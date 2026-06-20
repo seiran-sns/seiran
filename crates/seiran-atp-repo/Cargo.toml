@@ -1,0 +1,6 @@
+[package]
+name = "seiran-atp-repo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]

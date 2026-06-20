@@ -8,17 +8,17 @@
 ## 📅 フェーズ1: 開発環境セットアップ ＆ データベース移行 (DB Schema)
 データベースのマイグレーションと、システムの中核となる統一ポストID (Snowflake) 採番エンジンを実装する。
 
-- [ ] **1.1. データベース・マイグレーション・スクリプトの作成**
-  - [ ] `users` テーブル（ローカル認証）の実装
-  - [ ] `actors` テーブル（統一アクター情報、`actor_type_enum`、ペアリング/ブリッジ参照ポインタ）の実装
-  - [ ] `posts` テーブル（統一ポスト、リレーション、重複マージ用UUID/ポインタ、プロトコル固有ID）の実装
-  - [ ] 各インデックス（`idx_actors_type`, `idx_actors_pair`, `idx_actors_bridge`, `idx_posts_snowflake` 等）の設定
-- [ ] **1.2. 統一ID (Snowflake / ULID) 採番エンジンの実装**
-  - [ ] 48bit タイムスタンプ ＋ 16bit シリアルノードID/ランダム値による一意ID生成モジュールの実装
-  - [ ] 未来補正タイムスタンプアルゴリズムの実装:
+- [x] **1.1. データベース・マイグレーション・スクリプトの作成**
+  - [x] `users` テーブル（ローカル認証）の実装
+  - [x] `actors` テーブル（統一アクター情報、`actor_type_enum`、ペアリング/ブリッジ参照ポインタ）の実装
+  - [x] `posts` テーブル（統一ポスト、リレーション、重複マージ用UUID/ポインタ、プロトコル固有ID）の実装
+  - [x] 各インデックス（`idx_actors_type`, `idx_actors_pair`, `idx_actors_bridge`, `idx_posts_snowflake` 等）の設定
+- [x] **1.2. 統一ID (Snowflake / ULID) 採番エンジンの実装**
+  - [x] 48bit タイムスタンプ ＋ 16bit シリアルノードID/ランダム値による一意ID生成モジュールの実装
+  - [x] 未来補正タイムスタンプアルゴリズムの実装:
     `if post.created_at > SYSTEM_NOW() { id_timestamp = SYSTEM_NOW(); } else { id_timestamp = post.created_at; }`
-- [ ] **1.3. データベース接続レイヤー (Rust/SQLx等) のセットアップ**
-  - [ ] Connection Pool設計、接続テストの実行
+- [x] **1.3. データベース接続レイヤー (Rust/SQLx等) のセットアップ**
+  - [x] Connection Pool設計、接続テストの実行
 
 ---
 
