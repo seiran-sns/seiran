@@ -33,6 +33,43 @@ pub struct ExtUserInfo {
 * **本家（`seiran.org`）:** 環境変数 `AUTH_PROVIDER=auth0`。Auth0 SDKを用いてJWTの署名検証、ソーシャルログイン（Google/Facebook等）を処理する。Misskeyアプリが `MiAuth`（`/miauth/authorize`）を要求してきた場合は、Auth0の認証セッションと紐付けてアクセストークンを発行・偽装する。
 * **OSS配布版:** 環境変数 `AUTH_PROVIDER=local`。自前のPostgreSQL内のパスワードハッシュ（Argon2）検証と、内蔵SMTPモジュールによるメール確認（従来型）へフォールバックする。
 
+### 1.3 設定ファイルとシークレット管理
+
+設定ファイルは **Twelve-Factor App** の原則に基づき、ユーザーが編集する `.env` と、サーバーが自動生成する `secrets.toml` の2種類に分離する。
+
+#### ディレクトリ構成
+
+```text
+config/                   ← SEIRAN_CONFIG_DIR 環境変数で指定（デフォルト: ./config）
+├── (seiran.env)          ← 将来: ユーザーが書く設定をまとめるファイル
+└── secrets.toml          ← 【自動生成】起動時に存在しなければ自動生成される
+```
+
+Docker 運用時はこの `config/` ディレクトリをまるごとボリュームマウントすることで、シークレットを永続化・サルベージできる。
+
+```yaml
+volumes:
+  - ./config:/app/config
+```
+
+#### `secrets.toml` の内容
+
+| フィールド | 説明 | 生成方式 |
+|---|---|---|
+| `jwt_secret` | ローカル認証 JWT の署名鍵（256bit / hex） | `OsRng` で毎回ランダム生成 |
+| `atproto_private_key_pem` | AT Protocol PDS 署名用 P-256 秘密鍵（PKCS#8 PEM） | `SigningKey::random()` |
+| `atproto_public_key_pem` | 対応する P-256 公開鍵（PEM） | 上記から導出 |
+
+- **ユーザーが手動設定する必要は一切ない。** 環境変数 `JWT_SECRET` は廃止。
+- ファイルのパーミッションは `0600`（所有者のみ読み書き可）で作成される。
+- **⚠️ このファイルを Git にコミットしてはならない。**（`.gitignore` で `config/` を除外済み）
+- ファイルを紛失すると、既存の JWT トークンと AT Protocol 署名がすべて無効になる。
+
+#### 実装箇所
+
+- `seiran-common::secrets` モジュール (`crates/seiran-common/src/secrets.rs`)
+- 各バイナリの `main()` で `SecretsFile::from_env().load_or_create()` を呼び出し、返却された `Secrets` を `create_auth_provider(&secrets)` に渡す。
+
 ---
 
 ## 2. 統一アクターモデルの実装ロジック
