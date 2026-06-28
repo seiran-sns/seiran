@@ -1,5 +1,5 @@
 # ─── ステージ1: cargo-chef のインストール ────────────────────────────────────
-FROM rust:1.85-bookworm AS chef
+FROM rust:1-bookworm AS chef
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
