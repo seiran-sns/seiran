@@ -47,6 +47,8 @@ pub struct JobContext {
     pub domain_semaphores: Arc<tokio::sync::Mutex<HashMap<String, Arc<Semaphore>>>>,
     /// アクター単位の排他実行制御（AtpRepositoryPublish 等で使用）
     pub actor_semaphores: Arc<tokio::sync::Mutex<HashMap<i64, Arc<Semaphore>>>>,
+    /// DB 接続プール（フェーズ4以降のジョブハンドラが使用）
+    pub db_pool: Option<sqlx::PgPool>,
 }
 
 impl JobContext {
@@ -55,7 +57,13 @@ impl JobContext {
             queue,
             domain_semaphores: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             actor_semaphores: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            db_pool: None,
         }
+    }
+
+    pub fn with_db_pool(mut self, pool: sqlx::PgPool) -> Self {
+        self.db_pool = Some(pool);
+        self
     }
 
     /// ドメイン単位のセマフォを取得または生成します（最大並列数: 2）
@@ -84,6 +92,11 @@ pub struct WorkerEngine {
 impl WorkerEngine {
     pub fn new(queue: Arc<InMemoryJobQueue>) -> Self {
         let ctx = Arc::new(JobContext::new(queue.clone()));
+        Self { queue, ctx }
+    }
+
+    pub fn new_with_db(queue: Arc<InMemoryJobQueue>, pool: sqlx::PgPool) -> Self {
+        let ctx = Arc::new(JobContext::new(queue.clone()).with_db_pool(pool));
         Self { queue, ctx }
     }
 

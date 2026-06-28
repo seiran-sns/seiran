@@ -13,10 +13,13 @@
 //! ```
 
 use p256::ecdsa::SigningKey;
-use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+use p256::pkcs8::{
+    EncodePrivateKey as P256EncodePrivateKey, EncodePublicKey as P256EncodePublicKey, LineEnding,
+};
 // p256 と argon2 は同じ rand_core v0.6.x を使うため、
 // argon2 が再エクスポートする OsRng を利用してバージョン競合を回避する。
 use argon2::password_hash::rand_core::OsRng;
+use rsa::RsaPrivateKey;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -34,6 +37,16 @@ pub struct Secrets {
 
     /// AT Protocol PDS 用 P-256 公開鍵（PEM形式）
     pub atproto_public_key_pem: String,
+
+    /// ActivityPub HTTP Signatures 用 RSA-2048 秘密鍵（PKCS#8 PEM形式）
+    /// 既存の secrets.toml との後方互換性のため Option。
+    #[serde(default)]
+    pub ap_private_key_pem: Option<String>,
+
+    /// ActivityPub HTTP Signatures 用 RSA-2048 公開鍵（PKCS#8 PEM形式）
+    /// AP アクタードキュメントの publicKey として公開される。
+    #[serde(default)]
+    pub ap_public_key_pem: Option<String>,
 }
 
 impl Secrets {
@@ -61,11 +74,29 @@ impl Secrets {
             .to_public_key_pem(LineEnding::LF)
             .map_err(|e| SecretsError::KeyGen(e.to_string()))?;
 
+        // --- ActivityPub HTTP Signatures 用 RSA-2048 鍵ペア ---
+        let (ap_private_key_pem, ap_public_key_pem) = generate_rsa_key_pair(&mut rng)?;
+
         Ok(Self {
             jwt_secret,
             atproto_private_key_pem,
             atproto_public_key_pem,
+            ap_private_key_pem: Some(ap_private_key_pem),
+            ap_public_key_pem: Some(ap_public_key_pem),
         })
+    }
+
+    /// AP RSA 鍵が未設定の場合に生成して補完する（旧 secrets.toml の移行用）
+    pub fn ensure_ap_keys(&mut self) -> Result<bool, SecretsError> {
+        if self.ap_private_key_pem.is_some() && self.ap_public_key_pem.is_some() {
+            return Ok(false);
+        }
+        let mut rng = OsRng;
+        let (priv_pem, pub_pem) = generate_rsa_key_pair(&mut rng)?;
+        self.ap_private_key_pem = Some(priv_pem);
+        self.ap_public_key_pem = Some(pub_pem);
+        eprintln!("[seiran] AP RSA 鍵ペアを新規生成しました。");
+        Ok(true)
     }
 
 
@@ -95,9 +126,15 @@ impl SecretsFile {
     }
 
     /// シークレットを読み込む。ファイルが存在しなければ自動生成して保存する。
+    /// 既存ファイルに AP RSA 鍵が未設定の場合は自動補完する。
     pub fn load_or_create(&self) -> Result<Secrets, SecretsError> {
         if self.path.exists() {
-            self.load()
+            let mut secrets = self.load()?;
+            // 旧 secrets.toml に AP 鍵が無い場合は補完して保存
+            if secrets.ensure_ap_keys()? {
+                self.save(&secrets)?;
+            }
+            Ok(secrets)
         } else {
             eprintln!(
                 "[seiran] secrets.toml が見つかりません。新規生成します: {}",
@@ -174,5 +211,25 @@ pub enum SecretsError {
 
     #[error("鍵ペア生成エラー: {0}")]
     KeyGen(String),
+}
+
+/// RSA-2048 鍵ペアを生成し (秘密鍵 PEM, 公開鍵 PEM) を返す
+fn generate_rsa_key_pair(
+    rng: &mut OsRng,
+) -> Result<(String, String), SecretsError> {
+    let private_key = RsaPrivateKey::new(rng, 2048)
+        .map_err(|e| SecretsError::KeyGen(format!("RSA鍵生成失敗: {}", e)))?;
+    let public_key = private_key.to_public_key();
+
+    let private_pem = private_key
+        .to_pkcs8_pem(LineEnding::LF)
+        .map_err(|e| SecretsError::KeyGen(format!("RSA秘密鍵PEM変換失敗: {}", e)))?
+        .to_string();
+
+    let public_pem = public_key
+        .to_public_key_pem(LineEnding::LF)
+        .map_err(|e| SecretsError::KeyGen(format!("RSA公開鍵PEM変換失敗: {}", e)))?;
+
+    Ok((private_pem, public_pem))
 }
 

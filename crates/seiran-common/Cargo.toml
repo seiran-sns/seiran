@@ -19,3 +19,7 @@ toml = "1.1.2"
 p256 = { version = "0.13.2", features = ["pkcs8", "pem"] }
 hex = "0.4.3"
 thiserror = "2.0.18"
+url = "2.5.8"
+urlencoding = "2.1.3"
+rsa = { version = "0.9.10", features = ["sha2", "pem"] }
+sha2 = "0.10"

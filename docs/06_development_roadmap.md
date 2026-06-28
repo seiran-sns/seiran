@@ -71,10 +71,10 @@
 ## 🌐 フェーズ4: マルチプロトコル通信エンジン ＆ ゼロトラストペアリング (Federation Engine)
 ActivityPubおよびAT Protocolのプロトコルレベルの同期・解決、そしてリモートseiranユーザー同士の直接ペアリングを実装する。
 
-- [ ] **4.1. ActivityPub (Fediverse) 統合**
-  - [ ] Webfinger解決、Inbox（受取）および Outbox（過去ログ配送）ハンドラの実装
-  - [ ] HTTP Signaturesによる署名検証、公開鍵キャッシュ
-  - [ ] Outbox同期時の「過去30日間 / 最大300件」キャップ処理 (ベストエフォート)
+- [x] **4.1. ActivityPub (Fediverse) 統合**
+  - [x] Webfinger解決、Inbox（受取）および Outbox（過去ログ配送）ハンドラの実装
+  - [x] HTTP Signaturesによる署名検証、公開鍵キャッシュ
+  - [x] Outbox同期時の「過去30日間 / 最大300件」キャップ処理 (ベストエフォート)
 - [ ] **4.2. AT Protocol (Bluesky) 統合**
   - [ ] DID解決（`did:plc`, `did:web`）、AppView APIクライアントの実装
   - [ ] `getAuthorFeed` を用いた過去ログフェッチ（過去30日間 / 最大300件キャップ）
