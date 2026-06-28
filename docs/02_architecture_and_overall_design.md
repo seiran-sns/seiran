@@ -1,5 +1,22 @@
 # Doc 2. アーキテクチャ ＆ 全体設計マニフェスト (Architecture & Overall Design)
 
+## 0-0. seiran のプロトコル上の位置づけ
+
+seiran は **ActivityPub（Fediverse）の AP サーバー**と **AT Protocol の PDS（Personal Data Server）** を兼ねるマルチプロトコル SNS サーバーである。
+
+| プロトコル | seiran の役割 | ユーザーへの意味 |
+|---|---|---|
+| ActivityPub | AP サーバー（Mastodon 等と同等） | `@username@domain` で Fediverse から発見・フォロー可能 |
+| AT Protocol | PDS 本体 | ユーザーの `did:plc:...` を seiran が plc.directory に登録・管理する。外部の bsky.social PDS は使用しない |
+
+### ローカルユーザーの ATP アイデンティティ管理
+- ユーザー登録時、seiran が plc.directory に `did:plc:...` を登録し、PDS エンドポイントとして seiran 自身を指定する。
+- ユーザーの AT Protocol リポジトリ（MST: Merkle Search Tree）は seiran が管理する。
+- 投稿時は seiran が P-256 秘密鍵（`secrets.toml` の `atproto_private_key_pem`）で署名し、Relay（`bsky.network` 等）に配信する。
+- **外部 Bluesky アカウントの認証情報（App Password 等）は不要**。seiran がリポジトリ操作の主体である。
+
+---
+
 ## 0. フロントエンドAPI互換性（Misskey API互換レイヤー ＆ クライアント種別の前提）
 本システムのバックエンドは、既存の豊富なMisskey互換フロントエンドエコシステムをそのままレバレッジするため、**Misskey APIの完全な互換レイヤー（エンドポイント群）**を実装する。
 
@@ -147,7 +164,12 @@ graph TD
 * **将来の物理分割**: 最もリソース（CPU・メモリ・帯域）を消費する箇所であるため、キュー（Redis等）を介してAPIサーバーとは完全に異なるインスタンス群として独立運用・スケール可能。
 
 #### ④ `seiran-atp-repo` (ATPリポジトリ管理サービス)
-* **役割**: AT Protocol（ATP）のMST（Merkle Search Tree）リポジトリの生成、レコード署名、リレーサーバーへのブロードキャスト管理。
+* **役割**: seiran PDS としての AT Protocol（ATP）リポジトリ管理。具体的には：
+  - ローカルユーザーの MST（Merkle Search Tree）リポジトリの生成・更新
+  - レコード（投稿・フォロー等）への P-256 署名コミットの作成
+  - Relay サーバー（`bsky.network` 等）への配信（`com.atproto.sync` 系 API）
+  - Bluesky Firehose の受信（フォロー済みアクターの新着投稿を DB に保存）
+* **外部 PDS への依存なし**: seiran が PDS 本体であるため、bsky.social 等の外部 PDS の認証情報は一切不要。
 * **状態性**: 各アクターの署名鍵やリポジトリ整合性を管理する性質上、**シーケンシャルで厳密な順序性（排他制御）が必要な半ステートフル**な領域。
 * **将来の物理分割**: gRPCや内部APIを通じてAPIやWorkerからアクセスされる、シングルトン的またはアクター単位でパーティショニング（シャード）された独立サービスとして切り離し可能。
 
