@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+dotenvy = "0.15.7"
+seiran-common = { version = "0.1.0", path = "../seiran-common" }
+tokio = { version = "1.52.3", features = ["full"] }
