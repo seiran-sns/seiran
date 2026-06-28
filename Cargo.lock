@@ -1689,10 +1689,12 @@ name = "seiran-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chrono",
  "dotenvy",
  "seiran-common",
  "serde",
  "serde_json",
+ "sqlx",
  "tokio",
  "tower-http 0.5.2",
  "uuid",

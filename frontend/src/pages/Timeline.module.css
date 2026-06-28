@@ -1,0 +1,170 @@
+.layout {
+  min-height: 100vh;
+  background: #0f0f11;
+  color: #e8e8f0;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  background: rgba(15, 15, 17, 0.9);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid #2a2a30;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 10;
+}
+
+.logo {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #a78bfa;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.username {
+  font-size: 0.875rem;
+  color: #888;
+}
+
+.logoutBtn {
+  background: none;
+  border: 1px solid #2a2a30;
+  color: #888;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.logoutBtn:hover {
+  border-color: #555;
+  color: #bbb;
+}
+
+.main {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 0 16px 40px;
+}
+
+.postForm {
+  border: 1px solid #2a2a30;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 20px 0;
+  background: #1a1a1e;
+}
+
+.textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #e8e8f0;
+  font-size: 1rem;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.textarea::placeholder {
+  color: #555;
+}
+
+.postFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+  border-top: 1px solid #2a2a30;
+  padding-top: 10px;
+}
+
+.charCount {
+  font-size: 0.8rem;
+  color: #555;
+  margin-right: auto;
+}
+
+.postError {
+  font-size: 0.8rem;
+  color: #f87171;
+}
+
+.postBtn {
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 7px 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.postBtn:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+.postBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.message {
+  text-align: center;
+  color: #555;
+  padding: 40px 0;
+  font-size: 0.9rem;
+}
+
+.note {
+  background: #1a1a1e;
+  border: 1px solid #2a2a30;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+}
+
+.noteHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.noteUser {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #a78bfa;
+}
+
+.noteTime {
+  font-size: 0.78rem;
+  color: #555;
+}
+
+.noteBody {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

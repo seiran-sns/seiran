@@ -9,6 +9,10 @@
 # ⚠️ このディレクトリを Docker ボリュームにマウントして永続化してください。
 config/
 
+# フロントエンド依存パッケージ
+frontend/node_modules/
+frontend/dist/
+
 # エディタ・OS メタデータ
 .DS_Store
 .idea/
