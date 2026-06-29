@@ -751,24 +751,6 @@ async fn atp_commit_new_post(
         at_uri, commit_cid_str
     );
 
-    // 初回コミット時のみ Relay に crawl を要求する（バックグラウンドで実行）
-    if prev_commit_cid_str.is_none() {
-        if let Ok(local_domain) = std::env::var("LOCAL_DOMAIN") {
-            tokio::spawn(async move {
-                let client = reqwest::Client::new();
-                match client
-                    .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
-                    .json(&serde_json::json!({"hostname": local_domain}))
-                    .send()
-                    .await
-                {
-                    Ok(res) => eprintln!("[atp] requestCrawl → {}", res.status()),
-                    Err(e) => eprintln!("[atp] requestCrawl 失敗: {}", e),
-                }
-            });
-        }
-    }
-
     Ok(())
 }
 
@@ -897,6 +879,23 @@ async fn atp_commit_profile(
     }
 
     eprintln!("[atp] profile commit 完了: did={}, cid={}", at_did, commit_cid_str);
+
+    // profile が最初のコミットなので、ここで Relay に crawl を要求する
+    if let Ok(local_domain) = std::env::var("LOCAL_DOMAIN") {
+        tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            match client
+                .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
+                .json(&serde_json::json!({"hostname": local_domain}))
+                .send()
+                .await
+            {
+                Ok(res) => eprintln!("[atp] requestCrawl → {}", res.status()),
+                Err(e) => eprintln!("[atp] requestCrawl 失敗: {}", e),
+            }
+        });
+    }
+
     Ok(())
 }
 
