@@ -1,0 +1,470 @@
+//! AT Protocol PDS リポジトリ管理
+//!
+//! MST (Merkle Search Tree) の構築、commit の P-256 署名、CAR ファイルの生成、
+//! および subscribeRepos WebSocket フレームの構築を担当する。
+
+use argon2::password_hash::rand_core::{OsRng, RngCore};
+pub use ipld_core::cid::Cid;
+use ipld_core::ipld::Ipld;
+use multihash::Multihash;
+use p256::ecdsa::{signature::Signer, SigningKey};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// エラー型
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, thiserror::Error)]
+pub enum RepoError {
+    #[error("CBOR エンコードエラー: {0}")]
+    Cbor(String),
+    #[error("鍵エラー: {0}")]
+    Key(String),
+    #[error("CID パースエラー: {0}")]
+    CidParse(String),
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CID ヘルパー
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// DAG-CBOR バイト列から CIDv1 (codec=dag-cbor, hash=sha2-256) を計算する。
+pub fn cid_from_dagcbor(cbor: &[u8]) -> Cid {
+    let hash = Sha256::digest(cbor);
+    // SHA-256 multihash: code=0x12, digest_len=32
+    let mh = Multihash::<64>::wrap(0x12, hash.as_slice()).expect("multihash wrap");
+    Cid::new_v1(0x71, mh) // 0x71 = dag-cbor
+}
+
+/// CID を base32lower 文字列に変換する（例: "bafyrei..."）。
+pub fn cid_to_string(cid: &Cid) -> String {
+    cid.to_string()
+}
+
+/// CID 文字列をパースする。
+pub fn cid_from_str(s: &str) -> Result<Cid, RepoError> {
+    s.parse::<Cid>().map_err(|e| RepoError::CidParse(e.to_string()))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TID 生成（AT Protocol の rkey 形式）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// TID = 53bit マイクロ秒タイムスタンプ || 10bit クロックID
+// base32sortable 13 文字に変換（alphabet: 234567abcdefghijklmnopqrstuvwxyz）
+
+const S32_CHARS: &[u8] = b"234567abcdefghijklmnopqrstuvwxyz";
+
+pub fn generate_tid() -> String {
+    let ts_us = chrono::Utc::now().timestamp_micros() as u64;
+    let clock_id = (OsRng.next_u32() as u64) & 0x3FF;
+    let value = (ts_us << 10) | clock_id;
+    let mut chars = [0u8; 13];
+    let mut v = value;
+    for i in (0..13).rev() {
+        chars[i] = S32_CHARS[(v & 0x1F) as usize];
+        v >>= 5;
+    }
+    String::from_utf8(chars.to_vec()).unwrap()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MST (Merkle Search Tree) 構築
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// AT Protocol MST の高さ（layer）は SHA-256(key) の base32lower（RFC 4648 lowercase）で
+// 先頭の 'a'（= 0b00000 = 0）の個数によって決まる。
+// 同じ layer のキーが同じノードに入り、layer の低いキーはサブツリーに降りる。
+
+fn leading_zeros_on_hash(key: &str) -> u32 {
+    let hash = Sha256::digest(key.as_bytes());
+    let b32 = base32::encode(
+        base32::Alphabet::RFC4648 { padding: false },
+        hash.as_slice(),
+    )
+    .to_lowercase();
+    b32.chars().take_while(|&c| c == 'a').count() as u32
+}
+
+fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
+    a.iter().zip(b.iter()).take_while(|(ca, cb)| ca == cb).count()
+}
+
+// MST ノード（DAG-CBOR シリアライズ用）— canonical 順: e (0x65) < l (0x6c)
+#[derive(Serialize)]
+struct MstNode {
+    e: Vec<MstEntry>,
+    l: Option<Cid>,
+}
+
+// MST エントリ — canonical 順: k (0x6b) < p (0x70) < t (0x74) < v (0x76)
+#[derive(Serialize)]
+struct MstEntry {
+    #[serde(with = "serde_bytes")]
+    k: Vec<u8>,
+    p: u32,
+    t: Option<Cid>,
+    v: Cid,
+}
+
+type Blocks = Vec<(Cid, Vec<u8>)>;
+
+/// ソート済みの (key, record_cid) リストから MST を構築する。
+/// (root_cid, blocks) を返す。
+pub fn build_mst(entries: &[(String, Cid)]) -> Result<(Cid, Blocks), RepoError> {
+    if entries.is_empty() {
+        let node = MstNode { e: vec![], l: None };
+        let cbor = serde_ipld_dagcbor::to_vec(&node).map_err(|e| RepoError::Cbor(e.to_string()))?;
+        let cid = cid_from_dagcbor(&cbor);
+        return Ok((cid.clone(), vec![(cid, cbor)]));
+    }
+    let layer = entries
+        .iter()
+        .map(|(k, _)| leading_zeros_on_hash(k))
+        .max()
+        .unwrap_or(0);
+    build_layer(entries, layer)
+}
+
+fn build_layer(entries: &[(String, Cid)], layer: u32) -> Result<(Cid, Blocks), RepoError> {
+    let mut blocks: Blocks = vec![];
+    let mut node_entries: Vec<MstEntry> = vec![];
+    let mut subtree_buf: Vec<(String, Cid)> = vec![];
+    let mut left_subtree: Option<Cid> = None;
+    let mut prev_key_bytes: Vec<u8> = vec![];
+
+    let flush_subtree =
+        |subtree_buf: &mut Vec<(String, Cid)>, blocks: &mut Blocks| -> Result<Option<Cid>, RepoError> {
+            if subtree_buf.is_empty() {
+                return Ok(None);
+            }
+            let (sc, sb) = build_layer(subtree_buf, layer.saturating_sub(1))?;
+            blocks.extend(sb);
+            subtree_buf.clear();
+            Ok(Some(sc))
+        };
+
+    for (key, cid) in entries {
+        let h = leading_zeros_on_hash(key);
+        let key_bytes = key.as_bytes();
+
+        if h < layer {
+            subtree_buf.push((key.clone(), cid.clone()));
+        } else {
+            // h == layer
+            let sc = flush_subtree(&mut subtree_buf, &mut blocks)?;
+            if node_entries.is_empty() {
+                left_subtree = sc;
+            } else {
+                node_entries.last_mut().unwrap().t = sc;
+            }
+
+            let prefix_len = common_prefix_len(&prev_key_bytes, key_bytes);
+            prev_key_bytes = key_bytes.to_vec();
+
+            node_entries.push(MstEntry {
+                p: prefix_len as u32,
+                k: key_bytes[prefix_len..].to_vec(),
+                v: cid.clone(),
+                t: None,
+            });
+        }
+    }
+
+    // 末尾のサブツリーを処理
+    if !subtree_buf.is_empty() {
+        let (sc, sb) = build_layer(&subtree_buf, layer.saturating_sub(1))?;
+        blocks.extend(sb);
+        if node_entries.is_empty() {
+            left_subtree = Some(sc);
+        } else {
+            node_entries.last_mut().unwrap().t = Some(sc);
+        }
+    }
+
+    let node = MstNode {
+        e: node_entries,
+        l: left_subtree,
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&node).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    blocks.push((cid.clone(), cbor));
+
+    Ok((cid, blocks))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Commit 生成と P-256 署名
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 未署名 commit
+// canonical 順: did(3) < rev(3) < data(4) < prev(4) < version(7)
+// ただし同長は辞書順: did < rev ('d' < 'r'), data < prev ('d' < 'p')
+#[derive(Serialize)]
+struct UnsignedCommit {
+    data: Cid,
+    did: String,
+    prev: Option<Cid>,
+    rev: String,
+    version: u64,
+}
+
+// 署名済み commit (sig を追加)
+// canonical 順: did(3) < rev(3) < sig(3) < data(4) < prev(4) < version(7)
+// 同長 3: did < rev < sig ('d' < 'r' < 's')
+#[derive(Serialize)]
+struct SignedCommit {
+    data: Cid,
+    did: String,
+    prev: Option<Cid>,
+    rev: String,
+    #[serde(with = "serde_bytes")]
+    sig: Vec<u8>,
+    version: u64,
+}
+
+/// commit を生成して P-256 で署名し、(commit_cid, commit_cbor) を返す。
+///
+/// - `signing_key`: actors.at_signing_key_pem から復元したユーザー固有の鍵
+/// - 署名は未署名 commit の DAG-CBOR バイト列に対して行われる（内部で SHA-256 適用）
+pub fn create_commit(
+    did: &str,
+    rev: &str,
+    mst_root: Cid,
+    prev: Option<Cid>,
+    signing_key: &SigningKey,
+) -> Result<(Cid, Vec<u8>), RepoError> {
+    let unsigned = UnsignedCommit {
+        data: mst_root.clone(),
+        did: did.to_string(),
+        prev: prev.clone(),
+        rev: rev.to_string(),
+        version: 3,
+    };
+    let unsigned_cbor =
+        serde_ipld_dagcbor::to_vec(&unsigned).map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    // p256 Signer::sign は内部で SHA-256 を適用する
+    let sig: p256::ecdsa::Signature = signing_key.sign(&unsigned_cbor);
+    let sig_bytes = sig.to_bytes().to_vec(); // IEEE P1363: R(32) || S(32) = 64 bytes
+
+    let signed = SignedCommit {
+        data: mst_root,
+        did: did.to_string(),
+        prev,
+        rev: rev.to_string(),
+        sig: sig_bytes,
+        version: 3,
+    };
+    let commit_cbor =
+        serde_ipld_dagcbor::to_vec(&signed).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let commit_cid = cid_from_dagcbor(&commit_cbor);
+
+    Ok((commit_cid, commit_cbor))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CAR ファイルエンコーダ (CARv1)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// フォーマット:
+//   varint(header_len) + header_cbor
+//   [varint(cid_len + block_len) + cid_raw_bytes + block_bytes] * n
+//
+// header_cbor = {"roots": [commit_cid], "version": 1}
+// cid_raw_bytes = CIDv1 のバイト列（multibase prefix なし）
+
+pub fn encode_car(root_cid: &Cid, blocks: &[(Cid, Vec<u8>)]) -> Result<Vec<u8>, RepoError> {
+    // ヘッダー: {"roots": [CID], "version": 1}
+    // canonical 順: roots(5) < version(7)
+    let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    header_map.insert(
+        "roots".to_string(),
+        Ipld::List(vec![Ipld::Link(root_cid.clone())]),
+    );
+    header_map.insert("version".to_string(), Ipld::Integer(1));
+    let header_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(header_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut car = vec![];
+    encode_uvarint(header_cbor.len() as u64, &mut car);
+    car.extend_from_slice(&header_cbor);
+
+    for (cid, block) in blocks {
+        let cid_bytes = cid.to_bytes(); // raw CID bytes (no multibase prefix)
+        let total = cid_bytes.len() + block.len();
+        encode_uvarint(total as u64, &mut car);
+        car.extend_from_slice(&cid_bytes);
+        car.extend_from_slice(block);
+    }
+
+    Ok(car)
+}
+
+fn encode_uvarint(mut n: u64, buf: &mut Vec<u8>) {
+    loop {
+        let byte = (n & 0x7F) as u8;
+        n >>= 7;
+        if n == 0 {
+            buf.push(byte);
+            break;
+        }
+        buf.push(byte | 0x80);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// app.bsky.feed.post レコード
+// ─────────────────────────────────────────────────────────────────────────────
+
+// canonical 順: text(4) < $type(5) < createdAt(9)
+#[derive(Serialize)]
+struct BskyFeedPost {
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    text: String,
+    #[serde(rename = "$type")]
+    kind: String,
+}
+
+/// `app.bsky.feed.post` レコードの DAG-CBOR バイト列と CID を生成する。
+pub fn encode_bsky_feed_post(
+    text: &str,
+    created_at_rfc3339: &str,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    let record = BskyFeedPost {
+        created_at: created_at_rfc3339.to_string(),
+        text: text.to_string(),
+        kind: "app.bsky.feed.post".to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
+/// `app.bsky.actor.profile` レコードの DAG-CBOR バイト列と CID を生成する。
+pub fn encode_bsky_actor_profile(
+    display_name: &str,
+    created_at_rfc3339: &str,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    // canonical 順: $type(5) < createdAt(9) < displayName(11)
+    #[derive(Serialize)]
+    struct BskyActorProfile {
+        #[serde(rename = "$type")]
+        kind: String,
+        #[serde(rename = "createdAt")]
+        created_at: String,
+        #[serde(rename = "displayName")]
+        display_name: String,
+    }
+    let record = BskyActorProfile {
+        kind: "app.bsky.actor.profile".to_string(),
+        created_at: created_at_rfc3339.to_string(),
+        display_name: display_name.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// subscribeRepos WebSocket フレーム構築
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 各 WebSocket バイナリフレーム = cbor(header) + cbor(body) （連結、区切りなし）
+//
+// header: {"op": 1, "t": "#commit"}
+// body:   CommitEvt 構造体
+
+pub struct CommitEvtOp {
+    pub action: String, // "create"
+    pub path: String,   // "app.bsky.feed.post/<tid>"
+    pub cid: Cid,
+}
+
+pub fn build_commit_frame(
+    seq: i64,
+    did: &str,
+    commit_cid: &Cid,
+    prev_cid: Option<&Cid>,
+    rev: &str,
+    since: Option<&str>,
+    car_bytes: &[u8],
+    ops: &[CommitEvtOp],
+    time: &str,
+) -> Result<Vec<u8>, RepoError> {
+    // ヘッダー CBOR
+    // canonical 順: op(2) < t(1)... wait: "op"(2) vs "t"(1)
+    // length 1: "t" → comes first
+    // length 2: "op" → comes second
+    let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    header_map.insert("op".to_string(), Ipld::Integer(1));
+    header_map.insert("t".to_string(), Ipld::String("#commit".to_string()));
+    let header_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(header_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    // ボディ CBOR（Ipld::Map で canonical ordering は自動処理）
+    let ops_ipld: Vec<Ipld> = ops
+        .iter()
+        .map(|op| {
+            let mut m: BTreeMap<String, Ipld> = BTreeMap::new();
+            m.insert("action".to_string(), Ipld::String(op.action.clone()));
+            m.insert("cid".to_string(), Ipld::Link(op.cid.clone()));
+            m.insert("path".to_string(), Ipld::String(op.path.clone()));
+            Ipld::Map(m)
+        })
+        .collect();
+
+    let mut body_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    body_map.insert("blobs".to_string(), Ipld::List(vec![]));
+    body_map.insert("blocks".to_string(), Ipld::Bytes(car_bytes.to_vec()));
+    body_map.insert("commit".to_string(), Ipld::Link(commit_cid.clone()));
+    body_map.insert("did".to_string(), Ipld::String(did.to_string()));
+    body_map.insert("ops".to_string(), Ipld::List(ops_ipld));
+    body_map.insert(
+        "prev".to_string(),
+        prev_cid
+            .map(|c| Ipld::Link(c.clone()))
+            .unwrap_or(Ipld::Null),
+    );
+    body_map.insert("rebase".to_string(), Ipld::Bool(false));
+    body_map.insert("repo".to_string(), Ipld::String(did.to_string()));
+    body_map.insert("rev".to_string(), Ipld::String(rev.to_string()));
+    body_map.insert("seq".to_string(), Ipld::Integer(seq as i128));
+    body_map.insert(
+        "since".to_string(),
+        since
+            .map(|s| Ipld::String(s.to_string()))
+            .unwrap_or(Ipld::Null),
+    );
+    body_map.insert("time".to_string(), Ipld::String(time.to_string()));
+    body_map.insert("tooBig".to_string(), Ipld::Bool(false));
+
+    let body_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(body_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut frame = header_cbor;
+    frame.extend_from_slice(&body_cbor);
+    Ok(frame)
+}
+
+/// subscribeRepos の #error フレームを生成する。
+pub fn build_error_frame(name: &str, message: &str) -> Result<Vec<u8>, RepoError> {
+    let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    header_map.insert("op".to_string(), Ipld::Integer(-1));
+    header_map.insert("t".to_string(), Ipld::String("#error".to_string()));
+    let header_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(header_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut body_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    body_map.insert("message".to_string(), Ipld::String(message.to_string()));
+    body_map.insert("name".to_string(), Ipld::String(name.to_string()));
+    let body_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(body_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut frame = header_cbor;
+    frame.extend_from_slice(&body_cbor);
+    Ok(frame)
+}

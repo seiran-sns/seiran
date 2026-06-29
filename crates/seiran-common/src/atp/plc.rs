@@ -1,0 +1,173 @@
+use argon2::password_hash::rand_core::OsRng;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
+use p256::ecdsa::{signature::Signer, SigningKey};
+use p256::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+
+#[derive(Debug, thiserror::Error)]
+pub enum PlcError {
+    #[error("鍵生成エラー: {0}")]
+    KeyGen(String),
+    #[error("CBOR エンコードエラー: {0}")]
+    Cbor(String),
+    #[error("HTTP エラー: {0}")]
+    Http(String),
+    #[error("plc.directory 登録失敗 (HTTP {status}): {body}")]
+    PlcDirectory { status: u16, body: String },
+}
+
+/// P-256 公開鍵を `did:key` 形式に変換する
+/// multicodec: p256-pub = 0x1200 → varint [0x80, 0x24]
+pub fn p256_to_did_key(verifying_key: &p256::ecdsa::VerifyingKey) -> String {
+    let compressed = verifying_key.to_encoded_point(true);
+    let mut buf = vec![0x80u8, 0x24u8];
+    buf.extend_from_slice(compressed.as_bytes());
+    format!("did:key:z{}", bs58::encode(&buf).into_string())
+}
+
+/// PEM 文字列から P-256 SigningKey を復元する
+pub fn signing_key_from_pem(pem: &str) -> Result<SigningKey, PlcError> {
+    SigningKey::from_pkcs8_pem(pem).map_err(|e| PlcError::KeyGen(e.to_string()))
+}
+
+// ─── DAG-CBOR 用データ構造 ────────────────────────────────────────────────────
+// serde_ipld_dagcbor はフィールド名を canonical 順（バイト長→辞書順）にソートする。
+// struct の宣言順に関係なく CBOR 出力は仕様通りになる。
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlcService {
+    endpoint: String,
+    r#type: String,
+}
+
+/// 署名前オペレーション（sig なし）— CBOR エンコードして署名対象にする
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GenesisOpUnsigned {
+    also_known_as: Vec<String>,
+    prev: Option<String>,
+    rotation_keys: Vec<String>,
+    services: BTreeMap<String, PlcService>,
+    r#type: String,
+    verification_methods: BTreeMap<String, String>,
+}
+
+/// 署名済みオペレーション（sig あり）— CBOR エンコードして DID を計算し、JSON で POST する
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GenesisOpSigned {
+    also_known_as: Vec<String>,
+    prev: Option<String>,
+    rotation_keys: Vec<String>,
+    services: BTreeMap<String, PlcService>,
+    sig: String,
+    r#type: String,
+    verification_methods: BTreeMap<String, String>,
+}
+
+// ─── 登録 ─────────────────────────────────────────────────────────────────────
+
+/// did:plc を plc.directory に登録する。
+///
+/// DID は「署名済みオペレーション」の DAG-CBOR ハッシュから導出する（仕様通り）。
+/// 署名は「署名前オペレーション」の DAG-CBOR バイトに対して行う。
+///
+/// - `rotation_signing_key`: サーバーの P-256 鍵（secrets.toml の atproto_private_key_pem）
+/// - 戻り値: `(did, user_signing_key_pem)`
+pub async fn register_did_plc(
+    username: &str,
+    pds_domain: &str,
+    rotation_signing_key: &SigningKey,
+) -> Result<(String, String), PlcError> {
+    let user_signing_key = SigningKey::random(&mut OsRng);
+    let user_did_key = p256_to_did_key(user_signing_key.verifying_key());
+    let rotation_did_key = p256_to_did_key(rotation_signing_key.verifying_key());
+
+    let handle = format!("at://{}.{}", username, pds_domain);
+    let pds_endpoint = format!("https://{}", pds_domain);
+
+    let mut services = BTreeMap::new();
+    services.insert(
+        "atproto_pds".to_string(),
+        PlcService {
+            endpoint: pds_endpoint.clone(),
+            r#type: "AtprotoPersonalDataServer".to_string(),
+        },
+    );
+    let mut verification_methods = BTreeMap::new();
+    verification_methods.insert("atproto".to_string(), user_did_key.clone());
+
+    // ① 署名前オペレーションを DAG-CBOR エンコード → rotation key で署名
+    let unsigned_op = GenesisOpUnsigned {
+        also_known_as: vec![handle.clone()],
+        prev: None,
+        rotation_keys: vec![rotation_did_key.clone()],
+        services: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                "atproto_pds".to_string(),
+                PlcService {
+                    endpoint: pds_endpoint,
+                    r#type: "AtprotoPersonalDataServer".to_string(),
+                },
+            );
+            m
+        },
+        r#type: "plc_operation".to_string(),
+        verification_methods: verification_methods.clone(),
+    };
+    let unsigned_cbor =
+        serde_ipld_dagcbor::to_vec(&unsigned_op).map_err(|e| PlcError::Cbor(e.to_string()))?;
+    let raw_sig: p256::ecdsa::Signature = rotation_signing_key.sign(&unsigned_cbor);
+    // AT Protocol は base64url（URL-safe、パディングなし）
+    // plc.directory は sig に '=' が含まれると即エラーにする
+    let sig_str = URL_SAFE_NO_PAD.encode(raw_sig.to_bytes().as_slice());
+
+    // ② 署名済みオペレーションを DAG-CBOR エンコード → SHA-256 → DID
+    //    plc.directory も同じ処理で DID を検証する
+    let signed_op = GenesisOpSigned {
+        also_known_as: vec![handle],
+        prev: None,
+        rotation_keys: vec![rotation_did_key],
+        services,
+        sig: sig_str,
+        r#type: "plc_operation".to_string(),
+        verification_methods,
+    };
+    let signed_cbor =
+        serde_ipld_dagcbor::to_vec(&signed_op).map_err(|e| PlcError::Cbor(e.to_string()))?;
+    let hash = Sha256::digest(&signed_cbor);
+    let b32 = base32::encode(
+        base32::Alphabet::RFC4648 { padding: false },
+        hash.as_slice(),
+    )
+    .to_lowercase();
+    let did = format!("did:plc:{}", &b32[..24]);
+
+    // ③ plc.directory に POST（JSON ボディ = 署名済みオペレーション）
+    let url = format!("https://plc.directory/{}", did);
+    let client = reqwest::Client::new();
+    let res = client
+        .post(&url)
+        .json(&signed_op)
+        .send()
+        .await
+        .map_err(|e| PlcError::Http(e.to_string()))?;
+
+    let status = res.status().as_u16();
+    if status != 200 && status != 201 {
+        let body = res.text().await.unwrap_or_default();
+        return Err(PlcError::PlcDirectory { status, body });
+    }
+
+    let key_pem = user_signing_key
+        .to_pkcs8_pem(LineEnding::LF)
+        .map_err(|e| PlcError::KeyGen(e.to_string()))?
+        .to_string();
+
+    Ok((did, key_pem))
+}
