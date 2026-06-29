@@ -114,6 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/xrpc/com.atproto.repo.getRecord", get(xrpc_get_record))
         // AT Protocol DID 解決
         .route("/.well-known/did.json", get(well_known_did))
+        .route("/.well-known/atproto-did", get(well_known_atproto_did))
         .with_state(state)
         .layer(cors);
 
@@ -1276,6 +1277,50 @@ async fn xrpc_describe_server(State(state): State<AppState>) -> impl IntoRespons
         "inviteCodeRequired": false,
         "phoneVerificationRequired": false,
     }))
+}
+
+// ─── /.well-known/atproto-did ────────────────────────────────────────────
+// Host ヘッダーが "{username}.{domain}" の形式のとき、そのユーザーの DID を返す。
+// Cloudflare 等のリバースプロキシが Host を書き換えないことが前提。
+
+async fn well_known_atproto_did(
+    axum::extract::Host(host): axum::extract::Host,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    // "yuba9.beta.seiran.org" → username = "yuba9"
+    let username = host
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_string();
+
+    if username.is_empty() || username == state.local_domain {
+        return (StatusCode::NOT_FOUND, "").into_response();
+    }
+
+    let row = sqlx::query(
+        "SELECT at_did FROM actors WHERE username = $1 AND domain = $2 AND at_did IS NOT NULL LIMIT 1",
+    )
+    .bind(&username)
+    .bind(&state.local_domain)
+    .fetch_optional(&state.db)
+    .await;
+
+    match row {
+        Ok(Some(r)) => {
+            let did: String = r.try_get("at_did").unwrap_or_default();
+            if did.is_empty() {
+                (StatusCode::NOT_FOUND, "").into_response()
+            } else {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/plain")],
+                    did,
+                )
+                    .into_response()
+            }
+        }
+        _ => (StatusCode::NOT_FOUND, "").into_response(),
+    }
 }
 
 // ─── /.well-known/did.json ────────────────────────────────────────────────
