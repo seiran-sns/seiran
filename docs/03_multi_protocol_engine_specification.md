@@ -78,3 +78,124 @@ APとATPが絡み合うマルチプロトコル環境において、同じ内容
 #### ③ 一般ブリッジユーザーの投稿（シナリオ3）
 * **現象**: 一般のAPまたはATPユーザーの投稿が、外部ブリッジによって他方に投影され、その両方を自サーバーが受信する現象。
 * **処理ルール（重複許容 ＆ リンク）**: 重複したままDBに受け入れます。インサート時に、ブリッジが変換時にメタデータに埋め込んでいるオリジナル投稿URL（`source_url`等）を辿り、すでにオリジナル（本尊）がDBに存在すれば、`parent_original_post_id` に本尊の投稿IDをセットしてハードリンクを張ります。
+
+---
+
+## 5. Misskey 互換レイヤー仕様（MiAuth & `/api/meta`）
+
+Aria・Miria・ZonePane 等の Misskey クライアントから seiran を Misskey サーバーとして利用可能にするための互換エンドポイント仕様。
+
+### 5.1 サーバー検出エンドポイント: `POST /api/meta`
+
+Misskey クライアントは、ホスト名を入力した直後に `POST /api/meta` を呼び出してサーバー種別を判定する。
+`features.miauth` が `true` でなければ、クライアントは MiAuth フローへ進まずトークン手動入力画面を表示する。
+
+**リクエスト**: `POST /api/meta`  
+**ボディ**: `{}` （空 JSON）
+
+**レスポンス（最小構成）**:
+```json
+{
+  "uri": "https://seiran.example.com",
+  "name": "seiran",
+  "version": "0.1.0",
+  "features": {
+    "registration": true,
+    "miauth": true
+  }
+}
+```
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `features.miauth` | **必須** | `true` でなければ MiAuth フローに進まない |
+| `features.registration` | 推奨 | アカウント登録が可能かどうか |
+| `uri` | 推奨 | クライアントが URL 正規化に使用する |
+| `name` | 推奨 | サーバー名（クライアント UI に表示） |
+| `version` | 推奨 | バージョン文字列 |
+
+### 5.2 MiAuth セッション開始
+
+クライアントは以下の URL を WebView/ブラウザで開き、ユーザーに認可を求める。
+
+```
+GET /miauth/{sessionId}
+  ?name={アプリ名}
+  &permission={カンマ区切りの権限リスト}
+  [&callback={コールバック URL}]   ← Android のみ
+```
+
+- `sessionId`: クライアントが生成する UUID v4
+- `name`: クライアントアプリ名（例: `"Aria"`）
+- `permission`: カンマ区切りの権限文字列（Aria は 39 種送信。seiran は現状無視して全権付与）
+- `callback`: 認可完了後のリダイレクト先（例: `aria://aria/miauth`）。省略時は HTML で「認可されました」を表示
+
+**現在の seiran 実装**:  
+`GET /miauth/:session_id?name=...&callback=...` を受け付け、HTML の認可ページを返す。
+`permission` クエリパラメータは `MiAuthQuery` 構造体に存在しないため無視される（許容）。
+
+### 5.3 MiAuth 完了確認: `POST /api/miauth/{sessionId}/check`
+
+ユーザーが認可ボタンを押した後、クライアントはこのエンドポイントをポーリングして結果を取得する。
+
+**リクエスト**: `POST /api/miauth/{sessionId}/check`  
+**ボディ**: なし
+
+**レスポンス（認可済み）**:
+```json
+{
+  "ok": true,
+  "token": "<アクセストークン文字列>",
+  "user": {
+    "id": "123456789",
+    "name": "表示名",
+    "username": "username",
+    "host": null,
+    "avatarUrl": null
+  }
+}
+```
+
+**レスポンス（未認可・セッション未完了）**:
+```json
+{ "ok": false }
+```
+
+> **注意**: 現在の seiran 実装は `POST /api/miauth/check`（ボディに `{"session": "..."}` を受け取るパス固定形式）になっている。
+> Aria が期待する `POST /api/miauth/{sessionId}/check`（パスにセッション ID）とは URL が異なるため、
+> ルーティングの修正が必要（フェーズ 2.4 で対応予定）。
+
+### 5.4 メールアドレス確認フロー（Email Verification）
+
+ユーザー登録は「メールアドレス入力 → 確認メールクリック → パスワード等の残情報入力」の 2 ステップ構成とする。
+
+**フロー**:
+1. クライアントが `POST /api/auth/verify-email` にメールアドレスを送信
+2. サーバーが `email_verifications` テーブルに確認トークン（UUID, TTL 24h）を保存し、確認メールを送信
+3. ユーザーが確認メールのリンク（`GET /auth/verify?token=...`）をクリック
+4. トークンが有効なら、その `token` をクライアントに返す（またはセッションに記録）
+5. クライアントが `POST /api/auth/register` に確認済みトークン + パスワード + ユーザー名を送信して登録完了
+
+**追加テーブル** (`email_verifications`):
+```sql
+CREATE TABLE email_verifications (
+  id         BIGINT PRIMARY KEY,
+  email      TEXT NOT NULL,
+  token      UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '24 hours',
+  verified_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+**SMTP 設定（`.env`）**:
+```env
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=no-reply@example.com
+SMTP_PASSWORD=your_password
+SMTP_FROM=no-reply@example.com
+SMTP_TLS=starttls   # starttls | tls | none
+```
+
+Rust 実装は `lettre` クレートを使用する（`lettre = { version = "0.11", features = ["tokio1", "smtp-transport"] }`）。
