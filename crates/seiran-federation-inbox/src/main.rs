@@ -184,7 +184,7 @@ async fn webfinger_handler(
 
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/jrd+json")],
+        [(axum::http::header::CONTENT_TYPE, "application/jrd+json; charset=utf-8")],
         Json(response),
     )
         .into_response()
