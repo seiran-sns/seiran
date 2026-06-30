@@ -1,4 +1,4 @@
-use axum::{extract::{Query, State}, http::HeaderMap, response::IntoResponse, Json};
+use axum::{extract::{Query, State}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}, Json};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
@@ -94,23 +94,52 @@ async fn build_profile_response(
     row: sqlx::postgres::PgRow,
     my_user_id: Option<i64>,
     state: &AppState,
-) -> impl IntoResponse {
-    let actor_id: i64 = row.try_get("id").unwrap_or(0);
-    let username: String = row.try_get("username").unwrap_or_default();
-    let domain: String = row.try_get("domain").unwrap_or_default();
+) -> Response {
+    let actor_id: i64 = match row.try_get("id") {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[profile] actor id 取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+    let username: String = match row.try_get("username") {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[profile] username 取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+    let domain: String = match row.try_get("domain") {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[profile] domain 取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
     let display_name: Option<String> = row.try_get("display_name").ok().flatten();
-    let actor_type: String = row.try_get("actor_type").unwrap_or_default();
+    let actor_type: String = match row.try_get("actor_type") {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[profile] actor_type 取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
     let ap_uri: Option<String> = row.try_get("ap_uri").ok().flatten();
 
     // 自分の actor_id を取得
     let my_actor_id: Option<i64> = if let Some(uid) = my_user_id {
-        sqlx::query("SELECT id FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1")
+        match sqlx::query("SELECT id FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1")
             .bind(uid)
             .fetch_optional(&state.db)
             .await
-            .ok()
-            .flatten()
-            .and_then(|r| r.try_get("id").ok())
+        {
+            Ok(Some(r)) => r.try_get("id").ok(),
+            Ok(None) => None,
+            Err(e) => {
+                eprintln!("[profile] 自分の actor_id 取得失敗: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            }
+        }
     } else {
         None
     };
@@ -118,17 +147,28 @@ async fn build_profile_response(
     // フォロー状態
     let follow_status = match my_actor_id {
         Some(mid) => {
-            let f = sqlx::query(
+            let f = match sqlx::query(
                 "SELECT status FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2 LIMIT 1",
             )
             .bind(mid)
             .bind(actor_id)
             .fetch_optional(&state.db)
             .await
-            .ok()
-            .flatten();
+            {
+                Ok(row) => row,
+                Err(e) => {
+                    eprintln!("[profile] フォロー状態取得失敗: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+                }
+            };
             match f {
-                Some(r) => r.try_get::<String, _>("status").unwrap_or_else(|_| "accepted".to_string()),
+                Some(r) => match r.try_get::<String, _>("status") {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("[profile] follow status 取得失敗: {}", e);
+                        return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+                    }
+                },
                 None => "not_following".to_string(),
             }
         }
@@ -136,7 +176,7 @@ async fn build_profile_response(
     };
 
     // 最近の投稿（最大20件）
-    let post_rows = sqlx::query(
+    let post_rows = match sqlx::query(
         "SELECT id, body, created_at FROM posts
          WHERE actor_id = $1 AND deleted_at IS NULL
          ORDER BY id DESC LIMIT 20",
@@ -144,7 +184,13 @@ async fn build_profile_response(
     .bind(actor_id)
     .fetch_all(&state.db)
     .await
-    .unwrap_or_default();
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("[profile] 最近の投稿取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
 
     let recent_posts = post_rows
         .iter()
@@ -169,6 +215,7 @@ async fn build_profile_response(
         follow_status,
         recent_posts,
     })
+    .into_response()
 }
 
 async fn fetch_remote_profile(

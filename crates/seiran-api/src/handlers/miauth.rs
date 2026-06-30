@@ -1,12 +1,14 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use uuid::Uuid;
 
+use crate::middleware::extract_auth;
 use crate::AppState;
 
 #[derive(Debug, Clone)]
@@ -50,8 +52,15 @@ pub struct CheckResponse {
 pub async fn miauth_page(
     Path(session_id): Path<String>,
     Query(query): Query<MiAuthQuery>,
+    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
+    // Authorization ヘッダーが存在すれば JWT を検証してユーザー ID を取得する
+    let user_id = extract_auth(&headers, &state.local_auth)
+        .await
+        .ok()
+        .map(|u| u.user_id);
+
     let mut map = state.miauth_sessions.write().await;
     map.insert(
         session_id.clone(),
@@ -59,7 +68,7 @@ pub async fn miauth_page(
             app_name: query.name.clone(),
             redirect_uri: query.callback.clone(),
             token: None,
-            user_id: None,
+            user_id,
             username: None,
         },
     );
@@ -98,13 +107,59 @@ pub async fn miauth_authorize(
     Path(session_id): Path<String>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let mut map = state.miauth_sessions.write().await;
+    // Phase 1: セッションから user_id を取得（読み取りロック）
+    let user_id = {
+        let map = state.miauth_sessions.read().await;
+        match map.get(&session_id) {
+            Some(session) => match session.user_id {
+                Some(id) => id,
+                None => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        "認証が必要です。先にログインしてから認可してください。",
+                    )
+                        .into_response()
+                }
+            },
+            None => {
+                return (StatusCode::NOT_FOUND, "セッションが見つかりません").into_response()
+            }
+        }
+    };
 
+    // Phase 2: DB からユーザー名を取得（ロック不保持）
+    let username = {
+        let row = sqlx::query(
+            "SELECT username FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
+        )
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await;
+
+        match row {
+            Ok(Some(r)) => match r.try_get::<String, _>("username") {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[miauth] username 取得失敗: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+                }
+            },
+            Ok(None) => {
+                return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response()
+            }
+            Err(e) => {
+                eprintln!("[miauth] ユーザー検索失敗: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            }
+        }
+    };
+
+    // Phase 3: セッションにトークンとユーザー名を保存し、リダイレクト（書き込みロック）
+    let mut map = state.miauth_sessions.write().await;
     if let Some(session) = map.get_mut(&session_id) {
         let token = format!("miauth-token-{}", Uuid::new_v4());
         session.token = Some(token);
-        session.user_id = Some(1);
-        session.username = Some("test_user".to_string());
+        session.username = Some(username);
 
         if let Some(ref callback) = session.redirect_uri.clone() {
             let redirect_url = if callback.contains('?') {

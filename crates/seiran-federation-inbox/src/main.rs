@@ -441,6 +441,33 @@ async fn handle_accept(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::strip_html;
+
+    #[test]
+    fn test_strip_html_simple() {
+        assert_eq!(strip_html("<p>Hello, world!</p>"), "Hello, world!");
+        assert_eq!(strip_html("<b>bold</b> and <i>italic</i>"), "bold and italic");
+    }
+
+    #[test]
+    fn test_strip_html_entities() {
+        assert_eq!(strip_html("<p>a &amp; b</p>"), "a & b");
+        assert_eq!(strip_html("&lt;script&gt;"), "<script>");
+        assert_eq!(strip_html("&quot;quoted&quot;"), "\"quoted\"");
+        assert_eq!(strip_html("it&#39;s"), "it's");
+        assert_eq!(strip_html("a&nbsp;b"), "a b");
+    }
+
+    #[test]
+    fn test_strip_html_empty() {
+        assert_eq!(strip_html(""), "");
+        assert_eq!(strip_html("   "), "");
+        assert_eq!(strip_html("<br/>"), "");
+    }
+}
+
 // Undo(Follow) アクティビティを処理してフォロー解除する
 async fn handle_undo(
     activity: serde_json::Value,

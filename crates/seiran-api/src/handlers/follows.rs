@@ -42,10 +42,25 @@ pub async fn create_follow(
     .await;
 
     let (local_actor_id, local_username) = match local_row {
-        Ok(Some(r)) => (
-            r.try_get::<i64, _>("id").unwrap_or(0),
-            r.try_get::<String, _>("username").unwrap_or_default(),
-        ),
+        Ok(Some(r)) => {
+            let id = match r.try_get::<i64, _>("id") {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[follow] ローカルアクター id 取得失敗: {}", e);
+                    return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー")
+                        .into_response();
+                }
+            };
+            let name = match r.try_get::<String, _>("username") {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[follow] ローカルアクター username 取得失敗: {}", e);
+                    return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー")
+                        .into_response();
+                }
+            };
+            (id, name)
+        }
         _ => {
             return (axum::http::StatusCode::NOT_FOUND, "アクターが見つかりません")
                 .into_response()
@@ -121,7 +136,14 @@ pub async fn create_follow(
     .await;
 
     let remote_actor_id: i64 = match remote_row {
-        Ok(r) => r.try_get("id").unwrap_or(new_actor_id),
+        Ok(r) => match r.try_get("id") {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[follow] リモートアクター id 取得失敗: {}", e);
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー")
+                    .into_response();
+            }
+        },
         Err(e) => {
             eprintln!("[follow] リモートアクター upsert 失敗: {}", e);
             return (

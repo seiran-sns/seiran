@@ -123,3 +123,41 @@ pub fn plain_to_html(text: &str) -> String {
         .collect();
     paragraphs.join("")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::plain_to_html;
+
+    #[test]
+    fn test_plain_to_html_single_paragraph() {
+        assert_eq!(plain_to_html("Hello"), "<p>Hello</p>");
+        assert_eq!(plain_to_html("Hello, world!"), "<p>Hello, world!</p>");
+    }
+
+    #[test]
+    fn test_plain_to_html_double_newline() {
+        assert_eq!(
+            plain_to_html("Hello\n\nWorld"),
+            "<p>Hello</p><p>World</p>"
+        );
+        assert_eq!(
+            plain_to_html("First\n\nSecond\n\nThird"),
+            "<p>First</p><p>Second</p><p>Third</p>"
+        );
+        // 単一改行は <br> になる
+        assert_eq!(plain_to_html("line1\nline2"), "<p>line1<br>line2</p>");
+    }
+
+    #[test]
+    fn test_plain_to_html_no_xss() {
+        let result = plain_to_html("<script>alert(1)</script>");
+        // <script> タグがそのままHTMLとして出力されないこと
+        assert!(!result.contains("<script>"));
+        assert!(!result.contains("</script>"));
+        assert!(result.contains("&lt;script&gt;"));
+        assert_eq!(
+            result,
+            "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>"
+        );
+    }
+}

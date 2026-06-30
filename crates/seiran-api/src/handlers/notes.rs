@@ -184,7 +184,13 @@ pub async fn home_timeline(
     .await;
 
     let actor_id: i64 = match actor_row {
-        Ok(Some(r)) => r.try_get("id").unwrap_or(0),
+        Ok(Some(r)) => match r.try_get("id") {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[home_timeline] actor id 取得失敗: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            }
+        },
         _ => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
     };
 
