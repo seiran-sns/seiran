@@ -49,6 +49,30 @@ impl CloudflareClient {
             .ok_or_else(|| CloudflareError::Api("レコード ID が取得できません".to_string()))
     }
 
+    /// `_atproto.{handle}` TXT レコードが存在しない場合のみ作成する。
+    /// 既存レコードがあれば何もしない。
+    pub async fn ensure_atproto_txt(&self, handle: &str, did: &str) -> Result<(), CloudflareError> {
+        let name = format!("_atproto.{}", handle);
+        let list_url = format!(
+            "https://api.cloudflare.com/client/v4/zones/{}/dns_records?type=TXT&name={}",
+            self.zone_id, name
+        );
+        let list_resp: serde_json::Value = self.http
+            .get(&list_url)
+            .bearer_auth(&self.token)
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        let existing = list_resp["result"].as_array().map(|a| !a.is_empty()).unwrap_or(false);
+        if existing {
+            return Ok(());
+        }
+
+        self.set_atproto_txt(handle, did).await.map(|_| ())
+    }
+
     /// TXT レコードを削除する。
     pub async fn delete_txt_record(&self, record_id: &str) -> Result<(), CloudflareError> {
         let url = format!(

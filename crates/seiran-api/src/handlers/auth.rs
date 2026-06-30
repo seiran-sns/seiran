@@ -189,16 +189,8 @@ pub async fn register(
         eprintln!("[register] ATP プロフィールコミット失敗（登録は完了済み）: {}", e);
     }
 
-    // TXT レコードを 10 分後に非同期削除（AppView がハンドル検証を完了する時間を確保）
-    if let (Some(cf), Some(record_id)) = (state.cloudflare.clone(), cf_record_id) {
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
-            match cf.delete_txt_record(&record_id).await {
-                Ok(_) => eprintln!("[register] Cloudflare TXT 削除完了: id={}", record_id),
-                Err(e) => eprintln!("[register] Cloudflare TXT 削除失敗: {}", e),
-            }
-        });
-    }
+    // TXT レコードはそのまま残す（bsky.app はハンドル解決に常時使用するため）
+    let _ = cf_record_id;
 
     let token = state.local_auth.generate_token(user_id, &req.email)
         .map_err(|e| {
