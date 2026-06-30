@@ -150,6 +150,57 @@
   margin-bottom: 8px;
 }
 
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #2a2a30;
+}
+
+.tab {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 0.9rem;
+  padding: 10px 20px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab:hover { color: #ccc; }
+
+.activeTab {
+  color: #a78bfa;
+  border-bottom-color: #a78bfa;
+  font-weight: 600;
+}
+
+.noteUserBtn {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.noteUserBtn:hover .noteDisplayName { text-decoration: underline; }
+
+.noteDisplayName {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #a78bfa;
+}
+
+.noteAcct {
+  font-size: 0.75rem;
+  color: #666;
+}
+
 .noteUser {
   font-size: 0.875rem;
   font-weight: 600;
@@ -159,6 +210,7 @@
 .noteTime {
   font-size: 0.78rem;
   color: #555;
+  margin-left: auto;
 }
 
 .noteBody {

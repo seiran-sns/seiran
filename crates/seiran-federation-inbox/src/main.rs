@@ -119,6 +119,17 @@ async fn inbox_handler(
                 }
             });
         }
+        "Create" => {
+            if activity["object"]["type"].as_str() == Some("Note") {
+                let state_clone = state.clone();
+                let activity_clone = activity.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_create_note(activity_clone, state_clone).await {
+                        eprintln!("[Inbox/Create] 処理エラー: {}", e);
+                    }
+                });
+            }
+        }
         "Accept" => {
             let state_clone = state.clone();
             let activity_clone = activity.clone();
@@ -261,6 +272,107 @@ async fn handle_follow(
         follower_uri, local_actor_uri
     );
     Ok(())
+}
+
+// Create(Note) を受け取り posts テーブルに保存する
+async fn handle_create_note(
+    activity: serde_json::Value,
+    state: Arc<AppState>,
+) -> Result<(), String> {
+    let note = &activity["object"];
+    let note_id = note["id"].as_str().ok_or("Note: id がありません")?;
+    let actor_uri = activity["actor"].as_str().ok_or("Create: actor がありません")?;
+    let content_html = note["content"].as_str().unwrap_or("").to_string();
+    let published = note["published"].as_str().unwrap_or("");
+
+    // 公開日時を parse して snowflake ID を生成
+    let created_at = published
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let post_id = seiran_common::generate_snowflake_id(created_at);
+
+    // リモートアクターを upsert（未登録なら作成）
+    let remote_ap = seiran_common::ap::fetch_actor(actor_uri).await?;
+    let remote_inbox = remote_ap.inbox.clone().unwrap_or_default();
+    let remote_username = remote_ap
+        .preferred_username
+        .clone()
+        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
+    let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
+    let remote_domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
+
+    let now = chrono::Utc::now();
+    let new_actor_id = seiran_common::generate_snowflake_id(now);
+
+    let actor_row = sqlx::query(
+        "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, created_at, updated_at)
+         VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $7)
+         ON CONFLICT (ap_uri) DO UPDATE
+           SET ap_inbox_url  = EXCLUDED.ap_inbox_url,
+               display_name  = EXCLUDED.display_name,
+               updated_at    = EXCLUDED.updated_at
+         RETURNING id",
+    )
+    .bind(new_actor_id)
+    .bind(actor_uri)
+    .bind(&remote_inbox)
+    .bind(&remote_username)
+    .bind(&remote_domain)
+    .bind(&remote_display_name)
+    .bind(now)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+
+    let actor_id: i64 = actor_row.try_get("id").map_err(|e| e.to_string())?;
+
+    // HTML タグを除去して本文を得る
+    let body = strip_html(&content_html);
+
+    // posts テーブルに挿入（ap_object_id が重複する場合はスキップ）
+    sqlx::query(
+        "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (ap_object_id) DO NOTHING",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .bind(&body)
+    .bind(note_id)
+    .bind(created_at)
+    .execute(&state.db)
+    .await
+    .map_err(|e| format!("posts INSERT エラー: {}", e))?;
+
+    eprintln!("[Create/Note] {} から投稿を受信・保存: {}", actor_uri, note_id);
+    Ok(())
+}
+
+fn strip_html(html: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                result.push(' ');
+            }
+            _ if !in_tag => result.push(c),
+            _ => {}
+        }
+    }
+    // HTML エンティティを簡易変換
+    result
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // Accept(Follow) を受け取り follows.status を accepted に更新する

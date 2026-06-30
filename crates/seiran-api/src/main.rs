@@ -53,6 +53,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local_auth = Arc::new(LocalAuthProvider::new(secrets.jwt_secret_bytes()));
     let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
     let http_client = Arc::new(reqwest::Client::new());
+    let crawl_http = Arc::clone(&http_client);
+    let crawl_domain = local_domain.clone();
+    let startup_domain = local_domain.clone();
 
     let (atp_event_tx, _) = broadcast::channel::<AtpCommitEvent>(1024);
     let atp_event_tx = Arc::new(atp_event_tx);
@@ -81,6 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    let startup_pool = pool.clone();
+    let startup_cf = cloudflare.clone();
+
     let state = AppState {
         db: pool,
         local_auth,
@@ -105,8 +111,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))
+        .route("/api/notes/home-timeline", get(handlers::notes::home_timeline))
         // フォロー
         .route("/api/follows/create", post(handlers::follows::create_follow))
+        // ユーザープロフィール
+        .route("/api/users/profile", get(handlers::users::user_profile))
         // MiAuth（Misskey 互換クライアント用）
         .route("/miauth/:session_id", get(handlers::miauth::miauth_page))
         .route("/miauth/:session_id/authorize", post(handlers::miauth::miauth_authorize))
@@ -122,6 +131,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/.well-known/atproto-did", get(handlers::xrpc::server::well_known_atproto_did))
         .with_state(state)
         .layer(cors);
+
+    // 起動時タスク: Cloudflare TXT 再登録 + Relay requestCrawl
+    {
+        let pool2 = startup_pool;
+        let cf2 = startup_cf;
+        let hc = crawl_http;
+        let domain = crawl_domain;
+        let sd = startup_domain;
+        tokio::spawn(async move {
+            // 全ローカルユーザーのハンドル TXT を確保（再デプロイ後の消失対策）
+            if let Some(cf) = cf2 {
+                match sqlx::query("SELECT username, at_did FROM actors WHERE actor_type = 'local' AND at_did IS NOT NULL")
+                    .fetch_all(&pool2)
+                    .await
+                {
+                    Ok(rows) => {
+                        use sqlx::Row;
+                        for row in rows {
+                            let username: String = match row.try_get("username") { Ok(v) => v, Err(_) => continue };
+                            let did: String = match row.try_get("at_did") { Ok(v) => v, Err(_) => continue };
+                            let handle = format!("{}.{}", username, sd);
+                            match cf.ensure_atproto_txt(&handle, &did).await {
+                                Ok(_) => eprintln!("[startup] TXT 確認済み: _atproto.{}", handle),
+                                Err(e) => eprintln!("[startup] TXT 登録失敗: {}: {}", handle, e),
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("[startup] ローカルユーザー取得失敗: {}", e),
+                }
+            }
+
+            // Relay に requestCrawl を送って subscribeRepos 再接続を促す
+            match hc
+                .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
+                .json(&serde_json::json!({"hostname": domain}))
+                .send()
+                .await
+            {
+                Ok(res) => eprintln!("[atp] 起動時 requestCrawl → {}", res.status()),
+                Err(e) => eprintln!("[atp] 起動時 requestCrawl 失敗: {}", e),
+            }
+        });
+    }
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let addr = format!("0.0.0.0:{}", port);

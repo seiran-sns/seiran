@@ -53,7 +53,30 @@ export interface Note {
   user: {
     id: number;
     username: string;
+    domain?: string;
+    display_name?: string;
   };
+}
+
+export interface ProfileNote {
+  id: string;
+  text: string;
+  created_at: string;
+}
+
+export interface UserProfile {
+  username: string;
+  domain: string;
+  display_name?: string;
+  actor_type: string;
+  ap_uri?: string;
+  follow_status: "not_following" | "pending" | "accepted";
+  recent_posts: ProfileNote[];
+}
+
+export interface FollowResponse {
+  status: string;
+  target_uri: string;
 }
 
 // =====================================================================
@@ -88,6 +111,26 @@ export const api = {
       if (params?.since_id) q.set("since_id", params.since_id);
       const qs = q.toString();
       return request<Note[]>("GET", `/notes/local-timeline${qs ? `?${qs}` : ""}`);
+    },
+    homeTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {
+      const q = new URLSearchParams();
+      if (params?.limit) q.set("limit", String(params.limit));
+      if (params?.until_id) q.set("until_id", params.until_id);
+      if (params?.since_id) q.set("since_id", params.since_id);
+      const qs = q.toString();
+      return request<Note[]>("GET", `/notes/home-timeline${qs ? `?${qs}` : ""}`);
+    },
+  },
+
+  users: {
+    profile(q: string) {
+      return request<UserProfile>("GET", `/users/profile?q=${encodeURIComponent(q)}`);
+    },
+  },
+
+  follows: {
+    create(target: string) {
+      return request<FollowResponse>("POST", "/follows/create", { target });
     },
   },
 };

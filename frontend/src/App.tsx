@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Timeline from "./pages/Timeline";
+import UserProfilePage from "./pages/UserProfile";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -42,6 +43,14 @@ export default function App() {
             <RedirectIfAuthed>
               <Register />
             </RedirectIfAuthed>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <RequireAuth>
+              <UserProfilePage />
+            </RequireAuth>
           }
         />
       </Routes>
