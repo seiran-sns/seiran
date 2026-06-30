@@ -7,7 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
-use seiran_common::generate_snowflake_id;
+use seiran_common::{ap::deliver_post_to_ap_followers, generate_snowflake_id};
 
 use crate::AppState;
 use crate::middleware::extract_auth;
@@ -83,12 +83,15 @@ pub async fn create_note(
     let now = chrono::Utc::now();
     let post_id = generate_snowflake_id(now);
 
+    let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
+
     if let Err(e) = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, created_at) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at) VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(post_id)
     .bind(actor_id)
     .bind(&req.text)
+    .bind(&ap_object_id)
     .bind(now)
     .execute(&state.db)
     .await
@@ -99,6 +102,25 @@ pub async fn create_note(
 
     if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &req.text, now).await {
         eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
+    }
+
+    // AP フォロワーへ非同期配送
+    {
+        let db = state.db.clone();
+        let local_domain = state.local_domain.clone();
+        let ap_private_key_pem = state
+            .secrets
+            .ap_private_key_pem
+            .clone()
+            .unwrap_or_default();
+        tokio::spawn(async move {
+            if let Err(e) =
+                deliver_post_to_ap_followers(&db, post_id, actor_id, &local_domain, &ap_private_key_pem)
+                    .await
+            {
+                eprintln!("[create_note] AP 配送エラー: {}", e);
+            }
+        });
     }
 
     Json(NoteResponse {
