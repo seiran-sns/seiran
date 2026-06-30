@@ -180,18 +180,22 @@ impl AtpCommitService {
             .execute(&self.pool)
             .await?;
 
-        // ⑨ atp_records INSERT
+        // ⑨ atp_records INSERT（投稿は posts テーブルで管理するためスキップ）
+        // app.bsky.feed.post を atp_records にも入れると load_atp_entries で
+        // posts テーブルとの二重取得になり MST に重複キーが生じて AppView に拒否される。
         let record_cid_str = cid_to_string(&record.cid);
-        sqlx::query(
-            "INSERT INTO atp_records (actor_id, collection, rkey, cid) VALUES ($1, $2, $3, $4)
-             ON CONFLICT (actor_id, collection, rkey) DO UPDATE SET cid = EXCLUDED.cid",
-        )
-        .bind(actor_id)
-        .bind(record.collection)
-        .bind(&record.rkey)
-        .bind(&record_cid_str)
-        .execute(&self.pool)
-        .await?;
+        if record.collection != "app.bsky.feed.post" {
+            sqlx::query(
+                "INSERT INTO atp_records (actor_id, collection, rkey, cid) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (actor_id, collection, rkey) DO UPDATE SET cid = EXCLUDED.cid",
+            )
+            .bind(actor_id)
+            .bind(record.collection)
+            .bind(&record.rkey)
+            .bind(&record_cid_str)
+            .execute(&self.pool)
+            .await?;
+        }
 
         // atp_repo_events INSERT → seq 取得
         let ops_json = serde_json::json!([{

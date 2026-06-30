@@ -97,13 +97,22 @@ pub async fn register(
             ApiError::Internal("ATP鍵ロードエラー".to_string())
         })?;
 
-    let (at_did, at_signing_key_pem) =
-        register_did_plc(&req.username, &state.local_domain, &rotation_key, &state.http_client)
-            .await
-            .map_err(|e| {
-                eprintln!("[register] did:plc 登録失敗: {}", e);
-                ApiError::Internal("did:plc 登録エラー".to_string())
-            })?;
+    // did:plc 登録（初回コールド起動時に稀に失敗するため最大3回リトライ）
+    let (at_did, at_signing_key_pem) = {
+        let mut result = None;
+        for attempt in 1u8..=3 {
+            match register_did_plc(&req.username, &state.local_domain, &rotation_key, &state.http_client).await {
+                Ok(r) => { result = Some(r); break; }
+                Err(e) => {
+                    eprintln!("[register] did:plc 登録失敗 (試行 {}/3): {}", attempt, e);
+                    if attempt < 3 {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+            }
+        }
+        result.ok_or_else(|| ApiError::Internal("did:plc 登録エラー（3回失敗）".to_string()))?
+    };
 
     // Cloudflare DNS TXT レコードによるハンドル検証の準備（PLC登録直後、DID確定後）
     let cf_record_id = if let Some(cf) = &state.cloudflare {
