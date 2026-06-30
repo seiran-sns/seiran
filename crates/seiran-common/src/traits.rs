@@ -5,42 +5,7 @@ use uuid::Uuid;
 use std::time::Duration;
 
 // ==========================================
-// 1. 認証システム (Auth Layer)
-// ==========================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExtUserInfo {
-    pub sub: String,
-    pub email: String,
-}
-
-#[derive(Debug)]
-pub enum AuthError {
-    InvalidToken,
-    VerificationFailed(String),
-    Internal(String),
-}
-
-impl std::fmt::Display for AuthError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AuthError::InvalidToken => write!(f, "Invalid token"),
-            AuthError::VerificationFailed(msg) => write!(f, "Verification failed: {}", msg),
-            AuthError::Internal(msg) => write!(f, "Internal authentication error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for AuthError {}
-
-#[async_trait]
-pub trait AuthProvider: Send + Sync {
-    /// JWT等の認証トークンを検証し、プロバイダ側の一意ユーザー識別子（sub）とメールアドレスを返します。
-    async fn verify_token(&self, token: &str) -> Result<ExtUserInfo, AuthError>;
-}
-
-// ==========================================
-// 2. データベース・共通構造体定義
+// 1. データベース・共通構造体定義
 // ==========================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

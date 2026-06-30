@@ -23,18 +23,14 @@
 ---
 
 ## 🔒 フェーズ2: プラガブル認証システム ＆ MiAuth互換 (Auth Layer)
-外部のAuth0および内蔵のローカル認証を切り替え可能にし、Misskeyクライアント向けのMiAuthエンドポイントを実装する。
+ローカル ID/PW 認証のみを使用（Auth0 は廃止）。Misskeyクライアント向けのMiAuthエンドポイントを実装する。
 
-- [x] **2.1. `AuthProvider` Trait (インターフェース) の定義**
-  - [x] `verify_token` メソッドの定義と、`ExtUserInfo` 構造体の設計
-- [x] **2.2. Auth0 プロバイダ実装 (`AUTH_PROVIDER=auth0`)**
-  - [x] Auth0 SDK/JWTデコードを用いた外部トークンの検証とユーザーマッピング
-- [x] **2.3. ローカル認証プロバイダ実装 (`AUTH_PROVIDER=local`)**
-  - [x] 自前DB（`users`等）との連携、Argon2によるパスワードハッシュ検証
-  - [x] SMTPモジュールによる新規登録時のメール確認機能の枠組み実装
-- [x] **2.4. MiAuth (Misskey認証) 互換エンドポイントの実装**
+- [x] **2.1. ローカル認証プロバイダ実装**
+  - [x] `users` テーブルとの連携、Argon2 によるパスワードハッシュ、JWT 発行
+  - [x] `users.auth0_sub` カラム削除（Auth0 廃止）
+- [x] **2.2. MiAuth (Misskey認証) 互換エンドポイントの実装**
   - [x] `/miauth/authorize` エンドポイントの実装
-  - [x] Auth0等のセッションと紐付けたアクセストークン発行・偽装ロジックの実装
+  - [x] ローカル JWT と紐付けたアクセストークン発行ロジックの実装
 - [x] **2.5. シークレット自動生成・永続化 (`secrets.toml`)**
   - [x] `seiran-common::secrets` モジュールの実装
   - [x] `JWT_SECRET`（256bit hex）を起動時に `OsRng` でランダム生成し `config/secrets.toml` に保存

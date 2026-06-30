@@ -1,5 +1,5 @@
 use axum::http::HeaderMap;
-use seiran_common::{LocalAuthProvider, traits::AuthProvider};
+use seiran_common::LocalAuthProvider;
 
 use crate::error::ApiError;
 
@@ -19,16 +19,9 @@ pub async fn extract_auth(
         .and_then(|s| s.strip_prefix("Bearer "))
         .ok_or(ApiError::Unauthorized("Authorization ヘッダーが必要です"))?;
 
-    let info = auth
+    let verified = auth
         .verify_token(bearer)
-        .await
         .map_err(|_| ApiError::Unauthorized("トークンが無効です"))?;
 
-    let user_id: i64 = info
-        .sub
-        .strip_prefix("local|")
-        .and_then(|s| s.parse().ok())
-        .ok_or(ApiError::Unauthorized("トークン形式が不正です"))?;
-
-    Ok(AuthUser { user_id, email: info.email })
+    Ok(AuthUser { user_id: verified.user_id, email: verified.email })
 }
