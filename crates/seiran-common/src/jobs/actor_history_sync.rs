@@ -139,7 +139,7 @@ async fn handle_atp(at_did: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
 
     eprintln!("[ActorHistorySync] ATP過去ログ同期開始: {}", at_did);
 
-    let posts = fetch_atp_history(at_did, 300, 30)
+    let posts = fetch_atp_history(&ctx.ap_client.http, at_did, 300, 30)
         .await
         .unwrap_or_else(|e| {
             eprintln!("[ActorHistorySync] ATP フェッチエラー（ベストエフォート）: {}", e);

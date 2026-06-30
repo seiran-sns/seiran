@@ -21,7 +21,14 @@ async fn main() {
         .await
         .expect("DB 接続に失敗しました");
 
+    let http = std::sync::Arc::new(
+        reqwest::Client::builder()
+            .user_agent("seiran-federation/0.1.0")
+            .build()
+            .expect("HTTP クライアント初期化失敗"),
+    );
+
     eprintln!("[seiran-atp-repo] Firehose リスナーを起動します。");
 
-    firehose::run(pool).await;
+    firehose::run(pool, http).await;
 }

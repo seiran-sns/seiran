@@ -94,15 +94,11 @@ struct CreateRecordResp {
 /// 公開エンドポイントを使用するため認証不要。
 /// `did` は `did:plc:...` 形式のほかハンドル (`user.bsky.social`) も受け付ける。
 pub async fn fetch_atp_history(
+    client: &reqwest::Client,
     did: &str,
     max_posts: usize,
     max_days: i64,
 ) -> Result<Vec<BskyPost>, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("seiran-federation/0.1.0")
-        .build()
-        .map_err(|e| format!("HTTPクライアント初期化失敗: {}", e))?;
-
     let cutoff = Utc::now() - Duration::days(max_days);
     let mut posts: Vec<BskyPost> = Vec::new();
     let mut cursor: Option<String> = None;
@@ -207,15 +203,11 @@ pub async fn fetch_atp_history(
 ///
 /// `identifier` はハンドルまたは DID。`password` は App Password を推奨。
 pub async fn create_atp_session(
+    client: &reqwest::Client,
     pds_endpoint: &str,
     identifier: &str,
     password: &str,
 ) -> Result<AtpSession, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("seiran-federation/0.1.0")
-        .build()
-        .map_err(|e| format!("HTTPクライアント初期化失敗: {}", e))?;
-
     let resp = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createSession",
@@ -252,16 +244,12 @@ pub async fn create_atp_session(
 ///
 /// 成功時は `(at_uri, cid)` を返す。
 pub async fn create_atp_post(
+    client: &reqwest::Client,
     session: &AtpSession,
     pds_endpoint: &str,
     text: &str,
     created_at: DateTime<Utc>,
 ) -> Result<(String, String), String> {
-    let client = reqwest::Client::builder()
-        .user_agent("seiran-federation/0.1.0")
-        .build()
-        .map_err(|e| format!("HTTPクライアント初期化失敗: {}", e))?;
-
     let record = serde_json::json!({
         "$type": "app.bsky.feed.post",
         "text": text,

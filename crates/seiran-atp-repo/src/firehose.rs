@@ -12,6 +12,7 @@
 //! AppView REST API で取得するベストエフォート方式を採用する。
 
 use std::io::Cursor;
+use std::sync::Arc;
 use std::time::Duration;
 
 use ciborium::value::Value as CborValue;
@@ -27,13 +28,13 @@ const FIREHOSE_URL: &str =
     "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos";
 
 /// Firehose リスナーを起動する。切断時は指数バックオフで再接続する。
-pub async fn run(pool: PgPool) {
+pub async fn run(pool: PgPool, http: Arc<reqwest::Client>) {
     let mut backoff_secs = 2u64;
 
     loop {
         eprintln!("[Firehose] 接続中: {}", FIREHOSE_URL);
 
-        match connect_and_process(&pool).await {
+        match connect_and_process(&pool, &http).await {
             Ok(()) => {
                 eprintln!("[Firehose] 接続終了（正常）。再接続します。");
                 backoff_secs = 2;
@@ -47,7 +48,7 @@ pub async fn run(pool: PgPool) {
     }
 }
 
-async fn connect_and_process(pool: &PgPool) -> Result<(), String> {
+async fn connect_and_process(pool: &PgPool, http: &reqwest::Client) -> Result<(), String> {
     let (mut ws_stream, _) = connect_async(FIREHOSE_URL)
         .await
         .map_err(|e| format!("WebSocket 接続失敗: {}", e))?;
@@ -58,7 +59,7 @@ async fn connect_and_process(pool: &PgPool) -> Result<(), String> {
         let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
 
         if let Message::Binary(bytes) = msg {
-            if let Err(e) = process_message(&bytes, pool).await {
+            if let Err(e) = process_message(&bytes, pool, http).await {
                 // 個別イベントのエラーは無視して続行
                 eprintln!("[Firehose] メッセージ処理エラー（スキップ）: {}", e);
             }
@@ -68,7 +69,7 @@ async fn connect_and_process(pool: &PgPool) -> Result<(), String> {
     Ok(())
 }
 
-async fn process_message(bytes: &[u8], pool: &PgPool) -> Result<(), String> {
+async fn process_message(bytes: &[u8], pool: &PgPool, http: &reqwest::Client) -> Result<(), String> {
     let mut cursor = Cursor::new(bytes);
 
     // ヘッダー CBOR を読む
@@ -128,7 +129,7 @@ async fn process_message(bytes: &[u8], pool: &PgPool) -> Result<(), String> {
 
         // AppView REST で単一ポストを取得（最新1件取得の簡易実装）
         // 本来は getPostThread だが、getAuthorFeed+limit=1 で代替
-        if let Ok(posts) = fetch_atp_history(&did, 1, 1).await {
+        if let Ok(posts) = fetch_atp_history(http, &did, 1, 1).await {
             for post in posts {
                 if post.uri == at_uri {
                     save_atp_post(pool, &did, &post).await?;

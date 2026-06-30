@@ -302,3 +302,71 @@ fn build_signing_string(
     }
     Ok(lines.join("\n"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── parse_signature_header ───────────────────────────────────────────
+
+    #[test]
+    fn parse_signature_header_extracts_key_fields() {
+        let header = r#"keyId="https://example.com/users/alice#main-key",algorithm="rsa-sha256",headers="(request-target) host date",signature="abc123""#;
+        let map = parse_signature_header(header).unwrap();
+        assert_eq!(map.get("keyId").map(|s| s.as_str()), Some("https://example.com/users/alice#main-key"));
+        assert_eq!(map.get("algorithm").map(|s| s.as_str()), Some("rsa-sha256"));
+        assert_eq!(map.get("headers").map(|s| s.as_str()), Some("(request-target) host date"));
+        assert_eq!(map.get("signature").map(|s| s.as_str()), Some("abc123"));
+    }
+
+    #[test]
+    fn parse_signature_header_single_pair() {
+        let header = r#"keyId="did:example:123#key-1""#;
+        let map = parse_signature_header(header).unwrap();
+        assert_eq!(map.get("keyId").map(|s| s.as_str()), Some("did:example:123#key-1"));
+    }
+
+    #[test]
+    fn parse_signature_header_returns_empty_on_malformed() {
+        let map = parse_signature_header("no-equals-sign").unwrap();
+        assert!(map.is_empty());
+    }
+
+    // ─── build_signing_string ─────────────────────────────────────────────
+
+    #[test]
+    fn build_signing_string_request_target() {
+        let headers = HashMap::new();
+        let result = build_signing_string("POST", "/inbox", &headers, "(request-target)").unwrap();
+        assert_eq!(result, "(request-target): post /inbox");
+    }
+
+    #[test]
+    fn build_signing_string_multiple_headers() {
+        let mut headers = HashMap::new();
+        headers.insert("host".to_string(), "example.com".to_string());
+        headers.insert("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string());
+        let result = build_signing_string(
+            "POST",
+            "/inbox",
+            &headers,
+            "(request-target) host date",
+        ).unwrap();
+        let expected = "(request-target): post /inbox\nhost: example.com\ndate: Mon, 01 Jan 2024 00:00:00 GMT";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn build_signing_string_method_is_lowercased() {
+        let headers = HashMap::new();
+        let result = build_signing_string("GET", "/users/alice", &headers, "(request-target)").unwrap();
+        assert!(result.starts_with("(request-target): get "));
+    }
+
+    #[test]
+    fn build_signing_string_missing_header_returns_error() {
+        let headers = HashMap::new();
+        let err = build_signing_string("POST", "/inbox", &headers, "host").unwrap_err();
+        assert!(matches!(err, ApError::Signature(_)));
+    }
+}

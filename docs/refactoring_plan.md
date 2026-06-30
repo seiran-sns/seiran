@@ -26,6 +26,8 @@
 | **M-B**: `ApClient` 構造体化・グローバルキャッシュ廃止 | **完了** | `ap/client.rs`, 各 `AppState` |
 | **M-C**: pub API の `Result<_, String>` → typed error | **完了** | `ap/*`, `auth/local.rs` |
 | **H-B step2-3**: Repository 層導入・ハンドラから SQL 排除 | **完了** | `seiran-common/src/repository/`, 全ハンドラ |
+| **M-E**: `atp_repository_publish.rs` 役割明確化・HTTP クライアント共有化 | **完了** | `atp/client.rs`, `jobs/atp_repository_publish.rs`, `seiran-atp-repo/` |
+| **L-B**: HTTP Signatures ユニットテスト追加 | **完了** | `ap/client.rs` の `parse_signature_header` / `build_signing_string` テスト 7 件 |
 
 ---
 

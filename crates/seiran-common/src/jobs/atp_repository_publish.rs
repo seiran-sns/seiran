@@ -1,7 +1,10 @@
-//! ⑤ ATPリポジトリコミット・配信キュー (`atp_repository_publish`)
+//! ⑤ 外部 PDS ミラーリングキュー (`atp_repository_publish`)
 //!
-//! 極高優先度で実行され、アクターID単位のFIFO（先入れ先出し）制御・排他ロックの適用を保証する。
-//! リポジトリの順序整合性を維持するため、同一アクターに対するコミット処理は直列化される。
+//! seiran のローカル投稿を **外部 Bluesky PDS（bsky.social 等）にミラーリング**するジョブ。
+//! ローカル ATP リポジトリへのコミット（`AtpCommitService`）とは独立した処理であり、
+//! 役割は bsky.social の App Password を用いた `createRecord` 呼び出しのみ。
+//!
+//! アクターID単位の FIFO 排他ロックで投稿順序の整合性を保証する。
 //!
 //! # 環境変数
 //! - `ATP_HANDLE` — Bluesky ハンドル（例: `seiran.bsky.social`）
@@ -100,11 +103,13 @@ async fn handle_create_post(actor_id: i64, ctx: &Arc<JobContext>) -> Result<(), 
         .try_get("created_at")
         .map_err(|e| format!("created_at取得失敗: {}", e))?;
 
+    let http = &ctx.ap_client.http;
+
     // PDS セッション作成
-    let session = create_atp_session(&pds_url, &atp_handle, &atp_password).await?;
+    let session = create_atp_session(http, &pds_url, &atp_handle, &atp_password).await?;
 
     // ATP ポスト作成
-    let (at_uri, at_cid) = create_atp_post(&session, &pds_url, &body, created_at).await?;
+    let (at_uri, at_cid) = create_atp_post(http, &session, &pds_url, &body, created_at).await?;
 
     // DB に AT URI / CID を書き戻す
     sqlx::query("UPDATE posts SET at_uri = $1, at_cid = $2 WHERE id = $3")
@@ -116,7 +121,7 @@ async fn handle_create_post(actor_id: i64, ctx: &Arc<JobContext>) -> Result<(), 
         .map_err(|e| format!("ATP URI 書き戻し失敗: {}", e))?;
 
     eprintln!(
-        "[AtpRepositoryPublish] ATP 配信完了: post_id={}, at_uri={}",
+        "[AtpRepositoryPublish] 外部 PDS 配信完了: post_id={}, at_uri={}",
         post_id, at_uri
     );
     Ok(())
