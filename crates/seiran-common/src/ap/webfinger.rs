@@ -33,12 +33,7 @@ impl WebFingerResponse {
 }
 
 /// 指定したアクター名とドメインから Webfinger 解決を実行する
-pub async fn resolve_webfinger(username: &str, domain: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("seiran-federation/0.1.0")
-        .build()
-        .map_err(|e| format!("HTTPクライアント初期化失敗: {}", e))?;
-
+pub async fn resolve_webfinger(client: &reqwest::Client, username: &str, domain: &str) -> Result<String, String> {
     let resource = format!("acct:{}@{}", username, domain);
     let url = format!(
         "https://{}/.well-known/webfinger?resource={}",
@@ -66,15 +61,5 @@ pub async fn resolve_webfinger(username: &str, domain: &str) -> Result<String, S
 
     parsed
         .actor_uri()
-        .ok_ok_or_else(|| "Webfinger リンクに ActivityPub 互換アクターURIが見つかりません".to_string())
-}
-
-trait OkOrExt<T> {
-    fn ok_ok_or_else<F: FnOnce() -> String>(self, err_fn: F) -> Result<T, String>;
-}
-
-impl<T> OkOrExt<T> for Option<T> {
-    fn ok_ok_or_else<F: FnOnce() -> String>(self, err_fn: F) -> Result<T, String> {
-        self.ok_or_else(err_fn)
-    }
+        .ok_or_else(|| "Webfinger リンクに ActivityPub 互換アクターURIが見つかりません".to_string())
 }

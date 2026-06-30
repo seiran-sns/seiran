@@ -42,12 +42,7 @@ pub struct ApActor {
 }
 
 /// リモートアクター情報を取得する
-pub async fn fetch_actor(actor_uri: &str) -> Result<ApActor, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("seiran-federation/0.1.0")
-        .build()
-        .map_err(|e| format!("HTTPクライアント初期化失敗: {}", e))?;
-
+pub async fn fetch_actor(client: &reqwest::Client, actor_uri: &str) -> Result<ApActor, String> {
     let res = client
         .get(actor_uri)
         .header("Accept", "application/activity+json, application/ld+json")
@@ -71,7 +66,7 @@ pub async fn fetch_actor(actor_uri: &str) -> Result<ApActor, String> {
 }
 
 /// 指定した key_id (URL) から公開鍵 PEM を取得する（キャッシュ対応）
-pub async fn get_public_key_pem(key_id: &str) -> Result<String, String> {
+pub async fn get_public_key_pem(client: &reqwest::Client, key_id: &str) -> Result<String, String> {
     // 1. キャッシュヒット確認
     {
         let cache = get_cache().read().await;
@@ -87,7 +82,7 @@ pub async fn get_public_key_pem(key_id: &str) -> Result<String, String> {
     // アクター情報そのもの、あるいは鍵オブジェクト単体が返る。
     // フラグメント部分 (#main-key) を除外したベースURIを叩くのが安全。
     let base_uri = key_id.split('#').next().unwrap_or(key_id);
-    let actor = fetch_actor(base_uri).await?;
+    let actor = fetch_actor(client, base_uri).await?;
 
     if let Some(pubkey_info) = actor.public_key {
         if pubkey_info.id == key_id || base_uri == pubkey_info.owner {
@@ -108,11 +103,13 @@ pub async fn get_public_key_pem(key_id: &str) -> Result<String, String> {
 /// HTTP Signatures の署名を検証します
 ///
 /// # 引数
+/// - `client`: 共有 HTTP クライアント
 /// - `method`: リクエストメソッド (e.g. "POST")
 /// - `path`: リクエストパス (e.g. "/inbox")
 /// - `headers`: 受信した HTTP ヘッダー一覧
 /// - `signature_header`: 受信した `Signature` ヘッダーの内容
 pub async fn verify_signature(
+    client: &reqwest::Client,
     method: &str,
     path: &str,
     headers: &HashMap<String, String>,
@@ -129,7 +126,7 @@ pub async fn verify_signature(
     let signing_string = build_signing_string(method, path, headers, &header_list_str)?;
 
     // 3. 公開鍵 PEM の取得
-    let pem = get_public_key_pem(key_id).await?;
+    let pem = get_public_key_pem(client, key_id).await?;
 
     // 4. RSA 公開鍵オブジェクトのパース
     let public_key = RsaPublicKey::from_public_key_pem(&pem)
@@ -199,11 +196,13 @@ fn build_signing_string(
 /// HTTP Signatures 付きで ActivityPub エンドポイントへ POST する
 ///
 /// # 引数
+/// - `client`: 共有 HTTP クライアント
 /// - `url`: 送信先 URL（相手の inbox 等）
 /// - `body`: JSON 文字列
 /// - `actor_key_id`: 署名に使うキー ID（例: `https://beta.seiran.org/users/yubaj#main-key`）
 /// - `private_key_pem`: RSA 秘密鍵 PEM
 pub async fn sign_and_post(
+    client: &reqwest::Client,
     url: &str,
     body: &str,
     actor_key_id: &str,
@@ -248,11 +247,6 @@ pub async fn sign_and_post(
         r#"keyId="{}",algorithm="rsa-sha256",headers="(request-target) host date content-type digest",signature="{}""#,
         actor_key_id, sig_b64
     );
-
-    let client = reqwest::Client::builder()
-        .user_agent("seiran-federation/0.1.0")
-        .build()
-        .map_err(|e| format!("HTTP クライアント初期化失敗: {}", e))?;
 
     let res = client
         .post(url)

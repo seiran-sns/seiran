@@ -49,6 +49,8 @@ pub struct JobContext {
     pub actor_semaphores: Arc<tokio::sync::Mutex<HashMap<i64, Arc<Semaphore>>>>,
     /// DB 接続プール（フェーズ4以降のジョブハンドラが使用）
     pub db_pool: Option<sqlx::PgPool>,
+    /// 共有 HTTP クライアント（AP 通信で使用）
+    pub http_client: Arc<reqwest::Client>,
 }
 
 impl JobContext {
@@ -58,11 +60,22 @@ impl JobContext {
             domain_semaphores: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             actor_semaphores: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             db_pool: None,
+            http_client: Arc::new(
+                reqwest::Client::builder()
+                    .user_agent("seiran-federation/0.1.0")
+                    .build()
+                    .unwrap_or_default(),
+            ),
         }
     }
 
     pub fn with_db_pool(mut self, pool: sqlx::PgPool) -> Self {
         self.db_pool = Some(pool);
+        self
+    }
+
+    pub fn with_http_client(mut self, client: Arc<reqwest::Client>) -> Self {
+        self.http_client = client;
         self
     }
 

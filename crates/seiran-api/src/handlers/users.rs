@@ -222,10 +222,10 @@ async fn fetch_remote_profile(
     username: &str,
     domain: &str,
     my_user_id: Option<i64>,
-    _state: &AppState,
+    state: &AppState,
 ) -> impl IntoResponse {
     // WebFinger → Actor ドキュメント取得
-    let actor_uri = match resolve_webfinger(username, domain).await {
+    let actor_uri = match resolve_webfinger(&state.http_client, username, domain).await {
         Ok(uri) => uri,
         Err(e) => {
             return (
@@ -236,7 +236,7 @@ async fn fetch_remote_profile(
         }
     };
 
-    let ap_actor = match fetch_actor(&actor_uri).await {
+    let ap_actor = match fetch_actor(&state.http_client, &actor_uri).await {
         Ok(a) => a,
         Err(e) => {
             return (

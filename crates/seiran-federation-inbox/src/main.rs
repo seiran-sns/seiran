@@ -25,6 +25,7 @@ pub struct AppState {
     pub local_domain: String,
     pub ap_public_key_pem: String,
     pub ap_private_key_pem: String,
+    pub http_client: Arc<reqwest::Client>,
 }
 
 #[tokio::main]
@@ -41,12 +42,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ap_public_key_pem = secrets.ap_public_key_pem.unwrap_or_default();
     let ap_private_key_pem = secrets.ap_private_key_pem.unwrap_or_default();
 
+    let http_client = Arc::new(
+        reqwest::Client::builder()
+            .user_agent("seiran-federation/0.1.0")
+            .build()?,
+    );
+
     let state = Arc::new(AppState {
         db,
         job_queue,
         local_domain,
         ap_public_key_pem,
         ap_private_key_pem,
+        http_client,
     });
 
     let app = Router::new()

@@ -1956,10 +1956,12 @@ dependencies = [
  "axum",
  "chrono",
  "dotenvy",
+ "reqwest",
  "seiran-common",
  "serde",
  "serde_json",
  "sqlx",
+ "thiserror 1.0.69",
  "tokio",
 ]
 

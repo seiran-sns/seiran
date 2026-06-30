@@ -31,11 +31,12 @@ pub struct ApNote {
 /// - 最大 `max_posts` 件かつ `max_days` 日前までを対象（どちらか早い方で停止）
 /// - outbox 非公開・取得失敗の場合はベストエフォートで空 Vec を返す
 pub async fn fetch_ap_history(
+    client: &reqwest::Client,
     actor_uri: &str,
     max_posts: usize,
     max_days: i64,
 ) -> Result<Vec<ApNote>, String> {
-    let actor = fetch_actor(actor_uri).await?;
+    let actor = fetch_actor(client, actor_uri).await?;
     let outbox_url = match actor.outbox {
         Some(url) => url,
         None => {
@@ -43,12 +44,6 @@ pub async fn fetch_ap_history(
             return Ok(vec![]);
         }
     };
-
-    let client = reqwest::Client::builder()
-        .user_agent("seiran-federation/0.1.0")
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("HTTPクライアント初期化失敗: {}", e))?;
 
     let since = Utc::now() - Duration::days(max_days);
     let mut notes: Vec<ApNote> = Vec::new();

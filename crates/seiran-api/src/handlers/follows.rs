@@ -68,7 +68,7 @@ pub async fn create_follow(
     };
 
     // ターゲット URI を解決（handle または URI）
-    let target_uri = match resolve_target_uri(&req.target).await {
+    let target_uri = match resolve_target_uri(&state.http_client, &req.target).await {
         Ok(uri) => uri,
         Err(e) => {
             eprintln!("[follow] ターゲット解決失敗: {}", e);
@@ -87,7 +87,7 @@ pub async fn create_follow(
     }
 
     // リモートアクタードキュメント取得
-    let remote_ap = match fetch_actor(&target_uri).await {
+    let remote_ap = match fetch_actor(&state.http_client, &target_uri).await {
         Ok(a) => a,
         Err(e) => {
             return (
@@ -198,7 +198,7 @@ pub async fn create_follow(
         }
     };
 
-    if let Err(e) = sign_and_post(&remote_inbox, &body, &actor_key_id, &ap_private_key_pem).await {
+    if let Err(e) = sign_and_post(&state.http_client, &remote_inbox, &body, &actor_key_id, &ap_private_key_pem).await {
         eprintln!("[follow] Follow 送信失敗: {}", e);
         return (
             axum::http::StatusCode::BAD_GATEWAY,
@@ -220,7 +220,7 @@ pub async fn create_follow(
 }
 
 /// `@alice@mastodon.social` または `https://...` 形式のターゲットを Actor URI に解決する
-async fn resolve_target_uri(target: &str) -> Result<String, String> {
+async fn resolve_target_uri(client: &reqwest::Client, target: &str) -> Result<String, String> {
     let t = target.trim().trim_start_matches('@');
 
     // URI 形式（https://）
@@ -231,7 +231,7 @@ async fn resolve_target_uri(target: &str) -> Result<String, String> {
     // handle 形式: `alice@mastodon.social` または `@alice@mastodon.social`
     let parts: Vec<&str> = t.splitn(2, '@').collect();
     if parts.len() == 2 {
-        return resolve_webfinger(parts[0], parts[1]).await;
+        return resolve_webfinger(client, parts[0], parts[1]).await;
     }
 
     Err(format!(
