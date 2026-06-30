@@ -3,8 +3,8 @@
 //! リモートアクタードキュメントの取得、公開鍵（RSA）のフェッチとキャッシュ、
 //! および受信リクエストの HTTP Signatures 署名検証を行う。
 
-use rsa::pkcs8::DecodePublicKey;
-use rsa::{Pkcs1v15Sign, RsaPublicKey};
+use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey};
+use rsa::{Pkcs1v15Sign, RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -34,6 +34,7 @@ pub struct ApActor {
     pub actor_type: String,
     #[serde(rename = "preferredUsername")]
     pub preferred_username: Option<String>,
+    pub name: Option<String>,
     pub inbox: Option<String>,
     pub outbox: Option<String>,
     #[serde(rename = "publicKey")]
@@ -193,4 +194,83 @@ fn build_signing_string(
         }
     }
     Ok(lines.join("\n"))
+}
+
+/// HTTP Signatures 付きで ActivityPub エンドポイントへ POST する
+///
+/// # 引数
+/// - `url`: 送信先 URL（相手の inbox 等）
+/// - `body`: JSON 文字列
+/// - `actor_key_id`: 署名に使うキー ID（例: `https://beta.seiran.org/users/yubaj#main-key`）
+/// - `private_key_pem`: RSA 秘密鍵 PEM
+pub async fn sign_and_post(
+    url: &str,
+    body: &str,
+    actor_key_id: &str,
+    private_key_pem: &str,
+) -> Result<(), String> {
+    let now = chrono::Utc::now();
+    let date_str = now.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+
+    let parsed_url = url::Url::parse(url)
+        .map_err(|e| format!("URL パースエラー: {}", e))?;
+    let host = parsed_url.host_str().unwrap_or("").to_string();
+    let path = parsed_url.path().to_string();
+
+    // Digest ヘッダー（SHA-256 of body）
+    let body_hash = Sha256::digest(body.as_bytes());
+    let digest = format!(
+        "SHA-256={}",
+        base64::Engine::encode(&base64::prelude::BASE64_STANDARD, body_hash)
+    );
+
+    // 署名対象文字列
+    let signing_string = format!(
+        "(request-target): post {}\nhost: {}\ndate: {}\ncontent-type: application/activity+json\ndigest: {}",
+        path, host, date_str, digest
+    );
+
+    // RSA-SHA256 署名
+    let private_key = RsaPrivateKey::from_pkcs8_pem(private_key_pem)
+        .map_err(|e| format!("RSA 秘密鍵パース失敗: {}", e))?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(signing_string.as_bytes());
+    let hashed = hasher.finalize();
+
+    let sig_bytes = private_key
+        .sign(Pkcs1v15Sign::new::<Sha256>(), &hashed)
+        .map_err(|e| format!("RSA 署名失敗: {}", e))?;
+
+    let sig_b64 = base64::Engine::encode(&base64::prelude::BASE64_STANDARD, sig_bytes);
+
+    let signature_header = format!(
+        r#"keyId="{}",algorithm="rsa-sha256",headers="(request-target) host date content-type digest",signature="{}""#,
+        actor_key_id, sig_b64
+    );
+
+    let client = reqwest::Client::builder()
+        .user_agent("seiran-federation/0.1.0")
+        .build()
+        .map_err(|e| format!("HTTP クライアント初期化失敗: {}", e))?;
+
+    let res = client
+        .post(url)
+        .header("Date", &date_str)
+        .header("Host", &host)
+        .header("Content-Type", "application/activity+json")
+        .header("Digest", &digest)
+        .header("Signature", &signature_header)
+        .body(body.to_string())
+        .send()
+        .await
+        .map_err(|e| format!("POST リクエスト失敗: {}", e))?;
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let body_text = res.text().await.unwrap_or_default();
+        return Err(format!("POST レスポンスエラー {}: {}", status, body_text));
+    }
+
+    Ok(())
 }
