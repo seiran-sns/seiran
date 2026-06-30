@@ -108,7 +108,7 @@ pub async fn deliver_post_to_ap_followers(
 /// プレーンテキストを ActivityPub 向け HTML に変換する
 ///
 /// 空行で段落分割し、改行を `<br>` に変換する。
-fn plain_to_html(text: &str) -> String {
+pub fn plain_to_html(text: &str) -> String {
     let paragraphs: Vec<String> = text
         .split("\n\n")
         .map(|para| {
