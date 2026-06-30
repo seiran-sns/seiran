@@ -221,6 +221,29 @@ seiran/
 
 ---
 
+### 4.3.1 データアクセス層（Repository パターン）
+
+`seiran-api` の HTTP ハンドラは SQL を直接記述せず、`seiran-common::repository` に定義したリポジトリトレイトを経由してデータベースにアクセスする。これにより、ハンドラのテスト時に Mock 実装を差し込めるほか、SQL の記述箇所が一元化される。
+
+```text
+crates/seiran-common/src/repository/
+├── mod.rs       # re-export
+├── actor.rs     # Actor 構造体 + ActorRepository + PgActorRepository
+├── user.rs      # LoginRow + UserRepository + PgUserRepository
+├── post.rs      # TimelinePost / PostSummary / PostRecord + PostRepository + PgPostRepository
+├── follow.rs    # FollowRepository + PgFollowRepository
+└── atp.rs       # RepoEvent + AtpReadRepository + PgAtpReadRepository
+```
+
+- `AppState` はリポジトリを `Arc<dyn XxxRepository>` で保持し、ハンドラは `state.actors` / `state.posts` 等を呼ぶ。
+- PostgreSQL の `actor_type_enum` は SELECT 時に `::text` キャストして `String` にデコードする。
+- タイムライン取得（home/local）は `$N::bigint IS NULL OR ...` パターンで until/since の有無を 1 クエリに統一している。
+- `AppState.db: PgPool` は `deliver_post_to_ap_followers`（`seiran-common`）が `&PgPool` を要求するため暫定的に保持している。将来 `FollowerRepository` へ移行したら削除する。
+
+> ATP コミット処理（`AtpCommitService`）は書き込みの厳密な順序性が必要な半ステートフル領域のため、リポジトリ層とは別に `seiran-common::atp::service` に集約している。
+
+---
+
 ### 4.4 ジョブワーカーエンジン ＆ 制御ロジック仕様
 
 非同期タスク処理の安定性と対外トラフィックの平滑化のため、以下の制御機構を実装している。

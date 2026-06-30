@@ -1,7 +1,7 @@
 use axum::{extract::{Query, State}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}, Json};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 
+use seiran_common::repository::Actor;
 
 use crate::middleware::extract_auth;
 use crate::AppState;
@@ -35,14 +35,11 @@ pub async fn user_profile(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    // ログインユーザーの actor_id（フォロー状態確認用）
-    let my_actor_id: Option<i64> = extract_auth(&headers, &state.local_auth)
+    // ログインユーザーの user_id（フォロー状態確認用）
+    let my_user_id: Option<i64> = extract_auth(&headers, &state.local_auth)
         .await
         .ok()
-        .and_then(|u| {
-            // NOTE: async block が使えないので DB は後で引く
-            Some(u.user_id)
-        });
+        .map(|u| u.user_id);
 
     let q = params.q.trim().trim_start_matches('@');
 
@@ -50,7 +47,7 @@ pub async fn user_profile(
     let (lookup_username, lookup_domain): (String, Option<String>) =
         if q.starts_with("https://") || q.starts_with("http://") {
             // Actor URI → WebFinger などは省略し、DB で ap_uri 検索
-            return lookup_by_uri(q, my_actor_id, &state).await.into_response();
+            return lookup_by_uri(q, my_user_id, &state).await.into_response();
         } else {
             let parts: Vec<&str> = q.splitn(2, '@').collect();
             if parts.len() == 2 {
@@ -66,73 +63,33 @@ pub async fn user_profile(
         .to_string();
 
     // DB で検索
-    let actor_row = sqlx::query(
-        "SELECT id, username, domain, display_name, actor_type, ap_uri FROM actors
-         WHERE username = $1 AND domain = $2 LIMIT 1",
-    )
-    .bind(&lookup_username)
-    .bind(&domain)
-    .fetch_optional(&state.db)
-    .await;
-
-    match actor_row {
-        Ok(Some(row)) => build_profile_response(row, my_actor_id, &state).await.into_response(),
+    match state.actors.find_by_username_domain(&lookup_username, &domain).await {
+        Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
         Ok(None) if lookup_domain.is_some() => {
             // DB にいない → AP から取得して返す（DB には保存しない）
-            fetch_remote_profile(&lookup_username, lookup_domain.as_deref().unwrap(), my_actor_id, &state).await.into_response()
+            fetch_remote_profile(&lookup_username, lookup_domain.as_deref().unwrap(), my_user_id, &state)
+                .await
+                .into_response()
         }
-        Ok(None) => (axum::http::StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
         Err(e) => {
             eprintln!("[profile] DB エラー: {}", e);
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
         }
     }
 }
 
 async fn build_profile_response(
-    row: sqlx::postgres::PgRow,
+    actor: Actor,
     my_user_id: Option<i64>,
     state: &AppState,
 ) -> Response {
-    let actor_id: i64 = match row.try_get("id") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[profile] actor id 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-    let username: String = match row.try_get("username") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[profile] username 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-    let domain: String = match row.try_get("domain") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[profile] domain 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-    let display_name: Option<String> = row.try_get("display_name").ok().flatten();
-    let actor_type: String = match row.try_get("actor_type") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[profile] actor_type 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-    let ap_uri: Option<String> = row.try_get("ap_uri").ok().flatten();
+    let actor_id = actor.id;
 
     // 自分の actor_id を取得
     let my_actor_id: Option<i64> = if let Some(uid) = my_user_id {
-        match sqlx::query("SELECT id FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1")
-            .bind(uid)
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(Some(r)) => r.try_get("id").ok(),
+        match state.actors.find_local_by_user_id(uid).await {
+            Ok(Some(a)) => Some(a.id),
             Ok(None) => None,
             Err(e) => {
                 eprintln!("[profile] 自分の actor_id 取得失敗: {}", e);
@@ -145,45 +102,19 @@ async fn build_profile_response(
 
     // フォロー状態
     let follow_status = match my_actor_id {
-        Some(mid) => {
-            let f = match sqlx::query(
-                "SELECT status FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2 LIMIT 1",
-            )
-            .bind(mid)
-            .bind(actor_id)
-            .fetch_optional(&state.db)
-            .await
-            {
-                Ok(row) => row,
-                Err(e) => {
-                    eprintln!("[profile] フォロー状態取得失敗: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-                }
-            };
-            match f {
-                Some(r) => match r.try_get::<String, _>("status") {
-                    Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("[profile] follow status 取得失敗: {}", e);
-                        return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-                    }
-                },
-                None => "not_following".to_string(),
+        Some(mid) => match state.follows.find_status(mid, actor_id).await {
+            Ok(Some(s)) => s,
+            Ok(None) => "not_following".to_string(),
+            Err(e) => {
+                eprintln!("[profile] フォロー状態取得失敗: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
             }
-        }
+        },
         None => "not_following".to_string(),
     };
 
     // 最近の投稿（最大20件）
-    let post_rows = match sqlx::query(
-        "SELECT id, body, created_at FROM posts
-         WHERE actor_id = $1 AND deleted_at IS NULL
-         ORDER BY id DESC LIMIT 20",
-    )
-    .bind(actor_id)
-    .fetch_all(&state.db)
-    .await
-    {
+    let post_rows = match state.posts.recent_by_actor(actor_id, 20).await {
         Ok(rows) => rows,
         Err(e) => {
             eprintln!("[profile] 最近の投稿取得失敗: {}", e);
@@ -192,25 +123,20 @@ async fn build_profile_response(
     };
 
     let recent_posts = post_rows
-        .iter()
-        .filter_map(|r| {
-            Some(ProfileNote {
-                id: r.try_get::<i64, _>("id").ok()?.to_string(),
-                text: r.try_get("body").ok()?,
-                created_at: r
-                    .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-                    .ok()?
-                    .to_rfc3339(),
-            })
+        .into_iter()
+        .map(|p| ProfileNote {
+            id: p.id.to_string(),
+            text: p.body,
+            created_at: p.created_at.to_rfc3339(),
         })
         .collect();
 
     Json(ProfileResponse {
-        username,
-        domain,
-        display_name,
-        actor_type,
-        ap_uri,
+        username: actor.username,
+        domain: actor.domain,
+        display_name: actor.display_name,
+        actor_type: actor.actor_type,
+        ap_uri: actor.ap_uri,
         follow_status,
         recent_posts,
     })
@@ -267,16 +193,8 @@ async fn lookup_by_uri(
     my_user_id: Option<i64>,
     state: &AppState,
 ) -> impl IntoResponse {
-    let row = sqlx::query(
-        "SELECT id, username, domain, display_name, actor_type, ap_uri FROM actors
-         WHERE ap_uri = $1 LIMIT 1",
-    )
-    .bind(uri)
-    .fetch_optional(&state.db)
-    .await;
-
-    match row {
-        Ok(Some(r)) => build_profile_response(r, my_user_id, state).await.into_response(),
+    match state.actors.find_by_ap_uri(uri).await {
+        Ok(Some(actor)) => build_profile_response(actor, my_user_id, state).await,
         _ => (axum::http::StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
     }
 }

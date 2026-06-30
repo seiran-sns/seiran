@@ -5,7 +5,6 @@ use axum::{
     response::IntoResponse,
 };
 use serde::Deserialize;
-use sqlx::Row;
 use tokio::sync::broadcast;
 
 use seiran_common::atp::{
@@ -28,35 +27,17 @@ pub async fn xrpc_get_repo(
     Query(params): Query<GetRepoParams>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let actor_row = sqlx::query(
-        "SELECT id, at_repo_cid FROM actors WHERE at_did = $1 LIMIT 1",
-    )
-    .bind(&params.did)
-    .fetch_optional(&state.db)
-    .await;
-
-    let (actor_id, commit_cid_str) = match actor_row {
-        Ok(Some(r)) => {
-            let id: i64 = match r.try_get("id") {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("[getRepo] id 取得失敗: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-                }
-            };
-            let cid: Option<String> = match r.try_get("at_repo_cid") {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("[getRepo] at_repo_cid 取得失敗: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-                }
-            };
-            (id, cid)
+    let actor = match state.actors.find_by_did(&params.did).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "DID が見つかりません").into_response(),
+        Err(e) => {
+            eprintln!("[getRepo] アクター取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
-        _ => return (StatusCode::NOT_FOUND, "DID が見つかりません").into_response(),
     };
 
-    let commit_cid_str = match commit_cid_str {
+    let actor_id = actor.id;
+    let commit_cid_str = match actor.at_repo_cid {
         Some(s) => s,
         None => return (StatusCode::NOT_FOUND, "リポジトリが未初期化です").into_response(),
     };
@@ -66,14 +47,7 @@ pub async fn xrpc_get_repo(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "commit CID パース失敗").into_response(),
     };
 
-    let block_rows = sqlx::query(
-        "SELECT cid, bytes FROM atp_blocks WHERE actor_id = $1",
-    )
-    .bind(actor_id)
-    .fetch_all(&state.db)
-    .await;
-
-    let block_rows = match block_rows {
+    let block_rows = match state.atp_repo.find_blocks_by_actor(actor_id).await {
         Ok(r) => r,
         Err(e) => {
             eprintln!("[getRepo] ブロック取得失敗: {}", e);
@@ -82,10 +56,8 @@ pub async fn xrpc_get_repo(
     };
 
     let blocks: Vec<_> = block_rows
-        .iter()
-        .filter_map(|row| {
-            let cid_str: String = row.try_get("cid").ok()?;
-            let bytes: Vec<u8> = row.try_get("bytes").ok()?;
+        .into_iter()
+        .filter_map(|(cid_str, bytes)| {
             let cid = cid_from_str(&cid_str).ok()?;
             Some((cid, bytes))
         })
@@ -121,50 +93,21 @@ async fn handle_subscribe_repos(
     let mut rx = state.atp_service.event_tx().subscribe();
 
     if let Some(cursor) = params.cursor {
-        let rows = sqlx::query(
-            "SELECT id, car_bytes, did, commit_cid, prev_cid, rev, since_rev, ops_json, created_at
-             FROM atp_repo_events WHERE id > $1 ORDER BY id ASC LIMIT 500",
-        )
-        .bind(cursor)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
+        let events = state
+            .atp_repo
+            .find_events_after(cursor, 500)
+            .await
+            .unwrap_or_default();
 
-        for row in rows {
-            let seq: i64 = match row.try_get("id") {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let did: String = match row.try_get("did") {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let commit_cid_str: String = match row.try_get("commit_cid") {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let prev_cid_str: Option<String> = row.try_get("prev_cid").ok().flatten();
-            let rev: String = match row.try_get("rev") {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let since_rev: Option<String> = row.try_get("since_rev").ok().flatten();
-            let car_bytes: Vec<u8> = match row.try_get("car_bytes") {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let ops_json: serde_json::Value =
-                row.try_get("ops_json").unwrap_or(serde_json::json!([]));
-            let created_at: chrono::DateTime<chrono::Utc> =
-                row.try_get("created_at").unwrap_or_else(|_| chrono::Utc::now());
-
-            let commit_cid = match cid_from_str(&commit_cid_str) {
+        for evt in events {
+            let commit_cid = match cid_from_str(&evt.commit_cid) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            let prev_cid = prev_cid_str.as_deref().and_then(|s| cid_from_str(s).ok());
+            let prev_cid = evt.prev_cid.as_deref().and_then(|s| cid_from_str(s).ok());
 
-            let ops: Vec<CommitEvtOp> = ops_json
+            let ops: Vec<CommitEvtOp> = evt
+                .ops_json
                 .as_array()
                 .unwrap_or(&vec![])
                 .iter()
@@ -176,15 +119,15 @@ async fn handle_subscribe_repos(
                 })
                 .collect();
 
-            let time_str = created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let time_str = evt.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             if let Ok(frame) = build_commit_frame(
-                seq,
-                &did,
+                evt.id,
+                &evt.did,
                 &commit_cid,
                 prev_cid.as_ref(),
-                &rev,
-                since_rev.as_deref(),
-                &car_bytes,
+                &evt.rev,
+                evt.since_rev.as_deref(),
+                &evt.car_bytes,
                 &ops,
                 &time_str,
             ) {

@@ -5,7 +5,6 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::middleware::extract_auth;
@@ -128,29 +127,14 @@ pub async fn miauth_authorize(
     };
 
     // Phase 2: DB からユーザー名を取得（ロック不保持）
-    let username = {
-        let row = sqlx::query(
-            "SELECT username FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
-        )
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await;
-
-        match row {
-            Ok(Some(r)) => match r.try_get::<String, _>("username") {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("[miauth] username 取得失敗: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-                }
-            },
-            Ok(None) => {
-                return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response()
-            }
-            Err(e) => {
-                eprintln!("[miauth] ユーザー検索失敗: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-            }
+    let username = match state.actors.find_local_by_user_id(user_id).await {
+        Ok(Some(a)) => a.username,
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response()
+        }
+        Err(e) => {
+            eprintln!("[miauth] ユーザー検索失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
 

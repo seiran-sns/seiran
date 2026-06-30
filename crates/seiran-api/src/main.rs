@@ -14,6 +14,10 @@ use seiran_common::{
     get_db_pool, run_migrations, LocalAuthProvider, Secrets, SecretsFile,
     AtpCommitService, AtpCommitEvent, ApClient,
 };
+use seiran_common::repository::{
+    ActorRepository, AtpReadRepository, FollowRepository, PostRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgPostRepository, PgUserRepository,
+};
 
 use handlers::miauth::MiAuthSession;
 
@@ -23,6 +27,14 @@ use handlers::miauth::MiAuthSession;
 
 #[derive(Clone)]
 pub struct AppState {
+    /// リポジトリ層（SQL アクセスはここを経由する）
+    pub actors: Arc<dyn ActorRepository>,
+    pub users: Arc<dyn UserRepository>,
+    pub posts: Arc<dyn PostRepository>,
+    pub follows: Arc<dyn FollowRepository>,
+    pub atp_repo: Arc<dyn AtpReadRepository>,
+    /// deliver_post_to_ap_followers（seiran-common）が &PgPool を要求するため保持。
+    /// 将来 FollowerRepository へ移行したら削除する。
     pub db: PgPool,
     pub local_auth: Arc<LocalAuthProvider>,
     pub miauth_sessions: Arc<RwLock<HashMap<String, MiAuthSession>>>,
@@ -86,10 +98,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let startup_pool = pool.clone();
+    // リポジトリ層の構築
+    let actors: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
+    let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
+    let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
+    let follows: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
+    let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
+
+    let startup_actors = Arc::clone(&actors);
     let startup_cf = cloudflare.clone();
 
     let state = AppState {
+        actors,
+        users,
+        posts,
+        follows,
+        atp_repo,
         db: pool,
         local_auth,
         miauth_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -137,7 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 起動時タスク: Cloudflare TXT 再登録 + Relay requestCrawl
     {
-        let pool2 = startup_pool;
+        let startup_actors = startup_actors;
         let cf2 = startup_cf;
         let hc = crawl_http;
         let domain = crawl_domain;
@@ -145,15 +169,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             // 全ローカルユーザーのハンドル TXT を確保（再デプロイ後の消失対策）
             if let Some(cf) = cf2 {
-                match sqlx::query("SELECT username, at_did FROM actors WHERE actor_type = 'local' AND at_did IS NOT NULL")
-                    .fetch_all(&pool2)
-                    .await
-                {
+                match startup_actors.list_local_dids().await {
                     Ok(rows) => {
-                        use sqlx::Row;
-                        for row in rows {
-                            let username: String = match row.try_get("username") { Ok(v) => v, Err(_) => continue };
-                            let did: String = match row.try_get("at_did") { Ok(v) => v, Err(_) => continue };
+                        for (username, did) in rows {
                             let handle = format!("{}.{}", username, sd);
                             match cf.ensure_atproto_txt(&handle, &did).await {
                                 Ok(_) => eprintln!("[startup] TXT 確認済み: _atproto.{}", handle),

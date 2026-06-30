@@ -5,8 +5,8 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 
+use seiran_common::repository::TimelinePost;
 use seiran_common::{ap::deliver_post_to_ap_followers, generate_snowflake_id};
 
 use crate::AppState;
@@ -33,9 +33,7 @@ pub struct NoteUserInfo {
     pub display_name: Option<String>,
 }
 
-fn map_note_rows(
-    result: Result<Vec<sqlx::postgres::PgRow>, sqlx::Error>,
-) -> impl IntoResponse {
+fn map_note_rows(result: Result<Vec<TimelinePost>, sqlx::Error>) -> impl IntoResponse {
     let rows = match result {
         Ok(r) => r,
         Err(e) => {
@@ -44,22 +42,17 @@ fn map_note_rows(
         }
     };
     let notes: Vec<NoteResponse> = rows
-        .iter()
-        .filter_map(|r| {
-            Some(NoteResponse {
-                id: r.try_get::<i64, _>("id").ok()?.to_string(),
-                text: r.try_get("body").ok()?,
-                created_at: r
-                    .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-                    .ok()?
-                    .to_rfc3339(),
-                user: NoteUserInfo {
-                    id: r.try_get("actor_id").ok()?,
-                    username: r.try_get("username").ok()?,
-                    domain: r.try_get("domain").ok(),
-                    display_name: r.try_get("display_name").ok().flatten(),
-                },
-            })
+        .into_iter()
+        .map(|p| NoteResponse {
+            id: p.id.to_string(),
+            text: p.body,
+            created_at: p.created_at.to_rfc3339(),
+            user: NoteUserInfo {
+                id: p.actor_id,
+                username: p.username,
+                domain: Some(p.domain),
+                display_name: p.display_name,
+            },
         })
         .collect();
     Json(notes).into_response()
@@ -86,32 +79,13 @@ pub async fn create_note(
         return (StatusCode::BAD_REQUEST, "text は空にできません").into_response();
     }
 
-    let actor_row = sqlx::query(
-        "SELECT id, username FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
-    )
-    .bind(auth_user.user_id)
-    .fetch_optional(&state.db)
-    .await;
-
-    let (actor_id, username) = match actor_row {
-        Ok(Some(r)) => {
-            let id: i64 = match r.try_get("id") {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("[create_note] actor id 取得失敗: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-                }
-            };
-            let name: String = match r.try_get("username") {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("[create_note] username 取得失敗: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-                }
-            };
-            (id, name)
+    let (actor_id, username) = match state.actors.find_local_by_user_id(auth_user.user_id).await {
+        Ok(Some(a)) => (a.id, a.username),
+        Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
+        Err(e) => {
+            eprintln!("[create_note] アクター取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
-        _ => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
     };
 
     let now = chrono::Utc::now();
@@ -119,16 +93,10 @@ pub async fn create_note(
 
     let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
 
-    if let Err(e) = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at) VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .bind(&req.text)
-    .bind(&ap_object_id)
-    .bind(now)
-    .execute(&state.db)
-    .await
+    if let Err(e) = state
+        .posts
+        .insert(post_id, actor_id, &req.text, &ap_object_id, now)
+        .await
     {
         eprintln!("[create_note] INSERT 失敗: {}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "投稿の保存に失敗しました").into_response();
@@ -177,57 +145,23 @@ pub async fn home_timeline(
         Err(e) => return e.into_response(),
     };
 
-    let actor_row = sqlx::query(
-        "SELECT id FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
-    )
-    .bind(auth_user.user_id)
-    .fetch_optional(&state.db)
-    .await;
-
-    let actor_id: i64 = match actor_row {
-        Ok(Some(r)) => match r.try_get("id") {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("[home_timeline] actor id 取得失敗: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-            }
-        },
-        _ => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
+    let actor_id: i64 = match state.actors.find_local_by_user_id(auth_user.user_id).await {
+        Ok(Some(a)) => a.id,
+        Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
+        Err(e) => {
+            eprintln!("[home_timeline] アクター取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
     };
 
     let limit = q.limit.unwrap_or(30).min(100);
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let rows = match (until_id, since_id) {
-        (Some(uid), _) => sqlx::query(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             WHERE p.deleted_at IS NULL AND p.id < $1
-               AND (p.actor_id = $2 OR p.actor_id IN (
-                     SELECT target_actor_id FROM follows
-                     WHERE follower_actor_id = $2 AND status = 'accepted'))
-             ORDER BY p.id DESC LIMIT $3",
-        ).bind(uid).bind(actor_id).bind(limit).fetch_all(&state.db).await,
-        (_, Some(sid)) => sqlx::query(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             WHERE p.deleted_at IS NULL AND p.id > $1
-               AND (p.actor_id = $2 OR p.actor_id IN (
-                     SELECT target_actor_id FROM follows
-                     WHERE follower_actor_id = $2 AND status = 'accepted'))
-             ORDER BY p.id DESC LIMIT $3",
-        ).bind(sid).bind(actor_id).bind(limit).fetch_all(&state.db).await,
-        _ => sqlx::query(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             WHERE p.deleted_at IS NULL
-               AND (p.actor_id = $1 OR p.actor_id IN (
-                     SELECT target_actor_id FROM follows
-                     WHERE follower_actor_id = $1 AND status = 'accepted'))
-             ORDER BY p.id DESC LIMIT $2",
-        ).bind(actor_id).bind(limit).fetch_all(&state.db).await,
-    };
+    let rows = state
+        .posts
+        .home_timeline(actor_id, limit, until_id, since_id)
+        .await;
 
     map_note_rows(rows).into_response()
 }
@@ -240,26 +174,7 @@ pub async fn local_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let rows = match (until_id, since_id) {
-        (Some(uid), _) => sqlx::query(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             WHERE a.actor_type = 'local' AND p.deleted_at IS NULL AND p.id < $1
-             ORDER BY p.id DESC LIMIT $2",
-        ).bind(uid).bind(limit).fetch_all(&state.db).await,
-        (_, Some(sid)) => sqlx::query(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             WHERE a.actor_type = 'local' AND p.deleted_at IS NULL AND p.id > $1
-             ORDER BY p.id DESC LIMIT $2",
-        ).bind(sid).bind(limit).fetch_all(&state.db).await,
-        _ => sqlx::query(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             WHERE a.actor_type = 'local' AND p.deleted_at IS NULL
-             ORDER BY p.id DESC LIMIT $1",
-        ).bind(limit).fetch_all(&state.db).await,
-    };
+    let rows = state.posts.local_timeline(limit, until_id, since_id).await;
 
     map_note_rows(rows).into_response()
 }

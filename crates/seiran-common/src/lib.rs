@@ -7,6 +7,7 @@ pub mod queue;
 pub mod jobs;
 pub mod ap;
 pub mod atp;
+pub mod repository;
 
 pub use db::{get_db_pool, run_migrations};
 pub use id::generate_snowflake_id;

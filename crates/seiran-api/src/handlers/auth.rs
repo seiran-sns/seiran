@@ -5,7 +5,6 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 
 use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 use seiran_common::atp::{prepare_plc_genesis, submit_plc_genesis};
@@ -49,22 +48,20 @@ pub async fn register(
         return Err(ApiError::BadRequest("username・email・password（8文字以上）は必須です"));
     }
 
-    let exists = sqlx::query("SELECT id FROM users WHERE email = $1 LIMIT 1")
-        .bind(&req.email)
-        .fetch_optional(&state.db)
+    let exists = state
+        .users
+        .email_exists(&req.email)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    if exists.is_some() {
+    if exists {
         return Err(ApiError::Conflict("このメールアドレスは登録済みです"));
     }
 
-    let username_exists =
-        sqlx::query("SELECT id FROM actors WHERE username = $1 AND domain = $2 LIMIT 1")
-            .bind(&req.username)
-            .bind(&state.local_domain)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let username_exists = state
+        .actors
+        .find_by_username_domain(&req.username, &state.local_domain)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
     if username_exists.is_some() {
         return Err(ApiError::Conflict("このユーザー名は使用済みです"));
     }
@@ -150,39 +147,31 @@ pub async fn register(
     };
 
     // 4. DB 書き込み（PLC 送信成功後）
-    let user_row = sqlx::query(
-        "INSERT INTO users (email, password_hash, created_at, updated_at)
-         VALUES ($1, $2, NOW(), NOW())
-         RETURNING id",
-    )
-    .bind(&req.email)
-    .bind(&password_hash)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| {
-        eprintln!("[register] users INSERT 失敗: {}", e);
-        ApiError::Internal("ユーザー作成エラー".to_string())
-    })?;
-
-    let user_id: i64 = user_row.try_get("id").map_err(|e| ApiError::Internal(e.to_string()))?;
+    let user_id = state
+        .users
+        .insert(&req.email, &password_hash)
+        .await
+        .map_err(|e| {
+            eprintln!("[register] users INSERT 失敗: {}", e);
+            ApiError::Internal("ユーザー作成エラー".to_string())
+        })?;
 
     let actor_id = generate_snowflake_id(chrono::Utc::now());
-    sqlx::query(
-        "INSERT INTO actors (id, user_id, actor_type, username, domain, at_did, at_signing_key_pem, created_at, updated_at)
-         VALUES ($1, $2, 'local', $3, $4, $5, $6, NOW(), NOW())",
-    )
-    .bind(actor_id)
-    .bind(user_id)
-    .bind(&req.username)
-    .bind(&state.local_domain)
-    .bind(&at_did)
-    .bind(&at_signing_key_pem)
-    .execute(&state.db)
-    .await
-    .map_err(|e| {
-        eprintln!("[register] actors INSERT 失敗: {}", e);
-        ApiError::Internal("アクター作成エラー".to_string())
-    })?;
+    state
+        .actors
+        .insert_local(
+            actor_id,
+            user_id,
+            &req.username,
+            &state.local_domain,
+            &at_did,
+            &at_signing_key_pem,
+        )
+        .await
+        .map_err(|e| {
+            eprintln!("[register] actors INSERT 失敗: {}", e);
+            ApiError::Internal("アクター作成エラー".to_string())
+        })?;
 
     let now = chrono::Utc::now();
     if let Err(e) = state.atp_service.commit_profile(actor_id, &req.username, now).await {
@@ -208,18 +197,7 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> impl IntoResponse {
-    let row = sqlx::query(
-        "SELECT u.id, u.email, u.password_hash, a.username
-         FROM users u
-         JOIN actors a ON a.user_id = u.id AND a.actor_type = 'local'
-         WHERE u.email = $1
-         LIMIT 1",
-    )
-    .bind(&req.email)
-    .fetch_optional(&state.db)
-    .await;
-
-    let row = match row {
+    let row = match state.users.find_login_by_email(&req.email).await {
         Ok(Some(r)) => r,
         Ok(None) => {
             return (StatusCode::UNAUTHORIZED, "メールアドレスまたはパスワードが正しくありません")
@@ -231,36 +209,11 @@ pub async fn login(
         }
     };
 
-    let user_id: i64 = match row.try_get("id") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[login] id 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-    let email: String = match row.try_get("email") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[login] email 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-    let username: String = match row.try_get("username") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[login] username 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-    let hash: Option<String> = match row.try_get::<Option<String>, _>("password_hash") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[login] password_hash 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
+    let user_id = row.id;
+    let email = row.email;
+    let username = row.username;
 
-    let hash = match hash {
+    let hash = match row.password_hash {
         Some(h) => h,
         None => {
             return (StatusCode::UNAUTHORIZED, "ローカル認証が設定されていません").into_response()
@@ -299,24 +252,13 @@ pub async fn me(
         Err(e) => return e.into_response(),
     };
 
-    let row = sqlx::query(
-        "SELECT a.username FROM actors a
-         WHERE a.user_id = $1 AND a.actor_type = 'local'
-         LIMIT 1",
-    )
-    .bind(auth_user.user_id)
-    .fetch_optional(&state.db)
-    .await;
-
-    let username: String = match row {
-        Ok(Some(r)) => match r.try_get("username") {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("[me] username 取得失敗: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-            }
-        },
-        _ => return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
+    let username: String = match state.actors.find_local_by_user_id(auth_user.user_id).await {
+        Ok(Some(a)) => a.username,
+        Ok(None) => return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
+        Err(e) => {
+            eprintln!("[me] DB エラー: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
     };
 
     Json(UserInfo {

@@ -1,7 +1,6 @@
 use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Row;
 
 use seiran_common::{generate_snowflake_id, ApError};
 
@@ -31,38 +30,19 @@ pub async fn create_follow(
     };
 
     // ローカルアクター取得
-    let local_row = sqlx::query(
-        "SELECT id, username FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
-    )
-    .bind(auth_user.user_id)
-    .fetch_optional(&state.db)
-    .await;
-
-    let (local_actor_id, local_username) = match local_row {
-        Ok(Some(r)) => {
-            let id = match r.try_get::<i64, _>("id") {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("[follow] ローカルアクター id 取得失敗: {}", e);
-                    return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー")
-                        .into_response();
-                }
-            };
-            let name = match r.try_get::<String, _>("username") {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("[follow] ローカルアクター username 取得失敗: {}", e);
-                    return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー")
-                        .into_response();
-                }
-            };
-            (id, name)
-        }
-        _ => {
-            return (axum::http::StatusCode::NOT_FOUND, "アクターが見つかりません")
-                .into_response()
-        }
-    };
+    let (local_actor_id, local_username) =
+        match state.actors.find_local_by_user_id(auth_user.user_id).await {
+            Ok(Some(a)) => (a.id, a.username),
+            Ok(None) => {
+                return (axum::http::StatusCode::NOT_FOUND, "アクターが見つかりません")
+                    .into_response()
+            }
+            Err(e) => {
+                eprintln!("[follow] ローカルアクター取得失敗: {}", e);
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー")
+                    .into_response();
+            }
+        };
 
     // ターゲット URI を解決（handle または URI）
     let target_uri = match resolve_target_uri(&state, &req.target).await {
@@ -113,55 +93,31 @@ pub async fn create_follow(
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
 
-    let remote_row = sqlx::query(
-        "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, created_at, updated_at)
-         VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $7)
-         ON CONFLICT (ap_uri) DO UPDATE
-           SET ap_inbox_url  = EXCLUDED.ap_inbox_url,
-               display_name  = EXCLUDED.display_name,
-               updated_at    = EXCLUDED.updated_at
-         RETURNING id",
-    )
-    .bind(new_actor_id)
-    .bind(&target_uri)
-    .bind(&remote_inbox)
-    .bind(&remote_username)
-    .bind(&remote_domain)
-    .bind(&remote_display_name)
-    .bind(now)
-    .fetch_one(&state.db)
-    .await;
-
-    let remote_actor_id: i64 = match remote_row {
-        Ok(r) => match r.try_get("id") {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("[follow] リモートアクター id 取得失敗: {}", e);
-                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー")
-                    .into_response();
-            }
-        },
+    let remote_actor_id: i64 = match state
+        .actors
+        .upsert_remote_fedi(
+            new_actor_id,
+            &target_uri,
+            &remote_inbox,
+            &remote_username,
+            &remote_domain,
+            &remote_display_name,
+            now,
+        )
+        .await
+    {
+        Ok(id) => id,
         Err(e) => {
             eprintln!("[follow] リモートアクター upsert 失敗: {}", e);
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "DB エラー",
-            )
-                .into_response();
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
 
     // follows テーブルに pending で挿入（既存なら status を pending に戻す）
-    if let Err(e) = sqlx::query(
-        "INSERT INTO follows (follower_actor_id, target_actor_id, status)
-         VALUES ($1, $2, 'pending')
-         ON CONFLICT (follower_actor_id, target_actor_id) DO UPDATE
-           SET status = 'pending'",
-    )
-    .bind(local_actor_id)
-    .bind(remote_actor_id)
-    .execute(&state.db)
-    .await
+    if let Err(e) = state
+        .follows
+        .upsert_pending(local_actor_id, remote_actor_id)
+        .await
     {
         eprintln!("[follow] follows INSERT 失敗: {}", e);
         return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();

@@ -22,6 +22,10 @@
 | **M-D**: `miauth_authorize` ハードコード修正 | **完了** | `handlers/miauth.rs` |
 | **L-A**: `strip_html`/`plain_to_html` テスト追加 | **完了** | `federation-inbox/src/handlers/inbox.rs`, `seiran-common/src/ap/deliver.rs` |
 | **H-A**: `seiran-federation-inbox/src/main.rs` 分割 | **完了** | `federation-inbox/src/handlers/` ディレクトリ作成、main.rs 68行化 |
+| **M-A**: AP クライアントへの `reqwest::Client` 注入 | **完了** | `ap/client.rs` ほか |
+| **M-B**: `ApClient` 構造体化・グローバルキャッシュ廃止 | **完了** | `ap/client.rs`, 各 `AppState` |
+| **M-C**: pub API の `Result<_, String>` → typed error | **完了** | `ap/*`, `auth/local.rs` |
+| **H-B step2-3**: Repository 層導入・ハンドラから SQL 排除 | **完了** | `seiran-common/src/repository/`, 全ハンドラ |
 
 ---
 
