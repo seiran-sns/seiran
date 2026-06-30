@@ -18,6 +18,16 @@
 ### コミット前の確認フロー
 1. コード実装・修正
 2. `cargo build` でコンパイルエラーがないことを確認
-3. 関連する設計文書を更新（上記の対応表に従う）
-4. `docs/06_development_roadmap.md` の進捗チェックを更新
-5. マイケルに画面・動作確認を依頼してから `main` ブランチへコミット
+3. `sqlx::query!` を追加・変更した場合は `cargo sqlx prepare --workspace` を実行して `.sqlx/` キャッシュを更新する（忘れると Docker ビルドが失敗する）
+4. 関連する設計文書を更新（上記の対応表に従う）
+5. `docs/06_development_roadmap.md` の進捗チェックを更新
+6. マイケルに画面・動作確認を依頼してから `main` ブランチへコミット
+
+### sqlx オフラインキャッシュについて
+
+`sqlx::query!` マクロはコンパイル時に DB に接続して SQL の型チェックを行う。Docker ビルド環境には DB がないため、`.sqlx/` キャッシュ（オフラインモード）を使う。
+
+- **キャッシュ更新が必要なタイミング**: `sqlx::query!` / `sqlx::query_as!` / `sqlx::query_scalar!` 等を追加・変更したとき
+- **更新コマンド**: `cargo sqlx prepare --workspace`（ローカル DB が起動している状態で実行）
+- **`.sqlx/` ディレクトリは必ず git にコミットする**
+- Dockerfile には `SQLX_OFFLINE=true` が設定済み
