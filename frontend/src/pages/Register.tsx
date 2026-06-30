@@ -1,35 +1,44 @@
 import { FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { useAuth } from "../contexts/AuthContext";
 import styles from "./Auth.module.css";
 
 export default function Register() {
-  const navigate = useNavigate();
-  const { login } = useAuth();
-  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    if (password.length < 8) {
-      setError("パスワードは8文字以上で入力してください");
-      return;
-    }
     setLoading(true);
     try {
-      const res = await api.auth.register(username, email, password);
-      login(res.token, res.user);
-      navigate("/");
+      await api.auth.requestEmailVerification(email);
+      setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登録に失敗しました");
+      setError(err instanceof Error ? err.message : "送信に失敗しました");
     } finally {
       setLoading(false);
     }
+  }
+
+  if (sent) {
+    return (
+      <div className={styles.container}>
+        <div className={styles.card}>
+          <h1 className={styles.title}>seiran</h1>
+          <h2 className={styles.subtitle}>メールを送信しました</h2>
+          <p style={{ textAlign: "center", color: "#a0aec0", lineHeight: 1.6 }}>
+            <strong>{email}</strong> に確認メールを送りました。<br />
+            メール内のリンクをクリックして登録を完了してください。
+          </p>
+          <p className={styles.link} style={{ marginTop: "1.5rem" }}>
+            <Link to="/login">ログインページへ</Link>
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -37,20 +46,10 @@ export default function Register() {
       <div className={styles.card}>
         <h1 className={styles.title}>seiran</h1>
         <h2 className={styles.subtitle}>新規登録</h2>
+        <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem", fontSize: "0.9rem" }}>
+          まずメールアドレスを入力してください。確認メールを送信します。
+        </p>
         <form onSubmit={handleSubmit} className={styles.form}>
-          <label className={styles.label}>
-            ユーザー名
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className={styles.input}
-              required
-              autoFocus
-              pattern="[a-zA-Z0-9_]+"
-              title="英数字とアンダースコアのみ使用できます"
-            />
-          </label>
           <label className={styles.label}>
             メールアドレス
             <input
@@ -59,22 +58,12 @@ export default function Register() {
               onChange={(e) => setEmail(e.target.value)}
               className={styles.input}
               required
-            />
-          </label>
-          <label className={styles.label}>
-            パスワード（8文字以上）
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={styles.input}
-              required
-              minLength={8}
+              autoFocus
             />
           </label>
           {error && <p className={styles.error}>{error}</p>}
           <button type="submit" className={styles.button} disabled={loading}>
-            {loading ? "登録中..." : "登録する"}
+            {loading ? "送信中..." : "確認メールを送る"}
           </button>
         </form>
         <p className={styles.link}>

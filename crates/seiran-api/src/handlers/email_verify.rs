@@ -62,7 +62,7 @@ pub async fn request_email_verification(
     };
 
     let token = row.token;
-    let verify_url = format!("https://{}/auth/verify?token={}", state.local_domain, token);
+    let verify_url = format!("https://{}/verify-email?token={}", state.local_domain, token);
 
     if let Err(e) = send_verification_email(&email, &verify_url).await {
         eprintln!("[verify-email] メール送信失敗: {}", e);

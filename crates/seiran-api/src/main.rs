@@ -134,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         // 認証
         .route("/api/auth/verify-email", post(handlers::email_verify::request_email_verification))
-        .route("/auth/verify", get(handlers::email_verify::verify_email_token))
+        .route("/api/auth/verify-token", get(handlers::email_verify::verify_email_token))
         .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/me", get(handlers::auth::me))

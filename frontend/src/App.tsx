@@ -4,6 +4,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Timeline from "./pages/Timeline";
 import UserProfilePage from "./pages/UserProfile";
+import VerifyEmail from "./pages/VerifyEmail";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -45,6 +46,7 @@ export default function App() {
             </RedirectIfAuthed>
           }
         />
+        <Route path="/verify-email" element={<VerifyEmail />} />
         <Route
           path="/profile"
           element={

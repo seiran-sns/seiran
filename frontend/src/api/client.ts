@@ -83,13 +83,27 @@ export interface FollowResponse {
 // Auth API
 // =====================================================================
 
+export interface VerifyEmailResponse {
+  message: string;
+}
+
+export interface VerifyTokenResponse {
+  registration_token: string;
+}
+
 export const api = {
   auth: {
-    register(username: string, email: string, password: string) {
+    requestEmailVerification(email: string) {
+      return request<VerifyEmailResponse>("POST", "/auth/verify-email", { email });
+    },
+    verifyEmailToken(token: string) {
+      return request<VerifyTokenResponse>("GET", `/auth/verify-token?token=${encodeURIComponent(token)}`);
+    },
+    register(username: string, password: string, registrationToken: string) {
       return request<AuthResponse>("POST", "/auth/register", {
         username,
-        email,
         password,
+        registration_token: registrationToken,
       });
     },
     login(email: string, password: string) {
