@@ -9,7 +9,7 @@ pub use client::{
     fetch_atp_history, create_atp_session, create_atp_post,
     BskyPost, AtpSession,
 };
-pub use plc::{register_did_plc, p256_to_did_key, signing_key_from_pem, PlcError};
+pub use plc::{prepare_plc_genesis, submit_plc_genesis, PlcGenesis, p256_to_did_key, signing_key_from_pem, PlcError};
 pub use repo::{
     Cid,
     generate_tid, cid_from_dagcbor, cid_from_str, cid_to_string,

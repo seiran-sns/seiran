@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use seiran_common::{generate_snowflake_id, LocalAuthProvider};
-use seiran_common::atp::register_did_plc;
+use seiran_common::atp::{prepare_plc_genesis, submit_plc_genesis};
 use seiran_common::atp::signing_key_from_pem;
 
 use crate::AppState;
@@ -75,6 +75,81 @@ pub async fn register(
             ApiError::Internal("パスワード処理エラー".to_string())
         })?;
 
+    let rotation_key = signing_key_from_pem(&state.secrets.atproto_private_key_pem)
+        .map_err(|e| {
+            eprintln!("[register] 回転鍵ロード失敗: {}", e);
+            ApiError::Internal("ATP鍵ロードエラー".to_string())
+        })?;
+
+    // 1.DID確定 → 2.TXT セット → 3.PLC送信 をリトライ単位でまとめて実行
+    // リトライ時は genesis を再生成（新しいランダム鍵 → 別の署名 → 別の DID）し、
+    // 前回セットした TXT を削除してから新 DID 用の TXT を置き直す。
+    // DB 書き込みはここより後 — 失敗時に孤立レコードが残らないようにするため
+    let (at_did, at_signing_key_pem, cf_record_id) = {
+        let mut prev_cf_id: Option<String> = None;
+        let mut attempt = 0u8;
+
+        loop {
+            attempt += 1;
+
+            // リトライ時: 前回の TXT を削除してから新しい genesis を使う
+            if let (Some(cf), Some(old_id)) = (&state.cloudflare, prev_cf_id.take()) {
+                let _ = cf.delete_txt_record(&old_id).await;
+            }
+
+            // 1. DID 確定（ローカル計算のみ）
+            let genesis = match prepare_plc_genesis(&req.username, &state.local_domain, &rotation_key) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("[register] genesis 準備失敗 (試行 {}/3): {}", attempt, e);
+                    if attempt >= 3 {
+                        return Err(ApiError::Internal("did:plc genesis 準備エラー".to_string()));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
+
+            // 2. Cloudflare TXT セット（plc.directory 送信より先に配置）
+            let new_cf_id = if let Some(cf) = &state.cloudflare {
+                let handle = format!("{}.{}", req.username, state.local_domain);
+                match cf.set_atproto_txt(&handle, &genesis.did).await {
+                    Ok(id) => {
+                        eprintln!("[register] Cloudflare TXT セット完了: _atproto.{}", handle);
+                        Some(id)
+                    }
+                    Err(e) => {
+                        eprintln!("[register] Cloudflare TXT セット失敗（登録は継続）: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            // 3. plc.directory へ送信
+            match submit_plc_genesis(&genesis, &state.http_client).await {
+                Ok(()) => break (genesis.did, genesis.signing_key_pem, new_cf_id),
+                Err(e) => {
+                    eprintln!("[register] did:plc 送信失敗 (試行 {}/3): {}", attempt, e);
+                    prev_cf_id = new_cf_id;
+                    if attempt >= 3 {
+                        if let (Some(cf), Some(id)) = (state.cloudflare.clone(), prev_cf_id) {
+                            tokio::spawn(async move {
+                                let _ = cf.delete_txt_record(&id).await;
+                                eprintln!("[register] did:plc 失敗のため TXT 削除");
+                            });
+                        }
+                        eprintln!("[register] did:plc 登録失敗（3回）: {}", e);
+                        return Err(ApiError::Internal("did:plc 登録エラー（3回失敗）".to_string()));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+    };
+
+    // 4. DB 書き込み（PLC 送信成功後）
     let user_row = sqlx::query(
         "INSERT INTO users (email, password_hash, created_at, updated_at)
          VALUES ($1, $2, NOW(), NOW())
@@ -90,46 +165,6 @@ pub async fn register(
     })?;
 
     let user_id: i64 = user_row.try_get("id").map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let rotation_key = signing_key_from_pem(&state.secrets.atproto_private_key_pem)
-        .map_err(|e| {
-            eprintln!("[register] 回転鍵ロード失敗: {}", e);
-            ApiError::Internal("ATP鍵ロードエラー".to_string())
-        })?;
-
-    // did:plc 登録（初回コールド起動時に稀に失敗するため最大3回リトライ）
-    let (at_did, at_signing_key_pem) = {
-        let mut result = None;
-        for attempt in 1u8..=3 {
-            match register_did_plc(&req.username, &state.local_domain, &rotation_key, &state.http_client).await {
-                Ok(r) => { result = Some(r); break; }
-                Err(e) => {
-                    eprintln!("[register] did:plc 登録失敗 (試行 {}/3): {}", attempt, e);
-                    if attempt < 3 {
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    }
-                }
-            }
-        }
-        result.ok_or_else(|| ApiError::Internal("did:plc 登録エラー（3回失敗）".to_string()))?
-    };
-
-    // Cloudflare DNS TXT レコードによるハンドル検証の準備（PLC登録直後、DID確定後）
-    let cf_record_id = if let Some(cf) = &state.cloudflare {
-        let handle = format!("{}.{}", req.username, state.local_domain);
-        match cf.set_atproto_txt(&handle, &at_did).await {
-            Ok(id) => {
-                eprintln!("[register] Cloudflare TXT セット完了: _atproto.{}", handle);
-                Some(id)
-            }
-            Err(e) => {
-                eprintln!("[register] Cloudflare TXT セット失敗（登録は継続）: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
 
     let actor_id = generate_snowflake_id(chrono::Utc::now());
     sqlx::query(

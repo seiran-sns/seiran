@@ -71,20 +71,20 @@ struct GenesisOpSigned {
 
 // ─── 登録 ─────────────────────────────────────────────────────────────────────
 
-/// did:plc を plc.directory に登録する。
-///
-/// DID は「署名済みオペレーション」の DAG-CBOR ハッシュから導出する（仕様通り）。
-/// 署名は「署名前オペレーション」の DAG-CBOR バイトに対して行う。
-///
-/// - `rotation_signing_key`: サーバーの P-256 鍵（secrets.toml の atproto_private_key_pem）
-/// - `client`: 再利用可能な HTTP クライアント（呼び出し元の AppState から渡す）
-/// - 戻り値: `(did, user_signing_key_pem)`
-pub async fn register_did_plc(
+/// genesis op 生成済みデータ。DID は確定しているが plc.directory にはまだ送信していない。
+pub struct PlcGenesis {
+    pub did: String,
+    pub signing_key_pem: String,
+    signed_op: GenesisOpSigned,
+}
+
+/// DID を確定させ genesis op を準備する（ネットワーク通信なし）。
+/// plc.directory への送信は `submit_plc_genesis` で別途行う。
+pub fn prepare_plc_genesis(
     username: &str,
     pds_domain: &str,
     rotation_signing_key: &SigningKey,
-    client: &reqwest::Client,
-) -> Result<(String, String), PlcError> {
+) -> Result<PlcGenesis, PlcError> {
     let user_signing_key = SigningKey::random(&mut OsRng);
     let user_did_key = p256_to_did_key(user_signing_key.verifying_key());
     let rotation_did_key = p256_to_did_key(rotation_signing_key.verifying_key());
@@ -150,11 +150,23 @@ pub async fn register_did_plc(
     .to_lowercase();
     let did = format!("did:plc:{}", &b32[..24]);
 
-    // ③ plc.directory に POST（JSON ボディ = 署名済みオペレーション）
-    let url = format!("https://plc.directory/{}", did);
+    let signing_key_pem = user_signing_key
+        .to_pkcs8_pem(LineEnding::LF)
+        .map_err(|e| PlcError::KeyGen(e.to_string()))?
+        .to_string();
+
+    Ok(PlcGenesis { did, signing_key_pem, signed_op })
+}
+
+/// 準備済み genesis op を plc.directory に送信する（ネットワーク通信あり）。
+pub async fn submit_plc_genesis(
+    genesis: &PlcGenesis,
+    client: &reqwest::Client,
+) -> Result<(), PlcError> {
+    let url = format!("https://plc.directory/{}", genesis.did);
     let res = client
         .post(&url)
-        .json(&signed_op)
+        .json(&genesis.signed_op)
         .send()
         .await
         .map_err(|e| PlcError::Http(e.to_string()))?;
@@ -165,10 +177,5 @@ pub async fn register_did_plc(
         return Err(PlcError::PlcDirectory { status, body });
     }
 
-    let key_pem = user_signing_key
-        .to_pkcs8_pem(LineEnding::LF)
-        .map_err(|e| PlcError::KeyGen(e.to_string()))?
-        .to_string();
-
-    Ok((did, key_pem))
+    Ok(())
 }

@@ -1,12 +1,18 @@
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
+use serde::Deserialize;
 use sqlx::Row;
 
 use crate::AppState;
+
+#[derive(Deserialize)]
+pub struct ResolveHandleQuery {
+    pub handle: String,
+}
 
 pub async fn xrpc_describe_server(State(state): State<AppState>) -> impl IntoResponse {
     Json(serde_json::json!({
@@ -15,6 +21,53 @@ pub async fn xrpc_describe_server(State(state): State<AppState>) -> impl IntoRes
         "inviteCodeRequired": false,
         "phoneVerificationRequired": false,
     }))
+}
+
+pub async fn xrpc_resolve_handle(
+    Query(params): Query<ResolveHandleQuery>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let handle = params.handle.trim().to_lowercase();
+
+    // {username}.{local_domain} 形式かチェック
+    let suffix = format!(".{}", state.local_domain);
+    let username = if let Some(u) = handle.strip_suffix(&suffix) {
+        u.to_string()
+    } else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "InvalidRequest", "message": "このPDSが管理していないハンドルです"})),
+        ).into_response();
+    };
+
+    if username.is_empty() || username.contains('.') {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "InvalidRequest", "message": "無効なハンドルです"})),
+        ).into_response();
+    }
+
+    let row = sqlx::query(
+        "SELECT at_did FROM actors WHERE username = $1 AND domain = $2 AND at_did IS NOT NULL LIMIT 1",
+    )
+    .bind(&username)
+    .bind(&state.local_domain)
+    .fetch_optional(&state.db)
+    .await;
+
+    match row {
+        Ok(Some(r)) => match r.try_get::<String, _>("at_did") {
+            Ok(did) if !did.is_empty() => Json(serde_json::json!({"did": did})).into_response(),
+            _ => (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "NotFound", "message": "ハンドルが見つかりません"})),
+            ).into_response(),
+        },
+        _ => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "NotFound", "message": "ハンドルが見つかりません"})),
+        ).into_response(),
+    }
 }
 
 pub async fn well_known_did(State(state): State<AppState>) -> impl IntoResponse {
