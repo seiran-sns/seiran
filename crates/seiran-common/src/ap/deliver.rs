@@ -39,6 +39,7 @@ pub async fn deliver_post_to_ap_followers(
          FROM follows f
          JOIN actors a ON a.id = f.follower_actor_id
          WHERE f.target_actor_id = $1
+           AND f.status = 'accepted'
            AND a.actor_type = 'fedi'
            AND a.ap_inbox_url IS NOT NULL",
     )

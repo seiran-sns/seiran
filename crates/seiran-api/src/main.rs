@@ -105,6 +105,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))
+        // フォロー
+        .route("/api/follows/create", post(handlers::follows::create_follow))
         // MiAuth（Misskey 互換クライアント用）
         .route("/miauth/:session_id", get(handlers::miauth::miauth_page))
         .route("/miauth/:session_id/authorize", post(handlers::miauth::miauth_authorize))

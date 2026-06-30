@@ -119,6 +119,15 @@ async fn inbox_handler(
                 }
             });
         }
+        "Accept" => {
+            let state_clone = state.clone();
+            let activity_clone = activity.clone();
+            tokio::spawn(async move {
+                if let Err(e) = handle_accept(activity_clone, state_clone).await {
+                    eprintln!("[Inbox/Accept] 処理エラー: {}", e);
+                }
+            });
+        }
         "Undo" => {
             let state_clone = state.clone();
             let activity_clone = activity.clone();
@@ -250,6 +259,72 @@ async fn handle_follow(
     eprintln!(
         "[Follow] {} → {} フォロー完了・Accept 送信済み",
         follower_uri, local_actor_uri
+    );
+    Ok(())
+}
+
+// Accept(Follow) を受け取り follows.status を accepted に更新する
+async fn handle_accept(
+    activity: serde_json::Value,
+    state: Arc<AppState>,
+) -> Result<(), String> {
+    // object が {type:"Follow", actor:"...", object:"..."} 形式のみ対応
+    let obj = &activity["object"];
+    if obj["type"].as_str() != Some("Follow") {
+        return Ok(());
+    }
+
+    let local_actor_uri = obj["actor"]
+        .as_str()
+        .ok_or("Accept/Follow: object.actor がありません")?;
+    let remote_actor_uri = activity["actor"]
+        .as_str()
+        .ok_or("Accept: actor がありません")?;
+
+    // ローカルアクターを username から特定
+    let suffix = format!("https://{}/users/", state.local_domain);
+    let local_username = local_actor_uri
+        .strip_prefix(&suffix)
+        .ok_or("Accept: object.actor がローカルアクターではありません")?;
+
+    let local_row = sqlx::query(
+        "SELECT id FROM actors WHERE username = $1 AND domain = $2 AND actor_type = 'local' LIMIT 1",
+    )
+    .bind(local_username)
+    .bind(&state.local_domain)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
+    .ok_or_else(|| format!("ローカルアクター '{}' が見つかりません", local_username))?;
+
+    let local_actor_id: i64 = local_row.try_get("id").map_err(|e| e.to_string())?;
+
+    // リモートアクターを ap_uri から特定
+    let remote_row = sqlx::query("SELECT id FROM actors WHERE ap_uri = $1 LIMIT 1")
+        .bind(remote_actor_uri)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| format!("リモートアクター検索エラー: {}", e))?
+        .ok_or_else(|| format!("リモートアクター '{}' が DB に見つかりません", remote_actor_uri))?;
+
+    let remote_actor_id: i64 = remote_row.try_get("id").map_err(|e| e.to_string())?;
+
+    // follows.status を accepted に更新
+    let updated = sqlx::query(
+        "UPDATE follows SET status = 'accepted'
+         WHERE follower_actor_id = $1 AND target_actor_id = $2 AND status = 'pending'",
+    )
+    .bind(local_actor_id)
+    .bind(remote_actor_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| format!("follows UPDATE エラー: {}", e))?;
+
+    eprintln!(
+        "[Accept] {} → {} フォロー確定 (rows={})",
+        local_actor_uri,
+        remote_actor_uri,
+        updated.rows_affected()
     );
     Ok(())
 }
