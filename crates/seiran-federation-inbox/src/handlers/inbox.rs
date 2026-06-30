@@ -3,7 +3,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use seiran_common::ap::{fetch_actor, sign_and_post, verify_signature};
 use seiran_common::traits::Job;
 use seiran_common::generate_snowflake_id;
 use sqlx::Row;
@@ -33,7 +32,7 @@ pub async fn inbox_handler(
         }
     };
 
-    match verify_signature(&state.http_client, "POST", "/inbox", &header_map, &signature).await {
+    match state.ap_client.verify_signature("POST", "/inbox", &header_map, &signature).await {
         Ok(true) => {}
         Ok(false) => {
             return (StatusCode::UNAUTHORIZED, "署名検証失敗").into_response();
@@ -141,7 +140,7 @@ async fn handle_follow(
     let local_actor_id: i64 = local_row.try_get("id").map_err(|e| e.to_string())?;
 
     // リモートアクタードキュメントを取得（inbox URL・display_name 用）
-    let remote_ap = fetch_actor(&state.http_client, follower_uri).await?;
+    let remote_ap = state.ap_client.fetch_actor(follower_uri).await?;
     let remote_inbox = remote_ap
         .inbox
         .as_deref()
@@ -211,7 +210,7 @@ async fn handle_follow(
     let accept_body =
         serde_json::to_string(&accept).map_err(|e| format!("Accept シリアライズ失敗: {}", e))?;
 
-    sign_and_post(&state.http_client, &remote_inbox, &accept_body, &actor_key_id, &state.ap_private_key_pem).await?;
+    state.ap_client.sign_and_post(&remote_inbox, &accept_body, &actor_key_id, &state.ap_private_key_pem).await?;
 
     eprintln!(
         "[Follow] {} → {} フォロー完了・Accept 送信済み",
@@ -238,7 +237,7 @@ async fn handle_create_note(
     let post_id = seiran_common::generate_snowflake_id(created_at);
 
     // リモートアクターを upsert（未登録なら作成）
-    let remote_ap = seiran_common::ap::fetch_actor(&state.http_client, actor_uri).await?;
+    let remote_ap = state.ap_client.fetch_actor(actor_uri).await?;
     let remote_inbox = remote_ap.inbox.clone().unwrap_or_default();
     let remote_username = remote_ap
         .preferred_username

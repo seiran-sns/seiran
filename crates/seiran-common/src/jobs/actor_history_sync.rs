@@ -45,7 +45,7 @@ async fn handle_ap(ap_uri: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
 
     eprintln!("[ActorHistorySync] AP過去ログ同期開始: {}", ap_uri);
 
-    let notes = fetch_ap_history(&ctx.http_client, ap_uri, 300, 30).await?;
+    let notes = fetch_ap_history(&ctx.ap_client, ap_uri, 300, 30).await?;
     eprintln!("[ActorHistorySync] {}件のノートを取得: {}", notes.len(), ap_uri);
 
     match &ctx.db_pool {

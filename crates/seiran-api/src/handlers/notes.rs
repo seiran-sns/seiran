@@ -147,10 +147,10 @@ pub async fn create_note(
             .ap_private_key_pem
             .clone()
             .unwrap_or_default();
-        let http_client = state.http_client.clone();
+        let ap_client = state.ap_client.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                deliver_post_to_ap_followers(&http_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem)
+                deliver_post_to_ap_followers(&ap_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem)
                     .await
             {
                 eprintln!("[create_note] AP 配送エラー: {}", e);

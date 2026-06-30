@@ -4,11 +4,11 @@
 
 use sqlx::{PgPool, Row};
 
-use super::client::sign_and_post;
+use super::client::ApClient;
 
 /// ローカル投稿を AP フォロワー全員の inbox へ配送する
 pub async fn deliver_post_to_ap_followers(
-    client: &reqwest::Client,
+    ap_client: &ApClient,
     db: &PgPool,
     post_id: i64,
     actor_id: i64,
@@ -91,7 +91,7 @@ pub async fn deliver_post_to_ap_followers(
             Ok(u) => u,
             Err(_) => continue,
         };
-        match sign_and_post(client, &inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
+        match ap_client.sign_and_post(&inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
             Ok(()) => ok += 1,
             Err(e) => {
                 eprintln!("[Deliver] {} への配送失敗: {}", inbox, e);

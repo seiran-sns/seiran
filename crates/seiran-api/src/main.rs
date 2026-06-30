@@ -12,7 +12,7 @@ use sqlx::PgPool;
 
 use seiran_common::{
     get_db_pool, run_migrations, LocalAuthProvider, Secrets, SecretsFile,
-    AtpCommitService, AtpCommitEvent,
+    AtpCommitService, AtpCommitEvent, ApClient,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -30,6 +30,7 @@ pub struct AppState {
     pub secrets: Arc<Secrets>,
     pub atp_service: Arc<AtpCommitService>,
     pub http_client: Arc<reqwest::Client>,
+    pub ap_client: Arc<ApClient>,
     pub cloudflare: Option<Arc<cloudflare::CloudflareClient>>,
 }
 
@@ -53,6 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local_auth = Arc::new(LocalAuthProvider::new(secrets.jwt_secret_bytes()));
     let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
     let http_client = Arc::new(reqwest::Client::new());
+    let ap_client = Arc::new(ApClient::new(Arc::clone(&http_client)));
     let crawl_http = Arc::clone(&http_client);
     let crawl_domain = local_domain.clone();
     let startup_domain = local_domain.clone();
@@ -95,6 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         secrets: Arc::new(secrets),
         atp_service,
         http_client,
+        ap_client,
         cloudflare,
     };
 

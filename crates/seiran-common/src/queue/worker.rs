@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
+use crate::ap::ApClient;
 use crate::jobs;
 use crate::queue::InMemoryJobQueue;
 use crate::traits::{Job, JobQueue};
@@ -49,23 +50,24 @@ pub struct JobContext {
     pub actor_semaphores: Arc<tokio::sync::Mutex<HashMap<i64, Arc<Semaphore>>>>,
     /// DB 接続プール（フェーズ4以降のジョブハンドラが使用）
     pub db_pool: Option<sqlx::PgPool>,
-    /// 共有 HTTP クライアント（AP 通信で使用）
-    pub http_client: Arc<reqwest::Client>,
+    /// AP クライアント（HTTP クライアントと公開鍵キャッシュを保持）
+    pub ap_client: Arc<ApClient>,
 }
 
 impl JobContext {
     pub fn new(queue: Arc<dyn JobQueue>) -> Self {
+        let http = Arc::new(
+            reqwest::Client::builder()
+                .user_agent("seiran-federation/0.1.0")
+                .build()
+                .unwrap_or_default(),
+        );
         Self {
             queue,
             domain_semaphores: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             actor_semaphores: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             db_pool: None,
-            http_client: Arc::new(
-                reqwest::Client::builder()
-                    .user_agent("seiran-federation/0.1.0")
-                    .build()
-                    .unwrap_or_default(),
-            ),
+            ap_client: Arc::new(ApClient::new(http)),
         }
     }
 
@@ -74,8 +76,8 @@ impl JobContext {
         self
     }
 
-    pub fn with_http_client(mut self, client: Arc<reqwest::Client>) -> Self {
-        self.http_client = client;
+    pub fn with_ap_client(mut self, ap_client: Arc<ApClient>) -> Self {
+        self.ap_client = ap_client;
         self
     }
 

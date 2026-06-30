@@ -6,7 +6,7 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::client::fetch_actor;
+use super::client::ApClient;
 
 /// AP Note（投稿）型
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -31,12 +31,12 @@ pub struct ApNote {
 /// - 最大 `max_posts` 件かつ `max_days` 日前までを対象（どちらか早い方で停止）
 /// - outbox 非公開・取得失敗の場合はベストエフォートで空 Vec を返す
 pub async fn fetch_ap_history(
-    client: &reqwest::Client,
+    ap_client: &ApClient,
     actor_uri: &str,
     max_posts: usize,
     max_days: i64,
 ) -> Result<Vec<ApNote>, String> {
-    let actor = fetch_actor(client, actor_uri).await?;
+    let actor = ap_client.fetch_actor(actor_uri).await?;
     let outbox_url = match actor.outbox {
         Some(url) => url,
         None => {
@@ -49,7 +49,7 @@ pub async fn fetch_ap_history(
     let mut notes: Vec<ApNote> = Vec::new();
 
     // Outbox コレクション取得
-    let collection: serde_json::Value = match client
+    let collection: serde_json::Value = match ap_client.http
         .get(&outbox_url)
         .header("Accept", "application/activity+json, application/ld+json")
         .send()
@@ -97,7 +97,7 @@ pub async fn fetch_ap_history(
             break;
         }
 
-        let page: serde_json::Value = match client
+        let page: serde_json::Value = match ap_client.http
             .get(&url)
             .header("Accept", "application/activity+json, application/ld+json")
             .send()

@@ -4,7 +4,7 @@ use axum::{
 };
 use seiran_common::queue::create_job_queue;
 use seiran_common::traits::JobQueue;
-use seiran_common::{get_db_pool, SecretsFile};
+use seiran_common::{get_db_pool, SecretsFile, ApClient};
 use sqlx::PgPool;
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ pub struct AppState {
     pub local_domain: String,
     pub ap_public_key_pem: String,
     pub ap_private_key_pem: String,
-    pub http_client: Arc<reqwest::Client>,
+    pub ap_client: Arc<ApClient>,
 }
 
 #[tokio::main]
@@ -47,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .user_agent("seiran-federation/0.1.0")
             .build()?,
     );
+    let ap_client = Arc::new(ApClient::new(http_client));
 
     let state = Arc::new(AppState {
         db,
@@ -54,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         local_domain,
         ap_public_key_pem,
         ap_private_key_pem,
-        http_client,
+        ap_client,
     });
 
     let app = Router::new()

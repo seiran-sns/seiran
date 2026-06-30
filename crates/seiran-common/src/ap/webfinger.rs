@@ -32,8 +32,8 @@ impl WebFingerResponse {
     }
 }
 
-/// 指定したアクター名とドメインから Webfinger 解決を実行する
-pub async fn resolve_webfinger(client: &reqwest::Client, username: &str, domain: &str) -> Result<String, String> {
+/// Webfinger 解決の内部実装（ApClient::resolve_webfinger から呼ばれる）
+pub(super) async fn resolve_webfinger_impl(client: &reqwest::Client, username: &str, domain: &str) -> Result<String, String> {
     let resource = format!("acct:{}@{}", username, domain);
     let url = format!(
         "https://{}/.well-known/webfinger?resource={}",

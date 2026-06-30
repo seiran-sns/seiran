@@ -2,7 +2,6 @@ use axum::{extract::{Query, State}, http::{HeaderMap, StatusCode}, response::{In
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
-use seiran_common::ap::{fetch_actor, resolve_webfinger};
 
 use crate::middleware::extract_auth;
 use crate::AppState;
@@ -225,7 +224,7 @@ async fn fetch_remote_profile(
     state: &AppState,
 ) -> impl IntoResponse {
     // WebFinger → Actor ドキュメント取得
-    let actor_uri = match resolve_webfinger(&state.http_client, username, domain).await {
+    let actor_uri = match state.ap_client.resolve_webfinger(username, domain).await {
         Ok(uri) => uri,
         Err(e) => {
             return (
@@ -236,7 +235,7 @@ async fn fetch_remote_profile(
         }
     };
 
-    let ap_actor = match fetch_actor(&state.http_client, &actor_uri).await {
+    let ap_actor = match state.ap_client.fetch_actor(&actor_uri).await {
         Ok(a) => a,
         Err(e) => {
             return (
