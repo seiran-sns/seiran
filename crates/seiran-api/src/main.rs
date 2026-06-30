@@ -1,3 +1,4 @@
+mod cloudflare;
 mod error;
 mod middleware;
 mod handlers;
@@ -29,6 +30,7 @@ pub struct AppState {
     pub secrets: Arc<Secrets>,
     pub atp_service: Arc<AtpCommitService>,
     pub http_client: Arc<reqwest::Client>,
+    pub cloudflare: Option<Arc<cloudflare::CloudflareClient>>,
 }
 
 // =====================================================================
@@ -61,6 +63,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&http_client),
     ));
 
+    let cloudflare = match (
+        std::env::var("CLOUDFLARE_API_TOKEN"),
+        std::env::var("CLOUDFLARE_ZONE_ID"),
+    ) {
+        (Ok(token), Ok(zone_id)) if !token.is_empty() && !zone_id.is_empty() => {
+            eprintln!("[seiran-api] Cloudflare DNS ハンドル検証: 有効");
+            Some(Arc::new(cloudflare::CloudflareClient::new(
+                Arc::clone(&http_client),
+                token,
+                zone_id,
+            )))
+        }
+        _ => {
+            eprintln!("[seiran-api] Cloudflare DNS ハンドル検証: 無効 (HTTP well-known のみ)");
+            None
+        }
+    };
+
     let state = AppState {
         db: pool,
         local_auth,
@@ -69,6 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         secrets: Arc::new(secrets),
         atp_service,
         http_client,
+        cloudflare,
     };
 
     let cors = CorsLayer::new()

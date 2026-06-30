@@ -105,6 +105,23 @@ pub async fn register(
                 ApiError::Internal("did:plc 登録エラー".to_string())
             })?;
 
+    // Cloudflare DNS TXT レコードによるハンドル検証の準備（PLC登録直後、DID確定後）
+    let cf_record_id = if let Some(cf) = &state.cloudflare {
+        let handle = format!("{}.{}", req.username, state.local_domain);
+        match cf.set_atproto_txt(&handle, &at_did).await {
+            Ok(id) => {
+                eprintln!("[register] Cloudflare TXT セット完了: _atproto.{}", handle);
+                Some(id)
+            }
+            Err(e) => {
+                eprintln!("[register] Cloudflare TXT セット失敗（登録は継続）: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let actor_id = generate_snowflake_id(chrono::Utc::now());
     sqlx::query(
         "INSERT INTO actors (id, user_id, actor_type, username, domain, at_did, at_signing_key_pem, created_at, updated_at)
@@ -126,6 +143,17 @@ pub async fn register(
     let now = chrono::Utc::now();
     if let Err(e) = state.atp_service.commit_profile(actor_id, &req.username, now).await {
         eprintln!("[register] ATP プロフィールコミット失敗（登録は完了済み）: {}", e);
+    }
+
+    // TXT レコードを 10 分後に非同期削除（AppView がハンドル検証を完了する時間を確保）
+    if let (Some(cf), Some(record_id)) = (state.cloudflare.clone(), cf_record_id) {
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+            match cf.delete_txt_record(&record_id).await {
+                Ok(_) => eprintln!("[register] Cloudflare TXT 削除完了: id={}", record_id),
+                Err(e) => eprintln!("[register] Cloudflare TXT 削除失敗: {}", e),
+            }
+        });
     }
 
     let token = state.local_auth.generate_token(user_id, &req.email)
