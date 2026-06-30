@@ -6,7 +6,7 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::client::ApClient;
+use super::client::{ApClient, ApError};
 
 /// AP Note（投稿）型
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -35,7 +35,7 @@ pub async fn fetch_ap_history(
     actor_uri: &str,
     max_posts: usize,
     max_days: i64,
-) -> Result<Vec<ApNote>, String> {
+) -> Result<Vec<ApNote>, ApError> {
     let actor = ap_client.fetch_actor(actor_uri).await?;
     let outbox_url = match actor.outbox {
         Some(url) => url,

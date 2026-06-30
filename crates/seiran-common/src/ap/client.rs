@@ -11,6 +11,28 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// AP 通信エラー
+#[derive(Debug, thiserror::Error)]
+pub enum ApError {
+    #[error("HTTP エラー: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("JSON パースエラー: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("署名エラー: {0}")]
+    Signature(String),
+    #[error("アクター取得失敗: {0}")]
+    FetchActor(String),
+    #[error("{0}")]
+    Other(String),
+}
+
+/// 後方互換性のため `Result<_, String>` コンテキストで `?` が使えるようにする
+impl From<ApError> for String {
+    fn from(e: ApError) -> Self {
+        e.to_string()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PublicKeyInfo {
     pub id: String,
@@ -51,31 +73,26 @@ impl ApClient {
     }
 
     /// リモートアクター情報を取得する
-    pub async fn fetch_actor(&self, actor_uri: &str) -> Result<ApActor, String> {
+    pub async fn fetch_actor(&self, actor_uri: &str) -> Result<ApActor, ApError> {
         let res = self.http
             .get(actor_uri)
             .header("Accept", "application/activity+json, application/ld+json")
             .send()
-            .await
-            .map_err(|e| format!("アクタードキュメントフェッチ失敗: {}", e))?;
+            .await?;
 
         if !res.status().is_success() {
-            return Err(format!(
-                "アクタードキュメントフェッチエラー: ステータス {}",
+            return Err(ApError::FetchActor(format!(
+                "ステータス {}",
                 res.status()
-            ));
+            )));
         }
 
-        let actor = res
-            .json::<ApActor>()
-            .await
-            .map_err(|e| format!("アクタードキュメント JSONパース失敗: {}", e))?;
-
+        let actor = res.json::<ApActor>().await?;
         Ok(actor)
     }
 
     /// 指定した key_id (URL) から公開鍵 PEM を取得する（キャッシュ対応）
-    pub async fn get_public_key_pem(&self, key_id: &str) -> Result<String, String> {
+    pub async fn get_public_key_pem(&self, key_id: &str) -> Result<String, ApError> {
         // 1. キャッシュヒット確認
         {
             let cache = self.key_cache.read().await;
@@ -103,10 +120,10 @@ impl ApClient {
             }
         }
 
-        Err(format!(
+        Err(ApError::FetchActor(format!(
             "取得したアクタードキュメントから一致する key_id ({}) が見つかりません",
             key_id
-        ))
+        )))
     }
 
     /// HTTP Signatures の署名を検証します
@@ -122,12 +139,14 @@ impl ApClient {
         path: &str,
         headers: &HashMap<String, String>,
         signature_header: &str,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, ApError> {
         // 1. Signature ヘッダーの要素をパース
         // 例: keyId="...",algorithm="rsa-sha256",headers="...",signature="..."
         let parsed = parse_signature_header(signature_header)?;
-        let key_id = parsed.get("keyId").ok_or_else(|| "keyId が見つかりません".to_string())?;
-        let signature_b64 = parsed.get("signature").ok_or_else(|| "signature が見つかりません".to_string())?;
+        let key_id = parsed.get("keyId")
+            .ok_or_else(|| ApError::Signature("keyId が見つかりません".to_string()))?;
+        let signature_b64 = parsed.get("signature")
+            .ok_or_else(|| ApError::Signature("signature が見つかりません".to_string()))?;
         let header_list_str = parsed.get("headers").cloned().unwrap_or_else(|| "date".to_string());
 
         // 2. 署名対象文字列 (Signing String) を構築
@@ -138,11 +157,11 @@ impl ApClient {
 
         // 4. RSA 公開鍵オブジェクトのパース
         let public_key = RsaPublicKey::from_public_key_pem(&pem)
-            .map_err(|e| format!("RSA公開鍵のパース失敗: {}", e))?;
+            .map_err(|e| ApError::Signature(format!("RSA公開鍵のパース失敗: {}", e)))?;
 
         // 5. 署名の base64 デコード
         let signature_bytes = base64::Engine::decode(&base64::prelude::BASE64_STANDARD, signature_b64)
-            .map_err(|e| format!("署名base64デコード失敗: {}", e))?;
+            .map_err(|e| ApError::Signature(format!("署名base64デコード失敗: {}", e)))?;
 
         // 6. SHA-256 ハッシュの計算
         let mut hasher = Sha256::new();
@@ -158,7 +177,7 @@ impl ApClient {
 
         match result {
             Ok(()) => Ok(true),
-            Err(e) => Err(format!("署名検証失敗: {:?}", e)),
+            Err(e) => Err(ApError::Signature(format!("署名検証失敗: {:?}", e))),
         }
     }
 
@@ -175,12 +194,12 @@ impl ApClient {
         body: &str,
         actor_key_id: &str,
         private_key_pem: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApError> {
         let now = chrono::Utc::now();
         let date_str = now.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
         let parsed_url = url::Url::parse(url)
-            .map_err(|e| format!("URL パースエラー: {}", e))?;
+            .map_err(|e| ApError::Other(format!("URL パースエラー: {}", e)))?;
         let host = parsed_url.host_str().unwrap_or("").to_string();
         let path = parsed_url.path().to_string();
 
@@ -199,7 +218,7 @@ impl ApClient {
 
         // RSA-SHA256 署名
         let private_key = RsaPrivateKey::from_pkcs8_pem(private_key_pem)
-            .map_err(|e| format!("RSA 秘密鍵パース失敗: {}", e))?;
+            .map_err(|e| ApError::Signature(format!("RSA 秘密鍵パース失敗: {}", e)))?;
 
         let mut hasher = Sha256::new();
         hasher.update(signing_string.as_bytes());
@@ -207,7 +226,7 @@ impl ApClient {
 
         let sig_bytes = private_key
             .sign(Pkcs1v15Sign::new::<Sha256>(), &hashed)
-            .map_err(|e| format!("RSA 署名失敗: {}", e))?;
+            .map_err(|e| ApError::Signature(format!("RSA 署名失敗: {}", e)))?;
 
         let sig_b64 = base64::Engine::encode(&base64::prelude::BASE64_STANDARD, sig_bytes);
 
@@ -225,26 +244,25 @@ impl ApClient {
             .header("Signature", &signature_header)
             .body(body.to_string())
             .send()
-            .await
-            .map_err(|e| format!("POST リクエスト失敗: {}", e))?;
+            .await?;
 
         if !res.status().is_success() {
             let status = res.status();
             let body_text = res.text().await.unwrap_or_default();
-            return Err(format!("POST レスポンスエラー {}: {}", status, body_text));
+            return Err(ApError::Other(format!("POST レスポンスエラー {}: {}", status, body_text)));
         }
 
         Ok(())
     }
 
     /// Webfinger 解決を実行する
-    pub async fn resolve_webfinger(&self, username: &str, domain: &str) -> Result<String, String> {
+    pub async fn resolve_webfinger(&self, username: &str, domain: &str) -> Result<String, ApError> {
         super::webfinger::resolve_webfinger_impl(&self.http, username, domain).await
     }
 }
 
 /// Signature ヘッダーを簡易パースする
-fn parse_signature_header(header: &str) -> Result<HashMap<String, String>, String> {
+fn parse_signature_header(header: &str) -> Result<HashMap<String, String>, ApError> {
     let mut map = HashMap::new();
     // カンマ区切りの key="value" パターンを取り出す
     // 簡易的にクォーテーションを考慮しつつ分割する
@@ -266,7 +284,7 @@ fn build_signing_string(
     path: &str,
     headers: &HashMap<String, String>,
     header_list_str: &str,
-) -> Result<String, String> {
+) -> Result<String, ApError> {
     let mut lines = Vec::new();
     for header_name in header_list_str.split(' ') {
         let name_lower = header_name.to_lowercase();
@@ -274,7 +292,10 @@ fn build_signing_string(
             lines.push(format!("(request-target): {} {}", method.to_lowercase(), path));
         } else {
             let val = headers.get(&name_lower).ok_or_else(|| {
-                format!("署名対象ヘッダー \"{}\" がリクエストに見つかりません", header_name)
+                ApError::Signature(format!(
+                    "署名対象ヘッダー \"{}\" がリクエストに見つかりません",
+                    header_name
+                ))
             })?;
             lines.push(format!("{}: {}", name_lower, val));
         }

@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::client::ApError;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WebFingerLink {
     pub rel: String,
@@ -33,7 +35,7 @@ impl WebFingerResponse {
 }
 
 /// Webfinger 解決の内部実装（ApClient::resolve_webfinger から呼ばれる）
-pub(super) async fn resolve_webfinger_impl(client: &reqwest::Client, username: &str, domain: &str) -> Result<String, String> {
+pub(super) async fn resolve_webfinger_impl(client: &reqwest::Client, username: &str, domain: &str) -> Result<String, ApError> {
     let resource = format!("acct:{}@{}", username, domain);
     let url = format!(
         "https://{}/.well-known/webfinger?resource={}",
@@ -47,19 +49,15 @@ pub(super) async fn resolve_webfinger_impl(client: &reqwest::Client, username: &
         .get(&url)
         .header("Accept", "application/jrd+json, application/json")
         .send()
-        .await
-        .map_err(|e| format!("Webfingerリクエスト失敗: {}", e))?;
+        .await?;
 
     if !res.status().is_success() {
-        return Err(format!("Webfinger応答エラー: ステータス {}", res.status()));
+        return Err(ApError::Other(format!("Webfinger応答エラー: ステータス {}", res.status())));
     }
 
-    let parsed = res
-        .json::<WebFingerResponse>()
-        .await
-        .map_err(|e| format!("Webfinger JSONパース失敗: {}", e))?;
+    let parsed = res.json::<WebFingerResponse>().await?;
 
     parsed
         .actor_uri()
-        .ok_or_else(|| "Webfinger リンクに ActivityPub 互換アクターURIが見つかりません".to_string())
+        .ok_or_else(|| ApError::Other("Webfinger リンクに ActivityPub 互換アクターURIが見つかりません".to_string()))
 }

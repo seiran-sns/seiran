@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 
-use seiran_common::generate_snowflake_id;
+use seiran_common::{generate_snowflake_id, ApError};
 
 use crate::middleware::extract_auth;
 use crate::AppState;
@@ -217,7 +217,7 @@ pub async fn create_follow(
 }
 
 /// `@alice@mastodon.social` または `https://...` 形式のターゲットを Actor URI に解決する
-async fn resolve_target_uri(state: &AppState, target: &str) -> Result<String, String> {
+async fn resolve_target_uri(state: &AppState, target: &str) -> Result<String, ApError> {
     let t = target.trim().trim_start_matches('@');
 
     // URI 形式（https://）
@@ -231,8 +231,8 @@ async fn resolve_target_uri(state: &AppState, target: &str) -> Result<String, St
         return state.ap_client.resolve_webfinger(parts[0], parts[1]).await;
     }
 
-    Err(format!(
+    Err(ApError::Other(format!(
         "ターゲット形式が不正です（@user@domain または https://... を指定してください）: {}",
         target
-    ))
+    )))
 }

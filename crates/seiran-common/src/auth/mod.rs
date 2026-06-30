@@ -1,3 +1,3 @@
 pub mod local;
 
-pub use local::LocalAuthProvider;
+pub use local::{LocalAuthProvider, AuthError};

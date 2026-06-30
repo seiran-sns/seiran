@@ -4,7 +4,7 @@
 
 use sqlx::{PgPool, Row};
 
-use super::client::ApClient;
+use super::client::{ApClient, ApError};
 
 /// ローカル投稿を AP フォロワー全員の inbox へ配送する
 pub async fn deliver_post_to_ap_followers(
@@ -14,7 +14,7 @@ pub async fn deliver_post_to_ap_followers(
     actor_id: i64,
     local_domain: &str,
     ap_private_key_pem: &str,
-) -> Result<(), String> {
+) -> Result<(), ApError> {
     // 投稿本文・作成日時・投稿者ユーザー名を取得
     let row = sqlx::query(
         "SELECT p.body, p.created_at, a.username
@@ -26,13 +26,13 @@ pub async fn deliver_post_to_ap_followers(
     .bind(actor_id)
     .fetch_optional(db)
     .await
-    .map_err(|e| format!("投稿情報取得エラー: {}", e))?
-    .ok_or_else(|| format!("投稿 {} が見つかりません", post_id))?;
+    .map_err(|e| ApError::Other(format!("投稿情報取得エラー: {}", e)))?
+    .ok_or_else(|| ApError::Other(format!("投稿 {} が見つかりません", post_id)))?;
 
-    let body: String = row.try_get("body").map_err(|e| e.to_string())?;
+    let body: String = row.try_get("body").map_err(|e| ApError::Other(e.to_string()))?;
     let created_at: chrono::DateTime<chrono::Utc> =
-        row.try_get("created_at").map_err(|e| e.to_string())?;
-    let username: String = row.try_get("username").map_err(|e| e.to_string())?;
+        row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
+    let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
 
     // AP フォロワー（actor_type='fedi'）の inbox URL 一覧を取得
     let follower_rows = sqlx::query(
@@ -47,7 +47,7 @@ pub async fn deliver_post_to_ap_followers(
     .bind(actor_id)
     .fetch_all(db)
     .await
-    .map_err(|e| format!("フォロワー取得エラー: {}", e))?;
+    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
 
     if follower_rows.is_empty() {
         return Ok(());
@@ -82,7 +82,7 @@ pub async fn deliver_post_to_ap_followers(
     });
 
     let body_str = serde_json::to_string(&activity)
-        .map_err(|e| format!("Activity JSON シリアライズ失敗: {}", e))?;
+        .map_err(|e| ApError::Json(e))?;
 
     let mut ok = 0usize;
     let mut ng = 0usize;
