@@ -67,7 +67,7 @@ pub fn generate_tid() -> String {
         chars[i] = S32_CHARS[(v & 0x1F) as usize];
         v >>= 5;
     }
-    String::from_utf8(chars.to_vec()).unwrap()
+    String::from_utf8(chars.to_vec()).expect("S32_CHARS は ASCII のみのため常に有効")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -467,4 +467,55 @@ pub fn build_error_frame(name: &str, message: &str) -> Result<Vec<u8>, RepoError
     let mut frame = header_cbor;
     frame.extend_from_slice(&body_cbor);
     Ok(frame)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_tid_length() {
+        let tid = generate_tid();
+        assert_eq!(tid.len(), 13);
+    }
+
+    #[test]
+    fn test_generate_tid_alphabet() {
+        let tid = generate_tid();
+        let valid: std::collections::HashSet<char> =
+            "234567abcdefghijklmnopqrstuvwxyz".chars().collect();
+        assert!(tid.chars().all(|c| valid.contains(&c)), "TID に無効な文字: {}", tid);
+    }
+
+    #[test]
+    fn test_cid_roundtrip() {
+        let cbor = b"test data";
+        let cid = cid_from_dagcbor(cbor);
+        let s = cid_to_string(&cid);
+        let parsed = cid_from_str(&s).unwrap();
+        assert_eq!(cid, parsed);
+    }
+
+    #[test]
+    fn test_encode_bsky_feed_post_deterministic() {
+        let (cbor1, cid1) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z").unwrap();
+        let (cbor2, cid2) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z").unwrap();
+        assert_eq!(cbor1, cbor2);
+        assert_eq!(cid1, cid2);
+    }
+
+    #[test]
+    fn test_build_mst_empty() {
+        let (root, blocks) = build_mst(&[]).unwrap();
+        assert!(!blocks.is_empty());
+        assert_eq!(blocks[0].0, root);
+    }
+
+    #[test]
+    fn test_build_mst_single_entry() {
+        let (_, cid) = encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z").unwrap();
+        let entries = vec![("app.bsky.feed.post/test123".to_string(), cid)];
+        let result = build_mst(&entries);
+        assert!(result.is_ok());
+    }
 }

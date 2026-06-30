@@ -14,4 +14,5 @@ pub use auth::{create_auth_provider, Auth0Provider, LocalAuthProvider};
 pub use secrets::{Secrets, SecretsFile, SecretsError};
 pub use queue::{create_job_queue, InMemoryJobQueue, WorkerEngine};
 pub use queue::worker::JobContext;
+pub use atp::{AtpCommitService, AtpCommitError, AtpCommitEvent};
 

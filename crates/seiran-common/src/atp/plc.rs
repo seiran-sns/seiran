@@ -77,11 +77,13 @@ struct GenesisOpSigned {
 /// 署名は「署名前オペレーション」の DAG-CBOR バイトに対して行う。
 ///
 /// - `rotation_signing_key`: サーバーの P-256 鍵（secrets.toml の atproto_private_key_pem）
+/// - `client`: 再利用可能な HTTP クライアント（呼び出し元の AppState から渡す）
 /// - 戻り値: `(did, user_signing_key_pem)`
 pub async fn register_did_plc(
     username: &str,
     pds_domain: &str,
     rotation_signing_key: &SigningKey,
+    client: &reqwest::Client,
 ) -> Result<(String, String), PlcError> {
     let user_signing_key = SigningKey::random(&mut OsRng);
     let user_did_key = p256_to_did_key(user_signing_key.verifying_key());
@@ -150,7 +152,6 @@ pub async fn register_did_plc(
 
     // ③ plc.directory に POST（JSON ボディ = 署名済みオペレーション）
     let url = format!("https://plc.directory/{}", did);
-    let client = reqwest::Client::new();
     let res = client
         .post(&url)
         .json(&signed_op)

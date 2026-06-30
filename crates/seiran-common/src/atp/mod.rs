@@ -2,6 +2,7 @@ pub mod did;
 pub mod client;
 pub mod plc;
 pub mod repo;
+pub mod service;
 
 pub use did::{resolve_did, DidDocument, DidService};
 pub use client::{
@@ -15,3 +16,4 @@ pub use repo::{
     build_mst, create_commit, encode_car, encode_bsky_feed_post, encode_bsky_actor_profile,
     build_commit_frame, build_error_frame, CommitEvtOp, RepoError,
 };
+pub use service::{AtpCommitService, AtpCommitError, AtpCommitEvent};
