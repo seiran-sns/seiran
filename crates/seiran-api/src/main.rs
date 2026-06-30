@@ -1,5 +1,6 @@
 mod cloudflare;
 mod error;
+mod mailer;
 mod middleware;
 mod handlers;
 
@@ -132,6 +133,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         // 認証
+        .route("/api/auth/verify-email", post(handlers::email_verify::request_email_verification))
+        .route("/auth/verify", get(handlers::email_verify::verify_email_token))
         .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/me", get(handlers::auth::me))
@@ -143,9 +146,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/follows/create", post(handlers::follows::create_follow))
         // ユーザープロフィール
         .route("/api/users/profile", get(handlers::users::user_profile))
+        // Misskey 互換レイヤー
+        .route("/api/meta", post(handlers::meta::api_meta))
         // MiAuth（Misskey 互換クライアント用）
         .route("/miauth/:session_id", get(handlers::miauth::miauth_page))
         .route("/miauth/:session_id/authorize", post(handlers::miauth::miauth_authorize))
+        .route("/api/miauth/:session_id/check", post(handlers::miauth::miauth_check_by_path))
         .route("/api/miauth/check", post(handlers::miauth::miauth_check))
         // AT Protocol XRPC エンドポイント
         .route("/xrpc/com.atproto.server.describeServer", get(handlers::xrpc::server::xrpc_describe_server))

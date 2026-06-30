@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Redirect},
+    response::{Html, IntoResponse, Redirect, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -158,13 +158,28 @@ pub async fn miauth_authorize(
     Html("<h3>認可されました。アプリに戻ってください。</h3>").into_response()
 }
 
+/// Misskey 互換クライアント（Aria 等）が使用するパスベース check エンドポイント。
+/// `POST /api/miauth/{session_id}/check`（ボディなし）
+pub async fn miauth_check_by_path(
+    Path(session_id): Path<String>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    miauth_check_inner(&session_id, &state).await
+}
+
+/// seiran 独自フロントエンドが使用するボディベース check エンドポイント（後方互換）。
+/// `POST /api/miauth/check` + `{"session": "..."}`
 pub async fn miauth_check(
     State(state): State<AppState>,
     Json(payload): Json<CheckRequest>,
 ) -> impl IntoResponse {
+    miauth_check_inner(&payload.session, &state).await
+}
+
+async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
     let map = state.miauth_sessions.read().await;
 
-    if let Some(session) = map.get(&payload.session) {
+    if let Some(session) = map.get(session_id) {
         if let (Some(token), Some(user_id), Some(username)) =
             (&session.token, &session.user_id, &session.username)
         {

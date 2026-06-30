@@ -160,6 +160,25 @@ CREATE INDEX idx_follows_follower ON follows(follower_actor_id);
 CREATE INDEX idx_follows_target ON follows(target_actor_id);
 ```
 
+### 1.6 `email_verifications` (メールアドレス確認フロー)
+
+ユーザー登録の 2 ステップフローで使用。確認メール送信後、24 時間以内にリンクをクリックした記録を保持する。
+
+```sql
+CREATE TABLE email_verifications (
+    id          BIGINT PRIMARY KEY,
+    email       TEXT NOT NULL,
+    token       UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    expires_at  TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '24 hours',
+    verified_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+- `token`: 確認メールの URL に埋め込まれる UUID。`GET /auth/verify?token=...` で照合。
+- `verified_at`: メールリンクのクリック時刻。`NULL` = 未確認。
+- 登録完了時（`POST /api/auth/register`）にレコードを DELETE して使い捨てにする。
+
 ---
 
 ## 2. データベース層での主要クエリ・ユースケース

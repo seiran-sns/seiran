@@ -31,17 +31,18 @@
 - [x] **2.2. MiAuth (Misskey認証) 互換エンドポイントの実装**
   - [x] `/miauth/authorize` エンドポイントの実装
   - [x] ローカル JWT と紐付けたアクセストークン発行ロジックの実装
-- [ ] **2.3. メールアドレス確認フロー（Email Verification）**
-  - [ ] `email_verifications` テーブルのマイグレーション追加（`id, email, token UUID, expires_at, verified_at, created_at`）
-  - [ ] `POST /api/auth/verify-email` — メールアドレスを受け取り確認トークンを生成・送信
-  - [ ] `GET /auth/verify?token=...` — トークン検証・`verified_at` を記録しクライアントへトークンを返却
-  - [ ] `POST /api/auth/register` に確認済みトークンの必須検証を追加（未確認メールでの登録を拒否）
-  - [ ] `lettre` クレートによる SMTP 送信実装（`SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_TLS` を `.env` に追加）
-  - [ ] `.env.example` に SMTP 設定例を追加
-- [ ] **2.4. Aria (Misskey クライアント) MiAuth 互換対応**
-  - [ ] `POST /api/meta` エンドポイント実装（`{"features": {"miauth": true, "registration": true}, "uri": "...", "name": "seiran", "version": "..."}` を返す）
-  - [ ] MiAuth check エンドポイント URL を修正: `/api/miauth/check`（ボディでセッション受け取り）→ `/api/miauth/:session_id/check`（パスでセッション受け取り、ボディなし）
-  - [ ] `MiAuthQuery` に `permission: Option<String>` フィールドを追加（現在は無視、将来のスコープ制御への布石）
+- [x] **2.3. メールアドレス確認フロー（Email Verification）**
+  - [x] `email_verifications` テーブルのマイグレーション追加（`id, email, token UUID, expires_at, verified_at, created_at`）
+  - [x] `POST /api/auth/verify-email` — メールアドレスを受け取り確認トークンを生成・送信
+  - [x] `GET /auth/verify?token=...` — トークン検証・`verified_at` を記録しクライアントへトークンを返却
+  - [x] `POST /api/auth/register` に `registration_token` 必須検証を追加（未確認メールでの登録を拒否・レコードを DELETE して使い捨て）
+  - [x] `lettre` クレートによる SMTP 送信実装（`seiran-api/src/mailer.rs`）
+  - [x] `.env` に SMTP 設定追加（Resend / smtp.resend.com / info@seiran.org）
+  - [x] `.env.example` に SMTP 設定例を追加
+- [x] **2.4. Aria (Misskey クライアント) MiAuth 互換対応**
+  - [x] `POST /api/meta` エンドポイント実装（`{"features": {"miauth": true, "registration": true}, "uri": "...", "name": "seiran", "version": "..."}` を返す）
+  - [x] MiAuth check エンドポイント追加: `/api/miauth/:session_id/check`（パスでセッション受け取り、ボディなし）← Aria が期待する形式
+  - [x] 旧 `/api/miauth/check`（ボディ形式）は後方互換で残存
   - 仕様詳細: `docs/03_multi_protocol_engine_specification.md` セクション 5 参照
 - [x] **2.5. シークレット自動生成・永続化 (`secrets.toml`)**
   - [x] `seiran-common::secrets` モジュールの実装

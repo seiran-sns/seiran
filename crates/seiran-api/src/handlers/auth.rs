@@ -17,8 +17,9 @@ use crate::middleware::extract_auth;
 #[derive(Deserialize)]
 pub struct RegisterRequest {
     pub username: String,
-    pub email: String,
     pub password: String,
+    /// POST /api/auth/verify-email → GET /auth/verify?token=... で得られるトークン
+    pub registration_token: String,
 }
 
 #[derive(Serialize)]
@@ -44,13 +45,30 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
-    if req.username.is_empty() || req.email.is_empty() || req.password.len() < 8 {
-        return Err(ApiError::BadRequest("username・email・password（8文字以上）は必須です"));
+    if req.username.is_empty() || req.password.len() < 8 || req.registration_token.is_empty() {
+        return Err(ApiError::BadRequest("username・password（8文字以上）・registration_token は必須です"));
     }
+
+    // registration_token を検証し、確認済みのメールアドレスを取得する
+    let token: uuid::Uuid = req.registration_token.parse()
+        .map_err(|_| ApiError::BadRequest("registration_token が無効です"))?;
+
+    let verification = sqlx::query!(
+        "DELETE FROM email_verifications
+         WHERE token = $1 AND verified_at IS NOT NULL
+         RETURNING email",
+        token,
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?
+    .ok_or(ApiError::BadRequest("registration_token が無効か期限切れです。メール確認をやり直してください"))?;
+
+    let email = verification.email;
 
     let exists = state
         .users
-        .email_exists(&req.email)
+        .email_exists(&email)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     if exists {
@@ -149,7 +167,7 @@ pub async fn register(
     // 4. DB 書き込み（PLC 送信成功後）
     let user_id = state
         .users
-        .insert(&req.email, &password_hash)
+        .insert(&email, &password_hash)
         .await
         .map_err(|e| {
             eprintln!("[register] users INSERT 失敗: {}", e);
@@ -181,7 +199,7 @@ pub async fn register(
     // TXT レコードはそのまま残す（bsky.app はハンドル解決に常時使用するため）
     let _ = cf_record_id;
 
-    let token = state.local_auth.generate_token(user_id, &req.email)
+    let token = state.local_auth.generate_token(user_id, &email)
         .map_err(|e| {
             eprintln!("[register] JWT 生成失敗: {}", e);
             ApiError::Internal("トークン生成エラー".to_string())
@@ -189,7 +207,7 @@ pub async fn register(
 
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username: req.username, email: req.email },
+        user: UserInfo { id: user_id, username: req.username, email: email },
     }))
 }
 
