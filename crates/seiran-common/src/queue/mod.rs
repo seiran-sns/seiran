@@ -24,10 +24,6 @@ use crate::traits::JobQueue;
 pub fn create_job_queue() -> Arc<dyn JobQueue> {
     let backend = std::env::var("JOB_QUEUE_BACKEND").unwrap_or_else(|_| "memory".to_string());
 
-    match backend.as_str() {
-        _ => {
-            eprintln!("[seiran] JobQueue バックエンド: InMemory（開発モード）");
-            Arc::new(InMemoryJobQueue::new())
-        }
-    }
+    eprintln!("[seiran] JobQueue バックエンド: {} → InMemory（開発モード）", backend);
+    Arc::new(InMemoryJobQueue::new())
 }

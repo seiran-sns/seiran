@@ -86,6 +86,10 @@ impl InMemoryJobQueue {
         self.inner.lock().await.heap.len()
     }
 
+    pub async fn is_empty(&self) -> bool {
+        self.inner.lock().await.heap.is_empty()
+    }
+
     /// 通知ハンドルを複製して返します（WorkerEngine が保持する用）
     pub fn notify_handle(&self) -> Arc<Notify> {
         self.notify.clone()

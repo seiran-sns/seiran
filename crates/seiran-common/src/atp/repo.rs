@@ -118,7 +118,7 @@ pub fn build_mst(entries: &[(String, Cid)]) -> Result<(Cid, Blocks), RepoError> 
         let node = MstNode { e: vec![], l: None };
         let cbor = serde_ipld_dagcbor::to_vec(&node).map_err(|e| RepoError::Cbor(e.to_string()))?;
         let cid = cid_from_dagcbor(&cbor);
-        return Ok((cid.clone(), vec![(cid, cbor)]));
+        return Ok((cid, vec![(cid, cbor)]));
     }
     let layer = entries
         .iter()
@@ -151,7 +151,7 @@ fn build_layer(entries: &[(String, Cid)], layer: u32) -> Result<(Cid, Blocks), R
         let key_bytes = key.as_bytes();
 
         if h < layer {
-            subtree_buf.push((key.clone(), cid.clone()));
+            subtree_buf.push((key.clone(), *cid));
         } else {
             // h == layer
             let sc = flush_subtree(&mut subtree_buf, &mut blocks)?;
@@ -167,7 +167,7 @@ fn build_layer(entries: &[(String, Cid)], layer: u32) -> Result<(Cid, Blocks), R
             node_entries.push(MstEntry {
                 p: prefix_len as u32,
                 k: key_bytes[prefix_len..].to_vec(),
-                v: cid.clone(),
+                v: *cid,
                 t: None,
             });
         }
@@ -190,7 +190,7 @@ fn build_layer(entries: &[(String, Cid)], layer: u32) -> Result<(Cid, Blocks), R
     };
     let cbor = serde_ipld_dagcbor::to_vec(&node).map_err(|e| RepoError::Cbor(e.to_string()))?;
     let cid = cid_from_dagcbor(&cbor);
-    blocks.push((cid.clone(), cbor));
+    blocks.push((cid, cbor));
 
     Ok((cid, blocks))
 }
@@ -237,9 +237,9 @@ pub fn create_commit(
     signing_key: &SigningKey,
 ) -> Result<(Cid, Vec<u8>), RepoError> {
     let unsigned = UnsignedCommit {
-        data: mst_root.clone(),
+        data: mst_root,
         did: did.to_string(),
-        prev: prev.clone(),
+        prev,
         rev: rev.to_string(),
         version: 3,
     };
@@ -282,7 +282,7 @@ pub fn encode_car(root_cid: &Cid, blocks: &[(Cid, Vec<u8>)]) -> Result<Vec<u8>, 
     let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
     header_map.insert(
         "roots".to_string(),
-        Ipld::List(vec![Ipld::Link(root_cid.clone())]),
+        Ipld::List(vec![Ipld::Link(*root_cid)]),
     );
     header_map.insert("version".to_string(), Ipld::Integer(1));
     let header_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(header_map))
@@ -384,6 +384,7 @@ pub struct CommitEvtOp {
     pub cid: Cid,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_commit_frame(
     seq: i64,
     did: &str,
@@ -411,7 +412,7 @@ pub fn build_commit_frame(
         .map(|op| {
             let mut m: BTreeMap<String, Ipld> = BTreeMap::new();
             m.insert("action".to_string(), Ipld::String(op.action.clone()));
-            m.insert("cid".to_string(), Ipld::Link(op.cid.clone()));
+            m.insert("cid".to_string(), Ipld::Link(op.cid));
             m.insert("path".to_string(), Ipld::String(op.path.clone()));
             Ipld::Map(m)
         })
@@ -420,13 +421,13 @@ pub fn build_commit_frame(
     let mut body_map: BTreeMap<String, Ipld> = BTreeMap::new();
     body_map.insert("blobs".to_string(), Ipld::List(vec![]));
     body_map.insert("blocks".to_string(), Ipld::Bytes(car_bytes.to_vec()));
-    body_map.insert("commit".to_string(), Ipld::Link(commit_cid.clone()));
+    body_map.insert("commit".to_string(), Ipld::Link(*commit_cid));
     body_map.insert("did".to_string(), Ipld::String(did.to_string()));
     body_map.insert("ops".to_string(), Ipld::List(ops_ipld));
     body_map.insert(
         "prev".to_string(),
         prev_cid
-            .map(|c| Ipld::Link(c.clone()))
+            .map(|c| Ipld::Link(*c))
             .unwrap_or(Ipld::Null),
     );
     body_map.insert("rebase".to_string(), Ipld::Bool(false));

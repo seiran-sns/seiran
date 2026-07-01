@@ -131,7 +131,7 @@ async fn handle_subscribe_repos(
                 &ops,
                 &time_str,
             ) {
-                if socket.send(Message::Binary(frame.into())).await.is_err() {
+                if socket.send(Message::Binary(frame)).await.is_err() {
                     return;
                 }
             }
@@ -142,7 +142,7 @@ async fn handle_subscribe_repos(
         match rx.recv().await {
             Ok(evt) => {
                 if socket
-                    .send(Message::Binary(evt.frame_bytes.into()))
+                    .send(Message::Binary(evt.frame_bytes))
                     .await
                     .is_err()
                 {

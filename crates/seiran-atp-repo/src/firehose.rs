@@ -58,12 +58,11 @@ async fn connect_and_process(pool: &PgPool, http: &reqwest::Client) -> Result<()
     while let Some(msg) = ws_stream.next().await {
         let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
 
-        if let Message::Binary(bytes) = msg {
-            if let Err(e) = process_message(&bytes, pool, http).await {
+        if let Message::Binary(bytes) = msg
+            && let Err(e) = process_message(&bytes, pool, http).await {
                 // 個別イベントのエラーは無視して続行
                 eprintln!("[Firehose] メッセージ処理エラー（スキップ）: {}", e);
             }
-        }
     }
 
     Ok(())
@@ -186,11 +185,10 @@ async fn save_atp_post(
 fn extract_text_field(val: &CborValue, field: &str) -> Option<String> {
     if let CborValue::Map(map) = val {
         for (k, v) in map {
-            if let (CborValue::Text(key), CborValue::Text(text)) = (k, v) {
-                if key == field {
+            if let (CborValue::Text(key), CborValue::Text(text)) = (k, v)
+                && key == field {
                     return Some(text.clone());
                 }
-            }
         }
     }
     None
@@ -199,14 +197,13 @@ fn extract_text_field(val: &CborValue, field: &str) -> Option<String> {
 fn extract_int_field(val: &CborValue, field: &str) -> Option<i64> {
     if let CborValue::Map(map) = val {
         for (k, v) in map {
-            if let CborValue::Text(key) = k {
-                if key == field {
+            if let CborValue::Text(key) = k
+                && key == field {
                     return match v {
                         CborValue::Integer(i) => i64::try_from(*i).ok(),
                         _ => None,
                     };
                 }
-            }
         }
     }
     None
