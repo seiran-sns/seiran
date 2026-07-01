@@ -60,6 +60,16 @@ pub async fn miauth_page(
         .ok()
         .map(|u| u.user_id);
 
+    // 未ログイン時はログイン画面へリダイレクト
+    if user_id.is_none() {
+        let mut return_url = format!("/miauth/{}?name={}", session_id, urlencoding::encode(&query.name));
+        if let Some(ref cb) = query.callback {
+            return_url.push_str(&format!("&callback={}", urlencoding::encode(cb)));
+        }
+        let login_url = format!("/login?redirect={}", urlencoding::encode(&return_url));
+        return Redirect::to(&login_url).into_response();
+    }
+
     let mut map = state.miauth_sessions.write().await;
     map.insert(
         session_id.clone(),
@@ -99,7 +109,7 @@ pub async fn miauth_page(
         query.name, session_id
     );
 
-    Html(html)
+    Html(html).into_response()
 }
 
 pub async fn miauth_authorize(
