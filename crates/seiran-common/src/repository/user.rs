@@ -26,6 +26,9 @@ pub trait UserRepository: Send + Sync {
 
     /// ログイン用にメールアドレスでユーザー + ローカルアクターを取得する。
     async fn find_login_by_email(&self, email: &str) -> Result<Option<LoginRow>, sqlx::Error>;
+
+    /// ログイン用にユーザーネームでユーザー + ローカルアクターを取得する。
+    async fn find_login_by_username(&self, username: &str) -> Result<Option<LoginRow>, sqlx::Error>;
 }
 
 pub struct PgUserRepository {
@@ -88,6 +91,18 @@ impl UserRepository for PgUserRepository {
              LIMIT 1",
         )
         .bind(email)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn find_login_by_username(&self, username: &str) -> Result<Option<LoginRow>, sqlx::Error> {
+        sqlx::query_as::<_, LoginRow>(
+            "SELECT u.id, u.email, u.password_hash, a.username
+             FROM users u
+             JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
+             WHERE a.username = $1",
+        )
+        .bind(username)
         .fetch_optional(&self.pool)
         .await
     }
