@@ -133,7 +133,7 @@ impl AtpCommitService {
         // ③ 既存エントリをロードして新規レコードを追加・ソート
         let mut entries = self.load_atp_entries(actor_id).await?;
         let entry_key = format!("{}/{}", record.collection, record.rkey);
-        entries.push((entry_key.clone(), record.cid.clone()));
+        entries.push((entry_key.clone(), record.cid));
         entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         // ④ MST 構築
@@ -148,14 +148,14 @@ impl AtpCommitService {
             &at_did,
             &new_rev,
             mst_root,
-            prev_cid_parsed.clone(),
+            prev_cid_parsed,
             &signing_key,
         )?;
 
         // ⑥ CAR エンコード
         let mut new_blocks = mst_blocks;
-        new_blocks.push((record.cid.clone(), record.cbor));
-        new_blocks.push((commit_cid.clone(), commit_cbor));
+        new_blocks.push((record.cid, record.cbor));
+        new_blocks.push((commit_cid, commit_cbor));
         let diff_car = encode_car(&commit_cid, &new_blocks)?;
 
         // ⑦ atp_blocks INSERT
@@ -226,7 +226,7 @@ impl AtpCommitService {
         let ws_ops = vec![CommitEvtOp {
             action: record.action.to_string(),
             path: entry_key,
-            cid: record.cid.clone(),
+            cid: record.cid,
         }];
         if let Ok(frame) = build_commit_frame(
             seq,

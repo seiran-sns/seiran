@@ -206,7 +206,7 @@ pub async fn register(
 
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username: req.username, email: email },
+        user: UserInfo { id: user_id, username: req.username, email },
     }))
 }
 

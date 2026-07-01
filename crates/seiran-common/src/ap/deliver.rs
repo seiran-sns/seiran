@@ -82,7 +82,7 @@ pub async fn deliver_post_to_ap_followers(
     });
 
     let body_str = serde_json::to_string(&activity)
-        .map_err(|e| ApError::Json(e))?;
+        .map_err(ApError::Json)?;
 
     let mut ok = 0usize;
     let mut ng = 0usize;
