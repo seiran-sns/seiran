@@ -47,6 +47,11 @@ pub struct Secrets {
     /// AP アクタードキュメントの publicKey として公開される。
     #[serde(default)]
     pub ap_public_key_pem: Option<String>,
+
+    /// DB 内機密フィールド（storage_providers.secret_key 等）の AES-256-GCM 暗号化鍵（hex、256bit）
+    /// 既存の secrets.toml との後方互換性のため Option。
+    #[serde(default)]
+    pub encryption_key: Option<String>,
 }
 
 impl Secrets {
@@ -77,12 +82,18 @@ impl Secrets {
         // --- ActivityPub HTTP Signatures 用 RSA-2048 鍵ペア ---
         let (ap_private_key_pem, ap_public_key_pem) = generate_rsa_key_pair(&mut rng)?;
 
+        // --- AES-256-GCM 汎用暗号化鍵: 256bit ランダム値 (hex) ---
+        let mut enc_bytes = [0u8; 32];
+        rng.fill_bytes(&mut enc_bytes);
+        let encryption_key = hex::encode(enc_bytes);
+
         Ok(Self {
             jwt_secret,
             atproto_private_key_pem,
             atproto_public_key_pem,
             ap_private_key_pem: Some(ap_private_key_pem),
             ap_public_key_pem: Some(ap_public_key_pem),
+            encryption_key: Some(encryption_key),
         })
     }
 
@@ -99,6 +110,28 @@ impl Secrets {
         Ok(true)
     }
 
+
+    /// encryption_key が未設定の場合に生成して補完する（旧 secrets.toml の移行用）
+    pub fn ensure_encryption_key(&mut self) -> bool {
+        if self.encryption_key.is_some() {
+            return false;
+        }
+        use argon2::password_hash::rand_core::RngCore;
+        let mut rng = OsRng;
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        self.encryption_key = Some(hex::encode(bytes));
+        eprintln!("[seiran] encryption_key を新規生成しました。");
+        true
+    }
+
+    /// `encryption_key` を生バイト列として返す
+    pub fn encryption_key_bytes(&self) -> Vec<u8> {
+        self.encryption_key
+            .as_deref()
+            .and_then(|s| hex::decode(s).ok())
+            .unwrap_or_default()
+    }
 
     /// `jwt_secret` を生バイト列として返す（`LocalAuthProvider` に渡す用）
     pub fn jwt_secret_bytes(&self) -> Vec<u8> {
@@ -130,8 +163,9 @@ impl SecretsFile {
     pub fn load_or_create(&self) -> Result<Secrets, SecretsError> {
         if self.path.exists() {
             let mut secrets = self.load()?;
-            // 旧 secrets.toml に AP 鍵が無い場合は補完して保存
-            if secrets.ensure_ap_keys()? {
+            let mut updated = secrets.ensure_ap_keys()?;
+            updated |= secrets.ensure_encryption_key();
+            if updated {
                 self.save(&secrets)?;
             }
             Ok(secrets)
