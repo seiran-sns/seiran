@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
@@ -7,9 +7,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use seiran_common::repository::TimelinePost;
-use seiran_common::{ap::deliver_post_to_ap_followers, generate_snowflake_id};
+use seiran_common::{ap::{deliver_post_to_ap_followers, plain_to_html}, generate_snowflake_id};
 
 use crate::AppState;
+use crate::error::ApiError;
 use crate::middleware::extract_auth;
 
 #[derive(Deserialize)]
@@ -177,4 +178,77 @@ pub async fn local_timeline(
     let rows = state.posts.local_timeline(limit, until_id, since_id).await;
 
     map_note_rows(rows).into_response()
+}
+
+/// フロントエンド向け: GET /api/notes/:id
+pub async fn get_note(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<NoteResponse>, ApiError> {
+    let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
+    let post = state
+        .posts
+        .find_by_id(post_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+    Ok(Json(NoteResponse {
+        id: post.id.to_string(),
+        text: post.body,
+        created_at: post.created_at.to_rfc3339(),
+        user: NoteUserInfo {
+            id: post.actor_id,
+            username: post.username,
+            domain: Some(post.domain),
+            display_name: post.display_name,
+        },
+    }))
+}
+
+/// ActivityPub 向け: GET /notes/:id
+/// nginx が Accept: application/activity+json のリクエストのみここへ転送する。
+pub async fn get_note_ap(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let post_id: i64 = match id.parse() {
+        Ok(i) => i,
+        Err(_) => return (StatusCode::NOT_FOUND, "").into_response(),
+    };
+
+    let post = match state.posts.find_by_id(post_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
+        Err(e) => {
+            eprintln!("[get_note_ap] DB エラー: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "").into_response();
+        }
+    };
+
+    // ローカルポストのみ AP として提供する
+    if post.domain != state.local_domain {
+        return (StatusCode::NOT_FOUND, "").into_response();
+    }
+
+    let actor_uri = format!("https://{}/users/{}", state.local_domain, post.username);
+    let note_id = format!("https://{}/notes/{}", state.local_domain, post.id);
+    let content_html = plain_to_html(&post.body);
+
+    let ap_note = serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Note",
+        "id": note_id,
+        "url": note_id,
+        "attributedTo": actor_uri,
+        "content": content_html,
+        "published": post.created_at.to_rfc3339(),
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [format!("{}/followers", actor_uri)],
+    });
+
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/activity+json; charset=utf-8")],
+        Json(ap_note),
+    )
+        .into_response()
 }

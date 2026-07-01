@@ -111,6 +111,177 @@ volumes:
 
 ---
 
+## 1.4 API エラーレスポンス仕様
+
+### 基本方針
+
+API はエラー時に機械可読な `code` フィールドを含む JSON を返す。**ユーザー向けメッセージへのローカライズはフロントエンドの責務**であり、API はメッセージ文字列を返さない。
+
+```json
+{
+  "code": "EMAIL_ALREADY_REGISTERED",
+  "detail": {}
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `code` | `string` | ✓ | スネークアッパーケースのエラー識別子 |
+| `detail` | `object` | — | フロントエンドがメッセージ補間に使う付加情報（省略可） |
+
+HTTP ステータスコードがエラーの大分類を示し、`code` がより詳細な種別を示す。
+
+### エラーコード一覧
+
+| code | HTTP | 発生箇所 |
+|---|---|---|
+| `EMAIL_INVALID` | 400 | メール形式が不正 |
+| `INVALID_INPUT` | 400 | 必須フィールド不足・形式不正 |
+| `INVALID_TOKEN` | 400 | メール確認トークンが無効または期限切れ |
+| `REGISTRATION_TOKEN_INVALID` | 400 | 登録トークンが無効または期限切れ |
+| `EMAIL_ALREADY_REGISTERED` | 409 | 登録済みメールアドレス |
+| `USERNAME_TAKEN` | 409 | 使用済みユーザー名 |
+| `INVALID_CREDENTIALS` | 401 | ログイン失敗 |
+| `UNAUTHORIZED` | 401 | 認証トークンなし・無効 |
+| `NOT_FOUND` | 404 | リソースが存在しない |
+| `INTERNAL_ERROR` | 500 | サーバー内部エラー（詳細はサーバーログのみ） |
+
+### 実装箇所
+
+- `crates/seiran-api/src/error.rs` — `ApiError` enum と `IntoResponse` 実装
+- `frontend/src/api/client.ts` — `ApiError` クラス・`getErrorMessage()` 関数・`ERROR_MESSAGES` マップ
+
+### 1.5 ログイン識別子（メールアドレス or ユーザーネーム）
+
+`POST /api/auth/login` はフィールド名を `identifier` に変更し、メールアドレスまたはローカルユーザーネームの両方を受け付ける。
+
+```json
+{ "identifier": "foo@example.com", "password": "..." }
+{ "identifier": "foo",             "password": "..." }
+```
+
+**バックエンドの解決ロジック:**
+
+1. `identifier` に `@` が含まれる → メールアドレスとして `users` テーブルを検索
+2. `@` が含まれない → ユーザーネームとして `actors` テーブルを検索（`domain = LOCAL_DOMAIN AND username = $1`）し、紐付く `user_id` から `users` を引く
+
+どちらの場合も、ヒットしなければ `INVALID_CREDENTIALS`（404 情報を漏らさないために 401 を返す）。
+
+---
+
+### 1.6 パスワードリセット
+
+メール送信基盤（SMTP）が整ったため、パスワードリセットフローを提供する。
+
+#### フロー
+
+1. **`POST /api/auth/request-password-reset`** — `{ email }` を受け取り、`password_resets` テーブルにトークンを生成してリセットリンクをメール送信。メールアドレスが存在しない場合でも同一レスポンスを返す（ユーザー列挙攻撃防止）。
+2. **`GET /api/auth/verify-reset-token?token=...`** — トークンを検証して有効な場合は `reset_token` を返す（フロントエンドがフォームに渡す）。有効期限は **1時間**。
+3. **`POST /api/auth/reset-password`** — `{ reset_token, new_password }` を受け取り、パスワードハッシュを更新してトークンを削除。
+
+#### DB テーブル
+
+```sql
+CREATE TABLE password_resets (
+    id         BIGINT PRIMARY KEY,
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token      UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '1 hour',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+`verify-reset-token` は `email_verifications` と同様に SELECT のみ（副作用なし）。トークンの消費は `reset-password` の DELETE で行う。
+
+#### エラーコード追加
+
+| code | HTTP | 説明 |
+|---|---|---|
+| `RESET_TOKEN_INVALID` | 400 | リセットトークンが無効または期限切れ |
+| `PASSWORD_TOO_SHORT` | 400 | パスワードが短すぎる（8文字未満） |
+
+---
+
+### 1.7 Turnstile 自然人判別（オプション）
+
+Cloudflare Turnstile をログイン・新規登録フォームに組み込み、ボット登録を防止する。サーバー側の `TURNSTILE_SECRET_KEY` 環境変数が設定されている場合のみ検証を行い、未設定の場合はスキップする。
+
+#### フロー
+
+1. フロントエンドが Turnstile ウィジェットを描画し、ユーザーがチャレンジを完了するとトークンを取得する
+2. API リクエストのボディに `cf_turnstile_response` フィールドとして含める
+3. バックエンドが `https://challenges.cloudflare.com/turnstile/v0/siteverify` にトークンを POST して検証
+4. 検証失敗時は `TURNSTILE_FAILED`（400）を返す
+
+#### 設定
+
+```env
+TURNSTILE_SITE_KEY=0x4AAAAAAA...     # フロントエンド用（公開可）
+TURNSTILE_SECRET_KEY=0x4AAAAAAA...   # バックエンド検証用（非公開）
+```
+
+`TURNSTILE_SECRET_KEY` が未設定の場合、バックエンドは `cf_turnstile_response` フィールドを無視して通過させる。これにより開発環境やセルフホスト環境での設定が任意になる。
+
+#### 対象エンドポイント
+
+- `POST /api/auth/verify-email`（新規登録入口）
+- `POST /api/auth/login`
+- `POST /api/auth/request-password-reset`
+
+---
+
+### 1.8 Note 詳細エンドポイント（AP エントリーポイント兼用）
+
+`/notes/:id` は **ブラウザ向け SPA** と **Fediverse サーバー向け ActivityPub** の両方に応答する。
+
+#### コンテンツネゴシエーション（nginx）
+
+nginx の `map` ディレクティブで `$http_accept` を検査し、転送先を切り替える。
+
+```nginx
+map $http_accept $notes_upstream {
+    default                        "frontend:5173";
+    "~*application/activity\+json" "api:3000";
+    "~*application/ld\+json"       "api:3000";
+}
+```
+
+| クライアント | Accept ヘッダー | nginx の転送先 |
+|---|---|---|
+| ブラウザ | `text/html, ...` | frontend（Vite SPA） |
+| Mastodon 等 | `application/activity+json` | api（AP Note JSON） |
+
+#### ブラウザフロー
+
+1. ブラウザが `/notes/:id` を要求 → nginx が frontend へ転送
+2. React Router が `/notes/:id` にマッチし `NoteDetail` コンポーネントをレンダリング
+3. `NoteDetail` が `GET /api/notes/:id` を呼んで投稿データを取得・表示
+
+#### ActivityPub フロー
+
+1. Fediverse サーバーが `GET /notes/:id`（`Accept: application/activity+json`）を要求
+2. nginx が api へ転送
+3. `GET /notes/:id` ハンドラがローカルポストのみ AP Note JSON を返す
+4. レスポンス `Content-Type: application/activity+json; charset=utf-8`
+
+AP Note の形式:
+
+```json
+{
+  "@context": "https://www.w3.org/ns/activitystreams",
+  "type": "Note",
+  "id": "https://seiran.org/notes/123456789",
+  "url": "https://seiran.org/notes/123456789",
+  "attributedTo": "https://seiran.org/users/alice",
+  "content": "<p>投稿本文（HTML エスケープ済み）</p>",
+  "published": "2026-07-01T12:00:00Z",
+  "to": ["https://www.w3.org/ns/activitystreams#Public"],
+  "cc": ["https://seiran.org/users/alice/followers"]
+}
+```
+
+---
+
 ## 2. 統一アクターモデルの実装ロジック
 
 `actors` テーブルにおける「魂の結合」と「影武者紐付け」を処理するためのビジネスロジック。

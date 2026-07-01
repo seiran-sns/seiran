@@ -211,6 +211,12 @@
   font-size: 0.78rem;
   color: #555;
   margin-left: auto;
+  text-decoration: none;
+}
+
+.noteTime:hover {
+  text-decoration: underline;
+  color: #888;
 }
 
 .noteBody {

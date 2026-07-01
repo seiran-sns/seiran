@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import styles from "./Auth.module.css";
 
@@ -27,12 +27,14 @@ export default function VerifyEmail() {
       setState({ phase: "error", message: "URLが無効です" });
       return;
     }
-    api.auth.verifyEmailToken(token)
+    const controller = new AbortController();
+    api.auth.verifyEmailToken(token, controller.signal)
       .then((res) => setState({ phase: "form", registrationToken: res.registration_token }))
-      .catch((err) => setState({
-        phase: "error",
-        message: err instanceof Error ? err.message : "トークンが無効か期限切れです",
-      }));
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setState({ phase: "error", message: getErrorMessage(err) });
+      });
+    return () => controller.abort();
   }, [searchParams]);
 
   async function handleSubmit(e: FormEvent) {
@@ -49,7 +51,7 @@ export default function VerifyEmail() {
       login(res.token, res.user);
       navigate("/");
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "登録に失敗しました");
+      setFormError(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }

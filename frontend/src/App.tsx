@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Login from "./pages/Login";
+import NoteDetail from "./pages/NoteDetail";
 import Register from "./pages/Register";
 import Timeline from "./pages/Timeline";
 import UserProfilePage from "./pages/UserProfile";
@@ -47,6 +48,7 @@ export default function App() {
           }
         />
         <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/notes/:id" element={<NoteDetail />} />
         <Route
           path="/profile"
           element={

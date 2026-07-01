@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api/client";
+import { api, getErrorMessage } from "../api/client";
 import styles from "./Auth.module.css";
 
 export default function Register() {
@@ -17,7 +17,7 @@ export default function Register() {
       await api.auth.requestEmailVerification(email);
       setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "送信に失敗しました");
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }

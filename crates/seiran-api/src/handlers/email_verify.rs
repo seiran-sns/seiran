@@ -1,14 +1,12 @@
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
-    response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use seiran_common::generate_snowflake_id;
 
+use crate::error::ApiError;
 use crate::mailer::send_verification_email;
 use crate::AppState;
 
@@ -37,81 +35,74 @@ pub struct VerifyTokenResponse {
 pub async fn request_email_verification(
     State(state): State<AppState>,
     Json(payload): Json<VerifyEmailRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<VerifyEmailResponse>, ApiError> {
     let email = payload.email.trim().to_lowercase();
     if email.is_empty() || !email.contains('@') {
-        return (StatusCode::BAD_REQUEST, "有効なメールアドレスを入力してください").into_response();
+        return Err(ApiError::BadRequest("EMAIL_INVALID"));
+    }
+
+    // すでに登録済みのメールアドレスは拒否
+    let exists = state
+        .users
+        .email_exists(&email)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if exists {
+        return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
     }
 
     let pool = &state.db;
     let id = generate_snowflake_id(chrono::Utc::now());
 
-    let row = match sqlx::query!(
+    let row = sqlx::query!(
         "INSERT INTO email_verifications (id, email) VALUES ($1, $2) RETURNING token",
         id,
         email,
     )
     .fetch_one(pool)
     .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[verify-email] DB エラー: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
+    .map_err(|e| ApiError::Internal(format!("DB エラー: {}", e)))?;
 
     let token = row.token;
     let verify_url = format!("https://{}/verify-email?token={}", state.local_domain, token);
 
-    if let Err(e) = send_verification_email(&email, &verify_url).await {
-        eprintln!("[verify-email] メール送信失敗: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "メール送信に失敗しました").into_response();
-    }
+    send_verification_email(&email, &verify_url)
+        .await
+        .map_err(|e| {
+            eprintln!("[verify-email] メール送信失敗: {}", e);
+            ApiError::Internal(format!("メール送信失敗: {}", e))
+        })?;
 
-    Json(VerifyEmailResponse {
+    Ok(Json(VerifyEmailResponse {
         message: format!("{} に確認メールを送信しました", email),
-    })
-    .into_response()
+    }))
 }
 
-/// Step 2: 確認リンクを受け取り、verified_at を記録してクライアントに登録トークンを返す
+/// Step 2: 確認リンクのトークンを検証してクライアントに登録トークンを返す
+/// トークンの消費は POST /api/auth/register の DELETE で行う（このエンドポイントは副作用なし）
 pub async fn verify_email_token(
     Query(params): Query<VerifyTokenQuery>,
     State(state): State<AppState>,
-) -> impl IntoResponse {
-    let token: Uuid = match params.token.parse() {
-        Ok(u) => u,
-        Err(_) => return (StatusCode::BAD_REQUEST, "無効なトークンです").into_response(),
-    };
-
+) -> Result<Json<VerifyTokenResponse>, ApiError> {
     let pool = &state.db;
 
+    let token: uuid::Uuid = params
+        .token
+        .parse()
+        .map_err(|_| ApiError::BadRequest("INVALID_TOKEN"))?;
+
     let row = sqlx::query!(
-        "UPDATE email_verifications
-         SET verified_at = now()
+        "SELECT token FROM email_verifications
          WHERE token = $1
-           AND verified_at IS NULL
-           AND expires_at > now()
-         RETURNING token",
+           AND expires_at > now()",
         token,
     )
     .fetch_optional(pool)
-    .await;
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?
+    .ok_or(ApiError::BadRequest("INVALID_TOKEN"))?;
 
-    match row {
-        Ok(Some(r)) => Json(VerifyTokenResponse {
-            registration_token: r.token.to_string(),
-        })
-        .into_response(),
-        Ok(None) => (
-            StatusCode::BAD_REQUEST,
-            "トークンが無効か期限切れです",
-        )
-            .into_response(),
-        Err(e) => {
-            eprintln!("[verify-email] DB エラー: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
-        }
-    }
+    Ok(Json(VerifyTokenResponse {
+        registration_token: row.token.to_string(),
+    }))
 }

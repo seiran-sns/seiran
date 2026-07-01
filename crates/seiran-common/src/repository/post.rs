@@ -69,6 +69,9 @@ pub trait PostRepository: Send + Sync {
 
     /// DID + rkey で app.bsky.feed.post レコードを取得する。
     async fn find_record(&self, did: &str, rkey: &str) -> Result<Option<PostRecord>, sqlx::Error>;
+
+    /// ID でポストとアクター情報を取得する。
+    async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error>;
 }
 
 pub struct PgPostRepository {
@@ -178,6 +181,18 @@ impl PostRepository for PgPostRepository {
         )
         .bind(did)
         .bind(rkey)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error> {
+        sqlx::query_as::<_, TimelinePost>(
+            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
+             FROM posts p JOIN actors a ON a.id = p.actor_id
+             WHERE p.id = $1 AND p.deleted_at IS NULL
+             LIMIT 1",
+        )
+        .bind(id)
         .fetch_optional(&self.pool)
         .await
     }

@@ -162,7 +162,7 @@ CREATE INDEX idx_follows_target ON follows(target_actor_id);
 
 ### 1.6 `email_verifications` (メールアドレス確認フロー)
 
-ユーザー登録の 2 ステップフローで使用。確認メール送信後、24 時間以内にリンクをクリックした記録を保持する。
+ユーザー登録の 2 ステップフローで使用。確認メール送信後、24 時間以内に登録を完了しなければならない。
 
 ```sql
 CREATE TABLE email_verifications (
@@ -170,14 +170,13 @@ CREATE TABLE email_verifications (
     email       TEXT NOT NULL,
     token       UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     expires_at  TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '24 hours',
-    verified_at TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
-- `token`: 確認メールの URL に埋め込まれる UUID。`GET /auth/verify?token=...` で照合。
-- `verified_at`: メールリンクのクリック時刻。`NULL` = 未確認。
-- 登録完了時（`POST /api/auth/register`）にレコードを DELETE して使い捨てにする。
+- `token`: 確認メールの URL に埋め込まれる UUID。`GET /api/auth/verify-token?token=...` で照合。
+- トークンの有効性は「レコードが存在し `expires_at` が未来」だけで判断する。
+- 登録完了時（`POST /api/auth/register`）にレコードを DELETE してトークンを消費する。
 
 ---
 

@@ -9,10 +9,49 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// =====================================================================
+// 構造化エラー
+// API は {"code": "...", "detail": {...}} の JSON を返す。
+// フロントエンドが code を見てユーザー向けメッセージに変換する責務を持つ。
+// =====================================================================
+
+export class ApiError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly status: number,
+    public readonly detail?: Record<string, unknown>
+  ) {
+    super(code);
+    this.name = "ApiError";
+  }
+}
+
+const ERROR_MESSAGES: Record<string, string> = {
+  EMAIL_ALREADY_REGISTERED: "このメールアドレスはすでに使用されています",
+  EMAIL_INVALID: "有効なメールアドレスを入力してください",
+  INVALID_TOKEN: "リンクが無効か期限切れです。メールの確認をやり直してください",
+  USERNAME_TAKEN: "このユーザー名はすでに使用されています",
+  INVALID_INPUT: "入力内容を確認してください",
+  INVALID_CREDENTIALS: "メールアドレスまたはパスワードが正しくありません",
+  REGISTRATION_TOKEN_INVALID: "メール確認をやり直してください",
+  UNAUTHORIZED: "ログインが必要です",
+  NOT_FOUND: "見つかりません",
+  INTERNAL_ERROR: "サーバーエラーが発生しました。しばらく待ってから再試行してください",
+};
+
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return ERROR_MESSAGES[error.code] ?? `エラーが発生しました (${error.code})`;
+  }
+  if (error instanceof Error) return error.message;
+  return "不明なエラーが発生しました";
+}
+
 async function request<T>(
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  signal?: AbortSignal
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -21,11 +60,22 @@ async function request<T>(
       ...authHeaders(),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    const contentType = res.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      try {
+        const err = (await res.json()) as { code?: string; detail?: Record<string, unknown> };
+        if (err.code) {
+          throw new ApiError(err.code, res.status, err.detail);
+        }
+      } catch (e) {
+        if (e instanceof ApiError) throw e;
+      }
+    }
+    throw new ApiError("UNKNOWN_ERROR", res.status);
   }
 
   return res.json() as Promise<T>;
@@ -96,8 +146,8 @@ export const api = {
     requestEmailVerification(email: string) {
       return request<VerifyEmailResponse>("POST", "/auth/verify-email", { email });
     },
-    verifyEmailToken(token: string) {
-      return request<VerifyTokenResponse>("GET", `/auth/verify-token?token=${encodeURIComponent(token)}`);
+    verifyEmailToken(token: string, signal?: AbortSignal) {
+      return request<VerifyTokenResponse>("GET", `/auth/verify-token?token=${encodeURIComponent(token)}`, undefined, signal);
     },
     register(username: string, password: string, registrationToken: string) {
       return request<AuthResponse>("POST", "/auth/register", {
@@ -115,6 +165,9 @@ export const api = {
   },
 
   notes: {
+    get(id: string) {
+      return request<Note>("GET", `/notes/${encodeURIComponent(id)}`);
+    },
     create(text: string) {
       return request<Note>("POST", "/notes/create", { text });
     },

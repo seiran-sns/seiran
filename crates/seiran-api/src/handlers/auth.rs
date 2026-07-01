@@ -1,7 +1,6 @@
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    http::HeaderMap,
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -46,23 +45,23 @@ pub async fn register(
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
     if req.username.is_empty() || req.password.len() < 8 || req.registration_token.is_empty() {
-        return Err(ApiError::BadRequest("username・password（8文字以上）・registration_token は必須です"));
+        return Err(ApiError::BadRequest("INVALID_INPUT"));
     }
 
     // registration_token を検証し、確認済みのメールアドレスを取得する
     let token: uuid::Uuid = req.registration_token.parse()
-        .map_err(|_| ApiError::BadRequest("registration_token が無効です"))?;
+        .map_err(|_| ApiError::BadRequest("REGISTRATION_TOKEN_INVALID"))?;
 
     let verification = sqlx::query!(
         "DELETE FROM email_verifications
-         WHERE token = $1 AND verified_at IS NOT NULL
+         WHERE token = $1 AND expires_at > now()
          RETURNING email",
         token,
     )
     .fetch_optional(&state.db)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::BadRequest("registration_token が無効か期限切れです。メール確認をやり直してください"))?;
+    .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID"))?;
 
     let email = verification.email;
 
@@ -72,7 +71,7 @@ pub async fn register(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     if exists {
-        return Err(ApiError::Conflict("このメールアドレスは登録済みです"));
+        return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
     }
 
     let username_exists = state
@@ -81,7 +80,7 @@ pub async fn register(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     if username_exists.is_some() {
-        return Err(ApiError::Conflict("このユーザー名は使用済みです"));
+        return Err(ApiError::Conflict("USERNAME_TAKEN"));
     }
 
     let password_hash = LocalAuthProvider::hash_password(&req.password)
@@ -214,75 +213,63 @@ pub async fn register(
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
-) -> impl IntoResponse {
-    let row = match state.users.find_login_by_email(&req.email).await {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            return (StatusCode::UNAUTHORIZED, "メールアドレスまたはパスワードが正しくありません")
-                .into_response()
-        }
-        Err(e) => {
+) -> Result<Json<AuthResponse>, ApiError> {
+    let row = state
+        .users
+        .find_login_by_email(&req.email)
+        .await
+        .map_err(|e| {
             eprintln!("[login] DB エラー: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
+            ApiError::Internal(e.to_string())
+        })?
+        .ok_or(ApiError::Unauthorized("INVALID_CREDENTIALS"))?;
 
     let user_id = row.id;
     let email = row.email;
     let username = row.username;
 
-    let hash = match row.password_hash {
-        Some(h) => h,
-        None => {
-            return (StatusCode::UNAUTHORIZED, "ローカル認証が設定されていません").into_response()
-        }
-    };
+    let hash = row
+        .password_hash
+        .ok_or(ApiError::Unauthorized("INVALID_CREDENTIALS"))?;
 
     match LocalAuthProvider::verify_password(&req.password, &hash) {
         Ok(true) => {}
-        _ => {
-            return (StatusCode::UNAUTHORIZED, "メールアドレスまたはパスワードが正しくありません")
-                .into_response()
-        }
+        _ => return Err(ApiError::Unauthorized("INVALID_CREDENTIALS")),
     }
 
-    let token = match state.local_auth.generate_token(user_id, &email) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("[login] JWT 生成失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "トークン生成エラー").into_response();
-        }
-    };
+    let token = state.local_auth.generate_token(user_id, &email).map_err(|e| {
+        eprintln!("[login] JWT 生成失敗: {}", e);
+        ApiError::Internal("トークン生成エラー".to_string())
+    })?;
 
-    Json(AuthResponse {
+    Ok(Json(AuthResponse {
         token,
         user: UserInfo { id: user_id, username, email },
-    })
-    .into_response()
+    }))
 }
 
 pub async fn me(
     headers: HeaderMap,
     State(state): State<AppState>,
-) -> impl IntoResponse {
-    let auth_user = match extract_auth(&headers, &state.local_auth).await {
-        Ok(u) => u,
-        Err(e) => return e.into_response(),
-    };
+) -> Result<Json<UserInfo>, ApiError> {
+    let auth_user = extract_auth(&headers, &state.local_auth)
+        .await
+        .map_err(|_| ApiError::Unauthorized("UNAUTHORIZED"))?;
 
-    let username: String = match state.actors.find_local_by_user_id(auth_user.user_id).await {
-        Ok(Some(a)) => a.username,
-        Ok(None) => return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
-        Err(e) => {
+    let username = state
+        .actors
+        .find_local_by_user_id(auth_user.user_id)
+        .await
+        .map_err(|e| {
             eprintln!("[me] DB エラー: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
+            ApiError::Internal(e.to_string())
+        })?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?
+        .username;
 
-    Json(UserInfo {
+    Ok(Json(UserInfo {
         id: auth_user.user_id,
         username,
         email: auth_user.email,
-    })
-    .into_response()
+    }))
 }

@@ -142,6 +142,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))
         .route("/api/notes/home-timeline", get(handlers::notes::home_timeline))
+        .route("/api/notes/:id", get(handlers::notes::get_note))
+        // ActivityPub Note エンドポイント（nginx が AP Accept ヘッダーのみをここへ転送）
+        .route("/notes/:id", get(handlers::notes::get_note_ap))
         // フォロー
         .route("/api/follows/create", post(handlers::follows::create_follow))
         // ユーザープロフィール

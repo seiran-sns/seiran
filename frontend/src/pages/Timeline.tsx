@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, Note } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import styles from "./Timeline.module.css";
@@ -149,7 +149,9 @@ export default function Timeline() {
                   <span className={styles.noteDisplayName}>{displayName(note)}</span>
                   <span className={styles.noteAcct}>{acct(note)}</span>
                 </button>
-                <time className={styles.noteTime}>{formatDate(note.created_at)}</time>
+                <Link to={`/notes/${note.id}`} className={styles.noteTime}>
+                  <time>{formatDate(note.created_at)}</time>
+                </Link>
               </div>
               <p className={styles.noteBody}>{note.text}</p>
             </article>

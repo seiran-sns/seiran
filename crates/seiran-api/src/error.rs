@@ -1,35 +1,44 @@
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
+    Json,
 };
+use serde::Serialize;
+
+/// API エラーレスポンスのボディ。
+/// フロントエンドが `code` を見てユーザー向けメッセージに変換する責務を持つ。
+#[derive(Debug, Serialize)]
+struct ApiErrorBody {
+    code: &'static str,
+}
 
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 pub enum ApiError {
-    #[error("認証失敗: {0}")]
+    #[error("{0}")]
     Unauthorized(&'static str),
-    #[error("リソースが見つかりません")]
-    NotFound,
-    #[error("入力エラー: {0}")]
+    #[error("{0}")]
+    NotFound(&'static str),
+    #[error("{0}")]
     BadRequest(&'static str),
-    #[error("競合: {0}")]
+    #[error("{0}")]
     Conflict(&'static str),
+    /// `msg` はサーバーログにのみ出力され、クライアントには `INTERNAL_ERROR` コードのみ返す
     #[error("内部エラー: {0}")]
     Internal(String),
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, message) = match &self {
-            ApiError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, *msg),
-            ApiError::NotFound => (StatusCode::NOT_FOUND, "リソースが見つかりません"),
-            ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, *msg),
-            ApiError::Conflict(msg) => (StatusCode::CONFLICT, *msg),
+        let (status, code) = match &self {
+            ApiError::Unauthorized(c) => (StatusCode::UNAUTHORIZED, *c),
+            ApiError::NotFound(c) => (StatusCode::NOT_FOUND, *c),
+            ApiError::BadRequest(c) => (StatusCode::BAD_REQUEST, *c),
+            ApiError::Conflict(c) => (StatusCode::CONFLICT, *c),
             ApiError::Internal(msg) => {
                 eprintln!("[ERROR] {}", msg);
-                (StatusCode::INTERNAL_SERVER_ERROR, "内部エラーが発生しました")
+                (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR")
             }
         };
-        (status, message).into_response()
+        (status, Json(ApiErrorBody { code })).into_response()
     }
 }
