@@ -22,6 +22,8 @@ pub enum ApiError {
     BadRequest(&'static str),
     #[error("{0}")]
     Conflict(&'static str),
+    #[error("{0}")]
+    Forbidden(&'static str),
     /// `msg` はサーバーログにのみ出力され、クライアントには `INTERNAL_ERROR` コードのみ返す
     #[error("内部エラー: {0}")]
     Internal(String),
@@ -34,6 +36,7 @@ impl IntoResponse for ApiError {
             ApiError::NotFound(c) => (StatusCode::NOT_FOUND, *c),
             ApiError::BadRequest(c) => (StatusCode::BAD_REQUEST, *c),
             ApiError::Conflict(c) => (StatusCode::CONFLICT, *c),
+            ApiError::Forbidden(c) => (StatusCode::FORBIDDEN, *c),
             ApiError::Internal(msg) => {
                 eprintln!("[ERROR] {}", msg);
                 (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR")

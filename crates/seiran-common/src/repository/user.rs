@@ -21,6 +21,9 @@ pub trait UserRepository: Send + Sync {
     /// 新規ユーザーを挿入し、その user_id を返す。role は 'user' / 'moderator' / 'admin'。
     async fn insert(&self, email: &str, password_hash: &str, role: &str) -> Result<i64, sqlx::Error>;
 
+    /// ユーザー ID からロール文字列（"user" / "moderator" / "admin"）を取得する。
+    async fn find_role_by_user_id(&self, user_id: i64) -> Result<Option<String>, sqlx::Error>;
+
     /// ログイン用にメールアドレスでユーザー + ローカルアクターを取得する。
     async fn find_login_by_email(&self, email: &str) -> Result<Option<LoginRow>, sqlx::Error>;
 }
@@ -64,6 +67,16 @@ impl UserRepository for PgUserRepository {
         .fetch_one(&self.pool)
         .await?;
         Ok(row.0)
+    }
+
+    async fn find_role_by_user_id(&self, user_id: i64) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT role::text FROM users WHERE id = $1"
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(r,)| r))
     }
 
     async fn find_login_by_email(&self, email: &str) -> Result<Option<LoginRow>, sqlx::Error> {

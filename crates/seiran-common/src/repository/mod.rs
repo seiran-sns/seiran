@@ -7,10 +7,15 @@ pub mod actor;
 pub mod atp;
 pub mod follow;
 pub mod post;
+pub mod storage_provider;
 pub mod user;
 
 pub use actor::{Actor, ActorRepository, PgActorRepository};
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
 pub use follow::{FollowRepository, PgFollowRepository};
 pub use post::{PgPostRepository, PostRecord, PostRepository, PostSummary, TimelinePost};
+pub use storage_provider::{
+    CreateStorageProvider, PgStorageProviderRepository, StorageProvider,
+    StorageProviderError, StorageProviderRepository, UpdateStorageProvider,
+};
 pub use user::{LoginRow, PgUserRepository, UserRepository};

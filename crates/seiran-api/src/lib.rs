@@ -14,11 +14,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::cors::{Any, CorsLayer};
-use axum::{routing::{get, post}, Router};
+use axum::{routing::{get, patch, post}, Router};
 use sqlx::PgPool;
 
 use seiran_common::{
     LocalAuthProvider, Secrets, AtpCommitService, AtpCommitEvent, ApClient,
+    StorageProviderRepository, PgStorageProviderRepository,
 };
 use seiran_common::repository::{
     ActorRepository, AtpReadRepository, FollowRepository, PostRepository, UserRepository,
@@ -50,6 +51,7 @@ pub struct AppState {
     pub http_client: Arc<reqwest::Client>,
     pub ap_client: Arc<ApClient>,
     pub cloudflare: Option<Arc<cloudflare::CloudflareClient>>,
+    pub storage_providers: Arc<dyn StorageProviderRepository>,
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -93,6 +95,9 @@ pub async fn init_state(
         }
     };
 
+    let enc_key = secrets.encryption_key_bytes();
+    let storage_providers: Arc<dyn StorageProviderRepository> =
+        Arc::new(PgStorageProviderRepository::new(pool.clone(), enc_key));
     let actors: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
@@ -114,6 +119,7 @@ pub async fn init_state(
         http_client,
         ap_client,
         cloudflare,
+        storage_providers,
     }
 }
 
@@ -128,6 +134,13 @@ pub fn router(state: AppState) -> Router {
         // セットアップ（初回管理者作成）
         .route("/api/setup/status", get(handlers::setup::setup_status))
         .route("/api/setup", post(handlers::setup::setup))
+        // 管理者 API
+        .route("/api/admin/storage-providers",
+            get(handlers::admin::storage::list_storage_providers)
+            .post(handlers::admin::storage::create_storage_provider))
+        .route("/api/admin/storage-providers/:id",
+            patch(handlers::admin::storage::update_storage_provider)
+            .delete(handlers::admin::storage::delete_storage_provider))
         // 認証
         .route("/api/auth/verify-email", post(handlers::email_verify::request_email_verification))
         .route("/api/auth/verify-token", get(handlers::email_verify::verify_email_token))
