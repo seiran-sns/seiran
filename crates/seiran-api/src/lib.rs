@@ -21,6 +21,7 @@ use seiran_common::{
     LocalAuthProvider, Secrets, AtpCommitService, AtpCommitEvent, ApClient,
     StorageProviderRepository, PgStorageProviderRepository,
     MediaFileRepository, PgMediaFileRepository,
+    S3StorageClient,
 };
 use seiran_common::repository::{
     ActorRepository, AtpReadRepository, FollowRepository, PostRepository, UserRepository,
@@ -224,4 +225,92 @@ pub fn spawn_startup_tasks(state: &AppState) {
             Err(e) => eprintln!("[atp] 起動時 requestCrawl 失敗: {}", e),
         }
     });
+}
+
+// =====================================================================
+// メディア GC タスク
+// =====================================================================
+
+/// アップロードされたが参照されていない media_files を定期的に削除するタスク。
+///
+/// 1時間ごとに孤立ファイル（7日以上経過かつどのテーブルからも参照なし）を
+/// S3 → DB の順でベストエフォートで削除する。
+pub fn spawn_gc_tasks(state: &AppState) {
+    let db = state.db.clone();
+    let media_files = Arc::clone(&state.media_files);
+    let storage_providers = Arc::clone(&state.storage_providers);
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            run_media_gc(&db, media_files.as_ref(), storage_providers.as_ref()).await;
+        }
+    });
+}
+
+/// 孤立メディアファイルを保持する中間構造体。
+#[derive(sqlx::FromRow)]
+struct OrphanedMediaFile {
+    id: i64,
+    storage_provider_id: i64,
+    storage_key: String,
+}
+
+/// 孤立ファイルを最大 100 件取得し、S3 → DB の順で削除する（ベストエフォート）。
+async fn run_media_gc(
+    pool: &sqlx::PgPool,
+    media_files: &dyn MediaFileRepository,
+    storage_providers: &dyn StorageProviderRepository,
+) {
+    let rows: Vec<OrphanedMediaFile> = match sqlx::query_as::<_, OrphanedMediaFile>(
+        "SELECT id, storage_provider_id, storage_key
+         FROM media_files
+         WHERE created_at < NOW() - INTERVAL '7 days'
+           AND id NOT IN (SELECT media_file_id FROM post_attachments)
+           AND id NOT IN (SELECT avatar_media_id FROM actors WHERE avatar_media_id IS NOT NULL)
+           AND id NOT IN (SELECT banner_media_id FROM actors WHERE banner_media_id IS NOT NULL)
+           AND id NOT IN (SELECT media_file_id FROM custom_emojis)
+         LIMIT 100",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("[media-gc] 孤立ファイル取得失敗: {}", e);
+            return;
+        }
+    };
+
+    if rows.is_empty() {
+        return;
+    }
+    eprintln!("[media-gc] 孤立ファイル {} 件を処理します", rows.len());
+
+    for row in rows {
+        match storage_providers.find_by_id(row.storage_provider_id).await {
+            Ok(Some(provider)) => {
+                let s3 = S3StorageClient::new(&provider);
+                if let Err(e) = s3.delete(&row.storage_key).await {
+                    eprintln!("[media-gc] S3 削除失敗 id={}: {}", row.id, e);
+                    continue; // S3 失敗時は DB も削除しない
+                }
+                if let Err(e) = media_files.delete_by_id(row.id).await {
+                    eprintln!("[media-gc] DB 削除失敗 id={}: {}", row.id, e);
+                } else {
+                    eprintln!("[media-gc] 削除完了 id={}", row.id);
+                }
+            }
+            Ok(None) => {
+                eprintln!(
+                    "[media-gc] プロバイダー不明 id={}, provider_id={}",
+                    row.id, row.storage_provider_id
+                );
+            }
+            Err(e) => {
+                eprintln!("[media-gc] プロバイダー取得失敗: {}", e);
+            }
+        }
+    }
 }
