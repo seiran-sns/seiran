@@ -164,7 +164,9 @@ pub fn router(state: AppState) -> Router {
         // フォロー
         .route("/api/follows/create", post(handlers::follows::create_follow))
         // ユーザープロフィール
-        .route("/api/users/profile", get(handlers::users::user_profile))
+        .route("/api/users/profile",
+            get(handlers::users::user_profile)
+            .patch(handlers::users::update_profile))
         // Misskey 互換レイヤー
         .route("/api/meta", post(handlers::meta::api_meta))
         // MiAuth（Misskey 互換クライアント用）

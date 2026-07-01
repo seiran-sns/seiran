@@ -16,6 +16,7 @@ use crate::middleware::extract_auth;
 #[derive(Deserialize)]
 pub struct CreateNoteRequest {
     pub text: String,
+    pub attachment_ids: Option<Vec<i64>>,
 }
 
 #[derive(Serialize)]
@@ -80,6 +81,12 @@ pub async fn create_note(
         return (StatusCode::BAD_REQUEST, "text は空にできません").into_response();
     }
 
+    if let Some(ids) = &req.attachment_ids {
+        if ids.len() > 4 {
+            return ApiError::BadRequest("添付ファイルは最大4件です".to_owned()).into_response();
+        }
+    }
+
     let (actor_id, username) = match state.actors.find_local_by_user_id(auth_user.user_id).await {
         Ok(Some(a)) => (a.id, a.username),
         Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
@@ -101,6 +108,23 @@ pub async fn create_note(
     {
         eprintln!("[create_note] INSERT 失敗: {}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "投稿の保存に失敗しました").into_response();
+    }
+
+    if let Some(ids) = &req.attachment_ids {
+        for (position, &media_file_id) in ids.iter().enumerate() {
+            if let Err(e) = sqlx::query(
+                "INSERT INTO post_attachments (post_id, media_file_id, position) VALUES ($1, $2, $3)",
+            )
+            .bind(post_id)
+            .bind(media_file_id)
+            .bind(position as i16)
+            .execute(&state.db)
+            .await
+            {
+                eprintln!("[create_note] 添付 INSERT 失敗: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "添付の保存に失敗しました").into_response();
+            }
+        }
     }
 
     if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &req.text, now).await {
