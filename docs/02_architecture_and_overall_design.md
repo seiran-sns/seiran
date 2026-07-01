@@ -98,6 +98,9 @@ volumes:
 | `jwt_secret` | ローカル認証 JWT の署名鍵（256bit / hex） | `OsRng` で毎回ランダム生成 |
 | `atproto_private_key_pem` | AT Protocol PDS 署名用 P-256 秘密鍵（PKCS#8 PEM） | `SigningKey::random()` |
 | `atproto_public_key_pem` | 対応する P-256 公開鍵（PEM） | 上記から導出 |
+| `encryption_key` | DB 内の機密フィールド（`storage_providers.secret_key` 等）を暗号化する汎用鍵（256bit / hex） | `OsRng` で毎回ランダム生成 |
+
+`encryption_key` を用いた暗号化方式: **AES-256-GCM**。暗号化データは `nonce(12B) || ciphertext || tag(16B)` を base64 エンコードして TEXT カラムに格納する。`encryption_key` を紛失するとオブジェクトストレージへの接続が不可能になる。
 
 - **ユーザーが手動設定する必要は一切ない。** 環境変数 `JWT_SECRET` は廃止。
 - ファイルのパーミッションは `0600`（所有者のみ読み書き可）で作成される。

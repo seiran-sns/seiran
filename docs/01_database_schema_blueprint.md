@@ -8,17 +8,33 @@
 ## 1. テーブル定義 ＆ 物理データモデル
 
 ### 1.1 `users` (ローカル認証・アカウント管理)
-Auth0等の外部認証プロバイダの識別子と、内部の「魂（Identity）」をマッピングする。
 
 ```sql
+CREATE TYPE user_role AS ENUM ('user', 'moderator', 'admin');
+
 CREATE TABLE users (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    auth0_sub VARCHAR(255) UNIQUE NOT NULL, -- 例: 'google-oauth2|1029...'
-    email VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email         VARCHAR(255) UNIQUE NOT NULL,
+    password_hash TEXT,
+    role          user_role NOT NULL DEFAULT 'user',
+    suspended_at  TIMESTAMPTZ,            -- 非 NULL = 凍結済み
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+ロール権限マトリクス:
+
+| 操作 | user | moderator | admin |
+|---|---|---|---|
+| 投稿・閲覧 | ✓ | ✓ | ✓ |
+| 通報の閲覧・処理 | ✗ | ✓ | ✓ |
+| ユーザーの凍結（`suspended_at` 設定） | ✗ | ✓ | ✓ |
+| 他者ポストの削除 | ✗ | ✓ | ✓ |
+| サーバー設定変更（管理画面） | ✗ | ✗ | ✓ |
+| ユーザーロール任命 | ✗ | ✗ | ✓ |
+| カスタム絵文字管理 | ✗ | ✗ | ✓ |
+| オブジェクトストレージ設定 | ✗ | ✗ | ✓ |
 
 ### 1.2 `actors` (統一アクターテーブル)
 世界中のすべての「肉体」を管理する。ローカル、リモート、ブリッジ（影武者）のすべてがここに並列で格納される。
@@ -46,8 +62,10 @@ CREATE TABLE actors (
     username VARCHAR(255) NOT NULL, -- ユーザー名（@のあとの英数字）
     domain VARCHAR(255) NOT NULL,   -- インスタンスドメイン（例: mstdn.jp, bsky.social）
     display_name VARCHAR(255),
-    avatar_url VARCHAR(2048),
-    banner_url VARCHAR(2048),
+    avatar_url VARCHAR(2048),       -- リモートアクターはこちらを使用
+    banner_url VARCHAR(2048),       -- リモートアクターはこちらを使用
+    avatar_media_id BIGINT REFERENCES media_files(id) ON DELETE SET NULL, -- ローカルアクターのみ
+    banner_media_id BIGINT REFERENCES media_files(id) ON DELETE SET NULL, -- ローカルアクターのみ
     bio TEXT,
     
     -- 相互マッピング用外部キーポインタ
@@ -177,6 +195,137 @@ CREATE TABLE email_verifications (
 - `token`: 確認メールの URL に埋め込まれる UUID。`GET /api/auth/verify-token?token=...` で照合。
 - トークンの有効性は「レコードが存在し `expires_at` が未来」だけで判断する。
 - 登録完了時（`POST /api/auth/register`）にレコードを DELETE してトークンを消費する。
+
+---
+
+### 1.7 `storage_providers` (オブジェクトストレージプロバイダー)
+
+管理画面から登録する S3 互換オブジェクトストレージの設定。複数登録可能で、`id` 順に使用し容量上限に近づいたら次のプロバイダーへフォールバックする。
+
+```sql
+CREATE TABLE storage_providers (
+    id           BIGINT PRIMARY KEY,
+    name         VARCHAR(255) NOT NULL,      -- 管理者が付けるラベル
+    endpoint     VARCHAR(1024) NOT NULL,     -- S3 endpoint URL
+    bucket       VARCHAR(255) NOT NULL,
+    region       VARCHAR(100) NOT NULL DEFAULT 'auto',
+    access_key   VARCHAR(255) NOT NULL,
+    secret_key   TEXT NOT NULL,              -- AES-256-GCM で暗号化して格納（復号鍵は secrets.toml の encryption_key）
+    public_url   VARCHAR(1024) NOT NULL,     -- 公開アクセス用ベース URL
+    capacity_mb  BIGINT,                     -- NULL = 無制限。設定時は使用量合計がこれを超えたら次のプロバイダーへ
+    is_active    BOOLEAN NOT NULL DEFAULT true,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+**ストレージ選択アルゴリズム:**
+1. `is_active = true` のプロバイダーを `id` 昇順で走査
+2. `capacity_mb` が NULL → 無条件で選択
+3. `capacity_mb` が設定済み → `SELECT SUM(size) FROM media_files WHERE storage_provider_id = this.id` を計算し、合計 + 今回ファイルサイズ ≤ `capacity_mb * 1024 * 1024` なら選択。超過なら次へ
+4. 全プロバイダー満杯 → アップロードエラー
+
+---
+
+### 1.8 `media_files` (メディアファイル・グローバル重複排除)
+
+アップロードされた画像のメタデータ。オーナー概念を持たない。重複排除キーは `(sha256, blurhash)` の複合一致。
+
+```sql
+CREATE TABLE media_files (
+    id                   BIGINT PRIMARY KEY,
+    storage_provider_id  BIGINT NOT NULL REFERENCES storage_providers(id),
+    sha256               CHAR(64) NOT NULL,
+    blurhash             VARCHAR(100) NOT NULL,
+    size                 BIGINT NOT NULL,             -- バイト数
+    width                INT NOT NULL,
+    height               INT NOT NULL,
+    mime_type            VARCHAR(50) NOT NULL DEFAULT 'image/webp',
+    storage_key          VARCHAR(1024) NOT NULL,
+    uploaded_by_actor_id BIGINT REFERENCES actors(id) ON DELETE SET NULL, -- GC・監査用（オーナーシップではない）
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (sha256, blurhash),
+    UNIQUE (storage_provider_id, storage_key)
+);
+
+CREATE INDEX idx_media_files_sha256 ON media_files(sha256);
+```
+
+**重複排除フロー:**
+1. アップロード受信 → WebP 変換・リサイズ
+2. 変換後バイト列の SHA-256 と blurhash を計算（ハッシュは WebP 変換後に算出）
+3. `(sha256, blurhash)` が DB に存在 → 既存 `media_file_id` を返す（PUT スキップ）
+4. SHA-256 一致・blurhash 不一致 → 別画像として通常保存
+5. 両方不在 → ストレージ選択 → PUT → INSERT
+
+**画像処理仕様（変換後の保存寸法）:**
+
+| 用途 | 変換処理 | 保存寸法 |
+|---|---|---|
+| アバター | 中央正方形クロップ → WebP | 600 × 600 px |
+| バナー | fit: inside → WebP | 横最大 2048 × 縦最大 768 px |
+| カスタム絵文字 | fit: inside → WebP | 横最大 384 × 縦最大 64 px |
+| ポスト添付 | fit: inside → WebP | 長辺最大 2048 px |
+
+- サムネイルは生成しない。オリジナルは保持しない。WebP 1種のみ保存する。
+- アニメーション画像はアニメ WebP として保持する。
+
+**GC（ガベージコレクション）:**
+
+定期ジョブ（例: 1日1回）が以下の孤立ファイルを検出し、object storage DELETE → `media_files` DELETE の順で回収する。
+
+```sql
+SELECT id, storage_provider_id, storage_key
+FROM media_files
+WHERE created_at < now() - INTERVAL '7 days'
+  AND id NOT IN (
+    SELECT media_file_id FROM post_attachments
+    UNION
+    SELECT avatar_media_id FROM actors WHERE avatar_media_id IS NOT NULL
+    UNION
+    SELECT banner_media_id FROM actors WHERE banner_media_id IS NOT NULL
+    UNION
+    SELECT media_file_id FROM custom_emojis
+  );
+```
+
+**クォータ（利用容量）:**
+
+「利用者」テーブルは持たない。クォータは実参照テーブル（`post_attachments`・`actors.avatar_media_id/banner_media_id`）から distinct な `media_file_id` を集計して算出する。チェックはポスト送信・プロフィール保存のタイミングで行う（アップロード時ではなく使う瞬間に判定）。
+
+---
+
+### 1.9 `post_attachments` (ポスト添付画像)
+
+```sql
+CREATE TABLE post_attachments (
+    post_id        BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    media_file_id  BIGINT NOT NULL REFERENCES media_files(id),
+    position       SMALLINT NOT NULL,   -- 表示順（0 始まり）
+    alt_text       TEXT,
+    PRIMARY KEY (post_id, position)
+);
+
+CREATE INDEX idx_post_attachments_media ON post_attachments(media_file_id);
+```
+
+- 1ポストあたりの最大添付数は **4枚**（AT Protocol `app.bsky.embed.images` の上限に準拠）
+
+---
+
+### 1.10 `custom_emojis` (カスタム絵文字)
+
+管理者のみが登録・削除できる。
+
+```sql
+CREATE TABLE custom_emojis (
+    id            BIGINT PRIMARY KEY,
+    shortcode     VARCHAR(100) NOT NULL UNIQUE,  -- コロン不要: "blobcat" など
+    media_file_id BIGINT NOT NULL REFERENCES media_files(id),
+    category      VARCHAR(100),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
 
 ---
 
