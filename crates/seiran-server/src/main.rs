@@ -119,6 +119,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let state =
                 seiran_api::init_state(pool, secrets, http_client, local_domain).await;
             seiran_api::spawn_startup_tasks(&state);
+            seiran_api::spawn_gc_tasks(&state);
             serve(seiran_api::router(state), env_port("PORT", 3000)).await?;
         }
 
@@ -149,6 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await;
             seiran_api::spawn_startup_tasks(&api_state);
+            seiran_api::spawn_gc_tasks(&api_state);
 
             // federation ロール
             let inbox_state = seiran_federation_inbox::init_state(
