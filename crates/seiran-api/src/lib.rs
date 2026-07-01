@@ -125,6 +125,9 @@ pub fn router(state: AppState) -> Router {
         .allow_headers(Any);
 
     Router::new()
+        // セットアップ（初回管理者作成）
+        .route("/api/setup/status", get(handlers::setup::setup_status))
+        .route("/api/setup", post(handlers::setup::setup))
         // 認証
         .route("/api/auth/verify-email", post(handlers::email_verify::request_email_verification))
         .route("/api/auth/verify-token", get(handlers::email_verify::verify_email_token))

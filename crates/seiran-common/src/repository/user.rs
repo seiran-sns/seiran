@@ -15,8 +15,11 @@ pub trait UserRepository: Send + Sync {
     /// メールアドレスが登録済みかを返す。
     async fn email_exists(&self, email: &str) -> Result<bool, sqlx::Error>;
 
-    /// 新規ユーザーを挿入し、その user_id を返す。
-    async fn insert(&self, email: &str, password_hash: &str) -> Result<i64, sqlx::Error>;
+    /// 登録済みユーザー総数を返す（セットアップ状態チェック用）。
+    async fn count(&self) -> Result<i64, sqlx::Error>;
+
+    /// 新規ユーザーを挿入し、その user_id を返す。role は 'user' / 'moderator' / 'admin'。
+    async fn insert(&self, email: &str, password_hash: &str, role: &str) -> Result<i64, sqlx::Error>;
 
     /// ログイン用にメールアドレスでユーザー + ローカルアクターを取得する。
     async fn find_login_by_email(&self, email: &str) -> Result<Option<LoginRow>, sqlx::Error>;
@@ -42,14 +45,22 @@ impl UserRepository for PgUserRepository {
         Ok(row.is_some())
     }
 
-    async fn insert(&self, email: &str, password_hash: &str) -> Result<i64, sqlx::Error> {
+    async fn count(&self) -> Result<i64, sqlx::Error> {
+        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.0)
+    }
+
+    async fn insert(&self, email: &str, password_hash: &str, role: &str) -> Result<i64, sqlx::Error> {
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO users (email, password_hash, created_at, updated_at)
-             VALUES ($1, $2, NOW(), NOW())
+            "INSERT INTO users (email, password_hash, role, created_at, updated_at)
+             VALUES ($1, $2, $3::user_role, NOW(), NOW())
              RETURNING id",
         )
         .bind(email)
         .bind(password_hash)
+        .bind(role)
         .fetch_one(&self.pool)
         .await?;
         Ok(row.0)

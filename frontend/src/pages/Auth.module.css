@@ -31,6 +31,13 @@
   font-weight: 400;
 }
 
+.description {
+  color: #888;
+  font-size: 0.875rem;
+  text-align: center;
+  margin: -16px 0 20px;
+}
+
 .form {
   display: flex;
   flex-direction: column;

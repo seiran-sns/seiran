@@ -32,6 +32,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_TOKEN: "リンクが無効か期限切れです。メールの確認をやり直してください",
   USERNAME_TAKEN: "このユーザー名はすでに使用されています",
   INVALID_INPUT: "入力内容を確認してください",
+  ALREADY_INITIALIZED: "セットアップはすでに完了しています",
   INVALID_CREDENTIALS: "メールアドレスまたはパスワードが正しくありません",
   REGISTRATION_TOKEN_INVALID: "メール確認をやり直してください",
   UNAUTHORIZED: "ログインが必要です",
@@ -141,7 +142,20 @@ export interface VerifyTokenResponse {
   registration_token: string;
 }
 
+export interface SetupStatus {
+  initialized: boolean;
+}
+
 export const api = {
+  setup: {
+    status(signal?: AbortSignal) {
+      return request<SetupStatus>("GET", "/setup/status", undefined, signal);
+    },
+    initialize(username: string, email: string, password: string) {
+      return request<AuthResponse>("POST", "/setup", { username, email, password });
+    },
+  },
+
   auth: {
     requestEmailVerification(email: string) {
       return request<VerifyEmailResponse>("POST", "/auth/verify-email", { email });

@@ -112,6 +112,39 @@ volumes:
 - `seiran-common::secrets` モジュール (`crates/seiran-common/src/secrets.rs`)
 - 各バイナリの `main()` で `SecretsFile::from_env().load_or_create()` を呼び出し、返却された `Secrets` を `create_auth_provider(&secrets)` に渡す。
 
+### 1.3.1 初回セットアップフロー
+
+`users` テーブルにユーザーが1件も存在しない状態を「未初期化」とし、フロントエンドが専用のセットアップ画面を表示する。
+
+#### エンドポイント
+
+| エンドポイント | 説明 |
+|---|---|
+| `GET /api/setup/status` | `{ "initialized": bool }` を返す。`users` テーブルの件数で判定。 |
+| `POST /api/setup` | 初回管理者ユーザーを作成する。`users` が空のときのみ受理。 |
+
+#### リクエスト (`POST /api/setup`)
+
+```json
+{ "username": "alice", "email": "alice@example.com", "password": "..." }
+```
+
+#### 処理順序
+
+1. `users` テーブルが空でなければ `409 ALREADY_INITIALIZED` を返して終了。
+2. パスワードをハッシュ。
+3. PLC genesis op を生成 → Cloudflare TXT セット → `plc.directory` へ同期 POST（最大 3 回リトライ）。
+4. PLC 失敗 → エラー返却。DB は一切書き込まない。
+5. PLC 成功 → `users` INSERT（`role = 'admin'`）→ `actors` INSERT → ATP プロフィールコミット。
+6. JWT を発行してレスポンス。
+
+#### 設計上のポイント
+
+- **メール確認不要**: 管理者セットアップはサーバーへのアクセス権を持つ人間が行うため、`email_verifications` テーブルを使用しない。
+- **PLC 登録は同期**: ハンドルが PLC directory に既存のエントリと衝突した場合、登録を差し戻してユーザーに別ハンドルを選ばせるために同期実行とする。通常の新規登録フローも同様。
+- **ユーザーネームは任意**: `admin` 固定にすると `admin.domain` が PLC directory に既存の場合にハマるため、管理者が自由に設定できる。
+- **フロントエンドの動作**: アプリ起動時に `GET /api/setup/status` を呼び、`initialized: false` であれば全ルートの代わりにセットアップ画面を表示する（react-router の Routes を置き換え）。セットアップ完了後は通常の画面フローに移行。
+
 ---
 
 ## 1.4 API エラーレスポンス仕様

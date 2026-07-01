@@ -166,7 +166,7 @@ pub async fn register(
     // 4. DB 書き込み（PLC 送信成功後）
     let user_id = state
         .users
-        .insert(&email, &password_hash)
+        .insert(&email, &password_hash, "user")
         .await
         .map_err(|e| {
             eprintln!("[register] users INSERT 失敗: {}", e);
