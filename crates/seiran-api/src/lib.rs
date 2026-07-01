@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::cors::{Any, CorsLayer};
-use axum::{routing::{get, patch, post}, Router};
+use axum::{routing::{delete, get, patch, post}, Router};
 use sqlx::PgPool;
 
 use seiran_common::{
@@ -146,6 +146,17 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/storage-providers/:id",
             patch(handlers::admin::storage::update_storage_provider)
             .delete(handlers::admin::storage::delete_storage_provider))
+        // 管理者ユーザー管理
+        .route("/api/admin/users", get(handlers::admin::users::list_users))
+        .route("/api/admin/users/:id/suspend", post(handlers::admin::users::suspend_user))
+        .route("/api/admin/users/:id/unsuspend", post(handlers::admin::users::unsuspend_user))
+        .route("/api/admin/users/:id/role", post(handlers::admin::users::change_user_role))
+        // カスタム絵文字
+        .route("/api/admin/emojis",
+            get(handlers::admin::emojis::list_emojis)
+            .post(handlers::admin::emojis::create_emoji))
+        .route("/api/admin/emojis/:id",
+            delete(handlers::admin::emojis::delete_emoji))
         // ドライブ（メディアアップロード）
         .route("/api/drive/files/create", post(handlers::drive::create_drive_file))
         // 認証
