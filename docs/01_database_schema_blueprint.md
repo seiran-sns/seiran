@@ -198,7 +198,29 @@ CREATE TABLE email_verifications (
 
 ---
 
-### 1.7 `storage_providers` (オブジェクトストレージプロバイダー)
+### 1.7 `password_resets` (パスワードリセット)
+
+パスワードリセットフローで使用。リセットリンクの有効期限は **1 時間**。
+
+```sql
+CREATE TABLE password_resets (
+    id         BIGINT PRIMARY KEY,
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token      UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '1 hour',
+    used_at    TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_password_resets_token ON password_resets(token);
+```
+
+- `token`: リセットメールの URL に埋め込まれる UUID（DB が自動生成）。
+- `used_at`: リセット完了時に `NOW()` を記録（NULL = 未使用）。使い捨てトークン。
+- トークンの有効性は「`used_at IS NULL` かつ `expires_at > NOW()`」で判断。
+
+---
+
+### 1.8 `storage_providers` (オブジェクトストレージプロバイダー)
 
 管理画面から登録する S3 互換オブジェクトストレージの設定。複数登録可能で、`id` 順に使用し容量上限に近づいたら次のプロバイダーへフォールバックする。
 

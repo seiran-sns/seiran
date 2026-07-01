@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::HeaderMap,
     Json,
 };
@@ -11,6 +11,7 @@ use seiran_common::atp::signing_key_from_pem;
 
 use crate::AppState;
 use crate::error::ApiError;
+use crate::mailer::send_password_reset_email;
 use crate::middleware::extract_auth;
 
 #[derive(Deserialize)]
@@ -271,5 +272,169 @@ pub async fn me(
         id: auth_user.user_id,
         username,
         email: auth_user.email,
+    }))
+}
+
+// =====================================================================
+// パスワードリセット
+// =====================================================================
+
+#[derive(Deserialize)]
+pub struct RequestPasswordResetRequest {
+    pub email: String,
+}
+
+#[derive(Serialize)]
+pub struct MessageResponse {
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+pub struct VerifyResetTokenQuery {
+    pub token: String,
+}
+
+#[derive(Serialize)]
+pub struct ValidResponse {
+    pub valid: bool,
+}
+
+#[derive(Deserialize)]
+pub struct ResetPasswordRequest {
+    pub token: String,
+    pub new_password: String,
+}
+
+/// POST /api/auth/request-password-reset
+/// メールアドレスを受け取りリセットリンクを送信する。
+/// ユーザーが存在しない場合も同一レスポンスを返す（ユーザー存在確認攻撃を防ぐ）。
+pub async fn request_password_reset(
+    State(state): State<AppState>,
+    Json(req): Json<RequestPasswordResetRequest>,
+) -> Result<Json<MessageResponse>, ApiError> {
+    let email = req.email.trim().to_lowercase();
+
+    // ユーザーを検索（存在しなくても同一レスポンス）
+    let user_row: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM users WHERE email = $1 LIMIT 1",
+    )
+    .bind(&email)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    if let Some((user_id,)) = user_row {
+        let reset_id = generate_snowflake_id(chrono::Utc::now());
+
+        // password_resets に INSERT。token は DB の DEFAULT gen_random_uuid() で生成。
+        let token_row: Option<(String,)> = sqlx::query_as(
+            "INSERT INTO password_resets (id, user_id)
+             VALUES ($1, $2)
+             RETURNING token::text",
+        )
+        .bind(reset_id)
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[request-password-reset] DB エラー: {}", e)))?;
+
+        if let Some((token,)) = token_row {
+            let reset_url = format!("https://{}/reset-password?token={}", state.local_domain, token);
+            if let Err(e) = send_password_reset_email(&email, &reset_url).await {
+                eprintln!("[request-password-reset] メール送信失敗（処理は継続）: {}", e);
+            }
+        }
+    }
+
+    Ok(Json(MessageResponse {
+        message: "リセットリンクを送信しました（メールが存在する場合）".to_owned(),
+    }))
+}
+
+/// GET /api/auth/verify-reset-token?token={uuid}
+/// トークンの有効性を検証する（副作用なし）。
+pub async fn verify_reset_token(
+    Query(params): Query<VerifyResetTokenQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<ValidResponse>, ApiError> {
+    // UUID 形式の検証
+    uuid::Uuid::parse_str(&params.token)
+        .map_err(|_| ApiError::NotFound("RESET_TOKEN_INVALID"))?;
+
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT user_id FROM password_resets
+         WHERE token = $1::uuid
+           AND used_at IS NULL
+           AND expires_at > NOW()",
+    )
+    .bind(&params.token)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    if row.is_none() {
+        return Err(ApiError::NotFound("RESET_TOKEN_INVALID"));
+    }
+
+    Ok(Json(ValidResponse { valid: true }))
+}
+
+/// POST /api/auth/reset-password
+/// トークンを消費してパスワードを更新する。
+pub async fn reset_password(
+    State(state): State<AppState>,
+    Json(req): Json<ResetPasswordRequest>,
+) -> Result<Json<MessageResponse>, ApiError> {
+    // UUID 形式の検証
+    uuid::Uuid::parse_str(&req.token)
+        .map_err(|_| ApiError::BadRequest("RESET_TOKEN_INVALID".to_owned()))?;
+
+    // トークン検証（user_id を取得）
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT user_id FROM password_resets
+         WHERE token = $1::uuid
+           AND used_at IS NULL
+           AND expires_at > NOW()",
+    )
+    .bind(&req.token)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let (user_id,) = row.ok_or_else(|| ApiError::BadRequest("RESET_TOKEN_INVALID".to_owned()))?;
+
+    // パスワード長チェック
+    if req.new_password.len() < 8 {
+        return Err(ApiError::BadRequest("PASSWORD_TOO_SHORT".to_owned()));
+    }
+
+    // Argon2 でハッシュ化
+    let password_hash = LocalAuthProvider::hash_password(&req.new_password)
+        .map_err(|e| {
+            eprintln!("[reset-password] ハッシュ失敗: {}", e);
+            ApiError::Internal("パスワード処理エラー".to_string())
+        })?;
+
+    // users.password_hash を更新
+    sqlx::query(
+        "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
+    )
+    .bind(&password_hash)
+    .bind(user_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("[reset-password] users UPDATE 失敗: {}", e)))?;
+
+    // トークンを使用済みにする（used_at を記録）
+    sqlx::query(
+        "UPDATE password_resets SET used_at = NOW() WHERE token = $1::uuid",
+    )
+    .bind(&req.token)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("[reset-password] token UPDATE 失敗: {}", e)))?;
+
+    Ok(Json(MessageResponse {
+        message: "パスワードを更新しました".to_owned(),
     }))
 }

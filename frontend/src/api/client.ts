@@ -38,6 +38,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   UNAUTHORIZED: "ログインが必要です",
   NOT_FOUND: "見つかりません",
   INTERNAL_ERROR: "サーバーエラーが発生しました。しばらく待ってから再試行してください",
+  RESET_TOKEN_INVALID: "リンクが無効または期限切れです。パスワードリセットをやり直してください",
+  PASSWORD_TOO_SHORT: "パスワードは8文字以上で入力してください",
 };
 
 export function getErrorMessage(error: unknown): string {
@@ -175,6 +177,15 @@ export const api = {
     },
     me() {
       return request<User>("GET", "/auth/me");
+    },
+    requestPasswordReset(email: string) {
+      return request<{ message: string }>("POST", "/auth/request-password-reset", { email });
+    },
+    verifyResetToken(token: string, signal?: AbortSignal) {
+      return request<{ valid: boolean }>("GET", `/auth/verify-reset-token?token=${encodeURIComponent(token)}`, undefined, signal);
+    },
+    resetPassword(token: string, newPassword: string) {
+      return request<{ message: string }>("POST", "/auth/reset-password", { token, new_password: newPassword });
     },
   },
 
