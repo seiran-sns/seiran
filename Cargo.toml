@@ -6,4 +6,5 @@ members = [
     "crates/seiran-federation-inbox",
     "crates/seiran-federation-worker",
     "crates/seiran-atp-repo",
+    "crates/seiran-server",
 ]

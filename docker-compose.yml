@@ -1,5 +1,32 @@
 name: seiran
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 【大規模／ロール分離構成】
+# 統合バイナリ seiran-server を --role 違いで複数コンテナ起動し、
+# ワーカーや Firehose を API から独立させて負荷分散する。
+#
+# 小規模・単一コンテナで運用したい場合は docker-compose.mono.yml を使うこと:
+#   docker compose -f docker-compose.mono.yml up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 全バックエンドコンテナで共有するビルド・環境定義（同一イメージを役割違いで使う）
+x-seiran-backend: &seiran-backend
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  image: seiran-server:latest
+  restart: always
+  env_file: .env
+  environment:
+    DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+  volumes:
+    - config-data:/app/config
+  depends_on:
+    db:
+      condition: service_healthy
+  networks:
+    - internal
+
 services:
   # ─── PostgreSQL ────────────────────────────────────────────────────────────
   db:
@@ -20,77 +47,27 @@ services:
       interval: 5s
       retries: 20
 
-  # ─── seiran-api (REST API / 認証 / タイムライン) ─────────────────────────
+  # ─── api ロール (REST API / 認証 / タイムライン / XRPC) ────────────────────
   api:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: api
-    restart: always
-    env_file: .env
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-    volumes:
-      - config-data:/app/config
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - internal
+    <<: *seiran-backend
+    command: ["seiran-server", "--role", "api"]
 
-  # ─── seiran-federation-inbox (AP Inbox / Webfinger) ─────────────────────
+  # ─── federation ロール (AP Inbox / Webfinger / Actor / Outbox) ─────────────
   federation-inbox:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: federation-inbox
-    restart: always
-    env_file: .env
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-    volumes:
-      - config-data:/app/config
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - internal
+    <<: *seiran-backend
+    command: ["seiran-server", "--role", "federation"]
 
-  # ─── seiran-federation-worker (バックグラウンドジョブ実行) ───────────────
-  # 注意: 現在 InMemoryJobQueue を使用。api / federation-inbox とキューを共有しないため
+  # ─── worker ロール (バックグラウンドジョブ実行) ─────────────────────────────
+  # 注意: 現在 InMemoryJobQueue を使用。api / federation とキューを共有しないため
   # Phase 8 (Redis 統合) までは独立した処理のみ実行する。
   worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: worker
-    restart: always
-    env_file: .env
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-    volumes:
-      - config-data:/app/config
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - internal
+    <<: *seiran-backend
+    command: ["seiran-server", "--role", "worker"]
 
-  # ─── seiran-atp-repo (Bluesky Firehose リスナー) ─────────────────────────
+  # ─── firehose ロール (Bluesky Firehose リスナー) ───────────────────────────
   atp-repo:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: atp-repo
-    restart: always
-    env_file: .env
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - internal
+    <<: *seiran-backend
+    command: ["seiran-server", "--role", "firehose"]
 
   # ─── フロントエンド (Vite dev server) ────────────────────────────────────
   # node_modules はイメージビルド時にインストール済み。
@@ -107,7 +84,7 @@ services:
     networks:
       - internal
 
-  # ─── Nginx (リバースプロキシ) ─────────────────────────────────────────────
+  # ─── Nginx (リバースプロキシ / ロール分離ルーティング) ─────────────────────
   nginx:
     image: nginx:1.27-alpine
     restart: always

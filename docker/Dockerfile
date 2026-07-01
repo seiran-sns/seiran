@@ -4,47 +4,28 @@ FROM rust:1-bookworm AS builder
 WORKDIR /app
 COPY . .
 
+# 統合バイナリ seiran-server を1本だけビルドする。
+# 役割（api / federation / worker / firehose / all）は起動時の --role で切り替わる。
+#
 # --mount=type=cache で cargo レジストリと target/ をビルドキャッシュに保持する。
 # イメージレイヤーには含まれないため、ビルドをまたいで再利用される。
-# ソース変更時は変更クレートのみ再コンパイル（2 回目以降は大幅に高速化）。
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    SQLX_OFFLINE=true cargo build --release \
-        -p seiran-api \
-        -p seiran-federation-inbox \
-        -p seiran-federation-worker \
-        -p seiran-atp-repo \
-    && cp target/release/seiran-api              /seiran-api \
-    && cp target/release/seiran-federation-inbox /seiran-federation-inbox \
-    && cp target/release/seiran-federation-worker /seiran-federation-worker \
-    && cp target/release/seiran-atp-repo         /seiran-atp-repo
+    SQLX_OFFLINE=true cargo build --release -p seiran-server \
+    && cp target/release/seiran-server /seiran-server
 
-# ─── ランタイム共通ベース ─────────────────────────────────────────────────────
+# ─── ランタイム ───────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+COPY --from=builder /seiran-server /usr/local/bin/seiran-server
 
-# ─── seiran-api ──────────────────────────────────────────────────────────────
-FROM runtime AS api
-COPY --from=builder /seiran-api /usr/local/bin/seiran-api
-EXPOSE 3000
-CMD ["seiran-api"]
+# api / all は 3000、federation は 3001（説明用。実際の待受は環境変数で制御）
+EXPOSE 3000 3001
 
-# ─── seiran-federation-inbox ─────────────────────────────────────────────────
-FROM runtime AS federation-inbox
-COPY --from=builder /seiran-federation-inbox /usr/local/bin/seiran-federation-inbox
-EXPOSE 3001
-CMD ["seiran-federation-inbox"]
-
-# ─── seiran-federation-worker ────────────────────────────────────────────────
-FROM runtime AS worker
-COPY --from=builder /seiran-federation-worker /usr/local/bin/seiran-federation-worker
-CMD ["seiran-federation-worker"]
-
-# ─── seiran-atp-repo (Firehose リスナー) ─────────────────────────────────────
-FROM runtime AS atp-repo
-COPY --from=builder /seiran-atp-repo /usr/local/bin/seiran-atp-repo
-CMD ["seiran-atp-repo"]
+# 引数なし = 全ロールを1プロセスで実行（小規模サーバー向け）。
+# 大規模構成では compose 側で command に --role を渡して役割を分離する。
+CMD ["seiran-server"]

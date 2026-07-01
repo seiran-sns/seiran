@@ -312,9 +312,31 @@ AP Note の形式:
 
 ---
 
-## 4. 大規模化を見据えた疎結合コンポーネント構成（物理分割ロードマップ）
+## 4. 大規模化を見据えた疎結合コンポーネント構成（単一バイナリ・複数ロール）
 
-本システムは、開発初期（プロトタイプ期）はシンプルなモノリス（単一のRustプロセス）として動作するが、将来のユーザー増加やネットワーク負荷増大に備え、各機能コンポーネント間のインターフェースを厳格に切り離す。物理的に別々のサーバー（マイクロサービス）へプロセス分割可能な以下の4つのコアコンポーネントで構成する。
+本システムは、各機能コンポーネントのインターフェースを厳格に切り離しつつ、**実体は単一の統合バイナリ `seiran-server` に集約**している。起動時の `--role`（または環境変数 `SEIRAN_ROLE`）で役割を切り替えることで、以下の2つの運用形態を同じイメージで実現する。
+
+- **小規模構成（`role=all`、既定）**: api / federation / worker / firehose を1プロセスで同時起動し、単一コンテナで全機能を提供する。
+- **大規模構成（ロール分離）**: 同じイメージを `--role` 違いで複数コンテナ起動し、ワーカーや Firehose を Web API から独立させて負荷分散する。
+
+各ロールは以下の4つのコアコンポーネントに対応する（下記 4.1）。ソフトウェア境界（クレート分割）は維持したまま、物理境界（プロセス／コンテナ分割）を起動オプションで選べる構造とした。
+
+### 4.0 統合バイナリ `seiran-server` のロール
+
+| ロール | 対応クレート | 待受ポート | 内容 |
+|---|---|---|---|
+| `all`（既定） | 全クレート | `PORT`（既定 3000） | api + federation を1ポートに合流し、worker と firehose を同一プロセスで spawn |
+| `api` | `seiran-api` | `PORT`（既定 3000） | REST API / 認証 / タイムライン / XRPC |
+| `federation` | `seiran-federation-inbox` | `FEDERATION_INBOX_PORT`（既定 3001） | ActivityPub Inbox / WebFinger / Actor / Outbox / NodeInfo |
+| `worker` | `seiran-federation-worker` | なし | 非同期ジョブ実行エンジン（現状 DB 不要のスタブ） |
+| `firehose` | `seiran-atp-repo` | なし | Bluesky Firehose リスナー |
+
+- **ルーター合流**: `seiran-api` と `seiran-federation-inbox` は担当パスが完全に重複しないため（前者は `/api/*` `/xrpc/*` `/notes/:id` 等、後者は `/inbox` `/users/:username` `/.well-known/webfinger` 等）、`all` モードでは axum の `Router::merge` で単一ポートに合流できる。各ルーターは自前の `AppState` を `with_state` で保持したまま合流するため、状態の統合は不要。
+- **共有リソース**: `all` モードでは DB プール・シークレット・HTTP クライアントをプロセス内で一度だけ生成し、各ロールの `init_state` へ渡す（重複接続の回避）。
+- **nginx**: 小規模構成は `docker/nginx.mono.conf`（全バックエンドパスを `seiran-server:3000` へ）、大規模構成は `docker/nginx.conf`（`api:3000` と `federation-inbox:3001` を分離）を使う。
+- **compose**: 小規模は `docker-compose.mono.yml`、大規模は `docker-compose.yml`。
+
+各クレートは `main` を持たず、`init_state()` / `router()` / `run()` 等を公開するライブラリとして実装し、`seiran-server` がそれらを配線する。
 
 ### 4.1 4大コンポーネントの定義と物理分割境界
 
@@ -377,18 +399,18 @@ graph TD
 ---
 
 ### 4.3 Rust プロジェクト構成 (Cargo Workspaces)
-ソフトウェア境界を物理的な境界と完全に一致させるため、Rustのリポジトリ構成に `Cargo Workspace` を採用し、以下のマルチパッケージ構成とする。
+ソフトウェア境界を明確に保つため `Cargo Workspace` を採用する。各ロールクレートは **ライブラリ**（`main` を持たない）として実装し、唯一のバイナリ `seiran-server` がそれらを配線して `--role` で起動する。
 
 ```text
 seiran/
 ├── Cargo.toml
 ├── crates/
-│   ├── seiran-api/             # Web API エンドポイント / 互換レイヤー
-│   ├── seiran-federation/      # AP Inbox / ATP Firehose レシーバー
-│   ├── seiran-worker/          # 各種非同期ジョブ実行ワーカー
-│   ├── seiran-atp-repo/        # ATP MSTリポジトリ処理・署名
-│   ├── seiran-core/            # 共通のデータ構造 (Post, Actor等)
-│   └── seiran-queue/           # JobQueue / SessionStore の Trait 定義
+│   ├── seiran-server/          # 【唯一のバイナリ】--role で各ロールを起動
+│   ├── seiran-api/             # (lib) Web API / 認証 / TL / XRPC
+│   ├── seiran-federation-inbox/# (lib) AP Inbox / WebFinger / Actor / Outbox
+│   ├── seiran-federation-worker/# (lib) 非同期ジョブ実行ワーカー
+│   ├── seiran-atp-repo/        # (lib) ATP Firehose リスナー / MST 管理
+│   └── seiran-common/          # (lib) 共通データ構造・DB・キュー・ATP/AP エンジン
 
 ---
 

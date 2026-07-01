@@ -102,6 +102,14 @@
     - [x] `/verify-actor` ハンドシェイク検証、Webfinger解決、アバター画像等のキャッシュ
   - [x] **⑤ ATPリポジトリコミット・配信キュー (`atp_repository_publish`)**
     - [x] 極高優先度、アクターID単位 of FIFO（先入れ先出し）制御・排他ロックの適用
+- [x] **3.4. 統合バイナリ化（単一バイナリ・複数ロール）**
+  - [x] 各ロールクレート（api / inbox / worker / atp-repo）を lib 化（`main` を廃止し `init_state` / `router` / `run` を公開）
+  - [x] 統合バイナリ `seiran-server` 新設（`--role` / `SEIRAN_ROLE` で分岐、引数なしは `all`）
+  - [x] `all` モードで api + federation を `Router::merge`、worker / firehose を spawn、共有リソース（DB プール・シークレット・HTTP クライアント）はプロセス内で一度だけ生成
+  - [x] Dockerfile を単一バイナリビルドに集約（マルチターゲット廃止）
+  - [x] `docker-compose.yml`（大規模・ロール分離）と `docker-compose.mono.yml`（小規模・単一コンテナ）を用意
+  - [x] `docker/nginx.conf`（split）と `docker/nginx.mono.conf`（mono）を用意
+  - 仕様詳細: `docs/02_architecture_and_overall_design.md` セクション 4.0 参照
 
 ---
 

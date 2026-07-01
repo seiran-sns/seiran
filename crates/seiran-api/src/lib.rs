@@ -1,8 +1,14 @@
-mod cloudflare;
-mod error;
-mod mailer;
-mod middleware;
-mod handlers;
+//! seiran-api — REST API / 認証 / タイムライン / XRPC を提供するライブラリ。
+//!
+//! バイナリは `seiran-server` が `--role api`（または `all`）で起動する。
+//! ここでは AppState 構築（[`init_state`]）・ルーター構築（[`router`]）・
+//! 起動時タスク（[`spawn_startup_tasks`]）を公開し、実際の serve は呼び出し側が行う。
+
+pub mod cloudflare;
+pub mod error;
+pub mod mailer;
+pub mod middleware;
+pub mod handlers;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,8 +18,7 @@ use axum::{routing::{get, post}, Router};
 use sqlx::PgPool;
 
 use seiran_common::{
-    get_db_pool, run_migrations, LocalAuthProvider, Secrets, SecretsFile,
-    AtpCommitService, AtpCommitEvent, ApClient,
+    LocalAuthProvider, Secrets, AtpCommitService, AtpCommitEvent, ApClient,
 };
 use seiran_common::repository::{
     ActorRepository, AtpReadRepository, FollowRepository, PostRepository, UserRepository,
@@ -47,30 +52,19 @@ pub struct AppState {
     pub cloudflare: Option<Arc<cloudflare::CloudflareClient>>,
 }
 
-// =====================================================================
-// エントリーポイント
-// =====================================================================
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _ = dotenvy::dotenv();
-
-    let secrets_file = SecretsFile::from_env();
-    let secrets = secrets_file.load_or_create()?;
-    eprintln!("[seiran-api] シークレット読み込み完了");
-
-    let pool = get_db_pool().await?;
-    eprintln!("[seiran-api] DB 接続完了");
-    run_migrations(&pool).await?;
-    eprintln!("[seiran-api] マイグレーション適用完了");
-
+/// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
+/// api ロールの [`AppState`] を構築する。
+///
+/// `seiran-server` が単一プロセス内でこれらのリソースを一度だけ生成し、
+/// 各ロールの `init_state` へ渡す（`all` モードでの重複接続を避けるため）。
+pub async fn init_state(
+    pool: PgPool,
+    secrets: Arc<Secrets>,
+    http_client: Arc<reqwest::Client>,
+    local_domain: String,
+) -> AppState {
     let local_auth = Arc::new(LocalAuthProvider::new(secrets.jwt_secret_bytes()));
-    let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
-    let http_client = Arc::new(reqwest::Client::new());
     let ap_client = Arc::new(ApClient::new(Arc::clone(&http_client)));
-    let crawl_http = Arc::clone(&http_client);
-    let crawl_domain = local_domain.clone();
-    let startup_domain = local_domain.clone();
 
     let (atp_event_tx, _) = broadcast::channel::<AtpCommitEvent>(1024);
     let atp_event_tx = Arc::new(atp_event_tx);
@@ -99,17 +93,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // リポジトリ層の構築
     let actors: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
     let follows: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
 
-    let startup_actors = Arc::clone(&actors);
-    let startup_cf = cloudflare.clone();
-
-    let state = AppState {
+    AppState {
         actors,
         users,
         posts,
@@ -119,19 +109,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         local_auth,
         miauth_sessions: Arc::new(RwLock::new(HashMap::new())),
         local_domain,
-        secrets: Arc::new(secrets),
+        secrets,
         atp_service,
         http_client,
         ap_client,
         cloudflare,
-    };
+    }
+}
 
+/// api ロールの axum ルーターを構築する（CORS 適用込み）。
+pub fn router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let app = Router::new()
+    Router::new()
         // 認証
         .route("/api/auth/verify-email", post(handlers::email_verify::request_email_verification))
         .route("/api/auth/verify-token", get(handlers::email_verify::verify_email_token))
@@ -166,50 +159,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/.well-known/did.json", get(handlers::xrpc::server::well_known_did))
         .route("/.well-known/atproto-did", get(handlers::xrpc::server::well_known_atproto_did))
         .with_state(state)
-        .layer(cors);
+        .layer(cors)
+}
 
-    // 起動時タスク: Cloudflare TXT 再登録 + Relay requestCrawl
-    {
-        let startup_actors = startup_actors;
-        let cf2 = startup_cf;
-        let hc = crawl_http;
-        let domain = crawl_domain;
-        let sd = startup_domain;
-        tokio::spawn(async move {
-            // 全ローカルユーザーのハンドル TXT を確保（再デプロイ後の消失対策）
-            if let Some(cf) = cf2 {
-                match startup_actors.list_local_dids().await {
-                    Ok(rows) => {
-                        for (username, did) in rows {
-                            let handle = format!("{}.{}", username, sd);
-                            match cf.ensure_atproto_txt(&handle, &did).await {
-                                Ok(_) => eprintln!("[startup] TXT 確認済み: _atproto.{}", handle),
-                                Err(e) => eprintln!("[startup] TXT 登録失敗: {}: {}", handle, e),
-                            }
+/// 起動時タスク: 全ローカルユーザーの Cloudflare TXT 再登録 + Relay requestCrawl。
+///
+/// 再デプロイ後の TXT 消失対策と subscribeRepos 再接続の促進のため、
+/// バックグラウンドで一度だけ実行する。
+pub fn spawn_startup_tasks(state: &AppState) {
+    let startup_actors = Arc::clone(&state.actors);
+    let cf2 = state.cloudflare.clone();
+    let hc = Arc::clone(&state.http_client);
+    let domain = state.local_domain.clone();
+    let sd = state.local_domain.clone();
+
+    tokio::spawn(async move {
+        // 全ローカルユーザーのハンドル TXT を確保（再デプロイ後の消失対策）
+        if let Some(cf) = cf2 {
+            match startup_actors.list_local_dids().await {
+                Ok(rows) => {
+                    for (username, did) in rows {
+                        let handle = format!("{}.{}", username, sd);
+                        match cf.ensure_atproto_txt(&handle, &did).await {
+                            Ok(_) => eprintln!("[startup] TXT 確認済み: _atproto.{}", handle),
+                            Err(e) => eprintln!("[startup] TXT 登録失敗: {}: {}", handle, e),
                         }
                     }
-                    Err(e) => eprintln!("[startup] ローカルユーザー取得失敗: {}", e),
                 }
+                Err(e) => eprintln!("[startup] ローカルユーザー取得失敗: {}", e),
             }
+        }
 
-            // Relay に requestCrawl を送って subscribeRepos 再接続を促す
-            match hc
-                .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
-                .json(&serde_json::json!({"hostname": domain}))
-                .send()
-                .await
-            {
-                Ok(res) => eprintln!("[atp] 起動時 requestCrawl → {}", res.status()),
-                Err(e) => eprintln!("[atp] 起動時 requestCrawl 失敗: {}", e),
-            }
-        });
-    }
-
-    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
-    let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    eprintln!("[seiran-api] 起動: http://{}", addr);
-    axum::serve(listener, app).await?;
-
-    Ok(())
+        // Relay に requestCrawl を送って subscribeRepos 再接続を促す
+        match hc
+            .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
+            .json(&serde_json::json!({"hostname": domain}))
+            .send()
+            .await
+        {
+            Ok(res) => eprintln!("[atp] 起動時 requestCrawl → {}", res.status()),
+            Err(e) => eprintln!("[atp] 起動時 requestCrawl 失敗: {}", e),
+        }
+    });
 }
