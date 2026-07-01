@@ -1,0 +1,20 @@
+# Rust ビルド成果物
+/target/
+
+# 環境変数（秘密情報を含む）
+.env
+.env.local
+
+# シークレット自動生成ファイル（secrets.toml を含む config/ ディレクトリ）
+# ⚠️ このディレクトリを Docker ボリュームにマウントして永続化してください。
+config/
+
+# フロントエンド依存パッケージ
+frontend/node_modules/
+frontend/dist/
+
+# エディタ・OS メタデータ
+.DS_Store
+.idea/
+*.swp
+*.swo

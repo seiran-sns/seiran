@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/seiran-common",
+    "crates/seiran-api",
+    "crates/seiran-federation-inbox",
+    "crates/seiran-federation-worker",
+    "crates/seiran-atp-repo",
+    "crates/seiran-server",
+]
