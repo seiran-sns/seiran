@@ -170,8 +170,8 @@ export const api = {
         registration_token: registrationToken,
       });
     },
-    login(email: string, password: string) {
-      return request<AuthResponse>("POST", "/auth/login", { email, password });
+    login(identifier: string, password: string) {
+      return request<AuthResponse>("POST", "/auth/login", { identifier, password });
     },
     me() {
       return request<User>("GET", "/auth/me");

@@ -51,12 +51,12 @@
   - [x] フロントエンド `client.ts` に `ApiError` クラスと `getErrorMessage()` 関数を追加（コード→日本語メッセージのマップ）
   - [x] `Register.tsx` / `VerifyEmail.tsx` でエラーメッセージ表示を `getErrorMessage()` 経由に統一
   - [x] 方針を `docs/02_architecture_and_overall_design.md` セクション 1.4 に文書化
-- [ ] **2.7. ユーザーネームによるログイン対応**
-  - [ ] `POST /api/auth/login` の `email` フィールドを `identifier` に変更（後方互換なし）
-  - [ ] `identifier` に `@` が含まれる場合はメールアドレス、含まれない場合はユーザーネームとして解決
-  - [ ] ユーザーネーム解決: `actors WHERE username = $1 AND domain = LOCAL_DOMAIN` で `user_id` を取得
-  - [ ] フロントエンド `Login.tsx` のフィールドラベルを「メールアドレス / ユーザーネーム」に変更
-  - [ ] `client.ts` の `login()` の引数名を `identifier` に変更
+- [x] **2.7. ユーザーネームによるログイン対応**
+  - [x] `POST /api/auth/login` の `email` フィールドを `identifier` に変更（後方互換なし）
+  - [x] `identifier` に `@` が含まれる場合はメールアドレス、含まれない場合はユーザーネームとして解決
+  - [x] ユーザーネーム解決: `actors WHERE username = $1 AND domain = LOCAL_DOMAIN` で `user_id` を取得
+  - [x] フロントエンド `Login.tsx` のフィールドラベルを「メールアドレス / ユーザーネーム」に変更
+  - [x] `client.ts` の `login()` の引数名を `identifier` に変更
   - 仕様詳細: `docs/02_architecture_and_overall_design.md` セクション 1.5 参照
 - [ ] **2.8. パスワードリセット機能**
   - [ ] マイグレーション: `password_resets` テーブル（`id, user_id, token UUID, expires_at 1h, created_at`）

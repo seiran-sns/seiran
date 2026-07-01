@@ -36,7 +36,7 @@ pub struct UserInfo {
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
-    pub email: String,
+    pub identifier: String, // メールアドレス OR ユーザーネーム
     pub password: String,
 }
 
@@ -214,15 +214,16 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
-    let row = state
-        .users
-        .find_login_by_email(&req.email)
-        .await
-        .map_err(|e| {
-            eprintln!("[login] DB エラー: {}", e);
-            ApiError::Internal(e.to_string())
-        })?
-        .ok_or(ApiError::Unauthorized("INVALID_CREDENTIALS"))?;
+    let row = if req.identifier.contains('@') {
+        state.users.find_login_by_email(&req.identifier).await
+    } else {
+        state.users.find_login_by_username(&req.identifier).await
+    }
+    .map_err(|e| {
+        eprintln!("[login] DB エラー: {}", e);
+        ApiError::Internal(e.to_string())
+    })?
+    .ok_or(ApiError::Unauthorized("INVALID_CREDENTIALS"))?;
 
     let user_id = row.id;
     let email = row.email;
