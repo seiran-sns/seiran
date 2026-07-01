@@ -45,12 +45,12 @@ pub async fn register(
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
     if req.username.is_empty() || req.password.len() < 8 || req.registration_token.is_empty() {
-        return Err(ApiError::BadRequest("INVALID_INPUT"));
+        return Err(ApiError::BadRequest("INVALID_INPUT".into()));
     }
 
     // registration_token を検証し、確認済みのメールアドレスを取得する
     let token: uuid::Uuid = req.registration_token.parse()
-        .map_err(|_| ApiError::BadRequest("REGISTRATION_TOKEN_INVALID"))?;
+        .map_err(|_| ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
 
     let verification = sqlx::query!(
         "DELETE FROM email_verifications
@@ -61,7 +61,7 @@ pub async fn register(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID"))?;
+    .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
 
     let email = verification.email;
 

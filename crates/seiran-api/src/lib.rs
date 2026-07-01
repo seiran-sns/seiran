@@ -20,6 +20,7 @@ use sqlx::PgPool;
 use seiran_common::{
     LocalAuthProvider, Secrets, AtpCommitService, AtpCommitEvent, ApClient,
     StorageProviderRepository, PgStorageProviderRepository,
+    MediaFileRepository, PgMediaFileRepository,
 };
 use seiran_common::repository::{
     ActorRepository, AtpReadRepository, FollowRepository, PostRepository, UserRepository,
@@ -52,6 +53,7 @@ pub struct AppState {
     pub ap_client: Arc<ApClient>,
     pub cloudflare: Option<Arc<cloudflare::CloudflareClient>>,
     pub storage_providers: Arc<dyn StorageProviderRepository>,
+    pub media_files: Arc<dyn MediaFileRepository>,
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -98,6 +100,8 @@ pub async fn init_state(
     let enc_key = secrets.encryption_key_bytes();
     let storage_providers: Arc<dyn StorageProviderRepository> =
         Arc::new(PgStorageProviderRepository::new(pool.clone(), enc_key));
+    let media_files: Arc<dyn MediaFileRepository> =
+        Arc::new(PgMediaFileRepository::new(pool.clone()));
     let actors: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
@@ -120,6 +124,7 @@ pub async fn init_state(
         ap_client,
         cloudflare,
         storage_providers,
+        media_files,
     }
 }
 
@@ -141,6 +146,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/storage-providers/:id",
             patch(handlers::admin::storage::update_storage_provider)
             .delete(handlers::admin::storage::delete_storage_provider))
+        // ドライブ（メディアアップロード）
+        .route("/api/drive/files/create", post(handlers::drive::create_drive_file))
         // 認証
         .route("/api/auth/verify-email", post(handlers::email_verify::request_email_verification))
         .route("/api/auth/verify-token", get(handlers::email_verify::verify_email_token))

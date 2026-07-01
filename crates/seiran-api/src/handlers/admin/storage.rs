@@ -115,7 +115,7 @@ pub async fn create_storage_provider(
     if req.name.is_empty() || req.endpoint.is_empty() || req.bucket.is_empty()
         || req.access_key.is_empty() || req.secret_key.is_empty() || req.public_url.is_empty()
     {
-        return Err(ApiError::BadRequest("INVALID_INPUT"));
+        return Err(ApiError::BadRequest("INVALID_INPUT".into()));
     }
     let provider = state
         .storage_providers

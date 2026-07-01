@@ -41,7 +41,7 @@ pub async fn setup(
     Json(req): Json<SetupRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
     if req.username.is_empty() || req.email.is_empty() || req.password.len() < 8 {
-        return Err(ApiError::BadRequest("INVALID_INPUT"));
+        return Err(ApiError::BadRequest("INVALID_INPUT".into()));
     }
 
     let count = state

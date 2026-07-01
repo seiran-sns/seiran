@@ -6,6 +6,7 @@
 pub mod actor;
 pub mod atp;
 pub mod follow;
+pub mod media_file;
 pub mod post;
 pub mod storage_provider;
 pub mod user;
@@ -13,6 +14,9 @@ pub mod user;
 pub use actor::{Actor, ActorRepository, PgActorRepository};
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
 pub use follow::{FollowRepository, PgFollowRepository};
+pub use media_file::{
+    CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
+};
 pub use post::{PgPostRepository, PostRecord, PostRepository, PostSummary, TimelinePost};
 pub use storage_provider::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider,

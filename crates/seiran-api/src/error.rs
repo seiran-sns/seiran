@@ -5,11 +5,9 @@ use axum::{
 };
 use serde::Serialize;
 
-/// API エラーレスポンスのボディ。
-/// フロントエンドが `code` を見てユーザー向けメッセージに変換する責務を持つ。
 #[derive(Debug, Serialize)]
 struct ApiErrorBody {
-    code: &'static str,
+    code: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -19,11 +17,13 @@ pub enum ApiError {
     #[error("{0}")]
     NotFound(&'static str),
     #[error("{0}")]
-    BadRequest(&'static str),
+    BadRequest(String),
     #[error("{0}")]
     Conflict(&'static str),
     #[error("{0}")]
     Forbidden(&'static str),
+    #[error("{0}")]
+    ServiceUnavailable(&'static str),
     /// `msg` はサーバーログにのみ出力され、クライアントには `INTERNAL_ERROR` コードのみ返す
     #[error("内部エラー: {0}")]
     Internal(String),
@@ -31,15 +31,16 @@ pub enum ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, code) = match &self {
-            ApiError::Unauthorized(c) => (StatusCode::UNAUTHORIZED, *c),
-            ApiError::NotFound(c) => (StatusCode::NOT_FOUND, *c),
-            ApiError::BadRequest(c) => (StatusCode::BAD_REQUEST, *c),
-            ApiError::Conflict(c) => (StatusCode::CONFLICT, *c),
-            ApiError::Forbidden(c) => (StatusCode::FORBIDDEN, *c),
+        let (status, code) = match self {
+            ApiError::Unauthorized(c) => (StatusCode::UNAUTHORIZED, c.to_owned()),
+            ApiError::NotFound(c) => (StatusCode::NOT_FOUND, c.to_owned()),
+            ApiError::BadRequest(c) => (StatusCode::BAD_REQUEST, c),
+            ApiError::Conflict(c) => (StatusCode::CONFLICT, c.to_owned()),
+            ApiError::Forbidden(c) => (StatusCode::FORBIDDEN, c.to_owned()),
+            ApiError::ServiceUnavailable(c) => (StatusCode::SERVICE_UNAVAILABLE, c.to_owned()),
             ApiError::Internal(msg) => {
                 eprintln!("[ERROR] {}", msg);
-                (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR")
+                (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR".to_owned())
             }
         };
         (status, Json(ApiErrorBody { code })).into_response()

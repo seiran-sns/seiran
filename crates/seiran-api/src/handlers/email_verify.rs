@@ -38,7 +38,7 @@ pub async fn request_email_verification(
 ) -> Result<Json<VerifyEmailResponse>, ApiError> {
     let email = payload.email.trim().to_lowercase();
     if email.is_empty() || !email.contains('@') {
-        return Err(ApiError::BadRequest("EMAIL_INVALID"));
+        return Err(ApiError::BadRequest("EMAIL_INVALID".into()));
     }
 
     // すでに登録済みのメールアドレスは拒否
@@ -89,7 +89,7 @@ pub async fn verify_email_token(
     let token: uuid::Uuid = params
         .token
         .parse()
-        .map_err(|_| ApiError::BadRequest("INVALID_TOKEN"))?;
+        .map_err(|_| ApiError::BadRequest("INVALID_TOKEN".into()))?;
 
     let row = sqlx::query!(
         "SELECT token FROM email_verifications
@@ -100,7 +100,7 @@ pub async fn verify_email_token(
     .fetch_optional(pool)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::BadRequest("INVALID_TOKEN"))?;
+    .ok_or(ApiError::BadRequest("INVALID_TOKEN".into()))?;
 
     Ok(Json(VerifyTokenResponse {
         registration_token: row.token.to_string(),

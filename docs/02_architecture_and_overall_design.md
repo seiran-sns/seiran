@@ -145,6 +145,29 @@ volumes:
 - **ユーザーネームは任意**: `admin` 固定にすると `admin.domain` が PLC directory に既存の場合にハマるため、管理者が自由に設定できる。
 - **フロントエンドの動作**: アプリ起動時に `GET /api/setup/status` を呼び、`initialized: false` であれば全ルートの代わりにセットアップ画面を表示する（react-router の Routes を置き換え）。セットアップ完了後は通常の画面フローに移行。
 
+### 1.3.2 メディアアップロードフロー（`POST /api/drive/files/create`）
+
+| ステップ | 処理内容 |
+|---|---|
+| 1 | JWT 認証（Bearer トークン必須） |
+| 2 | multipart フォームから `file`（必須）と `media_type`（省略時: `"post"`）を取得 |
+| 3 | `process_image()` で WebP 変換・リサイズ・SHA-256 計算・blurhash 計算 |
+| 4 | `(sha256, blurhash)` 複合一致で `media_files` を検索し、一致があれば既存レコードを返す（`is_reused: true`） |
+| 5 | `select_provider()` でアクティブなストレージプロバイダーを id 昇順にスキャンし、`capacity_mb` 内に収まる最初のものを採用。なければ `503 SERVICE_UNAVAILABLE` |
+| 6 | S3 互換 API（`PUT`）でアップロード。ストレージキーは `media/{uuid}.webp` |
+| 7 | `media_files` テーブルに INSERT |
+
+#### `media_type` ごとのリサイズ仕様
+
+| 値 | 変換後サイズ | 方式 |
+|---|---|---|
+| `avatar` | 600 × 600 | center-crop（`resize_to_fill`） |
+| `banner` | 横最大 2048 × 縦最大 768 | fit-inside（縦横比維持） |
+| `emoji` | 横最大 384 × 縦最大 64 | fit-inside |
+| `post`（省略時） | 長辺最大 2048 | fit-inside（長辺 ≤ 2048 のときは無変換） |
+
+出力フォーマットは常に **WebP lossless**（`image` クレートの純 Rust 実装、外部 C ライブラリ不要）。
+
 ---
 
 ## 1.4 API エラーレスポンス仕様

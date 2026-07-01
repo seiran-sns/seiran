@@ -9,6 +9,7 @@ pub mod jobs;
 pub mod ap;
 pub mod atp;
 pub mod repository;
+pub mod storage;
 
 pub use db::{get_db_pool, run_migrations};
 pub use id::generate_snowflake_id;
@@ -23,5 +24,12 @@ pub use crypto::{decrypt as crypto_decrypt, encrypt as crypto_encrypt, CryptoErr
 pub use repository::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider,
     StorageProviderError, StorageProviderRepository, UpdateStorageProvider,
+};
+pub use storage::{
+    process_image, ImageProcessingError, MediaKind, ProcessedImage,
+    S3StorageClient, S3Error, select_provider, SelectorError,
+};
+pub use repository::{
+    CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
 };
 

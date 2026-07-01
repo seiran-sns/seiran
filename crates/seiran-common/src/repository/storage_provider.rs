@@ -61,6 +61,8 @@ pub trait StorageProviderRepository: Send + Sync {
     async fn insert(&self, req: CreateStorageProvider) -> Result<StorageProvider, StorageProviderError>;
     async fn update(&self, id: i64, req: UpdateStorageProvider) -> Result<Option<StorageProvider>, StorageProviderError>;
     async fn delete(&self, id: i64) -> Result<(), StorageProviderError>;
+    /// プロバイダーに保存済みのバイト数合計。capacity チェックに使う。
+    async fn get_used_bytes(&self, provider_id: i64) -> Result<i64, StorageProviderError>;
 }
 
 pub struct PgStorageProviderRepository {
@@ -224,5 +226,15 @@ impl StorageProviderRepository for PgStorageProviderRepository {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    async fn get_used_bytes(&self, provider_id: i64) -> Result<i64, StorageProviderError> {
+        let row: (Option<i64>,) = sqlx::query_as(
+            "SELECT SUM(size) FROM media_files WHERE storage_provider_id = $1"
+        )
+        .bind(provider_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0.unwrap_or(0))
     }
 }
