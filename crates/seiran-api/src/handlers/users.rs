@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use seiran_common::repository::Actor;
 
+use crate::error::ApiError;
 use crate::middleware::extract_auth;
 use crate::AppState;
 
@@ -197,4 +198,104 @@ async fn lookup_by_uri(
         Ok(Some(actor)) => build_profile_response(actor, my_user_id, state).await,
         _ => (axum::http::StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
     }
+}
+
+// =====================================================================
+// PATCH /api/users/profile — プロフィール更新
+// =====================================================================
+
+#[derive(Deserialize)]
+pub struct UpdateProfileRequest {
+    pub display_name: Option<String>,
+    /// `None` = フィールド未指定（現在値を保持）
+    /// `Some(None)` = null を明示（解除）
+    /// `Some(Some(id))` = メディア ID を設定
+    #[serde(default)]
+    pub avatar_media_id: Option<Option<i64>>,
+    #[serde(default)]
+    pub banner_media_id: Option<Option<i64>>,
+}
+
+#[derive(Serialize)]
+pub struct UpdateProfileResponse {
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_media_id: Option<i64>,
+    pub banner_media_id: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct ActorProfileRow {
+    username: String,
+    display_name: Option<String>,
+    avatar_media_id: Option<i64>,
+    banner_media_id: Option<i64>,
+}
+
+pub async fn update_profile(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateProfileRequest>,
+) -> impl IntoResponse {
+    let auth_user = match extract_auth(&headers, &state.local_auth).await {
+        Ok(u) => u,
+        Err(e) => return e.into_response(),
+    };
+
+    // 現在のプロフィールを取得
+    let current = match sqlx::query_as::<_, ActorProfileRow>(
+        "SELECT username, display_name, avatar_media_id, banner_media_id \
+         FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
+    )
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
+        Err(e) => {
+            eprintln!("[update_profile] SELECT 失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+
+    // リクエストで指定されたフィールドのみ上書き
+    let new_display_name: Option<String> = if req.display_name.is_some() {
+        req.display_name
+    } else {
+        current.display_name
+    };
+    let new_avatar_media_id: Option<i64> = match req.avatar_media_id {
+        None => current.avatar_media_id,
+        Some(v) => v,
+    };
+    let new_banner_media_id: Option<i64> = match req.banner_media_id {
+        None => current.banner_media_id,
+        Some(v) => v,
+    };
+
+    // UPDATE
+    if let Err(e) = sqlx::query(
+        "UPDATE actors \
+         SET display_name = $1, avatar_media_id = $2, banner_media_id = $3, updated_at = NOW() \
+         WHERE user_id = $4 AND actor_type = 'local'",
+    )
+    .bind(&new_display_name)
+    .bind(new_avatar_media_id)
+    .bind(new_banner_media_id)
+    .bind(auth_user.user_id)
+    .execute(&state.db)
+    .await
+    {
+        eprintln!("[update_profile] UPDATE 失敗: {}", e);
+        return ApiError::Internal(e.to_string()).into_response();
+    }
+
+    Json(UpdateProfileResponse {
+        username: current.username,
+        display_name: new_display_name,
+        avatar_media_id: new_avatar_media_id,
+        banner_media_id: new_banner_media_id,
+    })
+    .into_response()
 }
