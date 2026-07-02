@@ -80,6 +80,8 @@ CREATE TABLE actors (
 CREATE INDEX idx_actors_type ON actors(actor_type);
 CREATE INDEX idx_actors_pair ON actors(seiran_pair_actor_id) WHERE seiran_pair_actor_id IS NOT NULL;
 CREATE INDEX idx_actors_bridge ON actors(bridge_real_actor_id) WHERE bridge_real_actor_id IS NOT NULL;
+CREATE INDEX idx_actors_user_id ON actors(user_id);                         -- 認証エンドポイントの find_local_by_user_id 高速化
+CREATE INDEX idx_actors_username_domain ON actors(username, domain);        -- WebFinger / プロフィール検索 / フォロー解決高速化
 ```
 
 ### 1.3 `posts` (統一ポストテーブル)
@@ -120,7 +122,7 @@ CREATE TABLE posts (
 );
 
 -- インデックス戦略
-CREATE INDEX idx_posts_actor_id ON posts(actor_id);
+CREATE INDEX idx_posts_actor_id ON posts(actor_id, id DESC) WHERE deleted_at IS NULL; -- recent_by_actor / context_* のインデックススキャン化
 CREATE INDEX idx_posts_reply_to ON posts(reply_to_post_id) WHERE reply_to_post_id IS NOT NULL;
 CREATE INDEX idx_posts_repost_of ON posts(repost_of_post_id) WHERE repost_of_post_id IS NOT NULL;
 CREATE INDEX idx_posts_quote_of ON posts(quote_of_post_id) WHERE quote_of_post_id IS NOT NULL;
@@ -176,6 +178,7 @@ CREATE TABLE follows (
 
 CREATE INDEX idx_follows_follower ON follows(follower_actor_id);
 CREATE INDEX idx_follows_target ON follows(target_actor_id);
+CREATE INDEX idx_follows_target_follower ON follows(target_actor_id, follower_actor_id) WHERE status = 'accepted'; -- ホームTL / AP配送フォロワー取得高速化
 ```
 
 ### 1.6 `email_verifications` (メールアドレス確認フロー)
