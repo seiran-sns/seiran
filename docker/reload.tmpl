@@ -1,0 +1,4 @@
+# upstream reload trigger — do not edit manually
+# seiran-server instances: {{ len (where $ "Labels.com.docker.compose.service" "seiran-server") }}
+{{ range where $ "Labels.com.docker.compose.service" "seiran-server" }}# {{ .Name }}
+{{ end }}

@@ -61,8 +61,11 @@ services:
     networks:
       - internal
 
-  # ─── Nginx (リバースプロキシ / 単一バックエンド) ───────────────────────────
-  nginx:
+  # ─── ロードバランサー (nginx + docker-gen による動的 upstream 管理) ─────────
+  # seiran-server コンテナの起動・終了を docker-gen が検知し、
+  # lb (nginx) に SIGHUP を送って Docker DNS を再解決させる。
+  # `docker compose up --scale seiran-server=N` でバックエンドを増減できる。
+  lb:
     image: nginx:1.27-alpine
     restart: always
     volumes:
@@ -74,13 +77,26 @@ services:
       - internal
       - external
 
+  # seiran-server の起動/終了を検知して lb を reload するウォッチャー
+  docker-gen:
+    image: nginxproxy/docker-gen:latest
+    restart: always
+    command: -notify-sighup seiran-lb-1 -watch /etc/docker-gen/templates/reload.tmpl /tmp/trigger
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./docker/reload.tmpl:/etc/docker-gen/templates/reload.tmpl:ro
+    depends_on:
+      - lb
+    networks:
+      - internal
+
   # ─── Cloudflare Tunnel ────────────────────────────────────────────────────
   tunnel:
     image: cloudflare/cloudflared:latest
     restart: always
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
     depends_on:
-      - nginx
+      - lb
     networks:
       - external
 
