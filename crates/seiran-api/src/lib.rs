@@ -174,6 +174,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))
         .route("/api/notes/home-timeline", get(handlers::notes::home_timeline))
         .route("/api/notes/:id", get(handlers::notes::get_note))
+        .route("/api/notes/:id/context", get(handlers::notes::note_context))
         // ActivityPub Note エンドポイント（nginx が AP Accept ヘッダーのみをここへ転送）
         .route("/notes/:id", get(handlers::notes::get_note_ap))
         // フォロー

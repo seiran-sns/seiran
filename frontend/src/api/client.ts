@@ -212,6 +212,9 @@ export const api = {
       const qs = q.toString();
       return request<Note[]>("GET", `/notes/home-timeline${qs ? `?${qs}` : ""}`);
     },
+    context(id: string): Promise<{ before: Note[]; after: Note[] }> {
+      return request<{ before: Note[]; after: Note[] }>("GET", `/notes/${encodeURIComponent(id)}/context`);
+    },
   },
 
   users: {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -7,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use seiran_common::repository::TimelinePost;
-use seiran_common::{ap::{deliver_post_to_ap_followers, plain_to_html}, generate_snowflake_id};
+use seiran_common::{ap::{deliver_post_to_ap_followers, fetch_ap_history, plain_to_html}, generate_snowflake_id};
 
 use crate::AppState;
 use crate::error::ApiError;
@@ -275,4 +277,143 @@ pub async fn get_note_ap(
         Json(ap_note),
     )
         .into_response()
+}
+
+// =====================================================================
+// ノート詳細コンテキスト（前後投稿）
+// =====================================================================
+
+#[derive(Serialize)]
+pub struct NoteContextResponse {
+    pub before: Vec<NoteResponse>,
+    pub after: Vec<NoteResponse>,
+}
+
+/// GET /api/notes/:id/context
+/// 同一アクターの前後投稿を各10件ずつ返す。
+/// リモートアクターかつ未フォローの場合は AP Outbox から最大50件を同期フェッチしてから返す。
+pub async fn note_context(
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<NoteContextResponse>, ApiError> {
+    let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
+
+    // 1. 対象ノートを取得
+    let post = state
+        .posts
+        .find_by_id(post_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+
+    let actor_id = post.actor_id;
+
+    // 2. リモートアクターの場合、Outbox から追加フェッチ
+    if post.domain != state.local_domain {
+        // 閲覧者がこのアクターをフォロー中か確認
+        let viewer_follows = async {
+            let auth_user = extract_auth(&headers, &state.local_auth).await.ok()?;
+            let my_actor = state.actors.find_local_by_user_id(auth_user.user_id).await.ok()??;
+            matches!(
+                state.follows.find_status(my_actor.id, actor_id).await,
+                Ok(Some(_))
+            )
+            .then_some(())
+        }
+        .await
+        .is_some();
+
+        if !viewer_follows {
+            // アクターの AP URI を取得
+            #[derive(sqlx::FromRow)]
+            struct ApUriRow {
+                ap_uri: Option<String>,
+            }
+
+            if let Ok(Some(row)) = sqlx::query_as::<_, ApUriRow>(
+                "SELECT ap_uri FROM actors WHERE id = $1 LIMIT 1",
+            )
+            .bind(actor_id)
+            .fetch_optional(&state.db)
+            .await
+            {
+                if let Some(ap_uri) = row.ap_uri {
+                    let ap_client = Arc::clone(&state.ap_client);
+                    let fetch_result = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        fetch_ap_history(&ap_client, &ap_uri, 50, 30),
+                    )
+                    .await;
+
+                    if let Ok(Ok(ap_notes)) = fetch_result {
+                        for ap_note in ap_notes {
+                            let body = strip_html_tags(&ap_note.content.unwrap_or_default());
+                            if let Some(ts) = ap_note
+                                .published
+                                .as_deref()
+                                .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
+                            {
+                                let note_id = generate_snowflake_id(ts);
+                                let _ = state
+                                    .posts
+                                    .insert_remote(note_id, actor_id, &body, &ap_note.id, ts)
+                                    .await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. DB からコンテキストを取得
+    let before_posts = state
+        .posts
+        .context_before(actor_id, post_id, 10)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let after_posts = state
+        .posts
+        .context_after(actor_id, post_id, 10)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let map_post = |p: TimelinePost| NoteResponse {
+        id: p.id.to_string(),
+        text: p.body,
+        created_at: p.created_at.to_rfc3339(),
+        user: NoteUserInfo {
+            id: p.actor_id,
+            username: p.username,
+            domain: Some(p.domain),
+            display_name: p.display_name,
+        },
+    };
+
+    Ok(Json(NoteContextResponse {
+        before: before_posts.into_iter().map(map_post).collect(),
+        after: after_posts.into_iter().map(map_post).collect(),
+    }))
+}
+
+/// HTML タグを取り除き、基本エンティティを復元する。
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(c),
+            _ => {}
+        }
+    }
+    result
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
 }
