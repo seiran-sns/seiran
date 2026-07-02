@@ -72,6 +72,32 @@ pub trait PostRepository: Send + Sync {
 
     /// ID でポストとアクター情報を取得する。
     async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error>;
+
+    /// リモートノートを重複無視で挿入する（ON CONFLICT DO NOTHING）。
+    async fn insert_remote(
+        &self,
+        id: i64,
+        actor_id: i64,
+        body: &str,
+        ap_object_id: &str,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error>;
+
+    /// 指定ノートIDより前（id < note_id）の投稿を降順で取得する。
+    async fn context_before(
+        &self,
+        actor_id: i64,
+        note_id: i64,
+        limit: i64,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
+
+    /// 指定ノートIDより後（id > note_id）の投稿を昇順で取得する。
+    async fn context_after(
+        &self,
+        actor_id: i64,
+        note_id: i64,
+        limit: i64,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 }
 
 pub struct PgPostRepository {
@@ -194,6 +220,71 @@ impl PostRepository for PgPostRepository {
         )
         .bind(id)
         .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn insert_remote(
+        &self,
+        id: i64,
+        actor_id: i64,
+        body: &str,
+        ap_object_id: &str,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (ap_object_id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(actor_id)
+        .bind(body)
+        .bind(ap_object_id)
+        .bind(created_at)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    async fn context_before(
+        &self,
+        actor_id: i64,
+        note_id: i64,
+        limit: i64,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        sqlx::query_as::<_, TimelinePost>(
+            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name
+             FROM posts p
+             JOIN actors a ON a.id = p.actor_id
+             WHERE p.actor_id = $1 AND p.id < $2 AND p.deleted_at IS NULL
+             ORDER BY p.id DESC
+             LIMIT $3",
+        )
+        .bind(actor_id)
+        .bind(note_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn context_after(
+        &self,
+        actor_id: i64,
+        note_id: i64,
+        limit: i64,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        sqlx::query_as::<_, TimelinePost>(
+            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name
+             FROM posts p
+             JOIN actors a ON a.id = p.actor_id
+             WHERE p.actor_id = $1 AND p.id > $2 AND p.deleted_at IS NULL
+             ORDER BY p.id ASC
+             LIMIT $3",
+        )
+        .bind(actor_id)
+        .bind(note_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
         .await
     }
 }
