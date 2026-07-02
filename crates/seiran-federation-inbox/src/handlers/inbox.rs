@@ -3,8 +3,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use base64::Engine as _;
 use seiran_common::traits::Job;
 use seiran_common::generate_snowflake_id;
+use sha2::{Digest as Sha2Digest, Sha256};
 use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,10 +27,38 @@ pub async fn inbox_handler(
         })
         .collect();
 
+    // [HIGH-01-①] Digest ヘッダーの必須化とボディ完全性検証
+    let body_hash = Sha256::digest(&body);
+    let computed_digest = format!(
+        "SHA-256={}",
+        base64::prelude::BASE64_STANDARD.encode(body_hash)
+    );
+    match header_map.get("digest") {
+        Some(received_digest) if received_digest == &computed_digest => {}
+        Some(_) => {
+            return (StatusCode::UNAUTHORIZED, "Digest ヘッダーがボディと一致しません").into_response();
+        }
+        None => {
+            return (StatusCode::UNAUTHORIZED, "Digest ヘッダーが必要です").into_response();
+        }
+    }
+
     let signature = match header_map.get("signature") {
         Some(s) => s.clone(),
         None => {
             return (StatusCode::UNAUTHORIZED, "署名ヘッダーが見つかりません").into_response();
+        }
+    };
+
+    // Signature の headers= に "digest" が含まれることを確認
+    if !signature_covers_digest(&signature) {
+        return (StatusCode::UNAUTHORIZED, "Signature の headers= に digest が含まれていません").into_response();
+    }
+
+    let key_id = match extract_key_id(&signature) {
+        Some(k) => k,
+        None => {
+            return (StatusCode::UNAUTHORIZED, "Signature に keyId が見つかりません").into_response();
         }
     };
 
@@ -53,6 +83,17 @@ pub async fn inbox_handler(
             return (StatusCode::BAD_REQUEST, "JSON パースエラー").into_response();
         }
     };
+
+    // [HIGH-01-②] keyId のアクター URI とアクティビティの actor フィールドの一致検証
+    let key_actor_base = key_id.split('#').next().unwrap_or(&key_id);
+    let activity_actor = activity["actor"].as_str().unwrap_or("");
+    if key_actor_base != activity_actor {
+        eprintln!(
+            "[Inbox] keyId のアクター ({}) と activity.actor ({}) が一致しません",
+            key_actor_base, activity_actor
+        );
+        return (StatusCode::UNAUTHORIZED, "署名者とアクターが一致しません").into_response();
+    }
 
     match activity["type"].as_str().unwrap_or("") {
         "Follow" => {
@@ -293,6 +334,29 @@ async fn handle_create_note(
     Ok(())
 }
 
+/// Signature ヘッダーの headers= フィールドに "digest" が含まれているか確認する
+fn signature_covers_digest(signature_header: &str) -> bool {
+    for part in signature_header.split(',') {
+        let kv: Vec<&str> = part.splitn(2, '=').collect();
+        if kv.len() == 2 && kv[0].trim() == "headers" {
+            let headers_val = kv[1].trim().trim_matches('"');
+            return headers_val.split(' ').any(|h| h.eq_ignore_ascii_case("digest"));
+        }
+    }
+    false
+}
+
+/// Signature ヘッダーから keyId の値を抽出する
+fn extract_key_id(signature_header: &str) -> Option<String> {
+    for part in signature_header.split(',') {
+        let kv: Vec<&str> = part.splitn(2, '=').collect();
+        if kv.len() == 2 && kv[0].trim() == "keyId" {
+            return Some(kv[1].trim().trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
 pub fn strip_html(html: &str) -> String {
     let mut result = String::new();
     let mut in_tag = false;
@@ -448,7 +512,40 @@ async fn handle_undo(
 
 #[cfg(test)]
 mod tests {
-    use super::strip_html;
+    use super::{extract_key_id, signature_covers_digest, strip_html};
+
+    #[test]
+    fn signature_covers_digest_with_digest() {
+        let sig = r#"keyId="https://example.com/users/alice#main-key",algorithm="rsa-sha256",headers="(request-target) host date digest",signature="abc""#;
+        assert!(signature_covers_digest(sig));
+    }
+
+    #[test]
+    fn signature_covers_digest_without_digest() {
+        let sig = r#"keyId="https://example.com/users/alice#main-key",algorithm="rsa-sha256",headers="(request-target) host date",signature="abc""#;
+        assert!(!signature_covers_digest(sig));
+    }
+
+    #[test]
+    fn signature_covers_digest_no_headers_field() {
+        let sig = r#"keyId="https://example.com/users/alice#main-key",signature="abc""#;
+        assert!(!signature_covers_digest(sig));
+    }
+
+    #[test]
+    fn extract_key_id_basic() {
+        let sig = r#"keyId="https://example.com/users/alice#main-key",algorithm="rsa-sha256",headers="(request-target) host date digest",signature="abc""#;
+        assert_eq!(
+            extract_key_id(sig),
+            Some("https://example.com/users/alice#main-key".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_key_id_missing() {
+        let sig = r#"algorithm="rsa-sha256",signature="abc""#;
+        assert_eq!(extract_key_id(sig), None);
+    }
 
     #[test]
     fn test_strip_html_simple() {
