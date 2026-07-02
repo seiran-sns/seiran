@@ -13,6 +13,7 @@ use axum::{
     Router,
 };
 use seiran_common::queue::create_job_queue;
+use seiran_common::repository::{ActorRepository, PgActorRepository};
 use seiran_common::traits::JobQueue;
 use seiran_common::{ApClient, Secrets};
 use sqlx::PgPool;
@@ -28,6 +29,7 @@ use handlers::{
 pub struct AppState {
     pub db: PgPool,
     pub job_queue: Arc<dyn JobQueue>,
+    pub actor_repo: Arc<dyn ActorRepository>,
     pub local_domain: String,
     pub ap_public_key_pem: String,
     pub ap_private_key_pem: String,
@@ -42,6 +44,7 @@ pub fn init_state(
     local_domain: String,
 ) -> Arc<AppState> {
     let job_queue = create_job_queue();
+    let actor_repo: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let ap_public_key_pem = secrets.ap_public_key_pem.clone().unwrap_or_default();
     let ap_private_key_pem = secrets.ap_private_key_pem.clone().unwrap_or_default();
     let ap_client = Arc::new(ApClient::new(http_client));
@@ -49,6 +52,7 @@ pub fn init_state(
     Arc::new(AppState {
         db: pool,
         job_queue,
+        actor_repo,
         local_domain,
         ap_public_key_pem,
         ap_private_key_pem,

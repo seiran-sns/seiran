@@ -157,27 +157,10 @@ async fn handle_follow(
     let now = chrono::Utc::now();
     let new_id = generate_snowflake_id(now);
 
-    let remote_row = sqlx::query(
-        "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, created_at, updated_at)
-         VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $7)
-         ON CONFLICT (ap_uri) DO UPDATE
-           SET ap_inbox_url  = EXCLUDED.ap_inbox_url,
-               display_name  = EXCLUDED.display_name,
-               updated_at    = EXCLUDED.updated_at
-         RETURNING id",
-    )
-    .bind(new_id)
-    .bind(follower_uri)
-    .bind(&remote_inbox)
-    .bind(&remote_username)
-    .bind(&remote_domain)
-    .bind(&remote_display_name)
-    .bind(now)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
-
-    let follower_actor_id: i64 = remote_row.try_get("id").map_err(|e| e.to_string())?;
+    let follower_actor_id = state.actor_repo
+        .upsert_remote_fedi(new_id, follower_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, now)
+        .await
+        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
 
     // follows テーブルに挿入（重複時はスキップ）
     sqlx::query(
@@ -249,27 +232,10 @@ async fn handle_create_note(
     let now = chrono::Utc::now();
     let new_actor_id = seiran_common::generate_snowflake_id(now);
 
-    let actor_row = sqlx::query(
-        "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, created_at, updated_at)
-         VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $7)
-         ON CONFLICT (ap_uri) DO UPDATE
-           SET ap_inbox_url  = EXCLUDED.ap_inbox_url,
-               display_name  = EXCLUDED.display_name,
-               updated_at    = EXCLUDED.updated_at
-         RETURNING id",
-    )
-    .bind(new_actor_id)
-    .bind(actor_uri)
-    .bind(&remote_inbox)
-    .bind(&remote_username)
-    .bind(&remote_domain)
-    .bind(&remote_display_name)
-    .bind(now)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
-
-    let actor_id: i64 = actor_row.try_get("id").map_err(|e| e.to_string())?;
+    let actor_id = state.actor_repo
+        .upsert_remote_fedi(new_actor_id, actor_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, now)
+        .await
+        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
 
     // HTML タグを除去して本文を得る
     let body = strip_html(&content_html);
