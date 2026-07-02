@@ -82,6 +82,8 @@ fn env_port(key: &str, default: u16) -> u16 {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let _ = dotenvy::dotenv();
 
     let role = Role::resolve();
