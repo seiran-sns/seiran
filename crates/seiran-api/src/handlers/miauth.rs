@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Form, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     Json,
@@ -18,12 +18,18 @@ pub struct MiAuthSession {
     pub token: Option<String>,
     pub user_id: Option<i64>,
     pub username: Option<String>,
+    pub csrf_token: String,
 }
 
 #[derive(Deserialize)]
 pub struct MiAuthQuery {
     pub name: String,
     pub callback: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct AuthorizeForm {
+    pub csrf_token: String,
 }
 
 #[derive(Deserialize)]
@@ -48,12 +54,40 @@ pub struct CheckResponse {
     pub user: CheckResponseUser,
 }
 
+/// [MED-02] callback URL が安全なリダイレクト先かどうかを検証する
+/// HTTPS スキームのみ許可し、localhost・IP アドレスは拒否する
+fn is_valid_callback(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    let host = match parsed.host_str() {
+        Some(h) => h,
+        None => return false,
+    };
+    if host == "localhost" || host.starts_with("127.") || host.starts_with("192.168.")
+        || host.starts_with("10.") || host == "::1" || host == "[::1]"
+    {
+        return false;
+    }
+    true
+}
+
 pub async fn miauth_page(
     Path(session_id): Path<String>,
     Query(query): Query<MiAuthQuery>,
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
+    // [MED-02] callback URL を事前に検証する
+    if let Some(ref cb) = query.callback {
+        if !is_valid_callback(cb) {
+            return (StatusCode::BAD_REQUEST, "無効なコールバック URL です").into_response();
+        }
+    }
+
     // Authorization ヘッダーが存在すれば JWT を検証してユーザー ID を取得する
     let user_id = extract_auth(&headers, &state.local_auth)
         .await
@@ -70,6 +104,9 @@ pub async fn miauth_page(
         return Redirect::to(&login_url).into_response();
     }
 
+    // [MED-03] CSRF トークンを生成してセッションに保存する
+    let csrf_token = Uuid::new_v4().to_string();
+
     let mut map = state.miauth_sessions.write().await;
     map.insert(
         session_id.clone(),
@@ -79,8 +116,13 @@ pub async fn miauth_page(
             token: None,
             user_id,
             username: None,
+            csrf_token: csrf_token.clone(),
         },
     );
+
+    // [MED-01] クエリパラメータ name を HTML エスケープしてから埋め込む
+    let escaped_name = html_escape::encode_text(&query.name);
+    let escaped_session_id = html_escape::encode_text(&session_id);
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -101,12 +143,13 @@ pub async fn miauth_page(
     <h2>アプリ連携の認可</h2>
     <p>アプリ <strong>{}</strong> が seiran アカウントへのアクセスを求めています。</p>
     <form action="/miauth/{}/authorize" method="POST">
+      <input type="hidden" name="csrf_token" value="{}">
       <button type="submit">連携を承認する</button>
     </form>
   </div>
 </body>
 </html>"#,
-        query.name, session_id
+        escaped_name, escaped_session_id, csrf_token
     );
 
     Html(html).into_response()
@@ -115,21 +158,27 @@ pub async fn miauth_page(
 pub async fn miauth_authorize(
     Path(session_id): Path<String>,
     State(state): State<AppState>,
+    Form(form): Form<AuthorizeForm>,
 ) -> impl IntoResponse {
-    // Phase 1: セッションから user_id を取得（読み取りロック）
-    let user_id = {
+    // [MED-03] CSRF トークン検証（セッションのトークンとフォームのトークンを照合）
+    let (user_id, redirect_uri) = {
         let map = state.miauth_sessions.read().await;
         match map.get(&session_id) {
-            Some(session) => match session.user_id {
-                Some(id) => id,
-                None => {
-                    return (
-                        StatusCode::UNAUTHORIZED,
-                        "認証が必要です。先にログインしてから認可してください。",
-                    )
-                        .into_response()
+            Some(session) => {
+                if session.csrf_token != form.csrf_token {
+                    return (StatusCode::FORBIDDEN, "CSRF トークンが無効です").into_response();
                 }
-            },
+                match session.user_id {
+                    Some(id) => (id, session.redirect_uri.clone()),
+                    None => {
+                        return (
+                            StatusCode::UNAUTHORIZED,
+                            "認証が必要です。先にログインしてから認可してください。",
+                        )
+                            .into_response()
+                    }
+                }
+            }
             None => {
                 return (StatusCode::NOT_FOUND, "セッションが見つかりません").into_response()
             }
@@ -155,13 +204,16 @@ pub async fn miauth_authorize(
         session.token = Some(token);
         session.username = Some(username);
 
-        if let Some(ref callback) = session.redirect_uri.clone() {
-            let redirect_url = if callback.contains('?') {
-                format!("{}&session={}", callback, session_id)
-            } else {
-                format!("{}?session={}", callback, session_id)
-            };
-            return Redirect::to(&redirect_url).into_response();
+        if let Some(ref callback) = redirect_uri {
+            // [MED-02] リダイレクト直前に再度検証（セッション保存時点でのチェック済みだが念のため）
+            if is_valid_callback(callback) {
+                let redirect_url = if callback.contains('?') {
+                    format!("{}&session={}", callback, session_id)
+                } else {
+                    format!("{}?session={}", callback, session_id)
+                };
+                return Redirect::to(&redirect_url).into_response();
+            }
         }
     }
 
@@ -209,4 +261,37 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
     }
 
     (StatusCode::BAD_REQUEST, "Invalid or unauthorized session").into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_callback;
+
+    #[test]
+    fn valid_callback_https() {
+        assert!(is_valid_callback("https://app.example.com/callback"));
+    }
+
+    #[test]
+    fn invalid_callback_http() {
+        assert!(!is_valid_callback("http://app.example.com/callback"));
+    }
+
+    #[test]
+    fn invalid_callback_localhost() {
+        assert!(!is_valid_callback("https://localhost/callback"));
+        assert!(!is_valid_callback("https://127.0.0.1/callback"));
+    }
+
+    #[test]
+    fn invalid_callback_private_ip() {
+        assert!(!is_valid_callback("https://192.168.1.1/callback"));
+        assert!(!is_valid_callback("https://10.0.0.1/callback"));
+    }
+
+    #[test]
+    fn invalid_callback_malformed() {
+        assert!(!is_valid_callback("not-a-url"));
+        assert!(!is_valid_callback(""));
+    }
 }
