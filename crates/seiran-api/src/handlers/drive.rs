@@ -41,6 +41,7 @@ pub struct DriveFileResponse {
 ///   - `media_type`: "avatar" | "banner" | "emoji" | "post"（省略時は "post"）
 ///
 /// アクティブなストレージプロバイダーが設定されていない場合は 503 を返す。
+/// ストレージプロバイダーの容量上限を超過する場合は 507 `STORAGE_QUOTA_EXCEEDED` を返す。
 pub async fn create_drive_file(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -121,9 +122,22 @@ pub async fn create_drive_file(
     let provider = select_provider(state.storage_providers.as_ref(), processed.size)
         .await
         .map_err(|e| match e {
-            SelectorError::NoAvailableProvider => ApiError::ServiceUnavailable("ストレージプロバイダーが設定されていないか、全て容量超過です"),
+            SelectorError::NoAvailableProvider => ApiError::ServiceUnavailable("ストレージプロバイダーが設定されていません"),
+            SelectorError::QuotaExceeded => ApiError::InsufficientStorage,
             SelectorError::Db(db_e) => ApiError::Internal(db_e.to_string()),
         })?;
+
+    // クォータ二重チェック（プロバイダー確定後、PUT 前に明示的に確認）
+    if let Some(cap_mb) = provider.capacity_mb {
+        let used_bytes = state
+            .storage_providers
+            .get_used_bytes(provider.id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        if cap_mb * 1024 * 1024 < used_bytes + processed.size {
+            return Err(ApiError::InsufficientStorage);
+        }
+    }
 
     // S3 アップロード
     let storage_key = format!("media/{}.webp", Uuid::new_v4());
