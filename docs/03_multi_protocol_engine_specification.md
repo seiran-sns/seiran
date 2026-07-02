@@ -161,9 +161,12 @@ Bsky 配信モード（`deliver_to_bsky = true`）での投稿本文には、AT 
 
 - brid.gy Federated Bridge のハンドル命名規則: `{username}.{instance}.ap.brid.gy`
   例: `@yuba@reax.work` → `yuba.reax.work.ap.brid.gy`
-- `GET https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=yuba.reax.work.ap.brid.gy` でハンドル解決を試みる
+- ブリッジユーザーの探索は以下の2段階で行う:
+  1. **DB ルックアップ（第1段階）**: `actors` テーブルで `username = 'yuba'` かつ `domain = 'reax.work'` に対応するブリッジアクター（`at_identifier` または `ap_uri` が brid.gy ドメインを持つ）をまず探す
+  2. **外部問い合わせ（第2段階）**: DB に存在しない場合のみ、`GET https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=yuba.reax.work.ap.brid.gy` でハンドル解決を試みる
+  3. **タイムアウト**: 外部問い合わせは **2秒** でタイムアウトし、失敗時は URL リンクフォールバックに移行する。投稿体験を損なわないための上限。
 - 解決成功（200 + did 返却）→ `@yuba.reax.work.ap.brid.gy` に置き換え
-- 解決失敗（404 等）→ URL リンク `https://reax.work/@yuba` に変換
+- 解決失敗（404 等またはタイムアウト）→ URL リンク `https://reax.work/@yuba` に変換
 
 ### 7.2 文字数の考慮
 
@@ -172,6 +175,30 @@ Bsky 配信モード（`deliver_to_bsky = true`）での投稿本文には、AT 
 ### 7.3 処理タイミング
 
 `create_note` ハンドラ内でバリデーション後・`commit_post` 呼び出し前に変換を実施する。`deliver_to_bsky = false` の場合は変換不要。
+
+---
+
+## 8. AP（Fediverse）向け ATP 形式 ID 変換
+
+Fedi 配信モード（`deliver_to_fedi = true`）での投稿本文に `@yuba.bsky.social` のような ATP ハンドル形式の識別子が含まれる場合、AP では直接メンションとして扱えないため変換処理が必要。
+
+### 8.1 変換ルール
+
+**ATP ハンドルの検出**:  
+`@` が1つで後続がドメイン形式（例: `@yuba.bsky.social`、`@alice.bsky.team`）をパターンとして検出。`@user@domain` の Fediverse 形式と区別する。
+
+**2段階ブリッジ探索**（タイムアウト: 2秒）:
+
+1. **DB ルックアップ（第1段階）**: `actors` テーブルで ATP ハンドルに対応するブリッジアクターを探す。brid.gy 経由でインポート済みのアクターは `domain = 'bsky.brid.gy'`、`username = 'yuba.bsky.social'` 等で登録されている想定。
+2. **外部 WebFinger（第2段階）**: DB に存在しない場合、`@yuba.bsky.social@bsky.brid.gy` の WebFinger（`https://bsky.brid.gy/.well-known/webfinger?resource=acct:yuba.bsky.social@bsky.brid.gy`）で AP アクターの存在を確認する。
+
+**解決成功時**: 投稿本文の `@yuba.bsky.social` を `@yuba.bsky.social@bsky.brid.gy` という AP メンション形式に置き換える。
+
+**解決失敗時（フォールバック）**: AP プロトコルに URL リンク概念はないが、`content` フィールドは HTML なので `<a>` タグとして埋め込める。本文を Markdown 形式 `[yuba.bsky.social](https://bsky.app/profile/yuba.bsky.social)` に変換し、`plain_to_html` の Markdown → HTML 変換で `<a href="...">` タグになる。
+
+### 8.2 処理タイミング
+
+`deliver_post_to_ap_followers` 呼び出し前に変換を実施。`deliver_to_fedi = false` の場合は変換不要。
 
 ---
 
