@@ -1,11 +1,12 @@
 import { FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import styles from "./Auth.module.css";
 
 export default function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -19,7 +20,8 @@ export default function Login() {
     try {
       const res = await api.auth.login(identifier, password);
       login(res.token, res.user);
-      navigate("/");
+      const redirectTo = searchParams.get("redirect");
+      navigate(redirectTo && redirectTo.startsWith("/") ? redirectTo : "/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "ログインに失敗しました");
     } finally {
