@@ -171,6 +171,7 @@ CREATE TABLE follows (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     follower_actor_id BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
     target_actor_id BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+    status VARCHAR(10) NOT NULL DEFAULT 'accepted',  -- 'accepted' | 'pending'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     
     UNIQUE(follower_actor_id, target_actor_id)
