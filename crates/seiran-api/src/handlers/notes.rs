@@ -11,6 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use seiran_common::repository::TimelinePost;
 use seiran_common::{ap::{deliver_post_to_ap_followers, fetch_ap_history, plain_to_html}, generate_snowflake_id};
+use seiran_common::mention::{convert_mentions_for_bsky, convert_mentions_for_ap};
 
 use crate::AppState;
 use crate::error::ApiError;
@@ -149,8 +150,39 @@ pub async fn create_note(
         }
     }
 
+    // ── メンション変換（変換失敗時は元テキストをそのまま使用する） ──────────────
+
+    // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
+    let bsky_text = if deliver_bsky {
+        convert_mentions_for_bsky(
+            &req.text,
+            &state.local_domain,
+            &state.db,
+            state.ap_client.http.as_ref(),
+        )
+        .await
+    } else {
+        req.text.clone()
+    };
+
+    // AP 配信用: `@handle.tld` (ATP ハンドル) → `@handle.tld@bsky.brid.gy` または Markdown リンク
+    // deliver_post_to_ap_followers は post_id 経由で DB から本文を取得するため、
+    // 現時点ではこの変換結果を直接渡す手段がない（将来の拡張用に変換だけ実施する）。
+    let _ap_text = if deliver_fedi {
+        convert_mentions_for_ap(
+            &req.text,
+            &state.db,
+            state.ap_client.http.as_ref(),
+        )
+        .await
+    } else {
+        req.text.clone()
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     if deliver_bsky {
-        if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &req.text, now).await {
+        if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &bsky_text, now).await {
             eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
         }
     }
