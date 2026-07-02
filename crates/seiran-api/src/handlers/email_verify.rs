@@ -5,7 +5,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use seiran_common::generate_snowflake_id;
-use seiran_common::SiteSettingsRepository;
 
 use crate::error::ApiError;
 use crate::mailer::{send_verification_email, MailError};

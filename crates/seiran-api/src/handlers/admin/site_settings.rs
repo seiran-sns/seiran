@@ -5,7 +5,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use seiran_common::SiteSettingsRepository;
 
 use crate::AppState;
 use crate::error::ApiError;

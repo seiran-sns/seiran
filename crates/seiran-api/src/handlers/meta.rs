@@ -1,6 +1,5 @@
 use axum::{extract::State, response::IntoResponse, Json};
 use serde_json::json;
-use seiran_common::SiteSettingsRepository;
 
 use crate::AppState;
 

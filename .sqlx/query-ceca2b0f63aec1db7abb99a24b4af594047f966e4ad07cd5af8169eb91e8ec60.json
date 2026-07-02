@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "DELETE FROM email_verifications\n         WHERE token = $1 AND expires_at > now()\n         RETURNING email",
+  "query": "DELETE FROM email_verifications\n             WHERE token = $1 AND expires_at > now()\n             RETURNING email",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "27eddf6cb71050c19ffde9185f46325a83175f6f18de4c4dc62112fe6a9a3cd8"
+  "hash": "ceca2b0f63aec1db7abb99a24b4af594047f966e4ad07cd5af8169eb91e8ec60"
 }

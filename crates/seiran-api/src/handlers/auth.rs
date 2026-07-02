@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use seiran_common::{generate_snowflake_id, LocalAuthProvider, SiteSettingsRepository};
+use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 use seiran_common::atp::{prepare_plc_genesis, submit_plc_genesis};
 use seiran_common::atp::signing_key_from_pem;
 
