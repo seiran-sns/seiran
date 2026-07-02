@@ -13,30 +13,34 @@ export default function NoteDetail() {
   const [before, setBefore] = useState<Note[]>([]);
   const [after, setAfter] = useState<Note[]>([]);
   const [contextLoading, setContextLoading] = useState(false);
+  const [contextLoaded, setContextLoaded] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
     setBefore([]);
     setAfter([]);
+    setContextLoaded(false);
     api.notes
       .get(id)
-      .then((n) => {
-        setNote(n);
-        // コンテキストを並列で取得
-        setContextLoading(true);
-        api.notes
-          .context(id)
-          .then((ctx) => {
-            setBefore(ctx.before);
-            setAfter(ctx.after);
-          })
-          .catch(() => {}) // context 取得失敗は無視
-          .finally(() => setContextLoading(false));
-      })
+      .then((n) => setNote(n))
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
   }, [id]);
+
+  function loadContext() {
+    if (!id || contextLoading || contextLoaded) return;
+    setContextLoading(true);
+    api.notes
+      .context(id)
+      .then((ctx) => {
+        setBefore(ctx.before);
+        setAfter(ctx.after);
+        setContextLoaded(true);
+      })
+      .catch(() => {})
+      .finally(() => setContextLoading(false));
+  }
 
   function formatDate(iso: string) {
     return new Date(iso).toLocaleString("ja-JP", {
@@ -67,8 +71,8 @@ export default function NoteDetail() {
         {loading && <p className={styles.message}>読み込み中...</p>}
         {error && <p className={styles.error}>{error}</p>}
 
-        {/* 前のノート（降順で来るのでreverse して古い順に表示） */}
-        {before.length > 0 && (
+        {/* 前のノート */}
+        {contextLoaded && before.length > 0 && (
           <section>
             <p className={styles.message} style={{ fontSize: "0.85rem", color: "#666" }}>
               それより前のノート
@@ -90,6 +94,20 @@ export default function NoteDetail() {
               </Link>
             ))}
           </section>
+        )}
+
+        {/* 前後読み込みボタン */}
+        {!loading && note && !contextLoaded && (
+          <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
+            <button
+              onClick={loadContext}
+              disabled={contextLoading}
+              className={styles.backBtn}
+              style={{ fontSize: "0.85rem" }}
+            >
+              {contextLoading ? "読み込み中..." : "前後のノートを表示"}
+            </button>
+          </div>
         )}
 
         {/* メインノート */}
@@ -118,7 +136,7 @@ export default function NoteDetail() {
         )}
 
         {/* 後のノート */}
-        {after.length > 0 && (
+        {contextLoaded && after.length > 0 && (
           <section>
             <p className={styles.message} style={{ fontSize: "0.85rem", color: "#666" }}>
               それより後のノート
@@ -140,12 +158,6 @@ export default function NoteDetail() {
               </Link>
             ))}
           </section>
-        )}
-
-        {contextLoading && (
-          <p className={styles.message} style={{ fontSize: "0.85rem" }}>
-            周辺ノートを読み込み中...
-          </p>
         )}
       </main>
     </div>
