@@ -1,20 +1,16 @@
 //! SMTP メール送信ユーティリティ
 //!
-//! 環境変数:
-//! - `SMTP_HOST`     — SMTP サーバーホスト名
-//! - `SMTP_PORT`     — ポート番号（デフォルト: 587）
-//! - `SMTP_USERNAME` — 認証ユーザー名
-//! - `SMTP_PASSWORD` — 認証パスワード
-//! - `SMTP_FROM`     — 送信元アドレス（例: `info@seiran.org`）
-//! - `SMTP_TLS`      — `tls`（465）/ `starttls`（587）/ `none`（デフォルト: starttls）
+//! SMTP 設定は DB の `site_settings` テーブルから取得する。
+//! キー: `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password`, `smtp_from`, `smtp_tls`
 
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MailError {
-    #[error("SMTP 設定が不足しています: {0}")]
+    #[error("SMTP が未設定です: {0}")]
     Config(&'static str),
     #[error("メッセージ構築失敗: {0}")]
     Build(#[from] lettre::error::Error),
@@ -24,16 +20,62 @@ pub enum MailError {
     Address(#[from] lettre::address::AddressError),
 }
 
-pub async fn send_verification_email(to: &str, verify_url: &str) -> Result<(), MailError> {
-    let host = std::env::var("SMTP_HOST").map_err(|_| MailError::Config("SMTP_HOST"))?;
-    let port: u16 = std::env::var("SMTP_PORT")
-        .unwrap_or_else(|_| "587".to_string())
-        .parse()
+/// DB から取得した site_settings のマップから SMTP トランスポートを構築する。
+/// `smtp_host` が存在しない場合は `MailError::Config` を返す。
+fn build_transport(
+    settings: &HashMap<String, String>,
+) -> Result<(AsyncSmtpTransport<Tokio1Executor>, String), MailError> {
+    let host = settings
+        .get("smtp_host")
+        .filter(|v| !v.is_empty())
+        .ok_or(MailError::Config("smtp_host"))?
+        .clone();
+    let port: u16 = settings
+        .get("smtp_port")
+        .and_then(|v| v.parse().ok())
         .unwrap_or(587);
-    let username = std::env::var("SMTP_USERNAME").map_err(|_| MailError::Config("SMTP_USERNAME"))?;
-    let password = std::env::var("SMTP_PASSWORD").map_err(|_| MailError::Config("SMTP_PASSWORD"))?;
-    let from = std::env::var("SMTP_FROM").map_err(|_| MailError::Config("SMTP_FROM"))?;
-    let tls_mode = std::env::var("SMTP_TLS").unwrap_or_else(|_| "starttls".to_string());
+    let username = settings
+        .get("smtp_username")
+        .filter(|v| !v.is_empty())
+        .ok_or(MailError::Config("smtp_username"))?
+        .clone();
+    let password = settings
+        .get("smtp_password")
+        .filter(|v| !v.is_empty())
+        .ok_or(MailError::Config("smtp_password"))?
+        .clone();
+    let from = settings
+        .get("smtp_from")
+        .filter(|v| !v.is_empty())
+        .ok_or(MailError::Config("smtp_from"))?
+        .clone();
+    let tls_mode = settings
+        .get("smtp_tls")
+        .cloned()
+        .unwrap_or_else(|| "starttls".to_string());
+
+    let creds = Credentials::new(username, password);
+
+    let transport: AsyncSmtpTransport<Tokio1Executor> = match tls_mode.as_str() {
+        "tls" => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?
+            .port(port)
+            .credentials(creds)
+            .build(),
+        _ => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?
+            .port(port)
+            .credentials(creds)
+            .build(),
+    };
+
+    Ok((transport, from))
+}
+
+pub async fn send_verification_email(
+    settings: &HashMap<String, String>,
+    to: &str,
+    verify_url: &str,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
 
     let body = format!(
         "seiran へようこそ。\n\n以下のリンクをクリックしてメールアドレスを確認してください:\n\n{}\n\nこのリンクは 24 時間有効です。\n\n心当たりがない場合は無視してください。",
@@ -47,33 +89,16 @@ pub async fn send_verification_email(to: &str, verify_url: &str) -> Result<(), M
         .header(ContentType::TEXT_PLAIN)
         .body(body)?;
 
-    let creds = Credentials::new(username, password);
-
-    let transport: AsyncSmtpTransport<Tokio1Executor> = match tls_mode.as_str() {
-        "tls" => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?
-            .port(port)
-            .credentials(creds)
-            .build(),
-        _ => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?
-            .port(port)
-            .credentials(creds)
-            .build(),
-    };
-
     transport.send(email).await?;
     Ok(())
 }
 
-pub async fn send_password_reset_email(to: &str, reset_url: &str) -> Result<(), MailError> {
-    let host = std::env::var("SMTP_HOST").map_err(|_| MailError::Config("SMTP_HOST"))?;
-    let port: u16 = std::env::var("SMTP_PORT")
-        .unwrap_or_else(|_| "587".to_string())
-        .parse()
-        .unwrap_or(587);
-    let username = std::env::var("SMTP_USERNAME").map_err(|_| MailError::Config("SMTP_USERNAME"))?;
-    let password = std::env::var("SMTP_PASSWORD").map_err(|_| MailError::Config("SMTP_PASSWORD"))?;
-    let from = std::env::var("SMTP_FROM").map_err(|_| MailError::Config("SMTP_FROM"))?;
-    let tls_mode = std::env::var("SMTP_TLS").unwrap_or_else(|_| "starttls".to_string());
+pub async fn send_password_reset_email(
+    settings: &HashMap<String, String>,
+    to: &str,
+    reset_url: &str,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
 
     let body = format!(
         "seiran — パスワードリセットのリクエストを受け付けました。\n\n以下のリンクをクリックしてパスワードを再設定してください:\n\n{}\n\nこのリンクは 1 時間有効です。\n\n心当たりがない場合は無視してください。",
@@ -86,19 +111,6 @@ pub async fn send_password_reset_email(to: &str, reset_url: &str) -> Result<(), 
         .subject("seiran — パスワードのリセット")
         .header(ContentType::TEXT_PLAIN)
         .body(body)?;
-
-    let creds = Credentials::new(username, password);
-
-    let transport: AsyncSmtpTransport<Tokio1Executor> = match tls_mode.as_str() {
-        "tls" => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?
-            .port(port)
-            .credentials(creds)
-            .build(),
-        _ => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?
-            .port(port)
-            .credentials(creds)
-            .build(),
-    };
 
     transport.send(email).await?;
     Ok(())

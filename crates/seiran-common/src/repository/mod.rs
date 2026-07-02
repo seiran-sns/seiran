@@ -8,6 +8,7 @@ pub mod atp;
 pub mod follow;
 pub mod media_file;
 pub mod post;
+pub mod site_settings;
 pub mod storage_provider;
 pub mod user;
 
@@ -18,6 +19,7 @@ pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
 };
 pub use post::{PgPostRepository, PostRecord, PostRepository, PostSummary, TimelinePost};
+pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage_provider::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider,
     StorageProviderError, StorageProviderRepository, UpdateStorageProvider,

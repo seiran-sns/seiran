@@ -21,6 +21,7 @@ use seiran_common::{
     LocalAuthProvider, Secrets, AtpCommitService, AtpCommitEvent, ApClient,
     StorageProviderRepository, PgStorageProviderRepository,
     MediaFileRepository, PgMediaFileRepository,
+    SiteSettingsRepository, PgSiteSettingsRepository,
     S3StorageClient,
 };
 use seiran_common::repository::{
@@ -55,6 +56,7 @@ pub struct AppState {
     pub cloudflare: Option<Arc<cloudflare::CloudflareClient>>,
     pub storage_providers: Arc<dyn StorageProviderRepository>,
     pub media_files: Arc<dyn MediaFileRepository>,
+    pub site_settings: Arc<dyn SiteSettingsRepository>,
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -103,6 +105,8 @@ pub async fn init_state(
         Arc::new(PgStorageProviderRepository::new(pool.clone(), enc_key));
     let media_files: Arc<dyn MediaFileRepository> =
         Arc::new(PgMediaFileRepository::new(pool.clone()));
+    let site_settings: Arc<dyn SiteSettingsRepository> =
+        Arc::new(PgSiteSettingsRepository::new(pool.clone()));
     let actors: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
@@ -126,6 +130,7 @@ pub async fn init_state(
         cloudflare,
         storage_providers,
         media_files,
+        site_settings,
     }
 }
 
@@ -152,6 +157,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/users/:id/suspend", post(handlers::admin::users::suspend_user))
         .route("/api/admin/users/:id/unsuspend", post(handlers::admin::users::unsuspend_user))
         .route("/api/admin/users/:id/role", post(handlers::admin::users::change_user_role))
+        // サイト設定
+        .route("/api/admin/site-settings",
+            get(handlers::admin::site_settings::get_site_settings)
+            .patch(handlers::admin::site_settings::update_site_settings))
         // カスタム絵文字
         .route("/api/admin/emojis",
             get(handlers::admin::emojis::list_emojis)
