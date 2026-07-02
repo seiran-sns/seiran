@@ -1,6 +1,6 @@
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, Note, getErrorMessage } from "../api/client";
+import { api, Note, DriveFile, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import styles from "./Timeline.module.css";
 
@@ -34,7 +34,10 @@ export default function Timeline() {
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [attached, setAttached] = useState<DriveFile | null>(null);
+  const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -53,15 +56,37 @@ export default function Timeline() {
     setPostError("");
     setPosting(true);
     try {
-      const note = await api.notes.create(text.trim(), deliverFedi, deliverBsky);
+      const attachmentIds = attached ? [attached.id] : [];
+      const note = await api.notes.create(text.trim(), deliverFedi, deliverBsky, attachmentIds);
       setNotes((prev) => [note, ...prev]);
       setText("");
+      setAttached(null);
       textareaRef.current?.focus();
     } catch (err) {
       setPostError(getErrorMessage(err));
     } finally {
       setPosting(false);
     }
+  }
+
+  async function handleFileSelect(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setPostError("");
+    setUploading(true);
+    try {
+      const driveFile = await api.media.upload(file);
+      setAttached(driveFile);
+    } catch (err) {
+      setPostError(getErrorMessage(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function handleRemoveAttachment() {
+    setAttached(null);
   }
 
   function handleTextareaKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -124,6 +149,13 @@ export default function Timeline() {
 
       <main className={styles.main}>
         <form onSubmit={handlePost} className={styles.postForm}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={handleFileSelect}
+          />
           <textarea
             ref={textareaRef}
             value={text}
@@ -149,7 +181,31 @@ export default function Timeline() {
             >
               Bsky 🦋
             </button>
+            <button
+              type="button"
+              className={styles.attachBtn}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || !!attached}
+              title="画像を添付"
+            >
+              📎
+            </button>
+            {uploading && <span className={styles.spinner} />}
           </div>
+
+          {attached && (
+            <div className={styles.attachPreview}>
+              <img src={attached.url} alt="添付画像" className={styles.attachThumb} />
+              <button
+                type="button"
+                className={styles.attachRemoveBtn}
+                onClick={handleRemoveAttachment}
+                title="添付を解除"
+              >
+                ×
+              </button>
+            </div>
+          )}
 
           {deliverBsky && overLimit && (
             <p className={styles.scopeGuide}>

@@ -266,3 +266,74 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.attachBtn {
+  background: none;
+  border: 1px solid #2a2a30;
+  color: #888;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+  line-height: 1;
+}
+
+.attachBtn:hover:not(:disabled) {
+  border-color: #555;
+  color: #bbb;
+}
+
+.attachBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #444;
+  border-top-color: #a78bfa;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.attachPreview {
+  position: relative;
+  display: inline-block;
+  margin-top: 8px;
+}
+
+.attachThumb {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #2a2a30;
+  display: block;
+}
+
+.attachRemoveBtn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  background: #3a3a42;
+  border: 1px solid #555;
+  border-radius: 50%;
+  color: #ccc;
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}

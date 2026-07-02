@@ -133,6 +133,18 @@ export interface FollowResponse {
   target_uri: string;
 }
 
+export interface DriveFile {
+  id: string;
+  url: string;
+  sha256: string;
+  blurhash: string;
+  width: number;
+  height: number;
+  size: number;
+  mimeType: string;
+  isReused: boolean;
+}
+
 // =====================================================================
 // Auth API
 // =====================================================================
@@ -194,11 +206,12 @@ export const api = {
     get(id: string) {
       return request<Note>("GET", `/notes/${encodeURIComponent(id)}`);
     },
-    create(text: string, deliverToFedi: boolean = true, deliverToBsky: boolean = true) {
+    create(text: string, deliverToFedi: boolean = true, deliverToBsky: boolean = true, attachmentIds: string[] = []) {
       return request<Note>("POST", "/notes/create", {
         text,
         deliver_to_fedi: deliverToFedi,
         deliver_to_bsky: deliverToBsky,
+        attachment_ids: attachmentIds.length > 0 ? attachmentIds.map(Number) : undefined,
       });
     },
     localTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {
@@ -231,6 +244,33 @@ export const api = {
   follows: {
     create(target: string) {
       return request<FollowResponse>("POST", "/follows/create", { target });
+    },
+  },
+
+  media: {
+    upload(file: File): Promise<DriveFile> {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("media_type", "post");
+      return fetch(`${BASE}/drive/files/create`, {
+        method: "POST",
+        headers: { ...authHeaders() },
+        body: formData,
+      }).then(async (res) => {
+        if (!res.ok) {
+          const contentType = res.headers.get("content-type") ?? "";
+          if (contentType.includes("application/json")) {
+            try {
+              const err = (await res.json()) as { code?: string; detail?: Record<string, unknown> };
+              if (err.code) throw new ApiError(err.code, res.status, err.detail);
+            } catch (e) {
+              if (e instanceof ApiError) throw e;
+            }
+          }
+          throw new ApiError("UNKNOWN_ERROR", res.status);
+        }
+        return res.json() as Promise<DriveFile>;
+      });
     },
   },
 };

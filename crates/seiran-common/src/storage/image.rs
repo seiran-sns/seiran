@@ -48,10 +48,14 @@ pub fn process_image(data: &[u8], kind: MediaKind) -> Result<ProcessedImage, Ima
     // SHA-256
     let sha256 = hex::encode(Sha256::digest(&webp_bytes));
 
-    // blurhash (RGB)
+    // blurhash (RGB) — 0.2.x にオフバイワンバグがあるため catch_unwind でガード
     let rgb = img.to_rgb8();
-    let hash = blurhash::encode(4, 3, width, height, rgb.as_raw())
-        .map_err(|e| ImageProcessingError::Blurhash(e.to_string()))?;
+    let rgb_raw = rgb.as_raw().to_vec();
+    let hash = std::panic::catch_unwind(move || {
+        blurhash::encode(4, 3, width, height, &rgb_raw)
+    })
+    .unwrap_or_else(|_| Ok(String::new()))
+    .unwrap_or_default();
 
     Ok(ProcessedImage {
         size: webp_bytes.len() as i64,
