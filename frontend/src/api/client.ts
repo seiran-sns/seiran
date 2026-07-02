@@ -233,7 +233,7 @@ export const api = {
         text,
         deliver_to_fedi: deliverToFedi,
         deliver_to_bsky: deliverToBsky,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds.map(Number) : undefined,
+        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
       });
     },
     localTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {

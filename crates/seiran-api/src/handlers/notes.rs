@@ -20,7 +20,8 @@ use crate::middleware::extract_auth;
 #[derive(Deserialize)]
 pub struct CreateNoteRequest {
     pub text: String,
-    pub attachment_ids: Option<Vec<i64>>,
+    // JS の Number 精度問題を避けるため文字列で受け取り、サーバー側で i64 にパースする
+    pub attachment_ids: Option<Vec<String>>,
     pub deliver_to_fedi: Option<bool>,
     pub deliver_to_bsky: Option<bool>,
 }
@@ -108,6 +109,11 @@ pub async fn create_note(
         if ids.len() > 4 {
             return ApiError::BadRequest("添付ファイルは最大4件です".to_owned()).into_response();
         }
+        for id_str in ids {
+            if id_str.parse::<i64>().is_err() {
+                return ApiError::BadRequest("INVALID_ATTACHMENT_ID".to_owned()).into_response();
+            }
+        }
     }
 
     let (actor_id, username) = match state.actors.find_local_by_user_id(auth_user.user_id).await {
@@ -134,7 +140,8 @@ pub async fn create_note(
     }
 
     if let Some(ids) = &req.attachment_ids {
-        for (position, &media_file_id) in ids.iter().enumerate() {
+        for (position, id_str) in ids.iter().enumerate() {
+            let media_file_id: i64 = id_str.parse().unwrap();
             if let Err(e) = sqlx::query(
                 "INSERT INTO post_attachments (post_id, media_file_id, position) VALUES ($1, $2, $3)",
             )
