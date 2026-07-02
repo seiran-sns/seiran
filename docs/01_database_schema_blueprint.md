@@ -353,6 +353,32 @@ CREATE TABLE custom_emojis (
 );
 ```
 
+### 1.11 `site_settings` (サイト設定・キーバリューストア)
+
+管理者 API（`GET/PATCH /api/admin/site-settings`）で変更可能なサーバー設定を格納する汎用 KV テーブル。
+
+```sql
+CREATE TABLE site_settings (
+    key        VARCHAR(64) PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+```
+
+主要キー一覧:
+
+| キー | 型（文字列表現） | デフォルト | 説明 |
+|---|---|---|---|
+| `smtp_host` | string | なし | SMTP サーバーホスト名 |
+| `smtp_port` | string（数値） | `"587"` | SMTP ポート番号 |
+| `smtp_username` | string | なし | SMTP 認証ユーザー名 |
+| `smtp_password` | string | なし | SMTP 認証パスワード（API レスポンスでは返さない） |
+| `smtp_from` | string | なし | 送信元メールアドレス |
+| `smtp_tls` | `"tls"` / `"starttls"` | `"starttls"` | TLS モード |
+| `require_email_verification` | `"true"` / `"false"` | `"false"` | メール確認必須フラグ |
+
+`smtp_host` が未設定の場合、`POST /api/auth/verify-email` は HTTP 503 + `{"code": "SMTP_NOT_CONFIGURED"}` を返す。
+
 ---
 
 ## 2. データベース層での主要クエリ・ユースケース

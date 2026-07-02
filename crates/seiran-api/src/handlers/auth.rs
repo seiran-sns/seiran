@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use seiran_common::{generate_snowflake_id, LocalAuthProvider};
+use seiran_common::{generate_snowflake_id, LocalAuthProvider, SiteSettingsRepository};
 use seiran_common::atp::{prepare_plc_genesis, submit_plc_genesis};
 use seiran_common::atp::signing_key_from_pem;
 
@@ -18,8 +18,11 @@ use crate::middleware::extract_auth;
 pub struct RegisterRequest {
     pub username: String,
     pub password: String,
-    /// POST /api/auth/verify-email → GET /auth/verify?token=... で得られるトークン
-    pub registration_token: String,
+    /// POST /api/auth/verify-email → GET /auth/verify?token=... で得られるトークン。
+    /// require_email_verification=false のときは省略可。
+    pub registration_token: Option<String>,
+    /// registration_token を省略する場合（メール確認不要フロー）に直接指定するメールアドレス。
+    pub email: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -45,26 +48,52 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
-    if req.username.is_empty() || req.password.len() < 8 || req.registration_token.is_empty() {
+    if req.username.is_empty() || req.password.len() < 8 {
         return Err(ApiError::BadRequest("INVALID_INPUT".into()));
     }
 
-    // registration_token を検証し、確認済みのメールアドレスを取得する
-    let token: uuid::Uuid = req.registration_token.parse()
-        .map_err(|_| ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
+    // メールアドレスを解決する:
+    // - registration_token が指定されている場合は email_verifications から取得
+    // - 省略されている場合は require_email_verification=false を確認して email フィールドを使用
+    let email: String = if let Some(token_str) = &req.registration_token {
+        let token_str = token_str.trim();
+        if token_str.is_empty() {
+            return Err(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()));
+        }
+        let token: uuid::Uuid = token_str.parse()
+            .map_err(|_| ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
 
-    let verification = sqlx::query!(
-        "DELETE FROM email_verifications
-         WHERE token = $1 AND expires_at > now()
-         RETURNING email",
-        token,
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
+        let verification = sqlx::query!(
+            "DELETE FROM email_verifications
+             WHERE token = $1 AND expires_at > now()
+             RETURNING email",
+            token,
+        )
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
 
-    let email = verification.email;
+        verification.email
+    } else {
+        // トークンなし登録: require_email_verification が false であることを確認
+        let require_ev = state
+            .site_settings
+            .get("require_email_verification")
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        if require_ev {
+            return Err(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()));
+        }
+        req.email
+            .as_deref()
+            .filter(|e| !e.is_empty() && e.contains('@'))
+            .ok_or_else(|| ApiError::BadRequest("INVALID_INPUT".into()))?
+            .trim()
+            .to_lowercase()
+    };
 
     let exists = state
         .users
@@ -341,7 +370,12 @@ pub async fn request_password_reset(
 
         if let Some((token,)) = token_row {
             let reset_url = format!("https://{}/reset-password?token={}", state.local_domain, token);
-            if let Err(e) = send_password_reset_email(&email, &reset_url).await {
+            let smtp_settings = state
+                .site_settings
+                .get_all()
+                .await
+                .unwrap_or_default();
+            if let Err(e) = send_password_reset_email(&smtp_settings, &email, &reset_url).await {
                 eprintln!("[request-password-reset] メール送信失敗（処理は継続）: {}", e);
             }
         }

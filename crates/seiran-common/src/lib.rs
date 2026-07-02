@@ -26,6 +26,7 @@ pub use repository::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider,
     StorageProviderError, StorageProviderRepository, UpdateStorageProvider,
 };
+pub use repository::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage::{
     process_image, ImageProcessingError, MediaKind, ProcessedImage,
     S3StorageClient, S3Error, select_provider, SelectorError,

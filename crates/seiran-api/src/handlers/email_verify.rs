@@ -5,9 +5,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use seiran_common::generate_snowflake_id;
+use seiran_common::SiteSettingsRepository;
 
 use crate::error::ApiError;
-use crate::mailer::send_verification_email;
+use crate::mailer::{send_verification_email, MailError};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -66,11 +67,20 @@ pub async fn request_email_verification(
     let token = row.token;
     let verify_url = format!("https://{}/verify-email?token={}", state.local_domain, token);
 
-    send_verification_email(&email, &verify_url)
+    let smtp_settings = state
+        .site_settings
+        .get_all()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    send_verification_email(&smtp_settings, &email, &verify_url)
         .await
         .map_err(|e| {
             eprintln!("[verify-email] メール送信失敗: {}", e);
-            ApiError::Internal(format!("メール送信失敗: {}", e))
+            match e {
+                MailError::Config(_) => ApiError::ServiceUnavailable("SMTP_NOT_CONFIGURED"),
+                _ => ApiError::Internal(format!("メール送信失敗: {}", e)),
+            }
         })?;
 
     Ok(Json(VerifyEmailResponse {

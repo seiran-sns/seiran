@@ -161,7 +161,22 @@ export interface SetupStatus {
   initialized: boolean;
 }
 
+export interface MetaResponse {
+  uri: string;
+  name: string;
+  version: string;
+  features: {
+    registration: boolean;
+    miauth: boolean;
+  };
+  requireEmailVerification: boolean;
+}
+
 export const api = {
+  meta(signal?: AbortSignal) {
+    return request<MetaResponse>("POST", "/meta", undefined, signal);
+  },
+
   setup: {
     status(signal?: AbortSignal) {
       return request<SetupStatus>("GET", "/setup/status", undefined, signal);
@@ -183,6 +198,13 @@ export const api = {
         username,
         password,
         registration_token: registrationToken,
+      });
+    },
+    registerDirect(email: string, username: string, password: string) {
+      return request<AuthResponse>("POST", "/auth/register", {
+        username,
+        password,
+        email,
       });
     },
     login(identifier: string, password: string) {
