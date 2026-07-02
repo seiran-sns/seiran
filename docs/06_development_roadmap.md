@@ -13,6 +13,7 @@
   - [x] `actors` テーブル（統一アクター情報、`actor_type_enum`、ペアリング/ブリッジ参照ポインタ）の実装
   - [x] `posts` テーブル（統一ポスト、リレーション、重複マージ用UUID/ポインタ、プロトコル固有ID）の実装
   - [x] 各インデックス（`idx_actors_type`, `idx_actors_pair`, `idx_actors_bridge`, `idx_posts_snowflake` 等）の設定
+  - [x] DBパフォーマンスインデックス追加（`idx_actors_user_id`, `idx_actors_username_domain`, `idx_follows_target_follower`, `idx_posts_actor_id` 複合部分インデックス化）
 - [x] **1.2. 統一ID (Snowflake / ULID) 採番エンジンの実装**
   - [x] 48bit タイムスタンプ ＋ 16bit シリアルノードID/ランダム値による一意ID生成モジュールの実装
   - [x] 未来補正タイムスタンプアルゴリズムの実装:
