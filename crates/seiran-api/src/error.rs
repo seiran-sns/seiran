@@ -24,6 +24,9 @@ pub enum ApiError {
     Forbidden(&'static str),
     #[error("{0}")]
     ServiceUnavailable(&'static str),
+    /// ストレージプロバイダーのクォータ超過（HTTP 507）
+    #[error("ストレージ容量が不足しています")]
+    InsufficientStorage,
     /// `msg` はサーバーログにのみ出力され、クライアントには `INTERNAL_ERROR` コードのみ返す
     #[error("内部エラー: {0}")]
     Internal(String),
@@ -38,6 +41,9 @@ impl IntoResponse for ApiError {
             ApiError::Conflict(c) => (StatusCode::CONFLICT, c.to_owned()),
             ApiError::Forbidden(c) => (StatusCode::FORBIDDEN, c.to_owned()),
             ApiError::ServiceUnavailable(c) => (StatusCode::SERVICE_UNAVAILABLE, c.to_owned()),
+            ApiError::InsufficientStorage => {
+                (StatusCode::INSUFFICIENT_STORAGE, "STORAGE_QUOTA_EXCEEDED".to_owned())
+            }
             ApiError::Internal(msg) => {
                 eprintln!("[ERROR] {}", msg);
                 (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR".to_owned())
