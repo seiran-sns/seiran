@@ -153,7 +153,8 @@ pub async fn create_note(
     // ── メンション変換（変換失敗時は元テキストをそのまま使用する） ──────────────
 
     // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
-    let bsky_text = if deliver_bsky {
+    // 戻り値: (変換後テキスト, AT Protocol Facet リスト)
+    let (bsky_text, bsky_facets) = if deliver_bsky {
         convert_mentions_for_bsky(
             &req.text,
             &state.local_domain,
@@ -162,7 +163,7 @@ pub async fn create_note(
         )
         .await
     } else {
-        req.text.clone()
+        (req.text.clone(), vec![])
     };
 
     // AP 配信用: `@handle.tld` (ATP ハンドル) → `@handle.tld@bsky.brid.gy` または Markdown リンク
@@ -180,7 +181,7 @@ pub async fn create_note(
     // ─────────────────────────────────────────────────────────────────────────
 
     if deliver_bsky {
-        if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &bsky_text, now).await {
+        if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &bsky_text, bsky_facets, now).await {
             eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
         }
     }

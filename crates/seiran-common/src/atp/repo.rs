@@ -316,28 +316,61 @@ fn encode_uvarint(mut n: u64, buf: &mut Vec<u8>) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// app.bsky.feed.post レコード
+// app.bsky.feed.post レコード（Facet 型を含む）
 // ─────────────────────────────────────────────────────────────────────────────
 
-// canonical 順: text(4) < $type(5) < createdAt(9)
+/// AT Protocol Facet の index（UTF-8 バイトオフセット）
+/// canonical 順: byteEnd(7) < byteStart(9)
+#[derive(Serialize)]
+pub struct BskyFacetIndex {
+    #[serde(rename = "byteEnd")]
+    pub byte_end: usize,
+    #[serde(rename = "byteStart")]
+    pub byte_start: usize,
+}
+
+/// Facet feature: mention
+/// canonical 順: did(3) < $type(5)
+#[derive(Serialize)]
+pub struct BskyFacetMention {
+    pub did: String,
+    #[serde(rename = "$type")]
+    pub kind: String,
+}
+
+/// AT Protocol リッチテキスト Facet（`app.bsky.richtext.facet`）
+/// canonical 順: index(5) < features(8)
+#[derive(Serialize)]
+pub struct BskyFacet {
+    pub index: BskyFacetIndex,
+    pub features: Vec<BskyFacetMention>,
+}
+
+// canonical 順: text(4) < $type(5) < facets(6) < createdAt(9)
 #[derive(Serialize)]
 struct BskyFeedPost {
-    #[serde(rename = "createdAt")]
-    created_at: String,
     text: String,
     #[serde(rename = "$type")]
     kind: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    facets: Vec<BskyFacet>,
+    #[serde(rename = "createdAt")]
+    created_at: String,
 }
 
 /// `app.bsky.feed.post` レコードの DAG-CBOR バイト列と CID を生成する。
+///
+/// `facets` が空の場合は `facets` フィールドを省略する。
 pub fn encode_bsky_feed_post(
     text: &str,
     created_at_rfc3339: &str,
+    facets: Vec<BskyFacet>,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
     let record = BskyFeedPost {
-        created_at: created_at_rfc3339.to_string(),
         text: text.to_string(),
         kind: "app.bsky.feed.post".to_string(),
+        facets,
+        created_at: created_at_rfc3339.to_string(),
     };
     let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
     let cid = cid_from_dagcbor(&cbor);
@@ -499,8 +532,8 @@ mod tests {
 
     #[test]
     fn test_encode_bsky_feed_post_deterministic() {
-        let (cbor1, cid1) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z").unwrap();
-        let (cbor2, cid2) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z").unwrap();
+        let (cbor1, cid1) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![]).unwrap();
+        let (cbor2, cid2) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![]).unwrap();
         assert_eq!(cbor1, cbor2);
         assert_eq!(cid1, cid2);
     }
@@ -514,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_build_mst_single_entry() {
-        let (_, cid) = encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z").unwrap();
+        let (_, cid) = encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z", vec![]).unwrap();
         let entries = vec![("app.bsky.feed.post/test123".to_string(), cid)];
         let result = build_mst(&entries);
         assert!(result.is_ok());

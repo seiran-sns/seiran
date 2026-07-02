@@ -8,27 +8,32 @@
 
 use std::time::Duration;
 
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
+
+use crate::atp::repo::{BskyFacet, BskyFacetIndex, BskyFacetMention};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bsky 向けメンション変換
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// 投稿本文中の `@xxx` 形式メンションを AT Protocol ハンドルへ変換する。
+/// 投稿本文中の `@xxx` 形式メンションを AT Protocol ハンドルへ変換し、
+/// 変換後テキストと AT Protocol Facet リストを返す。
 ///
 /// * `@username`（ドメインなし）→ ローカルアクター確認後 `@username.{local_domain}` に展開
 /// * `@user@domain.tld` → brid.gy 2 段階ルックアップ → `@user.domain.tld.ap.brid.gy`
 ///   失敗した場合はそのまま（AT Protocol では未知メンションはテキスト扱い）
 ///
+/// DID が取得できた場合は対応する `BskyFacet` を生成する（ベストエフォート）。
 /// 変換中に DB / HTTP エラーが発生した場合は元テキストにフォールバックする。
 pub async fn convert_mentions_for_bsky(
     text: &str,
     local_domain: &str,
     pool: &PgPool,
     http_client: &reqwest::Client,
-) -> String {
+) -> (String, Vec<BskyFacet>) {
     let text_chars: Vec<char> = text.chars().collect();
     let mut result = String::with_capacity(text.len() * 2);
+    let mut facets: Vec<BskyFacet> = Vec::new();
     let mut i = 0;
 
     while i < text_chars.len() {
@@ -90,16 +95,27 @@ pub async fn convert_mentions_for_bsky(
 
             // domain == local_domain の場合はローカルユーザーとして扱う
             if domain.eq_ignore_ascii_case(local_domain) {
+                let did = get_local_actor_did(&username, pool).await;
+                let byte_start = result.len();
                 result.push('@');
                 result.push_str(&username);
                 result.push('.');
                 result.push_str(local_domain);
+                let byte_end = result.len();
+                if let Some(did) = did {
+                    facets.push(make_mention_facet(byte_start, byte_end, did));
+                }
             } else {
-                // brid.gy 経由で Bsky ハンドルを解決
+                // brid.gy 経由で Bsky ハンドルと DID を解決
                 match resolve_fedi_for_bsky(&username, &domain, pool, http_client).await {
-                    Some(handle) => {
+                    Some((handle, did_opt)) => {
+                        let byte_start = result.len();
                         result.push('@');
                         result.push_str(&handle);
+                        let byte_end = result.len();
+                        if let Some(did) = did_opt {
+                            facets.push(make_mention_facet(byte_start, byte_end, did));
+                        }
                     }
                     None => {
                         // 解決失敗 → 元のテキストをそのまま残す
@@ -113,10 +129,16 @@ pub async fn convert_mentions_for_bsky(
         } else {
             // `@username` 形式 → ローカルアクター確認
             if is_local_actor(&username, pool).await {
+                let did = get_local_actor_did(&username, pool).await;
+                let byte_start = result.len();
                 result.push('@');
                 result.push_str(&username);
                 result.push('.');
                 result.push_str(local_domain);
+                let byte_end = result.len();
+                if let Some(did) = did {
+                    facets.push(make_mention_facet(byte_start, byte_end, did));
+                }
             } else {
                 // ローカルに存在しない → そのまま
                 result.push('@');
@@ -125,7 +147,34 @@ pub async fn convert_mentions_for_bsky(
         }
     }
 
-    result
+    (result, facets)
+}
+
+/// `BskyFacet`（mention）を生成するヘルパー。
+fn make_mention_facet(byte_start: usize, byte_end: usize, did: String) -> BskyFacet {
+    BskyFacet {
+        index: BskyFacetIndex { byte_end, byte_start },
+        features: vec![BskyFacetMention {
+            did,
+            kind: "app.bsky.richtext.facet#mention".to_string(),
+        }],
+    }
+}
+
+/// `actors` テーブルからローカルアクターの `at_did` を取得する。
+///
+/// アクターが存在しない、または `at_did` が未設定の場合は `None` を返す。
+async fn get_local_actor_did(username: &str, pool: &PgPool) -> Option<String> {
+    let row = sqlx::query(
+        "SELECT at_did FROM actors WHERE actor_type = 'local' AND username = $1 LIMIT 1",
+    )
+    .bind(username)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    row.and_then(|r| r.try_get::<Option<String>, _>("at_did").ok().flatten())
 }
 
 /// `actors` テーブルにローカルアクター（`actor_type = 'local'`）として存在するか確認する。
@@ -140,16 +189,18 @@ async fn is_local_actor(username: &str, pool: &PgPool) -> bool {
     .unwrap_or(false)
 }
 
-/// Fediverse メンション（`@user@domain`）を brid.gy 経由で AT Protocol ハンドルに解決する。
+/// Fediverse メンション（`@user@domain`）を brid.gy 経由で AT Protocol ハンドルと DID に解決する。
 ///
-/// 解決に成功した場合は `Some("user.domain.ap.brid.gy")` を返す。
-/// DB に存在しない場合は外部 API（`bsky.social` の `resolveHandle`）を **2 秒タイムアウト** で試みる。
+/// 戻り値: `Some((handle, Option<did>))` または `None`（解決失敗）。
+///
+/// * DB にアクターが存在する場合: ハンドルを確定し、bsky.brid.gy で DID を解決（2 秒タイムアウト）
+/// * DB にない場合: `bsky.brid.gy` の `resolveHandle` API で存在確認 + DID 取得を一度に行う（2 秒タイムアウト）
 async fn resolve_fedi_for_bsky(
     username: &str,
     domain: &str,
     pool: &PgPool,
     http_client: &reqwest::Client,
-) -> Option<String> {
+) -> Option<(String, Option<String>)> {
     // brid.gy ハンドル命名規則: {username}.{domain}.ap.brid.gy
     let bridgy_username = format!("{}.{}", username, domain);
     let bridgy_handle = format!("{}.ap.brid.gy", bridgy_username);
@@ -166,15 +217,16 @@ async fn resolve_fedi_for_bsky(
     .is_some();
 
     if found_in_db {
-        return Some(bridgy_handle);
+        // DB にあれば、bsky.brid.gy で DID を解決（失敗時は Facet なし）
+        let did = resolve_did_via_bridgy(&bridgy_handle, http_client).await;
+        return Some((bridgy_handle, did));
     }
 
-    // 第2段階: bsky.social の resolveHandle API で確認（2 秒タイムアウト）
+    // 第2段階: bsky.brid.gy の resolveHandle API で存在確認 + DID 取得（2 秒タイムアウト）
     let url = format!(
-        "https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle={}",
+        "https://bsky.brid.gy/xrpc/com.atproto.identity.resolveHandle?handle={}",
         bridgy_handle
     );
-
     let res = tokio::time::timeout(
         Duration::from_secs(2),
         http_client.get(&url).send(),
@@ -182,7 +234,35 @@ async fn resolve_fedi_for_bsky(
     .await;
 
     match res {
-        Ok(Ok(response)) if response.status().is_success() => Some(bridgy_handle),
+        Ok(Ok(response)) if response.status().is_success() => {
+            let did = response
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v["did"].as_str().map(|s| s.to_string()));
+            Some((bridgy_handle, did))
+        }
+        _ => None,
+    }
+}
+
+/// `bsky.brid.gy` の `resolveHandle` API で DID を解決する（2 秒タイムアウト）。
+async fn resolve_did_via_bridgy(handle: &str, http_client: &reqwest::Client) -> Option<String> {
+    let url = format!(
+        "https://bsky.brid.gy/xrpc/com.atproto.identity.resolveHandle?handle={}",
+        handle
+    );
+    let res = tokio::time::timeout(
+        Duration::from_secs(2),
+        http_client.get(&url).send(),
+    )
+    .await;
+    match res {
+        Ok(Ok(response)) if response.status().is_success() => response
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| v["did"].as_str().map(|s| s.to_string())),
         _ => None,
     }
 }
