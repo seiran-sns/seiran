@@ -158,6 +158,11 @@ impl AtpCommitService {
         new_blocks.push((commit_cid, commit_cbor));
         let diff_car = encode_car(&commit_cid, &new_blocks)?;
 
+        let commit_cid_str = cid_to_string(&commit_cid);
+        let record_cid_str = cid_to_string(&record.cid);
+
+        let mut tx = self.pool.begin().await?;
+
         // ⑦ atp_blocks INSERT
         for (cid, bytes) in &new_blocks {
             sqlx::query(
@@ -167,23 +172,21 @@ impl AtpCommitService {
             .bind(cid_to_string(cid))
             .bind(actor_id)
             .bind(bytes.as_slice())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         }
 
         // ⑧ actors UPDATE
-        let commit_cid_str = cid_to_string(&commit_cid);
         sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2 WHERE id = $3")
             .bind(&commit_cid_str)
             .bind(&new_rev)
             .bind(actor_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
         // ⑨ atp_records INSERT（投稿は posts テーブルで管理するためスキップ）
         // app.bsky.feed.post を atp_records にも入れると load_atp_entries で
         // posts テーブルとの二重取得になり MST に重複キーが生じて AppView に拒否される。
-        let record_cid_str = cid_to_string(&record.cid);
         if record.collection != "app.bsky.feed.post" {
             sqlx::query(
                 "INSERT INTO atp_records (actor_id, collection, rkey, cid) VALUES ($1, $2, $3, $4)
@@ -193,11 +196,11 @@ impl AtpCommitService {
             .bind(record.collection)
             .bind(&record.rkey)
             .bind(&record_cid_str)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         }
 
-        // atp_repo_events INSERT → seq 取得
+        // ⑩ atp_repo_events INSERT → seq 取得
         let ops_json = serde_json::json!([{
             "action": record.action,
             "path": entry_key,
@@ -217,9 +220,11 @@ impl AtpCommitService {
         .bind(prev_rev.as_deref())
         .bind(diff_car.as_slice())
         .bind(&ops_json)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
         let seq: i64 = event_row.try_get("id")?;
+
+        tx.commit().await?;
 
         // WebSocket ブロードキャスト
         let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
