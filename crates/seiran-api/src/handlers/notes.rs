@@ -166,9 +166,7 @@ pub async fn create_note(
     };
 
     // AP 配信用: `@handle.tld` (ATP ハンドル) → `@handle.tld@bsky.brid.gy` または Markdown リンク
-    // deliver_post_to_ap_followers は post_id 経由で DB から本文を取得するため、
-    // 現時点ではこの変換結果を直接渡す手段がない（将来の拡張用に変換だけ実施する）。
-    let _ap_text = if deliver_fedi {
+    let ap_text = if deliver_fedi {
         convert_mentions_for_ap(
             &req.text,
             &state.db,
@@ -198,7 +196,7 @@ pub async fn create_note(
         let ap_client = state.ap_client.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                deliver_post_to_ap_followers(&ap_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem)
+                deliver_post_to_ap_followers(&ap_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem, Some(ap_text.as_str()))
                     .await
             {
                 eprintln!("[create_note] AP 配送エラー: {}", e);

@@ -7,6 +7,9 @@ use sqlx::{PgPool, Row};
 use super::client::{ApClient, ApError};
 
 /// ローカル投稿を AP フォロワー全員の inbox へ配送する
+///
+/// `override_body` が `Some` の場合はその値を本文として使用する（AP向けメンション変換済みテキスト等）。
+/// `None` の場合は DB の `posts.body` をそのまま使用する。
 pub async fn deliver_post_to_ap_followers(
     ap_client: &ApClient,
     db: &PgPool,
@@ -14,6 +17,7 @@ pub async fn deliver_post_to_ap_followers(
     actor_id: i64,
     local_domain: &str,
     ap_private_key_pem: &str,
+    override_body: Option<&str>,
 ) -> Result<(), ApError> {
     // 投稿本文・作成日時・投稿者ユーザー名を取得
     let row = sqlx::query(
@@ -29,7 +33,11 @@ pub async fn deliver_post_to_ap_followers(
     .map_err(|e| ApError::Other(format!("投稿情報取得エラー: {}", e)))?
     .ok_or_else(|| ApError::Other(format!("投稿 {} が見つかりません", post_id)))?;
 
-    let body: String = row.try_get("body").map_err(|e| ApError::Other(e.to_string()))?;
+    let body: String = if let Some(ob) = override_body {
+        ob.to_owned()
+    } else {
+        row.try_get("body").map_err(|e| ApError::Other(e.to_string()))?
+    };
     let created_at: chrono::DateTime<chrono::Utc> =
         row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
     let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
