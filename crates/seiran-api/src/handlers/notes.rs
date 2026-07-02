@@ -7,6 +7,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use unicode_segmentation::UnicodeSegmentation;
 
 use seiran_common::repository::TimelinePost;
 use seiran_common::{ap::{deliver_post_to_ap_followers, fetch_ap_history, plain_to_html}, generate_snowflake_id};
@@ -19,6 +20,8 @@ use crate::middleware::extract_auth;
 pub struct CreateNoteRequest {
     pub text: String,
     pub attachment_ids: Option<Vec<i64>>,
+    pub deliver_to_fedi: Option<bool>,
+    pub deliver_to_bsky: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -83,6 +86,23 @@ pub async fn create_note(
         return (StatusCode::BAD_REQUEST, "text は空にできません").into_response();
     }
 
+    let deliver_fedi = req.deliver_to_fedi.unwrap_or(true);
+    let deliver_bsky = req.deliver_to_bsky.unwrap_or(true);
+
+    let (max_bytes, max_graphemes): (usize, usize) = if deliver_bsky {
+        (3_000, 300)
+    } else {
+        (10_000, 3_000)
+    };
+    let byte_len = req.text.len();
+    if byte_len > max_bytes {
+        return ApiError::BadRequest("TEXT_TOO_LONG".to_owned()).into_response();
+    }
+    let grapheme_count = req.text.graphemes(true).count();
+    if grapheme_count > max_graphemes {
+        return ApiError::BadRequest("TEXT_TOO_LONG".to_owned()).into_response();
+    }
+
     if let Some(ids) = &req.attachment_ids {
         if ids.len() > 4 {
             return ApiError::BadRequest("添付ファイルは最大4件です".to_owned()).into_response();
@@ -129,12 +149,13 @@ pub async fn create_note(
         }
     }
 
-    if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &req.text, now).await {
-        eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
+    if deliver_bsky {
+        if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &req.text, now).await {
+            eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
+        }
     }
 
-    // AP フォロワーへ非同期配送
-    {
+    if deliver_fedi {
         let db = state.db.clone();
         let local_domain = state.local_domain.clone();
         let ap_private_key_pem = state

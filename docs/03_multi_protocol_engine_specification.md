@@ -94,6 +94,58 @@ APとATPが絡み合うマルチプロトコル環境において、同じ内容
 
 ---
 
+## 6. 配信先トグル仕様
+
+投稿作成時にユーザーが独立して ON/OFF できる 2 つのトグルで配信先を制御する。
+
+### 6.1 フィールド定義
+
+| フィールド | 型 | 既定値 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `deliver_to_fedi` | `bool` | `true` | ActivityPub（Fediverse）フォロワーへ配送するか |
+| `deliver_to_bsky` | `bool` | `true` | AT Protocol Relay へコミットするか |
+
+### 6.2 組み合わせと文字数制限
+
+| `deliver_to_fedi` | `deliver_to_bsky` | 配信先 | UTF-8 バイト上限 | Grapheme 上限 |
+| :--- | :--- | :--- | :--- | :--- |
+| OFF | OFF | ローカルのみ | 10,000 | 3,000 |
+| ON  | OFF | Fediverse のみ | 10,000 | 3,000 |
+| OFF | ON  | Bluesky のみ | 3,000 | 300 |
+| ON  | ON  | 両方 | 3,000 | 300 |
+
+`deliver_to_bsky` が ON のときのみ厳しい制限が適用される。
+
+Grapheme カウントは `Intl.Segmenter`（フロントエンド）および `unicode-segmentation` クレート（バックエンド）を使用する。
+バイト数カウントは `TextEncoder`（フロントエンド）および `str::len()`（バックエンド、UTF-8 ネイティブ）を使用する。
+
+### 6.3 バックエンド処理条件
+
+| 処理 | 実行条件 |
+| :--- | :--- |
+| ATP リポジトリコミット（`atp_repository_publish` キュー） | `deliver_to_bsky == true` |
+| AP 配送（`outbound_post_delivery` キュー） | `deliver_to_fedi == true` |
+
+### 6.4 フロントエンド残り文字数表示ロジック
+
+残り文字数は以下の式で算出し、負の値になった場合は投稿ボタンを無効化して黄色ガイドメッセージを表示する。
+
+```
+remaining = min(maxGraphemes - graphemes, floor((maxBytes - bytes) / 3))
+```
+
+`deliver_to_bsky` ON の場合（厳しい制限）:
+```
+remaining = min(300 - graphemes, floor((3000 - bytes) / 3))
+```
+
+`deliver_to_bsky` OFF の場合（緩い制限）:
+```
+remaining = min(3000 - graphemes, floor((10000 - bytes) / 3))
+```
+
+---
+
 ## 5. Misskey 互換レイヤー仕様（MiAuth & `/api/meta`）
 
 Aria・Miria・ZonePane 等の Misskey クライアントから seiran を Misskey サーバーとして利用可能にするための互換エンドポイント仕様。

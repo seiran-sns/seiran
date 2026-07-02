@@ -1,10 +1,27 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, Note } from "../api/client";
+import { api, Note, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import styles from "./Timeline.module.css";
 
 type Tab = "local" | "home";
+
+function countGraphemes(text: string): number {
+  const seg = new Intl.Segmenter();
+  return [...seg.segment(text)].length;
+}
+
+function countUtf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
+function calcRemaining(text: string, deliverBsky: boolean): number {
+  const maxBytes = deliverBsky ? 3_000 : 10_000;
+  const maxGraphemes = deliverBsky ? 300 : 3_000;
+  const graphemes = countGraphemes(text);
+  const bytes = countUtf8Bytes(text);
+  return Math.min(maxGraphemes - graphemes, Math.floor((maxBytes - bytes) / 3));
+}
 
 export default function Timeline() {
   const { user, logout } = useAuth();
@@ -12,6 +29,8 @@ export default function Timeline() {
   const [tab, setTab] = useState<Tab>("local");
   const [notes, setNotes] = useState<Note[]>([]);
   const [text, setText] = useState("");
+  const [deliverFedi, setDeliverFedi] = useState(true);
+  const [deliverBsky, setDeliverBsky] = useState(true);
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -25,18 +44,21 @@ export default function Timeline() {
     fetch.then(setNotes).finally(() => setLoading(false));
   }, [tab]);
 
+  const remaining = calcRemaining(text, deliverBsky);
+  const overLimit = remaining < 0;
+
   async function handlePost(e: FormEvent) {
     e.preventDefault();
-    if (!text.trim()) return;
+    if (!text.trim() || overLimit) return;
     setPostError("");
     setPosting(true);
     try {
-      const note = await api.notes.create(text.trim());
+      const note = await api.notes.create(text.trim(), deliverFedi, deliverBsky);
       setNotes((prev) => [note, ...prev]);
       setText("");
       textareaRef.current?.focus();
     } catch (err) {
-      setPostError(err instanceof Error ? err.message : "投稿に失敗しました");
+      setPostError(getErrorMessage(err));
     } finally {
       setPosting(false);
     }
@@ -100,15 +122,40 @@ export default function Timeline() {
             className={styles.textarea}
             placeholder="いまどうしてる？"
             rows={3}
-            maxLength={500}
           />
+
+          <div className={styles.scopeRow}>
+            <button
+              type="button"
+              className={`${styles.scopeBtn} ${deliverFedi ? styles.scopeActive : ""}`}
+              onClick={() => setDeliverFedi((v) => !v)}
+            >
+              Fedi 🌐
+            </button>
+            <button
+              type="button"
+              className={`${styles.scopeBtn} ${deliverBsky ? styles.scopeActive : ""}`}
+              onClick={() => setDeliverBsky((v) => !v)}
+            >
+              Bsky 🦋
+            </button>
+          </div>
+
+          {deliverBsky && overLimit && (
+            <p className={styles.scopeGuide}>
+              Bluesky の文字数制限を超えています。Bsky をオフにすると投稿できます。
+            </p>
+          )}
+
           <div className={styles.postFooter}>
-            <span className={styles.charCount}>{text.length} / 500</span>
+            <span className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}>
+              残り {remaining}
+            </span>
             {postError && <span className={styles.postError}>{postError}</span>}
             <button
               type="submit"
               className={styles.postBtn}
-              disabled={posting || !text.trim()}
+              disabled={posting || !text.trim() || overLimit}
             >
               {posting ? "投稿中..." : "投稿"}
             </button>

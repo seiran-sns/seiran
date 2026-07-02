@@ -90,10 +90,50 @@
   padding-top: 10px;
 }
 
+.scopeRow {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.scopeBtn {
+  background: none;
+  border: 1px solid #2a2a30;
+  color: #666;
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.scopeBtn:hover {
+  border-color: #555;
+  color: #aaa;
+}
+
+.scopeActive {
+  background: #1e1060;
+  border-color: #7c3aed;
+  color: #a78bfa;
+}
+
+.scopeGuide {
+  font-size: 0.78rem;
+  color: #f59e0b;
+  margin: 8px 0 0;
+  line-height: 1.4;
+}
+
 .charCount {
   font-size: 0.8rem;
   color: #555;
   margin-right: auto;
+}
+
+.charCountOver {
+  color: #f87171;
+  font-weight: 600;
 }
 
 .postError {

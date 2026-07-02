@@ -40,6 +40,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INTERNAL_ERROR: "サーバーエラーが発生しました。しばらく待ってから再試行してください",
   RESET_TOKEN_INVALID: "リンクが無効または期限切れです。パスワードリセットをやり直してください",
   PASSWORD_TOO_SHORT: "パスワードは8文字以上で入力してください",
+  TEXT_TOO_LONG: "文字数制限を超えています（@ユーザー名の展開後に超過した可能性があります）",
 };
 
 export function getErrorMessage(error: unknown): string {
@@ -193,8 +194,12 @@ export const api = {
     get(id: string) {
       return request<Note>("GET", `/notes/${encodeURIComponent(id)}`);
     },
-    create(text: string) {
-      return request<Note>("POST", "/notes/create", { text });
+    create(text: string, deliverToFedi: boolean = true, deliverToBsky: boolean = true) {
+      return request<Note>("POST", "/notes/create", {
+        text,
+        deliver_to_fedi: deliverToFedi,
+        deliver_to_bsky: deliverToBsky,
+      });
     },
     localTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {
       const q = new URLSearchParams();
