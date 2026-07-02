@@ -16,6 +16,27 @@ pub trait FollowRepository: Send + Sync {
         follower_actor_id: i64,
         target_actor_id: i64,
     ) -> Result<Option<String>, sqlx::Error>;
+
+    /// リモートからのフォロー受信時に accepted で挿入する（重複なら何もしない）。
+    async fn insert_accepted(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<(), sqlx::Error>;
+
+    /// pending のフォローを accepted に昇格させる（Accept 受信時）。
+    async fn accept(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<u64, sqlx::Error>;
+
+    /// フォロー関係を削除する（Undo/Follow 受信時）。
+    async fn delete_by_actors(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgFollowRepository {
@@ -62,5 +83,53 @@ impl FollowRepository for PgFollowRepository {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|r| r.0))
+    }
+
+    async fn insert_accepted(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO follows (follower_actor_id, target_actor_id, status)
+             VALUES ($1, $2, 'accepted')
+             ON CONFLICT (follower_actor_id, target_actor_id) DO NOTHING",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    async fn accept(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE follows SET status = 'accepted'
+             WHERE follower_actor_id = $1 AND target_actor_id = $2 AND status = 'pending'",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    async fn delete_by_actors(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "DELETE FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
     }
 }

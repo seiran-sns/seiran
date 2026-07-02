@@ -7,7 +7,6 @@ use base64::Engine as _;
 use seiran_common::traits::Job;
 use seiran_common::generate_snowflake_id;
 use sha2::{Digest as Sha2Digest, Sha256};
-use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -168,17 +167,15 @@ async fn handle_follow(
         .ok_or("Follow: object URI からユーザー名を抽出できません")?;
 
     // ローカルアクターが実在するか確認
-    let local_row = sqlx::query(
-        "SELECT id FROM actors WHERE username = $1 AND domain = $2 AND actor_type = 'local' LIMIT 1",
-    )
-    .bind(local_username)
-    .bind(&state.local_domain)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
-    .ok_or_else(|| format!("ローカルアクター '{}' が存在しません", local_username))?;
-
-    let local_actor_id: i64 = local_row.try_get("id").map_err(|e| e.to_string())?;
+    let local_actor = state.actor_repo
+        .find_by_username_domain(local_username, &state.local_domain)
+        .await
+        .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
+        .ok_or_else(|| format!("ローカルアクター '{}' が存在しません", local_username))?;
+    if local_actor.actor_type != "local" {
+        return Err(format!("'{}' はローカルアクターではありません", local_username));
+    }
+    let local_actor_id = local_actor.id;
 
     // リモートアクタードキュメントを取得（inbox URL・display_name 用）
     let remote_ap = state.ap_client.fetch_actor(follower_uri).await?;
@@ -203,17 +200,11 @@ async fn handle_follow(
         .await
         .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
 
-    // follows テーブルに挿入（重複時はスキップ）
-    sqlx::query(
-        "INSERT INTO follows (follower_actor_id, target_actor_id)
-         VALUES ($1, $2)
-         ON CONFLICT (follower_actor_id, target_actor_id) DO NOTHING",
-    )
-    .bind(follower_actor_id)
-    .bind(local_actor_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| format!("follows INSERT エラー: {}", e))?;
+    // follows テーブルに挿入（重複時はスキップ、リモートからのフォローは自動 accepted）
+    state.follow_repo
+        .insert_accepted(follower_actor_id, local_actor_id)
+        .await
+        .map_err(|e| format!("follows INSERT エラー: {}", e))?;
 
     // Accept アクティビティを構築して送信
     let local_actor_uri = format!("https://{}/users/{}", state.local_domain, local_username);
@@ -282,19 +273,10 @@ async fn handle_create_note(
     let body = strip_html(&content_html);
 
     // posts テーブルに挿入（ap_object_id が重複する場合はスキップ）
-    sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (ap_object_id) DO NOTHING",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .bind(&body)
-    .bind(note_id)
-    .bind(created_at)
-    .execute(&state.db)
-    .await
-    .map_err(|e| format!("posts INSERT エラー: {}", e))?;
+    state.post_repo
+        .insert_remote(post_id, actor_id, &body, note_id, created_at)
+        .await
+        .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
     eprintln!("[Create/Note] {} から投稿を受信・保存: {}", actor_uri, note_id);
     Ok(())
@@ -374,44 +356,35 @@ async fn handle_accept(
         .strip_prefix(&suffix)
         .ok_or("Accept: object.actor がローカルアクターではありません")?;
 
-    let local_row = sqlx::query(
-        "SELECT id FROM actors WHERE username = $1 AND domain = $2 AND actor_type = 'local' LIMIT 1",
-    )
-    .bind(local_username)
-    .bind(&state.local_domain)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
-    .ok_or_else(|| format!("ローカルアクター '{}' が見つかりません", local_username))?;
-
-    let local_actor_id: i64 = local_row.try_get("id").map_err(|e| e.to_string())?;
+    let local_actor = state.actor_repo
+        .find_by_username_domain(local_username, &state.local_domain)
+        .await
+        .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
+        .ok_or_else(|| format!("ローカルアクター '{}' が見つかりません", local_username))?;
+    if local_actor.actor_type != "local" {
+        return Err(format!("'{}' はローカルアクターではありません", local_username));
+    }
+    let local_actor_id = local_actor.id;
 
     // リモートアクターを ap_uri から特定
-    let remote_row = sqlx::query("SELECT id FROM actors WHERE ap_uri = $1 LIMIT 1")
-        .bind(remote_actor_uri)
-        .fetch_optional(&state.db)
+    let remote_actor = state.actor_repo
+        .find_by_ap_uri(remote_actor_uri)
         .await
         .map_err(|e| format!("リモートアクター検索エラー: {}", e))?
         .ok_or_else(|| format!("リモートアクター '{}' が DB に見つかりません", remote_actor_uri))?;
-
-    let remote_actor_id: i64 = remote_row.try_get("id").map_err(|e| e.to_string())?;
+    let remote_actor_id = remote_actor.id;
 
     // follows.status を accepted に更新
-    let updated = sqlx::query(
-        "UPDATE follows SET status = 'accepted'
-         WHERE follower_actor_id = $1 AND target_actor_id = $2 AND status = 'pending'",
-    )
-    .bind(local_actor_id)
-    .bind(remote_actor_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| format!("follows UPDATE エラー: {}", e))?;
+    let rows = state.follow_repo
+        .accept(local_actor_id, remote_actor_id)
+        .await
+        .map_err(|e| format!("follows UPDATE エラー: {}", e))?;
 
     eprintln!(
         "[Accept] {} → {} フォロー確定 (rows={})",
         local_actor_uri,
         remote_actor_uri,
-        updated.rows_affected()
+        rows
     );
     Ok(())
 }
@@ -438,39 +411,28 @@ async fn handle_undo(
         .next()
         .ok_or("Undo/Follow: object.object URI からユーザー名を抽出できません")?;
 
-    let follower_row = sqlx::query("SELECT id FROM actors WHERE ap_uri = $1 LIMIT 1")
-        .bind(follower_uri)
-        .fetch_optional(&state.db)
+    let follower = match state.actor_repo
+        .find_by_ap_uri(follower_uri)
         .await
-        .map_err(|e| format!("フォロワーアクター検索エラー: {}", e))?;
-
-    let follower_id = match follower_row {
-        Some(r) => r.try_get::<i64, _>("id").map_err(|e| e.to_string())?,
+        .map_err(|e| format!("フォロワーアクター検索エラー: {}", e))?
+    {
+        Some(a) => a,
         None => return Ok(()), // 既にいない場合は何もしない
     };
 
-    let target_row = sqlx::query(
-        "SELECT id FROM actors WHERE username = $1 AND domain = $2 AND actor_type = 'local' LIMIT 1",
-    )
-    .bind(local_username)
-    .bind(&state.local_domain)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?;
-
-    let target_id = match target_row {
-        Some(r) => r.try_get::<i64, _>("id").map_err(|e| e.to_string())?,
-        None => return Ok(()),
+    let target = match state.actor_repo
+        .find_by_username_domain(local_username, &state.local_domain)
+        .await
+        .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
+    {
+        Some(a) if a.actor_type == "local" => a,
+        _ => return Ok(()),
     };
 
-    sqlx::query(
-        "DELETE FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2",
-    )
-    .bind(follower_id)
-    .bind(target_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| format!("follows DELETE エラー: {}", e))?;
+    state.follow_repo
+        .delete_by_actors(follower.id, target.id)
+        .await
+        .map_err(|e| format!("follows DELETE エラー: {}", e))?;
 
     eprintln!("[Undo/Follow] {} のフォロー解除完了", follower_uri);
     Ok(())

@@ -119,11 +119,14 @@ impl AtpCommitService {
     /// 共通コミットパイプライン。
     /// MST 構築 → commit 署名 → CAR 生成 → atp_blocks 保存 → actors 更新
     /// → atp_records 保存 → atp_repo_events 記録 → WebSocket ブロードキャスト
+    ///
+    /// `post_id` を指定すると、同一トランザクション内で `posts.at_uri/at_cid/at_rkey` を更新する。
     async fn commit_record_inner(
         &self,
         actor_id: i64,
         record: CommitRecord,
         now: DateTime<Utc>,
+        post_id: Option<i64>,
     ) -> Result<CommitResult, AtpCommitError> {
         // ① アクター情報取得
         let actor_row = sqlx::query(
@@ -217,6 +220,20 @@ impl AtpCommitService {
             .await?;
         }
 
+        // ⑨.5 posts テーブル更新（commit_post 専用: post_id が指定された場合のみ）
+        if let Some(pid) = post_id {
+            let at_uri = format!("at://{}/app.bsky.feed.post/{}", at_did, record.rkey);
+            sqlx::query(
+                "UPDATE posts SET at_uri = $1, at_cid = $2, at_rkey = $3 WHERE id = $4",
+            )
+            .bind(&at_uri)
+            .bind(&record_cid_str)
+            .bind(&record.rkey)
+            .bind(pid)
+            .execute(&mut *tx)
+            .await?;
+        }
+
         // ⑩ atp_repo_events INSERT → seq 取得
         let ops_json = serde_json::json!([{
             "action": record.action,
@@ -288,17 +305,9 @@ impl AtpCommitService {
             action: "create",
         };
 
-        let result = self.commit_record_inner(actor_id, record, now).await?;
+        let result = self.commit_record_inner(actor_id, record, now, Some(post_id)).await?;
 
         let at_uri = format!("at://{}/app.bsky.feed.post/{}", result.at_did, rkey);
-        sqlx::query("UPDATE posts SET at_uri = $1, at_cid = $2, at_rkey = $3 WHERE id = $4")
-            .bind(&at_uri)
-            .bind(&record_cid_str)
-            .bind(&rkey)
-            .bind(post_id)
-            .execute(&self.pool)
-            .await?;
-
         eprintln!("[atp] commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
         self.spawn_request_crawl();
         Ok(())
@@ -322,7 +331,7 @@ impl AtpCommitService {
             action: "create",
         };
 
-        let result = self.commit_record_inner(actor_id, record, now).await?;
+        let result = self.commit_record_inner(actor_id, record, now, None).await?;
 
         eprintln!("[atp] profile commit 完了: did={}", result.at_did);
         self.spawn_request_crawl();
