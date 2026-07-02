@@ -65,6 +65,23 @@ impl AtpCommitService {
         &self.event_tx
     }
 
+    fn spawn_request_crawl(&self) {
+        if let Ok(local_domain) = std::env::var("LOCAL_DOMAIN") {
+            let http_client = Arc::clone(&self.http_client);
+            tokio::spawn(async move {
+                match http_client
+                    .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
+                    .json(&serde_json::json!({"hostname": local_domain}))
+                    .send()
+                    .await
+                {
+                    Ok(res) => eprintln!("[atp] requestCrawl → {}", res.status()),
+                    Err(e) => eprintln!("[atp] requestCrawl 失敗: {}", e),
+                }
+            });
+        }
+    }
+
     /// 指定アクターの全 ATP レコードを MST 構築用エントリとしてロードする。
     async fn load_atp_entries(&self, actor_id: i64) -> Result<Vec<(String, Cid)>, AtpCommitError> {
         let post_rows = sqlx::query(
@@ -283,6 +300,7 @@ impl AtpCommitService {
             .await?;
 
         eprintln!("[atp] commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
+        self.spawn_request_crawl();
         Ok(())
     }
 
@@ -307,22 +325,7 @@ impl AtpCommitService {
         let result = self.commit_record_inner(actor_id, record, now).await?;
 
         eprintln!("[atp] profile commit 完了: did={}", result.at_did);
-
-        let http_client = Arc::clone(&self.http_client);
-        if let Ok(local_domain) = std::env::var("LOCAL_DOMAIN") {
-            tokio::spawn(async move {
-                match http_client
-                    .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
-                    .json(&serde_json::json!({"hostname": local_domain}))
-                    .send()
-                    .await
-                {
-                    Ok(res) => eprintln!("[atp] requestCrawl → {}", res.status()),
-                    Err(e) => eprintln!("[atp] requestCrawl 失敗: {}", e),
-                }
-            });
-        }
-
+        self.spawn_request_crawl();
         Ok(())
     }
 }

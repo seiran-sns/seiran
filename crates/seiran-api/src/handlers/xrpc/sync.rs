@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use axum::{
     extract::{Query, State},
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -138,21 +140,29 @@ async fn handle_subscribe_repos(
         }
     }
 
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(30));
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
     loop {
-        match rx.recv().await {
-            Ok(evt) => {
-                if socket
-                    .send(Message::Binary(evt.frame_bytes))
-                    .await
-                    .is_err()
-                {
+        tokio::select! {
+            _ = ping_interval.tick() => {
+                if socket.send(Message::Ping(vec![])).await.is_err() {
                     break;
                 }
             }
-            Err(broadcast::error::RecvError::Lagged(_n)) => {
-                eprintln!("[subscribeRepos] イベントチャンネルが遅延");
+            result = rx.recv() => {
+                match result {
+                    Ok(evt) => {
+                        if socket.send(Message::Binary(evt.frame_bytes)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_n)) => {
+                        eprintln!("[subscribeRepos] イベントチャンネルが遅延");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
             }
-            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }
