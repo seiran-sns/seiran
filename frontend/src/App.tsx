@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import ForgotPassword from "./pages/ForgotPassword";
 import Login from "./pages/Login";
 import NoteDetail from "./pages/NoteDetail";
 import Register from "./pages/Register";
+import ResetPassword from "./pages/ResetPassword";
 import Setup from "./pages/Setup";
 import Timeline from "./pages/Timeline";
 import UserProfilePage from "./pages/UserProfile";
@@ -66,6 +68,8 @@ function AppRoutes() {
         }
       />
       <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/notes/:id" element={<NoteDetail />} />
       <Route
         path="/profile"

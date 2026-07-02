@@ -65,6 +65,9 @@ export default function Login() {
         <p className={styles.link}>
           アカウントをお持ちでない方は <Link to="/register">新規登録</Link>
         </p>
+        <p className={styles.link}>
+          <Link to="/forgot-password">パスワードをお忘れの方</Link>
+        </p>
       </div>
     </div>
   );

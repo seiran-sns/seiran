@@ -58,13 +58,13 @@
   - [x] フロントエンド `Login.tsx` のフィールドラベルを「メールアドレス / ユーザーネーム」に変更
   - [x] `client.ts` の `login()` の引数名を `identifier` に変更
   - 仕様詳細: `docs/02_architecture_and_overall_design.md` セクション 1.5 参照
-- [ ] **2.8. パスワードリセット機能**
-  - [ ] マイグレーション: `password_resets` テーブル（`id, user_id, token UUID, expires_at 1h, created_at`）
-  - [ ] `POST /api/auth/request-password-reset` — メールアドレスを受け取りリセットリンクを送信（ユーザー不在でも同一レスポンス）
-  - [ ] `GET /api/auth/verify-reset-token?token=...` — トークン検証（副作用なし）
-  - [ ] `POST /api/auth/reset-password` — `{ reset_token, new_password }` でパスワード更新・トークン消費
-  - [ ] フロントエンド: `/forgot-password` ページ（メール入力）、`/reset-password?token=...` ページ（新パスワード設定）
-  - [ ] エラーコード追加: `RESET_TOKEN_INVALID`, `PASSWORD_TOO_SHORT`
+- [x] **2.8. パスワードリセット機能**
+  - [x] マイグレーション: `password_resets` テーブル（`id, user_id, token UUID, expires_at 1h, created_at`）
+  - [x] `POST /api/auth/request-password-reset` — メールアドレスを受け取りリセットリンクを送信（ユーザー不在でも同一レスポンス）
+  - [x] `GET /api/auth/verify-reset-token?token=...` — トークン検証（副作用なし）
+  - [x] `POST /api/auth/reset-password` — `{ token, new_password }` でパスワード更新・トークン消費
+  - [x] フロントエンド: `/forgot-password` ページ（メール入力）、`/reset-password?token=...` ページ（新パスワード設定）
+  - [x] エラーコード追加: `RESET_TOKEN_INVALID`, `PASSWORD_TOO_SHORT`
   - 仕様詳細: `docs/02_architecture_and_overall_design.md` セクション 1.6 参照
 - [ ] **2.9. Turnstile 自然人判別（優先度: 低）**
   - [ ] `TURNSTILE_SECRET_KEY` 環境変数が設定されている場合のみ検証を有効化（未設定時はスキップ）

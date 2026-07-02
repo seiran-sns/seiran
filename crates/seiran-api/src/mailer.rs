@@ -63,3 +63,43 @@ pub async fn send_verification_email(to: &str, verify_url: &str) -> Result<(), M
     transport.send(email).await?;
     Ok(())
 }
+
+pub async fn send_password_reset_email(to: &str, reset_url: &str) -> Result<(), MailError> {
+    let host = std::env::var("SMTP_HOST").map_err(|_| MailError::Config("SMTP_HOST"))?;
+    let port: u16 = std::env::var("SMTP_PORT")
+        .unwrap_or_else(|_| "587".to_string())
+        .parse()
+        .unwrap_or(587);
+    let username = std::env::var("SMTP_USERNAME").map_err(|_| MailError::Config("SMTP_USERNAME"))?;
+    let password = std::env::var("SMTP_PASSWORD").map_err(|_| MailError::Config("SMTP_PASSWORD"))?;
+    let from = std::env::var("SMTP_FROM").map_err(|_| MailError::Config("SMTP_FROM"))?;
+    let tls_mode = std::env::var("SMTP_TLS").unwrap_or_else(|_| "starttls".to_string());
+
+    let body = format!(
+        "seiran — パスワードリセットのリクエストを受け付けました。\n\n以下のリンクをクリックしてパスワードを再設定してください:\n\n{}\n\nこのリンクは 1 時間有効です。\n\n心当たりがない場合は無視してください。",
+        reset_url
+    );
+
+    let email = Message::builder()
+        .from(from.parse()?)
+        .to(to.parse()?)
+        .subject("seiran — パスワードのリセット")
+        .header(ContentType::TEXT_PLAIN)
+        .body(body)?;
+
+    let creds = Credentials::new(username, password);
+
+    let transport: AsyncSmtpTransport<Tokio1Executor> = match tls_mode.as_str() {
+        "tls" => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?
+            .port(port)
+            .credentials(creds)
+            .build(),
+        _ => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?
+            .port(port)
+            .credentials(creds)
+            .build(),
+    };
+
+    transport.send(email).await?;
+    Ok(())
+}
