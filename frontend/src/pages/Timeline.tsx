@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, Note, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
@@ -64,6 +64,15 @@ export default function Timeline() {
     }
   }
 
+  function handleTextareaKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      if (text.trim() && !overLimit && !posting) {
+        handlePost(e as unknown as FormEvent);
+      }
+    }
+  }
+
   function handleLogout() {
     logout();
     navigate("/login");
@@ -119,6 +128,7 @@ export default function Timeline() {
             ref={textareaRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleTextareaKeyDown}
             className={styles.textarea}
             placeholder="いまどうしてる？"
             rows={3}
