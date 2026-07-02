@@ -278,6 +278,31 @@ async fn handle_create_note(
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
+    // 添付画像の URL を保存（S3 には保存せず URL のみ記録）
+    if let Some(attachments) = note["attachment"].as_array() {
+        for (position, att) in attachments.iter().enumerate() {
+            let url = att["url"].as_str()
+                .or_else(|| att.as_str())
+                .unwrap_or_default();
+            if url.is_empty() {
+                continue;
+            }
+            if let Err(e) = sqlx::query(
+                "INSERT INTO post_attachments (post_id, media_file_id, remote_url, position)
+                 VALUES ($1, NULL, $2, $3)
+                 ON CONFLICT (post_id, position) DO NOTHING",
+            )
+            .bind(post_id)
+            .bind(url)
+            .bind(position as i16)
+            .execute(&state.db)
+            .await
+            {
+                eprintln!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
+            }
+        }
+    }
+
     eprintln!("[Create/Note] {} から投稿を受信・保存: {}", actor_uri, note_id);
     Ok(())
 }

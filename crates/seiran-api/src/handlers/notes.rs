@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
@@ -7,6 +8,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use unicode_segmentation::UnicodeSegmentation;
 
 use seiran_common::repository::TimelinePost;
@@ -26,12 +28,22 @@ pub struct CreateNoteRequest {
     pub deliver_to_bsky: Option<bool>,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentResponse {
+    pub url: String,
+    pub mime_type: String,
+    pub width: i32,
+    pub height: i32,
+}
+
 #[derive(Serialize)]
 pub struct NoteResponse {
     pub id: String,
     pub text: String,
     pub created_at: String,
     pub user: NoteUserInfo,
+    pub attachments: Vec<AttachmentResponse>,
 }
 
 #[derive(Serialize)]
@@ -42,29 +54,68 @@ pub struct NoteUserInfo {
     pub display_name: Option<String>,
 }
 
-fn map_note_rows(result: Result<Vec<TimelinePost>, sqlx::Error>) -> impl IntoResponse {
-    let rows = match result {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[timeline] クエリ失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "TL取得に失敗しました").into_response();
+/// post_id リストに対する添付情報を一括取得する。
+/// ローカル投稿は media_files + storage_providers から URL を組み立て、
+/// リモート受信投稿は remote_url をそのまま使用する。
+async fn fetch_attachments_map(
+    db: &sqlx::PgPool,
+    post_ids: &[i64],
+) -> HashMap<i64, Vec<AttachmentResponse>> {
+    if post_ids.is_empty() {
+        return HashMap::new();
+    }
+    let rows = sqlx::query(
+        "SELECT pa.post_id,
+                COALESCE(
+                    rtrim(sp.public_url, '/') || '/' || mf.storage_key,
+                    pa.remote_url
+                ) AS url,
+                COALESCE(mf.mime_type, 'image/jpeg') AS mime_type,
+                COALESCE(mf.width,  0) AS width,
+                COALESCE(mf.height, 0) AS height
+         FROM post_attachments pa
+         LEFT JOIN media_files mf ON mf.id = pa.media_file_id
+         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         WHERE pa.post_id = ANY($1)
+         ORDER BY pa.post_id, pa.position",
+    )
+    .bind(post_ids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+
+    let mut map: HashMap<i64, Vec<AttachmentResponse>> = HashMap::new();
+    for row in rows {
+        let post_id: i64 = row.try_get("post_id").unwrap_or_default();
+        let url: String = row.try_get::<Option<String>, _>("url")
+            .unwrap_or(None)
+            .unwrap_or_default();
+        if url.is_empty() {
+            continue;
         }
-    };
-    let notes: Vec<NoteResponse> = rows
-        .into_iter()
-        .map(|p| NoteResponse {
-            id: p.id.to_string(),
-            text: p.body,
-            created_at: p.created_at.to_rfc3339(),
-            user: NoteUserInfo {
-                id: p.actor_id,
-                username: p.username,
-                domain: Some(p.domain),
-                display_name: p.display_name,
-            },
-        })
-        .collect();
-    Json(notes).into_response()
+        map.entry(post_id).or_default().push(AttachmentResponse {
+            url,
+            mime_type: row.try_get("mime_type").unwrap_or_else(|_| "image/jpeg".into()),
+            width: row.try_get("width").unwrap_or(0),
+            height: row.try_get("height").unwrap_or(0),
+        });
+    }
+    map
+}
+
+fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -> NoteResponse {
+    NoteResponse {
+        id: p.id.to_string(),
+        text: p.body,
+        created_at: p.created_at.to_rfc3339(),
+        user: NoteUserInfo {
+            id: p.actor_id,
+            username: p.username,
+            domain: Some(p.domain),
+            display_name: p.display_name,
+        },
+        attachments,
+    }
 }
 
 #[derive(Deserialize)]
@@ -217,6 +268,7 @@ pub async fn create_note(
         text: req.text,
         created_at: now.to_rfc3339(),
         user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None },
+        attachments: vec![],
     })
     .into_response()
 }
@@ -244,12 +296,19 @@ pub async fn home_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let rows = state
-        .posts
-        .home_timeline(actor_id, limit, until_id, since_id)
-        .await;
-
-    map_note_rows(rows).into_response()
+    let rows = match state.posts.home_timeline(actor_id, limit, until_id, since_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[home_timeline] クエリ失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "TL取得に失敗しました").into_response();
+        }
+    };
+    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let notes: Vec<NoteResponse> = rows.into_iter()
+        .map(|p| { let id = p.id; to_note_response(p, att_map.remove(&id).unwrap_or_default()) })
+        .collect();
+    Json(notes).into_response()
 }
 
 pub async fn local_timeline(
@@ -260,9 +319,19 @@ pub async fn local_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let rows = state.posts.local_timeline(limit, until_id, since_id).await;
-
-    map_note_rows(rows).into_response()
+    let rows = match state.posts.local_timeline(limit, until_id, since_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[local_timeline] クエリ失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "TL取得に失敗しました").into_response();
+        }
+    };
+    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let notes: Vec<NoteResponse> = rows.into_iter()
+        .map(|p| { let id = p.id; to_note_response(p, att_map.remove(&id).unwrap_or_default()) })
+        .collect();
+    Json(notes).into_response()
 }
 
 /// フロントエンド向け: GET /api/notes/:id
@@ -277,17 +346,8 @@ pub async fn get_note(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
-    Ok(Json(NoteResponse {
-        id: post.id.to_string(),
-        text: post.body,
-        created_at: post.created_at.to_rfc3339(),
-        user: NoteUserInfo {
-            id: post.actor_id,
-            username: post.username,
-            domain: Some(post.domain),
-            display_name: post.display_name,
-        },
-    }))
+    let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
+    Ok(Json(to_note_response(post, att_map.remove(&post_id).unwrap_or_default())))
 }
 
 /// ActivityPub 向け: GET /notes/:id
@@ -438,21 +498,16 @@ pub async fn note_context(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let map_post = |p: TimelinePost| NoteResponse {
-        id: p.id.to_string(),
-        text: p.body,
-        created_at: p.created_at.to_rfc3339(),
-        user: NoteUserInfo {
-            id: p.actor_id,
-            username: p.username,
-            domain: Some(p.domain),
-            display_name: p.display_name,
-        },
-    };
+    let all_ids: Vec<i64> = before_posts.iter().chain(after_posts.iter()).map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &all_ids).await;
 
     Ok(Json(NoteContextResponse {
-        before: before_posts.into_iter().map(map_post).collect(),
-        after: after_posts.into_iter().map(map_post).collect(),
+        before: before_posts.into_iter()
+            .map(|p| { let id = p.id; to_note_response(p, att_map.remove(&id).unwrap_or_default()) })
+            .collect(),
+        after: after_posts.into_iter()
+            .map(|p| { let id = p.id; to_note_response(p, att_map.remove(&id).unwrap_or_default()) })
+            .collect(),
     }))
 }
 

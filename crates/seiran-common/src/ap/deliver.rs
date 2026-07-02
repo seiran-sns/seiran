@@ -42,6 +42,39 @@ pub async fn deliver_post_to_ap_followers(
         row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
     let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
 
+    // 添付ファイルを取得
+    let attachment_rows = sqlx::query(
+        "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
+         FROM post_attachments pa
+         JOIN media_files mf ON mf.id = pa.media_file_id
+         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         WHERE pa.post_id = $1
+         ORDER BY pa.position",
+    )
+    .bind(post_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| ApError::Other(format!("添付取得エラー: {}", e)))?;
+
+    let attachments: Vec<serde_json::Value> = attachment_rows
+        .iter()
+        .filter_map(|r| {
+            let storage_key: String = r.try_get("storage_key").ok()?;
+            let mime_type: String = r.try_get("mime_type").ok()?;
+            let width: i32 = r.try_get("width").ok()?;
+            let height: i32 = r.try_get("height").ok()?;
+            let public_url: String = r.try_get("public_url").ok()?;
+            let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
+            Some(serde_json::json!({
+                "type": "Document",
+                "mediaType": mime_type,
+                "url": url,
+                "width": width,
+                "height": height
+            }))
+        })
+        .collect();
+
     // AP フォロワー（actor_type='fedi'）の inbox URL 一覧を取得
     let follower_rows = sqlx::query(
         "SELECT a.ap_inbox_url
@@ -69,6 +102,20 @@ pub async fn deliver_post_to_ap_followers(
     let published = created_at.to_rfc3339();
     let content_html = plain_to_html(&body);
 
+    let mut note_obj = serde_json::json!({
+        "type": "Note",
+        "id": note_id,
+        "attributedTo": actor_uri,
+        "content": content_html,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [followers_uri],
+        "url": note_id
+    });
+    if !attachments.is_empty() {
+        note_obj["attachment"] = serde_json::Value::Array(attachments);
+    }
+
     let activity = serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Create",
@@ -77,16 +124,7 @@ pub async fn deliver_post_to_ap_followers(
         "published": published,
         "to": ["https://www.w3.org/ns/activitystreams#Public"],
         "cc": [followers_uri],
-        "object": {
-            "type": "Note",
-            "id": note_id,
-            "attributedTo": actor_uri,
-            "content": content_html,
-            "published": published,
-            "to": ["https://www.w3.org/ns/activitystreams#Public"],
-            "cc": [followers_uri],
-            "url": note_id
-        }
+        "object": note_obj
     });
 
     let body_str = serde_json::to_string(&activity)

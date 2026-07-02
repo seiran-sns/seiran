@@ -100,6 +100,13 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface NoteAttachment {
+  url: string;
+  mimeType: string;
+  width: number;
+  height: number;
+}
+
 export interface Note {
   id: string;
   text: string;
@@ -110,6 +117,7 @@ export interface Note {
     domain?: string;
     display_name?: string;
   };
+  attachments: NoteAttachment[];
 }
 
 export interface ProfileNote {

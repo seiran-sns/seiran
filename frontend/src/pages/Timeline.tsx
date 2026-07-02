@@ -267,6 +267,20 @@ export default function Timeline() {
                 </Link>
               </div>
               <p className={styles.noteBody}>{note.text}</p>
+              {note.attachments && note.attachments.length > 0 && (
+                <div className={styles.noteAttachments}>
+                  {note.attachments.map((att, i) => (
+                    <a key={i} href={att.url} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src={att.url}
+                        alt=""
+                        className={styles.noteAttachImage}
+                        loading="lazy"
+                      />
+                    </a>
+                  ))}
+                </div>
+              )}
             </article>
           ))}
         </div>
