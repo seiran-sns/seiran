@@ -7,6 +7,7 @@ use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
     build_commit_frame, build_mst, cid_from_str, cid_to_string, create_commit, encode_car,
     encode_bsky_actor_profile, encode_bsky_feed_post, generate_tid, Cid, CommitEvtOp, RepoError,
+    BskyFacet,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -290,11 +291,12 @@ impl AtpCommitService {
         actor_id: i64,
         post_id: i64,
         text: &str,
+        facets: Vec<BskyFacet>,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str)?;
+        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets)?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
