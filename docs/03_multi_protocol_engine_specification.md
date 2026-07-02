@@ -146,6 +146,35 @@ remaining = min(3000 - graphemes, floor((10000 - bytes) / 3))
 
 ---
 
+## 7. Bluesky 向けメンション変換（Facet 生成）
+
+Bsky 配信モード（`deliver_to_bsky = true`）での投稿本文には、AT Protocol の `RichText` Facet としてメンションを埋め込む必要がある。そのため投稿本文中の `@xxx` 形式の識別子を Bsky ハンドルに変換してから `commit_post` に渡す。
+
+### 7.1 変換ルール
+
+#### 1. ローカルユーザー `@yuba`（ドメイン部なし）
+
+- `@yuba.{LOCAL_DOMAIN}` に展開（例: `@yuba.beta.seiran.org`）
+- `actors` テーブルで `username = 'yuba'` かつローカルアクターであることを確認してから置換
+
+#### 2. Fediverse リモートユーザー `@yuba@reax.work`
+
+- brid.gy Federated Bridge のハンドル命名規則: `{username}.{instance}.ap.brid.gy`
+  例: `@yuba@reax.work` → `yuba.reax.work.ap.brid.gy`
+- `GET https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=yuba.reax.work.ap.brid.gy` でハンドル解決を試みる
+- 解決成功（200 + did 返却）→ `@yuba.reax.work.ap.brid.gy` に置き換え
+- 解決失敗（404 等）→ URL リンク `https://reax.work/@yuba` に変換
+
+### 7.2 文字数の考慮
+
+変換後の本文でバイト数・grapheme 数がチェックされる。変換によって文字数が増加するため、UI 側カウントでは余裕があっても API が `TEXT_TOO_LONG` を返す場合がある（クライアントはこのエラーを受け取り表示する実装済み）。
+
+### 7.3 処理タイミング
+
+`create_note` ハンドラ内でバリデーション後・`commit_post` 呼び出し前に変換を実施する。`deliver_to_bsky = false` の場合は変換不要。
+
+---
+
 ## 5. Misskey 互換レイヤー仕様（MiAuth & `/api/meta`）
 
 Aria・Miria・ZonePane 等の Misskey クライアントから seiran を Misskey サーバーとして利用可能にするための互換エンドポイント仕様。
