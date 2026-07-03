@@ -14,7 +14,9 @@ pub use repo::{
     Cid,
     generate_tid, cid_from_dagcbor, cid_from_str, cid_to_string, cid_from_sha256_hex,
     build_mst, create_commit, encode_car, encode_bsky_feed_post, encode_bsky_actor_profile,
+    encode_bsky_feed_repost,
     build_commit_frame, build_identity_frame, build_error_frame, CommitEvtOp, RepoError,
     BskyFacet, BskyFacetIndex, BskyFacetMention, BskyImage,
+    BskyRefRecord, BskyPostReply,
 };
 pub use service::{AtpCommitService, AtpCommitError, AtpCommitEvent};

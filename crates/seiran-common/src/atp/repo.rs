@@ -368,8 +368,32 @@ pub fn cid_from_sha256_hex(sha256_hex: &str) -> Result<Cid, RepoError> {
     Ok(Cid::new_v1(0x55, mh))
 }
 
-// canonical 順: text(4) < $type(5) < embed(5) < facets(6) < createdAt(9)
-// 5文字のキー同士: "$type"($ = 0x24) < "embed"(e = 0x65)
+// ─────────────────────────────────────────────────────────────────────────────
+// app.bsky.feed.post の reply フィールド型
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// AT Protocol ポスト参照（uri + cid）。
+/// canonical 順: cid(3) < uri(3) → 同長は辞書順: c < u
+#[derive(Serialize)]
+pub struct BskyRefRecord {
+    pub cid: String,
+    pub uri: String,
+}
+
+/// app.bsky.feed.post の reply フィールド。
+/// canonical 順: root(4) < parent(6)
+#[derive(Serialize)]
+pub struct BskyPostReply {
+    pub root: BskyRefRecord,
+    pub parent: BskyRefRecord,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// app.bsky.feed.post レコード構造体
+// ─────────────────────────────────────────────────────────────────────────────
+
+// canonical 順: text(4) < $type(5) < embed(5) < reply(5) < facets(6) < createdAt(9)
+// 5文字のキー同士: "$type"($ = 0x24) < "embed"(e = 0x65) < "reply"(r = 0x72)
 #[derive(Serialize)]
 struct BskyFeedPost {
     text: String,
@@ -377,8 +401,24 @@ struct BskyFeedPost {
     kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     embed: Option<Ipld>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply: Option<BskyPostReply>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     facets: Vec<BskyFacet>,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// app.bsky.feed.repost レコード構造体
+// ─────────────────────────────────────────────────────────────────────────────
+
+// canonical 順: $type(5) < subject(7) < createdAt(9)
+#[derive(Serialize)]
+struct BskyFeedRepost {
+    #[serde(rename = "$type")]
+    kind: String,
+    subject: BskyRefRecord,
     #[serde(rename = "createdAt")]
     created_at: String,
 }
@@ -422,11 +462,13 @@ fn build_embed_images_ipld(images: &[BskyImage]) -> Result<Ipld, RepoError> {
 ///
 /// `facets` が空の場合は `facets` フィールドを省略する。
 /// `images` が空でない場合は `embed` フィールドとして `app.bsky.embed.images` を含める。
+/// `reply` が Some の場合は `reply` フィールドを含める（リプライ投稿）。
 pub fn encode_bsky_feed_post(
     text: &str,
     created_at_rfc3339: &str,
     facets: Vec<BskyFacet>,
     images: Vec<BskyImage>,
+    reply: Option<BskyPostReply>,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
     let embed = if images.is_empty() {
         None
@@ -437,7 +479,27 @@ pub fn encode_bsky_feed_post(
         text: text.to_string(),
         kind: "app.bsky.feed.post".to_string(),
         embed,
+        reply,
         facets,
+        created_at: created_at_rfc3339.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
+/// `app.bsky.feed.repost` レコードの DAG-CBOR バイト列と CID を生成する。
+pub fn encode_bsky_feed_repost(
+    at_uri: &str,
+    at_cid: &str,
+    created_at_rfc3339: &str,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    let record = BskyFeedRepost {
+        kind: "app.bsky.feed.repost".to_string(),
+        subject: BskyRefRecord {
+            cid: at_cid.to_string(),
+            uri: at_uri.to_string(),
+        },
         created_at: created_at_rfc3339.to_string(),
     };
     let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
