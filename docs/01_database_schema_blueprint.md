@@ -121,6 +121,12 @@ CREATE TABLE posts (
     inserted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
+-- リポスト重複制約: 同一ユーザーが同一ポストを取り消し前に再リポストできないようにする
+-- 論理削除（deleted_at IS NULL）している行のみ対象。取り消し後は再リポスト可能。
+CREATE UNIQUE INDEX idx_posts_unique_repost
+    ON posts(actor_id, repost_of_post_id)
+    WHERE repost_of_post_id IS NOT NULL AND deleted_at IS NULL;
+
 -- インデックス戦略
 CREATE INDEX idx_posts_actor_id ON posts(actor_id, id DESC) WHERE deleted_at IS NULL; -- recent_by_actor / context_* のインデックススキャン化
 CREATE INDEX idx_posts_reply_to ON posts(reply_to_post_id) WHERE reply_to_post_id IS NOT NULL;

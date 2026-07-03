@@ -323,46 +323,126 @@ Rust 実装は `lettre` クレートを使用する（`lettre = { version = "0.1
 
 ---
 
-## 9. Fedi リモートポストの Bsky リポスト配信
+## 9. リポスト・引用・リプライのクロスプロトコル配信ルール
 
-Fedi のリモートポストを Bsky 向けにリポスト（Boost）する際、そのポストに対応する Bsky 上のブリッジポストが存在するかを探す。
+### 9.0 リポストの重複制約
 
-### 9.1 処理フロー
+同一ユーザーが同一ポストを **取り消し（undo）前に再リポストすることはできない**。
+DB レベルで `UNIQUE INDEX (actor_id, repost_of_post_id) WHERE deleted_at IS NULL` で強制する。
+取り消し（論理削除）後は `deleted_at` が設定されてインデックスから外れるため、再リポストが可能になる。
+
+---
+
+### 9.1 リポストのクロスプロトコル配信マトリクス
+
+UI では Fedi リモートポストをリポストしようとすると、以下の3アクションから選ぶ：
+
+| UI アクション | Fedi 配信 | Bsky 配信 |
+|---|---|---|
+| **リポスト**（両方） | AP `Announce` を送信 | 後述のブリッジ探索ロジックで配信 |
+| **Fediにだけリポスト** | AP `Announce` を送信 | 配信しない |
+| **引用** | 後述の引用ロジックで配信 | 後述の引用ロジックで配信 |
+
+Misskey API (`/api/notes/create` に `renoteId` 指定) 経由のリノートは「リポスト（両方）」として扱う。
+
+ポストの種別ごとの配信先：
+
+| 元ポストの種別 | Fedi 配信先 | Bsky 配信先 |
+|---|---|---|
+| ローカルポスト / リモート seiran ポスト | AP `Announce` | ATP `app.bsky.feed.repost` |
+| Fedi リモートポスト | AP `Announce` | ブリッジ探索（9.2節）|
+| Bsky リモートポスト | ブリッジ探索（9.3節）| ATP `app.bsky.feed.repost` |
+
+---
+
+### 9.2 Fedi リモートポストを Bsky にリポストする際のブリッジ探索
 
 ```
-Fedi リモートポストのリポスト
+Fedi リモートポストのリポスト → Bsky 配信
   ↓
-【第1段階】DB ルックアップ
-  posts テーブルで ap_object_id に対応するブリッジポストを確認
-  （brid.gy 経由でインポート済みのポストは at_uri が設定されている想定）
-  ↓ 見つかった場合
-  → そのポストの at_uri を使って Bsky リポスト（app.bsky.feed.repost）
-  ↓ 見つからない場合
+【第1段階】DB ルックアップ（タイムアウトなし）
+  posts テーブルで repost_of_post_id に対応するレコードの at_uri を確認
+  （brid.gy 経由でインポート済みのポストは at_uri が設定されている）
+  ↓ at_uri あり
+  → ATP app.bsky.feed.repost でリポスト
+  ↓ at_uri なし
 【第2段階】ブリッジユーザー経由の探索（タイムアウト: 2秒）
   1. 元ポストの投稿者（Fedi ユーザー）に対応する brid.gy ブリッジユーザーを探す
      （Section 7 の2段階ルックアップと同じ手順）
   2. ブリッジユーザーが見つかった場合:
-     AT Protocol API で当該ユーザーのポスト一覧を取得し、
+     AT Protocol API で当該ユーザーの投稿一覧を取得し、
      ap_object_id に一致するポストの at_uri を探す
-  ↓ 見つかった場合
-  → そのポストの at_uri を使って Bsky リポスト
-  ↓ 見つからない場合
+  ↓ at_uri 取得成功
+  → ATP app.bsky.feed.repost でリポスト
+  ↓ 取得失敗 / タイムアウト
 【フォールバック】
-  → 元ポストの AP URI / URL をリンクカード付き（external embed）として Bsky に投稿
+  → 元ポストの URL を external embed（リンクカード）として持つ新規ポストを Bsky に投稿
      本文例: "🔁 {投稿者表示名}: {元ポストURL}"
 ```
 
-### 9.2 タイムアウトと失敗時の動作
+**タイムアウトと失敗時の動作**
+- 外部問い合わせは合計 **2秒以内** でタイムアウトし、フォールバックに移行する
+- Bsky 配信の成否にかかわらず、ローカルのリポスト記録（`posts` テーブル）は維持する
 
-- 外部への問い合わせ（ブリッジユーザー探索 + ポスト取得）を合わせて **2秒以内** でタイムアウト
-- タイムアウトした場合はフォールバック（URLカード付き投稿）に移行し、エラーとして扱わない
-- Bsky への投稿は続行する（リポスト配信の失敗でローカルのリポスト記録は消えない）
+**初期リリースの簡易実装**
+- 第1段階（DB ルックアップ）のみ実装し、第2段階のブリッジユーザー探索は後続フェーズで追加
 
-### 9.3 実装フェーズ
+---
 
-この機能は実装コストが高いため後続フェーズで対応する。初期リリースでは以下の簡易実装とする：
-- DB にブリッジポストが記録済みの場合のみリポスト → それ以外はフォールバック（URLカード投稿）
-- ブリッジユーザー経由のオンデマンド探索は Phase 後半で追加
+### 9.3 Bsky リモートポストを Fedi にリポストする際のブリッジ探索
+
+```
+Bsky リモートポストのリポスト → Fedi 配信
+  ↓
+【第1段階】DB ルックアップ（タイムアウトなし）
+  posts テーブルで repost_of_post_id に対応するレコードの ap_object_id を確認
+  （brid.gy 経由でインポート済みのポストは ap_object_id が設定されている）
+  ↓ ap_object_id あり
+  → AP Announce アクティビティを送信
+  ↓ ap_object_id なし
+【第2段階】ブリッジポスト探索（タイムアウト: 2秒）
+  1. 元ポストの投稿者（Bsky ユーザー）に対応する brid.gy ブリッジ AP アクターを探す
+     （Section 8 の2段階ルックアップと同じ手順）
+  2. ブリッジアクターが見つかった場合:
+     そのアクターの Outbox または AP API で元ポストに対応する AP オブジェクトを探す
+  ↓ AP オブジェクト取得成功
+  → AP Announce アクティビティを送信
+  ↓ 取得失敗 / タイムアウト
+【フォールバック】
+  → 元ポストの bsky.app URL をメンション付き通常投稿として Fedi に配信
+     本文例: "🔁 {投稿者ハンドル}: {bsky.app/profile/.../post/...}"
+```
+
+---
+
+### 9.4 引用投稿のクロスプロトコル配信
+
+引用（quote）は元ポストをインライン参照する形式で、リポストより単純。
+
+| 元ポストの種別 | Fedi 配信 | Bsky 配信 |
+|---|---|---|
+| ローカル / リモート seiran | AP `Create(Note)` + quoteUrl | ATP `app.bsky.feed.post` + `app.bsky.embed.record` |
+| Fedi リモート | AP `Create(Note)` + quoteUrl | ATP `app.bsky.feed.post` + **external embed**（元ポスト URL をカード表示）|
+| Bsky リモート | AP `Create(Note)` + quoteUrl（bsky.app URL）| ATP `app.bsky.feed.post` + `app.bsky.embed.record`（元ポストの at_uri） |
+
+Fedi 引用 → Bsky では `app.bsky.embed.record` ではなく `app.bsky.embed.external` を使う（ブリッジポストが存在しても at_uri 取得コストが高いため、URLカードで代替）。
+
+---
+
+### 9.5 リプライのクロスプロトコル配信ルール
+
+リプライ先が存在しない世界にリプライだけ配送しても意味がないため、元ポストの種別で配信先を制限する。
+
+| 元ポスト（`reply_to_post_id` が指す投稿）の種別 | Fedi 配信 | Bsky 配信 |
+|---|---|---|
+| ローカルポスト | ✅ AP `Create(Note)` | ✅ ATP `app.bsky.feed.post`（`reply` 付き）|
+| リモート seiran ポスト | ✅ AP `Create(Note)` | ✅ ATP `app.bsky.feed.post`（`reply` 付き）|
+| Fedi リモートポスト | ✅ AP `Create(Note)` | ❌ 配信しない |
+| Bsky リモートポスト | ❌ 配信しない | ✅ ATP `app.bsky.feed.post`（`reply` 付き）|
+
+**「リモート seiran ポスト」の判定**
+- `posts.at_uri` が `at://did:plc:…` で、かつ `actors.domain` が seiran インスタンスのドメインであるポスト
+- このポストは Fedi 側にも AP Note として存在し（seiran が AP + ATP 両対応のため）Bsky 側にも ATP レコードとして存在するため、両方に配送できる
 
 ---
 
