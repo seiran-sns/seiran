@@ -7,7 +7,9 @@ use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
     build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
     cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
+    encode_bsky_feed_repost,
     generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage,
+    BskyPostReply,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -303,6 +305,8 @@ impl AtpCommitService {
     }
 
     /// ポスト作成コミット（posts テーブル更新を追加）
+    ///
+    /// `reply` が Some の場合は ATP `app.bsky.feed.post` の `reply` フィールドを設定する（リプライ投稿）。
     pub async fn commit_post(
         &self,
         actor_id: i64,
@@ -311,6 +315,7 @@ impl AtpCommitService {
         facets: Vec<BskyFacet>,
         attachment_ids: &[i64],
         now: DateTime<Utc>,
+        reply: Option<BskyPostReply>,
     ) -> Result<(), AtpCommitError> {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -345,7 +350,7 @@ impl AtpCommitService {
             .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
             .collect();
 
-        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, images)?;
+        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, images, reply)?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
@@ -361,6 +366,69 @@ impl AtpCommitService {
 
         let at_uri = format!("at://{}/app.bsky.feed.post/{}", result.at_did, rkey);
         eprintln!("[atp] commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
+    /// Bsky リポストコミット（`app.bsky.feed.repost` レコードを ATP リポジトリにコミット）。
+    ///
+    /// `at_uri` / `at_cid` は元ポストの ATP URI と CID。
+    /// posts テーブルを更新しない（リポストは atp_records で管理）。
+    pub async fn commit_repost(
+        &self,
+        actor_id: i64,
+        at_uri: &str,
+        at_cid: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let rkey = generate_tid();
+        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        let (record_cbor, record_cid) = encode_bsky_feed_repost(at_uri, at_cid, &created_at_str)?;
+
+        let record = CommitRecord {
+            collection: "app.bsky.feed.repost",
+            rkey: rkey.clone(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action: "create",
+            blob_cids: vec![],
+        };
+
+        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+
+        eprintln!("[atp] repost commit 完了: did={}, rkey={}", result.at_did, rkey);
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
+    /// Bsky テキスト投稿コミット（DB の posts レコードを更新しない）。
+    ///
+    /// リポストの Bsky フォールバック投稿など、DB にポストレコードを作らずに
+    /// ATP リポジトリにテキストポストだけ送信したい場合に使用する。
+    pub async fn commit_standalone_text_post(
+        &self,
+        actor_id: i64,
+        text: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let rkey = generate_tid();
+        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, vec![], vec![], None)?;
+
+        let record = CommitRecord {
+            collection: "app.bsky.feed.post",
+            rkey: rkey.clone(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action: "create",
+            blob_cids: vec![],
+        };
+
+        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+
+        eprintln!("[atp] standalone text post commit 完了: did={}, rkey={}", result.at_did, rkey);
         self.spawn_request_crawl();
         Ok(())
     }
