@@ -32,6 +32,6 @@ bs58 = "0.5"
 base32 = "0.4"
 aes-gcm = "0.10"
 aws-sdk-s3 = "1"
-image = { version = "0.25", features = ["webp"] }
+image = { version = "0.25", features = ["webp", "jpeg", "png"] }
 blurhash = "0.2"
 zstd = "0.13"

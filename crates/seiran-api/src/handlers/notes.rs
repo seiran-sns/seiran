@@ -157,8 +157,8 @@ pub async fn create_note(
     }
 
     if let Some(ids) = &req.attachment_ids {
-        if ids.len() > 4 {
-            return ApiError::BadRequest("添付ファイルは最大4件です".to_owned()).into_response();
+        if ids.len() > 10 {
+            return ApiError::BadRequest("添付ファイルは最大10件です".to_owned()).into_response();
         }
         for id_str in ids {
             if id_str.parse::<i64>().is_err() {

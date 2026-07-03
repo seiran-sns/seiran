@@ -82,6 +82,15 @@ fn env_port(key: &str, default: u16) -> u16 {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // blurhash 0.2.x のオフバイワンバグによる既知パニックを stderr に出力しない。
+    // catch_unwind で回復済みのため、ログノイズを抑制するだけで動作は正常。
+    std::panic::set_hook(Box::new(|info| {
+        let msg = info.to_string();
+        if !msg.contains("blurhash") {
+            eprintln!("{}", msg);
+        }
+    }));
+
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let _ = dotenvy::dotenv();
