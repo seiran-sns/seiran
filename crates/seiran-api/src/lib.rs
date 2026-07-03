@@ -186,6 +186,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))
         .route("/api/notes/home-timeline", get(handlers::notes::home_timeline))
+        // Misskey 互換エイリアス
+        .route("/api/notes/timeline", get(handlers::notes::home_timeline))
         .route("/api/notes/search", get(handlers::search::search_notes))
         .route("/api/notes/:id", get(handlers::notes::get_note))
         .route("/api/notes/:id/context", get(handlers::notes::note_context))

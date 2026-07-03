@@ -45,20 +45,32 @@ pub struct AttachmentResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NoteResponse {
     pub id: String,
     pub text: String,
     pub created_at: String,
     pub user: NoteUserInfo,
     pub attachments: Vec<AttachmentResponse>,
+    // 7.2 拡張メタデータ
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub renote_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quote_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_original_id: Option<String>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NoteUserInfo {
     pub id: i64,
     pub username: String,
     pub domain: Option<String>,
     pub display_name: Option<String>,
+    pub actor_type: String,
 }
 
 /// post_id リストに対する添付情報を一括取得する。
@@ -120,15 +132,22 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
             username: p.username,
             domain: Some(p.domain),
             display_name: p.display_name,
+            actor_type: if p.actor_type.is_empty() { "local".to_string() } else { p.actor_type },
         },
         attachments,
+        renote_id: p.repost_of_post_id.map(|i| i.to_string()),
+        quote_id: p.quote_of_post_id.map(|i| i.to_string()),
+        reply_id: p.reply_to_post_id.map(|i| i.to_string()),
+        parent_original_id: p.parent_original_post_id.map(|i| i.to_string()),
     }
 }
 
 #[derive(Deserialize)]
 pub struct TimelineQuery {
     pub limit: Option<i64>,
+    #[serde(alias = "untilId")]
     pub until_id: Option<String>,
+    #[serde(alias = "sinceId")]
     pub since_id: Option<String>,
 }
 
@@ -335,8 +354,10 @@ pub async fn create_note(
             id: post_id.to_string(),
             text: String::new(),
             created_at: now.to_rfc3339(),
-            user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None },
+            user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None, actor_type: "local".to_string() },
             attachments: vec![],
+            renote_id: Some(renote_id.to_string()),
+            quote_id: None, reply_id: None, parent_original_id: None,
         }).into_response();
     }
 
@@ -617,8 +638,12 @@ pub async fn create_note(
         id: post_id.to_string(),
         text,
         created_at: now.to_rfc3339(),
-        user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None },
+        user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None, actor_type: "local".to_string() },
         attachments: final_attachments,
+        renote_id: None,
+        quote_id: quote_of_id_i64.map(|i| i.to_string()),
+        reply_id: reply_to_id_i64.map(|i| i.to_string()),
+        parent_original_id: None,
     })
     .into_response()
 }

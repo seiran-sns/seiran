@@ -12,6 +12,17 @@ pub struct TimelinePost {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    // 7.2 拡張フィールド（古いクエリとの互換のため #[sqlx(default)] を付与）
+    #[sqlx(default)]
+    pub actor_type: String,
+    #[sqlx(default)]
+    pub repost_of_post_id: Option<i64>,
+    #[sqlx(default)]
+    pub quote_of_post_id: Option<i64>,
+    #[sqlx(default)]
+    pub reply_to_post_id: Option<i64>,
+    #[sqlx(default)]
+    pub parent_original_post_id: Option<i64>,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -142,7 +153,8 @@ impl PostRepository for PgPostRepository {
         since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
+            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
              FROM posts p JOIN actors a ON a.id = p.actor_id
              WHERE p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.id < $2)
@@ -167,7 +179,8 @@ impl PostRepository for PgPostRepository {
         since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
+            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
              FROM posts p JOIN actors a ON a.id = p.actor_id
              WHERE a.actor_type = 'local' AND p.deleted_at IS NULL
                AND ($1::bigint IS NULL OR p.id < $1)
@@ -213,7 +226,8 @@ impl PostRepository for PgPostRepository {
 
     async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name
+            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
              FROM posts p JOIN actors a ON a.id = p.actor_id
              WHERE p.id = $1 AND p.deleted_at IS NULL
              LIMIT 1",
@@ -253,7 +267,8 @@ impl PostRepository for PgPostRepository {
         limit: i64,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name
+            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              WHERE p.actor_id = $1 AND p.id < $2 AND p.deleted_at IS NULL
@@ -274,7 +289,8 @@ impl PostRepository for PgPostRepository {
         limit: i64,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name
+            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              WHERE p.actor_id = $1 AND p.id > $2 AND p.deleted_at IS NULL
