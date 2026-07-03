@@ -10,6 +10,8 @@ use super::client::{ApClient, ApError};
 ///
 /// `override_body` が `Some` の場合はその値を本文として使用する（AP向けメンション変換済みテキスト等）。
 /// `None` の場合は DB の `posts.body` をそのまま使用する。
+/// `quote_url` が `Some` の場合は Note に `quoteUrl` / `_misskey_quote` を付与する（引用投稿）。
+/// seiran_post_uuid は DB の posts.seiran_post_uuid から自動取得して Note に付与する。
 pub async fn deliver_post_to_ap_followers(
     ap_client: &ApClient,
     db: &PgPool,
@@ -18,10 +20,11 @@ pub async fn deliver_post_to_ap_followers(
     local_domain: &str,
     ap_private_key_pem: &str,
     override_body: Option<&str>,
+    quote_url: Option<&str>,
 ) -> Result<(), ApError> {
-    // 投稿本文・作成日時・投稿者ユーザー名を取得
+    // 投稿本文・作成日時・投稿者ユーザー名・seiran_post_uuid を取得
     let row = sqlx::query(
-        "SELECT p.body, p.created_at, a.username
+        "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username
          FROM posts p
          JOIN actors a ON a.id = p.actor_id
          WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
@@ -41,6 +44,7 @@ pub async fn deliver_post_to_ap_followers(
     let created_at: chrono::DateTime<chrono::Utc> =
         row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
     let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
+    let seiran_uuid: Option<String> = row.try_get("seiran_post_uuid").unwrap_or(None);
 
     // 添付ファイルを取得
     let attachment_rows = sqlx::query(
@@ -114,6 +118,13 @@ pub async fn deliver_post_to_ap_followers(
     });
     if !attachments.is_empty() {
         note_obj["attachment"] = serde_json::Value::Array(attachments);
+    }
+    if let Some(q_url) = quote_url {
+        note_obj["quoteUrl"] = serde_json::Value::String(q_url.to_string());
+        note_obj["_misskey_quote"] = serde_json::Value::String(q_url.to_string());
+    }
+    if let Some(uuid) = seiran_uuid {
+        note_obj["seiranUuid"] = serde_json::Value::String(uuid);
     }
 
     let activity = serde_json::json!({

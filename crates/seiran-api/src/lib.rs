@@ -9,6 +9,7 @@ pub mod error;
 pub mod mailer;
 pub mod middleware;
 pub mod handlers;
+pub mod search;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ use seiran_common::repository::{
 };
 
 use handlers::miauth::MiAuthSession;
+use search::InMemorySearchStore;
 
 // =====================================================================
 // アプリケーション状態
@@ -57,6 +59,7 @@ pub struct AppState {
     pub storage_providers: Arc<dyn StorageProviderRepository>,
     pub media_files: Arc<dyn MediaFileRepository>,
     pub site_settings: Arc<dyn SiteSettingsRepository>,
+    pub search_store: Arc<InMemorySearchStore>,
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -131,6 +134,7 @@ pub async fn init_state(
         storage_providers,
         media_files,
         site_settings,
+        search_store: Arc::new(InMemorySearchStore::new()),
     }
 }
 
@@ -182,6 +186,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))
         .route("/api/notes/home-timeline", get(handlers::notes::home_timeline))
+        .route("/api/notes/search", get(handlers::search::search_notes))
         .route("/api/notes/:id", get(handlers::notes::get_note))
         .route("/api/notes/:id/context", get(handlers::notes::note_context))
         // ActivityPub Note エンドポイント（nginx が AP Accept ヘッダーのみをここへ転送）
@@ -295,6 +300,16 @@ pub fn spawn_startup_tasks(state: &AppState) {
 /// 1時間ごとに孤立ファイル（7日以上経過かつどのテーブルからも参照なし）を
 /// S3 → DB の順でベストエフォートで削除する。
 pub fn spawn_gc_tasks(state: &AppState) {
+    // 検索セッション GC（1分ごとにタイムアウトしたセッションを削除）
+    let search_store = Arc::clone(&state.search_store);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            search_store.cleanup();
+        }
+    });
+
     let db = state.db.clone();
     let media_files = Arc::clone(&state.media_files);
     let storage_providers = Arc::clone(&state.storage_providers);

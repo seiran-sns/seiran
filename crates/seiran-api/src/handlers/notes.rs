@@ -14,7 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use seiran_common::repository::TimelinePost;
 use seiran_common::{ap::{deliver_post_to_ap_followers, deliver_ap_announce, fetch_ap_history, plain_to_html}, generate_snowflake_id};
 use seiran_common::mention::{convert_mentions_for_bsky, convert_mentions_for_ap};
-use seiran_common::atp::{BskyPostReply, BskyRefRecord};
+use seiran_common::atp::{BskyPostReply, BskyRefRecord, BskyEmbed};
 
 use crate::AppState;
 use crate::error::ApiError;
@@ -31,6 +31,8 @@ pub struct CreateNoteRequest {
     pub renote_id: Option<String>,
     /// リプライ先のポスト ID（指定時はリプライとして処理し配信先を制御する）
     pub reply_to_id: Option<String>,
+    /// 引用元のポスト ID（指定時は引用投稿として処理する）
+    pub quote_of_id: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -62,7 +64,7 @@ pub struct NoteUserInfo {
 /// post_id リストに対する添付情報を一括取得する。
 /// ローカル投稿は media_files + storage_providers から URL を組み立て、
 /// リモート受信投稿は remote_url をそのまま使用する。
-async fn fetch_attachments_map(
+pub async fn fetch_attachments_map(
     db: &sqlx::PgPool,
     post_ids: &[i64],
 ) -> HashMap<i64, Vec<AttachmentResponse>> {
@@ -108,7 +110,7 @@ async fn fetch_attachments_map(
     map
 }
 
-fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -> NoteResponse {
+pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -> NoteResponse {
     NoteResponse {
         id: p.id.to_string(),
         text: p.body,
@@ -295,7 +297,7 @@ pub async fn create_note(
                 tokio::spawn(async move {
                     if let Err(e) = deliver_post_to_ap_followers(
                         &ap_client, &db, post_id, actor_id, &local_domain, &ap_pem,
-                        Some(&fallback_text),
+                        Some(&fallback_text), None,
                     ).await {
                         eprintln!("[create_note] Bsky→Fedi フォールバック配送失敗: {}", e);
                     }
@@ -441,35 +443,72 @@ pub async fn create_note(
 
     let post_id = generate_snowflake_id(now);
     let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
+    let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
 
-    // リプライの場合は reply_to_post_id を設定してインサート
     let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
-    let insert_result = if let Some(reply_id) = reply_to_id_i64 {
-        sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, reply_to_post_id, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind(post_id)
-        .bind(actor_id)
-        .bind(&text)
-        .bind(&ap_object_id)
-        .bind(reply_id)
-        .bind(now)
-        .execute(&state.db)
-        .await
-    } else {
-        sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
-             VALUES ($1, $2, $3, $4, $5)",
-        )
-        .bind(post_id)
-        .bind(actor_id)
-        .bind(&text)
-        .bind(&ap_object_id)
-        .bind(now)
-        .execute(&state.db)
-        .await
-    };
+    let quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
+
+    // ── 引用元情報の取得（Bsky embed / AP quoteUrl を決定する） ─────────────────
+    let (bsky_quote_embed, ap_quote_url): (Option<BskyEmbed>, Option<String>) =
+        if let Some(quote_id) = quote_of_id_i64 {
+            let q_row = sqlx::query(
+                "SELECT p.ap_object_id, p.at_uri, p.at_cid, a.domain
+                 FROM posts p JOIN actors a ON a.id = p.actor_id
+                 WHERE p.id = $1 AND p.deleted_at IS NULL LIMIT 1",
+            )
+            .bind(quote_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+
+            if let Some(r) = q_row {
+                let q_ap_id: Option<String> = r.try_get("ap_object_id").unwrap_or(None);
+                let q_at_uri: Option<String> = r.try_get("at_uri").unwrap_or(None);
+                let q_at_cid: Option<String> = r.try_get("at_cid").unwrap_or(None);
+                let q_domain: String = r.try_get("domain").unwrap_or_default();
+
+                let (_is_local, is_fedi, _is_bsky) = classify_post(
+                    q_ap_id.as_deref(), q_at_uri.as_deref(), &q_domain, &state.local_domain,
+                );
+
+                let bsky_embed = if is_fedi {
+                    q_ap_id.as_deref().map(|u| BskyEmbed::External { url: u.to_string() })
+                } else if let (Some(uri), Some(cid)) = (&q_at_uri, &q_at_cid) {
+                    Some(BskyEmbed::Record { uri: uri.clone(), cid: cid.clone() })
+                } else {
+                    q_ap_id.as_deref().map(|u| BskyEmbed::External { url: u.to_string() })
+                };
+
+                let ap_url = if q_at_uri.is_some() && q_ap_id.is_none() {
+                    q_at_uri.as_deref().map(at_uri_to_bsky_app_url)
+                } else {
+                    q_ap_id.clone()
+                };
+
+                (bsky_embed, ap_url)
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
+    // seiran_post_uuid / reply_to_post_id / quote_of_post_id を含む統合 INSERT
+    let insert_result = sqlx::query(
+        "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .bind(&text)
+    .bind(&ap_object_id)
+    .bind(&seiran_post_uuid)
+    .bind(reply_to_id_i64)
+    .bind(quote_of_id_i64)
+    .bind(now)
+    .execute(&state.db)
+    .await;
 
     if let Err(e) = insert_result {
         eprintln!("[create_note] INSERT 失敗: {}", e);
@@ -532,10 +571,20 @@ pub async fn create_note(
         .collect();
 
     if deliver_bsky {
-        if let Err(e) = state.atp_service.commit_post(
-            actor_id, post_id, &bsky_text, bsky_facets, &attachment_ids_i64, now, bsky_reply,
-        ).await {
-            eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
+        if let Some(embed) = bsky_quote_embed {
+            // 引用投稿: embed を付けて commit_quote を使う（画像 embed と共存しない）
+            if let Err(e) = state.atp_service.commit_quote(
+                actor_id, post_id, &bsky_text, bsky_facets, Some(embed), now, bsky_reply,
+            ).await {
+                eprintln!("[create_note] ATP quote commit 失敗（投稿は保存済み）: {}", e);
+            }
+        } else {
+            // 通常投稿 / リプライ
+            if let Err(e) = state.atp_service.commit_post(
+                actor_id, post_id, &bsky_text, bsky_facets, &attachment_ids_i64, now, bsky_reply,
+            ).await {
+                eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
+            }
         }
     }
 
@@ -550,8 +599,11 @@ pub async fn create_note(
         let ap_client = state.ap_client.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                deliver_post_to_ap_followers(&ap_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem, Some(ap_text.as_str()))
-                    .await
+                deliver_post_to_ap_followers(
+                    &ap_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem,
+                    Some(ap_text.as_str()), ap_quote_url.as_deref(),
+                )
+                .await
             {
                 eprintln!("[create_note] AP 配送エラー: {}", e);
             }

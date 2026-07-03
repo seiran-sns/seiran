@@ -8,7 +8,7 @@ use crate::atp::repo::{
     build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
     cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
     encode_bsky_feed_repost,
-    generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage,
+    generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage, BskyEmbed,
     BskyPostReply,
 };
 
@@ -354,7 +354,8 @@ impl AtpCommitService {
             .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
             .collect();
 
-        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, bsky_images, reply)?;
+        let embed = if bsky_images.is_empty() { None } else { Some(BskyEmbed::Images(bsky_images)) };
+        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
@@ -419,7 +420,7 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, vec![], vec![], None)?;
+        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, vec![], None, None)?;
 
         let record = CommitRecord {
             collection: "app.bsky.feed.post",
@@ -433,6 +434,44 @@ impl AtpCommitService {
         let result = self.commit_record_inner(actor_id, record, now, None).await?;
 
         eprintln!("[atp] standalone text post commit 完了: did={}, rkey={}", result.at_did, rkey);
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
+    /// 引用投稿コミット（`app.bsky.embed.record` または `app.bsky.embed.external` 付き）。
+    ///
+    /// `embed` に `BskyEmbed::Record` を渡すと Bsky ネイティブ引用、
+    /// `BskyEmbed::External` を渡すと URL カードとして送信する。
+    /// DB の posts レコードは呼び出し元で更新済みである前提。
+    pub async fn commit_quote(
+        &self,
+        actor_id: i64,
+        post_id: i64,
+        text: &str,
+        facets: Vec<BskyFacet>,
+        embed: Option<BskyEmbed>,
+        now: DateTime<Utc>,
+        reply: Option<BskyPostReply>,
+    ) -> Result<(), AtpCommitError> {
+        let rkey = generate_tid();
+        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
+        let record_cid_str = cid_to_string(&record_cid);
+
+        let record = CommitRecord {
+            collection: "app.bsky.feed.post",
+            rkey: rkey.clone(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action: "create",
+            blob_cids: vec![],
+        };
+
+        let result = self.commit_record_inner(actor_id, record, now, Some(post_id)).await?;
+
+        let at_uri = format!("at://{}/app.bsky.feed.post/{}", result.at_did, rkey);
+        eprintln!("[atp] quote commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
         self.spawn_request_crawl();
         Ok(())
     }

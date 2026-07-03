@@ -6,6 +6,7 @@ pub mod follows;
 pub mod meta;
 pub mod miauth;
 pub mod notes;
+pub mod search;
 pub mod setup;
 pub mod users;
 pub mod xrpc;

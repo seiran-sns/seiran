@@ -272,11 +272,89 @@ async fn handle_create_note(
     // HTML タグを除去して本文を得る
     let body = strip_html(&content_html);
 
-    // posts テーブルに挿入（ap_object_id が重複する場合はスキップ）
-    state.post_repo
-        .insert_remote(post_id, actor_id, &body, note_id, created_at)
+    let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_default();
+
+    // ── フェーズ5: 重複排除チェック ──────────────────────────────────────────
+
+    // シナリオ2: seiran_post_uuid による seiran 間マージ
+    let seiran_uuid = note["seiranUuid"].as_str();
+    if let Some(uuid) = seiran_uuid {
+        use sqlx::Row;
+        let existing = sqlx::query(
+            "SELECT id, ap_object_id FROM posts WHERE seiran_post_uuid = $1 LIMIT 1",
+        )
+        .bind(uuid)
+        .fetch_optional(&state.db)
         .await
-        .map_err(|e| format!("posts INSERT エラー: {}", e))?;
+        .map_err(|e| format!("seiran_post_uuid 検索失敗: {}", e))?;
+
+        if let Some(row) = existing {
+            let existing_id: i64 = row.try_get("id").unwrap_or(0);
+            let existing_ap_id: Option<String> = row.try_get("ap_object_id").unwrap_or(None);
+            if existing_ap_id.is_none() {
+                // ap_object_id 未設定なら UPDATE
+                let _ = sqlx::query(
+                    "UPDATE posts SET ap_object_id = $1 WHERE id = $2",
+                )
+                .bind(note_id)
+                .bind(existing_id)
+                .execute(&state.db)
+                .await;
+                eprintln!("[Create/Note] seiran_uuid マージ（AP 側更新）: id={}", existing_id);
+            }
+            // 重複インサートはしない
+            return Ok(());
+        }
+    }
+
+    // シナリオ1: ループバック検知（note.id または note.url が LOCAL_DOMAIN の notes URL）
+    let loopback_prefix = format!("https://{}/notes/", local_domain);
+    let parent_original_post_id: Option<i64> = {
+        let candidates = [
+            note["url"].as_str().unwrap_or(""),
+            note_id,
+        ];
+        candidates.iter().find_map(|url| {
+            url.strip_prefix(&loopback_prefix)
+                .and_then(|id_str| id_str.parse::<i64>().ok())
+        })
+    };
+
+    // シナリオ3: ブリッジ重複検知（note.url が bsky.app の場合、at_uri で既存ポストを探す）
+    let parent_original_post_id = if parent_original_post_id.is_some() {
+        parent_original_post_id
+    } else {
+        let bsky_url = note["url"].as_str().unwrap_or("");
+        if let Some(at_uri) = bsky_app_url_to_at_uri(bsky_url) {
+            use sqlx::Row;
+            sqlx::query("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
+                .bind(&at_uri)
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|r| r.try_get::<i64, _>("id").ok())
+        } else {
+            None
+        }
+    };
+
+    // posts テーブルに挿入（ap_object_id 重複はスキップ、seiran_post_uuid も保存）
+    sqlx::query(
+        "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (ap_object_id) DO NOTHING",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .bind(&body)
+    .bind(note_id)
+    .bind(seiran_uuid)
+    .bind(parent_original_post_id)
+    .bind(created_at)
+    .execute(&state.db)
+    .await
+    .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
     // 添付画像の URL を保存（S3 には保存せず URL のみ記録）
     if let Some(attachments) = note["attachment"].as_array() {
@@ -303,8 +381,22 @@ async fn handle_create_note(
         }
     }
 
-    eprintln!("[Create/Note] {} から投稿を受信・保存: {}", actor_uri, note_id);
+    let dup_info = parent_original_post_id.map_or(String::new(), |id| format!(" (parent_original={})", id));
+    eprintln!("[Create/Note] {} から投稿を受信・保存: {}{}", actor_uri, note_id, dup_info);
     Ok(())
+}
+
+/// `https://bsky.app/profile/{did}/post/{rkey}` → `at://{did}/app.bsky.feed.post/{rkey}`
+fn bsky_app_url_to_at_uri(url: &str) -> Option<String> {
+    let without_prefix = url.strip_prefix("https://bsky.app/profile/")?;
+    let mut parts = without_prefix.splitn(3, '/');
+    let did = parts.next()?;
+    let post_label = parts.next()?;
+    if post_label != "post" {
+        return None;
+    }
+    let rkey = parts.next()?;
+    Some(format!("at://{}/app.bsky.feed.post/{}", did, rkey))
 }
 
 /// Signature ヘッダーの headers= フィールドに "digest" が含まれているか確認する

@@ -423,6 +423,42 @@ struct BskyFeedRepost {
     created_at: String,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Bsky embed 種別
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// AT Protocol ポスト embed の種別。
+pub enum BskyEmbed {
+    Images(Vec<BskyImage>),
+    Record { uri: String, cid: String },
+    External { url: String },
+}
+
+/// `app.bsky.embed.record`（引用ポスト）の Ipld を構築する。
+fn build_embed_record_ipld(uri: &str, cid_str: &str) -> Ipld {
+    let mut record = BTreeMap::new();
+    record.insert("cid".to_string(), Ipld::String(cid_str.to_string()));
+    record.insert("uri".to_string(), Ipld::String(uri.to_string()));
+
+    let mut embed = BTreeMap::new();
+    embed.insert("$type".to_string(), Ipld::String("app.bsky.embed.record".to_string()));
+    embed.insert("record".to_string(), Ipld::Map(record));
+    Ipld::Map(embed)
+}
+
+/// `app.bsky.embed.external`（URL カード）の Ipld を構築する。
+fn build_embed_external_ipld(url: &str) -> Ipld {
+    let mut external = BTreeMap::new();
+    external.insert("description".to_string(), Ipld::String(String::new()));
+    external.insert("title".to_string(), Ipld::String(String::new()));
+    external.insert("uri".to_string(), Ipld::String(url.to_string()));
+
+    let mut embed = BTreeMap::new();
+    embed.insert("$type".to_string(), Ipld::String("app.bsky.embed.external".to_string()));
+    embed.insert("external".to_string(), Ipld::Map(external));
+    Ipld::Map(embed)
+}
+
 /// `app.bsky.embed.images` の Ipld ツリーを構築する。
 fn build_embed_images_ipld(images: &[BskyImage]) -> Result<Ipld, RepoError> {
     let image_list: Result<Vec<Ipld>, RepoError> = images.iter().map(|img| {
@@ -461,19 +497,22 @@ fn build_embed_images_ipld(images: &[BskyImage]) -> Result<Ipld, RepoError> {
 /// `app.bsky.feed.post` レコードの DAG-CBOR バイト列と CID を生成する。
 ///
 /// `facets` が空の場合は `facets` フィールドを省略する。
-/// `images` が空でない場合は `embed` フィールドとして `app.bsky.embed.images` を含める。
+/// `embed` が Some の場合は embed フィールドを含める（画像・引用・URL カード）。
 /// `reply` が Some の場合は `reply` フィールドを含める（リプライ投稿）。
 pub fn encode_bsky_feed_post(
     text: &str,
     created_at_rfc3339: &str,
     facets: Vec<BskyFacet>,
-    images: Vec<BskyImage>,
+    embed: Option<BskyEmbed>,
     reply: Option<BskyPostReply>,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
-    let embed = if images.is_empty() {
-        None
-    } else {
-        Some(build_embed_images_ipld(&images)?)
+    let embed = match embed {
+        None => None,
+        Some(BskyEmbed::Images(images)) => {
+            if images.is_empty() { None } else { Some(build_embed_images_ipld(&images)?) }
+        }
+        Some(BskyEmbed::Record { uri, cid }) => Some(build_embed_record_ipld(&uri, &cid)),
+        Some(BskyEmbed::External { url }) => Some(build_embed_external_ipld(&url)),
     };
     let record = BskyFeedPost {
         text: text.to_string(),
@@ -680,8 +719,8 @@ mod tests {
 
     #[test]
     fn test_encode_bsky_feed_post_deterministic() {
-        let (cbor1, cid1) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![]).unwrap();
-        let (cbor2, cid2) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![]).unwrap();
+        let (cbor1, cid1) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
+        let (cbor2, cid2) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
         assert_eq!(cbor1, cbor2);
         assert_eq!(cid1, cid2);
     }
@@ -695,7 +734,7 @@ mod tests {
 
     #[test]
     fn test_build_mst_single_entry() {
-        let (_, cid) = encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z", vec![]).unwrap();
+        let (_, cid) = encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
         let entries = vec![("app.bsky.feed.post/test123".to_string(), cid)];
         let result = build_mst(&entries);
         assert!(result.is_ok());
