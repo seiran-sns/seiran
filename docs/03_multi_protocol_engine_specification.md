@@ -363,3 +363,67 @@ Fedi リモートポストのリポスト
 この機能は実装コストが高いため後続フェーズで対応する。初期リリースでは以下の簡易実装とする：
 - DB にブリッジポストが記録済みの場合のみリポスト → それ以外はフォールバック（URLカード投稿）
 - ブリッジユーザー経由のオンデマンド探索は Phase 後半で追加
+
+---
+
+## 10. 画像 embed の DAG-CBOR 形式仕様
+
+### 10.1 blob ref の CBOR エンコーディング
+
+AT Protocol において画像 blob への参照（blob ref）は DAG-CBOR の **CBOR Tag 42** で直接 CID を指定する。
+
+```
+// 正しい形式
+blob.ref = Ipld::Link(cid)  →  CBOR tag42( <CIDv1 bytes> )
+
+// 誤った形式（使用禁止）
+blob.ref = Ipld::Map({"$link": Ipld::Link(cid)})  →  {"$link": tag42(...)}
+```
+
+`Ipld::Link` を `serde_ipld_dagcbor` でシリアライズすると tag42 になる。`{"$link": ...}` ラップは AT Protocol の JSON 表現であり、CBOR では使用しない。
+
+### 10.2 `app.bsky.embed.images` レコード構造
+
+フィールドのキー順序は DAG-CBOR のカノニカル順（文字列長昇順 → 辞書順）に従う：
+
+```
+embed:
+  $type: "app.bsky.embed.images"  (5)
+  images: [...]                    (6)
+
+images[n]:
+  alt: ""              (3)
+  image: <blob>        (5)
+  aspectRatio: {...}   (11)
+
+blob:
+  ref: tag42(CID)     (3)   ← Ipld::Link で直接指定
+  size: <bytes>        (4)
+  $type: "blob"        (5)
+  mimeType: "..."      (8)
+
+aspectRatio:
+  width: <px>   (5)
+  height: <px>  (6)
+```
+
+### 10.3 `#commit` フレームの `blobs` フィールド
+
+`subscribeRepos` の `#commit` イベントには `blobs` フィールドがあり、そのコミットで参照する blob の CID リストを含める必要がある。このフィールドが空配列だと AppView が blob の存在を認識できず、画像 embed を持つ投稿をインデックスしない。
+
+```
+blobs: [ Ipld::Link(blob_cid1), Ipld::Link(blob_cid2), ... ]
+```
+
+seiran の実装では `commit_post` 呼び出し時に `CommitRecord.blob_cids` に blob CID のリストを渡し、`build_commit_frame` が `blobs` フィールドに展開する。
+
+### 10.4 `com.atproto.sync.getBlob` エンドポイント
+
+AppView は投稿をインデックスする際に PDS の `getBlob` エンドポイントから blob を取得する。seiran は画像を外部ストレージ（R2/S3）に保存しているため、`getBlob` は CDN URL への HTTP 307 リダイレクトを返す。
+
+```
+GET /xrpc/com.atproto.sync.getBlob?did=<DID>&cid=<CIDv1>
+→ 307 Redirect: https://media.seiran.org/media/<storage_key>
+```
+
+CID の sha2-256 ダイジェストを `media_files.sha256` と照合して対応する CDN URL を返す。

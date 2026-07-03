@@ -11,6 +11,7 @@ use p256::ecdsa::{signature::Signer, SigningKey};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use hex;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // エラー型
@@ -346,29 +347,96 @@ pub struct BskyFacet {
     pub features: Vec<BskyFacetMention>,
 }
 
-// canonical 順: text(4) < $type(5) < facets(6) < createdAt(9)
+/// 画像添付情報（`app.bsky.embed.images` 生成用）
+pub struct BskyImage {
+    /// 保存済みバイナリの SHA-256（hex）— raw CIDv1 の生成に使用
+    pub sha256_hex: String,
+    pub mime_type: String,
+    pub size: i64,
+    pub width: i32,
+    pub height: i32,
+    pub alt: String,
+}
+
+/// SHA-256 ハッシュ（hex 文字列）から CIDv1 (raw codec=0x55) を生成する。
+/// AT Protocol Blob 参照で使用する。
+pub fn cid_from_sha256_hex(sha256_hex: &str) -> Result<Cid, RepoError> {
+    let bytes = hex::decode(sha256_hex)
+        .map_err(|e| RepoError::CidParse(format!("SHA-256 hex デコード失敗: {}", e)))?;
+    let mh = Multihash::<64>::wrap(0x12, &bytes)
+        .map_err(|e| RepoError::CidParse(format!("multihash wrap 失敗: {}", e)))?;
+    Ok(Cid::new_v1(0x55, mh))
+}
+
+// canonical 順: text(4) < $type(5) < embed(5) < facets(6) < createdAt(9)
+// 5文字のキー同士: "$type"($ = 0x24) < "embed"(e = 0x65)
 #[derive(Serialize)]
 struct BskyFeedPost {
     text: String,
     #[serde(rename = "$type")]
     kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    embed: Option<Ipld>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     facets: Vec<BskyFacet>,
     #[serde(rename = "createdAt")]
     created_at: String,
 }
 
+/// `app.bsky.embed.images` の Ipld ツリーを構築する。
+fn build_embed_images_ipld(images: &[BskyImage]) -> Result<Ipld, RepoError> {
+    let image_list: Result<Vec<Ipld>, RepoError> = images.iter().map(|img| {
+        let blob_cid = cid_from_sha256_hex(&img.sha256_hex)?;
+
+        // blob: canonical 順 ref(3) < size(4) < $type(5) < mimeType(8)
+        // ref は CID リンク（DAG-CBOR tag 42）を直接持つ
+        let mut blob_map = BTreeMap::new();
+        blob_map.insert("ref".to_string(), Ipld::Link(blob_cid));
+        blob_map.insert("size".to_string(), Ipld::Integer(img.size as i128));
+        blob_map.insert("$type".to_string(), Ipld::String("blob".to_string()));
+        blob_map.insert("mimeType".to_string(), Ipld::String(img.mime_type.clone()));
+
+        // aspectRatio: canonical 順 width(5) < height(6)
+        let mut aspect = BTreeMap::new();
+        aspect.insert("width".to_string(), Ipld::Integer(img.width as i128));
+        aspect.insert("height".to_string(), Ipld::Integer(img.height as i128));
+
+        // image item: canonical 順 alt(3) < image(5) < aspectRatio(11)
+        let mut item = BTreeMap::new();
+        item.insert("alt".to_string(), Ipld::String(img.alt.clone()));
+        item.insert("image".to_string(), Ipld::Map(blob_map));
+        item.insert("aspectRatio".to_string(), Ipld::Map(aspect));
+
+        Ok(Ipld::Map(item))
+    }).collect();
+
+    // embed: canonical 順 $type(5) < images(6)
+    let mut embed = BTreeMap::new();
+    embed.insert("$type".to_string(), Ipld::String("app.bsky.embed.images".to_string()));
+    embed.insert("images".to_string(), Ipld::List(image_list?));
+
+    Ok(Ipld::Map(embed))
+}
+
 /// `app.bsky.feed.post` レコードの DAG-CBOR バイト列と CID を生成する。
 ///
 /// `facets` が空の場合は `facets` フィールドを省略する。
+/// `images` が空でない場合は `embed` フィールドとして `app.bsky.embed.images` を含める。
 pub fn encode_bsky_feed_post(
     text: &str,
     created_at_rfc3339: &str,
     facets: Vec<BskyFacet>,
+    images: Vec<BskyImage>,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
+    let embed = if images.is_empty() {
+        None
+    } else {
+        Some(build_embed_images_ipld(&images)?)
+    };
     let record = BskyFeedPost {
         text: text.to_string(),
         kind: "app.bsky.feed.post".to_string(),
+        embed,
         facets,
         created_at: created_at_rfc3339.to_string(),
     };
@@ -427,6 +495,7 @@ pub fn build_commit_frame(
     since: Option<&str>,
     car_bytes: &[u8],
     ops: &[CommitEvtOp],
+    blob_cids: &[Cid],
     time: &str,
 ) -> Result<Vec<u8>, RepoError> {
     // ヘッダー CBOR
@@ -452,30 +521,47 @@ pub fn build_commit_frame(
         .collect();
 
     let mut body_map: BTreeMap<String, Ipld> = BTreeMap::new();
-    body_map.insert("blobs".to_string(), Ipld::List(vec![]));
+    let blobs_ipld: Vec<Ipld> = blob_cids.iter().map(|c| Ipld::Link(*c)).collect();
+    body_map.insert("blobs".to_string(), Ipld::List(blobs_ipld));
     body_map.insert("blocks".to_string(), Ipld::Bytes(car_bytes.to_vec()));
     body_map.insert("commit".to_string(), Ipld::Link(*commit_cid));
     body_map.insert("did".to_string(), Ipld::String(did.to_string()));
     body_map.insert("ops".to_string(), Ipld::List(ops_ipld));
-    body_map.insert(
-        "prev".to_string(),
-        prev_cid
-            .map(|c| Ipld::Link(*c))
-            .unwrap_or(Ipld::Null),
-    );
+    if let Some(c) = prev_cid {
+        body_map.insert("prev".to_string(), Ipld::Link(*c));
+    }
     body_map.insert("rebase".to_string(), Ipld::Bool(false));
     body_map.insert("repo".to_string(), Ipld::String(did.to_string()));
     body_map.insert("rev".to_string(), Ipld::String(rev.to_string()));
     body_map.insert("seq".to_string(), Ipld::Integer(seq as i128));
-    body_map.insert(
-        "since".to_string(),
-        since
-            .map(|s| Ipld::String(s.to_string()))
-            .unwrap_or(Ipld::Null),
-    );
+    if let Some(s) = since {
+        body_map.insert("since".to_string(), Ipld::String(s.to_string()));
+    }
     body_map.insert("time".to_string(), Ipld::String(time.to_string()));
     body_map.insert("tooBig".to_string(), Ipld::Bool(false));
 
+    let body_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(body_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut frame = header_cbor;
+    frame.extend_from_slice(&body_cbor);
+    Ok(frame)
+}
+
+/// subscribeRepos の #identity フレームを生成する。
+/// handle が確定したとき AppView に再検証を促すために送信する。
+pub fn build_identity_frame(seq: i64, did: &str, handle: &str, time: &str) -> Result<Vec<u8>, RepoError> {
+    let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    header_map.insert("op".to_string(), Ipld::Integer(1));
+    header_map.insert("t".to_string(), Ipld::String("#identity".to_string()));
+    let header_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(header_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut body_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    body_map.insert("did".to_string(), Ipld::String(did.to_string()));
+    body_map.insert("handle".to_string(), Ipld::String(handle.to_string()));
+    body_map.insert("seq".to_string(), Ipld::Integer(seq as i128));
+    body_map.insert("time".to_string(), Ipld::String(time.to_string()));
     let body_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(body_map))
         .map_err(|e| RepoError::Cbor(e.to_string()))?;
 

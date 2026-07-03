@@ -5,9 +5,9 @@ use tokio::sync::broadcast;
 
 use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
-    build_commit_frame, build_mst, cid_from_str, cid_to_string, create_commit, encode_car,
-    encode_bsky_actor_profile, encode_bsky_feed_post, generate_tid, Cid, CommitEvtOp, RepoError,
-    BskyFacet,
+    build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
+    cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
+    generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -37,6 +37,7 @@ pub struct CommitRecord {
     pub cbor: Vec<u8>,
     pub cid: Cid,
     pub action: &'static str,
+    pub blob_cids: Vec<Cid>,
 }
 
 /// コミット処理の結果
@@ -259,16 +260,15 @@ impl AtpCommitService {
         .await?;
         let seq: i64 = event_row.try_get("id")?;
 
-        tx.commit().await?;
-
-        // WebSocket ブロードキャスト
+        // フレームを生成して zstd 圧縮し、同一 tx 内で frame_bytes を保存する。
+        // tx.commit() 前に行うことで、フレームバイト列と他のレコードの atomicity を保つ。
         let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let ws_ops = vec![CommitEvtOp {
             action: record.action.to_string(),
             path: entry_key,
             cid: record.cid,
         }];
-        if let Ok(frame) = build_commit_frame(
+        let frame_opt = build_commit_frame(
             seq,
             &at_did,
             &commit_cid,
@@ -277,8 +277,25 @@ impl AtpCommitService {
             prev_rev.as_deref(),
             &diff_car,
             &ws_ops,
+            &record.blob_cids,
             &time_str,
-        ) {
+        ).ok();
+        if let Some(ref frame) = frame_opt {
+            if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
+                sqlx::query(
+                    "UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2",
+                )
+                .bind(&compressed)
+                .bind(seq)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        tx.commit().await?;
+
+        // WebSocket ブロードキャスト
+        if let Some(frame) = frame_opt {
             let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
         }
 
@@ -292,11 +309,43 @@ impl AtpCommitService {
         post_id: i64,
         text: &str,
         facets: Vec<BskyFacet>,
+        attachment_ids: &[i64],
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets)?;
+
+        // 添付ファイル情報を DB から取得して BskyImage に変換
+        let images: Vec<BskyImage> = if !attachment_ids.is_empty() {
+            let rows = sqlx::query(
+                "SELECT mf.sha256, mf.size, mf.mime_type, mf.width, mf.height
+                 FROM media_files mf WHERE mf.id = ANY($1)
+                 ORDER BY array_position($1, mf.id)",
+            )
+            .bind(attachment_ids)
+            .fetch_all(&self.pool)
+            .await?;
+
+            rows.iter().filter_map(|r| {
+                use sqlx::Row;
+                let sha256: String = r.try_get("sha256").ok()?;
+                let size: i64 = r.try_get("size").ok()?;
+                let mime_type: String = r.try_get("mime_type").ok()?;
+                let width: i32 = r.try_get("width").ok()?;
+                let height: i32 = r.try_get("height").ok()?;
+                // CID 生成に失敗したものはスキップ
+                cid_from_sha256_hex(&sha256).ok()?;
+                Some(BskyImage { sha256_hex: sha256, mime_type, size, width, height, alt: String::new() })
+            }).collect()
+        } else {
+            vec![]
+        };
+
+        let blob_cids: Vec<Cid> = images.iter()
+            .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
+            .collect();
+
+        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, images)?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
@@ -305,6 +354,7 @@ impl AtpCommitService {
             cbor: record_cbor,
             cid: record_cid,
             action: "create",
+            blob_cids,
         };
 
         let result = self.commit_record_inner(actor_id, record, now, Some(post_id)).await?;
@@ -331,12 +381,52 @@ impl AtpCommitService {
             cbor: record_cbor,
             cid: record_cid,
             action: "create",
+            blob_cids: vec![],
         };
 
         let result = self.commit_record_inner(actor_id, record, now, None).await?;
 
         eprintln!("[atp] profile commit 完了: did={}", result.at_did);
         self.spawn_request_crawl();
+        Ok(())
+    }
+
+    /// #identity イベントを DB に保存して subscribeRepos にブロードキャストする。
+    /// ユーザー登録完了後に呼び出し、Relay/AppView に handle の再検証を促す。
+    pub async fn broadcast_identity_event(
+        &self,
+        actor_id: i64,
+        did: &str,
+        handle: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        // まず seq を確保するために frame_bytes なしで INSERT する。
+        let seq: i64 = sqlx::query_scalar(
+            "INSERT INTO atp_repo_events (event_type, actor_id, did, handle)
+             VALUES ('identity', $1, $2, $3)
+             RETURNING id",
+        )
+        .bind(actor_id)
+        .bind(did)
+        .bind(handle)
+        .fetch_one(&self.pool)
+        .await?;
+
+        // 実 seq でフレームを生成し、圧縮して DB に保存してからブロードキャスト。
+        let frame = build_identity_frame(seq, did, handle, &time_str)?;
+        let compressed = zstd::encode_all(&frame[..], 3)
+            .map_err(|e| RepoError::Cbor(e.to_string()))?;
+        sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
+            .bind(&compressed)
+            .bind(seq)
+            .execute(&self.pool)
+            .await?;
+
+        let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+
+        eprintln!("[atp] identity broadcast: did={}, handle={}, seq={}", did, handle, seq);
         Ok(())
     }
 }

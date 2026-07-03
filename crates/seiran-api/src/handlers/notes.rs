@@ -238,8 +238,18 @@ pub async fn create_note(
 
     // ─────────────────────────────────────────────────────────────────────────
 
+    // attachment_ids を i64 に変換（バリデーション済みなので unwrap 安全）
+    let attachment_ids_i64: Vec<i64> = req.attachment_ids
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|s| s.parse::<i64>().unwrap())
+        .collect();
+
     if deliver_bsky {
-        if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &bsky_text, bsky_facets, now).await {
+        if let Err(e) = state.atp_service.commit_post(
+            actor_id, post_id, &bsky_text, bsky_facets, &attachment_ids_i64, now,
+        ).await {
             eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
         }
     }
@@ -263,12 +273,15 @@ pub async fn create_note(
         });
     }
 
+    let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
+    let final_attachments = att_map.remove(&post_id).unwrap_or_default();
+
     Json(NoteResponse {
         id: post_id.to_string(),
         text: req.text,
         created_at: now.to_rfc3339(),
         user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None },
-        attachments: vec![],
+        attachments: final_attachments,
     })
     .into_response()
 }
@@ -379,7 +392,39 @@ pub async fn get_note_ap(
     let note_id = format!("https://{}/notes/{}", state.local_domain, post.id);
     let content_html = plain_to_html(&post.body);
 
-    let ap_note = serde_json::json!({
+    let attachment_rows = sqlx::query(
+        "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
+         FROM post_attachments pa
+         JOIN media_files mf ON mf.id = pa.media_file_id
+         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         WHERE pa.post_id = $1
+         ORDER BY pa.position",
+    )
+    .bind(post_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let attachments: Vec<serde_json::Value> = attachment_rows
+        .iter()
+        .filter_map(|r| {
+            let storage_key: String = r.try_get("storage_key").ok()?;
+            let mime_type: String = r.try_get("mime_type").ok()?;
+            let width: i32 = r.try_get("width").ok()?;
+            let height: i32 = r.try_get("height").ok()?;
+            let public_url: String = r.try_get("public_url").ok()?;
+            let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
+            Some(serde_json::json!({
+                "type": "Document",
+                "mediaType": mime_type,
+                "url": url,
+                "width": width,
+                "height": height
+            }))
+        })
+        .collect();
+
+    let mut ap_note = serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Note",
         "id": note_id,
@@ -390,6 +435,9 @@ pub async fn get_note_ap(
         "to": ["https://www.w3.org/ns/activitystreams#Public"],
         "cc": [format!("{}/followers", actor_uri)],
     });
+    if !attachments.is_empty() {
+        ap_note["attachment"] = serde_json::Value::Array(attachments);
+    }
 
     (
         [(axum::http::header::CONTENT_TYPE, "application/activity+json; charset=utf-8")],

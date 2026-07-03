@@ -203,6 +203,7 @@ pub fn router(state: AppState) -> Router {
         .route("/xrpc/com.atproto.server.describeServer", get(handlers::xrpc::server::xrpc_describe_server))
         .route("/xrpc/com.atproto.identity.resolveHandle", get(handlers::xrpc::server::xrpc_resolve_handle))
         .route("/xrpc/com.atproto.sync.getRepo", get(handlers::xrpc::sync::xrpc_get_repo))
+        .route("/xrpc/com.atproto.sync.getBlob", get(handlers::xrpc::sync::xrpc_get_blob))
         .route("/xrpc/com.atproto.sync.subscribeRepos", get(handlers::xrpc::sync::xrpc_subscribe_repos))
         .route("/xrpc/com.atproto.repo.getRecord", get(handlers::xrpc::repo::xrpc_get_record))
         // AT Protocol DID 解決
@@ -222,6 +223,9 @@ pub fn spawn_startup_tasks(state: &AppState) {
     let hc = Arc::clone(&state.http_client);
     let domain = state.local_domain.clone();
     let sd = state.local_domain.clone();
+    let identity_db = state.db.clone();
+    let identity_atp = Arc::clone(&state.atp_service);
+    let identity_domain = state.local_domain.clone();
 
     tokio::spawn(async move {
         // 全ローカルユーザーのハンドル TXT を確保（再デプロイ後の消失対策）
@@ -249,6 +253,35 @@ pub fn spawn_startup_tasks(state: &AppState) {
         {
             Ok(res) => eprintln!("[atp] 起動時 requestCrawl → {}", res.status()),
             Err(e) => eprintln!("[atp] 起動時 requestCrawl 失敗: {}", e),
+        }
+
+        // requestCrawl 後、Relay が subscribeRepos に接続するまで待機してから
+        // #identity イベントがない既存ユーザー分を DB 保存 + broadcast する。
+        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+
+        let now = chrono::Utc::now();
+        let missing: Vec<(i64, String, String)> = match sqlx::query_as::<_, (i64, String, String)>(
+            "SELECT a.id, a.username, a.at_did
+             FROM actors a
+             WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
+               AND NOT EXISTS (
+                 SELECT 1 FROM atp_repo_events e
+                 WHERE e.actor_id = a.id AND e.event_type = 'identity'
+               )",
+        )
+        .fetch_all(&identity_db)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => { eprintln!("[startup] #identity 対象取得失敗: {}", e); return; }
+        };
+
+        for (actor_id, username, did) in missing {
+            let handle = format!("{}.{}", username, identity_domain);
+            match identity_atp.broadcast_identity_event(actor_id, &did, &handle, now).await {
+                Ok(_) => eprintln!("[startup] #identity broadcast: {}", handle),
+                Err(e) => eprintln!("[startup] #identity 失敗 {}: {}", handle, e),
+            }
         }
     });
 }

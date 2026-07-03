@@ -107,6 +107,41 @@ pub async fn outbox_handler(
         }
     };
 
+    // 取得した post_id のリストで添付ファイルをまとめて取得
+    let post_ids: Vec<i64> = rows.iter().filter_map(|r| r.try_get("id").ok()).collect();
+    let mut att_map: std::collections::HashMap<i64, Vec<serde_json::Value>> = std::collections::HashMap::new();
+    if !post_ids.is_empty() {
+        let att_rows = sqlx::query(
+            "SELECT pa.post_id, mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
+             FROM post_attachments pa
+             JOIN media_files mf ON mf.id = pa.media_file_id
+             JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             WHERE pa.post_id = ANY($1)
+             ORDER BY pa.post_id, pa.position",
+        )
+        .bind(&post_ids)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        for r in &att_rows {
+            let pid: i64 = match r.try_get("post_id") { Ok(v) => v, Err(_) => continue };
+            let storage_key: String = match r.try_get("storage_key") { Ok(v) => v, Err(_) => continue };
+            let mime_type: String = match r.try_get("mime_type") { Ok(v) => v, Err(_) => continue };
+            let width: i32 = match r.try_get("width") { Ok(v) => v, Err(_) => continue };
+            let height: i32 = match r.try_get("height") { Ok(v) => v, Err(_) => continue };
+            let public_url: String = match r.try_get("public_url") { Ok(v) => v, Err(_) => continue };
+            let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
+            att_map.entry(pid).or_default().push(serde_json::json!({
+                "type": "Document",
+                "mediaType": mime_type,
+                "url": url,
+                "width": width,
+                "height": height
+            }));
+        }
+    }
+
     let mut ordered_items = Vec::new();
     let mut oldest_id: Option<i64> = None;
 
@@ -130,6 +165,21 @@ pub async fn outbox_handler(
         let published = created_at.to_rfc3339();
         let content_html = plain_to_html(&body);
 
+        let attachments = att_map.remove(&post_id).unwrap_or_default();
+        let mut note_obj = serde_json::json!({
+            "type": "Note",
+            "id": note_id,
+            "attributedTo": actor_uri,
+            "content": content_html,
+            "published": published,
+            "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            "cc": [followers_uri],
+            "url": note_id
+        });
+        if !attachments.is_empty() {
+            note_obj["attachment"] = serde_json::Value::Array(attachments);
+        }
+
         ordered_items.push(serde_json::json!({
             "type": "Create",
             "id": activity_id,
@@ -137,16 +187,7 @@ pub async fn outbox_handler(
             "published": published,
             "to": ["https://www.w3.org/ns/activitystreams#Public"],
             "cc": [followers_uri],
-            "object": {
-                "type": "Note",
-                "id": note_id,
-                "attributedTo": actor_uri,
-                "content": content_html,
-                "published": published,
-                "to": ["https://www.w3.org/ns/activitystreams#Public"],
-                "cc": [followers_uri],
-                "url": note_id
-            }
+            "object": note_obj
         }));
     }
 

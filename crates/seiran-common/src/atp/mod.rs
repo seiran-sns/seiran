@@ -12,9 +12,9 @@ pub use client::{
 pub use plc::{prepare_plc_genesis, submit_plc_genesis, PlcGenesis, p256_to_did_key, signing_key_from_pem, PlcError};
 pub use repo::{
     Cid,
-    generate_tid, cid_from_dagcbor, cid_from_str, cid_to_string,
+    generate_tid, cid_from_dagcbor, cid_from_str, cid_to_string, cid_from_sha256_hex,
     build_mst, create_commit, encode_car, encode_bsky_feed_post, encode_bsky_actor_profile,
-    build_commit_frame, build_error_frame, CommitEvtOp, RepoError,
-    BskyFacet, BskyFacetIndex, BskyFacetMention,
+    build_commit_frame, build_identity_frame, build_error_frame, CommitEvtOp, RepoError,
+    BskyFacet, BskyFacetIndex, BskyFacetMention, BskyImage,
 };
 pub use service::{AtpCommitService, AtpCommitError, AtpCommitEvent};

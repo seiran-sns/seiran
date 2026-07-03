@@ -4,16 +4,69 @@ use axum::{
     extract::{Query, State},
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Redirect},
 };
 use serde::Deserialize;
+use sqlx::Row;
 use tokio::sync::broadcast;
 
 use seiran_common::atp::{
-    build_commit_frame, cid_from_str, encode_car, CommitEvtOp,
+    build_commit_frame, build_identity_frame, cid_from_str, encode_car, CommitEvtOp,
 };
 
 use crate::AppState;
+
+#[derive(Deserialize)]
+pub struct GetBlobParams {
+    pub did: Option<String>,
+    pub cid: String,
+}
+
+/// `com.atproto.sync.getBlob` — CID から Blob（画像バイナリ）を返す。
+/// seiran はメディアを外部ストレージ (R2/S3) に保存しているため、CDN URL にリダイレクトする。
+pub async fn xrpc_get_blob(
+    Query(params): Query<GetBlobParams>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let cid = match params.cid.parse::<seiran_common::atp::Cid>() {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid CID").into_response(),
+    };
+
+    // CIDv1 raw (0x55) または dag-cbor (0x71) の sha2-256 multihash からハッシュを取得
+    let mh = cid.hash();
+    if mh.code() != 0x12 {
+        return (StatusCode::BAD_REQUEST, "Unsupported hash function (expected sha2-256)").into_response();
+    }
+    let sha256_hex = hex::encode(mh.digest());
+
+    let row = sqlx::query(
+        "SELECT mf.mime_type,
+                rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url
+         FROM media_files mf
+         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         WHERE mf.sha256 = $1
+         LIMIT 1",
+    )
+    .bind(&sha256_hex)
+    .fetch_optional(&state.db)
+    .await;
+
+    match row {
+        Ok(Some(r)) => {
+            let url: String = r.try_get("url").unwrap_or_default();
+            if url.is_empty() {
+                return (StatusCode::NOT_FOUND, "Blob not found").into_response();
+            }
+            Redirect::temporary(&url).into_response()
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, "Blob not found").into_response(),
+        Err(e) => {
+            eprintln!("[getBlob] DB エラー: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
+        }
+    }
+}
 
 #[derive(Deserialize)]
 pub struct GetRepoParams {
@@ -102,37 +155,53 @@ async fn handle_subscribe_repos(
             .unwrap_or_default();
 
         for evt in events {
-            let commit_cid = match cid_from_str(&evt.commit_cid) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            let prev_cid = evt.prev_cid.as_deref().and_then(|s| cid_from_str(s).ok());
+            // frame_bytes が保存済みなら解凍してそのまま送る（再構築なし）
+            if let Some(ref compressed) = evt.frame_bytes {
+                match zstd::decode_all(&compressed[..]) {
+                    Ok(frame) => {
+                        if socket.send(Message::Binary(frame)).await.is_err() {
+                            return;
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        eprintln!("[subscribeRepos] frame_bytes 解凍失敗 id={}: {}", evt.id, e);
+                    }
+                }
+            }
 
-            let ops: Vec<CommitEvtOp> = evt
-                .ops_json
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .filter_map(|op| {
-                    let action = op["action"].as_str()?.to_string();
-                    let path = op["path"].as_str()?.to_string();
-                    let cid = cid_from_str(op["cid"].as_str()?).ok()?;
-                    Some(CommitEvtOp { action, path, cid })
-                })
-                .collect();
-
+            // frame_bytes が NULL の旧レコードは event_type に応じて再構築する
             let time_str = evt.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            if let Ok(frame) = build_commit_frame(
-                evt.id,
-                &evt.did,
-                &commit_cid,
-                prev_cid.as_ref(),
-                &evt.rev,
-                evt.since_rev.as_deref(),
-                &evt.car_bytes,
-                &ops,
-                &time_str,
-            ) {
+            let frame_result = if evt.event_type == "identity" {
+                let handle = evt.handle.as_deref().unwrap_or("");
+                build_identity_frame(evt.id, &evt.did, handle, &time_str)
+            } else {
+                let commit_cid = match evt.commit_cid.as_deref().and_then(|s| cid_from_str(s).ok()) {
+                    Some(c) => c,
+                    None => continue,
+                };
+                let prev_cid = evt.prev_cid.as_deref().and_then(|s| cid_from_str(s).ok());
+                let ops: Vec<CommitEvtOp> = evt
+                    .ops_json
+                    .as_ref()
+                    .and_then(|j| j.as_array())
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter_map(|op| {
+                        let action = op["action"].as_str()?.to_string();
+                        let path = op["path"].as_str()?.to_string();
+                        let cid = cid_from_str(op["cid"].as_str()?).ok()?;
+                        Some(CommitEvtOp { action, path, cid })
+                    })
+                    .collect();
+                let car = evt.car_bytes.as_deref().unwrap_or(&[]);
+                let rev = evt.rev.as_deref().unwrap_or("");
+                build_commit_frame(
+                    evt.id, &evt.did, &commit_cid, prev_cid.as_ref(),
+                    rev, evt.since_rev.as_deref(), car, &ops, &[], &time_str,
+                )
+            };
+            if let Ok(frame) = frame_result {
                 if socket.send(Message::Binary(frame)).await.is_err() {
                     return;
                 }

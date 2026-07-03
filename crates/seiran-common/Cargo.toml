@@ -34,3 +34,4 @@ aes-gcm = "0.10"
 aws-sdk-s3 = "1"
 image = { version = "0.25", features = ["webp"] }
 blurhash = "0.2"
+zstd = "0.13"
