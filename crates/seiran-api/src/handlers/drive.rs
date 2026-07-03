@@ -139,8 +139,15 @@ pub async fn create_drive_file(
         }
     }
 
-    // S3 アップロード
-    let storage_key = format!("media/{}.webp", Uuid::new_v4());
+    // S3 アップロード（拡張子は実際の MIME type に合わせる）
+    let ext = match processed.mime_type.as_str() {
+        "image/jpeg" => "jpg",
+        "image/png"  => "png",
+        "image/gif"  => "gif",
+        "image/avif" => "avif",
+        _            => "webp",
+    };
+    let storage_key = format!("media/{}.{}", Uuid::new_v4(), ext);
     let s3 = S3StorageClient::new(&provider);
     let public_url = s3
         .put(&storage_key, processed.data, &processed.mime_type)

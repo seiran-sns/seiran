@@ -341,11 +341,15 @@ impl AtpCommitService {
             vec![]
         };
 
-        let blob_cids: Vec<Cid> = images.iter()
+        // app.bsky.embed.images の上限は 4 枚（AT Protocol 仕様）。
+        // ポスト自体は最大 10 枚まで許容するが、Bsky embed には先頭 4 枚のみ含める。
+        let bsky_images: Vec<BskyImage> = images.into_iter().take(4).collect();
+
+        let blob_cids: Vec<Cid> = bsky_images.iter()
             .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
             .collect();
 
-        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, images)?;
+        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, bsky_images)?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {

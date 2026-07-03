@@ -1,7 +1,11 @@
 use image::{
-    codecs::webp::WebPEncoder,
+    codecs::{
+        jpeg::JpegEncoder,
+        png::PngEncoder,
+        webp::WebPEncoder,
+    },
     imageops::FilterType,
-    DynamicImage, ImageEncoder,
+    DynamicImage, ImageEncoder, ImageFormat,
 };
 use sha2::{Digest, Sha256};
 
@@ -31,6 +35,8 @@ pub enum ImageProcessingError {
 }
 
 pub fn process_image(data: &[u8], kind: MediaKind) -> Result<ProcessedImage, ImageProcessingError> {
+    let original_format = image::guess_format(data).ok();
+
     let src = image::load_from_memory(data)?;
     let img = resize(&src, kind);
     let (width, height) = (img.width(), img.height());
@@ -45,8 +51,18 @@ pub fn process_image(data: &[u8], kind: MediaKind) -> Result<ProcessedImage, Ima
         image::ExtendedColorType::Rgba8,
     )?;
 
-    // SHA-256
-    let sha256 = hex::encode(Sha256::digest(&webp_bytes));
+    // 元画像より WebP が大きい場合は元形式（Exif 除去済み）で保存する
+    let (final_bytes, final_mime) = if webp_bytes.len() > data.len() {
+        match try_encode_original_format(&img, original_format) {
+            Some((orig_bytes, mime)) => (orig_bytes, mime),
+            None => (webp_bytes, "image/webp".to_owned()),
+        }
+    } else {
+        (webp_bytes, "image/webp".to_owned())
+    };
+
+    // SHA-256（実際に保存するバイナリのハッシュ）
+    let sha256 = hex::encode(Sha256::digest(&final_bytes));
 
     // blurhash (RGB) — 0.2.x にオフバイワンバグがあるため catch_unwind でガード
     let rgb = img.to_rgb8();
@@ -58,14 +74,52 @@ pub fn process_image(data: &[u8], kind: MediaKind) -> Result<ProcessedImage, Ima
     .unwrap_or_default();
 
     Ok(ProcessedImage {
-        size: webp_bytes.len() as i64,
-        data: webp_bytes,
+        size: final_bytes.len() as i64,
+        data: final_bytes,
         width,
         height,
         sha256,
         blurhash: hash,
-        mime_type: "image/webp".to_owned(),
+        mime_type: final_mime,
     })
+}
+
+/// `image` クレートで再エンコードして Exif を除去する。
+/// JPEG は quality=85 で再エンコード、PNG は lossless。
+/// 対応外の形式（GIF, AVIF など）は None を返す（呼び出し元が WebP にフォールバック）。
+fn try_encode_original_format(
+    img: &DynamicImage,
+    format: Option<ImageFormat>,
+) -> Option<(Vec<u8>, String)> {
+    match format {
+        Some(ImageFormat::Jpeg) => {
+            let mut buf = Vec::new();
+            let rgb = img.to_rgb8();
+            JpegEncoder::new_with_quality(&mut buf, 85)
+                .write_image(
+                    rgb.as_raw(),
+                    img.width(),
+                    img.height(),
+                    image::ExtendedColorType::Rgb8,
+                )
+                .ok()?;
+            Some((buf, "image/jpeg".to_owned()))
+        }
+        Some(ImageFormat::Png) => {
+            let mut buf = Vec::new();
+            let rgba = img.to_rgba8();
+            PngEncoder::new(&mut buf)
+                .write_image(
+                    rgba.as_raw(),
+                    img.width(),
+                    img.height(),
+                    image::ExtendedColorType::Rgba8,
+                )
+                .ok()?;
+            Some((buf, "image/png".to_owned()))
+        }
+        _ => None,
+    }
 }
 
 fn resize(img: &DynamicImage, kind: MediaKind) -> DynamicImage {
