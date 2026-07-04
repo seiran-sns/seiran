@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, UserProfile, getErrorMessage } from "../api/client";
 import Modal from "../components/common/Modal";
 import AppShell from "../components/layout/AppShell";
+import { useAuth } from "../contexts/AuthContext";
 import { formatDate } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
@@ -40,8 +41,10 @@ export default function ProfilePage() {
     };
   }, [q]);
 
+  const { user } = useAuth();
   const isLocal = profile?.actor_type === "local";
   const isBridge = !!profile?.bridge_real_handle;
+  const isSelf = isLocal && !!user && user.username === profile?.username;
 
   async function doFollow() {
     if (!profile) return;
@@ -144,6 +147,14 @@ export default function ProfilePage() {
               </div>
             )}
           </div>
+
+          {isSelf && (
+            <div className={styles.followArea}>
+              <button className={styles.editBtn} onClick={() => navigate("/settings/profile")}>
+                プロフィールを編集
+              </button>
+            </div>
+          )}
 
           {!isLocal && (
             <div className={styles.followArea}>
