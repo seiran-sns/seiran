@@ -128,6 +128,22 @@ a.idValue:hover {
   align-items: center;
 }
 
+.editBtn {
+  background: none;
+  color: var(--accent);
+  border: 1px solid var(--accent-strong);
+  border-radius: 20px;
+  padding: 8px 20px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.editBtn:hover {
+  background: var(--accent-deep);
+}
+
 .followBtn {
   background: var(--accent-strong);
   color: #fff;

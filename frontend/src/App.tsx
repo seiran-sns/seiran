@@ -11,6 +11,7 @@ import Login from "./pages/Login";
 import NoteDetailPage from "./pages/NoteDetailPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import ProfilePage from "./pages/ProfilePage";
+import ProfileEditPage from "./pages/ProfileEditPage";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import SearchPage from "./pages/SearchPage";
@@ -93,6 +94,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <AdminPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/settings/profile"
+        element={
+          <RequireAuth>
+            <ProfileEditPage />
           </RequireAuth>
         }
       />
