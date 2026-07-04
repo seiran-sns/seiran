@@ -83,6 +83,7 @@ pub async fn create_follow(
         }
     };
 
+    let remote_avatar_url = remote_ap.avatar_url();
     let remote_username = remote_ap
         .preferred_username
         .unwrap_or_else(|| target_uri.rsplit('/').next().unwrap_or("unknown").to_string());
@@ -102,6 +103,7 @@ pub async fn create_follow(
             &remote_username,
             &remote_domain,
             &remote_display_name,
+            remote_avatar_url.as_deref(),
             now,
         )
         .await

@@ -160,6 +160,7 @@ export interface Note {
     domain?: string;
     displayName?: string;
     actorType: string; // "local" | "fedi" | "bsky" | "remote_seiran" | ...
+    avatarUrl?: string;
   };
   attachments: NoteAttachment[];
   // 7.2 拡張メタデータ（存在する場合のみ）
@@ -215,6 +216,8 @@ interface RawNote {
     display_name?: string;
     actorType?: string;
     actor_type?: string;
+    avatarUrl?: string;
+    avatar_url?: string;
   };
   attachments?: NoteAttachment[];
   renoteId?: string;
@@ -239,6 +242,7 @@ function normalizeNote(r: RawNote): Note {
       domain: r.user?.domain,
       displayName: r.user?.displayName ?? r.user?.display_name,
       actorType: r.user?.actorType ?? r.user?.actor_type ?? "local",
+      avatarUrl: r.user?.avatarUrl ?? r.user?.avatar_url,
     },
     attachments: r.attachments ?? [],
     renoteId: r.renoteId ?? r.renote_id,

@@ -5,6 +5,7 @@ import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
 import ReplyIndicator from "../components/note/ReplyIndicator";
+import Avatar from "../components/note/Avatar";
 import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../lib/format";
 import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
@@ -110,9 +111,7 @@ export default function NoteDetailPage() {
                 navigate(`/profile?q=${encodeURIComponent(profileQuery(note.user.username, note.user.domain))}`)
               }
             >
-              <span className={styles.focalAvatar}>
-                {(note.user.displayName || note.user.username)[0]?.toUpperCase() ?? "?"}
-              </span>
+              <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={48} />
               <span className={styles.focalNames}>
                 <span className={styles.focalDisplayName}>{displayName(note)}</span>
                 <span className={styles.focalAcct}>

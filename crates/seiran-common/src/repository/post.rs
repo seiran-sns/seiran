@@ -23,6 +23,9 @@ pub struct TimelinePost {
     pub reply_to_post_id: Option<i64>,
     #[sqlx(default)]
     pub parent_original_post_id: Option<i64>,
+    /// 投稿者アバター URL（local は avatar_media_id 解決、remote は actors.avatar_url）。
+    #[sqlx(default)]
+    pub avatar_url: Option<String>,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -154,8 +157,11 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
@@ -180,8 +186,11 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE a.actor_type = 'local' AND p.deleted_at IS NULL
                AND ($1::bigint IS NULL OR p.id < $1)
                AND ($2::bigint IS NULL OR p.id > $2)
@@ -215,6 +224,8 @@ impl PostRepository for PgPostRepository {
             "SELECT p.body, p.created_at, p.at_uri, p.at_cid
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE a.at_did = $1 AND p.at_rkey = $2 AND p.deleted_at IS NULL
              LIMIT 1",
         )
@@ -227,8 +238,11 @@ impl PostRepository for PgPostRepository {
     async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.id = $1 AND p.deleted_at IS NULL
              LIMIT 1",
         )
@@ -268,9 +282,12 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.id < $2 AND p.deleted_at IS NULL
              ORDER BY p.id DESC
              LIMIT $3",
@@ -290,9 +307,12 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id
+                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.id > $2 AND p.deleted_at IS NULL
              ORDER BY p.id ASC
              LIMIT $3",
