@@ -1,15 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api, Note, getErrorMessage } from "../api/client";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
-import ReplyIndicator from "../components/note/ReplyIndicator";
-import Avatar from "../components/note/Avatar";
 import ReactionChips from "../components/note/ReactionChips";
-import { acct, displayName, formatDate, profilePath, protocolBadge } from "../lib/format";
 import { useRightPane } from "../contexts/RightPaneContext";
-import { useComposer } from "../contexts/ComposerContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./NoteDetailPage.module.css";
 
@@ -17,7 +13,6 @@ export default function NoteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { noteDetailTab, setNoteDetailTab } = useRightPane();
-  const { openReply } = useComposer();
 
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,7 +61,6 @@ export default function NoteDetailPage() {
       .finally(() => setCtxLoading(false));
   }
 
-  const badge = note ? protocolBadge(note.user.actorType) : null;
   const contextList = [...before].reverse().concat(after);
 
   // 「投稿主の前後」ブロック（ボタン → 読み込み → 一覧）。中央・右ペインで共用。
@@ -107,63 +101,8 @@ export default function NoteDetailPage() {
 
       {note && (
         <>
-          <article className={styles.focal}>
-            <button
-              className={styles.focalUser}
-              onClick={() =>
-                navigate(profilePath(note.user.username, note.user.domain))
-              }
-            >
-              <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={48} />
-              <span className={styles.focalNames}>
-                <span className={styles.focalDisplayName}>{displayName(note)}</span>
-                <span className={styles.focalAcct}>
-                  {acct(note)}
-                  {badge && <span title={badge.label}> {badge.icon}</span>}
-                </span>
-              </span>
-            </button>
-
-            {/* リプライインジケータ（↩️ + ホバーで返信先プレビュー・issue #20） */}
-            {note.replyId && (
-              <div className={styles.focalReply}>
-                <ReplyIndicator replyId={note.replyId} />
-              </div>
-            )}
-
-            <p className={styles.focalBody}>{note.text}</p>
-
-            {note.attachments && note.attachments.length > 0 && (
-              <div className={styles.focalAttachments}>
-                {note.attachments.map((att, i) => (
-                  <a key={i} href={att.url} target="_blank" rel="noopener noreferrer">
-                    <img src={att.url} alt="" className={styles.focalAttachImage} loading="lazy" />
-                  </a>
-                ))}
-              </div>
-            )}
-
-            <time className={styles.focalTime}>{formatDate(note.createdAt)}</time>
-
-            {note.quoteId && (
-              <Link to={`/notes/${note.quoteId}`} className={styles.quoteLink}>
-                ❝ 引用元のポストを見る
-              </Link>
-            )}
-            {note.parentOriginalId && (
-              <Link to={`/notes/${note.parentOriginalId}`} className={styles.originalLink}>
-                🀄 本尊のオリジナル投稿を見る
-              </Link>
-            )}
-
-            <ReactionChips reactions={note.reactions} />
-
-            <div className={styles.focalActions}>
-              <button className={styles.focalReplyBtn} onClick={() => openReply(note)}>
-                💬 返信
-              </button>
-            </div>
-          </article>
+          {/* 主役ポストはタイムラインと同じ NoteCard を大型表示で共用する（#43）。 */}
+          <NoteCard note={note} large linkToDetail={false} />
 
           {/* 投稿主の前後の投稿（右ペインが隠れる幅でのみ中央に表示。ボタン起動）。 */}
           <section className={styles.narrowContext}>

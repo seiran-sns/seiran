@@ -8,6 +8,34 @@
   background: rgba(0, 0, 0, 0.025);
 }
 
+/* 主役ポスト（ポスト詳細画面）用の大型表示（#43） */
+.large {
+  padding: 18px 18px 16px;
+  border-left: 3px solid var(--accent-strong);
+}
+
+.large:hover {
+  background: none;
+}
+
+.large .displayName {
+  font-size: 1.05rem;
+}
+
+.large .body {
+  font-size: 1.12rem;
+  line-height: 1.7;
+  margin-left: 0;
+  margin-top: 10px;
+}
+
+.large .relations,
+.large .attachments,
+.large .originalLink,
+.large .actions {
+  margin-left: 0;
+}
+
 .rail {
   font-size: 0.78rem;
   color: var(--text-dim);

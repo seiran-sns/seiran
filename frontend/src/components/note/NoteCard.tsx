@@ -11,9 +11,11 @@ interface NoteCardProps {
   note: Note;
   /** クリックでポスト詳細へ遷移させるか（デフォルト true）。 */
   linkToDetail?: boolean;
+  /** 主役ポスト（ポスト詳細画面）用の大型表示（#43）。文字・アバターを拡大する。 */
+  large?: boolean;
 }
 
-export default function NoteCard({ note, linkToDetail = true }: NoteCardProps) {
+export default function NoteCard({ note, linkToDetail = true, large = false }: NoteCardProps) {
   const navigate = useNavigate();
   const { openReply } = useComposer();
   const badge = protocolBadge(note.user.actorType);
@@ -24,7 +26,7 @@ export default function NoteCard({ note, linkToDetail = true }: NoteCardProps) {
   }
 
   return (
-    <article className={styles.card}>
+    <article className={`${styles.card} ${large ? styles.large : ""}`}>
       {note.renoteId && (
         <div className={styles.rail}>
           🔁 リノート
@@ -33,7 +35,7 @@ export default function NoteCard({ note, linkToDetail = true }: NoteCardProps) {
 
       <div className={styles.header}>
         <button className={styles.userBtn} onClick={goProfile}>
-          <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={40} />
+          <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={large ? 48 : 40} />
           <span className={styles.names}>
             <span className={styles.displayName}>{displayName(note)}</span>
             <span className={styles.acct}>
