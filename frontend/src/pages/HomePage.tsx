@@ -7,7 +7,7 @@ import PostComposer from "../components/note/PostComposer";
 import NotificationsPanel from "../components/right/NotificationsPanel";
 import TrendsSearchPanel from "../components/right/TrendsSearchPanel";
 import { useRightPane } from "../contexts/RightPaneContext";
-import { useStreaming } from "../hooks/useStreaming";
+import { useStreamingContext } from "../contexts/StreamingContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
@@ -19,6 +19,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
   const { timelineTab, setTimelineTab } = useRightPane();
+  const { registerNote, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
 
   useEffect(() => {
@@ -51,7 +52,7 @@ export default function HomePage() {
   }
 
   // リアルタイム更新（#37）: ストリームで届いたポストをアニメ付きで先頭挿入。
-  useStreaming((n) => prepend(n, true));
+  useEffect(() => registerNote((n) => prepend(n, true)), [registerNote]);
 
   const center = (
     <>
@@ -94,7 +95,7 @@ export default function HomePage() {
   const right = (
     <>
       <Tabs
-        tabs={["トレンド＆検索", "クイック通知"]}
+        tabs={["トレンド＆検索", unread > 0 ? `クイック通知 (${unread})` : "クイック通知"]}
         active={timelineTab}
         onChange={setTimelineTab}
       />

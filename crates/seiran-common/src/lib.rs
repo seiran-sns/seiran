@@ -11,6 +11,7 @@ pub mod atp;
 pub mod mention;
 pub mod repository;
 pub mod storage;
+pub mod streaming;
 
 pub use db::{get_db_pool, run_migrations};
 pub use id::generate_snowflake_id;
@@ -21,6 +22,7 @@ pub use queue::{create_job_queue, InMemoryJobQueue, WorkerEngine};
 pub use queue::worker::JobContext;
 pub use atp::{AtpCommitService, AtpCommitError, AtpCommitEvent};
 pub use ap::{ApClient, ApError};
+pub use streaming::{StreamEvent, StreamHub};
 pub use crypto::{decrypt as crypto_decrypt, encrypt as crypto_encrypt, CryptoError};
 pub use repository::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider,

@@ -218,6 +218,15 @@ async fn handle_follow(
         .await
         .map_err(|e| format!("follows INSERT エラー: {}", e))?;
 
+    // リアルタイム通知（#37）: フォローされたローカルユーザーへ
+    state.stream_hub.publish_event(
+        std::collections::HashSet::from([local_actor_id]),
+        "follow",
+        serde_json::json!({
+            "actor": { "username": remote_username, "domain": remote_domain, "displayName": remote_display_name },
+        }),
+    );
+
     // Accept アクティビティを構築して送信
     let local_actor_uri = format!("https://{}/users/{}", state.local_domain, local_username);
     let accept_id = format!(
@@ -516,6 +525,21 @@ async fn handle_accept(
         remote_actor_uri,
         rows
     );
+
+    // リアルタイム通知（#37）: フォローが承諾されたローカルユーザーへ
+    if rows > 0 {
+        state.stream_hub.publish_event(
+            std::collections::HashSet::from([local_actor_id]),
+            "followAccepted",
+            serde_json::json!({
+                "actor": {
+                    "username": remote_actor.username,
+                    "domain": remote_actor.domain,
+                    "displayName": remote_actor.display_name,
+                },
+            }),
+        );
+    }
     Ok(())
 }
 
@@ -608,15 +632,15 @@ async fn handle_reaction(
     let reaction_type = if is_like { "like" } else { "emoji" };
 
     // 対象ローカルポストを ap_object_id で検索（未知のポストなら無視）
-    let post_row: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM posts WHERE ap_object_id = $1 AND deleted_at IS NULL LIMIT 1",
+    let post_row: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT id, actor_id FROM posts WHERE ap_object_id = $1 AND deleted_at IS NULL LIMIT 1",
     )
     .bind(object_uri)
     .fetch_optional(&state.db)
     .await
     .map_err(|e| format!("対象ポスト検索エラー: {}", e))?;
-    let post_id = match post_row {
-        Some((id,)) => id,
+    let (post_id, post_author_id) = match post_row {
+        Some(row) => row,
         None => return Ok(()), // 未知ポストへのリアクションは無視
     };
 
@@ -654,6 +678,17 @@ async fn handle_reaction(
     .map_err(|e| format!("reactions INSERT エラー: {}", e))?;
 
     eprintln!("[Reaction] post {} に {} を記録", post_id, content);
+
+    // リアルタイム通知（#37）: リアクションされたポストの著者へ
+    state.stream_hub.publish_event(
+        std::collections::HashSet::from([post_author_id]),
+        "reaction",
+        serde_json::json!({
+            "postId": post_id.to_string(),
+            "emoji": content,
+            "actor": { "username": remote_username, "domain": remote_domain, "displayName": remote_display_name },
+        }),
+    );
     Ok(())
 }
 

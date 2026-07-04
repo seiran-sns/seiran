@@ -18,7 +18,7 @@ use seiran_common::repository::{
     PostRepository,
 };
 use seiran_common::traits::JobQueue;
-use seiran_common::{ApClient, Secrets};
+use seiran_common::{ApClient, Secrets, StreamHub};
 use sqlx::PgPool;
 
 use handlers::{
@@ -39,14 +39,18 @@ pub struct AppState {
     pub ap_public_key_pem: String,
     pub ap_private_key_pem: String,
     pub ap_client: Arc<ApClient>,
+    /// リアルタイム更新（#37）の共有ストリーミングハブ。api ロールと同一インスタンス。
+    pub stream_hub: Arc<StreamHub>,
 }
 
 /// 共有リソースを受け取り federation ロールの [`AppState`] を構築する。
+/// `stream_hub` は api ロールと共有する（federation 単独時は新規で可）。
 pub fn init_state(
     pool: PgPool,
     secrets: &Secrets,
     http_client: Arc<reqwest::Client>,
     local_domain: String,
+    stream_hub: Arc<StreamHub>,
 ) -> Arc<AppState> {
     let job_queue = create_job_queue();
     let actor_repo: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
@@ -66,6 +70,7 @@ pub fn init_state(
         ap_public_key_pem,
         ap_private_key_pem,
         ap_client,
+        stream_hub,
     })
 }
 
