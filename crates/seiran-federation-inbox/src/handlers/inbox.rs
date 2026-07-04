@@ -133,6 +133,17 @@ pub async fn inbox_handler(
                 }
             });
         }
+        // いいね（Like）・絵文字リアクション（Misskey 拡張 EmojiReact）(#22)
+        "Like" | "EmojiReact" => {
+            let is_like = activity["type"].as_str() == Some("Like");
+            let state_clone = state.clone();
+            let activity_clone = activity.clone();
+            tokio::spawn(async move {
+                if let Err(e) = handle_reaction(activity_clone, state_clone, is_like).await {
+                    eprintln!("[Inbox/Reaction] 処理エラー: {}", e);
+                }
+            });
+        }
         other => {
             eprintln!("[Inbox] type={} をジョブキューへエンキュー", other);
             if let Err(e) = state
@@ -514,6 +525,20 @@ async fn handle_undo(
     state: Arc<AppState>,
 ) -> Result<(), String> {
     let obj = &activity["object"];
+
+    // Undo(Like) / Undo(EmojiReact): reactions から対象を削除する (#22)
+    if matches!(obj["type"].as_str(), Some("Like") | Some("EmojiReact")) {
+        if let Some(activity_id) = obj["id"].as_str() {
+            let deleted = sqlx::query("DELETE FROM reactions WHERE ap_activity_id = $1")
+                .bind(activity_id)
+                .execute(&state.db)
+                .await
+                .map_err(|e| format!("reactions DELETE エラー: {}", e))?;
+            eprintln!("[Undo/Reaction] {} を取り消し（{} 行）", activity_id, deleted.rows_affected());
+        }
+        return Ok(());
+    }
+
     if obj["type"].as_str() != Some("Follow") {
         return Ok(());
     }
@@ -554,6 +579,81 @@ async fn handle_undo(
         .map_err(|e| format!("follows DELETE エラー: {}", e))?;
 
     eprintln!("[Undo/Follow] {} のフォロー解除完了", follower_uri);
+    Ok(())
+}
+
+/// いいね（Like）・絵文字リアクション（EmojiReact）を受信し reactions テーブルへ保存する (#22)。
+/// `is_like = true` の場合は ❤ 絵文字リアクションとして解釈する。
+async fn handle_reaction(
+    activity: serde_json::Value,
+    state: Arc<AppState>,
+    is_like: bool,
+) -> Result<(), String> {
+    let actor_uri = activity["actor"]
+        .as_str()
+        .ok_or("Reaction: actor フィールドがありません")?;
+    // object は対象ノートの URI（文字列 or {id}）
+    let object_uri = activity["object"]
+        .as_str()
+        .or_else(|| activity["object"]["id"].as_str())
+        .ok_or("Reaction: object フィールドがありません")?;
+    let activity_id = activity["id"].as_str();
+
+    // リアクション内容: Like は ❤、EmojiReact は content（絵文字 or :shortcode:）
+    let content: String = if is_like {
+        "❤".to_string()
+    } else {
+        activity["content"].as_str().unwrap_or("❤").to_string()
+    };
+    let reaction_type = if is_like { "like" } else { "emoji" };
+
+    // 対象ローカルポストを ap_object_id で検索（未知のポストなら無視）
+    let post_row: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM posts WHERE ap_object_id = $1 AND deleted_at IS NULL LIMIT 1",
+    )
+    .bind(object_uri)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| format!("対象ポスト検索エラー: {}", e))?;
+    let post_id = match post_row {
+        Some((id,)) => id,
+        None => return Ok(()), // 未知ポストへのリアクションは無視
+    };
+
+    // リアクションを打ったアクターを upsert
+    let remote_ap = state.ap_client.fetch_actor(actor_uri).await?;
+    let remote_inbox = remote_ap.inbox.clone().unwrap_or_default();
+    let remote_username = remote_ap
+        .preferred_username
+        .clone()
+        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
+    let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
+    let remote_domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
+    let remote_avatar_url = remote_ap.avatar_url();
+
+    let now = chrono::Utc::now();
+    let new_actor_id = generate_snowflake_id(now);
+    let actor_id = state.actor_repo
+        .upsert_remote_fedi(new_actor_id, actor_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now)
+        .await
+        .map_err(|e| format!("リアクター upsert エラー: {}", e))?;
+
+    // reactions へ INSERT（同一ユーザー・同一内容の重複、activity_id 重複はスキップ）
+    sqlx::query(
+        "INSERT INTO reactions (post_id, actor_id, reaction_type, content, ap_activity_id)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .bind(reaction_type)
+    .bind(&content)
+    .bind(activity_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| format!("reactions INSERT エラー: {}", e))?;
+
+    eprintln!("[Reaction] post {} に {} を記録", post_id, content);
     Ok(())
 }
 

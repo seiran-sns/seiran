@@ -3,6 +3,7 @@ import { Note } from "../../api/client";
 import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../../lib/format";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
+import ReactionChips from "./ReactionChips";
 import styles from "./NoteCard.module.css";
 
 interface NoteCardProps {
@@ -91,6 +92,8 @@ export default function NoteCard({ note, linkToDetail = true }: NoteCardProps) {
           🀄 本尊のオリジナル投稿を見る
         </Link>
       )}
+
+      <ReactionChips reactions={note.reactions} />
     </article>
   );
 }
