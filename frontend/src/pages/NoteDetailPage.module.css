@@ -114,3 +114,24 @@
   background: var(--accent-deep);
   border-left: 3px solid var(--accent-strong);
 }
+
+/* 投稿主の前後の投稿は、通常は右ペインに表示する。
+   右ペインが隠れる幅（≤1400px, AppShell と一致）でのみ中央に表示する。 */
+.narrowContext {
+  display: none;
+}
+
+.contextLabel {
+  padding: 10px 16px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+
+@media (max-width: 1400px) {
+  .narrowContext {
+    display: block;
+  }
+}

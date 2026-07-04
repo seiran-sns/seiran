@@ -155,6 +155,57 @@ export interface SearchResult {
   session_id?: string;
 }
 
+/**
+ * バックエンドの生レスポンス。NoteResponse は camelCase 化の移行途中で、
+ * 稼働中バイナリの世代によって snake_case（`created_at`）を返す場合があるため、
+ * 両方のキーを許容してフロント内部では camelCase の `Note` に正規化する。
+ */
+interface RawNote {
+  id: string | number;
+  text?: string;
+  createdAt?: string;
+  created_at?: string;
+  user?: {
+    id: number;
+    username: string;
+    domain?: string;
+    displayName?: string;
+    display_name?: string;
+    actorType?: string;
+    actor_type?: string;
+  };
+  attachments?: NoteAttachment[];
+  renoteId?: string;
+  renote_id?: string;
+  quoteId?: string;
+  quote_id?: string;
+  replyId?: string;
+  reply_id?: string;
+  parentOriginalId?: string;
+  parent_original_id?: string;
+}
+
+/** snake_case / camelCase 混在に耐えるノート正規化。 */
+function normalizeNote(r: RawNote): Note {
+  return {
+    id: String(r.id),
+    text: r.text ?? "",
+    createdAt: r.createdAt ?? r.created_at ?? "",
+    user: {
+      id: r.user?.id ?? 0,
+      username: r.user?.username ?? "",
+      domain: r.user?.domain,
+      displayName: r.user?.displayName ?? r.user?.display_name,
+      actorType: r.user?.actorType ?? r.user?.actor_type ?? "local",
+    },
+    attachments: r.attachments ?? [],
+    renoteId: r.renoteId ?? r.renote_id,
+    quoteId: r.quoteId ?? r.quote_id,
+    replyId: r.replyId ?? r.reply_id,
+    parentOriginalId: r.parentOriginalId ?? r.parent_original_id,
+  };
+}
+
 export interface FollowResponse {
   status: string;
   target_uri: string;
@@ -252,42 +303,56 @@ export const api = {
   },
 
   notes: {
-    get(id: string) {
-      return request<Note>("GET", `/notes/${encodeURIComponent(id)}`);
+    async get(id: string) {
+      return normalizeNote(await request<RawNote>("GET", `/notes/${encodeURIComponent(id)}`));
     },
-    create(text: string, deliverToFedi: boolean = true, deliverToBsky: boolean = true, attachmentIds: string[] = []) {
-      return request<Note>("POST", "/notes/create", {
-        text,
-        deliver_to_fedi: deliverToFedi,
-        deliver_to_bsky: deliverToBsky,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
-      });
+    async create(text: string, deliverToFedi: boolean = true, deliverToBsky: boolean = true, attachmentIds: string[] = []) {
+      return normalizeNote(
+        await request<RawNote>("POST", "/notes/create", {
+          text,
+          deliver_to_fedi: deliverToFedi,
+          deliver_to_bsky: deliverToBsky,
+          attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+        })
+      );
     },
-    localTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {
+    async localTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {
       const q = new URLSearchParams();
       if (params?.limit) q.set("limit", String(params.limit));
       if (params?.until_id) q.set("until_id", params.until_id);
       if (params?.since_id) q.set("since_id", params.since_id);
       const qs = q.toString();
-      return request<Note[]>("GET", `/notes/local-timeline${qs ? `?${qs}` : ""}`);
+      const rows = await request<RawNote[]>("GET", `/notes/local-timeline${qs ? `?${qs}` : ""}`);
+      return rows.map(normalizeNote);
     },
-    homeTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {
+    async homeTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {
       const q = new URLSearchParams();
       if (params?.limit) q.set("limit", String(params.limit));
       if (params?.until_id) q.set("until_id", params.until_id);
       if (params?.since_id) q.set("since_id", params.since_id);
       const qs = q.toString();
-      return request<Note[]>("GET", `/notes/home-timeline${qs ? `?${qs}` : ""}`);
+      const rows = await request<RawNote[]>("GET", `/notes/home-timeline${qs ? `?${qs}` : ""}`);
+      return rows.map(normalizeNote);
     },
-    context(id: string): Promise<{ before: Note[]; after: Note[] }> {
-      return request<{ before: Note[]; after: Note[] }>("GET", `/notes/${encodeURIComponent(id)}/context`);
+    async context(id: string): Promise<{ before: Note[]; after: Note[] }> {
+      const raw = await request<{ before: RawNote[]; after: RawNote[] }>(
+        "GET",
+        `/notes/${encodeURIComponent(id)}/context`
+      );
+      return { before: raw.before.map(normalizeNote), after: raw.after.map(normalizeNote) };
     },
-    search(params: { q: string; limit?: number; session_id?: string }, signal?: AbortSignal) {
+    async search(params: { q: string; limit?: number; session_id?: string }, signal?: AbortSignal) {
       const qs = new URLSearchParams();
       qs.set("q", params.q);
       if (params.limit) qs.set("limit", String(params.limit));
       if (params.session_id) qs.set("session_id", params.session_id);
-      return request<SearchResult>("GET", `/notes/search?${qs.toString()}`, undefined, signal);
+      const raw = await request<{ notes: RawNote[]; session_id?: string }>(
+        "GET",
+        `/notes/search?${qs.toString()}`,
+        undefined,
+        signal
+      );
+      return { notes: raw.notes.map(normalizeNote), session_id: raw.session_id };
     },
   },
 

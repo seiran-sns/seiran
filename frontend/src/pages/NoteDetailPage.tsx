@@ -80,6 +80,16 @@ export default function NoteDetailPage() {
             </Link>
           )}
 
+          {/* 投稿主の前の投稿（右ペインが隠れる幅でのみ中央に表示） */}
+          {before.length > 0 && (
+            <section className={styles.narrowContext}>
+              <div className={styles.contextLabel}>投稿主の前の投稿</div>
+              {[...before].reverse().map((n) => (
+                <NoteCard key={n.id} note={n} />
+              ))}
+            </section>
+          )}
+
           <article className={styles.focal}>
             <button
               className={styles.focalUser}
@@ -124,6 +134,16 @@ export default function NoteDetailPage() {
               </Link>
             )}
           </article>
+
+          {/* 投稿主の次の投稿（右ペインが隠れる幅でのみ中央に表示） */}
+          {after.length > 0 && (
+            <section className={styles.narrowContext}>
+              <div className={styles.contextLabel}>投稿主の次の投稿</div>
+              {after.map((n) => (
+                <NoteCard key={n.id} note={n} />
+              ))}
+            </section>
+          )}
 
           {/* 直系リプライ・引用（専用 API 未実装のためプレースホルダ） */}
           <div className={panel.placeholder}>
