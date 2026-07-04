@@ -3,6 +3,40 @@
   flex-direction: column;
 }
 
+.replyBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-left: 3px solid var(--accent-strong);
+  background: var(--bg-elev);
+  border-radius: 0 8px 8px 0;
+}
+
+.replyTo {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.replySnippet {
+  font-size: 0.85rem;
+  color: var(--text);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.replyScopeNote {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  align-self: center;
+}
+
 .textarea {
   width: 100%;
   background: transparent;
