@@ -15,7 +15,7 @@ interface NoteCardProps {
   large?: boolean;
 }
 
-export default function NoteCard({ note, linkToDetail = true, large = false }: NoteCardProps) {
+function PostContent({ note, linkToDetail, large = false }: { note: Note; linkToDetail: boolean; large?: boolean }) {
   const navigate = useNavigate();
   const { openReply } = useComposer();
   const badge = protocolBadge(note.user.actorType);
@@ -26,13 +26,7 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
   }
 
   return (
-    <article className={`${styles.card} ${large ? styles.large : ""}`}>
-      {note.renoteId && (
-        <div className={styles.rail}>
-          🔁 リノート
-        </div>
-      )}
-
+    <>
       <div className={styles.header}>
         <button className={styles.userBtn} onClick={goProfile}>
           <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={large ? 48 : 40} />
@@ -111,6 +105,29 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
           💬 返信
         </button>
       </div>
+    </>
+  );
+}
+
+export default function NoteCard({ note, linkToDetail = true, large = false }: NoteCardProps) {
+  if (note.renote) {
+    return (
+      <article className={`${styles.card} ${large ? styles.large : ""}`}>
+        <div className={styles.rail}>
+          🔁 <strong>{displayName(note)}</strong> が{" "}
+          <Link to={`/notes/${note.id}`} className={styles.repostTime} onClick={(e) => e.stopPropagation()}>
+            {formatDate(note.createdAt)}
+          </Link>{" "}
+          にリポスト
+        </div>
+        <PostContent note={note.renote} linkToDetail={linkToDetail} large={large} />
+      </article>
+    );
+  }
+
+  return (
+    <article className={`${styles.card} ${large ? styles.large : ""}`}>
+      <PostContent note={note} linkToDetail={linkToDetail} large={large} />
     </article>
   );
 }

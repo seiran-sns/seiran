@@ -395,6 +395,12 @@ AP Note の形式:
 * **プロフィールの投稿**: `ProfileResponse.recent_posts` を、タイムラインと同一形状の `NoteResponse`（アクター情報・添付・リアクション込み）で返す。バックエンドは `PostRepository::timeline_by_actor`（アクター指定の結合クエリ）で取得し、`fetch_attachments_map` / `fetch_reactions_map` で集計して `to_note_response` で組み立てる。フロントは受信後 `normalizeNote` で `Note` に正規化して `NoteCard` を描画する。
 * **ポスト詳細の主役ポスト**: 中央のフォーカス投稿も同じ `NoteCard` を用いる。大きめ文字・大きめカードで強調するため、`NoteCard` に `large` オプションを設け（アバター 48px・本文拡大・左アクセントボーダー）、`<NoteCard note large linkToDetail={false} />` で描画する。専用の focal レイアウトは廃止し、モジュールを完全共通化した。前後投稿も従来どおり `NoteCard`（通常サイズ）を用いる。
 
+### 2.9 リポストの表示（#45）
+リポストは `posts.repost_of_post_id` を持つ本文空のラッパ行として保存される。表示側では「誰がいつリポストしたか」のヘッダと元ポストの中身を1枚のカードで示す。
+* **API**: `NoteResponse` に `renote: Option<Box<NoteResponse>>` を追加。`renote_id`（元ポストID）を持つノートについて、`embed_renotes()` が元ポストを一括解決（アクター・添付・リアクション込み）して `renote` へ埋め込む。ホーム／ローカルTL・ポスト詳細（`GET /api/notes/:id`）・前後コンテキスト・リポスト作成レスポンスで適用する。
+* **表示**: フロント `NoteCard` は `renote` があればヘッダ「（表示名）が（日時）にリポスト」＋元ポスト本体を描画する。ヘッダの日時は**リポスト自身**の詳細（`/notes/{リポストID}`）へリンクし、リポスト直後の投稿を前後コンテキストで辿れるようにする。
+* **詳細画面**: `/notes/{リポストID}` を開いた場合、フォーカス投稿は元ポストの内容を本体に、上部にリポスト情報を添えて表示する。前後コンテキストは**リポスト実行者**の投稿列を対象とする。
+
 ---
 
 ## 3. 統一ポストID 採番ルール

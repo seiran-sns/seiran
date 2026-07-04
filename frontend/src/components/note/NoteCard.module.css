@@ -43,6 +43,15 @@
   padding-left: 4px;
 }
 
+.repostTime {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.repostTime:hover {
+  text-decoration: underline;
+}
+
 .header {
   display: flex;
   align-items: flex-start;

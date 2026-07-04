@@ -61,6 +61,8 @@ export default function NoteDetailPage() {
       .finally(() => setCtxLoading(false));
   }
 
+  // リポスト詳細（#45）: リアクションタブはリポスト元のリアクションを表示する。
+  const display = note?.renote ?? note;
   const contextList = [...before].reverse().concat(after);
 
   // 「投稿主の前後」ブロック（ボタン → 読み込み → 一覧）。中央・右ペインで共用。
@@ -101,7 +103,7 @@ export default function NoteDetailPage() {
 
       {note && (
         <>
-          {/* 主役ポストはタイムラインと同じ NoteCard を大型表示で共用する（#43）。 */}
+          {/* 主役ポストはタイムラインと同じ NoteCard を大型表示で共用する（#43）。リポスト表示は NoteCard 内部で処理（#45）。 */}
           <NoteCard note={note} large linkToDetail={false} />
 
           {/* 投稿主の前後の投稿（右ペインが隠れる幅でのみ中央に表示。ボタン起動）。 */}
@@ -129,9 +131,9 @@ export default function NoteDetailPage() {
       />
       {noteDetailTab === 0 ? (
         renderContext()
-      ) : note && note.reactions && note.reactions.length > 0 ? (
+      ) : display && display.reactions && display.reactions.length > 0 ? (
         <div style={{ padding: "12px 16px" }}>
-          <ReactionChips reactions={note.reactions} />
+          <ReactionChips reactions={display.reactions} />
         </div>
       ) : (
         <div className={panel.placeholder}>
