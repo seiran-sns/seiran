@@ -44,6 +44,14 @@ pub struct AttachmentResponse {
     pub height: i32,
 }
 
+/// ポストに対するリアクション集計（絵文字ごとの件数）(#22)。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionSummary {
+    pub emoji: String,
+    pub count: i64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteResponse {
@@ -61,6 +69,9 @@ pub struct NoteResponse {
     pub reply_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_original_id: Option<String>,
+    // リアクション集計（#22）。空なら省略。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<ReactionSummary>,
 }
 
 #[derive(Serialize)]
@@ -142,7 +153,41 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         quote_id: p.quote_of_post_id.map(|i| i.to_string()),
         reply_id: p.reply_to_post_id.map(|i| i.to_string()),
         parent_original_id: p.parent_original_post_id.map(|i| i.to_string()),
+        reactions: Vec::new(),
     }
+}
+
+/// post_id リストに対するリアクション集計を一括取得する（絵文字ごとの件数、多い順）(#22)。
+pub async fn fetch_reactions_map(
+    db: &sqlx::PgPool,
+    post_ids: &[i64],
+) -> HashMap<i64, Vec<ReactionSummary>> {
+    if post_ids.is_empty() {
+        return HashMap::new();
+    }
+    let rows = sqlx::query(
+        "SELECT post_id, content, COUNT(*) AS cnt
+         FROM reactions
+         WHERE post_id = ANY($1)
+         GROUP BY post_id, content
+         ORDER BY post_id, cnt DESC",
+    )
+    .bind(post_ids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+
+    let mut map: HashMap<i64, Vec<ReactionSummary>> = HashMap::new();
+    for row in rows {
+        let post_id: i64 = row.try_get("post_id").unwrap_or_default();
+        let emoji: String = row.try_get("content").unwrap_or_default();
+        let count: i64 = row.try_get("cnt").unwrap_or_default();
+        if emoji.is_empty() {
+            continue;
+        }
+        map.entry(post_id).or_default().push(ReactionSummary { emoji, count });
+    }
+    map
 }
 
 #[derive(Deserialize)]
@@ -361,6 +406,7 @@ pub async fn create_note(
             attachments: vec![],
             renote_id: Some(renote_id.to_string()),
             quote_id: None, reply_id: None, parent_original_id: None,
+            reactions: vec![],
         }).into_response();
     }
 
@@ -647,6 +693,7 @@ pub async fn create_note(
         quote_id: quote_of_id_i64.map(|i| i.to_string()),
         reply_id: reply_to_id_i64.map(|i| i.to_string()),
         parent_original_id: None,
+        reactions: vec![],
     })
     .into_response()
 }
@@ -683,8 +730,14 @@ pub async fn home_timeline(
     };
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids).await;
     let notes: Vec<NoteResponse> = rows.into_iter()
-        .map(|p| { let id = p.id; to_note_response(p, att_map.remove(&id).unwrap_or_default()) })
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            nr
+        })
         .collect();
     Json(notes).into_response()
 }
@@ -706,8 +759,14 @@ pub async fn local_timeline(
     };
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids).await;
     let notes: Vec<NoteResponse> = rows.into_iter()
-        .map(|p| { let id = p.id; to_note_response(p, att_map.remove(&id).unwrap_or_default()) })
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            nr
+        })
         .collect();
     Json(notes).into_response()
 }
@@ -725,7 +784,10 @@ pub async fn get_note(
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
-    Ok(Json(to_note_response(post, att_map.remove(&post_id).unwrap_or_default())))
+    let rmap = fetch_reactions_map(&state.db, &[post_id]).await;
+    let mut nr = to_note_response(post, att_map.remove(&post_id).unwrap_or_default());
+    nr.reactions = rmap.get(&post_id).cloned().unwrap_or_default();
+    Ok(Json(nr))
 }
 
 /// ActivityPub 向け: GET /notes/:id
@@ -913,14 +975,17 @@ pub async fn note_context(
 
     let all_ids: Vec<i64> = before_posts.iter().chain(after_posts.iter()).map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &all_ids).await;
+    let rmap = fetch_reactions_map(&state.db, &all_ids).await;
+    let build = |p: TimelinePost, att_map: &mut HashMap<i64, Vec<AttachmentResponse>>| {
+        let id = p.id;
+        let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+        nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+        nr
+    };
 
     Ok(Json(NoteContextResponse {
-        before: before_posts.into_iter()
-            .map(|p| { let id = p.id; to_note_response(p, att_map.remove(&id).unwrap_or_default()) })
-            .collect(),
-        after: after_posts.into_iter()
-            .map(|p| { let id = p.id; to_note_response(p, att_map.remove(&id).unwrap_or_default()) })
-            .collect(),
+        before: before_posts.into_iter().map(|p| build(p, &mut att_map)).collect(),
+        after: after_posts.into_iter().map(|p| build(p, &mut att_map)).collect(),
     }))
 }
 

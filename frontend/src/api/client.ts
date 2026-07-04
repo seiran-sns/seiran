@@ -168,6 +168,13 @@ export interface Note {
   quoteId?: string;
   replyId?: string;
   parentOriginalId?: string;
+  // リアクション集計（#22）
+  reactions?: ReactionSummary[];
+}
+
+export interface ReactionSummary {
+  emoji: string;
+  count: number;
 }
 
 export interface ProfileNote {
@@ -228,6 +235,7 @@ interface RawNote {
   reply_id?: string;
   parentOriginalId?: string;
   parent_original_id?: string;
+  reactions?: ReactionSummary[];
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -249,6 +257,7 @@ function normalizeNote(r: RawNote): Note {
     quoteId: r.quoteId ?? r.quote_id,
     replyId: r.replyId ?? r.reply_id,
     parentOriginalId: r.parentOriginalId ?? r.parent_original_id,
+    reactions: r.reactions ?? [],
   };
 }
 
@@ -352,13 +361,20 @@ export const api = {
     async get(id: string) {
       return normalizeNote(await request<RawNote>("GET", `/notes/${encodeURIComponent(id)}`));
     },
-    async create(text: string, deliverToFedi: boolean = true, deliverToBsky: boolean = true, attachmentIds: string[] = []) {
+    async create(
+      text: string,
+      deliverToFedi: boolean = true,
+      deliverToBsky: boolean = true,
+      attachmentIds: string[] = [],
+      replyToId?: string
+    ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
           text,
           deliver_to_fedi: deliverToFedi,
           deliver_to_bsky: deliverToBsky,
           attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+          reply_to_id: replyToId,
         })
       );
     },
