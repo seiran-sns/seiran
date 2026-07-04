@@ -169,6 +169,11 @@ CREATE INDEX idx_reactions_post_content ON reactions(post_id, content);
 CREATE INDEX idx_reactions_actor_id ON reactions(actor_id);
 ```
 
+#### 取り込み・公開（#22 実装メモ）
+- **AP 受信**: federation-inbox が `Like`（`content = "❤"`, `reaction_type = 'like'`）と Misskey 拡張 `EmojiReact`（`content` は絵文字 or `:shortcode:`, `reaction_type = 'emoji'`）を受信し、`object` の URI から対象ローカルポスト（`posts.ap_object_id`）を解決して INSERT する。`ap_activity_id` に元アクティビティ ID を保存し、`Undo(Like)` / `Undo(EmojiReact)` で DELETE する。未知ポストへのリアクションは無視する。
+- **API 公開**: ノート系 API（`NoteResponse.reactions`）が `[{ emoji, count }]`（`content` ごとの件数、多い順）を返す。空なら省略。
+- **Bsky Like の取り込みは今後対応**（Firehose の `app.bsky.feed.like` を対象ポストへ紐付ける処理が必要）。
+
 ### 1.5 `follows` (フォロー関係テーブル)
 プロトコルごとの「配送」の宛先リストとしても機能する。
 

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
+import { ComposerProvider } from "./contexts/ComposerContext";
 import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HomePage from "./pages/HomePage";
@@ -10,6 +11,7 @@ import Login from "./pages/Login";
 import NoteDetailPage from "./pages/NoteDetailPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import ProfilePage from "./pages/ProfilePage";
+import ProfileEditPage from "./pages/ProfileEditPage";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import SearchPage from "./pages/SearchPage";
@@ -96,6 +98,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/settings/profile"
+        element={
+          <RequireAuth>
+            <ProfileEditPage />
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/login"
         element={
           <RedirectIfAuthed>
@@ -122,7 +132,9 @@ export default function App() {
   return (
     <AuthProvider>
       <RightPaneProvider>
-        <AppRoutes />
+        <ComposerProvider>
+          <AppRoutes />
+        </ComposerProvider>
       </RightPaneProvider>
     </AuthProvider>
   );
