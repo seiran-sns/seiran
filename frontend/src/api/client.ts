@@ -180,12 +180,6 @@ export interface ReactionSummary {
   count: number;
 }
 
-export interface ProfileNote {
-  id: string;
-  text: string;
-  created_at: string;
-}
-
 /** ProfileResponse（バックエンドは snake_case のまま）。 */
 export interface UserProfile {
   username: string;
@@ -196,7 +190,8 @@ export interface UserProfile {
   at_did?: string;
   bio?: string;
   follow_status: "not_following" | "pending" | "accepted";
-  recent_posts: ProfileNote[];
+  /** 最近の投稿。タイムラインと同じ NoteCard で描画する（#43）。 */
+  recent_posts: Note[];
   // 7.3 ブリッジ介入・魂の結合メタデータ
   bridge_real_handle?: string;
   bridge_protocol?: string; // "fedi" | "bsky"
@@ -429,8 +424,13 @@ export const api = {
   },
 
   users: {
-    profile(q: string) {
-      return request<UserProfile>("GET", `/users/profile?q=${encodeURIComponent(q)}`);
+    async profile(q: string) {
+      const raw = await request<Omit<UserProfile, "recent_posts"> & { recent_posts?: RawNote[] }>(
+        "GET",
+        `/users/profile?q=${encodeURIComponent(q)}`
+      );
+      // recent_posts はタイムラインと同じ NoteCard で描画するため Note に正規化（#43）。
+      return { ...raw, recent_posts: (raw.recent_posts ?? []).map(normalizeNote) } as UserProfile;
     },
     updateProfile(patch: {
       display_name?: string;

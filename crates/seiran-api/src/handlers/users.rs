@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use seiran_common::repository::Actor;
 
 use crate::error::ApiError;
+use crate::handlers::notes::{
+    fetch_attachments_map, fetch_reactions_map, to_note_response, NoteResponse,
+};
 use crate::middleware::extract_auth;
 use crate::AppState;
 
@@ -23,7 +26,8 @@ pub struct ProfileResponse {
     pub at_did: Option<String>,
     pub bio: Option<String>,
     pub follow_status: String, // "not_following" | "pending" | "accepted"
-    pub recent_posts: Vec<ProfileNote>,
+    /// 最近の投稿。タイムラインと同じ NoteCard で描画するため NoteResponse で返す（#43）。
+    pub recent_posts: Vec<NoteResponse>,
     // 7.3 拡張メタデータ（ブリッジ介入・魂の結合判定）
     /// このアクターがブリッジ（影武者）の場合、本尊アクターのハンドル（`user@domain`）。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -33,13 +37,6 @@ pub struct ProfileResponse {
     pub bridge_protocol: Option<String>,
     /// リモート seiran ユーザーと魂の結合（ペアリング）済みか。
     pub is_paired: bool,
-}
-
-#[derive(Serialize)]
-pub struct ProfileNote {
-    pub id: String,
-    pub text: String,
-    pub created_at: String,
 }
 
 pub async fn user_profile(
@@ -125,21 +122,25 @@ async fn build_profile_response(
         None => "not_following".to_string(),
     };
 
-    // 最近の投稿（最大20件）
-    let post_rows = match state.posts.recent_by_actor(actor_id, 20).await {
+    // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
+    // アクター情報・添付・リアクションを含む NoteResponse で返す（#43）。
+    let post_rows = match state.posts.timeline_by_actor(actor_id, 20).await {
         Ok(rows) => rows,
         Err(e) => {
             eprintln!("[profile] 最近の投稿取得失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
-
-    let recent_posts = post_rows
+    let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
+    let rmap = fetch_reactions_map(&state.db, &post_ids).await;
+    let recent_posts: Vec<NoteResponse> = post_rows
         .into_iter()
-        .map(|p| ProfileNote {
-            id: p.id.to_string(),
-            text: p.body,
-            created_at: p.created_at.to_rfc3339(),
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            nr
         })
         .collect();
 

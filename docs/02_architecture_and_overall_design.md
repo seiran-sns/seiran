@@ -387,6 +387,11 @@ AP Note の形式:
 * **nginx**: `location = /api/streaming` を専用ブロックにし `Upgrade` / `Connection: upgrade` を通す。
 * **今後**: リアクション到達・被フォロー・フォロー承諾の通知は federation-inbox クレートからのハブ共有が必要なため後続対応。
 
+### 2.8 ポストカードの共通化（#43）
+タイムライン・ポスト詳細・ユーザー詳細の各画面で、ポスト表示は単一のカードコンポーネント（フロント `components/note/NoteCard`）を共用する。最も機能が充実したタイムラインのカードを正とし、他画面へ横展開する。
+* **プロフィールの投稿**: `ProfileResponse.recent_posts` を、タイムラインと同一形状の `NoteResponse`（アクター情報・添付・リアクション込み）で返す。バックエンドは `PostRepository::timeline_by_actor`（アクター指定の結合クエリ）で取得し、`fetch_attachments_map` / `fetch_reactions_map` で集計して `to_note_response` で組み立てる。フロントは受信後 `normalizeNote` で `Note` に正規化して `NoteCard` を描画する。
+* **ポスト詳細の前後投稿**: 既存どおり `NoteCard` を用いる。中央のフォーカス投稿は、より大きく強調した詳細レイアウトを維持する（アバター・本文・リアクション・返信導線は NoteCard と同一の要素を含む）。
+
 ---
 
 ## 3. 統一ポストID 採番ルール
