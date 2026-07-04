@@ -390,6 +390,11 @@ AP Note の形式:
 * **通知**: リアクション到達・被フォロー・フォロー承諾は `federation-inbox` クレートからも配信する。`StreamHub` を `seiran-common` に移設し、`all` ロールでは api の `stream_hub` を inbox の `init_state` に共有渡しして単一ハブで跨いで配信する（`federation` 単独ロールでは購読者が居ないため新規ハブで可）。inbox は該当イベント受理時に対象ローカルアクターだけを受信者集合とし `{"type":"reaction|follow|followAccepted","body":{...}}` を送出する。
 * **フロント購読集約**: WS 接続はアプリ全体で1本に集約する（`StreamingProvider`）。`type==="note"` は登録済みリスナー（ホーム TL）へ、通知系イベントは未読カウント付きで通知リストへ積み、右ペイン「クイック通知」タブに表示する（タブ表示中は既読化）。
 
+### 2.8 ポストカードの共通化（#43）
+タイムライン・ポスト詳細・ユーザー詳細の各画面で、ポスト表示は単一のカードコンポーネント（フロント `components/note/NoteCard`）を共用する。最も機能が充実したタイムラインのカードを正とし、他画面へ横展開する。
+* **プロフィールの投稿**: `ProfileResponse.recent_posts` を、タイムラインと同一形状の `NoteResponse`（アクター情報・添付・リアクション込み）で返す。バックエンドは `PostRepository::timeline_by_actor`（アクター指定の結合クエリ）で取得し、`fetch_attachments_map` / `fetch_reactions_map` で集計して `to_note_response` で組み立てる。フロントは受信後 `normalizeNote` で `Note` に正規化して `NoteCard` を描画する。
+* **ポスト詳細の主役ポスト**: 中央のフォーカス投稿も同じ `NoteCard` を用いる。大きめ文字・大きめカードで強調するため、`NoteCard` に `large` オプションを設け（アバター 48px・本文拡大・左アクセントボーダー）、`<NoteCard note large linkToDetail={false} />` で描画する。専用の focal レイアウトは廃止し、モジュールを完全共通化した。前後投稿も従来どおり `NoteCard`（通常サイズ）を用いる。
+
 ---
 
 ## 3. 統一ポストID 採番ルール

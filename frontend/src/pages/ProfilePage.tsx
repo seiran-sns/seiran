@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, UserProfile, getErrorMessage } from "../api/client";
 import Modal from "../components/common/Modal";
 import AppShell from "../components/layout/AppShell";
+import NoteCard from "../components/note/NoteCard";
 import { useAuth } from "../contexts/AuthContext";
-import { formatDate } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
 
@@ -180,12 +180,7 @@ export default function ProfilePage() {
       {profile.recent_posts.length === 0 ? (
         <p className={panel.message}>投稿がありません。</p>
       ) : (
-        profile.recent_posts.map((post) => (
-          <Link key={post.id} to={`/notes/${post.id}`} className={styles.rightPost}>
-            <p className={styles.rightPostBody}>{post.text}</p>
-            <time className={styles.rightPostTime}>{formatDate(post.created_at)}</time>
-          </Link>
-        ))
+        profile.recent_posts.map((post) => <NoteCard key={post.id} note={post} />)
       )}
     </>
   );

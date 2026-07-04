@@ -74,12 +74,20 @@ pub trait PostRepository: Send + Sync {
         since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
-    /// 指定アクターの最近の投稿を取得する。
+    /// 指定アクターの最近の投稿を取得する（プロフィール要約用の軽量版）。
     async fn recent_by_actor(
         &self,
         actor_id: i64,
         limit: i64,
     ) -> Result<Vec<PostSummary>, sqlx::Error>;
+
+    /// 指定アクターの最近の投稿を、タイムラインと同じ結合行（アクター情報込み）で取得する。
+    /// プロフィール画面でタイムラインと同一の NoteCard を描画するために使う（#43）。
+    async fn timeline_by_actor(
+        &self,
+        actor_id: i64,
+        limit: i64,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// DID + rkey で app.bsky.feed.post レコードを取得する。
     async fn find_record(&self, did: &str, rkey: &str) -> Result<Option<PostRecord>, sqlx::Error>;
@@ -212,6 +220,29 @@ impl PostRepository for PgPostRepository {
             "SELECT id, body, created_at FROM posts
              WHERE actor_id = $1 AND deleted_at IS NULL
              ORDER BY id DESC LIMIT $2",
+        )
+        .bind(actor_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn timeline_by_actor(
+        &self,
+        actor_id: i64,
+        limit: i64,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        sqlx::query_as::<_, TimelinePost>(
+            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+             FROM posts p
+             JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             WHERE p.actor_id = $1 AND p.deleted_at IS NULL
+             ORDER BY p.id DESC
+             LIMIT $2",
         )
         .bind(actor_id)
         .bind(limit)
