@@ -363,6 +363,9 @@ AP Note の形式:
 * `is_paired`: `seiran_pair_actor_id` の有無（魂の結合済みか）を表す真偽値。
 * `at_did` / `bio`: プロトコルアイデンティティ表示とプロフィール本文。
 
+### 2.4 認証情報 API の役割公開（管理画面の表示制御用）
+`GET /api/auth/me`（および `login` / `register` / `setup` が返す `AuthResponse.user`）は `role`（`user` / `moderator` / `admin`）を含む。公式フロントエンドはこの値で管理メニュー（`/admin`）の表示可否を判定する。ただし表示制御は UX 上の利便であり、実際の権限検証は各管理 API 側の `require_admin` が担う（フロントの値を信頼しない）。
+
 ---
 
 ## 3. 統一ポストID 採番ルール

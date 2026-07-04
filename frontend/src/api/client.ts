@@ -93,6 +93,48 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  role: string; // "user" | "moderator" | "admin"
+}
+
+// ── 管理画面用の型（レスポンスは snake_case） ──────────────────────────────
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  role: string;
+  suspended_at: string | null;
+  username: string | null;
+}
+
+export interface StorageProvider {
+  id: number;
+  name: string;
+  endpoint: string;
+  bucket: string;
+  region: string;
+  access_key: string;
+  secret_key_set: boolean;
+  public_url: string;
+  capacity_mb: number | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface SiteSettings {
+  smtp_host: string;
+  smtp_port: string;
+  smtp_username: string;
+  smtp_password_set: boolean;
+  smtp_from: string;
+  require_email_verification: string;
+}
+
+export interface CustomEmoji {
+  id: string;
+  shortcode: string;
+  media_file_id: string;
+  category: string | null;
+  created_at: string;
 }
 
 export interface AuthResponse {
@@ -362,6 +404,67 @@ export const api = {
     },
   },
 
+  admin: {
+    listUsers() {
+      return request<AdminUser[]>("GET", "/admin/users");
+    },
+    suspendUser(id: string) {
+      return request<{ ok: boolean }>("POST", `/admin/users/${encodeURIComponent(id)}/suspend`);
+    },
+    unsuspendUser(id: string) {
+      return request<{ ok: boolean }>("POST", `/admin/users/${encodeURIComponent(id)}/unsuspend`);
+    },
+    changeUserRole(id: string, role: string) {
+      return request<{ ok: boolean }>("POST", `/admin/users/${encodeURIComponent(id)}/role`, { role });
+    },
+
+    getSiteSettings() {
+      return request<SiteSettings>("GET", "/admin/site-settings");
+    },
+    updateSiteSettings(patch: Partial<{
+      smtp_host: string;
+      smtp_port: string;
+      smtp_username: string;
+      smtp_password: string;
+      smtp_from: string;
+      require_email_verification: string;
+    }>) {
+      return request<SiteSettings>("PATCH", "/admin/site-settings", patch);
+    },
+
+    listStorageProviders() {
+      return request<StorageProvider[]>("GET", "/admin/storage-providers");
+    },
+    createStorageProvider(body: {
+      name: string;
+      endpoint: string;
+      bucket: string;
+      region?: string;
+      access_key: string;
+      secret_key: string;
+      public_url: string;
+      capacity_mb?: number | null;
+    }) {
+      return request<StorageProvider>("POST", "/admin/storage-providers", body);
+    },
+    updateStorageProvider(id: number, patch: Record<string, unknown>) {
+      return request<StorageProvider>("PATCH", `/admin/storage-providers/${id}`, patch);
+    },
+    deleteStorageProvider(id: number) {
+      return request<{ ok: boolean }>("DELETE", `/admin/storage-providers/${id}`);
+    },
+
+    listEmojis() {
+      return request<CustomEmoji[]>("GET", "/admin/emojis");
+    },
+    createEmoji(body: { shortcode: string; media_file_id: number; category?: string }) {
+      return request<CustomEmoji>("POST", "/admin/emojis", body);
+    },
+    deleteEmoji(id: string) {
+      return request<{ ok: boolean }>("DELETE", `/admin/emojis/${encodeURIComponent(id)}`);
+    },
+  },
+
   follows: {
     create(target: string) {
       return request<FollowResponse>("POST", "/follows/create", { target });
@@ -369,10 +472,10 @@ export const api = {
   },
 
   media: {
-    upload(file: File): Promise<DriveFile> {
+    upload(file: File, mediaType: "post" | "emoji" | "avatar" | "banner" = "post"): Promise<DriveFile> {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("media_type", "post");
+      formData.append("media_type", mediaType);
       return fetch(`${BASE}/drive/files/create`, {
         method: "POST",
         headers: { ...authHeaders() },

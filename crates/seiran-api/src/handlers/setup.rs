@@ -168,6 +168,6 @@ pub async fn setup(
 
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username: req.username, email: req.email },
+        user: UserInfo { id: user_id, username: req.username, email: req.email, role: "admin".to_string() },
     }))
 }
