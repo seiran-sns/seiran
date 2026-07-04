@@ -1,0 +1,72 @@
+/* 中央・右ペインで共通利用するパネル部品。 */
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: rgba(15, 15, 17, 0.85);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.title {
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.subtitle {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+.backBtn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.backBtn:hover {
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
+.message {
+  text-align: center;
+  color: var(--text-faint);
+  padding: 40px 20px;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.placeholder {
+  margin: 16px;
+  padding: 24px 18px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.placeholderIcon {
+  font-size: 1.8rem;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.rightHeader {
+  padding: 16px 16px 8px;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text);
+}

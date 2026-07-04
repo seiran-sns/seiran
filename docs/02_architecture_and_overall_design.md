@@ -356,6 +356,13 @@ AP Note の形式:
 * Fedi側で `*.brid.gy` 由来のアカウントを検出 ➔ オリジナルのBluesky DIDを特定し、その本尊レコードのIDを `bridge_real_actor_id` に格納。
 * Bsky側で `*.fed.brid.gy` 由来のアカウントを検出 ➔ オリジナルのFedi Actor URIを特定し、その本尊レコードのIDを `bridge_real_actor_id` に格納。
 
+### 2.3 プロフィール API のメタデータ公開（フロントエンド介入用）
+公式フロントエンドがブリッジ介入（本尊ワープ・フォロー警告）と魂の結合判定を行えるよう、`GET /api/users/profile` は以下の拡張メタデータを返す。
+* `bridge_real_handle`: `bridge_real_actor_id` が埋まっている場合、本尊アクターのハンドル（`@user` / `@user@domain`）。フロントは「本尊ワープ」ボタンの遷移先に使用する。
+* `bridge_protocol`: 本尊が属するプロトコル（`bsky` / `fedi`）。導線アイコンの出し分けに使用。
+* `is_paired`: `seiran_pair_actor_id` の有無（魂の結合済みか）を表す真偽値。
+* `at_did` / `bio`: プロトコルアイデンティティ表示とプロフィール本文。
+
 ---
 
 ## 3. 統一ポストID 採番ルール

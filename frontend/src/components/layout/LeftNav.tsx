@@ -1,0 +1,67 @@
+import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
+import styles from "./AppShell.module.css";
+
+interface NavItem {
+  to: string;
+  icon: string;
+  label: string;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { to: "/", icon: "🏠", label: "ホーム" },
+  { to: "/search", icon: "🔍", label: "検索" },
+  { to: "/notifications", icon: "🔔", label: "通知" },
+];
+
+export default function LeftNav({ onCompose }: { onCompose: () => void }) {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
+
+  return (
+    <nav className={styles.leftNav}>
+      <div className={styles.logo}>seiran</div>
+
+      <ul className={styles.navList}>
+        {NAV_ITEMS.map((item) => (
+          <li key={item.to}>
+            <NavLink
+              to={item.to}
+              end={item.to === "/"}
+              className={({ isActive }) =>
+                `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`
+              }
+            >
+              <span className={styles.navIcon}>{item.icon}</span>
+              <span className={styles.navLabel}>{item.label}</span>
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+
+      <button className={styles.composeBtn} onClick={onCompose}>
+        <span className={styles.navIcon}>✏️</span>
+        <span className={styles.navLabel}>投稿</span>
+      </button>
+
+      <div className={styles.navFooter}>
+        <button
+          className={styles.userChip}
+          onClick={() => navigate(`/profile?q=${user?.username}`)}
+          title="自分のプロフィール"
+        >
+          <span className={styles.userAvatar}>{user?.username?.[0]?.toUpperCase() ?? "?"}</span>
+          <span className={styles.navLabel}>@{user?.username}</span>
+        </button>
+        <button className={styles.logoutBtn} onClick={handleLogout} title="ログアウト">
+          ⏻
+        </button>
+      </div>
+    </nav>
+  );
+}

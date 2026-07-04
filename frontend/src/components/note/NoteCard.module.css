@@ -1,0 +1,152 @@
+.card {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+
+.card:hover {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.rail {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  padding-left: 4px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.userBtn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+
+.avatar {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent-deep);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.displayName {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userBtn:hover .displayName {
+  text-decoration: underline;
+}
+
+.acct {
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.protoBadge {
+  font-size: 0.72rem;
+}
+
+.time {
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  margin-left: auto;
+  text-decoration: none;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.time:hover {
+  text-decoration: underline;
+  color: var(--text-dim);
+}
+
+.relations {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 6px 50px;
+}
+
+.relLink {
+  font-size: 0.76rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.relLink:hover {
+  text-decoration: underline;
+}
+
+.body {
+  margin: 0 0 0 50px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0 0 50px;
+}
+
+.attachImage {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: 8px;
+  object-fit: cover;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+
+.originalLink {
+  display: inline-block;
+  margin: 10px 0 0 50px;
+  font-size: 0.8rem;
+  color: var(--accent);
+  background: var(--accent-deep);
+  padding: 5px 10px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.originalLink:hover {
+  background: #2a1580;
+}

@@ -1,0 +1,238 @@
+.card {
+  padding: 20px 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.warpBanner {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--accent-deep);
+  border: 1px solid var(--accent-strong);
+  color: var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  cursor: pointer;
+  text-align: left;
+  margin-bottom: 20px;
+  transition: background 0.15s;
+}
+
+.warpBanner:hover {
+  background: #2a1580;
+}
+
+.warpIcon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+.avatarLarge {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: var(--accent-deep);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 2.2rem;
+  margin-bottom: 14px;
+}
+
+.names {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+
+.displayName {
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.acct {
+  font-size: 0.86rem;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.badge {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 10px;
+}
+
+.pairedBadge {
+  color: var(--accent);
+  border-color: var(--accent-strong);
+  background: var(--accent-deep);
+}
+
+.bio {
+  font-size: 0.92rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0 0 14px;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.idRow {
+  display: flex;
+  gap: 10px;
+  font-size: 0.78rem;
+  align-items: baseline;
+}
+
+.idLabel {
+  flex: 0 0 34px;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+.idValue {
+  color: var(--text-dim);
+  word-break: break-all;
+  text-decoration: none;
+}
+
+a.idValue:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.followArea {
+  display: flex;
+  align-items: center;
+}
+
+.followBtn {
+  background: var(--accent-strong);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 9px 28px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.followBtn:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+.followBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.followingBadge,
+.pendingBadge {
+  font-size: 0.85rem;
+  padding: 8px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+}
+
+.followingBadge {
+  color: var(--accent);
+  border-color: var(--accent-strong);
+}
+
+.pendingBadge {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+/* 右ペイン: そのユーザーの投稿リスト */
+.rightPost {
+  display: block;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.1s;
+}
+
+.rightPost:hover {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.rightPostBody {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rightPostTime {
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+/* ブリッジフォロー警告モーダル */
+.modalText {
+  font-size: 0.92rem;
+  line-height: 1.7;
+  margin: 0 0 20px;
+}
+
+.modalActions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modalPrimary {
+  background: var(--accent-strong);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modalPrimary:hover {
+  background: #6d28d9;
+}
+
+.modalSecondary {
+  background: none;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.modalSecondary:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}

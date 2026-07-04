@@ -107,17 +107,24 @@ export interface NoteAttachment {
   height: number;
 }
 
+/** NoteResponse（バックエンドは `#[serde(rename_all = "camelCase")]`）。 */
 export interface Note {
   id: string;
   text: string;
-  created_at: string;
+  createdAt: string;
   user: {
     id: number;
     username: string;
     domain?: string;
-    display_name?: string;
+    displayName?: string;
+    actorType: string; // "local" | "fedi" | "bsky" | "remote_seiran" | ...
   };
   attachments: NoteAttachment[];
+  // 7.2 拡張メタデータ（存在する場合のみ）
+  renoteId?: string;
+  quoteId?: string;
+  replyId?: string;
+  parentOriginalId?: string;
 }
 
 export interface ProfileNote {
@@ -126,14 +133,26 @@ export interface ProfileNote {
   created_at: string;
 }
 
+/** ProfileResponse（バックエンドは snake_case のまま）。 */
 export interface UserProfile {
   username: string;
   domain: string;
   display_name?: string;
   actor_type: string;
   ap_uri?: string;
+  at_did?: string;
+  bio?: string;
   follow_status: "not_following" | "pending" | "accepted";
   recent_posts: ProfileNote[];
+  // 7.3 ブリッジ介入・魂の結合メタデータ
+  bridge_real_handle?: string;
+  bridge_protocol?: string; // "fedi" | "bsky"
+  is_paired: boolean;
+}
+
+export interface SearchResult {
+  notes: Note[];
+  session_id?: string;
 }
 
 export interface FollowResponse {
@@ -262,6 +281,13 @@ export const api = {
     },
     context(id: string): Promise<{ before: Note[]; after: Note[] }> {
       return request<{ before: Note[]; after: Note[] }>("GET", `/notes/${encodeURIComponent(id)}/context`);
+    },
+    search(params: { q: string; limit?: number; session_id?: string }, signal?: AbortSignal) {
+      const qs = new URLSearchParams();
+      qs.set("q", params.q);
+      if (params.limit) qs.set("limit", String(params.limit));
+      if (params.session_id) qs.set("session_id", params.session_id);
+      return request<SearchResult>("GET", `/notes/search?${qs.toString()}`, undefined, signal);
     },
   },
 

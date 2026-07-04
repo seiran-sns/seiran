@@ -1,3 +1,22 @@
+:root {
+  /* カラートークン */
+  --bg: #0f0f11;
+  --bg-elev: #1a1a1e;
+  --bg-elev-2: #202027;
+  --border: #2a2a30;
+  --border-strong: #3a3a42;
+  --text: #e8e8f0;
+  --text-dim: #888;
+  --text-faint: #555;
+  --accent: #a78bfa;
+  --accent-strong: #7c3aed;
+  --accent-deep: #1e1060;
+  --danger: #f87171;
+  --warn: #f59e0b;
+  --bsky: #3b82f6;
+  --fedi: #8b5cf6;
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -7,11 +26,24 @@ html, body {
   padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
     "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
-  background: #0f0f11;
-  color: #e8e8f0;
+  background: var(--bg);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
 
 a {
   color: inherit;
+}
+
+/* スクロールバー（暗色テーマ用） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a30;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a42;
 }

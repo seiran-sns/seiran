@@ -20,8 +20,19 @@ pub struct ProfileResponse {
     pub display_name: Option<String>,
     pub actor_type: String,
     pub ap_uri: Option<String>,
+    pub at_did: Option<String>,
+    pub bio: Option<String>,
     pub follow_status: String, // "not_following" | "pending" | "accepted"
     pub recent_posts: Vec<ProfileNote>,
+    // 7.3 拡張メタデータ（ブリッジ介入・魂の結合判定）
+    /// このアクターがブリッジ（影武者）の場合、本尊アクターのハンドル（`user@domain`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bridge_real_handle: Option<String>,
+    /// 本尊が属するプロトコル（`fedi` / `bsky` など）。フロントの導線アイコンに使用。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bridge_protocol: Option<String>,
+    /// リモート seiran ユーザーと魂の結合（ペアリング）済みか。
+    pub is_paired: bool,
 }
 
 #[derive(Serialize)]
@@ -132,14 +143,37 @@ async fn build_profile_response(
         })
         .collect();
 
+    // 本尊（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
+    // その本尊アクターのハンドルとプロトコルをフロントの「本尊ワープ」導線に渡す。
+    let (bridge_real_handle, bridge_protocol) = match actor.bridge_real_actor_id {
+        Some(real_id) => match state.actors.find_by_id(real_id).await {
+            Ok(Some(real)) => {
+                let handle = if real.domain == state.local_domain {
+                    format!("@{}", real.username)
+                } else {
+                    format!("@{}@{}", real.username, real.domain)
+                };
+                let proto = if real.at_did.is_some() { "bsky" } else { "fedi" };
+                (Some(handle), Some(proto.to_string()))
+            }
+            _ => (None, None),
+        },
+        None => (None, None),
+    };
+
     Json(ProfileResponse {
         username: actor.username,
         domain: actor.domain,
         display_name: actor.display_name,
         actor_type: actor.actor_type,
         ap_uri: actor.ap_uri,
+        at_did: actor.at_did,
+        bio: actor.bio,
         follow_status,
         recent_posts,
+        bridge_real_handle,
+        bridge_protocol,
+        is_paired: actor.seiran_pair_actor_id.is_some(),
     })
     .into_response()
 }
@@ -183,8 +217,13 @@ async fn fetch_remote_profile(
         display_name: ap_actor.name,
         actor_type: "fedi".to_string(),
         ap_uri: Some(actor_uri),
+        at_did: None,
+        bio: ap_actor.summary,
         follow_status: "not_following".to_string(),
         recent_posts: vec![],
+        bridge_real_handle: None,
+        bridge_protocol: None,
+        is_paired: false,
     })
     .into_response()
 }
