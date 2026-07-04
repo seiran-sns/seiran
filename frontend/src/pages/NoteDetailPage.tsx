@@ -6,6 +6,7 @@ import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
 import ReplyIndicator from "../components/note/ReplyIndicator";
 import Avatar from "../components/note/Avatar";
+import ReactionChips from "../components/note/ReactionChips";
 import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../lib/format";
 import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
@@ -152,6 +153,8 @@ export default function NoteDetailPage() {
                 🀄 本尊のオリジナル投稿を見る
               </Link>
             )}
+
+            <ReactionChips reactions={note.reactions} />
           </article>
 
           {/* 投稿主の前後の投稿（右ペインが隠れる幅でのみ中央に表示。ボタン起動）。 */}
@@ -179,10 +182,14 @@ export default function NoteDetailPage() {
       />
       {noteDetailTab === 0 ? (
         renderContext()
+      ) : note && note.reactions && note.reactions.length > 0 ? (
+        <div style={{ padding: "12px 16px" }}>
+          <ReactionChips reactions={note.reactions} />
+        </div>
       ) : (
         <div className={panel.placeholder}>
           <span className={panel.placeholderIcon}>😀</span>
-          絵文字リアクション（Fedi カスタム絵文字・ATP Like 等）の集計表示は準備中です。
+          このポストにはまだリアクションがありません。
         </div>
       )}
     </>

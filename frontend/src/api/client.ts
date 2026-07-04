@@ -168,6 +168,13 @@ export interface Note {
   quoteId?: string;
   replyId?: string;
   parentOriginalId?: string;
+  // リアクション集計（#22）
+  reactions?: ReactionSummary[];
+}
+
+export interface ReactionSummary {
+  emoji: string;
+  count: number;
 }
 
 export interface ProfileNote {
@@ -228,6 +235,7 @@ interface RawNote {
   reply_id?: string;
   parentOriginalId?: string;
   parent_original_id?: string;
+  reactions?: ReactionSummary[];
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -249,6 +257,7 @@ function normalizeNote(r: RawNote): Note {
     quoteId: r.quoteId ?? r.quote_id,
     replyId: r.replyId ?? r.reply_id,
     parentOriginalId: r.parentOriginalId ?? r.parent_original_id,
+    reactions: r.reactions ?? [],
   };
 }
 
