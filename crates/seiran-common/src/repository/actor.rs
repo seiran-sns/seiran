@@ -20,11 +20,17 @@ pub struct Actor {
     pub at_repo_cid: Option<String>,
     pub at_repo_rev: Option<String>,
     pub at_signing_key_pem: Option<String>,
+    pub bio: Option<String>,
+    /// リモート seiran の対の行（魂の結合済み判定に使用）。
+    pub seiran_pair_actor_id: Option<i64>,
+    /// ブリッジ（影武者）時の「本尊」の行 ID。
+    pub bridge_real_actor_id: Option<i64>,
 }
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
-    display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem";
+    display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem, \
+    bio, seiran_pair_actor_id, bridge_real_actor_id";
 
 #[async_trait]
 pub trait ActorRepository: Send + Sync {
@@ -43,6 +49,9 @@ pub trait ActorRepository: Send + Sync {
 
     /// AT Protocol DID でアクターを取得する。
     async fn find_by_did(&self, did: &str) -> Result<Option<Actor>, sqlx::Error>;
+
+    /// アクター ID でアクターを取得する。
+    async fn find_by_id(&self, id: i64) -> Result<Option<Actor>, sqlx::Error>;
 
     /// ユーザー名 + ドメインから DID のみを取得する（`at_did IS NOT NULL` のもの）。
     async fn find_did_by_username_domain(
@@ -128,6 +137,15 @@ impl ActorRepository for PgActorRepository {
             "SELECT {ACTOR_COLS} FROM actors WHERE at_did = $1 LIMIT 1"
         ))
         .bind(did)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn find_by_id(&self, id: i64) -> Result<Option<Actor>, sqlx::Error> {
+        sqlx::query_as::<_, Actor>(&format!(
+            "SELECT {ACTOR_COLS} FROM actors WHERE id = $1 LIMIT 1"
+        ))
+        .bind(id)
         .fetch_optional(&self.pool)
         .await
     }

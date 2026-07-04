@@ -1,0 +1,154 @@
+.upLink {
+  display: block;
+  padding: 12px 16px;
+  font-size: 0.82rem;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.upLink:hover {
+  text-decoration: underline;
+}
+
+.focal {
+  padding: 18px 18px 16px;
+  border-left: 3px solid var(--accent-strong);
+  border-bottom: 1px solid var(--border);
+}
+
+.focalUser {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  margin-bottom: 12px;
+}
+
+.focalAvatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent-deep);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+.focalNames {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.focalDisplayName {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.focalUser:hover .focalDisplayName {
+  text-decoration: underline;
+}
+
+.focalAcct {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.focalBody {
+  margin: 0 0 12px;
+  font-size: 1.15rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.focalAttachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.focalAttachImage {
+  max-width: 100%;
+  max-height: 400px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+
+.focalTime {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  display: block;
+}
+
+.quoteLink,
+.originalLink {
+  display: inline-block;
+  margin-top: 12px;
+  margin-right: 8px;
+  font-size: 0.82rem;
+  color: var(--accent);
+  background: var(--accent-deep);
+  padding: 6px 12px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.quoteLink:hover,
+.originalLink:hover {
+  background: var(--accent-deep-hover);
+}
+
+.ctxTrigger {
+  padding: 16px;
+  text-align: center;
+}
+
+.ctxButton {
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  border-radius: 20px;
+  padding: 8px 20px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ctxButton:hover {
+  background: var(--accent-deep);
+  border-color: var(--accent-strong);
+}
+
+/* 投稿主の前後の投稿は、通常は右ペインに表示する。
+   右ペインが隠れる幅（≤1400px, AppShell と一致）でのみ中央に表示する。 */
+.narrowContext {
+  display: none;
+}
+
+.contextLabel {
+  padding: 10px 16px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+
+@media (max-width: 1400px) {
+  .narrowContext {
+    display: block;
+  }
+}

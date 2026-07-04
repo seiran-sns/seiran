@@ -3,12 +3,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0f0f11;
+  background: var(--bg-elev);
 }
 
 .card {
-  background: #1a1a1e;
-  border: 1px solid #2a2a30;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 40px;
   width: 100%;
@@ -19,20 +19,20 @@
   margin: 0 0 4px;
   font-size: 1.8rem;
   font-weight: 700;
-  color: #a78bfa;
+  color: var(--accent);
   text-align: center;
 }
 
 .subtitle {
   margin: 0 0 28px;
   font-size: 1rem;
-  color: #888;
+  color: var(--text-dim);
   text-align: center;
   font-weight: 400;
 }
 
 .description {
-  color: #888;
+  color: var(--text-dim);
   font-size: 0.875rem;
   text-align: center;
   margin: -16px 0 20px;
@@ -49,32 +49,32 @@
   flex-direction: column;
   gap: 6px;
   font-size: 0.875rem;
-  color: #bbb;
+  color: var(--text-dim);
 }
 
 .input {
-  background: #0f0f11;
-  border: 1px solid #2a2a30;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 12px;
-  color: #e8e8f0;
+  color: var(--text);
   font-size: 0.95rem;
   outline: none;
   transition: border-color 0.15s;
 }
 
 .input:focus {
-  border-color: #7c3aed;
+  border-color: var(--accent-strong);
 }
 
 .error {
-  color: #f87171;
+  color: var(--danger);
   font-size: 0.875rem;
   margin: 0;
 }
 
 .button {
-  background: #7c3aed;
+  background: var(--accent-strong);
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -87,7 +87,7 @@
 }
 
 .button:hover:not(:disabled) {
-  background: #6d28d9;
+  background: var(--accent-hover);
 }
 
 .button:disabled {
@@ -99,11 +99,11 @@
   text-align: center;
   margin: 20px 0 0;
   font-size: 0.875rem;
-  color: #888;
+  color: var(--text-dim);
 }
 
 .link a {
-  color: #a78bfa;
+  color: var(--accent);
   text-decoration: none;
 }
 

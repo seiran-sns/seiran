@@ -1,0 +1,178 @@
+.shell {
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 0;
+}
+
+/* ── 左ペイン（幅固定：小 / 240px）───────────────────────────── */
+.leftNav {
+  flex: 0 0 240px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  border-right: 1px solid var(--border);
+  gap: 6px;
+}
+
+.logo {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--accent);
+  padding: 8px 12px 16px;
+  letter-spacing: 0.02em;
+}
+
+.navList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.navLink,
+.composeBtn,
+.userChip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 1rem;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.navLink:hover,
+.userChip:hover {
+  background: var(--bg-elev);
+}
+
+.navLinkActive {
+  background: var(--bg-elev);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.navIcon {
+  font-size: 1.15rem;
+  width: 1.4rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.navLabel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composeBtn {
+  margin-top: 10px;
+  background: var(--accent-strong);
+  color: #fff;
+  font-weight: 700;
+  justify-content: center;
+}
+
+.composeBtn:hover {
+  background: var(--accent-hover);
+}
+
+.navFooter {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.userChip {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9rem;
+}
+
+.userAvatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-deep);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.logoutBtn {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.logoutBtn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* ── 中央ペイン（幅固定：中 / 600px）─────────────────────────── */
+.center {
+  flex: 0 0 600px;
+  max-width: 600px;
+  min-height: 100vh;
+  border-right: 1px solid var(--border);
+}
+
+/* ── 右ペイン（幅固定：中〜大 / 500px）───────────────────────── */
+.right {
+  flex: 0 0 500px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* ── レスポンシブ ────────────────────────────────────────────── */
+@media (max-width: 1400px) {
+  .right {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .center {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+  .leftNav {
+    flex-basis: 72px;
+  }
+  .navLabel,
+  .logo {
+    display: none;
+  }
+  .composeBtn {
+    padding: 10px;
+  }
+}

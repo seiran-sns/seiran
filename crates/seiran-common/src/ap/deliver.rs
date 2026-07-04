@@ -12,6 +12,7 @@ use super::client::{ApClient, ApError};
 /// `None` の場合は DB の `posts.body` をそのまま使用する。
 /// `quote_url` が `Some` の場合は Note に `quoteUrl` / `_misskey_quote` を付与する（引用投稿）。
 /// seiran_post_uuid は DB の posts.seiran_post_uuid から自動取得して Note に付与する。
+#[allow(clippy::too_many_arguments)]
 pub async fn deliver_post_to_ap_followers(
     ap_client: &ApClient,
     db: &PgPool,

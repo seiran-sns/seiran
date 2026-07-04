@@ -2,14 +2,17 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { RightPaneProvider } from "./contexts/RightPaneContext";
 import ForgotPassword from "./pages/ForgotPassword";
+import HomePage from "./pages/HomePage";
 import Login from "./pages/Login";
-import NoteDetail from "./pages/NoteDetail";
+import NoteDetailPage from "./pages/NoteDetailPage";
+import NotificationsPage from "./pages/NotificationsPage";
+import ProfilePage from "./pages/ProfilePage";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
+import SearchPage from "./pages/SearchPage";
 import Setup from "./pages/Setup";
-import Timeline from "./pages/Timeline";
-import UserProfilePage from "./pages/UserProfile";
 import VerifyEmail from "./pages/VerifyEmail";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -47,7 +50,39 @@ function AppRoutes() {
         path="/"
         element={
           <RequireAuth>
-            <Timeline />
+            <HomePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/search"
+        element={
+          <RequireAuth>
+            <SearchPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/notifications"
+        element={
+          <RequireAuth>
+            <NotificationsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/notes/:id"
+        element={
+          <RequireAuth>
+            <NoteDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <RequireAuth>
+            <ProfilePage />
           </RequireAuth>
         }
       />
@@ -70,15 +105,6 @@ function AppRoutes() {
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/notes/:id" element={<NoteDetail />} />
-      <Route
-        path="/profile"
-        element={
-          <RequireAuth>
-            <UserProfilePage />
-          </RequireAuth>
-        }
-      />
     </Routes>
   );
 }
@@ -86,7 +112,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <RightPaneProvider>
+        <AppRoutes />
+      </RightPaneProvider>
     </AuthProvider>
   );
 }

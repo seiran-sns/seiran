@@ -49,6 +49,7 @@ pub struct ApActor {
     #[serde(rename = "preferredUsername")]
     pub preferred_username: Option<String>,
     pub name: Option<String>,
+    pub summary: Option<String>,
     pub inbox: Option<String>,
     pub outbox: Option<String>,
     #[serde(rename = "publicKey")]

@@ -1,0 +1,38 @@
+.composerWrap {
+  padding: 16px;
+  border-bottom: 8px solid var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.feedTabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 4;
+}
+
+.feedTab {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  padding: 13px 0;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.feedTab:hover {
+  color: var(--text);
+}
+
+.feedTabActive {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}

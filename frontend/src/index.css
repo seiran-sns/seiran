@@ -1,3 +1,24 @@
+:root {
+  /* カラートークン（白基調・アクセントは青〜紺系のライトテーマ） */
+  --bg: #ffffff;
+  --bg-elev: #f3f6fc;
+  --bg-elev-2: #e7edf8;
+  --border: #dbe1ec;
+  --border-strong: #bcc6d9;
+  --text: #16203a;
+  --text-dim: #5b6782;
+  --text-faint: #98a1b5;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-hover: #1e40af;
+  --accent-deep: #dbeafe;
+  --accent-deep-hover: #c7dbfb;
+  --danger: #dc2626;
+  --warn: #b45309;
+  --bsky: #3b82f6;
+  --fedi: #4f46e5;
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -7,11 +28,24 @@ html, body {
   padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
     "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
-  background: #0f0f11;
-  color: #e8e8f0;
+  background: var(--bg);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
 
 a {
   color: inherit;
+}
+
+/* スクロールバー（ライトテーマ用） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
 }

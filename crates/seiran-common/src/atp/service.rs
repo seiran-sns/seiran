@@ -307,6 +307,7 @@ impl AtpCommitService {
     /// ポスト作成コミット（posts テーブル更新を追加）
     ///
     /// `reply` が Some の場合は ATP `app.bsky.feed.post` の `reply` フィールドを設定する（リプライ投稿）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn commit_post(
         &self,
         actor_id: i64,
@@ -443,6 +444,7 @@ impl AtpCommitService {
     /// `embed` に `BskyEmbed::Record` を渡すと Bsky ネイティブ引用、
     /// `BskyEmbed::External` を渡すと URL カードとして送信する。
     /// DB の posts レコードは呼び出し元で更新済みである前提。
+    #[allow(clippy::too_many_arguments)]
     pub async fn commit_quote(
         &self,
         actor_id: i64,
