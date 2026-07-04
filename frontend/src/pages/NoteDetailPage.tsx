@@ -7,7 +7,7 @@ import NoteCard from "../components/note/NoteCard";
 import ReplyIndicator from "../components/note/ReplyIndicator";
 import Avatar from "../components/note/Avatar";
 import ReactionChips from "../components/note/ReactionChips";
-import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../lib/format";
+import { acct, displayName, formatDate, profilePath, protocolBadge } from "../lib/format";
 import { useRightPane } from "../contexts/RightPaneContext";
 import { useComposer } from "../contexts/ComposerContext";
 import panel from "../components/common/Panel.module.css";
@@ -111,7 +111,7 @@ export default function NoteDetailPage() {
             <button
               className={styles.focalUser}
               onClick={() =>
-                navigate(`/profile?q=${encodeURIComponent(profileQuery(note.user.username, note.user.domain))}`)
+                navigate(profilePath(note.user.username, note.user.domain))
               }
             >
               <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={48} />

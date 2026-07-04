@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
@@ -29,6 +29,13 @@ function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   return user ? <Navigate to="/" replace /> : <>{children}</>;
+}
+
+/** `/@handle` 形式の permalink（#36）。`@` 始まりのときのみプロフィールを表示。 */
+function ProfileByAcct() {
+  const { acct } = useParams<{ acct: string }>();
+  if (!acct || !acct.startsWith("@")) return <Navigate to="/" replace />;
+  return <ProfilePage />;
 }
 
 function AppRoutes() {
@@ -103,6 +110,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <ProfileEditPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/:acct"
+        element={
+          <RequireAuth>
+            <ProfileByAcct />
           </RequireAuth>
         }
       />

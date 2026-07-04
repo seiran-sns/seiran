@@ -62,7 +62,7 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
       <div className={styles.navFooter}>
         <button
           className={styles.userChip}
-          onClick={() => navigate(`/profile?q=${user?.username}`)}
+          onClick={() => user?.username && navigate(`/@${user.username}`)}
           title="自分のプロフィール"
         >
           <span className={styles.userAvatar}>{user?.username?.[0]?.toUpperCase() ?? "?"}</span>

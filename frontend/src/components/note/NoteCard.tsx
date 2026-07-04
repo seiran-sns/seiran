@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Note } from "../../api/client";
-import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../../lib/format";
+import { acct, displayName, formatDate, profilePath, protocolBadge } from "../../lib/format";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import ReactionChips from "./ReactionChips";
@@ -20,7 +20,7 @@ export default function NoteCard({ note, linkToDetail = true }: NoteCardProps) {
 
   function goProfile(e: React.MouseEvent) {
     e.stopPropagation();
-    navigate(`/profile?q=${encodeURIComponent(profileQuery(note.user.username, note.user.domain))}`);
+    navigate(profilePath(note.user.username, note.user.domain));
   }
 
   return (
