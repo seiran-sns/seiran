@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use seiran_common::{get_db_pool, run_migrations, SecretsFile};
+use seiran_common::{get_db_pool, run_migrations, SecretsFile, StreamHub};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Role {
@@ -135,11 +135,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Role::Federation => {
+            // 単独 federation ロールでは WS 購読者（api）が居ないため新規ハブで可。
             let state = seiran_federation_inbox::init_state(
                 pool,
                 &secrets,
                 http_client,
                 local_domain,
+                Arc::new(StreamHub::new()),
             );
             serve(
                 seiran_federation_inbox::router(state),
@@ -163,12 +165,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             seiran_api::spawn_startup_tasks(&api_state);
             seiran_api::spawn_gc_tasks(&api_state);
 
-            // federation ロール
+            // federation ロール（#37: ストリーミングハブを api と共有して跨いで配信）
+            let shared_hub = Arc::clone(&api_state.stream_hub);
             let inbox_state = seiran_federation_inbox::init_state(
                 pool.clone(),
                 &secrets,
                 Arc::clone(&http_client),
                 local_domain.clone(),
+                shared_hub,
             );
 
             // パスが衝突しないため単一ポートに合流できる

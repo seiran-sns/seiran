@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
 import { ComposerProvider } from "./contexts/ComposerContext";
 import { SiteMetaProvider } from "./contexts/SiteMetaContext";
+import { StreamingProvider } from "./contexts/StreamingContext";
 import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HomePage from "./pages/HomePage";
@@ -148,11 +149,13 @@ export default function App() {
   return (
     <SiteMetaProvider>
       <AuthProvider>
-        <RightPaneProvider>
-          <ComposerProvider>
-            <AppRoutes />
-          </ComposerProvider>
-        </RightPaneProvider>
+        <StreamingProvider>
+          <RightPaneProvider>
+            <ComposerProvider>
+              <AppRoutes />
+            </ComposerProvider>
+          </RightPaneProvider>
+        </StreamingProvider>
       </AuthProvider>
     </SiteMetaProvider>
   );

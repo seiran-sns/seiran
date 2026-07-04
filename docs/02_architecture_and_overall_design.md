@@ -385,7 +385,8 @@ AP Note の形式:
 * **配信**: `create_note` でローカルポストを作成した際、受信者集合（著者 ＋ accepted なローカルフォロワー）を計算し、`{"type":"note","body":<NoteResponse>}` をハブへ送出する。各接続は `recipients` に自分の actor ID が含まれるときのみ受信する。
 * **反映**: フロントは受信したポストをホーム TL の先頭へ挿入し、`max-height` を 0 から広げる押し出しアニメーションで表示する（重複は id で排除）。切断時は自動再接続する。
 * **nginx**: `location = /api/streaming` を専用ブロックにし `Upgrade` / `Connection: upgrade` を通す。
-* **今後**: リアクション到達・被フォロー・フォロー承諾の通知は federation-inbox クレートからのハブ共有が必要なため後続対応。
+* **通知**: リアクション到達・被フォロー・フォロー承諾は `federation-inbox` クレートからも配信する。`StreamHub` を `seiran-common` に移設し、`all` ロールでは api の `stream_hub` を inbox の `init_state` に共有渡しして単一ハブで跨いで配信する（`federation` 単独ロールでは購読者が居ないため新規ハブで可）。inbox は該当イベント受理時に対象ローカルアクターだけを受信者集合とし `{"type":"reaction|follow|followAccepted","body":{...}}` を送出する。
+* **フロント購読集約**: WS 接続はアプリ全体で1本に集約する（`StreamingProvider`）。`type==="note"` は登録済みリスナー（ホーム TL）へ、通知系イベントは未読カウント付きで通知リストへ積み、右ペイン「クイック通知」タブに表示する（タブ表示中は既読化）。
 
 ---
 

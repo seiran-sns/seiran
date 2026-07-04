@@ -1,13 +1,16 @@
 import { useEffect, useRef } from "react";
-import { getToken, noteFromStream, Note } from "../api/client";
+import { getToken } from "../api/client";
 
 /**
  * リアルタイム更新の WebSocket 接続（#37）。
- * `note` イベントを受け取ると `onNote` を呼ぶ。切断時は自動再接続する。
+ * 受信イベントを `onEvent(type, body)` に渡す。切断時は自動再接続する。
  */
-export function useStreaming(onNote: (n: Note) => void) {
-  const onNoteRef = useRef(onNote);
-  onNoteRef.current = onNote;
+export function useStreaming(
+  onEvent: (type: string, body: unknown) => void,
+  reconnectKey?: unknown
+) {
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
 
   useEffect(() => {
     const token = getToken();
@@ -24,7 +27,7 @@ export function useStreaming(onNote: (n: Note) => void) {
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
-          if (msg.type === "note" && msg.body) onNoteRef.current(noteFromStream(msg.body));
+          if (msg && typeof msg.type === "string") onEventRef.current(msg.type, msg.body);
         } catch {
           /* 無視 */
         }
@@ -41,5 +44,7 @@ export function useStreaming(onNote: (n: Note) => void) {
       if (retry) window.clearTimeout(retry);
       ws?.close();
     };
-  }, []);
+    // reconnectKey（ログイン状態など）が変わったら張り直す
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reconnectKey]);
 }
