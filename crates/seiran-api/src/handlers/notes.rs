@@ -364,7 +364,7 @@ pub async fn create_note(
                 tokio::spawn(async move {
                     if let Err(e) = deliver_post_to_ap_followers(
                         &ap_client, &db, post_id, actor_id, &local_domain, &ap_pem,
-                        Some(&fallback_text), None,
+                        Some(&fallback_text), None, None,
                     ).await {
                         eprintln!("[create_note] Bsky→Fedi フォールバック配送失敗: {}", e);
                     }
@@ -418,7 +418,7 @@ pub async fn create_note(
     }
 
     // ── リプライ先の種別判定と配信先制御 ─────────────────────────────────────
-    let (deliver_fedi_allowed, deliver_bsky_allowed, bsky_reply) =
+    let (deliver_fedi_allowed, deliver_bsky_allowed, bsky_reply, ap_in_reply_to) =
         if let Some(ref reply_to_id_str) = req.reply_to_id {
             let reply_to_id: i64 = match reply_to_id_str.parse() {
                 Ok(id) => id,
@@ -478,9 +478,9 @@ pub async fn create_note(
                 None
             };
 
-            (fedi_ok, bsky_ok, bsky_reply)
+            (fedi_ok, bsky_ok, bsky_reply, reply_ap_id)
         } else {
-            (true, true, None)
+            (true, true, None, None)
         };
 
     let deliver_fedi = req.deliver_to_fedi.unwrap_or(true) && deliver_fedi_allowed;
@@ -667,11 +667,12 @@ pub async fn create_note(
             .clone()
             .unwrap_or_default();
         let ap_client = state.ap_client.clone();
+        let ap_in_reply_to = ap_in_reply_to.clone();
         tokio::spawn(async move {
             if let Err(e) =
                 deliver_post_to_ap_followers(
                     &ap_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem,
-                    Some(ap_text.as_str()), ap_quote_url.as_deref(),
+                    Some(ap_text.as_str()), ap_quote_url.as_deref(), ap_in_reply_to.as_deref(),
                 )
                 .await
             {
