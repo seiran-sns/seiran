@@ -157,7 +157,7 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -186,7 +186,7 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -238,7 +238,7 @@ impl PostRepository for PgPostRepository {
     async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -282,7 +282,7 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
@@ -307,7 +307,7 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
