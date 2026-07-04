@@ -22,6 +22,7 @@ pub async fn deliver_post_to_ap_followers(
     ap_private_key_pem: &str,
     override_body: Option<&str>,
     quote_url: Option<&str>,
+    in_reply_to: Option<&str>,
 ) -> Result<(), ApError> {
     // 投稿本文・作成日時・投稿者ユーザー名・seiran_post_uuid を取得
     let row = sqlx::query(
@@ -123,6 +124,10 @@ pub async fn deliver_post_to_ap_followers(
     if let Some(q_url) = quote_url {
         note_obj["quoteUrl"] = serde_json::Value::String(q_url.to_string());
         note_obj["_misskey_quote"] = serde_json::Value::String(q_url.to_string());
+    }
+    // リプライ先の AP Note URI（#38: これが無いとリモートで単独ポストに見える）
+    if let Some(irt) = in_reply_to {
+        note_obj["inReplyTo"] = serde_json::Value::String(irt.to_string());
     }
     if let Some(uuid) = seiran_uuid {
         note_obj["seiranUuid"] = serde_json::Value::String(uuid);
