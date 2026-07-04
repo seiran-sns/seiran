@@ -110,9 +110,26 @@
   background: var(--accent-deep-hover);
 }
 
-.ctxCurrent {
+.ctxTrigger {
+  padding: 16px;
+  text-align: center;
+}
+
+.ctxButton {
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  border-radius: 20px;
+  padding: 8px 20px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ctxButton:hover {
   background: var(--accent-deep);
-  border-left: 3px solid var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 /* 投稿主の前後の投稿は、通常は右ペインに表示する。

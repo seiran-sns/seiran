@@ -17,15 +17,25 @@ export default function NoteDetailPage() {
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // 前後の投稿はボタン押下で初めて読み込む（遅延ロード）。
   const [before, setBefore] = useState<Note[]>([]);
   const [after, setAfter] = useState<Note[]>([]);
-  const [ctxLoading, setCtxLoading] = useState(true);
+  const [ctxRequested, setCtxRequested] = useState(false);
+  const [ctxLoading, setCtxLoading] = useState(false);
+  const [ctxLoaded, setCtxLoaded] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
     setLoading(true);
     setError("");
+    // ノートが切り替わったら前後投稿の状態をリセット（再度ボタン押下が必要）。
+    setBefore([]);
+    setAfter([]);
+    setCtxRequested(false);
+    setCtxLoading(false);
+    setCtxLoaded(false);
     api.notes
       .get(id)
       .then((n) => !cancelled && setNote(n))
@@ -36,28 +46,47 @@ export default function NoteDetailPage() {
     };
   }, [id]);
 
-  // 右ペイン「投稿主の前後の投稿」用のコンテキストを取得（Doc5 §2.3 モード1）。
-  useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
+  function loadContext() {
+    if (!id || ctxRequested) return;
+    setCtxRequested(true);
     setCtxLoading(true);
-    setBefore([]);
-    setAfter([]);
     api.notes
       .context(id)
       .then((ctx) => {
-        if (cancelled) return;
         setBefore(ctx.before);
         setAfter(ctx.after);
+        setCtxLoaded(true);
       })
-      .catch(() => {})
-      .finally(() => !cancelled && setCtxLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+      .catch((e) => setError(getErrorMessage(e)))
+      .finally(() => setCtxLoading(false));
+  }
 
   const badge = note ? protocolBadge(note.user.actorType) : null;
+  const contextList = [...before].reverse().concat(after);
+
+  // 「投稿主の前後」ブロック（ボタン → 読み込み → 一覧）。中央・右ペインで共用。
+  function renderContext() {
+    if (!ctxRequested) {
+      return (
+        <div className={styles.ctxTrigger}>
+          <button className={styles.ctxButton} onClick={loadContext}>
+            前後の投稿を表示
+          </button>
+        </div>
+      );
+    }
+    if (ctxLoading) return <p className={panel.message}>読み込み中...</p>;
+    if (ctxLoaded && contextList.length === 0) {
+      return <p className={panel.message}>前後の投稿はありません。</p>;
+    }
+    return (
+      <div>
+        {contextList.map((n) => (
+          <NoteCard key={n.id} note={n} />
+        ))}
+      </div>
+    );
+  }
 
   const center = (
     <>
@@ -78,16 +107,6 @@ export default function NoteDetailPage() {
             <Link to={`/notes/${note.replyId}`} className={styles.upLink}>
               ↩ 返信元のポストを見る
             </Link>
-          )}
-
-          {/* 投稿主の前の投稿（右ペインが隠れる幅でのみ中央に表示） */}
-          {before.length > 0 && (
-            <section className={styles.narrowContext}>
-              <div className={styles.contextLabel}>投稿主の前の投稿</div>
-              {[...before].reverse().map((n) => (
-                <NoteCard key={n.id} note={n} />
-              ))}
-            </section>
           )}
 
           <article className={styles.focal}>
@@ -135,15 +154,11 @@ export default function NoteDetailPage() {
             )}
           </article>
 
-          {/* 投稿主の次の投稿（右ペインが隠れる幅でのみ中央に表示） */}
-          {after.length > 0 && (
-            <section className={styles.narrowContext}>
-              <div className={styles.contextLabel}>投稿主の次の投稿</div>
-              {after.map((n) => (
-                <NoteCard key={n.id} note={n} />
-              ))}
-            </section>
-          )}
+          {/* 投稿主の前後の投稿（右ペインが隠れる幅でのみ中央に表示。ボタン起動）。 */}
+          <section className={styles.narrowContext}>
+            <div className={styles.contextLabel}>投稿主の前後の投稿</div>
+            {renderContext()}
+          </section>
 
           {/* 直系リプライ・引用（専用 API 未実装のためプレースホルダ） */}
           <div className={panel.placeholder}>
@@ -155,8 +170,6 @@ export default function NoteDetailPage() {
     </>
   );
 
-  const contextList = [...before].reverse().concat(after);
-
   const right = (
     <>
       <Tabs
@@ -165,17 +178,7 @@ export default function NoteDetailPage() {
         onChange={setNoteDetailTab}
       />
       {noteDetailTab === 0 ? (
-        ctxLoading ? (
-          <p className={panel.message}>読み込み中...</p>
-        ) : contextList.length === 0 ? (
-          <p className={panel.message}>前後の投稿はありません。</p>
-        ) : (
-          contextList.map((n) => (
-            <div key={n.id} className={n.id === id ? styles.ctxCurrent : ""}>
-              <NoteCard note={n} />
-            </div>
-          ))
-        )
+        renderContext()
       ) : (
         <div className={panel.placeholder}>
           <span className={panel.placeholderIcon}>😀</span>
