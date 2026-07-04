@@ -360,9 +360,14 @@ CREATE TABLE custom_emojis (
     shortcode     VARCHAR(100) NOT NULL UNIQUE,  -- コロン不要: "blobcat" など
     media_file_id BIGINT NOT NULL REFERENCES media_files(id),
     category      VARCHAR(100),
+    tags          TEXT[] NOT NULL DEFAULT '{}',   -- #49: 複数タグ可・ホワイトスペース以外の文字を許可
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- タグ絞り込み用（配列包含）
+CREATE INDEX idx_custom_emojis_tags ON custom_emojis USING GIN (tags);
 ```
+
+- **タグ（#49）**: 1絵文字に複数タグ、別々の絵文字に同じタグを付けられる。使用文字はホワイトスペース以外すべて許可（`-` や日本語も可）。絵文字ピッカーの部分一致マッチ対象。管理 API `POST /api/admin/emojis`（作成時）と `PATCH /api/admin/emojis/:id`（後から編集）で設定でき、`GET /api/admin/emojis` が返す。サーバー側でトリム・空要素除去・重複除去を行う。
 
 ### 1.11 `site_settings` (サイト設定・キーバリューストア)
 

@@ -11,10 +11,23 @@ export default function EmojisPanel() {
 
   const [shortcode, setShortcode] = useState("");
   const [category, setCategory] = useState("");
+  const [tags, setTags] = useState("");
   const [uploaded, setUploaded] = useState<DriveFile | null>(null);
   const [uploading, setUploading] = useState(false);
   const [creating, setCreating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // タグのインライン編集（#49）
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editTags, setEditTags] = useState("");
+
+  /** 空白・カンマ区切りの文字列をタグ配列に変換する（重複・空要素はバックエンドでも正規化）。 */
+  function parseTags(s: string): string[] {
+    return s
+      .split(/[\s,]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
 
   function load() {
     setLoading(true);
@@ -53,15 +66,37 @@ export default function EmojisPanel() {
         shortcode: shortcode.trim(),
         media_file_id: Number(uploaded.id),
         category: category.trim() || undefined,
+        tags: parseTags(tags),
       });
       setShortcode("");
       setCategory("");
+      setTags("");
       setUploaded(null);
       load();
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setCreating(false);
+    }
+  }
+
+  function startEdit(em: CustomEmoji) {
+    setEditId(em.id);
+    setEditTags(em.tags.join(" "));
+    setError("");
+  }
+
+  async function saveTags(em: CustomEmoji) {
+    setBusyId(em.id);
+    setError("");
+    try {
+      await api.admin.updateEmoji(em.id, { tags: parseTags(editTags) });
+      setEditId(null);
+      load();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -109,6 +144,15 @@ export default function EmojisPanel() {
           カテゴリ（任意）
           <input className={styles.input} value={category} onChange={(e) => setCategory(e.target.value)} />
         </label>
+        <label className={styles.label}>
+          タグ（任意・空白またはカンマ区切り。ピッカーの部分一致対象）
+          <input
+            className={styles.input}
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="猫 かわいい blob-cat"
+          />
+        </label>
         <button className={styles.btn} type="submit" disabled={creating || !uploaded || !shortcode.trim()}>
           {creating ? "追加中..." : "絵文字を追加"}
         </button>
@@ -121,7 +165,33 @@ export default function EmojisPanel() {
             <div className={styles.grow}>
               <div className={styles.primaryText}>:{em.shortcode}:</div>
               {em.category && <div className={styles.subText}>{em.category}</div>}
+              {editId === em.id ? (
+                <div className={styles.actions} style={{ marginTop: 6 }}>
+                  <input
+                    className={styles.input}
+                    value={editTags}
+                    onChange={(e) => setEditTags(e.target.value)}
+                    placeholder="空白またはカンマ区切り"
+                    style={{ flex: 1 }}
+                  />
+                  <button className={styles.btn} disabled={busyId === em.id} onClick={() => saveTags(em)}>
+                    保存
+                  </button>
+                  <button className={styles.btnGhost} onClick={() => setEditId(null)}>
+                    取消
+                  </button>
+                </div>
+              ) : (
+                em.tags.length > 0 && (
+                  <div className={styles.subText}>🏷 {em.tags.join(" / ")}</div>
+                )
+              )}
             </div>
+            {editId !== em.id && (
+              <button className={styles.btnGhost} disabled={busyId === em.id} onClick={() => startEdit(em)}>
+                タグ編集
+              </button>
+            )}
             <button className={styles.btnDanger} disabled={busyId === em.id} onClick={() => remove(em)}>
               削除
             </button>

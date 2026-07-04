@@ -137,6 +137,8 @@ export interface CustomEmoji {
   shortcode: string;
   media_file_id: string;
   category: string | null;
+  /** タグ（#49）。ピッカーの部分一致対象。 */
+  tags: string[];
   created_at: string;
 }
 
@@ -504,8 +506,11 @@ export const api = {
     listEmojis() {
       return request<CustomEmoji[]>("GET", "/admin/emojis");
     },
-    createEmoji(body: { shortcode: string; media_file_id: number; category?: string }) {
+    createEmoji(body: { shortcode: string; media_file_id: number; category?: string; tags?: string[] }) {
       return request<CustomEmoji>("POST", "/admin/emojis", body);
+    },
+    updateEmoji(id: string, body: { category?: string; tags?: string[] }) {
+      return request<CustomEmoji>("PATCH", `/admin/emojis/${encodeURIComponent(id)}`, body);
     },
     deleteEmoji(id: string) {
       return request<{ ok: boolean }>("DELETE", `/admin/emojis/${encodeURIComponent(id)}`);

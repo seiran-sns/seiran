@@ -20,6 +20,7 @@ struct EmojiRow {
     shortcode: String,
     media_file_id: i64,
     category: Option<String>,
+    tags: Vec<String>,
     created_at: DateTime<Utc>,
 }
 
@@ -31,6 +32,8 @@ pub struct EmojiResponse {
     pub shortcode: String,
     pub media_file_id: String,
     pub category: Option<String>,
+    /// タグ（#49）。ピッカーの部分一致対象。
+    pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -41,6 +44,7 @@ impl From<EmojiRow> for EmojiResponse {
             shortcode: r.shortcode,
             media_file_id: r.media_file_id.to_string(),
             category: r.category,
+            tags: r.tags,
             created_at: r.created_at,
         }
     }
@@ -53,6 +57,35 @@ pub struct CreateEmojiRequest {
     pub shortcode: String,
     pub media_file_id: i64,
     pub category: Option<String>,
+    /// タグ（#49）。省略時は空。
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateEmojiRequest {
+    /// いずれも省略時は現在値を保持する。
+    pub category: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+/// タグを正規化する（#49）。
+/// トリム → 空要素除去 → 重複除去。ホワイトスペースを含むタグは不正として弾く。
+fn normalize_tags(tags: &[String]) -> Result<Vec<String>, ApiError> {
+    let mut out: Vec<String> = Vec::new();
+    for t in tags {
+        let t = t.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if t.chars().any(char::is_whitespace) {
+            return Err(ApiError::BadRequest("INVALID_TAG".to_owned()));
+        }
+        let t = t.to_string();
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    Ok(out)
 }
 
 // ─── エラー変換 ───────────────────────────────────────────────────────────
@@ -77,7 +110,7 @@ pub async fn list_emojis(
     require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
 
     let rows: Vec<EmojiRow> = sqlx::query_as::<_, EmojiRow>(
-        "SELECT id, shortcode, media_file_id, category, created_at
+        "SELECT id, shortcode, media_file_id, category, tags, created_at
          FROM custom_emojis
          ORDER BY id",
     )
@@ -102,22 +135,57 @@ pub async fn create_emoji(
         return Err(ApiError::BadRequest("INVALID_SHORTCODE".to_owned()));
     }
 
+    let tags = normalize_tags(req.tags.as_deref().unwrap_or(&[]))?;
     let id = generate_snowflake_id(Utc::now());
 
     let row: EmojiRow = sqlx::query_as::<_, EmojiRow>(
-        "INSERT INTO custom_emojis (id, shortcode, media_file_id, category)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, shortcode, media_file_id, category, created_at",
+        "INSERT INTO custom_emojis (id, shortcode, media_file_id, category, tags)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, shortcode, media_file_id, category, tags, created_at",
     )
     .bind(id)
     .bind(&req.shortcode)
     .bind(req.media_file_id)
     .bind(req.category.as_deref())
+    .bind(&tags)
     .fetch_one(&state.db)
     .await
     .map_err(map_emoji_db_error)?;
 
     Ok(Json(row.into()))
+}
+
+/// PATCH /api/admin/emojis/:id — カテゴリ・タグを更新する（#49）。
+pub async fn update_emoji(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<UpdateEmojiRequest>,
+) -> Result<Json<EmojiResponse>, ApiError> {
+    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+
+    let tags = match req.tags {
+        Some(ref t) => Some(normalize_tags(t)?),
+        None => None,
+    };
+
+    // COALESCE で「省略フィールドは現在値を保持」する（$3/$4 が NULL なら既存値）。
+    let row: Option<EmojiRow> = sqlx::query_as::<_, EmojiRow>(
+        "UPDATE custom_emojis
+         SET category = COALESCE($2, category),
+             tags     = COALESCE($3, tags)
+         WHERE id = $1
+         RETURNING id, shortcode, media_file_id, category, tags, created_at",
+    )
+    .bind(id)
+    .bind(req.category.as_deref())
+    .bind(tags.as_deref())
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    row.map(|r| Json(r.into()))
+        .ok_or(ApiError::NotFound("EMOJI_NOT_FOUND"))
 }
 
 /// DELETE /api/admin/emojis/:id
