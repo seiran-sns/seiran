@@ -63,6 +63,10 @@
   color: var(--text-dim);
 }
 
+.focalReply {
+  margin: 0 0 10px;
+}
+
 .focalBody {
   margin: 0 0 12px;
   font-size: 1.15rem;

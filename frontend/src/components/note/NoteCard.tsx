@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Note } from "../../api/client";
 import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../../lib/format";
+import ReplyIndicator from "./ReplyIndicator";
 import styles from "./NoteCard.module.css";
 
 interface NoteCardProps {
@@ -54,11 +55,7 @@ export default function NoteCard({ note, linkToDetail = true }: NoteCardProps) {
 
       {(note.replyId || note.quoteId) && (
         <div className={styles.relations}>
-          {note.replyId && (
-            <Link to={`/notes/${note.replyId}`} className={styles.relLink} onClick={(e) => e.stopPropagation()}>
-              ↩ 返信元
-            </Link>
-          )}
+          {note.replyId && <ReplyIndicator replyId={note.replyId} />}
           {note.quoteId && (
             <Link to={`/notes/${note.quoteId}`} className={styles.relLink} onClick={(e) => e.stopPropagation()}>
               ❝ 引用元

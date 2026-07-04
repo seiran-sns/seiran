@@ -4,6 +4,7 @@ import { api, Note, getErrorMessage } from "../api/client";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
+import ReplyIndicator from "../components/note/ReplyIndicator";
 import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../lib/format";
 import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
@@ -102,13 +103,6 @@ export default function NoteDetailPage() {
 
       {note && (
         <>
-          {/* リプライ元への垂直遡り（Doc5 §2.3） */}
-          {note.replyId && (
-            <Link to={`/notes/${note.replyId}`} className={styles.upLink}>
-              ↩ 返信元のポストを見る
-            </Link>
-          )}
-
           <article className={styles.focal}>
             <button
               className={styles.focalUser}
@@ -127,6 +121,13 @@ export default function NoteDetailPage() {
                 </span>
               </span>
             </button>
+
+            {/* リプライインジケータ（↩️ + ホバーで返信先プレビュー・issue #20） */}
+            {note.replyId && (
+              <div className={styles.focalReply}>
+                <ReplyIndicator replyId={note.replyId} />
+              </div>
+            )}
 
             <p className={styles.focalBody}>{note.text}</p>
 
