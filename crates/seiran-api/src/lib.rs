@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::cors::{Any, CorsLayer};
-use axum::{routing::{delete, get, patch, post}, Router};
+use axum::{routing::{get, patch, post}, Router};
 use sqlx::PgPool;
 
 use seiran_common::{
@@ -177,7 +177,8 @@ pub fn router(state: AppState) -> Router {
             get(handlers::admin::emojis::list_emojis)
             .post(handlers::admin::emojis::create_emoji))
         .route("/api/admin/emojis/:id",
-            delete(handlers::admin::emojis::delete_emoji))
+            patch(handlers::admin::emojis::update_emoji)
+            .delete(handlers::admin::emojis::delete_emoji))
         // ドライブ（メディアアップロード）
         .route("/api/drive/files/create", post(handlers::drive::create_drive_file))
         // 認証
