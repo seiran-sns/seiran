@@ -29,6 +29,11 @@ export function profileQuery(username: string, domain?: string): string {
     : username;
 }
 
+/** プロフィールの permalink パス（Misskey 互換の `/@handle` 形式・#36）。 */
+export function profilePath(username: string, domain?: string): string {
+  return `/@${profileQuery(username, domain)}`;
+}
+
 /** アクター種別に対応するプロトコルバッジ（絵文字 + ラベル）。 */
 export function protocolBadge(actorType: string): { icon: string; label: string } | null {
   switch (actorType) {

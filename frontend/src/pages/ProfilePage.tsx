@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, UserProfile, getErrorMessage } from "../api/client";
 import Modal from "../components/common/Modal";
 import AppShell from "../components/layout/AppShell";
@@ -12,8 +12,10 @@ type FollowStatus = "not_following" | "pending" | "accepted";
 
 export default function ProfilePage() {
   const [searchParams] = useSearchParams();
+  const { acct } = useParams<{ acct: string }>();
   const navigate = useNavigate();
-  const q = searchParams.get("q") ?? "";
+  // permalink `/@handle`（#36）を優先し、旧 `/profile?q=` も後方互換で受ける。
+  const q = acct ? acct.replace(/^@/, "") : searchParams.get("q") ?? "";
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,7 +74,7 @@ export default function ProfilePage() {
   function warpToReal() {
     if (profile?.bridge_real_handle) {
       setBridgeModalOpen(false);
-      navigate(`/profile?q=${encodeURIComponent(profile.bridge_real_handle)}`);
+      navigate(`/${profile.bridge_real_handle}`);
     }
   }
 

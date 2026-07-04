@@ -65,7 +65,7 @@ export default function ProfileEditPage() {
         ...(avatar ? { avatar_media_id: Number(avatar.id) } : {}),
       });
       setSaved(true);
-      setTimeout(() => navigate(`/profile?q=${encodeURIComponent(user?.username ?? "")}`), 500);
+      setTimeout(() => navigate(`/@${user?.username ?? ""}`), 500);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
