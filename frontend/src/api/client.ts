@@ -127,6 +127,9 @@ export interface SiteSettings {
   smtp_password_set: boolean;
   smtp_from: string;
   require_email_verification: string;
+  site_name: string;
+  site_color: string;
+  site_icon_url: string;
 }
 
 export interface CustomEmoji {
@@ -303,6 +306,8 @@ export interface MetaResponse {
     miauth: boolean;
   };
   requireEmailVerification: boolean;
+  siteColor?: string;
+  siteIconUrl?: string;
 }
 
 export const api = {
@@ -462,6 +467,9 @@ export const api = {
       smtp_password: string;
       smtp_from: string;
       require_email_verification: string;
+      site_name: string;
+      site_color: string;
+      site_icon_url: string;
     }>) {
       return request<SiteSettings>("PATCH", "/admin/site-settings", patch);
     },

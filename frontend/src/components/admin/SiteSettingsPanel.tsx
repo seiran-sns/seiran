@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { api, getErrorMessage } from "../../api/client";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
@@ -17,6 +17,13 @@ export default function SiteSettingsPanel() {
   const [from, setFrom] = useState("");
   const [requireVerify, setRequireVerify] = useState(false);
 
+  // サイト外観（#30）
+  const [siteName, setSiteName] = useState("");
+  const [siteColor, setSiteColor] = useState("");
+  const [siteIconUrl, setSiteIconUrl] = useState("");
+  const [uploadingIcon, setUploadingIcon] = useState(false);
+  const iconRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     api.admin
       .getSiteSettings()
@@ -27,10 +34,29 @@ export default function SiteSettingsPanel() {
         setFrom(s.smtp_from);
         setPasswordSet(s.smtp_password_set);
         setRequireVerify(s.require_email_verification === "true");
+        setSiteName(s.site_name);
+        setSiteColor(s.site_color);
+        setSiteIconUrl(s.site_icon_url);
       })
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
   }, []);
+
+  async function onIcon(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploadingIcon(true);
+    setError("");
+    try {
+      const f = await api.media.upload(file, "avatar");
+      setSiteIconUrl(f.url);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setUploadingIcon(false);
+    }
+  }
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -44,6 +70,9 @@ export default function SiteSettingsPanel() {
         smtp_username: username,
         smtp_from: from,
         require_email_verification: requireVerify ? "true" : "false",
+        site_name: siteName,
+        site_color: siteColor,
+        site_icon_url: siteIconUrl,
       };
       // パスワードは入力があったときだけ送る（未入力なら既存値を維持）。
       if (password) patch.smtp_password = password;
@@ -62,10 +91,41 @@ export default function SiteSettingsPanel() {
 
   return (
     <div className={styles.body}>
-      <h2 className={styles.sectionTitle}>サイト設定（SMTP・登録）</h2>
+      <h2 className={styles.sectionTitle}>サイト設定</h2>
       {error && <p className={styles.error}>{error}</p>}
       {saved && <p className={styles.success}>保存しました。</p>}
-      <form className={styles.card} onSubmit={save}>
+
+      <form onSubmit={save}>
+        <div className={styles.card}>
+          <div style={{ fontWeight: 700, fontSize: "0.9rem", marginBottom: 12 }}>サイト外観</div>
+          <label className={styles.label}>
+            サイト名称
+            <input className={styles.input} value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="seiran" />
+          </label>
+          <label className={styles.label} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            サイトカラー
+            <input type="color" value={siteColor || "#2563eb"} onChange={(e) => setSiteColor(e.target.value)} style={{ width: 48, height: 32, padding: 0, border: "none", background: "none" }} />
+            <input className={styles.input} value={siteColor} onChange={(e) => setSiteColor(e.target.value)} placeholder="#2563eb（空欄で既定色）" style={{ flex: 1 }} />
+          </label>
+          <label className={styles.label}>
+            サイトアイコン
+            <span className={styles.actions} style={{ marginTop: 4 }}>
+              <input ref={iconRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onIcon} />
+              {siteIconUrl && <img src={siteIconUrl} alt="" style={{ width: 40, height: 40, borderRadius: 8 }} />}
+              <button type="button" className={styles.btnGhost} onClick={() => iconRef.current?.click()} disabled={uploadingIcon}>
+                {uploadingIcon ? "アップロード中..." : siteIconUrl ? "アイコンを変更" : "アイコンを選択"}
+              </button>
+              {siteIconUrl && (
+                <button type="button" className={styles.btnGhost} onClick={() => setSiteIconUrl("")}>
+                  削除
+                </button>
+              )}
+            </span>
+          </label>
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>SMTP・登録</div>
+        <div className={styles.card}>
         <label className={styles.label}>
           SMTP ホスト
           <input className={styles.input} value={host} onChange={(e) => setHost(e.target.value)} placeholder="smtp.resend.com" />
@@ -99,6 +159,8 @@ export default function SiteSettingsPanel() {
         <p className={styles.hint}>
           メール確認を必須にする場合は SMTP 設定が完了している必要があります。
         </p>
+        </div>
+
         <button className={styles.btn} type="submit" disabled={saving}>
           {saving ? "保存中..." : "保存"}
         </button>
