@@ -379,6 +379,14 @@ AP Note の形式:
 * **公開**: `POST /api/meta`（公開）が `name`（`site_name`、未設定時 `seiran`）・`siteColor`・`siteIconUrl` を返す。
 * **反映**: フロントは `site_color` から派生アクセント色（`--accent` 系 CSS 変数）を `color-mix` で生成して適用し、左ナビのロゴをサイト名称＋アイコンに差し替える。`site_color` 未設定時は既定のアクセント色を使用する。
 
+### 2.7 リアルタイム更新のストリーミング（#37）
+タイムラインの即時反映のため、プロセス内ブロードキャストハブ（`StreamHub`）と WebSocket を用いる。
+* **接続**: `GET /api/streaming?token=<JWT>`（ブラウザ WS は Authorization ヘッダを付けられないためトークンはクエリ）。サーバーはトークンからローカルアクター ID を解決し、ハブを購読する。
+* **配信**: `create_note` でローカルポストを作成した際、受信者集合（著者 ＋ accepted なローカルフォロワー）を計算し、`{"type":"note","body":<NoteResponse>}` をハブへ送出する。各接続は `recipients` に自分の actor ID が含まれるときのみ受信する。
+* **反映**: フロントは受信したポストをホーム TL の先頭へ挿入し、`max-height` を 0 から広げる押し出しアニメーションで表示する（重複は id で排除）。切断時は自動再接続する。
+* **nginx**: `location = /api/streaming` を専用ブロックにし `Upgrade` / `Connection: upgrade` を通す。
+* **今後**: リアクション到達・被フォロー・フォロー承諾の通知は federation-inbox クレートからのハブ共有が必要なため後続対応。
+
 ---
 
 ## 3. 統一ポストID 採番ルール

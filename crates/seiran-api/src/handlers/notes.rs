@@ -683,7 +683,7 @@ pub async fn create_note(
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
     let final_attachments = att_map.remove(&post_id).unwrap_or_default();
 
-    Json(NoteResponse {
+    let note_resp = NoteResponse {
         id: post_id.to_string(),
         text,
         created_at: now.to_rfc3339(),
@@ -694,8 +694,29 @@ pub async fn create_note(
         reply_id: reply_to_id_i64.map(|i| i.to_string()),
         parent_original_id: None,
         reactions: vec![],
-    })
-    .into_response()
+    };
+
+    // リアルタイム配信（#37）: 著者 + accepted なローカルフォロワーの stream へ
+    {
+        let mut recipients: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        recipients.insert(actor_id);
+        if let Ok(rows) = sqlx::query_scalar::<_, i64>(
+            "SELECT f.follower_actor_id FROM follows f
+             JOIN actors a ON a.id = f.follower_actor_id
+             WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
+        )
+        .bind(actor_id)
+        .fetch_all(&state.db)
+        .await
+        {
+            recipients.extend(rows);
+        }
+        if let Ok(v) = serde_json::to_value(&note_resp) {
+            state.stream_hub.publish_note(recipients, &v);
+        }
+    }
+
+    Json(note_resp).into_response()
 }
 
 pub async fn home_timeline(

@@ -10,6 +10,7 @@ pub mod mailer;
 pub mod middleware;
 pub mod handlers;
 pub mod search;
+pub mod streaming;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,6 +33,7 @@ use seiran_common::repository::{
 
 use handlers::miauth::MiAuthSession;
 use search::InMemorySearchStore;
+use streaming::StreamHub;
 
 // =====================================================================
 // アプリケーション状態
@@ -60,6 +62,8 @@ pub struct AppState {
     pub media_files: Arc<dyn MediaFileRepository>,
     pub site_settings: Arc<dyn SiteSettingsRepository>,
     pub search_store: Arc<InMemorySearchStore>,
+    /// リアルタイム更新（#37）のストリーミングハブ。
+    pub stream_hub: Arc<StreamHub>,
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -135,6 +139,7 @@ pub async fn init_state(
         media_files,
         site_settings,
         search_store: Arc::new(InMemorySearchStore::new()),
+        stream_hub: Arc::new(StreamHub::new()),
     }
 }
 
@@ -189,6 +194,7 @@ pub fn router(state: AppState) -> Router {
         // Misskey 互換エイリアス
         .route("/api/notes/timeline", get(handlers::notes::home_timeline))
         .route("/api/notes/search", get(handlers::search::search_notes))
+        .route("/api/streaming", get(handlers::streaming::streaming))
         .route("/api/notes/:id", get(handlers::notes::get_note))
         .route("/api/notes/:id/context", get(handlers::notes::note_context))
         // ActivityPub Note エンドポイント（nginx が AP Accept ヘッダーのみをここへ転送）

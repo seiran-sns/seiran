@@ -264,6 +264,11 @@ function normalizeNote(r: RawNote): Note {
   };
 }
 
+/** ストリーミング（#37）で受け取った note ペイロードを Note に正規化する。 */
+export function noteFromStream(body: unknown): Note {
+  return normalizeNote(body as RawNote);
+}
+
 export interface FollowResponse {
   status: string;
   target_uri: string;
