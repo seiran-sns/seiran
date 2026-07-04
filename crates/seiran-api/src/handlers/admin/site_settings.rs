@@ -21,6 +21,10 @@ pub struct SiteSettingsResponse {
     pub smtp_password_set: bool,
     pub smtp_from: String,
     pub require_email_verification: String,
+    // サイト外観（#30）
+    pub site_name: String,
+    pub site_color: String,
+    pub site_icon_url: String,
 }
 
 fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
@@ -37,6 +41,9 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .get("require_email_verification")
             .cloned()
             .unwrap_or_else(|| "false".to_string()),
+        site_name: settings.get("site_name").cloned().unwrap_or_default(),
+        site_color: settings.get("site_color").cloned().unwrap_or_default(),
+        site_icon_url: settings.get("site_icon_url").cloned().unwrap_or_default(),
     }
 }
 
@@ -50,6 +57,9 @@ pub struct UpdateSiteSettingsRequest {
     pub smtp_password: Option<String>,
     pub smtp_from: Option<String>,
     pub require_email_verification: Option<String>,
+    pub site_name: Option<String>,
+    pub site_color: Option<String>,
+    pub site_icon_url: Option<String>,
 }
 
 // ─── ハンドラ ─────────────────────────────────────────────────────────────
@@ -85,6 +95,9 @@ pub async fn update_site_settings(
         req.smtp_password.as_deref().map(|v| ("smtp_password", v.to_string())),
         req.smtp_from.as_deref().map(|v| ("smtp_from", v.to_string())),
         req.require_email_verification.as_deref().map(|v| ("require_email_verification", v.to_string())),
+        req.site_name.as_deref().map(|v| ("site_name", v.to_string())),
+        req.site_color.as_deref().map(|v| ("site_color", v.to_string())),
+        req.site_icon_url.as_deref().map(|v| ("site_icon_url", v.to_string())),
     ]
     .into_iter()
     .flatten()

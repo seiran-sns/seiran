@@ -4,6 +4,7 @@ import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
 import { ComposerProvider } from "./contexts/ComposerContext";
+import { SiteMetaProvider } from "./contexts/SiteMetaContext";
 import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HomePage from "./pages/HomePage";
@@ -130,12 +131,14 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <RightPaneProvider>
-        <ComposerProvider>
-          <AppRoutes />
-        </ComposerProvider>
-      </RightPaneProvider>
-    </AuthProvider>
+    <SiteMetaProvider>
+      <AuthProvider>
+        <RightPaneProvider>
+          <ComposerProvider>
+            <AppRoutes />
+          </ComposerProvider>
+        </RightPaneProvider>
+      </AuthProvider>
+    </SiteMetaProvider>
   );
 }

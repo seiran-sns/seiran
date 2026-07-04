@@ -373,6 +373,12 @@ AP Note の形式:
 * アバター未設定・取得失敗時はフロントが頭文字プレースホルダにフォールバックする。
 * Bsky リモートアクターのアバター取り込みは今後対応（現状は未設定→プレースホルダ）。
 
+### 2.6 サイト外観設定（名称・カラー・アイコン）
+管理者が `site_settings` に保存するサイト外観を、公式フロントが起動時に取得して反映する。
+* **保存**: `GET/PATCH /api/admin/site-settings`（admin 限定）が `site_name` / `site_color` / `site_icon_url` を管理する。アイコンは drive にアップロードした画像の CDN URL を `site_icon_url` に格納する。
+* **公開**: `POST /api/meta`（公開）が `name`（`site_name`、未設定時 `seiran`）・`siteColor`・`siteIconUrl` を返す。
+* **反映**: フロントは `site_color` から派生アクセント色（`--accent` 系 CSS 変数）を `color-mix` で生成して適用し、左ナビのロゴをサイト名称＋アイコンに差し替える。`site_color` 未設定時は既定のアクセント色を使用する。
+
 ---
 
 ## 3. 統一ポストID 採番ルール

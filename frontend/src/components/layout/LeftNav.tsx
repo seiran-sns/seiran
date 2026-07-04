@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import { isAdminRole } from "../../lib/roles";
 import styles from "./AppShell.module.css";
 
@@ -17,6 +18,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function LeftNav({ onCompose }: { onCompose: () => void }) {
   const { user, logout } = useAuth();
+  const site = useSiteMeta();
   const navigate = useNavigate();
 
   const navItems = isAdminRole(user?.role)
@@ -30,7 +32,10 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
 
   return (
     <nav className={styles.leftNav}>
-      <div className={styles.logo}>seiran</div>
+      <div className={styles.logo}>
+        {site.iconUrl && <img src={site.iconUrl} alt="" className={styles.logoIcon} />}
+        <span className={styles.logoText}>{site.name}</span>
+      </div>
 
       <ul className={styles.navList}>
         {navItems.map((item) => (
