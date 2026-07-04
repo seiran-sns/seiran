@@ -2,6 +2,7 @@ pub mod admin;
 pub mod auth;
 pub mod drive;
 pub mod email_verify;
+pub mod favicon;
 pub mod follows;
 pub mod meta;
 pub mod miauth;

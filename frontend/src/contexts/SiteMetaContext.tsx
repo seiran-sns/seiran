@@ -30,6 +30,17 @@ function applyColor(color: string) {
   root.setProperty("--accent-deep-hover", `color-mix(in srgb, ${color} 24%, white)`);
 }
 
+/** サイトアイコン（#42）を favicon (<link rel="icon">) に反映する。空なら既定へ戻す。 */
+function applyFavicon(iconUrl: string) {
+  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "icon";
+    document.head.appendChild(link);
+  }
+  link.href = iconUrl || "/favicon.ico";
+}
+
 export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
   const [meta, setMeta] = useState<SiteMeta>({ name: "seiran", iconUrl: "", color: "" });
 
@@ -41,6 +52,7 @@ export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
         const next = { name: m.name || "seiran", iconUrl: m.siteIconUrl ?? "", color: m.siteColor ?? "" };
         setMeta(next);
         applyColor(next.color);
+        applyFavicon(next.iconUrl);
         if (next.name) document.title = next.name;
       })
       .catch(() => {});

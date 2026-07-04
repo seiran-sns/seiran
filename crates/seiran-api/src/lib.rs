@@ -151,6 +151,8 @@ pub fn router(state: AppState) -> Router {
         .allow_headers(Any);
 
     Router::new()
+        // サイトアイコンを favicon として返す（#42）
+        .route("/favicon.ico", get(handlers::favicon::favicon))
         // セットアップ（初回管理者作成）
         .route("/api/setup/status", get(handlers::setup::setup_status))
         .route("/api/setup", post(handlers::setup::setup))
