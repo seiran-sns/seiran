@@ -8,5 +8,6 @@ pub mod miauth;
 pub mod notes;
 pub mod search;
 pub mod setup;
+pub mod streaming;
 pub mod users;
 pub mod xrpc;

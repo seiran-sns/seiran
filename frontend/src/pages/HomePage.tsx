@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, Note } from "../api/client";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
@@ -7,6 +7,7 @@ import PostComposer from "../components/note/PostComposer";
 import NotificationsPanel from "../components/right/NotificationsPanel";
 import TrendsSearchPanel from "../components/right/TrendsSearchPanel";
 import { useRightPane } from "../contexts/RightPaneContext";
+import { useStreaming } from "../hooks/useStreaming";
 import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
@@ -16,7 +17,9 @@ export default function HomePage() {
   const [feed, setFeed] = useState<Feed>("home");
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
+  const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
   const { timelineTab, setTimelineTab } = useRightPane();
+  const timers = useRef<number[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,9 +33,25 @@ export default function HomePage() {
     };
   }, [feed]);
 
-  function prepend(note: Note) {
-    setNotes((prev) => [note, ...prev]);
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+
+  function prepend(note: Note, animate = false) {
+    setNotes((prev) => (prev.some((n) => n.id === note.id) ? prev : [note, ...prev]));
+    if (animate) {
+      setEnteringIds((prev) => new Set(prev).add(note.id));
+      const t = window.setTimeout(() => {
+        setEnteringIds((prev) => {
+          const next = new Set(prev);
+          next.delete(note.id);
+          return next;
+        });
+      }, 450);
+      timers.current.push(t);
+    }
   }
+
+  // リアルタイム更新（#37）: ストリームで届いたポストをアニメ付きで先頭挿入。
+  useStreaming((n) => prepend(n, true));
 
   const center = (
     <>
@@ -62,6 +81,7 @@ export default function HomePage() {
       <NoteList
         notes={notes}
         loading={loading}
+        enteringIds={enteringIds}
         emptyMessage={
           feed === "home"
             ? "フォロー中のユーザーの投稿がここに表示されます。"

@@ -10,7 +10,8 @@ export default defineConfig({
     proxy: {
       // ローカル開発（cargo run 直接起動）時のみ有効。
       // Docker + nginx 構成では nginx がルーティングを担うため不使用。
-      "/api": "http://localhost:3000",
+      // ws:true で /api/streaming の WebSocket もプロキシする（#37）。
+      "/api": { target: "http://localhost:3000", ws: true },
       "/miauth": "http://localhost:3000",
     },
   },

@@ -1,0 +1,19 @@
+/* リアルタイム挿入時の押し出しアニメーション（#37）。
+   max-height を 0 から広げることで、下のポストが押し下げられていく。 */
+.entering {
+  animation: noteEnter 0.4s ease-out;
+  overflow: hidden;
+}
+
+@keyframes noteEnter {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    max-height: 800px;
+    transform: translateY(0);
+  }
+}
