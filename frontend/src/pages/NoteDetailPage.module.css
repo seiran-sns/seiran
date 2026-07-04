@@ -96,6 +96,29 @@
   display: block;
 }
 
+.focalActions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.focalReplyBtn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: 20px;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.focalReplyBtn:hover {
+  border-color: var(--accent-strong);
+  color: var(--accent);
+  background: var(--accent-deep);
+}
+
 .quoteLink,
 .originalLink {
   display: inline-block;

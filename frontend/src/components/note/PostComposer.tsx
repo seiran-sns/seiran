@@ -1,14 +1,16 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { api, DriveFile, Note, getErrorMessage } from "../../api/client";
-import { calcRemaining } from "../../lib/format";
+import { acct, calcRemaining, displayName } from "../../lib/format";
 import styles from "./PostComposer.module.css";
 
 interface PostComposerProps {
   onPosted?: (note: Note) => void;
   autoFocus?: boolean;
+  /** 指定時は返信として投稿する（配信先は元ポストのネットワークに自動ルーティング）。 */
+  replyTo?: Note;
 }
 
-export default function PostComposer({ onPosted, autoFocus }: PostComposerProps) {
+export default function PostComposer({ onPosted, autoFocus, replyTo }: PostComposerProps) {
   const [text, setText] = useState("");
   const [deliverFedi, setDeliverFedi] = useState(true);
   const [deliverBsky, setDeliverBsky] = useState(true);
@@ -23,7 +25,10 @@ export default function PostComposer({ onPosted, autoFocus }: PostComposerProps)
     if (autoFocus) textareaRef.current?.focus();
   }, [autoFocus]);
 
-  const remaining = calcRemaining(text, deliverBsky);
+  // 返信時は配信先が元ポストのネットワークに固定される。fedi リモートへの返信のみ
+  // Fedi の緩い上限、それ以外（bsky / ローカル・seiran＝両方）は Bsky の厳しい上限を適用。
+  const effectiveBsky = replyTo ? replyTo.user.actorType !== "fedi" : deliverBsky;
+  const remaining = calcRemaining(text, effectiveBsky);
   const overLimit = remaining < 0;
 
   async function handlePost(e: FormEvent) {
@@ -33,7 +38,13 @@ export default function PostComposer({ onPosted, autoFocus }: PostComposerProps)
     setPosting(true);
     try {
       const attachmentIds = attached ? [attached.id] : [];
-      const note = await api.notes.create(text.trim(), deliverFedi, deliverBsky, attachmentIds);
+      const note = await api.notes.create(
+        text.trim(),
+        replyTo ? true : deliverFedi,
+        replyTo ? true : deliverBsky,
+        attachmentIds,
+        replyTo?.id
+      );
       setText("");
       setAttached(null);
       onPosted?.(note);
@@ -69,6 +80,15 @@ export default function PostComposer({ onPosted, autoFocus }: PostComposerProps)
 
   return (
     <form onSubmit={handlePost} className={styles.form}>
+      {replyTo && (
+        <div className={styles.replyBanner}>
+          <span className={styles.replyTo}>
+            返信先: <strong>{displayName(replyTo)}</strong> {acct(replyTo)}
+          </span>
+          <span className={styles.replySnippet}>{replyTo.text}</span>
+        </div>
+      )}
+
       <input
         ref={fileInputRef}
         type="file"
@@ -82,25 +102,29 @@ export default function PostComposer({ onPosted, autoFocus }: PostComposerProps)
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         className={styles.textarea}
-        placeholder="いまどうしてる？"
+        placeholder={replyTo ? "返信を入力" : "いまどうしてる？"}
         rows={3}
       />
 
       <div className={styles.scopeRow}>
-        <button
-          type="button"
-          className={`${styles.scopeBtn} ${deliverFedi ? styles.scopeActive : ""}`}
-          onClick={() => setDeliverFedi((v) => !v)}
-        >
-          Fedi 🌐
-        </button>
-        <button
-          type="button"
-          className={`${styles.scopeBtn} ${deliverBsky ? styles.scopeActive : ""}`}
-          onClick={() => setDeliverBsky((v) => !v)}
-        >
-          Bsky 🦋
-        </button>
+        {!replyTo && (
+          <>
+            <button
+              type="button"
+              className={`${styles.scopeBtn} ${deliverFedi ? styles.scopeActive : ""}`}
+              onClick={() => setDeliverFedi((v) => !v)}
+            >
+              Fedi 🌐
+            </button>
+            <button
+              type="button"
+              className={`${styles.scopeBtn} ${deliverBsky ? styles.scopeActive : ""}`}
+              onClick={() => setDeliverBsky((v) => !v)}
+            >
+              Bsky 🦋
+            </button>
+          </>
+        )}
         <button
           type="button"
           className={styles.attachBtn}
@@ -110,6 +134,15 @@ export default function PostComposer({ onPosted, autoFocus }: PostComposerProps)
         >
           📎
         </button>
+        {replyTo && (
+          <span className={styles.replyScopeNote}>
+            {replyTo.user.actorType === "fedi"
+              ? "Fediverse に返信"
+              : replyTo.user.actorType === "bsky"
+              ? "Bluesky に返信"
+              : "元ポストのネットワークに返信"}
+          </span>
+        )}
         {uploading && <span className={styles.spinner} />}
       </div>
 
@@ -127,9 +160,11 @@ export default function PostComposer({ onPosted, autoFocus }: PostComposerProps)
         </div>
       )}
 
-      {deliverBsky && overLimit && (
+      {effectiveBsky && overLimit && (
         <p className={styles.guide}>
-          Bluesky の文字数制限を超えています。Bsky をオフにすると投稿できます。
+          {replyTo
+            ? "Bluesky の文字数制限を超えています。"
+            : "Bluesky の文字数制限を超えています。Bsky をオフにすると投稿できます。"}
         </p>
       )}
 
