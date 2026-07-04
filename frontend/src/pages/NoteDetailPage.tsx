@@ -9,6 +9,7 @@ import Avatar from "../components/note/Avatar";
 import ReactionChips from "../components/note/ReactionChips";
 import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../lib/format";
 import { useRightPane } from "../contexts/RightPaneContext";
+import { useComposer } from "../contexts/ComposerContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./NoteDetailPage.module.css";
 
@@ -16,6 +17,7 @@ export default function NoteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { noteDetailTab, setNoteDetailTab } = useRightPane();
+  const { openReply } = useComposer();
 
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
@@ -155,6 +157,12 @@ export default function NoteDetailPage() {
             )}
 
             <ReactionChips reactions={note.reactions} />
+
+            <div className={styles.focalActions}>
+              <button className={styles.focalReplyBtn} onClick={() => openReply(note)}>
+                💬 返信
+              </button>
+            </div>
           </article>
 
           {/* 投稿主の前後の投稿（右ペインが隠れる幅でのみ中央に表示。ボタン起動）。 */}

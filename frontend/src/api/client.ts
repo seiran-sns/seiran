@@ -361,13 +361,20 @@ export const api = {
     async get(id: string) {
       return normalizeNote(await request<RawNote>("GET", `/notes/${encodeURIComponent(id)}`));
     },
-    async create(text: string, deliverToFedi: boolean = true, deliverToBsky: boolean = true, attachmentIds: string[] = []) {
+    async create(
+      text: string,
+      deliverToFedi: boolean = true,
+      deliverToBsky: boolean = true,
+      attachmentIds: string[] = [],
+      replyToId?: string
+    ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
           text,
           deliver_to_fedi: deliverToFedi,
           deliver_to_bsky: deliverToBsky,
           attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+          reply_to_id: replyToId,
         })
       );
     },

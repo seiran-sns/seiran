@@ -4,6 +4,7 @@ import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../.
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import ReactionChips from "./ReactionChips";
+import { useComposer } from "../../contexts/ComposerContext";
 import styles from "./NoteCard.module.css";
 
 interface NoteCardProps {
@@ -14,6 +15,7 @@ interface NoteCardProps {
 
 export default function NoteCard({ note, linkToDetail = true }: NoteCardProps) {
   const navigate = useNavigate();
+  const { openReply } = useComposer();
   const badge = protocolBadge(note.user.actorType);
 
   function goProfile(e: React.MouseEvent) {
@@ -94,6 +96,19 @@ export default function NoteCard({ note, linkToDetail = true }: NoteCardProps) {
       )}
 
       <ReactionChips reactions={note.reactions} />
+
+      <div className={styles.actions}>
+        <button
+          className={styles.actionBtn}
+          onClick={(e) => {
+            e.stopPropagation();
+            openReply(note);
+          }}
+          title="返信"
+        >
+          💬 返信
+        </button>
+      </div>
     </article>
   );
 }

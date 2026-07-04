@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
+import { ComposerProvider } from "./contexts/ComposerContext";
 import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HomePage from "./pages/HomePage";
@@ -122,7 +123,9 @@ export default function App() {
   return (
     <AuthProvider>
       <RightPaneProvider>
-        <AppRoutes />
+        <ComposerProvider>
+          <AppRoutes />
+        </ComposerProvider>
       </RightPaneProvider>
     </AuthProvider>
   );

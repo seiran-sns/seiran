@@ -150,3 +150,25 @@
 .originalLink:hover {
   background: var(--accent-deep-hover);
 }
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 0 50px;
+}
+
+.actionBtn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.actionBtn:hover {
+  background: var(--accent-deep);
+  color: var(--accent);
+}
