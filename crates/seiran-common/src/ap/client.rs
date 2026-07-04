@@ -50,10 +50,27 @@ pub struct ApActor {
     pub preferred_username: Option<String>,
     pub name: Option<String>,
     pub summary: Option<String>,
+    /// アバター画像。実装により object / array / 欠落があり得るため Value で受ける
+    /// （`avatar_url()` で URL を抽出する）。
+    #[serde(default)]
+    pub icon: Option<serde_json::Value>,
     pub inbox: Option<String>,
     pub outbox: Option<String>,
     #[serde(rename = "publicKey")]
     pub public_key: Option<PublicKeyInfo>,
+}
+
+impl ApActor {
+    /// `icon`（object または array）から最初の画像 URL を抽出する。
+    pub fn avatar_url(&self) -> Option<String> {
+        let v = self.icon.as_ref()?;
+        let obj = if v.is_array() {
+            v.as_array()?.first()?
+        } else {
+            v
+        };
+        obj.get("url")?.as_str().map(|s| s.to_string())
+    }
 }
 
 /// ActivityPub 通信クライアント

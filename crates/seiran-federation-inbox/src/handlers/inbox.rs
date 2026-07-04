@@ -177,8 +177,9 @@ async fn handle_follow(
     }
     let local_actor_id = local_actor.id;
 
-    // リモートアクタードキュメントを取得（inbox URL・display_name 用）
+    // リモートアクタードキュメントを取得（inbox URL・display_name・アバター用）
     let remote_ap = state.ap_client.fetch_actor(follower_uri).await?;
+    let remote_avatar_url = remote_ap.avatar_url();
     let remote_inbox = remote_ap
         .inbox
         .as_deref()
@@ -196,7 +197,7 @@ async fn handle_follow(
     let new_id = generate_snowflake_id(now);
 
     let follower_actor_id = state.actor_repo
-        .upsert_remote_fedi(new_id, follower_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, now)
+        .upsert_remote_fedi(new_id, follower_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now)
         .await
         .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
 
@@ -260,12 +261,13 @@ async fn handle_create_note(
         .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
     let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
     let remote_domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
+    let remote_avatar_url = remote_ap.avatar_url();
 
     let now = chrono::Utc::now();
     let new_actor_id = seiran_common::generate_snowflake_id(now);
 
     let actor_id = state.actor_repo
-        .upsert_remote_fedi(new_actor_id, actor_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, now)
+        .upsert_remote_fedi(new_actor_id, actor_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now)
         .await
         .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
 

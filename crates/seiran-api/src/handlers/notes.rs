@@ -71,6 +71,8 @@ pub struct NoteUserInfo {
     pub domain: Option<String>,
     pub display_name: Option<String>,
     pub actor_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 /// post_id リストに対する添付情報を一括取得する。
@@ -133,6 +135,7 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
             domain: Some(p.domain),
             display_name: p.display_name,
             actor_type: if p.actor_type.is_empty() { "local".to_string() } else { p.actor_type },
+            avatar_url: p.avatar_url,
         },
         attachments,
         renote_id: p.repost_of_post_id.map(|i| i.to_string()),
@@ -354,7 +357,7 @@ pub async fn create_note(
             id: post_id.to_string(),
             text: String::new(),
             created_at: now.to_rfc3339(),
-            user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None, actor_type: "local".to_string() },
+            user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
             attachments: vec![],
             renote_id: Some(renote_id.to_string()),
             quote_id: None, reply_id: None, parent_original_id: None,
@@ -638,7 +641,7 @@ pub async fn create_note(
         id: post_id.to_string(),
         text,
         created_at: now.to_rfc3339(),
-        user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None, actor_type: "local".to_string() },
+        user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
         attachments: final_attachments,
         renote_id: None,
         quote_id: quote_of_id_i64.map(|i| i.to_string()),

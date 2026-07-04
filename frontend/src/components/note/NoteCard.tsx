@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Note } from "../../api/client";
 import { acct, displayName, formatDate, profileQuery, protocolBadge } from "../../lib/format";
 import ReplyIndicator from "./ReplyIndicator";
+import Avatar from "./Avatar";
 import styles from "./NoteCard.module.css";
 
 interface NoteCardProps {
@@ -29,9 +30,7 @@ export default function NoteCard({ note, linkToDetail = true }: NoteCardProps) {
 
       <div className={styles.header}>
         <button className={styles.userBtn} onClick={goProfile}>
-          <span className={styles.avatar}>
-            {(note.user.displayName || note.user.username)[0]?.toUpperCase() ?? "?"}
-          </span>
+          <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={40} />
           <span className={styles.names}>
             <span className={styles.displayName}>{displayName(note)}</span>
             <span className={styles.acct}>

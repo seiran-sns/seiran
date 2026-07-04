@@ -81,6 +81,7 @@ pub trait ActorRepository: Send + Sync {
         username: &str,
         domain: &str,
         display_name: &str,
+        avatar_url: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<i64, sqlx::Error>;
 
@@ -198,14 +199,16 @@ impl ActorRepository for PgActorRepository {
         username: &str,
         domain: &str,
         display_name: &str,
+        avatar_url: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<i64, sqlx::Error> {
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, created_at, updated_at)
-             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $7)
+            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, created_at, updated_at)
+             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $8)
              ON CONFLICT (ap_uri) DO UPDATE
                SET ap_inbox_url = EXCLUDED.ap_inbox_url,
                    display_name = EXCLUDED.display_name,
+                   avatar_url   = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
                    updated_at   = EXCLUDED.updated_at
              RETURNING id",
         )
@@ -215,6 +218,7 @@ impl ActorRepository for PgActorRepository {
         .bind(username)
         .bind(domain)
         .bind(display_name)
+        .bind(avatar_url)
         .bind(now)
         .fetch_one(&self.pool)
         .await?;
