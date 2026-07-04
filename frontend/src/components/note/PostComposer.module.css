@@ -165,7 +165,7 @@
 }
 
 .postBtn:hover:not(:disabled) {
-  background: #6d28d9;
+  background: var(--accent-hover);
 }
 
 .postBtn:disabled {

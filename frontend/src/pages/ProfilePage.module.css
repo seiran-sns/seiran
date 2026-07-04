@@ -22,7 +22,7 @@
 }
 
 .warpBanner:hover {
-  background: #2a1580;
+  background: var(--accent-deep-hover);
 }
 
 .warpIcon {
@@ -141,7 +141,7 @@ a.idValue:hover {
 }
 
 .followBtn:hover:not(:disabled) {
-  background: #6d28d9;
+  background: var(--accent-hover);
 }
 
 .followBtn:disabled {
@@ -178,7 +178,7 @@ a.idValue:hover {
 }
 
 .rightPost:hover {
-  background: rgba(255, 255, 255, 0.015);
+  background: rgba(0, 0, 0, 0.025);
 }
 
 .rightPostBody {
@@ -219,7 +219,7 @@ a.idValue:hover {
 }
 
 .modalPrimary:hover {
-  background: #6d28d9;
+  background: var(--accent-hover);
 }
 
 .modalSecondary {

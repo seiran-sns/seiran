@@ -5,7 +5,7 @@
 }
 
 .card:hover {
-  background: rgba(255, 255, 255, 0.015);
+  background: rgba(0, 0, 0, 0.025);
 }
 
 .rail {
@@ -148,5 +148,5 @@
 }
 
 .originalLink:hover {
-  background: #2a1580;
+  background: var(--accent-deep-hover);
 }

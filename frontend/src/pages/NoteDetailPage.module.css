@@ -107,7 +107,7 @@
 
 .quoteLink:hover,
 .originalLink:hover {
-  background: #2a1580;
+  background: var(--accent-deep-hover);
 }
 
 .ctxCurrent {

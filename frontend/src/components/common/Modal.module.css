@@ -1,7 +1,7 @@
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(22, 32, 58, 0.45);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-start;
@@ -17,7 +17,7 @@
   border-radius: 14px;
   width: 100%;
   max-width: 540px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 20px 60px rgba(22, 32, 58, 0.22);
   animation: pop 0.14s ease-out;
 }
 

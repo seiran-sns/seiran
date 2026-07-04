@@ -87,7 +87,7 @@
 }
 
 .composeBtn:hover {
-  background: #6d28d9;
+  background: var(--accent-hover);
 }
 
 .navFooter {
