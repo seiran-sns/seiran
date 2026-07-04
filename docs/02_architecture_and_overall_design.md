@@ -378,6 +378,8 @@ AP Note の形式:
 * **保存**: `GET/PATCH /api/admin/site-settings`（admin 限定）が `site_name` / `site_color` / `site_icon_url` を管理する。アイコンは drive にアップロードした画像の CDN URL を `site_icon_url` に格納する。
 * **公開**: `POST /api/meta`（公開）が `name`（`site_name`、未設定時 `seiran`）・`siteColor`・`siteIconUrl` を返す。
 * **反映**: フロントは `site_color` から派生アクセント色（`--accent` 系 CSS 変数）を `color-mix` で生成して適用し、左ナビのロゴをサイト名称＋アイコンに差し替える。`site_color` 未設定時は既定のアクセント色を使用する。
+* **Favicon（#42）**: `GET /favicon.ico`（seiran-api）が `site_icon_url` へ 302 リダイレクトする（未設定時は 404 で既定アイコンにフォールバック）。ブラウザは JS を介さず直接 `/favicon.ico` を要求するため、リンクプレビュー bot 等にも効く。加えてフロントは `<link rel="icon">` を取得済み `site_icon_url` で動的更新する（設定変更の即時反映）。nginx は `location = /favicon.ico` を backend へ転送する。
+* **AP サーバー情報（#42）**: NodeInfo 2.1（`/nodeinfo/2.1`）の `metadata` に、Misskey 系の慣習に合わせ `nodeName`（`site_name`）・`themeColor`（`site_color`）・`iconUrl`（`site_icon_url`）を同梱する（値が空のものは省略）。連合先サーバーの一覧表示等でサイトアイコン・カラーが利用される。
 
 ### 2.7 リアルタイム更新のストリーミング（#37）
 タイムラインの即時反映のため、プロセス内ブロードキャストハブ（`StreamHub`）と WebSocket を用いる。
