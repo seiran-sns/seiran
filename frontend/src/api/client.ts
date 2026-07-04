@@ -422,6 +422,20 @@ export const api = {
     profile(q: string) {
       return request<UserProfile>("GET", `/users/profile?q=${encodeURIComponent(q)}`);
     },
+    updateProfile(patch: {
+      display_name?: string;
+      bio?: string;
+      avatar_media_id?: number | null;
+      banner_media_id?: number | null;
+    }) {
+      return request<{
+        username: string;
+        display_name?: string;
+        bio?: string;
+        avatar_media_id?: number;
+        banner_media_id?: number;
+      }>("PATCH", "/users/profile", patch);
+    },
   },
 
   admin: {

@@ -246,6 +246,8 @@ async fn lookup_by_uri(
 #[derive(Deserialize)]
 pub struct UpdateProfileRequest {
     pub display_name: Option<String>,
+    /// 自己紹介。未指定なら現在値を保持、空文字なら空に更新。
+    pub bio: Option<String>,
     /// `None` = フィールド未指定（現在値を保持）
     /// `Some(None)` = null を明示（解除）
     /// `Some(Some(id))` = メディア ID を設定
@@ -259,6 +261,7 @@ pub struct UpdateProfileRequest {
 pub struct UpdateProfileResponse {
     pub username: String,
     pub display_name: Option<String>,
+    pub bio: Option<String>,
     pub avatar_media_id: Option<i64>,
     pub banner_media_id: Option<i64>,
 }
@@ -267,6 +270,7 @@ pub struct UpdateProfileResponse {
 struct ActorProfileRow {
     username: String,
     display_name: Option<String>,
+    bio: Option<String>,
     avatar_media_id: Option<i64>,
     banner_media_id: Option<i64>,
 }
@@ -283,7 +287,7 @@ pub async fn update_profile(
 
     // 現在のプロフィールを取得
     let current = match sqlx::query_as::<_, ActorProfileRow>(
-        "SELECT username, display_name, avatar_media_id, banner_media_id \
+        "SELECT username, display_name, bio, avatar_media_id, banner_media_id \
          FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
     )
     .bind(auth_user.user_id)
@@ -304,6 +308,11 @@ pub async fn update_profile(
     } else {
         current.display_name
     };
+    let new_bio: Option<String> = if req.bio.is_some() {
+        req.bio
+    } else {
+        current.bio
+    };
     let new_avatar_media_id: Option<i64> = match req.avatar_media_id {
         None => current.avatar_media_id,
         Some(v) => v,
@@ -316,10 +325,11 @@ pub async fn update_profile(
     // UPDATE
     if let Err(e) = sqlx::query(
         "UPDATE actors \
-         SET display_name = $1, avatar_media_id = $2, banner_media_id = $3, updated_at = NOW() \
-         WHERE user_id = $4 AND actor_type = 'local'",
+         SET display_name = $1, bio = $2, avatar_media_id = $3, banner_media_id = $4, updated_at = NOW() \
+         WHERE user_id = $5 AND actor_type = 'local'",
     )
     .bind(&new_display_name)
+    .bind(&new_bio)
     .bind(new_avatar_media_id)
     .bind(new_banner_media_id)
     .bind(auth_user.user_id)
@@ -333,6 +343,7 @@ pub async fn update_profile(
     Json(UpdateProfileResponse {
         username: current.username,
         display_name: new_display_name,
+        bio: new_bio,
         avatar_media_id: new_avatar_media_id,
         banner_media_id: new_banner_media_id,
     })
