@@ -1,0 +1,172 @@
+.body {
+  padding: 16px;
+}
+
+.sectionTitle {
+  font-size: 0.95rem;
+  font-weight: 800;
+  margin: 4px 0 14px;
+}
+
+.card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.primaryText {
+  font-weight: 700;
+  font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subText {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.badge {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.badgeAdmin {
+  color: var(--accent);
+  border-color: var(--accent-strong);
+  background: var(--accent-deep);
+}
+
+.badgeSuspended {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.input,
+.select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+  font-family: inherit;
+}
+
+.input:focus,
+.select:focus {
+  border-color: var(--accent-strong);
+}
+
+.btn {
+  background: var(--accent-strong);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btnGhost:hover {
+  border-color: var(--accent-strong);
+  color: var(--text);
+}
+
+.btnDanger {
+  background: none;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.btnDanger:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 0.82rem;
+  margin: 8px 0;
+}
+
+.success {
+  color: var(--accent);
+  font-size: 0.82rem;
+  margin: 8px 0;
+}
+
+.hint {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  margin: 4px 0 12px;
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}

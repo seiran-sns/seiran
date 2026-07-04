@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { isAdminRole } from "../../lib/roles";
 import styles from "./AppShell.module.css";
 
 interface NavItem {
@@ -18,6 +19,10 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  const navItems = isAdminRole(user?.role)
+    ? [...NAV_ITEMS, { to: "/admin", icon: "🛡️", label: "管理" }]
+    : NAV_ITEMS;
+
   function handleLogout() {
     logout();
     navigate("/login");
@@ -28,7 +33,7 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
       <div className={styles.logo}>seiran</div>
 
       <ul className={styles.navList}>
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <li key={item.to}>
             <NavLink
               to={item.to}

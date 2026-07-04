@@ -36,6 +36,8 @@ pub struct UserInfo {
     pub id: i64,
     pub username: String,
     pub email: String,
+    /// `user` / `moderator` / `admin`。管理画面の表示制御にフロントが使用する。
+    pub role: String,
 }
 
 #[derive(Deserialize)]
@@ -243,7 +245,7 @@ pub async fn register(
 
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username: req.username, email },
+        user: UserInfo { id: user_id, username: req.username, email, role: "user".to_string() },
     }))
 }
 
@@ -280,9 +282,17 @@ pub async fn login(
         ApiError::Internal("トークン生成エラー".to_string())
     })?;
 
+    let role = state
+        .users
+        .find_role_by_user_id(user_id)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "user".to_string());
+
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username, email },
+        user: UserInfo { id: user_id, username, email, role },
     }))
 }
 
@@ -305,10 +315,19 @@ pub async fn me(
         .ok_or(ApiError::NotFound("NOT_FOUND"))?
         .username;
 
+    let role = state
+        .users
+        .find_role_by_user_id(auth_user.user_id)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "user".to_string());
+
     Ok(Json(UserInfo {
         id: auth_user.user_id,
         username,
         email: auth_user.email,
+        role,
     }))
 }
 

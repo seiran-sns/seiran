@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
+import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HomePage from "./pages/HomePage";
 import Login from "./pages/Login";
@@ -83,6 +84,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <ProfilePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <RequireAuth>
+            <AdminPage />
           </RequireAuth>
         }
       />
