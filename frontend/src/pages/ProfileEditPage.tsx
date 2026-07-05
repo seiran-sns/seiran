@@ -1,10 +1,16 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, DriveFile, getErrorMessage } from "../api/client";
+import { api, DriveFile, getErrorMessage, ApiError } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfileEdit.module.css";
+
+const WITHDRAW_ERROR: Record<string, string> = {
+  CONFIRM_HANDLE_MISMATCH: "ハンドルが一致しません",
+  ALREADY_WITHDRAWN: "すでに退会済みです",
+  ACTOR_NOT_FOUND: "アクターが見つかりません",
+};
 
 export default function ProfileEditPage() {
   const { user } = useAuth();
@@ -14,6 +20,12 @@ export default function ProfileEditPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+
+  // 退会フォーム
+  const [withdrawHandle, setWithdrawHandle] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState("");
+  const [showWithdrawForm, setShowWithdrawForm] = useState(false);
 
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
@@ -70,6 +82,26 @@ export default function ProfileEditPage() {
       setError(getErrorMessage(err));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function withdraw(e: FormEvent) {
+    e.preventDefault();
+    if (!confirm("退会すると元に戻せません。本当に退会しますか？")) return;
+    setWithdrawing(true);
+    setWithdrawError("");
+    try {
+      await api.account.withdraw(withdrawHandle.trim());
+      localStorage.removeItem("seiran_token");
+      navigate("/login");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setWithdrawError(WITHDRAW_ERROR[err.code] ?? `エラー (${err.code})`);
+      } else {
+        setWithdrawError(getErrorMessage(err));
+      }
+    } finally {
+      setWithdrawing(false);
     }
   }
 
@@ -134,6 +166,48 @@ export default function ProfileEditPage() {
           </button>
         </form>
       )}
+
+      {/* 退会 */}
+      <div className={styles.dangerZone}>
+        <h3 className={styles.dangerTitle}>危険な操作</h3>
+        {!showWithdrawForm ? (
+          <button className={styles.dangerBtn} onClick={() => setShowWithdrawForm(true)}>
+            このアカウントを退会する
+          </button>
+        ) : (
+          <form className={styles.withdrawForm} onSubmit={withdraw}>
+            <p className={styles.dangerHint}>
+              退会すると投稿が削除され、フォロー関係が解除されます。この操作は取り消せません。
+              確認のため、自分のハンドル（<strong>@{user?.username}</strong>）を入力してください。
+            </p>
+            {withdrawError && <p className={styles.error}>{withdrawError}</p>}
+            <input
+              className={styles.input}
+              value={withdrawHandle}
+              onChange={(e) => setWithdrawHandle(e.target.value)}
+              placeholder={user?.username ?? ""}
+              disabled={withdrawing}
+            />
+            <div className={styles.withdrawActions}>
+              <button
+                type="button"
+                className={styles.ghost}
+                onClick={() => { setShowWithdrawForm(false); setWithdrawError(""); }}
+                disabled={withdrawing}
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                className={styles.dangerBtn}
+                disabled={withdrawing || !withdrawHandle.trim()}
+              >
+                {withdrawing ? "処理中..." : "退会する"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </>
   );
 

@@ -73,7 +73,10 @@ CREATE TABLE actors (
     bridge_real_actor_id BIGINT REFERENCES actors(id) ON DELETE SET NULL, -- ブリッジ時の「本尊」の行
     
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+
+    -- 退会管理（#29 Phase A）
+    withdrawn_at TIMESTAMP WITH TIME ZONE                                   -- NULL=現役 / NOT NULL=退会済み
 );
 
 -- インデックス戦略
@@ -82,6 +85,7 @@ CREATE INDEX idx_actors_pair ON actors(seiran_pair_actor_id) WHERE seiran_pair_a
 CREATE INDEX idx_actors_bridge ON actors(bridge_real_actor_id) WHERE bridge_real_actor_id IS NOT NULL;
 CREATE INDEX idx_actors_user_id ON actors(user_id);                         -- 認証エンドポイントの find_local_by_user_id 高速化
 CREATE INDEX idx_actors_username_domain ON actors(username, domain);        -- WebFinger / プロフィール検索 / フォロー解決高速化
+CREATE INDEX idx_actors_withdrawn_at ON actors(withdrawn_at) WHERE withdrawn_at IS NOT NULL;
 ```
 
 ### 1.3 `posts` (統一ポストテーブル)

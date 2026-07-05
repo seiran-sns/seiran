@@ -563,6 +563,12 @@ export const api = {
     },
   },
 
+  account: {
+    withdraw(confirmHandle: string) {
+      return request<void>("POST", "/account/withdraw", { confirm_handle: confirmHandle });
+    },
+  },
+
   media: {
     upload(file: File, mediaType: "post" | "emoji" | "avatar" | "banner" = "post"): Promise<DriveFile> {
       const formData = new FormData();

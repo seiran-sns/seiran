@@ -118,3 +118,57 @@
   color: var(--text-faint);
   margin: 0 0 18px;
 }
+
+.dangerZone {
+  margin: 32px 20px 20px;
+  padding: 16px;
+  border: 1px solid var(--danger, #e74c3c);
+  border-radius: 10px;
+}
+
+.dangerTitle {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--danger, #e74c3c);
+  margin: 0 0 12px;
+}
+
+.dangerBtn {
+  background: var(--danger, #e74c3c);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 10px 22px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.dangerBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.dangerBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerHint {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.withdrawForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.withdrawActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}

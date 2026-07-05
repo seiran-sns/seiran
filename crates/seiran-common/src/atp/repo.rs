@@ -671,6 +671,39 @@ pub fn build_identity_frame(seq: i64, did: &str, handle: &str, time: &str) -> Re
     Ok(frame)
 }
 
+/// subscribeRepos の #account フレームを生成する。
+/// `active=false, status="deleted"` でアカウント削除を AppView/Relay に通知する。
+pub fn build_account_frame(
+    seq: i64,
+    did: &str,
+    handle: &str,
+    time: &str,
+    active: bool,
+    status: Option<&str>,
+) -> Result<Vec<u8>, RepoError> {
+    let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    header_map.insert("op".to_string(), Ipld::Integer(1));
+    header_map.insert("t".to_string(), Ipld::String("#account".to_string()));
+    let header_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(header_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut body_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    body_map.insert("active".to_string(), Ipld::Bool(active));
+    body_map.insert("did".to_string(), Ipld::String(did.to_string()));
+    body_map.insert("handle".to_string(), Ipld::String(handle.to_string()));
+    body_map.insert("seq".to_string(), Ipld::Integer(seq as i128));
+    if let Some(s) = status {
+        body_map.insert("status".to_string(), Ipld::String(s.to_string()));
+    }
+    body_map.insert("time".to_string(), Ipld::String(time.to_string()));
+    let body_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(body_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut frame = header_cbor;
+    frame.extend_from_slice(&body_cbor);
+    Ok(frame)
+}
+
 /// subscribeRepos の #error フレームを生成する。
 pub fn build_error_frame(name: &str, message: &str) -> Result<Vec<u8>, RepoError> {
     let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();

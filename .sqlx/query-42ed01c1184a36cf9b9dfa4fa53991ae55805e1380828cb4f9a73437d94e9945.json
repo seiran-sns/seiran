@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.username, a.at_did, a.withdrawn_at\n         FROM actors a\n         JOIN users u ON u.id = a.user_id\n         WHERE u.id = $1 AND a.actor_type = 'local'\n         LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "at_did",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "withdrawn_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "42ed01c1184a36cf9b9dfa4fa53991ae55805e1380828cb4f9a73437d94e9945"
+}

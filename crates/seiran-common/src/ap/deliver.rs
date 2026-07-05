@@ -255,6 +255,84 @@ pub async fn deliver_ap_announce(
     Ok(())
 }
 
+/// ローカルアクターの AP Delete(Actor) アクティビティを Fedi フォロワー全員の inbox へ配送する。
+/// アカウント退会時（#29）に呼び出し、リモートサーバーにフォロー解除とキャッシュ削除を促す。
+pub async fn deliver_delete_actor(
+    ap_client: &ApClient,
+    db: &PgPool,
+    actor_id: i64,
+    local_domain: &str,
+    ap_private_key_pem: &str,
+) -> Result<(), ApError> {
+    let row = sqlx::query(
+        "SELECT username FROM actors WHERE id = $1 LIMIT 1",
+    )
+    .bind(actor_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| ApError::Other(format!("アクター取得エラー: {}", e)))?
+    .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
+
+    let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
+
+    let follower_rows = sqlx::query(
+        "SELECT a.ap_inbox_url
+         FROM follows f
+         JOIN actors a ON a.id = f.follower_actor_id
+         WHERE f.target_actor_id = $1
+           AND f.status = 'accepted'
+           AND a.actor_type = 'fedi'
+           AND a.ap_inbox_url IS NOT NULL",
+    )
+    .bind(actor_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
+
+    if follower_rows.is_empty() {
+        return Ok(());
+    }
+
+    let actor_uri = format!("https://{}/users/{}", local_domain, username);
+    let actor_key_id = format!("{}#main-key", actor_uri);
+    let activity_id = format!("https://{}/activities/delete-actor-{}", local_domain, actor_id);
+    let published = chrono::Utc::now().to_rfc3339();
+
+    let activity = serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Delete",
+        "id": activity_id,
+        "actor": actor_uri,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "object": actor_uri
+    });
+
+    let body_str = serde_json::to_string(&activity).map_err(ApError::Json)?;
+
+    let mut ok = 0usize;
+    let mut ng = 0usize;
+    for row in &follower_rows {
+        let inbox: String = match row.try_get("ap_inbox_url") {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        match ap_client.sign_and_post(&inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
+            Ok(()) => ok += 1,
+            Err(e) => {
+                eprintln!("[Deliver] Delete(Actor): {} への配送失敗: {}", inbox, e);
+                ng += 1;
+            }
+        }
+    }
+
+    eprintln!(
+        "[Deliver] Delete(Actor) actor_id={} username={}: {}件成功 / {}件失敗",
+        actor_id, username, ok, ng
+    );
+    Ok(())
+}
+
 /// プレーンテキストを ActivityPub 向け HTML に変換する
 ///
 /// 空行で段落分割し、改行を `<br>` に変換する。
