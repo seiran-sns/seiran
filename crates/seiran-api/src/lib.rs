@@ -15,6 +15,7 @@ pub mod streaming;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
+use dashmap::DashMap;
 use tower_http::cors::{Any, CorsLayer};
 use axum::{routing::{get, patch, post}, Router};
 use sqlx::PgPool;
@@ -64,6 +65,8 @@ pub struct AppState {
     pub search_store: Arc<InMemorySearchStore>,
     /// リアルタイム更新（#37）のストリーミングハブ。
     pub stream_hub: Arc<StreamHub>,
+    /// 絵文字インポートジョブの進捗状態（#50）。job_id → ImportJobStatus。
+    pub emoji_import_jobs: Arc<DashMap<String, handlers::admin::emoji_import::ImportJobStatus>>,
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -140,6 +143,7 @@ pub async fn init_state(
         site_settings,
         search_store: Arc::new(InMemorySearchStore::new()),
         stream_hub: Arc::new(StreamHub::new()),
+        emoji_import_jobs: Arc::new(DashMap::new()),
     }
 }
 
@@ -179,6 +183,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/emojis/:id",
             patch(handlers::admin::emojis::update_emoji)
             .delete(handlers::admin::emojis::delete_emoji))
+        // 絵文字インポート（#50）
+        .route("/api/admin/emojis/import",
+            post(handlers::admin::emoji_import::start_import))
+        .route("/api/admin/emojis/import/:job_id",
+            get(handlers::admin::emoji_import::get_import_status))
         // ドライブ（メディアアップロード）
         .route("/api/drive/files/create", post(handlers::drive::create_drive_file))
         // 認証
