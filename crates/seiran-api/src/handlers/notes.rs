@@ -52,7 +52,7 @@ pub struct ReactionSummary {
     pub count: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteResponse {
     pub id: String,
@@ -72,9 +72,13 @@ pub struct NoteResponse {
     // リアクション集計（#22）。空なら省略。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reactions: Vec<ReactionSummary>,
+    /// リポスト（renote_id を持つ）の場合の元ポスト実体（#45）。
+    /// このノート自身は「リポストした」というラッパで、表示すべき中身は `renote` 側。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub renote: Option<Box<NoteResponse>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteUserInfo {
     pub id: i64,
@@ -154,6 +158,51 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         reply_id: p.reply_to_post_id.map(|i| i.to_string()),
         parent_original_id: p.parent_original_post_id.map(|i| i.to_string()),
         reactions: Vec::new(),
+        renote: None,
+    }
+}
+
+/// リポスト（`renote_id` を持つ）ノートについて、元ポストを一括解決して
+/// `renote` フィールドへ埋め込む（#45）。表示側はこの中身をカード本体として描画する。
+pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse]) {
+    let orig_ids: Vec<i64> = notes
+        .iter()
+        .filter_map(|n| n.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok()))
+        .collect();
+    if orig_ids.is_empty() {
+        return;
+    }
+
+    let rows = sqlx::query_as::<_, TimelinePost>(
+        "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
+                a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+         LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+         WHERE p.id = ANY($1) AND p.deleted_at IS NULL",
+    )
+    .bind(&orig_ids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+
+    let mut att_map = fetch_attachments_map(db, &orig_ids).await;
+    let rmap = fetch_reactions_map(db, &orig_ids).await;
+    let mut by_id: HashMap<i64, NoteResponse> = HashMap::new();
+    for r in rows {
+        let id = r.id;
+        let mut nr = to_note_response(r, att_map.remove(&id).unwrap_or_default());
+        nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+        by_id.insert(id, nr);
+    }
+
+    for n in notes.iter_mut() {
+        if let Some(oid) = n.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok()) {
+            if let Some(orig) = by_id.get(&oid) {
+                n.renote = Some(Box::new(orig.clone()));
+            }
+        }
     }
 }
 
@@ -398,7 +447,7 @@ pub async fn create_note(
             }
         }
 
-        return Json(NoteResponse {
+        let mut repost_resp = NoteResponse {
             id: post_id.to_string(),
             text: String::new(),
             created_at: now.to_rfc3339(),
@@ -407,7 +456,11 @@ pub async fn create_note(
             renote_id: Some(renote_id.to_string()),
             quote_id: None, reply_id: None, parent_original_id: None,
             reactions: vec![],
-        }).into_response();
+            renote: None,
+        };
+        // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
+        embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp)).await;
+        return Json(repost_resp).into_response();
     }
 
     // ── 通常投稿 / リプライ処理 ───────────────────────────────────────────────
@@ -695,6 +748,7 @@ pub async fn create_note(
         reply_id: reply_to_id_i64.map(|i| i.to_string()),
         parent_original_id: None,
         reactions: vec![],
+        renote: None,
     };
 
     // リアルタイム配信（#37）: 著者 + accepted なローカルフォロワーの stream へ
@@ -753,7 +807,7 @@ pub async fn home_timeline(
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids).await;
-    let notes: Vec<NoteResponse> = rows.into_iter()
+    let mut notes: Vec<NoteResponse> = rows.into_iter()
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
@@ -761,6 +815,7 @@ pub async fn home_timeline(
             nr
         })
         .collect();
+    embed_renotes(&state.db, &mut notes).await;
     Json(notes).into_response()
 }
 
@@ -782,7 +837,7 @@ pub async fn local_timeline(
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids).await;
-    let notes: Vec<NoteResponse> = rows.into_iter()
+    let mut notes: Vec<NoteResponse> = rows.into_iter()
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
@@ -790,6 +845,7 @@ pub async fn local_timeline(
             nr
         })
         .collect();
+    embed_renotes(&state.db, &mut notes).await;
     Json(notes).into_response()
 }
 
@@ -809,6 +865,7 @@ pub async fn get_note(
     let rmap = fetch_reactions_map(&state.db, &[post_id]).await;
     let mut nr = to_note_response(post, att_map.remove(&post_id).unwrap_or_default());
     nr.reactions = rmap.get(&post_id).cloned().unwrap_or_default();
+    embed_renotes(&state.db, std::slice::from_mut(&mut nr)).await;
     Ok(Json(nr))
 }
 
@@ -1005,10 +1062,12 @@ pub async fn note_context(
         nr
     };
 
-    Ok(Json(NoteContextResponse {
-        before: before_posts.into_iter().map(|p| build(p, &mut att_map)).collect(),
-        after: after_posts.into_iter().map(|p| build(p, &mut att_map)).collect(),
-    }))
+    let mut before: Vec<NoteResponse> = before_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
+    let mut after: Vec<NoteResponse> = after_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
+    embed_renotes(&state.db, &mut before).await;
+    embed_renotes(&state.db, &mut after).await;
+
+    Ok(Json(NoteContextResponse { before, after }))
 }
 
 /// HTML タグを取り除き、基本エンティティを復元する。

@@ -175,6 +175,8 @@ export interface Note {
   parentOriginalId?: string;
   // リアクション集計（#22）
   reactions?: ReactionSummary[];
+  /** リポストの場合の元ポスト実体（#45）。この Note 自身は「リポストした」ラッパ。 */
+  renote?: Note;
 }
 
 export interface ReactionSummary {
@@ -236,6 +238,7 @@ interface RawNote {
   parentOriginalId?: string;
   parent_original_id?: string;
   reactions?: ReactionSummary[];
+  renote?: RawNote;
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -258,6 +261,7 @@ function normalizeNote(r: RawNote): Note {
     replyId: r.replyId ?? r.reply_id,
     parentOriginalId: r.parentOriginalId ?? r.parent_original_id,
     reactions: r.reactions ?? [],
+    renote: r.renote ? normalizeNote(r.renote) : undefined,
   };
 }
 
