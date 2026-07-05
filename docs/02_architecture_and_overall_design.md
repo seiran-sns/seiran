@@ -395,6 +395,20 @@ AP Note の形式:
 * **プロフィールの投稿**: `ProfileResponse.recent_posts` を、タイムラインと同一形状の `NoteResponse`（アクター情報・添付・リアクション込み）で返す。バックエンドは `PostRepository::timeline_by_actor`（アクター指定の結合クエリ）で取得し、`fetch_attachments_map` / `fetch_reactions_map` で集計して `to_note_response` で組み立てる。フロントは受信後 `normalizeNote` で `Note` に正規化して `NoteCard` を描画する。
 * **ポスト詳細の主役ポスト**: 中央のフォーカス投稿も同じ `NoteCard` を用いる。大きめ文字・大きめカードで強調するため、`NoteCard` に `large` オプションを設け（アバター 48px・本文拡大・左アクセントボーダー）、`<NoteCard note large linkToDetail={false} />` で描画する。専用の focal レイアウトは廃止し、モジュールを完全共通化した。前後投稿も従来どおり `NoteCard`（通常サイズ）を用いる。
 
+### 2.9 退会機能 Phase A（#29）
+
+ローカルユーザーが自身のアカウントを退会する機能。不可逆操作のため `confirm_handle`（自分のハンドル入力）を API・UI 両方で必須とする。
+
+**処理フロー** (`POST /api/account/withdraw`):
+1. **AP Delete(Actor)**: `deliver_delete_actor` が Fedi フォロワー全員の inbox へ `Delete` アクティビティを配送。
+2. **ATP #account**: `AtpCommitService::broadcast_account_event`（`active=false, status=deleted`）が subscribeRepos ストリームへ送出し、Relay/AppView にアカウント無効化を伝える。
+3. **投稿論理削除**: `posts.deleted_at = NOW()` でタイムラインから除外。
+4. **アクター退会マーク**: `actors.withdrawn_at = NOW()` をセット。
+
+フロントエンドは `/settings/profile` の下部「危険な操作」セクションにハンドル入力確認フォームを配置。退会成功後はトークンを消去してログイン画面に遷移する。
+
+> **Phase B 以降の課題**: PLC tombstone operation（DID の完全撤回）、サイトクローズ時の全ユーザー一括退会、退会済みアクターによる新規 API 呼び出しの完全ブロック。
+
 ---
 
 ## 3. 統一ポストID 採番ルール

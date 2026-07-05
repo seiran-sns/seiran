@@ -190,6 +190,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/request-password-reset", post(handlers::auth::request_password_reset))
         .route("/api/auth/verify-reset-token", get(handlers::auth::verify_reset_token))
         .route("/api/auth/reset-password", post(handlers::auth::reset_password))
+        // アカウント管理（退会等）
+        .route("/api/account/withdraw", post(handlers::account::withdraw))
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))

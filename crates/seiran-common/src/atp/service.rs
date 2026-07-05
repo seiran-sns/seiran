@@ -5,7 +5,7 @@ use tokio::sync::broadcast;
 
 use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
-    build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
+    build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
     cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
     encode_bsky_feed_repost,
     generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage, BskyEmbed,
@@ -540,6 +540,45 @@ impl AtpCommitService {
         let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
 
         eprintln!("[atp] identity broadcast: did={}, handle={}, seq={}", did, handle, seq);
+        Ok(())
+    }
+
+    /// #account イベントを DB に保存して subscribeRepos にブロードキャストする。
+    /// `active=false, status="deleted"` でアカウント削除を AppView/Relay に通知する（退会機能 #29）。
+    pub async fn broadcast_account_event(
+        &self,
+        actor_id: i64,
+        did: &str,
+        handle: &str,
+        now: DateTime<Utc>,
+        active: bool,
+        status: Option<&str>,
+    ) -> Result<(), AtpCommitError> {
+        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        let seq: i64 = sqlx::query_scalar(
+            "INSERT INTO atp_repo_events (event_type, actor_id, did, handle)
+             VALUES ('account', $1, $2, $3)
+             RETURNING id",
+        )
+        .bind(actor_id)
+        .bind(did)
+        .bind(handle)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let frame = build_account_frame(seq, did, handle, &time_str, active, status)?;
+        let compressed = zstd::encode_all(&frame[..], 3)
+            .map_err(|e| RepoError::Cbor(e.to_string()))?;
+        sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
+            .bind(&compressed)
+            .bind(seq)
+            .execute(&self.pool)
+            .await?;
+
+        let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+
+        eprintln!("[atp] account broadcast: did={}, active={}, seq={}", did, active, seq);
         Ok(())
     }
 }
