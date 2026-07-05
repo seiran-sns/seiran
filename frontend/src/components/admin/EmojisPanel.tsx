@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
-import { api, CustomEmoji, DriveFile, getErrorMessage } from "../../api/client";
+import { api, CustomEmoji, DriveFile, EmojiImportJob, getErrorMessage } from "../../api/client";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 
@@ -20,6 +20,12 @@ export default function EmojisPanel() {
   // タグのインライン編集（#49）
   const [editId, setEditId] = useState<string | null>(null);
   const [editTags, setEditTags] = useState("");
+
+  // Misskey ZIP インポート（#50）
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importJob, setImportJob] = useState<EmojiImportJob | null>(null);
+  const [importError, setImportError] = useState("");
 
   /** 空白・カンマ区切りの文字列をタグ配列に変換する（重複・空要素はバックエンドでも正規化）。 */
   function parseTags(s: string): string[] {
@@ -80,6 +86,39 @@ export default function EmojisPanel() {
     }
   }
 
+  async function onImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    setImportError("");
+    setImportJob(null);
+    let job: EmojiImportJob;
+    try {
+      job = await api.admin.importEmojis(file);
+      setImportJob(job);
+    } catch (err) {
+      setImportError(getErrorMessage(err));
+      setImporting(false);
+      return;
+    }
+    // ポーリングして進捗を更新
+    const poll = setInterval(async () => {
+      try {
+        const status = await api.admin.getEmojiImportStatus(job.jobId);
+        setImportJob(status);
+        if (status.done) {
+          clearInterval(poll);
+          setImporting(false);
+          load();
+        }
+      } catch {
+        clearInterval(poll);
+        setImporting(false);
+      }
+    }, 1500);
+  }
+
   function startEdit(em: CustomEmoji) {
     setEditId(em.id);
     setEditTags(em.tags.join(" "));
@@ -120,6 +159,42 @@ export default function EmojisPanel() {
     <div className={styles.body}>
       <h2 className={styles.sectionTitle}>カスタム絵文字</h2>
       {error && <p className={styles.error}>{error}</p>}
+
+      {/* Misskey ZIP インポート（#50） */}
+      <div className={styles.card}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Misskey ZIP インポート</div>
+        <input
+          ref={importFileRef}
+          type="file"
+          accept=".zip"
+          style={{ display: "none" }}
+          onChange={onImportFile}
+        />
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={styles.btnGhost}
+            onClick={() => importFileRef.current?.click()}
+            disabled={importing}
+          >
+            {importing ? "インポート中..." : "ZIPを選択してインポート"}
+          </button>
+        </div>
+        {importError && <p className={styles.error} style={{ marginTop: 8 }}>{importError}</p>}
+        {importJob && (
+          <div style={{ marginTop: 8, fontSize: 13, color: "var(--color-text-sub, #666)" }}>
+            {importJob.done ? "完了" : "処理中"} — 追加: {importJob.processed} / スキップ: {importJob.skipped} / 失敗: {importJob.failed} / 合計: {importJob.total}
+            {importJob.errors.length > 0 && (
+              <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
+                {importJob.errors.slice(0, 10).map((err, i) => (
+                  <li key={i} style={{ color: "var(--color-danger, #c00)" }}>{err}</li>
+                ))}
+                {importJob.errors.length > 10 && <li>… 他 {importJob.errors.length - 10} 件</li>}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
 
       <form className={styles.card} onSubmit={create}>
         <div className={styles.actions} style={{ marginBottom: 12 }}>

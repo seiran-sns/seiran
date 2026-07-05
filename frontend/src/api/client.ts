@@ -142,6 +142,16 @@ export interface CustomEmoji {
   created_at: string;
 }
 
+export interface EmojiImportJob {
+  jobId: string;
+  total: number;
+  processed: number;
+  skipped: number;
+  failed: number;
+  done: boolean;
+  errors: string[];
+}
+
 export interface AuthResponse {
   token: string;
   user: User;
@@ -518,6 +528,32 @@ export const api = {
     },
     deleteEmoji(id: string) {
       return request<{ ok: boolean }>("DELETE", `/admin/emojis/${encodeURIComponent(id)}`);
+    },
+    importEmojis(file: File): Promise<EmojiImportJob> {
+      const formData = new FormData();
+      formData.append("file", file);
+      return fetch(`${BASE}/admin/emojis/import`, {
+        method: "POST",
+        headers: { ...authHeaders() },
+        body: formData,
+      }).then(async (res) => {
+        if (!res.ok) {
+          const contentType = res.headers.get("content-type") ?? "";
+          if (contentType.includes("application/json")) {
+            try {
+              const err = (await res.json()) as { code?: string };
+              if (err.code) throw new ApiError(err.code, res.status);
+            } catch (e) {
+              if (e instanceof ApiError) throw e;
+            }
+          }
+          throw new ApiError("UNKNOWN_ERROR", res.status);
+        }
+        return res.json() as Promise<EmojiImportJob>;
+      });
+    },
+    getEmojiImportStatus(jobId: string) {
+      return request<EmojiImportJob>("GET", `/admin/emojis/import/${encodeURIComponent(jobId)}`);
     },
   },
 

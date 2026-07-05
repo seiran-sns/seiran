@@ -24,3 +24,4 @@ html-escape = "0.2"
 zstd = "0.13"
 hex = "0.4"
 dashmap = "6"
+zip = { version = "2", default-features = false, features = ["deflate"] }
