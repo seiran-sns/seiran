@@ -387,7 +387,8 @@ export const api = {
       deliverToFedi: boolean = true,
       deliverToBsky: boolean = true,
       attachmentIds: string[] = [],
-      replyToId?: string
+      replyToId?: string,
+      renoteId?: string
     ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
@@ -396,6 +397,7 @@ export const api = {
           deliver_to_bsky: deliverToBsky,
           attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
           reply_to_id: replyToId,
+          renote_id: renoteId,
         })
       );
     },

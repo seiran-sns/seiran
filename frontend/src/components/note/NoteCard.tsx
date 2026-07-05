@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Note } from "../../api/client";
+import { api, Note } from "../../api/client";
 import { acct, displayName, formatDate, profilePath, protocolBadge } from "../../lib/format";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
@@ -19,6 +20,22 @@ function PostContent({ note, linkToDetail, large = false }: { note: Note; linkTo
   const navigate = useNavigate();
   const { openReply } = useComposer();
   const badge = protocolBadge(note.user.actorType);
+  const [reposting, setReposting] = useState(false);
+  const [reposted, setReposted] = useState(false);
+
+  async function handleRepost(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (reposting || reposted) return;
+    setReposting(true);
+    try {
+      await api.notes.create("", true, true, [], undefined, note.id);
+      setReposted(true);
+    } catch {
+      // エラー時は何もしない（後でトースト通知に置き換え予定）
+    } finally {
+      setReposting(false);
+    }
+  }
 
   function goProfile(e: React.MouseEvent) {
     e.stopPropagation();
@@ -103,6 +120,14 @@ function PostContent({ note, linkToDetail, large = false }: { note: Note; linkTo
           title="返信"
         >
           💬 返信
+        </button>
+        <button
+          className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
+          onClick={handleRepost}
+          disabled={reposting || reposted}
+          title={reposted ? "リポスト済み" : "リポスト"}
+        >
+          🔁 {reposted ? "リポスト済み" : reposting ? "..." : "リポスト"}
         </button>
       </div>
     </>

@@ -414,6 +414,8 @@ AP Note の形式:
 * **API**: `NoteResponse` に `renote: Option<Box<NoteResponse>>` を追加。`renote_id`（元ポストID）を持つノートについて、`embed_renotes()` が元ポストを一括解決（アクター・添付・リアクション込み）して `renote` へ埋め込む。ホーム／ローカルTL・ポスト詳細（`GET /api/notes/:id`）・前後コンテキスト・リポスト作成レスポンスで適用する。
 * **表示**: フロント `NoteCard` は `renote` があればヘッダ「（表示名）が（日時）にリポスト」＋元ポスト本体を描画する。ヘッダの日時は**リポスト自身**の詳細（`/notes/{リポストID}`）へリンクし、リポスト直後の投稿を前後コンテキストで辿れるようにする。
 * **詳細画面**: `/notes/{リポストID}` を開いた場合、フォーカス投稿は元ポストの内容を本体に、上部にリポスト情報を添えて表示する。前後コンテキストは**リポスト実行者**の投稿列を対象とする。
+* **リポストボタン**: `NoteCard` の各ポストカードに 🔁 リポストボタンを追加。クリック時に `api.notes.create` へ `renote_id` を渡してローカルリポストを作成し、タイムラインにリアルタイム反映される（StreamHub 経由）。
+* **AP 受信リポスト（Announce）**: `seiran-federation-inbox` の inbox ハンドラが `Announce` アクティビティを受け取ると `handle_announce()` を呼び出し、元ポストを DB から検索して `repost_of_post_id` 付きのリポストレコードを挿入する。`Undo(Announce)` は対象レコードを論理削除（`deleted_at = NOW()`）する。
 
 ---
 

@@ -133,6 +133,15 @@ pub async fn inbox_handler(
                 }
             });
         }
+        "Announce" => {
+            let state_clone = state.clone();
+            let activity_clone = activity.clone();
+            tokio::spawn(async move {
+                if let Err(e) = handle_announce(activity_clone, state_clone).await {
+                    eprintln!("[Inbox/Announce] 処理エラー: {}", e);
+                }
+            });
+        }
         // いいね（Like）・絵文字リアクション（Misskey 拡張 EmojiReact）(#22)
         "Like" | "EmojiReact" => {
             let is_like = activity["type"].as_str() == Some("Like");
@@ -563,6 +572,19 @@ async fn handle_undo(
         return Ok(());
     }
 
+    // Undo(Announce): posts から対象のリポストを論理削除する
+    if obj["type"].as_str() == Some("Announce") {
+        if let Some(announce_id) = obj["id"].as_str() {
+            let deleted = sqlx::query("UPDATE posts SET deleted_at = NOW() WHERE ap_object_id = $1")
+                .bind(announce_id)
+                .execute(&state.db)
+                .await
+                .map_err(|e| format!("posts (Announce) UPDATE エラー: {}", e))?;
+            eprintln!("[Undo/Announce] {} を取り消し（{} 行）", announce_id, deleted.rows_affected());
+        }
+        return Ok(());
+    }
+
     if obj["type"].as_str() != Some("Follow") {
         return Ok(());
     }
@@ -689,6 +711,94 @@ async fn handle_reaction(
             "actor": { "username": remote_username, "domain": remote_domain, "displayName": remote_display_name },
         }),
     );
+    Ok(())
+}
+
+// Announce(Note) を受け取り posts テーブルに保存する
+async fn handle_announce(
+    activity: serde_json::Value,
+    state: Arc<AppState>,
+) -> Result<(), String> {
+    let announce_id = activity["id"].as_str().ok_or("Announce: id がありません")?;
+    let actor_uri = activity["actor"].as_str().ok_or("Announce: actor がありません")?;
+    let object_uri = activity["object"].as_str().ok_or("Announce: object がありません")?;
+    let published = activity["published"].as_str().unwrap_or("");
+
+    // 公開日時を parse して snowflake ID を生成
+    let created_at = published
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let post_id = seiran_common::generate_snowflake_id(created_at);
+
+    // リモートアクターを upsert（未登録なら作成）
+    let remote_ap = state.ap_client.fetch_actor(actor_uri).await?;
+    let remote_inbox = remote_ap.inbox.clone().unwrap_or_default();
+    let remote_username = remote_ap
+        .preferred_username
+        .clone()
+        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
+    let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
+    let remote_domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
+    let remote_avatar_url = remote_ap.avatar_url();
+
+    let now = chrono::Utc::now();
+    let new_actor_id = seiran_common::generate_snowflake_id(now);
+
+    let actor_id = state.actor_repo
+        .upsert_remote_fedi(new_actor_id, actor_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now)
+        .await
+        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+
+    // 元ポストをDBから検索（ap_object_id or at_uri が object_uri と一致するもの）
+    let orig_post = sqlx::query!(
+        "SELECT id FROM posts WHERE ap_object_id = $1 OR at_uri = $1 LIMIT 1",
+        object_uri
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| format!("元ポスト検索失敗: {}", e))?;
+
+    let repost_of_post_id = match orig_post {
+        Some(row) => row.id,
+        None => {
+            eprintln!("[Inbox/Announce] 元ポストが見つかりません: {}", object_uri);
+            return Ok(());
+        }
+    };
+
+    // 重複チェック（同一アクターによる同一ポストのリポスト）
+    let existing = sqlx::query!(
+        "SELECT id FROM posts WHERE actor_id = $1 AND repost_of_post_id = $2 AND deleted_at IS NULL LIMIT 1",
+        actor_id,
+        repost_of_post_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| format!("重複チェック失敗: {}", e))?;
+
+    if existing.is_some() {
+        return Ok(());
+    }
+
+    // リポストをDBに挿入
+    sqlx::query!(
+        "INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at)
+         VALUES ($1, $2, '', $3, $4, $5)",
+        post_id,
+        actor_id,
+        announce_id,
+        repost_of_post_id,
+        created_at
+    )
+    .execute(&state.db)
+    .await
+    .map_err(|e| format!("リポスト挿入失敗: {}", e))?;
+
+    eprintln!(
+        "[Inbox/Announce] リポスト保存完了: id={}, actor_id={}, repost_of={}",
+        post_id, actor_id, repost_of_post_id
+    );
+
     Ok(())
 }
 

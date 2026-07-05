@@ -209,3 +209,8 @@
   background: var(--accent-deep);
   color: var(--accent);
 }
+
+.actionBtnActive {
+  color: var(--accent);
+  font-weight: 600;
+}

@@ -460,6 +460,27 @@ pub async fn create_note(
         };
         // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
         embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp)).await;
+
+        // リアルタイム配信（#37）: 著者 + accepted なローカルフォロワーの stream へ
+        {
+            let mut recipients: std::collections::HashSet<i64> = std::collections::HashSet::new();
+            recipients.insert(actor_id);
+            if let Ok(rows) = sqlx::query_scalar::<_, i64>(
+                "SELECT f.follower_actor_id FROM follows f
+                 JOIN actors a ON a.id = f.follower_actor_id
+                 WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
+            )
+            .bind(actor_id)
+            .fetch_all(&state.db)
+            .await
+            {
+                recipients.extend(rows);
+            }
+            if let Ok(v) = serde_json::to_value(&repost_resp) {
+                state.stream_hub.publish_note(recipients, &v);
+            }
+        }
+
         return Json(repost_resp).into_response();
     }
 

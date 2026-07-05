@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at)\n         VALUES ($1, $2, '', $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "95ccced629f2f176a36880a928e7eb7fd8dc4b5fb4731b4aeeb73fdbe0f4074d"
+}
