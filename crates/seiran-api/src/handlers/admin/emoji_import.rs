@@ -120,7 +120,7 @@ pub async fn start_import(
     })
     .await
     .map_err(|_| ApiError::Internal("タスク実行エラー".to_owned()))?
-    .map_err(|e| ApiError::BadRequest(e))?;
+    .map_err(ApiError::BadRequest)?;
 
     let total = meta.emojis.len();
     let job_id = Uuid::new_v4().to_string();
