@@ -17,6 +17,13 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* リポスト詳細のヘッダ（#45） */
+.repostRail {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
 .focalUser {
   display: flex;
   align-items: center;
