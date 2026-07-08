@@ -761,8 +761,17 @@ async fn handle_announce(
     let repost_of_post_id = match orig_post {
         Some(row) => row.id,
         None => {
-            eprintln!("[Inbox/Announce] 元ポストが見つかりません: {}", object_uri);
-            return Ok(());
+            eprintln!(
+                "[Inbox/Announce] 元ポストが DB に未存在。リモートからフェッチします: {}",
+                object_uri
+            );
+            match fetch_and_save_note(object_uri, &state).await {
+                Ok(id) => id,
+                Err(e) => {
+                    eprintln!("[Inbox/Announce] 元ポストの取得・保存に失敗: {}", e);
+                    return Ok(());
+                }
+            }
         }
     };
 
@@ -800,6 +809,105 @@ async fn handle_announce(
     );
 
     Ok(())
+}
+
+/// object_uri が指すリモートノートをフェッチして posts テーブルに保存し、その id を返す。
+/// 既にレコードが存在する場合は INSERT をスキップして既存 id を返す。
+async fn fetch_and_save_note(note_uri: &str, state: &Arc<AppState>) -> Result<i64, String> {
+    let note = state.ap_client.fetch_object(note_uri).await?;
+
+    // Note 以外の型（Article 等）は一旦非対応
+    if note["type"].as_str() != Some("Note") {
+        return Err(format!(
+            "フェッチしたオブジェクトが Note ではありません: type={:?}",
+            note["type"]
+        ));
+    }
+
+    let note_id = note["id"].as_str().unwrap_or(note_uri);
+    let content_html = note["content"].as_str().unwrap_or("").to_string();
+    let published = note["published"].as_str().unwrap_or("");
+
+    // attributedTo は文字列または配列どちらもあり得る
+    let actor_uri: String = note["attributedTo"]
+        .as_str()
+        .map(|s| s.to_string())
+        .or_else(|| {
+            note["attributedTo"]
+                .as_array()?
+                .iter()
+                .find_map(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .ok_or_else(|| format!("Note ({}) に attributedTo がありません", note_id))?;
+
+    let created_at = published
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let post_id = seiran_common::generate_snowflake_id(created_at);
+
+    // アクターを upsert
+    let remote_ap = state.ap_client.fetch_actor(&actor_uri).await?;
+    let remote_inbox = remote_ap.inbox.clone().unwrap_or_default();
+    let remote_username = remote_ap
+        .preferred_username
+        .clone()
+        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
+    let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
+    let remote_domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
+    let remote_avatar_url = remote_ap.avatar_url();
+
+    let now = chrono::Utc::now();
+    let new_actor_id = seiran_common::generate_snowflake_id(now);
+
+    let actor_id = state
+        .actor_repo
+        .upsert_remote_fedi(
+            new_actor_id,
+            &actor_uri,
+            &remote_inbox,
+            &remote_username,
+            &remote_domain,
+            &remote_display_name,
+            remote_avatar_url.as_deref(),
+            now,
+        )
+        .await
+        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+
+    let body = strip_html(&content_html);
+
+    sqlx::query(
+        "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (ap_object_id) DO NOTHING",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .bind(&body)
+    .bind(note_id)
+    .bind(created_at)
+    .execute(&state.db)
+    .await
+    .map_err(|e| format!("posts INSERT エラー: {}", e))?;
+
+    // ON CONFLICT で既存行がある場合も含め、DB 上の id を取得する
+    use sqlx::Row as _;
+    let row = sqlx::query("SELECT id FROM posts WHERE ap_object_id = $1 LIMIT 1")
+        .bind(note_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| format!("posts id 取得エラー: {}", e))?;
+
+    let saved_id: i64 = row
+        .try_get("id")
+        .map_err(|e| format!("id カラム取得エラー: {}", e))?;
+
+    eprintln!(
+        "[Inbox/Announce] 元ポストをフェッチして保存: id={}, uri={}",
+        saved_id, note_id
+    );
+    Ok(saved_id)
 }
 
 #[cfg(test)]

@@ -273,6 +273,27 @@ impl ApClient {
         Ok(())
     }
 
+    /// リモート AP オブジェクト（Note 等）を URI から取得する
+    pub async fn fetch_object(&self, object_uri: &str) -> Result<serde_json::Value, ApError> {
+        let res = self
+            .http
+            .get(object_uri)
+            .header("Accept", "application/activity+json, application/ld+json")
+            .send()
+            .await?;
+
+        if !res.status().is_success() {
+            return Err(ApError::Other(format!(
+                "オブジェクト取得失敗: ステータス {} ({})",
+                res.status(),
+                object_uri
+            )));
+        }
+
+        let obj = res.json::<serde_json::Value>().await?;
+        Ok(obj)
+    }
+
     /// Webfinger 解決を実行する
     pub async fn resolve_webfinger(&self, username: &str, domain: &str) -> Result<String, ApError> {
         super::webfinger::resolve_webfinger_impl(&self.http, username, domain).await
