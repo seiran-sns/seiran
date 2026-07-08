@@ -12,7 +12,7 @@ use sqlx::Row;
 use unicode_segmentation::UnicodeSegmentation;
 
 use seiran_common::repository::TimelinePost;
-use seiran_common::{ap::{deliver_post_to_ap_followers, deliver_ap_announce, fetch_ap_history, plain_to_html}, generate_snowflake_id};
+use seiran_common::{ap::{deliver_post_to_ap_followers, deliver_ap_announce, deliver_undo_announce, fetch_ap_history, plain_to_html}, generate_snowflake_id};
 use seiran_common::mention::{convert_mentions_for_bsky, convert_mentions_for_ap};
 use seiran_common::atp::{BskyPostReply, BskyRefRecord, BskyEmbed};
 
@@ -76,6 +76,9 @@ pub struct NoteResponse {
     /// このノート自身は「リポストした」というラッパで、表示すべき中身は `renote` 側。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub renote: Option<Box<NoteResponse>>,
+    /// 認証ユーザーがこのノートをリポスト済みかどうか。未認証時は省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reposted_by_me: Option<bool>,
 }
 
 #[derive(Serialize, Clone)]
@@ -159,12 +162,36 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         parent_original_id: p.parent_original_post_id.map(|i| i.to_string()),
         reactions: Vec::new(),
         renote: None,
+        reposted_by_me: None,
     }
+}
+
+/// 指定アクターが post_ids のどれをリポスト済みかを一括取得する。
+async fn fetch_reposted_ids(
+    db: &sqlx::PgPool,
+    actor_id: i64,
+    post_ids: &[i64],
+) -> std::collections::HashSet<i64> {
+    if post_ids.is_empty() {
+        return Default::default();
+    }
+    sqlx::query_scalar::<_, i64>(
+        "SELECT repost_of_post_id FROM posts
+         WHERE actor_id = $1 AND repost_of_post_id = ANY($2) AND deleted_at IS NULL",
+    )
+    .bind(actor_id)
+    .bind(post_ids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .collect()
 }
 
 /// リポスト（`renote_id` を持つ）ノートについて、元ポストを一括解決して
 /// `renote` フィールドへ埋め込む（#45）。表示側はこの中身をカード本体として描画する。
-pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse]) {
+/// `my_actor_id` を渡すと埋め込まれた元ポストに `reposted_by_me` が設定される。
+pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_actor_id: Option<i64>) {
     let orig_ids: Vec<i64> = notes
         .iter()
         .filter_map(|n| n.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok()))
@@ -195,6 +222,13 @@ pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse]) {
         let mut nr = to_note_response(r, att_map.remove(&id).unwrap_or_default());
         nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
         by_id.insert(id, nr);
+    }
+
+    if let Some(actor_id) = my_actor_id {
+        let reposted_set = fetch_reposted_ids(db, actor_id, &orig_ids).await;
+        for (&oid, nr) in by_id.iter_mut() {
+            nr.reposted_by_me = Some(reposted_set.contains(&oid));
+        }
     }
 
     for n in notes.iter_mut() {
@@ -457,9 +491,10 @@ pub async fn create_note(
             quote_id: None, reply_id: None, parent_original_id: None,
             reactions: vec![],
             renote: None,
+            reposted_by_me: None,
         };
         // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
-        embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp)).await;
+        embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
 
         // リアルタイム配信（#37）: 著者 + accepted なローカルフォロワーの stream へ
         {
@@ -770,6 +805,7 @@ pub async fn create_note(
         parent_original_id: None,
         reactions: vec![],
         renote: None,
+        reposted_by_me: None,
     };
 
     // リアルタイム配信（#37）: 著者 + accepted なローカルフォロワーの stream へ
@@ -828,22 +864,30 @@ pub async fn home_timeline(
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids).await;
+    let reposted_set = fetch_reposted_ids(&state.db, actor_id, &ids).await;
     let mut notes: Vec<NoteResponse> = rows.into_iter()
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            nr.reposted_by_me = Some(reposted_set.contains(&id));
             nr
         })
         .collect();
-    embed_renotes(&state.db, &mut notes).await;
+    embed_renotes(&state.db, &mut notes, Some(actor_id)).await;
     Json(notes).into_response()
 }
 
 pub async fn local_timeline(
     Query(q): Query<TimelineQuery>,
+    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
+    let my_actor_id: Option<i64> = async {
+        let auth_user = extract_auth(&headers, &state.local_auth).await.ok()?;
+        state.actors.find_local_by_user_id(auth_user.user_id).await.ok().flatten().map(|a| a.id)
+    }.await;
+
     let limit = q.limit.unwrap_or(20).min(100);
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
@@ -858,23 +902,37 @@ pub async fn local_timeline(
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids).await;
+    let reposted_set = if let Some(actor_id) = my_actor_id {
+        fetch_reposted_ids(&state.db, actor_id, &ids).await
+    } else {
+        Default::default()
+    };
     let mut notes: Vec<NoteResponse> = rows.into_iter()
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            if my_actor_id.is_some() {
+                nr.reposted_by_me = Some(reposted_set.contains(&id));
+            }
             nr
         })
         .collect();
-    embed_renotes(&state.db, &mut notes).await;
+    embed_renotes(&state.db, &mut notes, my_actor_id).await;
     Json(notes).into_response()
 }
 
 /// フロントエンド向け: GET /api/notes/:id
 pub async fn get_note(
     Path(id): Path<String>,
+    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<NoteResponse>, ApiError> {
+    let my_actor_id: Option<i64> = async {
+        let auth_user = extract_auth(&headers, &state.local_auth).await.ok()?;
+        state.actors.find_local_by_user_id(auth_user.user_id).await.ok().flatten().map(|a| a.id)
+    }.await;
+
     let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
     let post = state
         .posts
@@ -886,7 +944,11 @@ pub async fn get_note(
     let rmap = fetch_reactions_map(&state.db, &[post_id]).await;
     let mut nr = to_note_response(post, att_map.remove(&post_id).unwrap_or_default());
     nr.reactions = rmap.get(&post_id).cloned().unwrap_or_default();
-    embed_renotes(&state.db, std::slice::from_mut(&mut nr)).await;
+    if let Some(actor_id) = my_actor_id {
+        let reposted_set = fetch_reposted_ids(&state.db, actor_id, &[post_id]).await;
+        nr.reposted_by_me = Some(reposted_set.contains(&post_id));
+    }
+    embed_renotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
     Ok(Json(nr))
 }
 
@@ -991,6 +1053,11 @@ pub async fn note_context(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<NoteContextResponse>, ApiError> {
+    let my_actor_id: Option<i64> = async {
+        let auth_user = extract_auth(&headers, &state.local_auth).await.ok()?;
+        state.actors.find_local_by_user_id(auth_user.user_id).await.ok().flatten().map(|a| a.id)
+    }.await;
+
     let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
 
     // 1. 対象ノートを取得
@@ -1005,18 +1072,12 @@ pub async fn note_context(
 
     // 2. リモートアクターの場合、Outbox から追加フェッチ
     if post.domain != state.local_domain {
-        // 閲覧者がこのアクターをフォロー中か確認
-        let viewer_follows = async {
-            let auth_user = extract_auth(&headers, &state.local_auth).await.ok()?;
-            let my_actor = state.actors.find_local_by_user_id(auth_user.user_id).await.ok()??;
-            matches!(
-                state.follows.find_status(my_actor.id, actor_id).await,
-                Ok(Some(_))
-            )
-            .then_some(())
-        }
-        .await
-        .is_some();
+        // 閲覧者がこのアクターをフォロー中か確認（my_actor_id は既に取得済み）
+        let viewer_follows = if let Some(vid) = my_actor_id {
+            matches!(state.follows.find_status(vid, actor_id).await, Ok(Some(_)))
+        } else {
+            false
+        };
 
         if !viewer_follows {
             // アクターの AP URI を取得
@@ -1076,19 +1137,128 @@ pub async fn note_context(
     let all_ids: Vec<i64> = before_posts.iter().chain(after_posts.iter()).map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &all_ids).await;
     let rmap = fetch_reactions_map(&state.db, &all_ids).await;
+    let reposted_set = if let Some(aid) = my_actor_id {
+        fetch_reposted_ids(&state.db, aid, &all_ids).await
+    } else {
+        Default::default()
+    };
     let build = |p: TimelinePost, att_map: &mut HashMap<i64, Vec<AttachmentResponse>>| {
         let id = p.id;
         let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
         nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+        if my_actor_id.is_some() {
+            nr.reposted_by_me = Some(reposted_set.contains(&id));
+        }
         nr
     };
 
     let mut before: Vec<NoteResponse> = before_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
     let mut after: Vec<NoteResponse> = after_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
-    embed_renotes(&state.db, &mut before).await;
-    embed_renotes(&state.db, &mut after).await;
+    embed_renotes(&state.db, &mut before, my_actor_id).await;
+    embed_renotes(&state.db, &mut after, my_actor_id).await;
 
     Ok(Json(NoteContextResponse { before, after }))
+}
+
+/// DELETE /api/notes/:note_id/repost
+/// 自分がしたリポストを取り消す（論理削除 + AP Undo/Announce 配送）。
+pub async fn delete_repost(
+    Path(note_id_str): Path<String>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let auth_user = match extract_auth(&headers, &state.local_auth).await {
+        Ok(u) => u,
+        Err(e) => return e.into_response(),
+    };
+
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    let actor_id = match state.actors.find_local_by_user_id(auth_user.user_id).await {
+        Ok(Some(a)) => a.id,
+        Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
+        Err(e) => {
+            eprintln!("[delete_repost] アクター取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+
+    // 削除前にリポスト行の id・ap_object_id と元ポストの ap_object_id を取得する
+    let repost_row = sqlx::query(
+        "SELECT p.id AS repost_id, p.ap_object_id AS repost_ap_id,
+                orig.ap_object_id AS orig_ap_id
+         FROM posts p
+         JOIN posts orig ON orig.id = p.repost_of_post_id
+         WHERE p.actor_id = $1 AND p.repost_of_post_id = $2 AND p.deleted_at IS NULL
+         LIMIT 1",
+    )
+    .bind(actor_id)
+    .bind(note_id)
+    .fetch_optional(&state.db)
+    .await;
+
+    let (repost_post_id, repost_ap_id, orig_ap_id) = match repost_row {
+        Ok(Some(row)) => {
+            let rid: i64 = row.try_get("repost_id").unwrap_or(0);
+            let rap: Option<String> = row.try_get("repost_ap_id").unwrap_or(None);
+            let oap: Option<String> = row.try_get("orig_ap_id").unwrap_or(None);
+            (rid, rap, oap)
+        }
+        Ok(None) => return ApiError::NotFound("REPOST_NOT_FOUND").into_response(),
+        Err(e) => {
+            eprintln!("[delete_repost] SELECT 失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+
+    // 論理削除
+    if let Err(e) = sqlx::query(
+        "UPDATE posts SET deleted_at = NOW() WHERE id = $1",
+    )
+    .bind(repost_post_id)
+    .execute(&state.db)
+    .await
+    {
+        eprintln!("[delete_repost] UPDATE 失敗: {}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+    }
+
+    eprintln!(
+        "[delete_repost] actor_id={} が note_id={} のリポスト（post_id={}）を取り消し",
+        actor_id, note_id, repost_post_id
+    );
+
+    // AP Undo(Announce) 配送 — 元ポストに ap_object_id がある場合のみ
+    if let Some(orig_ap_object_id) = orig_ap_id {
+        let db = state.db.clone();
+        let local_domain = state.local_domain.clone();
+        let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
+        let ap_client = Arc::clone(&state.ap_client);
+        tokio::spawn(async move {
+            if let Err(e) = deliver_undo_announce(
+                &ap_client,
+                &db,
+                repost_post_id,
+                actor_id,
+                &local_domain,
+                &ap_pem,
+                &orig_ap_object_id,
+            )
+            .await
+            {
+                eprintln!("[delete_repost] AP Undo(Announce) 配送失敗: {}", e);
+            }
+        });
+    }
+
+    Json(serde_json::json!({
+        "ok": true,
+        "repostId": repost_ap_id.unwrap_or_default()
+    }))
+    .into_response()
 }
 
 /// HTML タグを取り除き、基本エンティティを復元する。

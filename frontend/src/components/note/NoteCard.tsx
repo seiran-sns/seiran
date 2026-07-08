@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, Note } from "../../api/client";
+import { api, ApiError, Note } from "../../api/client";
 import { acct, displayName, formatDate, profilePath, protocolBadge } from "../../lib/format";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
@@ -16,22 +16,45 @@ interface NoteCardProps {
   large?: boolean;
 }
 
-function PostContent({ note, linkToDetail, large = false }: { note: Note; linkToDetail: boolean; large?: boolean }) {
+function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
+  note: Note;
+  linkToDetail: boolean;
+  large?: boolean;
+  onUnreposted?: () => void;
+}) {
   const navigate = useNavigate();
   const { openReply } = useComposer();
   const badge = protocolBadge(note.user.actorType);
   const [reposting, setReposting] = useState(false);
-  const [reposted, setReposted] = useState(false);
+  const [unreposting, setUnreposting] = useState(false);
+  const [reposted, setReposted] = useState(note.repostedByMe ?? false);
 
   async function handleRepost(e: React.MouseEvent) {
     e.stopPropagation();
-    if (reposting || reposted) return;
+    if (reposting || unreposting) return;
+
+    if (reposted) {
+      setUnreposting(true);
+      try {
+        await api.notes.deleteRepost(note.id);
+        setReposted(false);
+        onUnreposted?.();
+      } catch {
+        // エラー時は何もしない
+      } finally {
+        setUnreposting(false);
+      }
+      return;
+    }
+
     setReposting(true);
     try {
       await api.notes.create("", true, true, [], undefined, note.id);
       setReposted(true);
-    } catch {
-      // エラー時は何もしない（後でトースト通知に置き換え予定）
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setReposted(true);
+      }
     } finally {
       setReposting(false);
     }
@@ -124,10 +147,10 @@ function PostContent({ note, linkToDetail, large = false }: { note: Note; linkTo
         <button
           className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
           onClick={handleRepost}
-          disabled={reposting || reposted}
-          title={reposted ? "リポスト済み" : "リポスト"}
+          disabled={reposting || unreposting}
+          title={reposted ? "リポスト解除" : "リポスト"}
         >
-          🔁 {reposted ? "リポスト済み" : reposting ? "..." : "リポスト"}
+          🔁 {reposted ? "リポスト済み" : (reposting || unreposting) ? "..." : "リポスト"}
         </button>
       </div>
     </>
@@ -135,6 +158,10 @@ function PostContent({ note, linkToDetail, large = false }: { note: Note; linkTo
 }
 
 export default function NoteCard({ note, linkToDetail = true, large = false }: NoteCardProps) {
+  const [hidden, setHidden] = useState(false);
+
+  if (hidden) return null;
+
   if (note.renote) {
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
@@ -145,7 +172,7 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
           </Link>{" "}
           にリポスト
         </div>
-        <PostContent note={note.renote} linkToDetail={linkToDetail} large={large} />
+        <PostContent note={note.renote} linkToDetail={linkToDetail} large={large} onUnreposted={() => setHidden(true)} />
       </article>
     );
   }

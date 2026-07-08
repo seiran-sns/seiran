@@ -187,6 +187,8 @@ export interface Note {
   reactions?: ReactionSummary[];
   /** リポストの場合の元ポスト実体（#45）。この Note 自身は「リポストした」ラッパ。 */
   renote?: Note;
+  /** 認証ユーザーがこのノートをリポスト済みかどうか（未認証時は undefined）。 */
+  repostedByMe?: boolean;
 }
 
 export interface ReactionSummary {
@@ -249,6 +251,8 @@ interface RawNote {
   parent_original_id?: string;
   reactions?: ReactionSummary[];
   renote?: RawNote;
+  repostedByMe?: boolean;
+  reposted_by_me?: boolean;
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -272,6 +276,7 @@ function normalizeNote(r: RawNote): Note {
     parentOriginalId: r.parentOriginalId ?? r.parent_original_id,
     reactions: r.reactions ?? [],
     renote: r.renote ? normalizeNote(r.renote) : undefined,
+    repostedByMe: r.repostedByMe ?? r.reposted_by_me,
   };
 }
 
@@ -425,6 +430,9 @@ export const api = {
         `/notes/${encodeURIComponent(id)}/context`
       );
       return { before: raw.before.map(normalizeNote), after: raw.after.map(normalizeNote) };
+    },
+    deleteRepost(noteId: string) {
+      return request<{ ok: boolean }>("DELETE", `/notes/${encodeURIComponent(noteId)}/repost`);
     },
     async search(params: { q: string; limit?: number; session_id?: string }, signal?: AbortSignal) {
       const qs = new URLSearchParams();

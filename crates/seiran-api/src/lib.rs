@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use dashmap::DashMap;
 use tower_http::cors::{Any, CorsLayer};
-use axum::{routing::{get, patch, post}, Router};
+use axum::{routing::{delete, get, patch, post}, Router};
 use sqlx::PgPool;
 
 use seiran_common::{
@@ -210,6 +210,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/search", get(handlers::search::search_notes))
         .route("/api/streaming", get(handlers::streaming::streaming))
         .route("/api/notes/:id", get(handlers::notes::get_note))
+        .route("/api/notes/:id/repost", delete(handlers::notes::delete_repost))
         .route("/api/notes/:id/context", get(handlers::notes::note_context))
         // ActivityPub Note エンドポイント（nginx が AP Accept ヘッダーのみをここへ転送）
         .route("/notes/:id", get(handlers::notes::get_note_ap))
