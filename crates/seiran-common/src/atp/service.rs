@@ -600,6 +600,128 @@ impl AtpCommitService {
         Ok(())
     }
 
+    /// `app.bsky.graph.follow` レコードを削除コミットする（アンフォロー）。
+    pub async fn commit_delete_follow(
+        &self,
+        actor_id: i64,
+        rkey: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let actor_row = sqlx::query(
+            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev
+             FROM actors WHERE id = $1",
+        )
+        .bind(actor_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let at_did: String = actor_row
+            .try_get::<Option<String>, _>("at_did")?
+            .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
+        let signing_key_pem: String = actor_row
+            .try_get::<Option<String>, _>("at_signing_key_pem")?
+            .ok_or(AtpCommitError::ActorConfig("at_signing_key_pem が未設定"))?;
+        let prev_commit_cid_str: Option<String> =
+            actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
+        let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
+
+        let signing_key = signing_key_from_pem(&signing_key_pem)?;
+
+        let mut entries = self.load_atp_entries(actor_id).await?;
+        let entry_key = format!("app.bsky.graph.follow/{}", rkey);
+        entries.retain(|(k, _)| k != &entry_key);
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let (mst_root, mst_blocks) = build_mst(&entries)?;
+
+        let new_rev = generate_tid();
+        let prev_cid_parsed = prev_commit_cid_str
+            .as_deref()
+            .and_then(|s| cid_from_str(s).ok());
+        let (commit_cid, commit_cbor) = create_commit(
+            &at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key,
+        )?;
+
+        let mut new_blocks = mst_blocks;
+        new_blocks.push((commit_cid, commit_cbor));
+        let diff_car = encode_car(&commit_cid, &new_blocks)?;
+        let commit_cid_str = cid_to_string(&commit_cid);
+
+        let mut tx = self.pool.begin().await?;
+
+        for (cid, bytes) in &new_blocks {
+            sqlx::query(
+                "INSERT INTO atp_blocks (cid, actor_id, bytes) VALUES ($1, $2, $3)
+                 ON CONFLICT (cid, actor_id) DO NOTHING",
+            )
+            .bind(cid_to_string(cid))
+            .bind(actor_id)
+            .bind(bytes.as_slice())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2 WHERE id = $3")
+            .bind(&commit_cid_str)
+            .bind(&new_rev)
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query(
+            "DELETE FROM atp_records WHERE actor_id = $1 AND collection = 'app.bsky.graph.follow' AND rkey = $2",
+        )
+        .bind(actor_id)
+        .bind(rkey)
+        .execute(&mut *tx)
+        .await?;
+
+        let ops_json = serde_json::json!([{"action": "delete", "path": entry_key}]);
+        let event_row = sqlx::query(
+            "INSERT INTO atp_repo_events
+             (actor_id, did, commit_cid, prev_cid, rev, since_rev, car_bytes, ops_json)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id",
+        )
+        .bind(actor_id)
+        .bind(&at_did)
+        .bind(&commit_cid_str)
+        .bind(prev_commit_cid_str.as_deref())
+        .bind(&new_rev)
+        .bind(prev_rev.as_deref())
+        .bind(diff_car.as_slice())
+        .bind(&ops_json)
+        .fetch_one(&mut *tx)
+        .await?;
+        let seq: i64 = event_row.try_get("id")?;
+
+        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ws_ops = vec![CommitEvtOp { action: "delete".to_string(), path: entry_key, cid: None }];
+        let frame_opt = build_commit_frame(
+            seq, &at_did, &commit_cid, prev_cid_parsed.as_ref(),
+            &new_rev, prev_rev.as_deref(), &diff_car, &ws_ops, &[], &time_str,
+        ).ok();
+        if let Some(ref frame) = frame_opt {
+            if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
+                sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
+                    .bind(&compressed)
+                    .bind(seq)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
+        tx.commit().await?;
+
+        if let Some(frame) = frame_opt {
+            let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+        }
+
+        eprintln!("[atp] follow delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
     /// Bsky テキスト投稿コミット（DB の posts レコードを更新しない）。
     ///
     /// リポストの Bsky フォールバック投稿など、DB にポストレコードを作らずに

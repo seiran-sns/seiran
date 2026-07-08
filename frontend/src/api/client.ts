@@ -571,6 +571,9 @@ export const api = {
     create(target: string) {
       return request<FollowResponse>("POST", "/follows/create", { target });
     },
+    delete(target: string) {
+      return request<void>("POST", "/follows/delete", { target });
+    },
   },
 
   account: {

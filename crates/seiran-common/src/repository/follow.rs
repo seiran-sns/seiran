@@ -38,6 +38,13 @@ pub trait FollowRepository: Send + Sync {
         target_actor_id: i64,
     ) -> Result<(), sqlx::Error>;
 
+    /// フォロー関係の atp_rkey を取得する（アンフォロー時の ATP 削除に使用）。
+    async fn find_atp_rkey(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<Option<String>, sqlx::Error>;
+
     /// ATP フォロー完了後に accepted で挿入する（rkey を保存）。
     /// 既にフォロー済みの場合は何もしない。
     async fn insert_accepted_bsky(
@@ -140,6 +147,22 @@ impl FollowRepository for PgFollowRepository {
         .execute(&self.pool)
         .await
         .map(|_| ())
+    }
+
+    async fn find_atp_rkey(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(Option<String>,)> = sqlx::query_as(
+            "SELECT atp_rkey FROM follows
+             WHERE follower_actor_id = $1 AND target_actor_id = $2 LIMIT 1",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|r| r.0))
     }
 
     async fn insert_accepted_bsky(

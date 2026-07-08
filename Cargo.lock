@@ -3471,6 +3471,7 @@ dependencies = [
  "reqwest",
  "seiran-common",
  "serde",
+ "serde_ipld_dagcbor",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",

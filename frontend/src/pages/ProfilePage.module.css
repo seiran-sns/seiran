@@ -165,6 +165,29 @@ a.idValue:hover {
   cursor: not-allowed;
 }
 
+.unfollowBtn {
+  background: transparent;
+  color: var(--danger, #e53935);
+  border: 1px solid var(--danger, #e53935);
+  border-radius: 20px;
+  padding: 9px 20px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  margin-left: 8px;
+}
+
+.unfollowBtn:hover:not(:disabled) {
+  background: var(--danger, #e53935);
+  color: #fff;
+}
+
+.unfollowBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .followingBadge,
 .pendingBadge {
   font-size: 0.85rem;

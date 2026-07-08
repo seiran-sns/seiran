@@ -216,6 +216,7 @@ pub fn router(state: AppState) -> Router {
         .route("/notes/:id", get(handlers::notes::get_note_ap))
         // フォロー
         .route("/api/follows/create", post(handlers::follows::create_follow))
+        .route("/api/follows/delete", post(handlers::follows::delete_follow))
         // ユーザープロフィール
         .route("/api/users/profile",
             get(handlers::users::user_profile)

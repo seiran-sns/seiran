@@ -22,6 +22,7 @@ export default function ProfilePage() {
   const [error, setError] = useState("");
   const [followStatus, setFollowStatus] = useState<FollowStatus>("not_following");
   const [following, setFollowing] = useState(false);
+  const [unfollowing, setUnfollowing] = useState(false);
   const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
 
   useEffect(() => {
@@ -48,18 +49,37 @@ export default function ProfilePage() {
   const isBridge = !!profile?.bridge_real_handle;
   const isSelf = isLocal && !!user && user.username === profile?.username;
 
+  function followTarget(): string {
+    if (!profile) return "";
+    // ローカルユーザーはユーザー名のみ、AP は ap_uri、Bsky は at_did（DID）
+    if (profile.actor_type === "local") return profile.username;
+    return profile.ap_uri || profile.at_did || `${profile.username}@${profile.domain}`;
+  }
+
   async function doFollow() {
     if (!profile) return;
     setFollowing(true);
     try {
-      // AP ユーザーは ap_uri、Bsky ユーザーは at_did（DID）をターゲットとして渡す
-      const target = profile.ap_uri || profile.at_did || `${profile.username}@${profile.domain}`;
-      await api.follows.create(target);
-      setFollowStatus("pending");
+      const result = await api.follows.create(followTarget());
+      // ローカルフォローは即 accepted
+      setFollowStatus(result.status === "accepted" ? "accepted" : "pending");
     } catch (e) {
       alert(getErrorMessage(e));
     } finally {
       setFollowing(false);
+    }
+  }
+
+  async function doUnfollow() {
+    if (!profile) return;
+    setUnfollowing(true);
+    try {
+      await api.follows.delete(followTarget());
+      setFollowStatus("not_following");
+    } catch (e) {
+      alert(getErrorMessage(e));
+    } finally {
+      setUnfollowing(false);
     }
   }
 
@@ -159,9 +179,16 @@ export default function ProfilePage() {
             </div>
           )}
 
-          {!isLocal && (
+          {!isSelf && (
             <div className={styles.followArea}>
-              {followStatus === "accepted" && <span className={styles.followingBadge}>フォロー中</span>}
+              {followStatus === "accepted" && (
+                <>
+                  <span className={styles.followingBadge}>フォロー中</span>
+                  <button className={styles.unfollowBtn} onClick={doUnfollow} disabled={unfollowing}>
+                    {unfollowing ? "解除中..." : "フォロー解除"}
+                  </button>
+                </>
+              )}
               {followStatus === "pending" && <span className={styles.pendingBadge}>承認待ち</span>}
               {followStatus === "not_following" && (
                 <button className={styles.followBtn} onClick={handleFollowClick} disabled={following}>
