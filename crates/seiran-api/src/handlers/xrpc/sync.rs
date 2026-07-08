@@ -190,7 +190,7 @@ async fn handle_subscribe_repos(
                     .filter_map(|op| {
                         let action = op["action"].as_str()?.to_string();
                         let path = op["path"].as_str()?.to_string();
-                        let cid = cid_from_str(op["cid"].as_str()?).ok()?;
+                        let cid = op["cid"].as_str().and_then(|s| cid_from_str(s).ok());
                         Some(CommitEvtOp { action, path, cid })
                     })
                     .collect();

@@ -463,7 +463,7 @@ pub async fn create_note(
                 let at_cid_clone = at_cid.clone();
                 let atp = Arc::clone(&state.atp_service);
                 tokio::spawn(async move {
-                    if let Err(e) = atp.commit_repost(actor_id, &at_uri_clone, &at_cid_clone, now).await {
+                    if let Err(e) = atp.commit_repost(actor_id, &at_uri_clone, &at_cid_clone, now, Some(post_id)).await {
                         eprintln!("[create_note] ATP repost 失敗: {}", e);
                     }
                 });
@@ -1186,9 +1186,10 @@ pub async fn delete_repost(
         }
     };
 
-    // 削除前にリポスト行の id・ap_object_id と元ポストの ap_object_id を取得する
+    // 削除前にリポスト行の id・ap_object_id・atp_repost_rkey と元ポストの ap_object_id を取得する
     let repost_row = sqlx::query(
         "SELECT p.id AS repost_id, p.ap_object_id AS repost_ap_id,
+                p.atp_repost_rkey,
                 orig.ap_object_id AS orig_ap_id
          FROM posts p
          JOIN posts orig ON orig.id = p.repost_of_post_id
@@ -1200,12 +1201,13 @@ pub async fn delete_repost(
     .fetch_optional(&state.db)
     .await;
 
-    let (repost_post_id, repost_ap_id, orig_ap_id) = match repost_row {
+    let (repost_post_id, repost_ap_id, orig_ap_id, atp_repost_rkey) = match repost_row {
         Ok(Some(row)) => {
             let rid: i64 = row.try_get("repost_id").unwrap_or(0);
             let rap: Option<String> = row.try_get("repost_ap_id").unwrap_or(None);
             let oap: Option<String> = row.try_get("orig_ap_id").unwrap_or(None);
-            (rid, rap, oap)
+            let ark: Option<String> = row.try_get("atp_repost_rkey").unwrap_or(None);
+            (rid, rap, oap, ark)
         }
         Ok(None) => return ApiError::NotFound("REPOST_NOT_FOUND").into_response(),
         Err(e) => {
@@ -1250,6 +1252,17 @@ pub async fn delete_repost(
             .await
             {
                 eprintln!("[delete_repost] AP Undo(Announce) 配送失敗: {}", e);
+            }
+        });
+    }
+
+    // ATP repost delete commit — atp_repost_rkey が保存されている場合のみ
+    if let Some(rkey) = atp_repost_rkey {
+        let atp = Arc::clone(&state.atp_service);
+        let now = chrono::Utc::now();
+        tokio::spawn(async move {
+            if let Err(e) = atp.delete_atp_repost(actor_id, &rkey, now).await {
+                eprintln!("[delete_repost] ATP repost delete 失敗: {}", e);
             }
         });
     }

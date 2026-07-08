@@ -581,9 +581,9 @@ pub fn encode_bsky_actor_profile(
 // body:   CommitEvt 構造体
 
 pub struct CommitEvtOp {
-    pub action: String, // "create"
-    pub path: String,   // "app.bsky.feed.post/<tid>"
-    pub cid: Cid,
+    pub action: String,      // "create" | "update" | "delete"
+    pub path: String,        // "app.bsky.feed.post/<tid>"
+    pub cid: Option<Cid>,   // delete の場合は None
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -615,7 +615,10 @@ pub fn build_commit_frame(
         .map(|op| {
             let mut m: BTreeMap<String, Ipld> = BTreeMap::new();
             m.insert("action".to_string(), Ipld::String(op.action.clone()));
-            m.insert("cid".to_string(), Ipld::Link(op.cid));
+            m.insert("cid".to_string(), match op.cid {
+                Some(c) => Ipld::Link(c),
+                None => Ipld::Null,
+            });
             m.insert("path".to_string(), Ipld::String(op.path.clone()));
             Ipld::Map(m)
         })
