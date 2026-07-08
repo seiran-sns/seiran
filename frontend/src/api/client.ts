@@ -205,6 +205,7 @@ export interface UserProfile {
   ap_uri?: string;
   at_did?: string;
   bio?: string;
+  avatar_url?: string;
   follow_status: "not_following" | "pending" | "accepted";
   /** 最近の投稿。タイムラインと同じ NoteCard で描画する（#43）。 */
   recent_posts: Note[];
@@ -461,8 +462,8 @@ export const api = {
     updateProfile(patch: {
       display_name?: string;
       bio?: string;
-      avatar_media_id?: number | null;
-      banner_media_id?: number | null;
+      avatar_media_id?: string | null;
+      banner_media_id?: string | null;
     }) {
       return request<{
         username: string;

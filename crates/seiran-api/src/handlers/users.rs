@@ -25,6 +25,7 @@ pub struct ProfileResponse {
     pub ap_uri: Option<String>,
     pub at_did: Option<String>,
     pub bio: Option<String>,
+    pub avatar_url: Option<String>,
     pub follow_status: String, // "not_following" | "pending" | "accepted"
     /// 最近の投稿。タイムラインと同じ NoteCard で描画するため NoteResponse で返す（#43）。
     pub recent_posts: Vec<NoteResponse>,
@@ -47,6 +48,7 @@ struct AppViewGetProfileResp {
     handle: String,
     display_name: Option<String>,
     description: Option<String>,
+    avatar: Option<String>,
 }
 
 /// Bsky AppView からプロフィールを取得して ProfileResponse を返す。
@@ -95,6 +97,7 @@ async fn fetch_bsky_profile_from_appview(
         ap_uri: None,
         at_did: Some(bsky.did),
         bio: bsky.description,
+        avatar_url: bsky.avatar,
         follow_status: "not_following".to_string(),
         recent_posts: vec![],
         bridge_real_handle: None,
@@ -222,6 +225,21 @@ async fn build_profile_response(
         })
         .collect();
 
+    // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
+    let avatar_url: Option<String> = sqlx::query_scalar(
+        "SELECT COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) \
+         FROM actors a \
+         LEFT JOIN media_files amf ON amf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id \
+         WHERE a.id = $1",
+    )
+    .bind(actor_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .flatten();
+
     // 本尊（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
     // その本尊アクターのハンドルとプロトコルをフロントの「本尊ワープ」導線に渡す。
     let (bridge_real_handle, bridge_protocol) = match actor.bridge_real_actor_id {
@@ -248,6 +266,7 @@ async fn build_profile_response(
         ap_uri: actor.ap_uri,
         at_did: actor.at_did,
         bio: actor.bio,
+        avatar_url,
         follow_status,
         recent_posts,
         bridge_real_handle,
@@ -288,6 +307,7 @@ async fn fetch_remote_profile(
 
     let _ = my_user_id; // リモートの場合フォロー状態は常に not_following（DB 未登録）
 
+    let ap_avatar_url = ap_actor.avatar_url();
     Json(ProfileResponse {
         username: ap_actor
             .preferred_username
@@ -298,6 +318,7 @@ async fn fetch_remote_profile(
         ap_uri: Some(actor_uri),
         at_did: None,
         bio: ap_actor.summary,
+        avatar_url: ap_avatar_url,
         follow_status: "not_following".to_string(),
         recent_posts: vec![],
         bridge_real_handle: None,
@@ -329,11 +350,11 @@ pub struct UpdateProfileRequest {
     pub bio: Option<String>,
     /// `None` = フィールド未指定（現在値を保持）
     /// `Some(None)` = null を明示（解除）
-    /// `Some(Some(id))` = メディア ID を設定
+    /// `Some(Some(id))` = メディア ID を設定（文字列で受け取り精度損失を防ぐ）
     #[serde(default)]
-    pub avatar_media_id: Option<Option<i64>>,
+    pub avatar_media_id: Option<Option<String>>,
     #[serde(default)]
-    pub banner_media_id: Option<Option<i64>>,
+    pub banner_media_id: Option<Option<String>>,
 }
 
 #[derive(Serialize)]
@@ -394,11 +415,19 @@ pub async fn update_profile(
     };
     let new_avatar_media_id: Option<i64> = match req.avatar_media_id {
         None => current.avatar_media_id,
-        Some(v) => v,
+        Some(None) => None,
+        Some(Some(s)) => match s.parse::<i64>() {
+            Ok(id) => Some(id),
+            Err(_) => return (StatusCode::BAD_REQUEST, "avatar_media_id が不正な値です").into_response(),
+        },
     };
     let new_banner_media_id: Option<i64> = match req.banner_media_id {
         None => current.banner_media_id,
-        Some(v) => v,
+        Some(None) => None,
+        Some(Some(s)) => match s.parse::<i64>() {
+            Ok(id) => Some(id),
+            Err(_) => return (StatusCode::BAD_REQUEST, "banner_media_id が不正な値です").into_response(),
+        },
     };
 
     // UPDATE

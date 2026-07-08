@@ -74,7 +74,7 @@ export default function ProfileEditPage() {
       await api.users.updateProfile({
         display_name: displayName,
         bio,
-        ...(avatar ? { avatar_media_id: Number(avatar.id) } : {}),
+        ...(avatar ? { avatar_media_id: avatar.id } : {}),
       });
       setSaved(true);
       setTimeout(() => navigate(`/@${user?.username ?? ""}`), 500);

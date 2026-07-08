@@ -126,7 +126,9 @@ export default function ProfilePage() {
           )}
 
           <div className={styles.avatarLarge}>
-            {(profile.display_name || profile.username)[0]?.toUpperCase() ?? "?"}
+            {profile.avatar_url
+              ? <img src={profile.avatar_url} alt="" className={styles.avatarImg} />
+              : (profile.display_name || profile.username)[0]?.toUpperCase() ?? "?"}
           </div>
 
           <div className={styles.names}>

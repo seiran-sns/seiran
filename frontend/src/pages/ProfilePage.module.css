@@ -42,6 +42,14 @@
   font-weight: 800;
   font-size: 2.2rem;
   margin-bottom: 14px;
+  overflow: hidden;
+}
+
+.avatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 .names {
