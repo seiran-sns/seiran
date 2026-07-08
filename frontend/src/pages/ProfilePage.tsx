@@ -52,7 +52,8 @@ export default function ProfilePage() {
     if (!profile) return;
     setFollowing(true);
     try {
-      const target = profile.ap_uri || `${profile.username}@${profile.domain}`;
+      // AP ユーザーは ap_uri、Bsky ユーザーは at_did（DID）をターゲットとして渡す
+      const target = profile.ap_uri || profile.at_did || `${profile.username}@${profile.domain}`;
       await api.follows.create(target);
       setFollowStatus("pending");
     } catch (e) {

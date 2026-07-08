@@ -39,6 +39,61 @@ pub struct ProfileResponse {
     pub is_paired: bool,
 }
 
+// AppView `app.bsky.actor.getProfile` レスポンスの必要フィールド
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppViewGetProfileResp {
+    did: String,
+    handle: String,
+    display_name: Option<String>,
+    description: Option<String>,
+}
+
+/// Bsky AppView からプロフィールを取得して ProfileResponse を返す。
+/// `actor` はハンドル（`alice.bsky.social`）または DID（`did:plc:...`）。
+async fn fetch_bsky_profile_from_appview(actor: &str, state: &AppState) -> Response {
+    let url = format!(
+        "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={}",
+        urlencoding::encode(actor)
+    );
+
+    let resp = match state.http_client.get(&url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[profile/bsky] AppView 接続失敗: {}", e);
+            return (StatusCode::BAD_GATEWAY, "AppView 接続失敗").into_response();
+        }
+    };
+
+    if !resp.status().is_success() {
+        return (StatusCode::NOT_FOUND, "Bsky ユーザーが見つかりません").into_response();
+    }
+
+    let bsky: AppViewGetProfileResp = match resp.json().await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[profile/bsky] AppView JSON 解析失敗: {}", e);
+            return (StatusCode::BAD_GATEWAY, "AppView レスポンス解析失敗").into_response();
+        }
+    };
+
+    Json(ProfileResponse {
+        username: bsky.handle,
+        domain: String::new(),
+        display_name: bsky.display_name,
+        actor_type: "bsky".to_string(),
+        ap_uri: None,
+        at_did: Some(bsky.did),
+        bio: bsky.description,
+        follow_status: "not_following".to_string(),
+        recent_posts: vec![],
+        bridge_real_handle: None,
+        bridge_protocol: None,
+        is_paired: false,
+    })
+    .into_response()
+}
+
 pub async fn user_profile(
     Query(params): Query<ProfileQuery>,
     headers: HeaderMap,
@@ -57,6 +112,20 @@ pub async fn user_profile(
         if q.starts_with("https://") || q.starts_with("http://") {
             // Actor URI → WebFinger などは省略し、DB で ap_uri 検索
             return lookup_by_uri(q, my_user_id, &state).await.into_response();
+        } else if q.starts_with("did:") {
+            // DID 形式 → DB で検索し、なければ AppView へ
+            return match state.actors.find_by_did(q).await {
+                Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
+                Ok(None) => fetch_bsky_profile_from_appview(q, &state).await,
+                Err(e) => {
+                    eprintln!("[profile] DB エラー: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
+                }
+            };
+        } else if q.contains('.') && !q.contains('@') {
+            // ドット含み・@なし → ATP ハンドル（alice.bsky.social 等）
+            // DB に at_did でアクターが登録済みの場合は DB から返す（未来の ATP フォロー実装に備え）
+            return fetch_bsky_profile_from_appview(q, &state).await;
         } else {
             let parts: Vec<&str> = q.splitn(2, '@').collect();
             if parts.len() == 2 {
