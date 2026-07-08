@@ -71,6 +71,17 @@ pub trait ActorRepository: Send + Sync {
         at_signing_key_pem: &str,
     ) -> Result<(), sqlx::Error>;
 
+    /// リモート（Bsky）アクターを upsert し、その actor_id を返す。
+    /// `at_did` の一意制約で衝突した場合は handle と display_name を更新する。
+    async fn upsert_remote_bsky(
+        &self,
+        id: i64,
+        at_did: &str,
+        handle: &str,
+        display_name: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Result<i64, sqlx::Error>;
+
     /// リモート（Fediverse）アクターを upsert し、その actor_id を返す。
     #[allow(clippy::too_many_arguments)]
     async fn upsert_remote_fedi(
@@ -189,6 +200,33 @@ impl ActorRepository for PgActorRepository {
         .execute(&self.pool)
         .await
         .map(|_| ())
+    }
+
+    async fn upsert_remote_bsky(
+        &self,
+        id: i64,
+        at_did: &str,
+        handle: &str,
+        display_name: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Result<i64, sqlx::Error> {
+        let row: (i64,) = sqlx::query_as(
+            "INSERT INTO actors (id, actor_type, at_did, username, domain, display_name, created_at, updated_at)
+             VALUES ($1, 'bsky', $2, $3, '', $4, $5, $5)
+             ON CONFLICT (at_did) DO UPDATE
+               SET username     = EXCLUDED.username,
+                   display_name = COALESCE(EXCLUDED.display_name, actors.display_name),
+                   updated_at   = EXCLUDED.updated_at
+             RETURNING id",
+        )
+        .bind(id)
+        .bind(at_did)
+        .bind(handle)
+        .bind(display_name)
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
     }
 
     async fn upsert_remote_fedi(

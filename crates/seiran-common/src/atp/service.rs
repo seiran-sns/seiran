@@ -7,7 +7,7 @@ use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
     build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
     cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
-    encode_bsky_feed_repost,
+    encode_bsky_feed_repost, encode_bsky_graph_follow,
     generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage, BskyEmbed,
     BskyPostReply,
 };
@@ -415,6 +415,35 @@ impl AtpCommitService {
         eprintln!("[atp] repost commit 完了: actor_id={}, rkey={}", actor_id, rkey);
         self.spawn_request_crawl();
         Ok(())
+    }
+
+    /// `app.bsky.graph.follow` レコードをコミットする。
+    /// 成功時は生成した rkey を返す（将来のアンフォロー時に必要）。
+    pub async fn commit_follow(
+        &self,
+        actor_id: i64,
+        subject_did: &str,
+        now: DateTime<Utc>,
+    ) -> Result<String, AtpCommitError> {
+        let rkey = generate_tid();
+        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        let (record_cbor, record_cid) = encode_bsky_graph_follow(subject_did, &created_at_str)?;
+
+        let record = CommitRecord {
+            collection: "app.bsky.graph.follow",
+            rkey: rkey.clone(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action: "create",
+            blob_cids: vec![],
+        };
+
+        self.commit_record_inner(actor_id, record, now, None).await?;
+
+        eprintln!("[atp] follow commit 完了: actor_id={}, subject={}, rkey={}", actor_id, subject_did, rkey);
+        self.spawn_request_crawl();
+        Ok(rkey)
     }
 
     /// リポスト解除コミット（app.bsky.feed.repost レコードを MST から削除する）。

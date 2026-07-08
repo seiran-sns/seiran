@@ -51,7 +51,12 @@ struct AppViewGetProfileResp {
 
 /// Bsky AppView からプロフィールを取得して ProfileResponse を返す。
 /// `actor` はハンドル（`alice.bsky.social`）または DID（`did:plc:...`）。
-async fn fetch_bsky_profile_from_appview(actor: &str, state: &AppState) -> Response {
+/// AppView フェッチ後に DB でアクターが登録済みかを確認し、フォロー状態も含めて返す。
+async fn fetch_bsky_profile_from_appview(
+    actor: &str,
+    my_user_id: Option<i64>,
+    state: &AppState,
+) -> Response {
     let url = format!(
         "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={}",
         urlencoding::encode(actor)
@@ -76,6 +81,11 @@ async fn fetch_bsky_profile_from_appview(actor: &str, state: &AppState) -> Respo
             return (StatusCode::BAD_GATEWAY, "AppView レスポンス解析失敗").into_response();
         }
     };
+
+    // フォロー済みアクターは DB に登録されているため、DID で引いてフォロー状態を返す
+    if let Ok(Some(db_actor)) = state.actors.find_by_did(&bsky.did).await {
+        return build_profile_response(db_actor, my_user_id, state).await;
+    }
 
     Json(ProfileResponse {
         username: bsky.handle,
@@ -116,7 +126,7 @@ pub async fn user_profile(
             // DID 形式 → DB で検索し、なければ AppView へ
             return match state.actors.find_by_did(q).await {
                 Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
-                Ok(None) => fetch_bsky_profile_from_appview(q, &state).await,
+                Ok(None) => fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
                 Err(e) => {
                     eprintln!("[profile] DB エラー: {}", e);
                     (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
@@ -124,8 +134,7 @@ pub async fn user_profile(
             };
         } else if q.contains('.') && !q.contains('@') {
             // ドット含み・@なし → ATP ハンドル（alice.bsky.social 等）
-            // DB に at_did でアクターが登録済みの場合は DB から返す（未来の ATP フォロー実装に備え）
-            return fetch_bsky_profile_from_appview(q, &state).await;
+            return fetch_bsky_profile_from_appview(q, my_user_id, &state).await;
         } else {
             let parts: Vec<&str> = q.splitn(2, '@').collect();
             if parts.len() == 2 {

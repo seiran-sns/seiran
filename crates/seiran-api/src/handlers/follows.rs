@@ -1,4 +1,4 @@
-use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
+use axum::{extract::State, http::HeaderMap, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -6,6 +6,14 @@ use seiran_common::{generate_snowflake_id, ApError};
 
 use crate::middleware::extract_auth;
 use crate::AppState;
+
+// AppView getProfile レスポンス（フォロー時のアクター情報取得に使用）
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppViewProfile {
+    handle: String,
+    display_name: Option<String>,
+}
 
 #[derive(Deserialize)]
 pub struct CreateFollowRequest {
@@ -43,6 +51,11 @@ pub async fn create_follow(
                     .into_response();
             }
         };
+
+    // DID 形式 → ATP フォローパス
+    if req.target.starts_with("did:") {
+        return follow_bsky(&req.target, auth_user.user_id, &state).await.into_response();
+    }
 
     // ターゲット URI を解決（handle または URI）
     let target_uri = match resolve_target_uri(&state, &req.target).await {
@@ -170,6 +183,87 @@ pub async fn create_follow(
     Json(FollowResponse {
         status: "pending".to_string(),
         target_uri,
+    })
+    .into_response()
+}
+
+/// DID をターゲットとした ATP フォローを実行する。
+async fn follow_bsky(did: &str, user_id: i64, state: &AppState) -> impl IntoResponse {
+    // ローカルアクター取得
+    let local_actor = match state.actors.find_local_by_user_id(user_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
+        Err(e) => {
+            eprintln!("[follow/bsky] ローカルアクター取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+
+    // AppView からプロフィール情報を取得（アクター登録用）
+    let url = format!(
+        "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={}",
+        urlencoding::encode(did)
+    );
+    let bsky_profile: AppViewProfile = match state.http_client.get(&url).send().await {
+        Ok(r) if r.status().is_success() => match r.json().await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[follow/bsky] AppView JSON 解析失敗: {}", e);
+                return (StatusCode::BAD_GATEWAY, "AppView レスポンス解析失敗").into_response();
+            }
+        },
+        Ok(r) => return (StatusCode::NOT_FOUND, format!("Bsky ユーザーが見つかりません ({})", r.status())).into_response(),
+        Err(e) => {
+            eprintln!("[follow/bsky] AppView 接続失敗: {}", e);
+            return (StatusCode::BAD_GATEWAY, "AppView 接続失敗").into_response();
+        }
+    };
+
+    // Bsky リモートアクターを DB に登録（upsert）
+    let now = chrono::Utc::now();
+    let new_actor_id = generate_snowflake_id(now);
+    let remote_actor_id = match state
+        .actors
+        .upsert_remote_bsky(
+            new_actor_id,
+            did,
+            &bsky_profile.handle,
+            bsky_profile.display_name.as_deref(),
+            now,
+        )
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("[follow/bsky] アクター upsert 失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+
+    // ATP リポに app.bsky.graph.follow レコードをコミット
+    let rkey = match state.atp_service.commit_follow(local_actor.id, did, now).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[follow/bsky] ATP commit 失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("ATP コミット失敗: {}", e)).into_response();
+        }
+    };
+
+    // follows テーブルに accepted で記録
+    if let Err(e) = state
+        .follows
+        .insert_accepted_bsky(local_actor.id, remote_actor_id, &rkey)
+        .await
+    {
+        eprintln!("[follow/bsky] follows INSERT 失敗: {}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+    }
+
+    eprintln!("[follow/bsky] {} → {} フォロー完了 (rkey={})", local_actor.id, did, rkey);
+
+    Json(FollowResponse {
+        status: "accepted".to_string(),
+        target_uri: format!("at://{}", did),
     })
     .into_response()
 }

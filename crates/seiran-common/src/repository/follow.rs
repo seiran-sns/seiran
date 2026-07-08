@@ -37,6 +37,15 @@ pub trait FollowRepository: Send + Sync {
         follower_actor_id: i64,
         target_actor_id: i64,
     ) -> Result<(), sqlx::Error>;
+
+    /// ATP フォロー完了後に accepted で挿入する（rkey を保存）。
+    /// 既にフォロー済みの場合は何もしない。
+    async fn insert_accepted_bsky(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        atp_rkey: &str,
+    ) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgFollowRepository {
@@ -128,6 +137,25 @@ impl FollowRepository for PgFollowRepository {
         )
         .bind(follower_actor_id)
         .bind(target_actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    async fn insert_accepted_bsky(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        atp_rkey: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO follows (follower_actor_id, target_actor_id, status, atp_rkey)
+             VALUES ($1, $2, 'accepted', $3)
+             ON CONFLICT (follower_actor_id, target_actor_id) DO NOTHING",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .bind(atp_rkey)
         .execute(&self.pool)
         .await
         .map(|_| ())

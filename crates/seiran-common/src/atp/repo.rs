@@ -571,6 +571,30 @@ pub fn encode_bsky_actor_profile(
     Ok((cbor, cid))
 }
 
+/// `app.bsky.graph.follow` レコードの DAG-CBOR バイト列と CID を生成する。
+pub fn encode_bsky_graph_follow(
+    subject_did: &str,
+    created_at_rfc3339: &str,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    // canonical 順: $type(5) < subject(7) < createdAt(9)
+    #[derive(Serialize)]
+    struct BskyGraphFollow {
+        #[serde(rename = "$type")]
+        kind: String,
+        subject: String,
+        #[serde(rename = "createdAt")]
+        created_at: String,
+    }
+    let record = BskyGraphFollow {
+        kind: "app.bsky.graph.follow".to_string(),
+        subject: subject_did.to_string(),
+        created_at: created_at_rfc3339.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // subscribeRepos WebSocket フレーム構築
 // ─────────────────────────────────────────────────────────────────────────────
