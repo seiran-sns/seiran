@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use seiran_common::{generate_snowflake_id, ApError};
+use seiran_common::atp::fetch_atp_history;
 
 use crate::middleware::extract_auth;
 use crate::AppState;
@@ -286,6 +287,16 @@ async fn follow_bsky(actor_id_or_handle: &str, user_id: i64, state: &AppState) -
 
     eprintln!("[follow/bsky] {} → {} フォロー完了 (rkey={})", local_actor.id, did, rkey);
 
+    // バックグラウンドで過去ポストを取り込む（フォロー直後に既存投稿を表示するため）
+    {
+        let db = state.db.clone();
+        let http = state.http_client.clone();
+        let did_clone = did.clone();
+        tokio::spawn(async move {
+            backfill_bsky_posts(&db, &http, &did_clone, remote_actor_id).await;
+        });
+    }
+
     Json(FollowResponse {
         status: "accepted".to_string(),
         target_uri: format!("at://{}", did),
@@ -396,4 +407,37 @@ async fn resolve_target_uri(state: &AppState, target: &str) -> Result<String, Ap
         "ターゲット形式が不正です: {}",
         target
     )))
+}
+
+/// Bsky アクターの過去ポストを AppView から取り込む（バックフィル）。
+/// フォロー時・プロフィール表示時にバックグラウンドで呼ばれる。
+pub(crate) async fn backfill_bsky_posts(
+    db: &sqlx::PgPool,
+    http: &reqwest::Client,
+    did: &str,
+    actor_id: i64,
+) {
+    match fetch_atp_history(http, did, 50, 7).await {
+        Ok(posts) => {
+            let count = posts.len();
+            for post in &posts {
+                let post_id = generate_snowflake_id(post.created_at);
+                let _ = sqlx::query(
+                    "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at)
+                     VALUES ($1, $2, $3, $4, $5, $6)
+                     ON CONFLICT (at_uri) DO NOTHING",
+                )
+                .bind(post_id)
+                .bind(actor_id)
+                .bind(&post.text)
+                .bind(&post.uri)
+                .bind(&post.cid)
+                .bind(post.created_at)
+                .execute(db)
+                .await;
+            }
+            eprintln!("[backfill/bsky] did={} {} 件処理", did, count);
+        }
+        Err(e) => eprintln!("[backfill/bsky] 失敗 did={}: {}", did, e),
+    }
 }

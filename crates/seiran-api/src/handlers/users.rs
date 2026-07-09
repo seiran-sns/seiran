@@ -91,6 +91,16 @@ async fn fetch_bsky_profile_from_appview(
             db_actor.id, &bsky.did, &bsky.handle,
             bsky.display_name.as_deref(), bsky.avatar.as_deref(), now,
         ).await;
+        // バックグラウンドで過去ポストを取り込む
+        {
+            let db = state.db.clone();
+            let http = state.http_client.clone();
+            let did_clone = bsky.did.clone();
+            let actor_id = db_actor.id;
+            tokio::spawn(async move {
+                crate::handlers::follows::backfill_bsky_posts(&db, &http, &did_clone, actor_id).await;
+            });
+        }
         return build_profile_response(db_actor, my_user_id, state).await;
     }
 

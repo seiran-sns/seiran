@@ -199,6 +199,57 @@ pub async fn fetch_atp_history(
     Ok(posts)
 }
 
+/// AppView `app.bsky.feed.getPosts` で AT URI を指定して単一ポストを取得する。
+///
+/// firehose から通知された AT URI を正確に取得するための用途。
+pub async fn fetch_single_bsky_post(
+    client: &reqwest::Client,
+    at_uri: &str,
+) -> Result<Option<BskyPost>, String> {
+    let url = format!(
+        "{}/xrpc/app.bsky.feed.getPosts?uris={}",
+        APPVIEW_URL,
+        urlencoding::encode(at_uri)
+    );
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("getPosts HTTP エラー: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("getPosts パースエラー: {}", e))?;
+
+    let posts = match json["posts"].as_array() {
+        Some(a) if !a.is_empty() => a,
+        _ => return Ok(None),
+    };
+
+    let p = &posts[0];
+    let text = p["record"]["text"].as_str().unwrap_or("").to_string();
+    let created_at_str = p["record"]["createdAt"].as_str().unwrap_or("");
+    let created_at = created_at_str
+        .parse::<DateTime<Utc>>()
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(Some(BskyPost {
+        uri: p["uri"].as_str().unwrap_or("").to_string(),
+        cid: p["cid"].as_str().unwrap_or("").to_string(),
+        author_did: p["author"]["did"].as_str().unwrap_or("").to_string(),
+        author_handle: p["author"]["handle"].as_str().unwrap_or("").to_string(),
+        text,
+        created_at,
+        indexed_at: Utc::now(),
+    }))
+}
+
 /// PDS に対して `com.atproto.server.createSession` を呼び出し、セッションを取得する。
 ///
 /// `identifier` はハンドルまたは DID。`password` は App Password を推奨。

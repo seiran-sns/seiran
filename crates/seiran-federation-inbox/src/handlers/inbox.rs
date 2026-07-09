@@ -412,6 +412,43 @@ async fn handle_create_note(
         }
     }
 
+    // ローカルフォロワーへ WebSocket リアルタイム配信
+    let follower_rows = sqlx::query(
+        "SELECT f.follower_actor_id FROM follows f
+         JOIN actors a ON a.id = f.follower_actor_id
+         WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
+    )
+    .bind(actor_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let recipients: std::collections::HashSet<i64> = follower_rows
+        .iter()
+        .filter_map(|r| {
+            use sqlx::Row;
+            r.try_get::<i64, _>("follower_actor_id").ok()
+        })
+        .collect();
+
+    if !recipients.is_empty() {
+        let note_json = serde_json::json!({
+            "id": post_id.to_string(),
+            "text": body,
+            "createdAt": created_at.to_rfc3339(),
+            "user": {
+                "id": actor_id,
+                "username": remote_username,
+                "domain": remote_domain,
+                "displayName": remote_display_name,
+                "actorType": "fedi",
+                "avatarUrl": remote_avatar_url,
+            },
+            "attachments": [],
+        });
+        state.stream_hub.publish_note(recipients, &note_json);
+    }
+
     let dup_info = parent_original_post_id.map_or(String::new(), |id| format!(" (parent_original={})", id));
     eprintln!("[Create/Note] {} から投稿を受信・保存: {}{}", actor_uri, note_id, dup_info);
     Ok(())

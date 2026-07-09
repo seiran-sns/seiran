@@ -120,7 +120,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match role {
         Role::Firehose => {
-            seiran_atp_repo::run(pool, http_client).await;
+            // スタンドアロン firehose は WebSocket 配信先がないため空の StreamHub を使用
+            let hub = Arc::new(StreamHub::new());
+            seiran_atp_repo::run(pool, http_client, hub).await;
         }
 
         Role::Api => {
@@ -175,16 +177,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 shared_hub,
             );
 
-            // パスが衝突しないため単一ポートに合流できる
-            let app =
-                seiran_api::router(api_state).merge(seiran_federation_inbox::router(inbox_state));
-
-            // firehose リスナーをバックグラウンド起動
+            // firehose リスナーをバックグラウンド起動（stream_hub を共有して WebSocket 配信）
             {
                 let pool = pool.clone();
                 let http = Arc::clone(&http_client);
-                tokio::spawn(async move { seiran_atp_repo::run(pool, http).await });
+                let hub = Arc::clone(&api_state.stream_hub);
+                tokio::spawn(async move { seiran_atp_repo::run(pool, http, hub).await });
             }
+
+            // パスが衝突しないため単一ポートに合流できる
+            let app =
+                seiran_api::router(api_state).merge(seiran_federation_inbox::router(inbox_state));
 
             // worker をバックグラウンド起動
             tokio::spawn(async move { seiran_federation_worker::run().await });
