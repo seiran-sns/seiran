@@ -84,8 +84,13 @@ async fn fetch_bsky_profile_from_appview(
         }
     };
 
-    // フォロー済みアクターは DB に登録されているため、DID で引いてフォロー状態を返す
+    // フォロー済みアクターは DB に登録されているため、avatar_url を更新してからプロフィールを返す
     if let Ok(Some(db_actor)) = state.actors.find_by_did(&bsky.did).await {
+        let now = chrono::Utc::now();
+        let _ = state.actors.upsert_remote_bsky(
+            db_actor.id, &bsky.did, &bsky.handle,
+            bsky.display_name.as_deref(), bsky.avatar.as_deref(), now,
+        ).await;
         return build_profile_response(db_actor, my_user_id, state).await;
     }
 

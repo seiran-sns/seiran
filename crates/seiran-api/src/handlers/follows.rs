@@ -9,13 +9,6 @@ use crate::AppState;
 
 // AppView getProfile レスポンス（フォロー時のアクター情報取得に使用）
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AppViewProfile {
-    handle: String,
-    display_name: Option<String>,
-}
-
-#[derive(Deserialize)]
 pub struct CreateFollowRequest {
     /// ローカルユーザー名 / `@alice@mastodon.social` / `https://...` / `did:plc:...`
     pub target: String,
@@ -242,30 +235,30 @@ async fn follow_bsky(actor_id_or_handle: &str, user_id: i64, state: &AppState) -
         "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={}",
         urlencoding::encode(actor_id_or_handle)
     );
-    let (did, bsky_profile) = match state.http_client.get(&url).send().await {
-        Ok(r) if r.status().is_success() => {
-            #[derive(Deserialize)]
-            #[serde(rename_all = "camelCase")]
-            struct Resp { did: String, handle: String, display_name: Option<String> }
-            match r.json::<Resp>().await {
-                Ok(p) => (p.did.clone(), AppViewProfile { handle: p.handle, display_name: p.display_name }),
-                Err(e) => {
-                    eprintln!("[follow/bsky] AppView JSON 解析失敗: {}", e);
-                    return (StatusCode::BAD_GATEWAY, "AppView レスポンス解析失敗").into_response();
-                }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BskyResp { did: String, handle: String, display_name: Option<String>, avatar: Option<String> }
+
+    let bsky_resp = match state.http_client.get(&url).send().await {
+        Ok(r) if r.status().is_success() => match r.json::<BskyResp>().await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[follow/bsky] AppView JSON 解析失敗: {}", e);
+                return (StatusCode::BAD_GATEWAY, "AppView レスポンス解析失敗").into_response();
             }
-        }
+        },
         Ok(r) => return (StatusCode::NOT_FOUND, format!("Bsky ユーザーが見つかりません ({})", r.status())).into_response(),
         Err(e) => {
             eprintln!("[follow/bsky] AppView 接続失敗: {}", e);
             return (StatusCode::BAD_GATEWAY, "AppView 接続失敗").into_response();
         }
     };
+    let did = bsky_resp.did.clone();
 
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
     let remote_actor_id = match state.actors.upsert_remote_bsky(
-        new_actor_id, &did, &bsky_profile.handle, bsky_profile.display_name.as_deref(), now,
+        new_actor_id, &did, &bsky_resp.handle, bsky_resp.display_name.as_deref(), bsky_resp.avatar.as_deref(), now,
     ).await {
         Ok(id) => id,
         Err(e) => {
