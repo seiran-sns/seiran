@@ -312,6 +312,10 @@ map $http_accept $notes_upstream {
 | ブラウザ | `text/html, ...` | frontend（Vite SPA） |
 | Mastodon 等 | `application/activity+json` | api（AP Note JSON） |
 
+#### コンテンツネゴシエーション（Vite dev server、ローカル開発）
+
+`cargo run`（`seiran-server` を直接起動し nginx を経由しない構成）時は、`frontend/vite.config.ts` の `server.proxy["/notes"]` に設定した `bypass` 関数が同じ判定を行う。`Accept` ヘッダーが `application/activity+json` または `application/ld+json` の場合のみ `bypass` が `undefined` を返してバックエンド（`localhost:3000`）へプロキシし、それ以外は `req.url` を返して Vite 自身（SPA fallback）に処理させる。
+
 #### ブラウザフロー
 
 1. ブラウザが `/notes/:id` を要求 → nginx が frontend へ転送
