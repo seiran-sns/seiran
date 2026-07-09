@@ -83,7 +83,7 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/post/:id"
+        path="/notes/:id"
         element={
           <RequireAuth>
             <NoteDetailPage />

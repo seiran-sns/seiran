@@ -42,7 +42,7 @@ export default function ReplyIndicator({ replyId }: { replyId: string }) {
   return (
     <span className={styles.wrap} onMouseEnter={onEnter} onMouseLeave={onLeave}>
       <Link
-        to={`/post/${replyId}`}
+        to={`/notes/${replyId}`}
         className={styles.indicator}
         onClick={(e) => e.stopPropagation()}
         title="返信元のポストへ移動"
@@ -55,7 +55,7 @@ export default function ReplyIndicator({ replyId }: { replyId: string }) {
           {loading && <span className={styles.dim}>読み込み中...</span>}
           {failed && <span className={styles.dim}>返信元を取得できませんでした。</span>}
           {target && (
-            <Link to={`/post/${target.id}`} className={styles.card} onClick={(e) => e.stopPropagation()}>
+            <Link to={`/notes/${target.id}`} className={styles.card} onClick={(e) => e.stopPropagation()}>
               <span className={styles.head}>
                 <span className={styles.avatar}>
                   {(target.user.displayName || target.user.username)[0]?.toUpperCase() ?? "?"}

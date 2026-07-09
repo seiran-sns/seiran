@@ -83,7 +83,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
           </span>
         </button>
         {linkToDetail ? (
-          <Link to={`/post/${note.id}`} className={styles.time} onClick={(e) => e.stopPropagation()}>
+          <Link to={`/notes/${note.id}`} className={styles.time} onClick={(e) => e.stopPropagation()}>
             <time>{formatDate(note.createdAt)}</time>
           </Link>
         ) : (
@@ -95,7 +95,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         <div className={styles.relations}>
           {note.replyId && <ReplyIndicator replyId={note.replyId} />}
           {note.quoteId && (
-            <Link to={`/post/${note.quoteId}`} className={styles.relLink} onClick={(e) => e.stopPropagation()}>
+            <Link to={`/notes/${note.quoteId}`} className={styles.relLink} onClick={(e) => e.stopPropagation()}>
               ❝ 引用元
             </Link>
           )}
@@ -122,7 +122,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
 
       {note.parentOriginalId && (
         <Link
-          to={`/post/${note.parentOriginalId}`}
+          to={`/notes/${note.parentOriginalId}`}
           className={styles.originalLink}
           onClick={(e) => e.stopPropagation()}
           title="この投稿はブリッジ/連合を経由した重複です。本尊のオリジナル投稿へ移動します。"
@@ -167,7 +167,7 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
         <div className={styles.rail}>
           🔁 <strong>{displayName(note)}</strong> が{" "}
-          <Link to={`/post/${note.id}`} className={styles.repostTime} onClick={(e) => e.stopPropagation()}>
+          <Link to={`/notes/${note.id}`} className={styles.repostTime} onClick={(e) => e.stopPropagation()}>
             {formatDate(note.createdAt)}
           </Link>{" "}
           にリポスト
