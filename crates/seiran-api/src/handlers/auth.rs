@@ -223,7 +223,7 @@ pub async fn register(
         })?;
 
     let now = chrono::Utc::now();
-    if let Err(e) = state.atp_service.commit_profile(actor_id, &req.username, now).await {
+    if let Err(e) = state.atp_service.commit_profile(actor_id, &req.username, None, None, now).await {
         eprintln!("[register] ATP プロフィールコミット失敗（登録は完了済み）: {}", e);
     }
 

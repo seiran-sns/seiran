@@ -459,18 +459,25 @@ fn build_embed_external_ipld(url: &str) -> Ipld {
     Ipld::Map(embed)
 }
 
+/// AT Protocol の `blob` 参照 Ipld を構築する（`app.bsky.embed.images` の画像・
+/// `app.bsky.actor.profile` の avatar など、blob 参照を持つ全レコードで共有する）。
+///
+/// blob: canonical 順 ref(3) < size(4) < $type(5) < mimeType(8)
+/// ref は CID リンク（DAG-CBOR tag 42）を直接持つ
+fn build_blob_ipld(sha256_hex: &str, mime_type: &str, size: i64) -> Result<Ipld, RepoError> {
+    let blob_cid = cid_from_sha256_hex(sha256_hex)?;
+    let mut blob_map = BTreeMap::new();
+    blob_map.insert("ref".to_string(), Ipld::Link(blob_cid));
+    blob_map.insert("size".to_string(), Ipld::Integer(size as i128));
+    blob_map.insert("$type".to_string(), Ipld::String("blob".to_string()));
+    blob_map.insert("mimeType".to_string(), Ipld::String(mime_type.to_string()));
+    Ok(Ipld::Map(blob_map))
+}
+
 /// `app.bsky.embed.images` の Ipld ツリーを構築する。
 fn build_embed_images_ipld(images: &[BskyImage]) -> Result<Ipld, RepoError> {
     let image_list: Result<Vec<Ipld>, RepoError> = images.iter().map(|img| {
-        let blob_cid = cid_from_sha256_hex(&img.sha256_hex)?;
-
-        // blob: canonical 順 ref(3) < size(4) < $type(5) < mimeType(8)
-        // ref は CID リンク（DAG-CBOR tag 42）を直接持つ
-        let mut blob_map = BTreeMap::new();
-        blob_map.insert("ref".to_string(), Ipld::Link(blob_cid));
-        blob_map.insert("size".to_string(), Ipld::Integer(img.size as i128));
-        blob_map.insert("$type".to_string(), Ipld::String("blob".to_string()));
-        blob_map.insert("mimeType".to_string(), Ipld::String(img.mime_type.clone()));
+        let blob_map = build_blob_ipld(&img.sha256_hex, &img.mime_type, img.size)?;
 
         // aspectRatio: canonical 順 width(5) < height(6)
         let mut aspect = BTreeMap::new();
@@ -480,7 +487,7 @@ fn build_embed_images_ipld(images: &[BskyImage]) -> Result<Ipld, RepoError> {
         // image item: canonical 順 alt(3) < image(5) < aspectRatio(11)
         let mut item = BTreeMap::new();
         item.insert("alt".to_string(), Ipld::String(img.alt.clone()));
-        item.insert("image".to_string(), Ipld::Map(blob_map));
+        item.insert("image".to_string(), blob_map);
         item.insert("aspectRatio".to_string(), Ipld::Map(aspect));
 
         Ok(Ipld::Map(item))
@@ -547,23 +554,39 @@ pub fn encode_bsky_feed_repost(
 }
 
 /// `app.bsky.actor.profile` レコードの DAG-CBOR バイト列と CID を生成する。
+///
+/// `description` が Some の場合は bio を、`avatar` が Some の場合は
+/// アイコン画像の blob 参照（sha256_hex, mime_type, size）を含める。
 pub fn encode_bsky_actor_profile(
     display_name: &str,
+    description: Option<&str>,
+    avatar: Option<(&str, &str, i64)>,
     created_at_rfc3339: &str,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
-    // canonical 順: $type(5) < createdAt(9) < displayName(11)
+    // canonical 順: $type(5) < avatar(6) < createdAt(9) < description(11) < displayName(11)
+    // 11文字キー同士: "description"(e=0x65) < "displayName"(i=0x69)
     #[derive(Serialize)]
     struct BskyActorProfile {
         #[serde(rename = "$type")]
         kind: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        avatar: Option<Ipld>,
         #[serde(rename = "createdAt")]
         created_at: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
         #[serde(rename = "displayName")]
         display_name: String,
     }
+    let avatar_ipld = match avatar {
+        Some((sha256_hex, mime_type, size)) => Some(build_blob_ipld(sha256_hex, mime_type, size)?),
+        None => None,
+    };
     let record = BskyActorProfile {
         kind: "app.bsky.actor.profile".to_string(),
+        avatar: avatar_ipld,
         created_at: created_at_rfc3339.to_string(),
+        description: description.map(|s| s.to_string()),
         display_name: display_name.to_string(),
     };
     let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;

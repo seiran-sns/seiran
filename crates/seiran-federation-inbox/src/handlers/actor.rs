@@ -20,13 +20,26 @@ struct ApActorDocument {
     #[serde(rename = "preferredUsername")]
     preferred_username: String,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<String>,
     inbox: String,
     outbox: String,
     followers: String,
     following: String,
     url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<ApImage>,
     #[serde(rename = "publicKey")]
     public_key: ApPublicKey,
+}
+
+#[derive(Serialize)]
+struct ApImage {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(rename = "mediaType")]
+    media_type: String,
+    url: String,
 }
 
 #[derive(Serialize)]
@@ -42,20 +55,31 @@ pub async fn actor_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let row = sqlx::query(
-        "SELECT username, display_name FROM actors
-         WHERE username = $1 AND domain = $2 AND actor_type = 'local' LIMIT 1",
+        "SELECT a.display_name, a.bio, \
+                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
+                mf.mime_type AS avatar_mime_type \
+         FROM actors a \
+         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+         WHERE a.username = $1 AND a.domain = $2 AND a.actor_type = 'local' LIMIT 1",
     )
     .bind(&username)
     .bind(&state.local_domain)
     .fetch_optional(&state.db)
     .await;
 
-    let display_name = match row {
-        Ok(Some(r)) => r
-            .try_get::<Option<String>, _>("display_name")
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| username.clone()),
+    let (display_name, bio, avatar_url, avatar_mime_type) = match row {
+        Ok(Some(r)) => {
+            let display_name = r
+                .try_get::<Option<String>, _>("display_name")
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| username.clone());
+            let bio = r.try_get::<Option<String>, _>("bio").ok().flatten();
+            let avatar_url = r.try_get::<Option<String>, _>("avatar_url").ok().flatten();
+            let avatar_mime_type = r.try_get::<Option<String>, _>("avatar_mime_type").ok().flatten();
+            (display_name, bio, avatar_url, avatar_mime_type)
+        }
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
         Err(e) => {
             eprintln!("[Actor] DB エラー: {}", e);
@@ -66,6 +90,12 @@ pub async fn actor_handler(
     let base = format!("https://{}", state.local_domain);
     let actor_uri = format!("{}/users/{}", base, username);
 
+    let icon = avatar_url.map(|url| ApImage {
+        kind: "Image".to_string(),
+        media_type: avatar_mime_type.unwrap_or_else(|| "image/jpeg".to_string()),
+        url,
+    });
+
     let doc = ApActorDocument {
         context: vec![
             "https://www.w3.org/ns/activitystreams".to_string(),
@@ -75,11 +105,13 @@ pub async fn actor_handler(
         actor_type: "Person".to_string(),
         preferred_username: username.clone(),
         name: display_name,
+        summary: bio,
         inbox: format!("{}/inbox", base),
         outbox: format!("{}/users/{}/outbox", base, username),
         followers: format!("{}/users/{}/followers", base, username),
         following: format!("{}/users/{}/following", base, username),
         url: format!("{}/@{}", base, username),
+        icon,
         public_key: ApPublicKey {
             id: format!("{}#main-key", actor_uri),
             owner: actor_uri,

@@ -507,3 +507,48 @@ GET /xrpc/com.atproto.sync.getBlob?did=<DID>&cid=<CIDv1>
 ```
 
 CID の sha2-256 ダイジェストを `media_files.sha256` と照合して対応する CDN URL を返す。
+
+### 10.5 `app.bsky.actor.profile` レコードのアバター・自己紹介
+
+`app.bsky.actor.profile`（rkey 固定 `self`）にも 10.1 の blob ref と同じエンコーディングでアバター画像を含める。フィールドのカノニカル順（文字列長昇順 → 辞書順）は以下の通り：
+
+```
+profile:
+  $type: "app.bsky.actor.profile"  (5)
+  avatar: <blob>                    (6)   ← 未設定時はフィールド自体を省略
+  createdAt: "..."                  (9)
+  description: "..."                (11)  ← 未設定時はフィールド自体を省略
+  displayName: "..."                (11)  ← "description" < "displayName"（5文字目 e < i）
+```
+
+`avatar` blob の内部構造（`ref`/`size`/`$type`/`mimeType`）は 10.2 の画像 embed と同一。`encode_bsky_actor_profile`（`crates/seiran-common/src/atp/repo.rs`）は画像 embed 用の blob ref 構築ロジック（`build_blob_ipld`）を共有する。
+
+## 11. ローカルユーザーのプロフィール配信（AP Actor icon/summary ＆ ATP profile 再コミット）
+
+ローカルユーザーが設定したアバター画像・自己紹介文（`actors.avatar_media_id` / `actors.bio`）は、以下の経路で AP・ATP 双方の対外公開データに反映される。
+
+### 11.1 ActivityPub Actor（`GET /users/:username`）
+
+`crates/seiran-federation-inbox/src/handlers/actor.rs` の `actor_handler` は、`actors` を `media_files` / `storage_providers` と LEFT JOIN してアバターの公開URLと `bio` を取得し、`Person` オブジェクトに以下を含める：
+
+- `icon`: `{"type": "Image", "mediaType": <mf.mime_type、不明時は "image/jpeg">, "url": <アバター公開URL>}`（アバター未設定時はフィールド自体を省略）
+- `summary`: `bio` の内容（未設定時はフィールド自体を省略）
+
+アバターURL解決は `users.rs` の内部プロフィールAPI（`build_profile_response`）と同じ `COALESCE(storage_providers.public_url || storage_key, actors.avatar_url)` パターンを用いる。この Actor エンドポイントは HTTP GET のたびに DB を都度参照するため、プロフィール編集後は次回フェッチで自動的に最新値が返る。
+
+### 11.2 `Update{Person}` の即時プッシュ配信
+
+新規フェッチでは 11.1 の都度参照で十分だが、**既にフォロー中**のリモートインスタンスは Actor 情報をキャッシュしているため、フェッチ待ちでは更新が反映されない。これを解消するため、`crates/seiran-common/src/ap/deliver.rs` の `deliver_update_actor` が `Update{Person}` アクティビティをフォロワー全員の inbox へ即時配送する。
+
+- `object` は 11.1 の `actor_handler` と同一構造の `Person` オブジェクト（`icon`/`summary`含む、`publicKey`も同梱）を都度DBから再構築したもの。
+- `activity.id` は配送のたびに一意（`update-actor-<actor_id>-<epoch_millis>`）にする。固定IDだと一部AP実装が2回目以降のUpdateを重複とみなして無視するため。
+- `crates/seiran-api/src/handlers/users.rs` の `update_profile` から `tokio::spawn` でバックグラウンド実行し、APIレスポンスはブロックしない。配送失敗はログのみでAPI自体は成功として返す（DB更新は既に完了しているため）。
+
+### 11.3 AT Protocol `app.bsky.actor.profile` の再コミット
+
+`crates/seiran-api/src/handlers/users.rs` の `update_profile` はプロフィール更新後、`AtpService::commit_profile(actor_id, display_name, description, avatar_media, now)` を呼び出し、`app.bsky.actor.profile/self` レコードを再コミット（MST再構築・署名・`atp_repo_events` 記録・`subscribeRepos` への `#commit` フレーム配信）する。これにより Bsky Relay/AppView が更新を検知できる。
+
+- `commit_profile` は `atp_records` に既存の `self` レコードがあるかを見て `action`（`create`/`update`）を自動判定する。
+- **重要**: 同一 rkey（`self`）を2回目以降コミットする際、MST構築用のエントリロード（`load_atp_entries`）が返す既存エントリと新エントリでキーが重複しないよう、`commit_record_inner` は push 前に同一キーの古いエントリを `retain` で除去する。これを行わないと MST に重複キーが入り、AppView に拒否される不正な木になる。
+
+新規登録時（`setup.rs` / `auth.rs`）はアバター・bioがまだ無いため `description: None, avatar_media: None` で呼ばれる。

@@ -1,6 +1,7 @@
 use axum::{extract::{Query, State}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}, Json};
 use serde::{Deserialize, Serialize};
 
+use seiran_common::ap::deliver_update_actor;
 use seiran_common::repository::Actor;
 
 use crate::error::ApiError;
@@ -383,6 +384,7 @@ pub struct UpdateProfileResponse {
 
 #[derive(sqlx::FromRow)]
 struct ActorProfileRow {
+    id: i64,
     username: String,
     display_name: Option<String>,
     bio: Option<String>,
@@ -402,7 +404,7 @@ pub async fn update_profile(
 
     // 現在のプロフィールを取得
     let current = match sqlx::query_as::<_, ActorProfileRow>(
-        "SELECT username, display_name, bio, avatar_media_id, banner_media_id \
+        "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id \
          FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
     )
     .bind(auth_user.user_id)
@@ -461,6 +463,45 @@ pub async fn update_profile(
     {
         eprintln!("[update_profile] UPDATE 失敗: {}", e);
         return ApiError::Internal(e.to_string()).into_response();
+    }
+
+    // ATP repo へプロフィールを再コミットして bsky 側にも avatar/bio を反映する。
+    let atp_display_name = new_display_name.clone().unwrap_or_else(|| current.username.clone());
+    let avatar_media: Option<(String, String, i64)> = match new_avatar_media_id {
+        Some(media_id) => sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT sha256, mime_type, size FROM media_files WHERE id = $1",
+        )
+        .bind(media_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten(),
+        None => None,
+    };
+    if let Err(e) = state
+        .atp_service
+        .commit_profile(current.id, &atp_display_name, new_bio.as_deref(), avatar_media, chrono::Utc::now())
+        .await
+    {
+        eprintln!("[update_profile] ATP プロフィール再コミット失敗（DB更新は完了済み）: {}", e);
+    }
+
+    // AP 側: 既にフォロー中のリモートインスタンスへ Update(Person) を即時プッシュ配信し、
+    // 相手側にキャッシュ済みの Actor 情報をすぐ更新させる。レスポンスはブロックしない。
+    {
+        let db = state.db.clone();
+        let local_domain = state.local_domain.clone();
+        let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
+        let ap_public_key_pem = state.secrets.ap_public_key_pem.clone().unwrap_or_default();
+        let ap_client = state.ap_client.clone();
+        let actor_id = current.id;
+        tokio::spawn(async move {
+            if let Err(e) = deliver_update_actor(
+                &ap_client, &db, actor_id, &local_domain, &ap_private_key_pem, &ap_public_key_pem,
+            ).await {
+                eprintln!("[update_profile] AP Update(Actor) 配送エラー: {}", e);
+            }
+        });
     }
 
     Json(UpdateProfileResponse {

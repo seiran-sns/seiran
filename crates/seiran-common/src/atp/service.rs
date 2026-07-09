@@ -155,8 +155,12 @@ impl AtpCommitService {
         let signing_key = signing_key_from_pem(&signing_key_pem)?;
 
         // ③ 既存エントリをロードして新規レコードを追加・ソート
+        // 同一キー（例: app.bsky.actor.profile/self の再コミット）が既に存在する場合は
+        // 古いエントリを取り除いてから積む。取り除かずに push すると MST に同一キーが
+        // 2つ入ってしまい、AppView がリジェクトする不正な木になる。
         let mut entries = self.load_atp_entries(actor_id).await?;
         let entry_key = format!("{}/{}", record.collection, record.rkey);
+        entries.retain(|(k, _)| k != &entry_key);
         entries.push((entry_key.clone(), record.cid));
         entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
@@ -792,28 +796,45 @@ impl AtpCommitService {
         Ok(())
     }
 
-    /// プロフィール登録コミット（初回コミット後に requestCrawl）
+    /// プロフィール（再）コミット。新規登録時は avatar/description なしで呼ばれ、
+    /// プロフィール編集時は bio・アバター blob 情報を渡して再コミットする。
+    /// 既に `app.bsky.actor.profile/self` が存在するかで action(create/update)を自動判定する。
     pub async fn commit_profile(
         &self,
         actor_id: i64,
         display_name: &str,
+        description: Option<&str>,
+        avatar_media: Option<(String, String, i64)>,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
+        let existing: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM atp_records \
+             WHERE actor_id = $1 AND collection = 'app.bsky.actor.profile' AND rkey = 'self')",
+        )
+        .bind(actor_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let action: &'static str = if existing { "update" } else { "create" };
+
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let (record_cbor, record_cid) = encode_bsky_actor_profile(display_name, &created_at_str)?;
+        let avatar_ref = avatar_media
+            .as_ref()
+            .map(|(sha256, mime, size)| (sha256.as_str(), mime.as_str(), *size));
+        let (record_cbor, record_cid) =
+            encode_bsky_actor_profile(display_name, description, avatar_ref, &created_at_str)?;
 
         let record = CommitRecord {
             collection: "app.bsky.actor.profile",
             rkey: "self".to_string(),
             cbor: record_cbor,
             cid: record_cid,
-            action: "create",
+            action,
             blob_cids: vec![],
         };
 
         let result = self.commit_record_inner(actor_id, record, now, None).await?;
 
-        eprintln!("[atp] profile commit 完了: did={}", result.at_did);
+        eprintln!("[atp] profile commit 完了（{}）: did={}", action, result.at_did);
         self.spawn_request_crawl();
         Ok(())
     }
