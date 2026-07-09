@@ -2,6 +2,9 @@
 //!
 //! `wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos` に接続し、
 //! 新規ポスト作成イベントを受信して DB に保存し、フォロワーへリアルタイム配信する。
+//!
+//! AppView のインデックス遅延対応として、ポストごとにバックグラウンドタスクを spawn し
+//! 最大 3 回リトライする（2s → 5s → 10s）。
 
 use std::collections::HashSet;
 use std::io::Cursor;
@@ -20,7 +23,9 @@ use seiran_common::{generate_snowflake_id, StreamHub};
 const FIREHOSE_URL: &str =
     "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos";
 
-/// Firehose リスナーを起動する。切断時は指数バックオフで再接続する。
+/// リトライ間隔（AppView インデックス遅延対応）
+const RETRY_DELAYS_SECS: &[u64] = &[2, 5, 10];
+
 pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<StreamHub>) {
     let mut backoff_secs = 2u64;
 
@@ -43,8 +48,8 @@ pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<Strea
 
 async fn connect_and_process(
     pool: &PgPool,
-    http: &reqwest::Client,
-    stream_hub: &StreamHub,
+    http: &Arc<reqwest::Client>,
+    stream_hub: &Arc<StreamHub>,
 ) -> Result<(), String> {
     let (mut ws_stream, _) = connect_async(FIREHOSE_URL)
         .await
@@ -55,10 +60,11 @@ async fn connect_and_process(
     while let Some(msg) = ws_stream.next().await {
         let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
 
-        if let Message::Binary(bytes) = msg
-            && let Err(e) = process_message(&bytes, pool, http, stream_hub).await {
+        if let Message::Binary(bytes) = msg {
+            if let Err(e) = process_message(&bytes, pool, http, stream_hub).await {
                 eprintln!("[Firehose] メッセージ処理エラー（スキップ）: {}", e);
             }
+        }
     }
 
     Ok(())
@@ -67,8 +73,8 @@ async fn connect_and_process(
 async fn process_message(
     bytes: &[u8],
     pool: &PgPool,
-    http: &reqwest::Client,
-    stream_hub: &StreamHub,
+    http: &Arc<reqwest::Client>,
+    stream_hub: &Arc<StreamHub>,
 ) -> Result<(), String> {
     let mut cursor = Cursor::new(bytes);
 
@@ -83,17 +89,15 @@ async fn process_message(
     let body: CborValue = ciborium::from_reader(&mut cursor)
         .map_err(|e| format!("ボディ CBOR パースエラー: {}", e))?;
 
-    let did = match extract_text_field(&body, "did") {
+    // subscribeRepos の #commit イベントでは "repo" フィールドに DID が入る（旧仕様の "did" ではない）
+    let did = match extract_text_field(&body, "repo").or_else(|| extract_text_field(&body, "did")) {
         Some(d) => d,
         None => return Ok(()),
     };
 
     let ops = extract_ops(&body);
     for (action, path) in ops {
-        if action != "create" {
-            continue;
-        }
-        if !path.starts_with("app.bsky.feed.post/") {
+        if action != "create" || !path.starts_with("app.bsky.feed.post/") {
             continue;
         }
 
@@ -131,74 +135,125 @@ async fn process_message(
 
         eprintln!("[Firehose] 新規ポスト検出: {}", at_uri);
 
-        // AppView から AT URI で正確に取得
-        let post = match fetch_single_bsky_post(http, &at_uri).await {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                eprintln!("[Firehose] AppView からポスト取得失敗（見つからず）: {}", at_uri);
-                continue;
-            }
-            Err(e) => {
-                eprintln!("[Firehose] AppView 取得エラー: {}", e);
-                continue;
-            }
-        };
+        // AppView のインデックス遅延があるためバックグラウンドタスクでリトライ取得
+        let pool2 = pool.clone();
+        let http2 = Arc::clone(http);
+        let hub2 = Arc::clone(stream_hub);
+        let at_uri2 = at_uri.clone();
 
-        let post_id = generate_snowflake_id(post.created_at);
-
-        sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (at_uri) DO NOTHING",
-        )
-        .bind(post_id)
-        .bind(actor_id)
-        .bind(&post.text)
-        .bind(&post.uri)
-        .bind(&post.cid)
-        .bind(post.created_at)
-        .execute(pool)
-        .await
-        .map_err(|e| format!("投稿インサート失敗: {}", e))?;
-
-        eprintln!("[Firehose] 保存完了: {}", post.uri);
-
-        // ローカルフォロワーを取得して WebSocket ストリームへ配信
-        let follower_rows = sqlx::query(
-            "SELECT f.follower_actor_id FROM follows f
-             JOIN actors a ON a.id = f.follower_actor_id
-             WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
-        )
-        .bind(actor_id)
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-
-        let recipients: HashSet<i64> = follower_rows
-            .iter()
-            .filter_map(|r| r.try_get::<i64, _>("follower_actor_id").ok())
-            .collect();
-
-        if !recipients.is_empty() {
-            let note_json = serde_json::json!({
-                "id": post_id.to_string(),
-                "text": post.text,
-                "createdAt": post.created_at.to_rfc3339(),
-                "user": {
-                    "id": actor_id,
-                    "username": username,
-                    "domain": serde_json::Value::Null,
-                    "displayName": display_name,
-                    "actorType": "bsky",
-                    "avatarUrl": avatar_url,
-                },
-                "attachments": [],
-            });
-            stream_hub.publish_note(recipients, &note_json);
-        }
+        tokio::spawn(async move {
+            fetch_and_save_with_retry(
+                &pool2, &http2, &hub2,
+                &at_uri2, actor_id, &username, display_name.as_deref(), avatar_url.as_deref(),
+            ).await;
+        });
     }
 
     Ok(())
+}
+
+/// AppView から AT URI でポストを取得して保存する。見つからない場合はリトライする。
+async fn fetch_and_save_with_retry(
+    pool: &PgPool,
+    http: &reqwest::Client,
+    stream_hub: &StreamHub,
+    at_uri: &str,
+    actor_id: i64,
+    username: &str,
+    display_name: Option<&str>,
+    avatar_url: Option<&str>,
+) {
+    for (attempt, &delay) in std::iter::once(&0u64)
+        .chain(RETRY_DELAYS_SECS.iter())
+        .enumerate()
+    {
+        if delay > 0 {
+            sleep(Duration::from_secs(delay)).await;
+        }
+
+        match fetch_single_bsky_post(http, at_uri).await {
+            Ok(Some(post)) => {
+                let post_id = generate_snowflake_id(post.created_at);
+
+                let result = sqlx::query(
+                    "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at)
+                     VALUES ($1, $2, $3, $4, $5, $6)
+                     ON CONFLICT (at_uri) DO NOTHING",
+                )
+                .bind(post_id)
+                .bind(actor_id)
+                .bind(&post.text)
+                .bind(&post.uri)
+                .bind(&post.cid)
+                .bind(post.created_at)
+                .execute(pool)
+                .await;
+
+                match result {
+                    Ok(r) if r.rows_affected() == 0 => {
+                        eprintln!("[Firehose] 重複スキップ: {}", at_uri);
+                    }
+                    Ok(_) => {
+                        eprintln!("[Firehose] 保存完了: {}", at_uri);
+
+                        // ローカルフォロワーへ WebSocket 配信
+                        let follower_rows = sqlx::query(
+                            "SELECT f.follower_actor_id FROM follows f
+                             JOIN actors a ON a.id = f.follower_actor_id
+                             WHERE f.target_actor_id = $1 AND f.status = 'accepted'
+                               AND a.actor_type = 'local'",
+                        )
+                        .bind(actor_id)
+                        .fetch_all(pool)
+                        .await
+                        .unwrap_or_default();
+
+                        let recipients: HashSet<i64> = follower_rows
+                            .iter()
+                            .filter_map(|r| r.try_get::<i64, _>("follower_actor_id").ok())
+                            .collect();
+
+                        if !recipients.is_empty() {
+                            let note_json = serde_json::json!({
+                                "id": post_id.to_string(),
+                                "text": post.text,
+                                "createdAt": post.created_at.to_rfc3339(),
+                                "user": {
+                                    "id": actor_id,
+                                    "username": username,
+                                    "domain": serde_json::Value::Null,
+                                    "displayName": display_name,
+                                    "actorType": "bsky",
+                                    "avatarUrl": avatar_url,
+                                },
+                                "attachments": [],
+                            });
+                            stream_hub.publish_note(recipients, &note_json);
+                        }
+                    }
+                    Err(e) => eprintln!("[Firehose] DB 保存失敗: {}", e),
+                }
+                return;
+            }
+            Ok(None) => {
+                if attempt < RETRY_DELAYS_SECS.len() {
+                    eprintln!(
+                        "[Firehose] AppView 未索引、{}秒後リトライ (試行{}/{}): {}",
+                        RETRY_DELAYS_SECS.get(attempt).unwrap_or(&0),
+                        attempt + 1,
+                        RETRY_DELAYS_SECS.len() + 1,
+                        at_uri
+                    );
+                } else {
+                    eprintln!("[Firehose] リトライ上限に達した、破棄: {}", at_uri);
+                }
+            }
+            Err(e) => {
+                eprintln!("[Firehose] AppView 取得エラー: {}", e);
+                return;
+            }
+        }
+    }
 }
 
 // ─── CBOR ユーティリティ ──────────────────────────────────────────────────
