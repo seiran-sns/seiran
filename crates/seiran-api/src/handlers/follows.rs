@@ -37,14 +37,18 @@ pub async fn create_follow(
 
     let t = req.target.trim().trim_start_matches('@');
 
+    // HTTP(S) URI → Fedi AP フォロー（ATP ハンドル判定より先に弾く）
+    if t.starts_with("https://") || t.starts_with("http://") {
+        return follow_fedi(t, auth_user.user_id, &state).await.into_response();
+    }
+
     // DID 形式 → Bsky ATP フォロー
     if t.starts_with("did:") {
         return follow_bsky(t, auth_user.user_id, &state).await.into_response();
     }
 
-    // ATP ハンドル（ドット含み・@なし）→ Bsky ATP フォロー（handle → DID は AppView に任せる）
+    // ATP ハンドル（ドット含み・@なし・http なし）→ Bsky ATP フォロー
     if t.contains('.') && !t.contains('@') {
-        // AppView に DID を解決させてから follow_bsky を呼ぶ
         return follow_bsky(t, auth_user.user_id, &state).await.into_response();
     }
 
@@ -58,7 +62,7 @@ pub async fn create_follow(
         return follow_local(parts[0], auth_user.user_id, &state).await.into_response();
     }
 
-    // Fedi リモート (`alice@mastodon.social` / `https://...`)
+    // Fedi リモート (`alice@mastodon.social`)
     follow_fedi(t, auth_user.user_id, &state).await.into_response()
 }
 
