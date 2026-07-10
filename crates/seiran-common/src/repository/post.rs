@@ -297,7 +297,7 @@ impl PostRepository for PgPostRepository {
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-             WHERE a.actor_type = 'local' AND p.deleted_at IS NULL
+             WHERE p.is_local = true AND p.deleted_at IS NULL
                AND ($1::bigint IS NULL OR p.id < $1)
                AND ($2::bigint IS NULL OR p.id > $2)
              ORDER BY p.id DESC LIMIT $3",

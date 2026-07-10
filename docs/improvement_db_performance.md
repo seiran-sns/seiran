@@ -520,3 +520,71 @@ ALTER TABLE atp_repo_events ALTER COLUMN car_bytes SET STORAGE EXTERNAL;
 ```
 
 > **注意**: `CREATE INDEX CONCURRENTLY` オプションを使えば本番稼働中のテーブルロックを回避できる（`CONCURRENTLY` は `CREATE UNIQUE INDEX` でも使用可能）。ただし sqlx マイグレーション内ではトランザクション外実行が必要なため、`-- sqlx: no-transaction` アノテーションを付与すること。
+
+---
+
+## 6. 追跡診断（2026-07-10）— タイムライン読み取り経路に絞った再調査
+
+> 診断日: 2026-07-10
+> 対象ブランチ: main
+> 診断者: Claude Sonnet 5（SQL 専門家モード）
+> 背景: リモート（Fediverse / Bluesky）からのポスト流入が高頻度で `posts` テーブルが巨大になりがちな運用を前提に、
+> タイムライン表示のスムーズさに直結する読み取りクエリを重点的に再調査した。
+
+### 6.1 検証方法
+
+ローカル DB（本番データではない）上で `BEGIN ... ROLLBACK` / 一時アクター・投稿の投入 → `VACUUM ANALYZE` → `EXPLAIN (ANALYZE, BUFFERS)` → 完全ロールバック/カスケード削除で原状回復、という手順で以下の想定データを作り、実際のプランとバッファ使用量を計測した。
+
+- ローカルアクター 50、リモートアクター 4,000、フォロワー用ローカルアクター 2,000
+- `posts` 50万行、うち **ローカル比率 0.2%**（1,000件）／残りはリモート流入想定
+- `follows` 100万行（フォロワー 2,000人 × フォロー500件）
+
+検証後は投入した行を全削除し、`posts`/`actors`/`follows` の件数が投入前と一致することを確認済み（本番相当の実データには一切影響していない）。
+
+### 6.2 確認できた問題と対応
+
+#### [最重要] `local_timeline()` が posts 全体の逆走査になっており、リモート流入が増えるほど際限なく劣化する
+
+**該当**: `crates/seiran-common/src/repository/post.rs` の `local_timeline()`
+
+旧実装は `posts` を `id DESC` で全体走査しながら `actors` を JOIN し `actor_type = 'local'` で足切りしていた。ローカル比率が低いほど、直近 N 件のローカル投稿を見つけるために大量のリモート投稿を読み飛ばす必要があり、**この「読み飛ばす行数」は posts テーブルが育ち続ける限り増加し続ける**（本サービスの前提そのもの）。
+
+実測（ローカル比率 0.2%・posts 50万行、VACUUM 後）:
+
+| 指標 | 旧実装（`actors.actor_type` JOIN 足切り） | 新実装（`posts.is_local` 部分インデックス） |
+|---|---:|---:|
+| shared buffers hit | 12,118 | 27〜28 |
+| Execution Time | 9.4 ms | 0.18〜0.28 ms |
+
+**対応**: `posts` に `is_local BOOLEAN NOT NULL DEFAULT false` を追加し、`BEFORE INSERT` トリガー `trg_posts_set_is_local` で `actors.actor_type` から自動複製（アプリ側の INSERT 経路が複数クレートにまたがり設定漏れのリスクが高いため、DB 側で不変条件を保証する設計とした）。`idx_posts_local_active ON posts(id DESC) WHERE deleted_at IS NULL AND is_local = true` を追加し、`local_timeline()` の `WHERE` 句を `p.is_local = true` に変更。あわせて `nodeinfo` の `post_count`（`WHERE actor_id IN (SELECT id FROM actors WHERE actor_type='local')`）も `is_local = true` に置き換え、全件カウントの逆走査を解消した。
+
+マイグレーション: `crates/seiran-common/migrations/20260710000000_posts_denormalize_is_local.sql`
+
+#### [高] `home_timeline()` のフォロー先取得が heap fetch を伴っていた
+
+**該当**: `crates/seiran-common/src/repository/post.rs` の `home_timeline()` サブクエリ
+```sql
+SELECT target_actor_id FROM follows WHERE follower_actor_id = $1 AND status = 'accepted'
+```
+既存の `idx_follows_target_follower(target_actor_id, follower_actor_id)` は逆方向（自分のフォロワー一覧・AP配送）専用で、この向きは `follower_actor_id` 単独インデックスのみ。`status` 判定・`target_actor_id` 取得のたびに heap fetch が発生していた。
+
+実測（follows 100万行、VACUUM 後）: `Bitmap Heap Scan`（buffers 503）→ `Index Only Scan`（buffers 8, **Heap Fetches: 0**）。
+
+**対応**: `idx_follows_follower_accepted ON follows(follower_actor_id) INCLUDE (target_actor_id) WHERE status = 'accepted'` を追加。
+
+なお旧レポート（§3 [高-5]）で「相関 IN サブクエリを CTE + JOIN に書き換えるべき」としていた指摘は、実測では Postgres が非相関サブクエリをハッシュ化（`hashed SubPlan`）して1回だけ評価しており、フォロー数が増えてもスキャン計算量は悪化しないことを確認した。**CTE への書き換えは不要と判断し見送った。**
+
+マイグレーション: `crates/seiran-common/migrations/20260710000001_follows_perf_indexes.sql`
+
+#### [低] 未使用インデックス `idx_follows_status` の削除
+
+`follows(status)` 単独インデックスを使うクエリはコードベース全体を検索しても存在しない（全クエリが `follower_actor_id` / `target_actor_id` との複合条件）。`status` はカーディナリティが低くスキャン最適化にも寄与しないため、フォロー操作（フォロー/アンフォロー/Accept で高頻度に書き込まれる）の書き込みコストを増やすだけの無駄なインデックスとして削除した。
+
+### 6.3 見送った項目（旧レポートのまま未着手）
+
+以下は §3〜§4 で指摘済みだが、今回はタイムライン読み取り経路への影響が相対的に小さい（書き込み経路・アーキテクチャ変更を伴う）ため着手を見送った。引き続き有効な指摘として残す。
+
+- atp_blocks の N+1 INSERT（§3 [高-6]）: ローカル投稿ごとの ATP コミット時のみに影響し、リモート流入量には比例しない。
+- `load_atp_entries` の全件取得による MST 再構築（§3 [高-7]）: アーキテクチャ変更（差分更新化）が必要な大きめの改修。
+- AP 配送の逐次実行（§4「AP 配送の並列化」）: `crates/seiran-common/src/ap/deliver.rs` は現在も `for row in &follower_rows` の逐次 `tokio::spawn` のまま。DB 層ではなくアプリ層の並列化課題。
+- Redis によるホームタイムライン / アクター情報キャッシュ（§4）: 今回のインデックス改善で単発クエリのコストは大幅に下がったため優先度は下がったが、リクエスト全体のレイテンシをさらに削るなら引き続き有効な施策。

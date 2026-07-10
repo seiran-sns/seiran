@@ -36,8 +36,7 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
 
     let post_count: i64 = sqlx::query(
         "SELECT COUNT(*) AS cnt FROM posts
-         WHERE actor_id IN (SELECT id FROM actors WHERE actor_type = 'local')
-           AND deleted_at IS NULL",
+         WHERE is_local = true AND deleted_at IS NULL",
     )
     .fetch_one(&state.db)
     .await

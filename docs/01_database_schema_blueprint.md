@@ -122,7 +122,16 @@ CREATE TABLE posts (
     atp_tombstone_cid VARCHAR(255) DEFAULT NULL,     -- ATPリポジトリ内での削除証明用CID
     
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    inserted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+    inserted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+
+    -- ローカルタイムライン高速化用の非正規化カラム（#DBパフォーマンス改善 2026-07-10）
+    -- actors.actor_type = 'local' の複製。リモート流入が多い前提では
+    -- 「posts を id 降順で全走査しつつ actors を JOIN して足切り」だと
+    -- テーブルが育つほどローカル投稿を探すコストが際限なく増える。
+    -- actor_type は投稿後に変わらないため posts 側に複製しても不整合しない。
+    -- BEFORE INSERT トリガー trg_posts_set_is_local が自動設定するため、
+    -- アプリケーションコードから明示的に書き込む必要はない。
+    is_local BOOLEAN NOT NULL DEFAULT false
 );
 
 -- リポスト重複制約: 同一ユーザーが同一ポストを取り消し前に再リポストできないようにする
@@ -131,6 +140,20 @@ CREATE UNIQUE INDEX idx_posts_unique_repost
     ON posts(actor_id, repost_of_post_id)
     WHERE repost_of_post_id IS NOT NULL AND deleted_at IS NULL;
 
+-- posts.actor_id の actor_type を自動複製するトリガー（is_local 非正規化カラムの維持用）
+CREATE OR REPLACE FUNCTION posts_set_is_local() RETURNS trigger AS $$
+BEGIN
+    SELECT (actor_type = 'local') INTO NEW.is_local
+    FROM actors WHERE id = NEW.actor_id;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_posts_set_is_local
+    BEFORE INSERT ON posts
+    FOR EACH ROW
+    EXECUTE FUNCTION posts_set_is_local();
+
 -- インデックス戦略
 CREATE INDEX idx_posts_actor_id ON posts(actor_id, id DESC) WHERE deleted_at IS NULL; -- recent_by_actor / context_* のインデックススキャン化
 CREATE INDEX idx_posts_reply_to ON posts(reply_to_post_id) WHERE reply_to_post_id IS NOT NULL;
@@ -138,6 +161,7 @@ CREATE INDEX idx_posts_repost_of ON posts(repost_of_post_id) WHERE repost_of_pos
 CREATE INDEX idx_posts_quote_of ON posts(quote_of_post_id) WHERE quote_of_post_id IS NOT NULL;
 CREATE INDEX idx_posts_parent_original ON posts(parent_original_post_id) WHERE parent_original_post_id IS NOT NULL;
 CREATE INDEX idx_posts_seiran_uuid ON posts(seiran_post_uuid) WHERE seiran_post_uuid IS NOT NULL;
+CREATE INDEX idx_posts_local_active ON posts(id DESC) WHERE deleted_at IS NULL AND is_local = true; -- local_timeline 専用（#DBパフォーマンス改善 2026-07-10）
 CREATE INDEX idx_posts_timeline_active ON posts(id) WHERE deleted_at IS NULL;
 
 -- 全文検索用インデックス（pg_trgmを利用したTrigram部分一致インデックス）
@@ -194,7 +218,8 @@ CREATE TABLE follows (
 
 CREATE INDEX idx_follows_follower ON follows(follower_actor_id);
 CREATE INDEX idx_follows_target ON follows(target_actor_id);
-CREATE INDEX idx_follows_target_follower ON follows(target_actor_id, follower_actor_id) WHERE status = 'accepted'; -- ホームTL / AP配送フォロワー取得高速化
+CREATE INDEX idx_follows_target_follower ON follows(target_actor_id, follower_actor_id) WHERE status = 'accepted'; -- 自分のフォロワー一覧 / AP配送フォロワー取得高速化
+CREATE INDEX idx_follows_follower_accepted ON follows(follower_actor_id) INCLUDE (target_actor_id) WHERE status = 'accepted'; -- ホームTL「自分のフォロー先」取得を index-only scan 化（#DBパフォーマンス改善 2026-07-10）
 ```
 
 ### 1.6 `email_verifications` (メールアドレス確認フロー)
