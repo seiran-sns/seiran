@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, FollowRepository, PostRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgPostRepository, PgUserRepository,
+    ActorRepository, AtpReadRepository, FollowRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -48,6 +48,8 @@ pub struct AppState {
     pub posts: Arc<dyn PostRepository>,
     pub follows: Arc<dyn FollowRepository>,
     pub atp_repo: Arc<dyn AtpReadRepository>,
+    /// リアクション（絵文字リアクション・いいね）リポジトリ。
+    pub reactions: Arc<dyn ReactionRepository>,
     /// deliver_post_to_ap_followers（seiran-common）が &PgPool を要求するため保持。
     /// 将来 FollowerRepository へ移行したら削除する。
     pub db: PgPool,
@@ -122,6 +124,7 @@ pub async fn init_state(
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
     let follows: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
+    let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
 
     AppState {
         actors,
@@ -129,6 +132,7 @@ pub async fn init_state(
         posts,
         follows,
         atp_repo,
+        reactions,
         db: pool,
         local_auth,
         miauth_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -211,6 +215,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/streaming", get(handlers::streaming::streaming))
         .route("/api/notes/:id", get(handlers::notes::get_note))
         .route("/api/notes/:id/repost", delete(handlers::notes::delete_repost))
+        .route("/api/notes/:id/reactions", post(handlers::notes::create_reaction))
+        .route("/api/notes/:id/reactions/:content", delete(handlers::notes::delete_reaction))
         .route("/api/notes/:id/context", get(handlers::notes::note_context))
         // ActivityPub Note エンドポイント（nginx が AP Accept ヘッダーのみをここへ転送）
         .route("/notes/:id", get(handlers::notes::get_note_ap))

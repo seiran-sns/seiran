@@ -1,12 +1,43 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, ApiError, Note } from "../../api/client";
+import { api, ApiError, Note, ReactionSummary } from "../../api/client";
 import { acct, displayName, formatDate, profilePath, protocolBadge } from "../../lib/format";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import ReactionChips from "./ReactionChips";
+import ReactionPicker from "./ReactionPicker";
 import { useComposer } from "../../contexts/ComposerContext";
 import styles from "./NoteCard.module.css";
+
+/**
+ * リアクションの楽観的更新を適用した新しい配列を返す。
+ * 1投稿につき1ユーザー1リアクションまで（Misskey 準拠）なので、既に別の絵文字に
+ * リアクション済みならまずそれを外してから、`reacting` なら新しい絵文字を付ける
+ * （＝切り替え）。同じ絵文字を指定した場合は取消（トグルオフ）のみになる。
+ */
+function optimisticSetReaction(
+  reactions: ReactionSummary[],
+  emoji: string,
+  reacting: boolean
+): ReactionSummary[] {
+  const prevMine = reactions.find((r) => r.reactedByMe)?.emoji;
+  let next = reactions;
+
+  if (prevMine) {
+    next = next
+      .map((r) => (r.emoji === prevMine ? { ...r, count: r.count - 1, reactedByMe: false } : r))
+      .filter((r) => r.count > 0);
+  }
+
+  if (reacting) {
+    const existing = next.find((r) => r.emoji === emoji);
+    next = existing
+      ? next.map((r) => (r.emoji === emoji ? { ...r, count: r.count + 1, reactedByMe: true } : r))
+      : [...next, { emoji, count: 1, reactedByMe: true }];
+  }
+
+  return next;
+}
 
 interface NoteCardProps {
   note: Note;
@@ -28,6 +59,10 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
   const [reposting, setReposting] = useState(false);
   const [unreposting, setUnreposting] = useState(false);
   const [reposted, setReposted] = useState(note.repostedByMe ?? false);
+  const [reactions, setReactions] = useState<ReactionSummary[]>(note.reactions ?? []);
+  // 1投稿につき1ユーザー1リアクションまでのため、切り替え中は他の絵文字操作も
+  // まとめてロックする（個別絵文字ごとの pending 管理はしない）。
+  const [reactionPending, setReactionPending] = useState(false);
 
   async function handleRepost(e: React.MouseEvent) {
     e.stopPropagation();
@@ -57,6 +92,25 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
       }
     } finally {
       setReposting(false);
+    }
+  }
+
+  async function toggleReaction(emoji: string) {
+    if (reactionPending) return;
+    const reacting = !(reactions.find((r) => r.emoji === emoji)?.reactedByMe ?? false);
+    const prevReactions = reactions;
+
+    setReactionPending(true);
+    setReactions((prev) => optimisticSetReaction(prev, emoji, reacting));
+    try {
+      const res = reacting
+        ? await api.notes.react(note.id, emoji)
+        : await api.notes.unreact(note.id, emoji);
+      setReactions(res.reactions);
+    } catch {
+      setReactions(prevReactions);
+    } finally {
+      setReactionPending(false);
     }
   }
 
@@ -131,7 +185,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         </Link>
       )}
 
-      <ReactionChips reactions={note.reactions} />
+      <ReactionChips reactions={reactions} onToggle={toggleReaction} disabled={reactionPending} />
 
       <div className={styles.actions}>
         <button
@@ -152,6 +206,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         >
           🔁 {reposted ? "リポスト済み" : (reposting || unreposting) ? "..." : "リポスト"}
         </button>
+        <ReactionPicker onPick={toggleReaction} disabled={reactionPending} />
       </div>
     </>
   );

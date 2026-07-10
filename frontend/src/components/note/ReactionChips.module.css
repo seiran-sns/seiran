@@ -15,6 +15,29 @@
   border: 1px solid var(--border);
   font-size: 0.82rem;
   line-height: 1.6;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--accent-deep);
+  border-color: var(--accent);
+}
+
+.chip:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.chipActive {
+  background: var(--accent-deep);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chipActive .count {
+  color: var(--accent);
 }
 
 .emoji {

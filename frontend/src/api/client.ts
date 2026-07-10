@@ -194,6 +194,12 @@ export interface Note {
 export interface ReactionSummary {
   emoji: string;
   count: number;
+  reactedByMe: boolean;
+}
+
+export interface ReactResult {
+  ok: boolean;
+  reactions: ReactionSummary[];
 }
 
 /** ProfileResponse（バックエンドは snake_case のまま）。 */
@@ -434,6 +440,15 @@ export const api = {
     },
     deleteRepost(noteId: string) {
       return request<{ ok: boolean }>("DELETE", `/notes/${encodeURIComponent(noteId)}/repost`);
+    },
+    react(noteId: string, content: string) {
+      return request<ReactResult>("POST", `/notes/${encodeURIComponent(noteId)}/reactions`, { content });
+    },
+    unreact(noteId: string, content: string) {
+      return request<ReactResult>(
+        "DELETE",
+        `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}`
+      );
     },
     async search(params: { q: string; limit?: number; session_id?: string }, signal?: AbortSignal) {
       const qs = new URLSearchParams();

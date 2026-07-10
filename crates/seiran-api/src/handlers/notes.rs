@@ -50,6 +50,7 @@ pub struct AttachmentResponse {
 pub struct ReactionSummary {
     pub emoji: String,
     pub count: i64,
+    pub reacted_by_me: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -215,7 +216,7 @@ pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_act
     .unwrap_or_default();
 
     let mut att_map = fetch_attachments_map(db, &orig_ids).await;
-    let rmap = fetch_reactions_map(db, &orig_ids).await;
+    let rmap = fetch_reactions_map(db, &orig_ids, my_actor_id).await;
     let mut by_id: HashMap<i64, NoteResponse> = HashMap::new();
     for r in rows {
         let id = r.id;
@@ -241,9 +242,11 @@ pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_act
 }
 
 /// post_id リストに対するリアクション集計を一括取得する（絵文字ごとの件数、多い順）(#22)。
+/// `my_actor_id` を渡すと各エントリに `reacted_by_me`（自分がそのリアクションを付け済みか）を設定する。
 pub async fn fetch_reactions_map(
     db: &sqlx::PgPool,
     post_ids: &[i64],
+    my_actor_id: Option<i64>,
 ) -> HashMap<i64, Vec<ReactionSummary>> {
     if post_ids.is_empty() {
         return HashMap::new();
@@ -260,6 +263,26 @@ pub async fn fetch_reactions_map(
     .await
     .unwrap_or_default();
 
+    let mine: HashSet<(i64, String)> = if let Some(actor_id) = my_actor_id {
+        sqlx::query(
+            "SELECT post_id, content FROM reactions WHERE actor_id = $1 AND post_id = ANY($2)",
+        )
+        .bind(actor_id)
+        .bind(post_ids)
+        .fetch_all(db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|row| {
+            let post_id: i64 = row.try_get("post_id").unwrap_or_default();
+            let content: String = row.try_get("content").unwrap_or_default();
+            (post_id, content)
+        })
+        .collect()
+    } else {
+        Default::default()
+    };
+
     let mut map: HashMap<i64, Vec<ReactionSummary>> = HashMap::new();
     for row in rows {
         let post_id: i64 = row.try_get("post_id").unwrap_or_default();
@@ -268,7 +291,8 @@ pub async fn fetch_reactions_map(
         if emoji.is_empty() {
             continue;
         }
-        map.entry(post_id).or_default().push(ReactionSummary { emoji, count });
+        let reacted_by_me = mine.contains(&(post_id, emoji.clone()));
+        map.entry(post_id).or_default().push(ReactionSummary { emoji, count, reacted_by_me });
     }
     map
 }
@@ -797,7 +821,7 @@ pub async fn home_timeline(
     };
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
-    let rmap = fetch_reactions_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
     let reposted_set = fetch_reposted_ids(&state.db, actor_id, &ids).await;
     let mut notes: Vec<NoteResponse> = rows.into_iter()
         .map(|p| {
@@ -835,7 +859,7 @@ pub async fn local_timeline(
     };
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
-    let rmap = fetch_reactions_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
     let reposted_set = if let Some(actor_id) = my_actor_id {
         fetch_reposted_ids(&state.db, actor_id, &ids).await
     } else {
@@ -875,7 +899,7 @@ pub async fn get_note(
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
-    let rmap = fetch_reactions_map(&state.db, &[post_id]).await;
+    let rmap = fetch_reactions_map(&state.db, &[post_id], my_actor_id).await;
     let mut nr = to_note_response(post, att_map.remove(&post_id).unwrap_or_default());
     nr.reactions = rmap.get(&post_id).cloned().unwrap_or_default();
     if let Some(actor_id) = my_actor_id {
@@ -1059,7 +1083,7 @@ pub async fn note_context(
 
     let all_ids: Vec<i64> = before_posts.iter().chain(after_posts.iter()).map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &all_ids).await;
-    let rmap = fetch_reactions_map(&state.db, &all_ids).await;
+    let rmap = fetch_reactions_map(&state.db, &all_ids, my_actor_id).await;
     let reposted_set = if let Some(aid) = my_actor_id {
         fetch_reposted_ids(&state.db, aid, &all_ids).await
     } else {
@@ -1170,6 +1194,122 @@ pub async fn delete_repost(
     Json(serde_json::json!({
         "ok": true,
         "repostId": undo_info.repost_ap_id.unwrap_or_default()
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct ReactRequest {
+    pub content: String,
+}
+
+/// リアクション内容（絵文字 or `:shortcode:`）の最大書記素クラスタ数。
+const MAX_REACTION_CONTENT_LEN: usize = 32;
+
+/// リアクション内容を検証し、trim 済みの文字列を返す。
+fn validate_reaction_content(raw: &str) -> Result<String, ApiError> {
+    let content = raw.trim().to_string();
+    if content.is_empty() || content.graphemes(true).count() > MAX_REACTION_CONTENT_LEN {
+        return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
+    }
+    Ok(content)
+}
+
+/// POST /api/notes/:id/reactions
+/// 自分の絵文字リアクションを追加する（ローカル保存のみ。AP/ATP への outbound 配信は今回のスコープ外）。
+pub async fn create_reaction(
+    Path(note_id_str): Path<String>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<ReactRequest>,
+) -> impl IntoResponse {
+    let auth_user = match extract_auth(&headers, &state.local_auth).await {
+        Ok(u) => u,
+        Err(e) => return e.into_response(),
+    };
+
+    let me = match state.actors.find_local_by_user_id(auth_user.user_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
+        Err(e) => return ApiError::Internal(format!("アクター取得失敗: {}", e)).into_response(),
+    };
+
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    let content = match validate_reaction_content(&req.content) {
+        Ok(c) => c,
+        Err(e) => return e.into_response(),
+    };
+
+    let post = match state.posts.find_by_id(note_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
+    };
+
+    if let Err(e) = state.reactions.insert(note_id, me.id, "emoji", &content, None).await {
+        return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response();
+    }
+
+    // リアルタイム通知（#37）: 自分の投稿への自作自演リアクションは通知しない
+    if post.actor_id != me.id {
+        state.stream_hub.publish_event(
+            HashSet::from([post.actor_id]),
+            "reaction",
+            serde_json::json!({
+                "postId": note_id.to_string(),
+                "emoji": content,
+                "actor": { "username": me.username, "domain": me.domain, "displayName": me.display_name },
+            }),
+        );
+    }
+
+    let rmap = fetch_reactions_map(&state.db, &[note_id], Some(me.id)).await;
+    Json(serde_json::json!({
+        "ok": true,
+        "reactions": rmap.get(&note_id).cloned().unwrap_or_default(),
+    }))
+    .into_response()
+}
+
+/// DELETE /api/notes/:id/reactions/:content
+/// 自分が付けたリアクションを取り消す。
+pub async fn delete_reaction(
+    Path((note_id_str, content)): Path<(String, String)>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let auth_user = match extract_auth(&headers, &state.local_auth).await {
+        Ok(u) => u,
+        Err(e) => return e.into_response(),
+    };
+
+    let actor_id = match state.actors.find_local_by_user_id(auth_user.user_id).await {
+        Ok(Some(a)) => a.id,
+        Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
+        Err(e) => return ApiError::Internal(format!("アクター取得失敗: {}", e)).into_response(),
+    };
+
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    let deleted = match state.reactions.delete_local(note_id, actor_id, &content).await {
+        Ok(n) => n,
+        Err(e) => return ApiError::Internal(format!("reactions DELETE 失敗: {}", e)).into_response(),
+    };
+    if deleted == 0 {
+        return ApiError::NotFound("REACTION_NOT_FOUND").into_response();
+    }
+
+    let rmap = fetch_reactions_map(&state.db, &[note_id], Some(actor_id)).await;
+    Json(serde_json::json!({
+        "ok": true,
+        "reactions": rmap.get(&note_id).cloned().unwrap_or_default(),
     }))
     .into_response()
 }

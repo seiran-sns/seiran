@@ -1,16 +1,34 @@
 import { ReactionSummary } from "../../api/client";
 import styles from "./ReactionChips.module.css";
 
-/** 外部から届いたリアクション/いいねの集計チップ表示（issue #22・現状は表示のみ）。 */
-export default function ReactionChips({ reactions }: { reactions?: ReactionSummary[] }) {
+interface ReactionChipsProps {
+  reactions?: ReactionSummary[];
+  /** チップクリック時に同じ絵文字でトグル（追加/取消・切替）する（未指定なら非インタラクティブ）。 */
+  onToggle?: (emoji: string) => void;
+  /** リアクション操作中は true。全チップのクリックを無効化する（1投稿1リアクションまでのため）。 */
+  disabled?: boolean;
+}
+
+/** 届いたリアクションの集計チップ表示。クリックで同じ絵文字を自分も付ける/取り消す/切り替える。 */
+export default function ReactionChips({ reactions, onToggle, disabled }: ReactionChipsProps) {
   if (!reactions || reactions.length === 0) return null;
   return (
     <div className={styles.wrap}>
-      {reactions.map((r, i) => (
-        <span key={i} className={styles.chip} title={r.emoji}>
+      {reactions.map((r) => (
+        <button
+          key={r.emoji}
+          type="button"
+          className={`${styles.chip} ${r.reactedByMe ? styles.chipActive : ""}`}
+          title={r.reactedByMe ? "クリックで取り消す" : "クリックで同じリアクションを付ける"}
+          disabled={!onToggle || disabled}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle?.(r.emoji);
+          }}
+        >
           <span className={styles.emoji}>{r.emoji}</span>
           <span className={styles.count}>{r.count}</span>
-        </span>
+        </button>
       ))}
     </div>
   );

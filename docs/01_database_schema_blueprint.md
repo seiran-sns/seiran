@@ -188,8 +188,11 @@ CREATE TABLE reactions (
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     
-    -- 同一ユーザーによる同一ポストへの同一リアクション重複を防止
-    UNIQUE(post_id, actor_id, content)
+    -- 1投稿につきユーザー1リアクションまで（Misskey 準拠。投稿元がローカル/リモートでも
+    -- 挙動を統一するため全投稿一律で適用する。#22 初版は post_id+actor_id+content の
+    -- ユニークだったため同一ユーザーが複数の異なる絵文字を付けられたが、連合先
+    -- （Misskey 等）は1投稿1ユーザー1リアクションが前提のため後日この制約に変更した）
+    UNIQUE(post_id, actor_id)
 );
 
 -- 右ペインの「リアクション集計・打ったメンツ一覧」を爆速化するための複合インデックス
@@ -198,8 +201,10 @@ CREATE INDEX idx_reactions_actor_id ON reactions(actor_id);
 ```
 
 #### 取り込み・公開（#22 実装メモ）
-- **AP 受信**: federation-inbox が `Like`（`content = "❤"`, `reaction_type = 'like'`）と Misskey 拡張 `EmojiReact`（`content` は絵文字 or `:shortcode:`, `reaction_type = 'emoji'`）を受信し、`object` の URI から対象ローカルポスト（`posts.ap_object_id`）を解決して INSERT する。`ap_activity_id` に元アクティビティ ID を保存し、`Undo(Like)` / `Undo(EmojiReact)` で DELETE する。未知ポストへのリアクションは無視する。
-- **API 公開**: ノート系 API（`NoteResponse.reactions`）が `[{ emoji, count }]`（`content` ごとの件数、多い順）を返す。空なら省略。
+- **1投稿1ユーザー1リアクション**: `UNIQUE(post_id, actor_id)` により、同一ユーザーが同一投稿に付けられるリアクションは常に1個まで。別の絵文字を付けると `INSERT ... ON CONFLICT (post_id, actor_id) DO UPDATE` により既存のリアクションが新しい絵文字で**上書き（切り替え）**される（Misskey がリアクション変更時に `Undo` → 新規 `EmojiReact` を送る挙動と整合）。
+- **AP 受信**: federation-inbox が `Like`（`content = "❤"`, `reaction_type = 'like'`）と Misskey 拡張 `EmojiReact`（`content` は絵文字 or `:shortcode:`, `reaction_type = 'emoji'`）を受信し、`object` の URI から対象ローカルポスト（`posts.ap_object_id`）を解決して INSERT（＝上記の上書き）する。`ap_activity_id` に元アクティビティ ID を保存し、`Undo(Like)` / `Undo(EmojiReact)` で DELETE する。未知ポストへのリアクションは無視する。
+- **API 公開**: ノート系 API（`NoteResponse.reactions`）が `[{ emoji, count, reactedByMe }]`（`content` ごとの件数、多い順。`reactedByMe` は認証ユーザー自身がその絵文字を付け済みかどうか。配列中で `reactedByMe: true` になり得るのは最大1件）を返す。空なら省略。
+- **ローカルユーザーによる追加/取消**: `POST /api/notes/:id/reactions`（body `{ content }`）でリアクションを追加（既存の自分のリアクションがあれば切り替え）、`DELETE /api/notes/:id/reactions/:content` で取消する（`reaction_type = 'emoji'` 固定、`ap_activity_id` は `NULL`）。いずれも `seiran-api` 内で完結し、対象ポストがリモート（Fedi/Bsky）由来であっても **AP `Like`/`EmojiReact` や ATP Like の outbound 配信は行わない**（ローカル記録のみ。将来対応）。追加時、ポスト著者がリアクションした本人以外であれば StreamHub 経由で `reaction` イベント（`{ postId, emoji, actor }`）を通知する。
 - **Bsky Like の取り込みは今後対応**（Firehose の `app.bsky.feed.like` を対象ポストへ紐付ける処理が必要）。
 
 ### 1.5 `follows` (フォロー関係テーブル)

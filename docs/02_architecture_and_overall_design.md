@@ -397,6 +397,7 @@ AP Note の形式:
 ### 2.8 ポストカードの共通化（#43）
 タイムライン・ポスト詳細・ユーザー詳細の各画面で、ポスト表示は単一のカードコンポーネント（フロント `components/note/NoteCard`）を共用する。最も機能が充実したタイムラインのカードを正とし、他画面へ横展開する。
 * **プロフィールの投稿**: `ProfileResponse.recent_posts` を、タイムラインと同一形状の `NoteResponse`（アクター情報・添付・リアクション込み）で返す。バックエンドは `PostRepository::timeline_by_actor`（アクター指定の結合クエリ）で取得し、`fetch_attachments_map` / `fetch_reactions_map` で集計して `to_note_response` で組み立てる。フロントは受信後 `normalizeNote` で `Note` に正規化して `NoteCard` を描画する。
+* **リアクション追加/取消（ローカル）**: `fetch_reactions_map` は閲覧者の `actor_id`（`my_actor_id`）を受け取り、各 `ReactionSummary` に `reactedByMe` を付与する。1投稿につきユーザー1リアクションまで（Misskey 準拠、`reactions` テーブルの `UNIQUE(post_id, actor_id)`）のため、別の絵文字を選ぶと `ReactionRepository::insert` の `ON CONFLICT DO UPDATE` により既存のリアクションが**切り替わる**（同時に2つは付かない）。フロントは `NoteCard` の `ReactionChips`（表示チップをクリックで同じ絵文字をトグル/切替）と `ReactionPicker`（固定クイック絵文字 + 自由入力のポップオーバー）から `api.notes.react` / `api.notes.unreact`（`POST`/`DELETE /api/notes/:id/reactions[...]`）を呼び、レスポンスの権威的な `reactions` 配列でローカル state を更新する（楽観的更新 + 失敗時ロールバック。切替中は他の絵文字操作もまとめてロック）。対象がリモート投稿でも AP/ATP への outbound 配信は行わずローカル記録のみ。
 * **ポスト詳細の主役ポスト**: 中央のフォーカス投稿も同じ `NoteCard` を用いる。大きめ文字・大きめカードで強調するため、`NoteCard` に `large` オプションを設け（アバター 48px・本文拡大・左アクセントボーダー）、`<NoteCard note large linkToDetail={false} />` で描画する。専用の focal レイアウトは廃止し、モジュールを完全共通化した。前後投稿も従来どおり `NoteCard`（通常サイズ）を用いる。
 
 ### 2.9 退会機能 Phase A（#29）

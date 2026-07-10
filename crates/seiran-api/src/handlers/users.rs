@@ -203,7 +203,7 @@ async fn build_profile_response(
     };
     let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
-    let rmap = fetch_reactions_map(&state.db, &post_ids).await;
+    let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
     let recent_posts: Vec<NoteResponse> = post_rows
         .into_iter()
         .map(|p| {
