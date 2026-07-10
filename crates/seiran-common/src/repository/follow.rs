@@ -53,6 +53,13 @@ pub trait FollowRepository: Send + Sync {
         target_actor_id: i64,
         atp_rkey: &str,
     ) -> Result<(), sqlx::Error>;
+
+    /// `target_actor_id` を accepted な status でフォローしているローカルアクターの ID 一覧を取得する。
+    /// 新規投稿の realtime WebSocket 配信対象を決めるために使う。
+    async fn find_accepted_local_follower_ids(
+        &self,
+        target_actor_id: i64,
+    ) -> Result<Vec<i64>, sqlx::Error>;
 }
 
 pub struct PgFollowRepository {
@@ -182,5 +189,19 @@ impl FollowRepository for PgFollowRepository {
         .execute(&self.pool)
         .await
         .map(|_| ())
+    }
+
+    async fn find_accepted_local_follower_ids(
+        &self,
+        target_actor_id: i64,
+    ) -> Result<Vec<i64>, sqlx::Error> {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT f.follower_actor_id FROM follows f
+             JOIN actors a ON a.id = f.follower_actor_id
+             WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
+        )
+        .bind(target_actor_id)
+        .fetch_all(&self.pool)
+        .await
     }
 }

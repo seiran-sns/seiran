@@ -15,7 +15,7 @@ use axum::{
 use seiran_common::queue::create_job_queue;
 use seiran_common::repository::{
     ActorRepository, FollowRepository, PgActorRepository, PgFollowRepository, PgPostRepository,
-    PostRepository,
+    PgReactionRepository, PostRepository, ReactionRepository,
 };
 use seiran_common::traits::JobQueue;
 use seiran_common::{ApClient, Secrets, StreamHub};
@@ -35,6 +35,7 @@ pub struct AppState {
     pub actor_repo: Arc<dyn ActorRepository>,
     pub follow_repo: Arc<dyn FollowRepository>,
     pub post_repo: Arc<dyn PostRepository>,
+    pub reaction_repo: Arc<dyn ReactionRepository>,
     pub local_domain: String,
     pub ap_public_key_pem: String,
     pub ap_private_key_pem: String,
@@ -56,6 +57,7 @@ pub fn init_state(
     let actor_repo: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let follow_repo: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
     let post_repo: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
+    let reaction_repo: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
     let ap_public_key_pem = secrets.ap_public_key_pem.clone().unwrap_or_default();
     let ap_private_key_pem = secrets.ap_private_key_pem.clone().unwrap_or_default();
     let ap_client = Arc::new(ApClient::new(http_client));
@@ -66,6 +68,7 @@ pub fn init_state(
         actor_repo,
         follow_repo,
         post_repo,
+        reaction_repo,
         local_domain,
         ap_public_key_pem,
         ap_private_key_pem,

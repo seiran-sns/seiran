@@ -250,6 +250,90 @@ pub async fn fetch_single_bsky_post(
     }))
 }
 
+/// `app.bsky.actor.getProfile` レスポンスから必要なフィールドのみ取り出したもの。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BskyProfile {
+    pub did: String,
+    pub handle: String,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub avatar: Option<String>,
+}
+
+/// AppView `app.bsky.actor.getProfile` でプロフィールを取得する。
+///
+/// `actor` はハンドル（`alice.bsky.social`）または DID（`did:plc:...`）。
+/// フォロー処理（アクター登録）とプロフィール表示の両方から使う共通のエントリポイント。
+pub async fn fetch_bsky_profile(client: &reqwest::Client, actor: &str) -> Result<BskyProfile, String> {
+    let url = format!(
+        "{}/xrpc/app.bsky.actor.getProfile?actor={}",
+        APPVIEW_URL,
+        urlencoding::encode(actor)
+    );
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("getProfile HTTP エラー: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("getProfile 失敗 ({}): actor={}", resp.status(), actor));
+    }
+
+    resp.json::<BskyProfile>()
+        .await
+        .map_err(|e| format!("getProfile パースエラー: {}", e))
+}
+
+/// AppView `app.bsky.feed.searchPosts` でポストを全文検索する。
+///
+/// 戻り値: (at_uri リスト, 次ページカーソル)。エラー時は空リストを返す（呼び出し元は
+/// ローカル DB 検索結果のみへフォールバックする設計のため、エラーを致命扱いしない）。
+pub async fn search_appview_posts(
+    client: &reqwest::Client,
+    query: &str,
+    cursor: Option<&str>,
+) -> (Vec<String>, Option<String>) {
+    let mut url = format!(
+        "{}/xrpc/app.bsky.feed.searchPosts?q={}&limit=25",
+        APPVIEW_URL,
+        urlencoding::encode(query)
+    );
+    if let Some(c) = cursor {
+        url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
+    }
+
+    let resp = match client.get(&url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[atp::search_appview_posts] AppView フェッチ失敗: {}", e);
+            return (vec![], None);
+        }
+    };
+
+    let json: serde_json::Value = match resp.json().await {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("[atp::search_appview_posts] AppView JSON パース失敗: {}", e);
+            return (vec![], None);
+        }
+    };
+
+    let cursor_next = json["cursor"].as_str().map(str::to_string);
+    let uris: Vec<String> = json["posts"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| p["uri"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    (uris, cursor_next)
+}
+
 /// PDS に対して `com.atproto.server.createSession` を呼び出し、セッションを取得する。
 ///
 /// `identifier` はハンドルまたは DID。`password` は App Password を推奨。

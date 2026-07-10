@@ -56,7 +56,7 @@ pub async fn search_notes(
             // AppView カーソルがあれば追加フェッチ
             let new_appview_cursor = if let Some(cursor) = appview_cursor {
                 let (av_ids, next_cursor) =
-                    search_appview(&state.http_client, &raw_query, Some(&cursor)).await;
+                    seiran_common::atp::search_appview_posts(&state.http_client, &raw_query, Some(&cursor)).await;
                 let mut av_ids_local = appview_ids_to_local(&state.db, av_ids).await;
                 buf.append(&mut av_ids_local);
                 next_cursor
@@ -78,7 +78,7 @@ pub async fn search_notes(
     // ── 初回リクエスト: ローカル DB + AppView 並行フェッチ ───────────────────
     let (local_ids, (av_post_ids, appview_cursor)) = tokio::join!(
         search_local_db(&state.db, &raw_query, 60, None),
-        search_appview(&state.http_client, &raw_query, None),
+        seiran_common::atp::search_appview_posts(&state.http_client, &raw_query, None),
     );
     let local_until_id = local_ids.last().copied();
 
@@ -139,47 +139,6 @@ async fn search_local_db(
         .collect()
 }
 
-/// AppView からポスト URI リストを取得する。
-/// 戻り値: (at_uri リスト, 次ページカーソル)
-async fn search_appview(
-    http: &reqwest::Client,
-    query: &str,
-    cursor: Option<&str>,
-) -> (Vec<String>, Option<String>) {
-    let mut url = format!(
-        "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q={}&limit=25",
-        urlencoding::encode(query)
-    );
-    if let Some(c) = cursor {
-        url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
-    }
-
-    let resp = match http.get(&url).send().await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[search] AppView フェッチ失敗: {}", e);
-            return (vec![], None);
-        }
-    };
-
-    let json: serde_json::Value = match resp.json().await {
-        Ok(j) => j,
-        Err(e) => {
-            eprintln!("[search] AppView JSON パース失敗: {}", e);
-            return (vec![], None);
-        }
-    };
-
-    let cursor_next = json["cursor"].as_str().map(str::to_string);
-    let uris: Vec<String> = json["posts"]
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .filter_map(|p| p["uri"].as_str().map(str::to_string))
-        .collect();
-
-    (uris, cursor_next)
-}
 
 /// AppView の at_uri リストをローカル DB の post_id にマッピングする。
 /// DB に存在しないポストはスキップ（オンデマンドインポートは行わない）。

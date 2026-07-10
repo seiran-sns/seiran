@@ -1,13 +1,12 @@
-pub mod did;
 pub mod client;
 pub mod plc;
 pub mod repo;
 pub mod service;
 
-pub use did::{resolve_did, DidDocument, DidService};
 pub use client::{
-    fetch_atp_history, fetch_single_bsky_post, create_atp_session, create_atp_post,
-    BskyPost, AtpSession,
+    fetch_atp_history, fetch_single_bsky_post, fetch_bsky_profile, search_appview_posts,
+    create_atp_session, create_atp_post,
+    BskyPost, BskyProfile, AtpSession,
 };
 pub use plc::{prepare_plc_genesis, submit_plc_genesis, PlcGenesis, p256_to_did_key, signing_key_from_pem, PlcError};
 pub use repo::{

@@ -3,12 +3,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use seiran_common::{generate_snowflake_id, ApError};
-use seiran_common::atp::fetch_atp_history;
+use seiran_common::atp::{fetch_atp_history, fetch_bsky_profile};
 
 use crate::middleware::extract_auth;
 use crate::AppState;
 
-// AppView getProfile レスポンス（フォロー時のアクター情報取得に使用）
 #[derive(Deserialize)]
 pub struct CreateFollowRequest {
     /// ローカルユーザー名 / `@alice@mastodon.social` / `https://...` / `did:plc:...`
@@ -236,26 +235,11 @@ async fn follow_bsky(actor_id_or_handle: &str, user_id: i64, state: &AppState) -
     };
 
     // AppView からプロフィール情報を取得（DID 解決 + アクター登録用）
-    let url = format!(
-        "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={}",
-        urlencoding::encode(actor_id_or_handle)
-    );
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct BskyResp { did: String, handle: String, display_name: Option<String>, avatar: Option<String> }
-
-    let bsky_resp = match state.http_client.get(&url).send().await {
-        Ok(r) if r.status().is_success() => match r.json::<BskyResp>().await {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("[follow/bsky] AppView JSON 解析失敗: {}", e);
-                return (StatusCode::BAD_GATEWAY, "AppView レスポンス解析失敗").into_response();
-            }
-        },
-        Ok(r) => return (StatusCode::NOT_FOUND, format!("Bsky ユーザーが見つかりません ({})", r.status())).into_response(),
+    let bsky_resp = match fetch_bsky_profile(&state.http_client, actor_id_or_handle).await {
+        Ok(p) => p,
         Err(e) => {
-            eprintln!("[follow/bsky] AppView 接続失敗: {}", e);
-            return (StatusCode::BAD_GATEWAY, "AppView 接続失敗").into_response();
+            eprintln!("[follow/bsky] AppView 取得失敗: {}", e);
+            return (StatusCode::BAD_GATEWAY, "Bsky ユーザーが見つかりません").into_response();
         }
     };
     let did = bsky_resp.did.clone();

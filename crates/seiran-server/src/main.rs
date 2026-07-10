@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use seiran_common::{get_db_pool, run_migrations, SecretsFile, StreamHub};
+use seiran_common::{ap::ApClient, get_db_pool, run_migrations, SecretsFile, StreamHub};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Role {
@@ -98,9 +98,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let role = Role::resolve();
     eprintln!("[seiran-server] ロール: {:?}", role);
 
-    // worker は現状 DB を必要としない（InMemoryJobQueue のスタブ）ため先に分岐する
+    // worker は現状 DB を必要としない（InMemoryJobQueue のスタブ）ため先に分岐する。
+    // 単独プロセスのため、この場合のみここで HTTP クライアントを新規生成する
+    // （`all` ロールでは下で作る共有 http_client を再利用する。二重生成しない）。
     if role == Role::Worker {
-        seiran_federation_worker::run().await;
+        let http_client = Arc::new(
+            reqwest::Client::builder()
+                .user_agent("seiran-federation/0.1.0")
+                .build()?,
+        );
+        seiran_federation_worker::run(Arc::new(ApClient::new(http_client))).await;
         return Ok(());
     }
 
@@ -185,12 +192,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tokio::spawn(async move { seiran_atp_repo::run(pool, http, hub).await });
             }
 
+            // worker をバックグラウンド起動（api ロールと同じ ApClient / コネクションプールを共有）
+            let worker_ap_client = Arc::clone(&api_state.ap_client);
+            tokio::spawn(async move { seiran_federation_worker::run(worker_ap_client).await });
+
             // パスが衝突しないため単一ポートに合流できる
             let app =
                 seiran_api::router(api_state).merge(seiran_federation_inbox::router(inbox_state));
-
-            // worker をバックグラウンド起動
-            tokio::spawn(async move { seiran_federation_worker::run().await });
 
             serve(app, env_port("PORT", 3000)).await?;
         }

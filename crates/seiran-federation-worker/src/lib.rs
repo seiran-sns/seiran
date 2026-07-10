@@ -8,14 +8,17 @@
 
 use std::sync::Arc;
 
+use seiran_common::ap::ApClient;
 use seiran_common::queue::{InMemoryJobQueue, WorkerEngine};
 
 /// ワーカーエンジンを起動し、ジョブを処理し続ける（常駐）。
-pub async fn run() {
+/// `ap_client` は呼び出し元が生成した共有インスタンスを受け取る
+/// （`all` ロールでは api/federation と同じコネクションプールを再利用する）。
+pub async fn run(ap_client: Arc<ApClient>) {
     eprintln!("[federation-worker] 起動中...");
 
     let queue = Arc::new(InMemoryJobQueue::new());
-    let engine = WorkerEngine::new(queue);
+    let engine = WorkerEngine::new(queue, ap_client);
 
     // デキュー・実行・リトライを永続的に回す
     engine.run().await;

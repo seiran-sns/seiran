@@ -55,29 +55,21 @@ pub struct JobContext {
 }
 
 impl JobContext {
-    pub fn new(queue: Arc<dyn JobQueue>) -> Self {
-        let http = Arc::new(
-            reqwest::Client::builder()
-                .user_agent("seiran-federation/0.1.0")
-                .build()
-                .unwrap_or_default(),
-        );
+    /// `ap_client` は呼び出し元（`seiran-server`）が起動時に一度だけ生成した共有インスタンスを
+    /// 受け取る。ここでローカルに `reqwest::Client` を生成すると、api/federation ロールと
+    /// 別のコネクションプールになってしまうため禁止（`docs/coding_rules.md` 禁止事項 #8）。
+    pub fn new(queue: Arc<dyn JobQueue>, ap_client: Arc<ApClient>) -> Self {
         Self {
             queue,
             domain_semaphores: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             actor_semaphores: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             db_pool: None,
-            ap_client: Arc::new(ApClient::new(http)),
+            ap_client,
         }
     }
 
     pub fn with_db_pool(mut self, pool: sqlx::PgPool) -> Self {
         self.db_pool = Some(pool);
-        self
-    }
-
-    pub fn with_ap_client(mut self, ap_client: Arc<ApClient>) -> Self {
-        self.ap_client = ap_client;
         self
     }
 
@@ -105,13 +97,13 @@ pub struct WorkerEngine {
 }
 
 impl WorkerEngine {
-    pub fn new(queue: Arc<InMemoryJobQueue>) -> Self {
-        let ctx = Arc::new(JobContext::new(queue.clone()));
+    pub fn new(queue: Arc<InMemoryJobQueue>, ap_client: Arc<ApClient>) -> Self {
+        let ctx = Arc::new(JobContext::new(queue.clone(), ap_client));
         Self { queue, ctx }
     }
 
-    pub fn new_with_db(queue: Arc<InMemoryJobQueue>, pool: sqlx::PgPool) -> Self {
-        let ctx = Arc::new(JobContext::new(queue.clone()).with_db_pool(pool));
+    pub fn new_with_db(queue: Arc<InMemoryJobQueue>, pool: sqlx::PgPool, ap_client: Arc<ApClient>) -> Self {
+        let ctx = Arc::new(JobContext::new(queue.clone(), ap_client).with_db_pool(pool));
         Self { queue, ctx }
     }
 

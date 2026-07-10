@@ -7,7 +7,7 @@ use base64::Engine as _;
 use seiran_common::traits::Job;
 use seiran_common::generate_snowflake_id;
 use sha2::{Digest as Sha2Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::AppState;
@@ -168,6 +168,44 @@ pub async fn inbox_handler(
     (StatusCode::ACCEPTED, "").into_response()
 }
 
+/// AP アクタードキュメントを取得し、`actors` テーブルへ upsert した結果。
+struct RemoteActorInfo {
+    actor_id: i64,
+    username: String,
+    display_name: String,
+    domain: String,
+    avatar_url: Option<String>,
+    inbox: String,
+}
+
+/// リモートの ActivityPub アクターを URI からフェッチし、`actors` テーブルへ upsert する。
+/// Follow / Create(Note) / Like / EmojiReact / Announce のすべての受信経路で
+/// 「投稿・リアクションの送信元アクターを解決する」という同じ What を担う共通処理。
+async fn upsert_remote_fedi_actor(
+    state: &Arc<AppState>,
+    actor_uri: &str,
+) -> Result<RemoteActorInfo, String> {
+    let remote_ap = state.ap_client.fetch_actor(actor_uri).await?;
+    let inbox = remote_ap.inbox.clone().unwrap_or_default();
+    let username = remote_ap
+        .preferred_username
+        .clone()
+        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
+    let display_name = remote_ap.name.clone().unwrap_or_else(|| username.clone());
+    let domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
+    let avatar_url = remote_ap.avatar_url();
+
+    let now = chrono::Utc::now();
+    let new_actor_id = generate_snowflake_id(now);
+    let actor_id = state
+        .actor_repo
+        .upsert_remote_fedi(new_actor_id, actor_uri, &inbox, &username, &domain, &display_name, avatar_url.as_deref(), now)
+        .await
+        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+
+    Ok(RemoteActorInfo { actor_id, username, display_name, domain, avatar_url, inbox })
+}
+
 // Follow アクティビティを処理し Accept を送信する
 async fn handle_follow(
     activity: serde_json::Value,
@@ -197,29 +235,12 @@ async fn handle_follow(
     }
     let local_actor_id = local_actor.id;
 
-    // リモートアクタードキュメントを取得（inbox URL・display_name・アバター用）
-    let remote_ap = state.ap_client.fetch_actor(follower_uri).await?;
-    let remote_avatar_url = remote_ap.avatar_url();
-    let remote_inbox = remote_ap
-        .inbox
-        .as_deref()
-        .ok_or("Follow: リモートアクターの inbox が取得できません")?
-        .to_string();
-
-    let remote_username = remote_ap
-        .preferred_username
-        .unwrap_or_else(|| follower_uri.rsplit('/').next().unwrap_or("unknown").to_string());
-    let remote_display_name = remote_ap.name.unwrap_or_else(|| remote_username.clone());
-    let remote_domain = follower_uri.split('/').nth(2).unwrap_or(follower_uri).to_string();
-
-    // リモートアクターを actors テーブルに upsert
-    let now = chrono::Utc::now();
-    let new_id = generate_snowflake_id(now);
-
-    let follower_actor_id = state.actor_repo
-        .upsert_remote_fedi(new_id, follower_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now)
-        .await
-        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+    // リモートアクターを解決・upsert（inbox URL・display_name・アバター用）
+    let remote = upsert_remote_fedi_actor(&state, follower_uri).await?;
+    if remote.inbox.is_empty() {
+        return Err("Follow: リモートアクターの inbox が取得できません".to_string());
+    }
+    let follower_actor_id = remote.actor_id;
 
     // follows テーブルに挿入（重複時はスキップ、リモートからのフォローは自動 accepted）
     state.follow_repo
@@ -229,10 +250,10 @@ async fn handle_follow(
 
     // リアルタイム通知（#37）: フォローされたローカルユーザーへ
     state.stream_hub.publish_event(
-        std::collections::HashSet::from([local_actor_id]),
+        HashSet::from([local_actor_id]),
         "follow",
         serde_json::json!({
-            "actor": { "username": remote_username, "domain": remote_domain, "displayName": remote_display_name },
+            "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
         }),
     );
 
@@ -255,13 +276,47 @@ async fn handle_follow(
     let accept_body =
         serde_json::to_string(&accept).map_err(|e| format!("Accept シリアライズ失敗: {}", e))?;
 
-    state.ap_client.sign_and_post(&remote_inbox, &accept_body, &actor_key_id, &state.ap_private_key_pem).await?;
+    state.ap_client.sign_and_post(&remote.inbox, &accept_body, &actor_key_id, &state.ap_private_key_pem).await?;
 
     eprintln!(
         "[Follow] {} → {} フォロー完了・Accept 送信済み",
         follower_uri, local_actor_uri
     );
     Ok(())
+}
+
+/// `https://bsky.app/profile/{did}/post/{rkey}` → `at://{did}/app.bsky.feed.post/{rkey}`
+fn bsky_app_url_to_at_uri(url: &str) -> Option<String> {
+    let without_prefix = url.strip_prefix("https://bsky.app/profile/")?;
+    let mut parts = without_prefix.splitn(3, '/');
+    let did = parts.next()?;
+    let post_label = parts.next()?;
+    if post_label != "post" {
+        return None;
+    }
+    let rkey = parts.next()?;
+    Some(format!("at://{}/app.bsky.feed.post/{}", did, rkey))
+}
+
+/// 受信した Note の重複排除（フェーズ5）判定: ループバック（シナリオ1）またはブリッジ重複（シナリオ3）
+/// を検知し、既存のオリジナル投稿 ID があれば返す。
+async fn resolve_parent_original_post_id(
+    state: &Arc<AppState>,
+    note_id: &str,
+    note_url: &str,
+) -> Option<i64> {
+    // シナリオ1: ループバック検知（note.id または note.url が LOCAL_DOMAIN の notes URL）
+    let loopback_prefix = format!("https://{}/notes/", state.local_domain);
+    let loopback = [note_url, note_id]
+        .iter()
+        .find_map(|url| url.strip_prefix(&loopback_prefix).and_then(|id_str| id_str.parse::<i64>().ok()));
+    if loopback.is_some() {
+        return loopback;
+    }
+
+    // シナリオ3: ブリッジ重複検知（note.url が bsky.app の場合、at_uri で既存ポストを探す）
+    let at_uri = bsky_app_url_to_at_uri(note_url)?;
+    state.post_repo.find_id_by_at_uri(&at_uri).await.ok().flatten()
 }
 
 // Create(Note) を受け取り posts テーブルに保存する
@@ -281,56 +336,29 @@ async fn handle_create_note(
         .unwrap_or_else(|_| chrono::Utc::now());
     let post_id = seiran_common::generate_snowflake_id(created_at);
 
-    // リモートアクターを upsert（未登録なら作成）
-    let remote_ap = state.ap_client.fetch_actor(actor_uri).await?;
-    let remote_inbox = remote_ap.inbox.clone().unwrap_or_default();
-    let remote_username = remote_ap
-        .preferred_username
-        .clone()
-        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
-    let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
-    let remote_domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
-    let remote_avatar_url = remote_ap.avatar_url();
-
-    let now = chrono::Utc::now();
-    let new_actor_id = seiran_common::generate_snowflake_id(now);
-
-    let actor_id = state.actor_repo
-        .upsert_remote_fedi(new_actor_id, actor_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now)
-        .await
-        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+    // リモートアクターを解決・upsert（未登録なら作成）
+    let remote = upsert_remote_fedi_actor(&state, actor_uri).await?;
+    let actor_id = remote.actor_id;
 
     // HTML タグを除去して本文を得る
     let body = strip_html(&content_html);
 
-    let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_default();
-
-    // ── フェーズ5: 重複排除チェック ──────────────────────────────────────────
-
     // シナリオ2: seiran_post_uuid による seiran 間マージ
     let seiran_uuid = note["seiranUuid"].as_str();
     if let Some(uuid) = seiran_uuid {
-        use sqlx::Row;
-        let existing = sqlx::query(
-            "SELECT id, ap_object_id FROM posts WHERE seiran_post_uuid = $1 LIMIT 1",
-        )
-        .bind(uuid)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| format!("seiran_post_uuid 検索失敗: {}", e))?;
-
-        if let Some(row) = existing {
-            let existing_id: i64 = row.try_get("id").unwrap_or(0);
-            let existing_ap_id: Option<String> = row.try_get("ap_object_id").unwrap_or(None);
+        if let Some((existing_id, existing_ap_id)) = state
+            .post_repo
+            .find_by_seiran_uuid(uuid)
+            .await
+            .map_err(|e| format!("seiran_post_uuid 検索失敗: {}", e))?
+        {
             if existing_ap_id.is_none() {
                 // ap_object_id 未設定なら UPDATE
-                let _ = sqlx::query(
-                    "UPDATE posts SET ap_object_id = $1 WHERE id = $2",
-                )
-                .bind(note_id)
-                .bind(existing_id)
-                .execute(&state.db)
-                .await;
+                state
+                    .post_repo
+                    .update_ap_object_id(existing_id, note_id)
+                    .await
+                    .map_err(|e| format!("ap_object_id 更新失敗: {}", e))?;
                 eprintln!("[Create/Note] seiran_uuid マージ（AP 側更新）: id={}", existing_id);
             }
             // 重複インサートはしない
@@ -338,54 +366,15 @@ async fn handle_create_note(
         }
     }
 
-    // シナリオ1: ループバック検知（note.id または note.url が LOCAL_DOMAIN の notes URL）
-    let loopback_prefix = format!("https://{}/notes/", local_domain);
-    let parent_original_post_id: Option<i64> = {
-        let candidates = [
-            note["url"].as_str().unwrap_or(""),
-            note_id,
-        ];
-        candidates.iter().find_map(|url| {
-            url.strip_prefix(&loopback_prefix)
-                .and_then(|id_str| id_str.parse::<i64>().ok())
-        })
-    };
-
-    // シナリオ3: ブリッジ重複検知（note.url が bsky.app の場合、at_uri で既存ポストを探す）
-    let parent_original_post_id = if parent_original_post_id.is_some() {
-        parent_original_post_id
-    } else {
-        let bsky_url = note["url"].as_str().unwrap_or("");
-        if let Some(at_uri) = bsky_app_url_to_at_uri(bsky_url) {
-            use sqlx::Row;
-            sqlx::query("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
-                .bind(&at_uri)
-                .fetch_optional(&state.db)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|r| r.try_get::<i64, _>("id").ok())
-        } else {
-            None
-        }
-    };
+    let note_url = note["url"].as_str().unwrap_or("");
+    let parent_original_post_id = resolve_parent_original_post_id(&state, note_id, note_url).await;
 
     // posts テーブルに挿入（ap_object_id 重複はスキップ、seiran_post_uuid も保存）
-    sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (ap_object_id) DO NOTHING",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .bind(&body)
-    .bind(note_id)
-    .bind(seiran_uuid)
-    .bind(parent_original_post_id)
-    .bind(created_at)
-    .execute(&state.db)
-    .await
-    .map_err(|e| format!("posts INSERT エラー: {}", e))?;
+    state
+        .post_repo
+        .insert_remote_with_dedup(post_id, actor_id, &body, note_id, seiran_uuid, parent_original_post_id, created_at)
+        .await
+        .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
     // 添付画像の URL を保存（S3 には保存せず URL のみ記録）
     if let Some(attachments) = note["attachment"].as_array() {
@@ -396,39 +385,19 @@ async fn handle_create_note(
             if url.is_empty() {
                 continue;
             }
-            if let Err(e) = sqlx::query(
-                "INSERT INTO post_attachments (post_id, media_file_id, remote_url, position)
-                 VALUES ($1, NULL, $2, $3)
-                 ON CONFLICT (post_id, position) DO NOTHING",
-            )
-            .bind(post_id)
-            .bind(url)
-            .bind(position as i16)
-            .execute(&state.db)
-            .await
-            {
+            if let Err(e) = state.post_repo.attach_remote_media_url(post_id, url, position as i16).await {
                 eprintln!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
             }
         }
     }
 
     // ローカルフォロワーへ WebSocket リアルタイム配信
-    let follower_rows = sqlx::query(
-        "SELECT f.follower_actor_id FROM follows f
-         JOIN actors a ON a.id = f.follower_actor_id
-         WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
-    )
-    .bind(actor_id)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-
-    let recipients: std::collections::HashSet<i64> = follower_rows
-        .iter()
-        .filter_map(|r| {
-            use sqlx::Row;
-            r.try_get::<i64, _>("follower_actor_id").ok()
-        })
+    let recipients: HashSet<i64> = state
+        .follow_repo
+        .find_accepted_local_follower_ids(actor_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
         .collect();
 
     if !recipients.is_empty() {
@@ -438,11 +407,11 @@ async fn handle_create_note(
             "createdAt": created_at.to_rfc3339(),
             "user": {
                 "id": actor_id,
-                "username": remote_username,
-                "domain": remote_domain,
-                "displayName": remote_display_name,
+                "username": remote.username,
+                "domain": remote.domain,
+                "displayName": remote.display_name,
                 "actorType": "fedi",
-                "avatarUrl": remote_avatar_url,
+                "avatarUrl": remote.avatar_url,
             },
             "attachments": [],
         });
@@ -452,19 +421,6 @@ async fn handle_create_note(
     let dup_info = parent_original_post_id.map_or(String::new(), |id| format!(" (parent_original={})", id));
     eprintln!("[Create/Note] {} から投稿を受信・保存: {}{}", actor_uri, note_id, dup_info);
     Ok(())
-}
-
-/// `https://bsky.app/profile/{did}/post/{rkey}` → `at://{did}/app.bsky.feed.post/{rkey}`
-fn bsky_app_url_to_at_uri(url: &str) -> Option<String> {
-    let without_prefix = url.strip_prefix("https://bsky.app/profile/")?;
-    let mut parts = without_prefix.splitn(3, '/');
-    let did = parts.next()?;
-    let post_label = parts.next()?;
-    if post_label != "post" {
-        return None;
-    }
-    let rkey = parts.next()?;
-    Some(format!("at://{}/app.bsky.feed.post/{}", did, rkey))
 }
 
 /// Signature ヘッダーの headers= フィールドに "digest" が含まれているか確認する
@@ -575,7 +531,7 @@ async fn handle_accept(
     // リアルタイム通知（#37）: フォローが承諾されたローカルユーザーへ
     if rows > 0 {
         state.stream_hub.publish_event(
-            std::collections::HashSet::from([local_actor_id]),
+            HashSet::from([local_actor_id]),
             "followAccepted",
             serde_json::json!({
                 "actor": {
@@ -599,12 +555,12 @@ async fn handle_undo(
     // Undo(Like) / Undo(EmojiReact): reactions から対象を削除する (#22)
     if matches!(obj["type"].as_str(), Some("Like") | Some("EmojiReact")) {
         if let Some(activity_id) = obj["id"].as_str() {
-            let deleted = sqlx::query("DELETE FROM reactions WHERE ap_activity_id = $1")
-                .bind(activity_id)
-                .execute(&state.db)
+            let deleted = state
+                .reaction_repo
+                .delete_by_activity_id(activity_id)
                 .await
                 .map_err(|e| format!("reactions DELETE エラー: {}", e))?;
-            eprintln!("[Undo/Reaction] {} を取り消し（{} 行）", activity_id, deleted.rows_affected());
+            eprintln!("[Undo/Reaction] {} を取り消し（{} 行）", activity_id, deleted);
         }
         return Ok(());
     }
@@ -612,12 +568,12 @@ async fn handle_undo(
     // Undo(Announce): posts から対象のリポストを論理削除する
     if obj["type"].as_str() == Some("Announce") {
         if let Some(announce_id) = obj["id"].as_str() {
-            let deleted = sqlx::query("UPDATE posts SET deleted_at = NOW() WHERE ap_object_id = $1")
-                .bind(announce_id)
-                .execute(&state.db)
+            let deleted = state
+                .post_repo
+                .soft_delete_by_ap_object_id(announce_id)
                 .await
                 .map_err(|e| format!("posts (Announce) UPDATE エラー: {}", e))?;
-            eprintln!("[Undo/Announce] {} を取り消し（{} 行）", announce_id, deleted.rows_affected());
+            eprintln!("[Undo/Announce] {} を取り消し（{} 行）", announce_id, deleted);
         }
         return Ok(());
     }
@@ -691,61 +647,37 @@ async fn handle_reaction(
     let reaction_type = if is_like { "like" } else { "emoji" };
 
     // 対象ローカルポストを ap_object_id で検索（未知のポストなら無視）
-    let post_row: Option<(i64, i64)> = sqlx::query_as(
-        "SELECT id, actor_id FROM posts WHERE ap_object_id = $1 AND deleted_at IS NULL LIMIT 1",
-    )
-    .bind(object_uri)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| format!("対象ポスト検索エラー: {}", e))?;
-    let (post_id, post_author_id) = match post_row {
-        Some(row) => row,
+    let (post_id, post_author_id) = match state
+        .post_repo
+        .find_id_and_actor_by_ap_object_id(object_uri)
+        .await
+        .map_err(|e| format!("対象ポスト検索エラー: {}", e))?
+    {
+        Some(pair) => pair,
         None => return Ok(()), // 未知ポストへのリアクションは無視
     };
 
-    // リアクションを打ったアクターを upsert
-    let remote_ap = state.ap_client.fetch_actor(actor_uri).await?;
-    let remote_inbox = remote_ap.inbox.clone().unwrap_or_default();
-    let remote_username = remote_ap
-        .preferred_username
-        .clone()
-        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
-    let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
-    let remote_domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
-    let remote_avatar_url = remote_ap.avatar_url();
-
-    let now = chrono::Utc::now();
-    let new_actor_id = generate_snowflake_id(now);
-    let actor_id = state.actor_repo
-        .upsert_remote_fedi(new_actor_id, actor_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now)
-        .await
-        .map_err(|e| format!("リアクター upsert エラー: {}", e))?;
+    // リアクションを打ったアクターを解決・upsert
+    let remote = upsert_remote_fedi_actor(&state, actor_uri).await?;
+    let actor_id = remote.actor_id;
 
     // reactions へ INSERT（同一ユーザー・同一内容の重複、activity_id 重複はスキップ）
-    sqlx::query(
-        "INSERT INTO reactions (post_id, actor_id, reaction_type, content, ap_activity_id)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT DO NOTHING",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .bind(reaction_type)
-    .bind(&content)
-    .bind(activity_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| format!("reactions INSERT エラー: {}", e))?;
+    state
+        .reaction_repo
+        .insert(post_id, actor_id, reaction_type, &content, activity_id)
+        .await
+        .map_err(|e| format!("reactions INSERT エラー: {}", e))?;
 
     eprintln!("[Reaction] post {} に {} を記録", post_id, content);
 
     // リアルタイム通知（#37）: リアクションされたポストの著者へ
     state.stream_hub.publish_event(
-        std::collections::HashSet::from([post_author_id]),
+        HashSet::from([post_author_id]),
         "reaction",
         serde_json::json!({
             "postId": post_id.to_string(),
             "emoji": content,
-            "actor": { "username": remote_username, "domain": remote_domain, "displayName": remote_display_name },
+            "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
         }),
     );
     Ok(())
@@ -767,36 +699,18 @@ async fn handle_announce(
         .unwrap_or_else(|_| chrono::Utc::now());
     let post_id = seiran_common::generate_snowflake_id(created_at);
 
-    // リモートアクターを upsert（未登録なら作成）
-    let remote_ap = state.ap_client.fetch_actor(actor_uri).await?;
-    let remote_inbox = remote_ap.inbox.clone().unwrap_or_default();
-    let remote_username = remote_ap
-        .preferred_username
-        .clone()
-        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
-    let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
-    let remote_domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
-    let remote_avatar_url = remote_ap.avatar_url();
-
-    let now = chrono::Utc::now();
-    let new_actor_id = seiran_common::generate_snowflake_id(now);
-
-    let actor_id = state.actor_repo
-        .upsert_remote_fedi(new_actor_id, actor_uri, &remote_inbox, &remote_username, &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now)
-        .await
-        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+    // リモートアクターを解決・upsert（未登録なら作成）
+    let remote = upsert_remote_fedi_actor(&state, actor_uri).await?;
+    let actor_id = remote.actor_id;
 
     // 元ポストをDBから検索（ap_object_id or at_uri が object_uri と一致するもの）
-    let orig_post = sqlx::query!(
-        "SELECT id FROM posts WHERE ap_object_id = $1 OR at_uri = $1 LIMIT 1",
-        object_uri
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| format!("元ポスト検索失敗: {}", e))?;
-
-    let repost_of_post_id = match orig_post {
-        Some(row) => row.id,
+    let repost_of_post_id = match state
+        .post_repo
+        .find_id_by_ap_or_at_uri(object_uri)
+        .await
+        .map_err(|e| format!("元ポスト検索失敗: {}", e))?
+    {
+        Some(id) => id,
         None => {
             eprintln!(
                 "[Inbox/Announce] 元ポストが DB に未存在。リモートからフェッチします: {}",
@@ -813,32 +727,22 @@ async fn handle_announce(
     };
 
     // 重複チェック（同一アクターによる同一ポストのリポスト）
-    let existing = sqlx::query!(
-        "SELECT id FROM posts WHERE actor_id = $1 AND repost_of_post_id = $2 AND deleted_at IS NULL LIMIT 1",
-        actor_id,
-        repost_of_post_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| format!("重複チェック失敗: {}", e))?;
-
-    if existing.is_some() {
+    if state
+        .post_repo
+        .find_repost_undo_info(actor_id, repost_of_post_id)
+        .await
+        .map_err(|e| format!("重複チェック失敗: {}", e))?
+        .is_some()
+    {
         return Ok(());
     }
 
     // リポストをDBに挿入
-    sqlx::query!(
-        "INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at)
-         VALUES ($1, $2, '', $3, $4, $5)",
-        post_id,
-        actor_id,
-        announce_id,
-        repost_of_post_id,
-        created_at
-    )
-    .execute(&state.db)
-    .await
-    .map_err(|e| format!("リポスト挿入失敗: {}", e))?;
+    state
+        .post_repo
+        .insert_repost(post_id, actor_id, announce_id, repost_of_post_id, created_at)
+        .await
+        .map_err(|e| format!("リポスト挿入失敗: {}", e))?;
 
     eprintln!(
         "[Inbox/Announce] リポスト保存完了: id={}, actor_id={}, repost_of={}",
@@ -883,62 +787,25 @@ async fn fetch_and_save_note(note_uri: &str, state: &Arc<AppState>) -> Result<i6
         .unwrap_or_else(|_| chrono::Utc::now());
     let post_id = seiran_common::generate_snowflake_id(created_at);
 
-    // アクターを upsert
-    let remote_ap = state.ap_client.fetch_actor(&actor_uri).await?;
-    let remote_inbox = remote_ap.inbox.clone().unwrap_or_default();
-    let remote_username = remote_ap
-        .preferred_username
-        .clone()
-        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
-    let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
-    let remote_domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
-    let remote_avatar_url = remote_ap.avatar_url();
-
-    let now = chrono::Utc::now();
-    let new_actor_id = seiran_common::generate_snowflake_id(now);
-
-    let actor_id = state
-        .actor_repo
-        .upsert_remote_fedi(
-            new_actor_id,
-            &actor_uri,
-            &remote_inbox,
-            &remote_username,
-            &remote_domain,
-            &remote_display_name,
-            remote_avatar_url.as_deref(),
-            now,
-        )
-        .await
-        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+    // アクターを解決・upsert
+    let remote = upsert_remote_fedi_actor(state, &actor_uri).await?;
+    let actor_id = remote.actor_id;
 
     let body = strip_html(&content_html);
 
-    sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (ap_object_id) DO NOTHING",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .bind(&body)
-    .bind(note_id)
-    .bind(created_at)
-    .execute(&state.db)
-    .await
-    .map_err(|e| format!("posts INSERT エラー: {}", e))?;
+    state
+        .post_repo
+        .insert_remote(post_id, actor_id, &body, note_id, created_at)
+        .await
+        .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
     // ON CONFLICT で既存行がある場合も含め、DB 上の id を取得する
-    use sqlx::Row as _;
-    let row = sqlx::query("SELECT id FROM posts WHERE ap_object_id = $1 LIMIT 1")
-        .bind(note_id)
-        .fetch_one(&state.db)
+    let saved_id = state
+        .post_repo
+        .find_id_by_ap_or_at_uri(note_id)
         .await
-        .map_err(|e| format!("posts id 取得エラー: {}", e))?;
-
-    let saved_id: i64 = row
-        .try_get("id")
-        .map_err(|e| format!("id カラム取得エラー: {}", e))?;
+        .map_err(|e| format!("posts id 取得エラー: {}", e))?
+        .ok_or_else(|| format!("posts id 取得エラー: {} が見つかりません", note_id))?;
 
     eprintln!(
         "[Inbox/Announce] 元ポストをフェッチして保存: id={}, uri={}",
@@ -949,7 +816,7 @@ async fn fetch_and_save_note(note_uri: &str, state: &Arc<AppState>) -> Result<i6
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_key_id, signature_covers_digest, strip_html};
+    use super::{bsky_app_url_to_at_uri, extract_key_id, signature_covers_digest, strip_html};
 
     #[test]
     fn signature_covers_digest_with_digest() {
@@ -1004,5 +871,27 @@ mod tests {
         assert_eq!(strip_html(""), "");
         assert_eq!(strip_html("   "), "");
         assert_eq!(strip_html("<br/>"), "");
+    }
+
+    #[test]
+    fn bsky_app_url_to_at_uri_valid() {
+        assert_eq!(
+            bsky_app_url_to_at_uri("https://bsky.app/profile/did:plc:abc123/post/xyz789"),
+            Some("at://did:plc:abc123/app.bsky.feed.post/xyz789".to_string())
+        );
+    }
+
+    #[test]
+    fn bsky_app_url_to_at_uri_wrong_label() {
+        assert_eq!(
+            bsky_app_url_to_at_uri("https://bsky.app/profile/did:plc:abc123/likes/xyz789"),
+            None
+        );
+    }
+
+    #[test]
+    fn bsky_app_url_to_at_uri_not_bsky_app() {
+        assert_eq!(bsky_app_url_to_at_uri("https://example.com/notes/1"), None);
+        assert_eq!(bsky_app_url_to_at_uri(""), None);
     }
 }

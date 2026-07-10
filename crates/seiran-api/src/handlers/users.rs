@@ -2,6 +2,7 @@ use axum::{extract::{Query, State}, http::{HeaderMap, StatusCode}, response::{In
 use serde::{Deserialize, Serialize};
 
 use seiran_common::ap::deliver_update_actor;
+use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::repository::Actor;
 
 use crate::error::ApiError;
@@ -41,17 +42,6 @@ pub struct ProfileResponse {
     pub is_paired: bool,
 }
 
-// AppView `app.bsky.actor.getProfile` レスポンスの必要フィールド
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AppViewGetProfileResp {
-    did: String,
-    handle: String,
-    display_name: Option<String>,
-    description: Option<String>,
-    avatar: Option<String>,
-}
-
 /// Bsky AppView からプロフィールを取得して ProfileResponse を返す。
 /// `actor` はハンドル（`alice.bsky.social`）または DID（`did:plc:...`）。
 /// AppView フェッチ後に DB でアクターが登録済みかを確認し、フォロー状態も含めて返す。
@@ -60,28 +50,11 @@ async fn fetch_bsky_profile_from_appview(
     my_user_id: Option<i64>,
     state: &AppState,
 ) -> Response {
-    let url = format!(
-        "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={}",
-        urlencoding::encode(actor)
-    );
-
-    let resp = match state.http_client.get(&url).send().await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[profile/bsky] AppView 接続失敗: {}", e);
-            return (StatusCode::BAD_GATEWAY, "AppView 接続失敗").into_response();
-        }
-    };
-
-    if !resp.status().is_success() {
-        return (StatusCode::NOT_FOUND, "Bsky ユーザーが見つかりません").into_response();
-    }
-
-    let bsky: AppViewGetProfileResp = match resp.json().await {
+    let bsky = match fetch_bsky_profile(&state.http_client, actor).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[profile/bsky] AppView JSON 解析失敗: {}", e);
-            return (StatusCode::BAD_GATEWAY, "AppView レスポンス解析失敗").into_response();
+            eprintln!("[profile/bsky] AppView 取得失敗: {}", e);
+            return (StatusCode::NOT_FOUND, "Bsky ユーザーが見つかりません").into_response();
         }
     };
 

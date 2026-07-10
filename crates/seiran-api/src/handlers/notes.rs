@@ -1,17 +1,17 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use unicode_segmentation::UnicodeSegmentation;
 
-use seiran_common::repository::TimelinePost;
+use seiran_common::repository::{PostDeliveryMeta, TimelinePost};
 use seiran_common::{ap::{deliver_post_to_ap_followers, deliver_ap_announce, deliver_undo_announce, fetch_ap_history, plain_to_html}, generate_snowflake_id};
 use seiran_common::mention::{convert_mentions_for_bsky, convert_mentions_for_ap};
 use seiran_common::atp::{BskyPostReply, BskyRefRecord, BskyEmbed};
@@ -324,6 +324,423 @@ fn classify_post(
     (true, false, false)
 }
 
+/// 新規投稿を著者本人 + accepted なローカルフォロワーへ WebSocket でリアルタイム配信する（#37）。
+async fn broadcast_new_note(state: &AppState, actor_id: i64, note: &NoteResponse) {
+    let mut recipients: HashSet<i64> = HashSet::new();
+    recipients.insert(actor_id);
+    if let Ok(rows) = state.follows.find_accepted_local_follower_ids(actor_id).await {
+        recipients.extend(rows);
+    }
+    if let Ok(v) = serde_json::to_value(note) {
+        state.stream_hub.publish_note(recipients, &v);
+    }
+}
+
+/// リポストを Fedi（AP Announce）・Bsky（ATP repost）の両プロトコルへ配送する。
+/// 元ポストが存在しないプロトコルにはフォールバック（URL テキスト投稿）で代替する。
+#[allow(clippy::too_many_arguments)]
+fn deliver_repost(
+    state: &AppState,
+    post_id: i64,
+    actor_id: i64,
+    now: chrono::DateTime<chrono::Utc>,
+    deliver_fedi: bool,
+    deliver_bsky: bool,
+    meta: &PostDeliveryMeta,
+    is_local_or_seiran: bool,
+    is_fedi_remote: bool,
+) {
+    if deliver_fedi {
+        if let Some(ref ap_id) = meta.ap_object_id {
+            // 元ポストに ap_object_id がある → AP Announce 送信
+            let ap_id_clone = ap_id.clone();
+            let db = state.db.clone();
+            let local_domain = state.local_domain.clone();
+            let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
+            let ap_client = Arc::clone(&state.ap_client);
+            tokio::spawn(async move {
+                if let Err(e) = deliver_ap_announce(
+                    &ap_client, &db, post_id, actor_id, &local_domain, &ap_pem, &ap_id_clone,
+                ).await {
+                    eprintln!("[create_note] AP Announce 失敗: {}", e);
+                }
+            });
+        } else if meta.at_uri.is_some() {
+            // Bsky リモートポストのリポスト → Fedi フォールバック: URL テキスト投稿
+            let bsky_url = at_uri_to_bsky_app_url(meta.at_uri.as_deref().unwrap_or(""));
+            let author_name = meta.display_name.as_deref().unwrap_or(&meta.username).to_string();
+            let fallback_text = format!("🔁 {}: {}", author_name, bsky_url);
+            let db = state.db.clone();
+            let local_domain = state.local_domain.clone();
+            let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
+            let ap_client = Arc::clone(&state.ap_client);
+            tokio::spawn(async move {
+                if let Err(e) = deliver_post_to_ap_followers(
+                    &ap_client, &db, post_id, actor_id, &local_domain, &ap_pem,
+                    Some(&fallback_text), None, None,
+                ).await {
+                    eprintln!("[create_note] Bsky→Fedi フォールバック配送失敗: {}", e);
+                }
+            });
+        }
+    }
+
+    if deliver_bsky {
+        if let (Some(at_uri), Some(at_cid)) = (&meta.at_uri, &meta.at_cid) {
+            // 元ポストに at_uri と at_cid がある → ATP repost
+            let at_uri_clone = at_uri.clone();
+            let at_cid_clone = at_cid.clone();
+            let atp = Arc::clone(&state.atp_service);
+            tokio::spawn(async move {
+                if let Err(e) = atp.commit_repost(actor_id, &at_uri_clone, &at_cid_clone, now, Some(post_id)).await {
+                    eprintln!("[create_note] ATP repost 失敗: {}", e);
+                }
+            });
+        } else if (is_fedi_remote || is_local_or_seiran) && meta.ap_object_id.is_some() {
+            // at_uri なし（Fedi リモートまたはローカル）→ Bsky フォールバック: URL テキスト投稿
+            let ap_id = meta.ap_object_id.clone().unwrap_or_default();
+            let author_name = meta.display_name.as_deref().unwrap_or(&meta.username).to_string();
+            let fallback_text = format!("🔁 {}: {}", author_name, ap_id);
+            let atp = Arc::clone(&state.atp_service);
+            tokio::spawn(async move {
+                if let Err(e) = atp.commit_standalone_text_post(actor_id, &fallback_text, now).await {
+                    eprintln!("[create_note] Fedi→Bsky フォールバック投稿失敗: {}", e);
+                }
+            });
+        }
+    }
+}
+
+/// リポスト作成（`renote_id` 指定時）を処理する。
+/// 元ポストのメタ情報取得 → repost レコード挿入 → 両プロトコルへの配送 → realtime 配信、の順で行う。
+async fn create_repost(
+    state: &AppState,
+    actor_id: i64,
+    user_id: i64,
+    username: String,
+    renote_id_str: &str,
+    req: &CreateNoteRequest,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Response {
+    let renote_id: i64 = match renote_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_RENOTE_ID".to_owned()).into_response(),
+    };
+
+    let meta = match state.posts.find_delivery_meta(renote_id).await {
+        Ok(Some(m)) => m,
+        Ok(None) => return ApiError::NotFound("RENOTE_TARGET_NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("repost 元ポスト取得失敗: {}", e)).into_response(),
+    };
+
+    let (is_local_or_seiran, is_fedi_remote, _is_bsky_remote) = classify_post(
+        meta.ap_object_id.as_deref(),
+        meta.at_uri.as_deref(),
+        &meta.domain,
+        &state.local_domain,
+    );
+
+    let post_id = generate_snowflake_id(now);
+    // リポストの AP オブジェクト ID は Announce URI として生成
+    let announce_ap_id = format!("https://{}/announces/{}", state.local_domain, post_id);
+
+    match state.posts.insert_repost(post_id, actor_id, &announce_ap_id, renote_id, now).await {
+        Ok(()) => {}
+        Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("23505") => {
+            // UNIQUE 制約違反 = すでにリポスト済み
+            return ApiError::Conflict("ALREADY_REPOSTED").into_response();
+        }
+        Err(e) => {
+            return ApiError::Internal(format!("repost INSERT 失敗: {}", e)).into_response();
+        }
+    }
+
+    deliver_repost(
+        state, post_id, actor_id, now,
+        req.deliver_to_fedi.unwrap_or(true), req.deliver_to_bsky.unwrap_or(true),
+        &meta, is_local_or_seiran, is_fedi_remote,
+    );
+
+    let mut repost_resp = NoteResponse {
+        id: post_id.to_string(),
+        text: String::new(),
+        created_at: now.to_rfc3339(),
+        user: NoteUserInfo { id: user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
+        attachments: vec![],
+        renote_id: Some(renote_id.to_string()),
+        quote_id: None, reply_id: None, parent_original_id: None,
+        reactions: vec![],
+        renote: None,
+        reposted_by_me: None,
+    };
+    // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
+    embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
+    broadcast_new_note(state, actor_id, &repost_resp).await;
+
+    Json(repost_resp).into_response()
+}
+
+/// リプライ先の配信先制御に使う情報。
+struct ReplyContext {
+    deliver_fedi_allowed: bool,
+    deliver_bsky_allowed: bool,
+    bsky_reply: Option<BskyPostReply>,
+    ap_in_reply_to: Option<String>,
+}
+
+/// リプライ先ポストの種別を判定し、配信先制御（元ポストが存在しないプロトコルには配信しない）と
+/// ATP reply フィールドを組み立てる。
+async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str) -> Result<ReplyContext, ApiError> {
+    let reply_to_id: i64 = reply_to_id_str
+        .parse()
+        .map_err(|_| ApiError::BadRequest("INVALID_REPLY_TO_ID".to_owned()))?;
+
+    let meta = state
+        .posts
+        .find_delivery_meta(reply_to_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("reply 元ポスト取得失敗: {}", e)))?
+        .ok_or(ApiError::NotFound("REPLY_TARGET_NOT_FOUND"))?;
+
+    let (_is_local_or_seiran, is_fedi_remote, is_bsky_remote) = classify_post(
+        meta.ap_object_id.as_deref(),
+        meta.at_uri.as_deref(),
+        &meta.domain,
+        &state.local_domain,
+    );
+
+    // 配信先制御: 元ポストが存在しないプロトコルには配信しない
+    let deliver_fedi_allowed = !is_bsky_remote; // Bsky リモートへのリプライ → Fedi 配信しない
+    let deliver_bsky_allowed = !is_fedi_remote; // Fedi リモートへのリプライ → Bsky 配信しない
+
+    // ATP reply フィールド: Bsky 配信する場合かつ at_uri/at_cid が取得できる場合のみ設定
+    let bsky_reply = if deliver_bsky_allowed {
+        match (&meta.at_uri, &meta.at_cid) {
+            (Some(uri), Some(cid)) => Some(BskyPostReply {
+                root: BskyRefRecord { cid: cid.clone(), uri: uri.clone() },
+                parent: BskyRefRecord { cid: cid.clone(), uri: uri.clone() },
+            }),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    Ok(ReplyContext {
+        deliver_fedi_allowed,
+        deliver_bsky_allowed,
+        bsky_reply,
+        ap_in_reply_to: meta.ap_object_id,
+    })
+}
+
+/// 引用元ポストの種別から Bsky embed（引用埋め込み）と AP quoteUrl を組み立てる。
+async fn resolve_quote_embed(state: &AppState, quote_of_id: i64) -> (Option<BskyEmbed>, Option<String>) {
+    let meta = match state.posts.find_delivery_meta(quote_of_id).await {
+        Ok(Some(m)) => m,
+        _ => return (None, None),
+    };
+
+    let (_is_local, is_fedi, _is_bsky) = classify_post(
+        meta.ap_object_id.as_deref(), meta.at_uri.as_deref(), &meta.domain, &state.local_domain,
+    );
+
+    let bsky_embed = if is_fedi {
+        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External { url: u.to_string() })
+    } else if let (Some(uri), Some(cid)) = (&meta.at_uri, &meta.at_cid) {
+        Some(BskyEmbed::Record { uri: uri.clone(), cid: cid.clone() })
+    } else {
+        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External { url: u.to_string() })
+    };
+
+    let ap_url = if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
+        meta.at_uri.as_deref().map(at_uri_to_bsky_app_url)
+    } else {
+        meta.ap_object_id.clone()
+    };
+
+    (bsky_embed, ap_url)
+}
+
+/// 投稿文字数を配信先（Bsky か否か）に応じたバイト数・書記素クラスタ数の上限で検証する。
+fn validate_text_length(text: &str, deliver_bsky: bool) -> Result<(), ApiError> {
+    let (max_bytes, max_graphemes): (usize, usize) = if deliver_bsky { (3_000, 300) } else { (10_000, 3_000) };
+    if text.len() > max_bytes || text.graphemes(true).count() > max_graphemes {
+        return Err(ApiError::BadRequest("TEXT_TOO_LONG".to_owned()));
+    }
+    Ok(())
+}
+
+/// 添付ファイル ID の件数・形式を検証する（件数上限 10、i64 としてパース可能か）。
+fn validate_attachment_ids(ids: &[String]) -> Result<(), ApiError> {
+    if ids.len() > 10 {
+        return Err(ApiError::BadRequest("添付ファイルは最大10件です".to_owned()));
+    }
+    if ids.iter().any(|s| s.parse::<i64>().is_err()) {
+        return Err(ApiError::BadRequest("INVALID_ATTACHMENT_ID".to_owned()));
+    }
+    Ok(())
+}
+
+/// 検証済みの添付ファイル ID 群を投稿に紐付ける。
+async fn attach_media_files(state: &AppState, post_id: i64, attachment_ids: &[i64]) -> Result<(), ApiError> {
+    for (position, media_file_id) in attachment_ids.iter().enumerate() {
+        state
+            .posts
+            .attach_media(post_id, *media_file_id, position as i16)
+            .await
+            .map_err(|e| ApiError::Internal(format!("添付 INSERT 失敗: {}", e)))?;
+    }
+    Ok(())
+}
+
+/// 通常投稿 / リプライ / 引用投稿を Fedi・Bsky へ配送する（Bsky は同期コミット、Fedi は非同期配送）。
+#[allow(clippy::too_many_arguments)]
+async fn deliver_regular_post(
+    state: &AppState,
+    post_id: i64,
+    actor_id: i64,
+    now: chrono::DateTime<chrono::Utc>,
+    text: &str,
+    deliver_fedi: bool,
+    deliver_bsky: bool,
+    bsky_reply: Option<BskyPostReply>,
+    bsky_quote_embed: Option<BskyEmbed>,
+    ap_quote_url: Option<String>,
+    ap_in_reply_to: Option<String>,
+    attachment_ids: &[i64],
+) {
+    // メンション変換（変換失敗時は元テキストをそのまま使用する）
+    // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
+    let (bsky_text, bsky_facets) = if deliver_bsky {
+        convert_mentions_for_bsky(text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await
+    } else {
+        (text.to_string(), vec![])
+    };
+
+    // AP 配信用: `@handle.tld` (ATP ハンドル) → `@handle.tld@bsky.brid.gy` または Markdown リンク
+    let ap_text = if deliver_fedi {
+        convert_mentions_for_ap(text, &state.db, state.ap_client.http.as_ref()).await
+    } else {
+        text.to_string()
+    };
+
+    if deliver_bsky {
+        if let Some(embed) = bsky_quote_embed {
+            // 引用投稿: embed を付けて commit_quote を使う（画像 embed と共存しない）
+            if let Err(e) = state.atp_service.commit_quote(actor_id, post_id, &bsky_text, bsky_facets, Some(embed), now, bsky_reply).await {
+                eprintln!("[create_note] ATP quote commit 失敗（投稿は保存済み）: {}", e);
+            }
+        } else if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &bsky_text, bsky_facets, attachment_ids, now, bsky_reply).await {
+            eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
+        }
+    }
+
+    if deliver_fedi {
+        let db = state.db.clone();
+        let local_domain = state.local_domain.clone();
+        let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
+        let ap_client = state.ap_client.clone();
+        tokio::spawn(async move {
+            if let Err(e) = deliver_post_to_ap_followers(
+                &ap_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem,
+                Some(ap_text.as_str()), ap_quote_url.as_deref(), ap_in_reply_to.as_deref(),
+            ).await {
+                eprintln!("[create_note] AP 配送エラー: {}", e);
+            }
+        });
+    }
+}
+
+/// 通常投稿・リプライ・引用投稿を処理する（`renote_id` を持たないケース）。
+/// バリデーション → リプライ/引用先の解決 → INSERT → 添付紐付け → 両プロトコル配信 → realtime 配信、の順で行う。
+async fn create_regular_post(
+    state: &AppState,
+    actor_id: i64,
+    user_id: i64,
+    username: String,
+    req: &CreateNoteRequest,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Response {
+    let text = req.text.as_deref().unwrap_or("").to_string();
+    if text.trim().is_empty() {
+        return ApiError::BadRequest("text は空にできません".to_owned()).into_response();
+    }
+
+    let reply_ctx = match &req.reply_to_id {
+        Some(id) => match resolve_reply_context(state, id).await {
+            Ok(ctx) => ctx,
+            Err(e) => return e.into_response(),
+        },
+        None => ReplyContext { deliver_fedi_allowed: true, deliver_bsky_allowed: true, bsky_reply: None, ap_in_reply_to: None },
+    };
+
+    let deliver_fedi = req.deliver_to_fedi.unwrap_or(true) && reply_ctx.deliver_fedi_allowed;
+    let deliver_bsky = req.deliver_to_bsky.unwrap_or(true) && reply_ctx.deliver_bsky_allowed;
+
+    if let Err(e) = validate_text_length(&text, deliver_bsky) {
+        return e.into_response();
+    }
+    if let Some(ids) = &req.attachment_ids {
+        if let Err(e) = validate_attachment_ids(ids) {
+            return e.into_response();
+        }
+    }
+
+    let post_id = generate_snowflake_id(now);
+    let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
+    let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
+
+    let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
+    let quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
+
+    // 引用元情報の取得（Bsky embed / AP quoteUrl を決定する）
+    let (bsky_quote_embed, ap_quote_url) = match quote_of_id_i64 {
+        Some(quote_id) => resolve_quote_embed(state, quote_id).await,
+        None => (None, None),
+    };
+
+    // seiran_post_uuid / reply_to_post_id / quote_of_post_id を含む統合 INSERT
+    if let Err(e) = state
+        .posts
+        .insert_full(post_id, actor_id, &text, &ap_object_id, &seiran_post_uuid, reply_to_id_i64, quote_of_id_i64, now)
+        .await
+    {
+        return ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)).into_response();
+    }
+
+    // attachment_ids を i64 に変換（バリデーション済みなので unwrap 安全）
+    let attachment_ids_i64: Vec<i64> = req.attachment_ids.as_deref().unwrap_or(&[]).iter().map(|s| s.parse::<i64>().unwrap()).collect();
+    if let Err(e) = attach_media_files(state, post_id, &attachment_ids_i64).await {
+        return e.into_response();
+    }
+
+    deliver_regular_post(
+        state, post_id, actor_id, now, &text, deliver_fedi, deliver_bsky,
+        reply_ctx.bsky_reply, bsky_quote_embed, ap_quote_url, reply_ctx.ap_in_reply_to, &attachment_ids_i64,
+    ).await;
+
+    let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
+    let note_resp = NoteResponse {
+        id: post_id.to_string(),
+        text,
+        created_at: now.to_rfc3339(),
+        user: NoteUserInfo { id: user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
+        attachments: att_map.remove(&post_id).unwrap_or_default(),
+        renote_id: None,
+        quote_id: quote_of_id_i64.map(|i| i.to_string()),
+        reply_id: reply_to_id_i64.map(|i| i.to_string()),
+        parent_original_id: None,
+        reactions: vec![],
+        renote: None,
+        reposted_by_me: None,
+    };
+
+    broadcast_new_note(state, actor_id, &note_resp).await;
+
+    Json(note_resp).into_response()
+}
+
 pub async fn create_note(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -337,498 +754,15 @@ pub async fn create_note(
     let (actor_id, username) = match state.actors.find_local_by_user_id(auth_user.user_id).await {
         Ok(Some(a)) => (a.id, a.username),
         Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
-        Err(e) => {
-            eprintln!("[create_note] アクター取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
+        Err(e) => return ApiError::Internal(format!("アクター取得失敗: {}", e)).into_response(),
     };
 
     let now = chrono::Utc::now();
 
-    // ── リポスト処理 ──────────────────────────────────────────────────────────
-    if let Some(ref renote_id_str) = req.renote_id {
-        let renote_id: i64 = match renote_id_str.parse() {
-            Ok(id) => id,
-            Err(_) => return ApiError::BadRequest("INVALID_RENOTE_ID".to_owned()).into_response(),
-        };
-
-        // 元ポスト情報を取得（ap_object_id, at_uri, at_cid, アクターのドメインと表示名）
-        let orig_row = match sqlx::query(
-            "SELECT p.ap_object_id, p.at_uri, p.at_cid,
-                    a.domain AS orig_domain, a.display_name AS orig_display_name,
-                    a.username AS orig_username
-             FROM posts p
-             JOIN actors a ON a.id = p.actor_id
-             WHERE p.id = $1 AND p.deleted_at IS NULL
-             LIMIT 1",
-        )
-        .bind(renote_id)
-        .fetch_optional(&state.db)
-        .await {
-            Ok(Some(r)) => r,
-            Ok(None) => return ApiError::NotFound("RENOTE_TARGET_NOT_FOUND").into_response(),
-            Err(e) => {
-                eprintln!("[create_note] repost 元ポスト取得失敗: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-            }
-        };
-
-        let orig_ap_object_id: Option<String> = orig_row.try_get("ap_object_id").unwrap_or(None);
-        let orig_at_uri: Option<String> = orig_row.try_get("at_uri").unwrap_or(None);
-        let orig_at_cid: Option<String> = orig_row.try_get("at_cid").unwrap_or(None);
-        let orig_domain: String = orig_row.try_get("orig_domain").unwrap_or_default();
-        let orig_display_name: Option<String> = orig_row.try_get("orig_display_name").unwrap_or(None);
-        let orig_username: String = orig_row.try_get("orig_username").unwrap_or_default();
-
-        let (is_local_or_seiran, is_fedi_remote, _is_bsky_remote) = classify_post(
-            orig_ap_object_id.as_deref(),
-            orig_at_uri.as_deref(),
-            &orig_domain,
-            &state.local_domain,
-        );
-
-        let post_id = generate_snowflake_id(now);
-        // リポストの AP オブジェクト ID は Announce URI として生成
-        let announce_ap_id = format!("https://{}/announces/{}", state.local_domain, post_id);
-
-        // リポストレコードを DB に INSERT
-        let insert_result = sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at)
-             VALUES ($1, $2, '', $3, $4, $5)",
-        )
-        .bind(post_id)
-        .bind(actor_id)
-        .bind(&announce_ap_id)
-        .bind(renote_id)
-        .bind(now)
-        .execute(&state.db)
-        .await;
-
-        match insert_result {
-            Ok(_) => {}
-            Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("23505") => {
-                // UNIQUE 制約違反 = すでにリポスト済み
-                return ApiError::Conflict("ALREADY_REPOSTED").into_response();
-            }
-            Err(e) => {
-                eprintln!("[create_note] repost INSERT 失敗: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "リポストの保存に失敗しました").into_response();
-            }
-        }
-
-        let deliver_fedi = req.deliver_to_fedi.unwrap_or(true);
-        let deliver_bsky = req.deliver_to_bsky.unwrap_or(true);
-
-        // ── Fedi 配信（AP Announce）─────────────────────────────────────────
-        if deliver_fedi {
-            if let Some(ref ap_id) = orig_ap_object_id {
-                // 元ポストに ap_object_id がある → AP Announce 送信
-                let ap_id_clone = ap_id.clone();
-                let db = state.db.clone();
-                let local_domain = state.local_domain.clone();
-                let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
-                let ap_client = Arc::clone(&state.ap_client);
-                tokio::spawn(async move {
-                    if let Err(e) = deliver_ap_announce(
-                        &ap_client, &db, post_id, actor_id, &local_domain, &ap_pem, &ap_id_clone,
-                    ).await {
-                        eprintln!("[create_note] AP Announce 失敗: {}", e);
-                    }
-                });
-            } else if orig_at_uri.is_some() {
-                // Bsky リモートポストのリポスト → Fedi フォールバック: URL テキスト投稿
-                let bsky_url = at_uri_to_bsky_app_url(orig_at_uri.as_deref().unwrap_or(""));
-                let author_name = orig_display_name.as_deref().unwrap_or(&orig_username).to_string();
-                let fallback_text = format!("🔁 {}: {}", author_name, bsky_url);
-                let db = state.db.clone();
-                let local_domain = state.local_domain.clone();
-                let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
-                let ap_client = Arc::clone(&state.ap_client);
-                tokio::spawn(async move {
-                    if let Err(e) = deliver_post_to_ap_followers(
-                        &ap_client, &db, post_id, actor_id, &local_domain, &ap_pem,
-                        Some(&fallback_text), None, None,
-                    ).await {
-                        eprintln!("[create_note] Bsky→Fedi フォールバック配送失敗: {}", e);
-                    }
-                });
-            }
-        }
-
-        // ── Bsky 配信（ATP repost / フォールバック）─────────────────────────
-        if deliver_bsky {
-            if let (Some(ref at_uri), Some(ref at_cid)) = (&orig_at_uri, &orig_at_cid) {
-                // 元ポストに at_uri と at_cid がある → ATP repost
-                let at_uri_clone = at_uri.clone();
-                let at_cid_clone = at_cid.clone();
-                let atp = Arc::clone(&state.atp_service);
-                tokio::spawn(async move {
-                    if let Err(e) = atp.commit_repost(actor_id, &at_uri_clone, &at_cid_clone, now, Some(post_id)).await {
-                        eprintln!("[create_note] ATP repost 失敗: {}", e);
-                    }
-                });
-            } else if (is_fedi_remote || is_local_or_seiran) && orig_ap_object_id.is_some() {
-                // at_uri なし（Fedi リモートまたはローカル）→ Bsky フォールバック: URL テキスト投稿
-                let ap_id = orig_ap_object_id.as_deref().unwrap_or("").to_string();
-                let author_name = orig_display_name.as_deref().unwrap_or(&orig_username).to_string();
-                let fallback_text = format!("🔁 {}: {}", author_name, ap_id);
-                let atp = Arc::clone(&state.atp_service);
-                tokio::spawn(async move {
-                    if let Err(e) = atp.commit_standalone_text_post(actor_id, &fallback_text, now).await {
-                        eprintln!("[create_note] Fedi→Bsky フォールバック投稿失敗: {}", e);
-                    }
-                });
-            }
-        }
-
-        let mut repost_resp = NoteResponse {
-            id: post_id.to_string(),
-            text: String::new(),
-            created_at: now.to_rfc3339(),
-            user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
-            attachments: vec![],
-            renote_id: Some(renote_id.to_string()),
-            quote_id: None, reply_id: None, parent_original_id: None,
-            reactions: vec![],
-            renote: None,
-            reposted_by_me: None,
-        };
-        // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
-        embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
-
-        // リアルタイム配信（#37）: 著者 + accepted なローカルフォロワーの stream へ
-        {
-            let mut recipients: std::collections::HashSet<i64> = std::collections::HashSet::new();
-            recipients.insert(actor_id);
-            if let Ok(rows) = sqlx::query_scalar::<_, i64>(
-                "SELECT f.follower_actor_id FROM follows f
-                 JOIN actors a ON a.id = f.follower_actor_id
-                 WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
-            )
-            .bind(actor_id)
-            .fetch_all(&state.db)
-            .await
-            {
-                recipients.extend(rows);
-            }
-            if let Ok(v) = serde_json::to_value(&repost_resp) {
-                state.stream_hub.publish_note(recipients, &v);
-            }
-        }
-
-        return Json(repost_resp).into_response();
+    match &req.renote_id {
+        Some(renote_id_str) => create_repost(&state, actor_id, auth_user.user_id, username, renote_id_str, &req, now).await,
+        None => create_regular_post(&state, actor_id, auth_user.user_id, username, &req, now).await,
     }
-
-    // ── 通常投稿 / リプライ処理 ───────────────────────────────────────────────
-
-    let text = req.text.as_deref().unwrap_or("").to_string();
-    if text.trim().is_empty() {
-        return (StatusCode::BAD_REQUEST, "text は空にできません").into_response();
-    }
-
-    // ── リプライ先の種別判定と配信先制御 ─────────────────────────────────────
-    let (deliver_fedi_allowed, deliver_bsky_allowed, bsky_reply, ap_in_reply_to) =
-        if let Some(ref reply_to_id_str) = req.reply_to_id {
-            let reply_to_id: i64 = match reply_to_id_str.parse() {
-                Ok(id) => id,
-                Err(_) => {
-                    return ApiError::BadRequest("INVALID_REPLY_TO_ID".to_owned()).into_response()
-                }
-            };
-
-            let reply_row = match sqlx::query(
-                "SELECT p.ap_object_id, p.at_uri, p.at_cid, a.domain AS reply_domain
-                 FROM posts p
-                 JOIN actors a ON a.id = p.actor_id
-                 WHERE p.id = $1 AND p.deleted_at IS NULL
-                 LIMIT 1",
-            )
-            .bind(reply_to_id)
-            .fetch_optional(&state.db)
-            .await
-            {
-                Ok(Some(r)) => r,
-                Ok(None) => {
-                    return ApiError::NotFound("REPLY_TARGET_NOT_FOUND").into_response()
-                }
-                Err(e) => {
-                    eprintln!("[create_note] reply 元ポスト取得失敗: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-                }
-            };
-
-            let reply_ap_id: Option<String> = reply_row.try_get("ap_object_id").unwrap_or(None);
-            let reply_at_uri: Option<String> = reply_row.try_get("at_uri").unwrap_or(None);
-            let reply_at_cid: Option<String> = reply_row.try_get("at_cid").unwrap_or(None);
-            let reply_domain: String = reply_row.try_get("reply_domain").unwrap_or_default();
-
-            let (_is_local_or_seiran, is_fedi_remote, is_bsky_remote) = classify_post(
-                reply_ap_id.as_deref(),
-                reply_at_uri.as_deref(),
-                &reply_domain,
-                &state.local_domain,
-            );
-
-            // 配信先制御: 元ポストが存在しないプロトコルには配信しない
-            let fedi_ok = !is_bsky_remote; // Bsky リモートへのリプライ → Fedi 配信しない
-            let bsky_ok = !is_fedi_remote; // Fedi リモートへのリプライ → Bsky 配信しない
-
-            // ATP reply フィールド: Bsky 配信する場合かつ at_uri/at_cid が取得できる場合のみ設定
-            let bsky_reply = if bsky_ok {
-                if let (Some(uri), Some(cid)) = (reply_at_uri.as_ref(), reply_at_cid.as_ref()) {
-                    Some(BskyPostReply {
-                        root: BskyRefRecord { cid: cid.clone(), uri: uri.clone() },
-                        parent: BskyRefRecord { cid: cid.clone(), uri: uri.clone() },
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            (fedi_ok, bsky_ok, bsky_reply, reply_ap_id)
-        } else {
-            (true, true, None, None)
-        };
-
-    let deliver_fedi = req.deliver_to_fedi.unwrap_or(true) && deliver_fedi_allowed;
-    let deliver_bsky = req.deliver_to_bsky.unwrap_or(true) && deliver_bsky_allowed;
-
-    let (max_bytes, max_graphemes): (usize, usize) = if deliver_bsky {
-        (3_000, 300)
-    } else {
-        (10_000, 3_000)
-    };
-    let byte_len = text.len();
-    if byte_len > max_bytes {
-        return ApiError::BadRequest("TEXT_TOO_LONG".to_owned()).into_response();
-    }
-    let grapheme_count = text.graphemes(true).count();
-    if grapheme_count > max_graphemes {
-        return ApiError::BadRequest("TEXT_TOO_LONG".to_owned()).into_response();
-    }
-
-    if let Some(ids) = &req.attachment_ids {
-        if ids.len() > 10 {
-            return ApiError::BadRequest("添付ファイルは最大10件です".to_owned()).into_response();
-        }
-        for id_str in ids {
-            if id_str.parse::<i64>().is_err() {
-                return ApiError::BadRequest("INVALID_ATTACHMENT_ID".to_owned()).into_response();
-            }
-        }
-    }
-
-    let post_id = generate_snowflake_id(now);
-    let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
-    let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
-
-    let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
-    let quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
-
-    // ── 引用元情報の取得（Bsky embed / AP quoteUrl を決定する） ─────────────────
-    let (bsky_quote_embed, ap_quote_url): (Option<BskyEmbed>, Option<String>) =
-        if let Some(quote_id) = quote_of_id_i64 {
-            let q_row = sqlx::query(
-                "SELECT p.ap_object_id, p.at_uri, p.at_cid, a.domain
-                 FROM posts p JOIN actors a ON a.id = p.actor_id
-                 WHERE p.id = $1 AND p.deleted_at IS NULL LIMIT 1",
-            )
-            .bind(quote_id)
-            .fetch_optional(&state.db)
-            .await
-            .ok()
-            .flatten();
-
-            if let Some(r) = q_row {
-                let q_ap_id: Option<String> = r.try_get("ap_object_id").unwrap_or(None);
-                let q_at_uri: Option<String> = r.try_get("at_uri").unwrap_or(None);
-                let q_at_cid: Option<String> = r.try_get("at_cid").unwrap_or(None);
-                let q_domain: String = r.try_get("domain").unwrap_or_default();
-
-                let (_is_local, is_fedi, _is_bsky) = classify_post(
-                    q_ap_id.as_deref(), q_at_uri.as_deref(), &q_domain, &state.local_domain,
-                );
-
-                let bsky_embed = if is_fedi {
-                    q_ap_id.as_deref().map(|u| BskyEmbed::External { url: u.to_string() })
-                } else if let (Some(uri), Some(cid)) = (&q_at_uri, &q_at_cid) {
-                    Some(BskyEmbed::Record { uri: uri.clone(), cid: cid.clone() })
-                } else {
-                    q_ap_id.as_deref().map(|u| BskyEmbed::External { url: u.to_string() })
-                };
-
-                let ap_url = if q_at_uri.is_some() && q_ap_id.is_none() {
-                    q_at_uri.as_deref().map(at_uri_to_bsky_app_url)
-                } else {
-                    q_ap_id.clone()
-                };
-
-                (bsky_embed, ap_url)
-            } else {
-                (None, None)
-            }
-        } else {
-            (None, None)
-        };
-
-    // seiran_post_uuid / reply_to_post_id / quote_of_post_id を含む統合 INSERT
-    let insert_result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .bind(&text)
-    .bind(&ap_object_id)
-    .bind(&seiran_post_uuid)
-    .bind(reply_to_id_i64)
-    .bind(quote_of_id_i64)
-    .bind(now)
-    .execute(&state.db)
-    .await;
-
-    if let Err(e) = insert_result {
-        eprintln!("[create_note] INSERT 失敗: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "投稿の保存に失敗しました").into_response();
-    }
-
-    if let Some(ids) = &req.attachment_ids {
-        for (position, id_str) in ids.iter().enumerate() {
-            let media_file_id: i64 = id_str.parse().unwrap();
-            if let Err(e) = sqlx::query(
-                "INSERT INTO post_attachments (post_id, media_file_id, position) VALUES ($1, $2, $3)",
-            )
-            .bind(post_id)
-            .bind(media_file_id)
-            .bind(position as i16)
-            .execute(&state.db)
-            .await
-            {
-                eprintln!("[create_note] 添付 INSERT 失敗: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "添付の保存に失敗しました").into_response();
-            }
-        }
-    }
-
-    // ── メンション変換（変換失敗時は元テキストをそのまま使用する） ──────────────
-
-    // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
-    let (bsky_text, bsky_facets) = if deliver_bsky {
-        convert_mentions_for_bsky(
-            &text,
-            &state.local_domain,
-            &state.db,
-            state.ap_client.http.as_ref(),
-        )
-        .await
-    } else {
-        (text.clone(), vec![])
-    };
-
-    // AP 配信用: `@handle.tld` (ATP ハンドル) → `@handle.tld@bsky.brid.gy` または Markdown リンク
-    let ap_text = if deliver_fedi {
-        convert_mentions_for_ap(
-            &text,
-            &state.db,
-            state.ap_client.http.as_ref(),
-        )
-        .await
-    } else {
-        text.clone()
-    };
-
-    // ─────────────────────────────────────────────────────────────────────────
-
-    // attachment_ids を i64 に変換（バリデーション済みなので unwrap 安全）
-    let attachment_ids_i64: Vec<i64> = req.attachment_ids
-        .as_deref()
-        .unwrap_or(&[])
-        .iter()
-        .map(|s| s.parse::<i64>().unwrap())
-        .collect();
-
-    if deliver_bsky {
-        if let Some(embed) = bsky_quote_embed {
-            // 引用投稿: embed を付けて commit_quote を使う（画像 embed と共存しない）
-            if let Err(e) = state.atp_service.commit_quote(
-                actor_id, post_id, &bsky_text, bsky_facets, Some(embed), now, bsky_reply,
-            ).await {
-                eprintln!("[create_note] ATP quote commit 失敗（投稿は保存済み）: {}", e);
-            }
-        } else {
-            // 通常投稿 / リプライ
-            if let Err(e) = state.atp_service.commit_post(
-                actor_id, post_id, &bsky_text, bsky_facets, &attachment_ids_i64, now, bsky_reply,
-            ).await {
-                eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
-            }
-        }
-    }
-
-    if deliver_fedi {
-        let db = state.db.clone();
-        let local_domain = state.local_domain.clone();
-        let ap_private_key_pem = state
-            .secrets
-            .ap_private_key_pem
-            .clone()
-            .unwrap_or_default();
-        let ap_client = state.ap_client.clone();
-        let ap_in_reply_to = ap_in_reply_to.clone();
-        tokio::spawn(async move {
-            if let Err(e) =
-                deliver_post_to_ap_followers(
-                    &ap_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem,
-                    Some(ap_text.as_str()), ap_quote_url.as_deref(), ap_in_reply_to.as_deref(),
-                )
-                .await
-            {
-                eprintln!("[create_note] AP 配送エラー: {}", e);
-            }
-        });
-    }
-
-    let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
-    let final_attachments = att_map.remove(&post_id).unwrap_or_default();
-
-    let note_resp = NoteResponse {
-        id: post_id.to_string(),
-        text,
-        created_at: now.to_rfc3339(),
-        user: NoteUserInfo { id: auth_user.user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
-        attachments: final_attachments,
-        renote_id: None,
-        quote_id: quote_of_id_i64.map(|i| i.to_string()),
-        reply_id: reply_to_id_i64.map(|i| i.to_string()),
-        parent_original_id: None,
-        reactions: vec![],
-        renote: None,
-        reposted_by_me: None,
-    };
-
-    // リアルタイム配信（#37）: 著者 + accepted なローカルフォロワーの stream へ
-    {
-        let mut recipients: std::collections::HashSet<i64> = std::collections::HashSet::new();
-        recipients.insert(actor_id);
-        if let Ok(rows) = sqlx::query_scalar::<_, i64>(
-            "SELECT f.follower_actor_id FROM follows f
-             JOIN actors a ON a.id = f.follower_actor_id
-             WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
-        )
-        .bind(actor_id)
-        .fetch_all(&state.db)
-        .await
-        {
-            recipients.extend(rows);
-        }
-        if let Ok(v) = serde_json::to_value(&note_resp) {
-            state.stream_hub.publish_note(recipients, &v);
-        }
-    }
-
-    Json(note_resp).into_response()
 }
 
 pub async fn home_timeline(
@@ -1081,19 +1015,8 @@ pub async fn note_context(
 
         if !viewer_follows {
             // アクターの AP URI を取得
-            #[derive(sqlx::FromRow)]
-            struct ApUriRow {
-                ap_uri: Option<String>,
-            }
-
-            if let Ok(Some(row)) = sqlx::query_as::<_, ApUriRow>(
-                "SELECT ap_uri FROM actors WHERE id = $1 LIMIT 1",
-            )
-            .bind(actor_id)
-            .fetch_optional(&state.db)
-            .await
-            {
-                if let Some(ap_uri) = row.ap_uri {
+            if let Ok(Some(actor)) = state.actors.find_by_id(actor_id).await {
+                if let Some(ap_uri) = actor.ap_uri {
                     let ap_client = Arc::clone(&state.ap_client);
                     let fetch_result = tokio::time::timeout(
                         std::time::Duration::from_secs(5),
@@ -1160,6 +1083,16 @@ pub async fn note_context(
     Ok(Json(NoteContextResponse { before, after }))
 }
 
+/// リポスト取り消し（Undo）で必要な情報が見つからなかった場合に返すエラー。
+async fn find_repost_for_undo(state: &AppState, actor_id: i64, note_id: i64) -> Result<seiran_common::repository::RepostUndoInfo, Response> {
+    state
+        .posts
+        .find_repost_undo_info(actor_id, note_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("SELECT 失敗: {}", e)).into_response())?
+        .ok_or_else(|| ApiError::NotFound("REPOST_NOT_FOUND").into_response())
+}
+
 /// DELETE /api/notes/:note_id/repost
 /// 自分がしたリポストを取り消す（論理削除 + AP Undo/Announce 配送）。
 pub async fn delete_repost(
@@ -1180,70 +1113,37 @@ pub async fn delete_repost(
     let actor_id = match state.actors.find_local_by_user_id(auth_user.user_id).await {
         Ok(Some(a)) => a.id,
         Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
-        Err(e) => {
-            eprintln!("[delete_repost] アクター取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
+        Err(e) => return ApiError::Internal(format!("アクター取得失敗: {}", e)).into_response(),
     };
 
     // 削除前にリポスト行の id・ap_object_id・atp_repost_rkey と元ポストの ap_object_id を取得する
-    let repost_row = sqlx::query(
-        "SELECT p.id AS repost_id, p.ap_object_id AS repost_ap_id,
-                p.atp_repost_rkey,
-                orig.ap_object_id AS orig_ap_id
-         FROM posts p
-         JOIN posts orig ON orig.id = p.repost_of_post_id
-         WHERE p.actor_id = $1 AND p.repost_of_post_id = $2 AND p.deleted_at IS NULL
-         LIMIT 1",
-    )
-    .bind(actor_id)
-    .bind(note_id)
-    .fetch_optional(&state.db)
-    .await;
-
-    let (repost_post_id, repost_ap_id, orig_ap_id, atp_repost_rkey) = match repost_row {
-        Ok(Some(row)) => {
-            let rid: i64 = row.try_get("repost_id").unwrap_or(0);
-            let rap: Option<String> = row.try_get("repost_ap_id").unwrap_or(None);
-            let oap: Option<String> = row.try_get("orig_ap_id").unwrap_or(None);
-            let ark: Option<String> = row.try_get("atp_repost_rkey").unwrap_or(None);
-            (rid, rap, oap, ark)
-        }
-        Ok(None) => return ApiError::NotFound("REPOST_NOT_FOUND").into_response(),
-        Err(e) => {
-            eprintln!("[delete_repost] SELECT 失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
+    let undo_info = match find_repost_for_undo(&state, actor_id, note_id).await {
+        Ok(info) => info,
+        Err(resp) => return resp,
     };
 
     // 論理削除
-    if let Err(e) = sqlx::query(
-        "UPDATE posts SET deleted_at = NOW() WHERE id = $1",
-    )
-    .bind(repost_post_id)
-    .execute(&state.db)
-    .await
-    {
-        eprintln!("[delete_repost] UPDATE 失敗: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+    if let Err(e) = state.posts.soft_delete_by_id(undo_info.repost_id).await {
+        return ApiError::Internal(format!("UPDATE 失敗: {}", e)).into_response();
     }
 
     eprintln!(
         "[delete_repost] actor_id={} が note_id={} のリポスト（post_id={}）を取り消し",
-        actor_id, note_id, repost_post_id
+        actor_id, note_id, undo_info.repost_id
     );
 
     // AP Undo(Announce) 配送 — 元ポストに ap_object_id がある場合のみ
-    if let Some(orig_ap_object_id) = orig_ap_id {
+    if let Some(orig_ap_object_id) = undo_info.orig_ap_id {
         let db = state.db.clone();
         let local_domain = state.local_domain.clone();
         let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
         let ap_client = Arc::clone(&state.ap_client);
+        let repost_id = undo_info.repost_id;
         tokio::spawn(async move {
             if let Err(e) = deliver_undo_announce(
                 &ap_client,
                 &db,
-                repost_post_id,
+                repost_id,
                 actor_id,
                 &local_domain,
                 &ap_pem,
@@ -1257,7 +1157,7 @@ pub async fn delete_repost(
     }
 
     // ATP repost delete commit — atp_repost_rkey が保存されている場合のみ
-    if let Some(rkey) = atp_repost_rkey {
+    if let Some(rkey) = undo_info.atp_repost_rkey {
         let atp = Arc::clone(&state.atp_service);
         let now = chrono::Utc::now();
         tokio::spawn(async move {
@@ -1269,7 +1169,7 @@ pub async fn delete_repost(
 
     Json(serde_json::json!({
         "ok": true,
-        "repostId": repost_ap_id.unwrap_or_default()
+        "repostId": undo_info.repost_ap_id.unwrap_or_default()
     }))
     .into_response()
 }
@@ -1293,4 +1193,77 @@ fn strip_html_tags(html: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
         .replace("&nbsp;", " ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{at_uri_to_bsky_app_url, classify_post, strip_html_tags};
+
+    #[test]
+    fn at_uri_to_bsky_app_url_valid() {
+        assert_eq!(
+            at_uri_to_bsky_app_url("at://did:plc:abc123/app.bsky.feed.post/xyz789"),
+            "https://bsky.app/profile/did:plc:abc123/post/xyz789"
+        );
+    }
+
+    #[test]
+    fn at_uri_to_bsky_app_url_missing_prefix_passthrough() {
+        // "at://" プレフィックスがない・パーツ不足の場合はそのまま返す
+        assert_eq!(at_uri_to_bsky_app_url("not-an-at-uri"), "not-an-at-uri");
+        assert_eq!(at_uri_to_bsky_app_url("at://did:plc:abc123"), "at://did:plc:abc123");
+    }
+
+    #[test]
+    fn classify_post_local_domain_match() {
+        // domain が local_domain と一致する場合は ap_object_id / at_uri の値によらずローカル扱い
+        assert_eq!(
+            classify_post(None, None, "seiran.example", "seiran.example"),
+            (true, false, false)
+        );
+    }
+
+    #[test]
+    fn classify_post_seiran_remote_has_both_ids() {
+        assert_eq!(
+            classify_post(Some("https://a/notes/1"), Some("at://did/x/y"), "other.example", "seiran.example"),
+            (true, false, false)
+        );
+    }
+
+    #[test]
+    fn classify_post_fedi_remote_ap_only() {
+        assert_eq!(
+            classify_post(Some("https://mastodon.example/notes/1"), None, "mastodon.example", "seiran.example"),
+            (false, true, false)
+        );
+    }
+
+    #[test]
+    fn classify_post_bsky_remote_at_uri_only() {
+        assert_eq!(
+            classify_post(None, Some("at://did/x/y"), "bsky.example", "seiran.example"),
+            (false, false, true)
+        );
+    }
+
+    #[test]
+    fn classify_post_unknown_defaults_to_local() {
+        assert_eq!(
+            classify_post(None, None, "other.example", "seiran.example"),
+            (true, false, false)
+        );
+    }
+
+    #[test]
+    fn strip_html_tags_removes_tags_and_decodes_entities() {
+        assert_eq!(strip_html_tags("<p>a &amp; b</p>"), "a & b");
+        assert_eq!(strip_html_tags("&lt;script&gt;"), "<script>");
+    }
+
+    #[test]
+    fn strip_html_tags_empty() {
+        assert_eq!(strip_html_tags(""), "");
+        assert_eq!(strip_html_tags("<br/>"), "");
+    }
 }
