@@ -94,6 +94,8 @@ export interface User {
   username: string;
   email: string;
   role: string; // "user" | "moderator" | "admin"
+  /** ローカル actors.id。noteUpdated ストリームイベントの reactorActorId との突き合わせに使う。 */
+  actor_id: number;
 }
 
 // ── 管理画面用の型（レスポンスは snake_case） ──────────────────────────────

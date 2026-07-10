@@ -205,6 +205,7 @@ CREATE INDEX idx_reactions_actor_id ON reactions(actor_id);
 - **AP 受信**: federation-inbox が `Like`（`content = "❤"`, `reaction_type = 'like'`）と Misskey 拡張 `EmojiReact`（`content` は絵文字 or `:shortcode:`, `reaction_type = 'emoji'`）を受信し、`object` の URI から対象ローカルポスト（`posts.ap_object_id`）を解決して INSERT（＝上記の上書き）する。`ap_activity_id` に元アクティビティ ID を保存し、`Undo(Like)` / `Undo(EmojiReact)` で DELETE する。未知ポストへのリアクションは無視する。
 - **API 公開**: ノート系 API（`NoteResponse.reactions`）が `[{ emoji, count, reactedByMe }]`（`content` ごとの件数、多い順。`reactedByMe` は認証ユーザー自身がその絵文字を付け済みかどうか。配列中で `reactedByMe: true` になり得るのは最大1件）を返す。空なら省略。
 - **ローカルユーザーによる追加/取消**: `POST /api/notes/:id/reactions`（body `{ content }`）でリアクションを追加（既存の自分のリアクションがあれば切り替え）、`DELETE /api/notes/:id/reactions/:content` で取消する（`reaction_type = 'emoji'` 固定、`ap_activity_id` は `NULL`）。いずれも `seiran-api` 内で完結し、対象ポストがリモート（Fedi/Bsky）由来であっても **AP `Like`/`EmojiReact` や ATP Like の outbound 配信は行わない**（ローカル記録のみ。将来対応）。追加時、ポスト著者がリアクションした本人以外であれば StreamHub 経由で `reaction` イベント（`{ postId, emoji, actor }`）を通知する。
+- **リアクションのリアルタイム配信**: 上記の通知（`"reaction"`）とは別に、ローカル追加/取消・AP 受信 `EmojiReact`/`Like`・`Undo` のいずれでも `seiran_common::streaming::broadcast_reaction_update` を呼び、`{ "type": "noteUpdated", "body": { postId, reactions: [{emoji,count}], reactorActorId, reactorEmoji } }` を著者 + accepted なローカルフォロワーへ送出する。フロントはこれを受けて `NoteCard` のリアクション表示をその場で更新する（詳細は Doc2 §2.7・§2.8）。
 - **Bsky Like の取り込みは今後対応**（Firehose の `app.bsky.feed.like` を対象ポストへ紐付ける処理が必要）。
 
 ### 1.5 `follows` (フォロー関係テーブル)

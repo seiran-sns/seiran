@@ -15,6 +15,7 @@ use seiran_common::repository::{PostDeliveryMeta, TimelinePost};
 use seiran_common::{ap::{deliver_post_to_ap_followers, deliver_ap_announce, deliver_undo_announce, fetch_ap_history, plain_to_html}, generate_snowflake_id};
 use seiran_common::mention::{convert_mentions_for_bsky, convert_mentions_for_ap};
 use seiran_common::atp::{BskyPostReply, BskyRefRecord, BskyEmbed};
+use seiran_common::streaming::broadcast_reaction_update;
 
 use crate::AppState;
 use crate::error::ApiError;
@@ -1254,7 +1255,7 @@ pub async fn create_reaction(
         return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response();
     }
 
-    // リアルタイム通知（#37）: 自分の投稿への自作自演リアクションは通知しない
+    // 通知ベル用（#37）: 自分の投稿への自作自演リアクションは通知しない
     if post.actor_id != me.id {
         state.stream_hub.publish_event(
             HashSet::from([post.actor_id]),
@@ -1266,6 +1267,19 @@ pub async fn create_reaction(
             }),
         );
     }
+
+    // タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の
+    // ストリーミング挙動に合わせる）。通知ベルと違い自作自演でも送出する。
+    broadcast_reaction_update(
+        &state.stream_hub,
+        state.follows.as_ref(),
+        state.reactions.as_ref(),
+        note_id,
+        post.actor_id,
+        me.id,
+        Some(&content),
+    )
+    .await;
 
     let rmap = fetch_reactions_map(&state.db, &[note_id], Some(me.id)).await;
     Json(serde_json::json!({
@@ -1298,6 +1312,12 @@ pub async fn delete_reaction(
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
+    let post = match state.posts.find_by_id(note_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
+    };
+
     let deleted = match state.reactions.delete_local(note_id, actor_id, &content).await {
         Ok(n) => n,
         Err(e) => return ApiError::Internal(format!("reactions DELETE 失敗: {}", e)).into_response(),
@@ -1305,6 +1325,17 @@ pub async fn delete_reaction(
     if deleted == 0 {
         return ApiError::NotFound("REACTION_NOT_FOUND").into_response();
     }
+
+    broadcast_reaction_update(
+        &state.stream_hub,
+        state.follows.as_ref(),
+        state.reactions.as_ref(),
+        note_id,
+        post.actor_id,
+        actor_id,
+        None,
+    )
+    .await;
 
     let rmap = fetch_reactions_map(&state.db, &[note_id], Some(actor_id)).await;
     Json(serde_json::json!({

@@ -12,6 +12,8 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
+use crate::repository::{FollowRepository, ReactionRepository};
+
 /// ストリーミングイベント。`recipients` に含まれるローカルアクターのみが受信する。
 #[derive(Clone)]
 pub struct StreamEvent {
@@ -62,4 +64,47 @@ impl StreamHub {
     pub fn publish_note(&self, recipients: HashSet<i64>, note_json: &serde_json::Value) {
         self.publish_event(recipients, "note", note_json.clone());
     }
+}
+
+/// リアクション追加/切替/取消（ローカル・AP 受信のいずれも）を `noteUpdated` イベントとして
+/// 送出する。配信先は投稿の著者 + 著者をフォロー中（承認済み・ローカル）のアクター
+/// （`broadcast_new_note` と同じ考え方。「今この投稿を見ている全員」を追跡する仕組みは
+/// まだ無いため、既存のリアルタイム配信の範囲に合わせている）。
+///
+/// `reactor_emoji` は今回のイベント後の「reactor 自身がこの投稿に付けているリアクション」。
+/// 切替/追加なら `Some(新しい絵文字)`、取消（他に付け直さなかった場合）なら `None`。
+/// 受信側はこれと自分の actor_id を比較して `reactedByMe` を再計算できる（他人のリアクションは
+/// 件数のみ更新すればよい）。
+pub async fn broadcast_reaction_update(
+    stream_hub: &StreamHub,
+    follows: &dyn FollowRepository,
+    reactions: &dyn ReactionRepository,
+    post_id: i64,
+    post_author_id: i64,
+    reactor_actor_id: i64,
+    reactor_emoji: Option<&str>,
+) {
+    let agg = reactions.aggregate_for_post(post_id).await.unwrap_or_default();
+    let reactions_json: Vec<serde_json::Value> = agg
+        .into_iter()
+        .filter(|(emoji, _)| !emoji.is_empty())
+        .map(|(emoji, count)| serde_json::json!({ "emoji": emoji, "count": count }))
+        .collect();
+
+    let mut recipients: HashSet<i64> = HashSet::new();
+    recipients.insert(post_author_id);
+    if let Ok(rows) = follows.find_accepted_local_follower_ids(post_author_id).await {
+        recipients.extend(rows);
+    }
+
+    stream_hub.publish_event(
+        recipients,
+        "noteUpdated",
+        serde_json::json!({
+            "postId": post_id.to_string(),
+            "reactions": reactions_json,
+            "reactorActorId": reactor_actor_id,
+            "reactorEmoji": reactor_emoji,
+        }),
+    );
 }

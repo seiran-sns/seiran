@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError, Note, ReactionSummary } from "../../api/client";
 import { acct, displayName, formatDate, profilePath, protocolBadge } from "../../lib/format";
@@ -7,6 +7,8 @@ import Avatar from "./Avatar";
 import ReactionChips from "./ReactionChips";
 import ReactionPicker from "./ReactionPicker";
 import { useComposer } from "../../contexts/ComposerContext";
+import { useAuth } from "../../contexts/AuthContext";
+import { ReactionUpdate, useStreamingContext } from "../../contexts/StreamingContext";
 import styles from "./NoteCard.module.css";
 
 /**
@@ -39,6 +41,27 @@ function optimisticSetReaction(
   return next;
 }
 
+/**
+ * WebSocket 経由で届いた `noteUpdated`（リアクション追加/切替/取消）を現在の表示に反映する。
+ * サーバーから届く集計は閲覧者ごとの `reactedByMe` を含まないため、自分自身の操作
+ * （`reactorActorId` が自分の actor_id と一致）ならその場で `reactedByMe` を再計算し、
+ * 他人の操作ならローカルで既に把握している `reactedByMe` をそのまま引き継ぐ。
+ */
+function applyReactionUpdate(
+  reactions: ReactionSummary[],
+  update: ReactionUpdate,
+  myActorId: number | undefined
+): ReactionSummary[] {
+  const isMe = myActorId !== undefined && update.reactorActorId === myActorId;
+  return update.reactions.map((r) => ({
+    emoji: r.emoji,
+    count: r.count,
+    reactedByMe: isMe
+      ? r.emoji === update.reactorEmoji
+      : reactions.find((x) => x.emoji === r.emoji)?.reactedByMe ?? false,
+  }));
+}
+
 interface NoteCardProps {
   note: Note;
   /** クリックでポスト詳細へ遷移させるか（デフォルト true）。 */
@@ -55,6 +78,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
 }) {
   const navigate = useNavigate();
   const { openReply } = useComposer();
+  const { user } = useAuth();
+  const { registerReaction } = useStreamingContext();
   const badge = protocolBadge(note.user.actorType);
   const [reposting, setReposting] = useState(false);
   const [unreposting, setUnreposting] = useState(false);
@@ -63,6 +88,13 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
   // 1投稿につき1ユーザー1リアクションまでのため、切り替え中は他の絵文字操作も
   // まとめてロックする（個別絵文字ごとの pending 管理はしない）。
   const [reactionPending, setReactionPending] = useState(false);
+
+  // 他ユーザー（または自分の別タブ/端末）によるリアクション追加/切替/取消をリアルタイム反映する。
+  useEffect(() => {
+    return registerReaction(note.id, (update) => {
+      setReactions((prev) => applyReactionUpdate(prev, update, user?.actor_id));
+    });
+  }, [note.id, registerReaction, user?.actor_id]);
 
   async function handleRepost(e: React.MouseEvent) {
     e.stopPropagation();

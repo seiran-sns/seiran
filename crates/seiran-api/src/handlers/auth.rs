@@ -38,6 +38,9 @@ pub struct UserInfo {
     pub email: String,
     /// `user` / `moderator` / `admin`。管理画面の表示制御にフロントが使用する。
     pub role: String,
+    /// 対応するローカル actors.id。フロントがストリーミングイベントの `reactorActorId` 等と
+    /// 突き合わせて「自分自身の操作か」を判定するために使う。
+    pub actor_id: i64,
 }
 
 #[derive(Deserialize)]
@@ -245,7 +248,7 @@ pub async fn register(
 
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username: req.username, email, role: "user".to_string() },
+        user: UserInfo { id: user_id, username: req.username, email, role: "user".to_string(), actor_id },
     }))
 }
 
@@ -290,9 +293,20 @@ pub async fn login(
         .flatten()
         .unwrap_or_else(|| "user".to_string());
 
+    let actor_id = state
+        .actors
+        .find_local_by_user_id(user_id)
+        .await
+        .map_err(|e| {
+            eprintln!("[login] アクター取得失敗: {}", e);
+            ApiError::Internal(e.to_string())
+        })?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?
+        .id;
+
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username, email, role },
+        user: UserInfo { id: user_id, username, email, role, actor_id },
     }))
 }
 
@@ -304,7 +318,7 @@ pub async fn me(
         .await
         .map_err(|_| ApiError::Unauthorized("UNAUTHORIZED"))?;
 
-    let username = state
+    let actor = state
         .actors
         .find_local_by_user_id(auth_user.user_id)
         .await
@@ -312,8 +326,7 @@ pub async fn me(
             eprintln!("[me] DB エラー: {}", e);
             ApiError::Internal(e.to_string())
         })?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?
-        .username;
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
 
     let role = state
         .users
@@ -325,9 +338,10 @@ pub async fn me(
 
     Ok(Json(UserInfo {
         id: auth_user.user_id,
-        username,
+        username: actor.username,
         email: auth_user.email,
         role,
+        actor_id: actor.id,
     }))
 }
 

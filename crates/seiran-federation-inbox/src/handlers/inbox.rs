@@ -6,6 +6,7 @@ use axum::{
 use base64::Engine as _;
 use seiran_common::traits::Job;
 use seiran_common::generate_snowflake_id;
+use seiran_common::streaming::broadcast_reaction_update;
 use sha2::{Digest as Sha2Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -560,7 +561,21 @@ async fn handle_undo(
                 .delete_by_activity_id(activity_id)
                 .await
                 .map_err(|e| format!("reactions DELETE エラー: {}", e))?;
-            eprintln!("[Undo/Reaction] {} を取り消し（{} 行）", activity_id, deleted);
+            if let Some((post_id, actor_id)) = deleted {
+                eprintln!("[Undo/Reaction] {} を取り消し（post_id={}）", activity_id, post_id);
+                if let Ok(Some(post)) = state.post_repo.find_by_id(post_id).await {
+                    broadcast_reaction_update(
+                        &state.stream_hub,
+                        state.follow_repo.as_ref(),
+                        state.reaction_repo.as_ref(),
+                        post_id,
+                        post.actor_id,
+                        actor_id,
+                        None,
+                    )
+                    .await;
+                }
+            }
         }
         return Ok(());
     }
@@ -670,7 +685,7 @@ async fn handle_reaction(
 
     eprintln!("[Reaction] post {} に {} を記録", post_id, content);
 
-    // リアルタイム通知（#37）: リアクションされたポストの著者へ
+    // 通知ベル用（#37）: リアクションされたポストの著者へ
     state.stream_hub.publish_event(
         HashSet::from([post_author_id]),
         "reaction",
@@ -680,6 +695,20 @@ async fn handle_reaction(
             "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
         }),
     );
+
+    // タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の
+    // ストリーミング挙動に合わせる）。
+    broadcast_reaction_update(
+        &state.stream_hub,
+        state.follow_repo.as_ref(),
+        state.reaction_repo.as_ref(),
+        post_id,
+        post_author_id,
+        actor_id,
+        Some(&content),
+    )
+    .await;
+
     Ok(())
 }
 
