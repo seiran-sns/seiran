@@ -26,6 +26,12 @@ pub struct TimelinePost {
     /// 投稿者アバター URL（local は avatar_media_id 解決、remote は actors.avatar_url）。
     #[sqlx(default)]
     pub avatar_url: Option<String>,
+    /// 投稿本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信、AP `tag` 配列由来）。
+    #[sqlx(default)]
+    pub post_emoji_map: Option<serde_json::Value>,
+    /// 投稿者アクターの表示名中のカスタム絵文字→画像URLマップ。
+    #[sqlx(default)]
+    pub actor_emoji_map: Option<serde_json::Value>,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -214,6 +220,9 @@ pub trait PostRepository: Send + Sync {
     /// リモートから受信したノートを、重複排除メタ（seiran_uuid・ループバック/ブリッジ紐付け）付きで挿入する。
     /// `ap_object_id` が既存なら何もしない。
     #[allow(clippy::too_many_arguments)]
+    /// `emoji_map` は本文中のカスタム絵文字（`:shortcode:`）→画像URLのマップ（AP `tag` 配列由来、
+    /// 無ければ空オブジェクト）。
+    #[allow(clippy::too_many_arguments)]
     async fn insert_remote_with_dedup(
         &self,
         id: i64,
@@ -223,6 +232,7 @@ pub trait PostRepository: Send + Sync {
         seiran_uuid: Option<&str>,
         parent_original_post_id: Option<i64>,
         created_at: DateTime<Utc>,
+        emoji_map: &serde_json::Value,
     ) -> Result<(), sqlx::Error>;
 }
 
@@ -270,7 +280,8 @@ impl PostRepository for PgPostRepository {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -299,7 +310,8 @@ impl PostRepository for PgPostRepository {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -339,7 +351,8 @@ impl PostRepository for PgPostRepository {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -374,7 +387,8 @@ impl PostRepository for PgPostRepository {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -418,7 +432,8 @@ impl PostRepository for PgPostRepository {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -443,7 +458,8 @@ impl PostRepository for PgPostRepository {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -651,10 +667,11 @@ impl PostRepository for PgPostRepository {
         seiran_uuid: Option<&str>,
         parent_original_post_id: Option<i64>,
         created_at: DateTime<Utc>,
+        emoji_map: &serde_json::Value,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, created_at, emoji_map)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (ap_object_id) DO NOTHING",
         )
         .bind(id)
@@ -664,6 +681,7 @@ impl PostRepository for PgPostRepository {
         .bind(seiran_uuid)
         .bind(parent_original_post_id)
         .bind(created_at)
+        .bind(emoji_map)
         .execute(&self.pool)
         .await
         .map(|_| ())

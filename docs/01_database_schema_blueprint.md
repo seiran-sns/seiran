@@ -67,6 +67,9 @@ CREATE TABLE actors (
     avatar_media_id BIGINT REFERENCES media_files(id) ON DELETE SET NULL, -- ローカルアクターのみ
     banner_media_id BIGINT REFERENCES media_files(id) ON DELETE SET NULL, -- ローカルアクターのみ
     bio TEXT,
+    -- 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ。AP Person の `tag` 配列
+    -- （`type:"Emoji"`）から解決する。ローカルアクターは常に空オブジェクト。
+    emoji_map JSONB NOT NULL DEFAULT '{}'::jsonb,
     
     -- 相互マッピング用外部キーポインタ
     seiran_pair_actor_id BIGINT REFERENCES actors(id) ON DELETE SET NULL, -- リモートseiranの対の行
@@ -116,6 +119,9 @@ CREATE TABLE posts (
     -- 静的・拡張メタデータ (プロトコル別変形レシピ、メディア情報などを格納)
     -- ※頻繁なUPDATEがかかる動的データはここに入れないこと
     metadata JSONB DEFAULT '{}'::jsonb NOT NULL, 
+    -- 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ。AP Note の `tag` 配列
+    -- （`type:"Emoji"`）から解決する。ローカル投稿は常に空オブジェクト。
+    emoji_map JSONB NOT NULL DEFAULT '{}'::jsonb,
     
     -- 削除・変更管理
     deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL, -- 論理削除フラグ
@@ -185,7 +191,11 @@ CREATE TABLE reactions (
     -- 外部宇宙での削除（Undo）追跡用ID
     ap_activity_id VARCHAR(2048) UNIQUE,
     at_uri VARCHAR(2048) UNIQUE,
-    
+
+    -- Fedi から受信したカスタム絵文字（content が ":shortcode:" 形式）の画像URL。
+    -- AP の tag 配列（type:"Emoji"）から解決する。Unicode絵文字・ローカル送信分は NULL。
+    emoji_url TEXT,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     
     -- 1投稿につきユーザー1リアクションまで（Misskey 準拠。投稿元がローカル/リモートでも
@@ -202,13 +212,14 @@ CREATE INDEX idx_reactions_actor_id ON reactions(actor_id);
 
 #### 取り込み・公開（#22 実装メモ）
 - **1投稿1ユーザー1リアクション**: `UNIQUE(post_id, actor_id)` により、同一ユーザーが同一投稿に付けられるリアクションは常に1個まで。別の絵文字を付けると `INSERT ... ON CONFLICT (post_id, actor_id) DO UPDATE` により既存のリアクションが新しい絵文字で**上書き（切り替え）**される（Misskey がリアクション変更時に `Undo` → 新規 `EmojiReact` を送る挙動と整合）。
-- **AP 受信**: federation-inbox が `Like`（`content = "❤️"`, `reaction_type = 'like'`）と Misskey 拡張 `EmojiReact`（`content` は絵文字 or `:shortcode:`, `reaction_type = 'emoji'`）を受信し、`object` の URI から対象ローカルポスト（`posts.ap_object_id`）を解決して INSERT（＝上記の上書き）する。`ap_activity_id` に元アクティビティ ID を保存し、`Undo(Like)` / `Undo(EmojiReact)` で DELETE する。未知ポストへのリアクションは無視する。
-- **API 公開**: ノート系 API（`NoteResponse.reactions`）が `[{ emoji, count, reactedByMe }]`（`content` ごとの件数、多い順。`reactedByMe` は認証ユーザー自身がその絵文字を付け済みかどうか。配列中で `reactedByMe: true` になり得るのは最大1件）を返す。空なら省略。
-- **ローカルユーザーによる追加/取消**: `POST /api/notes/:id/reactions`（body `{ content }`）でリアクションを追加（既存の自分のリアクションがあれば切り替え）、`DELETE /api/notes/:id/reactions/:content` で取消する（`reaction_type = 'emoji'` 固定、`ap_activity_id` は `NULL`）。いずれも `seiran-api` 内で完結する。**AP `Like`/`EmojiReact` の outbound 配信は今回もスコープ外のまま**（ローカル記録のみ、将来対応）。**ATP（Bluesky）へは outbound 配信する**（下記）。追加時、ポスト著者がリアクションした本人以外であれば StreamHub 経由で `reaction` イベント（`{ postId, emoji, actor }`）を通知する。
-- **リアクションのリアルタイム配信**: 上記の通知（`"reaction"`）とは別に、ローカル追加/取消・AP 受信 `EmojiReact`/`Like`・`Undo`・ATP `app.bsky.feed.like` の受信/削除のいずれでも `seiran_common::streaming::broadcast_reaction_update` を呼び、`{ "type": "noteUpdated", "body": { postId, reactions: [{emoji,count}], reactorActorId, reactorEmoji } }` を著者 + accepted なローカルフォロワーへ送出する。フロントはこれを受けて `NoteCard` のリアクション表示をその場で更新する（詳細は Doc2 §2.7・§2.8）。
+- **AP 受信**: federation-inbox の `handle_reaction` が `Like`/`EmojiReact` の両 wire type を受信する。**Misskey は絵文字リアクション（Unicode・カスタム絵文字とも）でも AP の `type` を "Like" 固定で送り `EmojiReact` 型は使わない**ため、種別判定は wire type ではなく内容フィールドで行う：`content`（無ければ `_misskey_reaction`）を読み、どちらも無い場合のみ Mastodon 等の素のお気に入りとみなし `content = "❤️"` とする。`content` が `❤️` なら `reaction_type = 'like'`、それ以外は `'emoji'`。`content` が `:shortcode:` 形式（カスタム絵文字）の場合、activity の `tag` 配列（`[{type:"Emoji", name:":shortcode:", icon:{url:"..."}}]`）から一致する要素を探し `icon.url` を `emoji_url` に保存する（`extract_emoji_tag_url`、見つからなければ `NULL`）。`object` の URI から対象ローカルポスト（`posts.ap_object_id`）を解決して INSERT（＝上記の上書き）する。`ap_activity_id` に元アクティビティ ID を保存し、`Undo(Like)` / `Undo(EmojiReact)` で DELETE する。未知ポストへのリアクションは無視する。
+- **API 公開**: ノート系 API（`NoteResponse.reactions`）が `[{ emoji, count, reactedByMe, emojiUrl? }]`（`content` ごとの件数、多い順。`reactedByMe` は認証ユーザー自身がその絵文字を付け済みかどうか。配列中で `reactedByMe: true` になり得るのは最大1件。`emojiUrl` は Fedi 受信のカスタム絵文字のみ付与し、同一 `content` の行が複数ドメインの同名カスタム絵文字を含む場合は代表の1つのURLになる簡略仕様）を返す。空なら省略。
+- **ローカルユーザーによる追加/取消**: `POST /api/notes/:id/reactions`（body `{ content }`）でリアクションを追加（既存の自分のリアクションがあれば切り替え）、`DELETE /api/notes/:id/reactions/:content` で取消する（`reaction_type = 'emoji'` 固定、`ap_activity_id` はローカルで発行した `https://{domain}/activities/reactions/{post_id}-{actor_id}-{epoch_millis}`、`emoji_url` は常に `NULL`）。`content` は `emojis` crate（Unicode公式データ準拠）による完全一致で Unicode 絵文字のみ許可し、`:shortcode:` やプレーンテキストは拒否する（カスタム絵文字ピッカー未実装のため。Doc3 §9.6 参照）。**AP `Like`/`EmojiReact` の outbound 配信を実装済み**（`deliver_ap_reaction`/`deliver_ap_undo_reaction`、対象ポスト著者 + 自分の Fedi フォロワー全員へ配送、詳細は Doc3 §9.6）。**ATP（Bluesky）へも outbound 配信する**（下記）。追加時、ポスト著者がリアクションした本人以外であれば StreamHub 経由で `reaction` イベント（`{ postId, emoji, actor }`）を通知する。
+- **リアクションのリアルタイム配信**: 上記の通知（`"reaction"`）とは別に、ローカル追加/取消・AP 受信 `EmojiReact`/`Like`・`Undo`・ATP `app.bsky.feed.like` の受信/削除のいずれでも `seiran_common::streaming::broadcast_reaction_update` を呼び、`{ "type": "noteUpdated", "body": { postId, reactions: [{emoji,count,emojiUrl}], reactorActorId, reactorEmoji } }` を著者 + accepted なローカルフォロワーへ送出する。フロントはこれを受けて `NoteCard` のリアクション表示をその場で更新する（詳細は Doc2 §2.7・§2.8）。カスタム絵文字（`emojiUrl` 付き）は `ReactionChips` が `img` 表示し、ローカルユーザーが自分でまだ付けていないカスタム絵文字チップはクリック不可にする（送信すると必ずバリデーションで弾かれるため）。
 - **ATP（Bluesky）連携（outbound）**: `AtpCommitService::commit_like`（`crates/seiran-common/src/atp/service.rs`）が対象ポストの `at_uri`/`at_cid` を subject として `app.bsky.feed.like` レコードをコミットする。ATP には絵文字リアクションの概念が無い（Like のみ）ため、どの絵文字でも Like として送る。実際の絵文字は非標準の拡張フィールド `emoji` としてベストエフォートで載せる（Bluesky 公式クライアントは無視するだけのはず。実際に生成した署名付きレコードで UTF-8 エンコードを確認済み）。生成した at_uri（`at://did/app.bsky.feed.like/rkey`）を `reactions.at_uri` に保存し、`ap_activity_id` の ATP 版として扱う。切替（別の絵文字への変更）は `delete_atp_like` で旧 Like を削除してから `commit_like` で新規作成（ATP 側にも「1投稿1いいね」を反映）。対象ポストが ATP 上に存在しない（`at_uri`/`at_cid` が無い）場合は配信しない。いずれも API レスポンスをブロックしない fire-and-forget（`tokio::spawn`）。
 - **ATP（Bluesky）連携（inbound）**: `crates/seiran-atp-repo/src/firehose.rs` は Bluesky 公式の **Jetstream**（`wss://jetstream1.us-east.bsky.network/subscribe`、Relay Firehose を購読して dag-cbor → JSON にデコード済みのイベントを配信する軽量サービス）に `wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like` を指定して接続する。この2 collection 以外（repost/follow/block/profile/カスタムlexicon等）はサーバー側で除外されるため、受信自体しない（旧: Relay の生 Firehose に直結して全collectionを受信し、CBOR/CARを自前デコードしていた。Jetstream 移行によりその自前デコード処理は不要になった）。`app.bsky.feed.like` の create イベントは、Jetstream が既にJSON化して同梱してくる `record.subject.uri` を見て `posts.at_uri` と一致するものだけを取り込む（**Like の対象は任意の投稿なので、投稿の場合と異なり liker の DID がローカルで既知かどうかでは絞り込めない**。一致しなければ何もしない）。実トラフィックで確認したところ Like イベントはグローバルで概ね600〜700件/秒あり、`wantedCollections` で他collectionは除外できてもLike自体の全件判定は毎回発生する（DIDベースの絞り込み `wantedDids` は未導入。今後の課題）。一致した場合、liker のアクターが未知なら AppView からプロフィールを取得して `upsert_remote_bsky` で作成し、`reactions` へ `content` は非標準 `emoji` フィールドがあればそれ、無ければ絵文字ピッカーと同じ `"❤️"`（VS16付きハート）で INSERT（`at_uri` に受信した Like レコードの at_uri を保存）。delete イベントは `at://did/app.bsky.feed.like/rkey` を組み立てて `reactions.at_uri` で直接 DELETE する（AP の `Undo` と同型、レコード本体は不要）。
 - **ATP（Bluesky）連携（投稿取り込み）**: 同じ Jetstream 接続で `app.bsky.feed.post` の create も検知する。DID が既知のローカル `actors`（`at_did` 一致）であれば、Jetstream イベントに同梱される `record.text`/`record.createdAt` をそのまま `posts` へ保存する。Jetstream はほぼリアルタイムでレコード本体を配信するため、旧実装にあった「AppViewへの再取得＋インデックス遅延リトライ（2s/5s/10s）」は不要になった。`record.reply.parent.uri` が付いている場合はリプライとみなし、その URI が `posts.at_uri` として既知（＝こちらの投稿、または既に取り込み済みの Bsky 投稿への返信）であれば `posts.reply_to_post_id` を設定する。親が未知の場合（無関係な Bsky ユーザー同士のリプライ等）は通常投稿として保存する。
+- **本文・表示名中のカスタム絵文字（`emoji_map`）**: `posts.emoji_map`/`actors.emoji_map` は、AP 受信時（`handle_create_note`/`upsert_remote_fedi_actor`）に Note/Person の `tag` 配列（`type:"Emoji"`）から `seiran_common::ap::build_emoji_map` で `{shortcode: 画像URL}` を抽出して保存する（ローカル投稿・ローカルアクターは常に空オブジェクト）。API 公開時（`to_note_response`）は投稿の `emoji_map` と投稿者の `emoji_map` を統合して `NoteResponse.emojis` として返す。フロントは `EmojiText` コンポーネント（`frontend/src/components/note/EmojiText.tsx`）で本文・表示名中の `:shortcode:` をこのマップと突き合わせ、解決できるものだけ `img` に置換する（解決できない場合はテキストのまま）。詳細は Doc3 §9.7。既知の制約: `create_note`/`create_repost` API のレスポンス直後の `NoteResponse`（常にローカルユーザー自身の投稿）は `emojis` を空のまま返す（ローカル表示名にカスタム絵文字は無いため）。プロフィールページ単体の表示名・`ReplyIndicator` の「返信先」表示名は今回未対応（今後の課題）。
 
 ### 1.5 `follows` (フォロー関係テーブル)
 プロトコルごとの「配送」の宛先リストとしても機能する。

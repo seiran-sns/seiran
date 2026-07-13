@@ -191,12 +191,16 @@ export interface Note {
   renote?: Note;
   /** 認証ユーザーがこのノートをリポスト済みかどうか（未認証時は undefined）。 */
   repostedByMe?: boolean;
+  /** 本文・投稿者表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信のみ）。 */
+  emojis?: Record<string, string>;
 }
 
 export interface ReactionSummary {
   emoji: string;
   count: number;
   reactedByMe: boolean;
+  /** Fedi から受信したカスタム絵文字（`:shortcode:`）の画像URL。Unicode絵文字は undefined。 */
+  emojiUrl?: string;
 }
 
 export interface ReactResult {
@@ -262,6 +266,7 @@ interface RawNote {
   renote?: RawNote;
   repostedByMe?: boolean;
   reposted_by_me?: boolean;
+  emojis?: Record<string, string>;
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -286,6 +291,7 @@ function normalizeNote(r: RawNote): Note {
     reactions: r.reactions ?? [],
     renote: r.renote ? normalizeNote(r.renote) : undefined,
     repostedByMe: r.repostedByMe ?? r.reposted_by_me,
+    emojis: r.emojis,
   };
 }
 

@@ -30,6 +30,13 @@
   opacity: 0.6;
 }
 
+/* カスタム絵文字チップで「自分では付けられない」ために disabled にしている場合は、
+   届いたリアクション自体は正当なものなので、他の disabled（操作中の一時無効化等）と
+   同じ薄い表示にはしない。クリックできないことはカーソルとツールチップだけで示す。 */
+.chip.chipReadonly:disabled {
+  opacity: 1;
+}
+
 .chipActive {
   background: var(--accent-deep);
   border-color: var(--accent);
@@ -45,6 +52,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.emojiImg {
+  height: 1.1em;
+  width: 1.1em;
+  object-fit: contain;
+  vertical-align: middle;
 }
 
 .count {

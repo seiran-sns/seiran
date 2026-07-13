@@ -3,15 +3,15 @@ import { Notif, useStreamingContext } from "../../contexts/StreamingContext";
 import panel from "../common/Panel.module.css";
 import styles from "./NotificationsPanel.module.css";
 
-/** 通知1件を人間可読な文言に整形する。 */
-function describe(n: Notif): { icon: string; text: string } {
+/** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。 */
+function describe(n: Notif): { icon: string; iconUrl?: string; text: string } {
   const actor = n.body.actor;
   const who = actor?.displayName || actor?.username || "だれか";
   const handle = actor?.username && actor?.domain ? `@${actor.username}@${actor.domain}` : "";
   const label = handle ? `${who}（${handle}）` : who;
   switch (n.kind) {
     case "reaction":
-      return { icon: n.body.emoji || "⭐", text: `${label} がリアクションしました` };
+      return { icon: n.body.emoji || "⭐", iconUrl: n.body.emojiUrl, text: `${label} がリアクションしました` };
     case "follow":
       return { icon: "➕", text: `${label} にフォローされました` };
     case "followAccepted":
@@ -44,10 +44,14 @@ export default function NotificationsPanel() {
   return (
     <ul className={styles.list}>
       {notifications.map((n) => {
-        const { icon, text } = describe(n);
+        const { icon, iconUrl, text } = describe(n);
         return (
           <li key={n.id} className={styles.item}>
-            <span className={styles.icon}>{icon}</span>
+            {iconUrl ? (
+              <img className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" />
+            ) : (
+              <span className={styles.icon}>{icon}</span>
+            )}
             <span className={styles.text}>{text}</span>
           </li>
         );

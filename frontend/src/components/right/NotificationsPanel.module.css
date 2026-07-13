@@ -18,6 +18,13 @@
   line-height: 1;
 }
 
+.iconImg {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
 .text {
   flex: 1 1 auto;
   font-size: 14px;

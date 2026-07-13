@@ -364,7 +364,7 @@ async fn handle_inbound_like_create(
     // 常に絵文字1個。emoji フィールドが無ければ ❤️（絵文字ピッカーと同じ、VS16付きハート）として扱う。
     let content = emoji.unwrap_or("❤️");
     let reactions_repo = PgReactionRepository::new(pool.clone());
-    if let Err(e) = reactions_repo.insert(post_id, actor_id, "like", content, None, Some(at_uri)).await {
+    if let Err(e) = reactions_repo.insert(post_id, actor_id, "like", content, None, Some(at_uri), None).await {
         eprintln!("[Jetstream/Like] reactions INSERT 失敗: {}", e);
         return;
     }

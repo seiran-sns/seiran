@@ -58,6 +58,10 @@ pub struct ApActor {
     pub outbox: Option<String>,
     #[serde(rename = "publicKey")]
     pub public_key: Option<PublicKeyInfo>,
+    /// 表示名(`name`)・自己紹介(`summary`)中のカスタム絵文字タグ(`type:"Emoji"`)。
+    /// `emoji_map()` で `{shortcode: 画像URL}` に変換する。
+    #[serde(default)]
+    pub tag: Vec<serde_json::Value>,
 }
 
 impl ApActor {
@@ -71,6 +75,27 @@ impl ApActor {
         };
         obj.get("url")?.as_str().map(|s| s.to_string())
     }
+
+    /// 表示名中のカスタム絵文字の shortcode→画像URLマップ。
+    pub fn emoji_map(&self) -> serde_json::Value {
+        build_emoji_map(&self.tag)
+    }
+}
+
+/// AP の `tag` 配列（`type:"Emoji"` の要素）から `{shortcode: 画像URL}` のマップを構築する。
+/// Note 本文・Person 表示名・Like/EmojiReact のいずれでも同じ形式で使われる:
+/// `{"id":"...", "type":"Emoji", "name":":shortcode:", "icon":{"type":"Image","url":"..."}}`
+pub fn build_emoji_map(tags: &[serde_json::Value]) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for tag in tags {
+        if tag["type"].as_str() != Some("Emoji") {
+            continue;
+        }
+        if let (Some(name), Some(url)) = (tag["name"].as_str(), tag["icon"]["url"].as_str()) {
+            map.insert(name.to_string(), serde_json::Value::String(url.to_string()));
+        }
+    }
+    serde_json::Value::Object(map)
 }
 
 /// ActivityPub 通信クライアント
@@ -407,5 +432,49 @@ mod tests {
         let headers = HashMap::new();
         let err = build_signing_string("POST", "/inbox", &headers, "host").unwrap_err();
         assert!(matches!(err, ApError::Signature(_)));
+    }
+
+    // ─── build_emoji_map ───────────────────────────────────────────
+
+    #[test]
+    fn build_emoji_map_extracts_multiple_shortcodes() {
+        let tags = vec![
+            serde_json::json!({
+                "type": "Emoji", "name": ":blobcat:",
+                "icon": { "url": "https://example.com/blobcat.png" }
+            }),
+            serde_json::json!({
+                "type": "Emoji", "name": ":ablobcatwave:",
+                "icon": { "url": "https://example.com/wave.png" }
+            }),
+        ];
+        let map = build_emoji_map(&tags);
+        assert_eq!(map[":blobcat:"], "https://example.com/blobcat.png");
+        assert_eq!(map[":ablobcatwave:"], "https://example.com/wave.png");
+    }
+
+    #[test]
+    fn build_emoji_map_ignores_non_emoji_tags() {
+        let tags = vec![serde_json::json!({
+            "type": "Mention", "name": "@alice", "href": "https://example.com/users/alice"
+        })];
+        assert_eq!(build_emoji_map(&tags), serde_json::json!({}));
+    }
+
+    #[test]
+    fn build_emoji_map_empty_tags() {
+        assert_eq!(build_emoji_map(&[]), serde_json::json!({}));
+    }
+
+    #[test]
+    fn ap_actor_emoji_map_uses_tag_field() {
+        let actor: ApActor = serde_json::from_value(serde_json::json!({
+            "id": "https://example.com/users/alice",
+            "type": "Person",
+            "tag": [
+                { "type": "Emoji", "name": ":blobcat:", "icon": { "url": "https://example.com/blobcat.png" } }
+            ]
+        })).unwrap();
+        assert_eq!(actor.emoji_map()[":blobcat:"], "https://example.com/blobcat.png");
     }
 }

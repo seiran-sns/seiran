@@ -87,8 +87,10 @@ pub async fn broadcast_reaction_update(
     let agg = reactions.aggregate_for_post(post_id).await.unwrap_or_default();
     let reactions_json: Vec<serde_json::Value> = agg
         .into_iter()
-        .filter(|(emoji, _)| !emoji.is_empty())
-        .map(|(emoji, count)| serde_json::json!({ "emoji": emoji, "count": count }))
+        .filter(|(emoji, _, _)| !emoji.is_empty())
+        .map(|(emoji, count, emoji_url)| {
+            serde_json::json!({ "emoji": emoji, "count": count, "emojiUrl": emoji_url })
+        })
         .collect();
 
     let mut recipients: HashSet<i64> = HashSet::new();

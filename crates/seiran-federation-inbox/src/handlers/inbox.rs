@@ -7,6 +7,7 @@ use base64::Engine as _;
 use seiran_common::traits::Job;
 use seiran_common::generate_snowflake_id;
 use seiran_common::streaming::broadcast_reaction_update;
+use seiran_common::ap::build_emoji_map;
 use sha2::{Digest as Sha2Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -144,12 +145,14 @@ pub async fn inbox_handler(
             });
         }
         // いいね（Like）・絵文字リアクション（Misskey 拡張 EmojiReact）(#22)
+        // Misskey は絵文字リアクションでも type を "Like" 固定で送ってくる（EmojiReact は
+        // 使わない）ため、種別の判定は wire type ではなく handle_reaction 内で
+        // content/_misskey_reaction フィールドの有無から行う。
         "Like" | "EmojiReact" => {
-            let is_like = activity["type"].as_str() == Some("Like");
             let state_clone = state.clone();
             let activity_clone = activity.clone();
             tokio::spawn(async move {
-                if let Err(e) = handle_reaction(activity_clone, state_clone, is_like).await {
+                if let Err(e) = handle_reaction(activity_clone, state_clone).await {
                     eprintln!("[Inbox/Reaction] 処理エラー: {}", e);
                 }
             });
@@ -195,12 +198,14 @@ async fn upsert_remote_fedi_actor(
     let display_name = remote_ap.name.clone().unwrap_or_else(|| username.clone());
     let domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
     let avatar_url = remote_ap.avatar_url();
+    // 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Person の tag 配列由来）。
+    let emoji_map = remote_ap.emoji_map();
 
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
     let actor_id = state
         .actor_repo
-        .upsert_remote_fedi(new_actor_id, actor_uri, &inbox, &username, &domain, &display_name, avatar_url.as_deref(), now)
+        .upsert_remote_fedi(new_actor_id, actor_uri, &inbox, &username, &domain, &display_name, avatar_url.as_deref(), now, &emoji_map)
         .await
         .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
 
@@ -343,6 +348,8 @@ async fn handle_create_note(
 
     // HTML タグを除去して本文を得る
     let body = strip_html(&content_html);
+    // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
+    let emoji_map = build_emoji_map(&note["tag"].as_array().cloned().unwrap_or_default());
 
     // シナリオ2: seiran_post_uuid による seiran 間マージ
     let seiran_uuid = note["seiranUuid"].as_str();
@@ -373,7 +380,7 @@ async fn handle_create_note(
     // posts テーブルに挿入（ap_object_id 重複はスキップ、seiran_post_uuid も保存）
     state
         .post_repo
-        .insert_remote_with_dedup(post_id, actor_id, &body, note_id, seiran_uuid, parent_original_post_id, created_at)
+        .insert_remote_with_dedup(post_id, actor_id, &body, note_id, seiran_uuid, parent_original_post_id, created_at, &emoji_map)
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
@@ -415,6 +422,7 @@ async fn handle_create_note(
                 "avatarUrl": remote.avatar_url,
             },
             "attachments": [],
+            "emojis": emoji_map,
         });
         state.stream_hub.publish_note(recipients, &note_json);
     }
@@ -636,13 +644,21 @@ async fn handle_undo(
     Ok(())
 }
 
+/// value（activity/note）の `tag` 配列から、指定した shortcode（`:name:` 形式）に対応する
+/// カスタム絵文字タグの画像 URL を取り出す（`seiran_common::ap::build_emoji_map` を利用）。
+fn extract_emoji_tag_url(value: &serde_json::Value, shortcode: &str) -> Option<String> {
+    let tags = value["tag"].as_array().cloned().unwrap_or_default();
+    build_emoji_map(&tags).get(shortcode)?.as_str().map(|s| s.to_string())
+}
+
 /// いいね（Like）・絵文字リアクション（EmojiReact）を受信し reactions テーブルへ保存する (#22)。
-/// `is_like = true` の場合は ❤️ 絵文字リアクションとして解釈する。
-async fn handle_reaction(
-    activity: serde_json::Value,
-    state: Arc<AppState>,
-    is_like: bool,
-) -> Result<(), String> {
+///
+/// Misskey は絵文字リアクション（Unicode 絵文字・カスタム絵文字とも）でも AP の `type` を
+/// `"Like"` 固定で送り、実際の内容は `content`/`_misskey_reaction` フィールドに載せる
+/// （`EmojiReact` 型は使わない）。そのため種別判定に wire type を使わず、`content` /
+/// `_misskey_reaction` の値の有無で決める（どちらも無い場合のみ、Mastodon 等の素の
+/// お気に入りとみなし ❤️ を割り当てる）。
+async fn handle_reaction(activity: serde_json::Value, state: Arc<AppState>) -> Result<(), String> {
     let actor_uri = activity["actor"]
         .as_str()
         .ok_or("Reaction: actor フィールドがありません")?;
@@ -653,13 +669,15 @@ async fn handle_reaction(
         .ok_or("Reaction: object フィールドがありません")?;
     let activity_id = activity["id"].as_str();
 
-    // リアクション内容: Like は ❤️、EmojiReact は content（絵文字 or :shortcode:）
-    let content: String = if is_like {
-        "❤️".to_string()
-    } else {
-        activity["content"].as_str().unwrap_or("❤️").to_string()
-    };
-    let reaction_type = if is_like { "like" } else { "emoji" };
+    let content: String = activity["content"]
+        .as_str()
+        .or_else(|| activity["_misskey_reaction"].as_str())
+        .unwrap_or("❤️")
+        .to_string();
+    let reaction_type = if content == "❤️" { "like" } else { "emoji" };
+    // content が `:shortcode:` 形式（カスタム絵文字）の場合、tag 配列から画像 URL を解決する。
+    // Unicode 絵文字や素の Like（❤️ 固定）では通常 tag に一致が無いため自然に None になる。
+    let emoji_url = extract_emoji_tag_url(&activity, &content);
 
     // 対象ローカルポストを ap_object_id で検索（未知のポストなら無視）
     let (post_id, post_author_id) = match state
@@ -679,7 +697,7 @@ async fn handle_reaction(
     // reactions へ INSERT（同一ユーザー・同一内容の重複、activity_id 重複はスキップ）
     state
         .reaction_repo
-        .insert(post_id, actor_id, reaction_type, &content, activity_id, None)
+        .insert(post_id, actor_id, reaction_type, &content, activity_id, None, emoji_url.as_deref())
         .await
         .map_err(|e| format!("reactions INSERT エラー: {}", e))?;
 
@@ -692,6 +710,7 @@ async fn handle_reaction(
         serde_json::json!({
             "postId": post_id.to_string(),
             "emoji": content,
+            "emojiUrl": emoji_url,
             "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
         }),
     );
@@ -845,7 +864,7 @@ async fn fetch_and_save_note(note_uri: &str, state: &Arc<AppState>) -> Result<i6
 
 #[cfg(test)]
 mod tests {
-    use super::{bsky_app_url_to_at_uri, extract_key_id, signature_covers_digest, strip_html};
+    use super::{bsky_app_url_to_at_uri, extract_emoji_tag_url, extract_key_id, signature_covers_digest, strip_html};
 
     #[test]
     fn signature_covers_digest_with_digest() {
@@ -922,5 +941,64 @@ mod tests {
     fn bsky_app_url_to_at_uri_not_bsky_app() {
         assert_eq!(bsky_app_url_to_at_uri("https://example.com/notes/1"), None);
         assert_eq!(bsky_app_url_to_at_uri(""), None);
+    }
+
+    #[test]
+    fn extract_emoji_tag_url_finds_matching_custom_emoji() {
+        let activity = serde_json::json!({
+            "type": "Like",
+            "content": ":blobcat:",
+            "_misskey_reaction": ":blobcat:",
+            "tag": [
+                {
+                    "id": "https://misskey.example/emojis/blobcat",
+                    "type": "Emoji",
+                    "name": ":blobcat:",
+                    "icon": { "type": "Image", "mediaType": "image/png", "url": "https://misskey.example/files/blobcat.png" }
+                }
+            ]
+        });
+        assert_eq!(
+            extract_emoji_tag_url(&activity, ":blobcat:"),
+            Some("https://misskey.example/files/blobcat.png".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_emoji_tag_url_ignores_non_matching_name() {
+        let activity = serde_json::json!({
+            "tag": [
+                { "type": "Emoji", "name": ":other:", "icon": { "url": "https://example.com/other.png" } }
+            ]
+        });
+        assert_eq!(extract_emoji_tag_url(&activity, ":blobcat:"), None);
+    }
+
+    #[test]
+    fn extract_emoji_tag_url_ignores_non_emoji_tag_type() {
+        let activity = serde_json::json!({
+            "tag": [
+                { "type": "Mention", "name": ":blobcat:", "icon": { "url": "https://example.com/x.png" } }
+            ]
+        });
+        assert_eq!(extract_emoji_tag_url(&activity, ":blobcat:"), None);
+    }
+
+    #[test]
+    fn extract_emoji_tag_url_no_tag_field() {
+        let activity = serde_json::json!({ "content": "👍" });
+        assert_eq!(extract_emoji_tag_url(&activity, "👍"), None);
+    }
+
+    #[test]
+    fn extract_emoji_tag_url_unicode_emoji_content_has_no_tag_match() {
+        // Unicode 絵文字は通常 tag 配列に一致が無いため None のままになる
+        let activity = serde_json::json!({
+            "content": "🎉",
+            "tag": [
+                { "type": "Emoji", "name": ":blobcat:", "icon": { "url": "https://example.com/blobcat.png" } }
+            ]
+        });
+        assert_eq!(extract_emoji_tag_url(&activity, "🎉"), None);
     }
 }

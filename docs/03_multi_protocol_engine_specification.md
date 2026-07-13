@@ -587,9 +587,31 @@ Fedi 引用 → Bsky では `app.bsky.embed.record` ではなく `app.bsky.embed
 - `reactions.ap_activity_id` はローカルで発行した `https://{domain}/activities/reactions/{post_id}-{actor_id}-{epoch_millis}`
   形式の URI で、AP 側での Undo 対象特定に使う（ATP 側の `at_uri`/rkey 保存と同じ役割）
 
-**INBOUND との対称性**
-- 受信側（`crates/seiran-federation-inbox/src/handlers/inbox.rs` の `handle_reaction`）は既に実装済みで、
-  この節の実装により Like/EmojiReact の送受信が双方向になった
+**INBOUND（受信側）の内容解決とカスタム絵文字対応**
+- 受信側は `crates/seiran-federation-inbox/src/handlers/inbox.rs` の `handle_reaction`。**Misskey は絵文字
+  リアクション（Unicode・カスタム絵文字とも）でも AP の `type` を `"Like"` 固定で送り、`EmojiReact` 型は
+  使わない**（実際の内容は `content`/`_misskey_reaction` フィールドに載る）。そのため種別判定に wire type
+  （`activity["type"]`）は使わず、`content`（無ければ `_misskey_reaction`）を読んで判定する。どちらも
+  存在しない場合のみ Mastodon 等の素のお気に入りとみなし `content = "❤️"` とする
+  （`reaction_type` は `content == "❤️"` なら `'like'`、それ以外は `'emoji'`）
+- `content` が `:shortcode:` 形式（カスタム絵文字）の場合、activity の `tag` 配列から画像 URL を解決する
+  （`extract_emoji_tag_url`）。Misskey 等が Like/EmojiReact に添付する形式:
+  ```json
+  {
+    "type": "Like",
+    "content": ":blobcat:",
+    "_misskey_reaction": ":blobcat:",
+    "tag": [
+      { "id": "https://misskey.example/emojis/blobcat", "type": "Emoji", "name": ":blobcat:",
+        "icon": { "type": "Image", "mediaType": "image/png", "url": "https://misskey.example/files/blobcat.png" } }
+    ]
+  }
+  ```
+  `tag` 配列から `type == "Emoji" && name == content` の要素を探し `icon.url` を `reactions.emoji_url`
+  に保存する。見つからなければ（Unicode 絵文字、または `tag` 未添付のリモート実装）`NULL` のまま
+- これにより、受信した Like/EmojiReact は「Unicode 絵文字」「カスタム絵文字（画像URL解決込み）」
+  「素の Like（❤️固定）」の3パターンをすべて正しく `reactions` テーブルへ反映する。この節の OUTBOUND
+  実装と合わせて Like/EmojiReact の送受信が双方向になった
 
 **送信内容のバリデーション（Unicode 絵文字限定）**
 - `POST /api/notes/:id/reactions` の `validate_reaction_content`（`crates/seiran-api/src/handlers/notes.rs`）は、
@@ -604,6 +626,70 @@ Fedi 引用 → Bsky では `app.bsky.embed.record` ではなく `app.bsky.embed
 - 上記の制約は **ローカルからの送信（outbound）にのみ適用**する。AP から受信する `EmojiReact.content`
   （9章冒頭・DBスキーマ文書参照）は他インスタンスのカスタム絵文字ショートコードを含みうるため、
   INBOUND 側では従来通りバリデーションせずそのまま保存する
+
+---
+
+### 9.7 投稿本文・表示名中のカスタム絵文字（`:shortcode:`）表示
+
+9.6 節はリアクション（Like/EmojiReact）自体が持つカスタム絵文字の話だったが、Note 本文や Person の
+表示名の中に埋め込まれた `:shortcode:`（例: 「わこつ:blobcatwave:」）も同じ AP `tag` 配列の仕組みで
+画像化できる。Misskey は Note・Person いずれにもトップレベルの `tag` 配列（`type:"Emoji"`）を添付する:
+
+```json
+{
+  "type": "Note",
+  "content": "わこつ :blobcatwave:",
+  "tag": [
+    { "id": "https://misskey.example/emojis/blobcatwave", "type": "Emoji", "name": ":blobcatwave:",
+      "icon": { "type": "Image", "url": "https://misskey.example/files/wave.png" } }
+  ]
+}
+```
+Person（表示名・自己紹介中の絵文字）も同形式。Update(Person) 受信時も同じ経路で再解決される。
+
+**共通ヘルパー**: `seiran_common::ap::build_emoji_map(tags: &[Value]) -> Value`（`crates/seiran-common/src/ap/client.rs`）
+が `tag` 配列から `{shortcode: 画像URL}` のオブジェクトを構築する。9.6 節の `extract_emoji_tag_url`（単一
+shortcode の解決、リアクション用）もこの関数を内部で使うよう統一した。`ApActor::emoji_map()` は
+`ApActor.tag`（新設フィールド）からこのマップを返す。
+
+**保存**:
+- `handle_create_note`（`crates/seiran-federation-inbox/src/handlers/inbox.rs`）が `note["tag"]` から
+  `build_emoji_map` で本文用マップを作り `posts.emoji_map` に保存する（`PostRepository::insert_remote_with_dedup`
+  に `emoji_map` 引数を追加）
+- `upsert_remote_fedi_actor` が `remote_ap.emoji_map()`（Person の `tag` 由来）を `actors.emoji_map` に保存する
+  （`ActorRepository::upsert_remote_fedi` に `emoji_map` 引数を追加。`follows.rs` の
+  フォロー時アクター解決からも同様に呼ばれる）
+- ローカル投稿・ローカルアクターは常に空オブジェクト（カスタム絵文字ショートコードをローカルから
+  送信する経路が無いため。9.6 節のバリデーションと同じ理由）
+
+**API 公開**: `to_note_response`（`crates/seiran-api/src/handlers/notes.rs`）が `posts.emoji_map` と
+投稿者の `actors.emoji_map` を統合し、`NoteResponse.emojis: Record<string,string>` として返す（本文・
+表示名の両方をこの1つのマップで解決できるようにする簡略設計。空なら省略）。`TimelinePost` に
+`post_emoji_map`/`actor_emoji_map` フィールドを追加し、対応する全SQLクエリ（`home_timeline` 等6箇所 +
+`embed_renotes`）の SELECT 句に `p.emoji_map`/`a.emoji_map` を追加した。
+
+**フロントエンド**: `frontend/src/components/note/EmojiText.tsx` が `text`/`emojis` を受け取り、本文・
+表示名中の `:[a-zA-Z0-9_+-]+:` パターンを `emojis` マップと突き合わせて、解決できるものだけ `<img>`
+に置換する（解決できないコロン記法はテキストのまま）。`NoteCard`（本文・投稿者表示名・リポスト元の
+表示名）で使用。ラップ要素を持たないため呼び出し側の `<span>`/`<p>` のスタイルはそのまま活きる。
+
+- **境界条件**: 左端（`:` の直前）は何が接触していても良い（例: 「わこつ:blobcatwave:」）。右端
+  （閉じ `:` の直後）だけは英数字・アンダースコアが接触していないことを条件にする（`file:name_here:12345`
+  のような無関係なコロン記法を誤って絵文字化しないため）。右端の接触チェックに失敗した場合は、
+  そのショートコードが `emojis` マップに存在するかに関わらずマッチ自体を無効化しテキストのまま残す。
+- **サイズ**: `<img>` の高さのみ行の高さに合わせて固定し（`height: 1.2em`）、幅は `width: auto` で
+  画像本来の縦横比に追従させる（正方形とは限らないカスタム絵文字を歪ませないため。横長の絵文字は
+  そのぶん横に長く表示される）。
+
+**通知（クイック通知欄）のカスタム絵文字リアクション**: `handle_reaction` は既に `emoji_url` を計算済み
+だったが、WS `"reaction"` イベントのペイロードに配線されていなかった不具合を修正し `"emojiUrl"` を
+追加した。`frontend/src/contexts/StreamingContext.tsx` の `Notif.body.emojiUrl` を経由して
+`NotificationsPanel.tsx` が `img` 表示する（`ReactionChips`/`EmojiText` と同じ「URL があれば画像、
+無ければテキスト」パターン）。
+
+**既知の制約**: プロフィールページ単体の表示名表示（`ProfilePage.tsx`）と `ReplyIndicator` の
+「返信先」表示名は今回のスコープ外（`NoteResponse` を経由しないため）。将来対応する場合は
+`ProfileResponse` にも `emojis` フィールドを追加する形になる。
 
 ---
 

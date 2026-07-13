@@ -52,6 +52,9 @@ pub struct ReactionSummary {
     pub emoji: String,
     pub count: i64,
     pub reacted_by_me: bool,
+    /// Fedi から受信したカスタム絵文字（`:shortcode:`）の画像 URL。Unicode 絵文字は `None`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji_url: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -81,6 +84,24 @@ pub struct NoteResponse {
     /// 認証ユーザーがこのノートをリポスト済みかどうか。未認証時は省略。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reposted_by_me: Option<bool>,
+    /// 本文・投稿者表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信のみ、
+    /// `posts.emoji_map` と投稿者 `actors.emoji_map` の統合）。フロントは本文・表示名描画時に
+    /// このマップで `:shortcode:` を画像に置換する。空なら省略。
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub emojis: HashMap<String, String>,
+}
+
+/// `serde_json::Value`（JSONB由来のオブジェクト、`None`/非オブジェクトなら空）を
+/// `HashMap<String, String>` に変換する。カスタム絵文字マップ（shortcode→画像URL）の
+/// デコードに使う。
+fn json_map_to_string_map(v: Option<serde_json::Value>) -> HashMap<String, String> {
+    v.and_then(|v| v.as_object().cloned())
+        .map(|obj| {
+            obj.into_iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Serialize, Clone)]
@@ -145,6 +166,9 @@ pub async fn fetch_attachments_map(
 }
 
 pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -> NoteResponse {
+    let mut emojis = json_map_to_string_map(p.post_emoji_map);
+    emojis.extend(json_map_to_string_map(p.actor_emoji_map));
+
     NoteResponse {
         id: p.id.to_string(),
         text: p.body,
@@ -165,6 +189,7 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         reactions: Vec::new(),
         renote: None,
         reposted_by_me: None,
+        emojis,
     }
 }
 
@@ -253,7 +278,7 @@ pub async fn fetch_reactions_map(
         return HashMap::new();
     }
     let rows = sqlx::query(
-        "SELECT post_id, content, COUNT(*) AS cnt
+        "SELECT post_id, content, COUNT(*) AS cnt, MAX(emoji_url) AS emoji_url
          FROM reactions
          WHERE post_id = ANY($1)
          GROUP BY post_id, content
@@ -289,11 +314,12 @@ pub async fn fetch_reactions_map(
         let post_id: i64 = row.try_get("post_id").unwrap_or_default();
         let emoji: String = row.try_get("content").unwrap_or_default();
         let count: i64 = row.try_get("cnt").unwrap_or_default();
+        let emoji_url: Option<String> = row.try_get("emoji_url").unwrap_or(None);
         if emoji.is_empty() {
             continue;
         }
         let reacted_by_me = mine.contains(&(post_id, emoji.clone()));
-        map.entry(post_id).or_default().push(ReactionSummary { emoji, count, reacted_by_me });
+        map.entry(post_id).or_default().push(ReactionSummary { emoji, count, reacted_by_me, emoji_url });
     }
     map
 }
@@ -497,6 +523,7 @@ async fn create_repost(
         reactions: vec![],
         renote: None,
         reposted_by_me: None,
+        emojis: HashMap::new(),
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
     embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
@@ -772,6 +799,7 @@ async fn create_regular_post(
         reactions: vec![],
         renote: None,
         reposted_by_me: None,
+        emojis: HashMap::new(),
     };
 
     broadcast_new_note(state, actor_id, &note_resp).await;
@@ -1288,7 +1316,7 @@ pub async fn create_reaction(
         chrono::Utc::now().timestamp_millis()
     );
 
-    if let Err(e) = state.reactions.insert(note_id, me.id, "emoji", &content, Some(&activity_id), None).await {
+    if let Err(e) = state.reactions.insert(note_id, me.id, "emoji", &content, Some(&activity_id), None, None).await {
         return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response();
     }
 

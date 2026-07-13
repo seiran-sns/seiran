@@ -6,6 +6,7 @@ import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import ReactionChips from "./ReactionChips";
 import ReactionPicker from "./ReactionPicker";
+import EmojiText from "./EmojiText";
 import { useComposer } from "../../contexts/ComposerContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { ReactionUpdate, useStreamingContext } from "../../contexts/StreamingContext";
@@ -56,6 +57,7 @@ function applyReactionUpdate(
   return update.reactions.map((r) => ({
     emoji: r.emoji,
     count: r.count,
+    emojiUrl: r.emojiUrl,
     reactedByMe: isMe
       ? r.emoji === update.reactorEmoji
       : reactions.find((x) => x.emoji === r.emoji)?.reactedByMe ?? false,
@@ -157,7 +159,9 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         <button className={styles.userBtn} onClick={goProfile}>
           <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={large ? 48 : 40} />
           <span className={styles.names}>
-            <span className={styles.displayName}>{displayName(note)}</span>
+            <span className={styles.displayName}>
+              <EmojiText text={displayName(note)} emojis={note.emojis} />
+            </span>
             <span className={styles.acct}>
               {acct(note)}
               {badge && (
@@ -188,7 +192,9 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         </div>
       )}
 
-      <p className={styles.body}>{note.text}</p>
+      <p className={styles.body}>
+        <EmojiText text={note.text} emojis={note.emojis} />
+      </p>
 
       {note.attachments && note.attachments.length > 0 && (
         <div className={styles.attachments}>
@@ -253,7 +259,7 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
         <div className={styles.rail}>
-          🔁 <strong>{displayName(note)}</strong> が{" "}
+          🔁 <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong> が{" "}
           <Link to={`/notes/${note.id}`} className={styles.repostTime} onClick={(e) => e.stopPropagation()}>
             {formatDate(note.createdAt)}
           </Link>{" "}

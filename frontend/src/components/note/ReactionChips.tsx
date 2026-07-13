@@ -14,22 +14,38 @@ export default function ReactionChips({ reactions, onToggle, disabled }: Reactio
   if (!reactions || reactions.length === 0) return null;
   return (
     <div className={styles.wrap}>
-      {reactions.map((r) => (
-        <button
-          key={r.emoji}
-          type="button"
-          className={`${styles.chip} ${r.reactedByMe ? styles.chipActive : ""}`}
-          title={r.reactedByMe ? "クリックで取り消す" : "クリックで同じリアクションを付ける"}
-          disabled={!onToggle || disabled}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle?.(r.emoji);
-          }}
-        >
-          <span className={styles.emoji}>{r.emoji}</span>
-          <span className={styles.count}>{r.count}</span>
-        </button>
-      ))}
+      {reactions.map((r) => {
+        // カスタム絵文字（画像）はローカルからは送信できない（Unicode絵文字限定バリデーション）ため、
+        // 自分がまだ付けていないカスタム絵文字チップはクリックしても必ず失敗する。無駄なリクエストを
+        // 避けるため、その場合はクリックを無効化する（自分が既に付けている分の取消は許可する）。
+        const addBlocked = !!r.emojiUrl && !r.reactedByMe;
+        return (
+          <button
+            key={r.emoji}
+            type="button"
+            className={`${styles.chip} ${r.reactedByMe ? styles.chipActive : ""} ${addBlocked ? styles.chipReadonly : ""}`}
+            title={
+              addBlocked
+                ? "カスタム絵文字は自分では付けられません"
+                : r.reactedByMe
+                  ? "クリックで取り消す"
+                  : "クリックで同じリアクションを付ける"
+            }
+            disabled={!onToggle || disabled || addBlocked}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle?.(r.emoji);
+            }}
+          >
+            {r.emojiUrl ? (
+              <img className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} title={r.emoji} loading="lazy" />
+            ) : (
+              <span className={styles.emoji}>{r.emoji}</span>
+            )}
+            <span className={styles.count}>{r.count}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

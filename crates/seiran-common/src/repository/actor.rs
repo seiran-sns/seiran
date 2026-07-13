@@ -25,12 +25,14 @@ pub struct Actor {
     pub seiran_pair_actor_id: Option<i64>,
     /// ブリッジ（影武者）時の「本尊」の行 ID。
     pub bridge_real_actor_id: Option<i64>,
+    /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信、AP `tag` 配列由来）。
+    pub emoji_map: Option<serde_json::Value>,
 }
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
     display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem, \
-    bio, seiran_pair_actor_id, bridge_real_actor_id";
+    bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map";
 
 #[async_trait]
 pub trait ActorRepository: Send + Sync {
@@ -84,6 +86,8 @@ pub trait ActorRepository: Send + Sync {
     ) -> Result<i64, sqlx::Error>;
 
     /// リモート（Fediverse）アクターを upsert し、その actor_id を返す。
+    /// `emoji_map` は表示名（`name`）中のカスタム絵文字（`:shortcode:`）→画像URLのマップ
+    /// （AP Person の `tag` 配列由来、無ければ空オブジェクト）。
     #[allow(clippy::too_many_arguments)]
     async fn upsert_remote_fedi(
         &self,
@@ -95,6 +99,7 @@ pub trait ActorRepository: Send + Sync {
         display_name: &str,
         avatar_url: Option<&str>,
         now: DateTime<Utc>,
+        emoji_map: &serde_json::Value,
     ) -> Result<i64, sqlx::Error>;
 
     /// DID を持つ全ローカルアクターの (username, did) を取得する（起動時 TXT 再登録用）。
@@ -243,14 +248,16 @@ impl ActorRepository for PgActorRepository {
         display_name: &str,
         avatar_url: Option<&str>,
         now: DateTime<Utc>,
+        emoji_map: &serde_json::Value,
     ) -> Result<i64, sqlx::Error> {
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, created_at, updated_at)
-             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $8)
+            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, created_at, updated_at, emoji_map)
+             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $8, $9)
              ON CONFLICT (ap_uri) DO UPDATE
                SET ap_inbox_url = EXCLUDED.ap_inbox_url,
                    display_name = EXCLUDED.display_name,
                    avatar_url   = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
+                   emoji_map    = EXCLUDED.emoji_map,
                    updated_at   = EXCLUDED.updated_at
              RETURNING id",
         )
@@ -262,6 +269,7 @@ impl ActorRepository for PgActorRepository {
         .bind(display_name)
         .bind(avatar_url)
         .bind(now)
+        .bind(emoji_map)
         .fetch_one(&self.pool)
         .await?;
         Ok(row.0)

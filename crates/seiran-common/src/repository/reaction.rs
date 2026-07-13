@@ -9,6 +9,9 @@ pub trait ReactionRepository: Send + Sync {
     /// `at_uri`（ATP 連携）は `None` を渡すと既存値を保持する（非同期の ATP コミット完了を
     /// 待たずにローカル反映するため。`at_uri` の設定自体は `AtpCommitService::commit_like` や
     /// INBOUND の Like 受信経路が別途行う）。
+    /// `emoji_url` は Fedi から受信したカスタム絵文字（`:shortcode:`）の画像 URL。
+    /// `at_uri` と異なり毎回そのまま上書きする（ローカル送信は常に `None`、AP 受信は
+    /// 解決できた URL か `None` を都度渡すため、旧値を保持する必要が無い）。
     async fn insert(
         &self,
         post_id: i64,
@@ -17,6 +20,7 @@ pub trait ReactionRepository: Send + Sync {
         content: &str,
         ap_activity_id: Option<&str>,
         at_uri: Option<&str>,
+        emoji_url: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
     /// `ap_activity_id` で特定されるリアクションを取り消す（Undo(Like)/Undo(EmojiReact) 受信時）。
@@ -43,9 +47,12 @@ pub trait ReactionRepository: Send + Sync {
         actor_id: i64,
     ) -> Result<Option<(String, Option<String>, Option<String>)>, sqlx::Error>;
 
-    /// 指定ポストの絵文字ごとの件数集計（多い順）。ストリーミング配信ペイロード（`noteUpdated`）の
-    /// 組み立てに使う。閲覧者ごとの `reactedByMe` は含まない（API 公開用の集計は `fetch_reactions_map` を使う）。
-    async fn aggregate_for_post(&self, post_id: i64) -> Result<Vec<(String, i64)>, sqlx::Error>;
+    /// 指定ポストの絵文字ごとの件数集計（多い順、`(content, count, emoji_url)`）。
+    /// ストリーミング配信ペイロード（`noteUpdated`）の組み立てに使う。閲覧者ごとの `reactedByMe`
+    /// は含まない（API 公開用の集計は `fetch_reactions_map` を使う）。`emoji_url` は同一 `content`
+    /// の行のうち非NULLな値を代表として1つ返す（異なるドメインの同名カスタム絵文字が
+    /// 混在する場合は代表値のみになる簡略仕様）。
+    async fn aggregate_for_post(&self, post_id: i64) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error>;
 }
 
 pub struct PgReactionRepository {
@@ -68,15 +75,17 @@ impl ReactionRepository for PgReactionRepository {
         content: &str,
         ap_activity_id: Option<&str>,
         at_uri: Option<&str>,
+        emoji_url: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO reactions (post_id, actor_id, reaction_type, content, ap_activity_id, at_uri)
-             VALUES ($1, $2, $3, $4, $5, $6)
+            "INSERT INTO reactions (post_id, actor_id, reaction_type, content, ap_activity_id, at_uri, emoji_url)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (post_id, actor_id) DO UPDATE SET
                  reaction_type = EXCLUDED.reaction_type,
                  content = EXCLUDED.content,
                  ap_activity_id = EXCLUDED.ap_activity_id,
                  at_uri = COALESCE(EXCLUDED.at_uri, reactions.at_uri),
+                 emoji_url = EXCLUDED.emoji_url,
                  created_at = CURRENT_TIMESTAMP",
         )
         .bind(post_id)
@@ -85,6 +94,7 @@ impl ReactionRepository for PgReactionRepository {
         .bind(content)
         .bind(ap_activity_id)
         .bind(at_uri)
+        .bind(emoji_url)
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -140,9 +150,9 @@ impl ReactionRepository for PgReactionRepository {
         Ok(result.rows_affected())
     }
 
-    async fn aggregate_for_post(&self, post_id: i64) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    async fn aggregate_for_post(&self, post_id: i64) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT content, COUNT(*) AS cnt FROM reactions
+            "SELECT content, COUNT(*) AS cnt, MAX(emoji_url) AS emoji_url FROM reactions
              WHERE post_id = $1
              GROUP BY content
              ORDER BY cnt DESC",
@@ -150,6 +160,6 @@ impl ReactionRepository for PgReactionRepository {
         .bind(post_id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.into_iter().map(|r| (r.get("content"), r.get("cnt"))).collect())
+        Ok(rows.into_iter().map(|r| (r.get("content"), r.get("cnt"), r.get("emoji_url"))).collect())
     }
 }
