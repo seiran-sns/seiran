@@ -7,7 +7,9 @@
 //!
 //! 投稿はイベントに同梱されるレコード本体（text/createdAt）をそのまま保存する
 //! （Jetstream はほぼリアルタイムなので、旧実装にあった AppView 再取得＋インデックス
-//! 遅延リトライは不要）。
+//! 遅延リトライは不要）。`record.reply.parent.uri` が付いている場合は、その親投稿が
+//! `posts.at_uri` として既知（＝こちらの投稿への返信）かを調べ、既知なら
+//! `posts.reply_to_post_id` を設定してリプライとして保存する。
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -131,6 +133,14 @@ async fn process_message(
             else {
                 return Ok(());
             };
+            // リプライなら reply.parent.uri を見て、親がこちらの既知投稿（at_uri 保存済み）か
+            // どうかで reply_to_post_id を解決する（親が不明なら通常投稿として扱う）。
+            let reply_parent_uri = record
+                .get("reply")
+                .and_then(|r| r.get("parent"))
+                .and_then(|p| p.get("uri"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             // この DID のアクターが DB に存在するか確認
             let actor_row = sqlx::query(
@@ -171,9 +181,24 @@ async fn process_message(
             let body_text = body_text.to_string();
 
             tokio::spawn(async move {
+                let reply_to_post_id = match &reply_parent_uri {
+                    Some(parent_uri) => {
+                        let posts_repo = PgPostRepository::new(pool2.clone());
+                        match posts_repo.find_id_and_actor_by_at_uri(parent_uri).await {
+                            Ok(Some((parent_post_id, _))) => Some(parent_post_id),
+                            Ok(None) => None,
+                            Err(e) => {
+                                eprintln!("[Jetstream] リプライ親投稿検索失敗（通常投稿として保存）: {}", e);
+                                None
+                            }
+                        }
+                    }
+                    None => None,
+                };
                 save_bsky_post(
                     &pool2, &hub2, &at_uri2, &cid, &body_text, created_at,
                     actor_id, &username, display_name.as_deref(), avatar_url.as_deref(),
+                    reply_to_post_id,
                 ).await;
             });
         }
@@ -235,12 +260,14 @@ async fn save_bsky_post(
     username: &str,
     display_name: Option<&str>,
     avatar_url: Option<&str>,
+    reply_to_post_id: Option<i64>,
 ) {
+    let reply_id_str = reply_to_post_id.map(|id| id.to_string());
     let post_id = generate_snowflake_id(created_at);
 
     let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (at_uri) DO NOTHING",
     )
     .bind(post_id)
@@ -249,6 +276,7 @@ async fn save_bsky_post(
     .bind(at_uri)
     .bind(at_cid)
     .bind(created_at)
+    .bind(reply_to_post_id)
     .execute(pool)
     .await;
 
@@ -290,6 +318,7 @@ async fn save_bsky_post(
                         "avatarUrl": avatar_url,
                     },
                     "attachments": [],
+                    "replyId": reply_id_str,
                 });
                 stream_hub.publish_note(recipients, &note_json);
             }
