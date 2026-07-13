@@ -12,7 +12,7 @@ use seiran_common::repository::{Actor, TimelinePost};
 use crate::handlers::notes::{fetch_attachments_map, fetch_reactions_map, AttachmentResponse, ReactionSummary};
 use crate::AppState;
 
-use super::types::{MisskeyDriveFile, MisskeyNote, MisskeyUserDetailed, MisskeyUserLite};
+use super::types::{MisskeyDriveFile, MisskeyMeDetailed, MisskeyNote, MisskeyUserDetailed, MisskeyUserLite};
 
 pub fn user_lite(
     actor_id: i64,
@@ -69,6 +69,44 @@ pub async fn build_user_detailed(state: &AppState, actor: &Actor) -> MisskeyUser
         is_locked: false,
         is_silenced: false,
         is_suspended: false,
+    }
+}
+
+/// `/api/i` 用（`MisskeyMeDetailed`）。`build_user_detailed` に自分専用フィールドを足す。
+pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDetailed {
+    let detailed = build_user_detailed(state, actor).await;
+
+    let notes_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND deleted_at IS NULL")
+        .bind(actor.id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+    let followers_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE target_actor_id = $1 AND status = 'accepted'")
+        .bind(actor.id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+    let following_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE follower_actor_id = $1 AND status = 'accepted'")
+        .bind(actor.id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+
+    let role = match actor.user_id {
+        Some(uid) => state.users.find_role_by_user_id(uid).await.ok().flatten().unwrap_or_else(|| "user".to_string()),
+        None => "user".to_string(),
+    };
+
+    MisskeyMeDetailed {
+        detailed,
+        notes_count,
+        followers_count,
+        following_count,
+        is_moderator: role == "admin" || role == "moderator",
+        is_admin: role == "admin",
+        always_mark_nsfw: false,
+        careful_bot: false,
+        auto_accept_followed: false,
     }
 }
 

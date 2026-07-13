@@ -20,8 +20,8 @@ use crate::handlers::notes::ReactRequest;
 use crate::middleware::extract_auth;
 use crate::AppState;
 
-use super::convert::{build_note, build_notes, build_user_detailed};
-use super::types::{MisskeyNote, MisskeyUserDetailed};
+use super::convert::{build_me_detailed, build_note, build_notes, build_user_detailed};
+use super::types::{MisskeyMeDetailed, MisskeyNote, MisskeyUserDetailed};
 
 // ─── リクエストDTO（Misskey 本家の camelCase フィールド名に合わせる） ──────────
 
@@ -103,7 +103,7 @@ fn as_no_content(resp: Response) -> Response {
 // ─── 自分自身・ユーザー ─────────────────────────────────────────────────
 
 /// POST /api/i
-pub async fn api_i(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<MisskeyUserDetailed>, ApiError> {
+pub async fn api_i(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<MisskeyMeDetailed>, ApiError> {
     let auth_user = extract_auth(&headers, &state.local_auth).await?;
     let actor = state
         .actors
@@ -111,7 +111,7 @@ pub async fn api_i(headers: HeaderMap, State(state): State<AppState>) -> Result<
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
-    Ok(Json(build_user_detailed(&state, &actor).await))
+    Ok(Json(build_me_detailed(&state, &actor).await))
 }
 
 /// POST /api/users/show

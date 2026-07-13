@@ -34,6 +34,28 @@ pub struct MisskeyUserDetailed {
     pub is_suspended: bool,
 }
 
+/// `/api/i`（自分自身）専用のレスポンス型。`UserDetailedNotMe` を返す `/api/users/show` とは
+/// 別の、Misskey 本家の `MeDetailed` スキーマに合わせた自分専用フィールドを追加で持つ。
+/// `misskey_dart`（Aria 等が使用）の生成コードは `notesCount`/`isModerator`/`isAdmin`/
+/// `alwaysMarkNsfw`/`carefulBot`/`autoAcceptFollowed` を non-nullable 必須として直接
+/// キャストするため、欠けると Dart 側で `TypeError`（例:
+/// `type 'Null' is not a subtype of type 'num' in type cast`）となり未処理例外で
+/// クライアントがフリーズする（実機で確認済み）。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyMeDetailed {
+    #[serde(flatten)]
+    pub detailed: MisskeyUserDetailed,
+    pub notes_count: i64,
+    pub followers_count: i64,
+    pub following_count: i64,
+    pub is_moderator: bool,
+    pub is_admin: bool,
+    pub always_mark_nsfw: bool,
+    pub careful_bot: bool,
+    pub auto_accept_followed: bool,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MisskeyDriveFile {
@@ -77,4 +99,65 @@ pub struct MisskeyNote {
     pub url: Option<String>,
     /// 認証ユーザーが付けたリアクション（絵文字）。未認証・未リアクション時は `null`。
     pub my_reaction: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `misskey_dart` の `MeDetailed.fromJson`（Aria 等が `/api/i` のレスポンスをパースする際に
+    /// 使用）が non-nullable 必須として直接キャストするフィールド一覧。1つでも欠けると
+    /// Dart 側で未処理の `TypeError` となりアプリがフリーズする（実機で確認済みの回帰）。
+    #[test]
+    fn me_detailed_includes_all_misskey_dart_required_fields() {
+        let me = MisskeyMeDetailed {
+            detailed: MisskeyUserDetailed {
+                lite: MisskeyUserLite {
+                    id: "1".to_owned(),
+                    username: "alice".to_owned(),
+                    host: None,
+                    name: None,
+                    avatar_url: None,
+                    is_bot: false,
+                    is_cat: false,
+                },
+                created_at: "2026-01-01T00:00:00+00:00".to_owned(),
+                description: None,
+                banner_url: None,
+                is_locked: false,
+                is_silenced: false,
+                is_suspended: false,
+            },
+            notes_count: 0,
+            followers_count: 0,
+            following_count: 0,
+            is_moderator: false,
+            is_admin: false,
+            always_mark_nsfw: false,
+            careful_bot: false,
+            auto_accept_followed: false,
+        };
+        let value = serde_json::to_value(&me).unwrap();
+        for key in [
+            "id",
+            "username",
+            "isBot",
+            "isCat",
+            "createdAt",
+            "isLocked",
+            "isSilenced",
+            "isSuspended",
+            "notesCount",
+            "isModerator",
+            "isAdmin",
+            "alwaysMarkNsfw",
+            "carefulBot",
+            "autoAcceptFollowed",
+        ] {
+            assert!(
+                value.get(key).is_some_and(|v| !v.is_null()),
+                "必須フィールド `{key}` が欠けているか null です（misskey_dart 側で TypeError の原因になる）"
+            );
+        }
+    }
 }

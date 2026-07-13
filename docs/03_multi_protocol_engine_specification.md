@@ -401,6 +401,39 @@ Rust 実装は `lettre` クレートを使用する（`lettre = { version = "0.1
   エラーID体系ではなく、既存の seiran `ApiError` 形状をそのまま透過する
 - `emojis`（本文中のカスタム絵文字インライン表示用マップ）は常に空
 
+### 5.7 実機（Aria）デバッグで判明した MiAuth の実装不備（2026-07-13）
+
+Aria（third-party Misskey クライアント、`poppingmoon/aria`）での実機テストを通じて、Phase 1/2 の
+MiAuth 実装に3つの不備が見つかり修正した。いずれも「サーバーは200を返しているのにクライアントが
+フリーズする」形で顕在化し、原因究明は Aria 本体・依存パッケージ `misskey_dart`・実物の Misskey
+（`/home/yuba/misskey` にローカルチェックアウト済み）のソースを直接読んで特定した。
+
+1. **`/api/miauth/:sessionId/check` の未認可時レスポンスが非2xxだった**: 本家 Misskey は
+   未認可・不明セッションでも常に `200 {"ok": false}` を返すが、seiran は `400 Bad Request` を
+   返していた。Aria の `check()` 呼び出しは Dio を try/catch 無しで呼ぶ実装（go_router の
+   `redirect` コールバック内）のため、非2xx で未処理例外となりアプリがフリーズしていた。
+   → 常に `200` を返すよう修正。あわせてセッションを認可成立後に一度きりで消費する
+   （本家の `access_tokens.fetched` と同等の一回性）よう変更。
+2. **MiAuth が発行する「アクセストークン」が実体のないダミー文字列だった**: 以前は
+   `format!("miauth-token-{}", Uuid::new_v4())` という、どこにも登録されないランダム文字列を
+   返していた。タイムライン閲覧（未認証で見られる）は動くが、投稿等の要認証操作は
+   `extract_auth` がこれを JWT として検証できず 401 になっていた。
+   → 自社ログイン（`/api/auth/login`）と同じ `LocalAuthProvider::generate_token` で本物の
+   JWT を発行するよう変更（新しいトークン検証経路を追加しない）。既知の制約: アプリ単位の
+   失効・権限スコープは自社ログインのトークンと同じく未対応。
+3. **`/api/i` が `/api/users/show` と同じ小さいスキーマを返していた**: `misskey_dart` は
+   `/api/i` のレスポンスを `MeDetailed`（`UserDetailedNotMe` よりずっと大きい、自分専用の
+   スキーマ）としてパースし、`notesCount`/`isModerator`/`isAdmin`/`alwaysMarkNsfw`/
+   `carefulBot`/`autoAcceptFollowed` 等を non-nullable 必須として直接キャストする
+   （欠けると Dart の生の `TypeError` で未処理例外）。
+   → `/api/i` 専用の `MisskeyMeDetailed`（`handlers::misskey::types`）を新設し、
+   `notesCount`/`followersCount`/`followingCount` は実集計、`isAdmin`/`isModerator` は
+   実際の `users.role` から算出するようにした。`/api/users/show` は引き続き
+   `MisskeyUserDetailed`（`UserDetailedNotMe` 相当）のまま。
+
+いずれも `handlers::miauth.rs`・`handlers::misskey::{types,convert,endpoints}` にフィールド名を
+固定する回帰テストを追加済み。
+
 ---
 
 ## 9. リポスト・引用・リプライのクロスプロトコル配信ルール
