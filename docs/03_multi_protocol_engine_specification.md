@@ -282,9 +282,9 @@ GET /miauth/{sessionId}
 { "ok": false }
 ```
 
-> **注意**: 現在の seiran 実装は `POST /api/miauth/check`（ボディに `{"session": "..."}` を受け取るパス固定形式）になっている。
-> Aria が期待する `POST /api/miauth/{sessionId}/check`（パスにセッション ID）とは URL が異なるため、
-> ルーティングの修正が必要（フェーズ 2.4 で対応予定）。
+> **現在の seiran 実装**: `POST /api/miauth/{sessionId}/check`（Aria 等が期待するパスベース形式）と
+> `POST /api/miauth/check` + `{"session": "..."}`（seiran 独自フロントエンドが使うボディベース形式、
+> 後方互換として残置）の両方を提供する（フェーズ 2.4 で対応済み）。
 
 ### 5.4 メールアドレス確認フロー（Email Verification）
 
@@ -320,6 +320,86 @@ SMTP_TLS=starttls   # starttls | tls | none
 ```
 
 Rust 実装は `lettre` クレートを使用する（`lettre = { version = "0.11", features = ["tokio1", "smtp-transport"] }`）。
+
+### 5.5 互換性監査（2026-07-13）と対応状況
+
+フロントエンド向け API 全体を実際の Misskey API 仕様と突き合わせた監査を実施した。
+結論: **MiAuth ログイン導線と `/api/meta` によるサーバー検出は互換だが、ログイン後の実操作
+（ノート作成・タイムライン取得・リアクション・フォロー等）は Misskey の実際のワイヤープロトコル
+とは非互換**。無改造の Aria/Miria/ZonePane 等はログインはできても、その後の画面はほぼ動作しない。
+主な非互換点（詳細はフェーズ 7.4 のバックログを参照）:
+
+- **認証方式**: Misskey は `i`（アクセストークン）を JSON ボディ or クエリに含める。seiran は
+  `Authorization: Bearer` ヘッダーのみを見る（`middleware/auth.rs::extract_auth`）。
+- **HTTPメソッド**: Misskey の API エンドポイントは原則すべて `POST`（`GET`/`DELETE` は使わない）。
+  seiran はタイムライン系を `GET`、リポスト取消・リアクション取消を `DELETE` で実装している。
+- **レスポンス形状**: Misskey の `Note`/`UserLite` スキーマ（`visibility`, `cw`, `reactions`
+  （絵文字→件数のマップ）, `renoteCount`, `user.avatarUrl`, `user.host` 等）と seiran の
+  `NoteResponse`/`NoteUserInfo`（配列ベースの `reactions`、`domain` フィールド等）は別物。
+- **未実装の標準エンドポイント**: `/api/i`, `/api/users/show`, `/api/notes/show`,
+  `/api/notes/reactions/create`, `/api/notes/reactions/delete`, `/api/following/create`,
+  `/api/following/delete`, `/api/i/notifications`, `/api/notes/unrenote` など。
+- **ストリーミングプロトコル**: Misskey はチャンネル購読方式（`connect`/`channel`）、seiran は
+  認証ユーザー宛てブロードキャストのみの単純な WebSocket。
+
+**今回の監査で追加・修正した互換性向上（既存フロントエンドへの破壊的変更なし）**:
+
+- `GET /api/emojis`（新規・未認証）: Misskey クライアントの絵文字ピッカーが参照するカスタム
+  絵文字一覧を Misskey 互換の形状（`{emojis: [{id, aliases, name, category, host, url, license}]}`）
+  で公開する（`handlers/emojis.rs`）。従来は `/api/admin/emojis`（要 admin 認証）でしか取得できず、
+  一般ユーザー・第三者クライアントからは参照不能だった。
+- `POST /api/meta` に `emojis`（上記と同じ絵文字一覧）・`maxNoteTextLength`
+  （`notes::BSKY_MAX_TEXT_GRAPHEMES` と同期）・`disableRegistration` を追加。
+- エラーレスポンスに Misskey 風の入れ子 `error: {code, message}` を追加（既存の平坦な `code`
+  フィールドは後方互換のためそのまま維持）。`id`/`kind`（Misskey のエラー種別 UUID）は
+  seiran 側にレジストリが無く偽装になるため付与していない。
+- 5.3 の「ルーティング修正が必要」という記載は、パスベース `check` エンドポイントの実装により
+  解消済みだったため、注記を実装済みに更新した。
+
+**マイケルの方針決定（2026-07-13）**: フル互換を目指す。最終的には Misskey スキーマへ統一するが、
+移行中は既存のカスタム API・自社フロントエンド（`frontend/`）を無理に同時に壊さず、有利なら
+並存させてよい。Misskey 本家の設計自体に非効率・不自然な HTTP メソッド等がある箇所は、互換用
+エンドポイントと実用エンドポイントの両方を持たせる判断も許容する。これを受けて Phase 1・2 を
+本セッションで実装した（詳細は §5.6）。Phase 3（ストリーミングのチャンネル購読化）・Phase 4
+（フロントエンドの追従改修・旧エンドポイント整理）は未着手（フェーズ 7.4 バックログ）。
+
+### 5.6 Phase 1・2 実装内容（2026-07-13）
+
+**Phase 1 — `i` トークン認証ブリッジ**: 新設ミドルウェア `middleware::misskey_auth_bridge::bridge`
+をルーター最前段に追加。`Authorization` ヘッダーが無いリクエストに限り、JSON ボディの `i` または
+クエリの `i` を検出し、`Authorization: Bearer <token>` ヘッダーを合成してから次段へ渡す。
+既存の `extract_auth` 呼び出し箇所（約15箇所）は無改修のまま `i` 認証を受理できるようになった。
+ボディは `axum::body::to_bytes`（上限2MB）で一度バッファし、同じバイト列で `Body` を再構築して
+ダウンストリームの `Json<T>` extractor に渡す。優先順位はヘッダー＞ボディ`i`＞クエリ`i`。
+
+**Phase 2 — Misskey 準拠エンドポイントの追加（既存 API と並存）**: `handlers::misskey` モジュール
+配下に、実際の Misskey パス・POSTオンリー規約・JSONスキーマに合わせた**新規**エンドポイントを
+追加した（既存のカスタムエンドポイントは変更・削除していない）。
+
+| 追加エンドポイント | 内容 |
+|---|---|
+| `POST /api/i` | 自分自身の `UserDetailed` |
+| `POST /api/users/show` | `{userId}` または `{username,host}` でユーザー取得 |
+| `POST /api/notes/show` | `{noteId}` で単一ノート取得（`MisskeyNote` 形状） |
+| `POST /api/notes/local-timeline` / `POST /api/notes/timeline` | ボディで `limit`/`sinceId`/`untilId` を受理するタイムライン（既存の `GET` 版は残置） |
+| `POST /api/notes/reactions/create` / `delete` | `{noteId, reaction}` / `{noteId}`。成功時 `204 No Content` |
+| `POST /api/notes/unrenote` | `{noteId}`。成功時 `204 No Content` |
+| `POST /api/following/create` / `delete` | `{userId}`（seiran の actors.id）。成功時 `204 No Content` |
+
+書き込み系（リアクション・アンリノート・フォロー）は既存の `handlers::notes`/`handlers::follows`
+の関数を直接呼び出し、AP/ATP配送・ストリーミング配信などの副作用ロジックをそのまま再利用する
+（レスポンスだけ Misskey 流に整形）。読み取り系は `handlers::misskey::convert` が
+`TimelinePost`/`Actor` から `MisskeyNote`/`MisskeyUserLite`/`MisskeyUserDetailed`
+（`handlers::misskey::types`）を組み立てる。renote数/reply数は既存リポジトリに集計メソッドが
+無いため `convert::fetch_counts_map` で都度 SELECT している。
+
+**既知の簡略化・未対応点**（いずれも「Phase 2 は完全再現ではなく実用最小部分集合」という前提で
+意図的に許容している）:
+- `visibility` は常に `"public"`（seiran はまだ公開範囲の概念を持たない）
+- `cw` は常に `null`（Content Warning 未対応）
+- リアクション作成/削除・アンリノート・フォロー作成/削除のエラーレスポンスは Misskey 本家の
+  エラーID体系ではなく、既存の seiran `ApiError` 形状をそのまま透過する
+- `emojis`（本文中のカスタム絵文字インライン表示用マップ）は常に空
 
 ---
 

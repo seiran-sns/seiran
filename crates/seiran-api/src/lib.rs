@@ -229,9 +229,22 @@ pub fn router(state: AppState) -> Router {
             .patch(handlers::users::update_profile))
         // Misskey 互換レイヤー
         .route("/api/meta", post(handlers::meta::api_meta))
+        // カスタム絵文字一覧（未認証・Misskey クライアントのリアクションピッカー用）
+        .route("/api/emojis", get(handlers::emojis::list_emojis))
+        // Misskey 準拠の追加エンドポイント（Phase 2）。既存のカスタムAPIと並存する。
+        .route("/api/i", post(handlers::misskey::endpoints::api_i))
+        .route("/api/users/show", post(handlers::misskey::endpoints::users_show))
+        .route("/api/notes/show", post(handlers::misskey::endpoints::notes_show))
+        .route("/api/notes/local-timeline", post(handlers::misskey::endpoints::notes_local_timeline))
+        .route("/api/notes/timeline", post(handlers::misskey::endpoints::notes_home_timeline))
+        .route("/api/notes/reactions/create", post(handlers::misskey::endpoints::reactions_create))
+        .route("/api/notes/reactions/delete", post(handlers::misskey::endpoints::reactions_delete))
+        .route("/api/notes/unrenote", post(handlers::misskey::endpoints::notes_unrenote))
+        .route("/api/following/create", post(handlers::misskey::endpoints::following_create))
+        .route("/api/following/delete", post(handlers::misskey::endpoints::following_delete))
         // MiAuth（Misskey 互換クライアント用）
         .route("/miauth/:session_id", get(handlers::miauth::miauth_page))
-        .route("/miauth/:session_id/authorize", post(handlers::miauth::miauth_authorize))
+        .route("/api/miauth/:session_id/authorize", post(handlers::miauth::miauth_authorize))
         .route("/api/miauth/:session_id/check", post(handlers::miauth::miauth_check_by_path))
         .route("/api/miauth/check", post(handlers::miauth::miauth_check))
         // AT Protocol XRPC エンドポイント
@@ -245,6 +258,9 @@ pub fn router(state: AppState) -> Router {
         .route("/.well-known/did.json", get(handlers::xrpc::server::well_known_did))
         .route("/.well-known/atproto-did", get(handlers::xrpc::server::well_known_atproto_did))
         .with_state(state)
+        // Misskey クライアントの `i`（ボディ/クエリ）トークンを Authorization ヘッダーへ
+        // 合成するブリッジ。既存ハンドラの extract_auth 呼び出しは無改修のまま両対応になる。
+        .layer(axum::middleware::from_fn(middleware::misskey_auth_bridge::bridge))
         .layer(cors)
 }
 

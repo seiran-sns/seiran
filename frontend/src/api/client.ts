@@ -600,6 +600,13 @@ export const api = {
     },
   },
 
+  miauth: {
+    /** MiAuth 認可確認画面（`/connect/:sessionId`）で「承認する」を押した時に呼ぶ。 */
+    authorize(sessionId: string) {
+      return request<{ ok: boolean }>("POST", `/miauth/${encodeURIComponent(sessionId)}/authorize`);
+    },
+  },
+
   media: {
     upload(file: File, mediaType: "post" | "emoji" | "avatar" | "banner" = "post"): Promise<DriveFile> {
       const formData = new FormData();

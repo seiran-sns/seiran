@@ -7,7 +7,19 @@ use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 struct ApiErrorBody {
+    /// 既存フロントエンド（`frontend/src/api/client.ts`）が読む後方互換フィールド。
     code: String,
+    /// Misskey クライアントが読む `error.code` / `error.message` に寄せた入れ子表現。
+    /// 実際の Misskey はここに `id`（UUID のエラー種別識別子）・`kind` も含めるが、
+    /// seiran はエラーごとの ID レジストリを持たないため未対応（付与すると誤った識別子を
+    /// 騙ることになるため、無理に埋めない）。
+    error: ApiErrorDetail,
+}
+
+#[derive(Debug, Serialize)]
+struct ApiErrorDetail {
+    code: String,
+    message: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +61,11 @@ impl IntoResponse for ApiError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR".to_owned())
             }
         };
-        (status, Json(ApiErrorBody { code })).into_response()
+        // message は Internal のログ詳細を漏らさないよう、常に外部公開済みの code を再利用する。
+        let body = ApiErrorBody {
+            code: code.clone(),
+            error: ApiErrorDetail { code: code.clone(), message: code },
+        };
+        (status, Json(body)).into_response()
     }
 }

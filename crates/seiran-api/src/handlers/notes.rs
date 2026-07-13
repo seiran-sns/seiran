@@ -587,9 +587,22 @@ async fn resolve_quote_embed(state: &AppState, quote_of_id: i64) -> (Option<Bsky
     (bsky_embed, ap_url)
 }
 
+/// Bsky 配信時の本文上限（書記素クラスタ数）。`/api/meta` の `maxNoteTextLength` にも使う。
+pub const BSKY_MAX_TEXT_GRAPHEMES: usize = 300;
+/// Bsky 配信時の本文上限（バイト数）。
+const BSKY_MAX_TEXT_BYTES: usize = 3_000;
+/// Fedi のみ配信時の本文上限（書記素クラスタ数）。
+const FEDI_MAX_TEXT_GRAPHEMES: usize = 3_000;
+/// Fedi のみ配信時の本文上限（バイト数）。
+const FEDI_MAX_TEXT_BYTES: usize = 10_000;
+
 /// 投稿文字数を配信先（Bsky か否か）に応じたバイト数・書記素クラスタ数の上限で検証する。
 fn validate_text_length(text: &str, deliver_bsky: bool) -> Result<(), ApiError> {
-    let (max_bytes, max_graphemes): (usize, usize) = if deliver_bsky { (3_000, 300) } else { (10_000, 3_000) };
+    let (max_bytes, max_graphemes): (usize, usize) = if deliver_bsky {
+        (BSKY_MAX_TEXT_BYTES, BSKY_MAX_TEXT_GRAPHEMES)
+    } else {
+        (FEDI_MAX_TEXT_BYTES, FEDI_MAX_TEXT_GRAPHEMES)
+    };
     if text.len() > max_bytes || text.graphemes(true).count() > max_graphemes {
         return Err(ApiError::BadRequest("TEXT_TOO_LONG".to_owned()));
     }

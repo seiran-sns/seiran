@@ -1,7 +1,7 @@
 use axum::{
-    extract::{Form, Path, Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{IntoResponse, Redirect, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -10,26 +10,19 @@ use uuid::Uuid;
 use crate::middleware::extract_auth;
 use crate::AppState;
 
-#[derive(Debug, Clone)]
+/// MiAuth セッションの認可状態。認可（`POST /api/miauth/:session_id/authorize`）が
+/// 成立して初めて `token`/`user_id`/`username` が埋まる。
+#[derive(Debug, Clone, Default)]
 pub struct MiAuthSession {
-    #[allow(dead_code)]
-    pub app_name: String,
-    pub redirect_uri: Option<String>,
     pub token: Option<String>,
     pub user_id: Option<i64>,
     pub username: Option<String>,
-    pub csrf_token: String,
 }
 
 #[derive(Deserialize)]
 pub struct MiAuthQuery {
     pub name: String,
     pub callback: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct AuthorizeForm {
-    pub csrf_token: String,
 }
 
 #[derive(Deserialize)]
@@ -54,33 +47,40 @@ pub struct CheckResponse {
     pub user: CheckResponseUser,
 }
 
-/// [MED-02] callback URL が安全なリダイレクト先かどうかを検証する
-/// HTTPS スキームのみ許可し、localhost・IP アドレスは拒否する
+/// [MED-02] callback URL が安全なリダイレクト先かどうかを検証する。
+///
+/// MiAuth のネイティブアプリクライアント（Aria 等）は `aria://aria/miauth` のような
+/// カスタム URI スキームをコールバックに使う（Doc3 §5.2 に例示済み）。これは OS の
+/// Intent ディスパッチであってネットワーク到達性の懸念（SSRF・内部ネットワークへの誘導）が
+/// 無いため許可する。`https` はホスト検証（localhost・プライベート IP を拒否）した上で許可、
+/// `http`（平文でセッション ID が漏れる）とスクリプト実行系スキームは明示的に拒否する。
 fn is_valid_callback(url: &str) -> bool {
     let Ok(parsed) = url::Url::parse(url) else {
         return false;
     };
-    if parsed.scheme() != "https" {
-        return false;
+    match parsed.scheme() {
+        "https" => {
+            let Some(host) = parsed.host_str() else {
+                return false;
+            };
+            !(host == "localhost" || host.starts_with("127.") || host.starts_with("192.168.")
+                || host.starts_with("10.") || host == "::1" || host == "[::1]")
+        }
+        "http" | "javascript" | "data" | "vbscript" | "file" => false,
+        // それ以外はネイティブアプリのカスタム URI スキームとして許可する。
+        _ => true,
     }
-    let host = match parsed.host_str() {
-        Some(h) => h,
-        None => return false,
-    };
-    if host == "localhost" || host.starts_with("127.") || host.starts_with("192.168.")
-        || host.starts_with("10.") || host == "::1" || host == "[::1]"
-    {
-        return false;
-    }
-    true
 }
 
-pub async fn miauth_page(
-    Path(session_id): Path<String>,
-    Query(query): Query<MiAuthQuery>,
-    headers: HeaderMap,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+/// `GET /miauth/:session_id`
+///
+/// Aria 等のクライアントが最初に開く URL。認可画面自体は自社フロントエンド（SPA）側に
+/// 統一したため（既存のログイン・タイムライン等の画面と一貫させるため）、ここでは
+/// callback URL の検証だけ行い、`name`/`callback` を引き継いで `/connect/:session_id`
+/// （フロントエンドのルート）へ 303 リダイレクトするだけの薄い入口にする。
+/// ログイン要否の判定・認可アクション自体は SPA 側が `RequireAuth` と
+/// `POST /api/miauth/:session_id/authorize`（Bearer 認証）で行う。
+pub async fn miauth_page(Path(session_id): Path<String>, Query(query): Query<MiAuthQuery>) -> impl IntoResponse {
     // [MED-02] callback URL を事前に検証する
     if let Some(ref cb) = query.callback {
         if !is_valid_callback(cb) {
@@ -88,136 +88,50 @@ pub async fn miauth_page(
         }
     }
 
-    // Authorization ヘッダーが存在すれば JWT を検証してユーザー ID を取得する
-    let user_id = extract_auth(&headers, &state.local_auth)
-        .await
-        .ok()
-        .map(|u| u.user_id);
-
-    // 未ログイン時はログイン画面へリダイレクト
-    if user_id.is_none() {
-        let mut return_url = format!("/miauth/{}?name={}", session_id, urlencoding::encode(&query.name));
-        if let Some(ref cb) = query.callback {
-            return_url.push_str(&format!("&callback={}", urlencoding::encode(cb)));
-        }
-        let login_url = format!("/login?redirect={}", urlencoding::encode(&return_url));
-        return Redirect::to(&login_url).into_response();
+    let mut redirect_url = format!("/connect/{}?name={}", session_id, urlencoding::encode(&query.name));
+    if let Some(ref cb) = query.callback {
+        redirect_url.push_str(&format!("&callback={}", urlencoding::encode(cb)));
     }
-
-    // [MED-03] CSRF トークンを生成してセッションに保存する
-    let csrf_token = Uuid::new_v4().to_string();
-
-    let mut map = state.miauth_sessions.write().await;
-    map.insert(
-        session_id.clone(),
-        MiAuthSession {
-            app_name: query.name.clone(),
-            redirect_uri: query.callback.clone(),
-            token: None,
-            user_id,
-            username: None,
-            csrf_token: csrf_token.clone(),
-        },
-    );
-
-    // [MED-01] クエリパラメータ name を HTML エスケープしてから埋め込む
-    let escaped_name = html_escape::encode_text(&query.name);
-    let escaped_session_id = html_escape::encode_text(&session_id);
-
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-  <title>seiran - MiAuth 認可</title>
-  <style>
-    body {{ font-family: sans-serif; display: flex; justify-content: center; align-items: center;
-            height: 100vh; margin: 0; background: #121214; color: #e1e1e6; }}
-    .card {{ background: #202024; padding: 30px; border-radius: 8px; max-width: 400px; text-align: center; }}
-    h2 {{ margin-top: 0; color: #fff; }}
-    button {{ background: #4f46e5; color: white; border: none; padding: 10px 20px;
-              border-radius: 4px; font-size: 16px; cursor: pointer; margin-top: 20px; }}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h2>アプリ連携の認可</h2>
-    <p>アプリ <strong>{}</strong> が seiran アカウントへのアクセスを求めています。</p>
-    <form action="/miauth/{}/authorize" method="POST">
-      <input type="hidden" name="csrf_token" value="{}">
-      <button type="submit">連携を承認する</button>
-    </form>
-  </div>
-</body>
-</html>"#,
-        escaped_name, escaped_session_id, csrf_token
-    );
-
-    Html(html).into_response()
+    Redirect::to(&redirect_url).into_response()
 }
 
+/// `POST /api/miauth/:session_id/authorize`
+///
+/// SPA の認可確認画面（ログイン済みユーザーのみ到達できる）から、既存の
+/// `Authorization: Bearer` 認証で呼ばれる。CSRF トークンの手当ては不要
+/// （同一オリジンの JS が明示的に付与したヘッダーのみで認証するため、ブラウザが
+/// 自動送信する Cookie 前提の CSRF とは脅威モデルが異なる）。
 pub async fn miauth_authorize(
     Path(session_id): Path<String>,
+    headers: HeaderMap,
     State(state): State<AppState>,
-    Form(form): Form<AuthorizeForm>,
 ) -> impl IntoResponse {
-    // [MED-03] CSRF トークン検証（セッションのトークンとフォームのトークンを照合）
-    let (user_id, redirect_uri) = {
-        let map = state.miauth_sessions.read().await;
-        match map.get(&session_id) {
-            Some(session) => {
-                if session.csrf_token != form.csrf_token {
-                    return (StatusCode::FORBIDDEN, "CSRF トークンが無効です").into_response();
-                }
-                match session.user_id {
-                    Some(id) => (id, session.redirect_uri.clone()),
-                    None => {
-                        return (
-                            StatusCode::UNAUTHORIZED,
-                            "認証が必要です。先にログインしてから認可してください。",
-                        )
-                            .into_response()
-                    }
-                }
-            }
-            None => {
-                return (StatusCode::NOT_FOUND, "セッションが見つかりません").into_response()
-            }
-        }
+    let auth_user = match extract_auth(&headers, &state.local_auth).await {
+        Ok(u) => u,
+        Err(e) => return e.into_response(),
     };
 
-    // Phase 2: DB からユーザー名を取得（ロック不保持）
-    let username = match state.actors.find_local_by_user_id(user_id).await {
+    let username = match state.actors.find_local_by_user_id(auth_user.user_id).await {
         Ok(Some(a)) => a.username,
-        Ok(None) => {
-            return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response()
-        }
+        Ok(None) => return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
         Err(e) => {
             eprintln!("[miauth] ユーザー検索失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
 
-    // Phase 3: セッションにトークンとユーザー名を保存し、リダイレクト（書き込みロック）
+    let token = format!("miauth-token-{}", Uuid::new_v4());
     let mut map = state.miauth_sessions.write().await;
-    if let Some(session) = map.get_mut(&session_id) {
-        let token = format!("miauth-token-{}", Uuid::new_v4());
-        session.token = Some(token);
-        session.username = Some(username);
+    map.insert(
+        session_id,
+        MiAuthSession {
+            token: Some(token),
+            user_id: Some(auth_user.user_id),
+            username: Some(username),
+        },
+    );
 
-        if let Some(ref callback) = redirect_uri {
-            // [MED-02] リダイレクト直前に再度検証（セッション保存時点でのチェック済みだが念のため）
-            if is_valid_callback(callback) {
-                let redirect_url = if callback.contains('?') {
-                    format!("{}&session={}", callback, session_id)
-                } else {
-                    format!("{}?session={}", callback, session_id)
-                };
-                return Redirect::to(&redirect_url).into_response();
-            }
-        }
-    }
-
-    Html("<h3>認可されました。アプリに戻ってください。</h3>").into_response()
+    Json(serde_json::json!({ "ok": true })).into_response()
 }
 
 /// Misskey 互換クライアント（Aria 等）が使用するパスベース check エンドポイント。
@@ -293,5 +207,19 @@ mod tests {
     fn invalid_callback_malformed() {
         assert!(!is_valid_callback("not-a-url"));
         assert!(!is_valid_callback(""));
+    }
+
+    #[test]
+    fn valid_callback_native_app_custom_scheme() {
+        // Aria 等のネイティブアプリが使うカスタム URI スキーム（Doc3 §5.2 に例示済み）。
+        assert!(is_valid_callback("aria://aria/miauth"));
+        assert!(is_valid_callback("miria://callback"));
+    }
+
+    #[test]
+    fn invalid_callback_script_schemes() {
+        assert!(!is_valid_callback("javascript:alert(1)"));
+        assert!(!is_valid_callback("data:text/html,<script>alert(1)</script>"));
+        assert!(!is_valid_callback("file:///etc/passwd"));
     }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
@@ -10,6 +10,7 @@ import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HomePage from "./pages/HomePage";
 import Login from "./pages/Login";
+import MiAuthConnectPage from "./pages/MiAuthConnectPage";
 import NoteDetailPage from "./pages/NoteDetailPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -22,14 +23,24 @@ import VerifyEmail from "./pages/VerifyEmail";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return null;
-  return user ? <>{children}</> : <Navigate to="/login" replace />;
+  if (!user) {
+    const redirect = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?redirect=${redirect}`} replace />;
+  }
+  return <>{children}</>;
 }
 
 function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const [searchParams] = useSearchParams();
   if (loading) return null;
-  return user ? <Navigate to="/" replace /> : <>{children}</>;
+  if (user) {
+    const redirectTo = searchParams.get("redirect");
+    return <Navigate to={redirectTo && redirectTo.startsWith("/") ? redirectTo : "/"} replace />;
+  }
+  return <>{children}</>;
 }
 
 /** `/@handle` 形式の permalink（#36）。`@` 始まりのときのみプロフィールを表示。 */
@@ -111,6 +122,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <ProfileEditPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/connect/:sessionId"
+        element={
+          <RequireAuth>
+            <MiAuthConnectPage />
           </RequireAuth>
         }
       />

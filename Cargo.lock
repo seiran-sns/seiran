@@ -3449,6 +3449,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
+ "tower",
  "tower-http 0.5.2",
  "unicode-segmentation",
  "url",
