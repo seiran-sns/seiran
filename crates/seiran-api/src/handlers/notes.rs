@@ -1251,7 +1251,12 @@ pub async fn create_reaction(
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
 
-    if let Err(e) = state.reactions.insert(note_id, me.id, "emoji", &content, None).await {
+    // ATP 連携（切替時に削除すべき旧 Like の rkey を退避 / 配信先の at_uri・at_cid を取得）。
+    // 対象に ATP 実体が無ければ配信しない（AP/Bsky 由来でも at_uri を持たないポストへは無反応）。
+    let prev_at_uri = state.reactions.find_at_uri(note_id, me.id).await.ok().flatten();
+    let delivery_meta = state.posts.find_delivery_meta(note_id).await.ok().flatten();
+
+    if let Err(e) = state.reactions.insert(note_id, me.id, "emoji", &content, None, None).await {
         return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response();
     }
 
@@ -1280,6 +1285,28 @@ pub async fn create_reaction(
         Some(&content),
     )
     .await;
+
+    // ATP 連携: 絵文字は送れないため Like として送る（`emoji` は非標準の拡張メタデータとして
+    // ベストエフォートで載せる）。旧リアクションがあれば先に削除してから作り直す（切替）。
+    if let Some(meta) = delivery_meta {
+        if let (Some(target_uri), Some(target_cid)) = (meta.at_uri, meta.at_cid) {
+            let atp = Arc::clone(&state.atp_service);
+            let actor_id = me.id;
+            let emoji = content.clone();
+            let prev_rkey = prev_at_uri.as_deref().and_then(|u| u.rsplit('/').next()).map(|s| s.to_string());
+            let now = chrono::Utc::now();
+            tokio::spawn(async move {
+                if let Some(rkey) = prev_rkey {
+                    if let Err(e) = atp.delete_atp_like(actor_id, &rkey, now).await {
+                        eprintln!("[create_reaction] ATP Like 削除失敗（切替前処理）: {}", e);
+                    }
+                }
+                if let Err(e) = atp.commit_like(actor_id, note_id, &target_uri, &target_cid, Some(&emoji), now).await {
+                    eprintln!("[create_reaction] ATP Like commit 失敗: {}", e);
+                }
+            });
+        }
+    }
 
     let rmap = fetch_reactions_map(&state.db, &[note_id], Some(me.id)).await;
     Json(serde_json::json!({
@@ -1318,6 +1345,9 @@ pub async fn delete_reaction(
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
 
+    // ATP 連携: 削除前に現在の at_uri（Like レコードの rkey）を退避しておく。
+    let prev_at_uri = state.reactions.find_at_uri(note_id, actor_id).await.ok().flatten();
+
     let deleted = match state.reactions.delete_local(note_id, actor_id, &content).await {
         Ok(n) => n,
         Err(e) => return ApiError::Internal(format!("reactions DELETE 失敗: {}", e)).into_response(),
@@ -1336,6 +1366,16 @@ pub async fn delete_reaction(
         None,
     )
     .await;
+
+    if let Some(rkey) = prev_at_uri.as_deref().and_then(|u| u.rsplit('/').next()).map(|s| s.to_string()) {
+        let atp = Arc::clone(&state.atp_service);
+        let now = chrono::Utc::now();
+        tokio::spawn(async move {
+            if let Err(e) = atp.delete_atp_like(actor_id, &rkey, now).await {
+                eprintln!("[delete_reaction] ATP Like 削除失敗: {}", e);
+            }
+        });
+    }
 
     let rmap = fetch_reactions_map(&state.db, &[note_id], Some(actor_id)).await;
     Json(serde_json::json!({

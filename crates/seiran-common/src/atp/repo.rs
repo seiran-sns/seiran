@@ -424,6 +424,24 @@ struct BskyFeedRepost {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// app.bsky.feed.like レコード構造体（リアクション連携）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `app.bsky.feed.like` レコード。ATP には絵文字リアクションの概念が無いため、
+/// どの絵文字であっても Like として送る。`emoji` は非標準の拡張フィールド
+/// （seiran 独自。公式 Bluesky クライアントは無視するだけのはず）。
+#[derive(Serialize)]
+struct BskyFeedLike {
+    #[serde(rename = "$type")]
+    kind: String,
+    subject: BskyRefRecord,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    emoji: Option<String>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Bsky embed 種別
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -547,6 +565,28 @@ pub fn encode_bsky_feed_repost(
             uri: at_uri.to_string(),
         },
         created_at: created_at_rfc3339.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
+/// `app.bsky.feed.like` レコードの DAG-CBOR バイト列と CID を生成する。
+/// `emoji` は非標準の拡張フィールド（Some の場合のみレコードへ含める）。
+pub fn encode_bsky_feed_like(
+    at_uri: &str,
+    at_cid: &str,
+    created_at_rfc3339: &str,
+    emoji: Option<&str>,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    let record = BskyFeedLike {
+        kind: "app.bsky.feed.like".to_string(),
+        subject: BskyRefRecord {
+            cid: at_cid.to_string(),
+            uri: at_uri.to_string(),
+        },
+        created_at: created_at_rfc3339.to_string(),
+        emoji: emoji.map(|s| s.to_string()),
     };
     let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
     let cid = cid_from_dagcbor(&cbor);
@@ -821,5 +861,24 @@ mod tests {
         let entries = vec![("app.bsky.feed.post/test123".to_string(), cid)];
         let result = build_mst(&entries);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_encode_bsky_feed_like_with_emoji() {
+        let (cbor, cid) = encode_bsky_feed_like(
+            "at://did:plc:abc/app.bsky.feed.post/xyz",
+            "bafyreidummycid",
+            "2024-01-01T00:00:00.000Z",
+            Some("👍"),
+        ).unwrap();
+        assert!(!cbor.is_empty());
+        assert_eq!(cid_from_dagcbor(&cbor), cid);
+    }
+
+    #[test]
+    fn test_encode_bsky_feed_like_without_emoji_omits_field() {
+        let (with_emoji, _) = encode_bsky_feed_like("at://a/b/c", "cid1", "2024-01-01T00:00:00.000Z", Some("❤")).unwrap();
+        let (without_emoji, _) = encode_bsky_feed_like("at://a/b/c", "cid1", "2024-01-01T00:00:00.000Z", None).unwrap();
+        assert_ne!(with_emoji, without_emoji, "emoji フィールドの有無で CBOR が変わらないのはおかしい");
     }
 }

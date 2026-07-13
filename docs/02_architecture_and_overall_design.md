@@ -398,7 +398,7 @@ AP Note の形式:
 ### 2.8 ポストカードの共通化（#43）
 タイムライン・ポスト詳細・ユーザー詳細の各画面で、ポスト表示は単一のカードコンポーネント（フロント `components/note/NoteCard`）を共用する。最も機能が充実したタイムラインのカードを正とし、他画面へ横展開する。
 * **プロフィールの投稿**: `ProfileResponse.recent_posts` を、タイムラインと同一形状の `NoteResponse`（アクター情報・添付・リアクション込み）で返す。バックエンドは `PostRepository::timeline_by_actor`（アクター指定の結合クエリ）で取得し、`fetch_attachments_map` / `fetch_reactions_map` で集計して `to_note_response` で組み立てる。フロントは受信後 `normalizeNote` で `Note` に正規化して `NoteCard` を描画する。
-* **リアクション追加/取消（ローカル）**: `fetch_reactions_map` は閲覧者の `actor_id`（`my_actor_id`）を受け取り、各 `ReactionSummary` に `reactedByMe` を付与する。1投稿につきユーザー1リアクションまで（Misskey 準拠、`reactions` テーブルの `UNIQUE(post_id, actor_id)`）のため、別の絵文字を選ぶと `ReactionRepository::insert` の `ON CONFLICT DO UPDATE` により既存のリアクションが**切り替わる**（同時に2つは付かない）。フロントは `NoteCard` の `ReactionChips`（表示チップをクリックで同じ絵文字をトグル/切替）と `ReactionPicker`（固定クイック絵文字 + 自由入力のポップオーバー）から `api.notes.react` / `api.notes.unreact`（`POST`/`DELETE /api/notes/:id/reactions[...]`）を呼び、レスポンスの権威的な `reactions` 配列でローカル state を更新する（楽観的更新 + 失敗時ロールバック。切替中は他の絵文字操作もまとめてロック）。加えて、著者+フォロワーの範囲では他クライアントの操作も `noteUpdated` ストリームイベント経由でリアルタイムに反映される（§2.7 参照）。対象がリモート投稿でも AP/ATP への outbound 配信は行わずローカル記録のみ。
+* **リアクション追加/取消（ローカル）**: `fetch_reactions_map` は閲覧者の `actor_id`（`my_actor_id`）を受け取り、各 `ReactionSummary` に `reactedByMe` を付与する。1投稿につきユーザー1リアクションまで（Misskey 準拠、`reactions` テーブルの `UNIQUE(post_id, actor_id)`）のため、別の絵文字を選ぶと `ReactionRepository::insert` の `ON CONFLICT DO UPDATE` により既存のリアクションが**切り替わる**（同時に2つは付かない）。フロントは `NoteCard` の `ReactionChips`（表示チップをクリックで同じ絵文字をトグル/切替）と `ReactionPicker`（固定クイック絵文字 + 自由入力のポップオーバー）から `api.notes.react` / `api.notes.unreact`（`POST`/`DELETE /api/notes/:id/reactions[...]`）を呼び、レスポンスの権威的な `reactions` 配列でローカル state を更新する（楽観的更新 + 失敗時ロールバック。切替中は他の絵文字操作もまとめてロック）。加えて、著者+フォロワーの範囲では他クライアントの操作も `noteUpdated` ストリームイベント経由でリアルタイムに反映される（§2.7 参照）。対象が AP/Fedi リモート投稿の場合は outbound 配信を行わずローカル記録のみだが、**ATP（Bluesky）へは outbound 配信する**（Doc1 §1.4 参照。`AtpCommitService::commit_like`/`delete_atp_like` で `app.bsky.feed.like` をコミット/削除し、絵文字は非標準の `emoji` 拡張フィールドとしてベストエフォートで載せる）。逆方向（ATP → ローカル）も `seiran-atp-repo` の Jetstream 受信で `app.bsky.feed.like` を検知し `reactions` へ反映する（Doc1 §1.4。`wantedCollections` で post/like 以外のcollectionはサーバー側で除外されるが、Like自体は対象が任意の投稿のためDIDでは絞り込めず、グローバルなLikeイベント全件を判定する設計になっている）。
 * **ポスト詳細の主役ポスト**: 中央のフォーカス投稿も同じ `NoteCard` を用いる。大きめ文字・大きめカードで強調するため、`NoteCard` に `large` オプションを設け（アバター 48px・本文拡大・左アクセントボーダー）、`<NoteCard note large linkToDetail={false} />` で描画する。専用の focal レイアウトは廃止し、モジュールを完全共通化した。前後投稿も従来どおり `NoteCard`（通常サイズ）を用いる。
 
 ### 2.9 退会機能 Phase A（#29）
@@ -457,7 +457,7 @@ AP Note の形式:
 | `api` | `seiran-api` | `PORT`（既定 3000） | REST API / 認証 / タイムライン / XRPC |
 | `federation` | `seiran-federation-inbox` | `FEDERATION_INBOX_PORT`（既定 3001） | ActivityPub Inbox / WebFinger / Actor / Outbox / NodeInfo |
 | `worker` | `seiran-federation-worker` | なし | 非同期ジョブ実行エンジン（現状 DB 不要のスタブ） |
-| `firehose` | `seiran-atp-repo` | なし | Bluesky Firehose リスナー |
+| `firehose` | `seiran-atp-repo` | なし | Bluesky Jetstream リスナー（Relay Firehose を購読するBluesky公式の軽量フィルタ済みサービス） |
 
 - **ルーター合流**: `seiran-api` と `seiran-federation-inbox` は担当パスが完全に重複しないため（前者は `/api/*` `/xrpc/*` `/notes/:id` 等、後者は `/inbox` `/users/:username` `/.well-known/webfinger` 等）、`all` モードでは axum の `Router::merge` で単一ポートに合流できる。各ルーターは自前の `AppState` を `with_state` で保持したまま合流するため、状態の統合は不要。
 - **共有リソース**: `all` モードでは DB プール・シークレット・HTTP クライアントをプロセス内で一度だけ生成し、各ロールの `init_state` へ渡す（重複接続の回避）。
@@ -511,7 +511,7 @@ graph TD
   - ローカルユーザーの MST（Merkle Search Tree）リポジトリの生成・更新
   - レコード（投稿・フォロー等）への P-256 署名コミットの作成
   - Relay サーバー（`bsky.network` 等）への配信（`com.atproto.sync` 系 API）
-  - Bluesky Firehose の受信（フォロー済みアクターの新着投稿を DB に保存）
+  - Bluesky Jetstream（Relay Firehose をフィルタ済みJSONで配信する公式軽量サービス）の受信。フォロー済みアクターの新着投稿を DB に保存、および `app.bsky.feed.like` を検知してリアクションに反映
 * **外部 PDS への依存なし**: seiran が PDS 本体であるため、bsky.social 等の外部 PDS の認証情報は一切不要。
 * **状態性**: 各アクターの署名鍵やリポジトリ整合性を管理する性質上、**シーケンシャルで厳密な順序性（排他制御）が必要な半ステートフル**な領域。
 * **将来の物理分割**: gRPCや内部APIを通じてAPIやWorkerからアクセスされる、シングルトン的またはアクター単位でパーティショニング（シャード）された独立サービスとして切り離し可能。

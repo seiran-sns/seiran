@@ -7,7 +7,7 @@ use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
     build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
     cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
-    encode_bsky_feed_repost, encode_bsky_graph_follow,
+    encode_bsky_feed_repost, encode_bsky_feed_like, encode_bsky_graph_follow,
     generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage, BskyEmbed,
     BskyPostReply,
 };
@@ -421,6 +421,51 @@ impl AtpCommitService {
         Ok(())
     }
 
+    /// `app.bsky.feed.like` レコードをコミットする（リアクション連携）。
+    /// ATP には絵文字リアクションの概念が無いため、どの絵文字でも Like として送る。
+    /// `emoji` は非標準の拡張フィールドとしてベストエフォートで載せる。
+    /// 成功したら生成した at_uri（`at://did/app.bsky.feed.like/rkey`）を
+    /// `reactions.at_uri` に自己保存する（`commit_repost` が `posts.atp_repost_rkey` を
+    /// 自己保存するのと同じ流儀）。切替（別の絵文字への変更）の場合、旧 Like の削除は
+    /// 呼び出し側が事前に `delete_atp_like` で行う（このメソッドは新規作成のみを担う）。
+    pub async fn commit_like(
+        &self,
+        actor_id: i64,
+        post_id: i64,
+        target_at_uri: &str,
+        target_at_cid: &str,
+        emoji: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let rkey = generate_tid();
+        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        let (record_cbor, record_cid) = encode_bsky_feed_like(target_at_uri, target_at_cid, &created_at_str, emoji)?;
+
+        let record = CommitRecord {
+            collection: "app.bsky.feed.like",
+            rkey: rkey.clone(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action: "create",
+            blob_cids: vec![],
+        };
+
+        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+
+        let at_uri_self = format!("at://{}/app.bsky.feed.like/{}", result.at_did, rkey);
+        sqlx::query("UPDATE reactions SET at_uri = $1 WHERE post_id = $2 AND actor_id = $3")
+            .bind(&at_uri_self)
+            .bind(post_id)
+            .bind(actor_id)
+            .execute(&self.pool)
+            .await?;
+
+        eprintln!("[atp] like commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
     /// `app.bsky.graph.follow` レコードをコミットする。
     /// 成功時は生成した rkey を返す（将来のアンフォロー時に必要）。
     pub async fn commit_follow(
@@ -600,6 +645,162 @@ impl AtpCommitService {
         }
 
         eprintln!("[atp] repost delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
+    /// リアクション取消/切替コミット（`app.bsky.feed.like` レコードを MST から削除する）。
+    /// `reactions.at_uri` のクリアは呼び出し側の責務
+    /// （ローカル取消は行自体を DELETE するので不要。切替は直後の `commit_like` が上書きする）。
+    pub async fn delete_atp_like(
+        &self,
+        actor_id: i64,
+        rkey: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        // ① アクター情報取得
+        let actor_row = sqlx::query(
+            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev
+             FROM actors WHERE id = $1",
+        )
+        .bind(actor_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let at_did: String = actor_row
+            .try_get::<Option<String>, _>("at_did")?
+            .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
+        let signing_key_pem: String = actor_row
+            .try_get::<Option<String>, _>("at_signing_key_pem")?
+            .ok_or(AtpCommitError::ActorConfig("at_signing_key_pem が未設定"))?;
+        let prev_commit_cid_str: Option<String> =
+            actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
+        let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
+
+        // ② 署名鍵をロード
+        let signing_key = signing_key_from_pem(&signing_key_pem)?;
+
+        // ③ 既存エントリをロードして対象レコードを除去
+        let mut entries = self.load_atp_entries(actor_id).await?;
+        let entry_key = format!("app.bsky.feed.like/{}", rkey);
+        entries.retain(|(k, _)| k != &entry_key);
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        // ④ MST 構築
+        let (mst_root, mst_blocks) = build_mst(&entries)?;
+
+        // ⑤ commit 生成・P-256 署名
+        let new_rev = generate_tid();
+        let prev_cid_parsed = prev_commit_cid_str
+            .as_deref()
+            .and_then(|s| cid_from_str(s).ok());
+        let (commit_cid, commit_cbor) = create_commit(
+            &at_did,
+            &new_rev,
+            mst_root,
+            prev_cid_parsed,
+            &signing_key,
+        )?;
+
+        // ⑥ CAR エンコード（削除レコードのブロックは含まない）
+        let mut new_blocks = mst_blocks;
+        new_blocks.push((commit_cid, commit_cbor));
+        let diff_car = encode_car(&commit_cid, &new_blocks)?;
+
+        let commit_cid_str = cid_to_string(&commit_cid);
+
+        let mut tx = self.pool.begin().await?;
+
+        // ⑦ atp_blocks INSERT
+        for (cid, bytes) in &new_blocks {
+            sqlx::query(
+                "INSERT INTO atp_blocks (cid, actor_id, bytes) VALUES ($1, $2, $3)
+                 ON CONFLICT (cid, actor_id) DO NOTHING",
+            )
+            .bind(cid_to_string(cid))
+            .bind(actor_id)
+            .bind(bytes.as_slice())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // ⑧ actors UPDATE
+        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2 WHERE id = $3")
+            .bind(&commit_cid_str)
+            .bind(&new_rev)
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await?;
+
+        // ⑨ atp_records DELETE
+        sqlx::query(
+            "DELETE FROM atp_records WHERE actor_id = $1 AND collection = 'app.bsky.feed.like' AND rkey = $2",
+        )
+        .bind(actor_id)
+        .bind(rkey)
+        .execute(&mut *tx)
+        .await?;
+
+        // ⑩ atp_repo_events INSERT
+        let ops_json = serde_json::json!([{
+            "action": "delete",
+            "path": entry_key,
+        }]);
+        let event_row = sqlx::query(
+            "INSERT INTO atp_repo_events
+             (actor_id, did, commit_cid, prev_cid, rev, since_rev, car_bytes, ops_json)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id",
+        )
+        .bind(actor_id)
+        .bind(&at_did)
+        .bind(&commit_cid_str)
+        .bind(prev_commit_cid_str.as_deref())
+        .bind(&new_rev)
+        .bind(prev_rev.as_deref())
+        .bind(diff_car.as_slice())
+        .bind(&ops_json)
+        .fetch_one(&mut *tx)
+        .await?;
+        let seq: i64 = event_row.try_get("id")?;
+
+        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ws_ops = vec![CommitEvtOp {
+            action: "delete".to_string(),
+            path: entry_key,
+            cid: None,
+        }];
+        let frame_opt = build_commit_frame(
+            seq,
+            &at_did,
+            &commit_cid,
+            prev_cid_parsed.as_ref(),
+            &new_rev,
+            prev_rev.as_deref(),
+            &diff_car,
+            &ws_ops,
+            &[],
+            &time_str,
+        ).ok();
+        if let Some(ref frame) = frame_opt {
+            if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
+                sqlx::query(
+                    "UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2",
+                )
+                .bind(&compressed)
+                .bind(seq)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        tx.commit().await?;
+
+        if let Some(frame) = frame_opt {
+            let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+        }
+
+        eprintln!("[atp] like delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
         self.spawn_request_crawl();
         Ok(())
     }

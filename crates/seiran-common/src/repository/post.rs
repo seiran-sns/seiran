@@ -205,6 +205,12 @@ pub trait PostRepository: Send + Sync {
         ap_object_id: &str,
     ) -> Result<Option<(i64, i64)>, sqlx::Error>;
 
+    /// `at_uri` から (id, actor_id) を取得する（ATP `app.bsky.feed.like` の対象ポスト特定用）。
+    async fn find_id_and_actor_by_at_uri(
+        &self,
+        at_uri: &str,
+    ) -> Result<Option<(i64, i64)>, sqlx::Error>;
+
     /// リモートから受信したノートを、重複排除メタ（seiran_uuid・ループバック/ブリッジ紐付け）付きで挿入する。
     /// `ap_object_id` が既存なら何もしない。
     #[allow(clippy::too_many_arguments)]
@@ -620,6 +626,18 @@ impl PostRepository for PgPostRepository {
             "SELECT id, actor_id FROM posts WHERE ap_object_id = $1 AND deleted_at IS NULL LIMIT 1",
         )
         .bind(ap_object_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn find_id_and_actor_by_at_uri(
+        &self,
+        at_uri: &str,
+    ) -> Result<Option<(i64, i64)>, sqlx::Error> {
+        sqlx::query_as::<_, (i64, i64)>(
+            "SELECT id, actor_id FROM posts WHERE at_uri = $1 AND deleted_at IS NULL LIMIT 1",
+        )
+        .bind(at_uri)
         .fetch_optional(&self.pool)
         .await
     }

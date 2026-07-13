@@ -13,7 +13,7 @@ pub use repo::{
     Cid,
     generate_tid, cid_from_dagcbor, cid_from_str, cid_to_string, cid_from_sha256_hex,
     build_mst, create_commit, encode_car, encode_bsky_feed_post, encode_bsky_actor_profile,
-    encode_bsky_feed_repost, encode_bsky_graph_follow,
+    encode_bsky_feed_repost, encode_bsky_feed_like, encode_bsky_graph_follow,
     build_commit_frame, build_identity_frame, build_error_frame, CommitEvtOp, RepoError,
     BskyFacet, BskyFacetIndex, BskyFacetMention, BskyImage, BskyEmbed,
     BskyRefRecord, BskyPostReply,

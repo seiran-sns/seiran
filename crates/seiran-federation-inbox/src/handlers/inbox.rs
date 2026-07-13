@@ -637,7 +637,7 @@ async fn handle_undo(
 }
 
 /// いいね（Like）・絵文字リアクション（EmojiReact）を受信し reactions テーブルへ保存する (#22)。
-/// `is_like = true` の場合は ❤ 絵文字リアクションとして解釈する。
+/// `is_like = true` の場合は ❤️ 絵文字リアクションとして解釈する。
 async fn handle_reaction(
     activity: serde_json::Value,
     state: Arc<AppState>,
@@ -653,11 +653,11 @@ async fn handle_reaction(
         .ok_or("Reaction: object フィールドがありません")?;
     let activity_id = activity["id"].as_str();
 
-    // リアクション内容: Like は ❤、EmojiReact は content（絵文字 or :shortcode:）
+    // リアクション内容: Like は ❤️、EmojiReact は content（絵文字 or :shortcode:）
     let content: String = if is_like {
-        "❤".to_string()
+        "❤️".to_string()
     } else {
-        activity["content"].as_str().unwrap_or("❤").to_string()
+        activity["content"].as_str().unwrap_or("❤️").to_string()
     };
     let reaction_type = if is_like { "like" } else { "emoji" };
 
@@ -679,7 +679,7 @@ async fn handle_reaction(
     // reactions へ INSERT（同一ユーザー・同一内容の重複、activity_id 重複はスキップ）
     state
         .reaction_repo
-        .insert(post_id, actor_id, reaction_type, &content, activity_id)
+        .insert(post_id, actor_id, reaction_type, &content, activity_id, None)
         .await
         .map_err(|e| format!("reactions INSERT エラー: {}", e))?;
 
