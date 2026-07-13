@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isValidReactionEmoji } from "../../lib/reaction";
 import noteCardStyles from "./NoteCard.module.css";
 import styles from "./ReactionPicker.module.css";
 
@@ -16,6 +17,7 @@ interface ReactionPickerProps {
 export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps) {
   const [open, setOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
+  const [customError, setCustomError] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,6 +34,7 @@ export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps
   function pick(emoji: string) {
     setOpen(false);
     setCustomInput("");
+    setCustomError(false);
     onPick(emoji);
   }
 
@@ -39,7 +42,10 @@ export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps
     e.preventDefault();
     e.stopPropagation();
     const trimmed = customInput.trim();
-    if (!trimmed || trimmed.length > MAX_CONTENT_LEN) return;
+    if (!trimmed || trimmed.length > MAX_CONTENT_LEN || !isValidReactionEmoji(trimmed)) {
+      setCustomError(true);
+      return;
+    }
     pick(trimmed);
   }
 
@@ -78,12 +84,22 @@ export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps
               placeholder="絵文字を入力"
               value={customInput}
               maxLength={MAX_CONTENT_LEN}
-              onChange={(e) => setCustomInput(e.target.value)}
+              onChange={(e) => {
+                setCustomInput(e.target.value);
+                setCustomError(false);
+              }}
             />
-            <button type="submit" className={styles.customSubmit} disabled={!customInput.trim()}>
+            <button
+              type="submit"
+              className={styles.customSubmit}
+              disabled={!customInput.trim() || !isValidReactionEmoji(customInput)}
+            >
               追加
             </button>
           </form>
+          {customError && (
+            <p className={styles.customError}>絵文字1つだけを入力してください</p>
+          )}
         </div>
       )}
     </div>

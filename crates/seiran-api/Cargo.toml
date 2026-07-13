@@ -26,6 +26,7 @@ serde_ipld_dagcbor = "0.6"
 hex = "0.4"
 dashmap = "6"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+emojis = { version = "0.9.0", default-features = false }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

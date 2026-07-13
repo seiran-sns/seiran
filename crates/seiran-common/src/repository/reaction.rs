@@ -34,9 +34,14 @@ pub trait ReactionRepository: Send + Sync {
     /// 返り値は削除行数（0 なら該当リアクションなし）。
     async fn delete_local(&self, post_id: i64, actor_id: i64, content: &str) -> Result<u64, sqlx::Error>;
 
-    /// 指定 (post_id, actor_id) の現在の `at_uri` を取得する。ATP への切替/取消の際、
-    /// 事前に「削除すべき旧 Like レコード」の rkey を退避するために使う。
-    async fn find_at_uri(&self, post_id: i64, actor_id: i64) -> Result<Option<String>, sqlx::Error>;
+    /// 指定 (post_id, actor_id) の現在のリアクション行から `content` / `ap_activity_id` / `at_uri`
+    /// を取得する。切替・取消の際、事前に「削除すべき旧リアクション（AP の Undo 対象、ATP の
+    /// 削除対象 rkey）」を退避するために使う。
+    async fn find_current(
+        &self,
+        post_id: i64,
+        actor_id: i64,
+    ) -> Result<Option<(String, Option<String>, Option<String>)>, sqlx::Error>;
 
     /// 指定ポストの絵文字ごとの件数集計（多い順）。ストリーミング配信ペイロード（`noteUpdated`）の
     /// 組み立てに使う。閲覧者ごとの `reactedByMe` は含まない（API 公開用の集計は `fetch_reactions_map` を使う）。
@@ -108,15 +113,19 @@ impl ReactionRepository for PgReactionRepository {
         Ok(row.map(|r| (r.get("post_id"), r.get("actor_id"))))
     }
 
-    async fn find_at_uri(&self, post_id: i64, actor_id: i64) -> Result<Option<String>, sqlx::Error> {
+    async fn find_current(
+        &self,
+        post_id: i64,
+        actor_id: i64,
+    ) -> Result<Option<(String, Option<String>, Option<String>)>, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT at_uri FROM reactions WHERE post_id = $1 AND actor_id = $2",
+            "SELECT content, ap_activity_id, at_uri FROM reactions WHERE post_id = $1 AND actor_id = $2",
         )
         .bind(post_id)
         .bind(actor_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.and_then(|r| r.get::<Option<String>, _>("at_uri")))
+        Ok(row.map(|r| (r.get("content"), r.get("ap_activity_id"), r.get("at_uri"))))
     }
 
     async fn delete_local(&self, post_id: i64, actor_id: i64, content: &str) -> Result<u64, sqlx::Error> {

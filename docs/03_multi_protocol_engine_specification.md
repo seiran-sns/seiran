@@ -559,6 +559,54 @@ Fedi 引用 → Bsky では `app.bsky.embed.record` ではなく `app.bsky.embed
 
 ---
 
+### 9.6 リアクション（絵文字/Like）の配送先
+
+`POST /api/notes/:id/reactions` でローカルユーザーが絵文字リアクションを付けた際、AP `Like`/`EmojiReact`
+アクティビティ（取消時は `Undo`）を以下 2 種類の宛先の **和集合（重複排除）** へ配送する
+（`crates/seiran-common/src/ap/deliver.rs` の `deliver_ap_reaction` / `deliver_ap_undo_reaction`）。
+
+1. **対象ポストの著者**（`actors.actor_type = 'fedi'` の場合のみ、`ap_inbox_url` 宛）
+   - リアクション対象のポストがあるサーバーに確実に通知が届くようにするため
+2. **リアクションした本人（ローカルアクター）の Fedi フォロワー全員**（`follows.status = 'accepted'` かつ
+   フォロワーが `actor_type = 'fedi'`、`ap_inbox_url` 宛）
+   - フォロワーのタイムライン/通知でリアクションの事実を確認できるようにするため。他のアクティビティ
+     （Create/Announce/Update 等）と同じ「フォロワー全員へバラ配送（sharedInbox 未対応）」パターンに揃えている
+
+対象ポストが `ap_object_id` を持たない（Bsky 由来でブリッジされていない等）場合は AP 上の実体が無いため配送しない。
+
+**Like か EmojiReact かの判定**（`reaction_activity_type`）
+- リアクション内容が `❤️` の場合 → `Like`（EmojiReact 未対応の Mastodon 等とも広く互換）
+- それ以外 → `EmojiReact`（`content` フィールドにリアクション内容を格納。Misskey 系フォーク互換のため
+  非標準の `_misskey_reaction` フィールドも併記）
+
+**切替時の Undo**
+- 1投稿1ユーザー1リアクションの制約（9.0 節同様の Misskey 準拠ルール、`reactions.UNIQUE(post_id, actor_id)`）により、
+  既存のリアクションを異なる絵文字に切り替える場合がある。旧リアクションが AP へ配送済み
+  （`reactions.ap_activity_id` が設定済み）であれば、新リアクションの送信前に旧リアクションの `Undo` を
+  同じ宛先集合へ配送してから送り直す
+- `reactions.ap_activity_id` はローカルで発行した `https://{domain}/activities/reactions/{post_id}-{actor_id}-{epoch_millis}`
+  形式の URI で、AP 側での Undo 対象特定に使う（ATP 側の `at_uri`/rkey 保存と同じ役割）
+
+**INBOUND との対称性**
+- 受信側（`crates/seiran-federation-inbox/src/handlers/inbox.rs` の `handle_reaction`）は既に実装済みで、
+  この節の実装により Like/EmojiReact の送受信が双方向になった
+
+**送信内容のバリデーション（Unicode 絵文字限定）**
+- `POST /api/notes/:id/reactions` の `validate_reaction_content`（`crates/seiran-api/src/handlers/notes.rs`）は、
+  「絵文字リアクション」という名の通り Unicode 絵文字（単体・肌色/性別修飾・ZWJ結合・国旗・キーキャップ等の
+  RGI シーケンスを含む）以外の文字列を拒否する。判定は Unicode 公式の `emoji-test.txt` 準拠データから
+  生成された `emojis` crate による完全一致で行い、`:shortcode:` のようなカスタム絵文字ショートコードや
+  プレーンテキストは通さない（カスタム絵文字ピッカー自体が未実装のため、ローカル送信経路では意図的に
+  絵文字のみへ制限している）
+- フロントエンド（`frontend/src/lib/reaction.ts` の `isValidReactionEmoji`、npm パッケージ `emoji-regex`
+  使用）でも同じ方針で自由入力欄を事前チェックする。これはあくまで UX 向上のための先取りチェックであり、
+  最終的な正当性判定は API 側（バックエンド）が行う
+- 上記の制約は **ローカルからの送信（outbound）にのみ適用**する。AP から受信する `EmojiReact.content`
+  （9章冒頭・DBスキーマ文書参照）は他インスタンスのカスタム絵文字ショートコードを含みうるため、
+  INBOUND 側では従来通りバリデーションせずそのまま保存する
+
+---
+
 ## 10. 画像 embed の DAG-CBOR 形式仕様
 
 ### 10.1 blob ref の CBOR エンコーディング

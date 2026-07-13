@@ -12,7 +12,7 @@ use sqlx::Row;
 use unicode_segmentation::UnicodeSegmentation;
 
 use seiran_common::repository::{PostDeliveryMeta, TimelinePost};
-use seiran_common::{ap::{deliver_post_to_ap_followers, deliver_ap_announce, deliver_undo_announce, fetch_ap_history, plain_to_html}, generate_snowflake_id};
+use seiran_common::{ap::{deliver_post_to_ap_followers, deliver_ap_announce, deliver_undo_announce, deliver_ap_reaction, deliver_ap_undo_reaction, fetch_ap_history, plain_to_html}, generate_snowflake_id};
 use seiran_common::mention::{convert_mentions_for_bsky, convert_mentions_for_ap};
 use seiran_common::atp::{BskyPostReply, BskyRefRecord, BskyEmbed};
 use seiran_common::streaming::broadcast_reaction_update;
@@ -1217,20 +1217,30 @@ pub struct ReactRequest {
     pub content: String,
 }
 
-/// リアクション内容（絵文字 or `:shortcode:`）の最大書記素クラスタ数。
+/// リアクション内容の書記素クラスタ数の安全上限（`emojis::get` の完全一致チェックの前段で
+/// 極端に長い文字列を弾くためのもの。実際の絵文字判定はこの定数ではなく下記の完全一致で行う）。
 const MAX_REACTION_CONTENT_LEN: usize = 32;
 
 /// リアクション内容を検証し、trim 済みの文字列を返す。
+///
+/// 「絵文字リアクション」という以上、Unicode 絵文字（単体・肌色/性別修飾・ZWJ結合・国旗・
+/// キーキャップ等の RGI シーケンスを含む）以外の文字列は許可しない。`:shortcode:` のような
+/// カスタム絵文字ショートコードも現状未対応のため拒否する。判定は `emojis` crate
+/// （Unicode 公式の emoji-test.txt 準拠データ）による完全一致で行う。
 fn validate_reaction_content(raw: &str) -> Result<String, ApiError> {
     let content = raw.trim().to_string();
     if content.is_empty() || content.graphemes(true).count() > MAX_REACTION_CONTENT_LEN {
+        return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
+    }
+    if emojis::get(&content).is_none() {
         return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
     }
     Ok(content)
 }
 
 /// POST /api/notes/:id/reactions
-/// 自分の絵文字リアクションを追加する（ローカル保存のみ。AP/ATP への outbound 配信は今回のスコープ外）。
+/// 自分の絵文字リアクションを追加する。ローカル保存に加え、AP（対象ポスト著者 + 自分の Fedi
+/// フォロワー全員）・ATP（対象に at_uri がある場合）の双方へ配送する。
 pub async fn create_reaction(
     Path(note_id_str): Path<String>,
     headers: HeaderMap,
@@ -1264,12 +1274,21 @@ pub async fn create_reaction(
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
 
-    // ATP 連携（切替時に削除すべき旧 Like の rkey を退避 / 配信先の at_uri・at_cid を取得）。
-    // 対象に ATP 実体が無ければ配信しない（AP/Bsky 由来でも at_uri を持たないポストへは無反応）。
-    let prev_at_uri = state.reactions.find_at_uri(note_id, me.id).await.ok().flatten();
+    // 切替時に取り消すべき旧リアクション（AP の Undo 対象 / ATP の削除対象 rkey）を退避。
+    // 対象に ATP 実体が無ければ ATP 配信しない（AP/Bsky 由来でも at_uri を持たないポストへは無反応）。
+    let prev = state.reactions.find_current(note_id, me.id).await.ok().flatten();
     let delivery_meta = state.posts.find_delivery_meta(note_id).await.ok().flatten();
 
-    if let Err(e) = state.reactions.insert(note_id, me.id, "emoji", &content, None, None).await {
+    // AP へ配送する Like/EmojiReact 自身の activity id を発行し、Undo で参照できるよう保存する。
+    let activity_id = format!(
+        "https://{}/activities/reactions/{}-{}-{}",
+        state.local_domain,
+        note_id,
+        me.id,
+        chrono::Utc::now().timestamp_millis()
+    );
+
+    if let Err(e) = state.reactions.insert(note_id, me.id, "emoji", &content, Some(&activity_id), None).await {
         return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response();
     }
 
@@ -1306,7 +1325,11 @@ pub async fn create_reaction(
             let atp = Arc::clone(&state.atp_service);
             let actor_id = me.id;
             let emoji = content.clone();
-            let prev_rkey = prev_at_uri.as_deref().and_then(|u| u.rsplit('/').next()).map(|s| s.to_string());
+            let prev_rkey = prev
+                .as_ref()
+                .and_then(|(_, _, at_uri)| at_uri.as_deref())
+                .and_then(|u| u.rsplit('/').next())
+                .map(|s| s.to_string());
             let now = chrono::Utc::now();
             tokio::spawn(async move {
                 if let Some(rkey) = prev_rkey {
@@ -1319,6 +1342,43 @@ pub async fn create_reaction(
                 }
             });
         }
+    }
+
+    // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ配送する。
+    // 旧リアクションが既に AP へ配送済み（ap_activity_id あり）なら、先に Undo してから送る（切替）。
+    {
+        let ap_client = Arc::clone(&state.ap_client);
+        let db = state.db.clone();
+        let local_domain = state.local_domain.clone();
+        let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
+        let actor_id = me.id;
+        let new_content = content.clone();
+        let new_activity_id = activity_id.clone();
+        let prev_for_undo = prev
+            .as_ref()
+            .and_then(|(prev_content, prev_activity_id, _)| {
+                prev_activity_id.clone().map(|id| (prev_content.clone(), id))
+            });
+        tokio::spawn(async move {
+            if let Some((prev_content, prev_activity_id)) = prev_for_undo {
+                if let Err(e) = deliver_ap_undo_reaction(
+                    &ap_client, &db, note_id, actor_id, &local_domain, &ap_pem,
+                    &prev_activity_id, &prev_content,
+                )
+                .await
+                {
+                    eprintln!("[create_reaction] AP Undo(旧リアクション) 配送失敗: {}", e);
+                }
+            }
+            if let Err(e) = deliver_ap_reaction(
+                &ap_client, &db, note_id, actor_id, &local_domain, &ap_pem,
+                &new_activity_id, &new_content,
+            )
+            .await
+            {
+                eprintln!("[create_reaction] AP リアクション配送失敗: {}", e);
+            }
+        });
     }
 
     let rmap = fetch_reactions_map(&state.db, &[note_id], Some(me.id)).await;
@@ -1358,8 +1418,8 @@ pub async fn delete_reaction(
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
 
-    // ATP 連携: 削除前に現在の at_uri（Like レコードの rkey）を退避しておく。
-    let prev_at_uri = state.reactions.find_at_uri(note_id, actor_id).await.ok().flatten();
+    // 削除前に現在の ap_activity_id（AP Undo 対象）と at_uri（ATP 削除対象の rkey）を退避しておく。
+    let prev = state.reactions.find_current(note_id, actor_id).await.ok().flatten();
 
     let deleted = match state.reactions.delete_local(note_id, actor_id, &content).await {
         Ok(n) => n,
@@ -1380,12 +1440,36 @@ pub async fn delete_reaction(
     )
     .await;
 
-    if let Some(rkey) = prev_at_uri.as_deref().and_then(|u| u.rsplit('/').next()).map(|s| s.to_string()) {
+    if let Some(rkey) = prev
+        .as_ref()
+        .and_then(|(_, _, at_uri)| at_uri.as_deref())
+        .and_then(|u| u.rsplit('/').next())
+        .map(|s| s.to_string())
+    {
         let atp = Arc::clone(&state.atp_service);
         let now = chrono::Utc::now();
         tokio::spawn(async move {
             if let Err(e) = atp.delete_atp_like(actor_id, &rkey, now).await {
                 eprintln!("[delete_reaction] ATP Like 削除失敗: {}", e);
+            }
+        });
+    }
+
+    // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ Undo を配送する。
+    if let Some(prev_activity_id) = prev.as_ref().and_then(|(_, ap_activity_id, _)| ap_activity_id.clone()) {
+        let ap_client = Arc::clone(&state.ap_client);
+        let db = state.db.clone();
+        let local_domain = state.local_domain.clone();
+        let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
+        let content_for_undo = content.clone();
+        tokio::spawn(async move {
+            if let Err(e) = deliver_ap_undo_reaction(
+                &ap_client, &db, note_id, actor_id, &local_domain, &ap_pem,
+                &prev_activity_id, &content_for_undo,
+            )
+            .await
+            {
+                eprintln!("[delete_reaction] AP Undo(リアクション) 配送失敗: {}", e);
             }
         });
     }
@@ -1421,7 +1505,7 @@ fn strip_html_tags(html: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{at_uri_to_bsky_app_url, classify_post, strip_html_tags};
+    use super::{at_uri_to_bsky_app_url, classify_post, strip_html_tags, validate_reaction_content};
 
     #[test]
     fn at_uri_to_bsky_app_url_valid() {
@@ -1489,5 +1573,68 @@ mod tests {
     fn strip_html_tags_empty() {
         assert_eq!(strip_html_tags(""), "");
         assert_eq!(strip_html_tags("<br/>"), "");
+    }
+
+    #[test]
+    fn validate_reaction_content_accepts_basic_emoji() {
+        assert_eq!(validate_reaction_content("🎉").unwrap(), "🎉");
+        assert_eq!(validate_reaction_content(" 👍 ").unwrap(), "👍");
+    }
+
+    #[test]
+    fn validate_reaction_content_accepts_vs16_sequence() {
+        // ❤️ = U+2764 + VS16（クイックリアクションで使われる形）
+        assert_eq!(validate_reaction_content("❤️").unwrap(), "❤️");
+    }
+
+    #[test]
+    fn validate_reaction_content_accepts_skin_tone_modifier() {
+        assert!(validate_reaction_content("👍🏽").is_ok());
+    }
+
+    #[test]
+    fn validate_reaction_content_accepts_zwj_sequence() {
+        // 家族の ZWJ 結合絵文字
+        assert!(validate_reaction_content("👨‍👩‍👧").is_ok());
+    }
+
+    #[test]
+    fn validate_reaction_content_accepts_flag_sequence() {
+        assert!(validate_reaction_content("🇯🇵").is_ok());
+    }
+
+    #[test]
+    fn validate_reaction_content_rejects_plain_text() {
+        assert!(validate_reaction_content("いいね").is_err());
+        assert!(validate_reaction_content("nice").is_err());
+    }
+
+    #[test]
+    fn validate_reaction_content_rejects_shortcode() {
+        assert!(validate_reaction_content(":smile:").is_err());
+    }
+
+    #[test]
+    fn validate_reaction_content_rejects_bare_digit_and_keycap_base() {
+        // 単体の数字/#/* は emoji-data.txt 上 Emoji=Yes だが、キーキャップ結合が無ければ
+        // 絵文字として認識しない（emojis crate は完全一致でしか通さない）
+        assert!(validate_reaction_content("1").is_err());
+        assert!(validate_reaction_content("#").is_err());
+    }
+
+    #[test]
+    fn validate_reaction_content_accepts_keycap_sequence() {
+        assert!(validate_reaction_content("1️⃣").is_ok());
+    }
+
+    #[test]
+    fn validate_reaction_content_rejects_emoji_plus_text() {
+        assert!(validate_reaction_content("🎉nice").is_err());
+    }
+
+    #[test]
+    fn validate_reaction_content_rejects_empty() {
+        assert!(validate_reaction_content("").is_err());
+        assert!(validate_reaction_content("   ").is_err());
     }
 }

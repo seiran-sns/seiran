@@ -75,3 +75,9 @@
   background: var(--border-strong);
   cursor: default;
 }
+
+.customError {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: var(--danger);
+}

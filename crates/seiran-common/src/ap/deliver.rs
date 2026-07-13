@@ -554,6 +554,247 @@ pub async fn deliver_update_actor(
     Ok(())
 }
 
+/// リアクション内容から送信する AP アクティビティ種別を決める。
+/// ❤️ は EmojiReact 未対応の実装（Mastodon 等）にも通じる `Like` として送り、
+/// それ以外は Misskey 互換の `EmojiReact` として送る。
+fn reaction_activity_type(content: &str) -> &'static str {
+    if content == "❤️" {
+        "Like"
+    } else {
+        "EmojiReact"
+    }
+}
+
+/// Like/EmojiReact アクティビティ（またはその埋め込みオブジェクト）を組み立てる。
+fn build_reaction_object(
+    activity_type: &str,
+    id: &str,
+    actor_uri: &str,
+    object_ap_id: &str,
+    content: &str,
+) -> serde_json::Value {
+    let mut obj = serde_json::json!({
+        "type": activity_type,
+        "id": id,
+        "actor": actor_uri,
+        "object": object_ap_id,
+    });
+    if activity_type == "EmojiReact" {
+        obj["content"] = serde_json::Value::String(content.to_string());
+        // Misskey 系フォークとの互換のため非標準フィールドも併記する。
+        obj["_misskey_reaction"] = serde_json::Value::String(content.to_string());
+    }
+    obj
+}
+
+/// リアクション配送先を解決する。
+///
+/// 配送先は (1) 対象ポストの著者（Fedi リモートの場合のみ）と (2) `reactor_actor_id`
+/// の Fedi フォロワー全員、の inbox の和集合（重複排除）。対象ポストが AP 上の実体
+/// （`ap_object_id`）を持たない場合（Bsky 由来など）は `None` を返し、配送不要とする。
+async fn resolve_reaction_targets(
+    db: &PgPool,
+    post_id: i64,
+    reactor_actor_id: i64,
+) -> Result<Option<(String, Vec<String>)>, ApError> {
+    let post_row = sqlx::query(
+        "SELECT p.ap_object_id, a.actor_type::text AS actor_type, a.ap_inbox_url
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.id = $1 LIMIT 1",
+    )
+    .bind(post_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| ApError::Other(format!("対象ポスト取得エラー: {}", e)))?;
+
+    let post_row = match post_row {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+
+    let object_ap_id: Option<String> = post_row.try_get("ap_object_id").unwrap_or(None);
+    let object_ap_id = match object_ap_id {
+        Some(id) => id,
+        None => return Ok(None),
+    };
+    let author_actor_type: String = post_row.try_get("actor_type").unwrap_or_default();
+    let author_inbox: Option<String> = post_row.try_get("ap_inbox_url").unwrap_or(None);
+
+    let mut inboxes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if author_actor_type == "fedi" {
+        if let Some(inbox) = author_inbox {
+            inboxes.insert(inbox);
+        }
+    }
+
+    // reactor 本人（ローカルアクター）の Fedi フォロワー全員の inbox を追加する。
+    let follower_rows = sqlx::query(
+        "SELECT a.ap_inbox_url
+         FROM follows f
+         JOIN actors a ON a.id = f.follower_actor_id
+         WHERE f.target_actor_id = $1
+           AND f.status = 'accepted'
+           AND a.actor_type = 'fedi'
+           AND a.ap_inbox_url IS NOT NULL",
+    )
+    .bind(reactor_actor_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
+
+    for row in &follower_rows {
+        if let Ok(inbox) = row.try_get::<String, _>("ap_inbox_url") {
+            inboxes.insert(inbox);
+        }
+    }
+
+    Ok(Some((object_ap_id, inboxes.into_iter().collect())))
+}
+
+/// ローカルアクターの絵文字リアクション（Like/EmojiReact）を、対象ポストの著者
+/// （Fedi リモートの場合のみ）と reactor 本人の Fedi フォロワー全員の inbox へ配送する。
+///
+/// `activity_id` は呼び出し元があらかじめ発行し `reactions.ap_activity_id` に保存した値と
+/// 同一のものを渡すこと（後の Undo で参照するため）。
+#[allow(clippy::too_many_arguments)]
+pub async fn deliver_ap_reaction(
+    ap_client: &ApClient,
+    db: &PgPool,
+    post_id: i64,
+    actor_id: i64,
+    local_domain: &str,
+    ap_private_key_pem: &str,
+    activity_id: &str,
+    content: &str,
+) -> Result<(), ApError> {
+    let (object_ap_id, inboxes) = match resolve_reaction_targets(db, post_id, actor_id).await? {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+    if inboxes.is_empty() {
+        return Ok(());
+    }
+
+    let actor_row = sqlx::query("SELECT username FROM actors WHERE id = $1 LIMIT 1")
+        .bind(actor_id)
+        .fetch_optional(db)
+        .await
+        .map_err(|e| ApError::Other(format!("アクター情報取得エラー: {}", e)))?
+        .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
+    let username: String = actor_row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
+
+    let actor_uri = format!("https://{}/users/{}", local_domain, username);
+    let actor_key_id = format!("{}#main-key", actor_uri);
+    let followers_uri = format!("{}/followers", actor_uri);
+    let published = chrono::Utc::now().to_rfc3339();
+    let activity_type = reaction_activity_type(content);
+
+    let mut activity = build_reaction_object(activity_type, activity_id, &actor_uri, &object_ap_id, content);
+    activity["@context"] = serde_json::Value::String("https://www.w3.org/ns/activitystreams".to_string());
+    activity["published"] = serde_json::Value::String(published);
+    activity["to"] = serde_json::json!(["https://www.w3.org/ns/activitystreams#Public"]);
+    activity["cc"] = serde_json::json!([followers_uri]);
+
+    let body_str = serde_json::to_string(&activity).map_err(ApError::Json)?;
+
+    let mut ok = 0usize;
+    let mut ng = 0usize;
+    for inbox in &inboxes {
+        match ap_client.sign_and_post(inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
+            Ok(()) => ok += 1,
+            Err(e) => {
+                eprintln!("[Deliver] {}(post_id={}): {} への配送失敗: {}", activity_type, post_id, inbox, e);
+                ng += 1;
+            }
+        }
+    }
+
+    eprintln!(
+        "[Deliver] {} post_id={} actor_id={}: {}件成功 / {}件失敗",
+        activity_type, post_id, actor_id, ok, ng
+    );
+    Ok(())
+}
+
+/// ローカルアクターの絵文字リアクション取消（Undo(Like)/Undo(EmojiReact)）を、
+/// `deliver_ap_reaction` と同じ宛先集合（対象ポスト著者 + reactor 本人の Fedi フォロワー）へ配送する。
+///
+/// `prev_activity_id` / `content` は取り消し対象の元リアクションのもの
+/// （`reactions.ap_activity_id` に保存されていた値とその時点の `content`）を渡すこと。
+#[allow(clippy::too_many_arguments)]
+pub async fn deliver_ap_undo_reaction(
+    ap_client: &ApClient,
+    db: &PgPool,
+    post_id: i64,
+    actor_id: i64,
+    local_domain: &str,
+    ap_private_key_pem: &str,
+    prev_activity_id: &str,
+    content: &str,
+) -> Result<(), ApError> {
+    let (object_ap_id, inboxes) = match resolve_reaction_targets(db, post_id, actor_id).await? {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+    if inboxes.is_empty() {
+        return Ok(());
+    }
+
+    let actor_row = sqlx::query("SELECT username FROM actors WHERE id = $1 LIMIT 1")
+        .bind(actor_id)
+        .fetch_optional(db)
+        .await
+        .map_err(|e| ApError::Other(format!("アクター情報取得エラー: {}", e)))?
+        .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
+    let username: String = actor_row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
+
+    let actor_uri = format!("https://{}/users/{}", local_domain, username);
+    let actor_key_id = format!("{}#main-key", actor_uri);
+    let followers_uri = format!("{}/followers", actor_uri);
+    let published = chrono::Utc::now().to_rfc3339();
+    let activity_type = reaction_activity_type(content);
+    let inner = build_reaction_object(activity_type, prev_activity_id, &actor_uri, &object_ap_id, content);
+
+    let undo_id = format!(
+        "https://{}/activities/undo-reactions/{}-{}-{}",
+        local_domain,
+        post_id,
+        actor_id,
+        chrono::Utc::now().timestamp_millis()
+    );
+
+    let activity = serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Undo",
+        "id": undo_id,
+        "actor": actor_uri,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [followers_uri],
+        "object": inner
+    });
+
+    let body_str = serde_json::to_string(&activity).map_err(ApError::Json)?;
+
+    let mut ok = 0usize;
+    let mut ng = 0usize;
+    for inbox in &inboxes {
+        match ap_client.sign_and_post(inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
+            Ok(()) => ok += 1,
+            Err(e) => {
+                eprintln!("[Deliver] Undo({})(post_id={}): {} への配送失敗: {}", activity_type, post_id, inbox, e);
+                ng += 1;
+            }
+        }
+    }
+
+    eprintln!(
+        "[Deliver] Undo({}) post_id={} actor_id={}: {}件成功 / {}件失敗",
+        activity_type, post_id, actor_id, ok, ng
+    );
+    Ok(())
+}
+
 /// プレーンテキストを ActivityPub 向け HTML に変換する
 ///
 /// 空行で段落分割し、改行を `<br>` に変換する。

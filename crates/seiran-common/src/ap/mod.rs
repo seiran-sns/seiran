@@ -6,6 +6,6 @@ pub mod outbox;
 pub mod webfinger;
 
 pub use client::{ApClient, ApError, ApActor, PublicKeyInfo};
-pub use deliver::{deliver_post_to_ap_followers, deliver_ap_announce, deliver_undo_announce, deliver_delete_actor, deliver_update_actor, plain_to_html};
+pub use deliver::{deliver_post_to_ap_followers, deliver_ap_announce, deliver_undo_announce, deliver_delete_actor, deliver_update_actor, deliver_ap_reaction, deliver_ap_undo_reaction, plain_to_html};
 pub use outbox::{fetch_ap_history, ApNote};
 pub use webfinger::{WebFingerLink, WebFingerResponse};
