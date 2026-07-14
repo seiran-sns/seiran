@@ -173,6 +173,11 @@
   border: 1px solid var(--border);
 }
 
+.attachAudio {
+  width: 100%;
+  max-width: 400px;
+}
+
 .originalLink {
   display: inline-block;
   margin: 10px 0 0 50px;

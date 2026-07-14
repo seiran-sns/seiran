@@ -325,6 +325,30 @@ async fn resolve_parent_original_post_id(
     state.post_repo.find_id_by_at_uri(&at_uri).await.ok().flatten()
 }
 
+/// AP attachment の実 MIME タイプを判定する。
+/// 多くの実装（Mastodon 等）は `mediaType` を明示するのでそれを優先し、
+/// 欠けている場合のみ URL の拡張子から推測する（判別不能なら `None`）。
+fn guess_attachment_mime_type(att: &serde_json::Value, url: &str) -> Option<String> {
+    if let Some(mt) = att["mediaType"].as_str() {
+        if !mt.is_empty() {
+            return Some(mt.to_string());
+        }
+    }
+    let ext = url.rsplit('.').next()?.to_ascii_lowercase();
+    let guessed = match ext.as_str() {
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "mp3" => "audio/mpeg",
+        "ogg" | "oga" => "audio/ogg",
+        "wav" => "audio/wav",
+        "m4a" => "audio/mp4",
+        "flac" => "audio/flac",
+        _ => return None,
+    };
+    Some(guessed.to_string())
+}
+
 // Create(Note) を受け取り posts テーブルに保存する
 async fn handle_create_note(
     activity: serde_json::Value,
@@ -384,7 +408,7 @@ async fn handle_create_note(
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
-    // 添付画像の URL を保存（S3 には保存せず URL のみ記録）
+    // 添付画像・動画・音声の URL を保存（S3 には保存せず URL のみ記録）
     if let Some(attachments) = note["attachment"].as_array() {
         for (position, att) in attachments.iter().enumerate() {
             let url = att["url"].as_str()
@@ -393,7 +417,8 @@ async fn handle_create_note(
             if url.is_empty() {
                 continue;
             }
-            if let Err(e) = state.post_repo.attach_remote_media_url(post_id, url, position as i16).await {
+            let mime_type = guess_attachment_mime_type(att, url);
+            if let Err(e) = state.post_repo.attach_remote_media_url(post_id, url, mime_type.as_deref(), position as i16).await {
                 eprintln!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
             }
         }

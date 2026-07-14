@@ -178,7 +178,8 @@ pub trait PostRepository: Send + Sync {
     async fn attach_media(&self, post_id: i64, media_file_id: i64, position: i16) -> Result<(), sqlx::Error>;
 
     /// リモート添付 URL を投稿に紐付ける（`media_file_id` を持たない受信投稿用）。
-    async fn attach_remote_media_url(&self, post_id: i64, url: &str, position: i16) -> Result<(), sqlx::Error>;
+    /// `mime_type` は AP attachment の `mediaType`（判別できなければ推定値）。
+    async fn attach_remote_media_url(&self, post_id: i64, url: &str, mime_type: Option<&str>, position: i16) -> Result<(), sqlx::Error>;
 
     /// 指定アクターが `note_id` に対して行ったリポストの取り消しに必要な情報を取得する。
     async fn find_repost_undo_info(
@@ -551,14 +552,15 @@ impl PostRepository for PgPostRepository {
         .map(|_| ())
     }
 
-    async fn attach_remote_media_url(&self, post_id: i64, url: &str, position: i16) -> Result<(), sqlx::Error> {
+    async fn attach_remote_media_url(&self, post_id: i64, url: &str, mime_type: Option<&str>, position: i16) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO post_attachments (post_id, media_file_id, remote_url, position)
-             VALUES ($1, NULL, $2, $3)
+            "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, position)
+             VALUES ($1, NULL, $2, $3, $4)
              ON CONFLICT (post_id, position) DO NOTHING",
         )
         .bind(post_id)
         .bind(url)
+        .bind(mime_type)
         .bind(position)
         .execute(&self.pool)
         .await

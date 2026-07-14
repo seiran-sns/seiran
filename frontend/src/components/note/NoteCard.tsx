@@ -198,17 +198,41 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
 
       {note.attachments && note.attachments.length > 0 && (
         <div className={styles.attachments}>
-          {note.attachments.map((att, i) => (
-            <a
-              key={i}
-              href={att.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <img src={att.url} alt="" className={styles.attachImage} loading="lazy" />
-            </a>
-          ))}
+          {note.attachments.map((att, i) => {
+            if (att.mimeType.startsWith("video/")) {
+              return (
+                <video
+                  key={i}
+                  src={att.url}
+                  controls
+                  className={styles.attachImage}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              );
+            }
+            if (att.mimeType.startsWith("audio/")) {
+              return (
+                <audio
+                  key={i}
+                  src={att.url}
+                  controls
+                  className={styles.attachAudio}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              );
+            }
+            return (
+              <a
+                key={i}
+                href={att.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <img src={att.url} alt="" className={styles.attachImage} loading="lazy" />
+              </a>
+            );
+          })}
         </div>
       )}
 

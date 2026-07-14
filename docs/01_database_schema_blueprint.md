@@ -380,20 +380,24 @@ WHERE created_at < now() - INTERVAL '7 days'
 
 ---
 
-### 1.9 `post_attachments` (ポスト添付画像)
+### 1.9 `post_attachments` (ポスト添付メディア)
 
 ```sql
 CREATE TABLE post_attachments (
-    post_id        BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-    media_file_id  BIGINT NOT NULL REFERENCES media_files(id),
-    position       SMALLINT NOT NULL,   -- 表示順（0 始まり）
-    alt_text       TEXT,
+    post_id           BIGINT   NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    media_file_id     BIGINT   REFERENCES media_files(id),  -- ローカル投稿: あり／リモート受信: NULL
+    position          SMALLINT NOT NULL,   -- 表示順（0 始まり）
+    alt_text          TEXT,
+    remote_url        TEXT,    -- リモート受信投稿の添付 URL（S3 に保存せず参照のみ）
+    remote_mime_type  TEXT,    -- リモート受信投稿の実 MIME タイプ（AP attachment の mediaType 由来）
     PRIMARY KEY (post_id, position)
 );
 
 CREATE INDEX idx_post_attachments_media ON post_attachments(media_file_id);
 ```
 
+- ローカル投稿: `media_file_id` あり、`remote_url`/`remote_mime_type` は NULL（種別は `media_files.mime_type` を参照）
+- リモート受信投稿: `media_file_id` は NULL、`remote_url` に添付 URL、`remote_mime_type` に AP attachment の `mediaType`（欠落時は URL 拡張子から推測した値、判別不能なら NULL）を保存する。画像・動画・音声いずれも同じ仕組みで保持し、API レスポンスの `mime_type` から notecard 側で `<img>`/`<video>`/`<audio>` を出し分ける。
 - 1ポストあたりの最大添付数は **4枚**（AT Protocol `app.bsky.embed.images` の上限に準拠）
 
 ---

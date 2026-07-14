@@ -132,7 +132,7 @@ pub async fn fetch_attachments_map(
                     rtrim(sp.public_url, '/') || '/' || mf.storage_key,
                     pa.remote_url
                 ) AS url,
-                COALESCE(mf.mime_type, 'image/jpeg') AS mime_type,
+                COALESCE(mf.mime_type, pa.remote_mime_type, 'image/jpeg') AS mime_type,
                 COALESCE(mf.width,  0) AS width,
                 COALESCE(mf.height, 0) AS height
          FROM post_attachments pa
