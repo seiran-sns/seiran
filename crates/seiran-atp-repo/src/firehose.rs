@@ -77,6 +77,68 @@ async fn connect_and_process(
     Ok(())
 }
 
+/// Bsky embed（画像・動画）から復元した添付情報。CDN URL は DID + blob CID のみから
+/// 決定的に組み立てられる（Bluesky AppView への追加問い合わせは不要）。
+struct ParsedAttachment {
+    url: String,
+    mime_type: String,
+    width: i32,
+    height: i32,
+    thumbnail_url: Option<String>,
+}
+
+/// AP Note の `record.embed` を解析し、添付URL一覧を組み立てる。
+/// `app.bsky.embed.images` → `https://cdn.bsky.app/img/feed_fullsize/plain/{did}/{cid}`
+/// `app.bsky.embed.video` → HLSプレイリスト `https://video.bsky.app/watch/{did}/{cid}/playlist.m3u8`
+///   （動画本体はBluesky公式の動画処理パイプラインでHLSにトランスコードされて配信されるため、
+///   PDS上のblob自体を指すURLではなくこの固定パターンを使う。サムネイルも同様のパターン）。
+/// `app.bsky.embed.recordWithMedia`（引用+メディア）は `media` フィールドを再帰的に見る。
+/// 未知の embed 種別や画像/動画以外（`external`/`record` 単体等）は空を返す。
+fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedAttachment> {
+    let embed_type = embed.get("$type").and_then(|v| v.as_str()).unwrap_or("");
+    match embed_type {
+        "app.bsky.embed.images" => {
+            embed.get("images")
+                .and_then(|v| v.as_array())
+                .map(|images| {
+                    images.iter().filter_map(|img| {
+                        let cid = img.get("image")?.get("ref")?.get("$link")?.as_str()?;
+                        let mime_type = img.get("image")
+                            .and_then(|i| i.get("mimeType"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("image/jpeg")
+                            .to_string();
+                        let width = img.get("aspectRatio").and_then(|a| a.get("width")).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                        let height = img.get("aspectRatio").and_then(|a| a.get("height")).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                        let url = format!("https://cdn.bsky.app/img/feed_fullsize/plain/{}/{}", did, cid);
+                        Some(ParsedAttachment { url, mime_type, width, height, thumbnail_url: None })
+                    }).collect()
+                })
+                .unwrap_or_default()
+        }
+        "app.bsky.embed.video" => {
+            let Some(cid) = embed.get("video").and_then(|v| v.get("ref")).and_then(|r| r.get("$link")).and_then(|v| v.as_str()) else {
+                return vec![];
+            };
+            let width = embed.get("aspectRatio").and_then(|a| a.get("width")).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let height = embed.get("aspectRatio").and_then(|a| a.get("height")).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let did_encoded = urlencoding::encode(did);
+            let url = format!("https://video.bsky.app/watch/{}/{}/playlist.m3u8", did_encoded, cid);
+            let thumbnail_url = format!("https://video.bsky.app/watch/{}/{}/thumbnail.jpg", did_encoded, cid);
+            vec![ParsedAttachment {
+                url, mime_type: "application/vnd.apple.mpegurl".to_string(), width, height,
+                thumbnail_url: Some(thumbnail_url),
+            }]
+        }
+        "app.bsky.embed.recordWithMedia" => {
+            embed.get("media")
+                .map(|media| parse_bsky_embed_attachments(media, did))
+                .unwrap_or_default()
+        }
+        _ => vec![],
+    }
+}
+
 /// Jetstream の commit イベント（`kind: "commit"`）。`identity`/`account` は無視する。
 #[derive(Deserialize)]
 struct JetstreamEvent {
@@ -142,6 +204,11 @@ async fn process_message(
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
+            // 添付（画像・動画）。CDN URL は DID + blob CID から決定的に組み立てる。
+            let attachments: Vec<ParsedAttachment> = record.get("embed")
+                .map(|embed| parse_bsky_embed_attachments(embed, &did))
+                .unwrap_or_default();
+
             // この DID のアクターが DB に存在するか確認
             let actor_row = sqlx::query(
                 "SELECT id, username, display_name, avatar_url FROM actors WHERE at_did = $1 LIMIT 1",
@@ -198,7 +265,7 @@ async fn process_message(
                 save_bsky_post(
                     &pool2, &hub2, &at_uri2, &cid, &body_text, created_at,
                     actor_id, &username, display_name.as_deref(), avatar_url.as_deref(),
-                    reply_to_post_id,
+                    reply_to_post_id, attachments,
                 ).await;
             });
         }
@@ -261,6 +328,7 @@ async fn save_bsky_post(
     display_name: Option<&str>,
     avatar_url: Option<&str>,
     reply_to_post_id: Option<i64>,
+    attachments: Vec<ParsedAttachment>,
 ) {
     let reply_id_str = reply_to_post_id.map(|id| id.to_string());
     let post_id = generate_snowflake_id(created_at);
@@ -287,6 +355,18 @@ async fn save_bsky_post(
         Ok(_) => {
             eprintln!("[Jetstream] 保存完了: {}", at_uri);
 
+            // 添付（画像・動画）を post_attachments に保存
+            if !attachments.is_empty() {
+                let posts_repo = PgPostRepository::new(pool.clone());
+                for (position, att) in attachments.iter().enumerate() {
+                    if let Err(e) = posts_repo.attach_remote_media_url(
+                        post_id, &att.url, Some(&att.mime_type), att.thumbnail_url.as_deref(), position as i16,
+                    ).await {
+                        eprintln!("[Jetstream] 添付 URL 保存失敗（スキップ）: {}", e);
+                    }
+                }
+            }
+
             // ローカルフォロワーへ WebSocket 配信
             let follower_rows = sqlx::query(
                 "SELECT f.follower_actor_id FROM follows f
@@ -305,6 +385,15 @@ async fn save_bsky_post(
                 .collect();
 
             if !recipients.is_empty() {
+                let attachments_json: Vec<JsonValue> = attachments.iter().map(|att| {
+                    serde_json::json!({
+                        "url": att.url,
+                        "mimeType": att.mime_type,
+                        "width": att.width,
+                        "height": att.height,
+                        "thumbnailUrl": att.thumbnail_url,
+                    })
+                }).collect();
                 let note_json = serde_json::json!({
                     "id": post_id.to_string(),
                     "text": text,
@@ -317,7 +406,7 @@ async fn save_bsky_post(
                         "actorType": "bsky",
                         "avatarUrl": avatar_url,
                     },
-                    "attachments": [],
+                    "attachments": attachments_json,
                     "replyId": reply_id_str,
                 });
                 stream_hub.publish_note(recipients, &note_json);

@@ -7,6 +7,7 @@ import Avatar from "./Avatar";
 import ReactionChips from "./ReactionChips";
 import ReactionPicker from "./ReactionPicker";
 import EmojiText from "./EmojiText";
+import HlsVideo from "./HlsVideo";
 import { useComposer } from "../../contexts/ComposerContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { ReactionUpdate, useStreamingContext } from "../../contexts/StreamingContext";
@@ -199,12 +200,14 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
       {note.attachments && note.attachments.length > 0 && (
         <div className={styles.attachments}>
           {note.attachments.map((att, i) => {
-            if (att.mimeType.startsWith("video/")) {
+            const isHls = att.mimeType === "application/vnd.apple.mpegurl" || att.mimeType === "application/x-mpegURL";
+            if (att.mimeType.startsWith("video/") || isHls) {
               return (
-                <video
+                <HlsVideo
                   key={i}
                   src={att.url}
-                  controls
+                  poster={att.thumbnailUrl}
+                  isHls={isHls}
                   className={styles.attachImage}
                   onClick={(e) => e.stopPropagation()}
                 />

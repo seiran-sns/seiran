@@ -141,7 +141,8 @@ pub async fn fetch_attachments_map(
                 COALESCE(mf.height, 0) AS height,
                 sp.public_url AS public_url,
                 mf.thumbnail_key AS thumbnail_key,
-                mf.duration_ms AS duration_ms
+                mf.duration_ms AS duration_ms,
+                pa.remote_thumbnail_url AS remote_thumbnail_url
          FROM post_attachments pa
          LEFT JOIN media_files mf ON mf.id = pa.media_file_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -164,9 +165,10 @@ pub async fn fetch_attachments_map(
         }
         let public_url: Option<String> = row.try_get("public_url").unwrap_or(None);
         let thumbnail_key: Option<String> = row.try_get("thumbnail_key").unwrap_or(None);
+        let remote_thumbnail_url: Option<String> = row.try_get("remote_thumbnail_url").unwrap_or(None);
         let thumbnail_url = match (&public_url, &thumbnail_key) {
             (Some(pu), Some(tk)) => Some(format!("{}/{}", pu.trim_end_matches('/'), tk)),
-            _ => None,
+            _ => remote_thumbnail_url,
         };
         map.entry(post_id).or_default().push(AttachmentResponse {
             url,

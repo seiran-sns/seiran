@@ -3522,6 +3522,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "tokio-tungstenite",
+ "urlencoding",
 ]
 
 [[package]]

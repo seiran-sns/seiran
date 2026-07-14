@@ -400,20 +400,22 @@ WHERE created_at < now() - INTERVAL '7 days'
 
 ```sql
 CREATE TABLE post_attachments (
-    post_id           BIGINT   NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-    media_file_id     BIGINT   REFERENCES media_files(id),  -- ローカル投稿: あり／リモート受信: NULL
-    position          SMALLINT NOT NULL,   -- 表示順（0 始まり）
-    alt_text          TEXT,
-    remote_url        TEXT,    -- リモート受信投稿の添付 URL（S3 に保存せず参照のみ）
-    remote_mime_type  TEXT,    -- リモート受信投稿の実 MIME タイプ（AP attachment の mediaType 由来）
+    post_id                BIGINT   NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    media_file_id          BIGINT   REFERENCES media_files(id),  -- ローカル投稿: あり／リモート受信: NULL
+    position               SMALLINT NOT NULL,   -- 表示順（0 始まり）
+    alt_text               TEXT,
+    remote_url             TEXT,    -- リモート受信投稿の添付 URL（S3 に保存せず参照のみ）
+    remote_mime_type       TEXT,    -- リモート受信投稿の実 MIME タイプ（AP attachment の mediaType 由来）
+    remote_thumbnail_url   TEXT,    -- リモート受信投稿のサムネイル URL（本体と別URLの場合のみ。例: Bsky動画のHLSサムネイル）
     PRIMARY KEY (post_id, position)
 );
 
 CREATE INDEX idx_post_attachments_media ON post_attachments(media_file_id);
 ```
 
-- ローカル投稿: `media_file_id` あり、`remote_url`/`remote_mime_type` は NULL（種別は `media_files.mime_type` を参照）
-- リモート受信投稿: `media_file_id` は NULL、`remote_url` に添付 URL、`remote_mime_type` に AP attachment の `mediaType`（欠落時は URL 拡張子から推測した値、判別不能なら NULL）を保存する。画像・動画・音声いずれも同じ仕組みで保持し、API レスポンスの `mime_type` から notecard 側で `<img>`/`<video>`/`<audio>` を出し分ける。
+- ローカル投稿: `media_file_id` あり、`remote_*` 列は全て NULL（種別は `media_files.mime_type` を参照）
+- AP(Fedi)受信投稿: `media_file_id` は NULL、`remote_url` に添付 URL、`remote_mime_type` に AP attachment の `mediaType`（欠落時は URL 拡張子から推測した値、判別不能なら NULL）を保存する。画像・動画・音声いずれも同じ仕組みで保持し、API レスポンスの `mime_type` から notecard 側で `<img>`/`<video>`/`<audio>` を出し分ける。
+- ATP(Bsky)受信投稿: `media_file_id` は NULL。Jetstreamで受信した `record.embed` を解析し、`app.bsky.embed.images` は Bluesky CDN の画像URL（`https://cdn.bsky.app/img/feed_fullsize/plain/{did}/{cid}`）を `remote_url` に、`app.bsky.embed.video` はBluesky公式の動画パイプラインが生成するHLSプレイリストURL（`https://video.bsky.app/watch/{did}/{cid}/playlist.m3u8`、`remote_mime_type` は `application/vnd.apple.mpegurl`）を `remote_url` に、対応するサムネイルJPEG URL（`.../thumbnail.jpg`）を `remote_thumbnail_url` に保存する。いずれもDID+blob CIDのみから決定的に組み立てられるURLで、Bluesky AppViewへの追加問い合わせは不要（`crates/seiran-atp-repo/src/firehose.rs` の `parse_bsky_embed_attachments`）。`app.bsky.embed.recordWithMedia`（引用+メディア）は `media` フィールドを再帰的に解決する。フロントはHLSプレイリストを `hls.js` 経由で再生する（Safari はネイティブHLS再生）。
 - 1ポストあたりの最大添付数は **4枚**（AT Protocol `app.bsky.embed.images` の上限に準拠）
 
 ---

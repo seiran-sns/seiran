@@ -418,7 +418,7 @@ async fn handle_create_note(
                 continue;
             }
             let mime_type = guess_attachment_mime_type(att, url);
-            if let Err(e) = state.post_repo.attach_remote_media_url(post_id, url, mime_type.as_deref(), position as i16).await {
+            if let Err(e) = state.post_repo.attach_remote_media_url(post_id, url, mime_type.as_deref(), None, position as i16).await {
                 eprintln!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
             }
         }
