@@ -20,6 +20,7 @@ pub use auth::local::VerifiedUser;
 pub use secrets::{Secrets, SecretsFile, SecretsError};
 pub use queue::{create_job_queue, InMemoryJobQueue, WorkerEngine};
 pub use queue::worker::JobContext;
+pub use traits::{Job, JobQueue};
 pub use atp::{AtpCommitService, AtpCommitError, AtpCommitEvent};
 pub use ap::{ApClient, ApError};
 pub use streaming::{StreamEvent, StreamHub};

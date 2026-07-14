@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use seiran_common::{ap::ApClient, get_db_pool, run_migrations, SecretsFile, StreamHub};
+use seiran_common::{ap::ApClient, get_db_pool, run_migrations, InMemoryJobQueue, SecretsFile, StreamHub};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Role {
@@ -98,16 +98,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let role = Role::resolve();
     eprintln!("[seiran-server] ロール: {:?}", role);
 
-    // worker は現状 DB を必要としない（InMemoryJobQueue のスタブ）ため先に分岐する。
-    // 単独プロセスのため、この場合のみここで HTTP クライアントを新規生成する
-    // （`all` ロールでは下で作る共有 http_client を再利用する。二重生成しない）。
+    // worker も BskyVideoPoll 等 DB アクセスが必要なジョブを扱うため、単独起動時も
+    // DB に接続する（以前は「DB不要」だったが、ジョブハンドラの実装が進んだため変更）。
     if role == Role::Worker {
+        let pool = get_db_pool().await?;
+        eprintln!("[seiran-server] DB 接続完了");
         let http_client = Arc::new(
             reqwest::Client::builder()
                 .user_agent("seiran-federation/0.1.0")
                 .build()?,
         );
-        seiran_federation_worker::run(Arc::new(ApClient::new(http_client))).await;
+        // 単独 worker プロセスは他ロールとキューを共有できない（split-role構成では
+        // Redis統合まで各プロセスが独立したキューになる。現状の既知の制約）。
+        let queue = Arc::new(InMemoryJobQueue::new());
+        seiran_federation_worker::run(queue, pool, Arc::new(ApClient::new(http_client))).await;
         return Ok(());
     }
 
@@ -124,6 +128,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build()?,
     );
     let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+    // `all` ロールでは api と worker が同一プロセス内でこのインスタンスを共有する
+    // （api 側で enqueue したジョブを worker がそのまま処理できる）。
+    // worker 側は具体型 `Arc<InMemoryJobQueue>`、api 側はトレイトオブジェクト
+    // `Arc<dyn JobQueue>` を要求するため、両方の型で持っておく。
+    let job_queue_concrete = Arc::new(InMemoryJobQueue::new());
+    let job_queue: Arc<dyn seiran_common::JobQueue> = job_queue_concrete.clone();
 
     match role {
         Role::Firehose => {
@@ -137,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("[seiran-server] マイグレーション適用完了");
 
             let state =
-                seiran_api::init_state(pool, secrets, http_client, local_domain).await;
+                seiran_api::init_state(pool, secrets, http_client, local_domain, job_queue).await;
             seiran_api::spawn_startup_tasks(&state);
             seiran_api::spawn_gc_tasks(&state);
             serve(seiran_api::router(state), env_port("PORT", 3000)).await?;
@@ -169,6 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Arc::clone(&secrets),
                 Arc::clone(&http_client),
                 local_domain.clone(),
+                Arc::clone(&job_queue),
             )
             .await;
             seiran_api::spawn_startup_tasks(&api_state);
@@ -192,9 +203,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tokio::spawn(async move { seiran_atp_repo::run(pool, http, hub).await });
             }
 
-            // worker をバックグラウンド起動（api ロールと同じ ApClient / コネクションプールを共有）
+            // worker をバックグラウンド起動（api ロールと同じ ApClient / JobQueue / DB プールを共有）
             let worker_ap_client = Arc::clone(&api_state.ap_client);
-            tokio::spawn(async move { seiran_federation_worker::run(worker_ap_client).await });
+            let worker_queue = Arc::clone(&job_queue_concrete);
+            let worker_pool = pool.clone();
+            tokio::spawn(async move { seiran_federation_worker::run(worker_queue, worker_pool, worker_ap_client).await });
 
             // パスが衝突しないため単一ポートに合流できる
             let app =

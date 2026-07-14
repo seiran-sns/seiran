@@ -3482,13 +3482,16 @@ name = "seiran-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "chrono",
  "dashmap",
  "dotenvy",
  "emojis",
  "hex",
  "html-escape",
+ "jsonwebtoken",
  "lettre",
+ "p256",
  "reqwest",
  "seiran-common",
  "serde",
@@ -3587,6 +3590,7 @@ version = "0.1.0"
 dependencies = [
  "dotenvy",
  "seiran-common",
+ "sqlx",
  "tokio",
 ]
 

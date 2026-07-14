@@ -94,6 +94,10 @@ pub enum Job {
     
     /// AT Protocolリポジトリのコミットと、リレーへの通知
     AtpRepositoryPublish { actor_id: i64, commit_type: String },
+
+    /// Bsky公式動画パイプライン（app.bsky.video.uploadVideo）の完了待ち。
+    /// getJobStatusを1回叩き、未完了ならErrを返してリトライさせる。
+    BskyVideoPoll { media_file_id: i64 },
 }
 
 #[async_trait]

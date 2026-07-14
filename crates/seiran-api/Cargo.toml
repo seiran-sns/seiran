@@ -25,6 +25,9 @@ zstd = "0.13"
 serde_ipld_dagcbor = "0.6"
 hex = "0.4"
 sha2 = "0.10"
+jsonwebtoken = "9"
+base64 = "0.22"
+p256 = { version = "0.13.2", features = ["pkcs8", "pem"] }
 dashmap = "6"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 emojis = { version = "0.9.0", default-features = false }

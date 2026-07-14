@@ -9,10 +9,12 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use seiran_common::{
+    atp::sign_service_auth_jwt,
     ext_for_mime_type, generate_snowflake_id, is_allowed_video_or_audio_mime,
     process_image, probe_video_or_audio, sniff_mime_type, MediaKind,
-    repository::CreateMediaFile,
-    select_provider, SelectorError, S3StorageClient, StorageProviderRepository,
+    queue::worker::priority,
+    repository::{Actor, CreateMediaFile},
+    select_provider, Job, SelectorError, S3StorageClient, StorageProviderRepository,
 };
 
 use crate::{
@@ -57,17 +59,18 @@ pub async fn create_drive_file(
 ) -> Result<Json<DriveFileResponse>, ApiError> {
     let auth = extract_auth(&headers, &state.local_auth).await?;
 
-    // アップローダーの actor_id を取得
-    let actor_id = state
+    // アップローダーのアクター情報を取得（Bsky動画パイプライン結合にはDID/署名鍵も必要）
+    let actor = state
         .actors
         .find_local_by_user_id(auth.user_id)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .map(|a| a.id);
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let actor_id = actor.as_ref().map(|a| a.id);
 
     // multipart フィールドを収集
     let mut file_bytes: Option<Vec<u8>> = None;
     let mut media_type_str = "post".to_owned();
+    let mut deliver_to_bsky = true;
 
     while let Some(field) = multipart
         .next_field()
@@ -87,6 +90,10 @@ pub async fn create_drive_file(
                     .text()
                     .await
                     .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+            }
+            Some("deliver_to_bsky") => {
+                let v = field.text().await.map_err(|e| ApiError::BadRequest(e.to_string()))?;
+                deliver_to_bsky = v != "false";
             }
             _ => {}
         }
@@ -114,7 +121,7 @@ pub async fn create_drive_file(
         return create_image_file(&state, actor_id, &raw_bytes, kind).await;
     }
 
-    create_video_or_audio_file(&state, actor_id, raw_bytes, sniffed_mime).await
+    create_video_or_audio_file(&state, actor.as_ref(), raw_bytes, sniffed_mime, deliver_to_bsky).await
 }
 
 /// 画像アップロード処理（WebP 変換・リサイズ・blurhash 計算）。従来の処理をそのまま踏襲する。
@@ -209,10 +216,12 @@ async fn create_image_file(
 /// ffmpeg でメタデータ（再生時間・解像度）とサムネイルフレームのみ抽出する。
 async fn create_video_or_audio_file(
     state: &AppState,
-    actor_id: Option<i64>,
+    actor: Option<&Actor>,
     raw_bytes: Vec<u8>,
     mime_type: String,
+    deliver_to_bsky: bool,
 ) -> Result<Json<DriveFileResponse>, ApiError> {
+    let actor_id = actor.map(|a| a.id);
     if !is_allowed_video_or_audio_mime(&mime_type) {
         return Err(ApiError::BadRequest(format!("対応していないファイル形式です: {}", mime_type)));
     }
@@ -274,6 +283,14 @@ async fn create_video_or_audio_file(
         None
     };
 
+    // Bsky動画パイプラインへの提出にはS3保存後も生バイト列が要るため、
+    // move される前に複製しておく（音声やdeliver_to_bsky=falseでは複製しない）。
+    let video_bytes_for_bsky = if mime_type.starts_with("video/") && deliver_to_bsky {
+        Some(raw_bytes.clone())
+    } else {
+        None
+    };
+
     let ext = ext_for_mime_type(&mime_type);
     let storage_key = format!("media/{}.{}", Uuid::new_v4(), ext);
     let public_url = s3
@@ -301,6 +318,13 @@ async fn create_video_or_audio_file(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // 動画かつBsky配信あり要求時、Bluesky公式動画パイプラインへ提出する。
+    // uploadVideo自体は同期・即時（ジョブ受理確認のみ）で、アップロードAPIの
+    // レスポンスはブロックしない。完了待ちは`Job::BskyVideoPoll`に委ねる。
+    if let (Some(video_bytes), Some(actor)) = (video_bytes_for_bsky, actor) {
+        submit_to_bsky_video_pipeline(state, actor, record.id, video_bytes).await;
+    }
+
     let thumbnail_url = match &thumbnail_key {
         Some(key) => Some(build_public_url(state.storage_providers.as_ref(), provider.id, key).await),
         None => None,
@@ -319,6 +343,101 @@ async fn create_video_or_audio_file(
         duration_ms: probed.duration_ms,
         thumbnail_url,
     }))
+}
+
+const BSKY_VIDEO_SERVICE_HOST: &str = "https://video.bsky.app";
+
+/// Bluesky公式動画パイプライン（`app.bsky.video.uploadVideo`）へ動画を提出する。
+/// 同期的だが即時（ジョブ受理確認のみ）で、完了までは待たない
+/// （`Job::BskyVideoPoll`がバックグラウンドで完了を待つ）。
+/// 失敗しても`media_files.bsky_video_status='failed'`を記録するだけで、
+/// アップロードAPI自体は成功として扱う（動画はローカル保存済みのため）。
+async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_file_id: i64, video_bytes: Vec<u8>) {
+    let (Some(did), Some(pem)) = (actor.at_did.as_deref(), actor.at_signing_key_pem.as_deref()) else {
+        eprintln!("[BskyVideo] at_did/at_signing_key_pem 未設定のためスキップ media_file_id={}", media_file_id);
+        mark_bsky_video_failed(state, media_file_id).await;
+        return;
+    };
+
+    let own_pds_did = format!("did:web:{}", state.local_domain);
+    let jwt = match sign_service_auth_jwt(pem, did, &own_pds_did, "com.atproto.repo.uploadBlob") {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("[BskyVideo] JWT署名失敗 media_file_id={}: {}", media_file_id, e);
+            mark_bsky_video_failed(state, media_file_id).await;
+            return;
+        }
+    };
+
+    let upload_url = format!(
+        "{}/xrpc/app.bsky.video.uploadVideo?did={}&name=seiran-{}.mp4",
+        BSKY_VIDEO_SERVICE_HOST,
+        urlencoding::encode(did),
+        media_file_id,
+    );
+
+    let resp = state
+        .ap_client
+        .http
+        .post(&upload_url)
+        .header("Authorization", format!("Bearer {}", jwt))
+        .header("Content-Type", "video/mp4")
+        .body(video_bytes)
+        .send()
+        .await;
+
+    let resp = match resp {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[BskyVideo] uploadVideoリクエスト失敗 media_file_id={}: {}", media_file_id, e);
+            mark_bsky_video_failed(state, media_file_id).await;
+            return;
+        }
+    };
+
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+
+    // 同一内容の動画が既にBluesky側で処理済みの場合、409 Conflict + "already_exists"
+    // だが有効なjobIdは返ってくる（実機確認済み）。この場合も成功として扱う。
+    let job_id = serde_json::from_str::<serde_json::Value>(&body_text)
+        .ok()
+        .and_then(|v| {
+            v.get("jobId").and_then(|j| j.as_str()).map(|s| s.to_string())
+                .or_else(|| v.get("jobStatus").and_then(|j| j.get("jobId")).and_then(|j| j.as_str()).map(|s| s.to_string()))
+        });
+
+    let Some(job_id) = job_id else {
+        eprintln!("[BskyVideo] uploadVideo失敗 media_file_id={} status={} body={}", media_file_id, status, body_text);
+        mark_bsky_video_failed(state, media_file_id).await;
+        return;
+    };
+    if !status.is_success() {
+        eprintln!("[BskyVideo] uploadVideo非2xxだがjobId取得 media_file_id={} status={} jobId={}", media_file_id, status, job_id);
+    }
+
+    if let Err(e) = sqlx::query(
+        "UPDATE media_files SET bsky_video_job_id = $1, bsky_video_status = 'pending' WHERE id = $2",
+    )
+    .bind(&job_id)
+    .bind(media_file_id)
+    .execute(&state.db)
+    .await
+    {
+        eprintln!("[BskyVideo] DB更新失敗 media_file_id={}: {}", media_file_id, e);
+        return;
+    }
+
+    if let Err(e) = state.job_queue.enqueue(Job::BskyVideoPoll { media_file_id }, priority::HIGH).await {
+        eprintln!("[BskyVideo] ジョブ投入失敗 media_file_id={}: {}", media_file_id, e);
+    }
+}
+
+async fn mark_bsky_video_failed(state: &AppState, media_file_id: i64) {
+    let _ = sqlx::query("UPDATE media_files SET bsky_video_status = 'failed' WHERE id = $1")
+        .bind(media_file_id)
+        .execute(&state.db)
+        .await;
 }
 
 fn map_selector_error(e: SelectorError) -> ApiError {

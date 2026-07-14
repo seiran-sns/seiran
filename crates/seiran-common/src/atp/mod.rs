@@ -1,7 +1,9 @@
 pub mod client;
+pub mod did_resolve;
 pub mod plc;
 pub mod repo;
 pub mod service;
+pub mod service_auth;
 
 pub use client::{
     fetch_atp_history, fetch_single_bsky_post, fetch_bsky_profile, search_appview_posts,
@@ -19,3 +21,5 @@ pub use repo::{
     BskyRefRecord, BskyPostReply,
 };
 pub use service::{AtpCommitService, AtpCommitError, AtpCommitEvent};
+pub use service_auth::{sign_service_auth_jwt, ServiceAuthError};
+pub use did_resolve::{resolve_atproto_verification_key, DidResolveError};

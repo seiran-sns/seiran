@@ -325,12 +325,14 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        // 添付ファイル情報を DB から取得して画像/非画像に分類する。
-        // 動画・音声は app.bsky.embed.video 相当の本格対応が別タスクのため、
-        // 代わりに外部リンクカード（app.bsky.embed.external）として配信する。
-        let (bsky_images, non_image_url) = if !attachment_ids.is_empty() {
+        // 添付ファイル情報を DB から取得して画像/動画/その他に分類する。
+        // 動画は bsky_video_status='ready'（Bsky公式動画パイプライン結合済み）の
+        // 場合のみ app.bsky.embed.video を使う。それ以外（音声・未完了の動画）は
+        // 外部リンクカード（app.bsky.embed.external）にフォールバックする。
+        let (bsky_images, video_candidate, non_image_url) = if !attachment_ids.is_empty() {
             let rows = sqlx::query(
-                "SELECT mf.sha256, mf.size, mf.mime_type, mf.width, mf.height, mf.storage_key, sp.public_url
+                "SELECT mf.sha256, mf.size, mf.mime_type, mf.width, mf.height, mf.storage_key, sp.public_url,
+                        mf.bsky_video_cid, mf.bsky_video_status
                  FROM media_files mf
                  JOIN storage_providers sp ON sp.id = mf.storage_provider_id
                  WHERE mf.id = ANY($1)
@@ -341,15 +343,16 @@ impl AtpCommitService {
             .await?;
 
             let mut images: Vec<BskyImage> = Vec::new();
+            let mut video_candidate: Option<BskyEmbed> = None;
             let mut non_image_url: Option<String> = None;
             for r in &rows {
                 use sqlx::Row;
                 let Ok(sha256) = r.try_get::<String, _>("sha256") else { continue };
                 let Ok(mime_type) = r.try_get::<String, _>("mime_type") else { continue };
+                let size: i64 = r.try_get("size").unwrap_or(0);
+                let width: Option<i32> = r.try_get("width").unwrap_or(None);
+                let height: Option<i32> = r.try_get("height").unwrap_or(None);
                 if mime_type.starts_with("image/") {
-                    let size: i64 = r.try_get("size").unwrap_or(0);
-                    let width: Option<i32> = r.try_get("width").unwrap_or(None);
-                    let height: Option<i32> = r.try_get("height").unwrap_or(None);
                     // CID 生成に失敗したものはスキップ
                     if cid_from_sha256_hex(&sha256).is_err() { continue; }
                     images.push(BskyImage {
@@ -357,27 +360,49 @@ impl AtpCommitService {
                         width: width.unwrap_or(0), height: height.unwrap_or(0),
                         alt: String::new(),
                     });
-                } else if non_image_url.is_none() {
+                    continue;
+                }
+                if mime_type.starts_with("video/") && video_candidate.is_none() {
+                    let status: Option<String> = r.try_get("bsky_video_status").unwrap_or(None);
+                    let video_cid: Option<String> = r.try_get("bsky_video_cid").unwrap_or(None);
+                    if status.as_deref() == Some("ready") {
+                        if let Some(video_cid) = video_cid {
+                            video_candidate = Some(BskyEmbed::Video {
+                                cid: video_cid, mime_type: mime_type.clone(), size,
+                                width: width.unwrap_or(0), height: height.unwrap_or(0),
+                            });
+                            continue;
+                        }
+                    }
+                }
+                if non_image_url.is_none() {
                     if let (Ok(storage_key), Ok(public_url)) = (r.try_get::<String, _>("storage_key"), r.try_get::<String, _>("public_url")) {
                         non_image_url = Some(format!("{}/{}", public_url.trim_end_matches('/'), storage_key));
                     }
                 }
             }
-            (images, non_image_url)
+            (images, video_candidate, non_image_url)
         } else {
-            (vec![], None)
+            (vec![], None, None)
         };
 
         // app.bsky.embed.images の上限は 4 枚（AT Protocol 仕様）。
         // ポスト自体は最大 10 枚まで許容するが、Bsky embed には先頭 4 枚のみ含める。
         let bsky_images: Vec<BskyImage> = bsky_images.into_iter().take(4).collect();
 
-        let blob_cids: Vec<Cid> = bsky_images.iter()
+        let mut blob_cids: Vec<Cid> = bsky_images.iter()
             .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
             .collect();
 
         let embed = if !bsky_images.is_empty() {
             Some(BskyEmbed::Images(bsky_images))
+        } else if let Some(video_embed) = video_candidate {
+            if let BskyEmbed::Video { ref cid, .. } = video_embed {
+                if let Ok(video_cid) = cid_from_str(cid) {
+                    blob_cids.push(video_cid);
+                }
+            }
+            Some(video_embed)
         } else {
             non_image_url.map(|url| BskyEmbed::External { url })
         };

@@ -618,10 +618,16 @@ export const api = {
   },
 
   media: {
-    upload(file: File, mediaType: "post" | "emoji" | "avatar" | "banner" = "post"): Promise<DriveFile> {
+    /**
+     * `deliverToBsky`: 動画添付のみ意味を持つ。Bluesky公式動画パイプラインへの
+     * 提出可否（省略時true）。falseにすると音声・画像と同様、Bskyへは
+     * externalリンクカードとして配信される。
+     */
+    upload(file: File, mediaType: "post" | "emoji" | "avatar" | "banner" = "post", deliverToBsky = true): Promise<DriveFile> {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("media_type", mediaType);
+      formData.append("deliver_to_bsky", String(deliverToBsky));
       return fetch(`${BASE}/drive/files/create`, {
         method: "POST",
         headers: { ...authHeaders() },

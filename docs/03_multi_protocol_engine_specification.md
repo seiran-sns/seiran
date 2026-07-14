@@ -45,7 +45,7 @@
 
 ## 2. バックグラウンド・キュー設計 (`JobQueue` の分類)
 
-システム全体の分散通信および同期を支えるため、バックエンドに以下の5つの非同期キューを実装する。これらは `JobQueue` Trait で抽象化され、オンメモリでの実装からRedis（`apalis` 等）への移行を容易にする。
+システム全体の分散通信および同期を支えるため、バックエンドに以下の6つの非同期キューを実装する。これらは `JobQueue` Trait で抽象化され、オンメモリでの実装からRedis（`apalis` 等）への移行を容易にする。
 
 | キュー（ジョブ）名 | 処理内容 | 優先度 | リトライ & レート制限（レートリミット）戦略 |
 | :--- | :--- | :--- | :--- |
@@ -54,6 +54,7 @@
 | **3. 配送受け入れ（インバウンド）キュー**<br>`inbound_activity_process` | 外部（APのInbox等）から届いたアクティビティ（投稿、リアクション等）を非同期でパースする。Note（ポスト）本体のフェッチ、未知アクターの解決、関連する親スレッドの補完フェッチ、DB保存処理など。 | **中 (Medium)** | ・外部サーバーへのフェッチ（Noteの解決やアクター解決）が頻発するため、ドメイン単位のレート制限を適用。<br>・依存リソース（アクターや親投稿）が一時的に解決できない場合、短いスパンで再スケジュール（指数バックオフで最大5回リトライ）。 |
 | **4. アクター検証・メタデータ取得キュー**<br>`actor_metadata_resolve` | リモートseiranアクターのハンドシェイク検証（`verify-actor`）や、Webfingerによる解決、アバター画像やOGP情報のプロキシ・キャッシュ化。 | **中 (Medium)** | ・タイムアウト時は短いスパンで再試行（最大3回）。<br>・画像取得失敗等は非クリティカルとして扱い、デフォルト画像でフォールバック。 |
 | **5. ATPリポジトリコミット・配信キュー**<br>`atp_repository_publish` | seiran PDS としてローカルユーザーの AT Protocol リポジトリを更新する。具体的には、投稿・削除等のレコードを DAG-CBOR 形式で MST にコミットし、P-256 秘密鍵で署名した後、Relay サーバーへ配信する。外部 PDS（bsky.social 等）は使用しない。 | **極高 (Critical)** | ・順序性の維持が不可欠（同じDIDに対するコミット順が前後してはならない）。<br>・アクターID単位の **FIFO（先入れ先出し）** キュー、またはシリアル排他ロック制御が必要。 |
+| **6. Bsky動画パイプライン結合キュー**<br>`bsky_video_poll` | 動画添付アップロード時にBluesky公式動画パイプライン（`app.bsky.video.uploadVideo`）へ投げたジョブの完了（`app.bsky.video.getJobStatus`）を待つ。完了したら`media_files.bsky_video_cid`/`bsky_video_status='ready'`を更新し、以降の`commit_post`が`app.bsky.embed.video`を使えるようにする。 | **高 (High)** | ・1回の実行で1回だけ`getJobStatus`を叩き、未完了なら`Err`を返してリトライさせる（固定3秒間隔・最大10回=30秒）。<br>・30秒以内に完了しなければ`bsky_video_status`は`'pending'`のまま放置され、該当ポストは`app.bsky.embed.external`にフォールバックする（待たない設計）。 |
 
 ---
 
@@ -799,3 +800,80 @@ profile:
 - **重要**: 同一 rkey（`self`）を2回目以降コミットする際、MST構築用のエントリロード（`load_atp_entries`）が返す既存エントリと新エントリでキーが重複しないよう、`commit_record_inner` は push 前に同一キーの古いエントリを `retain` で除去する。これを行わないと MST に重複キーが入り、AppView に拒否される不正な木になる。
 
 新規登録時（`setup.rs` / `auth.rs`）はアバター・bioがまだ無いため `description: None, avatar_media: None` で呼ばれる。
+
+## 12. Bsky公式動画パイプライン結合（`app.bsky.embed.video`）
+
+seiranから投稿した動画をBluesky公式アプリで再生可能にするため、Bluesky公式の
+動画処理サービス（`video.bsky.app`）と連携する。この節は実機検証で判明した、
+一般に公開ドキュメント化されていない挙動を記録する。
+
+### 12.1 サービス間認証JWT（Inter-Service Auth）の実際の仕様
+
+`com.atproto.server.getServiceAuth`相当のJWT（`iss`/`aud`/`lxm`/`exp`）を
+P-256署名鍵（`at_signing_key_pem`）で自己署名して使う
+（`crates/seiran-common/src/atp/service_auth.rs`の`sign_service_auth_jwt`）。
+`jsonwebtoken`クレートの`Algorithm::ES256`がそのまま使える
+（seiranはsecp256k1ではなくP-256を使用しているため）。
+
+**重要（公式ドキュメント未記載・実機検証で判明）**:
+- `aud`は「呼び出し先サービス（`video.bsky.app`）のDID」ではなく、
+  **自分のPDS自身のDID**（`did:web:{local_domain}`）を指定する。
+  誤ると`invalid token audience`エラーになる。
+- `lxm`は「今まさに呼び出しているメソッド名」ではなく、**このトークンが
+  最終的に使われる自PDS側のアクション名**（`com.atproto.repo.uploadBlob`）を
+  指定する。誤ると`invalid token lexicon method`エラーになる。
+- Bluesky動画サービスは`uploadVideo`呼び出し時に受け取ったこのJWTを保持し、
+  トランスコード完了後、自PDSの`com.atproto.repo.uploadBlob`エンドポイントを
+  呼び戻す際に**同じトークンをそのまま再利用**する（実機で`Authorization`
+  ヘッダを確認済み）。
+
+### 12.2 uploadVideo〜getJobStatusのフロー
+
+1. `POST https://video.bsky.app/xrpc/app.bsky.video.uploadVideo?did={did}&name=...`
+   （動画バイナリ、`Content-Type: video/mp4`、上記12.1のJWT）→
+   `{"did":..., "jobId":..., "state":"JOB_STATE_CREATED"}`（成功時はフラット構造）。
+2. `GET https://video.bsky.app/xrpc/app.bsky.video.getJobStatus?jobId=...`
+   （同様のJWT、`lxm=app.bsky.video.getJobStatus`）をポーリング。
+   完了時 `{"jobStatus":{"state":"JOB_STATE_COMPLETED","blob":{"$type":"blob",
+   "ref":{"$link":<CID>},"mimeType":"video/mp4","size":...}}}`
+   （エラー・完了時は`jobStatus`にネストされる点に注意）。
+3. 並行して、Bluesky動画サービスが自PDSの`com.atproto.repo.uploadBlob`へ
+   トランスコード済みバイナリをPOSTしてくる（詳細は12.3）。
+
+このアカウントが一度もBlueskyのAppViewにインデックスされたことが無い場合
+（例: seiran内部でのみ有効なテスト用アカウント）、`uploadVideo`は
+`profile_not_found`エラーを返す。実際にBlueskyと交信歴のある
+ペアリング済みアカウントでのみ機能する。
+
+### 12.3 `com.atproto.repo.uploadBlob`受け口（PDS側）
+
+`crates/seiran-api/src/handlers/xrpc/repo.rs`の`xrpc_upload_blob`
+（`POST /xrpc/com.atproto.repo.uploadBlob`）で受信する。
+
+- `Authorization: Bearer <jwt>`を検証する（`iss`のDIDからAT Protocol
+  verification key を解決し署名検証、`aud == did:web:{local_domain}`、
+  `lxm == "com.atproto.repo.uploadBlob"`、`exp`未失効を確認）。
+- 受信バイト列のSHA-256からCIDを計算し（`cid_from_sha256_hex`）、
+  `{"blob":{"$type":"blob","ref":{"$link":CID},"mimeType":...,"size":...}}`
+  を返す。**受信バイト列自体はS3に保存せず読み捨てる**
+  （ローカル/Fedi配信は常にアップロード時のオリジナルファイルを使うため、
+  この copy は不要。`getBlob`でこのCIDを問い合わせられても404になるが、
+  実害は無い設計判断として許容している）。
+- 実測: 計算したCIDは`getJobStatus`が報告するCIDと完全一致する。
+
+### 12.4 `bsky_video_poll`ジョブと`commit_post`への反映
+
+動画アップロード時（`deliver_to_bsky`が有効な場合）、アップロードAPI内で
+同期的に`uploadVideo`を1回叩いて`jobId`を取得し、`media_files`に
+`bsky_video_job_id`/`bsky_video_status='pending'`を保存した上で
+`Job::BskyVideoPoll`をJobQueueに積む（§2の6番目のキュー参照）。
+このジョブは`getJobStatus`を1回叩いて未完了なら`Err`を返し、
+`WorkerEngine`の既存リトライ機構（固定3秒間隔・最大10回=30秒）に
+乗せて再試行させる。完了したら`bsky_video_cid`/`bsky_video_status='ready'`
+を保存する。
+
+投稿作成時（`commit_post`、`crates/seiran-common/src/atp/service.rs`）は
+`media_files.bsky_video_status`を見て、`'ready'`なら`app.bsky.embed.video`、
+そうでなければ（`pending`のまま・`failed`・音声等）`app.bsky.embed.external`
+にフォールバックする。ポストAPI自体は`bsky_video_status`の完了を待たない
+（アップロード猶予30秒の間に完了していればラッキー、という設計）。

@@ -328,6 +328,9 @@ CREATE TABLE media_files (
     storage_key          VARCHAR(1024) NOT NULL,
     duration_ms          INT,                          -- 動画・音声の再生時間。画像は NULL
     thumbnail_key        TEXT,                         -- 動画サムネイル(WebP)の storage_key。画像・音声は NULL
+    bsky_video_job_id    TEXT,                         -- Bsky公式動画パイプラインのuploadVideo jobId
+    bsky_video_cid       TEXT,                         -- getJobStatus完了時に得られるblob CID
+    bsky_video_status    TEXT,                         -- NULL(対象外)/'pending'/'ready'/'failed'
     uploaded_by_actor_id BIGINT REFERENCES actors(id) ON DELETE SET NULL, -- GC・監査用（オーナーシップではない）
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -345,6 +348,12 @@ CREATE INDEX idx_media_files_sha256 ON media_files(sha256);
   本体は無変換（トランスコードなし）でそのまま保存する。
 - 音声: `width`/`height`/`blurhash`/`thumbnail_key` は全て NULL、`duration_ms` のみ
   埋まる。本体は無変換でそのまま保存する。
+- 動画かつBsky配信ありでアップロードされた場合、`bsky_video_job_id`/
+  `bsky_video_cid`/`bsky_video_status`にBluesky公式動画パイプライン
+  （`app.bsky.video.uploadVideo`）との連携状態を保持する。`bsky_video_status`が
+  `'ready'`になって初めて、そのポストのATP配信で`app.bsky.embed.video`が使われる
+  （それ以外は`app.bsky.embed.external`にフォールバック）。詳細は
+  `docs/03_multi_protocol_engine_specification.md`参照。
 
 **重複排除フロー:**
 - 画像: 変換後バイト列の SHA-256 と blurhash を計算し `(sha256, blurhash)` の

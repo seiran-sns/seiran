@@ -450,6 +450,9 @@ pub enum BskyEmbed {
     Images(Vec<BskyImage>),
     Record { uri: String, cid: String },
     External { url: String },
+    /// Bsky公式動画パイプライン（`app.bsky.video.uploadVideo`）で発行された
+    /// blob CIDを使った動画embed。`bsky_video_status='ready'`の場合のみ使用する。
+    Video { cid: String, mime_type: String, size: i64, width: i32, height: i32 },
 }
 
 /// `app.bsky.embed.record`（引用ポスト）の Ipld を構築する。
@@ -484,12 +487,41 @@ fn build_embed_external_ipld(url: &str) -> Ipld {
 /// ref は CID リンク（DAG-CBOR tag 42）を直接持つ
 fn build_blob_ipld(sha256_hex: &str, mime_type: &str, size: i64) -> Result<Ipld, RepoError> {
     let blob_cid = cid_from_sha256_hex(sha256_hex)?;
+    build_blob_ipld_from_cid_value(blob_cid, mime_type, size)
+}
+
+/// `build_blob_ipld`と同じblob参照Ipldを、sha256からではなく既知のCID文字列から
+/// 直接構築する（Bsky公式動画パイプラインが発行したCIDのように、seiran側で
+/// バイナリを保持していない/sha256から逆算できないケース向け）。
+fn build_blob_ipld_from_cid(cid_str: &str, mime_type: &str, size: i64) -> Result<Ipld, RepoError> {
+    let blob_cid = cid_from_str(cid_str)?;
+    build_blob_ipld_from_cid_value(blob_cid, mime_type, size)
+}
+
+fn build_blob_ipld_from_cid_value(blob_cid: Cid, mime_type: &str, size: i64) -> Result<Ipld, RepoError> {
     let mut blob_map = BTreeMap::new();
     blob_map.insert("ref".to_string(), Ipld::Link(blob_cid));
     blob_map.insert("size".to_string(), Ipld::Integer(size as i128));
     blob_map.insert("$type".to_string(), Ipld::String("blob".to_string()));
     blob_map.insert("mimeType".to_string(), Ipld::String(mime_type.to_string()));
     Ok(Ipld::Map(blob_map))
+}
+
+/// `app.bsky.embed.video` の Ipld ツリーを構築する。
+fn build_embed_video_ipld(cid_str: &str, mime_type: &str, size: i64, width: i32, height: i32) -> Result<Ipld, RepoError> {
+    let blob_map = build_blob_ipld_from_cid(cid_str, mime_type, size)?;
+
+    let mut embed = BTreeMap::new();
+    embed.insert("alt".to_string(), Ipld::String(String::new()));
+    embed.insert("$type".to_string(), Ipld::String("app.bsky.embed.video".to_string()));
+    embed.insert("video".to_string(), blob_map);
+    if width > 0 && height > 0 {
+        let mut aspect = BTreeMap::new();
+        aspect.insert("width".to_string(), Ipld::Integer(width as i128));
+        aspect.insert("height".to_string(), Ipld::Integer(height as i128));
+        embed.insert("aspectRatio".to_string(), Ipld::Map(aspect));
+    }
+    Ok(Ipld::Map(embed))
 }
 
 /// `app.bsky.embed.images` の Ipld ツリーを構築する。
@@ -538,6 +570,9 @@ pub fn encode_bsky_feed_post(
         }
         Some(BskyEmbed::Record { uri, cid }) => Some(build_embed_record_ipld(&uri, &cid)),
         Some(BskyEmbed::External { url }) => Some(build_embed_external_ipld(&url)),
+        Some(BskyEmbed::Video { cid, mime_type, size, width, height }) => {
+            Some(build_embed_video_ipld(&cid, &mime_type, size, width, height)?)
+        }
     };
     let record = BskyFeedPost {
         text: text.to_string(),

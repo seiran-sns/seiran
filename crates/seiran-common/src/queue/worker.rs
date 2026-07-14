@@ -217,6 +217,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::AtpRepositoryPublish { actor_id, commit_type } => {
             jobs::atp_repository_publish::handle(actor_id, commit_type, ctx).await
         }
+        Job::BskyVideoPoll { media_file_id } => {
+            jobs::bsky_video_poll::handle(media_file_id, ctx).await
+        }
     }
 }
 
@@ -228,6 +231,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::InboundActivityProcess { .. } => "InboundActivityProcess",
         Job::ActorMetadataResolve { .. } => "ActorMetadataResolve",
         Job::AtpRepositoryPublish { .. } => "AtpRepositoryPublish",
+        Job::BskyVideoPoll { .. } => "BskyVideoPoll",
     }
 }
 
@@ -258,6 +262,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 5,
             base_delay_ms: 500,
             max_delay_ms: 10_000,
+        },
+        Job::BskyVideoPoll { .. } => RetryConfig {
+            // 固定3秒間隔・最大10回（=最大30秒）。base=max にすることで
+            // 指数バックオフの式が初回からmax_delay_msにクランプされ実質固定間隔になる。
+            max_attempts: 10,
+            base_delay_ms: 3000,
+            max_delay_ms: 3000,
         },
     }
 }

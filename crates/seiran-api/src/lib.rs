@@ -25,7 +25,7 @@ use seiran_common::{
     StorageProviderRepository, PgStorageProviderRepository,
     MediaFileRepository, PgMediaFileRepository,
     SiteSettingsRepository, PgSiteSettingsRepository,
-    S3StorageClient,
+    S3StorageClient, JobQueue,
 };
 use seiran_common::repository::{
     ActorRepository, AtpReadRepository, FollowRepository, PostRepository, ReactionRepository, UserRepository,
@@ -69,6 +69,9 @@ pub struct AppState {
     pub stream_hub: Arc<StreamHub>,
     /// 絵文字インポートジョブの進捗状態（#50）。job_id → ImportJobStatus。
     pub emoji_import_jobs: Arc<DashMap<String, handlers::admin::emoji_import::ImportJobStatus>>,
+    /// 非同期ジョブキュー（Bsky動画パイプライン結合等）。`all` ロールでは
+    /// `seiran-federation-worker`のWorkerEngineと同一インスタンスを共有する。
+    pub job_queue: Arc<dyn JobQueue>,
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -81,6 +84,7 @@ pub async fn init_state(
     secrets: Arc<Secrets>,
     http_client: Arc<reqwest::Client>,
     local_domain: String,
+    job_queue: Arc<dyn JobQueue>,
 ) -> AppState {
     let local_auth = Arc::new(LocalAuthProvider::new(secrets.jwt_secret_bytes()));
     let ap_client = Arc::new(ApClient::new(Arc::clone(&http_client)));
@@ -148,6 +152,7 @@ pub async fn init_state(
         search_store: Arc::new(InMemorySearchStore::new()),
         stream_hub: Arc::new(StreamHub::new()),
         emoji_import_jobs: Arc::new(DashMap::new()),
+        job_queue,
     }
 }
 
@@ -259,6 +264,8 @@ pub fn router(state: AppState) -> Router {
         .route("/xrpc/com.atproto.sync.getBlob", get(handlers::xrpc::sync::xrpc_get_blob))
         .route("/xrpc/com.atproto.sync.subscribeRepos", get(handlers::xrpc::sync::xrpc_subscribe_repos))
         .route("/xrpc/com.atproto.repo.getRecord", get(handlers::xrpc::repo::xrpc_get_record))
+        // Bsky公式動画パイプライン（uploadVideo）が完了後に呼び戻してくるコールバック
+        .route("/xrpc/com.atproto.repo.uploadBlob", post(handlers::xrpc::repo::xrpc_upload_blob))
         // AT Protocol DID 解決
         .route("/.well-known/did.json", get(handlers::xrpc::server::well_known_did))
         .route("/.well-known/atproto-did", get(handlers::xrpc::server::well_known_atproto_did))

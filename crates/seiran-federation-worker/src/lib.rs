@@ -2,23 +2,27 @@
 //!
 //! バイナリは `seiran-server` が `--role worker`（または `all`）で起動する。
 //!
-//! 現状は `InMemoryJobQueue` を使う独立プロセスとして常駐する。プロセスをまたいだ
-//! キュー共有は Redis 統合（フェーズ 8）まで行わない。ただし `all` モードでは
-//! api / inbox と同一プロセスで動くため、将来はプロセス内でキューを共有できる。
+//! `all` ロールでは `queue` は api ロールの `AppState.job_queue` と同一インスタンスを
+//! 共有する（呼び出し元の `seiran-server` が一度だけ生成して両方に渡す）ため、
+//! api 側から積んだジョブをプロセス内でこの worker がそのまま処理できる。
+//! プロセスをまたいだキュー共有（split-role 構成）は Redis 統合（フェーズ 8）まで
+//! 行わない点に注意（`--role worker` 単独起動時は自分専用のキューになる）。
 
 use std::sync::Arc;
+
+use sqlx::PgPool;
 
 use seiran_common::ap::ApClient;
 use seiran_common::queue::{InMemoryJobQueue, WorkerEngine};
 
 /// ワーカーエンジンを起動し、ジョブを処理し続ける（常駐）。
-/// `ap_client` は呼び出し元が生成した共有インスタンスを受け取る
-/// （`all` ロールでは api/federation と同じコネクションプールを再利用する）。
-pub async fn run(ap_client: Arc<ApClient>) {
+/// `queue`/`pool`/`ap_client` は呼び出し元が生成した共有インスタンスを受け取る
+/// （`all` ロールでは api/federation と同じキュー・DBプール・コネクションプールを
+/// 再利用する）。
+pub async fn run(queue: Arc<InMemoryJobQueue>, pool: PgPool, ap_client: Arc<ApClient>) {
     eprintln!("[federation-worker] 起動中...");
 
-    let queue = Arc::new(InMemoryJobQueue::new());
-    let engine = WorkerEngine::new(queue, ap_client);
+    let engine = WorkerEngine::new_with_db(queue, pool, ap_client);
 
     // デキュー・実行・リトライを永続的に回す
     engine.run().await;
