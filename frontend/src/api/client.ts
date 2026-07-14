@@ -96,6 +96,8 @@ export interface User {
   role: string; // "user" | "moderator" | "admin"
   /** ローカル actors.id。noteUpdated ストリームイベントの reactorActorId との突き合わせに使う。 */
   actor_id: number;
+  /** 左下ナビ等の自分のアイコン表示用。未設定の場合は undefined。 */
+  avatar_url?: string;
 }
 
 // ── 管理画面用の型（レスポンスは snake_case） ──────────────────────────────

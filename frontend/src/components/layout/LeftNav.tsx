@@ -65,7 +65,13 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
           onClick={() => user?.username && navigate(`/@${user.username}`)}
           title="自分のプロフィール"
         >
-          <span className={styles.userAvatar}>{user?.username?.[0]?.toUpperCase() ?? "?"}</span>
+          <span className={styles.userAvatar}>
+            {user?.avatar_url ? (
+              <img src={user.avatar_url} alt="" className={styles.userAvatarImg} />
+            ) : (
+              user?.username?.[0]?.toUpperCase() ?? "?"
+            )}
+          </span>
           <span className={styles.navLabel}>@{user?.username}</span>
         </button>
         <button className={styles.logoutBtn} onClick={handleLogout} title="ログアウト">

@@ -132,6 +132,13 @@
   justify-content: center;
   font-weight: 700;
   font-size: 0.85rem;
+  overflow: hidden;
+}
+
+.userAvatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .logoutBtn {

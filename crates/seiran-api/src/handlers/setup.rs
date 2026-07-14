@@ -168,6 +168,13 @@ pub async fn setup(
 
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username: req.username, email: req.email, role: "admin".to_string(), actor_id },
+        user: UserInfo {
+            id: user_id,
+            username: req.username,
+            email: req.email,
+            role: "admin".to_string(),
+            actor_id,
+            avatar_url: None, // セットアップ直後はアバター未設定
+        },
     }))
 }

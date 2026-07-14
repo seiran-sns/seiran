@@ -30,6 +30,8 @@ export default function ProfileEditPage() {
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
   const [avatar, setAvatar] = useState<DriveFile | null>(null);
+  /** 既存のアイコンURL（未変更時のプレビュー用）。新規アップロード後は avatar.url を優先する。 */
+  const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -42,6 +44,7 @@ export default function ProfileEditPage() {
         if (cancelled) return;
         setDisplayName(p.display_name ?? "");
         setBio(p.bio ?? "");
+        setCurrentAvatarUrl(p.avatar_url ?? null);
       })
       .catch((e) => !cancelled && setError(getErrorMessage(e)))
       .finally(() => !cancelled && setLoading(false));
@@ -123,8 +126,8 @@ export default function ProfileEditPage() {
 
           <div className={styles.avatarRow}>
             <div className={styles.avatarPreview}>
-              {avatar ? (
-                <img src={avatar.url} alt="" />
+              {avatar || currentAvatarUrl ? (
+                <img src={avatar ? avatar.url : currentAvatarUrl!} alt="" />
               ) : (
                 <span>{(displayName || user?.username || "?")[0]?.toUpperCase()}</span>
               )}

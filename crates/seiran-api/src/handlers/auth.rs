@@ -41,6 +41,27 @@ pub struct UserInfo {
     /// 対応するローカル actors.id。フロントがストリーミングイベントの `reactorActorId` 等と
     /// 突き合わせて「自分自身の操作か」を判定するために使う。
     pub actor_id: i64,
+    /// 左下ナビ等の自分のアイコン表示用。avatar_media_id 経由のアップロード画像を優先する
+    /// （`handlers::users::build_profile_response` と同じクエリパターン）。
+    pub avatar_url: Option<String>,
+}
+
+/// actors.avatar_media_id がある場合は storage_providers から公開 URL を解決し、
+/// なければ actors.avatar_url（リモート由来）をそのまま使う。
+async fn fetch_avatar_url(state: &AppState, actor_id: i64) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
+         FROM actors a \
+         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+         WHERE a.id = $1",
+    )
+    .bind(actor_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .flatten()
 }
 
 #[derive(Deserialize)]
@@ -248,7 +269,14 @@ pub async fn register(
 
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username: req.username, email, role: "user".to_string(), actor_id },
+        user: UserInfo {
+            id: user_id,
+            username: req.username,
+            email,
+            role: "user".to_string(),
+            actor_id,
+            avatar_url: None, // 登録直後はアバター未設定
+        },
     }))
 }
 
@@ -304,9 +332,11 @@ pub async fn login(
         .ok_or(ApiError::NotFound("NOT_FOUND"))?
         .id;
 
+    let avatar_url = fetch_avatar_url(&state, actor_id).await;
+
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username, email, role, actor_id },
+        user: UserInfo { id: user_id, username, email, role, actor_id, avatar_url },
     }))
 }
 
@@ -336,12 +366,15 @@ pub async fn me(
         .flatten()
         .unwrap_or_else(|| "user".to_string());
 
+    let avatar_url = fetch_avatar_url(&state, actor.id).await;
+
     Ok(Json(UserInfo {
         id: auth_user.user_id,
         username: actor.username,
         email: auth_user.email,
         role,
         actor_id: actor.id,
+        avatar_url,
     }))
 }
 

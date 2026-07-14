@@ -370,12 +370,15 @@ AP Note の形式:
 ### 2.4 認証情報 API の役割公開（管理画面の表示制御用）
 `GET /api/auth/me`（および `login` / `register` / `setup` が返す `AuthResponse.user`）は `role`（`user` / `moderator` / `admin`）を含む。公式フロントエンドはこの値で管理メニュー（`/admin`）の表示可否を判定する。ただし表示制御は UX 上の利便であり、実際の権限検証は各管理 API 側の `require_admin` が担う（フロントの値を信頼しない）。
 
+同レスポンスは `avatar_url`（ログイン中ユーザー自身のアイコン。解決規則は 2.5 節と同じ）も含み、左下ナビ等の自分のアイコン表示に使う。`register` / `setup` はアカウント作成直後で未設定のため常に `null`。
+
 ### 2.5 ポストのユーザーアイコン（アバター）解決
 ノート系 API（`NoteResponse.user`）は投稿者のアバター URL（`avatarUrl`）を含む。解決規則:
 * **ローカルアクター**: `actors.avatar_media_id` → `media_files` + `storage_providers` からオブジェクトストレージ URL を組み立てる。
 * **リモートアクター**: `actors.avatar_url` をそのまま使用する。Fedi リモートは AP アクタードキュメントの `icon.url` を受信時（inbox の Follow / Create(Note)、およびこちら発フォロー時）に `actors.avatar_url` へ保存する。
 * アバター未設定・取得失敗時はフロントが頭文字プレースホルダにフォールバックする。
 * Bsky リモートアクターのアバター取り込みは今後対応（現状は未設定→プレースホルダ）。
+* `AuthResponse.user.avatar_url`（2.4 節）とプロフィール編集画面（`GET /api/users/profile` の `UserProfile.avatar_url`）も同じ解決規則を使う。
 
 ### 2.6 サイト外観設定（名称・カラー・アイコン）
 管理者が `site_settings` に保存するサイト外観を、公式フロントが起動時に取得して反映する。
