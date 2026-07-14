@@ -325,41 +325,62 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        // 添付ファイル情報を DB から取得して BskyImage に変換
-        let images: Vec<BskyImage> = if !attachment_ids.is_empty() {
+        // 添付ファイル情報を DB から取得して画像/非画像に分類する。
+        // 動画・音声は app.bsky.embed.video 相当の本格対応が別タスクのため、
+        // 代わりに外部リンクカード（app.bsky.embed.external）として配信する。
+        let (bsky_images, non_image_url) = if !attachment_ids.is_empty() {
             let rows = sqlx::query(
-                "SELECT mf.sha256, mf.size, mf.mime_type, mf.width, mf.height
-                 FROM media_files mf WHERE mf.id = ANY($1)
+                "SELECT mf.sha256, mf.size, mf.mime_type, mf.width, mf.height, mf.storage_key, sp.public_url
+                 FROM media_files mf
+                 JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+                 WHERE mf.id = ANY($1)
                  ORDER BY array_position($1, mf.id)",
             )
             .bind(attachment_ids)
             .fetch_all(&self.pool)
             .await?;
 
-            rows.iter().filter_map(|r| {
+            let mut images: Vec<BskyImage> = Vec::new();
+            let mut non_image_url: Option<String> = None;
+            for r in &rows {
                 use sqlx::Row;
-                let sha256: String = r.try_get("sha256").ok()?;
-                let size: i64 = r.try_get("size").ok()?;
-                let mime_type: String = r.try_get("mime_type").ok()?;
-                let width: i32 = r.try_get("width").ok()?;
-                let height: i32 = r.try_get("height").ok()?;
-                // CID 生成に失敗したものはスキップ
-                cid_from_sha256_hex(&sha256).ok()?;
-                Some(BskyImage { sha256_hex: sha256, mime_type, size, width, height, alt: String::new() })
-            }).collect()
+                let Ok(sha256) = r.try_get::<String, _>("sha256") else { continue };
+                let Ok(mime_type) = r.try_get::<String, _>("mime_type") else { continue };
+                if mime_type.starts_with("image/") {
+                    let size: i64 = r.try_get("size").unwrap_or(0);
+                    let width: Option<i32> = r.try_get("width").unwrap_or(None);
+                    let height: Option<i32> = r.try_get("height").unwrap_or(None);
+                    // CID 生成に失敗したものはスキップ
+                    if cid_from_sha256_hex(&sha256).is_err() { continue; }
+                    images.push(BskyImage {
+                        sha256_hex: sha256, mime_type, size,
+                        width: width.unwrap_or(0), height: height.unwrap_or(0),
+                        alt: String::new(),
+                    });
+                } else if non_image_url.is_none() {
+                    if let (Ok(storage_key), Ok(public_url)) = (r.try_get::<String, _>("storage_key"), r.try_get::<String, _>("public_url")) {
+                        non_image_url = Some(format!("{}/{}", public_url.trim_end_matches('/'), storage_key));
+                    }
+                }
+            }
+            (images, non_image_url)
         } else {
-            vec![]
+            (vec![], None)
         };
 
         // app.bsky.embed.images の上限は 4 枚（AT Protocol 仕様）。
         // ポスト自体は最大 10 枚まで許容するが、Bsky embed には先頭 4 枚のみ含める。
-        let bsky_images: Vec<BskyImage> = images.into_iter().take(4).collect();
+        let bsky_images: Vec<BskyImage> = bsky_images.into_iter().take(4).collect();
 
         let blob_cids: Vec<Cid> = bsky_images.iter()
             .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
             .collect();
 
-        let embed = if bsky_images.is_empty() { None } else { Some(BskyEmbed::Images(bsky_images)) };
+        let embed = if !bsky_images.is_empty() {
+            Some(BskyEmbed::Images(bsky_images))
+        } else {
+            non_image_url.map(|url| BskyEmbed::External { url })
+        };
         let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
         let record_cid_str = cid_to_string(&record_cid);
 

@@ -50,7 +50,7 @@ pub async fn deliver_post_to_ap_followers(
 
     // 添付ファイルを取得
     let attachment_rows = sqlx::query(
-        "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
+        "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, mf.blurhash, sp.public_url
          FROM post_attachments pa
          JOIN media_files mf ON mf.id = pa.media_file_id
          JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -67,17 +67,24 @@ pub async fn deliver_post_to_ap_followers(
         .filter_map(|r| {
             let storage_key: String = r.try_get("storage_key").ok()?;
             let mime_type: String = r.try_get("mime_type").ok()?;
-            let width: i32 = r.try_get("width").ok()?;
-            let height: i32 = r.try_get("height").ok()?;
+            let width: Option<i32> = r.try_get("width").ok()?;
+            let height: Option<i32> = r.try_get("height").ok()?;
+            let blurhash: Option<String> = r.try_get("blurhash").ok()?;
             let public_url: String = r.try_get("public_url").ok()?;
             let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
-            Some(serde_json::json!({
+            let mut doc = serde_json::json!({
                 "type": "Document",
                 "mediaType": mime_type,
                 "url": url,
-                "width": width,
-                "height": height
-            }))
+            });
+            if let (Some(w), Some(h)) = (width, height) {
+                doc["width"] = serde_json::json!(w);
+                doc["height"] = serde_json::json!(h);
+            }
+            if let Some(bh) = blurhash {
+                doc["blurhash"] = serde_json::json!(bh);
+            }
+            Some(doc)
         })
         .collect();
 

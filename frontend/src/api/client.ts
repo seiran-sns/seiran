@@ -164,6 +164,8 @@ export interface NoteAttachment {
   mimeType: string;
   width: number;
   height: number;
+  thumbnailUrl?: string;
+  durationMs?: number;
 }
 
 /** NoteResponse（バックエンドは `#[serde(rename_all = "camelCase")]`）。 */
@@ -309,12 +311,14 @@ export interface DriveFile {
   id: string;
   url: string;
   sha256: string;
-  blurhash: string;
-  width: number;
-  height: number;
+  blurhash?: string;
+  width?: number;
+  height?: number;
   size: number;
   mimeType: string;
   isReused: boolean;
+  durationMs?: number;
+  thumbnailUrl?: string;
 }
 
 // =====================================================================

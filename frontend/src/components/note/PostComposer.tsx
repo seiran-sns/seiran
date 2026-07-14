@@ -92,7 +92,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,video/*,audio/*"
         style={{ display: "none" }}
         onChange={handleFileSelect}
       />
@@ -130,7 +130,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
           className={styles.attachBtn}
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading || !!attached}
-          title="画像を添付"
+          title="画像・動画・音声を添付"
         >
           📎
         </button>
@@ -148,7 +148,13 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
 
       {attached && (
         <div className={styles.attachPreview}>
-          <img src={attached.url} alt="添付画像" className={styles.attachThumb} />
+          {attached.mimeType.startsWith("video/") ? (
+            <video src={attached.url} controls className={styles.attachThumb} />
+          ) : attached.mimeType.startsWith("audio/") ? (
+            <audio src={attached.url} controls className={styles.attachAudio} />
+          ) : (
+            <img src={attached.url} alt="添付画像" className={styles.attachThumb} />
+          )}
           <button
             type="button"
             className={styles.attachRemoveBtn}

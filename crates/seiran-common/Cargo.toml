@@ -35,3 +35,4 @@ aws-sdk-s3 = "1"
 image = { version = "0.25", features = ["webp", "jpeg", "png"] }
 blurhash = "0.2"
 zstd = "0.13"
+infer = "0.16"

@@ -135,6 +135,12 @@
   display: block;
 }
 
+.attachAudio {
+  width: 240px;
+  max-width: 100%;
+  display: block;
+}
+
 .attachRemoveBtn {
   position: absolute;
   top: -6px;

@@ -43,6 +43,10 @@ pub struct AttachmentResponse {
     pub mime_type: String,
     pub width: i32,
     pub height: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
 }
 
 /// ポストに対するリアクション集計（絵文字ごとの件数）(#22)。
@@ -134,7 +138,10 @@ pub async fn fetch_attachments_map(
                 ) AS url,
                 COALESCE(mf.mime_type, pa.remote_mime_type, 'image/jpeg') AS mime_type,
                 COALESCE(mf.width,  0) AS width,
-                COALESCE(mf.height, 0) AS height
+                COALESCE(mf.height, 0) AS height,
+                sp.public_url AS public_url,
+                mf.thumbnail_key AS thumbnail_key,
+                mf.duration_ms AS duration_ms
          FROM post_attachments pa
          LEFT JOIN media_files mf ON mf.id = pa.media_file_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -155,11 +162,19 @@ pub async fn fetch_attachments_map(
         if url.is_empty() {
             continue;
         }
+        let public_url: Option<String> = row.try_get("public_url").unwrap_or(None);
+        let thumbnail_key: Option<String> = row.try_get("thumbnail_key").unwrap_or(None);
+        let thumbnail_url = match (&public_url, &thumbnail_key) {
+            (Some(pu), Some(tk)) => Some(format!("{}/{}", pu.trim_end_matches('/'), tk)),
+            _ => None,
+        };
         map.entry(post_id).or_default().push(AttachmentResponse {
             url,
             mime_type: row.try_get("mime_type").unwrap_or_else(|_| "image/jpeg".into()),
             width: row.try_get("width").unwrap_or(0),
             height: row.try_get("height").unwrap_or(0),
+            thumbnail_url,
+            duration_ms: row.try_get("duration_ms").unwrap_or(None),
         });
     }
     map

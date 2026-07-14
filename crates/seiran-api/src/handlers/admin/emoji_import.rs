@@ -290,12 +290,14 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
                         id: file_id,
                         storage_provider_id: provider.id,
                         sha256: processed.sha256,
-                        blurhash: processed.blurhash,
+                        blurhash: Some(processed.blurhash),
                         size: processed.size,
-                        width: processed.width as i32,
-                        height: processed.height as i32,
+                        width: Some(processed.width as i32),
+                        height: Some(processed.height as i32),
                         mime_type: processed.mime_type,
                         storage_key,
+                        duration_ms: None,
+                        thumbnail_key: None,
                         uploaded_by_actor_id: None,
                     })
                     .await

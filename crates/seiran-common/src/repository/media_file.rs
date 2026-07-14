@@ -7,12 +7,14 @@ pub struct MediaFile {
     pub id: i64,
     pub storage_provider_id: i64,
     pub sha256: String,
-    pub blurhash: String,
+    pub blurhash: Option<String>,
     pub size: i64,
-    pub width: i32,
-    pub height: i32,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
     pub mime_type: String,
     pub storage_key: String,
+    pub duration_ms: Option<i32>,
+    pub thumbnail_key: Option<String>,
     pub uploaded_by_actor_id: Option<i64>,
     pub created_at: DateTime<Utc>,
 }
@@ -21,12 +23,14 @@ pub struct CreateMediaFile {
     pub id: i64,
     pub storage_provider_id: i64,
     pub sha256: String,
-    pub blurhash: String,
+    pub blurhash: Option<String>,
     pub size: i64,
-    pub width: i32,
-    pub height: i32,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
     pub mime_type: String,
     pub storage_key: String,
+    pub duration_ms: Option<i32>,
+    pub thumbnail_key: Option<String>,
     pub uploaded_by_actor_id: Option<i64>,
 }
 
@@ -37,7 +41,7 @@ pub enum MediaFileError {
 }
 
 const SELECT_COLS: &str =
-    "id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, uploaded_by_actor_id, created_at";
+    "id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id, created_at";
 
 #[async_trait]
 pub trait MediaFileRepository: Send + Sync {
@@ -47,6 +51,10 @@ pub trait MediaFileRepository: Send + Sync {
         sha256: &str,
         blurhash: &str,
     ) -> Result<Option<MediaFile>, MediaFileError>;
+
+    /// SHA-256 のみで一致するファイルを返す（重複排除用。`blurhash` が概念上
+    /// 存在しない音声ファイル向け。`blurhash IS NULL` の行のみが対象）。
+    async fn find_by_sha256(&self, sha256: &str) -> Result<Option<MediaFile>, MediaFileError>;
 
     async fn find_by_id(&self, id: i64) -> Result<Option<MediaFile>, MediaFileError>;
 
@@ -82,6 +90,16 @@ impl MediaFileRepository for PgMediaFileRepository {
         Ok(row)
     }
 
+    async fn find_by_sha256(&self, sha256: &str) -> Result<Option<MediaFile>, MediaFileError> {
+        let row = sqlx::query_as::<_, MediaFile>(&format!(
+            "SELECT {SELECT_COLS} FROM media_files WHERE sha256 = $1 AND blurhash IS NULL LIMIT 1"
+        ))
+        .bind(sha256)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
     async fn find_by_id(&self, id: i64) -> Result<Option<MediaFile>, MediaFileError> {
         let row = sqlx::query_as::<_, MediaFile>(&format!(
             "SELECT {SELECT_COLS} FROM media_files WHERE id = $1"
@@ -95,8 +113,8 @@ impl MediaFileRepository for PgMediaFileRepository {
     async fn insert(&self, req: CreateMediaFile) -> Result<MediaFile, MediaFileError> {
         let row = sqlx::query_as::<_, MediaFile>(&format!(
             "INSERT INTO media_files \
-             (id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, uploaded_by_actor_id) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) \
+             (id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) \
              RETURNING {SELECT_COLS}"
         ))
         .bind(req.id)
@@ -108,6 +126,8 @@ impl MediaFileRepository for PgMediaFileRepository {
         .bind(req.height)
         .bind(req.mime_type)
         .bind(req.storage_key)
+        .bind(req.duration_ms)
+        .bind(req.thumbnail_key)
         .bind(req.uploaded_by_actor_id)
         .fetch_one(&self.pool)
         .await?;

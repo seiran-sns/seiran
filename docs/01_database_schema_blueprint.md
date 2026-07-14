@@ -313,19 +313,21 @@ CREATE TABLE storage_providers (
 
 ### 1.8 `media_files` (メディアファイル・グローバル重複排除)
 
-アップロードされた画像のメタデータ。オーナー概念を持たない。重複排除キーは `(sha256, blurhash)` の複合一致。
+アップロードされた画像・動画・音声のメタデータ。オーナー概念を持たない。
 
 ```sql
 CREATE TABLE media_files (
     id                   BIGINT PRIMARY KEY,
     storage_provider_id  BIGINT NOT NULL REFERENCES storage_providers(id),
     sha256               CHAR(64) NOT NULL,
-    blurhash             VARCHAR(100) NOT NULL,
+    blurhash             VARCHAR(100),                -- 画像・動画サムネイルのみ。音声は NULL
     size                 BIGINT NOT NULL,             -- バイト数
-    width                INT NOT NULL,
-    height               INT NOT NULL,
+    width                INT,                          -- 画像・動画のみ。音声は NULL
+    height               INT,                          -- 画像・動画のみ。音声は NULL
     mime_type            VARCHAR(50) NOT NULL DEFAULT 'image/webp',
     storage_key          VARCHAR(1024) NOT NULL,
+    duration_ms          INT,                          -- 動画・音声の再生時間。画像は NULL
+    thumbnail_key        TEXT,                         -- 動画サムネイル(WebP)の storage_key。画像・音声は NULL
     uploaded_by_actor_id BIGINT REFERENCES actors(id) ON DELETE SET NULL, -- GC・監査用（オーナーシップではない）
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -336,12 +338,21 @@ CREATE TABLE media_files (
 CREATE INDEX idx_media_files_sha256 ON media_files(sha256);
 ```
 
+- 画像: `width`/`height`/`blurhash` は必須で埋まる（従来通り）。
+- 動画: `width`/`height` は ffprobe で取得した実解像度、`blurhash` は抽出した
+  サムネイルフレームを画像処理パイプラインに通して計算した値、`thumbnail_key` に
+  サムネイル WebP の storage_key、`duration_ms` に再生時間を保存する。
+  本体は無変換（トランスコードなし）でそのまま保存する。
+- 音声: `width`/`height`/`blurhash`/`thumbnail_key` は全て NULL、`duration_ms` のみ
+  埋まる。本体は無変換でそのまま保存する。
+
 **重複排除フロー:**
-1. アップロード受信 → WebP 変換・リサイズ
-2. 変換後バイト列の SHA-256 と blurhash を計算（ハッシュは WebP 変換後に算出）
-3. `(sha256, blurhash)` が DB に存在 → 既存 `media_file_id` を返す（PUT スキップ）
-4. SHA-256 一致・blurhash 不一致 → 別画像として通常保存
-5. 両方不在 → ストレージ選択 → PUT → INSERT
+- 画像: 変換後バイト列の SHA-256 と blurhash を計算し `(sha256, blurhash)` の
+  複合一致で重複排除（従来通り）。
+- 動画: 本体（無変換）の SHA-256 と、サムネイルフレームから計算した blurhash の
+  組み合わせで重複排除（決定的に同じフレームが抽出されるため再アップロードでも一致する）。
+- 音声: `blurhash` が概念上存在しない（常に NULL）ため、SHA-256 のみで重複排除する
+  （`blurhash IS NULL` 条件付き検索）。
 
 **画像処理仕様（変換後の保存寸法）:**
 
@@ -350,10 +361,15 @@ CREATE INDEX idx_media_files_sha256 ON media_files(sha256);
 | アバター | 中央正方形クロップ → WebP | 600 × 600 px |
 | バナー | fit: inside → WebP | 横最大 2048 × 縦最大 768 px |
 | カスタム絵文字 | fit: inside → WebP | 横最大 384 × 縦最大 64 px |
-| ポスト添付 | fit: inside → WebP | 長辺最大 2048 px |
+| ポスト添付（画像） | fit: inside → WebP | 長辺最大 2048 px |
+| ポスト添付（動画サムネイル） | ffmpeg でフレーム抽出 → 画像処理と同じ fit: inside → WebP | 長辺最大 2048 px |
 
-- サムネイルは生成しない。オリジナルは保持しない。WebP 1種のみ保存する。
+- 画像はサムネイルを生成しない。オリジナルは保持しない。WebP 1種のみ保存する。
 - アニメーション画像はアニメ WebP として保持する。
+- 動画・音声は ffmpeg でメタデータ（解像度・再生時間）抽出とサムネイル抽出のみ行い、
+  本体のトランスコードは行わない（原本バイナリをそのまま保存）。
+- アップロードサイズ上限は 100MB（`docker/nginx*.conf` の `client_max_body_size` と
+  axum 側 `DefaultBodyLimit` を参照）。
 
 **GC（ガベージコレクション）:**
 

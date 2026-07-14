@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use dashmap::DashMap;
 use tower_http::cors::{Any, CorsLayer};
-use axum::{routing::{delete, get, patch, post}, Router};
+use axum::{extract::DefaultBodyLimit, routing::{delete, get, patch, post}, Router};
 use sqlx::PgPool;
 
 use seiran_common::{
@@ -192,8 +192,13 @@ pub fn router(state: AppState) -> Router {
             post(handlers::admin::emoji_import::start_import))
         .route("/api/admin/emojis/import/:job_id",
             get(handlers::admin::emoji_import::get_import_status))
-        // ドライブ（メディアアップロード）
-        .route("/api/drive/files/create", post(handlers::drive::create_drive_file))
+        // ドライブ（メディアアップロード）。動画・音声添付を考慮し 100MB まで許可
+        // （axum のデフォルトボディ上限は小さいため明示的に上書きする）。
+        .route(
+            "/api/drive/files/create",
+            post(handlers::drive::create_drive_file)
+                .layer(DefaultBodyLimit::max(105 * 1024 * 1024)),
+        )
         // 認証
         .route("/api/auth/verify-email", post(handlers::email_verify::request_email_verification))
         .route("/api/auth/verify-token", get(handlers::email_verify::verify_email_token))

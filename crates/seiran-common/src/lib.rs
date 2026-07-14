@@ -32,6 +32,8 @@ pub use repository::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage::{
     process_image, ImageProcessingError, MediaKind, ProcessedImage,
     S3StorageClient, S3Error, select_provider, SelectorError,
+    ext_for_mime_type, is_allowed_video_or_audio_mime, probe_video_or_audio,
+    sniff_mime_type, MediaProbeError, ProbedMedia,
 };
 pub use repository::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
