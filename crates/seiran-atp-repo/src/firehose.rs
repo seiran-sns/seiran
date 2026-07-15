@@ -209,9 +209,19 @@ async fn process_message(
                 .map(|embed| parse_bsky_embed_attachments(embed, &did))
                 .unwrap_or_default();
 
-            // この DID のアクターが DB に存在するか確認
+            // この DID のアクターが「ローカルユーザーにフォローされている」場合のみ保存対象とする。
+            // 単に actors テーブルに存在するだけでは不十分（いいね等をきっかけに resolve_or_upsert_bsky_actor
+            // で無関係なアクターが actors へ upsert され、その投稿まで際限なく取り込まれてしまうため。
+            // 2026-07: 実際にこの経路で posts が104万行超まで膨張する不具合があった）。
             let actor_row = sqlx::query(
-                "SELECT id, username, display_name, avatar_url FROM actors WHERE at_did = $1 LIMIT 1",
+                "SELECT a.id, a.username, a.display_name, a.avatar_url
+                 FROM actors a
+                 JOIN follows f ON f.target_actor_id = a.id
+                 JOIN actors follower ON follower.id = f.follower_actor_id
+                 WHERE a.at_did = $1
+                   AND f.status = 'accepted'
+                   AND follower.actor_type = 'local'
+                 LIMIT 1",
             )
             .bind(&did)
             .fetch_optional(pool)
