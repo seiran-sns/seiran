@@ -8,3 +8,9 @@ members = [
     "crates/seiran-atp-repo",
     "crates/seiran-server",
 ]
+
+# デバッグビルドにデバッグシンボル（DWARF情報）を含めない。
+# gdb/lldb 等でのステップ実行はしない開発フローのため、バイナリサイズ・リンク時間・
+# target/ のディスク使用量を優先する。
+[profile.dev]
+debug = 0
