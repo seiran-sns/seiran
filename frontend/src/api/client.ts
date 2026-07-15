@@ -82,7 +82,15 @@ async function request<T>(
     throw new ApiError("UNKNOWN_ERROR", res.status);
   }
 
-  return res.json() as Promise<T>;
+  // 204 No Content 等、ボディが無い成功レスポンスは res.json() が
+  // "Unexpected end of JSON input" で例外を投げるため、パース前に弾く
+  // （例: admin のロール変更/凍結・解除 API。処理自体は成功しているのに
+  // 呼び出し側にエラーとして伝播していた不具合）。
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 // =====================================================================
@@ -550,13 +558,13 @@ export const api = {
       return request<AdminUser[]>("GET", "/admin/users");
     },
     suspendUser(id: string) {
-      return request<{ ok: boolean }>("POST", `/admin/users/${encodeURIComponent(id)}/suspend`);
+      return request<void>("POST", `/admin/users/${encodeURIComponent(id)}/suspend`);
     },
     unsuspendUser(id: string) {
-      return request<{ ok: boolean }>("POST", `/admin/users/${encodeURIComponent(id)}/unsuspend`);
+      return request<void>("POST", `/admin/users/${encodeURIComponent(id)}/unsuspend`);
     },
     changeUserRole(id: string, role: string) {
-      return request<{ ok: boolean }>("POST", `/admin/users/${encodeURIComponent(id)}/role`, { role });
+      return request<void>("POST", `/admin/users/${encodeURIComponent(id)}/role`, { role });
     },
 
     getSiteSettings() {
@@ -595,7 +603,7 @@ export const api = {
       return request<StorageProvider>("PATCH", `/admin/storage-providers/${id}`, patch);
     },
     deleteStorageProvider(id: number) {
-      return request<{ ok: boolean }>("DELETE", `/admin/storage-providers/${id}`);
+      return request<void>("DELETE", `/admin/storage-providers/${id}`);
     },
 
     listEmojis() {
@@ -608,7 +616,7 @@ export const api = {
       return request<CustomEmoji>("PATCH", `/admin/emojis/${encodeURIComponent(id)}`, body);
     },
     deleteEmoji(id: string) {
-      return request<{ ok: boolean }>("DELETE", `/admin/emojis/${encodeURIComponent(id)}`);
+      return request<void>("DELETE", `/admin/emojis/${encodeURIComponent(id)}`);
     },
     importEmojis(file: File): Promise<EmojiImportJob> {
       const formData = new FormData();
