@@ -14,15 +14,21 @@ use sqlx::PgPool;
 
 use seiran_common::ap::ApClient;
 use seiran_common::queue::{InMemoryJobQueue, WorkerEngine};
+use seiran_common::DeliveryConfig;
 
 /// ワーカーエンジンを起動し、ジョブを処理し続ける（常駐）。
 /// `queue`/`pool`/`ap_client` は呼び出し元が生成した共有インスタンスを受け取る
 /// （`all` ロールでは api/federation と同じキュー・DBプール・コネクションプールを
-/// 再利用する）。
-pub async fn run(queue: Arc<InMemoryJobQueue>, pool: PgPool, ap_client: Arc<ApClient>) {
+/// 再利用する）。`delivery` は AP 配送ジョブ用の設定（ドメイン・AP 鍵）。
+pub async fn run(
+    queue: Arc<InMemoryJobQueue>,
+    pool: PgPool,
+    ap_client: Arc<ApClient>,
+    delivery: DeliveryConfig,
+) {
     eprintln!("[federation-worker] 起動中...");
 
-    let engine = WorkerEngine::new_with_db(queue, pool, ap_client);
+    let engine = WorkerEngine::new_with_db(queue, pool, ap_client, delivery);
 
     // デキュー・実行・リトライを永続的に回す
     engine.run().await;

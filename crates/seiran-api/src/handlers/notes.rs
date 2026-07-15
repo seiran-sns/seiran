@@ -12,7 +12,7 @@ use sqlx::Row;
 use unicode_segmentation::UnicodeSegmentation;
 
 use seiran_common::repository::{PostDeliveryMeta, TimelinePost};
-use seiran_common::{ap::{deliver_post_to_ap_followers, deliver_ap_announce, deliver_undo_announce, deliver_ap_reaction, deliver_ap_undo_reaction, fetch_ap_history, plain_to_html}, generate_snowflake_id};
+use seiran_common::{ap::{fetch_ap_history, plain_to_html}, generate_snowflake_id, ApDeliveryKind, PrevApReaction};
 use seiran_common::mention::{convert_mentions_for_bsky, convert_mentions_for_ap};
 use seiran_common::atp::{BskyPostReply, BskyRefRecord, BskyEmbed};
 use seiran_common::streaming::broadcast_reaction_update;
@@ -363,33 +363,38 @@ fn at_uri_to_bsky_app_url(at_uri: &str) -> String {
     }
 }
 
+/// ポストの出自（どのプロトコル上に実体を持つか）。配信先の制御に使う。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PostOrigin {
+    /// ローカル投稿、または seiran リモート（AP/ATP 両方の実体を持つ）
+    LocalOrSeiran,
+    /// Fedi リモート（AP 実体のみ）
+    FediRemote,
+    /// Bsky リモート（ATP 実体のみ）
+    BskyRemote,
+}
+
 /// 元ポストの種別を判定する。
-///
-/// 戻り値: (is_local_or_seiran, is_fedi_remote, is_bsky_remote)
 fn classify_post(
     ap_object_id: Option<&str>,
     at_uri: Option<&str>,
     actor_domain: &str,
     local_domain: &str,
-) -> (bool, bool, bool) {
+) -> PostOrigin {
     // ローカルポストは actors.domain == local_domain
     if actor_domain == local_domain {
-        return (true, false, false);
+        return PostOrigin::LocalOrSeiran;
     }
-    // seiran リモート: ap_object_id あり AND at_uri あり（かつ domain != local）
-    if ap_object_id.is_some() && at_uri.is_some() {
-        return (true, false, false);
+    match (ap_object_id.is_some(), at_uri.is_some()) {
+        // seiran リモート: ap_object_id あり AND at_uri あり（かつ domain != local）
+        (true, true) => PostOrigin::LocalOrSeiran,
+        // Fedi リモート: ap_object_id あり AND at_uri なし
+        (true, false) => PostOrigin::FediRemote,
+        // Bsky リモート: ap_object_id なし AND at_uri あり
+        (false, true) => PostOrigin::BskyRemote,
+        // 判定不能 → ローカル相当として扱う
+        (false, false) => PostOrigin::LocalOrSeiran,
     }
-    // Fedi リモート: ap_object_id あり AND at_uri なし
-    if ap_object_id.is_some() && at_uri.is_none() {
-        return (false, true, false);
-    }
-    // Bsky リモート: ap_object_id なし AND at_uri あり
-    if ap_object_id.is_none() && at_uri.is_some() {
-        return (false, false, true);
-    }
-    // 判定不能 → ローカル相当として扱う
-    (true, false, false)
 }
 
 /// 新規投稿を著者本人 + accepted なローカルフォロワーへ WebSocket でリアルタイム配信する（#37）。
@@ -404,56 +409,53 @@ async fn broadcast_new_note(state: &AppState, actor_id: i64, note: &NoteResponse
     }
 }
 
+/// 配信先プロトコルの指定（ユーザーの `deliver_to_*` 指定とリプライ先制約の合成結果）。
+#[derive(Clone, Copy)]
+struct DeliveryTargets {
+    fedi: bool,
+    bsky: bool,
+}
+
 /// リポストを Fedi（AP Announce）・Bsky（ATP repost）の両プロトコルへ配送する。
 /// 元ポストが存在しないプロトコルにはフォールバック（URL テキスト投稿）で代替する。
-#[allow(clippy::too_many_arguments)]
-fn deliver_repost(
+///
+/// AP 側はジョブキュー（Worker）へ積む。ATP 側は firehose ブロードキャストが
+/// プロセス内チャネルに結合しているため、Worker 分離まで spawn のまま（レポート A-5）。
+async fn deliver_repost(
     state: &AppState,
     post_id: i64,
     actor_id: i64,
     now: chrono::DateTime<chrono::Utc>,
-    deliver_fedi: bool,
-    deliver_bsky: bool,
+    targets: DeliveryTargets,
     meta: &PostDeliveryMeta,
-    is_local_or_seiran: bool,
-    is_fedi_remote: bool,
+    origin: PostOrigin,
 ) {
-    if deliver_fedi {
+    if targets.fedi {
         if let Some(ref ap_id) = meta.ap_object_id {
             // 元ポストに ap_object_id がある → AP Announce 送信
-            let ap_id_clone = ap_id.clone();
-            let db = state.db.clone();
-            let local_domain = state.local_domain.clone();
-            let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
-            let ap_client = Arc::clone(&state.ap_client);
-            tokio::spawn(async move {
-                if let Err(e) = deliver_ap_announce(
-                    &ap_client, &db, post_id, actor_id, &local_domain, &ap_pem, &ap_id_clone,
-                ).await {
-                    eprintln!("[create_note] AP Announce 失敗: {}", e);
-                }
-            });
+            state
+                .enqueue_ap_delivery(actor_id, ApDeliveryKind::Announce {
+                    post_id,
+                    original_ap_object_id: ap_id.clone(),
+                })
+                .await;
         } else if meta.at_uri.is_some() {
             // Bsky リモートポストのリポスト → Fedi フォールバック: URL テキスト投稿
             let bsky_url = at_uri_to_bsky_app_url(meta.at_uri.as_deref().unwrap_or(""));
             let author_name = meta.display_name.as_deref().unwrap_or(&meta.username).to_string();
             let fallback_text = format!("🔁 {}: {}", author_name, bsky_url);
-            let db = state.db.clone();
-            let local_domain = state.local_domain.clone();
-            let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
-            let ap_client = Arc::clone(&state.ap_client);
-            tokio::spawn(async move {
-                if let Err(e) = deliver_post_to_ap_followers(
-                    &ap_client, &db, post_id, actor_id, &local_domain, &ap_pem,
-                    Some(&fallback_text), None, None,
-                ).await {
-                    eprintln!("[create_note] Bsky→Fedi フォールバック配送失敗: {}", e);
-                }
-            });
+            state
+                .enqueue_ap_delivery(actor_id, ApDeliveryKind::PostToFollowers {
+                    post_id,
+                    body: Some(fallback_text),
+                    quote_url: None,
+                    in_reply_to: None,
+                })
+                .await;
         }
     }
 
-    if deliver_bsky {
+    if targets.bsky {
         if let (Some(at_uri), Some(at_cid)) = (&meta.at_uri, &meta.at_cid) {
             // 元ポストに at_uri と at_cid がある → ATP repost
             let at_uri_clone = at_uri.clone();
@@ -464,7 +466,7 @@ fn deliver_repost(
                     eprintln!("[create_note] ATP repost 失敗: {}", e);
                 }
             });
-        } else if (is_fedi_remote || is_local_or_seiran) && meta.ap_object_id.is_some() {
+        } else if origin != PostOrigin::BskyRemote && meta.ap_object_id.is_some() {
             // at_uri なし（Fedi リモートまたはローカル）→ Bsky フォールバック: URL テキスト投稿
             let ap_id = meta.ap_object_id.clone().unwrap_or_default();
             let author_name = meta.display_name.as_deref().unwrap_or(&meta.username).to_string();
@@ -501,7 +503,7 @@ async fn create_repost(
         Err(e) => return ApiError::Internal(format!("repost 元ポスト取得失敗: {}", e)).into_response(),
     };
 
-    let (is_local_or_seiran, is_fedi_remote, _is_bsky_remote) = classify_post(
+    let origin = classify_post(
         meta.ap_object_id.as_deref(),
         meta.at_uri.as_deref(),
         &meta.domain,
@@ -525,9 +527,12 @@ async fn create_repost(
 
     deliver_repost(
         state, post_id, actor_id, now,
-        req.deliver_to_fedi.unwrap_or(true), req.deliver_to_bsky.unwrap_or(true),
-        &meta, is_local_or_seiran, is_fedi_remote,
-    );
+        DeliveryTargets {
+            fedi: req.deliver_to_fedi.unwrap_or(true),
+            bsky: req.deliver_to_bsky.unwrap_or(true),
+        },
+        &meta, origin,
+    ).await;
 
     let mut repost_resp = NoteResponse {
         id: post_id.to_string(),
@@ -571,7 +576,7 @@ async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str) -> Resul
         .map_err(|e| ApiError::Internal(format!("reply 元ポスト取得失敗: {}", e)))?
         .ok_or(ApiError::NotFound("REPLY_TARGET_NOT_FOUND"))?;
 
-    let (_is_local_or_seiran, is_fedi_remote, is_bsky_remote) = classify_post(
+    let origin = classify_post(
         meta.ap_object_id.as_deref(),
         meta.at_uri.as_deref(),
         &meta.domain,
@@ -579,8 +584,8 @@ async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str) -> Resul
     );
 
     // 配信先制御: 元ポストが存在しないプロトコルには配信しない
-    let deliver_fedi_allowed = !is_bsky_remote; // Bsky リモートへのリプライ → Fedi 配信しない
-    let deliver_bsky_allowed = !is_fedi_remote; // Fedi リモートへのリプライ → Bsky 配信しない
+    let deliver_fedi_allowed = origin != PostOrigin::BskyRemote; // Bsky リモートへのリプライ → Fedi 配信しない
+    let deliver_bsky_allowed = origin != PostOrigin::FediRemote; // Fedi リモートへのリプライ → Bsky 配信しない
 
     // ATP reply フィールド: Bsky 配信する場合かつ at_uri/at_cid が取得できる場合のみ設定
     let bsky_reply = if deliver_bsky_allowed {
@@ -610,11 +615,11 @@ async fn resolve_quote_embed(state: &AppState, quote_of_id: i64) -> (Option<Bsky
         _ => return (None, None),
     };
 
-    let (_is_local, is_fedi, _is_bsky) = classify_post(
+    let origin = classify_post(
         meta.ap_object_id.as_deref(), meta.at_uri.as_deref(), &meta.domain, &state.local_domain,
     );
 
-    let bsky_embed = if is_fedi {
+    let bsky_embed = if origin == PostOrigin::FediRemote {
         meta.ap_object_id.as_deref().map(|u| BskyEmbed::External { url: u.to_string() })
     } else if let (Some(uri), Some(cid)) = (&meta.at_uri, &meta.at_cid) {
         Some(BskyEmbed::Record { uri: uri.clone(), cid: cid.clone() })
@@ -676,61 +681,58 @@ async fn attach_media_files(state: &AppState, post_id: i64, attachment_ids: &[i6
     Ok(())
 }
 
-/// 通常投稿 / リプライ / 引用投稿を Fedi・Bsky へ配送する（Bsky は同期コミット、Fedi は非同期配送）。
-#[allow(clippy::too_many_arguments)]
-async fn deliver_regular_post(
-    state: &AppState,
+/// 通常投稿 / リプライ / 引用投稿の配送指示。
+struct RegularPostDelivery {
     post_id: i64,
     actor_id: i64,
     now: chrono::DateTime<chrono::Utc>,
-    text: &str,
-    deliver_fedi: bool,
-    deliver_bsky: bool,
+    text: String,
+    targets: DeliveryTargets,
     bsky_reply: Option<BskyPostReply>,
     bsky_quote_embed: Option<BskyEmbed>,
     ap_quote_url: Option<String>,
     ap_in_reply_to: Option<String>,
-    attachment_ids: &[i64],
-) {
+    attachment_ids: Vec<i64>,
+}
+
+/// 通常投稿 / リプライ / 引用投稿を Fedi・Bsky へ配送する。
+/// Bsky は ATP コミット（firehose 結合のため in-process）、Fedi は ApDelivery ジョブ。
+async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
     // メンション変換（変換失敗時は元テキストをそのまま使用する）
     // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
-    let (bsky_text, bsky_facets) = if deliver_bsky {
-        convert_mentions_for_bsky(text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await
+    let (bsky_text, bsky_facets) = if d.targets.bsky {
+        convert_mentions_for_bsky(&d.text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await
     } else {
-        (text.to_string(), vec![])
+        (d.text.clone(), vec![])
     };
 
     // AP 配信用: `@handle.tld` (ATP ハンドル) → `@handle.tld@bsky.brid.gy` または Markdown リンク
-    let ap_text = if deliver_fedi {
-        convert_mentions_for_ap(text, &state.db, state.ap_client.http.as_ref()).await
+    let ap_text = if d.targets.fedi {
+        convert_mentions_for_ap(&d.text, &state.db, state.ap_client.http.as_ref()).await
     } else {
-        text.to_string()
+        d.text.clone()
     };
 
-    if deliver_bsky {
-        if let Some(embed) = bsky_quote_embed {
+    if d.targets.bsky {
+        if let Some(embed) = d.bsky_quote_embed {
             // 引用投稿: embed を付けて commit_quote を使う（画像 embed と共存しない）
-            if let Err(e) = state.atp_service.commit_quote(actor_id, post_id, &bsky_text, bsky_facets, Some(embed), now, bsky_reply).await {
+            if let Err(e) = state.atp_service.commit_quote(d.actor_id, d.post_id, &bsky_text, bsky_facets, Some(embed), d.now, d.bsky_reply).await {
                 eprintln!("[create_note] ATP quote commit 失敗（投稿は保存済み）: {}", e);
             }
-        } else if let Err(e) = state.atp_service.commit_post(actor_id, post_id, &bsky_text, bsky_facets, attachment_ids, now, bsky_reply).await {
+        } else if let Err(e) = state.atp_service.commit_post(d.actor_id, d.post_id, &bsky_text, bsky_facets, &d.attachment_ids, d.now, d.bsky_reply).await {
             eprintln!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
         }
     }
 
-    if deliver_fedi {
-        let db = state.db.clone();
-        let local_domain = state.local_domain.clone();
-        let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
-        let ap_client = state.ap_client.clone();
-        tokio::spawn(async move {
-            if let Err(e) = deliver_post_to_ap_followers(
-                &ap_client, &db, post_id, actor_id, &local_domain, &ap_private_key_pem,
-                Some(ap_text.as_str()), ap_quote_url.as_deref(), ap_in_reply_to.as_deref(),
-            ).await {
-                eprintln!("[create_note] AP 配送エラー: {}", e);
-            }
-        });
+    if d.targets.fedi {
+        state
+            .enqueue_ap_delivery(d.actor_id, ApDeliveryKind::PostToFollowers {
+                post_id: d.post_id,
+                body: Some(ap_text),
+                quote_url: d.ap_quote_url,
+                in_reply_to: d.ap_in_reply_to,
+            })
+            .await;
     }
 }
 
@@ -797,10 +799,18 @@ async fn create_regular_post(
         return e.into_response();
     }
 
-    deliver_regular_post(
-        state, post_id, actor_id, now, &text, deliver_fedi, deliver_bsky,
-        reply_ctx.bsky_reply, bsky_quote_embed, ap_quote_url, reply_ctx.ap_in_reply_to, &attachment_ids_i64,
-    ).await;
+    deliver_regular_post(state, RegularPostDelivery {
+        post_id,
+        actor_id,
+        now,
+        text: text.clone(),
+        targets: DeliveryTargets { fedi: deliver_fedi, bsky: deliver_bsky },
+        bsky_reply: reply_ctx.bsky_reply,
+        bsky_quote_embed,
+        ap_quote_url,
+        ap_in_reply_to: reply_ctx.ap_in_reply_to,
+        attachment_ids: attachment_ids_i64.clone(),
+    }).await;
 
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
     let note_resp = NoteResponse {
@@ -1217,26 +1227,12 @@ pub async fn delete_repost(
 
     // AP Undo(Announce) 配送 — 元ポストに ap_object_id がある場合のみ
     if let Some(orig_ap_object_id) = undo_info.orig_ap_id {
-        let db = state.db.clone();
-        let local_domain = state.local_domain.clone();
-        let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
-        let ap_client = Arc::clone(&state.ap_client);
-        let repost_id = undo_info.repost_id;
-        tokio::spawn(async move {
-            if let Err(e) = deliver_undo_announce(
-                &ap_client,
-                &db,
-                repost_id,
-                actor_id,
-                &local_domain,
-                &ap_pem,
-                &orig_ap_object_id,
-            )
-            .await
-            {
-                eprintln!("[delete_repost] AP Undo(Announce) 配送失敗: {}", e);
-            }
-        });
+        state
+            .enqueue_ap_delivery(actor_id, ApDeliveryKind::UndoAnnounce {
+                announce_post_id: undo_info.repost_id,
+                original_ap_object_id: orig_ap_object_id,
+            })
+            .await;
     }
 
     // ATP repost delete commit — atp_repost_rkey が保存されている場合のみ
@@ -1390,41 +1386,21 @@ pub async fn create_reaction(
     }
 
     // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ配送する。
-    // 旧リアクションが既に AP へ配送済み（ap_activity_id あり）なら、先に Undo してから送る（切替）。
-    {
-        let ap_client = Arc::clone(&state.ap_client);
-        let db = state.db.clone();
-        let local_domain = state.local_domain.clone();
-        let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
-        let actor_id = me.id;
-        let new_content = content.clone();
-        let new_activity_id = activity_id.clone();
-        let prev_for_undo = prev
-            .as_ref()
-            .and_then(|(prev_content, prev_activity_id, _)| {
-                prev_activity_id.clone().map(|id| (prev_content.clone(), id))
-            });
-        tokio::spawn(async move {
-            if let Some((prev_content, prev_activity_id)) = prev_for_undo {
-                if let Err(e) = deliver_ap_undo_reaction(
-                    &ap_client, &db, note_id, actor_id, &local_domain, &ap_pem,
-                    &prev_activity_id, &prev_content,
-                )
-                .await
-                {
-                    eprintln!("[create_reaction] AP Undo(旧リアクション) 配送失敗: {}", e);
-                }
-            }
-            if let Err(e) = deliver_ap_reaction(
-                &ap_client, &db, note_id, actor_id, &local_domain, &ap_pem,
-                &new_activity_id, &new_content,
-            )
-            .await
-            {
-                eprintln!("[create_reaction] AP リアクション配送失敗: {}", e);
-            }
-        });
-    }
+    // 旧リアクションが既に AP へ配送済み（ap_activity_id あり）なら、ジョブ側が先に Undo してから送る（切替）。
+    let undo_prev = prev.as_ref().and_then(|(prev_content, prev_activity_id, _)| {
+        prev_activity_id.clone().map(|id| PrevApReaction {
+            activity_id: id,
+            content: prev_content.clone(),
+        })
+    });
+    state
+        .enqueue_ap_delivery(me.id, ApDeliveryKind::Reaction {
+            post_id: note_id,
+            activity_id: activity_id.clone(),
+            content: content.clone(),
+            undo_prev,
+        })
+        .await;
 
     let rmap = fetch_reactions_map(&state.db, &[note_id], Some(me.id)).await;
     Json(serde_json::json!({
@@ -1502,21 +1478,13 @@ pub async fn delete_reaction(
 
     // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ Undo を配送する。
     if let Some(prev_activity_id) = prev.as_ref().and_then(|(_, ap_activity_id, _)| ap_activity_id.clone()) {
-        let ap_client = Arc::clone(&state.ap_client);
-        let db = state.db.clone();
-        let local_domain = state.local_domain.clone();
-        let ap_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
-        let content_for_undo = content.clone();
-        tokio::spawn(async move {
-            if let Err(e) = deliver_ap_undo_reaction(
-                &ap_client, &db, note_id, actor_id, &local_domain, &ap_pem,
-                &prev_activity_id, &content_for_undo,
-            )
-            .await
-            {
-                eprintln!("[delete_reaction] AP Undo(リアクション) 配送失敗: {}", e);
-            }
-        });
+        state
+            .enqueue_ap_delivery(actor_id, ApDeliveryKind::UndoReaction {
+                post_id: note_id,
+                prev_activity_id,
+                content: content.clone(),
+            })
+            .await;
     }
 
     let rmap = fetch_reactions_map(&state.db, &[note_id], Some(actor_id)).await;
@@ -1550,7 +1518,7 @@ fn strip_html_tags(html: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{at_uri_to_bsky_app_url, classify_post, strip_html_tags, validate_reaction_content};
+    use super::{at_uri_to_bsky_app_url, classify_post, strip_html_tags, validate_reaction_content, PostOrigin};
 
     #[test]
     fn at_uri_to_bsky_app_url_valid() {
@@ -1572,7 +1540,7 @@ mod tests {
         // domain が local_domain と一致する場合は ap_object_id / at_uri の値によらずローカル扱い
         assert_eq!(
             classify_post(None, None, "seiran.example", "seiran.example"),
-            (true, false, false)
+            PostOrigin::LocalOrSeiran
         );
     }
 
@@ -1580,7 +1548,7 @@ mod tests {
     fn classify_post_seiran_remote_has_both_ids() {
         assert_eq!(
             classify_post(Some("https://a/notes/1"), Some("at://did/x/y"), "other.example", "seiran.example"),
-            (true, false, false)
+            PostOrigin::LocalOrSeiran
         );
     }
 
@@ -1588,7 +1556,7 @@ mod tests {
     fn classify_post_fedi_remote_ap_only() {
         assert_eq!(
             classify_post(Some("https://mastodon.example/notes/1"), None, "mastodon.example", "seiran.example"),
-            (false, true, false)
+            PostOrigin::FediRemote
         );
     }
 
@@ -1596,7 +1564,7 @@ mod tests {
     fn classify_post_bsky_remote_at_uri_only() {
         assert_eq!(
             classify_post(None, Some("at://did/x/y"), "bsky.example", "seiran.example"),
-            (false, false, true)
+            PostOrigin::BskyRemote
         );
     }
 
@@ -1604,7 +1572,7 @@ mod tests {
     fn classify_post_unknown_defaults_to_local() {
         assert_eq!(
             classify_post(None, None, "other.example", "seiran.example"),
-            (true, false, false)
+            PostOrigin::LocalOrSeiran
         );
     }
 

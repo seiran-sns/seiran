@@ -96,12 +96,13 @@
   - [x] **① 過去ログ同期キュー (`actor_history_sync`)**
     - [x] ドメイン単位 of 同時実行制限（Concurrency Limit）の適用
     - [x] 1〜3秒のジッター挿入、指数バックオフで最大3回リトライ
-  - [x] **② 投稿配送キュー (`outbound_post_delivery`)**
+  - [x] **② AP 配送キュー (`ap_delivery`、旧 `outbound_post_delivery`)**
     - [x] 高優先度処理、相手サーバーダウン時の長期指数バックオフ（最大10回リトライ）
-  - [x] **③ 配送受け入れ（インバウンド）キュー (`inbound_activity_process`)**
-    - [x] ドメイン単位のレート制限、依存リソース未解決時の再スケジュール
-  - [x] **④ アクター検証・メタデータ取得キュー (`actor_metadata_resolve`)**
-    - [x] `/verify-actor` ハンドシェイク検証、Webfinger解決、アバター画像等のキャッシュ
+    - [x] `ApDeliveryKind`（Create/Announce/Undo/Update/Delete/リアクション）として実装し、API ハンドラの `tokio::spawn` 直接配送を enqueue に置換（2026-07 リファクタリング）
+  - [ ] **③ 配送受け入れ（インバウンド）キュー (`inbound_activity_process`)** — 未実装。既知アクティビティは federation-inbox ハンドラが直接処理しており、ハンドラ群の Worker 移設（`docs/refactoring_report_2026-07.md` A-3）とセットで実装する
+    - [ ] ドメイン単位のレート制限、依存リソース未解決時の再スケジュール
+  - [ ] **④ アクター検証・メタデータ取得キュー (`actor_metadata_resolve`)** — 未実装（ゼロトラストペアリング統合時に実装）
+    - [ ] `/verify-actor` ハンドシェイク検証、Webfinger解決、アバター画像等のキャッシュ
   - [x] **⑤ ATPリポジトリコミット・配信キュー (`atp_repository_publish`)**
     - [x] 極高優先度、アクターID単位 of FIFO（先入れ先出し）制御・排他ロックの適用
 - [x] **3.4. 統合バイナリ化（単一バイナリ・複数ロール）**

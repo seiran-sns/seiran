@@ -3,7 +3,7 @@
 use axum::{extract::State, http::HeaderMap, Json};
 use serde::Deserialize;
 
-use seiran_common::ap::deliver_delete_actor;
+use seiran_common::ApDeliveryKind;
 
 use crate::{error::ApiError, middleware::extract_auth, AppState};
 
@@ -52,20 +52,10 @@ pub async fn withdraw(
     let actor_id = actor.id;
     let now = chrono::Utc::now();
 
-    // 1. AP Delete(Actor) を Fedi フォロワーに配送（失敗しても退会処理は続行）
-    if let Some(ap_pem) = state.secrets.ap_private_key_pem.as_deref() {
-        if let Err(e) = deliver_delete_actor(
-            &state.ap_client,
-            &state.db,
-            actor_id,
-            &state.local_domain,
-            ap_pem,
-        )
-        .await
-        {
-            eprintln!("[withdraw] AP Delete(Actor) 配送失敗 (actor_id={}): {:?}", actor_id, e);
-        }
-    }
+    // 1. AP Delete(Actor) を Fedi フォロワーに配送（Worker の ApDelivery ジョブ）。
+    //    以前は同期 await でフォロワー数に比例して退会レスポンスが遅延していた。
+    //    退会処理は actors 行を物理削除しないため、応答後のジョブ実行でも宛先解決できる。
+    state.enqueue_ap_delivery(actor_id, ApDeliveryKind::DeleteActor).await;
 
     // 2. ATP #account（active=false, status=deleted）を Relay に送信
     if let Some(did) = actor.at_did.as_deref() {

@@ -1,10 +1,372 @@
 //! ActivityPub 投稿配送モジュール
 //!
-//! ローカルユーザーの新規投稿を、AP フォロワーの inbox へ HTTP Signatures 付きで配送する。
+//! ローカルユーザーのアクティビティ（Create/Announce/Undo/Update/Delete/リアクション）を
+//! AP フォロワーの inbox へ HTTP Signatures 付きで配送する。
+//!
+//! # 構成（how/what 分離）
+//! - `deliver_*`（公開関数）: 「何を配送するか」のオーケストレーション
+//! - `build_*`（純関数）: アクティビティ JSON の組み立て。DB・ネットワーク非依存でテスト可能
+//! - `fetch_*` / `fan_out_activity`（共通ヘルパー）: 配送に必要なデータ取得と署名 POST の実行
 
 use sqlx::{PgPool, Row};
 
 use super::client::{ApClient, ApError};
+
+// =====================================================================
+// 共通ヘルパー（how: データ取得・署名 POST ファンアウト）
+// =====================================================================
+
+/// ローカルアクターの AP 上のアドレス一式。`local_domain` と `username` から決まる。
+struct LocalActorAddress {
+    actor_uri: String,
+    key_id: String,
+    followers_uri: String,
+}
+
+fn local_actor_address(local_domain: &str, username: &str) -> LocalActorAddress {
+    let actor_uri = format!("https://{}/users/{}", local_domain, username);
+    LocalActorAddress {
+        key_id: format!("{}#main-key", actor_uri),
+        followers_uri: format!("{}/followers", actor_uri),
+        actor_uri,
+    }
+}
+
+/// アクター ID からユーザー名を取得する。
+async fn fetch_username(db: &PgPool, actor_id: i64) -> Result<String, ApError> {
+    let row = sqlx::query("SELECT username FROM actors WHERE id = $1 LIMIT 1")
+        .bind(actor_id)
+        .fetch_optional(db)
+        .await
+        .map_err(|e| ApError::Other(format!("アクター情報取得エラー: {}", e)))?
+        .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
+    row.try_get("username").map_err(|e| ApError::Other(e.to_string()))
+}
+
+/// 指定アクターの AP フォロワー（actor_type='fedi'）の inbox URL 一覧を取得する。
+async fn fetch_fedi_follower_inboxes(db: &PgPool, actor_id: i64) -> Result<Vec<String>, ApError> {
+    let rows = sqlx::query(
+        "SELECT a.ap_inbox_url
+         FROM follows f
+         JOIN actors a ON a.id = f.follower_actor_id
+         WHERE f.target_actor_id = $1
+           AND f.status = 'accepted'
+           AND a.actor_type = 'fedi'
+           AND a.ap_inbox_url IS NOT NULL",
+    )
+    .bind(actor_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("ap_inbox_url").ok())
+        .collect())
+}
+
+/// アクティビティを inbox 群へ署名付き POST でファンアウトし、成功/失敗件数をログする。
+///
+/// 一部でも成功すれば `Ok`（受信側は activity id で重複排除するとはいえ、再送を最小限に
+/// するため）。宛先が 1 件以上あり **全滅** した場合のみ `Err` を返し、ジョブキュー経由の
+/// 呼び出しでは WorkerEngine のリトライに乗る。
+async fn fan_out_activity(
+    ap_client: &ApClient,
+    inboxes: &[String],
+    activity: &serde_json::Value,
+    key_id: &str,
+    ap_private_key_pem: &str,
+    log_label: &str,
+) -> Result<(), ApError> {
+    if inboxes.is_empty() {
+        return Ok(());
+    }
+
+    let body_str = serde_json::to_string(activity).map_err(ApError::Json)?;
+
+    let mut ok = 0usize;
+    let mut ng = 0usize;
+    for inbox in inboxes {
+        match ap_client.sign_and_post(inbox, &body_str, key_id, ap_private_key_pem).await {
+            Ok(()) => ok += 1,
+            Err(e) => {
+                eprintln!("[Deliver] {}: {} への配送失敗: {}", log_label, inbox, e);
+                ng += 1;
+            }
+        }
+    }
+
+    eprintln!("[Deliver] {}: {}件成功 / {}件失敗", log_label, ok, ng);
+
+    if ok == 0 && ng > 0 {
+        return Err(ApError::Other(format!("{}: 全 {} 件の配送に失敗", log_label, ng)));
+    }
+    Ok(())
+}
+
+// =====================================================================
+// アクティビティ構築（what: 純関数・テスト対象）
+// =====================================================================
+
+/// Create(Note) アクティビティの構築パラメータ。
+struct NoteActivityParams<'a> {
+    local_domain: &'a str,
+    post_id: i64,
+    content_html: &'a str,
+    published: &'a str,
+    attachments: Vec<serde_json::Value>,
+    quote_url: Option<&'a str>,
+    in_reply_to: Option<&'a str>,
+    seiran_uuid: Option<&'a str>,
+}
+
+/// Create(Note) アクティビティを組み立てる。
+fn build_create_note_activity(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_json::Value {
+    let note_id = format!("https://{}/notes/{}", p.local_domain, p.post_id);
+    let activity_id = format!("https://{}/activities/{}", p.local_domain, p.post_id);
+
+    let mut note_obj = serde_json::json!({
+        "type": "Note",
+        "id": note_id,
+        "attributedTo": addr.actor_uri,
+        "content": p.content_html,
+        "published": p.published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [addr.followers_uri],
+        "url": note_id
+    });
+    if !p.attachments.is_empty() {
+        note_obj["attachment"] = serde_json::Value::Array(p.attachments.clone());
+    }
+    if let Some(q_url) = p.quote_url {
+        note_obj["quoteUrl"] = serde_json::Value::String(q_url.to_string());
+        note_obj["_misskey_quote"] = serde_json::Value::String(q_url.to_string());
+    }
+    // リプライ先の AP Note URI（#38: これが無いとリモートで単独ポストに見える）
+    if let Some(irt) = p.in_reply_to {
+        note_obj["inReplyTo"] = serde_json::Value::String(irt.to_string());
+    }
+    if let Some(uuid) = p.seiran_uuid {
+        note_obj["seiranUuid"] = serde_json::Value::String(uuid.to_string());
+    }
+
+    serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Create",
+        "id": activity_id,
+        "actor": addr.actor_uri,
+        "published": p.published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [addr.followers_uri],
+        "object": note_obj
+    })
+}
+
+/// 添付ファイル 1 件分の AP Document オブジェクトを組み立てる。
+fn build_attachment_document(
+    public_url: &str,
+    storage_key: &str,
+    mime_type: &str,
+    width: Option<i32>,
+    height: Option<i32>,
+    blurhash: Option<&str>,
+) -> serde_json::Value {
+    let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
+    let mut doc = serde_json::json!({
+        "type": "Document",
+        "mediaType": mime_type,
+        "url": url,
+    });
+    if let (Some(w), Some(h)) = (width, height) {
+        doc["width"] = serde_json::json!(w);
+        doc["height"] = serde_json::json!(h);
+    }
+    if let Some(bh) = blurhash {
+        doc["blurhash"] = serde_json::json!(bh);
+    }
+    doc
+}
+
+/// Announce アクティビティを組み立てる。
+fn build_announce_activity(
+    addr: &LocalActorAddress,
+    announce_id: &str,
+    original_ap_object_id: &str,
+    published: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Announce",
+        "id": announce_id,
+        "actor": addr.actor_uri,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [addr.followers_uri],
+        "object": original_ap_object_id
+    })
+}
+
+/// Undo(Announce) アクティビティを組み立てる。
+fn build_undo_announce_activity(
+    addr: &LocalActorAddress,
+    undo_id: &str,
+    announce_id: &str,
+    original_ap_object_id: &str,
+    published: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Undo",
+        "id": undo_id,
+        "actor": addr.actor_uri,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [addr.followers_uri],
+        "object": {
+            "type": "Announce",
+            "id": announce_id,
+            "actor": addr.actor_uri,
+            "object": original_ap_object_id
+        }
+    })
+}
+
+/// Delete(Actor) アクティビティを組み立てる。
+fn build_delete_actor_activity(
+    addr: &LocalActorAddress,
+    activity_id: &str,
+    published: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Delete",
+        "id": activity_id,
+        "actor": addr.actor_uri,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "object": addr.actor_uri
+    })
+}
+
+/// Update(Person) の object となる Person ドキュメントの構築パラメータ。
+struct PersonObjectParams<'a> {
+    local_domain: &'a str,
+    username: &'a str,
+    display_name: &'a str,
+    bio: Option<&'a str>,
+    avatar_url: Option<&'a str>,
+    avatar_mime_type: Option<&'a str>,
+    ap_public_key_pem: &'a str,
+}
+
+/// Person ドキュメントを組み立てる。
+/// `actor_handler`（federation-inbox の `GET /users/:username`）が返すものと同一構造にする。
+fn build_person_object(addr: &LocalActorAddress, p: &PersonObjectParams) -> serde_json::Value {
+    let base = format!("https://{}", p.local_domain);
+    let mut person = serde_json::json!({
+        "@context": ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
+        "id": addr.actor_uri,
+        "type": "Person",
+        "preferredUsername": p.username,
+        "name": p.display_name,
+        "inbox": format!("{}/inbox", base),
+        "outbox": format!("{}/users/{}/outbox", base, p.username),
+        "followers": addr.followers_uri,
+        "following": format!("{}/users/{}/following", base, p.username),
+        "url": format!("{}/@{}", base, p.username),
+        "publicKey": {
+            "id": addr.key_id,
+            "owner": addr.actor_uri,
+            "publicKeyPem": p.ap_public_key_pem
+        }
+    });
+    if let Some(b) = p.bio {
+        person["summary"] = serde_json::Value::String(b.to_string());
+    }
+    if let Some(url) = p.avatar_url {
+        person["icon"] = serde_json::json!({
+            "type": "Image",
+            "mediaType": p.avatar_mime_type.unwrap_or("image/jpeg"),
+            "url": url
+        });
+    }
+    person
+}
+
+/// Update(Person) アクティビティを組み立てる。
+fn build_update_actor_activity(
+    addr: &LocalActorAddress,
+    activity_id: &str,
+    published: &str,
+    person: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Update",
+        "id": activity_id,
+        "actor": addr.actor_uri,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [addr.followers_uri],
+        "object": person
+    })
+}
+
+/// リアクション内容から送信する AP アクティビティ種別を決める。
+/// ❤️ は EmojiReact 未対応の実装（Mastodon 等）にも通じる `Like` として送り、
+/// それ以外は Misskey 互換の `EmojiReact` として送る。
+fn reaction_activity_type(content: &str) -> &'static str {
+    if content == "❤️" {
+        "Like"
+    } else {
+        "EmojiReact"
+    }
+}
+
+/// Like/EmojiReact アクティビティ（またはその埋め込みオブジェクト）を組み立てる。
+fn build_reaction_object(
+    activity_type: &str,
+    id: &str,
+    actor_uri: &str,
+    object_ap_id: &str,
+    content: &str,
+) -> serde_json::Value {
+    let mut obj = serde_json::json!({
+        "type": activity_type,
+        "id": id,
+        "actor": actor_uri,
+        "object": object_ap_id,
+    });
+    if activity_type == "EmojiReact" {
+        obj["content"] = serde_json::Value::String(content.to_string());
+        // Misskey 系フォークとの互換のため非標準フィールドも併記する。
+        obj["_misskey_reaction"] = serde_json::Value::String(content.to_string());
+    }
+    obj
+}
+
+/// Undo(Like/EmojiReact) アクティビティを組み立てる。
+fn build_undo_reaction_activity(
+    addr: &LocalActorAddress,
+    undo_id: &str,
+    published: &str,
+    inner: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Undo",
+        "id": undo_id,
+        "actor": addr.actor_uri,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [addr.followers_uri],
+        "object": inner
+    })
+}
+
+// =====================================================================
+// 配送オーケストレーション（公開 API）
+// =====================================================================
 
 /// ローカル投稿を AP フォロワー全員の inbox へ配送する
 ///
@@ -48,8 +410,41 @@ pub async fn deliver_post_to_ap_followers(
     let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
     let seiran_uuid: Option<String> = row.try_get("seiran_post_uuid").unwrap_or(None);
 
-    // 添付ファイルを取得
-    let attachment_rows = sqlx::query(
+    let attachments = fetch_attachment_documents(db, post_id).await?;
+
+    let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
+    if inboxes.is_empty() {
+        return Ok(());
+    }
+
+    let addr = local_actor_address(local_domain, &username);
+    let activity = build_create_note_activity(
+        &addr,
+        &NoteActivityParams {
+            local_domain,
+            post_id,
+            content_html: &plain_to_html(&body),
+            published: &created_at.to_rfc3339(),
+            attachments,
+            quote_url,
+            in_reply_to,
+            seiran_uuid: seiran_uuid.as_deref(),
+        },
+    );
+
+    fan_out_activity(
+        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        &format!("Create(Note) post_id={} username={}", post_id, username),
+    )
+    .await
+}
+
+/// 投稿の添付ファイル群を AP Document オブジェクトのリストとして取得する。
+async fn fetch_attachment_documents(
+    db: &PgPool,
+    post_id: i64,
+) -> Result<Vec<serde_json::Value>, ApError> {
+    let rows = sqlx::query(
         "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, mf.blurhash, sp.public_url
          FROM post_attachments pa
          JOIN media_files mf ON mf.id = pa.media_file_id
@@ -62,7 +457,7 @@ pub async fn deliver_post_to_ap_followers(
     .await
     .map_err(|e| ApError::Other(format!("添付取得エラー: {}", e)))?;
 
-    let attachments: Vec<serde_json::Value> = attachment_rows
+    Ok(rows
         .iter()
         .filter_map(|r| {
             let storage_key: String = r.try_get("storage_key").ok()?;
@@ -71,110 +466,11 @@ pub async fn deliver_post_to_ap_followers(
             let height: Option<i32> = r.try_get("height").ok()?;
             let blurhash: Option<String> = r.try_get("blurhash").ok()?;
             let public_url: String = r.try_get("public_url").ok()?;
-            let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
-            let mut doc = serde_json::json!({
-                "type": "Document",
-                "mediaType": mime_type,
-                "url": url,
-            });
-            if let (Some(w), Some(h)) = (width, height) {
-                doc["width"] = serde_json::json!(w);
-                doc["height"] = serde_json::json!(h);
-            }
-            if let Some(bh) = blurhash {
-                doc["blurhash"] = serde_json::json!(bh);
-            }
-            Some(doc)
+            Some(build_attachment_document(
+                &public_url, &storage_key, &mime_type, width, height, blurhash.as_deref(),
+            ))
         })
-        .collect();
-
-    // AP フォロワー（actor_type='fedi'）の inbox URL 一覧を取得
-    let follower_rows = sqlx::query(
-        "SELECT a.ap_inbox_url
-         FROM follows f
-         JOIN actors a ON a.id = f.follower_actor_id
-         WHERE f.target_actor_id = $1
-           AND f.status = 'accepted'
-           AND a.actor_type = 'fedi'
-           AND a.ap_inbox_url IS NOT NULL",
-    )
-    .bind(actor_id)
-    .fetch_all(db)
-    .await
-    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
-
-    if follower_rows.is_empty() {
-        return Ok(());
-    }
-
-    let actor_uri = format!("https://{}/users/{}", local_domain, username);
-    let note_id = format!("https://{}/notes/{}", local_domain, post_id);
-    let activity_id = format!("https://{}/activities/{}", local_domain, post_id);
-    let followers_uri = format!("{}/followers", actor_uri);
-    let actor_key_id = format!("{}#main-key", actor_uri);
-    let published = created_at.to_rfc3339();
-    let content_html = plain_to_html(&body);
-
-    let mut note_obj = serde_json::json!({
-        "type": "Note",
-        "id": note_id,
-        "attributedTo": actor_uri,
-        "content": content_html,
-        "published": published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [followers_uri],
-        "url": note_id
-    });
-    if !attachments.is_empty() {
-        note_obj["attachment"] = serde_json::Value::Array(attachments);
-    }
-    if let Some(q_url) = quote_url {
-        note_obj["quoteUrl"] = serde_json::Value::String(q_url.to_string());
-        note_obj["_misskey_quote"] = serde_json::Value::String(q_url.to_string());
-    }
-    // リプライ先の AP Note URI（#38: これが無いとリモートで単独ポストに見える）
-    if let Some(irt) = in_reply_to {
-        note_obj["inReplyTo"] = serde_json::Value::String(irt.to_string());
-    }
-    if let Some(uuid) = seiran_uuid {
-        note_obj["seiranUuid"] = serde_json::Value::String(uuid);
-    }
-
-    let activity = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Create",
-        "id": activity_id,
-        "actor": actor_uri,
-        "published": published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [followers_uri],
-        "object": note_obj
-    });
-
-    let body_str = serde_json::to_string(&activity)
-        .map_err(ApError::Json)?;
-
-    let mut ok = 0usize;
-    let mut ng = 0usize;
-    for row in &follower_rows {
-        let inbox: String = match row.try_get("ap_inbox_url") {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        match ap_client.sign_and_post(&inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
-            Ok(()) => ok += 1,
-            Err(e) => {
-                eprintln!("[Deliver] {} への配送失敗: {}", inbox, e);
-                ng += 1;
-            }
-        }
-    }
-
-    eprintln!(
-        "[Deliver] post_id={} username={}: {}件成功 / {}件失敗",
-        post_id, username, ok, ng
-    );
-    Ok(())
+        .collect())
 }
 
 /// ローカルアクターの AP Announce アクティビティを Fedi フォロワー全員の inbox へ配送する
@@ -189,77 +485,20 @@ pub async fn deliver_ap_announce(
     ap_private_key_pem: &str,
     original_ap_object_id: &str,
 ) -> Result<(), ApError> {
-    // アクターのユーザー名を取得
-    let actor_row = sqlx::query(
-        "SELECT username FROM actors WHERE id = $1 LIMIT 1",
-    )
-    .bind(actor_id)
-    .fetch_optional(db)
-    .await
-    .map_err(|e| ApError::Other(format!("アクター情報取得エラー: {}", e)))?
-    .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
+    let username = fetch_username(db, actor_id).await?;
+    let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
 
-    let username: String = actor_row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
-
-    // AP フォロワー（actor_type='fedi'）の inbox URL 一覧を取得
-    let follower_rows = sqlx::query(
-        "SELECT a.ap_inbox_url
-         FROM follows f
-         JOIN actors a ON a.id = f.follower_actor_id
-         WHERE f.target_actor_id = $1
-           AND f.status = 'accepted'
-           AND a.actor_type = 'fedi'
-           AND a.ap_inbox_url IS NOT NULL",
-    )
-    .bind(actor_id)
-    .fetch_all(db)
-    .await
-    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
-
-    if follower_rows.is_empty() {
-        return Ok(());
-    }
-
-    let actor_uri = format!("https://{}/users/{}", local_domain, username);
+    let addr = local_actor_address(local_domain, &username);
     let announce_id = format!("https://{}/announces/{}", local_domain, post_id);
-    let actor_key_id = format!("{}#main-key", actor_uri);
-    let followers_uri = format!("{}/followers", actor_uri);
-    let published = chrono::Utc::now().to_rfc3339();
-
-    let activity = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Announce",
-        "id": announce_id,
-        "actor": actor_uri,
-        "published": published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [followers_uri],
-        "object": original_ap_object_id
-    });
-
-    let body_str = serde_json::to_string(&activity).map_err(ApError::Json)?;
-
-    let mut ok = 0usize;
-    let mut ng = 0usize;
-    for row in &follower_rows {
-        let inbox: String = match row.try_get("ap_inbox_url") {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        match ap_client.sign_and_post(&inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
-            Ok(()) => ok += 1,
-            Err(e) => {
-                eprintln!("[Deliver] Announce: {} への配送失敗: {}", inbox, e);
-                ng += 1;
-            }
-        }
-    }
-
-    eprintln!(
-        "[Deliver] Announce post_id={} username={}: {}件成功 / {}件失敗",
-        post_id, username, ok, ng
+    let activity = build_announce_activity(
+        &addr, &announce_id, original_ap_object_id, &chrono::Utc::now().to_rfc3339(),
     );
-    Ok(())
+
+    fan_out_activity(
+        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        &format!("Announce post_id={} username={}", post_id, username),
+    )
+    .await
 }
 
 /// ローカルアクターの AP Delete(Actor) アクティビティを Fedi フォロワー全員の inbox へ配送する。
@@ -271,73 +510,19 @@ pub async fn deliver_delete_actor(
     local_domain: &str,
     ap_private_key_pem: &str,
 ) -> Result<(), ApError> {
-    let row = sqlx::query(
-        "SELECT username FROM actors WHERE id = $1 LIMIT 1",
-    )
-    .bind(actor_id)
-    .fetch_optional(db)
-    .await
-    .map_err(|e| ApError::Other(format!("アクター取得エラー: {}", e)))?
-    .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
+    let username = fetch_username(db, actor_id).await?;
+    let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
 
-    let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
-
-    let follower_rows = sqlx::query(
-        "SELECT a.ap_inbox_url
-         FROM follows f
-         JOIN actors a ON a.id = f.follower_actor_id
-         WHERE f.target_actor_id = $1
-           AND f.status = 'accepted'
-           AND a.actor_type = 'fedi'
-           AND a.ap_inbox_url IS NOT NULL",
-    )
-    .bind(actor_id)
-    .fetch_all(db)
-    .await
-    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
-
-    if follower_rows.is_empty() {
-        return Ok(());
-    }
-
-    let actor_uri = format!("https://{}/users/{}", local_domain, username);
-    let actor_key_id = format!("{}#main-key", actor_uri);
+    let addr = local_actor_address(local_domain, &username);
     let activity_id = format!("https://{}/activities/delete-actor-{}", local_domain, actor_id);
-    let published = chrono::Utc::now().to_rfc3339();
+    let activity =
+        build_delete_actor_activity(&addr, &activity_id, &chrono::Utc::now().to_rfc3339());
 
-    let activity = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Delete",
-        "id": activity_id,
-        "actor": actor_uri,
-        "published": published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "object": actor_uri
-    });
-
-    let body_str = serde_json::to_string(&activity).map_err(ApError::Json)?;
-
-    let mut ok = 0usize;
-    let mut ng = 0usize;
-    for row in &follower_rows {
-        let inbox: String = match row.try_get("ap_inbox_url") {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        match ap_client.sign_and_post(&inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
-            Ok(()) => ok += 1,
-            Err(e) => {
-                eprintln!("[Deliver] Delete(Actor): {} への配送失敗: {}", inbox, e);
-                ng += 1;
-            }
-        }
-    }
-
-    eprintln!(
-        "[Deliver] Delete(Actor) actor_id={} username={}: {}件成功 / {}件失敗",
-        actor_id, username, ok, ng
-    );
-    Ok(())
+    fan_out_activity(
+        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        &format!("Delete(Actor) actor_id={} username={}", actor_id, username),
+    )
+    .await
 }
 
 /// ローカルアクターの AP Undo(Announce) を Fedi フォロワー全員の inbox へ配送する。
@@ -351,87 +536,27 @@ pub async fn deliver_undo_announce(
     ap_private_key_pem: &str,
     original_ap_object_id: &str,
 ) -> Result<(), ApError> {
-    let actor_row = sqlx::query("SELECT username FROM actors WHERE id = $1 LIMIT 1")
-        .bind(actor_id)
-        .fetch_optional(db)
-        .await
-        .map_err(|e| ApError::Other(format!("アクター情報取得エラー: {}", e)))?
-        .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
+    let username = fetch_username(db, actor_id).await?;
+    let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
 
-    let username: String = actor_row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
-
-    let follower_rows = sqlx::query(
-        "SELECT a.ap_inbox_url
-         FROM follows f
-         JOIN actors a ON a.id = f.follower_actor_id
-         WHERE f.target_actor_id = $1
-           AND f.status = 'accepted'
-           AND a.actor_type = 'fedi'
-           AND a.ap_inbox_url IS NOT NULL",
-    )
-    .bind(actor_id)
-    .fetch_all(db)
-    .await
-    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
-
-    if follower_rows.is_empty() {
-        return Ok(());
-    }
-
-    let actor_uri = format!("https://{}/users/{}", local_domain, username);
+    let addr = local_actor_address(local_domain, &username);
     let announce_id = format!("https://{}/announces/{}", local_domain, announce_post_id);
     let undo_id = format!("https://{}/undos/{}", local_domain, announce_post_id);
-    let actor_key_id = format!("{}#main-key", actor_uri);
-    let followers_uri = format!("{}/followers", actor_uri);
-    let published = chrono::Utc::now().to_rfc3339();
-
-    let activity = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Undo",
-        "id": undo_id,
-        "actor": actor_uri,
-        "published": published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [followers_uri],
-        "object": {
-            "type": "Announce",
-            "id": announce_id,
-            "actor": actor_uri,
-            "object": original_ap_object_id
-        }
-    });
-
-    let body_str = serde_json::to_string(&activity).map_err(ApError::Json)?;
-
-    let mut ok = 0usize;
-    let mut ng = 0usize;
-    for row in &follower_rows {
-        let inbox: String = match row.try_get("ap_inbox_url") {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        match ap_client.sign_and_post(&inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
-            Ok(()) => ok += 1,
-            Err(e) => {
-                eprintln!("[Deliver] Undo(Announce): {} への配送失敗: {}", inbox, e);
-                ng += 1;
-            }
-        }
-    }
-
-    eprintln!(
-        "[Deliver] Undo(Announce) post_id={} username={}: {}件成功 / {}件失敗",
-        announce_post_id, username, ok, ng
+    let activity = build_undo_announce_activity(
+        &addr, &undo_id, &announce_id, original_ap_object_id, &chrono::Utc::now().to_rfc3339(),
     );
-    Ok(())
+
+    fan_out_activity(
+        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        &format!("Undo(Announce) post_id={} username={}", announce_post_id, username),
+    )
+    .await
 }
 
 /// ローカルアクターの AP Update(Person) アクティビティを Fedi フォロワー全員の inbox へ配送する。
 ///
 /// プロフィール編集（display_name/bio/avatar）後に呼び出し、リモートインスタンスが
 /// キャッシュ済みの Actor 情報をプルせずとも即時更新できるようにする。
-/// object の Person 表現は `actor_handler`（federation-inbox の `GET /users/:username`）が
-/// 都度返すものと同一構造にする。
 pub async fn deliver_update_actor(
     ap_client: &ApClient,
     db: &PgPool,
@@ -464,29 +589,25 @@ pub async fn deliver_update_actor(
     let avatar_url: Option<String> = row.try_get("avatar_url").unwrap_or(None);
     let avatar_mime_type: Option<String> = row.try_get("avatar_mime_type").unwrap_or(None);
 
-    // AP フォロワー（actor_type='fedi'）の inbox URL 一覧を取得
-    let follower_rows = sqlx::query(
-        "SELECT a.ap_inbox_url
-         FROM follows f
-         JOIN actors a ON a.id = f.follower_actor_id
-         WHERE f.target_actor_id = $1
-           AND f.status = 'accepted'
-           AND a.actor_type = 'fedi'
-           AND a.ap_inbox_url IS NOT NULL",
-    )
-    .bind(actor_id)
-    .fetch_all(db)
-    .await
-    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
-
-    if follower_rows.is_empty() {
+    let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
+    if inboxes.is_empty() {
         return Ok(());
     }
 
-    let base = format!("https://{}", local_domain);
-    let actor_uri = format!("{}/users/{}", base, username);
-    let actor_key_id = format!("{}#main-key", actor_uri);
-    let followers_uri = format!("{}/followers", actor_uri);
+    let addr = local_actor_address(local_domain, &username);
+    let person = build_person_object(
+        &addr,
+        &PersonObjectParams {
+            local_domain,
+            username: &username,
+            display_name: &display_name,
+            bio: bio.as_deref(),
+            avatar_url: avatar_url.as_deref(),
+            avatar_mime_type: avatar_mime_type.as_deref(),
+            ap_public_key_pem,
+        },
+    );
+
     // Update は編集の度に配送されうるため、activity id は毎回一意にする
     // （固定IDだと一部実装が2回目以降のUpdateを重複とみなして無視する）。
     let activity_id = format!(
@@ -495,103 +616,14 @@ pub async fn deliver_update_actor(
         actor_id,
         chrono::Utc::now().timestamp_millis()
     );
-    let published = chrono::Utc::now().to_rfc3339();
+    let activity =
+        build_update_actor_activity(&addr, &activity_id, &chrono::Utc::now().to_rfc3339(), person);
 
-    let mut person = serde_json::json!({
-        "@context": ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
-        "id": actor_uri,
-        "type": "Person",
-        "preferredUsername": username,
-        "name": display_name,
-        "inbox": format!("{}/inbox", base),
-        "outbox": format!("{}/users/{}/outbox", base, username),
-        "followers": followers_uri,
-        "following": format!("{}/users/{}/following", base, username),
-        "url": format!("{}/@{}", base, username),
-        "publicKey": {
-            "id": actor_key_id,
-            "owner": actor_uri,
-            "publicKeyPem": ap_public_key_pem
-        }
-    });
-    if let Some(b) = &bio {
-        person["summary"] = serde_json::Value::String(b.clone());
-    }
-    if let Some(url) = &avatar_url {
-        person["icon"] = serde_json::json!({
-            "type": "Image",
-            "mediaType": avatar_mime_type.unwrap_or_else(|| "image/jpeg".to_string()),
-            "url": url
-        });
-    }
-
-    let activity = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Update",
-        "id": activity_id,
-        "actor": actor_uri,
-        "published": published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [followers_uri],
-        "object": person
-    });
-
-    let body_str = serde_json::to_string(&activity).map_err(ApError::Json)?;
-
-    let mut ok = 0usize;
-    let mut ng = 0usize;
-    for row in &follower_rows {
-        let inbox: String = match row.try_get("ap_inbox_url") {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        match ap_client.sign_and_post(&inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
-            Ok(()) => ok += 1,
-            Err(e) => {
-                eprintln!("[Deliver] Update(Actor): {} への配送失敗: {}", inbox, e);
-                ng += 1;
-            }
-        }
-    }
-
-    eprintln!(
-        "[Deliver] Update(Actor) actor_id={} username={}: {}件成功 / {}件失敗",
-        actor_id, username, ok, ng
-    );
-    Ok(())
-}
-
-/// リアクション内容から送信する AP アクティビティ種別を決める。
-/// ❤️ は EmojiReact 未対応の実装（Mastodon 等）にも通じる `Like` として送り、
-/// それ以外は Misskey 互換の `EmojiReact` として送る。
-fn reaction_activity_type(content: &str) -> &'static str {
-    if content == "❤️" {
-        "Like"
-    } else {
-        "EmojiReact"
-    }
-}
-
-/// Like/EmojiReact アクティビティ（またはその埋め込みオブジェクト）を組み立てる。
-fn build_reaction_object(
-    activity_type: &str,
-    id: &str,
-    actor_uri: &str,
-    object_ap_id: &str,
-    content: &str,
-) -> serde_json::Value {
-    let mut obj = serde_json::json!({
-        "type": activity_type,
-        "id": id,
-        "actor": actor_uri,
-        "object": object_ap_id,
-    });
-    if activity_type == "EmojiReact" {
-        obj["content"] = serde_json::Value::String(content.to_string());
-        // Misskey 系フォークとの互換のため非標準フィールドも併記する。
-        obj["_misskey_reaction"] = serde_json::Value::String(content.to_string());
-    }
-    obj
+    fan_out_activity(
+        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        &format!("Update(Actor) actor_id={} username={}", actor_id, username),
+    )
+    .await
 }
 
 /// リアクション配送先を解決する。
@@ -634,26 +666,7 @@ async fn resolve_reaction_targets(
         }
     }
 
-    // reactor 本人（ローカルアクター）の Fedi フォロワー全員の inbox を追加する。
-    let follower_rows = sqlx::query(
-        "SELECT a.ap_inbox_url
-         FROM follows f
-         JOIN actors a ON a.id = f.follower_actor_id
-         WHERE f.target_actor_id = $1
-           AND f.status = 'accepted'
-           AND a.actor_type = 'fedi'
-           AND a.ap_inbox_url IS NOT NULL",
-    )
-    .bind(reactor_actor_id)
-    .fetch_all(db)
-    .await
-    .map_err(|e| ApError::Other(format!("フォロワー取得エラー: {}", e)))?;
-
-    for row in &follower_rows {
-        if let Ok(inbox) = row.try_get::<String, _>("ap_inbox_url") {
-            inboxes.insert(inbox);
-        }
-    }
+    inboxes.extend(fetch_fedi_follower_inboxes(db, reactor_actor_id).await?);
 
     Ok(Some((object_ap_id, inboxes.into_iter().collect())))
 }
@@ -678,49 +691,24 @@ pub async fn deliver_ap_reaction(
         Some(v) => v,
         None => return Ok(()),
     };
-    if inboxes.is_empty() {
-        return Ok(());
-    }
 
-    let actor_row = sqlx::query("SELECT username FROM actors WHERE id = $1 LIMIT 1")
-        .bind(actor_id)
-        .fetch_optional(db)
-        .await
-        .map_err(|e| ApError::Other(format!("アクター情報取得エラー: {}", e)))?
-        .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
-    let username: String = actor_row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
-
-    let actor_uri = format!("https://{}/users/{}", local_domain, username);
-    let actor_key_id = format!("{}#main-key", actor_uri);
-    let followers_uri = format!("{}/followers", actor_uri);
-    let published = chrono::Utc::now().to_rfc3339();
+    let username = fetch_username(db, actor_id).await?;
+    let addr = local_actor_address(local_domain, &username);
     let activity_type = reaction_activity_type(content);
 
-    let mut activity = build_reaction_object(activity_type, activity_id, &actor_uri, &object_ap_id, content);
-    activity["@context"] = serde_json::Value::String("https://www.w3.org/ns/activitystreams".to_string());
-    activity["published"] = serde_json::Value::String(published);
+    let mut activity =
+        build_reaction_object(activity_type, activity_id, &addr.actor_uri, &object_ap_id, content);
+    activity["@context"] =
+        serde_json::Value::String("https://www.w3.org/ns/activitystreams".to_string());
+    activity["published"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
     activity["to"] = serde_json::json!(["https://www.w3.org/ns/activitystreams#Public"]);
-    activity["cc"] = serde_json::json!([followers_uri]);
+    activity["cc"] = serde_json::json!([addr.followers_uri]);
 
-    let body_str = serde_json::to_string(&activity).map_err(ApError::Json)?;
-
-    let mut ok = 0usize;
-    let mut ng = 0usize;
-    for inbox in &inboxes {
-        match ap_client.sign_and_post(inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
-            Ok(()) => ok += 1,
-            Err(e) => {
-                eprintln!("[Deliver] {}(post_id={}): {} への配送失敗: {}", activity_type, post_id, inbox, e);
-                ng += 1;
-            }
-        }
-    }
-
-    eprintln!(
-        "[Deliver] {} post_id={} actor_id={}: {}件成功 / {}件失敗",
-        activity_type, post_id, actor_id, ok, ng
-    );
-    Ok(())
+    fan_out_activity(
+        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        &format!("{} post_id={} actor_id={}", activity_type, post_id, actor_id),
+    )
+    .await
 }
 
 /// ローカルアクターの絵文字リアクション取消（Undo(Like)/Undo(EmojiReact)）を、
@@ -743,24 +731,12 @@ pub async fn deliver_ap_undo_reaction(
         Some(v) => v,
         None => return Ok(()),
     };
-    if inboxes.is_empty() {
-        return Ok(());
-    }
 
-    let actor_row = sqlx::query("SELECT username FROM actors WHERE id = $1 LIMIT 1")
-        .bind(actor_id)
-        .fetch_optional(db)
-        .await
-        .map_err(|e| ApError::Other(format!("アクター情報取得エラー: {}", e)))?
-        .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
-    let username: String = actor_row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
-
-    let actor_uri = format!("https://{}/users/{}", local_domain, username);
-    let actor_key_id = format!("{}#main-key", actor_uri);
-    let followers_uri = format!("{}/followers", actor_uri);
-    let published = chrono::Utc::now().to_rfc3339();
+    let username = fetch_username(db, actor_id).await?;
+    let addr = local_actor_address(local_domain, &username);
     let activity_type = reaction_activity_type(content);
-    let inner = build_reaction_object(activity_type, prev_activity_id, &actor_uri, &object_ap_id, content);
+    let inner =
+        build_reaction_object(activity_type, prev_activity_id, &addr.actor_uri, &object_ap_id, content);
 
     let undo_id = format!(
         "https://{}/activities/undo-reactions/{}-{}-{}",
@@ -769,37 +745,14 @@ pub async fn deliver_ap_undo_reaction(
         actor_id,
         chrono::Utc::now().timestamp_millis()
     );
+    let activity =
+        build_undo_reaction_activity(&addr, &undo_id, &chrono::Utc::now().to_rfc3339(), inner);
 
-    let activity = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Undo",
-        "id": undo_id,
-        "actor": actor_uri,
-        "published": published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [followers_uri],
-        "object": inner
-    });
-
-    let body_str = serde_json::to_string(&activity).map_err(ApError::Json)?;
-
-    let mut ok = 0usize;
-    let mut ng = 0usize;
-    for inbox in &inboxes {
-        match ap_client.sign_and_post(inbox, &body_str, &actor_key_id, ap_private_key_pem).await {
-            Ok(()) => ok += 1,
-            Err(e) => {
-                eprintln!("[Deliver] Undo({})(post_id={}): {} への配送失敗: {}", activity_type, post_id, inbox, e);
-                ng += 1;
-            }
-        }
-    }
-
-    eprintln!(
-        "[Deliver] Undo({}) post_id={} actor_id={}: {}件成功 / {}件失敗",
-        activity_type, post_id, actor_id, ok, ng
-    );
-    Ok(())
+    fan_out_activity(
+        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        &format!("Undo({}) post_id={} actor_id={}", activity_type, post_id, actor_id),
+    )
+    .await
 }
 
 /// プレーンテキストを ActivityPub 向け HTML に変換する
@@ -822,7 +775,185 @@ pub fn plain_to_html(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::plain_to_html;
+    use super::*;
+
+    fn addr() -> LocalActorAddress {
+        local_actor_address("seiran.example", "alice")
+    }
+
+    #[test]
+    fn local_actor_address_builds_uris() {
+        let a = addr();
+        assert_eq!(a.actor_uri, "https://seiran.example/users/alice");
+        assert_eq!(a.key_id, "https://seiran.example/users/alice#main-key");
+        assert_eq!(a.followers_uri, "https://seiran.example/users/alice/followers");
+    }
+
+    #[test]
+    fn create_note_activity_minimal() {
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+            },
+        );
+        assert_eq!(activity["type"], "Create");
+        assert_eq!(activity["id"], "https://seiran.example/activities/42");
+        let note = &activity["object"];
+        assert_eq!(note["type"], "Note");
+        assert_eq!(note["id"], "https://seiran.example/notes/42");
+        assert_eq!(note["content"], "<p>hello</p>");
+        // オプション項目は付与されない
+        assert!(note.get("attachment").is_none());
+        assert!(note.get("quoteUrl").is_none());
+        assert!(note.get("inReplyTo").is_none());
+        assert!(note.get("seiranUuid").is_none());
+    }
+
+    #[test]
+    fn create_note_activity_with_quote_reply_uuid() {
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![serde_json::json!({"type": "Document"})],
+                quote_url: Some("https://other.example/notes/1"),
+                in_reply_to: Some("https://other.example/notes/2"),
+                seiran_uuid: Some("uuid-1234"),
+            },
+        );
+        let note = &activity["object"];
+        assert_eq!(note["quoteUrl"], "https://other.example/notes/1");
+        assert_eq!(note["_misskey_quote"], "https://other.example/notes/1");
+        assert_eq!(note["inReplyTo"], "https://other.example/notes/2");
+        assert_eq!(note["seiranUuid"], "uuid-1234");
+        assert_eq!(note["attachment"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn attachment_document_with_dimensions_and_blurhash() {
+        let doc = build_attachment_document(
+            "https://cdn.example/", "media/1.png", "image/png", Some(100), Some(200), Some("LKO2?U"),
+        );
+        assert_eq!(doc["type"], "Document");
+        assert_eq!(doc["mediaType"], "image/png");
+        // public_url 末尾スラッシュは正規化される
+        assert_eq!(doc["url"], "https://cdn.example/media/1.png");
+        assert_eq!(doc["width"], 100);
+        assert_eq!(doc["height"], 200);
+        assert_eq!(doc["blurhash"], "LKO2?U");
+    }
+
+    #[test]
+    fn attachment_document_without_optional_fields() {
+        let doc = build_attachment_document(
+            "https://cdn.example", "media/1.mp4", "video/mp4", None, None, None,
+        );
+        assert!(doc.get("width").is_none());
+        assert!(doc.get("blurhash").is_none());
+    }
+
+    #[test]
+    fn announce_activity_shape() {
+        let activity = build_announce_activity(
+            &addr(),
+            "https://seiran.example/announces/7",
+            "https://other.example/notes/9",
+            "2026-07-15T00:00:00+00:00",
+        );
+        assert_eq!(activity["type"], "Announce");
+        assert_eq!(activity["object"], "https://other.example/notes/9");
+        assert_eq!(activity["actor"], "https://seiran.example/users/alice");
+        assert_eq!(activity["cc"][0], "https://seiran.example/users/alice/followers");
+    }
+
+    #[test]
+    fn undo_announce_wraps_original_announce() {
+        let activity = build_undo_announce_activity(
+            &addr(),
+            "https://seiran.example/undos/7",
+            "https://seiran.example/announces/7",
+            "https://other.example/notes/9",
+            "2026-07-15T00:00:00+00:00",
+        );
+        assert_eq!(activity["type"], "Undo");
+        assert_eq!(activity["object"]["type"], "Announce");
+        assert_eq!(activity["object"]["id"], "https://seiran.example/announces/7");
+        assert_eq!(activity["object"]["object"], "https://other.example/notes/9");
+    }
+
+    #[test]
+    fn delete_actor_targets_own_actor_uri() {
+        let activity = build_delete_actor_activity(
+            &addr(),
+            "https://seiran.example/activities/delete-actor-1",
+            "2026-07-15T00:00:00+00:00",
+        );
+        assert_eq!(activity["type"], "Delete");
+        assert_eq!(activity["actor"], activity["object"]);
+    }
+
+    #[test]
+    fn person_object_optional_fields() {
+        let a = addr();
+        let minimal = build_person_object(
+            &a,
+            &PersonObjectParams {
+                local_domain: "seiran.example",
+                username: "alice",
+                display_name: "Alice",
+                bio: None,
+                avatar_url: None,
+                avatar_mime_type: None,
+                ap_public_key_pem: "PEM",
+            },
+        );
+        assert!(minimal.get("summary").is_none());
+        assert!(minimal.get("icon").is_none());
+        assert_eq!(minimal["publicKey"]["publicKeyPem"], "PEM");
+
+        let full = build_person_object(
+            &a,
+            &PersonObjectParams {
+                local_domain: "seiran.example",
+                username: "alice",
+                display_name: "Alice",
+                bio: Some("hi"),
+                avatar_url: Some("https://cdn.example/a.png"),
+                avatar_mime_type: Some("image/png"),
+                ap_public_key_pem: "PEM",
+            },
+        );
+        assert_eq!(full["summary"], "hi");
+        assert_eq!(full["icon"]["mediaType"], "image/png");
+    }
+
+    #[test]
+    fn reaction_type_heart_is_like_others_are_emoji_react() {
+        assert_eq!(reaction_activity_type("❤️"), "Like");
+        assert_eq!(reaction_activity_type("🎉"), "EmojiReact");
+    }
+
+    #[test]
+    fn reaction_object_emoji_react_has_misskey_fields() {
+        let like = build_reaction_object("Like", "id1", "actor1", "obj1", "❤️");
+        assert!(like.get("content").is_none());
+        assert!(like.get("_misskey_reaction").is_none());
+
+        let react = build_reaction_object("EmojiReact", "id1", "actor1", "obj1", "🎉");
+        assert_eq!(react["content"], "🎉");
+        assert_eq!(react["_misskey_reaction"], "🎉");
+    }
 
     #[test]
     fn test_plain_to_html_single_paragraph() {

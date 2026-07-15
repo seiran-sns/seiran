@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use seiran_common::{ap::ApClient, get_db_pool, run_migrations, InMemoryJobQueue, SecretsFile, StreamHub};
+use seiran_common::{ap::ApClient, get_db_pool, run_migrations, DeliveryConfig, InMemoryJobQueue, SecretsFile, StreamHub};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Role {
@@ -100,7 +100,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // worker も BskyVideoPoll 等 DB アクセスが必要なジョブを扱うため、単独起動時も
     // DB に接続する（以前は「DB不要」だったが、ジョブハンドラの実装が進んだため変更）。
+    // AP 配送ジョブ（ApDelivery）が署名に AP 鍵を使うため、シークレットも読み込む。
     if role == Role::Worker {
+        let secrets = SecretsFile::from_env().load_or_create()?;
+        eprintln!("[seiran-server] シークレット読み込み完了");
         let pool = get_db_pool().await?;
         eprintln!("[seiran-server] DB 接続完了");
         let http_client = Arc::new(
@@ -108,10 +111,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .user_agent("seiran-federation/0.1.0")
                 .build()?,
         );
+        let delivery = DeliveryConfig {
+            local_domain: std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string()),
+            ap_private_key_pem: secrets.ap_private_key_pem.clone(),
+            ap_public_key_pem: secrets.ap_public_key_pem.clone(),
+        };
         // 単独 worker プロセスは他ロールとキューを共有できない（split-role構成では
         // Redis統合まで各プロセスが独立したキューになる。現状の既知の制約）。
         let queue = Arc::new(InMemoryJobQueue::new());
-        seiran_federation_worker::run(queue, pool, Arc::new(ApClient::new(http_client))).await;
+        seiran_federation_worker::run(queue, pool, Arc::new(ApClient::new(http_client)), delivery).await;
         return Ok(());
     }
 
@@ -207,7 +215,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let worker_ap_client = Arc::clone(&api_state.ap_client);
             let worker_queue = Arc::clone(&job_queue_concrete);
             let worker_pool = pool.clone();
-            tokio::spawn(async move { seiran_federation_worker::run(worker_queue, worker_pool, worker_ap_client).await });
+            let worker_delivery = DeliveryConfig {
+                local_domain: local_domain.clone(),
+                ap_private_key_pem: secrets.ap_private_key_pem.clone(),
+                ap_public_key_pem: secrets.ap_public_key_pem.clone(),
+            };
+            tokio::spawn(async move {
+                seiran_federation_worker::run(worker_queue, worker_pool, worker_ap_client, worker_delivery).await
+            });
 
             // パスが衝突しないため単一ポートに合流できる
             let app =

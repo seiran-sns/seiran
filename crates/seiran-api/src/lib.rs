@@ -25,7 +25,7 @@ use seiran_common::{
     StorageProviderRepository, PgStorageProviderRepository,
     MediaFileRepository, PgMediaFileRepository,
     SiteSettingsRepository, PgSiteSettingsRepository,
-    S3StorageClient, JobQueue,
+    S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
     ActorRepository, AtpReadRepository, FollowRepository, PostRepository, ReactionRepository, UserRepository,
@@ -69,9 +69,34 @@ pub struct AppState {
     pub stream_hub: Arc<StreamHub>,
     /// 絵文字インポートジョブの進捗状態（#50）。job_id → ImportJobStatus。
     pub emoji_import_jobs: Arc<DashMap<String, handlers::admin::emoji_import::ImportJobStatus>>,
-    /// 非同期ジョブキュー（Bsky動画パイプライン結合等）。`all` ロールでは
+    /// 非同期ジョブキュー（AP配送・Bsky動画パイプライン結合等）。`all` ロールでは
     /// `seiran-federation-worker`のWorkerEngineと同一インスタンスを共有する。
     pub job_queue: Arc<dyn JobQueue>,
+}
+
+impl AppState {
+    /// AP 配送ジョブを積む。配送の実行・リトライは Worker（`jobs::ap_delivery`）が担う。
+    /// enqueue 失敗はログのみ（投稿等の主処理は成功済みのため呼び出し元へは伝播しない）。
+    pub async fn enqueue_ap_delivery(&self, actor_id: i64, kind: ApDeliveryKind) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::ApDelivery { actor_id, kind }, job_priority::HIGH)
+            .await
+        {
+            eprintln!("[job] ApDelivery enqueue 失敗 (actor_id={}): {}", actor_id, e);
+        }
+    }
+
+    /// 過去ログ同期ジョブ（ActorHistorySync）を積む。
+    pub async fn enqueue_actor_history_sync(&self, ap_uri: Option<String>, at_did: Option<String>) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::ActorHistorySync { ap_uri, at_did }, job_priority::LOW)
+            .await
+        {
+            eprintln!("[job] ActorHistorySync enqueue 失敗: {}", e);
+        }
+    }
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -276,77 +301,84 @@ pub fn router(state: AppState) -> Router {
         .layer(cors)
 }
 
-/// 起動時タスク: 全ローカルユーザーの Cloudflare TXT 再登録 + Relay requestCrawl。
-///
-/// 再デプロイ後の TXT 消失対策と subscribeRepos 再接続の促進のため、
-/// バックグラウンドで一度だけ実行する。
+/// 起動時タスク: 全ローカルユーザーの Cloudflare TXT 再登録 → Relay requestCrawl →
+/// #identity イベントのバックフィル、をこの順でバックグラウンド実行する。
 pub fn spawn_startup_tasks(state: &AppState) {
-    let startup_actors = Arc::clone(&state.actors);
-    let cf2 = state.cloudflare.clone();
-    let hc = Arc::clone(&state.http_client);
-    let domain = state.local_domain.clone();
-    let sd = state.local_domain.clone();
-    let identity_db = state.db.clone();
-    let identity_atp = Arc::clone(&state.atp_service);
-    let identity_domain = state.local_domain.clone();
-
+    let state = state.clone();
     tokio::spawn(async move {
-        // 全ローカルユーザーのハンドル TXT を確保（再デプロイ後の消失対策）
-        if let Some(cf) = cf2 {
-            match startup_actors.list_local_dids().await {
-                Ok(rows) => {
-                    for (username, did) in rows {
-                        let handle = format!("{}.{}", username, sd);
-                        match cf.ensure_atproto_txt(&handle, &did).await {
-                            Ok(_) => eprintln!("[startup] TXT 確認済み: _atproto.{}", handle),
-                            Err(e) => eprintln!("[startup] TXT 登録失敗: {}: {}", handle, e),
-                        }
-                    }
-                }
-                Err(e) => eprintln!("[startup] ローカルユーザー取得失敗: {}", e),
-            }
-        }
-
-        // Relay に requestCrawl を送って subscribeRepos 再接続を促す
-        match hc
-            .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
-            .json(&serde_json::json!({"hostname": domain}))
-            .send()
-            .await
-        {
-            Ok(res) => eprintln!("[atp] 起動時 requestCrawl → {}", res.status()),
-            Err(e) => eprintln!("[atp] 起動時 requestCrawl 失敗: {}", e),
-        }
-
+        ensure_handle_txt_records(&state).await;
+        request_relay_crawl(&state).await;
         // requestCrawl 後、Relay が subscribeRepos に接続するまで待機してから
-        // #identity イベントがない既存ユーザー分を DB 保存 + broadcast する。
+        // #identity をブロードキャストする。
         tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
-
-        let now = chrono::Utc::now();
-        let missing: Vec<(i64, String, String)> = match sqlx::query_as::<_, (i64, String, String)>(
-            "SELECT a.id, a.username, a.at_did
-             FROM actors a
-             WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
-               AND NOT EXISTS (
-                 SELECT 1 FROM atp_repo_events e
-                 WHERE e.actor_id = a.id AND e.event_type = 'identity'
-               )",
-        )
-        .fetch_all(&identity_db)
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => { eprintln!("[startup] #identity 対象取得失敗: {}", e); return; }
-        };
-
-        for (actor_id, username, did) in missing {
-            let handle = format!("{}.{}", username, identity_domain);
-            match identity_atp.broadcast_identity_event(actor_id, &did, &handle, now).await {
-                Ok(_) => eprintln!("[startup] #identity broadcast: {}", handle),
-                Err(e) => eprintln!("[startup] #identity 失敗 {}: {}", handle, e),
-            }
-        }
+        backfill_identity_events(&state).await;
     });
+}
+
+/// 全ローカルユーザーの ATP ハンドル TXT レコードを確保する（再デプロイ後の消失対策）。
+async fn ensure_handle_txt_records(state: &AppState) {
+    let Some(cf) = state.cloudflare.as_ref() else {
+        return;
+    };
+    let rows = match state.actors.list_local_dids().await {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("[startup] ローカルユーザー取得失敗: {}", e);
+            return;
+        }
+    };
+    for (username, did) in rows {
+        let handle = format!("{}.{}", username, state.local_domain);
+        match cf.ensure_atproto_txt(&handle, &did).await {
+            Ok(_) => eprintln!("[startup] TXT 確認済み: _atproto.{}", handle),
+            Err(e) => eprintln!("[startup] TXT 登録失敗: {}: {}", handle, e),
+        }
+    }
+}
+
+/// Relay に requestCrawl を送って subscribeRepos 再接続を促す。
+async fn request_relay_crawl(state: &AppState) {
+    match state
+        .http_client
+        .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
+        .json(&serde_json::json!({"hostname": state.local_domain}))
+        .send()
+        .await
+    {
+        Ok(res) => eprintln!("[atp] 起動時 requestCrawl → {}", res.status()),
+        Err(e) => eprintln!("[atp] 起動時 requestCrawl 失敗: {}", e),
+    }
+}
+
+/// #identity イベントが未送出の既存ローカルユーザー分を DB 保存 + broadcast する。
+async fn backfill_identity_events(state: &AppState) {
+    let now = chrono::Utc::now();
+    let missing: Vec<(i64, String, String)> = match sqlx::query_as::<_, (i64, String, String)>(
+        "SELECT a.id, a.username, a.at_did
+         FROM actors a
+         WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM atp_repo_events e
+             WHERE e.actor_id = a.id AND e.event_type = 'identity'
+           )",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[startup] #identity 対象取得失敗: {}", e);
+            return;
+        }
+    };
+
+    for (actor_id, username, did) in missing {
+        let handle = format!("{}.{}", username, state.local_domain);
+        match state.atp_service.broadcast_identity_event(actor_id, &did, &handle, now).await {
+            Ok(_) => eprintln!("[startup] #identity broadcast: {}", handle),
+            Err(e) => eprintln!("[startup] #identity 失敗 {}: {}", handle, e),
+        }
+    }
 }
 
 // =====================================================================

@@ -41,13 +41,11 @@ impl PartialOrd for PrioritizedJob {
 
 impl Ord for PrioritizedJob {
     fn cmp(&self, other: &Self) -> Ordering {
-        // 優先度が高いほど先（最大ヒープ）
-        // 同一優先度内では投入順（sequence が小さいほど先 → sequence の逆順比較）
-        other
-            .priority
-            .cmp(&self.priority)
-            .reverse()
-            .then(other.sequence.cmp(&self.sequence).reverse())
+        // BinaryHeap は最大ヒープなので Greater と評価された方が先にポップされる。
+        // 優先度が高いほど先、同一優先度内では sequence が小さい（先に投入された）方が先。
+        self.priority
+            .cmp(&other.priority)
+            .then(other.sequence.cmp(&self.sequence))
     }
 }
 
@@ -116,5 +114,94 @@ impl JobQueue for InMemoryJobQueue {
         // Worker を起こす
         self.notify.notify_one();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// テスト用のダミージョブ。actor_id で個体を識別する。
+    fn job(id: i64) -> Job {
+        Job::ApDelivery { actor_id: id, kind: crate::traits::ApDeliveryKind::DeleteActor }
+    }
+
+    fn post_id_of(job: &Job) -> i64 {
+        match job {
+            Job::ApDelivery { actor_id, .. } => *actor_id,
+            _ => panic!("テストでは ApDelivery のみ使用する"),
+        }
+    }
+
+    #[tokio::test]
+    async fn dequeue_returns_none_when_empty() {
+        let q = InMemoryJobQueue::new();
+        assert!(q.dequeue().await.is_none());
+        assert!(q.is_empty().await);
+        assert_eq!(q.len().await, 0);
+    }
+
+    #[tokio::test]
+    async fn higher_priority_dequeued_first() {
+        let q = InMemoryJobQueue::new();
+        q.enqueue(job(1), 10).await.unwrap();
+        q.enqueue(job(2), 100).await.unwrap();
+        q.enqueue(job(3), 50).await.unwrap();
+
+        assert_eq!(post_id_of(&q.dequeue().await.unwrap()), 2);
+        assert_eq!(post_id_of(&q.dequeue().await.unwrap()), 3);
+        assert_eq!(post_id_of(&q.dequeue().await.unwrap()), 1);
+    }
+
+    #[tokio::test]
+    async fn same_priority_is_fifo() {
+        let q = InMemoryJobQueue::new();
+        for i in 1..=5 {
+            q.enqueue(job(i), 10).await.unwrap();
+        }
+        for i in 1..=5 {
+            assert_eq!(post_id_of(&q.dequeue().await.unwrap()), i, "同一優先度は投入順（FIFO）で取り出す");
+        }
+    }
+
+    #[tokio::test]
+    async fn mixed_priorities_keep_fifo_within_same_priority() {
+        let q = InMemoryJobQueue::new();
+        q.enqueue(job(1), 10).await.unwrap();
+        q.enqueue(job(2), 50).await.unwrap();
+        q.enqueue(job(3), 10).await.unwrap();
+        q.enqueue(job(4), 50).await.unwrap();
+
+        let order: Vec<i64> = [
+            q.dequeue().await.unwrap(),
+            q.dequeue().await.unwrap(),
+            q.dequeue().await.unwrap(),
+            q.dequeue().await.unwrap(),
+        ]
+        .iter()
+        .map(post_id_of)
+        .collect();
+        assert_eq!(order, vec![2, 4, 1, 3]);
+    }
+
+    #[tokio::test]
+    async fn enqueue_notifies_worker() {
+        let q = InMemoryJobQueue::new();
+        let notify = q.notify_handle();
+        q.enqueue(job(1), 10).await.unwrap();
+        // enqueue 済みなら notified() は即座に解決する（permit が立っている）
+        tokio::time::timeout(std::time::Duration::from_millis(100), notify.notified())
+            .await
+            .expect("enqueue 後に notify されていない");
+    }
+
+    #[tokio::test]
+    async fn len_tracks_queue_size() {
+        let q = InMemoryJobQueue::new();
+        q.enqueue(job(1), 10).await.unwrap();
+        q.enqueue(job(2), 10).await.unwrap();
+        assert_eq!(q.len().await, 2);
+        q.dequeue().await;
+        assert_eq!(q.len().await, 1);
     }
 }

@@ -9,7 +9,7 @@
 //! # 優先度定数
 //! ```
 //! const PRIORITY_CRITICAL : i32 = 100;  // ATP リポジトリコミット
-//! const PRIORITY_HIGH     : i32 =  50;  // 投稿配送（アウトバウンド）
+//! const PRIORITY_HIGH     : i32 =  50;  // AP 配送（アウトバウンド）
 //! const PRIORITY_NORMAL   : i32 =  10;  // インバウンド処理、メタデータ解決
 //! const PRIORITY_LOW      : i32 =   1;  // 過去ログ同期
 //! ```
@@ -41,6 +41,15 @@ struct RetryConfig {
     max_delay_ms: u64,
 }
 
+/// AP 配送ジョブ（`Job::ApDelivery`）に必要な設定。
+/// 起動時に `seiran-server` が secrets / 環境変数から一度だけ組み立てて注入する。
+#[derive(Clone)]
+pub struct DeliveryConfig {
+    pub local_domain: String,
+    pub ap_private_key_pem: Option<String>,
+    pub ap_public_key_pem: Option<String>,
+}
+
 /// ジョブ実行コンテキスト（ハンドラに渡す）
 pub struct JobContext {
     pub queue: Arc<dyn JobQueue>,
@@ -52,6 +61,8 @@ pub struct JobContext {
     pub db_pool: Option<sqlx::PgPool>,
     /// AP クライアント（HTTP クライアントと公開鍵キャッシュを保持）
     pub ap_client: Arc<ApClient>,
+    /// AP 配送設定（ApDelivery ジョブが使用）
+    pub delivery: Option<DeliveryConfig>,
 }
 
 impl JobContext {
@@ -65,11 +76,17 @@ impl JobContext {
             actor_semaphores: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             db_pool: None,
             ap_client,
+            delivery: None,
         }
     }
 
     pub fn with_db_pool(mut self, pool: sqlx::PgPool) -> Self {
         self.db_pool = Some(pool);
+        self
+    }
+
+    pub fn with_delivery_config(mut self, config: DeliveryConfig) -> Self {
+        self.delivery = Some(config);
         self
     }
 
@@ -102,8 +119,17 @@ impl WorkerEngine {
         Self { queue, ctx }
     }
 
-    pub fn new_with_db(queue: Arc<InMemoryJobQueue>, pool: sqlx::PgPool, ap_client: Arc<ApClient>) -> Self {
-        let ctx = Arc::new(JobContext::new(queue.clone(), ap_client).with_db_pool(pool));
+    pub fn new_with_db(
+        queue: Arc<InMemoryJobQueue>,
+        pool: sqlx::PgPool,
+        ap_client: Arc<ApClient>,
+        delivery: DeliveryConfig,
+    ) -> Self {
+        let ctx = Arc::new(
+            JobContext::new(queue.clone(), ap_client)
+                .with_db_pool(pool)
+                .with_delivery_config(delivery),
+        );
         Self { queue, ctx }
     }
 
@@ -158,14 +184,12 @@ async fn execute_with_retry(
         }
         Err(e) if attempt + 1 < config.max_attempts => {
             // 指数バックオフ + ジッター（0〜1秒）
-            let delay_ms = (config.base_delay_ms * (1u64 << attempt))
-                .min(config.max_delay_ms);
             let jitter_ms = {
                 use argon2::password_hash::rand_core::{OsRng, RngCore};
                 let mut rng = OsRng;
                 rng.next_u32() as u64 % 1000
             };
-            let wait = Duration::from_millis(delay_ms + jitter_ms);
+            let wait = Duration::from_millis(backoff_delay_ms(&config, attempt) + jitter_ms);
 
             eprintln!(
                 "[Worker] 失敗: {} - {} → {}ms後にリトライ (attempt {})",
@@ -182,6 +206,15 @@ async fn execute_with_retry(
             );
         }
     }
+}
+
+/// 指数バックオフの待機時間（ジッター抜き）を計算する。
+/// `base_delay_ms * 2^attempt` を `max_delay_ms` でクランプする。
+fn backoff_delay_ms(config: &RetryConfig, attempt: u32) -> u64 {
+    config
+        .base_delay_ms
+        .saturating_mul(1u64.checked_shl(attempt).unwrap_or(u64::MAX))
+        .min(config.max_delay_ms)
 }
 
 /// リトライを遅延実行するためのタスクを起動する同期的なヘルパー関数
@@ -205,8 +238,8 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::ActorHistorySync { ap_uri, at_did } => {
             jobs::actor_history_sync::handle(ap_uri, at_did, ctx).await
         }
-        Job::OutboundPostDelivery { post_id } => {
-            jobs::outbound_post_delivery::handle(post_id, ctx).await
+        Job::ApDelivery { actor_id, kind } => {
+            jobs::ap_delivery::handle(actor_id, kind, ctx).await
         }
         Job::InboundActivityProcess { raw_activity } => {
             jobs::inbound_activity_process::handle(raw_activity, ctx).await
@@ -227,7 +260,7 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
 fn job_name(job: &Job) -> &'static str {
     match job {
         Job::ActorHistorySync { .. } => "ActorHistorySync",
-        Job::OutboundPostDelivery { .. } => "OutboundPostDelivery",
+        Job::ApDelivery { .. } => "ApDelivery",
         Job::InboundActivityProcess { .. } => "InboundActivityProcess",
         Job::ActorMetadataResolve { .. } => "ActorMetadataResolve",
         Job::AtpRepositoryPublish { .. } => "AtpRepositoryPublish",
@@ -243,7 +276,7 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             base_delay_ms: 1000, // 1s → 2s → 4s
             max_delay_ms: 30_000,
         },
-        Job::OutboundPostDelivery { .. } => RetryConfig {
+        Job::ApDelivery { .. } => RetryConfig {
             max_attempts: 10,
             base_delay_ms: 5000, // 5s → 10s → ... → max
             max_delay_ms: 3_600_000, // 最大1時間
@@ -270,5 +303,43 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             base_delay_ms: 3000,
             max_delay_ms: 3000,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_grows_exponentially() {
+        let config = RetryConfig { max_attempts: 10, base_delay_ms: 1000, max_delay_ms: 30_000 };
+        assert_eq!(backoff_delay_ms(&config, 0), 1000);
+        assert_eq!(backoff_delay_ms(&config, 1), 2000);
+        assert_eq!(backoff_delay_ms(&config, 2), 4000);
+        assert_eq!(backoff_delay_ms(&config, 3), 8000);
+    }
+
+    #[test]
+    fn backoff_is_clamped_to_max_delay() {
+        let config = RetryConfig { max_attempts: 10, base_delay_ms: 5000, max_delay_ms: 60_000 };
+        assert_eq!(backoff_delay_ms(&config, 10), 60_000);
+    }
+
+    #[test]
+    fn backoff_with_equal_base_and_max_is_fixed_interval() {
+        // BskyVideoPoll の「固定3秒間隔」設定が成立していること
+        let config = RetryConfig { max_attempts: 10, base_delay_ms: 3000, max_delay_ms: 3000 };
+        for attempt in 0..10 {
+            assert_eq!(backoff_delay_ms(&config, attempt), 3000);
+        }
+    }
+
+    #[test]
+    fn backoff_does_not_overflow_on_huge_attempt() {
+        let config = RetryConfig { max_attempts: 100, base_delay_ms: 1000, max_delay_ms: 60_000 };
+        // 2^attempt が u64 を溢れる領域でもパニックせず max にクランプされる
+        assert_eq!(backoff_delay_ms(&config, 63), 60_000);
+        assert_eq!(backoff_delay_ms(&config, 64), 60_000);
+        assert_eq!(backoff_delay_ms(&config, 200), 60_000);
     }
 }

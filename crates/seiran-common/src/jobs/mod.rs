@@ -6,7 +6,7 @@
 
 pub mod actor_history_sync;
 pub mod actor_metadata_resolve;
+pub mod ap_delivery;
 pub mod atp_repository_publish;
 pub mod bsky_video_poll;
 pub mod inbound_activity_process;
-pub mod outbound_post_delivery;

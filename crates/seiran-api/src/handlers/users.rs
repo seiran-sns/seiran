@@ -1,8 +1,8 @@
 use axum::{extract::{Query, State}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}, Json};
 use serde::{Deserialize, Serialize};
 
-use seiran_common::ap::deliver_update_actor;
 use seiran_common::atp::fetch_bsky_profile;
+use seiran_common::ApDeliveryKind;
 use seiran_common::repository::Actor;
 
 use crate::error::ApiError;
@@ -65,16 +65,8 @@ async fn fetch_bsky_profile_from_appview(
             db_actor.id, &bsky.did, &bsky.handle,
             bsky.display_name.as_deref(), bsky.avatar.as_deref(), now,
         ).await;
-        // バックグラウンドで過去ポストを取り込む
-        {
-            let db = state.db.clone();
-            let http = state.http_client.clone();
-            let did_clone = bsky.did.clone();
-            let actor_id = db_actor.id;
-            tokio::spawn(async move {
-                crate::handlers::follows::backfill_bsky_posts(&db, &http, &did_clone, actor_id).await;
-            });
-        }
+        // バックグラウンドで過去ポストを取り込む（Worker の ActorHistorySync ジョブ）
+        state.enqueue_actor_history_sync(None, Some(bsky.did.clone())).await;
         return build_profile_response(db_actor, my_user_id, state).await;
     }
 
@@ -459,23 +451,9 @@ pub async fn update_profile(
         eprintln!("[update_profile] ATP プロフィール再コミット失敗（DB更新は完了済み）: {}", e);
     }
 
-    // AP 側: 既にフォロー中のリモートインスタンスへ Update(Person) を即時プッシュ配信し、
-    // 相手側にキャッシュ済みの Actor 情報をすぐ更新させる。レスポンスはブロックしない。
-    {
-        let db = state.db.clone();
-        let local_domain = state.local_domain.clone();
-        let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
-        let ap_public_key_pem = state.secrets.ap_public_key_pem.clone().unwrap_or_default();
-        let ap_client = state.ap_client.clone();
-        let actor_id = current.id;
-        tokio::spawn(async move {
-            if let Err(e) = deliver_update_actor(
-                &ap_client, &db, actor_id, &local_domain, &ap_private_key_pem, &ap_public_key_pem,
-            ).await {
-                eprintln!("[update_profile] AP Update(Actor) 配送エラー: {}", e);
-            }
-        });
-    }
+    // AP 側: 既にフォロー中のリモートインスタンスへ Update(Person) をプッシュ配信し、
+    // 相手側にキャッシュ済みの Actor 情報をすぐ更新させる（Worker の ApDelivery ジョブ）。
+    state.enqueue_ap_delivery(current.id, ApDeliveryKind::UpdateActor).await;
 
     Json(UpdateProfileResponse {
         username: current.username,

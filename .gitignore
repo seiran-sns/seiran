@@ -18,3 +18,7 @@ frontend/dist/
 .idea/
 *.swp
 *.swo
+
+# 開発時のサーバー実行ログ
+*.log
+nohup.out

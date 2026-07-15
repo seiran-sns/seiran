@@ -579,7 +579,7 @@ crates/seiran-common/src/repository/
 | ジョブ名 | 優先度定数 | リトライ上限 | リトライ基本待機時間 | 説明 |
 |---|---|---|---|---|
 | `AtpRepositoryPublish` | `100` (CRITICAL) | 5回 | 500ms | ATP リポジトリ整合性を保つための超高優先コミット配信 |
-| `OutboundPostDelivery` | `50` (HIGH) | 10回 | 5,000ms (最大1時間) | タイムリーな連合配送（指数バックオフによる最大10回追従） |
+| `ApDelivery` | `50` (HIGH) | 10回 | 5,000ms (最大1時間) | AP アクティビティ（Create/Announce/Undo/Update/Delete/リアクション）の連合配送。API ハンドラは `ApDeliveryKind` を積むだけで、宛先解決・署名 POST・リトライは Worker が担う |
 | `InboundActivityProcess`| `10` (NORMAL) | 3回 | 2,000ms | 受信したアクティビティの解析・DB保存 |
 | `ActorMetadataResolve` | `10` (NORMAL) | 3回 | 1,000ms | リモートアクターのWebfinger解決、アバター取得等 |
 | `ActorHistorySync` | `1` (LOW) | 3回 | 1,000ms | 新規フォロー時の過去ログフェッチ |
