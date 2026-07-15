@@ -250,6 +250,13 @@ pub async fn fetch_single_bsky_post(
     }))
 }
 
+/// `app.bsky.actor.profile` の `pinnedPost`（`com.atproto.repo.strongRef`）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct BskyPinnedPostRef {
+    pub uri: String,
+    pub cid: String,
+}
+
 /// `app.bsky.actor.getProfile` レスポンスから必要なフィールドのみ取り出したもの。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -259,6 +266,46 @@ pub struct BskyProfile {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub avatar: Option<String>,
+    /// ピン留め投稿（#61）。Bsky はピン留めを1件までしかサポートしない。
+    #[serde(default)]
+    pub pinned_post: Option<BskyPinnedPostRef>,
+}
+
+/// Bsky ポストを `posts` テーブルへ反映し、ローカル post_id を返す（既存なら既存の id、
+/// 無ければ新規挿入）。リモートアクターのピン留め（`pinnedPost`）同期専用（#61）。
+pub async fn upsert_bsky_post(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    post: &BskyPost,
+) -> Result<i64, sqlx::Error> {
+    if let Some(id) = sqlx::query_scalar::<_, i64>("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
+        .bind(&post.uri)
+        .fetch_optional(pool)
+        .await?
+    {
+        return Ok(id);
+    }
+
+    let post_id = crate::generate_snowflake_id(post.created_at);
+    sqlx::query(
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (at_uri) DO NOTHING",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .bind(&post.text)
+    .bind(&post.uri)
+    .bind(&post.cid)
+    .bind(post.created_at)
+    .execute(pool)
+    .await?;
+
+    // ON CONFLICT で INSERT がスキップされた場合（並行同期の競合）に備え、確定した id を引き直す。
+    sqlx::query_scalar::<_, i64>("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
+        .bind(&post.uri)
+        .fetch_one(pool)
+        .await
 }
 
 /// AppView `app.bsky.actor.getProfile` でプロフィールを取得する。

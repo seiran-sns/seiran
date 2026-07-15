@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, ApiError, Note, ReactionSummary } from "../../api/client";
+import { api, ApiError, getErrorMessage, Note, ReactionSummary } from "../../api/client";
 import { acct, displayName, formatDate, profilePath, protocolBadge } from "../../lib/format";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
@@ -88,6 +88,9 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
   const [unreposting, setUnreposting] = useState(false);
   const [reposted, setReposted] = useState(note.repostedByMe ?? false);
   const [reactions, setReactions] = useState<ReactionSummary[]>(note.reactions ?? []);
+  const isSelf = note.user.actorType === "local" && !!user && user.username === note.user.username;
+  const [pinned, setPinned] = useState(note.pinnedByMe ?? false);
+  const [pinning, setPinning] = useState(false);
   // 1投稿につき1ユーザー1リアクションまでのため、切り替え中は他の絵文字操作も
   // まとめてロックする（個別絵文字ごとの pending 管理はしない）。
   const [reactionPending, setReactionPending] = useState(false);
@@ -146,6 +149,25 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
       setReactions(prevReactions);
     } finally {
       setReactionPending(false);
+    }
+  }
+
+  async function handleTogglePin(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (pinning) return;
+    setPinning(true);
+    try {
+      if (pinned) {
+        await api.notes.unpin(note.id);
+        setPinned(false);
+      } else {
+        await api.notes.pin(note.id);
+        setPinned(true);
+      }
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setPinning(false);
     }
   }
 
@@ -272,6 +294,16 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
           🔁 {reposted ? "リポスト済み" : (reposting || unreposting) ? "..." : "リポスト"}
         </button>
         <ReactionPicker onPick={toggleReaction} disabled={reactionPending} />
+        {isSelf && (
+          <button
+            className={`${styles.actionBtn} ${pinned ? styles.actionBtnActive : ""}`}
+            onClick={handleTogglePin}
+            disabled={pinning}
+            title={pinned ? "ピン留め解除" : "ピン留め"}
+          >
+            📌 {pinned ? "ピン留め済み" : pinning ? "..." : "ピン留め"}
+          </button>
+        )}
       </div>
     </>
   );

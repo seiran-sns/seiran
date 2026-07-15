@@ -122,6 +122,7 @@ async fn create_repost(
         renote: None,
         reposted_by_me: None,
         emojis: HashMap::new(),
+        pinned_by_me: None,
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
     embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
@@ -221,6 +222,7 @@ async fn create_regular_post(
         renote: None,
         reposted_by_me: None,
         emojis: HashMap::new(),
+        pinned_by_me: None,
     };
 
     broadcast_new_note(state, actor_id, &note_resp).await;
@@ -792,4 +794,138 @@ pub async fn delete_reaction(
         "reactions": rmap.get(&note_id).cloned().unwrap_or_default(),
     }))
     .into_response()
+}
+
+/// POST /api/notes/:id/pin
+/// 自分の投稿をピン留めする（#61）。5件を超えると最古のピン留めが自動的に外れる。
+/// Fedi 向けは featured collection（都度動的生成、`seiran-federation-inbox`）で、
+/// Bsky 向けは最新1件のみ `app.bsky.actor.profile` の `pinnedPost` として反映する。
+pub async fn pin_note(
+    Path(note_id_str): Path<String>,
+    me: AuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    let post = match state.posts.find_by_id(note_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
+    };
+    if post.actor_id != me.actor_id {
+        return ApiError::Forbidden("NOT_YOUR_POST").into_response();
+    }
+
+    if let Err(e) = state.pinned_posts.pin(me.actor_id, note_id).await {
+        return ApiError::Internal(format!("pinned_posts INSERT 失敗: {}", e)).into_response();
+    }
+
+    sync_bsky_pinned_post(&state, me.actor_id).await;
+
+    respond_with_pinned_ids(&state, me.actor_id).await
+}
+
+/// DELETE /api/notes/:id/pin
+/// 自分の投稿のピン留めを解除する（#61）。
+pub async fn unpin_note(
+    Path(note_id_str): Path<String>,
+    me: AuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    match state.pinned_posts.unpin(me.actor_id, note_id).await {
+        Ok(true) => {}
+        Ok(false) => return ApiError::NotFound("PIN_NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("pinned_posts DELETE 失敗: {}", e)).into_response(),
+    }
+
+    sync_bsky_pinned_post(&state, me.actor_id).await;
+
+    respond_with_pinned_ids(&state, me.actor_id).await
+}
+
+async fn respond_with_pinned_ids(state: &AppState, actor_id: i64) -> Response {
+    match state.pinned_posts.list_by_actor(actor_id).await {
+        Ok(ids) => Json(serde_json::json!({
+            "ok": true,
+            "pinnedPostIds": ids.into_iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => ApiError::Internal(format!("pinned_posts SELECT 失敗: {}", e)).into_response(),
+    }
+}
+
+/// 現在のピン留め状態から、Bsky プロフィールへ反映すべき最新1件の strongRef（uri, cid）を解決する。
+/// ピン留めが無い、または最新のピン留め投稿が Bsky に存在しない（`at_uri` が無い）場合は `None`。
+pub async fn resolve_bsky_pinned_post(state: &AppState, actor_id: i64) -> Option<(String, String)> {
+    let latest_id = match state.pinned_posts.list_by_actor(actor_id).await {
+        Ok(ids) => ids.into_iter().next()?,
+        Err(e) => {
+            tracing::error!("[pinned] list_by_actor 失敗: {}", e);
+            return None;
+        }
+    };
+    match state.posts.find_delivery_meta(latest_id).await {
+        Ok(Some(meta)) => match (meta.at_uri, meta.at_cid) {
+            (Some(uri), Some(cid)) => Some((uri, cid)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// pin/unpin 後に Bsky プロフィール（`app.bsky.actor.profile`）を再コミットする。
+/// 現在の display_name/bio/avatar は維持したまま `pinnedPost` だけを更新するため、
+/// 都度 DB から現在値を読み直す。失敗してもログのみ（pin/unpin 自体は成功済みのため
+/// 呼び出し元へは伝播しない）。
+async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
+    let pinned_post = resolve_bsky_pinned_post(state, actor_id).await;
+    let (display_name, bio, avatar_media) = match fetch_atp_profile_material(state, actor_id).await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("[pinned] プロフィール材料取得失敗: {}", e);
+            return;
+        }
+    };
+    if let Err(e) = state
+        .atp_service
+        .commit_profile(actor_id, &display_name, bio.as_deref(), avatar_media, pinned_post, chrono::Utc::now())
+        .await
+    {
+        tracing::error!("[pinned] ATP プロフィール再コミット失敗: {}", e);
+    }
+}
+
+/// ATP プロフィール再コミットに必要な現在の display_name/bio/avatar blob 情報を取得する。
+async fn fetch_atp_profile_material(
+    state: &AppState,
+    actor_id: i64,
+) -> Result<(String, Option<String>, Option<(String, String, i64)>), sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT a.username, a.display_name, a.bio, mf.sha256, mf.mime_type, mf.size
+         FROM actors a
+         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+         WHERE a.id = $1",
+    )
+    .bind(actor_id)
+    .fetch_one(&state.db)
+    .await?;
+    let username: String = row.try_get("username")?;
+    let display_name: Option<String> = row.try_get("display_name")?;
+    let bio: Option<String> = row.try_get("bio")?;
+    let sha256: Option<String> = row.try_get("sha256")?;
+    let mime_type: Option<String> = row.try_get("mime_type")?;
+    let size: Option<i64> = row.try_get("size")?;
+    let avatar_media = match (sha256, mime_type, size) {
+        (Some(s), Some(m), Some(sz)) => Some((s, m, sz)),
+        _ => None,
+    };
+    Ok((display_name.unwrap_or(username), bio, avatar_media))
 }

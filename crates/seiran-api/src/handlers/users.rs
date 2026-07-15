@@ -31,6 +31,9 @@ pub struct ProfileResponse {
     pub follow_status: String, // "not_following" | "pending" | "accepted"
     /// 最近の投稿。タイムラインと同じ NoteCard で描画するため NoteResponse で返す（#43）。
     pub recent_posts: Vec<NoteResponse>,
+    /// ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
+    /// Fedi featured collection / Bsky pinnedPost の同期結果。
+    pub pinned_posts: Vec<NoteResponse>,
     // 7.3 拡張メタデータ（ブリッジ介入・魂の結合判定）
     /// このアクターがブリッジ（影武者）の場合、本尊アクターのハンドル（`user@domain`）。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,6 +70,7 @@ async fn fetch_bsky_profile_from_appview(
         ).await;
         // バックグラウンドで過去ポストを取り込む（Worker の ActorHistorySync ジョブ）
         state.enqueue_actor_history_sync(None, Some(bsky.did.clone())).await;
+        sync_remote_bsky_pinned(state, db_actor.id, bsky.pinned_post.as_ref()).await;
         return build_profile_response(db_actor, my_user_id, state).await;
     }
 
@@ -81,6 +85,7 @@ async fn fetch_bsky_profile_from_appview(
         avatar_url: bsky.avatar,
         follow_status: "not_following".to_string(),
         recent_posts: vec![],
+        pinned_posts: vec![],
         bridge_real_handle: None,
         bridge_protocol: None,
         is_paired: false,
@@ -150,6 +155,64 @@ pub async fn user_profile(
     }
 }
 
+/// リモート Bsky アクターの `pinnedPost`（ピン留め投稿, #61）を取得し、`pinned_posts`
+/// テーブルへ同期する。Bsky はピン留め1件までのため常に0〜1件。ベストエフォート
+/// （取得・保存に失敗してもログのみ、プロフィール表示自体は継続する）。
+async fn sync_remote_bsky_pinned(
+    state: &AppState,
+    actor_id: i64,
+    pinned_post: Option<&seiran_common::atp::BskyPinnedPostRef>,
+) {
+    let post_ids: Vec<i64> = match pinned_post {
+        Some(pin) => match seiran_common::atp::fetch_single_bsky_post(&state.http_client, &pin.uri).await {
+            Ok(Some(post)) => match seiran_common::atp::upsert_bsky_post(&state.db, actor_id, &post).await {
+                Ok(id) => vec![id],
+                Err(e) => {
+                    tracing::warn!("[profile] pinnedPost 保存失敗（スキップ）: {}", e);
+                    vec![]
+                }
+            },
+            Ok(None) => vec![],
+            Err(e) => {
+                tracing::warn!("[profile] pinnedPost 取得失敗（スキップ）: {}", e);
+                vec![]
+            }
+        },
+        None => vec![],
+    };
+
+    if let Err(e) = state.pinned_posts.sync_from_remote(actor_id, &post_ids, chrono::Utc::now()).await {
+        tracing::warn!("[profile] pinned_posts 同期失敗: {}", e);
+    }
+}
+
+/// リモート Fedi アクターの featured collection（ピン留め投稿, #61）を取得し、
+/// `pinned_posts` テーブルへ同期する。ベストエフォート（取得・保存に失敗してもログのみ、
+/// プロフィール表示自体は継続する）。
+async fn sync_remote_fedi_pinned(state: &AppState, actor: &Actor) {
+    let Some(ap_uri) = actor.ap_uri.as_deref() else { return };
+
+    let notes = match seiran_common::ap::fetch_ap_featured(&state.ap_client, ap_uri).await {
+        Ok(notes) => notes,
+        Err(e) => {
+            tracing::warn!("[profile] featured collection 取得失敗（スキップ）: {}", e);
+            return;
+        }
+    };
+
+    let mut post_ids = Vec::with_capacity(notes.len());
+    for note in &notes {
+        match seiran_common::ap::upsert_ap_note(&state.db, actor.id, note).await {
+            Ok(id) => post_ids.push(id),
+            Err(e) => tracing::warn!("[profile] featured Note 保存失敗（スキップ）: {}", e),
+        }
+    }
+
+    if let Err(e) = state.pinned_posts.sync_from_remote(actor.id, &post_ids, chrono::Utc::now()).await {
+        tracing::warn!("[profile] pinned_posts 同期失敗: {}", e);
+    }
+}
+
 async fn build_profile_response(
     actor: Actor,
     my_user_id: Option<i64>,
@@ -184,6 +247,13 @@ async fn build_profile_response(
         None => "not_following".to_string(),
     };
 
+    // リモート Fedi アクターの場合、featured collection（ピン留め投稿, #61）を都度同期する。
+    // ベストエフォート（失敗してもプロフィール表示自体は継続する）。DB 未登録の未知アクター
+    // （`fetch_remote_profile`）はここを通らないため対象外。
+    if actor.actor_type == "fedi" && actor.domain != state.local_domain {
+        sync_remote_fedi_pinned(state, &actor).await;
+    }
+
     // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
     // アクター情報・添付・リアクションを含む NoteResponse で返す（#43）。
     let post_rows = match state.posts.timeline_by_actor(actor_id, 20).await {
@@ -196,7 +266,7 @@ async fn build_profile_response(
     let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
     let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
-    let recent_posts: Vec<NoteResponse> = post_rows
+    let mut recent_posts: Vec<NoteResponse> = post_rows
         .into_iter()
         .map(|p| {
             let id = p.id;
@@ -205,6 +275,41 @@ async fn build_profile_response(
             nr
         })
         .collect();
+
+    // ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
+    // Fedi featured collection / Bsky pinnedPost 同期結果（`sync_remote_pinned_posts` 参照）。
+    let pinned_rows = match state.pinned_posts.list_timeline_by_actor(actor_id).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[profile] ピン留め投稿取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+    let pinned_ids: Vec<i64> = pinned_rows.iter().map(|p| p.id).collect();
+    let mut pinned_att_map = fetch_attachments_map(&state.db, &pinned_ids).await;
+    let pinned_rmap = fetch_reactions_map(&state.db, &pinned_ids, my_actor_id).await;
+    let mut pinned_posts: Vec<NoteResponse> = pinned_rows
+        .into_iter()
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(p, pinned_att_map.remove(&id).unwrap_or_default());
+            nr.reactions = pinned_rmap.get(&id).cloned().unwrap_or_default();
+            nr
+        })
+        .collect();
+
+    // 自分自身のプロフィールを見ている場合、各投稿の pinned_by_me を設定する
+    // （ピン留めボタンの現在状態表示に使う）。
+    if my_actor_id == Some(actor_id) {
+        let pinned_id_set: std::collections::HashSet<i64> = pinned_ids.iter().copied().collect();
+        for nr in recent_posts.iter_mut() {
+            let is_pinned = nr.id.parse::<i64>().map(|id| pinned_id_set.contains(&id)).unwrap_or(false);
+            nr.pinned_by_me = Some(is_pinned);
+        }
+        for nr in pinned_posts.iter_mut() {
+            nr.pinned_by_me = Some(true);
+        }
+    }
 
     // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
     let avatar_url: Option<String> = sqlx::query_scalar(
@@ -250,6 +355,7 @@ async fn build_profile_response(
         avatar_url,
         follow_status,
         recent_posts,
+        pinned_posts,
         bridge_real_handle,
         bridge_protocol,
         is_paired: actor.seiran_pair_actor_id.is_some(),
@@ -286,22 +392,47 @@ async fn fetch_remote_profile(
         }
     };
 
-    let _ = my_user_id; // リモートの場合フォロー状態は常に not_following（DB 未登録）
+    // ピン留め（featured collection, #61）を初回アクセス時から表示するため、
+    // 未認知アクターでもこの時点で DB へ upsert してから build_profile_response に委譲する
+    // （マイケルの要望・2026-07-15: 「初回アクセス時も同期するよう拡張する」）。
+    let ap_inbox = ap_actor.inbox.clone().unwrap_or_default();
+    let resolved_username = ap_actor
+        .preferred_username
+        .clone()
+        .unwrap_or_else(|| username.to_string());
+    let display_name = ap_actor.name.clone().unwrap_or_else(|| resolved_username.clone());
+    let avatar_url = ap_actor.avatar_url();
+    let emoji_map = ap_actor.emoji_map();
+    let now = chrono::Utc::now();
+    let new_actor_id = seiran_common::generate_snowflake_id(now);
 
-    let ap_avatar_url = ap_actor.avatar_url();
+    match state
+        .actors
+        .upsert_remote_fedi(new_actor_id, &actor_uri, &ap_inbox, &resolved_username, domain, &display_name, avatar_url.as_deref(), now, &emoji_map)
+        .await
+    {
+        Ok(actor_id) => match state.actors.find_by_id(actor_id).await {
+            Ok(Some(actor)) => return build_profile_response(actor, my_user_id, state).await.into_response(),
+            Ok(None) => tracing::error!("[profile] upsert 直後のアクター取得に失敗（存在しない）: actor_id={}", actor_id),
+            Err(e) => tracing::error!("[profile] upsert 直後のアクター取得エラー: {}", e),
+        },
+        Err(e) => tracing::error!("[profile] リモートアクター upsert 失敗（フォールバックで非永続表示）: {}", e),
+    }
+
+    // upsert に失敗した場合のフォールバック（従来通りの非永続表示、ピン留めは出せない）。
+    let _ = my_user_id;
     Json(ProfileResponse {
-        username: ap_actor
-            .preferred_username
-            .unwrap_or_else(|| username.to_string()),
+        username: resolved_username,
         domain: domain.to_string(),
-        display_name: ap_actor.name,
+        display_name: Some(display_name),
         actor_type: "fedi".to_string(),
         ap_uri: Some(actor_uri),
         at_did: None,
         bio: ap_actor.summary,
-        avatar_url: ap_avatar_url,
+        avatar_url,
         follow_status: "not_following".to_string(),
         recent_posts: vec![],
+        pinned_posts: vec![],
         bridge_real_handle: None,
         bridge_protocol: None,
         is_paired: false,
@@ -443,9 +574,10 @@ pub async fn update_profile(
         .flatten(),
         None => None,
     };
+    let pinned_post = crate::handlers::notes::resolve_bsky_pinned_post(&state, current.id).await;
     if let Err(e) = state
         .atp_service
-        .commit_profile(current.id, &atp_display_name, new_bio.as_deref(), avatar_media, chrono::Utc::now())
+        .commit_profile(current.id, &atp_display_name, new_bio.as_deref(), avatar_media, pinned_post, chrono::Utc::now())
         .await
     {
         tracing::error!("[update_profile] ATP プロフィール再コミット失敗（DB更新は完了済み）: {}", e);

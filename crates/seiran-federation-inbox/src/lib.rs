@@ -22,6 +22,7 @@ use sqlx::PgPool;
 
 use handlers::{
     actor::actor_handler,
+    featured::featured_handler,
     inbox::inbox_handler,
     nodeinfo::{nodeinfo_discovery_handler, nodeinfo_handler},
     outbox::outbox_handler,
@@ -87,5 +88,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/inbox", post(inbox_handler))
         .route("/users/:username", get(actor_handler))
         .route("/users/:username/outbox", get(outbox_handler))
+        .route("/users/:username/collections/featured", get(featured_handler))
         .with_state(state)
 }

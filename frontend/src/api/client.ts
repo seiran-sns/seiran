@@ -205,6 +205,8 @@ export interface Note {
   repostedByMe?: boolean;
   /** 本文・投稿者表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信のみ）。 */
   emojis?: Record<string, string>;
+  /** 認証ユーザー自身の投稿がピン留め済みかどうか（#61）。自分のプロフィール表示時のみ設定。 */
+  pinnedByMe?: boolean;
 }
 
 export interface ReactionSummary {
@@ -233,6 +235,9 @@ export interface UserProfile {
   follow_status: "not_following" | "pending" | "accepted";
   /** 最近の投稿。タイムラインと同じ NoteCard で描画する（#43）。 */
   recent_posts: Note[];
+  /** ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
+   * Fedi featured collection / Bsky pinnedPost の同期結果。 */
+  pinned_posts: Note[];
   // 7.3 ブリッジ介入・魂の結合メタデータ
   bridge_real_handle?: string;
   bridge_protocol?: string; // "fedi" | "bsky"
@@ -279,6 +284,8 @@ interface RawNote {
   repostedByMe?: boolean;
   reposted_by_me?: boolean;
   emojis?: Record<string, string>;
+  pinnedByMe?: boolean;
+  pinned_by_me?: boolean;
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -304,6 +311,7 @@ function normalizeNote(r: RawNote): Note {
     renote: r.renote ? normalizeNote(r.renote) : undefined,
     repostedByMe: r.repostedByMe ?? r.reposted_by_me,
     emojis: r.emojis,
+    pinnedByMe: r.pinnedByMe ?? r.pinned_by_me,
   };
 }
 
@@ -501,6 +509,12 @@ export const api = {
         `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}`
       );
     },
+    pin(noteId: string) {
+      return request<{ ok: boolean; pinnedPostIds: string[] }>("POST", `/notes/${encodeURIComponent(noteId)}/pin`);
+    },
+    unpin(noteId: string) {
+      return request<{ ok: boolean; pinnedPostIds: string[] }>("DELETE", `/notes/${encodeURIComponent(noteId)}/pin`);
+    },
     async search(params: { q: string; limit?: number; session_id?: string }, signal?: AbortSignal) {
       const qs = new URLSearchParams();
       qs.set("q", params.q);
@@ -530,12 +544,15 @@ export const api = {
 
   users: {
     async profile(q: string) {
-      const raw = await request<Omit<UserProfile, "recent_posts"> & { recent_posts?: RawNote[] }>(
-        "GET",
-        `/users/profile?q=${encodeURIComponent(q)}`
-      );
-      // recent_posts はタイムラインと同じ NoteCard で描画するため Note に正規化（#43）。
-      return { ...raw, recent_posts: (raw.recent_posts ?? []).map(normalizeNote) } as UserProfile;
+      const raw = await request<
+        Omit<UserProfile, "recent_posts" | "pinned_posts"> & { recent_posts?: RawNote[]; pinned_posts?: RawNote[] }
+      >("GET", `/users/profile?q=${encodeURIComponent(q)}`);
+      // recent_posts / pinned_posts はタイムラインと同じ NoteCard で描画するため Note に正規化（#43, #61）。
+      return {
+        ...raw,
+        recent_posts: (raw.recent_posts ?? []).map(normalizeNote),
+        pinned_posts: (raw.pinned_posts ?? []).map(normalizeNote),
+      } as UserProfile;
     },
     updateProfile(patch: {
       display_name?: string;

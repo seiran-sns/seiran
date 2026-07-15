@@ -79,6 +79,9 @@ pub struct NoteResponse {
     /// このマップで `:shortcode:` を画像に置換する。空なら省略。
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub emojis: HashMap<String, String>,
+    /// 認証ユーザー自身の投稿がピン留め済みかどうか（#61）。自分のプロフィール表示時のみ設定。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_by_me: Option<bool>,
 }
 
 /// `serde_json::Value`（JSONB由来のオブジェクト、`None`/非オブジェクトなら空）を
@@ -131,6 +134,7 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         renote: None,
         reposted_by_me: None,
         emojis,
+        pinned_by_me: None,
     }
 }
 

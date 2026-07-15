@@ -526,6 +526,49 @@ CREATE INDEX idx_notifications_recipient_unread ON notifications (recipient_acto
 - ローカル同士のフォローは即時 `accepted` になり AP `Follow`/`Accept` を経由しないため、
   現状 `follow`/`followRequestAccepted` 通知はリモートからのフォローのみで発生する。
 
+### 1.13 `pinned_posts` (ピン留めポストテーブル、#61)
+
+ローカルユーザーが自分のポストを最大5件までピン留めできる機能（マイケル仕様: 5件を
+超えると最古のピン留めから自動的に外れる）。加えて、Fedi/Bsky の**リモートアクター**の
+プロフィールをローカルで閲覧した際に、そのアクター自身が設定しているピン留め投稿を
+同期・表示するためのキャッシュストアとしても同じテーブルを使う。
+
+```sql
+CREATE TABLE pinned_posts (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    actor_id BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+    post_id BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    pinned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (actor_id, post_id)
+);
+
+CREATE INDEX idx_pinned_posts_actor ON pinned_posts (actor_id, pinned_at DESC);
+```
+
+- **ローカルユーザーの pin/unpin**: `POST`/`DELETE /api/notes/:id/pin`
+  （`handlers::notes::pin_note`/`unpin_note`）が `PinnedPostsRepository::pin`/`unpin` を呼ぶ。
+  `pin` は INSERT 後に `actor_id` ごと `pinned_at DESC OFFSET 5` で6件目以降を `DELETE ...
+  RETURNING post_id` し、追い出された `post_id` を返す（5件超過時の自動追い出し、DBトリガー
+  ではなくアプリ層で実施）。自分の投稿以外は403（`post.actor_id != me.actor_id`）。
+- **リモートアクターの同期**: `PinnedPostsRepository::sync_from_remote(actor_id, post_ids,
+  now)` が、渡された `post_ids`（同期元での並び順、先頭ほど優先）で該当 `actor_id` の行を
+  丸ごと洗い替える（`post_ids` に無い既存行を DELETE → 無い分を INSERT、`pinned_at` は
+  並び順を保つよう `now` から順にずらして採番）。呼び出し元はプロフィール表示ハンドラ
+  （`build_profile_response`/`fetch_bsky_profile_from_appview`、詳細は Doc3 §10）。
+- **API 公開**: `ProfileResponse.pinned_posts`（`recent_posts` と同じ `NoteResponse` 形式）
+  として返す。自分自身のプロフィールを見ている場合、`recent_posts`/`pinned_posts` 双方の
+  各要素に `pinned_by_me` を付与する（ピン留めボタンの状態表示用、それ以外は省略）。
+- **Bsky 側の反映**: Bsky はピン留めが1件までのため、`pinned_posts` の先頭（`pinned_at`
+  最新）のみを `app.bsky.actor.profile` の `pinnedPost`（`com.atproto.repo.strongRef`）として
+  `AtpCommitService::commit_profile` に渡す。対象ポストが ATP 上に存在しない
+  （`at_uri`/`at_cid` が無い）場合は `pinnedPost` を送らない。
+- **Fedi 側の反映**: Actor ドキュメントの `featured` フィールド
+  （`https://{domain}/users/{username}/collections/featured`）が指す `OrderedCollection` を
+  `seiran-federation-inbox` が都度動的生成する（Note オブジェクトを `Create` でラップせず
+  直接列挙、最大5件のためページングなし）。Add/Remove Activity のフォロワーへの配送は
+  行わない（リモート側がプロフィール取得時に都度フェッチする経路で十分と判断、詳細は
+  Doc3 §10）。
+
 ---
 
 ## 2. データベース層での主要クエリ・ユースケース

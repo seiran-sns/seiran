@@ -24,6 +24,17 @@ export default function ProfilePage() {
   const [following, setFollowing] = useState(false);
   const [unfollowing, setUnfollowing] = useState(false);
   const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
+  // AppShell.module.css の右ペイン非表示ブレークポイント（1400px）と合わせる。
+  // 狭幅では右ペインが無いため、ピン留め・最新ポストの両方を中央ペインへ連続表示する（#61）。
+  const [isNarrow, setIsNarrow] = useState(false);
+
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 1400px)");
+    setIsNarrow(mql.matches);
+    const handler = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
 
   useEffect(() => {
     if (!q) return;
@@ -204,7 +215,16 @@ export default function ProfilePage() {
     </>
   );
 
-  const right = profile && (
+  // ピン留めポスト（#61）: プロフィールカード直下に表示。多すぎるピン留めが最新ポスト一覧の
+  // 邪魔をしないよう、最新ポストとは別セクションにする。
+  const pinnedSection = profile && profile.pinned_posts.length > 0 && (
+    <>
+      <div className={panel.rightHeader}>ピン留め</div>
+      {profile.pinned_posts.map((post) => <NoteCard key={post.id} note={post} />)}
+    </>
+  );
+
+  const recentSection = profile && (
     <>
       <div className={panel.rightHeader}>投稿</div>
       {profile.recent_posts.length === 0 ? (
@@ -215,9 +235,22 @@ export default function ProfilePage() {
     </>
   );
 
+  // 狭幅（スマホ等、右ペインが無い）では中央ペインにピン留め→最新ポストを連続表示する。
+  // 広幅では中央にピン留めのみ、右ペインに最新ポストを時系列表示する。
+  const right = !isNarrow ? recentSection : null;
+
   return (
     <>
-      <AppShell center={center} right={right} />
+      <AppShell
+        center={
+          <>
+            {center}
+            {pinnedSection}
+            {isNarrow && recentSection}
+          </>
+        }
+        right={right}
+      />
 
       <Modal
         open={bridgeModalOpen}

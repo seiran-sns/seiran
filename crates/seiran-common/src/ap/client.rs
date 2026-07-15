@@ -56,6 +56,10 @@ pub struct ApActor {
     pub icon: Option<serde_json::Value>,
     pub inbox: Option<String>,
     pub outbox: Option<String>,
+    /// ピン留め投稿の OrderedCollection URL（#61）。無い実装（Mastodon 以前や一部の
+    /// 軽量実装）もあるため `Option`。
+    #[serde(default)]
+    pub featured: Option<String>,
     #[serde(rename = "publicKey")]
     pub public_key: Option<PublicKeyInfo>,
     /// 表示名(`name`)・自己紹介(`summary`)中のカスタム絵文字タグ(`type:"Emoji"`)。

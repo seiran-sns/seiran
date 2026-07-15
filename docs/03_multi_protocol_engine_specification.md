@@ -853,7 +853,7 @@ profile:
 
 ### 11.3 AT Protocol `app.bsky.actor.profile` の再コミット
 
-`crates/seiran-api/src/handlers/users.rs` の `update_profile` はプロフィール更新後、`AtpService::commit_profile(actor_id, display_name, description, avatar_media, now)` を呼び出し、`app.bsky.actor.profile/self` レコードを再コミット（MST再構築・署名・`atp_repo_events` 記録・`subscribeRepos` への `#commit` フレーム配信）する。これにより Bsky Relay/AppView が更新を検知できる。
+`crates/seiran-api/src/handlers/users.rs` の `update_profile` はプロフィール更新後、`AtpService::commit_profile(actor_id, display_name, description, avatar_media, pinned_post, now)` を呼び出し、`app.bsky.actor.profile/self` レコードを再コミット（MST再構築・署名・`atp_repo_events` 記録・`subscribeRepos` への `#commit` フレーム配信）する。これにより Bsky Relay/AppView が更新を検知できる。`pinned_post`（`(uri, cid)`）はピン留め投稿への strongRef で、`update_profile` は編集時点の既存ピン留め状態（`resolve_bsky_pinned_post`）を引き直して渡し、編集操作でピン留めが消えないようにする。詳細は §13。
 
 - `commit_profile` は `atp_records` に既存の `self` レコードがあるかを見て `action`（`create`/`update`）を自動判定する。
 - **重要**: 同一 rkey（`self`）を2回目以降コミットする際、MST構築用のエントリロード（`load_atp_entries`）が返す既存エントリと新エントリでキーが重複しないよう、`commit_record_inner` は push 前に同一キーの古いエントリを `retain` で除去する。これを行わないと MST に重複キーが入り、AppView に拒否される不正な木になる。
@@ -936,3 +936,88 @@ P-256署名鍵（`at_signing_key_pem`）で自己署名して使う
 そうでなければ（`pending`のまま・`failed`・音声等）`app.bsky.embed.external`
 にフォールバックする。ポストAPI自体は`bsky_video_status`の完了を待たない
 （アップロード猶予30秒の間に完了していればラッキー、という設計）。
+
+## 13. ポストのピン留め（#61）
+
+ローカルユーザーは自分のポストを最大5件までピン留めでき、5件を超えると最古のもの
+から自動的に外れる。ピン留めは Fedi 向けプロフィール（AP Actor の `featured`
+collection）・Bsky 向けプロフィール（`app.bsky.actor.profile` の `pinnedPost`）の
+両方に反映する（送信）。加えて、Fedi/Bsky の**リモートアクター**のプロフィールを
+seiran で閲覧した際、そのアクター自身のピン留めを取り込んで表示する（受信）。DB
+設計は Doc1 §1.13 を参照。
+
+### 13.1 送信: Fedi featured collection
+
+- `crates/seiran-federation-inbox/src/handlers/actor.rs` の Actor ドキュメントに
+  `featured: "https://{domain}/users/{username}/collections/featured"` を含める。
+- `GET /users/:username/collections/featured`（`handlers::featured::featured_handler`）が
+  `pinned_posts` を `pinned_at DESC` で結合し、`OrderedCollection` を都度動的生成して返す
+  （`orderedItems` に Note オブジェクトを `Create` でラップせず直接列挙、最大5件のため
+  ページングなし）。Mastodon 等の実装はプロフィール取得時にこの URL を都度フェッチする
+  想定で、`Add`/`Remove` Activity のフォロワーへの配送は行わない（スコープ外、将来課題）。
+
+### 13.2 送信: Bsky `pinnedPost`
+
+- `app.bsky.actor.profile` レコード（`encode_bsky_actor_profile`,
+  `crates/seiran-common/src/atp/repo.rs`）に `pinnedPost`（`com.atproto.repo.strongRef` =
+  `{uri, cid}`）フィールドを追加。DAG-CBOR canonical 順は
+  `$type(5) < avatar(6) < createdAt(9) < pinnedPost(10) < description(11) < displayName(11)`
+  （キー長→同長は辞書順）。
+- `AtpCommitService::commit_profile` に `pinned_post: Option<(String, String)>` 引数を追加。
+  Bsky はピン留め1件までのため、`pinned_posts` テーブルの先頭（`pinned_at` 最新）のみを渡す。
+  対象ポストに `at_uri`/`at_cid` が無い（ATP 上に存在しない）場合は `None` を渡す。
+- `handlers::notes::pin_note`/`unpin_note` は pin/unpin のたびに
+  `handlers::notes::sync_bsky_pinned_post` を呼び、現在の display_name/bio/avatar を
+  DB から読み直した上で `commit_profile` を再コミットする（display_name 等は維持し
+  `pinnedPost` のみ更新するため）。
+
+### 13.3 受信: リモート Fedi アクターの featured 取り込み
+
+- `crates/seiran-common/src/ap/client.rs` の `ApActor` に `featured: Option<String>` を追加。
+- `crates/seiran-common/src/ap/outbox.rs` の `fetch_ap_featured` が `featured` URL の
+  `OrderedCollection` を取得し、`orderedItems` の各要素を `ApNote` にデコードする
+  （`type: "Note"` 直下・`type: "Create"` でラップの両方に対応、`extract_note_flexible`）。
+  取得・パース失敗時はベストエフォートで空配列（プロフィール表示自体は失敗させない）。
+- `upsert_ap_note` が各 `ApNote` を `posts` テーブルへ反映し（`ap_object_id` で重複排除、
+  `ActorHistorySync` の `save_ap_notes` と同じ INSERT パターン）、ローカル `post_id` を返す。
+- `crates/seiran-api/src/handlers/users.rs` の `sync_remote_fedi_pinned` が
+  `build_profile_response` 内で（対象が `actor_type == "fedi"` かつリモートの場合のみ）
+  上記フェッチ→取り込み→`pinned_posts.sync_from_remote` を同期的に実行する。
+- **DB 未登録の未知アクター（初回アクセス）でも同期する**（マイケルの要望・2026-07-15:
+  「初回アクセス時も同期するよう拡張する」）。`fetch_remote_profile`（WebFinger 解決経路）は
+  `ApClient::fetch_actor` で取得した `ApActor` を即座に `ActorRepository::upsert_remote_fedi`
+  でDBへ登録してから `build_profile_response` に委譲する（`jobs::inbound_activity_process`
+  の `upsert_remote_fedi_actor` と同じ upsert パターン）。これにより「一度も見たことがない
+  リモートFediアクター」でも初回表示からピン留め・`recent_posts` が反映される（以前は
+  `recent_posts`/`pinned_posts` とも空を返す非永続表示だった）。upsert 失敗時は従来通りの
+  非永続フォールバック表示。
+- **既知の不具合修正（本機能の実装中に発見）**: `upsert_ap_note` が保存する `body` は AP
+  Note の `content`（HTML、Mastodon 等は `<p>`/`<a>` 等でラップして送る）をそのまま使って
+  いたため、フロントでHTMLタグが素のまま表示される不具合があった。他の受信経路
+  （`handle_create_note`）と同じ `strip_html`（`jobs::inbound_activity_process`）を通す
+  よう修正。同じ問題は既存の `ActorHistorySync::save_ap_notes`（フォロー時の過去ログ
+  一括取り込み）にもあったため、合わせて修正した。
+
+### 13.4 受信: リモート Bsky アクターの `pinnedPost` 取り込み
+
+- `crates/seiran-common/src/atp/client.rs` の `BskyProfile` に
+  `pinned_post: Option<BskyPinnedPostRef>`（`{uri, cid}`）を追加。
+  `app.bsky.actor.getProfile` のレスポンスをそのままデコードする。
+- `pinned_post` があれば既存の `fetch_single_bsky_post`（`app.bsky.feed.getPosts`）で
+  本文を取得し、`upsert_bsky_post` が `posts` テーブルへ反映（`at_uri` で重複排除）して
+  ローカル `post_id` を返す。
+- `crates/seiran-api/src/handlers/users.rs` の `sync_remote_bsky_pinned` が
+  `fetch_bsky_profile_from_appview` の DB 登録済みアクター分岐から呼ばれ、
+  `pinned_posts.sync_from_remote` で0〜1件に同期する。DB 未登録（AppView 直接表示）の
+  場合は対象外（`recent_posts` も空のパスと同じ扱い）。
+
+### 13.5 API 公開・フロントエンド表示
+
+- `ProfileResponse.pinned_posts`（`NoteResponse[]`、`recent_posts` と同形式）として返す。
+  自分自身のプロフィールを見ている場合のみ、各 `NoteResponse` に `pinned_by_me` を付与する。
+- フロントエンドはプロフィール画面の中央ペイン（本人プロフィールカード直下）にピン留め
+  セクションを表示し、右ペインには従来通り最新ポストを時系列表示する（`ProfilePage.tsx`）。
+  右ペインが無い狭幅（`AppShell.module.css` の `max-width: 1400px` ブレークポイントと
+  同期した `matchMedia` 判定）では、中央ペインにピン留め→最新ポストの順で連続表示する。
+- `NoteCard.tsx` は投稿者が自分自身（`actorType === "local"` かつ `username` 一致）の場合
+  のみピン留めトグルボタンを表示し、`POST`/`DELETE /api/notes/:id/pin` を叩く。

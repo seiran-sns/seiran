@@ -8,6 +8,7 @@ pub mod atp;
 pub mod follow;
 pub mod media_file;
 pub mod notification;
+pub mod pinned_post;
 pub mod post;
 pub mod reaction;
 pub mod site_settings;
@@ -21,6 +22,7 @@ pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
 };
 pub use notification::{NotificationKind, NotificationRepository, NotificationRow, PgNotificationRepository};
+pub use pinned_post::{PgPinnedPostsRepository, PinnedPostsRepository, MAX_PINNED_POSTS};
 pub use post::{
     PgPostRepository, PostDeliveryMeta, PostRecord, PostRepository, PostSummary, RepostUndoInfo,
     TimelinePost,

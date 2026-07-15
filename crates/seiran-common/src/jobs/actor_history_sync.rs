@@ -10,6 +10,7 @@ use sqlx::Row;
 use crate::ap::outbox::{fetch_ap_history, ApNote};
 use crate::atp::client::{fetch_atp_history, BskyPost};
 use crate::generate_snowflake_id;
+use crate::jobs::inbound_activity_process::strip_html;
 use crate::queue::worker::JobContext;
 
 pub async fn handle(
@@ -99,7 +100,10 @@ async fn save_ap_notes(
             .unwrap_or_else(chrono::Utc::now);
 
         let post_id = generate_snowflake_id(created_at);
-        let body = note.content.clone().unwrap_or_default();
+        // AP Note の content は HTML（Mastodon 等は <p>/<a> 等でラップして送る）のため、
+        // 他の受信経路（handle_create_note）と同じく strip_html でプレーンテキスト化する
+        // （#61 のピン留め取り込み実装時に、この過去ログ同期経路が未対応だったことに気づいた既存不具合の修正）。
+        let body = strip_html(&note.content.clone().unwrap_or_default());
 
         sqlx::query(
             "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, created_at)

@@ -426,6 +426,24 @@ AP Note の形式:
 * **リポストボタン**: `NoteCard` の各ポストカードに 🔁 リポストボタンを追加。クリック時に `api.notes.create` へ `renote_id` を渡してローカルリポストを作成し、タイムラインにリアルタイム反映される（StreamHub 経由）。
 * **AP 受信リポスト（Announce）**: `seiran-federation-inbox` の inbox ハンドラが `Announce` アクティビティを受け取ると `handle_announce()` を呼び出し、元ポストを DB から検索して `repost_of_post_id` 付きのリポストレコードを挿入する。`Undo(Announce)` は対象レコードを論理削除（`deleted_at = NOW()`）する。
 
+### 2.11 ポストのピン留め（#61）
+
+ローカルユーザーは自分のポストを最大5件までピン留めでき、5件を超えると最古のものから
+自動的に外れる（`pinned_posts` テーブル、Doc1 §1.13）。ピン留めは Fedi 向けプロフィール
+（AP Actor の `featured` collection）・Bsky 向けプロフィール（`app.bsky.actor.profile` の
+`pinnedPost`、Bsky はピン留め1件までのため最新1件のみ共有）の双方に反映する。加えて、
+Fedi/Bsky の**リモートアクター**のプロフィールを閲覧した際は、そのアクター自身の
+ピン留めを取り込んで表示する（送信・受信いずれも詳細は Doc3 §13）。
+
+* **画面配置**: プロフィール画面の中央ペイン（本人プロフィールカード直下）にピン留め
+  セクションを配置し、右ペインには従来通り最新ポストを時系列表示する（`ProfileResponse`
+  に `recent_posts` とは別の `pinned_posts` を追加）。多すぎるピン留めが「最新ポストを
+  時系列で眺める」体験を妨げないための意図的な分離（右ペインが無い狭幅環境では中央ペイン
+  にピン留め→最新ポストの順で連続表示する、§2.8 のポストカード共通化と同じ `NoteCard` を
+  再利用）。
+* **API**: `POST`/`DELETE /api/notes/:id/pin` で自分の投稿のみピン留め/解除できる
+  （`post.actor_id != me.actor_id` は403）。
+
 ---
 
 ## 3. 統一ポストID 採番ルール

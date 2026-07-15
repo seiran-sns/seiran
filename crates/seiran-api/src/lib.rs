@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, FollowRepository, NotificationRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AtpReadRepository, FollowRepository, NotificationRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgNotificationRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -50,6 +50,8 @@ pub struct AppState {
     pub atp_repo: Arc<dyn AtpReadRepository>,
     /// リアクション（絵文字リアクション・いいね）リポジトリ。
     pub reactions: Arc<dyn ReactionRepository>,
+    /// ピン留めポスト（ローカルユーザーの pin/unpin 操作結果 + リモートアクターの同期結果の共通ストア）。
+    pub pinned_posts: Arc<dyn PinnedPostsRepository>,
     /// 通知（フォロー・リアクション等）の永続化リポジトリ。
     pub notifications: Arc<dyn NotificationRepository>,
     /// deliver_post_to_ap_followers（seiran-common）が &PgPool を要求するため保持。
@@ -167,6 +169,7 @@ pub async fn init_state(
     let follows: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
     let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
+    let pinned_posts: Arc<dyn PinnedPostsRepository> = Arc::new(PgPinnedPostsRepository::new(pool.clone()));
     let notifications: Arc<dyn NotificationRepository> = Arc::new(PgNotificationRepository::new(pool.clone()));
 
     AppState {
@@ -176,6 +179,7 @@ pub async fn init_state(
         follows,
         atp_repo,
         reactions,
+        pinned_posts,
         notifications,
         db: pool,
         local_auth,
@@ -267,6 +271,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/:id/repost", delete(handlers::notes::delete_repost))
         .route("/api/notes/:id/reactions", post(handlers::notes::create_reaction))
         .route("/api/notes/:id/reactions/:content", delete(handlers::notes::delete_reaction))
+        .route("/api/notes/:id/pin", post(handlers::notes::pin_note))
+        .route("/api/notes/:id/pin", delete(handlers::notes::unpin_note))
         .route("/api/notes/:id/context", get(handlers::notes::note_context))
         // ActivityPub Note エンドポイント（nginx が AP Accept ヘッダーのみをここへ転送）
         .route("/notes/:id", get(handlers::notes::get_note_ap))
