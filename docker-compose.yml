@@ -10,6 +10,12 @@ name: seiran
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 全バックエンドコンテナで共有するビルド・環境定義（同一イメージを役割違いで使う）
+#
+# REDIS_URL: この大規模構成は api / federation / worker が別コンテナのため、
+# ジョブキューをプロセス間で共有するには Redis が必須（未設定だと各コンテナが
+# 孤立した InMemoryJobQueue を持ち、他コンテナの Worker にジョブが届かない）。
+# モノリスモード（docker-compose.mono.yml）には Redis サービス自体が無い
+# （同一プロセス内で完結するため不要。`docs/`「キューバックエンド選択方針」参照）。
 x-seiran-backend: &seiran-backend
   build:
     context: .
@@ -19,10 +25,13 @@ x-seiran-backend: &seiran-backend
   env_file: .env
   environment:
     DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    REDIS_URL: redis://redis:6379
   volumes:
     - config-data:/app/config
   depends_on:
     db:
+      condition: service_healthy
+    redis:
       condition: service_healthy
   networks:
     - internal
@@ -47,6 +56,19 @@ services:
       interval: 5s
       retries: 20
 
+  # ─── Redis（split-role構成のジョブキュー共有用）───────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis-data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
   # ─── api ロール (REST API / 認証 / タイムライン / XRPC) ────────────────────
   api:
     <<: *seiran-backend
@@ -58,8 +80,7 @@ services:
     command: ["seiran-server", "--role", "federation"]
 
   # ─── worker ロール (バックグラウンドジョブ実行) ─────────────────────────────
-  # 注意: 現在 InMemoryJobQueue を使用。api / federation とキューを共有しないため
-  # Phase 8 (Redis 統合) までは独立した処理のみ実行する。
+  # Redis バックエンドで api / federation とキューを共有する（RedisJobQueue）。
   worker:
     <<: *seiran-backend
     command: ["seiran-server", "--role", "worker"]
@@ -115,3 +136,4 @@ networks:
 volumes:
   db-data:
   config-data: # secrets.toml の永続化（全バックエンドサービスで共有）
+  redis-data: # ジョブキューの永続化（AOF等はredis:7-alpineのデフォルト設定に従う）

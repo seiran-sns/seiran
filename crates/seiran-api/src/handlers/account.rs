@@ -65,7 +65,7 @@ pub async fn withdraw(
             .broadcast_account_event(actor_id, did, &handle, now, false, Some("deleted"))
             .await
         {
-            eprintln!("[withdraw] ATP #account broadcast 失敗 (actor_id={}): {:?}", actor_id, e);
+            tracing::error!("[withdraw] ATP #account broadcast 失敗 (actor_id={}): {:?}", actor_id, e);
         }
     }
 
@@ -89,6 +89,6 @@ pub async fn withdraw(
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    eprintln!("[withdraw] 退会完了: actor_id={}, username={}", actor_id, actor.username);
+    tracing::info!("[withdraw] 退会完了: actor_id={}, username={}", actor_id, actor.username);
     Ok(Json(()))
 }

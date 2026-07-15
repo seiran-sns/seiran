@@ -1,0 +1,787 @@
+//! ノート（投稿）関連ハンドラ。
+//!
+//! - `dto`: リクエスト/レスポンス型と DB 行 → レスポンスの素朴な変換
+//! - `queries`: 複数ポストへの添付・リアクション・リポスト状態の一括解決（読み取り集約）
+//! - `delivery`: Fedi（AP）/ Bsky（ATP）への配送オーケストレーション
+//! - `validation`: 本文長・添付件数・リアクション内容の検証
+//!
+//! このファイル（`mod.rs`）自体は axum ハンドラ（HTTPエントリポイント）と、
+//! 投稿作成の各経路（通常投稿・リポスト）のオーケストレーションのみを持つ。
+
+pub mod delivery;
+pub mod dto;
+pub mod queries;
+pub mod validation;
+
+pub use dto::{AttachmentResponse, NoteResponse, ReactRequest, ReactionSummary};
+pub use dto::to_note_response;
+pub use queries::{embed_renotes, fetch_attachments_map, fetch_reactions_map};
+pub use validation::BSKY_MAX_TEXT_GRAPHEMES;
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use sqlx::Row;
+
+use seiran_common::repository::TimelinePost;
+use seiran_common::streaming::broadcast_reaction_update;
+use seiran_common::{ap::{fetch_ap_history, plain_to_html}, generate_snowflake_id, ApDeliveryKind, PrevApReaction};
+
+use crate::error::ApiError;
+use crate::middleware::{AuthedUser, MaybeAuthedUser};
+use crate::AppState;
+
+use dto::{CreateNoteRequest, NoteContextResponse, NoteUserInfo, TimelineQuery};
+use delivery::{
+    broadcast_new_note, classify_post, deliver_regular_post, deliver_repost, resolve_quote_embed,
+    resolve_reply_context, DeliveryTargets, RegularPostDelivery, ReplyContext,
+};
+use queries::{fetch_reposted_ids, find_repost_for_undo};
+use validation::{strip_html_tags, validate_attachment_ids, validate_reaction_content, validate_text_length};
+
+/// 検証済みの添付ファイル ID 群を投稿に紐付ける。
+async fn attach_media_files(state: &AppState, post_id: i64, attachment_ids: &[i64]) -> Result<(), ApiError> {
+    for (position, media_file_id) in attachment_ids.iter().enumerate() {
+        state
+            .posts
+            .attach_media(post_id, *media_file_id, position as i16)
+            .await
+            .map_err(|e| ApiError::Internal(format!("添付 INSERT 失敗: {}", e)))?;
+    }
+    Ok(())
+}
+
+/// リポスト作成（`renote_id` 指定時）を処理する。
+/// 元ポストのメタ情報取得 → repost レコード挿入 → 両プロトコルへの配送 → realtime 配信、の順で行う。
+async fn create_repost(
+    state: &AppState,
+    actor_id: i64,
+    user_id: i64,
+    username: String,
+    renote_id_str: &str,
+    req: &CreateNoteRequest,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Response {
+    let renote_id: i64 = match renote_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_RENOTE_ID".to_owned()).into_response(),
+    };
+
+    let meta = match state.posts.find_delivery_meta(renote_id).await {
+        Ok(Some(m)) => m,
+        Ok(None) => return ApiError::NotFound("RENOTE_TARGET_NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("repost 元ポスト取得失敗: {}", e)).into_response(),
+    };
+
+    let origin = classify_post(
+        meta.ap_object_id.as_deref(),
+        meta.at_uri.as_deref(),
+        &meta.domain,
+        &state.local_domain,
+    );
+
+    let post_id = generate_snowflake_id(now);
+    // リポストの AP オブジェクト ID は Announce URI として生成
+    let announce_ap_id = format!("https://{}/announces/{}", state.local_domain, post_id);
+
+    match state.posts.insert_repost(post_id, actor_id, &announce_ap_id, renote_id, now).await {
+        Ok(()) => {}
+        Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("23505") => {
+            // UNIQUE 制約違反 = すでにリポスト済み
+            return ApiError::Conflict("ALREADY_REPOSTED").into_response();
+        }
+        Err(e) => {
+            return ApiError::Internal(format!("repost INSERT 失敗: {}", e)).into_response();
+        }
+    }
+
+    deliver_repost(
+        state, post_id, actor_id, now,
+        DeliveryTargets {
+            fedi: req.deliver_to_fedi.unwrap_or(true),
+            bsky: req.deliver_to_bsky.unwrap_or(true),
+        },
+        &meta, origin,
+    ).await;
+
+    let mut repost_resp = NoteResponse {
+        id: post_id.to_string(),
+        text: String::new(),
+        created_at: now.to_rfc3339(),
+        user: NoteUserInfo { id: user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
+        attachments: vec![],
+        renote_id: Some(renote_id.to_string()),
+        quote_id: None, reply_id: None, parent_original_id: None,
+        reactions: vec![],
+        renote: None,
+        reposted_by_me: None,
+        emojis: HashMap::new(),
+    };
+    // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
+    embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
+    broadcast_new_note(state, actor_id, &repost_resp).await;
+
+    Json(repost_resp).into_response()
+}
+
+/// 通常投稿・リプライ・引用投稿を処理する（`renote_id` を持たないケース）。
+/// バリデーション → リプライ/引用先の解決 → INSERT → 添付紐付け → 両プロトコル配信 → realtime 配信、の順で行う。
+async fn create_regular_post(
+    state: &AppState,
+    actor_id: i64,
+    user_id: i64,
+    username: String,
+    req: &CreateNoteRequest,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Response {
+    let text = req.text.as_deref().unwrap_or("").to_string();
+    if text.trim().is_empty() {
+        return ApiError::BadRequest("text は空にできません".to_owned()).into_response();
+    }
+
+    let reply_ctx = match &req.reply_to_id {
+        Some(id) => match resolve_reply_context(state, id).await {
+            Ok(ctx) => ctx,
+            Err(e) => return e.into_response(),
+        },
+        None => ReplyContext { deliver_fedi_allowed: true, deliver_bsky_allowed: true, bsky_reply: None, ap_in_reply_to: None },
+    };
+
+    let deliver_fedi = req.deliver_to_fedi.unwrap_or(true) && reply_ctx.deliver_fedi_allowed;
+    let deliver_bsky = req.deliver_to_bsky.unwrap_or(true) && reply_ctx.deliver_bsky_allowed;
+
+    if let Err(e) = validate_text_length(&text, deliver_bsky) {
+        return e.into_response();
+    }
+    if let Some(ids) = &req.attachment_ids {
+        if let Err(e) = validate_attachment_ids(ids) {
+            return e.into_response();
+        }
+    }
+
+    let post_id = generate_snowflake_id(now);
+    let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
+    let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
+
+    let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
+    let quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
+
+    // 引用元情報の取得（Bsky embed / AP quoteUrl を決定する）
+    let (bsky_quote_embed, ap_quote_url) = match quote_of_id_i64 {
+        Some(quote_id) => resolve_quote_embed(state, quote_id).await,
+        None => (None, None),
+    };
+
+    // seiran_post_uuid / reply_to_post_id / quote_of_post_id を含む統合 INSERT
+    if let Err(e) = state
+        .posts
+        .insert_full(post_id, actor_id, &text, &ap_object_id, &seiran_post_uuid, reply_to_id_i64, quote_of_id_i64, now)
+        .await
+    {
+        return ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)).into_response();
+    }
+
+    // attachment_ids を i64 に変換（バリデーション済みなので unwrap 安全）
+    let attachment_ids_i64: Vec<i64> = req.attachment_ids.as_deref().unwrap_or(&[]).iter().map(|s| s.parse::<i64>().unwrap()).collect();
+    if let Err(e) = attach_media_files(state, post_id, &attachment_ids_i64).await {
+        return e.into_response();
+    }
+
+    deliver_regular_post(state, RegularPostDelivery {
+        post_id,
+        actor_id,
+        now,
+        text: text.clone(),
+        targets: DeliveryTargets { fedi: deliver_fedi, bsky: deliver_bsky },
+        bsky_reply: reply_ctx.bsky_reply,
+        bsky_quote_embed,
+        ap_quote_url,
+        ap_in_reply_to: reply_ctx.ap_in_reply_to,
+        attachment_ids: attachment_ids_i64.clone(),
+    }).await;
+
+    let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
+    let note_resp = NoteResponse {
+        id: post_id.to_string(),
+        text,
+        created_at: now.to_rfc3339(),
+        user: NoteUserInfo { id: user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
+        attachments: att_map.remove(&post_id).unwrap_or_default(),
+        renote_id: None,
+        quote_id: quote_of_id_i64.map(|i| i.to_string()),
+        reply_id: reply_to_id_i64.map(|i| i.to_string()),
+        parent_original_id: None,
+        reactions: vec![],
+        renote: None,
+        reposted_by_me: None,
+        emojis: HashMap::new(),
+    };
+
+    broadcast_new_note(state, actor_id, &note_resp).await;
+
+    Json(note_resp).into_response()
+}
+
+pub async fn create_note(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(req): Json<CreateNoteRequest>,
+) -> impl IntoResponse {
+    let now = chrono::Utc::now();
+
+    match &req.renote_id {
+        Some(renote_id_str) => create_repost(&state, user.actor_id, user.user_id, user.username, renote_id_str, &req, now).await,
+        None => create_regular_post(&state, user.actor_id, user.user_id, user.username, &req, now).await,
+    }
+}
+
+pub async fn home_timeline(
+    Query(q): Query<TimelineQuery>,
+    user: AuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor_id = user.actor_id;
+
+    let limit = q.limit.unwrap_or(30).min(100);
+    let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = match state.posts.home_timeline(actor_id, limit, until_id, since_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("[home_timeline] クエリ失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "TL取得に失敗しました").into_response();
+        }
+    };
+    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
+    let reposted_set = fetch_reposted_ids(&state.db, actor_id, &ids).await;
+    let mut notes: Vec<NoteResponse> = rows.into_iter()
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            nr.reposted_by_me = Some(reposted_set.contains(&id));
+            nr
+        })
+        .collect();
+    embed_renotes(&state.db, &mut notes, Some(actor_id)).await;
+    Json(notes).into_response()
+}
+
+pub async fn local_timeline(
+    Query(q): Query<TimelineQuery>,
+    MaybeAuthedUser(user): MaybeAuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let my_actor_id: Option<i64> = user.map(|u| u.actor_id);
+
+    let limit = q.limit.unwrap_or(20).min(100);
+    let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = match state.posts.local_timeline(limit, until_id, since_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("[local_timeline] クエリ失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "TL取得に失敗しました").into_response();
+        }
+    };
+    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
+    let reposted_set = if let Some(actor_id) = my_actor_id {
+        fetch_reposted_ids(&state.db, actor_id, &ids).await
+    } else {
+        Default::default()
+    };
+    let mut notes: Vec<NoteResponse> = rows.into_iter()
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            if my_actor_id.is_some() {
+                nr.reposted_by_me = Some(reposted_set.contains(&id));
+            }
+            nr
+        })
+        .collect();
+    embed_renotes(&state.db, &mut notes, my_actor_id).await;
+    Json(notes).into_response()
+}
+
+/// フロントエンド向け: GET /api/notes/:id
+pub async fn get_note(
+    Path(id): Path<String>,
+    MaybeAuthedUser(user): MaybeAuthedUser,
+    State(state): State<AppState>,
+) -> Result<Json<NoteResponse>, ApiError> {
+    let my_actor_id: Option<i64> = user.map(|u| u.actor_id);
+
+    let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
+    let post = state
+        .posts
+        .find_by_id(post_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+    let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
+    let rmap = fetch_reactions_map(&state.db, &[post_id], my_actor_id).await;
+    let mut nr = to_note_response(post, att_map.remove(&post_id).unwrap_or_default());
+    nr.reactions = rmap.get(&post_id).cloned().unwrap_or_default();
+    if let Some(actor_id) = my_actor_id {
+        let reposted_set = fetch_reposted_ids(&state.db, actor_id, &[post_id]).await;
+        nr.reposted_by_me = Some(reposted_set.contains(&post_id));
+    }
+    embed_renotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
+    Ok(Json(nr))
+}
+
+/// ActivityPub 向け: GET /notes/:id
+/// nginx が Accept: application/activity+json のリクエストのみここへ転送する。
+pub async fn get_note_ap(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let post_id: i64 = match id.parse() {
+        Ok(i) => i,
+        Err(_) => return (StatusCode::NOT_FOUND, "").into_response(),
+    };
+
+    let post = match state.posts.find_by_id(post_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
+        Err(e) => {
+            tracing::error!("[get_note_ap] DB エラー: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "").into_response();
+        }
+    };
+
+    // ローカルポストのみ AP として提供する
+    if post.domain != state.local_domain {
+        return (StatusCode::NOT_FOUND, "").into_response();
+    }
+
+    let actor_uri = format!("https://{}/users/{}", state.local_domain, post.username);
+    let note_id = format!("https://{}/notes/{}", state.local_domain, post.id);
+    let content_html = plain_to_html(&post.body);
+
+    let attachment_rows = sqlx::query(
+        "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
+         FROM post_attachments pa
+         JOIN media_files mf ON mf.id = pa.media_file_id
+         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         WHERE pa.post_id = $1
+         ORDER BY pa.position",
+    )
+    .bind(post_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let attachments: Vec<serde_json::Value> = attachment_rows
+        .iter()
+        .filter_map(|r| {
+            let storage_key: String = r.try_get("storage_key").ok()?;
+            let mime_type: String = r.try_get("mime_type").ok()?;
+            let width: i32 = r.try_get("width").ok()?;
+            let height: i32 = r.try_get("height").ok()?;
+            let public_url: String = r.try_get("public_url").ok()?;
+            let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
+            Some(serde_json::json!({
+                "type": "Document",
+                "mediaType": mime_type,
+                "url": url,
+                "width": width,
+                "height": height
+            }))
+        })
+        .collect();
+
+    let mut ap_note = serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Note",
+        "id": note_id,
+        "url": note_id,
+        "attributedTo": actor_uri,
+        "content": content_html,
+        "published": post.created_at.to_rfc3339(),
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [format!("{}/followers", actor_uri)],
+    });
+    if !attachments.is_empty() {
+        ap_note["attachment"] = serde_json::Value::Array(attachments);
+    }
+
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/activity+json; charset=utf-8")],
+        Json(ap_note),
+    )
+        .into_response()
+}
+
+// =====================================================================
+// ノート詳細コンテキスト（前後投稿）
+// =====================================================================
+
+/// GET /api/notes/:id/context
+/// 同一アクターの前後投稿を各10件ずつ返す。
+/// リモートアクターかつ未フォローの場合は AP Outbox から最大50件を同期フェッチしてから返す。
+pub async fn note_context(
+    Path(id): Path<String>,
+    MaybeAuthedUser(user): MaybeAuthedUser,
+    State(state): State<AppState>,
+) -> Result<Json<NoteContextResponse>, ApiError> {
+    let my_actor_id: Option<i64> = user.map(|u| u.actor_id);
+
+    let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
+
+    // 1. 対象ノートを取得
+    let post = state
+        .posts
+        .find_by_id(post_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+
+    let actor_id = post.actor_id;
+
+    // 2. リモートアクターの場合、Outbox から追加フェッチ
+    if post.domain != state.local_domain {
+        // 閲覧者がこのアクターをフォロー中か確認（my_actor_id は既に取得済み）
+        let viewer_follows = if let Some(vid) = my_actor_id {
+            matches!(state.follows.find_status(vid, actor_id).await, Ok(Some(_)))
+        } else {
+            false
+        };
+
+        if !viewer_follows {
+            // アクターの AP URI を取得
+            if let Ok(Some(actor)) = state.actors.find_by_id(actor_id).await {
+                if let Some(ap_uri) = actor.ap_uri {
+                    let ap_client = Arc::clone(&state.ap_client);
+                    let fetch_result = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        fetch_ap_history(&ap_client, &ap_uri, 50, 30),
+                    )
+                    .await;
+
+                    if let Ok(Ok(ap_notes)) = fetch_result {
+                        for ap_note in ap_notes {
+                            let body = strip_html_tags(&ap_note.content.unwrap_or_default());
+                            if let Some(ts) = ap_note
+                                .published
+                                .as_deref()
+                                .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
+                            {
+                                let note_id = generate_snowflake_id(ts);
+                                let _ = state
+                                    .posts
+                                    .insert_remote(note_id, actor_id, &body, &ap_note.id, ts)
+                                    .await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. DB からコンテキストを取得
+    let before_posts = state
+        .posts
+        .context_before(actor_id, post_id, 10)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let after_posts = state
+        .posts
+        .context_after(actor_id, post_id, 10)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let all_ids: Vec<i64> = before_posts.iter().chain(after_posts.iter()).map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &all_ids).await;
+    let rmap = fetch_reactions_map(&state.db, &all_ids, my_actor_id).await;
+    let reposted_set = if let Some(aid) = my_actor_id {
+        fetch_reposted_ids(&state.db, aid, &all_ids).await
+    } else {
+        Default::default()
+    };
+    let build = |p: TimelinePost, att_map: &mut HashMap<i64, Vec<dto::AttachmentResponse>>| {
+        let id = p.id;
+        let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+        nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+        if my_actor_id.is_some() {
+            nr.reposted_by_me = Some(reposted_set.contains(&id));
+        }
+        nr
+    };
+
+    let mut before: Vec<NoteResponse> = before_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
+    let mut after: Vec<NoteResponse> = after_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
+    embed_renotes(&state.db, &mut before, my_actor_id).await;
+    embed_renotes(&state.db, &mut after, my_actor_id).await;
+
+    Ok(Json(NoteContextResponse { before, after }))
+}
+
+/// DELETE /api/notes/:note_id/repost
+/// 自分がしたリポストを取り消す（論理削除 + AP Undo/Announce 配送）。
+pub async fn delete_repost(
+    Path(note_id_str): Path<String>,
+    user: AuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor_id = user.actor_id;
+
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    // 削除前にリポスト行の id・ap_object_id・atp_repost_rkey と元ポストの ap_object_id を取得する
+    let undo_info = match find_repost_for_undo(&state, actor_id, note_id).await {
+        Ok(info) => info,
+        Err(resp) => return resp,
+    };
+
+    // 論理削除
+    if let Err(e) = state.posts.soft_delete_by_id(undo_info.repost_id).await {
+        return ApiError::Internal(format!("UPDATE 失敗: {}", e)).into_response();
+    }
+
+    tracing::info!(
+        "[delete_repost] actor_id={} が note_id={} のリポスト（post_id={}）を取り消し",
+        actor_id, note_id, undo_info.repost_id
+    );
+
+    // AP Undo(Announce) 配送 — 元ポストに ap_object_id がある場合のみ
+    if let Some(orig_ap_object_id) = undo_info.orig_ap_id {
+        state
+            .enqueue_ap_delivery(actor_id, ApDeliveryKind::UndoAnnounce {
+                announce_post_id: undo_info.repost_id,
+                original_ap_object_id: orig_ap_object_id,
+            })
+            .await;
+    }
+
+    // ATP repost delete commit — atp_repost_rkey が保存されている場合のみ
+    if let Some(rkey) = undo_info.atp_repost_rkey {
+        let atp = Arc::clone(&state.atp_service);
+        let now = chrono::Utc::now();
+        tokio::spawn(async move {
+            if let Err(e) = atp.delete_atp_repost(actor_id, &rkey, now).await {
+                tracing::error!("[delete_repost] ATP repost delete 失敗: {}", e);
+            }
+        });
+    }
+
+    Json(serde_json::json!({
+        "ok": true,
+        "repostId": undo_info.repost_ap_id.unwrap_or_default()
+    }))
+    .into_response()
+}
+
+/// POST /api/notes/:id/reactions
+/// 自分の絵文字リアクションを追加する。ローカル保存に加え、AP（対象ポスト著者 + 自分の Fedi
+/// フォロワー全員）・ATP（対象に at_uri がある場合）の双方へ配送する。
+pub async fn create_reaction(
+    Path(note_id_str): Path<String>,
+    me: AuthedUser,
+    State(state): State<AppState>,
+    Json(req): Json<dto::ReactRequest>,
+) -> impl IntoResponse {
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    let content = match validate_reaction_content(&req.content) {
+        Ok(c) => c,
+        Err(e) => return e.into_response(),
+    };
+
+    let post = match state.posts.find_by_id(note_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
+    };
+
+    // 切替時に取り消すべき旧リアクション（AP の Undo 対象 / ATP の削除対象 rkey）を退避。
+    // 対象に ATP 実体が無ければ ATP 配信しない（AP/Bsky 由来でも at_uri を持たないポストへは無反応）。
+    let prev = state.reactions.find_current(note_id, me.actor_id).await.ok().flatten();
+    let delivery_meta = state.posts.find_delivery_meta(note_id).await.ok().flatten();
+
+    // AP へ配送する Like/EmojiReact 自身の activity id を発行し、Undo で参照できるよう保存する。
+    let activity_id = format!(
+        "https://{}/activities/reactions/{}-{}-{}",
+        state.local_domain,
+        note_id,
+        me.actor_id,
+        chrono::Utc::now().timestamp_millis()
+    );
+
+    if let Err(e) = state.reactions.insert(note_id, me.actor_id, "emoji", &content, Some(&activity_id), None, None).await {
+        return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response();
+    }
+
+    // 通知ベル用（#37）: 自分の投稿への自作自演リアクションは通知しない
+    if post.actor_id != me.actor_id {
+        state.stream_hub.publish_event(
+            std::collections::HashSet::from([post.actor_id]),
+            "reaction",
+            serde_json::json!({
+                "postId": note_id.to_string(),
+                "emoji": content,
+                "actor": { "username": me.username, "domain": me.domain, "displayName": me.display_name },
+            }),
+        );
+    }
+
+    // タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の
+    // ストリーミング挙動に合わせる）。通知ベルと違い自作自演でも送出する。
+    broadcast_reaction_update(
+        &state.stream_hub,
+        state.follows.as_ref(),
+        state.reactions.as_ref(),
+        note_id,
+        post.actor_id,
+        me.actor_id,
+        Some(&content),
+    )
+    .await;
+
+    // ATP 連携: 絵文字は送れないため Like として送る（`emoji` は非標準の拡張メタデータとして
+    // ベストエフォートで載せる）。旧リアクションがあれば先に削除してから作り直す（切替）。
+    if let Some(meta) = delivery_meta {
+        if let (Some(target_uri), Some(target_cid)) = (meta.at_uri, meta.at_cid) {
+            let atp = Arc::clone(&state.atp_service);
+            let actor_id = me.actor_id;
+            let emoji = content.clone();
+            let prev_rkey = prev
+                .as_ref()
+                .and_then(|(_, _, at_uri)| at_uri.as_deref())
+                .and_then(|u| u.rsplit('/').next())
+                .map(|s| s.to_string());
+            let now = chrono::Utc::now();
+            tokio::spawn(async move {
+                if let Some(rkey) = prev_rkey {
+                    if let Err(e) = atp.delete_atp_like(actor_id, &rkey, now).await {
+                        tracing::error!("[create_reaction] ATP Like 削除失敗（切替前処理）: {}", e);
+                    }
+                }
+                if let Err(e) = atp.commit_like(actor_id, note_id, &target_uri, &target_cid, Some(&emoji), now).await {
+                    tracing::error!("[create_reaction] ATP Like commit 失敗: {}", e);
+                }
+            });
+        }
+    }
+
+    // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ配送する。
+    // 旧リアクションが既に AP へ配送済み（ap_activity_id あり）なら、ジョブ側が先に Undo してから送る（切替）。
+    let undo_prev = prev.as_ref().and_then(|(prev_content, prev_activity_id, _)| {
+        prev_activity_id.clone().map(|id| PrevApReaction {
+            activity_id: id,
+            content: prev_content.clone(),
+        })
+    });
+    state
+        .enqueue_ap_delivery(me.actor_id, ApDeliveryKind::Reaction {
+            post_id: note_id,
+            activity_id: activity_id.clone(),
+            content: content.clone(),
+            undo_prev,
+        })
+        .await;
+
+    let rmap = fetch_reactions_map(&state.db, &[note_id], Some(me.actor_id)).await;
+    Json(serde_json::json!({
+        "ok": true,
+        "reactions": rmap.get(&note_id).cloned().unwrap_or_default(),
+    }))
+    .into_response()
+}
+
+/// DELETE /api/notes/:id/reactions/:content
+/// 自分が付けたリアクションを取り消す。
+pub async fn delete_reaction(
+    Path((note_id_str, content)): Path<(String, String)>,
+    user: AuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor_id = user.actor_id;
+
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    let post = match state.posts.find_by_id(note_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
+    };
+
+    // 削除前に現在の ap_activity_id（AP Undo 対象）と at_uri（ATP 削除対象の rkey）を退避しておく。
+    let prev = state.reactions.find_current(note_id, actor_id).await.ok().flatten();
+
+    let deleted = match state.reactions.delete_local(note_id, actor_id, &content).await {
+        Ok(n) => n,
+        Err(e) => return ApiError::Internal(format!("reactions DELETE 失敗: {}", e)).into_response(),
+    };
+    if deleted == 0 {
+        return ApiError::NotFound("REACTION_NOT_FOUND").into_response();
+    }
+
+    broadcast_reaction_update(
+        &state.stream_hub,
+        state.follows.as_ref(),
+        state.reactions.as_ref(),
+        note_id,
+        post.actor_id,
+        actor_id,
+        None,
+    )
+    .await;
+
+    if let Some(rkey) = prev
+        .as_ref()
+        .and_then(|(_, _, at_uri)| at_uri.as_deref())
+        .and_then(|u| u.rsplit('/').next())
+        .map(|s| s.to_string())
+    {
+        let atp = Arc::clone(&state.atp_service);
+        let now = chrono::Utc::now();
+        tokio::spawn(async move {
+            if let Err(e) = atp.delete_atp_like(actor_id, &rkey, now).await {
+                tracing::error!("[delete_reaction] ATP Like 削除失敗: {}", e);
+            }
+        });
+    }
+
+    // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ Undo を配送する。
+    if let Some(prev_activity_id) = prev.as_ref().and_then(|(_, ap_activity_id, _)| ap_activity_id.clone()) {
+        state
+            .enqueue_ap_delivery(actor_id, ApDeliveryKind::UndoReaction {
+                post_id: note_id,
+                prev_activity_id,
+                content: content.clone(),
+            })
+            .await;
+    }
+
+    let rmap = fetch_reactions_map(&state.db, &[note_id], Some(actor_id)).await;
+    Json(serde_json::json!({
+        "ok": true,
+        "reactions": rmap.get(&note_id).cloned().unwrap_or_default(),
+    }))
+    .into_response()
+}

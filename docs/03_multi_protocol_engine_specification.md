@@ -45,13 +45,13 @@
 
 ## 2. バックグラウンド・キュー設計 (`JobQueue` の分類)
 
-システム全体の分散通信および同期を支えるため、バックエンドに以下の6つの非同期キューを実装する。これらは `JobQueue` Trait で抽象化され、オンメモリでの実装からRedis（`apalis` 等）への移行を容易にする。
+システム全体の分散通信および同期を支えるため、バックエンドに以下の6つの非同期キューを実装する。これらは `JobQueue` Trait で抽象化されており、モノリスモード（`--role all`）では `InMemoryJobQueue`、split-role 構成では `REDIS_URL` 設定時に自前実装の `RedisJobQueue`（優先度付き Sorted Set + `BZPOPMIN` + Lua スクリプトによる遅延リトライ昇格）へ切り替わる（バックエンド選択の詳細は `docs/02_architecture_and_overall_design.md` §4.1 ③）。
 
 | キュー（ジョブ）名 | 処理内容 | 優先度 | リトライ & レート制限（レートリミット）戦略 |
 | :--- | :--- | :--- | :--- |
 | **1. 過去ログ同期キュー**<br>`actor_history_sync` | 新規フォローされたアクターの過去ログ（最大300件）をページネーションしながら順次取得・DB保存する。 | **低 (Low)** | ・**ドメイン単位の同時実行制限 (Concurrency Limit)**: 同一APインスタンスに対する同時フェッチを1件に制限。<br>・リクエスト間に 1〜3秒のジッター（揺らぎ）を挿入。<br>・失敗時は指数バックオフで最大3回リトライ。 |
 | **2. AP 配送キュー**<br>`ap_delivery` | 自サーバーで発生した AP アクティビティ（投稿 Create のほか、Announce/Undo(Announce)/Like・EmojiReact/Undo(リアクション)/Update(Person)/Delete(Actor)）を、APフォロワーの各リモートサーバー（Inbox）へ配送する（APのみ。ATPはPDS自律処理のため不要）。配送内容は `ApDeliveryKind` enum で表現し、API ハンドラはこれを enqueue するだけでよい。 | **高 (High)** | ・ユーザーのアクションに直結するため、最高優先度で即時実行。<br>・相手サーバーのダウン時は、数時間にわたる指数バックオフで最大10回程度リトライ（段階的に間隔を広げる）。<br>・宛先が1件以上あり全滅した場合のみ `Err`（リトライ対象）。部分成功時は重複配送を避けるため `Ok` とする。 |
-| **3. 配送受け入れ（インバウンド）キュー**<br>`inbound_activity_process` | 外部（APのInbox等）から届いたアクティビティ（投稿、リアクション等）を非同期でパースする。Note（ポスト）本体のフェッチ、未知アクターの解決、関連する親スレッドの補完フェッチ、DB保存処理など。 | **中 (Medium)** | ・外部サーバーへのフェッチ（Noteの解決やアクター解決）が頻発するため、ドメイン単位のレート制限を適用。<br>・依存リソース（アクターや親投稿）が一時的に解決できない場合、短いスパンで再スケジュール（指数バックオフで最大5回リトライ）。 |
+| **3. 配送受け入れ（インバウンド）キュー**<br>`inbound_activity_process` | 外部（APのInbox）から届いたアクティビティ（Follow/Create/Accept/Undo/Announce/Like・EmojiReact 全種別）を非同期で処理する。未知アクターの解決（upsert）、Note本体の保存、リアクション記録、フォロー状態更新、リアルタイム配信（`stream_hub`）まで含む（`seiran_common::jobs::inbound_activity_process`。2026-07リファクタリングで `federation-inbox` 側の `tokio::spawn` 直接処理から全面移行）。 | **中 (Medium)** | ・指数バックオフで最大3回リトライ（2s → 4s → …、上限60s）。<br>・ドメイン単位のレート制限は未実装（今後の課題。現状 `ActorHistorySync` キューのみ適用）。 |
 | **4. アクター検証・メタデータ取得キュー**<br>`actor_metadata_resolve` | リモートseiranアクターのハンドシェイク検証（`verify-actor`）や、Webfingerによる解決、アバター画像やOGP情報のプロキシ・キャッシュ化。 | **中 (Medium)** | ・タイムアウト時は短いスパンで再試行（最大3回）。<br>・画像取得失敗等は非クリティカルとして扱い、デフォルト画像でフォールバック。 |
 | **5. ATPリポジトリコミット・配信キュー**<br>`atp_repository_publish` | seiran PDS としてローカルユーザーの AT Protocol リポジトリを更新する。具体的には、投稿・削除等のレコードを DAG-CBOR 形式で MST にコミットし、P-256 秘密鍵で署名した後、Relay サーバーへ配信する。外部 PDS（bsky.social 等）は使用しない。 | **極高 (Critical)** | ・順序性の維持が不可欠（同じDIDに対するコミット順が前後してはならない）。<br>・アクターID単位の **FIFO（先入れ先出し）** キュー、またはシリアル排他ロック制御が必要。 |
 | **6. Bsky動画パイプライン結合キュー**<br>`bsky_video_poll` | 動画添付アップロード時にBluesky公式動画パイプライン（`app.bsky.video.uploadVideo`）へ投げたジョブの完了（`app.bsky.video.getJobStatus`）を待つ。完了したら`media_files.bsky_video_cid`/`bsky_video_status='ready'`を更新し、以降の`commit_post`が`app.bsky.embed.video`を使えるようにする。 | **高 (High)** | ・1回の実行で1回だけ`getJobStatus`を叩き、未完了なら`Err`を返してリトライさせる（固定3秒間隔・最大10回=30秒）。<br>・30秒以内に完了しなければ`bsky_video_status`は`'pending'`のまま放置され、該当ポストは`app.bsky.embed.external`にフォールバックする（待たない設計）。 |

@@ -75,7 +75,7 @@ pub async fn request_email_verification(
     send_verification_email(&smtp_settings, &email, &verify_url)
         .await
         .map_err(|e| {
-            eprintln!("[verify-email] メール送信失敗: {}", e);
+            tracing::error!("[verify-email] メール送信失敗: {}", e);
             match e {
                 MailError::Config(_) => ApiError::ServiceUnavailable("SMTP_NOT_CONFIGURED"),
                 _ => ApiError::Internal(format!("メール送信失敗: {}", e)),

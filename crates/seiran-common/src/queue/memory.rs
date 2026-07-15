@@ -1,7 +1,9 @@
 //! オンメモリ JobQueue 実装
 //!
-//! 開発・テスト環境向け。プロセス再起動でキューの内容は消えるが、
-//! 外部依存ゼロで即座に動作確認できる。
+//! 開発・テスト環境向け（`--role all` のモノリスモードはこれで十分。同一プロセス内で
+//! api/worker が動くため外部ミドルウェアは不要）。プロセス再起動でキューの内容は
+//! 消えるが、外部依存ゼロで即座に動作確認できる。split-role 構成でプロセスをまたいで
+//! キューを共有したい場合は `RedisJobQueue` を使うこと。
 //!
 //! # 内部構造
 //! - `tokio::sync::Mutex<BinaryHeap<PrioritizedJob>>`: 優先度付きヒープによるキュー
@@ -11,9 +13,10 @@ use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
 
-use crate::traits::{Job, JobQueue};
+use crate::traits::{Job, JobQueue, QueuedJob};
 
 /// 優先度付きジョブエントリ
 /// BinaryHeap は最大ヒープなので priority が大きいほど先に処理される
@@ -22,6 +25,7 @@ struct PrioritizedJob {
     priority: i32,
     /// 投入順序（同一優先度内での FIFO 保証）
     sequence: u64,
+    attempt: u32,
     job: Job,
 }
 
@@ -73,10 +77,19 @@ impl InMemoryJobQueue {
         }
     }
 
-    /// キューからジョブを1件デキューします（Worker が呼び出す）
+    /// キューからジョブを1件デキューします（非ブロッキング。空なら `None`）。
+    /// `JobQueue::dequeue_blocking` はこれをラップしてブロッキング動作にする。
     pub async fn dequeue(&self) -> Option<Job> {
         let mut inner = self.inner.lock().await;
         inner.heap.pop().map(|pj| pj.job)
+    }
+
+    async fn push(&self, job: Job, priority: i32, attempt: u32) {
+        let mut inner = self.inner.lock().await;
+        inner.sequence += 1;
+        let seq = inner.sequence;
+        inner.heap.push(PrioritizedJob { priority, sequence: seq, attempt, job });
+        self.notify.notify_one();
     }
 
     /// 現在のキュー長を返します
@@ -103,17 +116,36 @@ impl Default for InMemoryJobQueue {
 #[async_trait]
 impl JobQueue for InMemoryJobQueue {
     async fn enqueue(&self, job: Job, priority: i32) -> Result<(), String> {
-        let mut inner = self.inner.lock().await;
-        inner.sequence += 1;
-        let seq = inner.sequence;
-        inner.heap.push(PrioritizedJob {
-            priority,
-            sequence: seq,
-            job,
-        });
-        // Worker を起こす
-        self.notify.notify_one();
+        self.push(job, priority, 0).await;
         Ok(())
+    }
+
+    async fn enqueue_retry(&self, job: Job, priority: i32, attempt: u32, delay: Duration) -> Result<(), String> {
+        // InMemory はプロセス内 sleep で遅延させる。プロセス再起動でこの待ちは失われるが、
+        // モノリスモード（開発・小規模運用）では許容範囲（詳細はモジュール冒頭のコメント参照）。
+        let inner = Arc::clone(&self.inner);
+        let notify = Arc::clone(&self.notify);
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let mut inner = inner.lock().await;
+            inner.sequence += 1;
+            let seq = inner.sequence;
+            inner.heap.push(PrioritizedJob { priority, sequence: seq, attempt, job });
+            notify.notify_one();
+        });
+        Ok(())
+    }
+
+    async fn dequeue_blocking(&self) -> QueuedJob {
+        loop {
+            {
+                let mut inner = self.inner.lock().await;
+                if let Some(pj) = inner.heap.pop() {
+                    return QueuedJob { job: pj.job, priority: pj.priority, attempt: pj.attempt };
+                }
+            }
+            self.notify.notified().await;
+        }
     }
 }
 
@@ -203,5 +235,35 @@ mod tests {
         assert_eq!(q.len().await, 2);
         q.dequeue().await;
         assert_eq!(q.len().await, 1);
+    }
+
+    #[tokio::test]
+    async fn dequeue_blocking_waits_then_returns_queued_job() {
+        let q = Arc::new(InMemoryJobQueue::new());
+        let q2 = Arc::clone(&q);
+        let handle = tokio::spawn(async move { q2.dequeue_blocking().await });
+
+        // まだ何も積んでいないので即座には終わらないはず
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!handle.is_finished());
+
+        q.enqueue(job(42), 10).await.unwrap();
+        let qj = tokio::time::timeout(Duration::from_millis(200), handle)
+            .await
+            .expect("dequeue_blocking がタイムアウトした")
+            .unwrap();
+        assert_eq!(post_id_of(&qj.job), 42);
+        assert_eq!(qj.priority, 10);
+        assert_eq!(qj.attempt, 0);
+    }
+
+    #[tokio::test]
+    async fn enqueue_retry_carries_attempt_and_priority() {
+        let q = InMemoryJobQueue::new();
+        q.enqueue_retry(job(7), 50, 3, Duration::from_millis(10)).await.unwrap();
+        let qj = q.dequeue_blocking().await;
+        assert_eq!(post_id_of(&qj.job), 7);
+        assert_eq!(qj.priority, 50);
+        assert_eq!(qj.attempt, 3);
     }
 }

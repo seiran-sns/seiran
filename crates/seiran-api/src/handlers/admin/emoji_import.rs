@@ -359,7 +359,7 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
 
     // ジョブ完了
     update_job(&state, &job_id, |s| { s.done = true; });
-    eprintln!(
+    tracing::info!(
         "[emoji-import] job_id={} 完了: processed={} skipped={} failed={}",
         job_id,
         state.emoji_import_jobs.get(&job_id).map(|s| s.processed).unwrap_or(0),

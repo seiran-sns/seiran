@@ -498,16 +498,20 @@ graph TD
 * **役割**: クライアントからのリクエスト受け口（Misskey API互換レイヤー ＆ MiAuth認可）。
 * **状態性**: 完全ステートレス。セッションは `SessionStore` Trait を介して読み書きする。
 * **将来の物理分割**: HTTPサーバー群として、ロードバランサーの配下で無制限に水平スケール（Scale-out）が可能。
+* **ATP コミットイベントのプロセス間配信（実装済み）**: `seiran-api` は `subscribeRepos` WebSocket の配信元でもある。単一プロセスでは `AtpCommitService` のプロセス内 `broadcast::Sender` で十分だが、`api` ロールを複数レプリカで水平スケールすると、レプリカ A で行われたコミットがレプリカ B の WS クライアントに届かない問題が生じる。`REDIS_URL` が設定されている場合（`--role api` の split-role 起動時のみ。`--role all` では常に無効）、`AtpCommitService::with_redis_bridge` が有効になり、コミットイベントを Redis Pub/Sub 経由で全レプリカへ配信する（各レプリカが購読タスクでローカルの `broadcast::Sender` へ転送するため、`subscribeRepos` ハンドラ自体の実装は変更不要）。
 
 #### ② `seiran-federation-inbox` (インバウンド・イベントゲートウェイ)
 * **役割**: 外部ネットワーク（ActivityPubのInbox、AT ProtocolのFirehose）からの高頻度ストリームの受け口。
-* **処理ルール**: 受け取った生のデータを即座に検証し、`inbound_activity_process` キューへ投入（エンキュー）して即座に `202 Accepted` / 成功応答を返す。重いパースやDB挿入処理はここでは行わない。
-* **将来の物理分割**: 連合トラフィックの急増によるWeb API（`seiran-api`）への影響を避けるため、ストリームレシーバー専用の独立したスケーリンググループとして分離可能。
+* **処理ルール（実装済み）**: `inbox_handler` は Digest/HTTP Signature 検証（低レイテンシ必須）のみを同期で行い、即座に `202 Accepted` を返す。アクティビティの実処理（Follow/Create/Accept/Undo/Announce/Like 全種別）は例外なく `Job::InboundActivityProcess` として `inbound_activity_process` キューへ投入し、Worker（`seiran_common::jobs::inbound_activity_process`）が非同期で実行する。ハンドラ本体（`handle_follow`/`handle_create_note`/`handle_accept`/`handle_undo`/`handle_reaction`/`handle_announce` 等）は `seiran-common` 側に実装があり、`JobContext.inbox`（`InboxContext`: リポジトリ4種・`local_domain`・AP秘密鍵・`stream_hub`）経由で必要なリソースにアクセスする。以前は Follow 等の既知種別のみ `tokio::spawn` で即時処理し未知種別だけキューに積む逆転した実装だったが、2026-07リファクタリングで是正した。
+* **将来の物理分割**: 連合トラフィックの急増によるWeb API（`seiran-api`）への影響を避けるため、ストリームレシーバー専用の独立したスケーリンググループとして分離可能。実処理が全てジョブ化されたことで、`federation-inbox`（受信のみ）と `worker`（処理）を独立にスケールアウトできる。
 
 #### ③ `seiran-federation-worker` (非同期ジョブワーカー)
 * **役割**: バックグラウンドジョブの実行エンジン。
 * **処理ルール**: `JobQueue` からジョブをデキューし、過去ログのインポート・投稿配送・アクター検証・DB保存処理を非同期で実行する。
-* **将来の物理分割**: 最もリソース（CPU・メモリ・帯域）を消費する箇所であるため、キュー（Redis等）を介してAPIサーバーとは完全に異なるインスタンス群として独立運用・スケール可能。
+* **物理分割（実装済み）**: `JobQueue` バックエンドはロールに応じて自動選択される（`seiran_common::create_job_queue`）。
+  - モノリスモード（`--role all`）: `InMemoryJobQueue`。同一プロセス内で api/worker が動くため外部ミドルウェア不要。
+  - split-role 構成（api / federation / worker を別プロセス・別コンテナで起動）: 環境変数 `REDIS_URL` が設定されていれば `RedisJobQueue`（優先度付き Sorted Set + 遅延リトライキュー、`BZPOPMIN` でブロッキング取得）を使い、プロセスをまたいでキューを共有する。未設定の場合は `InMemoryJobQueue` にフォールバックするが、この場合 enqueue したジョブは同一プロセス内でしか処理されない（他プロセスの Worker には届かない）警告ログが出る。
+  - `docker-compose.yml`（大規模／ロール分離構成）は `redis` サービスを同梱し、api/federation/worker の各コンテナへ自動的に `REDIS_URL` を渡す。`docker-compose.mono.yml`（単一コンテナ構成）には Redis サービス自体が無い。
 
 #### ④ `seiran-atp-repo` (ATPリポジトリ管理サービス)
 * **役割**: seiran PDS としての AT Protocol（ATP）リポジトリ管理。具体的には：
@@ -586,17 +590,19 @@ crates/seiran-common/src/repository/
 
 #### 4.4.2 並列・排他制御ルール (Concurrency Limits)
 
-1. **ドメイン単位の同時実行制限 (Concurrency Limit)**
+1. **グローバル同時実行数の上限**
+   - `WorkerEngine` はキューに大量のジョブが溜まっていた状態から復帰した際に一斉 spawn してリソースを食い潰す（サンダリングハード）のを防ぐため、`tokio::sync::Semaphore` で同時実行ジョブ数の上限（既定 32）を設けている。
+2. **ドメイン単位の同時実行制限 (Concurrency Limit)**
    - `ActorHistorySync` などの対外接続ジョブは、同一宛先ドメインへのトラフィック集中を防ぐため、ドメインごとに同時並行実行数を **最大 2 並列** に制限する。
    - `JobContext` 内のドメイン別 `tokio::sync::Semaphore` で管理される。
-2. **アクターID単位の直列化 (Serialization Lock)**
+3. **アクターID単位の直列化 (Serialization Lock)**
    - `AtpRepositoryPublish` など、順序依存性があるコミットジョブは、同一アクターIDに対し必ず **1並列（排他制御）** で実行される。
    - コミットの順序崩れによる ATP リポジトリ破損を防止する。
 
 #### 4.4.3 リトライ ＆ 再スケジュール
 
 - **指数バックオフとジッター (Exponential Backoff with Jitter)**
-  - ジョブが `Err(e)` を返した場合、ワーカーは `base_delay_ms * 2^attempt + jitter_ms` (0〜1,000msのジッター) を算出して遅延させ、再実行する。
-  - 非同期での再帰呼び出しによるスレッド安全の破綻（`!Send` Future）を回避するため、同期的ヘルパー `spawn_retry` を介して再度 `tokio::spawn` される。
+  - ジョブが `Err(e)` を返した場合、ワーカーは `base_delay_ms * 2^attempt + jitter_ms` (0〜1,000msのジッター) を算出し、`JobQueue::enqueue_retry` でその遅延後に実行可能になるようキューへ再投入する。
+  - リトライ待ち状態はキュー側（バックエンド実装）が保持する。`RedisJobQueue` は遅延用の Sorted Set に載せるため、Worker プロセスが再起動してもリトライ状態は残る。`InMemoryJobQueue` はプロセス内 `sleep` で遅延を実現するため、プロセス再起動でリトライ待ちは失われる（モノリスモード・開発用途では許容）。
 - **依存関係の未解決による再スケジュール**
   - 親ポストがまだ受信・インポートされていない等で処理が続行できない場合、ハンドラは自身を一時正常終了させ、依存リソースが解決されることを期待して、数秒〜数分後に再実行するジョブをジョブキューへ再エンキュー（再スケジュール）する。

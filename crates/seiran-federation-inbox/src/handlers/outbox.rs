@@ -43,7 +43,7 @@ pub async fn outbox_handler(
         ),
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
         Err(e) => {
-            eprintln!("[Outbox] DB エラー: {}", e);
+            tracing::error!("[Outbox] DB エラー: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
@@ -102,7 +102,7 @@ pub async fn outbox_handler(
     let rows = match rows {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[Outbox] 投稿取得エラー: {}", e);
+            tracing::error!("[Outbox] 投稿取得エラー: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };

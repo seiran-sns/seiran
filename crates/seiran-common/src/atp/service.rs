@@ -1,6 +1,10 @@
 use chrono::{DateTime, Utc};
+use futures_util::StreamExt;
+use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::broadcast;
 
 use crate::atp::plc::{signing_key_from_pem, PlcError};
@@ -25,11 +29,51 @@ pub enum AtpCommitError {
 }
 
 /// subscribeRepos WebSocket にブロードキャストするイベント
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AtpCommitEvent {
     pub frame_bytes: Vec<u8>,
     #[allow(dead_code)]
     pub seq: i64,
+}
+
+/// Redis Pub/Sub でイベントをプロセス間配信する際のチャンネル名。
+const ATP_EVENTS_CHANNEL: &str = "seiran:atp:events";
+
+/// Redis Pub/Sub を購読し、受信したイベントをローカルの `event_tx` へ転送し続ける。
+/// 接続が切れる・購読が終了すると `Err` を返し、呼び出し側が再接続をリトライする。
+async fn run_redis_bridge_subscriber(
+    client: &redis::Client,
+    event_tx: &Arc<broadcast::Sender<AtpCommitEvent>>,
+) -> Result<(), String> {
+    let mut pubsub = client
+        .get_async_pubsub()
+        .await
+        .map_err(|e| format!("Redis接続に失敗しました: {}", e))?;
+    pubsub
+        .subscribe(ATP_EVENTS_CHANNEL)
+        .await
+        .map_err(|e| format!("Redis購読に失敗しました: {}", e))?;
+
+    let mut stream = pubsub.on_message();
+    while let Some(msg) = stream.next().await {
+        let payload: String = match msg.get_payload() {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!("[AtpCommitService] Redisメッセージの取得に失敗しました: {}", e);
+                continue;
+            }
+        };
+        match serde_json::from_str::<AtpCommitEvent>(&payload) {
+            Ok(event) => {
+                let _ = event_tx.send(event);
+            }
+            Err(e) => {
+                tracing::error!("[AtpCommitService] イベントのデシリアライズに失敗しました: {}", e);
+            }
+        }
+    }
+
+    Err("購読ストリームが終了しました".to_string())
 }
 
 /// コミット処理に渡すレコード情報
@@ -54,6 +98,9 @@ pub struct AtpCommitService {
     pool: PgPool,
     event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
     http_client: Arc<reqwest::Client>,
+    /// `Some` の場合、コミットイベントはローカルの `event_tx` へ直接送らず Redis 経由で
+    /// 配信する（プロセス間配信ブリッジが有効。`with_redis_bridge` 参照）。
+    redis_pub: Option<redis::aio::ConnectionManager>,
 }
 
 impl AtpCommitService {
@@ -62,11 +109,66 @@ impl AtpCommitService {
         event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
         http_client: Arc<reqwest::Client>,
     ) -> Self {
-        Self { pool, event_tx, http_client }
+        Self { pool, event_tx, http_client, redis_pub: None }
+    }
+
+    /// コミットイベントを Redis Pub/Sub 経由でプロセス間配信するブリッジを有効にする。
+    ///
+    /// `seiran-api` を複数レプリカで水平スケールした場合、レプリカ A で行われたコミットは
+    /// レプリカ A の `event_tx`（プロセス内 broadcast）にしか流れず、レプリカ B の
+    /// subscribeRepos WebSocket クライアントには届かない。このブリッジを有効にすると、
+    /// コミット時にローカル送信の代わりに Redis へ publish し、全プロセス（自分自身を含む）が
+    /// 購読タスク経由でそれぞれの `event_tx` に転送するため、どのレプリカに接続した
+    /// WebSocket クライアントにも届くようになる。
+    ///
+    /// モノリスモード（`--role all`）や単一レプリカ運用では不要（`event_tx` の直接送信で十分）。
+    pub async fn with_redis_bridge(&mut self, redis_url: &str) -> Result<(), String> {
+        let client = redis::Client::open(redis_url)
+            .map_err(|e| format!("Redis接続URLが不正です: {}", e))?;
+        let publish_conn = redis::aio::ConnectionManager::new(client.clone())
+            .await
+            .map_err(|e| format!("Redis接続に失敗しました: {}", e))?;
+        self.redis_pub = Some(publish_conn);
+
+        let event_tx = Arc::clone(&self.event_tx);
+        tokio::spawn(async move {
+            loop {
+                match run_redis_bridge_subscriber(&client, &event_tx).await {
+                    Ok(()) => {}
+                    Err(e) => tracing::info!("[AtpCommitService] Redis購読が切断されました: {}", e),
+                }
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                tracing::info!("[AtpCommitService] Redis購読を再接続します...");
+            }
+        });
+
+        Ok(())
     }
 
     pub fn event_tx(&self) -> &Arc<broadcast::Sender<AtpCommitEvent>> {
         &self.event_tx
+    }
+
+    /// コミットイベントを配信する。Redis ブリッジが有効なら Redis へ publish し
+    /// （自プロセスへも購読タスク経由で戻ってくる）、無効ならローカル `event_tx` へ直接送る。
+    fn publish_event(&self, event: AtpCommitEvent) {
+        let Some(conn) = self.redis_pub.clone() else {
+            let _ = self.event_tx.send(event);
+            return;
+        };
+        tokio::spawn(async move {
+            let mut conn = conn;
+            let payload = match serde_json::to_string(&event) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!("[AtpCommitService] イベントのシリアライズに失敗しました: {}", e);
+                    return;
+                }
+            };
+            if let Err(e) = conn.publish::<_, _, ()>(ATP_EVENTS_CHANNEL, payload).await {
+                tracing::error!("[AtpCommitService] Redis publish に失敗しました: {}", e);
+            }
+        });
     }
 
     fn spawn_request_crawl(&self) {
@@ -79,8 +181,8 @@ impl AtpCommitService {
                     .send()
                     .await
                 {
-                    Ok(res) => eprintln!("[atp] requestCrawl → {}", res.status()),
-                    Err(e) => eprintln!("[atp] requestCrawl 失敗: {}", e),
+                    Ok(res) => tracing::info!("[atp] requestCrawl → {}", res.status()),
+                    Err(e) => tracing::error!("[atp] requestCrawl 失敗: {}", e),
                 }
             });
         }
@@ -302,7 +404,7 @@ impl AtpCommitService {
 
         // WebSocket ブロードキャスト
         if let Some(frame) = frame_opt {
-            let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
         }
 
         Ok(CommitResult { commit_cid, rev: new_rev, seq, at_did })
@@ -421,7 +523,7 @@ impl AtpCommitService {
         let result = self.commit_record_inner(actor_id, record, now, Some(post_id)).await?;
 
         let at_uri = format!("at://{}/app.bsky.feed.post/{}", result.at_did, rkey);
-        eprintln!("[atp] commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
+        tracing::info!("[atp] commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
         self.spawn_request_crawl();
         Ok(())
     }
@@ -462,7 +564,7 @@ impl AtpCommitService {
                 .await?;
         }
 
-        eprintln!("[atp] repost commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!("[atp] repost commit 完了: actor_id={}, rkey={}", actor_id, rkey);
         self.spawn_request_crawl();
         Ok(())
     }
@@ -507,7 +609,7 @@ impl AtpCommitService {
             .execute(&self.pool)
             .await?;
 
-        eprintln!("[atp] like commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!("[atp] like commit 完了: actor_id={}, rkey={}", actor_id, rkey);
         self.spawn_request_crawl();
         Ok(())
     }
@@ -536,7 +638,7 @@ impl AtpCommitService {
 
         self.commit_record_inner(actor_id, record, now, None).await?;
 
-        eprintln!("[atp] follow commit 完了: actor_id={}, subject={}, rkey={}", actor_id, subject_did, rkey);
+        tracing::info!("[atp] follow commit 完了: actor_id={}, subject={}, rkey={}", actor_id, subject_did, rkey);
         self.spawn_request_crawl();
         Ok(rkey)
     }
@@ -687,10 +789,10 @@ impl AtpCommitService {
         tx.commit().await?;
 
         if let Some(frame) = frame_opt {
-            let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
         }
 
-        eprintln!("[atp] repost delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!("[atp] repost delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
         self.spawn_request_crawl();
         Ok(())
     }
@@ -843,10 +945,10 @@ impl AtpCommitService {
         tx.commit().await?;
 
         if let Some(frame) = frame_opt {
-            let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
         }
 
-        eprintln!("[atp] like delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!("[atp] like delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
         self.spawn_request_crawl();
         Ok(())
     }
@@ -965,10 +1067,10 @@ impl AtpCommitService {
         tx.commit().await?;
 
         if let Some(frame) = frame_opt {
-            let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
         }
 
-        eprintln!("[atp] follow delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!("[atp] follow delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
         self.spawn_request_crawl();
         Ok(())
     }
@@ -999,7 +1101,7 @@ impl AtpCommitService {
 
         let result = self.commit_record_inner(actor_id, record, now, None).await?;
 
-        eprintln!("[atp] standalone text post commit 完了: did={}, rkey={}", result.at_did, rkey);
+        tracing::info!("[atp] standalone text post commit 完了: did={}, rkey={}", result.at_did, rkey);
         self.spawn_request_crawl();
         Ok(())
     }
@@ -1038,7 +1140,7 @@ impl AtpCommitService {
         let result = self.commit_record_inner(actor_id, record, now, Some(post_id)).await?;
 
         let at_uri = format!("at://{}/app.bsky.feed.post/{}", result.at_did, rkey);
-        eprintln!("[atp] quote commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
+        tracing::info!("[atp] quote commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
         self.spawn_request_crawl();
         Ok(())
     }
@@ -1081,7 +1183,7 @@ impl AtpCommitService {
 
         let result = self.commit_record_inner(actor_id, record, now, None).await?;
 
-        eprintln!("[atp] profile commit 完了（{}）: did={}", action, result.at_did);
+        tracing::info!("[atp] profile commit 完了（{}）: did={}", action, result.at_did);
         self.spawn_request_crawl();
         Ok(())
     }
@@ -1119,9 +1221,9 @@ impl AtpCommitService {
             .execute(&self.pool)
             .await?;
 
-        let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+        self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
 
-        eprintln!("[atp] identity broadcast: did={}, handle={}, seq={}", did, handle, seq);
+        tracing::info!("[atp] identity broadcast: did={}, handle={}, seq={}", did, handle, seq);
         Ok(())
     }
 
@@ -1158,9 +1260,9 @@ impl AtpCommitService {
             .execute(&self.pool)
             .await?;
 
-        let _ = self.event_tx.send(AtpCommitEvent { frame_bytes: frame, seq });
+        self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
 
-        eprintln!("[atp] account broadcast: did={}, active={}, seq={}", did, active, seq);
+        tracing::info!("[atp] account broadcast: did={}, active={}, seq={}", did, active, seq);
         Ok(())
     }
 }

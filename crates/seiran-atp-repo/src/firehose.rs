@@ -37,15 +37,15 @@ pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<Strea
     let mut backoff_secs = 2u64;
 
     loop {
-        eprintln!("[Jetstream] 接続中: {}", JETSTREAM_URL);
+        tracing::info!("[Jetstream] 接続中: {}", JETSTREAM_URL);
 
         match connect_and_process(&pool, &http, &stream_hub).await {
             Ok(()) => {
-                eprintln!("[Jetstream] 接続終了（正常）。再接続します。");
+                tracing::info!("[Jetstream] 接続終了（正常）。再接続します。");
                 backoff_secs = 2;
             }
             Err(e) => {
-                eprintln!("[Jetstream] エラー: {}。{}秒後に再接続します。", e, backoff_secs);
+                tracing::error!("[Jetstream] エラー: {}。{}秒後に再接続します。", e, backoff_secs);
                 sleep(Duration::from_secs(backoff_secs)).await;
                 backoff_secs = (backoff_secs * 2).min(120);
             }
@@ -62,14 +62,14 @@ async fn connect_and_process(
         .await
         .map_err(|e| format!("WebSocket 接続失敗: {}", e))?;
 
-    eprintln!("[Jetstream] 接続成功。イベント受信中...");
+    tracing::info!("[Jetstream] 接続成功。イベント受信中...");
 
     while let Some(msg) = ws_stream.next().await {
         let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
 
         if let Message::Text(text) = msg {
             if let Err(e) = process_message(&text, pool, http, stream_hub).await {
-                eprintln!("[Jetstream] メッセージ処理エラー（スキップ）: {}", e);
+                tracing::error!("[Jetstream] メッセージ処理エラー（スキップ）: {}", e);
             }
         }
     }
@@ -240,7 +240,7 @@ async fn process_message(
                 return Ok(());
             }
 
-            eprintln!("[Jetstream] 新規ポスト検出: {}", at_uri);
+            tracing::info!("[Jetstream] 新規ポスト検出: {}", at_uri);
 
             let pool2 = pool.clone();
             let hub2 = Arc::clone(stream_hub);
@@ -255,7 +255,7 @@ async fn process_message(
                             Ok(Some((parent_post_id, _))) => Some(parent_post_id),
                             Ok(None) => None,
                             Err(e) => {
-                                eprintln!("[Jetstream] リプライ親投稿検索失敗（通常投稿として保存）: {}", e);
+                                tracing::error!("[Jetstream] リプライ親投稿検索失敗（通常投稿として保存）: {}", e);
                                 None
                             }
                         }
@@ -350,10 +350,10 @@ async fn save_bsky_post(
 
     match result {
         Ok(r) if r.rows_affected() == 0 => {
-            eprintln!("[Jetstream] 重複スキップ: {}", at_uri);
+            tracing::warn!("[Jetstream] 重複スキップ: {}", at_uri);
         }
         Ok(_) => {
-            eprintln!("[Jetstream] 保存完了: {}", at_uri);
+            tracing::info!("[Jetstream] 保存完了: {}", at_uri);
 
             // 添付（画像・動画）を post_attachments に保存
             if !attachments.is_empty() {
@@ -362,7 +362,7 @@ async fn save_bsky_post(
                     if let Err(e) = posts_repo.attach_remote_media_url(
                         post_id, &att.url, Some(&att.mime_type), att.thumbnail_url.as_deref(), position as i16,
                     ).await {
-                        eprintln!("[Jetstream] 添付 URL 保存失敗（スキップ）: {}", e);
+                        tracing::error!("[Jetstream] 添付 URL 保存失敗（スキップ）: {}", e);
                     }
                 }
             }
@@ -412,7 +412,7 @@ async fn save_bsky_post(
                 stream_hub.publish_note(recipients, &note_json);
             }
         }
-        Err(e) => eprintln!("[Jetstream] DB 保存失敗: {}", e),
+        Err(e) => tracing::error!("[Jetstream] DB 保存失敗: {}", e),
     }
 }
 
@@ -436,7 +436,7 @@ async fn handle_inbound_like_create(
         Ok(Some(pair)) => pair,
         Ok(None) => return, // ローカル投稿ではない（あるいは未取り込み）
         Err(e) => {
-            eprintln!("[Jetstream/Like] 対象ポスト検索失敗: {}", e);
+            tracing::error!("[Jetstream/Like] 対象ポスト検索失敗: {}", e);
             return;
         }
     };
@@ -444,7 +444,7 @@ async fn handle_inbound_like_create(
     let actor_id = match resolve_or_upsert_bsky_actor(pool, http, did).await {
         Ok(id) => id,
         Err(e) => {
-            eprintln!("[Jetstream/Like] liker アクター解決失敗: {}", e);
+            tracing::error!("[Jetstream/Like] liker アクター解決失敗: {}", e);
             return;
         }
     };
@@ -454,11 +454,11 @@ async fn handle_inbound_like_create(
     let content = emoji.unwrap_or("❤️");
     let reactions_repo = PgReactionRepository::new(pool.clone());
     if let Err(e) = reactions_repo.insert(post_id, actor_id, "like", content, None, Some(at_uri), None).await {
-        eprintln!("[Jetstream/Like] reactions INSERT 失敗: {}", e);
+        tracing::error!("[Jetstream/Like] reactions INSERT 失敗: {}", e);
         return;
     }
 
-    eprintln!("[Jetstream/Like] post {} に {} を記録（did={}）", post_id, content, did);
+    tracing::info!("[Jetstream/Like] post {} に {} を記録（did={}）", post_id, content, did);
 
     // 通知ベル用（#37）: 自作自演（本尊が自分の投稿を Bsky 側からもいいねした等）は通知しない
     if post_author_id != actor_id {
@@ -489,7 +489,7 @@ async fn handle_inbound_like_delete(pool: &PgPool, stream_hub: &StreamHub, at_ur
     let deleted = match reactions_repo.delete_by_at_uri(at_uri).await {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("[Jetstream/Unlike] reactions DELETE 失敗: {}", e);
+            tracing::error!("[Jetstream/Unlike] reactions DELETE 失敗: {}", e);
             return;
         }
     };
@@ -497,7 +497,7 @@ async fn handle_inbound_like_delete(pool: &PgPool, stream_hub: &StreamHub, at_ur
         return; // 元々知らないリアクションだった（重複 delete イベント等）
     };
 
-    eprintln!("[Jetstream/Unlike] post {} のリアクションを取消（at_uri={}）", post_id, at_uri);
+    tracing::info!("[Jetstream/Unlike] post {} のリアクションを取消（at_uri={}）", post_id, at_uri);
 
     let posts_repo = PgPostRepository::new(pool.clone());
     let post_author_id = match posts_repo.find_by_id(post_id).await {

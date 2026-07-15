@@ -214,13 +214,13 @@ ActorMetadataResolve）は偽 sleep + 成功ログのプレースホルダーの
 > `all` ロールでは API と Worker が同一プロセス・同一キューを共有するため、今回のジョブ化は即時に有効。
 > split-role 構成で効かせるには #8（キュー永続化）が必要。
 
-### 次フェーズ（別コミット推奨・要設計判断）
-| # | 項目 | 備考 |
-|---|------|------|
-| 8 | A-4/A-6: キューの永続化バックエンド（Redis or Postgres SKIP LOCKED）+ Worker 並列制限・リトライのキュー内保持 | split-role スケールアウトの本丸 |
-| 9 | A-3: インバウンド処理のジョブ化 | inbox ハンドラ群の seiran-common 移設を伴う |
-| 10 | A-5: ATP コミットイベントのプロセス間配信 | #8 とセットで設計 |
-| 11 | D-1: tracing 導入 | 機械的だが変更行数大 |
-| 12 | D-3: 認証 extractor 化 / D-2: ApiError 統一 | |
-| 13 | B-6: PLC リトライ共通化 / B-7: 生 SQL のリポジトリ層移設 / D-5: notes.rs 分割 | |
-| 14 | E-3: 統合テスト基盤 | |
+### 次フェーズ（2026-07-15 追記: マイケルの指示により順次実施中）
+| # | 項目 | 備考 | 状態 |
+|---|------|------|------|
+| 8 | A-4/A-6: キューの永続化バックエンド（Redis）+ Worker 並列制限・リトライのキュー内保持 | split-role スケールアウトの本丸。バックエンドは Redis を選択（マイケル指示）。モノリスモード（`--role all`）は無条件 InMemory、split-role は `REDIS_URL` の有無で自動判定 | ✅ 完了（`RedisJobQueue` 実装、`JobQueue` trait に `enqueue_retry`/`dequeue_blocking` 追加しバックエンド非依存化、`WorkerEngine` に同時実行数上限（既定32）追加、docker-compose.yml に redis サービス追加。split-role実プロセスでの越境配送を実機確認済み） |
+| 9 | A-3: インバウンド処理のジョブ化 | inbox ハンドラ群の seiran-common 移設を伴う | ✅ 完了（Follow/Create/Accept/Undo/Announce/Like・EmojiReact の全ハンドラ+ヘルパー約900行を `seiran-federation-inbox` → `seiran-common::jobs::inbound_activity_process` へ移設。`JobContext` に `InboxContext`（リポジトリ4種/local_domain/AP秘密鍵/stream_hub）を追加。`inbox_handler` は署名検証後、全種別を `enqueue` するだけに単純化。純関数テスト11件も移設し全通過。`all`モード実機で起動・Worker組み込みを確認。**ただし実際の署名付きAPリクエストによるハンドラ本体のライブ動作確認は未実施**（外部Fediverseサーバーとの実接続が必要で、この制約は移設前から変わらない）) |
+| 10 | A-5: ATP コミットイベントのプロセス間配信 | `api` ロール水平スケール時に必要（Worker への ATP コミット移設自体は未実施、次の課題として残す） | ✅ 完了（`AtpCommitService::with_redis_bridge` を実装。`REDIS_URL` 設定時のみ、`api` ロールの複数レプリカ間で `subscribeRepos` の commit フレームを Redis Pub/Sub 経由で共有。2レプリカ実プロセスでの越境配信を実機確認済み。`all` ロールは無効のまま） |
+| 11 | D-1: tracing 導入 | 機械的だが変更行数大 | ✅ 完了（`println!`/`eprintln!` 272箇所を39ファイルで `tracing::info!`/`warn!`/`error!` へ機械変換。`seiran-server` で `tracing_subscriber` を初期化し `RUST_LOG` によるレベル制御が可能に。実機で `RUST_LOG=warn` によるログ抑制を確認済み） |
+| 12 | D-3: 認証 extractor 化 / D-2: ApiError 統一 | | ✅ 完了（`AuthedUser`/`MaybeAuthedUser` という axum `FromRequestParts` extractor を新設し、`extract_auth`+`find_local_by_user_id`+404処理の定型10〜15行をハンドラ引数1つに統一。notes.rs全8ハンドラ・follows.rs・misskey/endpoints.rsのブリッジ関数に適用。副次的に「アクターが見つかりません」という生タプル応答（JSON でなく素のテキストボディを返し、フロントエンドの`res.json()`がパース失敗するlatentバグ）を`ApiError::NotFound("ACTOR_NOT_FOUND")`へ統一。実機で401/200/404の各経路を確認済み。**セイラン全体には他に約70箇所の生タプルStatusCode応答が残っており、これらの完全統一は今回のスコープ外**（個別に妥当性判断が必要なため機械変換不可）) |
+| 13 | B-6: PLC リトライ共通化 / B-7: 生 SQL のリポジトリ層移設 / D-5: notes.rs 分割 | | ✅ 一部完了。**B-6**: auth.rs/setup.rs に重複していた「did:plc発行（genesis準備→Cloudflare TXT→plc.directory送信、最大3回リトライ）」を`handlers/plc_genesis.rs::register_plc_did`へ統合。**D-5**: notes.rs（1592行）を`notes/{dto,queries,delivery,validation,mod}.rs`の5ファイルへ分割（DTO / 読み取り集約クエリ / Fedi・Bsky配送オーケストレーション / 入力検証 / axumハンドラ本体）。外部から見た`crate::handlers::notes::X`パスは`pub use`で完全互換のまま維持。実機でcreate_note/home_timeline/get_note/note_contextを確認済み。**B-7（生SQLのリポジトリ層移設）は見送り**: notes/queries.rsへ整理はしたが、`seiran-common`のリポジトリ trait への昇格は行っていない（read-model専用で他クレートからの再利用価値が低く、trait拡張のリスクに見合わないと判断。追って必要になれば`queries.rs`の内容がそのまま移設候補になる） |
+| 14 | E-3: 統合テスト基盤 | | ✅ 完了（`crates/seiran-api/tests/` を新設。`support/mod.rs` が実DB接続+本物の`seiran_api::router`+ログインヘルパーを提供し、各テストは`#[ignore]`で通常のcargo testから除外・明示実行する運用。`notes_integration.rs`に3テスト実装（作成→取得の往復一致、未認証401がJSON形式、存在しないnote_idの404がJSON形式）。実DBに対して3件とも実行・成功を確認済み） |

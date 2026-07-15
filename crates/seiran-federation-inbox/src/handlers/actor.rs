@@ -82,7 +82,7 @@ pub async fn actor_handler(
         }
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
         Err(e) => {
-            eprintln!("[Actor] DB エラー: {}", e);
+            tracing::error!("[Actor] DB エラー: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };

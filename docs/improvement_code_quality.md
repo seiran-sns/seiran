@@ -74,14 +74,9 @@
 
 ---
 
-### [中-3] 構造化ログがなく `eprintln!` で全ログを出力している
+### [解消済み] 構造化ログがなく `eprintln!` で全ログを出力している
 
-- **深刻度**: 中
-- **該当箇所**: コードベース全体（`eprintln!("[atp] ...")`、`eprintln!("[Inbox] ...")` 等）
-- **問題点**:  
-  `eprintln!` はログレベルの制御・フィルタリングができない。本番障害時に DEBUG レベルの大量ログが stderr に流れてもレベルで絞れない。また JSON 形式で出力できないため、Loki/CloudWatch 等への取り込みがしにくい。
-- **改善案**:  
-  `tracing` クレート（`tracing-subscriber` + JSON フォーマッタ）を導入し、`eprintln!` を `tracing::info!` / `tracing::warn!` / `tracing::error!` に段階的に置き換える。`seiran-server/main.rs` で `tracing_subscriber::fmt::init()` を呼ぶだけで既存コードへの影響を最小限に抑えられる。今すぐ全置換する必要はなく、新規コードから適用していく。
+- **状態**: 2026-07リファクタリングで解消。ワークスペース全体（272箇所）の `println!`/`eprintln!` を `tracing::info!`/`warn!`/`error!` へ機械的に置換（メッセージ文言中の「失敗」「エラー」等のキーワードでレベルを判定）。`seiran-server/main.rs` で `tracing_subscriber::fmt().with_env_filter(...).init()` を呼び、`RUST_LOG` 環境変数でレベル制御可能になった（未設定時は `info`）。JSON フォーマッタは未導入（今後の課題、`tracing_subscriber::fmt().json()` に切り替えるだけで対応可能）。
 
 ---
 
@@ -140,14 +135,9 @@
 
 ---
 
-### [低-3] `create_job_queue()` が redis 指定でも InMemory を返し誤解を招くログを出す
+### [解消済み] `create_job_queue()` が redis 指定でも InMemory を返し誤解を招くログを出す
 
-- **深刻度**: 低
-- **該当箇所**: `crates/seiran-common/src/queue/mod.rs` — `create_job_queue()`
-- **問題点**:  
-  `JOB_QUEUE_BACKEND=redis` を設定しても InMemoryJobQueue が返される。ログに「redis → InMemory（開発モード）」と表示されるが、設定者は Redis を期待している可能性がある。
-- **改善案**:  
-  `redis` が指定された場合は明示的に `warn!` (または `eprintln!`) で「Redis バックエンドは未実装のため InMemory を使用します」と出力するか、サポート外の値を受け取ったら起動失敗させる。
+- **状態**: 2026-07リファクタリングで解消。`RedisJobQueue` を実装し、`create_job_queue(is_monolith)` はロール（モノリス/split-role）と `REDIS_URL` の有無に応じて明示的にバックエンドを選択・ログ出力するようになった（`crates/seiran-common/src/queue/mod.rs`）。`JOB_QUEUE_BACKEND` 環境変数は廃止し `REDIS_URL` の有無で判定する方式に変更。
 
 ---
 

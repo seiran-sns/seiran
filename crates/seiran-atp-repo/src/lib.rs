@@ -14,6 +14,6 @@ pub mod firehose;
 
 /// Firehose リスナーを起動する（常駐）。
 pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<StreamHub>) {
-    eprintln!("[seiran-atp-repo] Firehose リスナーを起動します。");
+    tracing::info!("[seiran-atp-repo] Firehose リスナーを起動します。");
     firehose::run(pool, http, stream_hub).await;
 }

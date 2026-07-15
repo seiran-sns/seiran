@@ -43,7 +43,7 @@ pub(super) async fn resolve_webfinger_impl(client: &reqwest::Client, username: &
         urlencoding::encode(&resource)
     );
 
-    println!("[Webfinger] 解決を試行中: {}", url);
+    tracing::info!("[Webfinger] 解決を試行中: {}", url);
 
     let res = client
         .get(&url)

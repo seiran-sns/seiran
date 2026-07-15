@@ -144,7 +144,7 @@ impl ApClient {
             }
         }
 
-        println!("[ApClient] 公開鍵フェッチ中: {}", key_id);
+        tracing::info!("[ApClient] 公開鍵フェッチ中: {}", key_id);
 
         // 2. キャッシュミス時はアクターもしくは鍵を直接フェッチ
         // 通常 key_id (e.g. https://example.com/users/test#main-key) にアクセスすると

@@ -308,7 +308,7 @@ pub async fn search_appview_posts(
     let resp = match client.get(&url).send().await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[atp::search_appview_posts] AppView フェッチ失敗: {}", e);
+            tracing::error!("[atp::search_appview_posts] AppView フェッチ失敗: {}", e);
             return (vec![], None);
         }
     };
@@ -316,7 +316,7 @@ pub async fn search_appview_posts(
     let json: serde_json::Value = match resp.json().await {
         Ok(j) => j,
         Err(e) => {
-            eprintln!("[atp::search_appview_posts] AppView JSON パース失敗: {}", e);
+            tracing::error!("[atp::search_appview_posts] AppView JSON パース失敗: {}", e);
             return (vec![], None);
         }
     };

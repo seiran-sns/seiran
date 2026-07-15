@@ -12,7 +12,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use seiran_common::queue::create_job_queue;
 use seiran_common::repository::{
     ActorRepository, FollowRepository, PgActorRepository, PgFollowRepository, PgPostRepository,
     PgReactionRepository, PostRepository, ReactionRepository,
@@ -46,14 +45,16 @@ pub struct AppState {
 
 /// 共有リソースを受け取り federation ロールの [`AppState`] を構築する。
 /// `stream_hub` は api ロールと共有する（federation 単独時は新規で可）。
+/// `job_queue` は呼び出し元（`seiran-server`）がロールに応じて一度だけ生成した
+/// 共有インスタンスを受け取る（`all` ロールでは api/worker と同一インスタンスになる）。
 pub fn init_state(
     pool: PgPool,
     secrets: &Secrets,
     http_client: Arc<reqwest::Client>,
     local_domain: String,
     stream_hub: Arc<StreamHub>,
+    job_queue: Arc<dyn JobQueue>,
 ) -> Arc<AppState> {
-    let job_queue = create_job_queue();
     let actor_repo: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let follow_repo: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
     let post_repo: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));

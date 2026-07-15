@@ -62,7 +62,7 @@ pub async fn xrpc_get_blob(
         }
         Ok(None) => (StatusCode::NOT_FOUND, "Blob not found").into_response(),
         Err(e) => {
-            eprintln!("[getBlob] DB エラー: {}", e);
+            tracing::error!("[getBlob] DB エラー: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
         }
     }
@@ -86,7 +86,7 @@ pub async fn xrpc_get_repo(
         Ok(Some(a)) => a,
         Ok(None) => return (StatusCode::NOT_FOUND, "DID が見つかりません").into_response(),
         Err(e) => {
-            eprintln!("[getRepo] アクター取得失敗: {}", e);
+            tracing::error!("[getRepo] アクター取得失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
@@ -105,7 +105,7 @@ pub async fn xrpc_get_repo(
     let block_rows = match state.atp_repo.find_blocks_by_actor(actor_id).await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[getRepo] ブロック取得失敗: {}", e);
+            tracing::error!("[getRepo] ブロック取得失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "ブロック取得失敗").into_response();
         }
     };
@@ -126,7 +126,7 @@ pub async fn xrpc_get_repo(
         )
             .into_response(),
         Err(e) => {
-            eprintln!("[getRepo] CAR 生成失敗: {}", e);
+            tracing::error!("[getRepo] CAR 生成失敗: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "CAR 生成失敗").into_response()
         }
     }
@@ -165,7 +165,7 @@ async fn handle_subscribe_repos(
                         continue;
                     }
                     Err(e) => {
-                        eprintln!("[subscribeRepos] frame_bytes 解凍失敗 id={}: {}", evt.id, e);
+                        tracing::error!("[subscribeRepos] frame_bytes 解凍失敗 id={}: {}", evt.id, e);
                     }
                 }
             }
@@ -227,7 +227,7 @@ async fn handle_subscribe_repos(
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_n)) => {
-                        eprintln!("[subscribeRepos] イベントチャンネルが遅延");
+                        tracing::warn!("[subscribeRepos] イベントチャンネルが遅延");
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }

@@ -25,7 +25,7 @@ pub async fn handle(actor_id: i64, commit_type: String, ctx: Arc<JobContext>) ->
         .await
         .map_err(|e| format!("アクター排他ロック取得失敗: {}", e))?;
 
-    eprintln!(
+    tracing::info!(
         "[Job::AtpRepositoryPublish] 開始 - actor_id: {}, commit_type: {}",
         actor_id, commit_type
     );
@@ -35,14 +35,14 @@ pub async fn handle(actor_id: i64, commit_type: String, ctx: Arc<JobContext>) ->
             handle_create_post(actor_id, &ctx).await?;
         }
         other => {
-            eprintln!(
+            tracing::info!(
                 "[Job::AtpRepositoryPublish] 未対応のコミットタイプ: {} (actor_id={})",
                 other, actor_id
             );
         }
     }
 
-    eprintln!(
+    tracing::info!(
         "[Job::AtpRepositoryPublish] 正常終了 - actor_id: {}",
         actor_id
     );
@@ -53,7 +53,7 @@ async fn handle_create_post(actor_id: i64, ctx: &Arc<JobContext>) -> Result<(), 
     let pool = match &ctx.db_pool {
         Some(p) => p,
         None => {
-            eprintln!("[AtpRepositoryPublish] DB pool 未設定のためスキップ");
+            tracing::warn!("[AtpRepositoryPublish] DB pool 未設定のためスキップ");
             return Ok(());
         }
     };
@@ -62,14 +62,14 @@ async fn handle_create_post(actor_id: i64, ctx: &Arc<JobContext>) -> Result<(), 
     let atp_handle = match std::env::var("ATP_HANDLE").ok() {
         Some(h) => h,
         None => {
-            eprintln!("[AtpRepositoryPublish] ATP_HANDLE 未設定のためスキップ");
+            tracing::warn!("[AtpRepositoryPublish] ATP_HANDLE 未設定のためスキップ");
             return Ok(());
         }
     };
     let atp_password = match std::env::var("ATP_APP_PASSWORD").ok() {
         Some(p) => p,
         None => {
-            eprintln!("[AtpRepositoryPublish] ATP_APP_PASSWORD 未設定のためスキップ");
+            tracing::warn!("[AtpRepositoryPublish] ATP_APP_PASSWORD 未設定のためスキップ");
             return Ok(());
         }
     };
@@ -90,7 +90,7 @@ async fn handle_create_post(actor_id: i64, ctx: &Arc<JobContext>) -> Result<(), 
     let row = match row {
         Some(r) => r,
         None => {
-            eprintln!("[AtpRepositoryPublish] 配信対象ポストなし (actor_id={})", actor_id);
+            tracing::info!("[AtpRepositoryPublish] 配信対象ポストなし (actor_id={})", actor_id);
             return Ok(());
         }
     };
@@ -120,7 +120,7 @@ async fn handle_create_post(actor_id: i64, ctx: &Arc<JobContext>) -> Result<(), 
         .await
         .map_err(|e| format!("ATP URI 書き戻し失敗: {}", e))?;
 
-    eprintln!(
+    tracing::info!(
         "[AtpRepositoryPublish] 外部 PDS 配信完了: post_id={}, at_uri={}",
         post_id, at_uri
     );

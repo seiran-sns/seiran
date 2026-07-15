@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::queue::worker::JobContext;
 
 pub async fn handle(actor_id: i64, _ctx: Arc<JobContext>) -> Result<(), String> {
-    eprintln!(
+    tracing::error!(
         "[Job::ActorMetadataResolve] 未実装のため破棄します (actor_id={})",
         actor_id
     );

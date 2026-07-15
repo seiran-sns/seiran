@@ -141,7 +141,7 @@ pub async fn miauth_authorize(
         Ok(Some(a)) => a,
         Ok(None) => return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
         Err(e) => {
-            eprintln!("[miauth] ユーザー検索失敗: {}", e);
+            tracing::error!("[miauth] ユーザー検索失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
@@ -156,7 +156,7 @@ pub async fn miauth_authorize(
     let token = match state.local_auth.generate_token(auth_user.user_id, &auth_user.email) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("[miauth] トークン生成失敗: {}", e);
+            tracing::error!("[miauth] トークン生成失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "トークン生成エラー").into_response();
         }
     };

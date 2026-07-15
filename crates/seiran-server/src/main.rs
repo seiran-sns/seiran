@@ -17,7 +17,33 @@
 
 use std::sync::Arc;
 
-use seiran_common::{ap::ApClient, get_db_pool, run_migrations, DeliveryConfig, InMemoryJobQueue, SecretsFile, StreamHub};
+use seiran_common::repository::{
+    PgActorRepository, PgFollowRepository, PgPostRepository, PgReactionRepository,
+};
+use seiran_common::{
+    ap::ApClient, create_job_queue, get_db_pool, run_migrations, DeliveryConfig, InboxContext,
+    SecretsFile, StreamHub,
+};
+use sqlx::PgPool;
+
+/// `InboxContext`（InboundActivityProcess ジョブ用）を組み立てる。
+/// standalone worker と `all` ロール埋め込み worker の両方から呼ばれる共通ヘルパー。
+fn build_inbox_context(
+    pool: &PgPool,
+    local_domain: &str,
+    ap_private_key_pem: Option<String>,
+    stream_hub: Arc<StreamHub>,
+) -> InboxContext {
+    InboxContext {
+        actor_repo: Arc::new(PgActorRepository::new(pool.clone())),
+        follow_repo: Arc::new(PgFollowRepository::new(pool.clone())),
+        post_repo: Arc::new(PgPostRepository::new(pool.clone())),
+        reaction_repo: Arc::new(PgReactionRepository::new(pool.clone())),
+        local_domain: local_domain.to_string(),
+        ap_private_key_pem: ap_private_key_pem.unwrap_or_default(),
+        stream_hub,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Role {
@@ -58,7 +84,7 @@ impl Role {
             "worker" => Role::Worker,
             "firehose" | "atp-repo" => Role::Firehose,
             other => {
-                eprintln!("[seiran-server] 不明なロール '{}' → 'all' で起動します", other);
+                tracing::warn!("[seiran-server] 不明なロール '{}' → 'all' で起動します", other);
                 Role::All
             }
         }
@@ -68,7 +94,7 @@ impl Role {
 async fn serve(app: axum::Router, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    eprintln!("[seiran-server] リッスン開始: http://{}", addr);
+    tracing::info!("[seiran-server] リッスン開始: http://{}", addr);
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -82,12 +108,20 @@ fn env_port(key: &str, default: u16) -> u16 {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `RUST_LOG`（例: `RUST_LOG=debug`, `RUST_LOG=seiran_common=debug,info`）でレベル制御。
+    // 未設定時は info レベル。
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .init();
+
     // blurhash 0.2.x のオフバイワンバグによる既知パニックを stderr に出力しない。
     // catch_unwind で回復済みのため、ログノイズを抑制するだけで動作は正常。
     std::panic::set_hook(Box::new(|info| {
         let msg = info.to_string();
         if !msg.contains("blurhash") {
-            eprintln!("{}", msg);
+            tracing::error!("{}", msg);
         }
     }));
 
@@ -96,39 +130,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = dotenvy::dotenv();
 
     let role = Role::resolve();
-    eprintln!("[seiran-server] ロール: {:?}", role);
+    tracing::info!("[seiran-server] ロール: {:?}", role);
 
     // worker も BskyVideoPoll 等 DB アクセスが必要なジョブを扱うため、単独起動時も
     // DB に接続する（以前は「DB不要」だったが、ジョブハンドラの実装が進んだため変更）。
     // AP 配送ジョブ（ApDelivery）が署名に AP 鍵を使うため、シークレットも読み込む。
     if role == Role::Worker {
         let secrets = SecretsFile::from_env().load_or_create()?;
-        eprintln!("[seiran-server] シークレット読み込み完了");
+        tracing::info!("[seiran-server] シークレット読み込み完了");
         let pool = get_db_pool().await?;
-        eprintln!("[seiran-server] DB 接続完了");
+        tracing::info!("[seiran-server] DB 接続完了");
         let http_client = Arc::new(
             reqwest::Client::builder()
                 .user_agent("seiran-federation/0.1.0")
                 .build()?,
         );
+        let worker_local_domain =
+            std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
         let delivery = DeliveryConfig {
-            local_domain: std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string()),
+            local_domain: worker_local_domain.clone(),
             ap_private_key_pem: secrets.ap_private_key_pem.clone(),
             ap_public_key_pem: secrets.ap_public_key_pem.clone(),
         };
-        // 単独 worker プロセスは他ロールとキューを共有できない（split-role構成では
-        // Redis統合まで各プロセスが独立したキューになる。現状の既知の制約）。
-        let queue = Arc::new(InMemoryJobQueue::new());
-        seiran_federation_worker::run(queue, pool, Arc::new(ApClient::new(http_client)), delivery).await;
+        // standalone worker には WS 接続クライアントが居ないため空の StreamHub を使う
+        // （InboundActivityProcess の realtime 配信は no-op になる。Role::Firehose と同じ扱い）。
+        let inbox = build_inbox_context(
+            &pool, &worker_local_domain, secrets.ap_private_key_pem.clone(), Arc::new(StreamHub::new()),
+        );
+        // split-role（standalone worker）: REDIS_URL があれば api/federation プロセスと
+        // キューを共有できる。未設定なら自分専用の InMemory になる既知の制約（create_job_queue 参照）。
+        let queue = create_job_queue(false).await;
+        seiran_federation_worker::run(queue, pool, Arc::new(ApClient::new(http_client)), delivery, Some(inbox)).await;
         return Ok(());
     }
 
     // ── 共有リソース（プロセス内で一度だけ生成し各ロールへ渡す）──
     let secrets = Arc::new(SecretsFile::from_env().load_or_create()?);
-    eprintln!("[seiran-server] シークレット読み込み完了");
+    tracing::info!("[seiran-server] シークレット読み込み完了");
 
     let pool = get_db_pool().await?;
-    eprintln!("[seiran-server] DB 接続完了");
+    tracing::info!("[seiran-server] DB 接続完了");
 
     let http_client = Arc::new(
         reqwest::Client::builder()
@@ -136,12 +177,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build()?,
     );
     let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
-    // `all` ロールでは api と worker が同一プロセス内でこのインスタンスを共有する
-    // （api 側で enqueue したジョブを worker がそのまま処理できる）。
-    // worker 側は具体型 `Arc<InMemoryJobQueue>`、api 側はトレイトオブジェクト
-    // `Arc<dyn JobQueue>` を要求するため、両方の型で持っておく。
-    let job_queue_concrete = Arc::new(InMemoryJobQueue::new());
-    let job_queue: Arc<dyn seiran_common::JobQueue> = job_queue_concrete.clone();
+    // `all` ロールは常に InMemory（同一プロセス内で api/federation/worker が動くため
+    // 外部ミドルウェア不要）。split-role（api/federation 単独起動）は REDIS_URL の
+    // 有無で Redis/InMemory を切り替える（create_job_queue のロジック参照）。
+    let job_queue = create_job_queue(role == Role::All).await;
+    // ATP コミットイベントの Redis プロセス間配信ブリッジも同じ方針: `all` は常に無効
+    // （`api` role を複数レプリカで水平スケールする場合のみ必要。単一プロセス内なら
+    // event_tx の直接配信で十分）。split-role の api ロールでは REDIS_URL があれば有効化する。
+    let atp_event_redis_url = if role == Role::All {
+        None
+    } else {
+        std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty())
+    };
 
     match role {
         Role::Firehose => {
@@ -152,10 +199,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Role::Api => {
             run_migrations(&pool).await?;
-            eprintln!("[seiran-server] マイグレーション適用完了");
+            tracing::info!("[seiran-server] マイグレーション適用完了");
 
-            let state =
-                seiran_api::init_state(pool, secrets, http_client, local_domain, job_queue).await;
+            let state = seiran_api::init_state(
+                pool, secrets, http_client, local_domain, job_queue, atp_event_redis_url,
+            )
+            .await;
             seiran_api::spawn_startup_tasks(&state);
             seiran_api::spawn_gc_tasks(&state);
             serve(seiran_api::router(state), env_port("PORT", 3000)).await?;
@@ -169,6 +218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 http_client,
                 local_domain,
                 Arc::new(StreamHub::new()),
+                job_queue,
             );
             serve(
                 seiran_federation_inbox::router(state),
@@ -179,7 +229,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Role::All => {
             run_migrations(&pool).await?;
-            eprintln!("[seiran-server] マイグレーション適用完了");
+            tracing::info!("[seiran-server] マイグレーション適用完了");
 
             // api ロール
             let api_state = seiran_api::init_state(
@@ -188,12 +238,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Arc::clone(&http_client),
                 local_domain.clone(),
                 Arc::clone(&job_queue),
+                atp_event_redis_url,
             )
             .await;
             seiran_api::spawn_startup_tasks(&api_state);
             seiran_api::spawn_gc_tasks(&api_state);
 
-            // federation ロール（#37: ストリーミングハブを api と共有して跨いで配信）
+            // federation ロール（#37: ストリーミングハブを api と共有して跨いで配信。
+            // job_queue も api/worker と同一インスタンスを共有する）
             let shared_hub = Arc::clone(&api_state.stream_hub);
             let inbox_state = seiran_federation_inbox::init_state(
                 pool.clone(),
@@ -201,6 +253,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Arc::clone(&http_client),
                 local_domain.clone(),
                 shared_hub,
+                Arc::clone(&job_queue),
             );
 
             // firehose リスナーをバックグラウンド起動（stream_hub を共有して WebSocket 配信）
@@ -213,15 +266,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // worker をバックグラウンド起動（api ロールと同じ ApClient / JobQueue / DB プールを共有）
             let worker_ap_client = Arc::clone(&api_state.ap_client);
-            let worker_queue = Arc::clone(&job_queue_concrete);
+            let worker_queue = Arc::clone(&job_queue);
             let worker_pool = pool.clone();
             let worker_delivery = DeliveryConfig {
                 local_domain: local_domain.clone(),
                 ap_private_key_pem: secrets.ap_private_key_pem.clone(),
                 ap_public_key_pem: secrets.ap_public_key_pem.clone(),
             };
+            // InboundActivityProcess 用: api ロールと同じ stream_hub を共有するため、
+            // 埋め込み worker で処理したインバウンド活動のリアルタイム通知も api の
+            // WebSocket クライアントへ届く。
+            let worker_inbox = build_inbox_context(
+                &pool, &local_domain, secrets.ap_private_key_pem.clone(), Arc::clone(&api_state.stream_hub),
+            );
             tokio::spawn(async move {
-                seiran_federation_worker::run(worker_queue, worker_pool, worker_ap_client, worker_delivery).await
+                seiran_federation_worker::run(
+                    worker_queue, worker_pool, worker_ap_client, worker_delivery, Some(worker_inbox),
+                )
+                .await
             });
 
             // パスが衝突しないため単一ポートに合流できる

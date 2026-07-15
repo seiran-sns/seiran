@@ -205,9 +205,13 @@ pub async fn reactions_create(
     State(state): State<AppState>,
     Json(body): Json<ReactionCreateBody>,
 ) -> impl IntoResponse {
+    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
+        Ok(u) => u,
+        Err(e) => return as_no_content(e),
+    };
     let resp = crate::handlers::notes::create_reaction(
         Path(body.note_id),
-        headers,
+        user,
         State(state),
         Json(ReactRequest { content: body.reaction }),
     )
@@ -221,15 +225,11 @@ pub async fn reactions_create(
 /// 指定する必要がない）。既存の `delete_reaction` は絵文字をパスパラメータに取るため、
 /// ここで現在のリアクション内容を引いてから委譲する。
 pub async fn reactions_delete(headers: HeaderMap, State(state): State<AppState>, Json(body): Json<NoteIdBody>) -> Response {
-    let auth_user = match extract_auth(&headers, &state.local_auth).await {
+    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
         Ok(u) => u,
-        Err(e) => return e.into_response(),
+        Err(e) => return e,
     };
-    let actor_id = match state.actors.find_local_by_user_id(auth_user.user_id).await {
-        Ok(Some(a)) => a.id,
-        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
-        Err(e) => return ApiError::Internal(e.to_string()).into_response(),
-    };
+    let actor_id = user.actor_id;
     let note_id: i64 = match body.note_id.parse() {
         Ok(id) => id,
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
@@ -246,7 +246,7 @@ pub async fn reactions_delete(headers: HeaderMap, State(state): State<AppState>,
         None => return ApiError::NotFound("NOT_REACTED").into_response(),
     };
 
-    let resp = crate::handlers::notes::delete_reaction(Path((body.note_id, content)), headers, State(state))
+    let resp = crate::handlers::notes::delete_reaction(Path((body.note_id, content)), user, State(state))
         .await
         .into_response();
     as_no_content(resp)
@@ -254,7 +254,11 @@ pub async fn reactions_delete(headers: HeaderMap, State(state): State<AppState>,
 
 /// POST /api/notes/unrenote
 pub async fn notes_unrenote(headers: HeaderMap, State(state): State<AppState>, Json(body): Json<NoteIdBody>) -> impl IntoResponse {
-    let resp = crate::handlers::notes::delete_repost(Path(body.note_id), headers, State(state))
+    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
+        Ok(u) => u,
+        Err(e) => return as_no_content(e),
+    };
+    let resp = crate::handlers::notes::delete_repost(Path(body.note_id), user, State(state))
         .await
         .into_response();
     as_no_content(resp)
@@ -285,9 +289,10 @@ pub async fn following_create(headers: HeaderMap, State(state): State<AppState>,
 
 /// POST /api/following/delete
 pub async fn following_delete(headers: HeaderMap, State(state): State<AppState>, Json(body): Json<FollowingBody>) -> Response {
-    if let Err(e) = extract_auth(&headers, &state.local_auth).await {
-        return e.into_response();
-    }
+    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
     let actor_id: i64 = match body.user_id.parse() {
         Ok(id) => id,
         Err(_) => return ApiError::BadRequest("INVALID_USER_ID".to_owned()).into_response(),
@@ -296,7 +301,7 @@ pub async fn following_delete(headers: HeaderMap, State(state): State<AppState>,
         Ok(t) => t,
         Err(e) => return e.into_response(),
     };
-    let resp = crate::handlers::follows::delete_follow(headers, State(state), Json(DeleteFollowRequest { target }))
+    let resp = crate::handlers::follows::delete_follow(user, State(state), Json(DeleteFollowRequest { target }))
         .await
         .into_response();
     as_no_content(resp)

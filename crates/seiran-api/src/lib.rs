@@ -83,7 +83,7 @@ impl AppState {
             .enqueue(Job::ApDelivery { actor_id, kind }, job_priority::HIGH)
             .await
         {
-            eprintln!("[job] ApDelivery enqueue 失敗 (actor_id={}): {}", actor_id, e);
+            tracing::error!("[job] ApDelivery enqueue 失敗 (actor_id={}): {}", actor_id, e);
         }
     }
 
@@ -94,7 +94,7 @@ impl AppState {
             .enqueue(Job::ActorHistorySync { ap_uri, at_did }, job_priority::LOW)
             .await
         {
-            eprintln!("[job] ActorHistorySync enqueue 失敗: {}", e);
+            tracing::error!("[job] ActorHistorySync enqueue 失敗: {}", e);
         }
     }
 }
@@ -110,6 +110,10 @@ pub async fn init_state(
     http_client: Arc<reqwest::Client>,
     local_domain: String,
     job_queue: Arc<dyn JobQueue>,
+    // `Some` なら ATP コミットイベントを Redis Pub/Sub 経由でプロセス間配信する
+    // ブリッジを有効にする（`api` ロールを複数レプリカで水平スケールする場合に必要。
+    // モノリスモードや単一レプリカ運用では `None` でよい）。
+    atp_event_redis_url: Option<String>,
 ) -> AppState {
     let local_auth = Arc::new(LocalAuthProvider::new(secrets.jwt_secret_bytes()));
     let ap_client = Arc::new(ApClient::new(Arc::clone(&http_client)));
@@ -117,18 +121,25 @@ pub async fn init_state(
     let (atp_event_tx, _) = broadcast::channel::<AtpCommitEvent>(1024);
     let atp_event_tx = Arc::new(atp_event_tx);
 
-    let atp_service = Arc::new(AtpCommitService::new(
-        pool.clone(),
-        Arc::clone(&atp_event_tx),
-        Arc::clone(&http_client),
-    ));
+    let mut atp_service =
+        AtpCommitService::new(pool.clone(), Arc::clone(&atp_event_tx), Arc::clone(&http_client));
+    if let Some(redis_url) = atp_event_redis_url {
+        match atp_service.with_redis_bridge(&redis_url).await {
+            Ok(()) => tracing::info!("[seiran-api] ATPコミットイベント: Redisプロセス間配信ブリッジ有効"),
+            Err(e) => tracing::error!(
+                "[seiran-api] ATPコミットイベントのRedisブリッジ有効化に失敗（プロセス内配信のみで続行）: {}",
+                e
+            ),
+        }
+    }
+    let atp_service = Arc::new(atp_service);
 
     let cloudflare = match (
         std::env::var("CLOUDFLARE_API_TOKEN"),
         std::env::var("CLOUDFLARE_ZONE_ID"),
     ) {
         (Ok(token), Ok(zone_id)) if !token.is_empty() && !zone_id.is_empty() => {
-            eprintln!("[seiran-api] Cloudflare DNS ハンドル検証: 有効");
+            tracing::info!("[seiran-api] Cloudflare DNS ハンドル検証: 有効");
             Some(Arc::new(cloudflare::CloudflareClient::new(
                 Arc::clone(&http_client),
                 token,
@@ -136,7 +147,7 @@ pub async fn init_state(
             )))
         }
         _ => {
-            eprintln!("[seiran-api] Cloudflare DNS ハンドル検証: 無効 (HTTP well-known のみ)");
+            tracing::info!("[seiran-api] Cloudflare DNS ハンドル検証: 無効 (HTTP well-known のみ)");
             None
         }
     };
@@ -323,15 +334,15 @@ async fn ensure_handle_txt_records(state: &AppState) {
     let rows = match state.actors.list_local_dids().await {
         Ok(rows) => rows,
         Err(e) => {
-            eprintln!("[startup] ローカルユーザー取得失敗: {}", e);
+            tracing::error!("[startup] ローカルユーザー取得失敗: {}", e);
             return;
         }
     };
     for (username, did) in rows {
         let handle = format!("{}.{}", username, state.local_domain);
         match cf.ensure_atproto_txt(&handle, &did).await {
-            Ok(_) => eprintln!("[startup] TXT 確認済み: _atproto.{}", handle),
-            Err(e) => eprintln!("[startup] TXT 登録失敗: {}: {}", handle, e),
+            Ok(_) => tracing::info!("[startup] TXT 確認済み: _atproto.{}", handle),
+            Err(e) => tracing::error!("[startup] TXT 登録失敗: {}: {}", handle, e),
         }
     }
 }
@@ -345,8 +356,8 @@ async fn request_relay_crawl(state: &AppState) {
         .send()
         .await
     {
-        Ok(res) => eprintln!("[atp] 起動時 requestCrawl → {}", res.status()),
-        Err(e) => eprintln!("[atp] 起動時 requestCrawl 失敗: {}", e),
+        Ok(res) => tracing::info!("[atp] 起動時 requestCrawl → {}", res.status()),
+        Err(e) => tracing::error!("[atp] 起動時 requestCrawl 失敗: {}", e),
     }
 }
 
@@ -367,7 +378,7 @@ async fn backfill_identity_events(state: &AppState) {
     {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[startup] #identity 対象取得失敗: {}", e);
+            tracing::error!("[startup] #identity 対象取得失敗: {}", e);
             return;
         }
     };
@@ -375,8 +386,8 @@ async fn backfill_identity_events(state: &AppState) {
     for (actor_id, username, did) in missing {
         let handle = format!("{}.{}", username, state.local_domain);
         match state.atp_service.broadcast_identity_event(actor_id, &did, &handle, now).await {
-            Ok(_) => eprintln!("[startup] #identity broadcast: {}", handle),
-            Err(e) => eprintln!("[startup] #identity 失敗 {}: {}", handle, e),
+            Ok(_) => tracing::info!("[startup] #identity broadcast: {}", handle),
+            Err(e) => tracing::error!("[startup] #identity 失敗 {}: {}", handle, e),
         }
     }
 }
@@ -442,7 +453,7 @@ async fn run_media_gc(
     {
         Ok(rows) => rows,
         Err(e) => {
-            eprintln!("[media-gc] 孤立ファイル取得失敗: {}", e);
+            tracing::error!("[media-gc] 孤立ファイル取得失敗: {}", e);
             return;
         }
     };
@@ -450,30 +461,30 @@ async fn run_media_gc(
     if rows.is_empty() {
         return;
     }
-    eprintln!("[media-gc] 孤立ファイル {} 件を処理します", rows.len());
+    tracing::info!("[media-gc] 孤立ファイル {} 件を処理します", rows.len());
 
     for row in rows {
         match storage_providers.find_by_id(row.storage_provider_id).await {
             Ok(Some(provider)) => {
                 let s3 = S3StorageClient::new(&provider);
                 if let Err(e) = s3.delete(&row.storage_key).await {
-                    eprintln!("[media-gc] S3 削除失敗 id={}: {}", row.id, e);
+                    tracing::error!("[media-gc] S3 削除失敗 id={}: {}", row.id, e);
                     continue; // S3 失敗時は DB も削除しない
                 }
                 if let Err(e) = media_files.delete_by_id(row.id).await {
-                    eprintln!("[media-gc] DB 削除失敗 id={}: {}", row.id, e);
+                    tracing::error!("[media-gc] DB 削除失敗 id={}: {}", row.id, e);
                 } else {
-                    eprintln!("[media-gc] 削除完了 id={}", row.id);
+                    tracing::info!("[media-gc] 削除完了 id={}", row.id);
                 }
             }
             Ok(None) => {
-                eprintln!(
+                tracing::warn!(
                     "[media-gc] プロバイダー不明 id={}, provider_id={}",
                     row.id, row.storage_provider_id
                 );
             }
             Err(e) => {
-                eprintln!("[media-gc] プロバイダー取得失敗: {}", e);
+                tracing::error!("[media-gc] プロバイダー取得失敗: {}", e);
             }
         }
     }

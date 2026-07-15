@@ -15,16 +15,16 @@ use crate::traits::ApDeliveryKind;
 
 pub async fn handle(actor_id: i64, kind: ApDeliveryKind, ctx: Arc<JobContext>) -> Result<(), String> {
     let Some(pool) = ctx.db_pool.as_ref() else {
-        eprintln!("[ApDelivery] DB pool 未設定のためスキップ (actor_id={})", actor_id);
+        tracing::warn!("[ApDelivery] DB pool 未設定のためスキップ (actor_id={})", actor_id);
         return Ok(());
     };
     let Some(cfg) = ctx.delivery.as_ref() else {
-        eprintln!("[ApDelivery] 配送設定（DeliveryConfig）未注入のためスキップ (actor_id={})", actor_id);
+        tracing::warn!("[ApDelivery] 配送設定（DeliveryConfig）未注入のためスキップ (actor_id={})", actor_id);
         return Ok(());
     };
     // 鍵未設定はリトライしても直らないため、明示ログを残して破棄する（空文字で署名を試みない）
     let Some(private_pem) = cfg.ap_private_key_pem.as_deref().filter(|s| !s.is_empty()) else {
-        eprintln!("[ApDelivery] AP 秘密鍵未設定のため配送を破棄 (actor_id={})", actor_id);
+        tracing::error!("[ApDelivery] AP 秘密鍵未設定のため配送を破棄 (actor_id={})", actor_id);
         return Ok(());
     };
 
@@ -65,7 +65,7 @@ pub async fn handle(actor_id: i64, kind: ApDeliveryKind, ctx: Arc<JobContext>) -
                 )
                 .await
                 {
-                    eprintln!("[ApDelivery] 旧リアクション Undo 配送失敗（続行）: {}", e);
+                    tracing::error!("[ApDelivery] 旧リアクション Undo 配送失敗（続行）: {}", e);
                 }
             }
             deliver_ap_reaction(
@@ -84,7 +84,7 @@ pub async fn handle(actor_id: i64, kind: ApDeliveryKind, ctx: Arc<JobContext>) -
         }
         ApDeliveryKind::UpdateActor => {
             let Some(public_pem) = cfg.ap_public_key_pem.as_deref().filter(|s| !s.is_empty()) else {
-                eprintln!("[ApDelivery] AP 公開鍵未設定のため Update(Actor) を破棄 (actor_id={})", actor_id);
+                tracing::error!("[ApDelivery] AP 公開鍵未設定のため Update(Actor) を破棄 (actor_id={})", actor_id);
                 return Ok(());
             };
             deliver_update_actor(ap_client, pool, actor_id, domain, private_pem, public_pem)

@@ -40,7 +40,7 @@ pub async fn fetch_ap_history(
     let outbox_url = match actor.outbox {
         Some(url) => url,
         None => {
-            eprintln!("[ApOutbox] {} の outbox フィールドが存在しません（スキップ）", actor_uri);
+            tracing::warn!("[ApOutbox] {} の outbox フィールドが存在しません（スキップ）", actor_uri);
             return Ok(vec![]);
         }
     };
@@ -58,16 +58,16 @@ pub async fn fetch_ap_history(
         Ok(r) if r.status().is_success() => match r.json().await {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("[ApOutbox] Outbox JSONパース失敗: {}", e);
+                tracing::error!("[ApOutbox] Outbox JSONパース失敗: {}", e);
                 return Ok(vec![]);
             }
         },
         Ok(r) => {
-            eprintln!("[ApOutbox] Outbox HTTP {} (非公開とみなしスキップ): {}", r.status(), outbox_url);
+            tracing::warn!("[ApOutbox] Outbox HTTP {} (非公開とみなしスキップ): {}", r.status(), outbox_url);
             return Ok(vec![]);
         }
         Err(e) => {
-            eprintln!("[ApOutbox] Outbox 取得失敗 (スキップ): {}", e);
+            tracing::error!("[ApOutbox] Outbox 取得失敗 (スキップ): {}", e);
             return Ok(vec![]);
         }
     };
@@ -106,16 +106,16 @@ pub async fn fetch_ap_history(
             Ok(r) if r.status().is_success() => match r.json().await {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("[ApOutbox] ページ JSONパース失敗 ({}): {}", url, e);
+                    tracing::error!("[ApOutbox] ページ JSONパース失敗 ({}): {}", url, e);
                     break;
                 }
             },
             Ok(r) => {
-                eprintln!("[ApOutbox] ページ HTTP {} ({})", r.status(), url);
+                tracing::info!("[ApOutbox] ページ HTTP {} ({})", r.status(), url);
                 break;
             }
             Err(e) => {
-                eprintln!("[ApOutbox] ページ取得失敗 ({}): {}", url, e);
+                tracing::error!("[ApOutbox] ページ取得失敗 ({}): {}", url, e);
                 break;
             }
         };

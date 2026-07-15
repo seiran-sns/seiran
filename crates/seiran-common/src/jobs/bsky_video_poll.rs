@@ -19,7 +19,7 @@ pub async fn handle(media_file_id: i64, ctx: Arc<JobContext>) -> Result<(), Stri
     let pool = match &ctx.db_pool {
         Some(p) => p,
         None => {
-            eprintln!("[BskyVideoPoll] DB pool 未設定のためスキップ (media_file_id={})", media_file_id);
+            tracing::warn!("[BskyVideoPoll] DB pool 未設定のためスキップ (media_file_id={})", media_file_id);
             return Ok(());
         }
     };
@@ -36,7 +36,7 @@ pub async fn handle(media_file_id: i64, ctx: Arc<JobContext>) -> Result<(), Stri
     .map_err(|e| format!("DB取得失敗: {}", e))?;
 
     let Some(row) = row else {
-        eprintln!("[BskyVideoPoll] media_file_id={} が見つかりません（終了）", media_file_id);
+        tracing::warn!("[BskyVideoPoll] media_file_id={} が見つかりません（終了）", media_file_id);
         return Ok(());
     };
 
@@ -45,7 +45,7 @@ pub async fn handle(media_file_id: i64, ctx: Arc<JobContext>) -> Result<(), Stri
     let pem: Option<String> = row.try_get("at_signing_key_pem").unwrap_or(None);
 
     let (Some(job_id), Some(did), Some(pem)) = (job_id, did, pem) else {
-        eprintln!("[BskyVideoPoll] media_file_id={} に必要な情報が無い（終了）", media_file_id);
+        tracing::info!("[BskyVideoPoll] media_file_id={} に必要な情報が無い（終了）", media_file_id);
         mark_failed(pool, media_file_id).await;
         return Ok(());
     };
@@ -70,7 +70,7 @@ pub async fn handle(media_file_id: i64, ctx: Arc<JobContext>) -> Result<(), Stri
     let body_text = resp.text().await.unwrap_or_default();
 
     if !status.is_success() {
-        eprintln!("[BskyVideoPoll] getJobStatus失敗 media_file_id={} status={} body={}", media_file_id, status, body_text);
+        tracing::error!("[BskyVideoPoll] getJobStatus失敗 media_file_id={} status={} body={}", media_file_id, status, body_text);
         mark_failed(pool, media_file_id).await;
         return Ok(());
     }
@@ -85,7 +85,7 @@ pub async fn handle(media_file_id: i64, ctx: Arc<JobContext>) -> Result<(), Stri
     match state {
         "JOB_STATE_COMPLETED" => {
             let Some(cid) = job_status.get("blob").and_then(|b| b.get("ref")).and_then(|r| r.get("$link")).and_then(|v| v.as_str()) else {
-                eprintln!("[BskyVideoPoll] 完了状態だがblob CIDが無い media_file_id={}", media_file_id);
+                tracing::info!("[BskyVideoPoll] 完了状態だがblob CIDが無い media_file_id={}", media_file_id);
                 mark_failed(pool, media_file_id).await;
                 return Ok(());
             };
@@ -97,11 +97,11 @@ pub async fn handle(media_file_id: i64, ctx: Arc<JobContext>) -> Result<(), Stri
             .execute(pool)
             .await
             .map_err(|e| format!("DB更新失敗: {}", e))?;
-            eprintln!("[BskyVideoPoll] 完了 media_file_id={} cid={}", media_file_id, cid);
+            tracing::info!("[BskyVideoPoll] 完了 media_file_id={} cid={}", media_file_id, cid);
             Ok(())
         }
         "JOB_STATE_FAILED" => {
-            eprintln!("[BskyVideoPoll] Bluesky側が失敗を報告 media_file_id={} body={}", media_file_id, body_text);
+            tracing::error!("[BskyVideoPoll] Bluesky側が失敗を報告 media_file_id={} body={}", media_file_id, body_text);
             mark_failed(pool, media_file_id).await;
             Ok(())
         }

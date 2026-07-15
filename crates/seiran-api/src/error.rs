@@ -57,7 +57,7 @@ impl IntoResponse for ApiError {
                 (StatusCode::INSUFFICIENT_STORAGE, "STORAGE_QUOTA_EXCEEDED".to_owned())
             }
             ApiError::Internal(msg) => {
-                eprintln!("[ERROR] {}", msg);
+                tracing::error!("[ERROR] {}", msg);
                 (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR".to_owned())
             }
         };

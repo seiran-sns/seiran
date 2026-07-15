@@ -62,7 +62,7 @@ pub async fn webfinger_handler(
         Ok(Some(_)) => {}
         Ok(None) => return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
         Err(e) => {
-            eprintln!("[WebFinger] DB エラー: {}", e);
+            tracing::error!("[WebFinger] DB エラー: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     }

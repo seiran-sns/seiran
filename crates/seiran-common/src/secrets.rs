@@ -106,7 +106,7 @@ impl Secrets {
         let (priv_pem, pub_pem) = generate_rsa_key_pair(&mut rng)?;
         self.ap_private_key_pem = Some(priv_pem);
         self.ap_public_key_pem = Some(pub_pem);
-        eprintln!("[seiran] AP RSA 鍵ペアを新規生成しました。");
+        tracing::info!("[seiran] AP RSA 鍵ペアを新規生成しました。");
         Ok(true)
     }
 
@@ -121,7 +121,7 @@ impl Secrets {
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
         self.encryption_key = Some(hex::encode(bytes));
-        eprintln!("[seiran] encryption_key を新規生成しました。");
+        tracing::info!("[seiran] encryption_key を新規生成しました。");
         true
     }
 
@@ -170,13 +170,13 @@ impl SecretsFile {
             }
             Ok(secrets)
         } else {
-            eprintln!(
+            tracing::warn!(
                 "[seiran] secrets.toml が見つかりません。新規生成します: {}",
                 self.path.display()
             );
             let secrets = Secrets::generate()?;
             self.save(&secrets)?;
-            eprintln!(
+            tracing::info!(
                 "[seiran] secrets.toml を生成しました。このファイルを安全に保管してください。"
             );
             Ok(secrets)

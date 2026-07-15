@@ -10,6 +10,7 @@ pub mod meta;
 pub mod miauth;
 pub mod misskey;
 pub mod notes;
+pub mod plc_genesis;
 pub mod search;
 pub mod setup;
 pub mod streaming;

@@ -141,10 +141,34 @@ pub enum Job {
     BskyVideoPoll { media_file_id: i64 },
 }
 
+/// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。
+/// `priority`/`attempt` はリトライ時に同じ値で `enqueue_retry` へ引き継ぐために保持する。
+#[derive(Debug, Clone)]
+pub struct QueuedJob {
+    pub job: Job,
+    pub priority: i32,
+    /// これまでの試行回数（0 始まり）。リトライ設定の上限判定・バックオフ計算に使う。
+    pub attempt: u32,
+}
+
 #[async_trait]
 pub trait JobQueue: Send + Sync {
-    /// ジョブを非同期キューに追加します。優先度が低いものから高いものまでサポート。
+    /// ジョブを非同期キューに追加します（初回投入。attempt=0 相当）。
+    /// 優先度は値が大きいほど先に処理される。
     async fn enqueue(&self, job: Job, priority: i32) -> Result<(), String>;
+
+    /// リトライ用の再投入。`delay` 経過後に実行可能になる。
+    /// `attempt` は次に行う試行の番号（1 始まり）で、Worker がリトライ上限判定に使う。
+    ///
+    /// InMemory 実装はプロセス内 sleep で遅延を実現するため、プロセス再起動で
+    /// リトライ待ち状態は失われる（開発用途では許容）。Redis 実装は遅延キュー
+    /// （sorted set）に載せるため、Worker プロセスが再起動してもリトライ状態は残る。
+    async fn enqueue_retry(&self, job: Job, priority: i32, attempt: u32, delay: Duration) -> Result<(), String>;
+
+    /// 実行可能なジョブが出るまでブロックして 1 件取得する。
+    /// WorkerEngine のメインループが呼ぶ。バックエンドを問わず同じインターフェースで
+    /// 動くことで、WorkerEngine は InMemory / Redis のどちらでも同一コードで動作する。
+    async fn dequeue_blocking(&self) -> QueuedJob;
 }
 
 #[cfg(test)]

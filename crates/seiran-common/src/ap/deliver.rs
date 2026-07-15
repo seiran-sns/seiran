@@ -90,13 +90,13 @@ async fn fan_out_activity(
         match ap_client.sign_and_post(inbox, &body_str, key_id, ap_private_key_pem).await {
             Ok(()) => ok += 1,
             Err(e) => {
-                eprintln!("[Deliver] {}: {} への配送失敗: {}", log_label, inbox, e);
+                tracing::error!("[Deliver] {}: {} への配送失敗: {}", log_label, inbox, e);
                 ng += 1;
             }
         }
     }
 
-    eprintln!("[Deliver] {}: {}件成功 / {}件失敗", log_label, ok, ng);
+    tracing::error!("[Deliver] {}: {}件成功 / {}件失敗", log_label, ok, ng);
 
     if ok == 0 && ng > 0 {
         return Err(ApError::Other(format!("{}: 全 {} 件の配送に失敗", log_label, ng)));

@@ -1,10 +1,11 @@
 //! WorkerEngine: ジョブのデキュー・実行・リトライを管理する実行エンジン
 //!
 //! # 動作フロー
-//! 1. `InMemoryJobQueue::notify` を待機
-//! 2. ジョブをデキュー
+//! 1. `JobQueue::dequeue_blocking` で実行可能なジョブを待機・取得（バックエンド非依存）
+//! 2. グローバル並列数セマフォの permit を取得してから別タスクで実行
 //! 3. 対応するジョブハンドラを呼び出し
-//! 4. 失敗時は指数バックオフでリトライキューへ再投入
+//! 4. 失敗時は `JobQueue::enqueue_retry` で指数バックオフ後の再投入をキューに委ねる
+//!    （リトライ待ち状態はキュー側が保持する。Redis 実装ならプロセス再起動を跨いで残る）
 //!
 //! # 優先度定数
 //! ```
@@ -21,8 +22,9 @@ use tokio::sync::Semaphore;
 
 use crate::ap::ApClient;
 use crate::jobs;
-use crate::queue::InMemoryJobQueue;
-use crate::traits::{Job, JobQueue};
+use crate::repository::{ActorRepository, FollowRepository, PostRepository, ReactionRepository};
+use crate::streaming::StreamHub;
+use crate::traits::{Job, JobQueue, QueuedJob};
 
 /// ジョブの優先度定数
 pub mod priority {
@@ -31,6 +33,11 @@ pub mod priority {
     pub const NORMAL: i32 = 10;
     pub const LOW: i32 = 1;
 }
+
+/// WorkerEngine が同時実行するジョブ数のデフォルト上限。
+/// キューに大量のジョブが溜まっていた状態から復帰した際、一斉に spawn して
+/// リソースを食い潰す（サンダリングハード）のを防ぐ。
+const DEFAULT_MAX_CONCURRENT_JOBS: usize = 32;
 
 /// リトライ設定
 struct RetryConfig {
@@ -50,6 +57,22 @@ pub struct DeliveryConfig {
     pub ap_public_key_pem: Option<String>,
 }
 
+/// インバウンド AP アクティビティ処理ジョブ（`Job::InboundActivityProcess`）に必要な設定。
+/// `federation-inbox` ロールが起動時に一度だけ組み立てて注入する
+/// （`all` ロールでは埋め込み Worker が api/federation と同じ `stream_hub` を共有する）。
+#[derive(Clone)]
+pub struct InboxContext {
+    pub actor_repo: Arc<dyn ActorRepository>,
+    pub follow_repo: Arc<dyn FollowRepository>,
+    pub post_repo: Arc<dyn PostRepository>,
+    pub reaction_repo: Arc<dyn ReactionRepository>,
+    pub local_domain: String,
+    pub ap_private_key_pem: String,
+    /// リアルタイム更新（#37）の共有ストリーミングハブ。standalone Worker では
+    /// 接続クライアントの居ない空ハブになる（`Role::Firehose` と同じ扱い）。
+    pub stream_hub: Arc<StreamHub>,
+}
+
 /// ジョブ実行コンテキスト（ハンドラに渡す）
 pub struct JobContext {
     pub queue: Arc<dyn JobQueue>,
@@ -63,6 +86,8 @@ pub struct JobContext {
     pub ap_client: Arc<ApClient>,
     /// AP 配送設定（ApDelivery ジョブが使用）
     pub delivery: Option<DeliveryConfig>,
+    /// インバウンド AP アクティビティ処理設定（InboundActivityProcess ジョブが使用）
+    pub inbox: Option<InboxContext>,
 }
 
 impl JobContext {
@@ -77,6 +102,7 @@ impl JobContext {
             db_pool: None,
             ap_client,
             delivery: None,
+            inbox: None,
         }
     }
 
@@ -87,6 +113,11 @@ impl JobContext {
 
     pub fn with_delivery_config(mut self, config: DeliveryConfig) -> Self {
         self.delivery = Some(config);
+        self
+    }
+
+    pub fn with_inbox_context(mut self, inbox: InboxContext) -> Self {
+        self.inbox = Some(inbox);
         self
     }
 
@@ -107,68 +138,77 @@ impl JobContext {
     }
 }
 
-/// WorkerEngine: ジョブキューを監視し、ジョブを実行するバックグラウンドエンジン
+/// WorkerEngine: ジョブキューを監視し、ジョブを実行するバックグラウンドエンジン。
+/// `queue` は `JobQueue` トレイトオブジェクトのため、InMemory / Redis どちらの
+/// バックエンドでも同一コードで動作する。
 pub struct WorkerEngine {
-    queue: Arc<InMemoryJobQueue>,
+    queue: Arc<dyn JobQueue>,
     ctx: Arc<JobContext>,
+    max_concurrent: usize,
 }
 
 impl WorkerEngine {
-    pub fn new(queue: Arc<InMemoryJobQueue>, ap_client: Arc<ApClient>) -> Self {
+    pub fn new(queue: Arc<dyn JobQueue>, ap_client: Arc<ApClient>) -> Self {
         let ctx = Arc::new(JobContext::new(queue.clone(), ap_client));
-        Self { queue, ctx }
+        Self { queue, ctx, max_concurrent: DEFAULT_MAX_CONCURRENT_JOBS }
     }
 
     pub fn new_with_db(
-        queue: Arc<InMemoryJobQueue>,
+        queue: Arc<dyn JobQueue>,
         pool: sqlx::PgPool,
         ap_client: Arc<ApClient>,
         delivery: DeliveryConfig,
+        inbox: Option<InboxContext>,
     ) -> Self {
-        let ctx = Arc::new(
-            JobContext::new(queue.clone(), ap_client)
-                .with_db_pool(pool)
-                .with_delivery_config(delivery),
-        );
-        Self { queue, ctx }
+        let mut ctx_builder = JobContext::new(queue.clone(), ap_client)
+            .with_db_pool(pool)
+            .with_delivery_config(delivery);
+        if let Some(inbox) = inbox {
+            ctx_builder = ctx_builder.with_inbox_context(inbox);
+        }
+        let ctx = Arc::new(ctx_builder);
+        Self { queue, ctx, max_concurrent: DEFAULT_MAX_CONCURRENT_JOBS }
+    }
+
+    /// 同時実行数の上限を変更する（既定は `DEFAULT_MAX_CONCURRENT_JOBS`）。
+    pub fn with_max_concurrent(mut self, max_concurrent: usize) -> Self {
+        self.max_concurrent = max_concurrent.max(1);
+        self
     }
 
     /// バックグラウンドワーカーループを起動します
     /// このメソッドは `tokio::spawn` で呼び出してください
     pub async fn run(self) {
-        let notify = self.queue.notify_handle();
-        eprintln!("[WorkerEngine] ジョブワーカー起動");
+        tracing::info!("[WorkerEngine] ジョブワーカー起動 (最大並列数: {})", self.max_concurrent);
+        let semaphore = Arc::new(Semaphore::new(self.max_concurrent));
 
         loop {
-            // ジョブが投入されるまで待機（既にキューに残っていれば即処理）
-            if self.queue.len().await == 0 {
-                notify.notified().await;
-            }
+            let queued = self.queue.dequeue_blocking().await;
+            let ctx = self.ctx.clone();
+            let queue = self.queue.clone();
 
-            while let Some(job) = self.queue.dequeue().await {
-                let ctx = self.ctx.clone();
-                let queue = self.queue.clone();
+            // permit 取得をブロッキングで待つことで、実行中ジョブ数を上限内に保つ
+            // （キューが一斉に溜まっていた場合のサンダリングハード対策）。
+            let permit = Arc::clone(&semaphore)
+                .acquire_owned()
+                .await
+                .expect("semaphore は閉じられない");
 
-                // ジョブごとに別タスクで実行（ブロッキングを防ぐ）
-                tokio::spawn(async move {
-                    execute_with_retry(job, ctx, queue, 0).await;
-                });
-            }
+            tokio::spawn(async move {
+                execute_with_retry(queued, ctx, queue).await;
+                drop(permit);
+            });
         }
     }
 }
 
-/// ジョブを実行し、失敗時は指数バックオフでリトライします
-async fn execute_with_retry(
-    job: Job,
-    ctx: Arc<JobContext>,
-    queue: Arc<InMemoryJobQueue>,
-    attempt: u32,
-) {
+/// ジョブを実行し、失敗時は指数バックオフでリトライキューへ再投入します。
+async fn execute_with_retry(queued: QueuedJob, ctx: Arc<JobContext>, queue: Arc<dyn JobQueue>) {
+    let QueuedJob { job, priority, attempt } = queued;
     let config = retry_config_for(&job);
     let job_name = job_name(&job);
 
-    eprintln!(
+    tracing::info!(
         "[Worker] 実行開始: {} (attempt {}/{})",
         job_name,
         attempt + 1,
@@ -180,7 +220,7 @@ async fn execute_with_retry(
 
     match result {
         Ok(()) => {
-            eprintln!("[Worker] 完了: {}", job_name);
+            tracing::info!("[Worker] 完了: {}", job_name);
         }
         Err(e) if attempt + 1 < config.max_attempts => {
             // 指数バックオフ + ジッター（0〜1秒）
@@ -191,16 +231,20 @@ async fn execute_with_retry(
             };
             let wait = Duration::from_millis(backoff_delay_ms(&config, attempt) + jitter_ms);
 
-            eprintln!(
+            tracing::error!(
                 "[Worker] 失敗: {} - {} → {}ms後にリトライ (attempt {})",
                 job_name, e, wait.as_millis(), attempt + 1
             );
 
-            // ヘルパー関数を介して再スケジュールすることで、直接の非同期再帰によるコンパイラの混乱を防ぐ
-            spawn_retry(job, ctx, queue, attempt + 1, wait);
+            if let Err(enqueue_err) = queue.enqueue_retry(job, priority, attempt + 1, wait).await {
+                tracing::error!(
+                    "[Worker] リトライ再投入失敗（ジョブは失われました）: {} - {}",
+                    job_name, enqueue_err
+                );
+            }
         }
         Err(e) => {
-            eprintln!(
+            tracing::error!(
                 "[Worker] 最大リトライ数に達しました（破棄）: {} - {}",
                 job_name, e
             );
@@ -216,21 +260,6 @@ fn backoff_delay_ms(config: &RetryConfig, attempt: u32) -> u64 {
         .saturating_mul(1u64.checked_shl(attempt).unwrap_or(u64::MAX))
         .min(config.max_delay_ms)
 }
-
-/// リトライを遅延実行するためのタスクを起動する同期的なヘルパー関数
-fn spawn_retry(
-    job: Job,
-    ctx: Arc<JobContext>,
-    queue: Arc<InMemoryJobQueue>,
-    attempt: u32,
-    delay: Duration,
-) {
-    tokio::spawn(async move {
-        tokio::time::sleep(delay).await;
-        execute_with_retry(job, ctx, queue, attempt).await;
-    });
-}
-
 
 /// ジョブ種別ごとにハンドラを呼び出します（所有権を受け取る）
 async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
@@ -341,5 +370,28 @@ mod tests {
         assert_eq!(backoff_delay_ms(&config, 63), 60_000);
         assert_eq!(backoff_delay_ms(&config, 64), 60_000);
         assert_eq!(backoff_delay_ms(&config, 200), 60_000);
+    }
+
+    #[tokio::test]
+    async fn engine_processes_job_via_dyn_queue() {
+        // WorkerEngine が Arc<dyn JobQueue> の背後で InMemory/Redis どちらでも
+        // 動作することの最小回帰テスト（InMemory で代表）。
+        use crate::ap::ApClient;
+        use crate::queue::InMemoryJobQueue;
+
+        let queue: Arc<dyn JobQueue> = Arc::new(InMemoryJobQueue::new());
+        let http = Arc::new(reqwest::Client::new());
+        let ap_client = Arc::new(ApClient::new(http));
+        let engine = WorkerEngine::new(Arc::clone(&queue), ap_client).with_max_concurrent(2);
+
+        queue
+            .enqueue(Job::InboundActivityProcess { raw_activity: "{}".into() }, priority::NORMAL)
+            .await
+            .unwrap();
+
+        let handle = tokio::spawn(engine.run());
+        // InboundActivityProcess は未実装スタブで即 Ok を返すので短時間で完了するはず
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        handle.abort();
     }
 }

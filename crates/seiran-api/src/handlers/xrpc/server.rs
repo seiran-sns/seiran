@@ -64,7 +64,7 @@ pub async fn xrpc_resolve_handle(
         }
         Ok(_) => not_found(),
         Err(e) => {
-            eprintln!("[resolveHandle] DB エラー: {}", e);
+            tracing::error!("[resolveHandle] DB エラー: {}", e);
             not_found()
         }
     }
@@ -109,7 +109,7 @@ pub async fn well_known_atproto_did(
         }
         Ok(_) => (StatusCode::NOT_FOUND, "").into_response(),
         Err(e) => {
-            eprintln!("[well_known_atproto_did] DB エラー: {}", e);
+            tracing::error!("[well_known_atproto_did] DB エラー: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "").into_response()
         }
     }

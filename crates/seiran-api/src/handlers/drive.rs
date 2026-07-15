@@ -354,7 +354,7 @@ const BSKY_VIDEO_SERVICE_HOST: &str = "https://video.bsky.app";
 /// アップロードAPI自体は成功として扱う（動画はローカル保存済みのため）。
 async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_file_id: i64, video_bytes: Vec<u8>) {
     let (Some(did), Some(pem)) = (actor.at_did.as_deref(), actor.at_signing_key_pem.as_deref()) else {
-        eprintln!("[BskyVideo] at_did/at_signing_key_pem 未設定のためスキップ media_file_id={}", media_file_id);
+        tracing::warn!("[BskyVideo] at_did/at_signing_key_pem 未設定のためスキップ media_file_id={}", media_file_id);
         mark_bsky_video_failed(state, media_file_id).await;
         return;
     };
@@ -363,7 +363,7 @@ async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_fi
     let jwt = match sign_service_auth_jwt(pem, did, &own_pds_did, "com.atproto.repo.uploadBlob") {
         Ok(j) => j,
         Err(e) => {
-            eprintln!("[BskyVideo] JWT署名失敗 media_file_id={}: {}", media_file_id, e);
+            tracing::error!("[BskyVideo] JWT署名失敗 media_file_id={}: {}", media_file_id, e);
             mark_bsky_video_failed(state, media_file_id).await;
             return;
         }
@@ -389,7 +389,7 @@ async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_fi
     let resp = match resp {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[BskyVideo] uploadVideoリクエスト失敗 media_file_id={}: {}", media_file_id, e);
+            tracing::error!("[BskyVideo] uploadVideoリクエスト失敗 media_file_id={}: {}", media_file_id, e);
             mark_bsky_video_failed(state, media_file_id).await;
             return;
         }
@@ -408,12 +408,12 @@ async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_fi
         });
 
     let Some(job_id) = job_id else {
-        eprintln!("[BskyVideo] uploadVideo失敗 media_file_id={} status={} body={}", media_file_id, status, body_text);
+        tracing::error!("[BskyVideo] uploadVideo失敗 media_file_id={} status={} body={}", media_file_id, status, body_text);
         mark_bsky_video_failed(state, media_file_id).await;
         return;
     };
     if !status.is_success() {
-        eprintln!("[BskyVideo] uploadVideo非2xxだがjobId取得 media_file_id={} status={} jobId={}", media_file_id, status, job_id);
+        tracing::info!("[BskyVideo] uploadVideo非2xxだがjobId取得 media_file_id={} status={} jobId={}", media_file_id, status, job_id);
     }
 
     if let Err(e) = sqlx::query(
@@ -424,12 +424,12 @@ async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_fi
     .execute(&state.db)
     .await
     {
-        eprintln!("[BskyVideo] DB更新失敗 media_file_id={}: {}", media_file_id, e);
+        tracing::error!("[BskyVideo] DB更新失敗 media_file_id={}: {}", media_file_id, e);
         return;
     }
 
     if let Err(e) = state.job_queue.enqueue(Job::BskyVideoPoll { media_file_id }, priority::HIGH).await {
-        eprintln!("[BskyVideo] ジョブ投入失敗 media_file_id={}: {}", media_file_id, e);
+        tracing::error!("[BskyVideo] ジョブ投入失敗 media_file_id={}: {}", media_file_id, e);
     }
 }
 

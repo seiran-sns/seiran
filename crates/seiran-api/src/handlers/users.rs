@@ -53,7 +53,7 @@ async fn fetch_bsky_profile_from_appview(
     let bsky = match fetch_bsky_profile(&state.http_client, actor).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[profile/bsky] AppView 取得失敗: {}", e);
+            tracing::error!("[profile/bsky] AppView 取得失敗: {}", e);
             return (StatusCode::NOT_FOUND, "Bsky ユーザーが見つかりません").into_response();
         }
     };
@@ -112,7 +112,7 @@ pub async fn user_profile(
                 Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
                 Ok(None) => fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
                 Err(e) => {
-                    eprintln!("[profile] DB エラー: {}", e);
+                    tracing::error!("[profile] DB エラー: {}", e);
                     (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
                 }
             };
@@ -144,7 +144,7 @@ pub async fn user_profile(
         }
         Ok(None) => (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
         Err(e) => {
-            eprintln!("[profile] DB エラー: {}", e);
+            tracing::error!("[profile] DB エラー: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
         }
     }
@@ -163,7 +163,7 @@ async fn build_profile_response(
             Ok(Some(a)) => Some(a.id),
             Ok(None) => None,
             Err(e) => {
-                eprintln!("[profile] 自分の actor_id 取得失敗: {}", e);
+                tracing::error!("[profile] 自分の actor_id 取得失敗: {}", e);
                 return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
             }
         }
@@ -177,7 +177,7 @@ async fn build_profile_response(
             Ok(Some(s)) => s,
             Ok(None) => "not_following".to_string(),
             Err(e) => {
-                eprintln!("[profile] フォロー状態取得失敗: {}", e);
+                tracing::error!("[profile] フォロー状態取得失敗: {}", e);
                 return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
             }
         },
@@ -189,7 +189,7 @@ async fn build_profile_response(
     let post_rows = match state.posts.timeline_by_actor(actor_id, 20).await {
         Ok(rows) => rows,
         Err(e) => {
-            eprintln!("[profile] 最近の投稿取得失敗: {}", e);
+            tracing::error!("[profile] 最近の投稿取得失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
@@ -377,9 +377,9 @@ pub async fn update_profile(
     .await
     {
         Ok(Some(r)) => r,
-        Ok(None) => return (StatusCode::NOT_FOUND, "アクターが見つかりません").into_response(),
+        Ok(None) => return ApiError::NotFound("ACTOR_NOT_FOUND").into_response(),
         Err(e) => {
-            eprintln!("[update_profile] SELECT 失敗: {}", e);
+            tracing::error!("[update_profile] SELECT 失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
@@ -426,7 +426,7 @@ pub async fn update_profile(
     .execute(&state.db)
     .await
     {
-        eprintln!("[update_profile] UPDATE 失敗: {}", e);
+        tracing::error!("[update_profile] UPDATE 失敗: {}", e);
         return ApiError::Internal(e.to_string()).into_response();
     }
 
@@ -448,7 +448,7 @@ pub async fn update_profile(
         .commit_profile(current.id, &atp_display_name, new_bio.as_deref(), avatar_media, chrono::Utc::now())
         .await
     {
-        eprintln!("[update_profile] ATP プロフィール再コミット失敗（DB更新は完了済み）: {}", e);
+        tracing::error!("[update_profile] ATP プロフィール再コミット失敗（DB更新は完了済み）: {}", e);
     }
 
     // AP 側: 既にフォロー中のリモートインスタンスへ Update(Person) をプッシュ配信し、
