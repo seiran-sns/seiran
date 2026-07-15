@@ -82,12 +82,14 @@ async fn upsert_remote_fedi_actor(
     let avatar_url = remote_ap.avatar_url();
     // 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Person の tag 配列由来）。
     let emoji_map = remote_ap.emoji_map();
+    // プロフィールのキーバリュー項目（#62）。
+    let profile_fields = remote_ap.profile_fields_json();
 
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
     let actor_id = inbox
         .actor_repo
-        .upsert_remote_fedi(new_actor_id, actor_uri, &ap_inbox, &username, &domain, &display_name, avatar_url.as_deref(), now, &emoji_map)
+        .upsert_remote_fedi(new_actor_id, actor_uri, &ap_inbox, &username, &domain, &display_name, avatar_url.as_deref(), now, &emoji_map, &profile_fields)
         .await
         .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
 

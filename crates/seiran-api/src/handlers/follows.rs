@@ -307,12 +307,14 @@ async fn follow_fedi(target: &str, user_id: i64, state: &AppState) -> impl IntoR
     let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
     let remote_domain = target_uri.split('/').nth(2).unwrap_or("").to_string();
     let remote_emoji_map = remote_ap.emoji_map();
+    // プロフィールのキーバリュー項目（#62）。
+    let remote_profile_fields = remote_ap.profile_fields_json();
 
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
     let remote_actor_id = match state.actors.upsert_remote_fedi(
         new_actor_id, &target_uri, &remote_inbox, &remote_username,
-        &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now, &remote_emoji_map,
+        &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now, &remote_emoji_map, &remote_profile_fields,
     ).await {
         Ok(id) => id,
         Err(e) => {

@@ -222,6 +222,12 @@ export interface ReactResult {
   reactions: ReactionSummary[];
 }
 
+/** プロフィールのキーバリュー項目（#62、Mastodon 等の「プロフィールのメタデータ欄」）。 */
+export interface ProfileField {
+  name: string;
+  value: string;
+}
+
 /** ProfileResponse（バックエンドは snake_case のまま）。 */
 export interface UserProfile {
   username: string;
@@ -238,6 +244,9 @@ export interface UserProfile {
   /** ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
    * Fedi featured collection / Bsky pinnedPost の同期結果。 */
   pinned_posts: Note[];
+  /** プロフィールのキーバリュー項目（#62）。ローカル編集値、またはリモート Fedi アクターの
+   * AP Actor `attachment`（`type: "PropertyValue"`）から取り込んだ値。 */
+  profile_fields: ProfileField[];
   // 7.3 ブリッジ介入・魂の結合メタデータ
   bridge_real_handle?: string;
   bridge_protocol?: string; // "fedi" | "bsky"
@@ -559,6 +568,7 @@ export const api = {
       bio?: string;
       avatar_media_id?: string | null;
       banner_media_id?: string | null;
+      profile_fields?: ProfileField[];
     }) {
       return request<{
         username: string;
@@ -566,6 +576,7 @@ export const api = {
         bio?: string;
         avatar_media_id?: number;
         banner_media_id?: number;
+        profile_fields: ProfileField[];
       }>("PATCH", "/users/profile", patch);
     },
   },

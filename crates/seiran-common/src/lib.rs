@@ -15,6 +15,9 @@ pub mod streaming;
 
 pub use db::{get_db_pool, run_migrations};
 pub use id::generate_snowflake_id;
+
+/// プロフィールのキーバリュー項目（#62）の最大件数。Mastodon 等のデフォルト（4件）に合わせる。
+pub const MAX_PROFILE_FIELDS: usize = 4;
 pub use auth::{LocalAuthProvider, AuthError};
 pub use auth::local::VerifiedUser;
 pub use secrets::{Secrets, SecretsFile, SecretsError};

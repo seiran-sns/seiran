@@ -1,10 +1,17 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, DriveFile, getErrorMessage, ApiError } from "../api/client";
+import { api, DriveFile, getErrorMessage, ApiError, ProfileField } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfileEdit.module.css";
+
+/** プロフィール編集フォームで扱う固定スロット数（#62、Mastodon のデフォルト4件に合わせる）。 */
+const PROFILE_FIELD_SLOTS = 4;
+
+function emptyProfileFields(): ProfileField[] {
+  return Array.from({ length: PROFILE_FIELD_SLOTS }, () => ({ name: "", value: "" }));
+}
 
 const WITHDRAW_ERROR: Record<string, string> = {
   CONFIRM_HANDLE_MISMATCH: "ハンドルが一致しません",
@@ -29,6 +36,7 @@ export default function ProfileEditPage() {
 
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
+  const [profileFields, setProfileFields] = useState<ProfileField[]>(emptyProfileFields());
   const [avatar, setAvatar] = useState<DriveFile | null>(null);
   /** 既存のアイコンURL（未変更時のプレビュー用）。新規アップロード後は avatar.url を優先する。 */
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
@@ -45,6 +53,9 @@ export default function ProfileEditPage() {
         setDisplayName(p.display_name ?? "");
         setBio(p.bio ?? "");
         setCurrentAvatarUrl(p.avatar_url ?? null);
+        const slots = emptyProfileFields();
+        p.profile_fields.slice(0, PROFILE_FIELD_SLOTS).forEach((f, i) => { slots[i] = f; });
+        setProfileFields(slots);
       })
       .catch((e) => !cancelled && setError(getErrorMessage(e)))
       .finally(() => !cancelled && setLoading(false));
@@ -78,6 +89,7 @@ export default function ProfileEditPage() {
         display_name: displayName,
         bio,
         ...(avatar ? { avatar_media_id: avatar.id } : {}),
+        profile_fields: profileFields.filter((f) => f.name.trim() && f.value.trim()),
       });
       setSaved(true);
       setTimeout(() => navigate(`/@${user?.username ?? ""}`), 500);
@@ -160,9 +172,35 @@ export default function ProfileEditPage() {
             />
           </label>
 
-          <p className={styles.hint}>
-            プロフィールのキーバリュー項目（リンク等）は今後対応予定です。
-          </p>
+          <div className={styles.fieldsSection}>
+            <p className={styles.fieldsLabel}>プロフィール項目（リンク等、最大{PROFILE_FIELD_SLOTS}件）</p>
+            {profileFields.map((field, i) => (
+              <div className={styles.fieldRow} key={i}>
+                <input
+                  className={`${styles.input} ${styles.fieldName}`}
+                  value={field.name}
+                  onChange={(e) => {
+                    const next = [...profileFields];
+                    next[i] = { ...next[i], name: e.target.value };
+                    setProfileFields(next);
+                  }}
+                  placeholder="ラベル（例: サイト）"
+                  maxLength={50}
+                />
+                <input
+                  className={styles.input}
+                  value={field.value}
+                  onChange={(e) => {
+                    const next = [...profileFields];
+                    next[i] = { ...next[i], value: e.target.value };
+                    setProfileFields(next);
+                  }}
+                  placeholder="値（例: https://example.com）"
+                  maxLength={255}
+                />
+              </div>
+            ))}
+          </div>
 
           <button className={styles.save} type="submit" disabled={saving}>
             {saving ? "保存中..." : "保存"}

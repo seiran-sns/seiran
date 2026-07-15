@@ -66,6 +66,10 @@ pub struct ApActor {
     /// `emoji_map()` で `{shortcode: 画像URL}` に変換する。
     #[serde(default)]
     pub tag: Vec<serde_json::Value>,
+    /// プロフィールのキーバリュー項目（#62）。`type: "PropertyValue"` の要素を
+    /// `property_values()` で `(name, value)` のペアに変換する。
+    #[serde(default)]
+    pub attachment: Vec<serde_json::Value>,
 }
 
 impl ApActor {
@@ -83,6 +87,42 @@ impl ApActor {
     /// 表示名中のカスタム絵文字の shortcode→画像URLマップ。
     pub fn emoji_map(&self) -> serde_json::Value {
         build_emoji_map(&self.tag)
+    }
+
+    /// `attachment` 配列（`type: "PropertyValue"` の要素）から `(name, value)` のペアを
+    /// 抽出する（#62）。`value` は HTML を含みうるため（Mastodon 等はリンクを `<a>` タグ付きで
+    /// 送る）、呼び出し側で必要に応じてプレーンテキスト化すること。
+    pub fn property_values(&self) -> Vec<(String, String)> {
+        self.attachment
+            .iter()
+            .filter(|a| a.get("type").and_then(|t| t.as_str()) == Some("PropertyValue"))
+            .filter_map(|a| {
+                let name = a.get("name")?.as_str()?.to_string();
+                let value = a.get("value")?.as_str()?.to_string();
+                Some((name, value))
+            })
+            .collect()
+    }
+
+    /// `property_values()` を `MAX_PROFILE_FIELDS` 件までに切り詰め、`value` を `strip_html`
+    /// でプレーンテキスト化した上で `actors.profile_fields` へそのまま保存できる JSON 配列
+    /// （`[{"name": ..., "value": ...}, ...]`）を組み立てる（#62）。
+    pub fn profile_fields_json(&self) -> serde_json::Value {
+        serde_json::Value::Array(
+            self.property_values()
+                .into_iter()
+                .filter_map(|(name, value)| {
+                    // strip_html 後に空になる値（アイコンのみのリンク等）は取り込まない。
+                    let value = crate::jobs::inbound_activity_process::strip_html(&value);
+                    if value.trim().is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::json!({"name": name, "value": value}))
+                    }
+                })
+                .take(crate::MAX_PROFILE_FIELDS)
+                .collect(),
+        )
     }
 }
 

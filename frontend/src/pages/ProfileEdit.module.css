@@ -119,6 +119,31 @@
   margin: 0 0 18px;
 }
 
+.fieldsSection {
+  margin: 0 0 20px;
+}
+
+.fieldsLabel {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+}
+
+.fieldRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.fieldRow .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.fieldName {
+  flex: 0 0 35%;
+}
+
 .dangerZone {
   margin: 32px 20px 20px;
   padding: 16px;

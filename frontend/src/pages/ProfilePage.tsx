@@ -166,6 +166,24 @@ export default function ProfilePage() {
 
           {profile.bio && <p className={styles.bio}>{profile.bio}</p>}
 
+          {/* プロフィールのキーバリュー項目（#62） */}
+          {profile.profile_fields.length > 0 && (
+            <div className={styles.identity}>
+              {profile.profile_fields.map((field, i) => (
+                <div className={styles.idRow} key={i}>
+                  <span className={styles.idLabel}>{field.name}</span>
+                  {field.value.startsWith("http://") || field.value.startsWith("https://") ? (
+                    <a className={styles.idValue} href={field.value} target="_blank" rel="noopener noreferrer">
+                      {field.value}
+                    </a>
+                  ) : (
+                    <span className={styles.idValue}>{field.value}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* プロトコルアイデンティティ */}
           <div className={styles.identity}>
             {profile.at_did && (

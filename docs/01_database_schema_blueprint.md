@@ -70,6 +70,11 @@ CREATE TABLE actors (
     -- 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ。AP Person の `tag` 配列
     -- （`type:"Emoji"`）から解決する。ローカルアクターは常に空オブジェクト。
     emoji_map JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- プロフィールのキーバリュー項目（#62、Mastodon 等の「プロフィールのメタデータ欄」に
+    -- 相当）。`[{"name": "サイト", "value": "https://example.com"}, ...]`（順序を保持、
+    -- 最大4件）。ローカルユーザーが編集した値、またはリモート Fedi アクターの AP Actor
+    -- `attachment`（`type: "PropertyValue"`）から取り込んだ値。
+    profile_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
     
     -- 相互マッピング用外部キーポインタ
     seiran_pair_actor_id BIGINT REFERENCES actors(id) ON DELETE SET NULL, -- リモートseiranの対の行

@@ -27,12 +27,16 @@ pub struct Actor {
     pub bridge_real_actor_id: Option<i64>,
     /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信、AP `tag` 配列由来）。
     pub emoji_map: Option<serde_json::Value>,
+    /// プロフィールのキーバリュー項目（#62）。`[{"name": ..., "value": ...}, ...]`（最大
+    /// `MAX_PROFILE_FIELDS` 件）。ローカルユーザーが編集した値、またはリモート Fedi アクター
+    /// の AP Actor `attachment`（`type: "PropertyValue"`）から取り込んだ値。
+    pub profile_fields: Option<serde_json::Value>,
 }
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
     display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem, \
-    bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map";
+    bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields";
 
 #[async_trait]
 pub trait ActorRepository: Send + Sync {
@@ -88,6 +92,8 @@ pub trait ActorRepository: Send + Sync {
     /// リモート（Fediverse）アクターを upsert し、その actor_id を返す。
     /// `emoji_map` は表示名（`name`）中のカスタム絵文字（`:shortcode:`）→画像URLのマップ
     /// （AP Person の `tag` 配列由来、無ければ空オブジェクト）。
+    /// `profile_fields` はプロフィールのキーバリュー項目（#62、AP Actor の `attachment`
+    /// `type: "PropertyValue"` 由来、無ければ空配列）。
     #[allow(clippy::too_many_arguments)]
     async fn upsert_remote_fedi(
         &self,
@@ -100,6 +106,7 @@ pub trait ActorRepository: Send + Sync {
         avatar_url: Option<&str>,
         now: DateTime<Utc>,
         emoji_map: &serde_json::Value,
+        profile_fields: &serde_json::Value,
     ) -> Result<i64, sqlx::Error>;
 
     /// DID を持つ全ローカルアクターの (username, did) を取得する（起動時 TXT 再登録用）。
@@ -249,16 +256,18 @@ impl ActorRepository for PgActorRepository {
         avatar_url: Option<&str>,
         now: DateTime<Utc>,
         emoji_map: &serde_json::Value,
+        profile_fields: &serde_json::Value,
     ) -> Result<i64, sqlx::Error> {
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, created_at, updated_at, emoji_map)
-             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $8, $9)
+            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, created_at, updated_at, emoji_map, profile_fields)
+             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $8, $9, $10)
              ON CONFLICT (ap_uri) DO UPDATE
-               SET ap_inbox_url = EXCLUDED.ap_inbox_url,
-                   display_name = EXCLUDED.display_name,
-                   avatar_url   = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
-                   emoji_map    = EXCLUDED.emoji_map,
-                   updated_at   = EXCLUDED.updated_at
+               SET ap_inbox_url   = EXCLUDED.ap_inbox_url,
+                   display_name   = EXCLUDED.display_name,
+                   avatar_url     = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
+                   emoji_map      = EXCLUDED.emoji_map,
+                   profile_fields = EXCLUDED.profile_fields,
+                   updated_at     = EXCLUDED.updated_at
              RETURNING id",
         )
         .bind(id)
@@ -270,6 +279,7 @@ impl ActorRepository for PgActorRepository {
         .bind(avatar_url)
         .bind(now)
         .bind(emoji_map)
+        .bind(profile_fields)
         .fetch_one(&self.pool)
         .await?;
         Ok(row.0)

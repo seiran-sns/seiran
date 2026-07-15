@@ -18,6 +18,20 @@ pub struct ProfileQuery {
     pub q: String,
 }
 
+/// プロフィールのキーバリュー項目（#62、Mastodon 等の「プロフィールのメタデータ欄」に相当）。
+/// `actors.profile_fields`（JSONB配列）にそのままシリアライズされる。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileField {
+    pub name: String,
+    pub value: String,
+}
+
+/// `actors.profile_fields`（JSONB）を `Vec<ProfileField>` にデコードする。壊れた値・欠落は
+/// 空配列として扱う（ベストエフォート、プロフィール表示自体は失敗させない）。
+fn profile_fields_from_json(v: &serde_json::Value) -> Vec<ProfileField> {
+    serde_json::from_value(v.clone()).unwrap_or_default()
+}
+
 #[derive(Serialize)]
 pub struct ProfileResponse {
     pub username: String,
@@ -34,6 +48,9 @@ pub struct ProfileResponse {
     /// ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
     /// Fedi featured collection / Bsky pinnedPost の同期結果。
     pub pinned_posts: Vec<NoteResponse>,
+    /// プロフィールのキーバリュー項目（#62）。ローカルユーザーが編集した値、またはリモート
+    /// Fedi アクターの AP Actor `attachment`（`type: "PropertyValue"`）から取り込んだ値。
+    pub profile_fields: Vec<ProfileField>,
     // 7.3 拡張メタデータ（ブリッジ介入・魂の結合判定）
     /// このアクターがブリッジ（影武者）の場合、本尊アクターのハンドル（`user@domain`）。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -86,6 +103,7 @@ async fn fetch_bsky_profile_from_appview(
         follow_status: "not_following".to_string(),
         recent_posts: vec![],
         pinned_posts: vec![],
+        profile_fields: vec![],
         bridge_real_handle: None,
         bridge_protocol: None,
         is_paired: false,
@@ -344,6 +362,12 @@ async fn build_profile_response(
         None => (None, None),
     };
 
+    let profile_fields = actor
+        .profile_fields
+        .as_ref()
+        .map(profile_fields_from_json)
+        .unwrap_or_default();
+
     Json(ProfileResponse {
         username: actor.username,
         domain: actor.domain,
@@ -356,6 +380,7 @@ async fn build_profile_response(
         follow_status,
         recent_posts,
         pinned_posts,
+        profile_fields,
         bridge_real_handle,
         bridge_protocol,
         is_paired: actor.seiran_pair_actor_id.is_some(),
@@ -403,12 +428,14 @@ async fn fetch_remote_profile(
     let display_name = ap_actor.name.clone().unwrap_or_else(|| resolved_username.clone());
     let avatar_url = ap_actor.avatar_url();
     let emoji_map = ap_actor.emoji_map();
+    // プロフィールのキーバリュー項目（#62）。
+    let profile_fields = ap_actor.profile_fields_json();
     let now = chrono::Utc::now();
     let new_actor_id = seiran_common::generate_snowflake_id(now);
 
     match state
         .actors
-        .upsert_remote_fedi(new_actor_id, &actor_uri, &ap_inbox, &resolved_username, domain, &display_name, avatar_url.as_deref(), now, &emoji_map)
+        .upsert_remote_fedi(new_actor_id, &actor_uri, &ap_inbox, &resolved_username, domain, &display_name, avatar_url.as_deref(), now, &emoji_map, &profile_fields)
         .await
     {
         Ok(actor_id) => match state.actors.find_by_id(actor_id).await {
@@ -433,6 +460,7 @@ async fn fetch_remote_profile(
         follow_status: "not_following".to_string(),
         recent_posts: vec![],
         pinned_posts: vec![],
+        profile_fields: vec![],
         bridge_real_handle: None,
         bridge_protocol: None,
         is_paired: false,
@@ -467,6 +495,10 @@ pub struct UpdateProfileRequest {
     pub avatar_media_id: Option<Option<String>>,
     #[serde(default)]
     pub banner_media_id: Option<Option<String>>,
+    /// プロフィールのキーバリュー項目（#62）。`None` = 現在値を保持、`Some(vec)` = 全置換
+    /// （空・空白のみの行は保存時に除外する）。
+    #[serde(default)]
+    pub profile_fields: Option<Vec<ProfileField>>,
 }
 
 #[derive(Serialize)]
@@ -476,6 +508,7 @@ pub struct UpdateProfileResponse {
     pub bio: Option<String>,
     pub avatar_media_id: Option<i64>,
     pub banner_media_id: Option<i64>,
+    pub profile_fields: Vec<ProfileField>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -486,6 +519,53 @@ struct ActorProfileRow {
     bio: Option<String>,
     avatar_media_id: Option<i64>,
     banner_media_id: Option<i64>,
+    profile_fields: serde_json::Value,
+}
+
+/// プロフィールのキーバリュー項目のラベル・値の最大文字数（#62）。
+const MAX_PROFILE_FIELD_NAME_LEN: usize = 50;
+const MAX_PROFILE_FIELD_VALUE_LEN: usize = 255;
+
+/// リクエストで指定された `profile_fields` を検証し、DB へ保存する JSON 値を組み立てる。
+/// 前後空白を除去し、ラベル・値のどちらかが空になった行は無視する（フォームの空欄行を
+/// 気にせず送信できるようにするため）。件数・長さの上限超過は 400 を返す。
+fn validate_profile_fields(fields: Vec<ProfileField>) -> Result<serde_json::Value, Response> {
+    if fields.len() > seiran_common::MAX_PROFILE_FIELDS {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("プロフィール項目は最大{}件までです", seiran_common::MAX_PROFILE_FIELDS),
+        )
+            .into_response());
+    }
+    let cleaned: Vec<ProfileField> = fields
+        .into_iter()
+        .filter_map(|f| {
+            let name = f.name.trim().to_string();
+            let value = f.value.trim().to_string();
+            if name.is_empty() || value.is_empty() {
+                None
+            } else {
+                Some(ProfileField { name, value })
+            }
+        })
+        .collect();
+    for f in &cleaned {
+        if f.name.chars().count() > MAX_PROFILE_FIELD_NAME_LEN {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("プロフィール項目のラベルは{}文字までです", MAX_PROFILE_FIELD_NAME_LEN),
+            )
+                .into_response());
+        }
+        if f.value.chars().count() > MAX_PROFILE_FIELD_VALUE_LEN {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("プロフィール項目の値は{}文字までです", MAX_PROFILE_FIELD_VALUE_LEN),
+            )
+                .into_response());
+        }
+    }
+    serde_json::to_value(cleaned).map_err(|e| ApiError::Internal(e.to_string()).into_response())
 }
 
 pub async fn update_profile(
@@ -500,7 +580,7 @@ pub async fn update_profile(
 
     // 現在のプロフィールを取得
     let current = match sqlx::query_as::<_, ActorProfileRow>(
-        "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id \
+        "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id, profile_fields \
          FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
     )
     .bind(auth_user.user_id)
@@ -542,17 +622,26 @@ pub async fn update_profile(
             Err(_) => return (StatusCode::BAD_REQUEST, "banner_media_id が不正な値です").into_response(),
         },
     };
+    let new_profile_fields: serde_json::Value = match req.profile_fields {
+        Some(fields) => match validate_profile_fields(fields) {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        },
+        None => current.profile_fields,
+    };
 
     // UPDATE
     if let Err(e) = sqlx::query(
         "UPDATE actors \
-         SET display_name = $1, bio = $2, avatar_media_id = $3, banner_media_id = $4, updated_at = NOW() \
-         WHERE user_id = $5 AND actor_type = 'local'",
+         SET display_name = $1, bio = $2, avatar_media_id = $3, banner_media_id = $4, \
+             profile_fields = $5, updated_at = NOW() \
+         WHERE user_id = $6 AND actor_type = 'local'",
     )
     .bind(&new_display_name)
     .bind(&new_bio)
     .bind(new_avatar_media_id)
     .bind(new_banner_media_id)
+    .bind(&new_profile_fields)
     .bind(auth_user.user_id)
     .execute(&state.db)
     .await
@@ -561,26 +650,22 @@ pub async fn update_profile(
         return ApiError::Internal(e.to_string()).into_response();
     }
 
-    // ATP repo へプロフィールを再コミットして bsky 側にも avatar/bio を反映する。
-    let atp_display_name = new_display_name.clone().unwrap_or_else(|| current.username.clone());
-    let avatar_media: Option<(String, String, i64)> = match new_avatar_media_id {
-        Some(media_id) => sqlx::query_as::<_, (String, String, i64)>(
-            "SELECT sha256, mime_type, size FROM media_files WHERE id = $1",
-        )
-        .bind(media_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten(),
-        None => None,
-    };
+    // ATP repo へプロフィールを再コミットして bsky 側にも avatar/bio/プロフィールの
+    // キーバリュー項目（#62、bio 末尾へのリスト追記）を反映する。UPDATE 済みの最新値を
+    // 読み直す（display_name・avatar_media の材料取得と bio へのフィールド追記を一本化した
+    // 共通ヘルパー、pin/unpin 時の再コミットとも共用）。
     let pinned_post = crate::handlers::notes::resolve_bsky_pinned_post(&state, current.id).await;
-    if let Err(e) = state
-        .atp_service
-        .commit_profile(current.id, &atp_display_name, new_bio.as_deref(), avatar_media, pinned_post, chrono::Utc::now())
-        .await
-    {
-        tracing::error!("[update_profile] ATP プロフィール再コミット失敗（DB更新は完了済み）: {}", e);
+    match crate::handlers::notes::fetch_atp_profile_material(&state, current.id).await {
+        Ok((atp_display_name, bio_with_fields, avatar_media)) => {
+            if let Err(e) = state
+                .atp_service
+                .commit_profile(current.id, &atp_display_name, bio_with_fields.as_deref(), avatar_media, pinned_post, chrono::Utc::now())
+                .await
+            {
+                tracing::error!("[update_profile] ATP プロフィール再コミット失敗（DB更新は完了済み）: {}", e);
+            }
+        }
+        Err(e) => tracing::error!("[update_profile] ATP 再コミット材料取得失敗（DB更新は完了済み）: {}", e),
     }
 
     // AP 側: 既にフォロー中のリモートインスタンスへ Update(Person) をプッシュ配信し、
@@ -593,6 +678,7 @@ pub async fn update_profile(
         bio: new_bio,
         avatar_media_id: new_avatar_media_id,
         banner_media_id: new_banner_media_id,
+        profile_fields: profile_fields_from_json(&new_profile_fields),
     })
     .into_response()
 }

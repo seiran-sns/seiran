@@ -860,6 +860,43 @@ profile:
 
 新規登録時（`setup.rs` / `auth.rs`）はアバター・bioがまだ無いため `description: None, avatar_media: None` で呼ばれる。
 
+### 11.4 プロフィールのキーバリュー項目（#62）
+
+Mastodon 等の「プロフィールのメタデータ欄」（AP Actor の `attachment[type=PropertyValue]`）
+相当の機能。DB は `actors.profile_fields`（Doc1 §1.2、`[{"name", "value"}, ...]` 配列、
+最大 `seiran_common::MAX_PROFILE_FIELDS`（4）件）。
+
+**送信: Fedi（AP Actor `attachment`）**
+- `crates/seiran-federation-inbox/src/handlers/actor.rs` の `actor_handler` が
+  `profile_fields` を `ApPropertyValue { type: "PropertyValue", name, value }` の配列に
+  変換し `attachment` として返す。`value` は `property_value_html` で HTML エスケープし、
+  `http(s)://` で始まる場合は `<a href="..." rel="me nofollow noopener noreferrer">` で
+  ラップする（Mastodon 等のクライアントは `value` を HTML としてレンダリングするため、
+  素のテキストのままだとリンクにならない）。
+
+**送信: Bsky（`description` 末尾への追記）**
+- Bsky の `app.bsky.actor.profile` には構造化フィールドが無いため、`crates/seiran-api/src/handlers/notes/mod.rs`
+  の `fetch_atp_profile_material`（pin/unpin 時の再コミットと `update_profile` の両方が
+  共用する、ATP 再コミット材料を DB から読み直す関数）が `append_profile_fields_to_bio`
+  で bio の末尾に `ラベル: 値` を改行区切りで追記した文字列を組み立て、それを
+  `commit_profile` の `description` 引数として渡す。項目が無ければ bio をそのまま返す。
+
+**受信: リモート Fedi アクターの PropertyValue 取り込み**
+- `crates/seiran-common/src/ap/client.rs` の `ApActor` に `attachment: Vec<serde_json::Value>`
+  を追加し、`property_values()`（`type: "PropertyValue"` の要素を `(name, value)` に変換）・
+  `profile_fields_json()`（`MAX_PROFILE_FIELDS` 件に切り詰め、`value` を `strip_html` して
+  DB 保存用の JSON 配列を組み立てる）を追加。
+- `ActorRepository::upsert_remote_fedi`（`emoji_map` と同じ UPSERT パターン）に
+  `profile_fields` 引数を追加し、リモートアクターを upsert する全経路
+  （`jobs::inbound_activity_process::upsert_remote_fedi_actor`、`handlers::follows` の
+  Fedi フォロー時の解決、`handlers::users::fetch_remote_profile` の未認知アクター初回
+  アクセス時 upsert）で `ap_actor.profile_fields_json()` を渡す。
+- **既知の制約**: 一度取り込んだ値は、そのアクターへの Follow 受信等で再度 upsert される
+  タイミングまで更新されない（`bio` と同じ扱い。プロフィール表示のたびに Actor 自体を
+  再フェッチする設計にはしていない。ピン留めの featured collection のみ例外的に毎回
+  同期している、§13.3 参照）。Bsky 側の受信（リモート Bsky アクターの `description` に
+  埋め込まれたキーバリュー文字列のパース）は対象外（要望に含まれていないため未実装）。
+
 ## 12. Bsky公式動画パイプライン結合（`app.bsky.embed.video`）
 
 seiranから投稿した動画をBluesky公式アプリで再生可能にするため、Bluesky公式の

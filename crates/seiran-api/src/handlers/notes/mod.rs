@@ -904,12 +904,12 @@ async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
 }
 
 /// ATP プロフィール再コミットに必要な現在の display_name/bio/avatar blob 情報を取得する。
-async fn fetch_atp_profile_material(
+pub(crate) async fn fetch_atp_profile_material(
     state: &AppState,
     actor_id: i64,
 ) -> Result<(String, Option<String>, Option<(String, String, i64)>), sqlx::Error> {
     let row = sqlx::query(
-        "SELECT a.username, a.display_name, a.bio, mf.sha256, mf.mime_type, mf.size
+        "SELECT a.username, a.display_name, a.bio, a.profile_fields, mf.sha256, mf.mime_type, mf.size
          FROM actors a
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
          WHERE a.id = $1",
@@ -920,6 +920,7 @@ async fn fetch_atp_profile_material(
     let username: String = row.try_get("username")?;
     let display_name: Option<String> = row.try_get("display_name")?;
     let bio: Option<String> = row.try_get("bio")?;
+    let profile_fields: serde_json::Value = row.try_get("profile_fields")?;
     let sha256: Option<String> = row.try_get("sha256")?;
     let mime_type: Option<String> = row.try_get("mime_type")?;
     let size: Option<i64> = row.try_get("size")?;
@@ -927,5 +928,37 @@ async fn fetch_atp_profile_material(
         (Some(s), Some(m), Some(sz)) => Some((s, m, sz)),
         _ => None,
     };
-    Ok((display_name.unwrap_or(username), bio, avatar_media))
+    let bio_with_fields = append_profile_fields_to_bio(bio, &profile_fields);
+    Ok((display_name.unwrap_or(username), bio_with_fields, avatar_media))
+}
+
+/// bio の末尾にプロフィールのキーバリュー項目を整形して追記する（#62）。Bsky は構造化された
+/// プロフィール欄を持たず自己紹介文（`description`）のみのため、マイケルの提案通り
+/// `ラベル: 値` の行をリスト形式で bio の後ろに追記してフォールバック表示する。
+/// 項目が無ければ bio をそのまま返す。
+fn append_profile_fields_to_bio(bio: Option<String>, profile_fields: &serde_json::Value) -> Option<String> {
+    let fields: Vec<(String, String)> = profile_fields
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|f| {
+                    let name = f.get("name")?.as_str()?.to_string();
+                    let value = f.get("value")?.as_str()?.to_string();
+                    Some((name, value))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if fields.is_empty() {
+        return bio;
+    }
+    let list = fields
+        .iter()
+        .map(|(name, value)| format!("{}: {}", name, value))
+        .collect::<Vec<_>>()
+        .join("\n");
+    match bio {
+        Some(b) if !b.trim().is_empty() => Some(format!("{}\n\n{}", b, list)),
+        _ => Some(list),
+    }
 }
