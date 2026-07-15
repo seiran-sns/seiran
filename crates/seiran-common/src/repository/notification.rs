@@ -36,6 +36,8 @@ pub struct NotificationRow {
     pub notifier_actor_id: Option<i64>,
     pub note_id: Option<i64>,
     pub reaction: Option<String>,
+    /// 通知発生時点で確定していたカスタム絵文字の画像URL（非正規化保存、下記 insert 参照）。
+    pub reaction_emoji_url: Option<String>,
     pub is_read: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -44,6 +46,11 @@ pub struct NotificationRow {
 pub trait NotificationRepository: Send + Sync {
     /// 通知を1件記録する。`id` は呼び出し側で採番済みの snowflake ID
     /// （新しい順ソートに `ORDER BY id DESC` をそのまま使えるようにするため）。
+    /// `reaction_emoji_url` は `reaction` がカスタム絵文字（`:shortcode:`）の場合のみ、
+    /// 呼び出し時点で解決済みの画像URLを渡す（`reactions` テーブルは
+    /// `UNIQUE(post_id, actor_id)` で1人1投稿1リアクションのため、同じアクターが後で
+    /// 別の絵文字へ切り替えると過去の行が上書きされ、都度クエリでは解決できなくなるため
+    /// 非正規化して保存する）。
     #[allow(clippy::too_many_arguments)]
     async fn insert(
         &self,
@@ -53,6 +60,7 @@ pub trait NotificationRepository: Send + Sync {
         notifier_actor_id: Option<i64>,
         note_id: Option<i64>,
         reaction: Option<&str>,
+        reaction_emoji_url: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
     /// 自分宛ての通知を新しい順に取得する（カーソルページネーション、`posts` の
@@ -89,10 +97,11 @@ impl NotificationRepository for PgNotificationRepository {
         notifier_actor_id: Option<i64>,
         note_id: Option<i64>,
         reaction: Option<&str>,
+        reaction_emoji_url: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+            "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(id)
         .bind(recipient_actor_id)
@@ -100,6 +109,7 @@ impl NotificationRepository for PgNotificationRepository {
         .bind(notifier_actor_id)
         .bind(note_id)
         .bind(reaction)
+        .bind(reaction_emoji_url)
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -113,7 +123,7 @@ impl NotificationRepository for PgNotificationRepository {
         since_id: Option<i64>,
     ) -> Result<Vec<NotificationRow>, sqlx::Error> {
         sqlx::query_as::<_, NotificationRow>(
-            "SELECT id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, is_read, created_at
+            "SELECT id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, is_read, created_at
              FROM notifications
              WHERE recipient_actor_id = $1
                AND ($2::bigint IS NULL OR id < $2)

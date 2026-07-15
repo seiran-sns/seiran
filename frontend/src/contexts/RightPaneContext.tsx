@@ -8,7 +8,7 @@ import { createContext, useContext, useState } from "react";
  * だけで、常に同じモード（例: 「投稿主の前後の投稿」）で文脈を覗き見できる。
  */
 interface RightPaneState {
-  /** ホーム画面の右ペインタブ（0: トレンド＆検索, 1: クイック通知）。 */
+  /** ホーム画面の右ペインタブ（0: クイック通知, 1: トレンド＆検索）。トレンド集計はまだ未実装のため、機能しているクイック通知をデフォルトタブにしている。 */
   timelineTab: number;
   setTimelineTab: (i: number) => void;
   /** ポスト詳細の右ペインタブ（0: 投稿主の前後, 1: リアクション）。 */

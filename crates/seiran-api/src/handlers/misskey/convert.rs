@@ -291,14 +291,26 @@ pub async fn build_notifications(
     }
 
     rows.into_iter()
-        .map(|r| MisskeyNotification {
-            id: r.id.to_string(),
-            created_at: r.created_at.to_rfc3339(),
-            kind: r.kind,
-            user_id: r.notifier_actor_id.map(|id| id.to_string()),
-            user: r.notifier_actor_id.and_then(|id| notifier_users.get(&id).cloned()),
-            note: r.note_id.and_then(|id| notes.get(&id).cloned()),
-            reaction: r.reaction,
+        .map(|r| {
+            let mut note = r.note_id.and_then(|id| notes.get(&id).cloned());
+            // ノート単位で共有キャッシュした `reactionEmojis` は投稿の「現在の」リアクション
+            // 集計にすぎない。`reactions` は1人1投稿1リアクションのため、通知発生後に
+            // 同じアクターが別の絵文字へ切り替えると過去の行は上書きされて消え、共有キャッシュ
+            // からは解決できなくなる。通知 INSERT 時点で非正規化保存した
+            // `reaction_emoji_url`（存在する場合）でこの通知固有の1エントリだけ上書きし、
+            // 過去の通知でも確実に画像解決できるようにする。
+            if let (Some(note), Some(reaction), Some(url)) = (&mut note, &r.reaction, &r.reaction_emoji_url) {
+                note.reaction_emojis.insert(reaction.clone(), url.clone());
+            }
+            MisskeyNotification {
+                id: r.id.to_string(),
+                created_at: r.created_at.to_rfc3339(),
+                kind: r.kind,
+                user_id: r.notifier_actor_id.map(|id| id.to_string()),
+                user: r.notifier_actor_id.and_then(|id| notifier_users.get(&id).cloned()),
+                note,
+                reaction: r.reaction,
+            }
         })
         .collect()
 }

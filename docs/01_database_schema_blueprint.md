@@ -490,6 +490,7 @@ CREATE TABLE notifications (
     notifier_actor_id  BIGINT REFERENCES actors(id) ON DELETE SET NULL,
     note_id            BIGINT REFERENCES posts(id) ON DELETE SET NULL,
     reaction           VARCHAR(255),  -- type='reaction' の場合のみ（リアクション内容）
+    reaction_emoji_url TEXT,          -- type='reaction' かつカスタム絵文字の場合のみ（下記参照）
     is_read            BOOLEAN NOT NULL DEFAULT false,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -507,13 +508,21 @@ CREATE INDEX idx_notifications_recipient_unread ON notifications (recipient_acto
   `id DESC` 取得する（他のタイムライン系クエリと同じカーソルページネーション規約）。
   `mark_all_read` は `POST /api/i/notifications` の `markAsRead`（デフォルト true）で
   呼ばれ、パネルを開いた時点の全件を既読にする。
-- **カスタム絵文字リアクションの画像表示**: `notifications.reaction` 自体は生文字列
-  （`:shortcode:` または Unicode絵文字）のみを保持し画像URLは持たない。本家 Misskey も同様に
-  通知オブジェクト自体には画像URLを持たせず、同梱する `note`（`MisskeyNote`）側の
-  `reactionEmojis: {shortcode→url}` をクライアントが参照する設計のため、seiran もこれに合わせた
-  （Doc3 §5.8 参照）。`reactions.emoji_url` は投稿単位で `fetch_reactions_map` が集計する
-  ため、通知発生時点でのリアクション内容が後で変更・削除されていると解決できないことがある
-  （本家 Misskey も同じ制約）。
+- **カスタム絵文字リアクションの画像表示（`reaction_emoji_url` の非正規化保存）**: 初回実装は
+  `notifications.reaction`（生文字列）しか保存せず、表示時に対象投稿の**現在の**リアクション
+  集計（`reactions` テーブル、`fetch_reactions_map`）から画像URLを都度引いていた。しかし
+  `reactions` は `UNIQUE(post_id, actor_id)` で1人1投稿1リアクションのため、同じアクターが
+  後で別の絵文字へ切り替えると過去の行は上書きされて消え、古い通知の画像が解決できなくなる
+  不具合があった（マイケル指摘・2026-07-15、同一アクターが短時間に何度もリアクションを
+  切り替えるケースで顕在化）。マイグレーション `20260716020000_notifications_reaction_emoji_url.sql`
+  で `reaction_emoji_url` を追加し、通知 INSERT 時点で確定している画像URLをこのテーブル自身
+  にも非正規化保存するよう変更。読み取り時（`convert::build_notifications`）は、ノート単位で
+  共有キャッシュした `MisskeyNote.reactionEmojis` にこの通知固有の `(reaction,
+  reaction_emoji_url)` を上書き挿入することで、他の通知や投稿の現在状態に関わらず常に
+  正しい画像URLが解決される。**既知の制約**: このマイグレーション適用前に作成された既存の
+  通知データは `reaction_emoji_url` が `NULL` のままのため遡って修正されない（当時の
+  URLを再構築する手段が無いため）。当該投稿の現在のリアクション内容とたまたま一致する場合
+  のみ従来通りの都度解決にフォールバックする。
 - ローカル同士のフォローは即時 `accepted` になり AP `Follow`/`Accept` を経由しないため、
   現状 `follow`/`followRequestAccepted` 通知はリモートからのフォローのみで発生する。
 

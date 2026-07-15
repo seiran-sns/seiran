@@ -647,7 +647,7 @@ pub async fn create_reaction(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = state
             .notifications
-            .insert(notif_id, post.actor_id, NotificationKind::Reaction, Some(me.actor_id), Some(note_id), Some(&content))
+            .insert(notif_id, post.actor_id, NotificationKind::Reaction, Some(me.actor_id), Some(note_id), Some(&content), None)
             .await
         {
             tracing::error!("[create_reaction] notifications INSERT 失敗: {}", e);

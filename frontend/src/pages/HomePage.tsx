@@ -95,11 +95,11 @@ export default function HomePage() {
   const right = (
     <>
       <Tabs
-        tabs={["トレンド＆検索", unread > 0 ? `クイック通知 (${unread})` : "クイック通知"]}
+        tabs={[unread > 0 ? `クイック通知 (${unread})` : "クイック通知", "トレンド＆検索"]}
         active={timelineTab}
         onChange={setTimelineTab}
       />
-      {timelineTab === 0 ? <TrendsSearchPanel /> : <NotificationsPanel />}
+      {timelineTab === 0 ? <NotificationsPanel /> : <TrendsSearchPanel />}
     </>
   );
 

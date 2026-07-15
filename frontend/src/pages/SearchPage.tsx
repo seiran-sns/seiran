@@ -113,14 +113,14 @@ export default function SearchPage() {
 
   const right = (
     <>
-      <Tabs tabs={["トレンド＆検索", "クイック通知"]} active={timelineTab} onChange={setTimelineTab} />
+      <Tabs tabs={["クイック通知", "トレンド＆検索"]} active={timelineTab} onChange={setTimelineTab} />
       {timelineTab === 0 ? (
+        <NotificationsPanel />
+      ) : (
         <div className={panel.placeholder}>
           <span className={panel.placeholderIcon}>📈</span>
           トレンド集計は準備中です。
         </div>
-      ) : (
-        <NotificationsPanel />
       )}
     </>
   );
