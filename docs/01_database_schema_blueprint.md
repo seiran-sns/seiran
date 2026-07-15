@@ -474,6 +474,49 @@ CREATE TABLE site_settings (
 
 `smtp_host` が未設定の場合、`POST /api/auth/verify-email` は HTTP 503 + `{"code": "SMTP_NOT_CONFIGURED"}` を返す。
 
+### 1.12 `notifications` (通知永続化テーブル)
+
+従来「クイック通知」は WebSocket ライブ配信のみで永続化しておらず、フロントエンドの
+インメモリ配列（最大100件、リロードで消滅）に頼っていた。マイケルの要望
+（2026-07-15: 「一度見ると消えてしまうのはもったいない」）を受け、通知を DB に永続化し、
+新着順の無限スクロールで過去分も遡れるようにした。エンドポイントは Misskey API 互換の
+`POST /api/i/notifications`（Doc3 §5.8）。
+
+```sql
+CREATE TABLE notifications (
+    id                 BIGINT PRIMARY KEY,  -- Snowflake ID（自然に時系列ソートされる）
+    recipient_actor_id BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+    type               VARCHAR(32) NOT NULL,  -- 'follow' | 'reaction' | 'followRequestAccepted'
+    notifier_actor_id  BIGINT REFERENCES actors(id) ON DELETE SET NULL,
+    note_id            BIGINT REFERENCES posts(id) ON DELETE SET NULL,
+    reaction           VARCHAR(255),  -- type='reaction' の場合のみ（リアクション内容）
+    is_read            BOOLEAN NOT NULL DEFAULT false,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_notifications_recipient ON notifications (recipient_actor_id, id DESC);
+CREATE INDEX idx_notifications_recipient_unread ON notifications (recipient_actor_id) WHERE NOT is_read;
+```
+
+- **書き込み元**: リアクション作成（`handlers::notes::create_reaction`、ローカル/Jetstream
+  Like inbound とも）、AP `Follow` 受信（`jobs::inbound_activity_process::handle_follow`）、
+  AP `Accept(Follow)` 受信（`handle_accept`、type は `followRequestAccepted`）の各経路で
+  `NotificationRepository::insert` を呼ぶ。書き込み失敗はログのみで本処理をブロックしない
+  （通知はベストエフォート）。
+- **読み取り**: `NotificationRepository::list` が `until_id`/`since_id` カーソルで
+  `id DESC` 取得する（他のタイムライン系クエリと同じカーソルページネーション規約）。
+  `mark_all_read` は `POST /api/i/notifications` の `markAsRead`（デフォルト true）で
+  呼ばれ、パネルを開いた時点の全件を既読にする。
+- **カスタム絵文字リアクションの画像表示**: `notifications.reaction` 自体は生文字列
+  （`:shortcode:` または Unicode絵文字）のみを保持し画像URLは持たない。本家 Misskey も同様に
+  通知オブジェクト自体には画像URLを持たせず、同梱する `note`（`MisskeyNote`）側の
+  `reactionEmojis: {shortcode→url}` をクライアントが参照する設計のため、seiran もこれに合わせた
+  （Doc3 §5.8 参照）。`reactions.emoji_url` は投稿単位で `fetch_reactions_map` が集計する
+  ため、通知発生時点でのリアクション内容が後で変更・削除されていると解決できないことがある
+  （本家 Misskey も同じ制約）。
+- ローカル同士のフォローは即時 `accepted` になり AP `Follow`/`Accept` を経由しないため、
+  現状 `follow`/`followRequestAccepted` 通知はリモートからのフォローのみで発生する。
+
 ---
 
 ## 2. データベース層での主要クエリ・ユースケース

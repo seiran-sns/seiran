@@ -29,7 +29,7 @@ use axum::{
 };
 use sqlx::Row;
 
-use seiran_common::repository::TimelinePost;
+use seiran_common::repository::{NotificationKind, TimelinePost};
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::{ap::{fetch_ap_history, plain_to_html}, generate_snowflake_id, ApDeliveryKind, PrevApReaction};
 
@@ -644,6 +644,14 @@ pub async fn create_reaction(
                 "actor": { "username": me.username, "domain": me.domain, "displayName": me.display_name },
             }),
         );
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = state
+            .notifications
+            .insert(notif_id, post.actor_id, NotificationKind::Reaction, Some(me.actor_id), Some(note_id), Some(&content))
+            .await
+        {
+            tracing::error!("[create_reaction] notifications INSERT 失敗: {}", e);
+        }
     }
 
     // タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の

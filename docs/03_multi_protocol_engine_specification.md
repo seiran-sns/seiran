@@ -339,7 +339,8 @@ Rust 実装は `lettre` クレートを使用する（`lettre = { version = "0.1
   `NoteResponse`/`NoteUserInfo`（配列ベースの `reactions`、`domain` フィールド等）は別物。
 - **未実装の標準エンドポイント**: `/api/i`, `/api/users/show`, `/api/notes/show`,
   `/api/notes/reactions/create`, `/api/notes/reactions/delete`, `/api/following/create`,
-  `/api/following/delete`, `/api/i/notifications`, `/api/notes/unrenote` など。
+  `/api/following/delete`, `/api/notes/unrenote` など。（`/api/i/notifications` は
+  §5.8 で実装済み）
 - **ストリーミングプロトコル**: Misskey はチャンネル購読方式（`connect`/`channel`）、seiran は
   認証ユーザー宛てブロードキャストのみの単純な WebSocket。
 
@@ -434,6 +435,51 @@ MiAuth 実装に3つの不備が見つかり修正した。いずれも「サー
 
 いずれも `handlers::miauth.rs`・`handlers::misskey::{types,convert,endpoints}` にフィールド名を
 固定する回帰テストを追加済み。
+
+### 5.8 `POST /api/i/notifications`（通知永続化, 2026-07-15）
+
+マイケルの要望: 「クイック通知が一度見ると消えてしまうのはもったいない。新着順に並び、
+過去分も無限スクロールで遡れるようにしてほしい。あくまで Misskey API 互換で」。
+従来の通知（フォロー・リアクション・フォロー承認）は WebSocket ライブ配信のみで、
+フロントエンドのインメモリ配列（`StreamingContext`、最大100件、リロードで消滅）に頼っていた。
+これを DB 永続化（`notifications` テーブル、Doc1 §1.12）し、本家 Misskey の
+`POST /api/i/notifications` と同じワイヤープロトコルで実装した。
+
+**バックエンド**: `NotificationRepository`（`seiran-common::repository::notification`）が
+`insert`/`list`（`until_id`/`since_id` カーソル）/`mark_all_read` を提供。書き込みは
+リアクション作成（ローカル `handlers::notes::create_reaction`、AP/ATP inbound とも）、
+AP `Follow`/`Accept(Follow)` 受信の各経路から行う。`AppState.notifications`
+（`Arc<dyn NotificationRepository>`）・`InboxContext.notification_repo` として
+DI する（既存の `PostRepository` 等と同じパターン）。ハンドラ本体は
+`handlers::misskey::endpoints::i_notifications`。paramDef（`limit`/`sinceId`/`untilId`/
+`markAsRead`/`includeTypes`/`excludeTypes`）は本家 Misskey に合わせたが、`sinceDate`/
+`untilDate` は未対応。レスポンス型 `MisskeyNotification`（`handlers::misskey::types`）・
+組み立ては `convert::build_notifications`（通知者・ノートを ID ごとに一括解決してから
+`MisskeyNote`/`MisskeyUserLite` へ変換）。
+
+**フロントエンド**: `NotificationsPanel.tsx` は初回マウント時に `api.notifications.list()`
+で新着20件を取得し、以降は下端到達で `IntersectionObserver` により `untilId` カーソルで
+過去分を追加取得する（無限スクロール）。WebSocket ライブ通知（`StreamingContext` の
+`registerNotifArrived`）は「新着があった」というシグナルにのみ使い、実データは常に
+`sinceId` 付きで REST から再取得する（WS ペイロードのアドホックな整形をやめ、一覧表示と
+同じ ID 体系・スキーマに統一するため）。`unread` バッジのカウント・既読化ロジック自体は
+変更していない。
+
+**カスタム絵文字リアクションの画像表示**: 初回実装時、`notifications.reaction` は
+`:shortcode:`/Unicode の生文字列のみで画像URLを持たず、通知一覧上のカスタム絵文字が
+テキスト表示に退行する不具合があった（マイケル指摘・2026-07-15）。本家 Misskey の
+`NotificationEntityService`/`NoteEntityService` を確認したところ、本家も通知オブジェクト
+自体には画像URLを持たせず、同梱する packed `Note` 側の
+`reactionEmojis: populateEmojis(reactionEmojiNames, host)`（`{shortcode→url}`）を
+クライアントが参照する設計だった。これに合わせ `MisskeyNote` に `reactionEmojis`
+（`handlers::misskey::convert::to_misskey_note` が既存の `fetch_reactions_map` の
+`ReactionSummary.emoji_url` から構築）を追加し、フロントは
+`n.note?.reactionEmojis?.[n.reaction]` を解決できた場合のみ `img` 表示するよう修正した。
+
+**既知の制約**（Doc1 §1.12 参照）:
+- `reactionEmojis` は投稿の**現在の**リアクション集計から解決するため、通知発生後に
+  当該リアクションが変更・削除されていると解決できないことがある（本家 Misskey も同じ制約）。
+- ローカル同士のフォローは AP を経由しないため通知が発生しない（リモートからのフォローのみ対応）。
 
 ---
 

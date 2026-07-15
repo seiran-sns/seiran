@@ -13,6 +13,7 @@ use std::sync::Arc;
 use crate::ap::{build_emoji_map, ApClient};
 use crate::generate_snowflake_id;
 use crate::queue::worker::{InboxContext, JobContext};
+use crate::repository::NotificationKind;
 use crate::streaming::broadcast_reaction_update;
 
 pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), String> {
@@ -146,6 +147,14 @@ async fn handle_follow(
             "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
         }),
     );
+    let notif_id = generate_snowflake_id(chrono::Utc::now());
+    if let Err(e) = inbox
+        .notification_repo
+        .insert(notif_id, local_actor_id, NotificationKind::Follow, Some(follower_actor_id), None, None)
+        .await
+    {
+        tracing::error!("[Follow] notifications INSERT 失敗: {}", e);
+    }
 
     // Accept アクティビティを構築して送信
     let local_actor_uri = format!("https://{}/users/{}", inbox.local_domain, local_username);
@@ -438,6 +447,14 @@ async fn handle_accept(activity: serde_json::Value, inbox: &InboxContext) -> Res
                 },
             }),
         );
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = inbox
+            .notification_repo
+            .insert(notif_id, local_actor_id, NotificationKind::FollowRequestAccepted, Some(remote_actor.id), None, None)
+            .await
+        {
+            tracing::error!("[Accept] notifications INSERT 失敗: {}", e);
+        }
     }
     Ok(())
 }
@@ -606,6 +623,14 @@ async fn handle_reaction(
             "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
         }),
     );
+    let notif_id = generate_snowflake_id(chrono::Utc::now());
+    if let Err(e) = inbox
+        .notification_repo
+        .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(&content))
+        .await
+    {
+        tracing::error!("[Reaction] notifications INSERT 失敗: {}", e);
+    }
 
     // タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の
     // ストリーミング挙動に合わせる）。

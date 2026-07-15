@@ -91,6 +91,11 @@ pub struct MisskeyNote {
     pub emojis: BTreeMap<String, String>,
     /// 絵文字 → 件数。
     pub reactions: BTreeMap<String, i64>,
+    /// カスタム絵文字リアクション（`:shortcode:`）→画像URL。本家 Misskey の
+    /// `NoteEntityService`（`reactionEmojis: populateEmojis(reactionEmojiNames, host)`）に
+    /// 相当。Unicode絵文字のリアクションはここに現れない（クライアント側はそのまま
+    /// テキストとして描画する）。
+    pub reaction_emojis: BTreeMap<String, String>,
     pub renote_count: i64,
     pub replies_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,6 +104,28 @@ pub struct MisskeyNote {
     pub url: Option<String>,
     /// 認証ユーザーが付けたリアクション（絵文字）。未認証・未リアクション時は `null`。
     pub my_reaction: Option<String>,
+}
+
+/// `POST /api/i/notifications` のレスポンス要素。Misskey 本家の `Notification` エンティティ
+/// （`packed 'Notification'`）に合わせる。型ごとに存在するフィールドが異なるため
+/// 全フィールド `Option`（`None` は省略）にしている。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyNotification {
+    pub id: String,
+    pub created_at: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// `notifierId` 相当。Misskey 本家は `userId` というフィールド名で通知の起点ユーザーIDを返す。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<MisskeyUserLite>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<MisskeyNote>,
+    /// `type == "reaction"` の場合のみ。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reaction: Option<String>,
 }
 
 #[cfg(test)]

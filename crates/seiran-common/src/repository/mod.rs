@@ -7,6 +7,7 @@ pub mod actor;
 pub mod atp;
 pub mod follow;
 pub mod media_file;
+pub mod notification;
 pub mod post;
 pub mod reaction;
 pub mod site_settings;
@@ -19,6 +20,7 @@ pub use follow::{FollowRepository, PgFollowRepository};
 pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
 };
+pub use notification::{NotificationKind, NotificationRepository, NotificationRow, PgNotificationRepository};
 pub use post::{
     PgPostRepository, PostDeliveryMeta, PostRecord, PostRepository, PostSummary, RepostUndoInfo,
     TimelinePost,

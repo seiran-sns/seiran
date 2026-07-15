@@ -323,6 +323,35 @@ export interface DriveFile {
   thumbnailUrl?: string;
 }
 
+/**
+ * `POST /api/i/notifications`（Misskey API 互換）のレスポンス要素。
+ * バックエンドは既に camelCase で返すため正規化不要（`Note`/`RawNote` と違い
+ * snake_case な旧世代レスポンスとの互換を持たない新規エンドポイントのため）。
+ */
+export interface NotificationUser {
+  id: string;
+  username: string;
+  /** ローカルユーザーは null。 */
+  host: string | null;
+  name?: string;
+  avatarUrl?: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  createdAt: string;
+  type: string; // "reaction" | "follow" | "followRequestAccepted"
+  userId?: string;
+  user?: NotificationUser;
+  /** `type === "reaction"` の場合のみ。カスタム絵文字は `:shortcode:` 形式。 */
+  reaction?: string;
+  /**
+   * `type === "reaction"` の場合のみ。`note.reactionEmojis` にカスタム絵文字（`reaction` と
+   * 同じキー）の画像URLが入っている場合のみ画像表示する（Unicode絵文字は入らない）。
+   */
+  note?: { reactionEmojis?: Record<string, string> };
+}
+
 // =====================================================================
 // Auth API
 // =====================================================================
@@ -476,6 +505,18 @@ export const api = {
         signal
       );
       return { notes: raw.notes.map(normalizeNote), session_id: raw.session_id };
+    },
+  },
+
+  /** Misskey API 互換の `/api/i/notifications`（Doc3 §5.5）。 */
+  notifications: {
+    list(params?: { limit?: number; untilId?: string; sinceId?: string; markAsRead?: boolean }) {
+      return request<NotificationItem[]>("POST", "/i/notifications", {
+        limit: params?.limit,
+        untilId: params?.untilId,
+        sinceId: params?.sinceId,
+        markAsRead: params?.markAsRead,
+      });
     },
   },
 

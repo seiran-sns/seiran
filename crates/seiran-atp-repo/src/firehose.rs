@@ -24,8 +24,8 @@ use futures_util::StreamExt;
 
 use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::repository::{
-    ActorRepository, PostRepository, ReactionRepository,
-    PgActorRepository, PgFollowRepository, PgPostRepository, PgReactionRepository,
+    ActorRepository, NotificationKind, NotificationRepository, PostRepository, ReactionRepository,
+    PgActorRepository, PgFollowRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
 };
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::{generate_snowflake_id, StreamHub};
@@ -483,6 +483,14 @@ async fn handle_inbound_like_create(
                     "actor": { "username": liker.username, "domain": liker.domain, "displayName": liker.display_name },
                 }),
             );
+        }
+        let notifications_repo = PgNotificationRepository::new(pool.clone());
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = notifications_repo
+            .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(content))
+            .await
+        {
+            tracing::error!("[Jetstream/Like] notifications INSERT 失敗: {}", e);
         }
     }
 

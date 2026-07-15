@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, FollowRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AtpReadRepository, FollowRepository, NotificationRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -50,6 +50,8 @@ pub struct AppState {
     pub atp_repo: Arc<dyn AtpReadRepository>,
     /// リアクション（絵文字リアクション・いいね）リポジトリ。
     pub reactions: Arc<dyn ReactionRepository>,
+    /// 通知（フォロー・リアクション等）の永続化リポジトリ。
+    pub notifications: Arc<dyn NotificationRepository>,
     /// deliver_post_to_ap_followers（seiran-common）が &PgPool を要求するため保持。
     /// 将来 FollowerRepository へ移行したら削除する。
     pub db: PgPool,
@@ -165,6 +167,7 @@ pub async fn init_state(
     let follows: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
     let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
+    let notifications: Arc<dyn NotificationRepository> = Arc::new(PgNotificationRepository::new(pool.clone()));
 
     AppState {
         actors,
@@ -173,6 +176,7 @@ pub async fn init_state(
         follows,
         atp_repo,
         reactions,
+        notifications,
         db: pool,
         local_auth,
         miauth_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -288,6 +292,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/unrenote", post(handlers::misskey::endpoints::notes_unrenote))
         .route("/api/following/create", post(handlers::misskey::endpoints::following_create))
         .route("/api/following/delete", post(handlers::misskey::endpoints::following_delete))
+        .route("/api/i/notifications", post(handlers::misskey::endpoints::i_notifications))
         // MiAuth（Misskey 互換クライアント用）
         .route("/miauth/:session_id", get(handlers::miauth::miauth_page))
         .route("/api/miauth/:session_id/authorize", post(handlers::miauth::miauth_authorize))

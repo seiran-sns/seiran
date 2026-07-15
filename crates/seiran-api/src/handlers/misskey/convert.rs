@@ -7,12 +7,12 @@ use std::collections::{BTreeMap, HashMap};
 
 use sqlx::Row;
 
-use seiran_common::repository::{Actor, TimelinePost};
+use seiran_common::repository::{Actor, NotificationRow, TimelinePost};
 
 use crate::handlers::notes::{fetch_attachments_map, fetch_reactions_map, AttachmentResponse, ReactionSummary};
 use crate::AppState;
 
-use super::types::{MisskeyDriveFile, MisskeyMeDetailed, MisskeyNote, MisskeyUserDetailed, MisskeyUserLite};
+use super::types::{MisskeyDriveFile, MisskeyMeDetailed, MisskeyNote, MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite};
 
 pub fn user_lite(
     actor_id: i64,
@@ -140,9 +140,13 @@ fn to_misskey_note(
         .collect();
 
     let mut reactions_map: BTreeMap<String, i64> = BTreeMap::new();
+    let mut reaction_emojis: BTreeMap<String, String> = BTreeMap::new();
     let mut my_reaction = None;
     for r in reactions {
         reactions_map.insert(r.emoji.clone(), r.count);
+        if let Some(url) = &r.emoji_url {
+            reaction_emojis.insert(r.emoji.clone(), url.clone());
+        }
         if r.reacted_by_me {
             my_reaction = Some(r.emoji.clone());
         }
@@ -174,6 +178,7 @@ fn to_misskey_note(
         tags: vec![],
         emojis: BTreeMap::new(),
         reactions: reactions_map,
+        reaction_emojis,
         renote_count,
         replies_count,
         uri: local_url.clone(),
@@ -247,4 +252,53 @@ pub async fn build_note(state: &AppState, post: TimelinePost, my_actor_id: Optio
         .into_iter()
         .next()
         .expect("build_notes は入力1件に対し出力1件を返す")
+}
+
+/// 通知一覧（`POST /api/i/notifications`）を Misskey 形式へ変換する。
+/// `recipient_actor_id` は通知の宛先本人（ノートを包む際の `myReaction` 等の視点に使う）。
+pub async fn build_notifications(
+    state: &AppState,
+    rows: Vec<NotificationRow>,
+    recipient_actor_id: i64,
+) -> Vec<MisskeyNotification> {
+    use std::collections::{HashMap, HashSet};
+
+    let notifier_ids: Vec<i64> = rows.iter().filter_map(|r| r.notifier_actor_id).collect::<HashSet<_>>().into_iter().collect();
+    let notifier_users: HashMap<i64, MisskeyUserLite> = if notifier_ids.is_empty() {
+        HashMap::new()
+    } else {
+        sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>)>(
+            "SELECT id, username, domain, display_name, avatar_url FROM actors WHERE id = ANY($1)",
+        )
+        .bind(&notifier_ids)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(id, username, domain, display_name, avatar_url)| {
+            (id, user_lite(id, &username, &domain, &state.local_domain, display_name.as_deref(), avatar_url.as_deref()))
+        })
+        .collect()
+    };
+
+    // note_id は重複がありうる（同じ投稿への複数リアクション等）ため、一意な ID ごとに1回だけ取得する。
+    let note_ids: HashSet<i64> = rows.iter().filter_map(|r| r.note_id).collect();
+    let mut notes: HashMap<i64, MisskeyNote> = HashMap::new();
+    for note_id in note_ids {
+        if let Ok(Some(post)) = state.posts.find_by_id(note_id).await {
+            notes.insert(note_id, build_note(state, post, Some(recipient_actor_id)).await);
+        }
+    }
+
+    rows.into_iter()
+        .map(|r| MisskeyNotification {
+            id: r.id.to_string(),
+            created_at: r.created_at.to_rfc3339(),
+            kind: r.kind,
+            user_id: r.notifier_actor_id.map(|id| id.to_string()),
+            user: r.notifier_actor_id.and_then(|id| notifier_users.get(&id).cloned()),
+            note: r.note_id.and_then(|id| notes.get(&id).cloned()),
+            reaction: r.reaction,
+        })
+        .collect()
 }

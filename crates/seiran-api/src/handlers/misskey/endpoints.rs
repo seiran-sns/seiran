@@ -17,11 +17,11 @@ use serde::Deserialize;
 use crate::error::ApiError;
 use crate::handlers::follows::{CreateFollowRequest, DeleteFollowRequest};
 use crate::handlers::notes::ReactRequest;
-use crate::middleware::extract_auth;
+use crate::middleware::{extract_auth, AuthedUser};
 use crate::AppState;
 
-use super::convert::{build_me_detailed, build_note, build_notes, build_user_detailed};
-use super::types::{MisskeyMeDetailed, MisskeyNote, MisskeyUserDetailed};
+use super::convert::{build_me_detailed, build_note, build_notes, build_notifications, build_user_detailed};
+use super::types::{MisskeyMeDetailed, MisskeyNote, MisskeyNotification, MisskeyUserDetailed};
 
 // ─── リクエストDTO（Misskey 本家の camelCase フィールド名に合わせる） ──────────
 
@@ -58,6 +58,24 @@ pub struct UserShowBody {
 #[serde(rename_all = "camelCase")]
 pub struct FollowingBody {
     pub user_id: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// `POST /api/i/notifications` のリクエストボディ。Misskey 本家の paramDef に合わせる
+/// （`sinceDate`/`untilDate` は seiran では未対応、`sinceId`/`untilId` のみ）。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationsBody {
+    pub limit: Option<i64>,
+    pub since_id: Option<String>,
+    pub until_id: Option<String>,
+    #[serde(default = "default_true")]
+    pub mark_as_read: bool,
+    pub include_types: Option<Vec<String>>,
+    pub exclude_types: Option<Vec<String>>,
 }
 
 // ─── 共通ヘルパー ───────────────────────────────────────────────────────
@@ -262,6 +280,58 @@ pub async fn notes_unrenote(headers: HeaderMap, State(state): State<AppState>, J
         .await
         .into_response();
     as_no_content(resp)
+}
+
+// ─── 通知 ────────────────────────────────────────────────────────────
+
+/// POST /api/i/notifications
+/// 自分宛ての通知を新しい順にカーソルページネーション取得する。以前はWebSocketの
+/// プッシュ配信のみでオンメモリ保持（ページ再読み込みで消失、直近100件までしか遡れない）
+/// だった「クイック通知」を永続化し、無限スクロールで過去分も遡れるようにする。
+pub async fn i_notifications(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<NotificationsBody>,
+) -> Result<Json<Vec<MisskeyNotification>>, ApiError> {
+    // includeTypes が空配列の場合は何もクエリしない（本家 Misskey の仕様）
+    if body.include_types.as_ref().is_some_and(|t| t.is_empty()) {
+        return Ok(Json(vec![]));
+    }
+
+    let limit = body.limit.unwrap_or(10).clamp(1, 100);
+    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = state
+        .notifications
+        .list(user.actor_id, limit, until_id, since_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let rows: Vec<_> = rows
+        .into_iter()
+        .filter(|r| {
+            if let Some(include) = &body.include_types {
+                if !include.iter().any(|t| t == &r.kind) {
+                    return false;
+                }
+            }
+            if let Some(exclude) = &body.exclude_types {
+                if exclude.iter().any(|t| t == &r.kind) {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+
+    if body.mark_as_read {
+        if let Err(e) = state.notifications.mark_all_read(user.actor_id).await {
+            tracing::error!("[i/notifications] mark_all_read 失敗: {}", e);
+        }
+    }
+
+    Ok(Json(build_notifications(&state, rows, user.actor_id).await))
 }
 
 // ─── フォロー ────────────────────────────────────────────────────────

@@ -3,20 +3,6 @@ import { Note, noteFromStream, ReactionSummary } from "../api/client";
 import { useAuth } from "./AuthContext";
 import { useStreaming } from "../hooks/useStreaming";
 
-/** 通知（リアクション/フォロー/フォロー承諾）1件。 */
-export interface Notif {
-  id: number;
-  kind: "reaction" | "follow" | "followAccepted";
-  body: {
-    postId?: string;
-    emoji?: string;
-    /** Fedi から受信したカスタム絵文字（`:shortcode:`）の画像URL。Unicode絵文字は undefined。 */
-    emojiUrl?: string;
-    actor?: { username?: string; domain?: string; displayName?: string };
-  };
-  at: number;
-}
-
 type NoteListener = (n: Note) => void;
 
 /** `noteUpdated`（リアクション追加/切替/取消）のライブ更新1件。 */
@@ -32,33 +18,40 @@ export interface ReactionUpdate {
 
 type ReactionListener = (u: ReactionUpdate) => void;
 
+/**
+ * 通知系イベント（reaction/follow/followAccepted）が届いたことのみを知らせるリスナー。
+ * ペイロードは使わない。通知の永続化（`POST /api/i/notifications`）に一本化したため、
+ * WS ペイロードは「新着があったので再取得せよ」という即時性のためのシグナルに過ぎない。
+ */
+type NotifListener = () => void;
+
 interface StreamingValue {
-  notifications: Notif[];
   unread: number;
   markRead: () => void;
   /** 新規ポスト受信リスナーを登録する（HomePage が TL 先頭挿入に使用）。戻り値で解除。 */
   registerNote: (cb: NoteListener) => () => void;
   /** 指定ノートIDのリアクションのライブ更新を購読する（NoteCard が使用）。戻り値で解除。 */
   registerReaction: (noteId: string, cb: ReactionListener) => () => void;
+  /** 通知の新着シグナルを購読する（NotificationsPanel が使用）。戻り値で解除。 */
+  registerNotifArrived: (cb: NotifListener) => () => void;
 }
 
 const StreamingContext = createContext<StreamingValue>({
-  notifications: [],
   unread: 0,
   markRead: () => {},
   registerNote: () => () => {},
   registerReaction: () => () => {},
+  registerNotifArrived: () => () => {},
 });
 
 const NOTIF_KINDS = new Set(["reaction", "follow", "followAccepted"]);
-let notifSeq = 0;
 
 export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const [notifications, setNotifications] = useState<Notif[]>([]);
   const [unread, setUnread] = useState(0);
   const noteListeners = useRef<Set<NoteListener>>(new Set());
   const reactionListeners = useRef<Map<string, Set<ReactionListener>>>(new Map());
+  const notifListeners = useRef<Set<NotifListener>>(new Set());
 
   useStreaming((type, body) => {
     if (type === "note") {
@@ -68,9 +61,8 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
       const update = body as ReactionUpdate;
       reactionListeners.current.get(update.postId)?.forEach((cb) => cb(update));
     } else if (NOTIF_KINDS.has(type)) {
-      const notif: Notif = { id: ++notifSeq, kind: type as Notif["kind"], body: (body ?? {}) as Notif["body"], at: Date.now() };
-      setNotifications((prev) => [notif, ...prev].slice(0, 100));
       setUnread((u) => u + 1);
+      notifListeners.current.forEach((cb) => cb());
     }
   }, user?.id ?? null);
 
@@ -96,10 +88,19 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const registerNotifArrived = useCallback((cb: NotifListener) => {
+    notifListeners.current.add(cb);
+    return () => {
+      notifListeners.current.delete(cb);
+    };
+  }, []);
+
   const markRead = useCallback(() => setUnread(0), []);
 
   return (
-    <StreamingContext.Provider value={{ notifications, unread, markRead, registerNote, registerReaction }}>
+    <StreamingContext.Provider
+      value={{ unread, markRead, registerNote, registerReaction, registerNotifArrived }}
+    >
       {children}
     </StreamingContext.Provider>
   );
