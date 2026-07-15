@@ -280,21 +280,42 @@ impl PostRepository for PgPostRepository {
         until_id: Option<i64>,
         since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        // `actor_id = $1 OR actor_id IN (follows...)` を素朴に `ORDER BY id DESC LIMIT` すると、
+        // posts 全体（Bsky Jetstream 経由で無関係なリモート投稿を含め100万行超）を id 降順に
+        // スキャンしながら1行ずつフィルタする実行計画になり、フォロー数が少ないユーザーほど
+        // 大量の無関係行を読み飛ばすまで終わらない（実測 2.6秒、104万行スキャンして8行採用）。
+        // targets（自分+フォロー中）を LATERAL で actor_id ごとに `idx_posts_actor_id` を引かせ、
+        // 各アクター最大 limit 件だけ取ってからマージソートする形に書き換えると、
+        // 既存インデックスのみで実測 1〜4ms まで改善する。
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
+            "WITH targets AS (
+                 SELECT $1::bigint AS actor_id
+                 UNION
+                 SELECT target_actor_id FROM follows
+                 WHERE follower_actor_id = $1 AND status = 'accepted'
+             ),
+             candidate_ids AS (
+                 SELECT p.id
+                 FROM targets t
+                 CROSS JOIN LATERAL (
+                     SELECT id FROM posts p
+                     WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
+                       AND ($2::bigint IS NULL OR p.id < $2)
+                       AND ($3::bigint IS NULL OR p.id > $3)
+                     ORDER BY p.id DESC LIMIT $4
+                 ) p
+                 ORDER BY p.id DESC LIMIT $4
+             )
+             SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
-             FROM posts p JOIN actors a ON a.id = p.actor_id
+             FROM candidate_ids ci
+             JOIN posts p ON p.id = ci.id
+             JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-             WHERE p.deleted_at IS NULL
-               AND ($2::bigint IS NULL OR p.id < $2)
-               AND ($3::bigint IS NULL OR p.id > $3)
-               AND (p.actor_id = $1 OR p.actor_id IN (
-                     SELECT target_actor_id FROM follows
-                     WHERE follower_actor_id = $1 AND status = 'accepted'))
-             ORDER BY p.id DESC LIMIT $4",
+             ORDER BY p.id DESC",
         )
         .bind(actor_id)
         .bind(until_id)
