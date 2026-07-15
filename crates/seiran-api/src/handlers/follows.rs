@@ -306,6 +306,11 @@ async fn follow_fedi(target: &str, user_id: i64, state: &AppState) -> impl IntoR
         .unwrap_or_else(|| target_uri.rsplit('/').next().unwrap_or("unknown").to_string());
     let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
     let remote_domain = target_uri.split('/').nth(2).unwrap_or("").to_string();
+    // 自己紹介文（AP Person の summary は HTML のため strip_html でプレーンテキスト化する）。
+    let remote_bio = remote_ap
+        .summary
+        .as_deref()
+        .map(seiran_common::jobs::inbound_activity_process::strip_html);
     let remote_emoji_map = remote_ap.emoji_map();
     // プロフィールのキーバリュー項目（#62）。
     let remote_profile_fields = remote_ap.profile_fields_json();
@@ -314,7 +319,7 @@ async fn follow_fedi(target: &str, user_id: i64, state: &AppState) -> impl IntoR
     let new_actor_id = generate_snowflake_id(now);
     let remote_actor_id = match state.actors.upsert_remote_fedi(
         new_actor_id, &target_uri, &remote_inbox, &remote_username,
-        &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), now, &remote_emoji_map, &remote_profile_fields,
+        &remote_domain, &remote_display_name, remote_avatar_url.as_deref(), remote_bio.as_deref(), now, &remote_emoji_map, &remote_profile_fields,
     ).await {
         Ok(id) => id,
         Err(e) => {

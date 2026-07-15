@@ -90,6 +90,8 @@ pub trait ActorRepository: Send + Sync {
     ) -> Result<i64, sqlx::Error>;
 
     /// リモート（Fediverse）アクターを upsert し、その actor_id を返す。
+    /// `bio` は自己紹介文（AP Person の `summary` 由来、HTML はプレーンテキスト化して渡す
+    /// こと）。`None` の場合は既存値を保持する（`avatar_url` と同じ COALESCE パターン）。
     /// `emoji_map` は表示名（`name`）中のカスタム絵文字（`:shortcode:`）→画像URLのマップ
     /// （AP Person の `tag` 配列由来、無ければ空オブジェクト）。
     /// `profile_fields` はプロフィールのキーバリュー項目（#62、AP Actor の `attachment`
@@ -104,6 +106,7 @@ pub trait ActorRepository: Send + Sync {
         domain: &str,
         display_name: &str,
         avatar_url: Option<&str>,
+        bio: Option<&str>,
         now: DateTime<Utc>,
         emoji_map: &serde_json::Value,
         profile_fields: &serde_json::Value,
@@ -254,17 +257,19 @@ impl ActorRepository for PgActorRepository {
         domain: &str,
         display_name: &str,
         avatar_url: Option<&str>,
+        bio: Option<&str>,
         now: DateTime<Utc>,
         emoji_map: &serde_json::Value,
         profile_fields: &serde_json::Value,
     ) -> Result<i64, sqlx::Error> {
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, created_at, updated_at, emoji_map, profile_fields)
-             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $8, $9, $10)
+            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, bio, created_at, updated_at, emoji_map, profile_fields)
+             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11)
              ON CONFLICT (ap_uri) DO UPDATE
                SET ap_inbox_url   = EXCLUDED.ap_inbox_url,
                    display_name   = EXCLUDED.display_name,
                    avatar_url     = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
+                   bio            = COALESCE(EXCLUDED.bio, actors.bio),
                    emoji_map      = EXCLUDED.emoji_map,
                    profile_fields = EXCLUDED.profile_fields,
                    updated_at     = EXCLUDED.updated_at
@@ -277,6 +282,7 @@ impl ActorRepository for PgActorRepository {
         .bind(domain)
         .bind(display_name)
         .bind(avatar_url)
+        .bind(bio)
         .bind(now)
         .bind(emoji_map)
         .bind(profile_fields)

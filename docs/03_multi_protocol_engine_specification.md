@@ -896,6 +896,16 @@ Mastodon 等の「プロフィールのメタデータ欄」（AP Actor の `att
   再フェッチする設計にはしていない。ピン留めの featured collection のみ例外的に毎回
   同期している、§13.3 参照）。Bsky 側の受信（リモート Bsky アクターの `description` に
   埋め込まれたキーバリュー文字列のパース）は対象外（要望に含まれていないため未実装）。
+- **fix（マイケル報告・2026-07-15）**: 本機能の実装過程で `ActorRepository::upsert_remote_fedi`
+  が **`bio` カラムを一切設定しない既存の欠陥**を発見した。#61（ピン留め機能）で
+  `fetch_remote_profile`（未認知アクター初回アクセス経路）を「都度 `ap_actor.summary` を
+  そのまま返す非永続表示」から「upsert してから `build_profile_response` に委譲」する
+  設計に変更した際、この欠陥に気づかずに切り替えてしまい、以後リモート Fedi アクターの
+  自己紹介文が一切表示されなくなる退行を生んでいた。`upsert_remote_fedi` に `bio: Option<&str>`
+  引数を追加し（`avatar_url` と同じ `COALESCE(EXCLUDED.bio, actors.bio)` パターンで
+  `None` の場合は既存値を保持）、`AP summary` を `strip_html` でプレーンテキスト化して渡す
+  よう全呼び出し経路を修正した。**既知の制約**: この修正より前に upsert 済みだったアクターの
+  `bio` は遡って修正されない（再度 Follow 受信等で upsert されるまで空のまま）。
 
 ## 12. Bsky公式動画パイプライン結合（`app.bsky.embed.video`）
 

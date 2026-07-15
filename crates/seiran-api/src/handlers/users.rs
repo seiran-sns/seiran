@@ -427,6 +427,11 @@ async fn fetch_remote_profile(
         .unwrap_or_else(|| username.to_string());
     let display_name = ap_actor.name.clone().unwrap_or_else(|| resolved_username.clone());
     let avatar_url = ap_actor.avatar_url();
+    // 自己紹介文（AP Person の summary は HTML のため strip_html でプレーンテキスト化する）。
+    let bio = ap_actor
+        .summary
+        .as_deref()
+        .map(seiran_common::jobs::inbound_activity_process::strip_html);
     let emoji_map = ap_actor.emoji_map();
     // プロフィールのキーバリュー項目（#62）。
     let profile_fields = ap_actor.profile_fields_json();
@@ -435,7 +440,7 @@ async fn fetch_remote_profile(
 
     match state
         .actors
-        .upsert_remote_fedi(new_actor_id, &actor_uri, &ap_inbox, &resolved_username, domain, &display_name, avatar_url.as_deref(), now, &emoji_map, &profile_fields)
+        .upsert_remote_fedi(new_actor_id, &actor_uri, &ap_inbox, &resolved_username, domain, &display_name, avatar_url.as_deref(), bio.as_deref(), now, &emoji_map, &profile_fields)
         .await
     {
         Ok(actor_id) => match state.actors.find_by_id(actor_id).await {
@@ -455,7 +460,7 @@ async fn fetch_remote_profile(
         actor_type: "fedi".to_string(),
         ap_uri: Some(actor_uri),
         at_did: None,
-        bio: ap_actor.summary,
+        bio,
         avatar_url,
         follow_status: "not_following".to_string(),
         recent_posts: vec![],
