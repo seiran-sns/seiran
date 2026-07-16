@@ -109,10 +109,14 @@ pub trait PostRepository: Send + Sync {
 
     /// 指定アクターの最近の投稿を、タイムラインと同じ結合行（アクター情報込み）で取得する。
     /// プロフィール画面でタイムラインと同一の NoteCard を描画するために使う（#43）。
+    /// `until_id`/`since_id` は他のタイムライン系クエリと同じカーソルページネーション規約
+    /// （プロフィール投稿一覧の無限スクロール用、#64）。
     async fn timeline_by_actor(
         &self,
         actor_id: i64,
         limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// DID + rkey で app.bsky.feed.post レコードを取得する。
@@ -371,6 +375,8 @@ impl PostRepository for PgPostRepository {
         &self,
         actor_id: i64,
         limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
@@ -382,10 +388,14 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.deleted_at IS NULL
+               AND ($2::bigint IS NULL OR p.id < $2)
+               AND ($3::bigint IS NULL OR p.id > $3)
              ORDER BY p.id DESC
-             LIMIT $2",
+             LIMIT $4",
         )
         .bind(actor_id)
+        .bind(until_id)
+        .bind(since_id)
         .bind(limit)
         .fetch_all(&self.pool)
         .await

@@ -230,6 +230,8 @@ export interface ProfileField {
 
 /** ProfileResponse（バックエンドは snake_case のまま）。 */
 export interface UserProfile {
+  /** DB未登録のリモートアクター（AppView直取得で未フォローのBskyユーザー等）は undefined。 */
+  actor_id?: string;
   username: string;
   domain: string;
   display_name?: string;
@@ -601,6 +603,16 @@ export const api = {
         recent_posts: (raw.recent_posts ?? []).map(normalizeNote),
         pinned_posts: (raw.pinned_posts ?? []).map(normalizeNote),
       } as UserProfile;
+    },
+    /** プロフィール画面の投稿一覧の追加ページ取得（無限スクロール、#64）。`actorId` は
+     * `UserProfile.actor_id`（DB未登録のリモートアクターは undefined になり得る）。 */
+    async posts(actorId: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+      const q = new URLSearchParams({ actor_id: actorId });
+      if (params?.limit) q.set("limit", String(params.limit));
+      if (params?.until_id) q.set("until_id", params.until_id);
+      if (params?.since_id) q.set("since_id", params.since_id);
+      const rows = await request<RawNote[]>("GET", `/users/posts?${q.toString()}`);
+      return rows.map(normalizeNote);
     },
     updateProfile(patch: {
       display_name?: string;

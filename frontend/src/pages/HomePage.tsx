@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ListSummary, Note } from "../api/client";
 import Tabs from "../components/common/Tabs";
@@ -12,10 +12,20 @@ import { useStreamingContext } from "../contexts/StreamingContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
+const PAGE_SIZE = 30;
+
 type Feed = { kind: "home" } | { kind: "local" } | { kind: "list"; id: string };
 
 function feedKey(feed: Feed): string {
   return feed.kind === "list" ? `list:${feed.id}` : feed.kind;
+}
+
+function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; since_id?: string }) {
+  return feed.kind === "home"
+    ? api.notes.homeTimeline(params)
+    : feed.kind === "local"
+    ? api.notes.localTimeline(params)
+    : api.lists.timeline(feed.id, params);
 }
 
 export default function HomePage() {
@@ -23,10 +33,15 @@ export default function HomePage() {
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
   const { timelineTab, setTimelineTab } = useRightPane();
   const { registerNote, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
+  const notesRef = useRef<Note[]>([]);
+  const loadingMoreRef = useRef(false);
+  notesRef.current = notes;
 
   useEffect(() => {
     api.lists.list().then(setLists).catch(() => {});
@@ -35,18 +50,39 @@ export default function HomePage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const fetch =
-      feed.kind === "home"
-        ? api.notes.homeTimeline({ limit: 30 })
-        : feed.kind === "local"
-        ? api.notes.localTimeline({ limit: 30 })
-        : api.lists.timeline(feed.id, { limit: 30 });
-    fetch
-      .then((n) => !cancelled && setNotes(n))
+    setHasMore(true);
+    fetchFeed(feed, { limit: PAGE_SIZE })
+      .then((n) => {
+        if (cancelled) return;
+        setNotes(n);
+        setHasMore(n.length >= PAGE_SIZE);
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedKey(feed)]);
+
+  const loadMore = useCallback(() => {
+    if (loadingMoreRef.current || notesRef.current.length === 0) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const untilId = notesRef.current[notesRef.current.length - 1].id;
+    fetchFeed(feed, { limit: PAGE_SIZE, until_id: untilId })
+      .then((rows) => {
+        setNotes((prev) => {
+          const seen = new Set(prev.map((p) => p.id));
+          const fresh = rows.filter((r) => !seen.has(r.id));
+          return [...prev, ...fresh];
+        });
+        setHasMore(rows.length >= PAGE_SIZE);
+      })
+      .finally(() => {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedKey(feed)]);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
@@ -110,6 +146,9 @@ export default function HomePage() {
         notes={notes}
         loading={loading}
         enteringIds={enteringIds}
+        onLoadMore={loadMore}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
         emptyMessage={
           feed.kind === "home"
             ? "フォロー中のユーザーの投稿がここに表示されます。"

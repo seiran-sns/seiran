@@ -18,6 +18,66 @@ pub struct ProfileQuery {
     pub q: String,
 }
 
+/// プロフィール画面の投稿一覧を無限スクロールで追加取得するためのクエリ（#64）。
+/// `ProfileResponse.actor_id` を起点に、他のタイムライン系エンドポイントと同じ
+/// `until_id`/`since_id` カーソル規約でページングする。
+#[derive(Deserialize)]
+pub struct UserPostsQuery {
+    pub actor_id: String,
+    pub limit: Option<i64>,
+    #[serde(alias = "untilId")]
+    pub until_id: Option<String>,
+    #[serde(alias = "sinceId")]
+    pub since_id: Option<String>,
+}
+
+/// `GET /api/users/posts` — プロフィール画面の投稿一覧の追加ページ取得（無限スクロール、#64）。
+/// `GET /api/users/profile` の `recent_posts`（初回最大20件）と同じ結合行・変換ロジックを使う。
+pub async fn user_posts(
+    Query(params): Query<UserPostsQuery>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor_id: i64 = match params.actor_id.parse() {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "不正な actor_id です").into_response(),
+    };
+    let limit = params.limit.unwrap_or(20).clamp(1, 100);
+    let until_id: Option<i64> = params.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = params.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let my_user_id: Option<i64> = extract_auth(&headers, &state.local_auth)
+        .await
+        .ok()
+        .map(|u| u.user_id);
+    let my_actor_id: Option<i64> = match my_user_id {
+        Some(uid) => state.actors.find_local_by_user_id(uid).await.ok().flatten().map(|a| a.id),
+        None => None,
+    };
+
+    let post_rows = match state.posts.timeline_by_actor(actor_id, limit, until_id, since_id).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[user_posts] 投稿取得失敗: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+    let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
+    let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
+    let notes: Vec<NoteResponse> = post_rows
+        .into_iter()
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            nr
+        })
+        .collect();
+
+    Json(notes).into_response()
+}
+
 /// プロフィールのキーバリュー項目（#62、Mastodon 等の「プロフィールのメタデータ欄」に相当）。
 /// `actors.profile_fields`（JSONB配列）にそのままシリアライズされる。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +94,11 @@ fn profile_fields_from_json(v: &serde_json::Value) -> Vec<ProfileField> {
 
 #[derive(Serialize)]
 pub struct ProfileResponse {
+    /// アクターID（文字列化、#64）。無限スクロールで追加ページを取得する `GET /api/users/posts`
+    /// の `actor_id` パラメータに使う。DB 未登録のリモートアクター（AppView 直取得で未フォロー
+    /// の Bsky ユーザー等）は永続 ID を持たないため `None`（この場合 `recent_posts` も常に空）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
@@ -102,6 +167,7 @@ async fn fetch_bsky_profile_from_appview(
     }
 
     Json(ProfileResponse {
+        actor_id: None,
         username: bsky.handle,
         domain: String::new(),
         display_name: bsky.display_name,
@@ -285,7 +351,7 @@ async fn build_profile_response(
 
     // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
     // アクター情報・添付・リアクションを含む NoteResponse で返す（#43）。
-    let post_rows = match state.posts.timeline_by_actor(actor_id, 20).await {
+    let post_rows = match state.posts.timeline_by_actor(actor_id, 20, None, None).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] 最近の投稿取得失敗: {}", e);
@@ -396,6 +462,7 @@ async fn build_profile_response(
     };
 
     Json(ProfileResponse {
+        actor_id: Some(actor_id.to_string()),
         username: actor.username,
         domain: actor.domain,
         display_name: actor.display_name,
@@ -482,6 +549,7 @@ async fn fetch_remote_profile(
     // upsert に失敗した場合のフォールバック（従来通りの非永続表示、ピン留めは出せない）。
     let _ = my_user_id;
     Json(ProfileResponse {
+        actor_id: None,
         username: resolved_username,
         domain: domain.to_string(),
         display_name: Some(display_name),

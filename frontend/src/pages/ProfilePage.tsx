@@ -1,14 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { api, UserProfile, getErrorMessage } from "../api/client";
+import { api, Note, UserProfile, getErrorMessage } from "../api/client";
 import Modal from "../components/common/Modal";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
+import NoteList from "../components/note/NoteList";
 import { useAuth } from "../contexts/AuthContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
 
 type FollowStatus = "not_following" | "pending" | "accepted";
+
+const PAGE_SIZE = 20;
 
 export default function ProfilePage() {
   const [searchParams] = useSearchParams();
@@ -27,6 +30,16 @@ export default function ProfilePage() {
   // AppShell.module.css の右ペイン非表示ブレークポイント（1400px）と合わせる。
   // 狭幅では右ペインが無いため、ピン留め・最新ポストの両方を中央ペインへ連続表示する（#61）。
   const [isNarrow, setIsNarrow] = useState(false);
+
+  // 投稿一覧の無限スクロール（#64）。`profile.recent_posts`（初回最大20件）を初期値とし、
+  // 下端到達で `GET /api/users/posts` から `until_id` カーソルで追加取得する。
+  const [posts, setPosts] = useState<Note[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const postsRef = useRef<Note[]>([]);
+  const loadingMoreRef = useRef(false);
+  const actorIdRef = useRef<string | undefined>(undefined);
+  postsRef.current = posts;
 
   useEffect(() => {
     const mql = window.matchMedia("(max-width: 1400px)");
@@ -47,6 +60,9 @@ export default function ProfilePage() {
         if (cancelled) return;
         setProfile(p);
         setFollowStatus(p.follow_status);
+        actorIdRef.current = p.actor_id;
+        setPosts(p.recent_posts);
+        setHasMore(!!p.actor_id && p.recent_posts.length >= PAGE_SIZE);
       })
       .catch((e) => !cancelled && setError(getErrorMessage(e)))
       .finally(() => !cancelled && setLoading(false));
@@ -54,6 +70,28 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, [q]);
+
+  const loadMorePosts = useCallback(() => {
+    const actorId = actorIdRef.current;
+    if (!actorId || loadingMoreRef.current || postsRef.current.length === 0) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const untilId = postsRef.current[postsRef.current.length - 1].id;
+    api.users
+      .posts(actorId, { limit: PAGE_SIZE, until_id: untilId })
+      .then((rows) => {
+        setPosts((prev) => {
+          const seen = new Set(prev.map((p) => p.id));
+          const fresh = rows.filter((r) => !seen.has(r.id));
+          return [...prev, ...fresh];
+        });
+        setHasMore(rows.length >= PAGE_SIZE);
+      })
+      .finally(() => {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      });
+  }, []);
 
   const { user } = useAuth();
   const isLocal = profile?.actor_type === "local";
@@ -259,11 +297,13 @@ export default function ProfilePage() {
   const recentSection = profile && (
     <>
       <div className={panel.rightHeader}>投稿</div>
-      {profile.recent_posts.length === 0 ? (
-        <p className={panel.message}>投稿がありません。</p>
-      ) : (
-        profile.recent_posts.map((post) => <NoteCard key={post.id} note={post} />)
-      )}
+      <NoteList
+        notes={posts}
+        emptyMessage="投稿がありません。"
+        onLoadMore={loadMorePosts}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
+      />
     </>
   );
 
