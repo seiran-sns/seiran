@@ -4,6 +4,7 @@ use axum::{extract::State, http::HeaderMap, Json};
 use serde::Deserialize;
 
 use seiran_common::ApDeliveryKind;
+use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 
 use crate::{error::ApiError, middleware::extract_auth, AppState};
 
@@ -88,6 +89,10 @@ pub async fn withdraw(
     .execute(&state.db)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // 退会したユーザーのフォロー・所有リストが持っていたBsky DIDを
+    // Jetstream の wantedDids 絞り込みリストから外すため再構築を促す。
+    touch_jetstream_wanted_dids(&state.db).await;
 
     tracing::info!("[withdraw] 退会完了: actor_id={}, username={}", actor_id, actor.username);
     Ok(Json(()))

@@ -8,6 +8,7 @@ pub mod queue;
 pub mod jobs;
 pub mod ap;
 pub mod atp;
+pub mod jetstream_control;
 pub mod mention;
 pub mod repository;
 pub mod storage;

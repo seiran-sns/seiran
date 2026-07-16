@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use seiran_common::repository::{Actor, ListMemberRow, ListRow, MAX_LISTS_PER_OWNER, MAX_MEMBERS_PER_LIST};
 use seiran_common::generate_snowflake_id;
+use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 
 use crate::error::ApiError;
 use crate::handlers::notes::queries::fetch_reposted_ids;
@@ -286,6 +287,9 @@ pub async fn delete_list(
     match state.lists.delete(id, user.actor_id).await {
         Ok(0) => ApiError::NotFound("LIST_NOT_FOUND").into_response(),
         Ok(_) => {
+            // CASCADE削除で list_members ごと消えるため、それらが持っていた Bsky DID を
+            // Jetstream の wantedDids 絞り込みリストから外すため再構築を促す。
+            touch_jetstream_wanted_dids(&state.db).await;
             for actor_id in fedi_member_ids {
                 maybe_unfollow_if_unreferenced(&state, actor_id).await;
             }
@@ -397,6 +401,11 @@ pub async fn add_member(
         state.enqueue_proxy_follow_sync(target_actor.id, true).await;
     }
 
+    if target_actor.actor_type == "bsky" {
+        // Jetstream の wantedDids 絞り込みリストにこの DID を加えるため再構築を促す。
+        touch_jetstream_wanted_dids(&state.db).await;
+    }
+
     if list.is_public {
         maybe_publish_listitem(&state, id, list.at_uri.as_deref(), user.actor_id, &target_actor, now).await;
     }
@@ -438,6 +447,10 @@ pub async fn remove_member(
         Ok(true) => {
             tracing::info!("[lists] list={} からメンバー削除 actor={}", id, actor_id);
             maybe_unfollow_if_unreferenced(&state, actor_id).await;
+            // 削除対象がBskyアクターかどうかを問わず、Jetstreamのwanted_dids
+            // 再構築ポーリングに委ねる（過剰な再接続は許容、cursorがあるため
+            // 取りこぼしのリスクは無い）。
+            touch_jetstream_wanted_dids(&state.db).await;
             if let Some(rkey) = atp_rkey {
                 let now = chrono::Utc::now();
                 if let Err(e) = state.atp_service.delete_atp_graph_listitem(user.actor_id, &rkey, now).await {

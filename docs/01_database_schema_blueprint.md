@@ -488,6 +488,7 @@ CREATE TABLE site_settings (
 | `smtp_tls` | `"tls"` / `"starttls"` | `"starttls"` | TLS モード |
 | `require_email_verification` | `"true"` / `"false"` | `"false"` | メール確認必須フラグ |
 | `jetstream_cursor` | string（数値） | なし | 直近処理した Bluesky Jetstream イベントの `time_us`（マイクロ秒 Unix タイムスタンプ）。管理者 API 経由では変更不可、`seiran-atp-repo`（`firehose.rs`）が5秒間隔で自動更新・再接続時に読み出す（Doc3 §14 参照） |
+| `jetstream_wanted_dids_touch` | `"1"` 固定 | なし | Jetstream の `wantedDids` 絞り込みリスト再構築トリガー。値自体は使わず `updated_at` だけを「変更バージョン」として利用する。ATPフォロー増減・リストメンバー増減・リスト削除・ローカルユーザー退会のたびに更新され、`firehose`側が30秒間隔でポーリングして変化を検知する（Doc3 §14.2 参照） |
 
 `smtp_host` が未設定の場合、`POST /api/auth/verify-email` は HTTP 503 + `{"code": "SMTP_NOT_CONFIGURED"}` を返す。
 

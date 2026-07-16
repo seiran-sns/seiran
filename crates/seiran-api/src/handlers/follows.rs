@@ -4,6 +4,7 @@ use serde_json::json;
 
 use seiran_common::{generate_snowflake_id, ApError};
 use seiran_common::atp::fetch_bsky_profile;
+use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 
 use crate::error::ApiError;
 use crate::middleware::{extract_auth, AuthedUser};
@@ -117,6 +118,8 @@ pub async fn delete_follow(
             tracing::error!("[unfollow] ATP delete commit 失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, format!("ATP コミット失敗: {}", e)).into_response();
         }
+        // Jetstream の wantedDids 絞り込みリストからも除外対象になりうるため再構築を促す。
+        touch_jetstream_wanted_dids(&state.db).await;
     }
 
     // AP Undo Follow（Fedi リモートアクター、かつローカルアクターでない場合のみ）
@@ -259,6 +262,9 @@ async fn follow_bsky(actor_id_or_handle: &str, user_id: i64, state: &AppState) -
     }
 
     tracing::info!("[follow/bsky] {} → {} フォロー完了 (rkey={})", local_actor.id, did, rkey);
+
+    // Jetstream の wantedDids 絞り込みリストにこの DID を加えるため再構築を促す。
+    touch_jetstream_wanted_dids(&state.db).await;
 
     // バックグラウンドで過去ポストを取り込む（Worker の ActorHistorySync ジョブ）
     state.enqueue_actor_history_sync(None, Some(did.clone())).await;

@@ -23,6 +23,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use futures_util::StreamExt;
 
 use seiran_common::atp::fetch_bsky_profile;
+use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::repository::{
     ActorRepository, NotificationKind, NotificationRepository, PostRepository, ReactionRepository,
     PgActorRepository, PgFollowRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
@@ -30,8 +31,14 @@ use seiran_common::repository::{
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::{generate_snowflake_id, StreamHub};
 
-const JETSTREAM_URL: &str =
+const JETSTREAM_BASE_URL: &str =
     "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like";
+
+/// `wantedDids` 絞り込みリスト（フォロイー + リストメンバーの Bsky DID 集合）を
+/// 再構築すべきか、受信ループ内で定期ポーリングする間隔。フォロー変更等は
+/// リアルタイム性が必須ではなく、cursorによりこの間の取りこぼしも無いため、
+/// 短すぎない間隔で十分（DBポーリング負荷を抑える）。
+const WANTED_DIDS_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// サーバー停止中に発生したイベントを取りこぼさないよう、直近処理した Jetstream
 /// イベントの `time_us`（マイクロ秒 Unix タイムスタンプ）を `site_settings`
@@ -90,17 +97,66 @@ struct JetstreamTimeUs {
     time_us: i64,
 }
 
+/// ローカルユーザーのフォロー先、またはいずれかのリストのメンバーである Bsky
+/// アクターの DID 集合を取得する。`wantedDids` としてJetstreamへ渡し、サーバー側で
+/// 無関係な投稿を除外してもらう。退会済み（`withdrawn_at`設定済み）ローカル
+/// ユーザーのフォロー・所有リストは対象から除外する。
+async fn load_wanted_dids(pool: &PgPool) -> Vec<String> {
+    // `follows`/`list_members`（少数行）を起点にJOINでDIDを引く。`actors`側（at_didを
+    // 持つ全件、Bsky経由でupsertされた既知アクター全体）から出発してEXISTSで判定すると
+    // フルスキャンになり本末転倒（実測、既知アクター数十万件規模で1秒近くかかった）。
+    let rows = sqlx::query(
+        "SELECT DISTINCT a.at_did AS did
+         FROM actors a
+         JOIN follows f ON f.target_actor_id = a.id
+         JOIN actors follower ON follower.id = f.follower_actor_id
+         WHERE a.at_did IS NOT NULL AND f.status = 'accepted'
+           AND follower.actor_type = 'local' AND follower.withdrawn_at IS NULL
+         UNION
+         SELECT DISTINCT a.at_did AS did
+         FROM actors a
+         JOIN list_members lm ON lm.actor_id = a.id
+         JOIN lists l ON l.id = lm.list_id
+         JOIN actors owner ON owner.id = l.owner_actor_id
+         WHERE a.at_did IS NOT NULL AND owner.withdrawn_at IS NULL",
+    )
+    .fetch_all(pool)
+    .await;
+
+    match rows {
+        Ok(rows) => rows.iter().filter_map(|r| r.try_get::<String, _>("did").ok()).collect(),
+        Err(e) => {
+            tracing::error!("[Jetstream] wantedDids取得失敗（無絞り込みで接続します）: {}", e);
+            Vec::new()
+        }
+    }
+}
+
+/// `JETSTREAM_BASE_URL` に `wantedDids` を付与した接続URLを組み立てる。
+/// 対象DIDが1件も無ければ絞り込みなし（全世界のpost/like）で接続する
+/// （初回起動直後で誰もフォローしていない等のレアケース向けフォールバック）。
+fn build_jetstream_url(cursor: Option<i64>, wanted_dids: &[String]) -> String {
+    let mut url = JETSTREAM_BASE_URL.to_string();
+    for did in wanted_dids {
+        url.push_str("&wantedDids=");
+        url.push_str(did);
+    }
+    if let Some(c) = cursor {
+        url.push_str(&format!("&cursor={}", c));
+    }
+    url
+}
+
 async fn connect_and_process(
     pool: &PgPool,
     http: &Arc<reqwest::Client>,
     stream_hub: &Arc<StreamHub>,
 ) -> Result<(), String> {
     let cursor = load_jetstream_cursor(pool).await;
-    let url = match cursor {
-        Some(c) => format!("{}&cursor={}", JETSTREAM_URL, c),
-        None => JETSTREAM_URL.to_string(),
-    };
-    tracing::info!("[Jetstream] 接続中: {}", url);
+    let wanted_dids = load_wanted_dids(pool).await;
+    let wanted_dids_touch_at_connect = fetch_wanted_dids_touch(pool).await;
+    let url = build_jetstream_url(cursor, &wanted_dids);
+    tracing::info!("[Jetstream] 接続中（wantedDids {}件）: {}", wanted_dids.len(), url);
 
     let (mut ws_stream, _) = connect_async(&url)
         .await
@@ -109,20 +165,34 @@ async fn connect_and_process(
     tracing::info!("[Jetstream] 接続成功。イベント受信中...");
 
     let mut last_saved_at = tokio::time::Instant::now() - JETSTREAM_CURSOR_SAVE_INTERVAL;
+    let mut wanted_dids_poll = tokio::time::interval(WANTED_DIDS_POLL_INTERVAL);
+    wanted_dids_poll.tick().await; // 初回tickは即座に発火するので消費しておく
 
-    while let Some(msg) = ws_stream.next().await {
-        let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
+    loop {
+        tokio::select! {
+            msg = ws_stream.next() => {
+                let Some(msg) = msg else { break; };
+                let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
 
-        if let Message::Text(text) = msg {
-            if let Ok(t) = serde_json::from_str::<JetstreamTimeUs>(&text) {
-                if last_saved_at.elapsed() >= JETSTREAM_CURSOR_SAVE_INTERVAL {
-                    save_jetstream_cursor(pool, t.time_us).await;
-                    last_saved_at = tokio::time::Instant::now();
+                if let Message::Text(text) = msg {
+                    if let Ok(t) = serde_json::from_str::<JetstreamTimeUs>(&text) {
+                        if last_saved_at.elapsed() >= JETSTREAM_CURSOR_SAVE_INTERVAL {
+                            save_jetstream_cursor(pool, t.time_us).await;
+                            last_saved_at = tokio::time::Instant::now();
+                        }
+                    }
+
+                    if let Err(e) = process_message(&text, pool, http, stream_hub).await {
+                        tracing::error!("[Jetstream] メッセージ処理エラー（スキップ）: {}", e);
+                    }
                 }
             }
-
-            if let Err(e) = process_message(&text, pool, http, stream_hub).await {
-                tracing::error!("[Jetstream] メッセージ処理エラー（スキップ）: {}", e);
+            _ = wanted_dids_poll.tick() => {
+                let current_touch = fetch_wanted_dids_touch(pool).await;
+                if current_touch != wanted_dids_touch_at_connect {
+                    tracing::info!("[Jetstream] wantedDids変更を検知。再接続します。");
+                    return Ok(());
+                }
             }
         }
     }
