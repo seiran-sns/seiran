@@ -33,12 +33,17 @@ use seiran_common::{generate_snowflake_id, StreamHub};
 const JETSTREAM_URL: &str =
     "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like";
 
+/// サーバー停止中に発生したイベントを取りこぼさないよう、直近処理した Jetstream
+/// イベントの `time_us`（マイクロ秒 Unix タイムスタンプ）を `site_settings`
+/// （汎用KVテーブル。Doc1 §1.11）に永続化し、再接続時に `cursor` パラメータとして
+/// 引き継ぐ。書き込み頻度を抑えるため、受信ループ内で一定間隔ごとにのみ保存する。
+const JETSTREAM_CURSOR_KEY: &str = "jetstream_cursor";
+const JETSTREAM_CURSOR_SAVE_INTERVAL: Duration = Duration::from_secs(5);
+
 pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<StreamHub>) {
     let mut backoff_secs = 2u64;
 
     loop {
-        tracing::info!("[Jetstream] 接続中: {}", JETSTREAM_URL);
-
         match connect_and_process(&pool, &http, &stream_hub).await {
             Ok(()) => {
                 tracing::info!("[Jetstream] 接続終了（正常）。再接続します。");
@@ -53,21 +58,69 @@ pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<Strea
     }
 }
 
+async fn load_jetstream_cursor(pool: &PgPool) -> Option<i64> {
+    sqlx::query("SELECT value FROM site_settings WHERE key = $1")
+        .bind(JETSTREAM_CURSOR_KEY)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.try_get::<String, _>("value").ok())
+        .and_then(|v| v.parse::<i64>().ok())
+}
+
+async fn save_jetstream_cursor(pool: &PgPool, time_us: i64) {
+    if let Err(e) = sqlx::query(
+        "INSERT INTO site_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+    )
+    .bind(JETSTREAM_CURSOR_KEY)
+    .bind(time_us.to_string())
+    .execute(pool)
+    .await
+    {
+        tracing::error!("[Jetstream] cursor保存失敗: {}", e);
+    }
+}
+
+/// cursorの`time_us`だけを取り出すための最小限のパース対象（`identity`/`account`
+/// イベントも含め、全メッセージ種別に付与される）。
+#[derive(Deserialize)]
+struct JetstreamTimeUs {
+    time_us: i64,
+}
+
 async fn connect_and_process(
     pool: &PgPool,
     http: &Arc<reqwest::Client>,
     stream_hub: &Arc<StreamHub>,
 ) -> Result<(), String> {
-    let (mut ws_stream, _) = connect_async(JETSTREAM_URL)
+    let cursor = load_jetstream_cursor(pool).await;
+    let url = match cursor {
+        Some(c) => format!("{}&cursor={}", JETSTREAM_URL, c),
+        None => JETSTREAM_URL.to_string(),
+    };
+    tracing::info!("[Jetstream] 接続中: {}", url);
+
+    let (mut ws_stream, _) = connect_async(&url)
         .await
         .map_err(|e| format!("WebSocket 接続失敗: {}", e))?;
 
     tracing::info!("[Jetstream] 接続成功。イベント受信中...");
 
+    let mut last_saved_at = tokio::time::Instant::now() - JETSTREAM_CURSOR_SAVE_INTERVAL;
+
     while let Some(msg) = ws_stream.next().await {
         let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
 
         if let Message::Text(text) = msg {
+            if let Ok(t) = serde_json::from_str::<JetstreamTimeUs>(&text) {
+                if last_saved_at.elapsed() >= JETSTREAM_CURSOR_SAVE_INTERVAL {
+                    save_jetstream_cursor(pool, t.time_us).await;
+                    last_saved_at = tokio::time::Instant::now();
+                }
+            }
+
             if let Err(e) = process_message(&text, pool, http, stream_hub).await {
                 tracing::error!("[Jetstream] メッセージ処理エラー（スキップ）: {}", e);
             }

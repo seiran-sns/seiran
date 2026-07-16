@@ -487,8 +487,11 @@ CREATE TABLE site_settings (
 | `smtp_from` | string | なし | 送信元メールアドレス |
 | `smtp_tls` | `"tls"` / `"starttls"` | `"starttls"` | TLS モード |
 | `require_email_verification` | `"true"` / `"false"` | `"false"` | メール確認必須フラグ |
+| `jetstream_cursor` | string（数値） | なし | 直近処理した Bluesky Jetstream イベントの `time_us`（マイクロ秒 Unix タイムスタンプ）。管理者 API 経由では変更不可、`seiran-atp-repo`（`firehose.rs`）が5秒間隔で自動更新・再接続時に読み出す（Doc3 §14 参照） |
 
 `smtp_host` が未設定の場合、`POST /api/auth/verify-email` は HTTP 503 + `{"code": "SMTP_NOT_CONFIGURED"}` を返す。
+
+`jetstream_cursor` は管理者 API（`GET/PATCH /api/admin/site-settings`）の対象外で、他のキーとは異なりユーザー設定ではなく内部状態の永続化用途。
 
 ### 1.12 `notifications` (通知永続化テーブル)
 
