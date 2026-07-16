@@ -13,7 +13,17 @@ use seiran_common::StreamHub;
 pub mod firehose;
 
 /// Firehose リスナーを起動する（常駐）。
-pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<StreamHub>) {
+///
+/// `redis_url`があれば、複数インスタンス起動時のJetstream接続排他制御（リーダー選出）を
+/// 行う。`is_monolith`はRedis未使用時・通信失敗時のフェイルオープン/フェイルクローズを
+/// 決める（`true`＝`all`ロール、`false`＝`firehose`単独ロール。Doc3 §14.2参照）。
+pub async fn run(
+    pool: PgPool,
+    http: Arc<reqwest::Client>,
+    stream_hub: Arc<StreamHub>,
+    redis_url: Option<String>,
+    is_monolith: bool,
+) {
     tracing::info!("[seiran-atp-repo] Firehose リスナーを起動します。");
-    firehose::run(pool, http, stream_hub).await;
+    firehose::run(pool, http, stream_hub, redis_url, is_monolith).await;
 }

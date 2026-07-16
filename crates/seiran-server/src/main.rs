@@ -190,12 +190,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty())
     };
+    // Jetstream接続の排他制御（複数インスタンス起動時のリーダー選出）専用のRedis URL。
+    // `atp_event_redis_url`と違い、`all`ロールでも複数起動（無停止バージョンアップ中の
+    // 一時的なスケールアウト等）を検知したいため、ロールに関わらずそのまま読む
+    // （Doc3 §14.2、Doc6既知の課題）。
+    let jetstream_redis_url = std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty());
 
     match role {
         Role::Firehose => {
             // スタンドアロン firehose は WebSocket 配信先がないため空の StreamHub を使用
             let hub = Arc::new(StreamHub::new());
-            seiran_atp_repo::run(pool, http_client, hub).await;
+            seiran_atp_repo::run(pool, http_client, hub, jetstream_redis_url, false).await;
         }
 
         Role::Api => {
@@ -262,7 +267,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let pool = pool.clone();
                 let http = Arc::clone(&http_client);
                 let hub = Arc::clone(&api_state.stream_hub);
-                tokio::spawn(async move { seiran_atp_repo::run(pool, http, hub).await });
+                let redis_url = jetstream_redis_url.clone();
+                tokio::spawn(async move { seiran_atp_repo::run(pool, http, hub, redis_url, true).await });
             }
 
             // worker をバックグラウンド起動（api ロールと同じ ApClient / JobQueue / DB プールを共有）

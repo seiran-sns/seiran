@@ -9,6 +9,7 @@ pub mod jobs;
 pub mod ap;
 pub mod atp;
 pub mod jetstream_control;
+pub mod jetstream_leader;
 pub mod mention;
 pub mod repository;
 pub mod storage;
