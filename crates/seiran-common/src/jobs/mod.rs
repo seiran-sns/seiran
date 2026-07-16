@@ -10,3 +10,4 @@ pub mod ap_delivery;
 pub mod atp_repository_publish;
 pub mod bsky_video_poll;
 pub mod inbound_activity_process;
+pub mod proxy_follow_sync;

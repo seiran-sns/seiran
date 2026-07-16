@@ -284,6 +284,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::BskyVideoPoll { media_file_id } => {
             jobs::bsky_video_poll::handle(media_file_id, ctx).await
         }
+        Job::ProxyFollowSync { target_actor_id, want_follow } => {
+            jobs::proxy_follow_sync::handle(target_actor_id, want_follow, ctx).await
+        }
     }
 }
 
@@ -296,6 +299,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::ActorMetadataResolve { .. } => "ActorMetadataResolve",
         Job::AtpRepositoryPublish { .. } => "AtpRepositoryPublish",
         Job::BskyVideoPoll { .. } => "BskyVideoPoll",
+        Job::ProxyFollowSync { .. } => "ProxyFollowSync",
     }
 }
 
@@ -333,6 +337,11 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 10,
             base_delay_ms: 3000,
             max_delay_ms: 3000,
+        },
+        Job::ProxyFollowSync { .. } => RetryConfig {
+            max_attempts: 10,
+            base_delay_ms: 5000, // ApDelivery と同様、リモートAP配送のため長めに構える
+            max_delay_ms: 3_600_000,
         },
     }
 }

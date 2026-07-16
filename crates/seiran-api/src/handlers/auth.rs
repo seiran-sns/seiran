@@ -76,6 +76,15 @@ pub async fn register(
     if req.username.is_empty() || req.password.len() < 8 {
         return Err(ApiError::BadRequest("INVALID_INPUT".into()));
     }
+    // ユーザー名はドメイン名の1ラベルとして成立する文字列に限る（ATPハンドルの
+    // `{username}.{domain}` 組み立てに必要、かつ `.` の有無でローカルIDとATPハンドルを
+    // 判別可能にするため）。`seiran_common::username` 参照。
+    if !seiran_common::is_valid_local_username(&req.username) {
+        return Err(ApiError::BadRequest("USERNAME_INVALID_FORMAT".into()));
+    }
+    if seiran_common::is_reserved_username(&req.username) {
+        return Err(ApiError::BadRequest("USERNAME_RESERVED".into()));
+    }
 
     // メールアドレスを解決する:
     // - registration_token が指定されている場合は email_verifications から取得

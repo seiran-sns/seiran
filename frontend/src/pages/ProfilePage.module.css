@@ -283,3 +283,33 @@ a.idValue:hover {
   border-color: var(--border-strong);
   color: var(--text);
 }
+
+.listsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 16px 16px;
+}
+
+.listBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+
+.listBadge:hover {
+  border-color: var(--accent-strong);
+}
+
+.listBadgeCount {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}

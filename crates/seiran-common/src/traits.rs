@@ -139,6 +139,11 @@ pub enum Job {
     /// Bsky公式動画パイプライン（app.bsky.video.uploadVideo）の完了待ち。
     /// getJobStatusを1回叩き、未完了ならErrを返してリトライさせる。
     BskyVideoPoll { media_file_id: i64 },
+
+    /// リスト機能（#63）: list-relay 仮想アクターによる代理フォロー/アンフォローの同期。
+    /// `want_follow: true` はリストへの初回参照時、`false` は参照が0件になった時に積む
+    /// （参照カウントの判定は呼び出し側の `ListRepository::actor_referenced_by_any_list` で行う）。
+    ProxyFollowSync { target_actor_id: i64, want_follow: bool },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

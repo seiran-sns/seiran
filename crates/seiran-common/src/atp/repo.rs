@@ -699,6 +699,62 @@ pub fn encode_bsky_graph_follow(
     Ok((cbor, cid))
 }
 
+/// `app.bsky.graph.list` レコードの DAG-CBOR バイト列と CID を生成する（リスト機能 #63）。
+/// `purpose` は常に `app.bsky.graph.defs#curatelist`（関心リスト、Bluesky公式アプリの
+/// デフォルト分類）固定でよい（モデレーションリストは対象外）。
+pub fn encode_bsky_graph_list(
+    name: &str,
+    created_at_rfc3339: &str,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    // canonical 順: name(4) < $type(5) < purpose(7) < createdAt(9)
+    #[derive(Serialize)]
+    struct BskyGraphList {
+        name: String,
+        #[serde(rename = "$type")]
+        kind: String,
+        purpose: String,
+        #[serde(rename = "createdAt")]
+        created_at: String,
+    }
+    let record = BskyGraphList {
+        name: name.to_string(),
+        kind: "app.bsky.graph.list".to_string(),
+        purpose: "app.bsky.graph.defs#curatelist".to_string(),
+        created_at: created_at_rfc3339.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
+/// `app.bsky.graph.listitem` レコードの DAG-CBOR バイト列と CID を生成する（リスト機能 #63）。
+/// `list_uri` は対象リストの `at://did:.../app.bsky.graph.list/<rkey>` 形式のURI。
+pub fn encode_bsky_graph_listitem(
+    list_uri: &str,
+    subject_did: &str,
+    created_at_rfc3339: &str,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    // canonical 順: list(4) < $type(5) < subject(7) < createdAt(9)
+    #[derive(Serialize)]
+    struct BskyGraphListitem {
+        list: String,
+        #[serde(rename = "$type")]
+        kind: String,
+        subject: String,
+        #[serde(rename = "createdAt")]
+        created_at: String,
+    }
+    let record = BskyGraphListitem {
+        list: list_uri.to_string(),
+        kind: "app.bsky.graph.listitem".to_string(),
+        subject: subject_did.to_string(),
+        created_at: created_at_rfc3339.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // subscribeRepos WebSocket フレーム構築
 // ─────────────────────────────────────────────────────────────────────────────

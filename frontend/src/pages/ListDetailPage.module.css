@@ -1,0 +1,46 @@
+.meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.editLink {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.editLink:hover {
+  text-decoration: underline;
+}
+
+.membersRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.memberBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 4px 12px 4px 4px;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.memberBadge img {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+}

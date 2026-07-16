@@ -60,6 +60,16 @@ pub struct ProfileResponse {
     pub bridge_protocol: Option<String>,
     /// リモート seiran ユーザーと魂の結合（ペアリング）済みか。
     pub is_paired: bool,
+    /// 公開リスト一覧（#63）。現状ローカルユーザーのみ対応（リモートFedi/Bskyユーザー自身の
+    /// 公開リストをオンデマンド取得・表示する機能は将来課題）。
+    pub public_lists: Vec<PublicListSummary>,
+}
+
+#[derive(Serialize)]
+pub struct PublicListSummary {
+    pub id: String,
+    pub name: String,
+    pub member_count: i64,
 }
 
 /// Bsky AppView からプロフィールを取得して ProfileResponse を返す。
@@ -107,6 +117,7 @@ async fn fetch_bsky_profile_from_appview(
         bridge_real_handle: None,
         bridge_protocol: None,
         is_paired: false,
+        public_lists: vec![],
     })
     .into_response()
 }
@@ -368,6 +379,22 @@ async fn build_profile_response(
         .map(profile_fields_from_json)
         .unwrap_or_default();
 
+    // 公開リスト一覧（#63）。現状ローカルユーザーのみ対応（リモートは将来課題）。
+    let public_lists = if actor.actor_type == "local" {
+        state
+            .lists
+            .list_public_by_owner(actor_id)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|r| PublicListSummary { id: r.id.to_string(), name: r.name, member_count: r.member_count })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
     Json(ProfileResponse {
         username: actor.username,
         domain: actor.domain,
@@ -384,6 +411,7 @@ async fn build_profile_response(
         bridge_real_handle,
         bridge_protocol,
         is_paired: actor.seiran_pair_actor_id.is_some(),
+        public_lists,
     })
     .into_response()
 }
@@ -469,6 +497,7 @@ async fn fetch_remote_profile(
         bridge_real_handle: None,
         bridge_protocol: None,
         is_paired: false,
+        public_lists: vec![],
     })
     .into_response()
 }

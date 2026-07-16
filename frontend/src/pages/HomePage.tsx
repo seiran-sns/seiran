@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, Note } from "../api/client";
+import { Link } from "react-router-dom";
+import { api, ListSummary, Note } from "../api/client";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteList from "../components/note/NoteList";
@@ -11,10 +12,15 @@ import { useStreamingContext } from "../contexts/StreamingContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
-type Feed = "local" | "home";
+type Feed = { kind: "home" } | { kind: "local" } | { kind: "list"; id: string };
+
+function feedKey(feed: Feed): string {
+  return feed.kind === "list" ? `list:${feed.id}` : feed.kind;
+}
 
 export default function HomePage() {
-  const [feed, setFeed] = useState<Feed>("home");
+  const [feed, setFeed] = useState<Feed>({ kind: "home" });
+  const [lists, setLists] = useState<ListSummary[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
@@ -23,16 +29,25 @@ export default function HomePage() {
   const timers = useRef<number[]>([]);
 
   useEffect(() => {
+    api.lists.list().then(setLists).catch(() => {});
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const fetch = feed === "home" ? api.notes.homeTimeline({ limit: 30 }) : api.notes.localTimeline({ limit: 30 });
+    const fetch =
+      feed.kind === "home"
+        ? api.notes.homeTimeline({ limit: 30 })
+        : feed.kind === "local"
+        ? api.notes.localTimeline({ limit: 30 })
+        : api.lists.timeline(feed.id, { limit: 30 });
     fetch
       .then((n) => !cancelled && setNotes(n))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [feed]);
+  }, [feedKey(feed)]);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
 
@@ -66,17 +81,29 @@ export default function HomePage() {
 
       <div className={styles.feedTabs}>
         <button
-          className={`${styles.feedTab} ${feed === "home" ? styles.feedTabActive : ""}`}
-          onClick={() => setFeed("home")}
+          className={`${styles.feedTab} ${feed.kind === "home" ? styles.feedTabActive : ""}`}
+          onClick={() => setFeed({ kind: "home" })}
         >
           ホーム
         </button>
         <button
-          className={`${styles.feedTab} ${feed === "local" ? styles.feedTabActive : ""}`}
-          onClick={() => setFeed("local")}
+          className={`${styles.feedTab} ${feed.kind === "local" ? styles.feedTabActive : ""}`}
+          onClick={() => setFeed({ kind: "local" })}
         >
           ローカル
         </button>
+        {lists.map((l) => (
+          <button
+            key={l.id}
+            className={`${styles.feedTab} ${feed.kind === "list" && feed.id === l.id ? styles.feedTabActive : ""}`}
+            onClick={() => setFeed({ kind: "list", id: l.id })}
+          >
+            {l.name}
+          </button>
+        ))}
+        <Link to="/settings/lists" className={styles.feedTab}>
+          + リスト管理
+        </Link>
       </div>
 
       <NoteList
@@ -84,9 +111,11 @@ export default function HomePage() {
         loading={loading}
         enteringIds={enteringIds}
         emptyMessage={
-          feed === "home"
+          feed.kind === "home"
             ? "フォロー中のユーザーの投稿がここに表示されます。"
-            : "まだ投稿がありません。最初の投稿をしてみましょう！"
+            : feed.kind === "local"
+            ? "まだ投稿がありません。最初の投稿をしてみましょう！"
+            : "このリストのメンバーの投稿がここに表示されます。"
         }
       />
     </>

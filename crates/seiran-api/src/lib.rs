@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, FollowRepository, NotificationRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgNotificationRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AtpReadRepository, FollowRepository, ListRepository, NotificationRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgListRepository, PgNotificationRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -76,6 +76,10 @@ pub struct AppState {
     /// 非同期ジョブキュー（AP配送・Bsky動画パイプライン結合等）。`all` ロールでは
     /// `seiran-federation-worker`のWorkerEngineと同一インスタンスを共有する。
     pub job_queue: Arc<dyn JobQueue>,
+    /// リスト機能（#63）: 誰にもフォローされていないリモートFediユーザーの投稿を
+    /// 受信するための代理フォロー用仮想アクター（list-relay）の actor_id。
+    pub lists: Arc<dyn ListRepository>,
+    pub system_proxy_actor_id: i64,
 }
 
 impl AppState {
@@ -99,6 +103,18 @@ impl AppState {
             .await
         {
             tracing::error!("[job] ActorHistorySync enqueue 失敗: {}", e);
+        }
+    }
+
+    /// リスト機能（#63）: list-relay 仮想アクターの代理フォロー/アンフォローを積む。
+    /// 呼び出し元（`handlers::lists`）が参照カウントの0↔1遷移を判定した上で呼ぶ。
+    pub async fn enqueue_proxy_follow_sync(&self, target_actor_id: i64, want_follow: bool) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::ProxyFollowSync { target_actor_id, want_follow }, job_priority::HIGH)
+            .await
+        {
+            tracing::error!("[job] ProxyFollowSync enqueue 失敗 (target={}): {}", target_actor_id, e);
         }
     }
 }
@@ -171,6 +187,17 @@ pub async fn init_state(
     let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
     let pinned_posts: Arc<dyn PinnedPostsRepository> = Arc::new(PgPinnedPostsRepository::new(pool.clone()));
     let notifications: Arc<dyn NotificationRepository> = Arc::new(PgNotificationRepository::new(pool.clone()));
+    let lists: Arc<dyn ListRepository> = Arc::new(PgListRepository::new(pool.clone()));
+
+    let system_proxy_actor_id = match seiran_common::ensure_system_proxy_actor(&pool, &local_domain).await {
+        Ok(id) => id,
+        Err(e) => {
+            // 起動を止めるほどの障害ではない（リスト機能のプロキシフォローが動かないだけ）ため、
+            // ログのみに留めて 0（実在しない actor_id）で継続する。
+            tracing::error!("[seiran-api] list-relay プロキシアクターの準備に失敗: {}", e);
+            0
+        }
+    };
 
     AppState {
         actors,
@@ -197,6 +224,8 @@ pub async fn init_state(
         stream_hub: Arc::new(StreamHub::new()),
         emoji_import_jobs: Arc::new(DashMap::new()),
         job_queue,
+        lists,
+        system_proxy_actor_id,
     }
 }
 
@@ -279,6 +308,18 @@ pub fn router(state: AppState) -> Router {
         // フォロー
         .route("/api/follows/create", post(handlers::follows::create_follow))
         .route("/api/follows/delete", post(handlers::follows::delete_follow))
+        // リスト（#63）
+        .route("/api/lists",
+            get(handlers::lists::my_lists)
+            .post(handlers::lists::create_list))
+        .route("/api/lists/:id",
+            get(handlers::lists::get_list)
+            .patch(handlers::lists::update_list)
+            .delete(handlers::lists::delete_list))
+        .route("/api/lists/:id/members", post(handlers::lists::add_member))
+        .route("/api/lists/:id/members/:actor_id", delete(handlers::lists::remove_member))
+        .route("/api/lists/:id/timeline", get(handlers::lists::list_timeline))
+        .route("/api/actors/search", get(handlers::actor_search::search_actors))
         // ユーザープロフィール
         .route("/api/users/profile",
             get(handlers::users::user_profile)

@@ -9,6 +9,8 @@ import { StreamingProvider } from "./contexts/StreamingContext";
 import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HomePage from "./pages/HomePage";
+import ListDetailPage from "./pages/ListDetailPage";
+import ListsSettingsPage from "./pages/ListsSettingsPage";
 import Login from "./pages/Login";
 import MiAuthConnectPage from "./pages/MiAuthConnectPage";
 import NoteDetailPage from "./pages/NoteDetailPage";
@@ -122,6 +124,22 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <ProfileEditPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/settings/lists"
+        element={
+          <RequireAuth>
+            <ListsSettingsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/lists/:id"
+        element={
+          <RequireAuth>
+            <ListDetailPage />
           </RequireAuth>
         }
       />

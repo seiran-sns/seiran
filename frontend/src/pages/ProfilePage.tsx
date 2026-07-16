@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, UserProfile, getErrorMessage } from "../api/client";
 import Modal from "../components/common/Modal";
 import AppShell from "../components/layout/AppShell";
@@ -242,6 +242,20 @@ export default function ProfilePage() {
     </>
   );
 
+  // 公開リスト一覧（#63）。現状ローカルユーザーのみ表示（リモートは将来課題）。
+  const listsSection = profile && profile.public_lists.length > 0 && (
+    <>
+      <div className={panel.rightHeader}>公開リスト</div>
+      <div className={styles.listsRow}>
+        {profile.public_lists.map((l) => (
+          <Link key={l.id} to={`/lists/${l.id}`} className={styles.listBadge}>
+            {l.name} <span className={styles.listBadgeCount}>{l.member_count}</span>
+          </Link>
+        ))}
+      </div>
+    </>
+  );
+
   const recentSection = profile && (
     <>
       <div className={panel.rightHeader}>投稿</div>
@@ -264,6 +278,7 @@ export default function ProfilePage() {
           <>
             {center}
             {pinnedSection}
+            {listsSection}
             {isNarrow && recentSection}
           </>
         }

@@ -96,6 +96,17 @@ CREATE INDEX idx_actors_username_domain ON actors(username, domain);        -- W
 CREATE INDEX idx_actors_withdrawn_at ON actors(withdrawn_at) WHERE withdrawn_at IS NOT NULL;
 ```
 
+**ローカルユーザー名の命名規則**（`seiran_common::username`、`register()`で強制）:
+ローカルユーザー名は「ドメイン名の1ラベルとして成立する文字列」でなければならない
+（英数字とハイフンのみ、先頭/末尾はハイフン不可、ピリオド不可、1〜63文字）。理由は2つ:
+1. ATPハンドルは `{username}.{domain}` の形で組み立てるため、username自体がDNSラベルと
+   して妥当でなければ不正なハンドルになる。
+2. `@`で始まり途中に`@`を含まない文字列（ローカルID`@user`かATPハンドル
+   `@user.bsky.social`か）を見たとき、`.`の有無でどちらかを判別できる。
+
+加えて`list-relay`（リスト機能#63のプロキシアクター用）等の予約ユーザー名は
+`register()`が明示的に拒否する（`RESERVED_LOCAL_USERNAMES`）。
+
 ### 1.3 `posts` (統一ポストテーブル)
 宇宙の壁を超えて集約されるすべての投稿。未来補正タイムスタンプ付きのIDで完全に一次元ソートされる。編集競合を避けるため、更新系の動的データ（リアクション等）は別テーブルに完全分離する。
 
@@ -573,6 +584,76 @@ CREATE INDEX idx_pinned_posts_actor ON pinned_posts (actor_id, pinned_at DESC);
   直接列挙、最大5件のためページングなし）。Add/Remove Activity のフォロワーへの配送は
   行わない（リモート側がプロフィール取得時に都度フェッチする経路で十分と判断、詳細は
   Doc3 §10）。
+
+### 1.14 `lists` / `list_members` (リスト機能、#63)
+
+Twitter/Mastodon の「リスト」に相当する機能。ユーザーごとに複数のリストを持て、
+ローカル/リモートFedi/Bskyのアクターを混在してメンバー登録できる。公開リストは
+Fediverse には AP Collection として、Bluesky には `app.bsky.graph.list`/`listitem`
+として実際にPDSリポジトリへコミットし、双方のプロトコルからネイティブに閲覧できる
+（Mastodon本家のリストは常に非公開だが、seiranはこの点を独自拡張している）。
+
+```sql
+CREATE TABLE lists (
+    id BIGINT PRIMARY KEY,  -- generate_snowflake_id() で採番
+    owner_actor_id BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    is_public BOOLEAN NOT NULL DEFAULT false,
+
+    -- 公開リストを app.bsky.graph.list として自前PDSにコミットした結果
+    -- （非公開リスト、またはコミット未実施の間は NULL）。
+    at_rkey VARCHAR(255),
+    at_uri VARCHAR(2048) UNIQUE,
+    at_cid VARCHAR(255),
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (owner_actor_id, name)
+);
+
+CREATE INDEX idx_lists_owner ON lists(owner_actor_id);
+CREATE INDEX idx_lists_public ON lists(owner_actor_id) WHERE is_public = true;
+
+CREATE TABLE list_members (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    list_id BIGINT NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+    actor_id BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    -- app.bsky.graph.listitem コミット結果（対象が actor_type <> 'fedi' の場合のみ）。
+    at_rkey VARCHAR(255),
+    at_uri VARCHAR(2048) UNIQUE,
+    UNIQUE (list_id, actor_id)
+);
+
+CREATE INDEX idx_list_members_list ON list_members(list_id, added_at DESC);
+CREATE INDEX idx_list_members_actor ON list_members(actor_id);
+```
+
+- **可視性制限**: 公開リストをFediから見た場合は `actor_type <> 'bsky'`、Bskyから見た場合は
+  `actor_type <> 'fedi'` でメンバーを絞り込む。ローカルアクターの `ap_uri` は常にNULL
+  （AP Actor URIは `https://{domain}/users/{username}` として動的生成されるため）なので、
+  「Fedi側から見えるか」の判定に `ap_uri IS NOT NULL` は使えない点に注意。
+- **プロキシアクター（list-relay）**: 誰にもフォローされていないリモートFediユーザーの
+  投稿を受信するため、seiranは `actor_type='local'`・`user_id=NULL` の仮想アクター
+  `list-relay` を持つ（`seiran_common::system_actor::ensure_system_proxy_actor`が起動時に
+  冪等生成し、`actor_id`を`site_settings`キー`system_proxy_actor_id`に記録）。AP署名は
+  ローカルアクター共通のサーバー単一RSA鍵を流用するため専用鍵は不要。フォロー要否は
+  **参照カウント方式**（`list_members`からの動的COUNT、`ListRepository::
+  actor_referenced_by_any_list`）で判定し、`Job::ProxyFollowSync`がFollow/Undo Followを
+  送信する。ユーザー名`list-relay`は一般ユーザーが登録できない予約名として`register()`が
+  拒否する（`seiran_common::username`参照、§1.2の命名規則も参照）。
+- **Bsky受信フィルタ**: `seiran-atp-repo`のJetstreamハンドラは、DIDが
+  「ローカルユーザーにフォローされている」か「いずれかの`list_members`に含まれる」
+  いずれかを満たす場合のみ投稿を保存する（無関係投稿の際限ない取り込みを防ぐ、
+  過去に104万行まで膨張した事故の反省を踏襲）。
+- **リストタイムライン**: `ListRepository::timeline`は`home_timeline`と同じ
+  targets-LATERAL集約パターンを、対象を「自分+フォロー中」から`list_members`に
+  差し替えて再利用する。
+- **上限**: 1アクターあたりリスト数30個、1リストあたりメンバー数500人（提案値、
+  `MAX_LISTS_PER_OWNER`/`MAX_MEMBERS_PER_LIST`定数）。
+- 詳細なプロトコル仕様（AP Collectionのエンドポイント形状、ATP `app.bsky.graph.list`/
+  `listitem`のレコード仕様）はDoc3 §14を参照。
 
 ---
 

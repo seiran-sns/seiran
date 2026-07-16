@@ -251,6 +251,8 @@ export interface UserProfile {
   bridge_real_handle?: string;
   bridge_protocol?: string; // "fedi" | "bsky"
   is_paired: boolean;
+  /** 公開リスト一覧（#63）。現状ローカルユーザーのみ（リモートは将来課題）。 */
+  public_lists: { id: string; name: string; member_count: number }[];
 }
 
 export interface SearchResult {
@@ -391,6 +393,43 @@ export interface VerifyTokenResponse {
 
 export interface SetupStatus {
   initialized: boolean;
+}
+
+// ── リスト機能（#63） ──────────────────────────────────────────────────
+
+export interface ListSummary {
+  id: string;
+  name: string;
+  is_public: boolean;
+  member_count: number;
+  created_at: string;
+}
+
+export interface ListMember {
+  actor_id: string;
+  username: string;
+  domain: string;
+  display_name?: string;
+  actor_type: string;
+  avatar_url?: string;
+  added_at: string;
+}
+
+export interface ListDetail extends ListSummary {
+  members: ListMember[];
+  is_owner: boolean;
+}
+
+/** アクター検索候補（リストのメンバー追加サジェスト用）。 */
+export interface ActorSuggestion {
+  actor_id: string;
+  username: string;
+  domain: string;
+  display_name?: string;
+  actor_type: string;
+  avatar_url?: string;
+  /** `api.lists.addMember` にそのまま渡せるターゲット文字列。 */
+  target: string;
 }
 
 export interface MetaResponse {
@@ -680,6 +719,47 @@ export const api = {
     },
     delete(target: string) {
       return request<void>("POST", "/follows/delete", { target });
+    },
+  },
+
+  actors: {
+    /** DB上のアクターをユーザー名/表示名の部分一致で検索する（リストのメンバー追加サジェスト用）。 */
+    search(q: string, limit = 10, signal?: AbortSignal) {
+      const query = new URLSearchParams({ q, limit: String(limit) });
+      return request<ActorSuggestion[]>("GET", `/actors/search?${query.toString()}`, undefined, signal);
+    },
+  },
+
+  lists: {
+    list() {
+      return request<ListSummary[]>("GET", "/lists");
+    },
+    create(name: string, isPublic: boolean) {
+      return request<ListSummary>("POST", "/lists", { name, is_public: isPublic });
+    },
+    get(id: string) {
+      return request<ListDetail>("GET", `/lists/${encodeURIComponent(id)}`);
+    },
+    update(id: string, name: string, isPublic: boolean) {
+      return request<ListSummary>("PATCH", `/lists/${encodeURIComponent(id)}`, { name, is_public: isPublic });
+    },
+    remove(id: string) {
+      return request<void>("DELETE", `/lists/${encodeURIComponent(id)}`);
+    },
+    addMember(id: string, target: string) {
+      return request<ListMember[]>("POST", `/lists/${encodeURIComponent(id)}/members`, { target });
+    },
+    removeMember(id: string, actorId: string) {
+      return request<void>("DELETE", `/lists/${encodeURIComponent(id)}/members/${encodeURIComponent(actorId)}`);
+    },
+    async timeline(id: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+      const q = new URLSearchParams();
+      if (params?.limit) q.set("limit", String(params.limit));
+      if (params?.until_id) q.set("until_id", params.until_id);
+      if (params?.since_id) q.set("since_id", params.since_id);
+      const qs = q.toString();
+      const rows = await request<RawNote[]>("GET", `/lists/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`);
+      return rows.map(normalizeNote);
     },
   },
 

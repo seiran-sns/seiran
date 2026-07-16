@@ -14,6 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/", icon: "🏠", label: "ホーム" },
   { to: "/search", icon: "🔍", label: "検索" },
   { to: "/notifications", icon: "🔔", label: "通知" },
+  { to: "/settings/lists", icon: "📋", label: "リスト" },
 ];
 
 export default function LeftNav({ onCompose }: { onCompose: () => void }) {

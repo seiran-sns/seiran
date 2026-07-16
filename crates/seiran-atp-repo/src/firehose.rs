@@ -209,18 +209,24 @@ async fn process_message(
                 .map(|embed| parse_bsky_embed_attachments(embed, &did))
                 .unwrap_or_default();
 
-            // この DID のアクターが「ローカルユーザーにフォローされている」場合のみ保存対象とする。
+            // この DID のアクターが「ローカルユーザーにフォローされている」、または
+            // 「いずれかのリストに含まれている」場合のみ保存対象とする（リスト機能 #63:
+            // 誰にもフォローされていないBskyユーザーでも、リストに入れれば投稿を受信できる）。
             // 単に actors テーブルに存在するだけでは不十分（いいね等をきっかけに resolve_or_upsert_bsky_actor
             // で無関係なアクターが actors へ upsert され、その投稿まで際限なく取り込まれてしまうため。
             // 2026-07: 実際にこの経路で posts が104万行超まで膨張する不具合があった）。
             let actor_row = sqlx::query(
                 "SELECT a.id, a.username, a.display_name, a.avatar_url
                  FROM actors a
-                 JOIN follows f ON f.target_actor_id = a.id
-                 JOIN actors follower ON follower.id = f.follower_actor_id
                  WHERE a.at_did = $1
-                   AND f.status = 'accepted'
-                   AND follower.actor_type = 'local'
+                   AND (
+                     EXISTS (
+                       SELECT 1 FROM follows f
+                       JOIN actors follower ON follower.id = f.follower_actor_id
+                       WHERE f.target_actor_id = a.id AND f.status = 'accepted' AND follower.actor_type = 'local'
+                     )
+                     OR EXISTS (SELECT 1 FROM list_members lm WHERE lm.actor_id = a.id)
+                   )
                  LIMIT 1",
             )
             .bind(&did)
@@ -377,12 +383,17 @@ async fn save_bsky_post(
                 }
             }
 
-            // ローカルフォロワーへ WebSocket 配信
+            // ローカルフォロワー + この投稿者をリストに含めているリスト所有者へ WebSocket 配信
+            // （リスト機能 #63: リストタブを開いている間もリアルタイム更新されるように）。
             let follower_rows = sqlx::query(
-                "SELECT f.follower_actor_id FROM follows f
+                "SELECT f.follower_actor_id AS recipient_id FROM follows f
                  JOIN actors a ON a.id = f.follower_actor_id
                  WHERE f.target_actor_id = $1 AND f.status = 'accepted'
-                   AND a.actor_type = 'local'",
+                   AND a.actor_type = 'local'
+                 UNION
+                 SELECT l.owner_actor_id AS recipient_id FROM list_members lm
+                 JOIN lists l ON l.id = lm.list_id
+                 WHERE lm.actor_id = $1",
             )
             .bind(actor_id)
             .fetch_all(pool)
@@ -391,7 +402,7 @@ async fn save_bsky_post(
 
             let recipients: HashSet<i64> = follower_rows
                 .iter()
-                .filter_map(|r| r.try_get::<i64, _>("follower_actor_id").ok())
+                .filter_map(|r| r.try_get::<i64, _>("recipient_id").ok())
                 .collect();
 
             if !recipients.is_empty() {

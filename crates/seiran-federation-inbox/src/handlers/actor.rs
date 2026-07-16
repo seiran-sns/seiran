@@ -28,6 +28,8 @@ struct ApActorDocument {
     following: String,
     /// ピン留め投稿（#61）。Mastodon 等はプロフィール表示時にこの URL を都度フェッチする。
     featured: String,
+    /// 公開リスト一覧（#63、Mastodon にはない独自拡張）。
+    lists: String,
     url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     icon: Option<ApImage>,
@@ -162,6 +164,7 @@ pub async fn actor_handler(
         followers: format!("{}/users/{}/followers", base, username),
         following: format!("{}/users/{}/following", base, username),
         featured: format!("{}/users/{}/collections/featured", base, username),
+        lists: format!("{}/users/{}/lists", base, username),
         url: format!("{}/@{}", base, username),
         icon,
         public_key: ApPublicKey {

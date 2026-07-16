@@ -12,9 +12,13 @@ pub mod mention;
 pub mod repository;
 pub mod storage;
 pub mod streaming;
+pub mod system_actor;
+pub mod username;
 
 pub use db::{get_db_pool, run_migrations};
 pub use id::generate_snowflake_id;
+pub use system_actor::{ensure_system_proxy_actor, resolve_system_proxy_actor_id};
+pub use username::{is_reserved_username, is_valid_local_username, PROXY_ACTOR_USERNAME, RESERVED_LOCAL_USERNAMES};
 
 /// プロフィールのキーバリュー項目（#62）の最大件数。Mastodon 等のデフォルト（4件）に合わせる。
 pub const MAX_PROFILE_FIELDS: usize = 4;

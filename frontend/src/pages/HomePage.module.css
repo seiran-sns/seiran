@@ -12,19 +12,26 @@
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(8px);
   z-index: 4;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: thin;
 }
 
 .feedTab {
-  flex: 1;
+  flex: 0 0 auto;
   background: none;
   border: none;
   color: var(--text-dim);
   font-size: 0.9rem;
-  padding: 13px 0;
+  padding: 13px 16px;
+  white-space: nowrap;
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   transition: color 0.15s, border-color 0.15s;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
 }
 
 .feedTab:hover {

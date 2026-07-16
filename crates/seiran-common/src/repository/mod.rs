@@ -6,6 +6,7 @@
 pub mod actor;
 pub mod atp;
 pub mod follow;
+pub mod list;
 pub mod media_file;
 pub mod notification;
 pub mod pinned_post;
@@ -18,6 +19,10 @@ pub mod user;
 pub use actor::{Actor, ActorRepository, PgActorRepository};
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
 pub use follow::{FollowRepository, PgFollowRepository};
+pub use list::{
+    ListMemberRow, ListRepository, ListRow, PgListRepository, MAX_LISTS_PER_OWNER,
+    MAX_MEMBERS_PER_LIST,
+};
 pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
 };

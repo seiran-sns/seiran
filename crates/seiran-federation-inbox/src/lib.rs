@@ -24,6 +24,7 @@ use handlers::{
     actor::actor_handler,
     featured::featured_handler,
     inbox::inbox_handler,
+    lists::{list_detail_handler, lists_collection_handler},
     nodeinfo::{nodeinfo_discovery_handler, nodeinfo_handler},
     outbox::outbox_handler,
     webfinger::webfinger_handler,
@@ -89,5 +90,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/users/:username", get(actor_handler))
         .route("/users/:username/outbox", get(outbox_handler))
         .route("/users/:username/collections/featured", get(featured_handler))
+        .route("/users/:username/lists", get(lists_collection_handler))
+        .route("/users/:username/lists/:list_id", get(list_detail_handler))
         .with_state(state)
 }

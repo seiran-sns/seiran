@@ -12,6 +12,7 @@ use crate::atp::repo::{
     build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
     cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
     encode_bsky_feed_repost, encode_bsky_feed_like, encode_bsky_graph_follow,
+    encode_bsky_graph_list, encode_bsky_graph_listitem,
     generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage, BskyEmbed,
     BskyPostReply,
 };
@@ -643,6 +644,72 @@ impl AtpCommitService {
         Ok(rkey)
     }
 
+    /// `app.bsky.graph.list` レコードをコミットする（リスト機能 #63、公開リストのみ呼ぶ）。
+    /// 成功時は `(rkey, at_uri, cid)` を返す。呼び出し元が `ListRepository::set_atp_list_record`
+    /// で `lists` テーブルに保存する。
+    pub async fn commit_graph_list(
+        &self,
+        actor_id: i64,
+        name: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(String, String, String), AtpCommitError> {
+        let rkey = generate_tid();
+        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        let (record_cbor, record_cid) = encode_bsky_graph_list(name, &created_at_str)?;
+        let cid_str = cid_to_string(&record_cid);
+
+        let record = CommitRecord {
+            collection: "app.bsky.graph.list",
+            rkey: rkey.clone(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action: "create",
+            blob_cids: vec![],
+        };
+
+        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+        let at_uri = format!("at://{}/app.bsky.graph.list/{}", result.at_did, rkey);
+
+        tracing::info!("[atp] list commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        self.spawn_request_crawl();
+        Ok((rkey, at_uri, cid_str))
+    }
+
+    /// `app.bsky.graph.listitem` レコードをコミットする（公開リストの、かつ Bsky 可視の
+    /// メンバー追加時のみ呼ぶ）。成功時は `(rkey, at_uri)` を返す。
+    pub async fn commit_graph_listitem(
+        &self,
+        actor_id: i64,
+        list_uri: &str,
+        subject_did: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(String, String), AtpCommitError> {
+        let rkey = generate_tid();
+        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        let (record_cbor, record_cid) = encode_bsky_graph_listitem(list_uri, subject_did, &created_at_str)?;
+
+        let record = CommitRecord {
+            collection: "app.bsky.graph.listitem",
+            rkey: rkey.clone(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action: "create",
+            blob_cids: vec![],
+        };
+
+        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+        let at_uri = format!("at://{}/app.bsky.graph.listitem/{}", result.at_did, rkey);
+
+        tracing::info!(
+            "[atp] listitem commit 完了: actor_id={}, list={}, subject={}, rkey={}",
+            actor_id, list_uri, subject_did, rkey
+        );
+        self.spawn_request_crawl();
+        Ok((rkey, at_uri))
+    }
+
     /// リポスト解除コミット（app.bsky.feed.repost レコードを MST から削除する）。
     pub async fn delete_atp_repost(
         &self,
@@ -1073,6 +1140,152 @@ impl AtpCommitService {
         tracing::info!("[atp] follow delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
         self.spawn_request_crawl();
         Ok(())
+    }
+
+    /// 指定コレクション種別のレコードを MST から削除する汎用ヘルパー（リスト機能 #63）。
+    /// `delete_atp_repost`/`commit_delete_follow` と同型だが、`app.bsky.graph.list` /
+    /// `app.bsky.graph.listitem` の2種を1つの実装で賄うため collection を引数化する。
+    async fn delete_atp_record_generic(
+        &self,
+        actor_id: i64,
+        collection: &str,
+        rkey: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let actor_row = sqlx::query(
+            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev
+             FROM actors WHERE id = $1",
+        )
+        .bind(actor_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let at_did: String = actor_row
+            .try_get::<Option<String>, _>("at_did")?
+            .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
+        let signing_key_pem: String = actor_row
+            .try_get::<Option<String>, _>("at_signing_key_pem")?
+            .ok_or(AtpCommitError::ActorConfig("at_signing_key_pem が未設定"))?;
+        let prev_commit_cid_str: Option<String> =
+            actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
+        let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
+
+        let signing_key = signing_key_from_pem(&signing_key_pem)?;
+
+        let mut entries = self.load_atp_entries(actor_id).await?;
+        let entry_key = format!("{}/{}", collection, rkey);
+        entries.retain(|(k, _)| k != &entry_key);
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let (mst_root, mst_blocks) = build_mst(&entries)?;
+
+        let new_rev = generate_tid();
+        let prev_cid_parsed = prev_commit_cid_str
+            .as_deref()
+            .and_then(|s| cid_from_str(s).ok());
+        let (commit_cid, commit_cbor) = create_commit(
+            &at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key,
+        )?;
+
+        let mut new_blocks = mst_blocks;
+        new_blocks.push((commit_cid, commit_cbor));
+        let diff_car = encode_car(&commit_cid, &new_blocks)?;
+        let commit_cid_str = cid_to_string(&commit_cid);
+
+        let mut tx = self.pool.begin().await?;
+
+        for (cid, bytes) in &new_blocks {
+            sqlx::query(
+                "INSERT INTO atp_blocks (cid, actor_id, bytes) VALUES ($1, $2, $3)
+                 ON CONFLICT (cid, actor_id) DO NOTHING",
+            )
+            .bind(cid_to_string(cid))
+            .bind(actor_id)
+            .bind(bytes.as_slice())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2 WHERE id = $3")
+            .bind(&commit_cid_str)
+            .bind(&new_rev)
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query(
+            "DELETE FROM atp_records WHERE actor_id = $1 AND collection = $2 AND rkey = $3",
+        )
+        .bind(actor_id)
+        .bind(collection)
+        .bind(rkey)
+        .execute(&mut *tx)
+        .await?;
+
+        let ops_json = serde_json::json!([{"action": "delete", "path": entry_key}]);
+        let event_row = sqlx::query(
+            "INSERT INTO atp_repo_events
+             (actor_id, did, commit_cid, prev_cid, rev, since_rev, car_bytes, ops_json)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id",
+        )
+        .bind(actor_id)
+        .bind(&at_did)
+        .bind(&commit_cid_str)
+        .bind(prev_commit_cid_str.as_deref())
+        .bind(&new_rev)
+        .bind(prev_rev.as_deref())
+        .bind(diff_car.as_slice())
+        .bind(&ops_json)
+        .fetch_one(&mut *tx)
+        .await?;
+        let seq: i64 = event_row.try_get("id")?;
+
+        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ws_ops = vec![CommitEvtOp { action: "delete".to_string(), path: entry_key, cid: None }];
+        let frame_opt = build_commit_frame(
+            seq, &at_did, &commit_cid, prev_cid_parsed.as_ref(),
+            &new_rev, prev_rev.as_deref(), &diff_car, &ws_ops, &[], &time_str,
+        ).ok();
+        if let Some(ref frame) = frame_opt {
+            if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
+                sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
+                    .bind(&compressed)
+                    .bind(seq)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
+        tx.commit().await?;
+
+        if let Some(frame) = frame_opt {
+            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
+        }
+
+        tracing::info!("[atp] {} delete commit 完了: actor_id={}, rkey={}", collection, actor_id, rkey);
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
+    /// `app.bsky.graph.list` レコードを削除する（リスト非公開化・削除時）。
+    pub async fn delete_atp_graph_list(
+        &self,
+        actor_id: i64,
+        rkey: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        self.delete_atp_record_generic(actor_id, "app.bsky.graph.list", rkey, now).await
+    }
+
+    /// `app.bsky.graph.listitem` レコードを削除する（メンバー削除・リスト削除時）。
+    pub async fn delete_atp_graph_listitem(
+        &self,
+        actor_id: i64,
+        rkey: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        self.delete_atp_record_generic(actor_id, "app.bsky.graph.listitem", rkey, now).await
     }
 
     /// Bsky テキスト投稿コミット（DB の posts レコードを更新しない）。
