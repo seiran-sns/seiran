@@ -692,7 +692,7 @@ async fn handle_inbound_like_create(
         let notifications_repo = PgNotificationRepository::new(pool.clone());
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = notifications_repo
-            .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(content), None)
+            .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(content), None, Some(at_uri))
             .await
         {
             tracing::error!("[Jetstream/Like] notifications INSERT 失敗: {}", e);

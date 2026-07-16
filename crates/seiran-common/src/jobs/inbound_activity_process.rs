@@ -154,7 +154,7 @@ async fn handle_follow(
     let notif_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = inbox
         .notification_repo
-        .insert(notif_id, local_actor_id, NotificationKind::Follow, Some(follower_actor_id), None, None, None)
+        .insert(notif_id, local_actor_id, NotificationKind::Follow, Some(follower_actor_id), None, None, None, None)
         .await
     {
         tracing::error!("[Follow] notifications INSERT 失敗: {}", e);
@@ -454,7 +454,7 @@ async fn handle_accept(activity: serde_json::Value, inbox: &InboxContext) -> Res
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = inbox
             .notification_repo
-            .insert(notif_id, local_actor_id, NotificationKind::FollowRequestAccepted, Some(remote_actor.id), None, None, None)
+            .insert(notif_id, local_actor_id, NotificationKind::FollowRequestAccepted, Some(remote_actor.id), None, None, None, None)
             .await
         {
             tracing::error!("[Accept] notifications INSERT 失敗: {}", e);
@@ -630,7 +630,7 @@ async fn handle_reaction(
     let notif_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = inbox
         .notification_repo
-        .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(&content), emoji_url.as_deref())
+        .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(&content), emoji_url.as_deref(), activity_id)
         .await
     {
         tracing::error!("[Reaction] notifications INSERT 失敗: {}", e);

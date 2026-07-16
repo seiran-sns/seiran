@@ -512,11 +512,13 @@ CREATE TABLE notifications (
     reaction           VARCHAR(255),  -- type='reaction' の場合のみ（リアクション内容）
     reaction_emoji_url TEXT,          -- type='reaction' かつカスタム絵文字の場合のみ（下記参照）
     is_read            BOOLEAN NOT NULL DEFAULT false,
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    source_uri         VARCHAR(2048)  -- 発生源イベントの一意識別子（下記参照、無ければNULL）
 );
 
 CREATE INDEX idx_notifications_recipient ON notifications (recipient_actor_id, id DESC);
 CREATE INDEX idx_notifications_recipient_unread ON notifications (recipient_actor_id) WHERE NOT is_read;
+CREATE UNIQUE INDEX idx_notifications_source_uri ON notifications (source_uri) WHERE source_uri IS NOT NULL;
 ```
 
 - **書き込み元**: リアクション作成（`handlers::notes::create_reaction`、ローカル/Jetstream
@@ -524,6 +526,13 @@ CREATE INDEX idx_notifications_recipient_unread ON notifications (recipient_acto
   AP `Accept(Follow)` 受信（`handle_accept`、type は `followRequestAccepted`）の各経路で
   `NotificationRepository::insert` を呼ぶ。書き込み失敗はログのみで本処理をブロックしない
   （通知はベストエフォート）。
+- **`source_uri`（2026-07-16 追加）**: `firehose`/`federation-worker`の複数起動（Doc6
+  既知の課題）で同一イベントが複線受信された場合に、通知が重複してDBに残る不具合への
+  対処。ATP Likeイベントは`at_uri`（`app.bsky.feed.like`のrkey由来、1いいね=1レコードで
+  一意）、AP Reactionイベントは`ap_activity_id`を`source_uri`として保存し、部分ユニーク
+  インデックスで重複INSERTを`ON CONFLICT ... DO NOTHING`により無視する。follow系・
+  ローカルリアクションの通知は`source_uri`を持たない（`NULL`同士は一意制約上区別され、
+  何行あっても衝突しない）。
 - **読み取り**: `NotificationRepository::list` が `until_id`/`since_id` カーソルで
   `id DESC` 取得する（他のタイムライン系クエリと同じカーソルページネーション規約）。
   `mark_all_read` は `POST /api/i/notifications` の `markAsRead`（デフォルト true）で

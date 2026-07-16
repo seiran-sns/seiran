@@ -5,6 +5,7 @@ use serde_json::json;
 use seiran_common::{generate_snowflake_id, ApError};
 use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
+use seiran_common::repository::Actor;
 
 use crate::error::ApiError;
 use crate::middleware::{extract_auth, AuthedUser};
@@ -101,23 +102,44 @@ pub async fn delete_follow(
         }
     };
 
-    // フォロー関係と atp_rkey を取得
-    let atp_rkey = match state.follows.find_atp_rkey(local_actor_id, target_actor.id).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("[unfollow] atp_rkey 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+    match unfollow_target(&state, local_actor_id, &user.username, &target_actor).await {
+        Ok(()) => {
+            tracing::info!("[unfollow] {} → {} アンフォロー完了", local_actor_id, target_actor.id);
+            Json(serde_json::json!({"status": "ok"})).into_response()
         }
-    };
+        Err(e) => {
+            tracing::error!("[unfollow] {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, e).into_response()
+        }
+    }
+}
+
+/// 1件のフォロー関係を解除する（ATP フォロー解除コミット + AP Undo Follow 配送 +
+/// `follows` テーブルからの削除）。`delete_follow`（ユーザー操作によるアンフォロー）と
+/// `account::withdraw`（退会時、フォロー先全員への一括アンフォロー）の両方から呼ばれる
+/// 共通処理。
+pub async fn unfollow_target(
+    state: &AppState,
+    local_actor_id: i64,
+    local_username: &str,
+    target_actor: &Actor,
+) -> Result<(), String> {
+    // フォロー関係と atp_rkey を取得
+    let atp_rkey = state
+        .follows
+        .find_atp_rkey(local_actor_id, target_actor.id)
+        .await
+        .map_err(|e| format!("atp_rkey 取得失敗: {}", e))?;
 
     let now = chrono::Utc::now();
 
     // ATP フォロー解除（atp_rkey が保存されている場合）
     if let Some(ref rkey) = atp_rkey {
-        if let Err(e) = state.atp_service.commit_delete_follow(local_actor_id, rkey, now).await {
-            tracing::error!("[unfollow] ATP delete commit 失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("ATP コミット失敗: {}", e)).into_response();
-        }
+        state
+            .atp_service
+            .commit_delete_follow(local_actor_id, rkey, now)
+            .await
+            .map_err(|e| format!("ATP delete commit 失敗: {}", e))?;
         // Jetstream の wantedDids 絞り込みリストからも除外対象になりうるため再構築を促す。
         touch_jetstream_wanted_dids(&state.db).await;
     }
@@ -127,7 +149,7 @@ pub async fn delete_follow(
         if let (Some(ap_inbox_url), Some(ap_uri)) =
             (target_actor.ap_inbox_url.as_deref(), target_actor.ap_uri.as_deref())
         {
-            let local_actor_uri = format!("https://{}/users/{}", state.local_domain, user.username);
+            let local_actor_uri = format!("https://{}/users/{}", state.local_domain, local_username);
             let actor_key_id = format!("{}#main-key", local_actor_uri);
             let follow_id = format!("https://{}/activities/follow/{}", state.local_domain, target_actor.id);
             let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
@@ -154,13 +176,13 @@ pub async fn delete_follow(
     }
 
     // follows テーブルから削除
-    if let Err(e) = state.follows.delete_by_actors(local_actor_id, target_actor.id).await {
-        tracing::error!("[unfollow] follows DELETE 失敗: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-    }
+    state
+        .follows
+        .delete_by_actors(local_actor_id, target_actor.id)
+        .await
+        .map_err(|e| format!("follows DELETE 失敗: {}", e))?;
 
-    tracing::info!("[unfollow] {} → {} アンフォロー完了", local_actor_id, target_actor.id);
-    Json(serde_json::json!({"status": "ok"})).into_response()
+    Ok(())
 }
 
 /// ローカルユーザーへのフォロー（ATP コミット + follows テーブル accepted）

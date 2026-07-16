@@ -51,6 +51,10 @@ pub trait NotificationRepository: Send + Sync {
     /// `UNIQUE(post_id, actor_id)` で1人1投稿1リアクションのため、同じアクターが後で
     /// 別の絵文字へ切り替えると過去の行が上書きされ、都度クエリでは解決できなくなるため
     /// 非正規化して保存する）。
+    /// `source_uri` はイベントの発生源を特定する一意識別子（ATP Likeの`at_uri`、AP
+    /// Reactionの`ap_activity_id`）。渡すと部分ユニークインデックス経由で重複INSERTが
+    /// 無視される（firehose/federation-workerの複数起動による複線受信対策。Doc6既知の課題）。
+    /// follow系・ローカルリアクションの通知は`None`のままでよい。
     #[allow(clippy::too_many_arguments)]
     async fn insert(
         &self,
@@ -61,6 +65,7 @@ pub trait NotificationRepository: Send + Sync {
         note_id: Option<i64>,
         reaction: Option<&str>,
         reaction_emoji_url: Option<&str>,
+        source_uri: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
     /// 自分宛ての通知を新しい順に取得する（カーソルページネーション、`posts` の
@@ -98,10 +103,12 @@ impl NotificationRepository for PgNotificationRepository {
         note_id: Option<i64>,
         reaction: Option<&str>,
         reaction_emoji_url: Option<&str>,
+        source_uri: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, source_uri)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (source_uri) WHERE source_uri IS NOT NULL DO NOTHING",
         )
         .bind(id)
         .bind(recipient_actor_id)
@@ -110,6 +117,7 @@ impl NotificationRepository for PgNotificationRepository {
         .bind(note_id)
         .bind(reaction)
         .bind(reaction_emoji_url)
+        .bind(source_uri)
         .execute(&self.pool)
         .await
         .map(|_| ())

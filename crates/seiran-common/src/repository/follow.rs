@@ -60,6 +60,13 @@ pub trait FollowRepository: Send + Sync {
         &self,
         target_actor_id: i64,
     ) -> Result<Vec<i64>, sqlx::Error>;
+
+    /// `follower_actor_id` が accepted な status でフォローしている全ての
+    /// `target_actor_id` を取得する（退会時、フォロー先全員への一括アンフォロー用）。
+    async fn find_accepted_target_ids(
+        &self,
+        follower_actor_id: i64,
+    ) -> Result<Vec<i64>, sqlx::Error>;
 }
 
 pub struct PgFollowRepository {
@@ -201,6 +208,19 @@ impl FollowRepository for PgFollowRepository {
              WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
         )
         .bind(target_actor_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn find_accepted_target_ids(
+        &self,
+        follower_actor_id: i64,
+    ) -> Result<Vec<i64>, sqlx::Error> {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT target_actor_id FROM follows
+             WHERE follower_actor_id = $1 AND status = 'accepted'",
+        )
+        .bind(follower_actor_id)
         .fetch_all(&self.pool)
         .await
     }
