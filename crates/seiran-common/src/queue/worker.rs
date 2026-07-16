@@ -287,6 +287,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::ProxyFollowSync { target_actor_id, want_follow } => {
             jobs::proxy_follow_sync::handle(target_actor_id, want_follow, ctx).await
         }
+        Job::AccountWithdrawUnfollowAll { actor_id, username } => {
+            jobs::account_withdraw_unfollow_all::handle(actor_id, username, ctx).await
+        }
     }
 }
 
@@ -300,6 +303,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::AtpRepositoryPublish { .. } => "AtpRepositoryPublish",
         Job::BskyVideoPoll { .. } => "BskyVideoPoll",
         Job::ProxyFollowSync { .. } => "ProxyFollowSync",
+        Job::AccountWithdrawUnfollowAll { .. } => "AccountWithdrawUnfollowAll",
     }
 }
 
@@ -341,6 +345,11 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         Job::ProxyFollowSync { .. } => RetryConfig {
             max_attempts: 10,
             base_delay_ms: 5000, // ApDelivery と同様、リモートAP配送のため長めに構える
+            max_delay_ms: 3_600_000,
+        },
+        Job::AccountWithdrawUnfollowAll { .. } => RetryConfig {
+            max_attempts: 10,
+            base_delay_ms: 5000, // ApDelivery/ProxyFollowSyncと同様、リモート配送を含むため長めに構える
             max_delay_ms: 3_600_000,
         },
     }

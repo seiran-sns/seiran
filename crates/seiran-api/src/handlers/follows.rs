@@ -115,9 +115,10 @@ pub async fn delete_follow(
 }
 
 /// 1件のフォロー関係を解除する（ATP フォロー解除コミット + AP Undo Follow 配送 +
-/// `follows` テーブルからの削除）。`delete_follow`（ユーザー操作によるアンフォロー）と
-/// `account::withdraw`（退会時、フォロー先全員への一括アンフォロー）の両方から呼ばれる
-/// 共通処理。
+/// `follows` テーブルからの削除）。`delete_follow`（ユーザー操作によるアンフォロー）から
+/// 呼ばれる。退会時のフォロー先一括アンフォローは、フォロー数に比例して時間がかかる
+/// ため Worker のジョブ（`seiran_common::jobs::account_withdraw_unfollow_all`）として
+/// 別実装している（`AppState` を要求するこの関数は `JobContext` からは呼べないため）。
 pub async fn unfollow_target(
     state: &AppState,
     local_actor_id: i64,

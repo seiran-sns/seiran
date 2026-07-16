@@ -144,6 +144,11 @@ pub enum Job {
     /// `want_follow: true` はリストへの初回参照時、`false` は参照が0件になった時に積む
     /// （参照カウントの判定は呼び出し側の `ListRepository::actor_referenced_by_any_list` で行う）。
     ProxyFollowSync { target_actor_id: i64, want_follow: bool },
+
+    /// 退会処理: 自分がフォローしていた相手（フォロイー）全員への一括アンフォロー
+    /// （ATPフォロー解除コミット + AP Undo Follow配送 + follows削除）。フォロー数に
+    /// 比例して時間がかかるため、Delete(Actor)配送（`ApDelivery`）と同様にジョブ化する。
+    AccountWithdrawUnfollowAll { actor_id: i64, username: String },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

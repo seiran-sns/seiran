@@ -1230,16 +1230,27 @@ account.rs`の`withdraw`）。「凍結」（`users.suspended_at`）はログイ
 **退会時のフォロイー一括アンフォロー（2026-07-16）**: 従来は退会処理（`account::withdraw`）
 がフォロワー側（Delete(Actor)配送、Doc1 §1.2参照）とATP #accountイベントのみで、自分が
 フォローしていた相手（フォロイー）側へは何も通知しておらず、リモート側にフォロー関係が
-残り続ける不整合があった。`crates/seiran-api/src/handlers/follows.rs`の`delete_follow`
-ハンドラから、1件分のフォロー解除処理（ATPフォロー解除コミット・AP Undo Follow配送・
-`follows`テーブル削除）を`unfollow_target`として切り出し、`withdraw`ハンドラと共有する。
-`withdraw`は`FollowRepository::find_accepted_target_ids`で自分がフォローしていた全ての
-`target_actor_id`を取得し、各々に対して`unfollow_target`を呼ぶ。フォロー数に比例して
-時間がかかりうるため、Delete(Actor)配送と同様に`tokio::spawn`で非同期化し退会レスポンスを
-遅延させない（個々の失敗はログのみ、リトライは行わない。退会処理自体は既に完了しているため）。
+残り続ける不整合があった。フォロー数に比例して時間がかかりうる処理のため、Delete(Actor)
+配送（`ApDelivery`ジョブ）・list-relayの代理フォロー同期（`ProxyFollowSync`ジョブ）と同様に
+Workerのジョブとして実装する（新設`Job::AccountWithdrawUnfollowAll`、
+`seiran_common::jobs::account_withdraw_unfollow_all`）。`withdraw`ハンドラは
+`AppState::enqueue_account_withdraw_unfollow_all`でジョブを積むのみで、実処理はWorkerが
+リトライ機構（最大10回、5秒〜1時間の指数バックオフ、`ApDelivery`/`ProxyFollowSync`と同じ
+設定）付きで実行する。当初は`tokio::spawn`で非同期化する実装だったが、プロセスクラッシュ時に
+タスクごと失われリトライもされない点を指摘され（2026-07-16 マイケル）、既存のジョブキュー
+パターン（`Job`/`WorkerEngine`/`JobContext`）に載せる設計に変更した。
+
+ジョブハンドラ内では`FollowRepository::find_accepted_target_ids`で自分がフォローしていた
+全ての`target_actor_id`を取得し、各々についてATPフォロー解除コミット・AP Undo Follow配送・
+`follows`テーブル削除を行う。ATPコミット用の`AtpCommitService`はジョブ専用の使い捨て
+`broadcast`チャンネルで構築する（`subscribeRepos`のリアルタイム購読者には届かないが、
+`atp_repo_events`テーブルへの記録自体は行われるため、他のRelayが再購読すれば最終的には
+一貫する。退会時のフォロー解除にリアルタイム性は必須ではないと判断）。`follows`行は
+ターゲットごとに処理の最後で削除するため、リトライ時は既に処理済みのターゲットが
+自然にスキップされる（冪等）。
 実機確認: ローカルフォロー（裏でATP followレコードも作成される設計、Doc1 §1.5）を持つ
-テストユーザーを退会させ、`follows`行の削除とATP `follow delete commit`実行（rkey一致）を
-確認済み（2026-07-16）。
+テストユーザーを退会させ、`Worker`ログでのジョブ実行（`attempt 1/10`）・ATP
+`follow delete commit`実行（rkey一致）・`follows`行の削除を確認済み（2026-07-16）。
 
 **Likeの通知重複の対処（2026-07-16）**: `notifications`テーブルに`source_uri`カラムと
 部分ユニークインデックスを追加（Doc1 §1.12参照）。firehose/federation-workerの複数起動

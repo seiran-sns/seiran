@@ -98,48 +98,11 @@ pub async fn withdraw(
     // Jetstream の wantedDids 絞り込みリストから外すため再構築を促す。
     touch_jetstream_wanted_dids(&state.db).await;
 
-    // 5. フォロー先全員へのアンフォロー。フォロー数に比例して時間がかかりうるため、
-    //    DeleteActor配送と同様に非同期化し退会レスポンスを遅延させない。
-    //    個々の失敗はログのみ（リトライは行わない。退会処理自体は既に完了しているため）。
-    {
-        let state2 = state.clone();
-        let username2 = actor.username.clone();
-        tokio::spawn(async move {
-            let target_ids = match state2.follows.find_accepted_target_ids(actor_id).await {
-                Ok(ids) => ids,
-                Err(e) => {
-                    tracing::error!("[withdraw] フォロー先一覧取得失敗: {}", e);
-                    return;
-                }
-            };
-            for target_id in target_ids {
-                let target_actor = match state2.actors.find_by_id(target_id).await {
-                    Ok(Some(a)) => a,
-                    Ok(None) => continue,
-                    Err(e) => {
-                        tracing::error!(
-                            "[withdraw] フォロー先アクター取得失敗 (target_id={}): {}",
-                            target_id, e
-                        );
-                        continue;
-                    }
-                };
-                if let Err(e) =
-                    crate::handlers::follows::unfollow_target(&state2, actor_id, &username2, &target_actor)
-                        .await
-                {
-                    tracing::error!(
-                        "[withdraw] フォロー先アンフォロー失敗 (target_id={}): {}",
-                        target_id, e
-                    );
-                }
-            }
-            tracing::info!(
-                "[withdraw] フォロー先への一括アンフォロー完了: actor_id={}",
-                actor_id
-            );
-        });
-    }
+    // 5. フォロー先全員へのアンフォローをWorkerのジョブとして積む（Worker の
+    //    AccountWithdrawUnfollowAll ジョブ。ApDelivery/ProxyFollowSyncと同じジョブ
+    //    キュー経由にすることで、プロセスクラッシュ時もリトライ機構の恩恵を受けられる
+    //    （tokio::spawnだとプロセス終了と共に失われてしまうため。2026-07-16 マイケル指摘）。
+    state.enqueue_account_withdraw_unfollow_all(actor_id, actor.username.clone()).await;
 
     tracing::info!("[withdraw] 退会完了: actor_id={}, username={}", actor_id, actor.username);
     Ok(Json(()))

@@ -117,6 +117,18 @@ impl AppState {
             tracing::error!("[job] ProxyFollowSync enqueue 失敗 (target={}): {}", target_actor_id, e);
         }
     }
+
+    /// 退会時、自分がフォローしていた相手（フォロイー）全員への一括アンフォロージョブを積む。
+    /// 配送の実行・リトライは Worker（`jobs::account_withdraw_unfollow_all`）が担う。
+    pub async fn enqueue_account_withdraw_unfollow_all(&self, actor_id: i64, username: String) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::AccountWithdrawUnfollowAll { actor_id, username }, job_priority::HIGH)
+            .await
+        {
+            tracing::error!("[job] AccountWithdrawUnfollowAll enqueue 失敗 (actor_id={}): {}", actor_id, e);
+        }
+    }
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
