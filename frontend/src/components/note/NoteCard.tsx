@@ -104,6 +104,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
     });
   }, [note.id, registerReaction, user?.actor_id]);
 
+  const isPrivateRepostTarget = note.visibility === "followers_only" || note.visibility === "direct";
+
   async function handleRepost(e: React.MouseEvent) {
     e.stopPropagation();
     if (reposting || unreposting) return;
@@ -122,6 +124,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
       return;
     }
 
+    if (isPrivateRepostTarget) return;
+
     setReposting(true);
     try {
       await api.notes.create("", true, true, [], undefined, note.id);
@@ -129,6 +133,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setReposted(true);
+      } else if (err instanceof ApiError && err.status === 403) {
+        alert("非公開の投稿はリポストできません。");
       }
     } finally {
       setReposting(false);
@@ -300,10 +306,10 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         <button
           className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
           onClick={handleRepost}
-          disabled={reposting || unreposting}
-          title={reposted ? "リポスト解除" : "リポスト"}
+          disabled={reposting || unreposting || (isPrivateRepostTarget && !reposted)}
+          title={isPrivateRepostTarget ? "非公開の投稿はリポストできません" : reposted ? "リポスト解除" : "リポスト"}
         >
-          🔁 {reposted ? "リポスト済み" : (reposting || unreposting) ? "..." : "リポスト"}
+          🔁 {isPrivateRepostTarget ? "リポスト不可" : reposted ? "リポスト済み" : (reposting || unreposting) ? "..." : "リポスト"}
         </button>
         <ReactionPicker onPick={toggleReaction} disabled={reactionPending} />
         {isSelf && (

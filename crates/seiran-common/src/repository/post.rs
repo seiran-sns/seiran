@@ -70,6 +70,9 @@ pub struct PostDeliveryMeta {
     pub domain: String,
     pub display_name: Option<String>,
     pub username: String,
+    /// 元ポストの可視性（"public"|"unlisted"|"followers_only"|"direct"）。
+    /// リポスト可否判定・可視性継承・Bsky配送許可判定に使う。
+    pub visibility: String,
 }
 
 /// リポスト取り消し（Undo）に必要な情報。
@@ -207,6 +210,8 @@ pub trait PostRepository: Send + Sync {
     ) -> Result<(), sqlx::Error>;
 
     /// リポストレコードを挿入する（`UNIQUE(actor_id, repost_of_post_id)` 制約違反はそのまま呼び出し元へ伝播する）。
+    /// `visibility` は元ポストから継承した値（"public"|"unlisted"）。呼び出し元が
+    /// `followers_only`/`direct` を渡さないことを保証する（`create_repost` で事前に禁止）。
     async fn insert_repost(
         &self,
         id: i64,
@@ -214,6 +219,7 @@ pub trait PostRepository: Send + Sync {
         ap_object_id: &str,
         repost_of_post_id: i64,
         created_at: DateTime<Utc>,
+        visibility: &str,
     ) -> Result<(), sqlx::Error>;
 
     /// 添付ファイルを投稿に紐付ける（ローカルアップロード済みの `media_file_id` を持つケース）。
@@ -345,7 +351,6 @@ impl PostRepository for PgPostRepository {
                      WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
                        AND ($2::bigint IS NULL OR p.id < $2)
                        AND ($3::bigint IS NULL OR p.id > $3)
-                       AND (p.visibility != 'unlisted' OR p.actor_id = $1)
                        AND (
                            p.visibility NOT IN ('followers_only', 'direct')
                            OR p.actor_id = $1
@@ -638,7 +643,8 @@ impl PostRepository for PgPostRepository {
     async fn find_delivery_meta(&self, id: i64) -> Result<Option<PostDeliveryMeta>, sqlx::Error> {
         sqlx::query_as::<_, PostDeliveryMeta>(
             "SELECT p.ap_object_id, p.at_uri, p.at_cid,
-                    a.domain, a.display_name, a.username
+                    a.domain, a.display_name, a.username,
+                    p.visibility::text AS visibility
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              WHERE p.id = $1 AND p.deleted_at IS NULL
@@ -691,16 +697,18 @@ impl PostRepository for PgPostRepository {
         ap_object_id: &str,
         repost_of_post_id: i64,
         created_at: DateTime<Utc>,
+        visibility: &str,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at)
-             VALUES ($1, $2, '', $3, $4, $5)",
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at, visibility)
+             VALUES ($1, $2, '', $3, $4, $5, $6::post_visibility_enum)",
         )
         .bind(id)
         .bind(actor_id)
         .bind(ap_object_id)
         .bind(repost_of_post_id)
         .bind(created_at)
+        .bind(visibility)
         .execute(&self.pool)
         .await
         .map(|_| ())

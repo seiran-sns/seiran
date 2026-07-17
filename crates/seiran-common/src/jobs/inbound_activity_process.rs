@@ -721,7 +721,7 @@ async fn handle_announce(
     // リポストをDBに挿入
     inbox
         .post_repo
-        .insert_repost(post_id, actor_id, announce_id, repost_of_post_id, created_at)
+        .insert_repost(post_id, actor_id, announce_id, repost_of_post_id, created_at, "public")
         .await
         .map_err(|e| format!("リポスト挿入失敗: {}", e))?;
 

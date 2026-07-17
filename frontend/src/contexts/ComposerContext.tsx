@@ -21,7 +21,7 @@ export function ComposerProvider({ children }: { children: React.ReactNode }) {
       {children}
       <Modal open={replyTarget !== null} onClose={() => setReplyTarget(null)} title="返信">
         {replyTarget && (
-          <PostComposer autoFocus replyTo={replyTarget} onPosted={() => setReplyTarget(null)} />
+          <PostComposer key={replyTarget.id} autoFocus replyTo={replyTarget} onPosted={() => setReplyTarget(null)} />
         )}
       </Modal>
     </ComposerContext.Provider>

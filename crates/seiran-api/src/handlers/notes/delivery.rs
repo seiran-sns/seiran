@@ -120,7 +120,17 @@ pub async fn deliver_repost(
         }
     }
 
-    if targets.bsky {
+    // 二重防御: 元ポストが followers_only/direct（＝本来 create_repost で弾かれているはず）
+    // なら Bsky コミットを行わない。呼び出し元の実装ミスに対する最終ガードとして再チェックする。
+    let bsky_target = targets.bsky && meta.visibility != "followers_only" && meta.visibility != "direct";
+    if targets.bsky && !bsky_target {
+        tracing::warn!(
+            "[deliver_repost] visibility={} のポストへの Bsky リポストが要求されたためスキップ（呼び出し元のバグの可能性、post_id={}）",
+            meta.visibility, post_id
+        );
+    }
+
+    if bsky_target {
         if let (Some(at_uri), Some(at_cid)) = (&meta.at_uri, &meta.at_cid) {
             // 元ポストに at_uri と at_cid がある → ATP repost
             let at_uri_clone = at_uri.clone();
@@ -146,12 +156,40 @@ pub async fn deliver_repost(
     }
 }
 
-/// リプライ先の配信先制御に使う情報。
+/// リプライ先の配信先制御・可視性継承に使う情報。
 pub struct ReplyContext {
     pub deliver_fedi_allowed: bool,
     pub deliver_bsky_allowed: bool,
     pub bsky_reply: Option<BskyPostReply>,
     pub ap_in_reply_to: Option<String>,
+    /// 親ポストの可視性（非リプライの場合は `None`）。
+    /// "public"/"unlisted"/"followers_only"/"direct" のいずれか。
+    pub parent_visibility: Option<String>,
+}
+
+impl ReplyContext {
+    /// リプライ先の可視性制約を踏まえて、リクエストされた visibility を確定する。
+    /// - 非リプライ、または親が public/direct: 制約なし（従来のバリデーション、デフォルト public）。
+    /// - 親が followers_only: 強制的に followers_only（Misskey互換の黙った読み替え）。
+    /// - 親が unlisted: public/unlisted/followers_only いずれも選択可、デフォルトは unlisted。
+    pub fn resolve_visibility(&self, requested: Option<&str>) -> Result<&'static str, ApiError> {
+        match self.parent_visibility.as_deref() {
+            Some("followers_only") => Ok("followers_only"),
+            Some("unlisted") => match requested {
+                None | Some("unlisted") => Ok("unlisted"),
+                Some("public") => Ok("public"),
+                Some("followers_only") => Ok("followers_only"),
+                Some(_) => Err(ApiError::BadRequest("INVALID_VISIBILITY".to_owned())),
+            },
+            // 非リプライ、または親が public/direct/未知値 → 従来ロジック
+            _ => match requested {
+                None | Some("public") => Ok("public"),
+                Some("unlisted") => Ok("unlisted"),
+                Some("followers_only") => Ok("followers_only"),
+                Some(_) => Err(ApiError::BadRequest("INVALID_VISIBILITY".to_owned())),
+            },
+        }
+    }
 }
 
 /// リプライ先ポストの種別を判定し、配信先制御（元ポストが存在しないプロトコルには配信しない）と
@@ -197,6 +235,7 @@ pub async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str) -> R
         deliver_bsky_allowed,
         bsky_reply,
         ap_in_reply_to: meta.ap_object_id,
+        parent_visibility: Some(meta.visibility.clone()),
     })
 }
 
@@ -235,8 +274,9 @@ pub struct RegularPostDelivery {
     pub now: chrono::DateTime<chrono::Utc>,
     pub text: String,
     pub targets: DeliveryTargets,
-    /// 投稿の可視性（"public" | "unlisted" | "followers_only"）。Bsky はプロトコル上 public
-    /// 限定のため、非 public の場合は Bsky コミットをスキップする最終防御に使う。
+    /// 投稿の可視性（"public" | "unlisted" | "followers_only"）。Bsky はプロトコル上
+    /// followers_only 配信をサポートしないため、その場合は Bsky コミットをスキップする
+    /// 最終防御に使う（unlisted は Bsky 配送可能）。
     pub visibility: String,
     pub bsky_reply: Option<BskyPostReply>,
     pub bsky_quote_embed: Option<BskyEmbed>,
@@ -248,10 +288,10 @@ pub struct RegularPostDelivery {
 /// 通常投稿 / リプライ / 引用投稿を Fedi・Bsky へ配送する。
 /// Bsky は ATP コミット（firehose 結合のため in-process）、Fedi は ApDelivery ジョブ。
 pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
-    // 二重防御: visibility が非 public なら Bsky コミットを行わない。create_regular_post 側で
-    // 既に deliver_bsky を false に読み替え済みのはずだが、呼び出し元の実装ミスに対する
-    // 最終ガードとして再チェックする。
-    let bsky_target = d.targets.bsky && d.visibility == "public";
+    // 二重防御: visibility が followers_only なら Bsky コミットを行わない（Bsky はプロトコル上
+    // フォロワー限定配信をサポートしないため）。create_regular_post 側で既に deliver_bsky を
+    // false に読み替え済みのはずだが、呼び出し元の実装ミスに対する最終ガードとして再チェックする。
+    let bsky_target = d.targets.bsky && d.visibility != "followers_only";
     if d.targets.bsky && !bsky_target {
         tracing::warn!(
             "[deliver_regular_post] visibility={} で Bsky 配送が要求されたためスキップ（呼び出し元のバグの可能性、post_id={}）",

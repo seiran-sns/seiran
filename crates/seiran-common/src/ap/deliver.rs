@@ -203,21 +203,24 @@ fn build_attachment_document(
     doc
 }
 
-/// Announce アクティビティを組み立てる。
+/// Announce アクティビティを組み立てる。`visibility` はリポスト自身の可視性
+/// （"public"|"unlisted"、`create_repost` が元ポストから継承した値）。
 fn build_announce_activity(
     addr: &LocalActorAddress,
     announce_id: &str,
     original_ap_object_id: &str,
     published: &str,
+    visibility: &str,
 ) -> serde_json::Value {
+    let (to, cc) = visibility_to_to_cc(addr, visibility);
     serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Announce",
         "id": announce_id,
         "actor": addr.actor_uri,
         "published": published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [addr.followers_uri],
+        "to": to,
+        "cc": cc,
         "object": original_ap_object_id
     })
 }
@@ -504,12 +507,18 @@ pub async fn deliver_ap_announce(
     original_ap_object_id: &str,
 ) -> Result<(), ApError> {
     let username = fetch_username(db, actor_id).await?;
+    let visibility: String = sqlx::query_scalar("SELECT visibility::text FROM posts WHERE id = $1")
+        .bind(post_id)
+        .fetch_optional(db)
+        .await
+        .map_err(|e| ApError::Other(e.to_string()))?
+        .unwrap_or_else(|| "public".to_string());
     let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
 
     let addr = local_actor_address(local_domain, &username);
     let announce_id = format!("https://{}/announces/{}", local_domain, post_id);
     let activity = build_announce_activity(
-        &addr, &announce_id, original_ap_object_id, &chrono::Utc::now().to_rfc3339(),
+        &addr, &announce_id, original_ap_object_id, &chrono::Utc::now().to_rfc3339(), &visibility,
     );
 
     fan_out_activity(
@@ -932,11 +941,25 @@ mod tests {
             "https://seiran.example/announces/7",
             "https://other.example/notes/9",
             "2026-07-15T00:00:00+00:00",
+            "public",
         );
         assert_eq!(activity["type"], "Announce");
         assert_eq!(activity["object"], "https://other.example/notes/9");
         assert_eq!(activity["actor"], "https://seiran.example/users/alice");
         assert_eq!(activity["cc"][0], "https://seiran.example/users/alice/followers");
+    }
+
+    #[test]
+    fn announce_activity_unlisted_to_cc() {
+        let activity = build_announce_activity(
+            &addr(),
+            "https://seiran.example/announces/7",
+            "https://other.example/notes/9",
+            "2026-07-15T00:00:00+00:00",
+            "unlisted",
+        );
+        assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
+        assert_eq!(activity["cc"], serde_json::json!(["https://www.w3.org/ns/activitystreams#Public"]));
     }
 
     #[test]

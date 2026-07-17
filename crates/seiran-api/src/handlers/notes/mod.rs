@@ -79,6 +79,17 @@ async fn create_repost(
         Err(e) => return ApiError::Internal(format!("repost 元ポスト取得失敗: {}", e)).into_response(),
     };
 
+    // Misskey/Mastodon 互換: 非公開（followers_only）ポストはリポスト禁止。
+    // `direct` も同様に厳格扱いする（閲覧制御が両者を同列に扱っているのに合わせる）。
+    // 新規操作の明示的な拒否のため、投稿時のような「黙った読み替え」ではなく通常のエラーを返す。
+    if meta.visibility == "followers_only" || meta.visibility == "direct" {
+        return ApiError::Forbidden("PRIVATE_POST_NOT_REPOSTABLE").into_response();
+    }
+
+    // リポスト自身の可視性はクライアントが選べず、元ポストから自動決定する。
+    // ここに到達する時点で meta.visibility は "public" か "unlisted" のいずれかのみ。
+    let repost_visibility: &str = if meta.visibility == "unlisted" { "unlisted" } else { "public" };
+
     let origin = classify_post(
         meta.ap_object_id.as_deref(),
         meta.at_uri.as_deref(),
@@ -90,7 +101,7 @@ async fn create_repost(
     // リポストの AP オブジェクト ID は Announce URI として生成
     let announce_ap_id = format!("https://{}/announces/{}", state.local_domain, post_id);
 
-    match state.posts.insert_repost(post_id, actor_id, &announce_ap_id, renote_id, now).await {
+    match state.posts.insert_repost(post_id, actor_id, &announce_ap_id, renote_id, now, repost_visibility).await {
         Ok(()) => {}
         Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("23505") => {
             // UNIQUE 制約違反 = すでにリポスト済み
@@ -156,26 +167,30 @@ async fn create_regular_post(
             Ok(ctx) => ctx,
             Err(e) => return e.into_response(),
         },
-        None => ReplyContext { deliver_fedi_allowed: true, deliver_bsky_allowed: true, bsky_reply: None, ap_in_reply_to: None },
+        None => ReplyContext {
+            deliver_fedi_allowed: true,
+            deliver_bsky_allowed: true,
+            bsky_reply: None,
+            ap_in_reply_to: None,
+            parent_visibility: None,
+        },
     };
 
-    // 可視性の検証。新規パラメータのため後方互換は考慮不要（不正値はエラーでよい）。
-    // "direct" はローカル投稿作成のスコープ外（Fedi受信専用）のため許可しない。
-    let visibility: &'static str = match req.visibility.as_deref() {
-        None | Some("public") => "public",
-        Some("unlisted") => "unlisted",
-        Some("followers_only") => "followers_only",
-        Some(_) => return ApiError::BadRequest("INVALID_VISIBILITY".to_owned()).into_response(),
+    // 可視性の決定（リプライ先の制約を含む）。新規パラメータのため後方互換は考慮不要
+    // （不正値はエラーでよい）。"direct" はローカル投稿作成のスコープ外のため許可しない。
+    let visibility: &'static str = match reply_ctx.resolve_visibility(req.visibility.as_deref()) {
+        Ok(v) => v,
+        Err(e) => return e.into_response(),
     };
 
     let deliver_fedi = req.deliver_to_fedi.unwrap_or(true) && reply_ctx.deliver_fedi_allowed;
     let mut deliver_bsky = req.deliver_to_bsky.unwrap_or(true) && reply_ctx.deliver_bsky_allowed;
 
-    // Misskey互換API保護: Bsky はプロトコル上 public 投稿しかサポートしない。visibility が
-    // 非 public なのに Bsky 配送が要求された場合、エラーを返さず Fedi のみ配送に読み替える
-    // （フロントは PostComposer で事前にブロックするが、フロントを経由しない外部クライアント
-    // からの想定外リクエストにも安全に対応する）。
-    if visibility != "public" && deliver_bsky {
+    // Misskey互換API保護: Bsky はプロトコル上 followers_only（フォロワー限定）投稿を配信できない。
+    // visibility が followers_only なのに Bsky 配送が要求された場合、エラーを返さず Fedi のみ
+    // 配送に読み替える（unlisted は Bsky 配送可能。フロントは PostComposer で事前にブロックするが、
+    // フロントを経由しない外部クライアントからの想定外リクエストにも安全に対応する）。
+    if visibility == "followers_only" && deliver_bsky {
         tracing::info!(
             "[create_regular_post] visibility={} で Bsky 配送が要求されたため Fedi のみに読み替え（actor_id={}）",
             visibility, actor_id

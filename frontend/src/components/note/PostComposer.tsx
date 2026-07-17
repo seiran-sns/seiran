@@ -12,11 +12,28 @@ interface PostComposerProps {
 
 type Visibility = "public" | "unlisted" | "followers_only";
 
+/** 返信先ポストの可視性から、この返信の選択肢・デフォルト・強制値を算出する。 */
+function replyVisibilityConstraint(replyTo?: Note): {
+  forced: Visibility | null;
+  defaultValue: Visibility;
+} {
+  const parent = replyTo?.visibility;
+  if (parent === "followers_only") {
+    return { forced: "followers_only", defaultValue: "followers_only" };
+  }
+  if (parent === "unlisted") {
+    return { forced: null, defaultValue: "unlisted" };
+  }
+  // undefined(public) / "direct" / 想定外値 → 制約なし
+  return { forced: null, defaultValue: "public" };
+}
+
 export default function PostComposer({ onPosted, autoFocus, replyTo }: PostComposerProps) {
   const [text, setText] = useState("");
   const [deliverFedi, setDeliverFedi] = useState(true);
   const [deliverBsky, setDeliverBsky] = useState(true);
-  const [visibility, setVisibility] = useState<Visibility>("public");
+  const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo) : null;
+  const [visibility, setVisibility] = useState<Visibility>(() => replyConstraint?.defaultValue ?? "public");
   const [guideMessage, setGuideMessage] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState("");
@@ -42,18 +59,19 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
     guideTimerRef.current = window.setTimeout(() => setGuideMessage(null), 3200);
   }
 
-  // Bsky はプロトコル上 public 限定のため、可視性と Bsky 配送は相互排他。
+  // Bsky はプロトコル上 followers_only（プライベート）投稿を配信できないため相互排他。
+  // unlisted（ひかえめ）は Bsky 配送と両立できる。
   function handleVisibilityChange(next: Visibility) {
-    if (next !== "public" && deliverBsky) {
-      showGuide("Bsky配送がオンの間はパブリックのみ選べます。Bsky配送をオフにすると変更できます。");
+    if (next === "followers_only" && deliverBsky) {
+      showGuide("Bsky配送がオンの間はプライベートを選べません。Bsky配送をオフにすると変更できます。");
       return;
     }
     setVisibility(next);
   }
 
   function handleToggleBsky() {
-    if (!deliverBsky && visibility !== "public") {
-      showGuide("Bsky配送は「パブリック」の投稿のみ対応しています。可視性をパブリックにすると配送できます。");
+    if (!deliverBsky && visibility === "followers_only") {
+      showGuide("Bsky配送は「プライベート」以外の投稿で対応しています。可視性を変更すると配送できます。");
       return;
     }
     setDeliverBsky((v) => !v);
@@ -61,7 +79,10 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
 
   // 返信時は配信先が元ポストのネットワークに固定される。fedi リモートへの返信のみ
   // Fedi の緩い上限、それ以外（bsky / ローカル・seiran＝両方）は Bsky の厳しい上限を適用。
-  const effectiveBsky = replyTo ? replyTo.user.actorType !== "fedi" : deliverBsky;
+  // 可視性がプライベートの場合は Bsky に配送されないため上限判定からも除外する。
+  const effectiveBsky = replyTo
+    ? replyTo.user.actorType !== "fedi" && visibility !== "followers_only"
+    : deliverBsky;
   const remaining = calcRemaining(text, effectiveBsky);
   const overLimit = remaining < 0;
 
@@ -79,11 +100,11 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
         attachmentIds,
         replyTo?.id,
         undefined,
-        replyTo ? undefined : visibility
+        visibility
       );
       setText("");
       setAttached(null);
-      setVisibility("public");
+      setVisibility(replyConstraint?.defaultValue ?? "public");
       onPosted?.(note);
       textareaRef.current?.focus();
     } catch (err) {
@@ -183,7 +204,13 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
         {uploading && <span className={styles.spinner} />}
       </div>
 
-      {!replyTo && (
+      {replyConstraint?.forced ? (
+        <div className={styles.visibilityRow}>
+          <span className={styles.replyScopeNote}>
+            🔒️ 非公開の投稿への返信のため、この返信も非公開になります
+          </span>
+        </div>
+      ) : (
         <div className={styles.visibilityRow}>
           <button
             type="button"
