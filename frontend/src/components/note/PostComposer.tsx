@@ -10,20 +10,54 @@ interface PostComposerProps {
   replyTo?: Note;
 }
 
+type Visibility = "public" | "unlisted" | "followers_only";
+
 export default function PostComposer({ onPosted, autoFocus, replyTo }: PostComposerProps) {
   const [text, setText] = useState("");
   const [deliverFedi, setDeliverFedi] = useState(true);
   const [deliverBsky, setDeliverBsky] = useState(true);
+  const [visibility, setVisibility] = useState<Visibility>("public");
+  const [guideMessage, setGuideMessage] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState("");
   const [attached, setAttached] = useState<DriveFile | null>(null);
   const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const guideTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (autoFocus) textareaRef.current?.focus();
   }, [autoFocus]);
+
+  useEffect(() => {
+    return () => {
+      if (guideTimerRef.current) window.clearTimeout(guideTimerRef.current);
+    };
+  }, []);
+
+  function showGuide(message: string) {
+    setGuideMessage(message);
+    if (guideTimerRef.current) window.clearTimeout(guideTimerRef.current);
+    guideTimerRef.current = window.setTimeout(() => setGuideMessage(null), 3200);
+  }
+
+  // Bsky はプロトコル上 public 限定のため、可視性と Bsky 配送は相互排他。
+  function handleVisibilityChange(next: Visibility) {
+    if (next !== "public" && deliverBsky) {
+      showGuide("Bsky配送がオンの間はパブリックのみ選べます。Bsky配送をオフにすると変更できます。");
+      return;
+    }
+    setVisibility(next);
+  }
+
+  function handleToggleBsky() {
+    if (!deliverBsky && visibility !== "public") {
+      showGuide("Bsky配送は「パブリック」の投稿のみ対応しています。可視性をパブリックにすると配送できます。");
+      return;
+    }
+    setDeliverBsky((v) => !v);
+  }
 
   // 返信時は配信先が元ポストのネットワークに固定される。fedi リモートへの返信のみ
   // Fedi の緩い上限、それ以外（bsky / ローカル・seiran＝両方）は Bsky の厳しい上限を適用。
@@ -43,10 +77,13 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
         replyTo ? true : deliverFedi,
         replyTo ? true : deliverBsky,
         attachmentIds,
-        replyTo?.id
+        replyTo?.id,
+        undefined,
+        replyTo ? undefined : visibility
       );
       setText("");
       setAttached(null);
+      setVisibility("public");
       onPosted?.(note);
       textareaRef.current?.focus();
     } catch (err) {
@@ -119,7 +156,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
             <button
               type="button"
               className={`${styles.scopeBtn} ${deliverBsky ? styles.scopeActive : ""}`}
-              onClick={() => setDeliverBsky((v) => !v)}
+              onClick={handleToggleBsky}
             >
               Bsky 🦋
             </button>
@@ -145,6 +182,37 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
         )}
         {uploading && <span className={styles.spinner} />}
       </div>
+
+      {!replyTo && (
+        <div className={styles.visibilityRow}>
+          <button
+            type="button"
+            className={`${styles.scopeBtn} ${visibility === "public" ? styles.scopeActive : ""}`}
+            onClick={() => handleVisibilityChange("public")}
+          >
+            👥 パブリック
+          </button>
+          <button
+            type="button"
+            className={`${styles.scopeBtn} ${visibility === "unlisted" ? styles.scopeActive : ""}`}
+            onClick={() => handleVisibilityChange("unlisted")}
+          >
+            🤫 ひかえめ
+          </button>
+          <button
+            type="button"
+            className={`${styles.scopeBtn} ${visibility === "followers_only" ? styles.scopeActive : ""}`}
+            onClick={() => handleVisibilityChange("followers_only")}
+          >
+            🔒️ プライベート
+          </button>
+          {guideMessage && (
+            <span className={styles.popover} role="status">
+              {guideMessage}
+            </span>
+          )}
+        </div>
+      )}
 
       {attached && (
         <div className={styles.attachPreview}>

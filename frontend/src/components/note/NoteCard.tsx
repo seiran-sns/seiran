@@ -341,6 +341,19 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
     );
   }
 
+  // renoteId はあるが renote が欠落している場合、元ポストが非公開（プライベート/ひかえめ）で
+  // 閲覧者から見えないケース（embed_renotes の可視性ガードによるもの）。
+  if (note.renoteId) {
+    return (
+      <article className={`${styles.card} ${large ? styles.large : ""}`}>
+        <div className={styles.rail}>
+          🔁 <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong> がリポスト
+        </div>
+        <p className={styles.unavailableNote}>この投稿は表示できません（非公開投稿のため）。</p>
+      </article>
+    );
+  }
+
   return (
     <article className={`${styles.card} ${large ? styles.large : ""}`}>
       <PostContent note={note} linkToDetail={linkToDetail} large={large} />

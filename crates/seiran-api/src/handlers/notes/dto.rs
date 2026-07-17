@@ -20,6 +20,9 @@ pub struct CreateNoteRequest {
     pub reply_to_id: Option<String>,
     /// 引用元のポスト ID（指定時は引用投稿として処理する）
     pub quote_of_id: Option<String>,
+    /// 投稿の可視性（"public" | "unlisted" | "followers_only"）。省略時は "public"。
+    /// "direct" はローカル投稿作成のスコープ外（Fedi受信専用）のため受け付けない。
+    pub visibility: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -82,8 +85,8 @@ pub struct NoteResponse {
     /// 認証ユーザー自身の投稿がピン留め済みかどうか（#61）。自分のプロフィール表示時のみ設定。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinned_by_me: Option<bool>,
-    /// 可視性（`unlisted`/`followers_only`/`direct`）。Fedi受信ポストの`to`/`cc`から判定した値。
-    /// `public`（デフォルト・大多数のケース）は省略する。
+    /// 可視性（`unlisted`/`followers_only`/`direct`）。ローカル投稿は投稿作成時の選択、
+    /// Fedi受信ポストは`to`/`cc`から判定した値。`public`（デフォルト・大多数のケース）は省略する。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<String>,
     /// ローカル投稿がFedi/Bskyへ実際に配送されたか（投稿作成時の配送先選択の永続化）。

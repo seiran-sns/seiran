@@ -82,7 +82,8 @@ pub struct MisskeyNote {
     /// `text` として表現する。seiran 内部の `repost_of_post_id`（リポスト）と
     /// `quote_of_post_id`（引用）はどちらもここに統合する。
     pub renote_id: Option<String>,
-    /// Misskey は「公開範囲」の概念を持つが、seiran は現状すべて公開投稿のみのため固定値。
+    /// seiran の可視性（`public`/`unlisted`/`followers_only`/`direct`）を Misskey 本家の語彙
+    /// （`public`/`home`/`followers`/`specified`）にマッピングした値（`to_misskey_visibility`）。
     pub visibility: String,
     pub file_ids: Vec<String>,
     pub files: Vec<MisskeyDriveFile>,

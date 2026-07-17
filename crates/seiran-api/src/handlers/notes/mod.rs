@@ -159,8 +159,29 @@ async fn create_regular_post(
         None => ReplyContext { deliver_fedi_allowed: true, deliver_bsky_allowed: true, bsky_reply: None, ap_in_reply_to: None },
     };
 
+    // 可視性の検証。新規パラメータのため後方互換は考慮不要（不正値はエラーでよい）。
+    // "direct" はローカル投稿作成のスコープ外（Fedi受信専用）のため許可しない。
+    let visibility: &'static str = match req.visibility.as_deref() {
+        None | Some("public") => "public",
+        Some("unlisted") => "unlisted",
+        Some("followers_only") => "followers_only",
+        Some(_) => return ApiError::BadRequest("INVALID_VISIBILITY".to_owned()).into_response(),
+    };
+
     let deliver_fedi = req.deliver_to_fedi.unwrap_or(true) && reply_ctx.deliver_fedi_allowed;
-    let deliver_bsky = req.deliver_to_bsky.unwrap_or(true) && reply_ctx.deliver_bsky_allowed;
+    let mut deliver_bsky = req.deliver_to_bsky.unwrap_or(true) && reply_ctx.deliver_bsky_allowed;
+
+    // Misskey互換API保護: Bsky はプロトコル上 public 投稿しかサポートしない。visibility が
+    // 非 public なのに Bsky 配送が要求された場合、エラーを返さず Fedi のみ配送に読み替える
+    // （フロントは PostComposer で事前にブロックするが、フロントを経由しない外部クライアント
+    // からの想定外リクエストにも安全に対応する）。
+    if visibility != "public" && deliver_bsky {
+        tracing::info!(
+            "[create_regular_post] visibility={} で Bsky 配送が要求されたため Fedi のみに読み替え（actor_id={}）",
+            visibility, actor_id
+        );
+        deliver_bsky = false;
+    }
 
     if let Err(e) = validate_text_length(&text, deliver_bsky) {
         return e.into_response();
@@ -187,7 +208,7 @@ async fn create_regular_post(
     // seiran_post_uuid / reply_to_post_id / quote_of_post_id を含む統合 INSERT
     if let Err(e) = state
         .posts
-        .insert_full(post_id, actor_id, &text, &ap_object_id, &seiran_post_uuid, reply_to_id_i64, quote_of_id_i64, now, deliver_fedi, deliver_bsky)
+        .insert_full(post_id, actor_id, &text, &ap_object_id, &seiran_post_uuid, reply_to_id_i64, quote_of_id_i64, now, visibility, deliver_fedi, deliver_bsky)
         .await
     {
         return ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)).into_response();
@@ -205,6 +226,7 @@ async fn create_regular_post(
         now,
         text: text.clone(),
         targets: DeliveryTargets { fedi: deliver_fedi, bsky: deliver_bsky },
+        visibility: visibility.to_string(),
         bsky_reply: reply_ctx.bsky_reply,
         bsky_quote_embed,
         ap_quote_url,
@@ -228,7 +250,7 @@ async fn create_regular_post(
         reposted_by_me: None,
         emojis: HashMap::new(),
         pinned_by_me: None,
-        visibility: None,
+        visibility: if visibility == "public" { None } else { Some(visibility.to_string()) },
         deliver_fedi: Some(deliver_fedi),
         deliver_bsky: Some(deliver_bsky),
     };
@@ -297,7 +319,7 @@ pub async fn local_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let rows = match state.posts.local_timeline(limit, until_id, since_id).await {
+    let rows = match state.posts.local_timeline(my_actor_id, limit, until_id, since_id).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[local_timeline] クエリ失敗: {}", e);
@@ -338,7 +360,7 @@ pub async fn get_note(
     let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
     let post = state
         .posts
-        .find_by_id(post_id)
+        .find_by_id_for_viewer(post_id, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
@@ -365,7 +387,7 @@ pub async fn get_note_ap(
         Err(_) => return (StatusCode::NOT_FOUND, "").into_response(),
     };
 
-    let post = match state.posts.find_by_id(post_id).await {
+    let post = match state.posts.find_by_id_for_viewer(post_id, None).await {
         Ok(Some(p)) => p,
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
         Err(e) => {
@@ -415,6 +437,15 @@ pub async fn get_note_ap(
         })
         .collect();
 
+    // find_by_id_for_viewer(post_id, None) により followers_only/direct は既に404化されている
+    // ため、ここに到達する時点で post.visibility は public/unlisted のいずれか。
+    let followers_uri = format!("{}/followers", actor_uri);
+    let (to, cc): (Vec<String>, Vec<String>) = if post.visibility == "unlisted" {
+        (vec![followers_uri], vec!["https://www.w3.org/ns/activitystreams#Public".to_string()])
+    } else {
+        (vec!["https://www.w3.org/ns/activitystreams#Public".to_string()], vec![followers_uri])
+    };
+
     let mut ap_note = serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Note",
@@ -423,8 +454,8 @@ pub async fn get_note_ap(
         "attributedTo": actor_uri,
         "content": content_html,
         "published": post.created_at.to_rfc3339(),
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [format!("{}/followers", actor_uri)],
+        "to": to,
+        "cc": cc,
     });
     if !attachments.is_empty() {
         ap_note["attachment"] = serde_json::Value::Array(attachments);
@@ -456,7 +487,7 @@ pub async fn note_context(
     // 1. 対象ノートを取得
     let post = state
         .posts
-        .find_by_id(post_id)
+        .find_by_id_for_viewer(post_id, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
@@ -507,12 +538,12 @@ pub async fn note_context(
     // 3. DB からコンテキストを取得
     let before_posts = state
         .posts
-        .context_before(actor_id, post_id, 10)
+        .context_before(actor_id, post_id, 10, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let after_posts = state
         .posts
-        .context_after(actor_id, post_id, 10)
+        .context_after(actor_id, post_id, 10, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -619,7 +650,7 @@ pub async fn create_reaction(
         Err(e) => return e.into_response(),
     };
 
-    let post = match state.posts.find_by_id(note_id).await {
+    let post = match state.posts.find_by_id_for_viewer(note_id, Some(me.actor_id)).await {
         Ok(Some(p)) => p,
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
@@ -742,7 +773,7 @@ pub async fn delete_reaction(
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
-    let post = match state.posts.find_by_id(note_id).await {
+    let post = match state.posts.find_by_id_for_viewer(note_id, Some(actor_id)).await {
         Ok(Some(p)) => p,
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
@@ -818,7 +849,7 @@ pub async fn pin_note(
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
-    let post = match state.posts.find_by_id(note_id).await {
+    let post = match state.posts.find_by_id_for_viewer(note_id, Some(me.actor_id)).await {
         Ok(Some(p)) => p,
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),

@@ -164,7 +164,7 @@ pub async fn notes_show(
     let post_id: i64 = body.note_id.parse().map_err(|_| ApiError::NotFound("NOTE_NOT_FOUND"))?;
     let post = state
         .posts
-        .find_by_id(post_id)
+        .find_by_id_for_viewer(post_id, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
@@ -184,7 +184,7 @@ pub async fn notes_local_timeline(
 
     let rows = state
         .posts
-        .local_timeline(limit, until_id, since_id)
+        .local_timeline(my_actor_id, limit, until_id, since_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(build_notes(&state, rows, my_actor_id).await))

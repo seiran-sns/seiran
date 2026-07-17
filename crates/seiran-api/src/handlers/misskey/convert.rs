@@ -110,6 +110,17 @@ pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDeta
     }
 }
 
+/// seiranの可視性（`unlisted`/`followers_only`/`direct`）をMisskey本家の語彙に変換する。
+fn to_misskey_visibility(v: &str) -> String {
+    match v {
+        "unlisted" => "home",
+        "followers_only" => "followers",
+        "direct" => "specified",
+        _ => "public",
+    }
+    .to_string()
+}
+
 fn to_misskey_note(
     p: &TimelinePost,
     local_domain: &str,
@@ -172,7 +183,7 @@ fn to_misskey_note(
         user,
         reply_id: p.reply_to_post_id.map(|i| i.to_string()),
         renote_id,
-        visibility: "public".to_string(),
+        visibility: to_misskey_visibility(&p.visibility),
         file_ids: files.iter().map(|f| f.id.clone()).collect(),
         files,
         tags: vec![],
@@ -285,7 +296,7 @@ pub async fn build_notifications(
     let note_ids: HashSet<i64> = rows.iter().filter_map(|r| r.note_id).collect();
     let mut notes: HashMap<i64, MisskeyNote> = HashMap::new();
     for note_id in note_ids {
-        if let Ok(Some(post)) = state.posts.find_by_id(note_id).await {
+        if let Ok(Some(post)) = state.posts.find_by_id_for_viewer(note_id, Some(recipient_actor_id)).await {
             notes.insert(note_id, build_note(state, post, Some(recipient_actor_id)).await);
         }
     }

@@ -108,6 +108,9 @@ async fn fan_out_activity(
 // アクティビティ構築（what: 純関数・テスト対象）
 // =====================================================================
 
+/// AS2 の Public コレクション URI（`to`/`cc` に載せることで公開範囲を示す）。
+const AS_PUBLIC: &str = "https://www.w3.org/ns/activitystreams#Public";
+
 /// Create(Note) アクティビティの構築パラメータ。
 struct NoteActivityParams<'a> {
     local_domain: &'a str,
@@ -118,12 +121,25 @@ struct NoteActivityParams<'a> {
     quote_url: Option<&'a str>,
     in_reply_to: Option<&'a str>,
     seiran_uuid: Option<&'a str>,
+    /// "public" | "unlisted" | "followers_only" | "direct"。to/cc の組み立てに使う
+    /// （受信側の `classify_ap_visibility` と対称なマッピング）。
+    visibility: &'a str,
+}
+
+/// 可視性から Create(Note)/Note 共通の to/cc を決める。
+fn visibility_to_to_cc(addr: &LocalActorAddress, visibility: &str) -> (Vec<String>, Vec<String>) {
+    match visibility {
+        "unlisted" => (vec![addr.followers_uri.clone()], vec![AS_PUBLIC.to_string()]),
+        "followers_only" | "direct" => (vec![addr.followers_uri.clone()], vec![]),
+        _ => (vec![AS_PUBLIC.to_string()], vec![addr.followers_uri.clone()]),
+    }
 }
 
 /// Create(Note) アクティビティを組み立てる。
 fn build_create_note_activity(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_json::Value {
     let note_id = format!("https://{}/notes/{}", p.local_domain, p.post_id);
     let activity_id = format!("https://{}/activities/{}", p.local_domain, p.post_id);
+    let (to, cc) = visibility_to_to_cc(addr, p.visibility);
 
     let mut note_obj = serde_json::json!({
         "type": "Note",
@@ -131,8 +147,8 @@ fn build_create_note_activity(addr: &LocalActorAddress, p: &NoteActivityParams) 
         "attributedTo": addr.actor_uri,
         "content": p.content_html,
         "published": p.published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [addr.followers_uri],
+        "to": to,
+        "cc": cc,
         "url": note_id
     });
     if !p.attachments.is_empty() {
@@ -156,8 +172,8 @@ fn build_create_note_activity(addr: &LocalActorAddress, p: &NoteActivityParams) 
         "id": activity_id,
         "actor": addr.actor_uri,
         "published": p.published,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
-        "cc": [addr.followers_uri],
+        "to": to,
+        "cc": cc,
         "object": note_obj
     })
 }
@@ -388,7 +404,7 @@ pub async fn deliver_post_to_ap_followers(
 ) -> Result<(), ApError> {
     // 投稿本文・作成日時・投稿者ユーザー名・seiran_post_uuid を取得
     let row = sqlx::query(
-        "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username
+        "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username, p.visibility::text AS visibility
          FROM posts p
          JOIN actors a ON a.id = p.actor_id
          WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
@@ -409,6 +425,7 @@ pub async fn deliver_post_to_ap_followers(
         row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
     let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
     let seiran_uuid: Option<String> = row.try_get("seiran_post_uuid").unwrap_or(None);
+    let visibility: String = row.try_get("visibility").unwrap_or_else(|_| "public".to_string());
 
     let attachments = fetch_attachment_documents(db, post_id).await?;
 
@@ -429,6 +446,7 @@ pub async fn deliver_post_to_ap_followers(
             quote_url,
             in_reply_to,
             seiran_uuid: seiran_uuid.as_deref(),
+            visibility: &visibility,
         },
     );
 
@@ -802,6 +820,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                visibility: "public",
             },
         );
         assert_eq!(activity["type"], "Create");
@@ -818,6 +837,48 @@ mod tests {
     }
 
     #[test]
+    fn create_note_activity_unlisted_to_cc() {
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                visibility: "unlisted",
+            },
+        );
+        assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
+        assert_eq!(activity["cc"], serde_json::json!(["https://www.w3.org/ns/activitystreams#Public"]));
+        assert_eq!(activity["object"]["to"], activity["to"]);
+        assert_eq!(activity["object"]["cc"], activity["cc"]);
+    }
+
+    #[test]
+    fn create_note_activity_followers_only_to_cc() {
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                visibility: "followers_only",
+            },
+        );
+        assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
+        assert_eq!(activity["cc"], serde_json::json!(Vec::<String>::new()));
+    }
+
+    #[test]
     fn create_note_activity_with_quote_reply_uuid() {
         let activity = build_create_note_activity(
             &addr(),
@@ -830,6 +891,7 @@ mod tests {
                 quote_url: Some("https://other.example/notes/1"),
                 in_reply_to: Some("https://other.example/notes/2"),
                 seiran_uuid: Some("uuid-1234"),
+                visibility: "public",
             },
         );
         let note = &activity["object"];

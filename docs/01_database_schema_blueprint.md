@@ -204,9 +204,11 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX idx_posts_body_trgm ON posts USING gin (body gin_trgm_ops);
 ```
 
-#### 配送先・可視性アイコン表示（2026-07-16）
+#### 配送先・可視性アイコン表示（2026-07-16、閲覧制御は2026-07-17）
 
 タイムライン上のポストカードに「配送先」「可視性」を示すアイコンを表示するための永続化。
+アイコン対応: `public`=👥パブリック（アイコン無し表示）、`unlisted`=🤫ひかえめ、
+`followers_only`=🔒️プライベート。
 
 - **配送先（ローカル投稿のみ）**: 投稿作成リクエストの `deliver_to_fedi`/`deliver_to_bsky`
   （`CreateNoteRequest`）をそのまま `posts.deliver_fedi`/`deliver_bsky` に保存する
@@ -216,21 +218,63 @@ CREATE INDEX idx_posts_body_trgm ON posts USING gin (body gin_trgm_ops);
   注意。リポスト（`posts.repost_of_post_id` が非NULLの行）自体はこの2カラムを持たず常にデフォルト
   値のまま。`NoteCard` はリポストの中身を `renote` に埋め込まれた元ポストから描画するため、リポスト
   行自体の配送先は表示に使われない。
-- **可視性（Fedi受信ポストのみ）**: AP `Create(Note)` 受信時（`handle_create_note`、
+- **可視性（ローカル投稿・Fedi受信ポスト双方）**: ローカル投稿は投稿作成リクエストの `visibility`
+  （`"public"`/`"unlisted"`/`"followers_only"`、`create_regular_post` で検証）をそのまま
+  `posts.visibility` に保存する。`"direct"` はローカル投稿作成のスコープ外（Fedi受信専用）。
+  Fedi受信ポストは AP `Create(Note)` 受信時（`handle_create_note`、
   `crates/seiran-common/src/jobs/inbound_activity_process.rs`）に Note の `to`/`cc` を
-  `seiran_common::ap::classify_ap_visibility` で判定し `posts.visibility` に保存する。
-  判定ルール（Mastodon互換）: `to` に `Public` があれば `public`、`cc` にのみあれば `unlisted`、
-  どちらにも無く `to` にフォロワーコレクション（`.../followers` で終わるURI）があれば
-  `followers_only`、それ以外は `direct`。ローカル投稿は現状常に `public` 固定（可視性選択UIは
-  将来課題、実装されたら `posts.visibility` へ書き込む経路を追加する）。
+  `seiran_common::ap::classify_ap_visibility` で判定し保存する（判定ルール、Mastodon互換: `to` に
+  `Public` があれば `public`、`cc` にのみあれば `unlisted`、どちらにも無く `to` にフォロワー
+  コレクション（`.../followers` で終わるURI）があれば `followers_only`、それ以外は `direct`）。
+  - **Bsky配送との相互排他**: Bsky（AT Protocol）はプロトコル上 public 投稿のみサポートするため、
+    `visibility != "public"` かつ Bsky配送が要求された場合、`create_regular_post` はエラーを返さず
+    `deliver_bsky` を黙って `false` に読み替える（Misskey互換API保護。フロントを経由しない外部
+    クライアントからの想定外リクエストにも対応するため）。`delivery.rs` の `deliver_regular_post`
+    でも同様のチェックを再度行う（二重防御、呼び出し元バグの検知用）。
+  - **AP `to`/`cc` への反映**: `crates/seiran-common/src/ap/deliver.rs` の
+    `build_create_note_activity` が `posts.visibility` に応じて to/cc を可変化する
+    （`classify_ap_visibility` の逆写像）: `public`→to=[Public],cc=[followers] /
+    `unlisted`→to=[followers],cc=[Public] / `followers_only`→to=[followers],cc=[]。
 - **API公開**: `NoteResponse`（`to_note_response`）は `visibility` が `public` の場合は省略、
   それ以外は文字列で返す。`deliverFedi`/`deliverBsky` はローカル投稿（`actor_type == "local"`）
-  の場合のみ含める。
+  の場合のみ含める。Misskey互換API（`to_misskey_note`）は `to_misskey_visibility` で
+  `unlisted→"home"`, `followers_only→"followers"`, `direct→"specified"` にマッピングする。
 - **フロント表示**: `NoteCard.tsx` が `lib/format.ts` の `deliveryBadges`/`visibilityBadge` を使い、
   既存のプロトコルバッジ（`protocolBadge`、🦋=Bsky/🌐=Fedi/🀄=seiran）と同じ `.protoBadge` スタイルで
-  並べて表示する。配送先は 🌐=Fedi配送あり・🦋=Bsky配送あり、可視性は 🔒=フォロワーのみ・
-  🏠=unlisted（`public`/`direct` はアイコン無し）。タイムラインの表示制御・フィルタリングには使わない
-  （純粋に表示用途）。
+  並べて表示する。配送先は 🌐=Fedi配送あり・🦋=Bsky配送あり、可視性は 🔒️=プライベート・
+  🤫=ひかえめ（`public`/`direct` はアイコン無し）。
+- **投稿作成UI**: `PostComposer.tsx` に可視性選択（👥パブリック/🤫ひかえめ/🔒️プライベート）を追加。
+  Bsky配送ON中は非publicへの変更を、非public中はBsky配送ONを、それぞれ軽量な自作ポップオーバーで
+  ブロックする（相互排他のUIガイド、実際の強制はサーバー側で行う）。
+
+##### 可視性による閲覧制御（2026-07-17）
+
+`followers_only`/`direct` は投稿者本人または accepted フォロワーの閲覧者のみアクセスできる。
+`unlisted` はホーム/ローカルタイムラインから除外する（自分の投稿は自分の home では見える）。
+プロフィール・パーマリンク・スレッド内では通常表示（Mastodon準拠）。
+
+共通ガード式（`PostRepository` の各クエリの `WHERE` に追加、`follows` の複合PKでインデックス
+オンリー解決可能なため新規インデックス不要）:
+```sql
+AND (
+    p.visibility NOT IN ('followers_only', 'direct')
+    OR p.actor_id = $viewer
+    OR EXISTS (SELECT 1 FROM follows f
+               WHERE f.follower_actor_id = $viewer AND f.target_actor_id = p.actor_id AND f.status = 'accepted')
+)
+```
+`direct`（ローカル投稿UIからは選択不可だが既存のFedi受信データが残る）も暫定的に `followers_only`
+と同じ厳格さでガードする（専用の宛先管理は将来課題）。`$viewer` が `NULL`（匿名）なら自己判定・
+EXISTS ともに常に偽になるため、匿名は非公開投稿を一切閲覧できない。
+
+- **`find_by_id` と `find_by_id_for_viewer` の使い分け**: `find_by_id` は可視性チェック無しの
+  内部整合性チェック専用（`inbound_activity_process.rs`・`seiran-atp-repo/src/firehose.rs` の
+  Undo(Like) 対象の author 引き当て等、閲覧者という概念が存在しない箇所）。HTTP公開エンドポイント
+  （`get_note`/`get_note_ap`/`note_context`/`create_reaction`/`delete_reaction`/`pin_note`/
+  Misskey互換の`notes_show`/`build_notifications`）は必ず `find_by_id_for_viewer` を使う。
+- **既知の制限（スコープ外）**: リポスト（`deliver_repost`）は元ポストの可視性を見ずに Bsky へ
+  配送してしまう可能性がある（`PostDeliveryMeta` に `visibility` が無い）。`pinned_posts` 経由の
+  ピン留め一覧にも可視性ガードが無い。いずれも今回未対応（将来課題）。
 
 ### 1.4 `reactions` (リアクション独立テーブル)
 コンフリクトやデッドタプルの増殖を防ぐため、ポストに対する動的な絵文字リアクション・Likeはすべて独立した行として `INSERT` / `DELETE` 管理する。

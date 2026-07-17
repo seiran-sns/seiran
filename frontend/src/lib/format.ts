@@ -59,13 +59,14 @@ export function deliveryBadges(note: Note): { icon: string; label: string }[] {
   return badges;
 }
 
-/** Fedi受信ポストの可視性バッジ（フォロワーのみ=🔒、unlisted=🏠）。public/directはアイコン無し。 */
+/** ポストの可視性バッジ（🔒️プライベート/🤫ひかえめ）。public/directはアイコン無し。
+ * ローカル投稿・Fedi受信投稿の両方に対応（ローカルは投稿作成時の選択、Fedi受信はto/ccから判定）。 */
 export function visibilityBadge(note: Note): { icon: string; label: string } | null {
   switch (note.visibility) {
     case "followers_only":
-      return { icon: "🔒", label: "フォロワーのみ" };
+      return { icon: "🔒️", label: "プライベート" };
     case "unlisted":
-      return { icon: "🏠", label: "ホームタイムラインのみ（unlisted）" };
+      return { icon: "🤫", label: "ひかえめ" };
     default:
       return null;
   }

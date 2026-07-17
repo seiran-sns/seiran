@@ -52,6 +52,12 @@
   text-decoration: underline;
 }
 
+.unavailableNote {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  padding: 4px;
+}
+
 .header {
   display: flex;
   align-items: flex-start;

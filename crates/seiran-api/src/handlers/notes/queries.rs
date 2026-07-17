@@ -118,9 +118,18 @@ pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_act
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
          LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-         WHERE p.id = ANY($1) AND p.deleted_at IS NULL",
+         WHERE p.id = ANY($1) AND p.deleted_at IS NULL
+           AND (
+               p.visibility NOT IN ('followers_only', 'direct')
+               OR p.actor_id = $2
+               OR EXISTS (
+                   SELECT 1 FROM follows f
+                   WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+               )
+           )",
     )
     .bind(&orig_ids)
+    .bind(my_actor_id)
     .fetch_all(db)
     .await
     .unwrap_or_default();

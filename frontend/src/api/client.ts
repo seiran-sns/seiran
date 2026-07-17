@@ -521,7 +521,8 @@ export const api = {
       deliverToBsky: boolean = true,
       attachmentIds: string[] = [],
       replyToId?: string,
-      renoteId?: string
+      renoteId?: string,
+      visibility?: "public" | "unlisted" | "followers_only"
     ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
@@ -531,6 +532,7 @@ export const api = {
           attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
           reply_to_id: replyToId,
           renote_id: renoteId,
+          visibility,
         })
       );
     },

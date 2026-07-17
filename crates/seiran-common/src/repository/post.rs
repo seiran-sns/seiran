@@ -102,9 +102,12 @@ pub trait PostRepository: Send + Sync {
         since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
-    /// ローカルタイムライン（ローカルアクターの投稿）を取得する。
+    /// ローカルタイムライン（ローカルアクターの投稿）を取得する。`viewer_actor_id` は閲覧者の
+    /// actor_id（匿名なら `None`）。`unlisted` は除外し、`followers_only`/`direct` は投稿者本人
+    /// または accepted フォロワーのみ取得できる（可視性による閲覧制御）。
     async fn local_timeline(
         &self,
+        viewer_actor_id: Option<i64>,
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
@@ -121,9 +124,13 @@ pub trait PostRepository: Send + Sync {
     /// プロフィール画面でタイムラインと同一の NoteCard を描画するために使う（#43）。
     /// `until_id`/`since_id` は他のタイムライン系クエリと同じカーソルページネーション規約
     /// （プロフィール投稿一覧の無限スクロール用、#64）。
+    /// `viewer_actor_id` は閲覧者の actor_id（匿名なら `None`）。`followers_only`/`direct` は
+    /// 投稿者本人または accepted フォロワーのみ取得できる（可視性による閲覧制御）。`unlisted` は
+    /// プロフィール表示のため除外しない。
     async fn timeline_by_actor(
         &self,
         actor_id: i64,
+        viewer_actor_id: Option<i64>,
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
@@ -132,8 +139,19 @@ pub trait PostRepository: Send + Sync {
     /// DID + rkey で app.bsky.feed.post レコードを取得する。
     async fn find_record(&self, did: &str, rkey: &str) -> Result<Option<PostRecord>, sqlx::Error>;
 
-    /// ID でポストとアクター情報を取得する。
+    /// ID でポストとアクター情報を取得する（可視性チェック無し、内部整合性チェック専用）。
+    /// HTTP公開エンドポイントからは呼ばないこと（`find_by_id_for_viewer` を使う）。
     async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error>;
+
+    /// ID でポストとアクター情報を取得する（閲覧者の可視性チェック付き、HTTP公開エンドポイント専用）。
+    /// `followers_only`/`direct` は投稿者本人または accepted フォロワーの `viewer_actor_id` のみ
+    /// 取得できる。それ以外（匿名・非フォロワー）には `None` を返す（＝404 相当）。
+    /// `unlisted`/`public` は無条件で返す。
+    async fn find_by_id_for_viewer(
+        &self,
+        id: i64,
+        viewer_actor_id: Option<i64>,
+    ) -> Result<Option<TimelinePost>, sqlx::Error>;
 
     /// リモートノートを重複無視で挿入する（ON CONFLICT DO NOTHING）。
     async fn insert_remote(
@@ -145,20 +163,25 @@ pub trait PostRepository: Send + Sync {
         created_at: DateTime<Utc>,
     ) -> Result<(), sqlx::Error>;
 
-    /// 指定ノートIDより前（id < note_id）の投稿を降順で取得する。
+    /// 指定ノートIDより前（id < note_id）の投稿を降順で取得する。`viewer_actor_id` は閲覧者の
+    /// actor_id（匿名なら `None`）。`followers_only`/`direct` は投稿者本人または accepted
+    /// フォロワーのみ取得できる。
     async fn context_before(
         &self,
         actor_id: i64,
         note_id: i64,
         limit: i64,
+        viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
-    /// 指定ノートIDより後（id > note_id）の投稿を昇順で取得する。
+    /// 指定ノートIDより後（id > note_id）の投稿を昇順で取得する。`viewer_actor_id` は
+    /// `context_before` と同様。
     async fn context_after(
         &self,
         actor_id: i64,
         note_id: i64,
         limit: i64,
+        viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// リポスト・リプライ・引用の配送先判定に使う、元ポストのメタ情報を取得する。
@@ -178,6 +201,7 @@ pub trait PostRepository: Send + Sync {
         reply_to_post_id: Option<i64>,
         quote_of_post_id: Option<i64>,
         created_at: DateTime<Utc>,
+        visibility: &str,
         deliver_fedi: bool,
         deliver_bsky: bool,
     ) -> Result<(), sqlx::Error>;
@@ -321,6 +345,15 @@ impl PostRepository for PgPostRepository {
                      WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
                        AND ($2::bigint IS NULL OR p.id < $2)
                        AND ($3::bigint IS NULL OR p.id > $3)
+                       AND (p.visibility != 'unlisted' OR p.actor_id = $1)
+                       AND (
+                           p.visibility NOT IN ('followers_only', 'direct')
+                           OR p.actor_id = $1
+                           OR EXISTS (
+                               SELECT 1 FROM follows f
+                               WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                           )
+                       )
                      ORDER BY p.id DESC LIMIT $4
                  ) p
                  ORDER BY p.id DESC LIMIT $4
@@ -347,6 +380,7 @@ impl PostRepository for PgPostRepository {
 
     async fn local_timeline(
         &self,
+        viewer_actor_id: Option<i64>,
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
@@ -361,10 +395,20 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.is_local = true AND p.deleted_at IS NULL
-               AND ($1::bigint IS NULL OR p.id < $1)
-               AND ($2::bigint IS NULL OR p.id > $2)
-             ORDER BY p.id DESC LIMIT $3",
+               AND ($2::bigint IS NULL OR p.id < $2)
+               AND ($3::bigint IS NULL OR p.id > $3)
+               AND (p.visibility != 'unlisted' OR p.actor_id = $1)
+               AND (
+                   p.visibility NOT IN ('followers_only', 'direct')
+                   OR p.actor_id = $1
+                   OR EXISTS (
+                       SELECT 1 FROM follows f
+                       WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                   )
+               )
+             ORDER BY p.id DESC LIMIT $4",
         )
+        .bind(viewer_actor_id)
         .bind(until_id)
         .bind(since_id)
         .bind(limit)
@@ -391,6 +435,7 @@ impl PostRepository for PgPostRepository {
     async fn timeline_by_actor(
         &self,
         actor_id: i64,
+        viewer_actor_id: Option<i64>,
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
@@ -406,12 +451,21 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.deleted_at IS NULL
-               AND ($2::bigint IS NULL OR p.id < $2)
-               AND ($3::bigint IS NULL OR p.id > $3)
+               AND ($3::bigint IS NULL OR p.id < $3)
+               AND ($4::bigint IS NULL OR p.id > $4)
+               AND (
+                   p.visibility NOT IN ('followers_only', 'direct')
+                   OR p.actor_id = $2
+                   OR EXISTS (
+                       SELECT 1 FROM follows f
+                       WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                   )
+               )
              ORDER BY p.id DESC
-             LIMIT $4",
+             LIMIT $5",
         )
         .bind(actor_id)
+        .bind(viewer_actor_id)
         .bind(until_id)
         .bind(since_id)
         .bind(limit)
@@ -453,6 +507,37 @@ impl PostRepository for PgPostRepository {
         .await
     }
 
+    async fn find_by_id_for_viewer(
+        &self,
+        id: i64,
+        viewer_actor_id: Option<i64>,
+    ) -> Result<Option<TimelinePost>, sqlx::Error> {
+        sqlx::query_as::<_, TimelinePost>(
+            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+             FROM posts p JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             WHERE p.id = $1 AND p.deleted_at IS NULL
+               AND (
+                   p.visibility NOT IN ('followers_only', 'direct')
+                   OR p.actor_id = $2
+                   OR EXISTS (
+                       SELECT 1 FROM follows f
+                       WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                   )
+               )
+             LIMIT 1",
+        )
+        .bind(id)
+        .bind(viewer_actor_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     async fn insert_remote(
         &self,
         id: i64,
@@ -481,6 +566,7 @@ impl PostRepository for PgPostRepository {
         actor_id: i64,
         note_id: i64,
         limit: i64,
+        viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
@@ -493,12 +579,21 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.id < $2 AND p.deleted_at IS NULL
+               AND (
+                   p.visibility NOT IN ('followers_only', 'direct')
+                   OR p.actor_id = $4
+                   OR EXISTS (
+                       SELECT 1 FROM follows f
+                       WHERE f.follower_actor_id = $4 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                   )
+               )
              ORDER BY p.id DESC
              LIMIT $3",
         )
         .bind(actor_id)
         .bind(note_id)
         .bind(limit)
+        .bind(viewer_actor_id)
         .fetch_all(&self.pool)
         .await
     }
@@ -508,6 +603,7 @@ impl PostRepository for PgPostRepository {
         actor_id: i64,
         note_id: i64,
         limit: i64,
+        viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
@@ -520,12 +616,21 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.id > $2 AND p.deleted_at IS NULL
+               AND (
+                   p.visibility NOT IN ('followers_only', 'direct')
+                   OR p.actor_id = $4
+                   OR EXISTS (
+                       SELECT 1 FROM follows f
+                       WHERE f.follower_actor_id = $4 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                   )
+               )
              ORDER BY p.id ASC
              LIMIT $3",
         )
         .bind(actor_id)
         .bind(note_id)
         .bind(limit)
+        .bind(viewer_actor_id)
         .fetch_all(&self.pool)
         .await
     }
@@ -555,12 +660,13 @@ impl PostRepository for PgPostRepository {
         reply_to_post_id: Option<i64>,
         quote_of_post_id: Option<i64>,
         created_at: DateTime<Utc>,
+        visibility: &str,
         deliver_fedi: bool,
         deliver_bsky: bool,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, deliver_fedi, deliver_bsky)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11)",
         )
         .bind(id)
         .bind(actor_id)
@@ -570,6 +676,7 @@ impl PostRepository for PgPostRepository {
         .bind(reply_to_post_id)
         .bind(quote_of_post_id)
         .bind(created_at)
+        .bind(visibility)
         .bind(deliver_fedi)
         .bind(deliver_bsky)
         .execute(&self.pool)

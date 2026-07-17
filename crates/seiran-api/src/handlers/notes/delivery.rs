@@ -235,6 +235,9 @@ pub struct RegularPostDelivery {
     pub now: chrono::DateTime<chrono::Utc>,
     pub text: String,
     pub targets: DeliveryTargets,
+    /// 投稿の可視性（"public" | "unlisted" | "followers_only"）。Bsky はプロトコル上 public
+    /// 限定のため、非 public の場合は Bsky コミットをスキップする最終防御に使う。
+    pub visibility: String,
     pub bsky_reply: Option<BskyPostReply>,
     pub bsky_quote_embed: Option<BskyEmbed>,
     pub ap_quote_url: Option<String>,
@@ -245,9 +248,20 @@ pub struct RegularPostDelivery {
 /// 通常投稿 / リプライ / 引用投稿を Fedi・Bsky へ配送する。
 /// Bsky は ATP コミット（firehose 結合のため in-process）、Fedi は ApDelivery ジョブ。
 pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
+    // 二重防御: visibility が非 public なら Bsky コミットを行わない。create_regular_post 側で
+    // 既に deliver_bsky を false に読み替え済みのはずだが、呼び出し元の実装ミスに対する
+    // 最終ガードとして再チェックする。
+    let bsky_target = d.targets.bsky && d.visibility == "public";
+    if d.targets.bsky && !bsky_target {
+        tracing::warn!(
+            "[deliver_regular_post] visibility={} で Bsky 配送が要求されたためスキップ（呼び出し元のバグの可能性、post_id={}）",
+            d.visibility, d.post_id
+        );
+    }
+
     // メンション変換（変換失敗時は元テキストをそのまま使用する）
     // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
-    let (bsky_text, bsky_facets) = if d.targets.bsky {
+    let (bsky_text, bsky_facets) = if bsky_target {
         convert_mentions_for_bsky(&d.text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await
     } else {
         (d.text.clone(), vec![])
@@ -260,7 +274,7 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
         d.text.clone()
     };
 
-    if d.targets.bsky {
+    if bsky_target {
         if let Some(embed) = d.bsky_quote_embed {
             // 引用投稿: embed を付けて commit_quote を使う（画像 embed と共存しない）
             if let Err(e) = state.atp_service.commit_quote(d.actor_id, d.post_id, &bsky_text, bsky_facets, Some(embed), d.now, d.bsky_reply).await {

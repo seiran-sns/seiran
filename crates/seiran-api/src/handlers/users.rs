@@ -55,7 +55,7 @@ pub async fn user_posts(
         None => None,
     };
 
-    let post_rows = match state.posts.timeline_by_actor(actor_id, limit, until_id, since_id).await {
+    let post_rows = match state.posts.timeline_by_actor(actor_id, my_actor_id, limit, until_id, since_id).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[user_posts] 投稿取得失敗: {}", e);
@@ -351,7 +351,7 @@ async fn build_profile_response(
 
     // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
     // アクター情報・添付・リアクションを含む NoteResponse で返す（#43）。
-    let post_rows = match state.posts.timeline_by_actor(actor_id, 20, None, None).await {
+    let post_rows = match state.posts.timeline_by_actor(actor_id, my_actor_id, 20, None, None).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] 最近の投稿取得失敗: {}", e);
