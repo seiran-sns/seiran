@@ -3607,6 +3607,7 @@ dependencies = [
  "emojis",
  "hex",
  "html-escape",
+ "ipld-core",
  "jsonwebtoken",
  "lettre",
  "p256",

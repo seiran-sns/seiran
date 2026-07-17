@@ -928,6 +928,24 @@ AT Protocol の署名検証（`indigo` の `atcrypto.PublicKeyP256.HashAndVerify
 
 両修正はローカルの `indigo`/`cmd/relay` を用いた実地検証で効果を確認済み（署名検証エラー・`missing prevData field` エラーとも解消）。デプロイ直後は各アカウントの最初の1コミットのみ、リレー側に残る旧状態の影響で `missing prevData field` が再発する可能性があるが、2回目以降は正常に処理される見込み。
 
+### 10.7 `com.atproto.repo.getRecord` の CID リンク（embed）デコード（2026-07-17）
+
+`crates/seiran-api/src/handlers/xrpc/repo.rs` の `xrpc_get_record` は、`atp_blocks` に
+保存された実際のコミット済み DAG-CBOR レコードを取得して JSON で返す。かつては
+`serde_ipld_dagcbor::from_slice::<serde_json::Value>(&cbor_bytes)` のように直接
+`serde_json::Value` へデコードしていたが、embed の blob ref のような **CID リンク
+（DAG-CBOR tag 42）を含むレコードでは `Msg("invalid type: newtype struct, expected
+any valid JSON value")` で失敗する**（`serde_json::Value` にはタグ付き値を表現する
+概念が無いため）。失敗時は例外にせず何も返さない実装だった `app.bsky.feed.post`
+専用パス（`get_record_post`）では、これが原因で embed が常に欠落していた
+（2026-07-17 マイケル指摘で発覚。実際の firehose 配信・relay 検証には影響しない
+表示専用のバグだった）。
+
+修正: 一度 `ipld_core::ipld::Ipld` にデコードしてから、AT Protocol の JSON 表現規約
+（CID リンク → `{"$link": "<cid>"}`、バイト列 → `{"$bytes": "<base64>"}`）に沿って
+手動で `serde_json::Value` に変換するヘルパー `ipld_to_json`（同ファイル）を追加し、
+`get_record_post`・`get_record_from_atp_records` の両方で使うようにした。
+
 ## 11. ローカルユーザーのプロフィール配信（AP Actor icon/summary ＆ ATP profile 再コミット）
 
 ローカルユーザーが設定したアバター画像・自己紹介文（`actors.avatar_media_id` / `actors.bio`）は、以下の経路で AP・ATP 双方の対外公開データに反映される。

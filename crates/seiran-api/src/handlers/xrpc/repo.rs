@@ -262,6 +262,44 @@ async fn get_record_post(params: &GetRecordParams, state: &AppState) -> axum::re
         }
     };
 
+    // 実際にコミット済みのレコード（embed 等を含む完全な内容）を atp_blocks から
+    // 取得してデコードする。以前は posts.body/created_at だけからその場で JSON を
+    // 再構築しており、embed（画像・動画・引用等）を一切返していなかった
+    // （2026-07-17 マイケル指摘で発覚。実際の firehose 配信・relay 検証には
+    // 影響しない表示専用のバグだった）。
+    let actor = state.actors.find_by_did(&params.repo).await.ok().flatten();
+    let actor = match actor {
+        Some(a) => Some(a),
+        None => state
+            .actors
+            .find_by_username_domain(&params.repo, &state.local_domain)
+            .await
+            .ok()
+            .flatten(),
+    };
+
+    if let Some(actor) = actor {
+        let block_row = sqlx::query("SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1")
+            .bind(&record.at_cid)
+            .bind(actor.id)
+            .fetch_optional(&state.db)
+            .await;
+        if let Ok(Some(row)) = block_row {
+            let cbor_bytes: Vec<u8> = row.try_get("bytes").unwrap_or_default();
+            match serde_ipld_dagcbor::from_slice::<ipld_core::ipld::Ipld>(&cbor_bytes) {
+                Ok(ipld) => {
+                    let value = ipld_to_json(&ipld);
+                    return Json(GetRecordResponse { uri: record.at_uri, cid: record.at_cid, value }).into_response();
+                }
+                Err(e) => {
+                    tracing::error!("[getRecord] CBOR デコード失敗 (cid={}): {}", record.at_cid, e);
+                }
+            }
+        }
+    }
+
+    // フォールバック: atp_blocks から取得できなかった場合のみ、簡易再構築する
+    // （embed は失われるが、text/createdAt だけでも返した方がまし）。
     let value = serde_json::json!({
         "$type": "app.bsky.feed.post",
         "text": record.body,
@@ -330,17 +368,38 @@ async fn get_record_from_atp_records(
         }
     };
 
-    // DAG-CBOR → serde_json::Value
-    let value: serde_json::Value = match serde_ipld_dagcbor::from_slice(&cbor_bytes) {
+    // DAG-CBOR → Ipld → serde_json::Value（CID リンクを含みうるため Ipld 経由で変換する）
+    let ipld: ipld_core::ipld::Ipld = match serde_ipld_dagcbor::from_slice(&cbor_bytes) {
         Ok(v) => v,
         Err(e) => {
             tracing::error!("[getRecord] CBOR デコード失敗 (cid={}): {}", cid_str, e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "CBOR デコード失敗").into_response();
         }
     };
+    let value = ipld_to_json(&ipld);
 
     let at_did = actor.at_did.as_deref().unwrap_or(&params.repo);
     let uri = format!("at://{}/{}/{}", at_did, params.collection, params.rkey);
 
     Json(GetRecordResponse { uri, cid: cid_str, value }).into_response()
+}
+
+/// DAG-CBOR デコード結果（`Ipld`）を AT Protocol の JSON 表現に変換する。
+/// `serde_json::Value` へ直接デシリアライズすると、CID リンク（tag 42）を含む
+/// レコード（embed の blob ref 等）で `invalid type: newtype struct` エラーになるため、
+/// 一度 `Ipld` にデコードしてから AT Protocol の規約（CIDリンク→`{"$link": "<cid>"}`、
+/// バイト列→`{"$bytes": "<base64>"}`）に沿って手動変換する。
+fn ipld_to_json(ipld: &ipld_core::ipld::Ipld) -> serde_json::Value {
+    use ipld_core::ipld::Ipld;
+    match ipld {
+        Ipld::Null => serde_json::Value::Null,
+        Ipld::Bool(b) => serde_json::Value::Bool(*b),
+        Ipld::Integer(i) => serde_json::json!(i),
+        Ipld::Float(f) => serde_json::json!(f),
+        Ipld::String(s) => serde_json::Value::String(s.clone()),
+        Ipld::Bytes(b) => serde_json::json!({ "$bytes": URL_SAFE_NO_PAD.encode(b) }),
+        Ipld::List(l) => serde_json::Value::Array(l.iter().map(ipld_to_json).collect()),
+        Ipld::Map(m) => serde_json::Value::Object(m.iter().map(|(k, v)| (k.clone(), ipld_to_json(v))).collect()),
+        Ipld::Link(cid) => serde_json::json!({ "$link": cid.to_string() }),
+    }
 }
