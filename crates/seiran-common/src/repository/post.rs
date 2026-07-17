@@ -82,6 +82,13 @@ pub struct RepostUndoInfo {
     pub repost_ap_id: Option<String>,
     pub orig_ap_id: Option<String>,
     pub atp_repost_rkey: Option<String>,
+    /// Fedi リモートポストのリポスト時に作った Bsky フォールバックテキスト投稿の rkey。
+    /// `atp_repost_rkey`（ネイティブ ATP repost）とは排他。
+    pub at_rkey: Option<String>,
+    /// 元ポスト（repost_of_post_id 先）の at_uri。`orig_ap_id` が無くこれがある場合、
+    /// 元ポストは Bsky ネイティブであり、Fedi へは Announce ではなく
+    /// `PostToFollowers` の Create(Note) フォールバックを送っている。
+    pub orig_at_uri: Option<String>,
 }
 
 #[async_trait]
@@ -749,8 +756,8 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Option<RepostUndoInfo>, sqlx::Error> {
         sqlx::query_as::<_, RepostUndoInfo>(
             "SELECT p.id AS repost_id, p.ap_object_id AS repost_ap_id,
-                    p.atp_repost_rkey,
-                    orig.ap_object_id AS orig_ap_id
+                    p.atp_repost_rkey, p.at_rkey,
+                    orig.ap_object_id AS orig_ap_id, orig.at_uri AS orig_at_uri
              FROM posts p
              JOIN posts orig ON orig.id = p.repost_of_post_id
              WHERE p.actor_id = $1 AND p.repost_of_post_id = $2 AND p.deleted_at IS NULL

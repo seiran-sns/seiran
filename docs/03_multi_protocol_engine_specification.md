@@ -615,8 +615,15 @@ Fedi リモートポストのリポスト → Bsky 配信
   → ATP app.bsky.feed.repost でリポスト
   ↓ 取得失敗 / タイムアウト
 【フォールバック】
-  → 元ポストの URL を external embed（リンクカード）として持つ新規ポストを Bsky に投稿
+  → 元ポストの URL を本文に含むテキストポストを Bsky に投稿
      本文例: "🔁 {投稿者表示名}: {元ポストURL}"
+     このテキストポストは "新規ポスト" として別行を作らず、リポストラッパー行
+     （`posts.repost_of_post_id` が設定された行）自身を PDS 上のテキストポスト
+     として commit する（`commit_post` に repost_of_post_id 側の post_id を渡し、
+     同一行の at_uri/at_cid/at_rkey を更新する）。これにより自前 Jetstream の
+     自己エコー（`ON CONFLICT (at_uri) DO NOTHING`）が重複行を作らず、ローカル
+     には元のリポスト1行だけが残る。リポスト取り消し時はこのテキストポストも
+     `delete_atp_post` で retract する。
 ```
 
 **タイムアウトと失敗時の動作**
@@ -650,7 +657,14 @@ Bsky リモートポストのリポスト → Fedi 配信
 【フォールバック】
   → 元ポストの bsky.app URL をメンション付き通常投稿として Fedi に配信
      本文例: "🔁 {投稿者ハンドル}: {bsky.app/profile/.../post/...}"
+     （AP Create(Note)、id は `https://{domain}/notes/{post_id}`）
 ```
+
+**リポスト取り消し時の Fedi 側配信**
+- 元ポストが Fedi 実体を持つ（AP Announce を送っていた）場合: `Undo(Announce)` を配送する
+- 元ポストが Bsky ネイティブ（上記フォールバックで Create(Note) を送っていた）場合:
+  `Undo(Announce)` ではなく、その Note（`https://{domain}/notes/{post_id}`）を対象にした
+  `Delete(Note)` を配送する
 
 ---
 

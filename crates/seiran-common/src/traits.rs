@@ -96,6 +96,12 @@ pub enum ApDeliveryKind {
     Announce { post_id: i64, original_ap_object_id: String },
     /// Undo(Announce)（リポスト取り消し）を配送する。
     UndoAnnounce { announce_post_id: i64, original_ap_object_id: String },
+    /// Delete(Note)（Bsky ネイティブポストのリポスト取り消し）を配送する。
+    /// Bsky リモートポストは Fedi 側に Announce ではなく `PostToFollowers` の
+    /// Create(Note) フォールバックとして配信されるため、取り消し時も Announce の
+    /// Undo ではなく、その Note（`https://{domain}/notes/{post_id}`）自体の
+    /// Delete を送る必要がある。
+    DeleteNote { post_id: i64 },
     /// Like/EmojiReact を配送する。`undo_prev` があれば先に旧リアクションの Undo を配送する（切替）。
     Reaction {
         post_id: i64,

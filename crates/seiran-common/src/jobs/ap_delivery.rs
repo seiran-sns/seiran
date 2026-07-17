@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::ap::{
     deliver_ap_announce, deliver_ap_reaction, deliver_ap_undo_reaction, deliver_delete_actor,
-    deliver_post_to_ap_followers, deliver_undo_announce, deliver_update_actor,
+    deliver_delete_note, deliver_post_to_ap_followers, deliver_undo_announce, deliver_update_actor,
 };
 use crate::queue::worker::JobContext;
 use crate::traits::ApDeliveryKind;
@@ -54,6 +54,11 @@ pub async fn handle(actor_id: i64, kind: ApDeliveryKind, ctx: Arc<JobContext>) -
             )
             .await
             .map_err(|e| e.to_string())
+        }
+        ApDeliveryKind::DeleteNote { post_id } => {
+            deliver_delete_note(ap_client, pool, post_id, actor_id, domain, private_pem)
+                .await
+                .map_err(|e| e.to_string())
         }
         ApDeliveryKind::Reaction { post_id, activity_id, content, undo_prev } => {
             // 切替時: 旧リアクションの Undo を先に配送する。失敗しても新リアクションの

@@ -618,12 +618,21 @@ pub async fn delete_repost(
         actor_id, note_id, undo_info.repost_id
     );
 
-    // AP Undo(Announce) 配送 — 元ポストに ap_object_id がある場合のみ
+    // AP Undo(Announce) 配送 — 元ポストに ap_object_id がある場合のみ。
+    // 元ポストが Bsky ネイティブ（ap_object_id 無し・at_uri 有り）の場合、Fedi へは
+    // Announce ではなく PostToFollowers の Create(Note) フォールバックを送っているため、
+    // Undo(Announce) ではなく Delete(Note) でその Note を撤回する。
     if let Some(orig_ap_object_id) = undo_info.orig_ap_id {
         state
             .enqueue_ap_delivery(actor_id, ApDeliveryKind::UndoAnnounce {
                 announce_post_id: undo_info.repost_id,
                 original_ap_object_id: orig_ap_object_id,
+            })
+            .await;
+    } else if undo_info.orig_at_uri.is_some() {
+        state
+            .enqueue_ap_delivery(actor_id, ApDeliveryKind::DeleteNote {
+                post_id: undo_info.repost_id,
             })
             .await;
     }
@@ -635,6 +644,15 @@ pub async fn delete_repost(
         tokio::spawn(async move {
             if let Err(e) = atp.delete_atp_repost(actor_id, &rkey, now).await {
                 tracing::error!("[delete_repost] ATP repost delete 失敗: {}", e);
+            }
+        });
+    } else if let Some(rkey) = undo_info.at_rkey {
+        // Fedi リモートポストのリポスト時に作った Bsky フォールバックテキスト投稿を retract する。
+        let atp = Arc::clone(&state.atp_service);
+        let now = chrono::Utc::now();
+        tokio::spawn(async move {
+            if let Err(e) = atp.delete_atp_post(actor_id, &rkey, now).await {
+                tracing::error!("[delete_repost] Bsky フォールバック投稿 delete 失敗: {}", e);
             }
         });
     }

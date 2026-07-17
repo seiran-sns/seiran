@@ -250,6 +250,27 @@ fn build_undo_announce_activity(
     })
 }
 
+/// Delete(Note) アクティビティを組み立てる。
+/// Bsky リモートポストのリポスト取り消し（Announce を送っていないケース）で、
+/// `PostToFollowers` フォールバックで作成した Note 自体を撤回するために使う。
+fn build_delete_note_activity(
+    addr: &LocalActorAddress,
+    note_id: &str,
+    activity_id: &str,
+    published: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Delete",
+        "id": activity_id,
+        "actor": addr.actor_uri,
+        "published": published,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "cc": [addr.followers_uri],
+        "object": note_id
+    })
+}
+
 /// Delete(Actor) アクティビティを組み立てる。
 fn build_delete_actor_activity(
     addr: &LocalActorAddress,
@@ -576,6 +597,34 @@ pub async fn deliver_undo_announce(
     fan_out_activity(
         ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
         &format!("Undo(Announce) post_id={} username={}", announce_post_id, username),
+    )
+    .await
+}
+
+/// ローカルアクターの AP Delete(Note) アクティビティを Fedi フォロワー全員の inbox へ配送する。
+/// `post_id` はリポスト投稿の posts.id（`PostToFollowers` で送った Note の id
+/// `https://{domain}/notes/{post_id}` と一致する）。
+pub async fn deliver_delete_note(
+    ap_client: &ApClient,
+    db: &PgPool,
+    post_id: i64,
+    actor_id: i64,
+    local_domain: &str,
+    ap_private_key_pem: &str,
+) -> Result<(), ApError> {
+    let username = fetch_username(db, actor_id).await?;
+    let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
+
+    let addr = local_actor_address(local_domain, &username);
+    let note_id = format!("https://{}/notes/{}", local_domain, post_id);
+    let activity_id = format!("https://{}/activities/delete-note-{}", local_domain, post_id);
+    let activity = build_delete_note_activity(
+        &addr, &note_id, &activity_id, &chrono::Utc::now().to_rfc3339(),
+    );
+
+    fan_out_activity(
+        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        &format!("Delete(Note) post_id={} username={}", post_id, username),
     )
     .await
 }

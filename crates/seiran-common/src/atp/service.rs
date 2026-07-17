@@ -864,6 +864,18 @@ impl AtpCommitService {
         Ok(())
     }
 
+    /// `app.bsky.feed.post` レコードを削除する。
+    /// Fedi リモートポストのリポスト時に作るフォールバックテキスト投稿（`commit_post` が
+    /// `posts.at_rkey` に自己保存したもの）を、リポスト取り消し時に retract するために使う。
+    pub async fn delete_atp_post(
+        &self,
+        actor_id: i64,
+        rkey: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        self.delete_atp_record_generic(actor_id, "app.bsky.feed.post", rkey, now).await
+    }
+
     /// リアクション取消/切替コミット（`app.bsky.feed.like` レコードを MST から削除する）。
     /// `reactions.at_uri` のクリアは呼び出し側の責務
     /// （ローカル取消は行自体を DELETE するので不要。切替は直後の `commit_like` が上書きする）。
@@ -1286,37 +1298,6 @@ impl AtpCommitService {
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
         self.delete_atp_record_generic(actor_id, "app.bsky.graph.listitem", rkey, now).await
-    }
-
-    /// Bsky テキスト投稿コミット（DB の posts レコードを更新しない）。
-    ///
-    /// リポストの Bsky フォールバック投稿など、DB にポストレコードを作らずに
-    /// ATP リポジトリにテキストポストだけ送信したい場合に使用する。
-    pub async fn commit_standalone_text_post(
-        &self,
-        actor_id: i64,
-        text: &str,
-        now: DateTime<Utc>,
-    ) -> Result<(), AtpCommitError> {
-        let rkey = generate_tid();
-        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-
-        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, vec![], None, None)?;
-
-        let record = CommitRecord {
-            collection: "app.bsky.feed.post",
-            rkey: rkey.clone(),
-            cbor: record_cbor,
-            cid: record_cid,
-            action: "create",
-            blob_cids: vec![],
-        };
-
-        let result = self.commit_record_inner(actor_id, record, now, None).await?;
-
-        tracing::info!("[atp] standalone text post commit 完了: did={}, rkey={}", result.at_did, rkey);
-        self.spawn_request_crawl();
-        Ok(())
     }
 
     /// 引用投稿コミット（`app.bsky.embed.record` または `app.bsky.embed.external` 付き）。

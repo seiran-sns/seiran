@@ -143,12 +143,17 @@ pub async fn deliver_repost(
             });
         } else if origin != PostOrigin::BskyRemote && meta.ap_object_id.is_some() {
             // at_uri なし（Fedi リモートまたはローカル）→ Bsky フォールバック: URL テキスト投稿
+            // リポストラッパー行（post_id）自体を PDS 上のテキストポストとしてコミットする。
+            // commit_post に post_id を渡すことで posts.at_uri/at_cid/at_rkey がこの行に
+            // 書き込まれ、自前 Jetstream の自己エコー（save_bsky_post）が
+            // `ON CONFLICT (at_uri) DO NOTHING` により重複ポストを作らなくなる
+            // （このリポストと無関係な別ノートがタイムラインに現れなくなる）。
             let ap_id = meta.ap_object_id.clone().unwrap_or_default();
             let author_name = meta.display_name.as_deref().unwrap_or(&meta.username).to_string();
             let fallback_text = format!("🔁 {}: {}", author_name, ap_id);
             let atp = Arc::clone(&state.atp_service);
             tokio::spawn(async move {
-                if let Err(e) = atp.commit_standalone_text_post(actor_id, &fallback_text, now).await {
+                if let Err(e) = atp.commit_post(actor_id, post_id, &fallback_text, vec![], &[], now, None).await {
                     tracing::error!("[create_note] Fedi→Bsky フォールバック投稿失敗: {}", e);
                 }
             });
