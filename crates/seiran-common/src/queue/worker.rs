@@ -290,6 +290,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::AccountWithdrawUnfollowAll { actor_id, username } => {
             jobs::account_withdraw_unfollow_all::handle(actor_id, username, ctx).await
         }
+        Job::BskyPostCommitDeferred { actor_id, post_id, text, attachment_ids, reply_root, reply_parent, now } => {
+            jobs::bsky_post_commit_deferred::handle(actor_id, post_id, text, attachment_ids, reply_root, reply_parent, now, ctx).await
+        }
     }
 }
 
@@ -304,6 +307,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::BskyVideoPoll { .. } => "BskyVideoPoll",
         Job::ProxyFollowSync { .. } => "ProxyFollowSync",
         Job::AccountWithdrawUnfollowAll { .. } => "AccountWithdrawUnfollowAll",
+        Job::BskyPostCommitDeferred { .. } => "BskyPostCommitDeferred",
     }
 }
 
@@ -351,6 +355,16 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 10,
             base_delay_ms: 5000, // ApDelivery/ProxyFollowSyncと同様、リモート配送を含むため長めに構える
             max_delay_ms: 3_600_000,
+        },
+        Job::BskyPostCommitDeferred { .. } => RetryConfig {
+            // BskyVideoPoll（固定3秒・最大10回=30秒）より一段余裕を持たせ、固定3秒間隔・
+            // 最大20回（=60秒）動画パイプライン結合の完了を待つ。ハンドラ側でも
+            // media_files.created_at からの経過時間で独立にタイムアウト判定するため
+            // （70秒、jobs::bsky_post_commit_deferred 参照）、リトライ上限に達する前に
+            // 時間切れでフォールバックコミットされるのが通常経路。
+            max_attempts: 20,
+            base_delay_ms: 3000,
+            max_delay_ms: 3000,
         },
     }
 }

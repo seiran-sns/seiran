@@ -129,6 +129,31 @@ impl AppState {
             tracing::error!("[job] AccountWithdrawUnfollowAll enqueue 失敗 (actor_id={}): {}", actor_id, e);
         }
     }
+
+    /// 動画添付を含む投稿の Bsky コミットを、動画パイプライン結合完了待ちで
+    /// Worker（`jobs::bsky_post_commit_deferred`）へ委譲する。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn enqueue_bsky_post_commit_deferred(
+        &self,
+        actor_id: i64,
+        post_id: i64,
+        text: String,
+        attachment_ids: Vec<i64>,
+        reply_root: Option<(String, String)>,
+        reply_parent: Option<(String, String)>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::BskyPostCommitDeferred { actor_id, post_id, text, attachment_ids, reply_root, reply_parent, now },
+                job_priority::HIGH,
+            )
+            .await
+        {
+            tracing::error!("[job] BskyPostCommitDeferred enqueue 失敗 (post_id={}): {}", post_id, e);
+        }
+    }
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -499,6 +524,19 @@ pub fn spawn_gc_tasks(state: &AppState) {
             run_media_gc(&db, media_files.as_ref(), storage_providers.as_ref()).await;
         }
     });
+
+    // atp_blobs（uploadBlob 受信バイト列。Bsky動画パイプラインの代理POST等）のGC。
+    // media_files と同じ7日ルールで、どの media_files.bsky_video_cid からも
+    // 参照されなくなったものを削除する（2026-07-17 マイケル指摘: 無制限保存の防止）。
+    let db2 = state.db.clone();
+    let storage_providers2 = Arc::clone(&state.storage_providers);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            run_atp_blobs_gc(&db2, storage_providers2.as_ref()).await;
+        }
+    });
 }
 
 /// 孤立メディアファイルを保持する中間構造体。
@@ -562,6 +600,62 @@ async fn run_media_gc(
             }
             Err(e) => {
                 tracing::error!("[media-gc] プロバイダー取得失敗: {}", e);
+            }
+        }
+    }
+}
+
+/// 孤立 atp_blobs（7日以上経過し、どの `media_files.bsky_video_cid` からも
+/// 参照されていない）を最大100件取得し、S3 → DB の順で削除する（ベストエフォート）。
+async fn run_atp_blobs_gc(pool: &sqlx::PgPool, storage_providers: &dyn StorageProviderRepository) {
+    let rows: Vec<OrphanedMediaFile> = match sqlx::query_as::<_, OrphanedMediaFile>(
+        "SELECT id, storage_provider_id, storage_key
+         FROM atp_blobs
+         WHERE created_at < NOW() - INTERVAL '7 days'
+           AND cid NOT IN (SELECT bsky_video_cid FROM media_files WHERE bsky_video_cid IS NOT NULL)
+         LIMIT 100",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[atp-blobs-gc] 孤立ブロブ取得失敗: {}", e);
+            return;
+        }
+    };
+
+    if rows.is_empty() {
+        return;
+    }
+    tracing::info!("[atp-blobs-gc] 孤立ブロブ {} 件を処理します", rows.len());
+
+    for row in rows {
+        match storage_providers.find_by_id(row.storage_provider_id).await {
+            Ok(Some(provider)) => {
+                let s3 = S3StorageClient::new(&provider);
+                if let Err(e) = s3.delete(&row.storage_key).await {
+                    tracing::error!("[atp-blobs-gc] S3 削除失敗 id={}: {}", row.id, e);
+                    continue;
+                }
+                if let Err(e) = sqlx::query("DELETE FROM atp_blobs WHERE id = $1")
+                    .bind(row.id)
+                    .execute(pool)
+                    .await
+                {
+                    tracing::error!("[atp-blobs-gc] DB 削除失敗 id={}: {}", row.id, e);
+                } else {
+                    tracing::info!("[atp-blobs-gc] 削除完了 id={}", row.id);
+                }
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    "[atp-blobs-gc] プロバイダー不明 id={}, provider_id={}",
+                    row.id, row.storage_provider_id
+                );
+            }
+            Err(e) => {
+                tracing::error!("[atp-blobs-gc] プロバイダー取得失敗: {}", e);
             }
         }
     }

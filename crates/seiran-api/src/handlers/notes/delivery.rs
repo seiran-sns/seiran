@@ -290,6 +290,36 @@ pub struct RegularPostDelivery {
     pub attachment_ids: Vec<i64>,
 }
 
+/// `attachment_ids` の中に、Bsky 動画パイプライン結合がまだ確定状態
+/// （`ready`/`failed`）に達していない動画添付が1件でもあるか判定する。
+async fn has_pending_video(pool: &sqlx::PgPool, attachment_ids: &[i64]) -> bool {
+    if attachment_ids.is_empty() {
+        return false;
+    }
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM media_files
+         WHERE id = ANY($1) AND mime_type LIKE 'video/%'
+           AND bsky_video_status IS DISTINCT FROM 'ready'
+           AND bsky_video_status IS DISTINCT FROM 'failed'",
+    )
+    .bind(attachment_ids)
+    .fetch_one(pool)
+    .await
+    .map(|c| c > 0)
+    .unwrap_or(false)
+}
+
+/// `BskyPostReply` を `Job::BskyPostCommitDeferred` へ渡せる `(uri, cid)` タプルに分解する。
+fn split_bsky_reply(reply: &Option<BskyPostReply>) -> (Option<(String, String)>, Option<(String, String)>) {
+    match reply {
+        Some(r) => (
+            Some((r.root.uri.clone(), r.root.cid.clone())),
+            Some((r.parent.uri.clone(), r.parent.cid.clone())),
+        ),
+        None => (None, None),
+    }
+}
+
 /// 通常投稿 / リプライ / 引用投稿を Fedi・Bsky へ配送する。
 /// Bsky は ATP コミット（firehose 結合のため in-process）、Fedi は ApDelivery ジョブ。
 pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
@@ -304,13 +334,15 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
         );
     }
 
-    // メンション変換（変換失敗時は元テキストをそのまま使用する）
-    // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
-    let (bsky_text, bsky_facets) = if bsky_target {
-        convert_mentions_for_bsky(&d.text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await
-    } else {
-        (d.text.clone(), vec![])
-    };
+    // 動画添付があり、まだ Bsky 動画パイプライン結合（トランスコード）が確定していない場合、
+    // ここで即座に commit_post すると常に app.bsky.embed.external にフォールバックしてしまう
+    // （一度 external でコミットされた投稿は再コミットされないため、以後 video embed 化
+    // されることもない）。投稿ボタンを押すタイミングが早すぎるだけで起きる問題なので、
+    // Bsky コミット自体を Worker（Job::BskyPostCommitDeferred）に委譲し、結合完了を
+    // 待ってからコミットする（2026-07-17 マイケル指摘・実機再現確認。引用投稿は対象外）。
+    let defer_for_video = bsky_target
+        && d.bsky_quote_embed.is_none()
+        && has_pending_video(&state.db, &d.attachment_ids).await;
 
     // AP 配信用: `@handle.tld` (ATP ハンドル) → `@handle.tld@bsky.brid.gy` または Markdown リンク
     let ap_text = if d.targets.fedi {
@@ -319,7 +351,25 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
         d.text.clone()
     };
 
-    if bsky_target {
+    if defer_for_video {
+        let (reply_root, reply_parent) = split_bsky_reply(&d.bsky_reply);
+        state
+            .enqueue_bsky_post_commit_deferred(
+                d.actor_id,
+                d.post_id,
+                d.text.clone(),
+                d.attachment_ids.clone(),
+                reply_root,
+                reply_parent,
+                d.now,
+            )
+            .await;
+    } else if bsky_target {
+        // メンション変換（変換失敗時は元テキストをそのまま使用する）
+        // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
+        let (bsky_text, bsky_facets) =
+            convert_mentions_for_bsky(&d.text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await;
+
         if let Some(embed) = d.bsky_quote_embed {
             // 引用投稿: embed を付けて commit_quote を使う（画像 embed と共存しない）
             if let Err(e) = state.atp_service.commit_quote(d.actor_id, d.post_id, &bsky_text, bsky_facets, Some(embed), d.now, d.bsky_reply).await {

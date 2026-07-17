@@ -14,6 +14,8 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 
 use seiran_common::atp::{cid_from_sha256_hex, cid_to_string, resolve_atproto_verification_key};
+use seiran_common::{ext_for_mime_type, generate_snowflake_id, select_provider, sniff_mime_type, S3StorageClient};
+use uuid::Uuid;
 
 use crate::AppState;
 
@@ -97,11 +99,16 @@ pub async fn xrpc_upload_blob(
         return (StatusCode::UNAUTHORIZED, "lxmが一致しません").into_response();
     }
 
-    let mime_type = headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/octet-stream")
-        .to_string();
+    // Content-Type ヘッダーをそのまま信用しない。Bsky公式動画パイプラインからの代理POSTは
+    // 実機確認で `Content-Type: */*` という無効なワイルドカード値を送ってくることがあり
+    // （2026-07-17 マイケル実機確認）、そのまま保存すると getBlob が返す動画の
+    // Content-Type も `*/*` になって再生できなくなる。ヘッダーがワイルドカードや欠落の
+    // 場合はマジックバイトから実際の MIME type を判定する。
+    let header_mime = headers.get("content-type").and_then(|v| v.to_str().ok());
+    let mime_type = match header_mime {
+        Some(m) if !m.is_empty() && !m.contains('*') => m.to_string(),
+        _ => sniff_mime_type(&body, "application/octet-stream"),
+    };
 
     let sha256_hex = hex::encode(Sha256::digest(&body));
     let cid = match cid_from_sha256_hex(&sha256_hex) {
@@ -112,7 +119,22 @@ pub async fn xrpc_upload_blob(
         }
     };
 
-    tracing::info!("[uploadBlob] 検証OK iss={} cid={} size={}（読み捨て・S3保存なし）", iss, cid, body.len());
+    // 受信バイト列を実際に S3 へ保存する。以前は「ローカル/Fedi配信は常にアップロード時の
+    // オリジナルファイルを使うため不要」として読み捨てていたが、Bsky公式動画パイプライン
+    // （video.bsky.app）はトランスコード完了後にこのエンドポイントへ代理POSTしてきており、
+    // 後で video.bsky.app 自身（または視聴者）がこの CID を getBlob で取得しようとすると
+    // 404 になり動画が再生できない不具合の直接原因だった（2026-07-17 マイケル実機確認）。
+    match state.actors.find_by_did(&iss).await {
+        Ok(Some(actor)) => {
+            if let Err(e) = store_uploaded_blob(&state, actor.id, &sha256_hex, &cid, &mime_type, body.len() as i64, &body).await {
+                tracing::error!("[uploadBlob] blob保存失敗（読み捨てて続行）cid={}: {}", cid, e);
+            }
+        }
+        Ok(None) => tracing::warn!("[uploadBlob] iss={} のアクターが見つからずblob保存スキップ cid={}", iss, cid),
+        Err(e) => tracing::error!("[uploadBlob] アクター解決失敗 iss={}: {}", iss, e),
+    }
+
+    tracing::info!("[uploadBlob] 検証OK iss={} cid={} size={}", iss, cid, body.len());
 
     Json(serde_json::json!({
         "blob": {
@@ -122,6 +144,85 @@ pub async fn xrpc_upload_blob(
             "size": body.len(),
         }
     })).into_response()
+}
+
+/// `uploadBlob` で受信したバイト列を `atp_blobs` テーブル経由で S3 に保存する。
+/// 既に同じ SHA-256（= 同じ内容）が保存済みならスキップする（content-addressable な
+/// ので重複排除で十分。動画パイプラインが複数アカウント分の同一トランスコード結果を
+/// 提出してくるケースもこれで安全）。
+async fn store_uploaded_blob(
+    state: &AppState,
+    actor_id: i64,
+    sha256_hex: &str,
+    cid: &str,
+    mime_type: &str,
+    size: i64,
+    body: &[u8],
+) -> Result<(), String> {
+    // 進行中の動画パイプラインジョブに対応するコールバックのみを受理する。これが無いと、
+    // 正当な自己署名JWT（DID本人なら誰でも作れる）さえあれば無制限回数・任意サイズで
+    // S3を消費できてしまう（2026-07-17 マイケル指摘）。
+    let has_pending_job: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM media_files WHERE uploaded_by_actor_id = $1 AND bsky_video_status = 'pending')",
+    )
+    .bind(actor_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| format!("pendingジョブ確認失敗: {}", e))?;
+    if !has_pending_job {
+        return Err("進行中の動画パイプラインジョブが無いため保存を拒否".to_string());
+    }
+
+    // 既に media_files 側に同じバイト列があれば S3 への重複保存を避ける
+    // （getBlob は media_files/atp_blobs 両方を検索するので、atp_blobs 側への
+    // 新規保存をスキップしても解決可能なまま。2026-07-17 マイケル指摘）。
+    let in_media_files: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_files WHERE sha256 = $1)")
+        .bind(sha256_hex)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| format!("media_files重複チェック失敗: {}", e))?;
+    if in_media_files {
+        return Ok(());
+    }
+
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM atp_blobs WHERE sha256 = $1)")
+        .bind(sha256_hex)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| format!("既存チェック失敗: {}", e))?;
+    if exists {
+        return Ok(());
+    }
+
+    let provider = select_provider(state.storage_providers.as_ref(), size)
+        .await
+        .map_err(|e| format!("プロバイダー選択失敗: {}", e))?;
+    let ext = ext_for_mime_type(mime_type);
+    let storage_key = format!("blobs/{}.{}", Uuid::new_v4(), ext);
+    let s3 = S3StorageClient::new(&provider);
+    s3.put(&storage_key, body.to_vec(), mime_type)
+        .await
+        .map_err(|e| format!("S3アップロード失敗: {}", e))?;
+
+    let id = generate_snowflake_id(chrono::Utc::now());
+    sqlx::query(
+        "INSERT INTO atp_blobs (id, actor_id, sha256, cid, mime_type, size, storage_provider_id, storage_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (sha256) DO NOTHING",
+    )
+    .bind(id)
+    .bind(actor_id)
+    .bind(sha256_hex)
+    .bind(cid)
+    .bind(mime_type)
+    .bind(size)
+    .bind(provider.id)
+    .bind(&storage_key)
+    .execute(&state.db)
+    .await
+    .map_err(|e| format!("atp_blobs INSERT失敗: {}", e))?;
+
+    Ok(())
 }
 
 #[derive(Deserialize)]

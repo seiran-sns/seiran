@@ -4,8 +4,10 @@
 //! 必要な自己署名JWTを組み立てる。atproto.com の仕様（iss/aud/lxm/exp）に従い、
 //! アカウントの `at_signing_key_pem`（P-256, PKCS8 PEM）でES256署名する。
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::Utc;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use p256::ecdsa::Signature;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -34,6 +36,28 @@ pub fn sign_service_auth_jwt(pem: &str, iss: &str, aud: &str, lxm: &str) -> Resu
     };
     let key = EncodingKey::from_ec_pem(pem.as_bytes())
         .map_err(|e| ServiceAuthError::Sign(format!("鍵読み込み失敗: {}", e)))?;
-    encode(&Header::new(Algorithm::ES256), &claims, &key)
-        .map_err(|e| ServiceAuthError::Sign(format!("署名失敗: {}", e)))
+    let jwt = encode(&Header::new(Algorithm::ES256), &claims, &key)
+        .map_err(|e| ServiceAuthError::Sign(format!("署名失敗: {}", e)))?;
+    normalize_jwt_es256_signature(&jwt)
+}
+
+/// `jsonwebtoken`（内部で `ring` を使用）の ES256 署名はデフォルトで low-S に正規化
+/// されず、s 値は数学的性質上ほぼ50%の確率で high-S になる。AT Protocol のサービス間
+/// 認証検証（`com.atproto.repo.uploadBlob` 等の呼び出し先）は
+/// `crates/seiran-common/src/atp/repo.rs` の commit 署名と同じく low-S を要求するため、
+/// JWT の署名セグメントだけを取り出して矯正し、組み直す。
+fn normalize_jwt_es256_signature(jwt: &str) -> Result<String, ServiceAuthError> {
+    let mut parts = jwt.rsplitn(2, '.');
+    let sig_b64 = parts.next().ok_or_else(|| ServiceAuthError::Sign("JWT形式が不正".to_string()))?;
+    let header_payload = parts.next().ok_or_else(|| ServiceAuthError::Sign("JWT形式が不正".to_string()))?;
+
+    let sig_bytes = URL_SAFE_NO_PAD
+        .decode(sig_b64)
+        .map_err(|e| ServiceAuthError::Sign(format!("署名デコード失敗: {}", e)))?;
+    let sig = Signature::try_from(sig_bytes.as_slice())
+        .map_err(|e| ServiceAuthError::Sign(format!("署名パース失敗: {}", e)))?;
+    let normalized = sig.normalize_s().unwrap_or(sig);
+    let normalized_b64 = URL_SAFE_NO_PAD.encode(normalized.to_bytes());
+
+    Ok(format!("{}.{}", header_payload, normalized_b64))
 }

@@ -1059,11 +1059,40 @@ P-256署名鍵（`at_signing_key_pem`）で自己署名して使う
   `lxm == "com.atproto.repo.uploadBlob"`、`exp`未失効を確認）。
 - 受信バイト列のSHA-256からCIDを計算し（`cid_from_sha256_hex`）、
   `{"blob":{"$type":"blob","ref":{"$link":CID},"mimeType":...,"size":...}}`
-  を返す。**受信バイト列自体はS3に保存せず読み捨てる**
-  （ローカル/Fedi配信は常にアップロード時のオリジナルファイルを使うため、
-  この copy は不要。`getBlob`でこのCIDを問い合わせられても404になるが、
-  実害は無い設計判断として許容している）。
+  を返す。
 - 実測: 計算したCIDは`getJobStatus`が報告するCIDと完全一致する。
+
+**2026-07-17 修正（重要）**: 以前は「ローカル/Fedi配信は常にアップロード時の
+オリジナルファイルを使うため不要」として受信バイト列を読み捨てていたが、これは
+誤った設計判断だった。Bsky公式動画パイプライン（`video.bsky.app`）は
+トランスコード完了後、**このエンドポイントへ自ら代理POSTしてきて**
+トランスコード済みバイナリを渡してくる（12.1参照）。`video.bsky.app`自身が
+後で動画再生のためにこのCIDを`getBlob`で取得しようとするため、読み捨てていると
+Bsky公式アプリ上で「ビデオが見つかりません」となり再生できない
+（マイケル実機確認・`video.bsky.app/watch/.../playlist.m3u8`が404）。
+
+現在は`atp_blobs`テーブル（Doc1 §1.x）に実際に保存する。`media_files`とは
+意図的に別テーブルにしている（`media_files`は「ユーザーが投稿に添付した
+ファイル」、`atp_blobs`は「サーバー間連携で受信した生blob」で意味が異なり、
+所有権・ライフサイクルも別）。ただし分離に伴うリスクとして以下3点を安全対策済み:
+
+1. **正当性検証**: 呼び出し元は「有効な自己署名JWT（DID本人の鍵で誰でも作れる）」
+   さえあれば技術的に誰でも叩けてしまうため、対応する
+   `media_files.bsky_video_status='pending'`のジョブが実在するアクターからの
+   呼び出しでなければ保存を拒否する（`store_uploaded_blob`）。これが無いと
+   無制限回数・任意サイズでS3を消費されうる。
+2. **クロステーブル重複排除**: 保存前に`media_files.sha256`も照合し、既に
+   同じバイト列があれば`atp_blobs`への新規保存をスキップする（`getBlob`は
+   両テーブルをUNIONで検索するため、スキップしても解決可能なまま）。
+3. **GC**: `crates/seiran-api/src/lib.rs`の`run_atp_blobs_gc`が、
+   `media_files`のGC（`run_media_gc`）と同じ1時間ごとのタスクの中で、
+   7日以上経過し`media_files.bsky_video_cid`から参照されなくなった
+   `atp_blobs`行をS3ごと削除する。
+
+Content-Type について: `video.bsky.app`からの代理POSTは実機で
+`Content-Type: */*`という無効なワイルドカード値を送ってくることがあるため、
+ヘッダーをそのまま信用せず、`*`を含む・空の場合はマジックバイトから
+`sniff_mime_type`で実際のMIME typeを判定する。
 
 ### 12.4 `bsky_video_poll`ジョブと`commit_post`への反映
 
@@ -1079,8 +1108,19 @@ P-256署名鍵（`at_signing_key_pem`）で自己署名して使う
 投稿作成時（`commit_post`、`crates/seiran-common/src/atp/service.rs`）は
 `media_files.bsky_video_status`を見て、`'ready'`なら`app.bsky.embed.video`、
 そうでなければ（`pending`のまま・`failed`・音声等）`app.bsky.embed.external`
-にフォールバックする。ポストAPI自体は`bsky_video_status`の完了を待たない
-（アップロード猶予30秒の間に完了していればラッキー、という設計）。
+にフォールバックする。
+
+**2026-07-17 修正**: 従来は投稿API自体が`bsky_video_status`の完了を待たず
+（アップロード猶予の間に完了していればラッキー、という設計）、投稿ボタンを
+押すタイミングが早いと常に`external`フォールバックに固定され、以後
+再コミットもされないため video embed 化されないままになる不具合があった
+（マイケル実機確認・再現）。動画添付があり`bsky_video_status`が未確定
+（`NULL`/`pending`）の場合、Bskyコミット自体を`Job::BskyPostCommitDeferred`
+（`crates/seiran-common/src/jobs/bsky_post_commit_deferred.rs`）に委譲する
+ようにした。固定3秒間隔・最大20回（60秒）リトライし、`media_files.created_at`
+からの経過時間が70秒を超えたらタイムアウトとして未確定のままフォールバック
+コミットする（`crates/seiran-api/src/handlers/notes/delivery.rs`の
+`has_pending_video`/`deliver_regular_post`）。
 
 ## 13. ポストのピン留め（#61）
 

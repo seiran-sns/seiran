@@ -155,6 +155,24 @@ pub enum Job {
     /// （ATPフォロー解除コミット + AP Undo Follow配送 + follows削除）。フォロー数に
     /// 比例して時間がかかるため、Delete(Actor)配送（`ApDelivery`）と同様にジョブ化する。
     AccountWithdrawUnfollowAll { actor_id: i64, username: String },
+
+    /// 動画添付を含む投稿の Bsky ATP コミットを、動画パイプライン結合
+    /// （`media_files.bsky_video_status`）が確定状態（`ready`/`failed`）になるまで
+    /// 遅延する。投稿作成時点でまだトランスコード中の動画に対して即座に `commit_post`
+    /// すると、その時点の状態でしか判定できず常に `external` フォールバックになって
+    /// しまうため（2026-07-17 マイケル指摘・実機再現確認）。`reply_root`/`reply_parent`
+    /// は `(uri, cid)` のタプルで、リプライでない場合は両方 `None`。
+    BskyPostCommitDeferred {
+        actor_id: i64,
+        post_id: i64,
+        text: String,
+        attachment_ids: Vec<i64>,
+        reply_root: Option<(String, String)>,
+        reply_parent: Option<(String, String)>,
+        /// 投稿作成時点の時刻。ATP レコードの `createdAt` は実行時ではなく
+        /// この時刻を使う（ジョブの実行がずれても投稿日時がずれないように）。
+        now: DateTime<Utc>,
+    },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。
@@ -222,6 +240,15 @@ mod tests {
             Job::InboundActivityProcess { raw_activity: "{}".into() },
             Job::AtpRepositoryPublish { actor_id: 1, commit_type: "create_post".into() },
             Job::BskyVideoPoll { media_file_id: 9 },
+            Job::BskyPostCommitDeferred {
+                actor_id: 1,
+                post_id: 2,
+                text: "hello".into(),
+                attachment_ids: vec![3, 4],
+                reply_root: Some(("at://did:plc:x/app.bsky.feed.post/a".into(), "bafyrei...".into())),
+                reply_parent: Some(("at://did:plc:x/app.bsky.feed.post/b".into(), "bafyrei...".into())),
+                now: Utc::now(),
+            },
         ];
         for job in jobs {
             let json = serde_json::to_string(&job).expect("serialize");

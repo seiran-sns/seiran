@@ -245,6 +245,26 @@ async fn create_video_or_audio_file(
     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     if let Some(existing) = existing {
+        // 同一 sha256 の既存レコードを再利用する場合でも、過去の Bsky 動画パイプライン
+        // 提出が 'failed'（またはそもそも未提出）のままだと、再アップロードしても
+        // 永久に video embed 化されない（isReused の早期 return で submit が
+        // スキップされていた既存バグ）。再送信を試みる。
+        if existing.mime_type.starts_with("video/") && deliver_to_bsky {
+            if let Some(actor) = actor {
+                let status: Option<String> = sqlx::query_scalar(
+                    "SELECT bsky_video_status FROM media_files WHERE id = $1",
+                )
+                .bind(existing.id)
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten();
+                if !matches!(status.as_deref(), Some("pending") | Some("ready")) {
+                    submit_to_bsky_video_pipeline(state, actor, existing.id, raw_bytes.clone()).await;
+                }
+            }
+        }
+
         let url = build_public_url(state.storage_providers.as_ref(), existing.storage_provider_id, &existing.storage_key).await;
         let thumbnail_url = match &existing.thumbnail_key {
             Some(key) => Some(build_public_url(state.storage_providers.as_ref(), existing.storage_provider_id, key).await),

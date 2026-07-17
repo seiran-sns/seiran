@@ -40,12 +40,23 @@ pub async fn xrpc_get_blob(
     }
     let sha256_hex = hex::encode(mh.digest());
 
+    // media_files（ユーザーが投稿に添付した通常ファイル）に加え、atp_blobs
+    // （com.atproto.repo.uploadBlob で受信・保存したバイト列。Bsky公式動画パイプラインが
+    // トランスコード完了後に代理POSTしてくるものを含む）も検索する。
     let row = sqlx::query(
-        "SELECT mf.mime_type,
-                rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url
-         FROM media_files mf
-         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         WHERE mf.sha256 = $1
+        "SELECT mime_type, url FROM (
+             SELECT mf.mime_type AS mime_type,
+                    rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url
+             FROM media_files mf
+             JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             WHERE mf.sha256 = $1
+             UNION ALL
+             SELECT ab.mime_type AS mime_type,
+                    rtrim(sp.public_url, '/') || '/' || ab.storage_key AS url
+             FROM atp_blobs ab
+             JOIN storage_providers sp ON sp.id = ab.storage_provider_id
+             WHERE ab.sha256 = $1
+         ) t
          LIMIT 1",
     )
     .bind(&sha256_hex)

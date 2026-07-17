@@ -804,6 +804,55 @@ CREATE INDEX idx_list_members_actor ON list_members(actor_id);
 
 ---
 
+### 1.15 `atp_blobs` (com.atproto.repo.uploadBlob 受信ブロブ、2026-07-17)
+
+`media_files`とは意図的に別テーブル。`media_files`は「ユーザーが投稿に添付した
+ファイル」（`post_attachments`と結びつく）だが、こちらは「PDSのuploadBlob
+エンドポイントがサーバー間連携で受信した生バイト列」で、投稿添付という意味を
+持たない（典型例: Bsky公式動画パイプラインがトランスコード完了後に代理POST
+してくるバイナリ。Doc3 §12.3）。
+
+```sql
+CREATE TABLE atp_blobs (
+    id                   BIGINT PRIMARY KEY,
+    actor_id             BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+    sha256               TEXT NOT NULL,
+    cid                  TEXT NOT NULL,   -- sha256 から計算される CIDv1 raw 文字列（GCの照合に使用）
+    mime_type            TEXT NOT NULL,
+    size                 BIGINT NOT NULL,
+    storage_provider_id  BIGINT NOT NULL REFERENCES storage_providers(id),
+    storage_key          TEXT NOT NULL,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX idx_atp_blobs_sha256 ON atp_blobs(sha256);
+CREATE INDEX idx_atp_blobs_cid ON atp_blobs(cid);
+```
+
+**安全対策（分離ゆえに必要になったもの、マイケル指摘 2026-07-17）:**
+
+1. **正当性検証**: `uploadBlob`は有効な自己署名JWT（DID本人の鍵で誰でも作れる）
+   さえあれば技術的に誰でも叩けてしまうため、対応する
+   `media_files.bsky_video_status='pending'`のジョブが実在するアクターからの
+   呼び出しでなければ保存を拒否する。無制限回数・任意サイズでのS3消費を防ぐ。
+2. **クロステーブル重複排除**: 保存前に`media_files.sha256`も照合し、既に
+   同じバイト列があれば新規保存しない（`getBlob`は両テーブルをUNIONで検索）。
+3. **GC**: `media_files`のGCと同じ1時間ごとのタスクで、7日以上経過し
+   `media_files.bsky_video_cid`から参照されなくなった行をS3ごと削除する
+   （`run_atp_blobs_gc`、`crates/seiran-api/src/lib.rs`）。
+
+```sql
+SELECT id, storage_provider_id, storage_key
+FROM atp_blobs
+WHERE created_at < NOW() - INTERVAL '7 days'
+  AND cid NOT IN (SELECT bsky_video_cid FROM media_files WHERE bsky_video_cid IS NOT NULL);
+```
+
+`getBlob`（`com.atproto.sync.getBlob`）は`media_files`と`atp_blobs`を
+sha256でUNION検索し、どちらかにあればそのCDN URLへ307リダイレクトする。
+
+---
+
 ## 2. データベース層での主要クエリ・ユースケース
 
 ### 2.1 リモートseiranユーザーの統合タイムライン取得
