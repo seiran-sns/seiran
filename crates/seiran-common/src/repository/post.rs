@@ -32,6 +32,16 @@ pub struct TimelinePost {
     /// 投稿者アクターの表示名中のカスタム絵文字→画像URLマップ。
     #[sqlx(default)]
     pub actor_emoji_map: Option<serde_json::Value>,
+    /// 可視性（`public`/`unlisted`/`followers_only`/`direct`）。Fedi受信ポストは`to`/`cc`から
+    /// 判定した値、ローカル投稿は常に`public`（可視性選択は将来課題）。
+    #[sqlx(default)]
+    pub visibility: String,
+    /// ローカル投稿が実際にFedi/Bskyへ配送されたか（投稿作成時の`deliver_to_fedi`/`deliver_to_bsky`
+    /// を永続化したもの）。ローカル投稿以外では意味を持たない。
+    #[sqlx(default)]
+    pub deliver_fedi: bool,
+    #[sqlx(default)]
+    pub deliver_bsky: bool,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -155,6 +165,8 @@ pub trait PostRepository: Send + Sync {
     async fn find_delivery_meta(&self, id: i64) -> Result<Option<PostDeliveryMeta>, sqlx::Error>;
 
     /// `seiran_post_uuid` / リプライ / 引用を含むローカル投稿を挿入する。
+    /// `deliver_fedi`/`deliver_bsky` は投稿作成時に実際に配送対象とした値をそのまま永続化する
+    /// （タイムライン表示時の配送先アイコン用、#配送先・可視性アイコン追加）。
     #[allow(clippy::too_many_arguments)]
     async fn insert_full(
         &self,
@@ -166,6 +178,8 @@ pub trait PostRepository: Send + Sync {
         reply_to_post_id: Option<i64>,
         quote_of_post_id: Option<i64>,
         created_at: DateTime<Utc>,
+        deliver_fedi: bool,
+        deliver_bsky: bool,
     ) -> Result<(), sqlx::Error>;
 
     /// リポストレコードを挿入する（`UNIQUE(actor_id, repost_of_post_id)` 制約違反はそのまま呼び出し元へ伝播する）。
@@ -240,6 +254,7 @@ pub trait PostRepository: Send + Sync {
         parent_original_post_id: Option<i64>,
         created_at: DateTime<Utc>,
         emoji_map: &serde_json::Value,
+        visibility: &str,
     ) -> Result<(), sqlx::Error>;
 }
 
@@ -313,7 +328,8 @@ impl PostRepository for PgPostRepository {
              SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
              FROM candidate_ids ci
              JOIN posts p ON p.id = ci.id
              JOIN actors a ON a.id = p.actor_id
@@ -339,7 +355,8 @@ impl PostRepository for PgPostRepository {
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -382,7 +399,8 @@ impl PostRepository for PgPostRepository {
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -422,7 +440,8 @@ impl PostRepository for PgPostRepository {
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -467,7 +486,8 @@ impl PostRepository for PgPostRepository {
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -493,7 +513,8 @@ impl PostRepository for PgPostRepository {
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -523,6 +544,7 @@ impl PostRepository for PgPostRepository {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_full(
         &self,
         id: i64,
@@ -533,10 +555,12 @@ impl PostRepository for PgPostRepository {
         reply_to_post_id: Option<i64>,
         quote_of_post_id: Option<i64>,
         created_at: DateTime<Utc>,
+        deliver_fedi: bool,
+        deliver_bsky: bool,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, deliver_fedi, deliver_bsky)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(id)
         .bind(actor_id)
@@ -546,6 +570,8 @@ impl PostRepository for PgPostRepository {
         .bind(reply_to_post_id)
         .bind(quote_of_post_id)
         .bind(created_at)
+        .bind(deliver_fedi)
+        .bind(deliver_bsky)
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -694,6 +720,7 @@ impl PostRepository for PgPostRepository {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_remote_with_dedup(
         &self,
         id: i64,
@@ -704,10 +731,11 @@ impl PostRepository for PgPostRepository {
         parent_original_post_id: Option<i64>,
         created_at: DateTime<Utc>,
         emoji_map: &serde_json::Value,
+        visibility: &str,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, created_at, emoji_map)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, created_at, emoji_map, visibility)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum)
              ON CONFLICT (ap_object_id) DO NOTHING",
         )
         .bind(id)
@@ -718,6 +746,7 @@ impl PostRepository for PgPostRepository {
         .bind(parent_original_post_id)
         .bind(created_at)
         .bind(emoji_map)
+        .bind(visibility)
         .execute(&self.pool)
         .await
         .map(|_| ())

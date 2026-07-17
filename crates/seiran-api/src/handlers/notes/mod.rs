@@ -123,6 +123,11 @@ async fn create_repost(
         reposted_by_me: None,
         emojis: HashMap::new(),
         pinned_by_me: None,
+        // リポストラッパー自体は NoteCard 上で直接描画されない（renote 側の中身が表示される）
+        // ため、配送先・可視性は未設定のままでよい。
+        visibility: None,
+        deliver_fedi: None,
+        deliver_bsky: None,
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
     embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
@@ -182,7 +187,7 @@ async fn create_regular_post(
     // seiran_post_uuid / reply_to_post_id / quote_of_post_id を含む統合 INSERT
     if let Err(e) = state
         .posts
-        .insert_full(post_id, actor_id, &text, &ap_object_id, &seiran_post_uuid, reply_to_id_i64, quote_of_id_i64, now)
+        .insert_full(post_id, actor_id, &text, &ap_object_id, &seiran_post_uuid, reply_to_id_i64, quote_of_id_i64, now, deliver_fedi, deliver_bsky)
         .await
     {
         return ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)).into_response();
@@ -223,6 +228,9 @@ async fn create_regular_post(
         reposted_by_me: None,
         emojis: HashMap::new(),
         pinned_by_me: None,
+        visibility: None,
+        deliver_fedi: Some(deliver_fedi),
+        deliver_bsky: Some(deliver_bsky),
     };
 
     broadcast_new_note(state, actor_id, &note_resp).await;

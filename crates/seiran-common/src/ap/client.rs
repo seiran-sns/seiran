@@ -142,6 +142,27 @@ pub fn build_emoji_map(tags: &[serde_json::Value]) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+/// AP Note の `to`/`cc` から Mastodon 互換の4値可視性を判定する。
+/// - `to` に Public が含まれる: `public`（一般的な公開投稿）
+/// - `cc` にのみ Public が含まれる: `unlisted`（公開だが一覧に載らない）
+/// - Public がどちらにも無く `to` にフォロワーコレクション（`.../followers`）が含まれる: `followers_only`
+/// - それ以外（特定アクターのみ宛先）: `direct`
+pub fn classify_ap_visibility(to: &[String], cc: &[String]) -> &'static str {
+    const PUBLIC_URIS: [&str; 3] =
+        ["https://www.w3.org/ns/activitystreams#Public", "as:Public", "Public"];
+    let has_public = |uris: &[String]| uris.iter().any(|u| PUBLIC_URIS.contains(&u.as_str()));
+
+    if has_public(to) {
+        "public"
+    } else if has_public(cc) {
+        "unlisted"
+    } else if to.iter().any(|u| u.ends_with("/followers")) {
+        "followers_only"
+    } else {
+        "direct"
+    }
+}
+
 /// ActivityPub 通信クライアント
 ///
 /// HTTP クライアントと公開鍵キャッシュをインスタンスフィールドとして保持する。
@@ -520,5 +541,35 @@ mod tests {
             ]
         })).unwrap();
         assert_eq!(actor.emoji_map()[":blobcat:"], "https://example.com/blobcat.png");
+    }
+
+    // ─── classify_ap_visibility ────────────────────────────────────────────
+
+    #[test]
+    fn classify_ap_visibility_public() {
+        let to = vec!["https://www.w3.org/ns/activitystreams#Public".to_string()];
+        let cc = vec!["https://example.com/users/alice/followers".to_string()];
+        assert_eq!(classify_ap_visibility(&to, &cc), "public");
+    }
+
+    #[test]
+    fn classify_ap_visibility_unlisted() {
+        let to = vec!["https://example.com/users/alice/followers".to_string()];
+        let cc = vec!["https://www.w3.org/ns/activitystreams#Public".to_string()];
+        assert_eq!(classify_ap_visibility(&to, &cc), "unlisted");
+    }
+
+    #[test]
+    fn classify_ap_visibility_followers_only() {
+        let to = vec!["https://example.com/users/alice/followers".to_string()];
+        let cc: Vec<String> = vec![];
+        assert_eq!(classify_ap_visibility(&to, &cc), "followers_only");
+    }
+
+    #[test]
+    fn classify_ap_visibility_direct() {
+        let to = vec!["https://example.com/users/bob".to_string()];
+        let cc: Vec<String> = vec![];
+        assert_eq!(classify_ap_visibility(&to, &cc), "direct");
     }
 }

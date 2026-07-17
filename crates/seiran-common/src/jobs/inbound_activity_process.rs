@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::ap::{build_emoji_map, ApClient};
+use crate::ap::{build_emoji_map, classify_ap_visibility, ApClient};
 use crate::generate_snowflake_id;
 use crate::queue::worker::{InboxContext, JobContext};
 use crate::repository::NotificationKind;
@@ -272,6 +272,8 @@ async fn handle_create_note(
     let body = strip_html(&content_html);
     // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
     let emoji_map = build_emoji_map(&note["tag"].as_array().cloned().unwrap_or_default());
+    // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
+    let visibility = classify_ap_visibility(&as_string_list(&note["to"]), &as_string_list(&note["cc"]));
 
     // シナリオ2: seiran_post_uuid による seiran 間マージ
     let seiran_uuid = note["seiranUuid"].as_str();
@@ -302,7 +304,7 @@ async fn handle_create_note(
     // posts テーブルに挿入（ap_object_id 重複はスキップ、seiran_post_uuid も保存）
     inbox
         .post_repo
-        .insert_remote_with_dedup(post_id, actor_id, &body, note_id, seiran_uuid, parent_original_post_id, created_at, &emoji_map)
+        .insert_remote_with_dedup(post_id, actor_id, &body, note_id, seiran_uuid, parent_original_post_id, created_at, &emoji_map, visibility)
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
@@ -353,6 +355,15 @@ async fn handle_create_note(
     let dup_info = parent_original_post_id.map_or(String::new(), |id| format!(" (parent_original={})", id));
     tracing::info!("[Create/Note] {} から投稿を受信・保存: {}{}", actor_uri, note_id, dup_info);
     Ok(())
+}
+
+/// AP の `to`/`cc` は単一文字列・配列のどちらの場合もあるため、文字列配列へ正規化する。
+fn as_string_list(v: &serde_json::Value) -> Vec<String> {
+    match v {
+        serde_json::Value::Array(arr) => arr.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        serde_json::Value::String(s) => vec![s.clone()],
+        _ => vec![],
+    }
 }
 
 /// プレーンテキストへの単純な HTML タグ除去（エンティティも簡易デコード）。

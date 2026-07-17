@@ -50,6 +50,27 @@ export function protocolBadge(actorType: string): { icon: string; label: string 
   }
 }
 
+/** ローカル投稿の配送先バッジ（Fedi配送あり=🌐、Bsky配送あり=🦋）。ローカル投稿以外は空。 */
+export function deliveryBadges(note: Note): { icon: string; label: string }[] {
+  if (note.user.actorType !== "local") return [];
+  const badges: { icon: string; label: string }[] = [];
+  if (note.deliverFedi) badges.push({ icon: "🌐", label: "Fediverseへ配送" });
+  if (note.deliverBsky) badges.push({ icon: "🦋", label: "Blueskyへ配送" });
+  return badges;
+}
+
+/** Fedi受信ポストの可視性バッジ（フォロワーのみ=🔒、unlisted=🏠）。public/directはアイコン無し。 */
+export function visibilityBadge(note: Note): { icon: string; label: string } | null {
+  switch (note.visibility) {
+    case "followers_only":
+      return { icon: "🔒", label: "フォロワーのみ" };
+    case "unlisted":
+      return { icon: "🏠", label: "ホームタイムラインのみ（unlisted）" };
+    default:
+      return null;
+  }
+}
+
 const segmenter = new Intl.Segmenter();
 
 export function countGraphemes(text: string): number {

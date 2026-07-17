@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError, getErrorMessage, Note, ReactionSummary } from "../../api/client";
-import { acct, displayName, formatDate, profilePath, protocolBadge } from "../../lib/format";
+import { acct, deliveryBadges, displayName, formatDate, profilePath, protocolBadge, visibilityBadge } from "../../lib/format";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import ReactionChips from "./ReactionChips";
@@ -84,6 +84,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
   const { user } = useAuth();
   const { registerReaction } = useStreamingContext();
   const badge = protocolBadge(note.user.actorType);
+  const delBadges = deliveryBadges(note);
+  const visBadge = visibilityBadge(note);
   const [reposting, setReposting] = useState(false);
   const [unreposting, setUnreposting] = useState(false);
   const [reposted, setReposted] = useState(note.repostedByMe ?? false);
@@ -190,6 +192,16 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
               {badge && (
                 <span className={styles.protoBadge} title={badge.label}>
                   {badge.icon}
+                </span>
+              )}
+              {delBadges.map((b) => (
+                <span key={b.icon} className={styles.protoBadge} title={b.label}>
+                  {b.icon}
+                </span>
+              ))}
+              {visBadge && (
+                <span className={styles.protoBadge} title={visBadge.label}>
+                  {visBadge.icon}
                 </span>
               )}
             </span>

@@ -207,6 +207,12 @@ export interface Note {
   emojis?: Record<string, string>;
   /** 認証ユーザー自身の投稿がピン留め済みかどうか（#61）。自分のプロフィール表示時のみ設定。 */
   pinnedByMe?: boolean;
+  /** 可視性（`unlisted`/`followers_only`/`direct`）。Fedi受信ポストの`to`/`cc`から判定した値。
+   * `public`（デフォルト）は省略される。 */
+  visibility?: string;
+  /** ローカル投稿がFedi/Bskyへ実際に配送されたか。ローカル投稿以外では省略。 */
+  deliverFedi?: boolean;
+  deliverBsky?: boolean;
 }
 
 export interface ReactionSummary {
@@ -299,6 +305,9 @@ interface RawNote {
   emojis?: Record<string, string>;
   pinnedByMe?: boolean;
   pinned_by_me?: boolean;
+  visibility?: string;
+  deliverFedi?: boolean;
+  deliverBsky?: boolean;
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -325,6 +334,9 @@ function normalizeNote(r: RawNote): Note {
     repostedByMe: r.repostedByMe ?? r.reposted_by_me,
     emojis: r.emojis,
     pinnedByMe: r.pinnedByMe ?? r.pinned_by_me,
+    visibility: r.visibility,
+    deliverFedi: r.deliverFedi,
+    deliverBsky: r.deliverBsky,
   };
 }
 

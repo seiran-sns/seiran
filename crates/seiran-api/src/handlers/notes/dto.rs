@@ -82,6 +82,16 @@ pub struct NoteResponse {
     /// 認証ユーザー自身の投稿がピン留め済みかどうか（#61）。自分のプロフィール表示時のみ設定。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinned_by_me: Option<bool>,
+    /// 可視性（`unlisted`/`followers_only`/`direct`）。Fedi受信ポストの`to`/`cc`から判定した値。
+    /// `public`（デフォルト・大多数のケース）は省略する。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
+    /// ローカル投稿がFedi/Bskyへ実際に配送されたか（投稿作成時の配送先選択の永続化）。
+    /// ローカル投稿以外（リモート受信・リポストラッパー）では省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deliver_fedi: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deliver_bsky: Option<bool>,
 }
 
 /// `serde_json::Value`（JSONB由来のオブジェクト、`None`/非オブジェクトなら空）を
@@ -113,6 +123,9 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
     let mut emojis = json_map_to_string_map(p.post_emoji_map);
     emojis.extend(json_map_to_string_map(p.actor_emoji_map));
 
+    let actor_type = if p.actor_type.is_empty() { "local".to_string() } else { p.actor_type };
+    let is_local = actor_type == "local";
+
     NoteResponse {
         id: p.id.to_string(),
         text: p.body,
@@ -122,7 +135,7 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
             username: p.username,
             domain: Some(p.domain),
             display_name: p.display_name,
-            actor_type: if p.actor_type.is_empty() { "local".to_string() } else { p.actor_type },
+            actor_type,
             avatar_url: p.avatar_url,
         },
         attachments,
@@ -135,6 +148,9 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         reposted_by_me: None,
         emojis,
         pinned_by_me: None,
+        visibility: if p.visibility == "public" { None } else { Some(p.visibility) },
+        deliver_fedi: if is_local { Some(p.deliver_fedi) } else { None },
+        deliver_bsky: if is_local { Some(p.deliver_bsky) } else { None },
     }
 }
 

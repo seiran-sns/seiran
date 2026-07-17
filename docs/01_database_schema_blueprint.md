@@ -111,6 +111,8 @@ CREATE INDEX idx_actors_withdrawn_at ON actors(withdrawn_at) WHERE withdrawn_at 
 宇宙の壁を超えて集約されるすべての投稿。未来補正タイムスタンプ付きのIDで完全に一次元ソートされる。編集競合を避けるため、更新系の動的データ（リアクション等）は別テーブルに完全分離する。
 
 ```sql
+CREATE TYPE post_visibility_enum AS ENUM ('public', 'unlisted', 'followers_only', 'direct');
+
 CREATE TABLE posts (
     id BIGINT PRIMARY KEY, -- 補正タイムスタンプ内包の統一ポストID（ソート主軸）
     actor_id BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
@@ -153,7 +155,18 @@ CREATE TABLE posts (
     -- actor_type は投稿後に変わらないため posts 側に複製しても不整合しない。
     -- BEFORE INSERT トリガー trg_posts_set_is_local が自動設定するため、
     -- アプリケーションコードから明示的に書き込む必要はない。
-    is_local BOOLEAN NOT NULL DEFAULT false
+    is_local BOOLEAN NOT NULL DEFAULT false,
+
+    -- 配送先・可視性アイコン表示用（#配送先・可視性アイコン追加 2026-07-16）
+    -- visibility: Fedi 受信ポストの Note.to/cc から判定した4値（seiran_common::ap::classify_ap_visibility）。
+    -- ローカル投稿は現状常に 'public' 固定（可視性選択UIは将来課題）。
+    visibility post_visibility_enum NOT NULL DEFAULT 'public',
+    -- deliver_fedi/deliver_bsky: ローカル投稿作成時に実際に配送対象とした値の永続化。
+    -- ap_object_id は deliver_to_fedi の値に関わらず常に生成される（投稿自身のAP識別子として
+    -- 必要なため）ので「配送されたか」の判定には使えず、別途カラムで持つ。リモート受信ポストでは
+    -- 意味を持たない（常にデフォルト値のまま）。
+    deliver_fedi BOOLEAN NOT NULL DEFAULT true,
+    deliver_bsky BOOLEAN NOT NULL DEFAULT true
 );
 
 -- リポスト重複制約: 同一ユーザーが同一ポストを取り消し前に再リポストできないようにする
@@ -190,6 +203,34 @@ CREATE INDEX idx_posts_timeline_active ON posts(id) WHERE deleted_at IS NULL;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX idx_posts_body_trgm ON posts USING gin (body gin_trgm_ops);
 ```
+
+#### 配送先・可視性アイコン表示（2026-07-16）
+
+タイムライン上のポストカードに「配送先」「可視性」を示すアイコンを表示するための永続化。
+
+- **配送先（ローカル投稿のみ）**: 投稿作成リクエストの `deliver_to_fedi`/`deliver_to_bsky`
+  （`CreateNoteRequest`）をそのまま `posts.deliver_fedi`/`deliver_bsky` に保存する
+  （`crates/seiran-api/src/handlers/notes/mod.rs` の `create_regular_post` →
+  `PostRepository::insert_full`）。`ap_object_id` は `deliver_to_fedi` の値に関わらずローカル
+  投稿なら常に生成される（投稿自身のAP識別子として必要）ため、配送有無の判定には使えないことに
+  注意。リポスト（`posts.repost_of_post_id` が非NULLの行）自体はこの2カラムを持たず常にデフォルト
+  値のまま。`NoteCard` はリポストの中身を `renote` に埋め込まれた元ポストから描画するため、リポスト
+  行自体の配送先は表示に使われない。
+- **可視性（Fedi受信ポストのみ）**: AP `Create(Note)` 受信時（`handle_create_note`、
+  `crates/seiran-common/src/jobs/inbound_activity_process.rs`）に Note の `to`/`cc` を
+  `seiran_common::ap::classify_ap_visibility` で判定し `posts.visibility` に保存する。
+  判定ルール（Mastodon互換）: `to` に `Public` があれば `public`、`cc` にのみあれば `unlisted`、
+  どちらにも無く `to` にフォロワーコレクション（`.../followers` で終わるURI）があれば
+  `followers_only`、それ以外は `direct`。ローカル投稿は現状常に `public` 固定（可視性選択UIは
+  将来課題、実装されたら `posts.visibility` へ書き込む経路を追加する）。
+- **API公開**: `NoteResponse`（`to_note_response`）は `visibility` が `public` の場合は省略、
+  それ以外は文字列で返す。`deliverFedi`/`deliverBsky` はローカル投稿（`actor_type == "local"`）
+  の場合のみ含める。
+- **フロント表示**: `NoteCard.tsx` が `lib/format.ts` の `deliveryBadges`/`visibilityBadge` を使い、
+  既存のプロトコルバッジ（`protocolBadge`、🦋=Bsky/🌐=Fedi/🀄=seiran）と同じ `.protoBadge` スタイルで
+  並べて表示する。配送先は 🌐=Fedi配送あり・🦋=Bsky配送あり、可視性は 🔒=フォロワーのみ・
+  🏠=unlisted（`public`/`direct` はアイコン無し）。タイムラインの表示制御・フィルタリングには使わない
+  （純粋に表示用途）。
 
 ### 1.4 `reactions` (リアクション独立テーブル)
 コンフリクトやデッドタプルの増殖を防ぐため、ポストに対する動的な絵文字リアクション・Likeはすべて独立した行として `INSERT` / `DELETE` 管理する。
