@@ -927,6 +927,9 @@ pub async fn resolve_bsky_pinned_post(state: &AppState, actor_id: i64) -> Option
         }
     };
     match state.posts.find_delivery_meta(latest_id).await {
+        // Bsky はプロトコル上 followers_only を表現できず、pinnedPost として同期すると
+        // Bsky上では誰でも見える形で公開されてしまう。direct も同様に厳格扱いし同期しない。
+        Ok(Some(meta)) if meta.visibility == "followers_only" || meta.visibility == "direct" => None,
         Ok(Some(meta)) => match (meta.at_uri, meta.at_cid) {
             (Some(uri), Some(cid)) => Some((uri, cid)),
             _ => None,

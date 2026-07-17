@@ -673,6 +673,9 @@ async fn handle_announce(
     let actor_uri = activity["actor"].as_str().ok_or("Announce: actor がありません")?;
     let object_uri = activity["object"].as_str().ok_or("Announce: object がありません")?;
     let published = activity["published"].as_str().unwrap_or("");
+    // Announce（リポスト）自身の to/cc から可視性を判定する（元ポストの可視性ではなく、
+    // このリポストという行為自体が公開/フォロワー限定/ひかえめのいずれで行われたか）。
+    let visibility = classify_ap_visibility(&as_string_list(&activity["to"]), &as_string_list(&activity["cc"]));
 
     // 公開日時を parse して snowflake ID を生成
     let created_at = published
@@ -721,7 +724,7 @@ async fn handle_announce(
     // リポストをDBに挿入
     inbox
         .post_repo
-        .insert_repost(post_id, actor_id, announce_id, repost_of_post_id, created_at, "public")
+        .insert_repost(post_id, actor_id, announce_id, repost_of_post_id, created_at, visibility)
         .await
         .map_err(|e| format!("リポスト挿入失敗: {}", e))?;
 

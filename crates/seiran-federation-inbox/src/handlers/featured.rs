@@ -40,11 +40,14 @@ pub async fn featured_handler(
     let actor_uri = format!("{}/users/{}", base, username);
     let followers_uri = format!("{}/followers", actor_uri);
 
+    // このエンドポイントは認証なしの完全匿名アクセスのため、followers_only/direct な
+    // ピン留め投稿は常に除外する（可視性による閲覧制御）。
     let rows = sqlx::query(
         "SELECT p.id, p.body, p.created_at
          FROM pinned_posts pp
          JOIN posts p ON p.id = pp.post_id
          WHERE pp.actor_id = $1 AND p.deleted_at IS NULL
+           AND p.visibility NOT IN ('followers_only', 'direct')
          ORDER BY pp.pinned_at DESC",
     )
     .bind(actor_id)

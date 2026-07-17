@@ -373,7 +373,7 @@ async fn build_profile_response(
 
     // ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
     // Fedi featured collection / Bsky pinnedPost 同期結果（`sync_remote_pinned_posts` 参照）。
-    let pinned_rows = match state.pinned_posts.list_timeline_by_actor(actor_id).await {
+    let pinned_rows = match state.pinned_posts.list_timeline_by_actor(actor_id, my_actor_id).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] ピン留め投稿取得失敗: {}", e);

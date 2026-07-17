@@ -21,7 +21,9 @@ pub trait PinnedPostsRepository: Send + Sync {
     async fn list_by_actor(&self, actor_id: i64) -> Result<Vec<i64>, sqlx::Error>;
 
     /// actor のピン留め投稿を、タイムラインと同じ結合行（アクター情報込み）で取得する（`pinned_at` 降順）。
-    async fn list_timeline_by_actor(&self, actor_id: i64) -> Result<Vec<TimelinePost>, sqlx::Error>;
+    /// `viewer_actor_id` は閲覧者の actor_id（匿名なら `None`）。`followers_only`/`direct` は
+    /// 投稿者本人または accepted フォロワーの閲覧者にのみ返す（可視性による閲覧制御）。
+    async fn list_timeline_by_actor(&self, actor_id: i64, viewer_actor_id: Option<i64>) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// リモートアクター（Fedi の featured collection / Bsky の `pinnedPost`）から取得した
     /// 最新のピン留め状態でこのテーブルを洗い替える。`post_ids` は同期元での並び順
@@ -87,21 +89,31 @@ impl PinnedPostsRepository for PgPinnedPostsRepository {
         .await
     }
 
-    async fn list_timeline_by_actor(&self, actor_id: i64) -> Result<Vec<TimelinePost>, sqlx::Error> {
+    async fn list_timeline_by_actor(&self, actor_id: i64, viewer_actor_id: Option<i64>) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
              FROM pinned_posts pp
              JOIN posts p ON p.id = pp.post_id
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE pp.actor_id = $1 AND p.deleted_at IS NULL
+               AND (
+                   p.visibility NOT IN ('followers_only', 'direct')
+                   OR p.actor_id = $2
+                   OR EXISTS (
+                       SELECT 1 FROM follows f
+                       WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                   )
+               )
              ORDER BY pp.pinned_at DESC",
         )
         .bind(actor_id)
+        .bind(viewer_actor_id)
         .fetch_all(&self.pool)
         .await
     }
