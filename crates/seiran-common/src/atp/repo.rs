@@ -247,8 +247,13 @@ pub fn create_commit(
     let unsigned_cbor =
         serde_ipld_dagcbor::to_vec(&unsigned).map_err(|e| RepoError::Cbor(e.to_string()))?;
 
-    // p256 Signer::sign は内部で SHA-256 を適用する
+    // p256 Signer::sign は内部で SHA-256 を適用する。
+    // RustCrypto の署名はデフォルトで "low-S" に正規化されない（ECDSA の malleability により
+    // 数学的にはどちらも有効な署名だが、AT Protocol の検証（indigo の HashAndVerify）は
+    // low-S 形式を必須としており、high-S のまま送ると about 50% の確率で
+    // 「cryptographic signature invalid」としてリジェクトされる。normalize_s() で矯正する。
     let sig: p256::ecdsa::Signature = signing_key.sign(&unsigned_cbor);
+    let sig = sig.normalize_s().unwrap_or(sig);
     let sig_bytes = sig.to_bytes().to_vec(); // IEEE P1363: R(32) || S(32) = 64 bytes
 
     let signed = SignedCommit {
@@ -782,6 +787,7 @@ pub fn build_commit_frame(
     ops: &[CommitEvtOp],
     blob_cids: &[Cid],
     time: &str,
+    prev_data: Option<&Cid>,
 ) -> Result<Vec<u8>, RepoError> {
     // ヘッダー CBOR
     // canonical 順: op(2) < t(1)... wait: "op"(2) vs "t"(1)
@@ -817,6 +823,9 @@ pub fn build_commit_frame(
     body_map.insert("ops".to_string(), Ipld::List(ops_ipld));
     if let Some(c) = prev_cid {
         body_map.insert("prev".to_string(), Ipld::Link(*c));
+    }
+    if let Some(c) = prev_data {
+        body_map.insert("prevData".to_string(), Ipld::Link(*c));
     }
     body_map.insert("rebase".to_string(), Ipld::Bool(false));
     body_map.insert("repo".to_string(), Ipld::String(did.to_string()));

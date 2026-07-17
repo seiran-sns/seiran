@@ -196,9 +196,14 @@ async fn handle_subscribe_repos(
                     .collect();
                 let car = evt.car_bytes.as_deref().unwrap_or(&[]);
                 let rev = evt.rev.as_deref().unwrap_or("");
+                // frame_bytes 未保存の旧イベント再構築用フォールバック。atp_repo_events は
+                // コミット時点の prevData を保持していないため None を渡す（通常この経路は
+                // 使われない。新規コミットは commit_record_inner 側で frame_bytes に
+                // prevData 込みで保存済み）。
                 build_commit_frame(
                     evt.id, &evt.did, &commit_cid, prev_cid.as_ref(),
                     rev, evt.since_rev.as_deref(), car, &ops, &[], &time_str,
+                    None,
                 )
             };
             if let Ok(frame) = frame_result {

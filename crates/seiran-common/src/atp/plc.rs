@@ -115,7 +115,10 @@ pub fn prepare_plc_genesis(
     let unsigned_cbor = serde_ipld_dagcbor::to_vec(&unsigned_op)
         .map_err(|e| PlcError::Cbor(e.to_string()))?;
 
+    // low-S 正規化（AT Protocol/PLC の検証は low-S 必須。crates/seiran-common/src/atp/repo.rs の
+    // create_commit と同じ理由）。
     let raw_sig: p256::ecdsa::Signature = rotation_signing_key.sign(&unsigned_cbor);
+    let raw_sig = raw_sig.normalize_s().unwrap_or(raw_sig);
     let sig_str = URL_SAFE_NO_PAD.encode(raw_sig.to_bytes().as_slice());
 
     // ② 署名済みオペレーションを DAG-CBOR エンコード → SHA-256 → DID

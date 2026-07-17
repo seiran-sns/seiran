@@ -413,16 +413,28 @@ async fn ensure_handle_txt_records(state: &AppState) {
 }
 
 /// Relay に requestCrawl を送って subscribeRepos 再接続を促す。
+/// ATP_RELAY_URL はカンマ区切りで複数指定でき、全てへ並行して送る
+/// （AtpCommitService::spawn_request_crawl と同じ規約）。
 async fn request_relay_crawl(state: &AppState) {
-    match state
-        .http_client
-        .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
-        .json(&serde_json::json!({"hostname": state.local_domain}))
-        .send()
-        .await
-    {
-        Ok(res) => tracing::info!("[atp] 起動時 requestCrawl → {}", res.status()),
-        Err(e) => tracing::error!("[atp] 起動時 requestCrawl 失敗: {}", e),
+    let relay_base_raw = std::env::var("ATP_RELAY_URL")
+        .unwrap_or_else(|_| "https://bsky.network".to_string());
+    let relay_bases: Vec<String> = relay_base_raw
+        .split(',')
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    for relay_base in relay_bases {
+        let url = format!("{}/xrpc/com.atproto.sync.requestCrawl", relay_base);
+        match state
+            .http_client
+            .post(&url)
+            .json(&serde_json::json!({"hostname": state.local_domain}))
+            .send()
+            .await
+        {
+            Ok(res) => tracing::info!("[atp] 起動時 requestCrawl({}) → {}", url, res.status()),
+            Err(e) => tracing::error!("[atp] 起動時 requestCrawl({}) 失敗: {}", url, e),
+        }
     }
 }
 

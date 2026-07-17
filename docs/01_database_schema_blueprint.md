@@ -57,6 +57,15 @@ CREATE TABLE actors (
     -- プロトコル固有の識別子（URI / DID）
     ap_uri VARCHAR(2048) UNIQUE, -- ActivityPubのActor URI (例: [https://example.com/users/foo](https://example.com/users/foo))
     at_did VARCHAR(255) UNIQUE,  -- AT ProtocolのDID (例: did:plc:abcdefg...)
+
+    -- ATP リポジトリ状態（ローカルユーザーのみ。seiran が PDS としてリポジトリを保持するために必要）
+    at_signing_key_pem TEXT,  -- リポジトリコミット署名用 P-256 秘密鍵（PEM）
+    at_repo_cid TEXT,         -- 直近コミットの CID（commit オブジェクト全体、subscribeRepos の `prev` に使う）
+    at_repo_rev TEXT,         -- 直近コミットの rev（TID、subscribeRepos の `since` に使う）
+    -- 直近コミット時点の MST root CID（commit オブジェクトの `data` フィールド）。
+    -- AT Protocol Sync 1.1 で必須の `#commit` イベント `prevData` フィールドを次回コミット時に
+    -- 埋めるために保持する（§10.6 参照。無いと2回目以降の全コミットがリレーにリジェクトされる）。
+    at_repo_data_cid TEXT,
     
     -- 表示用メタデータ
     username VARCHAR(255) NOT NULL, -- ユーザー名（@のあとの英数字）

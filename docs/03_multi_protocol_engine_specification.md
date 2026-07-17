@@ -910,6 +910,24 @@ profile:
 
 `avatar` blob の内部構造（`ref`/`size`/`$type`/`mimeType`）は 10.2 の画像 embed と同一。`encode_bsky_actor_profile`（`crates/seiran-common/src/atp/repo.rs`）は画像 embed 用の blob ref 構築ロジック（`build_blob_ipld`）を共有する。
 
+### 10.6 Bsky 配送不安定性の原因と修正（`prevData` フィールド・ECDSA low-S 正規化）
+
+2026-07-17、Bsky 公式リレー実装（`bluesky-social/indigo`、`cmd/relay`）をローカルで動かし実際のコミットを検証させることで、配送が特定タイミングで途絶する不具合の主因を2件特定した。
+
+**① `#commit` フレームの `prevData` フィールド欠落**
+
+AT Protocol Sync 1.1 は `subscribeRepos` の `#commit` イベントに `prevData`（前回コミット時点の MST root CID）を含めることを要求する（`indigo` の `cmd/relay/relay/verify.go` の `VerifyCommitMessageStrict`）。そのDIDの**初回コミットのみ** `prevData` 省略が許容され、**2回目以降のコミットは `prevData` が無いと `"missing prevData field"` で即リジェクトされる**。seiran の `build_commit_frame`（`crates/seiran-common/src/atp/repo.rs`）はこのフィールドを送っていなかったため、実質的に2回目以降のほぼ全コミットがリレーに拒否されていた。
+
+修正: `actors` テーブルに前回コミットの MST root CID を保持する `at_repo_data_cid` カラムを追加し（マイグレーション `20260717000000_actors_at_repo_data_cid.sql`）、`commit_record_inner` / `delete_atp_repost` / `delete_atp_like` / `commit_delete_follow` / `delete_atp_record_generic` の各コミット処理で、コミットのたびに新しい MST root CID をこのカラムへ保存し、次回コミット時に読み出して `build_commit_frame` の新しい `prev_data` 引数へ渡すようにした。
+
+**② ECDSA 署名の "low-S" 未正規化（約50%の確率でランダムに失敗）**
+
+AT Protocol の署名検証（`indigo` の `atcrypto.PublicKeyP256.HashAndVerify`）は ECDSA 署名のマレアビリティ対策として "low-S" 形式の署名を必須とする。RustCrypto の `p256::ecdsa::SigningKey::sign` はデフォルトで low-S 正規化を行わないため、生成される署名の s 値は数学的性質上ほぼ50%の確率で high-S になり、その場合 Bsky 側の検証で `"cryptographic signature invalid"` として拒否される。既存メモにあった「配送が特定タイミングで途絶える」という不規則な症状は、実際にはタイミングとは無関係で、コミットのたびにほぼコイントスの確率でランダムに発生していたものだった。
+
+修正: `crates/seiran-common/src/atp/repo.rs` の `create_commit`、および `crates/seiran-common/src/atp/plc.rs` の PLC genesis operation 署名の両方で、署名生成後に `Signature::normalize_s()` を呼んで low-S に正規化するよう変更した。
+
+両修正はローカルの `indigo`/`cmd/relay` を用いた実地検証で効果を確認済み（署名検証エラー・`missing prevData field` エラーとも解消）。デプロイ直後は各アカウントの最初の1コミットのみ、リレー側に残る旧状態の影響で `missing prevData field` が再発する可能性があるが、2回目以降は正常に処理される見込み。
+
 ## 11. ローカルユーザーのプロフィール配信（AP Actor icon/summary ＆ ATP profile 再コミット）
 
 ローカルユーザーが設定したアバター画像・自己紹介文（`actors.avatar_media_id` / `actors.bio`）は、以下の経路で AP・ATP 双方の対外公開データに反映される。

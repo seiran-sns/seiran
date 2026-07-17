@@ -174,18 +174,33 @@ impl AtpCommitService {
 
     fn spawn_request_crawl(&self) {
         if let Ok(local_domain) = std::env::var("LOCAL_DOMAIN") {
-            let http_client = Arc::clone(&self.http_client);
-            tokio::spawn(async move {
-                match http_client
-                    .post("https://bsky.network/xrpc/com.atproto.sync.requestCrawl")
-                    .json(&serde_json::json!({"hostname": local_domain}))
-                    .send()
-                    .await
-                {
-                    Ok(res) => tracing::info!("[atp] requestCrawl → {}", res.status()),
-                    Err(e) => tracing::error!("[atp] requestCrawl 失敗: {}", e),
-                }
-            });
+            // ATP_RELAY_URL はカンマ区切りで複数指定でき、全てへ並行して requestCrawl する。
+            // 未設定時は本番の Bsky 公式リレーのみ（従来通りの挙動）。ローカル調査用に自前の
+            // relay 実装を並行稼働させる場合は
+            // ATP_RELAY_URL=https://bsky.network,http://localhost:2470 のように追加する。
+            let relay_base_raw = std::env::var("ATP_RELAY_URL")
+                .unwrap_or_else(|_| "https://bsky.network".to_string());
+            let relay_bases: Vec<String> = relay_base_raw
+                .split(',')
+                .map(|s| s.trim().trim_end_matches('/').to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            for relay_base in relay_bases {
+                let http_client = Arc::clone(&self.http_client);
+                let local_domain = local_domain.clone();
+                tokio::spawn(async move {
+                    let url = format!("{}/xrpc/com.atproto.sync.requestCrawl", relay_base);
+                    match http_client
+                        .post(&url)
+                        .json(&serde_json::json!({"hostname": local_domain}))
+                        .send()
+                        .await
+                    {
+                        Ok(res) => tracing::info!("[atp] requestCrawl({}) → {}", url, res.status()),
+                        Err(e) => tracing::error!("[atp] requestCrawl({}) 失敗: {}", url, e),
+                    }
+                });
+            }
         }
     }
 
@@ -237,7 +252,7 @@ impl AtpCommitService {
     ) -> Result<CommitResult, AtpCommitError> {
         // ① アクター情報取得
         let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev
+            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
              FROM actors WHERE id = $1",
         )
         .bind(actor_id)
@@ -253,6 +268,8 @@ impl AtpCommitService {
         let prev_commit_cid_str: Option<String> =
             actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
         let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
+        let prev_data_cid_str: Option<String> =
+            actor_row.try_get::<Option<String>, _>("at_repo_data_cid")?;
 
         // ② 署名鍵をロード
         let signing_key = signing_key_from_pem(&signing_key_pem)?;
@@ -275,6 +292,9 @@ impl AtpCommitService {
         let prev_cid_parsed = prev_commit_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
+        let prev_data_cid_parsed = prev_data_cid_str
+            .as_deref()
+            .and_then(|s| cid_from_str(s).ok());
         let (commit_cid, commit_cbor) = create_commit(
             &at_did,
             &new_rev,
@@ -290,6 +310,7 @@ impl AtpCommitService {
         let diff_car = encode_car(&commit_cid, &new_blocks)?;
 
         let commit_cid_str = cid_to_string(&commit_cid);
+        let mst_root_cid_str = cid_to_string(&mst_root);
         let record_cid_str = cid_to_string(&record.cid);
 
         let mut tx = self.pool.begin().await?;
@@ -308,9 +329,10 @@ impl AtpCommitService {
         }
 
         // ⑧ actors UPDATE
-        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2 WHERE id = $3")
+        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
             .bind(&commit_cid_str)
             .bind(&new_rev)
+            .bind(&mst_root_cid_str)
             .bind(actor_id)
             .execute(&mut *tx)
             .await?;
@@ -388,6 +410,7 @@ impl AtpCommitService {
             &ws_ops,
             &record.blob_cids,
             &time_str,
+            prev_data_cid_parsed.as_ref(),
         ).ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
@@ -719,7 +742,7 @@ impl AtpCommitService {
     ) -> Result<(), AtpCommitError> {
         // ① アクター情報取得
         let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev
+            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
              FROM actors WHERE id = $1",
         )
         .bind(actor_id)
@@ -735,6 +758,8 @@ impl AtpCommitService {
         let prev_commit_cid_str: Option<String> =
             actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
         let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
+        let prev_data_cid_str: Option<String> =
+            actor_row.try_get::<Option<String>, _>("at_repo_data_cid")?;
 
         // ② 署名鍵をロード
         let signing_key = signing_key_from_pem(&signing_key_pem)?;
@@ -753,6 +778,9 @@ impl AtpCommitService {
         let prev_cid_parsed = prev_commit_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
+        let prev_data_cid_parsed = prev_data_cid_str
+            .as_deref()
+            .and_then(|s| cid_from_str(s).ok());
         let (commit_cid, commit_cbor) = create_commit(
             &at_did,
             &new_rev,
@@ -767,6 +795,7 @@ impl AtpCommitService {
         let diff_car = encode_car(&commit_cid, &new_blocks)?;
 
         let commit_cid_str = cid_to_string(&commit_cid);
+        let mst_root_cid_str = cid_to_string(&mst_root);
 
         let mut tx = self.pool.begin().await?;
 
@@ -784,9 +813,10 @@ impl AtpCommitService {
         }
 
         // ⑧ actors UPDATE
-        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2 WHERE id = $3")
+        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
             .bind(&commit_cid_str)
             .bind(&new_rev)
+            .bind(&mst_root_cid_str)
             .bind(actor_id)
             .execute(&mut *tx)
             .await?;
@@ -840,6 +870,7 @@ impl AtpCommitService {
             &ws_ops,
             &[],
             &time_str,
+            prev_data_cid_parsed.as_ref(),
         ).ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
@@ -887,7 +918,7 @@ impl AtpCommitService {
     ) -> Result<(), AtpCommitError> {
         // ① アクター情報取得
         let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev
+            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
              FROM actors WHERE id = $1",
         )
         .bind(actor_id)
@@ -903,6 +934,8 @@ impl AtpCommitService {
         let prev_commit_cid_str: Option<String> =
             actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
         let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
+        let prev_data_cid_str: Option<String> =
+            actor_row.try_get::<Option<String>, _>("at_repo_data_cid")?;
 
         // ② 署名鍵をロード
         let signing_key = signing_key_from_pem(&signing_key_pem)?;
@@ -921,6 +954,9 @@ impl AtpCommitService {
         let prev_cid_parsed = prev_commit_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
+        let prev_data_cid_parsed = prev_data_cid_str
+            .as_deref()
+            .and_then(|s| cid_from_str(s).ok());
         let (commit_cid, commit_cbor) = create_commit(
             &at_did,
             &new_rev,
@@ -935,6 +971,7 @@ impl AtpCommitService {
         let diff_car = encode_car(&commit_cid, &new_blocks)?;
 
         let commit_cid_str = cid_to_string(&commit_cid);
+        let mst_root_cid_str = cid_to_string(&mst_root);
 
         let mut tx = self.pool.begin().await?;
 
@@ -952,9 +989,10 @@ impl AtpCommitService {
         }
 
         // ⑧ actors UPDATE
-        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2 WHERE id = $3")
+        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
             .bind(&commit_cid_str)
             .bind(&new_rev)
+            .bind(&mst_root_cid_str)
             .bind(actor_id)
             .execute(&mut *tx)
             .await?;
@@ -1008,6 +1046,7 @@ impl AtpCommitService {
             &ws_ops,
             &[],
             &time_str,
+            prev_data_cid_parsed.as_ref(),
         ).ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
@@ -1040,7 +1079,7 @@ impl AtpCommitService {
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
         let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev
+            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
              FROM actors WHERE id = $1",
         )
         .bind(actor_id)
@@ -1056,6 +1095,8 @@ impl AtpCommitService {
         let prev_commit_cid_str: Option<String> =
             actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
         let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
+        let prev_data_cid_str: Option<String> =
+            actor_row.try_get::<Option<String>, _>("at_repo_data_cid")?;
 
         let signing_key = signing_key_from_pem(&signing_key_pem)?;
 
@@ -1070,6 +1111,9 @@ impl AtpCommitService {
         let prev_cid_parsed = prev_commit_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
+        let prev_data_cid_parsed = prev_data_cid_str
+            .as_deref()
+            .and_then(|s| cid_from_str(s).ok());
         let (commit_cid, commit_cbor) = create_commit(
             &at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key,
         )?;
@@ -1078,6 +1122,7 @@ impl AtpCommitService {
         new_blocks.push((commit_cid, commit_cbor));
         let diff_car = encode_car(&commit_cid, &new_blocks)?;
         let commit_cid_str = cid_to_string(&commit_cid);
+        let mst_root_cid_str = cid_to_string(&mst_root);
 
         let mut tx = self.pool.begin().await?;
 
@@ -1093,9 +1138,10 @@ impl AtpCommitService {
             .await?;
         }
 
-        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2 WHERE id = $3")
+        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
             .bind(&commit_cid_str)
             .bind(&new_rev)
+            .bind(&mst_root_cid_str)
             .bind(actor_id)
             .execute(&mut *tx)
             .await?;
@@ -1132,6 +1178,7 @@ impl AtpCommitService {
         let frame_opt = build_commit_frame(
             seq, &at_did, &commit_cid, prev_cid_parsed.as_ref(),
             &new_rev, prev_rev.as_deref(), &diff_car, &ws_ops, &[], &time_str,
+            prev_data_cid_parsed.as_ref(),
         ).ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
@@ -1165,7 +1212,7 @@ impl AtpCommitService {
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
         let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev
+            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
              FROM actors WHERE id = $1",
         )
         .bind(actor_id)
@@ -1181,6 +1228,8 @@ impl AtpCommitService {
         let prev_commit_cid_str: Option<String> =
             actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
         let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
+        let prev_data_cid_str: Option<String> =
+            actor_row.try_get::<Option<String>, _>("at_repo_data_cid")?;
 
         let signing_key = signing_key_from_pem(&signing_key_pem)?;
 
@@ -1195,6 +1244,9 @@ impl AtpCommitService {
         let prev_cid_parsed = prev_commit_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
+        let prev_data_cid_parsed = prev_data_cid_str
+            .as_deref()
+            .and_then(|s| cid_from_str(s).ok());
         let (commit_cid, commit_cbor) = create_commit(
             &at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key,
         )?;
@@ -1203,6 +1255,7 @@ impl AtpCommitService {
         new_blocks.push((commit_cid, commit_cbor));
         let diff_car = encode_car(&commit_cid, &new_blocks)?;
         let commit_cid_str = cid_to_string(&commit_cid);
+        let mst_root_cid_str = cid_to_string(&mst_root);
 
         let mut tx = self.pool.begin().await?;
 
@@ -1218,9 +1271,10 @@ impl AtpCommitService {
             .await?;
         }
 
-        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2 WHERE id = $3")
+        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
             .bind(&commit_cid_str)
             .bind(&new_rev)
+            .bind(&mst_root_cid_str)
             .bind(actor_id)
             .execute(&mut *tx)
             .await?;
@@ -1258,6 +1312,7 @@ impl AtpCommitService {
         let frame_opt = build_commit_frame(
             seq, &at_did, &commit_cid, prev_cid_parsed.as_ref(),
             &new_rev, prev_rev.as_deref(), &diff_car, &ws_ops, &[], &time_str,
+            prev_data_cid_parsed.as_ref(),
         ).ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
