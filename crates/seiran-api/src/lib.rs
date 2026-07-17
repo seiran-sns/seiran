@@ -314,6 +314,9 @@ pub fn router(state: AppState) -> Router {
             post(handlers::drive::create_drive_file)
                 .layer(DefaultBodyLimit::max(105 * 1024 * 1024)),
         )
+        // 音声・動画の簡易視聴ページ（Bskyの外部リンクカードの参照先。直リンクだと
+        // ダウンロードになってしまうため<audio>/<video>タグのみのHTMLを返す）
+        .route("/api/media/:media_file_id/watch", get(handlers::drive::watch_media))
         // 認証
         .route("/api/auth/verify-email", post(handlers::email_verify::request_email_verification))
         .route("/api/auth/verify-token", get(handlers::email_verify::verify_email_token))

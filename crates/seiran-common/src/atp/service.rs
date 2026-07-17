@@ -457,7 +457,7 @@ impl AtpCommitService {
         // 外部リンクカード（app.bsky.embed.external）にフォールバックする。
         let (bsky_images, video_candidate, non_image_url) = if !attachment_ids.is_empty() {
             let rows = sqlx::query(
-                "SELECT mf.sha256, mf.size, mf.mime_type, mf.width, mf.height, mf.storage_key, sp.public_url,
+                "SELECT mf.id, mf.sha256, mf.size, mf.mime_type, mf.width, mf.height, mf.storage_key, sp.public_url,
                         mf.bsky_video_cid, mf.bsky_video_status
                  FROM media_files mf
                  JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -502,8 +502,14 @@ impl AtpCommitService {
                     }
                 }
                 if non_image_url.is_none() {
-                    if let (Ok(storage_key), Ok(public_url)) = (r.try_get::<String, _>("storage_key"), r.try_get::<String, _>("public_url")) {
-                        non_image_url = Some(format!("{}/{}", public_url.trim_end_matches('/'), storage_key));
+                    // 音声（Bsky に専用embedが無い）・動画パイプライン未完了時の
+                    // フォールバックリンク先は、メディアファイルの直リンクではなく
+                    // 簡易視聴ページ（<audio>/<video> タグ1個だけのHTML、
+                    // `handlers::drive::watch_media`）にする。直リンクだとブラウザが
+                    // ダウンロードしてしまい再生できないため（2026-07-17 マイケル指摘）。
+                    if let Ok(media_file_id) = r.try_get::<i64, _>("id") {
+                        let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_default();
+                        non_image_url = Some(format!("https://{}/api/media/{}/watch", local_domain, media_file_id));
                     }
                 }
             }

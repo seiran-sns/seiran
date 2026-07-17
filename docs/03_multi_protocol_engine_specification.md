@@ -1140,6 +1140,28 @@ Content-Type について: `video.bsky.app`からの代理POSTは実機で
 コミットする（`crates/seiran-api/src/handlers/notes/delivery.rs`の
 `has_pending_video`/`deliver_regular_post`）。
 
+### 12.5 音声・動画フォールバックの簡易視聴ページ（2026-07-17）
+
+AT Protocol の `app.bsky.embed.*` には音声専用の embed type が存在しない。
+そのため音声添付は常に `app.bsky.embed.external`（外部リンクカード）になる。
+動画も `bsky_video_status != 'ready'`（パイプライン未完了・失敗）の場合は
+同じく `external` フォールバックになる（§12.4）。
+
+以前はこの `external` リンクの `uri` にメディアファイルの直リンク（S3/CDN
+URL）をそのまま使っていたが、これだとブラウザが（特にモバイルの一部環境で）
+ファイルをダウンロードしてしまい、その場で再生できずユーザー体験が悪い
+（2026-07-17 マイケル指摘）。
+
+修正: `AtpCommitService::commit_post`（`crates/seiran-common/src/atp/service.rs`）
+の `non_image_url` 構築を、直リンクではなく簡易視聴ページ
+`https://{local_domain}/api/media/{media_file_id}/watch` に変更した。
+このエンドポイント（`handlers::drive::watch_media`、
+`crates/seiran-api/src/handlers/drive.rs`）は、MIME type に応じて
+`<video>`/`<audio>` タグ1個だけを含む最小限のHTMLを返す（`controls
+autoplay playsinline`）。`/api/` 名前空間の下に置いているため、
+`docker/nginx*.conf` の既存の `location /api/` がそのまま拾い、
+インフラ設定の変更は不要。
+
 ## 13. ポストのピン留め（#61）
 
 ローカルユーザーは自分のポストを最大5件までピン留めでき、5件を超えると最古のもの

@@ -1,6 +1,7 @@
 use axum::{
-    extract::{Multipart, State},
-    http::HeaderMap,
+    extract::{Multipart, Path, State},
+    http::{HeaderMap, StatusCode},
+    response::{Html, IntoResponse},
     Json,
 };
 use chrono::Utc;
@@ -494,4 +495,47 @@ async fn build_public_url(
         Ok(Some(p)) => format!("{}/{}", p.public_url.trim_end_matches('/'), storage_key),
         _ => storage_key.to_owned(),
     }
+}
+
+/// `GET /api/media/:media_file_id/watch`
+///
+/// 音声・動画の簡易視聴ページ。Bsky の `app.bsky.embed.external` は音声専用の
+/// embed typeを持たず、動画も `bsky_video_status='ready'` でなければ external
+/// フォールバックになる（`AtpCommitService::commit_post`）。そのリンク先が
+/// メディアファイルの直リンクだとブラウザがダウンロードしてしまい再生できない
+/// ため、`<audio>`/`<video>` タグ1個だけの簡素なHTMLを返す
+/// （2026-07-17 マイケル指摘）。
+pub async fn watch_media(
+    Path(media_file_id): Path<i64>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let mf = match state.media_files.find_by_id(media_file_id).await {
+        Ok(Some(mf)) => mf,
+        Ok(None) => return (StatusCode::NOT_FOUND, "見つかりません").into_response(),
+        Err(e) => {
+            tracing::error!("[watch_media] DB エラー: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        }
+    };
+
+    let url = build_public_url(state.storage_providers.as_ref(), mf.storage_provider_id, &mf.storage_key).await;
+    let tag = if mf.mime_type.starts_with("video/") { "video" } else { "audio" };
+    let html = format!(
+        r#"<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>seiran メディア</title>
+<style>
+html,body{{margin:0;height:100%;background:#000;display:flex;align-items:center;justify-content:center}}
+{tag}{{max-width:100%;max-height:100%}}
+</style>
+</head>
+<body>
+<{tag} src="{url}" controls autoplay playsinline></{tag}>
+</body>
+</html>"#
+    );
+    Html(html).into_response()
 }
