@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use seiran_common::{
     atp::sign_service_auth_jwt,
-    ext_for_mime_type, generate_snowflake_id, is_allowed_video_or_audio_mime,
+    convert_audio_to_gray_video, ext_for_mime_type, generate_snowflake_id, is_allowed_video_or_audio_mime,
     process_image, probe_video_or_audio, sniff_mime_type, MediaKind,
     queue::worker::priority,
     repository::{Actor, CreateMediaFile},
@@ -249,8 +249,11 @@ async fn create_video_or_audio_file(
         // 同一 sha256 の既存レコードを再利用する場合でも、過去の Bsky 動画パイプライン
         // 提出が 'failed'（またはそもそも未提出）のままだと、再アップロードしても
         // 永久に video embed 化されない（isReused の早期 return で submit が
-        // スキップされていた既存バグ）。再送信を試みる。
-        if existing.mime_type.starts_with("video/") && deliver_to_bsky {
+        // スキップされていた既存バグ）。再送信を試みる。音声は Bsky には専用embedが
+        // 無いため、グレー背景動画に変換してから提出する（2026-07-17 マイケル発案）。
+        let existing_is_video = existing.mime_type.starts_with("video/");
+        let existing_is_audio = existing.mime_type.starts_with("audio/");
+        if (existing_is_video || existing_is_audio) && deliver_to_bsky {
             if let Some(actor) = actor {
                 let status: Option<String> = sqlx::query_scalar(
                     "SELECT bsky_video_status FROM media_files WHERE id = $1",
@@ -261,7 +264,14 @@ async fn create_video_or_audio_file(
                 .ok()
                 .flatten();
                 if !matches!(status.as_deref(), Some("pending") | Some("ready")) {
-                    submit_to_bsky_video_pipeline(state, actor, existing.id, raw_bytes.clone()).await;
+                    let bytes_for_pipeline = if existing_is_audio {
+                        convert_audio_to_gray_video(&raw_bytes, ext_for_mime_type(&existing.mime_type)).await
+                    } else {
+                        Some(raw_bytes.clone())
+                    };
+                    if let Some(bytes_for_pipeline) = bytes_for_pipeline {
+                        submit_to_bsky_video_pipeline(state, actor, existing.id, bytes_for_pipeline).await;
+                    }
                 }
             }
         }
@@ -304,10 +314,16 @@ async fn create_video_or_audio_file(
         None
     };
 
-    // Bsky動画パイプラインへの提出にはS3保存後も生バイト列が要るため、
-    // move される前に複製しておく（音声やdeliver_to_bsky=falseでは複製しない）。
-    let video_bytes_for_bsky = if mime_type.starts_with("video/") && deliver_to_bsky {
+    // Bsky動画パイプラインへの提出用バイト列を用意する（deliver_to_bsky=falseでは不要）。
+    // 動画はそのまま、音声は「グレー背景515x75の静止画 + 音声トラック」のmp4に変換して
+    // 提出する。Bskyには音声専用embedが無く動画embedしか無いため
+    // （2026-07-17 マイケル発案）。
+    let video_bytes_for_bsky = if !deliver_to_bsky {
+        None
+    } else if mime_type.starts_with("video/") {
         Some(raw_bytes.clone())
+    } else if mime_type.starts_with("audio/") {
+        convert_audio_to_gray_video(&raw_bytes, ext_for_mime_type(&mime_type)).await
     } else {
         None
     };
@@ -421,12 +437,16 @@ async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_fi
 
     // 同一内容の動画が既にBluesky側で処理済みの場合、409 Conflict + "already_exists"
     // だが有効なjobIdは返ってくる（実機確認済み）。この場合も成功として扱う。
+    // jobIdが空文字列の場合は「失敗レスポンスにたまたまjobIdフィールドが存在した」
+    // だけなので無効扱いする（2026-07-17、これが原因でエラー詳細が握り潰されていた
+    // バグを修正）。
     let job_id = serde_json::from_str::<serde_json::Value>(&body_text)
         .ok()
         .and_then(|v| {
             v.get("jobId").and_then(|j| j.as_str()).map(|s| s.to_string())
                 .or_else(|| v.get("jobStatus").and_then(|j| j.get("jobId")).and_then(|j| j.as_str()).map(|s| s.to_string()))
-        });
+        })
+        .filter(|s| !s.is_empty());
 
     let Some(job_id) = job_id else {
         tracing::error!("[BskyVideo] uploadVideo失敗 media_file_id={} status={} body={}", media_file_id, status, body_text);

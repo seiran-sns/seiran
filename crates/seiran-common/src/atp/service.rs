@@ -458,7 +458,7 @@ impl AtpCommitService {
         let (bsky_images, video_candidate, non_image_url) = if !attachment_ids.is_empty() {
             let rows = sqlx::query(
                 "SELECT mf.id, mf.sha256, mf.size, mf.mime_type, mf.width, mf.height, mf.storage_key, sp.public_url,
-                        mf.bsky_video_cid, mf.bsky_video_status
+                        mf.bsky_video_cid, mf.bsky_video_status, mf.bsky_video_size
                  FROM media_files mf
                  JOIN storage_providers sp ON sp.id = mf.storage_provider_id
                  WHERE mf.id = ANY($1)
@@ -488,14 +488,34 @@ impl AtpCommitService {
                     });
                     continue;
                 }
-                if mime_type.starts_with("video/") && video_candidate.is_none() {
+                let is_video = mime_type.starts_with("video/");
+                let is_audio = mime_type.starts_with("audio/");
+                if (is_video || is_audio) && video_candidate.is_none() {
                     let status: Option<String> = r.try_get("bsky_video_status").unwrap_or(None);
                     let video_cid: Option<String> = r.try_get("bsky_video_cid").unwrap_or(None);
                     if status.as_deref() == Some("ready") {
                         if let Some(video_cid) = video_cid {
+                            // Bsky側は必ずmp4へトランスコードするため、embedのmime_typeは
+                            // 元がaudio/*でも常にvideo/mp4を報告する。size もオリジナルの
+                            // アップロードサイズではなく、実際にトランスコードされた
+                            // バイト列サイズ（bsky_video_size）を優先する
+                            // （無ければ従来通り media_files.size にフォールバック）。
+                            // 音声を変換したグレー背景動画の解像度は
+                            // crate::storage::media_probe::AUDIO_VIDEO_WIDTH/HEIGHT
+                            // （convert_audio_to_gray_video が実際に生成する解像度）と
+                            // 必ず一致させる。
+                            let bsky_size: Option<i64> = r.try_get("bsky_video_size").unwrap_or(None);
+                            let (embed_width, embed_height) = if is_audio {
+                                (crate::AUDIO_VIDEO_WIDTH as i32, crate::AUDIO_VIDEO_HEIGHT as i32)
+                            } else {
+                                (width.unwrap_or(0), height.unwrap_or(0))
+                            };
                             video_candidate = Some(BskyEmbed::Video {
-                                cid: video_cid, mime_type: mime_type.clone(), size,
-                                width: width.unwrap_or(0), height: height.unwrap_or(0),
+                                cid: video_cid,
+                                mime_type: "video/mp4".to_string(),
+                                size: bsky_size.unwrap_or(size),
+                                width: embed_width,
+                                height: embed_height,
                             });
                             continue;
                         }

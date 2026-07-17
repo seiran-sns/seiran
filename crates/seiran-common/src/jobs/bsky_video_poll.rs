@@ -84,20 +84,30 @@ pub async fn handle(media_file_id: i64, ctx: Arc<JobContext>) -> Result<(), Stri
 
     match state {
         "JOB_STATE_COMPLETED" => {
-            let Some(cid) = job_status.get("blob").and_then(|b| b.get("ref")).and_then(|r| r.get("$link")).and_then(|v| v.as_str()) else {
+            let Some(blob) = job_status.get("blob") else {
+                tracing::info!("[BskyVideoPoll] 完了状態だがblobが無い media_file_id={}", media_file_id);
+                mark_failed(pool, media_file_id).await;
+                return Ok(());
+            };
+            let Some(cid) = blob.get("ref").and_then(|r| r.get("$link")).and_then(|v| v.as_str()) else {
                 tracing::info!("[BskyVideoPoll] 完了状態だがblob CIDが無い media_file_id={}", media_file_id);
                 mark_failed(pool, media_file_id).await;
                 return Ok(());
             };
+            // トランスコード後の実際のバイト列サイズ。media_files.size（アップロード時の
+            // オリジナルサイズ）とは異なるため別カラムに保持する（app.bsky.embed.video の
+            // size フィールドに使う。実機確認: 2,867,780→287,123 バイトのように変わる）。
+            let bsky_size = blob.get("size").and_then(|v| v.as_i64());
             sqlx::query(
-                "UPDATE media_files SET bsky_video_cid = $1, bsky_video_status = 'ready' WHERE id = $2",
+                "UPDATE media_files SET bsky_video_cid = $1, bsky_video_status = 'ready', bsky_video_size = $2 WHERE id = $3",
             )
             .bind(cid)
+            .bind(bsky_size)
             .bind(media_file_id)
             .execute(pool)
             .await
             .map_err(|e| format!("DB更新失敗: {}", e))?;
-            tracing::info!("[BskyVideoPoll] 完了 media_file_id={} cid={}", media_file_id, cid);
+            tracing::info!("[BskyVideoPoll] 完了 media_file_id={} cid={} size={:?}", media_file_id, cid, bsky_size);
             Ok(())
         }
         "JOB_STATE_FAILED" => {

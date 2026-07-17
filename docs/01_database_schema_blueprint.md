@@ -481,6 +481,7 @@ CREATE TABLE media_files (
     bsky_video_job_id    TEXT,                         -- Bsky公式動画パイプラインのuploadVideo jobId
     bsky_video_cid       TEXT,                         -- getJobStatus完了時に得られるblob CID
     bsky_video_status    TEXT,                         -- NULL(対象外)/'pending'/'ready'/'failed'
+    bsky_video_size      BIGINT,                       -- 実際にトランスコードされたバイト列サイズ（size とは別物。Doc3 §12.6）
     uploaded_by_actor_id BIGINT REFERENCES actors(id) ON DELETE SET NULL, -- GC・監査用（オーナーシップではない）
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
 

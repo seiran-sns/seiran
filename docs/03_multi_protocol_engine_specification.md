@@ -1162,6 +1162,46 @@ autoplay playsinline`）。`/api/` 名前空間の下に置いているため、
 `docker/nginx*.conf` の既存の `location /api/` がそのまま拾い、
 インフラ設定の変更は不要。
 
+### 12.6 音声投稿の `app.bsky.embed.video` 化（グレー背景動画変換、2026-07-17）
+
+§12.5 の視聴ページはあくまで external リンクカードの改善であり、Bsky タイムライン
+上でネイティブ再生されるわけではない。より良い体験として、音声を「グレー背景の
+静止画 + 音声トラック」の mp4 動画に変換し、動画パイプライン（§12.1〜§12.4）に
+そのまま載せることで `app.bsky.embed.video` として扱えるようにした
+（マイケル発案）。
+
+- `convert_audio_to_gray_video`（`crates/seiran-common/src/storage/media_probe.rs`）
+  が `ffmpeg` の `lavfi` color ソース（無音映像）と音声入力を `-shortest` で結合し、
+  `frag_keyframe+empty_moov` フラグで pipe 出力可能な mp4 を生成する。
+- 解像度は `AUDIO_VIDEO_WIDTH`/`AUDIO_VIDEO_HEIGHT` 定数（**80x20、4:1**）。
+  実機検証で以下が判明した:
+  - 515x75（6.87:1、当初案）→ `uploadVideo` が `"video aspect ratio is too wide"`
+    で即座に拒否（`app.bsky.video.uploadVideo` のバリデーション）。
+  - 2:1（600x300）・3:1（600x200・180x60）は許容。
+  - 36x12（3:1、432px²）→ `uploadVideo` 自体は通るが、後続の
+    `getJobStatus` が `"video processing error"` で失敗（解像度が小さすぎる）。
+  - 80x20（1600px²、4:1）→ 実機で再生確認済み。データ量を切り詰めつつ
+    動作する下限に近い値として採用。
+  - フレームレートは `r=2`（2fps）に抑えてファイルサイズを削減（元の音声
+    21KB → 変換後mp4 約90KB程度、実測）。
+- `handlers::drive::create_video_or_audio_file` は、`mime_type` が `audio/*` の
+  場合この変換を行ってから `submit_to_bsky_video_pipeline` に渡す（動画は従来
+  通り無変換）。isReused（既存レコード再利用）時の再送信ロジックも同様に対応。
+- `AtpCommitService::commit_post` の embed 判定は `mime_type.starts_with("audio/")`
+  も `video_candidate` の対象に含め、`bsky_video_status='ready'` なら
+  `app.bsky.embed.video` を使う。`aspectRatio` は音声由来の場合
+  `AUDIO_VIDEO_WIDTH`/`HEIGHT` 固定、`mimeType` は常に `video/mp4`
+  （Bsky側は必ずmp4へトランスコードするため、元のオリジナルmime_typeは使わない）。
+- `size` フィールドは `media_files.bsky_video_size`（実際にトランスコードされた
+  バイト列サイズ、`Job::BskyVideoPoll` が `getJobStatus` の `blob.size` から保存。
+  §12.4 のマイグレーション `20260717030000_media_files_bsky_video_size.sql`）を
+  優先する。これは音声変換に限らず**通常の動画埋め込みでも実は必要な修正**
+  だった。トランスコード後の実バイト数は `media_files.size`（アップロード時の
+  オリジナルサイズ）と大きく異なる（実測: 2,867,780→287,123バイトのように変わる）。
+- 副次的に発見・修正: `submit_to_bsky_video_pipeline` の `jobId` 抽出が
+  空文字列を有効な値として扱ってしまい、失敗時のエラー詳細
+  （`{"error": "..."}`）がログに出ずデバッグを妨げていたバグも修正した。
+
 ## 13. ポストのピン留め（#61）
 
 ローカルユーザーは自分のポストを最大5件までピン留めでき、5件を超えると最古のもの
