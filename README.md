@@ -35,7 +35,7 @@ Fediverse インスタンスとしても、Bluesky の PDS（Personal Data Serve
 
 ## 開発環境セットアップ
 
-前提: Rust ツールチェイン、Node.js、Docker（`docker compose`）、`psql`/`pg_config` が利用可能なこと。
+前提: Rust ツールチェイン、Node.js、Docker（`docker compose`）、`psql`/`pg_config`、`ffmpeg`/`ffprobe`（動画・音声添付の処理に使用）が利用可能なこと。
 
 ```bash
 # 1. 環境変数ファイルを作成
