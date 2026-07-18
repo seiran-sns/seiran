@@ -1,25 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, ActorSuggestion, ApiError, getErrorMessage, ListDetail, ListSummary } from "../api/client";
+import { useTranslation } from "react-i18next";
+import { api, ActorSuggestion, getErrorMessage, ListDetail, ListSummary } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ListsSettings.module.css";
 
-const LIST_ERROR: Record<string, string> = {
-  LIST_LIMIT_EXCEEDED: "リストは最大30個までです",
-  LIST_MEMBER_LIMIT_EXCEEDED: "リストのメンバーは最大500人までです",
-  LIST_NOT_FOUND: "リストが見つかりません",
-  LIST_NOT_OWNED: "自分のリストではありません",
-};
-
-function listErrorMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    return LIST_ERROR[err.code] ?? getErrorMessage(err);
-  }
-  return getErrorMessage(err);
-}
-
 export default function ListsSettingsPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
 
   // AppShell.module.css の右ペイン非表示ブレークポイント（1400px）と合わせる。
@@ -61,7 +49,7 @@ export default function ListsSettingsPage() {
     return api.lists
       .list()
       .then(setLists)
-      .catch((e) => setError(listErrorMessage(e)));
+      .catch((e) => setError(getErrorMessage(e)));
   }
 
   useEffect(() => {
@@ -83,7 +71,7 @@ export default function ListsSettingsPage() {
         setEditName(d.name);
         setEditIsPublic(d.is_public);
       })
-      .catch((e) => !cancelled && setError(listErrorMessage(e)))
+      .catch((e) => !cancelled && setError(getErrorMessage(e)))
       .finally(() => !cancelled && setDetailLoading(false));
     setMemberTarget("");
     setSuggestions([]);
@@ -133,7 +121,7 @@ export default function ListsSettingsPage() {
       await reloadLists();
       setSelectedId(created.id);
     } catch (err) {
-      setError(listErrorMessage(err));
+      setError(getErrorMessage(err));
     } finally {
       setCreating(false);
     }
@@ -152,21 +140,21 @@ export default function ListsSettingsPage() {
       const d = await api.lists.get(selectedId);
       setDetail(d);
     } catch (err) {
-      setError(listErrorMessage(err));
+      setError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
   }
 
   async function deleteList(id: string) {
-    if (!confirm("このリストを削除しますか？元に戻せません。")) return;
+    if (!confirm(t("lists:listsSettingsPage.deleteListConfirm"))) return;
     setError("");
     try {
       await api.lists.remove(id);
       if (selectedId === id) setSelectedId(null);
       await reloadLists();
     } catch (err) {
-      setError(listErrorMessage(err));
+      setError(getErrorMessage(err));
     }
   }
 
@@ -186,7 +174,7 @@ export default function ListsSettingsPage() {
       setDetail(d);
       await reloadLists();
     } catch (err) {
-      setMemberError(listErrorMessage(err));
+      setMemberError(getErrorMessage(err));
     } finally {
       setAddingMember(false);
     }
@@ -201,7 +189,7 @@ export default function ListsSettingsPage() {
       setDetail(d);
       await reloadLists();
     } catch (err) {
-      setError(listErrorMessage(err));
+      setError(getErrorMessage(err));
     }
   }
 
@@ -209,9 +197,9 @@ export default function ListsSettingsPage() {
     <>
       <header className={panel.header}>
         <button className={panel.backBtn} onClick={() => navigate(-1)}>
-          ← 戻る
+          ← {t("common:back")}
         </button>
-        <span className={panel.title}>リスト管理</span>
+        <span className={panel.title}>{t("lists:listsSettingsPage.title")}</span>
       </header>
 
       {error && <p className={styles.error}>{error}</p>}
@@ -221,7 +209,7 @@ export default function ListsSettingsPage() {
           className={styles.input}
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          placeholder="新しいリスト名"
+          placeholder={t("lists:listsSettingsPage.newListNamePlaceholder")}
           maxLength={100}
         />
         <label className={styles.checkboxLabel}>
@@ -230,17 +218,17 @@ export default function ListsSettingsPage() {
             checked={newIsPublic}
             onChange={(e) => setNewIsPublic(e.target.checked)}
           />
-          公開
+          {t("lists:listsSettingsPage.publicLabel")}
         </label>
         <button className={styles.save} type="submit" disabled={creating || !newName.trim()}>
-          {creating ? "作成中..." : "作成"}
+          {creating ? t("lists:listsSettingsPage.creatingButton") : t("common:create")}
         </button>
       </form>
 
       {loading ? (
-        <p className={panel.message}>読み込み中...</p>
+        <p className={panel.message}>{t("common:loading")}</p>
       ) : lists.length === 0 ? (
-        <p className={panel.message}>まだリストがありません。</p>
+        <p className={panel.message}>{t("lists:listsSettingsPage.noLists")}</p>
       ) : (
         <ul className={styles.listItems}>
           {lists.map((l) => (
@@ -251,7 +239,8 @@ export default function ListsSettingsPage() {
               >
                 <span className={styles.listItemName}>{l.name}</span>
                 <span className={styles.listItemMeta}>
-                  {l.is_public ? "公開" : "非公開"} ・ {l.member_count}人
+                  {l.is_public ? t("lists:listsSettingsPage.isPublicLabel") : t("lists:listsSettingsPage.isPrivateLabel")} ・{" "}
+                  {t("lists:listsSettingsPage.memberCount", { count: l.member_count })}
                 </span>
               </button>
             </li>
@@ -262,12 +251,14 @@ export default function ListsSettingsPage() {
   );
 
   const detailPanel = !selectedId ? (
-    <p className={panel.message}>左のリストを選択してください。</p>
+    <p className={panel.message}>{t("lists:listsSettingsPage.selectListPrompt")}</p>
   ) : detailLoading || !detail ? (
-    <p className={panel.message}>読み込み中...</p>
+    <p className={panel.message}>{t("common:loading")}</p>
   ) : (
     <>
-      <div className={panel.rightHeader}>{detail.name} の編集</div>
+      <div className={panel.rightHeader}>
+        {t("lists:listsSettingsPage.editingHeader", { name: detail.name })}
+      </div>
 
       <form className={styles.editForm} onSubmit={saveEdit}>
         <input
@@ -282,13 +273,13 @@ export default function ListsSettingsPage() {
             checked={editIsPublic}
             onChange={(e) => setEditIsPublic(e.target.checked)}
           />
-          公開
+          {t("lists:listsSettingsPage.publicLabel")}
         </label>
         <button className={styles.save} type="submit" disabled={saving || !editName.trim()}>
-          {saving ? "保存中..." : "保存"}
+          {saving ? t("common:saving") : t("common:save")}
         </button>
         <button type="button" className={styles.dangerBtn} onClick={() => deleteList(detail.id)}>
-          削除
+          {t("common:delete")}
         </button>
       </form>
 
@@ -302,7 +293,7 @@ export default function ListsSettingsPage() {
               setShowSuggestions(true);
             }}
             onFocus={() => setShowSuggestions(true)}
-            placeholder="ID/ハンドル/ニックネームで検索、または @user@domain・https://...・did:..."
+            placeholder={t("lists:listsSettingsPage.memberSearchPlaceholder")}
             autoComplete="off"
           />
           {showSuggestions && suggestions.length > 0 && (
@@ -337,7 +328,7 @@ export default function ListsSettingsPage() {
           )}
         </div>
         <button className={styles.save} type="submit" disabled={addingMember || !memberTarget.trim()}>
-          {addingMember ? "追加中..." : "メンバー追加"}
+          {addingMember ? t("lists:listsSettingsPage.addingMemberButton") : t("lists:listsSettingsPage.addMemberButton")}
         </button>
       </form>
       {memberError && <p className={styles.error}>{memberError}</p>}
@@ -357,11 +348,11 @@ export default function ListsSettingsPage() {
             </span>
             <span className={styles.memberType}>{m.actor_type}</span>
             <button className={styles.removeBtn} onClick={() => removeMember(m.actor_id)}>
-              削除
+              {t("common:delete")}
             </button>
           </li>
         ))}
-        {detail.members.length === 0 && <p className={panel.message}>まだメンバーがいません。</p>}
+        {detail.members.length === 0 && <p className={panel.message}>{t("lists:listsSettingsPage.noMembers")}</p>}
       </ul>
     </>
   );

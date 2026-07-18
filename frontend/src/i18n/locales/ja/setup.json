@@ -1,0 +1,11 @@
+{
+  "setup": {
+    "title": "初期セットアップ",
+    "description": "管理者アカウントを作成してください。",
+    "usernameLabel": "ユーザーネーム",
+    "emailLabel": "メールアドレス",
+    "passwordLabel": "パスワード（8文字以上）",
+    "submitting": "セットアップ中...",
+    "submit": "管理者アカウントを作成"
+  }
+}

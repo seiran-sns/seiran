@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import { isAdminRole } from "../../lib/roles";
@@ -7,23 +8,24 @@ import styles from "./AppShell.module.css";
 interface NavItem {
   to: string;
   icon: string;
-  label: string;
+  labelKey: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: "/", icon: "🏠", label: "ホーム" },
-  { to: "/search", icon: "🔍", label: "検索" },
-  { to: "/notifications", icon: "🔔", label: "通知" },
-  { to: "/settings/lists", icon: "📋", label: "リスト" },
+  { to: "/", icon: "🏠", labelKey: "leftNav.home" },
+  { to: "/search", icon: "🔍", labelKey: "leftNav.search" },
+  { to: "/notifications", icon: "🔔", labelKey: "leftNav.notifications" },
+  { to: "/settings/lists", icon: "📋", labelKey: "leftNav.lists" },
 ];
 
 export default function LeftNav({ onCompose }: { onCompose: () => void }) {
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
   const site = useSiteMeta();
   const navigate = useNavigate();
 
   const navItems = isAdminRole(user?.role)
-    ? [...NAV_ITEMS, { to: "/admin", icon: "🛡️", label: "管理" }]
+    ? [...NAV_ITEMS, { to: "/admin", icon: "🛡️", labelKey: "leftNav.admin" }]
     : NAV_ITEMS;
 
   function handleLogout() {
@@ -49,7 +51,7 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
               }
             >
               <span className={styles.navIcon}>{item.icon}</span>
-              <span className={styles.navLabel}>{item.label}</span>
+              <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
             </NavLink>
           </li>
         ))}
@@ -57,14 +59,14 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
 
       <button className={styles.composeBtn} onClick={onCompose}>
         <span className={styles.navIcon}>✏️</span>
-        <span className={styles.navLabel}>投稿</span>
+        <span className={styles.navLabel}>{t("nav:leftNav.composeLabel")}</span>
       </button>
 
       <div className={styles.navFooter}>
         <button
           className={styles.userChip}
           onClick={() => user?.username && navigate(`/@${user.username}`)}
-          title="自分のプロフィール"
+          title={t("nav:leftNav.profileTitle")}
         >
           <span className={styles.userAvatar}>
             {user?.avatar_url ? (
@@ -75,7 +77,7 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
           </span>
           <span className={styles.navLabel}>@{user?.username}</span>
         </button>
-        <button className={styles.logoutBtn} onClick={handleLogout} title="ログアウト">
+        <button className={styles.logoutBtn} onClick={handleLogout} title={t("nav:leftNav.logoutTitle")}>
           ⏻
         </button>
       </div>

@@ -1,4 +1,5 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, DriveFile, Note, getErrorMessage } from "../../api/client";
 import { acct, calcRemaining, displayName } from "../../lib/format";
 import styles from "./PostComposer.module.css";
@@ -29,6 +30,7 @@ function replyVisibilityConstraint(replyTo?: Note): {
 }
 
 export default function PostComposer({ onPosted, autoFocus, replyTo }: PostComposerProps) {
+  const { t } = useTranslation();
   const [text, setText] = useState("");
   const [deliverFedi, setDeliverFedi] = useState(true);
   const [deliverBsky, setDeliverBsky] = useState(true);
@@ -63,7 +65,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
   // unlisted（ひかえめ）は Bsky 配送と両立できる。
   function handleVisibilityChange(next: Visibility) {
     if (next === "followers_only" && deliverBsky) {
-      showGuide("Bsky配送がオンの間はプライベートを選べません。Bsky配送をオフにすると変更できます。");
+      showGuide(t("home:postComposer.bskyPrivateConflict"));
       return;
     }
     setVisibility(next);
@@ -71,7 +73,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
 
   function handleToggleBsky() {
     if (!deliverBsky && visibility === "followers_only") {
-      showGuide("Bsky配送は「プライベート」以外の投稿で対応しています。可視性を変更すると配送できます。");
+      showGuide(t("home:postComposer.bskyVisibilityConflict"));
       return;
     }
     setDeliverBsky((v) => !v);
@@ -141,7 +143,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
       {replyTo && (
         <div className={styles.replyBanner}>
           <span className={styles.replyTo}>
-            返信先: <strong>{displayName(replyTo)}</strong> {acct(replyTo)}
+            {t("home:postComposer.replyToPrefix")} <strong>{displayName(replyTo)}</strong> {acct(replyTo)}
           </span>
           <span className={styles.replySnippet}>{replyTo.text}</span>
         </div>
@@ -160,7 +162,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         className={styles.textarea}
-        placeholder={replyTo ? "返信を入力" : "いまどうしてる？"}
+        placeholder={replyTo ? t("home:postComposer.replyPlaceholder") : t("home:postComposer.placeholder")}
         rows={3}
       />
 
@@ -188,17 +190,17 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
           className={styles.attachBtn}
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading || !!attached}
-          title="画像・動画・音声を添付"
+          title={t("home:postComposer.attachTitle")}
         >
           📎
         </button>
         {replyTo && (
           <span className={styles.replyScopeNote}>
             {replyTo.user.actorType === "fedi"
-              ? "Fediverse に返信"
+              ? t("home:postComposer.replyToFedi")
               : replyTo.user.actorType === "bsky"
-              ? "Bluesky に返信"
-              : "元ポストのネットワークに返信"}
+              ? t("home:postComposer.replyToBsky")
+              : t("home:postComposer.replyToSameNetwork")}
           </span>
         )}
         {uploading && <span className={styles.spinner} />}
@@ -207,7 +209,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
       {replyConstraint?.forced ? (
         <div className={styles.visibilityRow}>
           <span className={styles.replyScopeNote}>
-            🔒️ 非公開の投稿への返信のため、この返信も非公開になります
+            🔒️ {t("home:postComposer.forcedPrivateNote")}
           </span>
         </div>
       ) : (
@@ -217,21 +219,21 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
             className={`${styles.scopeBtn} ${visibility === "public" ? styles.scopeActive : ""}`}
             onClick={() => handleVisibilityChange("public")}
           >
-            👥 パブリック
+            👥 {t("home:postComposer.visibilityPublic")}
           </button>
           <button
             type="button"
             className={`${styles.scopeBtn} ${visibility === "unlisted" ? styles.scopeActive : ""}`}
             onClick={() => handleVisibilityChange("unlisted")}
           >
-            🤫 ひかえめ
+            🤫 {t("home:postComposer.visibilityUnlisted")}
           </button>
           <button
             type="button"
             className={`${styles.scopeBtn} ${visibility === "followers_only" ? styles.scopeActive : ""}`}
             onClick={() => handleVisibilityChange("followers_only")}
           >
-            🔒️ プライベート
+            🔒️ {t("home:postComposer.visibilityPrivate")}
           </button>
           {guideMessage && (
             <span className={styles.popover} role="status">
@@ -248,13 +250,13 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
           ) : attached.mimeType.startsWith("audio/") ? (
             <audio src={attached.url} controls className={styles.attachAudio} />
           ) : (
-            <img src={attached.url} alt="添付画像" className={styles.attachThumb} />
+            <img src={attached.url} alt={t("home:postComposer.attachmentAlt")} className={styles.attachThumb} />
           )}
           <button
             type="button"
             className={styles.attachRemoveBtn}
             onClick={() => setAttached(null)}
-            title="添付を解除"
+            title={t("home:postComposer.removeAttachmentTitle")}
           >
             ×
           </button>
@@ -264,18 +266,18 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
       {effectiveBsky && overLimit && (
         <p className={styles.guide}>
           {replyTo
-            ? "Bluesky の文字数制限を超えています。"
-            : "Bluesky の文字数制限を超えています。Bsky をオフにすると投稿できます。"}
+            ? t("home:postComposer.overLimitReply")
+            : t("home:postComposer.overLimitDefault")}
         </p>
       )}
 
       <div className={styles.footer}>
         <span className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}>
-          残り {remaining}
+          {t("home:postComposer.remainingCount", { count: remaining })}
         </span>
         {error && <span className={styles.error}>{error}</span>}
         <button type="submit" className={styles.postBtn} disabled={posting || !text.trim() || overLimit}>
-          {posting ? "投稿中..." : "投稿"}
+          {posting ? t("home:postComposer.posting") : t("home:postComposer.postButton")}
         </button>
       </div>
     </form>

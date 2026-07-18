@@ -1,0 +1,92 @@
+{
+  "homePage": {
+    "title": "ホーム",
+    "homeTab": "ホーム",
+    "localTab": "ローカル",
+    "manageListsLink": "+ リスト管理",
+    "emptyHome": "フォロー中のユーザーの投稿がここに表示されます。",
+    "emptyLocal": "まだ投稿がありません。最初の投稿をしてみましょう！",
+    "emptyList": "このリストのメンバーの投稿がここに表示されます。",
+    "quickNotifications": "クイック通知",
+    "quickNotificationsWithCount": "クイック通知 ({{count}})",
+    "trendsAndSearch": "トレンド＆検索"
+  },
+  "noteDetailPage": {
+    "title": "ポスト",
+    "showContextButton": "前後の投稿を表示",
+    "noContext": "前後の投稿はありません。",
+    "contextLabel": "投稿主の前後の投稿",
+    "threadPlaceholder": "直系リプライ・引用ポストのツリー表示は準備中です。",
+    "contextTab": "投稿主の前後",
+    "reactionsTab": "リアクション",
+    "noReactions": "このポストにはまだリアクションがありません。"
+  },
+  "noteCard": {
+    "privateRepostError": "非公開の投稿はリポストできません。",
+    "replyButton": "返信",
+    "repostTitle": "リポスト",
+    "unrepostTitle": "リポスト解除",
+    "repostDisabledTitle": "非公開の投稿はリポストできません",
+    "repost": "リポスト",
+    "reposted": "リポスト済み",
+    "repostUnavailable": "リポスト不可",
+    "pinTitle": "ピン留め",
+    "unpinTitle": "ピン留め解除",
+    "pin": "ピン留め",
+    "pinned": "ピン留め済み",
+    "quoteSourceLink": "❝ 引用元",
+    "originalLinkTitle": "この投稿はブリッジ/連合を経由した重複です。本尊のオリジナル投稿へ移動します。",
+    "originalLinkText": "🀄 本尊のオリジナル投稿を見る",
+    "repostedConnector": "が",
+    "repostedSuffix": "にリポスト",
+    "repostedNoLinkSuffix": "がリポスト",
+    "unavailableRepost": "この投稿は表示できません（非公開投稿のため）。"
+  },
+  "noteList": {
+    "emptyDefault": "投稿がありません。"
+  },
+  "postComposer": {
+    "bskyPrivateConflict": "Bsky配送がオンの間はプライベートを選べません。Bsky配送をオフにすると変更できます。",
+    "bskyVisibilityConflict": "Bsky配送は「プライベート」以外の投稿で対応しています。可視性を変更すると配送できます。",
+    "placeholder": "いまどうしてる？",
+    "replyPlaceholder": "返信を入力",
+    "attachTitle": "画像・動画・音声を添付",
+    "replyToFedi": "Fediverse に返信",
+    "replyToBsky": "Bluesky に返信",
+    "replyToSameNetwork": "元ポストのネットワークに返信",
+    "forcedPrivateNote": "🔒️ 非公開の投稿への返信のため、この返信も非公開になります",
+    "visibilityPublic": "パブリック",
+    "visibilityUnlisted": "ひかえめ",
+    "visibilityPrivate": "プライベート",
+    "attachmentAlt": "添付画像",
+    "removeAttachmentTitle": "添付を解除",
+    "overLimitReply": "Bluesky の文字数制限を超えています。",
+    "overLimitDefault": "Bluesky の文字数制限を超えています。Bsky をオフにすると投稿できます。",
+    "remainingCount": "残り {{count}}",
+    "posting": "投稿中...",
+    "postButton": "投稿",
+    "replyToPrefix": "返信先:"
+  },
+  "reactionChips": {
+    "customEmojiBlocked": "カスタム絵文字は自分では付けられません",
+    "clickToRemove": "クリックで取り消す",
+    "clickToAdd": "クリックで同じリアクションを付ける"
+  },
+  "reactionPicker": {
+    "addReactionTitle": "リアクションを付ける",
+    "addReactionButton": "リアクション",
+    "customInputPlaceholder": "絵文字を入力",
+    "customInputError": "絵文字1つだけを入力してください"
+  },
+  "replyIndicator": {
+    "goToOriginalTitle": "返信元のポストへ移動",
+    "replyLabel": "返信",
+    "fetchFailed": "返信元を取得できませんでした。"
+  },
+  "badges": {
+    "deliveredFedi": "Fediverseへ配送",
+    "deliveredBsky": "Blueskyへ配送",
+    "visibilityPrivate": "プライベート",
+    "visibilityUnlisted": "ひかえめ"
+  }
+}

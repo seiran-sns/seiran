@@ -1,0 +1,15 @@
+{
+  "leftNav": {
+    "home": "ホーム",
+    "search": "検索",
+    "notifications": "通知",
+    "lists": "リスト",
+    "admin": "管理",
+    "composeLabel": "投稿",
+    "profileTitle": "自分のプロフィール",
+    "logoutTitle": "ログアウト"
+  },
+  "appShell": {
+    "composeModalTitle": "新規投稿"
+  }
+}

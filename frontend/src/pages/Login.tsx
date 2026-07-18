@@ -1,10 +1,12 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
+import { useTranslation } from "react-i18next";
+import { api, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import styles from "./Auth.module.css";
 
 export default function Login() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { login } = useAuth();
@@ -23,7 +25,7 @@ export default function Login() {
       const redirectTo = searchParams.get("redirect");
       navigate(redirectTo && redirectTo.startsWith("/") ? redirectTo : "/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ログインに失敗しました");
+      setError(getErrorMessage(err) || t("auth:login.genericError"));
     } finally {
       setLoading(false);
     }
@@ -32,11 +34,11 @@ export default function Login() {
   return (
     <div className={styles.container}>
       <div className={styles.card}>
-        <h1 className={styles.title}>seiran</h1>
-        <h2 className={styles.subtitle}>ログイン</h2>
+        <h1 className={styles.title}>{t("common:appName")}</h1>
+        <h2 className={styles.subtitle}>{t("auth:login.title")}</h2>
         <form onSubmit={handleSubmit} className={styles.form}>
           <label className={styles.label}>
-            メールアドレス / ユーザーネーム
+            {t("auth:login.identifierLabel")}
             <input
               type="text"
               value={identifier}
@@ -47,7 +49,7 @@ export default function Login() {
             />
           </label>
           <label className={styles.label}>
-            パスワード
+            {t("auth:login.passwordLabel")}
             <input
               type="password"
               value={password}
@@ -58,17 +60,14 @@ export default function Login() {
           </label>
           {error && <p className={styles.error}>{error}</p>}
           <button type="submit" className={styles.button} disabled={loading}>
-            {loading ? "ログイン中..." : "ログイン"}
+            {loading ? t("auth:login.submitting") : t("auth:login.submit")}
           </button>
         </form>
         <p className={styles.link}>
-          パスワードをお忘れの方は <Link to="/forgot-password">こちら</Link>
+          {t("auth:login.forgotPasswordPrefix")} <Link to="/forgot-password">{t("auth:login.forgotPasswordLink")}</Link>
         </p>
         <p className={styles.link}>
-          アカウントをお持ちでない方は <Link to="/register">新規登録</Link>
-        </p>
-        <p className={styles.link}>
-          <Link to="/forgot-password">パスワードをお忘れの方</Link>
+          {t("auth:login.noAccountPrefix")} <Link to="/register">{t("auth:login.registerLink")}</Link>
         </p>
       </div>
     </div>

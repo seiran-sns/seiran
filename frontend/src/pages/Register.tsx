@@ -1,9 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import styles from "./Auth.module.css";
 
 export default function Register() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
 
   // requireEmailVerification フラグ（null = まだロード中）
@@ -50,14 +52,13 @@ export default function Register() {
     return (
       <div className={styles.container}>
         <div className={styles.card}>
-          <h1 className={styles.title}>seiran</h1>
-          <h2 className={styles.subtitle}>メールを送信しました</h2>
+          <h1 className={styles.title}>{t("common:appName")}</h1>
+          <h2 className={styles.subtitle}>{t("auth:register.emailSentTitle")}</h2>
           <p style={{ textAlign: "center", color: "#a0aec0", lineHeight: 1.6 }}>
-            <strong>{email}</strong> に確認メールを送りました。<br />
-            メール内のリンクをクリックして登録を完了してください。
+            {t("auth:register.emailSentDescription", { email })}
           </p>
           <p className={styles.link} style={{ marginTop: "1.5rem" }}>
-            <Link to="/login">ログインページへ</Link>
+            <Link to="/login">{t("auth:register.goToLoginLink")}</Link>
           </p>
         </div>
       </div>
@@ -68,14 +69,14 @@ export default function Register() {
     return (
       <div className={styles.container}>
         <div className={styles.card}>
-          <h1 className={styles.title}>seiran</h1>
-          <h2 className={styles.subtitle}>新規登録</h2>
+          <h1 className={styles.title}>{t("common:appName")}</h1>
+          <h2 className={styles.subtitle}>{t("auth:register.title")}</h2>
           <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem", fontSize: "0.9rem" }}>
-            まずメールアドレスを入力してください。確認メールを送信します。
+            {t("auth:register.verifyDescription")}
           </p>
           <form onSubmit={handleVerifySubmit} className={styles.form}>
             <label className={styles.label}>
-              メールアドレス
+              {t("auth:register.emailLabel")}
               <input
                 type="email"
                 value={email}
@@ -87,11 +88,11 @@ export default function Register() {
             </label>
             {error && <p className={styles.error}>{error}</p>}
             <button type="submit" className={styles.button} disabled={loading}>
-              {loading ? "送信中..." : "確認メールを送る"}
+              {loading ? t("auth:register.sending") : t("auth:register.sendVerificationEmail")}
             </button>
           </form>
           <p className={styles.link}>
-            すでにアカウントをお持ちの方は <Link to="/login">ログイン</Link>
+            {t("auth:register.alreadyHaveAccountPrefix")} <Link to="/login">{t("auth:register.loginLink")}</Link>
           </p>
         </div>
       </div>
@@ -123,11 +124,11 @@ export default function Register() {
   return (
     <div className={styles.container}>
       <div className={styles.card}>
-        <h1 className={styles.title}>seiran</h1>
-        <h2 className={styles.subtitle}>新規登録</h2>
+        <h1 className={styles.title}>{t("common:appName")}</h1>
+        <h2 className={styles.subtitle}>{t("auth:register.title")}</h2>
         <form onSubmit={handleDirectSubmit} className={styles.form}>
           <label className={styles.label}>
-            メールアドレス
+            {t("auth:register.emailLabel")}
             <input
               type="email"
               value={directEmail}
@@ -138,7 +139,7 @@ export default function Register() {
             />
           </label>
           <label className={styles.label}>
-            ユーザー名
+            {t("auth:register.usernameLabel")}
             <input
               type="text"
               value={username}
@@ -148,7 +149,7 @@ export default function Register() {
             />
           </label>
           <label className={styles.label}>
-            パスワード（8文字以上）
+            {t("auth:register.passwordLabel")}
             <input
               type="password"
               value={password}
@@ -159,11 +160,11 @@ export default function Register() {
           </label>
           {error && <p className={styles.error}>{error}</p>}
           <button type="submit" className={styles.button} disabled={loading}>
-            {loading ? "登録中..." : "登録する"}
+            {loading ? t("auth:register.submitting") : t("auth:register.submit")}
           </button>
         </form>
         <p className={styles.link}>
-          すでにアカウントをお持ちの方は <Link to="/login">ログイン</Link>
+          {t("auth:register.alreadyHaveAccountPrefix")} <Link to="/login">{t("auth:register.loginLink")}</Link>
         </p>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, ApiError, getErrorMessage, Note, ReactionSummary } from "../../api/client";
 import { acct, deliveryBadges, displayName, formatDate, profilePath, protocolBadge, visibilityBadge } from "../../lib/format";
 import ReplyIndicator from "./ReplyIndicator";
@@ -10,6 +11,7 @@ import EmojiText from "./EmojiText";
 import HlsVideo from "./HlsVideo";
 import { useComposer } from "../../contexts/ComposerContext";
 import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../contexts/ToastContext";
 import { ReactionUpdate, useStreamingContext } from "../../contexts/StreamingContext";
 import styles from "./NoteCard.module.css";
 
@@ -80,8 +82,10 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
   onUnreposted?: () => void;
 }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { openReply } = useComposer();
   const { user } = useAuth();
+  const { showError } = useToast();
   const { registerReaction } = useStreamingContext();
   const badge = protocolBadge(note.user.actorType);
   const delBadges = deliveryBadges(note);
@@ -134,7 +138,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
       if (err instanceof ApiError && err.status === 409) {
         setReposted(true);
       } else if (err instanceof ApiError && err.status === 403) {
-        alert("非公開の投稿はリポストできません。");
+        showError(t("home:noteCard.privateRepostError"));
       }
     } finally {
       setReposting(false);
@@ -173,7 +177,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         setPinned(true);
       }
     } catch (err) {
-      alert(getErrorMessage(err));
+      showError(getErrorMessage(err));
     } finally {
       setPinning(false);
     }
@@ -227,7 +231,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
           {note.replyId && <ReplyIndicator replyId={note.replyId} />}
           {note.quoteId && (
             <Link to={`/notes/${note.quoteId}`} className={styles.relLink} onClick={(e) => e.stopPropagation()}>
-              ❝ 引用元
+              {t("home:noteCard.quoteSourceLink")}
             </Link>
           )}
         </div>
@@ -284,9 +288,9 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
           to={`/notes/${note.parentOriginalId}`}
           className={styles.originalLink}
           onClick={(e) => e.stopPropagation()}
-          title="この投稿はブリッジ/連合を経由した重複です。本尊のオリジナル投稿へ移動します。"
+          title={t("home:noteCard.originalLinkTitle")}
         >
-          🀄 本尊のオリジナル投稿を見る
+          {t("home:noteCard.originalLinkText")}
         </Link>
       )}
 
@@ -299,17 +303,30 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
             e.stopPropagation();
             openReply(note);
           }}
-          title="返信"
+          title={t("home:noteCard.replyButton")}
         >
-          💬 返信
+          💬 {t("home:noteCard.replyButton")}
         </button>
         <button
           className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
           onClick={handleRepost}
           disabled={reposting || unreposting || (isPrivateRepostTarget && !reposted)}
-          title={isPrivateRepostTarget ? "非公開の投稿はリポストできません" : reposted ? "リポスト解除" : "リポスト"}
+          title={
+            isPrivateRepostTarget
+              ? t("home:noteCard.repostDisabledTitle")
+              : reposted
+              ? t("home:noteCard.unrepostTitle")
+              : t("home:noteCard.repostTitle")
+          }
         >
-          🔁 {isPrivateRepostTarget ? "リポスト不可" : reposted ? "リポスト済み" : (reposting || unreposting) ? "..." : "リポスト"}
+          🔁{" "}
+          {isPrivateRepostTarget
+            ? t("home:noteCard.repostUnavailable")
+            : reposted
+            ? t("home:noteCard.reposted")
+            : (reposting || unreposting)
+            ? "..."
+            : t("home:noteCard.repost")}
         </button>
         <ReactionPicker onPick={toggleReaction} disabled={reactionPending} />
         {isSelf && (
@@ -317,9 +334,9 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
             className={`${styles.actionBtn} ${pinned ? styles.actionBtnActive : ""}`}
             onClick={handleTogglePin}
             disabled={pinning}
-            title={pinned ? "ピン留め解除" : "ピン留め"}
+            title={pinned ? t("home:noteCard.unpinTitle") : t("home:noteCard.pinTitle")}
           >
-            📌 {pinned ? "ピン留め済み" : pinning ? "..." : "ピン留め"}
+            📌 {pinned ? t("home:noteCard.pinned") : pinning ? "..." : t("home:noteCard.pin")}
           </button>
         )}
       </div>
@@ -328,19 +345,22 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
 }
 
 export default function NoteCard({ note, linkToDetail = true, large = false }: NoteCardProps) {
+  const { t } = useTranslation();
   const [hidden, setHidden] = useState(false);
 
   if (hidden) return null;
 
   if (note.renote) {
+    const suffix = t("home:noteCard.repostedSuffix");
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
         <div className={styles.rail}>
-          🔁 <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong> が{" "}
+          🔁 <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong>{" "}
+          {t("home:noteCard.repostedConnector")}{" "}
           <Link to={`/notes/${note.id}`} className={styles.repostTime} onClick={(e) => e.stopPropagation()}>
             {formatDate(note.createdAt)}
-          </Link>{" "}
-          にリポスト
+          </Link>
+          {suffix && <>{" "}{suffix}</>}
         </div>
         <PostContent note={note.renote} linkToDetail={linkToDetail} large={large} onUnreposted={() => setHidden(true)} />
       </article>
@@ -353,9 +373,10 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
         <div className={styles.rail}>
-          🔁 <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong> がリポスト
+          🔁 <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong>{" "}
+          {t("home:noteCard.repostedNoLinkSuffix")}
         </div>
-        <p className={styles.unavailableNote}>この投稿は表示できません（非公開投稿のため）。</p>
+        <p className={styles.unavailableNote}>{t("home:noteCard.unavailableRepost")}</p>
       </article>
     );
   }

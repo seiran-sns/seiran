@@ -1,0 +1,25 @@
+{
+  "listsSettingsPage": {
+    "title": "リスト管理",
+    "newListNamePlaceholder": "新しいリスト名",
+    "publicLabel": "公開",
+    "creatingButton": "作成中...",
+    "noLists": "まだリストがありません。",
+    "isPublicLabel": "公開",
+    "isPrivateLabel": "非公開",
+    "memberCount": "{{count}}人",
+    "selectListPrompt": "左のリストを選択してください。",
+    "editingHeader": "{{name}} の編集",
+    "deleteListConfirm": "このリストを削除しますか？元に戻せません。",
+    "memberSearchPlaceholder": "ID/ハンドル/ニックネームで検索、または @user@domain・https://...・did:...",
+    "addingMemberButton": "追加中...",
+    "addMemberButton": "メンバー追加",
+    "noMembers": "まだメンバーがいません。"
+  },
+  "listDetailPage": {
+    "title": "リスト",
+    "notFound": "このリストは存在しないか、非公開です。",
+    "memberCount": "{{count}}人のメンバー",
+    "emptyTimeline": "このリストのメンバーの投稿がここに表示されます。"
+  }
+}

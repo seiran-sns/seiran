@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, ListSummary, Note } from "../api/client";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
@@ -29,6 +30,7 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
 }
 
 export default function HomePage() {
+  const { t } = useTranslation();
   const [feed, setFeed] = useState<Feed>({ kind: "home" });
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -108,7 +110,7 @@ export default function HomePage() {
   const center = (
     <>
       <header className={panel.header}>
-        <span className={panel.title}>ホーム</span>
+        <span className={panel.title}>{t("home:homePage.title")}</span>
       </header>
 
       <div className={styles.composerWrap}>
@@ -120,13 +122,13 @@ export default function HomePage() {
           className={`${styles.feedTab} ${feed.kind === "home" ? styles.feedTabActive : ""}`}
           onClick={() => setFeed({ kind: "home" })}
         >
-          ホーム
+          {t("home:homePage.homeTab")}
         </button>
         <button
           className={`${styles.feedTab} ${feed.kind === "local" ? styles.feedTabActive : ""}`}
           onClick={() => setFeed({ kind: "local" })}
         >
-          ローカル
+          {t("home:homePage.localTab")}
         </button>
         {lists.map((l) => (
           <button
@@ -138,7 +140,7 @@ export default function HomePage() {
           </button>
         ))}
         <Link to="/settings/lists" className={styles.feedTab}>
-          + リスト管理
+          {t("home:homePage.manageListsLink")}
         </Link>
       </div>
 
@@ -151,10 +153,10 @@ export default function HomePage() {
         loadingMore={loadingMore}
         emptyMessage={
           feed.kind === "home"
-            ? "フォロー中のユーザーの投稿がここに表示されます。"
+            ? t("home:homePage.emptyHome")
             : feed.kind === "local"
-            ? "まだ投稿がありません。最初の投稿をしてみましょう！"
-            : "このリストのメンバーの投稿がここに表示されます。"
+            ? t("home:homePage.emptyLocal")
+            : t("home:homePage.emptyList")
         }
       />
     </>
@@ -163,7 +165,10 @@ export default function HomePage() {
   const right = (
     <>
       <Tabs
-        tabs={[unread > 0 ? `クイック通知 (${unread})` : "クイック通知", "トレンド＆検索"]}
+        tabs={[
+          unread > 0 ? t("home:homePage.quickNotificationsWithCount", { count: unread }) : t("home:homePage.quickNotifications"),
+          t("home:homePage.trendsAndSearch"),
+        ]}
         active={timelineTab}
         onChange={setTimelineTab}
       />

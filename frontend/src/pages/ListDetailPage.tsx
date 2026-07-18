@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, ApiError, getErrorMessage, ListDetail, Note } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import NoteList from "../components/note/NoteList";
@@ -9,6 +10,7 @@ import styles from "./ListDetailPage.module.css";
 const PAGE_SIZE = 30;
 
 export default function ListDetailPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -76,24 +78,24 @@ export default function ListDetailPage() {
     <>
       <header className={panel.header}>
         <button className={panel.backBtn} onClick={() => navigate(-1)}>
-          ← 戻る
+          ← {t("common:back")}
         </button>
-        <span className={panel.title}>{detail ? detail.name : "リスト"}</span>
+        <span className={panel.title}>{detail ? detail.name : t("lists:listDetailPage.title")}</span>
       </header>
 
       {loading ? (
-        <p className={panel.message}>読み込み中...</p>
+        <p className={panel.message}>{t("common:loading")}</p>
       ) : notFound ? (
-        <p className={panel.message}>このリストは存在しないか、非公開です。</p>
+        <p className={panel.message}>{t("lists:listDetailPage.notFound")}</p>
       ) : error ? (
         <p className={panel.message}>{error}</p>
       ) : detail ? (
         <>
           <div className={styles.meta}>
-            <span>{detail.members.length}人のメンバー</span>
+            <span>{t("lists:listDetailPage.memberCount", { count: detail.members.length })}</span>
             {detail.is_owner && (
               <Link to="/settings/lists" className={styles.editLink}>
-                編集
+                {t("common:edit")}
               </Link>
             )}
           </div>
@@ -109,7 +111,7 @@ export default function ListDetailPage() {
 
           <NoteList
             notes={notes}
-            emptyMessage="このリストのメンバーの投稿がここに表示されます。"
+            emptyMessage={t("lists:listDetailPage.emptyTimeline")}
             onLoadMore={loadMore}
             hasMore={hasMore}
             loadingMore={loadingMore}

@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import styles from "./Auth.module.css";
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export default function Setup({ onComplete }: Props) {
+  const { t } = useTranslation();
   const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -33,14 +35,14 @@ export default function Setup({ onComplete }: Props) {
   return (
     <div className={styles.container}>
       <div className={styles.card}>
-        <h1 className={styles.title}>seiran</h1>
-        <h2 className={styles.subtitle}>初期セットアップ</h2>
+        <h1 className={styles.title}>{t("common:appName")}</h1>
+        <h2 className={styles.subtitle}>{t("setup:setup.title")}</h2>
         <p className={styles.description}>
-          管理者アカウントを作成してください。
+          {t("setup:setup.description")}
         </p>
         <form onSubmit={handleSubmit} className={styles.form}>
           <label className={styles.label}>
-            ユーザーネーム
+            {t("setup:setup.usernameLabel")}
             <input
               type="text"
               value={username}
@@ -52,7 +54,7 @@ export default function Setup({ onComplete }: Props) {
             />
           </label>
           <label className={styles.label}>
-            メールアドレス
+            {t("setup:setup.emailLabel")}
             <input
               type="email"
               value={email}
@@ -63,7 +65,7 @@ export default function Setup({ onComplete }: Props) {
             />
           </label>
           <label className={styles.label}>
-            パスワード（8文字以上）
+            {t("setup:setup.passwordLabel")}
             <input
               type="password"
               value={password}
@@ -76,7 +78,7 @@ export default function Setup({ onComplete }: Props) {
           </label>
           {error && <p className={styles.error}>{error}</p>}
           <button type="submit" className={styles.button} disabled={loading}>
-            {loading ? "セットアップ中..." : "管理者アカウントを作成"}
+            {loading ? t("setup:setup.submitting") : t("setup:setup.submit")}
           </button>
         </form>
       </div>

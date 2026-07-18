@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, Note, getErrorMessage } from "../api/client";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
@@ -10,6 +11,7 @@ import panel from "../components/common/Panel.module.css";
 import styles from "./NoteDetailPage.module.css";
 
 export default function NoteDetailPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { noteDetailTab, setNoteDetailTab } = useRightPane();
@@ -71,14 +73,14 @@ export default function NoteDetailPage() {
       return (
         <div className={styles.ctxTrigger}>
           <button className={styles.ctxButton} onClick={loadContext}>
-            前後の投稿を表示
+            {t("home:noteDetailPage.showContextButton")}
           </button>
         </div>
       );
     }
-    if (ctxLoading) return <p className={panel.message}>読み込み中...</p>;
+    if (ctxLoading) return <p className={panel.message}>{t("common:loading")}</p>;
     if (ctxLoaded && contextList.length === 0) {
-      return <p className={panel.message}>前後の投稿はありません。</p>;
+      return <p className={panel.message}>{t("home:noteDetailPage.noContext")}</p>;
     }
     return (
       <div>
@@ -93,12 +95,12 @@ export default function NoteDetailPage() {
     <>
       <header className={panel.header}>
         <button className={panel.backBtn} onClick={() => navigate(-1)}>
-          ← 戻る
+          ← {t("common:back")}
         </button>
-        <span className={panel.title}>ポスト</span>
+        <span className={panel.title}>{t("home:noteDetailPage.title")}</span>
       </header>
 
-      {loading && <p className={panel.message}>読み込み中...</p>}
+      {loading && <p className={panel.message}>{t("common:loading")}</p>}
       {error && <p className={panel.message}>{error}</p>}
 
       {note && (
@@ -108,14 +110,14 @@ export default function NoteDetailPage() {
 
           {/* 投稿主の前後の投稿（右ペインが隠れる幅でのみ中央に表示。ボタン起動）。 */}
           <section className={styles.narrowContext}>
-            <div className={styles.contextLabel}>投稿主の前後の投稿</div>
+            <div className={styles.contextLabel}>{t("home:noteDetailPage.contextLabel")}</div>
             {renderContext()}
           </section>
 
           {/* 直系リプライ・引用（専用 API 未実装のためプレースホルダ） */}
           <div className={panel.placeholder}>
             <span className={panel.placeholderIcon}>💬</span>
-            直系リプライ・引用ポストのツリー表示は準備中です。
+            {t("home:noteDetailPage.threadPlaceholder")}
           </div>
         </>
       )}
@@ -125,7 +127,7 @@ export default function NoteDetailPage() {
   const right = (
     <>
       <Tabs
-        tabs={["投稿主の前後", "リアクション"]}
+        tabs={[t("home:noteDetailPage.contextTab"), t("home:noteDetailPage.reactionsTab")]}
         active={noteDetailTab}
         onChange={setNoteDetailTab}
       />
@@ -138,7 +140,7 @@ export default function NoteDetailPage() {
       ) : (
         <div className={panel.placeholder}>
           <span className={panel.placeholderIcon}>😀</span>
-          このポストにはまだリアクションがありません。
+          {t("home:noteDetailPage.noReactions")}
         </div>
       )}
     </>

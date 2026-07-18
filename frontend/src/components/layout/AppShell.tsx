@@ -1,4 +1,5 @@
 import { ReactNode, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Note } from "../../api/client";
 import Modal from "../common/Modal";
 import PostComposer from "../note/PostComposer";
@@ -15,6 +16,7 @@ interface AppShellProps {
 }
 
 export default function AppShell({ center, right, onPosted }: AppShellProps) {
+  const { t } = useTranslation();
   const [composeOpen, setComposeOpen] = useState(false);
 
   return (
@@ -25,7 +27,7 @@ export default function AppShell({ center, right, onPosted }: AppShellProps) {
 
       <aside className={styles.right}>{right}</aside>
 
-      <Modal open={composeOpen} onClose={() => setComposeOpen(false)} title="新規投稿">
+      <Modal open={composeOpen} onClose={() => setComposeOpen(false)} title={t("nav:appShell.composeModalTitle")}>
         <PostComposer
           autoFocus
           onPosted={(note) => {

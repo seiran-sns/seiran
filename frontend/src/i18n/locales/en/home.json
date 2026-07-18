@@ -1,0 +1,92 @@
+{
+  "homePage": {
+    "title": "Home",
+    "homeTab": "Home",
+    "localTab": "Local",
+    "manageListsLink": "+ Manage lists",
+    "emptyHome": "Posts from people you follow will show up here.",
+    "emptyLocal": "No posts yet. Be the first to post something!",
+    "emptyList": "Posts from this list's members will show up here.",
+    "quickNotifications": "Quick notifications",
+    "quickNotificationsWithCount": "Quick notifications ({{count}})",
+    "trendsAndSearch": "Trends & search"
+  },
+  "noteDetailPage": {
+    "title": "Post",
+    "showContextButton": "Show surrounding posts",
+    "noContext": "No surrounding posts.",
+    "contextLabel": "Author's surrounding posts",
+    "threadPlaceholder": "Reply and quote thread view is coming soon.",
+    "contextTab": "Surrounding posts",
+    "reactionsTab": "Reactions",
+    "noReactions": "No reactions on this post yet."
+  },
+  "noteCard": {
+    "privateRepostError": "Private posts can't be reposted.",
+    "replyButton": "Reply",
+    "repostTitle": "Repost",
+    "unrepostTitle": "Undo repost",
+    "repostDisabledTitle": "Private posts can't be reposted",
+    "repost": "Repost",
+    "reposted": "Reposted",
+    "repostUnavailable": "Can't repost",
+    "pinTitle": "Pin",
+    "unpinTitle": "Unpin",
+    "pin": "Pin",
+    "pinned": "Pinned",
+    "quoteSourceLink": "❝ Quoted post",
+    "originalLinkTitle": "This post is a duplicate delivered via a bridge/federation. Go to the original post.",
+    "originalLinkText": "🀄 View original post",
+    "repostedConnector": "reposted this at",
+    "repostedSuffix": "",
+    "repostedNoLinkSuffix": "reposted this",
+    "unavailableRepost": "This post can't be shown (it's private)."
+  },
+  "noteList": {
+    "emptyDefault": "No posts."
+  },
+  "postComposer": {
+    "bskyPrivateConflict": "You can't select Private while Bsky delivery is on. Turn off Bsky delivery to change it.",
+    "bskyVisibilityConflict": "Bsky delivery is only available for posts other than Private. Change the visibility to enable it.",
+    "placeholder": "What's happening?",
+    "replyPlaceholder": "Write a reply",
+    "attachTitle": "Attach an image, video, or audio file",
+    "replyToFedi": "Replying to the Fediverse",
+    "replyToBsky": "Replying to Bluesky",
+    "replyToSameNetwork": "Replying on the original post's network",
+    "forcedPrivateNote": "🔒️ This reply will also be private because it's replying to a private post",
+    "visibilityPublic": "Public",
+    "visibilityUnlisted": "Unlisted",
+    "visibilityPrivate": "Private",
+    "attachmentAlt": "Attached image",
+    "removeAttachmentTitle": "Remove attachment",
+    "overLimitReply": "This exceeds Bluesky's character limit.",
+    "overLimitDefault": "This exceeds Bluesky's character limit. Turn off Bsky to post anyway.",
+    "remainingCount": "{{count}} left",
+    "posting": "Posting...",
+    "postButton": "Post",
+    "replyToPrefix": "Replying to:"
+  },
+  "reactionChips": {
+    "customEmojiBlocked": "You can't add a custom emoji reaction yourself",
+    "clickToRemove": "Click to remove",
+    "clickToAdd": "Click to add the same reaction"
+  },
+  "reactionPicker": {
+    "addReactionTitle": "Add a reaction",
+    "addReactionButton": "React",
+    "customInputPlaceholder": "Enter an emoji",
+    "customInputError": "Please enter a single emoji"
+  },
+  "replyIndicator": {
+    "goToOriginalTitle": "Go to the original post",
+    "replyLabel": "Reply",
+    "fetchFailed": "Couldn't load the original post."
+  },
+  "badges": {
+    "deliveredFedi": "Delivered to Fediverse",
+    "deliveredBsky": "Delivered to Bluesky",
+    "visibilityPrivate": "Private",
+    "visibilityUnlisted": "Unlisted"
+  }
+}

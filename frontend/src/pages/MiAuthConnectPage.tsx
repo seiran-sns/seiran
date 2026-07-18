@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import styles from "./Auth.module.css";
 
@@ -39,12 +40,13 @@ function buildCallbackUrl(callback: string, sessionId: string): string {
  * 成功したら callback（ネイティブアプリのカスタム URI スキーム等）へ遷移する。
  */
 export default function MiAuthConnectPage() {
+  const { t } = useTranslation();
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams] = useSearchParams();
   const [phase, setPhase] = useState<Phase>("confirm");
   const [error, setError] = useState("");
 
-  const appName = searchParams.get("name") || "不明なアプリ";
+  const appName = searchParams.get("name") || t("miauth:connect.unknownApp");
   const callback = searchParams.get("callback");
 
   async function handleAuthorize() {
@@ -67,14 +69,14 @@ export default function MiAuthConnectPage() {
   return (
     <div className={styles.container}>
       <div className={styles.card}>
-        <h1 className={styles.title}>seiran</h1>
-        <h2 className={styles.subtitle}>アプリ連携の認可</h2>
+        <h1 className={styles.title}>{t("common:appName")}</h1>
+        <h2 className={styles.subtitle}>{t("miauth:connect.title")}</h2>
         {phase === "done" ? (
-          <p className={styles.description}>認可されました。アプリに戻ってください。</p>
+          <p className={styles.description}>{t("miauth:connect.doneDescription")}</p>
         ) : (
           <>
             <p className={styles.description}>
-              アプリ <strong>{appName}</strong> が seiran アカウントへのアクセスを求めています。
+              {t("miauth:connect.description", { appName })}
             </p>
             {error && <p className={styles.error}>{error}</p>}
             <button
@@ -83,7 +85,7 @@ export default function MiAuthConnectPage() {
               disabled={phase === "authorizing"}
               onClick={handleAuthorize}
             >
-              {phase === "authorizing" ? "処理中..." : "連携を承認する"}
+              {phase === "authorizing" ? t("miauth:connect.authorizing") : t("miauth:connect.submit")}
             </button>
           </>
         )}

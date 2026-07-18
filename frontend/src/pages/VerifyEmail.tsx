@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import styles from "./Auth.module.css";
@@ -10,6 +11,7 @@ type State =
   | { phase: "error"; message: string };
 
 export default function VerifyEmail() {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -24,7 +26,7 @@ export default function VerifyEmail() {
   useEffect(() => {
     const token = searchParams.get("token");
     if (!token) {
-      setState({ phase: "error", message: "URLが無効です" });
+      setState({ phase: "error", message: t("auth:verifyEmail.invalidUrl") });
       return;
     }
     const controller = new AbortController();
@@ -35,14 +37,14 @@ export default function VerifyEmail() {
         setState({ phase: "error", message: getErrorMessage(err) });
       });
     return () => controller.abort();
-  }, [searchParams]);
+  }, [searchParams, t]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (state.phase !== "form") return;
     setFormError("");
     if (password.length < 8) {
-      setFormError("パスワードは8文字以上で入力してください");
+      setFormError(t("auth:verifyEmail.passwordTooShort"));
       return;
     }
     setSubmitting(true);
@@ -61,8 +63,8 @@ export default function VerifyEmail() {
     return (
       <div className={styles.container}>
         <div className={styles.card}>
-          <h1 className={styles.title}>seiran</h1>
-          <p style={{ textAlign: "center", color: "#a0aec0" }}>メールアドレスを確認中...</p>
+          <h1 className={styles.title}>{t("common:appName")}</h1>
+          <p style={{ textAlign: "center", color: "#a0aec0" }}>{t("auth:verifyEmail.verifying")}</p>
         </div>
       </div>
     );
@@ -72,11 +74,11 @@ export default function VerifyEmail() {
     return (
       <div className={styles.container}>
         <div className={styles.card}>
-          <h1 className={styles.title}>seiran</h1>
-          <h2 className={styles.subtitle}>確認に失敗しました</h2>
+          <h1 className={styles.title}>{t("common:appName")}</h1>
+          <h2 className={styles.subtitle}>{t("auth:verifyEmail.failedTitle")}</h2>
           <p className={styles.error} style={{ textAlign: "center" }}>{state.message}</p>
           <p className={styles.link} style={{ marginTop: "1rem" }}>
-            <Link to="/register">最初からやり直す</Link>
+            <Link to="/register">{t("auth:verifyEmail.startOverLink")}</Link>
           </p>
         </div>
       </div>
@@ -86,14 +88,14 @@ export default function VerifyEmail() {
   return (
     <div className={styles.container}>
       <div className={styles.card}>
-        <h1 className={styles.title}>seiran</h1>
-        <h2 className={styles.subtitle}>アカウント情報を設定</h2>
+        <h1 className={styles.title}>{t("common:appName")}</h1>
+        <h2 className={styles.subtitle}>{t("auth:verifyEmail.title")}</h2>
         <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem", fontSize: "0.9rem" }}>
-          メールアドレスを確認しました。ユーザー名とパスワードを設定してください。
+          {t("auth:verifyEmail.description")}
         </p>
         <form onSubmit={handleSubmit} className={styles.form}>
           <label className={styles.label}>
-            ユーザー名
+            {t("auth:verifyEmail.usernameLabel")}
             <input
               type="text"
               value={username}
@@ -102,11 +104,11 @@ export default function VerifyEmail() {
               required
               autoFocus
               pattern="[a-zA-Z0-9_]+"
-              title="英数字とアンダースコアのみ使用できます"
+              title={t("auth:verifyEmail.usernamePatternTitle")}
             />
           </label>
           <label className={styles.label}>
-            パスワード（8文字以上）
+            {t("auth:verifyEmail.passwordLabel")}
             <input
               type="password"
               value={password}
@@ -118,7 +120,7 @@ export default function VerifyEmail() {
           </label>
           {formError && <p className={styles.error}>{formError}</p>}
           <button type="submit" className={styles.button} disabled={submitting}>
-            {submitting ? "登録中..." : "登録する"}
+            {submitting ? t("auth:verifyEmail.submitting") : t("auth:verifyEmail.submit")}
           </button>
         </form>
       </div>

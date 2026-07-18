@@ -1,3 +1,5 @@
+import i18n from "../i18n";
+
 const BASE = "/api";
 
 function getToken(): string | null {
@@ -26,29 +28,40 @@ export class ApiError extends Error {
   }
 }
 
-const ERROR_MESSAGES: Record<string, string> = {
-  EMAIL_ALREADY_REGISTERED: "このメールアドレスはすでに使用されています",
-  EMAIL_INVALID: "有効なメールアドレスを入力してください",
-  INVALID_TOKEN: "リンクが無効か期限切れです。メールの確認をやり直してください",
-  USERNAME_TAKEN: "このユーザー名はすでに使用されています",
-  INVALID_INPUT: "入力内容を確認してください",
-  ALREADY_INITIALIZED: "セットアップはすでに完了しています",
-  INVALID_CREDENTIALS: "メールアドレスまたはパスワードが正しくありません",
-  REGISTRATION_TOKEN_INVALID: "メール確認をやり直してください",
-  UNAUTHORIZED: "ログインが必要です",
-  NOT_FOUND: "見つかりません",
-  INTERNAL_ERROR: "サーバーエラーが発生しました。しばらく待ってから再試行してください",
-  RESET_TOKEN_INVALID: "リンクが無効または期限切れです。パスワードリセットをやり直してください",
-  PASSWORD_TOO_SHORT: "パスワードは8文字以上で入力してください",
-  TEXT_TOO_LONG: "文字数制限を超えています（@ユーザー名の展開後に超過した可能性があります）",
-};
-
+/**
+ * バックエンドのエラーコード（`crates/seiran-api/src/error.rs`）を
+ * `errors.*`（`frontend/src/i18n/locales/{lng}/errors.json`）へ機械的に対応させる。
+ * 未知のコードは 5xx なら SERVER_UNAVAILABLE、それ以外は UNKNOWN_WITH_CODE にフォールバックする。
+ */
 export function getErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    return ERROR_MESSAGES[error.code] ?? `エラーが発生しました (${error.code})`;
+    const key = `errors:${error.code}`;
+    if (i18n.exists(key)) return i18n.t(key);
+    if (error.status >= 500) return i18n.t("errors:SERVER_UNAVAILABLE");
+    return i18n.t("errors:UNKNOWN_WITH_CODE", { code: error.code });
   }
+  // fetch 自体が失敗した場合（オフライン・DNS 失敗等）は TypeError になる。
+  if (error instanceof TypeError) return i18n.t("errors:NETWORK_ERROR");
   if (error instanceof Error) return error.message;
-  return "不明なエラーが発生しました";
+  return i18n.t("errors:UNKNOWN");
+}
+
+type UnauthorizedHandler = () => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+/**
+ * トークン失効時（401）のグローバル処理（ログアウト＋ログイン画面誘導）を登録する。
+ * `AuthProvider` がマウント時に登録する。ログイン試行自体の 401（認証情報間違い）では
+ * トークンが存在しないため発火しない。
+ */
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler;
+}
+
+function notifyIfUnauthorized(status: number) {
+  if (status === 401 && getToken()) {
+    unauthorizedHandler?.();
+  }
 }
 
 async function request<T>(
@@ -68,6 +81,7 @@ async function request<T>(
   });
 
   if (!res.ok) {
+    notifyIfUnauthorized(res.status);
     const contentType = res.headers.get("content-type") ?? "";
     if (contentType.includes("application/json")) {
       try {
@@ -91,6 +105,29 @@ async function request<T>(
   }
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
+}
+
+/** FormData 送信（`request()` は JSON body 前提のため通せない）用の共通エラーハンドリング。 */
+async function uploadFormData<T>(path: string, formData: FormData): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+    body: formData,
+  });
+  if (!res.ok) {
+    notifyIfUnauthorized(res.status);
+    const contentType = res.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      try {
+        const err = (await res.json()) as { code?: string; detail?: Record<string, unknown> };
+        if (err.code) throw new ApiError(err.code, res.status, err.detail);
+      } catch (e) {
+        if (e instanceof ApiError) throw e;
+      }
+    }
+    throw new ApiError("UNKNOWN_ERROR", res.status);
+  }
+  return res.json() as Promise<T>;
 }
 
 // =====================================================================
@@ -714,25 +751,7 @@ export const api = {
     importEmojis(file: File): Promise<EmojiImportJob> {
       const formData = new FormData();
       formData.append("file", file);
-      return fetch(`${BASE}/admin/emojis/import`, {
-        method: "POST",
-        headers: { ...authHeaders() },
-        body: formData,
-      }).then(async (res) => {
-        if (!res.ok) {
-          const contentType = res.headers.get("content-type") ?? "";
-          if (contentType.includes("application/json")) {
-            try {
-              const err = (await res.json()) as { code?: string };
-              if (err.code) throw new ApiError(err.code, res.status);
-            } catch (e) {
-              if (e instanceof ApiError) throw e;
-            }
-          }
-          throw new ApiError("UNKNOWN_ERROR", res.status);
-        }
-        return res.json() as Promise<EmojiImportJob>;
-      });
+      return uploadFormData<EmojiImportJob>("/admin/emojis/import", formData);
     },
     getEmojiImportStatus(jobId: string) {
       return request<EmojiImportJob>("GET", `/admin/emojis/import/${encodeURIComponent(jobId)}`);
@@ -813,25 +832,7 @@ export const api = {
       formData.append("file", file);
       formData.append("media_type", mediaType);
       formData.append("deliver_to_bsky", String(deliverToBsky));
-      return fetch(`${BASE}/drive/files/create`, {
-        method: "POST",
-        headers: { ...authHeaders() },
-        body: formData,
-      }).then(async (res) => {
-        if (!res.ok) {
-          const contentType = res.headers.get("content-type") ?? "";
-          if (contentType.includes("application/json")) {
-            try {
-              const err = (await res.json()) as { code?: string; detail?: Record<string, unknown> };
-              if (err.code) throw new ApiError(err.code, res.status, err.detail);
-            } catch (e) {
-              if (e instanceof ApiError) throw e;
-            }
-          }
-          throw new ApiError("UNKNOWN_ERROR", res.status);
-        }
-        return res.json() as Promise<DriveFile>;
-      });
+      return uploadFormData<DriveFile>("/drive/files/create", formData);
     },
   },
 };

@@ -1,10 +1,12 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import panel from "../common/Panel.module.css";
 import styles from "./RightPanels.module.css";
 
 /** ホーム右ペイン タブ1: トレンド＆検索（Doc5 §2.1）。 */
 export default function TrendsSearchPanel() {
+  const { t } = useTranslation();
   const [q, setQ] = useState("");
   const navigate = useNavigate();
 
@@ -21,17 +23,17 @@ export default function TrendsSearchPanel() {
           className={styles.searchInput}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="キーワードを検索"
+          placeholder={t("search:trendsSearchPanel.placeholder")}
         />
-        <button type="submit" className={styles.searchBtn}>検索</button>
+        <button type="submit" className={styles.searchBtn}>{t("common:search")}</button>
       </form>
 
-      <div className={panel.rightHeader}>トレンド</div>
+      <div className={panel.rightHeader}>{t("search:trendsSearchPanel.trendsHeader")}</div>
       <div className={panel.placeholder}>
         <span className={panel.placeholderIcon}>📈</span>
-        二大宇宙（AP / ATP）の集計によるリアルタイムトレンドは準備中です。
+        {t("search:trendsSearchPanel.comingSoon")}
         <br />
-        集計エンジンの実装後に有効化されます。
+        {t("search:trendsSearchPanel.comingSoonDetail")}
       </div>
     </div>
   );

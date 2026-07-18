@@ -1,11 +1,13 @@
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import styles from "./Auth.module.css";
 
 type Phase = "form" | "sent";
 
 export default function ForgotPassword() {
+  const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>("form");
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
@@ -29,14 +31,13 @@ export default function ForgotPassword() {
     return (
       <div className={styles.container}>
         <div className={styles.card}>
-          <h1 className={styles.title}>seiran</h1>
-          <h2 className={styles.subtitle}>メールを確認してください</h2>
+          <h1 className={styles.title}>{t("common:appName")}</h1>
+          <h2 className={styles.subtitle}>{t("auth:forgotPassword.sentTitle")}</h2>
           <p style={{ textAlign: "center", color: "#a0aec0", fontSize: "0.9rem", margin: "0 0 24px" }}>
-            入力されたメールアドレスが登録されている場合、パスワードリセットリンクを送信しました。
-            メールボックスをご確認ください。
+            {t("auth:forgotPassword.sentDescription")}
           </p>
           <p className={styles.link}>
-            <Link to="/login">ログインページへ戻る</Link>
+            <Link to="/login">{t("auth:forgotPassword.backToLoginLink")}</Link>
           </p>
         </div>
       </div>
@@ -46,14 +47,14 @@ export default function ForgotPassword() {
   return (
     <div className={styles.container}>
       <div className={styles.card}>
-        <h1 className={styles.title}>seiran</h1>
-        <h2 className={styles.subtitle}>パスワードをリセット</h2>
+        <h1 className={styles.title}>{t("common:appName")}</h1>
+        <h2 className={styles.subtitle}>{t("auth:forgotPassword.title")}</h2>
         <p className={styles.description}>
-          登録済みのメールアドレスを入力してください。リセットリンクをお送りします。
+          {t("auth:forgotPassword.description")}
         </p>
         <form onSubmit={handleSubmit} className={styles.form}>
           <label className={styles.label}>
-            メールアドレス
+            {t("auth:forgotPassword.emailLabel")}
             <input
               type="email"
               value={email}
@@ -65,11 +66,11 @@ export default function ForgotPassword() {
           </label>
           {error && <p className={styles.error}>{error}</p>}
           <button type="submit" className={styles.button} disabled={loading}>
-            {loading ? "送信中..." : "リセットリンクを送信"}
+            {loading ? t("auth:forgotPassword.sending") : t("auth:forgotPassword.submit")}
           </button>
         </form>
         <p className={styles.link}>
-          <Link to="/login">ログインページへ戻る</Link>
+          <Link to="/login">{t("auth:forgotPassword.backToLoginLink")}</Link>
         </p>
       </div>
     </div>

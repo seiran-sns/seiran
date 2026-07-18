@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, Note, getErrorMessage } from "../api/client";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
@@ -11,6 +12,7 @@ import rp from "../components/right/RightPanels.module.css";
 import styles from "./HomePage.module.css";
 
 export default function SearchPage() {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQ = searchParams.get("q") ?? "";
   const { timelineTab, setTimelineTab } = useRightPane();
@@ -75,7 +77,7 @@ export default function SearchPage() {
   const center = (
     <>
       <header className={panel.header}>
-        <span className={panel.title}>検索</span>
+        <span className={panel.title}>{t("common:search")}</span>
       </header>
 
       <form className={rp.searchForm} onSubmit={submit}>
@@ -83,9 +85,9 @@ export default function SearchPage() {
           className={rp.searchInput}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="キーワードを検索（ローカル + Bluesky）"
+          placeholder={t("search:searchPage.placeholder")}
         />
-        <button type="submit" className={rp.searchBtn}>検索</button>
+        <button type="submit" className={rp.searchBtn}>{t("common:search")}</button>
       </form>
 
       {error && <p className={panel.message}>{error}</p>}
@@ -93,7 +95,7 @@ export default function SearchPage() {
       <NoteList
         notes={notes}
         loading={loading}
-        emptyMessage={searched ? "一致する投稿が見つかりませんでした。" : "キーワードを入力して検索してください。"}
+        emptyMessage={searched ? t("search:searchPage.noResults") : t("search:searchPage.prompt")}
       />
 
       {searched && notes.length > 0 && (
@@ -104,7 +106,7 @@ export default function SearchPage() {
             disabled={loadingMore}
             style={{ cursor: loadingMore ? "default" : "pointer" }}
           >
-            {loadingMore ? "読み込み中..." : "さらに読み込む"}
+            {loadingMore ? t("common:loading") : t("search:searchPage.loadMoreButton")}
           </button>
         </div>
       )}
@@ -113,13 +115,17 @@ export default function SearchPage() {
 
   const right = (
     <>
-      <Tabs tabs={["クイック通知", "トレンド＆検索"]} active={timelineTab} onChange={setTimelineTab} />
+      <Tabs
+        tabs={[t("search:searchPage.tabs.quickNotifications"), t("search:searchPage.tabs.trendsSearch")]}
+        active={timelineTab}
+        onChange={setTimelineTab}
+      />
       {timelineTab === 0 ? (
         <NotificationsPanel />
       ) : (
         <div className={panel.placeholder}>
           <span className={panel.placeholderIcon}>📈</span>
-          トレンド集計は準備中です。
+          {t("search:searchPage.trendsComingSoon")}
         </div>
       )}
     </>

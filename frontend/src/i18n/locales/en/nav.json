@@ -1,0 +1,15 @@
+{
+  "leftNav": {
+    "home": "Home",
+    "search": "Search",
+    "notifications": "Notifications",
+    "lists": "Lists",
+    "admin": "Admin",
+    "composeLabel": "Post",
+    "profileTitle": "My profile",
+    "logoutTitle": "Log out"
+  },
+  "appShell": {
+    "composeModalTitle": "New post"
+  }
+}

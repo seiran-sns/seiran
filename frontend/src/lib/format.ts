@@ -1,8 +1,9 @@
 import { Note } from "../api/client";
+import i18n from "../i18n";
 
-/** ISO 文字列を日本語ロケールの短い日時表記に変換する。 */
+/** ISO 文字列を現在の表示言語の短い日時表記に変換する。 */
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString("ja-JP", {
+  return new Date(iso).toLocaleString(i18n.language, {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -54,8 +55,8 @@ export function protocolBadge(actorType: string): { icon: string; label: string 
 export function deliveryBadges(note: Note): { icon: string; label: string }[] {
   if (note.user.actorType !== "local") return [];
   const badges: { icon: string; label: string }[] = [];
-  if (note.deliverFedi) badges.push({ icon: "🌐", label: "Fediverseへ配送" });
-  if (note.deliverBsky) badges.push({ icon: "🦋", label: "Blueskyへ配送" });
+  if (note.deliverFedi) badges.push({ icon: "🌐", label: i18n.t("home:badges.deliveredFedi") });
+  if (note.deliverBsky) badges.push({ icon: "🦋", label: i18n.t("home:badges.deliveredBsky") });
   return badges;
 }
 
@@ -64,9 +65,9 @@ export function deliveryBadges(note: Note): { icon: string; label: string }[] {
 export function visibilityBadge(note: Note): { icon: string; label: string } | null {
   switch (note.visibility) {
     case "followers_only":
-      return { icon: "🔒️", label: "プライベート" };
+      return { icon: "🔒️", label: i18n.t("home:badges.visibilityPrivate") };
     case "unlisted":
-      return { icon: "🤫", label: "ひかえめ" };
+      return { icon: "🤫", label: i18n.t("home:badges.visibilityUnlisted") };
     default:
       return null;
   }

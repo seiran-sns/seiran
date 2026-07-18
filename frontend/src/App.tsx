@@ -6,6 +6,7 @@ import { RightPaneProvider } from "./contexts/RightPaneContext";
 import { ComposerProvider } from "./contexts/ComposerContext";
 import { SiteMetaProvider } from "./contexts/SiteMetaContext";
 import { StreamingProvider } from "./contexts/StreamingContext";
+import { ToastProvider } from "./contexts/ToastContext";
 import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HomePage from "./pages/HomePage";
@@ -185,15 +186,17 @@ function AppRoutes() {
 export default function App() {
   return (
     <SiteMetaProvider>
-      <AuthProvider>
-        <StreamingProvider>
-          <RightPaneProvider>
-            <ComposerProvider>
-              <AppRoutes />
-            </ComposerProvider>
-          </RightPaneProvider>
-        </StreamingProvider>
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <StreamingProvider>
+            <RightPaneProvider>
+              <ComposerProvider>
+                <AppRoutes />
+              </ComposerProvider>
+            </RightPaneProvider>
+          </StreamingProvider>
+        </AuthProvider>
+      </ToastProvider>
     </SiteMetaProvider>
   );
 }

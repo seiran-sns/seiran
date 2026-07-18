@@ -1,0 +1,16 @@
+{
+  "notificationsPage": {
+    "title": "通知",
+    "comingSoon": "通知機能は準備中です。",
+    "comingSoonDetail": "リプライ・リアクション・フォローの通知エンドポイント実装後に有効化されます。"
+  },
+  "notificationsPanel": {
+    "unknownUser": "だれか",
+    "reactionText": "{{label}} がリアクションしました",
+    "followText": "{{label}} にフォローされました",
+    "followAcceptedText": "{{label}} がフォローを承認しました",
+    "genericText": "{{label}} から通知",
+    "noNotifications": "新しい通知はありません。",
+    "noNotificationsDetail": "リプライ・リアクション・フォローがここにリアルタイム表示されます。"
+  }
+}

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { api, User, getToken } from "../api/client";
+import { useNavigate } from "react-router-dom";
+import { api, User, getToken, setUnauthorizedHandler } from "../api/client";
 
 interface AuthContextValue {
   user: User | null;
@@ -18,6 +19,7 @@ const AuthContext = createContext<AuthContextValue>({
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (getToken()) {
@@ -40,6 +42,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("seiran_token");
     setUser(null);
   }
+
+  // トークン失効時（401）にログイン画面へ誘導する共通処理。
+  // ログイン試行自体の401（認証情報間違い）はトークン未保持のため client.ts 側で発火しない。
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      logout();
+      navigate("/login", { replace: true });
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [navigate]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout }}>

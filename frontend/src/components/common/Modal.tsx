@@ -1,4 +1,5 @@
 import { ReactNode, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import styles from "./Modal.module.css";
 
 interface ModalProps {
@@ -10,6 +11,7 @@ interface ModalProps {
 
 /** ダイアログ駆動 UI の基盤モーダル（オーバーレイクリック・Esc で閉じる）。 */
 export default function Modal({ open, onClose, title, children }: ModalProps) {
+  const { t } = useTranslation();
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -26,7 +28,7 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
       <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           {title && <span className={styles.title}>{title}</span>}
-          <button className={styles.close} onClick={onClose} aria-label="閉じる">
+          <button className={styles.close} onClick={onClose} aria-label={t("common:close")}>
             ×
           </button>
         </div>

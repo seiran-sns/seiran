@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, AdminUser, getErrorMessage } from "../../api/client";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
@@ -6,6 +7,7 @@ import styles from "../../pages/Admin.module.css";
 const ROLES = ["user", "moderator", "admin"];
 
 export default function UserManagement() {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -51,23 +53,25 @@ export default function UserManagement() {
     }
   }
 
-  if (loading) return <p className={panel.message}>読み込み中...</p>;
+  if (loading) return <p className={panel.message}>{t("common:loading")}</p>;
 
   return (
     <div className={styles.body}>
-      <h2 className={styles.sectionTitle}>ユーザー管理</h2>
+      <h2 className={styles.sectionTitle}>{t("admin:userManagement.title")}</h2>
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.card}>
-        {users.length === 0 && <p className={panel.message}>ユーザーがいません。</p>}
+        {users.length === 0 && <p className={panel.message}>{t("admin:userManagement.emptyMessage")}</p>}
         {users.map((u) => (
           <div key={u.id} className={styles.row}>
             <div className={styles.grow}>
               <div className={styles.primaryText}>
-                {u.username ? `@${u.username}` : "(アクター未作成)"}
+                {u.username ? `@${u.username}` : t("admin:userManagement.noActorLabel")}
               </div>
               <div className={styles.subText}>{u.email}</div>
             </div>
-            {u.suspended_at && <span className={`${styles.badge} ${styles.badgeSuspended}`}>凍結中</span>}
+            {u.suspended_at && (
+              <span className={`${styles.badge} ${styles.badgeSuspended}`}>{t("admin:userManagement.suspendedBadge")}</span>
+            )}
             <select
               className={styles.select}
               value={u.role}
@@ -85,7 +89,7 @@ export default function UserManagement() {
               disabled={busyId === u.id}
               onClick={() => toggleSuspend(u)}
             >
-              {u.suspended_at ? "凍結解除" : "凍結"}
+              {u.suspended_at ? t("admin:userManagement.unsuspendButton") : t("admin:userManagement.suspendButton")}
             </button>
           </div>
         ))}

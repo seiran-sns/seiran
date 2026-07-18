@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { ReactionSummary } from "../../api/client";
 import styles from "./ReactionChips.module.css";
 
@@ -11,6 +12,7 @@ interface ReactionChipsProps {
 
 /** 届いたリアクションの集計チップ表示。クリックで同じ絵文字を自分も付ける/取り消す/切り替える。 */
 export default function ReactionChips({ reactions, onToggle, disabled }: ReactionChipsProps) {
+  const { t } = useTranslation();
   if (!reactions || reactions.length === 0) return null;
   return (
     <div className={styles.wrap}>
@@ -26,10 +28,10 @@ export default function ReactionChips({ reactions, onToggle, disabled }: Reactio
             className={`${styles.chip} ${r.reactedByMe ? styles.chipActive : ""} ${addBlocked ? styles.chipReadonly : ""}`}
             title={
               addBlocked
-                ? "カスタム絵文字は自分では付けられません"
+                ? t("home:reactionChips.customEmojiBlocked")
                 : r.reactedByMe
-                  ? "クリックで取り消す"
-                  : "クリックで同じリアクションを付ける"
+                  ? t("home:reactionChips.clickToRemove")
+                  : t("home:reactionChips.clickToAdd")
             }
             disabled={!onToggle || disabled || addBlocked}
             onClick={(e) => {

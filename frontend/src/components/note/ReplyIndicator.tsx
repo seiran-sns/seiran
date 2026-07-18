@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, Note } from "../../api/client";
 import { acct, displayName } from "../../lib/format";
 import styles from "./ReplyIndicator.module.css";
@@ -10,6 +11,7 @@ import styles from "./ReplyIndicator.module.css";
  * タイムライン・詳細画面の両方で使用する。
  */
 export default function ReplyIndicator({ replyId }: { replyId: string }) {
+  const { t } = useTranslation();
   const [target, setTarget] = useState<Note | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -45,15 +47,15 @@ export default function ReplyIndicator({ replyId }: { replyId: string }) {
         to={`/notes/${replyId}`}
         className={styles.indicator}
         onClick={(e) => e.stopPropagation()}
-        title="返信元のポストへ移動"
+        title={t("home:replyIndicator.goToOriginalTitle")}
       >
-        <span aria-hidden>↩️</span> 返信
+        <span aria-hidden>↩️</span> {t("home:replyIndicator.replyLabel")}
       </Link>
 
       {open && (
         <span className={styles.popup} onMouseEnter={onEnter} onMouseLeave={onLeave}>
-          {loading && <span className={styles.dim}>読み込み中...</span>}
-          {failed && <span className={styles.dim}>返信元を取得できませんでした。</span>}
+          {loading && <span className={styles.dim}>{t("common:loading")}</span>}
+          {failed && <span className={styles.dim}>{t("home:replyIndicator.fetchFailed")}</span>}
           {target && (
             <Link to={`/notes/${target.id}`} className={styles.card} onClick={(e) => e.stopPropagation()}>
               <span className={styles.head}>

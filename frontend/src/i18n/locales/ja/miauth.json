@@ -1,0 +1,10 @@
+{
+  "connect": {
+    "unknownApp": "不明なアプリ",
+    "title": "アプリ連携の認可",
+    "doneDescription": "認可されました。アプリに戻ってください。",
+    "description": "アプリ {{appName}} が seiran アカウントへのアクセスを求めています。",
+    "authorizing": "処理中...",
+    "submit": "連携を承認する"
+  }
+}

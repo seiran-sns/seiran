@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, Note, UserProfile, getErrorMessage } from "../api/client";
 import Modal from "../components/common/Modal";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
 import NoteList from "../components/note/NoteList";
 import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "../contexts/ToastContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
 
@@ -14,6 +16,8 @@ type FollowStatus = "not_following" | "pending" | "accepted";
 const PAGE_SIZE = 20;
 
 export default function ProfilePage() {
+  const { t } = useTranslation();
+  const { showError } = useToast();
   const [searchParams] = useSearchParams();
   const { acct } = useParams<{ acct: string }>();
   const navigate = useNavigate();
@@ -113,7 +117,7 @@ export default function ProfilePage() {
       // ローカルフォローは即 accepted
       setFollowStatus(result.status === "accepted" ? "accepted" : "pending");
     } catch (e) {
-      alert(getErrorMessage(e));
+      showError(getErrorMessage(e));
     } finally {
       setFollowing(false);
     }
@@ -126,7 +130,7 @@ export default function ProfilePage() {
       await api.follows.delete(followTarget());
       setFollowStatus("not_following");
     } catch (e) {
-      alert(getErrorMessage(e));
+      showError(getErrorMessage(e));
     } finally {
       setUnfollowing(false);
     }
@@ -152,12 +156,12 @@ export default function ProfilePage() {
     <>
       <header className={panel.header}>
         <button className={panel.backBtn} onClick={() => navigate(-1)}>
-          ← 戻る
+          ← {t("common:back")}
         </button>
-        <span className={panel.title}>プロフィール</span>
+        <span className={panel.title}>{t("profile:profilePage.title")}</span>
       </header>
 
-      {loading && <p className={panel.message}>読み込み中...</p>}
+      {loading && <p className={panel.message}>{t("common:loading")}</p>}
       {error && <p className={panel.message}>{error}</p>}
 
       {profile && (
@@ -169,7 +173,9 @@ export default function ProfilePage() {
                 {profile.bridge_protocol === "bsky" ? "🦋" : "🌐"}
               </span>
               <span>
-                このアカウントは<strong>影武者</strong>です。本尊（{profile.bridge_real_handle}）はこちら →
+                {t("profile:profilePage.warpBanner.prefix")}
+                <strong>{t("profile:profilePage.warpBanner.shadowLabel")}</strong>
+                {t("profile:profilePage.warpBanner.suffix", { handle: profile.bridge_real_handle })}
               </span>
             </button>
           )}
@@ -190,8 +196,8 @@ export default function ProfilePage() {
 
           <div className={styles.badges}>
             {profile.is_paired && (
-              <span className={`${styles.badge} ${styles.pairedBadge}`} title="リモート seiran ユーザーと魂の結合済み">
-                🀄 魂の結合済み
+              <span className={`${styles.badge} ${styles.pairedBadge}`} title={t("profile:profilePage.pairedBadgeTitle")}>
+                🀄 {t("profile:profilePage.pairedBadge")}
               </span>
             )}
             {profile.at_did && (
@@ -243,7 +249,7 @@ export default function ProfilePage() {
           {isSelf && (
             <div className={styles.followArea}>
               <button className={styles.editBtn} onClick={() => navigate("/settings/profile")}>
-                プロフィールを編集
+                {t("profile:profilePage.editProfileButton")}
               </button>
             </div>
           )}
@@ -252,16 +258,16 @@ export default function ProfilePage() {
             <div className={styles.followArea}>
               {followStatus === "accepted" && (
                 <>
-                  <span className={styles.followingBadge}>フォロー中</span>
+                  <span className={styles.followingBadge}>{t("profile:profilePage.followingBadge")}</span>
                   <button className={styles.unfollowBtn} onClick={doUnfollow} disabled={unfollowing}>
-                    {unfollowing ? "解除中..." : "フォロー解除"}
+                    {unfollowing ? t("profile:profilePage.unfollowingButton") : t("profile:profilePage.unfollowButton")}
                   </button>
                 </>
               )}
-              {followStatus === "pending" && <span className={styles.pendingBadge}>承認待ち</span>}
+              {followStatus === "pending" && <span className={styles.pendingBadge}>{t("profile:profilePage.pendingBadge")}</span>}
               {followStatus === "not_following" && (
                 <button className={styles.followBtn} onClick={handleFollowClick} disabled={following}>
-                  {following ? "送信中..." : "フォロー"}
+                  {following ? t("profile:profilePage.followingSubmitButton") : t("profile:profilePage.followButton")}
                 </button>
               )}
             </div>
@@ -275,7 +281,7 @@ export default function ProfilePage() {
   // 邪魔をしないよう、最新ポストとは別セクションにする。
   const pinnedSection = profile && profile.pinned_posts.length > 0 && (
     <>
-      <div className={panel.rightHeader}>ピン留め</div>
+      <div className={panel.rightHeader}>{t("profile:profilePage.pinnedHeader")}</div>
       {profile.pinned_posts.map((post) => <NoteCard key={post.id} note={post} />)}
     </>
   );
@@ -283,7 +289,7 @@ export default function ProfilePage() {
   // 公開リスト一覧（#63）。現状ローカルユーザーのみ表示（リモートは将来課題）。
   const listsSection = profile && profile.public_lists.length > 0 && (
     <>
-      <div className={panel.rightHeader}>公開リスト</div>
+      <div className={panel.rightHeader}>{t("profile:profilePage.publicListsHeader")}</div>
       <div className={styles.listsRow}>
         {profile.public_lists.map((l) => (
           <Link key={l.id} to={`/lists/${l.id}`} className={styles.listBadge}>
@@ -296,10 +302,10 @@ export default function ProfilePage() {
 
   const recentSection = profile && (
     <>
-      <div className={panel.rightHeader}>投稿</div>
+      <div className={panel.rightHeader}>{t("profile:profilePage.postsHeader")}</div>
       <NoteList
         notes={posts}
-        emptyMessage="投稿がありません。"
+        emptyMessage={t("profile:profilePage.noPosts")}
         onLoadMore={loadMorePosts}
         hasMore={hasMore}
         loadingMore={loadingMore}
@@ -328,17 +334,18 @@ export default function ProfilePage() {
       <Modal
         open={bridgeModalOpen}
         onClose={() => setBridgeModalOpen(false)}
-        title="影武者アカウントのフォロー"
+        title={t("profile:profilePage.bridgeModal.title")}
       >
         <p className={styles.modalText}>
-          このアカウントは、
-          {profile?.bridge_protocol === "bsky" ? "Bluesky" : "Fediverse"}
-          のユーザーがブリッジ経由で投影されている<strong>影武者</strong>です。
-          seiran の機能をフルに活用するため、本尊（オリジナルアカウント）を直接フォローすることをおすすめします。
+          {t("profile:profilePage.bridgeModal.prefix", {
+            protocol: profile?.bridge_protocol === "bsky" ? "Bluesky" : "Fediverse",
+          })}
+          <strong>{t("profile:profilePage.bridgeModal.shadowLabel")}</strong>
+          {t("profile:profilePage.bridgeModal.suffix")}
         </p>
         <div className={styles.modalActions}>
           <button className={styles.modalPrimary} onClick={warpToReal}>
-            本尊のプロフィールへ移動
+            {t("profile:profilePage.bridgeModal.goToRealButton")}
           </button>
           <button
             className={styles.modalSecondary}
@@ -347,7 +354,7 @@ export default function ProfilePage() {
               doFollow();
             }}
           >
-            そのまま影武者をフォロー
+            {t("profile:profilePage.bridgeModal.followAnywayButton")}
           </button>
         </div>
       </Modal>

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import styles from "./Auth.module.css";
 
@@ -10,6 +11,7 @@ type Phase =
   | { kind: "done" };
 
 export default function ResetPassword() {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -23,7 +25,7 @@ export default function ResetPassword() {
   useEffect(() => {
     const token = searchParams.get("token");
     if (!token) {
-      setPhase({ kind: "invalid", message: "URLが無効です" });
+      setPhase({ kind: "invalid", message: t("auth:resetPassword.invalidUrl") });
       return;
     }
     const controller = new AbortController();
@@ -34,7 +36,7 @@ export default function ResetPassword() {
         setPhase({ kind: "invalid", message: getErrorMessage(err) });
       });
     return () => controller.abort();
-  }, [searchParams]);
+  }, [searchParams, t]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -42,11 +44,11 @@ export default function ResetPassword() {
     setError("");
 
     if (password.length < 8) {
-      setError("パスワードは8文字以上で入力してください");
+      setError(t("auth:resetPassword.passwordTooShort"));
       return;
     }
     if (password !== passwordConfirm) {
-      setError("パスワードが一致しません");
+      setError(t("auth:resetPassword.passwordMismatch"));
       return;
     }
 
@@ -65,8 +67,8 @@ export default function ResetPassword() {
     return (
       <div className={styles.container}>
         <div className={styles.card}>
-          <h1 className={styles.title}>seiran</h1>
-          <p style={{ textAlign: "center", color: "#a0aec0" }}>リンクを確認中...</p>
+          <h1 className={styles.title}>{t("common:appName")}</h1>
+          <p style={{ textAlign: "center", color: "#a0aec0" }}>{t("auth:resetPassword.verifying")}</p>
         </div>
       </div>
     );
@@ -76,13 +78,13 @@ export default function ResetPassword() {
     return (
       <div className={styles.container}>
         <div className={styles.card}>
-          <h1 className={styles.title}>seiran</h1>
-          <h2 className={styles.subtitle}>リンクが無効です</h2>
+          <h1 className={styles.title}>{t("common:appName")}</h1>
+          <h2 className={styles.subtitle}>{t("auth:resetPassword.invalidLinkTitle")}</h2>
           <p className={styles.error} style={{ textAlign: "center" }}>
-            {phase.message || "リンクが無効または期限切れです"}
+            {phase.message || t("auth:resetPassword.invalidLinkFallback")}
           </p>
           <p className={styles.link} style={{ marginTop: "1rem" }}>
-            <Link to="/forgot-password">パスワードリセットをやり直す</Link>
+            <Link to="/forgot-password">{t("auth:resetPassword.retryLink")}</Link>
           </p>
         </div>
       </div>
@@ -92,11 +94,11 @@ export default function ResetPassword() {
   return (
     <div className={styles.container}>
       <div className={styles.card}>
-        <h1 className={styles.title}>seiran</h1>
-        <h2 className={styles.subtitle}>新しいパスワードを設定</h2>
+        <h1 className={styles.title}>{t("common:appName")}</h1>
+        <h2 className={styles.subtitle}>{t("auth:resetPassword.title")}</h2>
         <form onSubmit={handleSubmit} className={styles.form}>
           <label className={styles.label}>
-            新しいパスワード（8文字以上）
+            {t("auth:resetPassword.newPasswordLabel")}
             <input
               type="password"
               value={password}
@@ -108,7 +110,7 @@ export default function ResetPassword() {
             />
           </label>
           <label className={styles.label}>
-            パスワード（確認）
+            {t("auth:resetPassword.confirmPasswordLabel")}
             <input
               type="password"
               value={passwordConfirm}
@@ -120,11 +122,11 @@ export default function ResetPassword() {
           </label>
           {error && <p className={styles.error}>{error}</p>}
           <button type="submit" className={styles.button} disabled={submitting}>
-            {submitting ? "更新中..." : "パスワードを更新"}
+            {submitting ? t("auth:resetPassword.updating") : t("auth:resetPassword.submit")}
           </button>
         </form>
         <p className={styles.link}>
-          <Link to="/login">ログインページへ戻る</Link>
+          <Link to="/login">{t("auth:resetPassword.backToLoginLink")}</Link>
         </p>
       </div>
     </div>

@@ -1,0 +1,53 @@
+{
+  "profilePage": {
+    "title": "プロフィール",
+    "warpBanner": {
+      "prefix": "このアカウントは",
+      "shadowLabel": "影武者",
+      "suffix": "です。本尊（{{handle}}）はこちら→"
+    },
+    "pairedBadge": "魂の結合済み",
+    "pairedBadgeTitle": "リモート seiran ユーザーと魂の結合済み",
+    "editProfileButton": "プロフィールを編集",
+    "followingBadge": "フォロー中",
+    "unfollowingButton": "解除中...",
+    "unfollowButton": "フォロー解除",
+    "pendingBadge": "承認待ち",
+    "followingSubmitButton": "送信中...",
+    "followButton": "フォロー",
+    "pinnedHeader": "ピン留め",
+    "publicListsHeader": "公開リスト",
+    "postsHeader": "投稿",
+    "noPosts": "投稿がありません。",
+    "bridgeModal": {
+      "title": "影武者アカウントのフォロー",
+      "prefix": "このアカウントは、{{protocol}}のユーザーがブリッジ経由で投影されている",
+      "shadowLabel": "影武者",
+      "suffix": "です。seiran の機能をフルに活用するため、本尊（オリジナルアカウント）を直接フォローすることをおすすめします。",
+      "goToRealButton": "本尊のプロフィールへ移動",
+      "followAnywayButton": "そのまま影武者をフォロー"
+    }
+  },
+  "profileEditPage": {
+    "title": "プロフィール編集",
+    "savedMessage": "保存しました。",
+    "uploadingAvatar": "アップロード中...",
+    "changeAvatarButton": "アイコンを変更",
+    "displayNameLabel": "表示名",
+    "bioLabel": "自己紹介",
+    "bioPlaceholder": "あなたについて教えてください",
+    "fieldsLabel": "プロフィール項目（リンク等、最大{{count}}件）",
+    "fieldNamePlaceholder": "ラベル（例: サイト）",
+    "fieldValuePlaceholder": "値（例: https://example.com）",
+    "dangerZoneTitle": "危険な操作",
+    "withdrawButton": "このアカウントを退会する",
+    "withdrawConfirm": "退会すると元に戻せません。本当に退会しますか？",
+    "withdrawHint": {
+      "body": "退会すると投稿が削除され、フォロー関係が解除されます。この操作は取り消せません。",
+      "handlePrefix": "確認のため、自分のハンドル（",
+      "handleSuffix": "）を入力してください。"
+    },
+    "withdrawing": "処理中...",
+    "withdrawSubmit": "退会する"
+  }
+}

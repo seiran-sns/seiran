@@ -1,9 +1,11 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, CustomEmoji, DriveFile, EmojiImportJob, getErrorMessage } from "../../api/client";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 
 export default function EmojisPanel() {
+  const { t } = useTranslation();
   const [emojis, setEmojis] = useState<CustomEmoji[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -140,7 +142,7 @@ export default function EmojisPanel() {
   }
 
   async function remove(em: CustomEmoji) {
-    if (!confirm(`絵文字 :${em.shortcode}: を削除しますか？`)) return;
+    if (!confirm(t("admin:emojisPanel.deleteConfirm", { shortcode: em.shortcode }))) return;
     setBusyId(em.id);
     setError("");
     try {
@@ -153,16 +155,16 @@ export default function EmojisPanel() {
     }
   }
 
-  if (loading) return <p className={panel.message}>読み込み中...</p>;
+  if (loading) return <p className={panel.message}>{t("common:loading")}</p>;
 
   return (
     <div className={styles.body}>
-      <h2 className={styles.sectionTitle}>カスタム絵文字</h2>
+      <h2 className={styles.sectionTitle}>{t("admin:emojisPanel.title")}</h2>
       {error && <p className={styles.error}>{error}</p>}
 
       {/* Misskey ZIP インポート（#50） */}
       <div className={styles.card}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Misskey ZIP インポート</div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{t("admin:emojisPanel.importTitle")}</div>
         <input
           ref={importFileRef}
           type="file"
@@ -177,19 +179,27 @@ export default function EmojisPanel() {
             onClick={() => importFileRef.current?.click()}
             disabled={importing}
           >
-            {importing ? "インポート中..." : "ZIPを選択してインポート"}
+            {importing ? t("admin:emojisPanel.importing") : t("admin:emojisPanel.selectZipButton")}
           </button>
         </div>
         {importError && <p className={styles.error} style={{ marginTop: 8 }}>{importError}</p>}
         {importJob && (
           <div style={{ marginTop: 8, fontSize: 13, color: "var(--color-text-sub, #666)" }}>
-            {importJob.done ? "完了" : "処理中"} — 追加: {importJob.processed} / スキップ: {importJob.skipped} / 失敗: {importJob.failed} / 合計: {importJob.total}
+            {importJob.done ? t("admin:emojisPanel.importDone") : t("admin:emojisPanel.importProcessing")} —{" "}
+            {t("admin:emojisPanel.importStats", {
+              processed: importJob.processed,
+              skipped: importJob.skipped,
+              failed: importJob.failed,
+              total: importJob.total,
+            })}
             {importJob.errors.length > 0 && (
               <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
                 {importJob.errors.slice(0, 10).map((err, i) => (
                   <li key={i} style={{ color: "var(--color-danger, #c00)" }}>{err}</li>
                 ))}
-                {importJob.errors.length > 10 && <li>… 他 {importJob.errors.length - 10} 件</li>}
+                {importJob.errors.length > 10 && (
+                  <li>{t("admin:emojisPanel.importMoreErrors", { count: importJob.errors.length - 10 })}</li>
+                )}
               </ul>
             )}
           </div>
@@ -200,12 +210,16 @@ export default function EmojisPanel() {
         <div className={styles.actions} style={{ marginBottom: 12 }}>
           <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFile} />
           <button type="button" className={styles.btnGhost} onClick={() => fileRef.current?.click()} disabled={uploading}>
-            {uploading ? "アップロード中..." : uploaded ? "画像を変更" : "画像を選択"}
+            {uploading
+              ? t("admin:emojisPanel.uploading")
+              : uploaded
+                ? t("admin:emojisPanel.changeImageButton")
+                : t("admin:emojisPanel.selectImageButton")}
           </button>
           {uploaded && <img src={uploaded.url} alt="" style={{ height: 32, borderRadius: 4 }} />}
         </div>
         <label className={styles.label}>
-          ショートコード（英数字・アンダースコア）
+          {t("admin:emojisPanel.shortcodeLabel")}
           <input
             className={styles.input}
             value={shortcode}
@@ -216,25 +230,25 @@ export default function EmojisPanel() {
           />
         </label>
         <label className={styles.label}>
-          カテゴリ（任意）
+          {t("admin:emojisPanel.categoryLabel")}
           <input className={styles.input} value={category} onChange={(e) => setCategory(e.target.value)} />
         </label>
         <label className={styles.label}>
-          タグ（任意・空白またはカンマ区切り。ピッカーの部分一致対象）
+          {t("admin:emojisPanel.tagsLabel")}
           <input
             className={styles.input}
             value={tags}
             onChange={(e) => setTags(e.target.value)}
-            placeholder="猫 かわいい blob-cat"
+            placeholder={t("admin:emojisPanel.tagsPlaceholder")}
           />
         </label>
         <button className={styles.btn} type="submit" disabled={creating || !uploaded || !shortcode.trim()}>
-          {creating ? "追加中..." : "絵文字を追加"}
+          {creating ? t("admin:emojisPanel.creating") : t("admin:emojisPanel.addButton")}
         </button>
       </form>
 
       <div className={styles.card}>
-        {emojis.length === 0 && <p className={panel.message}>カスタム絵文字がありません。</p>}
+        {emojis.length === 0 && <p className={panel.message}>{t("admin:emojisPanel.emptyMessage")}</p>}
         {emojis.map((em) => (
           <div key={em.id} className={styles.row}>
             <div className={styles.grow}>
@@ -246,14 +260,14 @@ export default function EmojisPanel() {
                     className={styles.input}
                     value={editTags}
                     onChange={(e) => setEditTags(e.target.value)}
-                    placeholder="空白またはカンマ区切り"
+                    placeholder={t("admin:emojisPanel.editTagsPlaceholder")}
                     style={{ flex: 1 }}
                   />
                   <button className={styles.btn} disabled={busyId === em.id} onClick={() => saveTags(em)}>
-                    保存
+                    {t("common:save")}
                   </button>
                   <button className={styles.btnGhost} onClick={() => setEditId(null)}>
-                    取消
+                    {t("common:cancel")}
                   </button>
                 </div>
               ) : (
@@ -264,11 +278,11 @@ export default function EmojisPanel() {
             </div>
             {editId !== em.id && (
               <button className={styles.btnGhost} disabled={busyId === em.id} onClick={() => startEdit(em)}>
-                タグ編集
+                {t("admin:emojisPanel.editTagsButton")}
               </button>
             )}
             <button className={styles.btnDanger} disabled={busyId === em.id} onClick={() => remove(em)}>
-              削除
+              {t("common:delete")}
             </button>
           </div>
         ))}

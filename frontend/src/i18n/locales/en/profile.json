@@ -1,0 +1,53 @@
+{
+  "profilePage": {
+    "title": "Profile",
+    "warpBanner": {
+      "prefix": "This account is a ",
+      "shadowLabel": "proxy",
+      "suffix": " account. The real account ({{handle}}) is here →"
+    },
+    "pairedBadge": "Soul-bound",
+    "pairedBadgeTitle": "Linked with a remote seiran user via soul-binding",
+    "editProfileButton": "Edit profile",
+    "followingBadge": "Following",
+    "unfollowingButton": "Unfollowing...",
+    "unfollowButton": "Unfollow",
+    "pendingBadge": "Requested",
+    "followingSubmitButton": "Sending...",
+    "followButton": "Follow",
+    "pinnedHeader": "Pinned",
+    "publicListsHeader": "Public lists",
+    "postsHeader": "Posts",
+    "noPosts": "No posts yet.",
+    "bridgeModal": {
+      "title": "Following a proxy account",
+      "prefix": "This account is a projection of a {{protocol}} user via a bridge, known as a ",
+      "shadowLabel": "proxy",
+      "suffix": ". To make full use of seiran's features, we recommend following the real (original) account directly.",
+      "goToRealButton": "Go to the real account's profile",
+      "followAnywayButton": "Follow the proxy account anyway"
+    }
+  },
+  "profileEditPage": {
+    "title": "Edit profile",
+    "savedMessage": "Saved.",
+    "uploadingAvatar": "Uploading...",
+    "changeAvatarButton": "Change avatar",
+    "displayNameLabel": "Display name",
+    "bioLabel": "Bio",
+    "bioPlaceholder": "Tell us about yourself",
+    "fieldsLabel": "Profile fields (links, etc. — up to {{count}})",
+    "fieldNamePlaceholder": "Label (e.g. Website)",
+    "fieldValuePlaceholder": "Value (e.g. https://example.com)",
+    "dangerZoneTitle": "Danger zone",
+    "withdrawButton": "Deactivate this account",
+    "withdrawConfirm": "Deactivating your account cannot be undone. Are you sure you want to proceed?",
+    "withdrawHint": {
+      "body": "Deactivating will delete your posts and remove your follow relationships. This action cannot be undone.",
+      "handlePrefix": " To confirm, please enter your handle (",
+      "handleSuffix": ") below."
+    },
+    "withdrawing": "Processing...",
+    "withdrawSubmit": "Deactivate account"
+  }
+}

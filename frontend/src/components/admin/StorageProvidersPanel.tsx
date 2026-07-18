@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, StorageProvider, getErrorMessage } from "../../api/client";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
@@ -15,6 +16,7 @@ const EMPTY = {
 };
 
 export default function StorageProvidersPanel() {
+  const { t } = useTranslation();
   const [providers, setProviders] = useState<StorageProvider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -49,7 +51,7 @@ export default function StorageProvidersPanel() {
   }
 
   async function remove(p: StorageProvider) {
-    if (!confirm(`ストレージ「${p.name}」を削除しますか？`)) return;
+    if (!confirm(t("admin:storageProvidersPanel.deleteConfirm", { name: p.name }))) return;
     setBusyId(p.id);
     setError("");
     try {
@@ -90,32 +92,32 @@ export default function StorageProvidersPanel() {
   const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  if (loading) return <p className={panel.message}>読み込み中...</p>;
+  if (loading) return <p className={panel.message}>{t("common:loading")}</p>;
 
   return (
     <div className={styles.body}>
-      <h2 className={styles.sectionTitle}>オブジェクトストレージ</h2>
+      <h2 className={styles.sectionTitle}>{t("admin:storageProvidersPanel.title")}</h2>
       {error && <p className={styles.error}>{error}</p>}
 
       <div className={styles.card}>
-        {providers.length === 0 && <p className={panel.message}>ストレージが登録されていません。</p>}
+        {providers.length === 0 && <p className={panel.message}>{t("admin:storageProvidersPanel.emptyMessage")}</p>}
         {providers.map((p) => (
           <div key={p.id} className={styles.row}>
             <div className={styles.grow}>
               <div className={styles.primaryText}>{p.name}</div>
               <div className={styles.subText}>
                 {p.endpoint} / {p.bucket}
-                {p.capacity_mb != null && ` / 上限 ${p.capacity_mb}MB`}
+                {p.capacity_mb != null && t("admin:storageProvidersPanel.capacitySuffix", { capacity: p.capacity_mb })}
               </div>
             </div>
             <span className={`${styles.badge} ${p.is_active ? styles.badgeAdmin : ""}`}>
-              {p.is_active ? "有効" : "無効"}
+              {p.is_active ? t("admin:storageProvidersPanel.active") : t("admin:storageProvidersPanel.inactive")}
             </span>
             <button className={styles.btnGhost} disabled={busyId === p.id} onClick={() => toggleActive(p)}>
-              {p.is_active ? "無効化" : "有効化"}
+              {p.is_active ? t("admin:storageProvidersPanel.deactivateButton") : t("admin:storageProvidersPanel.activateButton")}
             </button>
             <button className={styles.btnDanger} disabled={busyId === p.id} onClick={() => remove(p)}>
-              削除
+              {t("common:delete")}
             </button>
           </div>
         ))}
@@ -124,49 +126,49 @@ export default function StorageProvidersPanel() {
       {showForm ? (
         <form className={styles.card} onSubmit={create}>
           <label className={styles.label}>
-            名前
+            {t("admin:storageProvidersPanel.nameLabel")}
             <input className={styles.input} value={form.name} onChange={set("name")} required />
           </label>
           <label className={styles.label}>
-            エンドポイント
+            {t("admin:storageProvidersPanel.endpointLabel")}
             <input className={styles.input} value={form.endpoint} onChange={set("endpoint")} placeholder="https://xxx.r2.cloudflarestorage.com" required />
           </label>
           <label className={styles.label}>
-            バケット
+            {t("admin:storageProvidersPanel.bucketLabel")}
             <input className={styles.input} value={form.bucket} onChange={set("bucket")} required />
           </label>
           <label className={styles.label}>
-            リージョン
+            {t("admin:storageProvidersPanel.regionLabel")}
             <input className={styles.input} value={form.region} onChange={set("region")} placeholder="auto" />
           </label>
           <label className={styles.label}>
-            アクセスキー
+            {t("admin:storageProvidersPanel.accessKeyLabel")}
             <input className={styles.input} value={form.access_key} onChange={set("access_key")} required />
           </label>
           <label className={styles.label}>
-            シークレットキー
+            {t("admin:storageProvidersPanel.secretKeyLabel")}
             <input className={styles.input} type="password" value={form.secret_key} onChange={set("secret_key")} required />
           </label>
           <label className={styles.label}>
-            公開 URL（CDN）
+            {t("admin:storageProvidersPanel.publicUrlLabel")}
             <input className={styles.input} value={form.public_url} onChange={set("public_url")} placeholder="https://media.example.com" required />
           </label>
           <label className={styles.label}>
-            容量上限（MB・任意）
+            {t("admin:storageProvidersPanel.capacityLabel")}
             <input className={styles.input} type="number" value={form.capacity_mb} onChange={set("capacity_mb")} />
           </label>
           <div className={styles.actions}>
             <button className={styles.btn} type="submit" disabled={creating}>
-              {creating ? "作成中..." : "作成"}
+              {creating ? t("admin:storageProvidersPanel.creating") : t("common:create")}
             </button>
             <button className={styles.btnGhost} type="button" onClick={() => setShowForm(false)}>
-              キャンセル
+              {t("common:cancel")}
             </button>
           </div>
         </form>
       ) : (
         <button className={styles.btn} onClick={() => setShowForm(true)}>
-          + ストレージを追加
+          {t("admin:storageProvidersPanel.addButton")}
         </button>
       )}
     </div>

@@ -1,0 +1,25 @@
+{
+  "listsSettingsPage": {
+    "title": "Manage lists",
+    "newListNamePlaceholder": "New list name",
+    "publicLabel": "Public",
+    "creatingButton": "Creating...",
+    "noLists": "You don't have any lists yet.",
+    "isPublicLabel": "Public",
+    "isPrivateLabel": "Private",
+    "memberCount": "{{count}} members",
+    "selectListPrompt": "Select a list on the left.",
+    "editingHeader": "Editing {{name}}",
+    "deleteListConfirm": "Delete this list? This cannot be undone.",
+    "memberSearchPlaceholder": "Search by ID / handle / nickname, or @user@domain · https://... · did:...",
+    "addingMemberButton": "Adding...",
+    "addMemberButton": "Add member",
+    "noMembers": "No members yet."
+  },
+  "listDetailPage": {
+    "title": "List",
+    "notFound": "This list doesn't exist or is private.",
+    "memberCount": "{{count}} members",
+    "emptyTimeline": "Posts from this list's members will appear here."
+  }
+}

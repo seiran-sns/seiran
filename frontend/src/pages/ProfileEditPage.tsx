@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, DriveFile, getErrorMessage, ApiError, ProfileField } from "../api/client";
+import { useTranslation } from "react-i18next";
+import { api, DriveFile, getErrorMessage, ProfileField } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
 import panel from "../components/common/Panel.module.css";
@@ -13,13 +14,8 @@ function emptyProfileFields(): ProfileField[] {
   return Array.from({ length: PROFILE_FIELD_SLOTS }, () => ({ name: "", value: "" }));
 }
 
-const WITHDRAW_ERROR: Record<string, string> = {
-  CONFIRM_HANDLE_MISMATCH: "ハンドルが一致しません",
-  ALREADY_WITHDRAWN: "すでに退会済みです",
-  ACTOR_NOT_FOUND: "アクターが見つかりません",
-};
-
 export default function ProfileEditPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -102,7 +98,7 @@ export default function ProfileEditPage() {
 
   async function withdraw(e: FormEvent) {
     e.preventDefault();
-    if (!confirm("退会すると元に戻せません。本当に退会しますか？")) return;
+    if (!confirm(t("profile:profileEditPage.withdrawConfirm"))) return;
     setWithdrawing(true);
     setWithdrawError("");
     try {
@@ -110,11 +106,7 @@ export default function ProfileEditPage() {
       localStorage.removeItem("seiran_token");
       navigate("/login");
     } catch (err) {
-      if (err instanceof ApiError) {
-        setWithdrawError(WITHDRAW_ERROR[err.code] ?? `エラー (${err.code})`);
-      } else {
-        setWithdrawError(getErrorMessage(err));
-      }
+      setWithdrawError(getErrorMessage(err));
     } finally {
       setWithdrawing(false);
     }
@@ -124,17 +116,17 @@ export default function ProfileEditPage() {
     <>
       <header className={panel.header}>
         <button className={panel.backBtn} onClick={() => navigate(-1)}>
-          ← 戻る
+          ← {t("common:back")}
         </button>
-        <span className={panel.title}>プロフィール編集</span>
+        <span className={panel.title}>{t("profile:profileEditPage.title")}</span>
       </header>
 
       {loading ? (
-        <p className={panel.message}>読み込み中...</p>
+        <p className={panel.message}>{t("common:loading")}</p>
       ) : (
         <form className={styles.form} onSubmit={save}>
           {error && <p className={styles.error}>{error}</p>}
-          {saved && <p className={styles.success}>保存しました。</p>}
+          {saved && <p className={styles.success}>{t("profile:profileEditPage.savedMessage")}</p>}
 
           <div className={styles.avatarRow}>
             <div className={styles.avatarPreview}>
@@ -146,12 +138,12 @@ export default function ProfileEditPage() {
             </div>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onAvatar} />
             <button type="button" className={styles.ghost} onClick={() => fileRef.current?.click()} disabled={uploading}>
-              {uploading ? "アップロード中..." : "アイコンを変更"}
+              {uploading ? t("profile:profileEditPage.uploadingAvatar") : t("profile:profileEditPage.changeAvatarButton")}
             </button>
           </div>
 
           <label className={styles.label}>
-            表示名
+            {t("profile:profileEditPage.displayNameLabel")}
             <input
               className={styles.input}
               value={displayName}
@@ -162,18 +154,20 @@ export default function ProfileEditPage() {
           </label>
 
           <label className={styles.label}>
-            自己紹介
+            {t("profile:profileEditPage.bioLabel")}
             <textarea
               className={styles.textarea}
               value={bio}
               onChange={(e) => setBio(e.target.value)}
               rows={5}
-              placeholder="あなたについて教えてください"
+              placeholder={t("profile:profileEditPage.bioPlaceholder")}
             />
           </label>
 
           <div className={styles.fieldsSection}>
-            <p className={styles.fieldsLabel}>プロフィール項目（リンク等、最大{PROFILE_FIELD_SLOTS}件）</p>
+            <p className={styles.fieldsLabel}>
+              {t("profile:profileEditPage.fieldsLabel", { count: PROFILE_FIELD_SLOTS })}
+            </p>
             {profileFields.map((field, i) => (
               <div className={styles.fieldRow} key={i}>
                 <input
@@ -184,7 +178,7 @@ export default function ProfileEditPage() {
                     next[i] = { ...next[i], name: e.target.value };
                     setProfileFields(next);
                   }}
-                  placeholder="ラベル（例: サイト）"
+                  placeholder={t("profile:profileEditPage.fieldNamePlaceholder")}
                   maxLength={50}
                 />
                 <input
@@ -195,7 +189,7 @@ export default function ProfileEditPage() {
                     next[i] = { ...next[i], value: e.target.value };
                     setProfileFields(next);
                   }}
-                  placeholder="値（例: https://example.com）"
+                  placeholder={t("profile:profileEditPage.fieldValuePlaceholder")}
                   maxLength={255}
                 />
               </div>
@@ -203,23 +197,25 @@ export default function ProfileEditPage() {
           </div>
 
           <button className={styles.save} type="submit" disabled={saving}>
-            {saving ? "保存中..." : "保存"}
+            {saving ? t("common:saving") : t("common:save")}
           </button>
         </form>
       )}
 
       {/* 退会 */}
       <div className={styles.dangerZone}>
-        <h3 className={styles.dangerTitle}>危険な操作</h3>
+        <h3 className={styles.dangerTitle}>{t("profile:profileEditPage.dangerZoneTitle")}</h3>
         {!showWithdrawForm ? (
           <button className={styles.dangerBtn} onClick={() => setShowWithdrawForm(true)}>
-            このアカウントを退会する
+            {t("profile:profileEditPage.withdrawButton")}
           </button>
         ) : (
           <form className={styles.withdrawForm} onSubmit={withdraw}>
             <p className={styles.dangerHint}>
-              退会すると投稿が削除され、フォロー関係が解除されます。この操作は取り消せません。
-              確認のため、自分のハンドル（<strong>@{user?.username}</strong>）を入力してください。
+              {t("profile:profileEditPage.withdrawHint.body")}
+              {t("profile:profileEditPage.withdrawHint.handlePrefix")}
+              <strong>@{user?.username}</strong>
+              {t("profile:profileEditPage.withdrawHint.handleSuffix")}
             </p>
             {withdrawError && <p className={styles.error}>{withdrawError}</p>}
             <input
@@ -236,14 +232,14 @@ export default function ProfileEditPage() {
                 onClick={() => { setShowWithdrawForm(false); setWithdrawError(""); }}
                 disabled={withdrawing}
               >
-                キャンセル
+                {t("common:cancel")}
               </button>
               <button
                 type="submit"
                 className={styles.dangerBtn}
                 disabled={withdrawing || !withdrawHandle.trim()}
               >
-                {withdrawing ? "処理中..." : "退会する"}
+                {withdrawing ? t("profile:profileEditPage.withdrawing") : t("profile:profileEditPage.withdrawSubmit")}
               </button>
             </div>
           </form>

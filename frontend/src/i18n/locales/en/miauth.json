@@ -1,0 +1,10 @@
+{
+  "connect": {
+    "unknownApp": "Unknown app",
+    "title": "Authorize app connection",
+    "doneDescription": "Authorized. Please return to the app.",
+    "description": "{{appName}} is requesting access to your seiran account.",
+    "authorizing": "Processing...",
+    "submit": "Authorize"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "searchPage": {
+    "placeholder": "キーワードを検索（ローカル + Bluesky）",
+    "noResults": "一致する投稿が見つかりませんでした。",
+    "prompt": "キーワードを入力して検索してください。",
+    "loadMoreButton": "さらに読み込む",
+    "tabs": {
+      "quickNotifications": "クイック通知",
+      "trendsSearch": "トレンド＆検索"
+    },
+    "trendsComingSoon": "トレンド集計は準備中です。"
+  },
+  "trendsSearchPanel": {
+    "placeholder": "キーワードを検索",
+    "trendsHeader": "トレンド",
+    "comingSoon": "二大宇宙（AP / ATP）の集計によるリアルタイムトレンドは準備中です。",
+    "comingSoonDetail": "集計エンジンの実装後に有効化されます。"
+  }
+}

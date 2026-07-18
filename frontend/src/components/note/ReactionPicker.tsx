@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { isValidReactionEmoji } from "../../lib/reaction";
 import noteCardStyles from "./NoteCard.module.css";
 import styles from "./ReactionPicker.module.css";
@@ -15,6 +16,7 @@ interface ReactionPickerProps {
 
 /** 投稿に絵文字リアクションを付けるためのトリガーボタン＋ポップオーバー。 */
 export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
   const [customError, setCustomError] = useState(false);
@@ -59,9 +61,9 @@ export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        title="リアクションを付ける"
+        title={t("home:reactionPicker.addReactionTitle")}
       >
-        🙂 リアクション
+        🙂 {t("home:reactionPicker.addReactionButton")}
       </button>
       {open && (
         <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
@@ -81,7 +83,7 @@ export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps
             <input
               type="text"
               className={styles.customInput}
-              placeholder="絵文字を入力"
+              placeholder={t("home:reactionPicker.customInputPlaceholder")}
               value={customInput}
               maxLength={MAX_CONTENT_LEN}
               onChange={(e) => {
@@ -94,11 +96,11 @@ export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps
               className={styles.customSubmit}
               disabled={!customInput.trim() || !isValidReactionEmoji(customInput)}
             >
-              追加
+              {t("common:add")}
             </button>
           </form>
           {customError && (
-            <p className={styles.customError}>絵文字1つだけを入力してください</p>
+            <p className={styles.customError}>{t("home:reactionPicker.customInputError")}</p>
           )}
         </div>
       )}

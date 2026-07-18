@@ -1,4 +1,5 @@
 import { useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Note } from "../../api/client";
 import panel from "../common/Panel.module.css";
 import styles from "./NoteList.module.css";
@@ -20,13 +21,15 @@ interface NoteListProps {
 export default function NoteList({
   notes,
   loading,
-  emptyMessage = "投稿がありません。",
+  emptyMessage,
   linkToDetail = true,
   enteringIds,
   onLoadMore,
   hasMore,
   loadingMore,
 }: NoteListProps) {
+  const { t } = useTranslation();
+  const resolvedEmptyMessage = emptyMessage ?? t("home:noteList.emptyDefault");
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   // callback ref: sentinel の DOM 要素が生成・破棄されるたびに Reactが必ず呼ぶため、
@@ -51,8 +54,8 @@ export default function NoteList({
     [onLoadMore, hasMore]
   );
 
-  if (loading) return <p className={panel.message}>読み込み中...</p>;
-  if (notes.length === 0) return <p className={panel.message}>{emptyMessage}</p>;
+  if (loading) return <p className={panel.message}>{t("common:loading")}</p>;
+  if (notes.length === 0) return <p className={panel.message}>{resolvedEmptyMessage}</p>;
   return (
     <div>
       {notes.map((note) => (
@@ -62,7 +65,7 @@ export default function NoteList({
       ))}
       {onLoadMore && hasMore && (
         <div ref={sentinelRef} className={styles.sentinel}>
-          {loadingMore ? "読み込み中…" : ""}
+          {loadingMore ? t("common:loading") : ""}
         </div>
       )}
     </div>

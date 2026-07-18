@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import i18n from "../../i18n";
 import { api, NotificationItem } from "../../api/client";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import panel from "../common/Panel.module.css";
@@ -8,7 +10,7 @@ const PAGE_SIZE = 20;
 
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。 */
 function describe(n: NotificationItem): { icon: string; iconUrl?: string; text: string } {
-  const who = n.user?.name || n.user?.username || "だれか";
+  const who = n.user?.name || n.user?.username || i18n.t("notifications:notificationsPanel.unknownUser");
   const handle = n.user?.username && n.user?.host ? `@${n.user.username}@${n.user.host}` : "";
   const label = handle ? `${who}（${handle}）` : who;
   switch (n.type) {
@@ -16,14 +18,14 @@ function describe(n: NotificationItem): { icon: string; iconUrl?: string; text: 
       return {
         icon: n.reaction || "⭐",
         iconUrl: n.reaction ? n.note?.reactionEmojis?.[n.reaction] : undefined,
-        text: `${label} がリアクションしました`,
+        text: i18n.t("notifications:notificationsPanel.reactionText", { label }),
       };
     case "follow":
-      return { icon: "➕", text: `${label} にフォローされました` };
+      return { icon: "➕", text: i18n.t("notifications:notificationsPanel.followText", { label }) };
     case "followRequestAccepted":
-      return { icon: "🤝", text: `${label} がフォローを承認しました` };
+      return { icon: "🤝", text: i18n.t("notifications:notificationsPanel.followAcceptedText", { label }) };
     default:
-      return { icon: "🔔", text: `${label} から通知` };
+      return { icon: "🔔", text: i18n.t("notifications:notificationsPanel.genericText", { label }) };
   }
 }
 
@@ -35,6 +37,7 @@ function describe(n: NotificationItem): { icon: string; iconUrl?: string; text: 
  * 実データは常に REST から取得することで、一覧表示と整合したID体系を保つ。
  */
 export default function NotificationsPanel() {
+  const { t } = useTranslation();
   const { registerNotifArrived, markRead } = useStreamingContext();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -114,16 +117,16 @@ export default function NotificationsPanel() {
   }, [hasMore, loadMore, items.length]);
 
   if (loadingInitial) {
-    return <div className={panel.placeholder}>読み込み中…</div>;
+    return <div className={panel.placeholder}>{t("common:loading")}</div>;
   }
 
   if (items.length === 0) {
     return (
       <div className={panel.placeholder}>
         <span className={panel.placeholderIcon}>🔔</span>
-        新しい通知はありません。
+        {t("notifications:notificationsPanel.noNotifications")}
         <br />
-        リプライ・リアクション・フォローがここにリアルタイム表示されます。
+        {t("notifications:notificationsPanel.noNotificationsDetail")}
       </div>
     );
   }
@@ -145,7 +148,7 @@ export default function NotificationsPanel() {
       })}
       {hasMore && (
         <li ref={sentinelRef} className={styles.sentinel}>
-          {loadingMore ? "読み込み中…" : ""}
+          {loadingMore ? t("common:loading") : ""}
         </li>
       )}
     </ul>

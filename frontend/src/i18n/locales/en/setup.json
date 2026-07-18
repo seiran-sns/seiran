@@ -1,0 +1,11 @@
+{
+  "setup": {
+    "title": "Initial setup",
+    "description": "Please create an administrator account.",
+    "usernameLabel": "Username",
+    "emailLabel": "Email",
+    "passwordLabel": "Password (8+ characters)",
+    "submitting": "Setting up...",
+    "submit": "Create administrator account"
+  }
+}
