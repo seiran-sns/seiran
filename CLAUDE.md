@@ -18,10 +18,12 @@
 ### 設計文書の同期（必須）
 コードに変更を加えた場合、**必ず** 対応する設計文書を同期してからコミットすること。
 
-- **アーキテクチャ・設計の変更** → `docs/02_architecture_and_overall_design.md` を更新
-- **DBスキーマの変更** → `docs/01_database_schema_blueprint.md` を更新
-- **プロトコル仕様の変更** → `docs/03_multi_protocol_engine_specification.md` を更新
-- **新機能の完了** → `docs/06_development_roadmap.md` の該当チェックボックスに `[x]` を入れる
+- **アーキテクチャ・設計の変更** → `docs/architecture.md` を更新
+- **DBスキーマの変更** → `docs/database.md` を更新
+- **プロトコル仕様（AP/ATP・クロスプロトコル配送）の変更** → `docs/protocols.md` を更新
+- **UI/3ペイン仕様の変更** → `docs/ui_spec.md` を更新
+- **プロダクト思想・メンタルモデルの変更** → `docs/concept.md` を更新
+- **新機能の完了** → `docs/roadmap.md` の該当チェックボックスに `[x]` を入れる
 
 > **ルール**: 設計文書の更新とコードの変更は **同じコミット** に含めること。設計文書を後回しにしない。
 
@@ -31,7 +33,7 @@
 3. `cargo build` でコンパイルエラーがないことを確認
 4. `sqlx::query!` を追加・変更した場合は `cargo sqlx prepare --workspace` を実行して `.sqlx/` キャッシュを更新する（忘れると Docker ビルドが失敗する）
 5. 関連する設計文書を更新（上記の対応表に従う）
-6. `docs/06_development_roadmap.md` の進捗チェックを更新
+6. `docs/roadmap.md` の進捗チェックを更新
 7. マイケルに画面・動作確認を依頼してから `main` ブランチへコミット
 
 ### マイグレーションの適用方法（必読）
