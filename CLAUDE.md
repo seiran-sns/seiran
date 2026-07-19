@@ -31,10 +31,11 @@
 1. コード実装・修正
 2. 新しいマイグレーションファイルを追加した場合は `cargo sqlx migrate run` でローカル DB に適用する（後述）
 3. `cargo build` でコンパイルエラーがないことを確認
-4. `sqlx::query!` を追加・変更した場合は `cargo sqlx prepare --workspace` を実行して `.sqlx/` キャッシュを更新する（忘れると Docker ビルドが失敗する）
-5. 関連する設計文書を更新（上記の対応表に従う）
-6. `docs/roadmap.md` の進捗チェックを更新
-7. マイケルに画面・動作確認を依頼してから `main` ブランチへコミット
+4. `cargo clippy --workspace -- -D warnings` を実行し、指摘が無いことを確認（CI と同じコマンド）
+5. `sqlx::query!` を追加・変更した場合は `cargo sqlx prepare --workspace` を実行して `.sqlx/` キャッシュを更新する（忘れると Docker ビルドが失敗する）
+6. 関連する設計文書を更新（上記の対応表に従う）
+7. `docs/roadmap.md` の進捗チェックを更新
+8. マイケルに画面・動作確認を依頼してから `main` ブランチへコミット
 
 ### マイグレーションの適用方法（必読）
 
