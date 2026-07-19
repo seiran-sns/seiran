@@ -8,6 +8,8 @@
 
 use serde::Deserialize;
 
+use super::plc::plc_directory_base_url;
+
 #[derive(Debug, thiserror::Error)]
 pub enum DidResolveError {
     #[error("DIDドキュメント取得失敗: {0}")]
@@ -41,7 +43,7 @@ pub async fn resolve_atproto_verification_key(
     http: &reqwest::Client,
 ) -> Result<p256::ecdsa::VerifyingKey, DidResolveError> {
     let doc_url = if did.starts_with("did:plc:") {
-        format!("https://plc.directory/{}", did)
+        format!("{}/{}", plc_directory_base_url(), did)
     } else if let Some(domain) = did.strip_prefix("did:web:") {
         // did:web の `:` はパス区切りにデコードされる（ポート番号を除く。今回は未対応）
         let domain = domain.replace(':', "/");

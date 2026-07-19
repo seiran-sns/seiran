@@ -71,6 +71,15 @@ struct GenesisOpSigned {
 
 // ─── 登録 ─────────────────────────────────────────────────────────────────────
 
+/// plc.directory のベース URL。未設定時は本番の plc.directory。
+/// E2E テストではローカルのスタブサーバーに向けるために使う。
+pub fn plc_directory_base_url() -> String {
+    std::env::var("PLC_DIRECTORY_BASE_URL")
+        .unwrap_or_else(|_| "https://plc.directory".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
 /// genesis op 生成済みデータ。DID は確定しているが plc.directory にはまだ送信していない。
 pub struct PlcGenesis {
     pub did: String,
@@ -159,7 +168,7 @@ pub async fn submit_plc_genesis(
     genesis: &PlcGenesis,
     client: &reqwest::Client,
 ) -> Result<(), PlcError> {
-    let url = format!("https://plc.directory/{}", genesis.did);
+    let url = format!("{}/{}", plc_directory_base_url(), genesis.did);
     let res = client
         .post(&url)
         .json(&genesis.signed_op)

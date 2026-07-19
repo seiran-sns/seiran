@@ -10,7 +10,7 @@ pub use client::{
     create_atp_session, create_atp_post, upsert_bsky_post,
     BskyPost, BskyProfile, BskyPinnedPostRef, AtpSession,
 };
-pub use plc::{prepare_plc_genesis, submit_plc_genesis, PlcGenesis, p256_to_did_key, signing_key_from_pem, PlcError};
+pub use plc::{prepare_plc_genesis, submit_plc_genesis, plc_directory_base_url, PlcGenesis, p256_to_did_key, signing_key_from_pem, PlcError};
 pub use repo::{
     Cid,
     generate_tid, cid_from_dagcbor, cid_from_str, cid_to_string, cid_from_sha256_hex,
