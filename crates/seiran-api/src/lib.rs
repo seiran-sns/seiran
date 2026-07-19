@@ -60,6 +60,9 @@ pub struct AppState {
     pub local_auth: Arc<LocalAuthProvider>,
     pub miauth_sessions: Arc<RwLock<HashMap<String, MiAuthSession>>>,
     pub local_domain: String,
+    /// OGP対応（`handlers::ogp`）で SPA の index.html を取得する先。未設定時は Docker
+    /// 構成のデフォルト（`http://frontend:5173`）を使う。
+    pub frontend_origin: String,
     pub secrets: Arc<Secrets>,
     pub atp_service: Arc<AtpCommitService>,
     pub http_client: Arc<reqwest::Client>,
@@ -249,6 +252,8 @@ pub async fn init_state(
         local_auth,
         miauth_sessions: Arc::new(RwLock::new(HashMap::new())),
         local_domain,
+        frontend_origin: std::env::var("FRONTEND_ORIGIN")
+            .unwrap_or_else(|_| "http://frontend:5173".to_string()),
         secrets,
         atp_service,
         http_client,
@@ -343,8 +348,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/:id/pin", post(handlers::notes::pin_note))
         .route("/api/notes/:id/pin", delete(handlers::notes::unpin_note))
         .route("/api/notes/:id/context", get(handlers::notes::note_context))
-        // ActivityPub Note エンドポイント（nginx が AP Accept ヘッダーのみをここへ転送）
+        // ActivityPub Note / OGP注入済みSPA（Accept ヘッダーで振り分け、`handlers::ogp`）
         .route("/notes/:id", get(handlers::notes::get_note_ap))
+        // プロフィールページ（OGP注入済みSPA HTMLを返す、`handlers::ogp`）
+        .route("/@:handle", get(handlers::ogp::profile_ogp))
         // フォロー
         .route("/api/follows/create", post(handlers::follows::create_follow))
         .route("/api/follows/delete", post(handlers::follows::delete_follow))

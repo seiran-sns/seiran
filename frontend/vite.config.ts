@@ -20,19 +20,12 @@ export default defineConfig(({ mode }) => {
         // ws:true で /api/streaming の WebSocket もプロキシする（#37）。
         "/api": { target: "http://localhost:3000", ws: true },
         "/miauth": "http://localhost:3000",
-        // /notes/:id は AP クライアント向け（Accept: activity+json / ld+json）のみ
-        // バックエンドへ転送し、それ以外（ブラウザ）は SPA の NoteDetailPage に委ねる。
-        // nginx.conf の $notes_upstream map と同じロジック。
-        "/notes": {
-          target: "http://localhost:3000",
-          bypass(req) {
-            const accept = req.headers.accept ?? "";
-            if (/application\/(activity|ld)\+json/.test(accept)) {
-              return undefined; // バックエンドへプロキシ
-            }
-            return req.url; // Vite（SPA fallback）に処理させる
-          },
-        },
+        // /notes/:id・/@handle は常にバックエンドへ転送する。バックエンドが Accept
+        // ヘッダーで AP JSON-LD / OGP注入済み SPA HTML を出し分ける
+        // （`crates/seiran-api/src/handlers/ogp.rs`）。OGP 注入時はバックエンドが
+        // ルート `/` を取得しに来るだけなのでここには来ず、循環しない。
+        "/notes": "http://localhost:3000",
+        "/@": "http://localhost:3000",
       },
     },
   };

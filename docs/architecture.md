@@ -147,6 +147,29 @@ React 18 + Vite + TypeScript（react-router-dom v6）。`frontend/src/` 構成:
 
 3ペインUIのレイアウト仕様は `docs/ui_spec.md` を参照。
 
+## 8.1 OGP (Open Graph) 対応
+
+フロントエンドは SPA のため、素の index.html には投稿・プロフィールごとの `<meta>` が無い。
+User-Agent で既知の bot だけを判定して出し分ける方式は、リストにない未知のクローラーを
+取りこぼすため採用していない。代わりに `/notes/:id`・`/@:handle`（AP クライアント向け
+`Accept` を除く）へのリクエストは常に、SPA の index.html の `<head>` に OGP `<meta>` を
+注入したものを返す。実ブラウザはそのまま SPA が起動し（`<meta>` 注入以外は普段と同じ
+index.html）、クローラーは JS を実行しないため `<meta>` だけを読んで終わる。
+
+- `crates/seiran-api/src/handlers/ogp.rs` — DB から投稿/アクターの情報を取得し、
+  `state.frontend_origin`（Vite dev server、Docker既定は`http://frontend:5173`、環境変数
+  `FRONTEND_ORIGIN`で上書き可）から index.html を取得して `<title>`・OGP/Twitter Card の
+  `<meta>` を注入する。`GET /notes/:id` は既存の AP Note エンドポイント（`get_note_ap`）が
+  `Accept` ヘッダーで分岐し、AP クライアント向け JSON-LD とこの OGP 注入 HTML を出し分ける。
+  `GET /@:handle` はプロフィール専用の新規エンドポイント。
+- 投稿・アクターが見つからない/DBエラー時は `<meta>` を注入せず index.html をそのまま返す
+  （ここで 404 等を返すと SPA 自体が起動できず、フロント側の「見つかりません」表示や
+  リモートアクターの都度フェッチが機能しなくなるため）。
+- 可視性は投稿・プロフィールいずれも通常の閲覧経路と同じ判定を通す（`followers_only`/
+  `direct` は非表示、`PostRepository::find_by_id_for_viewer` を viewer なしで呼ぶ）。
+- nginx（`docker/nginx.conf`/`docker/nginx.mono.conf`）・ローカル開発（`frontend/vite.config.ts`
+  の proxy）とも、`/notes`・`/@` は bot 判定なしで常に api（バックエンド）へ転送する。
+
 ## 9. 環境変数
 
 | カテゴリ | 変数 |

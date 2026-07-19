@@ -405,16 +405,23 @@ pub async fn get_note(
     Ok(Json(nr))
 }
 
-/// ActivityPub 向け: GET /notes/:id
-/// nginx が Accept: application/activity+json のリクエストのみここへ転送する。
+/// GET /notes/:id
+/// nginx は常にここへ転送する（`docker/nginx.conf`）。Accept ヘッダーにより、AP クライアント
+/// 向け JSON-LD と、それ以外（ブラウザ・bot 問わず）向けの OGP 注入済み SPA HTML
+/// （`handlers::ogp`、`docs/architecture.md` 参照）を振り分ける。
 pub async fn get_note_ap(
     Path(id): Path<String>,
+    headers: axum::http::HeaderMap,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     let post_id: i64 = match id.parse() {
         Ok(i) => i,
         Err(_) => return (StatusCode::NOT_FOUND, "").into_response(),
     };
+
+    if crate::handlers::ogp::wants_html(&headers) {
+        return crate::handlers::ogp::note_ogp_html(post_id, &state).await;
+    }
 
     let post = match state.posts.find_by_id_for_viewer(post_id, None).await {
         Ok(Some(p)) => p,
