@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use seiran_common::atp::{BskyEmbed, BskyPostReply, BskyRefRecord};
-use seiran_common::mention::{convert_mentions_for_ap, convert_mentions_for_bsky};
+use seiran_common::mention::convert_mentions_for_bsky;
 use seiran_common::repository::PostDeliveryMeta;
 use seiran_common::ApDeliveryKind;
 
@@ -344,13 +344,6 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
         && d.bsky_quote_embed.is_none()
         && has_pending_video(&state.db, &d.attachment_ids).await;
 
-    // AP 配信用: `@handle.tld` (ATP ハンドル) → `@handle.tld@bsky.brid.gy` または Markdown リンク
-    let ap_text = if d.targets.fedi {
-        convert_mentions_for_ap(&d.text, &state.db, state.ap_client.http.as_ref()).await
-    } else {
-        d.text.clone()
-    };
-
     if defer_for_video {
         let (reply_root, reply_parent) = split_bsky_reply(&d.bsky_reply);
         state
@@ -381,10 +374,12 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
     }
 
     if d.targets.fedi {
+        // body は渡さない。deliver_post_to_ap_followers 側で DB の投稿本文を取得し、
+        // メンション解決（tag[]・<a> アンカー付与）まで一貫して行う。
         state
             .enqueue_ap_delivery(d.actor_id, ApDeliveryKind::PostToFollowers {
                 post_id: d.post_id,
-                body: Some(ap_text),
+                body: None,
                 quote_url: d.ap_quote_url,
                 in_reply_to: d.ap_in_reply_to,
             })

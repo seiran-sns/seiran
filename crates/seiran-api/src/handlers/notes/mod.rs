@@ -31,7 +31,7 @@ use sqlx::Row;
 
 use seiran_common::repository::{NotificationKind, TimelinePost};
 use seiran_common::streaming::broadcast_reaction_update;
-use seiran_common::{ap::{fetch_ap_history, plain_to_html}, generate_snowflake_id, ApDeliveryKind, PrevApReaction};
+use seiran_common::{ap::{fetch_ap_history, plain_to_html_with_mentions}, generate_snowflake_id, mention::convert_mentions_for_bsky, ApDeliveryKind, PrevApReaction};
 
 use crate::error::ApiError;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
@@ -198,7 +198,18 @@ async fn create_regular_post(
         deliver_bsky = false;
     }
 
-    if let Err(e) = validate_text_length(&text, deliver_bsky) {
+    // Bsky 配信する場合、メンション変換（`@user` → `@user.example.com` 等）でバイト数・
+    // 書記素数が増えうるため、投稿を受理する前に変換後テキストを同期的に確定し、
+    // それに対して Bsky の厳密な上限（300 書記素・3000 バイト）を検証する。
+    // ここで弾けば DB への INSERT 自体が行われない（未確定状態を作らない）。
+    let bsky_text_for_validation: Option<String> = if deliver_bsky {
+        let (bsky_text, _facets) =
+            convert_mentions_for_bsky(&text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await;
+        Some(bsky_text)
+    } else {
+        None
+    };
+    if let Err(e) = validate_text_length(&text, bsky_text_for_validation.as_deref()) {
         return e.into_response();
     }
     if let Some(ids) = &req.attachment_ids {
@@ -421,7 +432,15 @@ pub async fn get_note_ap(
 
     let actor_uri = format!("https://{}/users/{}", state.local_domain, post.username);
     let note_id = format!("https://{}/notes/{}", state.local_domain, post.id);
-    let content_html = plain_to_html(&post.body);
+    let (converted_body, mentions) = seiran_common::mention::convert_mentions_for_ap(
+        &post.body, &state.local_domain, &state.db, state.ap_client.http.as_ref(),
+    ).await;
+    let content_html = plain_to_html_with_mentions(&converted_body, &mentions);
+    let tag: Vec<serde_json::Value> = mentions
+        .iter()
+        .filter(|m| m.is_mention)
+        .map(|m| serde_json::json!({"type": "Mention", "href": m.href, "name": m.name}))
+        .collect();
 
     let attachment_rows = sqlx::query(
         "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
@@ -477,6 +496,9 @@ pub async fn get_note_ap(
     });
     if !attachments.is_empty() {
         ap_note["attachment"] = serde_json::Value::Array(attachments);
+    }
+    if !tag.is_empty() {
+        ap_note["tag"] = serde_json::Value::Array(tag);
     }
 
     (

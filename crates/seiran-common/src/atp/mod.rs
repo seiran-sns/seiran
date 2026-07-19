@@ -17,7 +17,7 @@ pub use repo::{
     build_mst, create_commit, encode_car, encode_bsky_feed_post, encode_bsky_actor_profile,
     encode_bsky_feed_repost, encode_bsky_feed_like, encode_bsky_graph_follow,
     build_commit_frame, build_identity_frame, build_error_frame, CommitEvtOp, RepoError,
-    BskyFacet, BskyFacetIndex, BskyFacetMention, BskyImage, BskyEmbed,
+    BskyFacet, BskyFacetIndex, BskyFacetMention, BskyFacetLink, BskyFacetFeature, BskyImage, BskyEmbed,
     BskyRefRecord, BskyPostReply,
 };
 pub use service::{AtpCommitService, AtpCommitError, AtpCommitEvent};

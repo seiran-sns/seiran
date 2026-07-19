@@ -124,6 +124,9 @@ struct NoteActivityParams<'a> {
     /// "public" | "unlisted" | "followers_only" | "direct"。to/cc の組み立てに使う
     /// （受信側の `classify_ap_visibility` と対称なマッピング）。
     visibility: &'a str,
+    /// 本文中のメンションから組み立てた `tag[]`（`{"type":"Mention","href":..,"name":..}`）。
+    /// 空なら Note オブジェクトに `tag` フィールド自体を含めない。
+    tag: Vec<serde_json::Value>,
 }
 
 /// 可視性から Create(Note)/Note 共通の to/cc を決める。
@@ -153,6 +156,9 @@ fn build_create_note_activity(addr: &LocalActorAddress, p: &NoteActivityParams) 
     });
     if !p.attachments.is_empty() {
         note_obj["attachment"] = serde_json::Value::Array(p.attachments.clone());
+    }
+    if !p.tag.is_empty() {
+        note_obj["tag"] = serde_json::Value::Array(p.tag.clone());
     }
     if let Some(q_url) = p.quote_url {
         note_obj["quoteUrl"] = serde_json::Value::String(q_url.to_string());
@@ -458,19 +464,37 @@ pub async fn deliver_post_to_ap_followers(
         return Ok(());
     }
 
+    // override_body（リポストのフォールバックテキスト等、投稿者本人が書いた本文ではない合成テキスト）
+    // の場合はメンション変換をせずそのまま HTML 化する。通常投稿（override_body なし）はここで
+    // 本文中のメンションを解決し、`<a>` アンカーと `tag[]`（AP Mention）を組み立てる。
+    let (content_html, tag): (String, Vec<serde_json::Value>) = if override_body.is_some() {
+        (plain_to_html(&body), Vec::new())
+    } else {
+        let (converted, mentions) =
+            crate::mention::convert_mentions_for_ap(&body, local_domain, db, &ap_client.http).await;
+        let html = plain_to_html_with_mentions(&converted, &mentions);
+        let tag: Vec<serde_json::Value> = mentions
+            .iter()
+            .filter(|m| m.is_mention)
+            .map(|m| serde_json::json!({"type": "Mention", "href": m.href, "name": m.name}))
+            .collect();
+        (html, tag)
+    };
+
     let addr = local_actor_address(local_domain, &username);
     let activity = build_create_note_activity(
         &addr,
         &NoteActivityParams {
             local_domain,
             post_id,
-            content_html: &plain_to_html(&body),
+            content_html: &content_html,
             published: &created_at.to_rfc3339(),
             attachments,
             quote_url,
             in_reply_to,
             seiran_uuid: seiran_uuid.as_deref(),
             visibility: &visibility,
+            tag,
         },
     );
 
@@ -831,20 +855,58 @@ pub async fn deliver_ap_undo_reaction(
     .await
 }
 
+/// HTML の特殊文字をエスケープする（`plain_to_html`／`plain_to_html_with_mentions` 共通）。
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// プレーンテキストを ActivityPub 向け HTML に変換する
 ///
 /// 空行で段落分割し、改行を `<br>` に変換する。
 pub fn plain_to_html(text: &str) -> String {
     let paragraphs: Vec<String> = text
         .split("\n\n")
-        .map(|para| {
-            let escaped = para
-                .replace('&', "&amp;")
-                .replace('<', "&lt;")
-                .replace('>', "&gt;")
-                .replace('"', "&quot;");
-            format!("<p>{}</p>", escaped.replace('\n', "<br>"))
-        })
+        .map(|para| format!("<p>{}</p>", escape_html(para).replace('\n', "<br>")))
+        .collect();
+    paragraphs.join("")
+}
+
+/// プレーンテキストを ActivityPub 向け HTML に変換する（メンション/リンク span 対応版）。
+///
+/// `mentions` の `byte_start`/`byte_end`（`text` に対する UTF-8 バイトオフセット）区間を
+/// `<a href="...">` に置き換えてから、`plain_to_html` と同じ段落分割・改行変換を行う。
+/// `mentions` は `crate::mention::convert_mentions_for_ap` の戻り値をそのまま渡す想定
+/// （byte_start 昇順・非重複であること）。
+pub fn plain_to_html_with_mentions(text: &str, mentions: &[crate::mention::ApInlineMention]) -> String {
+    let mut linked = String::with_capacity(text.len() * 2);
+    let mut last = 0usize;
+    for m in mentions {
+        if m.byte_start < last || m.byte_end > text.len() || m.byte_start > m.byte_end {
+            // 不正な範囲（呼び出し側のバグ等）はそのスパンだけ無視して安全側に倒す
+            continue;
+        }
+        linked.push_str(&escape_html(&text[last..m.byte_start]));
+        let rel = if m.is_mention {
+            r#" class="mention u-url" rel="nofollow noopener""#
+        } else {
+            r#" rel="nofollow noopener""#
+        };
+        linked.push_str(&format!(
+            r#"<a href="{}"{}>{}</a>"#,
+            escape_html(&m.href),
+            rel,
+            escape_html(&m.name)
+        ));
+        last = m.byte_end;
+    }
+    linked.push_str(&escape_html(&text[last..]));
+
+    let paragraphs: Vec<String> = linked
+        .split("\n\n")
+        .map(|para| format!("<p>{}</p>", para.replace('\n', "<br>")))
         .collect();
     paragraphs.join("")
 }
@@ -879,6 +941,7 @@ mod tests {
                 in_reply_to: None,
                 seiran_uuid: None,
                 visibility: "public",
+                tag: vec![],
             },
         );
         assert_eq!(activity["type"], "Create");
@@ -908,6 +971,7 @@ mod tests {
                 in_reply_to: None,
                 seiran_uuid: None,
                 visibility: "unlisted",
+                tag: vec![],
             },
         );
         assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
@@ -930,6 +994,7 @@ mod tests {
                 in_reply_to: None,
                 seiran_uuid: None,
                 visibility: "followers_only",
+                tag: vec![],
             },
         );
         assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
@@ -950,6 +1015,7 @@ mod tests {
                 in_reply_to: Some("https://other.example/notes/2"),
                 seiran_uuid: Some("uuid-1234"),
                 visibility: "public",
+                tag: vec![],
             },
         );
         let note = &activity["object"];
@@ -1120,5 +1186,80 @@ mod tests {
             result,
             "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>"
         );
+    }
+
+    #[test]
+    fn plain_to_html_with_mentions_wraps_mention_in_anchor() {
+        let text = "hello @alice@seiran.example bye";
+        let mentions = [crate::mention::ApInlineMention {
+            byte_start: 6,
+            byte_end: 27,
+            href: "https://seiran.example/users/alice".to_string(),
+            name: "@alice@seiran.example".to_string(),
+            is_mention: true,
+        }];
+        let html = plain_to_html_with_mentions(text, &mentions);
+        assert_eq!(
+            html,
+            r#"<p>hello <a href="https://seiran.example/users/alice" class="mention u-url" rel="nofollow noopener">@alice@seiran.example</a> bye</p>"#
+        );
+    }
+
+    #[test]
+    fn plain_to_html_with_mentions_non_mention_link_omits_mention_class() {
+        let text = "see alice.bsky.social";
+        let mentions = [crate::mention::ApInlineMention {
+            byte_start: 4,
+            byte_end: 21,
+            href: "https://bsky.app/profile/alice.bsky.social".to_string(),
+            name: "alice.bsky.social".to_string(),
+            is_mention: false,
+        }];
+        let html = plain_to_html_with_mentions(text, &mentions);
+        assert!(!html.contains("class=\"mention"));
+        assert!(html.contains(r#"<a href="https://bsky.app/profile/alice.bsky.social" rel="nofollow noopener">alice.bsky.social</a>"#));
+    }
+
+    #[test]
+    fn plain_to_html_with_mentions_escapes_surrounding_text() {
+        let text = "<b>@alice</b>";
+        let mentions = [crate::mention::ApInlineMention {
+            byte_start: 3,
+            byte_end: 9,
+            href: "https://seiran.example/users/alice".to_string(),
+            name: "@alice".to_string(),
+            is_mention: true,
+        }];
+        let html = plain_to_html_with_mentions(text, &mentions);
+        assert!(html.starts_with("<p>&lt;b&gt;<a "));
+        assert!(html.ends_with("</a>&lt;/b&gt;</p>"));
+    }
+
+    #[test]
+    fn plain_to_html_with_mentions_out_of_range_span_is_skipped() {
+        let text = "hi";
+        let mentions = [crate::mention::ApInlineMention {
+            byte_start: 0,
+            byte_end: 100, // text の範囲外
+            href: "https://example.com".to_string(),
+            name: "x".to_string(),
+            is_mention: true,
+        }];
+        let html = plain_to_html_with_mentions(text, &mentions);
+        assert_eq!(html, "<p>hi</p>");
+    }
+
+    #[test]
+    fn plain_to_html_with_mentions_preserves_newlines() {
+        let text = "@alice\nsecond line";
+        let mentions = [crate::mention::ApInlineMention {
+            byte_start: 0,
+            byte_end: 6,
+            href: "https://seiran.example/users/alice".to_string(),
+            name: "@alice".to_string(),
+            is_mention: true,
+        }];
+        let html = plain_to_html_with_mentions(text, &mentions);
+        assert!(html.contains("<br>second line"));
     }
 }

@@ -344,12 +344,30 @@ pub struct BskyFacetMention {
     pub kind: String,
 }
 
+/// Facet feature: link
+/// canonical 順: uri(3) < $type(5)
+#[derive(Serialize)]
+pub struct BskyFacetLink {
+    pub uri: String,
+    #[serde(rename = "$type")]
+    pub kind: String,
+}
+
+/// Facet feature（mention/link のいずれか）。untagged なので各バリアントの
+/// フィールドがそのまま `features[]` の要素として直列化される。
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum BskyFacetFeature {
+    Mention(BskyFacetMention),
+    Link(BskyFacetLink),
+}
+
 /// AT Protocol リッチテキスト Facet（`app.bsky.richtext.facet`）
 /// canonical 順: index(5) < features(8)
 #[derive(Serialize)]
 pub struct BskyFacet {
     pub index: BskyFacetIndex,
-    pub features: Vec<BskyFacetMention>,
+    pub features: Vec<BskyFacetFeature>,
 }
 
 /// 画像添付情報（`app.bsky.embed.images` 生成用）

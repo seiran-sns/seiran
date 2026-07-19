@@ -140,9 +140,32 @@ Bluesky facet・ActivityPub `<a href>` が示すリンク情報を、Misskey API
   - **N+1回避**: タイムライン等でまとめて複数投稿を返す箇所は、`crates/seiran-api/src/handlers/notes/queries.rs` の `resolve_mention_facets_in_place` が登場する全DIDを1回の `IN` 句クエリでバッチ解決してから `to_note_response` を呼ぶ。
   - **未知DIDの先行解決**: ローカル `actors` に無いDIDは `Job::ResolveBskyMention` をキューに積み、Bsky AppViewから非同期でプロフィールを取得して `actors` へupsertする（ベストエフォート。次回表示までに間に合わなくても実害はない＝その回は元テキストのまま表示されるだけ）。
 
+### 送信（seiranユーザー投稿 → Fedi/Bsky）のメンション/リンク解決
+`crates/seiran-common/src/mention.rs` が本文中の `@...` メンション・生URL（`http(s)://` から空白/`<>()[]` の手前まで）を配信先プロトコルごとに解決する。`@`直前のメールアドレス誤判定ガードはASCII英数字のみ見る（`is_ascii_alphanumeric()`）。Unicode版 `is_alphanumeric()` だと日本語等の文字も真になり、「文章@handle」のようにCJK文字に直接続くメンションを誤ってメールアドレスの一部とみなしスキップしてしまう（実機確認: 全角括弧直後にスペース無しで続くメンションが完全に無処理になっていた）。
+
+DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.identity.resolveHandle`、`public.api.bsky.app`）を使う。`bsky.brid.gy` は `com.atproto.identity.resolveHandle` を実装していない（`MethodNotImplemented`、実機確認）ため、ブリッジ済みハンドル（`{user}.{domain}.ap.brid.gy`等）のDID解決にも使わない。
+
+- **Bsky向け（`convert_mentions_for_bsky`）**:
+  - 生URL（`https://example.com` 等） → テキストは変更せず `app.bsky.richtext.facet#link` を付ける。
+  - `@username`（ローカル、ドメイン省略） → `@username.{local_domain}` に展開し、DIDが取れれば `app.bsky.richtext.facet#mention`。
+  - `@username@{local_domain}`（ローカルユーザーのFedi表記） → ローカルユーザーだとわかっているので上と同じ `@username.{local_domain}` に変換する（Fedi表記のままBskyに出さない）。
+  - `@handle.tld`（AT Protocolハンドル形式） → テキストは変更しない。`.{local_domain}` サフィックスならローカルユーザーとしてDID解決、そうでなければ公開AppViewでハンドル→DIDを解決しmention facetを付ける。
+  - `@user@domain`（他ドメインのFediverse形式） → brid.gyハンドル（`{user}.{domain}.ap.brid.gy`）を組み立て公開AppViewでDID解決できればmention facet。解決できない場合はテキストは `@user@domain` のまま変えず、代わりに `app.bsky.richtext.facet#link` を付ける（リンク先は既知のfediアクターなら本拠地URL=`actors.ap_uri`、未知なら自ドメインのリモートプロフィールページ `https://{local_domain}/@user@domain`）。
+- **AP向け（`convert_mentions_for_ap`）**: 戻り値は `(変換後テキスト, Vec<ApInlineMention>)`。各スパンは `href`・表示名・`is_mention`（`tag[]` に載せるか）を持つ。
+  - 生URL → テキストは変更せず、`is_mention: false` のリンクスパンとして追加する（`<a>` 化されるが `tag[]` には載らない）。
+  - ローカル `@username`（ドメイン省略） → 外部から見て意味を持つよう `@username@{local_domain}` に qualify し、ローカルアクターURI（`https://{local_domain}/users/{username}`）への Mention にする。
+  - `@username.{local_domain}`（ローカルユーザーのBskyハンドル表記） → ローカルユーザーだとわかっているので brid.gy 解決は試みず、上と同じ `@username@{local_domain}` の Mention に変換する（Bsky表記のままFediに出さない）。
+  - `@user@domain`（他ドメイン） → テキストは変更しない。DB（既知アクターの `ap_uri`）または webfinger（`https://{domain}/.well-known/webfinger?resource=acct:user@domain`）で href を解決できた場合のみ Mention を追加する。
+  - `@handle.tld`（他ドメインのBskyハンドル表記） → brid.gy webfinger（`acct:{handle}@bsky.brid.gy`）で解決できれば `@handle.tld@bsky.brid.gy` の Mention、できなければ `bsky.app/profile/{handle}` への単なるリンク（`is_mention: false`）。**ブリッジは対象アカウントがbrid.gyでの連携を有効化していない限り存在しない**（Bsky上に実在するアカウントでも無条件にブリッジされるわけではない）ため、この経路は珍しくない。
+  - Note の `content` HTML は `crates/seiran-common/src/ap/deliver.rs` の `plain_to_html_with_mentions` が上記スパンを `<a href="...">` へ変換して組み立てる（`is_mention` なスパンのみ `class="mention u-url"` を付ける）。`is_mention` なスパンは `tag[]`（`{"type":"Mention","href":...,"name":...}`）にも追加する。この変換・`tag[]` 組み立ては push配送（`deliver_post_to_ap_followers`、`override_body` 未指定時のみ）と pull取得（AP直接フェッチ `get_note_ap`）の両方で共有し、両者が食い違わないようにしている。リポストのフォールバックテキスト（`override_body` 指定時）はメンション変換をせずプレーンにHTML化する。
+
+### Bsky向け本文の文字数上限と受理タイミング
+`app.bsky.feed.post` の本文上限は書記素クラスタ数300・バイト数3000。メンション変換（`@user` → `@user.example.com` 等）でテキストが伸びうるため、`crates/seiran-api/src/handlers/notes/mod.rs` の `create_regular_post` は投稿をDBへINSERTする前に `convert_mentions_for_bsky` を同期的に実行し、**変換後テキスト**に対してこの上限を検証する（`validate_text_length`）。超過時は投稿自体を作らず `TEXT_TOO_LONG` エラーを返す。Bsky非配信時は元の入力テキストに対する緩い上限（3000書記素・10000バイト、Fedi向け）のみ検証する。
+
 ### 既知の制約
 - ローカル投稿者が生テキストに書いた `@mention` は、`posts.body` 自体は書き換わらない（AP/Bsky配送用のコピーにのみ `mention.rs` の変換がかかる）。フロントの `RichText` が本文中のプレーンな `@handle` パターンを直接検出してリンク化することでこれを補っている。
 - 内部リンクマーカーとして `[text](url)` を採用しているため、投稿本文がたまたまこの形式の文字列を含む場合は意図せずリンク化されうる（許容している）。
+- 送信時に生URLの自動リンク化（`app.bsky.richtext.facet#link` / AP `<a>`）は対応済みだが、ユーザーが手書きした `[text](url)`（Markdownリンク記法）のリンク化には未対応。
 
 ## 7. Misskey API 互換レイヤー
 

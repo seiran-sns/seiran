@@ -13,14 +13,19 @@ const FEDI_MAX_TEXT_GRAPHEMES: usize = 3_000;
 /// Fedi のみ配信時の本文上限（バイト数）。
 const FEDI_MAX_TEXT_BYTES: usize = 10_000;
 
-/// 投稿文字数を配信先（Bsky か否か）に応じたバイト数・書記素クラスタ数の上限で検証する。
-pub fn validate_text_length(text: &str, deliver_bsky: bool) -> Result<(), ApiError> {
-    let (max_bytes, max_graphemes): (usize, usize) = if deliver_bsky {
-        (BSKY_MAX_TEXT_BYTES, BSKY_MAX_TEXT_GRAPHEMES)
-    } else {
-        (FEDI_MAX_TEXT_BYTES, FEDI_MAX_TEXT_GRAPHEMES)
+/// 投稿文字数を配信先に応じたバイト数・書記素クラスタ数の上限で検証する。
+///
+/// `bsky_text` は Bsky 配信する場合に渡す、メンション変換後（`convert_mentions_for_bsky`
+/// 適用後）のテキスト。`@user` → `@user.example.com` のような展開でバイト数・書記素数が
+/// 増えうるため、Bsky の厳密な上限（300 書記素・3000 バイト）は元の入力テキストではなく
+/// この変換後テキストに対してチェックする（呼び出し元が投稿受理前に同期的に変換すること）。
+/// `None`（Bsky 非配信）の場合は元の `text` を Fedi 向けの緩い上限でチェックする。
+pub fn validate_text_length(text: &str, bsky_text: Option<&str>) -> Result<(), ApiError> {
+    let (checked, max_bytes, max_graphemes): (&str, usize, usize) = match bsky_text {
+        Some(bt) => (bt, BSKY_MAX_TEXT_BYTES, BSKY_MAX_TEXT_GRAPHEMES),
+        None => (text, FEDI_MAX_TEXT_BYTES, FEDI_MAX_TEXT_GRAPHEMES),
     };
-    if text.len() > max_bytes || text.graphemes(true).count() > max_graphemes {
+    if checked.len() > max_bytes || checked.graphemes(true).count() > max_graphemes {
         return Err(ApiError::BadRequest("TEXT_TOO_LONG".to_owned()));
     }
     Ok(())
@@ -81,7 +86,35 @@ pub fn strip_html_tags(html: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{strip_html_tags, validate_reaction_content};
+    use super::{strip_html_tags, validate_reaction_content, validate_text_length};
+
+    #[test]
+    fn validate_text_length_bsky_checks_converted_text_not_raw() {
+        // 変換後（bsky_text）が上限を超えていれば、元の text が短くても弾く
+        let raw = "@a";
+        let converted = "a".repeat(super::BSKY_MAX_TEXT_GRAPHEMES + 1);
+        assert!(validate_text_length(raw, Some(&converted)).is_err());
+    }
+
+    #[test]
+    fn validate_text_length_bsky_within_limit_ok() {
+        let raw = "hello";
+        let converted = "hello.seiran.example";
+        assert!(validate_text_length(raw, Some(converted)).is_ok());
+    }
+
+    #[test]
+    fn validate_text_length_no_bsky_uses_raw_text_with_looser_limit() {
+        // Bsky 上限を超えるが Fedi の緩い上限には収まる長さ
+        let text = "a".repeat(super::BSKY_MAX_TEXT_GRAPHEMES + 100);
+        assert!(validate_text_length(&text, None).is_ok());
+    }
+
+    #[test]
+    fn validate_text_length_no_bsky_still_enforces_fedi_limit() {
+        let text = "a".repeat(super::FEDI_MAX_TEXT_GRAPHEMES + 1);
+        assert!(validate_text_length(&text, None).is_err());
+    }
 
     #[test]
     fn strip_html_tags_removes_tags_and_decodes_entities() {
