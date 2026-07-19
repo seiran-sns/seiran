@@ -1,0 +1,19 @@
+name: seiran-e2e
+
+# E2Eテスト専用のPostgres。手動開発用の db コンテナ（docker-compose.mono.yml、ポート5432）
+# とは別インスタンス・別ポートで動かし、テスト実行のたびに空の状態から始める
+# （global-teardown.ts で `down -v` してデータを破棄する）。
+services:
+  db:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      POSTGRES_USER: seiran_e2e
+      POSTGRES_PASSWORD: seiran_e2e
+      POSTGRES_DB: seiran_e2e
+    ports:
+      - 5433:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seiran_e2e -d seiran_e2e"]
+      interval: 1s
+      retries: 30
