@@ -173,6 +173,12 @@ pub enum Job {
         /// この時刻を使う（ジョブの実行がずれても投稿日時がずれないように）。
         now: DateTime<Utc>,
     },
+
+    /// Bsky投稿のメンションfacetに含まれるDIDが未解決（ローカル`actors`に無い）の場合、
+    /// AppView からプロフィールを取得して upsert する。`posts.mention_facets` に保存された
+    /// DID は表示時（`NoteResponse` 生成時）に都度解決を試みるため、このジョブは
+    /// 「次回表示までに解決を終えておく」ためのベストエフォート先行解決。
+    ResolveBskyMention { did: String },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

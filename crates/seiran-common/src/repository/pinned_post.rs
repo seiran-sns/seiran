@@ -95,7 +95,7 @@ impl PinnedPostsRepository for PgPinnedPostsRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
              FROM pinned_posts pp
              JOIN posts p ON p.id = pp.post_id
              JOIN actors a ON a.id = p.actor_id

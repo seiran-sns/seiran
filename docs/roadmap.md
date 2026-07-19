@@ -15,6 +15,7 @@
 - [x] **フェーズ6: 検索セッション管理** — `SearchSession`、ブレンドアルゴリズム（InMemory実装のみ）。詳細: `docs/architecture.md` 6節
 - [x] **フェーズ7: 3ペインUI ＆ Misskey API互換** — 3ペインレイアウト、リアクション・通知・ピン留め・リスト機能、Misskey互換エンドポイント一式。詳細: `docs/ui_spec.md`, `docs/protocols.md` 6節
 - [x] **フェーズ7.5: フロントエンド国際化 ＆ エラーメッセージ改善** — react-i18next導入（英語/日本語、ブラウザ言語設定への自動追従）、バックエンドエラーコード全種の日英メッセージ化、トースト通知、401時の自動ログアウト＋ログイン画面誘導。詳細: `docs/architecture.md` 8節
+- [x] **フェーズ7.6: 本文中のリンク・メンションのクリック可能化** — Bsky facet（`#link`/`#mention`）・AP `<a href>` を内部リンクマーカー`[text](url)`としてMisskey API互換の`text`に埋め込み、フロント`RichText`コンポーネントでMarkdownリンク・生URL・`@mention`をクリック可能な要素へ変換。Bskyメンションはハンドル可変性に対応するため表示時に都度DID解決（`Job::ResolveBskyMention`による先行解決込み）。詳細: `docs/protocols.md` 6節
 
 ## 未完了・今後の課題
 

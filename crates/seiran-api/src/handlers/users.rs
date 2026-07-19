@@ -7,7 +7,7 @@ use seiran_common::repository::Actor;
 
 use crate::error::ApiError;
 use crate::handlers::notes::{
-    fetch_attachments_map, fetch_reactions_map, to_note_response, NoteResponse,
+    fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place, to_note_response, NoteResponse,
 };
 use crate::middleware::extract_auth;
 use crate::AppState;
@@ -55,13 +55,14 @@ pub async fn user_posts(
         None => None,
     };
 
-    let post_rows = match state.posts.timeline_by_actor(actor_id, my_actor_id, limit, until_id, since_id).await {
+    let mut post_rows = match state.posts.timeline_by_actor(actor_id, my_actor_id, limit, until_id, since_id).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[user_posts] 投稿取得失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
+    resolve_mention_facets_in_place(&state.db, &mut post_rows).await;
     let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
     let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
@@ -351,13 +352,14 @@ async fn build_profile_response(
 
     // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
     // アクター情報・添付・リアクションを含む NoteResponse で返す（#43）。
-    let post_rows = match state.posts.timeline_by_actor(actor_id, my_actor_id, 20, None, None).await {
+    let mut post_rows = match state.posts.timeline_by_actor(actor_id, my_actor_id, 20, None, None).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] 最近の投稿取得失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
+    resolve_mention_facets_in_place(&state.db, &mut post_rows).await;
     let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
     let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
@@ -373,13 +375,14 @@ async fn build_profile_response(
 
     // ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
     // Fedi featured collection / Bsky pinnedPost 同期結果（`sync_remote_pinned_posts` 参照）。
-    let pinned_rows = match state.pinned_posts.list_timeline_by_actor(actor_id, my_actor_id).await {
+    let mut pinned_rows = match state.pinned_posts.list_timeline_by_actor(actor_id, my_actor_id).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] ピン留め投稿取得失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
+    resolve_mention_facets_in_place(&state.db, &mut pinned_rows).await;
     let pinned_ids: Vec<i64> = pinned_rows.iter().map(|p| p.id).collect();
     let mut pinned_att_map = fetch_attachments_map(&state.db, &pinned_ids).await;
     let pinned_rmap = fetch_reactions_map(&state.db, &pinned_ids, my_actor_id).await;

@@ -12,7 +12,49 @@ use seiran_common::repository::TimelinePost;
 use crate::error::ApiError;
 use crate::AppState;
 
-use super::dto::{to_note_response, AttachmentResponse, NoteResponse, ReactionSummary};
+use super::dto::{apply_mention_facets, to_note_response, AttachmentResponse, NoteResponse, ReactionSummary};
+
+/// `posts` に含まれる Bsky メンションfacetのDIDをバッチ解決し（`actors` への IN句クエリ1回、
+/// N+1回避）、`body` 中のメンション範囲を `@handle`/`@handle@domain` へ置換する（未解決なら
+/// 投稿時点の表示のまま）。`to_note_response` を呼ぶ前に、`TimelinePost` 取得直後に1回呼ぶ。
+pub async fn resolve_mention_facets_in_place(db: &sqlx::PgPool, posts: &mut [TimelinePost]) {
+    let dids: HashSet<String> = posts
+        .iter()
+        .filter_map(|p| p.mention_facets.as_ref())
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .filter_map(|f| f.get("did").and_then(|d| d.as_str()).map(String::from))
+        .collect();
+    if dids.is_empty() {
+        return;
+    }
+    let dids: Vec<String> = dids.into_iter().collect();
+
+    let rows = sqlx::query("SELECT username, domain, at_did FROM actors WHERE at_did = ANY($1)")
+        .bind(&dids)
+        .fetch_all(db)
+        .await
+        .unwrap_or_default();
+
+    let mention_paths: HashMap<String, String> = rows
+        .iter()
+        .filter_map(|r| {
+            let did: String = r.try_get("at_did").ok()?;
+            let username: String = r.try_get("username").ok()?;
+            let domain: String = r.try_get("domain").ok()?;
+            let handle = if domain.is_empty() {
+                format!("@{}", username)
+            } else {
+                format!("@{}@{}", username, domain)
+            };
+            Some((did, handle))
+        })
+        .collect();
+
+    for p in posts.iter_mut() {
+        p.body = apply_mention_facets(&p.body, p.mention_facets.as_ref(), &mention_paths);
+    }
+}
 
 /// post_id リストに対する添付情報を一括取得する。
 /// ローカル投稿は media_files + storage_providers から URL を組み立て、
@@ -110,11 +152,11 @@ pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_act
         return;
     }
 
-    let rows = sqlx::query_as::<_, TimelinePost>(
+    let mut rows = sqlx::query_as::<_, TimelinePost>(
         "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                 a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                 COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+                p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
          LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -133,6 +175,7 @@ pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_act
     .fetch_all(db)
     .await
     .unwrap_or_default();
+    resolve_mention_facets_in_place(db, &mut rows).await;
 
     let mut att_map = fetch_attachments_map(db, &orig_ids).await;
     let rmap = fetch_reactions_map(db, &orig_ids, my_actor_id).await;

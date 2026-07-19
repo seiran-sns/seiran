@@ -122,6 +122,56 @@ pub struct NoteUserInfo {
     pub avatar_url: Option<String>,
 }
 
+/// `mention_facets`（`[{"byteStart":N,"byteEnd":M,"did":"did:plc:..."}]`）を使い、`body` 中の
+/// 該当バイト範囲を解決済みハンドル文字列（`@handle` または `@handle@domain`、先頭の `@` 込み）
+/// へ置換する。`mention_paths` に無い（未解決）DIDはそのまま変更しない（投稿時点の表示を維持）。
+/// フロントの MFM 描画コンポーネントが `@user@host` パターンを検出してプロフィールリンクに
+/// 変換する前提のため、ここでは Markdown リンクで包まずプレーンテキストのまま返す。
+///
+/// `byteStart`/`byteEnd` は保存時点で妥当性検証済みのはずだが、念のため範囲外・非文字境界・
+/// 他 facet との重なりはスキップする（表示を壊さない）。
+pub fn apply_mention_facets(
+    body: &str,
+    mention_facets: Option<&serde_json::Value>,
+    mention_paths: &HashMap<String, String>,
+) -> String {
+    let Some(facets) = mention_facets.and_then(|v| v.as_array()) else {
+        return body.to_string();
+    };
+    if facets.is_empty() {
+        return body.to_string();
+    }
+
+    let mut spans: Vec<(usize, usize, String)> = facets
+        .iter()
+        .filter_map(|f| {
+            let start = f.get("byteStart")?.as_u64()? as usize;
+            let end = f.get("byteEnd")?.as_u64()? as usize;
+            let did = f.get("did")?.as_str()?.to_string();
+            Some((start, end, did))
+        })
+        .collect();
+    // 後ろの facet から順に置換する（前方のオフセットを壊さないため）。
+    spans.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let mut result = body.to_string();
+    let mut upper_bound = result.len();
+    for (start, end, did) in spans {
+        if start >= end || end > result.len() || end > upper_bound {
+            continue;
+        }
+        if !result.is_char_boundary(start) || !result.is_char_boundary(end) {
+            continue;
+        }
+        if let Some(handle) = mention_paths.get(&did) {
+            result.replace_range(start..end, handle);
+            upper_bound = start;
+        }
+        // 未解決なら upper_bound は更新しない（この facet の範囲は変更していないため）。
+    }
+    result
+}
+
 pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -> NoteResponse {
     let mut emojis = json_map_to_string_map(p.post_emoji_map);
     emojis.extend(json_map_to_string_map(p.actor_emoji_map));
@@ -175,4 +225,98 @@ pub struct NoteContextResponse {
 #[derive(Deserialize)]
 pub struct ReactRequest {
     pub content: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_mention_facets;
+    use std::collections::HashMap;
+
+    fn facets(spans: &[(usize, usize, &str)]) -> serde_json::Value {
+        serde_json::json!(spans
+            .iter()
+            .map(|(start, end, did)| serde_json::json!({
+                "byteStart": start,
+                "byteEnd": end,
+                "did": did,
+            }))
+            .collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn resolved_did_is_replaced_with_handle() {
+        let body = "hi @alice.bsky.social!";
+        let byte_start = body.find("@alice.bsky.social").unwrap();
+        let byte_end = byte_start + "@alice.bsky.social".len();
+        let mention_facets = facets(&[(byte_start, byte_end, "did:plc:alice")]);
+        let mut mention_paths = HashMap::new();
+        mention_paths.insert("did:plc:alice".to_string(), "@alice.bsky.social".to_string());
+
+        let result = apply_mention_facets(body, Some(&mention_facets), &mention_paths);
+        assert_eq!(result, "hi @alice.bsky.social!");
+    }
+
+    #[test]
+    fn handle_change_is_reflected() {
+        // 投稿時点は @old.bsky.social だったが、その後ハンドルが変更された想定。
+        let body = "hi @old.bsky.social!";
+        let byte_start = body.find("@old.bsky.social").unwrap();
+        let byte_end = byte_start + "@old.bsky.social".len();
+        let mention_facets = facets(&[(byte_start, byte_end, "did:plc:alice")]);
+        let mut mention_paths = HashMap::new();
+        mention_paths.insert("did:plc:alice".to_string(), "@new.bsky.social".to_string());
+
+        let result = apply_mention_facets(body, Some(&mention_facets), &mention_paths);
+        assert_eq!(result, "hi @new.bsky.social!");
+    }
+
+    #[test]
+    fn unresolved_did_keeps_original_text() {
+        let body = "hi @unknown.bsky.social!";
+        let byte_start = body.find("@unknown.bsky.social").unwrap();
+        let byte_end = byte_start + "@unknown.bsky.social".len();
+        let mention_facets = facets(&[(byte_start, byte_end, "did:plc:unknown")]);
+        let mention_paths = HashMap::new(); // 未解決
+
+        let result = apply_mention_facets(body, Some(&mention_facets), &mention_paths);
+        assert_eq!(result, body, "未解決のDIDは元テキストのまま");
+    }
+
+    #[test]
+    fn no_mention_facets_returns_body_unchanged() {
+        let body = "plain text";
+        assert_eq!(apply_mention_facets(body, None, &HashMap::new()), body);
+        assert_eq!(
+            apply_mention_facets(body, Some(&serde_json::json!([])), &HashMap::new()),
+            body
+        );
+    }
+
+    #[test]
+    fn out_of_range_facet_is_skipped_without_panicking() {
+        let body = "short";
+        let mention_facets = facets(&[(0, 1000, "did:plc:x")]);
+        let mut mention_paths = HashMap::new();
+        mention_paths.insert("did:plc:x".to_string(), "@x.bsky.social".to_string());
+        assert_eq!(apply_mention_facets(body, Some(&mention_facets), &mention_paths), body);
+    }
+
+    #[test]
+    fn multiple_facets_applied_back_to_front() {
+        let body = "@alice and @bob";
+        let alice_start = 0;
+        let alice_end = "@alice".len();
+        let bob_start = body.find("@bob").unwrap();
+        let bob_end = bob_start + "@bob".len();
+        let mention_facets = facets(&[
+            (alice_start, alice_end, "did:plc:alice"),
+            (bob_start, bob_end, "did:plc:bob"),
+        ]);
+        let mut mention_paths = HashMap::new();
+        mention_paths.insert("did:plc:alice".to_string(), "@alice.bsky.social".to_string());
+        mention_paths.insert("did:plc:bob".to_string(), "@bob.bsky.social".to_string());
+
+        let result = apply_mention_facets(body, Some(&mention_facets), &mention_paths);
+        assert_eq!(result, "@alice.bsky.social and @bob.bsky.social");
+    }
 }

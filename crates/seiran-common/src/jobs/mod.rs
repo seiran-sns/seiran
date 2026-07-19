@@ -13,3 +13,4 @@ pub mod bsky_post_commit_deferred;
 pub mod bsky_video_poll;
 pub mod inbound_activity_process;
 pub mod proxy_follow_sync;
+pub mod resolve_bsky_mention;

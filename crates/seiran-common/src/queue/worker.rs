@@ -293,6 +293,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::BskyPostCommitDeferred { actor_id, post_id, text, attachment_ids, reply_root, reply_parent, now } => {
             jobs::bsky_post_commit_deferred::handle(actor_id, post_id, text, attachment_ids, reply_root, reply_parent, now, ctx).await
         }
+        Job::ResolveBskyMention { did } => {
+            jobs::resolve_bsky_mention::handle(did, ctx).await
+        }
     }
 }
 
@@ -308,6 +311,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::ProxyFollowSync { .. } => "ProxyFollowSync",
         Job::AccountWithdrawUnfollowAll { .. } => "AccountWithdrawUnfollowAll",
         Job::BskyPostCommitDeferred { .. } => "BskyPostCommitDeferred",
+        Job::ResolveBskyMention { .. } => "ResolveBskyMention",
     }
 }
 
@@ -365,6 +369,12 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 20,
             base_delay_ms: 3000,
             max_delay_ms: 3000,
+        },
+        Job::ResolveBskyMention { .. } => RetryConfig {
+            // ActorMetadataResolve と同様の軽量ベストエフォート解決。
+            max_attempts: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
         },
     }
 }

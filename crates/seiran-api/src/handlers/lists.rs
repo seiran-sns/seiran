@@ -19,7 +19,7 @@ use seiran_common::generate_snowflake_id;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 
 use crate::error::ApiError;
-use crate::handlers::notes::queries::fetch_reposted_ids;
+use crate::handlers::notes::queries::{fetch_reposted_ids, resolve_mention_facets_in_place};
 use crate::handlers::notes::{embed_renotes, fetch_attachments_map, fetch_reactions_map, to_note_response};
 use crate::handlers::notes::dto::TimelineQuery;
 use crate::handlers::target_resolve::resolve_and_upsert_target;
@@ -506,13 +506,14 @@ pub async fn list_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let rows = match state.lists.timeline(id, limit, until_id, since_id).await {
+    let mut rows = match state.lists.timeline(id, limit, until_id, since_id).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[list_timeline] クエリ失敗: {}", e);
             return ApiError::Internal("TL取得に失敗しました".to_string()).into_response();
         }
     };
+    resolve_mention_facets_in_place(&state.db, &mut rows).await;
 
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;

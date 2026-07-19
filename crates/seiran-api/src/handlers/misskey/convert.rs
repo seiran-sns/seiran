@@ -9,7 +9,7 @@ use sqlx::Row;
 
 use seiran_common::repository::{Actor, NotificationRow, TimelinePost};
 
-use crate::handlers::notes::{fetch_attachments_map, fetch_reactions_map, AttachmentResponse, ReactionSummary};
+use crate::handlers::notes::{fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place, AttachmentResponse, ReactionSummary};
 use crate::AppState;
 
 use super::types::{MisskeyDriveFile, MisskeyMeDetailed, MisskeyNote, MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite};
@@ -238,7 +238,8 @@ async fn fetch_counts_map(db: &sqlx::PgPool, post_ids: &[i64]) -> (HashMap<i64, 
 }
 
 /// タイムライン等、複数ノートをまとめて Misskey 形式へ変換する。
-pub async fn build_notes(state: &AppState, rows: Vec<TimelinePost>, my_actor_id: Option<i64>) -> Vec<MisskeyNote> {
+pub async fn build_notes(state: &AppState, mut rows: Vec<TimelinePost>, my_actor_id: Option<i64>) -> Vec<MisskeyNote> {
+    resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;

@@ -165,15 +165,15 @@ async fn fetch_and_respond(
     ids: Vec<i64>,
     session_id: Option<String>,
 ) -> axum::response::Response {
-    use super::notes::{fetch_attachments_map, to_note_response};
+    use super::notes::{fetch_attachments_map, resolve_mention_facets_in_place, to_note_response};
     use seiran_common::repository::TimelinePost;
 
     if ids.is_empty() {
         return Json(SearchResponse { notes: vec![], session_id }).into_response();
     }
 
-    let rows = sqlx::query_as::<_, TimelinePost>(
-        "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name
+    let mut rows = sqlx::query_as::<_, TimelinePost>(
+        "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name, p.mention_facets
          FROM posts p JOIN actors a ON a.id = p.actor_id
          WHERE p.id = ANY($1) AND p.deleted_at IS NULL
          ORDER BY p.id DESC",
@@ -182,6 +182,7 @@ async fn fetch_and_respond(
     .fetch_all(&state.db)
     .await
     .unwrap_or_default();
+    resolve_mention_facets_in_place(&state.db, &mut rows).await;
 
     let row_ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &row_ids).await;

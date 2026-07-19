@@ -327,7 +327,7 @@ impl ListRepository for PgListRepository {
              SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map, p.mention_facets
              FROM candidate_ids ci
              JOIN posts p ON p.id = ci.id
              JOIN actors a ON a.id = p.actor_id

@@ -8,6 +8,7 @@ import Avatar from "./Avatar";
 import ReactionChips from "./ReactionChips";
 import ReactionPicker from "./ReactionPicker";
 import EmojiText from "./EmojiText";
+import RichText from "./RichText";
 import HlsVideo from "./HlsVideo";
 import { useComposer } from "../../contexts/ComposerContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -238,7 +239,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
       )}
 
       <p className={styles.body}>
-        <EmojiText text={note.text} emojis={note.emojis} />
+        <RichText text={note.text} emojis={note.emojis} />
       </p>
 
       {note.attachments && note.attachments.length > 0 && (

@@ -1,15 +1,13 @@
+import { SHORTCODE_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
 import styles from "./EmojiText.module.css";
 
-const SHORTCODE_RE = /:[a-zA-Z0-9_+-]+:/g;
+const SHORTCODE_RE = new RegExp(SHORTCODE_SOURCE, "g");
 
 interface EmojiTextProps {
   text: string;
   /** shortcode（`:name:`）→画像URLのマップ（`Note.emojis`）。未指定/空ならプレーンテキストのまま。 */
   emojis?: Record<string, string>;
 }
-
-/** 英数字・アンダースコア（ショートコードの構成文字と同じ集合）。右端の接触判定に使う。 */
-const WORD_CHAR_RE = /[a-zA-Z0-9_]/;
 
 /**
  * 本文・表示名中の `:shortcode:` を、`emojis` マップで解決できるものだけ画像に置換する。

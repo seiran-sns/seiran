@@ -15,7 +15,7 @@ pub mod validation;
 
 pub use dto::{AttachmentResponse, NoteResponse, ReactRequest, ReactionSummary};
 pub use dto::to_note_response;
-pub use queries::{embed_renotes, fetch_attachments_map, fetch_reactions_map};
+pub use queries::{embed_renotes, fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place};
 pub use validation::BSKY_MAX_TEXT_GRAPHEMES;
 
 use std::collections::HashMap;
@@ -299,13 +299,14 @@ pub async fn home_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let rows = match state.posts.home_timeline(actor_id, limit, until_id, since_id).await {
+    let mut rows = match state.posts.home_timeline(actor_id, limit, until_id, since_id).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[home_timeline] クエリ失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "TL取得に失敗しました").into_response();
         }
     };
+    resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
@@ -334,13 +335,14 @@ pub async fn local_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let rows = match state.posts.local_timeline(my_actor_id, limit, until_id, since_id).await {
+    let mut rows = match state.posts.local_timeline(my_actor_id, limit, until_id, since_id).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[local_timeline] クエリ失敗: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "TL取得に失敗しました").into_response();
         }
     };
+    resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
@@ -373,12 +375,13 @@ pub async fn get_note(
     let my_actor_id: Option<i64> = user.map(|u| u.actor_id);
 
     let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
-    let post = state
+    let mut post = state
         .posts
         .find_by_id_for_viewer(post_id, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+    resolve_mention_facets_in_place(&state.db, std::slice::from_mut(&mut post)).await;
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
     let rmap = fetch_reactions_map(&state.db, &[post_id], my_actor_id).await;
     let mut nr = to_note_response(post, att_map.remove(&post_id).unwrap_or_default());
@@ -551,16 +554,18 @@ pub async fn note_context(
     }
 
     // 3. DB からコンテキストを取得
-    let before_posts = state
+    let mut before_posts = state
         .posts
         .context_before(actor_id, post_id, 10, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let after_posts = state
+    let mut after_posts = state
         .posts
         .context_after(actor_id, post_id, 10, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    resolve_mention_facets_in_place(&state.db, &mut before_posts).await;
+    resolve_mention_facets_in_place(&state.db, &mut after_posts).await;
 
     let all_ids: Vec<i64> = before_posts.iter().chain(after_posts.iter()).map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &all_ids).await;

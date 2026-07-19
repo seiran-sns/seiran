@@ -268,10 +268,12 @@ async fn handle_create_note(
     let remote = upsert_remote_fedi_actor(inbox, ap_client, actor_uri).await?;
     let actor_id = remote.actor_id;
 
-    // HTML タグを除去して本文を得る
-    let body = strip_html(&content_html);
+    // HTML タグを除去して本文を得る（<a href> はリンクとして保持し、Markdownリンク記法
+    // `[text](url)` に変換する。メンションは `@user@host` のプレーンテキストに正規化）。
+    let tags = note["tag"].as_array().cloned().unwrap_or_default();
+    let body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
     // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
-    let emoji_map = build_emoji_map(&note["tag"].as_array().cloned().unwrap_or_default());
+    let emoji_map = build_emoji_map(&tags);
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
     let visibility = classify_ap_visibility(&as_string_list(&note["to"]), &as_string_list(&note["cc"]));
 
@@ -366,6 +368,16 @@ fn as_string_list(v: &serde_json::Value) -> Vec<String> {
     }
 }
 
+/// HTML エンティティの簡易デコード（`strip_html` と `ap_content_to_markdown_body` で共有）。
+fn decode_html_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
+}
+
 /// プレーンテキストへの単純な HTML タグ除去（エンティティも簡易デコード）。
 pub fn strip_html(html: &str) -> String {
     let mut result = String::new();
@@ -381,17 +393,336 @@ pub fn strip_html(html: &str) -> String {
             _ => {}
         }
     }
-    // HTML エンティティを簡易変換
-    result
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
+    decode_html_entities(&result)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// HTML を「地の文」と「`<a href>`リンク」のセグメント列に分解する（`<a>` 以外のタグは
+/// すべて空白除去、ネストしたタグ（`<span>` 等）はリンクの内側テキストからも除去する）。
+/// 閉じタグの無い不正な HTML でも無限ループ・パニックせず、そこまでの内容で打ち切る。
+enum HtmlSegment {
+    Text(String),
+    Link {
+        href: String,
+        text: String,
+        /// `<a>` の `class` 属性に `mention`/`u-url` トークンが含まれるか。多くのFedi実装
+        /// （Mastodon等）はメンションアンカーに microformats クラスを付与するが、そのhrefは
+        /// 人間向けプロフィールURLで、`tag`配列のMention.hrefと一致しないことがある
+        /// （後者はAPアクターURI）。class情報を残しておき、href不一致時のフォールバック
+        /// 判定に使う。
+        is_mention_class: bool,
+    },
+}
+
+/// 非アンカータグ1個が地の文にもたらす区切り文字を返す（改行系タグのみ `\n`/`\n\n`、
+/// それ以外は半角スペース1個）。Mastodon等は改行を生の `\n` ではなく `<br>`/`<p>` で
+/// 表現するため、単純にすべてスペースへ潰すと改行が失われてしまう。
+fn tag_break_text(tag_inner: &str) -> &'static str {
+    let trimmed = tag_inner.trim().trim_end_matches('/').trim();
+    match trimmed.to_ascii_lowercase().as_str() {
+        "br" => "\n",
+        "/p" | "/div" => "\n\n",
+        _ => " ",
+    }
+}
+
+fn tokenize_anchors(html: &str) -> Vec<HtmlSegment> {
+    let chars: Vec<char> = html.chars().collect();
+    let mut segments = Vec::new();
+    let mut text_buf = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '<' {
+            text_buf.push(chars[i]);
+            i += 1;
+            continue;
+        }
+
+        // タグ全体（`<...>`）を読む。閉じる `>` が無ければ末尾までを1タグとみなす。
+        let mut j = i + 1;
+        while j < chars.len() && chars[j] != '>' {
+            j += 1;
+        }
+        let tag_inner: String = chars[i + 1..j].iter().collect();
+        let after_tag = if j < chars.len() { j + 1 } else { j };
+
+        let trimmed = tag_inner.trim_start();
+        let lower = trimmed.to_ascii_lowercase();
+        let is_anchor_open = (lower == "a" || lower.starts_with("a ") || lower.starts_with("a\t"))
+            && !trimmed.ends_with('/');
+
+        if !is_anchor_open {
+            text_buf.push_str(tag_break_text(&tag_inner));
+            i = after_tag;
+            continue;
+        }
+
+        if !text_buf.is_empty() {
+            segments.push(HtmlSegment::Text(std::mem::take(&mut text_buf)));
+        }
+        let href = extract_href_attr(&tag_inner);
+        // Mastodon等はメンションアンカーに `class="u-url mention"` を付与するが、その href は
+        // 人間向けプロフィールURLで `tag`配列のMention.href（APアクターURI）とは別物のことが
+        // 多い。class情報を残し、href不一致時のフォールバック判定に使う（後述）。
+        let is_mention_class = extract_class_tokens(&tag_inner)
+            .iter()
+            .any(|c| c == "mention" || c == "u-url");
+        i = after_tag;
+
+        // `</a>` まで読み、ネストしたタグは除去してテキストだけ残す。
+        let mut inner_text = String::new();
+        let mut in_inner_tag = false;
+        while i < chars.len() {
+            if chars[i] == '<' {
+                let ahead: String = chars[i + 1..].iter().take(2).collect::<String>().to_ascii_lowercase();
+                if ahead == "/a" {
+                    // `</a...>` という閉じタグ（属性・空白付きの `</a >` 等も含む）。'>' まで読み飛ばす。
+                    let mut k = i + 1;
+                    while k < chars.len() && chars[k] != '>' {
+                        k += 1;
+                    }
+                    i = if k < chars.len() { k + 1 } else { k };
+                    break;
+                }
+                in_inner_tag = true;
+            }
+            if chars[i] == '>' {
+                in_inner_tag = false;
+                i += 1;
+                continue;
+            }
+            if !in_inner_tag {
+                inner_text.push(chars[i]);
+            }
+            i += 1;
+        }
+
+        let inner_text = decode_html_entities(inner_text.trim());
+        match href {
+            Some(h) if !inner_text.is_empty() => {
+                segments.push(HtmlSegment::Link { href: h, text: inner_text, is_mention_class });
+            }
+            _ => {
+                if !inner_text.is_empty() {
+                    segments.push(HtmlSegment::Text(inner_text));
+                }
+            }
+        }
+        text_buf.push(' ');
+    }
+    if !text_buf.is_empty() {
+        segments.push(HtmlSegment::Text(text_buf));
+    }
+    segments
+}
+
+/// タグの中身（`a href="..." class="..."` のような属性文字列）から指定した属性の値を抽出する。
+fn extract_attr(tag_inner: &str, attr_name: &str) -> Option<String> {
+    let lower = tag_inner.to_ascii_lowercase();
+    let attr_lower = attr_name.to_ascii_lowercase();
+    let mut search_from = 0;
+    while let Some(rel_idx) = lower[search_from..].find(&attr_lower) {
+        let idx = search_from + rel_idx;
+        // 属性名の直前が英数字だと別属性名の一部（例: "href" 検索時の "xhref"）なので誤検出を避ける。
+        let boundary_ok = idx == 0 || !lower.as_bytes()[idx - 1].is_ascii_alphanumeric();
+        let after = &tag_inner[idx + attr_name.len()..];
+        let after_trimmed = after.trim_start();
+        if boundary_ok && after_trimmed.starts_with('=') {
+            let value_part = after_trimmed[1..].trim_start();
+            if let Some(quote) = value_part.chars().next() {
+                if quote == '"' || quote == '\'' {
+                    let rest = &value_part[quote.len_utf8()..];
+                    if let Some(end) = rest.find(quote) {
+                        return Some(rest[..end].to_string());
+                    }
+                }
+            }
+        }
+        search_from = idx + attr_name.len();
+    }
+    None
+}
+
+fn extract_href_attr(tag_inner: &str) -> Option<String> {
+    extract_attr(tag_inner, "href")
+}
+
+/// `class` 属性値を空白区切りのトークン列として返す（無ければ空）。
+fn extract_class_tokens(tag_inner: &str) -> Vec<String> {
+    extract_attr(tag_inner, "class")
+        .map(|c| c.split_whitespace().map(|s| s.to_ascii_lowercase()).collect())
+        .unwrap_or_default()
+}
+
+/// URL からホスト名部分を取り出す（`https://host/path?q#f` → `host`）。
+fn extract_host(url: &str) -> Option<&str> {
+    let without_scheme = url.split("://").nth(1)?;
+    let host = without_scheme.split(['/', '?', '#']).next()?;
+    (!host.is_empty()).then_some(host)
+}
+
+/// `tag.name` が `@user` のようにドメイン省略の場合、`tag.href` のホスト名を補って
+/// `@user@host` の完全修飾形にする。**Misskeyは自己言及メンション（投稿者自身への `@user`）の
+/// `name` をローカルドメイン省略で送ってくることがある**（実機確認: `attributedTo` と同一の
+/// アクターへのメンションで `name: "@yuba"` のみ、`href` はアクターURIそのもの）。
+fn qualify_mention_name(name: &str, href: &str) -> String {
+    let username = name.trim_start_matches('@');
+    if username.contains('@') {
+        return name.to_string(); // 既に完全修飾
+    }
+    match extract_host(href) {
+        Some(host) => format!("@{}@{}", username, host),
+        None => name.to_string(),
+    }
+}
+
+/// AP Note の Mention タグ（`tag`配列の `{"type":"Mention","href":"...","name":"@user@host"}`）
+/// と `href` が一致する場合、その `name`（完全修飾済み）を返す。
+fn find_mention_name_by_href(href: &str, tags: &[serde_json::Value]) -> Option<String> {
+    tags.iter()
+        .find(|t| t["type"].as_str() == Some("Mention") && t["href"].as_str() == Some(href))
+        .and_then(|t| Some(qualify_mention_name(t["name"].as_str()?, href)))
+}
+
+/// `<a>` の内側テキスト（例: `@bob`）のユーザー名部分と `tag`配列内 Mention の `name` の
+/// ユーザー名部分が一致するものを探す（`<a href>` が `tag[].href` と完全一致しない実装への
+/// フォールバック）。**同名ユーザーが複数の Mention として存在する場合**（例: 投稿者自身への
+/// `@yuba` と別インスタンスの `@yuba@fedibird.com` が同一Note内に共存するケース、実機確認）に
+/// 誤った方へマッチしないよう、まず `<a href>` と `tag.href` のホスト名が一致するものを優先し、
+/// 見つからなければユーザー名のみの一致にフォールバックする。
+fn find_mention_name_by_inner_text(anchor_href: &str, inner_text: &str, tags: &[serde_json::Value]) -> Option<String> {
+    let inner_username = inner_text.trim_start_matches('@').split('@').next()?;
+    if inner_username.is_empty() {
+        return None;
+    }
+    let mentions: Vec<&serde_json::Value> =
+        tags.iter().filter(|t| t["type"].as_str() == Some("Mention")).collect();
+
+    let username_matches = |t: &&serde_json::Value| -> bool {
+        t["name"]
+            .as_str()
+            .and_then(|name| name.trim_start_matches('@').split('@').next())
+            .map(|name_username| name_username.eq_ignore_ascii_case(inner_username))
+            .unwrap_or(false)
+    };
+
+    if let Some(anchor_host) = extract_host(anchor_href) {
+        if let Some(found) = mentions.iter().find(|t| {
+            username_matches(t)
+                && t["href"].as_str().and_then(extract_host).map(|h| h.eq_ignore_ascii_case(anchor_host)).unwrap_or(false)
+        }) {
+            let name = found["name"].as_str().unwrap_or_default();
+            let href = found["href"].as_str().unwrap_or_default();
+            return Some(qualify_mention_name(name, href));
+        }
+    }
+
+    // ホスト一致が見つからない場合のみ、ユーザー名だけのフォールバック一致を使う。
+    mentions.iter().find(|t| username_matches(t)).map(|t| {
+        let name = t["name"].as_str().unwrap_or_default();
+        let href = t["href"].as_str().unwrap_or_default();
+        qualify_mention_name(name, href)
+    })
+}
+
+/// AP Note のメンションアンカーが示す表示用メンション文字列（`@user@host`）を解決する。
+///
+/// 1. `href` が `tag`配列の Mention.href と完全一致 → その `name`（完全修飾済み）を使う
+/// 2. `<a>` の `class` に `mention`/`u-url` があり、`href` は不一致だが `tag`配列の中に
+///    （ホスト名優先で）ユーザー名が一致する Mention がある（Mastodon等は `<a>` の href に
+///    人間向けプロフィールURL、`tag[].href` にAPアクターURIを使い分けるため、両者が食い違う
+///    ことがある）→ その `name`
+/// 3. 上記いずれにも該当しないが `class` から見てメンションらしい → `<a>` の内側テキストを
+///    使う。ドメイン部分が省略されている（`@bob` のように単一`@`のみ）場合は、投稿元アクターの
+///    ドメイン（`sender_domain`）を補って `@bob@sender_domain` の完全修飾形にする
+///    （投稿元インスタンス内の相対メンション表記への対応）。
+/// メンションと判断できなければ `None`（呼び出し側は通常のURLリンクとして扱う）。
+fn resolve_ap_mention_text(
+    href: &str,
+    inner_text: &str,
+    is_mention_class: bool,
+    tags: &[serde_json::Value],
+    sender_domain: &str,
+) -> Option<String> {
+    if let Some(name) = find_mention_name_by_href(href, tags) {
+        return Some(name);
+    }
+    if !is_mention_class {
+        return None;
+    }
+    if let Some(name) = find_mention_name_by_inner_text(href, inner_text, tags) {
+        return Some(name);
+    }
+    // tag配列に対応エントリが無くても class から見てメンションらしいので、内側テキストを
+    // 完全修飾メンションへ正規化して採用する（本拠地サーバーへの直リンクを避けるため）。
+    let username = inner_text.trim_start_matches('@');
+    if username.is_empty() {
+        return None;
+    }
+    Some(if username.contains('@') || sender_domain.is_empty() {
+        format!("@{}", username)
+    } else {
+        format!("@{}@{}", username, sender_domain)
+    })
+}
+
+/// 改行（`\n`）を保持したまま、行内の連続空白だけを1個にまとめる。3個以上連続する改行は
+/// 2個（＝空行1つ）に、前後の空行はtrimする。`<br>`/`</p>`由来の改行と、タグ跡の半角スペースが
+/// 混在した文字列を、Misskey本家の `note.text` のような自然な改行付きプレーンテキストにする。
+fn normalize_whitespace_preserving_newlines(s: &str) -> String {
+    let joined = s
+        .split('\n')
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut result = String::with_capacity(joined.len());
+    let mut newline_run = 0usize;
+    for c in joined.chars() {
+        if c == '\n' {
+            newline_run += 1;
+        } else {
+            if newline_run > 0 {
+                result.push_str(&"\n".repeat(newline_run.min(2)));
+                newline_run = 0;
+            }
+            result.push(c);
+        }
+    }
+    result.trim_matches('\n').to_string()
+}
+
+/// AP Note の `content`（HTML）を、内部リンクマーカー `[表示テキスト](URL)`（Markdown
+/// リンク記法）を埋め込んだプレーンテキストへ変換する。`strip_html` との違いは `<a href>`
+/// をリンクとして保持する点と、`<br>`/`</p>` を改行として保持する点。ただしメンションと
+/// 判定されたリンクはMarkdownリンクで包まず、`@user@host` というプレーンテキストに正規化する
+/// （メンションはフロント側のメンション検出に委ねる。判定方法は `resolve_ap_mention_text`
+/// 参照）。一般の URL リンク・ハッシュタグのアンカーはそのまま `[text](url)` に変換する。
+///
+/// `sender_domain` はこのNoteの投稿者（アクター）のドメイン。`class="mention"` はあるが
+/// `tag`配列に対応エントリが無くドメイン省略のメンション（`@bob`）しか得られない場合、
+/// このドメインを補って完全修飾形（`@bob@sender_domain`）にする。
+pub fn ap_content_to_markdown_body(content_html: &str, tags: &[serde_json::Value], sender_domain: &str) -> String {
+    let mut out = String::new();
+    for seg in tokenize_anchors(content_html) {
+        match seg {
+            HtmlSegment::Text(t) => out.push_str(&t),
+            HtmlSegment::Link { href, text, is_mention_class } => {
+                if let Some(name) = resolve_ap_mention_text(&href, &text, is_mention_class, tags, sender_domain) {
+                    out.push_str(&name);
+                } else {
+                    out.push('[');
+                    out.push_str(&text);
+                    out.push_str("](");
+                    out.push_str(&href);
+                    out.push(')');
+                }
+            }
+        }
+    }
+    normalize_whitespace_preserving_newlines(&decode_html_entities(&out))
 }
 
 // Accept(Follow) を受け取り follows.status を accepted に更新する
@@ -779,7 +1110,8 @@ async fn fetch_and_save_note(
     let remote = upsert_remote_fedi_actor(inbox, ap_client, &actor_uri).await?;
     let actor_id = remote.actor_id;
 
-    let body = strip_html(&content_html);
+    let tags = note["tag"].as_array().cloned().unwrap_or_default();
+    let body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
 
     inbox
         .post_repo
@@ -804,7 +1136,144 @@ async fn fetch_and_save_note(
 
 #[cfg(test)]
 mod tests {
-    use super::{bsky_app_url_to_at_uri, extract_emoji_tag_url, strip_html};
+    use super::{
+        ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_emoji_tag_url, strip_html,
+    };
+
+    #[test]
+    fn ap_content_to_markdown_body_converts_plain_link() {
+        let html = r#"<p>見て <a href="https://example.com/foo">example.com/foo</a> だよ</p>"#;
+        let body = ap_content_to_markdown_body(html, &[], "example.social");
+        assert_eq!(body, "見て [example.com/foo](https://example.com/foo) だよ");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_mention_becomes_plain_handle_text() {
+        // メンションは Markdown リンクで包まず、tag.name（フルのメンション文字列）を
+        // そのままのテキストにする。フロントの MFM 描画コンポーネントが `@user@host`
+        // パターンを検出してプロフィールリンクへ変換する前提。
+        let html = r#"<p><a href="https://example.social/users/alice" class="u-url mention">@<span>alice</span></a> こんにちは</p>"#;
+        let tags = vec![serde_json::json!({
+            "type": "Mention",
+            "href": "https://example.social/users/alice",
+            "name": "@alice@example.social"
+        })];
+        let body = ap_content_to_markdown_body(html, &tags, "example.social");
+        assert_eq!(body, "@alice@example.social こんにちは");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_mention_class_with_mismatched_href_falls_back_to_tag_username_match() {
+        // Mastodon等は <a href> に人間向けプロフィールURL、tag[].href にAPアクターURIを使う
+        // ため両者が食い違うことがある。href完全一致に失敗しても、tag配列の中からユーザー名が
+        // 一致する Mention を見つけて name を採用し、本拠地サーバーへの直リンクにはしない。
+        let html = r#"<p><a href="https://example.social/@bob" class="u-url mention">@bob</a> hi</p>"#;
+        let tags = vec![serde_json::json!({
+            "type": "Mention",
+            "href": "https://example.social/users/bob",
+            "name": "@bob@example.social"
+        })];
+        let body = ap_content_to_markdown_body(html, &tags, "example.social");
+        assert_eq!(body, "@bob@example.social hi");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_mention_class_without_tag_entry_gets_sender_domain_appended() {
+        // tag配列に対応エントリが全く無い場合でも、class=mention なら本拠地サーバーへの
+        // 直リンクにはせず、投稿元アクターのドメイン（sender_domain）を補って完全修飾形にする。
+        let html = r#"<p><a href="https://example.social/@carol" class="u-url mention">@carol</a> yo</p>"#;
+        let body = ap_content_to_markdown_body(html, &[], "example.social");
+        assert_eq!(body, "@carol@example.social yo");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_self_mention_with_domain_omitted_name_gets_qualified() {
+        // 実機確認（reax.work, Misskey系）: 投稿者自身への自己言及メンションは
+        // tag.name がローカルドメイン省略の "@yuba" になることがある。href
+        // （アクターURI）からホスト名を補って完全修飾形にする。
+        let html = r#"<a href="https://reax.work/@yuba" class="u-url mention">@yuba</a>"#;
+        let tags = vec![serde_json::json!({
+            "type": "Mention",
+            "href": "https://reax.work/users/9dohp6knpn",
+            "name": "@yuba"
+        })];
+        let body = ap_content_to_markdown_body(html, &tags, "reax.work");
+        assert_eq!(body, "@yuba@reax.work");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_same_username_different_hosts_do_not_cross_match() {
+        // 実機確認: 同一Note内に同名ユーザー（投稿者自身 @yuba とは別インスタンスの
+        // @yuba@fedibird.com）への2つのメンションがあると、ユーザー名だけでの一致判定では
+        // 常に最初に見つかった方に誤マッチしてしまう。<a href> と tag.href のホスト名を
+        // 突き合わせることで、それぞれ正しい tag に解決されなければならない。
+        let html = concat!(
+            r#"<a href="https://reax.work/@yuba" class="u-url mention">@yuba</a>"#,
+            "<br />",
+            r#"<a href="https://fedibird.com/@yuba" class="u-url mention">@yuba@fedibird.com</a>"#,
+        );
+        let tags = vec![
+            serde_json::json!({
+                "type": "Mention",
+                "href": "https://reax.work/users/9dohp6knpn",
+                "name": "@yuba"
+            }),
+            serde_json::json!({
+                "type": "Mention",
+                "href": "https://fedibird.com/users/yuba",
+                "name": "@yuba@fedibird.com"
+            }),
+        ];
+        let body = ap_content_to_markdown_body(html, &tags, "reax.work");
+        assert_eq!(body, "@yuba@reax.work\n@yuba@fedibird.com");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_non_mention_link_with_mismatched_tags_stays_a_link() {
+        // class に mention/u-url が無ければ通常のリンクとして扱う（本拠地サーバーへの
+        // リンクになるのは意図通り、これは普通のURLリンクのケース）。
+        let html = r#"<a href="https://example.com/article">記事</a>"#;
+        let body = ap_content_to_markdown_body(html, &[], "example.social");
+        assert_eq!(body, "[記事](https://example.com/article)");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_hashtag_anchor_becomes_link_to_remote_tag_page() {
+        let html = r#"<a href="https://example.social/tags/foo" rel="tag">#foo</a>"#;
+        let body = ap_content_to_markdown_body(html, &[], "example.social");
+        assert_eq!(body, "[#foo](https://example.social/tags/foo)");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_unclosed_anchor_does_not_panic() {
+        let html = r#"text <a href="https://example.com">no closing tag"#;
+        let body = ap_content_to_markdown_body(html, &[], "example.social");
+        // 閉じタグが無くてもパニックせず、末尾までがリンクテキストとして扱われる。
+        assert_eq!(body, "text [no closing tag](https://example.com)");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_preserves_markdown_like_plain_text() {
+        // 元々 content 中に Markdown 風の文字列 `[text](url)` が含まれていた場合、
+        // <a> タグ由来でなくてもそのまま通過する（フロント側のパーサーが解釈する）。
+        let html = r#"<p>参考: [seiran](https://example.com/seiran)</p>"#;
+        let body = ap_content_to_markdown_body(html, &[], "example.social");
+        assert_eq!(body, "参考: [seiran](https://example.com/seiran)");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_preserves_paragraph_and_br_newlines() {
+        let html = "<p>1行目です</p><p>2行目<br>3行目です</p>";
+        let body = ap_content_to_markdown_body(html, &[], "example.social");
+        assert_eq!(body, "1行目です\n\n2行目\n3行目です");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_collapses_excessive_blank_lines() {
+        let html = "<p>foo</p><p></p><p></p><p>bar</p>";
+        let body = ap_content_to_markdown_body(html, &[], "example.social");
+        assert_eq!(body, "foo\n\nbar");
+    }
 
     #[test]
     fn test_strip_html_simple() {

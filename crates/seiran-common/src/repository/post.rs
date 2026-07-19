@@ -42,6 +42,11 @@ pub struct TimelinePost {
     pub deliver_fedi: bool,
     #[sqlx(default)]
     pub deliver_bsky: bool,
+    /// Bsky メンションfacetの位置情報（`[{"byteStart":N,"byteEnd":M,"did":"did:plc:..."}]`）。
+    /// `body` 自体は書き換えず、表示時（`to_note_response`）に都度 DID を解決して
+    /// `@handle.domain` へ置換する（ハンドルは可変なため）。ローカル投稿・Fedi受信は常に空配列。
+    #[sqlx(default)]
+    pub mention_facets: Option<serde_json::Value>,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -374,7 +379,7 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
              FROM candidate_ids ci
              JOIN posts p ON p.id = ci.id
              JOIN actors a ON a.id = p.actor_id
@@ -402,7 +407,7 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -457,7 +462,7 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -507,7 +512,7 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -529,7 +534,7 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -585,7 +590,7 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -622,7 +627,7 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id

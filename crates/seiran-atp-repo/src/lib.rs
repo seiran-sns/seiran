@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use sqlx::PgPool;
+use seiran_common::traits::JobQueue;
 use seiran_common::StreamHub;
 
 pub mod firehose;
@@ -17,13 +18,17 @@ pub mod firehose;
 /// `redis_url`があれば、複数インスタンス起動時のJetstream接続排他制御（リーダー選出）を
 /// 行う。`is_monolith`はRedis未使用時・通信失敗時のフェイルオープン/フェイルクローズを
 /// 決める（`true`＝`all`ロール、`false`＝`firehose`単独ロール。Doc3 §14.2参照）。
+/// `job_queue`はBskyメンションfacetの未解決DIDを`Job::ResolveBskyMention`として
+/// 積むために使う（api/worker と同一インスタンスを共有する）。
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     pool: PgPool,
     http: Arc<reqwest::Client>,
     stream_hub: Arc<StreamHub>,
     redis_url: Option<String>,
     is_monolith: bool,
+    job_queue: Arc<dyn JobQueue>,
 ) {
     tracing::info!("[seiran-atp-repo] Firehose リスナーを起動します。");
-    firehose::run(pool, http, stream_hub, redis_url, is_monolith).await;
+    firehose::run(pool, http, stream_hub, redis_url, is_monolith, job_queue).await;
 }
