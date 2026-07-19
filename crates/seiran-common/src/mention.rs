@@ -110,6 +110,12 @@ pub async fn convert_mentions_for_bsky(
 
         let username: String = text_chars[username_start..i].iter().collect();
 
+        // `@handle.tld` 形式（AT Protocol ハンドルとして書かれたメンション）か判定
+        let is_atproto_handle = {
+            let parts: Vec<&str> = username.split('.').collect();
+            parts.len() >= 2 && parts.last().map(|t| t.len() >= 2).unwrap_or(false)
+        };
+
         // `@user@domain` 形式か確認
         if i < text_chars.len() && text_chars[i] == '@' {
             i += 1; // skip second '@'
@@ -174,11 +180,7 @@ pub async fn convert_mentions_for_bsky(
                     }
                 }
             }
-        } else if {
-            // `@handle.tld` 形式（AT Protocol ハンドルとして書かれたメンション）か判定
-            let parts: Vec<&str> = username.split('.').collect();
-            parts.len() >= 2 && parts.last().map(|t| t.len() >= 2).unwrap_or(false)
-        } {
+        } else if is_atproto_handle {
             let local_suffix = format!(".{}", local_domain);
             let did = if let Some(local_username) = username.strip_suffix(&local_suffix) {
                 // 自ドメインの正規ハンドル形式（`{username}.{local_domain}`）→ ローカルユーザーとして解決

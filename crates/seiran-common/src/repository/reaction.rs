@@ -12,6 +12,7 @@ pub trait ReactionRepository: Send + Sync {
     /// `emoji_url` は Fedi から受信したカスタム絵文字（`:shortcode:`）の画像 URL。
     /// `at_uri` と異なり毎回そのまま上書きする（ローカル送信は常に `None`、AP 受信は
     /// 解決できた URL か `None` を都度渡すため、旧値を保持する必要が無い）。
+    #[allow(clippy::too_many_arguments)]
     async fn insert(
         &self,
         post_id: i64,

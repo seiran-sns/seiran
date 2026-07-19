@@ -152,7 +152,7 @@ pub fn apply_mention_facets(
         })
         .collect();
     // 後ろの facet から順に置換する（前方のオフセットを壊さないため）。
-    spans.sort_by(|a, b| b.0.cmp(&a.0));
+    spans.sort_by_key(|s| std::cmp::Reverse(s.0));
 
     let mut result = body.to_string();
     let mut upper_bound = result.len();

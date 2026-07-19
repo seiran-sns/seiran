@@ -49,10 +49,7 @@ pub async fn probe_video_or_audio(data: &[u8], ext_hint: &str) -> ProbedMedia {
     let result = tokio::time::timeout(PROBE_TIMEOUT, probe_inner(&tmp_path)).await;
     let _ = tokio::fs::remove_file(&tmp_path).await;
 
-    match result {
-        Ok(probed) => probed,
-        Err(_) => ProbedMedia::default(),
-    }
+    result.unwrap_or_default()
 }
 
 async fn probe_inner(tmp_path: &std::path::Path) -> ProbedMedia {

@@ -652,6 +652,7 @@ fn find_mention_name_by_inner_text(anchor_href: &str, inner_text: &str, tags: &[
 ///    使う。ドメイン部分が省略されている（`@bob` のように単一`@`のみ）場合は、投稿元アクターの
 ///    ドメイン（`sender_domain`）を補って `@bob@sender_domain` の完全修飾形にする
 ///    （投稿元インスタンス内の相対メンション表記への対応）。
+///
 /// メンションと判断できなければ `None`（呼び出し側は通常のURLリンクとして扱う）。
 ///
 /// `is_hashtag` が真の場合は上記いずれも試みず即座に `None` を返す。Mastodon等は

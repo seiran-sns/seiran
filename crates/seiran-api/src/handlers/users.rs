@@ -634,13 +634,15 @@ const MAX_PROFILE_FIELD_VALUE_LEN: usize = 255;
 /// リクエストで指定された `profile_fields` を検証し、DB へ保存する JSON 値を組み立てる。
 /// 前後空白を除去し、ラベル・値のどちらかが空になった行は無視する（フォームの空欄行を
 /// 気にせず送信できるようにするため）。件数・長さの上限超過は 400 を返す。
-fn validate_profile_fields(fields: Vec<ProfileField>) -> Result<serde_json::Value, Response> {
+fn validate_profile_fields(fields: Vec<ProfileField>) -> Result<serde_json::Value, Box<Response>> {
     if fields.len() > seiran_common::MAX_PROFILE_FIELDS {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("プロフィール項目は最大{}件までです", seiran_common::MAX_PROFILE_FIELDS),
-        )
-            .into_response());
+        return Err(Box::new(
+            (
+                StatusCode::BAD_REQUEST,
+                format!("プロフィール項目は最大{}件までです", seiran_common::MAX_PROFILE_FIELDS),
+            )
+                .into_response(),
+        ));
     }
     let cleaned: Vec<ProfileField> = fields
         .into_iter()
@@ -656,21 +658,25 @@ fn validate_profile_fields(fields: Vec<ProfileField>) -> Result<serde_json::Valu
         .collect();
     for f in &cleaned {
         if f.name.chars().count() > MAX_PROFILE_FIELD_NAME_LEN {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!("プロフィール項目のラベルは{}文字までです", MAX_PROFILE_FIELD_NAME_LEN),
-            )
-                .into_response());
+            return Err(Box::new(
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("プロフィール項目のラベルは{}文字までです", MAX_PROFILE_FIELD_NAME_LEN),
+                )
+                    .into_response(),
+            ));
         }
         if f.value.chars().count() > MAX_PROFILE_FIELD_VALUE_LEN {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!("プロフィール項目の値は{}文字までです", MAX_PROFILE_FIELD_VALUE_LEN),
-            )
-                .into_response());
+            return Err(Box::new(
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("プロフィール項目の値は{}文字までです", MAX_PROFILE_FIELD_VALUE_LEN),
+                )
+                    .into_response(),
+            ));
         }
     }
-    serde_json::to_value(cleaned).map_err(|e| ApiError::Internal(e.to_string()).into_response())
+    serde_json::to_value(cleaned).map_err(|e| Box::new(ApiError::Internal(e.to_string()).into_response()))
 }
 
 pub async fn update_profile(
@@ -730,7 +736,7 @@ pub async fn update_profile(
     let new_profile_fields: serde_json::Value = match req.profile_fields {
         Some(fields) => match validate_profile_fields(fields) {
             Ok(v) => v,
-            Err(resp) => return resp,
+            Err(resp) => return *resp,
         },
         None => current.profile_fields,
     };

@@ -474,9 +474,8 @@ async fn maybe_unfollow_if_unreferenced(state: &AppState, actor_id: i64) {
     if actor_type != "fedi" {
         return;
     }
-    match state.lists.actor_referenced_by_any_list(actor_id).await {
-        Ok(false) => state.enqueue_proxy_follow_sync(actor_id, false).await,
-        _ => {}
+    if let Ok(false) = state.lists.actor_referenced_by_any_list(actor_id).await {
+        state.enqueue_proxy_follow_sync(actor_id, false).await;
     }
 }
 

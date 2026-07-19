@@ -256,11 +256,11 @@ async fn connect_and_process(
                 let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
 
                 if let Message::Text(text) = msg {
-                    if let Ok(t) = serde_json::from_str::<JetstreamTimeUs>(&text) {
-                        if last_saved_at.elapsed() >= JETSTREAM_CURSOR_SAVE_INTERVAL {
-                            save_jetstream_cursor(pool, t.time_us).await;
-                            last_saved_at = tokio::time::Instant::now();
-                        }
+                    if let Ok(t) = serde_json::from_str::<JetstreamTimeUs>(&text)
+                        && last_saved_at.elapsed() >= JETSTREAM_CURSOR_SAVE_INTERVAL
+                    {
+                        save_jetstream_cursor(pool, t.time_us).await;
+                        last_saved_at = tokio::time::Instant::now();
                     }
 
                     if let Err(e) = process_message(&text, pool, http, stream_hub, job_queue).await {
@@ -362,7 +362,7 @@ enum JetstreamFacetFeature {
     #[serde(rename = "app.bsky.richtext.facet#mention")]
     Mention { did: String },
     #[serde(rename = "app.bsky.richtext.facet#tag")]
-    Tag { tag: String },
+    Tag,
     #[serde(other)]
     Unknown,
 }
@@ -440,7 +440,7 @@ fn apply_link_facets(text: &str, facets: Vec<JetstreamFacet>) -> (String, Vec<Me
         .into_iter()
         .filter(|f| f.features.iter().any(|feat| matches!(feat, JetstreamFacetFeature::Link { .. })))
         .collect();
-    link_facets.sort_by(|a, b| b.index.byte_start.cmp(&a.index.byte_start));
+    link_facets.sort_by_key(|f| std::cmp::Reverse(f.index.byte_start));
 
     let mut result = text.to_string();
     let mut upper_bound = result.len();
@@ -1025,7 +1025,7 @@ mod facet_tests {
         let byte_end = "#rust".len();
         let facets = vec![JetstreamFacet {
             index: JetstreamFacetIndex { byte_start: 0, byte_end },
-            features: vec![JetstreamFacetFeature::Tag { tag: "rust".to_string() }],
+            features: vec![JetstreamFacetFeature::Tag],
         }];
         let (result, mentions) = apply_link_facets(text, facets);
         assert_eq!(result, text);

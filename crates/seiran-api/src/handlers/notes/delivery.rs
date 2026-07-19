@@ -309,8 +309,11 @@ async fn has_pending_video(pool: &sqlx::PgPool, attachment_ids: &[i64]) -> bool 
     .unwrap_or(false)
 }
 
+/// ATP レコードの `(uri, cid)` 参照。
+type AtUriCid = (String, String);
+
 /// `BskyPostReply` を `Job::BskyPostCommitDeferred` へ渡せる `(uri, cid)` タプルに分解する。
-fn split_bsky_reply(reply: &Option<BskyPostReply>) -> (Option<(String, String)>, Option<(String, String)>) {
+fn split_bsky_reply(reply: &Option<BskyPostReply>) -> (Option<AtUriCid>, Option<AtUriCid>) {
     match reply {
         Some(r) => (
             Some((r.root.uri.clone(), r.root.cid.clone())),
