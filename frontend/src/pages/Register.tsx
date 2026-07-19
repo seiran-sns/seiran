@@ -2,11 +2,13 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
+import { useAuth } from "../contexts/AuthContext";
 import styles from "./Auth.module.css";
 
 export default function Register() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   // requireEmailVerification フラグ（null = まだロード中）
   const [requireEmailVerification, setRequireEmailVerification] = useState<boolean | null>(null);
@@ -107,7 +109,7 @@ export default function Register() {
     setLoading(true);
     try {
       const res = await api.auth.registerDirect(directEmail, username, password);
-      localStorage.setItem("seiran_token", res.token);
+      login(res.token, res.user);
       navigate("/");
     } catch (err) {
       setError(getErrorMessage(err));
