@@ -9,6 +9,8 @@ interface PostComposerProps {
   autoFocus?: boolean;
   /** 指定時は返信として投稿する（配信先は元ポストのネットワークに自動ルーティング）。 */
   replyTo?: Note;
+  /** 本文の初期値（ハッシュタグ入力済みでの投稿ダイアログ起動等）。 */
+  initialText?: string;
 }
 
 type Visibility = "public" | "unlisted" | "followers_only";
@@ -29,9 +31,9 @@ function replyVisibilityConstraint(replyTo?: Note): {
   return { forced: null, defaultValue: "public" };
 }
 
-export default function PostComposer({ onPosted, autoFocus, replyTo }: PostComposerProps) {
+export default function PostComposer({ onPosted, autoFocus, replyTo, initialText }: PostComposerProps) {
   const { t } = useTranslation();
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialText ?? "");
   const [deliverFedi, setDeliverFedi] = useState(true);
   const [deliverBsky, setDeliverBsky] = useState(true);
   const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo) : null;
@@ -46,7 +48,11 @@ export default function PostComposer({ onPosted, autoFocus, replyTo }: PostCompo
   const guideTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (autoFocus) textareaRef.current?.focus();
+    if (!autoFocus) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
   }, [autoFocus]);
 
   useEffect(() => {

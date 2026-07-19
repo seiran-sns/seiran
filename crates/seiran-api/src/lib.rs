@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, FollowRepository, ListRepository, NotificationRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgListRepository, PgNotificationRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AtpReadRepository, FollowRepository, HashtagRepository, ListRepository, NotificationRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgNotificationRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -82,6 +82,8 @@ pub struct AppState {
     /// リスト機能（#63）: 誰にもフォローされていないリモートFediユーザーの投稿を
     /// 受信するための代理フォロー用仮想アクター（list-relay）の actor_id。
     pub lists: Arc<dyn ListRepository>,
+    /// ハッシュタグ（ポスト⇔タグのm:n関係の永続化、ハッシュタイムライン、ホーム画面ピン留め）。
+    pub hashtags: Arc<dyn HashtagRepository>,
     pub system_proxy_actor_id: i64,
 }
 
@@ -228,6 +230,7 @@ pub async fn init_state(
     let pinned_posts: Arc<dyn PinnedPostsRepository> = Arc::new(PgPinnedPostsRepository::new(pool.clone()));
     let notifications: Arc<dyn NotificationRepository> = Arc::new(PgNotificationRepository::new(pool.clone()));
     let lists: Arc<dyn ListRepository> = Arc::new(PgListRepository::new(pool.clone()));
+    let hashtags: Arc<dyn HashtagRepository> = Arc::new(PgHashtagRepository::new(pool.clone()));
 
     let system_proxy_actor_id = match seiran_common::ensure_system_proxy_actor(&pool, &local_domain).await {
         Ok(id) => id,
@@ -267,6 +270,7 @@ pub async fn init_state(
         emoji_import_jobs: Arc::new(DashMap::new()),
         job_queue,
         lists,
+        hashtags,
         system_proxy_actor_id,
     }
 }
@@ -366,6 +370,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/lists/:id/members", post(handlers::lists::add_member))
         .route("/api/lists/:id/members/:actor_id", delete(handlers::lists::remove_member))
         .route("/api/lists/:id/timeline", get(handlers::lists::list_timeline))
+        // ハッシュタグ
+        .route("/api/hashtags/pinned", get(handlers::hashtags::pinned_hashtags))
+        .route("/api/hashtags/:name/timeline", get(handlers::hashtags::hashtag_timeline))
+        .route("/api/hashtags/:name/pin",
+            post(handlers::hashtags::pin_hashtag)
+            .delete(handlers::hashtags::unpin_hashtag))
         .route("/api/actors/search", get(handlers::actor_search::search_actors))
         // ユーザープロフィール
         .route("/api/users/profile",

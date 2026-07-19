@@ -808,6 +808,28 @@ export const api = {
     },
   },
 
+  hashtags: {
+    /** ホーム画面タブにピン留めされたハッシュタグ一覧。 */
+    pinned() {
+      return request<{ name: string }[]>("GET", "/hashtags/pinned");
+    },
+    pin(name: string) {
+      return request<void>("POST", `/hashtags/${encodeURIComponent(name)}/pin`);
+    },
+    unpin(name: string) {
+      return request<void>("DELETE", `/hashtags/${encodeURIComponent(name)}/pin`);
+    },
+    async timeline(name: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+      const q = new URLSearchParams();
+      if (params?.limit) q.set("limit", String(params.limit));
+      if (params?.until_id) q.set("until_id", params.until_id);
+      if (params?.since_id) q.set("since_id", params.since_id);
+      const qs = q.toString();
+      const rows = await request<RawNote[]>("GET", `/hashtags/${encodeURIComponent(name)}/timeline${qs ? `?${qs}` : ""}`);
+      return rows.map(normalizeNote);
+    },
+  },
+
   account: {
     withdraw(confirmHandle: string) {
       return request<void>("POST", "/account/withdraw", { confirm_handle: confirmHandle });

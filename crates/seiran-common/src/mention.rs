@@ -11,7 +11,7 @@ use std::time::Duration;
 use sqlx::{PgPool, Row};
 
 use crate::atp::fetch_bsky_profile;
-use crate::atp::repo::{BskyFacet, BskyFacetFeature, BskyFacetIndex, BskyFacetLink, BskyFacetMention};
+use crate::atp::repo::{BskyFacet, BskyFacetFeature, BskyFacetIndex, BskyFacetLink, BskyFacetMention, BskyFacetTag};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bsky 向けメンション変換
@@ -50,6 +50,18 @@ pub async fn convert_mentions_for_bsky(
                 result.push_str(&url);
                 let byte_end = result.len();
                 facets.push(make_link_facet(byte_start, byte_end, url));
+                i = end;
+                continue;
+            }
+        }
+
+        if ch == '#' {
+            if let Some((tag_body, end)) = scan_hashtag(&text_chars, i) {
+                let byte_start = result.len();
+                result.push('#');
+                result.push_str(&tag_body);
+                let byte_end = result.len();
+                facets.push(make_tag_facet(byte_start, byte_end, tag_body));
                 i = end;
                 continue;
             }
@@ -232,6 +244,45 @@ fn scan_url(text_chars: &[char], start: usize) -> Option<usize> {
     Some(end)
 }
 
+/// `text_chars[start]` が `#` である前提で、直前文字の境界チェックとタグ本体のスキャンを行う。
+/// 有効なハッシュタグなら `(タグ本体（# を除く、大文字小文字保持）, 終端インデックス（exclusive）)`
+/// を返す。境界・除外ルールは `crate::hashtag::extract_hashtags`（永続化用の抽出関数）と同じ
+/// （直前が半角英数字/アンダースコア/`/` ならスキップ、本体にアルファベットを1文字も含まない
+/// 場合は無効＝URLフラグメントや `#2026` 等の純数字列を誤検出しない）。大文字小文字を保持する点が
+/// 抽出関数と異なる（グルーピング用の正規化は永続化層の責務であり、配信用テキストには影響しない）。
+fn scan_hashtag(text_chars: &[char], start: usize) -> Option<(String, usize)> {
+    if start > 0 {
+        let prev = text_chars[start - 1];
+        if prev.is_ascii_alphanumeric() || prev == '_' || prev == '/' {
+            return None;
+        }
+    }
+    let tag_start = start + 1;
+    let mut end = tag_start;
+    while end < text_chars.len() && (text_chars[end].is_alphanumeric() || text_chars[end] == '_') {
+        end += 1;
+    }
+    if end == tag_start {
+        return None;
+    }
+    let tag_body: String = text_chars[tag_start..end].iter().collect();
+    if !tag_body.chars().any(|c| c.is_alphabetic()) {
+        return None;
+    }
+    Some((tag_body, end))
+}
+
+/// `BskyFacet`（tag）を生成するヘルパー。
+fn make_tag_facet(byte_start: usize, byte_end: usize, tag: String) -> BskyFacet {
+    BskyFacet {
+        index: BskyFacetIndex { byte_end, byte_start },
+        features: vec![BskyFacetFeature::Tag(BskyFacetTag {
+            tag,
+            kind: "app.bsky.richtext.facet#tag".to_string(),
+        })],
+    }
+}
+
 /// `BskyFacet`（mention）を生成するヘルパー。
 fn make_mention_facet(byte_start: usize, byte_end: usize, did: String) -> BskyFacet {
     BskyFacet {
@@ -353,19 +404,30 @@ async fn resolve_bsky_handle_did(handle: &str, http_client: &reqwest::Client) ->
 // AP（Fediverse）向け ATP ハンドル変換
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// AP 配信用の本文中インラインメンション/リンク（1 スパン）。
+/// スパンの種別。`tag[]` への追加要否・アンカーの `class`/`rel` 属性を左右する
+/// （`plain_to_html_with_mentions`・`crate::ap::deliver` 参照）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApInlineSpanKind {
+    /// AP `Mention` として `tag[]` に追加する（メンション通知対象）。
+    Mention,
+    /// AP `Hashtag` として `tag[]` に追加する。
+    Hashtag,
+    /// `tag[]` には追加しない単なるリンク（生URL、解決できなかった ATP ハンドルの
+    /// bsky.app プロフィールへのリンク等）。
+    Link,
+}
+
+/// AP 配信用の本文中インラインメンション/ハッシュタグ/リンク（1 スパン）。
 /// `byte_start`/`byte_end` は `convert_mentions_for_ap` の戻り値テキストにおける
 /// UTF-8 バイトオフセット（`plain_to_html_with_mentions` で `<a>` 化に使う）。
 pub struct ApInlineMention {
     pub byte_start: usize,
     pub byte_end: usize,
-    /// AP actor の href（`is_mention` の場合）、または単なるリンク先 URL。
+    /// リンク先 URL（Mention なら AP actor の href、Hashtag なら自インスタンスのタグページ）。
     pub href: String,
     /// 表示テキスト（このスパンの本文と同じ）。
     pub name: String,
-    /// true: AP `Mention` として `tag[]` に追加する（メンション通知対象）。
-    /// false: 解決できなかった ATP ハンドルの bsky.app プロフィールへの単なるリンク。
-    pub is_mention: bool,
+    pub kind: ApInlineSpanKind,
 }
 
 /// 投稿本文中のメンションを AP 配信向けに解決する。
@@ -379,7 +441,9 @@ pub struct ApInlineMention {
 ///   または webfinger で href を解決できた場合のみ Mention を追加する
 /// * `@handle.tld`（他インスタンスの AT Protocol ハンドル形式） → brid.gy 経由の webfinger で
 ///   解決できれば `@handle.tld@bsky.brid.gy` の Mention、できなければ bsky.app プロフィールへの
-///   単なるリンク（`is_mention: false`）
+///   単なるリンク（`ApInlineSpanKind::Link`）
+/// * `#タグ` → 自インスタンスのハッシュタグページ（`https://{local_domain}/tags/{タグ}`）への
+///   Hashtag（`docs/protocols.md` 6節参照）
 ///
 /// 変換中にエラーが発生した場合は元テキストにフォールバックする（対応する `ApInlineMention` は追加しない）。
 pub async fn convert_mentions_for_ap(
@@ -407,8 +471,21 @@ pub async fn convert_mentions_for_ap(
                     byte_end,
                     href: url.clone(),
                     name: url,
-                    is_mention: false,
+                    kind: ApInlineSpanKind::Link,
                 });
+                i = end;
+                continue;
+            }
+        }
+
+        if ch == '#' {
+            if let Some((tag_body, end)) = scan_hashtag(&text_chars, i) {
+                let name = format!("#{}", tag_body);
+                let href = format!("https://{}/tags/{}", local_domain, tag_body.to_lowercase());
+                let byte_start = result.len();
+                result.push_str(&name);
+                let byte_end = result.len();
+                mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Hashtag });
                 i = end;
                 continue;
             }
@@ -473,7 +550,7 @@ pub async fn convert_mentions_for_ap(
             result.push_str(&name);
             let byte_end = result.len();
             if let Some(href) = resolve_fedi_mention_href(&ident, &domain, pool, http_client).await {
-                mentions.push(ApInlineMention { byte_start, byte_end, href, name, is_mention: true });
+                mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Mention });
             }
             continue;
         }
@@ -498,7 +575,7 @@ pub async fn convert_mentions_for_ap(
                     let byte_start = result.len();
                     result.push_str(&name);
                     let byte_end = result.len();
-                    mentions.push(ApInlineMention { byte_start, byte_end, href, name, is_mention: true });
+                    mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Mention });
                 } else {
                     result.push('@');
                     result.push_str(&ident);
@@ -510,7 +587,7 @@ pub async fn convert_mentions_for_ap(
                         let byte_start = result.len();
                         result.push_str(&name);
                         let byte_end = result.len();
-                        mentions.push(ApInlineMention { byte_start, byte_end, href, name, is_mention: true });
+                        mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Mention });
                     }
                     None => {
                         // brid.gy で解決できない → bsky.app プロフィールへの単なるリンクとして表示する
@@ -519,7 +596,7 @@ pub async fn convert_mentions_for_ap(
                         let byte_start = result.len();
                         result.push_str(&name);
                         let byte_end = result.len();
-                        mentions.push(ApInlineMention { byte_start, byte_end, href, name, is_mention: false });
+                        mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Link });
                     }
                 }
             }
@@ -530,7 +607,7 @@ pub async fn convert_mentions_for_ap(
             let byte_start = result.len();
             result.push_str(&name);
             let byte_end = result.len();
-            mentions.push(ApInlineMention { byte_start, byte_end, href, name, is_mention: true });
+            mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Mention });
         } else {
             result.push('@');
             result.push_str(&ident);
@@ -538,6 +615,25 @@ pub async fn convert_mentions_for_ap(
     }
 
     (result, mentions)
+}
+
+/// `ApInlineMention` 群から AP `tag[]` 配列を組み立てる（`Mention`/`Hashtag` のみ、
+/// `Link` は含めない）。push配送（`crate::ap::deliver`）と pull取得
+/// （`seiran-api::handlers::notes::get_note_ap`）の両方で同じ組み立てロジックを共有する
+/// （`docs/protocols.md` 6節）。
+pub fn ap_inline_mentions_to_tag_json(mentions: &[ApInlineMention]) -> Vec<serde_json::Value> {
+    mentions
+        .iter()
+        .filter_map(|m| match m.kind {
+            ApInlineSpanKind::Mention => {
+                Some(serde_json::json!({"type": "Mention", "href": m.href, "name": m.name}))
+            }
+            ApInlineSpanKind::Hashtag => {
+                Some(serde_json::json!({"type": "Hashtag", "href": m.href, "name": m.name}))
+            }
+            ApInlineSpanKind::Link => None,
+        })
+        .collect()
 }
 
 /// webfinger（`acct:{username}@{domain}`）で AP actor の href
@@ -596,7 +692,7 @@ async fn resolve_fedi_mention_href(
 
 #[cfg(test)]
 mod tests {
-    use super::scan_url;
+    use super::{scan_hashtag, scan_url};
 
     #[test]
     fn scan_url_detects_https() {
@@ -667,6 +763,36 @@ mod tests {
             i += 1;
         }
         assert!(skipped, "`@` in email should be detected as preceded by word char");
+    }
+
+    #[test]
+    fn scan_hashtag_detects_ascii_tag() {
+        let chars: Vec<char> = "#foo bar".chars().collect();
+        let (tag, end) = scan_hashtag(&chars, 0).unwrap();
+        assert_eq!(tag, "foo");
+        assert_eq!(end, 4);
+    }
+
+    #[test]
+    fn scan_hashtag_detects_japanese_tag_directly_after_text() {
+        // 日本語はスペース無しで直接 `#タグ` が続くのが実利用上の通常パターン。
+        let chars: Vec<char> = "今日も#猫 かわいい".chars().collect();
+        let hash_idx = chars.iter().position(|&c| c == '#').unwrap();
+        let (tag, _end) = scan_hashtag(&chars, hash_idx).unwrap();
+        assert_eq!(tag, "猫");
+    }
+
+    #[test]
+    fn scan_hashtag_rejects_url_fragment() {
+        let chars: Vec<char> = "https://x.com/a#frag".chars().collect();
+        let hash_idx = chars.iter().position(|&c| c == '#').unwrap();
+        assert!(scan_hashtag(&chars, hash_idx).is_none());
+    }
+
+    #[test]
+    fn scan_hashtag_rejects_pure_numeric() {
+        let chars: Vec<char> = "#2026".chars().collect();
+        assert!(scan_hashtag(&chars, 0).is_none());
     }
 
     /// CJK文字（日本語等）に直接続く `@mention` は、メールアドレスの一部として誤スキップされない

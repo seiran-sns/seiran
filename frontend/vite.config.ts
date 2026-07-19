@@ -24,8 +24,12 @@ export default defineConfig(({ mode }) => {
         // ヘッダーで AP JSON-LD / OGP注入済み SPA HTML を出し分ける
         // （`crates/seiran-api/src/handlers/ogp.rs`）。OGP 注入時はバックエンドが
         // ルート `/` を取得しに来るだけなのでここには来ず、循環しない。
+        // `/@` は単純なプレフィックスマッチだと Vite 自身の内部モジュール
+        // （`/@vite/client`・`/@react-refresh`・`/@fs/...`・`/@id/...`）まで
+        // バックエンドへ転送してしまい、Viteクライアントが読み込めず白画面になる
+        // （実機確認）。それらを除外する正規表現（`^`始まりはVite側でregex扱い）にする。
         "/notes": "http://localhost:3000",
-        "/@": "http://localhost:3000",
+        "^/@(?!vite|react-refresh|fs/|id/)": "http://localhost:3000",
       },
     },
   };

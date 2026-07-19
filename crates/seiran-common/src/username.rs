@@ -13,7 +13,16 @@
 pub const PROXY_ACTOR_USERNAME: &str = "list-relay";
 
 /// 一般ユーザーが登録できない予約ユーザー名（`register()` で明示的に拒否する）。
-pub const RESERVED_LOCAL_USERNAMES: &[&str] = &[PROXY_ACTOR_USERNAME];
+///
+/// `vite`/`react-refresh` はプロフィールページ `GET /@:handle` との名前衝突を防ぐため
+/// 予約している。フロントエンド開発サーバー（Vite）は `/@vite/client`・`/@react-refresh`
+/// を自身の内部モジュールとして特別扱いするため、`frontend/vite.config.ts` の開発用プロキシは
+/// これらを除外してバックエンドへ転送しない（実機確認: 除外前は `/@vite/client` がバックエンドの
+/// `/@:handle` ルートに奪われ、Viteクライアントが読み込めず白画面になった）。この結果、万一
+/// 同名のローカルユーザーが存在すると、そのプロフィールページだけ開発サーバー経由では
+/// OGP注入が効かなくなる（本番の nginx 配信では発生しない開発環境限定の制約）ため、
+/// 登録自体を禁止して矛盾を作らないようにする。
+pub const RESERVED_LOCAL_USERNAMES: &[&str] = &[PROXY_ACTOR_USERNAME, "vite", "react-refresh"];
 
 /// ユーザー名がDNSラベルとして妥当か（英数字・ハイフンのみ、先頭/末尾はハイフン不可、1〜63文字）。
 pub fn is_valid_local_username(s: &str) -> bool {
@@ -68,5 +77,11 @@ mod tests {
         assert!(is_reserved_username("list-relay"));
         assert!(is_reserved_username("List-Relay"));
         assert!(!is_reserved_username("alice"));
+    }
+
+    #[test]
+    fn reserved_vite_internal_names() {
+        assert!(is_reserved_username("vite"));
+        assert!(is_reserved_username("react-refresh"));
     }
 }

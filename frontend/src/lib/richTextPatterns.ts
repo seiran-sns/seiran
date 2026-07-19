@@ -24,10 +24,27 @@ const URL_SOURCE = String.raw`(?<url>https?://[^\s<>()\[\]]+)`;
  */
 const MENTION_SOURCE = String.raw`(?<![\w])@(?<mention>[A-Za-z0-9_-]+(?:\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?)`;
 
+/**
+ * `#タグ`。直前が英数字・アンダースコア・`/` の場合はマッチしない（URLフラグメント
+ * `page#section` の誤検出を防ぐ）。タグ本体にアルファベットを1文字も含まないもの
+ * （`#2026` 等の純数字列）は誤検出防止のため対象外（バックエンドの抽出ルールと同じ、
+ * `crates/seiran-common/src/hashtag.rs` 参照）。
+ */
+const HASHTAG_SOURCE = String.raw`(?<![\w/])#(?<hashtag>[\p{L}\p{N}_]*\p{L}[\p{L}\p{N}_]*)`;
+
 /** 本文中のリッチテキスト要素をまとめて検出する結合正規表現（`RichText` 用）。 */
 export const RICH_TEXT_SOURCE = [
   MARKDOWN_LINK_SOURCE,
   URL_SOURCE,
   MENTION_SOURCE,
+  HASHTAG_SOURCE,
   `(?<shortcode>${SHORTCODE_SOURCE})`,
 ].join("|");
+
+/**
+ * Markdownリンクのリンクテキストが `#タグ` 形状かどうかの判定専用の正規表現。
+ * AP由来のハッシュタグアンカーは `[#foo](リモートのタグページURL)` という外部リンク
+ * 形状で届くが、ハッシュタグはローカル・Fedi・Bsky出自を問わず同列に扱うため、
+ * `RichText` はこの形状を検出した場合に外部リンクではなく内部タグリンクとして描画する。
+ */
+export const HASHTAG_LINK_TEXT_RE = new RegExp(`^${HASHTAG_SOURCE}$`, "u");

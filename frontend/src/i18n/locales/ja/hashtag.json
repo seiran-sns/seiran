@@ -1,0 +1,8 @@
+{
+  "hashtagPage": {
+    "addToHome": "ホーム画面に追加",
+    "removeFromHome": "ホーム画面から削除",
+    "postWithTag": "このハッシュタグでポスト",
+    "empty": "このハッシュタグの投稿がここに表示されます。"
+  }
+}

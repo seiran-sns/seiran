@@ -9,6 +9,7 @@ import { StreamingProvider } from "./contexts/StreamingContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
+import HashtagPage from "./pages/HashtagPage";
 import HomePage from "./pages/HomePage";
 import ListDetailPage from "./pages/ListDetailPage";
 import ListsSettingsPage from "./pages/ListsSettingsPage";
@@ -141,6 +142,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <ListDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/tags/:name"
+        element={
+          <RequireAuth>
+            <HashtagPage />
           </RequireAuth>
         }
       />

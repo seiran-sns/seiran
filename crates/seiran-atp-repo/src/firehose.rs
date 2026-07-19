@@ -26,8 +26,8 @@ use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
 use seiran_common::repository::{
-    ActorRepository, NotificationKind, NotificationRepository, PostRepository, ReactionRepository,
-    PgActorRepository, PgFollowRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
+    ActorRepository, HashtagRepository, NotificationKind, NotificationRepository, PostRepository, ReactionRepository,
+    PgActorRepository, PgFollowRepository, PgHashtagRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
 };
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::traits::{Job, JobQueue};
@@ -751,6 +751,10 @@ async fn save_bsky_post(
         }
         Ok(_) => {
             tracing::info!("[Jetstream] 保存完了: {}", at_uri);
+
+            if let Err(e) = PgHashtagRepository::new(pool.clone()).link_post(post_id, text).await {
+                tracing::error!("[Jetstream] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
+            }
 
             // 添付（画像・動画）を post_attachments に保存
             if !attachments.is_empty() {

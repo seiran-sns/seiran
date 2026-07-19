@@ -1,6 +1,11 @@
 import { Link } from "react-router-dom";
-import { RICH_TEXT_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
+import { HASHTAG_LINK_TEXT_RE, RICH_TEXT_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
 import styles from "./RichText.module.css";
+
+/** タグ本体（`#`除く）から正規化済みのハッシュタグページパスを組み立てる。 */
+function tagPath(hashtag: string): string {
+  return `/tags/${encodeURIComponent(hashtag.toLowerCase())}`;
+}
 
 interface RichTextProps {
   text: string;
@@ -43,24 +48,36 @@ export default function RichText({ text, emojis }: RichTextProps) {
     if (g.linkUrl !== undefined) {
       if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
       const to = g.linkUrl;
-      parts.push(
-        to.startsWith("/") && !to.startsWith("//") ? (
-          <Link key={key++} to={to} className={styles.link} onClick={stopPropagation}>
+      const hashtagMatch = HASHTAG_LINK_TEXT_RE.exec(g.linkText);
+      if (hashtagMatch) {
+        // AP由来のハッシュタグアンカー `[#foo](リモートのタグページURL)` は、リモートへ
+        // 飛ばさず自インスタンスの `/tags/foo` へ誘導する（ハッシュタグの出自を問わず
+        // 同列に扱うため）。
+        parts.push(
+          <Link key={key++} to={tagPath(hashtagMatch.groups!.hashtag)} className={styles.mention} onClick={stopPropagation}>
             {g.linkText}
           </Link>
-        ) : (
-          <a
-            key={key++}
-            href={to}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.link}
-            onClick={stopPropagation}
-          >
-            {g.linkText}
-          </a>
-        )
-      );
+        );
+      } else {
+        parts.push(
+          to.startsWith("/") && !to.startsWith("//") ? (
+            <Link key={key++} to={to} className={styles.link} onClick={stopPropagation}>
+              {g.linkText}
+            </Link>
+          ) : (
+            <a
+              key={key++}
+              href={to}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.link}
+              onClick={stopPropagation}
+            >
+              {g.linkText}
+            </a>
+          )
+        );
+      }
     } else if (g.url !== undefined) {
       if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
       parts.push(
@@ -80,6 +97,13 @@ export default function RichText({ text, emojis }: RichTextProps) {
       parts.push(
         <Link key={key++} to={`/@${g.mention}`} className={styles.mention} onClick={stopPropagation}>
           @{g.mention}
+        </Link>
+      );
+    } else if (g.hashtag !== undefined) {
+      if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+      parts.push(
+        <Link key={key++} to={tagPath(g.hashtag)} className={styles.mention} onClick={stopPropagation}>
+          #{g.hashtag}
         </Link>
       );
     } else if (g.shortcode !== undefined) {

@@ -1,5 +1,6 @@
 pub mod crypto;
 pub mod db;
+pub mod hashtag;
 pub mod id;
 pub mod traits;
 pub mod auth;

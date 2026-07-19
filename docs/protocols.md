@@ -167,6 +167,17 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 - 内部リンクマーカーとして `[text](url)` を採用しているため、投稿本文がたまたまこの形式の文字列を含む場合は意図せずリンク化されうる（許容している）。
 - 送信時に生URLの自動リンク化（`app.bsky.richtext.facet#link` / AP `<a>`）は対応済みだが、ユーザーが手書きした `[text](url)`（Markdownリンク記法）のリンク化には未対応。
 
+### ハッシュタグ
+ハッシュタグはポストとm:nの関係を持つ永続化オブジェクト（`hashtags`/`post_hashtags`、`docs/database.md` 参照）として扱い、検索の即席表示ではなく専用のハッシュタイムライン（`GET /api/hashtags/:name/timeline`）の主軸にする。
+
+- **送信側（ローカル投稿 → Bsky/AP）**: `convert_mentions_for_bsky`/`convert_mentions_for_ap`（`mention.rs`）は本文中の `@`（メンション）・`h`（URL）に加えて `#`（ハッシュタグ）もスキャンする（共通ヘルパー `scan_hashtag`。境界・除外ルールは `extract_hashtags` と同じだが、表示用テキストなので大文字小文字は保持する）。
+  - Bsky: `app.bsky.richtext.facet#tag`（`tag` フィールドは `#` を除いた本体、大文字小文字保持）を本文中の出現位置ごとに付与する。
+  - AP: `<a href="https://{local_domain}/tags/{正規化タグ}" class="mention hashtag" rel="tag">#タグ</a>` というアンカー（リンク先は自インスタンスのハッシュタイムライン）と、`tag[]` への `{"type":"Hashtag","href":...,"name":"#タグ"}` エントリを追加する。アンカー組み立て・`tag[]` 組み立ては push配送（`ap::deliver`）と pull取得（`get_note_ap`）の両方で `ap_inline_mentions_to_tag_json` を共有する。
+- **受信側の分類**: Mastodon等はハッシュタグアンカーにも `class="mention hashtag"` を付与する（メンションと `mention` トークンを共有する）ため、`class` だけでメンション判定すると `#foo` が壊れたメンション文字列（`@#foo@sender_domain`）に誤変換される。`ap_content_to_markdown_body`（`inbound_activity_process.rs`）は `rel="tag"` または `class` の `hashtag` トークンを検出したら、メンション解決ロジックより先に「ハッシュタグである」と判定して通常のURLリンク（`[#foo](url)`）として扱う。
+- **抽出（DB永続化）**: プロトコル別の特別処理を持たず、ローカル投稿・AP受信・Bsky受信いずれも「最終的な `posts.body` テキストを1回スキャンする」共通経路（`seiran_common::hashtag::extract_hashtags`）でハッシュタグを抽出し `HashtagRepository::link_post` でDBへリンクする。AP由来のハッシュタグアンカーは `[#foo](リモートのタグページURL)` というMarkdownリンクに変換されるが、リンクテキスト部分に `#foo` が残るためこの共通スキャンだけで取りこぼしなく検出できる。Bsky受信の `app.bsky.richtext.facet#tag`（`JetstreamFacetFeature::Tag`）は本文中に既に `#foo` がプレーンで載っているため、facet自体の値は今も参照しない。
+- **表示側**: フロントの `RichText` は `#foo` パターンとMarkdownリンクのリンクテキストが `#タグ` 形状の場合の両方を検出し、いずれも自インスタンスの `/tags/foo` へのリンクとして描画する（AP由来のハッシュタグアンカーもリモートのタグページへは飛ばさず、同列に扱う）。
+- **ホーム画面への追加**: `pinned_hashtags` にユーザーごとのピン留めを保存し、ホーム画面のフィードタブとして表示する（`pinned_posts`/`lists` と同じ「ユーザーごとの永続ショートカット」の設計思想）。
+
 ## 7. Misskey API 互換レイヤー
 
 `middleware::misskey_auth_bridge` が `Authorization` ヘッダー未指定時にJSONボディ/クエリの `i` を検出し `Authorization: Bearer` を合成する。`handlers::misskey`（`endpoints.rs`/`convert.rs`/`types.rs`）が Misskey ワイヤー形式のエンドポイントを提供する。

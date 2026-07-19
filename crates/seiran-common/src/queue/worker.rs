@@ -22,7 +22,7 @@ use tokio::sync::Semaphore;
 
 use crate::ap::ApClient;
 use crate::jobs;
-use crate::repository::{ActorRepository, FollowRepository, NotificationRepository, PostRepository, ReactionRepository};
+use crate::repository::{ActorRepository, FollowRepository, HashtagRepository, NotificationRepository, PostRepository, ReactionRepository};
 use crate::streaming::StreamHub;
 use crate::traits::{Job, JobQueue, QueuedJob};
 
@@ -68,6 +68,8 @@ pub struct InboxContext {
     pub reaction_repo: Arc<dyn ReactionRepository>,
     /// 通知（フォロー・リアクション等）の永続化リポジトリ。
     pub notification_repo: Arc<dyn NotificationRepository>,
+    /// ハッシュタグ抽出・リンク（AP受信投稿のハッシュタグ永続化）。
+    pub hashtag_repo: Arc<dyn HashtagRepository>,
     pub local_domain: String,
     pub ap_private_key_pem: String,
     /// リアルタイム更新（#37）の共有ストリーミングハブ。standalone Worker では

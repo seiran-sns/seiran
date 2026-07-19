@@ -310,6 +310,10 @@ async fn handle_create_note(
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
+    if let Err(e) = inbox.hashtag_repo.link_post(post_id, &body).await {
+        tracing::error!("[Create/Note] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
+    }
+
     // 添付画像・動画・音声の URL を保存（S3 には保存せず URL のみ記録）
     if let Some(attachments) = note["attachment"].as_array() {
         for (position, att) in attachments.iter().enumerate() {
@@ -413,6 +417,12 @@ enum HtmlSegment {
         /// （後者はAPアクターURI）。class情報を残しておき、href不一致時のフォールバック
         /// 判定に使う。
         is_mention_class: bool,
+        /// `<a>` の `rel` に `tag` トークン、または `class` に `hashtag` トークンが含まれるか。
+        /// Mastodon等はハッシュタグアンカーにも `class="mention hashtag"` を付与する（`mention`
+        /// トークンを共有する）ため、`is_mention_class` だけでは真のメンションと区別できない
+        /// （実機確認せずとも仕様上判明: Mastodonのハッシュタグリンクは常に `rel="tag"` を持つ）。
+        /// メンション解決より先にこちらを判定し、ハッシュタグなら通常のURLリンクとして扱う。
+        is_hashtag: bool,
     },
 }
 
@@ -469,6 +479,10 @@ fn tokenize_anchors(html: &str) -> Vec<HtmlSegment> {
         let is_mention_class = extract_class_tokens(&tag_inner)
             .iter()
             .any(|c| c == "mention" || c == "u-url");
+        let is_hashtag = extract_class_tokens(&tag_inner).iter().any(|c| c == "hashtag")
+            || extract_attr(&tag_inner, "rel")
+                .map(|r| r.split_whitespace().any(|t| t.eq_ignore_ascii_case("tag")))
+                .unwrap_or(false);
         i = after_tag;
 
         // `</a>` まで読み、ネストしたタグは除去してテキストだけ残す。
@@ -502,7 +516,7 @@ fn tokenize_anchors(html: &str) -> Vec<HtmlSegment> {
         let inner_text = decode_html_entities(inner_text.trim());
         match href {
             Some(h) if !inner_text.is_empty() => {
-                segments.push(HtmlSegment::Link { href: h, text: inner_text, is_mention_class });
+                segments.push(HtmlSegment::Link { href: h, text: inner_text, is_mention_class, is_hashtag });
             }
             _ => {
                 if !inner_text.is_empty() {
@@ -639,13 +653,22 @@ fn find_mention_name_by_inner_text(anchor_href: &str, inner_text: &str, tags: &[
 ///    ドメイン（`sender_domain`）を補って `@bob@sender_domain` の完全修飾形にする
 ///    （投稿元インスタンス内の相対メンション表記への対応）。
 /// メンションと判断できなければ `None`（呼び出し側は通常のURLリンクとして扱う）。
+///
+/// `is_hashtag` が真の場合は上記いずれも試みず即座に `None` を返す。Mastodon等は
+/// ハッシュタグアンカーにも `class="mention hashtag"` を付与する（`mention` トークンを
+/// メンションと共有する）ため、`is_mention_class` だけで判定すると `#foo` が
+/// `@#foo@sender_domain` のような壊れたメンション文字列に誤変換されてしまう。
 fn resolve_ap_mention_text(
     href: &str,
     inner_text: &str,
     is_mention_class: bool,
+    is_hashtag: bool,
     tags: &[serde_json::Value],
     sender_domain: &str,
 ) -> Option<String> {
+    if is_hashtag {
+        return None;
+    }
     if let Some(name) = find_mention_name_by_href(href, tags) {
         return Some(name);
     }
@@ -709,8 +732,8 @@ pub fn ap_content_to_markdown_body(content_html: &str, tags: &[serde_json::Value
     for seg in tokenize_anchors(content_html) {
         match seg {
             HtmlSegment::Text(t) => out.push_str(&t),
-            HtmlSegment::Link { href, text, is_mention_class } => {
-                if let Some(name) = resolve_ap_mention_text(&href, &text, is_mention_class, tags, sender_domain) {
+            HtmlSegment::Link { href, text, is_mention_class, is_hashtag } => {
+                if let Some(name) = resolve_ap_mention_text(&href, &text, is_mention_class, is_hashtag, tags, sender_domain) {
                     out.push_str(&name);
                 } else {
                     out.push('[');
@@ -1240,6 +1263,17 @@ mod tests {
     #[test]
     fn ap_content_to_markdown_body_hashtag_anchor_becomes_link_to_remote_tag_page() {
         let html = r#"<a href="https://example.social/tags/foo" rel="tag">#foo</a>"#;
+        let body = ap_content_to_markdown_body(html, &[], "example.social");
+        assert_eq!(body, "[#foo](https://example.social/tags/foo)");
+    }
+
+    #[test]
+    fn ap_content_to_markdown_body_real_mastodon_hashtag_anchor_with_mention_class_not_misparsed() {
+        // 実際のMastodonはハッシュタグアンカーにも class="mention hashtag" を付与する
+        // （メンションと `mention` トークンを共有する）。`rel="tag"` を見て先に弾かないと、
+        // メンション解決ロジックに巻き込まれ `@#foo@example.social` のような壊れた
+        // 文字列になってしまう（本テストが無い間に発生していた回帰）。
+        let html = r#"<a href="https://example.social/tags/foo" class="mention hashtag" rel="tag">#foo</a>"#;
         let body = ap_content_to_markdown_body(html, &[], "example.social");
         assert_eq!(body, "[#foo](https://example.social/tags/foo)");
     }

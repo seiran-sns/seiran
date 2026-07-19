@@ -15,10 +15,10 @@ import styles from "./HomePage.module.css";
 
 const PAGE_SIZE = 30;
 
-type Feed = { kind: "home" } | { kind: "local" } | { kind: "list"; id: string };
+type Feed = { kind: "home" } | { kind: "local" } | { kind: "list"; id: string } | { kind: "hashtag"; name: string };
 
 function feedKey(feed: Feed): string {
-  return feed.kind === "list" ? `list:${feed.id}` : feed.kind;
+  return feed.kind === "list" ? `list:${feed.id}` : feed.kind === "hashtag" ? `hashtag:${feed.name}` : feed.kind;
 }
 
 function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; since_id?: string }) {
@@ -26,13 +26,16 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
     ? api.notes.homeTimeline(params)
     : feed.kind === "local"
     ? api.notes.localTimeline(params)
-    : api.lists.timeline(feed.id, params);
+    : feed.kind === "list"
+    ? api.lists.timeline(feed.id, params)
+    : api.hashtags.timeline(feed.name, params);
 }
 
 export default function HomePage() {
   const { t } = useTranslation();
   const [feed, setFeed] = useState<Feed>({ kind: "home" });
   const [lists, setLists] = useState<ListSummary[]>([]);
+  const [pinnedHashtags, setPinnedHashtags] = useState<{ name: string }[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
@@ -47,6 +50,7 @@ export default function HomePage() {
 
   useEffect(() => {
     api.lists.list().then(setLists).catch(() => {});
+    api.hashtags.pinned().then(setPinnedHashtags).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -142,6 +146,15 @@ export default function HomePage() {
         <Link to="/settings/lists" className={styles.feedTab}>
           {t("home:homePage.manageListsLink")}
         </Link>
+        {pinnedHashtags.map((h) => (
+          <button
+            key={h.name}
+            className={`${styles.feedTab} ${feed.kind === "hashtag" && feed.name === h.name ? styles.feedTabActive : ""}`}
+            onClick={() => setFeed({ kind: "hashtag", name: h.name })}
+          >
+            #{h.name}
+          </button>
+        ))}
       </div>
 
       <NoteList
@@ -156,6 +169,8 @@ export default function HomePage() {
             ? t("home:homePage.emptyHome")
             : feed.kind === "local"
             ? t("home:homePage.emptyLocal")
+            : feed.kind === "hashtag"
+            ? t("hashtag:hashtagPage.empty")
             : t("home:homePage.emptyList")
         }
       />

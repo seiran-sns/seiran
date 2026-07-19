@@ -7,6 +7,7 @@ pub mod email_verify;
 pub mod emojis;
 pub mod favicon;
 pub mod follows;
+pub mod hashtags;
 pub mod lists;
 pub mod meta;
 pub mod miauth;

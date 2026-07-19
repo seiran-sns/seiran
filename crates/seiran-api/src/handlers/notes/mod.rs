@@ -246,6 +246,10 @@ async fn create_regular_post(
         return e.into_response();
     }
 
+    if let Err(e) = state.hashtags.link_post(post_id, &text).await {
+        tracing::error!("[create_regular_post] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
+    }
+
     deliver_regular_post(state, RegularPostDelivery {
         post_id,
         actor_id,
@@ -443,11 +447,7 @@ pub async fn get_note_ap(
         &post.body, &state.local_domain, &state.db, state.ap_client.http.as_ref(),
     ).await;
     let content_html = plain_to_html_with_mentions(&converted_body, &mentions);
-    let tag: Vec<serde_json::Value> = mentions
-        .iter()
-        .filter(|m| m.is_mention)
-        .map(|m| serde_json::json!({"type": "Mention", "href": m.href, "name": m.name}))
-        .collect();
+    let tag = seiran_common::mention::ap_inline_mentions_to_tag_json(&mentions);
 
     let attachment_rows = sqlx::query(
         "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url

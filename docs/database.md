@@ -30,6 +30,8 @@ ID 採番は2系統ある。
 | `storage_providers` | メディア保存先オブジェクトストレージ(S3互換)の設定 |
 | `lists` / `list_members` | ユーザーごとのリスト（Bsky `app.bsky.graph.list` 相当） |
 | `pinned_posts` | プロフィールへのピン留め投稿 |
+| `hashtags` / `post_hashtags` | ハッシュタグ（正規化済みタグ名）とポストのm:n関係 |
+| `pinned_hashtags` | ユーザーごとのハッシュタグタブのピン留め（ホーム画面への追加） |
 | `atp_records` | ATP の非 post レコード（`app.bsky.actor.profile` 等）の管理 |
 | `atp_blocks` | ATP MST の CAR ブロックストア（CID → バイト列） |
 | `atp_repo_events` | ATP `subscribeRepos` 配信用のイベントログ（commit/identity） |
@@ -69,6 +71,13 @@ ID 採番は2系統ある。
 
 ### `notifications`
 `source_uri`（発生源イベントの一意識別子、ATP Like の `at_uri` や AP の `ap_activity_id`）に部分 UNIQUE インデックスを張り、Jetstream/AP の複線受信による重複 INSERT を防いでいる。`reaction_emoji_url` は通知発生時点の絵文字画像URLをスナップショット保存する非正規化カラム（`reactions` が1人1リアクションのため、後から絵文字を切り替えると過去のリアクション内容を復元できなくなる問題への対処）。
+
+### `hashtags` / `post_hashtags` / `pinned_hashtags`
+ハッシュタグは検索結果の即席表示ではなく、ポストとm:nの関係を持つ永続化オブジェクトとして扱う。`hashtags.name` は正規化済み（先頭`#`除去・小文字化、グルーピング用の内部表現）。表示上の大文字小文字は各投稿の `posts.body` 原文に委ねる（`hashtags` テーブル自体は表示用の値を持たない）。
+
+抽出はプロトコル別の特別処理を持たず、ローカル投稿・AP受信・Bsky受信いずれも「最終的な `posts.body` テキストを1回スキャンする」共通経路（`seiran_common::hashtag::extract_hashtags`）で行う。AP由来のハッシュタグアンカーは `[#foo](リモートのタグページURL)` というMarkdownリンクに変換されるが、リンクテキスト部分に `#foo` がそのまま残るため、この共通スキャンだけで3ソースとも取りこぼしなく抽出できる（`docs/protocols.md` 6節参照）。抽出・リンクは投稿INSERT直後のベストエフォート処理で、失敗しても投稿自体は成立させる。
+
+`pinned_hashtags` は「ホーム画面に追加」操作の永続化（`pinned_posts` と同じ設計思想）。ハッシュタイムライン自体は `post_hashtags` を介した検索であり、ピン留めの有無に関係なく誰でも `/tags/:name` で閲覧できる。ハッシュタイムラインは `visibility IN ('public', 'unlisted')` のみを対象にする（特定アクター向けの閲覧制御が要るフィードではなく発見用の公開フィードのため、`followers_only` の例外は設けない）。
 
 ### メディア関連（`media_files` / `post_attachments` / `atp_blobs`)
 `media_files` は画像専用として始まったため `width`/`height`/`blurhash` は NULL 許容(動画・音声はこれらを持たない)。`bsky_video_*` 系カラムは Bluesky 公式動画パイプライン（`app.bsky.video.uploadVideo`）との連携状態を追跡する。`(sha256, blurhash)` の複合 UNIQUE でグローバル重複排除。

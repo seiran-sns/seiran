@@ -473,11 +473,7 @@ pub async fn deliver_post_to_ap_followers(
         let (converted, mentions) =
             crate::mention::convert_mentions_for_ap(&body, local_domain, db, &ap_client.http).await;
         let html = plain_to_html_with_mentions(&converted, &mentions);
-        let tag: Vec<serde_json::Value> = mentions
-            .iter()
-            .filter(|m| m.is_mention)
-            .map(|m| serde_json::json!({"type": "Mention", "href": m.href, "name": m.name}))
-            .collect();
+        let tag = crate::mention::ap_inline_mentions_to_tag_json(&mentions);
         (html, tag)
     };
 
@@ -889,10 +885,14 @@ pub fn plain_to_html_with_mentions(text: &str, mentions: &[crate::mention::ApInl
             continue;
         }
         linked.push_str(&escape_html(&text[last..m.byte_start]));
-        let rel = if m.is_mention {
-            r#" class="mention u-url" rel="nofollow noopener""#
-        } else {
-            r#" rel="nofollow noopener""#
+        let rel = match m.kind {
+            crate::mention::ApInlineSpanKind::Mention => r#" class="mention u-url" rel="nofollow noopener""#,
+            // Mastodon 等が実際に送ってくる形式（`class="mention hashtag" rel="tag"`）に合わせる。
+            // 受信側の `ap_content_to_markdown_body` はこの形式のアンカーを `#foo` として
+            // 解決できることを確認済み（`docs/protocols.md` 6節・`jobs::inbound_activity_process`
+            // のテスト参照）。
+            crate::mention::ApInlineSpanKind::Hashtag => r#" class="mention hashtag" rel="tag""#,
+            crate::mention::ApInlineSpanKind::Link => r#" rel="nofollow noopener""#,
         };
         linked.push_str(&format!(
             r#"<a href="{}"{}>{}</a>"#,
@@ -1196,7 +1196,7 @@ mod tests {
             byte_end: 27,
             href: "https://seiran.example/users/alice".to_string(),
             name: "@alice@seiran.example".to_string(),
-            is_mention: true,
+            kind: crate::mention::ApInlineSpanKind::Mention,
         }];
         let html = plain_to_html_with_mentions(text, &mentions);
         assert_eq!(
@@ -1213,7 +1213,7 @@ mod tests {
             byte_end: 21,
             href: "https://bsky.app/profile/alice.bsky.social".to_string(),
             name: "alice.bsky.social".to_string(),
-            is_mention: false,
+            kind: crate::mention::ApInlineSpanKind::Link,
         }];
         let html = plain_to_html_with_mentions(text, &mentions);
         assert!(!html.contains("class=\"mention"));
@@ -1228,7 +1228,7 @@ mod tests {
             byte_end: 9,
             href: "https://seiran.example/users/alice".to_string(),
             name: "@alice".to_string(),
-            is_mention: true,
+            kind: crate::mention::ApInlineSpanKind::Mention,
         }];
         let html = plain_to_html_with_mentions(text, &mentions);
         assert!(html.starts_with("<p>&lt;b&gt;<a "));
@@ -1243,7 +1243,7 @@ mod tests {
             byte_end: 100, // text の範囲外
             href: "https://example.com".to_string(),
             name: "x".to_string(),
-            is_mention: true,
+            kind: crate::mention::ApInlineSpanKind::Mention,
         }];
         let html = plain_to_html_with_mentions(text, &mentions);
         assert_eq!(html, "<p>hi</p>");
@@ -1257,7 +1257,7 @@ mod tests {
             byte_end: 6,
             href: "https://seiran.example/users/alice".to_string(),
             name: "@alice".to_string(),
-            is_mention: true,
+            kind: crate::mention::ApInlineSpanKind::Mention,
         }];
         let html = plain_to_html_with_mentions(text, &mentions);
         assert!(html.contains("<br>second line"));

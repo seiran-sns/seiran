@@ -1,0 +1,8 @@
+{
+  "hashtagPage": {
+    "addToHome": "Add to home screen",
+    "removeFromHome": "Remove from home screen",
+    "postWithTag": "Post with this hashtag",
+    "empty": "Posts with this hashtag will appear here."
+  }
+}

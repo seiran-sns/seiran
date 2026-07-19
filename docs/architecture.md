@@ -138,14 +138,16 @@ React 18 + Vite + TypeScript（react-router-dom v6）。`frontend/src/` 構成:
 
 - `api/client.ts` — バックエンドAPIクライアント、`ApiError`、`getErrorMessage()`
 - `components/layout/` — `AppShell`（3ペインの外枠）、`LeftNav`
-- `components/note/` — `NoteCard`（タイムライン・詳細・プロフィール共通の投稿カード）、`PostComposer`、`ReactionChips`/`ReactionPicker`、`HlsVideo`、`RichText`（本文中のMarkdownリンク`[text](url)`・生URL・`@mention`・絵文字ショートコードを1パスでクリック可能な要素へ変換。`EmojiText`は表示名等リンク化不要な箇所向けにショートコード置換のみ残す）等
+- `components/note/` — `NoteCard`（タイムライン・詳細・プロフィール共通の投稿カード）、`PostComposer`、`ReactionChips`/`ReactionPicker`、`HlsVideo`、`RichText`（本文中のMarkdownリンク`[text](url)`・生URL・`@mention`・`#ハッシュタグ`・絵文字ショートコードを1パスでクリック可能な要素へ変換。AP由来のハッシュタグアンカー`[#foo](リモートURL)`もリンクテキストの形状で検出し自インスタンスの`/tags/foo`へ読み替える。`EmojiText`は表示名等リンク化不要な箇所向けにショートコード置換のみ残す）等
 - `components/right/` — 右ペインのタブ内容（`NotificationsPanel`、`TrendsSearchPanel`）
 - `components/admin/` — 管理画面パネル群
-- `contexts/` — `AuthContext`、`ComposerContext`、`RightPaneContext`（右ペインのサブタブ状態保持）、`StreamingContext`（WebSocket集約）、`ToastContext`（エラー/成功/情報トースト通知）
+- `contexts/` — `AuthContext`、`ComposerContext`（返信モーダルに加え、`openCompose(initialText)` で本文プリフィル済みの素の投稿モーダルもグローバルに開ける）、`RightPaneContext`（右ペインのサブタブ状態保持）、`StreamingContext`（WebSocket集約）、`ToastContext`（エラー/成功/情報トースト通知）
 - `pages/` — 画面単位のトップレベルコンポーネント
 - `i18n/` — 国際化。`react-i18next` + `i18next-browser-languagedetector`。ブラウザの言語設定にのみ従い自動判定（`en`/`ja`、対応言語外は `en` にフォールバック）。ユーザーによる手動切り替えUIは未実装。翻訳リソースは `i18n/locales/{en,ja}/{namespace}.json` に画面・機能単位の名前空間で分割配置し、`i18n/index.ts` の `resources` に集約してビルド時にバンドルする。名前空間分割は、将来ユーザーが独自の言語ファイル（同形式のJSON）を作成・適用・配布できるようにする構想を見据えたもので、`i18n.addResourceBundle()` により実行時にリソースを追加・上書きできる
 
 3ペインUIのレイアウト仕様は `docs/ui_spec.md` を参照。
+
+**開発用プロキシとVite内部パスの衝突**: `frontend/vite.config.ts` の開発サーバー（ローカル `cargo run` 直接起動時のみ有効）は `GET /@:handle`（プロフィールページ）をバックエンドへ転送するが、単純なプレフィックスマッチだとVite自身の内部モジュール（`/@vite/client`・`/@react-refresh`・`/@fs/...`・`/@id/...`）まで巻き込んでバックエンドへ転送してしまい、Viteクライアントが読み込めず白画面になる（実機確認）。そのためこれらを除外する正規表現（`^`始まりはVite側でregex扱い）を使う。この関係で `vite`/`react-refresh` はローカルユーザー名として予約済み（`RESERVED_LOCAL_USERNAMES`、`crates/seiran-common/src/username.rs`）。
 
 ## 8.1 OGP (Open Graph) 対応
 
