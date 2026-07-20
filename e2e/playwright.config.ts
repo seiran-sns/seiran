@@ -9,6 +9,13 @@ const appviewStubPort = Number(process.env.APPVIEW_STUB_PORT ?? "2583");
 const backendPort = 3000;
 const frontendPort = 5173;
 
+// 【重要・変更禁止】webServer 各エントリの reuseExistingServer は必ず false にすること。
+// backendPort(3000)/frontendPort(5173) は scripts/dev-up.sh のネイティブ開発サーバーとも
+// 共有しているため、true にすると「既に起動している別プロセス」を無条件に流用してしまう。
+// 2026-07-20、まさにこれが起きて本物の開発サーバー（本物の開発DB・本物のplc.directory・
+// 本物のBsky Relayに接続）にE2Eが相乗りし、開発DBに48件のテストユーザーが混入・実PLC
+// ディレクトリを汚染する事故になった。false ならポート競合時に明確なエラーで止まるので安全。
+
 // バックエンドが `cargo run` 起動時に dotenvy でリポジトリルートの実 .env を読み込むため、
 // ここで明示的に上書きしない値（REDIS_URL 以外）は本物の .env の値が漏れてくる。
 // E2E が本物の外部サービス（Bsky Relay・Cloudflare DNS等）に触れないよう、
@@ -56,14 +63,14 @@ export default defineConfig({
       cwd: e2eDir,
       env: { PLC_STUB_PORT: String(plcStubPort) },
       port: plcStubPort,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
     {
       command: `node fixtures/stub-appview-server.ts`,
       cwd: e2eDir,
       env: { APPVIEW_STUB_PORT: String(appviewStubPort) },
       port: appviewStubPort,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
     {
       command: "cargo run -p seiran-server",
@@ -71,13 +78,13 @@ export default defineConfig({
       env: backendEnv,
       port: backendPort,
       timeout: 180_000,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
     {
       command: "npm run dev",
       cwd: path.join(repoRoot, "frontend"),
       port: frontendPort,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
   ],
 });
