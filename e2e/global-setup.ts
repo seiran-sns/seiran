@@ -1,30 +1,30 @@
-// E2E専用Postgresを起動し、healthyになるまで待つ。マイグレーション自体は
-// backend（seiran-server）起動時に自動実行される（crates/seiran-common/src/db.rs の
-// run_migrations）ので、ここでは待つだけでよい。
-import { execFileSync } from "node:child_process";
-import path from "node:path";
-
-const e2eDir = path.dirname(new URL(import.meta.url).pathname);
+// フロントは api.setup.status()（GET /api/setup/status、users テーブルが1件でも
+// あれば initialized:true）をアプリ起動時に1回だけ見て、初期化前なら常に
+// <Setup>（初期管理者作成）画面をルーティング無視で表示する
+// (frontend/src/App.tsx の AppRoutes)。E2E専用DBは各テスト実行のたびに空から
+// 始まるため、何もしないと最初にブラウザでどのURLを開いても<Setup>画面になってしまう。
+//
+// ここ（globalSetup）は Playwright の実行順序上、webServer（backend含む）が
+// 起動・readyになった後に実行される（playwright.config.ts の該当コメント参照）ため、
+// backendへ直接HTTPで先に1人登録しておくことで、以降の全テストを通常の画面遷移で
+// 開始できるようにする。
+const BACKEND_URL = "http://localhost:3000";
 
 export default async function globalSetup() {
-  execFileSync("docker", ["compose", "-f", "docker-compose.yml", "up", "-d", "db"], {
-    cwd: e2eDir,
-    stdio: "inherit",
-  });
+  const statusRes = await fetch(`${BACKEND_URL}/api/setup/status`);
+  const status = (await statusRes.json()) as { initialized: boolean };
+  if (status.initialized) return;
 
-  const deadline = Date.now() + 60_000;
-  for (;;) {
-    const status = execFileSync(
-      "docker",
-      ["compose", "-f", "docker-compose.yml", "ps", "db", "--format", "{{.Health}}"],
-      { cwd: e2eDir },
-    )
-      .toString()
-      .trim();
-    if (status === "healthy") return;
-    if (Date.now() > deadline) {
-      throw new Error(`E2E Postgres が healthy になりませんでした（最終ステータス: ${status}）`);
-    }
-    await new Promise((r) => setTimeout(r, 500));
+  const res = await fetch(`${BACKEND_URL}/api/setup`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      username: "e2ebootstrap",
+      email: "e2ebootstrap@example.com",
+      password: "seiranda-e2e",
+    }),
+  });
+  if (!res.ok && res.status !== 409) {
+    throw new Error(`初期管理者の作成に失敗しました: ${res.status} ${await res.text()}`);
   }
 }

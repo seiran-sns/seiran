@@ -60,7 +60,8 @@
 - [ ] 高負荷・スケールアウト検証（`RedisJobQueue` + `RedisSessionStore` 環境での動作確認、プロダクションビルド・デプロイ手順の検証）
 - [x] Playwright E2E基盤の構築（`e2e/`、スタブPLCサーバー、E2E専用DB）と新規登録フローの疎通テスト
 - [x] E2Eテストの拡充（ログイン、投稿、フォロー、返信、リアクション、検索、プロフィール編集、ハッシュタグ）
+- [x] Fedi配送のE2E化（投稿・返信・リポストがacceptedフォロワーのinboxへ正しいアクティビティで配送されることを、スタブFediアクター＋実HTTP Signaturesで検証）
 - [ ] 通知UI実装後にE2E化（`NotificationsPage` は現状プレースホルダで未実装）
-- [ ] リモート連合（Fedi/Bsky）まわりのE2E
+- [ ] Bsky側の配送E2E（ローカルPDSコミット自体は既存テストで間接的に検証済みだが、リモートBskyアクターからのフォロー受理を経由した配送は未検証）
 
 既存の結合テスト基盤: `crates/seiran-api/tests/`（実DB + 実 `seiran_api::router` を使用、`#[ignore]` で通常の `cargo test` から除外し `cargo test -p seiran-api --test <name> -- --ignored` で明示実行）。

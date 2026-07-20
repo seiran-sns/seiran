@@ -47,6 +47,13 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   reporter: "list",
+  // 【重要】Playwrightの実際の実行順序は「webServer起動 → globalSetup」であり、直感に反する
+  // （node_modules/playwright/lib/runner/index.js の createGlobalSetupTasks を見ると
+  // webServer は plugin として globalSetups より前に起動される）。そのため:
+  // - E2E用DBの起動待ちは globalSetup ではなく scripts/wait-for-db.ts として
+  //   backend の command 自体の前段に組み込んでいる（DBはbackend起動前に必要なため）。
+  // - globalSetup は逆に「backendが起動済みであること」を前提にできるので、
+  //   初期管理者アカウントのbootstrap（global-setup.ts参照）に使っている。
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
   use: {
@@ -73,7 +80,7 @@ export default defineConfig({
       reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
     {
-      command: "cargo run -p seiran-server",
+      command: `node ${path.join(e2eDir, "scripts", "wait-for-db.ts")} && cargo run -p seiran-server`,
       cwd: repoRoot,
       env: backendEnv,
       port: backendPort,
