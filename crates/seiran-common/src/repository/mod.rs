@@ -5,6 +5,7 @@
 
 pub mod actor;
 pub mod atp;
+pub mod dm;
 pub mod follow;
 pub mod hashtag;
 pub mod list;
@@ -19,6 +20,7 @@ pub mod user;
 
 pub use actor::{Actor, ActorRepository, PgActorRepository};
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
+pub use dm::{DmPeerSummary, DmRepository, PgDmRepository};
 pub use follow::{FollowRepository, PgFollowRepository};
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
 pub use list::{
@@ -31,8 +33,8 @@ pub use media_file::{
 pub use notification::{NotificationKind, NotificationRepository, NotificationRow, PgNotificationRepository};
 pub use pinned_post::{PgPinnedPostsRepository, PinnedPostsRepository, MAX_PINNED_POSTS};
 pub use post::{
-    PgPostRepository, PostDeliveryMeta, PostRecord, PostRepository, PostSummary, RepostUndoInfo,
-    TimelinePost,
+    DmSessionSummary, PgPostRepository, PostDeliveryMeta, PostRecord, PostRepository, PostSummary,
+    RepostUndoInfo, TimelinePost,
 };
 pub use reaction::{PgReactionRepository, ReactionRepository};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};

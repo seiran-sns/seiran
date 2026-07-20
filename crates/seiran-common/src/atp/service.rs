@@ -12,7 +12,7 @@ use crate::atp::repo::{
     build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
     cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
     encode_bsky_feed_repost, encode_bsky_feed_like, encode_bsky_graph_follow,
-    encode_bsky_graph_list, encode_bsky_graph_listitem,
+    encode_bsky_graph_list, encode_bsky_graph_listitem, encode_chat_actor_declaration,
     generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage, BskyEmbed,
     BskyPostReply,
 };
@@ -1465,6 +1465,39 @@ impl AtpCommitService {
         let result = self.commit_record_inner(actor_id, record, now, None).await?;
 
         tracing::info!("[atp] profile commit 完了（{}）: did={}", action, result.at_did);
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
+    /// `chat.bsky.actor.declaration`（Bsky DM受信可否設定、rkey固定`self`）をコミットする。
+    /// このレコードが無いと、Bluesky公式クライアントは相手（seiranユーザー）へのDM送信を
+    /// 保守的にブロックする（`docs/protocols.md` 9節）。新規登録時・既存ユーザーへの
+    /// バックフィルの両方から呼ばれる。既に同じ値で存在する場合も冪等に再コミットしてよい
+    /// （呼び出し頻度は低いためコストは無視できる）。
+    pub async fn commit_chat_declaration(&self, actor_id: i64, now: DateTime<Utc>) -> Result<(), AtpCommitError> {
+        let existing: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM atp_records \
+             WHERE actor_id = $1 AND collection = 'chat.bsky.actor.declaration' AND rkey = 'self')",
+        )
+        .bind(actor_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let action: &'static str = if existing { "update" } else { "create" };
+
+        let (record_cbor, record_cid) = encode_chat_actor_declaration("all")?;
+
+        let record = CommitRecord {
+            collection: "chat.bsky.actor.declaration",
+            rkey: "self".to_string(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action,
+            blob_cids: vec![],
+        };
+
+        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+
+        tracing::info!("[atp] chat declaration commit 完了（{}）: did={}", action, result.at_did);
         self.spawn_request_crawl();
         Ok(())
     }

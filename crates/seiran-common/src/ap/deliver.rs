@@ -127,13 +127,19 @@ struct NoteActivityParams<'a> {
     /// 本文中のメンションから組み立てた `tag[]`（`{"type":"Mention","href":..,"name":..}`）。
     /// 空なら Note オブジェクトに `tag` フィールド自体を含めない。
     tag: Vec<serde_json::Value>,
+    /// `visibility="direct"`（DM）の場合の宛先アクターURI一覧。`to` に直接使う
+    /// （フォロワーコレクションではなく実際の宛先個人のみへ配送するため）。
+    /// direct以外では無視される。
+    direct_recipients: &'a [String],
 }
 
 /// 可視性から Create(Note)/Note 共通の to/cc を決める。
-fn visibility_to_to_cc(addr: &LocalActorAddress, visibility: &str) -> (Vec<String>, Vec<String>) {
+fn visibility_to_to_cc(addr: &LocalActorAddress, visibility: &str, direct_recipients: &[String]) -> (Vec<String>, Vec<String>) {
     match visibility {
         "unlisted" => (vec![addr.followers_uri.clone()], vec![AS_PUBLIC.to_string()]),
-        "followers_only" | "direct" => (vec![addr.followers_uri.clone()], vec![]),
+        // DMは実際の宛先個人のみへ配送する（フォロワーコレクション宛にはしない）。
+        "direct" => (direct_recipients.to_vec(), vec![]),
+        "followers_only" => (vec![addr.followers_uri.clone()], vec![]),
         _ => (vec![AS_PUBLIC.to_string()], vec![addr.followers_uri.clone()]),
     }
 }
@@ -142,7 +148,7 @@ fn visibility_to_to_cc(addr: &LocalActorAddress, visibility: &str) -> (Vec<Strin
 fn build_create_note_activity(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_json::Value {
     let note_id = format!("https://{}/notes/{}", p.local_domain, p.post_id);
     let activity_id = format!("https://{}/activities/{}", p.local_domain, p.post_id);
-    let (to, cc) = visibility_to_to_cc(addr, p.visibility);
+    let (to, cc) = visibility_to_to_cc(addr, p.visibility, p.direct_recipients);
 
     let mut note_obj = serde_json::json!({
         "type": "Note",
@@ -218,7 +224,7 @@ fn build_announce_activity(
     published: &str,
     visibility: &str,
 ) -> serde_json::Value {
-    let (to, cc) = visibility_to_to_cc(addr, visibility);
+    let (to, cc) = visibility_to_to_cc(addr, visibility, &[]);
     serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Announce",
@@ -457,6 +463,13 @@ pub async fn deliver_post_to_ap_followers(
     let seiran_uuid: Option<String> = row.try_get("seiran_post_uuid").unwrap_or(None);
     let visibility: String = row.try_get("visibility").unwrap_or_else(|_| "public".to_string());
 
+    // DM（direct）はこの関数（フォロワー全体へのファンアウト）では扱わない。
+    // `deliver_direct_message_to_ap` を使うこと（呼び出し元の実装ミスに対する最終ガード）。
+    if visibility == "direct" {
+        tracing::warn!("[deliver_post_to_ap_followers] visibility=direct のポストが渡されたためスキップ（post_id={}）", post_id);
+        return Ok(());
+    }
+
     let attachments = fetch_attachment_documents(db, post_id).await?;
 
     let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
@@ -491,12 +504,95 @@ pub async fn deliver_post_to_ap_followers(
             seiran_uuid: seiran_uuid.as_deref(),
             visibility: &visibility,
             tag,
+            direct_recipients: &[],
         },
     );
 
     fan_out_activity(
         ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
         &format!("Create(Note) post_id={} username={}", post_id, username),
+    )
+    .await
+}
+
+/// DM（`visibility='direct'`）投稿を、宛先（`post_recipients`）の中のFediアクターへのみ
+/// 配送する。`deliver_post_to_ap_followers`（フォロワー全体へのファンアウト）とは異なり、
+/// フォロワーコレクションではなく実際の宛先個人のinboxのみへCreate(Note)を送る。
+pub async fn deliver_direct_message_to_ap(
+    ap_client: &ApClient,
+    db: &PgPool,
+    post_id: i64,
+    actor_id: i64,
+    local_domain: &str,
+    ap_private_key_pem: &str,
+) -> Result<(), ApError> {
+    let row = sqlx::query(
+        "SELECT p.body, p.created_at, a.username
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| ApError::Other(format!("投稿情報取得エラー: {}", e)))?
+    .ok_or_else(|| ApError::Other(format!("投稿 {} が見つかりません", post_id)))?;
+
+    let body: String = row.try_get("body").map_err(|e| ApError::Other(e.to_string()))?;
+    let created_at: chrono::DateTime<chrono::Utc> =
+        row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
+    let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
+
+    let recipient_rows = sqlx::query(
+        "SELECT a.ap_uri, a.ap_inbox_url
+         FROM post_recipients pr JOIN actors a ON a.id = pr.actor_id
+         WHERE pr.post_id = $1 AND a.actor_type = 'fedi' AND a.ap_uri IS NOT NULL AND a.ap_inbox_url IS NOT NULL",
+    )
+    .bind(post_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| ApError::Other(format!("DM宛先取得エラー: {}", e)))?;
+
+    if recipient_rows.is_empty() {
+        return Ok(());
+    }
+
+    let direct_recipients: Vec<String> = recipient_rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("ap_uri").ok())
+        .collect();
+    let inboxes: Vec<String> = recipient_rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("ap_inbox_url").ok())
+        .collect();
+
+    let attachments = fetch_attachment_documents(db, post_id).await?;
+    let (converted, mentions) =
+        crate::mention::convert_mentions_for_ap(&body, local_domain, db, &ap_client.http).await;
+    let content_html = plain_to_html_with_mentions(&converted, &mentions);
+    let tag = crate::mention::ap_inline_mentions_to_tag_json(&mentions);
+
+    let addr = local_actor_address(local_domain, &username);
+    let activity = build_create_note_activity(
+        &addr,
+        &NoteActivityParams {
+            local_domain,
+            post_id,
+            content_html: &content_html,
+            published: &created_at.to_rfc3339(),
+            attachments,
+            quote_url: None,
+            in_reply_to: None,
+            seiran_uuid: None,
+            visibility: "direct",
+            tag,
+            direct_recipients: &direct_recipients,
+        },
+    );
+
+    fan_out_activity(
+        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        &format!("Create(Note DM) post_id={} username={}", post_id, username),
     )
     .await
 }
@@ -942,6 +1038,7 @@ mod tests {
                 seiran_uuid: None,
                 visibility: "public",
                 tag: vec![],
+                direct_recipients: &[],
             },
         );
         assert_eq!(activity["type"], "Create");
@@ -972,6 +1069,7 @@ mod tests {
                 seiran_uuid: None,
                 visibility: "unlisted",
                 tag: vec![],
+                direct_recipients: &[],
             },
         );
         assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
@@ -995,6 +1093,7 @@ mod tests {
                 seiran_uuid: None,
                 visibility: "followers_only",
                 tag: vec![],
+                direct_recipients: &[],
             },
         );
         assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
@@ -1016,6 +1115,7 @@ mod tests {
                 seiran_uuid: Some("uuid-1234"),
                 visibility: "public",
                 tag: vec![],
+                direct_recipients: &[],
             },
         );
         let note = &activity["object"];

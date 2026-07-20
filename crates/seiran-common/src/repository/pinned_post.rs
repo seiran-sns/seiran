@@ -104,11 +104,17 @@ impl PinnedPostsRepository for PgPinnedPostsRepository {
              WHERE pp.actor_id = $1 AND p.deleted_at IS NULL
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
-                   OR p.actor_id = $2
-                   OR EXISTS (
-                       SELECT 1 FROM follows f
-                       WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                   )
+                   OR (p.visibility = 'followers_only' AND (
+                       p.actor_id = $2
+                       OR EXISTS (
+                           SELECT 1 FROM follows f
+                           WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                       )
+                   ))
+                   OR (p.visibility = 'direct' AND (
+                       p.actor_id = $2
+                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $2)
+                   ))
                )
              ORDER BY pp.pinned_at DESC",
         )

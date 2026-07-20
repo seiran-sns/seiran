@@ -182,9 +182,11 @@ pub async fn notes_local_timeline(
     let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
 
+    // Misskey互換APIはMisskey本家の`specified`同様のデフォルト挙動を保つため、
+    // `exclude_direct`は常に`false`（自分宛のdirectは含まれる）。
     let rows = state
         .posts
-        .local_timeline(my_actor_id, limit, until_id, since_id)
+        .local_timeline(my_actor_id, limit, until_id, since_id, false)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(build_notes(&state, rows, my_actor_id).await))
@@ -211,7 +213,7 @@ pub async fn notes_home_timeline(
 
     let rows = state
         .posts
-        .home_timeline(actor_id, limit, until_id, since_id)
+        .home_timeline(actor_id, limit, until_id, since_id, false)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(build_notes(&state, rows, Some(actor_id)).await))

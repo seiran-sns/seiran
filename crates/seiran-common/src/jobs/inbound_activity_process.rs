@@ -275,7 +275,51 @@ async fn handle_create_note(
     // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
     let emoji_map = build_emoji_map(&tags);
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
-    let visibility = classify_ap_visibility(&as_string_list(&note["to"]), &as_string_list(&note["cc"]));
+    let to_list = as_string_list(&note["to"]);
+    let visibility = classify_ap_visibility(&to_list, &as_string_list(&note["cc"]));
+
+    // AP inReplyTo からローカルの reply_to_post_id を解決する（DM機能実装以前はこの解決自体が
+    // 存在しなかった。通常投稿にも有用だが、direct（DM）のスレッド起点伝播に必須のため追加）。
+    let reply_to_post_id: Option<i64> = match note["inReplyTo"].as_str() {
+        Some(uri) => inbox.post_repo.find_id_by_ap_or_at_uri(uri).await.ok().flatten(),
+        None => None,
+    };
+
+    // DM（visibility="direct"）の宛先・スレッド起点解決。
+    // `to`に含まれるローカルアクターURI（`https://{local_domain}/users/{username}`）を宛先とする。
+    let (thread_root_post_id, recipient_actor_ids): (Option<i64>, Vec<i64>) = if visibility == "direct" {
+        let parent_thread_root = match reply_to_post_id {
+            Some(parent_id) => inbox
+                .post_repo
+                .find_delivery_meta(parent_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|m| if m.visibility == "direct" { m.thread_root_post_id } else { None }),
+            None => None,
+        };
+        let thread_root = parent_thread_root.unwrap_or(post_id);
+
+        // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
+        // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
+        // `find_by_ap_uri` では引っかからない。`handle_follow` と同じくURI末尾の
+        // セグメントをusernameとみなして `find_by_username_domain` で解決する。
+        let mut recipients = Vec::new();
+        for uri in &to_list {
+            if !uri.contains("/users/") {
+                continue;
+            }
+            let Some(local_username) = uri.rsplit('/').next() else { continue };
+            if let Ok(Some(actor)) = inbox.actor_repo.find_by_username_domain(local_username, &inbox.local_domain).await {
+                if actor.actor_type == "local" {
+                    recipients.push(actor.id);
+                }
+            }
+        }
+        (Some(thread_root), recipients)
+    } else {
+        (None, Vec::new())
+    };
 
     // シナリオ2: seiran_post_uuid による seiran 間マージ
     let seiran_uuid = note["seiranUuid"].as_str();
@@ -306,7 +350,10 @@ async fn handle_create_note(
     // posts テーブルに挿入（ap_object_id 重複はスキップ、seiran_post_uuid も保存）
     inbox
         .post_repo
-        .insert_remote_with_dedup(post_id, actor_id, &body, note_id, seiran_uuid, parent_original_post_id, created_at, &emoji_map, visibility)
+        .insert_remote_with_dedup(
+            post_id, actor_id, &body, note_id, seiran_uuid, parent_original_post_id, created_at, &emoji_map,
+            visibility, reply_to_post_id, thread_root_post_id, &recipient_actor_ids,
+        )
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
@@ -330,17 +377,22 @@ async fn handle_create_note(
         }
     }
 
-    // ローカルフォロワーへ WebSocket リアルタイム配信
-    let recipients: HashSet<i64> = inbox
-        .follow_repo
-        .find_accepted_local_follower_ids(actor_id)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
+    // WebSocket リアルタイム配信。directは宛先のみ（フォロワーには配信しない、本文漏洩防止）、
+    // それ以外はローカルフォロワー全体。
+    let recipients: HashSet<i64> = if visibility == "direct" {
+        recipient_actor_ids.iter().copied().collect()
+    } else {
+        inbox
+            .follow_repo
+            .find_accepted_local_follower_ids(actor_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
+    };
 
     if !recipients.is_empty() {
-        let note_json = serde_json::json!({
+        let mut note_json = serde_json::json!({
             "id": post_id.to_string(),
             "text": body,
             "createdAt": created_at.to_rfc3339(),
@@ -355,6 +407,9 @@ async fn handle_create_note(
             "attachments": [],
             "emojis": emoji_map,
         });
+        if visibility == "direct" {
+            note_json["visibility"] = serde_json::json!("direct");
+        }
         inbox.stream_hub.publish_note(recipients, &note_json);
     }
 

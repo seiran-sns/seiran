@@ -708,6 +708,28 @@ pub fn encode_bsky_actor_profile(
     Ok((cbor, cid))
 }
 
+/// `chat.bsky.actor.declaration` レコード（Bsky DM受信可否設定、rkey固定`self`）の
+/// DAG-CBOR バイト列と CID を生成する。`allow_incoming` は `"all"`/`"none"`/`"following"`。
+/// このレコードが無いと、Bluesky公式クライアントは相手（seiranユーザー）へのDM送信を
+/// 保守的にブロックする（`docs/protocols.md` 9節参照）。
+pub fn encode_chat_actor_declaration(allow_incoming: &str) -> Result<(Vec<u8>, Cid), RepoError> {
+    // canonical順: $type(5) < allowIncoming(13)
+    #[derive(Serialize)]
+    struct ChatActorDeclaration {
+        #[serde(rename = "$type")]
+        kind: String,
+        #[serde(rename = "allowIncoming")]
+        allow_incoming: String,
+    }
+    let record = ChatActorDeclaration {
+        kind: "chat.bsky.actor.declaration".to_string(),
+        allow_incoming: allow_incoming.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
 /// `app.bsky.graph.follow` レコードの DAG-CBOR バイト列と CID を生成する。
 pub fn encode_bsky_graph_follow(
     subject_did: &str,

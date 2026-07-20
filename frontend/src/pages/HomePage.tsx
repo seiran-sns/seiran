@@ -22,10 +22,13 @@ function feedKey(feed: Feed): string {
 }
 
 function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; since_id?: string }) {
+  // DM（visibility="direct"）はタイムラインに一切現れない仕様のため、対応エンドポイントには
+  // 常に exclude_direct を付与する（Misskey API互換のためデフォルトでは含まれるが、
+  // seiranフロントエンドは明示的に除外を要求する）。
   return feed.kind === "home"
-    ? api.notes.homeTimeline(params)
+    ? api.notes.homeTimeline({ ...params, exclude_direct: true })
     : feed.kind === "local"
-    ? api.notes.localTimeline(params)
+    ? api.notes.localTimeline({ ...params, exclude_direct: true })
     : feed.kind === "list"
     ? api.lists.timeline(feed.id, params)
     : api.hashtags.timeline(feed.name, params);

@@ -78,6 +78,21 @@ pub struct PostDeliveryMeta {
     /// 元ポストの可視性（"public"|"unlisted"|"followers_only"|"direct"）。
     /// リポスト可否判定・可視性継承・Bsky配送許可判定に使う。
     pub visibility: String,
+    /// 元ポストが`direct`の場合のスレッド起点ポストID。DM返信時、この値を子ポストへ
+    /// そのまま伝播コピーする（元ポストが`direct`でなければ`None`）。
+    pub thread_root_post_id: Option<i64>,
+}
+
+/// DMメッセージセッション（スレッド起点を同じくするdirect投稿の集合）の要約。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct DmSessionSummary {
+    pub thread_root_post_id: i64,
+    pub last_post_id: i64,
+    pub last_body: String,
+    pub last_created_at: DateTime<Utc>,
+    /// 自分以外の宛先アクターID一覧（グループではないため実務上1件のことが多いが、
+    /// 過去参加者を含め複数になりうる）。
+    pub peer_actor_ids: Vec<i64>,
 }
 
 /// リポスト取り消し（Undo）に必要な情報。
@@ -109,23 +124,29 @@ pub trait PostRepository: Send + Sync {
     ) -> Result<(), sqlx::Error>;
 
     /// ホームタイムライン（自分 + フォロー中の accepted アクターの投稿）を取得する。
+    /// `exclude_direct=true` の場合、自分が宛先の`direct`投稿も含め`direct`を一切含めない
+    /// （DM機能のため、フロントエンドはタイムライン取得時に常にこれを指定する。
+    /// Misskey API互換のためデフォルト`false`＝自分が宛先の`direct`は含まれる）。
     async fn home_timeline(
         &self,
         actor_id: i64,
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// ローカルタイムライン（ローカルアクターの投稿）を取得する。`viewer_actor_id` は閲覧者の
-    /// actor_id（匿名なら `None`）。`unlisted` は除外し、`followers_only`/`direct` は投稿者本人
-    /// または accepted フォロワーのみ取得できる（可視性による閲覧制御）。
+    /// actor_id（匿名なら `None`）。`unlisted` は除外し、`followers_only`は投稿者本人または
+    /// accepted フォロワーのみ、`direct`は投稿者本人または宛先（`post_recipients`）のみ取得できる
+    /// （可視性による閲覧制御）。`exclude_direct` は `home_timeline` 参照。
     async fn local_timeline(
         &self,
         viewer_actor_id: Option<i64>,
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// 指定アクターの最近の投稿を取得する（プロフィール要約用の軽量版）。
@@ -149,6 +170,7 @@ pub trait PostRepository: Send + Sync {
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// DID + rkey で app.bsky.feed.post レコードを取得する。
@@ -157,6 +179,10 @@ pub trait PostRepository: Send + Sync {
     /// ID でポストとアクター情報を取得する（可視性チェック無し、内部整合性チェック専用）。
     /// HTTP公開エンドポイントからは呼ばないこと（`find_by_id_for_viewer` を使う）。
     async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error>;
+
+    /// 複数IDでポストとアクター情報を一括取得する（可視性チェック無し）。呼び出し元が
+    /// 別途アクセス制御を済ませている場合のみ使うこと（DMセッション一覧の最終メッセージ取得等）。
+    async fn find_by_ids(&self, ids: &[i64]) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// ID でポストとアクター情報を取得する（閲覧者の可視性チェック付き、HTTP公開エンドポイント専用）。
     /// `followers_only`/`direct` は投稿者本人または accepted フォロワーの `viewer_actor_id` のみ
@@ -205,6 +231,9 @@ pub trait PostRepository: Send + Sync {
     /// `seiran_post_uuid` / リプライ / 引用を含むローカル投稿を挿入する。
     /// `deliver_fedi`/`deliver_bsky` は投稿作成時に実際に配送対象とした値をそのまま永続化する
     /// （タイムライン表示時の配送先アイコン用、#配送先・可視性アイコン追加）。
+    /// `thread_root_post_id`/`recipient_actor_ids` は`visibility='direct'`（DM）専用
+    /// （direct以外は`None`/空スライスを渡すこと）。`recipient_actor_ids`は同一トランザクション内で
+    /// `post_recipients` へも一括挿入する。
     #[allow(clippy::too_many_arguments)]
     async fn insert_full(
         &self,
@@ -219,6 +248,8 @@ pub trait PostRepository: Send + Sync {
         visibility: &str,
         deliver_fedi: bool,
         deliver_bsky: bool,
+        thread_root_post_id: Option<i64>,
+        recipient_actor_ids: &[i64],
     ) -> Result<(), sqlx::Error>;
 
     /// リポストレコードを挿入する（`UNIQUE(actor_id, repost_of_post_id)` 制約違反はそのまま呼び出し元へ伝播する）。
@@ -282,9 +313,11 @@ pub trait PostRepository: Send + Sync {
 
     /// リモートから受信したノートを、重複排除メタ（seiran_uuid・ループバック/ブリッジ紐付け）付きで挿入する。
     /// `ap_object_id` が既存なら何もしない。
-    #[allow(clippy::too_many_arguments)]
     /// `emoji_map` は本文中のカスタム絵文字（`:shortcode:`）→画像URLのマップ（AP `tag` 配列由来、
     /// 無ければ空オブジェクト）。
+    /// `reply_to_post_id`はAP `inReplyTo`から解決した親ポストID（Fedi受信投稿にも設定する）。
+    /// `thread_root_post_id`/`recipient_actor_ids`は`visibility='direct'`（DM受信）専用
+    /// （direct以外は`None`/空スライスを渡すこと）。
     #[allow(clippy::too_many_arguments)]
     async fn insert_remote_with_dedup(
         &self,
@@ -297,6 +330,9 @@ pub trait PostRepository: Send + Sync {
         created_at: DateTime<Utc>,
         emoji_map: &serde_json::Value,
         visibility: &str,
+        reply_to_post_id: Option<i64>,
+        thread_root_post_id: Option<i64>,
+        recipient_actor_ids: &[i64],
     ) -> Result<(), sqlx::Error>;
 }
 
@@ -340,6 +376,7 @@ impl PostRepository for PgPostRepository {
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         // `actor_id = $1 OR actor_id IN (follows...)` を素朴に `ORDER BY id DESC LIMIT` すると、
         // posts 全体（Bsky Jetstream 経由で無関係なリモート投稿を含め100万行超）を id 降順に
@@ -365,11 +402,17 @@ impl PostRepository for PgPostRepository {
                        AND ($3::bigint IS NULL OR p.id > $3)
                        AND (
                            p.visibility NOT IN ('followers_only', 'direct')
-                           OR p.actor_id = $1
-                           OR EXISTS (
-                               SELECT 1 FROM follows f
-                               WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                           )
+                           OR (p.visibility = 'followers_only' AND (
+                               p.actor_id = $1
+                               OR EXISTS (
+                                   SELECT 1 FROM follows f
+                                   WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                               )
+                           ))
+                           OR (p.visibility = 'direct' AND NOT $5 AND (
+                               p.actor_id = $1
+                               OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
+                           ))
                        )
                      ORDER BY p.id DESC LIMIT $4
                  ) p
@@ -391,6 +434,7 @@ impl PostRepository for PgPostRepository {
         .bind(until_id)
         .bind(since_id)
         .bind(limit)
+        .bind(exclude_direct)
         .fetch_all(&self.pool)
         .await
     }
@@ -401,6 +445,7 @@ impl PostRepository for PgPostRepository {
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
@@ -417,11 +462,17 @@ impl PostRepository for PgPostRepository {
                AND (p.visibility != 'unlisted' OR p.actor_id = $1)
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
-                   OR p.actor_id = $1
-                   OR EXISTS (
-                       SELECT 1 FROM follows f
-                       WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                   )
+                   OR (p.visibility = 'followers_only' AND (
+                       p.actor_id = $1
+                       OR EXISTS (
+                           SELECT 1 FROM follows f
+                           WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                       )
+                   ))
+                   OR (p.visibility = 'direct' AND NOT $5 AND (
+                       p.actor_id = $1
+                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
+                   ))
                )
              ORDER BY p.id DESC LIMIT $4",
         )
@@ -429,6 +480,7 @@ impl PostRepository for PgPostRepository {
         .bind(until_id)
         .bind(since_id)
         .bind(limit)
+        .bind(exclude_direct)
         .fetch_all(&self.pool)
         .await
     }
@@ -456,6 +508,7 @@ impl PostRepository for PgPostRepository {
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
@@ -472,11 +525,17 @@ impl PostRepository for PgPostRepository {
                AND ($4::bigint IS NULL OR p.id > $4)
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
-                   OR p.actor_id = $2
-                   OR EXISTS (
-                       SELECT 1 FROM follows f
-                       WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                   )
+                   OR (p.visibility = 'followers_only' AND (
+                       p.actor_id = $2
+                       OR EXISTS (
+                           SELECT 1 FROM follows f
+                           WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                       )
+                   ))
+                   OR (p.visibility = 'direct' AND NOT $6 AND (
+                       p.actor_id = $2
+                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $2)
+                   ))
                )
              ORDER BY p.id DESC
              LIMIT $5",
@@ -486,6 +545,7 @@ impl PostRepository for PgPostRepository {
         .bind(until_id)
         .bind(since_id)
         .bind(limit)
+        .bind(exclude_direct)
         .fetch_all(&self.pool)
         .await
     }
@@ -524,6 +584,23 @@ impl PostRepository for PgPostRepository {
         .await
     }
 
+    async fn find_by_ids(&self, ids: &[i64]) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        sqlx::query_as::<_, TimelinePost>(
+            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
+             FROM posts p JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             WHERE p.id = ANY($1) AND p.deleted_at IS NULL",
+        )
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await
+    }
+
     async fn find_by_id_for_viewer(
         &self,
         id: i64,
@@ -541,11 +618,17 @@ impl PostRepository for PgPostRepository {
              WHERE p.id = $1 AND p.deleted_at IS NULL
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
-                   OR p.actor_id = $2
-                   OR EXISTS (
-                       SELECT 1 FROM follows f
-                       WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                   )
+                   OR (p.visibility = 'followers_only' AND (
+                       p.actor_id = $2
+                       OR EXISTS (
+                           SELECT 1 FROM follows f
+                           WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                       )
+                   ))
+                   OR (p.visibility = 'direct' AND (
+                       p.actor_id = $2
+                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $2)
+                   ))
                )
              LIMIT 1",
         )
@@ -598,11 +681,17 @@ impl PostRepository for PgPostRepository {
              WHERE p.actor_id = $1 AND p.id < $2 AND p.deleted_at IS NULL
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
-                   OR p.actor_id = $4
-                   OR EXISTS (
-                       SELECT 1 FROM follows f
-                       WHERE f.follower_actor_id = $4 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                   )
+                   OR (p.visibility = 'followers_only' AND (
+                       p.actor_id = $4
+                       OR EXISTS (
+                           SELECT 1 FROM follows f
+                           WHERE f.follower_actor_id = $4 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                       )
+                   ))
+                   OR (p.visibility = 'direct' AND (
+                       p.actor_id = $4
+                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $4)
+                   ))
                )
              ORDER BY p.id DESC
              LIMIT $3",
@@ -635,11 +724,17 @@ impl PostRepository for PgPostRepository {
              WHERE p.actor_id = $1 AND p.id > $2 AND p.deleted_at IS NULL
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
-                   OR p.actor_id = $4
-                   OR EXISTS (
-                       SELECT 1 FROM follows f
-                       WHERE f.follower_actor_id = $4 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                   )
+                   OR (p.visibility = 'followers_only' AND (
+                       p.actor_id = $4
+                       OR EXISTS (
+                           SELECT 1 FROM follows f
+                           WHERE f.follower_actor_id = $4 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                       )
+                   ))
+                   OR (p.visibility = 'direct' AND (
+                       p.actor_id = $4
+                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $4)
+                   ))
                )
              ORDER BY p.id ASC
              LIMIT $3",
@@ -656,7 +751,7 @@ impl PostRepository for PgPostRepository {
         sqlx::query_as::<_, PostDeliveryMeta>(
             "SELECT p.ap_object_id, p.at_uri, p.at_cid,
                     a.domain, a.display_name, a.username,
-                    p.visibility::text AS visibility
+                    p.visibility::text AS visibility, p.thread_root_post_id
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              WHERE p.id = $1 AND p.deleted_at IS NULL
@@ -681,10 +776,13 @@ impl PostRepository for PgPostRepository {
         visibility: &str,
         deliver_fedi: bool,
         deliver_bsky: bool,
+        thread_root_post_id: Option<i64>,
+        recipient_actor_ids: &[i64],
     ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11)",
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky, thread_root_post_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11, $12)",
         )
         .bind(id)
         .bind(actor_id)
@@ -697,9 +795,21 @@ impl PostRepository for PgPostRepository {
         .bind(visibility)
         .bind(deliver_fedi)
         .bind(deliver_bsky)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        .bind(thread_root_post_id)
+        .execute(&mut *tx)
+        .await?;
+
+        if !recipient_actor_ids.is_empty() {
+            sqlx::query(
+                "INSERT INTO post_recipients (post_id, actor_id) SELECT $1, unnest($2::bigint[])",
+            )
+            .bind(id)
+            .bind(recipient_actor_ids)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await
     }
 
     async fn insert_repost(
@@ -859,10 +969,14 @@ impl PostRepository for PgPostRepository {
         created_at: DateTime<Utc>,
         emoji_map: &serde_json::Value,
         visibility: &str,
+        reply_to_post_id: Option<i64>,
+        thread_root_post_id: Option<i64>,
+        recipient_actor_ids: &[i64],
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, created_at, emoji_map, visibility)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum)
+        let mut tx = self.pool.begin().await?;
+        let result = sqlx::query(
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::post_visibility_enum)
              ON CONFLICT (ap_object_id) DO NOTHING",
         )
         .bind(id)
@@ -871,11 +985,25 @@ impl PostRepository for PgPostRepository {
         .bind(ap_object_id)
         .bind(seiran_uuid)
         .bind(parent_original_post_id)
+        .bind(reply_to_post_id)
+        .bind(thread_root_post_id)
         .bind(created_at)
         .bind(emoji_map)
         .bind(visibility)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        .execute(&mut *tx)
+        .await?;
+
+        // ON CONFLICT DO NOTHINGで重複スキップされた場合はpost_recipientsも書き込まない。
+        if result.rows_affected() > 0 && !recipient_actor_ids.is_empty() {
+            sqlx::query(
+                "INSERT INTO post_recipients (post_id, actor_id) SELECT $1, unnest($2::bigint[])",
+            )
+            .bind(id)
+            .bind(recipient_actor_ids)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await
     }
 }

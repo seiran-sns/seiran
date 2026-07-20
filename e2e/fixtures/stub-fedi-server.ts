@@ -17,6 +17,9 @@ export interface StubFediServer {
   receivedActivities(): Record<string, unknown>[];
   /** このスタブアクターからseiranへ署名付きFollowを送り、対象ローカルユーザーをフォローする。 */
   sendFollow(seiranBaseUrl: string, targetUsername: string): Promise<void>;
+  /** 対象ローカルユーザー宛のCreate(Note)を送る（`to`に対象アクターのみを指定するとdirect扱い）。
+   * `inReplyTo`を指定すると、そのAP Note IDへの返信として送信する。返り値は生成したNote ID。 */
+  sendCreateNote(seiranBaseUrl: string, targetUsername: string, text: string, inReplyTo?: string): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -126,6 +129,30 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
             object: targetActorUri,
           };
           await signedPost(`${seiranBaseUrl}/inbox`, activity, stub.actorUri, privateKey);
+        },
+        async sendCreateNote(seiranBaseUrl, targetUsername, text, inReplyTo) {
+          const targetActorUri = `${seiranBaseUrl}/users/${targetUsername}`;
+          const noteId = `${base}/notes/${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const activity = {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            type: "Create",
+            id: `${base}/activities/${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            actor: stub.actorUri,
+            to: [targetActorUri],
+            cc: [],
+            object: {
+              type: "Note",
+              id: noteId,
+              attributedTo: stub.actorUri,
+              content: `<p>${text}</p>`,
+              published: new Date().toISOString(),
+              to: [targetActorUri],
+              cc: [],
+              ...(inReplyTo ? { inReplyTo } : {}),
+            },
+          };
+          await signedPost(`${seiranBaseUrl}/inbox`, activity, stub.actorUri, privateKey);
+          return noteId;
         },
         close: () => new Promise((res, rej) => server.close((err) => (err ? rej(err) : res()))),
       };

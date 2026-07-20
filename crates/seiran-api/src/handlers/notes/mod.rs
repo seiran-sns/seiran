@@ -29,7 +29,7 @@ use axum::{
 };
 use sqlx::Row;
 
-use seiran_common::repository::{NotificationKind, TimelinePost};
+use seiran_common::repository::{Actor, NotificationKind, TimelinePost};
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::{ap::{fetch_ap_history, plain_to_html_with_mentions}, generate_snowflake_id, mention::convert_mentions_for_bsky, ApDeliveryKind, PrevApReaction};
 
@@ -43,7 +43,10 @@ use delivery::{
     resolve_reply_context, DeliveryTargets, RegularPostDelivery, ReplyContext,
 };
 use queries::{fetch_reposted_ids, find_repost_for_undo};
-use validation::{strip_html_tags, validate_attachment_ids, validate_reaction_content, validate_text_length};
+use validation::{
+    strip_html_tags, validate_attachment_ids, validate_dm_text_length, validate_reaction_content,
+    validate_text_length,
+};
 
 /// 検証済みの添付ファイル ID 群を投稿に紐付ける。
 async fn attach_media_files(state: &AppState, post_id: i64, attachment_ids: &[i64]) -> Result<(), ApiError> {
@@ -62,7 +65,6 @@ async fn attach_media_files(state: &AppState, post_id: i64, attachment_ids: &[i6
 async fn create_repost(
     state: &AppState,
     actor_id: i64,
-    user_id: i64,
     username: String,
     renote_id_str: &str,
     req: &CreateNoteRequest,
@@ -125,7 +127,7 @@ async fn create_repost(
         id: post_id.to_string(),
         text: String::new(),
         created_at: now.to_rfc3339(),
-        user: NoteUserInfo { id: user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
+        user: NoteUserInfo { id: actor_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
         attachments: vec![],
         renote_id: Some(renote_id.to_string()),
         quote_id: None, reply_id: None, parent_original_id: None,
@@ -152,7 +154,6 @@ async fn create_repost(
 async fn create_regular_post(
     state: &AppState,
     actor_id: i64,
-    user_id: i64,
     username: String,
     req: &CreateNoteRequest,
     now: chrono::DateTime<chrono::Utc>,
@@ -173,18 +174,57 @@ async fn create_regular_post(
             bsky_reply: None,
             ap_in_reply_to: None,
             parent_visibility: None,
+            parent_thread_root_post_id: None,
         },
     };
 
-    // 可視性の決定（リプライ先の制約を含む）。新規パラメータのため後方互換は考慮不要
-    // （不正値はエラーでよい）。"direct" はローカル投稿作成のスコープ外のため許可しない。
+    // 可視性の決定(リプライ先の制約を含む)。新規パラメータのため後方互換は考慮不要
+    // (不正値はエラーでよい)。
     let visibility: &'static str = match reply_ctx.resolve_visibility(req.visibility.as_deref()) {
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
 
-    let deliver_fedi = req.deliver_to_fedi.unwrap_or(true) && reply_ctx.deliver_fedi_allowed;
-    let mut deliver_bsky = req.deliver_to_bsky.unwrap_or(true) && reply_ctx.deliver_bsky_allowed;
+    // DM(visibility=="direct")の宛先解決・バリデーション。
+    let recipient_actor_ids: Vec<i64> = if visibility == "direct" {
+        match req.recipient_actor_ids.as_deref() {
+            Some(ids) if !ids.is_empty() => {
+                match ids.iter().map(|s| s.parse::<i64>()).collect::<Result<Vec<i64>, _>>() {
+                    Ok(v) => v,
+                    Err(_) => return ApiError::BadRequest("INVALID_RECIPIENT_ACTOR_ID".to_owned()).into_response(),
+                }
+            }
+            _ => return ApiError::BadRequest("RECIPIENT_ACTOR_IDS_REQUIRED".to_owned()).into_response(),
+        }
+    } else {
+        Vec::new()
+    };
+    let recipient_actors: Vec<Actor> = if recipient_actor_ids.is_empty() {
+        Vec::new()
+    } else {
+        match state.actors.find_by_ids(&recipient_actor_ids).await {
+            Ok(a) => a,
+            Err(e) => return ApiError::Internal(format!("DM宛先アクター取得失敗: {}", e)).into_response(),
+        }
+    };
+    let has_bsky_recipient = recipient_actors.iter().any(|a| a.actor_type == "bsky");
+    if visibility == "direct" {
+        // Bsky の DM は1対1のみのため、Bsky宛先が1人でも含まれるなら他の宛先の同居を許さない。
+        let bsky_count = recipient_actors.iter().filter(|a| a.actor_type == "bsky").count();
+        if bsky_count >= 1 && recipient_actors.len() > 1 {
+            return ApiError::BadRequest("BSKY_DM_SINGLE_RECIPIENT_ONLY".to_owned()).into_response();
+        }
+    }
+
+    let (deliver_fedi, mut deliver_bsky) = if visibility == "direct" {
+        let has_fedi_recipient = recipient_actors.iter().any(|a| a.actor_type == "fedi");
+        (has_fedi_recipient, has_bsky_recipient)
+    } else {
+        (
+            req.deliver_to_fedi.unwrap_or(true) && reply_ctx.deliver_fedi_allowed,
+            req.deliver_to_bsky.unwrap_or(true) && reply_ctx.deliver_bsky_allowed,
+        )
+    };
 
     // Misskey互換API保護: Bsky はプロトコル上 followers_only（フォロワー限定）投稿を配信できない。
     // visibility が followers_only なのに Bsky 配送が要求された場合、エラーを返さず Fedi のみ
@@ -198,23 +238,33 @@ async fn create_regular_post(
         deliver_bsky = false;
     }
 
-    // Bsky 配信する場合、メンション変換（`@user` → `@user.example.com` 等）でバイト数・
-    // 書記素数が増えうるため、投稿を受理する前に変換後テキストを同期的に確定し、
-    // それに対して Bsky の厳密な上限（300 書記素・3000 バイト）を検証する。
-    // ここで弾けば DB への INSERT 自体が行われない（未確定状態を作らない）。
-    let bsky_text_for_validation: Option<String> = if deliver_bsky {
-        let (bsky_text, _facets) =
-            convert_mentions_for_bsky(&text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await;
-        Some(bsky_text)
+    if visibility == "direct" {
+        // DMの文字数上限はBsky宛先の有無で切り替える(通常投稿の上限とは別体系)。
+        if let Err(e) = validate_dm_text_length(&text, has_bsky_recipient) {
+            return e.into_response();
+        }
     } else {
-        None
-    };
-    if let Err(e) = validate_text_length(&text, bsky_text_for_validation.as_deref()) {
-        return e.into_response();
+        // Bsky 配信する場合、メンション変換（`@user` → `@user.example.com` 等）でバイト数・
+        // 書記素数が増えうるため、投稿を受理する前に変換後テキストを同期的に確定し、
+        // それに対して Bsky の厳密な上限（300 書記素・3000 バイト）を検証する。
+        // ここで弾けば DB への INSERT 自体が行われない（未確定状態を作らない）。
+        let bsky_text_for_validation: Option<String> = if deliver_bsky {
+            let (bsky_text, _facets) =
+                convert_mentions_for_bsky(&text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await;
+            Some(bsky_text)
+        } else {
+            None
+        };
+        if let Err(e) = validate_text_length(&text, bsky_text_for_validation.as_deref()) {
+            return e.into_response();
+        }
     }
     if let Some(ids) = &req.attachment_ids {
         if let Err(e) = validate_attachment_ids(ids) {
             return e.into_response();
+        }
+        if visibility == "direct" && has_bsky_recipient && !ids.is_empty() {
+            return ApiError::BadRequest("BSKY_DM_NO_ATTACHMENTS".to_owned()).into_response();
         }
     }
 
@@ -231,10 +281,19 @@ async fn create_regular_post(
         None => (None, None),
     };
 
+    // DMのスレッド起点ID。親（reply_to）がdirectならその値をそのまま伝播コピーし、
+    // 親がdirectでない/非リプライなら自分自身がスレッド起点になる（マイケルの指示通り、
+    // 再帰クエリではなく伝播コピー方式）。
+    let thread_root_post_id: Option<i64> = if visibility == "direct" {
+        Some(reply_ctx.parent_thread_root_post_id.unwrap_or(post_id))
+    } else {
+        None
+    };
+
     // seiran_post_uuid / reply_to_post_id / quote_of_post_id を含む統合 INSERT
     if let Err(e) = state
         .posts
-        .insert_full(post_id, actor_id, &text, &ap_object_id, &seiran_post_uuid, reply_to_id_i64, quote_of_id_i64, now, visibility, deliver_fedi, deliver_bsky)
+        .insert_full(post_id, actor_id, &text, &ap_object_id, &seiran_post_uuid, reply_to_id_i64, quote_of_id_i64, now, visibility, deliver_fedi, deliver_bsky, thread_root_post_id, &recipient_actor_ids)
         .await
     {
         return ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)).into_response();
@@ -269,7 +328,7 @@ async fn create_regular_post(
         id: post_id.to_string(),
         text,
         created_at: now.to_rfc3339(),
-        user: NoteUserInfo { id: user_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
+        user: NoteUserInfo { id: actor_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
         attachments: att_map.remove(&post_id).unwrap_or_default(),
         renote_id: None,
         quote_id: quote_of_id_i64.map(|i| i.to_string()),
@@ -285,7 +344,11 @@ async fn create_regular_post(
         deliver_bsky: Some(deliver_bsky),
     };
 
-    broadcast_new_note(state, actor_id, &note_resp).await;
+    if visibility == "direct" {
+        delivery::broadcast_direct_message(state, actor_id, post_id, &note_resp).await;
+    } else {
+        broadcast_new_note(state, actor_id, &note_resp).await;
+    }
 
     Json(note_resp).into_response()
 }
@@ -298,8 +361,8 @@ pub async fn create_note(
     let now = chrono::Utc::now();
 
     match &req.renote_id {
-        Some(renote_id_str) => create_repost(&state, user.actor_id, user.user_id, user.username, renote_id_str, &req, now).await,
-        None => create_regular_post(&state, user.actor_id, user.user_id, user.username, &req, now).await,
+        Some(renote_id_str) => create_repost(&state, user.actor_id, user.username, renote_id_str, &req, now).await,
+        None => create_regular_post(&state, user.actor_id, user.username, &req, now).await,
     }
 }
 
@@ -314,7 +377,7 @@ pub async fn home_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.posts.home_timeline(actor_id, limit, until_id, since_id).await {
+    let mut rows = match state.posts.home_timeline(actor_id, limit, until_id, since_id, q.exclude_direct).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[home_timeline] クエリ失敗: {}", e);
@@ -350,7 +413,7 @@ pub async fn local_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.posts.local_timeline(my_actor_id, limit, until_id, since_id).await {
+    let mut rows = match state.posts.local_timeline(my_actor_id, limit, until_id, since_id, q.exclude_direct).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[local_timeline] クエリ失敗: {}", e);

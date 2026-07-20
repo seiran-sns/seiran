@@ -195,6 +195,11 @@ pub async fn register(
     if let Err(e) = state.atp_service.commit_profile(actor_id, &req.username, None, None, None, now).await {
         tracing::error!("[register] ATP プロフィールコミット失敗（登録は完了済み）: {}", e);
     }
+    // Bsky公式クライアントからのDM受信を許可する設定（`docs/protocols.md` 9節）。
+    // 無いとBluesky公式クライアントが相手（このユーザー）へのDM送信を保守的にブロックする。
+    if let Err(e) = state.atp_service.commit_chat_declaration(actor_id, now).await {
+        tracing::error!("[register] chat declaration コミット失敗（登録は完了済み）: {}", e);
+    }
 
     // #identity フレームを Relay に送信して AppView の handle キャッシュを更新させる。
     // commit_profile より後に送信することで seq 順序が保たれる。

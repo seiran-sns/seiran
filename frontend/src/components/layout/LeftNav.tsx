@@ -2,6 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
+import { useStreamingContext } from "../../contexts/StreamingContext";
 import { isAdminRole } from "../../lib/roles";
 import styles from "./AppShell.module.css";
 
@@ -9,12 +10,14 @@ interface NavItem {
   to: string;
   icon: string;
   labelKey: string;
+  badge?: number;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { to: "/", icon: "🏠", labelKey: "leftNav.home" },
   { to: "/search", icon: "🔍", labelKey: "leftNav.search" },
   { to: "/notifications", icon: "🔔", labelKey: "leftNav.notifications" },
+  { to: "/messages", icon: "✉️", labelKey: "leftNav.messages" },
   { to: "/settings/lists", icon: "📋", labelKey: "leftNav.lists" },
 ];
 
@@ -23,10 +26,14 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
   const { user, logout } = useAuth();
   const site = useSiteMeta();
   const navigate = useNavigate();
+  const { dmUnreadCount } = useStreamingContext();
 
+  const baseItems = NAV_ITEMS.map((item) =>
+    item.to === "/messages" ? { ...item, badge: dmUnreadCount } : item
+  );
   const navItems = isAdminRole(user?.role)
-    ? [...NAV_ITEMS, { to: "/admin", icon: "🛡️", labelKey: "leftNav.admin" }]
-    : NAV_ITEMS;
+    ? [...baseItems, { to: "/admin", icon: "🛡️", labelKey: "leftNav.admin" }]
+    : baseItems;
 
   function handleLogout() {
     logout();
@@ -52,6 +59,7 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
             >
               <span className={styles.navIcon}>{item.icon}</span>
               <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
+              {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
             </NavLink>
           </li>
         ))}

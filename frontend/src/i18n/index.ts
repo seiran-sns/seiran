@@ -7,6 +7,7 @@ import enErrors from "./locales/en/errors.json";
 import enAuth from "./locales/en/auth.json";
 import enSetup from "./locales/en/setup.json";
 import enNav from "./locales/en/nav.json";
+import enDm from "./locales/en/dm.json";
 import enHome from "./locales/en/home.json";
 import enHashtag from "./locales/en/hashtag.json";
 import enProfile from "./locales/en/profile.json";
@@ -22,6 +23,7 @@ import jaErrors from "./locales/ja/errors.json";
 import jaAuth from "./locales/ja/auth.json";
 import jaSetup from "./locales/ja/setup.json";
 import jaNav from "./locales/ja/nav.json";
+import jaDm from "./locales/ja/dm.json";
 import jaHome from "./locales/ja/home.json";
 import jaHashtag from "./locales/ja/hashtag.json";
 import jaProfile from "./locales/ja/profile.json";
@@ -47,6 +49,7 @@ export const resources = {
     auth: enAuth,
     setup: enSetup,
     nav: enNav,
+    dm: enDm,
     home: enHome,
     hashtag: enHashtag,
     profile: enProfile,
@@ -63,6 +66,7 @@ export const resources = {
     auth: jaAuth,
     setup: jaSetup,
     nav: jaNav,
+    dm: jaDm,
     home: jaHome,
     hashtag: jaHashtag,
     profile: jaProfile,

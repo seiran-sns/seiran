@@ -483,6 +483,24 @@ export interface ActorSuggestion {
   target: string;
 }
 
+/** DMセッション一覧の相手表示情報（`handlers::dm::DmPeerResponse`）。 */
+export interface DmPeer {
+  id: string;
+  username: string;
+  domain: string;
+  displayName?: string;
+  actorType: string;
+  avatarUrl?: string;
+}
+
+/** DMセッション（スレッド起点を同じくするdirect投稿の集合）の要約。 */
+export interface DmSession {
+  threadRootPostId: string;
+  lastMessage: Note;
+  peers: DmPeer[];
+  unread: boolean;
+}
+
 export interface MetaResponse {
   uri: string;
   name: string;
@@ -559,7 +577,8 @@ export const api = {
       attachmentIds: string[] = [],
       replyToId?: string,
       renoteId?: string,
-      visibility?: "public" | "unlisted" | "followers_only"
+      visibility?: "public" | "unlisted" | "followers_only" | "direct",
+      recipientActorIds?: string[]
     ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
@@ -570,23 +589,26 @@ export const api = {
           reply_to_id: replyToId,
           renote_id: renoteId,
           visibility,
+          recipient_actor_ids: recipientActorIds,
         })
       );
     },
-    async localTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {
+    async localTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
       const q = new URLSearchParams();
       if (params?.limit) q.set("limit", String(params.limit));
       if (params?.until_id) q.set("until_id", params.until_id);
       if (params?.since_id) q.set("since_id", params.since_id);
+      if (params?.exclude_direct) q.set("exclude_direct", "true");
       const qs = q.toString();
       const rows = await request<RawNote[]>("GET", `/notes/local-timeline${qs ? `?${qs}` : ""}`);
       return rows.map(normalizeNote);
     },
-    async homeTimeline(params?: { limit?: number; until_id?: string; since_id?: string }) {
+    async homeTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
       const q = new URLSearchParams();
       if (params?.limit) q.set("limit", String(params.limit));
       if (params?.until_id) q.set("until_id", params.until_id);
       if (params?.since_id) q.set("since_id", params.since_id);
+      if (params?.exclude_direct) q.set("exclude_direct", "true");
       const qs = q.toString();
       const rows = await request<RawNote[]>("GET", `/notes/home-timeline${qs ? `?${qs}` : ""}`);
       return rows.map(normalizeNote);
@@ -657,11 +679,12 @@ export const api = {
     },
     /** プロフィール画面の投稿一覧の追加ページ取得（無限スクロール、#64）。`actorId` は
      * `UserProfile.actor_id`（DB未登録のリモートアクターは undefined になり得る）。 */
-    async posts(actorId: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+    async posts(actorId: string, params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
       const q = new URLSearchParams({ actor_id: actorId });
       if (params?.limit) q.set("limit", String(params.limit));
       if (params?.until_id) q.set("until_id", params.until_id);
       if (params?.since_id) q.set("since_id", params.since_id);
+      if (params?.exclude_direct) q.set("exclude_direct", "true");
       const rows = await request<RawNote[]>("GET", `/users/posts?${q.toString()}`);
       return rows.map(normalizeNote);
     },
@@ -772,6 +795,32 @@ export const api = {
     search(q: string, limit = 10, signal?: AbortSignal) {
       const query = new URLSearchParams({ q, limit: String(limit) });
       return request<ActorSuggestion[]>("GET", `/actors/search?${query.toString()}`, undefined, signal);
+    },
+  },
+
+  dm: {
+    async sessions(params?: { limit?: number; until_id?: string; since_id?: string }) {
+      const q = new URLSearchParams();
+      if (params?.limit) q.set("limit", String(params.limit));
+      if (params?.until_id) q.set("until_id", params.until_id);
+      if (params?.since_id) q.set("since_id", params.since_id);
+      const qs = q.toString();
+      return request<DmSession[]>("GET", `/dm/sessions${qs ? `?${qs}` : ""}`);
+    },
+    async threadMessages(threadRootId: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+      const q = new URLSearchParams();
+      if (params?.limit) q.set("limit", String(params.limit));
+      if (params?.until_id) q.set("until_id", params.until_id);
+      if (params?.since_id) q.set("since_id", params.since_id);
+      const qs = q.toString();
+      const rows = await request<RawNote[]>("GET", `/dm/sessions/${encodeURIComponent(threadRootId)}/messages${qs ? `?${qs}` : ""}`);
+      return rows.map(normalizeNote);
+    },
+    markRead(threadRootId: string) {
+      return request<{ ok: boolean }>("POST", `/dm/sessions/${encodeURIComponent(threadRootId)}/read`);
+    },
+    unreadCount() {
+      return request<{ count: number }>("GET", "/dm/unread-count");
     },
   },
 

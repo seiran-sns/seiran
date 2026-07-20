@@ -18,6 +18,7 @@
 - [x] **フェーズ7.6: 本文中のリンク・メンションのクリック可能化** — Bsky facet（`#link`/`#mention`）・AP `<a href>` を内部リンクマーカー`[text](url)`としてMisskey API互換の`text`に埋め込み、フロント`RichText`コンポーネントでMarkdownリンク・生URL・`@mention`をクリック可能な要素へ変換。Bskyメンションはハンドル可変性に対応するため表示時に都度DID解決（`Job::ResolveBskyMention`による先行解決込み）。送信側（seiranユーザー投稿→Fedi/Bsky配送）もローカル/Bskyハンドル/Fediverse形式すべてのメンションでfacet・AP `tag[]`+アンカーを付与し、Bsky配信時は変換後テキストの文字数上限（300書記素/3000バイト）を投稿受理前に同期検証する。詳細: `docs/protocols.md` 6節
 - [x] **フェーズ7.7: 投稿詳細・プロフィールページのOGP対応** — SPAの素のindex.htmlには`<meta>`が無いため、`/notes/:id`・`/@:handle`（AP Accept除く）は常にバックエンド（`seiran-api`）がSPAのindex.htmlを取得してOGP `<meta>` + Twitter Cardを注入して返す（bot判定は行わず未知のクローラーにも対応、投稿/アクター未発見時は`<meta>`無しでSPAをそのまま返す）。詳細: `docs/architecture.md` 8.1節
 - [x] **フェーズ7.8: ハッシュタグ機能** — `hashtags`/`post_hashtags`/`pinned_hashtags` によるポスト⇔タグのm:n永続化。ローカル投稿・AP受信・Bsky受信いずれも最終的な `posts.body` から共通のスキャン（`seiran_common::hashtag::extract_hashtags`）で抽出するため、出自を問わず同じハッシュタイムライン（`/tags/:name`）に合流する。ハッシュタイムライン画面から「ホーム画面に追加」（`pinned_hashtags`、ホームのフィードタブ化）・「このハッシュタグでポスト」（`ComposerContext.openCompose` によるプリフィル投稿ダイアログ）。送信側（ローカル投稿→Bsky/AP配送）も `app.bsky.richtext.facet#tag`・AP `{"type":"Hashtag"}` タグ（自インスタンスの `/tags/:name` へのアンカー）を付与し、他クライアント上でも本物のハッシュタグとして認識される。受信側はMastodon等がハッシュタグアンカーにも`class="mention hashtag"`を付与する（メンションと`mention`トークンを共有する）ケースを`rel="tag"`で判別し誤ってメンション扱いしないようにする回帰修正込み。詳細: `docs/database.md`、`docs/protocols.md` 6節
+- [x] **フェーズ7.9: ダイレクトメッセージ機能** — `visibility='direct'`投稿を`posts`にそのまま格納し宛先（`post_recipients`）・スレッド起点伝播コピー（`thread_root_post_id`）・既読状態（`dm_read_states`）で管理。Fedi宛先は宛先個人のみへのAP配送、Bsky宛先は`chat.bsky.convo`（自己署名サービス認証JWT、送信は`Job::BskyDmSend`、受信は`seiran-atp-repo::bsky_dm_poll`の定期ポーリング）。Bsky宛先は1対1のみ・文字数上限1000書記素・メディア添付不可。フロントエンドは`MessagesPage`（右ペイン=セッション一覧、中央ペイン=時刻順メッセージ履歴+送信フォーム）、`RecipientPicker`（宛先chip入力）、左ペイン未読バッジ。詳細: `docs/database.md`、`docs/protocols.md` 9節、`docs/ui_spec.md` 2.5節
 
 ## 未完了・今後の課題
 
@@ -39,6 +40,7 @@
 - [ ] **`actor_metadata_resolve` ジョブの実装** — 現状ハンドラはスタブ、enqueueする箇所も無い。`/verify-actor` ハンドシェイク検証・Webfinger解決・アバター等のキャッシュを実処理として実装する
 - [ ] **`inbound_activity_process` のドメイン単位レート制限**
 - [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ表示）
+- [ ] **ユーザー設定に「Bsky DM受信許可」項目を追加** — 現状 `chat.bsky.actor.declaration` の `allowIncoming` は登録時・バックフィルとも `"all"` 固定でコミットする（`docs/protocols.md` 9節）。ユーザーが `"all"`/`"following"`/`"none"` を選べる設定画面UIとAPIを追加する
 
 ### インフラ・パフォーマンス
 

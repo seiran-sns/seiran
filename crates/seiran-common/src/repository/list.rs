@@ -320,6 +320,10 @@ impl ListRepository for PgListRepository {
                      WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
                        AND ($2::bigint IS NULL OR p.id < $2)
                        AND ($3::bigint IS NULL OR p.id > $3)
+                       -- リストタイムラインは閲覧者情報を持たない（誰が見ても同じ内容）ため、
+                       -- 宛先ベースの閲覧制御ができない。directは無条件で除外する
+                       -- （DM本文がリスト経由で第三者に漏れるのを防ぐ最低限の対応）。
+                       AND p.visibility != 'direct'
                      ORDER BY p.id DESC LIMIT $4
                  ) p
                  ORDER BY p.id DESC LIMIT $4

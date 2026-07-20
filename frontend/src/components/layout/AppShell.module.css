@@ -95,6 +95,18 @@
   text-overflow: ellipsis;
 }
 
+.navBadge {
+  margin-left: auto;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
 .composeBtn {
   margin-top: 10px;
   background: var(--accent-strong);

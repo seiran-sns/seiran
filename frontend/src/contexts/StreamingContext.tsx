@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useRef, useState } from "react";
-import { Note, noteFromStream, ReactionSummary } from "../api/client";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { api, Note, noteFromStream, ReactionSummary } from "../api/client";
 import { useAuth } from "./AuthContext";
 import { useStreaming } from "../hooks/useStreaming";
 
@@ -34,6 +34,12 @@ interface StreamingValue {
   registerReaction: (noteId: string, cb: ReactionListener) => () => void;
   /** 通知の新着シグナルを購読する（NotificationsPanel が使用）。戻り値で解除。 */
   registerNotifArrived: (cb: NotifListener) => () => void;
+  /** DM新着（visibility="direct"のnoteイベント）を購読する（MessagesPageが使用）。戻り値で解除。 */
+  registerDirectMessage: (cb: NoteListener) => () => void;
+  /** 未読のあるDMセッション数（左ペインバッジ用）。 */
+  dmUnreadCount: number;
+  /** サーバーから未読数を再取得する（既読操作後・ページロード時に呼ぶ）。 */
+  refreshDmUnreadCount: () => void;
 }
 
 const StreamingContext = createContext<StreamingValue>({
@@ -42,6 +48,9 @@ const StreamingContext = createContext<StreamingValue>({
   registerNote: () => () => {},
   registerReaction: () => () => {},
   registerNotifArrived: () => () => {},
+  registerDirectMessage: () => () => {},
+  dmUnreadCount: 0,
+  refreshDmUnreadCount: () => {},
 });
 
 const NOTIF_KINDS = new Set(["reaction", "follow", "followAccepted"]);
@@ -49,14 +58,31 @@ const NOTIF_KINDS = new Set(["reaction", "follow", "followAccepted"]);
 export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [unread, setUnread] = useState(0);
+  const [dmUnreadCount, setDmUnreadCount] = useState(0);
   const noteListeners = useRef<Set<NoteListener>>(new Set());
   const reactionListeners = useRef<Map<string, Set<ReactionListener>>>(new Map());
   const notifListeners = useRef<Set<NotifListener>>(new Set());
+  const dmListeners = useRef<Set<NoteListener>>(new Set());
+
+  const refreshDmUnreadCount = useCallback(() => {
+    if (!user) return;
+    api.dm.unreadCount().then((r) => setDmUnreadCount(r.count)).catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    refreshDmUnreadCount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useStreaming((type, body) => {
     if (type === "note") {
       const n = noteFromStream(body);
-      noteListeners.current.forEach((cb) => cb(n));
+      if (n.visibility === "direct") {
+        dmListeners.current.forEach((cb) => cb(n));
+        refreshDmUnreadCount();
+      } else {
+        noteListeners.current.forEach((cb) => cb(n));
+      }
     } else if (type === "noteUpdated") {
       const update = body as ReactionUpdate;
       reactionListeners.current.get(update.postId)?.forEach((cb) => cb(update));
@@ -95,11 +121,27 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const registerDirectMessage = useCallback((cb: NoteListener) => {
+    dmListeners.current.add(cb);
+    return () => {
+      dmListeners.current.delete(cb);
+    };
+  }, []);
+
   const markRead = useCallback(() => setUnread(0), []);
 
   return (
     <StreamingContext.Provider
-      value={{ unread, markRead, registerNote, registerReaction, registerNotifArrived }}
+      value={{
+        unread,
+        markRead,
+        registerNote,
+        registerReaction,
+        registerNotifArrived,
+        registerDirectMessage,
+        dmUnreadCount,
+        refreshDmUnreadCount,
+      }}
     >
       {children}
     </StreamingContext.Provider>

@@ -523,3 +523,69 @@ let mut child = Command::new("ffmpeg")
 表示時に引き延ばせるので解像度は小さくてよく、§15 の下限に近い 80x20（4:1）を採用。
 `ffmpeg` 未インストール・変換失敗時は `None` を返し、呼び出し側は従来通り
 `app.bsky.embed.external`（簡易視聴ページへのリンク）にフォールバックさせる。
+
+---
+
+## 17. `chat.bsky.convo`（Bluesky DM）への自己署名サービス認証【実機疎通確認済み】
+
+seiran は自前 PDS で外部 Bluesky 公式アカウント（bsky.social 等）を一切経由しないため、
+Bluesky 公式の DM 機能（`chat.bsky.convo.*`）を呼ぶにも OAuth ではなく §12 の
+自己署名 Service Auth JWT を使う。2026-07-20 に実機で疎通確認済み。
+
+### 17-1. `aud` は fragment 無しの素の DID（§12 の video pipeline とは異なるパターン）
+
+`did:web:api.bsky.chat` の DID Document（`https://api.bsky.chat/.well-known/did.json`）:
+```json
+{"id":"did:web:api.bsky.chat","service":[{"id":"#bsky_chat","type":"BskyChatService","serviceEndpoint":"https://api.bsky.chat"}]}
+```
+
+サービス自体は `#bsky_chat` という id を持つが、**JWT の `aud` クレームには fragment を
+付けない `"did:web:api.bsky.chat"` を使うのが正解**。fragment込み
+（`"did:web:api.bsky.chat#bsky_chat"`）を試すと `401 BadJwtAudience`
+（`"jwt audience does not match service did"`）で拒否される。
+
+```rust
+// crates/seiran-common/src/atp/service_auth.rs の sign_service_auth_jwt をそのまま使う
+let aud = "did:web:api.bsky.chat";  // fragment無し
+let lxm = "chat.bsky.convo.listConvos";
+let jwt = sign_service_auth_jwt(&pem, &did, aud, lxm)?;
+```
+
+§12 の `app.bsky.video.uploadVideo` 実装は `aud` に「呼び出し先サービスではなく
+自分の PDS の DID」を渡す特殊パターンだった（動画サービスが後で `uploadBlob` を
+代理呼び出しする関係上の設計）。`chat.bsky.convo` は素直な「呼び出し先サービスの
+DID（fragment無し）」パターンであり、両者を混同しないこと。
+
+### 17-2. 1対1会話の取得・作成（`getConvoForMembers`）
+
+```
+GET https://api.bsky.chat/xrpc/chat.bsky.convo.getConvoForMembers?members=<did1>&members=<did2>
+Authorization: Bearer <lxm=chat.bsky.convo.getConvoForMembersで署名したJWT>
+```
+
+`members` は1〜10件のDID配列（1:1もグループも同じエンドポイント）。**常に「自分+相手1人」の
+2件で呼べば1:1会話に固定できる**（3件以上を渡すとグループ会話になる）。レスポンスの
+`convo.kind` が `"directConvo"`/`"groupConvo"` で区別される。
+
+### 17-3. 受信者側のDM許可設定によるビジネスロジック拒否（`NotFollowedBySender`）
+
+```json
+{"error":"NotFollowedBySender","message":"recipient requires incoming messages to come from someone they follow"}
+```
+
+これは **`400 Bad Request`（`401`ではない）** で返る。JWT認証自体は成功しているが、
+受信者側の chat 設定（デフォルトでは多くの場合「フォロー中の相手からのみDM受信」）に
+よりビジネスロジックで拒否されている状態。認証方式の疎通確認としては
+「401ではなく400/成功が返ること」を確認すれば十分で、このエラー自体は実装の不備ではない。
+
+### 17-4. メッセージ本文の制限（`chat.bsky.convo.defs#messageInput`）
+
+書記素クラスタ数 **1000**・バイト数 **10000**（通常投稿の `app.bsky.feed.post`
+300書記素/3000バイトより緩い、別の上限体系）。
+
+### 17-5. `chat.bsky.convo` はJetstreamに乗らない
+
+Jetstream（`wss://jetstream1.us-east.bsky.network/subscribe`）が配信するのは
+`app.bsky.feed.post`/`app.bsky.feed.like` 等の公開コレクションのみで、DMは
+私信のため一切含まれない。Bsky側からの新着DM受信には `listConvos`/`getMessages` の
+定期ポーリングが必須（プッシュ配信の仕組みが無い）。

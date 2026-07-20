@@ -928,7 +928,7 @@ async fn handle_inbound_like_delete(pool: &PgPool, stream_hub: &StreamHub, at_ur
 
 /// DID からローカル `actors` 行を解決する。無ければ AppView からプロフィールを取得して upsert する
 /// （AP 側 `upsert_remote_fedi_actor` の ATP 版）。
-async fn resolve_or_upsert_bsky_actor(pool: &PgPool, http: &reqwest::Client, did: &str) -> Result<i64, String> {
+pub(crate) async fn resolve_or_upsert_bsky_actor(pool: &PgPool, http: &reqwest::Client, did: &str) -> Result<i64, String> {
     let actor_repo = PgActorRepository::new(pool.clone());
     if let Ok(Some(actor)) = actor_repo.find_by_did(did).await {
         return Ok(actor.id);

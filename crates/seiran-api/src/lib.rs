@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, FollowRepository, HashtagRepository, ListRepository, NotificationRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgNotificationRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AtpReadRepository, DmRepository, FollowRepository, HashtagRepository, ListRepository, NotificationRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgDmRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgNotificationRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -54,6 +54,8 @@ pub struct AppState {
     pub pinned_posts: Arc<dyn PinnedPostsRepository>,
     /// 通知（フォロー・リアクション等）の永続化リポジトリ。
     pub notifications: Arc<dyn NotificationRepository>,
+    /// ダイレクトメッセージ（DMセッション一覧・履歴・既読状態）の永続化リポジトリ。
+    pub dm: Arc<dyn DmRepository>,
     /// deliver_post_to_ap_followers（seiran-common）が &PgPool を要求するため保持。
     /// 将来 FollowerRepository へ移行したら削除する。
     pub db: PgPool,
@@ -159,6 +161,13 @@ impl AppState {
             tracing::error!("[job] BskyPostCommitDeferred enqueue 失敗 (post_id={}): {}", post_id, e);
         }
     }
+
+    /// DM（`visibility='direct'`）投稿のBsky宛先への実送信（`chat.bsky.convo.sendMessage`）ジョブを積む。
+    pub async fn enqueue_bsky_dm_send(&self, post_id: i64) {
+        if let Err(e) = self.job_queue.enqueue(Job::BskyDmSend { post_id }, job_priority::HIGH).await {
+            tracing::error!("[job] BskyDmSend enqueue 失敗 (post_id={}): {}", post_id, e);
+        }
+    }
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -229,6 +238,7 @@ pub async fn init_state(
     let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
     let pinned_posts: Arc<dyn PinnedPostsRepository> = Arc::new(PgPinnedPostsRepository::new(pool.clone()));
     let notifications: Arc<dyn NotificationRepository> = Arc::new(PgNotificationRepository::new(pool.clone()));
+    let dm: Arc<dyn DmRepository> = Arc::new(PgDmRepository::new(pool.clone()));
     let lists: Arc<dyn ListRepository> = Arc::new(PgListRepository::new(pool.clone()));
     let hashtags: Arc<dyn HashtagRepository> = Arc::new(PgHashtagRepository::new(pool.clone()));
 
@@ -251,6 +261,7 @@ pub async fn init_state(
         reactions,
         pinned_posts,
         notifications,
+        dm,
         db: pool,
         local_auth,
         miauth_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -344,6 +355,11 @@ pub fn router(state: AppState) -> Router {
         // Misskey 互換エイリアス
         .route("/api/notes/timeline", get(handlers::notes::home_timeline))
         .route("/api/notes/search", get(handlers::search::search_notes))
+        // ダイレクトメッセージ（DM本体の送受信は既存の /api/notes/create を再利用する）
+        .route("/api/dm/sessions", get(handlers::dm::sessions))
+        .route("/api/dm/sessions/:thread_root_id/messages", get(handlers::dm::thread_messages))
+        .route("/api/dm/sessions/:thread_root_id/read", post(handlers::dm::mark_read))
+        .route("/api/dm/unread-count", get(handlers::dm::unread_count))
         .route("/api/streaming", get(handlers::streaming::streaming))
         .route("/api/notes/:id", get(handlers::notes::get_note))
         .route("/api/notes/:id/repost", delete(handlers::notes::delete_repost))
@@ -433,6 +449,7 @@ pub fn spawn_startup_tasks(state: &AppState) {
         // #identity をブロードキャストする。
         tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
         backfill_identity_events(&state).await;
+        backfill_chat_declarations(&state).await;
     });
 }
 
@@ -510,6 +527,38 @@ async fn backfill_identity_events(state: &AppState) {
         match state.atp_service.broadcast_identity_event(actor_id, &did, &handle, now).await {
             Ok(_) => tracing::info!("[startup] #identity broadcast: {}", handle),
             Err(e) => tracing::error!("[startup] #identity 失敗 {}: {}", handle, e),
+        }
+    }
+}
+
+/// 既存ユーザー（DM機能実装前に登録済み）向けに `chat.bsky.actor.declaration` を
+/// バックフィルする。このレコードが無いとBluesky公式クライアントは相手（seiranユーザー）
+/// へのDM送信を保守的にブロックする（`docs/protocols.md` 9節）。
+async fn backfill_chat_declarations(state: &AppState) {
+    let now = chrono::Utc::now();
+    let missing: Vec<i64> = match sqlx::query_scalar::<_, i64>(
+        "SELECT a.id
+         FROM actors a
+         WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM atp_records r
+             WHERE r.actor_id = a.id AND r.collection = 'chat.bsky.actor.declaration' AND r.rkey = 'self'
+           )",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("[startup] chat declaration 対象取得失敗: {}", e);
+            return;
+        }
+    };
+
+    for actor_id in missing {
+        match state.atp_service.commit_chat_declaration(actor_id, now).await {
+            Ok(_) => tracing::info!("[startup] chat declaration commit: actor_id={}", actor_id),
+            Err(e) => tracing::error!("[startup] chat declaration 失敗 actor_id={}: {}", actor_id, e),
         }
     }
 }

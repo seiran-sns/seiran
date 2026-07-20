@@ -9,6 +9,14 @@ export interface E2eUser {
   email: string;
   token: string;
   userId: number;
+  /**
+   * actor_id（文字列）。`/api/auth/register` レスポンスの `user.actor_id` は
+   * バックエンドで i64 のまま返るため、JS の Number 精度（53bit）を超えて丸め誤差が
+   * 生じうる（既存の設計課題、DM機能のE2E実装で顕在化）。他人への宛先指定など
+   * actor_id を値として送る用途では、必ずこの文字列版（`/api/actors/search` 経由、
+   * 他のAPIレスポンス同様に文字列でシリアライズされる）を使うこと。
+   */
+  actorId: string;
 }
 
 let counter = 0;
@@ -32,8 +40,26 @@ export async function registerUserViaApi(
   });
   expect(res.ok(), `register failed: ${res.status()} ${await res.text()}`).toBeTruthy();
   const body = await res.json();
+  const token = body.token as string;
 
-  return { username, password, email, token: body.token as string, userId: body.user.id as number };
+  // body.user.actor_id はバックエンドがi64のまま返すためJS Number精度で丸め誤差が
+  // 生じうる（E2eUser.actorIdのコメント参照）。actor_search経由の文字列版で取り直す。
+  const searchRes = await request.get(`/api/actors/search?q=${encodeURIComponent(username)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(searchRes.ok(), `actor search failed: ${searchRes.status()} ${await searchRes.text()}`).toBeTruthy();
+  const suggestions = (await searchRes.json()) as { actor_id: string; username: string }[];
+  const self = suggestions.find((s) => s.username === username);
+  expect(self, `actor_search で自分自身(${username})が見つからない`).toBeTruthy();
+
+  return {
+    username,
+    password,
+    email,
+    token,
+    userId: body.user.id as number,
+    actorId: self!.actor_id,
+  };
 }
 
 /** ページ読み込み前にlocalStorageへtokenを仕込み、UIログイン操作を省略してログイン状態にする。 */

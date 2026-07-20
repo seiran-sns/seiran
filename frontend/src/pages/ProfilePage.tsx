@@ -82,7 +82,7 @@ export default function ProfilePage() {
     setLoadingMore(true);
     const untilId = postsRef.current[postsRef.current.length - 1].id;
     api.users
-      .posts(actorId, { limit: PAGE_SIZE, until_id: untilId })
+      .posts(actorId, { limit: PAGE_SIZE, until_id: untilId, exclude_direct: true })
       .then((rows) => {
         setPosts((prev) => {
           const seen = new Set(prev.map((p) => p.id));

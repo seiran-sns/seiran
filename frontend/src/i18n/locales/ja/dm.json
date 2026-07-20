@@ -1,0 +1,18 @@
+{
+  "messagesPage": {
+    "title": "メッセージ",
+    "newMessage": "新規メッセージ",
+    "emptySessions": "まだメッセージはありません",
+    "composeHint": "宛先を選んでメッセージを送信してください",
+    "unknownPeer": "不明な相手",
+    "textPlaceholder": "メッセージを入力…",
+    "sendButton": "送信",
+    "attachButtonTitle": "メディアを添付",
+    "bskySingleRecipientError": "Bskyユーザーへのメッセージは1対1のみ送信できます"
+  },
+  "recipientPicker": {
+    "placeholder": "宛先を入力…",
+    "protocolConflictWarning": "Bskyユーザーへのメッセージは他の宛先と同時に送信できません",
+    "unresolvedWarning": "「{{input}}」に該当するユーザーが見つかりませんでした"
+  }
+}

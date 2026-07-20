@@ -1,0 +1,18 @@
+{
+  "messagesPage": {
+    "title": "Messages",
+    "newMessage": "New message",
+    "emptySessions": "No messages yet",
+    "composeHint": "Choose a recipient to send a message",
+    "unknownPeer": "Unknown peer",
+    "textPlaceholder": "Type a message…",
+    "sendButton": "Send",
+    "attachButtonTitle": "Attach media",
+    "bskySingleRecipientError": "Messages to Bsky users can only be sent 1-to-1"
+  },
+  "recipientPicker": {
+    "placeholder": "Add a recipient…",
+    "protocolConflictWarning": "Messages to Bsky users cannot be combined with other recipients",
+    "unresolvedWarning": "Could not find a user matching \"{{input}}\""
+  }
+}

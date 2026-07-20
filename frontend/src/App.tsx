@@ -14,6 +14,7 @@ import HomePage from "./pages/HomePage";
 import ListDetailPage from "./pages/ListDetailPage";
 import ListsSettingsPage from "./pages/ListsSettingsPage";
 import Login from "./pages/Login";
+import MessagesPage from "./pages/MessagesPage";
 import MiAuthConnectPage from "./pages/MiAuthConnectPage";
 import NoteDetailPage from "./pages/NoteDetailPage";
 import NotificationsPage from "./pages/NotificationsPage";
@@ -150,6 +151,22 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <HashtagPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/messages"
+        element={
+          <RequireAuth>
+            <MessagesPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/messages/:threadRootId"
+        element={
+          <RequireAuth>
+            <MessagesPage />
           </RequireAuth>
         }
       />

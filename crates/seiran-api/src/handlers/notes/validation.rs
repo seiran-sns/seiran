@@ -12,6 +12,11 @@ const BSKY_MAX_TEXT_BYTES: usize = 3_000;
 const FEDI_MAX_TEXT_GRAPHEMES: usize = 3_000;
 /// Fedi のみ配信時の本文上限（バイト数）。
 const FEDI_MAX_TEXT_BYTES: usize = 10_000;
+/// DM の宛先に Bsky アクターが含まれる場合の本文上限（`chat.bsky.convo` の実仕様値、
+/// 書記素クラスタ数）。
+pub const BSKY_DM_MAX_TEXT_GRAPHEMES: usize = 1_000;
+/// 同上、バイト数。
+const BSKY_DM_MAX_TEXT_BYTES: usize = 10_000;
 
 /// 投稿文字数を配信先に応じたバイト数・書記素クラスタ数の上限で検証する。
 ///
@@ -26,6 +31,20 @@ pub fn validate_text_length(text: &str, bsky_text: Option<&str>) -> Result<(), A
         None => (text, FEDI_MAX_TEXT_BYTES, FEDI_MAX_TEXT_GRAPHEMES),
     };
     if checked.len() > max_bytes || checked.graphemes(true).count() > max_graphemes {
+        return Err(ApiError::BadRequest("TEXT_TOO_LONG".to_owned()));
+    }
+    Ok(())
+}
+
+/// DM本文の文字数を検証する。宛先にBskyアクターが含まれる場合は `chat.bsky.convo` の
+/// 実仕様上限（1000書記素・10000バイト）、含まれなければ通常のFedi向け上限を使う。
+pub fn validate_dm_text_length(text: &str, has_bsky_recipient: bool) -> Result<(), ApiError> {
+    let (max_bytes, max_graphemes) = if has_bsky_recipient {
+        (BSKY_DM_MAX_TEXT_BYTES, BSKY_DM_MAX_TEXT_GRAPHEMES)
+    } else {
+        (FEDI_MAX_TEXT_BYTES, FEDI_MAX_TEXT_GRAPHEMES)
+    };
+    if text.len() > max_bytes || text.graphemes(true).count() > max_graphemes {
         return Err(ApiError::BadRequest("TEXT_TOO_LONG".to_owned()));
     }
     Ok(())

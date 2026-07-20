@@ -1,0 +1,157 @@
+.wrap {
+  position: relative;
+}
+
+.chipInputRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg);
+  cursor: text;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent-deep);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 2px 6px 2px 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chipInvalid {
+  background: rgba(220, 38, 38, 0.15);
+  color: #dc2626;
+}
+
+.chipAvatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.chipLabel {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chipRemove {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+
+.chipRemove:hover {
+  opacity: 1;
+}
+
+.input {
+  flex: 1;
+  min-width: 120px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.suggestList {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.suggestItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.suggestItem:hover {
+  background: var(--bg-elev);
+}
+
+.suggestAvatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--accent-deep);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.suggestAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.suggestName {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  font-weight: 700;
+  font-size: 0.9rem;
+  overflow: hidden;
+}
+
+.suggestHandle {
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.suggestType {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.warningBubble {
+  margin-top: 4px;
+  padding: 6px 10px;
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}

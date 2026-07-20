@@ -32,6 +32,9 @@ ID 採番は2系統ある。
 | `pinned_posts` | プロフィールへのピン留め投稿 |
 | `hashtags` / `post_hashtags` | ハッシュタグ（正規化済みタグ名）とポストのm:n関係 |
 | `pinned_hashtags` | ユーザーごとのハッシュタグタブのピン留め（ホーム画面への追加） |
+| `post_recipients` | direct投稿（DM）の宛先アクター一覧 |
+| `dm_read_states` | DMスレッド別の最終既読ポストID（未読バッジ算出用） |
+| `bsky_convo_links` | DMスレッド起点と Bsky `chat.bsky.convo` の convoId の対応キャッシュ |
 | `atp_records` | ATP の非 post レコード（`app.bsky.actor.profile` 等）の管理 |
 | `atp_blocks` | ATP MST の CAR ブロックストア（CID → バイト列） |
 | `atp_repo_events` | ATP `subscribeRepos` 配信用のイベントログ（commit/identity） |
@@ -62,6 +65,15 @@ ID 採番は2系統ある。
 - `is_local`（非正規化 + トリガー）: ローカルタイムライン取得がリモート投稿優勢な環境で劣化する問題への対策。`BEFORE INSERT` トリガー `trg_posts_set_is_local` が `actors.actor_type` から自動導出するため、書き込み漏れの心配がない。
 - 重複排除・マージに使うカラム: `seiran_post_uuid`（他 seiran サーバー間マージのキー。**ATP側レコードには埋め込まれていないため、Bsky経由で先に取り込まれた投稿は AP 側の同一投稿と現状マージされない** — 既知の制約）、`parent_original_post_id`（ループバック・一般ブリッジ重複のハードリンク）。
 - `visibility`（ENUM `post_visibility_enum`: `public`/`unlisted`/`followers_only`/`direct`）と `deliver_fedi`/`deliver_bsky`（配信先トグル）は独立した軸。リプライは親の可視性を継承する。
+- `thread_root_post_id`: `direct`投稿（DM）のスレッド起点ポストID。DM関連テーブルの節を参照。`direct`以外の投稿では常にNULL。
+
+### ダイレクトメッセージ関連（`post_recipients` / `dm_read_states` / `bsky_convo_links`)
+DMは`visibility='direct'`の投稿をそのまま`posts`に格納する方式で実現し、Misskey APIクライアントからも読み書きできるようにしている（フロントエンドはタイムライン取得時に`direct`を除外するパラメータを付与することで、Misskey本家の`specified`投稿がタイムラインに現れうる挙動と両立させている）。
+
+- `post_recipients`: `direct`投稿の宛先アクター一覧（`post_id`/`actor_id`のUNIQUE）。Bsky宛先が絡む場合は1対1のみ許可というアプリ側バリデーション（DB制約では表現しない）が別途かかる。
+- `thread_root_post_id`（`posts`本体のカラム）: 「スレッド起点ポストを同じくするdirect投稿の集合」をメッセージセッションの単位とするための識別子。通常ポストへの返信として最初のdirect投稿が付いた場合、その最初のdirect投稿自身が起点になる。新規insert時は都度再帰クエリで遡らず、親（`reply_to_post_id`）の`thread_root_post_id`をそのままコピーする伝播コピー方式（親がdirectでない/存在しなければ自分自身のIDを設定）。中央ペインのメッセージ履歴はこの値で束ねて`id`昇順（時刻順）に並べ、ツリー表示はしない。
+- `dm_read_states`: `(actor_id, thread_root_post_id)`をPKに持つスレッド別の最終既読ポストID。未読バッジは「未読のあるセッション数」で算出する。
+- `bsky_convo_links`: DMスレッド起点とBsky `chat.bsky.convo`のconvoIdの対応キャッシュ（`getConvoForMembers`呼び出し回数を減らすため）。Bsky宛先が絡むスレッドのみ行を持つ。
 
 ### `reactions`
 `UNIQUE(post_id, actor_id)` — 1投稿につき1ユーザー1リアクション（Misskey 準拠）。切り替え時は `ON CONFLICT DO UPDATE`。`emoji_url` は Fedi 受信のカスタム絵文字画像URL（Unicode 絵文字/Like 由来は NULL）。

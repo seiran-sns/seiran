@@ -194,7 +194,40 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 
 `notifications` テーブルへの書き込みは、ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。種別は `Follow`/`Reaction`/`FollowRequestAccepted` の3種のみ。WebSocketは「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
 
-## 9. 未実装・スコープ外の機能
+## 9. ダイレクトメッセージ
+
+`visibility='direct'`の投稿をそのまま`posts`に格納する方式でDMを実現する（`docs/database.md`の「ダイレクトメッセージ関連」節も参照）。Misskey APIクライアントも同じ投稿テーブルを読み書きするため、Bsky DMも含めてMisskey互換の投稿・タイムライン取得APIでそのまま扱える。
+
+### 宛先・スレッド・タイムライン除外
+- 宛先は`post_recipients`（post_id/actor_id）に持つ。投稿作成API（`POST /api/notes/create`、Misskey互換では`visibleUserIds`も同じ意味で受け付ける）が`visibility=direct`のとき`recipient_actor_ids`必須。
+- スレッド起点（`posts.thread_root_post_id`）は再帰クエリではなく伝播コピー方式。新規direct投稿作成時、親（`reply_to_post_id`）が`direct`ならその`thread_root_post_id`をそのままコピーし、親が`direct`でなければ自分自身のIDを設定する。
+- 各タイムライン系クエリ（`home_timeline`/`local_timeline`/`timeline_by_actor`等）の`direct`閲覧制御は「投稿者本人 or `post_recipients`の宛先」のみ（`followers_only`とは異なりフォロワーには見せない）。`exclude_direct`クエリパラメータ（Misskey互換のためデフォルト`false`）を付けると宛先者でも一切表示しない。seiranフロントエンドは常にこれを付与する。
+- リスト・ピン留めタイムラインは閲覧者情報を持たない/宛先チェックの構造上の理由から、`direct`を無条件で除外する（`repository::list::timeline`、`repository::pinned_post::list_timeline_by_actor`）。
+
+### Fedi受信（`jobs::inbound_activity_process::handle_create_note`）
+`to`/`cc`から`classify_ap_visibility`が`direct`と判定した場合、通常投稿受信経路とは別に以下を行う。
+- `note["inReplyTo"]`から`reply_to_post_id`を解決する（`find_id_by_ap_or_at_uri`。DM以外の通常投稿にも設定するようになった。以前はFedi受信投稿は`reply_to_post_id`を一切保存しない実装だった）。
+- `to`に含まれるローカルアクターURIから宛先を解決し`post_recipients`へ保存する。ローカルユーザーの`actors.ap_uri`は登録時に設定されない（都度`https://{local_domain}/users/{username}`として動的組み立てされる）ため`find_by_ap_uri`では引っかからない。`handle_follow`と同じくURI末尾のセグメントをusernameとみなし`find_by_username_domain`で解決する。
+- `reply_to_post_id`の親が`direct`ならその`thread_root_post_id`を継承、そうでなければ自分自身のIDをスレッド起点とする（伝播コピー方式はローカル投稿と共通）。
+- WS配信は宛先のみ（フォロワーには配信しない）。
+
+### 配送
+- Fedi宛先: `ap::deliver_direct_message_to_ap`が`post_recipients`の中のFediアクターのinboxのみへCreate(Note)を送る（`to`は宛先アクターURIのみ、フォロワーコレクションではない）。`Job::ApDeliveryKind::DirectMessage`経由。
+- Bsky宛先: `jobs::bsky_dm_send`が`chat.bsky.convo.sendMessage`で送信する（`Job::BskyDmSend`）。1スレッドにつき1回だけ`chat.bsky.convo.getConvoForMembers`でconvoIdを解決し`bsky_convo_links`にキャッシュする。認証は自己署名サービス認証JWT（`docs/skill_atp_rust_programming.md` §17、`aud`はfragment無しの`did:web:api.bsky.chat`）。Bsky宛先は1対1のみ（宛先にBskyアクターが1人でも含まれる場合、他の宛先との同居はAPIレベルで拒否）。
+- WS配信: `direct`投稿は`delivery::broadcast_direct_message`で投稿者本人+宛先のみに配信する（通常投稿の`broadcast_new_note`はフォロワー全体に配信するため、DMには使わないこと。本文漏洩防止）。
+
+### Bsky受信ポーリング（`seiran-atp-repo::bsky_dm_poll`）
+`chat.bsky.convo`はJetstreamに乗らない（私信のため公開ファイヤホースに含まれない）ため、ローカルBskyリンク済みユーザーごとに60秒間隔で`listConvos`→新着があれば`getMessages`をポーリングして取り込む常駐タスク（`seiran-atp-repo::run`内で`tokio::spawn`）。`bsky_convo_links.last_synced_message_id`を重複取り込み防止カーソルに使う。取り込んだメッセージは`posts`（visibility=direct、thread_root_post_id・post_recipients設定）へ保存しWS配信する（送信者が自分自身のメッセージは`BskyDmSend`側で既に保存済みのためスキップ）。グループ会話（`kind=groupConvo`）は対象外。
+
+2026-07-20実機確認: `@ethilen.bsky.social`との送受信を実地テスト済み（送信・受信ポーリングとも正常動作）。
+
+### 未読管理
+`dm_read_states`（actor_id, thread_root_post_id, last_read_post_id）でスレッド別の既読カーソルを持つ。左ペインバッジは「未読のあるセッション数」（`DmRepository::unread_session_count`）。
+
+### `chat.bsky.actor.declaration`（Bsky DM受信許可）
+Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration`（rkey固定`self`、`allowIncoming: "all"|"none"|"following"`）を取得してDM送信可否を判定する。このレコードが無いと保守的に送信をブロックする（実機確認: 未コミット状態のseiranユーザーへ公式クライアントからDMを送ろうとすると宛先候補がグレーアウトする）。`AtpCommitService::commit_chat_declaration`が`allowIncoming: "all"`固定でコミットする。新規ユーザー登録時（`handlers::auth::register`）と、起動時のバックフィル（`spawn_startup_tasks`→`backfill_chat_declarations`、未コミットのローカルユーザーを検出して一括実行）の両方から呼ばれる。ユーザーが値を選べる設定UIは未実装（`docs/roadmap.md`参照）。
+
+## 10. 未実装・スコープ外の機能
 
 - **ゼロトラストハンドシェイク**（他seiranサーバー間の `/verify-actor` 検証、`remote_seiran` への昇格）: 未実装。`actors.seiran_pair_actor_id` はスキーマ上・読み取りコードは存在するが書き込みロジックが無い（常にNULL）。
 - **`actor_metadata_resolve` ジョブ**: ハンドラはdispatchに登録されているが中身はスタブ（即座に `Ok(())`）。enqueueする呼び出し箇所がプロダクションコードに存在しない。

@@ -59,6 +59,9 @@ pub trait ActorRepository: Send + Sync {
     /// アクター ID でアクターを取得する。
     async fn find_by_id(&self, id: i64) -> Result<Option<Actor>, sqlx::Error>;
 
+    /// 複数のアクター ID で一括取得する（DM宛先の種別判定用）。順序は保証しない。
+    async fn find_by_ids(&self, ids: &[i64]) -> Result<Vec<Actor>, sqlx::Error>;
+
     /// ユーザー名 + ドメインから DID のみを取得する（`at_did IS NOT NULL` のもの）。
     async fn find_did_by_username_domain(
         &self,
@@ -175,6 +178,15 @@ impl ActorRepository for PgActorRepository {
         ))
         .bind(id)
         .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn find_by_ids(&self, ids: &[i64]) -> Result<Vec<Actor>, sqlx::Error> {
+        sqlx::query_as::<_, Actor>(&format!(
+            "SELECT {ACTOR_COLS} FROM actors WHERE id = ANY($1)"
+        ))
+        .bind(ids)
+        .fetch_all(&self.pool)
         .await
     }
 

@@ -63,10 +63,25 @@ pub fn classify_post(
 }
 
 /// 新規投稿を著者本人 + accepted なローカルフォロワーへ WebSocket でリアルタイム配信する（#37）。
+/// `direct`（DM）投稿はこの関数を使わないこと（フォロワーにまで本文が届いてしまう）。
+/// 代わりに `broadcast_direct_message` を使う。
 pub async fn broadcast_new_note(state: &AppState, actor_id: i64, note: &NoteResponse) {
     let mut recipients: HashSet<i64> = HashSet::new();
     recipients.insert(actor_id);
     if let Ok(rows) = state.follows.find_accepted_local_follower_ids(actor_id).await {
+        recipients.extend(rows);
+    }
+    if let Ok(v) = serde_json::to_value(note) {
+        state.stream_hub.publish_note(recipients, &v);
+    }
+}
+
+/// DM（`visibility='direct'`）投稿を、著者本人 + 宛先（`post_recipients`）のみへ
+/// WebSocket でリアルタイム配信する。フォロワーには一切配信しない（本文漏洩防止）。
+pub async fn broadcast_direct_message(state: &AppState, actor_id: i64, post_id: i64, note: &NoteResponse) {
+    let mut recipients: HashSet<i64> = HashSet::new();
+    recipients.insert(actor_id);
+    if let Ok(rows) = state.dm.recipient_ids(post_id).await {
         recipients.extend(rows);
     }
     if let Ok(v) = serde_json::to_value(note) {
@@ -170,15 +185,22 @@ pub struct ReplyContext {
     /// 親ポストの可視性（非リプライの場合は `None`）。
     /// "public"/"unlisted"/"followers_only"/"direct" のいずれか。
     pub parent_visibility: Option<String>,
+    /// 親ポストが`direct`（DM）の場合のスレッド起点ポストID。DM返信時、この値を
+    /// そのまま子ポストへ伝播コピーする（親が`direct`でなければ`None`）。
+    pub parent_thread_root_post_id: Option<i64>,
 }
 
 impl ReplyContext {
     /// リプライ先の可視性制約を踏まえて、リクエストされた visibility を確定する。
-    /// - 非リプライ、または親が public/direct: 制約なし（従来のバリデーション、デフォルト public）。
+    /// - 親が`direct`（DMスレッド内の返信）: 常に`direct`を強制する（往復の途中で
+    ///   他の可視性へ離脱させない）。
+    /// - 非リプライ、または親が public: 制約なし（従来のバリデーション、デフォルト public）。
+    ///   ただし`direct`が明示指定されれば許可する（通常ポストへの返信として新規DMを開始する経路）。
     /// - 親が followers_only: 強制的に followers_only（Misskey互換の黙った読み替え）。
     /// - 親が unlisted: public/unlisted/followers_only いずれも選択可、デフォルトは unlisted。
     pub fn resolve_visibility(&self, requested: Option<&str>) -> Result<&'static str, ApiError> {
         match self.parent_visibility.as_deref() {
+            Some("direct") => Ok("direct"),
             Some("followers_only") => Ok("followers_only"),
             Some("unlisted") => match requested {
                 None | Some("unlisted") => Ok("unlisted"),
@@ -186,11 +208,12 @@ impl ReplyContext {
                 Some("followers_only") => Ok("followers_only"),
                 Some(_) => Err(ApiError::BadRequest("INVALID_VISIBILITY".to_owned())),
             },
-            // 非リプライ、または親が public/direct/未知値 → 従来ロジック
+            // 非リプライ、または親が public/未知値 → 従来ロジック
             _ => match requested {
                 None | Some("public") => Ok("public"),
                 Some("unlisted") => Ok("unlisted"),
                 Some("followers_only") => Ok("followers_only"),
+                Some("direct") => Ok("direct"),
                 Some(_) => Err(ApiError::BadRequest("INVALID_VISIBILITY".to_owned())),
             },
         }
@@ -241,6 +264,7 @@ pub async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str) -> R
         bsky_reply,
         ap_in_reply_to: meta.ap_object_id,
         parent_visibility: Some(meta.visibility.clone()),
+        parent_thread_root_post_id: meta.thread_root_post_id,
     })
 }
 
@@ -326,6 +350,18 @@ fn split_bsky_reply(reply: &Option<BskyPostReply>) -> (Option<AtUriCid>, Option<
 /// 通常投稿 / リプライ / 引用投稿を Fedi・Bsky へ配送する。
 /// Bsky は ATP コミット（firehose 結合のため in-process）、Fedi は ApDelivery ジョブ。
 pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
+    if d.visibility == "direct" {
+        // DM: Fedi宛先へは`DirectMessage`ジョブ（post_recipientsからFediアクターを解決）、
+        // Bsky宛先へは`BskyDmSend`ジョブ（chat.bsky.convo.sendMessage）でそれぞれ配送する。
+        if d.targets.fedi {
+            state.enqueue_ap_delivery(d.actor_id, ApDeliveryKind::DirectMessage { post_id: d.post_id }).await;
+        }
+        if d.targets.bsky {
+            state.enqueue_bsky_dm_send(d.post_id).await;
+        }
+        return;
+    }
+
     // 二重防御: visibility が followers_only なら Bsky コミットを行わない（Bsky はプロトコル上
     // フォロワー限定配信をサポートしないため）。create_regular_post 側で既に deliver_bsky を
     // false に読み替え済みのはずだが、呼び出し元の実装ミスに対する最終ガードとして再チェックする。

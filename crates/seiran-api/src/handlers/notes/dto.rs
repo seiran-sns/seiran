@@ -20,9 +20,15 @@ pub struct CreateNoteRequest {
     pub reply_to_id: Option<String>,
     /// 引用元のポスト ID（指定時は引用投稿として処理する）
     pub quote_of_id: Option<String>,
-    /// 投稿の可視性（"public" | "unlisted" | "followers_only"）。省略時は "public"。
-    /// "direct" はローカル投稿作成のスコープ外（Fedi受信専用）のため受け付けない。
+    /// 投稿の可視性（"public" | "unlisted" | "followers_only" | "direct"）。省略時は "public"。
+    /// "direct"（DM）指定時は`recipient_actor_ids`が必須。
     pub visibility: Option<String>,
+    /// DM（`visibility: "direct"`）の宛先アクターID一覧。JSの Number 精度問題を避けるため
+    /// 文字列で受け取る。Misskey本家の`visibleUserIds`と同じ役割のため、そのフィールド名も
+    /// エイリアスとして受け付ける（Misskey APIクライアントがBsky DMを読み書きできるようにする
+    /// ための互換対応）。
+    #[serde(alias = "visibleUserIds")]
+    pub recipient_actor_ids: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -214,6 +220,11 @@ pub struct TimelineQuery {
     pub until_id: Option<String>,
     #[serde(alias = "sinceId")]
     pub since_id: Option<String>,
+    /// `true`の場合、自分が宛先の`direct`投稿も含め`direct`を一切タイムラインに含めない。
+    /// Misskey API互換のためデフォルト`false`（省略時は自分宛のdirectも含まれる）。
+    /// seiranフロントエンドはDM専用画面と区別するため常にこれを付与する。
+    #[serde(alias = "excludeDirect", default)]
+    pub exclude_direct: bool,
 }
 
 #[derive(Serialize)]

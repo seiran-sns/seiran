@@ -92,6 +92,9 @@ pub enum ApDeliveryKind {
         quote_url: Option<String>,
         in_reply_to: Option<String>,
     },
+    /// DM（`visibility='direct'`）投稿を、宛先（`post_recipients`）の中のFediアクターへ
+    /// のみ配送する（フォロワーコレクションではなく宛先個人のinboxのみ）。
+    DirectMessage { post_id: i64 },
     /// Announce（リポスト）を配送する。
     Announce { post_id: i64, original_ap_object_id: String },
     /// Undo(Announce)（リポスト取り消し）を配送する。
@@ -179,6 +182,10 @@ pub enum Job {
     /// DID は表示時（`NoteResponse` 生成時）に都度解決を試みるため、このジョブは
     /// 「次回表示までに解決を終えておく」ためのベストエフォート先行解決。
     ResolveBskyMention { did: String },
+
+    /// DM（`visibility='direct'`）投稿を、宛先の中のBskyアクターへ`chat.bsky.convo.sendMessage`
+    /// で送信する。convoIdが`bsky_convo_links`に未キャッシュなら`getConvoForMembers`で先に解決する。
+    BskyDmSend { post_id: i64 },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。
