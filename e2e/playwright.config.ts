@@ -5,6 +5,7 @@ const e2eDir = path.dirname(new URL(import.meta.url).pathname);
 const repoRoot = path.resolve(e2eDir, "..");
 
 const plcStubPort = Number(process.env.PLC_STUB_PORT ?? "2582");
+const appviewStubPort = Number(process.env.APPVIEW_STUB_PORT ?? "2583");
 const backendPort = 3000;
 const frontendPort = 5173;
 
@@ -17,6 +18,7 @@ const backendEnv: Record<string, string> = {
   PORT: String(backendPort),
   LOCAL_DOMAIN: "localhost",
   PLC_DIRECTORY_BASE_URL: `http://127.0.0.1:${plcStubPort}`,
+  ATP_APPVIEW_URL: `http://127.0.0.1:${appviewStubPort}`,
   // Relay への requestCrawl が本物の bsky.network に飛ばないよう、存在しないローカル
   // ポートに向けておく（接続失敗はログに出るだけで登録処理自体は継続する）。
   ATP_RELAY_URL: "http://127.0.0.1:1",
@@ -54,6 +56,13 @@ export default defineConfig({
       cwd: e2eDir,
       env: { PLC_STUB_PORT: String(plcStubPort) },
       port: plcStubPort,
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command: `node fixtures/stub-appview-server.ts`,
+      cwd: e2eDir,
+      env: { APPVIEW_STUB_PORT: String(appviewStubPort) },
+      port: appviewStubPort,
       reuseExistingServer: !process.env.CI,
     },
     {

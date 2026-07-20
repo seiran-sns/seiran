@@ -6,7 +6,14 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-const APPVIEW_URL: &str = "https://public.api.bsky.app";
+/// Bsky AppView のベース URL。未設定時は本番の公開AppView。
+/// E2E テストではローカルのスタブサーバーに向けるために使う。
+fn appview_base_url() -> String {
+    std::env::var("ATP_APPVIEW_URL")
+        .unwrap_or_else(|_| "https://public.api.bsky.app".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
 
 // ─── 型定義 ────────────────────────────────────────────────────────────────
 
@@ -110,7 +117,7 @@ pub async fn fetch_atp_history(
 
         let mut url = format!(
             "{}/xrpc/app.bsky.feed.getAuthorFeed?actor={}&limit=100",
-            APPVIEW_URL,
+            appview_base_url(),
             urlencoding::encode(did)
         );
         if let Some(ref c) = cursor {
@@ -208,7 +215,7 @@ pub async fn fetch_single_bsky_post(
 ) -> Result<Option<BskyPost>, String> {
     let url = format!(
         "{}/xrpc/app.bsky.feed.getPosts?uris={}",
-        APPVIEW_URL,
+        appview_base_url(),
         urlencoding::encode(at_uri)
     );
 
@@ -315,7 +322,7 @@ pub async fn upsert_bsky_post(
 pub async fn fetch_bsky_profile(client: &reqwest::Client, actor: &str) -> Result<BskyProfile, String> {
     let url = format!(
         "{}/xrpc/app.bsky.actor.getProfile?actor={}",
-        APPVIEW_URL,
+        appview_base_url(),
         urlencoding::encode(actor)
     );
 
@@ -345,7 +352,7 @@ pub async fn search_appview_posts(
 ) -> (Vec<String>, Option<String>) {
     let mut url = format!(
         "{}/xrpc/app.bsky.feed.searchPosts?q={}&limit=25",
-        APPVIEW_URL,
+        appview_base_url(),
         urlencoding::encode(query)
     );
     if let Some(c) = cursor {
