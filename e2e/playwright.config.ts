@@ -26,6 +26,11 @@ const backendEnv: Record<string, string> = {
   CLOUDFLARE_ZONE_ID: "",
   REDIS_URL: "",
   SEIRAN_CONFIG_DIR: path.join(e2eDir, ".tmp-config"),
+  // sqlx::query! はコンパイル時にDBへ接続してスキーマ検証する。E2E専用DBはこの時点では
+  // マイグレーション未適用（マイグレーションはbackend起動時に自動実行される）なので、
+  // 生DBへ接続すると「relation "xxx" does not exist」でビルド自体が失敗する。
+  // Dockerfileと同様にコミット済みの .sqlx/ オフラインキャッシュを使わせる。
+  SQLX_OFFLINE: "true",
 };
 
 export default defineConfig({
