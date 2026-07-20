@@ -59,6 +59,7 @@
 - [ ] 連合（Federation）統合テスト（モックAP/ATPサーバー、他seiranハンドシェイク・特権同期のテスト）
 - [ ] 高負荷・スケールアウト検証（`RedisJobQueue` + `RedisSessionStore` 環境での動作確認、プロダクションビルド・デプロイ手順の検証）
 - [x] Playwright E2E基盤の構築（`e2e/`、スタブPLCサーバー、E2E専用DB）と新規登録フローの疎通テスト
-- [ ] E2Eテストの拡充（ログイン、投稿、フォロー等の主要シナリオ）
+- [x] E2Eテストの拡充（ログイン、投稿、フォロー等の主要シナリオ）
+- [ ] E2Eテストのさらなる拡充（返信・リアクション・通知・検索・リモート連合まわり）
 
 既存の結合テスト基盤: `crates/seiran-api/tests/`（実DB + 実 `seiran_api::router` を使用、`#[ignore]` で通常の `cargo test` から除外し `cargo test -p seiran-api --test <name> -- --ignored` で明示実行）。
