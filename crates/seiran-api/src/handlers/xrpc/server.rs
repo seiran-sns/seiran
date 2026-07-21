@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::Deserialize;
 
+use crate::error::ApiError;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -96,7 +97,7 @@ pub async fn well_known_atproto_did(
     let username = host.split('.').next().unwrap_or("").to_string();
 
     if username.is_empty() || username == state.local_domain {
-        return (StatusCode::NOT_FOUND, "").into_response();
+        return ApiError::NotFound("").into_response();
     }
 
     match state
@@ -107,10 +108,7 @@ pub async fn well_known_atproto_did(
         Ok(Some(did)) if !did.is_empty() => {
             ([(axum::http::header::CONTENT_TYPE, "text/plain")], did).into_response()
         }
-        Ok(_) => (StatusCode::NOT_FOUND, "").into_response(),
-        Err(e) => {
-            tracing::error!("[well_known_atproto_did] DB エラー: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "").into_response()
-        }
+        Ok(_) => ApiError::NotFound("").into_response(),
+        Err(e) => ApiError::Internal(format!("[well_known_atproto_did] DB エラー: {}", e)).into_response(),
     }
 }

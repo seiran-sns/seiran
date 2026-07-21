@@ -1,7 +1,7 @@
 use axum::{
     body::Bytes,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::IntoResponse,
     Json,
 };
@@ -17,6 +17,7 @@ use seiran_common::atp::{cid_from_sha256_hex, cid_to_string, resolve_atproto_ver
 use seiran_common::{ext_for_mime_type, generate_snowflake_id, select_provider, sniff_mime_type, S3StorageClient};
 use uuid::Uuid;
 
+use crate::error::ApiError;
 use crate::AppState;
 
 /// `com.atproto.repo.uploadBlob` のサービス間認証JWTクレーム。
@@ -51,35 +52,33 @@ pub async fn xrpc_upload_blob(
     body: Bytes,
 ) -> impl IntoResponse {
     let Some(auth_header) = headers.get("authorization").and_then(|v| v.to_str().ok()) else {
-        return (StatusCode::UNAUTHORIZED, "Authorization ヘッダがありません").into_response();
+        return ApiError::Unauthorized("Authorization ヘッダがありません").into_response();
     };
     let Some(jwt) = auth_header.strip_prefix("Bearer ") else {
-        return (StatusCode::UNAUTHORIZED, "Bearer トークンが必要です").into_response();
+        return ApiError::Unauthorized("Bearer トークンが必要です").into_response();
     };
 
     let Some(iss) = peek_unverified_iss(jwt) else {
-        return (StatusCode::UNAUTHORIZED, "JWTのissクレームを読み取れません").into_response();
+        return ApiError::Unauthorized("JWTのissクレームを読み取れません").into_response();
     };
 
     let verifying_key = match resolve_atproto_verification_key(&iss, &state.ap_client.http).await {
         Ok(k) => k,
         Err(e) => {
             tracing::error!("[uploadBlob] 検証鍵解決失敗 iss={}: {}", iss, e);
-            return (StatusCode::UNAUTHORIZED, "検証鍵の解決に失敗しました").into_response();
+            return ApiError::Unauthorized("検証鍵の解決に失敗しました").into_response();
         }
     };
     let public_key_pem = match verifying_key.to_public_key_pem(LineEnding::LF) {
         Ok(pem) => pem,
         Err(e) => {
-            tracing::error!("[uploadBlob] 公開鍵PEM変換失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "内部エラー").into_response();
+            return ApiError::Internal(format!("[uploadBlob] 公開鍵PEM変換失敗: {}", e)).into_response();
         }
     };
     let decoding_key = match DecodingKey::from_ec_pem(public_key_pem.as_bytes()) {
         Ok(k) => k,
         Err(e) => {
-            tracing::error!("[uploadBlob] DecodingKey構築失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "内部エラー").into_response();
+            return ApiError::Internal(format!("[uploadBlob] DecodingKey構築失敗: {}", e)).into_response();
         }
     };
 
@@ -91,12 +90,12 @@ pub async fn xrpc_upload_blob(
         Ok(data) => data.claims,
         Err(e) => {
             tracing::error!("[uploadBlob] JWT検証失敗 iss={}: {}", iss, e);
-            return (StatusCode::UNAUTHORIZED, "JWT検証に失敗しました").into_response();
+            return ApiError::Unauthorized("JWT検証に失敗しました").into_response();
         }
     };
     if claims.lxm != "com.atproto.repo.uploadBlob" {
         tracing::info!("[uploadBlob] lxm不一致: {}", claims.lxm);
-        return (StatusCode::UNAUTHORIZED, "lxmが一致しません").into_response();
+        return ApiError::Unauthorized("lxmが一致しません").into_response();
     }
 
     // Content-Type ヘッダーをそのまま信用しない。Bsky公式動画パイプラインからの代理POSTは
@@ -114,8 +113,7 @@ pub async fn xrpc_upload_blob(
     let cid = match cid_from_sha256_hex(&sha256_hex) {
         Ok(c) => cid_to_string(&c),
         Err(e) => {
-            tracing::error!("[uploadBlob] CID生成失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "CID生成失敗").into_response();
+            return ApiError::Internal(format!("[uploadBlob] CID生成失敗: {}", e)).into_response();
         }
     };
 
@@ -255,10 +253,9 @@ pub async fn xrpc_get_record(
 async fn get_record_post(params: &GetRecordParams, state: &AppState) -> axum::response::Response {
     let record = match state.posts.find_record(&params.repo, &params.rkey).await {
         Ok(Some(r)) => r,
-        Ok(None) => return (StatusCode::NOT_FOUND, "レコードが見つかりません").into_response(),
+        Ok(None) => return ApiError::NotFound("レコードが見つかりません").into_response(),
         Err(e) => {
-            tracing::error!("[getRecord] DB エラー: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(format!("[getRecord] DB エラー: {}", e)).into_response();
         }
     };
 
@@ -321,12 +318,11 @@ async fn get_record_from_atp_records(
             // did: でなければ username として検索（ローカルアクター）
             match state.actors.find_by_username_domain(&params.repo, &state.local_domain).await {
                 Ok(Some(a)) => a,
-                _ => return (StatusCode::NOT_FOUND, "リポジトリが見つかりません").into_response(),
+                _ => return ApiError::NotFound("リポジトリが見つかりません").into_response(),
             }
         }
         Err(e) => {
-            tracing::error!("[getRecord] アクター取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(format!("[getRecord] アクター取得失敗: {}", e)).into_response();
         }
     };
 
@@ -343,10 +339,9 @@ async fn get_record_from_atp_records(
 
     let cid_str = match record_row {
         Ok(Some(row)) => row.try_get::<String, _>("cid").unwrap_or_default(),
-        Ok(None) => return (StatusCode::NOT_FOUND, "レコードが見つかりません").into_response(),
+        Ok(None) => return ApiError::NotFound("レコードが見つかりません").into_response(),
         Err(e) => {
-            tracing::error!("[getRecord] atp_records 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(format!("[getRecord] atp_records 取得失敗: {}", e)).into_response();
         }
     };
 
@@ -361,10 +356,9 @@ async fn get_record_from_atp_records(
 
     let cbor_bytes: Vec<u8> = match block_row {
         Ok(Some(row)) => row.try_get::<Vec<u8>, _>("bytes").unwrap_or_default(),
-        Ok(None) => return (StatusCode::NOT_FOUND, "ブロックが見つかりません").into_response(),
+        Ok(None) => return ApiError::NotFound("ブロックが見つかりません").into_response(),
         Err(e) => {
-            tracing::error!("[getRecord] atp_blocks 取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(format!("[getRecord] atp_blocks 取得失敗: {}", e)).into_response();
         }
     };
 
@@ -372,8 +366,7 @@ async fn get_record_from_atp_records(
     let ipld: ipld_core::ipld::Ipld = match serde_ipld_dagcbor::from_slice(&cbor_bytes) {
         Ok(v) => v,
         Err(e) => {
-            tracing::error!("[getRecord] CBOR デコード失敗 (cid={}): {}", cid_str, e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "CBOR デコード失敗").into_response();
+            return ApiError::Internal(format!("[getRecord] CBOR デコード失敗 (cid={}): {}", cid_str, e)).into_response();
         }
     };
     let value = ipld_to_json(&ipld);
