@@ -7,22 +7,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use seiran_common::generate_snowflake_id;
+use seiran_common::repository::EmojiRow;
 
 use crate::AppState;
 use crate::error::ApiError;
 use crate::middleware::require_admin;
-
-// ─── DB 行 ────────────────────────────────────────────────────────────────
-
-#[derive(sqlx::FromRow)]
-struct EmojiRow {
-    id: i64,
-    shortcode: String,
-    media_file_id: i64,
-    category: Option<String>,
-    tags: Vec<String>,
-    created_at: DateTime<Utc>,
-}
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
 
@@ -109,14 +98,11 @@ pub async fn list_emojis(
 ) -> Result<Json<Vec<EmojiResponse>>, ApiError> {
     require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
 
-    let rows: Vec<EmojiRow> = sqlx::query_as::<_, EmojiRow>(
-        "SELECT id, shortcode, media_file_id, category, tags, created_at
-         FROM custom_emojis
-         ORDER BY id",
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let rows = state
+        .emojis
+        .list_all()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
@@ -138,19 +124,11 @@ pub async fn create_emoji(
     let tags = normalize_tags(req.tags.as_deref().unwrap_or(&[]))?;
     let id = generate_snowflake_id(Utc::now());
 
-    let row: EmojiRow = sqlx::query_as::<_, EmojiRow>(
-        "INSERT INTO custom_emojis (id, shortcode, media_file_id, category, tags)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, shortcode, media_file_id, category, tags, created_at",
-    )
-    .bind(id)
-    .bind(&req.shortcode)
-    .bind(req.media_file_id)
-    .bind(req.category.as_deref())
-    .bind(&tags)
-    .fetch_one(&state.db)
-    .await
-    .map_err(map_emoji_db_error)?;
+    let row = state
+        .emojis
+        .insert(id, &req.shortcode, req.media_file_id, req.category.as_deref(), &tags)
+        .await
+        .map_err(map_emoji_db_error)?;
 
     Ok(Json(row.into()))
 }
@@ -169,20 +147,11 @@ pub async fn update_emoji(
         None => None,
     };
 
-    // COALESCE で「省略フィールドは現在値を保持」する（$3/$4 が NULL なら既存値）。
-    let row: Option<EmojiRow> = sqlx::query_as::<_, EmojiRow>(
-        "UPDATE custom_emojis
-         SET category = COALESCE($2, category),
-             tags     = COALESCE($3, tags)
-         WHERE id = $1
-         RETURNING id, shortcode, media_file_id, category, tags, created_at",
-    )
-    .bind(id)
-    .bind(req.category.as_deref())
-    .bind(tags.as_deref())
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let row = state
+        .emojis
+        .update(id, req.category.as_deref(), tags.as_deref())
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     row.map(|r| Json(r.into()))
         .ok_or(ApiError::NotFound("EMOJI_NOT_FOUND"))
@@ -196,13 +165,13 @@ pub async fn delete_emoji(
 ) -> Result<StatusCode, ApiError> {
     require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
 
-    let result = sqlx::query("DELETE FROM custom_emojis WHERE id = $1")
-        .bind(id)
-        .execute(&state.db)
+    let deleted = state
+        .emojis
+        .delete(id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    if result.rows_affected() == 0 {
+    if !deleted {
         return Err(ApiError::NotFound("EMOJI_NOT_FOUND"));
     }
 

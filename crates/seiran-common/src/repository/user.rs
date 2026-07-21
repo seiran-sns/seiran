@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 /// ログイン処理用の users + actors 結合行。
@@ -8,6 +9,16 @@ pub struct LoginRow {
     pub email: String,
     pub password_hash: Option<String>,
     pub username: String,
+}
+
+/// 管理画面ユーザー一覧（`GET /api/admin/users`）用の users + actors 結合行。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AdminUserRow {
+    pub id: i64,
+    pub email: String,
+    pub role: String,
+    pub suspended_at: Option<DateTime<Utc>>,
+    pub username: Option<String>,
 }
 
 #[async_trait]
@@ -29,6 +40,21 @@ pub trait UserRepository: Send + Sync {
 
     /// ログイン用にユーザーネームでユーザー + ローカルアクターを取得する。
     async fn find_login_by_username(&self, username: &str) -> Result<Option<LoginRow>, sqlx::Error>;
+
+    /// メールアドレスから user_id を取得する（パスワードリセット申請用）。
+    async fn find_id_by_email(&self, email: &str) -> Result<Option<i64>, sqlx::Error>;
+
+    /// パスワードハッシュを更新する。
+    async fn update_password_hash(&self, user_id: i64, password_hash: &str) -> Result<(), sqlx::Error>;
+
+    /// 管理画面のユーザー一覧を返す（先頭100件、ID昇順）。
+    async fn list_for_admin(&self) -> Result<Vec<AdminUserRow>, sqlx::Error>;
+
+    /// アカウントの凍結状態を更新する。
+    async fn set_suspended(&self, user_id: i64, suspended: bool) -> Result<(), sqlx::Error>;
+
+    /// ロール（`user` / `moderator` / `admin`）を更新する。
+    async fn update_role(&self, user_id: i64, role: &str) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgUserRepository {
@@ -105,5 +131,52 @@ impl UserRepository for PgUserRepository {
         .bind(username)
         .fetch_optional(&self.pool)
         .await
+    }
+
+    async fn find_id_by_email(&self, email: &str) -> Result<Option<i64>, sqlx::Error> {
+        let row: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE email = $1 LIMIT 1")
+            .bind(email)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|(id,)| id))
+    }
+
+    async fn update_password_hash(&self, user_id: i64, password_hash: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
+            .bind(password_hash)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn list_for_admin(&self) -> Result<Vec<AdminUserRow>, sqlx::Error> {
+        sqlx::query_as::<_, AdminUserRow>(
+            "SELECT u.id, u.email, u.role::text AS role, u.suspended_at, a.username
+             FROM users u
+             LEFT JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
+             ORDER BY u.id
+             LIMIT 100",
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn set_suspended(&self, user_id: i64, suspended: bool) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET suspended_at = CASE WHEN $1 THEN NOW() ELSE NULL END WHERE id = $2")
+            .bind(suspended)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn update_role(&self, user_id: i64, role: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET role = $1::user_role WHERE id = $2")
+            .bind(role)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 }

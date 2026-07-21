@@ -181,13 +181,7 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
         }
 
         // 既存ショートコードのスキップ
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM custom_emojis WHERE shortcode = $1)",
-        )
-        .bind(&shortcode)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false);
+        let exists: bool = state.emojis.exists_by_shortcode(&shortcode).await.unwrap_or(false);
 
         if exists {
             update_job(&state, &job_id, |s| {
@@ -327,25 +321,16 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
         let license = entry.emoji.license.clone().filter(|l| !l.is_empty());
 
         let emoji_id = generate_snowflake_id(Utc::now());
-        let result = sqlx::query(
-            "INSERT INTO custom_emojis (id, shortcode, media_file_id, category, tags, license)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (shortcode) DO NOTHING",
-        )
-        .bind(emoji_id)
-        .bind(&shortcode)
-        .bind(media_file_id)
-        .bind(&category)
-        .bind(&tags)
-        .bind(&license)
-        .execute(&state.db)
-        .await;
+        let result = state
+            .emojis
+            .insert_if_absent(emoji_id, &shortcode, media_file_id, category.as_deref(), &tags, license.as_deref())
+            .await;
 
         match result {
-            Ok(r) if r.rows_affected() == 0 => {
+            Ok(false) => {
                 update_job(&state, &job_id, |s| { s.skipped += 1; });
             }
-            Ok(_) => {
+            Ok(true) => {
                 update_job(&state, &job_id, |s| { s.processed += 1; });
             }
             Err(e) => {

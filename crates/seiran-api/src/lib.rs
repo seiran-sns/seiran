@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, DmRepository, FollowRepository, HashtagRepository, ListRepository, NotificationRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgDmRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgNotificationRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AtpReadRepository, DmRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgDmRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -87,6 +87,12 @@ pub struct AppState {
     /// ハッシュタグ（ポスト⇔タグのm:n関係の永続化、ハッシュタイムライン、ホーム画面ピン留め）。
     pub hashtags: Arc<dyn HashtagRepository>,
     pub system_proxy_actor_id: i64,
+    /// パスワードリセットフロー（`password_resets` テーブル）。
+    pub password_resets: Arc<dyn PasswordResetRepository>,
+    /// 新規登録時のメール確認フロー（`email_verifications` テーブル）。
+    pub email_verifications: Arc<dyn EmailVerificationRepository>,
+    /// カスタム絵文字（`custom_emojis` テーブル）。
+    pub emojis: Arc<dyn EmojiRepository>,
 }
 
 impl AppState {
@@ -241,6 +247,9 @@ pub async fn init_state(
     let dm: Arc<dyn DmRepository> = Arc::new(PgDmRepository::new(pool.clone()));
     let lists: Arc<dyn ListRepository> = Arc::new(PgListRepository::new(pool.clone()));
     let hashtags: Arc<dyn HashtagRepository> = Arc::new(PgHashtagRepository::new(pool.clone()));
+    let password_resets: Arc<dyn PasswordResetRepository> = Arc::new(PgPasswordResetRepository::new(pool.clone()));
+    let email_verifications: Arc<dyn EmailVerificationRepository> = Arc::new(PgEmailVerificationRepository::new(pool.clone()));
+    let emojis: Arc<dyn EmojiRepository> = Arc::new(PgEmojiRepository::new(pool.clone()));
 
     let system_proxy_actor_id = match seiran_common::ensure_system_proxy_actor(&pool, &local_domain).await {
         Ok(id) => id,
@@ -283,6 +292,9 @@ pub async fn init_state(
         lists,
         hashtags,
         system_proxy_actor_id,
+        password_resets,
+        email_verifications,
+        emojis,
     }
 }
 

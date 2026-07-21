@@ -6,20 +6,11 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use seiran_common::repository::AdminUserRow;
+
 use crate::AppState;
 use crate::error::ApiError;
 use crate::middleware::require_admin;
-
-// ─── DB 行 ────────────────────────────────────────────────────────────────
-
-#[derive(sqlx::FromRow)]
-struct UserRow {
-    id: i64,
-    email: String,
-    role: String,
-    suspended_at: Option<DateTime<Utc>>,
-    username: Option<String>,
-}
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
 
@@ -32,8 +23,8 @@ pub struct AdminUserResponse {
     pub username: Option<String>,
 }
 
-impl From<UserRow> for AdminUserResponse {
-    fn from(r: UserRow) -> Self {
+impl From<AdminUserRow> for AdminUserResponse {
+    fn from(r: AdminUserRow) -> Self {
         Self {
             id: r.id.to_string(),
             email: r.email,
@@ -60,16 +51,11 @@ pub async fn list_users(
 ) -> Result<Json<Vec<AdminUserResponse>>, ApiError> {
     require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
 
-    let rows: Vec<UserRow> = sqlx::query_as::<_, UserRow>(
-        "SELECT u.id, u.email, u.role::text AS role, u.suspended_at, a.username
-         FROM users u
-         LEFT JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
-         ORDER BY u.id
-         LIMIT 100",
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let rows = state
+        .users
+        .list_for_admin()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
@@ -82,9 +68,9 @@ pub async fn suspend_user(
 ) -> Result<StatusCode, ApiError> {
     require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
 
-    sqlx::query("UPDATE users SET suspended_at = NOW() WHERE id = $1")
-        .bind(id)
-        .execute(&state.db)
+    state
+        .users
+        .set_suspended(id, true)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -99,9 +85,9 @@ pub async fn unsuspend_user(
 ) -> Result<StatusCode, ApiError> {
     require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
 
-    sqlx::query("UPDATE users SET suspended_at = NULL WHERE id = $1")
-        .bind(id)
-        .execute(&state.db)
+    state
+        .users
+        .set_suspended(id, false)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -121,10 +107,9 @@ pub async fn change_user_role(
         return Err(ApiError::BadRequest("INVALID_ROLE".to_owned()));
     }
 
-    sqlx::query("UPDATE users SET role = $1::user_role WHERE id = $2")
-        .bind(req.role.as_str())
-        .bind(id)
-        .execute(&state.db)
+    state
+        .users
+        .update_role(id, req.role.as_str())
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 

@@ -48,19 +48,7 @@ pub struct UserInfo {
 /// actors.avatar_media_id がある場合は storage_providers から公開 URL を解決し、
 /// なければ actors.avatar_url（リモート由来）をそのまま使う。
 async fn fetch_avatar_url(state: &AppState, actor_id: i64) -> Option<String> {
-    sqlx::query_scalar(
-        "SELECT COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
-         FROM actors a \
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
-         WHERE a.id = $1",
-    )
-    .bind(actor_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten()
-    .flatten()
+    state.actors.find_avatar_url(actor_id).await.ok().flatten()
 }
 
 #[derive(Deserialize)]
@@ -97,18 +85,12 @@ pub async fn register(
         let token: uuid::Uuid = token_str.parse()
             .map_err(|_| ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
 
-        let verification = sqlx::query!(
-            "DELETE FROM email_verifications
-             WHERE token = $1 AND expires_at > now()
-             RETURNING email",
-            token,
-        )
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
-
-        verification.email
+        state
+            .email_verifications
+            .consume(token)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?
     } else {
         // トークンなし登録: require_email_verification が false であることを確認
         let require_ev = state
@@ -368,30 +350,23 @@ pub async fn request_password_reset(
     let email = req.email.trim().to_lowercase();
 
     // ユーザーを検索（存在しなくても同一レスポンス）
-    let user_row: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM users WHERE email = $1 LIMIT 1",
-    )
-    .bind(&email)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let user_id = state
+        .users
+        .find_id_by_email(&email)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    if let Some((user_id,)) = user_row {
+    if let Some(user_id) = user_id {
         let reset_id = generate_snowflake_id(chrono::Utc::now());
 
         // password_resets に INSERT。token は DB の DEFAULT gen_random_uuid() で生成。
-        let token_row: Option<(String,)> = sqlx::query_as(
-            "INSERT INTO password_resets (id, user_id)
-             VALUES ($1, $2)
-             RETURNING token::text",
-        )
-        .bind(reset_id)
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(format!("[request-password-reset] DB エラー: {}", e)))?;
+        let token = state
+            .password_resets
+            .insert(reset_id, user_id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("[request-password-reset] DB エラー: {}", e)))?;
 
-        if let Some((token,)) = token_row {
+        if let Some(token) = token {
             let reset_url = format!("https://{}/reset-password?token={}", state.local_domain, token);
             let smtp_settings = state
                 .site_settings
@@ -419,18 +394,13 @@ pub async fn verify_reset_token(
     uuid::Uuid::parse_str(&params.token)
         .map_err(|_| ApiError::NotFound("RESET_TOKEN_INVALID"))?;
 
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT user_id FROM password_resets
-         WHERE token = $1::uuid
-           AND used_at IS NULL
-           AND expires_at > NOW()",
-    )
-    .bind(&params.token)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let user_id = state
+        .password_resets
+        .find_valid_user_id(&params.token)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    if row.is_none() {
+    if user_id.is_none() {
         return Err(ApiError::NotFound("RESET_TOKEN_INVALID"));
     }
 
@@ -448,18 +418,12 @@ pub async fn reset_password(
         .map_err(|_| ApiError::BadRequest("RESET_TOKEN_INVALID".to_owned()))?;
 
     // トークン検証（user_id を取得）
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT user_id FROM password_resets
-         WHERE token = $1::uuid
-           AND used_at IS NULL
-           AND expires_at > NOW()",
-    )
-    .bind(&req.token)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let (user_id,) = row.ok_or_else(|| ApiError::BadRequest("RESET_TOKEN_INVALID".to_owned()))?;
+    let user_id = state
+        .password_resets
+        .find_valid_user_id(&req.token)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::BadRequest("RESET_TOKEN_INVALID".to_owned()))?;
 
     // パスワード長チェック
     if req.new_password.len() < 8 {
@@ -474,23 +438,18 @@ pub async fn reset_password(
         })?;
 
     // users.password_hash を更新
-    sqlx::query(
-        "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
-    )
-    .bind(&password_hash)
-    .bind(user_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(format!("[reset-password] users UPDATE 失敗: {}", e)))?;
+    state
+        .users
+        .update_password_hash(user_id, &password_hash)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[reset-password] users UPDATE 失敗: {}", e)))?;
 
     // トークンを使用済みにする（used_at を記録）
-    sqlx::query(
-        "UPDATE password_resets SET used_at = NOW() WHERE token = $1::uuid",
-    )
-    .bind(&req.token)
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(format!("[reset-password] token UPDATE 失敗: {}", e)))?;
+    state
+        .password_resets
+        .mark_used(&req.token)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[reset-password] token UPDATE 失敗: {}", e)))?;
 
     Ok(Json(MessageResponse {
         message: "パスワードを更新しました".to_owned(),

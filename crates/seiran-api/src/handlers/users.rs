@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::ApDeliveryKind;
-use seiran_common::repository::Actor;
+use seiran_common::repository::{Actor, ActorProfileRow};
 
 use crate::error::ApiError;
 use crate::handlers::notes::{
@@ -413,19 +413,7 @@ async fn build_profile_response(
     }
 
     // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
-    let avatar_url: Option<String> = sqlx::query_scalar(
-        "SELECT COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) \
-         FROM actors a \
-         LEFT JOIN media_files amf ON amf.id = a.avatar_media_id \
-         LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id \
-         WHERE a.id = $1",
-    )
-    .bind(actor_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten()
-    .flatten();
+    let avatar_url: Option<String> = state.actors.find_avatar_url(actor_id).await.ok().flatten();
 
     // 本尊（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
     // その本尊アクターのハンドルとプロトコルをフロントの「本尊ワープ」導線に渡す。
@@ -619,17 +607,6 @@ pub struct UpdateProfileResponse {
     pub profile_fields: Vec<ProfileField>,
 }
 
-#[derive(sqlx::FromRow)]
-struct ActorProfileRow {
-    id: i64,
-    username: String,
-    display_name: Option<String>,
-    bio: Option<String>,
-    avatar_media_id: Option<i64>,
-    banner_media_id: Option<i64>,
-    profile_fields: serde_json::Value,
-}
-
 /// プロフィールのキーバリュー項目のラベル・値の最大文字数（#62）。
 const MAX_PROFILE_FIELD_NAME_LEN: usize = 50;
 const MAX_PROFILE_FIELD_VALUE_LEN: usize = 255;
@@ -693,14 +670,7 @@ pub async fn update_profile(
     };
 
     // 現在のプロフィールを取得
-    let current = match sqlx::query_as::<_, ActorProfileRow>(
-        "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id, profile_fields \
-         FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
-    )
-    .bind(auth_user.user_id)
-    .fetch_optional(&state.db)
-    .await
-    {
+    let current: ActorProfileRow = match state.actors.find_profile_by_user_id(auth_user.user_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return ApiError::NotFound("ACTOR_NOT_FOUND").into_response(),
         Err(e) => {
@@ -745,20 +715,17 @@ pub async fn update_profile(
     };
 
     // UPDATE
-    if let Err(e) = sqlx::query(
-        "UPDATE actors \
-         SET display_name = $1, bio = $2, avatar_media_id = $3, banner_media_id = $4, \
-             profile_fields = $5, updated_at = NOW() \
-         WHERE user_id = $6 AND actor_type = 'local'",
-    )
-    .bind(&new_display_name)
-    .bind(&new_bio)
-    .bind(new_avatar_media_id)
-    .bind(new_banner_media_id)
-    .bind(&new_profile_fields)
-    .bind(auth_user.user_id)
-    .execute(&state.db)
-    .await
+    if let Err(e) = state
+        .actors
+        .update_profile(
+            auth_user.user_id,
+            new_display_name.as_deref(),
+            new_bio.as_deref(),
+            new_avatar_media_id,
+            new_banner_media_id,
+            &new_profile_fields,
+        )
+        .await
     {
         tracing::error!("[update_profile] UPDATE 失敗: {}", e);
         return ApiError::Internal(e.to_string()).into_response();

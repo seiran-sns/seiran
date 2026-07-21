@@ -38,6 +38,18 @@ const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username,
     display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem, \
     bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields";
 
+/// プロフィール編集画面（`PATCH /api/users/me/profile`）が読み書きする行の部分集合。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ActorProfileRow {
+    pub id: i64,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub bio: Option<String>,
+    pub avatar_media_id: Option<i64>,
+    pub banner_media_id: Option<i64>,
+    pub profile_fields: serde_json::Value,
+}
+
 #[async_trait]
 pub trait ActorRepository: Send + Sync {
     /// ローカルユーザー（`actor_type = 'local'`）のアクターを user_id で取得する。
@@ -117,6 +129,25 @@ pub trait ActorRepository: Send + Sync {
 
     /// DID を持つ全ローカルアクターの (username, did) を取得する（起動時 TXT 再登録用）。
     async fn list_local_dids(&self) -> Result<Vec<(String, String)>, sqlx::Error>;
+
+    /// アバター URL を解決する。`avatar_media_id` があれば storage_providers から公開 URL を
+    /// 組み立て、なければ `avatar_url`（リモート由来）をそのまま返す。
+    async fn find_avatar_url(&self, actor_id: i64) -> Result<Option<String>, sqlx::Error>;
+
+    /// プロフィール編集用にローカルアクターの現在値を取得する。
+    async fn find_profile_by_user_id(&self, user_id: i64) -> Result<Option<ActorProfileRow>, sqlx::Error>;
+
+    /// プロフィールを更新する（`update_profile` ハンドラの UPDATE 文）。
+    #[allow(clippy::too_many_arguments)]
+    async fn update_profile(
+        &self,
+        user_id: i64,
+        display_name: Option<&str>,
+        bio: Option<&str>,
+        avatar_media_id: Option<i64>,
+        banner_media_id: Option<i64>,
+        profile_fields: &serde_json::Value,
+    ) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgActorRepository {
@@ -310,5 +341,55 @@ impl ActorRepository for PgActorRepository {
         )
         .fetch_all(&self.pool)
         .await
+    }
+
+    async fn find_avatar_url(&self, actor_id: i64) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(Option<String>,)> = sqlx::query_as(
+            "SELECT COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
+             FROM actors a \
+             LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
+             LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+             WHERE a.id = $1",
+        )
+        .bind(actor_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|(url,)| url))
+    }
+
+    async fn find_profile_by_user_id(&self, user_id: i64) -> Result<Option<ActorProfileRow>, sqlx::Error> {
+        sqlx::query_as::<_, ActorProfileRow>(
+            "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id, profile_fields \
+             FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn update_profile(
+        &self,
+        user_id: i64,
+        display_name: Option<&str>,
+        bio: Option<&str>,
+        avatar_media_id: Option<i64>,
+        banner_media_id: Option<i64>,
+        profile_fields: &serde_json::Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE actors \
+             SET display_name = $1, bio = $2, avatar_media_id = $3, banner_media_id = $4, \
+                 profile_fields = $5, updated_at = NOW() \
+             WHERE user_id = $6 AND actor_type = 'local'",
+        )
+        .bind(display_name)
+        .bind(bio)
+        .bind(avatar_media_id)
+        .bind(banner_media_id)
+        .bind(profile_fields)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
     }
 }
