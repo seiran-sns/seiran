@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, ActorSuggestion, getErrorMessage, ListDetail, ListSummary } from "../api/client";
 import AppShell from "../components/layout/AppShell";
+import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ListsSettings.module.css";
 
@@ -10,17 +11,8 @@ export default function ListsSettingsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  // AppShell.module.css の右ペイン非表示ブレークポイント（1400px）と合わせる。
   // 狭幅では右ペインが無いため、メンバー編集パネルを中央ペインへ連続表示する。
-  const [isNarrow, setIsNarrow] = useState(false);
-
-  useEffect(() => {
-    const mql = window.matchMedia("(max-width: 1400px)");
-    setIsNarrow(mql.matches);
-    const handler = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
-  }, []);
+  const isNarrow = useIsNarrowViewport();
 
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [loading, setLoading] = useState(true);

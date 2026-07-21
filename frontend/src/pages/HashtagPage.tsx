@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { api, Note } from "../api/client";
+import { api, getErrorMessage, Note } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import NoteList from "../components/note/NoteList";
 import { useComposer } from "../contexts/ComposerContext";
+import { useToast } from "../contexts/ToastContext";
+import { useCursorPagination } from "../hooks/useCursorPagination";
 import panel from "../components/common/Panel.module.css";
 import styles from "./HashtagPage.module.css";
 
@@ -15,18 +17,25 @@ export default function HashtagPage() {
   const { name } = useParams<{ name: string }>();
   const navigate = useNavigate();
   const { openCompose } = useComposer();
+  const { showError } = useToast();
 
-  const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [pinning, setPinning] = useState(false);
-  const notesRef = useRef<Note[]>([]);
-  const loadingMoreRef = useRef(false);
-  notesRef.current = notes;
 
   const tagName = (name ?? "").toLowerCase();
+
+  const onError = useCallback((e: unknown) => showError(getErrorMessage(e)), [showError]);
+  const fetchPage = useCallback(
+    (untilId: string) => api.hashtags.timeline(tagName, { limit: PAGE_SIZE, until_id: untilId }),
+    [tagName]
+  );
+  const { items: notes, setItems: setNotes, hasMore, setHasMore, loadingMore, loadMore } = useCursorPagination<Note>(
+    fetchPage,
+    (n) => n.id,
+    PAGE_SIZE,
+    onError
+  );
 
   useEffect(() => {
     if (!tagName) return;
@@ -43,31 +52,12 @@ export default function HashtagPage() {
         setHasMore(n.length >= PAGE_SIZE);
         setPinned(pinnedTags.some((p) => p.name === tagName));
       })
+      .catch((e) => !cancelled && onError(e))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [tagName]);
-
-  const loadMore = useCallback(() => {
-    if (!tagName || loadingMoreRef.current || notesRef.current.length === 0) return;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    const untilId = notesRef.current[notesRef.current.length - 1].id;
-    api.hashtags
-      .timeline(tagName, { limit: PAGE_SIZE, until_id: untilId })
-      .then((rows) => {
-        setNotes((prev) => {
-          const seen = new Set(prev.map((p) => p.id));
-          const fresh = rows.filter((r) => !seen.has(r.id));
-          return [...prev, ...fresh];
-        });
-        setHasMore(rows.length >= PAGE_SIZE);
-      })
-      .finally(() => {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tagName]);
 
   async function togglePin() {
@@ -81,6 +71,8 @@ export default function HashtagPage() {
         await api.hashtags.pin(tagName);
         setPinned(true);
       }
+    } catch (err) {
+      showError(getErrorMessage(err));
     } finally {
       setPinning(false);
     }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { api, ListSummary, Note } from "../api/client";
+import { api, getErrorMessage, ListSummary, Note } from "../api/client";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteList from "../components/note/NoteList";
@@ -10,6 +10,8 @@ import NotificationsPanel from "../components/right/NotificationsPanel";
 import TrendsSearchPanel from "../components/right/TrendsSearchPanel";
 import { useRightPane } from "../contexts/RightPaneContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
+import { useToast } from "../contexts/ToastContext";
+import { useCursorPagination } from "../hooks/useCursorPagination";
 import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
@@ -36,20 +38,28 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
 
 export default function HomePage() {
   const { t } = useTranslation();
+  const { showError } = useToast();
   const [feed, setFeed] = useState<Feed>({ kind: "home" });
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [pinnedHashtags, setPinnedHashtags] = useState<{ name: string }[]>([]);
-  const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
   const { timelineTab, setTimelineTab } = useRightPane();
   const { registerNote, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
-  const notesRef = useRef<Note[]>([]);
-  const loadingMoreRef = useRef(false);
-  notesRef.current = notes;
+
+  const onError = useCallback((err: unknown) => showError(getErrorMessage(err)), [showError]);
+  const fetchPage = useCallback(
+    (untilId: string) => fetchFeed(feed, { limit: PAGE_SIZE, until_id: untilId }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [feedKey(feed)]
+  );
+  const { items: notes, setItems: setNotes, hasMore, setHasMore, loadingMore, loadMore } = useCursorPagination<Note>(
+    fetchPage,
+    (n) => n.id,
+    PAGE_SIZE,
+    onError
+  );
 
   useEffect(() => {
     api.lists.list().then(setLists).catch(() => {});
@@ -66,31 +76,11 @@ export default function HomePage() {
         setNotes(n);
         setHasMore(n.length >= PAGE_SIZE);
       })
+      .catch((e) => !cancelled && onError(e))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feedKey(feed)]);
-
-  const loadMore = useCallback(() => {
-    if (loadingMoreRef.current || notesRef.current.length === 0) return;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    const untilId = notesRef.current[notesRef.current.length - 1].id;
-    fetchFeed(feed, { limit: PAGE_SIZE, until_id: untilId })
-      .then((rows) => {
-        setNotes((prev) => {
-          const seen = new Set(prev.map((p) => p.id));
-          const fresh = rows.filter((r) => !seen.has(r.id));
-          return [...prev, ...fresh];
-        });
-        setHasMore(rows.length >= PAGE_SIZE);
-      })
-      .finally(() => {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedKey(feed)]);
 

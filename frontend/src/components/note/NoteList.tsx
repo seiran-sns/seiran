@@ -1,6 +1,6 @@
-import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Note } from "../../api/client";
+import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
 import panel from "../common/Panel.module.css";
 import styles from "./NoteList.module.css";
 import NoteCard from "./NoteCard";
@@ -30,29 +30,7 @@ export default function NoteList({
 }: NoteListProps) {
   const { t } = useTranslation();
   const resolvedEmptyMessage = emptyMessage ?? t("home:noteList.emptyDefault");
-  const observerRef = useRef<IntersectionObserver | null>(null);
-
-  // callback ref: sentinel の DOM 要素が生成・破棄されるたびに Reactが必ず呼ぶため、
-  // useEffect + ref オブジェクトの組み合わせと違い、loading↔表示の切り替えで sentinel が
-  // 新しい DOM ノードに置き換わった場合でも observer の再アタッチ漏れが起きない。
-  // （tab切り替え直後に notes.length や hasMore がたまたま前後で同値になると、
-  //   useEffect の依存配列だけでは新しい要素への observe し直しが発生しないバグがあった）
-  const sentinelRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      observerRef.current?.disconnect();
-      observerRef.current = null;
-      if (!el || !onLoadMore || !hasMore) return;
-      const observer = new IntersectionObserver(
-        (entries) => {
-          if (entries[0]?.isIntersecting) onLoadMore();
-        },
-        { rootMargin: "200px" }
-      );
-      observer.observe(el);
-      observerRef.current = observer;
-    },
-    [onLoadMore, hasMore]
-  );
+  const sentinelRef = useInfiniteScrollSentinel<HTMLDivElement>(onLoadMore, hasMore);
 
   if (loading) return <p className={panel.message}>{t("common:loading")}</p>;
   if (notes.length === 0) return <p className={panel.message}>{resolvedEmptyMessage}</p>;

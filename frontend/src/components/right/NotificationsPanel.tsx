@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "../../i18n";
-import { api, NotificationItem } from "../../api/client";
+import { api, getErrorMessage, NotificationItem } from "../../api/client";
 import { useStreamingContext } from "../../contexts/StreamingContext";
+import { useToast } from "../../contexts/ToastContext";
+import { useCursorPagination } from "../../hooks/useCursorPagination";
+import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
 import panel from "../common/Panel.module.css";
 import styles from "./NotificationsPanel.module.css";
 
@@ -39,14 +42,23 @@ function describe(n: NotificationItem): { icon: string; iconUrl?: string; text: 
 export default function NotificationsPanel() {
   const { t } = useTranslation();
   const { registerNotifArrived, markRead } = useStreamingContext();
-  const [items, setItems] = useState<NotificationItem[]>([]);
+  const { showError } = useToast();
   const [loadingInitial, setLoadingInitial] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const itemsRef = useRef<NotificationItem[]>([]);
-  const loadingMoreRef = useRef(false);
-  const sentinelRef = useRef<HTMLLIElement | null>(null);
+
+  const onError = useCallback((e: unknown) => showError(getErrorMessage(e)), [showError]);
+  const fetchPage = useCallback(
+    (untilId: string) => api.notifications.list({ limit: PAGE_SIZE, untilId, markAsRead: false }),
+    []
+  );
+  const { items, setItems, hasMore, setHasMore, loadingMore, loadMore } = useCursorPagination<NotificationItem>(
+    fetchPage,
+    (n) => n.id,
+    PAGE_SIZE,
+    onError
+  );
   itemsRef.current = items;
+  const sentinelRef = useInfiniteScrollSentinel<HTMLLIElement>(loadMore, hasMore);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +70,7 @@ export default function NotificationsPanel() {
         setHasMore(rows.length >= PAGE_SIZE);
         markRead();
       })
+      .catch((e) => !cancelled && onError(e))
       .finally(() => !cancelled && setLoadingInitial(false));
     return () => {
       cancelled = true;
@@ -77,44 +90,10 @@ export default function NotificationsPanel() {
             return fresh.length > 0 ? [...fresh, ...prev] : prev;
           });
           markRead();
-        });
+        }).catch(onError);
       }),
-    [registerNotifArrived, markRead]
+    [registerNotifArrived, markRead, onError, setItems]
   );
-
-  const loadMore = useCallback(() => {
-    if (loadingMoreRef.current || itemsRef.current.length === 0) return;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    const untilId = itemsRef.current[itemsRef.current.length - 1].id;
-    api
-      .notifications.list({ limit: PAGE_SIZE, untilId, markAsRead: false })
-      .then((rows) => {
-        setItems((prev) => {
-          const seen = new Set(prev.map((p) => p.id));
-          const fresh = rows.filter((r) => !seen.has(r.id));
-          return [...prev, ...fresh];
-        });
-        setHasMore(rows.length >= PAGE_SIZE);
-      })
-      .finally(() => {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !hasMore) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) loadMore();
-      },
-      { rootMargin: "200px" }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loadMore, items.length]);
 
   if (loadingInitial) {
     return <div className={panel.placeholder}>{t("common:loading")}</div>;

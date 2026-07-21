@@ -16,7 +16,7 @@ function emptyProfileFields(): ProfileField[] {
 
 export default function ProfileEditPage() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -103,7 +103,7 @@ export default function ProfileEditPage() {
     setWithdrawError("");
     try {
       await api.account.withdraw(withdrawHandle.trim());
-      localStorage.removeItem("seiran_token");
+      logout();
       navigate("/login");
     } catch (err) {
       setWithdrawError(getErrorMessage(err));

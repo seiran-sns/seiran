@@ -8,6 +8,8 @@ import NoteCard from "../components/note/NoteCard";
 import NoteList from "../components/note/NoteList";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
+import { useCursorPagination } from "../hooks/useCursorPagination";
+import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
 
@@ -31,27 +33,25 @@ export default function ProfilePage() {
   const [following, setFollowing] = useState(false);
   const [unfollowing, setUnfollowing] = useState(false);
   const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
-  // AppShell.module.css の右ペイン非表示ブレークポイント（1400px）と合わせる。
   // 狭幅では右ペインが無いため、ピン留め・最新ポストの両方を中央ペインへ連続表示する（#61）。
-  const [isNarrow, setIsNarrow] = useState(false);
+  const isNarrow = useIsNarrowViewport();
 
   // 投稿一覧の無限スクロール（#64）。`profile.recent_posts`（初回最大20件）を初期値とし、
   // 下端到達で `GET /api/users/posts` から `until_id` カーソルで追加取得する。
-  const [posts, setPosts] = useState<Note[]>([]);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const postsRef = useRef<Note[]>([]);
-  const loadingMoreRef = useRef(false);
   const actorIdRef = useRef<string | undefined>(undefined);
-  postsRef.current = posts;
 
-  useEffect(() => {
-    const mql = window.matchMedia("(max-width: 1400px)");
-    setIsNarrow(mql.matches);
-    const handler = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
+  const onError = useCallback((e: unknown) => showError(getErrorMessage(e)), [showError]);
+  const fetchPage = useCallback((untilId: string) => {
+    // actorIdRef は profile 取得完了後にのみ設定され、hasMore も同時に true になるため、
+    // loadMore が呼ばれる時点では必ず値が入っている。
+    return api.users.posts(actorIdRef.current as string, { limit: PAGE_SIZE, until_id: untilId, exclude_direct: true });
   }, []);
+  const { items: posts, setItems: setPosts, hasMore, setHasMore, loadingMore, loadMore: loadMorePosts } = useCursorPagination<Note>(
+    fetchPage,
+    (n) => n.id,
+    PAGE_SIZE,
+    onError
+  );
 
   useEffect(() => {
     if (!q) return;
@@ -73,29 +73,8 @@ export default function ProfilePage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
-
-  const loadMorePosts = useCallback(() => {
-    const actorId = actorIdRef.current;
-    if (!actorId || loadingMoreRef.current || postsRef.current.length === 0) return;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    const untilId = postsRef.current[postsRef.current.length - 1].id;
-    api.users
-      .posts(actorId, { limit: PAGE_SIZE, until_id: untilId, exclude_direct: true })
-      .then((rows) => {
-        setPosts((prev) => {
-          const seen = new Set(prev.map((p) => p.id));
-          const fresh = rows.filter((r) => !seen.has(r.id));
-          return [...prev, ...fresh];
-        });
-        setHasMore(rows.length >= PAGE_SIZE);
-      })
-      .finally(() => {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      });
-  }, []);
 
   const { user } = useAuth();
   const isLocal = profile?.actor_type === "local";

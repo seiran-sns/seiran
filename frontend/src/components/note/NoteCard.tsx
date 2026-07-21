@@ -121,8 +121,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         await api.notes.deleteRepost(note.id);
         setReposted(false);
         onUnreposted?.();
-      } catch {
-        // エラー時は何もしない
+      } catch (err) {
+        showError(getErrorMessage(err));
       } finally {
         setUnreposting(false);
       }
@@ -140,6 +140,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         setReposted(true);
       } else if (err instanceof ApiError && err.status === 403) {
         showError(t("home:noteCard.privateRepostError"));
+      } else {
+        showError(getErrorMessage(err));
       }
     } finally {
       setReposting(false);
@@ -158,8 +160,9 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         ? await api.notes.react(note.id, emoji)
         : await api.notes.unreact(note.id, emoji);
       setReactions(res.reactions);
-    } catch {
+    } catch (err) {
       setReactions(prevReactions);
+      showError(getErrorMessage(err));
     } finally {
       setReactionPending(false);
     }

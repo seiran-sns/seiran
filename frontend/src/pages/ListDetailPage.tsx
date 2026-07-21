@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, ApiError, getErrorMessage, ListDetail, Note } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import NoteList from "../components/note/NoteList";
+import { useToast } from "../contexts/ToastContext";
+import { useCursorPagination } from "../hooks/useCursorPagination";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ListDetailPage.module.css";
 
@@ -13,17 +15,24 @@ export default function ListDetailPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { showError } = useToast();
 
   const [detail, setDetail] = useState<ListDetail | null>(null);
-  const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState("");
-  const notesRef = useRef<Note[]>([]);
-  const loadingMoreRef = useRef(false);
-  notesRef.current = notes;
+
+  const onError = useCallback((e: unknown) => showError(getErrorMessage(e)), [showError]);
+  const fetchPage = useCallback(
+    (untilId: string) => api.lists.timeline(id as string, { limit: PAGE_SIZE, until_id: untilId }),
+    [id]
+  );
+  const { items: notes, setItems: setNotes, hasMore, setHasMore, loadingMore, loadMore } = useCursorPagination<Note>(
+    fetchPage,
+    (n) => n.id,
+    PAGE_SIZE,
+    onError
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -51,27 +60,7 @@ export default function ListDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
-
-  const loadMore = useCallback(() => {
-    if (!id || loadingMoreRef.current || notesRef.current.length === 0) return;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    const untilId = notesRef.current[notesRef.current.length - 1].id;
-    api.lists
-      .timeline(id, { limit: PAGE_SIZE, until_id: untilId })
-      .then((rows) => {
-        setNotes((prev) => {
-          const seen = new Set(prev.map((p) => p.id));
-          const fresh = rows.filter((r) => !seen.has(r.id));
-          return [...prev, ...fresh];
-        });
-        setHasMore(rows.length >= PAGE_SIZE);
-      })
-      .finally(() => {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const center = (
