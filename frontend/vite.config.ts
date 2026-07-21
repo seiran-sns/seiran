@@ -32,5 +32,8 @@ export default defineConfig(({ mode }) => {
         "^/@(?!vite|react-refresh|fs/|id/)": "http://localhost:3000",
       },
     },
+    test: {
+      environment: "jsdom",
+    },
   };
 });

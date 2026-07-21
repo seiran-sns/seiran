@@ -22,7 +22,7 @@ import styles from "./NoteCard.module.css";
  * リアクション済みならまずそれを外してから、`reacting` なら新しい絵文字を付ける
  * （＝切り替え）。同じ絵文字を指定した場合は取消（トグルオフ）のみになる。
  */
-function optimisticSetReaction(
+export function optimisticSetReaction(
   reactions: ReactionSummary[],
   emoji: string,
   reacting: boolean
@@ -52,7 +52,7 @@ function optimisticSetReaction(
  * （`reactorActorId` が自分の actor_id と一致）ならその場で `reactedByMe` を再計算し、
  * 他人の操作ならローカルで既に把握している `reactedByMe` をそのまま引き継ぐ。
  */
-function applyReactionUpdate(
+export function applyReactionUpdate(
   reactions: ReactionSummary[],
   update: ReactionUpdate,
   myActorId: number | undefined

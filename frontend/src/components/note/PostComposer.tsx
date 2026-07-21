@@ -16,7 +16,7 @@ interface PostComposerProps {
 type Visibility = "public" | "unlisted" | "followers_only";
 
 /** 返信先ポストの可視性から、この返信の選択肢・デフォルト・強制値を算出する。 */
-function replyVisibilityConstraint(replyTo?: Note): {
+export function replyVisibilityConstraint(replyTo?: Note): {
   forced: Visibility | null;
   defaultValue: Visibility;
 } {
