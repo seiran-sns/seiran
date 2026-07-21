@@ -5,6 +5,10 @@
   gap: 0;
 }
 
+.desktopLeftNav {
+  display: flex;
+}
+
 /* ── 左ペイン（幅固定：小 / 240px）───────────────────────────── */
 .leftNav {
   flex: 0 0 240px;
@@ -189,26 +193,216 @@
   padding: 0;
 }
 
-/* ── レスポンシブ ────────────────────────────────────────────── */
-@media (max-width: 1400px) {
-  .right {
-    display: none;
+/* ── スマホ用フローティングメニューボタン ─────────────────────── */
+.floatingMenuBtn {
+  display: none;
+}
+
+/* ── スマホ用モバイルドロワー ───────────────────────────────── */
+.mobileBackdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1100;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.mobileDrawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 290px;
+  max-width: 85vw;
+  background: var(--bg);
+  z-index: 1101;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  animation: slideInLeft 0.22s ease-out;
+  overflow-y: auto;
+}
+
+.mobileDrawerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mobileDrawerTitle {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.mobileDrawerCloseBtn {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.mobileDrawerCloseBtn:hover {
+  color: var(--text);
+  background: var(--bg-elev);
+}
+
+.mobileDrawer .leftNav {
+  height: auto;
+  min-height: 0;
+  border-right: none;
+  position: static;
+  flex: 1;
+  padding: 12px;
+}
+
+.mobileDrawer .logo {
+  padding: 4px 12px 12px;
+}
+
+.mobileDrawer .navLabel,
+.mobileDrawer .logoText {
+  display: inline;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
-@media (max-width: 900px) {
-  .center {
-    flex: 1 1 auto;
-    max-width: none;
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* ── レスポンシブ ────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .shell {
+    flex-wrap: wrap;
+  }
+
+  .right {
+    flex: 0 0 100%;
+    width: 100%;
+    max-width: 600px;
+    height: auto;
+    position: static;
+    border-top: 1px solid var(--border);
+    border-right: none;
+  }
+}
+
+@media (max-width: 900px) and (min-width: 769px) {
+  .desktopLeftNav {
+    flex-basis: 72px;
   }
   .leftNav {
     flex-basis: 72px;
   }
   .navLabel,
-  .logo {
+  .logoText {
     display: none;
+  }
+  .logo {
+    justify-content: center;
+    padding: 8px 0 16px;
   }
   .composeBtn {
     padding: 10px;
+  }
+}
+
+@media (max-width: 768px) {
+  .desktopLeftNav {
+    display: none !important;
+  }
+
+  .shell {
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 100vh;
+  }
+
+  .center {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 100%;
+    min-height: auto;
+    border-right: none;
+  }
+
+  .right {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    position: static;
+    border-top: 1px solid var(--border);
+    border-right: none;
+  }
+
+  .floatingMenuBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    left: 20px;
+    bottom: 20px;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--accent-strong);
+    color: #ffffff;
+    border: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+    cursor: pointer;
+    z-index: 1000;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+
+  .floatingMenuBtn:hover {
+    background: var(--accent-hover);
+    transform: scale(1.05);
+  }
+
+  .floatingMenuBtn:active {
+    transform: scale(0.95);
+  }
+
+  .floatingMenuIcon {
+    font-size: 1.4rem;
+    line-height: 1;
+  }
+
+  .floatingMenuBadge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    background: #dc2626;
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 999px;
+    border: 2px solid var(--bg);
   }
 }

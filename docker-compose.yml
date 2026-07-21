@@ -97,6 +97,7 @@ services:
     build:
       context: frontend
       dockerfile: ../docker/Dockerfile.frontend
+    env_file: .env
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/index.html:/app/index.html

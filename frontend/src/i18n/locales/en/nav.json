@@ -8,7 +8,10 @@
     "admin": "Admin",
     "composeLabel": "Post",
     "profileTitle": "My profile",
-    "logoutTitle": "Log out"
+    "logoutTitle": "Log out",
+    "openMenu": "Open main menu",
+    "closeMenu": "Close menu",
+    "menuTitle": "Main Menu"
   },
   "appShell": {
     "composeModalTitle": "New post"

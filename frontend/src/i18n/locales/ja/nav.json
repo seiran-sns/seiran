@@ -8,7 +8,10 @@
     "admin": "管理",
     "composeLabel": "投稿",
     "profileTitle": "自分のプロフィール",
-    "logoutTitle": "ログアウト"
+    "logoutTitle": "ログアウト",
+    "openMenu": "メインメニューを開く",
+    "closeMenu": "メニューを閉じる",
+    "menuTitle": "メインメニュー"
   },
   "appShell": {
     "composeModalTitle": "新規投稿"

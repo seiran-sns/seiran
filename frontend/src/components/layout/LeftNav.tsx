@@ -21,7 +21,12 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/settings/lists", icon: "📋", labelKey: "leftNav.lists" },
 ];
 
-export default function LeftNav({ onCompose }: { onCompose: () => void }) {
+interface LeftNavProps {
+  onCompose: () => void;
+  onItemClick?: () => void;
+}
+
+export default function LeftNav({ onCompose, onItemClick }: LeftNavProps) {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const site = useSiteMeta();
@@ -36,8 +41,16 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
     : baseItems;
 
   function handleLogout() {
+    onItemClick?.();
     logout();
     navigate("/login");
+  }
+
+  function handleProfileClick() {
+    onItemClick?.();
+    if (user?.username) {
+      navigate(`/@${user.username}`);
+    }
   }
 
   return (
@@ -56,6 +69,7 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
               className={({ isActive }) =>
                 `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`
               }
+              onClick={() => onItemClick?.()}
             >
               <span className={styles.navIcon}>{item.icon}</span>
               <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
@@ -65,7 +79,13 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
         ))}
       </ul>
 
-      <button className={styles.composeBtn} onClick={onCompose}>
+      <button
+        className={styles.composeBtn}
+        onClick={() => {
+          onItemClick?.();
+          onCompose();
+        }}
+      >
         <span className={styles.navIcon}>✏️</span>
         <span className={styles.navLabel}>{t("nav:leftNav.composeLabel")}</span>
       </button>
@@ -73,7 +93,7 @@ export default function LeftNav({ onCompose }: { onCompose: () => void }) {
       <div className={styles.navFooter}>
         <button
           className={styles.userChip}
-          onClick={() => user?.username && navigate(`/@${user.username}`)}
+          onClick={handleProfileClick}
           title={t("nav:leftNav.profileTitle")}
         >
           <span className={styles.userAvatar}>
