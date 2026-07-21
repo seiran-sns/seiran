@@ -1,6 +1,6 @@
 use axum::{
     extract::{Multipart, Path, State},
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{Html, IntoResponse},
     Json,
 };
@@ -531,10 +531,10 @@ pub async fn watch_media(
 ) -> impl IntoResponse {
     let mf = match state.media_files.find_by_id(media_file_id).await {
         Ok(Some(mf)) => mf,
-        Ok(None) => return (StatusCode::NOT_FOUND, "見つかりません").into_response(),
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => {
             tracing::error!("[watch_media] DB エラー: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
 

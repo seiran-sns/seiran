@@ -1,11 +1,12 @@
 use axum::{
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Redirect, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::error::ApiError;
 use crate::middleware::extract_auth;
 use crate::AppState;
 
@@ -110,7 +111,7 @@ pub async fn miauth_page(Path(session_id): Path<String>, Query(query): Query<MiA
     // [MED-02] callback URL を事前に検証する
     if let Some(ref cb) = query.callback {
         if !is_valid_callback(cb) {
-            return (StatusCode::BAD_REQUEST, "無効なコールバック URL です").into_response();
+            return ApiError::BadRequest("無効なコールバック URL です".to_string()).into_response();
         }
     }
 
@@ -139,10 +140,10 @@ pub async fn miauth_authorize(
 
     let actor = match state.actors.find_local_by_user_id(auth_user.user_id).await {
         Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
+        Ok(None) => return ApiError::NotFound("USER_NOT_FOUND").into_response(),
         Err(e) => {
             tracing::error!("[miauth] ユーザー検索失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
 
@@ -157,7 +158,7 @@ pub async fn miauth_authorize(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("[miauth] トークン生成失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "トークン生成エラー").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
     let mut map = state.miauth_sessions.write().await;

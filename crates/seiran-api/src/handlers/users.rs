@@ -1,4 +1,4 @@
-use axum::{extract::{Query, State}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}, Json};
+use axum::{extract::{Query, State}, http::HeaderMap, response::{IntoResponse, Response}, Json};
 use serde::{Deserialize, Serialize};
 
 use seiran_common::atp::fetch_bsky_profile;
@@ -43,7 +43,7 @@ pub async fn user_posts(
 ) -> impl IntoResponse {
     let actor_id: i64 = match params.actor_id.parse() {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "不正な actor_id です").into_response(),
+        Err(_) => return ApiError::BadRequest("不正な actor_id です".to_string()).into_response(),
     };
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let until_id: Option<i64> = params.until_id.as_deref().and_then(|s| s.parse().ok());
@@ -62,7 +62,7 @@ pub async fn user_posts(
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[user_posts] 投稿取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
     resolve_mention_facets_in_place(&state.db, &mut post_rows).await;
@@ -153,7 +153,7 @@ async fn fetch_bsky_profile_from_appview(
         Ok(p) => p,
         Err(e) => {
             tracing::error!("[profile/bsky] AppView 取得失敗: {}", e);
-            return (StatusCode::NOT_FOUND, "Bsky ユーザーが見つかりません").into_response();
+            return ApiError::NotFound("USER_NOT_FOUND").into_response();
         }
     };
 
@@ -217,7 +217,7 @@ pub async fn user_profile(
                 Ok(None) => fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
                 Err(e) => {
                     tracing::error!("[profile] DB エラー: {}", e);
-                    (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
+                    ApiError::Internal(e.to_string()).into_response()
                 }
             };
         } else if q.contains('.') && !q.contains('@') {
@@ -246,10 +246,10 @@ pub async fn user_profile(
                 .await
                 .into_response()
         }
-        Ok(None) => (StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
+        Ok(None) => ApiError::NotFound("USER_NOT_FOUND").into_response(),
         Err(e) => {
             tracing::error!("[profile] DB エラー: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
+            ApiError::Internal(e.to_string()).into_response()
         }
     }
 }
@@ -326,7 +326,7 @@ async fn build_profile_response(
             Ok(None) => None,
             Err(e) => {
                 tracing::error!("[profile] 自分の actor_id 取得失敗: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+                return ApiError::Internal(e.to_string()).into_response();
             }
         }
     } else {
@@ -340,7 +340,7 @@ async fn build_profile_response(
             Ok(None) => "not_following".to_string(),
             Err(e) => {
                 tracing::error!("[profile] フォロー状態取得失敗: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+                return ApiError::Internal(e.to_string()).into_response();
             }
         },
         None => "not_following".to_string(),
@@ -359,7 +359,7 @@ async fn build_profile_response(
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] 最近の投稿取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
     resolve_mention_facets_in_place(&state.db, &mut post_rows).await;
@@ -382,7 +382,7 @@ async fn build_profile_response(
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] ピン留め投稿取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
     resolve_mention_facets_in_place(&state.db, &mut pinned_rows).await;
@@ -487,11 +487,8 @@ async fn fetch_remote_profile(
     let actor_uri = match state.ap_client.resolve_webfinger(username, domain).await {
         Ok(uri) => uri,
         Err(e) => {
-            return (
-                axum::http::StatusCode::NOT_FOUND,
-                format!("WebFinger 解決失敗: {}", e),
-            )
-                .into_response()
+            tracing::error!("[profile] WebFinger 解決失敗: {}", e);
+            return ApiError::NotFound("USER_NOT_FOUND").into_response();
         }
     };
 
@@ -571,7 +568,7 @@ async fn lookup_by_uri(
 ) -> impl IntoResponse {
     match state.actors.find_by_ap_uri(uri).await {
         Ok(Some(actor)) => build_profile_response(actor, my_user_id, state).await,
-        _ => (axum::http::StatusCode::NOT_FOUND, "ユーザーが見つかりません").into_response(),
+        _ => ApiError::NotFound("USER_NOT_FOUND").into_response(),
     }
 }
 
@@ -617,10 +614,7 @@ const MAX_PROFILE_FIELD_VALUE_LEN: usize = 255;
 fn validate_profile_fields(fields: Vec<ProfileField>) -> Result<serde_json::Value, Box<Response>> {
     if fields.len() > seiran_common::MAX_PROFILE_FIELDS {
         return Err(Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                format!("プロフィール項目は最大{}件までです", seiran_common::MAX_PROFILE_FIELDS),
-            )
+            ApiError::BadRequest(format!("プロフィール項目は最大{}件までです", seiran_common::MAX_PROFILE_FIELDS))
                 .into_response(),
         ));
     }
@@ -639,19 +633,13 @@ fn validate_profile_fields(fields: Vec<ProfileField>) -> Result<serde_json::Valu
     for f in &cleaned {
         if f.name.chars().count() > MAX_PROFILE_FIELD_NAME_LEN {
             return Err(Box::new(
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("プロフィール項目のラベルは{}文字までです", MAX_PROFILE_FIELD_NAME_LEN),
-                )
+                ApiError::BadRequest(format!("プロフィール項目のラベルは{}文字までです", MAX_PROFILE_FIELD_NAME_LEN))
                     .into_response(),
             ));
         }
         if f.value.chars().count() > MAX_PROFILE_FIELD_VALUE_LEN {
             return Err(Box::new(
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("プロフィール項目の値は{}文字までです", MAX_PROFILE_FIELD_VALUE_LEN),
-                )
+                ApiError::BadRequest(format!("プロフィール項目の値は{}文字までです", MAX_PROFILE_FIELD_VALUE_LEN))
                     .into_response(),
             ));
         }
@@ -675,7 +663,7 @@ pub async fn update_profile(
         Ok(None) => return ApiError::NotFound("ACTOR_NOT_FOUND").into_response(),
         Err(e) => {
             tracing::error!("[update_profile] SELECT 失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
 
@@ -695,7 +683,7 @@ pub async fn update_profile(
         Some(None) => None,
         Some(Some(s)) => match s.parse::<i64>() {
             Ok(id) => Some(id),
-            Err(_) => return (StatusCode::BAD_REQUEST, "avatar_media_id が不正な値です").into_response(),
+            Err(_) => return ApiError::BadRequest("avatar_media_id が不正な値です".to_string()).into_response(),
         },
     };
     let new_banner_media_id: Option<i64> = match req.banner_media_id {
@@ -703,7 +691,7 @@ pub async fn update_profile(
         Some(None) => None,
         Some(Some(s)) => match s.parse::<i64>() {
             Ok(id) => Some(id),
-            Err(_) => return (StatusCode::BAD_REQUEST, "banner_media_id が不正な値です").into_response(),
+            Err(_) => return ApiError::BadRequest("banner_media_id が不正な値です".to_string()).into_response(),
         },
     };
     let new_profile_fields: serde_json::Value = match req.profile_fields {
