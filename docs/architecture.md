@@ -121,6 +121,8 @@ pub struct SearchSession {
 3. **未来掘り**（`sinceId`）: AppViewへは問い合わせず、**ローカルDB検索のみ**で完結（過去に通過したAppView投稿は既にローカルDBにインサート済みのため取りこぼしがない）。
 4. **セッション消滅時**: エラーを返さず、通常のローカルDB検索へ自動フォールバックしベストエフォートで結果を返す。
 
+ブレンド処理の中核（ID列のマージ・降順ソート・重複排除・`limit`件での返却分/バッファ分への分割）は `handlers/search.rs` の `merge_sort_dedup_and_split()` として `AppState`（DB・HTTPクライアント）に依存しない純粋関数に切り出されており、単体テストで複数ページ・重複IDのシナリオを検証している。`InMemorySearchStore`（`search.rs`）の `create`/`take_buffer`/`put_buffer`/`cleanup` も同様に単体テスト済み。
+
 ## 7. ストレージ・シークレット管理
 
 **secrets.toml 自動生成**（`seiran-common::secrets`）: `SEIRAN_CONFIG_DIR`（既定 `./config`）配下の `secrets.toml` を読み、無ければ生成してパーミッション0600で保存。含まれるもの:
