@@ -342,9 +342,10 @@ pub async fn i_notifications(
 pub async fn following_create(headers: HeaderMap, State(state): State<AppState>, Json(body): Json<FollowingBody>) -> Response {
     // ターゲット解決（DB問い合わせ）より先に認証を確認する。未認証のまま先に解決すると
     // 「このIDのユーザーは存在するか」を匿名で探索できてしまう（列挙攻撃対策）。
-    if let Err(e) = extract_auth(&headers, &state.local_auth).await {
-        return e.into_response();
-    }
+    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
     let actor_id: i64 = match body.user_id.parse() {
         Ok(id) => id,
         Err(_) => return ApiError::BadRequest("INVALID_USER_ID".to_owned()).into_response(),
@@ -353,7 +354,7 @@ pub async fn following_create(headers: HeaderMap, State(state): State<AppState>,
         Ok(t) => t,
         Err(e) => return e.into_response(),
     };
-    let resp = crate::handlers::follows::create_follow(headers, State(state), Json(CreateFollowRequest { target }))
+    let resp = crate::handlers::follows::create_follow(user, State(state), Json(CreateFollowRequest { target }))
         .await
         .into_response();
     as_no_content(resp)

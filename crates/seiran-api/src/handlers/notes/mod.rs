@@ -29,7 +29,7 @@ use axum::{
 };
 use sqlx::Row;
 
-use seiran_common::repository::{Actor, NotificationKind, TimelinePost};
+use seiran_common::repository::{Actor, InsertFullParams, NotificationKind, TimelinePost};
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::{ap::{fetch_ap_history, plain_to_html_with_mentions}, generate_snowflake_id, mention::convert_mentions_for_bsky, ApDeliveryKind, PrevApReaction};
 
@@ -293,7 +293,21 @@ async fn create_regular_post(
     // seiran_post_uuid / reply_to_post_id / quote_of_post_id を含む統合 INSERT
     if let Err(e) = state
         .posts
-        .insert_full(post_id, actor_id, &text, &ap_object_id, &seiran_post_uuid, reply_to_id_i64, quote_of_id_i64, now, visibility, deliver_fedi, deliver_bsky, thread_root_post_id, &recipient_actor_ids)
+        .insert_full(InsertFullParams {
+            id: post_id,
+            actor_id,
+            body: &text,
+            ap_object_id: &ap_object_id,
+            seiran_post_uuid: &seiran_post_uuid,
+            reply_to_post_id: reply_to_id_i64,
+            quote_of_post_id: quote_of_id_i64,
+            created_at: now,
+            visibility,
+            deliver_fedi,
+            deliver_bsky,
+            thread_root_post_id,
+            recipient_actor_ids: &recipient_actor_ids,
+        })
         .await
     {
         return ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)).into_response();

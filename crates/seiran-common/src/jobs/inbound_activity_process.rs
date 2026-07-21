@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::ap::{build_emoji_map, classify_ap_visibility, ApClient};
 use crate::generate_snowflake_id;
 use crate::queue::worker::{InboxContext, JobContext};
-use crate::repository::NotificationKind;
+use crate::repository::{InsertRemoteWithDedupParams, NotificationKind};
 use crate::streaming::broadcast_reaction_update;
 
 pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), String> {
@@ -350,10 +350,20 @@ async fn handle_create_note(
     // posts テーブルに挿入（ap_object_id 重複はスキップ、seiran_post_uuid も保存）
     inbox
         .post_repo
-        .insert_remote_with_dedup(
-            post_id, actor_id, &body, note_id, seiran_uuid, parent_original_post_id, created_at, &emoji_map,
-            visibility, reply_to_post_id, thread_root_post_id, &recipient_actor_ids,
-        )
+        .insert_remote_with_dedup(InsertRemoteWithDedupParams {
+            id: post_id,
+            actor_id,
+            body: &body,
+            ap_object_id: note_id,
+            seiran_uuid,
+            parent_original_post_id,
+            created_at,
+            emoji_map: &emoji_map,
+            visibility,
+            reply_to_post_id,
+            thread_root_post_id,
+            recipient_actor_ids: &recipient_actor_ids,
+        })
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 

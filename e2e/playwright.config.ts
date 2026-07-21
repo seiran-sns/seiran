@@ -45,6 +45,9 @@ const backendEnv: Record<string, string> = {
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
+  // dm.spec.ts等、複数の expect.poll/toBeVisible(timeout:15_000) を逐次連結するテストが
+  // デフォルトの30秒制限に対して余裕が無くflakyになりうるため明示的に延長する。
+  timeout: 60_000,
   retries: 0,
   reporter: "list",
   // 【重要】Playwrightの実際の実行順序は「webServer起動 → globalSetup」であり、直感に反する

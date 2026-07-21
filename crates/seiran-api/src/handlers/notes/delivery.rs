@@ -428,7 +428,86 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
 
 #[cfg(test)]
 mod tests {
-    use super::{at_uri_to_bsky_app_url, classify_post, PostOrigin};
+    use super::{at_uri_to_bsky_app_url, classify_post, PostOrigin, ReplyContext};
+    use crate::error::ApiError;
+
+    fn ctx_with_parent_visibility(parent_visibility: Option<&str>) -> ReplyContext {
+        ReplyContext {
+            deliver_fedi_allowed: true,
+            deliver_bsky_allowed: true,
+            bsky_reply: None,
+            ap_in_reply_to: None,
+            parent_visibility: parent_visibility.map(str::to_owned),
+            parent_thread_root_post_id: None,
+        }
+    }
+
+    // ─── resolve_visibility ────────────────────────────────────────────────
+    // 可視性継承ロジック（間違えるとDM/フォロワー限定投稿が意図せず公開される情報漏洩に
+    // 直結するため、親visibility×requestedの主要な組み合わせを網羅する）。
+
+    #[test]
+    fn resolve_visibility_non_reply_defaults_to_public() {
+        let ctx = ctx_with_parent_visibility(None);
+        assert_eq!(ctx.resolve_visibility(None).unwrap(), "public");
+    }
+
+    #[test]
+    fn resolve_visibility_non_reply_allows_starting_a_dm() {
+        // 通常ポストへの返信として新規DMを開始する経路。
+        let ctx = ctx_with_parent_visibility(None);
+        assert_eq!(ctx.resolve_visibility(Some("direct")).unwrap(), "direct");
+    }
+
+    #[test]
+    fn resolve_visibility_direct_parent_always_forces_direct() {
+        let ctx = ctx_with_parent_visibility(Some("direct"));
+        assert_eq!(ctx.resolve_visibility(None).unwrap(), "direct");
+        // 明示的にpublicを指定してもDMスレッドから離脱させない。
+        assert_eq!(ctx.resolve_visibility(Some("public")).unwrap(), "direct");
+        assert_eq!(ctx.resolve_visibility(Some("followers_only")).unwrap(), "direct");
+    }
+
+    #[test]
+    fn resolve_visibility_followers_only_parent_forces_followers_only() {
+        let ctx = ctx_with_parent_visibility(Some("followers_only"));
+        assert_eq!(ctx.resolve_visibility(None).unwrap(), "followers_only");
+        assert_eq!(ctx.resolve_visibility(Some("public")).unwrap(), "followers_only");
+    }
+
+    #[test]
+    fn resolve_visibility_unlisted_parent_defaults_to_unlisted() {
+        let ctx = ctx_with_parent_visibility(Some("unlisted"));
+        assert_eq!(ctx.resolve_visibility(None).unwrap(), "unlisted");
+    }
+
+    #[test]
+    fn resolve_visibility_unlisted_parent_allows_public_or_followers_only() {
+        let ctx = ctx_with_parent_visibility(Some("unlisted"));
+        assert_eq!(ctx.resolve_visibility(Some("public")).unwrap(), "public");
+        assert_eq!(ctx.resolve_visibility(Some("followers_only")).unwrap(), "followers_only");
+        assert_eq!(ctx.resolve_visibility(Some("unlisted")).unwrap(), "unlisted");
+    }
+
+    #[test]
+    fn resolve_visibility_unlisted_parent_rejects_direct() {
+        let ctx = ctx_with_parent_visibility(Some("unlisted"));
+        assert!(matches!(ctx.resolve_visibility(Some("direct")), Err(ApiError::BadRequest(_))));
+    }
+
+    #[test]
+    fn resolve_visibility_public_parent_allows_any_valid_value() {
+        let ctx = ctx_with_parent_visibility(Some("public"));
+        assert_eq!(ctx.resolve_visibility(Some("unlisted")).unwrap(), "unlisted");
+        assert_eq!(ctx.resolve_visibility(Some("followers_only")).unwrap(), "followers_only");
+        assert_eq!(ctx.resolve_visibility(Some("direct")).unwrap(), "direct");
+    }
+
+    #[test]
+    fn resolve_visibility_rejects_unknown_value() {
+        let ctx = ctx_with_parent_visibility(None);
+        assert!(matches!(ctx.resolve_visibility(Some("bogus")), Err(ApiError::BadRequest(_))));
+    }
 
     #[test]
     fn at_uri_to_bsky_app_url_valid() {

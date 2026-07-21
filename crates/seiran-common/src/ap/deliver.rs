@@ -416,6 +416,56 @@ fn build_undo_reaction_activity(
     })
 }
 
+/// 投稿1件の配送に必要な共通データ（本文・作成日時・投稿者名・添付・付随メタ情報）。
+/// `deliver_post_to_ap_followers` と `deliver_direct_message_to_ap` の両方で使う
+/// 「投稿情報取得＋添付取得」のhowを1箇所にまとめたもの。
+struct PostActivityBasis {
+    body: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+    username: String,
+    seiran_uuid: Option<String>,
+    visibility: String,
+    attachments: Vec<serde_json::Value>,
+}
+
+async fn fetch_post_activity_basis(db: &PgPool, post_id: i64, actor_id: i64) -> Result<PostActivityBasis, ApError> {
+    let row = sqlx::query(
+        "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username, p.visibility::text AS visibility
+         FROM posts p
+         JOIN actors a ON a.id = p.actor_id
+         WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| ApError::Other(format!("投稿情報取得エラー: {}", e)))?
+    .ok_or_else(|| ApError::Other(format!("投稿 {} が見つかりません", post_id)))?;
+
+    let body: String = row.try_get("body").map_err(|e| ApError::Other(e.to_string()))?;
+    let created_at: chrono::DateTime<chrono::Utc> =
+        row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
+    let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
+    let seiran_uuid: Option<String> = row.try_get("seiran_post_uuid").unwrap_or(None);
+    let visibility: String = row.try_get("visibility").unwrap_or_else(|_| "public".to_string());
+    let attachments = fetch_attachment_documents(db, post_id).await?;
+
+    Ok(PostActivityBasis { body, created_at, username, seiran_uuid, visibility, attachments })
+}
+
+/// 本文中のメンションを解決し、AP向けHTML化された本文と `tag[]`（AP Mention）を組み立てる。
+async fn html_and_tags_for_body(
+    body: &str,
+    local_domain: &str,
+    db: &PgPool,
+    ap_client: &ApClient,
+) -> (String, Vec<serde_json::Value>) {
+    let (converted, mentions) = crate::mention::convert_mentions_for_ap(body, local_domain, db, &ap_client.http).await;
+    let html = plain_to_html_with_mentions(&converted, &mentions);
+    let tag = crate::mention::ap_inline_mentions_to_tag_json(&mentions);
+    (html, tag)
+}
+
 // =====================================================================
 // 配送オーケストレーション（公開 API）
 // =====================================================================
@@ -438,44 +488,21 @@ pub async fn deliver_post_to_ap_followers(
     quote_url: Option<&str>,
     in_reply_to: Option<&str>,
 ) -> Result<(), ApError> {
-    // 投稿本文・作成日時・投稿者ユーザー名・seiran_post_uuid を取得
-    let row = sqlx::query(
-        "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username, p.visibility::text AS visibility
-         FROM posts p
-         JOIN actors a ON a.id = p.actor_id
-         WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .fetch_optional(db)
-    .await
-    .map_err(|e| ApError::Other(format!("投稿情報取得エラー: {}", e)))?
-    .ok_or_else(|| ApError::Other(format!("投稿 {} が見つかりません", post_id)))?;
-
-    let body: String = if let Some(ob) = override_body {
-        ob.to_owned()
-    } else {
-        row.try_get("body").map_err(|e| ApError::Other(e.to_string()))?
-    };
-    let created_at: chrono::DateTime<chrono::Utc> =
-        row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
-    let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
-    let seiran_uuid: Option<String> = row.try_get("seiran_post_uuid").unwrap_or(None);
-    let visibility: String = row.try_get("visibility").unwrap_or_else(|_| "public".to_string());
+    let basis = fetch_post_activity_basis(db, post_id, actor_id).await?;
 
     // DM（direct）はこの関数（フォロワー全体へのファンアウト）では扱わない。
     // `deliver_direct_message_to_ap` を使うこと（呼び出し元の実装ミスに対する最終ガード）。
-    if visibility == "direct" {
+    if basis.visibility == "direct" {
         tracing::warn!("[deliver_post_to_ap_followers] visibility=direct のポストが渡されたためスキップ（post_id={}）", post_id);
         return Ok(());
     }
-
-    let attachments = fetch_attachment_documents(db, post_id).await?;
 
     let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
     if inboxes.is_empty() {
         return Ok(());
     }
+
+    let body: String = override_body.map(str::to_owned).unwrap_or(basis.body);
 
     // override_body（リポストのフォールバックテキスト等、投稿者本人が書いた本文ではない合成テキスト）
     // の場合はメンション変換をせずそのまま HTML 化する。通常投稿（override_body なし）はここで
@@ -483,26 +510,22 @@ pub async fn deliver_post_to_ap_followers(
     let (content_html, tag): (String, Vec<serde_json::Value>) = if override_body.is_some() {
         (plain_to_html(&body), Vec::new())
     } else {
-        let (converted, mentions) =
-            crate::mention::convert_mentions_for_ap(&body, local_domain, db, &ap_client.http).await;
-        let html = plain_to_html_with_mentions(&converted, &mentions);
-        let tag = crate::mention::ap_inline_mentions_to_tag_json(&mentions);
-        (html, tag)
+        html_and_tags_for_body(&body, local_domain, db, ap_client).await
     };
 
-    let addr = local_actor_address(local_domain, &username);
+    let addr = local_actor_address(local_domain, &basis.username);
     let activity = build_create_note_activity(
         &addr,
         &NoteActivityParams {
             local_domain,
             post_id,
             content_html: &content_html,
-            published: &created_at.to_rfc3339(),
-            attachments,
+            published: &basis.created_at.to_rfc3339(),
+            attachments: basis.attachments,
             quote_url,
             in_reply_to,
-            seiran_uuid: seiran_uuid.as_deref(),
-            visibility: &visibility,
+            seiran_uuid: basis.seiran_uuid.as_deref(),
+            visibility: &basis.visibility,
             tag,
             direct_recipients: &[],
         },
@@ -510,7 +533,7 @@ pub async fn deliver_post_to_ap_followers(
 
     fan_out_activity(
         ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
-        &format!("Create(Note) post_id={} username={}", post_id, username),
+        &format!("Create(Note) post_id={} username={}", post_id, basis.username),
     )
     .await
 }
@@ -526,22 +549,7 @@ pub async fn deliver_direct_message_to_ap(
     local_domain: &str,
     ap_private_key_pem: &str,
 ) -> Result<(), ApError> {
-    let row = sqlx::query(
-        "SELECT p.body, p.created_at, a.username
-         FROM posts p JOIN actors a ON a.id = p.actor_id
-         WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .fetch_optional(db)
-    .await
-    .map_err(|e| ApError::Other(format!("投稿情報取得エラー: {}", e)))?
-    .ok_or_else(|| ApError::Other(format!("投稿 {} が見つかりません", post_id)))?;
-
-    let body: String = row.try_get("body").map_err(|e| ApError::Other(e.to_string()))?;
-    let created_at: chrono::DateTime<chrono::Utc> =
-        row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
-    let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
+    let basis = fetch_post_activity_basis(db, post_id, actor_id).await?;
 
     let recipient_rows = sqlx::query(
         "SELECT a.ap_uri, a.ap_inbox_url
@@ -566,21 +574,17 @@ pub async fn deliver_direct_message_to_ap(
         .filter_map(|r| r.try_get::<String, _>("ap_inbox_url").ok())
         .collect();
 
-    let attachments = fetch_attachment_documents(db, post_id).await?;
-    let (converted, mentions) =
-        crate::mention::convert_mentions_for_ap(&body, local_domain, db, &ap_client.http).await;
-    let content_html = plain_to_html_with_mentions(&converted, &mentions);
-    let tag = crate::mention::ap_inline_mentions_to_tag_json(&mentions);
+    let (content_html, tag) = html_and_tags_for_body(&basis.body, local_domain, db, ap_client).await;
 
-    let addr = local_actor_address(local_domain, &username);
+    let addr = local_actor_address(local_domain, &basis.username);
     let activity = build_create_note_activity(
         &addr,
         &NoteActivityParams {
             local_domain,
             post_id,
             content_html: &content_html,
-            published: &created_at.to_rfc3339(),
-            attachments,
+            published: &basis.created_at.to_rfc3339(),
+            attachments: basis.attachments,
             quote_url: None,
             in_reply_to: None,
             seiran_uuid: None,
@@ -592,7 +596,7 @@ pub async fn deliver_direct_message_to_ap(
 
     fan_out_activity(
         ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
-        &format!("Create(Note DM) post_id={} username={}", post_id, username),
+        &format!("Create(Note DM) post_id={} username={}", post_id, basis.username),
     )
     .await
 }

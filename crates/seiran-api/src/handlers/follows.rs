@@ -1,4 +1,4 @@
-use axum::{extract::State, http::HeaderMap, http::StatusCode, response::IntoResponse, Json};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -7,8 +7,7 @@ use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 use seiran_common::repository::Actor;
 
-use crate::error::ApiError;
-use crate::middleware::{extract_auth, AuthedUser};
+use crate::middleware::AuthedUser;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -29,44 +28,39 @@ pub struct FollowResponse {
 }
 
 pub async fn create_follow(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(req): Json<CreateFollowRequest>,
 ) -> impl IntoResponse {
-    let auth_user = match extract_auth(&headers, &state.local_auth).await {
-        Ok(u) => u,
-        Err(e) => return e.into_response(),
-    };
-
     let t = req.target.trim().trim_start_matches('@');
 
     // HTTP(S) URI → Fedi AP フォロー（ATP ハンドル判定より先に弾く）
     if t.starts_with("https://") || t.starts_with("http://") {
-        return follow_fedi(t, auth_user.user_id, &state).await.into_response();
+        return follow_fedi(t, user.actor_id, &user.username, &state).await.into_response();
     }
 
     // DID 形式 → Bsky ATP フォロー
     if t.starts_with("did:") {
-        return follow_bsky(t, auth_user.user_id, &state).await.into_response();
+        return follow_bsky(t, user.actor_id, &state).await.into_response();
     }
 
     // ATP ハンドル（ドット含み・@なし・http なし）→ Bsky ATP フォロー
     if t.contains('.') && !t.contains('@') {
-        return follow_bsky(t, auth_user.user_id, &state).await.into_response();
+        return follow_bsky(t, user.actor_id, &state).await.into_response();
     }
 
     // ローカルユーザー名（@ なし・ドットなし）→ ローカルフォロー
     let parts: Vec<&str> = t.splitn(2, '@').collect();
     if parts.len() == 1 {
-        return follow_local(parts[0], auth_user.user_id, &state).await.into_response();
+        return follow_local(parts[0], user.actor_id, &state).await.into_response();
     }
     // `alice@seiran.org` → ローカルフォロー
     if parts.len() == 2 && parts[1] == state.local_domain {
-        return follow_local(parts[0], auth_user.user_id, &state).await.into_response();
+        return follow_local(parts[0], user.actor_id, &state).await.into_response();
     }
 
     // Fedi リモート (`alice@mastodon.social`)
-    follow_fedi(t, auth_user.user_id, &state).await.into_response()
+    follow_fedi(t, user.actor_id, &user.username, &state).await.into_response()
 }
 
 pub async fn delete_follow(
@@ -187,16 +181,10 @@ pub async fn unfollow_target(
 }
 
 /// ローカルユーザーへのフォロー（ATP コミット + follows テーブル accepted）
-async fn follow_local(username: &str, user_id: i64, state: &AppState) -> impl IntoResponse {
-    let local_actor = match state.actors.find_local_by_user_id(user_id).await {
-        Ok(Some(a)) => a,
-        Ok(None) => return ApiError::NotFound("ACTOR_NOT_FOUND").into_response(),
-        Err(e) => {
-            tracing::error!("[follow/local] ローカルアクター取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-
+///
+/// `local_actor_id` は `AuthedUser` extractor が既に解決済みのため、ここで改めて
+/// `find_local_by_user_id` を呼ばない（重複クエリの排除）。
+async fn follow_local(username: &str, local_actor_id: i64, state: &AppState) -> impl IntoResponse {
     let target_actor = match state.actors.find_by_username_domain(username, &state.local_domain).await {
         Ok(Some(a)) => a,
         Ok(None) => return (StatusCode::NOT_FOUND, "ターゲットユーザーが見つかりません").into_response(),
@@ -206,7 +194,7 @@ async fn follow_local(username: &str, user_id: i64, state: &AppState) -> impl In
         }
     };
 
-    if local_actor.id == target_actor.id {
+    if local_actor_id == target_actor.id {
         return (StatusCode::BAD_REQUEST, "自分自身はフォローできません").into_response();
     }
 
@@ -216,7 +204,7 @@ async fn follow_local(username: &str, user_id: i64, state: &AppState) -> impl In
     };
 
     let now = chrono::Utc::now();
-    let rkey = match state.atp_service.commit_follow(local_actor.id, &target_did, now).await {
+    let rkey = match state.atp_service.commit_follow(local_actor_id, &target_did, now).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[follow/local] ATP commit 失敗: {}", e);
@@ -224,12 +212,12 @@ async fn follow_local(username: &str, user_id: i64, state: &AppState) -> impl In
         }
     };
 
-    if let Err(e) = state.follows.insert_accepted_bsky(local_actor.id, target_actor.id, &rkey).await {
+    if let Err(e) = state.follows.insert_accepted_bsky(local_actor_id, target_actor.id, &rkey).await {
         tracing::error!("[follow/local] follows INSERT 失敗: {}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
     }
 
-    tracing::info!("[follow/local] {} → {} ローカルフォロー完了 (rkey={})", local_actor.id, target_actor.id, rkey);
+    tracing::info!("[follow/local] {} → {} ローカルフォロー完了 (rkey={})", local_actor_id, target_actor.id, rkey);
 
     Json(FollowResponse {
         status: "accepted".to_string(),
@@ -239,16 +227,7 @@ async fn follow_local(username: &str, user_id: i64, state: &AppState) -> impl In
 }
 
 /// Bsky リモートユーザーへの ATP フォロー（DID またはハンドル）
-async fn follow_bsky(actor_id_or_handle: &str, user_id: i64, state: &AppState) -> impl IntoResponse {
-    let local_actor = match state.actors.find_local_by_user_id(user_id).await {
-        Ok(Some(a)) => a,
-        Ok(None) => return ApiError::NotFound("ACTOR_NOT_FOUND").into_response(),
-        Err(e) => {
-            tracing::error!("[follow/bsky] ローカルアクター取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-
+async fn follow_bsky(actor_id_or_handle: &str, local_actor_id: i64, state: &AppState) -> impl IntoResponse {
     // AppView からプロフィール情報を取得（DID 解決 + アクター登録用）
     let bsky_resp = match fetch_bsky_profile(&state.http_client, actor_id_or_handle).await {
         Ok(p) => p,
@@ -271,7 +250,7 @@ async fn follow_bsky(actor_id_or_handle: &str, user_id: i64, state: &AppState) -
         }
     };
 
-    let rkey = match state.atp_service.commit_follow(local_actor.id, &did, now).await {
+    let rkey = match state.atp_service.commit_follow(local_actor_id, &did, now).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[follow/bsky] ATP commit 失敗: {}", e);
@@ -279,12 +258,12 @@ async fn follow_bsky(actor_id_or_handle: &str, user_id: i64, state: &AppState) -
         }
     };
 
-    if let Err(e) = state.follows.insert_accepted_bsky(local_actor.id, remote_actor_id, &rkey).await {
+    if let Err(e) = state.follows.insert_accepted_bsky(local_actor_id, remote_actor_id, &rkey).await {
         tracing::error!("[follow/bsky] follows INSERT 失敗: {}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
     }
 
-    tracing::info!("[follow/bsky] {} → {} フォロー完了 (rkey={})", local_actor.id, did, rkey);
+    tracing::info!("[follow/bsky] {} → {} フォロー完了 (rkey={})", local_actor_id, did, rkey);
 
     // Jetstream の wantedDids 絞り込みリストにこの DID を加えるため再構築を促す。
     touch_jetstream_wanted_dids(&state.db).await;
@@ -300,16 +279,7 @@ async fn follow_bsky(actor_id_or_handle: &str, user_id: i64, state: &AppState) -
 }
 
 /// Fedi リモートユーザーへの AP フォロー
-async fn follow_fedi(target: &str, user_id: i64, state: &AppState) -> impl IntoResponse {
-    let local_actor = match state.actors.find_local_by_user_id(user_id).await {
-        Ok(Some(a)) => a,
-        Ok(None) => return ApiError::NotFound("ACTOR_NOT_FOUND").into_response(),
-        Err(e) => {
-            tracing::error!("[follow/fedi] ローカルアクター取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
-
+async fn follow_fedi(target: &str, local_actor_id: i64, local_username: &str, state: &AppState) -> impl IntoResponse {
     let target_uri = match resolve_target_uri(state, target).await {
         Ok(uri) => uri,
         Err(e) => {
@@ -357,12 +327,12 @@ async fn follow_fedi(target: &str, user_id: i64, state: &AppState) -> impl IntoR
         }
     };
 
-    if let Err(e) = state.follows.upsert_pending(local_actor.id, remote_actor_id).await {
+    if let Err(e) = state.follows.upsert_pending(local_actor_id, remote_actor_id).await {
         tracing::error!("[follow/fedi] follows INSERT 失敗: {}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
     }
 
-    let local_actor_uri = format!("https://{}/users/{}", state.local_domain, local_actor.username);
+    let local_actor_uri = format!("https://{}/users/{}", state.local_domain, local_username);
     let actor_key_id = format!("{}#main-key", local_actor_uri);
     let follow_id = format!("https://{}/activities/follow/{}", state.local_domain, remote_actor_id);
     let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();

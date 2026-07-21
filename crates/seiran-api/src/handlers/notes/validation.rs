@@ -105,7 +105,27 @@ pub fn strip_html_tags(html: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{strip_html_tags, validate_reaction_content, validate_text_length};
+    use super::{strip_html_tags, validate_dm_text_length, validate_reaction_content, validate_text_length};
+
+    #[test]
+    fn validate_dm_text_length_bsky_recipient_uses_tighter_grapheme_limit() {
+        // Bsky宛先ありは1,000grapheme上限。Fedi宛のみなら許容される長さでも弾く。
+        let text = "a".repeat(super::BSKY_DM_MAX_TEXT_GRAPHEMES + 1);
+        assert!(validate_dm_text_length(&text, true).is_err());
+        assert!(validate_dm_text_length(&text, false).is_ok());
+    }
+
+    #[test]
+    fn validate_dm_text_length_within_limit_ok() {
+        assert!(validate_dm_text_length("こんにちは", true).is_ok());
+        assert!(validate_dm_text_length("こんにちは", false).is_ok());
+    }
+
+    #[test]
+    fn validate_dm_text_length_bsky_recipient_at_exact_boundary_ok() {
+        let text = "a".repeat(super::BSKY_DM_MAX_TEXT_GRAPHEMES);
+        assert!(validate_dm_text_length(&text, true).is_ok());
+    }
 
     #[test]
     fn validate_text_length_bsky_checks_converted_text_not_raw() {

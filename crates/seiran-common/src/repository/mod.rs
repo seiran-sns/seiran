@@ -33,8 +33,8 @@ pub use media_file::{
 pub use notification::{NotificationKind, NotificationRepository, NotificationRow, PgNotificationRepository};
 pub use pinned_post::{PgPinnedPostsRepository, PinnedPostsRepository, MAX_PINNED_POSTS};
 pub use post::{
-    DmSessionSummary, PgPostRepository, PostDeliveryMeta, PostRecord, PostRepository, PostSummary,
-    RepostUndoInfo, TimelinePost,
+    DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, PgPostRepository, PostDeliveryMeta,
+    PostRecord, PostRepository, PostSummary, RepostUndoInfo, TimelinePost,
 };
 pub use reaction::{PgReactionRepository, ReactionRepository};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};

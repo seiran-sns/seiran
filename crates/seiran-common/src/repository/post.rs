@@ -111,6 +111,43 @@ pub struct RepostUndoInfo {
     pub orig_at_uri: Option<String>,
 }
 
+/// `PostRepository::insert_full` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
+pub struct InsertFullParams<'a> {
+    pub id: i64,
+    pub actor_id: i64,
+    pub body: &'a str,
+    pub ap_object_id: &'a str,
+    pub seiran_post_uuid: &'a str,
+    pub reply_to_post_id: Option<i64>,
+    pub quote_of_post_id: Option<i64>,
+    pub created_at: DateTime<Utc>,
+    pub visibility: &'a str,
+    pub deliver_fedi: bool,
+    pub deliver_bsky: bool,
+    /// `visibility='direct'`（DM）専用。direct以外は`None`を渡すこと。
+    pub thread_root_post_id: Option<i64>,
+    /// `visibility='direct'`（DM）専用。direct以外は空スライスを渡すこと。
+    pub recipient_actor_ids: &'a [i64],
+}
+
+/// `PostRepository::insert_remote_with_dedup` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
+pub struct InsertRemoteWithDedupParams<'a> {
+    pub id: i64,
+    pub actor_id: i64,
+    pub body: &'a str,
+    pub ap_object_id: &'a str,
+    pub seiran_uuid: Option<&'a str>,
+    pub parent_original_post_id: Option<i64>,
+    pub created_at: DateTime<Utc>,
+    pub emoji_map: &'a serde_json::Value,
+    pub visibility: &'a str,
+    pub reply_to_post_id: Option<i64>,
+    /// `visibility='direct'`（DM）専用。direct以外は`None`を渡すこと。
+    pub thread_root_post_id: Option<i64>,
+    /// `visibility='direct'`（DM）専用。direct以外は空スライスを渡すこと。
+    pub recipient_actor_ids: &'a [i64],
+}
+
 #[async_trait]
 pub trait PostRepository: Send + Sync {
     /// 新規ポストを挿入する。
@@ -234,23 +271,7 @@ pub trait PostRepository: Send + Sync {
     /// `thread_root_post_id`/`recipient_actor_ids` は`visibility='direct'`（DM）専用
     /// （direct以外は`None`/空スライスを渡すこと）。`recipient_actor_ids`は同一トランザクション内で
     /// `post_recipients` へも一括挿入する。
-    #[allow(clippy::too_many_arguments)]
-    async fn insert_full(
-        &self,
-        id: i64,
-        actor_id: i64,
-        body: &str,
-        ap_object_id: &str,
-        seiran_post_uuid: &str,
-        reply_to_post_id: Option<i64>,
-        quote_of_post_id: Option<i64>,
-        created_at: DateTime<Utc>,
-        visibility: &str,
-        deliver_fedi: bool,
-        deliver_bsky: bool,
-        thread_root_post_id: Option<i64>,
-        recipient_actor_ids: &[i64],
-    ) -> Result<(), sqlx::Error>;
+    async fn insert_full(&self, params: InsertFullParams<'_>) -> Result<(), sqlx::Error>;
 
     /// リポストレコードを挿入する（`UNIQUE(actor_id, repost_of_post_id)` 制約違反はそのまま呼び出し元へ伝播する）。
     /// `visibility` は元ポストから継承した値（"public"|"unlisted"）。呼び出し元が
@@ -318,22 +339,7 @@ pub trait PostRepository: Send + Sync {
     /// `reply_to_post_id`はAP `inReplyTo`から解決した親ポストID（Fedi受信投稿にも設定する）。
     /// `thread_root_post_id`/`recipient_actor_ids`は`visibility='direct'`（DM受信）専用
     /// （direct以外は`None`/空スライスを渡すこと）。
-    #[allow(clippy::too_many_arguments)]
-    async fn insert_remote_with_dedup(
-        &self,
-        id: i64,
-        actor_id: i64,
-        body: &str,
-        ap_object_id: &str,
-        seiran_uuid: Option<&str>,
-        parent_original_post_id: Option<i64>,
-        created_at: DateTime<Utc>,
-        emoji_map: &serde_json::Value,
-        visibility: &str,
-        reply_to_post_id: Option<i64>,
-        thread_root_post_id: Option<i64>,
-        recipient_actor_ids: &[i64],
-    ) -> Result<(), sqlx::Error>;
+    async fn insert_remote_with_dedup(&self, params: InsertRemoteWithDedupParams<'_>) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgPostRepository {
@@ -762,49 +768,33 @@ impl PostRepository for PgPostRepository {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn insert_full(
-        &self,
-        id: i64,
-        actor_id: i64,
-        body: &str,
-        ap_object_id: &str,
-        seiran_post_uuid: &str,
-        reply_to_post_id: Option<i64>,
-        quote_of_post_id: Option<i64>,
-        created_at: DateTime<Utc>,
-        visibility: &str,
-        deliver_fedi: bool,
-        deliver_bsky: bool,
-        thread_root_post_id: Option<i64>,
-        recipient_actor_ids: &[i64],
-    ) -> Result<(), sqlx::Error> {
+    async fn insert_full(&self, params: InsertFullParams<'_>) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky, thread_root_post_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11, $12)",
         )
-        .bind(id)
-        .bind(actor_id)
-        .bind(body)
-        .bind(ap_object_id)
-        .bind(seiran_post_uuid)
-        .bind(reply_to_post_id)
-        .bind(quote_of_post_id)
-        .bind(created_at)
-        .bind(visibility)
-        .bind(deliver_fedi)
-        .bind(deliver_bsky)
-        .bind(thread_root_post_id)
+        .bind(params.id)
+        .bind(params.actor_id)
+        .bind(params.body)
+        .bind(params.ap_object_id)
+        .bind(params.seiran_post_uuid)
+        .bind(params.reply_to_post_id)
+        .bind(params.quote_of_post_id)
+        .bind(params.created_at)
+        .bind(params.visibility)
+        .bind(params.deliver_fedi)
+        .bind(params.deliver_bsky)
+        .bind(params.thread_root_post_id)
         .execute(&mut *tx)
         .await?;
 
-        if !recipient_actor_ids.is_empty() {
+        if !params.recipient_actor_ids.is_empty() {
             sqlx::query(
                 "INSERT INTO post_recipients (post_id, actor_id) SELECT $1, unnest($2::bigint[])",
             )
-            .bind(id)
-            .bind(recipient_actor_ids)
+            .bind(params.id)
+            .bind(params.recipient_actor_ids)
             .execute(&mut *tx)
             .await?;
         }
@@ -957,49 +947,34 @@ impl PostRepository for PgPostRepository {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn insert_remote_with_dedup(
-        &self,
-        id: i64,
-        actor_id: i64,
-        body: &str,
-        ap_object_id: &str,
-        seiran_uuid: Option<&str>,
-        parent_original_post_id: Option<i64>,
-        created_at: DateTime<Utc>,
-        emoji_map: &serde_json::Value,
-        visibility: &str,
-        reply_to_post_id: Option<i64>,
-        thread_root_post_id: Option<i64>,
-        recipient_actor_ids: &[i64],
-    ) -> Result<(), sqlx::Error> {
+    async fn insert_remote_with_dedup(&self, params: InsertRemoteWithDedupParams<'_>) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let result = sqlx::query(
             "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::post_visibility_enum)
              ON CONFLICT (ap_object_id) DO NOTHING",
         )
-        .bind(id)
-        .bind(actor_id)
-        .bind(body)
-        .bind(ap_object_id)
-        .bind(seiran_uuid)
-        .bind(parent_original_post_id)
-        .bind(reply_to_post_id)
-        .bind(thread_root_post_id)
-        .bind(created_at)
-        .bind(emoji_map)
-        .bind(visibility)
+        .bind(params.id)
+        .bind(params.actor_id)
+        .bind(params.body)
+        .bind(params.ap_object_id)
+        .bind(params.seiran_uuid)
+        .bind(params.parent_original_post_id)
+        .bind(params.reply_to_post_id)
+        .bind(params.thread_root_post_id)
+        .bind(params.created_at)
+        .bind(params.emoji_map)
+        .bind(params.visibility)
         .execute(&mut *tx)
         .await?;
 
         // ON CONFLICT DO NOTHINGで重複スキップされた場合はpost_recipientsも書き込まない。
-        if result.rows_affected() > 0 && !recipient_actor_ids.is_empty() {
+        if result.rows_affected() > 0 && !params.recipient_actor_ids.is_empty() {
             sqlx::query(
                 "INSERT INTO post_recipients (post_id, actor_id) SELECT $1, unnest($2::bigint[])",
             )
-            .bind(id)
-            .bind(recipient_actor_ids)
+            .bind(params.id)
+            .bind(params.recipient_actor_ids)
             .execute(&mut *tx)
             .await?;
         }
