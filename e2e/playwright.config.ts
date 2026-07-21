@@ -34,6 +34,9 @@ const backendEnv: Record<string, string> = {
   CLOUDFLARE_API_TOKEN: "",
   CLOUDFLARE_ZONE_ID: "",
   REDIS_URL: "",
+  // Bsky側フォロワー検知ポーリング（`bsky_follower_poll`）の間隔。デフォルト60秒だと
+  // E2Eのタイムアウト（15秒）内に検知されないため短縮する。
+  BSKY_FOLLOWER_POLL_INTERVAL_SECS: "2",
   SEIRAN_CONFIG_DIR: path.join(e2eDir, ".tmp-config"),
   // sqlx::query! はコンパイル時にDBへ接続してスキーマ検証する。E2E専用DBはこの時点では
   // マイグレーション未適用（マイグレーションはbackend起動時に自動実行される）なので、

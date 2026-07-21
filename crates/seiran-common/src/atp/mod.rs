@@ -6,9 +6,9 @@ pub mod service;
 pub mod service_auth;
 
 pub use client::{
-    fetch_atp_history, fetch_single_bsky_post, fetch_bsky_profile, search_appview_posts,
+    fetch_atp_history, fetch_single_bsky_post, fetch_bsky_profile, fetch_bsky_followers, search_appview_posts,
     create_atp_session, create_atp_post, upsert_bsky_post,
-    BskyPost, BskyProfile, BskyPinnedPostRef, AtpSession,
+    BskyPost, BskyProfile, BskyPinnedPostRef, BskyFollowerProfile, AtpSession,
 };
 pub use plc::{prepare_plc_genesis, submit_plc_genesis, plc_directory_base_url, PlcGenesis, p256_to_did_key, signing_key_from_pem, PlcError};
 pub use repo::{

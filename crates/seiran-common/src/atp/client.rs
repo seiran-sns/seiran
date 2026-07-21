@@ -341,6 +341,62 @@ pub async fn fetch_bsky_profile(client: &reqwest::Client, actor: &str) -> Result
         .map_err(|e| format!("getProfile パースエラー: {}", e))
 }
 
+/// `app.bsky.graph.getFollowers` レスポンスの `followers` 配列の1要素。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BskyFollowerProfile {
+    pub did: String,
+    pub handle: String,
+    pub display_name: Option<String>,
+    pub avatar: Option<String>,
+}
+
+/// AppView `app.bsky.graph.getFollowers` でフォロワー一覧をページングして取得する。
+///
+/// 認証不要の公開エンドポイント。`bsky_follower_poll` がローカルユーザーごとに定期ポーリング
+/// する用途（Jetstream の `wantedDids` はフォロー元を事前検知できないため、この方式で
+/// リモート Bsky アクターからのフォローを検知する）。
+/// 戻り値: (フォロワー一覧, 次ページカーソル)。
+pub async fn fetch_bsky_followers(
+    client: &reqwest::Client,
+    actor_did: &str,
+    cursor: Option<&str>,
+    limit: u32,
+) -> Result<(Vec<BskyFollowerProfile>, Option<String>), String> {
+    let mut url = format!(
+        "{}/xrpc/app.bsky.graph.getFollowers?actor={}&limit={}",
+        appview_base_url(),
+        urlencoding::encode(actor_did),
+        limit
+    );
+    if let Some(c) = cursor {
+        url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
+    }
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("getFollowers HTTP エラー: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("getFollowers 失敗 ({}): actor={}", resp.status(), actor_did));
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct GetFollowersResp {
+        followers: Vec<BskyFollowerProfile>,
+        cursor: Option<String>,
+    }
+
+    let body: GetFollowersResp = resp
+        .json()
+        .await
+        .map_err(|e| format!("getFollowers パースエラー: {}", e))?;
+
+    Ok((body.followers, body.cursor))
+}
+
 /// AppView `app.bsky.feed.searchPosts` でポストを全文検索する。
 ///
 /// 戻り値: (at_uri リスト, 次ページカーソル)。エラー時は空リストを返す（呼び出し元は

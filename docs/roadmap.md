@@ -68,6 +68,6 @@
 - [x] リスト機能（`/settings/lists`）のE2E化（作成・改名・メンバー追加/削除・削除）
 - [x] クイック通知（ホーム右ペイン`NotificationsPanel`）のE2E化（他ユーザーのリアクションがWS経由でリアルタイムに一覧へ反映されることを検証）。`NotificationsPage`（`/notifications`）自体は依然プレースホルダで未実装
 - [x] ピン留め・リポスト取消のUI側状態変化のE2E化（ボタン表示のトグル確認）
-- [ ] Bsky側の配送E2E（ローカルPDSコミット自体は既存テストで間接的に検証済みだが、リモートBskyアクターからのフォロー受理を経由した配送は未検証）
+- [x] Bsky側の配送E2E（リモートBskyアクターからのフォロー受理をポーリング方式（`getFollowers`、`seiran-atp-repo::bsky_follower_poll`）で検知し、投稿の`subscribeRepos`配送までを通しで検証）
 
 既存の結合テスト基盤: `crates/seiran-api/tests/`（実DB + 実 `seiran_api::router` を使用、`#[ignore]` で通常の `cargo test` から除外し `cargo test -p seiran-api --test <name> -- --ignored` で明示実行）。

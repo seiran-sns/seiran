@@ -79,3 +79,20 @@ export async function seedAuth(page: Page, token: string): Promise<void> {
     window.localStorage.setItem("seiran_token", t);
   }, token);
 }
+
+/**
+ * 自分自身の AT Protocol DID（`at_did`）を取得する。`GET /api/users/profile?q={username}`
+ * のレスポンス（`ProfileResponse.at_did`、`crates/seiran-api/src/handlers/users.rs`）から
+ * 取り出すだけ。DID は Bsky側フォロワーポーリング（`getFollowers`）・`subscribeRepos`
+ * 購読の対象アクター指定に使う。
+ */
+export async function getOwnDid(request: APIRequestContext, token: string, username: string): Promise<string> {
+  const res = await request.get(`/api/users/profile?q=${encodeURIComponent(username)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(res.ok(), `profile取得failed: ${res.status()} ${await res.text()}`).toBeTruthy();
+  const body = await res.json();
+  const atDid = body.at_did as string | null;
+  expect(atDid, `${username} の at_did が未設定`).toBeTruthy();
+  return atDid!;
+}
