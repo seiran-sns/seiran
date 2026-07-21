@@ -1,8 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 import { startStubFediServer, type StubFediServer } from "../fixtures/stub-fedi-server";
-
-const SEIRAN_BASE_URL = "http://localhost:3000";
+import { BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 
 test("ローカルユーザー同士のDM送受信・タイムライン除外・既読バッジ", async ({ page, request, browser }) => {
   const alice = await registerUserViaApi(request, "e2dmalice");

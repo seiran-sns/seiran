@@ -1,20 +1,19 @@
 import { defineConfig } from "@playwright/test";
 import path from "node:path";
+import { BACKEND_PORT as backendPort, FRONTEND_PORT as frontendPort, PLC_STUB_PORT as plcStubPort, APPVIEW_STUB_PORT as appviewStubPort } from "./ports.ts";
 
 const e2eDir = path.dirname(new URL(import.meta.url).pathname);
 const repoRoot = path.resolve(e2eDir, "..");
 
-const plcStubPort = Number(process.env.PLC_STUB_PORT ?? "2582");
-const appviewStubPort = Number(process.env.APPVIEW_STUB_PORT ?? "2583");
-const backendPort = 3000;
-const frontendPort = 5173;
-
 // 【重要・変更禁止】webServer 各エントリの reuseExistingServer は必ず false にすること。
-// backendPort(3000)/frontendPort(5173) は scripts/dev-up.sh のネイティブ開発サーバーとも
-// 共有しているため、true にすると「既に起動している別プロセス」を無条件に流用してしまう。
-// 2026-07-20、まさにこれが起きて本物の開発サーバー（本物の開発DB・本物のplc.directory・
-// 本物のBsky Relayに接続）にE2Eが相乗りし、開発DBに48件のテストユーザーが混入・実PLC
-// ディレクトリを汚染する事故になった。false ならポート競合時に明確なエラーで止まるので安全。
+// backendPort/frontendPort は ports.ts で scripts/dev-up.sh のネイティブ開発サーバー
+// （3000/5173）とは別のポート（3100/5273）に意図的に分離しているため、E2E実行中も
+// 開発サーバーを止めなくてよい。ただし reuseExistingServer を true にすると、万一
+// 手元で同じポートに何か別プロセスが立っていた場合にそれへ無条件で相乗りしてしまう。
+// 2026-07-20、開発サーバーとポートが重複した状態でこれが起き、本物の開発DB・本物の
+// plc.directory・本物のBsky Relayに接続している開発サーバーにE2Eが相乗りし、開発DBに
+// 48件のテストユーザーが混入・実PLCディレクトリを汚染する事故になった。
+// false ならポート競合時に明確なエラーで止まるので安全。
 
 // バックエンドが `cargo run` 起動時に dotenvy でリポジトリルートの実 .env を読み込むため、
 // ここで明示的に上書きしない値（REDIS_URL 以外）は本物の .env の値が漏れてくる。
@@ -96,6 +95,7 @@ export default defineConfig({
     {
       command: "npm run dev",
       cwd: path.join(repoRoot, "frontend"),
+      env: { FRONTEND_PORT: String(frontendPort), BACKEND_PORT: String(backendPort) },
       port: frontendPort,
       reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },

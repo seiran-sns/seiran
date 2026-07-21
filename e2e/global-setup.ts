@@ -8,7 +8,7 @@
 // 起動・readyになった後に実行される（playwright.config.ts の該当コメント参照）ため、
 // backendへ直接HTTPで先に1人登録しておくことで、以降の全テストを通常の画面遷移で
 // 開始できるようにする。
-const BACKEND_URL = "http://localhost:3000";
+import { BACKEND_URL } from "./ports.ts";
 
 export default async function globalSetup() {
   const statusRes = await fetch(`${BACKEND_URL}/api/setup/status`);

@@ -2,13 +2,13 @@ import { test, expect } from "@playwright/test";
 import { registerUserViaApi, seedAuth, getOwnDid } from "../fixtures/api-helpers";
 import { registerBskyFollowers } from "../fixtures/stub-appview-control";
 import { waitForBskyFeedPost } from "../fixtures/subscribe-repos-client";
+import { BACKEND_URL as SEIRAN_BASE_URL, APPVIEW_STUB_PORT } from "../ports.ts";
 
 // Bsky側の配送E2E（docs/roadmap.md）: リモートBskyアクターからのフォロー受理を
 // `bsky_follower_poll`（`app.bsky.graph.getFollowers` ポーリング、間隔は playwright.config.ts の
 // backendEnv.BSKY_FOLLOWER_POLL_INTERVAL_SECS=2 で短縮済み）経由で検知できること、
 // および検知後の投稿が `subscribeRepos` で正しく配送されることを一気通貫で検証する。
-const SEIRAN_BASE_URL = "http://localhost:3000";
-const APPVIEW_BASE_URL = `http://127.0.0.1:${process.env.APPVIEW_STUB_PORT ?? "2583"}`;
+const APPVIEW_BASE_URL = `http://127.0.0.1:${APPVIEW_STUB_PORT}`;
 
 // NotificationsPanel（クイック通知）はHomePageの右ペインにあり、AppShellのレスポンシブCSSに
 // より既定のテストビューポート（1280px）幅では非表示になる。右ペインが表示される幅を指定する。

@@ -1,12 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 import { startStubFediServer, type StubFediServer } from "../fixtures/stub-fedi-server";
+import { BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 
 // Fedi配送は「自分のacceptedフォロワー全員へ配送」という単一の仕組みで、通常投稿・返信・
 // リポストいずれも同じフォロワーファンアウト経路を通る
 // (crates/seiran-common/src/ap/deliver.rs の fetch_fedi_follower_inboxes/fan_out_activity)。
 // そのためスタブアクターに事前にフォローさせておけば、配送先inboxで受信内容を検証できる。
-const SEIRAN_BASE_URL = "http://localhost:3000";
 
 async function followAndWaitAccepted(fedi: StubFediServer, username: string) {
   await fedi.sendFollow(SEIRAN_BASE_URL, username);
