@@ -36,6 +36,9 @@ pub enum ApiError {
     Forbidden(&'static str),
     #[error("{0}")]
     ServiceUnavailable(&'static str),
+    /// 上流（リモートサーバー・外部 AppView 等）からの取得・応答に失敗した場合（HTTP 502）
+    #[error("{0}")]
+    BadGateway(String),
     /// ストレージプロバイダーのクォータ超過（HTTP 507）
     #[error("ストレージ容量が不足しています")]
     InsufficientStorage,
@@ -53,6 +56,7 @@ impl IntoResponse for ApiError {
             ApiError::Conflict(c) => (StatusCode::CONFLICT, c.to_owned()),
             ApiError::Forbidden(c) => (StatusCode::FORBIDDEN, c.to_owned()),
             ApiError::ServiceUnavailable(c) => (StatusCode::SERVICE_UNAVAILABLE, c.to_owned()),
+            ApiError::BadGateway(c) => (StatusCode::BAD_GATEWAY, c),
             ApiError::InsufficientStorage => {
                 (StatusCode::INSUFFICIENT_STORAGE, "STORAGE_QUOTA_EXCEEDED".to_owned())
             }

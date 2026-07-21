@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{extract::State, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -7,6 +7,7 @@ use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 use seiran_common::repository::Actor;
 
+use crate::error::ApiError;
 use crate::middleware::AuthedUser;
 use crate::AppState;
 
@@ -89,10 +90,9 @@ pub async fn delete_follow(
 
     let target_actor = match target_actor {
         Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "ターゲットが見つかりません").into_response(),
+        Ok(None) => return ApiError::NotFound("ターゲットが見つかりません").into_response(),
         Err(e) => {
-            tracing::error!("[unfollow] ターゲット取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(format!("[unfollow] ターゲット取得失敗: {}", e)).into_response();
         }
     };
 
@@ -101,10 +101,7 @@ pub async fn delete_follow(
             tracing::info!("[unfollow] {} → {} アンフォロー完了", local_actor_id, target_actor.id);
             Json(serde_json::json!({"status": "ok"})).into_response()
         }
-        Err(e) => {
-            tracing::error!("[unfollow] {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, e).into_response()
-        }
+        Err(e) => ApiError::Internal(format!("[unfollow] {}", e)).into_response(),
     }
 }
 
@@ -187,34 +184,31 @@ pub async fn unfollow_target(
 async fn follow_local(username: &str, local_actor_id: i64, state: &AppState) -> impl IntoResponse {
     let target_actor = match state.actors.find_by_username_domain(username, &state.local_domain).await {
         Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "ターゲットユーザーが見つかりません").into_response(),
+        Ok(None) => return ApiError::NotFound("ターゲットユーザーが見つかりません").into_response(),
         Err(e) => {
-            tracing::error!("[follow/local] ターゲット取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(format!("[follow/local] ターゲット取得失敗: {}", e)).into_response();
         }
     };
 
     if local_actor_id == target_actor.id {
-        return (StatusCode::BAD_REQUEST, "自分自身はフォローできません").into_response();
+        return ApiError::BadRequest("自分自身はフォローできません".to_owned()).into_response();
     }
 
     let target_did = match target_actor.at_did.as_deref() {
         Some(d) => d.to_string(),
-        None => return (StatusCode::BAD_REQUEST, "ターゲットに ATP DID がありません").into_response(),
+        None => return ApiError::BadRequest("ターゲットに ATP DID がありません".to_owned()).into_response(),
     };
 
     let now = chrono::Utc::now();
     let rkey = match state.atp_service.commit_follow(local_actor_id, &target_did, now).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::error!("[follow/local] ATP commit 失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("ATP コミット失敗: {}", e)).into_response();
+            return ApiError::Internal(format!("[follow/local] ATP コミット失敗: {}", e)).into_response();
         }
     };
 
     if let Err(e) = state.follows.insert_accepted_bsky(local_actor_id, target_actor.id, &rkey).await {
-        tracing::error!("[follow/local] follows INSERT 失敗: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        return ApiError::Internal(format!("[follow/local] follows INSERT 失敗: {}", e)).into_response();
     }
 
     tracing::info!("[follow/local] {} → {} ローカルフォロー完了 (rkey={})", local_actor_id, target_actor.id, rkey);
@@ -233,7 +227,7 @@ async fn follow_bsky(actor_id_or_handle: &str, local_actor_id: i64, state: &AppS
         Ok(p) => p,
         Err(e) => {
             tracing::error!("[follow/bsky] AppView 取得失敗: {}", e);
-            return (StatusCode::BAD_GATEWAY, "Bsky ユーザーが見つかりません").into_response();
+            return ApiError::BadGateway("Bsky ユーザーが見つかりません".to_owned()).into_response();
         }
     };
     let did = bsky_resp.did.clone();
@@ -245,22 +239,19 @@ async fn follow_bsky(actor_id_or_handle: &str, local_actor_id: i64, state: &AppS
     ).await {
         Ok(id) => id,
         Err(e) => {
-            tracing::error!("[follow/bsky] アクター upsert 失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e)).into_response();
         }
     };
 
     let rkey = match state.atp_service.commit_follow(local_actor_id, &did, now).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::error!("[follow/bsky] ATP commit 失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("ATP コミット失敗: {}", e)).into_response();
+            return ApiError::Internal(format!("[follow/bsky] ATP コミット失敗: {}", e)).into_response();
         }
     };
 
     if let Err(e) = state.follows.insert_accepted_bsky(local_actor_id, remote_actor_id, &rkey).await {
-        tracing::error!("[follow/bsky] follows INSERT 失敗: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        return ApiError::Internal(format!("[follow/bsky] follows INSERT 失敗: {}", e)).into_response();
     }
 
     tracing::info!("[follow/bsky] {} → {} フォロー完了 (rkey={})", local_actor_id, did, rkey);
@@ -284,18 +275,18 @@ async fn follow_fedi(target: &str, local_actor_id: i64, local_username: &str, st
         Ok(uri) => uri,
         Err(e) => {
             tracing::error!("[follow/fedi] ターゲット解決失敗: {}", e);
-            return (StatusCode::BAD_REQUEST, format!("ターゲット解決失敗: {}", e)).into_response();
+            return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response();
         }
     };
 
     let remote_ap = match state.ap_client.fetch_actor(&target_uri).await {
         Ok(a) => a,
-        Err(e) => return (StatusCode::BAD_GATEWAY, format!("リモートアクター取得失敗: {}", e)).into_response(),
+        Err(e) => return ApiError::BadGateway(format!("リモートアクター取得失敗: {}", e)).into_response(),
     };
 
     let remote_inbox = match remote_ap.inbox.as_deref() {
         Some(u) => u.to_string(),
-        None => return (StatusCode::BAD_GATEWAY, "リモートアクターに inbox がありません").into_response(),
+        None => return ApiError::BadGateway("リモートアクターに inbox がありません".to_owned()).into_response(),
     };
 
     let remote_avatar_url = remote_ap.avatar_url();
@@ -322,14 +313,12 @@ async fn follow_fedi(target: &str, local_actor_id: i64, local_username: &str, st
     ).await {
         Ok(id) => id,
         Err(e) => {
-            tracing::error!("[follow/fedi] リモートアクター upsert 失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(format!("[follow/fedi] リモートアクター upsert 失敗: {}", e)).into_response();
         }
     };
 
     if let Err(e) = state.follows.upsert_pending(local_actor_id, remote_actor_id).await {
-        tracing::error!("[follow/fedi] follows INSERT 失敗: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+        return ApiError::Internal(format!("[follow/fedi] follows INSERT 失敗: {}", e)).into_response();
     }
 
     let local_actor_uri = format!("https://{}/users/{}", state.local_domain, local_username);
@@ -347,12 +336,12 @@ async fn follow_fedi(target: &str, local_actor_id: i64, local_username: &str, st
 
     let body = match serde_json::to_string(&follow_activity) {
         Ok(b) => b,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("JSON シリアライズ失敗: {}", e)).into_response(),
+        Err(e) => return ApiError::Internal(format!("[follow/fedi] JSON シリアライズ失敗: {}", e)).into_response(),
     };
 
     if let Err(e) = state.ap_client.sign_and_post(&remote_inbox, &body, &actor_key_id, &ap_private_key_pem).await {
         tracing::error!("[follow/fedi] Follow 送信失敗: {}", e);
-        return (StatusCode::BAD_GATEWAY, format!("Follow 送信失敗: {}", e)).into_response();
+        return ApiError::BadGateway(format!("Follow 送信失敗: {}", e)).into_response();
     }
 
     tracing::info!("[follow/fedi] {} → {} Follow 送信完了 (pending)", local_actor_uri, target_uri);
