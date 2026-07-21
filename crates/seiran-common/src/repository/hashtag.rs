@@ -28,6 +28,7 @@ pub trait HashtagRepository: Send + Sync {
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// ホーム画面タブへのピン留め（既に存在するタグ名を渡してもよい。無ければ作成する）。
@@ -92,6 +93,7 @@ impl HashtagRepository for PgHashtagRepository {
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
@@ -109,12 +111,14 @@ impl HashtagRepository for PgHashtagRepository {
                AND p.visibility IN ('public', 'unlisted')
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
+               AND ($5::bigint IS NULL OR p.actor_id = $5 OR NOT actor_is_hidden_for_viewer($5, p.actor_id))
              ORDER BY p.id DESC LIMIT $4",
         )
         .bind(tag_name)
         .bind(until_id)
         .bind(since_id)
         .bind(limit)
+        .bind(viewer_actor_id)
         .fetch_all(&self.pool)
         .await
     }

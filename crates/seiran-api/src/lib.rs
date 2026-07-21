@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, DmRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgDmRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AtpReadRepository, BlockRepository, DmRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -47,6 +47,10 @@ pub struct AppState {
     pub users: Arc<dyn UserRepository>,
     pub posts: Arc<dyn PostRepository>,
     pub follows: Arc<dyn FollowRepository>,
+    /// ブロック関係（Bsky準拠：フォロー強制解除＋相互完全非表示）。
+    pub blocks: Arc<dyn BlockRepository>,
+    /// ミュート関係（ローカル効果のみ、AP/ATP配送なし）。
+    pub mutes: Arc<dyn MuteRepository>,
     pub atp_repo: Arc<dyn AtpReadRepository>,
     /// リアクション（絵文字リアクション・いいね）リポジトリ。
     pub reactions: Arc<dyn ReactionRepository>,
@@ -240,6 +244,8 @@ pub async fn init_state(
     let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
     let follows: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
+    let blocks: Arc<dyn BlockRepository> = Arc::new(PgBlockRepository::new(pool.clone()));
+    let mutes: Arc<dyn MuteRepository> = Arc::new(PgMuteRepository::new(pool.clone()));
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
     let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
     let pinned_posts: Arc<dyn PinnedPostsRepository> = Arc::new(PgPinnedPostsRepository::new(pool.clone()));
@@ -266,6 +272,8 @@ pub async fn init_state(
         users,
         posts,
         follows,
+        blocks,
+        mutes,
         atp_repo,
         reactions,
         pinned_posts,
@@ -387,6 +395,12 @@ pub fn router(state: AppState) -> Router {
         // フォロー
         .route("/api/follows/create", post(handlers::follows::create_follow))
         .route("/api/follows/delete", post(handlers::follows::delete_follow))
+        // ブロック（Bsky準拠：フォロー強制解除＋相互完全非表示。Fediへは Block 配送、Bskyへは app.bsky.graph.block をコミット）
+        .route("/api/blocks/create", post(handlers::blocks::create_block))
+        .route("/api/blocks/delete", post(handlers::blocks::delete_block))
+        // ミュート（ローカル効果のみ、AP/ATP配送なし）
+        .route("/api/mutes/create", post(handlers::mutes::create_mute))
+        .route("/api/mutes/delete", post(handlers::mutes::delete_mute))
         // リスト（#63）
         .route("/api/lists",
             get(handlers::lists::my_lists)

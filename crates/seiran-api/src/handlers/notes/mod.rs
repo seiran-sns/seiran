@@ -163,7 +163,7 @@ async fn create_regular_post(
     }
 
     let reply_ctx = match &req.reply_to_id {
-        Some(id) => match resolve_reply_context(state, id).await {
+        Some(id) => match resolve_reply_context(state, id, actor_id).await {
             Ok(ctx) => ctx,
             Err(e) => return e.into_response(),
         },
@@ -798,6 +798,10 @@ pub async fn create_reaction(
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
+
+    if let Err(e) = crate::handlers::target_resolve::check_not_blocked(&state, me.actor_id, post.actor_id).await {
+        return e.into_response();
+    }
 
     // 切替時に取り消すべき旧リアクション（AP の Undo 対象 / ATP の削除対象 rkey）を退避。
     // 対象に ATP 実体が無ければ ATP 配信しない（AP/Bsky 由来でも at_uri を持たないポストへは無反応）。

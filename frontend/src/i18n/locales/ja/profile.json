@@ -19,6 +19,18 @@
     "publicListsHeader": "公開リスト",
     "postsHeader": "投稿",
     "noPosts": "投稿がありません。",
+    "actionsMenuTitle": "アカウント操作",
+    "muteButton": "ミュート",
+    "unmuteButton": "ミュート解除",
+    "blockButton": "ブロック",
+    "unblockButton": "ブロック解除",
+    "blockedByNotice": "このユーザーからブロックされています",
+    "blockConfirmModal": {
+      "title": "ブロックの確認",
+      "body": "ブロックすると、フォロー関係が解除され、お互いの投稿が表示されなくなります。相手が Fediverse ユーザーの場合はブロック通知が配送されます。本当にブロックしますか？",
+      "confirmButton": "ブロックする",
+      "cancelButton": "キャンセル"
+    },
     "bridgeModal": {
       "title": "影武者アカウントのフォロー",
       "prefix": "このアカウントは、{{protocol}}のユーザーがブリッジ経由で投影されている",

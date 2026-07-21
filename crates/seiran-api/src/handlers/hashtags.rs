@@ -46,7 +46,7 @@ pub async fn hashtag_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.hashtags.timeline(&tag_name, limit, until_id, since_id).await {
+    let mut rows = match state.hashtags.timeline(&tag_name, limit, until_id, since_id, viewer_actor_id).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[hashtag_timeline] クエリ失敗: {}", e);

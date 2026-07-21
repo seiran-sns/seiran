@@ -19,6 +19,18 @@
     "publicListsHeader": "Public lists",
     "postsHeader": "Posts",
     "noPosts": "No posts yet.",
+    "actionsMenuTitle": "Account actions",
+    "muteButton": "Mute",
+    "unmuteButton": "Unmute",
+    "blockButton": "Block",
+    "unblockButton": "Unblock",
+    "blockedByNotice": "This user has blocked you",
+    "blockConfirmModal": {
+      "title": "Confirm block",
+      "body": "Blocking will remove any follow relationship and hide each other's posts from both of you. If this user is on the Fediverse, a block notice will be delivered to their server. Are you sure you want to block?",
+      "confirmButton": "Block",
+      "cancelButton": "Cancel"
+    },
     "bridgeModal": {
       "title": "Following a proxy account",
       "prefix": "This account is a projection of a {{protocol}} user via a bridge, known as a ",

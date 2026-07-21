@@ -22,7 +22,7 @@ use tokio::sync::Semaphore;
 
 use crate::ap::ApClient;
 use crate::jobs;
-use crate::repository::{ActorRepository, FollowRepository, HashtagRepository, NotificationRepository, PostRepository, ReactionRepository};
+use crate::repository::{ActorRepository, BlockRepository, FollowRepository, HashtagRepository, NotificationRepository, PostRepository, ReactionRepository};
 use crate::streaming::StreamHub;
 use crate::traits::{Job, JobQueue, QueuedJob};
 
@@ -64,6 +64,8 @@ pub struct DeliveryConfig {
 pub struct InboxContext {
     pub actor_repo: Arc<dyn ActorRepository>,
     pub follow_repo: Arc<dyn FollowRepository>,
+    /// Block受信時のフォロー拒否判定・ブロック済みチェックに使う。
+    pub block_repo: Arc<dyn BlockRepository>,
     pub post_repo: Arc<dyn PostRepository>,
     pub reaction_repo: Arc<dyn ReactionRepository>,
     /// 通知（フォロー・リアクション等）の永続化リポジトリ。

@@ -105,9 +105,13 @@ impl NotificationRepository for PgNotificationRepository {
         reaction_emoji_url: Option<&str>,
         source_uri: Option<&str>,
     ) -> Result<(), sqlx::Error> {
+        // ブロック・ミュート関係にある相手からの通知は生成しない（$4=notifier_actor_idが
+        // NULL のシステム通知は素通り）。呼び出し元（リアクション作成・inbound Follow/Accept/
+        // Reaction・firehose・bsky_follower_poll）はこの1箇所の変更だけで自動的に対象になる。
         sqlx::query(
             "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, source_uri)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8
+             WHERE $4::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, $4)
              ON CONFLICT (source_uri) WHERE source_uri IS NOT NULL DO NOTHING",
         )
         .bind(id)
@@ -136,6 +140,7 @@ impl NotificationRepository for PgNotificationRepository {
              WHERE recipient_actor_id = $1
                AND ($2::bigint IS NULL OR id < $2)
                AND ($3::bigint IS NULL OR id > $3)
+               AND (notifier_actor_id IS NULL OR NOT actor_is_hidden_for_viewer($1, notifier_actor_id))
              ORDER BY id DESC LIMIT $4",
         )
         .bind(recipient_actor_id)

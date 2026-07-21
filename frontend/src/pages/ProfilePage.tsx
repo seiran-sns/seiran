@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note, UserProfile, getErrorMessage } from "../api/client";
+import ActionsMenu, { ActionsMenuItem } from "../components/common/ActionsMenu";
 import Modal from "../components/common/Modal";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
@@ -33,6 +34,12 @@ export default function ProfilePage() {
   const [following, setFollowing] = useState(false);
   const [unfollowing, setUnfollowing] = useState(false);
   const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
+  const [isBlocking, setIsBlocking] = useState(false);
+  const [isBlockedBy, setIsBlockedBy] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [blockActionLoading, setBlockActionLoading] = useState(false);
+  const [muteActionLoading, setMuteActionLoading] = useState(false);
+  const [blockConfirmModalOpen, setBlockConfirmModalOpen] = useState(false);
   // 狭幅では右ペインが無いため、ピン留め・最新ポストの両方を中央ペインへ連続表示する（#61）。
   const isNarrow = useIsNarrowViewport();
 
@@ -64,6 +71,9 @@ export default function ProfilePage() {
         if (cancelled) return;
         setProfile(p);
         setFollowStatus(p.follow_status);
+        setIsBlocking(p.is_blocking);
+        setIsBlockedBy(p.is_blocked_by);
+        setIsMuted(p.is_muted);
         actorIdRef.current = p.actor_id;
         setPosts(p.recent_posts);
         setHasMore(!!p.actor_id && p.recent_posts.length >= PAGE_SIZE);
@@ -112,6 +122,79 @@ export default function ProfilePage() {
       showError(getErrorMessage(e));
     } finally {
       setUnfollowing(false);
+    }
+  }
+
+  // ブロック・ミュートは相手のプロフィールに表示中の投稿一覧（recent_posts）自体の
+  // 表示可否も変える（actor_is_hidden_for_viewer によるタイムラインフィルタ）ため、
+  // ローカルの状態フラグ更新だけでなくプロフィール全体を取り直して反映する。
+  async function refreshProfile() {
+    if (!q) return;
+    try {
+      const p = await api.users.profile(q);
+      setProfile(p);
+      setFollowStatus(p.follow_status);
+      setIsBlocking(p.is_blocking);
+      setIsBlockedBy(p.is_blocked_by);
+      setIsMuted(p.is_muted);
+      setPosts(p.recent_posts);
+      setHasMore(!!p.actor_id && p.recent_posts.length >= PAGE_SIZE);
+    } catch {
+      // ベストエフォート（ブロック/ミュート操作自体は既に成功しているため、再取得失敗はエラー表示しない）
+    }
+  }
+
+  async function doMute() {
+    if (!profile) return;
+    setMuteActionLoading(true);
+    try {
+      await api.mutes.create(followTarget());
+      await refreshProfile();
+    } catch (e) {
+      showError(getErrorMessage(e));
+    } finally {
+      setMuteActionLoading(false);
+    }
+  }
+
+  async function doUnmute() {
+    if (!profile) return;
+    setMuteActionLoading(true);
+    try {
+      await api.mutes.delete(followTarget());
+      await refreshProfile();
+    } catch (e) {
+      showError(getErrorMessage(e));
+    } finally {
+      setMuteActionLoading(false);
+    }
+  }
+
+  // ブロックは破壊的操作（双方向フォロー強制解除を伴う）のため、確認モーダルを経由してから実行する。
+  async function doBlock() {
+    if (!profile) return;
+    setBlockActionLoading(true);
+    try {
+      await api.blocks.create(followTarget());
+      await refreshProfile();
+    } catch (e) {
+      showError(getErrorMessage(e));
+    } finally {
+      setBlockActionLoading(false);
+      setBlockConfirmModalOpen(false);
+    }
+  }
+
+  async function doUnblock() {
+    if (!profile) return;
+    setBlockActionLoading(true);
+    try {
+      await api.blocks.delete(followTarget());
+      await refreshProfile();
+    } catch (e) {
+      showError(getErrorMessage(e));
+    } finally {
+      setBlockActionLoading(false);
     }
   }
 
@@ -245,10 +328,52 @@ export default function ProfilePage() {
               )}
               {followStatus === "pending" && <span className={styles.pendingBadge}>{t("profile:profilePage.pendingBadge")}</span>}
               {followStatus === "not_following" && (
-                <button className={styles.followBtn} onClick={handleFollowClick} disabled={following}>
+                <button className={styles.followBtn} onClick={handleFollowClick} disabled={following || isBlockedBy || isBlocking}>
                   {following ? t("profile:profilePage.followingSubmitButton") : t("profile:profilePage.followButton")}
                 </button>
               )}
+              {isBlockedBy && (
+                <span className={styles.pendingBadge}>{t("profile:profilePage.blockedByNotice")}</span>
+              )}
+              <ActionsMenu
+                triggerTitle={t("profile:profilePage.actionsMenuTitle")}
+                items={(() => {
+                  const items: ActionsMenuItem[] = [];
+                  if (followStatus === "accepted") {
+                    items.push({
+                      key: "unfollow",
+                      label: unfollowing ? t("profile:profilePage.unfollowingButton") : t("profile:profilePage.unfollowButton"),
+                      onClick: doUnfollow,
+                      disabled: unfollowing,
+                    });
+                  } else if (followStatus === "pending") {
+                    items.push({
+                      key: "pending",
+                      label: t("profile:profilePage.pendingBadge"),
+                      onClick: () => {},
+                      disabled: true,
+                    });
+                  } else {
+                    items.push({
+                      key: "follow",
+                      label: following ? t("profile:profilePage.followingSubmitButton") : t("profile:profilePage.followButton"),
+                      onClick: handleFollowClick,
+                      disabled: following || isBlockedBy || isBlocking,
+                    });
+                  }
+                  items.push(
+                    isMuted
+                      ? { key: "unmute", label: t("profile:profilePage.unmuteButton"), onClick: doUnmute, disabled: muteActionLoading }
+                      : { key: "mute", label: t("profile:profilePage.muteButton"), onClick: doMute, disabled: muteActionLoading }
+                  );
+                  items.push(
+                    isBlocking
+                      ? { key: "unblock", label: t("profile:profilePage.unblockButton"), onClick: doUnblock, danger: true, disabled: blockActionLoading }
+                      : { key: "block", label: t("profile:profilePage.blockButton"), onClick: () => setBlockConfirmModalOpen(true), danger: true, disabled: blockActionLoading }
+                  );
+                  return items;
+                })()}
+              />
             </div>
           )}
         </div>
@@ -334,6 +459,22 @@ export default function ProfilePage() {
             }}
           >
             {t("profile:profilePage.bridgeModal.followAnywayButton")}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={blockConfirmModalOpen}
+        onClose={() => setBlockConfirmModalOpen(false)}
+        title={t("profile:profilePage.blockConfirmModal.title")}
+      >
+        <p className={styles.modalText}>{t("profile:profilePage.blockConfirmModal.body")}</p>
+        <div className={styles.modalActions}>
+          <button className={styles.modalPrimary} onClick={doBlock} disabled={blockActionLoading}>
+            {t("profile:profilePage.blockConfirmModal.confirmButton")}
+          </button>
+          <button className={styles.modalSecondary} onClick={() => setBlockConfirmModalOpen(false)}>
+            {t("profile:profilePage.blockConfirmModal.cancelButton")}
           </button>
         </div>
       </Modal>

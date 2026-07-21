@@ -31,6 +31,7 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
 
     match activity["type"].as_str().unwrap_or("") {
         "Follow" => handle_follow(activity, &inbox, ap_client).await,
+        "Block" => handle_block(activity, &inbox, ap_client).await,
         "Create" => {
             if activity["object"]["type"].as_str() == Some("Note") {
                 handle_create_note(activity, &inbox, ap_client).await
@@ -136,6 +137,21 @@ async fn handle_follow(
     }
     let follower_actor_id = remote.actor_id;
 
+    // ブロック済みチェック（Fedi標準の片方向拒否ブロック）: こちらが相手をブロック中なら、
+    // Accept を送らずサイレントに無視する（フォロー関係も作らない）。
+    let (is_blocking, _) = inbox
+        .block_repo
+        .find_relationship(local_actor_id, follower_actor_id)
+        .await
+        .map_err(|e| format!("ブロック関係取得エラー: {}", e))?;
+    if is_blocking {
+        tracing::info!(
+            "[Follow] {} は '{}' にブロックされているため無視します（Accept送信なし）",
+            follower_uri, local_username
+        );
+        return Ok(());
+    }
+
     // follows テーブルに挿入（重複時はスキップ、リモートからのフォローは自動 accepted）
     inbox
         .follow_repo
@@ -184,6 +200,54 @@ async fn handle_follow(
     tracing::info!(
         "[Follow] {} → {} フォロー完了・Accept 送信済み",
         follower_uri, local_actor_uri
+    );
+    Ok(())
+}
+
+/// Block アクティビティを処理する。相手発のブロックはこちら側の `blocks` テーブルには
+/// 書き込まない（`blocks.blocker_actor_id` はローカルユーザー視点の「自分が誰をブロックしたか」
+/// を表す設計のため、相手発ブロックを同じテーブルに書くと視点が混在する）。代わりに、
+/// ブロックされた側がブロックした側をフォローしていた関係があれば解消する
+/// （Mastodon 等の実挙動に合わせる）。通知は生成しない（Fedi慣習：ブロックは本人に知らせない）。
+async fn handle_block(
+    activity: serde_json::Value,
+    inbox: &InboxContext,
+    ap_client: &ApClient,
+) -> Result<(), String> {
+    let blocker_uri = activity["actor"]
+        .as_str()
+        .ok_or("Block: actor フィールドがありません")?;
+    let target_uri = activity["object"]
+        .as_str()
+        .ok_or("Block: object フィールドがありません")?;
+
+    let local_username = target_uri
+        .rsplit('/')
+        .next()
+        .ok_or("Block: object URI からユーザー名を抽出できません")?;
+
+    let local_actor = inbox
+        .actor_repo
+        .find_by_username_domain(local_username, &inbox.local_domain)
+        .await
+        .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
+        .ok_or_else(|| format!("ローカルアクター '{}' が存在しません", local_username))?;
+    if local_actor.actor_type != "local" {
+        return Err(format!("'{}' はローカルアクターではありません", local_username));
+    }
+
+    let remote = upsert_remote_fedi_actor(inbox, ap_client, blocker_uri).await?;
+
+    // こちら（ブロックされた側）が相手をフォローしていた関係を解消する。
+    inbox
+        .follow_repo
+        .delete_by_actors(local_actor.id, remote.actor_id)
+        .await
+        .map_err(|e| format!("follows DELETE エラー: {}", e))?;
+
+    tracing::info!(
+        "[Block] {} から '{}' へのブロックを受信・フォロー関係を解消しました",
+        blocker_uri, local_username
     );
     Ok(())
 }
@@ -922,6 +986,13 @@ async fn handle_undo(activity: serde_json::Value, inbox: &InboxContext) -> Resul
                 }
             }
         }
+        return Ok(());
+    }
+
+    // Undo(Block): こちらの blocks テーブルには相手発ブロックを記録していないため
+    // （handle_block参照）、DB上の巻き戻し対象は無い。ログのみに留める（自動再フォローはしない）。
+    if obj["type"].as_str() == Some("Block") {
+        tracing::info!("[Undo/Block] {} からのブロック解除を受信しました", activity["actor"].as_str().unwrap_or(""));
         return Ok(());
     }
 

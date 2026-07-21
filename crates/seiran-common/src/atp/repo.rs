@@ -754,6 +754,31 @@ pub fn encode_bsky_graph_follow(
     Ok((cbor, cid))
 }
 
+/// `app.bsky.graph.block` レコードの DAG-CBOR バイト列と CID を生成する。
+/// フィールド構成・canonical順は `encode_bsky_graph_follow` と同一（`$type`のみ異なる）。
+pub fn encode_bsky_graph_block(
+    subject_did: &str,
+    created_at_rfc3339: &str,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    // canonical 順: $type(5) < subject(7) < createdAt(9)
+    #[derive(Serialize)]
+    struct BskyGraphBlock {
+        #[serde(rename = "$type")]
+        kind: String,
+        subject: String,
+        #[serde(rename = "createdAt")]
+        created_at: String,
+    }
+    let record = BskyGraphBlock {
+        kind: "app.bsky.graph.block".to_string(),
+        subject: subject_did.to_string(),
+        created_at: created_at_rfc3339.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
 /// `app.bsky.graph.list` レコードの DAG-CBOR バイト列と CID を生成する（リスト機能 #63）。
 /// `purpose` は常に `app.bsky.graph.defs#curatelist`（関心リスト、Bluesky公式アプリの
 /// デフォルト分類）固定でよい（モデレーションリストは対象外）。

@@ -194,6 +194,10 @@ async fn follow_local(username: &str, local_actor_id: i64, state: &AppState) -> 
         return ApiError::BadRequest("自分自身はフォローできません".to_owned()).into_response();
     }
 
+    if let Err(e) = crate::handlers::target_resolve::check_not_blocked(state, local_actor_id, target_actor.id).await {
+        return e.into_response();
+    }
+
     let target_did = match target_actor.at_did.as_deref() {
         Some(d) => d.to_string(),
         None => return ApiError::BadRequest("ターゲットに ATP DID がありません".to_owned()).into_response(),
@@ -242,6 +246,10 @@ async fn follow_bsky(actor_id_or_handle: &str, local_actor_id: i64, state: &AppS
             return ApiError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e)).into_response();
         }
     };
+
+    if let Err(e) = crate::handlers::target_resolve::check_not_blocked(state, local_actor_id, remote_actor_id).await {
+        return e.into_response();
+    }
 
     let rkey = match state.atp_service.commit_follow(local_actor_id, &did, now).await {
         Ok(r) => r,
@@ -316,6 +324,10 @@ async fn follow_fedi(target: &str, local_actor_id: i64, local_username: &str, st
             return ApiError::Internal(format!("[follow/fedi] リモートアクター upsert 失敗: {}", e)).into_response();
         }
     };
+
+    if let Err(e) = crate::handlers::target_resolve::check_not_blocked(state, local_actor_id, remote_actor_id).await {
+        return e.into_response();
+    }
 
     if let Err(e) = state.follows.upsert_pending(local_actor_id, remote_actor_id).await {
         return ApiError::Internal(format!("[follow/fedi] follows INSERT 失敗: {}", e)).into_response();

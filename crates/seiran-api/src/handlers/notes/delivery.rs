@@ -221,8 +221,9 @@ impl ReplyContext {
 }
 
 /// リプライ先ポストの種別を判定し、配信先制御（元ポストが存在しないプロトコルには配信しない）と
-/// ATP reply フィールドを組み立てる。
-pub async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str) -> Result<ReplyContext, ApiError> {
+/// ATP reply フィールドを組み立てる。`viewer_actor_id` はリプライしようとしている本人で、
+/// リプライ先の投稿者とブロック関係にある場合はリプライ自体を拒否する（Bsky準拠のブロック定義）。
+pub async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str, viewer_actor_id: i64) -> Result<ReplyContext, ApiError> {
     let reply_to_id: i64 = reply_to_id_str
         .parse()
         .map_err(|_| ApiError::BadRequest("INVALID_REPLY_TO_ID".to_owned()))?;
@@ -233,6 +234,8 @@ pub async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str) -> R
         .await
         .map_err(|e| ApiError::Internal(format!("reply 元ポスト取得失敗: {}", e)))?
         .ok_or(ApiError::NotFound("REPLY_TARGET_NOT_FOUND"))?;
+
+    crate::handlers::target_resolve::check_not_blocked(state, viewer_actor_id, meta.actor_id).await?;
 
     let origin = classify_post(
         meta.ap_object_id.as_deref(),

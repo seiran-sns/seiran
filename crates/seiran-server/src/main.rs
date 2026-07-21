@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use seiran_common::repository::{
-    PgActorRepository, PgFollowRepository, PgHashtagRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
+    PgActorRepository, PgBlockRepository, PgFollowRepository, PgHashtagRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
 };
 use seiran_common::{
     ap::ApClient, create_job_queue, get_db_pool, run_migrations, DeliveryConfig, InboxContext,
@@ -37,6 +37,7 @@ fn build_inbox_context(
     InboxContext {
         actor_repo: Arc::new(PgActorRepository::new(pool.clone())),
         follow_repo: Arc::new(PgFollowRepository::new(pool.clone())),
+        block_repo: Arc::new(PgBlockRepository::new(pool.clone())),
         post_repo: Arc::new(PgPostRepository::new(pool.clone())),
         reaction_repo: Arc::new(PgReactionRepository::new(pool.clone())),
         notification_repo: Arc::new(PgNotificationRepository::new(pool.clone())),

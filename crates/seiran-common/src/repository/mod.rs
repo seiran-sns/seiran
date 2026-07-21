@@ -5,6 +5,7 @@
 
 pub mod actor;
 pub mod atp;
+pub mod block;
 pub mod dm;
 pub mod email_verification;
 pub mod emoji;
@@ -12,6 +13,7 @@ pub mod follow;
 pub mod hashtag;
 pub mod list;
 pub mod media_file;
+pub mod mute;
 pub mod notification;
 pub mod password_reset;
 pub mod pinned_post;
@@ -23,10 +25,12 @@ pub mod user;
 
 pub use actor::{Actor, ActorProfileRow, ActorRepository, PgActorRepository};
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
+pub use block::{BlockRepository, PgBlockRepository};
 pub use dm::{DmPeerSummary, DmRepository, PgDmRepository};
 pub use email_verification::{EmailVerificationRepository, PgEmailVerificationRepository};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowRepository, PgFollowRepository};
+pub use mute::{MuteRepository, PgMuteRepository};
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
 pub use list::{
     ListMemberRow, ListRepository, ListRow, PgListRepository, MAX_LISTS_PER_OWNER,

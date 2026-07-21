@@ -102,6 +102,7 @@ impl PinnedPostsRepository for PgPinnedPostsRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE pp.actor_id = $1 AND p.deleted_at IS NULL
+               AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_is_hidden_for_viewer($2, p.actor_id))
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
                    OR (p.visibility = 'followers_only' AND (

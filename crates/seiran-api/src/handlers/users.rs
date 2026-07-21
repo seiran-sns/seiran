@@ -112,6 +112,13 @@ pub struct ProfileResponse {
     pub bio: Option<String>,
     pub avatar_url: Option<String>,
     pub follow_status: String, // "not_following" | "pending" | "accepted"
+    /// 閲覧者（ログイン済みの場合）がこのアクターをブロック中か。
+    pub is_blocking: bool,
+    /// このアクターが閲覧者をブロック中か（Bsky準拠ブロックは相互完全非表示のため、
+    /// 閲覧者側にも「あなたはブロックされています」を伝える必要がある）。
+    pub is_blocked_by: bool,
+    /// 閲覧者がこのアクターをミュート中か。
+    pub is_muted: bool,
     /// 最近の投稿。タイムラインと同じ NoteCard で描画するため NoteResponse で返す（#43）。
     pub recent_posts: Vec<NoteResponse>,
     /// ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
@@ -181,6 +188,9 @@ async fn fetch_bsky_profile_from_appview(
         bio: bsky.description,
         avatar_url: bsky.avatar,
         follow_status: "not_following".to_string(),
+        is_blocking: false,
+        is_blocked_by: false,
+        is_muted: false,
         recent_posts: vec![],
         pinned_posts: vec![],
         profile_fields: vec![],
@@ -346,6 +356,18 @@ async fn build_profile_response(
         None => "not_following".to_string(),
     };
 
+    // ブロック・ミュート状態。タイムライン取得（timeline_by_actor/list_timeline_by_actor）は
+    // actor_is_hidden_for_viewer によって既に相互非表示が効くため、ここでは表示用の
+    // フラグ取得のみ行う（recent_posts/pinned_posts のショートサーキットは不要）。
+    let (is_blocking, is_blocked_by) = match my_actor_id {
+        Some(mid) => state.blocks.find_relationship(mid, actor_id).await.unwrap_or((false, false)),
+        None => (false, false),
+    };
+    let is_muted = match my_actor_id {
+        Some(mid) => state.mutes.is_muted(mid, actor_id).await.unwrap_or(false),
+        None => false,
+    };
+
     // リモート Fedi アクターの場合、featured collection（ピン留め投稿, #61）を都度同期する。
     // ベストエフォート（失敗してもプロフィール表示自体は継続する）。DB 未登録の未知アクター
     // （`fetch_remote_profile`）はここを通らないため対象外。
@@ -466,6 +488,9 @@ async fn build_profile_response(
         bio: actor.bio,
         avatar_url,
         follow_status,
+        is_blocking,
+        is_blocked_by,
+        is_muted,
         recent_posts,
         pinned_posts,
         profile_fields,
@@ -550,6 +575,9 @@ async fn fetch_remote_profile(
         bio,
         avatar_url,
         follow_status: "not_following".to_string(),
+        is_blocking: false,
+        is_blocked_by: false,
+        is_muted: false,
         recent_posts: vec![],
         pinned_posts: vec![],
         profile_fields: vec![],

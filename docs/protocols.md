@@ -28,10 +28,11 @@
 
 | type | 処理概要 |
 |---|---|
-| `Follow` | ローカルアクター実在確認 → リモートアクターupsert → `follows` に accepted 状態でINSERT（即時承認）→ 通知 → `Accept` を返送 |
+| `Follow` | ローカルアクター実在確認 → **ブロック済みチェック**（こちらが送信者をブロック中ならAcceptを送らずサイレントに無視）→ リモートアクターupsert → `follows` に accepted 状態でINSERT（即時承認）→ 通知 → `Accept` を返送 |
 | `Create`(Note) | リモートアクターupsert → HTML→内部リンクマーカー付きプレーンテキスト変換（6節参照）→ 絵文字tag解析 → 可視性判定 → **重複排除**（3節参照）→ `posts` にINSERT → 添付URL保存 → フォロワーへWS配信 |
 | `Accept`(Follow) | `follows.status` を `accepted` に更新、通知 |
-| `Undo` | `object.type` で分岐: `Like`/`EmojiReact`→リアクション削除、`Announce`→リポスト論理削除、`Follow`→フォロー解除 |
+| `Block` | リモートアクターupsert → ブロックされた側がブロックした側をフォローしていた関係があれば解消（`blocks` テーブルには書き込まない、通知も生成しない。11節参照） |
+| `Undo` | `object.type` で分岐: `Like`/`EmojiReact`→リアクション削除、`Announce`→リポスト論理削除、`Follow`→フォロー解除、`Block`→ログのみ（DB上の巻き戻し対象なし） |
 | `Announce` | リポスト保存。元ポストが未登録なら `fetch_object` でリモート取得してから紐付け |
 | `Like` \| `EmojiReact` | Misskey は絵文字リアクションも `type:"Like"` 固定で送るため、**wire type ではなく `content`/`_misskey_reaction` の有無**で判定する |
 
@@ -235,7 +236,32 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 ### `chat.bsky.actor.declaration`（Bsky DM受信許可）
 Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration`（rkey固定`self`、`allowIncoming: "all"|"none"|"following"`）を取得してDM送信可否を判定する。このレコードが無いと保守的に送信をブロックする（実機確認: 未コミット状態のseiranユーザーへ公式クライアントからDMを送ろうとすると宛先候補がグレーアウトする）。`AtpCommitService::commit_chat_declaration`が`allowIncoming: "all"`固定でコミットする。新規ユーザー登録時（`handlers::auth::register`）と、起動時のバックフィル（`spawn_startup_tasks`→`backfill_chat_declarations`、未コミットのローカルユーザーを検出して一括実行）の両方から呼ばれる。ユーザーが値を選べる設定UIは未実装（`docs/roadmap.md`参照）。
 
-## 10. 未実装・スコープ外の機能
+## 10. ブロック・ミュート
+
+### 定義
+- **ミュート**: Fedi/Bsky共通で「自分のタイムライン・通知から相手を隠すだけのローカル効果」。相手には一切通知されず、AP/ATP配送は発生しない（`mutes`テーブルへのINSERT/DELETEのみ）。
+- **ブロック**: seiranではBsky準拠の定義（フォロー関係の強制解除＋相互完全非表示）を採用する。Fediの「片方向拒否ブロック」とMisskey的「ミュート」を合わせた効果になるため、ブロック実行時は相手のプロトコルに応じて以下を行う。
+  - 相手がBsky: `app.bsky.graph.block`をコミット（`AtpCommitService::commit_block`）。
+  - 相手がFedi: AP `Block`アクティビティを配送する。
+  - いずれの場合もローカルの`blocks`テーブルへの1行挿入により、タイムライン・通知の相互非表示（`actor_is_hidden_for_viewer`、`docs/database.md`参照）と書き込みガード（下記）の両方が有効になる。
+
+### 書き込みガード
+ブロック関係にある場合、以下の書き込み操作をAPIレベルで拒否する（`handlers::target_resolve::check_not_blocked`）。
+- フォロー作成（`follows.rs::follow_local`/`follow_bsky`/`follow_fedi`）
+- リプライ作成（`notes::delivery::resolve_reply_context`）
+- リアクション作成（`notes::create_reaction`）
+
+引用投稿・リポストへの書き込みガードは対象外（`docs/roadmap.md`参照）。
+
+### AP受信時のフォロー拒否
+`inbound_activity_process::handle_follow`は、こちらが送信者をブロック中であれば`Accept`を送らずサイレントに無視する（Fedi標準の片方向拒否ブロックを実現）。
+
+### スコープ外
+- **Bsky側からの逆方向ブロック検知**（相手が`app.bsky.graph.block`で自分をブロックしたことの取り込み）: 未実装。AppView側のグラフ判定で可視性制御は元々完結しており、実装コストに見合わないと判断。
+- **リアクション一覧表示でのブロック/ミュート除外**: 未実装（`fetch_reactions_map`は対象外）。
+- **公開リストタイムライン（`list.rs::timeline`）でのフィルタリング**: 未実装。リストタイムラインは「閲覧者情報を持たない（誰が見ても同じ内容）」設計のため、viewer概念自体が無く、フィルタ追加には閲覧制御全体の見直しが必要。
+
+## 11. 未実装・スコープ外の機能
 
 - **ゼロトラストハンドシェイク**（他seiranサーバー間の `/verify-actor` 検証、`remote_seiran` への昇格）: 未実装。`actors.seiran_pair_actor_id` はスキーマ上・読み取りコードは存在するが書き込みロジックが無い（常にNULL）。
 - **`actor_metadata_resolve` ジョブ**: ハンドラはdispatchに登録されているが中身はスタブ（即座に `Ok(())`）。enqueueする呼び出し箇所がプロダクションコードに存在しない。
@@ -243,3 +269,4 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 - **Misskey互換ストリーミング（チャンネル購読方式）**: 未着手、現状はブロードキャストのみ。
 - **ドメイン単位のレート制限**（`inbound_activity_process` 向け）: 未実装。現状 `actor_history_sync` キューのみドメイン単位の同時実行制限を持つ。
 - **リモートFedi/Bskyユーザー自身の公開リストのオンデマンド取得**: 未実装（`public_lists` はローカルユーザーのみ対象）。
+- **ブロック・ミュート関連の未実装項目**: 10節「スコープ外」参照（Bsky側からの逆方向ブロック検知、リアクション一覧でのブロック/ミュート除外、公開リストタイムラインでのフィルタリング）。

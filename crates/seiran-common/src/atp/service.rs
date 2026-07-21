@@ -11,7 +11,7 @@ use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
     build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
     cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
-    encode_bsky_feed_repost, encode_bsky_feed_like, encode_bsky_graph_follow,
+    encode_bsky_feed_repost, encode_bsky_feed_like, encode_bsky_graph_block, encode_bsky_graph_follow,
     encode_bsky_graph_list, encode_bsky_graph_listitem, encode_chat_actor_declaration,
     generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage, BskyEmbed,
     BskyPostReply,
@@ -691,6 +691,45 @@ impl AtpCommitService {
         tracing::info!("[atp] follow commit 完了: actor_id={}, subject={}, rkey={}", actor_id, subject_did, rkey);
         self.spawn_request_crawl();
         Ok(rkey)
+    }
+
+    /// `app.bsky.graph.block` レコードをコミットする（Bsky準拠ブロック機能）。
+    /// 成功時は生成した rkey を返す（アンブロック時のレコード削除に必要）。
+    pub async fn commit_block(
+        &self,
+        actor_id: i64,
+        subject_did: &str,
+        now: DateTime<Utc>,
+    ) -> Result<String, AtpCommitError> {
+        let rkey = generate_tid();
+        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        let (record_cbor, record_cid) = encode_bsky_graph_block(subject_did, &created_at_str)?;
+
+        let record = CommitRecord {
+            collection: "app.bsky.graph.block",
+            rkey: rkey.clone(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action: "create",
+            blob_cids: vec![],
+        };
+
+        self.commit_record_inner(actor_id, record, now, None).await?;
+
+        tracing::info!("[atp] block commit 完了: actor_id={}, subject={}, rkey={}", actor_id, subject_did, rkey);
+        self.spawn_request_crawl();
+        Ok(rkey)
+    }
+
+    /// `app.bsky.graph.block` レコードを MST から削除する（アンブロック時）。
+    pub async fn commit_delete_block(
+        &self,
+        actor_id: i64,
+        rkey: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        self.delete_atp_record_generic(actor_id, "app.bsky.graph.block", rkey, now).await
     }
 
     /// `app.bsky.graph.list` レコードをコミットする（リスト機能 #63、公開リストのみ呼ぶ）。

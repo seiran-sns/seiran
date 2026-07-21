@@ -290,6 +290,12 @@ export interface UserProfile {
   bio?: string;
   avatar_url?: string;
   follow_status: "not_following" | "pending" | "accepted";
+  /** 閲覧者がこのアクターをブロック中か。 */
+  is_blocking: boolean;
+  /** このアクターが閲覧者をブロック中か（Bsky準拠ブロックは相互完全非表示）。 */
+  is_blocked_by: boolean;
+  /** 閲覧者がこのアクターをミュート中か。 */
+  is_muted: boolean;
   /** 最近の投稿。タイムラインと同じ NoteCard で描画する（#43）。 */
   recent_posts: Note[];
   /** ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
@@ -785,6 +791,24 @@ export const api = {
     },
     delete(target: string) {
       return request<void>("POST", "/follows/delete", { target });
+    },
+  },
+
+  blocks: {
+    create(target: string) {
+      return request<{ status: string }>("POST", "/blocks/create", { target });
+    },
+    delete(target: string) {
+      return request<{ status: string }>("POST", "/blocks/delete", { target });
+    },
+  },
+
+  mutes: {
+    create(target: string) {
+      return request<{ status: string }>("POST", "/mutes/create", { target });
+    },
+    delete(target: string) {
+      return request<{ status: string }>("POST", "/mutes/delete", { target });
     },
   },
 

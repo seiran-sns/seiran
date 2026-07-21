@@ -69,6 +69,8 @@ pub struct PostRecord {
 /// リポスト・リプライ・引用の配送先を判定するために必要な、元ポストのメタ情報。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PostDeliveryMeta {
+    /// 元ポストの投稿者actor_id（ブロック関係チェック用）。
+    pub actor_id: i64,
     pub ap_object_id: Option<String>,
     pub at_uri: Option<String>,
     pub at_cid: Option<String>,
@@ -397,6 +399,7 @@ impl PostRepository for PgPostRepository {
                  UNION
                  SELECT target_actor_id FROM follows
                  WHERE follower_actor_id = $1 AND status = 'accepted'
+                   AND NOT actor_is_hidden_for_viewer($1, target_actor_id)
              ),
              candidate_ids AS (
                  SELECT p.id
@@ -466,6 +469,7 @@ impl PostRepository for PgPostRepository {
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
                AND (p.visibility != 'unlisted' OR p.actor_id = $1)
+               AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
                    OR (p.visibility = 'followers_only' AND (
@@ -529,6 +533,7 @@ impl PostRepository for PgPostRepository {
              WHERE p.actor_id = $1 AND p.deleted_at IS NULL
                AND ($3::bigint IS NULL OR p.id < $3)
                AND ($4::bigint IS NULL OR p.id > $4)
+               AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_is_hidden_for_viewer($2, $1))
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
                    OR (p.visibility = 'followers_only' AND (
@@ -685,6 +690,7 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.id < $2 AND p.deleted_at IS NULL
+               AND ($4::bigint IS NULL OR p.actor_id = $4 OR NOT actor_is_hidden_for_viewer($4, p.actor_id))
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
                    OR (p.visibility = 'followers_only' AND (
@@ -728,6 +734,7 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.id > $2 AND p.deleted_at IS NULL
+               AND ($4::bigint IS NULL OR p.actor_id = $4 OR NOT actor_is_hidden_for_viewer($4, p.actor_id))
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
                    OR (p.visibility = 'followers_only' AND (
@@ -755,7 +762,7 @@ impl PostRepository for PgPostRepository {
 
     async fn find_delivery_meta(&self, id: i64) -> Result<Option<PostDeliveryMeta>, sqlx::Error> {
         sqlx::query_as::<_, PostDeliveryMeta>(
-            "SELECT p.ap_object_id, p.at_uri, p.at_cid,
+            "SELECT p.actor_id, p.ap_object_id, p.at_uri, p.at_cid,
                     a.domain, a.display_name, a.username,
                     p.visibility::text AS visibility, p.thread_root_post_id
              FROM posts p

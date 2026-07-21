@@ -9,7 +9,23 @@ use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::repository::Actor;
 use seiran_common::{generate_snowflake_id, ApError};
 
+use crate::error::ApiError;
 use crate::AppState;
+
+/// `actor_a`/`actor_b` のいずれかがもう一方をブロックしていれば `Forbidden` を返す。
+/// フォロー作成・リプライ作成・リアクション作成の書き込みガードで共通に使う
+/// （seiranのブロックはBsky準拠＝相互完全非表示のため、方向を問わず拒否する）。
+pub async fn check_not_blocked(state: &AppState, actor_a: i64, actor_b: i64) -> Result<(), ApiError> {
+    let (is_blocking, is_blocked_by) = state
+        .blocks
+        .find_relationship(actor_a, actor_b)
+        .await
+        .map_err(|e| ApiError::Internal(format!("ブロック関係取得失敗: {}", e)))?;
+    if is_blocking || is_blocked_by {
+        return Err(ApiError::Forbidden("BLOCKED"));
+    }
+    Ok(())
+}
 
 pub async fn resolve_and_upsert_target(state: &AppState, target: &str) -> Result<Actor, ApError> {
     let t = target.trim().trim_start_matches('@');
