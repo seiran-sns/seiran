@@ -9,7 +9,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+
+/// 公開鍵キャッシュの有効期限。リモートサーバーが鍵をローテーションしても、
+/// 最大でもこの時間が経てば新しい鍵を再フェッチするようになる
+/// （`verify_signature` は加えて検証失敗時に1回だけ強制再フェッチも行う）。
+const KEY_CACHE_TTL: Duration = Duration::from_secs(3600);
 
 /// AP 通信エラー
 #[derive(Debug, thiserror::Error)]
@@ -169,7 +175,7 @@ pub fn classify_ap_visibility(to: &[String], cc: &[String]) -> &'static str {
 /// プロセスグローバルな静的キャッシュを廃止し、テスト時にモックを注入できる構造にした。
 pub struct ApClient {
     pub http: Arc<reqwest::Client>,
-    pub key_cache: Arc<RwLock<HashMap<String, String>>>,
+    pub key_cache: Arc<RwLock<HashMap<String, (String, Instant)>>>,
 }
 
 impl ApClient {
@@ -199,19 +205,27 @@ impl ApClient {
         Ok(actor)
     }
 
-    /// 指定した key_id (URL) から公開鍵 PEM を取得する（キャッシュ対応）
+    /// 指定した key_id (URL) から公開鍵 PEM を取得する（TTL付きキャッシュ対応）
     pub async fn get_public_key_pem(&self, key_id: &str) -> Result<String, ApError> {
-        // 1. キャッシュヒット確認
+        // 1. キャッシュヒット確認（TTL内のみ有効）
         {
             let cache = self.key_cache.read().await;
-            if let Some(pem) = cache.get(key_id) {
-                return Ok(pem.clone());
+            if let Some((pem, fetched_at)) = cache.get(key_id) {
+                if fetched_at.elapsed() < KEY_CACHE_TTL {
+                    return Ok(pem.clone());
+                }
             }
         }
 
+        self.fetch_and_cache_public_key_pem(key_id).await
+    }
+
+    /// キャッシュの有無・TTLを無視して公開鍵を再フェッチし、結果でキャッシュを上書きする。
+    /// リモートの鍵ローテーション後に署名検証が失敗した際のリトライで使う。
+    async fn fetch_and_cache_public_key_pem(&self, key_id: &str) -> Result<String, ApError> {
         tracing::info!("[ApClient] 公開鍵フェッチ中: {}", key_id);
 
-        // 2. キャッシュミス時はアクターもしくは鍵を直接フェッチ
+        // アクターもしくは鍵を直接フェッチする。
         // 通常 key_id (e.g. https://example.com/users/test#main-key) にアクセスすると
         // アクター情報そのもの、あるいは鍵オブジェクト単体が返る。
         // フラグメント部分 (#main-key) を除外したベースURIを叩くのが安全。
@@ -221,9 +235,8 @@ impl ApClient {
         if let Some(pubkey_info) = actor.public_key {
             if pubkey_info.id == key_id || base_uri == pubkey_info.owner {
                 let pem = pubkey_info.public_key_pem;
-                // キャッシュに書き込み
                 let mut cache = self.key_cache.write().await;
-                cache.insert(key_id.to_string(), pem.clone());
+                cache.insert(key_id.to_string(), (pem.clone(), Instant::now()));
                 return Ok(pem);
             }
         }
@@ -260,33 +273,38 @@ impl ApClient {
         // 2. 署名対象文字列 (Signing String) を構築
         let signing_string = build_signing_string(method, path, headers, &header_list_str)?;
 
-        // 3. 公開鍵 PEM の取得
-        let pem = self.get_public_key_pem(key_id).await?;
-
-        // 4. RSA 公開鍵オブジェクトのパース
-        let public_key = RsaPublicKey::from_public_key_pem(&pem)
-            .map_err(|e| ApError::Signature(format!("RSA公開鍵のパース失敗: {}", e)))?;
-
-        // 5. 署名の base64 デコード
+        // 3. 署名の base64 デコード（鍵の取得元によらず共通）
         let signature_bytes = base64::Engine::decode(&base64::prelude::BASE64_STANDARD, signature_b64)
             .map_err(|e| ApError::Signature(format!("署名base64デコード失敗: {}", e)))?;
 
-        // 6. SHA-256 ハッシュの計算
+        // 4. 公開鍵 PEM の取得（キャッシュ利用）と検証
+        let pem = self.get_public_key_pem(key_id).await?;
+        if Self::verify_with_pem(&pem, &signing_string, &signature_bytes).is_ok() {
+            return Ok(true);
+        }
+
+        // 5. キャッシュ済みの鍵での検証に失敗した場合、リモートが鍵をローテーションした
+        // 可能性があるため、キャッシュを無視して1回だけ再フェッチし再検証する。
+        // 同じ鍵しか得られなかった場合は無駄な再検証をせず最初の失敗をそのまま返す。
+        let fresh_pem = self.fetch_and_cache_public_key_pem(key_id).await?;
+        if fresh_pem == pem {
+            return Err(ApError::Signature("署名検証失敗".to_string()));
+        }
+        Self::verify_with_pem(&fresh_pem, &signing_string, &signature_bytes).map(|()| true)
+    }
+
+    /// 与えられた公開鍵 PEM で signing string の署名を検証する（純粋な検証処理部分）
+    fn verify_with_pem(pem: &str, signing_string: &str, signature_bytes: &[u8]) -> Result<(), ApError> {
+        let public_key = RsaPublicKey::from_public_key_pem(pem)
+            .map_err(|e| ApError::Signature(format!("RSA公開鍵のパース失敗: {}", e)))?;
+
         let mut hasher = Sha256::new();
         hasher.update(signing_string.as_bytes());
         let hashed = hasher.finalize();
 
-        // 7. 署名検証の実行
-        let result = public_key.verify(
-            Pkcs1v15Sign::new::<Sha256>(),
-            &hashed,
-            &signature_bytes,
-        );
-
-        match result {
-            Ok(()) => Ok(true),
-            Err(e) => Err(ApError::Signature(format!("署名検証失敗: {:?}", e))),
-        }
+        public_key
+            .verify(Pkcs1v15Sign::new::<Sha256>(), &hashed, signature_bytes)
+            .map_err(|e| ApError::Signature(format!("署名検証失敗: {:?}", e)))
     }
 
     /// HTTP Signatures 付きで ActivityPub エンドポイントへ POST する
@@ -571,5 +589,33 @@ mod tests {
         let to = vec!["https://example.com/users/bob".to_string()];
         let cc: Vec<String> = vec![];
         assert_eq!(classify_ap_visibility(&to, &cc), "direct");
+    }
+
+    // ─── ApClient 公開鍵キャッシュのTTL ────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_public_key_pem_returns_cached_value_when_fresh() {
+        let client = ApClient::new(Arc::new(reqwest::Client::new()));
+        {
+            let mut cache = client.key_cache.write().await;
+            cache.insert("https://example.com/users/alice#main-key".to_string(), ("PEM-DATA".to_string(), Instant::now()));
+        }
+        // TTL内のキャッシュヒットのため、ネットワークアクセスなしで即座に返る。
+        let pem = client.get_public_key_pem("https://example.com/users/alice#main-key").await.unwrap();
+        assert_eq!(pem, "PEM-DATA");
+    }
+
+    #[tokio::test]
+    async fn get_public_key_pem_ignores_stale_cache_entry() {
+        let client = ApClient::new(Arc::new(reqwest::Client::new()));
+        let stale_at = Instant::now().checked_sub(KEY_CACHE_TTL + Duration::from_secs(1)).unwrap();
+        {
+            let mut cache = client.key_cache.write().await;
+            cache.insert("https://example.com/users/alice#main-key".to_string(), ("OLD-PEM".to_string(), stale_at));
+        }
+        // TTL切れのためキャッシュを使わず再フェッチを試みる。到達不能ホストなのでエラーになるが、
+        // 「古いPEMをそのまま返してしまう」ことがないのが検証したい点。
+        let result = client.get_public_key_pem("https://127.0.0.1.invalid/users/alice#main-key").await;
+        assert!(result.is_err());
     }
 }

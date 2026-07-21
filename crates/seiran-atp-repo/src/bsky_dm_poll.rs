@@ -153,15 +153,25 @@ async fn sync_convo(
     let peer_actor_id = resolve_or_upsert_bsky_actor(pool, http, &peer_did).await?;
 
     let mut current_thread_root = thread_root_post_id;
-    let mut last_message_id = last_synced;
 
+    // メッセージ1件ごとに「posts INSERT + post_recipients INSERT + カーソル前進」を
+    // 単一トランザクションでコミットする。複数メッセージの取り込み途中でエラーが起きても、
+    // 既にコミット済みの分のカーソルは進んでいるため、次回ポーリングでの再取り込みは
+    // 未コミット分のみに限定される。bsky_message_id のUNIQUE制約（DO NOTHING）が
+    // それでも起こりうる二重取り込み（同時ポーリング等）に対する保険になる。
     for m in &new_messages {
         let msg_id = m.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
         let sender_did = m.get("sender").and_then(|s| s.get("did")).and_then(|v| v.as_str()).unwrap_or_default();
 
         if sender_did == local_did {
-            // 自分が送信したメッセージ（BskyDmSend経由で既にpostsに存在する）はスキップする。
-            last_message_id = Some(msg_id);
+            // 自分が送信したメッセージ（BskyDmSend経由で既にpostsに存在する）はスキップするが、
+            // カーソルは進める必要がある。スレッド起点が未確定（＝この会話で送受信いずれの
+            // メッセージもまだ一件もない）場合はbsky_convo_linksの行を作れないため据え置く。
+            // その場合は次のメッセージ処理時、または次回ポーリングでの再スキップにより
+            // いずれ解消される（実害のない読み飛ばし）。
+            if let Some(thread_root) = current_thread_root {
+                persist_cursor(pool, thread_root, convo_id, &msg_id).await?;
+            }
             continue;
         }
 
@@ -173,31 +183,65 @@ async fn sync_convo(
             .map(|dt| dt.with_timezone(&chrono::Utc))
             .unwrap_or_else(chrono::Utc::now);
 
-        let post_id = generate_snowflake_id(sent_at);
-        let thread_root = current_thread_root.unwrap_or(post_id);
+        let candidate_post_id = generate_snowflake_id(sent_at);
+        let candidate_thread_root = current_thread_root.unwrap_or(candidate_post_id);
 
-        sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, visibility, thread_root_post_id, created_at)
-             VALUES ($1, $2, $3, 'direct', $4, $5)",
+        let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+        let inserted_id: Option<i64> = sqlx::query_scalar(
+            "INSERT INTO posts (id, actor_id, body, visibility, thread_root_post_id, created_at, bsky_message_id)
+             VALUES ($1, $2, $3, 'direct', $4, $5, $6)
+             ON CONFLICT (bsky_message_id) DO NOTHING
+             RETURNING id",
         )
-        .bind(post_id)
+        .bind(candidate_post_id)
         .bind(peer_actor_id)
         .bind(&text)
-        .bind(thread_root)
+        .bind(candidate_thread_root)
         .bind(sent_at)
-        .execute(pool)
+        .bind(&msg_id)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| format!("DM受信INSERT失敗: {}", e))?;
 
-        sqlx::query("INSERT INTO post_recipients (post_id, actor_id) VALUES ($1, $2)")
-            .bind(post_id)
+        // ON CONFLICT で行が挿入されなかった場合は、以前のポーリングで既に取り込み済み。
+        // その時に確定したpost_id/thread_rootを読み直し、今回生成した値は破棄する。
+        let (actual_post_id, actual_thread_root) = match inserted_id {
+            Some(id) => (id, candidate_thread_root),
+            None => {
+                let row = sqlx::query("SELECT id, thread_root_post_id FROM posts WHERE bsky_message_id = $1")
+                    .bind(&msg_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("既存DM取得失敗: {}", e))?;
+                let id: i64 = row.try_get("id").map_err(|e| e.to_string())?;
+                let root: Option<i64> = row.try_get("thread_root_post_id").ok().flatten();
+                (id, root.unwrap_or(id))
+            }
+        };
+
+        sqlx::query("INSERT INTO post_recipients (post_id, actor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+            .bind(actual_post_id)
             .bind(local_actor_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("post_recipients INSERT失敗: {}", e))?;
 
-        current_thread_root = Some(thread_root);
-        last_message_id = Some(msg_id);
+        sqlx::query(
+            "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id, last_synced_message_id)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (thread_root_post_id) DO UPDATE SET last_synced_message_id = EXCLUDED.last_synced_message_id",
+        )
+        .bind(actual_thread_root)
+        .bind(convo_id)
+        .bind(&msg_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        tx.commit().await.map_err(|e| e.to_string())?;
+
+        current_thread_root = Some(actual_thread_root);
 
         let peer_row = sqlx::query("SELECT username, domain, display_name, avatar_url FROM actors WHERE id = $1")
             .bind(peer_actor_id)
@@ -216,7 +260,7 @@ async fn sync_convo(
             };
 
         let note_json = serde_json::json!({
-            "id": post_id.to_string(),
+            "id": actual_post_id.to_string(),
             "text": text,
             "createdAt": sent_at.to_rfc3339(),
             "user": {
@@ -235,19 +279,21 @@ async fn sync_convo(
         stream_hub.publish_note(recipients, &note_json);
     }
 
-    if let Some(thread_root) = current_thread_root {
-        sqlx::query(
-            "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id, last_synced_message_id)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (thread_root_post_id) DO UPDATE SET last_synced_message_id = EXCLUDED.last_synced_message_id",
-        )
-        .bind(thread_root)
-        .bind(convo_id)
-        .bind(&last_message_id)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    }
+    Ok(())
+}
 
+/// 自分が送信したメッセージ（スキップ対象）のカーソルのみを進める。
+async fn persist_cursor(pool: &PgPool, thread_root: i64, convo_id: &str, msg_id: &str) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id, last_synced_message_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (thread_root_post_id) DO UPDATE SET last_synced_message_id = EXCLUDED.last_synced_message_id",
+    )
+    .bind(thread_root)
+    .bind(convo_id)
+    .bind(msg_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
