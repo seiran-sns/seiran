@@ -443,6 +443,45 @@ async fn handle_create_note(
         tracing::error!("[Create/Note] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
     }
 
+    // メンション通知: `tag[]` の `Mention` がローカルユーザーの AP actor URI
+    // （`https://{local_domain}/users/{username}`）を指す場合、通知を作る。
+    // ローカルユーザーの `ap_uri` は動的組み立てのため、DM宛先解決（上記）と同じ
+    // 「URI末尾セグメントをusernameとみなして解決する」方式を使う。
+    let mut mentioned_local_actor_ids: Vec<i64> = Vec::new();
+    for tag in &tags {
+        if tag["type"].as_str() != Some("Mention") {
+            continue;
+        }
+        let Some(href) = tag["href"].as_str() else { continue };
+        if !href.contains("/users/") {
+            continue;
+        }
+        let Some(local_username) = href.rsplit('/').next() else { continue };
+        if let Ok(Some(actor)) = inbox.actor_repo.find_by_username_domain(local_username, &inbox.local_domain).await {
+            if actor.actor_type == "local" && !mentioned_local_actor_ids.contains(&actor.id) {
+                mentioned_local_actor_ids.push(actor.id);
+            }
+        }
+    }
+    for mentioned_actor_id in mentioned_local_actor_ids {
+        inbox.stream_hub.publish_event(
+            HashSet::from([mentioned_actor_id]),
+            "mention",
+            serde_json::json!({
+                "postId": post_id.to_string(),
+                "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
+            }),
+        );
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = inbox
+            .notification_repo
+            .insert(notif_id, mentioned_actor_id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None)
+            .await
+        {
+            tracing::error!("[Create/Note] mention notifications INSERT 失敗: {}", e);
+        }
+    }
+
     // 添付画像・動画・音声の URL を保存（S3 には保存せず URL のみ記録）
     if let Some(attachments) = note["attachment"].as_array() {
         for (position, att) in attachments.iter().enumerate() {

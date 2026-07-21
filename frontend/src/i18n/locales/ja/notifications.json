@@ -7,6 +7,7 @@
     "reactionText": "{{label}} がリアクションしました",
     "followText": "{{label}} にフォローされました",
     "followAcceptedText": "{{label}} がフォローを承認しました",
+    "mentionText": "{{label}} からメンションされました",
     "genericText": "{{label}} から通知",
     "noNotifications": "新しい通知はありません。",
     "noNotificationsDetail": "リプライ・リアクション・フォローがここにリアルタイム表示されます。"

@@ -350,6 +350,124 @@ async fn is_local_actor(username: &str, pool: &PgPool) -> bool {
     .unwrap_or(false)
 }
 
+/// `actors` テーブルからローカルアクター（`actor_type = 'local'`）の `id` を取得する。
+async fn get_local_actor_id(username: &str, pool: &PgPool) -> Option<i64> {
+    let row = sqlx::query("SELECT id FROM actors WHERE actor_type = 'local' AND username = $1 LIMIT 1")
+        .bind(username)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()?;
+    row.try_get::<i64, _>("id").ok()
+}
+
+/// 本文中の `@username`（ドメイン省略）・`@username.{local_domain}`（AT Protocol ハンドル表記）・
+/// `@username@{local_domain}`（Fediverse 表記）のいずれかで書かれた、ローカルアクターへの
+/// メンションの `actor_id` 一覧を重複除去して返す（メンション通知作成用）。
+///
+/// `convert_mentions_for_bsky`/`convert_mentions_for_ap` は配信対象プロトコルが有効な投稿
+/// （Bsky/AP接続あり）でのみ呼ばれる配信用テキスト変換だが、メンション通知はローカル受信者の
+/// 話であり配信設定とは独立なため、投稿保存時は常にこちらを呼ぶ必要がある。
+pub async fn extract_local_mention_actor_ids(text: &str, local_domain: &str, pool: &PgPool) -> Vec<i64> {
+    let text_chars: Vec<char> = text.chars().collect();
+    let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut result_ids: Vec<i64> = Vec::new();
+    let mut i = 0;
+
+    while i < text_chars.len() {
+        let ch = text_chars[i];
+
+        if ch == 'h' {
+            if let Some(end) = scan_url(&text_chars, i) {
+                i = end;
+                continue;
+            }
+        }
+
+        if ch == '#' {
+            if let Some((_, end)) = scan_hashtag(&text_chars, i) {
+                i = end;
+                continue;
+            }
+        }
+
+        if ch != '@' {
+            i += 1;
+            continue;
+        }
+
+        if i > 0 {
+            let prev = text_chars[i - 1];
+            if prev.is_ascii_alphanumeric() || prev == '_' {
+                i += 1;
+                continue;
+            }
+        }
+
+        i += 1; // skip '@'
+
+        let username_start = i;
+        while i < text_chars.len()
+            && (text_chars[i].is_alphanumeric()
+                || text_chars[i] == '_'
+                || text_chars[i] == '-'
+                || text_chars[i] == '.')
+        {
+            i += 1;
+        }
+
+        if i == username_start {
+            continue;
+        }
+
+        let username: String = text_chars[username_start..i].iter().collect();
+
+        let is_atproto_handle = {
+            let parts: Vec<&str> = username.split('.').collect();
+            parts.len() >= 2 && parts.last().map(|t| t.len() >= 2).unwrap_or(false)
+        };
+
+        if i < text_chars.len() && text_chars[i] == '@' {
+            // `@user@domain` 形式。ローカルドメイン宛てのみ対象。
+            i += 1;
+            let domain_start = i;
+            while i < text_chars.len()
+                && (text_chars[i].is_alphanumeric() || text_chars[i] == '.' || text_chars[i] == '-')
+            {
+                i += 1;
+            }
+            let domain: String = text_chars[domain_start..i].iter().collect();
+            if domain.eq_ignore_ascii_case(local_domain) {
+                if let Some(id) = get_local_actor_id(&username, pool).await {
+                    if seen.insert(id) {
+                        result_ids.push(id);
+                    }
+                }
+            }
+        } else if is_atproto_handle {
+            // `@username.{local_domain}` 形式（自ドメインの正規ハンドル表記）のみ対象。
+            // 他ドメインの AT Protocol ハンドルはローカルアクターではないのでスキップ。
+            let local_suffix = format!(".{}", local_domain);
+            if let Some(local_username) = username.strip_suffix(&local_suffix) {
+                if let Some(id) = get_local_actor_id(local_username, pool).await {
+                    if seen.insert(id) {
+                        result_ids.push(id);
+                    }
+                }
+            }
+        } else {
+            // `@username` 形式（ドメイン省略）
+            if let Some(id) = get_local_actor_id(&username, pool).await {
+                if seen.insert(id) {
+                    result_ids.push(id);
+                }
+            }
+        }
+    }
+
+    result_ids
+}
+
 /// Fediverse メンション（`@user@domain`）を brid.gy 経由で AT Protocol ハンドルと DID に解決する。
 ///
 /// 戻り値: `Some((handle, Option<did>))` または `None`（解決失敗）。

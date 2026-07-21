@@ -30,7 +30,7 @@ use sqlx::Row;
 
 use seiran_common::repository::{Actor, InsertFullParams, NotificationKind, TimelinePost};
 use seiran_common::streaming::broadcast_reaction_update;
-use seiran_common::{ap::{fetch_ap_history, plain_to_html_with_mentions}, generate_snowflake_id, mention::convert_mentions_for_bsky, ApDeliveryKind, PrevApReaction};
+use seiran_common::{ap::{fetch_ap_history, plain_to_html_with_mentions}, generate_snowflake_id, mention::{convert_mentions_for_bsky, extract_local_mention_actor_ids}, ApDeliveryKind, PrevApReaction};
 
 use crate::error::ApiError;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
@@ -345,6 +345,31 @@ async fn create_regular_post(
 
     if let Err(e) = state.hashtags.link_post(post_id, &text).await {
         tracing::error!("[create_regular_post] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
+    }
+
+    // メンション通知: 本文中で `@username` 形式によりローカルユーザーが言及されていれば通知を
+    // 作る。Bsky/AP配送設定の有無とは無関係に常に処理する（配信は宛先プロトコルの話、通知は
+    // ローカル受信者の話で別軸のため）。
+    for mentioned_actor_id in extract_local_mention_actor_ids(&text, &state.local_domain, &state.db).await {
+        if mentioned_actor_id == actor_id {
+            continue; // 自己メンションは通知しない
+        }
+        state.stream_hub.publish_event(
+            std::collections::HashSet::from([mentioned_actor_id]),
+            "mention",
+            serde_json::json!({
+                "postId": post_id.to_string(),
+                "actor": { "username": username, "domain": serde_json::Value::Null },
+            }),
+        );
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = state
+            .notifications
+            .insert(notif_id, mentioned_actor_id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None)
+            .await
+        {
+            tracing::error!("[create_regular_post] mention notifications INSERT 失敗: {}", e);
+        }
     }
 
     deliver_regular_post(state, RegularPostDelivery {

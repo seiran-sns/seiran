@@ -9,12 +9,13 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 /// 通知の種別。Misskey 本家の `type` 値に合わせる
-/// （`follow` / `reaction` / `followRequestAccepted`）。
+/// （`follow` / `reaction` / `followRequestAccepted` / `mention`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationKind {
     Follow,
     Reaction,
     FollowRequestAccepted,
+    Mention,
 }
 
 impl NotificationKind {
@@ -23,6 +24,7 @@ impl NotificationKind {
             NotificationKind::Follow => "follow",
             NotificationKind::Reaction => "reaction",
             NotificationKind::FollowRequestAccepted => "followRequestAccepted",
+            NotificationKind::Mention => "mention",
         }
     }
 }

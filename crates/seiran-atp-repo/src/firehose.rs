@@ -756,6 +756,43 @@ async fn save_bsky_post(
                 tracing::error!("[Jetstream] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
             }
 
+            // メンション通知: mention_facets の各 did がローカルアクターを指す場合、通知を作る。
+            // source_uri は渡さない（1投稿に複数の宛先がありうるため、投稿の at_uri を
+            // 共有すると2人目以降が部分UNIQUEインデックスで弾かれてしまう。posts 自体は
+            // at_uri の ON CONFLICT で既に重複排除済みのため、このブロックへの到達自体が
+            // 新規保存時のみに限られ、重複INSERT対策は不要）。
+            if let JsonValue::Array(spans) = mention_facets {
+                let actor_repo = PgActorRepository::new(pool.clone());
+                let notifications_repo = PgNotificationRepository::new(pool.clone());
+                let mut notified: HashSet<i64> = HashSet::new();
+                for span in spans {
+                    let Some(mentioned_did) = span.get("did").and_then(|v| v.as_str()) else { continue };
+                    if let Ok(Some(mentioned_actor)) = actor_repo.find_by_did(mentioned_did).await {
+                        if mentioned_actor.actor_type != "local" || mentioned_actor.id == actor_id {
+                            continue;
+                        }
+                        if !notified.insert(mentioned_actor.id) {
+                            continue;
+                        }
+                        stream_hub.publish_event(
+                            HashSet::from([mentioned_actor.id]),
+                            "mention",
+                            serde_json::json!({
+                                "postId": post_id.to_string(),
+                                "actor": { "username": username, "domain": serde_json::Value::Null, "displayName": display_name },
+                            }),
+                        );
+                        let notif_id = generate_snowflake_id(chrono::Utc::now());
+                        if let Err(e) = notifications_repo
+                            .insert(notif_id, mentioned_actor.id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None)
+                            .await
+                        {
+                            tracing::error!("[Jetstream] mention notifications INSERT 失敗: {}", e);
+                        }
+                    }
+                }
+            }
+
             // 添付（画像・動画）を post_attachments に保存
             if !attachments.is_empty() {
                 let posts_repo = PgPostRepository::new(pool.clone());

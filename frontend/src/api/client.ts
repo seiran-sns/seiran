@@ -430,16 +430,17 @@ export interface NotificationUser {
 export interface NotificationItem {
   id: string;
   createdAt: string;
-  type: string; // "reaction" | "follow" | "followRequestAccepted"
+  type: string; // "reaction" | "follow" | "followRequestAccepted" | "mention"
   userId?: string;
   user?: NotificationUser;
   /** `type === "reaction"` の場合のみ。カスタム絵文字は `:shortcode:` 形式。 */
   reaction?: string;
   /**
-   * `type === "reaction"` の場合のみ。`note.reactionEmojis` にカスタム絵文字（`reaction` と
+   * `type === "reaction"` の場合は `reactionEmojis` にカスタム絵文字（`reaction` と
    * 同じキー）の画像URLが入っている場合のみ画像表示する（Unicode絵文字は入らない）。
+   * `type === "mention"` の場合は `id` があれば該当ポストへのリンクに使う。
    */
-  note?: { reactionEmojis?: Record<string, string> };
+  note?: { id?: string; reactionEmojis?: Record<string, string> };
 }
 
 // =====================================================================

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import i18n from "../../i18n";
 import { api, getErrorMessage, NotificationItem } from "../../api/client";
 import { useStreamingContext } from "../../contexts/StreamingContext";
@@ -27,6 +28,8 @@ function describe(n: NotificationItem): { icon: string; iconUrl?: string; text: 
       return { icon: "➕", text: i18n.t("notifications:notificationsPanel.followText", { label }) };
     case "followRequestAccepted":
       return { icon: "🤝", text: i18n.t("notifications:notificationsPanel.followAcceptedText", { label }) };
+    case "mention":
+      return { icon: "📣", text: i18n.t("notifications:notificationsPanel.mentionText", { label }) };
     default:
       return { icon: "🔔", text: i18n.t("notifications:notificationsPanel.genericText", { label }) };
   }
@@ -114,6 +117,7 @@ export default function NotificationsPanel() {
     <ul className={styles.list}>
       {items.map((n) => {
         const { icon, iconUrl, text } = describe(n);
+        const noteId = n.type === "mention" ? n.note?.id : undefined;
         return (
           <li key={n.id} className={styles.item}>
             {iconUrl ? (
@@ -121,7 +125,13 @@ export default function NotificationsPanel() {
             ) : (
               <span className={styles.icon}>{icon}</span>
             )}
-            <span className={styles.text}>{text}</span>
+            {noteId ? (
+              <Link to={`/notes/${noteId}`} className={styles.text}>
+                {text}
+              </Link>
+            ) : (
+              <span className={styles.text}>{text}</span>
+            )}
           </li>
         );
       })}

@@ -20,6 +20,7 @@
 - [x] **フェーズ7.8: ハッシュタグ機能** — `hashtags`/`post_hashtags`/`pinned_hashtags` によるポスト⇔タグのm:n永続化。ローカル投稿・AP受信・Bsky受信いずれも最終的な `posts.body` から共通のスキャン（`seiran_common::hashtag::extract_hashtags`）で抽出するため、出自を問わず同じハッシュタイムライン（`/tags/:name`）に合流する。ハッシュタイムライン画面から「ホーム画面に追加」（`pinned_hashtags`、ホームのフィードタブ化）・「このハッシュタグでポスト」（`ComposerContext.openCompose` によるプリフィル投稿ダイアログ）。送信側（ローカル投稿→Bsky/AP配送）も `app.bsky.richtext.facet#tag`・AP `{"type":"Hashtag"}` タグ（自インスタンスの `/tags/:name` へのアンカー）を付与し、他クライアント上でも本物のハッシュタグとして認識される。受信側はMastodon等がハッシュタグアンカーにも`class="mention hashtag"`を付与する（メンションと`mention`トークンを共有する）ケースを`rel="tag"`で判別し誤ってメンション扱いしないようにする回帰修正込み。詳細: `docs/database.md`、`docs/protocols.md` 6節
 - [x] **フェーズ7.9: ダイレクトメッセージ機能** — `visibility='direct'`投稿を`posts`にそのまま格納し宛先（`post_recipients`）・スレッド起点伝播コピー（`thread_root_post_id`）・既読状態（`dm_read_states`）で管理。Fedi宛先は宛先個人のみへのAP配送、Bsky宛先は`chat.bsky.convo`（自己署名サービス認証JWT、送信は`Job::BskyDmSend`、受信は`seiran-atp-repo::bsky_dm_poll`の定期ポーリング）。Bsky宛先は1対1のみ・文字数上限1000書記素・メディア添付不可。フロントエンドは`MessagesPage`（右ペイン=セッション一覧、中央ペイン=時刻順メッセージ履歴+送信フォーム）、`RecipientPicker`（宛先chip入力）、左ペイン未読バッジ。詳細: `docs/database.md`、`docs/protocols.md` 9節、`docs/ui_spec.md` 2.5節
 - [x] **フェーズ7.10: ブロック・ミュート機能** — プロフィール画面に対ユーザー操作メニュー（`ActionsMenu`、フォロー中/フォロー・ミュート・ブロックを統合、フォローは独立ボタンも併設）を新設。ブロックはBsky準拠の定義（フォロー関係強制解除＋相互完全非表示）を採用し、相手がBskyなら`app.bsky.graph.block`コミット、相手がFediならAP `Block`配送。タイムライン・通知の相互非表示・プロフィール本文/key-valueの非表示はSQL関数`actor_is_hidden_for_viewer`と`is_blocked_by`判定に集約、フォロー・リプライ・リアクション・引用投稿・リポスト・DM送信の書き込みもAPIレベルで拒否する。相手発ブロック（Fedi/Bskyリモートユーザーが自分をブロックした場合）も検知して同じ制限を対称に働かせる：Fedi側はAP `Block`受信時に記録、Bsky側は`app.bsky.graph.block`の無絞り込みJetstream監視（`seiran-atp-repo::bsky_block_watch`）でリアルタイム検知する。ミュートはFedi/Bsky共通のローカル効果のみ（AP/ATP配送なし）。詳細: `docs/database.md`、`docs/protocols.md` 10節、`docs/ui_spec.md` 2.2節
+- [x] **フェーズ7.11: メンション通知** — 本文中で`@username`形式によりローカルユーザーが言及された場合に通知（`type="mention"`）を作る。投稿の出自（ローカル投稿・Fedi受信・Bsky受信）ごとに解決経路を持ち、いずれも自己メンションは通知しない。通知一覧・クイック通知パネルへのリアルタイム反映は既存のフォロー/リアクション通知と同じ仕組み（`NotificationRepository`・`StreamHub`）に統合。詳細: `docs/protocols.md` 8節
 
 ## 未完了・今後の課題
 
@@ -72,5 +73,7 @@
 - [x] クイック通知（ホーム右ペイン`NotificationsPanel`）のE2E化（他ユーザーのリアクションがWS経由でリアルタイムに一覧へ反映されることを検証）。`NotificationsPage`（`/notifications`）は中央ペインに`NotificationsPanel`を表示する形で実装済み、専用ページへ直接遷移した場合の表示もE2Eで検証
 - [x] ピン留め・リポスト取消のUI側状態変化のE2E化（ボタン表示のトグル確認）
 - [x] Bsky側の配送E2E（リモートBskyアクターからのフォロー受理をポーリング方式（`getFollowers`、`seiran-atp-repo::bsky_follower_poll`）で検知し、投稿の`subscribeRepos`配送までを通しで検証）
+- [x] メンション通知のE2E化（ローカル投稿・Fedi受信）。ローカルは`@username`投稿で相手に通知が届くこと・自己メンションで通知されないことを検証、Fedi受信はスタブFediアクターから`tag[].type=="Mention"`付きCreateを送りメンション通知が届くことを検証（`e2e/tests/notifications.spec.ts`）
+- [ ] Bsky受信のメンション通知のE2E化 — `seiran-atp-repo::firehose`は本物のJetstreamサーバーへ接続する設計で、E2E側にイベント注入用のモックが無いため現状のE2E基盤では自動テストできない。実装（`save_bsky_post`内の通知処理）とcurlでの手動確認のみ
 
 既存の結合テスト基盤: `crates/seiran-api/tests/`（実DB + 実 `seiran_api::router` を使用、`#[ignore]` で通常の `cargo test` から除外し `cargo test -p seiran-api --test <name> -- --ignored` で明示実行）。

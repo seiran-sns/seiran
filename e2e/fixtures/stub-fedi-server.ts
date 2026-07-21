@@ -18,8 +18,15 @@ export interface StubFediServer {
   /** このスタブアクターからseiranへ署名付きFollowを送り、対象ローカルユーザーをフォローする。 */
   sendFollow(seiranBaseUrl: string, targetUsername: string): Promise<void>;
   /** 対象ローカルユーザー宛のCreate(Note)を送る（`to`に対象アクターのみを指定するとdirect扱い）。
-   * `inReplyTo`を指定すると、そのAP Note IDへの返信として送信する。返り値は生成したNote ID。 */
-  sendCreateNote(seiranBaseUrl: string, targetUsername: string, text: string, inReplyTo?: string): Promise<string>;
+   * `opts.inReplyTo`を指定すると、そのAP Note IDへの返信として送信する。
+   * `opts.mentionTargetUsername`を指定すると、そのローカルユーザーへの`tag[].type=="Mention"`
+   * （メンション通知E2E用）を`object.tag`に含める。返り値は生成したNote ID。 */
+  sendCreateNote(
+    seiranBaseUrl: string,
+    targetUsername: string,
+    text: string,
+    opts?: { inReplyTo?: string; mentionTargetUsername?: string },
+  ): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -130,9 +137,18 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
           };
           await signedPost(`${seiranBaseUrl}/inbox`, activity, stub.actorUri, privateKey);
         },
-        async sendCreateNote(seiranBaseUrl, targetUsername, text, inReplyTo) {
+        async sendCreateNote(seiranBaseUrl, targetUsername, text, opts) {
           const targetActorUri = `${seiranBaseUrl}/users/${targetUsername}`;
           const noteId = `${base}/notes/${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const tag = opts?.mentionTargetUsername
+            ? [
+                {
+                  type: "Mention",
+                  href: `${seiranBaseUrl}/users/${opts.mentionTargetUsername}`,
+                  name: `@${opts.mentionTargetUsername}`,
+                },
+              ]
+            : [];
           const activity = {
             "@context": "https://www.w3.org/ns/activitystreams",
             type: "Create",
@@ -148,7 +164,8 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
               published: new Date().toISOString(),
               to: [targetActorUri],
               cc: [],
-              ...(inReplyTo ? { inReplyTo } : {}),
+              tag,
+              ...(opts?.inReplyTo ? { inReplyTo: opts.inReplyTo } : {}),
             },
           };
           await signedPost(`${seiranBaseUrl}/inbox`, activity, stub.actorUri, privateKey);
