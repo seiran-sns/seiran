@@ -12,12 +12,17 @@ interface ReactionPickerProps {
   onPick: (emoji: string) => void;
   /** リアクション操作中は true。トリガーボタンを無効化する。 */
   disabled?: boolean;
+  /** 外部（`ActionsMenu` の「リアクション」項目等）から開閉を制御したい場合に指定する。 */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /** 投稿に絵文字リアクションを付けるためのトリガーボタン＋ポップオーバー。 */
-export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps) {
+export default function ReactionPicker({ onPick, disabled, open: controlledOpen, onOpenChange }: ReactionPickerProps) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = onOpenChange ?? setUncontrolledOpen;
   const [customInput, setCustomInput] = useState("");
   const [customError, setCustomError] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -59,7 +64,7 @@ export default function ReactionPicker({ onPick, disabled }: ReactionPickerProps
         disabled={disabled}
         onClick={(e) => {
           e.stopPropagation();
-          setOpen((v) => !v);
+          setOpen(!open);
         }}
         title={t("home:reactionPicker.addReactionTitle")}
       >

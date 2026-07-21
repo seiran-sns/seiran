@@ -43,8 +43,8 @@ pub use notification::{NotificationKind, NotificationRepository, NotificationRow
 pub use password_reset::{PasswordResetRepository, PgPasswordResetRepository};
 pub use pinned_post::{PgPinnedPostsRepository, PinnedPostsRepository, MAX_PINNED_POSTS};
 pub use post::{
-    DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, PgPostRepository, PostDeliveryMeta,
-    PostRecord, PostRepository, PostSummary, RepostUndoInfo, TimelinePost,
+    DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, PgPostRepository, PostDeleteInfo,
+    PostDeliveryMeta, PostRecord, PostRepository, PostSummary, RepostUndoInfo, TimelinePost,
 };
 pub use reaction::{PgReactionRepository, ReactionRepository};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};

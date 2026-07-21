@@ -113,6 +113,18 @@ pub struct RepostUndoInfo {
     pub orig_at_uri: Option<String>,
 }
 
+/// 投稿削除（`DELETE /api/notes/:id`）に必要な情報。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PostDeleteInfo {
+    /// 投稿者actor_id（本人以外は削除不可）。
+    pub actor_id: i64,
+    /// この投稿が実際にFediへ配送されたか（true の場合のみ AP Delete(Note) を送る）。
+    pub deliver_fedi: bool,
+    pub visibility: String,
+    /// Bskyへコミット済みの場合の rkey（未コミットなら None）。
+    pub at_rkey: Option<String>,
+}
+
 /// `PostRepository::insert_full` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
 pub struct InsertFullParams<'a> {
     pub id: i64,
@@ -303,6 +315,9 @@ pub trait PostRepository: Send + Sync {
         actor_id: i64,
         note_id: i64,
     ) -> Result<Option<RepostUndoInfo>, sqlx::Error>;
+
+    /// 投稿削除に必要な情報（所有者チェック・AP/ATP配送要否判定用）を取得する。
+    async fn find_delete_info(&self, id: i64) -> Result<Option<PostDeleteInfo>, sqlx::Error>;
 
     /// 投稿を id で論理削除する。
     async fn soft_delete_by_id(&self, id: i64) -> Result<(), sqlx::Error>;
@@ -877,6 +892,18 @@ impl PostRepository for PgPostRepository {
         )
         .bind(actor_id)
         .bind(note_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn find_delete_info(&self, id: i64) -> Result<Option<PostDeleteInfo>, sqlx::Error> {
+        sqlx::query_as::<_, PostDeleteInfo>(
+            "SELECT actor_id, deliver_fedi, visibility::text AS visibility, at_rkey
+             FROM posts
+             WHERE id = $1 AND deleted_at IS NULL
+             LIMIT 1",
+        )
+        .bind(id)
         .fetch_optional(&self.pool)
         .await
     }

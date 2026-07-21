@@ -21,11 +21,12 @@ interface NoteCardProps {
   large?: boolean;
 }
 
-function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
+function PostContent({ note, linkToDetail, large = false, onUnreposted, onDeleted }: {
   note: Note;
   linkToDetail: boolean;
   large?: boolean;
   onUnreposted?: () => void;
+  onDeleted?: () => void;
 }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -47,15 +48,17 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
     pinned,
     pinning,
     handleTogglePin,
-  } = useNoteCardActions(note, onUnreposted);
+    deleting,
+    handleDelete,
+  } = useNoteCardActions(note, onUnreposted, onDeleted);
 
   function goProfile(e: React.MouseEvent) {
     e.stopPropagation();
     navigate(profilePath(note.user.username, note.user.domain));
   }
 
-  function handleReply(e: React.MouseEvent) {
-    e.stopPropagation();
+  function handleReply(e?: React.MouseEvent) {
+    e?.stopPropagation();
     openReply(note);
   }
 
@@ -139,6 +142,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         pinned={pinned}
         pinning={pinning}
         onTogglePin={handleTogglePin}
+        deleting={deleting}
+        onDelete={handleDelete}
       />
     </>
   );
@@ -162,7 +167,13 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
           </Link>
           {suffix && <>{" "}{suffix}</>}
         </div>
-        <PostContent note={note.renote} linkToDetail={linkToDetail} large={large} onUnreposted={() => setHidden(true)} />
+        <PostContent
+          note={note.renote}
+          linkToDetail={linkToDetail}
+          large={large}
+          onUnreposted={() => setHidden(true)}
+          onDeleted={() => setHidden(true)}
+        />
       </article>
     );
   }
@@ -183,7 +194,7 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
 
   return (
     <article className={`${styles.card} ${large ? styles.large : ""}`}>
-      <PostContent note={note} linkToDetail={linkToDetail} large={large} />
+      <PostContent note={note} linkToDetail={linkToDetail} large={large} onDeleted={() => setHidden(true)} />
     </article>
   );
 }

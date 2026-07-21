@@ -225,3 +225,45 @@
   color: var(--accent);
   font-weight: 600;
 }
+
+.modalText {
+  font-size: 0.92rem;
+  line-height: 1.7;
+  margin: 0 0 20px;
+}
+
+.modalActions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modalPrimaryDanger {
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modalPrimaryDanger:hover {
+  filter: brightness(0.92);
+}
+
+.modalSecondary {
+  background: none;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.modalSecondary:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}

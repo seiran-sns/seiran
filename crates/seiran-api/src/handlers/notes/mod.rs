@@ -824,6 +824,57 @@ pub async fn delete_repost(
     .into_response()
 }
 
+/// DELETE /api/notes/:id
+/// 自分の投稿を削除する。論理削除（`deleted_at`）に加え、実際に配送済みだった先
+/// （Fedi/Bsky）へ Delete/取り消しを配送する。リポスト・引用・返信・リアクション等の
+/// 関連行はカスケード削除しない（読み取り側が `deleted_at IS NULL` を一貫して見る設計）。
+pub async fn delete_note(
+    Path(note_id_str): Path<String>,
+    me: AuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    let info = match state.posts.find_delete_info(note_id).await {
+        Ok(Some(info)) => info,
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
+    };
+    if info.actor_id != me.actor_id {
+        return ApiError::Forbidden("NOT_YOUR_POST").into_response();
+    }
+
+    if let Err(e) = state.posts.soft_delete_by_id(note_id).await {
+        return ApiError::Internal(format!("UPDATE 失敗: {}", e)).into_response();
+    }
+
+    tracing::info!("[delete_note] actor_id={} が note_id={} を削除", me.actor_id, note_id);
+
+    // AP Delete(Note) 配送 — 実際に Fedi へ Create(Note) 済みの場合のみ。direct（DM）は
+    // フォロワー配送ロジックしか持たないため対象外（本来の宛先には届かない）。
+    if info.deliver_fedi && info.visibility != "direct" {
+        state
+            .enqueue_ap_delivery(me.actor_id, ApDeliveryKind::DeleteNote { post_id: note_id })
+            .await;
+    }
+
+    // ATP 投稿 delete commit — Bsky へコミット済みで rkey が保存されている場合のみ
+    if let Some(rkey) = info.at_rkey {
+        let atp = Arc::clone(&state.atp_service);
+        let now = chrono::Utc::now();
+        tokio::spawn(async move {
+            if let Err(e) = atp.delete_atp_post(me.actor_id, &rkey, now).await {
+                tracing::error!("[delete_note] ATP post delete 失敗: {}", e);
+            }
+        });
+    }
+
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
 /// POST /api/notes/:id/reactions
 /// 自分の絵文字リアクションを追加する。ローカル保存に加え、AP（対象ポスト著者 + 自分の Fedi
 /// フォロワー全員）・ATP（対象に at_uri がある場合）の双方へ配送する。

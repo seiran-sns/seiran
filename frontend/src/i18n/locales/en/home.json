@@ -40,7 +40,13 @@
     "repostedConnector": "reposted this at",
     "repostedSuffix": "",
     "repostedNoLinkSuffix": "reposted this",
-    "unavailableRepost": "This post can't be shown (it's private)."
+    "unavailableRepost": "This post can't be shown (it's private).",
+    "menuTitle": "Menu",
+    "deleteConfirmModal": {
+      "title": "Delete this post?",
+      "body": "This can't be undone. Deleting will also remove the post from federated servers and Bluesky.",
+      "confirmButton": "Delete"
+    }
   },
   "noteList": {
     "emptyDefault": "No posts."

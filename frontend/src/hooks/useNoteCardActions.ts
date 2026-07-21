@@ -64,9 +64,10 @@ export function applyReactionUpdate(
  * だけでよく、表示ロジックに専念できる。
  *
  * `onUnreposted` はリポスト取消が成功した際に呼ばれる（NoteCard 側でリポスト表示自体を
+ * 非表示にするために使う）。`onDeleted` は投稿削除が成功した際に呼ばれる（同様にカード自体を
  * 非表示にするために使う）。
  */
-export function useNoteCardActions(note: Note, onUnreposted?: () => void) {
+export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDeleted?: () => void) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { showError } = useToast();
@@ -78,6 +79,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void) {
   const [reactions, setReactions] = useState<ReactionSummary[]>(note.reactions ?? []);
   const [pinned, setPinned] = useState(note.pinnedByMe ?? false);
   const [pinning, setPinning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   // 1投稿につき1ユーザー1リアクションまでのため、切り替え中は他の絵文字操作も
   // まとめてロックする（個別絵文字ごとの pending 管理はしない）。
   const [reactionPending, setReactionPending] = useState(false);
@@ -92,8 +94,8 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void) {
     });
   }, [note.id, registerReaction, user?.actor_id]);
 
-  async function handleRepost(e: React.MouseEvent) {
-    e.stopPropagation();
+  async function handleRepost(e?: React.MouseEvent) {
+    e?.stopPropagation();
     if (reposting || unreposting) return;
 
     if (reposted) {
@@ -149,8 +151,8 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void) {
     }
   }
 
-  async function handleTogglePin(e: React.MouseEvent) {
-    e.stopPropagation();
+  async function handleTogglePin(e?: React.MouseEvent) {
+    e?.stopPropagation();
     if (pinning) return;
     setPinning(true);
     try {
@@ -168,6 +170,19 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void) {
     }
   }
 
+  async function handleDelete() {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await api.notes.delete(note.id);
+      onDeleted?.();
+    } catch (err) {
+      showError(getErrorMessage(err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return {
     isSelf,
     isPrivateRepostTarget,
@@ -181,5 +196,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void) {
     pinned,
     pinning,
     handleTogglePin,
+    deleting,
+    handleDelete,
   };
 }

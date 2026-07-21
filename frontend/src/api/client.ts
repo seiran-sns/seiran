@@ -630,6 +630,9 @@ export const api = {
     deleteRepost(noteId: string) {
       return request<{ ok: boolean }>("DELETE", `/notes/${encodeURIComponent(noteId)}/repost`);
     },
+    delete(noteId: string) {
+      return request<{ ok: boolean }>("DELETE", `/notes/${encodeURIComponent(noteId)}`);
+    },
     react(noteId: string, content: string) {
       return request<ReactResult>("POST", `/notes/${encodeURIComponent(noteId)}/reactions`, { content });
     },

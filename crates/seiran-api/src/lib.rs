@@ -381,7 +381,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/dm/sessions/:thread_root_id/read", post(handlers::dm::mark_read))
         .route("/api/dm/unread-count", get(handlers::dm::unread_count))
         .route("/api/streaming", get(handlers::streaming::streaming))
-        .route("/api/notes/:id", get(handlers::notes::get_note))
+        .route("/api/notes/:id", get(handlers::notes::get_note).delete(handlers::notes::delete_note))
         .route("/api/notes/:id/repost", delete(handlers::notes::delete_repost))
         .route("/api/notes/:id/reactions", post(handlers::notes::create_reaction))
         .route("/api/notes/:id/reactions/:content", delete(handlers::notes::delete_reaction))

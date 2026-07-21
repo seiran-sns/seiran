@@ -40,7 +40,13 @@
     "repostedConnector": "が",
     "repostedSuffix": "にリポスト",
     "repostedNoLinkSuffix": "がリポスト",
-    "unavailableRepost": "この投稿は表示できません（非公開投稿のため）。"
+    "unavailableRepost": "この投稿は表示できません（非公開投稿のため）。",
+    "menuTitle": "メニュー",
+    "deleteConfirmModal": {
+      "title": "投稿を削除しますか？",
+      "body": "この操作は取り消せません。削除すると連合先・Bluesky上の投稿も削除されます。",
+      "confirmButton": "削除する"
+    }
   },
   "noteList": {
     "emptyDefault": "投稿がありません。"
