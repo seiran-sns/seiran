@@ -64,6 +64,39 @@ function notifyIfUnauthorized(status: number) {
   }
 }
 
+/** レスポンスが失敗（`!res.ok`）であれば `ApiError` を投げる（`request`/`uploadFormData` で共通）。 */
+export async function throwIfError(res: Response): Promise<void> {
+  if (res.ok) return;
+  notifyIfUnauthorized(res.status);
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    try {
+      const err = (await res.json()) as { code?: string; detail?: Record<string, unknown> };
+      if (err.code) {
+        throw new ApiError(err.code, res.status, err.detail);
+      }
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+    }
+  }
+  throw new ApiError("UNKNOWN_ERROR", res.status);
+}
+
+/**
+ * 成功レスポンスのボディを JSON としてパースする（`request`/`uploadFormData` で共通）。
+ * 204 No Content 等、ボディが無い成功レスポンスは `res.json()` が
+ * "Unexpected end of JSON input" で例外を投げるため、パース前に弾く
+ * （例: admin のロール変更/凍結・解除 API。処理自体は成功しているのに
+ * 呼び出し側にエラーとして伝播していた不具合）。
+ */
+export async function parseJsonBody<T>(res: Response): Promise<T> {
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
 async function request<T>(
   method: string,
   path: string,
@@ -79,32 +112,8 @@ async function request<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal,
   });
-
-  if (!res.ok) {
-    notifyIfUnauthorized(res.status);
-    const contentType = res.headers.get("content-type") ?? "";
-    if (contentType.includes("application/json")) {
-      try {
-        const err = (await res.json()) as { code?: string; detail?: Record<string, unknown> };
-        if (err.code) {
-          throw new ApiError(err.code, res.status, err.detail);
-        }
-      } catch (e) {
-        if (e instanceof ApiError) throw e;
-      }
-    }
-    throw new ApiError("UNKNOWN_ERROR", res.status);
-  }
-
-  // 204 No Content 等、ボディが無い成功レスポンスは res.json() が
-  // "Unexpected end of JSON input" で例外を投げるため、パース前に弾く
-  // （例: admin のロール変更/凍結・解除 API。処理自体は成功しているのに
-  // 呼び出し側にエラーとして伝播していた不具合）。
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  const text = await res.text();
-  return (text ? JSON.parse(text) : undefined) as T;
+  await throwIfError(res);
+  return parseJsonBody<T>(res);
 }
 
 /** FormData 送信（`request()` は JSON body 前提のため通せない）用の共通エラーハンドリング。 */
@@ -114,20 +123,17 @@ async function uploadFormData<T>(path: string, formData: FormData): Promise<T> {
     headers: { ...authHeaders() },
     body: formData,
   });
-  if (!res.ok) {
-    notifyIfUnauthorized(res.status);
-    const contentType = res.headers.get("content-type") ?? "";
-    if (contentType.includes("application/json")) {
-      try {
-        const err = (await res.json()) as { code?: string; detail?: Record<string, unknown> };
-        if (err.code) throw new ApiError(err.code, res.status, err.detail);
-      } catch (e) {
-        if (e instanceof ApiError) throw e;
-      }
-    }
-    throw new ApiError("UNKNOWN_ERROR", res.status);
-  }
-  return res.json() as Promise<T>;
+  await throwIfError(res);
+  return parseJsonBody<T>(res);
+}
+
+/** limit/until_id/since_id カーソルパラメータを組み立てる（7箇所の重複を共通化）。 */
+export function cursorParams(params?: { limit?: number; until_id?: string; since_id?: string }): URLSearchParams {
+  const q = new URLSearchParams();
+  if (params?.limit) q.set("limit", String(params.limit));
+  if (params?.until_id) q.set("until_id", params.until_id);
+  if (params?.since_id) q.set("since_id", params.since_id);
+  return q;
 }
 
 // =====================================================================
@@ -594,20 +600,14 @@ export const api = {
       );
     },
     async localTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
-      const q = new URLSearchParams();
-      if (params?.limit) q.set("limit", String(params.limit));
-      if (params?.until_id) q.set("until_id", params.until_id);
-      if (params?.since_id) q.set("since_id", params.since_id);
+      const q = cursorParams(params);
       if (params?.exclude_direct) q.set("exclude_direct", "true");
       const qs = q.toString();
       const rows = await request<RawNote[]>("GET", `/notes/local-timeline${qs ? `?${qs}` : ""}`);
       return rows.map(normalizeNote);
     },
     async homeTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
-      const q = new URLSearchParams();
-      if (params?.limit) q.set("limit", String(params.limit));
-      if (params?.until_id) q.set("until_id", params.until_id);
-      if (params?.since_id) q.set("since_id", params.since_id);
+      const q = cursorParams(params);
       if (params?.exclude_direct) q.set("exclude_direct", "true");
       const qs = q.toString();
       const rows = await request<RawNote[]>("GET", `/notes/home-timeline${qs ? `?${qs}` : ""}`);
@@ -680,10 +680,8 @@ export const api = {
     /** プロフィール画面の投稿一覧の追加ページ取得（無限スクロール、#64）。`actorId` は
      * `UserProfile.actor_id`（DB未登録のリモートアクターは undefined になり得る）。 */
     async posts(actorId: string, params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
-      const q = new URLSearchParams({ actor_id: actorId });
-      if (params?.limit) q.set("limit", String(params.limit));
-      if (params?.until_id) q.set("until_id", params.until_id);
-      if (params?.since_id) q.set("since_id", params.since_id);
+      const q = cursorParams(params);
+      q.set("actor_id", actorId);
       if (params?.exclude_direct) q.set("exclude_direct", "true");
       const rows = await request<RawNote[]>("GET", `/users/posts?${q.toString()}`);
       return rows.map(normalizeNote);
@@ -800,19 +798,11 @@ export const api = {
 
   dm: {
     async sessions(params?: { limit?: number; until_id?: string; since_id?: string }) {
-      const q = new URLSearchParams();
-      if (params?.limit) q.set("limit", String(params.limit));
-      if (params?.until_id) q.set("until_id", params.until_id);
-      if (params?.since_id) q.set("since_id", params.since_id);
-      const qs = q.toString();
+      const qs = cursorParams(params).toString();
       return request<DmSession[]>("GET", `/dm/sessions${qs ? `?${qs}` : ""}`);
     },
     async threadMessages(threadRootId: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
-      const q = new URLSearchParams();
-      if (params?.limit) q.set("limit", String(params.limit));
-      if (params?.until_id) q.set("until_id", params.until_id);
-      if (params?.since_id) q.set("since_id", params.since_id);
-      const qs = q.toString();
+      const qs = cursorParams(params).toString();
       const rows = await request<RawNote[]>("GET", `/dm/sessions/${encodeURIComponent(threadRootId)}/messages${qs ? `?${qs}` : ""}`);
       return rows.map(normalizeNote);
     },
@@ -847,11 +837,7 @@ export const api = {
       return request<void>("DELETE", `/lists/${encodeURIComponent(id)}/members/${encodeURIComponent(actorId)}`);
     },
     async timeline(id: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
-      const q = new URLSearchParams();
-      if (params?.limit) q.set("limit", String(params.limit));
-      if (params?.until_id) q.set("until_id", params.until_id);
-      if (params?.since_id) q.set("since_id", params.since_id);
-      const qs = q.toString();
+      const qs = cursorParams(params).toString();
       const rows = await request<RawNote[]>("GET", `/lists/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`);
       return rows.map(normalizeNote);
     },
@@ -869,11 +855,7 @@ export const api = {
       return request<void>("DELETE", `/hashtags/${encodeURIComponent(name)}/pin`);
     },
     async timeline(name: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
-      const q = new URLSearchParams();
-      if (params?.limit) q.set("limit", String(params.limit));
-      if (params?.until_id) q.set("until_id", params.until_id);
-      if (params?.since_id) q.set("since_id", params.since_id);
-      const qs = q.toString();
+      const qs = cursorParams(params).toString();
       const rows = await request<RawNote[]>("GET", `/hashtags/${encodeURIComponent(name)}/timeline${qs ? `?${qs}` : ""}`);
       return rows.map(normalizeNote);
     },
