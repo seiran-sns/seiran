@@ -23,7 +23,6 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
@@ -381,7 +380,7 @@ pub async fn home_timeline(
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[home_timeline] クエリ失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "TL取得に失敗しました").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
@@ -417,7 +416,7 @@ pub async fn local_timeline(
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[local_timeline] クエリ失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "TL取得に失敗しました").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
@@ -483,7 +482,7 @@ pub async fn get_note_ap(
 ) -> impl IntoResponse {
     let post_id: i64 = match id.parse() {
         Ok(i) => i,
-        Err(_) => return (StatusCode::NOT_FOUND, "").into_response(),
+        Err(_) => return ApiError::NotFound("NOT_FOUND").into_response(),
     };
 
     if crate::handlers::ogp::wants_html(&headers) {
@@ -492,16 +491,16 @@ pub async fn get_note_ap(
 
     let post = match state.posts.find_by_id_for_viewer(post_id, None).await {
         Ok(Some(p)) => p,
-        Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => {
             tracing::error!("[get_note_ap] DB エラー: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "").into_response();
+            return ApiError::Internal(e.to_string()).into_response();
         }
     };
 
     // ローカルポストのみ AP として提供する
     if post.domain != state.local_domain {
-        return (StatusCode::NOT_FOUND, "").into_response();
+        return ApiError::NotFound("NOT_FOUND").into_response();
     }
 
     let actor_uri = format!("https://{}/users/{}", state.local_domain, post.username);

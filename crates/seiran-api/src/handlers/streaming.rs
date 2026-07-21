@@ -7,12 +7,12 @@ use std::time::Duration;
 
 use axum::{
     extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Query, State},
-    http::StatusCode,
     response::IntoResponse,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
+use crate::error::ApiError;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -27,11 +27,11 @@ pub async fn streaming(
 ) -> impl IntoResponse {
     let verified = match state.local_auth.verify_token(&q.token) {
         Ok(v) => v,
-        Err(_) => return (StatusCode::UNAUTHORIZED, "invalid token").into_response(),
+        Err(_) => return ApiError::Unauthorized("invalid token").into_response(),
     };
     let actor_id = match state.actors.find_local_by_user_id(verified.user_id).await {
         Ok(Some(a)) => a.id,
-        _ => return (StatusCode::NOT_FOUND, "actor not found").into_response(),
+        _ => return ApiError::NotFound("actor not found").into_response(),
     };
     ws.on_upgrade(move |socket| handle_stream(socket, actor_id, state))
 }
