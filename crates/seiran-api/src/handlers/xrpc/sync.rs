@@ -14,6 +14,7 @@ use seiran_common::atp::{
     build_commit_frame, build_identity_frame, cid_from_str, encode_car, CommitEvtOp,
 };
 
+use crate::error::ApiError;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -30,13 +31,13 @@ pub async fn xrpc_get_blob(
 ) -> impl IntoResponse {
     let cid = match params.cid.parse::<seiran_common::atp::Cid>() {
         Ok(c) => c,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid CID").into_response(),
+        Err(_) => return ApiError::BadRequest("Invalid CID".to_string()).into_response(),
     };
 
     // CIDv1 raw (0x55) または dag-cbor (0x71) の sha2-256 multihash からハッシュを取得
     let mh = cid.hash();
     if mh.code() != 0x12 {
-        return (StatusCode::BAD_REQUEST, "Unsupported hash function (expected sha2-256)").into_response();
+        return ApiError::BadRequest("Unsupported hash function (expected sha2-256)".to_string()).into_response();
     }
     let sha256_hex = hex::encode(mh.digest());
 
@@ -67,15 +68,12 @@ pub async fn xrpc_get_blob(
         Ok(Some(r)) => {
             let url: String = r.try_get("url").unwrap_or_default();
             if url.is_empty() {
-                return (StatusCode::NOT_FOUND, "Blob not found").into_response();
+                return ApiError::NotFound("Blob not found").into_response();
             }
             Redirect::temporary(&url).into_response()
         }
-        Ok(None) => (StatusCode::NOT_FOUND, "Blob not found").into_response(),
-        Err(e) => {
-            tracing::error!("[getBlob] DB エラー: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response()
-        }
+        Ok(None) => ApiError::NotFound("Blob not found").into_response(),
+        Err(e) => ApiError::Internal(format!("[getBlob] DB エラー: {}", e)).into_response(),
     }
 }
 
@@ -95,29 +93,27 @@ pub async fn xrpc_get_repo(
 ) -> impl IntoResponse {
     let actor = match state.actors.find_by_did(&params.did).await {
         Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "DID が見つかりません").into_response(),
+        Ok(None) => return ApiError::NotFound("DID が見つかりません").into_response(),
         Err(e) => {
-            tracing::error!("[getRepo] アクター取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            return ApiError::Internal(format!("[getRepo] アクター取得失敗: {}", e)).into_response();
         }
     };
 
     let actor_id = actor.id;
     let commit_cid_str = match actor.at_repo_cid {
         Some(s) => s,
-        None => return (StatusCode::NOT_FOUND, "リポジトリが未初期化です").into_response(),
+        None => return ApiError::NotFound("リポジトリが未初期化です").into_response(),
     };
 
     let commit_cid = match cid_from_str(&commit_cid_str) {
         Ok(c) => c,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "commit CID パース失敗").into_response(),
+        Err(_) => return ApiError::Internal("commit CID パース失敗".to_string()).into_response(),
     };
 
     let block_rows = match state.atp_repo.find_blocks_by_actor(actor_id).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::error!("[getRepo] ブロック取得失敗: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "ブロック取得失敗").into_response();
+            return ApiError::Internal(format!("[getRepo] ブロック取得失敗: {}", e)).into_response();
         }
     };
 
@@ -136,10 +132,7 @@ pub async fn xrpc_get_repo(
             car_bytes,
         )
             .into_response(),
-        Err(e) => {
-            tracing::error!("[getRepo] CAR 生成失敗: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "CAR 生成失敗").into_response()
-        }
+        Err(e) => ApiError::Internal(format!("[getRepo] CAR 生成失敗: {}", e)).into_response(),
     }
 }
 
