@@ -357,6 +357,19 @@ async fn handle_create_note(
         None => None,
     };
 
+    // リプライ先投稿者のactor_id（ローカルユーザーの場合のみ）。リプライ通知の宛先に使う。
+    let reply_parent_local_actor_id: Option<i64> = match reply_to_post_id {
+        Some(parent_id) => inbox
+            .post_repo
+            .find_delivery_meta(parent_id)
+            .await
+            .ok()
+            .flatten()
+            .filter(|m| m.domain == inbox.local_domain)
+            .map(|m| m.actor_id),
+        None => None,
+    };
+
     // DM（visibility="direct"）の宛先・スレッド起点解決。
     // `to`に含まれるローカルアクターURI（`https://{local_domain}/users/{username}`）を宛先とする。
     let (thread_root_post_id, recipient_actor_ids): (Option<i64>, Vec<i64>) = if visibility == "direct" {
@@ -441,6 +454,26 @@ async fn handle_create_note(
 
     if let Err(e) = inbox.hashtag_repo.link_post(post_id, &body).await {
         tracing::error!("[Create/Note] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
+    }
+
+    // リプライ通知: リプライ先がローカルユーザーの投稿であれば通知を作る（自己リプライは除く）。
+    if let Some(parent_actor_id) = reply_parent_local_actor_id.filter(|id| *id != actor_id) {
+        inbox.stream_hub.publish_event(
+            HashSet::from([parent_actor_id]),
+            "reply",
+            serde_json::json!({
+                "postId": post_id.to_string(),
+                "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
+            }),
+        );
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = inbox
+            .notification_repo
+            .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None)
+            .await
+        {
+            tracing::error!("[Create/Note] reply notifications INSERT 失敗: {}", e);
+        }
     }
 
     // メンション通知: `tag[]` の `Mention` がローカルユーザーの AP actor URI

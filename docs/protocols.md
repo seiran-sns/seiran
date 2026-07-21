@@ -202,7 +202,7 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 
 `seiran-common::streaming::StreamHub`（プロセス内 `tokio::broadcast`、容量512）が `{"type":kind,"body":body}` を配信する。`GET /api/streaming?token=<JWT>` でWebSocket接続し、`recipients` に自分の actor_id が含まれるイベントのみ転送される。
 
-`notifications` テーブルへの書き込みは、ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。種別は `Follow`/`Reaction`/`FollowRequestAccepted`/`Mention` の4種。WebSocketは「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
+`notifications` テーブルへの書き込みは、ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。種別は `Follow`/`Reaction`/`FollowRequestAccepted`/`Mention`/`Reply` の5種。WebSocketは「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
 
 ### メンション通知
 本文中で `@username` 形式によりローカルユーザーが言及された場合、`notifications`（`type="mention"`, `note_id`=言及元投稿）を作る。配信設定（Bsky/AP接続の有無）とは無関係に、投稿の出自（ローカル/Fedi受信/Bsky受信）ごとに以下で解決する。自己メンションは通知しない。
@@ -212,6 +212,15 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 - **Bsky受信**（`seiran-atp-repo::firehose::save_bsky_post`）: 保存済みの `mention_facets`（6節）の各 `did` を `actors.at_did` で引き、`actor_type = 'local'` なら通知する。
 
 いずれの経路も `source_uri` は渡さない（1投稿に複数の宛先がありうるため、投稿の一意識別子を共有すると2人目以降が `notifications.source_uri` の部分UNIQUEインデックスで弾かれてしまう。posts 自体の重複排除は各経路で別途完結しているため、このブロックへの到達自体が新規保存時のみに限られ、重複INSERT対策は不要）。
+
+### リプライ通知
+自分の投稿に返信が付いた場合、`notifications`（`type="reply"`, `note_id`=返信投稿自体）を作る。可視性・配信設定とは無関係に常に処理し、リプライ先投稿者がローカルユーザーの場合のみ通知する。自己リプライは通知しない。本文中に相手への `@username` を書いた場合はメンション通知とは別に両方生成されうる（Misskey/Mastodon等と同様の挙動）。
+
+- **ローカル投稿**（`handlers::notes::create_regular_post`）: リプライ先解決（`resolve_reply_context`）が返す `ReplyContext::parent_local_actor_id`（リプライ先投稿の `PostDeliveryMeta::domain` が自ドメインの場合のみ `Some`）を宛先に使う。
+- **Fedi受信**（`jobs::inbound_activity_process::handle_create_note`）: `note["inReplyTo"]` から解決した `reply_to_post_id` の投稿者を `PostRepository::find_delivery_meta` で引き、`domain` が自ドメインなら通知する。
+- **Bsky受信**（`seiran-atp-repo::firehose::save_bsky_post`）: `record.reply.parent.uri` から解決した `reply_to_post_id` の投稿者が `actor_type = 'local'` なら通知する。
+
+いずれの経路も `source_uri` は渡さない（1リプライにつき宛先は常に1人だが、メンション通知と実装を揃えるため統一している）。
 
 ## 9. ダイレクトメッセージ
 

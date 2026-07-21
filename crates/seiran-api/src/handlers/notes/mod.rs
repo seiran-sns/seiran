@@ -179,6 +179,7 @@ async fn create_regular_post(
             ap_in_reply_to: None,
             parent_visibility: None,
             parent_thread_root_post_id: None,
+            parent_local_actor_id: None,
         },
     };
 
@@ -345,6 +346,26 @@ async fn create_regular_post(
 
     if let Err(e) = state.hashtags.link_post(post_id, &text).await {
         tracing::error!("[create_regular_post] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
+    }
+
+    // リプライ通知: リプライ先がローカルユーザーの投稿であれば通知を作る（自己リプライは除く）。
+    if let Some(parent_actor_id) = reply_ctx.parent_local_actor_id.filter(|id| *id != actor_id) {
+        state.stream_hub.publish_event(
+            std::collections::HashSet::from([parent_actor_id]),
+            "reply",
+            serde_json::json!({
+                "postId": post_id.to_string(),
+                "actor": { "username": username, "domain": serde_json::Value::Null },
+            }),
+        );
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = state
+            .notifications
+            .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None)
+            .await
+        {
+            tracing::error!("[create_regular_post] reply notifications INSERT 失敗: {}", e);
+        }
     }
 
     // メンション通知: 本文中で `@username` 形式によりローカルユーザーが言及されていれば通知を

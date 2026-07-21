@@ -4,11 +4,12 @@
   },
   "notificationsPanel": {
     "unknownUser": "Someone",
-    "reactionText": "{{label}} reacted",
-    "followText": "{{label}} followed you",
-    "followAcceptedText": "{{label}} accepted your follow request",
-    "mentionText": "{{label}} mentioned you",
-    "genericText": "Notification from {{label}}",
+    "reactionText": "<userLink>{{label}}</userLink> reacted",
+    "followText": "<userLink>{{label}}</userLink> followed you",
+    "followAcceptedText": "<userLink>{{label}}</userLink> accepted your follow request",
+    "mentionText": "<userLink>{{label}}</userLink> mentioned you",
+    "replyText": "<userLink>{{label}}</userLink> replied to you",
+    "genericText": "Notification from <userLink>{{label}}</userLink>",
     "noNotifications": "No new notifications.",
     "noNotificationsDetail": "Replies, reactions, and follows will appear here in real time."
   }

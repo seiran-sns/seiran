@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Trans, useTranslation } from "react-i18next";
+import { Link, useNavigate } from "react-router-dom";
 import i18n from "../../i18n";
 import { api, getErrorMessage, NotificationItem } from "../../api/client";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
+import { profilePath } from "../../lib/format";
 import panel from "../common/Panel.module.css";
 import styles from "./NotificationsPanel.module.css";
 
 const PAGE_SIZE = 20;
 
+/** ポストへのリンクを持つ通知種別（通知文全体を対象ポストへの遷移領域にする）。 */
+const NOTE_LINKED_TYPES = new Set(["reaction", "mention", "reply"]);
+
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。 */
-function describe(n: NotificationItem): { icon: string; iconUrl?: string; text: string } {
+function describe(n: NotificationItem): { icon: string; iconUrl?: string; i18nKey: string; label: string } {
   const who = n.user?.name || n.user?.username || i18n.t("notifications:notificationsPanel.unknownUser");
   const handle = n.user?.username && n.user?.host ? `@${n.user.username}@${n.user.host}` : "";
   const label = handle ? `${who}（${handle}）` : who;
@@ -22,16 +26,19 @@ function describe(n: NotificationItem): { icon: string; iconUrl?: string; text: 
       return {
         icon: n.reaction || "⭐",
         iconUrl: n.reaction ? n.note?.reactionEmojis?.[n.reaction] : undefined,
-        text: i18n.t("notifications:notificationsPanel.reactionText", { label }),
+        i18nKey: "notifications:notificationsPanel.reactionText",
+        label,
       };
     case "follow":
-      return { icon: "➕", text: i18n.t("notifications:notificationsPanel.followText", { label }) };
+      return { icon: "➕", i18nKey: "notifications:notificationsPanel.followText", label };
     case "followRequestAccepted":
-      return { icon: "🤝", text: i18n.t("notifications:notificationsPanel.followAcceptedText", { label }) };
+      return { icon: "🤝", i18nKey: "notifications:notificationsPanel.followAcceptedText", label };
     case "mention":
-      return { icon: "📣", text: i18n.t("notifications:notificationsPanel.mentionText", { label }) };
+      return { icon: "📣", i18nKey: "notifications:notificationsPanel.mentionText", label };
+    case "reply":
+      return { icon: "💬", i18nKey: "notifications:notificationsPanel.replyText", label };
     default:
-      return { icon: "🔔", text: i18n.t("notifications:notificationsPanel.genericText", { label }) };
+      return { icon: "🔔", i18nKey: "notifications:notificationsPanel.genericText", label };
   }
 }
 
@@ -44,6 +51,7 @@ function describe(n: NotificationItem): { icon: string; iconUrl?: string; text: 
  */
 export default function NotificationsPanel() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { registerNotifArrived, markRead } = useStreamingContext();
   const { showError } = useToast();
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -116,22 +124,31 @@ export default function NotificationsPanel() {
   return (
     <ul className={styles.list}>
       {items.map((n) => {
-        const { icon, iconUrl, text } = describe(n);
-        const noteId = n.type === "mention" ? n.note?.id : undefined;
+        const { icon, iconUrl, i18nKey, label } = describe(n);
+        const noteId = NOTE_LINKED_TYPES.has(n.type) ? n.note?.id : undefined;
+        const userLink = n.user?.username ? (
+          <Link
+            to={profilePath(n.user.username, n.user.host ?? undefined)}
+            className={styles.userLink}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span />
+        );
         return (
-          <li key={n.id} className={styles.item}>
+          <li
+            key={n.id}
+            className={noteId ? `${styles.item} ${styles.clickable}` : styles.item}
+            onClick={noteId ? () => navigate(`/notes/${noteId}`) : undefined}
+          >
             {iconUrl ? (
               <img className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" />
             ) : (
               <span className={styles.icon}>{icon}</span>
             )}
-            {noteId ? (
-              <Link to={`/notes/${noteId}`} className={styles.text}>
-                {text}
-              </Link>
-            ) : (
-              <span className={styles.text}>{text}</span>
-            )}
+            <span className={styles.text}>
+              <Trans i18n={i18n} i18nKey={i18nKey} values={{ label }} components={{ userLink }} />
+            </span>
           </li>
         );
       })}

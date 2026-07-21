@@ -756,6 +756,36 @@ async fn save_bsky_post(
                 tracing::error!("[Jetstream] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
             }
 
+            // リプライ通知: リプライ先がローカルユーザーの投稿であれば通知を作る（自己リプライは除く）。
+            if let Some(parent_id) = reply_to_post_id {
+                let parent_local_actor_id: Option<i64> = sqlx::query(
+                    "SELECT p.actor_id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE p.id = $1 AND a.actor_type = 'local'",
+                )
+                .bind(parent_id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|row| row.try_get::<i64, _>("actor_id").ok());
+                if let Some(parent_actor_id) = parent_local_actor_id.filter(|id| *id != actor_id) {
+                    stream_hub.publish_event(
+                        HashSet::from([parent_actor_id]),
+                        "reply",
+                        serde_json::json!({
+                            "postId": post_id.to_string(),
+                            "actor": { "username": username, "domain": serde_json::Value::Null, "displayName": display_name },
+                        }),
+                    );
+                    let notif_id = generate_snowflake_id(chrono::Utc::now());
+                    if let Err(e) = PgNotificationRepository::new(pool.clone())
+                        .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None)
+                        .await
+                    {
+                        tracing::error!("[Jetstream] reply notifications INSERT 失敗: {}", e);
+                    }
+                }
+            }
+
             // メンション通知: mention_facets の各 did がローカルアクターを指す場合、通知を作る。
             // source_uri は渡さない（1投稿に複数の宛先がありうるため、投稿の at_uri を
             // 共有すると2人目以降が部分UNIQUEインデックスで弾かれてしまう。posts 自体は

@@ -188,6 +188,8 @@ pub struct ReplyContext {
     /// 親ポストが`direct`（DM）の場合のスレッド起点ポストID。DM返信時、この値を
     /// そのまま子ポストへ伝播コピーする（親が`direct`でなければ`None`）。
     pub parent_thread_root_post_id: Option<i64>,
+    /// 親ポストの投稿者がローカルユーザーの場合のみ、その actor_id（リプライ通知の宛先に使う）。
+    pub parent_local_actor_id: Option<i64>,
 }
 
 impl ReplyContext {
@@ -261,6 +263,8 @@ pub async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str, view
         None
     };
 
+    let parent_local_actor_id = if meta.domain == state.local_domain { Some(meta.actor_id) } else { None };
+
     Ok(ReplyContext {
         deliver_fedi_allowed,
         deliver_bsky_allowed,
@@ -268,6 +272,7 @@ pub async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str, view
         ap_in_reply_to: meta.ap_object_id,
         parent_visibility: Some(meta.visibility.clone()),
         parent_thread_root_post_id: meta.thread_root_post_id,
+        parent_local_actor_id,
     })
 }
 
