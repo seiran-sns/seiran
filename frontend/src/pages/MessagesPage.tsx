@@ -131,9 +131,13 @@ export default function MessagesPage() {
       if (!threadRootId) {
         navigate(`/messages/${created.id}`);
       } else {
-        // WS経由の再取得（registerDirectMessage）とここでの手動追加は非同期で競合しうる
-        // （WS再取得が先に完了していると、ここでの追加が重複になる）ため、既に含まれていれば追加しない。
-        setMessages((prev) => (prev.some((m) => m.id === created.id) ? prev : [...prev, created]));
+        // 送信直後の楽観的追加（配列へのpush）はWS経由の再取得（registerDirectMessage、
+        // 全件を取り直すfull replace）と非同期に競合し、タイミング次第で同じメッセージが
+        // 二重表示される回帰バグがあった。「楽観的追加」と「WS再取得」という2つの独立した
+        // 経路がそれぞれ別々に画面状態を更新しようとするのがレースの根本原因のため、
+        // 送信後もWSと同じ「サーバーから取り直して丸ごと置き換える」経路に一本化する
+        // （full replace同士は順序によらず必ず同じ最終状態に収束し、重複が起こり得ない）。
+        setMessages(await api.dm.threadMessages(threadRootId, { limit: 200 }));
       }
     } catch (err) {
       setError(getErrorMessage(err));
