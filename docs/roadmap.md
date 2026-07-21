@@ -63,9 +63,11 @@
 - [x] Playwright E2E基盤の構築（`e2e/`、スタブPLCサーバー、E2E専用DB）と新規登録フローの疎通テスト
 - [x] E2Eテストの拡充（ログイン、投稿、フォロー、返信、リアクション、検索、プロフィール編集、ハッシュタグ）
 - [x] Fedi配送のE2E化（投稿・返信・リポストがacceptedフォロワーのinboxへ正しいアクティビティで配送されることを、スタブFediアクター＋実HTTP Signaturesで検証）
-- [x] フロントエンドのユニットテスト基盤（vitest + jsdom）を導入し、`lib/format.ts`・`lib/reaction.ts`・`lib/richTextPatterns.ts`・`api/client.ts`（`getErrorMessage`）・`NoteCard`/`PostComposer`内の純関数にテストを追加（`npm test`）
-- [ ] 通知UI実装後にE2E化（`NotificationsPage` は現状プレースホルダで未実装）
-- [ ] 管理画面（`/admin`）・リスト機能（`/settings/lists`）のE2E化
+- [x] フロントエンドのユニットテスト基盤（vitest + jsdom）を導入し、`lib/format.ts`・`lib/reaction.ts`・`lib/richTextPatterns.ts`・`api/client.ts`（`getErrorMessage`/`cursorParams`/`throwIfError`/`parseJsonBody`）・`NoteCard`/`PostComposer`内の純関数にテストを追加（`npm test`）
+- [x] 管理画面（`/admin`）のE2E化（アクセス制御、サイト設定変更・永続化確認、ユーザー凍結/凍結解除）
+- [x] リスト機能（`/settings/lists`）のE2E化（作成・改名・メンバー追加/削除・削除）
+- [x] クイック通知（ホーム右ペイン`NotificationsPanel`）のE2E化（他ユーザーのリアクションがWS経由でリアルタイムに一覧へ反映されることを検証）。`NotificationsPage`（`/notifications`）自体は依然プレースホルダで未実装
+- [x] ピン留め・リポスト取消のUI側状態変化のE2E化（ボタン表示のトグル確認）
 - [ ] Bsky側の配送E2E（ローカルPDSコミット自体は既存テストで間接的に検証済みだが、リモートBskyアクターからのフォロー受理を経由した配送は未検証）
 
 既存の結合テスト基盤: `crates/seiran-api/tests/`（実DB + 実 `seiran_api::router` を使用、`#[ignore]` で通常の `cargo test` から除外し `cargo test -p seiran-api --test <name> -- --ignored` で明示実行）。

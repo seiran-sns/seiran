@@ -62,6 +62,17 @@ export async function registerUserViaApi(
   };
 }
 
+/**
+ * 既存ユーザーとしてAPIログインしtokenを取得する。管理者(`global-setup.ts`が作成する
+ * `e2ebootstrap`)等、`registerUserViaApi`を経由しないアカウントでログイン状態を得たい場合に使う。
+ */
+export async function loginViaApi(request: APIRequestContext, identifier: string, password: string): Promise<string> {
+  const res = await request.post("/api/auth/login", { data: { identifier, password } });
+  expect(res.ok(), `login failed: ${res.status()} ${await res.text()}`).toBeTruthy();
+  const body = await res.json();
+  return body.token as string;
+}
+
 /** ページ読み込み前にlocalStorageへtokenを仕込み、UIログイン操作を省略してログイン状態にする。 */
 export async function seedAuth(page: Page, token: string): Promise<void> {
   await page.addInitScript((t) => {
