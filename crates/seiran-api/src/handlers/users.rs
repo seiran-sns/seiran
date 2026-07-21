@@ -477,6 +477,11 @@ async fn build_profile_response(
         vec![]
     };
 
+    // 相手からブロックされている場合、Bsky準拠の相互完全非表示の一環として
+    // 自己紹介文・プロフィールのキーバリュー項目も見せない
+    // （recent_posts/pinned_postsは既にタイムラインクエリのフィルタで空になる）。
+    let (bio, profile_fields) = if is_blocked_by { (None, vec![]) } else { (actor.bio, profile_fields) };
+
     Json(ProfileResponse {
         actor_id: Some(actor_id.to_string()),
         username: actor.username,
@@ -485,7 +490,7 @@ async fn build_profile_response(
         actor_type: actor.actor_type,
         ap_uri: actor.ap_uri,
         at_did: actor.at_did,
-        bio: actor.bio,
+        bio,
         avatar_url,
         follow_status,
         is_blocking,

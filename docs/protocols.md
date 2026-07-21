@@ -250,14 +250,21 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 - フォロー作成（`follows.rs::follow_local`/`follow_bsky`/`follow_fedi`）
 - リプライ作成（`notes::delivery::resolve_reply_context`）
 - リアクション作成（`notes::create_reaction`）
+- 引用投稿・リポスト作成（`notes::mod::create_regular_post`/`create_repost`）
+- DM送信（`notes::mod::create_regular_post`、`visibility=="direct"`の宛先ループ）
 
-引用投稿・リポストへの書き込みガードは対象外（`docs/roadmap.md`参照）。
+### プロフィール表示の制限
+相手からブロックされている（`is_blocked_by`）場合、自己紹介文（`bio`）・プロフィールのキーバリュー項目（`profile_fields`）を`build_profile_response`が空にして返す。投稿一覧（`recent_posts`/`pinned_posts`）は元々`actor_is_hidden_for_viewer`によるタイムラインクエリのフィルタで空になる。
 
 ### AP受信時のフォロー拒否
 `inbound_activity_process::handle_follow`は、こちらが送信者をブロック中であれば`Accept`を送らずサイレントに無視する（Fedi標準の片方向拒否ブロックを実現）。
 
+### 相手発ブロックの検知
+自分がブロックした場合だけでなく、**Fedi/Bskyリモートユーザーが自分をブロックした場合**も`blocks`テーブルへ記録し、上記の相互非表示・書き込みガードを対称に働かせる。
+- **Fedi側**: AP `Block`アクティビティを受信（`inbound_activity_process::handle_block`）した時点で`blocks`へ`(blocker_actor_id=相手, blocked_actor_id=ローカル)`をINSERTする。`Undo(Block)`受信時（`handle_undo`）にDELETEする。
+- **Bsky側**: Bluesky公式APIには「自分をブロックしている人一覧」を返すエンドポイントが無い（プライバシー保護のため意図的に非公開）ため、ポーリングでは検知できない。代わりに`seiran-atp-repo::bsky_block_watch`が、`app.bsky.graph.block`のみを対象とした**無絞り込み**Jetstream接続（`wantedDids`を使わない、実測で全世界約2件/秒程度）を張り、`record.subject`がローカルユーザーの`at_did`と一致するイベントだけを拾って`blocks`へ記録する。削除（Undo相当）はJetstreamの`delete`イベントに`subject`が同梱されない仕様のため、create時に`commit.rkey`を`blocks.atp_rkey`へ保存しておき、`(blocker_actor_id, atp_rkey)`の組で逆引きして削除する（`BlockRepository::delete_by_blocker_and_rkey`）。post/like用の既存Jetstream接続（`wantedDids`で絞り込み）とは独立したリーダー選出（`jetstream_leader::JetstreamLeaderElector`のリースキーをパラメータ化、`bsky_block_watch`専用キーを使用）で動く別接続。
+
 ### スコープ外
-- **Bsky側からの逆方向ブロック検知**（相手が`app.bsky.graph.block`で自分をブロックしたことの取り込み）: 未実装。AppView側のグラフ判定で可視性制御は元々完結しており、実装コストに見合わないと判断。
 - **リアクション一覧表示でのブロック/ミュート除外**: 未実装（`fetch_reactions_map`は対象外）。
 - **公開リストタイムライン（`list.rs::timeline`）でのフィルタリング**: 未実装。リストタイムラインは「閲覧者情報を持たない（誰が見ても同じ内容）」設計のため、viewer概念自体が無く、フィルタ追加には閲覧制御全体の見直しが必要。
 
@@ -269,4 +276,4 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 - **Misskey互換ストリーミング（チャンネル購読方式）**: 未着手、現状はブロードキャストのみ。
 - **ドメイン単位のレート制限**（`inbound_activity_process` 向け）: 未実装。現状 `actor_history_sync` キューのみドメイン単位の同時実行制限を持つ。
 - **リモートFedi/Bskyユーザー自身の公開リストのオンデマンド取得**: 未実装（`public_lists` はローカルユーザーのみ対象）。
-- **ブロック・ミュート関連の未実装項目**: 10節「スコープ外」参照（Bsky側からの逆方向ブロック検知、リアクション一覧でのブロック/ミュート除外、公開リストタイムラインでのフィルタリング）。
+- **ブロック・ミュート関連の未実装項目**: 10節「スコープ外」参照（リアクション一覧でのブロック/ミュート除外、公開リストタイムラインでのフィルタリング）。

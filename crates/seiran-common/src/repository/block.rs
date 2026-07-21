@@ -18,6 +18,15 @@ pub trait BlockRepository: Send + Sync {
         blocked_actor_id: i64,
     ) -> Result<(), sqlx::Error>;
 
+    /// リモート発ブロックのUndo（Jetstreamのdeleteイベント）用。Jetstreamのdeleteイベントは
+    /// レコード本体（subject）を伴わないため、blocker_actor_id + atp_rkeyの組で該当行を
+    /// 特定して削除する。
+    async fn delete_by_blocker_and_rkey(
+        &self,
+        blocker_actor_id: i64,
+        atp_rkey: &str,
+    ) -> Result<(), sqlx::Error>;
+
     /// ブロック時に保存した atp_rkey を取得する（アンブロック時の ATP 削除に使用）。
     async fn find_atp_rkey(
         &self,
@@ -77,6 +86,21 @@ impl BlockRepository for PgBlockRepository {
         )
         .bind(blocker_actor_id)
         .bind(blocked_actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    async fn delete_by_blocker_and_rkey(
+        &self,
+        blocker_actor_id: i64,
+        atp_rkey: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "DELETE FROM blocks WHERE blocker_actor_id = $1 AND atp_rkey = $2",
+        )
+        .bind(blocker_actor_id)
+        .bind(atp_rkey)
         .execute(&self.pool)
         .await
         .map(|_| ())

@@ -11,6 +11,7 @@ use sqlx::PgPool;
 use seiran_common::traits::JobQueue;
 use seiran_common::StreamHub;
 
+pub mod bsky_block_watch;
 pub mod bsky_dm_poll;
 pub mod bsky_follower_poll;
 pub mod firehose;
@@ -34,5 +35,6 @@ pub async fn run(
     tracing::info!("[seiran-atp-repo] Firehose リスナーを起動します。");
     tokio::spawn(bsky_dm_poll::run(pool.clone(), Arc::clone(&http), Arc::clone(&stream_hub)));
     tokio::spawn(bsky_follower_poll::run(pool.clone(), Arc::clone(&http), Arc::clone(&stream_hub)));
+    tokio::spawn(bsky_block_watch::run(pool.clone(), Arc::clone(&http), redis_url.clone(), is_monolith));
     firehose::run(pool, http, stream_hub, redis_url, is_monolith, job_queue).await;
 }

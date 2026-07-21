@@ -204,10 +204,11 @@ async fn handle_follow(
     Ok(())
 }
 
-/// Block アクティビティを処理する。相手発のブロックはこちら側の `blocks` テーブルには
-/// 書き込まない（`blocks.blocker_actor_id` はローカルユーザー視点の「自分が誰をブロックしたか」
-/// を表す設計のため、相手発ブロックを同じテーブルに書くと視点が混在する）。代わりに、
-/// ブロックされた側がブロックした側をフォローしていた関係があれば解消する
+/// Block アクティビティを処理する。相手発のブロックを `blocks` テーブルへ記録する
+/// （`blocker_actor_id=相手, blocked_actor_id=ローカル`。方向性を持つ関係として素直に
+/// 記録するだけであり視点混在にはならない）。これにより `actor_is_hidden_for_viewer`
+/// による相互非表示・書き込みガードが自動的に有効になる（`docs/protocols.md` 10節）。
+/// あわせて、ブロックされた側がブロックした側をフォローしていた関係があれば解消する
 /// （Mastodon 等の実挙動に合わせる）。通知は生成しない（Fedi慣習：ブロックは本人に知らせない）。
 async fn handle_block(
     activity: serde_json::Value,
@@ -238,6 +239,13 @@ async fn handle_block(
 
     let remote = upsert_remote_fedi_actor(inbox, ap_client, blocker_uri).await?;
 
+    // 相手発のブロックを記録する（Fedi側にはrkeyの概念が無いため atp_rkey は None）。
+    inbox
+        .block_repo
+        .insert(remote.actor_id, local_actor.id, None)
+        .await
+        .map_err(|e| format!("blocks INSERT エラー: {}", e))?;
+
     // こちら（ブロックされた側）が相手をフォローしていた関係を解消する。
     inbox
         .follow_repo
@@ -246,7 +254,7 @@ async fn handle_block(
         .map_err(|e| format!("follows DELETE エラー: {}", e))?;
 
     tracing::info!(
-        "[Block] {} から '{}' へのブロックを受信・フォロー関係を解消しました",
+        "[Block] {} から '{}' へのブロックを受信・記録し、フォロー関係を解消しました",
         blocker_uri, local_username
     );
     Ok(())
@@ -989,10 +997,25 @@ async fn handle_undo(activity: serde_json::Value, inbox: &InboxContext) -> Resul
         return Ok(());
     }
 
-    // Undo(Block): こちらの blocks テーブルには相手発ブロックを記録していないため
-    // （handle_block参照）、DB上の巻き戻し対象は無い。ログのみに留める（自動再フォローはしない）。
+    // Undo(Block): handle_block で記録した相手発ブロック（blocker=相手, blocked=ローカル）を
+    // 削除する（自動再フォローはしない）。
     if obj["type"].as_str() == Some("Block") {
-        tracing::info!("[Undo/Block] {} からのブロック解除を受信しました", activity["actor"].as_str().unwrap_or(""));
+        let blocker_uri = activity["actor"].as_str().unwrap_or("");
+        let target_uri = obj["object"].as_str().unwrap_or("");
+        let local_username = target_uri.rsplit('/').next().unwrap_or("");
+
+        if let (Some(blocker), Some(target)) = (
+            inbox.actor_repo.find_by_ap_uri(blocker_uri).await.ok().flatten(),
+            inbox.actor_repo.find_by_username_domain(local_username, &inbox.local_domain).await.ok().flatten(),
+        ) {
+            if target.actor_type == "local" {
+                if let Err(e) = inbox.block_repo.delete_by_actors(blocker.id, target.id).await {
+                    tracing::error!("[Undo/Block] blocks DELETE エラー: {}", e);
+                }
+            }
+        }
+
+        tracing::info!("[Undo/Block] {} からのブロック解除を受信しました", blocker_uri);
         return Ok(());
     }
 

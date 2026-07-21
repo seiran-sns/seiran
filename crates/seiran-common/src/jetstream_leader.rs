@@ -16,8 +16,10 @@ use std::time::Duration;
 use redis::aio::ConnectionManager;
 use uuid::Uuid;
 
-/// リーダーを記録するRedisキー。
-const LEADER_KEY: &str = "seiran:jetstream:leader";
+/// リーダーを記録するRedisキー（デフォルト、post/like用Jetstream接続向け）。
+/// 無絞り込みのブロック監視用接続等、別系統のJetstream接続を独立にリーダー選出したい
+/// 場合は`JetstreamLeaderElector::connect`に別のキーを渡す。
+pub const DEFAULT_LEADER_KEY: &str = "seiran:jetstream:leader";
 /// リースのTTL（秒）。チェック間隔の2倍を確保し、通常運転では
 /// リース確認のたびに残りTTLが半分以上残っている状態を保つ。
 const LEASE_TTL_SECS: u64 = 10;
@@ -48,16 +50,20 @@ pub struct JetstreamLeaderElector {
     conn: ConnectionManager,
     my_id: String,
     renew_script: redis::Script,
+    lease_key: String,
 }
 
 impl JetstreamLeaderElector {
-    pub async fn connect(redis_url: &str) -> Result<Self, String> {
-        tokio::time::timeout(REDIS_CALL_TIMEOUT, Self::connect_inner(redis_url))
+    /// `lease_key`でリース対象を区別する。同じキーを使う接続同士でのみリーダーが1つに絞られる
+    /// （post/like用とブロック監視用など、系統の異なるJetstream接続は別キーを渡して独立に
+    /// リーダー選出する）。
+    pub async fn connect(redis_url: &str, lease_key: &str) -> Result<Self, String> {
+        tokio::time::timeout(REDIS_CALL_TIMEOUT, Self::connect_inner(redis_url, lease_key))
             .await
             .map_err(|_| "Redis接続がタイムアウトしました".to_string())?
     }
 
-    async fn connect_inner(redis_url: &str) -> Result<Self, String> {
+    async fn connect_inner(redis_url: &str, lease_key: &str) -> Result<Self, String> {
         let client = redis::Client::open(redis_url)
             .map_err(|e| format!("Redis接続URLが不正です: {}", e))?;
         let conn = ConnectionManager::new(client)
@@ -67,6 +73,7 @@ impl JetstreamLeaderElector {
             conn,
             my_id: Uuid::new_v4().to_string(),
             renew_script: redis::Script::new(RENEW_LUA),
+            lease_key: lease_key.to_string(),
         })
     }
 
@@ -84,7 +91,7 @@ impl JetstreamLeaderElector {
         let mut conn = self.conn.clone();
 
         let acquired: Option<String> = redis::cmd("SET")
-            .arg(LEADER_KEY)
+            .arg(&self.lease_key)
             .arg(&self.my_id)
             .arg("NX")
             .arg("EX")
@@ -99,7 +106,7 @@ impl JetstreamLeaderElector {
 
         let renewed: i64 = self
             .renew_script
-            .key(LEADER_KEY)
+            .key(&self.lease_key)
             .arg(&self.my_id)
             .arg(LEASE_TTL_SECS)
             .invoke_async(&mut conn)

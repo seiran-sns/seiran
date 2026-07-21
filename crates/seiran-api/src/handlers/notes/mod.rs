@@ -87,6 +87,11 @@ async fn create_repost(
         return ApiError::Forbidden("PRIVATE_POST_NOT_REPOSTABLE").into_response();
     }
 
+    // 元ポストの投稿者とブロック関係にある場合はリポストを拒否する（Bsky準拠ブロック、双方向）。
+    if let Err(e) = crate::handlers::target_resolve::check_not_blocked(state, actor_id, meta.actor_id).await {
+        return e.into_response();
+    }
+
     // リポスト自身の可視性はクライアントが選べず、元ポストから自動決定する。
     // ここに到達する時点で meta.visibility は "public" か "unlisted" のいずれかのみ。
     let repost_visibility: &str = if meta.visibility == "unlisted" { "unlisted" } else { "public" };
@@ -273,6 +278,26 @@ async fn create_regular_post(
 
     let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
     let quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
+
+    // 引用先とブロック関係にある場合は引用を拒否する（Bsky準拠ブロック、双方向）。
+    if let Some(quote_id) = quote_of_id_i64 {
+        match state.posts.find_delivery_meta(quote_id).await {
+            Ok(Some(meta)) => {
+                if let Err(e) = crate::handlers::target_resolve::check_not_blocked(state, actor_id, meta.actor_id).await {
+                    return e.into_response();
+                }
+            }
+            Ok(None) => return ApiError::NotFound("QUOTE_TARGET_NOT_FOUND").into_response(),
+            Err(e) => return ApiError::Internal(format!("引用元ポスト取得失敗: {}", e)).into_response(),
+        }
+    }
+
+    // DM(direct)宛先とブロック関係にある場合は送信を拒否する。
+    for recipient in &recipient_actors {
+        if let Err(e) = crate::handlers::target_resolve::check_not_blocked(state, actor_id, recipient.id).await {
+            return e.into_response();
+        }
+    }
 
     // 引用元情報の取得（Bsky embed / AP quoteUrl を決定する）
     let (bsky_quote_embed, ap_quote_url) = match quote_of_id_i64 {

@@ -78,7 +78,7 @@ pub async fn run(
             None => is_monolith,
             Some(url) => {
                 if elector.is_none() {
-                    match JetstreamLeaderElector::connect(url).await {
+                    match JetstreamLeaderElector::connect(url, jetstream_leader::DEFAULT_LEADER_KEY).await {
                         Ok(e) => elector = Some(e),
                         Err(e) => tracing::error!("[Jetstream] Redis接続失敗: {}", e),
                     }
