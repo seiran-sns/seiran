@@ -1,8 +1,6 @@
 {
   "notificationsPage": {
-    "title": "Notifications",
-    "comingSoon": "Notifications are coming soon.",
-    "comingSoonDetail": "This will be enabled once the reply/reaction/follow notification endpoints are implemented."
+    "title": "Notifications"
   },
   "notificationsPanel": {
     "unknownUser": "Someone",

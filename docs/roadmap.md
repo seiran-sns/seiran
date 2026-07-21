@@ -66,7 +66,7 @@
 - [x] フロントエンドのユニットテスト基盤（vitest + jsdom）を導入し、`lib/format.ts`・`lib/reaction.ts`・`lib/richTextPatterns.ts`・`api/client.ts`（`getErrorMessage`/`cursorParams`/`throwIfError`/`parseJsonBody`）・`NoteCard`/`PostComposer`内の純関数にテストを追加（`npm test`）
 - [x] 管理画面（`/admin`）のE2E化（アクセス制御、サイト設定変更・永続化確認、ユーザー凍結/凍結解除）
 - [x] リスト機能（`/settings/lists`）のE2E化（作成・改名・メンバー追加/削除・削除）
-- [x] クイック通知（ホーム右ペイン`NotificationsPanel`）のE2E化（他ユーザーのリアクションがWS経由でリアルタイムに一覧へ反映されることを検証）。`NotificationsPage`（`/notifications`）自体は依然プレースホルダで未実装
+- [x] クイック通知（ホーム右ペイン`NotificationsPanel`）のE2E化（他ユーザーのリアクションがWS経由でリアルタイムに一覧へ反映されることを検証）。`NotificationsPage`（`/notifications`）は中央ペインに`NotificationsPanel`を表示する形で実装済み
 - [x] ピン留め・リポスト取消のUI側状態変化のE2E化（ボタン表示のトグル確認）
 - [x] Bsky側の配送E2E（リモートBskyアクターからのフォロー受理をポーリング方式（`getFollowers`、`seiran-atp-repo::bsky_follower_poll`）で検知し、投稿の`subscribeRepos`配送までを通しで検証）
 

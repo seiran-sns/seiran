@@ -1,8 +1,6 @@
 {
   "notificationsPage": {
-    "title": "通知",
-    "comingSoon": "通知機能は準備中です。",
-    "comingSoonDetail": "リプライ・リアクション・フォローの通知エンドポイント実装後に有効化されます。"
+    "title": "通知"
   },
   "notificationsPanel": {
     "unknownUser": "だれか",
