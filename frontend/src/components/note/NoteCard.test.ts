@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReactionSummary } from "../../api/client";
 import type { ReactionUpdate } from "../../contexts/StreamingContext";
-import { applyReactionUpdate, optimisticSetReaction } from "./NoteCard";
+import { applyReactionUpdate, optimisticSetReaction } from "../../hooks/useNoteCardActions";
 
 describe("optimisticSetReaction", () => {
   it("未リアクション状態から新規リアクションを追加する", () => {

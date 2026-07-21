@@ -1,72 +1,17 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { api, ApiError, getErrorMessage, Note, ReactionSummary } from "../../api/client";
+import { Note } from "../../api/client";
 import { acct, deliveryBadges, displayName, formatDate, profilePath, protocolBadge, visibilityBadge } from "../../lib/format";
+import { useNoteCardActions } from "../../hooks/useNoteCardActions";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
-import ReactionChips from "./ReactionChips";
-import ReactionPicker from "./ReactionPicker";
 import EmojiText from "./EmojiText";
 import RichText from "./RichText";
-import HlsVideo from "./HlsVideo";
+import NoteAttachments from "./NoteAttachments";
+import NoteCardActions from "./NoteCardActions";
 import { useComposer } from "../../contexts/ComposerContext";
-import { useAuth } from "../../contexts/AuthContext";
-import { useToast } from "../../contexts/ToastContext";
-import { ReactionUpdate, useStreamingContext } from "../../contexts/StreamingContext";
 import styles from "./NoteCard.module.css";
-
-/**
- * リアクションの楽観的更新を適用した新しい配列を返す。
- * 1投稿につき1ユーザー1リアクションまで（Misskey 準拠）なので、既に別の絵文字に
- * リアクション済みならまずそれを外してから、`reacting` なら新しい絵文字を付ける
- * （＝切り替え）。同じ絵文字を指定した場合は取消（トグルオフ）のみになる。
- */
-export function optimisticSetReaction(
-  reactions: ReactionSummary[],
-  emoji: string,
-  reacting: boolean
-): ReactionSummary[] {
-  const prevMine = reactions.find((r) => r.reactedByMe)?.emoji;
-  let next = reactions;
-
-  if (prevMine) {
-    next = next
-      .map((r) => (r.emoji === prevMine ? { ...r, count: r.count - 1, reactedByMe: false } : r))
-      .filter((r) => r.count > 0);
-  }
-
-  if (reacting) {
-    const existing = next.find((r) => r.emoji === emoji);
-    next = existing
-      ? next.map((r) => (r.emoji === emoji ? { ...r, count: r.count + 1, reactedByMe: true } : r))
-      : [...next, { emoji, count: 1, reactedByMe: true }];
-  }
-
-  return next;
-}
-
-/**
- * WebSocket 経由で届いた `noteUpdated`（リアクション追加/切替/取消）を現在の表示に反映する。
- * サーバーから届く集計は閲覧者ごとの `reactedByMe` を含まないため、自分自身の操作
- * （`reactorActorId` が自分の actor_id と一致）ならその場で `reactedByMe` を再計算し、
- * 他人の操作ならローカルで既に把握している `reactedByMe` をそのまま引き継ぐ。
- */
-export function applyReactionUpdate(
-  reactions: ReactionSummary[],
-  update: ReactionUpdate,
-  myActorId: number | undefined
-): ReactionSummary[] {
-  const isMe = myActorId !== undefined && update.reactorActorId === myActorId;
-  return update.reactions.map((r) => ({
-    emoji: r.emoji,
-    count: r.count,
-    emojiUrl: r.emojiUrl,
-    reactedByMe: isMe
-      ? r.emoji === update.reactorEmoji
-      : reactions.find((x) => x.emoji === r.emoji)?.reactedByMe ?? false,
-  }));
-}
 
 interface NoteCardProps {
   note: Note;
@@ -85,111 +30,33 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { openReply } = useComposer();
-  const { user } = useAuth();
-  const { showError } = useToast();
-  const { registerReaction } = useStreamingContext();
   const badge = protocolBadge(note.user.actorType);
   const delBadges = deliveryBadges(note);
   const visBadge = visibilityBadge(note);
-  const [reposting, setReposting] = useState(false);
-  const [unreposting, setUnreposting] = useState(false);
-  const [reposted, setReposted] = useState(note.repostedByMe ?? false);
-  const [reactions, setReactions] = useState<ReactionSummary[]>(note.reactions ?? []);
-  const isSelf = note.user.actorType === "local" && !!user && user.username === note.user.username;
-  const [pinned, setPinned] = useState(note.pinnedByMe ?? false);
-  const [pinning, setPinning] = useState(false);
-  // 1投稿につき1ユーザー1リアクションまでのため、切り替え中は他の絵文字操作も
-  // まとめてロックする（個別絵文字ごとの pending 管理はしない）。
-  const [reactionPending, setReactionPending] = useState(false);
 
-  // 他ユーザー（または自分の別タブ/端末）によるリアクション追加/切替/取消をリアルタイム反映する。
-  useEffect(() => {
-    return registerReaction(note.id, (update) => {
-      setReactions((prev) => applyReactionUpdate(prev, update, user?.actor_id));
-    });
-  }, [note.id, registerReaction, user?.actor_id]);
-
-  const isPrivateRepostTarget = note.visibility === "followers_only" || note.visibility === "direct";
-
-  async function handleRepost(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (reposting || unreposting) return;
-
-    if (reposted) {
-      setUnreposting(true);
-      try {
-        await api.notes.deleteRepost(note.id);
-        setReposted(false);
-        onUnreposted?.();
-      } catch (err) {
-        showError(getErrorMessage(err));
-      } finally {
-        setUnreposting(false);
-      }
-      return;
-    }
-
-    if (isPrivateRepostTarget) return;
-
-    setReposting(true);
-    try {
-      await api.notes.create("", true, true, [], undefined, note.id);
-      setReposted(true);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setReposted(true);
-      } else if (err instanceof ApiError && err.status === 403) {
-        showError(t("home:noteCard.privateRepostError"));
-      } else {
-        showError(getErrorMessage(err));
-      }
-    } finally {
-      setReposting(false);
-    }
-  }
-
-  async function toggleReaction(emoji: string) {
-    if (reactionPending) return;
-    const reacting = !(reactions.find((r) => r.emoji === emoji)?.reactedByMe ?? false);
-    const prevReactions = reactions;
-
-    setReactionPending(true);
-    setReactions((prev) => optimisticSetReaction(prev, emoji, reacting));
-    try {
-      const res = reacting
-        ? await api.notes.react(note.id, emoji)
-        : await api.notes.unreact(note.id, emoji);
-      setReactions(res.reactions);
-    } catch (err) {
-      setReactions(prevReactions);
-      showError(getErrorMessage(err));
-    } finally {
-      setReactionPending(false);
-    }
-  }
-
-  async function handleTogglePin(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (pinning) return;
-    setPinning(true);
-    try {
-      if (pinned) {
-        await api.notes.unpin(note.id);
-        setPinned(false);
-      } else {
-        await api.notes.pin(note.id);
-        setPinned(true);
-      }
-    } catch (err) {
-      showError(getErrorMessage(err));
-    } finally {
-      setPinning(false);
-    }
-  }
+  const {
+    isSelf,
+    isPrivateRepostTarget,
+    reactions,
+    reactionPending,
+    toggleReaction,
+    reposted,
+    reposting,
+    unreposting,
+    handleRepost,
+    pinned,
+    pinning,
+    handleTogglePin,
+  } = useNoteCardActions(note, onUnreposted);
 
   function goProfile(e: React.MouseEvent) {
     e.stopPropagation();
     navigate(profilePath(note.user.username, note.user.domain));
+  }
+
+  function handleReply(e: React.MouseEvent) {
+    e.stopPropagation();
+    openReply(note);
   }
 
   return (
@@ -245,47 +112,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         <RichText text={note.text} emojis={note.emojis} />
       </p>
 
-      {note.attachments && note.attachments.length > 0 && (
-        <div className={styles.attachments}>
-          {note.attachments.map((att, i) => {
-            const isHls = att.mimeType === "application/vnd.apple.mpegurl" || att.mimeType === "application/x-mpegURL";
-            if (att.mimeType.startsWith("video/") || isHls) {
-              return (
-                <HlsVideo
-                  key={i}
-                  src={att.url}
-                  poster={att.thumbnailUrl}
-                  isHls={isHls}
-                  className={styles.attachImage}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              );
-            }
-            if (att.mimeType.startsWith("audio/")) {
-              return (
-                <audio
-                  key={i}
-                  src={att.url}
-                  controls
-                  className={styles.attachAudio}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              );
-            }
-            return (
-              <a
-                key={i}
-                href={att.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <img src={att.url} alt="" className={styles.attachImage} loading="lazy" />
-              </a>
-            );
-          })}
-        </div>
-      )}
+      <NoteAttachments attachments={note.attachments} />
 
       {note.parentOriginalId && (
         <Link
@@ -298,52 +125,21 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted }: {
         </Link>
       )}
 
-      <ReactionChips reactions={reactions} onToggle={toggleReaction} disabled={reactionPending} />
-
-      <div className={styles.actions}>
-        <button
-          className={styles.actionBtn}
-          onClick={(e) => {
-            e.stopPropagation();
-            openReply(note);
-          }}
-          title={t("home:noteCard.replyButton")}
-        >
-          💬 {t("home:noteCard.replyButton")}
-        </button>
-        <button
-          className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
-          onClick={handleRepost}
-          disabled={reposting || unreposting || (isPrivateRepostTarget && !reposted)}
-          title={
-            isPrivateRepostTarget
-              ? t("home:noteCard.repostDisabledTitle")
-              : reposted
-              ? t("home:noteCard.unrepostTitle")
-              : t("home:noteCard.repostTitle")
-          }
-        >
-          🔁{" "}
-          {isPrivateRepostTarget
-            ? t("home:noteCard.repostUnavailable")
-            : reposted
-            ? t("home:noteCard.reposted")
-            : (reposting || unreposting)
-            ? "..."
-            : t("home:noteCard.repost")}
-        </button>
-        <ReactionPicker onPick={toggleReaction} disabled={reactionPending} />
-        {isSelf && (
-          <button
-            className={`${styles.actionBtn} ${pinned ? styles.actionBtnActive : ""}`}
-            onClick={handleTogglePin}
-            disabled={pinning}
-            title={pinned ? t("home:noteCard.unpinTitle") : t("home:noteCard.pinTitle")}
-          >
-            📌 {pinned ? t("home:noteCard.pinned") : pinning ? "..." : t("home:noteCard.pin")}
-          </button>
-        )}
-      </div>
+      <NoteCardActions
+        reactions={reactions}
+        reactionPending={reactionPending}
+        onToggleReaction={toggleReaction}
+        onReply={handleReply}
+        reposted={reposted}
+        reposting={reposting}
+        unreposting={unreposting}
+        isPrivateRepostTarget={isPrivateRepostTarget}
+        onRepost={handleRepost}
+        isSelf={isSelf}
+        pinned={pinned}
+        pinning={pinning}
+        onTogglePin={handleTogglePin}
+      />
     </>
   );
 }
