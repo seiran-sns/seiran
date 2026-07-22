@@ -1,6 +1,16 @@
 use async_trait::async_trait;
 use sqlx::{PgPool, Row};
 
+/// リアクションを付けたアクターの表示用情報（ホバーポップオーバーの「誰が付けたか」一覧用）。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ReactorInfo {
+    pub id: i64,
+    pub username: String,
+    pub domain: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
 #[async_trait]
 pub trait ReactionRepository: Send + Sync {
     /// リアクション（いいね／絵文字リアクション）を記録する。
@@ -63,6 +73,10 @@ pub trait ReactionRepository: Send + Sync {
     /// `reactions` は 1投稿1リアクションで切替時に上書きされるため、これは厳密な「過去の使用履歴」
     /// ではなく「現在も付いている自分のリアクション」の集計という近似値になる。
     async fn aggregate_for_actor(&self, actor_id: i64, limit: i64) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error>;
+
+    /// 指定 (post_id, content) にリアクションを付けたアクターを新しい順に返す
+    /// （リアクションチップのホバーポップオーバー「誰が付けたか」一覧用）。
+    async fn actors_for_reaction(&self, post_id: i64, content: &str, limit: i64) -> Result<Vec<ReactorInfo>, sqlx::Error>;
 }
 
 pub struct PgReactionRepository {
@@ -187,5 +201,24 @@ impl ReactionRepository for PgReactionRepository {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().map(|r| (r.get("content"), r.get("cnt"), r.get("emoji_url"))).collect())
+    }
+
+    async fn actors_for_reaction(&self, post_id: i64, content: &str, limit: i64) -> Result<Vec<ReactorInfo>, sqlx::Error> {
+        sqlx::query_as::<_, ReactorInfo>(
+            "SELECT a.id, a.username, a.domain, a.display_name,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+             FROM reactions r
+             JOIN actors a ON a.id = r.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             WHERE r.post_id = $1 AND r.content = $2
+             ORDER BY r.created_at DESC
+             LIMIT $3",
+        )
+        .bind(post_id)
+        .bind(content)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
     }
 }

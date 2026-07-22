@@ -939,6 +939,48 @@ pub async fn frequent_reactions(me: AuthedUser, State(state): State<AppState>) -
     Json(serde_json::json!({ "items": items }))
 }
 
+/// リアクションチップのホバーポップオーバーに表示するアクター数の上限。
+const REACTION_ACTORS_LIMIT: i64 = 50;
+
+/// GET /api/notes/:id/reactions/:content/actors
+/// 指定リアクション（絵文字/`:shortcode:`）を付けたアクター一覧を返す（ホバーポップオーバー用）。
+/// 投稿の可視性チェックは `get_note` と同じ `find_by_id_for_viewer` を使う。
+pub async fn reaction_actors(
+    Path((note_id_str, content)): Path<(String, String)>,
+    MaybeAuthedUser(user): MaybeAuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let my_actor_id = user.map(|u| u.actor_id);
+
+    let note_id: i64 = match note_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
+    };
+
+    match state.posts.find_by_id_for_viewer(note_id, my_actor_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
+    };
+
+    let actors = state
+        .reactions
+        .actors_for_reaction(note_id, &content, REACTION_ACTORS_LIMIT)
+        .await
+        .unwrap_or_default();
+
+    Json(serde_json::json!({
+        "actors": actors.into_iter().map(|a| serde_json::json!({
+            "id": a.id.to_string(),
+            "username": a.username,
+            "domain": a.domain,
+            "displayName": a.display_name,
+            "avatarUrl": a.avatar_url,
+        })).collect::<Vec<_>>(),
+    }))
+    .into_response()
+}
+
 /// POST /api/notes/:id/reactions
 /// 自分の絵文字リアクションを追加する。ローカル保存に加え、AP（対象ポスト著者 + 自分の Fedi
 /// フォロワー全員）・ATP（対象に at_uri がある場合）の双方へ配送する。

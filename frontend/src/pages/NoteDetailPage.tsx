@@ -135,7 +135,7 @@ export default function NoteDetailPage() {
         renderContext()
       ) : display && display.reactions && display.reactions.length > 0 ? (
         <div style={{ padding: "12px 16px" }}>
-          <ReactionChips reactions={display.reactions} />
+          <ReactionChips noteId={display.id} reactions={display.reactions} />
         </div>
       ) : (
         <div className={panel.placeholder}>

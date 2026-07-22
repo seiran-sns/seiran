@@ -287,6 +287,15 @@ export interface ReactionSummary {
   emojiUrl?: string;
 }
 
+/** `GET /notes/:id/reactions/:content/actors` の1件（リアクションチップのホバーポップオーバー用）。 */
+export interface ReactionActor {
+  id: string;
+  username: string;
+  domain: string;
+  displayName?: string;
+  avatarUrl?: string;
+}
+
 export interface ReactResult {
   ok: boolean;
   reactions: ReactionSummary[];
@@ -661,6 +670,12 @@ export const api = {
       return request<ReactResult>(
         "DELETE",
         `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}`
+      );
+    },
+    reactionActors(noteId: string, content: string) {
+      return request<{ actors: ReactionActor[] }>(
+        "GET",
+        `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}/actors`
       );
     },
     pin(noteId: string) {

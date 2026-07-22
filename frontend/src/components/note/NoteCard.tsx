@@ -214,6 +214,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
       )}
 
       <NoteCardActions
+        noteId={note.id}
         reactions={reactions}
         reactionPending={reactionPending}
         onToggleReaction={toggleReaction}

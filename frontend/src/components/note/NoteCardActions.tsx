@@ -8,6 +8,7 @@ import ReactionPicker from "./ReactionPicker";
 import styles from "./NoteCard.module.css";
 
 interface NoteCardActionsProps {
+  noteId: string;
   reactions: ReactionSummary[];
   reactionPending: boolean;
   onToggleReaction: (emoji: string) => void;
@@ -31,6 +32,7 @@ interface NoteCardActionsProps {
  * ある（自分の投稿のみ表示）。
  */
 export default function NoteCardActions({
+  noteId,
   reactions,
   reactionPending,
   onToggleReaction,
@@ -89,7 +91,7 @@ export default function NoteCardActions({
 
   return (
     <>
-      <ReactionChips reactions={reactions} onToggle={onToggleReaction} disabled={reactionPending} />
+      <ReactionChips noteId={noteId} reactions={reactions} onToggle={onToggleReaction} disabled={reactionPending} />
 
       <div className={styles.actions}>
         <button className={styles.actionBtn} onClick={onReply} title={t("home:noteCard.replyButton")}>

@@ -46,7 +46,7 @@ pub use post::{
     DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, PgPostRepository, PostDeleteInfo,
     PostDeliveryMeta, PostRecord, PostRepository, PostSummary, RepostUndoInfo, TimelinePost,
 };
-pub use reaction::{PgReactionRepository, ReactionRepository};
+pub use reaction::{PgReactionRepository, ReactionRepository, ReactorInfo};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage_provider::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider,

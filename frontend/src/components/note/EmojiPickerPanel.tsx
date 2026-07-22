@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, FrequentReaction, PublicEmoji } from "../../api/client";
+import { fetchCustomEmojis } from "../../lib/customEmojis";
 import { allUnicodeEmojis, unicodeEmojiGroups } from "../../lib/emojiData";
 import styles from "./EmojiPickerPanel.module.css";
 
@@ -33,11 +34,11 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      api.emojis.list().catch(() => ({ emojis: [] as PublicEmoji[] })),
+      fetchCustomEmojis().catch(() => [] as PublicEmoji[]),
       api.reactions.frequent().catch(() => ({ items: [] as FrequentReaction[] })),
-    ]).then(([emojisRes, frequentRes]) => {
+    ]).then(([emojis, frequentRes]) => {
       if (cancelled) return;
-      setCustomEmojis(emojisRes.emojis);
+      setCustomEmojis(emojis);
       setFrequent(frequentRes.items);
       if (frequentRes.items.length > 0) setTab("frequent");
       setLoading(false);

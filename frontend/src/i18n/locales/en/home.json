@@ -78,7 +78,9 @@
   },
   "reactionChips": {
     "clickToRemove": "Click to remove",
-    "clickToAdd": "Click to add the same reaction"
+    "clickToAdd": "Click to add the same reaction",
+    "customEmojiBlocked": "You can't add this custom emoji reaction — it's not registered on this server",
+    "actorsFetchFailed": "Failed to load"
   },
   "reactionPicker": {
     "addReactionTitle": "Add a reaction",
