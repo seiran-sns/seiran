@@ -7,6 +7,7 @@
 
 .desktopLeftNav {
   display: flex;
+  flex: 0 0 240px;
 }
 
 /* ── 左ペイン（幅固定：小 / 240px）───────────────────────────── */
