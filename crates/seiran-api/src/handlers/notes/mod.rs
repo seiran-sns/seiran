@@ -65,6 +65,7 @@ async fn create_repost(
     state: &AppState,
     actor_id: i64,
     username: String,
+    display_name: Option<String>,
     renote_id_str: &str,
     req: &CreateNoteRequest,
     now: chrono::DateTime<chrono::Utc>,
@@ -127,11 +128,19 @@ async fn create_repost(
         &meta, origin,
     ).await;
 
+    let avatar_url = state.actors.find_avatar_url(actor_id).await.ok().flatten();
     let mut repost_resp = NoteResponse {
         id: post_id.to_string(),
         text: String::new(),
         created_at: now.to_rfc3339(),
-        user: NoteUserInfo { id: actor_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
+        user: NoteUserInfo {
+            id: actor_id,
+            username,
+            domain: Some(state.local_domain.clone()),
+            display_name,
+            actor_type: "local".to_string(),
+            avatar_url,
+        },
         attachments: vec![],
         renote_id: Some(renote_id.to_string()),
         quote_id: None, reply_id: None, parent_original_id: None,
@@ -159,6 +168,7 @@ async fn create_regular_post(
     state: &AppState,
     actor_id: i64,
     username: String,
+    display_name: Option<String>,
     req: &CreateNoteRequest,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Response {
@@ -408,11 +418,19 @@ async fn create_regular_post(
     }).await;
 
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
+    let avatar_url = state.actors.find_avatar_url(actor_id).await.ok().flatten();
     let note_resp = NoteResponse {
         id: post_id.to_string(),
         text,
         created_at: now.to_rfc3339(),
-        user: NoteUserInfo { id: actor_id, username, domain: None, display_name: None, actor_type: "local".to_string(), avatar_url: None },
+        user: NoteUserInfo {
+            id: actor_id,
+            username,
+            domain: Some(state.local_domain.clone()),
+            display_name,
+            actor_type: "local".to_string(),
+            avatar_url,
+        },
         attachments: att_map.remove(&post_id).unwrap_or_default(),
         renote_id: None,
         quote_id: quote_of_id_i64.map(|i| i.to_string()),
@@ -445,8 +463,10 @@ pub async fn create_note(
     let now = chrono::Utc::now();
 
     match &req.renote_id {
-        Some(renote_id_str) => create_repost(&state, user.actor_id, user.username, renote_id_str, &req, now).await,
-        None => create_regular_post(&state, user.actor_id, user.username, &req, now).await,
+        Some(renote_id_str) => {
+            create_repost(&state, user.actor_id, user.username, user.display_name, renote_id_str, &req, now).await
+        }
+        None => create_regular_post(&state, user.actor_id, user.username, user.display_name, &req, now).await,
     }
 }
 
