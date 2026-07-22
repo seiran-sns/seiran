@@ -78,7 +78,10 @@ pub async fn fetch_attachments_map(
                 sp.public_url AS public_url,
                 mf.thumbnail_key AS thumbnail_key,
                 mf.duration_ms AS duration_ms,
-                pa.remote_thumbnail_url AS remote_thumbnail_url
+                pa.remote_thumbnail_url AS remote_thumbnail_url,
+                mf.sha256 AS sha256,
+                mf.size AS size,
+                mf.created_at AS media_created_at
          FROM post_attachments pa
          LEFT JOIN media_files mf ON mf.id = pa.media_file_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -106,6 +109,7 @@ pub async fn fetch_attachments_map(
             (Some(pu), Some(tk)) => Some(format!("{}/{}", pu.trim_end_matches('/'), tk)),
             _ => remote_thumbnail_url,
         };
+        let media_created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("media_created_at").unwrap_or(None);
         map.entry(post_id).or_default().push(AttachmentResponse {
             url,
             mime_type: row.try_get("mime_type").unwrap_or_else(|_| "image/jpeg".into()),
@@ -113,6 +117,9 @@ pub async fn fetch_attachments_map(
             height: row.try_get("height").unwrap_or(0),
             thumbnail_url,
             duration_ms: row.try_get("duration_ms").unwrap_or(None),
+            sha256: row.try_get("sha256").unwrap_or(None),
+            size: row.try_get("size").unwrap_or(None),
+            media_created_at: media_created_at.map(|dt| dt.to_rfc3339()),
         });
     }
     map

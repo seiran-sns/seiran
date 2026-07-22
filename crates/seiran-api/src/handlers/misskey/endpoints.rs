@@ -56,6 +56,15 @@ pub struct UserShowBody {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UsersNotesBody {
+    pub user_id: String,
+    pub limit: Option<i64>,
+    pub since_id: Option<String>,
+    pub until_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FollowingBody {
     pub user_id: String,
 }
@@ -150,6 +159,29 @@ pub async fn users_show(
     .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
 
     Ok(Json(build_user_detailed(&state, &actor).await))
+}
+
+/// POST /api/users/notes — プロフィール画面のノートタブ（Aria等）。
+/// カスタムAPI `GET /api/users/posts`（`handlers::users::user_posts`）と同じ
+/// `timeline_by_actor` を使うが、`exclude_direct=true` はカスタムAPI側の
+/// `build_profile_response` 初回取得と同じ扱い（DMをプロフィール投稿一覧に含めない）。
+pub async fn users_notes(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<UsersNotesBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let actor_id: i64 = body.user_id.parse().map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+    let limit = body.limit.unwrap_or(10).clamp(1, 100);
+    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = state
+        .posts
+        .timeline_by_actor(actor_id, my_actor_id, limit, until_id, since_id, true)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(build_notes(&state, rows, my_actor_id).await))
 }
 
 // ─── ノート ──────────────────────────────────────────────────────────

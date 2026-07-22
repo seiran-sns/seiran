@@ -21,6 +21,10 @@ pub struct MisskeyUserLite {
     pub is_cat: bool,
 }
 
+/// `misskey_dart` の `UserDetailedNotMe.fromJson`（`/api/users/show` が返す形）は
+/// `followersCount`/`followingCount`/`notesCount` を non-nullable `int` として直接
+/// キャストするため、欠けると Dart 側で `TypeError`（`type 'Null' is not a subtype of
+/// type 'num' in type cast`）となる（実機で確認済み。`MisskeyDriveFile` と同種の問題）。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MisskeyUserDetailed {
@@ -32,6 +36,9 @@ pub struct MisskeyUserDetailed {
     pub is_locked: bool,
     pub is_silenced: bool,
     pub is_suspended: bool,
+    pub notes_count: i64,
+    pub followers_count: i64,
+    pub following_count: i64,
 }
 
 /// `/api/i`（自分自身）専用のレスポンス型。`UserDetailedNotMe` を返す `/api/users/show` とは
@@ -46,9 +53,6 @@ pub struct MisskeyUserDetailed {
 pub struct MisskeyMeDetailed {
     #[serde(flatten)]
     pub detailed: MisskeyUserDetailed,
-    pub notes_count: i64,
-    pub followers_count: i64,
-    pub following_count: i64,
     pub is_moderator: bool,
     pub is_admin: bool,
     pub always_mark_nsfw: bool,
@@ -56,15 +60,34 @@ pub struct MisskeyMeDetailed {
     pub auto_accept_followed: bool,
 }
 
+/// `misskey_dart` の `DriveFile.fromJson` は `id`/`createdAt`/`name`/`type`/`md5`/`size`/
+/// `isSensitive`/`properties`/`url` を non-nullable 必須としてキャストするため、欠けると
+/// `MisskeyMeDetailed` と同様に Dart 側で `TypeError` となりタイムライン取得が例外落ちする
+/// （実機で確認済み）。`md5` は seiran 内部で持つ `sha256` を代用する（クライアントは値の
+/// 妥当性を検証せず単に文字列として保持するだけのため実害はない）。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MisskeyDriveFile {
     pub id: String,
+    pub created_at: String,
     pub name: String,
     #[serde(rename = "type")]
     pub file_type: String,
+    pub md5: String,
+    pub size: i64,
+    pub is_sensitive: bool,
+    pub properties: MisskeyDriveFileProperties,
     pub url: String,
     pub thumbnail_url: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyDriveFileProperties {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<i32>,
 }
 
 #[derive(Serialize, Clone)]

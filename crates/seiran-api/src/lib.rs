@@ -431,6 +431,7 @@ pub fn router(state: AppState) -> Router {
         // Misskey 準拠の追加エンドポイント（Phase 2）。既存のカスタムAPIと並存する。
         .route("/api/i", post(handlers::misskey::endpoints::api_i))
         .route("/api/users/show", post(handlers::misskey::endpoints::users_show))
+        .route("/api/users/notes", post(handlers::misskey::endpoints::users_notes))
         .route("/api/notes/show", post(handlers::misskey::endpoints::notes_show))
         .route("/api/notes/local-timeline", post(handlers::misskey::endpoints::notes_local_timeline))
         .route("/api/notes/timeline", post(handlers::misskey::endpoints::notes_home_timeline))

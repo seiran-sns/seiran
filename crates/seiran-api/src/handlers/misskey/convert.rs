@@ -12,7 +12,9 @@ use seiran_common::repository::{Actor, NotificationRow, TimelinePost};
 use crate::handlers::notes::{fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place, AttachmentResponse, ReactionSummary};
 use crate::AppState;
 
-use super::types::{MisskeyDriveFile, MisskeyMeDetailed, MisskeyNote, MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite};
+use super::types::{
+    MisskeyDriveFile, MisskeyDriveFileProperties, MisskeyMeDetailed, MisskeyNote, MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite,
+};
 
 pub fn user_lite(
     actor_id: i64,
@@ -61,21 +63,6 @@ pub async fn build_user_detailed(state: &AppState, actor: &Actor) -> MisskeyUser
         avatar_url.as_deref(),
     );
 
-    MisskeyUserDetailed {
-        lite,
-        created_at: created_at.to_rfc3339(),
-        description: actor.bio.clone(),
-        banner_url: None,
-        is_locked: false,
-        is_silenced: false,
-        is_suspended: false,
-    }
-}
-
-/// `/api/i` 用（`MisskeyMeDetailed`）。`build_user_detailed` に自分専用フィールドを足す。
-pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDetailed {
-    let detailed = build_user_detailed(state, actor).await;
-
     let notes_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND deleted_at IS NULL")
         .bind(actor.id)
         .fetch_one(&state.db)
@@ -92,6 +79,24 @@ pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDeta
         .await
         .unwrap_or(0);
 
+    MisskeyUserDetailed {
+        lite,
+        created_at: created_at.to_rfc3339(),
+        description: actor.bio.clone(),
+        banner_url: None,
+        is_locked: false,
+        is_silenced: false,
+        is_suspended: false,
+        notes_count,
+        followers_count,
+        following_count,
+    }
+}
+
+/// `/api/i` 用（`MisskeyMeDetailed`）。`build_user_detailed` に自分専用フィールドを足す。
+pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDetailed {
+    let detailed = build_user_detailed(state, actor).await;
+
     let role = match actor.user_id {
         Some(uid) => state.users.find_role_by_user_id(uid).await.ok().flatten().unwrap_or_else(|| "user".to_string()),
         None => "user".to_string(),
@@ -99,9 +104,6 @@ pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDeta
 
     MisskeyMeDetailed {
         detailed,
-        notes_count,
-        followers_count,
-        following_count,
         is_moderator: role == "admin" || role == "moderator",
         is_admin: role == "admin",
         always_mark_nsfw: false,
@@ -143,8 +145,17 @@ fn to_misskey_note(
         .enumerate()
         .map(|(i, a)| MisskeyDriveFile {
             id: format!("{}-{}", p.id, i),
+            // リモート添付は media_files に対応行が無く取得できないため、投稿日時を代用する。
+            created_at: a.media_created_at.clone().unwrap_or_else(|| p.created_at.to_rfc3339()),
             name: format!("file{}", i),
             file_type: a.mime_type.clone(),
+            md5: a.sha256.clone().unwrap_or_default(),
+            size: a.size.unwrap_or(0),
+            is_sensitive: false,
+            properties: MisskeyDriveFileProperties {
+                width: (a.width > 0).then_some(a.width),
+                height: (a.height > 0).then_some(a.height),
+            },
             url: a.url.clone(),
             thumbnail_url: a.url.clone(),
         })

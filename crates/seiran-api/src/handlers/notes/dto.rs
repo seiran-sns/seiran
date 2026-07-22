@@ -42,6 +42,14 @@ pub struct AttachmentResponse {
     pub thumbnail_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i64>,
+    /// Misskey 互換 API（`MisskeyDriveFile`）用。自ドメインアップロードのみ値を持つ
+    /// （リモート添付は `media_files` に対応行が無いため `None`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_created_at: Option<String>,
 }
 
 /// ポストに対するリアクション集計（絵文字ごとの件数）(#22)。
