@@ -65,6 +65,63 @@ async fn fetch_fedi_follower_inboxes(db: &PgPool, actor_id: i64) -> Result<Vec<S
         .collect())
 }
 
+/// メンション先アクターURI一覧を、フォロー関係と独立に inbox URL へ解決する
+/// （Mastodon等のメンション個別配送相当）。DB既知の fedi アクターは DB から、
+/// まだ一度も見たことのない相手はその場でアクタードキュメントを取得して解決する
+/// （ここで新規に upsert はしない。既存の `resolve_fedi_mention_href` によるメンション
+/// href 解決も同様に都度webfinger問い合わせのみで、DB保存は伴わない設計に合わせた）。
+/// `local_domain` 自身宛（ローカルユーザーへの自己言及等）は除外する。
+/// 個々の取得失敗は他の宛先解決を妨げないよう、ログのみでベストエフォートに扱う。
+async fn fetch_inboxes_by_ap_uris(
+    ap_client: &ApClient,
+    db: &PgPool,
+    local_domain: &str,
+    ap_uris: &[String],
+) -> Vec<String> {
+    let local_prefix = format!("https://{}/", local_domain);
+    let remote_uris: Vec<String> = ap_uris.iter().filter(|u| !u.starts_with(&local_prefix)).cloned().collect();
+    if remote_uris.is_empty() {
+        return Vec::new();
+    }
+
+    let known_rows = sqlx::query(
+        "SELECT ap_uri, ap_inbox_url FROM actors WHERE ap_uri = ANY($1) AND actor_type = 'fedi'",
+    )
+    .bind(&remote_uris)
+    .fetch_all(db)
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("[Deliver] メンション先アクター検索エラー: {}", e);
+        Vec::new()
+    });
+
+    let mut inboxes = Vec::new();
+    let mut known_uris = std::collections::HashSet::new();
+    for row in &known_rows {
+        if let Ok(uri) = row.try_get::<String, _>("ap_uri") {
+            known_uris.insert(uri);
+        }
+        if let Ok(Some(inbox)) = row.try_get::<Option<String>, _>("ap_inbox_url") {
+            inboxes.push(inbox);
+        }
+    }
+
+    for uri in remote_uris.iter().filter(|u| !known_uris.contains(*u)) {
+        match ap_client.fetch_actor(uri).await {
+            Ok(actor) => {
+                if let Some(inbox) = actor.inbox {
+                    inboxes.push(inbox);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("[Deliver] メンション先アクター({})の取得失敗、配送スキップ: {}", uri, e);
+            }
+        }
+    }
+
+    inboxes
+}
+
 /// アクティビティを inbox 群へ署名付き POST でファンアウトし、成功/失敗件数をログする。
 ///
 /// 一部でも成功すれば `Ok`（受信側は activity id で重複排除するとはいえ、再送を最小限に
@@ -131,16 +188,39 @@ struct NoteActivityParams<'a> {
     /// （フォロワーコレクションではなく実際の宛先個人のみへ配送するため）。
     /// direct以外では無視される。
     direct_recipients: &'a [String],
+    /// 本文中でメンションしたアクターURI一覧（`direct`以外の可視性で`to`に追加する）。
+    /// フォロワーでない相手にもメンション通知の元となるアクティビティ自体を届けるため
+    /// （`to`に含めるのはAP的な作法・実際の配送先は別途 `deliver_post_to_ap_followers` が解決する）。
+    /// directでは無視される（`direct_recipients`が既に実際の宛先そのもののため）。
+    mention_recipients: &'a [String],
 }
 
 /// 可視性から Create(Note)/Note 共通の to/cc を決める。
-fn visibility_to_to_cc(addr: &LocalActorAddress, visibility: &str, direct_recipients: &[String]) -> (Vec<String>, Vec<String>) {
+fn visibility_to_to_cc(
+    addr: &LocalActorAddress,
+    visibility: &str,
+    direct_recipients: &[String],
+    mention_recipients: &[String],
+) -> (Vec<String>, Vec<String>) {
     match visibility {
-        "unlisted" => (vec![addr.followers_uri.clone()], vec![AS_PUBLIC.to_string()]),
+        "unlisted" => {
+            let mut to = vec![addr.followers_uri.clone()];
+            to.extend(mention_recipients.iter().cloned());
+            (to, vec![AS_PUBLIC.to_string()])
+        }
         // DMは実際の宛先個人のみへ配送する（フォロワーコレクション宛にはしない）。
         "direct" => (direct_recipients.to_vec(), vec![]),
-        "followers_only" => (vec![addr.followers_uri.clone()], vec![]),
-        _ => (vec![AS_PUBLIC.to_string()], vec![addr.followers_uri.clone()]),
+        "followers_only" => {
+            let mut to = vec![addr.followers_uri.clone()];
+            to.extend(mention_recipients.iter().cloned());
+            (to, vec![])
+        }
+        _ => {
+            // メンション先はAP的な作法（Mastodon等）に合わせ cc ではなく to に含める。
+            let mut to = vec![AS_PUBLIC.to_string()];
+            to.extend(mention_recipients.iter().cloned());
+            (to, vec![addr.followers_uri.clone()])
+        }
     }
 }
 
@@ -148,7 +228,7 @@ fn visibility_to_to_cc(addr: &LocalActorAddress, visibility: &str, direct_recipi
 fn build_create_note_activity(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_json::Value {
     let note_id = format!("https://{}/notes/{}", p.local_domain, p.post_id);
     let activity_id = format!("https://{}/activities/{}", p.local_domain, p.post_id);
-    let (to, cc) = visibility_to_to_cc(addr, p.visibility, p.direct_recipients);
+    let (to, cc) = visibility_to_to_cc(addr, p.visibility, p.direct_recipients, p.mention_recipients);
 
     let mut note_obj = serde_json::json!({
         "type": "Note",
@@ -224,7 +304,7 @@ fn build_announce_activity(
     published: &str,
     visibility: &str,
 ) -> serde_json::Value {
-    let (to, cc) = visibility_to_to_cc(addr, visibility, &[]);
+    let (to, cc) = visibility_to_to_cc(addr, visibility, &[], &[]);
     serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Announce",
@@ -453,17 +533,27 @@ async fn fetch_post_activity_basis(db: &PgPool, post_id: i64, actor_id: i64) -> 
     Ok(PostActivityBasis { body, created_at, username, seiran_uuid, visibility, attachments })
 }
 
-/// 本文中のメンションを解決し、AP向けHTML化された本文と `tag[]`（AP Mention）を組み立てる。
+/// 本文中のメンションを解決し、AP向けHTML化された本文と `tag[]`（AP Mention）、
+/// メンション先アクターURI一覧（`kind==Mention`のみ、重複排除）を組み立てる。
+/// 3つ目の戻り値は、フォロー関係に関係なくメンション先へ通知（配送）を届けるために使う
+/// （`deliver_post_to_ap_followers` 参照）。
 async fn html_and_tags_for_body(
     body: &str,
     local_domain: &str,
     db: &PgPool,
     ap_client: &ApClient,
-) -> (String, Vec<serde_json::Value>) {
+) -> (String, Vec<serde_json::Value>, Vec<String>) {
     let (converted, mentions) = crate::mention::convert_mentions_for_ap(body, local_domain, db, &ap_client.http).await;
     let html = plain_to_html_with_mentions(&converted, &mentions);
     let tag = crate::mention::ap_inline_mentions_to_tag_json(&mentions);
-    (html, tag)
+    let mut mention_uris: Vec<String> = mentions
+        .iter()
+        .filter(|m| m.kind == crate::mention::ApInlineSpanKind::Mention)
+        .map(|m| m.href.clone())
+        .collect();
+    mention_uris.sort();
+    mention_uris.dedup();
+    (html, tag, mention_uris)
 }
 
 // =====================================================================
@@ -497,21 +587,27 @@ pub async fn deliver_post_to_ap_followers(
         return Ok(());
     }
 
-    let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
-    if inboxes.is_empty() {
-        return Ok(());
-    }
-
     let body: String = override_body.map(str::to_owned).unwrap_or(basis.body);
 
     // override_body（リポストのフォールバックテキスト等、投稿者本人が書いた本文ではない合成テキスト）
     // の場合はメンション変換をせずそのまま HTML 化する。通常投稿（override_body なし）はここで
     // 本文中のメンションを解決し、`<a>` アンカーと `tag[]`（AP Mention）を組み立てる。
-    let (content_html, tag): (String, Vec<serde_json::Value>) = if override_body.is_some() {
-        (plain_to_html(&body), Vec::new())
+    let (content_html, tag, mention_uris): (String, Vec<serde_json::Value>, Vec<String>) = if override_body.is_some() {
+        (plain_to_html(&body), Vec::new(), Vec::new())
     } else {
         html_and_tags_for_body(&body, local_domain, db, ap_client).await
     };
+
+    // 配送先はフォロワー + 本文中でメンションした相手（フォロワーでなくても通知を届ける）の和集合。
+    let mut inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
+    for inbox in fetch_inboxes_by_ap_uris(ap_client, db, local_domain, &mention_uris).await {
+        if !inboxes.contains(&inbox) {
+            inboxes.push(inbox);
+        }
+    }
+    if inboxes.is_empty() {
+        return Ok(());
+    }
 
     let addr = local_actor_address(local_domain, &basis.username);
     let activity = build_create_note_activity(
@@ -528,6 +624,7 @@ pub async fn deliver_post_to_ap_followers(
             visibility: &basis.visibility,
             tag,
             direct_recipients: &[],
+            mention_recipients: &mention_uris,
         },
     );
 
@@ -574,7 +671,7 @@ pub async fn deliver_direct_message_to_ap(
         .filter_map(|r| r.try_get::<String, _>("ap_inbox_url").ok())
         .collect();
 
-    let (content_html, tag) = html_and_tags_for_body(&basis.body, local_domain, db, ap_client).await;
+    let (content_html, tag, _mention_uris) = html_and_tags_for_body(&basis.body, local_domain, db, ap_client).await;
 
     let addr = local_actor_address(local_domain, &basis.username);
     let activity = build_create_note_activity(
@@ -591,6 +688,8 @@ pub async fn deliver_direct_message_to_ap(
             visibility: "direct",
             tag,
             direct_recipients: &direct_recipients,
+            // directは`direct_recipients`が既に実際の宛先そのものなので無視される（visibility_to_to_cc参照）。
+            mention_recipients: &[],
         },
     );
 
@@ -1043,6 +1142,7 @@ mod tests {
                 visibility: "public",
                 tag: vec![],
                 direct_recipients: &[],
+                mention_recipients: &[],
             },
         );
         assert_eq!(activity["type"], "Create");
@@ -1074,6 +1174,7 @@ mod tests {
                 visibility: "unlisted",
                 tag: vec![],
                 direct_recipients: &[],
+                mention_recipients: &[],
             },
         );
         assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
@@ -1098,6 +1199,7 @@ mod tests {
                 visibility: "followers_only",
                 tag: vec![],
                 direct_recipients: &[],
+                mention_recipients: &[],
             },
         );
         assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
@@ -1120,6 +1222,7 @@ mod tests {
                 visibility: "public",
                 tag: vec![],
                 direct_recipients: &[],
+                mention_recipients: &[],
             },
         );
         let note = &activity["object"];
@@ -1128,6 +1231,58 @@ mod tests {
         assert_eq!(note["inReplyTo"], "https://other.example/notes/2");
         assert_eq!(note["seiranUuid"], "uuid-1234");
         assert_eq!(note["attachment"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn create_note_activity_public_includes_mention_recipients_in_to() {
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello @bob</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                visibility: "public",
+                tag: vec![],
+                direct_recipients: &[],
+                mention_recipients: &["https://other.example/users/bob".to_string()],
+            },
+        );
+        // メンション先はフォロワーでなくても配送が届くよう to に含める（cc ではない）。
+        assert_eq!(
+            activity["to"],
+            serde_json::json!(["https://www.w3.org/ns/activitystreams#Public", "https://other.example/users/bob"])
+        );
+        assert_eq!(activity["cc"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
+    }
+
+    #[test]
+    fn create_note_activity_followers_only_includes_mention_recipients_in_to() {
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello @bob</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                visibility: "followers_only",
+                tag: vec![],
+                direct_recipients: &[],
+                mention_recipients: &["https://other.example/users/bob".to_string()],
+            },
+        );
+        assert_eq!(
+            activity["to"],
+            serde_json::json!(["https://seiran.example/users/alice/followers", "https://other.example/users/bob"])
+        );
     }
 
     #[test]

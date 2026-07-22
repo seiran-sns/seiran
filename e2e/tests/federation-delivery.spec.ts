@@ -3,10 +3,14 @@ import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 import { startStubFediServer, type StubFediServer } from "../fixtures/stub-fedi-server";
 import { BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 
-// Fedi配送は「自分のacceptedフォロワー全員へ配送」という単一の仕組みで、通常投稿・返信・
+// Fedi配送は「自分のacceptedフォロワー全員へ配送」が基本の仕組みで、通常投稿・返信・
 // リポストいずれも同じフォロワーファンアウト経路を通る
 // (crates/seiran-common/src/ap/deliver.rs の fetch_fedi_follower_inboxes/fan_out_activity)。
 // そのためスタブアクターに事前にフォローさせておけば、配送先inboxで受信内容を検証できる。
+// なお通常投稿は本文中のメンション先もフォロー関係と無関係に配送先へ追加される
+// （fetch_inboxes_by_ap_uris）が、e2eの stub-fedi-server はホストにポート番号を含むため
+// （`@user@host:port`）本文メンションのドメインパーサーでは表現できず、この経路のE2E化は
+// 別途 crates/seiran-common/src/ap/deliver.rs の unit test 側で担保している。
 
 async function followAndWaitAccepted(fedi: StubFediServer, username: string) {
   await fedi.sendFollow(SEIRAN_BASE_URL, username);

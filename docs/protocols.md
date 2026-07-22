@@ -50,6 +50,8 @@
 ### 配送
 `Job::ApDelivery{actor_id, kind}`（優先度高、最大10回リトライの指数バックオフ）。宛先は `follows` の `status='accepted' AND actor_type='fedi'` の `ap_inbox_url` 一覧（リアクションは対象ポスト著者のinboxも追加）。全inboxへ署名付きPOSTをファンアウトし、**1件でも成功すればOk**（全滅時のみリトライ対象）。秘密鍵未設定時はリトライしても直らないため即座に破棄。
 
+通常投稿（`PostToFollowers`、DM以外）は、上記フォロワーに加え**本文中でメンションした相手のinbox**もフォロー関係と無関係に配送先へ加える（`crates/seiran-common/src/ap/deliver.rs::fetch_inboxes_by_ap_uris`）。メンション先が既知（DB上に`actor_type='fedi'`の行がある）ならDBから、未知ならその場でアクタードキュメントを取得してinboxを解決する（DBへの保存は伴わない）。`to`にもメンション先のactor URIを含める（Mastodon等と同様の作法）。メンション先の取得に失敗した場合はそのメンション先だけをスキップし、他の配送は妨げない。
+
 ## 3. AT Protocol (Bsky) 統合
 
 seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）は使わない。
