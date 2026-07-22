@@ -106,14 +106,17 @@ pub enum ApDeliveryKind {
     /// Delete を送る必要がある。
     DeleteNote { post_id: i64 },
     /// Like/EmojiReact を配送する。`undo_prev` があれば先に旧リアクションの Undo を配送する（切替）。
+    /// `emoji_url` はカスタム絵文字（`:shortcode:`）の画像 URL。Unicode 絵文字は `None`。
+    /// Misskey/Fedibird 互換の `tag: [{type: Emoji, ...}]` 組み立てに使う（`ap::deliver::build_reaction_object`）。
     Reaction {
         post_id: i64,
         activity_id: String,
         content: String,
+        emoji_url: Option<String>,
         undo_prev: Option<PrevApReaction>,
     },
     /// Undo(Like/EmojiReact)（リアクション取り消し）を配送する。
-    UndoReaction { post_id: i64, prev_activity_id: String, content: String },
+    UndoReaction { post_id: i64, prev_activity_id: String, content: String, emoji_url: Option<String> },
     /// Update(Person)（プロフィール更新）を配送する。
     UpdateActor,
     /// Delete(Actor)（退会）を配送する。
@@ -125,6 +128,7 @@ pub enum ApDeliveryKind {
 pub struct PrevApReaction {
     pub activity_id: String,
     pub content: String,
+    pub emoji_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,9 +247,11 @@ mod tests {
                     post_id: 2,
                     activity_id: "https://a.example/activities/r1".into(),
                     content: "🎉".into(),
+                    emoji_url: None,
                     undo_prev: Some(PrevApReaction {
                         activity_id: "https://a.example/activities/r0".into(),
                         content: "❤️".into(),
+                        emoji_url: None,
                     }),
                 },
             },

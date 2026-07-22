@@ -195,6 +195,26 @@ export interface CustomEmoji {
   /** タグ（#49）。ピッカーの部分一致対象。 */
   tags: string[];
   created_at: string;
+  /** 画像プレビュー用 URL。`listEmojis` のみ解決済み、`createEmoji` の直後レスポンスは null。 */
+  url: string | null;
+}
+
+/** `GET /api/emojis`（公開、Misskey互換）の1件。バックエンドは `#[serde(rename_all = "camelCase")]`。 */
+export interface PublicEmoji {
+  id: string;
+  aliases: string[];
+  name: string;
+  category: string | null;
+  host: string | null;
+  url: string;
+  license: string | null;
+}
+
+/** `GET /api/reactions/frequent` の1件（よく使う絵文字ピッカー用）。 */
+export interface FrequentReaction {
+  content: string;
+  count: number;
+  emojiUrl: string | null;
 }
 
 export interface EmojiImportJob {
@@ -246,7 +266,8 @@ export interface Note {
   renote?: Note;
   /** 認証ユーザーがこのノートをリポスト済みかどうか（未認証時は undefined）。 */
   repostedByMe?: boolean;
-  /** 本文・投稿者表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信のみ）。 */
+  /** 本文・投稿者表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信のみ）。
+   * リアクションの画像URLは `reactions[].emojiUrl` で別途持つ。 */
   emojis?: Record<string, string>;
   /** 認証ユーザー自身の投稿がピン留め済みかどうか（#61）。自分のプロフィール表示時のみ設定。 */
   pinnedByMe?: boolean;
@@ -262,7 +283,7 @@ export interface ReactionSummary {
   emoji: string;
   count: number;
   reactedByMe: boolean;
-  /** Fedi から受信したカスタム絵文字（`:shortcode:`）の画像URL。Unicode絵文字は undefined。 */
+  /** カスタム絵文字（`:shortcode:`）の画像URL（ローカル送信・Fedi受信いずれも）。Unicode絵文字は undefined。 */
   emojiUrl?: string;
 }
 
@@ -770,7 +791,7 @@ export const api = {
     listEmojis() {
       return request<CustomEmoji[]>("GET", "/admin/emojis");
     },
-    createEmoji(body: { shortcode: string; media_file_id: number; category?: string; tags?: string[] }) {
+    createEmoji(body: { shortcode: string; media_file_id: string; category?: string; tags?: string[] }) {
       return request<CustomEmoji>("POST", "/admin/emojis", body);
     },
     updateEmoji(id: string, body: { category?: string; tags?: string[] }) {
@@ -914,6 +935,20 @@ export const api = {
       formData.append("media_type", mediaType);
       formData.append("deliver_to_bsky", String(deliverToBsky));
       return uploadFormData<DriveFile>("/drive/files/create", formData);
+    },
+  },
+
+  emojis: {
+    /** 公開カスタム絵文字一覧（未認証でも呼べる、Misskey互換 `GET /api/emojis`）。 */
+    list() {
+      return request<{ emojis: PublicEmoji[] }>("GET", "/emojis");
+    },
+  },
+
+  reactions: {
+    /** 自分がよく使う絵文字を頻度順に返す（絵文字ピッカーの「よく使う」タブ用）。 */
+    frequent() {
+      return request<{ items: FrequentReaction[] }>("GET", "/reactions/frequent");
     },
   },
 };

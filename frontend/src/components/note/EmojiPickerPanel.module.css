@@ -1,0 +1,99 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, 80vw);
+}
+
+.search {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tabActive {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.body {
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+}
+
+.group {
+  margin-bottom: 10px;
+}
+
+.groupTitle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 2px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.12s;
+}
+
+.item:hover {
+  background: var(--accent-deep);
+}
+
+.itemImg {
+  width: 1.5em;
+  height: 1.5em;
+  object-fit: contain;
+}
+
+.message {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  padding: 12px 4px;
+  text-align: center;
+}

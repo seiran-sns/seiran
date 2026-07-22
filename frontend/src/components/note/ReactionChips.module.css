@@ -13,7 +13,7 @@
   border-radius: 20px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  font-size: 0.82rem;
+  font-size: 1.23rem;
   line-height: 1.6;
   font-family: inherit;
   cursor: pointer;
@@ -28,13 +28,6 @@
 .chip:disabled {
   cursor: default;
   opacity: 0.6;
-}
-
-/* カスタム絵文字チップで「自分では付けられない」ために disabled にしている場合は、
-   届いたリアクション自体は正当なものなので、他の disabled（操作中の一時無効化等）と
-   同じ薄い表示にはしない。クリックできないことはカーソルとツールチップだけで示す。 */
-.chip.chipReadonly:disabled {
-  opacity: 1;
 }
 
 .chipActive {
@@ -56,7 +49,8 @@
 
 .emojiImg {
   height: 1.1em;
-  width: 1.1em;
+  width: auto;
+  max-width: 4.4em;
   object-fit: contain;
   vertical-align: middle;
 }

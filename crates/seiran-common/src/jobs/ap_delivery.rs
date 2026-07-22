@@ -66,13 +66,13 @@ pub async fn handle(actor_id: i64, kind: ApDeliveryKind, ctx: Arc<JobContext>) -
                 .await
                 .map_err(|e| e.to_string())
         }
-        ApDeliveryKind::Reaction { post_id, activity_id, content, undo_prev } => {
+        ApDeliveryKind::Reaction { post_id, activity_id, content, emoji_url, undo_prev } => {
             // 切替時: 旧リアクションの Undo を先に配送する。失敗しても新リアクションの
             // 配送は続行する（Undo だけリトライで再送すると新リアクションが二重になるため）。
             if let Some(prev) = undo_prev {
                 if let Err(e) = deliver_ap_undo_reaction(
                     ap_client, pool, post_id, actor_id, domain, private_pem,
-                    &prev.activity_id, &prev.content,
+                    &prev.activity_id, &prev.content, prev.emoji_url.as_deref(),
                 )
                 .await
                 {
@@ -81,14 +81,15 @@ pub async fn handle(actor_id: i64, kind: ApDeliveryKind, ctx: Arc<JobContext>) -
             }
             deliver_ap_reaction(
                 ap_client, pool, post_id, actor_id, domain, private_pem, &activity_id, &content,
+                emoji_url.as_deref(),
             )
             .await
             .map_err(|e| e.to_string())
         }
-        ApDeliveryKind::UndoReaction { post_id, prev_activity_id, content } => {
+        ApDeliveryKind::UndoReaction { post_id, prev_activity_id, content, emoji_url } => {
             deliver_ap_undo_reaction(
                 ap_client, pool, post_id, actor_id, domain, private_pem,
-                &prev_activity_id, &content,
+                &prev_activity_id, &content, emoji_url.as_deref(),
             )
             .await
             .map_err(|e| e.to_string())

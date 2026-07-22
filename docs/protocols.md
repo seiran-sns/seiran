@@ -52,6 +52,9 @@
 
 通常投稿（`PostToFollowers`、DM以外）は、上記フォロワーに加え**本文中でメンションした相手のinbox**もフォロー関係と無関係に配送先へ加える（`crates/seiran-common/src/ap/deliver.rs::fetch_inboxes_by_ap_uris`）。メンション先が既知（DB上に`actor_type='fedi'`の行がある）ならDBから、未知ならその場でアクタードキュメントを取得してinboxを解決する（DBへの保存は伴わない）。`to`にもメンション先のactor URIを含める（Mastodon等と同様の作法）。メンション先の取得に失敗した場合はそのメンション先だけをスキップし、他の配送は妨げない。
 
+### カスタム絵文字リアクションの送信（`EmojiReact`）
+ローカルユーザーがカスタム絵文字（`:shortcode:`）でリアクションすると、`build_reaction_object`（`ap/deliver.rs`）が Misskey/Fedibird 互換の `tag: [{"type":"Emoji","name":":shortcode:","icon":{"type":"Image","url":...}}]` を付与した `EmojiReact` を組み立てる。`content`/`_misskey_reaction` には `:shortcode:` 形式の文字列をそのまま載せる。受信側の `build_emoji_map`/`extract_emoji_tag_url`（`ap/client.rs`・`jobs/inbound_activity_process.rs`）と対称的なペアになっている。画像URLの解決は `EmojiRepository::find_url_by_shortcode`（`custom_emojis`/`media_files`/`storage_providers` を JOIN）で行い、未登録shortcodeは `INVALID_REACTION_CONTENT`/`UNKNOWN_EMOJI` として拒否する（`handlers/notes/validation.rs`・`handlers/notes/mod.rs::create_reaction`）。ATP（Bsky）はカスタム絵文字非対応のため、`commit_like` の `emoji` 拡張フィールドに `:shortcode:` 文字列をベストエフォートで載せるのみ（画像は送らない）。
+
 ## 3. AT Protocol (Bsky) 統合
 
 seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）は使わない。

@@ -77,15 +77,19 @@
     "replyToPrefix": "Replying to:"
   },
   "reactionChips": {
-    "customEmojiBlocked": "You can't add a custom emoji reaction yourself",
     "clickToRemove": "Click to remove",
     "clickToAdd": "Click to add the same reaction"
   },
   "reactionPicker": {
     "addReactionTitle": "Add a reaction",
     "addReactionButton": "React",
-    "customInputPlaceholder": "Enter an emoji",
-    "customInputError": "Please enter a single emoji"
+    "searchPlaceholder": "Search emoji",
+    "tabFrequent": "Frequently used",
+    "tabUnicode": "Emoji",
+    "tabCustom": "Custom",
+    "noResults": "No matching emoji",
+    "noFrequent": "No frequently used emoji yet",
+    "noCustomEmojis": "No custom emoji registered"
   },
   "replyIndicator": {
     "goToOriginalTitle": "Go to the original post",

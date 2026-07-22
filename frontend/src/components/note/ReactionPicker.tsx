@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { isValidReactionEmoji } from "../../lib/reaction";
+import Modal from "../common/Modal";
 import noteCardStyles from "./NoteCard.module.css";
-import styles from "./ReactionPicker.module.css";
 
-const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
-const MAX_CONTENT_LEN = 32;
+// Unicode 絵文字データセット（unicode-emoji-json、非圧縮で数百KB）を含むため、ピッカーを
+// 実際に開くまでロードしない（バンドルサイズ対策）。
+const EmojiPickerPanel = lazy(() => import("./EmojiPickerPanel"));
 
 interface ReactionPickerProps {
-  /** 絵文字が選択された時に呼ばれる（クイック選択・自由入力の両方から）。 */
+  /** 絵文字が選択された時に呼ばれる（Unicode絵文字文字列 or `:shortcode:`）。 */
   onPick: (emoji: string) => void;
   /** リアクション操作中は true。トリガーボタンを無効化する。 */
   disabled?: boolean;
@@ -17,47 +17,20 @@ interface ReactionPickerProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-/** 投稿に絵文字リアクションを付けるためのトリガーボタン＋ポップオーバー。 */
+/** 投稿に絵文字リアクションを付けるためのトリガーボタン＋ピッカー（Modal 内に検索・タブ・グリッド）。 */
 export default function ReactionPicker({ onPick, disabled, open: controlledOpen, onOpenChange }: ReactionPickerProps) {
   const { t } = useTranslation();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = onOpenChange ?? setUncontrolledOpen;
-  const [customInput, setCustomInput] = useState("");
-  const [customError, setCustomError] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleOutsideClick(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleOutsideClick);
-    return () => document.removeEventListener("mousedown", handleOutsideClick);
-  }, [open]);
 
   function pick(emoji: string) {
     setOpen(false);
-    setCustomInput("");
-    setCustomError(false);
     onPick(emoji);
   }
 
-  function handleCustomSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const trimmed = customInput.trim();
-    if (!trimmed || trimmed.length > MAX_CONTENT_LEN || !isValidReactionEmoji(trimmed)) {
-      setCustomError(true);
-      return;
-    }
-    pick(trimmed);
-  }
-
   return (
-    <div className={styles.wrap} ref={wrapRef}>
+    <>
       <button
         type="button"
         className={noteCardStyles.actionBtn}
@@ -70,45 +43,13 @@ export default function ReactionPicker({ onPick, disabled, open: controlledOpen,
       >
         🙂 {t("home:reactionPicker.addReactionButton")}
       </button>
-      {open && (
-        <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
-          <div className={styles.quickRow}>
-            {QUICK_EMOJIS.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                className={styles.quickBtn}
-                onClick={() => pick(emoji)}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-          <form className={styles.customRow} onSubmit={handleCustomSubmit}>
-            <input
-              type="text"
-              className={styles.customInput}
-              placeholder={t("home:reactionPicker.customInputPlaceholder")}
-              value={customInput}
-              maxLength={MAX_CONTENT_LEN}
-              onChange={(e) => {
-                setCustomInput(e.target.value);
-                setCustomError(false);
-              }}
-            />
-            <button
-              type="submit"
-              className={styles.customSubmit}
-              disabled={!customInput.trim() || !isValidReactionEmoji(customInput)}
-            >
-              {t("common:add")}
-            </button>
-          </form>
-          {customError && (
-            <p className={styles.customError}>{t("home:reactionPicker.customInputError")}</p>
-          )}
-        </div>
-      )}
-    </div>
+      <Modal open={open} onClose={() => setOpen(false)} title={t("home:reactionPicker.addReactionTitle")}>
+        {open && (
+          <Suspense fallback={<p>{t("common:loading")}</p>}>
+            <EmojiPickerPanel onPick={pick} />
+          </Suspense>
+        )}
+      </Modal>
+    </>
   );
 }

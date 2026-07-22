@@ -72,7 +72,7 @@ export default function EmojisPanel() {
     try {
       await api.admin.createEmoji({
         shortcode: shortcode.trim(),
-        media_file_id: Number(uploaded.id),
+        media_file_id: uploaded.id,
         category: category.trim() || undefined,
         tags: parseTags(tags),
       });
@@ -251,6 +251,7 @@ export default function EmojisPanel() {
         {emojis.length === 0 && <p className={panel.message}>{t("admin:emojisPanel.emptyMessage")}</p>}
         {emojis.map((em) => (
           <div key={em.id} className={styles.row}>
+            {em.url && <img src={em.url} alt={em.shortcode} style={{ height: 28, width: 28, objectFit: "contain" }} />}
             <div className={styles.grow}>
               <div className={styles.primaryText}>:{em.shortcode}:</div>
               {em.category && <div className={styles.subText}>{em.category}</div>}

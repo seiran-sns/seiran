@@ -44,7 +44,7 @@ use delivery::{
 use queries::{fetch_reposted_ids, find_repost_for_undo};
 use validation::{
     strip_html_tags, validate_attachment_ids, validate_dm_text_length, validate_reaction_content,
-    validate_text_length,
+    validate_text_length, ReactionContent,
 };
 
 /// 検証済みの添付ファイル ID 群を投稿に紐付ける。
@@ -916,6 +916,29 @@ pub async fn delete_note(
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
+/// よく使う絵文字ピッカーで表示する候補数の上限。
+const FREQUENT_REACTIONS_LIMIT: i64 = 24;
+
+/// GET /api/reactions/frequent
+/// 自分がよく使う絵文字（Unicode/カスタム問わず）を頻度順に返す（絵文字ピッカーの
+/// 「よく使う」タブ用）。`reactions` が 1投稿1リアクションで切替時に上書きされる都合上、
+/// これは「過去の使用履歴」ではなく「現在も自分が付けているリアクション」の集計になる
+/// （`ReactionRepository::aggregate_for_actor` 参照）。
+pub async fn frequent_reactions(me: AuthedUser, State(state): State<AppState>) -> impl IntoResponse {
+    let rows = state
+        .reactions
+        .aggregate_for_actor(me.actor_id, FREQUENT_REACTIONS_LIMIT)
+        .await
+        .unwrap_or_default();
+    let items: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(content, count, emoji_url)| {
+            serde_json::json!({ "content": content, "count": count, "emojiUrl": emoji_url })
+        })
+        .collect();
+    Json(serde_json::json!({ "items": items }))
+}
+
 /// POST /api/notes/:id/reactions
 /// 自分の絵文字リアクションを追加する。ローカル保存に加え、AP（対象ポスト著者 + 自分の Fedi
 /// フォロワー全員）・ATP（対象に at_uri がある場合）の双方へ配送する。
@@ -930,10 +953,21 @@ pub async fn create_reaction(
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
-    let content = match validate_reaction_content(&req.content) {
+    let parsed_content = match validate_reaction_content(&req.content) {
         Ok(c) => c,
         Err(e) => return e.into_response(),
     };
+    // カスタム絵文字（`:shortcode:`）は custom_emojis に実在するか確認し、画像 URL を解決する。
+    // Unicode 絵文字は emoji_url を持たない。
+    let emoji_url = match &parsed_content {
+        ReactionContent::Custom(shortcode) => match state.emojis.find_url_by_shortcode(shortcode).await {
+            Ok(Some(url)) => Some(url),
+            Ok(None) => return ApiError::BadRequest("UNKNOWN_EMOJI".to_owned()).into_response(),
+            Err(e) => return ApiError::Internal(format!("絵文字URL解決失敗: {}", e)).into_response(),
+        },
+        ReactionContent::Unicode(_) => None,
+    };
+    let content = parsed_content.as_db_content();
 
     let post = match state.posts.find_by_id_for_viewer(note_id, Some(me.actor_id)).await {
         Ok(Some(p)) => p,
@@ -959,7 +993,11 @@ pub async fn create_reaction(
         chrono::Utc::now().timestamp_millis()
     );
 
-    let reaction_id = match state.reactions.insert(note_id, me.actor_id, "emoji", &content, Some(&activity_id), None, None).await {
+    let reaction_id = match state
+        .reactions
+        .insert(note_id, me.actor_id, "emoji", &content, Some(&activity_id), None, emoji_url.as_deref())
+        .await
+    {
         Ok(id) => id,
         Err(e) => return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response(),
     };
@@ -977,13 +1015,14 @@ pub async fn create_reaction(
             serde_json::json!({
                 "postId": note_id.to_string(),
                 "emoji": content,
+                "emojiUrl": emoji_url,
                 "actor": { "username": me.username, "domain": me.domain, "displayName": me.display_name },
             }),
         );
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = state
             .notifications
-            .insert(notif_id, post.actor_id, NotificationKind::Reaction, Some(me.actor_id), Some(note_id), Some(&content), None, None, Some(reaction_id))
+            .insert(notif_id, post.actor_id, NotificationKind::Reaction, Some(me.actor_id), Some(note_id), Some(&content), emoji_url.as_deref(), None, Some(reaction_id))
             .await
         {
             tracing::error!("[create_reaction] notifications INSERT 失敗: {}", e);
@@ -1012,7 +1051,7 @@ pub async fn create_reaction(
             let emoji = content.clone();
             let prev_rkey = prev
                 .as_ref()
-                .and_then(|(_, _, at_uri)| at_uri.as_deref())
+                .and_then(|(_, _, at_uri, _)| at_uri.as_deref())
                 .and_then(|u| u.rsplit('/').next())
                 .map(|s| s.to_string());
             let now = chrono::Utc::now();
@@ -1031,10 +1070,11 @@ pub async fn create_reaction(
 
     // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ配送する。
     // 旧リアクションが既に AP へ配送済み（ap_activity_id あり）なら、ジョブ側が先に Undo してから送る（切替）。
-    let undo_prev = prev.as_ref().and_then(|(prev_content, prev_activity_id, _)| {
+    let undo_prev = prev.as_ref().and_then(|(prev_content, prev_activity_id, _, prev_emoji_url)| {
         prev_activity_id.clone().map(|id| PrevApReaction {
             activity_id: id,
             content: prev_content.clone(),
+            emoji_url: prev_emoji_url.clone(),
         })
     });
     state
@@ -1042,6 +1082,7 @@ pub async fn create_reaction(
             post_id: note_id,
             activity_id: activity_id.clone(),
             content: content.clone(),
+            emoji_url: emoji_url.clone(),
             undo_prev,
         })
         .await;
@@ -1098,7 +1139,7 @@ pub async fn delete_reaction(
 
     if let Some(rkey) = prev
         .as_ref()
-        .and_then(|(_, _, at_uri)| at_uri.as_deref())
+        .and_then(|(_, _, at_uri, _)| at_uri.as_deref())
         .and_then(|u| u.rsplit('/').next())
         .map(|s| s.to_string())
     {
@@ -1112,12 +1153,14 @@ pub async fn delete_reaction(
     }
 
     // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ Undo を配送する。
-    if let Some(prev_activity_id) = prev.as_ref().and_then(|(_, ap_activity_id, _)| ap_activity_id.clone()) {
+    if let Some(prev_activity_id) = prev.as_ref().and_then(|(_, ap_activity_id, _, _)| ap_activity_id.clone()) {
+        let emoji_url = prev.as_ref().and_then(|(_, _, _, emoji_url)| emoji_url.clone());
         state
             .enqueue_ap_delivery(actor_id, ApDeliveryKind::UndoReaction {
                 post_id: note_id,
                 prev_activity_id,
                 content: content.clone(),
+                emoji_url,
             })
             .await;
     }

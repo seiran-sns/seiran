@@ -12,6 +12,7 @@ test("投稿にリアクションを付けられる", async ({ page, request }) 
   await expect(page.getByText(text)).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: "リアクション" }).click();
+  await page.getByPlaceholder("絵文字を検索").fill("thumbs up");
   await page.getByRole("button", { name: "👍", exact: true }).click();
 
   await expect(page.getByRole("button", { name: /👍/ })).toBeVisible({ timeout: 15_000 });

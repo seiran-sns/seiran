@@ -77,15 +77,19 @@
     "replyToPrefix": "返信先:"
   },
   "reactionChips": {
-    "customEmojiBlocked": "カスタム絵文字は自分では付けられません",
     "clickToRemove": "クリックで取り消す",
     "clickToAdd": "クリックで同じリアクションを付ける"
   },
   "reactionPicker": {
     "addReactionTitle": "リアクションを付ける",
     "addReactionButton": "リアクション",
-    "customInputPlaceholder": "絵文字を入力",
-    "customInputError": "絵文字1つだけを入力してください"
+    "searchPlaceholder": "絵文字を検索",
+    "tabFrequent": "よく使う",
+    "tabUnicode": "絵文字",
+    "tabCustom": "カスタム",
+    "noResults": "該当する絵文字がありません",
+    "noFrequent": "まだよく使う絵文字がありません",
+    "noCustomEmojis": "カスタム絵文字が登録されていません"
   },
   "replyIndicator": {
     "goToOriginalTitle": "返信元のポストへ移動",

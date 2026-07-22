@@ -3,6 +3,8 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 /// `custom_emojis` テーブルの 1 行。
+/// `url` は `list_all` のみ `media_files`/`storage_providers` を JOIN して解決する
+/// （admin 一覧の画像プレビュー用）。`insert`/`update` は JOIN しないため常に `None`。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct EmojiRow {
     pub id: i64,
@@ -11,6 +13,7 @@ pub struct EmojiRow {
     pub category: Option<String>,
     pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
+    pub url: Option<String>,
 }
 
 #[async_trait]
@@ -54,6 +57,9 @@ pub trait EmojiRepository: Send + Sync {
         tags: &[String],
         license: Option<&str>,
     ) -> Result<bool, sqlx::Error>;
+
+    /// shortcode から画像 URL を解決する（カスタム絵文字リアクション用）。未登録なら `None`。
+    async fn find_url_by_shortcode(&self, shortcode: &str) -> Result<Option<String>, sqlx::Error>;
 }
 
 pub struct PgEmojiRepository {
@@ -70,9 +76,12 @@ impl PgEmojiRepository {
 impl EmojiRepository for PgEmojiRepository {
     async fn list_all(&self) -> Result<Vec<EmojiRow>, sqlx::Error> {
         sqlx::query_as::<_, EmojiRow>(
-            "SELECT id, shortcode, media_file_id, category, tags, created_at
-             FROM custom_emojis
-             ORDER BY id",
+            "SELECT ce.id, ce.shortcode, ce.media_file_id, ce.category, ce.tags, ce.created_at,
+                    rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url
+             FROM custom_emojis ce
+             JOIN media_files mf ON mf.id = ce.media_file_id
+             JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             ORDER BY ce.id",
         )
         .fetch_all(&self.pool)
         .await
@@ -89,7 +98,7 @@ impl EmojiRepository for PgEmojiRepository {
         sqlx::query_as::<_, EmojiRow>(
             "INSERT INTO custom_emojis (id, shortcode, media_file_id, category, tags)
              VALUES ($1, $2, $3, $4, $5)
-             RETURNING id, shortcode, media_file_id, category, tags, created_at",
+             RETURNING id, shortcode, media_file_id, category, tags, created_at, NULL::text AS url",
         )
         .bind(id)
         .bind(shortcode)
@@ -111,7 +120,7 @@ impl EmojiRepository for PgEmojiRepository {
              SET category = COALESCE($2, category),
                  tags     = COALESCE($3, tags)
              WHERE id = $1
-             RETURNING id, shortcode, media_file_id, category, tags, created_at",
+             RETURNING id, shortcode, media_file_id, category, tags, created_at, NULL::text AS url",
         )
         .bind(id)
         .bind(category)
@@ -158,5 +167,18 @@ impl EmojiRepository for PgEmojiRepository {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn find_url_by_shortcode(&self, shortcode: &str) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar(
+            "SELECT rtrim(sp.public_url, '/') || '/' || mf.storage_key
+             FROM custom_emojis ce
+             JOIN media_files mf ON mf.id = ce.media_file_id
+             JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             WHERE ce.shortcode = $1",
+        )
+        .bind(shortcode)
+        .fetch_optional(&self.pool)
+        .await
     }
 }

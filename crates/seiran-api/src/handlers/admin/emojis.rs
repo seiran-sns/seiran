@@ -24,6 +24,9 @@ pub struct EmojiResponse {
     /// タグ（#49）。ピッカーの部分一致対象。
     pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
+    /// 画像プレビュー用 URL。`list_emojis` のみ解決済み、`create_emoji` の直後レスポンスは
+    /// `None`（呼び出し元は登録後に一覧を再取得するため実害はない）。
+    pub url: Option<String>,
 }
 
 impl From<EmojiRow> for EmojiResponse {
@@ -35,6 +38,7 @@ impl From<EmojiRow> for EmojiResponse {
             category: r.category,
             tags: r.tags,
             created_at: r.created_at,
+            url: r.url,
         }
     }
 }
@@ -44,7 +48,8 @@ impl From<EmojiRow> for EmojiResponse {
 #[derive(Deserialize)]
 pub struct CreateEmojiRequest {
     pub shortcode: String,
-    pub media_file_id: i64,
+    /// JS Number の 53bit 精度では snowflake ID を正確に表現できないため文字列で受け取る。
+    pub media_file_id: String,
     pub category: Option<String>,
     /// タグ（#49）。省略時は空。
     pub tags: Option<Vec<String>>,
@@ -85,6 +90,10 @@ fn map_emoji_db_error(e: sqlx::Error) -> ApiError {
         if db_err.code().as_deref() == Some("23505") {
             return ApiError::Conflict("SHORTCODE_TAKEN");
         }
+        // foreign key violation: error code 23503（media_file_id が media_files に存在しない）
+        if db_err.code().as_deref() == Some("23503") {
+            return ApiError::BadRequest("MEDIA_FILE_NOT_FOUND".to_owned());
+        }
     }
     ApiError::Internal(e.to_string())
 }
@@ -121,12 +130,17 @@ pub async fn create_emoji(
         return Err(ApiError::BadRequest("INVALID_SHORTCODE".to_owned()));
     }
 
+    let media_file_id: i64 = req
+        .media_file_id
+        .parse()
+        .map_err(|_| ApiError::BadRequest("INVALID_MEDIA_FILE_ID".to_owned()))?;
+
     let tags = normalize_tags(req.tags.as_deref().unwrap_or(&[]))?;
     let id = generate_snowflake_id(Utc::now());
 
     let row = state
         .emojis
-        .insert(id, &req.shortcode, req.media_file_id, req.category.as_deref(), &tags)
+        .insert(id, &req.shortcode, media_file_id, req.category.as_deref(), &tags)
         .await
         .map_err(map_emoji_db_error)?;
 

@@ -65,21 +65,58 @@ pub fn validate_attachment_ids(ids: &[String]) -> Result<(), ApiError> {
 /// 極端に長い文字列を弾くためのもの。実際の絵文字判定はこの定数ではなく下記の完全一致で行う）。
 const MAX_REACTION_CONTENT_LEN: usize = 32;
 
-/// リアクション内容を検証し、trim 済みの文字列を返す。
+/// 構文的に妥当な `validate_reaction_content` の結果。
+/// Unicode 絵文字とカスタム絵文字ショートコードのどちらかを判別できる形で返す
+/// （カスタム絵文字は `custom_emojis` に実在するかを呼び出し元が別途 DB で確認する必要があるため、
+/// この関数自体は文字列の構文チェックのみを行う）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReactionContent {
+    /// `emojis` crate（Unicode 公式データ）に完全一致した絵文字文字列。
+    Unicode(String),
+    /// `:shortcode:` 形式で構文的に妥当だったショートコード（コロンを除く）。
+    Custom(String),
+}
+
+impl ReactionContent {
+    /// DB (`reactions.content`) や AP activity の `content`/`_misskey_reaction` に保存する形式。
+    pub fn as_db_content(&self) -> String {
+        match self {
+            ReactionContent::Unicode(s) => s.clone(),
+            ReactionContent::Custom(shortcode) => format!(":{}:", shortcode),
+        }
+    }
+}
+
+/// `:shortcode:` 形式かどうかを判定し、妥当ならコロンを除いた shortcode を返す。
+/// 許可する文字種は admin 絵文字登録（`handlers/admin/emojis.rs`）の shortcode バリデーションと揃える
+/// （英数字・アンダースコアのみ）。
+fn parse_custom_emoji_shortcode(s: &str) -> Option<&str> {
+    let inner = s.strip_prefix(':')?.strip_suffix(':')?;
+    if inner.is_empty() || !inner.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    Some(inner)
+}
+
+/// リアクション内容を検証する。
 ///
 /// 「絵文字リアクション」という以上、Unicode 絵文字（単体・肌色/性別修飾・ZWJ結合・国旗・
-/// キーキャップ等の RGI シーケンスを含む）以外の文字列は許可しない。`:shortcode:` のような
-/// カスタム絵文字ショートコードも現状未対応のため拒否する。判定は `emojis` crate
-/// （Unicode 公式の emoji-test.txt 準拠データ）による完全一致で行う。
-pub fn validate_reaction_content(raw: &str) -> Result<String, ApiError> {
+/// キーキャップ等の RGI シーケンスを含む）か、`:shortcode:` 形式のカスタム絵文字ショートコード
+/// のいずれかのみを許可する。Unicode 絵文字の判定は `emojis` crate
+/// （Unicode 公式の emoji-test.txt 準拠データ）による完全一致で行う。カスタム絵文字が実在するか
+/// （`custom_emojis` テーブルに登録済みか）はこの関数では確認しない（呼び出し元の責務）。
+pub fn validate_reaction_content(raw: &str) -> Result<ReactionContent, ApiError> {
     let content = raw.trim().to_string();
     if content.is_empty() || content.graphemes(true).count() > MAX_REACTION_CONTENT_LEN {
         return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
     }
+    if let Some(shortcode) = parse_custom_emoji_shortcode(&content) {
+        return Ok(ReactionContent::Custom(shortcode.to_string()));
+    }
     if emojis::get(&content).is_none() {
         return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
     }
-    Ok(content)
+    Ok(ReactionContent::Unicode(content))
 }
 
 /// HTML タグを取り除き、基本エンティティを復元する。
@@ -105,7 +142,10 @@ pub fn strip_html_tags(html: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{strip_html_tags, validate_dm_text_length, validate_reaction_content, validate_text_length};
+    use super::{
+        strip_html_tags, validate_dm_text_length, validate_reaction_content, validate_text_length,
+        ReactionContent,
+    };
 
     #[test]
     fn validate_dm_text_length_bsky_recipient_uses_tighter_grapheme_limit() {
@@ -169,14 +209,14 @@ mod tests {
 
     #[test]
     fn validate_reaction_content_accepts_basic_emoji() {
-        assert_eq!(validate_reaction_content("🎉").unwrap(), "🎉");
-        assert_eq!(validate_reaction_content(" 👍 ").unwrap(), "👍");
+        assert_eq!(validate_reaction_content("🎉").unwrap(), ReactionContent::Unicode("🎉".to_string()));
+        assert_eq!(validate_reaction_content(" 👍 ").unwrap(), ReactionContent::Unicode("👍".to_string()));
     }
 
     #[test]
     fn validate_reaction_content_accepts_vs16_sequence() {
         // ❤️ = U+2764 + VS16（クイックリアクションで使われる形）
-        assert_eq!(validate_reaction_content("❤️").unwrap(), "❤️");
+        assert_eq!(validate_reaction_content("❤️").unwrap(), ReactionContent::Unicode("❤️".to_string()));
     }
 
     #[test]
@@ -202,8 +242,20 @@ mod tests {
     }
 
     #[test]
-    fn validate_reaction_content_rejects_shortcode() {
-        assert!(validate_reaction_content(":smile:").is_err());
+    fn validate_reaction_content_accepts_shortcode_syntax() {
+        // 構文的に妥当な `:shortcode:` は Custom として受理する（実在確認は呼び出し元の責務）。
+        assert_eq!(
+            validate_reaction_content(":smile:").unwrap(),
+            ReactionContent::Custom("smile".to_string())
+        );
+        assert_eq!(ReactionContent::Custom("smile".to_string()).as_db_content(), ":smile:");
+    }
+
+    #[test]
+    fn validate_reaction_content_rejects_malformed_shortcode() {
+        assert!(validate_reaction_content(":sm ile:").is_err());
+        assert!(validate_reaction_content("::").is_err());
+        assert!(validate_reaction_content(":smile").is_err());
     }
 
     #[test]

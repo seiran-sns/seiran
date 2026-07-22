@@ -447,6 +447,7 @@ mod tests {
             ap_in_reply_to: None,
             parent_visibility: parent_visibility.map(str::to_owned),
             parent_thread_root_post_id: None,
+            parent_local_actor_id: None,
         }
     }
 

@@ -383,6 +383,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/streaming", get(handlers::streaming::streaming))
         .route("/api/notes/:id", get(handlers::notes::get_note).delete(handlers::notes::delete_note))
         .route("/api/notes/:id/repost", delete(handlers::notes::delete_repost))
+        .route("/api/reactions/frequent", get(handlers::notes::frequent_reactions))
         .route("/api/notes/:id/reactions", post(handlers::notes::create_reaction))
         .route("/api/notes/:id/reactions/:content", delete(handlers::notes::delete_reaction))
         .route("/api/notes/:id/pin", post(handlers::notes::pin_note))

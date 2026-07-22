@@ -456,12 +456,16 @@ fn reaction_activity_type(content: &str) -> &'static str {
 }
 
 /// Like/EmojiReact アクティビティ（またはその埋め込みオブジェクト）を組み立てる。
+/// `emoji_url` があれば（カスタム絵文字リアクション）、Misskey/Fedibird 互換の
+/// `tag: [{type: Emoji, name, icon: {url}}]` を付与する（受信側のパースは
+/// `jobs::inbound_activity_process::build_emoji_map` / `extract_emoji_tag_url` を参照）。
 fn build_reaction_object(
     activity_type: &str,
     id: &str,
     actor_uri: &str,
     object_ap_id: &str,
     content: &str,
+    emoji_url: Option<&str>,
 ) -> serde_json::Value {
     let mut obj = serde_json::json!({
         "type": activity_type,
@@ -473,6 +477,13 @@ fn build_reaction_object(
         obj["content"] = serde_json::Value::String(content.to_string());
         // Misskey 系フォークとの互換のため非標準フィールドも併記する。
         obj["_misskey_reaction"] = serde_json::Value::String(content.to_string());
+        if let Some(url) = emoji_url {
+            obj["tag"] = serde_json::json!([{
+                "type": "Emoji",
+                "name": content,
+                "icon": { "type": "Image", "url": url },
+            }]);
+        }
     }
     obj
 }
@@ -981,6 +992,7 @@ pub async fn deliver_ap_reaction(
     ap_private_key_pem: &str,
     activity_id: &str,
     content: &str,
+    emoji_url: Option<&str>,
 ) -> Result<(), ApError> {
     let (object_ap_id, inboxes) = match resolve_reaction_targets(db, post_id, actor_id).await? {
         Some(v) => v,
@@ -991,8 +1003,9 @@ pub async fn deliver_ap_reaction(
     let addr = local_actor_address(local_domain, &username);
     let activity_type = reaction_activity_type(content);
 
-    let mut activity =
-        build_reaction_object(activity_type, activity_id, &addr.actor_uri, &object_ap_id, content);
+    let mut activity = build_reaction_object(
+        activity_type, activity_id, &addr.actor_uri, &object_ap_id, content, emoji_url,
+    );
     activity["@context"] =
         serde_json::Value::String("https://www.w3.org/ns/activitystreams".to_string());
     activity["published"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
@@ -1021,6 +1034,7 @@ pub async fn deliver_ap_undo_reaction(
     ap_private_key_pem: &str,
     prev_activity_id: &str,
     content: &str,
+    emoji_url: Option<&str>,
 ) -> Result<(), ApError> {
     let (object_ap_id, inboxes) = match resolve_reaction_targets(db, post_id, actor_id).await? {
         Some(v) => v,
@@ -1030,8 +1044,9 @@ pub async fn deliver_ap_undo_reaction(
     let username = fetch_username(db, actor_id).await?;
     let addr = local_actor_address(local_domain, &username);
     let activity_type = reaction_activity_type(content);
-    let inner =
-        build_reaction_object(activity_type, prev_activity_id, &addr.actor_uri, &object_ap_id, content);
+    let inner = build_reaction_object(
+        activity_type, prev_activity_id, &addr.actor_uri, &object_ap_id, content, emoji_url,
+    );
 
     let undo_id = format!(
         "https://{}/activities/undo-reactions/{}-{}-{}",
@@ -1405,13 +1420,26 @@ mod tests {
 
     #[test]
     fn reaction_object_emoji_react_has_misskey_fields() {
-        let like = build_reaction_object("Like", "id1", "actor1", "obj1", "❤️");
+        let like = build_reaction_object("Like", "id1", "actor1", "obj1", "❤️", None);
         assert!(like.get("content").is_none());
         assert!(like.get("_misskey_reaction").is_none());
 
-        let react = build_reaction_object("EmojiReact", "id1", "actor1", "obj1", "🎉");
+        let react = build_reaction_object("EmojiReact", "id1", "actor1", "obj1", "🎉", None);
         assert_eq!(react["content"], "🎉");
         assert_eq!(react["_misskey_reaction"], "🎉");
+        assert!(react.get("tag").is_none());
+    }
+
+    #[test]
+    fn reaction_object_custom_emoji_includes_tag() {
+        let react = build_reaction_object(
+            "EmojiReact", "id1", "actor1", "obj1", ":blobcat:",
+            Some("https://example.com/blobcat.png"),
+        );
+        assert_eq!(react["content"], ":blobcat:");
+        assert_eq!(react["tag"][0]["type"], "Emoji");
+        assert_eq!(react["tag"][0]["name"], ":blobcat:");
+        assert_eq!(react["tag"][0]["icon"]["url"], "https://example.com/blobcat.png");
     }
 
     #[test]
