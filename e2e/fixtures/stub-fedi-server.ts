@@ -27,6 +27,9 @@ export interface StubFediServer {
     text: string,
     opts?: { inReplyTo?: string; mentionTargetUsername?: string },
   ): Promise<string>;
+  /** このスタブアクターが送った投稿（`sendCreateNote`が返した Note ID）に対する
+   * Delete(Tombstone)をseiranへ送る（リモート削除反映のE2E用）。 */
+  sendDeleteNote(seiranBaseUrl: string, noteId: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -170,6 +173,16 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
           };
           await signedPost(`${seiranBaseUrl}/inbox`, activity, stub.actorUri, privateKey);
           return noteId;
+        },
+        async sendDeleteNote(seiranBaseUrl, noteId) {
+          const activity = {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            type: "Delete",
+            id: `${base}/activities/${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            actor: stub.actorUri,
+            object: { type: "Tombstone", id: noteId },
+          };
+          await signedPost(`${seiranBaseUrl}/inbox`, activity, stub.actorUri, privateKey);
         },
         close: () => new Promise((res, rej) => server.close((err) => (err ? rej(err) : res()))),
       };

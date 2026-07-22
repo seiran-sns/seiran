@@ -343,6 +343,10 @@ pub trait PostRepository: Send + Sync {
         ap_object_id: &str,
     ) -> Result<Option<(i64, i64)>, sqlx::Error>;
 
+    /// `at_uri` を持つ投稿を論理削除する（ATP `app.bsky.feed.post` の delete commit 受信用）。
+    /// 返り値は (id, actor_id)。既に削除済み/該当なしなら None。
+    async fn soft_delete_by_at_uri(&self, at_uri: &str) -> Result<Option<(i64, i64)>, sqlx::Error>;
+
     /// `at_uri` から (id, actor_id) を取得する（ATP `app.bsky.feed.like` の対象ポスト特定用）。
     async fn find_id_and_actor_by_at_uri(
         &self,
@@ -922,6 +926,15 @@ impl PostRepository for PgPostRepository {
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected())
+    }
+
+    async fn soft_delete_by_at_uri(&self, at_uri: &str) -> Result<Option<(i64, i64)>, sqlx::Error> {
+        sqlx::query_as::<_, (i64, i64)>(
+            "UPDATE posts SET deleted_at = NOW() WHERE at_uri = $1 AND deleted_at IS NULL RETURNING id, actor_id",
+        )
+        .bind(at_uri)
+        .fetch_optional(&self.pool)
+        .await
     }
 
     async fn find_by_seiran_uuid(&self, uuid: &str) -> Result<Option<(i64, Option<String>)>, sqlx::Error> {

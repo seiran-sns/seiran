@@ -549,6 +549,14 @@ async fn process_message(
 
     match commit.collection.as_str() {
         "app.bsky.feed.post" => {
+            if commit.operation == "delete" {
+                let at_uri = format!("at://{}/app.bsky.feed.post/{}", did, commit.rkey);
+                let pool2 = pool.clone();
+                tokio::spawn(async move {
+                    handle_inbound_post_delete(&pool2, &at_uri).await;
+                });
+                return Ok(());
+            }
             if commit.operation != "create" {
                 return Ok(());
             }
@@ -991,6 +999,24 @@ async fn handle_inbound_like_delete(pool: &PgPool, stream_hub: &StreamHub, at_ur
         stream_hub, &follows_repo, &reactions_repo,
         post_id, post_author_id, actor_id, None,
     ).await;
+}
+
+/// ATP 投稿（`app.bsky.feed.post`）の削除を検知した際の処理。取り込み済み（`at_uri` 保存済み）の
+/// 投稿のみ論理削除する。`did`はJetstreamのcommitのリポジトリ所有者そのものなので、Likeの削除と
+/// 同様になりすまし確認は不要（`at_uri`自体がdidから組み立てられており、他者のdidの投稿を指せない）。
+async fn handle_inbound_post_delete(pool: &PgPool, at_uri: &str) {
+    let posts_repo = PgPostRepository::new(pool.clone());
+    match posts_repo.soft_delete_by_at_uri(at_uri).await {
+        Ok(Some((post_id, _actor_id))) => {
+            tracing::info!("[Jetstream] 投稿 {} を削除（at_uri={}）", post_id, at_uri);
+        }
+        Ok(None) => {
+            // 元々取り込んでいない投稿だった（フォロー対象外だった等）
+        }
+        Err(e) => {
+            tracing::error!("[Jetstream] posts (delete) UPDATE 失敗: {}", e);
+        }
+    }
 }
 
 /// DID からローカル `actors` 行を解決する。無ければ AppView からプロフィールを取得して upsert する
