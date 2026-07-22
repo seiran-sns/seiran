@@ -41,6 +41,9 @@
     "repostedSuffix": "にリポスト",
     "repostedNoLinkSuffix": "がリポスト",
     "unavailableRepost": "この投稿は表示できません（非公開投稿のため）。",
+    "notFollowing": "未フォロー",
+    "following": "フォロー済み",
+    "followPending": "フォロー承認待ち",
     "menuTitle": "メニュー",
     "deleteConfirmModal": {
       "title": "投稿を削除しますか？",

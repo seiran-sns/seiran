@@ -41,6 +41,9 @@
     "repostedSuffix": "",
     "repostedNoLinkSuffix": "reposted this",
     "unavailableRepost": "This post can't be shown (it's private).",
+    "notFollowing": "Not Following",
+    "following": "Following",
+    "followPending": "Follow Pending",
     "menuTitle": "Menu",
     "deleteConfirmModal": {
       "title": "Delete this post?",

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Note } from "../../api/client";
+import { api, getErrorMessage, Note } from "../../api/client";
 import { acct, deliveryBadges, displayName, formatDate, profilePath, protocolBadge, visibilityBadge } from "../../lib/format";
 import { useNoteCardActions } from "../../hooks/useNoteCardActions";
+import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../contexts/ToastContext";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
@@ -30,6 +32,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
 }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { user: currentUser } = useAuth();
+  const { showError } = useToast();
   const { openReply } = useComposer();
   const badge = protocolBadge(note.user.actorType);
   const delBadges = deliveryBadges(note);
@@ -52,6 +56,60 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
     handleDelete,
   } = useNoteCardActions(note, onUnreposted, onDeleted);
 
+  const targetKey = note.user.domain && note.user.domain !== window.location.hostname
+    ? `${note.user.username}@${note.user.domain}`
+    : note.user.username;
+
+  const isAuthorSelf = isSelf || (!!currentUser && currentUser.username === note.user.username && (!note.user.domain || note.user.domain === window.location.hostname));
+
+  const [isHovered, setIsHovered] = useState(false);
+  const [followStatus, setFollowStatus] = useState<"not_following" | "pending" | "accepted" | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(false);
+  const [followActionPending, setFollowActionPending] = useState(false);
+
+  function handleMouseEnter() {
+    setIsHovered(true);
+    if (!isAuthorSelf && followStatus === null && !loadingStatus) {
+      setLoadingStatus(true);
+      api.users.profile(targetKey)
+        .then((p) => setFollowStatus(p.follow_status))
+        .catch(() => setFollowStatus("not_following"))
+        .finally(() => setLoadingStatus(false));
+    }
+  }
+
+  function handleMouseLeave() {
+    setIsHovered(false);
+  }
+
+  async function handleToggleFollow(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (followActionPending || isAuthorSelf) return;
+
+    setFollowActionPending(true);
+    const current = followStatus ?? "not_following";
+
+    try {
+      if (current === "not_following") {
+        const res = await api.follows.create(targetKey);
+        setFollowStatus(res.status === "accepted" ? "accepted" : "pending");
+      } else {
+        await api.follows.delete(targetKey);
+        setFollowStatus("not_following");
+      }
+    } catch (err) {
+      showError(getErrorMessage(err));
+    } finally {
+      setFollowActionPending(false);
+    }
+  }
+
+  function getFollowLabel(status: "not_following" | "pending" | "accepted" | null): string {
+    if (status === "accepted") return t("home:noteCard.following");
+    if (status === "pending") return t("home:noteCard.followPending");
+    return t("home:noteCard.notFollowing");
+  }
+
   function goProfile(e: React.MouseEvent) {
     e.stopPropagation();
     navigate(profilePath(note.user.username, note.user.domain));
@@ -65,32 +123,56 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
   return (
     <>
       <div className={styles.header}>
-        <button className={styles.userBtn} onClick={goProfile}>
-          <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={large ? 48 : 40} />
-          <span className={styles.names}>
-            <span className={styles.displayName}>
-              <EmojiText text={displayName(note)} emojis={note.emojis} />
+        <div
+          className={styles.userContainer}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
+          {isHovered && !isAuthorSelf && (
+            <div className={styles.followWidgetPopover} onClick={(e) => e.stopPropagation()}>
+              <span className={`${styles.followWidgetLabel} ${styles[`status_${followStatus ?? "not_following"}`]}`}>
+                {loadingStatus ? t("common:loading") : getFollowLabel(followStatus)}
+              </span>
+              <button
+                type="button"
+                className={`${styles.followSwitch} ${styles[`switch_${followStatus ?? "not_following"}`]}`}
+                onClick={handleToggleFollow}
+                disabled={followActionPending || loadingStatus}
+                title={getFollowLabel(followStatus)}
+                aria-label={getFollowLabel(followStatus)}
+              >
+                <span className={styles.followSwitchKnob} />
+              </button>
+            </div>
+          )}
+
+          <button className={styles.userBtn} onClick={goProfile}>
+            <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={large ? 48 : 40} />
+            <span className={styles.names}>
+              <span className={styles.displayName}>
+                <EmojiText text={displayName(note)} emojis={note.emojis} />
+              </span>
+              <span className={styles.acct}>
+                {acct(note)}
+                {badge && (
+                  <span className={styles.protoBadge} title={badge.label}>
+                    {badge.icon}
+                  </span>
+                )}
+                {delBadges.map((b) => (
+                  <span key={b.icon} className={styles.protoBadge} title={b.label}>
+                    {b.icon}
+                  </span>
+                ))}
+                {visBadge && (
+                  <span className={styles.protoBadge} title={visBadge.label}>
+                    {visBadge.icon}
+                  </span>
+                )}
+              </span>
             </span>
-            <span className={styles.acct}>
-              {acct(note)}
-              {badge && (
-                <span className={styles.protoBadge} title={badge.label}>
-                  {badge.icon}
-                </span>
-              )}
-              {delBadges.map((b) => (
-                <span key={b.icon} className={styles.protoBadge} title={b.label}>
-                  {b.icon}
-                </span>
-              ))}
-              {visBadge && (
-                <span className={styles.protoBadge} title={visBadge.label}>
-                  {visBadge.icon}
-                </span>
-              )}
-            </span>
-          </span>
-        </button>
+          </button>
+        </div>
         {linkToDetail ? (
           <Link to={`/notes/${note.id}`} className={styles.time} onClick={(e) => e.stopPropagation()}>
             <time>{formatDate(note.createdAt)}</time>
