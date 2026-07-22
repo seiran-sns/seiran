@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
+import { HomeFeedProvider } from "./contexts/HomeFeedContext";
 import { ComposerProvider } from "./contexts/ComposerContext";
 import { SiteMetaProvider } from "./contexts/SiteMetaContext";
 import { StreamingProvider } from "./contexts/StreamingContext";
@@ -216,9 +217,11 @@ export default function App() {
         <AuthProvider>
           <StreamingProvider>
             <RightPaneProvider>
-              <ComposerProvider>
-                <AppRoutes />
-              </ComposerProvider>
+              <HomeFeedProvider>
+                <ComposerProvider>
+                  <AppRoutes />
+                </ComposerProvider>
+              </HomeFeedProvider>
             </RightPaneProvider>
           </StreamingProvider>
         </AuthProvider>

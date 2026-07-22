@@ -9,6 +9,7 @@ import PostComposer from "../components/note/PostComposer";
 import NotificationsPanel from "../components/right/NotificationsPanel";
 import TrendsSearchPanel from "../components/right/TrendsSearchPanel";
 import { useRightPane } from "../contexts/RightPaneContext";
+import { Feed, feedKey, useHomeFeed } from "../contexts/HomeFeedContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
@@ -16,12 +17,6 @@ import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
 const PAGE_SIZE = 30;
-
-type Feed = { kind: "home" } | { kind: "local" } | { kind: "list"; id: string } | { kind: "hashtag"; name: string };
-
-function feedKey(feed: Feed): string {
-  return feed.kind === "list" ? `list:${feed.id}` : feed.kind === "hashtag" ? `hashtag:${feed.name}` : feed.kind;
-}
 
 function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; since_id?: string }) {
   // DM（visibility="direct"）はタイムラインに一切現れない仕様のため、対応エンドポイントには
@@ -39,7 +34,7 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
 export default function HomePage() {
   const { t } = useTranslation();
   const { showError } = useToast();
-  const [feed, setFeed] = useState<Feed>({ kind: "home" });
+  const { feed, setFeed, getCache, setCache } = useHomeFeed();
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [pinnedHashtags, setPinnedHashtags] = useState<{ name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +61,45 @@ export default function HomePage() {
     api.hashtags.pinned().then(setPinnedHashtags).catch(() => {});
   }, []);
 
+  // スクロール位置は継続的に（都度）キャッシュへ書き戻す。「離脱時/アンマウント時に一度だけ
+  // 捕捉する」方式は、React 18 StrictMode（開発時）が疑似アンマウントでeffectのcleanupを
+  // 前倒しに発火させるため、まだ何もスクロールしていない新しいコンポーネントインスタンスの
+  // 初期値（0）で直前の復元値を上書きしてしまう不具合があった（実機確認）。
+  // rAFで間引きつつ書き込み、フィード切替のたびにこのeffect自体を張り替える。
   useEffect(() => {
+    const key = feedKey(feed);
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        setCache(key, { scrollY: window.scrollY });
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedKey(feed)]);
+
+  // 復元待ちのスクロール位置（キャッシュヒット時のみセットされ、一覧の描画後に一度だけ使う）。
+  const pendingScrollRestore = useRef<number | null>(null);
+
+  useEffect(() => {
+    const key = feedKey(feed);
+    const cached = getCache(key);
+    // 他画面から戻ってきた・タブを行き来した際は、キャッシュがあればそれをそのまま復元し
+    // 再フェッチしない（一覧が一瞬空になってスクロール位置がズレるのを防ぐ）。
+    if (cached) {
+      setNotes(cached.notes);
+      setHasMore(cached.hasMore);
+      setLoading(false);
+      pendingScrollRestore.current = cached.scrollY;
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setHasMore(true);
@@ -83,6 +116,27 @@ export default function HomePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedKey(feed)]);
+
+  // 一覧・hasMoreが変わるたびキャッシュへ反映（scrollYは触らずマージする）。
+  // loading中（フェッチ中・キャッシュ復元処理の途中）は書き込まない: React 18 StrictMode
+  // （開発時）はmount直後に同一レンダーのeffectを2回連続実行するため、setNotes等の
+  // 更新がまだ反映されていない「更新前の古いnotes（空配列）」をこのeffectが読んでしまい、
+  // 直前に復元/フェッチ中の正しいキャッシュを空データで上書きしてしまう不具合があった
+  // （実機確認）。loadingがfalseになる本当のコミット後の再実行まで書き込みを待つことで、
+  // 常に確定した値だけをキャッシュへ反映する。
+  useEffect(() => {
+    if (loading) return;
+    setCache(feedKey(feed), { notes, hasMore });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notes, hasMore, loading, feedKey(feed)]);
+
+  // キャッシュから復元した一覧がDOMへ反映された後に、一度だけスクロール位置を復元する。
+  useEffect(() => {
+    if (loading || pendingScrollRestore.current === null) return;
+    const y = pendingScrollRestore.current;
+    pendingScrollRestore.current = null;
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  }, [loading, notes]);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
 
