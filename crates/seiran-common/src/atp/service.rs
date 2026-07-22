@@ -622,10 +622,13 @@ impl AtpCommitService {
     /// `app.bsky.feed.like` レコードをコミットする（リアクション連携）。
     /// ATP には絵文字リアクションの概念が無いため、どの絵文字でも Like として送る。
     /// `emoji` は非標準の拡張フィールドとしてベストエフォートで載せる。
+    /// `reaction_id`（`reactions.id`）も非標準拡張フィールドとして載せ、このLikeが自分自身の
+    /// firehose経由で戻ってきた際に通知の重複排除トークンとして使う（`docs/protocols.md` 8節）。
     /// 成功したら生成した at_uri（`at://did/app.bsky.feed.like/rkey`）を
     /// `reactions.at_uri` に自己保存する（`commit_repost` が `posts.atp_repost_rkey` を
     /// 自己保存するのと同じ流儀）。切替（別の絵文字への変更）の場合、旧 Like の削除は
     /// 呼び出し側が事前に `delete_atp_like` で行う（このメソッドは新規作成のみを担う）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn commit_like(
         &self,
         actor_id: i64,
@@ -633,12 +636,13 @@ impl AtpCommitService {
         target_at_uri: &str,
         target_at_cid: &str,
         emoji: Option<&str>,
+        reaction_id: i64,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        let (record_cbor, record_cid) = encode_bsky_feed_like(target_at_uri, target_at_cid, &created_at_str, emoji)?;
+        let (record_cbor, record_cid) = encode_bsky_feed_like(target_at_uri, target_at_cid, &created_at_str, emoji, reaction_id)?;
 
         let record = CommitRecord {
             collection: "app.bsky.feed.like",

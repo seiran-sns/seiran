@@ -463,6 +463,11 @@ struct BskyFeedRepost {
 /// `app.bsky.feed.like` レコード。ATP には絵文字リアクションの概念が無いため、
 /// どの絵文字であっても Like として送る。`emoji` は非標準の拡張フィールド
 /// （seiran 独自。公式 Bluesky クライアントは無視するだけのはず）。
+/// `seiran_reaction_id` も同様の非標準拡張フィールドで、`reactions.id` をそのまま載せる。
+/// このLikeが自分自身のfirehose経由で戻ってきた際、通知の重複排除トークンとして使う
+/// （`notifications.reaction_id`、`docs/protocols.md` 8節）。
+/// フィールド宣言順は出力に影響しない（`serde_ipld_dagcbor` がキーをcanonical順に
+/// 自動ソートする、`docs/skill_atp_rust_programming.md`参照）。
 #[derive(Serialize)]
 struct BskyFeedLike {
     #[serde(rename = "$type")]
@@ -472,6 +477,8 @@ struct BskyFeedLike {
     created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     emoji: Option<String>,
+    #[serde(rename = "seiranReactionId", skip_serializing_if = "Option::is_none")]
+    seiran_reaction_id: Option<i64>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -641,11 +648,14 @@ pub fn encode_bsky_feed_repost(
 
 /// `app.bsky.feed.like` レコードの DAG-CBOR バイト列と CID を生成する。
 /// `emoji` は非標準の拡張フィールド（Some の場合のみレコードへ含める）。
+/// `reaction_id` も非標準拡張フィールド（`seiranReactionId`）で、自分自身の firehose 再受信時の
+/// 通知重複排除トークンとして使う（`BskyFeedLike`のドキュメント参照）。
 pub fn encode_bsky_feed_like(
     at_uri: &str,
     at_cid: &str,
     created_at_rfc3339: &str,
     emoji: Option<&str>,
+    reaction_id: i64,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
     let record = BskyFeedLike {
         kind: "app.bsky.feed.like".to_string(),
@@ -655,6 +665,7 @@ pub fn encode_bsky_feed_like(
         },
         created_at: created_at_rfc3339.to_string(),
         emoji: emoji.map(|s| s.to_string()),
+        seiran_reaction_id: Some(reaction_id),
     };
     let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
     let cid = cid_from_dagcbor(&cbor);

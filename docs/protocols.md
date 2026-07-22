@@ -210,6 +210,13 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 
 `notifications` テーブルへの書き込みは、ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。種別は `Follow`/`Reaction`/`FollowRequestAccepted`/`Mention`/`Reply` の5種。WebSocketは基本的に「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
 
+### リアクション通知の重複排除（`reaction_id`）
+ローカルユーザーが ATP 実体（`at_uri`/`at_cid`）を持つ投稿へリアクションすると、(1) `notes::create_reaction` がその場でローカル通知を即時INSERTし、(2) 同じリアクションを非同期で `AtpCommitService::commit_like` が `app.bsky.feed.like` としてコミットし、それが自分自身の firehose 受信（`seiran-atp-repo::firehose::handle_inbound_like_create`）で戻ってきて再度通知INSERTを試みる、という2経路が走る。この2つは「経路が違うだけの同一操作」であり、素朴に両方INSERTすると通知が重複表示される。
+
+これを防ぐため、`reactions.id`（`GENERATED ALWAYS AS IDENTITY`）を「リアクション実体の識別子」として2経路で共有する。ローカルINSERT時に採番された `reactions.id` を (a) `notifications.reaction_id` に保存し、(b) `commit_like` が `app.bsky.feed.like` レコードの非標準拡張フィールド `seiranReactionId` として埋め込む（`emoji` 拡張フィールドと同じ流儀）。自分自身の firehose 受信時、このLikeが `seiranReactionId` を持っていればそれをそのまま `notifications.reaction_id` として渡し、`idx_notifications_reaction_id`（`reaction_id IS NOT NULL` の部分UNIQUEインデックス、`ON CONFLICT DO NOTHING`）で2つ目のINSERTが弾かれる。
+
+`source_uri` によるUNIQUE制約（既存）とは目的が異なる: `source_uri` は「他人発のイベントの複線受信対策」（Doc6既知の課題）だが、`reaction_id` は「自分が起点の同一操作が別経路で戻ってくることの対策」。他人（他インスタンスのMisskey/Mastodonユーザーや他のBskyユーザー）からのリアクションには `seiranReactionId` が付かないため `reaction_id` は常に `NULL` で、同じ投稿に複数の絵文字で連投する（通知欄に文章のようなものを書く遊び）動作は妨げない。
+
 例外として `followAccepted`（`jobs::inbound_activity_process::handle_accept`、Fediフォローリクエストが相手から承諾された）はペイロード（`actor.username`/`actor.domain`）自体をフロントエンドが利用する。Fediフォローは常に `pending` で開始し、相手の `Accept` が非同期で届くまで承認待ち状態が続く（`handlers::follows::follow_fedi`）ため、`StreamingContext` が受信時に `stores/followStatusStore`（`username`+`domain` を正規化したキー、`lib/format.ts` の `profileQuery` と同じロジック）を直接更新し、`pending` → `accepted` へその場で切り替える。手動リロードや通知一覧の再取得を待たずに反映するための例外であり、通知の永続化・一覧表示自体は他の種別と同じ経路を通る。フォロー状態の表示側（`frontend/src/pages/ProfilePage.tsx` のフォローボタン、`frontend/src/components/note/NoteCard.tsx` のタイムライン上のフォロースイッチ）はいずれもこの共有ストアを `useSyncExternalStore` で参照する設計のため、自分の操作・WebSocket経由の承認のいずれでも、同一アクターを表示中の全コンポーネントが同時に反映される（詳細は `docs/architecture.md` のフロントエンド構成節）。
 
 ### メンション通知

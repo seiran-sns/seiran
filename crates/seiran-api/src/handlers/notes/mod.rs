@@ -371,7 +371,7 @@ async fn create_regular_post(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = state
             .notifications
-            .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None)
+            .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None, None)
             .await
         {
             tracing::error!("[create_regular_post] reply notifications INSERT 失敗: {}", e);
@@ -396,7 +396,7 @@ async fn create_regular_post(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = state
             .notifications
-            .insert(notif_id, mentioned_actor_id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None)
+            .insert(notif_id, mentioned_actor_id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None, None)
             .await
         {
             tracing::error!("[create_regular_post] mention notifications INSERT 失敗: {}", e);
@@ -959,11 +959,17 @@ pub async fn create_reaction(
         chrono::Utc::now().timestamp_millis()
     );
 
-    if let Err(e) = state.reactions.insert(note_id, me.actor_id, "emoji", &content, Some(&activity_id), None, None).await {
-        return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response();
-    }
+    let reaction_id = match state.reactions.insert(note_id, me.actor_id, "emoji", &content, Some(&activity_id), None, None).await {
+        Ok(id) => id,
+        Err(e) => return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response(),
+    };
 
-    // 通知ベル用（#37）: 自分の投稿への自作自演リアクションは通知しない
+    // 通知ベル用（#37）: 自分の投稿への自作自演リアクションは通知しない。
+    // `reaction_id` を渡しておくことで、対象ポストが ATP 実体を持つ場合に後段で ATP へ
+    // コミットしたこのリアクションが自分自身の firehose 受信
+    // （`seiran-atp-repo::firehose::handle_inbound_like_create`）で戻ってきても、
+    // 同じ reaction_id を持つ通知が UNIQUE 制約で弾かれ、二重通知にならない
+    // （`notifications.reaction_id`、`docs/protocols.md` 8節）。
     if post.actor_id != me.actor_id {
         state.stream_hub.publish_event(
             std::collections::HashSet::from([post.actor_id]),
@@ -977,7 +983,7 @@ pub async fn create_reaction(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = state
             .notifications
-            .insert(notif_id, post.actor_id, NotificationKind::Reaction, Some(me.actor_id), Some(note_id), Some(&content), None, None)
+            .insert(notif_id, post.actor_id, NotificationKind::Reaction, Some(me.actor_id), Some(note_id), Some(&content), None, None, Some(reaction_id))
             .await
         {
             tracing::error!("[create_reaction] notifications INSERT 失敗: {}", e);
@@ -1016,7 +1022,7 @@ pub async fn create_reaction(
                         tracing::error!("[create_reaction] ATP Like 削除失敗（切替前処理）: {}", e);
                     }
                 }
-                if let Err(e) = atp.commit_like(actor_id, note_id, &target_uri, &target_cid, Some(&emoji), now).await {
+                if let Err(e) = atp.commit_like(actor_id, note_id, &target_uri, &target_cid, Some(&emoji), reaction_id, now).await {
                     tracing::error!("[create_reaction] ATP Like commit 失敗: {}", e);
                 }
             });

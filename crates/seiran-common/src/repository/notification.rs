@@ -59,6 +59,11 @@ pub trait NotificationRepository: Send + Sync {
     /// Reactionの`ap_activity_id`）。渡すと部分ユニークインデックス経由で重複INSERTが
     /// 無視される（firehose/federation-workerの複数起動による複線受信対策。Doc6既知の課題）。
     /// follow系・ローカルリアクションの通知は`None`のままでよい。
+    /// `reaction_id` はリアクション通知専用の重複排除トークン（`reactions.id`）。ローカル
+    /// リアクション作成時はそのリアクション自身の id を渡し、ATPコミット後に自分自身の
+    /// firehose受信で戻ってきた同一リアクションも同じ id を持つため、部分ユニークインデックス
+    /// で「ローカル即時通知」と「firehose再受信通知」の二重発生を防げる。follow系・他人発の
+    /// リアクション（自分がATPへコミットしていないもの）は`None`のままでよい。
     #[allow(clippy::too_many_arguments)]
     async fn insert(
         &self,
@@ -70,6 +75,7 @@ pub trait NotificationRepository: Send + Sync {
         reaction: Option<&str>,
         reaction_emoji_url: Option<&str>,
         source_uri: Option<&str>,
+        reaction_id: Option<i64>,
     ) -> Result<(), sqlx::Error>;
 
     /// 自分宛ての通知を新しい順に取得する（カーソルページネーション、`posts` の
@@ -108,15 +114,18 @@ impl NotificationRepository for PgNotificationRepository {
         reaction: Option<&str>,
         reaction_emoji_url: Option<&str>,
         source_uri: Option<&str>,
+        reaction_id: Option<i64>,
     ) -> Result<(), sqlx::Error> {
         // ブロック・ミュート関係にある相手からの通知は生成しない（$4=notifier_actor_idが
         // NULL のシステム通知は素通り）。呼び出し元（リアクション作成・inbound Follow/Accept/
         // Reaction・firehose・bsky_follower_poll）はこの1箇所の変更だけで自動的に対象になる。
+        // ON CONFLICT はターゲット未指定（DO NOTHING）にして、source_uri・reaction_id
+        // どちらの部分ユニークインデックス違反でも無視する（1つのINSERTで両方に対応するため）。
         sqlx::query(
-            "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, source_uri)
-             SELECT $1, $2, $3, $4, $5, $6, $7, $8
+            "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, source_uri, reaction_id)
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
              WHERE $4::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, $4)
-             ON CONFLICT (source_uri) WHERE source_uri IS NOT NULL DO NOTHING",
+             ON CONFLICT DO NOTHING",
         )
         .bind(id)
         .bind(recipient_actor_id)
@@ -126,6 +135,7 @@ impl NotificationRepository for PgNotificationRepository {
         .bind(reaction)
         .bind(reaction_emoji_url)
         .bind(source_uri)
+        .bind(reaction_id)
         .execute(&self.pool)
         .await
         .map(|_| ())

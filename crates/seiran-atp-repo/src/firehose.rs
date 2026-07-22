@@ -687,6 +687,11 @@ async fn process_message(
                         return Ok(());
                     };
                     let emoji = record.get("emoji").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    // 自分自身がローカルAPI経由でコミットしたLikeなら、非標準拡張フィールドとして
+                    // 元の reactions.id が載っている（`encode_bsky_feed_like`）。これが戻ってきた
+                    // 場合、ローカル即時通知と同じ reaction_id を通知に持たせることで、
+                    // `notifications.reaction_id` の UNIQUE 制約により二重通知を防げる。
+                    let seiran_reaction_id = record.get("seiranReactionId").and_then(|v| v.as_i64());
 
                     let at_uri = format!("at://{}/app.bsky.feed.like/{}", did, commit.rkey);
                     let subject_uri = subject_uri.to_string();
@@ -694,7 +699,7 @@ async fn process_message(
                     let http2 = Arc::clone(http);
                     let hub2 = Arc::clone(stream_hub);
                     tokio::spawn(async move {
-                        handle_inbound_like_create(&pool2, &http2, &hub2, &did, &at_uri, &subject_uri, emoji.as_deref()).await;
+                        handle_inbound_like_create(&pool2, &http2, &hub2, &did, &at_uri, &subject_uri, emoji.as_deref(), seiran_reaction_id).await;
                     });
                 }
                 "delete" => {
@@ -786,7 +791,7 @@ async fn save_bsky_post(
                     );
                     let notif_id = generate_snowflake_id(chrono::Utc::now());
                     if let Err(e) = PgNotificationRepository::new(pool.clone())
-                        .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None)
+                        .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None, None)
                         .await
                     {
                         tracing::error!("[Jetstream] reply notifications INSERT 失敗: {}", e);
@@ -822,7 +827,7 @@ async fn save_bsky_post(
                         );
                         let notif_id = generate_snowflake_id(chrono::Utc::now());
                         if let Err(e) = notifications_repo
-                            .insert(notif_id, mentioned_actor.id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None)
+                            .insert(notif_id, mentioned_actor.id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None, None)
                             .await
                         {
                             tracing::error!("[Jetstream] mention notifications INSERT 失敗: {}", e);
@@ -902,6 +907,10 @@ async fn save_bsky_post(
 /// ATP Like（`app.bsky.feed.like`）の作成を検知した際の処理。
 /// `subject_uri` がローカル投稿の `at_uri` と一致する場合のみ `reactions` へ INSERT し、
 /// 通知ベル用イベント（著者のみ）とリアルタイム更新（`noteUpdated`、著者+フォロワー）を送出する。
+/// `seiran_reaction_id` は Like レコードの非標準拡張フィールド（`seiranReactionId`）から
+/// 抽出した値。自分自身がローカルAPI経由でコミットしたLikeが自分のfirehose受信で戻ってきた
+/// ケースでは、ローカル即時通知insertと同じ `reactions.id` が入っており、
+/// `notifications.reaction_id` の UNIQUE 制約で二重通知を防げる（`docs/protocols.md` 8節）。
 #[allow(clippy::too_many_arguments)]
 async fn handle_inbound_like_create(
     pool: &PgPool,
@@ -911,6 +920,7 @@ async fn handle_inbound_like_create(
     at_uri: &str,
     subject_uri: &str,
     emoji: Option<&str>,
+    seiran_reaction_id: Option<i64>,
 ) {
     let posts_repo = PgPostRepository::new(pool.clone());
     let (post_id, post_author_id) = match posts_repo.find_id_and_actor_by_at_uri(subject_uri).await {
@@ -958,7 +968,7 @@ async fn handle_inbound_like_create(
         let notifications_repo = PgNotificationRepository::new(pool.clone());
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = notifications_repo
-            .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(content), None, Some(at_uri))
+            .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(content), None, Some(at_uri), seiran_reaction_id)
             .await
         {
             tracing::error!("[Jetstream/Like] notifications INSERT 失敗: {}", e);

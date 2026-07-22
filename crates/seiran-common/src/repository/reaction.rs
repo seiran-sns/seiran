@@ -12,6 +12,8 @@ pub trait ReactionRepository: Send + Sync {
     /// `emoji_url` は Fedi から受信したカスタム絵文字（`:shortcode:`）の画像 URL。
     /// `at_uri` と異なり毎回そのまま上書きする（ローカル送信は常に `None`、AP 受信は
     /// 解決できた URL か `None` を都度渡すため、旧値を保持する必要が無い）。
+    /// 戻り値は当該行の `id`（切り替え時も同じ (post_id, actor_id) の既存行の id）。
+    /// 通知の重複排除用トークン（`notifications.reaction_id`）として使う。
     #[allow(clippy::too_many_arguments)]
     async fn insert(
         &self,
@@ -22,7 +24,7 @@ pub trait ReactionRepository: Send + Sync {
         ap_activity_id: Option<&str>,
         at_uri: Option<&str>,
         emoji_url: Option<&str>,
-    ) -> Result<(), sqlx::Error>;
+    ) -> Result<i64, sqlx::Error>;
 
     /// `ap_activity_id` で特定されるリアクションを取り消す（Undo(Like)/Undo(EmojiReact) 受信時）。
     /// 削除できた場合は `(post_id, actor_id)` を返す（ストリーミング通知の組み立てに使う）。
@@ -77,8 +79,8 @@ impl ReactionRepository for PgReactionRepository {
         ap_activity_id: Option<&str>,
         at_uri: Option<&str>,
         emoji_url: Option<&str>,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+    ) -> Result<i64, sqlx::Error> {
+        let row = sqlx::query(
             "INSERT INTO reactions (post_id, actor_id, reaction_type, content, ap_activity_id, at_uri, emoji_url)
              VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (post_id, actor_id) DO UPDATE SET
@@ -87,7 +89,8 @@ impl ReactionRepository for PgReactionRepository {
                  ap_activity_id = EXCLUDED.ap_activity_id,
                  at_uri = COALESCE(EXCLUDED.at_uri, reactions.at_uri),
                  emoji_url = EXCLUDED.emoji_url,
-                 created_at = CURRENT_TIMESTAMP",
+                 created_at = CURRENT_TIMESTAMP
+             RETURNING id",
         )
         .bind(post_id)
         .bind(actor_id)
@@ -96,9 +99,9 @@ impl ReactionRepository for PgReactionRepository {
         .bind(ap_activity_id)
         .bind(at_uri)
         .bind(emoji_url)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>("id"))
     }
 
     async fn delete_by_activity_id(
