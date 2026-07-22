@@ -2,6 +2,19 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
+/// `:shortcode:` 形式かどうかを判定し、妥当ならコロンを除いた shortcode を返す。
+/// 許可する文字種は admin 絵文字登録（`shortcode`）バリデーションと揃える（英数字・アンダースコアのみ）。
+/// ローカル送信（`handlers/notes/validation.rs`）と ATP 自己firehose再受信
+/// （`seiran-atp-repo::firehose::handle_inbound_like_create`）の両方で、`reactions.content`
+/// からカスタム絵文字の実在確認・画像URL解決が必要かどうかを判定するために使う共通ロジック。
+pub fn parse_custom_emoji_shortcode(s: &str) -> Option<&str> {
+    let inner = s.strip_prefix(':')?.strip_suffix(':')?;
+    if inner.is_empty() || !inner.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    Some(inner)
+}
+
 /// `custom_emojis` テーブルの 1 行。
 /// `url` は `list_all` のみ `media_files`/`storage_providers` を JOIN して解決する
 /// （admin 一覧の画像プレビュー用）。`insert`/`update` は JOIN しないため常に `None`。

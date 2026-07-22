@@ -26,8 +26,9 @@ use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
 use seiran_common::repository::{
-    ActorRepository, HashtagRepository, NotificationKind, NotificationRepository, PostRepository, ReactionRepository,
-    PgActorRepository, PgFollowRepository, PgHashtagRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
+    ActorRepository, EmojiRepository, HashtagRepository, NotificationKind, NotificationRepository, PostRepository, ReactionRepository,
+    PgActorRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
+    parse_custom_emoji_shortcode,
 };
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::traits::{Job, JobQueue};
@@ -943,8 +944,28 @@ async fn handle_inbound_like_create(
     // ATP は「1投稿1いいね」が前提（Like レコード自体が unique）なので content は
     // 常に絵文字1個。emoji フィールドが無ければ ❤️（絵文字ピッカーと同じ、VS16付きハート）として扱う。
     let content = emoji.unwrap_or("❤️");
+
+    // `content` がカスタム絵文字（`:shortcode:`）の場合、このサーバーの custom_emojis から
+    // 画像 URL を解決する。これはローカルユーザーが自分で送ったカスタム絵文字リアクションが
+    // ATP へ commit_like された後、自分自身の firehose 受信でここに戻ってくるケースに対応するため
+    // （`ON CONFLICT (post_id, actor_id) DO UPDATE` で emoji_url も上書きされるため、ここで
+    // `None` を渡すと `create_reaction` が設定した正しい URL を消してしまう回帰があった）。
+    let emoji_url = match parse_custom_emoji_shortcode(content) {
+        Some(shortcode) => {
+            let emojis_repo = PgEmojiRepository::new(pool.clone());
+            emojis_repo.find_url_by_shortcode(shortcode).await.unwrap_or_else(|e| {
+                tracing::error!("[Jetstream/Like] 絵文字URL解決失敗: {}", e);
+                None
+            })
+        }
+        None => None,
+    };
+
     let reactions_repo = PgReactionRepository::new(pool.clone());
-    if let Err(e) = reactions_repo.insert(post_id, actor_id, "like", content, None, Some(at_uri), None).await {
+    if let Err(e) = reactions_repo
+        .insert(post_id, actor_id, "like", content, None, Some(at_uri), emoji_url.as_deref())
+        .await
+    {
         tracing::error!("[Jetstream/Like] reactions INSERT 失敗: {}", e);
         return;
     }

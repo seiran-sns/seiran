@@ -2,6 +2,8 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
+use seiran_common::repository::parse_custom_emoji_shortcode;
+
 use crate::error::ApiError;
 
 /// Bsky 配信時の本文上限（書記素クラスタ数）。`/api/meta` の `maxNoteTextLength` にも使う。
@@ -85,17 +87,6 @@ impl ReactionContent {
             ReactionContent::Custom(shortcode) => format!(":{}:", shortcode),
         }
     }
-}
-
-/// `:shortcode:` 形式かどうかを判定し、妥当ならコロンを除いた shortcode を返す。
-/// 許可する文字種は admin 絵文字登録（`handlers/admin/emojis.rs`）の shortcode バリデーションと揃える
-/// （英数字・アンダースコアのみ）。
-fn parse_custom_emoji_shortcode(s: &str) -> Option<&str> {
-    let inner = s.strip_prefix(':')?.strip_suffix(':')?;
-    if inner.is_empty() || !inner.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        return None;
-    }
-    Some(inner)
 }
 
 /// リアクション内容を検証する。
