@@ -342,9 +342,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/emojis/:id",
             patch(handlers::admin::emojis::update_emoji)
             .delete(handlers::admin::emojis::delete_emoji))
-        // 絵文字インポート（#50）
+        // 絵文字インポート（#50）。多数のカスタム絵文字を含むZIPは数十〜数百MBになりうるため、
+        // axum のデフォルトボディ上限（2MB）を明示的に引き上げる。
         .route("/api/admin/emojis/import",
-            post(handlers::admin::emoji_import::start_import))
+            post(handlers::admin::emoji_import::start_import)
+                .layer(DefaultBodyLimit::max(200 * 1024 * 1024)))
         .route("/api/admin/emojis/import/:job_id",
             get(handlers::admin::emoji_import::get_import_status))
         // ドライブ（メディアアップロード）。動画・音声添付を考慮し 100MB まで許可
