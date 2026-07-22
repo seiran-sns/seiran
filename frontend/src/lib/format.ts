@@ -16,9 +16,9 @@ export function displayName(note: Note): string {
   return note.user.displayName || note.user.username;
 }
 
-/** ノート投稿者の acct 文字列（`@user` または `@user@domain`）。 */
+/** ノート投稿者の acct 文字列（`@user` または `@user@domain`）。ローカルユーザーは domain を省略。 */
 export function acct(note: Note): string {
-  return note.user.domain
+  return note.user.domain && note.user.domain !== window.location.hostname
     ? `@${note.user.username}@${note.user.domain}`
     : `@${note.user.username}`;
 }

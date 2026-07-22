@@ -164,8 +164,13 @@ async fn fetch_bsky_profile_from_appview(
         }
     };
 
-    // フォロー済みアクターは DB に登録されているため、avatar_url を更新してからプロフィールを返す
+    // フォロー済みアクターは DB に登録されているため、avatar_url を更新してからプロフィールを返す。
+    // 自インスタンスのローカルアクター本人が DID 経由で見つかった場合は、AppView 側の
+    // ハンドル表記（`user.domain` 形式）で username 列を上書きしてしまわないよう upsert をスキップする。
     if let Ok(Some(db_actor)) = state.actors.find_by_did(&bsky.did).await {
+        if db_actor.actor_type == "local" {
+            return build_profile_response(db_actor, my_user_id, state).await;
+        }
         let now = chrono::Utc::now();
         let _ = state.actors.upsert_remote_bsky(
             db_actor.id, &bsky.did, &bsky.handle,
@@ -231,8 +236,13 @@ pub async fn user_profile(
                 }
             };
         } else if q.contains('.') && !q.contains('@') {
-            // ドット含み・@なし → ATP ハンドル（alice.bsky.social 等）
-            return fetch_bsky_profile_from_appview(q, my_user_id, &state).await;
+            // ドット含み・@なし → `user.local-domain`（自インスタンスの AT ハンドル形式）ならローカル DB を検索し、
+            // それ以外は ATP ハンドル（alice.bsky.social 等）とみなして外部 AppView へ
+            let local_suffix = format!(".{}", state.local_domain);
+            match q.strip_suffix(local_suffix.as_str()) {
+                Some(local_username) => (local_username.to_string(), Some(state.local_domain.clone())),
+                None => return fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
+            }
         } else {
             let parts: Vec<&str> = q.splitn(2, '@').collect();
             if parts.len() == 2 {
@@ -250,7 +260,7 @@ pub async fn user_profile(
     // DB で検索
     match state.actors.find_by_username_domain(&lookup_username, &domain).await {
         Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
-        Ok(None) if lookup_domain.is_some() => {
+        Ok(None) if lookup_domain.as_deref().is_some_and(|d| d != state.local_domain) => {
             // DB にいない → AP から取得して返す（DB には保存しない）
             fetch_remote_profile(&lookup_username, lookup_domain.as_deref().unwrap(), my_user_id, &state)
                 .await
