@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, Note } from "../../api/client";
-import { acct, deliveryBadges, displayName, formatDate, profilePath, protocolBadge, visibilityBadge } from "../../lib/format";
+import { acct, deliveryBadges, displayName, formatDate, profilePath, profileQuery, protocolBadge, visibilityBadge } from "../../lib/format";
 import { useNoteCardActions } from "../../hooks/useNoteCardActions";
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../contexts/ToastContext";
+import { setFollowStatus as setFollowStatusStore, useFollowStatus } from "../../stores/followStatusStore";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
@@ -56,24 +57,26 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
     handleDelete,
   } = useNoteCardActions(note, onUnreposted, onDeleted);
 
-  const targetKey = note.user.domain && note.user.domain !== window.location.hostname
-    ? `${note.user.username}@${note.user.domain}`
-    : note.user.username;
+  const targetKey = profileQuery(note.user.username, note.user.domain);
 
   const isAuthorSelf = isSelf || (!!currentUser && currentUser.username === note.user.username && (!note.user.domain || note.user.domain === window.location.hostname));
 
   const [isHovered, setIsHovered] = useState(false);
-  const [followStatus, setFollowStatus] = useState<"not_following" | "pending" | "accepted" | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [followActionPending, setFollowActionPending] = useState(false);
+  // フォロー状態は共有ストア（stores/followStatusStore）を参照する。プロフィール画面や
+  // 同一ユーザーの他ポストのフォロースイッチと状態が一本化されるため、一方で操作するか
+  // WebSocket の `followAccepted`（StreamingContext）を受けるだけで全ての表示に伝播する。
+  // ストアに未登録（undefined）なら「まだ取得していない」ことを意味する。
+  const followStatus = useFollowStatus(targetKey) ?? null;
 
   function handleMouseEnter() {
     setIsHovered(true);
     if (!isAuthorSelf && followStatus === null && !loadingStatus) {
       setLoadingStatus(true);
       api.users.profile(targetKey)
-        .then((p) => setFollowStatus(p.follow_status))
-        .catch(() => setFollowStatus("not_following"))
+        .then((p) => setFollowStatusStore(targetKey, p.follow_status))
+        .catch(() => setFollowStatusStore(targetKey, "not_following"))
         .finally(() => setLoadingStatus(false));
     }
   }
@@ -92,10 +95,10 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
     try {
       if (current === "not_following") {
         const res = await api.follows.create(targetKey);
-        setFollowStatus(res.status === "accepted" ? "accepted" : "pending");
+        setFollowStatusStore(targetKey, res.status === "accepted" ? "accepted" : "pending");
       } else {
         await api.follows.delete(targetKey);
-        setFollowStatus("not_following");
+        setFollowStatusStore(targetKey, "not_following");
       }
     } catch (err) {
       showError(getErrorMessage(err));

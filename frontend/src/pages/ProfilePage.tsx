@@ -11,10 +11,10 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
+import { profileQuery } from "../lib/format";
+import { setFollowStatus as setFollowStatusStore, useFollowStatus } from "../stores/followStatusStore";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
-
-type FollowStatus = "not_following" | "pending" | "accepted";
 
 const PAGE_SIZE = 20;
 
@@ -30,7 +30,6 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [followStatus, setFollowStatus] = useState<FollowStatus>("not_following");
   const [following, setFollowing] = useState(false);
   const [unfollowing, setUnfollowing] = useState(false);
   const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
@@ -70,7 +69,7 @@ export default function ProfilePage() {
       .then((p) => {
         if (cancelled) return;
         setProfile(p);
-        setFollowStatus(p.follow_status);
+        setFollowStatusStore(profileQuery(p.username, p.domain), p.follow_status);
         setIsBlocking(p.is_blocking);
         setIsBlockedBy(p.is_blocked_by);
         setIsMuted(p.is_muted);
@@ -87,6 +86,14 @@ export default function ProfilePage() {
   }, [q]);
 
   const { user } = useAuth();
+
+  // フォロー状態は共有ストア（stores/followStatusStore）から取得する。プロフィール本体・
+  // 右ペインのポストリスト・タイムライン上の同一ユーザーのフォロースイッチが全て同じキーを
+  // 参照するため、いずれかで操作するか WebSocket の `followAccepted`（StreamingContext）を
+  // 受けるだけで、表示中の全コンポーネントに同時反映される。
+  const followKey = profile ? profileQuery(profile.username, profile.domain) : "";
+  const followStatus = useFollowStatus(followKey) ?? "not_following";
+
   const isLocal = profile?.actor_type === "local";
   const isBridge = !!profile?.bridge_real_handle;
   const isSelf = isLocal && !!user && user.username === profile?.username;
@@ -104,7 +111,7 @@ export default function ProfilePage() {
     try {
       const result = await api.follows.create(followTarget());
       // ローカルフォローは即 accepted
-      setFollowStatus(result.status === "accepted" ? "accepted" : "pending");
+      setFollowStatusStore(followKey, result.status === "accepted" ? "accepted" : "pending");
     } catch (e) {
       showError(getErrorMessage(e));
     } finally {
@@ -117,7 +124,7 @@ export default function ProfilePage() {
     setUnfollowing(true);
     try {
       await api.follows.delete(followTarget());
-      setFollowStatus("not_following");
+      setFollowStatusStore(followKey, "not_following");
     } catch (e) {
       showError(getErrorMessage(e));
     } finally {
@@ -133,7 +140,7 @@ export default function ProfilePage() {
     try {
       const p = await api.users.profile(q);
       setProfile(p);
-      setFollowStatus(p.follow_status);
+      setFollowStatusStore(profileQuery(p.username, p.domain), p.follow_status);
       setIsBlocking(p.is_blocking);
       setIsBlockedBy(p.is_blocked_by);
       setIsMuted(p.is_muted);

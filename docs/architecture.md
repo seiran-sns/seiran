@@ -145,7 +145,8 @@ React 18 + Vite + TypeScript（react-router-dom v6）。`frontend/src/` 構成:
 - `components/right/` — 右ペインのタブ内容（`NotificationsPanel`、`TrendsSearchPanel`）
 - `components/admin/` — 管理画面パネル群
 - `components/dm/` — `RecipientPicker`（DM宛先のchip入力。サジェスト選択/手打ち確定の両対応、Bskyアクターと他プロトコルの混在を警告表示）
-- `contexts/` — `AuthContext`、`ComposerContext`（返信モーダルに加え、`openCompose(initialText)` で本文プリフィル済みの素の投稿モーダルもグローバルに開ける）、`RightPaneContext`（右ペインのサブタブ状態保持）、`StreamingContext`（WebSocket集約。DM新着（`visibility=direct`のnoteイベント）は`registerDirectMessage`で別系統に振り分け、未読セッション数`dmUnreadCount`をLeftNavのバッジに供給する）、`ToastContext`（エラー/成功/情報トースト通知）
+- `contexts/` — `AuthContext`、`ComposerContext`（返信モーダルに加え、`openCompose(initialText)` で本文プリフィル済みの素の投稿モーダルもグローバルに開ける）、`RightPaneContext`（右ペインのサブタブ状態保持）、`StreamingContext`（WebSocket集約。DM新着（`visibility=direct`のnoteイベント）は`registerDirectMessage`で別系統に振り分け、未読セッション数`dmUnreadCount`をLeftNavのバッジに供給する。Fediフォロー承認（`followAccepted`）受信時は`stores/followStatusStore`を直接更新する、`docs/protocols.md` 8節）、`ToastContext`（エラー/成功/情報トースト通知）
+- `stores/followStatusStore.ts` — フォロー状態（`not_following`/`pending`/`accepted`）の外部ストア（Reactコンテキストではなくモジュールスコープの`Map`+`useSyncExternalStore`）。キーは`lib/format.ts`の`profileQuery(username, domain)`で統一。同一アクターのフォロー状態表示は画面内に複数存在しうる（プロフィール本体、右ペインのポストリスト、タイムライン上の同一ユーザーの複数投稿）ため、各コンポーネントがローカルstateで抱えず全てこのストアを購読する設計にし、一箇所の操作（フォロー/フォロー解除ボタン）・WebSocket経由の`followAccepted`受信のいずれでも表示中の全コンポーネントへ同時反映する。`ProfilePage`のフォローボタン、`NoteCard`のタイムライン上のフォロースイッチが利用
 - `pages/` — 画面単位のトップレベルコンポーネント（`MessagesPage`はDM専用画面、`docs/ui_spec.md`参照）
 - `i18n/` — 国際化。`react-i18next` + `i18next-browser-languagedetector`。ブラウザの言語設定にのみ従い自動判定（`en`/`ja`、対応言語外は `en` にフォールバック）。ユーザーによる手動切り替えUIは未実装。翻訳リソースは `i18n/locales/{en,ja}/{namespace}.json` に画面・機能単位の名前空間で分割配置し、`i18n/index.ts` の `resources` に集約してビルド時にバンドルする。名前空間分割は、将来ユーザーが独自の言語ファイル（同形式のJSON）を作成・適用・配布できるようにする構想を見据えたもので、`i18n.addResourceBundle()` により実行時にリソースを追加・上書きできる
 

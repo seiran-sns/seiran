@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api, Note, noteFromStream, ReactionSummary } from "../api/client";
+import { profileQuery } from "../lib/format";
+import { setFollowStatus as setFollowStatusStore } from "../stores/followStatusStore";
 import { useAuth } from "./AuthContext";
 import { useStreaming } from "../hooks/useStreaming";
 
@@ -89,6 +91,15 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     } else if (NOTIF_KINDS.has(type)) {
       setUnread((u) => u + 1);
       notifListeners.current.forEach((cb) => cb());
+      if (type === "followAccepted") {
+        // フォロー状態は共有ストア（stores/followStatusStore）に一本化しているため、ここで直接
+        // 更新するだけで、プロフィール画面・タイムライン上のフォロースイッチなど表示中の
+        // 全コンポーネントに伝播する（専用リスナーの配線は不要）。
+        const actor = (body as { actor?: { username?: string; domain?: string } })?.actor;
+        if (actor?.username && actor?.domain) {
+          setFollowStatusStore(profileQuery(actor.username, actor.domain), "accepted");
+        }
+      }
     }
   }, user?.id ?? null);
 

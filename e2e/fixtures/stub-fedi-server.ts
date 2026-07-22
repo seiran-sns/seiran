@@ -17,6 +17,13 @@ export interface StubFediServer {
   receivedActivities(): Record<string, unknown>[];
   /** このスタブアクターからseiranへ署名付きFollowを送り、対象ローカルユーザーをフォローする。 */
   sendFollow(seiranBaseUrl: string, targetUsername: string): Promise<void>;
+  /**
+   * seiranユーザーから受信したFollow（`receivedActivities()`で取得したもの）に対し、
+   * このスタブアクターからAcceptを送り返す（実サーバーの承認挙動を模擬）。
+   * Follow の `actor` フィールド（`https://{local_domain}/users/...`）は配送先ホスト:ポートと
+   * 一致するとは限らない（`local_domain` はポート番号を含まない識別子）ため、送信先は明示的に渡す。
+   */
+  sendAccept(seiranBaseUrl: string, followActivity: Record<string, unknown>): Promise<void>;
   /** 対象ローカルユーザー宛のCreate(Note)を送る（`to`に対象アクターのみを指定するとdirect扱い）。
    * `opts.inReplyTo`を指定すると、そのAP Note IDへの返信として送信する。
    * `opts.mentionTargetUsername`を指定すると、そのローカルユーザーへの`tag[].type=="Mention"`
@@ -104,8 +111,10 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
       req.on("data", (c) => chunks.push(c));
       req.on("end", () => {
         const raw = Buffer.concat(chunks).toString("utf8");
+        let activity: Record<string, unknown> | undefined;
         try {
-          received.unshift(JSON.parse(raw));
+          activity = JSON.parse(raw);
+          received.unshift(activity!);
         } catch (err) {
           received.unshift({ _parseError: String(err), raw });
         }
@@ -139,6 +148,16 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
             object: targetActorUri,
           };
           await signedPost(`${seiranBaseUrl}/inbox`, activity, stub.actorUri, privateKey);
+        },
+        async sendAccept(seiranBaseUrl, followActivity) {
+          const acceptActivity = {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            type: "Accept",
+            id: `${base}/accepts/${Date.now()}`,
+            actor: stub.actorUri,
+            object: followActivity,
+          };
+          await signedPost(`${seiranBaseUrl}/inbox`, acceptActivity, stub.actorUri, privateKey);
         },
         async sendCreateNote(seiranBaseUrl, targetUsername, text, opts) {
           const targetActorUri = `${seiranBaseUrl}/users/${targetUsername}`;

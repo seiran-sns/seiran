@@ -208,7 +208,9 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 
 `seiran-common::streaming::StreamHub`（プロセス内 `tokio::broadcast`、容量512）が `{"type":kind,"body":body}` を配信する。`GET /api/streaming?token=<JWT>` でWebSocket接続し、`recipients` に自分の actor_id が含まれるイベントのみ転送される。
 
-`notifications` テーブルへの書き込みは、ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。種別は `Follow`/`Reaction`/`FollowRequestAccepted`/`Mention`/`Reply` の5種。WebSocketは「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
+`notifications` テーブルへの書き込みは、ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。種別は `Follow`/`Reaction`/`FollowRequestAccepted`/`Mention`/`Reply` の5種。WebSocketは基本的に「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
+
+例外として `followAccepted`（`jobs::inbound_activity_process::handle_accept`、Fediフォローリクエストが相手から承諾された）はペイロード（`actor.username`/`actor.domain`）自体をフロントエンドが利用する。Fediフォローは常に `pending` で開始し、相手の `Accept` が非同期で届くまで承認待ち状態が続く（`handlers::follows::follow_fedi`）ため、`StreamingContext` が受信時に `stores/followStatusStore`（`username`+`domain` を正規化したキー、`lib/format.ts` の `profileQuery` と同じロジック）を直接更新し、`pending` → `accepted` へその場で切り替える。手動リロードや通知一覧の再取得を待たずに反映するための例外であり、通知の永続化・一覧表示自体は他の種別と同じ経路を通る。フォロー状態の表示側（`frontend/src/pages/ProfilePage.tsx` のフォローボタン、`frontend/src/components/note/NoteCard.tsx` のタイムライン上のフォロースイッチ）はいずれもこの共有ストアを `useSyncExternalStore` で参照する設計のため、自分の操作・WebSocket経由の承認のいずれでも、同一アクターを表示中の全コンポーネントが同時に反映される（詳細は `docs/architecture.md` のフロントエンド構成節）。
 
 ### メンション通知
 本文中で `@username` 形式によりローカルユーザーが言及された場合、`notifications`（`type="mention"`, `note_id`=言及元投稿）を作る。配信設定（Bsky/AP接続の有無）とは無関係に、投稿の出自（ローカル/Fedi受信/Bsky受信）ごとに以下で解決する。自己メンションは通知しない。
