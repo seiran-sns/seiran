@@ -49,7 +49,7 @@ pub async fn register_plc_did(
 
         // 2. Cloudflare TXT セット（plc.directory 送信より先に配置）
         let new_cf_id = if let Some(cf) = &state.cloudflare {
-            let handle = format!("{}.{}", username, state.local_domain);
+            let handle = format!("{}.{}", seiran_common::username::to_atp_username(username), state.local_domain);
             match cf.set_atproto_txt(&handle, &genesis.did).await {
                 Ok(id) => {
                     tracing::info!("[{}] Cloudflare TXT セット完了: _atproto.{}", log_prefix, handle);

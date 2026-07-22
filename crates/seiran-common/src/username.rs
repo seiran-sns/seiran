@@ -8,6 +8,14 @@
 //! 2. `@` で始まり途中に `@` を含まない文字列（ローカルID `@user` か ATP ハンドル
 //!    `@user.bsky.social` か）を見たとき、`.` を含むかどうかでどちらかを判別できる
 //!    （ローカルユーザー名に `.` が現れないことが前提のため）。
+//!
+//! 大文字小文字: username 自体には大文字を許可する（表示上の見た目を尊重する）が、
+//! ATPハンドルを組み立てる箇所（DID document の `alsoKnownAs`、resolveHandle/well-known
+//! の応答等）では必ず小文字化した値を使う。DNS/HTTPホスト名は経路上（プロキシ・リゾルバ・
+//! Bluesky側の正規化）で小文字化されうるため、大文字混じりのハンドルを PLC に登録すると
+//! 恒久的に解決不能（bsky.app 上で `handle.invalid`）になる実障害が過去に発生した。
+//! ハンドルの大小差だけで別ユーザーになれると衝突するため、ユーザー名の重複検証は
+//! 大文字小文字を区別しない（`ActorRepository::find_by_username_domain` 等）。
 
 /// list-relay 仮想アクター（リスト機能 #63 のプロキシフォロー用）の予約ユーザー名。
 pub const PROXY_ACTOR_USERNAME: &str = "list-relay";
@@ -26,6 +34,12 @@ pub fn is_valid_local_username(s: &str) -> bool {
         return false;
     }
     bytes.iter().all(|&b| is_alnum(b) || b == b'-')
+}
+
+/// ATPハンドル用に正規化したユーザー名（小文字化のみ。文字種の妥当性は
+/// `is_valid_local_username` で既に検証済みであることが前提）。
+pub fn to_atp_username(s: &str) -> String {
+    s.to_ascii_lowercase()
 }
 
 /// 予約ユーザー名か（大文字小文字を区別しない）。
@@ -54,6 +68,13 @@ mod tests {
     fn rejects_leading_trailing_hyphen() {
         assert!(!is_valid_local_username("-alice"));
         assert!(!is_valid_local_username("alice-"));
+    }
+
+    #[test]
+    fn accepts_uppercase_but_lowercases_for_atp() {
+        assert!(is_valid_local_username("Alice"));
+        assert_eq!(to_atp_username("Alice"), "alice");
+        assert_eq!(to_atp_username("ALICE"), "alice");
     }
 
     #[test]

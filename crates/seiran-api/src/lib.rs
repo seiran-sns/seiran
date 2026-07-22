@@ -493,7 +493,7 @@ async fn ensure_handle_txt_records(state: &AppState) {
         }
     };
     for (username, did) in rows {
-        let handle = format!("{}.{}", username, state.local_domain);
+        let handle = format!("{}.{}", seiran_common::username::to_atp_username(&username), state.local_domain);
         match cf.ensure_atproto_txt(&handle, &did).await {
             Ok(_) => tracing::info!("[startup] TXT 確認済み: _atproto.{}", handle),
             Err(e) => tracing::error!("[startup] TXT 登録失敗: {}: {}", handle, e),
@@ -550,7 +550,7 @@ async fn backfill_identity_events(state: &AppState) {
     };
 
     for (actor_id, username, did) in missing {
-        let handle = format!("{}.{}", username, state.local_domain);
+        let handle = format!("{}.{}", seiran_common::username::to_atp_username(&username), state.local_domain);
         match state.atp_service.broadcast_identity_event(actor_id, &did, &handle, now).await {
             Ok(_) => tracing::info!("[startup] #identity broadcast: {}", handle),
             Err(e) => tracing::error!("[startup] #identity 失敗 {}: {}", handle, e),

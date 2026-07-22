@@ -176,8 +176,10 @@ impl ActorRepository for PgActorRepository {
         username: &str,
         domain: &str,
     ) -> Result<Option<Actor>, sqlx::Error> {
+        // username は DNS ラベルとして扱う（大文字小文字を区別しない）。
+        // `crates/seiran-common/src/username.rs` のモジュールドキュメント参照。
         sqlx::query_as::<_, Actor>(&format!(
-            "SELECT {ACTOR_COLS} FROM actors WHERE username = $1 AND domain = $2 LIMIT 1"
+            "SELECT {ACTOR_COLS} FROM actors WHERE LOWER(username) = LOWER($1) AND domain = $2 LIMIT 1"
         ))
         .bind(username)
         .bind(domain)
@@ -226,9 +228,11 @@ impl ActorRepository for PgActorRepository {
         username: &str,
         domain: &str,
     ) -> Result<Option<String>, sqlx::Error> {
+        // resolveHandle / well-known はハンドルを DNS ラベルとして扱うため大文字小文字を
+        // 区別しない（`crates/seiran-common/src/username.rs` 参照）。
         let row: Option<(String,)> = sqlx::query_as(
             "SELECT at_did FROM actors
-             WHERE username = $1 AND domain = $2 AND at_did IS NOT NULL LIMIT 1",
+             WHERE LOWER(username) = LOWER($1) AND domain = $2 AND at_did IS NOT NULL LIMIT 1",
         )
         .bind(username)
         .bind(domain)

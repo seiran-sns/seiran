@@ -1062,6 +1062,7 @@ mod tests {
             "bafyreidummycid",
             "2024-01-01T00:00:00.000Z",
             Some("👍"),
+            1,
         ).unwrap();
         assert!(!cbor.is_empty());
         assert_eq!(cid_from_dagcbor(&cbor), cid);
@@ -1069,8 +1070,8 @@ mod tests {
 
     #[test]
     fn test_encode_bsky_feed_like_without_emoji_omits_field() {
-        let (with_emoji, _) = encode_bsky_feed_like("at://a/b/c", "cid1", "2024-01-01T00:00:00.000Z", Some("❤")).unwrap();
-        let (without_emoji, _) = encode_bsky_feed_like("at://a/b/c", "cid1", "2024-01-01T00:00:00.000Z", None).unwrap();
+        let (with_emoji, _) = encode_bsky_feed_like("at://a/b/c", "cid1", "2024-01-01T00:00:00.000Z", Some("❤"), 1).unwrap();
+        let (without_emoji, _) = encode_bsky_feed_like("at://a/b/c", "cid1", "2024-01-01T00:00:00.000Z", None, 2).unwrap();
         assert_ne!(with_emoji, without_emoji, "emoji フィールドの有無で CBOR が変わらないのはおかしい");
     }
 }

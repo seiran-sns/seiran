@@ -64,7 +64,7 @@ pub async fn withdraw(
 
     // 2. ATP #account（active=false, status=deleted）を Relay に送信
     if let Some(did) = actor.at_did.as_deref() {
-        let handle = format!("{}.{}", actor.username, state.local_domain);
+        let handle = format!("{}.{}", seiran_common::username::to_atp_username(&actor.username), state.local_domain);
         if let Err(e) = state
             .atp_service
             .broadcast_account_event(actor_id, did, &handle, now, false, Some("deleted"))

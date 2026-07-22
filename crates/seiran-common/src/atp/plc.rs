@@ -97,7 +97,9 @@ pub fn prepare_plc_genesis(
     rotation_signing_key: &SigningKey,
 ) -> Result<PlcGenesis, PlcError> {
     let rotation_did_key = p256_to_did_key(rotation_signing_key.verifying_key());
-    let handle = format!("at://{}.{}", username, pds_domain);
+    // ATPハンドルは常に小文字（`crate::username::to_atp_username` 参照。DNS/HTTPホスト名は
+    // 経路上で小文字化されうるため、大文字混じりで PLC に登録すると恒久的に解決不能になる）。
+    let handle = format!("at://{}.{}", crate::username::to_atp_username(username), pds_domain);
     let pds_endpoint = format!("https://{}", pds_domain);
 
     let user_signing_key = SigningKey::random(&mut OsRng);

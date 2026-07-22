@@ -185,7 +185,7 @@ pub async fn register(
 
     // #identity フレームを Relay に送信して AppView の handle キャッシュを更新させる。
     // commit_profile より後に送信することで seq 順序が保たれる。
-    let handle = format!("{}.{}", req.username, state.local_domain);
+    let handle = format!("{}.{}", seiran_common::username::to_atp_username(&req.username), state.local_domain);
     if let Err(e) = state.atp_service.broadcast_identity_event(actor_id, &at_did, &handle, now).await {
         tracing::error!("[register] #identity broadcast 失敗（登録は完了済み）: {}", e);
     }
