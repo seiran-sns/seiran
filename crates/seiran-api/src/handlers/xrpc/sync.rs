@@ -151,69 +151,81 @@ async fn handle_subscribe_repos(
 ) {
     let mut rx = state.atp_service.event_tx().subscribe();
 
-    if let Some(cursor) = params.cursor {
-        let events = state
-            .atp_repo
-            .find_events_after(cursor, 500)
-            .await
-            .unwrap_or_default();
+    if let Some(mut cursor) = params.cursor {
+        const BACKFILL_PAGE_SIZE: i64 = 500;
+        loop {
+            let events = state
+                .atp_repo
+                .find_events_after(cursor, BACKFILL_PAGE_SIZE)
+                .await
+                .unwrap_or_default();
+            let page_len = events.len() as i64;
 
-        for evt in events {
-            // frame_bytes が保存済みなら解凍してそのまま送る（再構築なし）
-            if let Some(ref compressed) = evt.frame_bytes {
-                match zstd::decode_all(&compressed[..]) {
-                    Ok(frame) => {
-                        if socket.send(Message::Binary(frame)).await.is_err() {
-                            return;
+            for evt in events {
+                cursor = evt.id;
+
+                // frame_bytes が保存済みなら解凍してそのまま送る（再構築なし）
+                if let Some(ref compressed) = evt.frame_bytes {
+                    match zstd::decode_all(&compressed[..]) {
+                        Ok(frame) => {
+                            if socket.send(Message::Binary(frame)).await.is_err() {
+                                return;
+                            }
+                            continue;
                         }
-                        continue;
+                        Err(e) => {
+                            tracing::error!("[subscribeRepos] frame_bytes 解凍失敗 id={}: {}", evt.id, e);
+                        }
                     }
-                    Err(e) => {
-                        tracing::error!("[subscribeRepos] frame_bytes 解凍失敗 id={}: {}", evt.id, e);
+                }
+
+                // frame_bytes が NULL の旧レコードは event_type に応じて再構築する
+                let time_str = evt.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                let frame_result = if evt.event_type == "identity" {
+                    let handle = evt.handle.as_deref().unwrap_or("");
+                    build_identity_frame(evt.id, &evt.did, handle, &time_str)
+                } else {
+                    let commit_cid = match evt.commit_cid.as_deref().and_then(|s| cid_from_str(s).ok()) {
+                        Some(c) => c,
+                        None => continue,
+                    };
+                    let prev_cid = evt.prev_cid.as_deref().and_then(|s| cid_from_str(s).ok());
+                    let ops: Vec<CommitEvtOp> = evt
+                        .ops_json
+                        .as_ref()
+                        .and_then(|j| j.as_array())
+                        .unwrap_or(&vec![])
+                        .iter()
+                        .filter_map(|op| {
+                            let action = op["action"].as_str()?.to_string();
+                            let path = op["path"].as_str()?.to_string();
+                            let cid = op["cid"].as_str().and_then(|s| cid_from_str(s).ok());
+                            Some(CommitEvtOp { action, path, cid })
+                        })
+                        .collect();
+                    let car = evt.car_bytes.as_deref().unwrap_or(&[]);
+                    let rev = evt.rev.as_deref().unwrap_or("");
+                    // frame_bytes 未保存の旧イベント再構築用フォールバック。atp_repo_events は
+                    // コミット時点の prevData を保持していないため None を渡す（通常この経路は
+                    // 使われない。新規コミットは commit_record_inner 側で frame_bytes に
+                    // prevData 込みで保存済み）。
+                    build_commit_frame(
+                        evt.id, &evt.did, &commit_cid, prev_cid.as_ref(),
+                        rev, evt.since_rev.as_deref(), car, &ops, &[], &time_str,
+                        None,
+                    )
+                };
+                if let Ok(frame) = frame_result {
+                    if socket.send(Message::Binary(frame)).await.is_err() {
+                        return;
                     }
                 }
             }
 
-            // frame_bytes が NULL の旧レコードは event_type に応じて再構築する
-            let time_str = evt.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            let frame_result = if evt.event_type == "identity" {
-                let handle = evt.handle.as_deref().unwrap_or("");
-                build_identity_frame(evt.id, &evt.did, handle, &time_str)
-            } else {
-                let commit_cid = match evt.commit_cid.as_deref().and_then(|s| cid_from_str(s).ok()) {
-                    Some(c) => c,
-                    None => continue,
-                };
-                let prev_cid = evt.prev_cid.as_deref().and_then(|s| cid_from_str(s).ok());
-                let ops: Vec<CommitEvtOp> = evt
-                    .ops_json
-                    .as_ref()
-                    .and_then(|j| j.as_array())
-                    .unwrap_or(&vec![])
-                    .iter()
-                    .filter_map(|op| {
-                        let action = op["action"].as_str()?.to_string();
-                        let path = op["path"].as_str()?.to_string();
-                        let cid = op["cid"].as_str().and_then(|s| cid_from_str(s).ok());
-                        Some(CommitEvtOp { action, path, cid })
-                    })
-                    .collect();
-                let car = evt.car_bytes.as_deref().unwrap_or(&[]);
-                let rev = evt.rev.as_deref().unwrap_or("");
-                // frame_bytes 未保存の旧イベント再構築用フォールバック。atp_repo_events は
-                // コミット時点の prevData を保持していないため None を渡す（通常この経路は
-                // 使われない。新規コミットは commit_record_inner 側で frame_bytes に
-                // prevData 込みで保存済み）。
-                build_commit_frame(
-                    evt.id, &evt.did, &commit_cid, prev_cid.as_ref(),
-                    rev, evt.since_rev.as_deref(), car, &ops, &[], &time_str,
-                    None,
-                )
-            };
-            if let Ok(frame) = frame_result {
-                if socket.send(Message::Binary(frame)).await.is_err() {
-                    return;
-                }
+            // 取得件数がページサイズ未満なら残りは無い。ページ丁度なら続きがある
+            // 可能性があるため、最後に送った id を新しい cursor として再取得する。
+            if page_len < BACKFILL_PAGE_SIZE {
+                break;
             }
         }
     }
