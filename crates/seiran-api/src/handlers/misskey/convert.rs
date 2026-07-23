@@ -167,7 +167,18 @@ fn to_misskey_note(
     for r in reactions {
         reactions_map.insert(r.emoji.clone(), r.count);
         if let Some(url) = &r.emoji_url {
-            reaction_emojis.insert(r.emoji.clone(), url.clone());
+            // Misskey 本家の `reactionEmojis` のキーはコロンなし shortcode
+            // （例: "blob_cat"）。`reactions` のキー（":blob_cat:"）とは異なる。
+            // seiran の reactions.content は ":shortcode:" 形式なので先頭末尾の ':' を除去する。
+            // クライアント（Aria 等）はこのキーで reactions と reactionEmojis を突き合わせるため、
+            // コロン付きのまま入れると照合が外れ画像が表示されない。
+            let emoji_key = r
+                .emoji
+                .strip_prefix(':')
+                .and_then(|s| s.strip_suffix(':'))
+                .unwrap_or(&r.emoji)
+                .to_string();
+            reaction_emojis.insert(emoji_key, url.clone());
         }
         if r.reacted_by_me {
             my_reaction = Some(r.emoji.clone());
@@ -323,7 +334,13 @@ pub async fn build_notifications(
             // `reaction_emoji_url`（存在する場合）でこの通知固有の1エントリだけ上書きし、
             // 過去の通知でも確実に画像解決できるようにする。
             if let (Some(note), Some(reaction), Some(url)) = (&mut note, &r.reaction, &r.reaction_emoji_url) {
-                note.reaction_emojis.insert(reaction.clone(), url.clone());
+                // `to_misskey_note` と同様に `:shortcode:` → `shortcode` に変換する。
+                let emoji_key = reaction
+                    .strip_prefix(':')
+                    .and_then(|s| s.strip_suffix(':'))
+                    .unwrap_or(reaction)
+                    .to_string();
+                note.reaction_emojis.insert(emoji_key, url.clone());
             }
             MisskeyNotification {
                 id: r.id.to_string(),
