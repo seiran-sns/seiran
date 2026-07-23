@@ -4,6 +4,27 @@
   border-bottom: 1px solid var(--border);
 }
 
+.composerToggleBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0 0 8px;
+}
+
+.composerToggleBtn:hover {
+  color: var(--text);
+}
+
+.composerToggleIcon {
+  font-size: 0.7rem;
+}
+
 .feedTabs {
   display: flex;
   border-bottom: 1px solid var(--border);

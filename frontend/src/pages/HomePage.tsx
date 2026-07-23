@@ -17,6 +17,7 @@ import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
 const PAGE_SIZE = 30;
+const COMPOSER_COLLAPSED_KEY = "seiran_composer_collapsed";
 
 function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; since_id?: string }) {
   // DM（visibility="direct"）はタイムラインに一切現れない仕様のため、対応エンドポイントには
@@ -39,6 +40,9 @@ export default function HomePage() {
   const [pinnedHashtags, setPinnedHashtags] = useState<{ name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
+  const [composerCollapsed, setComposerCollapsed] = useState(
+    () => localStorage.getItem(COMPOSER_COLLAPSED_KEY) === "1"
+  );
   const { timelineTab, setTimelineTab } = useRightPane();
   const { registerNote, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
@@ -158,6 +162,14 @@ export default function HomePage() {
   // リアルタイム更新（#37）: ストリームで届いたポストをアニメ付きで先頭挿入。
   useEffect(() => registerNote((n) => prepend(n, true)), [registerNote]);
 
+  function toggleComposerCollapsed() {
+    setComposerCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem(COMPOSER_COLLAPSED_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
+
   const center = (
     <>
       <header className={panel.header}>
@@ -165,7 +177,16 @@ export default function HomePage() {
       </header>
 
       <div className={styles.composerWrap}>
-        <PostComposer onPosted={prepend} />
+        <button
+          type="button"
+          className={styles.composerToggleBtn}
+          onClick={toggleComposerCollapsed}
+          aria-expanded={!composerCollapsed}
+        >
+          <span>{t("home:homePage.composerToggleLabel")}</span>
+          <span className={styles.composerToggleIcon}>{composerCollapsed ? "▶" : "▼"}</span>
+        </button>
+        {!composerCollapsed && <PostComposer onPosted={prepend} />}
       </div>
 
       <div className={styles.feedTabs}>

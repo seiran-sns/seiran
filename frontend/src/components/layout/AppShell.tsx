@@ -55,6 +55,16 @@ export default function AppShell({ center, right, onPosted }: AppShellProps) {
         )}
       </button>
 
+      {/* スマホ表示用フローティング投稿ボタン */}
+      <button
+        className={styles.floatingComposeBtn}
+        onClick={() => setComposeOpen(true)}
+        aria-label={t("nav:appShell.composeModalTitle")}
+        title={t("nav:appShell.composeModalTitle")}
+      >
+        <span className={styles.floatingComposeIcon}>✏️</span>
+      </button>
+
       {/* スマホ表示用モバイルドロワーメニュー */}
       {mobileMenuOpen && (
         <div className={styles.mobileBackdrop} onClick={() => setMobileMenuOpen(false)}>

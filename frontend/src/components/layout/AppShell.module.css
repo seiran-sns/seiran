@@ -199,6 +199,11 @@
   display: none;
 }
 
+/* ── スマホ用フローティング投稿ボタン ─────────────────────────── */
+.floatingComposeBtn {
+  display: none;
+}
+
 /* ── スマホ用モバイルドロワー ───────────────────────────────── */
 .mobileBackdrop {
   position: fixed;
@@ -405,5 +410,38 @@
     padding: 3px 6px;
     border-radius: 999px;
     border: 2px solid var(--bg);
+  }
+
+  .floatingComposeBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--accent-strong);
+    color: #ffffff;
+    border: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+    cursor: pointer;
+    z-index: 1000;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+
+  .floatingComposeBtn:hover {
+    background: var(--accent-hover);
+    transform: scale(1.05);
+  }
+
+  .floatingComposeBtn:active {
+    transform: scale(0.95);
+  }
+
+  .floatingComposeIcon {
+    font-size: 1.3rem;
+    line-height: 1;
   }
 }
