@@ -46,6 +46,20 @@ export default function HomePage() {
   const { timelineTab, setTimelineTab } = useRightPane();
   const { registerNote, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+
+  // フィードタブ（下記feedTabs）はheaderの直下にstickyで張り付ける。両者とも
+  // position: sticky; top: 0 だと重なってしまうため、headerの実高さ分だけオフセットする。
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const update = () => setHeaderHeight(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const onError = useCallback((err: unknown) => showError(getErrorMessage(err)), [showError]);
   const fetchPage = useCallback(
@@ -172,7 +186,7 @@ export default function HomePage() {
 
   const center = (
     <>
-      <header className={panel.header}>
+      <header className={panel.header} ref={headerRef}>
         <span className={panel.title}>{t("home:homePage.title")}</span>
       </header>
 
@@ -189,7 +203,7 @@ export default function HomePage() {
         {!composerCollapsed && <PostComposer onPosted={prepend} />}
       </div>
 
-      <div className={styles.feedTabs}>
+      <div className={styles.feedTabs} style={{ top: headerHeight }}>
         <button
           className={`${styles.feedTab} ${feed.kind === "home" ? styles.feedTabActive : ""}`}
           onClick={() => setFeed({ kind: "home" })}
