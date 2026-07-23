@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note, getErrorMessage } from "../api/client";
+import RemoteBanner from "../components/common/RemoteBanner";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
@@ -102,6 +103,11 @@ export default function NoteDetailPage() {
 
       {loading && <p className={panel.message}>{t("common:loading")}</p>}
       {error && <p className={panel.message}>{error}</p>}
+
+      {/* リポスト詳細（#45）: 表示すべき実体（リポスト元があればそちら）でリモート判定する。 */}
+      {display && display.user.actorType !== "local" && display.remoteUrl && (
+        <RemoteBanner message={t("common:remoteBanner.note")} url={display.remoteUrl} />
+      )}
 
       {note && (
         <>

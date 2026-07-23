@@ -163,7 +163,8 @@ pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_act
         "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                 a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                 COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
+                p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
+                p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
          LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id

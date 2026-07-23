@@ -1,4 +1,4 @@
-import { Note } from "../api/client";
+import { Note, UserProfile } from "../api/client";
 import i18n from "../i18n";
 
 /** ISO 文字列を現在の表示言語の短い日時表記に変換する。 */
@@ -33,6 +33,14 @@ export function profileQuery(username: string, domain?: string): string {
 /** プロフィールの permalink パス（Misskey 互換の `/@handle` 形式・#36）。 */
 export function profilePath(username: string, domain?: string): string {
   return `/@${profileQuery(username, domain)}`;
+}
+
+/** リモートユーザーを元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。ローカルなら null。 */
+export function remoteProfileUrl(profile: UserProfile): string | null {
+  if (profile.actor_type === "local") return null;
+  if (profile.ap_uri) return profile.ap_uri;
+  if (profile.at_did) return `https://bsky.app/profile/${profile.at_did}`;
+  return null;
 }
 
 /** アクター種別に対応するプロトコルバッジ（絵文字 + ラベル）。 */

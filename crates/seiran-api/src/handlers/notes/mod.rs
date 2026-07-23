@@ -154,6 +154,7 @@ async fn create_repost(
         visibility: None,
         deliver_fedi: None,
         deliver_bsky: None,
+        remote_url: None,
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
     embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
@@ -444,6 +445,7 @@ async fn create_regular_post(
         visibility: if visibility == "public" { None } else { Some(visibility.to_string()) },
         deliver_fedi: Some(deliver_fedi),
         deliver_bsky: Some(deliver_bsky),
+        remote_url: None,
     };
 
     if visibility == "direct" {

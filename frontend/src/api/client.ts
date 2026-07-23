@@ -277,6 +277,8 @@ export interface Note {
   /** ローカル投稿がFedi/Bskyへ実際に配送されたか。ローカル投稿以外では省略。 */
   deliverFedi?: boolean;
   deliverBsky?: boolean;
+  /** リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。ローカル投稿は省略。 */
+  remoteUrl?: string;
 }
 
 export interface ReactionSummary {
@@ -387,6 +389,8 @@ interface RawNote {
   visibility?: string;
   deliverFedi?: boolean;
   deliverBsky?: boolean;
+  remoteUrl?: string;
+  remote_url?: string;
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -416,6 +420,7 @@ function normalizeNote(r: RawNote): Note {
     visibility: r.visibility,
     deliverFedi: r.deliverFedi,
     deliverBsky: r.deliverBsky,
+    remoteUrl: r.remoteUrl ?? r.remote_url,
   };
 }
 

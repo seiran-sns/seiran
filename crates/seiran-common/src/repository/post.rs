@@ -47,6 +47,14 @@ pub struct TimelinePost {
     /// `@handle.domain` へ置換する（ハンドルは可変なため）。ローカル投稿・Fedi受信は常に空配列。
     #[sqlx(default)]
     pub mention_facets: Option<serde_json::Value>,
+    /// リモート投稿の AP Note ID（`posts.ap_object_id`）。「リモートで表示」リンク組み立て用
+    /// （ローカル投稿・Bsky受信投稿では `None`）。全クエリで取得しているわけではない。
+    #[sqlx(default)]
+    pub post_ap_object_id: Option<String>,
+    /// リモート投稿の AT URI（`posts.at_uri`、`at://did/collection/rkey` 形式）。
+    /// 「リモートで表示」リンク組み立て用（ローカル投稿・Fedi受信投稿では `None`）。
+    #[sqlx(default)]
+    pub post_at_uri: Option<String>,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -641,7 +649,8 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
+                    p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id

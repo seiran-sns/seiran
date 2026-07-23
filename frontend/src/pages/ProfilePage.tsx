@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api, Note, UserProfile, getErrorMessage } from "../api/client";
 import ActionsMenu, { ActionsMenuItem } from "../components/common/ActionsMenu";
 import Modal from "../components/common/Modal";
+import RemoteBanner from "../components/common/RemoteBanner";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
 import NoteList from "../components/note/NoteList";
@@ -11,7 +12,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
-import { profileQuery } from "../lib/format";
+import { profileQuery, remoteProfileUrl } from "../lib/format";
 import { setFollowStatus as setFollowStatusStore, useFollowStatus } from "../stores/followStatusStore";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
@@ -229,6 +230,10 @@ export default function ProfilePage() {
         </button>
         <span className={panel.title}>{t("profile:profilePage.title")}</span>
       </header>
+
+      {profile && remoteProfileUrl(profile) && (
+        <RemoteBanner message={t("common:remoteBanner.user")} url={remoteProfileUrl(profile) as string} />
+      )}
 
       {loading && <p className={panel.message}>{t("common:loading")}</p>}
       {error && <p className={panel.message}>{error}</p>}

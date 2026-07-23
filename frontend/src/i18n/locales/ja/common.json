@@ -20,5 +20,10 @@
   "search": "検索",
   "settings": "設定",
   "error": "エラー",
-  "unknownError": "不明なエラーが発生しました"
+  "unknownError": "不明なエラーが発生しました",
+  "remoteBanner": {
+    "note": "リモートのポストです",
+    "user": "リモートのユーザーです",
+    "viewRemote": "リモートで表示"
+  }
 }

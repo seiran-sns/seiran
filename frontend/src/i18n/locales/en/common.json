@@ -20,5 +20,10 @@
   "search": "Search",
   "settings": "Settings",
   "error": "Error",
-  "unknownError": "An unknown error occurred"
+  "unknownError": "An unknown error occurred",
+  "remoteBanner": {
+    "note": "This is a remote post",
+    "user": "This is a remote user",
+    "viewRemote": "View on remote server"
+  }
 }

@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use seiran_common::repository::TimelinePost;
 
+use super::delivery::at_uri_to_bsky_app_url;
+
 #[derive(Deserialize)]
 pub struct CreateNoteRequest {
     pub text: Option<String>,
@@ -116,6 +118,10 @@ pub struct NoteResponse {
     pub deliver_fedi: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deliver_bsky: Option<bool>,
+    /// リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。
+    /// ローカル投稿、または元URIを未取得のリモート投稿では省略（#リモートで表示バナー）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_url: Option<String>,
 }
 
 /// `serde_json::Value`（JSONB由来のオブジェクト、`None`/非オブジェクトなら空）を
@@ -200,6 +206,16 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
     let actor_type = if p.actor_type.is_empty() { "local".to_string() } else { p.actor_type };
     let is_local = actor_type == "local";
 
+    // リモート投稿の元URL: Fedi（AP Note ID）を優先し、無ければ Bsky（AT URI → bsky.app）を使う。
+    // seiranリモート投稿は両方の実体を持つことがあるが、seiran自体はAP側が正規表現のためAP優先。
+    let remote_url = if is_local {
+        None
+    } else if let Some(ap_uri) = p.post_ap_object_id.filter(|s| !s.is_empty()) {
+        Some(ap_uri)
+    } else {
+        p.post_at_uri.as_deref().map(at_uri_to_bsky_app_url)
+    };
+
     NoteResponse {
         id: p.id.to_string(),
         text: p.body,
@@ -225,6 +241,7 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         visibility: if p.visibility == "public" { None } else { Some(p.visibility) },
         deliver_fedi: if is_local { Some(p.deliver_fedi) } else { None },
         deliver_bsky: if is_local { Some(p.deliver_bsky) } else { None },
+        remote_url,
     }
 }
 
