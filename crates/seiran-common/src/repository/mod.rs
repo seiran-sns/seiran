@@ -25,12 +25,12 @@ pub mod user;
 
 pub use actor::{Actor, ActorProfileRow, ActorRepository, PgActorRepository};
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
-pub use block::{BlockRepository, PgBlockRepository};
+pub use block::{BlockRepository, BlockedActorRow, PgBlockRepository};
 pub use dm::{DmPeerSummary, DmRepository, PgDmRepository};
 pub use email_verification::{EmailVerificationRepository, PgEmailVerificationRepository};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
-pub use mute::{MuteRepository, PgMuteRepository};
+pub use mute::{MuteRepository, MutedActorRow, PgMuteRepository};
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
 pub use list::{
     ListMemberRow, ListRepository, ListRow, PgListRepository, MAX_LISTS_PER_OWNER,

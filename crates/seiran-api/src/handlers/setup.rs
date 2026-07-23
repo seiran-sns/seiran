@@ -118,6 +118,7 @@ pub async fn setup(
             role: "admin".to_string(),
             actor_id,
             avatar_url: None, // セットアップ直後はアバター未設定
+            language_preference: None, // セットアップ直後は「自動」
         },
     }))
 }

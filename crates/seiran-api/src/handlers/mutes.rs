@@ -46,6 +46,34 @@ pub async fn create_mute(
     Json(MuteResponse { status: "muted".to_string() }).into_response()
 }
 
+#[derive(Serialize)]
+pub struct MutedActorItem {
+    pub actor_id: String,
+    pub username: String,
+    pub domain: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+/// `GET /api/mutes` — 自分がミュート中のアクター一覧（設定画面のミュート・ブロック管理、#55）。
+pub async fn list_mutes(user: AuthedUser, State(state): State<AppState>) -> impl IntoResponse {
+    match state.mutes.list_muted(user.actor_id).await {
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(|r| MutedActorItem {
+                    actor_id: r.id.to_string(),
+                    username: r.username,
+                    domain: r.domain,
+                    display_name: r.display_name,
+                    avatar_url: r.avatar_url,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => ApiError::Internal(format!("[list_mutes] 一覧取得失敗: {}", e)).into_response(),
+    }
+}
+
 pub async fn delete_mute(
     user: AuthedUser,
     State(state): State<AppState>,

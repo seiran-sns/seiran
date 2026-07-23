@@ -1,1 +1,42 @@
-{}
+{
+  "menu": {
+    "title": "Settings",
+    "account": "Account",
+    "profile": "Profile",
+    "mutesBlocks": "Mutes & Blocks",
+    "lists": "Lists",
+    "appearance": "Appearance",
+    "appTokens": "App tokens",
+    "comingSoon": "Coming soon"
+  },
+  "appearanceSettings": {
+    "title": "Appearance settings",
+    "languageTitle": "Language",
+    "languageHint": "Choose the app's display language. \"Automatic\" follows your browser's language setting.",
+    "languageAuto": "Automatic",
+    "languageJa": "日本語",
+    "languageEn": "English",
+    "saved": "Language preference saved."
+  },
+  "accountSettings": {
+    "title": "Account settings",
+    "identityTitle": "Account info",
+    "emailLabel": "Email",
+    "passwordTitle": "Change password",
+    "currentPasswordLabel": "Current password",
+    "newPasswordLabel": "New password (8+ characters)",
+    "newPasswordConfirmLabel": "Confirm new password",
+    "changePasswordButton": "Change password",
+    "passwordSaved": "Password changed.",
+    "passwordMismatch": "New passwords don't match."
+  },
+  "mutesBlocks": {
+    "title": "Mutes & Blocks",
+    "mutesTab": "Muted",
+    "blocksTab": "Blocked",
+    "noMutes": "You haven't muted anyone.",
+    "noBlocks": "You haven't blocked anyone.",
+    "unmuteButton": "Unmute",
+    "unblockButton": "Unblock"
+  }
+}

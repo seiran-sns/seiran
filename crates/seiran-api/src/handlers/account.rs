@@ -4,9 +4,90 @@ use axum::{extract::State, http::HeaderMap, Json};
 use serde::Deserialize;
 
 use seiran_common::ApDeliveryKind;
+use seiran_common::LocalAuthProvider;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 
 use crate::{error::ApiError, middleware::extract_auth, AppState};
+
+/// フロントの i18n が対応する言語コード（`account:languagePreference` の許可値）。
+const SUPPORTED_LANGUAGES: [&str; 2] = ["ja", "en"];
+
+#[derive(Deserialize)]
+pub struct UpdateLanguageRequest {
+    /// `None` は「自動」（ブラウザ設定に従う）。
+    pub language: Option<String>,
+}
+
+/// `POST /api/account/language`（#55 表示設定）
+/// 設定画面「表示」＞「言語」から呼ばれる。`language: null` で「自動」に戻せる。
+pub async fn update_language(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateLanguageRequest>,
+) -> Result<Json<()>, ApiError> {
+    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+
+    if let Some(lang) = &req.language {
+        if !SUPPORTED_LANGUAGES.contains(&lang.as_str()) {
+            return Err(ApiError::BadRequest("UNSUPPORTED_LANGUAGE".to_owned()));
+        }
+    }
+
+    state
+        .users
+        .update_language_preference(auth_user.user_id, req.language.as_deref())
+        .await
+        .map_err(|e| ApiError::Internal(format!("[update-language] users UPDATE 失敗: {}", e)))?;
+
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// `POST /api/account/change-password`（#55）
+/// ログイン中ユーザーが設定画面から自分でパスワードを変更する。メール経由のトークン方式
+/// （`/api/auth/reset-password`）とは別経路で、現在のパスワードの確認を必須とする。
+pub async fn change_password(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<ChangePasswordRequest>,
+) -> Result<Json<()>, ApiError> {
+    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+
+    if req.new_password.len() < 8 {
+        return Err(ApiError::BadRequest("PASSWORD_TOO_SHORT".to_owned()));
+    }
+
+    let row = sqlx::query!("SELECT password_hash FROM users WHERE id = $1", auth_user.user_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
+    let current_hash = row.password_hash.ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
+
+    let current_ok = LocalAuthProvider::verify_password(&req.current_password, &current_hash)
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !current_ok {
+        return Err(ApiError::BadRequest("CURRENT_PASSWORD_INCORRECT".to_owned()));
+    }
+
+    let password_hash = LocalAuthProvider::hash_password(&req.new_password).map_err(|e| {
+        tracing::error!("[change-password] ハッシュ失敗: {}", e);
+        ApiError::Internal("パスワード処理エラー".to_string())
+    })?;
+
+    state
+        .users
+        .update_password_hash(auth_user.user_id, &password_hash)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[change-password] users UPDATE 失敗: {}", e)))?;
+
+    Ok(Json(()))
+}
 
 #[derive(Deserialize)]
 pub struct WithdrawRequest {

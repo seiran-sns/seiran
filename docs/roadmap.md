@@ -25,12 +25,13 @@
 - [x] **フェーズ7.13: カスタム絵文字リアクション** — ローカルユーザーがカスタム絵文字（`:shortcode:`）でリアクションできるようにした。バックエンドは`validate_reaction_content`をUnicode/カスタムの判別のみ行う純関数に整理し、`create_reaction`が`EmojiRepository::find_url_by_shortcode`でURL解決・実在確認する。AP配送はMisskey/Fedibird互換の`EmojiReact`＋`tag: [{type: Emoji, ...}]`まで対応（受信側の`build_emoji_map`と対称）、ATPはLike＋`emoji`拡張フィールドのベストエフォートのまま。フロントは`ReactionPicker`を刷新し、`Modal`内の`EmojiPickerPanel`（検索欄＋よく使う/絵文字/カスタムのタブ＋グリッド）に統合。Unicode絵文字データセット（`unicode-emoji-json`）は`React.lazy`で遅延ロード。「よく使う」は自分の現在のリアクションを`GET /api/reactions/frequent`で頻度集計した近似値。あわせて`POST /api/admin/emojis`の500エラー（`media_file_id`をJS `Number()`変換すると53bit精度の壁でsnowflake IDが破損し外部キー違反になっていた）を、リクエストボディを文字列で受けてサーバー側でparseする方式に修正。管理画面の絵文字一覧に画像プレビューも追加。絵文字ZIPインポート（`/api/admin/emojis/import`）はボディサイズ上限未設定で大きいZIPが`multipart/form-data`解析エラーになる不具合、およびアニメーションGIF/WebP/APNGが`process_image`で静止画WebPへ変換されてしまう不具合（`image`クレート0.25はアニメーション書き出し未対応のため、アニメーション画像はリサイズ・再エンコードせず元バイト列のまま保存する方式に修正）も解消。加えて`ReactionChips`の各チップにホバーすると、そのリアクションを付けたアクター一覧（アイコン＋名前）をポップオーバー表示する機能（`GET /api/notes/:id/reactions/:content/actors`）を追加。詳細: `docs/protocols.md`、`docs/database.md`、`docs/ui_spec.md` 2.2b節
 - [x] **フェーズ7.14: 「リモートで表示」バナー** — ポスト詳細・プロフィール画面に、対象がローカルアクターでない場合の共通バナー（`RemoteBanner`）を追加。Fedi由来はAP URI、Bsky由来は`https://bsky.app/profile/{did}[/post/{rkey}]`へ別タブで遷移するリンクを表示する。`NoteResponse`に`remoteUrl`（`posts.ap_object_id`/`at_uri`から算出）を追加。詳細: `docs/ui_spec.md` 3.3節
 - [x] **フェーズ7.15: プロフィール画面のフォロー中/フォロワー一覧（#56）** — プロフィール右ペインをタブシート化（【投稿】【フォロー中】【フォロワー】、`Tabs`コンポーネント）し、中央ペインのフォロー数・フォロワー数バッジをクリックすると対応タブへ切り替わる。バックエンドは`FollowRepository::list_following`/`list_followers`（`follows.id`によるカーソルページネーション、`actor_is_hidden_for_viewer`でブロック関係を除外）と`count_relations`を追加、`GET /api/users/following`・`/api/users/followers`・`ProfileResponse.following_count`/`follower_count`として公開。DB未登録のリモートアクター（`actor_id`を持たない）はフォロー一覧タブ自体を出さず従来通り投稿一覧のみ表示する。詳細: `docs/ui_spec.md` 2.2節
+- [x] **フェーズ7.16: 設定画面（#55）** — メインメニューに「設定」を新設し、`/settings`（メニュー）・`/settings/account`（アカウント設定）・`/settings/mutes-blocks`（ミュート・ブロック管理）・`/settings/appearance`（表示設定）を追加。アカウント設定はメール/DID表示、現在のパスワード確認付きパスワード変更（`POST /api/account/change-password`、`LocalAuthProvider::verify_password`/`hash_password`を再利用）、退会（旧プロフィール編集画面から移動）を集約する。ミュート・ブロック管理は`MuteRepository::list_muted`/`BlockRepository::list_blocked`（新規追加、最大200件・カーソルページネーションなし）による対象者一覧＋解除ボタンをタブ切り替えで表示する。表示設定は言語（自動/日本語/英語）を`POST /api/account/language`で`users.language_preference`に保存し、`i18n.changeLanguage()`で即時反映する。アプリトークン（発行済みMiAuthトークンの一覧・無効化）は現状バックエンドがトークンをDB永続化していないため未実装、設定メニューに「近日公開」表示のみ残す（#60で切り出し済み）。メールアドレス変更も未実装（#59で切り出し済み）。詳細: `docs/ui_spec.md` 2.7節
 
 ## 未完了・今後の課題
 
 ### フロントエンド
 
-- [ ] **言語切り替えUI** — 現状はブラウザの言語設定への自動追従のみ。ユーザーが手動で言語を選べるUIは未実装
+- [x] **言語切り替えUI** — 設定画面「表示」（`/settings/appearance`、#55）で自動/日本語/英語を選択可能。詳細は上記フェーズ7.16、`docs/ui_spec.md` 2.7節
 - [ ] **ユーザー製翻訳ファイルの適用・配布機能** — ユーザーが独自の言語ファイル（`i18n/locales/{lng}/*.json` と同形式）を作成し、アプリに読み込ませて適用・配布できるようにする構想。現状の名前空間分割構成は `i18n.addResourceBundle()` によるこの拡張を見据えたもの
 
 ### プロトコル
@@ -81,5 +82,6 @@
 - [x] メンション通知のE2E化（ローカル投稿・Fedi受信）。ローカルは`@username`投稿で相手に通知が届くこと・自己メンションで通知されないことを検証、Fedi受信はスタブFediアクターから`tag[].type=="Mention"`付きCreateを送りメンション通知が届くことを検証（`e2e/tests/notifications.spec.ts`）
 - [ ] Bsky受信のメンション通知のE2E化 — `seiran-atp-repo::firehose`は本物のJetstreamサーバーへ接続する設計で、E2E側にイベント注入用のモックが無いため現状のE2E基盤では自動テストできない。実装（`save_bsky_post`内の通知処理）とcurlでの手動確認のみ
 - [x] プロフィール画面のフォロー中/フォロワータブのE2E化（#56、`e2e/tests/follow.spec.ts`）。ユーザー間フォロー後、双方のプロフィールでフォロー数/フォロワー数バッジから右ペインのタブが切り替わり相手アクターが一覧表示されることを検証
+- [x] 設定画面のE2E化（#55、`e2e/tests/settings.spec.ts`）。設定メニューからアカウント設定への遷移とDID表示、現在パスワード誤り時のエラー表示から正しいパスワードでの変更成功・新パスワードでのログインまでの一連、ミュート・ブロック一覧の表示とタブ切り替え・解除操作、表示設定での言語切り替え（英語選択→保存確認→自動に戻す→`/api/auth/me`の`language_preference`検証）を検証
 
 既存の結合テスト基盤: `crates/seiran-api/tests/`（実DB + 実 `seiran_api::router` を使用、`#[ignore]` で通常の `cargo test` から除外し `cargo test -p seiran-api --test <name> -- --ignored` で明示実行）。

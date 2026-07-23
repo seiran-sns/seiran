@@ -370,6 +370,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/reset-password", post(handlers::auth::reset_password))
         // アカウント管理（退会等）
         .route("/api/account/withdraw", post(handlers::account::withdraw))
+        .route("/api/account/change-password", post(handlers::account::change_password))
+        .route("/api/account/language", post(handlers::account::update_language))
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))
@@ -402,9 +404,11 @@ pub fn router(state: AppState) -> Router {
         // ブロック（Bsky準拠：フォロー強制解除＋相互完全非表示。Fediへは Block 配送、Bskyへは app.bsky.graph.block をコミット）
         .route("/api/blocks/create", post(handlers::blocks::create_block))
         .route("/api/blocks/delete", post(handlers::blocks::delete_block))
+        .route("/api/blocks", get(handlers::blocks::list_blocks))
         // ミュート（ローカル効果のみ、AP/ATP配送なし）
         .route("/api/mutes/create", post(handlers::mutes::create_mute))
         .route("/api/mutes/delete", post(handlers::mutes::delete_mute))
+        .route("/api/mutes", get(handlers::mutes::list_mutes))
         // リスト（#63）
         .route("/api/lists",
             get(handlers::lists::my_lists)

@@ -57,6 +57,8 @@ ID 採番は2系統ある。
 
 ローカルアクターは `avatar_media_id`/`banner_media_id`（自前 `media_files` 参照）、リモートアクターは `avatar_url`/`banner_url`（URL直持ち）という排他的な使い分けをしている。
 
+`users.language_preference`（設定画面「表示」＞「言語」）: `ja` / `en` のいずれか、`NULL` は「自動」（ブラウザの言語設定に従う）を意味する。
+
 ### `posts` の設計
 統一ポストID（`id`）はタイムスタンプ内包の Snowflake で、`sinceId`/`untilId` ページネーションの主軸になる。
 

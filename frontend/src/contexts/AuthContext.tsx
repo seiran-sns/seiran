@@ -1,6 +1,14 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import i18n from "../i18n";
 import { api, User, getToken, setUnauthorizedHandler } from "../api/client";
+
+/** サーバーに保存された言語設定（#55）があれば、ブラウザ判定・localStorage より優先して適用する。 */
+function applyLanguagePreference(user: User) {
+  if (user.language_preference) {
+    i18n.changeLanguage(user.language_preference);
+  }
+}
 
 interface AuthContextValue {
   user: User | null;
@@ -25,7 +33,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (getToken()) {
       api.auth
         .me()
-        .then(setUser)
+        .then((u) => {
+          setUser(u);
+          applyLanguagePreference(u);
+        })
         .catch(() => localStorage.removeItem("seiran_token"))
         .finally(() => setLoading(false));
     } else {
@@ -36,6 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   function login(token: string, user: User) {
     localStorage.setItem("seiran_token", token);
     setUser(user);
+    applyLanguagePreference(user);
   }
 
   function logout() {

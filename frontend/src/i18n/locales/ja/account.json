@@ -1,1 +1,42 @@
-{}
+{
+  "menu": {
+    "title": "設定",
+    "account": "アカウント",
+    "profile": "プロフィール",
+    "mutesBlocks": "ミュート・ブロック",
+    "lists": "リスト",
+    "appearance": "表示",
+    "appTokens": "アプリトークン",
+    "comingSoon": "近日公開"
+  },
+  "appearanceSettings": {
+    "title": "表示設定",
+    "languageTitle": "言語",
+    "languageHint": "アプリの表示言語を選択します。「自動」を選ぶとブラウザの言語設定に従います。",
+    "languageAuto": "自動",
+    "languageJa": "日本語",
+    "languageEn": "English",
+    "saved": "言語設定を保存しました。"
+  },
+  "accountSettings": {
+    "title": "アカウント設定",
+    "identityTitle": "アカウント情報",
+    "emailLabel": "メール",
+    "passwordTitle": "パスワード変更",
+    "currentPasswordLabel": "現在のパスワード",
+    "newPasswordLabel": "新しいパスワード（8文字以上）",
+    "newPasswordConfirmLabel": "新しいパスワード（確認）",
+    "changePasswordButton": "パスワードを変更",
+    "passwordSaved": "パスワードを変更しました。",
+    "passwordMismatch": "新しいパスワードが一致しません。"
+  },
+  "mutesBlocks": {
+    "title": "ミュート・ブロック",
+    "mutesTab": "ミュート中",
+    "blocksTab": "ブロック中",
+    "noMutes": "ミュート中のユーザーはいません。",
+    "noBlocks": "ブロック中のユーザーはいません。",
+    "unmuteButton": "ミュート解除",
+    "unblockButton": "ブロック解除"
+  }
+}

@@ -9,15 +9,18 @@ import { ComposerProvider } from "./contexts/ComposerContext";
 import { SiteMetaProvider } from "./contexts/SiteMetaContext";
 import { StreamingProvider } from "./contexts/StreamingContext";
 import { ToastProvider } from "./contexts/ToastContext";
+import AccountSettingsPage from "./pages/AccountSettingsPage";
 import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HashtagPage from "./pages/HashtagPage";
 import HomePage from "./pages/HomePage";
 import ListDetailPage from "./pages/ListDetailPage";
 import ListsSettingsPage from "./pages/ListsSettingsPage";
+import AppearanceSettingsPage from "./pages/AppearanceSettingsPage";
 import Login from "./pages/Login";
 import MessagesPage from "./pages/MessagesPage";
 import MiAuthConnectPage from "./pages/MiAuthConnectPage";
+import MutesBlocksSettingsPage from "./pages/MutesBlocksSettingsPage";
 import NoteDetailPage from "./pages/NoteDetailPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -25,6 +28,7 @@ import ProfileEditPage from "./pages/ProfileEditPage";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import SearchPage from "./pages/SearchPage";
+import SettingsMenuPage from "./pages/SettingsMenuPage";
 import Setup from "./pages/Setup";
 import VerifyEmail from "./pages/VerifyEmail";
 
@@ -126,6 +130,30 @@ function AppRoutes() {
           }
         />
         <Route
+          path="/settings"
+          element={
+            <RequireAuth>
+              <SettingsMenuPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/account"
+          element={
+            <RequireAuth>
+              <AccountSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/mutes-blocks"
+          element={
+            <RequireAuth>
+              <MutesBlocksSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
           path="/settings/profile"
           element={
             <RequireAuth>
@@ -138,6 +166,14 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <ListsSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/appearance"
+          element={
+            <RequireAuth>
+              <AppearanceSettingsPage />
             </RequireAuth>
           }
         />

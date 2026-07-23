@@ -1,35 +1,34 @@
-.form {
+.section {
   padding: 20px;
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
 }
 
-.avatarRow {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
+.sectionTitle {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin: 0 0 14px;
 }
 
-.avatarPreview {
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: var(--accent-deep);
-  color: var(--accent);
+.identityRow {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 1.8rem;
-  flex-shrink: 0;
+  gap: 10px;
+  font-size: 0.85rem;
+  align-items: baseline;
+  margin-bottom: 8px;
 }
 
-.avatarPreview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.identityLabel {
+  flex: 0 0 60px;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+.identityValue {
+  color: var(--text-dim);
+  word-break: break-all;
 }
 
 .label {
@@ -41,8 +40,7 @@
   margin-bottom: 16px;
 }
 
-.input,
-.textarea {
+.input {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -53,14 +51,8 @@
   font-family: inherit;
 }
 
-.input:focus,
-.textarea:focus {
+.input:focus {
   border-color: var(--accent-strong);
-}
-
-.textarea {
-  resize: vertical;
-  line-height: 1.6;
 }
 
 .ghost {
@@ -113,33 +105,56 @@
   margin: 0 0 12px;
 }
 
-.hint {
-  font-size: 0.78rem;
-  color: var(--text-faint);
-  margin: 0 0 18px;
+.dangerZone {
+  margin: 20px;
+  padding: 16px;
+  border: 1px solid var(--danger, #e74c3c);
+  border-radius: 10px;
 }
 
-.fieldsSection {
-  margin: 0 0 20px;
+.dangerTitle {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--danger, #e74c3c);
+  margin: 0 0 12px;
 }
 
-.fieldsLabel {
+.dangerBtn {
+  background: var(--danger, #e74c3c);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 10px 22px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.dangerBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.dangerBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerHint {
   font-size: 0.82rem;
   color: var(--text-dim);
-  margin: 0 0 8px;
+  margin: 0 0 12px;
+  line-height: 1.5;
 }
 
-.fieldRow {
+.withdrawForm {
   display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.fieldRow .input {
-  flex: 1;
-  min-width: 0;
-}
-
-.fieldName {
-  flex: 0 0 35%;
+.withdrawActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }

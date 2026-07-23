@@ -5,6 +5,7 @@
   "ALREADY_REPOSTED": "すでにリポスト済みです",
   "ALREADY_WITHDRAWN": "退会手続きはすでに完了しています",
   "CONFIRM_HANDLE_MISMATCH": "確認用ハンドルが一致しません",
+  "CURRENT_PASSWORD_INCORRECT": "現在のパスワードが正しくありません",
   "EMAIL_ALREADY_REGISTERED": "このメールアドレスはすでに使用されています",
   "EMAIL_INVALID": "有効なメールアドレスを入力してください",
   "EMOJI_NOT_FOUND": "絵文字が見つかりません",

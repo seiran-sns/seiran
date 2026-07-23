@@ -91,10 +91,12 @@ i18n
     ns: Object.keys(resources.en),
     interpolation: { escapeValue: false },
     detection: {
-      // ブラウザの言語設定にのみ従う。ユーザー切り替えUIは未実装のため
-      // localStorage 等へのキャッシュは行わない。
-      order: ["navigator"],
-      caches: [],
+      // 設定画面「表示」＞「言語」（#55）でユーザーが明示的に選択した場合は
+      // localStorage に記憶し、次回以降はそれを優先する。未選択（「自動」）の
+      // 場合はブラウザの言語設定（navigator）に従う。ログイン中はサーバー側の
+      // 保存値（`AuthContext` 経由）がさらに優先される。
+      order: ["localStorage", "navigator"],
+      caches: ["localStorage"],
     },
     returnEmptyString: false,
   });
