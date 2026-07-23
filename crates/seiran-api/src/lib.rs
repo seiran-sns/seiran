@@ -371,6 +371,7 @@ pub fn router(state: AppState) -> Router {
         // アカウント管理（退会等）
         .route("/api/account/withdraw", post(handlers::account::withdraw))
         .route("/api/account/change-password", post(handlers::account::change_password))
+        .route("/api/account/language", post(handlers::account::update_language))
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))

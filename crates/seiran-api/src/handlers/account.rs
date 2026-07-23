@@ -9,6 +9,39 @@ use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 
 use crate::{error::ApiError, middleware::extract_auth, AppState};
 
+/// フロントの i18n が対応する言語コード（`account:languagePreference` の許可値）。
+const SUPPORTED_LANGUAGES: [&str; 2] = ["ja", "en"];
+
+#[derive(Deserialize)]
+pub struct UpdateLanguageRequest {
+    /// `None` は「自動」（ブラウザ設定に従う）。
+    pub language: Option<String>,
+}
+
+/// `POST /api/account/language`（#55 表示設定）
+/// 設定画面「表示」＞「言語」から呼ばれる。`language: null` で「自動」に戻せる。
+pub async fn update_language(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateLanguageRequest>,
+) -> Result<Json<()>, ApiError> {
+    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+
+    if let Some(lang) = &req.language {
+        if !SUPPORTED_LANGUAGES.contains(&lang.as_str()) {
+            return Err(ApiError::BadRequest("UNSUPPORTED_LANGUAGE".to_owned()));
+        }
+    }
+
+    state
+        .users
+        .update_language_preference(auth_user.user_id, req.language.as_deref())
+        .await
+        .map_err(|e| ApiError::Internal(format!("[update-language] users UPDATE 失敗: {}", e)))?;
+
+    Ok(Json(()))
+}
+
 #[derive(Deserialize)]
 pub struct ChangePasswordRequest {
     pub current_password: String,

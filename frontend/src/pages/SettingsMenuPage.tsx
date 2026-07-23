@@ -18,6 +18,7 @@ const ITEMS: SettingsMenuItem[] = [
   { to: "/settings/profile", icon: "🪪", labelKey: "menu.profile" },
   { to: "/settings/mutes-blocks", icon: "🚫", labelKey: "menu.mutesBlocks" },
   { to: "/settings/lists", icon: "📋", labelKey: "menu.lists" },
+  { to: "/settings/appearance", icon: "🎨", labelKey: "menu.appearance" },
   { icon: "🔑", labelKey: "menu.appTokens", disabled: true },
 ];
 

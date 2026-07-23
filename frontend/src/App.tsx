@@ -16,6 +16,7 @@ import HashtagPage from "./pages/HashtagPage";
 import HomePage from "./pages/HomePage";
 import ListDetailPage from "./pages/ListDetailPage";
 import ListsSettingsPage from "./pages/ListsSettingsPage";
+import AppearanceSettingsPage from "./pages/AppearanceSettingsPage";
 import Login from "./pages/Login";
 import MessagesPage from "./pages/MessagesPage";
 import MiAuthConnectPage from "./pages/MiAuthConnectPage";
@@ -165,6 +166,14 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <ListsSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/appearance"
+          element={
+            <RequireAuth>
+              <AppearanceSettingsPage />
             </RequireAuth>
           }
         />

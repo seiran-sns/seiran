@@ -43,6 +43,8 @@ pub struct UserInfo {
     /// 左下ナビ等の自分のアイコン表示用。avatar_media_id 経由のアップロード画像を優先する
     /// （`handlers::users::build_profile_response` と同じクエリパターン）。
     pub avatar_url: Option<String>,
+    /// 表示言語設定（`ja` / `en`）。`None` は「自動」（ブラウザ設定に従う）。
+    pub language_preference: Option<String>,
 }
 
 /// actors.avatar_media_id がある場合は storage_providers から公開 URL を解決し、
@@ -208,6 +210,7 @@ pub async fn register(
             role: "user".to_string(),
             actor_id,
             avatar_url: None, // 登録直後はアバター未設定
+            language_preference: None, // 登録直後は「自動」
         },
     }))
 }
@@ -266,9 +269,16 @@ pub async fn login(
 
     let avatar_url = fetch_avatar_url(&state, actor_id).await;
 
+    let language_preference = state
+        .users
+        .find_language_preference_by_user_id(user_id)
+        .await
+        .ok()
+        .flatten();
+
     Ok(Json(AuthResponse {
         token,
-        user: UserInfo { id: user_id, username, email, role, actor_id, avatar_url },
+        user: UserInfo { id: user_id, username, email, role, actor_id, avatar_url, language_preference },
     }))
 }
 
@@ -300,6 +310,13 @@ pub async fn me(
 
     let avatar_url = fetch_avatar_url(&state, actor.id).await;
 
+    let language_preference = state
+        .users
+        .find_language_preference_by_user_id(auth_user.user_id)
+        .await
+        .ok()
+        .flatten();
+
     Ok(Json(UserInfo {
         id: auth_user.user_id,
         username: actor.username,
@@ -307,6 +324,7 @@ pub async fn me(
         role,
         actor_id: actor.id,
         avatar_url,
+        language_preference,
     }))
 }
 

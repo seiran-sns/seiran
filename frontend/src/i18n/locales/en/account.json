@@ -5,8 +5,18 @@
     "profile": "Profile",
     "mutesBlocks": "Mutes & Blocks",
     "lists": "Lists",
+    "appearance": "Appearance",
     "appTokens": "App tokens",
     "comingSoon": "Coming soon"
+  },
+  "appearanceSettings": {
+    "title": "Appearance settings",
+    "languageTitle": "Language",
+    "languageHint": "Choose the app's display language. \"Automatic\" follows your browser's language setting.",
+    "languageAuto": "Automatic",
+    "languageJa": "日本語",
+    "languageEn": "English",
+    "saved": "Language preference saved."
   },
   "accountSettings": {
     "title": "Account settings",

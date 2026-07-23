@@ -55,6 +55,12 @@ pub trait UserRepository: Send + Sync {
 
     /// ロール（`user` / `moderator` / `admin`）を更新する。
     async fn update_role(&self, user_id: i64, role: &str) -> Result<(), sqlx::Error>;
+
+    /// 表示言語設定（`ja` / `en`）を取得する。`None` は「自動」（ブラウザ設定に従う）。
+    async fn find_language_preference_by_user_id(&self, user_id: i64) -> Result<Option<String>, sqlx::Error>;
+
+    /// 表示言語設定を更新する。`None` を渡すと「自動」に戻す。
+    async fn update_language_preference(&self, user_id: i64, language: Option<&str>) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgUserRepository {
@@ -174,6 +180,24 @@ impl UserRepository for PgUserRepository {
     async fn update_role(&self, user_id: i64, role: &str) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users SET role = $1::user_role WHERE id = $2")
             .bind(role)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn find_language_preference_by_user_id(&self, user_id: i64) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT language_preference FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.and_then(|(v,)| v))
+    }
+
+    async fn update_language_preference(&self, user_id: i64, language: Option<&str>) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET language_preference = $1, updated_at = NOW() WHERE id = $2")
+            .bind(language)
             .bind(user_id)
             .execute(&self.pool)
             .await

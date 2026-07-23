@@ -149,6 +149,8 @@ export interface User {
   actor_id: number;
   /** 左下ナビ等の自分のアイコン表示用。未設定の場合は undefined。 */
   avatar_url?: string;
+  /** 表示言語設定（`ja` / `en`）。`null`/`undefined` は「自動」（ブラウザ設定に従う）。 */
+  language_preference?: string | null;
 }
 
 // ── 管理画面用の型（レスポンスは snake_case） ──────────────────────────────
@@ -957,6 +959,10 @@ export const api = {
         current_password: currentPassword,
         new_password: newPassword,
       });
+    },
+    /** 設定画面「表示」から表示言語を変更する（#55、`null` で自動に戻す）。 */
+    updateLanguage(language: string | null) {
+      return request<void>("POST", "/account/language", { language });
     },
   },
 
