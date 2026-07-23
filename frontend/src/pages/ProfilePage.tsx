@@ -5,9 +5,11 @@ import { api, Note, UserProfile, getErrorMessage } from "../api/client";
 import ActionsMenu, { ActionsMenuItem } from "../components/common/ActionsMenu";
 import Modal from "../components/common/Modal";
 import RemoteBanner from "../components/common/RemoteBanner";
+import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
 import NoteList from "../components/note/NoteList";
+import FollowListPanel from "../components/right/FollowListPanel";
 import { useAuth } from "../contexts/AuthContext";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
@@ -44,6 +46,9 @@ export default function ProfilePage() {
   const [blockConfirmModalOpen, setBlockConfirmModalOpen] = useState(false);
   // 狭幅では右ペインが無いため、ピン留め・最新ポストの両方を中央ペインへ連続表示する（#61）。
   const isNarrow = useIsNarrowViewport();
+  // 右ペイン（狭幅では中央ペイン）のタブ状態: 0=投稿, 1=フォロー中, 2=フォロワー（#56）。
+  // プロフィール切替時にリセットする（他ユーザーのフォロワータブを見たまま遷移してもタブは投稿に戻る）。
+  const [rightTab, setRightTab] = useState(0);
 
   // 投稿一覧の無限スクロール（#64）。`profile.recent_posts`（初回最大20件）を初期値とし、
   // 下端到達で `GET /api/users/posts` から `until_id` カーソルで追加取得する。
@@ -67,6 +72,7 @@ export default function ProfilePage() {
     let cancelled = false;
     setLoading(true);
     setError("");
+    setRightTab(0);
     api.users
       .profile(q)
       .then((p) => {
@@ -270,6 +276,17 @@ export default function ProfilePage() {
             </span>
           </div>
 
+          {profile.actor_id && (
+            <div className={styles.followCounts}>
+              <button type="button" className={styles.followCountBtn} onClick={() => setRightTab(1)}>
+                <strong>{profile.following_count}</strong> {t("profile:profilePage.followingCountLabel")}
+              </button>
+              <button type="button" className={styles.followCountBtn} onClick={() => setRightTab(2)}>
+                <strong>{profile.follower_count}</strong> {t("profile:profilePage.followerCountLabel")}
+              </button>
+            </div>
+          )}
+
           <div className={styles.badges}>
             {profile.is_paired && (
               <span className={`${styles.badge} ${styles.pairedBadge}`} title={t("profile:profilePage.pairedBadgeTitle")}>
@@ -431,9 +448,38 @@ export default function ProfilePage() {
     </>
   );
 
-  // 狭幅（スマホ等、右ペインが無い）では中央ペインにピン留め→最新ポストを連続表示する。
-  // 広幅では中央にピン留めのみ、右ペインに最新ポストを時系列表示する。
-  const right = !isNarrow ? recentSection : null;
+  // 投稿/フォロー中/フォロワーのタブシート（#56）。actor_id を持たない（DB未登録の）
+  // リモートアクターはフォロー一覧を取得できないため、従来通り投稿一覧のみ表示する。
+  const followTabsSection = profile && profile.actor_id && (
+    <>
+      <Tabs
+        tabs={[
+          t("profile:profilePage.postsHeader"),
+          t("profile:profilePage.followingTab"),
+          t("profile:profilePage.followersTab"),
+        ]}
+        active={rightTab}
+        onChange={setRightTab}
+      />
+      {rightTab === 0 && (
+        <NoteList
+          notes={posts}
+          emptyMessage={t("profile:profilePage.noPosts")}
+          onLoadMore={loadMorePosts}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+        />
+      )}
+      {rightTab === 1 && <FollowListPanel actorId={profile.actor_id} kind="following" onError={onError} />}
+      {rightTab === 2 && <FollowListPanel actorId={profile.actor_id} kind="followers" onError={onError} />}
+    </>
+  );
+
+  const tabbedSection = followTabsSection ?? recentSection;
+
+  // 狭幅（スマホ等、右ペインが無い）では中央ペインにピン留め→タブシートを連続表示する。
+  // 広幅では中央にピン留めのみ、右ペインにタブシートを表示する。
+  const right = !isNarrow ? tabbedSection : null;
 
   return (
     <>
@@ -443,7 +489,7 @@ export default function ProfilePage() {
             {center}
             {pinnedSection}
             {listsSection}
-            {isNarrow && recentSection}
+            {isNarrow && tabbedSection}
           </>
         }
         right={right}

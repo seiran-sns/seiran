@@ -428,6 +428,8 @@ pub fn router(state: AppState) -> Router {
             get(handlers::users::user_profile)
             .patch(handlers::users::update_profile))
         .route("/api/users/posts", get(handlers::users::user_posts))
+        .route("/api/users/following", get(handlers::users::user_following))
+        .route("/api/users/followers", get(handlers::users::user_followers))
         // Misskey 互換レイヤー
         .route("/api/meta", post(handlers::meta::api_meta))
         // カスタム絵文字一覧（未認証・Misskey クライアントのリアクションピッカー用）

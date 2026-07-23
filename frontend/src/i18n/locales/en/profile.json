@@ -19,6 +19,14 @@
     "publicListsHeader": "Public lists",
     "postsHeader": "Posts",
     "noPosts": "No posts yet.",
+    "followingTab": "Following",
+    "followersTab": "Followers",
+    "followingCountLabel": "Following",
+    "followerCountLabel": "Followers",
+    "followList": {
+      "noFollowing": "Not following anyone yet.",
+      "noFollowers": "No followers yet."
+    },
     "actionsMenuTitle": "Account actions",
     "muteButton": "Mute",
     "unmuteButton": "Unmute",

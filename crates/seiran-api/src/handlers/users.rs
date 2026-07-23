@@ -9,7 +9,7 @@ use crate::error::ApiError;
 use crate::handlers::notes::{
     fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place, to_note_response, NoteResponse,
 };
-use crate::middleware::extract_auth;
+use crate::middleware::{extract_auth, MaybeAuthedUser};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -82,6 +82,97 @@ pub async fn user_posts(
     Json(notes).into_response()
 }
 
+/// フォロー中/フォロワー一覧の1件（#56）。
+#[derive(Serialize)]
+pub struct FollowListItem {
+    /// カーソルページネーション用（`GET`の`until_id`にそのまま渡す）。
+    pub follow_id: String,
+    pub actor_id: String,
+    pub username: String,
+    pub domain: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+impl From<seiran_common::repository::FollowListRow> for FollowListItem {
+    fn from(r: seiran_common::repository::FollowListRow) -> Self {
+        Self {
+            follow_id: r.follow_id.to_string(),
+            actor_id: r.actor_id.to_string(),
+            username: r.username,
+            domain: r.domain,
+            display_name: r.display_name,
+            avatar_url: r.avatar_url,
+        }
+    }
+}
+
+/// プロフィール画面のフォロー中/フォロワータブの無限スクロール用クエリ（#56）。
+/// `until_id`/`since_id` は `follows.id` を指す（`GET /api/users/posts` の規約と同様）。
+#[derive(Deserialize)]
+pub struct FollowListQuery {
+    pub actor_id: String,
+    pub limit: Option<i64>,
+    #[serde(alias = "untilId")]
+    pub until_id: Option<String>,
+    #[serde(alias = "sinceId")]
+    pub since_id: Option<String>,
+}
+
+/// `GET /api/users/following` — 指定アクター（`actor_id`）がフォロー中の一覧（#56）。
+pub async fn user_following(
+    Query(params): Query<FollowListQuery>,
+    MaybeAuthedUser(me): MaybeAuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor_id: i64 = match params.actor_id.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("不正な actor_id です".to_string()).into_response(),
+    };
+    let limit = params.limit.unwrap_or(30).clamp(1, 100);
+    let until_id: Option<i64> = params.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = params.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    match state
+        .follows
+        .list_following(actor_id, me.map(|u| u.actor_id), limit, until_id, since_id)
+        .await
+    {
+        Ok(rows) => Json(rows.into_iter().map(FollowListItem::from).collect::<Vec<_>>()).into_response(),
+        Err(e) => {
+            tracing::error!("[user_following] フォロー中一覧取得失敗: {}", e);
+            ApiError::Internal(e.to_string()).into_response()
+        }
+    }
+}
+
+/// `GET /api/users/followers` — 指定アクター（`actor_id`）のフォロワー一覧（#56）。
+pub async fn user_followers(
+    Query(params): Query<FollowListQuery>,
+    MaybeAuthedUser(me): MaybeAuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor_id: i64 = match params.actor_id.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("不正な actor_id です".to_string()).into_response(),
+    };
+    let limit = params.limit.unwrap_or(30).clamp(1, 100);
+    let until_id: Option<i64> = params.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = params.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    match state
+        .follows
+        .list_followers(actor_id, me.map(|u| u.actor_id), limit, until_id, since_id)
+        .await
+    {
+        Ok(rows) => Json(rows.into_iter().map(FollowListItem::from).collect::<Vec<_>>()).into_response(),
+        Err(e) => {
+            tracing::error!("[user_followers] フォロワー一覧取得失敗: {}", e);
+            ApiError::Internal(e.to_string()).into_response()
+        }
+    }
+}
+
 /// プロフィールのキーバリュー項目（#62、Mastodon 等の「プロフィールのメタデータ欄」に相当）。
 /// `actors.profile_fields`（JSONB配列）にそのままシリアライズされる。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +230,10 @@ pub struct ProfileResponse {
     /// 公開リスト一覧（#63）。現状ローカルユーザーのみ対応（リモートFedi/Bskyユーザー自身の
     /// 公開リストをオンデマンド取得・表示する機能は将来課題）。
     pub public_lists: Vec<PublicListSummary>,
+    /// フォロー中の人数（#56）。DB に未登録のリモートアクター（AppView 直取得等）は常に0。
+    pub following_count: i64,
+    /// フォロワーの人数（#56）。following_count と同様、DB 未登録のリモートアクターは常に0。
+    pub follower_count: i64,
 }
 
 #[derive(Serialize)]
@@ -203,6 +298,8 @@ async fn fetch_bsky_profile_from_appview(
         bridge_protocol: None,
         is_paired: false,
         public_lists: vec![],
+        following_count: 0,
+        follower_count: 0,
     })
     .into_response()
 }
@@ -492,6 +589,9 @@ async fn build_profile_response(
     // （recent_posts/pinned_postsは既にタイムラインクエリのフィルタで空になる）。
     let (bio, profile_fields) = if is_blocked_by { (None, vec![]) } else { (actor.bio, profile_fields) };
 
+    // フォロー中/フォロワー人数（#56）。プロフィールカードの表示・右ペインタブ切替に使う。
+    let (following_count, follower_count) = state.follows.count_relations(actor_id).await.unwrap_or((0, 0));
+
     Json(ProfileResponse {
         actor_id: Some(actor_id.to_string()),
         username: actor.username,
@@ -513,6 +613,8 @@ async fn build_profile_response(
         bridge_protocol,
         is_paired: actor.seiran_pair_actor_id.is_some(),
         public_lists,
+        following_count,
+        follower_count,
     })
     .into_response()
 }
@@ -600,6 +702,8 @@ async fn fetch_remote_profile(
         bridge_protocol: None,
         is_paired: false,
         public_lists: vec![],
+        following_count: 0,
+        follower_count: 0,
     })
     .into_response()
 }
