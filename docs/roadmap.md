@@ -58,6 +58,7 @@
 - [ ] **Misskeyストリーミングのチャンネル購読対応**（現状は認証ユーザー宛て一律ブロードキャストのみ）
 - [ ] **フロントエンドのMisskeyスキーマへの追従改修**、検証済み旧カスタムエンドポイントの整理
 - [ ] APIレスポンスの `bio` 末尾に本尊URLを自動挿入するフォールバック（ZonePane/Miria/Aria等の非Misskey互換画面向け）
+- [ ] **`visibility` の値語彙をMisskey本家（`public`/`home`/`followers`/`specified`）にマッピング** — 現状seiran語彙（`public`/`unlisted`/`followers_only`/`direct`）のみ受け付けており、本家語彙で送ると`resolve_visibility`が`400 INVALID_VISIBILITY`を返す。Ariaなど非公開範囲を変更して投稿するMisskeyクライアントで投稿が失敗しうる。詳細: `docs/protocols.md` 7節
 
 ### テスト・QA
 
