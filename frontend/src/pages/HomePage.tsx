@@ -13,6 +13,7 @@ import { Feed, feedKey, useHomeFeed } from "../contexts/HomeFeedContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
+import { useSwipe } from "../hooks/useSwipe";
 import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
@@ -47,7 +48,51 @@ export default function HomePage() {
   const { registerNote, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
   const headerRef = useRef<HTMLElement>(null);
+  const feedTabsRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+
+  // 利用可能なフィードタブの配列（順序定義）
+  const availableFeeds = useCallback((): Feed[] => {
+    return [
+      { kind: "home" },
+      { kind: "local" },
+      ...lists.map((l) => ({ kind: "list" as const, id: l.id })),
+      ...pinnedHashtags.map((h) => ({ kind: "hashtag" as const, name: h.name })),
+    ];
+  }, [lists, pinnedHashtags])();
+
+  const currentFeedIndex = availableFeeds.findIndex((f) => {
+    if (f.kind !== feed.kind) return false;
+    if (f.kind === "list") return f.id === (feed as { kind: "list"; id: string }).id;
+    if (f.kind === "hashtag") return f.name === (feed as { kind: "hashtag"; name: string }).name;
+    return true;
+  });
+
+  const handleSwipeLeft = useCallback(() => {
+    if (currentFeedIndex >= 0 && currentFeedIndex < availableFeeds.length - 1) {
+      setFeed(availableFeeds[currentFeedIndex + 1]);
+    }
+  }, [availableFeeds, currentFeedIndex, setFeed]);
+
+  const handleSwipeRight = useCallback(() => {
+    if (currentFeedIndex > 0) {
+      setFeed(availableFeeds[currentFeedIndex - 1]);
+    }
+  }, [availableFeeds, currentFeedIndex, setFeed]);
+
+  const swipeHandlers = useSwipe({
+    onSwipeLeft: handleSwipeLeft,
+    onSwipeRight: handleSwipeRight,
+  });
+
+  // フィード切り替え時にアクティブなタブ要素が見えるようにスクロール
+  useEffect(() => {
+    if (!feedTabsRef.current) return;
+    const activeTabEl = feedTabsRef.current.querySelector<HTMLElement>(`.${styles.feedTabActive}`);
+    if (activeTabEl) {
+      activeTabEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    }
+  }, [feedKey(feed)]);
 
   // フィードタブ（下記feedTabs）はheaderの直下にstickyで張り付ける。両者とも
   // position: sticky; top: 0 だと重なってしまうため、headerの実高さ分だけオフセットする。
@@ -185,7 +230,7 @@ export default function HomePage() {
   }
 
   const center = (
-    <>
+    <div className={styles.swipeContainer} {...swipeHandlers}>
       <header className={panel.header} ref={headerRef}>
         <span className={panel.title}>{t("home:homePage.title")}</span>
       </header>
@@ -203,7 +248,7 @@ export default function HomePage() {
         {!composerCollapsed && <PostComposer onPosted={prepend} />}
       </div>
 
-      <div className={styles.feedTabs} style={{ top: headerHeight }}>
+      <div className={styles.feedTabs} ref={feedTabsRef} style={{ top: headerHeight }}>
         <button
           className={`${styles.feedTab} ${feed.kind === "home" ? styles.feedTabActive : ""}`}
           onClick={() => setFeed({ kind: "home" })}
@@ -256,7 +301,7 @@ export default function HomePage() {
             : t("home:homePage.emptyList")
         }
       />
-    </>
+    </div>
   );
 
   const right = (
