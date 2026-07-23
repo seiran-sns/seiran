@@ -212,6 +212,8 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 
 **既知の非互換点**: `cw` は常に `null`、書き込み系のエラー形状はMisskey本家のエラーID体系を再現していない、本文中カスタム絵文字インライン用 `emojis` マップは常に空。ストリーミングはMisskeyのチャンネル購読方式ではなく単純な認証ユーザー宛てブロードキャストのみ。`MisskeyDriveFile.isSensitive` は概念自体をDBに持たないため常に `false`。
 
+**`MisskeyNote.uri`/`url` の算出**（`handlers::misskey::convert::to_misskey_note`）: `uri` はActivityPub Object IDで、Misskey本家準拠のためローカルノートでは常に `null`、Fedi受信ノートのみ非null。seiranはローカル投稿にもFederation配送用の自己参照的な `posts.ap_object_id`（`https://{local_domain}/notes/{id}`）を常に持たせているため、`ap_object_id` の有無だけでは出自を判定できず、`domain == local_domain` で判定する（実機確認: Ariaがこれを見てローカルノートをリモート扱いする不具合の原因だった）。`url`は人間向けURLで、Fedi（`ap_object_id`）優先、無ければBsky（`at_uri`→bsky.app URL）にフォールバックする。ローカルノートは両方 `null`。
+
 **`misskey_dart`（Aria等）の non-nullable 直接キャスト対策**: `misskey_dart` の生成コード（`*.g.dart`）は本家スキーマの必須フィールドを `as String`/`as num` 等で直接キャストするため、JSONでキーが欠けたり `null` だと Dart 側で未処理の `TypeError` となりクライアントが落ちる（サーバー側のバリデーションエラーとは別の失敗モード）。`MisskeyMeDetailed`（`notesCount` 等）に続き `MisskeyDriveFile`（`createdAt`/`md5`/`size`/`isSensitive`/`properties`）、`MisskeyUserDetailed`（`/api/users/show`・`/api/i` 共通、`notesCount`/`followersCount`/`followingCount`）でも踏んだため、Misskey互換型を追加・変更する際は本家スキーマの必須/任意を都度 `misskey_dart` のソースで確認すること。`md5` は seiran 内部で持つ `sha256` を代用し、リモート添付など元データが無い場合は空文字列/0を返す（クライアントは値を検証せず保持するだけのため実害はない）。
 
 ## 8. 通知・リアルタイム配信

@@ -9,6 +9,7 @@ use sqlx::Row;
 
 use seiran_common::repository::{Actor, NotificationRow, TimelinePost};
 
+use crate::handlers::notes::delivery::at_uri_to_bsky_app_url;
 use crate::handlers::notes::{fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place, AttachmentResponse, ReactionSummary};
 use crate::AppState;
 
@@ -190,10 +191,21 @@ fn to_misskey_note(
     let renote_id = p.repost_of_post_id.or(p.quote_of_post_id).map(|i| i.to_string());
     let is_plain_repost = p.repost_of_post_id.is_some();
 
-    let local_url = if p.domain == local_domain {
-        Some(format!("https://{}/notes/{}", local_domain, p.id))
-    } else {
+    // Misskey本家準拠: `uri` は ActivityPub Object ID（リモート由来のノートにのみ存在し、
+    // ローカルノートでは常に null）。クライアント（Aria等）はこれの有無でノートの出自
+    // （ローカル/リモート）を判定するため、ローカルノートにURLを入れると誤ってリモート
+    // ノート扱いされてしまう。なお seiran はローカル投稿にも自己参照的な AP Object ID
+    // （`https://{local_domain}/notes/{id}`）を常に posts.ap_object_id へ持たせている
+    // （Federation送信時にIDとして使うため）ので、`post_ap_object_id` の有無だけでは
+    // ローカル/リモートを判定できず、`p.domain` で判定する必要がある。
+    // `url` は人間向けURLで、AP優先・無ければBsky（at_uri→bsky.app）にフォールバックする
+    // （`dto::to_note_response`のremote_urlと同じ方針）。
+    let is_local = p.domain == local_domain;
+    let uri = if is_local { None } else { p.post_ap_object_id.clone().filter(|s| !s.is_empty()) };
+    let url = if is_local {
         None
+    } else {
+        uri.clone().or_else(|| p.post_at_uri.as_deref().map(at_uri_to_bsky_app_url))
     };
 
     MisskeyNote {
@@ -214,8 +226,8 @@ fn to_misskey_note(
         reaction_emojis,
         renote_count,
         replies_count,
-        uri: local_url.clone(),
-        url: local_url,
+        uri,
+        url,
         my_reaction,
     }
 }
@@ -353,4 +365,80 @@ pub async fn build_notifications(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LOCAL_DOMAIN: &str = "seiran-beta.org";
+
+    fn base_post() -> TimelinePost {
+        TimelinePost {
+            id: 1,
+            body: "hello".to_string(),
+            created_at: chrono::Utc::now(),
+            actor_id: 100,
+            username: "alice".to_string(),
+            domain: LOCAL_DOMAIN.to_string(),
+            display_name: None,
+            actor_type: "local".to_string(),
+            repost_of_post_id: None,
+            quote_of_post_id: None,
+            reply_to_post_id: None,
+            parent_original_post_id: None,
+            avatar_url: None,
+            post_emoji_map: None,
+            actor_emoji_map: None,
+            visibility: "public".to_string(),
+            deliver_fedi: false,
+            deliver_bsky: false,
+            mention_facets: None,
+            post_ap_object_id: None,
+            post_at_uri: None,
+        }
+    }
+
+    // 実際の投稿作成処理（handlers::notes::mod.rs）は、Federation配送のIDとして使うため
+    // ローカル投稿にも常に自ドメインの `ap_object_id` を持たせる。この回帰テストは、
+    // それによって `uri`/`url` がローカルノートでも誤って非nullになる不具合
+    // （Ariaがローカルノートをリモート扱いする原因だった）が再発しないことを確認する。
+    #[test]
+    fn local_note_has_null_uri_and_url_even_with_self_referential_ap_object_id() {
+        let mut p = base_post();
+        p.post_ap_object_id = Some(format!("https://{}/notes/{}", LOCAL_DOMAIN, p.id));
+
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+
+        assert_eq!(note.uri, None);
+        assert_eq!(note.url, None);
+        assert_eq!(note.user.host, None);
+    }
+
+    #[test]
+    fn remote_fedi_note_uses_ap_object_id_for_uri_and_url() {
+        let mut p = base_post();
+        p.domain = "remote.example".to_string();
+        p.actor_type = "fedi".to_string();
+        p.post_ap_object_id = Some("https://remote.example/notes/xyz".to_string());
+
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+
+        assert_eq!(note.uri.as_deref(), Some("https://remote.example/notes/xyz"));
+        assert_eq!(note.url.as_deref(), Some("https://remote.example/notes/xyz"));
+        assert_eq!(note.user.host.as_deref(), Some("remote.example"));
+    }
+
+    #[test]
+    fn remote_bsky_note_has_null_uri_but_bsky_app_url() {
+        let mut p = base_post();
+        p.domain = "bsky.social".to_string();
+        p.actor_type = "bsky".to_string();
+        p.post_at_uri = Some("at://did:plc:abc123/app.bsky.feed.post/xyz".to_string());
+
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+
+        assert_eq!(note.uri, None);
+        assert_eq!(note.url.as_deref(), Some("https://bsky.app/profile/did:plc:abc123/post/xyz"));
+    }
 }
