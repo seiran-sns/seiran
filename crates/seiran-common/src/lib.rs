@@ -41,7 +41,7 @@ pub use repository::{
 };
 pub use repository::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage::{
-    process_image, ImageProcessingError, MediaKind, ProcessedImage,
+    prepare_image, ExifSanitizedImage, ImagePipeline, ImageProcessingError, MediaKind, ProcessedImage,
     S3StorageClient, S3Error, select_provider, SelectorError,
     convert_audio_to_gray_video, ext_for_mime_type, is_allowed_video_or_audio_mime,
     probe_video_or_audio, sniff_mime_type, MediaProbeError, ProbedMedia,

@@ -133,7 +133,9 @@ pub struct SearchSession {
 
 `storage_providers.secret_key` 等は `encryption_key` で AES-256-GCM 暗号化して DB に格納する（`crypto.rs`）。
 
-**S3互換オブジェクトストレージ**: `storage/selector.rs` の `select_provider()` が有効なプロバイダーを id 昇順でスキャンし、`capacity_mb` に収まる最初の1件を選択する（複数プロバイダーの容量切り替え）。`storage/s3.rs` が実際の PUT/DELETE、`storage/image.rs`/`media_probe.rs` が画像リサイズ(WebP変換)・動画音声のプローブを担う。
+**S3互換オブジェクトストレージ**: `storage/selector.rs` の `select_provider()` が有効なプロバイダーを id 昇順でスキャンし、`capacity_mb` に収まる最初の1件を選択する（複数プロバイダーの容量切り替え）。`storage/s3.rs` が実際の PUT/DELETE、`media_probe.rs` が動画音声のプローブを担う。
+
+**画像アップロードパイプライン**（`storage/image.rs::prepare_image()`）: ユーザーの画像を不要に劣化させないため、2つの候補を用意してから採用する。まず `storage/exif.rs`（`img-parts`クレート使用）でJPEG/PNGのExifをOrientationタグのみに絞り込んだ「無劣化オリジナル候補」を作る（画素は再エンコードしない）。続けてOrientationを画素に適用したうえで `MediaKind` ごとの最大サイズにリサイズしWebPロスレスエンコードした「リサイズ候補」を作る。呼び出し元（`handlers/media_store.rs::store_image()`）が両候補それぞれのsha256+blurhashで `media_files` の重複排除チェックを行い、どちらも未登録ならバイトサイズが小さい方を採用してS3へアップロードする。img-parts非対応フォーマット（静止画WebP・AVIF・単一フレームGIF等）はOrientation適用のみ行いWebP再エンコードする（オリジナル候補なし）。アニメーション画像（GIF/APNG/WebPアニメ）は元バイト列をそのまま保存する。
 
 ## 8. フロントエンド
 

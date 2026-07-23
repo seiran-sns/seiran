@@ -12,7 +12,7 @@ use uuid::Uuid;
 use seiran_common::{
     atp::sign_service_auth_jwt,
     convert_audio_to_gray_video, ext_for_mime_type, generate_snowflake_id, is_allowed_video_or_audio_mime,
-    process_image, probe_video_or_audio, sniff_mime_type, MediaKind,
+    prepare_image, probe_video_or_audio, sniff_mime_type, ImagePipeline, MediaKind,
     queue::worker::priority,
     repository::{Actor, CreateMediaFile},
     select_provider, Job, SelectorError, S3StorageClient, StorageProviderRepository,
@@ -20,6 +20,7 @@ use seiran_common::{
 
 use crate::{
     error::ApiError,
+    handlers::media_store,
     middleware::auth::{extract_auth, AuthUser},
     AppState,
 };
@@ -181,7 +182,7 @@ pub async fn create_drive_file(
     create_video_or_audio_file(&state, actor.as_ref(), raw_bytes, sniffed_mime, deliver_to_bsky, md5, original_filename).await
 }
 
-/// 画像アップロード処理（WebP 変換・リサイズ・blurhash 計算）。従来の処理をそのまま踏襲する。
+/// 画像アップロード処理（Exif整理・Orientation補正・WebP変換・重複排除）。
 async fn create_image_file(
     state: &AppState,
     actor_id: Option<i64>,
@@ -190,102 +191,28 @@ async fn create_image_file(
     md5: String,
     original_filename: Option<String>,
 ) -> Result<Json<DriveFileResponse>, ApiError> {
-    let processed = process_image(raw_bytes, kind)
+    let pipeline = prepare_image(raw_bytes, kind)
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let outcome = media_store::store_image(state, pipeline, actor_id).await?;
+    let record = outcome.record;
 
-    // 重複排除: 同じ (sha256, blurhash) が既存ならそれを返す
-    if let Some(existing) = state
-        .media_files
-        .find_by_sha256_and_blurhash(&processed.sha256, &processed.blurhash)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-    {
-        let url = build_public_url(state.storage_providers.as_ref(), existing.storage_provider_id, &existing.storage_key).await;
-        // 画像は別途縮小サムネイルを持たないため、本体と同じURLをthumbnailUrlとして返す。
-        // Misskeyクライアント（Aria等）はDriveFile.thumbnailUrlが無いと投稿フォームの
-        // プレビューで画像を表示せずアイコンにフォールバックするため必須。
-        let thumbnail_url = Some(url.clone());
-        let name = original_filename.unwrap_or_else(|| default_file_name(existing.id, &existing.mime_type));
-        let kind = existing.mime_type.clone();
-        return Ok(Json(DriveFileResponse {
-            id: existing.id.to_string(),
-            url,
-            sha256: existing.sha256,
-            blurhash: existing.blurhash,
-            width: existing.width.map(|w| w as u32),
-            height: existing.height.map(|h| h as u32),
-            size: existing.size,
-            mime_type: existing.mime_type,
-            is_reused: true,
-            duration_ms: None,
-            thumbnail_url,
-            created_at: existing.created_at,
-            name,
-            kind,
-            md5,
-            is_sensitive: false,
-            properties: DriveFileProperties {
-                width: existing.width.map(|w| w as u32),
-                height: existing.height.map(|h| h as u32),
-            },
-        }));
-    }
-
-    let provider = select_provider(state.storage_providers.as_ref(), processed.size)
-        .await
-        .map_err(map_selector_error)?;
-    check_quota(state, &provider, processed.size).await?;
-
-    // S3 アップロード（拡張子は実際の MIME type に合わせる）
-    let ext = match processed.mime_type.as_str() {
-        "image/jpeg" => "jpg",
-        "image/png"  => "png",
-        "image/gif"  => "gif",
-        "image/avif" => "avif",
-        _            => "webp",
-    };
-    let storage_key = format!("media/{}.{}", Uuid::new_v4(), ext);
-    let s3 = S3StorageClient::new(&provider);
-    let public_url = s3
-        .put(&storage_key, processed.data, &processed.mime_type)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let id = generate_snowflake_id(Utc::now());
-    let record = state
-        .media_files
-        .insert(CreateMediaFile {
-            id,
-            storage_provider_id: provider.id,
-            sha256: processed.sha256.clone(),
-            blurhash: Some(processed.blurhash.clone()),
-            size: processed.size,
-            width: Some(processed.width as i32),
-            height: Some(processed.height as i32),
-            mime_type: processed.mime_type.clone(),
-            storage_key,
-            duration_ms: None,
-            thumbnail_key: None,
-            uploaded_by_actor_id: actor_id,
-        })
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let name = original_filename.unwrap_or_else(|| default_file_name(record.id, &processed.mime_type));
-    let kind = processed.mime_type.clone();
-    // 画像は別途縮小サムネイルを持たないため、本体と同じURLをthumbnailUrlとして返す
-    // （Misskeyクライアントの投稿フォームプレビュー用、既存レコード再利用時と同じ理由）。
-    let thumbnail_url = Some(public_url.clone());
+    let url = build_public_url(state.storage_providers.as_ref(), record.storage_provider_id, &record.storage_key).await;
+    // 画像は別途縮小サムネイルを持たないため、本体と同じURLをthumbnailUrlとして返す。
+    // Misskeyクライアント（Aria等）はDriveFile.thumbnailUrlが無いと投稿フォームの
+    // プレビューで画像を表示せずアイコンにフォールバックするため必須。
+    let thumbnail_url = Some(url.clone());
+    let name = original_filename.unwrap_or_else(|| default_file_name(record.id, &record.mime_type));
+    let kind = record.mime_type.clone();
     Ok(Json(DriveFileResponse {
         id: record.id.to_string(),
-        url: public_url,
-        sha256: processed.sha256,
-        blurhash: Some(processed.blurhash),
-        width: Some(processed.width),
-        height: Some(processed.height),
-        size: processed.size,
-        mime_type: processed.mime_type,
-        is_reused: false,
+        url,
+        sha256: record.sha256.clone(),
+        blurhash: record.blurhash.clone(),
+        width: record.width.map(|w| w as u32),
+        height: record.height.map(|h| h as u32),
+        size: record.size,
+        mime_type: record.mime_type.clone(),
+        is_reused: outcome.is_reused,
         duration_ms: None,
         thumbnail_url,
         created_at: record.created_at,
@@ -294,8 +221,8 @@ async fn create_image_file(
         md5,
         is_sensitive: false,
         properties: DriveFileProperties {
-            width: Some(processed.width),
-            height: Some(processed.height),
+            width: record.width.map(|w| w as u32),
+            height: record.height.map(|h| h as u32),
         },
     }))
 }
@@ -322,7 +249,11 @@ async fn create_video_or_audio_file(
     let probed = probe_video_or_audio(&raw_bytes, ext_for_mime_type(&mime_type)).await;
     let thumbnail = probed.thumbnail_frame
         .as_deref()
-        .and_then(|frame| process_image(frame, MediaKind::Post).ok());
+        .and_then(|frame| prepare_image(frame, MediaKind::Post).ok())
+        .map(|pipeline| match pipeline {
+            ImagePipeline::Static { resized, .. } => resized,
+            ImagePipeline::AnimatedPassthrough(p) => p,
+        });
     let blurhash = thumbnail.as_ref().map(|t| t.blurhash.clone());
 
     // 重複排除: blurhash が求まった（動画）場合は (sha256, blurhash) 一致、
@@ -606,7 +537,7 @@ fn default_file_name(id: i64, mime_type: &str) -> String {
     format!("seiran-{}.{}", id, ext)
 }
 
-fn map_selector_error(e: SelectorError) -> ApiError {
+pub(crate) fn map_selector_error(e: SelectorError) -> ApiError {
     match e {
         SelectorError::NoAvailableProvider => ApiError::ServiceUnavailable("ストレージプロバイダーが設定されていません"),
         SelectorError::QuotaExceeded => ApiError::InsufficientStorage,
@@ -615,7 +546,7 @@ fn map_selector_error(e: SelectorError) -> ApiError {
 }
 
 /// クォータ二重チェック（プロバイダー確定後、PUT 前に明示的に確認）
-async fn check_quota(state: &AppState, provider: &seiran_common::repository::StorageProvider, upload_size: i64) -> Result<(), ApiError> {
+pub(crate) async fn check_quota(state: &AppState, provider: &seiran_common::repository::StorageProvider, upload_size: i64) -> Result<(), ApiError> {
     if let Some(cap_mb) = provider.capacity_mb {
         let used_bytes = state
             .storage_providers

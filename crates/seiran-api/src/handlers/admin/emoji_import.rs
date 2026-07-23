@@ -16,14 +16,10 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use seiran_common::{
-    generate_snowflake_id,
-    process_image, MediaKind,
-    repository::CreateMediaFile,
-    select_provider, SelectorError, S3StorageClient,
-};
+use seiran_common::{generate_snowflake_id, prepare_image, MediaKind};
 
 use crate::error::ApiError;
+use crate::handlers::media_store;
 use crate::middleware::require_admin;
 use crate::AppState;
 
@@ -220,8 +216,8 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
             }
         };
 
-        // 画像処理
-        let processed = match process_image(&image_bytes, MediaKind::Emoji) {
+        // 画像処理（Exif整理・Orientation補正・WebP変換）
+        let pipeline = match prepare_image(&image_bytes, MediaKind::Emoji) {
             Ok(p) => p,
             Err(e) => {
                 update_job(&state, &job_id, |s| {
@@ -232,79 +228,15 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
             }
         };
 
-        // 重複排除: sha256+blurhash が既存ならメディアファイルを再利用
-        let media_file_id = match state
-            .media_files
-            .find_by_sha256_and_blurhash(&processed.sha256, &processed.blurhash)
-            .await
-        {
-            Ok(Some(existing)) => existing.id,
-            _ => {
-                // ストレージ選択 → S3 アップロード → DB 記録
-                let provider = match select_provider(state.storage_providers.as_ref(), processed.size).await {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let msg = match e {
-                            SelectorError::NoAvailableProvider => "ストレージプロバイダー未設定".to_owned(),
-                            SelectorError::QuotaExceeded => "ストレージ容量超過".to_owned(),
-                            SelectorError::Db(e) => e.to_string(),
-                        };
-                        update_job(&state, &job_id, |s| {
-                            s.failed += 1;
-                            s.errors.push(format!(":{}:  {}", shortcode, msg));
-                        });
-                        continue;
-                    }
-                };
-
-                let ext = match processed.mime_type.as_str() {
-                    "image/jpeg" => "jpg",
-                    "image/png" => "png",
-                    "image/gif" => "gif",
-                    "image/avif" => "avif",
-                    _ => "webp",
-                };
-                let storage_key = format!("media/{}.{}", Uuid::new_v4(), ext);
-                let s3 = S3StorageClient::new(&provider);
-                match s3.put(&storage_key, processed.data.clone(), &processed.mime_type).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        update_job(&state, &job_id, |s| {
-                            s.failed += 1;
-                            s.errors.push(format!(":{}:  S3 アップロードエラー: {}", shortcode, e));
-                        });
-                        continue;
-                    }
-                }
-
-                let file_id = generate_snowflake_id(Utc::now());
-                match state
-                    .media_files
-                    .insert(CreateMediaFile {
-                        id: file_id,
-                        storage_provider_id: provider.id,
-                        sha256: processed.sha256,
-                        blurhash: Some(processed.blurhash),
-                        size: processed.size,
-                        width: Some(processed.width as i32),
-                        height: Some(processed.height as i32),
-                        mime_type: processed.mime_type,
-                        storage_key,
-                        duration_ms: None,
-                        thumbnail_key: None,
-                        uploaded_by_actor_id: None,
-                    })
-                    .await
-                {
-                    Ok(_) => file_id,
-                    Err(e) => {
-                        update_job(&state, &job_id, |s| {
-                            s.failed += 1;
-                            s.errors.push(format!(":{}:  DB 記録エラー: {}", shortcode, e));
-                        });
-                        continue;
-                    }
-                }
+        // 重複排除チェック → S3 アップロード → DB 記録
+        let media_file_id = match media_store::store_image(&state, pipeline, None).await {
+            Ok(outcome) => outcome.record.id,
+            Err(e) => {
+                update_job(&state, &job_id, |s| {
+                    s.failed += 1;
+                    s.errors.push(format!(":{}:  {}", shortcode, e));
+                });
+                continue;
             }
         };
 

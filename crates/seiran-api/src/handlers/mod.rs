@@ -11,6 +11,7 @@ pub mod favicon;
 pub mod follows;
 pub mod hashtags;
 pub mod lists;
+pub mod media_store;
 pub mod meta;
 pub mod miauth;
 pub mod misskey;
