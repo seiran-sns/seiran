@@ -4,7 +4,7 @@ use axum::{
     response::{Html, IntoResponse},
     Json,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -20,7 +20,7 @@ use seiran_common::{
 
 use crate::{
     error::ApiError,
-    middleware::auth::extract_auth,
+    middleware::auth::{extract_auth, AuthUser},
     AppState,
 };
 
@@ -43,6 +43,25 @@ pub struct DriveFileResponse {
     pub duration_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thumbnail_url: Option<String>,
+    // 以下、Misskeyワイヤー互換用（misskey_dart `DriveFile.fromJson` の必須フィールド）。
+    // seiranのフロントエンドは使わないが、Misskeyクライアント（Aria等）のJSONデコードが
+    // これらの欠落でnullキャスト例外を起こすため必須。
+    pub created_at: DateTime<Utc>,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub md5: String,
+    pub is_sensitive: bool,
+    pub properties: DriveFileProperties,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFileProperties {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
 }
 
 /// POST /api/drive/files/create
@@ -58,20 +77,13 @@ pub async fn create_drive_file(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<DriveFileResponse>, ApiError> {
-    let auth = extract_auth(&headers, &state.local_auth).await?;
-
-    // アップローダーのアクター情報を取得（Bsky動画パイプライン結合にはDID/署名鍵も必要）
-    let actor = state
-        .actors
-        .find_local_by_user_id(auth.user_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let actor_id = actor.as_ref().map(|a| a.id);
-
     // multipart フィールドを収集
     let mut file_bytes: Option<Vec<u8>> = None;
+    let mut filename_from_file_field: Option<String> = None;
+    let mut filename_from_name_field: Option<String> = None;
     let mut media_type_str = "post".to_owned();
     let mut deliver_to_bsky = true;
+    let mut token_field: Option<String> = None;
 
     while let Some(field) = multipart
         .next_field()
@@ -80,6 +92,7 @@ pub async fn create_drive_file(
     {
         match field.name() {
             Some("file") => {
+                filename_from_file_field = field.file_name().map(|s| s.to_owned());
                 let data = field
                     .bytes()
                     .await
@@ -96,9 +109,50 @@ pub async fn create_drive_file(
                 let v = field.text().await.map_err(|e| ApiError::BadRequest(e.to_string()))?;
                 deliver_to_bsky = v != "false";
             }
+            // Misskeyクライアント（Aria等）はアクセストークンをAuthorizationヘッダーではなく
+            // multipartの`i`フィールドとして送ってくる（misskey_dart postWithBinary仕様）。
+            // JSON/クエリ用のmisskey_auth_bridgeはmultipartボディを素通りするため、ここで拾う。
+            Some("i") => {
+                let v = field.text().await.map_err(|e| ApiError::BadRequest(e.to_string()))?;
+                if !v.is_empty() {
+                    token_field = Some(v);
+                }
+            }
+            // Misskey本家の`DriveFilesCreateRequest.name`。misskey_dartの`postWithBinary`は
+            // file添付にContent-Dispositionのfilenameを付与せず、代わりにこの独立した
+            // テキストフィールドでファイル名を送る（`createAsBinary`がfileName引数を渡さない
+            // ため）。file添付側のfilename属性より優先する。
+            Some("name") => {
+                let v = field.text().await.map_err(|e| ApiError::BadRequest(e.to_string()))?;
+                if !v.is_empty() {
+                    filename_from_name_field = Some(v);
+                }
+            }
             _ => {}
         }
     }
+
+    let original_filename = filename_from_name_field.or(filename_from_file_field);
+
+    let auth = match extract_auth(&headers, &state.local_auth).await {
+        Ok(auth) => auth,
+        Err(err) => {
+            let token = token_field.ok_or(err)?;
+            let verified = state
+                .local_auth
+                .verify_token(&token)
+                .map_err(|_| ApiError::Unauthorized("トークンが無効です"))?;
+            AuthUser { user_id: verified.user_id, email: verified.email }
+        }
+    };
+
+    // アップローダーのアクター情報を取得（Bsky動画パイプライン結合にはDID/署名鍵も必要）
+    let actor = state
+        .actors
+        .find_local_by_user_id(auth.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let actor_id = actor.as_ref().map(|a| a.id);
 
     let raw_bytes = file_bytes.ok_or_else(|| ApiError::BadRequest("ファイルが含まれていません".to_owned()))?;
 
@@ -118,11 +172,13 @@ pub async fn create_drive_file(
         return Err(ApiError::BadRequest("画像ファイルのみアップロードできます".to_owned()));
     }
 
+    let md5 = format!("{:x}", md5::compute(&raw_bytes));
+
     if is_image {
-        return create_image_file(&state, actor_id, &raw_bytes, kind).await;
+        return create_image_file(&state, actor_id, &raw_bytes, kind, md5, original_filename).await;
     }
 
-    create_video_or_audio_file(&state, actor.as_ref(), raw_bytes, sniffed_mime, deliver_to_bsky).await
+    create_video_or_audio_file(&state, actor.as_ref(), raw_bytes, sniffed_mime, deliver_to_bsky, md5, original_filename).await
 }
 
 /// 画像アップロード処理（WebP 変換・リサイズ・blurhash 計算）。従来の処理をそのまま踏襲する。
@@ -131,6 +187,8 @@ async fn create_image_file(
     actor_id: Option<i64>,
     raw_bytes: &[u8],
     kind: MediaKind,
+    md5: String,
+    original_filename: Option<String>,
 ) -> Result<Json<DriveFileResponse>, ApiError> {
     let processed = process_image(raw_bytes, kind)
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
@@ -143,6 +201,12 @@ async fn create_image_file(
         .map_err(|e| ApiError::Internal(e.to_string()))?
     {
         let url = build_public_url(state.storage_providers.as_ref(), existing.storage_provider_id, &existing.storage_key).await;
+        // 画像は別途縮小サムネイルを持たないため、本体と同じURLをthumbnailUrlとして返す。
+        // Misskeyクライアント（Aria等）はDriveFile.thumbnailUrlが無いと投稿フォームの
+        // プレビューで画像を表示せずアイコンにフォールバックするため必須。
+        let thumbnail_url = Some(url.clone());
+        let name = original_filename.unwrap_or_else(|| default_file_name(existing.id, &existing.mime_type));
+        let kind = existing.mime_type.clone();
         return Ok(Json(DriveFileResponse {
             id: existing.id.to_string(),
             url,
@@ -154,7 +218,16 @@ async fn create_image_file(
             mime_type: existing.mime_type,
             is_reused: true,
             duration_ms: None,
-            thumbnail_url: None,
+            thumbnail_url,
+            created_at: existing.created_at,
+            name,
+            kind,
+            md5,
+            is_sensitive: false,
+            properties: DriveFileProperties {
+                width: existing.width.map(|w| w as u32),
+                height: existing.height.map(|h| h as u32),
+            },
         }));
     }
 
@@ -198,6 +271,11 @@ async fn create_image_file(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    let name = original_filename.unwrap_or_else(|| default_file_name(record.id, &processed.mime_type));
+    let kind = processed.mime_type.clone();
+    // 画像は別途縮小サムネイルを持たないため、本体と同じURLをthumbnailUrlとして返す
+    // （Misskeyクライアントの投稿フォームプレビュー用、既存レコード再利用時と同じ理由）。
+    let thumbnail_url = Some(public_url.clone());
     Ok(Json(DriveFileResponse {
         id: record.id.to_string(),
         url: public_url,
@@ -209,7 +287,16 @@ async fn create_image_file(
         mime_type: processed.mime_type,
         is_reused: false,
         duration_ms: None,
-        thumbnail_url: None,
+        thumbnail_url,
+        created_at: record.created_at,
+        name,
+        kind,
+        md5,
+        is_sensitive: false,
+        properties: DriveFileProperties {
+            width: Some(processed.width),
+            height: Some(processed.height),
+        },
     }))
 }
 
@@ -221,6 +308,8 @@ async fn create_video_or_audio_file(
     raw_bytes: Vec<u8>,
     mime_type: String,
     deliver_to_bsky: bool,
+    md5: String,
+    original_filename: Option<String>,
 ) -> Result<Json<DriveFileResponse>, ApiError> {
     let actor_id = actor.map(|a| a.id);
     if !is_allowed_video_or_audio_mime(&mime_type) {
@@ -281,6 +370,8 @@ async fn create_video_or_audio_file(
             Some(key) => Some(build_public_url(state.storage_providers.as_ref(), existing.storage_provider_id, key).await),
             None => None,
         };
+        let name = original_filename.unwrap_or_else(|| default_file_name(existing.id, &existing.mime_type));
+        let kind = existing.mime_type.clone();
         return Ok(Json(DriveFileResponse {
             id: existing.id.to_string(),
             url,
@@ -293,6 +384,15 @@ async fn create_video_or_audio_file(
             is_reused: true,
             duration_ms: existing.duration_ms.map(|d| d as i64),
             thumbnail_url,
+            created_at: existing.created_at,
+            name,
+            kind,
+            md5,
+            is_sensitive: false,
+            properties: DriveFileProperties {
+                width: existing.width.map(|w| w as u32),
+                height: existing.height.map(|h| h as u32),
+            },
         }));
     }
 
@@ -367,6 +467,8 @@ async fn create_video_or_audio_file(
         None => None,
     };
 
+    let name = original_filename.unwrap_or_else(|| default_file_name(record.id, &mime_type));
+    let kind = mime_type.clone();
     Ok(Json(DriveFileResponse {
         id: record.id.to_string(),
         url: public_url,
@@ -379,6 +481,15 @@ async fn create_video_or_audio_file(
         is_reused: false,
         duration_ms: probed.duration_ms,
         thumbnail_url,
+        created_at: record.created_at,
+        name,
+        kind,
+        md5,
+        is_sensitive: false,
+        properties: DriveFileProperties {
+            width: probed.width,
+            height: probed.height,
+        },
     }))
 }
 
@@ -479,6 +590,20 @@ async fn mark_bsky_video_failed(state: &AppState, media_file_id: i64) {
         .bind(media_file_id)
         .execute(&state.db)
         .await;
+}
+
+/// Misskeyワイヤー互換の`name`フィールド用。クライアントが元のファイル名を送ってこなかった
+/// 場合のフォールバック名を、MIME typeから推測した拡張子付きで生成する。
+fn default_file_name(id: i64, mime_type: &str) -> String {
+    let ext = match mime_type {
+        "image/jpeg" => "jpg",
+        "image/png"  => "png",
+        "image/gif"  => "gif",
+        "image/avif" => "avif",
+        "image/webp" => "webp",
+        _            => ext_for_mime_type(mime_type),
+    };
+    format!("seiran-{}.{}", id, ext)
 }
 
 fn map_selector_error(e: SelectorError) -> ApiError {

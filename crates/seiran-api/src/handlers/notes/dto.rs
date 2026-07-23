@@ -11,12 +11,19 @@ use seiran_common::repository::TimelinePost;
 pub struct CreateNoteRequest {
     pub text: Option<String>,
     // JS の Number 精度問題を避けるため文字列で受け取り、サーバー側で i64 にパースする
+    // Misskey本家の`fileIds`と同じ役割のため、そのフィールド名もエイリアスとして受け付ける
+    // （Misskey APIクライアント、`mediaIds`は旧名で`fileIds`優先のため対応不要）。
+    #[serde(alias = "fileIds")]
     pub attachment_ids: Option<Vec<String>>,
     pub deliver_to_fedi: Option<bool>,
     pub deliver_to_bsky: Option<bool>,
-    /// リポスト元のポスト ID（指定時はリポスト投稿として処理）
+    /// リポスト元のポスト ID（指定時はリポスト投稿として処理）。Misskey本家の`renoteId`も
+    /// エイリアスとして受け付ける（Misskey APIクライアント対応）。
+    #[serde(alias = "renoteId")]
     pub renote_id: Option<String>,
-    /// リプライ先のポスト ID（指定時はリプライとして処理し配信先を制御する）
+    /// リプライ先のポスト ID（指定時はリプライとして処理し配信先を制御する）。Misskey本家の
+    /// `replyId`もエイリアスとして受け付ける（Misskey APIクライアント対応）。
+    #[serde(alias = "replyId")]
     pub reply_to_id: Option<String>,
     /// 引用元のポスト ID（指定時は引用投稿として処理する）
     pub quote_of_id: Option<String>,
