@@ -200,7 +200,12 @@ impl ReplyContext {
     ///   ただし`direct`が明示指定されれば許可する（通常ポストへの返信として新規DMを開始する経路）。
     /// - 親が followers_only: 強制的に followers_only（Misskey互換の黙った読み替え）。
     /// - 親が unlisted: public/unlisted/followers_only いずれも選択可、デフォルトは unlisted。
+    ///
+    /// `requested`はMisskey本家の語彙（`home`/`followers`/`specified`）も受け付け、
+    /// 内部で対応するseiran語彙（`unlisted`/`followers_only`/`direct`）へ正規化してから
+    /// 判定する（`handlers::misskey::convert::to_misskey_visibility`の逆変換に相当）。
     pub fn resolve_visibility(&self, requested: Option<&str>) -> Result<&'static str, ApiError> {
+        let requested = requested.map(normalize_misskey_visibility);
         match self.parent_visibility.as_deref() {
             Some("direct") => Ok("direct"),
             Some("followers_only") => Ok("followers_only"),
@@ -219,6 +224,18 @@ impl ReplyContext {
                 Some(_) => Err(ApiError::BadRequest("INVALID_VISIBILITY".to_owned())),
             },
         }
+    }
+}
+
+/// Misskey本家の`visibility`語彙（`home`/`followers`/`specified`）をseiran語彙
+/// （`unlisted`/`followers_only`/`direct`）へ正規化する。`public`およびseiran語彙が
+/// そのまま来た場合・未知の値はそのまま通す（後続の判定で弾かれる）。
+fn normalize_misskey_visibility(v: &str) -> &str {
+    match v {
+        "home" => "unlisted",
+        "followers" => "followers_only",
+        "specified" => "direct",
+        other => other,
     }
 }
 
@@ -516,6 +533,26 @@ mod tests {
     fn resolve_visibility_rejects_unknown_value() {
         let ctx = ctx_with_parent_visibility(None);
         assert!(matches!(ctx.resolve_visibility(Some("bogus")), Err(ApiError::BadRequest(_))));
+    }
+
+    #[test]
+    fn resolve_visibility_accepts_misskey_vocabulary() {
+        // Misskey本家語彙（home/followers/specified）をAria等が送ってきても、
+        // seiran語彙（unlisted/followers_only/direct）と同じ結果になること。
+        let ctx = ctx_with_parent_visibility(None);
+        assert_eq!(ctx.resolve_visibility(Some("home")).unwrap(), "unlisted");
+        assert_eq!(ctx.resolve_visibility(Some("followers")).unwrap(), "followers_only");
+        assert_eq!(ctx.resolve_visibility(Some("specified")).unwrap(), "direct");
+    }
+
+    #[test]
+    fn resolve_visibility_misskey_vocabulary_respects_parent_constraints() {
+        let ctx = ctx_with_parent_visibility(Some("direct"));
+        // DMスレッド内の返信でMisskey語彙を送っても、direct強制から離脱できない。
+        assert_eq!(ctx.resolve_visibility(Some("home")).unwrap(), "direct");
+
+        let ctx = ctx_with_parent_visibility(Some("unlisted"));
+        assert!(matches!(ctx.resolve_visibility(Some("specified")), Err(ApiError::BadRequest(_))));
     }
 
     #[test]
