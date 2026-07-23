@@ -344,6 +344,21 @@ export interface UserProfile {
   is_paired: boolean;
   /** 公開リスト一覧（#63）。現状ローカルユーザーのみ（リモートは将来課題）。 */
   public_lists: { id: string; name: string; member_count: number }[];
+  /** フォロー中の人数（#56）。DB未登録のリモートアクターは常に0。 */
+  following_count: number;
+  /** フォロワーの人数（#56）。following_count と同様、DB未登録のリモートアクターは常に0。 */
+  follower_count: number;
+}
+
+/** フォロー中/フォロワー一覧の1件（#56、`GET /users/following` `/users/followers`）。 */
+export interface FollowListItem {
+  /** カーソルページネーション用（次ページ取得の `until_id` にそのまま渡す）。 */
+  follow_id: string;
+  actor_id: string;
+  username: string;
+  domain: string;
+  display_name?: string;
+  avatar_url?: string;
 }
 
 export interface SearchResult {
@@ -747,6 +762,18 @@ export const api = {
       if (params?.exclude_direct) q.set("exclude_direct", "true");
       const rows = await request<RawNote[]>("GET", `/users/posts?${q.toString()}`);
       return rows.map(normalizeNote);
+    },
+    /** プロフィール画面「フォロー中」タブの一覧取得（無限スクロール、#56）。 */
+    following(actorId: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+      const q = cursorParams(params);
+      q.set("actor_id", actorId);
+      return request<FollowListItem[]>("GET", `/users/following?${q.toString()}`);
+    },
+    /** プロフィール画面「フォロワー」タブの一覧取得（無限スクロール、#56）。 */
+    followers(actorId: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+      const q = cursorParams(params);
+      q.set("actor_id", actorId);
+      return request<FollowListItem[]>("GET", `/users/followers?${q.toString()}`);
     },
     updateProfile(patch: {
       display_name?: string;

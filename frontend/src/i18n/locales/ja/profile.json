@@ -19,6 +19,14 @@
     "publicListsHeader": "公開リスト",
     "postsHeader": "投稿",
     "noPosts": "投稿がありません。",
+    "followingTab": "フォロー中",
+    "followersTab": "フォロワー",
+    "followingCountLabel": "フォロー中",
+    "followerCountLabel": "フォロワー",
+    "followList": {
+      "noFollowing": "フォロー中のユーザーがいません。",
+      "noFollowers": "フォロワーがいません。"
+    },
     "actionsMenuTitle": "アカウント操作",
     "muteButton": "ミュート",
     "unmuteButton": "ミュート解除",

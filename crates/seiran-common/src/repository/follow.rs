@@ -1,6 +1,18 @@
 use async_trait::async_trait;
 use sqlx::PgPool;
 
+/// フォロー中/フォロワー一覧の1行（アクター表示情報 + カーソル用 `follows.id`、#56）。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct FollowListRow {
+    /// カーソルページネーション用（`follows.id`、`until_id`/`since_id` に使う）。
+    pub follow_id: i64,
+    pub actor_id: i64,
+    pub username: String,
+    pub domain: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
 #[async_trait]
 pub trait FollowRepository: Send + Sync {
     /// フォローを pending で挿入する（既存なら status を pending に戻す）。
@@ -67,6 +79,33 @@ pub trait FollowRepository: Send + Sync {
         &self,
         follower_actor_id: i64,
     ) -> Result<Vec<i64>, sqlx::Error>;
+
+    /// `actor_id` の (following_count, follower_count) を返す（プロフィール画面表示用、#56）。
+    /// status='accepted' のみをカウントする（pending は含まない）。
+    async fn count_relations(&self, actor_id: i64) -> Result<(i64, i64), sqlx::Error>;
+
+    /// `follower_actor_id` がフォロー中（status='accepted'）のアクター一覧を新しい順に返す
+    /// （プロフィール画面の「フォロー中」タブ、#56）。`viewer_actor_id` が指定されていれば、
+    /// 閲覧者からブロックされている等で非表示にすべきアクターを除外する。
+    async fn list_following(
+        &self,
+        follower_actor_id: i64,
+        viewer_actor_id: Option<i64>,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+    ) -> Result<Vec<FollowListRow>, sqlx::Error>;
+
+    /// `target_actor_id` をフォロー中（status='accepted'）のアクター一覧を新しい順に返す
+    /// （プロフィール画面の「フォロワー」タブ、#56）。`viewer_actor_id` の扱いは `list_following` と同じ。
+    async fn list_followers(
+        &self,
+        target_actor_id: i64,
+        viewer_actor_id: Option<i64>,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+    ) -> Result<Vec<FollowListRow>, sqlx::Error>;
 }
 
 pub struct PgFollowRepository {
@@ -221,6 +260,80 @@ impl FollowRepository for PgFollowRepository {
              WHERE follower_actor_id = $1 AND status = 'accepted'",
         )
         .bind(follower_actor_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn count_relations(&self, actor_id: i64) -> Result<(i64, i64), sqlx::Error> {
+        let row: (i64, i64) = sqlx::query_as(
+            "SELECT
+               (SELECT COUNT(*) FROM follows WHERE follower_actor_id = $1 AND status = 'accepted'),
+               (SELECT COUNT(*) FROM follows WHERE target_actor_id = $1 AND status = 'accepted')",
+        )
+        .bind(actor_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    async fn list_following(
+        &self,
+        follower_actor_id: i64,
+        viewer_actor_id: Option<i64>,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+    ) -> Result<Vec<FollowListRow>, sqlx::Error> {
+        sqlx::query_as::<_, FollowListRow>(
+            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
+                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url
+             FROM follows f
+             JOIN actors a ON a.id = f.target_actor_id
+             LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+             LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             WHERE f.follower_actor_id = $1 AND f.status = 'accepted'
+               AND ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, a.id))
+               AND ($3::bigint IS NULL OR f.id < $3)
+               AND ($4::bigint IS NULL OR f.id > $4)
+             ORDER BY f.id DESC
+             LIMIT $5",
+        )
+        .bind(follower_actor_id)
+        .bind(viewer_actor_id)
+        .bind(until_id)
+        .bind(since_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn list_followers(
+        &self,
+        target_actor_id: i64,
+        viewer_actor_id: Option<i64>,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+    ) -> Result<Vec<FollowListRow>, sqlx::Error> {
+        sqlx::query_as::<_, FollowListRow>(
+            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
+                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url
+             FROM follows f
+             JOIN actors a ON a.id = f.follower_actor_id
+             LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+             LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             WHERE f.target_actor_id = $1 AND f.status = 'accepted'
+               AND ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, a.id))
+               AND ($3::bigint IS NULL OR f.id < $3)
+               AND ($4::bigint IS NULL OR f.id > $4)
+             ORDER BY f.id DESC
+             LIMIT $5",
+        )
+        .bind(target_actor_id)
+        .bind(viewer_actor_id)
+        .bind(until_id)
+        .bind(since_id)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
     }

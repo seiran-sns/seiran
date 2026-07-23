@@ -29,7 +29,7 @@ pub use block::{BlockRepository, BlockedActorRow, PgBlockRepository};
 pub use dm::{DmPeerSummary, DmRepository, PgDmRepository};
 pub use email_verification::{EmailVerificationRepository, PgEmailVerificationRepository};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
-pub use follow::{FollowRepository, PgFollowRepository};
+pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
 pub use mute::{MuteRepository, MutedActorRow, PgMuteRepository};
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
 pub use list::{
