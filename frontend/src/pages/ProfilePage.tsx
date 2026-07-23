@@ -9,6 +9,7 @@ import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
 import NoteList from "../components/note/NoteList";
 import { useAuth } from "../contexts/AuthContext";
+import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
@@ -25,6 +26,7 @@ export default function ProfilePage() {
   const [searchParams] = useSearchParams();
   const { acct } = useParams<{ acct: string }>();
   const navigate = useNavigate();
+  const goBack = useGoBack();
   // permalink `/@handle`（#36）を優先し、旧 `/profile?q=` も後方互換で受ける。
   const q = acct ? acct.replace(/^@/, "") : searchParams.get("q") ?? "";
 
@@ -225,7 +227,7 @@ export default function ProfilePage() {
   const center = (
     <>
       <header className={panel.header}>
-        <button className={panel.backBtn} onClick={() => navigate(-1)}>
+        <button className={panel.backBtn} onClick={goBack}>
           ← {t("common:back")}
         </button>
         <span className={panel.title}>{t("profile:profilePage.title")}</span>

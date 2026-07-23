@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { NavigationHistoryProvider } from "./contexts/NavigationHistoryContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
 import { HomeFeedProvider } from "./contexts/HomeFeedContext";
 import { ComposerProvider } from "./contexts/ComposerContext";
@@ -74,139 +75,141 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
-      <Route
-        path="/"
-        element={
-          <RequireAuth>
-            <HomePage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/search"
-        element={
-          <RequireAuth>
-            <SearchPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/notifications"
-        element={
-          <RequireAuth>
-            <NotificationsPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/notes/:id"
-        element={
-          <RequireAuth>
-            <NoteDetailPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/profile"
-        element={
-          <RequireAuth>
-            <ProfilePage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/admin"
-        element={
-          <RequireAuth>
-            <AdminPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/settings/profile"
-        element={
-          <RequireAuth>
-            <ProfileEditPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/settings/lists"
-        element={
-          <RequireAuth>
-            <ListsSettingsPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/lists/:id"
-        element={
-          <RequireAuth>
-            <ListDetailPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/tags/:name"
-        element={
-          <RequireAuth>
-            <HashtagPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/messages"
-        element={
-          <RequireAuth>
-            <MessagesPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/messages/:threadRootId"
-        element={
-          <RequireAuth>
-            <MessagesPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/connect/:sessionId"
-        element={
-          <RequireAuth>
-            <MiAuthConnectPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/:acct"
-        element={
-          <RequireAuth>
-            <ProfileByAcct />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/login"
-        element={
-          <RedirectIfAuthed>
-            <Login />
-          </RedirectIfAuthed>
-        }
-      />
-      <Route
-        path="/register"
-        element={
-          <RedirectIfAuthed>
-            <Register />
-          </RedirectIfAuthed>
-        }
-      />
-      <Route path="/verify-email" element={<VerifyEmail />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
-    </Routes>
+    <NavigationHistoryProvider>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <RequireAuth>
+              <HomePage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/search"
+          element={
+            <RequireAuth>
+              <SearchPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/notifications"
+          element={
+            <RequireAuth>
+              <NotificationsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/notes/:id"
+          element={
+            <RequireAuth>
+              <NoteDetailPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <RequireAuth>
+              <ProfilePage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <RequireAuth>
+              <AdminPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/profile"
+          element={
+            <RequireAuth>
+              <ProfileEditPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/lists"
+          element={
+            <RequireAuth>
+              <ListsSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/lists/:id"
+          element={
+            <RequireAuth>
+              <ListDetailPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/tags/:name"
+          element={
+            <RequireAuth>
+              <HashtagPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/messages"
+          element={
+            <RequireAuth>
+              <MessagesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/messages/:threadRootId"
+          element={
+            <RequireAuth>
+              <MessagesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/connect/:sessionId"
+          element={
+            <RequireAuth>
+              <MiAuthConnectPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/:acct"
+          element={
+            <RequireAuth>
+              <ProfileByAcct />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/login"
+          element={
+            <RedirectIfAuthed>
+              <Login />
+            </RedirectIfAuthed>
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <RedirectIfAuthed>
+              <Register />
+            </RedirectIfAuthed>
+          }
+        />
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+      </Routes>
+    </NavigationHistoryProvider>
   );
 }
 

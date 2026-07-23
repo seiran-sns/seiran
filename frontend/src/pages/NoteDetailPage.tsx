@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note, getErrorMessage } from "../api/client";
 import RemoteBanner from "../components/common/RemoteBanner";
@@ -7,6 +7,7 @@ import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
 import ReactionChips from "../components/note/ReactionChips";
+import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./NoteDetailPage.module.css";
@@ -14,7 +15,7 @@ import styles from "./NoteDetailPage.module.css";
 export default function NoteDetailPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const goBack = useGoBack();
   const { noteDetailTab, setNoteDetailTab } = useRightPane();
 
   const [note, setNote] = useState<Note | null>(null);
@@ -95,7 +96,7 @@ export default function NoteDetailPage() {
   const center = (
     <>
       <header className={panel.header}>
-        <button className={panel.backBtn} onClick={() => navigate(-1)}>
+        <button className={panel.backBtn} onClick={goBack}>
           ← {t("common:back")}
         </button>
         <span className={panel.title}>{t("home:noteDetailPage.title")}</span>

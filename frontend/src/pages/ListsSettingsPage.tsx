@@ -1,13 +1,13 @@
-import { useNavigate } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import ListsPanel from "../components/lists/ListsPanel";
 import ListDetailPanel from "../components/lists/ListDetailPanel";
+import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { useListsSettings } from "../hooks/useListsSettings";
 import styles from "./ListsSettings.module.css";
 
 export default function ListsSettingsPage() {
-  const navigate = useNavigate();
+  const goBack = useGoBack();
 
   // 狭幅では右ペインが無いため、メンバー編集パネルを中央ペインへ連続表示する。
   const isNarrow = useIsNarrowViewport();
@@ -47,7 +47,7 @@ export default function ListsSettingsPage() {
 
   const center = (
     <ListsPanel
-      onBack={() => navigate(-1)}
+      onBack={goBack}
       error={error}
       lists={lists}
       loading={loading}
