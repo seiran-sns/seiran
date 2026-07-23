@@ -17,7 +17,7 @@ function emptyProfileFields(): ProfileField[] {
 
 export default function ProfileEditPage() {
   const { t } = useTranslation();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const goBack = useGoBack();
 
@@ -25,12 +25,6 @@ export default function ProfileEditPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-
-  // 退会フォーム
-  const [withdrawHandle, setWithdrawHandle] = useState("");
-  const [withdrawing, setWithdrawing] = useState(false);
-  const [withdrawError, setWithdrawError] = useState("");
-  const [showWithdrawForm, setShowWithdrawForm] = useState(false);
 
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
@@ -95,22 +89,6 @@ export default function ProfileEditPage() {
       setError(getErrorMessage(err));
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function withdraw(e: FormEvent) {
-    e.preventDefault();
-    if (!confirm(t("profile:profileEditPage.withdrawConfirm"))) return;
-    setWithdrawing(true);
-    setWithdrawError("");
-    try {
-      await api.account.withdraw(withdrawHandle.trim());
-      logout();
-      navigate("/login");
-    } catch (err) {
-      setWithdrawError(getErrorMessage(err));
-    } finally {
-      setWithdrawing(false);
     }
   }
 
@@ -203,50 +181,6 @@ export default function ProfileEditPage() {
           </button>
         </form>
       )}
-
-      {/* 退会 */}
-      <div className={styles.dangerZone}>
-        <h3 className={styles.dangerTitle}>{t("profile:profileEditPage.dangerZoneTitle")}</h3>
-        {!showWithdrawForm ? (
-          <button className={styles.dangerBtn} onClick={() => setShowWithdrawForm(true)}>
-            {t("profile:profileEditPage.withdrawButton")}
-          </button>
-        ) : (
-          <form className={styles.withdrawForm} onSubmit={withdraw}>
-            <p className={styles.dangerHint}>
-              {t("profile:profileEditPage.withdrawHint.body")}
-              {t("profile:profileEditPage.withdrawHint.handlePrefix")}
-              <strong>@{user?.username}</strong>
-              {t("profile:profileEditPage.withdrawHint.handleSuffix")}
-            </p>
-            {withdrawError && <p className={styles.error}>{withdrawError}</p>}
-            <input
-              className={styles.input}
-              value={withdrawHandle}
-              onChange={(e) => setWithdrawHandle(e.target.value)}
-              placeholder={user?.username ?? ""}
-              disabled={withdrawing}
-            />
-            <div className={styles.withdrawActions}>
-              <button
-                type="button"
-                className={styles.ghost}
-                onClick={() => { setShowWithdrawForm(false); setWithdrawError(""); }}
-                disabled={withdrawing}
-              >
-                {t("common:cancel")}
-              </button>
-              <button
-                type="submit"
-                className={styles.dangerBtn}
-                disabled={withdrawing || !withdrawHandle.trim()}
-              >
-                {withdrawing ? t("profile:profileEditPage.withdrawing") : t("profile:profileEditPage.withdrawSubmit")}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
     </>
   );
 

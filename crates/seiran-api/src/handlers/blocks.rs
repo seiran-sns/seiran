@@ -96,6 +96,34 @@ pub async fn create_block(
     Json(BlockResponse { status: "blocked".to_string() }).into_response()
 }
 
+#[derive(Serialize)]
+pub struct BlockedActorItem {
+    pub actor_id: String,
+    pub username: String,
+    pub domain: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+/// `GET /api/blocks` — 自分がブロック中のアクター一覧（設定画面のミュート・ブロック管理、#55）。
+pub async fn list_blocks(user: AuthedUser, State(state): State<AppState>) -> impl IntoResponse {
+    match state.blocks.list_blocked(user.actor_id).await {
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(|r| BlockedActorItem {
+                    actor_id: r.id.to_string(),
+                    username: r.username,
+                    domain: r.domain,
+                    display_name: r.display_name,
+                    avatar_url: r.avatar_url,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => ApiError::Internal(format!("[list_blocks] 一覧取得失敗: {}", e)).into_response(),
+    }
+}
+
 pub async fn delete_block(
     user: AuthedUser,
     State(state): State<AppState>,

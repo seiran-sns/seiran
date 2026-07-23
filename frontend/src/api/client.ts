@@ -434,6 +434,15 @@ export interface FollowResponse {
   target_uri: string;
 }
 
+/** ミュート/ブロック一覧の1件（#55、`GET /mutes` `/blocks`）。 */
+export interface MutedOrBlockedActor {
+  actor_id: string;
+  username: string;
+  domain: string;
+  display_name?: string;
+  avatar_url?: string;
+}
+
 export interface DriveFile {
   id: string;
   url: string;
@@ -846,6 +855,10 @@ export const api = {
     delete(target: string) {
       return request<{ status: string }>("POST", "/blocks/delete", { target });
     },
+    /** 設定画面のブロック一覧（#55）。 */
+    list() {
+      return request<MutedOrBlockedActor[]>("GET", "/blocks");
+    },
   },
 
   mutes: {
@@ -854,6 +867,10 @@ export const api = {
     },
     delete(target: string) {
       return request<{ status: string }>("POST", "/mutes/delete", { target });
+    },
+    /** 設定画面のミュート一覧（#55）。 */
+    list() {
+      return request<MutedOrBlockedActor[]>("GET", "/mutes");
     },
   },
 
@@ -933,6 +950,13 @@ export const api = {
   account: {
     withdraw(confirmHandle: string) {
       return request<void>("POST", "/account/withdraw", { confirm_handle: confirmHandle });
+    },
+    /** 設定画面のアカウント設定からパスワードを変更する（#55、要現パスワード確認）。 */
+    changePassword(currentPassword: string, newPassword: string) {
+      return request<void>("POST", "/account/change-password", {
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
     },
   },
 

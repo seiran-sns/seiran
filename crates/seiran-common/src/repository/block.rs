@@ -1,6 +1,16 @@
 use async_trait::async_trait;
 use sqlx::PgPool;
 
+/// ブロック中アクターの表示用情報（設定画面のブロック一覧、#55）。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct BlockedActorRow {
+    pub id: i64,
+    pub username: String,
+    pub domain: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
 #[async_trait]
 pub trait BlockRepository: Send + Sync {
     /// ブロックを挿入する（rkey があれば保存）。既存なら atp_rkey を上書きする。
@@ -42,6 +52,10 @@ pub trait BlockRepository: Send + Sync {
         actor_a: i64,
         actor_b: i64,
     ) -> Result<(bool, bool), sqlx::Error>;
+
+    /// ブロック中のアクター一覧を新しい順に返す（設定画面、#55）。件数は少数想定のため
+    /// カーソルページネーションはせず先頭200件を返す。
+    async fn list_blocked(&self, blocker_actor_id: i64) -> Result<Vec<BlockedActorRow>, sqlx::Error>;
 }
 
 pub struct PgBlockRepository {
@@ -137,5 +151,22 @@ impl BlockRepository for PgBlockRepository {
         .fetch_one(&self.pool)
         .await?;
         Ok(row)
+    }
+
+    async fn list_blocked(&self, blocker_actor_id: i64) -> Result<Vec<BlockedActorRow>, sqlx::Error> {
+        sqlx::query_as::<_, BlockedActorRow>(
+            "SELECT a.id, a.username, a.domain, a.display_name,
+                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url
+             FROM blocks b
+             JOIN actors a ON a.id = b.blocked_actor_id
+             LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+             LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             WHERE b.blocker_actor_id = $1
+             ORDER BY b.id DESC
+             LIMIT 200",
+        )
+        .bind(blocker_actor_id)
+        .fetch_all(&self.pool)
+        .await
     }
 }

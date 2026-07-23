@@ -5,6 +5,7 @@
   "ALREADY_REPOSTED": "Already reposted",
   "ALREADY_WITHDRAWN": "Account withdrawal has already been completed",
   "CONFIRM_HANDLE_MISMATCH": "The confirmation handle does not match",
+  "CURRENT_PASSWORD_INCORRECT": "Current password is incorrect",
   "EMAIL_ALREADY_REGISTERED": "This email address is already in use",
   "EMAIL_INVALID": "Please enter a valid email address",
   "EMOJI_NOT_FOUND": "Emoji not found",

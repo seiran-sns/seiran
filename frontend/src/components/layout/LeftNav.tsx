@@ -19,6 +19,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/notifications", icon: "🔔", labelKey: "leftNav.notifications" },
   { to: "/messages", icon: "✉️", labelKey: "leftNav.messages" },
   { to: "/settings/lists", icon: "📋", labelKey: "leftNav.lists" },
+  { to: "/settings", icon: "⚙️", labelKey: "leftNav.settings" },
 ];
 
 interface LeftNavProps {

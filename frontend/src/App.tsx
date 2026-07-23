@@ -9,6 +9,7 @@ import { ComposerProvider } from "./contexts/ComposerContext";
 import { SiteMetaProvider } from "./contexts/SiteMetaContext";
 import { StreamingProvider } from "./contexts/StreamingContext";
 import { ToastProvider } from "./contexts/ToastContext";
+import AccountSettingsPage from "./pages/AccountSettingsPage";
 import AdminPage from "./pages/AdminPage";
 import ForgotPassword from "./pages/ForgotPassword";
 import HashtagPage from "./pages/HashtagPage";
@@ -18,6 +19,7 @@ import ListsSettingsPage from "./pages/ListsSettingsPage";
 import Login from "./pages/Login";
 import MessagesPage from "./pages/MessagesPage";
 import MiAuthConnectPage from "./pages/MiAuthConnectPage";
+import MutesBlocksSettingsPage from "./pages/MutesBlocksSettingsPage";
 import NoteDetailPage from "./pages/NoteDetailPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -25,6 +27,7 @@ import ProfileEditPage from "./pages/ProfileEditPage";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import SearchPage from "./pages/SearchPage";
+import SettingsMenuPage from "./pages/SettingsMenuPage";
 import Setup from "./pages/Setup";
 import VerifyEmail from "./pages/VerifyEmail";
 
@@ -122,6 +125,30 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <AdminPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <RequireAuth>
+              <SettingsMenuPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/account"
+          element={
+            <RequireAuth>
+              <AccountSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/mutes-blocks"
+          element={
+            <RequireAuth>
+              <MutesBlocksSettingsPage />
             </RequireAuth>
           }
         />

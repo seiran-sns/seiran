@@ -1,0 +1,51 @@
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.95rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover:not(:disabled) {
+  background: var(--bg-elev);
+}
+
+.row:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.icon {
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+.label {
+  flex: 1;
+}
+
+.chevron {
+  color: var(--text-faint);
+  font-size: 1.1rem;
+}
+
+.comingSoon {
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 8px;
+}
