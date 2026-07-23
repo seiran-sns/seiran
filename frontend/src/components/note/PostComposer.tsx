@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, DriveFile, Note, getErrorMessage } from "../../api/client";
 import { acct, calcRemaining, displayName } from "../../lib/format";
@@ -122,10 +122,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
     }
   }
 
-  async function handleFileSelect(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
+  async function uploadFile(file: File) {
     setError("");
     setUploading(true);
     try {
@@ -135,6 +132,23 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
     } finally {
       setUploading(false);
     }
+  }
+
+  function handleFileSelect(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    uploadFile(file);
+  }
+
+  function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    if (uploading || attached) return;
+    const item = Array.from(e.clipboardData.items).find((i) => i.type.startsWith("image/"));
+    if (!item) return;
+    const file = item.getAsFile();
+    if (!file) return;
+    e.preventDefault();
+    uploadFile(file);
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -167,6 +181,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
         className={styles.textarea}
         placeholder={replyTo ? t("home:postComposer.replyPlaceholder") : t("home:postComposer.placeholder")}
         rows={3}
