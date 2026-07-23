@@ -64,3 +64,9 @@
   border-bottom-color: var(--accent);
   font-weight: 700;
 }
+
+.swipeContainer {
+  touch-action: pan-y;
+  min-height: 100%;
+}
+
