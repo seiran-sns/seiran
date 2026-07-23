@@ -70,6 +70,29 @@
   word-break: break-all;
 }
 
+.followCounts {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.followCountBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.followCountBtn:hover {
+  text-decoration: underline;
+}
+
+.followCountBtn strong {
+  color: var(--text);
+}
+
 .badges {
   display: flex;
   flex-wrap: wrap;
