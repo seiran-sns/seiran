@@ -17,18 +17,23 @@ const PAGE_SIZE = 20;
 const NOTE_LINKED_TYPES = new Set(["reaction", "mention", "reply"]);
 
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。 */
-function describe(n: NotificationItem): { icon: string; iconUrl?: string; i18nKey: string; label: string } {
+export function describeNotification(n: NotificationItem): { icon: string; iconUrl?: string; i18nKey: string; label: string } {
   const who = n.user?.name || n.user?.username || i18n.t("notifications:notificationsPanel.unknownUser");
   const handle = n.user?.username && n.user?.host ? `@${n.user.username}@${n.user.host}` : "";
   const label = handle ? `${who}（${handle}）` : who;
   switch (n.type) {
-    case "reaction":
+    case "reaction": {
+      // `reactionEmojis` のキーは Misskey 本家仕様に合わせコロンなし shortcode
+      // （バックエンド側 `convert.rs`）。`reaction` は `:shortcode:` 形式なので
+      // 先頭末尾の ':' を除いてから引く。
+      const shortcode = n.reaction?.replace(/^:(.*):$/, "$1");
       return {
         icon: n.reaction || "⭐",
-        iconUrl: n.reaction ? n.note?.reactionEmojis?.[n.reaction] : undefined,
+        iconUrl: shortcode ? n.note?.reactionEmojis?.[shortcode] : undefined,
         i18nKey: "notifications:notificationsPanel.reactionText",
         label,
       };
+    }
     case "follow":
       return { icon: "➕", i18nKey: "notifications:notificationsPanel.followText", label };
     case "followRequestAccepted":
@@ -124,7 +129,7 @@ export default function NotificationsPanel() {
   return (
     <ul className={styles.list}>
       {items.map((n) => {
-        const { icon, iconUrl, i18nKey, label } = describe(n);
+        const { icon, iconUrl, i18nKey, label } = describeNotification(n);
         const noteId = NOTE_LINKED_TYPES.has(n.type) ? n.note?.id : undefined;
         const userLink = n.user?.username ? (
           <Link
