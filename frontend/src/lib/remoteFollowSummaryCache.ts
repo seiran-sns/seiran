@@ -18,11 +18,23 @@ function cacheKey(actorId: string, direction: "following" | "followers"): string
 
 function fetchAndCache(actorId: string, direction: "following" | "followers"): Promise<RemoteFollowSummaryResponse> {
   const key = cacheKey(actorId, direction);
-  const promise = api.users.remoteFollowSummary(actorId, direction).catch((e) => {
-    // 失敗したPromiseをキャッシュに残すと、再訪時も永久に失敗し続けるため取り除く。
-    cache.delete(key);
-    throw e;
-  });
+  const promise = api.users.remoteFollowSummary(actorId, direction)
+    .then((res) => {
+      // pending=true（Workerでのバックグラウンド全件取得がまだ完了していない）の結果を
+      // そのままキャッシュに残すと、SPA内でタブを閉じて開き直す・別ページから戻るだけでは
+      // （完全なブラウザリロードをしない限り）このモジュールスコープキャッシュがクリアされず、
+      // Workerが裏で取得を完了させていても永久に古い（空/不完全な）結果を表示し続けてしまう
+      // （マイケル指摘 #68: リロードしても表示されない）。完了するまでは都度取り直す。
+      if (res.pending) {
+        cache.delete(key);
+      }
+      return res;
+    })
+    .catch((e) => {
+      // 失敗したPromiseをキャッシュに残すと、再訪時も永久に失敗し続けるため取り除く。
+      cache.delete(key);
+      throw e;
+    });
   cache.set(key, promise);
   return promise;
 }
