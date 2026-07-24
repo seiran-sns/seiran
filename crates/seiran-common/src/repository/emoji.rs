@@ -25,6 +25,7 @@ pub struct EmojiRow {
     pub media_file_id: i64,
     pub category: Option<String>,
     pub tags: Vec<String>,
+    pub license: Option<String>,
     pub created_at: DateTime<Utc>,
     pub url: Option<String>,
 }
@@ -36,6 +37,7 @@ pub trait EmojiRepository: Send + Sync {
 
     /// 新規絵文字を登録する。shortcode の一意制約違反はそのまま `sqlx::Error` を返す
     /// （呼び出し側で `23505` を判定して `ApiError::Conflict` に変換する）。
+    #[allow(clippy::too_many_arguments)]
     async fn insert(
         &self,
         id: i64,
@@ -43,14 +45,16 @@ pub trait EmojiRepository: Send + Sync {
         media_file_id: i64,
         category: Option<&str>,
         tags: &[String],
+        license: Option<&str>,
     ) -> Result<EmojiRow, sqlx::Error>;
 
-    /// category / tags を更新する（`None` は現在値を保持）。
+    /// category / tags / license を更新する（`None` は現在値を保持）。
     async fn update(
         &self,
         id: i64,
         category: Option<&str>,
         tags: Option<&[String]>,
+        license: Option<&str>,
     ) -> Result<Option<EmojiRow>, sqlx::Error>;
 
     /// 削除する。削除できたら true。
@@ -89,7 +93,7 @@ impl PgEmojiRepository {
 impl EmojiRepository for PgEmojiRepository {
     async fn list_all(&self) -> Result<Vec<EmojiRow>, sqlx::Error> {
         sqlx::query_as::<_, EmojiRow>(
-            "SELECT ce.id, ce.shortcode, ce.media_file_id, ce.category, ce.tags, ce.created_at,
+            "SELECT ce.id, ce.shortcode, ce.media_file_id, ce.category, ce.tags, ce.license, ce.created_at,
                     rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url
              FROM custom_emojis ce
              JOIN media_files mf ON mf.id = ce.media_file_id
@@ -107,17 +111,19 @@ impl EmojiRepository for PgEmojiRepository {
         media_file_id: i64,
         category: Option<&str>,
         tags: &[String],
+        license: Option<&str>,
     ) -> Result<EmojiRow, sqlx::Error> {
         sqlx::query_as::<_, EmojiRow>(
-            "INSERT INTO custom_emojis (id, shortcode, media_file_id, category, tags)
-             VALUES ($1, $2, $3, $4, $5)
-             RETURNING id, shortcode, media_file_id, category, tags, created_at, NULL::text AS url",
+            "INSERT INTO custom_emojis (id, shortcode, media_file_id, category, tags, license)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, shortcode, media_file_id, category, tags, license, created_at, NULL::text AS url",
         )
         .bind(id)
         .bind(shortcode)
         .bind(media_file_id)
         .bind(category)
         .bind(tags)
+        .bind(license)
         .fetch_one(&self.pool)
         .await
     }
@@ -127,17 +133,20 @@ impl EmojiRepository for PgEmojiRepository {
         id: i64,
         category: Option<&str>,
         tags: Option<&[String]>,
+        license: Option<&str>,
     ) -> Result<Option<EmojiRow>, sqlx::Error> {
         sqlx::query_as::<_, EmojiRow>(
             "UPDATE custom_emojis
              SET category = COALESCE($2, category),
-                 tags     = COALESCE($3, tags)
+                 tags     = COALESCE($3, tags),
+                 license  = COALESCE($4, license)
              WHERE id = $1
-             RETURNING id, shortcode, media_file_id, category, tags, created_at, NULL::text AS url",
+             RETURNING id, shortcode, media_file_id, category, tags, license, created_at, NULL::text AS url",
         )
         .bind(id)
         .bind(category)
         .bind(tags)
+        .bind(license)
         .fetch_optional(&self.pool)
         .await
     }

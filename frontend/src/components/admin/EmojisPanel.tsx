@@ -14,14 +14,16 @@ export default function EmojisPanel() {
   const [shortcode, setShortcode] = useState("");
   const [category, setCategory] = useState("");
   const [tags, setTags] = useState("");
+  const [license, setLicense] = useState("");
   const [uploaded, setUploaded] = useState<DriveFile | null>(null);
   const [uploading, setUploading] = useState(false);
   const [creating, setCreating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // タグのインライン編集（#49）
+  // タグ・ライセンスのインライン編集（#49, #63）
   const [editId, setEditId] = useState<string | null>(null);
   const [editTags, setEditTags] = useState("");
+  const [editLicense, setEditLicense] = useState("");
 
   // Misskey ZIP インポート（#50）
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -75,10 +77,12 @@ export default function EmojisPanel() {
         media_file_id: uploaded.id,
         category: category.trim() || undefined,
         tags: parseTags(tags),
+        license: license.trim() || undefined,
       });
       setShortcode("");
       setCategory("");
       setTags("");
+      setLicense("");
       setUploaded(null);
       load();
     } catch (err) {
@@ -124,14 +128,15 @@ export default function EmojisPanel() {
   function startEdit(em: CustomEmoji) {
     setEditId(em.id);
     setEditTags(em.tags.join(" "));
+    setEditLicense(em.license ?? "");
     setError("");
   }
 
-  async function saveTags(em: CustomEmoji) {
+  async function saveEdit(em: CustomEmoji) {
     setBusyId(em.id);
     setError("");
     try {
-      await api.admin.updateEmoji(em.id, { tags: parseTags(editTags) });
+      await api.admin.updateEmoji(em.id, { tags: parseTags(editTags), license: editLicense.trim() });
       setEditId(null);
       load();
     } catch (err) {
@@ -242,6 +247,15 @@ export default function EmojisPanel() {
             placeholder={t("admin:emojisPanel.tagsPlaceholder")}
           />
         </label>
+        <label className={styles.label}>
+          {t("admin:emojisPanel.licenseLabel")}
+          <input
+            className={styles.input}
+            value={license}
+            onChange={(e) => setLicense(e.target.value)}
+            placeholder={t("admin:emojisPanel.licensePlaceholder")}
+          />
+        </label>
         <button className={styles.btn} type="submit" disabled={creating || !uploaded || !shortcode.trim()}>
           {creating ? t("admin:emojisPanel.creating") : t("admin:emojisPanel.addButton")}
         </button>
@@ -256,30 +270,38 @@ export default function EmojisPanel() {
               <div className={styles.primaryText}>:{em.shortcode}:</div>
               {em.category && <div className={styles.subText}>{em.category}</div>}
               {editId === em.id ? (
-                <div className={styles.actions} style={{ marginTop: 6 }}>
+                <div className={styles.actions} style={{ marginTop: 6, flexDirection: "column", alignItems: "stretch" }}>
                   <input
                     className={styles.input}
                     value={editTags}
                     onChange={(e) => setEditTags(e.target.value)}
                     placeholder={t("admin:emojisPanel.editTagsPlaceholder")}
-                    style={{ flex: 1 }}
                   />
-                  <button className={styles.btn} disabled={busyId === em.id} onClick={() => saveTags(em)}>
-                    {t("common:save")}
-                  </button>
-                  <button className={styles.btnGhost} onClick={() => setEditId(null)}>
-                    {t("common:cancel")}
-                  </button>
+                  <input
+                    className={styles.input}
+                    value={editLicense}
+                    onChange={(e) => setEditLicense(e.target.value)}
+                    placeholder={t("admin:emojisPanel.editLicensePlaceholder")}
+                  />
+                  <div className={styles.actions}>
+                    <button className={styles.btn} disabled={busyId === em.id} onClick={() => saveEdit(em)}>
+                      {t("common:save")}
+                    </button>
+                    <button className={styles.btnGhost} onClick={() => setEditId(null)}>
+                      {t("common:cancel")}
+                    </button>
+                  </div>
                 </div>
               ) : (
-                em.tags.length > 0 && (
-                  <div className={styles.subText}>🏷 {em.tags.join(" / ")}</div>
-                )
+                <>
+                  {em.tags.length > 0 && <div className={styles.subText}>🏷 {em.tags.join(" / ")}</div>}
+                  {em.license && <div className={styles.subText}>📄 {em.license}</div>}
+                </>
               )}
             </div>
             {editId !== em.id && (
               <button className={styles.btnGhost} disabled={busyId === em.id} onClick={() => startEdit(em)}>
-                {t("admin:emojisPanel.editTagsButton")}
+                {t("admin:emojisPanel.editButton")}
               </button>
             )}
             <button className={styles.btnDanger} disabled={busyId === em.id} onClick={() => remove(em)}>

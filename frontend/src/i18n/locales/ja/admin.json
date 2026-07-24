@@ -25,11 +25,14 @@
     "categoryLabel": "カテゴリ（任意）",
     "tagsLabel": "タグ（任意・空白またはカンマ区切り。ピッカーの部分一致対象）",
     "tagsPlaceholder": "猫 かわいい blob-cat",
+    "licenseLabel": "ライセンス（任意・1行）",
+    "licensePlaceholder": "CC BY 4.0 by ...",
     "creating": "追加中...",
     "addButton": "絵文字を追加",
     "emptyMessage": "カスタム絵文字がありません。",
     "editTagsPlaceholder": "空白またはカンマ区切り",
-    "editTagsButton": "タグ編集",
+    "editLicensePlaceholder": "ライセンス（任意・1行）",
+    "editButton": "編集",
     "deleteConfirm": "絵文字 :{{shortcode}}: を削除しますか？"
   },
   "siteSettingsPanel": {
