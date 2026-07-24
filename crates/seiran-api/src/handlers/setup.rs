@@ -103,7 +103,7 @@ pub async fn setup(
 
     let _ = cf_record_id;
 
-    let token = state.local_auth.generate_token(user_id, &req.email)
+    let (token, _jti) = state.local_auth.generate_token(user_id, &req.email)
         .map_err(|e| {
             tracing::error!("[setup] JWT 生成失敗: {}", e);
             ApiError::Internal("トークン生成エラー".to_string())

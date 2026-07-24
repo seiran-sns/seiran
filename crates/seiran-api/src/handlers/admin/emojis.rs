@@ -120,7 +120,7 @@ pub async fn list_emojis(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<EmojiResponse>>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     let rows = state
         .emojis
@@ -137,7 +137,7 @@ pub async fn create_emoji(
     State(state): State<AppState>,
     Json(req): Json<CreateEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     if req.shortcode.is_empty()
         || !req.shortcode.chars().all(|c| c.is_alphanumeric() || c == '_')
@@ -180,7 +180,7 @@ pub async fn update_emoji(
     Path(id): Path<i64>,
     Json(req): Json<UpdateEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     let tags = match req.tags {
         Some(ref t) => Some(normalize_tags(t)?),
@@ -207,7 +207,7 @@ pub async fn delete_emoji(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     let deleted = state
         .emojis

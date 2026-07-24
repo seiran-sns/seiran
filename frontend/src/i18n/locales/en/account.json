@@ -50,5 +50,10 @@
     "noBlocks": "You haven't blocked anyone.",
     "unmuteButton": "Unmute",
     "unblockButton": "Unblock"
+  },
+  "appTokensSettings": {
+    "empty": "No app tokens have been issued.",
+    "issuedAt": "Issued {{date}}",
+    "revokeButton": "Revoke"
   }
 }

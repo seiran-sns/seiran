@@ -9,7 +9,6 @@ interface SettingsMenuItem {
   to?: string;
   icon: string;
   labelKey: string;
-  /** バックエンド未実装で近日公開扱いの項目（#55: アプリトークン）。 */
   disabled?: boolean;
 }
 
@@ -19,7 +18,7 @@ const ITEMS: SettingsMenuItem[] = [
   { to: "/settings/mutes-blocks", icon: "🚫", labelKey: "menu.mutesBlocks" },
   { to: "/settings/lists", icon: "📋", labelKey: "menu.lists" },
   { to: "/settings/appearance", icon: "🎨", labelKey: "menu.appearance" },
-  { icon: "🔑", labelKey: "menu.appTokens", disabled: true },
+  { to: "/settings/app-tokens", icon: "🔑", labelKey: "menu.appTokens" },
 ];
 
 /** メインメニューの「設定」から遷移する設定項目一覧（#55）。 */

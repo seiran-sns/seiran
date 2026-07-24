@@ -46,7 +46,8 @@ export default function MiAuthConnectPage() {
   const [phase, setPhase] = useState<Phase>("confirm");
   const [error, setError] = useState("");
 
-  const appName = searchParams.get("name") || t("miauth:connect.unknownApp");
+  const rawName = searchParams.get("name");
+  const appName = rawName || t("miauth:connect.unknownApp");
   const callback = searchParams.get("callback");
 
   async function handleAuthorize() {
@@ -54,7 +55,7 @@ export default function MiAuthConnectPage() {
     setPhase("authorizing");
     setError("");
     try {
-      await api.miauth.authorize(sessionId);
+      await api.miauth.authorize(sessionId, rawName || undefined);
       if (callback && isSafeCallback(callback)) {
         window.location.href = buildCallbackUrl(callback, sessionId);
         return;

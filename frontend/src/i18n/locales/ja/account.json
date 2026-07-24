@@ -50,5 +50,10 @@
     "noBlocks": "ブロック中のユーザーはいません。",
     "unmuteButton": "ミュート解除",
     "unblockButton": "ブロック解除"
+  },
+  "appTokensSettings": {
+    "empty": "発行済みのアプリトークンはありません。",
+    "issuedAt": "{{date}} に発行",
+    "revokeButton": "無効化"
   }
 }

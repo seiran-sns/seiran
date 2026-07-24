@@ -77,7 +77,7 @@ pub async fn start_import(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<ImportStartResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, &*state.users).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), &*state.users).await?;
 
     // ZIP バイト列を取得
     let mut zip_bytes: Option<Vec<u8>> = None;
@@ -150,7 +150,7 @@ pub async fn get_import_status(
     headers: HeaderMap,
     Path(job_id): Path<String>,
 ) -> Result<Json<ImportJobStatus>, ApiError> {
-    require_admin(&headers, &state.local_auth, &*state.users).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), &*state.users).await?;
 
     let status = state
         .emoji_import_jobs

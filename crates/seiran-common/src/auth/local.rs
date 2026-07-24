@@ -23,12 +23,16 @@ struct LocalClaims {
     sub: String,
     email: String,
     exp: usize,
+    /// トークン個体の識別子（#60: アプリトークン管理）。MiAuth 発行分のみ
+    /// `app_tokens` テーブルに記録され、無効化チェックに使われる。
+    jti: uuid::Uuid,
 }
 
 #[derive(Debug, Clone)]
 pub struct VerifiedUser {
     pub user_id: i64,
     pub email: String,
+    pub jti: uuid::Uuid,
 }
 
 pub struct LocalAuthProvider {
@@ -55,24 +59,28 @@ impl LocalAuthProvider {
         Ok(argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok())
     }
 
-    pub fn generate_token(&self, user_id: i64, email: &str) -> Result<String, AuthError> {
+    /// 発行した JWT と、その `jti`（#60: アプリトークン管理での識別用）を返す。
+    pub fn generate_token(&self, user_id: i64, email: &str) -> Result<(String, uuid::Uuid), AuthError> {
         let exp = chrono::Utc::now()
             .checked_add_signed(chrono::Duration::days(7))
             .unwrap()
             .timestamp() as usize;
+        let jti = uuid::Uuid::new_v4();
 
         let claims = LocalClaims {
             sub: format!("local|{}", user_id),
             email: email.to_string(),
             exp,
+            jti,
         };
 
-        encode(
+        let token = encode(
             &Header::default(),
             &claims,
             &EncodingKey::from_secret(&self.secret),
         )
-        .map_err(|e| AuthError::TokenGeneration(e.to_string()))
+        .map_err(|e| AuthError::TokenGeneration(e.to_string()))?;
+        Ok((token, jti))
     }
 
     pub fn verify_token(&self, token: &str) -> Result<VerifiedUser, AuthError> {
@@ -89,6 +97,6 @@ impl LocalAuthProvider {
             .and_then(|s| s.parse().ok())
             .ok_or(AuthError::MalformedToken)?;
 
-        Ok(VerifiedUser { user_id, email: token_data.claims.email })
+        Ok(VerifiedUser { user_id, email: token_data.claims.email, jti: token_data.claims.jti })
     }
 }

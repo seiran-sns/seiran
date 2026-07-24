@@ -195,7 +195,7 @@ pub async fn register(
     // TXT レコードはそのまま残す（bsky.app はハンドル解決に常時使用するため）
     let _ = cf_record_id;
 
-    let token = state.local_auth.generate_token(user_id, &email)
+    let (token, _jti) = state.local_auth.generate_token(user_id, &email)
         .map_err(|e| {
             tracing::error!("[register] JWT 生成失敗: {}", e);
             ApiError::Internal("トークン生成エラー".to_string())
@@ -243,7 +243,7 @@ pub async fn login(
         _ => return Err(ApiError::Unauthorized("INVALID_CREDENTIALS")),
     }
 
-    let token = state.local_auth.generate_token(user_id, &email).map_err(|e| {
+    let (token, _jti) = state.local_auth.generate_token(user_id, &email).map_err(|e| {
         tracing::error!("[login] JWT 生成失敗: {}", e);
         ApiError::Internal("トークン生成エラー".to_string())
     })?;
@@ -286,7 +286,7 @@ pub async fn me(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<UserInfo>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth)
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref())
         .await
         .map_err(|_| ApiError::Unauthorized("UNAUTHORIZED"))?;
 

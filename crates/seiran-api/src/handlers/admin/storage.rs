@@ -100,7 +100,7 @@ pub async fn list_storage_providers(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<StorageProviderResponse>>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
     let providers = state.storage_providers.list_all().await.map_err(sp_err)?;
     Ok(Json(providers.into_iter().map(Into::into).collect()))
 }
@@ -111,7 +111,7 @@ pub async fn create_storage_provider(
     State(state): State<AppState>,
     Json(req): Json<CreateStorageProviderRequest>,
 ) -> Result<Json<StorageProviderResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
     if req.name.is_empty() || req.endpoint.is_empty() || req.bucket.is_empty()
         || req.access_key.is_empty() || req.secret_key.is_empty() || req.public_url.is_empty()
     {
@@ -141,7 +141,7 @@ pub async fn update_storage_provider(
     Path(id): Path<i64>,
     Json(req): Json<UpdateStorageProviderRequest>,
 ) -> Result<Json<StorageProviderResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
     let provider = state
         .storage_providers
         .update(
@@ -170,7 +170,7 @@ pub async fn delete_storage_provider(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<axum::http::StatusCode, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
     state.storage_providers.delete(id).await.map_err(sp_err)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }

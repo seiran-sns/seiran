@@ -69,7 +69,7 @@ pub async fn get_site_settings(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<SiteSettingsResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     let settings = state
         .site_settings
@@ -86,7 +86,7 @@ pub async fn update_site_settings(
     State(state): State<AppState>,
     Json(req): Json<UpdateSiteSettingsRequest>,
 ) -> Result<Json<SiteSettingsResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     let pairs: Vec<(&str, String)> = [
         req.smtp_host.as_deref().map(|v| ("smtp_host", v.to_string())),

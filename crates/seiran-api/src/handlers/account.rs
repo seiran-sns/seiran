@@ -1,7 +1,13 @@
 //! アカウント管理（退会など）ハンドラ（#29）
 
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
 use serde::Deserialize;
+
+use seiran_common::repository::AppTokenRow;
 
 use seiran_common::generate_snowflake_id;
 use seiran_common::ApDeliveryKind;
@@ -27,7 +33,7 @@ pub async fn update_language(
     State(state): State<AppState>,
     Json(req): Json<UpdateLanguageRequest>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
 
     if let Some(lang) = &req.language {
         if !SUPPORTED_LANGUAGES.contains(&lang.as_str()) {
@@ -58,7 +64,7 @@ pub async fn change_password(
     State(state): State<AppState>,
     Json(req): Json<ChangePasswordRequest>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
 
     if req.new_password.len() < 8 {
         return Err(ApiError::BadRequest("PASSWORD_TOO_SHORT".to_owned()));
@@ -104,7 +110,7 @@ pub async fn request_email_change(
     State(state): State<AppState>,
     Json(req): Json<RequestEmailChangeRequest>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
 
     let new_email = req.new_email.trim().to_lowercase();
     if new_email.is_empty() || !new_email.contains('@') {
@@ -214,7 +220,7 @@ pub async fn withdraw(
     State(state): State<AppState>,
     Json(req): Json<WithdrawRequest>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
 
     // actor を取得してハンドル確認
     let actor = sqlx::query!(
@@ -289,5 +295,43 @@ pub async fn withdraw(
     state.enqueue_account_withdraw_unfollow_all(actor_id, actor.username.clone()).await;
 
     tracing::info!("[withdraw] 退会完了: actor_id={}, username={}", actor_id, actor.username);
+    Ok(Json(()))
+}
+
+/// `GET /api/account/app-tokens`（#60）
+/// 発行済みアプリトークン（MiAuth 経由のみ、自社ログインは対象外）の一覧。
+pub async fn list_app_tokens(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<AppTokenRow>>, ApiError> {
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+
+    let tokens = state
+        .app_tokens
+        .list_by_user(auth_user.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[list-app-tokens] DB エラー: {}", e)))?;
+
+    Ok(Json(tokens))
+}
+
+/// `DELETE /api/account/app-tokens/:id`（#60）
+/// 本人所有のトークンのみ無効化できる。
+pub async fn revoke_app_token(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<()>, ApiError> {
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+
+    let revoked = state
+        .app_tokens
+        .revoke(id, auth_user.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[revoke-app-token] DB エラー: {}", e)))?;
+    if !revoked {
+        return Err(ApiError::NotFound("APP_TOKEN_NOT_FOUND"));
+    }
+
     Ok(Json(()))
 }

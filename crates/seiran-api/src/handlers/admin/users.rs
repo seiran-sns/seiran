@@ -49,7 +49,7 @@ pub async fn list_users(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AdminUserResponse>>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     let rows = state
         .users
@@ -66,7 +66,7 @@ pub async fn suspend_user(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     state
         .users
@@ -83,7 +83,7 @@ pub async fn unsuspend_user(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     state
         .users
@@ -101,7 +101,7 @@ pub async fn change_user_role(
     Path(id): Path<i64>,
     Json(req): Json<ChangeRoleRequest>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(&headers, &state.local_auth, state.users.as_ref()).await?;
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
     if !matches!(req.role.as_str(), "user" | "moderator" | "admin") {
         return Err(ApiError::BadRequest("INVALID_ROLE".to_owned()));
