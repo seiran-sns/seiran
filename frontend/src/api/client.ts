@@ -361,6 +361,28 @@ export interface FollowListItem {
   avatar_url?: string;
 }
 
+/** リモートFediアクターのフォロー中/フォロワー全件取得の1件（#68）。ローカルDB未登録の
+ * 場合は `actor_id` が無く、`handle`/`domain` は AP actor URI から抽出した簡易表示。 */
+export interface RemoteFollowSummaryItem {
+  uri: string;
+  actor_id?: string;
+  handle: string;
+  domain: string;
+  display_name?: string;
+  avatar_url?: string;
+}
+
+/** `GET /users/remote-follow-summary` のレスポンス（#68）。 */
+export interface RemoteFollowSummaryResponse {
+  items: RemoteFollowSummaryItem[];
+  complete: boolean;
+  /** 同期取得できず、Workerでのバックグラウンド全件取得を積んだか。 */
+  pending: boolean;
+  fetched_at?: string;
+  /** ローカルDB把握分とリモート直接取得分をブレンドした実際のフォロー中/フォロワー数（#68）。 */
+  total_count: number;
+}
+
 export interface SearchResult {
   notes: Note[];
   session_id?: string;
@@ -776,6 +798,12 @@ export const api = {
       const q = cursorParams(params);
       q.set("actor_id", actorId);
       return request<FollowListItem[]>("GET", `/users/followers?${q.toString()}`);
+    },
+    /** リモートFediアクターのフォロー中/フォロワーをAP経由で全件取得する（#68）。
+     * ローカルDBが把握している範囲を超えた「相手サーバー上の実際の全件」を返す。 */
+    remoteFollowSummary(actorId: string, direction: "following" | "followers") {
+      const q = new URLSearchParams({ actor_id: actorId, direction });
+      return request<RemoteFollowSummaryResponse>("GET", `/users/remote-follow-summary?${q.toString()}`);
     },
     updateProfile(patch: {
       display_name?: string;

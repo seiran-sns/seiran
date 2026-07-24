@@ -1,6 +1,8 @@
 use axum::{extract::{Query, State}, http::HeaderMap, response::{IntoResponse, Response}, Json};
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 
+use seiran_common::ap::fetch_ap_collection_uris;
 use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::ApDeliveryKind;
 use seiran_common::repository::{Actor, ActorProfileRow};
@@ -897,4 +899,326 @@ pub async fn update_profile(
         profile_fields: profile_fields_from_json(&new_profile_fields),
     })
     .into_response()
+}
+
+// ─── リモートFediアクターのフォロー中/フォロワー全件取得（#68） ───────────────────
+
+/// 同期フェッチのタイムアウト。これを超えたら以降は Worker ジョブ（`RemoteFollowListSync`）
+/// に委ねる（マイケル指摘: 3秒は長すぎるため200msに短縮。プロフィール画面を待たせない）。
+const REMOTE_FOLLOW_LIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
+/// 同期フェッチで取得する上限件数。バックグラウンドジョブ（`MAX_ITEMS` = 5000）より
+/// 大幅に控えめにし、リクエスト内で終わる規模に抑える。
+const REMOTE_FOLLOW_LIVE_MAX_ITEMS: usize = 500;
+
+/// リモート全件フォロー/フォロワー一覧の1件（#68）。ローカルDBに登録済みのアクターなら
+/// display_name/avatar_url 等を付与する。未登録の場合は URI から抽出したハンドル文字列のみ。
+#[derive(Serialize)]
+pub struct RemoteFollowSummaryItem {
+    pub uri: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+    pub handle: String,
+    pub domain: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct RemoteFollowSummaryResponse {
+    pub items: Vec<RemoteFollowSummaryItem>,
+    /// リモートのコレクション全体を取得しきれたか（上限到達時は false）。
+    pub complete: bool,
+    /// この応答は同期取得できず、Workerでのバックグラウンド全件取得を新たに積んだか。
+    /// true の場合、しばらくしてからのリロードで新しい結果が反映される可能性がある。
+    pub pending: bool,
+    pub fetched_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// ローカルDB把握分（`follows`テーブル）とリモート直接取得分をブレンドした実際の
+    /// フォロー中/フォロワー数（マイケル指摘 #68: プロフィールカードの人数表示にも反映したい）。
+    pub total_count: i64,
+}
+
+#[derive(Deserialize)]
+pub struct RemoteFollowSummaryQuery {
+    pub actor_id: String,
+    pub direction: String,
+}
+
+/// `GET /api/users/remote-follow-summary` — リモート Fedi アクターの followers/following
+/// コレクションを ActivityPub 経由で全件取得して返す（#68）。
+///
+/// ローカルDBが把握している関係（`follows`テーブル、`GET /api/users/following` 等）とは
+/// 独立に、相手のサーバーへ直接問い合わせる。短いタイムアウト内に取得できればその場で
+/// 返しつつDBへスナップショット保存する。取得できなければ既存スナップショット（あれば）を
+/// 返しつつ、Workerジョブ（`RemoteFollowListSync`）を積んでバックグラウンドで取得させる。
+/// ローカルアクター・Bskyアクター（`ap_uri`を持たない）は常に空を返す。
+pub async fn user_remote_follow_summary(
+    Query(params): Query<RemoteFollowSummaryQuery>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor_id: i64 = match params.actor_id.parse() {
+        Ok(id) => id,
+        Err(_) => return ApiError::BadRequest("不正な actor_id です".to_string()).into_response(),
+    };
+    if params.direction != "following" && params.direction != "followers" {
+        return ApiError::BadRequest(
+            "direction は following または followers を指定してください".to_string(),
+        )
+        .into_response();
+    }
+
+    let actor = match state.actors.find_by_id(actor_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return ApiError::NotFound("USER_NOT_FOUND").into_response(),
+        Err(e) => return ApiError::Internal(e.to_string()).into_response(),
+    };
+
+    let ap_uri = match (&actor.ap_uri, actor.actor_type.as_str()) {
+        (Some(uri), t) if t != "local" => uri.clone(),
+        // ローカル・Bskyアクターはこの機能の対象外（issue #68 は Fedi 限定）。
+        _ => {
+            return Json(RemoteFollowSummaryResponse {
+                items: vec![],
+                complete: true,
+                pending: false,
+                fetched_at: None,
+                total_count: 0,
+            })
+            .into_response();
+        }
+    };
+
+    let live_result = tokio::time::timeout(
+        REMOTE_FOLLOW_LIVE_TIMEOUT,
+        fetch_remote_follow_live(&state, &ap_uri, &params.direction),
+    )
+    .await;
+
+    let live_timed_out = live_result.is_err();
+    if let Ok(Some((uris, complete))) = live_result {
+        save_remote_follow_snapshot(&state.db, actor_id, &params.direction, &uris, complete).await;
+        if !complete {
+            // 同期フェッチの上限（500件）に達しただけで失敗はしていない場合も、より大きい
+            // 上限（5000件）でのバックグラウンド全件取得を積む。次回訪問時のライブ取得が
+            // 常に同じ500件で上書きし続け、Workerが取得したより完全なスナップショットを
+            // 巻き戻してしまわないよう、保存は非後退（件数が減る更新は無視）にしてある
+            // （`save_remote_follow_snapshot` のON CONFLICT句参照）。
+            state.enqueue_remote_follow_list_sync(actor_id, params.direction.clone()).await;
+        }
+        // 直近の同期フェッチ結果ではなく、非後退保存後のDB上の最善スナップショットを返す
+        // （過去にWorkerがより多く取得済みなら、それを優先して見せる）。
+        let (best_uris, best_complete, fetched_at) =
+            load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
+        let (items, unknown_uris) = resolve_remote_follow_items(&state.db, &best_uris).await;
+        enqueue_unknown_actor_resolves(&state, unknown_uris).await;
+        let total_count = blended_follow_count(&state, actor_id, &params.direction, best_uris.len()).await;
+        return Json(RemoteFollowSummaryResponse {
+            items,
+            complete: best_complete,
+            pending: !best_complete,
+            fetched_at,
+            total_count,
+        })
+        .into_response();
+    }
+
+    // 同期取得できなかった（タイムアウト/取得失敗/非公開設定等）
+    // → 既存スナップショットを返しつつ、Workerでのバックグラウンド全件取得を積む。
+    let reason = if live_timed_out {
+        format!("{:?}以内に完了せずタイムアウト", REMOTE_FOLLOW_LIVE_TIMEOUT)
+    } else {
+        "アクタードキュメント取得失敗、または following/followers フィールド欠落".to_string()
+    };
+    tracing::info!(
+        "[remote_follow_summary] 同期ライブ取得不可（{}）のためWorkerへ委譲: actor_id={} direction={} ({})",
+        reason, actor_id, params.direction, ap_uri
+    );
+    state.enqueue_remote_follow_list_sync(actor_id, params.direction.clone()).await;
+
+    let (uris, complete, fetched_at) =
+        load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
+    let (items, unknown_uris) = resolve_remote_follow_items(&state.db, &uris).await;
+    enqueue_unknown_actor_resolves(&state, unknown_uris).await;
+    let total_count = blended_follow_count(&state, actor_id, &params.direction, uris.len()).await;
+    // 既存スナップショットが complete=true（全件取得済み）なら、上で積んだWorkerジョブは
+    // 単なる裏側の再確認に過ぎず、フロントに「まだ取得中」と伝える必要はない。
+    // 以前は無条件で true を返しており、全件取得済みでも延々と pending 表示が続くバグがあった。
+    Json(RemoteFollowSummaryResponse { items, complete, pending: !complete, fetched_at, total_count }).into_response()
+}
+
+/// ローカルDBが把握しているフォロー数（`follows`テーブル）と、リモートへ直接問い合わせて
+/// 取得できた件数（重複排除済みURI数）のうち、大きい方をブレンド後の実数として採用する
+/// （マイケル指摘 #68: プロフィールカードの人数表示にも反映してほしい）。
+/// ローカルが把握しているフォロー関係は必ず相手のAPコレクションにも載っているはずなので、
+/// 通常はリモート側が superset になる。リモート取得が未完了で少なく出た場合に、既に分かって
+/// いるローカルの人数より後退して表示しないためのフォールバック。
+async fn blended_follow_count(state: &AppState, actor_id: i64, direction: &str, remote_count: usize) -> i64 {
+    let (following_count, follower_count) = state.follows.count_relations(actor_id).await.unwrap_or((0, 0));
+    let local_count = if direction == "following" { following_count } else { follower_count };
+    local_count.max(remote_count as i64)
+}
+
+/// 未知アクター（ローカルDB未登録）のURI一覧について、それぞれ `RemoteActorResolve`
+/// ジョブを積む（マイケル指摘 #68: 未知アクターの取得もWorkerジョブキューに積む）。
+async fn enqueue_unknown_actor_resolves(state: &AppState, unknown_uris: Vec<String>) {
+    for uri in unknown_uris {
+        state.enqueue_remote_actor_resolve(uri).await;
+    }
+}
+
+/// 短タイムアウト内での同期ライブ取得（アクタードキュメント→コレクション本体）。
+/// 取得失敗・`followers`/`following`フィールド欠落はエラーではなく `None` として扱う
+/// （呼び出し元がスナップショット/Workerフォールバックへ切り替える）。
+async fn fetch_remote_follow_live(
+    state: &AppState,
+    ap_uri: &str,
+    direction: &str,
+) -> Option<(Vec<String>, bool)> {
+    let actor = state.ap_client.fetch_actor(ap_uri).await.ok()?;
+    let collection_url = match direction {
+        "following" => actor.following,
+        _ => actor.followers,
+    }?;
+    Some(fetch_ap_collection_uris(&state.ap_client, &collection_url, REMOTE_FOLLOW_LIVE_MAX_ITEMS).await)
+}
+
+async fn save_remote_follow_snapshot(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    direction: &str,
+    uris: &[String],
+    complete: bool,
+) {
+    let json = match serde_json::to_value(uris) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("[remote_follow_summary] JSON変換失敗: {}", e);
+            return;
+        }
+    };
+    // 非後退更新: 新しい結果の件数が既存スナップショット以上の場合のみ actor_uris/complete を
+    // 上書きする。同期フェッチ（上限500件）はWorker（上限5000件）より少ない可能性が高く、
+    // 無条件上書きだとWorkerが積み上げた、より完全なスナップショットを毎回巻き戻してしまうため。
+    if let Err(e) = sqlx::query(
+        "INSERT INTO remote_follow_snapshots (actor_id, direction, actor_uris, complete, fetched_at)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+         ON CONFLICT (actor_id, direction) DO UPDATE SET
+             actor_uris = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
+                 THEN EXCLUDED.actor_uris ELSE remote_follow_snapshots.actor_uris END,
+             complete = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
+                 THEN EXCLUDED.complete ELSE remote_follow_snapshots.complete END,
+             fetched_at = CURRENT_TIMESTAMP",
+    )
+    .bind(actor_id)
+    .bind(direction)
+    .bind(json)
+    .bind(complete)
+    .execute(pool)
+    .await
+    {
+        tracing::error!("[remote_follow_summary] スナップショット保存失敗: {}", e);
+    }
+}
+
+async fn load_remote_follow_snapshot(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    direction: &str,
+) -> (Vec<String>, bool, Option<chrono::DateTime<chrono::Utc>>) {
+    let row = sqlx::query(
+        "SELECT actor_uris, complete, fetched_at FROM remote_follow_snapshots WHERE actor_id = $1 AND direction = $2",
+    )
+    .bind(actor_id)
+    .bind(direction)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    match row {
+        Some(r) => {
+            let uris: Vec<String> = r
+                .try_get::<serde_json::Value, _>("actor_uris")
+                .ok()
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default();
+            let complete: bool = r.try_get("complete").unwrap_or(false);
+            let fetched_at: chrono::DateTime<chrono::Utc> =
+                r.try_get("fetched_at").unwrap_or_else(|_| chrono::Utc::now());
+            (uris, complete, Some(fetched_at))
+        }
+        None => (vec![], false, None),
+    }
+}
+
+/// URI一覧を、ローカルDBに登録済みのアクターがあれば display_name 等を付与して
+/// `RemoteFollowSummaryItem` に変換する。未登録の URI はハンドルをパースしただけの
+/// 簡易表示にする（全件のプロフィールを都度リモートへフェッチするとレイテンシ・
+/// 負荷が過大になるため、既知の範囲でのみリッチ表示する）。
+/// 戻り値の2つ目は未登録だった URI 一覧（呼び出し元が `RemoteActorResolve` ジョブを
+/// 積むのに使う、マイケル指摘 #68）。
+async fn resolve_remote_follow_items(pool: &sqlx::PgPool, uris: &[String]) -> (Vec<RemoteFollowSummaryItem>, Vec<String>) {
+    if uris.is_empty() {
+        return (vec![], vec![]);
+    }
+
+    let rows = sqlx::query(
+        "SELECT id, ap_uri, username, domain, display_name, avatar_url FROM actors WHERE ap_uri = ANY($1)",
+    )
+    .bind(uris)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let mut known: std::collections::HashMap<String, RemoteFollowSummaryItem> = std::collections::HashMap::new();
+    for row in rows {
+        let Ok(ap_uri) = row.try_get::<String, _>("ap_uri") else { continue };
+        let id: i64 = row.try_get("id").unwrap_or_default();
+        let username: String = row.try_get("username").unwrap_or_default();
+        let domain: String = row.try_get("domain").unwrap_or_default();
+        let display_name: Option<String> = row.try_get("display_name").unwrap_or(None);
+        let avatar_url: Option<String> = row.try_get("avatar_url").unwrap_or(None);
+        known.insert(
+            ap_uri.clone(),
+            RemoteFollowSummaryItem {
+                uri: ap_uri,
+                actor_id: Some(id.to_string()),
+                handle: username,
+                domain,
+                display_name,
+                avatar_url,
+            },
+        );
+    }
+
+    let mut unknown_uris = Vec::new();
+    let items = uris
+        .iter()
+        .map(|uri| match known.remove(uri) {
+            Some(item) => item,
+            None => {
+                unknown_uris.push(uri.clone());
+                let (handle, domain) = parse_handle_from_uri(uri);
+                RemoteFollowSummaryItem {
+                    uri: uri.clone(),
+                    actor_id: None,
+                    handle,
+                    domain,
+                    display_name: None,
+                    avatar_url: None,
+                }
+            }
+        })
+        .collect();
+    (items, unknown_uris)
+}
+
+/// 未登録の actor URI からハンドル風の表示文字列を組み立てる（ベストエフォート）。
+/// 例: `https://mastodon.social/users/alice` → (`alice`, `mastodon.social`)
+fn parse_handle_from_uri(uri: &str) -> (String, String) {
+    let without_scheme = uri.trim_start_matches("https://").trim_start_matches("http://");
+    let mut parts = without_scheme.splitn(2, '/');
+    let domain = parts.next().unwrap_or("").to_string();
+    let path = parts.next().unwrap_or("");
+    let handle = path.rsplit('/').next().unwrap_or(path).to_string();
+    (handle, domain)
 }

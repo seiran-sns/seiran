@@ -25,7 +25,8 @@
     "followerCountLabel": "Followers",
     "followList": {
       "noFollowing": "Not following anyone yet.",
-      "noFollowers": "No followers yet."
+      "noFollowers": "No followers yet.",
+      "remoteExtraPending": "Fetching in the background. Please reload again shortly."
     },
     "actionsMenuTitle": "Account actions",
     "muteButton": "Mute",

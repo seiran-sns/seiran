@@ -180,6 +180,29 @@ impl AppState {
             tracing::error!("[job] BskyDmSend enqueue 失敗 (post_id={}): {}", post_id, e);
         }
     }
+
+    /// リモート Fedi アクターの followers/following 全件同期ジョブを積む（#68）。
+    /// プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック。
+    pub async fn enqueue_remote_follow_list_sync(&self, actor_id: i64, direction: String) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::RemoteFollowListSync { actor_id, direction }, job_priority::LOW)
+            .await
+        {
+            tracing::error!("[job] RemoteFollowListSync enqueue 失敗 (actor_id={}): {}", actor_id, e);
+        }
+    }
+
+    /// リモートフォロー一覧中の未知アクター（ローカルDB未登録）を解決するジョブを積む（#68）。
+    pub async fn enqueue_remote_actor_resolve(&self, uri: String) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::RemoteActorResolve { uri: uri.clone() }, job_priority::LOW)
+            .await
+        {
+            tracing::error!("[job] RemoteActorResolve enqueue 失敗 (uri={}): {}", uri, e);
+        }
+    }
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -440,6 +463,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/users/posts", get(handlers::users::user_posts))
         .route("/api/users/following", get(handlers::users::user_following))
         .route("/api/users/followers", get(handlers::users::user_followers))
+        .route("/api/users/remote-follow-summary", get(handlers::users::user_remote_follow_summary))
         // Misskey 互換レイヤー
         .route("/api/meta", post(handlers::meta::api_meta))
         // カスタム絵文字一覧（未認証・Misskey クライアントのリアクションピッカー用）
