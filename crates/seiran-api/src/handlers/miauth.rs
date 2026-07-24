@@ -32,6 +32,14 @@ pub struct CheckRequest {
     pub session: String,
 }
 
+/// `POST /api/miauth/:session_id/authorize` のボディ。`name` は #60（アプリトークン管理）
+/// で発行済みトークン一覧に表示するクライアント名として記録する。
+#[derive(Deserialize, Default)]
+pub struct AuthorizeRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 /// Misskey クライアント（Aria 等）は `misskey_dart` の `UserDetailedNotMe.fromJson` で
 /// この JSON をパースする。そのモデルは `id`/`username`/`isBot`/`isCat`/`createdAt`/
 /// `isLocked`/`isSilenced`/`isSuspended`/`followersCount`/`followingCount`/`notesCount`
@@ -132,8 +140,9 @@ pub async fn miauth_authorize(
     Path(session_id): Path<String>,
     headers: HeaderMap,
     State(state): State<AppState>,
+    body: Option<Json<AuthorizeRequest>>,
 ) -> impl IntoResponse {
-    let auth_user = match extract_auth(&headers, &state.local_auth).await {
+    let auth_user = match extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await {
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
@@ -154,13 +163,24 @@ pub async fn miauth_authorize(
     // 検証できず、タイムライン閲覧（未認証で見られる）は動いても投稿等の要認証操作が
     // 401 になっていた。既知の制約: アプリ単位の失効・権限スコープは未対応
     // （自社ログインのトークンと同じ扱いのため）。
-    let token = match state.local_auth.generate_token(auth_user.user_id, &auth_user.email) {
+    let (token, jti) = match state.local_auth.generate_token(auth_user.user_id, &auth_user.email) {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("[miauth] トークン生成失敗: {}", e);
             return ApiError::Internal(e.to_string()).into_response();
         }
     };
+
+    // #60: 発行済みトークンを記録する。失敗しても認可自体は継続する
+    // （一覧・無効化ができなくなるだけで、発行したトークン自体は有効なため）。
+    let client_name = body
+        .and_then(|Json(b)| b.name)
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| "Unknown".to_string());
+    if let Err(e) = state.app_tokens.insert(jti, auth_user.user_id, &client_name).await {
+        tracing::error!("[miauth] トークン記録失敗: {}", e);
+    }
+
     let mut map = state.miauth_sessions.write().await;
     map.insert(
         session_id,

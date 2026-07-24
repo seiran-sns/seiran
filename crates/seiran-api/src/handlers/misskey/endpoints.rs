@@ -91,7 +91,7 @@ pub struct NotificationsBody {
 
 /// ログイン済みなら actor_id を返し、未ログインなら `None`（読み取り系は匿名許可のため）。
 async fn optional_actor_id(headers: &HeaderMap, state: &AppState) -> Option<i64> {
-    let auth_user = extract_auth(headers, &state.local_auth).await.ok()?;
+    let auth_user = extract_auth(headers, &state.local_auth, state.app_tokens.as_ref()).await.ok()?;
     state.actors.find_local_by_user_id(auth_user.user_id).await.ok().flatten().map(|a| a.id)
 }
 
@@ -131,7 +131,7 @@ fn as_no_content(resp: Response) -> Response {
 
 /// POST /api/i
 pub async fn api_i(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<MisskeyMeDetailed>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
     let actor = state
         .actors
         .find_local_by_user_id(auth_user.user_id)
@@ -230,7 +230,7 @@ pub async fn notes_home_timeline(
     State(state): State<AppState>,
     Json(body): Json<TimelineBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
     let actor_id = state
         .actors
         .find_local_by_user_id(auth_user.user_id)

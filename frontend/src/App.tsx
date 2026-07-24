@@ -29,6 +29,7 @@ import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import SearchPage from "./pages/SearchPage";
 import SettingsMenuPage from "./pages/SettingsMenuPage";
+import AppTokensSettingsPage from "./pages/AppTokensSettingsPage";
 import Setup from "./pages/Setup";
 import VerifyEmail from "./pages/VerifyEmail";
 import VerifyEmailChange from "./pages/VerifyEmailChange";
@@ -175,6 +176,14 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <AppearanceSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/app-tokens"
+          element={
+            <RequireAuth>
+              <AppTokensSettingsPage />
             </RequireAuth>
           }
         />

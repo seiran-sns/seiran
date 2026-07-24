@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AppTokenRepository, AtpReadRepository, BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAppTokenRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -51,6 +51,8 @@ pub struct AppState {
     pub blocks: Arc<dyn BlockRepository>,
     /// ミュート関係（ローカル効果のみ、AP/ATP配送なし）。
     pub mutes: Arc<dyn MuteRepository>,
+    /// 発行済みアプリトークン（MiAuth 経由、#60）の一覧・無効化リポジトリ。
+    pub app_tokens: Arc<dyn AppTokenRepository>,
     pub atp_repo: Arc<dyn AtpReadRepository>,
     /// リアクション（絵文字リアクション・いいね）リポジトリ。
     pub reactions: Arc<dyn ReactionRepository>,
@@ -271,6 +273,7 @@ pub async fn init_state(
     let follows: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
     let blocks: Arc<dyn BlockRepository> = Arc::new(PgBlockRepository::new(pool.clone()));
     let mutes: Arc<dyn MuteRepository> = Arc::new(PgMuteRepository::new(pool.clone()));
+    let app_tokens: Arc<dyn AppTokenRepository> = Arc::new(PgAppTokenRepository::new(pool.clone()));
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
     let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
     let pinned_posts: Arc<dyn PinnedPostsRepository> = Arc::new(PgPinnedPostsRepository::new(pool.clone()));
@@ -300,6 +303,7 @@ pub async fn init_state(
         follows,
         blocks,
         mutes,
+        app_tokens,
         atp_repo,
         reactions,
         pinned_posts,
@@ -401,6 +405,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/account/language", post(handlers::account::update_language))
         .route("/api/account/email/request-change", post(handlers::account::request_email_change))
         .route("/api/account/email/confirm-change", post(handlers::account::confirm_email_change))
+        .route("/api/account/app-tokens", get(handlers::account::list_app_tokens))
+        .route("/api/account/app-tokens/:id", delete(handlers::account::revoke_app_token))
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))

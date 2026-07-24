@@ -484,6 +484,13 @@ export interface MutedOrBlockedActor {
   avatar_url?: string;
 }
 
+/** 発行済みアプリトークンの1件（#60、`GET /account/app-tokens`）。 */
+export interface AppTokenRow {
+  id: string;
+  client_name: string;
+  created_at: string;
+}
+
 export interface DriveFile {
   id: string;
   url: string;
@@ -1034,9 +1041,23 @@ export const api = {
   },
 
   miauth: {
-    /** MiAuth 認可確認画面（`/connect/:sessionId`）で「承認する」を押した時に呼ぶ。 */
-    authorize(sessionId: string) {
-      return request<{ ok: boolean }>("POST", `/miauth/${encodeURIComponent(sessionId)}/authorize`);
+    /**
+     * MiAuth 認可確認画面（`/connect/:sessionId`）で「承認する」を押した時に呼ぶ。
+     * `name` はクライアントアプリ名（#60: 発行済みトークン一覧に表示する）。
+     */
+    authorize(sessionId: string, name?: string) {
+      return request<{ ok: boolean }>("POST", `/miauth/${encodeURIComponent(sessionId)}/authorize`, { name });
+    },
+  },
+
+  appTokens: {
+    /** 設定画面の発行済みアプリトークン一覧（#60）。 */
+    list() {
+      return request<AppTokenRow[]>("GET", "/account/app-tokens");
+    },
+    /** 本人所有のトークンを無効化する（#60）。 */
+    revoke(id: string) {
+      return request<void>("DELETE", `/account/app-tokens/${encodeURIComponent(id)}`);
     },
   },
 
