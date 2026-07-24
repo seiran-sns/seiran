@@ -51,7 +51,7 @@ pub use post::{
     PostDeliveryMeta, PostRecord, PostRepository, PostSummary, RepostUndoInfo, TimelinePost,
 };
 pub use reaction::{PgReactionRepository, ReactionRepository, ReactorInfo};
-pub use emoji::parse_custom_emoji_shortcode;
+pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage_provider::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider,

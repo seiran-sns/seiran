@@ -15,6 +15,35 @@ pub fn parse_custom_emoji_shortcode(s: &str) -> Option<&str> {
     Some(inner)
 }
 
+/// 本文中に現れる `:shortcode:` 構文の候補を、出現順・重複なしで抽出する（コロンを除いた形）。
+/// 実在確認は行わない（呼び出し元が `EmojiRepository::find_urls_by_shortcodes` 等で解決する）。
+/// 文字種は `parse_custom_emoji_shortcode` と揃える（英数字・アンダースコアのみ）。
+pub fn extract_shortcode_candidates(text: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == ':' {
+            let start = i + 1;
+            let mut j = start;
+            while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                j += 1;
+            }
+            if j > start && j < chars.len() && chars[j] == ':' {
+                let shortcode: String = chars[start..j].iter().collect();
+                if seen.insert(shortcode.clone()) {
+                    result.push(shortcode);
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    result
+}
+
 /// `custom_emojis` テーブルの 1 行。
 /// `url` は `list_all` のみ `media_files`/`storage_providers` を JOIN して解決する
 /// （admin 一覧の画像プレビュー用）。`insert`/`update` は JOIN しないため常に `None`。
@@ -77,6 +106,11 @@ pub trait EmojiRepository: Send + Sync {
 
     /// shortcode から画像 URL を解決する（カスタム絵文字リアクション用）。未登録なら `None`。
     async fn find_url_by_shortcode(&self, shortcode: &str) -> Result<Option<String>, sqlx::Error>;
+
+    /// 複数の shortcode（コロンなし）に対応する画像 URL を一括解決する（本文中の
+    /// カスタム絵文字を `emoji_map` へ書き込む際の N+1 回避用）。実在しない shortcode は
+    /// 結果に含まれない。`(shortcode, url)` のペアを返す。
+    async fn find_urls_by_shortcodes(&self, shortcodes: &[String]) -> Result<Vec<(String, String)>, sqlx::Error>;
 }
 
 pub struct PgEmojiRepository {
@@ -202,5 +236,60 @@ impl EmojiRepository for PgEmojiRepository {
         .bind(shortcode)
         .fetch_optional(&self.pool)
         .await
+    }
+
+    async fn find_urls_by_shortcodes(&self, shortcodes: &[String]) -> Result<Vec<(String, String)>, sqlx::Error> {
+        if shortcodes.is_empty() {
+            return Ok(Vec::new());
+        }
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT ce.shortcode, rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url
+             FROM custom_emojis ce
+             JOIN media_files mf ON mf.id = ce.media_file_id
+             JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             WHERE ce.shortcode = ANY($1)",
+        )
+        .bind(shortcodes)
+        .fetch_all(&self.pool)
+        .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_shortcode_candidates_finds_single() {
+        assert_eq!(extract_shortcode_candidates("絵文字 :igyo: です"), vec!["igyo"]);
+    }
+
+    #[test]
+    fn extract_shortcode_candidates_finds_multiple_and_dedups() {
+        assert_eq!(
+            extract_shortcode_candidates(":a: text :b: more :a:"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_shortcode_candidates_ignores_lone_colon() {
+        assert_eq!(extract_shortcode_candidates("time is 12:34, not an emoji"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn extract_shortcode_candidates_ignores_non_word_chars_inside() {
+        // '-'や'+'は許可文字種外なので、コロン間に含まれると候補として成立しない。
+        assert_eq!(extract_shortcode_candidates(":not-valid: :also_valid_1:"), vec!["also_valid_1"]);
+    }
+
+    #[test]
+    fn extract_shortcode_candidates_handles_adjacent_shortcodes() {
+        assert_eq!(extract_shortcode_candidates(":a::b:"), vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn extract_shortcode_candidates_empty_text() {
+        assert_eq!(extract_shortcode_candidates(""), Vec::<String>::new());
     }
 }
