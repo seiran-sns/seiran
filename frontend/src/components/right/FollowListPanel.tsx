@@ -5,6 +5,7 @@ import { api, FollowListItem, RemoteFollowSummaryItem } from "../../api/client";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
 import { profilePath } from "../../lib/format";
+import { getRemoteFollowSummary } from "../../lib/remoteFollowSummaryCache";
 import Avatar from "../note/Avatar";
 import panel from "../common/Panel.module.css";
 import styles from "./FollowListPanel.module.css";
@@ -39,8 +40,9 @@ export default function FollowListPanel({ actorId, kind, onError, isRemoteFedi }
     }
     let cancelled = false;
     setRemoteState("loading");
-    api.users
-      .remoteFollowSummary(actorId, kind)
+    // プロフィール画面ロード時点で先読み済み（`prefetchRemoteFollowSummary`、#68）ならそれを
+    // 再利用する。タブを開いた瞬間の待たされた感を無くすのが狙い。
+    getRemoteFollowSummary(actorId, kind)
       .then((res) => {
         if (cancelled) return;
         setRemoteExtra(res.items);

@@ -904,8 +904,8 @@ pub async fn update_profile(
 // ─── リモートFediアクターのフォロー中/フォロワー全件取得（#68） ───────────────────
 
 /// 同期フェッチのタイムアウト。これを超えたら以降は Worker ジョブ（`RemoteFollowListSync`）
-/// に委ねる（issue の要求どおり「タイムアウトは短く」）。
-const REMOTE_FOLLOW_LIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+/// に委ねる（マイケル指摘: 3秒は長すぎるため200msに短縮。プロフィール画面を待たせない）。
+const REMOTE_FOLLOW_LIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
 /// 同期フェッチで取得する上限件数。バックグラウンドジョブ（`MAX_ITEMS` = 5000）より
 /// 大幅に控えめにし、リクエスト内で終わる規模に抑える。
 const REMOTE_FOLLOW_LIVE_MAX_ITEMS: usize = 500;
@@ -1003,7 +1003,8 @@ pub async fn user_remote_follow_summary(
         // （過去にWorkerがより多く取得済みなら、それを優先して見せる）。
         let (best_uris, best_complete, fetched_at) =
             load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
-        let items = resolve_remote_follow_items(&state.db, &best_uris).await;
+        let (items, unknown_uris) = resolve_remote_follow_items(&state.db, &best_uris).await;
+        enqueue_unknown_actor_resolves(&state, unknown_uris).await;
         return Json(RemoteFollowSummaryResponse {
             items,
             complete: best_complete,
@@ -1019,8 +1020,17 @@ pub async fn user_remote_follow_summary(
 
     let (uris, complete, fetched_at) =
         load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
-    let items = resolve_remote_follow_items(&state.db, &uris).await;
+    let (items, unknown_uris) = resolve_remote_follow_items(&state.db, &uris).await;
+    enqueue_unknown_actor_resolves(&state, unknown_uris).await;
     Json(RemoteFollowSummaryResponse { items, complete, pending: true, fetched_at }).into_response()
+}
+
+/// 未知アクター（ローカルDB未登録）のURI一覧について、それぞれ `RemoteActorResolve`
+/// ジョブを積む（マイケル指摘 #68: 未知アクターの取得もWorkerジョブキューに積む）。
+async fn enqueue_unknown_actor_resolves(state: &AppState, unknown_uris: Vec<String>) {
+    for uri in unknown_uris {
+        state.enqueue_remote_actor_resolve(uri).await;
+    }
 }
 
 /// 短タイムアウト内での同期ライブ取得（アクタードキュメント→コレクション本体）。
@@ -1112,9 +1122,11 @@ async fn load_remote_follow_snapshot(
 /// `RemoteFollowSummaryItem` に変換する。未登録の URI はハンドルをパースしただけの
 /// 簡易表示にする（全件のプロフィールを都度リモートへフェッチするとレイテンシ・
 /// 負荷が過大になるため、既知の範囲でのみリッチ表示する）。
-async fn resolve_remote_follow_items(pool: &sqlx::PgPool, uris: &[String]) -> Vec<RemoteFollowSummaryItem> {
+/// 戻り値の2つ目は未登録だった URI 一覧（呼び出し元が `RemoteActorResolve` ジョブを
+/// 積むのに使う、マイケル指摘 #68）。
+async fn resolve_remote_follow_items(pool: &sqlx::PgPool, uris: &[String]) -> (Vec<RemoteFollowSummaryItem>, Vec<String>) {
     if uris.is_empty() {
-        return vec![];
+        return (vec![], vec![]);
     }
 
     let rows = sqlx::query(
@@ -1146,10 +1158,13 @@ async fn resolve_remote_follow_items(pool: &sqlx::PgPool, uris: &[String]) -> Ve
         );
     }
 
-    uris.iter()
+    let mut unknown_uris = Vec::new();
+    let items = uris
+        .iter()
         .map(|uri| match known.remove(uri) {
             Some(item) => item,
             None => {
+                unknown_uris.push(uri.clone());
                 let (handle, domain) = parse_handle_from_uri(uri);
                 RemoteFollowSummaryItem {
                     uri: uri.clone(),
@@ -1161,7 +1176,8 @@ async fn resolve_remote_follow_items(pool: &sqlx::PgPool, uris: &[String]) -> Ve
                 }
             }
         })
-        .collect()
+        .collect();
+    (items, unknown_uris)
 }
 
 /// 未登録の actor URI からハンドル風の表示文字列を組み立てる（ベストエフォート）。

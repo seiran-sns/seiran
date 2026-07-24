@@ -192,6 +192,17 @@ impl AppState {
             tracing::error!("[job] RemoteFollowListSync enqueue 失敗 (actor_id={}): {}", actor_id, e);
         }
     }
+
+    /// リモートフォロー一覧中の未知アクター（ローカルDB未登録）を解決するジョブを積む（#68）。
+    pub async fn enqueue_remote_actor_resolve(&self, uri: String) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::RemoteActorResolve { uri: uri.clone() }, job_priority::LOW)
+            .await
+        {
+            tracing::error!("[job] RemoteActorResolve enqueue 失敗 (uri={}): {}", uri, e);
+        }
+    }
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り

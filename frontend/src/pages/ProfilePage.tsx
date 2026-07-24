@@ -16,6 +16,7 @@ import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { profileQuery, remoteProfileUrl } from "../lib/format";
+import { prefetchRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
 import { setFollowStatus as setFollowStatusStore, useFollowStatus } from "../stores/followStatusStore";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
@@ -85,6 +86,11 @@ export default function ProfilePage() {
         actorIdRef.current = p.actor_id;
         setPosts(p.recent_posts);
         setHasMore(!!p.actor_id && p.recent_posts.length >= PAGE_SIZE);
+        // フォロー中/フォロワータブがまだ開かれていない段階から先読みを開始する（#68 マイケル指摘）。
+        if (p.actor_id && p.actor_type === "fedi") {
+          prefetchRemoteFollowSummary(p.actor_id, "following");
+          prefetchRemoteFollowSummary(p.actor_id, "followers");
+        }
       })
       .catch((e) => !cancelled && setError(getErrorMessage(e)))
       .finally(() => !cancelled && setLoading(false));

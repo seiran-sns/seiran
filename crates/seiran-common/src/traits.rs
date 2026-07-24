@@ -196,6 +196,11 @@ pub enum Job {
     /// 同期取得が失敗/タイムアウトした場合のフォールバックとして積まれる。
     /// `direction` は `"following"` または `"followers"`。
     RemoteFollowListSync { actor_id: i64, direction: String },
+
+    /// リモート followers/following 一覧中、ローカル `actors` に未登録の actor URI を
+    /// 解決してプロフィールを upsert する（#68 マイケル指摘: 未知アクターもジョブ化）。
+    /// フォロー関係は作らず、表示のリッチ化（アバター・表示名等）のみが目的。
+    RemoteActorResolve { uri: String },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

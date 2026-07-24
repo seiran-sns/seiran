@@ -104,8 +104,34 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
     .await
     .map_err(|e| format!("スナップショット保存失敗: {}", e))?;
 
+    enqueue_unknown_actor_resolves(pool, &ctx.queue, &uris).await;
+
     tracing::info!("[RemoteFollowListSync] 完了: actor_id={} direction={}", actor_id, direction);
     Ok(())
+}
+
+/// 取得した actor URI のうち、ローカル `actors` に未登録のものについて `RemoteActorResolve`
+/// ジョブを積む（マイケル指摘 #68: 未知アクターの取得もWorkerジョブキューに積む）。
+async fn enqueue_unknown_actor_resolves(pool: &sqlx::PgPool, queue: &Arc<dyn crate::traits::JobQueue>, uris: &[String]) {
+    let known: std::collections::HashSet<String> =
+        sqlx::query_scalar::<_, String>("SELECT ap_uri FROM actors WHERE ap_uri = ANY($1)")
+            .bind(uris)
+            .fetch_all(pool)
+            .await
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_default();
+
+    for uri in uris {
+        if known.contains(uri) {
+            continue;
+        }
+        if let Err(e) = queue
+            .enqueue(crate::traits::Job::RemoteActorResolve { uri: uri.clone() }, crate::queue::worker::priority::LOW)
+            .await
+        {
+            tracing::warn!("[RemoteFollowListSync] RemoteActorResolve enqueue失敗 (uri={}): {}", uri, e);
+        }
+    }
 }
 
 fn extract_domain(uri: &str) -> String {

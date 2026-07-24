@@ -55,10 +55,11 @@
 ### リモートFediアクターのフォロー中/フォロワー全件取得（#68）
 プロフィール画面で `GET /api/users/remote-follow-summary?actor_id=&direction=following|followers` を叩くと、`follows` テーブル（seiranが認知している関係のみ）とは独立に、相手のアクタードキュメントが持つ `following`/`followers` OrderedCollection URL（`ApActor.following`/`ApActor.followers`）へ直接問い合わせ、コレクション全体（`first`/`next` をページ辿り）を取得する（`seiran-common::ap::collection::fetch_ap_collection_uris`）。
 
-- 同期取得は3秒タイムアウト・最大500件のキャップ付き。成功すれば `remote_follow_snapshots` テーブル（`docs/database.md` 参照）へ丸ごと上書き保存しつつその場でレスポンスに含める。
+- 同期取得は200msタイムアウト・最大500件のキャップ付き。成功すれば `remote_follow_snapshots` テーブル（`docs/database.md` 参照）へ丸ごと上書き保存しつつその場でレスポンスに含める。
 - タイムアウト・取得失敗（非公開設定を含む）の場合は、既存スナップショット（あれば）を返しつつ `Job::RemoteFollowListSync{actor_id, direction}`（優先度低）を積む。このジョブはキャップ5000件でバックグラウンド全件取得し、スナップショットを更新する。次回リロード時に反映される。
-- レスポンスの各アイテムはローカルDBに `ap_uri` が登録済みなら display_name/avatar_url 等を付与し、未登録の URI はハンドル文字列のみの簡易表示にする（全件のプロフィールを都度リモート取得すると負荷・レイテンシが過大なため）。
+- レスポンスの各アイテムはローカルDBに `ap_uri` が登録済みなら display_name/avatar_url 等を付与し、未登録の URI はハンドル文字列のみの簡易表示にする（全件のプロフィールを都度リモート取得すると負荷・レイテンシが過大なため）。未登録の URI は同期取得・`RemoteFollowListSync` の双方で `Job::RemoteActorResolve{uri}`（優先度低）を積み、バックグラウンドでプロフィールを解決・`actors` へ upsert する（フォロー関係は作らない。次回表示からリッチ表示になる）。
 - ローカルアクター・Bskyアクター（`ap_uri` を持たない）は対象外。Mastodon等はフォロー/フォロワー一覧をアカウント設定で非公開にできるため、HTTPエラーはエラー扱いにせず「非公開」として静かに空を返す。
+- フロントエンドは `FollowListPanel`（タブが開かれた時点）でのAPIコールに加え、`ProfilePage` がプロフィール取得完了直後（タブ選択前）に `prefetchRemoteFollowSummary` で先読みを開始する（`frontend/src/lib/remoteFollowSummaryCache.ts`）。タブを開いた瞬間に読み込み待ちが発生する体感を減らすための先読みキャッシュで、`FollowListPanel` はキャッシュ済みならそれを再利用する。
 
 ### カスタム絵文字リアクションの送信（`EmojiReact`）
 ローカルユーザーがカスタム絵文字（`:shortcode:`）でリアクションすると、`build_reaction_object`（`ap/deliver.rs`）が Misskey/Fedibird 互換の `tag: [{"type":"Emoji","name":":shortcode:","icon":{"type":"Image","url":...}}]` を付与した `EmojiReact` を組み立てる。`content`/`_misskey_reaction` には `:shortcode:` 形式の文字列をそのまま載せる。受信側の `build_emoji_map`/`extract_emoji_tag_url`（`ap/client.rs`・`jobs/inbound_activity_process.rs`）と対称的なペアになっている。画像URLの解決は `EmojiRepository::find_url_by_shortcode`（`custom_emojis`/`media_files`/`storage_providers` を JOIN）で行い、未登録shortcodeは `INVALID_REACTION_CONTENT`/`UNKNOWN_EMOJI` として拒否する（`handlers/notes/validation.rs`・`handlers/notes/mod.rs::create_reaction`）。ATP（Bsky）はカスタム絵文字非対応のため、`commit_like` の `emoji` 拡張フィールドに `:shortcode:` 文字列をベストエフォートで載せるのみ（画像は送らない）。
