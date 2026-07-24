@@ -3,10 +3,12 @@
 use axum::{extract::State, http::HeaderMap, Json};
 use serde::Deserialize;
 
+use seiran_common::generate_snowflake_id;
 use seiran_common::ApDeliveryKind;
 use seiran_common::LocalAuthProvider;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 
+use crate::mailer::{send_email_change_confirmation, MailError};
 use crate::{error::ApiError, middleware::extract_auth, AppState};
 
 /// フロントの i18n が対応する言語コード（`account:languagePreference` の許可値）。
@@ -85,6 +87,107 @@ pub async fn change_password(
         .update_password_hash(auth_user.user_id, &password_hash)
         .await
         .map_err(|e| ApiError::Internal(format!("[change-password] users UPDATE 失敗: {}", e)))?;
+
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+pub struct RequestEmailChangeRequest {
+    pub new_email: String,
+}
+
+/// `POST /api/account/email/request-change`（#59）
+/// 新しいメールアドレス宛に確認メールを送信する。実際の `users.email` 更新は
+/// `confirm_email_change` （リンク踏み時点）で行う。
+pub async fn request_email_change(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<RequestEmailChangeRequest>,
+) -> Result<Json<()>, ApiError> {
+    let auth_user = extract_auth(&headers, &state.local_auth).await?;
+
+    let new_email = req.new_email.trim().to_lowercase();
+    if new_email.is_empty() || !new_email.contains('@') {
+        return Err(ApiError::BadRequest("EMAIL_INVALID".to_owned()));
+    }
+
+    let exists = state
+        .users
+        .email_exists(&new_email)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if exists {
+        return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
+    }
+
+    let id = generate_snowflake_id(chrono::Utc::now());
+    let token = state
+        .email_changes
+        .insert(id, auth_user.user_id, &new_email)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[request-email-change] DB エラー: {}", e)))?
+        .ok_or_else(|| ApiError::Internal("[request-email-change] token 発行失敗".to_owned()))?;
+
+    let confirm_url = format!("https://{}/verify-email-change?token={}", state.local_domain, token);
+
+    let smtp_settings = state
+        .site_settings
+        .get_all()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    send_email_change_confirmation(&smtp_settings, &new_email, &confirm_url)
+        .await
+        .map_err(|e| {
+            tracing::error!("[request-email-change] メール送信失敗: {}", e);
+            match e {
+                MailError::Config(_) => ApiError::ServiceUnavailable("SMTP_NOT_CONFIGURED"),
+                _ => ApiError::Internal(format!("メール送信失敗: {}", e)),
+            }
+        })?;
+
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+pub struct ConfirmEmailChangeRequest {
+    pub token: String,
+}
+
+/// `POST /api/account/email/confirm-change`（#59）
+/// 確認メールのリンクを踏んだ際に呼ばれる。トークンを消費して `users.email` を更新する。
+/// パスワードリセットの確認フローと同様、ログイン状態は要求しない（トークンの所有が証明）。
+pub async fn confirm_email_change(
+    State(state): State<AppState>,
+    Json(req): Json<ConfirmEmailChangeRequest>,
+) -> Result<Json<()>, ApiError> {
+    let token: uuid::Uuid = req
+        .token
+        .parse()
+        .map_err(|_| ApiError::BadRequest("INVALID_TOKEN".to_owned()))?;
+
+    let (user_id, new_email) = state
+        .email_changes
+        .consume(token)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::BadRequest("INVALID_TOKEN".to_owned()))?;
+
+    // 発行後に別の場所で同じアドレスが登録された場合の競合を防ぐ
+    let exists = state
+        .users
+        .email_exists(&new_email)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if exists {
+        return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
+    }
+
+    state
+        .users
+        .update_email(user_id, &new_email)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[confirm-email-change] users UPDATE 失敗: {}", e)))?;
 
     Ok(Json(()))
 }

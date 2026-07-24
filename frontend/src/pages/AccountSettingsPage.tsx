@@ -18,6 +18,12 @@ export default function AccountSettingsPage() {
   const [did, setDid] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
+  // メールアドレス変更
+  const [newEmail, setNewEmail] = useState("");
+  const [changingEmail, setChangingEmail] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [emailRequested, setEmailRequested] = useState(false);
+
   // パスワード変更
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -66,6 +72,22 @@ export default function AccountSettingsPage() {
     }
   }
 
+  async function requestEmailChange(e: FormEvent) {
+    e.preventDefault();
+    setEmailError("");
+    setEmailRequested(false);
+    setChangingEmail(true);
+    try {
+      await api.account.requestEmailChange(newEmail.trim());
+      setEmailRequested(true);
+      setNewEmail("");
+    } catch (err) {
+      setEmailError(getErrorMessage(err));
+    } finally {
+      setChangingEmail(false);
+    }
+  }
+
   async function withdraw(e: FormEvent) {
     e.preventDefault();
     if (!confirm(t("profile:profileEditPage.withdrawConfirm"))) return;
@@ -108,6 +130,26 @@ export default function AccountSettingsPage() {
           )}
         </div>
       )}
+
+      <form className={styles.section} onSubmit={requestEmailChange}>
+        <h3 className={styles.sectionTitle}>{t("account:accountSettings.emailChangeTitle")}</h3>
+        {emailError && <p className={styles.error}>{emailError}</p>}
+        {emailRequested && <p className={styles.success}>{t("account:accountSettings.emailChangeRequested")}</p>}
+        <label className={styles.label}>
+          {t("account:accountSettings.newEmailLabel")}
+          <input
+            className={styles.input}
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            autoComplete="email"
+            required
+          />
+        </label>
+        <button className={styles.save} type="submit" disabled={changingEmail || !newEmail.trim()}>
+          {changingEmail ? t("common:saving") : t("account:accountSettings.changeEmailButton")}
+        </button>
+      </form>
 
       <form className={styles.section} onSubmit={changePassword}>
         <h3 className={styles.sectionTitle}>{t("account:accountSettings.passwordTitle")}</h3>

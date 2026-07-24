@@ -22,6 +22,10 @@
     "title": "Account settings",
     "identityTitle": "Account info",
     "emailLabel": "Email",
+    "emailChangeTitle": "Change email address",
+    "newEmailLabel": "New email address",
+    "changeEmailButton": "Send confirmation email",
+    "emailChangeRequested": "A confirmation email has been sent to the new address. Open the link in the email to complete the change.",
     "passwordTitle": "Change password",
     "currentPasswordLabel": "Current password",
     "newPasswordLabel": "New password (8+ characters)",
@@ -29,6 +33,14 @@
     "changePasswordButton": "Change password",
     "passwordSaved": "Password changed.",
     "passwordMismatch": "New passwords don't match."
+  },
+  "verifyEmailChange": {
+    "verifying": "Confirming your email change...",
+    "invalidUrl": "Invalid URL",
+    "successTitle": "Email address changed",
+    "successBody": "Your email address has been updated successfully.",
+    "failedTitle": "Confirmation failed",
+    "backToSettingsLink": "Back to settings"
   },
   "mutesBlocks": {
     "title": "Mutes & Blocks",

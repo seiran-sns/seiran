@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AtpReadRepository, BlockRepository, DmRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AtpReadRepository, BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
+    PgActorRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -95,6 +95,8 @@ pub struct AppState {
     pub password_resets: Arc<dyn PasswordResetRepository>,
     /// 新規登録時のメール確認フロー（`email_verifications` テーブル）。
     pub email_verifications: Arc<dyn EmailVerificationRepository>,
+    /// 設定画面からのメールアドレス変更フロー（`email_changes` テーブル、#59）。
+    pub email_changes: Arc<dyn EmailChangeRepository>,
     /// カスタム絵文字（`custom_emojis` テーブル）。
     pub emojis: Arc<dyn EmojiRepository>,
 }
@@ -255,6 +257,7 @@ pub async fn init_state(
     let hashtags: Arc<dyn HashtagRepository> = Arc::new(PgHashtagRepository::new(pool.clone()));
     let password_resets: Arc<dyn PasswordResetRepository> = Arc::new(PgPasswordResetRepository::new(pool.clone()));
     let email_verifications: Arc<dyn EmailVerificationRepository> = Arc::new(PgEmailVerificationRepository::new(pool.clone()));
+    let email_changes: Arc<dyn EmailChangeRepository> = Arc::new(PgEmailChangeRepository::new(pool.clone()));
     let emojis: Arc<dyn EmojiRepository> = Arc::new(PgEmojiRepository::new(pool.clone()));
 
     let system_proxy_actor_id = match seiran_common::ensure_system_proxy_actor(&pool, &local_domain).await {
@@ -302,6 +305,7 @@ pub async fn init_state(
         system_proxy_actor_id,
         password_resets,
         email_verifications,
+        email_changes,
         emojis,
     }
 }
@@ -372,6 +376,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/account/withdraw", post(handlers::account::withdraw))
         .route("/api/account/change-password", post(handlers::account::change_password))
         .route("/api/account/language", post(handlers::account::update_language))
+        .route("/api/account/email/request-change", post(handlers::account::request_email_change))
+        .route("/api/account/email/confirm-change", post(handlers::account::confirm_email_change))
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))

@@ -93,6 +93,29 @@ pub async fn send_verification_email(
     Ok(())
 }
 
+pub async fn send_email_change_confirmation(
+    settings: &HashMap<String, String>,
+    to: &str,
+    confirm_url: &str,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
+
+    let body = format!(
+        "seiran — メールアドレス変更のリクエストを受け付けました。\n\n以下のリンクをクリックしてこのメールアドレスへの変更を確定してください:\n\n{}\n\nこのリンクは 24 時間有効です。\n\n心当たりがない場合は無視してください。",
+        confirm_url
+    );
+
+    let email = Message::builder()
+        .from(from.parse()?)
+        .to(to.parse()?)
+        .subject("seiran — メールアドレス変更の確認")
+        .header(ContentType::TEXT_PLAIN)
+        .body(body)?;
+
+    transport.send(email).await?;
+    Ok(())
+}
+
 pub async fn send_password_reset_email(
     settings: &HashMap<String, String>,
     to: &str,

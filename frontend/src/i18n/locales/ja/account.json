@@ -22,6 +22,10 @@
     "title": "アカウント設定",
     "identityTitle": "アカウント情報",
     "emailLabel": "メール",
+    "emailChangeTitle": "メールアドレス変更",
+    "newEmailLabel": "新しいメールアドレス",
+    "changeEmailButton": "確認メールを送信",
+    "emailChangeRequested": "新しいメールアドレス宛に確認メールを送信しました。メール内のリンクを開くと変更が確定します。",
     "passwordTitle": "パスワード変更",
     "currentPasswordLabel": "現在のパスワード",
     "newPasswordLabel": "新しいパスワード（8文字以上）",
@@ -29,6 +33,14 @@
     "changePasswordButton": "パスワードを変更",
     "passwordSaved": "パスワードを変更しました。",
     "passwordMismatch": "新しいパスワードが一致しません。"
+  },
+  "verifyEmailChange": {
+    "verifying": "メールアドレスの変更を確認中...",
+    "invalidUrl": "URLが無効です",
+    "successTitle": "メールアドレスを変更しました",
+    "successBody": "新しいメールアドレスでの変更が完了しました。",
+    "failedTitle": "確認に失敗しました",
+    "backToSettingsLink": "設定画面へ戻る"
   },
   "mutesBlocks": {
     "title": "ミュート・ブロック",
