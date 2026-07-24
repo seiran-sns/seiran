@@ -379,6 +379,8 @@ export interface RemoteFollowSummaryResponse {
   /** 同期取得できず、Workerでのバックグラウンド全件取得を積んだか。 */
   pending: boolean;
   fetched_at?: string;
+  /** ローカルDB把握分とリモート直接取得分をブレンドした実際のフォロー中/フォロワー数（#68）。 */
+  total_count: number;
 }
 
 export interface SearchResult {

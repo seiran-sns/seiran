@@ -26,8 +26,6 @@
     "followList": {
       "noFollowing": "Not following anyone yet.",
       "noFollowers": "No followers yet.",
-      "remoteExtraHeader": "Other relations visible on the Fedi server",
-      "remoteExtraEmpty": "No other relations found.",
       "remoteExtraPending": "Fetching in the background. Please reload again shortly."
     },
     "actionsMenuTitle": "Account actions",

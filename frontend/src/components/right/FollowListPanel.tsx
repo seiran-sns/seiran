@@ -84,22 +84,22 @@ export default function FollowListPanel({ actorId, kind, onError, isRemoteFedi }
   if (initialLoading) return <p className={panel.message}>{t("common:loading")}</p>;
 
   // リモートで取得できた項目のうち、ローカルDBが既に把握している（=上のリストに出ている）
-  // アクターは重複表示しない。
+  // アクターは重複表示しない。マイケル指摘 #68: 見出しで分けず、既知/未知を問わず同じ
+  // 見た目の1つのリストとして混ぜて表示する。
   const knownActorIds = new Set(items.map((i) => i.actor_id));
   const extraItems = remoteExtra.filter((r) => !r.actor_id || !knownActorIds.has(r.actor_id));
 
   const emptyMessage =
     kind === "following" ? t("profile:profilePage.followList.noFollowing") : t("profile:profilePage.followList.noFollowers");
-  const showLocalEmpty = items.length === 0;
-  const showRemoteSection = isRemoteFedi && remoteState !== "idle";
+  const remoteStillLoading = isRemoteFedi && remoteState === "loading";
+  const isEmpty = items.length === 0 && extraItems.length === 0;
 
-  if (showLocalEmpty && !showRemoteSection) {
+  if (isEmpty && !remoteStillLoading) {
     return <p className={panel.message}>{emptyMessage}</p>;
   }
 
   return (
     <div className={styles.list}>
-      {showLocalEmpty && <p className={panel.message}>{emptyMessage}</p>}
       {items.map((item) => (
         <Link key={item.follow_id} to={profilePath(item.username, item.domain)} className={styles.row}>
           <Avatar url={item.avatar_url} name={item.display_name || item.username} size={40} />
@@ -117,34 +117,28 @@ export default function FollowListPanel({ actorId, kind, onError, isRemoteFedi }
           {loadingMore ? t("common:loading") : ""}
         </div>
       )}
-      {showRemoteSection && (
-        <div className={styles.remoteSection}>
-          <div className={styles.remoteSectionHeader}>{t("profile:profilePage.followList.remoteExtraHeader")}</div>
-          {remoteState === "loading" && <p className={panel.message}>{t("common:loading")}</p>}
-          {remoteState !== "loading" && extraItems.length === 0 && (
-            <p className={panel.message}>{t("profile:profilePage.followList.remoteExtraEmpty")}</p>
-          )}
-          {extraItems.map((item) =>
-            item.actor_id ? (
-              <Link key={item.uri} to={profilePath(item.handle, item.domain)} className={styles.row}>
-                <Avatar url={item.avatar_url} name={item.display_name || item.handle} size={40} />
-                <div className={styles.names}>
-                  <span className={styles.displayName}>{item.display_name || item.handle}</span>
-                  <span className={styles.acct}>@{item.handle}@{item.domain}</span>
-                </div>
-              </Link>
-            ) : (
-              <Link key={item.uri} to={profilePath(item.handle, item.domain)} className={styles.row}>
-                <Avatar url={undefined} name={item.handle} size={40} />
-                <div className={styles.names}>
-                  <span className={styles.displayName}>@{item.handle}</span>
-                  <span className={styles.acct}>@{item.handle}@{item.domain}</span>
-                </div>
-              </Link>
-            )
-          )}
-          {remoteState === "pending" && <p className={panel.message}>{t("profile:profilePage.followList.remoteExtraPending")}</p>}
-        </div>
+      {extraItems.map((item) =>
+        item.actor_id ? (
+          <Link key={item.uri} to={profilePath(item.handle, item.domain)} className={styles.row}>
+            <Avatar url={item.avatar_url} name={item.display_name || item.handle} size={40} />
+            <div className={styles.names}>
+              <span className={styles.displayName}>{item.display_name || item.handle}</span>
+              <span className={styles.acct}>@{item.handle}@{item.domain}</span>
+            </div>
+          </Link>
+        ) : (
+          <Link key={item.uri} to={profilePath(item.handle, item.domain)} className={styles.row}>
+            <Avatar url={undefined} name={item.handle} size={40} />
+            <div className={styles.names}>
+              <span className={styles.displayName}>@{item.handle}</span>
+              <span className={styles.acct}>@{item.handle}@{item.domain}</span>
+            </div>
+          </Link>
+        )
+      )}
+      {remoteStillLoading && <p className={panel.message}>{t("common:loading")}</p>}
+      {isRemoteFedi && remoteState === "pending" && (
+        <p className={panel.message}>{t("profile:profilePage.followList.remoteExtraPending")}</p>
       )}
     </div>
   );

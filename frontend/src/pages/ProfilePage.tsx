@@ -16,7 +16,7 @@ import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { profileQuery, remoteProfileUrl } from "../lib/format";
-import { prefetchRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
+import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
 import { setFollowStatus as setFollowStatusStore, useFollowStatus } from "../stores/followStatusStore";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
@@ -50,6 +50,10 @@ export default function ProfilePage() {
   // 右ペイン（狭幅では中央ペイン）のタブ状態: 0=投稿, 1=フォロー中, 2=フォロワー（#56）。
   // プロフィール切替時にリセットする（他ユーザーのフォロワータブを見たまま遷移してもタブは投稿に戻る）。
   const [rightTab, setRightTab] = useState(0);
+  // プロフィールカードのフォロー中/フォロワー人数表示（#68 マイケル指摘）。fediアクターの場合、
+  // ローカルDB把握分（`profile.following_count`等）ではなくリモート直接取得とブレンドした
+  // 実数（`total_count`）で上書きする。取得できるまでは undefined のままローカル値を表示する。
+  const [blendedCounts, setBlendedCounts] = useState<{ following?: number; followers?: number }>({});
 
   // 投稿一覧の無限スクロール（#64）。`profile.recent_posts`（初回最大20件）を初期値とし、
   // 下端到達で `GET /api/users/posts` から `until_id` カーソルで追加取得する。
@@ -74,6 +78,7 @@ export default function ProfilePage() {
     setLoading(true);
     setError("");
     setRightTab(0);
+    setBlendedCounts({});
     api.users
       .profile(q)
       .then((p) => {
@@ -87,9 +92,15 @@ export default function ProfilePage() {
         setPosts(p.recent_posts);
         setHasMore(!!p.actor_id && p.recent_posts.length >= PAGE_SIZE);
         // フォロー中/フォロワータブがまだ開かれていない段階から先読みを開始する（#68 マイケル指摘）。
+        // 結果はプロフィールカードの人数表示のブレンドにも使う（#68 マイケル指摘）。
         if (p.actor_id && p.actor_type === "fedi") {
-          prefetchRemoteFollowSummary(p.actor_id, "following");
-          prefetchRemoteFollowSummary(p.actor_id, "followers");
+          const actorId = p.actor_id;
+          getRemoteFollowSummary(actorId, "following")
+            .then((res) => !cancelled && setBlendedCounts((c) => ({ ...c, following: res.total_count })))
+            .catch(() => {});
+          getRemoteFollowSummary(actorId, "followers")
+            .then((res) => !cancelled && setBlendedCounts((c) => ({ ...c, followers: res.total_count })))
+            .catch(() => {});
         }
       })
       .catch((e) => !cancelled && setError(getErrorMessage(e)))
@@ -285,10 +296,10 @@ export default function ProfilePage() {
           {profile.actor_id && (
             <div className={styles.followCounts}>
               <button type="button" className={styles.followCountBtn} onClick={() => setRightTab(1)}>
-                <strong>{profile.following_count}</strong> {t("profile:profilePage.followingCountLabel")}
+                <strong>{blendedCounts.following ?? profile.following_count}</strong> {t("profile:profilePage.followingCountLabel")}
               </button>
               <button type="button" className={styles.followCountBtn} onClick={() => setRightTab(2)}>
-                <strong>{profile.follower_count}</strong> {t("profile:profilePage.followerCountLabel")}
+                <strong>{blendedCounts.followers ?? profile.follower_count}</strong> {t("profile:profilePage.followerCountLabel")}
               </button>
             </div>
           )}

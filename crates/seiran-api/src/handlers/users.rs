@@ -932,6 +932,9 @@ pub struct RemoteFollowSummaryResponse {
     /// true の場合、しばらくしてからのリロードで新しい結果が反映される可能性がある。
     pub pending: bool,
     pub fetched_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// ローカルDB把握分（`follows`テーブル）とリモート直接取得分をブレンドした実際の
+    /// フォロー中/フォロワー数（マイケル指摘 #68: プロフィールカードの人数表示にも反映したい）。
+    pub total_count: i64,
 }
 
 #[derive(Deserialize)]
@@ -978,6 +981,7 @@ pub async fn user_remote_follow_summary(
                 complete: true,
                 pending: false,
                 fetched_at: None,
+                total_count: 0,
             })
             .into_response();
         }
@@ -1006,11 +1010,13 @@ pub async fn user_remote_follow_summary(
             load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
         let (items, unknown_uris) = resolve_remote_follow_items(&state.db, &best_uris).await;
         enqueue_unknown_actor_resolves(&state, unknown_uris).await;
+        let total_count = blended_follow_count(&state, actor_id, &params.direction, best_uris.len()).await;
         return Json(RemoteFollowSummaryResponse {
             items,
             complete: best_complete,
             pending: !best_complete,
             fetched_at,
+            total_count,
         })
         .into_response();
     }
@@ -1032,10 +1038,23 @@ pub async fn user_remote_follow_summary(
         load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
     let (items, unknown_uris) = resolve_remote_follow_items(&state.db, &uris).await;
     enqueue_unknown_actor_resolves(&state, unknown_uris).await;
+    let total_count = blended_follow_count(&state, actor_id, &params.direction, uris.len()).await;
     // 既存スナップショットが complete=true（全件取得済み）なら、上で積んだWorkerジョブは
     // 単なる裏側の再確認に過ぎず、フロントに「まだ取得中」と伝える必要はない。
     // 以前は無条件で true を返しており、全件取得済みでも延々と pending 表示が続くバグがあった。
-    Json(RemoteFollowSummaryResponse { items, complete, pending: !complete, fetched_at }).into_response()
+    Json(RemoteFollowSummaryResponse { items, complete, pending: !complete, fetched_at, total_count }).into_response()
+}
+
+/// ローカルDBが把握しているフォロー数（`follows`テーブル）と、リモートへ直接問い合わせて
+/// 取得できた件数（重複排除済みURI数）のうち、大きい方をブレンド後の実数として採用する
+/// （マイケル指摘 #68: プロフィールカードの人数表示にも反映してほしい）。
+/// ローカルが把握しているフォロー関係は必ず相手のAPコレクションにも載っているはずなので、
+/// 通常はリモート側が superset になる。リモート取得が未完了で少なく出た場合に、既に分かって
+/// いるローカルの人数より後退して表示しないためのフォールバック。
+async fn blended_follow_count(state: &AppState, actor_id: i64, direction: &str, remote_count: usize) -> i64 {
+    let (following_count, follower_count) = state.follows.count_relations(actor_id).await.unwrap_or((0, 0));
+    let local_count = if direction == "following" { following_count } else { follower_count };
+    local_count.max(remote_count as i64)
 }
 
 /// 未知アクター（ローカルDB未登録）のURI一覧について、それぞれ `RemoteActorResolve`
