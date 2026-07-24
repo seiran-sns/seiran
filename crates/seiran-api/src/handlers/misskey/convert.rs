@@ -91,6 +91,8 @@ pub async fn build_user_detailed(state: &AppState, actor: &Actor) -> MisskeyUser
         notes_count,
         followers_count,
         following_count,
+        followers_visibility: "public".to_string(),
+        following_visibility: "public".to_string(),
     }
 }
 
@@ -224,11 +226,70 @@ fn to_misskey_note(
         emojis: BTreeMap::new(),
         reactions: reactions_map,
         reaction_emojis,
+        renote: None,
         renote_count,
         replies_count,
         uri,
         url,
         my_reaction,
+    }
+}
+
+/// `renoteId` を持つノートへ、リノート元/引用元ノート本体を埋め込む（型定義の
+/// `MisskeyNote::renote` コメント参照）。`handlers::notes::queries::embed_renotes`
+/// （カスタムAPI側、#45で対応済み）と同じ可視性フィルタ・一括フェッチ方針を踏襲する。
+/// 埋め込むノート自身の `renote` は常に `None`（孫リノートは埋め込まない）。
+async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id: Option<i64>) {
+    let orig_ids: Vec<i64> = notes.iter().filter_map(|n| n.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok())).collect();
+    if orig_ids.is_empty() {
+        return;
+    }
+
+    let mut rows = sqlx::query_as::<_, TimelinePost>(
+        "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
+                a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
+                p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+         LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+         WHERE p.id = ANY($1) AND p.deleted_at IS NULL
+           AND (
+               p.visibility NOT IN ('followers_only', 'direct')
+               OR p.actor_id = $2
+               OR EXISTS (
+                   SELECT 1 FROM follows f
+                   WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+               )
+           )",
+    )
+    .bind(&orig_ids)
+    .bind(my_actor_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    resolve_mention_facets_in_place(&state.db, &mut rows).await;
+
+    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
+    let (renote_counts, reply_counts) = fetch_counts_map(&state.db, &ids).await;
+
+    let mut by_id: HashMap<i64, MisskeyNote> = HashMap::new();
+    for r in rows {
+        let id = r.id;
+        let atts = att_map.remove(&id).unwrap_or_default();
+        let reactions = rmap.get(&id).cloned().unwrap_or_default();
+        let rc = *renote_counts.get(&id).unwrap_or(&0);
+        let pc = *reply_counts.get(&id).unwrap_or(&0);
+        by_id.insert(id, to_misskey_note(&r, &state.local_domain, &atts, &reactions, rc, pc));
+    }
+
+    for note in notes.iter_mut() {
+        if let Some(rid) = note.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok()) {
+            note.renote = by_id.get(&rid).cloned().map(Box::new);
+        }
     }
 }
 
@@ -279,7 +340,8 @@ pub async fn build_notes(state: &AppState, mut rows: Vec<TimelinePost>, my_actor
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
     let (renote_counts, reply_counts) = fetch_counts_map(&state.db, &ids).await;
 
-    rows.into_iter()
+    let mut notes: Vec<MisskeyNote> = rows
+        .into_iter()
         .map(|p| {
             let id = p.id;
             let atts = att_map.remove(&id).unwrap_or_default();
@@ -288,7 +350,10 @@ pub async fn build_notes(state: &AppState, mut rows: Vec<TimelinePost>, my_actor
             let pc = *reply_counts.get(&id).unwrap_or(&0);
             to_misskey_note(&p, &state.local_domain, &atts, &reactions, rc, pc)
         })
-        .collect()
+        .collect();
+
+    embed_renotes(state, &mut notes, my_actor_id).await;
+    notes
 }
 
 /// 単一ノートを Misskey 形式へ変換する（`/api/notes/show` 用）。
@@ -314,7 +379,12 @@ pub async fn build_notifications(
         HashMap::new()
     } else {
         sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>)>(
-            "SELECT id, username, domain, display_name, avatar_url FROM actors WHERE id = ANY($1)",
+            "SELECT a.id, a.username, a.domain, a.display_name, \
+                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
+             FROM actors a \
+             LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
+             LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+             WHERE a.id = ANY($1)",
         )
         .bind(&notifier_ids)
         .fetch_all(&state.db)

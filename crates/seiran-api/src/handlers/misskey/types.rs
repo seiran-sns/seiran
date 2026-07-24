@@ -39,6 +39,13 @@ pub struct MisskeyUserDetailed {
     pub notes_count: i64,
     pub followers_count: i64,
     pub following_count: i64,
+    /// フォロー/フォロワー一覧・数の公開範囲（本家 Misskey の設定機能に相当）。
+    /// seiran はこの設定自体に未対応なため常に `"public"` を返す。クライアント
+    /// （`misskey_dart` 等）はこの値が欠落していると非公開とみなし、
+    /// `followersCount`/`followingCount` の数値表示を鍵アイコンに置き換える
+    /// （実機で確認済み。値自体は正しく集計されているのに表示されない不具合の原因）。
+    pub followers_visibility: String,
+    pub following_visibility: String,
 }
 
 /// `/api/i`（自分自身）専用のレスポンス型。`UserDetailedNotMe` を返す `/api/users/show` とは
@@ -120,6 +127,12 @@ pub struct MisskeyNote {
     /// 相当。Unicode絵文字のリアクションはここに現れない（クライアント側はそのまま
     /// テキストとして描画する）。
     pub reaction_emojis: BTreeMap<String, String>,
+    /// リノート元/引用元ノートの本体。`renoteId` はあるがこれが `null` のままだと、
+    /// `misskey_dart` 等のクライアントは元ノートを解決できず「削除されたノート」の
+    /// プレースホルダーを描画する（実機で確認済み）。孫リノート（リノートのリノート）は
+    /// 埋め込まない（`embed_renotes` 参照、無限再帰・多段フェッチを避けるため）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub renote: Option<Box<MisskeyNote>>,
     pub renote_count: i64,
     pub replies_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -181,6 +194,8 @@ mod tests {
                 notes_count: 0,
                 followers_count: 0,
                 following_count: 0,
+                followers_visibility: "public".to_owned(),
+                following_visibility: "public".to_owned(),
             },
             is_moderator: false,
             is_admin: false,

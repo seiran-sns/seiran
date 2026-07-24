@@ -226,6 +226,12 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 
 **`misskey_dart`（Aria等）の non-nullable 直接キャスト対策**: `misskey_dart` の生成コード（`*.g.dart`）は本家スキーマの必須フィールドを `as String`/`as num` 等で直接キャストするため、JSONでキーが欠けたり `null` だと Dart 側で未処理の `TypeError` となりクライアントが落ちる（サーバー側のバリデーションエラーとは別の失敗モード）。`MisskeyMeDetailed`（`notesCount` 等）に続き `MisskeyDriveFile`（`createdAt`/`md5`/`size`/`isSensitive`/`properties`）、`MisskeyUserDetailed`（`/api/users/show`・`/api/i` 共通、`notesCount`/`followersCount`/`followingCount`）でも踏んだため、Misskey互換型を追加・変更する際は本家スキーマの必須/任意を都度 `misskey_dart` のソースで確認すること。`md5` は seiran 内部で持つ `sha256` を代用し、リモート添付など元データが無い場合は空文字列/0を返す（クライアントは値を検証せず保持するだけのため実害はない）。
 
+**`MisskeyNote.renote`（リノート元/引用元ノート本体の埋め込み）**: `renoteId` だけでは `misskey_dart` 等のクライアントが元ノートを解決できず「削除されたノート」のプレースホルダー表示になる（実機確認）。`embed_renotes`（`handlers::misskey::convert`、カスタムAPI側の `handlers::notes::queries::embed_renotes` と同じ可視性フィルタ・一括フェッチ方針）が `build_notes` の最後で `repost_of_post_id`/`quote_of_post_id` 先の投稿を一括取得し `renote` へ埋め込む。孫リノート（リノートのリノート）は埋め込まない（埋め込む側の `renote` は常に `None`）。
+
+**通知の `user.avatarUrl` 解決**: `build_notifications` の通知起点ユーザー取得クエリは、ローカルユーザーのアバターを `actors.avatar_media_id → media_files → storage_providers` 経由で解決する（`build_user_detailed` 等、他の全ユーザー取得クエリと同じ `COALESCE(rtrim(sp.public_url,'/')||'/'||mf.storage_key, a.avatar_url)` パターン）。以前は `actors.avatar_url` を直接参照していたためローカルユーザーのアバターが常に欠落していた（同カラムはリモートアクター用の生URL格納にのみ使われるため）。
+
+**`MisskeyUserDetailed.followersVisibility`/`followingVisibility`**: 本家Misskeyのフォロー/フォロワー一覧・数の公開範囲設定に相当するフィールド。seiranはこの設定自体に未対応のため常に `"public"` を返す。値が欠落しているとクライアントは非公開とみなし、`followersCount`/`followingCount`（値自体は正しく集計されている）の数値表示を鍵アイコンに置き換える。
+
 ## 8. 通知・リアルタイム配信
 
 `seiran-common::streaming::StreamHub`（プロセス内 `tokio::broadcast`、容量512）が `{"type":kind,"body":body}` を配信する。`GET /api/streaming?token=<JWT>` でWebSocket接続し、`recipients` に自分の actor_id が含まれるイベントのみ転送される。
