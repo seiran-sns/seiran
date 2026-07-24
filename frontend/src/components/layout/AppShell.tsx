@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Note } from "../../api/client";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import Modal from "../common/Modal";
@@ -20,6 +20,7 @@ interface AppShellProps {
 export default function AppShell({ center, right, onPosted }: AppShellProps) {
   const { t } = useTranslation();
   const location = useLocation();
+  const navigate = useNavigate();
   const { dmUnreadCount } = useStreamingContext();
   const [composeOpen, setComposeOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -53,6 +54,16 @@ export default function AppShell({ center, right, onPosted }: AppShellProps) {
             {dmUnreadCount > 99 ? "99+" : dmUnreadCount}
           </span>
         )}
+      </button>
+
+      {/* スマホ表示用フローティング通知ボタン（#75） */}
+      <button
+        className={styles.floatingNotifBtn}
+        onClick={() => navigate("/notifications")}
+        aria-label={t("nav:leftNav.notifications")}
+        title={t("nav:leftNav.notifications")}
+      >
+        <span className={styles.floatingNotifIcon}>🔔</span>
       </button>
 
       {/* スマホ表示用フローティング投稿ボタン */}
