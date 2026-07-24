@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { api, FollowListItem } from "../../api/client";
+import { api, FollowListItem, RemoteFollowSummaryItem } from "../../api/client";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
 import { profilePath } from "../../lib/format";
@@ -15,13 +15,42 @@ interface FollowListPanelProps {
   actorId: string;
   kind: "following" | "followers";
   onError: (err: unknown) => void;
+  /** リモートFediアクターのプロフィールの場合 true。ローカルDBが把握している範囲を
+   * 超えて、相手サーバーへ直接 AP 経由で全件取得を試みる（#68）。 */
+  isRemoteFedi?: boolean;
 }
 
 /** プロフィール右ペインの「フォロー中」「フォロワー」タブの中身（#56）。無限スクロール。 */
-export default function FollowListPanel({ actorId, kind, onError }: FollowListPanelProps) {
+export default function FollowListPanel({ actorId, kind, onError, isRemoteFedi }: FollowListPanelProps) {
   const { t } = useTranslation();
   const [initialLoading, setInitialLoading] = useState(true);
   const fetchFn = kind === "following" ? api.users.following : api.users.followers;
+
+  // リモートFediサーバーへの直接問い合わせによる全件取得（#68）。ローカルDBが把握して
+  // いない関係（seiranが認知していないリモート同士のフォロー）を補完表示する。
+  const [remoteExtra, setRemoteExtra] = useState<RemoteFollowSummaryItem[]>([]);
+  const [remoteState, setRemoteState] = useState<"idle" | "loading" | "pending" | "done">("idle");
+
+  useEffect(() => {
+    if (!isRemoteFedi) {
+      setRemoteExtra([]);
+      setRemoteState("idle");
+      return;
+    }
+    let cancelled = false;
+    setRemoteState("loading");
+    api.users
+      .remoteFollowSummary(actorId, kind)
+      .then((res) => {
+        if (cancelled) return;
+        setRemoteExtra(res.items);
+        setRemoteState(res.pending ? "pending" : "done");
+      })
+      .catch(() => !cancelled && setRemoteState("idle"));
+    return () => {
+      cancelled = true;
+    };
+  }, [actorId, kind, isRemoteFedi]);
 
   const fetchPage = useCallback((untilId: string) => fetchFn(actorId, { limit: PAGE_SIZE, until_id: untilId }), [actorId, fetchFn]);
   const { items, setItems, hasMore, setHasMore, loadingMore, loadMore } = useCursorPagination<FollowListItem>(
@@ -52,12 +81,23 @@ export default function FollowListPanel({ actorId, kind, onError }: FollowListPa
 
   if (initialLoading) return <p className={panel.message}>{t("common:loading")}</p>;
 
+  // リモートで取得できた項目のうち、ローカルDBが既に把握している（=上のリストに出ている）
+  // アクターは重複表示しない。
+  const knownActorIds = new Set(items.map((i) => i.actor_id));
+  const extraItems = remoteExtra.filter((r) => !r.actor_id || !knownActorIds.has(r.actor_id));
+
   const emptyMessage =
     kind === "following" ? t("profile:profilePage.followList.noFollowing") : t("profile:profilePage.followList.noFollowers");
-  if (items.length === 0) return <p className={panel.message}>{emptyMessage}</p>;
+  const showLocalEmpty = items.length === 0;
+  const showRemoteSection = isRemoteFedi && remoteState !== "idle";
+
+  if (showLocalEmpty && !showRemoteSection) {
+    return <p className={panel.message}>{emptyMessage}</p>;
+  }
 
   return (
     <div className={styles.list}>
+      {showLocalEmpty && <p className={panel.message}>{emptyMessage}</p>}
       {items.map((item) => (
         <Link key={item.follow_id} to={profilePath(item.username, item.domain)} className={styles.row}>
           <Avatar url={item.avatar_url} name={item.display_name || item.username} size={40} />
@@ -73,6 +113,35 @@ export default function FollowListPanel({ actorId, kind, onError }: FollowListPa
       {hasMore && (
         <div ref={sentinelRef} className={styles.sentinel}>
           {loadingMore ? t("common:loading") : ""}
+        </div>
+      )}
+      {showRemoteSection && (
+        <div className={styles.remoteSection}>
+          <div className={styles.remoteSectionHeader}>{t("profile:profilePage.followList.remoteExtraHeader")}</div>
+          {remoteState === "loading" && <p className={panel.message}>{t("common:loading")}</p>}
+          {remoteState !== "loading" && extraItems.length === 0 && (
+            <p className={panel.message}>{t("profile:profilePage.followList.remoteExtraEmpty")}</p>
+          )}
+          {extraItems.map((item) =>
+            item.actor_id ? (
+              <Link key={item.uri} to={profilePath(item.handle, item.domain)} className={styles.row}>
+                <Avatar url={item.avatar_url} name={item.display_name || item.handle} size={40} />
+                <div className={styles.names}>
+                  <span className={styles.displayName}>{item.display_name || item.handle}</span>
+                  <span className={styles.acct}>@{item.handle}@{item.domain}</span>
+                </div>
+              </Link>
+            ) : (
+              <Link key={item.uri} to={profilePath(item.handle, item.domain)} className={styles.row}>
+                <Avatar url={undefined} name={item.handle} size={40} />
+                <div className={styles.names}>
+                  <span className={styles.displayName}>@{item.handle}</span>
+                  <span className={styles.acct}>@{item.handle}@{item.domain}</span>
+                </div>
+              </Link>
+            )
+          )}
+          {remoteState === "pending" && <p className={panel.message}>{t("profile:profilePage.followList.remoteExtraPending")}</p>}
         </div>
       )}
     </div>

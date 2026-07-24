@@ -190,6 +190,12 @@ pub enum Job {
     /// DM（`visibility='direct'`）投稿を、宛先の中のBskyアクターへ`chat.bsky.convo.sendMessage`
     /// で送信する。convoIdが`bsky_convo_links`に未キャッシュなら`getConvoForMembers`で先に解決する。
     BskyDmSend { post_id: i64 },
+
+    /// リモート Fedi アクターの followers/following OrderedCollection を全件取得し、
+    /// `remote_follow_snapshots` へキャッシュする（#68）。プロフィール表示時の短タイムアウト
+    /// 同期取得が失敗/タイムアウトした場合のフォールバックとして積まれる。
+    /// `direction` は `"following"` または `"followers"`。
+    RemoteFollowListSync { actor_id: i64, direction: String },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

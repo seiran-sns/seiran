@@ -25,7 +25,10 @@
     "followerCountLabel": "フォロワー",
     "followList": {
       "noFollowing": "フォロー中のユーザーがいません。",
-      "noFollowers": "フォロワーがいません。"
+      "noFollowers": "フォロワーがいません。",
+      "remoteExtraHeader": "Fediサーバー上で確認できるその他の関係",
+      "remoteExtraEmpty": "他に確認できる関係はありません。",
+      "remoteExtraPending": "取得中です。しばらくしてから再読み込みしてください。"
     },
     "actionsMenuTitle": "アカウント操作",
     "muteButton": "ミュート",

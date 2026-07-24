@@ -470,8 +470,12 @@ export default function ProfilePage() {
           loadingMore={loadingMore}
         />
       )}
-      {rightTab === 1 && <FollowListPanel actorId={profile.actor_id} kind="following" onError={onError} />}
-      {rightTab === 2 && <FollowListPanel actorId={profile.actor_id} kind="followers" onError={onError} />}
+      {rightTab === 1 && (
+        <FollowListPanel actorId={profile.actor_id} kind="following" onError={onError} isRemoteFedi={profile.actor_type === "fedi"} />
+      )}
+      {rightTab === 2 && (
+        <FollowListPanel actorId={profile.actor_id} kind="followers" onError={onError} isRemoteFedi={profile.actor_type === "fedi"} />
+      )}
     </>
   );
 

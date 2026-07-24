@@ -66,6 +66,13 @@ pub struct ApActor {
     /// 軽量実装）もあるため `Option`。
     #[serde(default)]
     pub featured: Option<String>,
+    /// フォロー中一覧の OrderedCollection URL（#68）。非公開設定にしている実装や
+    /// 未対応実装もあるため `Option`。
+    #[serde(default)]
+    pub following: Option<String>,
+    /// フォロワー一覧の OrderedCollection URL（#68）。`following` と同様の理由で `Option`。
+    #[serde(default)]
+    pub followers: Option<String>,
     #[serde(rename = "publicKey")]
     pub public_key: Option<PublicKeyInfo>,
     /// 表示名(`name`)・自己紹介(`summary`)中のカスタム絵文字タグ(`type:"Emoji"`)。

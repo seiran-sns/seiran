@@ -303,6 +303,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::BskyDmSend { post_id } => {
             jobs::bsky_dm_send::handle(post_id, ctx).await
         }
+        Job::RemoteFollowListSync { actor_id, direction } => {
+            jobs::remote_follow_list_sync::handle(actor_id, direction, ctx).await
+        }
     }
 }
 
@@ -320,6 +323,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::BskyPostCommitDeferred { .. } => "BskyPostCommitDeferred",
         Job::ResolveBskyMention { .. } => "ResolveBskyMention",
         Job::BskyDmSend { .. } => "BskyDmSend",
+        Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
     }
 }
 
@@ -389,6 +393,12 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 10,
             base_delay_ms: 5000,
             max_delay_ms: 3_600_000,
+        },
+        Job::RemoteFollowListSync { .. } => RetryConfig {
+            // ActorHistorySync と同様の軽量ベストエフォート同期。
+            max_attempts: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
         },
     }
 }

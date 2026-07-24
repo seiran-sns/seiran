@@ -52,6 +52,14 @@
 
 通常投稿（`PostToFollowers`、DM以外）は、上記フォロワーに加え**本文中でメンションした相手のinbox**もフォロー関係と無関係に配送先へ加える（`crates/seiran-common/src/ap/deliver.rs::fetch_inboxes_by_ap_uris`）。メンション先が既知（DB上に`actor_type='fedi'`の行がある）ならDBから、未知ならその場でアクタードキュメントを取得してinboxを解決する（DBへの保存は伴わない）。`to`にもメンション先のactor URIを含める（Mastodon等と同様の作法）。メンション先の取得に失敗した場合はそのメンション先だけをスキップし、他の配送は妨げない。
 
+### リモートFediアクターのフォロー中/フォロワー全件取得（#68）
+プロフィール画面で `GET /api/users/remote-follow-summary?actor_id=&direction=following|followers` を叩くと、`follows` テーブル（seiranが認知している関係のみ）とは独立に、相手のアクタードキュメントが持つ `following`/`followers` OrderedCollection URL（`ApActor.following`/`ApActor.followers`）へ直接問い合わせ、コレクション全体（`first`/`next` をページ辿り）を取得する（`seiran-common::ap::collection::fetch_ap_collection_uris`）。
+
+- 同期取得は3秒タイムアウト・最大500件のキャップ付き。成功すれば `remote_follow_snapshots` テーブル（`docs/database.md` 参照）へ丸ごと上書き保存しつつその場でレスポンスに含める。
+- タイムアウト・取得失敗（非公開設定を含む）の場合は、既存スナップショット（あれば）を返しつつ `Job::RemoteFollowListSync{actor_id, direction}`（優先度低）を積む。このジョブはキャップ5000件でバックグラウンド全件取得し、スナップショットを更新する。次回リロード時に反映される。
+- レスポンスの各アイテムはローカルDBに `ap_uri` が登録済みなら display_name/avatar_url 等を付与し、未登録の URI はハンドル文字列のみの簡易表示にする（全件のプロフィールを都度リモート取得すると負荷・レイテンシが過大なため）。
+- ローカルアクター・Bskyアクター（`ap_uri` を持たない）は対象外。Mastodon等はフォロー/フォロワー一覧をアカウント設定で非公開にできるため、HTTPエラーはエラー扱いにせず「非公開」として静かに空を返す。
+
 ### カスタム絵文字リアクションの送信（`EmojiReact`）
 ローカルユーザーがカスタム絵文字（`:shortcode:`）でリアクションすると、`build_reaction_object`（`ap/deliver.rs`）が Misskey/Fedibird 互換の `tag: [{"type":"Emoji","name":":shortcode:","icon":{"type":"Image","url":...}}]` を付与した `EmojiReact` を組み立てる。`content`/`_misskey_reaction` には `:shortcode:` 形式の文字列をそのまま載せる。受信側の `build_emoji_map`/`extract_emoji_tag_url`（`ap/client.rs`・`jobs/inbound_activity_process.rs`）と対称的なペアになっている。画像URLの解決は `EmojiRepository::find_url_by_shortcode`（`custom_emojis`/`media_files`/`storage_providers` を JOIN）で行い、未登録shortcodeは `INVALID_REACTION_CONTENT`/`UNKNOWN_EMOJI` として拒否する（`handlers/notes/validation.rs`・`handlers/notes/mod.rs::create_reaction`）。ATP（Bsky）はカスタム絵文字非対応のため、`commit_like` の `emoji` 拡張フィールドに `:shortcode:` 文字列をベストエフォートで載せるのみ（画像は送らない）。
 
