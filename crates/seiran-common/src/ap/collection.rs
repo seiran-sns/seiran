@@ -13,7 +13,12 @@ use super::client::ApClient;
 ///   ベストエフォートで「空 + `complete=false`」を返す
 ///   （Mastodon 等はフォロー/フォロワー一覧を非公開にできるため、これは異常系ではない）
 /// - 戻り値: `(取得できた URI 一覧, コレクション全体を取得しきれたか)`
-pub async fn fetch_ap_collection_uris(
+///
+/// `fetch_ap_collection_uris` の実処理。呼び出し元でまとめて結果をログするため、
+/// 早期returnはここに閉じ込め、外側の薄いラッパーで最終結果を1行にまとめてログする
+/// （マイケル指摘 #68: リモートのフォロー/フォロワーが表示されない不具合の調査のため、
+/// 呼び出しごとに実際どんなデータが返ってきたか追えるようにする）。
+async fn fetch_ap_collection_uris_inner(
     ap_client: &ApClient,
     collection_url: &str,
     max_items: usize,
@@ -48,6 +53,14 @@ pub async fn fetch_ap_collection_uris(
         }
     };
 
+    let total_items = collection.get("totalItems").and_then(|v| v.as_u64());
+    tracing::info!(
+        "[ApCollection] コレクション取得成功: type={:?} totalItems={:?} url={}",
+        collection.get("type").and_then(|v| v.as_str()),
+        total_items,
+        collection_url
+    );
+
     // items/orderedItems がコレクション直下にある（ページネーションなし）パターン
     if let Some(items) = collection
         .get("orderedItems")
@@ -69,11 +82,29 @@ pub async fn fetch_ap_collection_uris(
             page_val.get("next").and_then(|v| v.as_str()).map(|s| s.to_string())
         }
         // first も items も無い（空コレクション、あるいは未対応形式）
-        _ => return (uris, true),
+        None => {
+            tracing::info!(
+                "[ApCollection] first/items 共に無し（空コレクションまたは未対応形式）: totalItems={:?} url={}",
+                total_items, collection_url
+            );
+            return (uris, true);
+        }
+        Some(other) => {
+            tracing::warn!(
+                "[ApCollection] first が想定外の形式 ({}): url={}",
+                other, collection_url
+            );
+            return (uris, true);
+        }
     };
 
+    let mut page_count = 0u32;
     while let Some(url) = next_url {
         if uris.len() >= max_items {
+            tracing::info!(
+                "[ApCollection] 上限 {} 件に到達したため打ち切り: page={} url={}",
+                max_items, page_count, collection_url
+            );
             return (uris, false);
         }
 
@@ -101,7 +132,13 @@ pub async fn fetch_ap_collection_uris(
             }
         };
 
+        page_count += 1;
+        let before = uris.len();
         let hit_cap = process_page(&page, max_items, &mut uris);
+        tracing::debug!(
+            "[ApCollection] ページ{}件取得 (累計{}件): {}",
+            uris.len() - before, uris.len(), url
+        );
         if hit_cap {
             return (uris, false);
         }
@@ -109,6 +146,22 @@ pub async fn fetch_ap_collection_uris(
     }
 
     (uris, true)
+}
+
+/// コレクションを取得し、含まれる actor URI 一覧を返す（詳細な挙動は
+/// [`fetch_ap_collection_uris_inner`] を参照）。呼び出し結果を必ず1行のログに残す。
+pub async fn fetch_ap_collection_uris(
+    ap_client: &ApClient,
+    collection_url: &str,
+    max_items: usize,
+) -> (Vec<String>, bool) {
+    let start = std::time::Instant::now();
+    let (uris, complete) = fetch_ap_collection_uris_inner(ap_client, collection_url, max_items).await;
+    tracing::info!(
+        "[ApCollection] 呼び出し結果: {}件取得 complete={} 所要={:?} url={}",
+        uris.len(), complete, start.elapsed(), collection_url
+    );
+    (uris, complete)
 }
 
 /// ページ Value の items/orderedItems を処理して URI を追加する。

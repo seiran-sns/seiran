@@ -989,6 +989,7 @@ pub async fn user_remote_follow_summary(
     )
     .await;
 
+    let live_timed_out = live_result.is_err();
     if let Ok(Some((uris, complete))) = live_result {
         save_remote_follow_snapshot(&state.db, actor_id, &params.direction, &uris, complete).await;
         if !complete {
@@ -1016,13 +1017,25 @@ pub async fn user_remote_follow_summary(
 
     // 同期取得できなかった（タイムアウト/取得失敗/非公開設定等）
     // → 既存スナップショットを返しつつ、Workerでのバックグラウンド全件取得を積む。
+    let reason = if live_timed_out {
+        format!("{:?}以内に完了せずタイムアウト", REMOTE_FOLLOW_LIVE_TIMEOUT)
+    } else {
+        "アクタードキュメント取得失敗、または following/followers フィールド欠落".to_string()
+    };
+    tracing::info!(
+        "[remote_follow_summary] 同期ライブ取得不可（{}）のためWorkerへ委譲: actor_id={} direction={} ({})",
+        reason, actor_id, params.direction, ap_uri
+    );
     state.enqueue_remote_follow_list_sync(actor_id, params.direction.clone()).await;
 
     let (uris, complete, fetched_at) =
         load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
     let (items, unknown_uris) = resolve_remote_follow_items(&state.db, &uris).await;
     enqueue_unknown_actor_resolves(&state, unknown_uris).await;
-    Json(RemoteFollowSummaryResponse { items, complete, pending: true, fetched_at }).into_response()
+    // 既存スナップショットが complete=true（全件取得済み）なら、上で積んだWorkerジョブは
+    // 単なる裏側の再確認に過ぎず、フロントに「まだ取得中」と伝える必要はない。
+    // 以前は無条件で true を返しており、全件取得済みでも延々と pending 表示が続くバグがあった。
+    Json(RemoteFollowSummaryResponse { items, complete, pending: !complete, fetched_at }).into_response()
 }
 
 /// 未知アクター（ローカルDB未登録）のURI一覧について、それぞれ `RemoteActorResolve`
