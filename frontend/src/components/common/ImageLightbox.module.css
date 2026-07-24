@@ -1,0 +1,53 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 26, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 200;
+  cursor: zoom-out;
+  animation: fade 0.12s ease-out;
+}
+
+.image {
+  /* 添付画像の最大アップロードサイズ(2048px)はRetina(2倍密度)表示を見込んだサイズのため、
+     ライトボックスの最大表示サイズはCSS上でその半分(1024px)とする。小さい画像を
+     引き伸ばさないよう width/height は auto のままにし、ビューポートが1024pxより
+     狭い場合はそちらに合わせて縮小する。 */
+  max-width: min(1024px, calc(100vw - 48px));
+  max-height: min(1024px, calc(100vh - 48px));
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  cursor: default;
+  animation: pop 0.14s ease-out;
+}
+
+.close {
+  position: fixed;
+  top: 16px;
+  right: 24px;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.close:hover {
+  opacity: 0.75;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
