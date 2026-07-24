@@ -17,6 +17,8 @@ use tower::ServiceExt;
 
 use support::{authed_json_request, body_json, login_test_user, test_router};
 
+use seiran_common::get_db_pool;
+
 /// 投稿作成 → 取得の往復が一致することを確認する。
 /// `deliver_to_fedi`/`deliver_to_bsky` を `false` にして実際の連合配送・ATP コミットを
 /// 起こさない（enqueue はされるがテストプロセスに Worker はいないため実害はない）。
@@ -94,4 +96,64 @@ async fn get_note_not_found_returns_json_404() {
 
     let json = body_json(res).await;
     assert!(json["code"].is_string(), "ApiError の JSON ボディでなければならない: {:?}", json);
+}
+
+/// リポストの `GET /api/notes/:id` レスポンスで、埋め込まれた元ポスト（`renote`）の
+/// `emojis` マップが失われないことの回帰テスト（#77）。`embed_renotes`（`queries.rs`）の
+/// SELECT文が `emoji_map` を取得していなかったため、リポスト経由で見る本文中の
+/// カスタム絵文字ショートコードが画像化されず「展開されなくなった」ように見えるバグがあった。
+#[tokio::test]
+#[ignore = "実DB（DATABASE_URL）と既存の seiran1 ユーザーが必要"]
+async fn embed_renotes_preserves_original_post_emoji_map() {
+    let app = test_router().await;
+    let token = login_test_user(&app, "seiran1").await;
+
+    let text = format!("絵文字埋め込みテスト元投稿 {}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+    let create_req = authed_json_request(
+        "POST",
+        "/api/notes/create",
+        &token,
+        serde_json::json!({ "text": text, "deliver_to_fedi": false, "deliver_to_bsky": false }),
+    );
+    let create_res = app.clone().oneshot(create_req).await.unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let original = body_json(create_res).await;
+    let original_id: i64 = original["id"].as_str().unwrap().parse().unwrap();
+
+    // Fedi受信時にのみ書き込まれる`emoji_map`（本テストでは受信フローを再現せず直接設定する）。
+    let pool = get_db_pool().await.expect("DB接続に失敗");
+    sqlx::query("UPDATE posts SET emoji_map = $1 WHERE id = $2")
+        .bind(serde_json::json!({":test_emoji:": "https://example.com/test.png"}))
+        .bind(original_id)
+        .execute(&pool)
+        .await
+        .expect("emoji_map更新に失敗");
+
+    let repost_req = authed_json_request(
+        "POST",
+        "/api/notes/create",
+        &token,
+        serde_json::json!({ "renote_id": original_id.to_string(), "deliver_to_fedi": false, "deliver_to_bsky": false }),
+    );
+    let repost_res = app.clone().oneshot(repost_req).await.unwrap();
+    assert_eq!(repost_res.status(), StatusCode::OK);
+    let repost = body_json(repost_res).await;
+    let repost_id = repost["id"].as_str().unwrap().to_string();
+
+    let get_req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/notes/{}", repost_id))
+        .header("authorization", format!("Bearer {}", token))
+        .body(Body::empty())
+        .unwrap();
+    let get_res = app.oneshot(get_req).await.unwrap();
+    assert_eq!(get_res.status(), StatusCode::OK);
+    let fetched = body_json(get_res).await;
+
+    assert_eq!(
+        fetched["renote"]["emojis"][":test_emoji:"],
+        "https://example.com/test.png",
+        "埋め込まれた元ポストのemojisマップが失われている: {:?}",
+        fetched["renote"]
+    );
 }
