@@ -714,6 +714,22 @@ export const api = {
       const rows = await request<RawNote[]>("GET", `/notes/home-timeline${qs ? `?${qs}` : ""}`);
       return rows.map(normalizeNote);
     },
+    /** ソーシャルタイムライン（自分 + フォロー中 + ローカル全体、#78）。 */
+    async socialTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
+      const q = cursorParams(params);
+      if (params?.exclude_direct) q.set("exclude_direct", "true");
+      const qs = q.toString();
+      const rows = await request<RawNote[]>("GET", `/notes/social-timeline${qs ? `?${qs}` : ""}`);
+      return rows.map(normalizeNote);
+    },
+    /** グローバルタイムライン（postsテーブルの全投稿、#78）。 */
+    async globalTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
+      const q = cursorParams(params);
+      if (params?.exclude_direct) q.set("exclude_direct", "true");
+      const qs = q.toString();
+      const rows = await request<RawNote[]>("GET", `/notes/global-timeline${qs ? `?${qs}` : ""}`);
+      return rows.map(normalizeNote);
+    },
     async context(id: string): Promise<{ before: Note[]; after: Note[] }> {
       const raw = await request<{ before: RawNote[]; after: RawNote[] }>(
         "GET",

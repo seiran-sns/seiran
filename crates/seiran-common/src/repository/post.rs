@@ -208,6 +208,28 @@ pub trait PostRepository: Send + Sync {
         exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
+    /// ソーシャルタイムライン（自分 + フォロー中 + ローカル全アクターの投稿、リプライ含む、#78）を取得する。
+    /// `home_timeline`（自分+フォロー中のみ）と`local_timeline`（ローカル全体のみ）を合成した形。
+    async fn social_timeline(
+        &self,
+        actor_id: i64,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+        exclude_direct: bool,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
+
+    /// グローバルタイムライン（`posts`テーブルに入ってきた全投稿、リプライ含む、#78）を取得する。
+    /// `local_timeline`から`is_local`条件を外したもの。
+    async fn global_timeline(
+        &self,
+        viewer_actor_id: Option<i64>,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+        exclude_direct: bool,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
+
     /// 指定アクターの最近の投稿を取得する（プロフィール要約用の軽量版）。
     async fn recent_by_actor(
         &self,
@@ -493,6 +515,148 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.is_local = true AND p.deleted_at IS NULL
+               AND ($2::bigint IS NULL OR p.id < $2)
+               AND ($3::bigint IS NULL OR p.id > $3)
+               AND (p.visibility != 'unlisted' OR p.actor_id = $1)
+               AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
+               AND (
+                   p.visibility NOT IN ('followers_only', 'direct')
+                   OR (p.visibility = 'followers_only' AND (
+                       p.actor_id = $1
+                       OR EXISTS (
+                           SELECT 1 FROM follows f
+                           WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                       )
+                   ))
+                   OR (p.visibility = 'direct' AND NOT $5 AND (
+                       p.actor_id = $1
+                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
+                   ))
+               )
+             ORDER BY p.id DESC LIMIT $4",
+        )
+        .bind(viewer_actor_id)
+        .bind(until_id)
+        .bind(since_id)
+        .bind(limit)
+        .bind(exclude_direct)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn social_timeline(
+        &self,
+        actor_id: i64,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+        exclude_direct: bool,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        // home_timeline（自分+フォロー中、LATERAL方式）とlocal_timeline（ローカル全体、
+        // is_localインデックス使用）の候補IDをUNIONしてから外側で再度LIMITする。
+        // 片方のみのLATERAL/インデックス最適化をそのまま活かせる（#78）。
+        sqlx::query_as::<_, TimelinePost>(
+            "WITH targets AS (
+                 SELECT $1::bigint AS actor_id
+                 UNION
+                 SELECT target_actor_id FROM follows
+                 WHERE follower_actor_id = $1 AND status = 'accepted'
+                   AND NOT actor_is_hidden_for_viewer($1, target_actor_id)
+             ),
+             candidate_ids AS (
+                 (
+                     SELECT p.id
+                     FROM targets t
+                     CROSS JOIN LATERAL (
+                         SELECT id FROM posts p
+                         WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
+                           AND ($2::bigint IS NULL OR p.id < $2)
+                           AND ($3::bigint IS NULL OR p.id > $3)
+                           AND (
+                               p.visibility NOT IN ('followers_only', 'direct')
+                               OR (p.visibility = 'followers_only' AND (
+                                   p.actor_id = $1
+                                   OR EXISTS (
+                                       SELECT 1 FROM follows f
+                                       WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                                   )
+                               ))
+                               OR (p.visibility = 'direct' AND NOT $5 AND (
+                                   p.actor_id = $1
+                                   OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
+                               ))
+                           )
+                         ORDER BY p.id DESC LIMIT $4
+                     ) p
+                 )
+
+                 UNION
+
+                 (
+                     SELECT p.id
+                     FROM posts p
+                     WHERE p.is_local = true AND p.deleted_at IS NULL
+                       AND ($2::bigint IS NULL OR p.id < $2)
+                       AND ($3::bigint IS NULL OR p.id > $3)
+                       AND (p.visibility != 'unlisted' OR p.actor_id = $1)
+                       AND (p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
+                       AND (
+                           p.visibility NOT IN ('followers_only', 'direct')
+                           OR (p.visibility = 'followers_only' AND (
+                               p.actor_id = $1
+                               OR EXISTS (
+                                   SELECT 1 FROM follows f
+                                   WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
+                               )
+                           ))
+                           OR (p.visibility = 'direct' AND NOT $5 AND (
+                               p.actor_id = $1
+                               OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
+                           ))
+                       )
+                     ORDER BY p.id DESC LIMIT $4
+                 )
+             )
+             SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
+             FROM candidate_ids ci
+             JOIN posts p ON p.id = ci.id
+             JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             ORDER BY p.id DESC LIMIT $4",
+        )
+        .bind(actor_id)
+        .bind(until_id)
+        .bind(since_id)
+        .bind(limit)
+        .bind(exclude_direct)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn global_timeline(
+        &self,
+        viewer_actor_id: Option<i64>,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+        exclude_direct: bool,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        // local_timeline から `is_local = true` 条件のみを外したもの（#78）。
+        sqlx::query_as::<_, TimelinePost>(
+            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets
+             FROM posts p JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             WHERE p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
                AND (p.visibility != 'unlisted' OR p.actor_id = $1)

@@ -7,7 +7,13 @@ import type { Note } from "../api/client";
  * `<Routes>` の外側に置くことで、他ページへ遷移してブラウザバック等で戻ってきても
  * タブ選択・一覧・スクロール位置がリセットされない。
  */
-export type Feed = { kind: "home" } | { kind: "local" } | { kind: "list"; id: string } | { kind: "hashtag"; name: string };
+export type Feed =
+  | { kind: "home" }
+  | { kind: "local" }
+  | { kind: "social" }
+  | { kind: "global" }
+  | { kind: "list"; id: string }
+  | { kind: "hashtag"; name: string };
 
 export function feedKey(feed: Feed): string {
   return feed.kind === "list" ? `list:${feed.id}` : feed.kind === "hashtag" ? `hashtag:${feed.name}` : feed.kind;

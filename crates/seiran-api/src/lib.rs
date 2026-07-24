@@ -411,6 +411,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))
         .route("/api/notes/home-timeline", get(handlers::notes::home_timeline))
+        .route("/api/notes/social-timeline", get(handlers::notes::social_timeline))
+        // Misskeyクライアント（Aria等）は`/api/notes/global-timeline`をPOSTで叩く（#78）。GET/POST共存。
+        .route("/api/notes/global-timeline", get(handlers::notes::global_timeline).post(handlers::misskey::endpoints::notes_global_timeline))
         // Misskey 互換エイリアス
         .route("/api/notes/timeline", get(handlers::notes::home_timeline))
         .route("/api/notes/search", get(handlers::search::search_notes))
@@ -483,6 +486,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/show", post(handlers::misskey::endpoints::notes_show))
         .route("/api/notes/local-timeline", post(handlers::misskey::endpoints::notes_local_timeline))
         .route("/api/notes/timeline", post(handlers::misskey::endpoints::notes_home_timeline))
+        .route("/api/notes/hybrid-timeline", post(handlers::misskey::endpoints::notes_hybrid_timeline))
         .route("/api/notes/reactions/create", post(handlers::misskey::endpoints::reactions_create))
         .route("/api/notes/reactions/delete", post(handlers::misskey::endpoints::reactions_delete))
         .route("/api/notes/unrenote", post(handlers::misskey::endpoints::notes_unrenote))

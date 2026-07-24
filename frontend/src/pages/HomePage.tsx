@@ -28,6 +28,10 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
     ? api.notes.homeTimeline({ ...params, exclude_direct: true })
     : feed.kind === "local"
     ? api.notes.localTimeline({ ...params, exclude_direct: true })
+    : feed.kind === "social"
+    ? api.notes.socialTimeline({ ...params, exclude_direct: true })
+    : feed.kind === "global"
+    ? api.notes.globalTimeline({ ...params, exclude_direct: true })
     : feed.kind === "list"
     ? api.lists.timeline(feed.id, params)
     : api.hashtags.timeline(feed.name, params);
@@ -56,6 +60,8 @@ export default function HomePage() {
     return [
       { kind: "home" },
       { kind: "local" },
+      { kind: "social" },
+      { kind: "global" },
       ...lists.map((l) => ({ kind: "list" as const, id: l.id })),
       ...pinnedHashtags.map((h) => ({ kind: "hashtag" as const, name: h.name })),
     ];
@@ -261,6 +267,18 @@ export default function HomePage() {
         >
           {t("home:homePage.localTab")}
         </button>
+        <button
+          className={`${styles.feedTab} ${feed.kind === "social" ? styles.feedTabActive : ""}`}
+          onClick={() => setFeed({ kind: "social" })}
+        >
+          {t("home:homePage.socialTab")}
+        </button>
+        <button
+          className={`${styles.feedTab} ${feed.kind === "global" ? styles.feedTabActive : ""}`}
+          onClick={() => setFeed({ kind: "global" })}
+        >
+          {t("home:homePage.globalTab")}
+        </button>
         {lists.map((l) => (
           <button
             key={l.id}
@@ -296,6 +314,10 @@ export default function HomePage() {
             ? t("home:homePage.emptyHome")
             : feed.kind === "local"
             ? t("home:homePage.emptyLocal")
+            : feed.kind === "social"
+            ? t("home:homePage.emptySocial")
+            : feed.kind === "global"
+            ? t("home:homePage.emptyGlobal")
             : feed.kind === "hashtag"
             ? t("hashtag:hashtagPage.empty")
             : t("home:homePage.emptyList")
