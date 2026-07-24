@@ -27,3 +27,12 @@
   border-bottom-color: var(--accent);
   font-weight: 700;
 }
+
+/* オプトイン: 画面上部（直上のsticky headerの下端）に張り付けたい呼び出し元用。
+   topはコンポーネント側からインラインstyleで渡される（headerの実高さ）。 */
+.sticky {
+  position: sticky;
+  z-index: 4;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+}
