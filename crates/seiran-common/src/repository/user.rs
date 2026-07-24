@@ -47,6 +47,9 @@ pub trait UserRepository: Send + Sync {
     /// パスワードハッシュを更新する。
     async fn update_password_hash(&self, user_id: i64, password_hash: &str) -> Result<(), sqlx::Error>;
 
+    /// メールアドレスを更新する（設定画面からのメールアドレス変更確定用）。
+    async fn update_email(&self, user_id: i64, email: &str) -> Result<(), sqlx::Error>;
+
     /// 管理画面のユーザー一覧を返す（先頭100件、ID昇順）。
     async fn list_for_admin(&self) -> Result<Vec<AdminUserRow>, sqlx::Error>;
 
@@ -150,6 +153,15 @@ impl UserRepository for PgUserRepository {
     async fn update_password_hash(&self, user_id: i64, password_hash: &str) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
             .bind(password_hash)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn update_email(&self, user_id: i64, email: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2")
+            .bind(email)
             .bind(user_id)
             .execute(&self.pool)
             .await

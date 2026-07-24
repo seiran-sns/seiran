@@ -993,6 +993,14 @@ export const api = {
     updateLanguage(language: string | null) {
       return request<void>("POST", "/account/language", { language });
     },
+    /** 設定画面のアカウント設定からメールアドレス変更をリクエストする（#59、新アドレス宛に確認メール送信）。 */
+    requestEmailChange(newEmail: string) {
+      return request<void>("POST", "/account/email/request-change", { new_email: newEmail });
+    },
+    /** 確認メールのリンク（`/verify-email-change?token=...`）を踏んだ際にトークンを確定する（#59）。 */
+    confirmEmailChange(token: string) {
+      return request<void>("POST", "/account/email/confirm-change", { token });
+    },
   },
 
   miauth: {
