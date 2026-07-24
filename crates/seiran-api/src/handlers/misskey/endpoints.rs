@@ -20,8 +20,8 @@ use crate::handlers::notes::ReactRequest;
 use crate::middleware::{extract_auth, AuthedUser};
 use crate::AppState;
 
-use super::convert::{build_me_detailed, build_note, build_notes, build_notifications, build_user_detailed};
-use super::types::{MisskeyMeDetailed, MisskeyNote, MisskeyNotification, MisskeyUserDetailed};
+use super::convert::{build_me_detailed, build_note, build_notes, build_notifications, build_user_detailed, user_lite};
+use super::types::{MisskeyFollowRelation, MisskeyMeDetailed, MisskeyNote, MisskeyNoteReaction, MisskeyNotification, MisskeyUserDetailed};
 
 // ─── リクエストDTO（Misskey 本家の camelCase フィールド名に合わせる） ──────────
 
@@ -67,6 +67,28 @@ pub struct UsersNotesBody {
 #[serde(rename_all = "camelCase")]
 pub struct FollowingBody {
     pub user_id: String,
+}
+
+/// `POST /api/users/following`・`POST /api/users/followers` 共通のリクエストボディ（#81）。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserRelationBody {
+    pub user_id: String,
+    pub limit: Option<i64>,
+    pub since_id: Option<String>,
+    pub until_id: Option<String>,
+}
+
+/// `POST /api/notes/reactions` のリクエストボディ（#81）。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotesReactionsBody {
+    pub note_id: String,
+    /// 本家 Misskey は省略可能（全種別対象）だが、seiran側の集計実装は単一絵文字指定が
+    /// 前提のため、省略時は空配列を返す（`notes_reactions` 内のコメント参照）。
+    #[serde(rename = "type")]
+    pub reaction_type: Option<String>,
+    pub limit: Option<i64>,
 }
 
 fn default_true() -> bool {
@@ -410,4 +432,109 @@ pub async fn following_delete(headers: HeaderMap, State(state): State<AppState>,
         .await
         .into_response();
     as_no_content(resp)
+}
+
+/// POST /api/users/following — 指定ユーザーのフォロー中一覧（Misskey互換、#81）。
+/// カスタムAPI `GET /api/users/following`（`handlers::users::user_following`）と同じ
+/// `list_following` を使い、Misskey本家の `Following` エンティティ形状に変換する。
+pub async fn users_following(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<UserRelationBody>,
+) -> Result<Json<Vec<MisskeyFollowRelation>>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let actor_id: i64 = body.user_id.parse().map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+    let limit = body.limit.unwrap_or(10).clamp(1, 100);
+    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = state
+        .follows
+        .list_following(actor_id, my_actor_id, limit, until_id, since_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| MisskeyFollowRelation {
+                id: r.follow_id.to_string(),
+                created_at: r.created_at.to_rfc3339(),
+                followee: Some(user_lite(r.actor_id, &r.username, &r.domain, &state.local_domain, r.display_name.as_deref(), r.avatar_url.as_deref())),
+                follower: None,
+            })
+            .collect(),
+    ))
+}
+
+/// POST /api/users/followers — 指定ユーザーのフォロワー一覧（Misskey互換、#81）。`users_following` と対。
+pub async fn users_followers(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<UserRelationBody>,
+) -> Result<Json<Vec<MisskeyFollowRelation>>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let actor_id: i64 = body.user_id.parse().map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+    let limit = body.limit.unwrap_or(10).clamp(1, 100);
+    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = state
+        .follows
+        .list_followers(actor_id, my_actor_id, limit, until_id, since_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| MisskeyFollowRelation {
+                id: r.follow_id.to_string(),
+                created_at: r.created_at.to_rfc3339(),
+                followee: None,
+                follower: Some(user_lite(r.actor_id, &r.username, &r.domain, &state.local_domain, r.display_name.as_deref(), r.avatar_url.as_deref())),
+            })
+            .collect(),
+    ))
+}
+
+/// POST /api/notes/reactions — 指定リアクション種別を付けたユーザー一覧（Misskey互換、#81）。
+/// Ariaで絵文字リアクションを長押しした際に呼ばれる。カスタムAPI
+/// `GET /api/notes/:id/reactions/:content/actors`（`handlers::notes::reaction_actors`）と
+/// 同じ `actors_for_reaction` を使う。投稿の可視性チェックも同様。
+pub async fn notes_reactions(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<NotesReactionsBody>,
+) -> Result<Json<Vec<MisskeyNoteReaction>>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let note_id: i64 = body.note_id.parse().map_err(|_| ApiError::NotFound("NOTE_NOT_FOUND"))?;
+
+    state
+        .posts
+        .find_by_id_for_viewer(note_id, my_actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
+
+    let Some(reaction_type) = body.reaction_type else {
+        return Ok(Json(vec![]));
+    };
+    let limit = body.limit.unwrap_or(10).clamp(1, 100);
+
+    let actors = state
+        .reactions
+        .actors_for_reaction(note_id, &reaction_type, limit)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(
+        actors
+            .into_iter()
+            .map(|a| MisskeyNoteReaction {
+                id: a.reaction_id.to_string(),
+                created_at: a.reaction_created_at.to_rfc3339(),
+                user: user_lite(a.id, &a.username, &a.domain, &state.local_domain, a.display_name.as_deref(), a.avatar_url.as_deref()),
+                kind: reaction_type.clone(),
+            })
+            .collect(),
+    ))
 }

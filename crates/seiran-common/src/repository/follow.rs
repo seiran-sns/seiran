@@ -11,6 +11,8 @@ pub struct FollowListRow {
     pub domain: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
+    /// Misskey互換API（`POST /api/users/following`・`followers`）の`createdAt`用。
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[async_trait]
@@ -286,7 +288,8 @@ impl FollowRepository for PgFollowRepository {
     ) -> Result<Vec<FollowListRow>, sqlx::Error> {
         sqlx::query_as::<_, FollowListRow>(
             "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
-                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url
+                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
+                    f.created_at
              FROM follows f
              JOIN actors a ON a.id = f.target_actor_id
              LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
@@ -317,7 +320,8 @@ impl FollowRepository for PgFollowRepository {
     ) -> Result<Vec<FollowListRow>, sqlx::Error> {
         sqlx::query_as::<_, FollowListRow>(
             "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
-                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url
+                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
+                    f.created_at
              FROM follows f
              JOIN actors a ON a.id = f.follower_actor_id
              LEFT JOIN media_files mf ON mf.id = a.avatar_media_id

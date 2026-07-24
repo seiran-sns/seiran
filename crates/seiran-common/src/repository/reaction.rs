@@ -9,6 +9,9 @@ pub struct ReactorInfo {
     pub domain: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
+    /// Misskey互換API（`POST /api/notes/reactions`）の`id`/`createdAt`用（`reactions.id`/`created_at`）。
+    pub reaction_id: i64,
+    pub reaction_created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[async_trait]
@@ -206,7 +209,8 @@ impl ReactionRepository for PgReactionRepository {
     async fn actors_for_reaction(&self, post_id: i64, content: &str, limit: i64) -> Result<Vec<ReactorInfo>, sqlx::Error> {
         sqlx::query_as::<_, ReactorInfo>(
             "SELECT a.id, a.username, a.domain, a.display_name,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    r.id AS reaction_id, r.created_at AS reaction_created_at
              FROM reactions r
              JOIN actors a ON a.id = r.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id

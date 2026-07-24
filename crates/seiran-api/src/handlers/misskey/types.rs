@@ -165,6 +165,33 @@ pub struct MisskeyNotification {
     pub reaction: Option<String>,
 }
 
+/// `POST /api/users/following`（フォロー中一覧）の要素。Misskey 本家の `Following` エンティティ
+/// に合わせる（`followee`）。`POST /api/users/followers`（`follower`）と共通の形にするため
+/// `subject` という名前で持ち、`endpoints.rs` 側でシリアライズ直前に `followee`/`follower` の
+/// どちらのキー名で出すかを切り替える（`#[serde(flatten)]` ではキー名を動的にできないため）。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyFollowRelation {
+    pub id: String,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followee: Option<MisskeyUserLite>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follower: Option<MisskeyUserLite>,
+}
+
+/// `POST /api/notes/reactions`（リアクションしたユーザー一覧）の要素。Misskey 本家の
+/// `NoteReaction` エンティティに合わせる。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyNoteReaction {
+    pub id: String,
+    pub created_at: String,
+    pub user: MisskeyUserLite,
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
