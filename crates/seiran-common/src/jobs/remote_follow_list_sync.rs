@@ -85,10 +85,16 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
     let actor_uris_json = serde_json::to_value(&uris).map_err(|e| format!("JSON変換失敗: {}", e))?;
 
     sqlx::query(
+        // 非後退更新: `handlers::users::save_remote_follow_snapshot`（同期フェッチ側）と
+        // 同じ規約。件数が既存以上の場合のみ上書きする。
         "INSERT INTO remote_follow_snapshots (actor_id, direction, actor_uris, complete, fetched_at)
          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-         ON CONFLICT (actor_id, direction)
-         DO UPDATE SET actor_uris = EXCLUDED.actor_uris, complete = EXCLUDED.complete, fetched_at = CURRENT_TIMESTAMP",
+         ON CONFLICT (actor_id, direction) DO UPDATE SET
+             actor_uris = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
+                 THEN EXCLUDED.actor_uris ELSE remote_follow_snapshots.actor_uris END,
+             complete = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
+                 THEN EXCLUDED.complete ELSE remote_follow_snapshots.complete END,
+             fetched_at = CURRENT_TIMESTAMP",
     )
     .bind(actor_id)
     .bind(&direction)

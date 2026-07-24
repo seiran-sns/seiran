@@ -991,12 +991,24 @@ pub async fn user_remote_follow_summary(
 
     if let Ok(Some((uris, complete))) = live_result {
         save_remote_follow_snapshot(&state.db, actor_id, &params.direction, &uris, complete).await;
-        let items = resolve_remote_follow_items(&state.db, &uris).await;
+        if !complete {
+            // 同期フェッチの上限（500件）に達しただけで失敗はしていない場合も、より大きい
+            // 上限（5000件）でのバックグラウンド全件取得を積む。次回訪問時のライブ取得が
+            // 常に同じ500件で上書きし続け、Workerが取得したより完全なスナップショットを
+            // 巻き戻してしまわないよう、保存は非後退（件数が減る更新は無視）にしてある
+            // （`save_remote_follow_snapshot` のON CONFLICT句参照）。
+            state.enqueue_remote_follow_list_sync(actor_id, params.direction.clone()).await;
+        }
+        // 直近の同期フェッチ結果ではなく、非後退保存後のDB上の最善スナップショットを返す
+        // （過去にWorkerがより多く取得済みなら、それを優先して見せる）。
+        let (best_uris, best_complete, fetched_at) =
+            load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
+        let items = resolve_remote_follow_items(&state.db, &best_uris).await;
         return Json(RemoteFollowSummaryResponse {
             items,
-            complete,
-            pending: false,
-            fetched_at: Some(chrono::Utc::now()),
+            complete: best_complete,
+            pending: !best_complete,
+            fetched_at,
         })
         .into_response();
     }
@@ -1041,11 +1053,18 @@ async fn save_remote_follow_snapshot(
             return;
         }
     };
+    // 非後退更新: 新しい結果の件数が既存スナップショット以上の場合のみ actor_uris/complete を
+    // 上書きする。同期フェッチ（上限500件）はWorker（上限5000件）より少ない可能性が高く、
+    // 無条件上書きだとWorkerが積み上げた、より完全なスナップショットを毎回巻き戻してしまうため。
     if let Err(e) = sqlx::query(
         "INSERT INTO remote_follow_snapshots (actor_id, direction, actor_uris, complete, fetched_at)
          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-         ON CONFLICT (actor_id, direction)
-         DO UPDATE SET actor_uris = EXCLUDED.actor_uris, complete = EXCLUDED.complete, fetched_at = CURRENT_TIMESTAMP",
+         ON CONFLICT (actor_id, direction) DO UPDATE SET
+             actor_uris = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
+                 THEN EXCLUDED.actor_uris ELSE remote_follow_snapshots.actor_uris END,
+             complete = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
+                 THEN EXCLUDED.complete ELSE remote_follow_snapshots.complete END,
+             fetched_at = CURRENT_TIMESTAMP",
     )
     .bind(actor_id)
     .bind(direction)
