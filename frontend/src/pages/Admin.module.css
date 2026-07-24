@@ -2,6 +2,11 @@
   padding: 16px;
 }
 
+.swipeContainer {
+  touch-action: pan-y;
+  min-height: 100%;
+}
+
 .sectionTitle {
   font-size: 0.95rem;
   font-weight: 800;
