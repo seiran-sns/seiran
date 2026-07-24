@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { NoteAttachment } from "../../api/client";
 import HlsVideo from "./HlsVideo";
+import ImageLightbox from "../common/ImageLightbox";
 import styles from "./NoteCard.module.css";
 
 interface NoteAttachmentsProps {
@@ -8,6 +10,8 @@ interface NoteAttachmentsProps {
 
 /** 投稿に添付されたメディア（画像/動画/HLS/音声）一覧の表示。 */
 export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
   if (!attachments || attachments.length === 0) return null;
 
   return (
@@ -38,17 +42,20 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
           );
         }
         return (
-          <a
+          <img
             key={i}
-            href={att.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <img src={att.url} alt="" className={styles.attachImage} loading="lazy" />
-          </a>
+            src={att.url}
+            alt=""
+            className={styles.attachImage}
+            loading="lazy"
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxSrc(att.url);
+            }}
+          />
         );
       })}
+      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
     </div>
   );
 }
