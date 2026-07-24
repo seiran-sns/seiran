@@ -25,11 +25,14 @@
     "categoryLabel": "Category (optional)",
     "tagsLabel": "Tags (optional, space or comma separated. Used for partial matches in the picker)",
     "tagsPlaceholder": "cat cute blob-cat",
+    "licenseLabel": "License (optional, single line)",
+    "licensePlaceholder": "CC BY 4.0 by ...",
     "creating": "Adding...",
     "addButton": "Add emoji",
     "emptyMessage": "No custom emojis yet.",
     "editTagsPlaceholder": "Space or comma separated",
-    "editTagsButton": "Edit tags",
+    "editLicensePlaceholder": "License (optional, single line)",
+    "editButton": "Edit",
     "deleteConfirm": "Delete the emoji :{{shortcode}}:?"
   },
   "siteSettingsPanel": {

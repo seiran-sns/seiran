@@ -196,6 +196,8 @@ export interface CustomEmoji {
   category: string | null;
   /** タグ（#49）。ピッカーの部分一致対象。 */
   tags: string[];
+  /** ライセンス情報（#63）。1行テキスト、任意項目。 */
+  license: string | null;
   created_at: string;
   /** 画像プレビュー用 URL。`listEmojis` のみ解決済み、`createEmoji` の直後レスポンスは null。 */
   url: string | null;
@@ -879,10 +881,10 @@ export const api = {
     listEmojis() {
       return request<CustomEmoji[]>("GET", "/admin/emojis");
     },
-    createEmoji(body: { shortcode: string; media_file_id: string; category?: string; tags?: string[] }) {
+    createEmoji(body: { shortcode: string; media_file_id: string; category?: string; tags?: string[]; license?: string }) {
       return request<CustomEmoji>("POST", "/admin/emojis", body);
     },
-    updateEmoji(id: string, body: { category?: string; tags?: string[] }) {
+    updateEmoji(id: string, body: { category?: string; tags?: string[]; license?: string }) {
       return request<CustomEmoji>("PATCH", `/admin/emojis/${encodeURIComponent(id)}`, body);
     },
     deleteEmoji(id: string) {

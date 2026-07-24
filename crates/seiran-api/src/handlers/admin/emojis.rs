@@ -23,6 +23,8 @@ pub struct EmojiResponse {
     pub category: Option<String>,
     /// タグ（#49）。ピッカーの部分一致対象。
     pub tags: Vec<String>,
+    /// ライセンス情報（#63）。1行テキスト、任意項目。
+    pub license: Option<String>,
     pub created_at: DateTime<Utc>,
     /// 画像プレビュー用 URL。`list_emojis` のみ解決済み、`create_emoji` の直後レスポンスは
     /// `None`（呼び出し元は登録後に一覧を再取得するため実害はない）。
@@ -37,6 +39,7 @@ impl From<EmojiRow> for EmojiResponse {
             media_file_id: r.media_file_id.to_string(),
             category: r.category,
             tags: r.tags,
+            license: r.license,
             created_at: r.created_at,
             url: r.url,
         }
@@ -53,6 +56,8 @@ pub struct CreateEmojiRequest {
     pub category: Option<String>,
     /// タグ（#49）。省略時は空。
     pub tags: Option<Vec<String>>,
+    /// ライセンス情報（#63）。1行テキスト、任意項目。
+    pub license: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -60,6 +65,16 @@ pub struct UpdateEmojiRequest {
     /// いずれも省略時は現在値を保持する。
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub license: Option<String>,
+}
+
+/// ライセンス情報を正規化する（#63）。トリムし、改行を含む場合は不正として弾く（1行テキストの要件）。
+fn normalize_license(license: &str) -> Result<String, ApiError> {
+    let trimmed = license.trim();
+    if trimmed.contains(['\n', '\r']) {
+        return Err(ApiError::BadRequest("INVALID_LICENSE".to_owned()));
+    }
+    Ok(trimmed.to_string())
 }
 
 /// タグを正規化する（#49）。
@@ -136,18 +151,29 @@ pub async fn create_emoji(
         .map_err(|_| ApiError::BadRequest("INVALID_MEDIA_FILE_ID".to_owned()))?;
 
     let tags = normalize_tags(req.tags.as_deref().unwrap_or(&[]))?;
+    let license = match req.license {
+        Some(ref l) => Some(normalize_license(l)?),
+        None => None,
+    };
     let id = generate_snowflake_id(Utc::now());
 
     let row = state
         .emojis
-        .insert(id, &req.shortcode, media_file_id, req.category.as_deref(), &tags)
+        .insert(
+            id,
+            &req.shortcode,
+            media_file_id,
+            req.category.as_deref(),
+            &tags,
+            license.as_deref(),
+        )
         .await
         .map_err(map_emoji_db_error)?;
 
     Ok(Json(row.into()))
 }
 
-/// PATCH /api/admin/emojis/:id — カテゴリ・タグを更新する（#49）。
+/// PATCH /api/admin/emojis/:id — カテゴリ・タグ・ライセンスを更新する（#49, #63）。
 pub async fn update_emoji(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -160,10 +186,14 @@ pub async fn update_emoji(
         Some(ref t) => Some(normalize_tags(t)?),
         None => None,
     };
+    let license = match req.license {
+        Some(ref l) => Some(normalize_license(l)?),
+        None => None,
+    };
 
     let row = state
         .emojis
-        .update(id, req.category.as_deref(), tags.as_deref())
+        .update(id, req.category.as_deref(), tags.as_deref(), license.as_deref())
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
