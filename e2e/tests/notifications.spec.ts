@@ -19,13 +19,14 @@ const MINIMAL_PNG = Buffer.from(
   "base64",
 );
 
-test("他ユーザーのリアクションが通知として届き一覧に表示される", async ({ page, request }) => {
+test("他ユーザーのリアクション通知をホバーすると対象ポストが表示される", async ({ page, request }) => {
   const alice = await registerUserViaApi(request, "e2enotifalice");
   const bob = await registerUserViaApi(request, "e2enotifbob");
 
+  const noteText = `通知テスト ${Date.now()}`;
   const createRes = await request.post("/api/notes/create", {
     headers: { Authorization: `Bearer ${alice.token}` },
-    data: { text: `通知テスト ${Date.now()}` },
+    data: { text: noteText },
   });
   expect(createRes.ok(), `投稿作成失敗: ${createRes.status()} ${await createRes.text()}`).toBeTruthy();
   const created = await createRes.json();
@@ -42,7 +43,11 @@ test("他ユーザーのリアクションが通知として届き一覧に表�
   });
   expect(reactRes.ok(), `リアクション失敗: ${reactRes.status()} ${await reactRes.text()}`).toBeTruthy();
 
-  await expect(page.getByText(`${bob.username} がリアクションしました`)).toBeVisible({ timeout: 15_000 });
+  const notifText = page.getByText(`${bob.username} がリアクションしました`);
+  await expect(notifText).toBeVisible({ timeout: 15_000 });
+
+  await notifText.hover();
+  await expect(page.getByRole("link", { name: new RegExp(noteText) })).toBeVisible({ timeout: 5_000 });
 });
 
 test("カスタム絵文字でリアクションされた通知にカスタム絵文字画像が表示される（#61回帰防止）", async ({ page, request }) => {
