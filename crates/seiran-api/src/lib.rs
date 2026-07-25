@@ -381,6 +381,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/users/:id/suspend", post(handlers::admin::users::suspend_user))
         .route("/api/admin/users/:id/unsuspend", post(handlers::admin::users::unsuspend_user))
         .route("/api/admin/users/:id/role", post(handlers::admin::users::change_user_role))
+        .route("/api/admin/users/:id/totp/disable", post(handlers::admin::users::disable_user_totp))
         // サイト設定
         .route("/api/admin/site-settings",
             get(handlers::admin::site_settings::get_site_settings)

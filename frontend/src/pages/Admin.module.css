@@ -52,6 +52,15 @@
   word-break: break-all;
 }
 
+.authStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
 .badge {
   font-size: 0.72rem;
   padding: 2px 8px;
