@@ -53,6 +53,20 @@ export default function UserManagement() {
     }
   }
 
+  async function disableTotp(u: AdminUser) {
+    if (!window.confirm(t("admin:userManagement.disableTotpConfirm", { username: u.username ?? u.email }))) return;
+    setBusyId(u.id);
+    setError("");
+    try {
+      await api.admin.disableUserTotp(u.id);
+      load();
+    } catch (e) {
+      setError(getErrorMessage(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   if (loading) return <p className={panel.message}>{t("common:loading")}</p>;
 
   return (
@@ -68,6 +82,10 @@ export default function UserManagement() {
                 {u.username ? `@${u.username}` : t("admin:userManagement.noActorLabel")}
               </div>
               <div className={styles.subText}>{u.email}</div>
+              <div className={styles.authStatus}>
+                <span>{t(u.totp_enabled ? "admin:userManagement.totpEnabled" : "admin:userManagement.totpDisabled")}</span>
+                <span>{t("admin:userManagement.passkeyCount", { count: u.passkey_count })}</span>
+              </div>
             </div>
             {u.suspended_at && (
               <span className={`${styles.badge} ${styles.badgeSuspended}`}>{t("admin:userManagement.suspendedBadge")}</span>
@@ -91,6 +109,15 @@ export default function UserManagement() {
             >
               {u.suspended_at ? t("admin:userManagement.unsuspendButton") : t("admin:userManagement.suspendButton")}
             </button>
+            {u.totp_enabled && (
+              <button
+                className={styles.btnDanger}
+                disabled={busyId === u.id}
+                onClick={() => disableTotp(u)}
+              >
+                {t("admin:userManagement.disableTotpButton")}
+              </button>
+            )}
           </div>
         ))}
       </div>

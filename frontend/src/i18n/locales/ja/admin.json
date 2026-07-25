@@ -83,6 +83,11 @@
     "noActorLabel": "(アクター未作成)",
     "suspendedBadge": "凍結中",
     "suspendButton": "凍結",
-    "unsuspendButton": "凍結解除"
+    "unsuspendButton": "凍結解除",
+    "totpEnabled": "TOTP: 有効",
+    "totpDisabled": "TOTP: 無効",
+    "passkeyCount": "パスキー: {{count}}件",
+    "disableTotpButton": "TOTP強制解除",
+    "disableTotpConfirm": "{{username}} のTOTPを強制解除しますか？"
   }
 }

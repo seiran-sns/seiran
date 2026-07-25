@@ -56,3 +56,26 @@ test("管理者はユーザーを凍結・凍結解除できる", async ({ page,
   await row.getByRole("button", { name: "凍結解除" }).click();
   await expect(row.getByText("凍結中")).toHaveCount(0, { timeout: 10_000 });
 });
+
+test("ユーザー管理にTOTP状態とパスキー数が表示され、TOTP強制解除APIは管理者だけが使える", async ({ page, request }) => {
+  const target = await registerUserViaApi(request, "e2eadminauthstatus");
+  const adminToken = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
+
+  const denied = await request.post(`/api/admin/users/${target.userId}/totp/disable`, {
+    headers: { Authorization: `Bearer ${target.token}` },
+  });
+  expect(denied.status()).toBe(403);
+
+  const disabled = await request.post(`/api/admin/users/${target.userId}/totp/disable`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  expect(disabled.status()).toBe(204);
+
+  await seedAuth(page, adminToken);
+  await page.goto("/admin");
+  const usernameCell = page.getByText(`@${target.username}`, { exact: true });
+  await expect(usernameCell).toBeVisible({ timeout: 10_000 });
+  const row = usernameCell.locator("xpath=../..");
+  await expect(row.getByText("TOTP: 無効")).toBeVisible();
+  await expect(row.getByText("パスキー: 0件")).toBeVisible();
+});
