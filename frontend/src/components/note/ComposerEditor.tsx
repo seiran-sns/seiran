@@ -80,8 +80,12 @@ function restoreSelection(root: HTMLElement, target: number) {
     }
     return false;
   };
-  if (!visit(root)) range.selectNodeContents(root), range.collapse(false);
-  else range.collapse(true);
+  if (!visit(root)) {
+    range.selectNodeContents(root);
+    range.collapse(false);
+  } else {
+    range.collapse(true);
+  }
   const selection = window.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
@@ -110,6 +114,7 @@ export default function ComposerEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   const pendingCaret = useRef<number | null>(null);
   const composing = useRef(false);
+  const initialCaret = useRef(value.length);
   const [caret, setCaret] = useState(value.length);
   const [emojis, setEmojis] = useState<PublicEmoji[]>([]);
   const [actors, setActors] = useState<ActorSuggestion[]>([]);
@@ -194,7 +199,7 @@ export default function ComposerEditor({
   useEffect(() => {
     if (!autoFocus || !editorRef.current) return;
     editorRef.current.focus();
-    restoreSelection(editorRef.current, value.length);
+    restoreSelection(editorRef.current, initialCaret.current);
   }, [autoFocus]);
 
   function updateFromDom() {
