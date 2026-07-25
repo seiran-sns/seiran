@@ -1,4 +1,7 @@
 {
+  "emojiContextMenu": {
+    "importButton": "絵文字をインポート"
+  },
   "homePage": {
     "title": "ホーム",
     "homeTab": "ホーム",

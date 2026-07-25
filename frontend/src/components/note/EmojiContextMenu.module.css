@@ -1,0 +1,27 @@
+.popover {
+  position: fixed;
+  z-index: 50;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(22, 32, 58, 0.15);
+  padding: 6px;
+  min-width: 180px;
+}
+
+.item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--bg-elev);
+}

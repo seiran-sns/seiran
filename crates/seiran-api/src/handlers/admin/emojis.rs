@@ -69,7 +69,7 @@ pub struct UpdateEmojiRequest {
 }
 
 /// ライセンス情報を正規化する（#63）。トリムし、改行を含む場合は不正として弾く（1行テキストの要件）。
-fn normalize_license(license: &str) -> Result<String, ApiError> {
+pub(crate) fn normalize_license(license: &str) -> Result<String, ApiError> {
     let trimmed = license.trim();
     if trimmed.contains(['\n', '\r']) {
         return Err(ApiError::BadRequest("INVALID_LICENSE".to_owned()));
@@ -79,7 +79,7 @@ fn normalize_license(license: &str) -> Result<String, ApiError> {
 
 /// タグを正規化する（#49）。
 /// トリム → 空要素除去 → 重複除去。ホワイトスペースを含むタグは不正として弾く。
-fn normalize_tags(tags: &[String]) -> Result<Vec<String>, ApiError> {
+pub(crate) fn normalize_tags(tags: &[String]) -> Result<Vec<String>, ApiError> {
     let mut out: Vec<String> = Vec::new();
     for t in tags {
         let t = t.trim();

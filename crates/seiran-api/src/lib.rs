@@ -29,8 +29,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AppTokenRepository, AtpReadRepository, BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, TotpRepository, UserRepository,
-    PgActorRepository, PgAppTokenRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgTotpRepository, PgUserRepository,
+    ActorRepository, AppTokenRepository, AtpReadRepository, BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, RemoteEmojiRepository, TotpRepository, UserRepository,
+    PgActorRepository, PgAppTokenRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgRemoteEmojiRepository, PgTotpRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -102,6 +102,8 @@ pub struct AppState {
     pub email_changes: Arc<dyn EmailChangeRepository>,
     /// カスタム絵文字（`custom_emojis` テーブル）。
     pub emojis: Arc<dyn EmojiRepository>,
+    /// リモートカスタム絵文字カタログ（`remote_emojis` テーブル、#73）。
+    pub remote_emojis: Arc<dyn RemoteEmojiRepository>,
     /// TOTP（二段階認証）設定・リカバリーコード・メール経由の強制解除リクエスト（#65）。
     pub totp: Arc<dyn TotpRepository>,
     pub webauthn: Arc<Webauthn>,
@@ -289,6 +291,7 @@ pub async fn init_state(
     let email_verifications: Arc<dyn EmailVerificationRepository> = Arc::new(PgEmailVerificationRepository::new(pool.clone()));
     let email_changes: Arc<dyn EmailChangeRepository> = Arc::new(PgEmailChangeRepository::new(pool.clone()));
     let emojis: Arc<dyn EmojiRepository> = Arc::new(PgEmojiRepository::new(pool.clone()));
+    let remote_emojis: Arc<dyn RemoteEmojiRepository> = Arc::new(PgRemoteEmojiRepository::new(pool.clone()));
     let totp: Arc<dyn TotpRepository> = Arc::new(PgTotpRepository::new(pool.clone()));
 
     let system_proxy_actor_id = match seiran_common::ensure_system_proxy_actor(&pool, &local_domain).await {
@@ -351,6 +354,7 @@ pub async fn init_state(
         email_verifications,
         email_changes,
         emojis,
+        remote_emojis,
         totp,
         webauthn,
     }
@@ -402,6 +406,11 @@ pub fn router(state: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(200 * 1024 * 1024)))
         .route("/api/admin/emojis/import/:job_id",
             get(handlers::admin::emoji_import::get_import_status))
+        // リモート絵文字カタログの一覧・インポート（#73）
+        .route("/api/admin/emojis/remote",
+            get(handlers::admin::remote_emojis::list_remote_emojis))
+        .route("/api/admin/emojis/remote/import",
+            post(handlers::admin::remote_emojis::import_remote_emoji))
         // ドライブ（メディアアップロード）。動画・音声添付を考慮し 100MB まで許可
         // （axum のデフォルトボディ上限は小さいため明示的に上書きする）。
         .route(

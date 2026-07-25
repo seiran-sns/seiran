@@ -11,6 +11,13 @@
   },
   "emojisPanel": {
     "title": "カスタム絵文字",
+    "localTab": "ローカル",
+    "remoteTab": "リモート",
+    "searchPlaceholder": "ショートコード・タグで検索",
+    "remoteSearchPlaceholder": "ショートコード・ドメインで検索",
+    "remoteEmptyMessage": "現時点で認識できているリモート絵文字がありません。",
+    "remoteLoadError": "リモート絵文字の取得に失敗しました。",
+    "remoteImportButton": "インポート",
     "importTitle": "Misskey ZIP インポート",
     "importing": "インポート中...",
     "selectZipButton": "ZIPを選択してインポート",
@@ -34,6 +41,19 @@
     "editLicensePlaceholder": "ライセンス（任意・1行）",
     "editButton": "編集",
     "deleteConfirm": "絵文字 :{{shortcode}}: を削除しますか？"
+  },
+  "emojiImportDialog": {
+    "title": "絵文字をインポート",
+    "shortcodeLabel": "ショートコード",
+    "sourceLabel": "取り込み元",
+    "categoryLabel": "カテゴリ（任意）",
+    "tagsLabel": "タグ（任意・空白またはカンマ区切り）",
+    "tagsPlaceholder": "猫 かわいい blob-cat",
+    "licenseLabel": "ライセンス（任意・1行）",
+    "licensePlaceholder": "CC BY 4.0 by ...",
+    "submitButton": "インポートする",
+    "submitting": "インポート中...",
+    "cancelButton": "キャンセル"
   },
   "siteSettingsPanel": {
     "title": "サイト設定",

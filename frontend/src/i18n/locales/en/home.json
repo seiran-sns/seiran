@@ -1,4 +1,7 @@
 {
+  "emojiContextMenu": {
+    "importButton": "Import emoji"
+  },
   "homePage": {
     "title": "Home",
     "homeTab": "Home",
