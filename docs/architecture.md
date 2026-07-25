@@ -143,6 +143,8 @@ pub struct SearchSession {
 
 **画像アップロードパイプライン**（`storage/image.rs::prepare_image()`）: ユーザーの画像を不要に劣化させないため、2つの候補を用意してから採用する。まず `storage/exif.rs`（`img-parts`クレート使用）でJPEG/PNGのExifをOrientationタグのみに絞り込んだ「無劣化オリジナル候補」を作る（画素は再エンコードしない）。続けてOrientationを画素に適用したうえで `MediaKind` ごとの最大サイズにリサイズしWebPロスレスエンコードした「リサイズ候補」を作る。呼び出し元（`handlers/media_store.rs::store_image()`）が両候補それぞれのsha256+blurhashで `media_files` の重複排除チェックを行い、どちらも未登録ならバイトサイズが小さい方を採用してS3へアップロードする。img-parts非対応フォーマット（静止画WebP・AVIF・単一フレームGIF等）はOrientation適用のみ行いWebP再エンコードする（オリジナル候補なし）。アニメーション画像（GIF/APNG/WebPアニメ）は元バイト列をそのまま保存する。
 
+**リモートメディアプロキシ（#87）**: フロントエンドは別オリジンのアバター、添付、サムネイル、本文・リアクションのカスタム絵文字を `GET /proxy?url=...` に変換する。同一オリジンのストレージURLは直接参照する。内蔵プロキシはHTTP(S)のみを許可し、資格情報・fragmentを拒否、DNS解決した全IPについてloopback/private/link-local/CGNAT等を拒否する。リダイレクト先も都度同じ検証を行い、5回・25MiB・20秒を上限とし、画像・動画・音声以外は中継しない。`site_settings.media_proxy_url` が設定されている場合は、Misskey互換の外部プロキシ `{base}/proxy?url=...` を利用する。
+
 ## 8. フロントエンド
 
 React 18 + Vite + TypeScript（react-router-dom v6）。`frontend/src/` 構成:

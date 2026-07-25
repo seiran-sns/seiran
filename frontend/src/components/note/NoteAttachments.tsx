@@ -3,6 +3,7 @@ import { NoteAttachment } from "../../api/client";
 import HlsVideo from "./HlsVideo";
 import ImageLightbox from "../common/ImageLightbox";
 import styles from "./NoteCard.module.css";
+import { mediaUrl } from "../../utils/mediaProxy";
 
 interface NoteAttachmentsProps {
   attachments?: NoteAttachment[];
@@ -22,8 +23,8 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
           return (
             <HlsVideo
               key={i}
-              src={att.url}
-              poster={att.thumbnailUrl}
+              src={mediaUrl(att.url) ?? att.url}
+              poster={mediaUrl(att.thumbnailUrl)}
               isHls={isHls}
               className={styles.attachImage}
               onClick={(e) => e.stopPropagation()}
@@ -34,7 +35,7 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
           return (
             <audio
               key={i}
-              src={att.url}
+              src={mediaUrl(att.url)}
               controls
               className={styles.attachAudio}
               onClick={(e) => e.stopPropagation()}
@@ -44,13 +45,13 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
         return (
           <img
             key={i}
-            src={att.url}
+            src={mediaUrl(att.url)}
             alt=""
             className={styles.attachImage}
             loading="lazy"
             onClick={(e) => {
               e.stopPropagation();
-              setLightboxSrc(att.url);
+              setLightboxSrc(mediaUrl(att.url) ?? att.url);
             }}
           />
         );

@@ -366,6 +366,8 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         // サイトアイコンを favicon として返す（#42）
         .route("/favicon.ico", get(handlers::favicon::favicon))
+        // Misskey互換メディアプロキシ（リモート画像のCORS回避、SSRF防止付き）
+        .route("/proxy", get(handlers::media_proxy::proxy))
         // セットアップ（初回管理者作成）
         .route("/api/setup/status", get(handlers::setup::setup_status))
         .route("/api/setup", post(handlers::setup::setup))

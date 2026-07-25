@@ -1,4 +1,5 @@
 import { SHORTCODE_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
+import { mediaUrl } from "../../utils/mediaProxy";
 import styles from "./EmojiText.module.css";
 
 const SHORTCODE_RE = new RegExp(SHORTCODE_SOURCE, "g");
@@ -41,7 +42,7 @@ export default function EmojiText({ text, emojis }: EmojiTextProps) {
       parts.push(text.slice(lastIndex, match.index));
     }
     parts.push(
-      <img key={key++} className={styles.emojiImg} src={url} alt={shortcode} title={shortcode} loading="lazy" />
+      <img key={key++} className={styles.emojiImg} src={mediaUrl(url)} alt={shortcode} title={shortcode} loading="lazy" />
     );
     lastIndex = endIndex;
   }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ReactionActor, ReactionSummary } from "../../api/client";
 import { fetchCustomEmojiShortcodes, parseCustomEmojiShortcode } from "../../lib/customEmojis";
+import { mediaUrl } from "../../utils/mediaProxy";
 import Avatar from "./Avatar";
 import styles from "./ReactionChips.module.css";
 
@@ -101,7 +102,7 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
         }}
       >
         {r.emojiUrl ? (
-          <img className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" />
+          <img className={styles.emojiImg} src={mediaUrl(r.emojiUrl)} alt={r.emoji} loading="lazy" />
         ) : (
           <span className={styles.emoji}>{r.emoji}</span>
         )}

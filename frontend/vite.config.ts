@@ -25,6 +25,7 @@ export default defineConfig(({ mode }) => {
         // Docker + nginx 構成では nginx がルーティングを担うため不使用。
         // ws:true で /api/streaming の WebSocket もプロキシする（#37）。
         "/api": { target: backendTarget, ws: true },
+        "/proxy": backendTarget,
         "/miauth": backendTarget,
         // /notes/:id・/@handle は常にバックエンドへ転送する。バックエンドが Accept
         // ヘッダーで AP JSON-LD / OGP注入済み SPA HTML を出し分ける

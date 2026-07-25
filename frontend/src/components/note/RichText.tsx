@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { HASHTAG_LINK_TEXT_RE, RICH_TEXT_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
+import { mediaUrl } from "../../utils/mediaProxy";
 import styles from "./RichText.module.css";
 
 /** タグ本体（`#`除く）から正規化済みのハッシュタグページパスを組み立てる。 */
@@ -117,7 +118,7 @@ export default function RichText({ text, emojis }: RichTextProps) {
       if (!url) continue;
       if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
       parts.push(
-        <img key={key++} className={styles.emojiImg} src={url} alt={shortcode} title={shortcode} loading="lazy" />
+        <img key={key++} className={styles.emojiImg} src={mediaUrl(url)} alt={shortcode} title={shortcode} loading="lazy" />
       );
     }
 

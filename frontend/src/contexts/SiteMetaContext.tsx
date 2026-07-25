@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { api } from "../api/client";
+import { configureMediaProxy } from "../utils/mediaProxy";
 
 /**
  * サイト外観メタ（名称・カラー・アイコン）を全体へ供給する（issue #30）。
@@ -49,6 +50,7 @@ export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
     api
       .meta(controller.signal)
       .then((m) => {
+        configureMediaProxy(m.mediaProxyUrl ?? "");
         const next = { name: m.name || "seiran", iconUrl: m.siteIconUrl ?? "", color: m.siteColor ?? "" };
         setMeta(next);
         applyColor(next.color);

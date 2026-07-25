@@ -189,6 +189,7 @@ export interface SiteSettings {
   site_name: string;
   site_color: string;
   site_icon_url: string;
+  media_proxy_url: string;
 }
 
 export interface CustomEmoji {
@@ -715,6 +716,7 @@ export interface MetaResponse {
   requireEmailVerification: boolean;
   siteColor?: string;
   siteIconUrl?: string;
+  mediaProxyUrl?: string;
 }
 
 export const api = {
@@ -1001,6 +1003,7 @@ export const api = {
       site_name: string;
       site_color: string;
       site_icon_url: string;
+      media_proxy_url: string;
     }>) {
       return request<SiteSettings>("PATCH", "/admin/site-settings", patch);
     },
