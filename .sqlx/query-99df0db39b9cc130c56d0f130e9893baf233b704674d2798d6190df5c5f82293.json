@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.username FROM actors a WHERE a.user_id = $1 AND a.actor_type::text = 'local'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "username",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "99df0db39b9cc130c56d0f130e9893baf233b704674d2798d6190df5c5f82293"
+}

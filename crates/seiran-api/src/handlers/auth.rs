@@ -5,13 +5,13 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 use seiran_common::atp::signing_key_from_pem;
+use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 
-use crate::AppState;
 use crate::error::ApiError;
 use crate::mailer::send_password_reset_email;
 use crate::middleware::extract_auth;
+use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct RegisterRequest {
@@ -84,7 +84,8 @@ pub async fn register(
         if token_str.is_empty() {
             return Err(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()));
         }
-        let token: uuid::Uuid = token_str.parse()
+        let token: uuid::Uuid = token_str
+            .parse()
             .map_err(|_| ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
 
         state
@@ -131,14 +132,13 @@ pub async fn register(
         return Err(ApiError::Conflict("USERNAME_TAKEN"));
     }
 
-    let password_hash = LocalAuthProvider::hash_password(&req.password)
-        .map_err(|e| {
-            tracing::error!("[register] ハッシュ失敗: {}", e);
-            ApiError::Internal("パスワード処理エラー".to_string())
-        })?;
+    let password_hash = LocalAuthProvider::hash_password(&req.password).map_err(|e| {
+        tracing::error!("[register] ハッシュ失敗: {}", e);
+        ApiError::Internal("パスワード処理エラー".to_string())
+    })?;
 
-    let rotation_key = signing_key_from_pem(&state.secrets.atproto_private_key_pem)
-        .map_err(|e| {
+    let rotation_key =
+        signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
             tracing::error!("[register] 回転鍵ロード失敗: {}", e);
             ApiError::Internal("ATP鍵ロードエラー".to_string())
         })?;
@@ -146,7 +146,13 @@ pub async fn register(
     // DID確定 → TXT セット → PLC送信（最大3回リトライ）。DB 書き込みはここより後
     // — 失敗時に孤立レコードが残らないようにするため。
     let (at_did, at_signing_key_pem, cf_record_id) =
-        crate::handlers::plc_genesis::register_plc_did(&state, &req.username, &rotation_key, "register").await?;
+        crate::handlers::plc_genesis::register_plc_did(
+            &state,
+            &req.username,
+            &rotation_key,
+            "register",
+        )
+        .await?;
 
     // 4. DB 書き込み（PLC 送信成功後）
     let user_id = state
@@ -176,26 +182,53 @@ pub async fn register(
         })?;
 
     let now = chrono::Utc::now();
-    if let Err(e) = state.atp_service.commit_profile(actor_id, &req.username, None, None, None, now).await {
-        tracing::error!("[register] ATP プロフィールコミット失敗（登録は完了済み）: {}", e);
+    if let Err(e) = state
+        .atp_service
+        .commit_profile(actor_id, &req.username, None, None, None, now)
+        .await
+    {
+        tracing::error!(
+            "[register] ATP プロフィールコミット失敗（登録は完了済み）: {}",
+            e
+        );
     }
     // Bsky公式クライアントからのDM受信を許可する設定（`docs/protocols.md` 9節）。
     // 無いとBluesky公式クライアントが相手（このユーザー）へのDM送信を保守的にブロックする。
-    if let Err(e) = state.atp_service.commit_chat_declaration(actor_id, now).await {
-        tracing::error!("[register] chat declaration コミット失敗（登録は完了済み）: {}", e);
+    if let Err(e) = state
+        .atp_service
+        .commit_chat_declaration(actor_id, now)
+        .await
+    {
+        tracing::error!(
+            "[register] chat declaration コミット失敗（登録は完了済み）: {}",
+            e
+        );
     }
 
     // #identity フレームを Relay に送信して AppView の handle キャッシュを更新させる。
     // commit_profile より後に送信することで seq 順序が保たれる。
-    let handle = format!("{}.{}", seiran_common::username::to_atp_username(&req.username), state.local_domain);
-    if let Err(e) = state.atp_service.broadcast_identity_event(actor_id, &at_did, &handle, now).await {
-        tracing::error!("[register] #identity broadcast 失敗（登録は完了済み）: {}", e);
+    let handle = format!(
+        "{}.{}",
+        seiran_common::username::to_atp_username(&req.username),
+        state.local_domain
+    );
+    if let Err(e) = state
+        .atp_service
+        .broadcast_identity_event(actor_id, &at_did, &handle, now)
+        .await
+    {
+        tracing::error!(
+            "[register] #identity broadcast 失敗（登録は完了済み）: {}",
+            e
+        );
     }
 
     // TXT レコードはそのまま残す（bsky.app はハンドル解決に常時使用するため）
     let _ = cf_record_id;
 
-    let (token, _jti) = state.local_auth.generate_token(user_id, &email)
+    let (token, _jti) = state
+        .local_auth
+        .generate_token(user_id, &email)
         .map_err(|e| {
             tracing::error!("[register] JWT 生成失敗: {}", e);
             ApiError::Internal("トークン生成エラー".to_string())
@@ -209,16 +242,87 @@ pub async fn register(
             email,
             role: "user".to_string(),
             actor_id,
-            avatar_url: None, // 登録直後はアバター未設定
+            avatar_url: None,          // 登録直後はアバター未設定
             language_preference: None, // 登録直後は「自動」
         },
     }))
 }
 
+/// ログイン成功後（パスワード検証・TOTP検証いずれも完了済み）の共通処理:
+/// 本トークン発行 + プロフィール情報の組み立て。`login`・`totp_verify`の両方から呼ぶ。
+pub(crate) async fn finish_login(
+    state: &AppState,
+    user_id: i64,
+    email: String,
+    username: String,
+) -> Result<AuthResponse, ApiError> {
+    let (token, _jti) = state
+        .local_auth
+        .generate_token(user_id, &email)
+        .map_err(|e| {
+            tracing::error!("[login] JWT 生成失敗: {}", e);
+            ApiError::Internal("トークン生成エラー".to_string())
+        })?;
+
+    let role = state
+        .users
+        .find_role_by_user_id(user_id)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "user".to_string());
+
+    let actor_id = state
+        .actors
+        .find_local_by_user_id(user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("[login] アクター取得失敗: {}", e);
+            ApiError::Internal(e.to_string())
+        })?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?
+        .id;
+
+    let avatar_url = fetch_avatar_url(state, actor_id).await;
+
+    let language_preference = state
+        .users
+        .find_language_preference_by_user_id(user_id)
+        .await
+        .ok()
+        .flatten();
+
+    Ok(AuthResponse {
+        token,
+        user: UserInfo {
+            id: user_id,
+            username,
+            email,
+            role,
+            actor_id,
+            avatar_url,
+            language_preference,
+        },
+    })
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum LoginResponse {
+    Success(AuthResponse),
+    TotpRequired(TotpRequiredResponse),
+}
+
+#[derive(Serialize)]
+pub struct TotpRequiredResponse {
+    pub totp_required: bool,
+    pub pending_token: String,
+}
+
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
-) -> Result<Json<AuthResponse>, ApiError> {
+) -> Result<Json<LoginResponse>, ApiError> {
     let row = if req.identifier.contains('@') {
         state.users.find_login_by_email(&req.identifier).await
     } else {
@@ -243,43 +347,32 @@ pub async fn login(
         _ => return Err(ApiError::Unauthorized("INVALID_CREDENTIALS")),
     }
 
-    let (token, _jti) = state.local_auth.generate_token(user_id, &email).map_err(|e| {
-        tracing::error!("[login] JWT 生成失敗: {}", e);
-        ApiError::Internal("トークン生成エラー".to_string())
-    })?;
-
-    let role = state
-        .users
-        .find_role_by_user_id(user_id)
+    // TOTP（#65）: 有効化済みなら本トークンではなく、TOTPコード検証待ちの
+    // 短命トークンだけを返す（本トークンは totp_verify で発行する）。
+    let totp_enabled = state
+        .totp
+        .find_by_user_id(user_id)
         .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "user".to_string());
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map(|(_, enabled)| enabled)
+        .unwrap_or(false);
 
-    let actor_id = state
-        .actors
-        .find_local_by_user_id(user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("[login] アクター取得失敗: {}", e);
-            ApiError::Internal(e.to_string())
-        })?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?
-        .id;
+    if totp_enabled {
+        let pending_token = state
+            .local_auth
+            .generate_pending_totp_token(user_id)
+            .map_err(|e| {
+                tracing::error!("[login] pending totp token 生成失敗: {}", e);
+                ApiError::Internal("トークン生成エラー".to_string())
+            })?;
+        return Ok(Json(LoginResponse::TotpRequired(TotpRequiredResponse {
+            totp_required: true,
+            pending_token,
+        })));
+    }
 
-    let avatar_url = fetch_avatar_url(&state, actor_id).await;
-
-    let language_preference = state
-        .users
-        .find_language_preference_by_user_id(user_id)
-        .await
-        .ok()
-        .flatten();
-
-    Ok(Json(AuthResponse {
-        token,
-        user: UserInfo { id: user_id, username, email, role, actor_id, avatar_url, language_preference },
-    }))
+    let auth = finish_login(&state, user_id, email, username).await?;
+    Ok(Json(LoginResponse::Success(auth)))
 }
 
 pub async fn me(
@@ -382,17 +475,21 @@ pub async fn request_password_reset(
             .password_resets
             .insert(reset_id, user_id)
             .await
-            .map_err(|e| ApiError::Internal(format!("[request-password-reset] DB エラー: {}", e)))?;
+            .map_err(|e| {
+                ApiError::Internal(format!("[request-password-reset] DB エラー: {}", e))
+            })?;
 
         if let Some(token) = token {
-            let reset_url = format!("https://{}/reset-password?token={}", state.local_domain, token);
-            let smtp_settings = state
-                .site_settings
-                .get_all()
-                .await
-                .unwrap_or_default();
+            let reset_url = format!(
+                "https://{}/reset-password?token={}",
+                state.local_domain, token
+            );
+            let smtp_settings = state.site_settings.get_all().await.unwrap_or_default();
             if let Err(e) = send_password_reset_email(&smtp_settings, &email, &reset_url).await {
-                tracing::error!("[request-password-reset] メール送信失敗（処理は継続）: {}", e);
+                tracing::error!(
+                    "[request-password-reset] メール送信失敗（処理は継続）: {}",
+                    e
+                );
             }
         }
     }
@@ -409,8 +506,7 @@ pub async fn verify_reset_token(
     State(state): State<AppState>,
 ) -> Result<Json<ValidResponse>, ApiError> {
     // UUID 形式の検証
-    uuid::Uuid::parse_str(&params.token)
-        .map_err(|_| ApiError::NotFound("RESET_TOKEN_INVALID"))?;
+    uuid::Uuid::parse_str(&params.token).map_err(|_| ApiError::NotFound("RESET_TOKEN_INVALID"))?;
 
     let user_id = state
         .password_resets
@@ -449,11 +545,10 @@ pub async fn reset_password(
     }
 
     // Argon2 でハッシュ化
-    let password_hash = LocalAuthProvider::hash_password(&req.new_password)
-        .map_err(|e| {
-            tracing::error!("[reset-password] ハッシュ失敗: {}", e);
-            ApiError::Internal("パスワード処理エラー".to_string())
-        })?;
+    let password_hash = LocalAuthProvider::hash_password(&req.new_password).map_err(|e| {
+        tracing::error!("[reset-password] ハッシュ失敗: {}", e);
+        ApiError::Internal("パスワード処理エラー".to_string())
+    })?;
 
     // users.password_hash を更新
     state

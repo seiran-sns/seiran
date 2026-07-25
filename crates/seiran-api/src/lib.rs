@@ -28,8 +28,8 @@ use seiran_common::{
     S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
 };
 use seiran_common::repository::{
-    ActorRepository, AppTokenRepository, AtpReadRepository, BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, UserRepository,
-    PgActorRepository, PgAppTokenRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgUserRepository,
+    ActorRepository, AppTokenRepository, AtpReadRepository, BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, TotpRepository, UserRepository,
+    PgActorRepository, PgAppTokenRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgTotpRepository, PgUserRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -101,6 +101,8 @@ pub struct AppState {
     pub email_changes: Arc<dyn EmailChangeRepository>,
     /// カスタム絵文字（`custom_emojis` テーブル）。
     pub emojis: Arc<dyn EmojiRepository>,
+    /// TOTP（二段階認証）設定・リカバリーコード・メール経由の強制解除リクエスト（#65）。
+    pub totp: Arc<dyn TotpRepository>,
 }
 
 impl AppState {
@@ -285,6 +287,7 @@ pub async fn init_state(
     let email_verifications: Arc<dyn EmailVerificationRepository> = Arc::new(PgEmailVerificationRepository::new(pool.clone()));
     let email_changes: Arc<dyn EmailChangeRepository> = Arc::new(PgEmailChangeRepository::new(pool.clone()));
     let emojis: Arc<dyn EmojiRepository> = Arc::new(PgEmojiRepository::new(pool.clone()));
+    let totp: Arc<dyn TotpRepository> = Arc::new(PgTotpRepository::new(pool.clone()));
 
     let system_proxy_actor_id = match seiran_common::ensure_system_proxy_actor(&pool, &local_domain).await {
         Ok(id) => id,
@@ -334,6 +337,7 @@ pub async fn init_state(
         email_verifications,
         email_changes,
         emojis,
+        totp,
     }
 }
 
@@ -399,6 +403,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/request-password-reset", post(handlers::auth::request_password_reset))
         .route("/api/auth/verify-reset-token", get(handlers::auth::verify_reset_token))
         .route("/api/auth/reset-password", post(handlers::auth::reset_password))
+        // TOTP（二段階認証、#65）: ログイン2段階目・認証アプリ紛失時のメール解除
+        .route("/api/auth/totp/verify", post(handlers::totp::totp_verify))
+        .route("/api/auth/totp/request-disable-email", post(handlers::totp::totp_request_disable_email))
+        .route("/api/auth/totp/confirm-disable", post(handlers::totp::totp_confirm_disable))
         // アカウント管理（退会等）
         .route("/api/account/withdraw", post(handlers::account::withdraw))
         .route("/api/account/change-password", post(handlers::account::change_password))
@@ -407,6 +415,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/account/email/confirm-change", post(handlers::account::confirm_email_change))
         .route("/api/account/app-tokens", get(handlers::account::list_app_tokens))
         .route("/api/account/app-tokens/:id", delete(handlers::account::revoke_app_token))
+        // TOTP（二段階認証、#65）: 設定画面での有効化・無効化
+        .route("/api/account/totp/status", get(handlers::totp::totp_status))
+        .route("/api/account/totp/setup", post(handlers::totp::totp_setup))
+        .route("/api/account/totp/enable", post(handlers::totp::totp_enable))
+        .route("/api/account/totp/disable", post(handlers::totp::totp_disable))
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))

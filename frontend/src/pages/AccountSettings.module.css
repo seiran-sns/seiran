@@ -105,6 +105,28 @@
   margin: 0 0 12px;
 }
 
+.qrCode {
+  width: fit-content;
+  padding: 12px;
+  margin: 12px auto;
+  background: white;
+  border-radius: 8px;
+}
+
+.secret,
+.recoveryCodes {
+  padding: 12px;
+  overflow-wrap: anywhere;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+
+.recoveryCodes {
+  user-select: all;
+  line-height: 1.7;
+}
+
 .dangerZone {
   margin: 20px;
   padding: 16px;

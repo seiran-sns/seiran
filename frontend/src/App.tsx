@@ -33,6 +33,7 @@ import AppTokensSettingsPage from "./pages/AppTokensSettingsPage";
 import Setup from "./pages/Setup";
 import VerifyEmail from "./pages/VerifyEmail";
 import VerifyEmailChange from "./pages/VerifyEmailChange";
+import TotpDisable from "./pages/TotpDisable";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -253,6 +254,7 @@ function AppRoutes() {
         />
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/verify-email-change" element={<VerifyEmailChange />} />
+        <Route path="/totp-disable" element={<TotpDisable />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
       </Routes>

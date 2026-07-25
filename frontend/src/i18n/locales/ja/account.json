@@ -32,7 +32,16 @@
     "newPasswordConfirmLabel": "新しいパスワード（確認）",
     "changePasswordButton": "パスワードを変更",
     "passwordSaved": "パスワードを変更しました。",
-    "passwordMismatch": "新しいパスワードが一致しません。"
+    "passwordMismatch": "新しいパスワードが一致しません。",
+    "totpTitle": "二段階認証",
+    "totpEnabled": "認証アプリによる二段階認証は有効です。",
+    "totpDisabled": "認証アプリによる二段階認証は無効です。",
+    "totpSetupButton": "認証アプリを設定",
+    "totpScanHint": "認証アプリでQRコードを読み取るか、下のシークレットを入力してください。",
+    "totpCodeLabel": "認証アプリの6桁コード",
+    "totpEnableButton": "確認して有効化",
+    "totpDisableButton": "二段階認証を無効化",
+    "recoveryCodesNotice": "以下のリカバリーコードを安全な場所に保存してください。各コードは一度だけ使え、この画面を離れると再表示できません。"
   },
   "verifyEmailChange": {
     "verifying": "メールアドレスの変更を確認中...",

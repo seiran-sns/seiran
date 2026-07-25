@@ -236,6 +236,18 @@ export interface AuthResponse {
   user: User;
 }
 
+/** #65: TOTP有効化済みユーザーのログイン応答。`totp_required`の有無で`AuthResponse`と判別する。 */
+export interface TotpRequiredResponse {
+  totp_required: true;
+  pending_token: string;
+}
+
+export type LoginResult = AuthResponse | TotpRequiredResponse;
+
+export function isTotpRequired(res: LoginResult): res is TotpRequiredResponse {
+  return "totp_required" in res;
+}
+
 export interface NoteAttachment {
   url: string;
   mimeType: string;
@@ -657,7 +669,7 @@ export const api = {
       });
     },
     login(identifier: string, password: string) {
-      return request<AuthResponse>("POST", "/auth/login", { identifier, password });
+      return request<LoginResult>("POST", "/auth/login", { identifier, password });
     },
     me() {
       return request<User>("GET", "/auth/me");
@@ -670,6 +682,20 @@ export const api = {
     },
     resetPassword(token: string, newPassword: string) {
       return request<{ message: string }>("POST", "/auth/reset-password", { token, new_password: newPassword });
+    },
+    totp: {
+      /** ログイン2段階目（#65）。`code`はTOTPコード（6桁数字）またはリカバリーコード（`nnnn-nnnn`）。 */
+      verify(pendingToken: string, code: string) {
+        return request<AuthResponse>("POST", "/auth/totp/verify", { pending_token: pendingToken, code });
+      },
+      /** 認証アプリ・リカバリーコードを両方失った場合、登録メールアドレス宛に解除リンクを送る（#65）。 */
+      requestDisableEmail(pendingToken: string) {
+        return request<void>("POST", "/auth/totp/request-disable-email", { pending_token: pendingToken });
+      },
+      /** メールのリンク（`/totp-disable?token=...`）を踏んだ際にトークンを確定する（#65）。 */
+      confirmDisable(token: string) {
+        return request<void>("POST", "/auth/totp/confirm-disable", { token });
+      },
     },
   },
 
@@ -1053,6 +1079,24 @@ export const api = {
     /** 確認メールのリンク（`/verify-email-change?token=...`）を踏んだ際にトークンを確定する（#59）。 */
     confirmEmailChange(token: string) {
       return request<void>("POST", "/account/email/confirm-change", { token });
+    },
+    totp: {
+      /** 設定画面「二段階認証」の現在の状態（#65）。 */
+      status() {
+        return request<{ enabled: boolean }>("GET", "/account/totp/status");
+      },
+      /** シークレットを新規生成する（未確定、`enable`で確認コード検証するまで有効にならない）。 */
+      setup() {
+        return request<{ secret: string; otpauth_url: string }>("POST", "/account/totp/setup");
+      },
+      /** 確認コードを検証して有効化する。成功時のみ表示するリカバリーコードを10件返す。 */
+      enable(code: string) {
+        return request<{ recovery_codes: string[] }>("POST", "/account/totp/enable", { code });
+      },
+      /** 現在のパスワード確認の上で無効化する。 */
+      disable(currentPassword: string) {
+        return request<void>("POST", "/account/totp/disable", { current_password: currentPassword });
+      },
     },
   },
 

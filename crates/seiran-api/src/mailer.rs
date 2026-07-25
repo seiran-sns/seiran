@@ -116,6 +116,30 @@ pub async fn send_email_change_confirmation(
     Ok(())
 }
 
+/// TOTP（#65）: 認証アプリ・リカバリーコードを両方失ったユーザー向けの強制解除メール。
+pub async fn send_totp_disable_email(
+    settings: &HashMap<String, String>,
+    to: &str,
+    disable_url: &str,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
+
+    let body = format!(
+        "seiran — 二段階認証（TOTP）の解除リクエストを受け付けました。\n\n以下のリンクをクリックすると、このアカウントの二段階認証を無効化できます:\n\n{}\n\nこのリンクは 1 時間有効です。\n\n心当たりがない場合はこのメールを無視してください（リンクを踏まない限り二段階認証は解除されません）。",
+        disable_url
+    );
+
+    let email = Message::builder()
+        .from(from.parse()?)
+        .to(to.parse()?)
+        .subject("seiran — 二段階認証の解除リクエスト")
+        .header(ContentType::TEXT_PLAIN)
+        .body(body)?;
+
+    transport.send(email).await?;
+    Ok(())
+}
+
 pub async fn send_password_reset_email(
     settings: &HashMap<String, String>,
     to: &str,
