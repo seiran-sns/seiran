@@ -165,6 +165,35 @@ pub struct MisskeyNotification {
     pub reaction: Option<String>,
 }
 
+/// `POST /api/users/following`（フォロー中一覧）の要素。Misskey 本家の `Following` エンティティ
+/// に合わせる（`followee`）。`POST /api/users/followers`（`follower`）と共通の形にするため
+/// `subject` という名前で持ち、`endpoints.rs` 側でシリアライズ直前に `followee`/`follower` の
+/// どちらのキー名で出すかを切り替える（`#[serde(flatten)]` ではキー名を動的にできないため）。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyFollowRelation {
+    pub id: String,
+    pub created_at: String,
+    pub followee_id: String,
+    pub follower_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followee: Option<MisskeyUserDetailed>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follower: Option<MisskeyUserDetailed>,
+}
+
+/// `POST /api/notes/reactions`（リアクションしたユーザー一覧）の要素。Misskey 本家の
+/// `NoteReaction` エンティティに合わせる。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyNoteReaction {
+    pub id: String,
+    pub created_at: String,
+    pub user: MisskeyUserLite,
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +254,23 @@ mod tests {
                 "必須フィールド `{key}` が欠けているか null です（misskey_dart 側で TypeError の原因になる）"
             );
         }
+    }
+
+    /// Aria が固定している `misskey_dart` の `Following.fromJson` は、関連先の詳細が
+    /// nullable でも `followeeId` と `followerId` 自体は non-nullable として読む。
+    #[test]
+    fn follow_relation_includes_both_required_actor_ids() {
+        let relation = MisskeyFollowRelation {
+            id: "3".to_owned(),
+            created_at: "2026-01-01T00:00:00+00:00".to_owned(),
+            followee_id: "2".to_owned(),
+            follower_id: "1".to_owned(),
+            followee: None,
+            follower: None,
+        };
+        let value = serde_json::to_value(&relation).unwrap();
+
+        assert_eq!(value["followeeId"], "2");
+        assert_eq!(value["followerId"], "1");
     }
 }

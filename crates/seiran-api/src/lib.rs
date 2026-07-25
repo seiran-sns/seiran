@@ -470,8 +470,9 @@ pub fn router(state: AppState) -> Router {
             get(handlers::users::user_profile)
             .patch(handlers::users::update_profile))
         .route("/api/users/posts", get(handlers::users::user_posts))
-        .route("/api/users/following", get(handlers::users::user_following))
-        .route("/api/users/followers", get(handlers::users::user_followers))
+        // Misskey クライアント（Aria等）は同パスをPOSTで叩く（#81）。GET/POST共存。
+        .route("/api/users/following", get(handlers::users::user_following).post(handlers::misskey::endpoints::users_following))
+        .route("/api/users/followers", get(handlers::users::user_followers).post(handlers::misskey::endpoints::users_followers))
         .route("/api/users/remote-follow-summary", get(handlers::users::user_remote_follow_summary))
         // Misskey 互換レイヤー
         .route("/api/meta", post(handlers::meta::api_meta))
@@ -486,6 +487,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/show", post(handlers::misskey::endpoints::notes_show))
         .route("/api/notes/local-timeline", post(handlers::misskey::endpoints::notes_local_timeline))
         .route("/api/notes/timeline", post(handlers::misskey::endpoints::notes_home_timeline))
+        .route("/api/notes/reactions", post(handlers::misskey::endpoints::notes_reactions))
         .route("/api/notes/hybrid-timeline", post(handlers::misskey::endpoints::notes_hybrid_timeline))
         .route("/api/notes/reactions/create", post(handlers::misskey::endpoints::reactions_create))
         .route("/api/notes/reactions/delete", post(handlers::misskey::endpoints::reactions_delete))
