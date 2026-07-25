@@ -521,6 +521,7 @@ impl PostRepository for PgPostRepository {
              WHERE p.is_local = true AND p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
+               AND p.visibility != 'followers_only'
                AND (p.visibility != 'unlisted' OR p.actor_id = $1)
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND (
@@ -663,6 +664,7 @@ impl PostRepository for PgPostRepository {
              WHERE p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
+               AND p.visibility != 'followers_only'
                AND (p.visibility != 'unlisted' OR p.actor_id = $1)
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND (
