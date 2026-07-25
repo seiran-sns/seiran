@@ -126,6 +126,21 @@ fn to_misskey_visibility(v: &str) -> String {
     .to_string()
 }
 
+/// seiranのemoji_map（`:shortcode:` → URL）をMisskey Noteの`emojis`
+/// （`shortcode` → URL）へ変換する。
+fn to_misskey_emojis(value: Option<&serde_json::Value>) -> BTreeMap<String, String> {
+    value
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flat_map(|map| map.iter())
+        .filter_map(|(key, value)| {
+            let url = value.as_str()?;
+            let shortcode = key.strip_prefix(':').and_then(|s| s.strip_suffix(':')).unwrap_or(key);
+            Some((shortcode.to_string(), url.to_string()))
+        })
+        .collect()
+}
+
 fn to_misskey_note(
     p: &TimelinePost,
     local_domain: &str,
@@ -223,7 +238,7 @@ fn to_misskey_note(
         file_ids: files.iter().map(|f| f.id.clone()).collect(),
         files,
         tags: vec![],
-        emojis: BTreeMap::new(),
+        emojis: to_misskey_emojis(p.post_emoji_map.as_ref()),
         reactions: reactions_map,
         reaction_emojis,
         renote: None,
@@ -467,6 +482,23 @@ mod tests {
             post_ap_object_id: None,
             post_at_uri: None,
         }
+    }
+
+    #[test]
+    fn note_emojis_uses_misskey_shortcode_keys_without_colons() {
+        let mut p = base_post();
+        p.body = "hello :blob_cat:".to_string();
+        p.post_emoji_map = Some(serde_json::json!({
+            ":blob_cat:": "https://example.com/blob-cat.png"
+        }));
+
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+
+        assert_eq!(
+            note.emojis.get("blob_cat").map(String::as_str),
+            Some("https://example.com/blob-cat.png")
+        );
+        assert!(!note.emojis.contains_key(":blob_cat:"));
     }
 
     // 実際の投稿作成処理（handlers::notes::mod.rs）は、Federation配送のIDとして使うため
