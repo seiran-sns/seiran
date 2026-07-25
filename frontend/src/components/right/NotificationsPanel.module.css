@@ -12,6 +12,14 @@
   border-bottom: 1px solid var(--border, #e3e8ef);
 }
 
+.previewWrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
 .icon {
   flex: 0 0 auto;
   font-size: 20px;

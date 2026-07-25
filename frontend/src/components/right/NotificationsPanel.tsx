@@ -9,6 +9,7 @@ import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
 import { profilePath } from "../../lib/format";
 import panel from "../common/Panel.module.css";
+import NoteHoverPreview from "../note/NoteHoverPreview";
 import styles from "./NotificationsPanel.module.css";
 
 const PAGE_SIZE = 20;
@@ -140,12 +141,8 @@ export default function NotificationsPanel() {
         ) : (
           <span />
         );
-        return (
-          <li
-            key={n.id}
-            className={noteId ? `${styles.item} ${styles.clickable}` : styles.item}
-            onClick={noteId ? () => navigate(`/notes/${noteId}`) : undefined}
-          >
+        const content = (
+          <>
             {iconUrl ? (
               <img className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" />
             ) : (
@@ -154,6 +151,21 @@ export default function NotificationsPanel() {
             <span className={styles.text}>
               <Trans i18n={i18n} i18nKey={i18nKey} values={{ label }} components={{ userLink }} />
             </span>
+          </>
+        );
+        return (
+          <li
+            key={n.id}
+            className={noteId ? `${styles.item} ${styles.clickable}` : styles.item}
+            onClick={noteId ? () => navigate(`/notes/${noteId}`) : undefined}
+          >
+            {noteId ? (
+              <NoteHoverPreview noteId={noteId} className={styles.previewWrap}>
+                {content}
+              </NoteHoverPreview>
+            ) : (
+              content
+            )}
           </li>
         );
       })}
