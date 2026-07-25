@@ -500,18 +500,25 @@ pub async fn users_following(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    Ok(Json(
-        rows.into_iter()
-            .map(|r| MisskeyFollowRelation {
-                id: r.follow_id.to_string(),
-                created_at: r.created_at.to_rfc3339(),
-                followee_id: r.actor_id.to_string(),
-                follower_id: actor_id.to_string(),
-                followee: Some(user_lite(r.actor_id, &r.username, &r.domain, &state.local_domain, r.display_name.as_deref(), r.avatar_url.as_deref())),
-                follower: None,
-            })
-            .collect(),
-    ))
+    let mut relations = Vec::with_capacity(rows.len());
+    for r in rows {
+        let actor = state
+            .actors
+            .find_by_id(r.actor_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
+        relations.push(MisskeyFollowRelation {
+            id: r.follow_id.to_string(),
+            created_at: r.created_at.to_rfc3339(),
+            followee_id: r.actor_id.to_string(),
+            follower_id: actor_id.to_string(),
+            followee: Some(build_user_detailed(&state, &actor).await),
+            follower: None,
+        });
+    }
+
+    Ok(Json(relations))
 }
 
 /// POST /api/users/followers — 指定ユーザーのフォロワー一覧（Misskey互換、#81）。`users_following` と対。
@@ -532,18 +539,25 @@ pub async fn users_followers(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    Ok(Json(
-        rows.into_iter()
-            .map(|r| MisskeyFollowRelation {
-                id: r.follow_id.to_string(),
-                created_at: r.created_at.to_rfc3339(),
-                followee_id: actor_id.to_string(),
-                follower_id: r.actor_id.to_string(),
-                followee: None,
-                follower: Some(user_lite(r.actor_id, &r.username, &r.domain, &state.local_domain, r.display_name.as_deref(), r.avatar_url.as_deref())),
-            })
-            .collect(),
-    ))
+    let mut relations = Vec::with_capacity(rows.len());
+    for r in rows {
+        let actor = state
+            .actors
+            .find_by_id(r.actor_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
+        relations.push(MisskeyFollowRelation {
+            id: r.follow_id.to_string(),
+            created_at: r.created_at.to_rfc3339(),
+            followee_id: actor_id.to_string(),
+            follower_id: r.actor_id.to_string(),
+            followee: None,
+            follower: Some(build_user_detailed(&state, &actor).await),
+        });
+    }
+
+    Ok(Json(relations))
 }
 
 /// POST /api/notes/reactions — 指定リアクション種別を付けたユーザー一覧（Misskey互換、#81）。

@@ -177,9 +177,9 @@ pub struct MisskeyFollowRelation {
     pub followee_id: String,
     pub follower_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub followee: Option<MisskeyUserLite>,
+    pub followee: Option<MisskeyUserDetailed>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub follower: Option<MisskeyUserLite>,
+    pub follower: Option<MisskeyUserDetailed>,
 }
 
 /// `POST /api/notes/reactions`（リアクションしたユーザー一覧）の要素。Misskey 本家の
