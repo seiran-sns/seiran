@@ -13,6 +13,61 @@ test("設定メニューからアカウント設定画面へ遷移でき、DID�
   await expect(page.getByText(/did:/)).toBeVisible({ timeout: 15_000 });
 });
 
+test("複数パスキーを登録・削除でき、パスキーでログインできる（#65）", async ({
+  page,
+  request,
+  context,
+}) => {
+  const user = await registerUserViaApi(request, "e2epasskey");
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  const firstAuthenticator = await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+
+  await seedAuth(page, user.token);
+  await page.goto("/settings/account");
+  await page.getByLabel("パスキーの名前").fill("テスト端末");
+  await page.getByRole("button", { name: "パスキーを追加" }).click();
+  await expect(page.getByText("テスト端末")).toBeVisible({ timeout: 15_000 });
+  await cdp.send("WebAuthn.removeVirtualAuthenticator", {
+    authenticatorId: firstAuthenticator.authenticatorId,
+  });
+  await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  await page.getByLabel("パスキーの名前").fill("予備端末");
+  await page.getByRole("button", { name: "パスキーを追加" }).click();
+  await expect(page.getByText("予備端末")).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole("button", { name: "⏻" }).click();
+  await page.getByLabel("メールアドレス / ユーザーネーム").fill(user.username);
+  await page.getByRole("button", { name: "パスキーを使う" }).click();
+  await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
+
+  await page.goto("/settings/account");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("listitem").filter({ hasText: "テスト端末" }).getByRole("button", { name: "削除" }).click();
+  await expect(page.getByText("予備端末")).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("listitem").filter({ hasText: "予備端末" }).getByRole("button", { name: "削除" }).click();
+  await expect(page.getByText("登録済みのパスキーはありません。")).toBeVisible({ timeout: 15_000 });
+});
+
 test("パスワードを変更でき、新しいパスワードでログインできる", async ({ page, request }) => {
   const user = await registerUserViaApi(request, "e2epw");
   await seedAuth(page, user.token);

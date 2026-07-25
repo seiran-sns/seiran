@@ -65,6 +65,8 @@ seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サ�
 
 TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリーコードはArgon2ハッシュのみを保存する。認証アプリとリカバリーコードを両方失った場合は、パスワード検証済みの用途限定JWTから登録メールアドレスへ1時間有効な解除リンクを送り、リンクのワンタイムトークン消費時にTOTP設定を削除する。
 
+パスキーはWebAuthn relying party（RP ID=`LOCAL_DOMAIN`、originは既定で`https://{LOCAL_DOMAIN}`、ローカル/E2Eのみ`WEBAUTHN_ORIGIN`で上書き）として実装する。ユーザーは設定画面から複数credentialを名前付きで登録・削除できる。登録・認証チャレンジの状態は`passkey_challenges`へ保存し、5分で失効、完了APIで原子的に削除する。認証成功時は署名カウンター等を含むcredentialを更新して通常JWTを発行する。パスキー自体がフィッシング耐性を持つ強い認証方式のため、パスキーログインではパスワードおよびTOTP入力を要求しない。
+
 - パスワード: Argon2（`argon2` クレート既定パラメータ、`OsRng` で salt生成）
 - トークン: `jsonwebtoken` による JWT（HS256相当）。`sub` は `"local|{user_id}"`、有効期限7日。secret は `secrets.toml` の `jwt_secret`（256bit hex、起動時自動生成）。
 

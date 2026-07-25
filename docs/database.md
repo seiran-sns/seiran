@@ -45,6 +45,7 @@ ID 採番は2系統ある。
 | `site_settings` | サイト全体の Key-Value 設定（SMTP 設定、Jetstream カーソル等の汎用格納庫） |
 | `email_verifications` / `email_changes` / `password_resets` | 認証系のワンタイムトークン |
 | `user_totp` / `user_totp_recovery_codes` / `totp_disable_requests` | TOTP設定、使い切りリカバリーコード、メール経由の解除トークン |
+| `user_passkeys` / `passkey_challenges` | 複数WebAuthn credentialと短命な登録・認証チャレンジ |
 | `app_tokens` | MiAuth経由で発行されたアプリトークンの一覧・無効化管理 |
 
 ## 3. 主要テーブルの設計判断
@@ -67,6 +68,11 @@ ID 採番は2系統ある。
 `user_totp`はユーザーごとに最大1行を持つ。セットアップ開始時は`enabled=false`で暗号化済みbase32シークレットを保存し、入力された初回コードの検証と10件のリカバリーコード発行が成功したトランザクション内で`enabled=true`にする。シークレットの暗号化は共通のAES-256-GCM鍵を使う。
 
 `user_totp_recovery_codes`は平文を保持せずArgon2ハッシュだけを保存し、使用時に`used_at`を原子的に設定する。`totp_disable_requests`は登録メールアドレスへ送る1時間有効のUUIDワンタイムトークンで、消費時に行を削除してから`user_totp`を削除する。いずれも`users`削除時にCASCADEされる。
+
+### パスキー（`user_passkeys` / `passkey_challenges`）
+
+- `user_passkeys`: `user_id`ごとに複数行を許可し、表示名、WebAuthn credential JSON、登録日時、最終利用日時を保持する。ユーザー削除時はCASCADE削除。
+- `passkey_challenges`: 登録または認証のWebAuthn stateをUUIDトークンに対応づける。5分で失効し、finish時に`DELETE ... RETURNING`で一度だけ消費する。
 
 ### `posts` の設計
 統一ポストID（`id`）はタイムスタンプ内包の Snowflake で、`sinceId`/`untilId` ページネーションの主軸になる。

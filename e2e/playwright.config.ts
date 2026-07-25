@@ -23,6 +23,7 @@ const backendEnv: Record<string, string> = {
   DATABASE_URL: "postgres://seiran_e2e:seiran_e2e@localhost:5433/seiran_e2e",
   PORT: String(backendPort),
   LOCAL_DOMAIN: "localhost",
+  WEBAUTHN_ORIGIN: `http://localhost:${frontendPort}`,
   PLC_DIRECTORY_BASE_URL: `http://127.0.0.1:${plcStubPort}`,
   ATP_APPVIEW_URL: `http://127.0.0.1:${appviewStubPort}`,
   // Relay への requestCrawl が本物の bsky.network に飛ばないよう、存在しないローカル

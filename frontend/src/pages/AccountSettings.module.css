@@ -122,6 +122,21 @@
   border-radius: 8px;
 }
 
+.passkeyList {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+}
+
+.passkeyList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
 .recoveryCodes {
   user-select: all;
   line-height: 1.7;
