@@ -36,6 +36,7 @@
 - [x] **カスタム絵文字のライセンス情報（#63）** — `custom_emojis.license`カラム（Misskey ZIPインポート #50 で追加済みだったが、インポート時にしか設定できなかった）を、手動での絵文字作成・編集からも設定できるようにした。`POST /api/admin/emojis`・`PATCH /api/admin/emojis/:id`のリクエストボディに`license`（1行テキスト・任意項目、改行を含む場合は`INVALID_LICENSE`で拒否）を追加。管理画面の絵文字追加フォームとインライン編集（タグ編集と統合）にライセンス入力欄を追加。zipインポートは既存実装のまま。
 - [x] **Misskey互換API フォロイー/フォロワー一覧・リアクションユーザー一覧（#81）** — Ariaがプロフィール画面のフォロー数/フォロワー数バッジ、およびリアクション長押しから叩く`POST /api/users/following`・`/api/users/followers`・`POST /api/notes/reactions`が未実装で405 Method Not Allowedになっていた不具合を修正。カスタムAPIの同パス`GET`と共存させる形で`POST`ハンドラを追加し、既存の`FollowRepository::list_following`/`list_followers`・`ReactionRepository::actors_for_reaction`をMisskeyワイヤー形状（`MisskeyFollowRelation`・`MisskeyNoteReaction`）に変換して返す。詳細: `docs/protocols.md` 7節
 - [x] **ソーシャルタイムライン・グローバルタイムライン（#78）** — ホーム画面のフィードタブに「ソーシャル」（自分+フォロー中+ローカル全アクターの投稿、リプライ含む）・「グローバル」（`posts`テーブルの全投稿）を追加。バックエンドは`PostRepository::social_timeline`（`home_timeline`のLATERAL方式候補と`local_timeline`の`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（`local_timeline`から`is_local`条件のみ外したもの）を新設し、カスタムAPI（`GET /api/notes/social-timeline`・`/global-timeline`）とMisskey互換API（`POST /api/notes/hybrid-timeline`・`/global-timeline`、Ariaからの呼び出し用）の両方から利用できる。新規テーブル・マイグレーションなし。詳細: `docs/protocols.md` 7節、`docs/database.md`、`docs/ui_spec.md` 2.4b/2.4d/2.4e節
+- [x] **タイムライン選択タブの永続化（#90）** — 最後に選択したホーム/ローカル/ソーシャル/グローバル/リスト/ハッシュタグをLocalStorageへ保存し、リロード後に復元する。
 
 ## 未完了・今後の課題
 
