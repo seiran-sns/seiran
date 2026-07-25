@@ -49,6 +49,55 @@ test("ローカルユーザーは短いIDで候補表示し、3形式のIDを既
   }
 });
 
+test("逐次入力中にID装飾が更新されてもFedi/Bsky候補と完全修飾ID認識を維持する", async ({ page, request }) => {
+  const author = await registerUserViaApi(request, "e2ecomposerremote");
+  await page.route("**/api/actors/search?**", (route) =>
+    route.fulfill({
+      json: [
+        {
+          actor_id: "9001",
+          username: "fedi-user",
+          domain: "remote.example",
+          display_name: "Fedi user",
+          actor_type: "fedi",
+          avatar_url: null,
+          target: "fedi-user@remote.example",
+        },
+        {
+          actor_id: "9002",
+          username: "sky-user.bsky.social",
+          domain: "",
+          display_name: "Bsky user",
+          actor_type: "bsky",
+          avatar_url: null,
+          target: "sky-user.bsky.social",
+        },
+      ],
+    })
+  );
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.click();
+  // 部分IDの未知/既知チェック結果が入力途中に返り、装飾DOMが更新される状況を再現する。
+  await editor.pressSequentially("@fedi-user@remote.example", { delay: 80 });
+  await expect(page.getByRole("option").filter({ hasText: "@fedi-user@remote.example" })).toBeVisible();
+  await expect(editor.locator("span", { hasText: "@fedi-user@remote.example" })).toHaveCSS(
+    "color",
+    "rgb(22, 139, 210)"
+  );
+
+  await editor.fill("");
+  await editor.pressSequentially("@sky-user.bsky.social", { delay: 80 });
+  await expect(page.getByRole("option").filter({ hasText: "@sky-user.bsky.social" })).toBeVisible();
+  await expect(editor.locator("span", { hasText: "@sky-user.bsky.social" })).toHaveCSS(
+    "color",
+    "rgb(22, 139, 210)"
+  );
+});
+
 test("カスタム絵文字候補を画像へ置換し境界Backspaceで通常テキストへ戻せる", async ({ page, request }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -90,6 +139,35 @@ test("カスタム絵文字候補を画像へ置換し境界Backspaceで通常�
   expect(pageErrors).toEqual([]);
   await expect(emoji).toHaveCount(0);
   await expect(editor).toContainText(":wide_emoji");
+});
+
+test("連結したshortcodeは閉じコロン後が英数字でない最後のものだけ絵文字化する", async ({ page, request }) => {
+  const author = await registerUserViaApi(request, "e2ecomposeremojiboundary");
+  await page.route("**/api/emojis", (route) =>
+    route.fulfill({
+      json: {
+        emojis: [{
+          id: "1",
+          aliases: [],
+          name: "igyo",
+          category: null,
+          host: null,
+          url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
+          license: null,
+        }],
+      },
+    })
+  );
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.fill(":igyo:igyo:igyo:");
+  await expect(editor.getByRole("img", { name: ":igyo:" })).toHaveCount(1);
+  // 画像化した最後のshortcodeはtextContentに含まれないため、手前の2つが
+  // 通常テキストのまま残ることを確認する。
+  await expect(editor).toContainText(":igyo:igyo");
 });
 
 test("上下矢印で入力候補の選択を移動できる", async ({ page, request }) => {

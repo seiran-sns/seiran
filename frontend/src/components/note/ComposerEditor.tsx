@@ -9,6 +9,7 @@ import {
 } from "react";
 import { ActorSuggestion, PublicEmoji, api } from "../../api/client";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
+import { SHORTCODE_SOURCE } from "../../lib/richTextPatterns";
 import styles from "./ComposerEditor.module.css";
 
 type Candidate =
@@ -26,6 +27,10 @@ interface ComposerEditorProps {
 
 const MENTION_RE = /(?<![\w])@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?/g;
 const TOKEN_RE = /(?<![\w])@[A-Za-z0-9_.@-]*$|:[A-Za-z0-9_+-]*$/;
+const DECORATION_RE = new RegExp(
+  `(${SHORTCODE_SOURCE}(?![A-Za-z0-9_])|(?<![\\w])@[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?)`,
+  "g"
+);
 
 function nodeValue(node: Node): string {
   if (node instanceof HTMLElement && node.dataset.value) return node.dataset.value;
@@ -142,8 +147,20 @@ export default function ComposerEditor({
   const [checkedMentions, setCheckedMentions] = useState<Set<string>>(new Set());
   const [active, setActive] = useState(-1);
 
+  function preserveCaretForRender() {
+    const editor = editorRef.current;
+    if (editor && document.activeElement === editor) {
+      pendingCaret.current = selectionOffset(editor);
+    }
+  }
+
   useEffect(() => {
-    fetchCustomEmojis().then(setEmojis).catch(() => setEmojis([]));
+    fetchCustomEmojis()
+      .then((rows) => {
+        preserveCaretForRender();
+        setEmojis(rows);
+      })
+      .catch(() => setEmojis([]));
   }, []);
 
   useEffect(() => {
@@ -158,6 +175,10 @@ export default function ComposerEditor({
     )
       .then((resolved) => {
         if (cancelled) return;
+        // 装飾クラスの更新でdangerouslySetInnerHTMLが差し替わっても、入力中の
+        // caretを先頭へ飛ばさない。これが無いと逐次入力中の部分IDチェック結果が
+        // 返った時点で、その後のID入力とサジェストが壊れる。
+        preserveCaretForRender();
         setCheckedMentions((current) => new Set([...current, ...unresolved]));
         setKnownMentions((current) => new Set([...current, ...resolved.filter((v): v is string => !!v)]));
       })
@@ -284,7 +305,7 @@ export default function ComposerEditor({
   }
 
   const emojiByCode = new Map(emojis.map((emoji) => [`:${emoji.name}:`, emoji]));
-  const parts = value.split(/(:[A-Za-z0-9_+-]+:|(?<![\w])@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?)/g);
+  const parts = value.split(DECORATION_RE);
   // contenteditable配下をReactの子要素として管理すると、ブラウザがatomic nodeを
   // 先に編集した場合にremoveChild競合が起きる。安全にescapeしたHTMLを面全体へ
   // 一括反映し、入力値はnodeValueで常にプレーンテキストへ戻す。
