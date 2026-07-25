@@ -174,6 +174,8 @@ pub struct MisskeyNotification {
 pub struct MisskeyFollowRelation {
     pub id: String,
     pub created_at: String,
+    pub followee_id: String,
+    pub follower_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followee: Option<MisskeyUserLite>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -252,5 +254,23 @@ mod tests {
                 "必須フィールド `{key}` が欠けているか null です（misskey_dart 側で TypeError の原因になる）"
             );
         }
+    }
+
+    /// Aria が固定している `misskey_dart` の `Following.fromJson` は、関連先の詳細が
+    /// nullable でも `followeeId` と `followerId` 自体は non-nullable として読む。
+    #[test]
+    fn follow_relation_includes_both_required_actor_ids() {
+        let relation = MisskeyFollowRelation {
+            id: "3".to_owned(),
+            created_at: "2026-01-01T00:00:00+00:00".to_owned(),
+            followee_id: "2".to_owned(),
+            follower_id: "1".to_owned(),
+            followee: None,
+            follower: None,
+        };
+        let value = serde_json::to_value(&relation).unwrap();
+
+        assert_eq!(value["followeeId"], "2");
+        assert_eq!(value["followerId"], "1");
     }
 }

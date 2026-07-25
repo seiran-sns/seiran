@@ -459,6 +459,8 @@ pub async fn users_following(
             .map(|r| MisskeyFollowRelation {
                 id: r.follow_id.to_string(),
                 created_at: r.created_at.to_rfc3339(),
+                followee_id: r.actor_id.to_string(),
+                follower_id: actor_id.to_string(),
                 followee: Some(user_lite(r.actor_id, &r.username, &r.domain, &state.local_domain, r.display_name.as_deref(), r.avatar_url.as_deref())),
                 follower: None,
             })
@@ -489,6 +491,8 @@ pub async fn users_followers(
             .map(|r| MisskeyFollowRelation {
                 id: r.follow_id.to_string(),
                 created_at: r.created_at.to_rfc3339(),
+                followee_id: actor_id.to_string(),
+                follower_id: r.actor_id.to_string(),
                 followee: None,
                 follower: Some(user_lite(r.actor_id, &r.username, &r.domain, &state.local_domain, r.display_name.as_deref(), r.avatar_url.as_deref())),
             })
