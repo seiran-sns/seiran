@@ -37,6 +37,7 @@
 - [x] **Misskey互換API フォロイー/フォロワー一覧・リアクションユーザー一覧（#81）** — Ariaがプロフィール画面のフォロー数/フォロワー数バッジ、およびリアクション長押しから叩く`POST /api/users/following`・`/api/users/followers`・`POST /api/notes/reactions`が未実装で405 Method Not Allowedになっていた不具合を修正。カスタムAPIの同パス`GET`と共存させる形で`POST`ハンドラを追加し、既存の`FollowRepository::list_following`/`list_followers`・`ReactionRepository::actors_for_reaction`をMisskeyワイヤー形状（`MisskeyFollowRelation`・`MisskeyNoteReaction`）に変換して返す。詳細: `docs/protocols.md` 7節
 - [x] **ソーシャルタイムライン・グローバルタイムライン（#78）** — ホーム画面のフィードタブに「ソーシャル」（自分+フォロー中+ローカル全アクターの投稿、リプライ含む）・「グローバル」（`posts`テーブルの全投稿）を追加。バックエンドは`PostRepository::social_timeline`（`home_timeline`のLATERAL方式候補と`local_timeline`の`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（`local_timeline`から`is_local`条件のみ外したもの）を新設し、カスタムAPI（`GET /api/notes/social-timeline`・`/global-timeline`）とMisskey互換API（`POST /api/notes/hybrid-timeline`・`/global-timeline`、Ariaからの呼び出し用）の両方から利用できる。新規テーブル・マイグレーションなし。詳細: `docs/protocols.md` 7節、`docs/database.md`、`docs/ui_spec.md` 2.4b/2.4d/2.4e節
 - [x] **Misskey互換APIの本文内カスタム絵文字（#88）** — Noteレスポンスの`emojis`へ本文shortcodeと画像URLの対応を返し、Aria等のMisskeyクライアントで画像表示できるようにする。
+- [x] **LTL/GTLの公開範囲修正（#91）** — フォロワーで閲覧権限があっても、フォロワー限定投稿はローカル/グローバルタイムラインへ表示せず、ホーム/ソーシャルタイムラインにだけ表示する。
 - [x] **タイムライン選択タブの永続化（#90）** — 最後に選択したホーム/ローカル/ソーシャル/グローバル/リスト/ハッシュタグをLocalStorageへ保存し、リロード後に復元する。
 
 ## 未完了・今後の課題
