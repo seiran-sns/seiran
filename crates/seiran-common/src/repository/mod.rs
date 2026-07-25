@@ -23,6 +23,7 @@ pub mod post;
 pub mod reaction;
 pub mod site_settings;
 pub mod storage_provider;
+pub mod totp;
 pub mod user;
 
 pub use actor::{Actor, ActorProfileRow, ActorRepository, PgActorRepository};
@@ -57,4 +58,5 @@ pub use storage_provider::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider,
     StorageProviderError, StorageProviderRepository, UpdateStorageProvider,
 };
+pub use totp::{PgTotpRepository, TotpRepository};
 pub use user::{AdminUserRow, LoginRow, PgUserRepository, UserRepository};

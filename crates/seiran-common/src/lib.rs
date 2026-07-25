@@ -16,6 +16,7 @@ pub mod repository;
 pub mod storage;
 pub mod streaming;
 pub mod system_actor;
+pub mod totp;
 pub mod username;
 
 pub use db::{get_db_pool, run_migrations};

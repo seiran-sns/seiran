@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { QRCodeSVG } from "qrcode.react";
 import { api, getErrorMessage } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
@@ -17,6 +18,15 @@ export default function AccountSettingsPage() {
 
   const [did, setDid] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+
+  // 二段階認証（TOTP）
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauth_url: string } | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [totpPassword, setTotpPassword] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [totpBusy, setTotpBusy] = useState(false);
+  const [totpError, setTotpError] = useState("");
 
   // メールアドレス変更
   const [newEmail, setNewEmail] = useState("");
@@ -45,10 +55,56 @@ export default function AccountSettingsPage() {
       .profile(user.username)
       .then((p) => !cancelled && setDid(p.at_did))
       .finally(() => !cancelled && setLoading(false));
+    api.account.totp.status().then(({ enabled }) => !cancelled && setTotpEnabled(enabled));
     return () => {
       cancelled = true;
     };
   }, [user]);
+
+  async function startTotpSetup() {
+    setTotpBusy(true);
+    setTotpError("");
+    try {
+      setTotpSetup(await api.account.totp.setup());
+    } catch (err) {
+      setTotpError(getErrorMessage(err));
+    } finally {
+      setTotpBusy(false);
+    }
+  }
+
+  async function enableTotp(e: FormEvent) {
+    e.preventDefault();
+    setTotpBusy(true);
+    setTotpError("");
+    try {
+      const result = await api.account.totp.enable(totpCode.trim());
+      setRecoveryCodes(result.recovery_codes);
+      setTotpEnabled(true);
+      setTotpSetup(null);
+      setTotpCode("");
+    } catch (err) {
+      setTotpError(getErrorMessage(err));
+    } finally {
+      setTotpBusy(false);
+    }
+  }
+
+  async function disableTotp(e: FormEvent) {
+    e.preventDefault();
+    setTotpBusy(true);
+    setTotpError("");
+    try {
+      await api.account.totp.disable(totpPassword);
+      setTotpEnabled(false);
+      setTotpPassword("");
+      setRecoveryCodes([]);
+    } catch (err) {
+      setTotpError(getErrorMessage(err));
+    } finally {
+      setTotpBusy(false);
+    }
+  }
 
   async function changePassword(e: FormEvent) {
     e.preventDefault();
@@ -194,6 +250,48 @@ export default function AccountSettingsPage() {
           {changingPassword ? t("common:saving") : t("account:accountSettings.changePasswordButton")}
         </button>
       </form>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>{t("account:accountSettings.totpTitle")}</h3>
+        <p>{t(totpEnabled ? "account:accountSettings.totpEnabled" : "account:accountSettings.totpDisabled")}</p>
+        {totpError && <p className={styles.error}>{totpError}</p>}
+        {recoveryCodes.length > 0 && (
+          <div>
+            <p className={styles.success}>{t("account:accountSettings.recoveryCodesNotice")}</p>
+            <pre className={styles.recoveryCodes}>{recoveryCodes.join("\n")}</pre>
+          </div>
+        )}
+        {!totpEnabled && !totpSetup && recoveryCodes.length === 0 && (
+          <button className={styles.save} type="button" onClick={startTotpSetup} disabled={totpBusy}>
+            {t("account:accountSettings.totpSetupButton")}
+          </button>
+        )}
+        {totpSetup && (
+          <form onSubmit={enableTotp}>
+            <p>{t("account:accountSettings.totpScanHint")}</p>
+            <div className={styles.qrCode}><QRCodeSVG value={totpSetup.otpauth_url} size={192} /></div>
+            <p className={styles.secret}>{totpSetup.secret}</p>
+            <label className={styles.label}>
+              {t("account:accountSettings.totpCodeLabel")}
+              <input className={styles.input} value={totpCode} onChange={(e) => setTotpCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" required />
+            </label>
+            <button className={styles.save} type="submit" disabled={totpBusy || totpCode.trim().length !== 6}>
+              {t("account:accountSettings.totpEnableButton")}
+            </button>
+          </form>
+        )}
+        {totpEnabled && recoveryCodes.length === 0 && (
+          <form onSubmit={disableTotp}>
+            <label className={styles.label}>
+              {t("account:accountSettings.currentPasswordLabel")}
+              <input className={styles.input} type="password" value={totpPassword} onChange={(e) => setTotpPassword(e.target.value)} autoComplete="current-password" required />
+            </label>
+            <button className={styles.dangerBtn} type="submit" disabled={totpBusy}>
+              {t("account:accountSettings.totpDisableButton")}
+            </button>
+          </form>
+        )}
+      </section>
 
       {/* 退会（#29、旧プロフィール編集画面からこちらへ移動、#55） */}
       <div className={styles.dangerZone}>

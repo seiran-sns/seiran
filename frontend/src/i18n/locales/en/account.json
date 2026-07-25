@@ -32,7 +32,16 @@
     "newPasswordConfirmLabel": "Confirm new password",
     "changePasswordButton": "Change password",
     "passwordSaved": "Password changed.",
-    "passwordMismatch": "New passwords don't match."
+    "passwordMismatch": "New passwords don't match.",
+    "totpTitle": "Two-factor authentication",
+    "totpEnabled": "Two-factor authentication with an authenticator app is enabled.",
+    "totpDisabled": "Two-factor authentication with an authenticator app is disabled.",
+    "totpSetupButton": "Set up authenticator app",
+    "totpScanHint": "Scan this QR code with your authenticator app, or enter the secret below.",
+    "totpCodeLabel": "6-digit authenticator code",
+    "totpEnableButton": "Verify and enable",
+    "totpDisableButton": "Disable two-factor authentication",
+    "recoveryCodesNotice": "Save these recovery codes somewhere safe. Each code can be used once, and they will not be shown again after you leave this page."
   },
   "verifyEmailChange": {
     "verifying": "Confirming your email change...",

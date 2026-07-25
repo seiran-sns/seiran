@@ -44,6 +44,7 @@ ID 採番は2系統ある。
 | `atp_blobs` | ATP `uploadBlob` で受信したバイナリ |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP 設定、Jetstream カーソル等の汎用格納庫） |
 | `email_verifications` / `email_changes` / `password_resets` | 認証系のワンタイムトークン |
+| `user_totp` / `user_totp_recovery_codes` / `totp_disable_requests` | TOTP設定、使い切りリカバリーコード、メール経由の解除トークン |
 | `app_tokens` | MiAuth経由で発行されたアプリトークンの一覧・無効化管理 |
 
 ## 3. 主要テーブルの設計判断
@@ -60,6 +61,12 @@ ID 採番は2系統ある。
 ローカルアクターは `avatar_media_id`/`banner_media_id`（自前 `media_files` 参照）、リモートアクターは `avatar_url`/`banner_url`（URL直持ち）という排他的な使い分けをしている。
 
 `users.language_preference`（設定画面「表示」＞「言語」）: `ja` / `en` のいずれか、`NULL` は「自動」（ブラウザの言語設定に従う）を意味する。
+
+### TOTP関連（`user_totp` / `user_totp_recovery_codes` / `totp_disable_requests`）
+
+`user_totp`はユーザーごとに最大1行を持つ。セットアップ開始時は`enabled=false`で暗号化済みbase32シークレットを保存し、入力された初回コードの検証と10件のリカバリーコード発行が成功したトランザクション内で`enabled=true`にする。シークレットの暗号化は共通のAES-256-GCM鍵を使う。
+
+`user_totp_recovery_codes`は平文を保持せずArgon2ハッシュだけを保存し、使用時に`used_at`を原子的に設定する。`totp_disable_requests`は登録メールアドレスへ送る1時間有効のUUIDワンタイムトークンで、消費時に行を削除してから`user_totp`を削除する。いずれも`users`削除時にCASCADEされる。
 
 ### `posts` の設計
 統一ポストID（`id`）はタイムスタンプ内包の Snowflake で、`sinceId`/`untilId` ページネーションの主軸になる。

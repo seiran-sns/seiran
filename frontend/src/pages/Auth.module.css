@@ -110,3 +110,17 @@
 .link a:hover {
   text-decoration: underline;
 }
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
