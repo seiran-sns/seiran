@@ -118,3 +118,43 @@ test("上下矢印で入力候補の選択を移動できる", async ({ page, re
   await editor.press("ArrowUp");
   await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
 });
+
+test("IME未確定中は入力DOMへ干渉せず、確定後に本文へ同期する", async ({ page, request }) => {
+  const author = await registerUserViaApi(request, "e2ecomposerime");
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent("compositionstart", {
+      bubbles: true,
+      data: "",
+    }));
+    const composingText = document.createTextNode("にほん");
+    element.replaceChildren(composingText);
+    Object.assign(window, { __composerComposingText: composingText });
+    element.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      data: "にほん",
+      inputType: "insertCompositionText",
+      isComposing: true,
+    }));
+  });
+
+  await expect(editor).toHaveText("にほん");
+  await expect.poll(() => editor.evaluate(
+    (element) => element.firstChild === (window as typeof window & {
+      __composerComposingText?: Node;
+    }).__composerComposingText
+  )).toBe(true);
+
+  await editor.evaluate((element) => {
+    element.textContent = "日本";
+    element.dispatchEvent(new CompositionEvent("compositionend", {
+      bubbles: true,
+      data: "日本",
+    }));
+  });
+  await expect(editor).toHaveText("日本");
+});

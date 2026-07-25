@@ -313,9 +313,15 @@ export default function ComposerEditor({
         aria-multiline="true"
         {...({ placeholder } as Record<string, string>)}
         suppressContentEditableWarning
-        onInput={updateFromDom}
+        onInput={() => {
+          // composition中に親のvalueを更新するとdangerouslySetInnerHTMLが未確定DOMを
+          // 作り直し、ブラウザのIMEセッションと未確定文字列を破壊してしまう。
+          // compositionendで完成したDOMを一度だけ同期する。
+          if (!composing.current) updateFromDom();
+        }}
         onKeyDown={handleKeyDown}
         onKeyUp={() => {
+          if (composing.current) return;
           const next = editorRef.current ? selectionOffset(editorRef.current) : null;
           if (next !== null) setCaret(next);
         }}
