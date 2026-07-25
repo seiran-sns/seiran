@@ -1,8 +1,9 @@
-import { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, DriveFile, Note, getErrorMessage } from "../../api/client";
 import { acct, calcRemaining, displayName } from "../../lib/format";
 import styles from "./PostComposer.module.css";
+import ComposerEditor from "./ComposerEditor";
 
 interface PostComposerProps {
   onPosted?: (note: Note) => void;
@@ -43,16 +44,12 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
   const [error, setError] = useState("");
   const [attached, setAttached] = useState<DriveFile | null>(null);
   const [uploading, setUploading] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const guideTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!autoFocus) return;
-    const el = textareaRef.current;
-    if (!el) return;
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
+    // ComposerEditor が装飾DOMの構築後にフォーカスとcaret復元を行う。
   }, [autoFocus]);
 
   useEffect(() => {
@@ -114,7 +111,6 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
       setAttached(null);
       setVisibility(replyConstraint?.defaultValue ?? "public");
       onPosted?.(note);
-      textareaRef.current?.focus();
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -141,23 +137,6 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
     uploadFile(file);
   }
 
-  function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
-    if (uploading || attached) return;
-    const item = Array.from(e.clipboardData.items).find((i) => i.type.startsWith("image/"));
-    if (!item) return;
-    const file = item.getAsFile();
-    if (!file) return;
-    e.preventDefault();
-    uploadFile(file);
-  }
-
-  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault();
-      handlePost(e as unknown as FormEvent);
-    }
-  }
-
   return (
     <form onSubmit={handlePost} className={styles.form}>
       {replyTo && (
@@ -176,15 +155,15 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
         style={{ display: "none" }}
         onChange={handleFileSelect}
       />
-      <textarea
-        ref={textareaRef}
+      <ComposerEditor
         value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-        className={styles.textarea}
+        onChange={setText}
+        onSubmitShortcut={() => handlePost({ preventDefault() {} } as FormEvent)}
+        onImagePaste={(file) => {
+          if (!uploading && !attached) uploadFile(file);
+        }}
         placeholder={replyTo ? t("home:postComposer.replyPlaceholder") : t("home:postComposer.placeholder")}
-        rows={3}
+        autoFocus={autoFocus}
       />
 
       <div className={styles.scopeRow}>
