@@ -24,8 +24,10 @@ test("管理者はサイト設定を変更でき、リロード後も反映さ�
   await page.getByRole("button", { name: "サイト設定" }).click();
 
   const newName = `seiran-e2e-${Date.now()}`;
+  const mediaProxyUrl = "http://localhost:3100";
   const nameInput = page.getByLabel("サイト名称");
   await nameInput.fill(newName);
+  await page.getByLabel("外部メディアプロキシURL").fill(mediaProxyUrl);
   await page.getByRole("button", { name: "保存" }).click();
 
   await expect(page.getByText("保存しました。")).toBeVisible({ timeout: 10_000 });
@@ -34,6 +36,7 @@ test("管理者はサイト設定を変更でき、リロード後も反映さ�
   await expect(page.getByText("ユーザー管理")).toBeVisible({ timeout: 10_000 });
   await page.getByRole("button", { name: "サイト設定" }).click();
   await expect(page.getByLabel("サイト名称")).toHaveValue(newName, { timeout: 10_000 });
+  await expect(page.getByLabel("外部メディアプロキシURL")).toHaveValue(mediaProxyUrl);
 });
 
 test("管理者はユーザーを凍結・凍結解除できる", async ({ page, request }) => {

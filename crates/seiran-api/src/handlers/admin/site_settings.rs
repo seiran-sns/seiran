@@ -25,6 +25,7 @@ pub struct SiteSettingsResponse {
     pub site_name: String,
     pub site_color: String,
     pub site_icon_url: String,
+    pub media_proxy_url: String,
 }
 
 fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
@@ -44,6 +45,7 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
         site_name: settings.get("site_name").cloned().unwrap_or_default(),
         site_color: settings.get("site_color").cloned().unwrap_or_default(),
         site_icon_url: settings.get("site_icon_url").cloned().unwrap_or_default(),
+        media_proxy_url: settings.get("media_proxy_url").cloned().unwrap_or_default(),
     }
 }
 
@@ -60,6 +62,7 @@ pub struct UpdateSiteSettingsRequest {
     pub site_name: Option<String>,
     pub site_color: Option<String>,
     pub site_icon_url: Option<String>,
+    pub media_proxy_url: Option<String>,
 }
 
 // ─── ハンドラ ─────────────────────────────────────────────────────────────
@@ -88,6 +91,14 @@ pub async fn update_site_settings(
 ) -> Result<Json<SiteSettingsResponse>, ApiError> {
     require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
+    if let Some(value) = req.media_proxy_url.as_deref().filter(|value| !value.trim().is_empty()) {
+        let url = url::Url::parse(value)
+            .map_err(|_| ApiError::BadRequest("INVALID_MEDIA_PROXY_URL".to_string()))?;
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+            return Err(ApiError::BadRequest("INVALID_MEDIA_PROXY_URL".to_string()));
+        }
+    }
+
     let pairs: Vec<(&str, String)> = [
         req.smtp_host.as_deref().map(|v| ("smtp_host", v.to_string())),
         req.smtp_port.as_deref().map(|v| ("smtp_port", v.to_string())),
@@ -98,6 +109,7 @@ pub async fn update_site_settings(
         req.site_name.as_deref().map(|v| ("site_name", v.to_string())),
         req.site_color.as_deref().map(|v| ("site_color", v.to_string())),
         req.site_icon_url.as_deref().map(|v| ("site_icon_url", v.to_string())),
+        req.media_proxy_url.as_deref().map(|v| ("media_proxy_url", v.trim_end_matches('/').to_string())),
     ]
     .into_iter()
     .flatten()

@@ -23,6 +23,7 @@ export default function SiteSettingsPanel() {
   const [siteName, setSiteName] = useState("");
   const [siteColor, setSiteColor] = useState("");
   const [siteIconUrl, setSiteIconUrl] = useState("");
+  const [mediaProxyUrl, setMediaProxyUrl] = useState("");
   const [uploadingIcon, setUploadingIcon] = useState(false);
   const iconRef = useRef<HTMLInputElement>(null);
 
@@ -39,6 +40,7 @@ export default function SiteSettingsPanel() {
         setSiteName(s.site_name);
         setSiteColor(s.site_color);
         setSiteIconUrl(s.site_icon_url);
+        setMediaProxyUrl(s.media_proxy_url);
       })
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
@@ -75,6 +77,7 @@ export default function SiteSettingsPanel() {
         site_name: siteName,
         site_color: siteColor,
         site_icon_url: siteIconUrl,
+        media_proxy_url: mediaProxyUrl,
       };
       // パスワードは入力があったときだけ送る（未入力なら既存値を維持）。
       if (password) patch.smtp_password = password;
@@ -128,6 +131,15 @@ export default function SiteSettingsPanel() {
               )}
             </span>
           </label>
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.mediaProxyTitle")}</div>
+        <div className={styles.card}>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.mediaProxyUrlLabel")}
+            <input className={styles.input} value={mediaProxyUrl} onChange={(e) => setMediaProxyUrl(e.target.value)} placeholder="https://media-proxy.example" />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.mediaProxyHint")}</p>
         </div>
 
         <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.smtpSectionTitle")}</div>

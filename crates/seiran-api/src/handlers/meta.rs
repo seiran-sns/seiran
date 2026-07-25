@@ -34,6 +34,7 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
         "requireEmailVerification": require_email_verification,
         "siteColor": get("site_color"),
         "siteIconUrl": get("site_icon_url"),
+        "mediaProxyUrl": get("media_proxy_url"),
         "emojis": emojis,
         // Bsky 配信時の書記素クラスタ上限（validate_text_length と同じ値）。
         // Fedi のみ配信時は上限が緩む（10,000バイト/3,000書記素）が、Misskey クライアントの

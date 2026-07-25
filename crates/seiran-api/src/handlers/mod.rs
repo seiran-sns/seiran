@@ -12,6 +12,7 @@ pub mod follows;
 pub mod hashtags;
 pub mod lists;
 pub mod media_store;
+pub mod media_proxy;
 pub mod meta;
 pub mod miauth;
 pub mod misskey;
