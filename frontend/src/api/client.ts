@@ -248,6 +248,88 @@ export function isTotpRequired(res: LoginResult): res is TotpRequiredResponse {
   return "totp_required" in res;
 }
 
+export interface PasskeySummary {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+function decodeBase64Url(value: string): ArrayBuffer {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)).buffer;
+}
+
+function encodeBase64Url(value: ArrayBuffer): string {
+  const bytes = new Uint8Array(value);
+  let binary = "";
+  bytes.forEach((byte) => (binary += String.fromCharCode(byte)));
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+type CredentialDescriptorJson = Record<string, unknown> & { id: string };
+type RegistrationOptionsJson = Record<string, unknown> & {
+  challenge: string;
+  user: Record<string, unknown> & { id: string };
+  excludeCredentials?: CredentialDescriptorJson[];
+};
+type AuthenticationOptionsJson = Record<string, unknown> & {
+  challenge: string;
+  allowCredentials?: CredentialDescriptorJson[];
+};
+type WebAuthnEnvelope<T> = { token: string; public_key: { publicKey: T } };
+
+function registrationOptions(value: RegistrationOptionsJson): PublicKeyCredentialCreationOptions {
+  return {
+    ...value,
+    challenge: decodeBase64Url(value.challenge),
+    user: { ...value.user, id: decodeBase64Url(value.user.id) },
+    excludeCredentials: value.excludeCredentials?.map((item) => ({
+      ...item,
+      id: decodeBase64Url(item.id),
+    })),
+  } as PublicKeyCredentialCreationOptions;
+}
+
+function authenticationOptions(value: AuthenticationOptionsJson): PublicKeyCredentialRequestOptions {
+  return {
+    ...value,
+    challenge: decodeBase64Url(value.challenge),
+    allowCredentials: value.allowCredentials?.map((item) => ({
+      ...item,
+      id: decodeBase64Url(item.id),
+    })),
+  } as PublicKeyCredentialRequestOptions;
+}
+
+function credentialJson(credential: PublicKeyCredential): Record<string, unknown> {
+  const response = credential.response;
+  if (response instanceof AuthenticatorAttestationResponse) {
+    return {
+      id: credential.id,
+      rawId: encodeBase64Url(credential.rawId),
+      type: credential.type,
+      response: {
+        attestationObject: encodeBase64Url(response.attestationObject),
+        clientDataJSON: encodeBase64Url(response.clientDataJSON),
+        transports: response.getTransports?.(),
+      },
+    };
+  }
+  const assertion = response as AuthenticatorAssertionResponse;
+  return {
+    id: credential.id,
+    rawId: encodeBase64Url(credential.rawId),
+    type: credential.type,
+    response: {
+      authenticatorData: encodeBase64Url(assertion.authenticatorData),
+      clientDataJSON: encodeBase64Url(assertion.clientDataJSON),
+      signature: encodeBase64Url(assertion.signature),
+      userHandle: assertion.userHandle ? encodeBase64Url(assertion.userHandle) : null,
+    },
+  };
+}
+
 export interface NoteAttachment {
   url: string;
   mimeType: string;
@@ -670,6 +752,19 @@ export const api = {
     },
     login(identifier: string, password: string) {
       return request<LoginResult>("POST", "/auth/login", { identifier, password });
+    },
+    async loginWithPasskey(identifier: string) {
+      const start = await request<WebAuthnEnvelope<AuthenticationOptionsJson>>(
+        "POST", "/auth/passkeys/start", { identifier }
+      );
+      const credential = (await navigator.credentials.get({
+        publicKey: authenticationOptions(start.public_key.publicKey),
+      })) as PublicKeyCredential | null;
+      if (!credential) throw new Error("Passkey authentication was cancelled");
+      return request<AuthResponse>("POST", "/auth/passkeys/finish", {
+        token: start.token,
+        credential: credentialJson(credential),
+      });
     },
     me() {
       return request<User>("GET", "/auth/me");
@@ -1096,6 +1191,27 @@ export const api = {
       /** 現在のパスワード確認の上で無効化する。 */
       disable(currentPassword: string) {
         return request<void>("POST", "/account/totp/disable", { current_password: currentPassword });
+      },
+    },
+    passkeys: {
+      list() {
+        return request<PasskeySummary[]>("GET", "/account/passkeys");
+      },
+      async register(name: string) {
+        const start = await request<WebAuthnEnvelope<RegistrationOptionsJson>>(
+          "POST", "/account/passkeys/registration/start", { name }
+        );
+        const credential = (await navigator.credentials.create({
+          publicKey: registrationOptions(start.public_key.publicKey),
+        })) as PublicKeyCredential | null;
+        if (!credential) throw new Error("Passkey registration was cancelled");
+        return request<PasskeySummary>("POST", "/account/passkeys/registration/finish", {
+          token: start.token,
+          credential: credentialJson(credential),
+        });
+      },
+      delete(id: string) {
+        return request<void>("DELETE", `/account/passkeys/${encodeURIComponent(id)}`);
       },
     },
   },

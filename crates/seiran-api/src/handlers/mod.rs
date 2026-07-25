@@ -24,5 +24,6 @@ pub mod setup;
 pub mod streaming;
 pub mod target_resolve;
 pub mod totp;
+pub mod passkeys;
 pub mod users;
 pub mod xrpc;

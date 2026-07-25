@@ -41,7 +41,14 @@
     "totpCodeLabel": "6-digit authenticator code",
     "totpEnableButton": "Verify and enable",
     "totpDisableButton": "Disable two-factor authentication",
-    "recoveryCodesNotice": "Save these recovery codes somewhere safe. Each code can be used once, and they will not be shown again after you leave this page."
+    "recoveryCodesNotice": "Save these recovery codes somewhere safe. Each code can be used once, and they will not be shown again after you leave this page.",
+    "passkeyTitle": "Passkeys",
+    "passkeyDescription": "Sign in without a password using your device screen lock, fingerprint, or face. You can register multiple passkeys.",
+    "passkeyEmpty": "No passkeys are registered.",
+    "passkeyNameLabel": "Passkey name",
+    "passkeyAddButton": "Add passkey",
+    "passkeyDeleteButton": "Delete",
+    "passkeyDeleteConfirm": "Delete this passkey?"
   },
   "verifyEmailChange": {
     "verifying": "Confirming your email change...",

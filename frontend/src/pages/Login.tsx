@@ -47,6 +47,22 @@ export default function Login() {
     }
   }
 
+  async function handlePasskeyLogin() {
+    setError("");
+    if (!identifier.trim()) {
+      setError(t("auth:login.passkeyIdentifierRequired"));
+      return;
+    }
+    setLoading(true);
+    try {
+      finishLogin(await api.auth.loginWithPasskey(identifier.trim()));
+    } catch (err) {
+      setError(getErrorMessage(err) || t("auth:login.genericError"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleTotpSubmit(e: FormEvent) {
     e.preventDefault();
     if (!pendingToken) return;
@@ -147,6 +163,9 @@ export default function Login() {
           {error && <p className={styles.error}>{error}</p>}
           <button type="submit" className={styles.button} disabled={loading}>
             {loading ? t("auth:login.submitting") : t("auth:login.submit")}
+          </button>
+          <button type="button" className={styles.button} disabled={loading || !window.PublicKeyCredential} onClick={handlePasskeyLogin}>
+            {t("auth:login.passkeySubmit")}
           </button>
         </form>
         <p className={styles.link}>

@@ -19,6 +19,7 @@ use dashmap::DashMap;
 use tower_http::cors::{Any, CorsLayer};
 use axum::{extract::DefaultBodyLimit, routing::{delete, get, patch, post}, Router};
 use sqlx::PgPool;
+use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 
 use seiran_common::{
     LocalAuthProvider, Secrets, AtpCommitService, AtpCommitEvent, ApClient,
@@ -103,6 +104,7 @@ pub struct AppState {
     pub emojis: Arc<dyn EmojiRepository>,
     /// TOTP（二段階認証）設定・リカバリーコード・メール経由の強制解除リクエスト（#65）。
     pub totp: Arc<dyn TotpRepository>,
+    pub webauthn: Arc<Webauthn>,
 }
 
 impl AppState {
@@ -299,6 +301,18 @@ pub async fn init_state(
         }
     };
 
+    let rp_origin_value = std::env::var("WEBAUTHN_ORIGIN")
+        .unwrap_or_else(|_| format!("https://{}", local_domain));
+    let rp_origin = Url::parse(&rp_origin_value)
+        .expect("LOCAL_DOMAINからWebAuthn originを構築できません");
+    let webauthn = Arc::new(
+        WebauthnBuilder::new(&local_domain, &rp_origin)
+            .expect("WebAuthn relying party設定が不正です")
+            .rp_name("seiran")
+            .build()
+            .expect("WebAuthn初期化に失敗しました"),
+    );
+
     AppState {
         actors,
         users,
@@ -338,6 +352,7 @@ pub async fn init_state(
         email_changes,
         emojis,
         totp,
+        webauthn,
     }
 }
 
@@ -407,6 +422,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/totp/verify", post(handlers::totp::totp_verify))
         .route("/api/auth/totp/request-disable-email", post(handlers::totp::totp_request_disable_email))
         .route("/api/auth/totp/confirm-disable", post(handlers::totp::totp_confirm_disable))
+        .route("/api/auth/passkeys/start", post(handlers::passkeys::authentication_start))
+        .route("/api/auth/passkeys/finish", post(handlers::passkeys::authentication_finish))
         // アカウント管理（退会等）
         .route("/api/account/withdraw", post(handlers::account::withdraw))
         .route("/api/account/change-password", post(handlers::account::change_password))
@@ -420,6 +437,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/account/totp/setup", post(handlers::totp::totp_setup))
         .route("/api/account/totp/enable", post(handlers::totp::totp_enable))
         .route("/api/account/totp/disable", post(handlers::totp::totp_disable))
+        .route("/api/account/passkeys", get(handlers::passkeys::list))
+        .route("/api/account/passkeys/registration/start", post(handlers::passkeys::registration_start))
+        .route("/api/account/passkeys/registration/finish", post(handlers::passkeys::registration_finish))
+        .route("/api/account/passkeys/:id", delete(handlers::passkeys::delete))
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
         .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))

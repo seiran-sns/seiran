@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
-import { api, getErrorMessage } from "../api/client";
+import { api, getErrorMessage, type PasskeySummary } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
@@ -27,6 +27,10 @@ export default function AccountSettingsPage() {
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [totpBusy, setTotpBusy] = useState(false);
   const [totpError, setTotpError] = useState("");
+  const [passkeys, setPasskeys] = useState<PasskeySummary[]>([]);
+  const [passkeyName, setPasskeyName] = useState("");
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyError, setPasskeyError] = useState("");
 
   // メールアドレス変更
   const [newEmail, setNewEmail] = useState("");
@@ -56,10 +60,37 @@ export default function AccountSettingsPage() {
       .then((p) => !cancelled && setDid(p.at_did))
       .finally(() => !cancelled && setLoading(false));
     api.account.totp.status().then(({ enabled }) => !cancelled && setTotpEnabled(enabled));
+    api.account.passkeys.list().then((items) => !cancelled && setPasskeys(items));
     return () => {
       cancelled = true;
     };
   }, [user]);
+
+  async function registerPasskey(e: FormEvent) {
+    e.preventDefault();
+    setPasskeyBusy(true);
+    setPasskeyError("");
+    try {
+      const item = await api.account.passkeys.register(passkeyName.trim());
+      setPasskeys((current) => [...current, item]);
+      setPasskeyName("");
+    } catch (err) {
+      setPasskeyError(getErrorMessage(err));
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  async function deletePasskey(id: string) {
+    if (!confirm(t("account:accountSettings.passkeyDeleteConfirm"))) return;
+    setPasskeyError("");
+    try {
+      await api.account.passkeys.delete(id);
+      setPasskeys((current) => current.filter((item) => item.id !== id));
+    } catch (err) {
+      setPasskeyError(getErrorMessage(err));
+    }
+  }
 
   async function startTotpSetup() {
     setTotpBusy(true);
@@ -291,6 +322,35 @@ export default function AccountSettingsPage() {
             </button>
           </form>
         )}
+      </section>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>{t("account:accountSettings.passkeyTitle")}</h3>
+        <p>{t("account:accountSettings.passkeyDescription")}</p>
+        {passkeyError && <p className={styles.error}>{passkeyError}</p>}
+        {passkeys.length === 0 ? (
+          <p>{t("account:accountSettings.passkeyEmpty")}</p>
+        ) : (
+          <ul className={styles.passkeyList}>
+            {passkeys.map((item) => (
+              <li key={item.id}>
+                <span>{item.name}</span>
+                <button className={styles.ghost} type="button" onClick={() => deletePasskey(item.id)}>
+                  {t("account:accountSettings.passkeyDeleteButton")}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form onSubmit={registerPasskey}>
+          <label className={styles.label}>
+            {t("account:accountSettings.passkeyNameLabel")}
+            <input className={styles.input} value={passkeyName} onChange={(e) => setPasskeyName(e.target.value)} maxLength={100} required />
+          </label>
+          <button className={styles.save} type="submit" disabled={passkeyBusy || !passkeyName.trim() || !window.PublicKeyCredential}>
+            {passkeyBusy ? t("common:saving") : t("account:accountSettings.passkeyAddButton")}
+          </button>
+        </form>
       </section>
 
       {/* 退会（#29、旧プロフィール編集画面からこちらへ移動、#55） */}

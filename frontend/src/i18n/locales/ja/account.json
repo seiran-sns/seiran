@@ -41,7 +41,14 @@
     "totpCodeLabel": "認証アプリの6桁コード",
     "totpEnableButton": "確認して有効化",
     "totpDisableButton": "二段階認証を無効化",
-    "recoveryCodesNotice": "以下のリカバリーコードを安全な場所に保存してください。各コードは一度だけ使え、この画面を離れると再表示できません。"
+    "recoveryCodesNotice": "以下のリカバリーコードを安全な場所に保存してください。各コードは一度だけ使え、この画面を離れると再表示できません。",
+    "passkeyTitle": "パスキー",
+    "passkeyDescription": "端末の画面ロックや指紋・顔認証を使って、パスワードなしでログインできます。複数登録できます。",
+    "passkeyEmpty": "登録済みのパスキーはありません。",
+    "passkeyNameLabel": "パスキーの名前",
+    "passkeyAddButton": "パスキーを追加",
+    "passkeyDeleteButton": "削除",
+    "passkeyDeleteConfirm": "このパスキーを削除しますか？"
   },
   "verifyEmailChange": {
     "verifying": "メールアドレスの変更を確認中...",
