@@ -92,7 +92,27 @@ function restoreSelection(root: HTMLElement, target: number) {
 }
 
 function actorValue(actor: ActorSuggestion) {
+  if (actor.actor_type === "local") return `@${actor.username}`;
   return actor.domain ? `@${actor.username}@${actor.domain}` : `@${actor.username}`;
+}
+
+function actorMentionValues(actor: ActorSuggestion) {
+  if (actor.actor_type !== "local") return [actorValue(actor)];
+  return [
+    `@${actor.username}`,
+    `@${actor.username}.${actor.domain}`,
+    `@${actor.username}@${actor.domain}`,
+  ];
+}
+
+async function mentionIsKnown(mention: string) {
+  const target = mention.slice(1);
+  const queries = [target];
+  if (!target.includes("@") && target.includes(".")) queries.push(target.slice(0, target.indexOf(".")));
+  const rows = (await Promise.all(queries.map((query) => api.actors.search(query, 10)))).flat();
+  return rows.some((row) =>
+    actorMentionValues(row).some((candidate) => candidate.toLowerCase() === mention.toLowerCase())
+  );
 }
 
 function escapeHtml(value: string) {
@@ -133,10 +153,7 @@ export default function ComposerEditor({
     let cancelled = false;
     Promise.all(
       unresolved.map(async (mention) => {
-        const rows = await api.actors.search(mention.slice(1), 10);
-        return rows.some((row) => actorValue(row).toLowerCase() === mention.toLowerCase())
-          ? mention
-          : null;
+        return (await mentionIsKnown(mention)) ? mention : null;
       })
     )
       .then((resolved) => {
@@ -150,7 +167,12 @@ export default function ComposerEditor({
     };
   }, [value, checkedMentions]);
 
-  const token = value.slice(0, caret).match(TOKEN_RE)?.[0] ?? "";
+  const rawToken = value.slice(0, caret).match(TOKEN_RE)?.[0] ?? "";
+  const token =
+    rawToken === ":" &&
+    emojis.some((emoji) => value.slice(0, caret).endsWith(`:${emoji.name}:`))
+      ? ""
+      : rawToken;
   useEffect(() => {
     if (!token.startsWith("@")) {
       setActors([]);
@@ -188,7 +210,7 @@ export default function ComposerEditor({
     return [];
   }, [actors, emojis, token]);
 
-  useEffect(() => setActive(-1), [token]);
+  useEffect(() => setActive(candidates.length ? 0 : -1), [token, candidates.length]);
 
   useLayoutEffect(() => {
     if (pendingCaret.current === null || !editorRef.current) return;
@@ -317,7 +339,7 @@ export default function ComposerEditor({
         dangerouslySetInnerHTML={{ __html: editorHtml }}
       />
       {candidates.length > 0 && (
-        <ul className={styles.suggestions} role="listbox">
+        <ul className={styles.suggestions} role="listbox" aria-label="入力候補">
           {candidates.map((candidate, index) => (
             <li key={`${candidate.kind}-${candidate.key}`}>
               <button
