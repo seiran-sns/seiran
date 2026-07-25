@@ -273,6 +273,52 @@ pub async fn notes_home_timeline(
     Ok(Json(build_notes(&state, rows, Some(actor_id)).await))
 }
 
+/// POST /api/notes/hybrid-timeline（ソーシャルタイムライン。要ログイン、#78）
+pub async fn notes_hybrid_timeline(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<TimelineBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let actor_id = state
+        .actors
+        .find_local_by_user_id(auth_user.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?
+        .id;
+
+    let limit = body.limit.unwrap_or(30).min(100);
+    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = state
+        .posts
+        .social_timeline(actor_id, limit, until_id, since_id, false)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(build_notes(&state, rows, Some(actor_id)).await))
+}
+
+/// POST /api/notes/global-timeline（グローバルタイムライン、#78）
+pub async fn notes_global_timeline(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<TimelineBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let limit = body.limit.unwrap_or(20).min(100);
+    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = state
+        .posts
+        .global_timeline(my_actor_id, limit, until_id, since_id, false)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(build_notes(&state, rows, my_actor_id).await))
+}
+
 /// POST /api/notes/reactions/create
 pub async fn reactions_create(
     headers: HeaderMap,

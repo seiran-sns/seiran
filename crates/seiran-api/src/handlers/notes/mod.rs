@@ -28,7 +28,7 @@ use axum::{
 };
 use sqlx::Row;
 
-use seiran_common::repository::{Actor, InsertFullParams, NotificationKind, TimelinePost};
+use seiran_common::repository::{extract_shortcode_candidates, Actor, InsertFullParams, NotificationKind, TimelinePost};
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::{ap::{fetch_ap_history, plain_to_html_with_mentions}, generate_snowflake_id, mention::{convert_mentions_for_bsky, extract_local_mention_actor_ids}, ApDeliveryKind, PrevApReaction};
 
@@ -288,6 +288,33 @@ async fn create_regular_post(
     let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
     let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
 
+    // 本文中のカスタム絵文字（`:shortcode:`）を、このサーバーの `custom_emojis` と照合して
+    // emoji_map を構築する。Fedi受信投稿はAPのtag配列由来でemoji_mapが埋まるが、ローカル
+    // 投稿作成にはその経路が無いため、ここで解決しないと本文中のショートコードが常に画像化
+    // されない（#77）。解決に失敗しても投稿自体は継続する（絵文字がテキストのまま出るだけ）。
+    let shortcode_candidates = extract_shortcode_candidates(&text);
+    let local_emoji_pairs = if shortcode_candidates.is_empty() {
+        Vec::new()
+    } else {
+        match state.emojis.find_urls_by_shortcodes(&shortcode_candidates).await {
+            Ok(pairs) => pairs,
+            Err(e) => {
+                tracing::error!("[create_regular_post] 絵文字ショートコード解決失敗: {}", e);
+                Vec::new()
+            }
+        }
+    };
+    let local_emoji_map: serde_json::Value = serde_json::Value::Object(
+        local_emoji_pairs
+            .into_iter()
+            .map(|(code, url)| (format!(":{}:", code), serde_json::Value::String(url)))
+            .collect(),
+    );
+    let response_emojis: HashMap<String, String> = local_emoji_map
+        .as_object()
+        .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+        .unwrap_or_default();
+
     let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
     let quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
 
@@ -343,6 +370,7 @@ async fn create_regular_post(
             deliver_bsky,
             thread_root_post_id,
             recipient_actor_ids: &recipient_actor_ids,
+            emoji_map: &local_emoji_map,
         })
         .await
     {
@@ -440,7 +468,7 @@ async fn create_regular_post(
         reactions: vec![],
         renote: None,
         reposted_by_me: None,
-        emojis: HashMap::new(),
+        emojis: response_emojis,
         pinned_by_me: None,
         visibility: if visibility == "public" { None } else { Some(visibility.to_string()) },
         deliver_fedi: Some(deliver_fedi),
@@ -523,6 +551,86 @@ pub async fn local_timeline(
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[local_timeline] クエリ失敗: {}", e);
+            return ApiError::Internal(e.to_string()).into_response();
+        }
+    };
+    resolve_mention_facets_in_place(&state.db, &mut rows).await;
+    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
+    let reposted_set = if let Some(actor_id) = my_actor_id {
+        fetch_reposted_ids(&state.db, actor_id, &ids).await
+    } else {
+        Default::default()
+    };
+    let mut notes: Vec<NoteResponse> = rows.into_iter()
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            if my_actor_id.is_some() {
+                nr.reposted_by_me = Some(reposted_set.contains(&id));
+            }
+            nr
+        })
+        .collect();
+    embed_renotes(&state.db, &mut notes, my_actor_id).await;
+    Json(notes).into_response()
+}
+
+/// ソーシャルタイムライン（自分 + フォロー中 + ローカル全体、#78）。
+pub async fn social_timeline(
+    Query(q): Query<TimelineQuery>,
+    user: AuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor_id = user.actor_id;
+
+    let limit = q.limit.unwrap_or(30).min(100);
+    let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let mut rows = match state.posts.social_timeline(actor_id, limit, until_id, since_id, q.exclude_direct).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("[social_timeline] クエリ失敗: {}", e);
+            return ApiError::Internal(e.to_string()).into_response();
+        }
+    };
+    resolve_mention_facets_in_place(&state.db, &mut rows).await;
+    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
+    let reposted_set = fetch_reposted_ids(&state.db, actor_id, &ids).await;
+    let mut notes: Vec<NoteResponse> = rows.into_iter()
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            nr.reposted_by_me = Some(reposted_set.contains(&id));
+            nr
+        })
+        .collect();
+    embed_renotes(&state.db, &mut notes, Some(actor_id)).await;
+    Json(notes).into_response()
+}
+
+/// グローバルタイムライン（`posts`テーブルの全投稿、#78）。
+pub async fn global_timeline(
+    Query(q): Query<TimelineQuery>,
+    MaybeAuthedUser(user): MaybeAuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let my_actor_id: Option<i64> = user.map(|u| u.actor_id);
+
+    let limit = q.limit.unwrap_or(20).min(100);
+    let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let mut rows = match state.posts.global_timeline(my_actor_id, limit, until_id, since_id, q.exclude_direct).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("[global_timeline] クエリ失敗: {}", e);
             return ApiError::Internal(e.to_string()).into_response();
         }
     };

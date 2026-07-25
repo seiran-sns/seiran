@@ -66,7 +66,7 @@ ID 採番は2系統ある。
 
 - `deleted_at`: 物理削除ではなく論理削除（Tombstone）。ATP は MST 上の署名付き履歴を壊せないため。`atp_tombstone_cid` に削除証明の CID を保持する。
 - `metadata`（JSONB）: プロトコル別の変形レシピなど拡張情報の汎用格納庫。
-- `emoji_map`（JSONB）: 本文中のカスタム絵文字 `:shortcode:` → 画像URL のマップ（Fedi 受信時に解決して保存。表示側で都度解決しない静的スナップショット）。
+- `emoji_map`（JSONB）: 本文中のカスタム絵文字 `:shortcode:` → 画像URL のマップ。Fedi 受信時は AP の `tag` 配列から、ローカル投稿作成時は本文中のショートコード候補（`extract_shortcode_candidates`）を `custom_emojis` と一括照合して、それぞれ投稿作成時に解決・保存する（表示側で都度解決しない静的スナップショット）。
 - `mention_facets`（JSONB、デフォルト `[]`）: Bsky投稿のメンションfacet位置情報 `[{"byteStart":N,"byteEnd":M,"did":"did:plc:..."}]`。`emoji_map`とは対照的に、DIDのハンドル解決は保存時ではなく表示時（`NoteResponse`生成時）に都度行う（Bskyハンドルは可変なため。`docs/protocols.md` 6節参照）。ローカル投稿・Fedi受信は常に空配列。
 - `is_local`（非正規化 + トリガー）: ローカルタイムライン取得がリモート投稿優勢な環境で劣化する問題への対策。`BEFORE INSERT` トリガー `trg_posts_set_is_local` が `actors.actor_type` から自動導出するため、書き込み漏れの心配がない。
 - 重複排除・マージに使うカラム: `seiran_post_uuid`（他 seiran サーバー間マージのキー。**ATP側レコードには埋め込まれていないため、Bsky経由で先に取り込まれた投稿は AP 側の同一投稿と現状マージされない** — 既知の制約）、`parent_original_post_id`（ループバック・一般ブリッジ重複のハードリンク）。
@@ -124,4 +124,5 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 ## 4. 典型的なクエリパターン
 
 - **ホーム/ローカルタイムライン**: `posts` を `id`（降順）でページネーションするだけの単純な SQL。フォロー時点で相手の過去ログを丸ごと自サーバー DB に取り込んでいるため、外部 API 呼び出しを伴わない（`docs/concept.md` 「タイムラインは自前の池」参照）。
+- **ソーシャル/グローバルタイムライン（#78）**: `PostRepository::social_timeline`（自分+フォロー中+ローカル全体、home_timelineのLATERAL方式候補とlocal_timelineの`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（local_timelineから`is_local`条件のみ外したもの）。新規テーブルは無く、`home_timeline`/`local_timeline`と同じインデックス（`idx_posts_actor_id`・`is_local`列）で完結する。
 - **検索**: ローカル DB 全文検索（`idx_posts_body_trgm`, pg_trgm）と AppView 検索の結果をマージする。セッション管理の詳細は `docs/architecture.md` の検索セッション節を参照。
