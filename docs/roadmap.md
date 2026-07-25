@@ -29,6 +29,7 @@
 - [x] **メールアドレス変更（#59）** — アカウント設定（`/settings/account`）に新アドレス入力フォームを追加。`email_changes`テーブル（`password_resets`と同型のワンタイムトークン方式、`user_id`紐付き）に変更リクエストを保存し新アドレス宛に確認メールを送信、`POST /api/account/email/confirm-change`でリンク踏み時点のトークン消費と`users.email`更新を行う（`/verify-email-change?token=...`がフロントの着地先）。既存の新規登録用`email_verifications`はuser_idを持たないため使い回さず専用テーブルとした。詳細: `docs/database.md`、`docs/ui_spec.md` 2.7節
 - [x] **TOTP二段階認証（#65 前半）** — 認証アプリ設定、10件の使い切りリカバリーコード、ログイン時の二段階検証、登録メール経由の解除を実装。シークレットは暗号化、リカバリーコードはArgon2ハッシュのみを保存する。詳細: `docs/architecture.md` 4節、`docs/database.md`、`docs/ui_spec.md` 2.7節
 - [x] **複数パスキー（#65 後半）** — WebAuthnによるパスワードレスログイン、複数credentialの登録・名前付き一覧・削除に対応。チャレンジは5分で失効し、一度だけ消費する。
+- [x] **管理画面の二段階認証状況（#65）** — ユーザーごとのTOTP状態・パスキー登録数表示と、管理者によるTOTP強制解除に対応。
 - [x] **添付画像のライトボックス表示（#64）** — `NoteCard`の添付画像クリックを新規タブ遷移からページ内ライトボックス（`ImageLightbox`）表示に変更。バックエンドの変更なし（フロントエンドのみ）。詳細: `docs/ui_spec.md` 2.2b節
 - [x] **管理画面タブシートの画面上部張り付き・左右スワイプ（#66）** — `/admin` のタブシート（`Tabs`）に、プロフィール画面のフィードタブと同じsticky手法をオプトインで適用（`sticky`/`top` props、直上の見出しの実高さぶんオフセット）し、下スクロール時に画面上部へ張り付くようにした。あわせてコンテンツ領域に既存の`useSwipe`フックを適用し、モバイルでの左右スワイプによるタブ切り替えに対応。バックエンドの変更なし。詳細: `docs/ui_spec.md` 2.8節
 - [x] **リモートFediユーザーのフォロー中/フォロワー全件取得・表示（#68）** — プロフィール画面で、`follows`テーブル（seiranが認知している関係のみ）とは独立に、相手のAPアクタードキュメントの`following`/`followers`OrderedCollectionへ直接問い合わせて全件取得する。短タイムアウト（200ms）の同期取得を試み、失敗/タイムアウト時は`Job::RemoteFollowListSync`をバックグラウンドで積み`remote_follow_snapshots`テーブルへキャッシュ、次回リロードで反映される。未登録アクターは`Job::RemoteActorResolve`でプロフィールを解決する。フロントは`ProfilePage`でプロフィール取得直後にタブが開かれる前から先読みを開始し（`remoteFollowSummaryCache`）、「フォロー中/フォロワー」タブにローカルDB未把握の項目を見出しで分けず同じ見た目の1つのリストとして混ぜて表示（既知アクターはアバター等付き、未知はハンドル文字列のみ）。プロフィールカードのフォロー中/フォロワー人数もローカル・リモートをブレンドした実数（`total_count`）を表示する。詳細: `docs/protocols.md` 2節、`docs/database.md`
@@ -36,6 +37,7 @@
 - [x] **Misskey互換API フォロイー/フォロワー一覧・リアクションユーザー一覧（#81）** — Ariaがプロフィール画面のフォロー数/フォロワー数バッジ、およびリアクション長押しから叩く`POST /api/users/following`・`/api/users/followers`・`POST /api/notes/reactions`が未実装で405 Method Not Allowedになっていた不具合を修正。カスタムAPIの同パス`GET`と共存させる形で`POST`ハンドラを追加し、既存の`FollowRepository::list_following`/`list_followers`・`ReactionRepository::actors_for_reaction`をMisskeyワイヤー形状（`MisskeyFollowRelation`・`MisskeyNoteReaction`）に変換して返す。詳細: `docs/protocols.md` 7節
 - [x] **ソーシャルタイムライン・グローバルタイムライン（#78）** — ホーム画面のフィードタブに「ソーシャル」（自分+フォロー中+ローカル全アクターの投稿、リプライ含む）・「グローバル」（`posts`テーブルの全投稿）を追加。バックエンドは`PostRepository::social_timeline`（`home_timeline`のLATERAL方式候補と`local_timeline`の`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（`local_timeline`から`is_local`条件のみ外したもの）を新設し、カスタムAPI（`GET /api/notes/social-timeline`・`/global-timeline`）とMisskey互換API（`POST /api/notes/hybrid-timeline`・`/global-timeline`、Ariaからの呼び出し用）の両方から利用できる。新規テーブル・マイグレーションなし。詳細: `docs/protocols.md` 7節、`docs/database.md`、`docs/ui_spec.md` 2.4b/2.4d/2.4e節
 - [x] **LTL/GTLの公開範囲修正（#91）** — フォロワーで閲覧権限があっても、フォロワー限定投稿はローカル/グローバルタイムラインへ表示せず、ホーム/ソーシャルタイムラインにだけ表示する。
+- [x] **タイムライン選択タブの永続化（#90）** — 最後に選択したホーム/ローカル/ソーシャル/グローバル/リスト/ハッシュタグをLocalStorageへ保存し、リロード後に復元する。
 
 ## 未完了・今後の課題
 

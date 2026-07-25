@@ -61,7 +61,7 @@ seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サ�
 
 ## 4. 認証
 
-認証の起点はローカル ID/PW（`seiran-common::auth::local::LocalAuthProvider`）。TOTPを有効化したユーザーはパスワード検証後に5分間有効な用途限定JWTを受け取り、`POST /api/auth/totp/verify`でTOTPまたは使い切りリカバリーコードを検証して初めて通常のJWTを取得する。用途限定JWTは通常JWTとクレーム形状を分け、一般APIの認証には利用できない。外部認証プロバイダとの連携や、認証方式を切り替える抽象化レイヤーは存在しない。
+認証の起点はローカル ID/PW（`seiran-common::auth::local::LocalAuthProvider`）。TOTPを有効化したユーザーはパスワード検証後に5分間有効な用途限定JWTを受け取り、`POST /api/auth/totp/verify`でTOTPまたは使い切りリカバリーコードを検証して初めて通常のJWTを取得する。用途限定JWTは通常JWTとクレーム形状を分け、一般APIの認証には利用できない。管理者はユーザー管理APIでTOTP有効状態とパスキー登録数を確認でき、本人が認証手段を失った場合はTOTP設定を強制解除できる。外部認証プロバイダとの連携や、認証方式を切り替える抽象化レイヤーは存在しない。
 
 TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリーコードはArgon2ハッシュのみを保存する。認証アプリとリカバリーコードを両方失った場合は、パスワード検証済みの用途限定JWTから登録メールアドレスへ1時間有効な解除リンクを送り、リンクのワンタイムトークン消費時にTOTP設定を削除する。
 

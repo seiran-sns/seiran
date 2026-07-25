@@ -40,3 +40,15 @@ test("ホーム画面から他画面へ遷移して戻ると、選択タブと�
   const scrollYAfter = await page.evaluate(() => window.scrollY);
   expect(Math.abs(scrollYAfter - scrollYBefore)).toBeLessThan(50);
 });
+
+test("タイムラインの選択タブはリロード後も保持される", async ({ page, request }) => {
+  const user = await registerUserViaApi(request, "e2ehometab");
+  await seedAuth(page, user.token);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "グローバル" }).click();
+  await expect(page.getByRole("button", { name: "グローバル" })).toHaveClass(/feedTabActive/);
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "グローバル" })).toHaveClass(/feedTabActive/, { timeout: 10_000 });
+});
