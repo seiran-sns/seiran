@@ -21,6 +21,8 @@ pub struct AdminUserResponse {
     pub role: String,
     pub suspended_at: Option<DateTime<Utc>>,
     pub username: Option<String>,
+    pub totp_enabled: bool,
+    pub passkey_count: i64,
 }
 
 impl From<AdminUserRow> for AdminUserResponse {
@@ -31,6 +33,8 @@ impl From<AdminUserRow> for AdminUserResponse {
             role: r.role,
             suspended_at: r.suspended_at,
             username: r.username,
+            totp_enabled: r.totp_enabled,
+            passkey_count: r.passkey_count,
         }
     }
 }
@@ -110,6 +114,26 @@ pub async fn change_user_role(
     state
         .users
         .update_role(id, req.role.as_str())
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/admin/users/:id/totp/disable
+///
+/// 管理者が、認証手段を失ったユーザーのTOTP設定を強制解除する。
+/// `user_totp` の削除によりリカバリーコードとメール解除要求もCASCADE削除される。
+pub async fn disable_user_totp(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
+
+    state
+        .totp
+        .delete(id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 

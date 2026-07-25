@@ -83,6 +83,11 @@
     "noActorLabel": "(actor not created)",
     "suspendedBadge": "Suspended",
     "suspendButton": "Suspend",
-    "unsuspendButton": "Unsuspend"
+    "unsuspendButton": "Unsuspend",
+    "totpEnabled": "TOTP: enabled",
+    "totpDisabled": "TOTP: disabled",
+    "passkeyCount": "Passkeys: {{count}}",
+    "disableTotpButton": "Force-disable TOTP",
+    "disableTotpConfirm": "Force-disable TOTP for {{username}}?"
   }
 }

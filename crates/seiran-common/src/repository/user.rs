@@ -19,6 +19,8 @@ pub struct AdminUserRow {
     pub role: String,
     pub suspended_at: Option<DateTime<Utc>>,
     pub username: Option<String>,
+    pub totp_enabled: bool,
+    pub passkey_count: i64,
 }
 
 #[async_trait]
@@ -170,7 +172,15 @@ impl UserRepository for PgUserRepository {
 
     async fn list_for_admin(&self) -> Result<Vec<AdminUserRow>, sqlx::Error> {
         sqlx::query_as::<_, AdminUserRow>(
-            "SELECT u.id, u.email, u.role::text AS role, u.suspended_at, a.username
+            "SELECT u.id, u.email, u.role::text AS role, u.suspended_at, a.username,
+                    EXISTS (
+                        SELECT 1 FROM user_totp t
+                        WHERE t.user_id = u.id AND t.enabled
+                    ) AS totp_enabled,
+                    (
+                        SELECT COUNT(*) FROM user_passkeys p
+                        WHERE p.user_id = u.id
+                    ) AS passkey_count
              FROM users u
              LEFT JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
              ORDER BY u.id

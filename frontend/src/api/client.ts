@@ -161,6 +161,8 @@ export interface AdminUser {
   role: string;
   suspended_at: string | null;
   username: string | null;
+  totp_enabled: boolean;
+  passkey_count: number;
 }
 
 export interface StorageProvider {
@@ -981,6 +983,9 @@ export const api = {
     },
     changeUserRole(id: string, role: string) {
       return request<void>("POST", `/admin/users/${encodeURIComponent(id)}/role`, { role });
+    },
+    disableUserTotp(id: string) {
+      return request<void>("POST", `/admin/users/${encodeURIComponent(id)}/totp/disable`);
     },
 
     getSiteSettings() {
