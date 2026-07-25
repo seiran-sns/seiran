@@ -137,5 +137,5 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 ## 4. 典型的なクエリパターン
 
 - **ホーム/ローカルタイムライン**: `posts` を `id`（降順）でページネーションするだけの単純な SQL。フォロー時点で相手の過去ログを丸ごと自サーバー DB に取り込んでいるため、外部 API 呼び出しを伴わない（`docs/concept.md` 「タイムラインは自前の池」参照）。
-- **ソーシャル/グローバルタイムライン（#78）**: `PostRepository::social_timeline`（自分+フォロー中+ローカル全体、home_timelineのLATERAL方式候補とlocal_timelineの`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（local_timelineから`is_local`条件のみ外したもの）。新規テーブルは無く、`home_timeline`/`local_timeline`と同じインデックス（`idx_posts_actor_id`・`is_local`列）で完結する。
+- **ソーシャル/グローバルタイムライン（#78）**: `PostRepository::social_timeline`（自分+フォロー中+ローカル全体、home_timelineのLATERAL方式候補とlocal_timelineの`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（local_timelineから`is_local`条件のみ外したもの）。新規テーブルは無く、`home_timeline`/`local_timeline`と同じインデックス（`idx_posts_actor_id`・`is_local`列）で完結する。フォロワー限定（`followers_only`）投稿は、閲覧者がフォロワーでもローカル/グローバルには出さず、ホームとソーシャルにだけ表示する（#91）。
 - **検索**: ローカル DB 全文検索（`idx_posts_body_trgm`, pg_trgm）と AppView 検索の結果をマージする。セッション管理の詳細は `docs/architecture.md` の検索セッション節を参照。
