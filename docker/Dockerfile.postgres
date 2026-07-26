@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+# ─────────────────────────────────────────────────────────────────────────────
+# pg_bigm 組み込み済み PostgreSQL イメージ (#97)
+#
+# pg_bigm は 2-gram（bigram）ベースの GIN インデックスで LIKE 検索を高速化する
+# PostgreSQL 拡張。Alpine 系の APK リポジトリには用意がないため、
+# Debian ベース（bookworm）の公式イメージ上でソースからビルドする。
+#
+# ビルドステージでコンパイルした共有ライブラリ・拡張定義ファイルだけを
+# ランタイムステージにコピーし、ビルド依存（gcc/make/ヘッダ等）は
+# 最終イメージに含めない。
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM postgres:16-bookworm AS builder
+
+ARG PG_BIGM_VERSION=1.2-20250903
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        build-essential \
+        postgresql-server-dev-16 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://github.com/pgbigm/pg_bigm/archive/refs/tags/v${PG_BIGM_VERSION}.tar.gz" -o /tmp/pg_bigm.tar.gz \
+    && mkdir -p /tmp/pg_bigm \
+    && tar xzf /tmp/pg_bigm.tar.gz -C /tmp/pg_bigm --strip-components=1 \
+    && rm /tmp/pg_bigm.tar.gz \
+    && make -C /tmp/pg_bigm USE_PGXS=1 \
+    && make -C /tmp/pg_bigm USE_PGXS=1 install
+
+FROM postgres:16-bookworm
+
+COPY --from=builder /usr/lib/postgresql/16/lib/pg_bigm.so /usr/lib/postgresql/16/lib/
+COPY --from=builder /usr/share/postgresql/16/extension/pg_bigm* /usr/share/postgresql/16/extension/

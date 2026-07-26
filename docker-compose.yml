@@ -38,8 +38,15 @@ x-seiran-backend: &seiran-backend
 
 services:
   # ─── PostgreSQL ────────────────────────────────────────────────────────────
+  # pg_bigm 組み込み済みイメージ（docker/Dockerfile.postgres, #97）。
+  # LIKE 検索用の bigm インデックスを効かせるため shared_preload_libraries に
+  # pg_bigm を積む（公式イメージの postgresql.conf を書き換えず起動引数で渡す）。
   db:
-    image: postgres:16-alpine
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.postgres
+    image: seiran-postgres:16-pgbigm
+    command: ["postgres", "-c", "shared_preload_libraries=pg_bigm"]
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
