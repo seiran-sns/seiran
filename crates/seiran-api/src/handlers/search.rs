@@ -116,10 +116,13 @@ async fn search_local_db(
     fetch_limit: i64,
     until_id: Option<i64>,
 ) -> Vec<i64> {
+    // pg_bigmはLIKE演算子のみ最適化対象（ILIKE非対応）のため、大文字小文字を無視した
+    // 部分一致は LOWER() LIKE LOWER() の形で書く（idx_posts_body_bigm はLOWER(body)に
+    // 対して張っているため、この形でないとインデックスが使われない）。
     let rows = if let Some(uid) = until_id {
         sqlx::query(
             "SELECT id FROM posts
-             WHERE body ILIKE '%' || $1 || '%'
+             WHERE LOWER(body) LIKE LOWER('%' || $1 || '%')
                AND deleted_at IS NULL AND id < $2
              ORDER BY id DESC LIMIT $3",
         )
@@ -131,7 +134,7 @@ async fn search_local_db(
     } else {
         sqlx::query(
             "SELECT id FROM posts
-             WHERE body ILIKE '%' || $1 || '%'
+             WHERE LOWER(body) LIKE LOWER('%' || $1 || '%')
                AND deleted_at IS NULL
              ORDER BY id DESC LIMIT $2",
         )

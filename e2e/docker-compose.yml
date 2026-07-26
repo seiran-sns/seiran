@@ -5,7 +5,14 @@ name: seiran-e2e
 # （global-teardown.ts で `down -v` してデータを破棄する）。
 services:
   db:
-    image: postgres:16-alpine
+    # pg_bigm 組み込み済みイメージ（../docker/Dockerfile.postgres, #97）。
+    # migrate時に `CREATE EXTENSION pg_bigm` を実行するため、素の postgres:16-alpine では
+    # 拡張が見つからず失敗する。
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.postgres
+    image: seiran-postgres:16-pgbigm
+    command: ["postgres", "-c", "shared_preload_libraries=pg_bigm"]
     restart: "no"
     environment:
       POSTGRES_USER: seiran_e2e
