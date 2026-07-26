@@ -8,8 +8,3 @@ CREATE EXTENSION IF NOT EXISTS pg_bigm;
 
 -- 投稿本文検索（GET /api/notes/search）
 CREATE INDEX idx_posts_body_bigm ON posts USING gin (LOWER(body) gin_bigm_ops);
-
--- アクター検索（GET /api/actors/search、リストメンバー追加のサジェスト）
-CREATE INDEX idx_actors_username_bigm ON actors USING gin (LOWER(username) gin_bigm_ops);
-CREATE INDEX idx_actors_display_name_bigm ON actors USING gin (LOWER(display_name) gin_bigm_ops);
-CREATE INDEX idx_actors_acct_bigm ON actors USING gin (LOWER(username || '@' || domain) gin_bigm_ops);

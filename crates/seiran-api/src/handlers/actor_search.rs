@@ -28,7 +28,7 @@ pub async fn search_actors(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     // `username`/`domain`はDBでは別カラムのため、"@yuba@reax.work"や"yuba@"のように
-    // "@"を含む入力は素の`username`単体の一致では一致しない。先頭の"@"を除去した上で、
+    // "@"を含む入力は素の`username ILIKE`単体では一致しない。先頭の"@"を除去した上で、
     // `username || '@' || domain`の結合文字列も検索対象に加えて acct 形式の入力に対応する。
     let query = q.q.trim().trim_start_matches('@');
     if query.is_empty() {
@@ -46,11 +46,11 @@ pub async fn search_actors(
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
          WHERE (a.actor_type != 'local' OR a.user_id IS NOT NULL)
            AND (
-             LOWER(a.username) LIKE LOWER($1) ESCAPE '\\'
-             OR LOWER(a.display_name) LIKE LOWER($1) ESCAPE '\\'
-             OR LOWER(a.username || '@' || a.domain) LIKE LOWER($1) ESCAPE '\\'
+             a.username ILIKE $1 ESCAPE '\\'
+             OR a.display_name ILIKE $1 ESCAPE '\\'
+             OR (a.username || '@' || a.domain) ILIKE $1 ESCAPE '\\'
            )
-         ORDER BY (CASE WHEN LOWER(a.username) LIKE LOWER($2) ESCAPE '\\' THEN 0 ELSE 1 END), a.username
+         ORDER BY (CASE WHEN a.username ILIKE $2 ESCAPE '\\' THEN 0 ELSE 1 END), a.username
          LIMIT $3",
     )
     .bind(&contains_pattern)
@@ -91,7 +91,7 @@ pub async fn search_actors(
     Json(out).into_response()
 }
 
-/// `LIKE` パターン中の `%`/`_`/`\` をエスケープする（ユーザー入力をそのままワイルドカードに
+/// `ILIKE` パターン中の `%`/`_`/`\` をエスケープする（ユーザー入力をそのままワイルドカードに
 /// しないため）。
 fn escape_like(s: &str) -> String {
     s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
