@@ -86,6 +86,7 @@ async fn upsert_remote_fedi_actor(
     let bio = remote_ap.summary.as_deref().map(strip_html);
     // 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Person の tag 配列由来）。
     let emoji_map = remote_ap.emoji_map();
+    record_remote_emojis(inbox, &domain, &remote_ap.tag).await;
     // プロフィールのキーバリュー項目（#62）。
     let profile_fields = remote_ap.profile_fields_json();
 
@@ -347,6 +348,7 @@ async fn handle_create_note(
     let body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
     // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
     let emoji_map = build_emoji_map(&tags);
+    record_remote_emojis(inbox, &remote.domain, &tags).await;
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
     let to_list = as_string_list(&note["to"]);
     let visibility = classify_ap_visibility(&to_list, &as_string_list(&note["cc"]));
@@ -1208,6 +1210,42 @@ fn extract_emoji_tag_url(value: &serde_json::Value, shortcode: &str) -> Option<S
     build_emoji_map(&tags).get(shortcode)?.as_str().map(|s| s.to_string())
 }
 
+/// APのEmoji tagを `remote_emojis` へ記録する（#73）。
+/// 投稿本文・表示名・絵文字リアクションのいずれの受信経路からも同じ形で呼ばれる。
+/// カタログ記録の失敗は本処理（投稿保存等）を止めるべきではないため、ログのみに留める。
+async fn record_remote_emojis(inbox: &InboxContext, domain: &str, tags: &[serde_json::Value]) {
+    for tag in tags {
+        if tag["type"].as_str() != Some("Emoji") {
+            continue;
+        }
+        let Some(name) = tag["name"].as_str() else { continue };
+        let Some(url) = tag["icon"]["url"].as_str() else { continue };
+        let shortcode = name.trim_matches(':');
+        if shortcode.is_empty() {
+            continue;
+        }
+        // Misskeyはライセンスを `_misskey_license.freeText` で配送する。他実装が
+        // aliases/tags/keywordsを添える場合も、既知情報として検索・初期値に利用する。
+        let license = tag["_misskey_license"]["freeText"].as_str();
+        let remote_tags: Vec<String> = ["aliases", "tags", "keywords"]
+            .iter()
+            .filter_map(|key| tag[*key].as_array())
+            .flatten()
+            .filter_map(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        if let Err(e) = inbox
+            .remote_emoji_repo
+            .upsert_seen(shortcode, domain, url, &remote_tags, license)
+            .await
+        {
+            tracing::warn!("[RemoteEmoji] 記録失敗 shortcode={} domain={}: {}", shortcode, domain, e);
+        }
+    }
+}
+
 /// いいね（Like）・絵文字リアクション（EmojiReact）を受信し reactions テーブルへ保存する (#22)。
 ///
 /// Misskey は絵文字リアクション（Unicode 絵文字・カスタム絵文字とも）でも AP の `type` を
@@ -1254,6 +1292,16 @@ async fn handle_reaction(
     // リアクションを打ったアクターを解決・upsert
     let remote = upsert_remote_fedi_actor(inbox, ap_client, actor_uri).await?;
     let actor_id = remote.actor_id;
+
+    // カスタム絵文字リアクションなら remote_emojis にも記録する（#73）。
+    if let Some(url) = emoji_url.as_deref() {
+        let tag = serde_json::json!({
+            "type": "Emoji",
+            "name": content,
+            "icon": { "url": url },
+        });
+        record_remote_emojis(inbox, &remote.domain, &[tag]).await;
+    }
 
     // reactions へ INSERT（同一ユーザー・同一内容の重複、activity_id 重複はスキップ）
     inbox

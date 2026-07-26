@@ -27,12 +27,14 @@ export interface StubFediServer {
   /** 対象ローカルユーザー宛のCreate(Note)を送る（`to`に対象アクターのみを指定するとdirect扱い）。
    * `opts.inReplyTo`を指定すると、そのAP Note IDへの返信として送信する。
    * `opts.mentionTargetUsername`を指定すると、そのローカルユーザーへの`tag[].type=="Mention"`
-   * （メンション通知E2E用）を`object.tag`に含める。返り値は生成したNote ID。 */
+   * （メンション通知E2E用）を`object.tag`に含める。
+   * `opts.emojiShortcode`を指定すると、リモート絵文字カタログE2E用のEmoji tagを含める。
+   * 返り値は生成したNote ID。 */
   sendCreateNote(
     seiranBaseUrl: string,
     targetUsername: string,
     text: string,
-    opts?: { inReplyTo?: string; mentionTargetUsername?: string },
+    opts?: { inReplyTo?: string; mentionTargetUsername?: string; emojiShortcode?: string },
   ): Promise<string>;
   /** このスタブアクターが送った投稿（`sendCreateNote`が返した Note ID）に対する
    * Delete(Tombstone)をseiranへ送る（リモート削除反映のE2E用）。 */
@@ -162,15 +164,27 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
         async sendCreateNote(seiranBaseUrl, targetUsername, text, opts) {
           const targetActorUri = `${seiranBaseUrl}/users/${targetUsername}`;
           const noteId = `${base}/notes/${Date.now()}-${Math.random().toString(36).slice(2)}`;
-          const tag = opts?.mentionTargetUsername
-            ? [
-                {
-                  type: "Mention",
-                  href: `${seiranBaseUrl}/users/${opts.mentionTargetUsername}`,
-                  name: `@${opts.mentionTargetUsername}`,
-                },
-              ]
-            : [];
+          const tag: Record<string, unknown>[] = [];
+          if (opts?.mentionTargetUsername) {
+            tag.push({
+              type: "Mention",
+              href: `${seiranBaseUrl}/users/${opts.mentionTargetUsername}`,
+              name: `@${opts.mentionTargetUsername}`,
+            });
+          }
+          if (opts?.emojiShortcode) {
+            tag.push({
+              type: "Emoji",
+              name: `:${opts.emojiShortcode}:`,
+              icon: {
+                type: "Image",
+                mediaType: "image/png",
+                url: `${base}/emoji/${opts.emojiShortcode}.png`,
+              },
+              aliases: [`alias_${opts.emojiShortcode}`],
+              _misskey_license: { freeText: "CC BY 4.0 E2E" },
+            });
+          }
           const activity = {
             "@context": "https://www.w3.org/ns/activitystreams",
             type: "Create",

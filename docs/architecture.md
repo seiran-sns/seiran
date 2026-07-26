@@ -143,7 +143,9 @@ pub struct SearchSession {
 
 **画像アップロードパイプライン**（`storage/image.rs::prepare_image()`）: ユーザーの画像を不要に劣化させないため、2つの候補を用意してから採用する。まず `storage/exif.rs`（`img-parts`クレート使用）でJPEG/PNGのExifをOrientationタグのみに絞り込んだ「無劣化オリジナル候補」を作る（画素は再エンコードしない）。続けてOrientationを画素に適用したうえで `MediaKind` ごとの最大サイズにリサイズしWebPロスレスエンコードした「リサイズ候補」を作る。呼び出し元（`handlers/media_store.rs::store_image()`）が両候補それぞれのsha256+blurhashで `media_files` の重複排除チェックを行い、どちらも未登録ならバイトサイズが小さい方を採用してS3へアップロードする。img-parts非対応フォーマット（静止画WebP・AVIF・単一フレームGIF等）はOrientation適用のみ行いWebP再エンコードする（オリジナル候補なし）。アニメーション画像（GIF/APNG/WebPアニメ）は元バイト列をそのまま保存する。
 
-**リモートメディアプロキシ（#87）**: フロントエンドは別オリジンのアバター、添付、サムネイル、本文・リアクションのカスタム絵文字を `GET /proxy?url=...` に変換する。同一オリジンのストレージURLは直接参照する。内蔵プロキシはHTTP(S)のみを許可し、資格情報・fragmentを拒否、DNS解決した全IPについてloopback/private/link-local/CGNAT等を拒否する。リダイレクト先も都度同じ検証を行い、5回・25MiB・20秒を上限とし、画像・動画・音声以外は中継しない。`site_settings.media_proxy_url` が設定されている場合は、Misskey互換の外部プロキシ `{base}/proxy?url=...` を利用する。
+**リモートメディアプロキシ（#87）**: フロントエンドは別オリジンのアバター、添付、サムネイル、本文・リアクションのカスタム絵文字を `GET /proxy?url=...` に変換する。同一オリジンのストレージURLは直接参照する。内蔵プロキシはHTTP(S)のみを許可し、資格情報・fragmentを拒否、DNS解決した全IPについてloopback/private/link-local/CGNAT等を拒否する。リダイレクト先も都度同じ検証を行い、5回・25MiB・20秒を上限とし、画像・動画・音声以外は中継しない。`site_settings.media_proxy_url` が設定されている場合は、Misskey互換の外部プロキシ `{base}/proxy?url=...` を利用する。SSRF対策を含むこの検証・取得ロジックは `handlers/media_proxy.rs::fetch_validated()` として切り出されており、`/proxy` エンドポイント自体と、リモート絵文字インポート（`handlers/admin/remote_emojis.rs`、#73。取得後は `prepare_image` → `media_store::store_image` を通して通常のアップロードと同じ経路で `media_files`/`custom_emojis` に登録する）の両方から使う。
+
+**リモート絵文字カタログ・インポート（#73）**: AP受信（投稿本文・表示名・絵文字リアクションのいずれか）で見つけたカスタム絵文字は `remote_emojis` テーブルへ都度 `upsert_seen` される（画像自体は取り込まない、カタログのみ）。管理画面「絵文字」パネルの「リモート」タブと、NoteCard本文・絵文字リアクションの右クリックメニュー（管理者にのみ表示、`components/note/EmojiContextMenu.tsx`）の双方が、この一覧からの1件選択→カテゴリ/タグ/ライセンス入力ダイアログ（`components/admin/EmojiImportDialog.tsx`）→`POST /api/admin/emojis/remote/import` という同じ導線でローカルの `custom_emojis` へ取り込む。
 
 ## 8. フロントエンド
 

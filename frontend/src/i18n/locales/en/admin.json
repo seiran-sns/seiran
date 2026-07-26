@@ -11,6 +11,13 @@
   },
   "emojisPanel": {
     "title": "Custom emojis",
+    "localTab": "Local",
+    "remoteTab": "Remote",
+    "searchPlaceholder": "Search by shortcode or tag",
+    "remoteSearchPlaceholder": "Search by shortcode or domain",
+    "remoteEmptyMessage": "No remote emojis recognized yet.",
+    "remoteLoadError": "Failed to load remote emojis.",
+    "remoteImportButton": "Import",
     "importTitle": "Import Misskey ZIP",
     "importing": "Importing...",
     "selectZipButton": "Select ZIP to import",
@@ -34,6 +41,19 @@
     "editLicensePlaceholder": "License (optional, single line)",
     "editButton": "Edit",
     "deleteConfirm": "Delete the emoji :{{shortcode}}:?"
+  },
+  "emojiImportDialog": {
+    "title": "Import emoji",
+    "shortcodeLabel": "Shortcode",
+    "sourceLabel": "Source",
+    "categoryLabel": "Category (optional)",
+    "tagsLabel": "Tags (optional, space or comma separated)",
+    "tagsPlaceholder": "cat cute blob-cat",
+    "licenseLabel": "License (optional, single line)",
+    "licensePlaceholder": "CC BY 4.0 by ...",
+    "submitButton": "Import",
+    "submitting": "Importing...",
+    "cancelButton": "Cancel"
   },
   "siteSettingsPanel": {
     "title": "Site settings",

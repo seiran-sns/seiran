@@ -4,6 +4,7 @@ import { api, ReactionActor, ReactionSummary } from "../../api/client";
 import { fetchCustomEmojiShortcodes, parseCustomEmojiShortcode } from "../../lib/customEmojis";
 import { mediaUrl } from "../../utils/mediaProxy";
 import Avatar from "./Avatar";
+import EmojiContextMenu from "./EmojiContextMenu";
 import styles from "./ReactionChips.module.css";
 
 interface ReactionChipsProps {
@@ -95,13 +96,17 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
       <button
         type="button"
         className={`${styles.chip} ${r.reactedByMe ? styles.chipActive : ""}`}
-        disabled={!onToggle || disabled || addBlocked}
         onClick={(e) => {
           e.stopPropagation();
-          onToggle?.(r.emoji);
+          if (!onToggle || disabled || addBlocked) return;
+          onToggle(r.emoji);
         }}
       >
-        {r.emojiUrl ? (
+        {r.emojiUrl && shortcode ? (
+          <EmojiContextMenu shortcode={shortcode} imageUrl={r.emojiUrl}>
+            <img className={styles.emojiImg} src={mediaUrl(r.emojiUrl)} alt={r.emoji} loading="lazy" />
+          </EmojiContextMenu>
+        ) : r.emojiUrl ? (
           <img className={styles.emojiImg} src={mediaUrl(r.emojiUrl)} alt={r.emoji} loading="lazy" />
         ) : (
           <span className={styles.emoji}>{r.emoji}</span>

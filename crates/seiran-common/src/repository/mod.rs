@@ -21,6 +21,7 @@ pub mod password_reset;
 pub mod pinned_post;
 pub mod post;
 pub mod reaction;
+pub mod remote_emoji;
 pub mod site_settings;
 pub mod storage_provider;
 pub mod totp;
@@ -53,6 +54,7 @@ pub use post::{
 };
 pub use reaction::{PgReactionRepository, ReactionRepository, ReactorInfo};
 pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
+pub use remote_emoji::{PgRemoteEmojiRepository, RemoteEmojiRepository, RemoteEmojiRow};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage_provider::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider,

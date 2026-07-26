@@ -4,7 +4,7 @@ use std::{
 };
 
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::Query,
     http::{header, HeaderValue, Response, StatusCode},
 };
@@ -79,9 +79,12 @@ async fn validate_url(raw: &str) -> Result<(Url, Vec<SocketAddr>), ApiError> {
     Ok((url, addresses))
 }
 
-/// Misskey互換 GET /proxy?url=...
-pub async fn proxy(Query(query): Query<ProxyQuery>) -> Result<Response<Body>, ApiError> {
-    let (mut url, mut addresses) = validate_url(&query.url).await?;
+/// 検証済みURLから本文を取得する（SSRF対策込み: private/loopback/link-local等のIPへの接続を拒否し、
+/// リダイレクト先も毎回同じ検証を通す）。`/proxy` エンドポイントとリモート絵文字インポート
+/// （`handlers::admin::remote_emojis`, #73）の両方から使う共通ロジック。
+/// `accept_prefixes` に前方一致しない `Content-Type` は `MEDIA_PROXY_UNSUPPORTED_TYPE` として拒否する。
+pub async fn fetch_validated(raw_url: &str, accept_prefixes: &[&str]) -> Result<(Bytes, String), ApiError> {
+    let (mut url, mut addresses) = validate_url(raw_url).await?;
 
     for redirect_count in 0..=MAX_REDIRECTS {
         let host = url
@@ -139,10 +142,7 @@ pub async fn proxy(Query(query): Query<ProxyQuery>) -> Result<Response<Body>, Ap
             .and_then(|v| v.to_str().ok())
             .unwrap_or("application/octet-stream")
             .to_owned();
-        if !content_type.starts_with("image/")
-            && !content_type.starts_with("video/")
-            && !content_type.starts_with("audio/")
-        {
+        if !accept_prefixes.iter().any(|p| content_type.starts_with(p)) {
             return Err(ApiError::BadGateway("MEDIA_PROXY_UNSUPPORTED_TYPE".into()));
         }
         let bytes = upstream
@@ -152,24 +152,31 @@ pub async fn proxy(Query(query): Query<ProxyQuery>) -> Result<Response<Body>, Ap
         if bytes.len() as u64 > MAX_MEDIA_BYTES {
             return Err(ApiError::BadGateway("MEDIA_PROXY_TOO_LARGE".into()));
         }
-        let mut response = Response::new(Body::from(bytes));
-        *response.status_mut() = StatusCode::OK;
-        response.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_str(&content_type)
-                .unwrap_or(HeaderValue::from_static("application/octet-stream")),
-        );
-        response.headers_mut().insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("public, max-age=86400"),
-        );
-        response.headers_mut().insert(
-            header::X_CONTENT_TYPE_OPTIONS,
-            HeaderValue::from_static("nosniff"),
-        );
-        return Ok(response);
+        return Ok((bytes, content_type));
     }
     unreachable!()
+}
+
+/// Misskey互換 GET /proxy?url=...
+pub async fn proxy(Query(query): Query<ProxyQuery>) -> Result<Response<Body>, ApiError> {
+    let (bytes, content_type) =
+        fetch_validated(&query.url, &["image/", "video/", "audio/"]).await?;
+    let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(&content_type)
+            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"),
+    );
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    Ok(response)
 }
 
 #[cfg(test)]

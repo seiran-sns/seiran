@@ -30,6 +30,7 @@ ID 採番は2系統ある。
 | `media_files` | アップロード/受信済みメディア実体 |
 | `post_attachments` | 投稿とメディアの中間テーブル |
 | `custom_emojis` | ローカルのカスタム絵文字定義 |
+| `remote_emojis` | AP受信で見つけたリモートカスタム絵文字のカタログ（インポート前提、画像は`media_files`に未取込） |
 | `storage_providers` | メディア保存先オブジェクトストレージ(S3互換)の設定 |
 | `lists` / `list_members` | ユーザーごとのリスト（Bsky `app.bsky.graph.list` 相当） |
 | `pinned_posts` | プロフィールへのピン留め投稿 |
@@ -97,6 +98,9 @@ DMは`visibility='direct'`の投稿をそのまま`posts`に格納する方式�
 
 ### `reactions`
 `UNIQUE(post_id, actor_id)` — 1投稿につき1ユーザー1リアクション（Misskey 準拠）。切り替え時は `ON CONFLICT DO UPDATE`。`content` は Unicode 絵文字文字列、またはカスタム絵文字の場合 `:shortcode:` 形式。`emoji_url` はカスタム絵文字の画像URL（ローカル送信は `custom_emojis` から解決、Fedi 受信は activity の `tag` から解決、ATP 自己firehose再受信も `custom_emojis` から再解決、Unicode 絵文字は NULL）。`ON CONFLICT DO UPDATE` は `emoji_url` も無条件で上書きするため、insert元となる3経路（`create_reaction`／AP受信の`handle_reaction`／ATP受信の`handle_inbound_like_create`）は全て、`content` が `:shortcode:` 形式なら emoji_url を解決してから渡す必要がある（未解決のまま `None` を渡すと既存の正しい値を消してしまう）。`id`（`GENERATED ALWAYS AS IDENTITY`）は集計用途ではなく、`notifications.reaction_id`（リアクション通知の重複排除トークン、下記参照）としても使う。
+
+### `remote_emojis`
+AP受信（投稿本文・表示名・絵文字リアクションのいずれか）で見つけたカスタム絵文字を`(shortcode, domain)`単位で`upsert_seen`し、`first_seen_at`/`last_seen_at`を更新するカタログテーブル。`tags`にはAP Emoji tagの`aliases`/`tags`/`keywords`、`license`にはMisskey拡張`_misskey_license.freeText`を保存し、再受信時に空の値で既知メタデータを消さない。画像は`media_files`へ取り込まない（表示は既存のメディアプロキシ経由でリモートURLを直接参照する）。管理画面「リモート」タブおよびNoteCard右クリックのインポート導線がここを起点に、選ばれた1件だけを`fetch_validated`でダウンロードし`custom_emojis`へ登録する。
 
 ### `follows`
 `status`（`pending`/`accepted`）を持つ。パフォーマンス上重要な2つの部分インデックスがある: フォロワー取得・AP配送方向の `(target_actor_id, follower_actor_id) WHERE status='accepted'` と、自分のフォロー先取得用のカバリングインデックス `(follower_actor_id) INCLUDE (target_actor_id) WHERE status='accepted'`。

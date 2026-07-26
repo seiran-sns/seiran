@@ -224,6 +224,18 @@ export interface FrequentReaction {
   emojiUrl: string | null;
 }
 
+/** `GET /api/admin/emojis/remote` の1件。AP受信で見つけたリモートカスタム絵文字（#73）。 */
+export interface RemoteEmoji {
+  id: string;
+  shortcode: string;
+  domain: string;
+  imageUrl: string;
+  tags: string[];
+  license: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
 export interface EmojiImportJob {
   jobId: string;
   total: number;
@@ -1049,6 +1061,13 @@ export const api = {
     },
     getEmojiImportStatus(jobId: string) {
       return request<EmojiImportJob>("GET", `/admin/emojis/import/${encodeURIComponent(jobId)}`);
+    },
+    listRemoteEmojis(keyword?: string) {
+      const q = keyword?.trim() ? `?keyword=${encodeURIComponent(keyword.trim())}` : "";
+      return request<RemoteEmoji[]>("GET", `/admin/emojis/remote${q}`);
+    },
+    importRemoteEmoji(body: { shortcode: string; image_url: string; category?: string; tags?: string[]; license?: string }) {
+      return request<CustomEmoji>("POST", "/admin/emojis/remote/import", body);
     },
   },
 
