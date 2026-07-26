@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use seiran_common::{generate_snowflake_id, prepare_image, MediaKind};
 
-use super::emojis::{normalize_license, normalize_tags, EmojiResponse};
+use super::emojis::{normalize_license, normalize_tags, validate_category, validate_shortcode, EmojiResponse};
 use crate::error::ApiError;
 use crate::handlers::media_proxy::fetch_validated;
 use crate::handlers::media_store;
@@ -102,10 +102,9 @@ pub async fn import_remote_emoji(
 ) -> Result<Json<EmojiResponse>, ApiError> {
     require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
-    if req.shortcode.is_empty()
-        || !req.shortcode.chars().all(|c| c.is_alphanumeric() || c == '_')
-    {
-        return Err(ApiError::BadRequest("INVALID_SHORTCODE".to_owned()));
+    validate_shortcode(&req.shortcode)?;
+    if let Some(ref c) = req.category {
+        validate_category(c)?;
     }
 
     let tags = normalize_tags(req.tags.as_deref().unwrap_or(&[]))?;

@@ -305,8 +305,9 @@ export default function EmojisPanel() {
             </label>
             <label className={styles.label}>
               {t("admin:emojisPanel.licenseLabel")}
-              <input
+              <textarea
                 className={styles.input}
+                rows={4}
                 value={license}
                 onChange={(e) => setLicense(e.target.value)}
                 placeholder={t("admin:emojisPanel.licensePlaceholder")}
@@ -341,8 +342,9 @@ export default function EmojisPanel() {
                         onChange={(e) => setEditTags(e.target.value)}
                         placeholder={t("admin:emojisPanel.editTagsPlaceholder")}
                       />
-                      <input
+                      <textarea
                         className={styles.input}
+                        rows={4}
                         value={editLicense}
                         onChange={(e) => setEditLicense(e.target.value)}
                         placeholder={t("admin:emojisPanel.editLicensePlaceholder")}

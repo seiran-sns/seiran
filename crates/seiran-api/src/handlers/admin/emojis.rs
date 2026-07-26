@@ -68,10 +68,32 @@ pub struct UpdateEmojiRequest {
     pub license: Option<String>,
 }
 
-/// ライセンス情報を正規化する（#63）。トリムし、改行を含む場合は不正として弾く（1行テキストの要件）。
+/// shortcode を検証する。`custom_emojis.shortcode` は `VARCHAR(100)` のため、文字種チェックに
+/// 加えて長さも検証する（超過分は DB 側の "value too long" エラーとなり 500 として露出してしまう）。
+pub(crate) fn validate_shortcode(shortcode: &str) -> Result<(), ApiError> {
+    if shortcode.is_empty()
+        || shortcode.chars().count() > 100
+        || !shortcode.chars().all(|c| c.is_alphanumeric() || c == '_')
+    {
+        return Err(ApiError::BadRequest("INVALID_SHORTCODE".to_owned()));
+    }
+    Ok(())
+}
+
+/// category を検証する。`custom_emojis.category` は `VARCHAR(100)` のため長さを検証する
+/// （超過分は DB 側の "value too long" エラーとなり 500 として露出してしまう）。
+pub(crate) fn validate_category(category: &str) -> Result<(), ApiError> {
+    if category.chars().count() > 100 {
+        return Err(ApiError::BadRequest("CATEGORY_TOO_LONG".to_owned()));
+    }
+    Ok(())
+}
+
+/// ライセンス情報を正規化する（#63）。トリムし、改行・タブ以外の制御文字を含む場合は不正として弾く。
+/// ライセンス全文（Apache License 2.0 の条文等）は複数行になるのが通例のため、改行自体は許容する。
 pub(crate) fn normalize_license(license: &str) -> Result<String, ApiError> {
     let trimmed = license.trim();
-    if trimmed.contains(['\n', '\r']) {
+    if trimmed.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t') {
         return Err(ApiError::BadRequest("INVALID_LICENSE".to_owned()));
     }
     Ok(trimmed.to_string())
@@ -139,10 +161,9 @@ pub async fn create_emoji(
 ) -> Result<Json<EmojiResponse>, ApiError> {
     require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
-    if req.shortcode.is_empty()
-        || !req.shortcode.chars().all(|c| c.is_alphanumeric() || c == '_')
-    {
-        return Err(ApiError::BadRequest("INVALID_SHORTCODE".to_owned()));
+    validate_shortcode(&req.shortcode)?;
+    if let Some(ref c) = req.category {
+        validate_category(c)?;
     }
 
     let media_file_id: i64 = req
@@ -182,6 +203,9 @@ pub async fn update_emoji(
 ) -> Result<Json<EmojiResponse>, ApiError> {
     require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
 
+    if let Some(ref c) = req.category {
+        validate_category(c)?;
+    }
     let tags = match req.tags {
         Some(ref t) => Some(normalize_tags(t)?),
         None => None,

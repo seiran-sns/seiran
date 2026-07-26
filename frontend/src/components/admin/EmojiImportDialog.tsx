@@ -108,8 +108,9 @@ export default function EmojiImportDialog({
         </label>
         <label className={styles.label}>
           {t("admin:emojiImportDialog.licenseLabel")}
-          <input
+          <textarea
             className={styles.input}
+            rows={4}
             value={license}
             onChange={(e) => setLicense(e.target.value)}
             placeholder={t("admin:emojiImportDialog.licensePlaceholder")}
