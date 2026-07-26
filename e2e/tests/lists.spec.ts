@@ -28,8 +28,11 @@ test("リストの作成・改名・メンバー追加/削除・削除ができ�
   await expect(page.getByText(`${renamed} の編集`)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText(renamed).first()).toBeVisible({ timeout: 10_000 });
 
-  // メンバー追加（サジェスト選択を経由せず、target文字列を直接送信する経路を検証）
-  await page.getByPlaceholder(/ID\/ハンドル\/ニックネームで検索/).fill(member.username);
+  // 先頭@を含む生入力でもサジェストされ、選択したtargetでメンバー追加できる。
+  await page.getByPlaceholder(/ID\/ハンドル\/ニックネームで検索/).fill(`@${member.username}`);
+  const suggestion = page.getByRole("button").filter({ hasText: `@${member.username}@` });
+  await expect(suggestion).toBeVisible({ timeout: 10_000 });
+  await suggestion.click();
   await page.getByRole("button", { name: "メンバー追加" }).click();
   await expect(page.getByText(`@${member.username}`)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("1人").first()).toBeVisible({ timeout: 10_000 });

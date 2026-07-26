@@ -158,6 +158,7 @@ React 18 + Vite + TypeScript（react-router-dom v6）。`frontend/src/` 構成:
 - `components/right/` — 右ペインのタブ内容（`NotificationsPanel`、`TrendsSearchPanel`）
 - `components/admin/` — 管理画面パネル群
 - `components/dm/` — `RecipientPicker`（DM宛先のchip入力。サジェスト選択/手打ち確定の両対応、Bskyアクターと他プロトコルの混在を警告表示）
+- アクター検索APIは用途別に分離する。`GET /api/actors/search`はリスト編集・DM向けの表示名/全ハンドル部分一致、`GET /api/actors/suggest`は`ComposerEditor`向けのハンドル前方一致である。後者のレスポンス`target`は入力形式に応じてローカル短縮/Fedi/Bsky表記を選び、フロントはその値をそのまま挿入する。
 - `contexts/` — `AuthContext`、`ComposerContext`（返信モーダルに加え、`openCompose(initialText)` で本文プリフィル済みの素の投稿モーダルもグローバルに開ける）、`RightPaneContext`（右ペインのサブタブ状態保持）、`StreamingContext`（WebSocket集約。DM新着（`visibility=direct`のnoteイベント）は`registerDirectMessage`で別系統に振り分け、未読セッション数`dmUnreadCount`をLeftNavのバッジに供給する。Fediフォロー承認（`followAccepted`）受信時は`stores/followStatusStore`を直接更新する、`docs/protocols.md` 8節）、`ToastContext`（エラー/成功/情報トースト通知）、`NavigationHistoryContext`（`useGoBack()`。SPA内でPUSHされたナビゲーションの深さを追跡し、各画面の「戻る」ボタンから共通で使う。直接URLを踏む・リロードする等でSPA内に戻り先が無い場合は`navigate(-1)`の代わりにホーム（`/`）へ遷移する）
 - `stores/followStatusStore.ts` — フォロー状態（`not_following`/`pending`/`accepted`）の外部ストア（Reactコンテキストではなくモジュールスコープの`Map`+`useSyncExternalStore`）。キーは`lib/format.ts`の`profileQuery(username, domain)`で統一。同一アクターのフォロー状態表示は画面内に複数存在しうる（プロフィール本体、右ペインのポストリスト、タイムライン上の同一ユーザーの複数投稿）ため、各コンポーネントがローカルstateで抱えず全てこのストアを購読する設計にし、一箇所の操作（フォロー/フォロー解除ボタン）・WebSocket経由の`followAccepted`受信のいずれでも表示中の全コンポーネントへ同時反映する。`ProfilePage`のフォローボタン、`NoteCard`のタイムライン上のフォロースイッチが利用
 - `pages/` — 画面単位のトップレベルコンポーネント（`MessagesPage`はDM専用画面、`docs/ui_spec.md`参照）
