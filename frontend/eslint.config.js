@@ -19,6 +19,13 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // react-hooks 7系はReact Compiler向け規則もrecommendedへ追加したが、本プロジェクトは
+      // React 18でCompiler未導入。従来から有効なhooks-of-rules/exhaustive-depsは維持し、
+      // Compiler前提で既存の正当な非同期effect/refパターンを拒否する規則だけ無効化する。
+      'react-hooks/immutability': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/use-memo': 'off',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },

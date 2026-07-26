@@ -23,6 +23,9 @@ const backendEnv: Record<string, string> = {
   DATABASE_URL: "postgres://seiran_e2e:seiran_e2e@localhost:5433/seiran_e2e",
   PORT: String(backendPort),
   LOCAL_DOMAIN: "localhost",
+  // OGP付きの直リンクHTMLをAPIが取得する先。未指定だとDocker向けの
+  // http://frontend:5173 を参照して502になり、/notes/:id・/@userのE2Eが空になる。
+  FRONTEND_ORIGIN: `http://127.0.0.1:${frontendPort}`,
   WEBAUTHN_ORIGIN: `http://localhost:${frontendPort}`,
   PLC_DIRECTORY_BASE_URL: `http://127.0.0.1:${plcStubPort}`,
   ATP_APPVIEW_URL: `http://127.0.0.1:${appviewStubPort}`,
@@ -48,10 +51,15 @@ const backendEnv: Record<string, string> = {
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
+  // 全specが同じE2E DB・初期管理者・site_settingsを共有するため、ファイル間も直列化する。
+  // `fullyParallel: false`だけではspecファイル同士は複数workerで並行実行される。
+  workers: 1,
   // dm.spec.ts等、複数の expect.poll/toBeVisible(timeout:15_000) を逐次連結するテストが
   // デフォルトの30秒制限に対して余裕が無くflakyになりうるため明示的に延長する。
   timeout: 60_000,
-  retries: 0,
+  // CIの共有runnerでのみ、外部プロセス起動やWebSocket切断タイミング由来の一過性失敗を
+  // trace付きで1回再試行する。ローカルでは失敗を即座に見せる。
+  retries: process.env.CI ? 1 : 0,
   reporter: "list",
   // 【重要】Playwrightの実際の実行順序は「webServer起動 → globalSetup」であり、直感に反する
   // （node_modules/playwright/lib/runner/index.js の createGlobalSetupTasks を見ると
@@ -90,7 +98,9 @@ export default defineConfig({
       cwd: repoRoot,
       env: backendEnv,
       port: backendPort,
-      timeout: 180_000,
+      // CIのクリーンrunnerではRust workspaceの初回ビルドだけで3分を超える。
+      // job全体はGitHub Actions側で30分に制限しつつ、backend起動には余裕を持たせる。
+      timeout: 600_000,
       reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
     {

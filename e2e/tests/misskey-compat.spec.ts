@@ -65,10 +65,12 @@ test("Misskey互換API: i/notificationsのリアクション通知でローカ�
   request,
 }) => {
   const s3 = await startStubS3Server();
+  let providerId: string | null = null;
+  let adminToken: string | null = null;
   try {
     const alice = await registerUserViaApi(request, "e2emknotifa");
     const bob = await registerUserViaApi(request, "e2emknotifb");
-    const adminToken = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
+    adminToken = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
 
     const providerRes = await request.post("/api/admin/storage-providers", {
       headers: { Authorization: `Bearer ${adminToken}` },
@@ -82,6 +84,7 @@ test("Misskey互換API: i/notificationsのリアクション通知でローカ�
       },
     });
     expect(providerRes.ok(), `ストレージプロバイダー登録失敗: ${providerRes.status()} ${await providerRes.text()}`).toBeTruthy();
+    providerId = (await providerRes.json()).id;
 
     const uploadRes = await request.post("/api/drive/files/create", {
       headers: { Authorization: `Bearer ${bob.token}` },
@@ -121,6 +124,12 @@ test("Misskey互換API: i/notificationsのリアクション通知でローカ�
     expect(reactionNotif.user.avatarUrl, "ローカルユーザーのavatarUrlが解決されていない").not.toBeNull();
     expect(reactionNotif.user.avatarUrl).toContain(s3.url);
   } finally {
+    if (providerId && adminToken) {
+      await request.patch(`/api/admin/storage-providers/${providerId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+        data: { is_active: false },
+      });
+    }
     await s3.close();
   }
 });

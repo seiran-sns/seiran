@@ -193,6 +193,12 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
 
 ## 9. E2Eテスト
 
+- PRおよび`main`へのpushではGitHub Actionsの`E2E` jobが、Node.js 20・Chromium・
+  E2E専用PostgreSQLを用いて全Playwrightテストを実行する。失敗時はtrace等の
+  `playwright-report` / `test-results`を7日間artifactとして保存する。
+- frontendのVitestユニットテストもCIの`Frontend` jobで型チェック・lintと併せて
+  必ず実行する。
+
 `e2e/`ディレクトリにPlaywrightプロジェクトを置く。外部の実サービス（fedi/Bskyインスタンス、PLCディレクトリ、Bsky Relay等）とは通信せず、seiranが話す相手をすべてローカルのスタブ/専用インスタンスに置き換えた上で実行する。実行は `cd e2e && npm test`。
 
 - `e2e/playwright.config.ts`: `webServer`にスタブPLCサーバー・スタブAppViewサーバー・スタブFediサーバー（`stub-fedi-server.ts`、後述）・backend（`cargo run -p seiran-server`）・frontend（`npm run dev`）をまとめて起動する。backendには`PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL`をそれぞれのスタブサーバーへ、`ATP_RELAY_URL`を存在しないローカルポートへ向け、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`を空文字にして、外部への実通信を確実に遮断している。`SQLX_OFFLINE=true`も設定し、マイグレーション未適用の空DBに対してsqlxのコンパイル時クエリ検証が失敗しないようコミット済み`.sqlx/`キャッシュを使わせる。

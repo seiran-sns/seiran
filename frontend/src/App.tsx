@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
@@ -9,31 +9,32 @@ import { ComposerProvider } from "./contexts/ComposerContext";
 import { SiteMetaProvider } from "./contexts/SiteMetaContext";
 import { StreamingProvider } from "./contexts/StreamingContext";
 import { ToastProvider } from "./contexts/ToastContext";
-import AccountSettingsPage from "./pages/AccountSettingsPage";
-import AdminPage from "./pages/AdminPage";
-import ForgotPassword from "./pages/ForgotPassword";
-import HashtagPage from "./pages/HashtagPage";
 import HomePage from "./pages/HomePage";
-import ListDetailPage from "./pages/ListDetailPage";
-import ListsSettingsPage from "./pages/ListsSettingsPage";
-import AppearanceSettingsPage from "./pages/AppearanceSettingsPage";
-import Login from "./pages/Login";
-import MessagesPage from "./pages/MessagesPage";
-import MiAuthConnectPage from "./pages/MiAuthConnectPage";
-import MutesBlocksSettingsPage from "./pages/MutesBlocksSettingsPage";
-import NoteDetailPage from "./pages/NoteDetailPage";
-import NotificationsPage from "./pages/NotificationsPage";
-import ProfilePage from "./pages/ProfilePage";
-import ProfileEditPage from "./pages/ProfileEditPage";
-import Register from "./pages/Register";
-import ResetPassword from "./pages/ResetPassword";
-import SearchPage from "./pages/SearchPage";
-import SettingsMenuPage from "./pages/SettingsMenuPage";
-import AppTokensSettingsPage from "./pages/AppTokensSettingsPage";
-import Setup from "./pages/Setup";
-import VerifyEmail from "./pages/VerifyEmail";
-import VerifyEmailChange from "./pages/VerifyEmailChange";
-import TotpDisable from "./pages/TotpDisable";
+
+const AccountSettingsPage = lazy(() => import("./pages/AccountSettingsPage"));
+const AdminPage = lazy(() => import("./pages/AdminPage"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const HashtagPage = lazy(() => import("./pages/HashtagPage"));
+const ListDetailPage = lazy(() => import("./pages/ListDetailPage"));
+const ListsSettingsPage = lazy(() => import("./pages/ListsSettingsPage"));
+const AppearanceSettingsPage = lazy(() => import("./pages/AppearanceSettingsPage"));
+const Login = lazy(() => import("./pages/Login"));
+const MessagesPage = lazy(() => import("./pages/MessagesPage"));
+const MiAuthConnectPage = lazy(() => import("./pages/MiAuthConnectPage"));
+const MutesBlocksSettingsPage = lazy(() => import("./pages/MutesBlocksSettingsPage"));
+const NoteDetailPage = lazy(() => import("./pages/NoteDetailPage"));
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
+const ProfilePage = lazy(() => import("./pages/ProfilePage"));
+const ProfileEditPage = lazy(() => import("./pages/ProfileEditPage"));
+const Register = lazy(() => import("./pages/Register"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const SearchPage = lazy(() => import("./pages/SearchPage"));
+const SettingsMenuPage = lazy(() => import("./pages/SettingsMenuPage"));
+const AppTokensSettingsPage = lazy(() => import("./pages/AppTokensSettingsPage"));
+const Setup = lazy(() => import("./pages/Setup"));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
+const VerifyEmailChange = lazy(() => import("./pages/VerifyEmailChange"));
+const TotpDisable = lazy(() => import("./pages/TotpDisable"));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -78,12 +79,17 @@ function AppRoutes() {
   if (initialized === null) return null;
 
   if (!initialized) {
-    return <Setup onComplete={() => setInitialized(true)} />;
+    return (
+      <Suspense fallback={null}>
+        <Setup onComplete={() => setInitialized(true)} />
+      </Suspense>
+    );
   }
 
   return (
     <NavigationHistoryProvider>
-      <Routes>
+      <Suspense fallback={null}>
+        <Routes>
         <Route
           path="/"
           element={
@@ -257,7 +263,8 @@ function AppRoutes() {
         <Route path="/totp-disable" element={<TotpDisable />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
-      </Routes>
+        </Routes>
+      </Suspense>
     </NavigationHistoryProvider>
   );
 }
