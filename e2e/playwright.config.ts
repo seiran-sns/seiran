@@ -80,21 +80,21 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `node fixtures/stub-plc-server.ts`,
+      command: `npx tsx fixtures/stub-plc-server.ts`,
       cwd: e2eDir,
       env: { PLC_STUB_PORT: String(plcStubPort) },
       port: plcStubPort,
       reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
     {
-      command: `node fixtures/stub-appview-server.ts`,
+      command: `npx tsx fixtures/stub-appview-server.ts`,
       cwd: e2eDir,
       env: { APPVIEW_STUB_PORT: String(appviewStubPort) },
       port: appviewStubPort,
       reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
     {
-      command: `node ${path.join(e2eDir, "scripts", "wait-for-db.ts")} && cargo run -p seiran-server`,
+      command: `npx tsx ${path.join(e2eDir, "scripts", "wait-for-db.ts")} && cargo run -p seiran-server`,
       cwd: repoRoot,
       env: backendEnv,
       port: backendPort,

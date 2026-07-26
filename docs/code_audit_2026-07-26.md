@@ -16,6 +16,8 @@
 - E2Eのbackendに`FRONTEND_ORIGIN`がなく、Docker用既定値
   `http://frontend:5173`へ接続して直リンク（`/notes/:id`、`/@user`）が502になっていた。
   E2E専用Viteへ明示的に向けた。
+- CIのNode.js 20ではTypeScriptファイルを直接実行できないため、E2Eの補助サーバーと
+  DB起動待ちは`tsx`を介して実行するよう統一した。
 - HomePage離脱時、scroll eventの保存を遅延する`requestAnimationFrame`がunmountでcancelされ、
   最終スクロール位置を失う競合があった。保存先は再renderを起こさないref内Mapなので、
   scroll eventで即時保存するよう修正した。加えて、active feed tabの
