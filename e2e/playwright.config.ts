@@ -4,6 +4,7 @@ import { BACKEND_PORT as backendPort, FRONTEND_PORT as frontendPort, PLC_STUB_PO
 
 const e2eDir = path.dirname(new URL(import.meta.url).pathname);
 const repoRoot = path.resolve(e2eDir, "..");
+const tsxBin = path.join(e2eDir, "node_modules", ".bin", "tsx");
 
 // 【重要・変更禁止】webServer 各エントリの reuseExistingServer は必ず false にすること。
 // backendPort/frontendPort は ports.ts で scripts/dev-up.sh のネイティブ開発サーバー
@@ -80,21 +81,21 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `npx tsx fixtures/stub-plc-server.ts`,
+      command: `${tsxBin} fixtures/stub-plc-server.ts`,
       cwd: e2eDir,
       env: { PLC_STUB_PORT: String(plcStubPort) },
       port: plcStubPort,
       reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
     {
-      command: `npx tsx fixtures/stub-appview-server.ts`,
+      command: `${tsxBin} fixtures/stub-appview-server.ts`,
       cwd: e2eDir,
       env: { APPVIEW_STUB_PORT: String(appviewStubPort) },
       port: appviewStubPort,
       reuseExistingServer: false, // 変更禁止・理由は上部コメント参照
     },
     {
-      command: `npx tsx ${path.join(e2eDir, "scripts", "wait-for-db.ts")} && cargo run -p seiran-server`,
+      command: `${tsxBin} ${path.join(e2eDir, "scripts", "wait-for-db.ts")} && cargo run -p seiran-server`,
       cwd: repoRoot,
       env: backendEnv,
       port: backendPort,
