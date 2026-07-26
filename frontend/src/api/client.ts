@@ -1107,10 +1107,15 @@ export const api = {
   },
 
   actors: {
-    /** DB上のアクターをユーザー名/表示名の部分一致で検索する（リストのメンバー追加サジェスト用）。 */
+    /** DB上のアクターを表示名・ハンドルの部分一致で検索する（リスト・DM用）。 */
     search(q: string, limit = 10, signal?: AbortSignal) {
       const query = new URLSearchParams({ q, limit: String(limit) });
       return request<ActorSuggestion[]>("GET", `/actors/search?${query.toString()}`, undefined, signal);
+    },
+    /** ハンドルの前方一致で検索する（投稿欄の@サジェスト用、qに先頭@は含めない）。 */
+    suggest(q: string, limit = 10, signal?: AbortSignal) {
+      const query = new URLSearchParams({ q, limit: String(limit) });
+      return request<ActorSuggestion[]>("GET", `/actors/suggest?${query.toString()}`, undefined, signal);
     },
   },
 

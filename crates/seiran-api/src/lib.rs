@@ -511,6 +511,7 @@ pub fn router(state: AppState) -> Router {
             post(handlers::hashtags::pin_hashtag)
             .delete(handlers::hashtags::unpin_hashtag))
         .route("/api/actors/search", get(handlers::actor_search::search_actors))
+        .route("/api/actors/suggest", get(handlers::actor_search::suggest_actors))
         // ユーザープロフィール
         .route("/api/users/profile",
             get(handlers::users::user_profile)

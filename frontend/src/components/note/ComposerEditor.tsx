@@ -97,8 +97,7 @@ function restoreSelection(root: HTMLElement, target: number) {
 }
 
 function actorValue(actor: ActorSuggestion) {
-  if (actor.actor_type === "local") return `@${actor.username}`;
-  return actor.domain ? `@${actor.username}@${actor.domain}` : `@${actor.username}`;
+  return `@${actor.target}`;
 }
 
 function actorMentionValues(actor: ActorSuggestion) {
@@ -114,7 +113,7 @@ async function mentionIsKnown(mention: string) {
   const target = mention.slice(1);
   const queries = [target];
   if (!target.includes("@") && target.includes(".")) queries.push(target.slice(0, target.indexOf(".")));
-  const rows = (await Promise.all(queries.map((query) => api.actors.search(query, 10)))).flat();
+  const rows = (await Promise.all(queries.map((query) => api.actors.suggest(query, 10)))).flat();
   return rows.some((row) =>
     actorMentionValues(row).some((candidate) => candidate.toLowerCase() === mention.toLowerCase())
   );
@@ -202,7 +201,7 @@ export default function ComposerEditor({
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       api.actors
-        .search(token.slice(1), 8, controller.signal)
+        .suggest(token.slice(1), 8, controller.signal)
         .then(setActors)
         .catch(() => setActors([]));
     }, 200);

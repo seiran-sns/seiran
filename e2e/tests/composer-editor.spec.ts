@@ -39,6 +39,23 @@ test("ローカルユーザーは短いIDで候補表示し、3形式のIDを既
   });
   const actors = (await search.json()) as { username: string; domain: string }[];
   const local = actors.find((actor) => actor.username === target.username)!;
+  const bskySuggest = await request.get(
+    `/api/actors/suggest?q=${encodeURIComponent(`${target.username}.${local.domain}`)}`,
+    { headers: { Authorization: `Bearer ${author.token}` } }
+  );
+  expect(bskySuggest.ok()).toBeTruthy();
+  const bskyRows = (await bskySuggest.json()) as { actor_id: string; target: string }[];
+  expect(bskyRows.find((actor) => actor.actor_id === target.actorId)?.target).toBe(
+    `${target.username.toLowerCase()}.${local.domain}`
+  );
+
+  const substringSuggest = await request.get(
+    `/api/actors/suggest?q=${encodeURIComponent(target.username.slice(2))}`,
+    { headers: { Authorization: `Bearer ${author.token}` } }
+  );
+  const substringRows = (await substringSuggest.json()) as { actor_id: string }[];
+  expect(substringRows.some((actor) => actor.actor_id === target.actorId)).toBe(false);
+
   for (const mention of [
     `@${target.username}`,
     `@${target.username}.${local.domain}`,
@@ -51,7 +68,7 @@ test("ローカルユーザーは短いIDで候補表示し、3形式のIDを既
 
 test("逐次入力中にID装飾が更新されてもFedi/Bsky候補と完全修飾ID認識を維持する", async ({ page, request }) => {
   const author = await registerUserViaApi(request, "e2ecomposerremote");
-  await page.route("**/api/actors/search?**", (route) =>
+  await page.route("**/api/actors/suggest?**", (route) =>
     route.fulfill({
       json: [
         {
