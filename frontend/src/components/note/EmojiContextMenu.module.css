@@ -1,6 +1,6 @@
 .popover {
   position: fixed;
-  z-index: 50;
+  z-index: 150;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 10px;

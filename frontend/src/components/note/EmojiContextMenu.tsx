@@ -1,4 +1,5 @@
 import { cloneElement, isValidElement, MouseEvent as ReactMouseEvent, ReactElement, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { fetchCustomEmojiShortcodes } from "../../lib/customEmojis";
@@ -73,24 +74,29 @@ export default function EmojiContextMenu({ shortcode, imageUrl, children }: Emoj
   return (
     <>
       {cloneElement(children, { onContextMenu: handleContextMenu } as Record<string, unknown>)}
-      {menuPos && (
-        <div className={styles.popover} style={{ left: menuPos.x, top: menuPos.y }} ref={menuRef}>
-          <button
-            type="button"
-            className={styles.item}
-            onClick={(e) => {
-              // このメニューはリアクションチップ（`<button>`）の内側にネストされることがあるため、
-              // 親要素までクリックが伝播するとリアクションの追加/取消が誤発火し、その結果チップごと
-              // アンマウントされてダイアログが開く前に消えてしまう。
-              e.stopPropagation();
-              setMenuPos(null);
-              setDialogOpen(true);
-            }}
-          >
-            {t("home:emojiContextMenu.importButton")}
-          </button>
-        </div>
-      )}
+      {menuPos &&
+        createPortal(
+          // NoteCard/ReactionChips 内にネストしたままだと祖先の transform 等が
+          // 作るスタッキングコンテキストに閉じ込められ、z-index が効かず他のポップオーバーの
+          // 裏に隠れてクリックも奪われてしまうため、body 直下へポータルして描画する。
+          <div className={styles.popover} style={{ left: menuPos.x, top: menuPos.y }} ref={menuRef}>
+            <button
+              type="button"
+              className={styles.item}
+              onClick={(e) => {
+                // このメニューはリアクションチップ（`<button>`）の内側にネストされることがあるため、
+                // 親要素までクリックが伝播するとリアクションの追加/取消が誤発火し、その結果チップごと
+                // アンマウントされてダイアログが開く前に消えてしまう。
+                e.stopPropagation();
+                setMenuPos(null);
+                setDialogOpen(true);
+              }}
+            >
+              {t("home:emojiContextMenu.importButton")}
+            </button>
+          </div>,
+          document.body,
+        )}
       {dialogOpen && (
         <EmojiImportDialog
           open

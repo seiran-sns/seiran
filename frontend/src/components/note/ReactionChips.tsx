@@ -96,10 +96,10 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
       <button
         type="button"
         className={`${styles.chip} ${r.reactedByMe ? styles.chipActive : ""}`}
-        disabled={!onToggle || disabled || addBlocked}
         onClick={(e) => {
           e.stopPropagation();
-          onToggle?.(r.emoji);
+          if (!onToggle || disabled || addBlocked) return;
+          onToggle(r.emoji);
         }}
       >
         {r.emojiUrl && shortcode ? (
