@@ -10,6 +10,7 @@ pub mod mailer;
 pub mod middleware;
 pub mod handlers;
 pub mod search;
+pub mod search_query;
 pub mod streaming;
 
 use std::collections::HashMap;

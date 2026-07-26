@@ -4,12 +4,17 @@
 //!
 //! ローカル DB と Bsky AppView（public.api.bsky.app）を並行検索してブレンドする。
 
-use axum::{extract::{Query, State}, response::IntoResponse, Json};
+use axum::{
+    extract::{Query, State},
+    response::IntoResponse,
+    Json,
+};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
+use sqlx::{QueryBuilder, Row};
 
-use crate::AppState;
 use super::notes::NoteResponse;
+use crate::middleware::MaybeAuthedUser;
+use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct SearchQuery {
@@ -28,35 +33,53 @@ pub struct SearchResponse {
 pub async fn search_notes(
     Query(q): Query<SearchQuery>,
     State(state): State<AppState>,
+    MaybeAuthedUser(user): MaybeAuthedUser,
 ) -> impl IntoResponse {
     let raw_query = q.q.as_deref().unwrap_or("").trim().to_string();
     if raw_query.is_empty() {
-        return Json(SearchResponse { notes: vec![], session_id: None }).into_response();
+        return Json(SearchResponse {
+            notes: vec![],
+            session_id: None,
+        })
+        .into_response();
     }
 
     let limit = q.limit.unwrap_or(30).min(100) as usize;
 
     // ── セッション継続（過去掘り） ────────────────────────────────────────────
     if let Some(ref sid) = q.session_id {
-        if let Some((mut buf, local_until_id, appview_cursor)) =
-            state.search_store.take_buffer(sid)
+        if let Some((mut buf, local_until_id, appview_cursor)) = state.search_store.take_buffer(sid)
         {
             // バッファが十分あればそのまま返す
             if buf.len() >= limit {
                 let ids: Vec<i64> = buf.drain(..limit).collect();
-                state.search_store.put_buffer(sid, buf, local_until_id, appview_cursor);
+                state
+                    .search_store
+                    .put_buffer(sid, buf, local_until_id, appview_cursor);
                 return fetch_and_respond(&state, ids, Some(sid.clone())).await;
             }
 
             // バッファ不足: ローカル DB を追加フェッチ
-            let mut extra_local = search_local_db(&state.db, &raw_query, 60, local_until_id).await;
+            let mut extra_local = search_local_db(
+                &state.db,
+                &raw_query,
+                60,
+                local_until_id,
+                user.as_ref()
+                    .map(|user| (user.actor_id, user.username.as_str())),
+            )
+            .await;
             let new_local_until = extra_local.last().copied();
             buf.append(&mut extra_local);
 
             // AppView カーソルがあれば追加フェッチ
             let new_appview_cursor = if let Some(cursor) = appview_cursor {
-                let (av_ids, next_cursor) =
-                    seiran_common::atp::search_appview_posts(&state.http_client, &raw_query, Some(&cursor)).await;
+                let (av_ids, next_cursor) = seiran_common::atp::search_appview_posts(
+                    &state.http_client,
+                    &raw_query,
+                    Some(&cursor),
+                )
+                .await;
                 let mut av_ids_local = appview_ids_to_local(&state.db, av_ids).await;
                 buf.append(&mut av_ids_local);
                 next_cursor
@@ -66,7 +89,9 @@ pub async fn search_notes(
 
             // ソート・重複除去・ページング分割
             let (ids, remaining) = merge_sort_dedup_and_split(buf, limit);
-            state.search_store.put_buffer(sid, remaining, new_local_until, new_appview_cursor);
+            state
+                .search_store
+                .put_buffer(sid, remaining, new_local_until, new_appview_cursor);
             return fetch_and_respond(&state, ids, Some(sid.clone())).await;
         }
         // セッション消滅 → ローカル DB のみフォールバック
@@ -74,7 +99,14 @@ pub async fn search_notes(
 
     // ── 初回リクエスト: ローカル DB + AppView 並行フェッチ ───────────────────
     let (local_ids, (av_post_ids, appview_cursor)) = tokio::join!(
-        search_local_db(&state.db, &raw_query, 60, None),
+        search_local_db(
+            &state.db,
+            &raw_query,
+            60,
+            None,
+            user.as_ref()
+                .map(|user| (user.actor_id, user.username.as_str())),
+        ),
         seiran_common::atp::search_appview_posts(&state.http_client, &raw_query, None),
     );
     let local_until_id = local_ids.last().copied();
@@ -115,34 +147,22 @@ async fn search_local_db(
     query: &str,
     fetch_limit: i64,
     until_id: Option<i64>,
+    me: Option<(i64, &str)>,
 ) -> Vec<i64> {
     // pg_bigmはLIKE演算子のみ最適化対象（ILIKE非対応）のため、大文字小文字を無視した
     // 部分一致は LOWER() LIKE LOWER() の形で書く（idx_posts_body_bigm はLOWER(body)に
     // 対して張っているため、この形でないとインデックスが使われない）。
-    let rows = if let Some(uid) = until_id {
-        sqlx::query(
-            "SELECT id FROM posts
-             WHERE LOWER(body) LIKE LOWER('%' || $1 || '%')
-               AND deleted_at IS NULL AND id < $2
-             ORDER BY id DESC LIMIT $3",
-        )
-        .bind(query)
-        .bind(uid)
-        .bind(fetch_limit)
-        .fetch_all(db)
-        .await
-    } else {
-        sqlx::query(
-            "SELECT id FROM posts
-             WHERE LOWER(body) LIKE LOWER('%' || $1 || '%')
-               AND deleted_at IS NULL
-             ORDER BY id DESC LIMIT $2",
-        )
-        .bind(query)
-        .bind(fetch_limit)
-        .fetch_all(db)
-        .await
-    };
+    let condition = crate::search_query::parse(query);
+    let mut sql =
+        QueryBuilder::new("SELECT p.id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE ");
+    crate::search_query::append_sql(&condition, &mut sql, me);
+    sql.push(" AND p.deleted_at IS NULL");
+    if let Some(uid) = until_id {
+        sql.push(" AND p.id < ").push_bind(uid);
+    }
+    sql.push(" ORDER BY p.id DESC LIMIT ")
+        .push_bind(fetch_limit);
+    let rows = sql.build().fetch_all(db).await;
 
     rows.unwrap_or_default()
         .iter()
@@ -150,20 +170,17 @@ async fn search_local_db(
         .collect()
 }
 
-
 /// AppView の at_uri リストをローカル DB の post_id にマッピングする。
 /// DB に存在しないポストはスキップ（オンデマンドインポートは行わない）。
 async fn appview_ids_to_local(db: &sqlx::PgPool, uris: Vec<String>) -> Vec<i64> {
     if uris.is_empty() {
         return vec![];
     }
-    let rows = sqlx::query(
-        "SELECT id FROM posts WHERE at_uri = ANY($1) AND deleted_at IS NULL",
-    )
-    .bind(&uris)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
+    let rows = sqlx::query("SELECT id FROM posts WHERE at_uri = ANY($1) AND deleted_at IS NULL")
+        .bind(&uris)
+        .fetch_all(db)
+        .await
+        .unwrap_or_default();
 
     rows.iter()
         .filter_map(|r| r.try_get::<i64, _>("id").ok())
@@ -180,7 +197,11 @@ async fn fetch_and_respond(
     use seiran_common::repository::TimelinePost;
 
     if ids.is_empty() {
-        return Json(SearchResponse { notes: vec![], session_id }).into_response();
+        return Json(SearchResponse {
+            notes: vec![],
+            session_id,
+        })
+        .into_response();
     }
 
     let mut rows = sqlx::query_as::<_, TimelinePost>(
