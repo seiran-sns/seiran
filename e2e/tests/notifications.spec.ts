@@ -54,10 +54,12 @@ test("カスタム絵文字でリアクションされた通知にカスタム�
   // E2E環境にはS3互換ストレージが無いため、画像アップロードを通すためだけにスタブを起動し、
   // 管理者APIでストレージプロバイダーとして登録する。
   const s3 = await startStubS3Server();
+  let providerId: string | null = null;
+  let adminToken: string | null = null;
   try {
     const alice = await registerUserViaApi(request, "e2enotifemojia");
     const bob = await registerUserViaApi(request, "e2enotifemojib");
-    const adminToken = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
+    adminToken = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
 
     const providerRes = await request.post("/api/admin/storage-providers", {
       headers: { Authorization: `Bearer ${adminToken}` },
@@ -71,6 +73,7 @@ test("カスタム絵文字でリアクションされた通知にカスタム�
       },
     });
     expect(providerRes.ok(), `ストレージプロバイダー登録失敗: ${providerRes.status()} ${await providerRes.text()}`).toBeTruthy();
+    providerId = (await providerRes.json()).id;
 
     // カスタム絵文字を1件作成（アップロード→管理者APIで登録）。
     const uploadRes = await request.post("/api/drive/files/create", {
@@ -112,6 +115,12 @@ test("カスタム絵文字でリアクションされた通知にカスタム�
     const notifItem = page.locator("li", { has: notifText });
     await expect(notifItem.locator(`img[alt="\\:${shortcode}\\:"]`)).toBeVisible({ timeout: 5_000 });
   } finally {
+    if (providerId && adminToken) {
+      await request.patch(`/api/admin/storage-providers/${providerId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+        data: { is_active: false },
+      });
+    }
     await s3.close();
   }
 });

@@ -531,14 +531,6 @@ pub async fn reset_password(
     uuid::Uuid::parse_str(&req.token)
         .map_err(|_| ApiError::BadRequest("RESET_TOKEN_INVALID".to_owned()))?;
 
-    // トークン検証（user_id を取得）
-    let user_id = state
-        .password_resets
-        .find_valid_user_id(&req.token)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or_else(|| ApiError::BadRequest("RESET_TOKEN_INVALID".to_owned()))?;
-
     // パスワード長チェック
     if req.new_password.len() < 8 {
         return Err(ApiError::BadRequest("PASSWORD_TOO_SHORT".to_owned()));
@@ -550,19 +542,16 @@ pub async fn reset_password(
         ApiError::Internal("パスワード処理エラー".to_string())
     })?;
 
-    // users.password_hash を更新
-    state
-        .users
-        .update_password_hash(user_id, &password_hash)
-        .await
-        .map_err(|e| ApiError::Internal(format!("[reset-password] users UPDATE 失敗: {}", e)))?;
-
-    // トークンを使用済みにする（used_at を記録）
-    state
+    // トークン消費とパスワード更新を同一トランザクションで行う。
+    // UPDATE ... RETURNING により、並行リクエストの片方だけが成功する。
+    let updated = state
         .password_resets
-        .mark_used(&req.token)
+        .consume_and_update_password(&req.token, &password_hash)
         .await
-        .map_err(|e| ApiError::Internal(format!("[reset-password] token UPDATE 失敗: {}", e)))?;
+        .map_err(|e| ApiError::Internal(format!("[reset-password] atomic UPDATE 失敗: {}", e)))?;
+    if !updated {
+        return Err(ApiError::BadRequest("RESET_TOKEN_INVALID".to_owned()));
+    }
 
     Ok(Json(MessageResponse {
         message: "パスワードを更新しました".to_owned(),

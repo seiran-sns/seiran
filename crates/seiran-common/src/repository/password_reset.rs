@@ -10,8 +10,13 @@ pub trait PasswordResetRepository: Send + Sync {
     /// 有効なトークン（未使用かつ期限内）から user_id を取得する。
     async fn find_valid_user_id(&self, token: &str) -> Result<Option<i64>, sqlx::Error>;
 
-    /// トークンを使用済みにする。
-    async fn mark_used(&self, token: &str) -> Result<(), sqlx::Error>;
+    /// 有効なトークンを一度だけ消費し、同じトランザクションでパスワードを更新する。
+    /// トークンが無効・使用済みなら `false` を返す。
+    async fn consume_and_update_password(
+        &self,
+        token: &str,
+        password_hash: &str,
+    ) -> Result<bool, sqlx::Error>;
 }
 
 pub struct PgPasswordResetRepository {
@@ -52,11 +57,33 @@ impl PasswordResetRepository for PgPasswordResetRepository {
         Ok(row.map(|(id,)| id))
     }
 
-    async fn mark_used(&self, token: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE password_resets SET used_at = NOW() WHERE token = $1::uuid")
+    async fn consume_and_update_password(
+        &self,
+        token: &str,
+        password_hash: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let user_id: Option<i64> = sqlx::query_scalar(
+            "UPDATE password_resets
+             SET used_at = NOW()
+             WHERE token = $1::uuid
+               AND used_at IS NULL
+               AND expires_at > NOW()
+             RETURNING user_id",
+        )
             .bind(token)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
+            .fetch_optional(&mut *tx)
+            .await?;
+        let Some(user_id) = user_id else {
+            tx.rollback().await?;
+            return Ok(false);
+        };
+        sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+            .bind(password_hash)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
     }
 }

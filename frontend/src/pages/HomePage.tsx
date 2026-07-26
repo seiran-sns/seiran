@@ -19,6 +19,16 @@ import styles from "./HomePage.module.css";
 
 const PAGE_SIZE = 30;
 const COMPOSER_COLLAPSED_KEY = "seiran_composer_collapsed";
+const SCROLL_KEY_PREFIX = "seiran_home_scroll:";
+
+function saveScrollPosition(key: string, y: number) {
+  sessionStorage.setItem(`${SCROLL_KEY_PREFIX}${key}`, String(y));
+}
+
+function loadScrollPosition(key: string): number {
+  const y = Number(sessionStorage.getItem(`${SCROLL_KEY_PREFIX}${key}`));
+  return Number.isFinite(y) && y > 0 ? y : 0;
+}
 
 function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; since_id?: string }) {
   // DM（visibility="direct"）はタイムラインに一切現れない仕様のため、対応エンドポイントには
@@ -51,6 +61,7 @@ export default function HomePage() {
   const { timelineTab, setTimelineTab } = useRightPane();
   const { registerNote, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
+  const navigatingAway = useRef(false);
   const headerRef = useRef<HTMLElement>(null);
   const feedTabsRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
@@ -93,10 +104,14 @@ export default function HomePage() {
 
   // フィード切り替え時にアクティブなタブ要素が見えるようにスクロール
   useEffect(() => {
-    if (!feedTabsRef.current) return;
-    const activeTabEl = feedTabsRef.current.querySelector<HTMLElement>(`.${styles.feedTabActive}`);
+    const tabs = feedTabsRef.current;
+    if (!tabs) return;
+    const activeTabEl = tabs.querySelector<HTMLElement>(`.${styles.feedTabActive}`);
     if (activeTabEl) {
-      activeTabEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+      // scrollIntoViewは横タブだけでなくwindowも縦に動かし、Home復帰時の
+      // タイムラインスクロール復元を0へ戻してしまう。タブコンテナだけを横移動する。
+      const left = activeTabEl.offsetLeft - (tabs.clientWidth - activeTabEl.offsetWidth) / 2;
+      tabs.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
     }
   }, [feedKey(feed)]);
 
@@ -134,21 +149,18 @@ export default function HomePage() {
   // 捕捉する」方式は、React 18 StrictMode（開発時）が疑似アンマウントでeffectのcleanupを
   // 前倒しに発火させるため、まだ何もスクロールしていない新しいコンポーネントインスタンスの
   // 初期値（0）で直前の復元値を上書きしてしまう不具合があった（実機確認）。
-  // rAFで間引きつつ書き込み、フィード切替のたびにこのeffect自体を張り替える。
+  // cacheはref内Mapへの軽量な同期書き込み（再renderなし）なので、scroll eventごとに
+  // 即時保存する。rAFへ遅延すると、画面遷移時にcleanupでcancelされて最終位置を失う。
   useEffect(() => {
     const key = feedKey(feed);
-    let raf = 0;
     const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        setCache(key, { scrollY: window.scrollY });
-      });
+      if (navigatingAway.current) return;
+      setCache(key, { scrollY: window.scrollY });
+      saveScrollPosition(key, window.scrollY);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       window.removeEventListener("scroll", onScroll);
-      if (raf) cancelAnimationFrame(raf);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedKey(feed)]);
@@ -165,7 +177,7 @@ export default function HomePage() {
       setNotes(cached.notes);
       setHasMore(cached.hasMore);
       setLoading(false);
-      pendingScrollRestore.current = cached.scrollY;
+      pendingScrollRestore.current = Math.max(cached.scrollY, loadScrollPosition(key));
       return;
     }
 
@@ -204,7 +216,9 @@ export default function HomePage() {
     if (loading || pendingScrollRestore.current === null) return;
     const y = pendingScrollRestore.current;
     pendingScrollRestore.current = null;
-    requestAnimationFrame(() => window.scrollTo(0, y));
+    // 1回目のrAFではReactのDOM commit直後でscrollHeightが確定していないことがある。
+    // 2 frame待って一覧レイアウト確定後に復元する。
+    requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
   }, [loading, notes]);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
@@ -234,6 +248,13 @@ export default function HomePage() {
       return next;
     });
   }
+
+  const saveCurrentScroll = useCallback(() => {
+    navigatingAway.current = true;
+    const key = feedKey(feed);
+    setCache(key, { scrollY: window.scrollY });
+    saveScrollPosition(key, window.scrollY);
+  }, [feed, setCache]);
 
   const center = (
     <div className={styles.swipeContainer} {...swipeHandlers}>
@@ -340,5 +361,5 @@ export default function HomePage() {
     </>
   );
 
-  return <AppShell center={center} right={right} onPosted={prepend} />;
+  return <AppShell center={center} right={right} onPosted={prepend} onBeforeNavigate={saveCurrentScroll} />;
 }

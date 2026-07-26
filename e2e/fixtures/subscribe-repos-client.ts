@@ -19,6 +19,7 @@
 
 import { decode, decodeFirst } from "cborg";
 import type { TagDecodeControl } from "cborg";
+import WebSocket from "ws";
 
 /** tag 42（CIDリンク）のデコーダ。先頭の0x00プレフィックスを除いた生CIDバイト列を返す。 */
 function cidTagDecoder(control: TagDecodeControl): Uint8Array {
@@ -134,7 +135,7 @@ export function waitForBskyFeedPost(
 
     const timer = setTimeout(() => finish(false), timeoutMs);
 
-    ws.addEventListener("message", (event: MessageEvent) => {
+    ws.addEventListener("message", (event) => {
       if (settled) return;
       try {
         const buf = new Uint8Array(event.data as ArrayBuffer);

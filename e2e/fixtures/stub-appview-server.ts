@@ -112,7 +112,7 @@ export function startStubAppviewServer(port = 0): Promise<StubAppviewServer> {
   });
 }
 
-// `node stub-appview-server.ts` で単体起動した場合は APPVIEW_STUB_PORT（デフォルト 2583）で
+// `npx tsx stub-appview-server.ts` で単体起動した場合は APPVIEW_STUB_PORT（デフォルト 2583）で
 // 待ち受ける（Playwright の webServer から直接起動するときに使う）。
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.APPVIEW_STUB_PORT ?? "2583");

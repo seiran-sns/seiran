@@ -119,7 +119,7 @@ export function startStubPlcServer(port = 0): Promise<StubPlcServer> {
   });
 }
 
-// `node stub-plc-server.ts` で単体起動した場合は PLC_STUB_PORT（デフォルト 2582）で待ち受ける
+// `npx tsx stub-plc-server.ts` で単体起動した場合は PLC_STUB_PORT（デフォルト 2582）で待ち受ける
 // （Playwright の webServer から直接起動するときに使う）。
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PLC_STUB_PORT ?? "2582");

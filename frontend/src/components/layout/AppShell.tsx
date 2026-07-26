@@ -15,9 +15,11 @@ interface AppShellProps {
   right?: ReactNode;
   /** 投稿完了時のコールバック（ホーム画面が新規ノートを先頭に差し込むのに使う）。 */
   onPosted?: (note: Note) => void;
+  /** RouterがDOMを差し替えてwindow.scrollYを変える前に、現在画面の状態を保存する。 */
+  onBeforeNavigate?: () => void;
 }
 
-export default function AppShell({ center, right, onPosted }: AppShellProps) {
+export default function AppShell({ center, right, onPosted, onBeforeNavigate }: AppShellProps) {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
@@ -31,10 +33,15 @@ export default function AppShell({ center, right, onPosted }: AppShellProps) {
   }, [location.pathname, location.search]);
 
   return (
-    <div className={styles.shell}>
+    <div
+      className={styles.shell}
+      onClickCapture={(event) => {
+        if ((event.target as Element).closest("a[href]")) onBeforeNavigate?.();
+      }}
+    >
       {/* PC表示用の左メニュー */}
       <div className={styles.desktopLeftNav}>
-        <LeftNav onCompose={() => setComposeOpen(true)} />
+        <LeftNav onCompose={() => setComposeOpen(true)} onItemClick={onBeforeNavigate} />
       </div>
 
       <main className={styles.center}>{center}</main>
@@ -59,7 +66,10 @@ export default function AppShell({ center, right, onPosted }: AppShellProps) {
       {/* スマホ表示用フローティング通知ボタン（#75） */}
       <button
         className={styles.floatingNotifBtn}
-        onClick={() => navigate("/notifications")}
+        onClick={() => {
+          onBeforeNavigate?.();
+          navigate("/notifications");
+        }}
         aria-label={t("nav:leftNav.notifications")}
         title={t("nav:leftNav.notifications")}
       >
