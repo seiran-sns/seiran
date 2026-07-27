@@ -155,3 +155,15 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 冪等化する。集計表示用の票数は `posts.poll` にも反映する。認証付きの投稿読取APIは
 `poll_votes` から回答者自身の選択肢番号を `poll.votedByMe` として付与し、クライアントが
 リロード後も回答済み状態と選択内容を復元できるようにする。
+
+### 通報（`reports` / `report_comments`）
+
+`reports` はローカル・Fedi・Bsky共通の管理台帳で、通報者、対象Actor、任意の対象Post、
+Bluesky準拠の理由分類、自由記述、通報先（ローカル管理者またはリモート）と処理状態を保持する。
+投稿通報では対象投稿が後から削除されても調査履歴を残すため `subject_post_id` は
+`ON DELETE SET NULL` とする。自由記述はDB制約でも300書記素相当（PostgreSQLの文字数）かつ
+1000バイト以下に制限する。リモート転送の成功時刻は `forwarded_at` に記録し、再送判断に使う。
+
+`report_comments` は管理者・モデレーターだけが読み書きできる内部メモで、通報削除時は
+CASCADE削除する。通報自体は監査履歴として物理削除せず、`status` と `closed_at` で
+オープン/クローズを管理する。
