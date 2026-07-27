@@ -146,7 +146,7 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 ## 4. 典型的なクエリパターン
 
 - **ホーム/ローカルタイムライン**: `posts` を `id`（降順）でページネーションするだけの単純な SQL。フォロー時点で相手の過去ログを丸ごと自サーバー DB に取り込んでいるため、外部 API 呼び出しを伴わない（`docs/concept.md` 「タイムラインは自前の池」参照）。
-- **ソーシャル/グローバルタイムライン（#78）**: `PostRepository::social_timeline`（自分+フォロー中+ローカル全体、home_timelineのLATERAL方式候補とlocal_timelineの`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（local_timelineから`is_local`条件のみ外したもの）。新規テーブルは無く、`home_timeline`/`local_timeline`と同じインデックス（`idx_posts_actor_id`・`is_local`列）で完結する。フォロワー限定（`followers_only`）投稿は、閲覧者がフォロワーでもローカル/グローバルには出さず、ホームとソーシャルにだけ表示する（#91）。
+- **ソーシャル/グローバルタイムライン（#78）**: `PostRepository::social_timeline`（自分+フォロー中+ローカル全体、home_timelineのLATERAL方式候補とlocal_timelineの`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（local_timelineから`is_local`条件のみ外したもの）。新規テーブルは無く、`home_timeline`/`local_timeline`と同じインデックス（`idx_posts_actor_id`・`is_local`列）で完結する。ひかえめ（`unlisted`）・プライベート（`followers_only`）投稿は、投稿者本人やフォロワーが閲覧してもローカル/グローバルには出さず、ホームとソーシャルにだけ表示する（#91, #105）。
 - **検索**: ローカル DB の投稿本文検索（`idx_posts_body_bigm`、pg_bigm）と AppView 検索の結果をマージする。pg_bigm は `LIKE` 演算子のみ最適化対象で `ILIKE` には対応しないため、投稿検索 SQL は `LOWER(body) LIKE LOWER(pattern)` 形式とし、インデックスも `LOWER(body)` に張っている（#97）。アクター検索は用途別に分離する。リスト編集・DM宛先の`GET /api/actors/search`は、`COALESCE(display_name, '')`とFedi/Bsky/ローカルの全ハンドル表記を改行区切りで連結した式へ生入力を部分一致させ、`idx_actors_search_bigm`（pg_bigm GIN式インデックス）を使う。投稿欄の`GET /api/actors/suggest`は表示名を対象にせずハンドル前方一致だけを行い、`idx_actors_handle_prefix`と`idx_actors_local_bsky_handle_prefix`（`text_pattern_ops` B-tree式インデックス）を個別走査して`UNION`する。環境依存のローカルドメインをmigrationへ焼き込まないため、式中のローカル判定には同義の`actor_type = 'local'`を使う。セッション管理の詳細は `docs/architecture.md` の検索セッション節を参照。
 # アンケート回答
 

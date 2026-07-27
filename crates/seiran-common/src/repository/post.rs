@@ -204,8 +204,8 @@ pub trait PostRepository: Send + Sync {
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// ローカルタイムライン（ローカルアクターの投稿）を取得する。`viewer_actor_id` は閲覧者の
-    /// actor_id（匿名なら `None`）。`unlisted` は除外し、`followers_only`は投稿者本人または
-    /// accepted フォロワーのみ、`direct`は投稿者本人または宛先（`post_recipients`）のみ取得できる
+    /// actor_id（匿名なら `None`）。`unlisted` と `followers_only` は投稿者本人を含めて除外し、
+    /// `direct`は投稿者本人または宛先（`post_recipients`）のみ取得できる
     /// （可視性による閲覧制御）。`exclude_direct` は `home_timeline` 参照。
     async fn local_timeline(
         &self,
@@ -526,8 +526,7 @@ impl PostRepository for PgPostRepository {
              WHERE p.is_local = true AND p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
-               AND p.visibility != 'followers_only'
-               AND (p.visibility != 'unlisted' OR p.actor_id = $1)
+               AND p.visibility NOT IN ('unlisted', 'followers_only')
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')
@@ -669,8 +668,7 @@ impl PostRepository for PgPostRepository {
              WHERE p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
-               AND p.visibility != 'followers_only'
-               AND (p.visibility != 'unlisted' OR p.actor_id = $1)
+               AND p.visibility NOT IN ('unlisted', 'followers_only')
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND (
                    p.visibility NOT IN ('followers_only', 'direct')

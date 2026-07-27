@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { registerUserViaApi } from "../fixtures/api-helpers";
 
-test("フォロワー限定投稿はLTL/GTLに出ず、STLには表示される", async ({ request }) => {
+test("ひかえめ・プライベート投稿はLTL/GTLに本人にも出ず、HTL/STLには表示される", async ({ request }) => {
   const author = await registerUserViaApi(request, "e2eprivateauthor");
   const follower = await registerUserViaApi(request, "e2eprivatefollower");
 
@@ -11,22 +11,37 @@ test("フォロワー限定投稿はLTL/GTLに出ず、STLには表示される"
   });
   expect(follow.ok(), `follow failed: ${follow.status()} ${await follow.text()}`).toBeTruthy();
 
-  const text = `private timeline test ${Date.now()}`;
-  const created = await request.post("/api/notes/create", {
-    headers: { Authorization: `Bearer ${author.token}` },
-    data: { text, visibility: "followers" },
-  });
-  expect(created.ok(), `create failed: ${created.status()} ${await created.text()}`).toBeTruthy();
+  const stamp = Date.now();
+  const posts = [
+    { text: `unlisted timeline test ${stamp}`, visibility: "home" },
+    { text: `private timeline test ${stamp}`, visibility: "followers" },
+  ];
+  for (const post of posts) {
+    const created = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${author.token}` },
+      data: post,
+    });
+    expect(created.ok(), `create failed: ${created.status()} ${await created.text()}`).toBeTruthy();
+  }
 
-  async function timeline(path: string) {
+  async function timeline(path: string, token: string) {
     const response = await request.get(path, {
-      headers: { Authorization: `Bearer ${follower.token}` },
+      headers: { Authorization: `Bearer ${token}` },
     });
     expect(response.ok(), `${path} failed: ${response.status()} ${await response.text()}`).toBeTruthy();
     return (await response.json()) as { text: string }[];
   }
 
-  expect((await timeline("/api/notes/local-timeline?limit=100")).some((note) => note.text === text)).toBe(false);
-  expect((await timeline("/api/notes/global-timeline?limit=100")).some((note) => note.text === text)).toBe(false);
-  expect((await timeline("/api/notes/social-timeline?limit=100")).some((note) => note.text === text)).toBe(true);
+  for (const viewer of [author, follower]) {
+    const local = await timeline("/api/notes/local-timeline?limit=100", viewer.token);
+    const global = await timeline("/api/notes/global-timeline?limit=100", viewer.token);
+    const home = await timeline("/api/notes/home-timeline?limit=100", viewer.token);
+    const social = await timeline("/api/notes/social-timeline?limit=100", viewer.token);
+    for (const post of posts) {
+      expect(local.some((note) => note.text === post.text)).toBe(false);
+      expect(global.some((note) => note.text === post.text)).toBe(false);
+      expect(home.some((note) => note.text === post.text)).toBe(true);
+      expect(social.some((note) => note.text === post.text)).toBe(true);
+    }
+  }
 });
