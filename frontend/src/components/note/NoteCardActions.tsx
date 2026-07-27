@@ -5,10 +5,14 @@ import ActionsMenu, { ActionsMenuItem } from "../common/ActionsMenu";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
 import ReactionPicker from "./ReactionPicker";
+import ReportModal from "../report/ReportModal";
 import styles from "./NoteCard.module.css";
 
 interface NoteCardActionsProps {
   noteId: string;
+  subjectActorId: string;
+  subjectLabel: string;
+  remoteHost?: string;
   reactions: ReactionSummary[];
   reactionPending: boolean;
   onToggleReaction: (emoji: string) => void;
@@ -33,6 +37,9 @@ interface NoteCardActionsProps {
  */
 export default function NoteCardActions({
   noteId,
+  subjectActorId,
+  subjectLabel,
+  remoteHost,
   reactions,
   reactionPending,
   onToggleReaction,
@@ -52,6 +59,7 @@ export default function NoteCardActions({
   const { t } = useTranslation();
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   function confirmDelete() {
     setDeleteConfirmOpen(false);
@@ -85,6 +93,14 @@ export default function NoteCardActions({
       label: `🗑️ ${t("common:delete")}`,
       onClick: () => setDeleteConfirmOpen(true),
       disabled: deleting,
+      danger: true,
+    });
+  }
+  if (!isSelf) {
+    menuItems.push({
+      key: "report",
+      label: "⚠️ 通報",
+      onClick: () => setReportOpen(true),
       danger: true,
     });
   }
@@ -142,6 +158,15 @@ export default function NoteCardActions({
           </button>
         </div>
       </Modal>
+      <ReportModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        subjectType="post"
+        subjectActorId={subjectActorId}
+        subjectPostId={noteId}
+        subjectLabel={subjectLabel}
+        remoteHost={remoteHost}
+      />
     </>
   );
 }

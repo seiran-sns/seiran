@@ -193,7 +193,7 @@ export default function MessagesPage() {
         {!messagesLoading && !threadRootId && <p className={styles.empty}>{t("dm:messagesPage.composeHint")}</p>}
         {!messagesLoading &&
           messages.map((m) => {
-            const isMine = m.user.id === user?.actor_id;
+            const isMine = m.user.id === String(user?.actor_id);
             return (
               <div key={m.id} className={`${styles.messageRow} ${isMine ? styles.messageRowMine : ""}`}>
                 {!isMine && <Avatar url={m.user.avatarUrl} name={m.user.displayName || m.user.username} size={28} />}

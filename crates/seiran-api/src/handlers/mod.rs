@@ -20,6 +20,7 @@ pub mod mutes;
 pub mod notes;
 pub mod ogp;
 pub mod plc_genesis;
+pub mod reports;
 pub mod search;
 pub mod setup;
 pub mod streaming;

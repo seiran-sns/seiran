@@ -376,6 +376,8 @@ pub fn router(state: AppState) -> Router {
         // セットアップ（初回管理者作成）
         .route("/api/setup/status", get(handlers::setup::setup_status))
         .route("/api/setup", post(handlers::setup::setup))
+        // ユーザー通報
+        .route("/api/reports", post(handlers::reports::create_report))
         // 管理者 API
         .route("/api/admin/storage-providers",
             get(handlers::admin::storage::list_storage_providers)
@@ -389,6 +391,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/users/:id/unsuspend", post(handlers::admin::users::unsuspend_user))
         .route("/api/admin/users/:id/role", post(handlers::admin::users::change_user_role))
         .route("/api/admin/users/:id/totp/disable", post(handlers::admin::users::disable_user_totp))
+        // 通報管理
+        .route("/api/admin/reports", get(handlers::admin::reports::list_reports))
+        .route("/api/admin/reports/:id/close", post(handlers::admin::reports::close_report))
+        .route("/api/admin/reports/:id/comments",
+            get(handlers::admin::reports::list_comments).post(handlers::admin::reports::add_comment))
+        .route("/api/admin/reports/:id/delete-post", post(handlers::admin::reports::delete_subject_post))
+        .route("/api/admin/reports/:id/suspend-user", post(handlers::admin::reports::suspend_subject))
+        .route("/api/admin/reports/:id/forward", post(handlers::admin::reports::forward_report))
         // サイト設定
         .route("/api/admin/site-settings",
             get(handlers::admin::site_settings::get_site_settings)

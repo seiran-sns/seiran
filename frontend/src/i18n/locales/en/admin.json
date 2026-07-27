@@ -2,6 +2,7 @@
   "adminPage": {
     "title": "Admin",
     "tabs": {
+      "reports": "Reports",
       "users": "Users",
       "siteSettings": "Site settings",
       "storage": "Storage",

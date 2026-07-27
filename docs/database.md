@@ -161,7 +161,7 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 `reports` はローカル・Fedi・Bsky共通の管理台帳で、通報者、対象Actor、任意の対象Post、
 Bluesky準拠の理由分類、自由記述、通報先（ローカル管理者またはリモート）と処理状態を保持する。
 投稿通報では対象投稿が後から削除されても調査履歴を残すため `subject_post_id` は
-`ON DELETE SET NULL` とする。自由記述はDB制約でも300書記素相当（PostgreSQLの文字数）かつ
+`ON DELETE SET NULL` とし、投稿種別では削除後のNULLも許容する。自由記述はDB制約でも300書記素相当（PostgreSQLの文字数）かつ
 1000バイト以下に制限する。リモート転送の成功時刻は `forwarded_at` に記録し、再送判断に使う。
 
 `report_comments` は管理者・モデレーターだけが読み書きできる内部メモで、通報削除時は

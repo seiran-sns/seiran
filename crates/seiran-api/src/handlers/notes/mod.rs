@@ -218,7 +218,7 @@ async fn create_repost(
         text: String::new(),
         created_at: now.to_rfc3339(),
         user: NoteUserInfo {
-            id: actor_id,
+            id: actor_id.to_string(),
             username,
             domain: Some(state.local_domain.clone()),
             display_name,
@@ -539,7 +539,7 @@ async fn create_regular_post(
         text,
         created_at: now.to_rfc3339(),
         user: NoteUserInfo {
-            id: actor_id,
+            id: actor_id.to_string(),
             username,
             domain: Some(state.local_domain.clone()),
             display_name,
@@ -756,15 +756,23 @@ pub async fn get_note(
     MaybeAuthedUser(user): MaybeAuthedUser,
     State(state): State<AppState>,
 ) -> Result<Json<NoteResponse>, ApiError> {
-    let my_actor_id: Option<i64> = user.map(|u| u.actor_id);
+    let my_actor_id: Option<i64> = user.as_ref().map(|u| u.actor_id);
+    let is_admin = if let Some(ref authed) = user {
+        state.users.find_role_by_user_id(authed.user_id).await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .as_deref() == Some("admin")
+    } else {
+        false
+    };
 
     let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
-    let mut post = state
-        .posts
-        .find_by_id_for_viewer(post_id, my_actor_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+    let mut post = if is_admin {
+        state.posts.find_by_id(post_id).await
+    } else {
+        state.posts.find_by_id_for_viewer(post_id, my_actor_id).await
+    }
+    .map_err(|e| ApiError::Internal(e.to_string()))?
+    .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     resolve_mention_facets_in_place(&state.db, std::slice::from_mut(&mut post)).await;
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
     let rmap = fetch_reactions_map(&state.db, &[post_id], my_actor_id).await;
