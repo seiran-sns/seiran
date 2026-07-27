@@ -11,6 +11,13 @@
   animation: fade 0.12s ease-out;
 }
 
+.imageWrap {
+  position: relative;
+  display: inline-flex;
+  max-width: min(1024px, calc(100vw - 48px));
+  max-height: min(1024px, calc(100vh - 48px));
+}
+
 .image {
   /* 添付画像の最大アップロードサイズ(2048px)はRetina(2倍密度)表示を見込んだサイズのため、
      ライトボックスの最大表示サイズはCSS上でその半分(1024px)とする。小さい画像を
@@ -23,6 +30,21 @@
   object-fit: contain;
   cursor: default;
   animation: pop 0.14s ease-out;
+}
+
+.blurred { filter: blur(24px); }
+
+.reveal {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 6px 10px;
 }
 
 .close {

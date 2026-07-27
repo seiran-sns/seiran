@@ -99,12 +99,12 @@ async fn get_note_not_found_returns_json_404() {
 }
 
 /// リポストの `GET /api/notes/:id` レスポンスで、埋め込まれた元ポスト（`renote`）の
-/// `emojis` マップが失われないことの回帰テスト（#77）。`embed_renotes`（`queries.rs`）の
-/// SELECT文が `emoji_map` を取得していなかったため、リポスト経由で見る本文中の
-/// カスタム絵文字ショートコードが画像化されず「展開されなくなった」ように見えるバグがあった。
+/// `emojis`・CW・アンケート情報が失われないことの回帰テスト（#77, #102）。
+/// `embed_renotes`（`queries.rs`）は通常の投稿取得とは別のSELECTを使うため、元投稿の
+/// 表示用カラムを追加した際に取得漏れが起きないことを確認する。
 #[tokio::test]
 #[ignore = "実DB（DATABASE_URL）と既存の seiran1 ユーザーが必要"]
-async fn embed_renotes_preserves_original_post_emoji_map() {
+async fn embed_renotes_preserves_original_post_display_metadata() {
     let app = test_router().await;
     let token = login_test_user(&app, "seiran1").await;
 
@@ -122,12 +122,28 @@ async fn embed_renotes_preserves_original_post_emoji_map() {
 
     // Fedi受信時にのみ書き込まれる`emoji_map`（本テストでは受信フローを再現せず直接設定する）。
     let pool = get_db_pool().await.expect("DB接続に失敗");
-    sqlx::query("UPDATE posts SET emoji_map = $1 WHERE id = $2")
+    let poll = serde_json::json!({
+        "multiple": false,
+        "options": [{"name": "選択肢A", "votes": 2}, {"name": "選択肢B", "votes": 1}]
+    });
+    sqlx::query("UPDATE posts SET emoji_map = $1, content_warning = $2, poll = $3 WHERE id = $4")
         .bind(serde_json::json!({":test_emoji:": "https://example.com/test.png"}))
+        .bind("アンケート注意書き")
+        .bind(&poll)
         .bind(original_id)
         .execute(&pool)
         .await
-        .expect("emoji_map更新に失敗");
+        .expect("表示メタデータ更新に失敗");
+    let voter_actor_id: i64 = sqlx::query_scalar(
+        "SELECT a.id FROM actors a JOIN users u ON u.id = a.user_id WHERE u.username = 'seiran1'",
+    )
+    .fetch_one(&pool).await.expect("seiran1 actor取得に失敗");
+    sqlx::query(
+        "INSERT INTO poll_votes (post_id, actor_id, option_index) VALUES ($1, $2, 0)
+         ON CONFLICT (post_id, actor_id, option_index) DO NOTHING",
+    )
+    .bind(original_id).bind(voter_actor_id).execute(&pool).await
+    .expect("アンケート回答の準備に失敗");
 
     let repost_req = authed_json_request(
         "POST",
@@ -156,6 +172,10 @@ async fn embed_renotes_preserves_original_post_emoji_map() {
         "埋め込まれた元ポストのemojisマップが失われている: {:?}",
         fetched["renote"]
     );
+    assert_eq!(fetched["renote"]["contentWarning"], "アンケート注意書き");
+    assert_eq!(fetched["renote"]["poll"]["multiple"], poll["multiple"]);
+    assert_eq!(fetched["renote"]["poll"]["options"], poll["options"]);
+    assert_eq!(fetched["renote"]["poll"]["votedByMe"], serde_json::json!([0]));
 }
 
 /// ローカル投稿の本文中に含まれる `:shortcode:` が、既存の `custom_emojis` と照合されて

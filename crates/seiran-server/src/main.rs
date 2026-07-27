@@ -35,6 +35,7 @@ fn build_inbox_context(
     stream_hub: Arc<StreamHub>,
 ) -> InboxContext {
     InboxContext {
+        db_pool: pool.clone(),
         actor_repo: Arc::new(PgActorRepository::new(pool.clone())),
         follow_repo: Arc::new(PgFollowRepository::new(pool.clone())),
         block_repo: Arc::new(PgBlockRepository::new(pool.clone())),

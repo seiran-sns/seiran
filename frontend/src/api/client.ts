@@ -352,6 +352,7 @@ export interface NoteAttachment {
   height: number;
   thumbnailUrl?: string;
   durationMs?: number;
+  isSensitive: boolean;
 }
 
 /** NoteResponse（バックエンドは `#[serde(rename_all = "camelCase")]`）。 */
@@ -392,6 +393,16 @@ export interface Note {
   deliverBsky?: boolean;
   /** リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。ローカル投稿は省略。 */
   remoteUrl?: string;
+  contentWarning?: string;
+  poll?: {
+    multiple: boolean;
+    options: { name: string; votes: number }[];
+    endTime?: string;
+    closed?: string;
+    votersCount?: number;
+    /** ログイン中ユーザーが回答した選択肢番号。回答前・未認証時は省略。 */
+    votedByMe?: number[];
+  };
 }
 
 export interface ReactionSummary {
@@ -541,6 +552,9 @@ interface RawNote {
   deliverBsky?: boolean;
   remoteUrl?: string;
   remote_url?: string;
+  contentWarning?: string;
+  content_warning?: string;
+  poll?: Note["poll"];
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -571,6 +585,8 @@ function normalizeNote(r: RawNote): Note {
     deliverFedi: r.deliverFedi,
     deliverBsky: r.deliverBsky,
     remoteUrl: r.remoteUrl ?? r.remote_url,
+    contentWarning: r.contentWarning ?? r.content_warning,
+    poll: r.poll,
   };
 }
 
@@ -893,6 +909,13 @@ export const api = {
       return request<{ actors: ReactionActor[] }>(
         "GET",
         `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}/actors`
+      );
+    },
+    votePoll(noteId: string, optionIndexes: number[]) {
+      return request<{ ok: boolean; poll: NonNullable<Note["poll"]>; voted: boolean }>(
+        "POST",
+        `/notes/${encodeURIComponent(noteId)}/poll-vote`,
+        { optionIndexes }
       );
     },
     pin(noteId: string) {

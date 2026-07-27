@@ -33,7 +33,12 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
         "Follow" => handle_follow(activity, &inbox, ap_client).await,
         "Block" => handle_block(activity, &inbox, ap_client).await,
         "Create" => {
-            if activity["object"]["type"].as_str() == Some("Note") {
+            if activity["object"]["type"].as_str() == Some("Note")
+                && activity["object"]["name"].is_string()
+                && activity["object"]["inReplyTo"].is_string()
+            {
+                handle_poll_vote(activity, &inbox, ap_client).await
+            } else if matches!(activity["object"]["type"].as_str(), Some("Note") | Some("Question")) {
                 handle_create_note(activity, &inbox, ap_client).await
             } else {
                 Ok(())
@@ -53,6 +58,59 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
             Ok(())
         }
     }
+}
+
+async fn handle_poll_vote(
+    activity: serde_json::Value,
+    inbox: &InboxContext,
+    ap_client: &ApClient,
+) -> Result<(), String> {
+    let actor_uri = activity["actor"].as_str().ok_or("PollVote: actor がありません")?;
+    let object = &activity["object"];
+    let question_id = object["inReplyTo"].as_str().ok_or("PollVote: inReplyTo がありません")?;
+    let option_name = object["name"].as_str().ok_or("PollVote: name がありません")?;
+    let activity_id = activity["id"].as_str().or_else(|| object["id"].as_str());
+
+    let Some((post_id, post_author_id)) = inbox.post_repo
+        .find_id_and_actor_by_ap_object_id(question_id).await
+        .map_err(|e| format!("PollVote: Question検索失敗: {}", e))?
+    else { return Ok(()) };
+    let remote = upsert_remote_fedi_actor(inbox, ap_client, actor_uri).await?;
+    let poll: Option<serde_json::Value> = sqlx::query_scalar("SELECT poll FROM posts WHERE id = $1")
+        .bind(post_id).fetch_optional(&inbox.db_pool).await
+        .map_err(|e| format!("PollVote: poll取得失敗: {}", e))?.flatten();
+    let Some(poll) = poll else { return Ok(()) };
+    let Some(index) = poll["options"].as_array()
+        .and_then(|options| options.iter().position(|o| o["name"].as_str() == Some(option_name)))
+    else { return Ok(()) };
+
+    let inserted = sqlx::query(
+        "INSERT INTO poll_votes (post_id, actor_id, option_index, ap_activity_id)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(post_id).bind(remote.actor_id).bind(index as i32).bind(activity_id)
+    .execute(&inbox.db_pool).await
+    .map_err(|e| format!("PollVote: 保存失敗: {}", e))?;
+    if inserted.rows_affected() > 0 {
+        let mut updated = poll;
+        if let Some(option) = updated["options"].as_array_mut().and_then(|options| options.get_mut(index)) {
+            option["votes"] = serde_json::json!(option["votes"].as_i64().unwrap_or(0) + 1);
+        }
+        sqlx::query("UPDATE posts SET poll = $2 WHERE id = $1")
+            .bind(post_id)
+            .bind(&updated)
+            .execute(&inbox.db_pool)
+            .await
+            .map_err(|e| format!("PollVote: 集計更新失敗: {}", e))?;
+    }
+    if post_author_id != remote.actor_id {
+        inbox.stream_hub.publish_event(
+            HashSet::from([post_author_id]), "pollVote",
+            serde_json::json!({"postId": post_id.to_string(), "actorId": remote.actor_id.to_string()}),
+        );
+    }
+    Ok(())
 }
 
 /// AP アクタードキュメントを取得し、`actors` テーブルへ upsert した結果。
@@ -320,6 +378,29 @@ fn guess_attachment_mime_type(att: &serde_json::Value, url: &str) -> Option<Stri
     Some(guessed.to_string())
 }
 
+fn normalize_ap_poll(note: &serde_json::Value) -> Option<serde_json::Value> {
+    if note["type"].as_str() != Some("Question") { return None; }
+    let (choices, multiple) = if let Some(v) = note["oneOf"].as_array() {
+        (v, false)
+    } else {
+        (note["anyOf"].as_array()?, true)
+    };
+    let options: Vec<_> = choices.iter().filter_map(|choice| {
+        Some(serde_json::json!({
+            "name": choice["name"].as_str()?,
+            "votes": choice["replies"]["totalItems"].as_i64().unwrap_or(0).max(0)
+        }))
+    }).collect();
+    if options.is_empty() { return None; }
+    Some(serde_json::json!({
+        "multiple": multiple,
+        "options": options,
+        "endTime": note["endTime"].as_str(),
+        "closed": note["closed"].as_str(),
+        "votersCount": note["votersCount"].as_i64(),
+    }))
+}
+
 // Create(Note) を受け取り posts テーブルに保存する
 async fn handle_create_note(
     activity: serde_json::Value,
@@ -455,6 +536,11 @@ async fn handle_create_note(
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
+    let content_warning = note["summary"].as_str().filter(|s| !s.is_empty());
+    let poll = normalize_ap_poll(note);
+    inbox.post_repo.set_fedi_content_metadata(post_id, content_warning, poll.as_ref())
+        .await.map_err(|e| format!("投稿メタデータ更新エラー: {}", e))?;
+
     if let Err(e) = inbox.hashtag_repo.link_post(post_id, &body).await {
         tracing::error!("[Create/Note] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
     }
@@ -528,7 +614,9 @@ async fn handle_create_note(
                 continue;
             }
             let mime_type = guess_attachment_mime_type(att, url);
-            if let Err(e) = inbox.post_repo.attach_remote_media_url(post_id, url, mime_type.as_deref(), None, position as i16).await {
+            let is_sensitive = att["sensitive"].as_bool().unwrap_or(false)
+                || note["sensitive"].as_bool().unwrap_or(false);
+            if let Err(e) = inbox.post_repo.attach_remote_media_url(post_id, url, mime_type.as_deref(), None, is_sensitive, position as i16).await {
                 tracing::error!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
             }
         }
@@ -1430,8 +1518,8 @@ async fn fetch_and_save_note(
 ) -> Result<i64, String> {
     let note = ap_client.fetch_object(note_uri).await?;
 
-    // Note 以外の型（Article 等）は一旦非対応
-    if note["type"].as_str() != Some("Note") {
+    // Note/Question 以外の型（Article 等）は一旦非対応
+    if !matches!(note["type"].as_str(), Some("Note") | Some("Question")) {
         return Err(format!(
             "フェッチしたオブジェクトが Note ではありません: type={:?}",
             note["type"]
@@ -1491,7 +1579,7 @@ async fn fetch_and_save_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_emoji_tag_url, strip_html,
+        ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_emoji_tag_url, normalize_ap_poll, strip_html,
     };
 
     #[test]
@@ -1741,5 +1829,28 @@ mod tests {
             ]
         });
         assert_eq!(extract_emoji_tag_url(&activity, "🎉"), None);
+    }
+
+    #[test]
+    fn normalizes_question_poll_without_trusting_negative_counts() {
+        let question = serde_json::json!({
+            "type": "Question",
+            "oneOf": [
+                { "name": "紅茶", "replies": { "totalItems": 3 } },
+                { "name": "珈琲", "replies": { "totalItems": -2 } }
+            ],
+            "endTime": "2026-07-28T00:00:00Z",
+            "votersCount": 3
+        });
+        assert_eq!(normalize_ap_poll(&question), Some(serde_json::json!({
+            "multiple": false,
+            "options": [
+                { "name": "紅茶", "votes": 3 },
+                { "name": "珈琲", "votes": 0 }
+            ],
+            "endTime": "2026-07-28T00:00:00Z",
+            "closed": null,
+            "votersCount": 3
+        })));
     }
 }

@@ -11,7 +11,8 @@ interface NoteAttachmentsProps {
 
 /** 投稿に添付されたメディア（画像/動画/HLS/音声）一覧の表示。 */
 export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; sensitive: boolean } | null>(null);
+  const [revealed, setRevealed] = useState<Set<number>>(() => new Set());
 
   if (!attachments || attachments.length === 0) return null;
 
@@ -42,21 +43,37 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
             />
           );
         }
+        const isRevealed = revealed.has(i);
         return (
-          <img
-            key={i}
-            src={mediaUrl(att.url)}
-            alt=""
-            className={styles.attachImage}
-            loading="lazy"
-            onClick={(e) => {
-              e.stopPropagation();
-              setLightboxSrc(mediaUrl(att.url) ?? att.url);
-            }}
-          />
+          <div key={i} className={styles.sensitiveImageWrap}>
+            <img
+              src={mediaUrl(att.url)}
+              alt=""
+              className={`${styles.attachImage} ${att.isSensitive && !isRevealed ? styles.attachBlurred : ""}`}
+              loading="lazy"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (att.isSensitive && isRevealed) {
+                  setRevealed((current) => {
+                    const next = new Set(current);
+                    next.delete(i);
+                    return next;
+                  });
+                } else {
+                  setLightbox({ src: mediaUrl(att.url) ?? att.url, sensitive: att.isSensitive });
+                }
+              }}
+            />
+            {att.isSensitive && !isRevealed && (
+              <button className={styles.sensitiveReveal} aria-label="閲覧注意画像を表示" onClick={(e) => {
+                e.stopPropagation();
+                setRevealed((current) => new Set(current).add(i));
+              }}>👁️</button>
+            )}
+          </div>
         );
       })}
-      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      <ImageLightbox src={lightbox?.src ?? null} sensitive={lightbox?.sensitive} onClose={() => setLightbox(null)} />
     </div>
   );
 }

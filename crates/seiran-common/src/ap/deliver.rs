@@ -1019,6 +1019,59 @@ pub async fn deliver_ap_reaction(
     .await
 }
 
+/// リモートQuestionへの回答を、Mastodon互換の
+/// `Create { object: Note { name, inReplyTo } }` として投稿者inboxへ送る。
+pub async fn deliver_ap_poll_vote(
+    ap_client: &ApClient,
+    db: &PgPool,
+    post_id: i64,
+    actor_id: i64,
+    local_domain: &str,
+    ap_private_key_pem: &str,
+    option_names: &[String],
+) -> Result<(), ApError> {
+    let row = sqlx::query(
+        "SELECT p.ap_object_id, a.ap_inbox_url, a.ap_uri
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.id = $1 AND p.deleted_at IS NULL",
+    )
+    .bind(post_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| ApError::Other(format!("アンケート配送先取得エラー: {}", e)))?;
+    let Some(row) = row else { return Ok(()) };
+    let Some(question_id): Option<String> = row.try_get("ap_object_id").unwrap_or(None) else { return Ok(()) };
+    let Some(inbox): Option<String> = row.try_get("ap_inbox_url").unwrap_or(None) else { return Ok(()) };
+    let Some(author_uri): Option<String> = row.try_get("ap_uri").unwrap_or(None) else { return Ok(()) };
+
+    let username = fetch_username(db, actor_id).await?;
+    let addr = local_actor_address(local_domain, &username);
+    for (index, name) in option_names.iter().enumerate() {
+        let activity_id = format!("https://{}/activities/poll-vote-{}-{}-{}", local_domain, post_id, actor_id, index);
+        let note_id = format!("{}/note", activity_id);
+        let activity = serde_json::json!({
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "id": activity_id,
+            "type": "Create",
+            "actor": addr.actor_uri,
+            "to": [author_uri],
+            "object": {
+                "id": note_id,
+                "type": "Note",
+                "attributedTo": addr.actor_uri,
+                "name": name,
+                "inReplyTo": question_id,
+                "to": [author_uri]
+            }
+        });
+        fan_out_activity(
+            ap_client, std::slice::from_ref(&inbox), &activity, &addr.key_id,
+            ap_private_key_pem, &format!("PollVote post_id={} actor_id={}", post_id, actor_id),
+        ).await?;
+    }
+    Ok(())
+}
+
 /// ローカルアクターの絵文字リアクション取消（Undo(Like)/Undo(EmojiReact)）を、
 /// `deliver_ap_reaction` と同じ宛先集合（対象ポスト著者 + reactor 本人の Fedi フォロワー）へ配送する。
 ///

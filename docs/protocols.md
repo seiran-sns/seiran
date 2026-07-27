@@ -14,6 +14,13 @@
 
 ## 2. ActivityPub (Fedi) 統合
 
+### Fedi投稿のCW・アンケート・閲覧注意画像
+
+受信した`Note`/`Question`の`summary`をCW、`Question.oneOf`/`anyOf`をアンケートとして
+正規化して保存する。添付の`sensitive`または投稿全体の`sensitive`が真なら、その画像を
+閲覧注意としてAPIへ返す。アンケートは外部サーバー上の集計結果を表示し、seiranからの投票配送は
+現時点では行わない。
+
 ### 構成
 - `seiran-common::ap`: プロトコル非依存の共通ロジック
   - `client.rs` — `ApClient`（`reqwest::Client` + 公開鍵キャッシュ）。アクターフェッチ、HTTP Signatures 検証・署名、可視性判定（to/cc → 4値）、カスタム絵文字 tag 解析
@@ -339,3 +346,8 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 - **ドメイン単位のレート制限**（`inbound_activity_process` 向け）: 未実装。現状 `actor_history_sync` キューのみドメイン単位の同時実行制限を持つ。
 - **リモートFedi/Bskyユーザー自身の公開リストのオンデマンド取得**: 未実装（`public_lists` はローカルユーザーのみ対象）。
 - **ブロック・ミュート関連の未実装項目**: 10節「スコープ外」参照（リアクション一覧でのブロック/ミュート除外、公開リストタイムラインでのフィルタリング）。
+# ActivityPubアンケート回答
+
+リモートの `Question` へのローカル回答は、選択肢ごとに
+`Create(Note)`（`name` が選択肢名、`inReplyTo` がQuestion ID）として投稿者Inboxへ配送する。
+同形式の回答を受信した場合は `poll_votes` に冪等保存し、Questionのローカル集計を更新する。

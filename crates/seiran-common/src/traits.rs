@@ -115,6 +115,8 @@ pub enum ApDeliveryKind {
         emoji_url: Option<String>,
         undo_prev: Option<PrevApReaction>,
     },
+    /// リモートFediアンケートへの回答。選択肢ごとに Create(Note) を投票先へ配送する。
+    PollVote { post_id: i64, option_names: Vec<String> },
     /// Undo(Like/EmojiReact)（リアクション取り消し）を配送する。
     UndoReaction { post_id: i64, prev_activity_id: String, content: String, emoji_url: Option<String> },
     /// Update(Person)（プロフィール更新）を配送する。

@@ -132,6 +132,9 @@ MiAuth（`/api/miauth/:session_id/authorize`）認可成立時に発行するJWT
 `media_files` は画像専用として始まったため `width`/`height`/`blurhash` は NULL 許容(動画・音声はこれらを持たない)。`bsky_video_*` 系カラムは Bluesky 公式動画パイプライン（`app.bsky.video.uploadVideo`）との連携状態を追跡する。`(sha256, blurhash)` の複合 UNIQUE でグローバル重複排除。
 
 `post_attachments` は `media_file_id`（ローカル添付）と `remote_url`/`remote_mime_type`/`remote_thumbnail_url`（リモート受信添付）が排他的に埋まる設計。
+ActivityPub受信添付の`is_sensitive`は画像単位の`attachment[].sensitive`を保存し、投稿全体の
+`sensitive=true`も全添付へ安全側に伝播する。`posts.content_warning`はAP `summary`、
+`posts.poll`はAP `Question`の`oneOf`/`anyOf`・票数・締切を表示用JSONとして保存する。
 
 `atp_blobs` は `uploadBlob` で受信した任意バイナリ（Bsky動画パイプラインが提出してくるトランスコード済み動画等）を保存する。`sha256` に UNIQUE を張り、content-addressable な重複排除を行う。
 
@@ -143,3 +146,10 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 - **ホーム/ローカルタイムライン**: `posts` を `id`（降順）でページネーションするだけの単純な SQL。フォロー時点で相手の過去ログを丸ごと自サーバー DB に取り込んでいるため、外部 API 呼び出しを伴わない（`docs/concept.md` 「タイムラインは自前の池」参照）。
 - **ソーシャル/グローバルタイムライン（#78）**: `PostRepository::social_timeline`（自分+フォロー中+ローカル全体、home_timelineのLATERAL方式候補とlocal_timelineの`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（local_timelineから`is_local`条件のみ外したもの）。新規テーブルは無く、`home_timeline`/`local_timeline`と同じインデックス（`idx_posts_actor_id`・`is_local`列）で完結する。フォロワー限定（`followers_only`）投稿は、閲覧者がフォロワーでもローカル/グローバルには出さず、ホームとソーシャルにだけ表示する（#91）。
 - **検索**: ローカル DB の投稿本文検索（`idx_posts_body_bigm`、pg_bigm）と AppView 検索の結果をマージする。pg_bigm は `LIKE` 演算子のみ最適化対象で `ILIKE` には対応しないため、投稿検索 SQL は `LOWER(body) LIKE LOWER(pattern)` 形式とし、インデックスも `LOWER(body)` に張っている（#97）。アクター検索は用途別に分離する。リスト編集・DM宛先の`GET /api/actors/search`は、`COALESCE(display_name, '')`とFedi/Bsky/ローカルの全ハンドル表記を改行区切りで連結した式へ生入力を部分一致させ、`idx_actors_search_bigm`（pg_bigm GIN式インデックス）を使う。投稿欄の`GET /api/actors/suggest`は表示名を対象にせずハンドル前方一致だけを行い、`idx_actors_handle_prefix`と`idx_actors_local_bsky_handle_prefix`（`text_pattern_ops` B-tree式インデックス）を個別走査して`UNION`する。環境依存のローカルドメインをmigrationへ焼き込まないため、式中のローカル判定には同義の`actor_type = 'local'`を使う。セッション管理の詳細は `docs/architecture.md` の検索セッション節を参照。
+# アンケート回答
+
+`poll_votes` はActivityPub `Question`への回答を、投稿・回答Actor・選択肢番号単位で保持する。
+複数回答では同一Actorが複数行を持ち、`ap_activity_id` の一意制約でリモートからの再配送を
+冪等化する。集計表示用の票数は `posts.poll` にも反映する。認証付きの投稿読取APIは
+`poll_votes` から回答者自身の選択肢番号を `poll.votedByMe` として付与し、クライアントが
+リロード後も回答済み状態と選択内容を復元できるようにする。
