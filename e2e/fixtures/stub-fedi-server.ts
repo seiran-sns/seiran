@@ -34,7 +34,17 @@ export interface StubFediServer {
     seiranBaseUrl: string,
     targetUsername: string,
     text: string,
-    opts?: { inReplyTo?: string; mentionTargetUsername?: string; emojiShortcode?: string },
+    opts?: {
+      inReplyTo?: string;
+      mentionTargetUsername?: string;
+      emojiShortcode?: string;
+      /** "public" 指定時は to に as:Public を含め、cc に対象アクターを置く（Mastodon方式）。省略時は従来どおり to に対象アクターのみ（direct扱い）。 */
+      visibility?: "public" | "direct";
+      /** ActivityPub summary（CW）。 */
+      summary?: string;
+      /** アンケート（Question）として送る場合の選択肢名一覧。指定時は object.type が "Question" になる。 */
+      pollOptions?: string[];
+    },
   ): Promise<string>;
   /** このスタブアクターが送った投稿（`sendCreateNote`が返した Note ID）に対する
    * Delete(Tombstone)をseiranへ送る（リモート削除反映のE2E用）。 */
@@ -185,23 +195,31 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
               _misskey_license: { freeText: "CC BY 4.0 E2E" },
             });
           }
+          const isPublic = opts?.visibility === "public";
+          const to = isPublic ? ["https://www.w3.org/ns/activitystreams#Public"] : [targetActorUri];
+          const cc = isPublic ? [targetActorUri] : [];
+          const poll = opts?.pollOptions
+            ? { oneOf: opts.pollOptions.map((name) => ({ type: "Note", name, replies: { type: "Collection", totalItems: 0 } })) }
+            : {};
           const activity = {
             "@context": "https://www.w3.org/ns/activitystreams",
             type: "Create",
             id: `${base}/activities/${Date.now()}-${Math.random().toString(36).slice(2)}`,
             actor: stub.actorUri,
-            to: [targetActorUri],
-            cc: [],
+            to,
+            cc,
             object: {
-              type: "Note",
+              type: opts?.pollOptions ? "Question" : "Note",
               id: noteId,
               attributedTo: stub.actorUri,
               content: `<p>${text}</p>`,
               published: new Date().toISOString(),
-              to: [targetActorUri],
-              cc: [],
+              to,
+              cc,
               tag,
               ...(opts?.inReplyTo ? { inReplyTo: opts.inReplyTo } : {}),
+              ...(opts?.summary ? { summary: opts.summary } : {}),
+              ...poll,
             },
           };
           await signedPost(`${seiranBaseUrl}/inbox`, activity, stub.actorUri, privateKey);

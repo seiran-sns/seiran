@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "../i18n";
-import { ApiError, cursorParams, getErrorMessage, parseJsonBody, throwIfError } from "./client";
+import { ApiError, cursorParams, getErrorMessage, noteFromStream, parseJsonBody, throwIfError } from "./client";
 
 // メッセージ文言はロケール依存のため、テストでは言語を固定してから検証する。
 beforeAll(async () => {
@@ -107,5 +107,29 @@ describe("throwIfError", () => {
       headers: { "content-type": "application/json" },
     });
     await expect(throwIfError(res)).rejects.toMatchObject({ code: "UNKNOWN_ERROR", status: 400 });
+  });
+});
+
+// #102: バックエンドは正しくcontentWarning/pollを返しているのに、正規化処理から
+// この2フィールドが漏れていて常にundefinedになりCW・アンケートUIが表示されない回帰があった。
+describe("noteFromStream（RawNote正規化）", () => {
+  it("contentWarningとpollをNoteへコピーする", () => {
+    const raw = {
+      id: "1",
+      text: "本文",
+      user: { id: 1, username: "alice" },
+      contentWarning: "注意書き",
+      poll: { multiple: false, options: [{ name: "A", votes: 1 }] },
+    };
+    const note = noteFromStream(raw);
+    expect(note.contentWarning).toBe("注意書き");
+    expect(note.poll).toEqual({ multiple: false, options: [{ name: "A", votes: 1 }] });
+  });
+
+  it("contentWarning/pollが無ければundefinedのまま", () => {
+    const raw = { id: "1", text: "本文", user: { id: 1, username: "alice" } };
+    const note = noteFromStream(raw);
+    expect(note.contentWarning).toBeUndefined();
+    expect(note.poll).toBeUndefined();
   });
 });

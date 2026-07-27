@@ -1,0 +1,86 @@
+import { test, expect } from "@playwright/test";
+import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
+import { startStubFediServer, type StubFediServer } from "../fixtures/stub-fedi-server";
+import { BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
+
+// PR #114（#102）で実装したはずのCW・アンケート表示が、実機確認で全く機能していなかった
+// 回帰（フロントのRawNote正規化でcontentWarning/pollが欠落・inbound側でCreate(Question)を
+// 無条件無視）を踏まえた再発防止テスト。DBに保存されるだけでなく、実際にNoteCardの
+// 表示・トグル挙動まで検証する。
+
+async function findSessionByText(request: import("@playwright/test").APIRequestContext, token: string, text: string) {
+  const res = await request.get("/api/dm/sessions", { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok()) return undefined;
+  const sessions = (await res.json()) as { threadRootPostId: string; lastMessage: { text: string } }[];
+  return sessions.find((s) => s.lastMessage.text === text);
+}
+
+test.describe("Fediから受信したCW・アンケート付き投稿の表示", () => {
+  let fedi: StubFediServer;
+
+  test.beforeEach(async () => {
+    fedi = await startStubFediServer();
+  });
+
+  test.afterEach(async () => {
+    await fedi.close();
+  });
+
+  test("CW付き投稿は初期状態で本文が隠れ、ボタンで開閉できる", async ({ page, request }) => {
+    const alice = await registerUserViaApi(request, "e2fedicw");
+    const text = `CW本文テスト ${Date.now()}`;
+    await fedi.sendCreateNote(SEIRAN_BASE_URL, alice.username, text, { summary: "テスト注意書き" });
+
+    let session: { threadRootPostId: string } | undefined;
+    await expect
+      .poll(
+        async () => {
+          session = await findSessionByText(request, alice.token, text);
+          return session !== undefined;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeTruthy();
+    const postId = session!.threadRootPostId;
+
+    await seedAuth(page, alice.token);
+    await page.goto(`/notes/${postId}`);
+
+    const cwButton = page.getByRole("button", { name: /テスト注意書き/ });
+    await expect(cwButton).toBeVisible();
+    await expect(page.getByText(text)).toHaveCount(0);
+
+    await cwButton.click();
+    await expect(page.getByText(text)).toBeVisible();
+
+    await cwButton.click();
+    await expect(page.getByText(text)).toHaveCount(0);
+  });
+
+  test("アンケート付き投稿は選択肢と票数が表示される", async ({ page, request }) => {
+    const alice = await registerUserViaApi(request, "e2fedipoll");
+    const text = `アンケート本文テスト ${Date.now()}`;
+    await fedi.sendCreateNote(SEIRAN_BASE_URL, alice.username, text, {
+      pollOptions: ["選択肢A", "選択肢B"],
+    });
+
+    let session: { threadRootPostId: string } | undefined;
+    await expect
+      .poll(
+        async () => {
+          session = await findSessionByText(request, alice.token, text);
+          return session !== undefined;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeTruthy();
+    const postId = session!.threadRootPostId;
+
+    await seedAuth(page, alice.token);
+    await page.goto(`/notes/${postId}`);
+
+    await expect(page.getByText("選択肢A")).toBeVisible();
+    await expect(page.getByText("選択肢B")).toBeVisible();
+    await expect(page.getByText("0票").first()).toBeVisible();
+  });
+});

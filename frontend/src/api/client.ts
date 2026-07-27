@@ -550,6 +550,9 @@ interface RawNote {
   deliverBsky?: boolean;
   remoteUrl?: string;
   remote_url?: string;
+  contentWarning?: string;
+  content_warning?: string;
+  poll?: Note["poll"];
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -580,6 +583,8 @@ function normalizeNote(r: RawNote): Note {
     deliverFedi: r.deliverFedi,
     deliverBsky: r.deliverBsky,
     remoteUrl: r.remoteUrl ?? r.remote_url,
+    contentWarning: r.contentWarning ?? r.content_warning,
+    poll: r.poll,
   };
 }
 

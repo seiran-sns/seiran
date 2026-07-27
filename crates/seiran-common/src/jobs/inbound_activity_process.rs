@@ -33,7 +33,7 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
         "Follow" => handle_follow(activity, &inbox, ap_client).await,
         "Block" => handle_block(activity, &inbox, ap_client).await,
         "Create" => {
-            if activity["object"]["type"].as_str() == Some("Note") {
+            if matches!(activity["object"]["type"].as_str(), Some("Note") | Some("Question")) {
                 handle_create_note(activity, &inbox, ap_client).await
             } else {
                 Ok(())
@@ -1460,8 +1460,8 @@ async fn fetch_and_save_note(
 ) -> Result<i64, String> {
     let note = ap_client.fetch_object(note_uri).await?;
 
-    // Note 以外の型（Article 等）は一旦非対応
-    if note["type"].as_str() != Some("Note") {
+    // Note/Question 以外の型（Article 等）は一旦非対応
+    if !matches!(note["type"].as_str(), Some("Note") | Some("Question")) {
         return Err(format!(
             "フェッチしたオブジェクトが Note ではありません: type={:?}",
             note["type"]
