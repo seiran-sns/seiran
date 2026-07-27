@@ -25,10 +25,10 @@ test("プロフィール投稿一覧では公開投稿のリポスト元が埋�
   });
   expect(profileRes.ok(), await profileRes.text()).toBeTruthy();
   const profile = (await profileRes.json()) as {
-    recent_posts: Array<{ id: string; renote_id?: string; renote?: { id: string; text: string } }>;
+    recent_posts: Array<{ id: string; renoteId?: string; renote?: { id: string; text: string } }>;
   };
   const initialRepost = profile.recent_posts.find((note) => note.id === String(repost.id));
-  expect(initialRepost?.renote_id).toBe(String(original.id));
+  expect(initialRepost?.renoteId).toBe(String(original.id));
   expect(initialRepost?.renote).toMatchObject({ id: String(original.id), text });
 
   const postsRes = await request.get(
@@ -38,10 +38,10 @@ test("プロフィール投稿一覧では公開投稿のリポスト元が埋�
   expect(postsRes.ok(), await postsRes.text()).toBeTruthy();
   const posts = (await postsRes.json()) as Array<{
     id: string;
-    renote_id?: string;
+    renoteId?: string;
     renote?: { id: string; text: string };
   }>;
   const pagedRepost = posts.find((note) => note.id === String(repost.id));
-  expect(pagedRepost?.renote_id).toBe(String(original.id));
+  expect(pagedRepost?.renoteId).toBe(String(original.id));
   expect(pagedRepost?.renote).toMatchObject({ id: String(original.id), text });
 });
