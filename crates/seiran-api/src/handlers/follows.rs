@@ -287,6 +287,14 @@ async fn follow_fedi(target: &str, local_actor_id: i64, local_username: &str, st
         }
     };
 
+    // target_uri が自ドメイン（`https://{local_domain}/users/{username}`）を指す場合、
+    // fetch_actor/upsert_remote_fedi へ進まず Bad Request とする。ローカルユーザーを
+    // fedi フォロー経路で解決させると影の重複 fedi 行が生成される（#110）。
+    if seiran_common::ap::extract_local_username(&target_uri, &state.local_domain).is_some() {
+        return ApiError::BadRequest("ローカルユーザーはFediフォロー経路で指定できません".to_owned())
+            .into_response();
+    }
+
     let remote_ap = match state.ap_client.fetch_actor(&target_uri).await {
         Ok(a) => a,
         Err(e) => return ApiError::BadGateway(format!("リモートアクター取得失敗: {}", e)).into_response(),

@@ -131,6 +131,28 @@ async fn upsert_remote_fedi_actor(
     ap_client: &ApClient,
     actor_uri: &str,
 ) -> Result<RemoteActorInfo, String> {
+    // actor_uri が自ドメイン（`https://{local_domain}/users/{username}`）を指す場合、
+    // 新規 fedi 行を作らずローカル行をそのまま返す。ローカル行は ap_uri で照合できない
+    // ため、ここでガードしないと配信ループバックやなりすましのたびに影の重複 fedi 行が
+    // 生成されてしまう（#110）。
+    if let Some(local_username) = crate::ap::extract_local_username(actor_uri, &inbox.local_domain) {
+        let local_actor = inbox
+            .actor_repo
+            .find_by_username_domain(local_username, &inbox.local_domain)
+            .await
+            .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
+            .filter(|a| a.actor_type == "local")
+            .ok_or_else(|| format!("自ドメインを名乗るアクター '{}' はローカルに存在しません", actor_uri))?;
+        return Ok(RemoteActorInfo {
+            actor_id: local_actor.id,
+            username: local_actor.username,
+            display_name: local_actor.display_name.unwrap_or_default(),
+            domain: local_actor.domain,
+            avatar_url: None,
+            inbox: String::new(),
+        });
+    }
+
     let remote_ap = ap_client.fetch_actor(actor_uri).await?;
     let ap_inbox = remote_ap.inbox.clone().unwrap_or_default();
     let username = remote_ap
