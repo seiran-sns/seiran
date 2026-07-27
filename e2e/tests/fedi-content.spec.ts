@@ -15,6 +15,15 @@ async function findSessionByText(request: import("@playwright/test").APIRequestC
   return sessions.find((s) => s.lastMessage.text === text);
 }
 
+async function findGlobalNoteByText(request: import("@playwright/test").APIRequestContext, token: string, text: string) {
+  const res = await request.get("/api/notes/global-timeline?limit=100", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok()) return undefined;
+  const notes = (await res.json()) as { id: string; text: string }[];
+  return notes.find((note) => note.text === text);
+}
+
 test.describe("Fediから受信したCW・アンケート付き投稿の表示", () => {
   let fedi: StubFediServer;
 
@@ -63,19 +72,20 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
     const text = `アンケート本文テスト ${Date.now()}`;
     await fedi.sendCreateNote(SEIRAN_BASE_URL, alice.username, text, {
       pollOptions: ["選択肢A", "選択肢B"],
+      visibility: "public",
     });
 
-    let session: { threadRootPostId: string } | undefined;
+    let note: { id: string } | undefined;
     await expect
       .poll(
         async () => {
-          session = await findSessionByText(request, alice.token, text);
-          return session !== undefined;
+          note = await findGlobalNoteByText(request, alice.token, text);
+          return note !== undefined;
         },
         { timeout: 15_000 },
       )
       .toBeTruthy();
-    const postId = session!.threadRootPostId;
+    const postId = note!.id;
 
     await seedAuth(page, alice.token);
     await page.goto(`/notes/${postId}`);
@@ -87,6 +97,18 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
     await expect(page.getByText("0票").first()).toBeVisible();
     await page.getByRole("button", { name: "回答に戻る" }).click();
     await page.getByRole("button", { name: "選択肢A" }).click();
+    await expect(page.getByText("1票")).toBeVisible();
+
+    const repostRes = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${alice.token}` },
+      data: { renote_id: postId, deliver_to_fedi: false, deliver_to_bsky: false },
+    });
+    expect(repostRes.ok(), `リポスト作成失敗: ${repostRes.status()} ${await repostRes.text()}`).toBeTruthy();
+    const repost = (await repostRes.json()) as { id: string };
+    await page.goto(`/notes/${repost.id}`);
+    await expect(page.getByText("選択肢A")).toBeVisible();
+    await expect(page.getByText("選択肢B")).toBeVisible();
+    await page.getByRole("button", { name: "結果を見る" }).click();
     await expect(page.getByText("1票")).toBeVisible();
   });
 });
