@@ -192,14 +192,30 @@
   cursor: pointer;
   padding: 5px 8px;
 }
-.contentWarning {
+.contentWarningWrap {
   margin: 6px 0 6px 50px;
   padding: 8px 10px;
-  border: 0;
   border-left: 3px solid var(--accent);
   background: var(--accent-deep);
+}
+.contentWarningText {
+  margin: 0;
   color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.contentWarningToggle {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  font-size: 0.8rem;
+  padding: 3px 10px;
   cursor: pointer;
+}
+.contentWarningToggle:hover {
+  background: var(--accent-deep-hover);
 }
 .poll { margin: 8px 0 0 50px; display: grid; gap: 5px; }
 .pollOption {
@@ -208,6 +224,29 @@
   border: 1px solid var(--border);
   border-radius: 7px;
   padding: 6px 9px;
+}
+.pollChoice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.pollChoice:hover { background: var(--accent-deep); }
+.pollControls { display: flex; gap: 8px; }
+.pollControls button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 9px;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
 }
 
 .attachAudio {

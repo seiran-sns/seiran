@@ -474,6 +474,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/:id/repost", delete(handlers::notes::delete_repost))
         .route("/api/reactions/frequent", get(handlers::notes::frequent_reactions))
         .route("/api/notes/:id/reactions", post(handlers::notes::create_reaction))
+        .route("/api/notes/:id/poll-vote", post(handlers::notes::vote_poll))
         .route("/api/notes/:id/reactions/:content", delete(handlers::notes::delete_reaction))
         .route("/api/notes/:id/reactions/:content/actors", get(handlers::notes::reaction_actors))
         .route("/api/notes/:id/pin", post(handlers::notes::pin_note))

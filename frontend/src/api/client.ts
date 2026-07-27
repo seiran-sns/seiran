@@ -909,6 +909,13 @@ export const api = {
         `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}/actors`
       );
     },
+    votePoll(noteId: string, optionIndexes: number[]) {
+      return request<{ ok: boolean; poll: NonNullable<Note["poll"]>; voted: boolean }>(
+        "POST",
+        `/notes/${encodeURIComponent(noteId)}/poll-vote`,
+        { optionIndexes }
+      );
+    },
     pin(noteId: string) {
       return request<{ ok: boolean; pinnedPostIds: string[] }>("POST", `/notes/${encodeURIComponent(noteId)}/pin`);
     },

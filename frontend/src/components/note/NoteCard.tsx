@@ -65,11 +65,38 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
   const [showContent, setShowContent] = useState(!note.contentWarning);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [followActionPending, setFollowActionPending] = useState(false);
+  const [poll, setPoll] = useState(note.poll);
+  const [pollResults, setPollResults] = useState(false);
+  const [pollVoted, setPollVoted] = useState(false);
+  const [pollSelection, setPollSelection] = useState<number[]>([]);
+  const [pollPending, setPollPending] = useState(false);
   // フォロー状態は共有ストア（stores/followStatusStore）を参照する。プロフィール画面や
   // 同一ユーザーの他ポストのフォロースイッチと状態が一本化されるため、一方で操作するか
   // WebSocket の `followAccepted`（StreamingContext）を受けるだけで全ての表示に伝播する。
   // ストアに未登録（undefined）なら「まだ取得していない」ことを意味する。
   const followStatus = useFollowStatus(targetKey) ?? null;
+
+  const pollClosed = !!poll && [poll.closed, poll.endTime]
+    .filter(Boolean)
+    .some((value) => new Date(value!).getTime() <= Date.now());
+
+  async function submitPollVote(indexes: number[]) {
+    if (!currentUser) {
+      showError("投票するにはログインが必要です");
+      return;
+    }
+    setPollPending(true);
+    try {
+      const result = await api.notes.votePoll(note.id, indexes);
+      setPoll(result.poll);
+      setPollVoted(true);
+      setPollResults(true);
+    } catch (error) {
+      showError(getErrorMessage(error));
+    } finally {
+      setPollPending(false);
+    }
+  }
 
   function handleMouseEnter() {
     setIsHovered(true);
@@ -198,12 +225,15 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
       )}
 
       {note.contentWarning && (
-        <button className={styles.contentWarning} onClick={(e) => {
-          e.stopPropagation();
-          setShowContent((shown) => !shown);
-        }}>
-          ⚠️ {note.contentWarning} — {showContent ? "隠す" : "表示"}
-        </button>
+        <div className={styles.contentWarningWrap}>
+          <p className={styles.contentWarningText}>⚠️ {note.contentWarning}</p>
+          <button className={styles.contentWarningToggle} onClick={(e) => {
+            e.stopPropagation();
+            setShowContent((shown) => !shown);
+          }}>
+            {showContent ? "隠す" : "表示"}
+          </button>
+        </div>
       )}
       {showContent && (
         <p className={styles.body}>
@@ -213,14 +243,39 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
 
       <NoteAttachments attachments={note.attachments} />
 
-      {note.poll && (
+      {poll && (
         <div className={styles.poll}>
-          {note.poll.options.map((option) => (
+          {(pollResults || pollVoted || pollClosed) ? poll.options.map((option) => (
             <div className={styles.pollOption} key={option.name}>
-              <span>{option.name}</span>
-              <span>{option.votes}票</span>
+              <span>{option.name}</span><span>{option.votes}票</span>
             </div>
+          )) : poll.options.map((option, index) => poll.multiple ? (
+            <label className={styles.pollChoice} key={option.name}>
+              <input type="checkbox" checked={pollSelection.includes(index)} disabled={pollPending}
+                onChange={(e) => setPollSelection((selected) => e.target.checked
+                  ? [...selected, index]
+                  : selected.filter((i) => i !== index))} />
+              <span>{option.name}</span>
+            </label>
+          ) : (
+            <button className={styles.pollChoice} key={option.name} disabled={pollPending}
+              onClick={(e) => { e.stopPropagation(); void submitPollVote([index]); }}>
+              {option.name}
+            </button>
           ))}
+          {!pollVoted && !pollClosed && (
+            <div className={styles.pollControls}>
+              {poll.multiple && !pollResults && (
+                <button disabled={pollPending || pollSelection.length === 0}
+                  onClick={(e) => { e.stopPropagation(); void submitPollVote(pollSelection); }}>
+                  回答
+                </button>
+              )}
+              <button onClick={(e) => { e.stopPropagation(); setPollResults((shown) => !shown); }}>
+                {pollResults ? "回答に戻る" : "結果を見る"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

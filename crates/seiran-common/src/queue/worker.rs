@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
+use sqlx::PgPool;
 
 use crate::ap::ApClient;
 use crate::jobs;
@@ -62,6 +63,7 @@ pub struct DeliveryConfig {
 /// （`all` ロールでは埋め込み Worker が api/federation と同じ `stream_hub` を共有する）。
 #[derive(Clone)]
 pub struct InboxContext {
+    pub db_pool: PgPool,
     pub actor_repo: Arc<dyn ActorRepository>,
     pub follow_repo: Arc<dyn FollowRepository>,
     /// Block受信時のフォロー拒否判定・ブロック済みチェックに使う。

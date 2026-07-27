@@ -346,3 +346,8 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 - **ドメイン単位のレート制限**（`inbound_activity_process` 向け）: 未実装。現状 `actor_history_sync` キューのみドメイン単位の同時実行制限を持つ。
 - **リモートFedi/Bskyユーザー自身の公開リストのオンデマンド取得**: 未実装（`public_lists` はローカルユーザーのみ対象）。
 - **ブロック・ミュート関連の未実装項目**: 10節「スコープ外」参照（リアクション一覧でのブロック/ミュート除外、公開リストタイムラインでのフィルタリング）。
+# ActivityPubアンケート回答
+
+リモートの `Question` へのローカル回答は、選択肢ごとに
+`Create(Note)`（`name` が選択肢名、`inReplyTo` がQuestion ID）として投稿者Inboxへ配送する。
+同形式の回答を受信した場合は `poll_votes` に冪等保存し、Questionのローカル集計を更新する。

@@ -40,18 +40,19 @@ export default function ImageLightbox({ src, onClose, sensitive = false }: Image
       <button className={styles.close} onClick={onClose} aria-label={t("common:close")}>
         ×
       </button>
-      <img
-        src={src}
-        alt=""
-        className={`${styles.image} ${sensitive && !revealed ? styles.blurred : ""}`}
-        onClick={(e) => e.stopPropagation()}
-      />
-      {sensitive && !revealed && (
-        <button className={styles.reveal} aria-label="閲覧注意画像を表示" onClick={(e) => {
-          e.stopPropagation();
-          setRevealed(true);
-        }}>👁️</button>
-      )}
+      <div className={styles.imageWrap} onClick={(e) => e.stopPropagation()}>
+        <img
+          src={src}
+          alt=""
+          className={`${styles.image} ${sensitive && !revealed ? styles.blurred : ""}`}
+        />
+        {sensitive && !revealed && (
+          <button className={styles.reveal} aria-label="閲覧注意画像を表示" onClick={(e) => {
+            e.stopPropagation();
+            setRevealed(true);
+          }}>👁️</button>
+        )}
+      </div>
     </div>
   );
 }

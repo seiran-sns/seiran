@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::ap::{
     deliver_ap_announce, deliver_ap_reaction, deliver_ap_undo_reaction, deliver_delete_actor,
     deliver_delete_note, deliver_direct_message_to_ap, deliver_post_to_ap_followers,
-    deliver_undo_announce, deliver_update_actor,
+    deliver_undo_announce, deliver_update_actor, deliver_ap_poll_vote,
 };
 use crate::queue::worker::JobContext;
 use crate::traits::ApDeliveryKind;
@@ -82,6 +82,13 @@ pub async fn handle(actor_id: i64, kind: ApDeliveryKind, ctx: Arc<JobContext>) -
             deliver_ap_reaction(
                 ap_client, pool, post_id, actor_id, domain, private_pem, &activity_id, &content,
                 emoji_url.as_deref(),
+            )
+            .await
+            .map_err(|e| e.to_string())
+        }
+        ApDeliveryKind::PollVote { post_id, option_names } => {
+            deliver_ap_poll_vote(
+                ap_client, pool, post_id, actor_id, domain, private_pem, &option_names,
             )
             .await
             .map_err(|e| e.to_string())

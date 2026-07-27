@@ -46,14 +46,15 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
     await seedAuth(page, alice.token);
     await page.goto(`/notes/${postId}`);
 
-    const cwButton = page.getByRole("button", { name: /テスト注意書き/ });
+    await expect(page.getByText(/テスト注意書き/)).toBeVisible();
+    const cwButton = page.getByRole("button", { name: "表示", exact: true });
     await expect(cwButton).toBeVisible();
     await expect(page.getByText(text)).toHaveCount(0);
 
     await cwButton.click();
     await expect(page.getByText(text)).toBeVisible();
 
-    await cwButton.click();
+    await page.getByRole("button", { name: "隠す", exact: true }).click();
     await expect(page.getByText(text)).toHaveCount(0);
   });
 
@@ -81,6 +82,11 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
 
     await expect(page.getByText("選択肢A")).toBeVisible();
     await expect(page.getByText("選択肢B")).toBeVisible();
+    await expect(page.getByText("0票")).toHaveCount(0);
+    await page.getByRole("button", { name: "結果を見る" }).click();
     await expect(page.getByText("0票").first()).toBeVisible();
+    await page.getByRole("button", { name: "回答に戻る" }).click();
+    await page.getByRole("button", { name: "選択肢A" }).click();
+    await expect(page.getByText("1票")).toBeVisible();
   });
 });
