@@ -9,8 +9,8 @@ use seiran_common::repository::{Actor, ActorProfileRow};
 
 use crate::error::ApiError;
 use crate::handlers::notes::{
-    attach_poll_votes, fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place,
-    to_note_response, NoteResponse,
+    attach_poll_votes, embed_renotes, fetch_attachments_map, fetch_reactions_map,
+    resolve_mention_facets_in_place, to_note_response, NoteResponse,
 };
 use crate::middleware::{extract_auth, MaybeAuthedUser};
 use crate::AppState;
@@ -81,6 +81,7 @@ pub async fn user_posts(
             nr
         })
         .collect();
+    embed_renotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
 
     Json(notes).into_response()
@@ -508,6 +509,7 @@ async fn build_profile_response(
             nr
         })
         .collect();
+    embed_renotes(&state.db, &mut recent_posts, my_actor_id).await;
 
     // ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
     // Fedi featured collection / Bsky pinnedPost 同期結果（`sync_remote_pinned_posts` 参照）。
