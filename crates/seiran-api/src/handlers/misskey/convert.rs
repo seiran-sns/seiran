@@ -481,6 +481,8 @@ mod tests {
             mention_facets: None,
             post_ap_object_id: None,
             post_at_uri: None,
+            content_warning: None,
+            poll: None,
         }
     }
 
