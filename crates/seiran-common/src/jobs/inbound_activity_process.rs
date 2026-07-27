@@ -694,14 +694,9 @@ fn as_string_list(v: &serde_json::Value) -> Vec<String> {
     }
 }
 
-/// HTML エンティティの簡易デコード（`strip_html` と `ap_content_to_markdown_body` で共有）。
+/// HTML エンティティのデコード（`strip_html` と `ap_content_to_markdown_body` で共有）。
 fn decode_html_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
+    html_escape::decode_html_entities(s).into_owned()
 }
 
 /// プレーンテキストへの単純な HTML タグ除去（エンティティも簡易デコード）。
@@ -1762,6 +1757,9 @@ mod tests {
         assert_eq!(strip_html("&lt;script&gt;"), "<script>");
         assert_eq!(strip_html("&quot;quoted&quot;"), "\"quoted\"");
         assert_eq!(strip_html("it&#39;s"), "it's");
+        assert_eq!(strip_html("VisualArt&#039;s"), "VisualArt's");
+        assert_eq!(strip_html("VisualArt&#x27;s"), "VisualArt's");
+        assert_eq!(strip_html("VisualArt&apos;s"), "VisualArt's");
         assert_eq!(strip_html("a&nbsp;b"), "a b");
     }
 

@@ -164,7 +164,7 @@ Bluesky facet・ActivityPub `<a href>` が示すリンク情報を、Misskey API
 `[表示テキスト](URL)`（Markdownリンク記法）をURLリンクのマーカーとして使う。`URL`が`/`始まり（`//`除く）ならフロント（`RichText`コンポーネント、`frontend/src/components/note/RichText.tsx`）は内部ルーティング、`https?://`ならタブ外部リンクとして描画する。
 
 - **Bsky `#link` facet**: `crates/seiran-atp-repo/src/firehose.rs` の `apply_link_facets` が、facetの `byteStart`/`byteEnd` が指すテキスト範囲を `[元テキスト](facet.uri)` に書き換えてから `posts.body` へ保存する（受信時に確定。URLは不変なので都度解決不要）。
-- **AP `<a href>`**: `crates/seiran-common/src/jobs/inbound_activity_process.rs` の `ap_content_to_markdown_body` が `content` のHTMLをタグ除去する際、`<a href="URL">text</a>` を `[text](URL)` に変換する（Mention以外のアンカー。ハッシュタグアンカーもここに含まれ、リモートインスタンスのタグページへの外部リンクになる）。`<br>`/`</p>`/`</div>` は改行として保持し（`\n`/`\n\n`）、Mastodon等がcontentを複数段落のHTMLで表現しても本文の改行が失われないようにする（`tag_break_text`/`normalize_whitespace_preserving_newlines`）。
+- **AP `<a href>`**: `crates/seiran-common/src/jobs/inbound_activity_process.rs` の `ap_content_to_markdown_body` が `content` のHTMLをタグ除去する際、`<a href="URL">text</a>` を `[text](URL)` に変換する（Mention以外のアンカー。ハッシュタグアンカーもここに含まれ、リモートインスタンスのタグページへの外部リンクになる）。`<br>`/`</p>`/`</div>` は改行として保持し（`\n`/`\n\n`）、Mastodon等がcontentを複数段落のHTMLで表現しても本文の改行が失われないようにする（`tag_break_text`/`normalize_whitespace_preserving_newlines`）。タグ除去後は名前付き・10進・16進のHTML文字参照をデコードする（例: `&apos;`、`&#039;`、`&#x27;` はすべて `'`）。文字参照表記を`posts.body`へ残さない。
 
 ### メンションは内部リンクマーカーで包まない
 フロントの `RichText` コンポーネントが `@user@host`（Fediverse形式）・`@handle.bsky.social`（Bskyハンドル形式）のパターンを自動検出し `/@...` へのプロフィールリンクに変換するため、メンションは `[text](url)` で包まず `@handle` 形式のプレーンテキストのまま `text` に埋め込む。**メンションを一般URLリンクの経路（`[text](href)`）に落とすと、リンク先がリモートアクターの本拠地サーバー（プロフィールURL）になってしまうため、必ずこの経路で処理する。**
