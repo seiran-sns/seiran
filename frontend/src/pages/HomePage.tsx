@@ -14,6 +14,7 @@ import { useStreamingContext } from "../contexts/StreamingContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useSwipe } from "../hooks/useSwipe";
+import { filterTimelineNotes } from "../lib/timelineVisibility";
 import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
@@ -34,7 +35,7 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
   // DM（visibility="direct"）はタイムラインに一切現れない仕様のため、対応エンドポイントには
   // 常に exclude_direct を付与する（Misskey API互換のためデフォルトでは含まれるが、
   // seiranフロントエンドは明示的に除外を要求する）。
-  return feed.kind === "home"
+  const request = feed.kind === "home"
     ? api.notes.homeTimeline({ ...params, exclude_direct: true })
     : feed.kind === "local"
     ? api.notes.localTimeline({ ...params, exclude_direct: true })
@@ -45,6 +46,7 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
     : feed.kind === "list"
     ? api.lists.timeline(feed.id, params)
     : api.hashtags.timeline(feed.name, params);
+  return request.then((notes) => filterTimelineNotes(feed, notes));
 }
 
 export default function HomePage() {
