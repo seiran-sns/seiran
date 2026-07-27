@@ -70,6 +70,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
   const [pollVoted, setPollVoted] = useState(false);
   const [pollSelection, setPollSelection] = useState<number[]>([]);
   const [pollPending, setPollPending] = useState(false);
+  const [pollRenderedAt] = useState(() => Date.now());
   // フォロー状態は共有ストア（stores/followStatusStore）を参照する。プロフィール画面や
   // 同一ユーザーの他ポストのフォロースイッチと状態が一本化されるため、一方で操作するか
   // WebSocket の `followAccepted`（StreamingContext）を受けるだけで全ての表示に伝播する。
@@ -78,7 +79,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
 
   const pollClosed = !!poll && [poll.closed, poll.endTime]
     .filter(Boolean)
-    .some((value) => new Date(value!).getTime() <= Date.now());
+    .some((value) => new Date(value!).getTime() <= pollRenderedAt);
 
   async function submitPollVote(indexes: number[]) {
     if (!currentUser) {
