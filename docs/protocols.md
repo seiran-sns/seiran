@@ -154,6 +154,8 @@ Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホス
    - **既知の制約**: `seiran_post_uuid` は ATP 側（Bskyレコード本体）には埋め込まれていない。そのため Jetstream 経由で先に取り込まれた投稿に後から AP の `Create` が届いても `find_by_seiran_uuid` は一致せず、**別行として新規INSERTされる**（マージされない）。現状「AP側が先」の場合のみ機能する。
 3. **一般ブリッジ重複**: Noteの `url` が `https://bsky.app/profile/{did}/post/{rkey}` 形式なら `at://` URIへ変換し既存ポストを検索、あれば `parent_original_post_id` にリンク（重複許容 + リンク）。
 
+**Actor解決の自ドメインガード**: リモートActor URI解決処理（`upsert_remote_fedi_actor`/`resolve_fedi`）は、URIが `https://{local_domain}/users/{username}` 形式で自ドメインを指す場合、`seiran_common::ap::extract_local_username` で判定してローカル行をそのまま返す（新規 `fedi` 行は作らない）。ローカル行は `insert_local` が設定する `ap_uri`（`https://{domain}/users/{username}`）を持つため、万一このガードを経由しなくても `find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により重複INSERTは自然に防がれる（二重防御）。
+
 ## 6. 本文中のリンク・メンション表現
 
 Bluesky facet・ActivityPub `<a href>` が示すリンク情報を、Misskey API互換（`NoteResponse.text`はプレーンテキストのまま）を保ちつつ画面上でクリック可能にするため、Misskey本家のMFM同様「`text`フィールドの中に内部リンクマーカーを埋め込み、フロントがパースする」方式を採る。

@@ -250,14 +250,19 @@ impl ActorRepository for PgActorRepository {
         at_did: &str,
         at_signing_key_pem: &str,
     ) -> Result<(), sqlx::Error> {
+        // ap_uri を格納しておくことで、万一リモートActor解決処理が自ドメインURIを
+        // 誤って渡してきても find_by_ap_uri / upsert_remote_fedi の ON CONFLICT (ap_uri)
+        // による自然な重複排除が効く（#110 の防御的二重チェック）。
+        let ap_uri = format!("https://{}/users/{}", domain, username);
         sqlx::query(
-            "INSERT INTO actors (id, user_id, actor_type, username, domain, at_did, at_signing_key_pem, created_at, updated_at)
-             VALUES ($1, $2, 'local', $3, $4, $5, $6, NOW(), NOW())",
+            "INSERT INTO actors (id, user_id, actor_type, username, domain, ap_uri, at_did, at_signing_key_pem, created_at, updated_at)
+             VALUES ($1, $2, 'local', $3, $4, $5, $6, $7, NOW(), NOW())",
         )
         .bind(id)
         .bind(user_id)
         .bind(username)
         .bind(domain)
+        .bind(&ap_uri)
         .bind(at_did)
         .bind(at_signing_key_pem)
         .execute(&self.pool)

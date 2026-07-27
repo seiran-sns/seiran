@@ -44,6 +44,24 @@ test("プロフィール画面のフォロー中/フォロワータブに一覧�
   await expect(page.getByText(`@${target.username}`)).toBeVisible({ timeout: 15_000 });
 });
 
+test("自ドメインのローカルActor URIをFediフォロー経路で指定すると拒否される（#110）", async ({ request }) => {
+  // リモートのfollowers/following一覧同期などでローカルActor URI
+  // （`https://{local_domain}/users/{username}`）が「未知のリモートURI」として
+  // 紛れ込むと、target解決経路が自ドメイン判定なしに upsert_remote_fedi まで
+  // 進んでしまい、actor_type='fedi' の影の重複行が生成されていた
+  // (crates/seiran-api/src/handlers/follows.rs の follow_fedi)。
+  // ローカル行は ap_uri で照合できないため、この判定がないと ON CONFLICT も効かない。
+  const follower = await registerUserViaApi(request, "e2eslf");
+  const target = await registerUserViaApi(request, "e2eslftgt");
+
+  const localActorUri = `https://localhost/users/${target.username}`;
+  const followRes = await request.post("/api/follows/create", {
+    headers: { Authorization: `Bearer ${follower.token}` },
+    data: { target: localActorUri },
+  });
+  expect(followRes.status()).toBe(400);
+});
+
 test.describe("Fediフォロー承認のリアルタイム反映", () => {
   let fedi: StubFediServer;
 

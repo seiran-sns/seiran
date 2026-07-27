@@ -39,6 +39,21 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
         return Ok(());
     }
 
+    // uri が自ドメインを指す場合、リモート未知アクターではなくローカルユーザーの
+    // Actor URI がフォロー一覧同期に混入しただけなので、fetch_actor へ進まず終了する
+    // （進めると影の重複 fedi 行が生成される、#110）。
+    let local_domain = ctx
+        .inbox
+        .as_ref()
+        .map(|i| i.local_domain.as_str())
+        .or_else(|| ctx.delivery.as_ref().map(|d| d.local_domain.as_str()));
+    if let Some(local_domain) = local_domain {
+        if crate::ap::extract_local_username(&uri, local_domain).is_some() {
+            tracing::debug!("[RemoteActorResolve] 自ドメインURIのためスキップ: {}", uri);
+            return Ok(());
+        }
+    }
+
     let domain = extract_domain(&uri);
     let sem = ctx.get_domain_semaphore(&domain).await;
     let _permit = sem.acquire_owned().await.map_err(|e| format!("セマフォ取得失敗: {}", e))?;

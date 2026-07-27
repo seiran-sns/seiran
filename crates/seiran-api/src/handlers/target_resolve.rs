@@ -96,6 +96,20 @@ async fn resolve_fedi(state: &AppState, target: &str) -> Result<Actor, ApError> 
         state.ap_client.resolve_webfinger(parts[0], parts[1]).await?
     };
 
+    // target_uri が自ドメイン（`https://{local_domain}/users/{username}`）を指す場合、
+    // 新規 fedi 行を作らずローカル行を返す（#110: ローカル行は ap_uri で照合できない
+    // ため、ここでガードしないとURL指定フォロー等で影の重複 fedi 行が生成される）。
+    if let Some(local_username) =
+        seiran_common::ap::extract_local_username(&target_uri, &state.local_domain)
+    {
+        return state
+            .actors
+            .find_by_username_domain(local_username, &state.local_domain)
+            .await
+            .map_err(|e| ApError::Other(format!("DBエラー: {}", e)))?
+            .ok_or_else(|| ApError::Other("ローカルユーザーが見つかりません".to_string()));
+    }
+
     if let Some(existing) = state
         .actors
         .find_by_ap_uri(&target_uri)
