@@ -320,6 +320,29 @@ fn guess_attachment_mime_type(att: &serde_json::Value, url: &str) -> Option<Stri
     Some(guessed.to_string())
 }
 
+fn normalize_ap_poll(note: &serde_json::Value) -> Option<serde_json::Value> {
+    if note["type"].as_str() != Some("Question") { return None; }
+    let (choices, multiple) = if let Some(v) = note["oneOf"].as_array() {
+        (v, false)
+    } else {
+        (note["anyOf"].as_array()?, true)
+    };
+    let options: Vec<_> = choices.iter().filter_map(|choice| {
+        Some(serde_json::json!({
+            "name": choice["name"].as_str()?,
+            "votes": choice["replies"]["totalItems"].as_i64().unwrap_or(0).max(0)
+        }))
+    }).collect();
+    if options.is_empty() { return None; }
+    Some(serde_json::json!({
+        "multiple": multiple,
+        "options": options,
+        "endTime": note["endTime"].as_str(),
+        "closed": note["closed"].as_str(),
+        "votersCount": note["votersCount"].as_i64(),
+    }))
+}
+
 // Create(Note) を受け取り posts テーブルに保存する
 async fn handle_create_note(
     activity: serde_json::Value,
@@ -455,6 +478,11 @@ async fn handle_create_note(
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
 
+    let content_warning = note["summary"].as_str().filter(|s| !s.is_empty());
+    let poll = normalize_ap_poll(note);
+    inbox.post_repo.set_fedi_content_metadata(post_id, content_warning, poll.as_ref())
+        .await.map_err(|e| format!("投稿メタデータ更新エラー: {}", e))?;
+
     if let Err(e) = inbox.hashtag_repo.link_post(post_id, &body).await {
         tracing::error!("[Create/Note] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
     }
@@ -528,7 +556,9 @@ async fn handle_create_note(
                 continue;
             }
             let mime_type = guess_attachment_mime_type(att, url);
-            if let Err(e) = inbox.post_repo.attach_remote_media_url(post_id, url, mime_type.as_deref(), None, position as i16).await {
+            let is_sensitive = att["sensitive"].as_bool().unwrap_or(false)
+                || note["sensitive"].as_bool().unwrap_or(false);
+            if let Err(e) = inbox.post_repo.attach_remote_media_url(post_id, url, mime_type.as_deref(), None, is_sensitive, position as i16).await {
                 tracing::error!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
             }
         }
@@ -1491,7 +1521,7 @@ async fn fetch_and_save_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_emoji_tag_url, strip_html,
+        ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_emoji_tag_url, normalize_ap_poll, strip_html,
     };
 
     #[test]
@@ -1741,5 +1771,28 @@ mod tests {
             ]
         });
         assert_eq!(extract_emoji_tag_url(&activity, "🎉"), None);
+    }
+
+    #[test]
+    fn normalizes_question_poll_without_trusting_negative_counts() {
+        let question = serde_json::json!({
+            "type": "Question",
+            "oneOf": [
+                { "name": "紅茶", "replies": { "totalItems": 3 } },
+                { "name": "珈琲", "replies": { "totalItems": -2 } }
+            ],
+            "endTime": "2026-07-28T00:00:00Z",
+            "votersCount": 3
+        });
+        assert_eq!(normalize_ap_poll(&question), Some(serde_json::json!({
+            "multiple": false,
+            "options": [
+                { "name": "紅茶", "votes": 3 },
+                { "name": "珈琲", "votes": 0 }
+            ],
+            "endTime": "2026-07-28T00:00:00Z",
+            "closed": null,
+            "votersCount": 3
+        })));
     }
 }

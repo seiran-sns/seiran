@@ -155,6 +155,8 @@ async fn create_repost(
         deliver_fedi: None,
         deliver_bsky: None,
         remote_url: None,
+        content_warning: None,
+        poll: None,
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
     embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
@@ -474,6 +476,8 @@ async fn create_regular_post(
         deliver_fedi: Some(deliver_fedi),
         deliver_bsky: Some(deliver_bsky),
         remote_url: None,
+        content_warning: None,
+        poll: None,
     };
 
     if visibility == "direct" {

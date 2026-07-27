@@ -842,7 +842,7 @@ async fn save_bsky_post(
                 let posts_repo = PgPostRepository::new(pool.clone());
                 for (position, att) in attachments.iter().enumerate() {
                     if let Err(e) = posts_repo.attach_remote_media_url(
-                        post_id, &att.url, Some(&att.mime_type), att.thumbnail_url.as_deref(), position as i16,
+                        post_id, &att.url, Some(&att.mime_type), att.thumbnail_url.as_deref(), false, position as i16,
                     ).await {
                         tracing::error!("[Jetstream] 添付 URL 保存失敗（スキップ）: {}", e);
                     }

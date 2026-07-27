@@ -14,6 +14,13 @@
 
 ## 2. ActivityPub (Fedi) 統合
 
+### Fedi投稿のCW・アンケート・閲覧注意画像
+
+受信した`Note`/`Question`の`summary`をCW、`Question.oneOf`/`anyOf`をアンケートとして
+正規化して保存する。添付の`sensitive`または投稿全体の`sensitive`が真なら、その画像を
+閲覧注意としてAPIへ返す。アンケートは外部サーバー上の集計結果を表示し、seiranからの投票配送は
+現時点では行わない。
+
 ### 構成
 - `seiran-common::ap`: プロトコル非依存の共通ロジック
   - `client.rs` — `ApClient`（`reqwest::Client` + 公開鍵キャッシュ）。アクターフェッチ、HTTP Signatures 検証・署名、可視性判定（to/cc → 4値）、カスタム絵文字 tag 解析

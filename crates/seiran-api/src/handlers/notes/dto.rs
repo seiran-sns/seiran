@@ -59,6 +59,7 @@ pub struct AttachmentResponse {
     pub size: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_created_at: Option<String>,
+    pub is_sensitive: bool,
 }
 
 /// ポストに対するリアクション集計（絵文字ごとの件数）(#22)。
@@ -122,6 +123,10 @@ pub struct NoteResponse {
     /// ローカル投稿、または元URIを未取得のリモート投稿では省略（#リモートで表示バナー）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_warning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poll: Option<serde_json::Value>,
 }
 
 /// `serde_json::Value`（JSONB由来のオブジェクト、`None`/非オブジェクトなら空）を
@@ -242,6 +247,8 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         deliver_fedi: if is_local { Some(p.deliver_fedi) } else { None },
         deliver_bsky: if is_local { Some(p.deliver_bsky) } else { None },
         remote_url,
+        content_warning: p.content_warning,
+        poll: p.poll,
     }
 }
 

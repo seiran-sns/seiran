@@ -132,6 +132,9 @@ MiAuth（`/api/miauth/:session_id/authorize`）認可成立時に発行するJWT
 `media_files` は画像専用として始まったため `width`/`height`/`blurhash` は NULL 許容(動画・音声はこれらを持たない)。`bsky_video_*` 系カラムは Bluesky 公式動画パイプライン（`app.bsky.video.uploadVideo`）との連携状態を追跡する。`(sha256, blurhash)` の複合 UNIQUE でグローバル重複排除。
 
 `post_attachments` は `media_file_id`（ローカル添付）と `remote_url`/`remote_mime_type`/`remote_thumbnail_url`（リモート受信添付）が排他的に埋まる設計。
+ActivityPub受信添付の`is_sensitive`は画像単位の`attachment[].sensitive`を保存し、投稿全体の
+`sensitive=true`も全添付へ安全側に伝播する。`posts.content_warning`はAP `summary`、
+`posts.poll`はAP `Question`の`oneOf`/`anyOf`・票数・締切を表示用JSONとして保存する。
 
 `atp_blobs` は `uploadBlob` で受信した任意バイナリ（Bsky動画パイプラインが提出してくるトランスコード済み動画等）を保存する。`sha256` に UNIQUE を張り、content-addressable な重複排除を行う。
 

@@ -25,6 +25,21 @@
   animation: pop 0.14s ease-out;
 }
 
+.blurred { filter: blur(24px); }
+
+.reveal {
+  position: fixed;
+  top: 16px;
+  right: 76px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 6px 10px;
+}
+
 .close {
   position: fixed;
   top: 16px;

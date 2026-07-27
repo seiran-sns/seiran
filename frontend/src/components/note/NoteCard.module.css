@@ -179,6 +179,37 @@
   border: 1px solid var(--border);
 }
 
+.sensitiveImageWrap { position: relative; max-width: 100%; }
+.attachBlurred { filter: blur(18px); }
+.sensitiveReveal {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  cursor: pointer;
+  padding: 5px 8px;
+}
+.contentWarning {
+  margin: 6px 0 6px 50px;
+  padding: 8px 10px;
+  border: 0;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-deep);
+  color: var(--text);
+  cursor: pointer;
+}
+.poll { margin: 8px 0 0 50px; display: grid; gap: 5px; }
+.pollOption {
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 9px;
+}
+
 .attachAudio {
   width: 100%;
   max-width: 400px;
@@ -370,4 +401,3 @@
 .switch_pending .followSwitchKnob {
   transform: translateX(16px);
 }
-

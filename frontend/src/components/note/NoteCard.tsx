@@ -62,6 +62,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
   const isAuthorSelf = isSelf || (!!currentUser && currentUser.username === note.user.username && (!note.user.domain || note.user.domain === window.location.hostname));
 
   const [isHovered, setIsHovered] = useState(false);
+  const [showContent, setShowContent] = useState(!note.contentWarning);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [followActionPending, setFollowActionPending] = useState(false);
   // フォロー状態は共有ストア（stores/followStatusStore）を参照する。プロフィール画面や
@@ -196,11 +197,32 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
         </div>
       )}
 
-      <p className={styles.body}>
-        <RichText text={note.text} emojis={note.emojis} />
-      </p>
+      {note.contentWarning && (
+        <button className={styles.contentWarning} onClick={(e) => {
+          e.stopPropagation();
+          setShowContent((shown) => !shown);
+        }}>
+          ⚠️ {note.contentWarning} — {showContent ? "隠す" : "表示"}
+        </button>
+      )}
+      {showContent && (
+        <p className={styles.body}>
+          <RichText text={note.text} emojis={note.emojis} />
+        </p>
+      )}
 
       <NoteAttachments attachments={note.attachments} />
+
+      {note.poll && (
+        <div className={styles.poll}>
+          {note.poll.options.map((option) => (
+            <div className={styles.pollOption} key={option.name}>
+              <span>{option.name}</span>
+              <span>{option.votes}票</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {note.parentOriginalId && (
         <Link

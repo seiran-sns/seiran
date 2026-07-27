@@ -352,6 +352,7 @@ export interface NoteAttachment {
   height: number;
   thumbnailUrl?: string;
   durationMs?: number;
+  isSensitive: boolean;
 }
 
 /** NoteResponse（バックエンドは `#[serde(rename_all = "camelCase")]`）。 */
@@ -392,6 +393,14 @@ export interface Note {
   deliverBsky?: boolean;
   /** リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。ローカル投稿は省略。 */
   remoteUrl?: string;
+  contentWarning?: string;
+  poll?: {
+    multiple: boolean;
+    options: { name: string; votes: number }[];
+    endTime?: string;
+    closed?: string;
+    votersCount?: number;
+  };
 }
 
 export interface ReactionSummary {
