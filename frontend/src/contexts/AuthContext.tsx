@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import i18n from "../i18n";
 import { api, User, getToken, setUnauthorizedHandler } from "../api/client";
+import { resolveSession } from "./authSession";
 
 /** サーバーに保存された言語設定（#55）があれば、ブラウザ判定・localStorage より優先して適用する。 */
 function applyLanguagePreference(user: User) {
@@ -30,18 +31,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (getToken()) {
-      api.auth
-        .me()
-        .then((u) => {
-          setUser(u);
-          applyLanguagePreference(u);
-        })
-        .catch(() => localStorage.removeItem("seiran_token"))
-        .finally(() => setLoading(false));
-    } else {
+    if (!getToken()) {
       setLoading(false);
+      return;
     }
+
+    let cancelled = false;
+
+    resolveSession(() => api.auth.me()).then((result) => {
+      if (cancelled) return;
+      if (result.kind === "authenticated") {
+        setUser(result.user);
+        applyLanguagePreference(result.user);
+      } else if (result.kind === "expired") {
+        // 明示的な認証失効（401）だけがログアウトすべき理由。
+        // それ以外（バックエンド再起動中の接続失敗・5xx等）でトークンを消すと、
+        // 再起動のたびにログイン状態が失われてしまう（#108）。
+        localStorage.removeItem("seiran_token");
+      }
+      // "unresolved" はトークンを保持したまま諦める。次回のマウント（再読み込み等）で
+      // バックエンドが復旧していればログイン状態が回復する。
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function login(token: string, user: User) {
