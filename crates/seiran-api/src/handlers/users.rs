@@ -9,7 +9,8 @@ use seiran_common::repository::{Actor, ActorProfileRow};
 
 use crate::error::ApiError;
 use crate::handlers::notes::{
-    fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place, to_note_response, NoteResponse,
+    attach_poll_votes, fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place,
+    to_note_response, NoteResponse,
 };
 use crate::middleware::{extract_auth, MaybeAuthedUser};
 use crate::AppState;
@@ -71,7 +72,7 @@ pub async fn user_posts(
     let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
     let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
-    let notes: Vec<NoteResponse> = post_rows
+    let mut notes: Vec<NoteResponse> = post_rows
         .into_iter()
         .map(|p| {
             let id = p.id;
@@ -80,6 +81,7 @@ pub async fn user_posts(
             nr
         })
         .collect();
+    attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
 
     Json(notes).into_response()
 }
@@ -542,6 +544,8 @@ async fn build_profile_response(
             nr.pinned_by_me = Some(true);
         }
     }
+    attach_poll_votes(&state.db, &mut recent_posts, my_actor_id).await;
+    attach_poll_votes(&state.db, &mut pinned_posts, my_actor_id).await;
 
     // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
     let avatar_url: Option<String> = state.actors.find_avatar_url(actor_id).await.ok().flatten();

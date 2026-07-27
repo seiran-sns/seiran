@@ -7,6 +7,7 @@ import { useNoteCardActions } from "../../hooks/useNoteCardActions";
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../contexts/ToastContext";
 import { setFollowStatus as setFollowStatusStore, useFollowStatus } from "../../stores/followStatusStore";
+import { setPollState, usePollState } from "../../stores/pollVoteStore";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
@@ -65,9 +66,10 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
   const [showContent, setShowContent] = useState(!note.contentWarning);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [followActionPending, setFollowActionPending] = useState(false);
-  const [poll, setPoll] = useState(note.poll);
+  const sharedPollState = usePollState(note.id, note.poll);
+  const poll = sharedPollState?.poll;
+  const pollVoted = (sharedPollState?.votedByMe.length ?? 0) > 0;
   const [pollResults, setPollResults] = useState(false);
-  const [pollVoted, setPollVoted] = useState(false);
   const [pollSelection, setPollSelection] = useState<number[]>([]);
   const [pollPending, setPollPending] = useState(false);
   const [pollRenderedAt] = useState(() => Date.now());
@@ -89,8 +91,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
     setPollPending(true);
     try {
       const result = await api.notes.votePoll(note.id, indexes);
-      setPoll(result.poll);
-      setPollVoted(true);
+      setPollState(note.id, { poll: result.poll, votedByMe: indexes });
       setPollResults(true);
     } catch (error) {
       showError(getErrorMessage(error));
@@ -246,9 +247,10 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
 
       {poll && (
         <div className={styles.poll}>
-          {(pollResults || pollVoted || pollClosed) ? poll.options.map((option) => (
-            <div className={styles.pollOption} key={option.name}>
-              <span>{option.name}</span><span>{option.votes}票</span>
+          {(pollResults || pollVoted || pollClosed) ? poll.options.map((option, index) => (
+            <div className={`${styles.pollOption} ${sharedPollState?.votedByMe.includes(index) ? styles.pollOptionVoted : ""}`} key={option.name}>
+              <span>{sharedPollState?.votedByMe.includes(index) && "✓ "}{option.name}</span>
+              <span>{option.votes}票</span>
             </div>
           )) : poll.options.map((option, index) => poll.multiple ? (
             <label className={styles.pollChoice} key={option.name}>

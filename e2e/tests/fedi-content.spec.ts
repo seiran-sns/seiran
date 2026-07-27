@@ -98,6 +98,13 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
     await page.getByRole("button", { name: "回答に戻る" }).click();
     await page.getByRole("button", { name: "選択肢A" }).click();
     await expect(page.getByText("1票")).toBeVisible();
+    await expect(page.getByText("✓ 選択肢A")).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByText("1票")).toBeVisible();
+    await expect(page.getByText("✓ 選択肢A")).toBeVisible();
+    await expect(page.getByRole("button", { name: "選択肢A" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "回答に戻る" })).toHaveCount(0);
 
     const repostRes = await request.post("/api/notes/create", {
       headers: { Authorization: `Bearer ${alice.token}` },
@@ -106,9 +113,8 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
     expect(repostRes.ok(), `リポスト作成失敗: ${repostRes.status()} ${await repostRes.text()}`).toBeTruthy();
     const repost = (await repostRes.json()) as { id: string };
     await page.goto(`/notes/${repost.id}`);
-    await expect(page.getByText("選択肢A")).toBeVisible();
+    await expect(page.getByText("✓ 選択肢A")).toBeVisible();
     await expect(page.getByText("選択肢B")).toBeVisible();
-    await page.getByRole("button", { name: "結果を見る" }).click();
     await expect(page.getByText("1票")).toBeVisible();
   });
 });

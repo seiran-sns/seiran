@@ -134,6 +134,16 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
         .execute(&pool)
         .await
         .expect("表示メタデータ更新に失敗");
+    let voter_actor_id: i64 = sqlx::query_scalar(
+        "SELECT a.id FROM actors a JOIN users u ON u.id = a.user_id WHERE u.username = 'seiran1'",
+    )
+    .fetch_one(&pool).await.expect("seiran1 actor取得に失敗");
+    sqlx::query(
+        "INSERT INTO poll_votes (post_id, actor_id, option_index) VALUES ($1, $2, 0)
+         ON CONFLICT (post_id, actor_id, option_index) DO NOTHING",
+    )
+    .bind(original_id).bind(voter_actor_id).execute(&pool).await
+    .expect("アンケート回答の準備に失敗");
 
     let repost_req = authed_json_request(
         "POST",
@@ -163,7 +173,9 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
         fetched["renote"]
     );
     assert_eq!(fetched["renote"]["contentWarning"], "アンケート注意書き");
-    assert_eq!(fetched["renote"]["poll"], poll);
+    assert_eq!(fetched["renote"]["poll"]["multiple"], poll["multiple"]);
+    assert_eq!(fetched["renote"]["poll"]["options"], poll["options"]);
+    assert_eq!(fetched["renote"]["poll"]["votedByMe"], serde_json::json!([0]));
 }
 
 /// ローカル投稿の本文中に含まれる `:shortcode:` が、既存の `custom_emojis` と照合されて

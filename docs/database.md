@@ -150,4 +150,6 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 
 `poll_votes` はActivityPub `Question`への回答を、投稿・回答Actor・選択肢番号単位で保持する。
 複数回答では同一Actorが複数行を持ち、`ap_activity_id` の一意制約でリモートからの再配送を
-冪等化する。集計表示用の票数は `posts.poll` にも反映する。
+冪等化する。集計表示用の票数は `posts.poll` にも反映する。認証付きの投稿読取APIは
+`poll_votes` から回答者自身の選択肢番号を `poll.votedByMe` として付与し、クライアントが
+リロード後も回答済み状態と選択内容を復元できるようにする。

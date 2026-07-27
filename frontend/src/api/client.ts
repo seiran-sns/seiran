@@ -400,6 +400,8 @@ export interface Note {
     endTime?: string;
     closed?: string;
     votersCount?: number;
+    /** ログイン中ユーザーが回答した選択肢番号。回答前・未認証時は省略。 */
+    votedByMe?: number[];
   };
 }
 

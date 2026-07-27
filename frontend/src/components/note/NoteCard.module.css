@@ -225,6 +225,10 @@
   border-radius: 7px;
   padding: 6px 9px;
 }
+.pollOptionVoted {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .pollChoice {
   display: flex;
   gap: 8px;

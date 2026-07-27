@@ -14,6 +14,39 @@ use crate::AppState;
 
 use super::dto::{apply_mention_facets, to_note_response, AttachmentResponse, NoteResponse, ReactionSummary};
 
+/// 認証中アクターの回答選択肢を通常投稿と埋め込みリポスト元の `poll.votedByMe` へ付与する。
+pub async fn attach_poll_votes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_actor_id: Option<i64>) {
+    let Some(actor_id) = my_actor_id else { return };
+    let post_ids: Vec<i64> = notes.iter()
+        .flat_map(|note| std::iter::once(note.id.as_str())
+            .chain(note.renote.as_deref().map(|renote| renote.id.as_str())))
+        .filter_map(|id| id.parse::<i64>().ok())
+        .collect();
+    if post_ids.is_empty() { return; }
+
+    let rows = sqlx::query(
+        "SELECT post_id, option_index FROM poll_votes
+         WHERE actor_id = $1 AND post_id = ANY($2)
+         ORDER BY post_id, option_index",
+    )
+    .bind(actor_id).bind(&post_ids).fetch_all(db).await.unwrap_or_default();
+    let mut votes: HashMap<i64, Vec<i32>> = HashMap::new();
+    for row in rows {
+        votes.entry(row.try_get("post_id").unwrap_or_default())
+            .or_default().push(row.try_get("option_index").unwrap_or_default());
+    }
+
+    fn apply(note: &mut NoteResponse, votes: &HashMap<i64, Vec<i32>>) {
+        if let (Ok(post_id), Some(poll)) = (note.id.parse::<i64>(), note.poll.as_mut()) {
+            if let Some(indexes) = votes.get(&post_id) {
+                poll["votedByMe"] = serde_json::json!(indexes);
+            }
+        }
+        if let Some(renote) = note.renote.as_deref_mut() { apply(renote, votes); }
+    }
+    notes.iter_mut().for_each(|note| apply(note, &votes));
+}
+
 /// `posts` に含まれる Bsky メンションfacetのDIDをバッチ解決し（`actors` への IN句クエリ1回、
 /// N+1回避）、`body` 中のメンション範囲を `@handle`/`@handle@domain` へ置換する（未解決なら
 /// 投稿時点の表示のまま）。`to_note_response` を呼ぶ前に、`TimelinePost` 取得直後に1回呼ぶ。
