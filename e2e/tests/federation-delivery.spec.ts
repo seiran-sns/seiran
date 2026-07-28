@@ -59,9 +59,11 @@ test.describe("Fedi配送", () => {
 
   test("本文カスタム絵文字がEmoji tag付きでFediへ配送される（#126）", async ({ request }) => {
     const s3 = await startStubS3Server();
+    let providerId: string | null = null;
+    let adminToken: string | null = null;
     try {
       const user = await registerUserViaApi(request, "e2afediemoji");
-      const adminToken = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
+      adminToken = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
       await followAndWaitAccepted(fedi, user.username);
 
       const providerRes = await request.post("/api/admin/storage-providers", {
@@ -76,6 +78,7 @@ test.describe("Fedi配送", () => {
         },
       });
       expect(providerRes.ok(), await providerRes.text()).toBeTruthy();
+      providerId = (await providerRes.json()).id;
 
       const uploadRes = await request.post("/api/drive/files/create", {
         headers: { Authorization: `Bearer ${user.token}` },
@@ -112,6 +115,12 @@ test.describe("Fedi配送", () => {
       const emojiTag = activity.object.tag.find((tag: any) => tag.type === "Emoji" && tag.name === `:${shortcode}:`);
       expect(emojiTag?.icon?.url).toContain(`${s3.url}/e2e-test/`);
     } finally {
+      if (providerId && adminToken) {
+        await request.patch(`/api/admin/storage-providers/${providerId}`, {
+          headers: { Authorization: `Bearer ${adminToken}` },
+          data: { is_active: false },
+        });
+      }
       await s3.close();
     }
   });
