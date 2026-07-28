@@ -35,7 +35,9 @@ pub async fn create_block(
 ) -> impl IntoResponse {
     let target_actor = match resolve_and_upsert_target(&state, &req.target).await {
         Ok(a) => a,
-        Err(e) => return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response()
+        }
     };
 
     if target_actor.id == user.actor_id {
@@ -48,7 +50,11 @@ pub async fn create_block(
         tracing::warn!("[block] 自分→相手のフォロー解除に失敗（続行）: {}", e);
     }
     // 相手→自分: こちらから相手のリポジトリを操作する手段は無いため、ローカルの follows 行だけ削除する。
-    if let Err(e) = state.follows.delete_by_actors(target_actor.id, user.actor_id).await {
+    if let Err(e) = state
+        .follows
+        .delete_by_actors(target_actor.id, user.actor_id)
+        .await
+    {
         tracing::warn!("[block] 相手→自分のフォロー行削除に失敗（続行）: {}", e);
     }
 
@@ -58,17 +64,25 @@ pub async fn create_block(
     // Fedi なら AP Block アクティビティを配送する。
     let mut atp_rkey: Option<String> = None;
     if let Some(did) = target_actor.at_did.as_deref() {
-        match state.atp_service.commit_block(user.actor_id, did, now).await {
+        match state
+            .atp_service
+            .commit_block(user.actor_id, did, now)
+            .await
+        {
             Ok(rkey) => atp_rkey = Some(rkey),
             Err(e) => tracing::error!("[block] ATP block コミット失敗: {}", e),
         }
     } else if target_actor.actor_type != "local" {
-        if let (Some(ap_inbox_url), Some(ap_uri)) =
-            (target_actor.ap_inbox_url.as_deref(), target_actor.ap_uri.as_deref())
-        {
+        if let (Some(ap_inbox_url), Some(ap_uri)) = (
+            target_actor.ap_inbox_url.as_deref(),
+            target_actor.ap_uri.as_deref(),
+        ) {
             let local_actor_uri = format!("https://{}/users/{}", state.local_domain, user.username);
             let actor_key_id = format!("{}#main-key", local_actor_uri);
-            let block_id = format!("https://{}/activities/block/{}", state.local_domain, target_actor.id);
+            let block_id = format!(
+                "https://{}/activities/block/{}",
+                state.local_domain, target_actor.id
+            );
             let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
 
             let block_activity = json!({
@@ -80,20 +94,35 @@ pub async fn create_block(
             });
 
             if let Ok(body) = serde_json::to_string(&block_activity) {
-                if let Err(e) = state.ap_client.sign_and_post(ap_inbox_url, &body, &actor_key_id, &ap_private_key_pem).await {
+                if let Err(e) = state
+                    .ap_client
+                    .sign_and_post(ap_inbox_url, &body, &actor_key_id, &ap_private_key_pem)
+                    .await
+                {
                     tracing::error!("[block] AP Block 送信失敗: {}", e);
                 }
             }
         }
     }
 
-    if let Err(e) = state.blocks.insert(user.actor_id, target_actor.id, atp_rkey.as_deref()).await {
+    if let Err(e) = state
+        .blocks
+        .insert(user.actor_id, target_actor.id, atp_rkey.as_deref())
+        .await
+    {
         return ApiError::Internal(format!("[block] blocks INSERT 失敗: {}", e)).into_response();
     }
 
-    tracing::info!("[block] {} → {} ブロック完了", user.actor_id, target_actor.id);
+    tracing::info!(
+        "[block] {} → {} ブロック完了",
+        user.actor_id,
+        target_actor.id
+    );
 
-    Json(BlockResponse { status: "blocked".to_string() }).into_response()
+    Json(BlockResponse {
+        status: "blocked".to_string(),
+    })
+    .into_response()
 }
 
 #[derive(Serialize)]
@@ -131,22 +160,36 @@ pub async fn delete_block(
 ) -> impl IntoResponse {
     let target_actor = match resolve_and_upsert_target(&state, &req.target).await {
         Ok(a) => a,
-        Err(e) => return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response()
+        }
     };
 
     let now = chrono::Utc::now();
 
-    if let Ok(Some(rkey)) = state.blocks.find_atp_rkey(user.actor_id, target_actor.id).await {
-        if let Err(e) = state.atp_service.commit_delete_block(user.actor_id, &rkey, now).await {
+    if let Ok(Some(rkey)) = state
+        .blocks
+        .find_atp_rkey(user.actor_id, target_actor.id)
+        .await
+    {
+        if let Err(e) = state
+            .atp_service
+            .commit_delete_block(user.actor_id, &rkey, now)
+            .await
+        {
             tracing::error!("[unblock] ATP block 削除コミット失敗: {}", e);
         }
     } else if target_actor.actor_type != "local" {
-        if let (Some(ap_inbox_url), Some(ap_uri)) =
-            (target_actor.ap_inbox_url.as_deref(), target_actor.ap_uri.as_deref())
-        {
+        if let (Some(ap_inbox_url), Some(ap_uri)) = (
+            target_actor.ap_inbox_url.as_deref(),
+            target_actor.ap_uri.as_deref(),
+        ) {
             let local_actor_uri = format!("https://{}/users/{}", state.local_domain, user.username);
             let actor_key_id = format!("{}#main-key", local_actor_uri);
-            let block_id = format!("https://{}/activities/block/{}", state.local_domain, target_actor.id);
+            let block_id = format!(
+                "https://{}/activities/block/{}",
+                state.local_domain, target_actor.id
+            );
             let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
 
             let undo_activity = json!({
@@ -163,18 +206,33 @@ pub async fn delete_block(
             });
 
             if let Ok(body) = serde_json::to_string(&undo_activity) {
-                if let Err(e) = state.ap_client.sign_and_post(ap_inbox_url, &body, &actor_key_id, &ap_private_key_pem).await {
+                if let Err(e) = state
+                    .ap_client
+                    .sign_and_post(ap_inbox_url, &body, &actor_key_id, &ap_private_key_pem)
+                    .await
+                {
                     tracing::error!("[unblock] AP Undo Block 送信失敗: {}", e);
                 }
             }
         }
     }
 
-    if let Err(e) = state.blocks.delete_by_actors(user.actor_id, target_actor.id).await {
+    if let Err(e) = state
+        .blocks
+        .delete_by_actors(user.actor_id, target_actor.id)
+        .await
+    {
         return ApiError::Internal(format!("[unblock] blocks DELETE 失敗: {}", e)).into_response();
     }
 
-    tracing::info!("[unblock] {} → {} アンブロック完了", user.actor_id, target_actor.id);
+    tracing::info!(
+        "[unblock] {} → {} アンブロック完了",
+        user.actor_id,
+        target_actor.id
+    );
 
-    Json(BlockResponse { status: "not_blocked".to_string() }).into_response()
+    Json(BlockResponse {
+        status: "not_blocked".to_string(),
+    })
+    .into_response()
 }

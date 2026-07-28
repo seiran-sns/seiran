@@ -129,7 +129,11 @@ pub async fn create_report(
     }
     // 通報者は送信先を選ばない。すべての通報はまずローカル管理者に届き、
     // 対象がリモートの場合のみ、管理者が判断してFedi/Bskyへ転送する。
-    let destination = if subject.actor_type != "local" { "remote" } else { "local" };
+    let destination = if subject.actor_type != "local" {
+        "remote"
+    } else {
+        "local"
+    };
     let remote_host = (destination == "remote").then(|| subject.domain.clone());
     let id = generate_snowflake_id(chrono::Utc::now());
     sqlx::query(

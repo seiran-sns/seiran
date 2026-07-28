@@ -11,8 +11,8 @@
 //! `follows` 行が残っている前提のため、削除済みなら該当ターゲットへの処理は
 //! 事実上のno-opになる）。
 
-use std::sync::Arc;
 use serde_json::json;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::atp::service::AtpCommitService;
@@ -22,11 +22,17 @@ use crate::repository::{ActorRepository, FollowRepository, PgActorRepository, Pg
 
 pub async fn handle(actor_id: i64, username: String, ctx: Arc<JobContext>) -> Result<(), String> {
     let Some(pool) = ctx.db_pool.as_ref() else {
-        tracing::warn!("[AccountWithdrawUnfollowAll] DB pool 未設定のためスキップ (actor_id={})", actor_id);
+        tracing::warn!(
+            "[AccountWithdrawUnfollowAll] DB pool 未設定のためスキップ (actor_id={})",
+            actor_id
+        );
         return Ok(());
     };
     let Some(cfg) = ctx.delivery.as_ref() else {
-        tracing::warn!("[AccountWithdrawUnfollowAll] 配送設定未注入のためスキップ (actor_id={})", actor_id);
+        tracing::warn!(
+            "[AccountWithdrawUnfollowAll] 配送設定未注入のためスキップ (actor_id={})",
+            actor_id
+        );
         return Ok(());
     };
     let ap_private_key_pem = cfg.ap_private_key_pem.clone().unwrap_or_default();
@@ -39,7 +45,11 @@ pub async fn handle(actor_id: i64, username: String, ctx: Arc<JobContext>) -> Re
     // 記録自体は行われるため、他のRelayが再購読すれば最終的に一貫する。退会時の
     // フォロー解除にリアルタイム性は必須ではないと判断）。
     let (event_tx, _rx) = broadcast::channel(16);
-    let atp_service = AtpCommitService::new(pool.clone(), Arc::new(event_tx), Arc::clone(&ctx.ap_client.http));
+    let atp_service = AtpCommitService::new(
+        pool.clone(),
+        Arc::new(event_tx),
+        Arc::clone(&ctx.ap_client.http),
+    );
 
     let target_ids = follows
         .find_accepted_target_ids(actor_id)
@@ -54,7 +64,11 @@ pub async fn handle(actor_id: i64, username: String, ctx: Arc<JobContext>) -> Re
             Ok(Some(a)) => a,
             Ok(None) => continue,
             Err(e) => {
-                tracing::error!("[AccountWithdrawUnfollowAll] ターゲット取得失敗 (target_id={}): {}", target_id, e);
+                tracing::error!(
+                    "[AccountWithdrawUnfollowAll] ターゲット取得失敗 (target_id={}): {}",
+                    target_id,
+                    e
+                );
                 continue;
             }
         };
@@ -62,22 +76,38 @@ pub async fn handle(actor_id: i64, username: String, ctx: Arc<JobContext>) -> Re
         let atp_rkey = match follows.find_atp_rkey(actor_id, target_id).await {
             Ok(r) => r,
             Err(e) => {
-                tracing::error!("[AccountWithdrawUnfollowAll] atp_rkey 取得失敗 (target_id={}): {}", target_id, e);
+                tracing::error!(
+                    "[AccountWithdrawUnfollowAll] atp_rkey 取得失敗 (target_id={}): {}",
+                    target_id,
+                    e
+                );
                 continue;
             }
         };
 
         if let Some(rkey) = atp_rkey.as_deref() {
-            if let Err(e) = atp_service.commit_delete_follow(actor_id, rkey, chrono::Utc::now()).await {
-                tracing::error!("[AccountWithdrawUnfollowAll] ATP delete commit 失敗 (target_id={}): {}", target_id, e);
+            if let Err(e) = atp_service
+                .commit_delete_follow(actor_id, rkey, chrono::Utc::now())
+                .await
+            {
+                tracing::error!(
+                    "[AccountWithdrawUnfollowAll] ATP delete commit 失敗 (target_id={}): {}",
+                    target_id,
+                    e
+                );
             } else {
                 touch_jetstream_wanted_dids(pool).await;
             }
         }
 
         if target.actor_type != "local" && target.actor_type != "bsky" {
-            if let (Some(ap_inbox_url), Some(ap_uri)) = (target.ap_inbox_url.as_deref(), target.ap_uri.as_deref()) {
-                let follow_id = format!("https://{}/activities/follow/{}", cfg.local_domain, target.id);
+            if let (Some(ap_inbox_url), Some(ap_uri)) =
+                (target.ap_inbox_url.as_deref(), target.ap_uri.as_deref())
+            {
+                let follow_id = format!(
+                    "https://{}/activities/follow/{}",
+                    cfg.local_domain, target.id
+                );
                 let undo_activity = json!({
                     "@context": "https://www.w3.org/ns/activitystreams",
                     "type": "Undo",
@@ -103,10 +133,17 @@ pub async fn handle(actor_id: i64, username: String, ctx: Arc<JobContext>) -> Re
         }
 
         if let Err(e) = follows.delete_by_actors(actor_id, target_id).await {
-            tracing::error!("[AccountWithdrawUnfollowAll] follows DELETE 失敗 (target_id={}): {}", target_id, e);
+            tracing::error!(
+                "[AccountWithdrawUnfollowAll] follows DELETE 失敗 (target_id={}): {}",
+                target_id,
+                e
+            );
         }
     }
 
-    tracing::info!("[AccountWithdrawUnfollowAll] フォロー先への一括アンフォロー完了: actor_id={}", actor_id);
+    tracing::info!(
+        "[AccountWithdrawUnfollowAll] フォロー先への一括アンフォロー完了: actor_id={}",
+        actor_id
+    );
     Ok(())
 }

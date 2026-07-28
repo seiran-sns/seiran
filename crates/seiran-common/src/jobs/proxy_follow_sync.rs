@@ -7,24 +7,37 @@
 //! `ListRepository::actor_referenced_by_any_list` を使い呼び出し側で行い、このジョブは
 //! Follow/Undo の実送信と `follows` テーブルの更新だけを担当する）。
 
-use std::sync::Arc;
 use serde_json::json;
+use std::sync::Arc;
 
 use crate::queue::worker::JobContext;
 use crate::repository::{ActorRepository, FollowRepository, PgActorRepository, PgFollowRepository};
 use crate::system_actor::resolve_system_proxy_actor_id;
 
-pub async fn handle(target_actor_id: i64, want_follow: bool, ctx: Arc<JobContext>) -> Result<(), String> {
+pub async fn handle(
+    target_actor_id: i64,
+    want_follow: bool,
+    ctx: Arc<JobContext>,
+) -> Result<(), String> {
     let Some(pool) = ctx.db_pool.as_ref() else {
-        tracing::warn!("[ProxyFollowSync] DB pool 未設定のためスキップ (target={})", target_actor_id);
+        tracing::warn!(
+            "[ProxyFollowSync] DB pool 未設定のためスキップ (target={})",
+            target_actor_id
+        );
         return Ok(());
     };
     let Some(cfg) = ctx.delivery.as_ref() else {
-        tracing::warn!("[ProxyFollowSync] 配送設定未注入のためスキップ (target={})", target_actor_id);
+        tracing::warn!(
+            "[ProxyFollowSync] 配送設定未注入のためスキップ (target={})",
+            target_actor_id
+        );
         return Ok(());
     };
     let Some(private_pem) = cfg.ap_private_key_pem.as_deref().filter(|s| !s.is_empty()) else {
-        tracing::error!("[ProxyFollowSync] AP 秘密鍵未設定のため破棄 (target={})", target_actor_id);
+        tracing::error!(
+            "[ProxyFollowSync] AP 秘密鍵未設定のため破棄 (target={})",
+            target_actor_id
+        );
         return Ok(());
     };
 
@@ -51,7 +64,10 @@ pub async fn handle(target_actor_id: i64, want_follow: bool, ctx: Arc<JobContext
     let (Some(target_uri), Some(target_inbox)) =
         (target.ap_uri.as_deref(), target.ap_inbox_url.as_deref())
     else {
-        return Err(format!("ターゲットアクター(id={})にap_uri/ap_inbox_urlがありません", target_actor_id));
+        return Err(format!(
+            "ターゲットアクター(id={})にap_uri/ap_inbox_urlがありません",
+            target_actor_id
+        ));
     };
 
     let existing_status = follows
@@ -62,7 +78,10 @@ pub async fn handle(target_actor_id: i64, want_follow: bool, ctx: Arc<JobContext
     let domain = cfg.local_domain.as_str();
     let proxy_actor_uri = format!("https://{}/users/list-relay", domain);
     let actor_key_id = format!("{}#main-key", proxy_actor_uri);
-    let follow_id = format!("https://{}/activities/follow/list-relay-{}", domain, target_actor_id);
+    let follow_id = format!(
+        "https://{}/activities/follow/list-relay-{}",
+        domain, target_actor_id
+    );
 
     if want_follow {
         if existing_status.is_some() {

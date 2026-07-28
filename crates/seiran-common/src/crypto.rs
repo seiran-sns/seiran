@@ -4,8 +4,8 @@
 //! 格納フォーマット: `base64( nonce(12B) || ciphertext || tag(16B) )`
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
     aead::rand_core::RngCore,
+    aead::{Aead, KeyInit, OsRng},
     Aes256Gcm, Key, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};

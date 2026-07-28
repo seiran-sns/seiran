@@ -44,7 +44,12 @@ impl S3StorageClient {
     }
 
     /// オブジェクトをアップロードし、公開 URL を返す。
-    pub async fn put(&self, key: &str, data: Vec<u8>, content_type: &str) -> Result<String, S3Error> {
+    pub async fn put(
+        &self,
+        key: &str,
+        data: Vec<u8>,
+        content_type: &str,
+    ) -> Result<String, S3Error> {
         self.client
             .put_object()
             .bucket(&self.bucket)

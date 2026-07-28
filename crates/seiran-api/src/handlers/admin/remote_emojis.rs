@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use seiran_common::{generate_snowflake_id, prepare_image, MediaKind};
 
-use super::emojis::{normalize_license, normalize_tags, validate_category, validate_shortcode, EmojiResponse};
+use super::emojis::{
+    normalize_license, normalize_tags, validate_category, validate_shortcode, EmojiResponse,
+};
 use crate::error::ApiError;
 use crate::handlers::media_proxy::fetch_validated;
 use crate::handlers::media_store;
@@ -61,7 +63,13 @@ pub async fn list_remote_emojis(
     State(state): State<AppState>,
     Query(query): Query<ListRemoteEmojisQuery>,
 ) -> Result<Json<Vec<RemoteEmojiResponse>>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     let keyword = query.keyword.as_deref().filter(|k| !k.trim().is_empty());
     let rows = state
@@ -100,7 +108,13 @@ pub async fn import_remote_emoji(
     State(state): State<AppState>,
     Json(req): Json<ImportRemoteEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     validate_shortcode(&req.shortcode)?;
     if let Some(ref c) = req.category {
@@ -116,7 +130,10 @@ pub async fn import_remote_emoji(
     let (image_bytes, _content_type) = fetch_validated(&req.image_url, &["image/"]).await?;
     let pipeline = prepare_image(&image_bytes, MediaKind::Emoji)
         .map_err(|e| ApiError::BadRequest(format!("画像処理エラー: {e}")))?;
-    let media_file_id = media_store::store_image(&state, pipeline, None).await?.record.id;
+    let media_file_id = media_store::store_image(&state, pipeline, None)
+        .await?
+        .record
+        .id;
 
     let id = generate_snowflake_id(Utc::now());
     let row = state

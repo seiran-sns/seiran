@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use axum::{
-    extract::{Query, State},
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Redirect},
 };
@@ -37,7 +37,8 @@ pub async fn xrpc_get_blob(
     // CIDv1 raw (0x55) または dag-cbor (0x71) の sha2-256 multihash からハッシュを取得
     let mh = cid.hash();
     if mh.code() != 0x12 {
-        return ApiError::BadRequest("Unsupported hash function (expected sha2-256)".to_string()).into_response();
+        return ApiError::BadRequest("Unsupported hash function (expected sha2-256)".to_string())
+            .into_response();
     }
     let sha256_hex = hex::encode(mh.digest());
 
@@ -95,7 +96,8 @@ pub async fn xrpc_get_repo(
         Ok(Some(a)) => a,
         Ok(None) => return ApiError::NotFound("DID が見つかりません").into_response(),
         Err(e) => {
-            return ApiError::Internal(format!("[getRepo] アクター取得失敗: {}", e)).into_response();
+            return ApiError::Internal(format!("[getRepo] アクター取得失敗: {}", e))
+                .into_response();
         }
     };
 
@@ -113,7 +115,8 @@ pub async fn xrpc_get_repo(
     let block_rows = match state.atp_repo.find_blocks_by_actor(actor_id).await {
         Ok(r) => r,
         Err(e) => {
-            return ApiError::Internal(format!("[getRepo] ブロック取得失敗: {}", e)).into_response();
+            return ApiError::Internal(format!("[getRepo] ブロック取得失敗: {}", e))
+                .into_response();
         }
     };
 
@@ -174,21 +177,28 @@ async fn handle_subscribe_repos(
                             continue;
                         }
                         Err(e) => {
-                            tracing::error!("[subscribeRepos] frame_bytes 解凍失敗 id={}: {}", evt.id, e);
+                            tracing::error!(
+                                "[subscribeRepos] frame_bytes 解凍失敗 id={}: {}",
+                                evt.id,
+                                e
+                            );
                         }
                     }
                 }
 
                 // frame_bytes が NULL の旧レコードは event_type に応じて再構築する
-                let time_str = evt.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                let time_str = evt
+                    .created_at
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
                 let frame_result = if evt.event_type == "identity" {
                     let handle = evt.handle.as_deref().unwrap_or("");
                     build_identity_frame(evt.id, &evt.did, handle, &time_str)
                 } else {
-                    let commit_cid = match evt.commit_cid.as_deref().and_then(|s| cid_from_str(s).ok()) {
-                        Some(c) => c,
-                        None => continue,
-                    };
+                    let commit_cid =
+                        match evt.commit_cid.as_deref().and_then(|s| cid_from_str(s).ok()) {
+                            Some(c) => c,
+                            None => continue,
+                        };
                     let prev_cid = evt.prev_cid.as_deref().and_then(|s| cid_from_str(s).ok());
                     let ops: Vec<CommitEvtOp> = evt
                         .ops_json
@@ -210,8 +220,16 @@ async fn handle_subscribe_repos(
                     // 使われない。新規コミットは commit_record_inner 側で frame_bytes に
                     // prevData 込みで保存済み）。
                     build_commit_frame(
-                        evt.id, &evt.did, &commit_cid, prev_cid.as_ref(),
-                        rev, evt.since_rev.as_deref(), car, &ops, &[], &time_str,
+                        evt.id,
+                        &evt.did,
+                        &commit_cid,
+                        prev_cid.as_ref(),
+                        rev,
+                        evt.since_rev.as_deref(),
+                        car,
+                        &ops,
+                        &[],
+                        &time_str,
                         None,
                     )
                 };

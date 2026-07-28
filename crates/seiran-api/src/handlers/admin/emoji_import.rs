@@ -78,7 +78,13 @@ pub async fn start_import(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<ImportStartResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), &*state.users).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        &*state.users,
+    )
+    .await?;
 
     // ZIP バイト列を取得
     let mut zip_bytes: Option<Vec<u8>> = None;
@@ -104,8 +110,8 @@ pub async fn start_import(
     let zip_clone = zip_bytes.clone();
     let meta: MetaJson = tokio::task::spawn_blocking(move || {
         let cursor = Cursor::new(zip_clone);
-        let mut archive = zip::ZipArchive::new(cursor)
-            .map_err(|e| format!("ZIP 解析エラー: {}", e))?;
+        let mut archive =
+            zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP 解析エラー: {}", e))?;
         let mut meta_file = archive
             .by_name("meta.json")
             .map_err(|_| "meta.json が見つかりません".to_owned())?;
@@ -151,7 +157,13 @@ pub async fn get_import_status(
     headers: HeaderMap,
     Path(job_id): Path<String>,
 ) -> Result<Json<ImportJobStatus>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), &*state.users).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        &*state.users,
+    )
+    .await?;
 
     let status = state
         .emoji_import_jobs
@@ -182,13 +194,20 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
         if validate_shortcode(&shortcode).is_err() {
             update_job(&state, &job_id, |s| {
                 s.skipped += 1;
-                s.errors.push(format!(":{}: 使用できない文字を含むショートコードのためスキップ", shortcode));
+                s.errors.push(format!(
+                    ":{}: 使用できない文字を含むショートコードのためスキップ",
+                    shortcode
+                ));
             });
             continue;
         }
 
         // 既存ショートコードのスキップ
-        let exists: bool = state.emojis.exists_by_shortcode(&shortcode).await.unwrap_or(false);
+        let exists: bool = state
+            .emojis
+            .exists_by_shortcode(&shortcode)
+            .await
+            .unwrap_or(false);
 
         if exists {
             update_job(&state, &job_id, |s| {
@@ -214,7 +233,8 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
             Ok(Err(e)) => {
                 update_job(&state, &job_id, |s| {
                     s.failed += 1;
-                    s.errors.push(format!(":{}:  ZIP 取得エラー: {}", shortcode, e));
+                    s.errors
+                        .push(format!(":{}:  ZIP 取得エラー: {}", shortcode, e));
                 });
                 continue;
             }
@@ -233,7 +253,8 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
             Err(e) => {
                 update_job(&state, &job_id, |s| {
                     s.failed += 1;
-                    s.errors.push(format!(":{}:  画像処理エラー: {}", shortcode, e));
+                    s.errors
+                        .push(format!(":{}:  画像処理エラー: {}", shortcode, e));
                 });
                 continue;
             }
@@ -266,33 +287,59 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
         let emoji_id = generate_snowflake_id(Utc::now());
         let result = state
             .emojis
-            .insert_if_absent(emoji_id, &shortcode, media_file_id, category.as_deref(), &tags, license.as_deref())
+            .insert_if_absent(
+                emoji_id,
+                &shortcode,
+                media_file_id,
+                category.as_deref(),
+                &tags,
+                license.as_deref(),
+            )
             .await;
 
         match result {
             Ok(false) => {
-                update_job(&state, &job_id, |s| { s.skipped += 1; });
+                update_job(&state, &job_id, |s| {
+                    s.skipped += 1;
+                });
             }
             Ok(true) => {
-                update_job(&state, &job_id, |s| { s.processed += 1; });
+                update_job(&state, &job_id, |s| {
+                    s.processed += 1;
+                });
             }
             Err(e) => {
                 update_job(&state, &job_id, |s| {
                     s.failed += 1;
-                    s.errors.push(format!(":{}:  絵文字登録エラー: {}", shortcode, e));
+                    s.errors
+                        .push(format!(":{}:  絵文字登録エラー: {}", shortcode, e));
                 });
             }
         }
     }
 
     // ジョブ完了
-    update_job(&state, &job_id, |s| { s.done = true; });
+    update_job(&state, &job_id, |s| {
+        s.done = true;
+    });
     tracing::info!(
         "[emoji-import] job_id={} 完了: processed={} skipped={} failed={}",
         job_id,
-        state.emoji_import_jobs.get(&job_id).map(|s| s.processed).unwrap_or(0),
-        state.emoji_import_jobs.get(&job_id).map(|s| s.skipped).unwrap_or(0),
-        state.emoji_import_jobs.get(&job_id).map(|s| s.failed).unwrap_or(0),
+        state
+            .emoji_import_jobs
+            .get(&job_id)
+            .map(|s| s.processed)
+            .unwrap_or(0),
+        state
+            .emoji_import_jobs
+            .get(&job_id)
+            .map(|s| s.skipped)
+            .unwrap_or(0),
+        state
+            .emoji_import_jobs
+            .get(&job_id)
+            .map(|s| s.failed)
+            .unwrap_or(0),
     );
 }
 

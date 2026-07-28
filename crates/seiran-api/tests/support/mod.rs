@@ -42,7 +42,9 @@ pub async fn test_router() -> Router {
             .load_or_create()
             .expect("secrets.toml の読み込みに失敗（config/ ディレクトリを確認してください）"),
     );
-    let pool = get_db_pool().await.expect("DB接続に失敗（DATABASE_URL / docker compose の起動を確認してください）");
+    let pool = get_db_pool()
+        .await
+        .expect("DB接続に失敗（DATABASE_URL / docker compose の起動を確認してください）");
     let http_client = Arc::new(
         reqwest::Client::builder()
             .user_agent("seiran-integration-test/0.1.0")
@@ -56,12 +58,16 @@ pub async fn test_router() -> Router {
     // を `false` にすること）。
     let job_queue = create_job_queue(true).await;
 
-    let state = seiran_api::init_state(pool, secrets, http_client, local_domain, job_queue, None).await;
+    let state =
+        seiran_api::init_state(pool, secrets, http_client, local_domain, job_queue, None).await;
     seiran_api::router(state)
 }
 
 /// CLAUDE.md の規約に従うテストユーザー（`seiran1` / パスワード `seiranda`）でログインし、
 /// JWT を返す。ユーザーが存在しない場合はパニックする（事前に作成しておくこと）。
+// 統合テストはファイル単位で別クレートになるため、一部のテストからのみ使う共通ヘルパーは
+// 他のテストクレートでは未使用になる。
+#[allow(dead_code)]
 pub async fn login_test_user(app: &Router, username: &str) -> String {
     let body = serde_json::json!({ "identifier": username, "password": "seiranda" }).to_string();
     let req = Request::builder()
@@ -78,13 +84,23 @@ pub async fn login_test_user(app: &Router, username: &str) -> String {
          パスワード 'seiranda' で事前に作成してください",
         username
     );
-    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    json["token"].as_str().expect("レスポンスに token フィールドがありません").to_string()
+    json["token"]
+        .as_str()
+        .expect("レスポンスに token フィールドがありません")
+        .to_string()
 }
 
 /// JSON ボディ付きの認証済みリクエストを組み立てる。
-pub fn authed_json_request(method: &str, uri: &str, token: &str, body: serde_json::Value) -> Request<Body> {
+pub fn authed_json_request(
+    method: &str,
+    uri: &str,
+    token: &str,
+    body: serde_json::Value,
+) -> Request<Body> {
     Request::builder()
         .method(method)
         .uri(uri)
@@ -96,6 +112,8 @@ pub fn authed_json_request(method: &str, uri: &str, token: &str, body: serde_jso
 
 /// レスポンスボディを JSON として読み取る。
 pub async fn body_json(res: axum::response::Response) -> serde_json::Value {
-    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
 }

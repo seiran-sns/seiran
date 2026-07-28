@@ -55,7 +55,9 @@ pub fn validate_dm_text_length(text: &str, has_bsky_recipient: bool) -> Result<(
 /// 添付ファイル ID の件数・形式を検証する（件数上限 10、i64 としてパース可能か）。
 pub fn validate_attachment_ids(ids: &[String]) -> Result<(), ApiError> {
     if ids.len() > 10 {
-        return Err(ApiError::BadRequest("添付ファイルは最大10件です".to_owned()));
+        return Err(ApiError::BadRequest(
+            "添付ファイルは最大10件です".to_owned(),
+        ));
     }
     if ids.iter().any(|s| s.parse::<i64>().is_err()) {
         return Err(ApiError::BadRequest("INVALID_ATTACHMENT_ID".to_owned()));
@@ -200,14 +202,23 @@ mod tests {
 
     #[test]
     fn validate_reaction_content_accepts_basic_emoji() {
-        assert_eq!(validate_reaction_content("🎉").unwrap(), ReactionContent::Unicode("🎉".to_string()));
-        assert_eq!(validate_reaction_content(" 👍 ").unwrap(), ReactionContent::Unicode("👍".to_string()));
+        assert_eq!(
+            validate_reaction_content("🎉").unwrap(),
+            ReactionContent::Unicode("🎉".to_string())
+        );
+        assert_eq!(
+            validate_reaction_content(" 👍 ").unwrap(),
+            ReactionContent::Unicode("👍".to_string())
+        );
     }
 
     #[test]
     fn validate_reaction_content_accepts_vs16_sequence() {
         // ❤️ = U+2764 + VS16（クイックリアクションで使われる形）
-        assert_eq!(validate_reaction_content("❤️").unwrap(), ReactionContent::Unicode("❤️".to_string()));
+        assert_eq!(
+            validate_reaction_content("❤️").unwrap(),
+            ReactionContent::Unicode("❤️".to_string())
+        );
     }
 
     #[test]
@@ -239,7 +250,10 @@ mod tests {
             validate_reaction_content(":smile:").unwrap(),
             ReactionContent::Custom("smile".to_string())
         );
-        assert_eq!(ReactionContent::Custom("smile".to_string()).as_db_content(), ":smile:");
+        assert_eq!(
+            ReactionContent::Custom("smile".to_string()).as_db_content(),
+            ":smile:"
+        );
     }
 
     #[test]

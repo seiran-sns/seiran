@@ -135,7 +135,10 @@ pub trait ActorRepository: Send + Sync {
     async fn find_avatar_url(&self, actor_id: i64) -> Result<Option<String>, sqlx::Error>;
 
     /// プロフィール編集用にローカルアクターの現在値を取得する。
-    async fn find_profile_by_user_id(&self, user_id: i64) -> Result<Option<ActorProfileRow>, sqlx::Error>;
+    async fn find_profile_by_user_id(
+        &self,
+        user_id: i64,
+    ) -> Result<Option<ActorProfileRow>, sqlx::Error>;
 
     /// プロフィールを更新する（`update_profile` ハンドラの UPDATE 文）。
     #[allow(clippy::too_many_arguments)]
@@ -366,7 +369,10 @@ impl ActorRepository for PgActorRepository {
         Ok(row.and_then(|(url,)| url))
     }
 
-    async fn find_profile_by_user_id(&self, user_id: i64) -> Result<Option<ActorProfileRow>, sqlx::Error> {
+    async fn find_profile_by_user_id(
+        &self,
+        user_id: i64,
+    ) -> Result<Option<ActorProfileRow>, sqlx::Error> {
         sqlx::query_as::<_, ActorProfileRow>(
             "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id, profile_fields \
              FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",

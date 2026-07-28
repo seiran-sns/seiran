@@ -4,6 +4,7 @@
 //! および subscribeRepos WebSocket フレームの構築を担当する。
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
+use hex;
 pub use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
 use multihash::Multihash;
@@ -11,7 +12,6 @@ use p256::ecdsa::{signature::Signer, SigningKey};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use hex;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // エラー型
@@ -46,7 +46,8 @@ pub fn cid_to_string(cid: &Cid) -> String {
 
 /// CID 文字列をパースする。
 pub fn cid_from_str(s: &str) -> Result<Cid, RepoError> {
-    s.parse::<Cid>().map_err(|e| RepoError::CidParse(e.to_string()))
+    s.parse::<Cid>()
+        .map_err(|e| RepoError::CidParse(e.to_string()))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,7 +91,10 @@ fn leading_zeros_on_hash(key: &str) -> u32 {
 }
 
 fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
-    a.iter().zip(b.iter()).take_while(|(ca, cb)| ca == cb).count()
+    a.iter()
+        .zip(b.iter())
+        .take_while(|(ca, cb)| ca == cb)
+        .count()
 }
 
 // MST ノード（DAG-CBOR シリアライズ用）— canonical 順: e (0x65) < l (0x6c)
@@ -136,16 +140,17 @@ fn build_layer(entries: &[(String, Cid)], layer: u32) -> Result<(Cid, Blocks), R
     let mut left_subtree: Option<Cid> = None;
     let mut prev_key_bytes: Vec<u8> = vec![];
 
-    let flush_subtree =
-        |subtree_buf: &mut Vec<(String, Cid)>, blocks: &mut Blocks| -> Result<Option<Cid>, RepoError> {
-            if subtree_buf.is_empty() {
-                return Ok(None);
-            }
-            let (sc, sb) = build_layer(subtree_buf, layer.saturating_sub(1))?;
-            blocks.extend(sb);
-            subtree_buf.clear();
-            Ok(Some(sc))
-        };
+    let flush_subtree = |subtree_buf: &mut Vec<(String, Cid)>,
+                         blocks: &mut Blocks|
+     -> Result<Option<Cid>, RepoError> {
+        if subtree_buf.is_empty() {
+            return Ok(None);
+        }
+        let (sc, sb) = build_layer(subtree_buf, layer.saturating_sub(1))?;
+        blocks.extend(sb);
+        subtree_buf.clear();
+        Ok(Some(sc))
+    };
 
     for (key, cid) in entries {
         let h = leading_zeros_on_hash(key);
@@ -286,10 +291,7 @@ pub fn encode_car(root_cid: &Cid, blocks: &[(Cid, Vec<u8>)]) -> Result<Vec<u8>, 
     // ヘッダー: {"roots": [CID], "version": 1}
     // canonical 順: roots(5) < version(7)
     let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
-    header_map.insert(
-        "roots".to_string(),
-        Ipld::List(vec![Ipld::Link(*root_cid)]),
-    );
+    header_map.insert("roots".to_string(), Ipld::List(vec![Ipld::Link(*root_cid)]));
     header_map.insert("version".to_string(), Ipld::Integer(1));
     let header_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(header_map))
         .map_err(|e| RepoError::Cbor(e.to_string()))?;
@@ -488,7 +490,10 @@ struct BskyFeedLike {
 /// AT Protocol ポスト embed の種別。
 pub enum BskyEmbed {
     Images(Vec<BskyImage>),
-    Record { uri: String, cid: String },
+    Record {
+        uri: String,
+        cid: String,
+    },
     External {
         url: String,
         title: String,
@@ -497,7 +502,13 @@ pub enum BskyEmbed {
     },
     /// Bsky公式動画パイプライン（`app.bsky.video.uploadVideo`）で発行された
     /// blob CIDを使った動画embed。`bsky_video_status='ready'`の場合のみ使用する。
-    Video { cid: String, mime_type: String, size: i64, width: i32, height: i32 },
+    Video {
+        cid: String,
+        mime_type: String,
+        size: i64,
+        width: i32,
+        height: i32,
+    },
 }
 
 /// `app.bsky.embed.record`（引用ポスト）の Ipld を構築する。
@@ -507,7 +518,10 @@ fn build_embed_record_ipld(uri: &str, cid_str: &str) -> Ipld {
     record.insert("uri".to_string(), Ipld::String(uri.to_string()));
 
     let mut embed = BTreeMap::new();
-    embed.insert("$type".to_string(), Ipld::String("app.bsky.embed.record".to_string()));
+    embed.insert(
+        "$type".to_string(),
+        Ipld::String("app.bsky.embed.record".to_string()),
+    );
     embed.insert("record".to_string(), Ipld::Map(record));
     Ipld::Map(embed)
 }
@@ -520,7 +534,10 @@ fn build_embed_external_ipld(
     thumb: Option<&BskyImage>,
 ) -> Result<Ipld, RepoError> {
     let mut external = BTreeMap::new();
-    external.insert("description".to_string(), Ipld::String(description.to_string()));
+    external.insert(
+        "description".to_string(),
+        Ipld::String(description.to_string()),
+    );
     if let Some(thumb) = thumb {
         external.insert(
             "thumb".to_string(),
@@ -531,7 +548,10 @@ fn build_embed_external_ipld(
     external.insert("uri".to_string(), Ipld::String(url.to_string()));
 
     let mut embed = BTreeMap::new();
-    embed.insert("$type".to_string(), Ipld::String("app.bsky.embed.external".to_string()));
+    embed.insert(
+        "$type".to_string(),
+        Ipld::String("app.bsky.embed.external".to_string()),
+    );
     embed.insert("external".to_string(), Ipld::Map(external));
     Ok(Ipld::Map(embed))
 }
@@ -554,7 +574,11 @@ fn build_blob_ipld_from_cid(cid_str: &str, mime_type: &str, size: i64) -> Result
     build_blob_ipld_from_cid_value(blob_cid, mime_type, size)
 }
 
-fn build_blob_ipld_from_cid_value(blob_cid: Cid, mime_type: &str, size: i64) -> Result<Ipld, RepoError> {
+fn build_blob_ipld_from_cid_value(
+    blob_cid: Cid,
+    mime_type: &str,
+    size: i64,
+) -> Result<Ipld, RepoError> {
     let mut blob_map = BTreeMap::new();
     blob_map.insert("ref".to_string(), Ipld::Link(blob_cid));
     blob_map.insert("size".to_string(), Ipld::Integer(size as i128));
@@ -564,12 +588,21 @@ fn build_blob_ipld_from_cid_value(blob_cid: Cid, mime_type: &str, size: i64) -> 
 }
 
 /// `app.bsky.embed.video` の Ipld ツリーを構築する。
-fn build_embed_video_ipld(cid_str: &str, mime_type: &str, size: i64, width: i32, height: i32) -> Result<Ipld, RepoError> {
+fn build_embed_video_ipld(
+    cid_str: &str,
+    mime_type: &str,
+    size: i64,
+    width: i32,
+    height: i32,
+) -> Result<Ipld, RepoError> {
     let blob_map = build_blob_ipld_from_cid(cid_str, mime_type, size)?;
 
     let mut embed = BTreeMap::new();
     embed.insert("alt".to_string(), Ipld::String(String::new()));
-    embed.insert("$type".to_string(), Ipld::String("app.bsky.embed.video".to_string()));
+    embed.insert(
+        "$type".to_string(),
+        Ipld::String("app.bsky.embed.video".to_string()),
+    );
     embed.insert("video".to_string(), blob_map);
     if width > 0 && height > 0 {
         let mut aspect = BTreeMap::new();
@@ -582,26 +615,32 @@ fn build_embed_video_ipld(cid_str: &str, mime_type: &str, size: i64, width: i32,
 
 /// `app.bsky.embed.images` の Ipld ツリーを構築する。
 fn build_embed_images_ipld(images: &[BskyImage]) -> Result<Ipld, RepoError> {
-    let image_list: Result<Vec<Ipld>, RepoError> = images.iter().map(|img| {
-        let blob_map = build_blob_ipld(&img.sha256_hex, &img.mime_type, img.size)?;
+    let image_list: Result<Vec<Ipld>, RepoError> = images
+        .iter()
+        .map(|img| {
+            let blob_map = build_blob_ipld(&img.sha256_hex, &img.mime_type, img.size)?;
 
-        // aspectRatio: canonical 順 width(5) < height(6)
-        let mut aspect = BTreeMap::new();
-        aspect.insert("width".to_string(), Ipld::Integer(img.width as i128));
-        aspect.insert("height".to_string(), Ipld::Integer(img.height as i128));
+            // aspectRatio: canonical 順 width(5) < height(6)
+            let mut aspect = BTreeMap::new();
+            aspect.insert("width".to_string(), Ipld::Integer(img.width as i128));
+            aspect.insert("height".to_string(), Ipld::Integer(img.height as i128));
 
-        // image item: canonical 順 alt(3) < image(5) < aspectRatio(11)
-        let mut item = BTreeMap::new();
-        item.insert("alt".to_string(), Ipld::String(img.alt.clone()));
-        item.insert("image".to_string(), blob_map);
-        item.insert("aspectRatio".to_string(), Ipld::Map(aspect));
+            // image item: canonical 順 alt(3) < image(5) < aspectRatio(11)
+            let mut item = BTreeMap::new();
+            item.insert("alt".to_string(), Ipld::String(img.alt.clone()));
+            item.insert("image".to_string(), blob_map);
+            item.insert("aspectRatio".to_string(), Ipld::Map(aspect));
 
-        Ok(Ipld::Map(item))
-    }).collect();
+            Ok(Ipld::Map(item))
+        })
+        .collect();
 
     // embed: canonical 順 $type(5) < images(6)
     let mut embed = BTreeMap::new();
-    embed.insert("$type".to_string(), Ipld::String("app.bsky.embed.images".to_string()));
+    embed.insert(
+        "$type".to_string(),
+        Ipld::String("app.bsky.embed.images".to_string()),
+    );
     embed.insert("images".to_string(), Ipld::List(image_list?));
 
     Ok(Ipld::Map(embed))
@@ -622,15 +661,33 @@ pub fn encode_bsky_feed_post(
     let embed = match embed {
         None => None,
         Some(BskyEmbed::Images(images)) => {
-            if images.is_empty() { None } else { Some(build_embed_images_ipld(&images)?) }
+            if images.is_empty() {
+                None
+            } else {
+                Some(build_embed_images_ipld(&images)?)
+            }
         }
         Some(BskyEmbed::Record { uri, cid }) => Some(build_embed_record_ipld(&uri, &cid)),
-        Some(BskyEmbed::External { url, title, description, thumb }) => {
-            Some(build_embed_external_ipld(&url, &title, &description, thumb.as_ref())?)
-        }
-        Some(BskyEmbed::Video { cid, mime_type, size, width, height }) => {
-            Some(build_embed_video_ipld(&cid, &mime_type, size, width, height)?)
-        }
+        Some(BskyEmbed::External {
+            url,
+            title,
+            description,
+            thumb,
+        }) => Some(build_embed_external_ipld(
+            &url,
+            &title,
+            &description,
+            thumb.as_ref(),
+        )?),
+        Some(BskyEmbed::Video {
+            cid,
+            mime_type,
+            size,
+            width,
+            height,
+        }) => Some(build_embed_video_ipld(
+            &cid, &mime_type, size, width, height,
+        )?),
     };
     let record = BskyFeedPost {
         text: text.to_string(),
@@ -728,7 +785,10 @@ pub fn encode_bsky_actor_profile(
         kind: "app.bsky.actor.profile".to_string(),
         avatar: avatar_ipld,
         created_at: created_at_rfc3339.to_string(),
-        pinned_post: pinned_post.map(|(uri, cid)| BskyRefRecord { cid: cid.to_string(), uri: uri.to_string() }),
+        pinned_post: pinned_post.map(|(uri, cid)| BskyRefRecord {
+            cid: cid.to_string(),
+            uri: uri.to_string(),
+        }),
         description: description.map(|s| s.to_string()),
         display_name: display_name.to_string(),
     };
@@ -874,9 +934,9 @@ pub fn encode_bsky_graph_listitem(
 // body:   CommitEvt 構造体
 
 pub struct CommitEvtOp {
-    pub action: String,      // "create" | "update" | "delete"
-    pub path: String,        // "app.bsky.feed.post/<tid>"
-    pub cid: Option<Cid>,   // delete の場合は None
+    pub action: String,   // "create" | "update" | "delete"
+    pub path: String,     // "app.bsky.feed.post/<tid>"
+    pub cid: Option<Cid>, // delete の場合は None
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -909,10 +969,13 @@ pub fn build_commit_frame(
         .map(|op| {
             let mut m: BTreeMap<String, Ipld> = BTreeMap::new();
             m.insert("action".to_string(), Ipld::String(op.action.clone()));
-            m.insert("cid".to_string(), match op.cid {
-                Some(c) => Ipld::Link(c),
-                None => Ipld::Null,
-            });
+            m.insert(
+                "cid".to_string(),
+                match op.cid {
+                    Some(c) => Ipld::Link(c),
+                    None => Ipld::Null,
+                },
+            );
             m.insert("path".to_string(), Ipld::String(op.path.clone()));
             Ipld::Map(m)
         })
@@ -951,7 +1014,12 @@ pub fn build_commit_frame(
 
 /// subscribeRepos の #identity フレームを生成する。
 /// handle が確定したとき AppView に再検証を促すために送信する。
-pub fn build_identity_frame(seq: i64, did: &str, handle: &str, time: &str) -> Result<Vec<u8>, RepoError> {
+pub fn build_identity_frame(
+    seq: i64,
+    did: &str,
+    handle: &str,
+    time: &str,
+) -> Result<Vec<u8>, RepoError> {
     let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
     header_map.insert("op".to_string(), Ipld::Integer(1));
     header_map.insert("t".to_string(), Ipld::String("#identity".to_string()));
@@ -1038,7 +1106,11 @@ mod tests {
         let tid = generate_tid();
         let valid: std::collections::HashSet<char> =
             "234567abcdefghijklmnopqrstuvwxyz".chars().collect();
-        assert!(tid.chars().all(|c| valid.contains(&c)), "TID に無効な文字: {}", tid);
+        assert!(
+            tid.chars().all(|c| valid.contains(&c)),
+            "TID に無効な文字: {}",
+            tid
+        );
     }
 
     #[test]
@@ -1052,8 +1124,10 @@ mod tests {
 
     #[test]
     fn test_encode_bsky_feed_post_deterministic() {
-        let (cbor1, cid1) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
-        let (cbor2, cid2) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
+        let (cbor1, cid1) =
+            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
+        let (cbor2, cid2) =
+            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
         assert_eq!(cbor1, cbor2);
         assert_eq!(cid1, cid2);
     }
@@ -1082,11 +1156,23 @@ mod tests {
         )
         .unwrap();
         let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
-        let Ipld::Map(record) = value else { panic!("record must be map") };
-        let Some(Ipld::Map(embed)) = record.get("embed") else { panic!("embed must be map") };
-        let Some(Ipld::Map(external)) = embed.get("external") else { panic!("external must be map") };
-        assert_eq!(external.get("title"), Some(&Ipld::String("Alice (@alice@fedi.example)".to_string())));
-        assert_eq!(external.get("description"), Some(&Ipld::String("元投稿本文".to_string())));
+        let Ipld::Map(record) = value else {
+            panic!("record must be map")
+        };
+        let Some(Ipld::Map(embed)) = record.get("embed") else {
+            panic!("embed must be map")
+        };
+        let Some(Ipld::Map(external)) = embed.get("external") else {
+            panic!("external must be map")
+        };
+        assert_eq!(
+            external.get("title"),
+            Some(&Ipld::String("Alice (@alice@fedi.example)".to_string()))
+        );
+        assert_eq!(
+            external.get("description"),
+            Some(&Ipld::String("元投稿本文".to_string()))
+        );
         assert!(matches!(external.get("thumb"), Some(Ipld::Map(_))));
     }
 
@@ -1099,7 +1185,8 @@ mod tests {
 
     #[test]
     fn test_build_mst_single_entry() {
-        let (_, cid) = encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
+        let (_, cid) =
+            encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
         let entries = vec![("app.bsky.feed.post/test123".to_string(), cid)];
         let result = build_mst(&entries);
         assert!(result.is_ok());
@@ -1113,15 +1200,28 @@ mod tests {
             "2024-01-01T00:00:00.000Z",
             Some("👍"),
             1,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(!cbor.is_empty());
         assert_eq!(cid_from_dagcbor(&cbor), cid);
     }
 
     #[test]
     fn test_encode_bsky_feed_like_without_emoji_omits_field() {
-        let (with_emoji, _) = encode_bsky_feed_like("at://a/b/c", "cid1", "2024-01-01T00:00:00.000Z", Some("❤"), 1).unwrap();
-        let (without_emoji, _) = encode_bsky_feed_like("at://a/b/c", "cid1", "2024-01-01T00:00:00.000Z", None, 2).unwrap();
-        assert_ne!(with_emoji, without_emoji, "emoji フィールドの有無で CBOR が変わらないのはおかしい");
+        let (with_emoji, _) = encode_bsky_feed_like(
+            "at://a/b/c",
+            "cid1",
+            "2024-01-01T00:00:00.000Z",
+            Some("❤"),
+            1,
+        )
+        .unwrap();
+        let (without_emoji, _) =
+            encode_bsky_feed_like("at://a/b/c", "cid1", "2024-01-01T00:00:00.000Z", None, 2)
+                .unwrap();
+        assert_ne!(
+            with_emoji, without_emoji,
+            "emoji フィールドの有無で CBOR が変わらないのはおかしい"
+        );
     }
 }

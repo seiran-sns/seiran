@@ -15,7 +15,11 @@ use crate::AppState;
 /// `actor_a`/`actor_b` のいずれかがもう一方をブロックしていれば `Forbidden` を返す。
 /// フォロー作成・リプライ作成・リアクション作成の書き込みガードで共通に使う
 /// （seiranのブロックはBsky準拠＝相互完全非表示のため、方向を問わず拒否する）。
-pub async fn check_not_blocked(state: &AppState, actor_a: i64, actor_b: i64) -> Result<(), ApiError> {
+pub async fn check_not_blocked(
+    state: &AppState,
+    actor_a: i64,
+    actor_b: i64,
+) -> Result<(), ApiError> {
     let (is_blocking, is_blocked_by) = state
         .blocks
         .find_relationship(actor_a, actor_b)
@@ -91,9 +95,15 @@ async fn resolve_fedi(state: &AppState, target: &str) -> Result<Actor, ApError> 
     } else {
         let parts: Vec<&str> = target.splitn(2, '@').collect();
         if parts.len() != 2 {
-            return Err(ApError::Other(format!("ターゲット形式が不正です: {}", target)));
+            return Err(ApError::Other(format!(
+                "ターゲット形式が不正です: {}",
+                target
+            )));
         }
-        state.ap_client.resolve_webfinger(parts[0], parts[1]).await?
+        state
+            .ap_client
+            .resolve_webfinger(parts[0], parts[1])
+            .await?
     };
 
     // target_uri が自ドメイン（`https://{local_domain}/users/{username}`）を指す場合、
@@ -125,11 +135,17 @@ async fn resolve_fedi(state: &AppState, target: &str) -> Result<Actor, ApError> 
         .clone()
         .ok_or_else(|| ApError::Other("リモートアクターにinboxがありません".to_string()))?;
     let remote_avatar_url = remote_ap.avatar_url();
-    let remote_username = remote_ap
-        .preferred_username
+    let remote_username = remote_ap.preferred_username.clone().unwrap_or_else(|| {
+        target_uri
+            .rsplit('/')
+            .next()
+            .unwrap_or("unknown")
+            .to_string()
+    });
+    let remote_display_name = remote_ap
+        .name
         .clone()
-        .unwrap_or_else(|| target_uri.rsplit('/').next().unwrap_or("unknown").to_string());
-    let remote_display_name = remote_ap.name.clone().unwrap_or_else(|| remote_username.clone());
+        .unwrap_or_else(|| remote_username.clone());
     let remote_domain = target_uri.split('/').nth(2).unwrap_or("").to_string();
     let remote_bio = remote_ap
         .summary

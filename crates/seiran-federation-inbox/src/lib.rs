@@ -60,7 +60,8 @@ pub fn init_state(
     let actor_repo: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let follow_repo: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
     let post_repo: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
-    let reaction_repo: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
+    let reaction_repo: Arc<dyn ReactionRepository> =
+        Arc::new(PgReactionRepository::new(pool.clone()));
     let ap_public_key_pem = secrets.ap_public_key_pem.clone().unwrap_or_default();
     let ap_private_key_pem = secrets.ap_private_key_pem.clone().unwrap_or_default();
     let ap_client = Arc::new(ApClient::new(http_client));
@@ -89,7 +90,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/inbox", post(inbox_handler))
         .route("/users/:username", get(actor_handler))
         .route("/users/:username/outbox", get(outbox_handler))
-        .route("/users/:username/collections/featured", get(featured_handler))
+        .route(
+            "/users/:username/collections/featured",
+            get(featured_handler),
+        )
         .route("/users/:username/lists", get(lists_collection_handler))
         .route("/users/:username/lists/:list_id", get(list_detail_handler))
         .with_state(state)

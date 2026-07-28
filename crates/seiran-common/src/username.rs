@@ -44,7 +44,9 @@ pub fn to_atp_username(s: &str) -> String {
 
 /// 予約ユーザー名か（大文字小文字を区別しない）。
 pub fn is_reserved_username(s: &str) -> bool {
-    RESERVED_LOCAL_USERNAMES.iter().any(|r| r.eq_ignore_ascii_case(s))
+    RESERVED_LOCAL_USERNAMES
+        .iter()
+        .any(|r| r.eq_ignore_ascii_case(s))
 }
 
 #[cfg(test)]

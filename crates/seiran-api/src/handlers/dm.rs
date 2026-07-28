@@ -53,17 +53,22 @@ pub async fn sessions(
 
     let summaries = match state.dm.sessions(actor_id, limit, until_id, since_id).await {
         Ok(s) => s,
-        Err(e) => return ApiError::Internal(format!("DMセッション取得失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("DMセッション取得失敗: {}", e)).into_response()
+        }
     };
     if summaries.is_empty() {
         return Json(Vec::<DmSessionResponse>::new()).into_response();
     }
 
     let thread_root_ids: Vec<i64> = summaries.iter().map(|s| s.thread_root_post_id).collect();
-    let read_states: HashMap<i64, i64> = match state.dm.read_states(actor_id, &thread_root_ids).await {
-        Ok(rows) => rows.into_iter().collect(),
-        Err(e) => return ApiError::Internal(format!("既読状態取得失敗: {}", e)).into_response(),
-    };
+    let read_states: HashMap<i64, i64> =
+        match state.dm.read_states(actor_id, &thread_root_ids).await {
+            Ok(rows) => rows.into_iter().collect(),
+            Err(e) => {
+                return ApiError::Internal(format!("既読状態取得失敗: {}", e)).into_response()
+            }
+        };
 
     let all_peer_ids: Vec<i64> = summaries
         .iter()
@@ -73,7 +78,9 @@ pub async fn sessions(
         .collect();
     let peer_summaries = match state.dm.peer_summaries(&all_peer_ids).await {
         Ok(p) => p,
-        Err(e) => return ApiError::Internal(format!("宛先アクター取得失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("宛先アクター取得失敗: {}", e)).into_response()
+        }
     };
     let peer_map: HashMap<i64, DmPeerResponse> = peer_summaries
         .into_iter()
@@ -96,7 +103,9 @@ pub async fn sessions(
     let last_post_ids: Vec<i64> = summaries.iter().map(|s| s.last_post_id).collect();
     let mut last_posts = match state.posts.find_by_ids(&last_post_ids).await {
         Ok(rows) => rows,
-        Err(e) => return ApiError::Internal(format!("最終メッセージ取得失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("最終メッセージ取得失敗: {}", e)).into_response()
+        }
     };
     resolve_mention_facets_in_place(&state.db, &mut last_posts).await;
     let mut att_map = fetch_attachments_map(&state.db, &last_post_ids).await;
@@ -120,7 +129,10 @@ pub async fn sessions(
                 .iter()
                 .filter_map(|id| peer_map.get(id).cloned())
                 .collect();
-            let last_read = read_states.get(&s.thread_root_post_id).copied().unwrap_or(0);
+            let last_read = read_states
+                .get(&s.thread_root_post_id)
+                .copied()
+                .unwrap_or(0);
             Some(DmSessionResponse {
                 thread_root_post_id: s.thread_root_post_id.to_string(),
                 unread: s.last_post_id > last_read,
@@ -151,9 +163,15 @@ pub async fn thread_messages(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.dm.thread_messages(thread_root_id, limit, until_id, since_id).await {
+    let mut rows = match state
+        .dm
+        .thread_messages(thread_root_id, limit, until_id, since_id)
+        .await
+    {
         Ok(r) => r,
-        Err(e) => return ApiError::Internal(format!("メッセージ履歴取得失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("メッセージ履歴取得失敗: {}", e)).into_response()
+        }
     };
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
@@ -192,7 +210,11 @@ pub async fn mark_read(
         return Json(serde_json::json!({"ok": true})).into_response();
     };
 
-    match state.dm.mark_read(actor_id, thread_root_id, last_post_id).await {
+    match state
+        .dm
+        .mark_read(actor_id, thread_root_id, last_post_id)
+        .await
+    {
         Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
         Err(e) => ApiError::Internal(format!("既読更新失敗: {}", e)).into_response(),
     }

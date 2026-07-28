@@ -6,7 +6,10 @@
 use std::time::Duration;
 
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Query, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Query, State,
+    },
     response::IntoResponse,
 };
 use serde::Deserialize;

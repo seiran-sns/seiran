@@ -55,7 +55,10 @@ pub trait BlockRepository: Send + Sync {
 
     /// ブロック中のアクター一覧を新しい順に返す（設定画面、#55）。件数は少数想定のため
     /// カーソルページネーションはせず先頭200件を返す。
-    async fn list_blocked(&self, blocker_actor_id: i64) -> Result<Vec<BlockedActorRow>, sqlx::Error>;
+    async fn list_blocked(
+        &self,
+        blocker_actor_id: i64,
+    ) -> Result<Vec<BlockedActorRow>, sqlx::Error>;
 }
 
 pub struct PgBlockRepository {
@@ -95,14 +98,12 @@ impl BlockRepository for PgBlockRepository {
         blocker_actor_id: i64,
         blocked_actor_id: i64,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "DELETE FROM blocks WHERE blocker_actor_id = $1 AND blocked_actor_id = $2",
-        )
-        .bind(blocker_actor_id)
-        .bind(blocked_actor_id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        sqlx::query("DELETE FROM blocks WHERE blocker_actor_id = $1 AND blocked_actor_id = $2")
+            .bind(blocker_actor_id)
+            .bind(blocked_actor_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 
     async fn delete_by_blocker_and_rkey(
@@ -110,14 +111,12 @@ impl BlockRepository for PgBlockRepository {
         blocker_actor_id: i64,
         atp_rkey: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "DELETE FROM blocks WHERE blocker_actor_id = $1 AND atp_rkey = $2",
-        )
-        .bind(blocker_actor_id)
-        .bind(atp_rkey)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        sqlx::query("DELETE FROM blocks WHERE blocker_actor_id = $1 AND atp_rkey = $2")
+            .bind(blocker_actor_id)
+            .bind(atp_rkey)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 
     async fn find_atp_rkey(
@@ -153,7 +152,10 @@ impl BlockRepository for PgBlockRepository {
         Ok(row)
     }
 
-    async fn list_blocked(&self, blocker_actor_id: i64) -> Result<Vec<BlockedActorRow>, sqlx::Error> {
+    async fn list_blocked(
+        &self,
+        blocker_actor_id: i64,
+    ) -> Result<Vec<BlockedActorRow>, sqlx::Error> {
         sqlx::query_as::<_, BlockedActorRow>(
             "SELECT a.id, a.username, a.domain, a.display_name,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url

@@ -72,20 +72,24 @@ impl InMemorySearchStore {
         local_until_id: Option<i64>,
         appview_cursor: Option<String>,
     ) {
-        self.sessions.insert(session_id, SearchSession {
-            query,
-            buffer,
-            local_until_id,
-            appview_cursor,
-            last_accessed: Instant::now(),
-        });
+        self.sessions.insert(
+            session_id,
+            SearchSession {
+                query,
+                buffer,
+                local_until_id,
+                appview_cursor,
+                last_accessed: Instant::now(),
+            },
+        );
     }
 
     /// タイムアウトしたセッションを削除する。
     pub fn cleanup(&self) {
         let now = Instant::now();
         let timeout = self.timeout;
-        self.sessions.retain(|_, v| now.duration_since(v.last_accessed) < timeout);
+        self.sessions
+            .retain(|_, v| now.duration_since(v.last_accessed) < timeout);
     }
 
     pub fn sessions_clone(&self) -> Arc<DashMap<String, SearchSession>> {
@@ -110,7 +114,9 @@ mod tests {
             Some("cursor-a".to_owned()),
         );
 
-        let (buf, local_until_id, cursor) = store.take_buffer("session-1").expect("session should exist");
+        let (buf, local_until_id, cursor) = store
+            .take_buffer("session-1")
+            .expect("session should exist");
         assert_eq!(buf, vec![10, 5, 2]);
         assert_eq!(local_until_id, Some(2));
         assert_eq!(cursor, Some("cursor-a".to_owned()));
@@ -121,13 +127,22 @@ mod tests {
     #[test]
     fn take_buffer_empties_the_buffer_so_it_is_not_returned_twice() {
         let store = InMemorySearchStore::new();
-        store.create("session-1".to_owned(), "q".to_owned(), vec![3, 1], None, None);
+        store.create(
+            "session-1".to_owned(),
+            "q".to_owned(),
+            vec![3, 1],
+            None,
+            None,
+        );
 
         let (first, ..) = store.take_buffer("session-1").unwrap();
         assert_eq!(first, vec![3, 1]);
 
         let (second, ..) = store.take_buffer("session-1").unwrap();
-        assert!(second.is_empty(), "2回目のtake_bufferは空であるべき（1回目でmem::takeされているため）");
+        assert!(
+            second.is_empty(),
+            "2回目のtake_bufferは空であるべき（1回目でmem::takeされているため）"
+        );
     }
 
     /// `put_buffer` で補充した内容が次の `take_buffer` で取り出せること
@@ -135,7 +150,13 @@ mod tests {
     #[test]
     fn put_buffer_then_take_buffer_roundtrips_updated_values() {
         let store = InMemorySearchStore::new();
-        store.create("session-1".to_owned(), "q".to_owned(), vec![9, 8], Some(8), None);
+        store.create(
+            "session-1".to_owned(),
+            "q".to_owned(),
+            vec![9, 8],
+            Some(8),
+            None,
+        );
 
         // 1ページ目消費
         let (buf, ..) = store.take_buffer("session-1").unwrap();

@@ -10,9 +10,9 @@ use serde::Deserialize;
 use seiran_common::repository::AppTokenRow;
 
 use seiran_common::generate_snowflake_id;
+use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 use seiran_common::ApDeliveryKind;
 use seiran_common::LocalAuthProvider;
-use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 
 use crate::mailer::{send_email_change_confirmation, MailError};
 use crate::{error::ApiError, middleware::extract_auth, AppState};
@@ -70,17 +70,24 @@ pub async fn change_password(
         return Err(ApiError::BadRequest("PASSWORD_TOO_SHORT".to_owned()));
     }
 
-    let row = sqlx::query!("SELECT password_hash FROM users WHERE id = $1", auth_user.user_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
+    let row = sqlx::query!(
+        "SELECT password_hash FROM users WHERE id = $1",
+        auth_user.user_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?
+    .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
+    let current_hash = row
+        .password_hash
         .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
-    let current_hash = row.password_hash.ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
 
     let current_ok = LocalAuthProvider::verify_password(&req.current_password, &current_hash)
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     if !current_ok {
-        return Err(ApiError::BadRequest("CURRENT_PASSWORD_INCORRECT".to_owned()));
+        return Err(ApiError::BadRequest(
+            "CURRENT_PASSWORD_INCORRECT".to_owned(),
+        ));
     }
 
     let password_hash = LocalAuthProvider::hash_password(&req.new_password).map_err(|e| {
@@ -134,7 +141,10 @@ pub async fn request_email_change(
         .map_err(|e| ApiError::Internal(format!("[request-email-change] DB エラー: {}", e)))?
         .ok_or_else(|| ApiError::Internal("[request-email-change] token 発行失敗".to_owned()))?;
 
-    let confirm_url = format!("https://{}/verify-email-change?token={}", state.local_domain, token);
+    let confirm_url = format!(
+        "https://{}/verify-email-change?token={}",
+        state.local_domain, token
+    );
 
     let smtp_settings = state
         .site_settings
@@ -193,7 +203,9 @@ pub async fn confirm_email_change(
         .users
         .update_email(user_id, &new_email)
         .await
-        .map_err(|e| ApiError::Internal(format!("[confirm-email-change] users UPDATE 失敗: {}", e)))?;
+        .map_err(|e| {
+            ApiError::Internal(format!("[confirm-email-change] users UPDATE 失敗: {}", e))
+        })?;
 
     Ok(Json(()))
 }
@@ -250,17 +262,27 @@ pub async fn withdraw(
     // 1. AP Delete(Actor) を Fedi フォロワーに配送（Worker の ApDelivery ジョブ）。
     //    以前は同期 await でフォロワー数に比例して退会レスポンスが遅延していた。
     //    退会処理は actors 行を物理削除しないため、応答後のジョブ実行でも宛先解決できる。
-    state.enqueue_ap_delivery(actor_id, ApDeliveryKind::DeleteActor).await;
+    state
+        .enqueue_ap_delivery(actor_id, ApDeliveryKind::DeleteActor)
+        .await;
 
     // 2. ATP #account（active=false, status=deleted）を Relay に送信
     if let Some(did) = actor.at_did.as_deref() {
-        let handle = format!("{}.{}", seiran_common::username::to_atp_username(&actor.username), state.local_domain);
+        let handle = format!(
+            "{}.{}",
+            seiran_common::username::to_atp_username(&actor.username),
+            state.local_domain
+        );
         if let Err(e) = state
             .atp_service
             .broadcast_account_event(actor_id, did, &handle, now, false, Some("deleted"))
             .await
         {
-            tracing::error!("[withdraw] ATP #account broadcast 失敗 (actor_id={}): {:?}", actor_id, e);
+            tracing::error!(
+                "[withdraw] ATP #account broadcast 失敗 (actor_id={}): {:?}",
+                actor_id,
+                e
+            );
         }
     }
 
@@ -292,9 +314,15 @@ pub async fn withdraw(
     //    AccountWithdrawUnfollowAll ジョブ。ApDelivery/ProxyFollowSyncと同じジョブ
     //    キュー経由にすることで、プロセスクラッシュ時もリトライ機構の恩恵を受けられる
     //    （tokio::spawnだとプロセス終了と共に失われてしまうため。2026-07-16 マイケル指摘）。
-    state.enqueue_account_withdraw_unfollow_all(actor_id, actor.username.clone()).await;
+    state
+        .enqueue_account_withdraw_unfollow_all(actor_id, actor.username.clone())
+        .await;
 
-    tracing::info!("[withdraw] 退会完了: actor_id={}, username={}", actor_id, actor.username);
+    tracing::info!(
+        "[withdraw] 退会完了: actor_id={}, username={}",
+        actor_id,
+        actor.username
+    );
     Ok(Json(()))
 }
 

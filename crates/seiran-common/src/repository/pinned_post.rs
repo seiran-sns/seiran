@@ -23,7 +23,11 @@ pub trait PinnedPostsRepository: Send + Sync {
     /// actor のピン留め投稿を、タイムラインと同じ結合行（アクター情報込み）で取得する（`pinned_at` 降順）。
     /// `viewer_actor_id` は閲覧者の actor_id（匿名なら `None`）。`followers_only`/`direct` は
     /// 投稿者本人または accepted フォロワーの閲覧者にのみ返す（可視性による閲覧制御）。
-    async fn list_timeline_by_actor(&self, actor_id: i64, viewer_actor_id: Option<i64>) -> Result<Vec<TimelinePost>, sqlx::Error>;
+    async fn list_timeline_by_actor(
+        &self,
+        actor_id: i64,
+        viewer_actor_id: Option<i64>,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// リモートアクター（Fedi の featured collection / Bsky の `pinnedPost`）から取得した
     /// 最新のピン留め状態でこのテーブルを洗い替える。`post_ids` は同期元での並び順
@@ -89,7 +93,11 @@ impl PinnedPostsRepository for PgPinnedPostsRepository {
         .await
     }
 
-    async fn list_timeline_by_actor(&self, actor_id: i64, viewer_actor_id: Option<i64>) -> Result<Vec<TimelinePost>, sqlx::Error> {
+    async fn list_timeline_by_actor(
+        &self,
+        actor_id: i64,
+        viewer_actor_id: Option<i64>,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,

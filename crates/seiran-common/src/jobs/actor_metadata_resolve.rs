@@ -6,8 +6,8 @@
 //! **未実装**: ゼロトラストペアリング統合（フェーズ4）で実装する。
 //! 現状 enqueue している箇所はない。
 
-use std::sync::Arc;
 use crate::queue::worker::JobContext;
+use std::sync::Arc;
 
 pub async fn handle(actor_id: i64, _ctx: Arc<JobContext>) -> Result<(), String> {
     tracing::error!(

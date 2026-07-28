@@ -27,7 +27,12 @@ pub enum ServiceAuthError {
 /// `iss`（アカウントのDID）・`aud`（対象サービスのDID、`#fragment`込み可）・
 /// `lxm`（呼び出すXRPCメソッド名）を指定してサービス間認証JWTを自己署名する。
 /// 有効期限は仕様推奨の60秒。
-pub fn sign_service_auth_jwt(pem: &str, iss: &str, aud: &str, lxm: &str) -> Result<String, ServiceAuthError> {
+pub fn sign_service_auth_jwt(
+    pem: &str,
+    iss: &str,
+    aud: &str,
+    lxm: &str,
+) -> Result<String, ServiceAuthError> {
     let claims = ServiceAuthClaims {
         iss: iss.to_string(),
         aud: aud.to_string(),
@@ -48,8 +53,12 @@ pub fn sign_service_auth_jwt(pem: &str, iss: &str, aud: &str, lxm: &str) -> Resu
 /// JWT の署名セグメントだけを取り出して矯正し、組み直す。
 fn normalize_jwt_es256_signature(jwt: &str) -> Result<String, ServiceAuthError> {
     let mut parts = jwt.rsplitn(2, '.');
-    let sig_b64 = parts.next().ok_or_else(|| ServiceAuthError::Sign("JWT形式が不正".to_string()))?;
-    let header_payload = parts.next().ok_or_else(|| ServiceAuthError::Sign("JWT形式が不正".to_string()))?;
+    let sig_b64 = parts
+        .next()
+        .ok_or_else(|| ServiceAuthError::Sign("JWT形式が不正".to_string()))?;
+    let header_payload = parts
+        .next()
+        .ok_or_else(|| ServiceAuthError::Sign("JWT形式が不正".to_string()))?;
 
     let sig_bytes = URL_SAFE_NO_PAD
         .decode(sig_b64)

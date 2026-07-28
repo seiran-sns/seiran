@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ListSummary, Note } from "../api/client";
@@ -69,16 +69,18 @@ export default function HomePage() {
   const [headerHeight, setHeaderHeight] = useState(0);
 
   // 利用可能なフィードタブの配列（順序定義）
-  const availableFeeds = useCallback((): Feed[] => {
-    return [
+  const availableFeeds = useMemo(
+    (): Feed[] => [
       { kind: "home" },
       { kind: "local" },
       { kind: "social" },
       { kind: "global" },
       ...lists.map((l) => ({ kind: "list" as const, id: l.id })),
       ...pinnedHashtags.map((h) => ({ kind: "hashtag" as const, name: h.name })),
-    ];
-  }, [lists, pinnedHashtags])();
+    ],
+    [lists, pinnedHashtags],
+  );
+  const currentFeedKey = feedKey(feed);
 
   const currentFeedIndex = availableFeeds.findIndex((f) => {
     if (f.kind !== feed.kind) return false;
@@ -115,7 +117,7 @@ export default function HomePage() {
       const left = activeTabEl.offsetLeft - (tabs.clientWidth - activeTabEl.offsetWidth) / 2;
       tabs.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
     }
-  }, [feedKey(feed)]);
+  }, [currentFeedKey]);
 
   // フィードタブ（下記feedTabs）はheaderの直下にstickyで張り付ける。両者とも
   // position: sticky; top: 0 だと重なってしまうため、headerの実高さ分だけオフセットする。
@@ -133,7 +135,7 @@ export default function HomePage() {
   const fetchPage = useCallback(
     (untilId: string) => fetchFeed(feed, { limit: PAGE_SIZE, until_id: untilId }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [feedKey(feed)]
+    [feed, currentFeedKey]
   );
   const { items: notes, setItems: setNotes, hasMore, setHasMore, loadingMore, loadMore } = useCursorPagination<Note>(
     fetchPage,
@@ -165,7 +167,7 @@ export default function HomePage() {
       window.removeEventListener("scroll", onScroll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feedKey(feed)]);
+  }, [currentFeedKey, setCache]);
 
   // 復元待ちのスクロール位置（キャッシュヒット時のみセットされ、一覧の描画後に一度だけ使う）。
   const pendingScrollRestore = useRef<number | null>(null);
@@ -197,8 +199,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feedKey(feed)]);
+  }, [currentFeedKey, feed, getCache, onError, setHasMore, setNotes]);
 
   // 一覧・hasMoreが変わるたびキャッシュへ反映（scrollYは触らずマージする）。
   // loading中（フェッチ中・キャッシュ復元処理の途中）は書き込まない: React 18 StrictMode
@@ -209,9 +210,8 @@ export default function HomePage() {
   // 常に確定した値だけをキャッシュへ反映する。
   useEffect(() => {
     if (loading) return;
-    setCache(feedKey(feed), { notes, hasMore });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notes, hasMore, loading, feedKey(feed)]);
+    setCache(currentFeedKey, { notes, hasMore });
+  }, [notes, hasMore, loading, feed, currentFeedKey, setCache]);
 
   // キャッシュから復元した一覧がDOMへ反映された後に、一度だけスクロール位置を復元する。
   useEffect(() => {
@@ -225,7 +225,7 @@ export default function HomePage() {
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
 
-  function prepend(note: Note, animate = false) {
+  const prepend = useCallback((note: Note, animate = false) => {
     setNotes((prev) => (prev.some((n) => n.id === note.id) ? prev : [note, ...prev]));
     if (animate) {
       setEnteringIds((prev) => new Set(prev).add(note.id));
@@ -238,10 +238,10 @@ export default function HomePage() {
       }, 450);
       timers.current.push(t);
     }
-  }
+  }, [setNotes]);
 
   // リアルタイム更新（#37）: ストリームで届いたポストをアニメ付きで先頭挿入。
-  useEffect(() => registerNote((n) => prepend(n, true)), [registerNote]);
+  useEffect(() => registerNote((n) => prepend(n, true)), [prepend, registerNote]);
 
   function toggleComposerCollapsed() {
     setComposerCollapsed((prev) => {

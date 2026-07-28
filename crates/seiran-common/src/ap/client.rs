@@ -161,8 +161,11 @@ pub fn build_emoji_map(tags: &[serde_json::Value]) -> serde_json::Value {
 /// - Public がどちらにも無く `to` にフォロワーコレクション（`.../followers`）が含まれる: `followers_only`
 /// - それ以外（特定アクターのみ宛先）: `direct`
 pub fn classify_ap_visibility(to: &[String], cc: &[String]) -> &'static str {
-    const PUBLIC_URIS: [&str; 3] =
-        ["https://www.w3.org/ns/activitystreams#Public", "as:Public", "Public"];
+    const PUBLIC_URIS: [&str; 3] = [
+        "https://www.w3.org/ns/activitystreams#Public",
+        "as:Public",
+        "Public",
+    ];
     let has_public = |uris: &[String]| uris.iter().any(|u| PUBLIC_URIS.contains(&u.as_str()));
 
     if has_public(to) {
@@ -195,17 +198,15 @@ impl ApClient {
 
     /// リモートアクター情報を取得する
     pub async fn fetch_actor(&self, actor_uri: &str) -> Result<ApActor, ApError> {
-        let res = self.http
+        let res = self
+            .http
             .get(actor_uri)
             .header("Accept", "application/activity+json, application/ld+json")
             .send()
             .await?;
 
         if !res.status().is_success() {
-            return Err(ApError::FetchActor(format!(
-                "ステータス {}",
-                res.status()
-            )));
+            return Err(ApError::FetchActor(format!("ステータス {}", res.status())));
         }
 
         let actor = res.json::<ApActor>().await?;
@@ -271,18 +272,24 @@ impl ApClient {
         // 1. Signature ヘッダーの要素をパース
         // 例: keyId="...",algorithm="rsa-sha256",headers="...",signature="..."
         let parsed = parse_signature_header(signature_header)?;
-        let key_id = parsed.get("keyId")
+        let key_id = parsed
+            .get("keyId")
             .ok_or_else(|| ApError::Signature("keyId が見つかりません".to_string()))?;
-        let signature_b64 = parsed.get("signature")
+        let signature_b64 = parsed
+            .get("signature")
             .ok_or_else(|| ApError::Signature("signature が見つかりません".to_string()))?;
-        let header_list_str = parsed.get("headers").cloned().unwrap_or_else(|| "date".to_string());
+        let header_list_str = parsed
+            .get("headers")
+            .cloned()
+            .unwrap_or_else(|| "date".to_string());
 
         // 2. 署名対象文字列 (Signing String) を構築
         let signing_string = build_signing_string(method, path, headers, &header_list_str)?;
 
         // 3. 署名の base64 デコード（鍵の取得元によらず共通）
-        let signature_bytes = base64::Engine::decode(&base64::prelude::BASE64_STANDARD, signature_b64)
-            .map_err(|e| ApError::Signature(format!("署名base64デコード失敗: {}", e)))?;
+        let signature_bytes =
+            base64::Engine::decode(&base64::prelude::BASE64_STANDARD, signature_b64)
+                .map_err(|e| ApError::Signature(format!("署名base64デコード失敗: {}", e)))?;
 
         // 4. 公開鍵 PEM の取得（キャッシュ利用）と検証
         let pem = self.get_public_key_pem(key_id).await?;
@@ -301,7 +308,11 @@ impl ApClient {
     }
 
     /// 与えられた公開鍵 PEM で signing string の署名を検証する（純粋な検証処理部分）
-    fn verify_with_pem(pem: &str, signing_string: &str, signature_bytes: &[u8]) -> Result<(), ApError> {
+    fn verify_with_pem(
+        pem: &str,
+        signing_string: &str,
+        signature_bytes: &[u8],
+    ) -> Result<(), ApError> {
         let public_key = RsaPublicKey::from_public_key_pem(pem)
             .map_err(|e| ApError::Signature(format!("RSA公開鍵のパース失敗: {}", e)))?;
 
@@ -331,8 +342,8 @@ impl ApClient {
         let now = chrono::Utc::now();
         let date_str = now.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
-        let parsed_url = url::Url::parse(url)
-            .map_err(|e| ApError::Other(format!("URL パースエラー: {}", e)))?;
+        let parsed_url =
+            url::Url::parse(url).map_err(|e| ApError::Other(format!("URL パースエラー: {}", e)))?;
         let host = parsed_url.host_str().unwrap_or("").to_string();
         let path = parsed_url.path().to_string();
 
@@ -368,7 +379,8 @@ impl ApClient {
             actor_key_id, sig_b64
         );
 
-        let res = self.http
+        let res = self
+            .http
             .post(url)
             .header("Date", &date_str)
             .header("Host", &host)
@@ -382,7 +394,10 @@ impl ApClient {
         if !res.status().is_success() {
             let status = res.status();
             let body_text = res.text().await.unwrap_or_default();
-            return Err(ApError::Other(format!("POST レスポンスエラー {}: {}", status, body_text)));
+            return Err(ApError::Other(format!(
+                "POST レスポンスエラー {}: {}",
+                status, body_text
+            )));
         }
 
         Ok(())
@@ -443,7 +458,11 @@ fn build_signing_string(
     for header_name in header_list_str.split(' ') {
         let name_lower = header_name.to_lowercase();
         if name_lower == "(request-target)" {
-            lines.push(format!("(request-target): {} {}", method.to_lowercase(), path));
+            lines.push(format!(
+                "(request-target): {} {}",
+                method.to_lowercase(),
+                path
+            ));
         } else {
             let val = headers.get(&name_lower).ok_or_else(|| {
                 ApError::Signature(format!(
@@ -467,9 +486,15 @@ mod tests {
     fn parse_signature_header_extracts_key_fields() {
         let header = r#"keyId="https://example.com/users/alice#main-key",algorithm="rsa-sha256",headers="(request-target) host date",signature="abc123""#;
         let map = parse_signature_header(header).unwrap();
-        assert_eq!(map.get("keyId").map(|s| s.as_str()), Some("https://example.com/users/alice#main-key"));
+        assert_eq!(
+            map.get("keyId").map(|s| s.as_str()),
+            Some("https://example.com/users/alice#main-key")
+        );
         assert_eq!(map.get("algorithm").map(|s| s.as_str()), Some("rsa-sha256"));
-        assert_eq!(map.get("headers").map(|s| s.as_str()), Some("(request-target) host date"));
+        assert_eq!(
+            map.get("headers").map(|s| s.as_str()),
+            Some("(request-target) host date")
+        );
         assert_eq!(map.get("signature").map(|s| s.as_str()), Some("abc123"));
     }
 
@@ -477,7 +502,10 @@ mod tests {
     fn parse_signature_header_single_pair() {
         let header = r#"keyId="did:example:123#key-1""#;
         let map = parse_signature_header(header).unwrap();
-        assert_eq!(map.get("keyId").map(|s| s.as_str()), Some("did:example:123#key-1"));
+        assert_eq!(
+            map.get("keyId").map(|s| s.as_str()),
+            Some("did:example:123#key-1")
+        );
     }
 
     #[test]
@@ -499,21 +527,22 @@ mod tests {
     fn build_signing_string_multiple_headers() {
         let mut headers = HashMap::new();
         headers.insert("host".to_string(), "example.com".to_string());
-        headers.insert("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string());
-        let result = build_signing_string(
-            "POST",
-            "/inbox",
-            &headers,
-            "(request-target) host date",
-        ).unwrap();
-        let expected = "(request-target): post /inbox\nhost: example.com\ndate: Mon, 01 Jan 2024 00:00:00 GMT";
+        headers.insert(
+            "date".to_string(),
+            "Mon, 01 Jan 2024 00:00:00 GMT".to_string(),
+        );
+        let result =
+            build_signing_string("POST", "/inbox", &headers, "(request-target) host date").unwrap();
+        let expected =
+            "(request-target): post /inbox\nhost: example.com\ndate: Mon, 01 Jan 2024 00:00:00 GMT";
         assert_eq!(result, expected);
     }
 
     #[test]
     fn build_signing_string_method_is_lowercased() {
         let headers = HashMap::new();
-        let result = build_signing_string("GET", "/users/alice", &headers, "(request-target)").unwrap();
+        let result =
+            build_signing_string("GET", "/users/alice", &headers, "(request-target)").unwrap();
         assert!(result.starts_with("(request-target): get "));
     }
 
@@ -565,7 +594,10 @@ mod tests {
                 { "type": "Emoji", "name": ":blobcat:", "icon": { "url": "https://example.com/blobcat.png" } }
             ]
         })).unwrap();
-        assert_eq!(actor.emoji_map()[":blobcat:"], "https://example.com/blobcat.png");
+        assert_eq!(
+            actor.emoji_map()[":blobcat:"],
+            "https://example.com/blobcat.png"
+        );
     }
 
     // ─── classify_ap_visibility ────────────────────────────────────────────
@@ -605,24 +637,37 @@ mod tests {
         let client = ApClient::new(Arc::new(reqwest::Client::new()));
         {
             let mut cache = client.key_cache.write().await;
-            cache.insert("https://example.com/users/alice#main-key".to_string(), ("PEM-DATA".to_string(), Instant::now()));
+            cache.insert(
+                "https://example.com/users/alice#main-key".to_string(),
+                ("PEM-DATA".to_string(), Instant::now()),
+            );
         }
         // TTL内のキャッシュヒットのため、ネットワークアクセスなしで即座に返る。
-        let pem = client.get_public_key_pem("https://example.com/users/alice#main-key").await.unwrap();
+        let pem = client
+            .get_public_key_pem("https://example.com/users/alice#main-key")
+            .await
+            .unwrap();
         assert_eq!(pem, "PEM-DATA");
     }
 
     #[tokio::test]
     async fn get_public_key_pem_ignores_stale_cache_entry() {
         let client = ApClient::new(Arc::new(reqwest::Client::new()));
-        let stale_at = Instant::now().checked_sub(KEY_CACHE_TTL + Duration::from_secs(1)).unwrap();
+        let stale_at = Instant::now()
+            .checked_sub(KEY_CACHE_TTL + Duration::from_secs(1))
+            .unwrap();
         {
             let mut cache = client.key_cache.write().await;
-            cache.insert("https://example.com/users/alice#main-key".to_string(), ("OLD-PEM".to_string(), stale_at));
+            cache.insert(
+                "https://example.com/users/alice#main-key".to_string(),
+                ("OLD-PEM".to_string(), stale_at),
+            );
         }
         // TTL切れのためキャッシュを使わず再フェッチを試みる。到達不能ホストなのでエラーになるが、
         // 「古いPEMをそのまま返してしまう」ことがないのが検証したい点。
-        let result = client.get_public_key_pem("https://127.0.0.1.invalid/users/alice#main-key").await;
+        let result = client
+            .get_public_key_pem("https://127.0.0.1.invalid/users/alice#main-key")
+            .await;
         assert!(result.is_err());
     }
 }

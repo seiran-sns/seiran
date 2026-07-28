@@ -6,9 +6,16 @@ pub mod deliver;
 pub mod outbox;
 pub mod webfinger;
 
-pub use client::{ApClient, ApError, ApActor, PublicKeyInfo, build_emoji_map, classify_ap_visibility};
+pub use client::{
+    build_emoji_map, classify_ap_visibility, ApActor, ApClient, ApError, PublicKeyInfo,
+};
 pub use collection::fetch_ap_collection_uris;
-pub use deliver::{deliver_post_to_ap_followers, deliver_direct_message_to_ap, deliver_ap_announce, deliver_undo_announce, deliver_delete_note, deliver_delete_actor, deliver_update_actor, deliver_ap_reaction, deliver_ap_undo_reaction, deliver_ap_poll_vote, plain_to_html, plain_to_html_with_mentions};
+pub use deliver::{
+    deliver_ap_announce, deliver_ap_poll_vote, deliver_ap_reaction, deliver_ap_undo_reaction,
+    deliver_delete_actor, deliver_delete_note, deliver_direct_message_to_ap,
+    deliver_post_to_ap_followers, deliver_undo_announce, deliver_update_actor, plain_to_html,
+    plain_to_html_with_mentions,
+};
 pub use outbox::{fetch_ap_featured, fetch_ap_history, upsert_ap_note, ApNote};
 pub use webfinger::{WebFingerLink, WebFingerResponse};
 
@@ -48,7 +55,10 @@ mod tests {
     fn extract_local_username_rejects_sub_path() {
         // .../users/{username}/followers のような下位パスはユーザー名そのものではない。
         assert_eq!(
-            extract_local_username("https://seiran-beta.org/users/yuba/followers", "seiran-beta.org"),
+            extract_local_username(
+                "https://seiran-beta.org/users/yuba/followers",
+                "seiran-beta.org"
+            ),
             None
         );
     }

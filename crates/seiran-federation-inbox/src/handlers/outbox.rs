@@ -4,8 +4,8 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use serde::Deserialize;
 use seiran_common::ap::plain_to_html;
+use serde::Deserialize;
 use sqlx::Row;
 use std::sync::Arc;
 
@@ -67,7 +67,10 @@ pub async fn outbox_handler(
         });
         return (
             StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "application/activity+json")],
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "application/activity+json",
+            )],
             Json(body),
         )
             .into_response();
@@ -78,25 +81,29 @@ pub async fn outbox_handler(
     let max_id: Option<i64> = query.max_id.as_deref().and_then(|s| s.parse().ok());
 
     let rows = match max_id {
-        Some(mid) => sqlx::query(
-            "SELECT id, body, created_at FROM posts
+        Some(mid) => {
+            sqlx::query(
+                "SELECT id, body, created_at FROM posts
              WHERE actor_id = $1 AND deleted_at IS NULL AND id < $2
              ORDER BY id DESC LIMIT $3",
-        )
-        .bind(actor_id)
-        .bind(mid)
-        .bind(PAGE_SIZE)
-        .fetch_all(&state.db)
-        .await,
-        None => sqlx::query(
-            "SELECT id, body, created_at FROM posts
+            )
+            .bind(actor_id)
+            .bind(mid)
+            .bind(PAGE_SIZE)
+            .fetch_all(&state.db)
+            .await
+        }
+        None => {
+            sqlx::query(
+                "SELECT id, body, created_at FROM posts
              WHERE actor_id = $1 AND deleted_at IS NULL
              ORDER BY id DESC LIMIT $2",
-        )
-        .bind(actor_id)
-        .bind(PAGE_SIZE)
-        .fetch_all(&state.db)
-        .await,
+            )
+            .bind(actor_id)
+            .bind(PAGE_SIZE)
+            .fetch_all(&state.db)
+            .await
+        }
     };
 
     let rows = match rows {
@@ -109,7 +116,8 @@ pub async fn outbox_handler(
 
     // 取得した post_id のリストで添付ファイルをまとめて取得
     let post_ids: Vec<i64> = rows.iter().filter_map(|r| r.try_get("id").ok()).collect();
-    let mut att_map: std::collections::HashMap<i64, Vec<serde_json::Value>> = std::collections::HashMap::new();
+    let mut att_map: std::collections::HashMap<i64, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
     if !post_ids.is_empty() {
         let att_rows = sqlx::query(
             "SELECT pa.post_id, mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
@@ -125,12 +133,30 @@ pub async fn outbox_handler(
         .unwrap_or_default();
 
         for r in &att_rows {
-            let pid: i64 = match r.try_get("post_id") { Ok(v) => v, Err(_) => continue };
-            let storage_key: String = match r.try_get("storage_key") { Ok(v) => v, Err(_) => continue };
-            let mime_type: String = match r.try_get("mime_type") { Ok(v) => v, Err(_) => continue };
-            let width: i32 = match r.try_get("width") { Ok(v) => v, Err(_) => continue };
-            let height: i32 = match r.try_get("height") { Ok(v) => v, Err(_) => continue };
-            let public_url: String = match r.try_get("public_url") { Ok(v) => v, Err(_) => continue };
+            let pid: i64 = match r.try_get("post_id") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let storage_key: String = match r.try_get("storage_key") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let mime_type: String = match r.try_get("mime_type") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let width: i32 = match r.try_get("width") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let height: i32 = match r.try_get("height") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let public_url: String = match r.try_get("public_url") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
             let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
             att_map.entry(pid).or_default().push(serde_json::json!({
                 "type": "Document",
@@ -202,15 +228,16 @@ pub async fn outbox_handler(
     // 次ページリンク（取得件数が上限に達した場合）
     if rows.len() as i64 == PAGE_SIZE {
         if let Some(oid) = oldest_id {
-            page["next"] = serde_json::json!(
-                format!("{}?page=true&max_id={}", outbox_uri, oid)
-            );
+            page["next"] = serde_json::json!(format!("{}?page=true&max_id={}", outbox_uri, oid));
         }
     }
 
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/activity+json")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/activity+json",
+        )],
         Json(page),
     )
         .into_response()

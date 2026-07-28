@@ -20,8 +20,13 @@ use crate::handlers::notes::ReactRequest;
 use crate::middleware::{extract_auth, AuthedUser};
 use crate::AppState;
 
-use super::convert::{build_me_detailed, build_note, build_notes, build_notifications, build_user_detailed, user_lite};
-use super::types::{MisskeyFollowRelation, MisskeyMeDetailed, MisskeyNote, MisskeyNoteReaction, MisskeyNotification, MisskeyUserDetailed};
+use super::convert::{
+    build_me_detailed, build_note, build_notes, build_notifications, build_user_detailed, user_lite,
+};
+use super::types::{
+    MisskeyFollowRelation, MisskeyMeDetailed, MisskeyNote, MisskeyNoteReaction,
+    MisskeyNotification, MisskeyUserDetailed,
+};
 
 // ─── リクエストDTO（Misskey 本家の camelCase フィールド名に合わせる） ──────────
 
@@ -113,8 +118,16 @@ pub struct NotificationsBody {
 
 /// ログイン済みなら actor_id を返し、未ログインなら `None`（読み取り系は匿名許可のため）。
 async fn optional_actor_id(headers: &HeaderMap, state: &AppState) -> Option<i64> {
-    let auth_user = extract_auth(headers, &state.local_auth, state.app_tokens.as_ref()).await.ok()?;
-    state.actors.find_local_by_user_id(auth_user.user_id).await.ok().flatten().map(|a| a.id)
+    let auth_user = extract_auth(headers, &state.local_auth, state.app_tokens.as_ref())
+        .await
+        .ok()?;
+    state
+        .actors
+        .find_local_by_user_id(auth_user.user_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|a| a.id)
 }
 
 /// Misskey の `userId`（=seiran の actors.id）から、既存の follows.rs が期待する
@@ -152,7 +165,10 @@ fn as_no_content(resp: Response) -> Response {
 // ─── 自分自身・ユーザー ─────────────────────────────────────────────────
 
 /// POST /api/i
-pub async fn api_i(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<MisskeyMeDetailed>, ApiError> {
+pub async fn api_i(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<MisskeyMeDetailed>, ApiError> {
     let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
     let actor = state
         .actors
@@ -169,13 +185,20 @@ pub async fn users_show(
     Json(body): Json<UserShowBody>,
 ) -> Result<Json<MisskeyUserDetailed>, ApiError> {
     let actor = if let Some(uid) = body.user_id {
-        let id: i64 = uid.parse().map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+        let id: i64 = uid
+            .parse()
+            .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
         state.actors.find_by_id(id).await
     } else if let Some(username) = body.username {
         let domain = body.host.unwrap_or_else(|| state.local_domain.clone());
-        state.actors.find_by_username_domain(&username, &domain).await
+        state
+            .actors
+            .find_by_username_domain(&username, &domain)
+            .await
     } else {
-        return Err(ApiError::BadRequest("USER_ID_OR_USERNAME_REQUIRED".to_owned()));
+        return Err(ApiError::BadRequest(
+            "USER_ID_OR_USERNAME_REQUIRED".to_owned(),
+        ));
     }
     .map_err(|e| ApiError::Internal(e.to_string()))?
     .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
@@ -193,7 +216,10 @@ pub async fn users_notes(
     Json(body): Json<UsersNotesBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
     let my_actor_id = optional_actor_id(&headers, &state).await;
-    let actor_id: i64 = body.user_id.parse().map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+    let actor_id: i64 = body
+        .user_id
+        .parse()
+        .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
     let limit = body.limit.unwrap_or(10).clamp(1, 100);
     let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
@@ -215,7 +241,10 @@ pub async fn notes_show(
     Json(body): Json<NoteIdBody>,
 ) -> Result<Json<MisskeyNote>, ApiError> {
     let my_actor_id = optional_actor_id(&headers, &state).await;
-    let post_id: i64 = body.note_id.parse().map_err(|_| ApiError::NotFound("NOTE_NOT_FOUND"))?;
+    let post_id: i64 = body
+        .note_id
+        .parse()
+        .map_err(|_| ApiError::NotFound("NOTE_NOT_FOUND"))?;
     let post = state
         .posts
         .find_by_id_for_viewer(post_id, my_actor_id)
@@ -333,7 +362,9 @@ pub async fn reactions_create(
         Path(body.note_id),
         user,
         State(state),
-        Json(ReactRequest { content: body.reaction }),
+        Json(ReactRequest {
+            content: body.reaction,
+        }),
     )
     .await
     .into_response();
@@ -344,7 +375,11 @@ pub async fn reactions_create(
 /// Misskey は `noteId` のみを受け取る（1投稿1ユーザー1リアクションが前提のため対象の絵文字を
 /// 指定する必要がない）。既存の `delete_reaction` は絵文字をパスパラメータに取るため、
 /// ここで現在のリアクション内容を引いてから委譲する。
-pub async fn reactions_delete(headers: HeaderMap, State(state): State<AppState>, Json(body): Json<NoteIdBody>) -> Response {
+pub async fn reactions_delete(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<NoteIdBody>,
+) -> Response {
     let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
         Ok(u) => u,
         Err(e) => return e,
@@ -355,25 +390,31 @@ pub async fn reactions_delete(headers: HeaderMap, State(state): State<AppState>,
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
-    let content: Option<String> = sqlx::query_scalar("SELECT content FROM reactions WHERE post_id = $1 AND actor_id = $2")
-        .bind(note_id)
-        .bind(actor_id)
-        .fetch_optional(&state.db)
-        .await
-        .unwrap_or(None);
+    let content: Option<String> =
+        sqlx::query_scalar("SELECT content FROM reactions WHERE post_id = $1 AND actor_id = $2")
+            .bind(note_id)
+            .bind(actor_id)
+            .fetch_optional(&state.db)
+            .await
+            .unwrap_or(None);
     let content = match content {
         Some(c) => c,
         None => return ApiError::NotFound("NOT_REACTED").into_response(),
     };
 
-    let resp = crate::handlers::notes::delete_reaction(Path((body.note_id, content)), user, State(state))
-        .await
-        .into_response();
+    let resp =
+        crate::handlers::notes::delete_reaction(Path((body.note_id, content)), user, State(state))
+            .await
+            .into_response();
     as_no_content(resp)
 }
 
 /// POST /api/notes/unrenote
-pub async fn notes_unrenote(headers: HeaderMap, State(state): State<AppState>, Json(body): Json<NoteIdBody>) -> impl IntoResponse {
+pub async fn notes_unrenote(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<NoteIdBody>,
+) -> impl IntoResponse {
     let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
         Ok(u) => u,
         Err(e) => return as_no_content(e),
@@ -439,7 +480,11 @@ pub async fn i_notifications(
 // ─── フォロー ────────────────────────────────────────────────────────
 
 /// POST /api/following/create
-pub async fn following_create(headers: HeaderMap, State(state): State<AppState>, Json(body): Json<FollowingBody>) -> Response {
+pub async fn following_create(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<FollowingBody>,
+) -> Response {
     // ターゲット解決（DB問い合わせ）より先に認証を確認する。未認証のまま先に解決すると
     // 「このIDのユーザーは存在するか」を匿名で探索できてしまう（列挙攻撃対策）。
     let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
@@ -454,14 +499,22 @@ pub async fn following_create(headers: HeaderMap, State(state): State<AppState>,
         Ok(t) => t,
         Err(e) => return e.into_response(),
     };
-    let resp = crate::handlers::follows::create_follow(user, State(state), Json(CreateFollowRequest { target }))
-        .await
-        .into_response();
+    let resp = crate::handlers::follows::create_follow(
+        user,
+        State(state),
+        Json(CreateFollowRequest { target }),
+    )
+    .await
+    .into_response();
     as_no_content(resp)
 }
 
 /// POST /api/following/delete
-pub async fn following_delete(headers: HeaderMap, State(state): State<AppState>, Json(body): Json<FollowingBody>) -> Response {
+pub async fn following_delete(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<FollowingBody>,
+) -> Response {
     let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
         Ok(u) => u,
         Err(e) => return e,
@@ -474,9 +527,13 @@ pub async fn following_delete(headers: HeaderMap, State(state): State<AppState>,
         Ok(t) => t,
         Err(e) => return e.into_response(),
     };
-    let resp = crate::handlers::follows::delete_follow(user, State(state), Json(DeleteFollowRequest { target }))
-        .await
-        .into_response();
+    let resp = crate::handlers::follows::delete_follow(
+        user,
+        State(state),
+        Json(DeleteFollowRequest { target }),
+    )
+    .await
+    .into_response();
     as_no_content(resp)
 }
 
@@ -489,7 +546,10 @@ pub async fn users_following(
     Json(body): Json<UserRelationBody>,
 ) -> Result<Json<Vec<MisskeyFollowRelation>>, ApiError> {
     let my_actor_id = optional_actor_id(&headers, &state).await;
-    let actor_id: i64 = body.user_id.parse().map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+    let actor_id: i64 = body
+        .user_id
+        .parse()
+        .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
     let limit = body.limit.unwrap_or(10).clamp(1, 100);
     let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
@@ -528,7 +588,10 @@ pub async fn users_followers(
     Json(body): Json<UserRelationBody>,
 ) -> Result<Json<Vec<MisskeyFollowRelation>>, ApiError> {
     let my_actor_id = optional_actor_id(&headers, &state).await;
-    let actor_id: i64 = body.user_id.parse().map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+    let actor_id: i64 = body
+        .user_id
+        .parse()
+        .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
     let limit = body.limit.unwrap_or(10).clamp(1, 100);
     let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
@@ -570,7 +633,10 @@ pub async fn notes_reactions(
     Json(body): Json<NotesReactionsBody>,
 ) -> Result<Json<Vec<MisskeyNoteReaction>>, ApiError> {
     let my_actor_id = optional_actor_id(&headers, &state).await;
-    let note_id: i64 = body.note_id.parse().map_err(|_| ApiError::NotFound("NOTE_NOT_FOUND"))?;
+    let note_id: i64 = body
+        .note_id
+        .parse()
+        .map_err(|_| ApiError::NotFound("NOTE_NOT_FOUND"))?;
 
     state
         .posts
@@ -596,7 +662,14 @@ pub async fn notes_reactions(
             .map(|a| MisskeyNoteReaction {
                 id: a.reaction_id.to_string(),
                 created_at: a.reaction_created_at.to_rfc3339(),
-                user: user_lite(a.id, &a.username, &a.domain, &state.local_domain, a.display_name.as_deref(), a.avatar_url.as_deref()),
+                user: user_lite(
+                    a.id,
+                    &a.username,
+                    &a.domain,
+                    &state.local_domain,
+                    a.display_name.as_deref(),
+                    a.avatar_url.as_deref(),
+                ),
                 kind: reaction_type.clone(),
             })
             .collect(),

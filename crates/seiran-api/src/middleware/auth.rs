@@ -1,6 +1,6 @@
 use axum::http::HeaderMap;
-use seiran_common::{LocalAuthProvider};
 use seiran_common::repository::{AppTokenRepository, UserRepository};
+use seiran_common::LocalAuthProvider;
 
 use crate::error::ApiError;
 
@@ -35,7 +35,10 @@ pub async fn extract_auth(
         return Err(ApiError::Unauthorized("トークンが無効化されています"));
     }
 
-    Ok(AuthUser { user_id: verified.user_id, email: verified.email })
+    Ok(AuthUser {
+        user_id: verified.user_id,
+        email: verified.email,
+    })
 }
 
 /// JWT 検証 + role = 'admin' チェック。

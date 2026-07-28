@@ -38,7 +38,12 @@ pub async fn register_plc_did(
         let genesis = match prepare_plc_genesis(username, &state.local_domain, rotation_key) {
             Ok(g) => g,
             Err(e) => {
-                tracing::error!("[{}] genesis 準備失敗 (試行 {}/3): {}", log_prefix, attempt, e);
+                tracing::error!(
+                    "[{}] genesis 準備失敗 (試行 {}/3): {}",
+                    log_prefix,
+                    attempt,
+                    e
+                );
                 if attempt >= 3 {
                     return Err(ApiError::Internal("did:plc genesis 準備エラー".to_string()));
                 }
@@ -49,14 +54,26 @@ pub async fn register_plc_did(
 
         // 2. Cloudflare TXT セット（plc.directory 送信より先に配置）
         let new_cf_id = if let Some(cf) = &state.cloudflare {
-            let handle = format!("{}.{}", seiran_common::username::to_atp_username(username), state.local_domain);
+            let handle = format!(
+                "{}.{}",
+                seiran_common::username::to_atp_username(username),
+                state.local_domain
+            );
             match cf.set_atproto_txt(&handle, &genesis.did).await {
                 Ok(id) => {
-                    tracing::info!("[{}] Cloudflare TXT セット完了: _atproto.{}", log_prefix, handle);
+                    tracing::info!(
+                        "[{}] Cloudflare TXT セット完了: _atproto.{}",
+                        log_prefix,
+                        handle
+                    );
                     Some(id)
                 }
                 Err(e) => {
-                    tracing::error!("[{}] Cloudflare TXT セット失敗（登録は継続）: {}", log_prefix, e);
+                    tracing::error!(
+                        "[{}] Cloudflare TXT セット失敗（登録は継続）: {}",
+                        log_prefix,
+                        e
+                    );
                     None
                 }
             }
@@ -68,7 +85,12 @@ pub async fn register_plc_did(
         match submit_plc_genesis(&genesis, &state.http_client).await {
             Ok(()) => return Ok((genesis.did, genesis.signing_key_pem, new_cf_id)),
             Err(e) => {
-                tracing::error!("[{}] did:plc 送信失敗 (試行 {}/3): {}", log_prefix, attempt, e);
+                tracing::error!(
+                    "[{}] did:plc 送信失敗 (試行 {}/3): {}",
+                    log_prefix,
+                    attempt,
+                    e
+                );
                 prev_cf_id = new_cf_id;
                 if attempt >= 3 {
                     if let (Some(cf), Some(id)) = (state.cloudflare.clone(), prev_cf_id) {
@@ -79,7 +101,9 @@ pub async fn register_plc_did(
                         });
                     }
                     tracing::error!("[{}] did:plc 登録失敗（3回）: {}", log_prefix, e);
-                    return Err(ApiError::Internal("did:plc 登録エラー（3回失敗）".to_string()));
+                    return Err(ApiError::Internal(
+                        "did:plc 登録エラー（3回失敗）".to_string(),
+                    ));
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }

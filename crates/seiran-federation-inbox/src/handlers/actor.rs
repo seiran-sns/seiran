@@ -112,13 +112,22 @@ pub async fn actor_handler(
                 .unwrap_or_else(|| username.clone());
             let bio = r.try_get::<Option<String>, _>("bio").ok().flatten();
             let avatar_url = r.try_get::<Option<String>, _>("avatar_url").ok().flatten();
-            let avatar_mime_type = r.try_get::<Option<String>, _>("avatar_mime_type").ok().flatten();
+            let avatar_mime_type = r
+                .try_get::<Option<String>, _>("avatar_mime_type")
+                .ok()
+                .flatten();
             let profile_fields = r
                 .try_get::<serde_json::Value, _>("profile_fields")
                 .ok()
                 .and_then(|v| v.as_array().cloned())
                 .unwrap_or_default();
-            (display_name, bio, avatar_url, avatar_mime_type, profile_fields)
+            (
+                display_name,
+                bio,
+                avatar_url,
+                avatar_mime_type,
+                profile_fields,
+            )
         }
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
         Err(e) => {

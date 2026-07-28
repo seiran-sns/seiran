@@ -687,10 +687,7 @@ mod tests {
         }
     }
 
-    fn delivery_meta(
-        ap_object_id: Option<&str>,
-        at_uri: Option<&str>,
-    ) -> PostDeliveryMeta {
+    fn delivery_meta(ap_object_id: Option<&str>, at_uri: Option<&str>) -> PostDeliveryMeta {
         PostDeliveryMeta {
             actor_id: 1,
             ap_object_id: ap_object_id.map(str::to_owned),
@@ -878,18 +875,13 @@ mod tests {
 
         assert_eq!(
             ap_quote_from_meta(&meta),
-            Some(ApQuote::Misskey(
-                "https://fedi.example/notes/1".to_owned()
-            ))
+            Some(ApQuote::Misskey("https://fedi.example/notes/1".to_owned()))
         );
     }
 
     #[test]
     fn ap_quote_from_meta_appends_bsky_only_url() {
-        let meta = delivery_meta(
-            None,
-            Some("at://did:plc:test/app.bsky.feed.post/abc"),
-        );
+        let meta = delivery_meta(None, Some("at://did:plc:test/app.bsky.feed.post/abc"));
 
         assert_eq!(
             ap_quote_from_meta(&meta),
