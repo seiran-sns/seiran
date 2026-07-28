@@ -5,7 +5,7 @@
 }
 
 .card:hover {
-  background: rgba(0, 0, 0, 0.025);
+  background: var(--bg-elev);
 }
 
 /* 主役ポスト（ポスト詳細画面）用の大型表示（#43） */
@@ -392,7 +392,7 @@
 }
 
 .status_pending {
-  color: #b45309;
+  color: var(--warn);
 }
 
 .followSwitch {

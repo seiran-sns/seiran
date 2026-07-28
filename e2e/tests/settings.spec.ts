@@ -192,7 +192,7 @@ test("設定メニューから表示設定画面へ遷移でき、言語を切�
   await page.getByRole("button", { name: "表示" }).click();
   await expect(page).toHaveURL(/\/settings\/appearance$/);
 
-  await page.getByRole("radio", { name: "English" }).check();
+  await page.getByRole("combobox").selectOption({ label: "English" });
   await expect(page.getByText("Language preference saved.")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "Appearance settings" }).or(page.getByText("Appearance settings"))).toBeVisible();
 
@@ -202,7 +202,7 @@ test("設定メニューから表示設定画面へ遷移でき、言語を切�
   expect(meRes.ok()).toBeTruthy();
   expect((await meRes.json()).language_preference).toBe("en");
 
-  await page.getByRole("radio", { name: "自動", exact: false }).or(page.getByRole("radio", { name: "Automatic" })).check();
+  await page.getByRole("combobox").selectOption({ label: "Automatic" });
   await expect(page.getByText("言語設定を保存しました。").or(page.getByText("Language preference saved."))).toBeVisible({
     timeout: 15_000,
   });
@@ -211,4 +211,31 @@ test("設定メニューから表示設定画面へ遷移でき、言語を切�
     headers: { Authorization: `Bearer ${user.token}` },
   });
   expect((await meRes2.json()).language_preference).toBeNull();
+});
+
+test("表示設定画面でテーマを切り替えるとhtmlのdata-theme属性が変わりlocalStorageに保存される（#127）", async ({
+  page,
+  request,
+}) => {
+  const user = await registerUserViaApi(request, "e2etheme");
+  await seedAuth(page, user.token);
+
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "表示" }).click();
+  await expect(page).toHaveURL(/\/settings\/appearance$/);
+
+  await page.getByRole("button", { name: "常にダーク" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect(await page.evaluate(() => localStorage.getItem("seiran_theme"))).toBe("dark");
+
+  await page.getByRole("button", { name: "常にライト" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  expect(await page.evaluate(() => localStorage.getItem("seiran_theme"))).toBe("light");
+
+  // リロード後も選択したテーマがちらつきなく維持される
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.getByRole("button", { name: "環境に従う" }).click();
+  expect(await page.evaluate(() => localStorage.getItem("seiran_theme"))).toBe("system");
 });

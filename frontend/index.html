@@ -6,6 +6,21 @@
     <!-- サイトアイコン（#42）。backend が site_icon_url へリダイレクトする。 -->
     <link rel="icon" href="/favicon.ico" />
     <title>seiran</title>
+    <!-- ダークモード（#127）。React マウント前に data-theme を確定させ、初期表示のちらつきを防ぐ。 -->
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem("seiran_theme");
+          var theme =
+            pref === "light" || pref === "dark"
+              ? pref
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
