@@ -825,7 +825,27 @@ pub async fn get_note_ap(
         &post.body, &state.local_domain, &state.db, state.ap_client.http.as_ref(),
     ).await;
     let content_html = plain_to_html_with_mentions(&converted_body, &mentions);
-    let tag = seiran_common::mention::ap_inline_mentions_to_tag_json(&mentions);
+    let mut tag = seiran_common::mention::ap_inline_mentions_to_tag_json(&mentions);
+    // 配送された Create(Note) を受信側が canonical URL から再取得しても
+    // カスタム絵文字情報を失わないよう、配送JSONと同じ Emoji tag を返す。
+    // Misskey系は受信時に object.id を再取得することがあるため、ここに tag が
+    // 無いと Create 側に含めても shortcode のまま保存される（#126）。
+    if let Some(emoji_map) = post.post_emoji_map.as_ref().and_then(serde_json::Value::as_object) {
+        for shortcode in extract_shortcode_candidates(&post.body) {
+            let name = format!(":{}:", shortcode);
+            let Some(url) = emoji_map.get(&name).and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            tag.push(serde_json::json!({
+                "type": "Emoji",
+                "name": name,
+                "icon": {
+                    "type": "Image",
+                    "url": url
+                }
+            }));
+        }
+    }
 
     let attachment_rows = sqlx::query(
         "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url

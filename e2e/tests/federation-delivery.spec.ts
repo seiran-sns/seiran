@@ -114,6 +114,19 @@ test.describe("Fedi配送", () => {
         .find((a) => a.type === "Create" && (a.object as any)?.content?.includes(text)) as any;
       const emojiTag = activity.object.tag.find((tag: any) => tag.type === "Emoji" && tag.name === `:${shortcode}:`);
       expect(emojiTag?.icon?.url).toContain(`${s3.url}/e2e-test/`);
+
+      // Misskey系などが Create の object.id を再取得する経路でも Emoji tag が
+      // 消えないことを確認する。配送JSONだけの検査では実機の不具合を検出できない。
+      const canonicalPath = new URL(activity.object.id).pathname;
+      const canonicalRes = await request.get(`${SEIRAN_BASE_URL}${canonicalPath}`, {
+        headers: { Accept: "application/activity+json" },
+      });
+      expect(canonicalRes.ok(), await canonicalRes.text()).toBeTruthy();
+      const canonicalNote = await canonicalRes.json();
+      const canonicalEmojiTag = canonicalNote.tag.find(
+        (tag: any) => tag.type === "Emoji" && tag.name === `:${shortcode}:`,
+      );
+      expect(canonicalEmojiTag?.icon?.url).toBe(emojiTag.icon.url);
     } finally {
       if (providerId && adminToken) {
         await request.patch(`/api/admin/storage-providers/${providerId}`, {
