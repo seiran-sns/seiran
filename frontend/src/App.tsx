@@ -8,6 +8,7 @@ import { HomeFeedProvider } from "./contexts/HomeFeedContext";
 import { ComposerProvider } from "./contexts/ComposerContext";
 import { SiteMetaProvider } from "./contexts/SiteMetaContext";
 import { StreamingProvider } from "./contexts/StreamingContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import HomePage from "./pages/HomePage";
 
@@ -271,20 +272,22 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <SiteMetaProvider>
-      <ToastProvider>
-        <AuthProvider>
-          <StreamingProvider>
-            <RightPaneProvider>
-              <HomeFeedProvider>
-                <ComposerProvider>
-                  <AppRoutes />
-                </ComposerProvider>
-              </HomeFeedProvider>
-            </RightPaneProvider>
-          </StreamingProvider>
-        </AuthProvider>
-      </ToastProvider>
-    </SiteMetaProvider>
+    <ThemeProvider>
+      <SiteMetaProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <StreamingProvider>
+              <RightPaneProvider>
+                <HomeFeedProvider>
+                  <ComposerProvider>
+                    <AppRoutes />
+                  </ComposerProvider>
+                </HomeFeedProvider>
+              </RightPaneProvider>
+            </StreamingProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </SiteMetaProvider>
+    </ThemeProvider>
   );
 }

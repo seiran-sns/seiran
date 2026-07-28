@@ -248,7 +248,7 @@ a.idValue:hover {
 }
 
 .rightPost:hover {
-  background: rgba(0, 0, 0, 0.025);
+  background: var(--bg-elev);
 }
 
 .rightPostBody {

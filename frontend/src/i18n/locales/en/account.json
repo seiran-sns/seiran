@@ -11,8 +11,11 @@
   },
   "appearanceSettings": {
     "title": "Appearance settings",
+    "themeTitle": "Theme",
+    "themeSystem": "Follow system",
+    "themeLight": "Always light",
+    "themeDark": "Always dark",
     "languageTitle": "Language",
-    "languageHint": "Choose the app's display language. \"Automatic\" follows your browser's language setting.",
     "languageAuto": "Automatic",
     "languageJa": "日本語",
     "languageEn": "English",

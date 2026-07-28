@@ -11,8 +11,11 @@
   },
   "appearanceSettings": {
     "title": "表示設定",
+    "themeTitle": "テーマ",
+    "themeSystem": "環境に従う",
+    "themeLight": "常にライト",
+    "themeDark": "常にダーク",
     "languageTitle": "言語",
-    "languageHint": "アプリの表示言語を選択します。「自動」を選ぶとブラウザの言語設定に従います。",
     "languageAuto": "自動",
     "languageJa": "日本語",
     "languageEn": "English",

@@ -29,8 +29,8 @@
 }
 
 .chipInvalid {
-  background: rgba(220, 38, 38, 0.15);
-  color: #dc2626;
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
 }
 
 .chipAvatar {
@@ -150,8 +150,8 @@
 .warningBubble {
   margin-top: 4px;
   padding: 6px 10px;
-  background: rgba(220, 38, 38, 0.12);
-  color: #dc2626;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
   border-radius: 8px;
   font-size: 0.8rem;
 }

@@ -69,7 +69,7 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #dc2626;
+  background: var(--danger);
   flex-shrink: 0;
 }
 
@@ -164,7 +164,7 @@
 }
 
 .error {
-  color: #dc2626;
+  color: var(--danger);
   font-size: 0.82rem;
   margin: 0;
 }
