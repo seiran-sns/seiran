@@ -427,7 +427,7 @@ async fn create_regular_post(
     }
 
     // 引用元情報の取得（Bsky embed / AP quoteUrl を決定する）
-    let (bsky_quote_embed, ap_quote_url) = match quote_of_id_i64 {
+    let (bsky_quote_embed, ap_quote) = match quote_of_id_i64 {
         Some(quote_id) => resolve_quote_embed(state, actor_id, quote_id).await,
         None => (None, None),
     };
@@ -529,7 +529,7 @@ async fn create_regular_post(
         visibility: visibility.to_string(),
         bsky_reply: reply_ctx.bsky_reply,
         bsky_quote_embed,
-        ap_quote_url,
+        ap_quote,
         ap_in_reply_to: reply_ctx.ap_in_reply_to,
         attachment_ids: attachment_ids_i64.clone(),
     }).await;
