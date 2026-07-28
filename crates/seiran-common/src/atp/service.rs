@@ -965,7 +965,8 @@ impl AtpCommitService {
     }
 
     /// `app.bsky.feed.post` レコードを削除する。
-    /// Fedi リモートポストのリポスト時に作るフォールバックテキスト投稿（`commit_post` が
+    /// Fedi リモートポストのリポスト時に作るフォールバック投稿（`commit_quote` が
+    /// 本文「🔁」と元ポストURLのexternal embedをコミットし、
     /// `posts.at_rkey` に自己保存したもの）を、リポスト取り消し時に retract するために使う。
     pub async fn delete_atp_post(
         &self,
