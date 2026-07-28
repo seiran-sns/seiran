@@ -344,7 +344,11 @@ pub async fn resolve_reply_context(state: &AppState, reply_to_id_str: &str, view
 }
 
 /// 引用元ポストの種別から Bsky embed（引用埋め込み）と AP quoteUrl を組み立てる。
-pub async fn resolve_quote_embed(state: &AppState, quote_of_id: i64) -> (Option<BskyEmbed>, Option<String>) {
+pub async fn resolve_quote_embed(
+    state: &AppState,
+    actor_id: i64,
+    quote_of_id: i64,
+) -> (Option<BskyEmbed>, Option<String>) {
     let meta = match state.posts.find_delivery_meta(quote_of_id).await {
         Ok(Some(m)) => m,
         _ => return (None, None),
@@ -355,9 +359,24 @@ pub async fn resolve_quote_embed(state: &AppState, quote_of_id: i64) -> (Option<
     );
 
     let bsky_embed = if origin == PostOrigin::FediRemote {
-        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External {
-            url: u.to_string(), title: String::new(), description: String::new(), thumb: None,
-        })
+        if let Some(url) = meta.ap_object_id.as_deref() {
+            let title = format!(
+                "{} (@{}@{})",
+                meta.display_name.as_deref().unwrap_or(&meta.username),
+                meta.username,
+                meta.domain
+            );
+            let thumb_url = meta.first_image_url.as_deref().or(meta.avatar_url.as_deref());
+            let thumb = prepare_external_thumb(state, actor_id, thumb_url).await;
+            Some(BskyEmbed::External {
+                url: url.to_string(),
+                title,
+                description: meta.body.clone(),
+                thumb,
+            })
+        } else {
+            None
+        }
     } else if let (Some(uri), Some(cid)) = (&meta.at_uri, &meta.at_cid) {
         Some(BskyEmbed::Record { uri: uri.clone(), cid: cid.clone() })
     } else {

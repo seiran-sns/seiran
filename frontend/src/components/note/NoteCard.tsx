@@ -91,7 +91,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
   const { t } = useTranslation();
   const { user: currentUser } = useAuth();
   const { showError } = useToast();
-  const { openReply } = useComposer();
+  const { openReply, openQuote } = useComposer();
   const badge = protocolBadge(note.user.actorType);
   const delBadges = deliveryBadges(note);
   const visBadge = visibilityBadge(note);
@@ -206,6 +206,11 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
   function handleReply(e?: React.MouseEvent) {
     e?.stopPropagation();
     openReply(note);
+  }
+
+  function handleQuote(e?: React.MouseEvent) {
+    e?.stopPropagation();
+    openQuote(note);
   }
 
   return (
@@ -358,6 +363,7 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
         reactionPending={reactionPending}
         onToggleReaction={toggleReaction}
         onReply={handleReply}
+        onQuote={handleQuote}
         reposted={reposted}
         reposting={reposting}
         unreposting={unreposting}

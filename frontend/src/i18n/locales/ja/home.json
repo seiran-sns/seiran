@@ -32,6 +32,7 @@
   "noteCard": {
     "privateRepostError": "非公開の投稿はリポストできません。",
     "replyButton": "返信",
+    "quoteButton": "引用",
     "repostTitle": "リポスト",
     "unrepostTitle": "リポスト解除",
     "repostDisabledTitle": "非公開の投稿はリポストできません",
@@ -67,10 +68,13 @@
     "emptyDefault": "投稿がありません。"
   },
   "postComposer": {
+    "replyModalTitle": "返信",
+    "quoteModalTitle": "引用ポスト",
     "bskyPrivateConflict": "Bsky配送がオンの間はプライベートを選べません。Bsky配送をオフにすると変更できます。",
     "bskyVisibilityConflict": "Bsky配送は「プライベート」以外の投稿で対応しています。可視性を変更すると配送できます。",
     "placeholder": "いまどうしてる？",
     "replyPlaceholder": "返信を入力",
+    "quotePlaceholder": "コメントを入力",
     "attachTitle": "画像・動画・音声を添付",
     "replyToFedi": "Fediverse に返信",
     "replyToBsky": "Bluesky に返信",
@@ -86,7 +90,8 @@
     "remainingCount": "残り {{count}}",
     "posting": "投稿中...",
     "postButton": "投稿",
-    "replyToPrefix": "返信先:"
+    "replyToPrefix": "返信先:",
+    "quoteToPrefix": "引用元:"
   },
   "reactionChips": {
     "clickToRemove": "クリックで取り消す",
