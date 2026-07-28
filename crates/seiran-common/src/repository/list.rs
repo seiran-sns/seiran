@@ -77,7 +77,12 @@ pub trait ListRepository: Send + Sync {
     async fn count_by_owner(&self, owner_actor_id: i64) -> Result<i64, sqlx::Error>;
 
     /// メンバーを追加する（既に追加済みなら何もしない）。
-    async fn add_member(&self, list_id: i64, actor_id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
+    async fn add_member(
+        &self,
+        list_id: i64,
+        actor_id: i64,
+        now: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error>;
 
     /// メンバーを削除する。削除できたら `true`。
     async fn remove_member(&self, list_id: i64, actor_id: i64) -> Result<bool, sqlx::Error>;
@@ -130,11 +135,15 @@ pub trait ListRepository: Send + Sync {
     ) -> Result<Option<String>, sqlx::Error>;
 
     /// メンバーの listitem rkey/uri をクリアする（非公開化・メンバー削除・リスト削除時）。
-    async fn clear_member_atp_record(&self, list_id: i64, actor_id: i64) -> Result<(), sqlx::Error>;
+    async fn clear_member_atp_record(&self, list_id: i64, actor_id: i64)
+        -> Result<(), sqlx::Error>;
 
     /// `at_rkey` が設定済みの（＝ATPにlistitemコミット済みの）メンバーの `(actor_id, at_rkey)` 一覧。
     /// リストの非公開化・削除時に、削除すべきlistitemを列挙するために使う。
-    async fn members_with_atp_record(&self, list_id: i64) -> Result<Vec<(i64, String)>, sqlx::Error>;
+    async fn members_with_atp_record(
+        &self,
+        list_id: i64,
+    ) -> Result<Vec<(i64, String)>, sqlx::Error>;
 }
 
 pub struct PgListRepository {
@@ -243,7 +252,12 @@ impl ListRepository for PgListRepository {
             .await
     }
 
-    async fn add_member(&self, list_id: i64, actor_id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error> {
+    async fn add_member(
+        &self,
+        list_id: i64,
+        actor_id: i64,
+        now: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO list_members (list_id, actor_id, added_at) VALUES ($1, $2, $3)
              ON CONFLICT (list_id, actor_id) DO NOTHING",
@@ -291,12 +305,10 @@ impl ListRepository for PgListRepository {
     }
 
     async fn actor_referenced_by_any_list(&self, actor_id: i64) -> Result<bool, sqlx::Error> {
-        sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM list_members WHERE actor_id = $1)",
-        )
-        .bind(actor_id)
-        .fetch_one(&self.pool)
-        .await
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM list_members WHERE actor_id = $1)")
+            .bind(actor_id)
+            .fetch_one(&self.pool)
+            .await
     }
 
     async fn timeline(
@@ -400,17 +412,19 @@ impl ListRepository for PgListRepository {
         list_id: i64,
         actor_id: i64,
     ) -> Result<Option<String>, sqlx::Error> {
-        sqlx::query_scalar(
-            "SELECT at_rkey FROM list_members WHERE list_id = $1 AND actor_id = $2",
-        )
-        .bind(list_id)
-        .bind(actor_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map(|opt| opt.flatten())
+        sqlx::query_scalar("SELECT at_rkey FROM list_members WHERE list_id = $1 AND actor_id = $2")
+            .bind(list_id)
+            .bind(actor_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|opt| opt.flatten())
     }
 
-    async fn clear_member_atp_record(&self, list_id: i64, actor_id: i64) -> Result<(), sqlx::Error> {
+    async fn clear_member_atp_record(
+        &self,
+        list_id: i64,
+        actor_id: i64,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE list_members SET at_rkey = NULL, at_uri = NULL WHERE list_id = $1 AND actor_id = $2",
         )
@@ -421,7 +435,10 @@ impl ListRepository for PgListRepository {
         .map(|_| ())
     }
 
-    async fn members_with_atp_record(&self, list_id: i64) -> Result<Vec<(i64, String)>, sqlx::Error> {
+    async fn members_with_atp_record(
+        &self,
+        list_id: i64,
+    ) -> Result<Vec<(i64, String)>, sqlx::Error> {
         sqlx::query_as(
             "SELECT actor_id, at_rkey FROM list_members WHERE list_id = $1 AND at_rkey IS NOT NULL",
         )

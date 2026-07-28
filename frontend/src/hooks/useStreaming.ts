@@ -45,6 +45,5 @@ export function useStreaming(
       ws?.close();
     };
     // reconnectKey（ログイン状態など）が変わったら張り直す
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reconnectKey]);
 }

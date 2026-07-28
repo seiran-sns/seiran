@@ -32,7 +32,9 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
         .await
         .map_err(|e| format!("アクターDB検索失敗: {}", e))?;
 
-    let ap_uri: String = match actor_row.and_then(|r| r.try_get::<Option<String>, _>("ap_uri").ok().flatten()) {
+    let ap_uri: String = match actor_row
+        .and_then(|r| r.try_get::<Option<String>, _>("ap_uri").ok().flatten())
+    {
         Some(uri) => uri,
         None => {
             tracing::warn!(
@@ -52,7 +54,9 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
 
     tracing::info!(
         "[RemoteFollowListSync] 開始: actor_id={} direction={} ({})",
-        actor_id, direction, ap_uri
+        actor_id,
+        direction,
+        ap_uri
     );
 
     let actor = ctx
@@ -70,19 +74,25 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
         None => {
             tracing::info!(
                 "[RemoteFollowListSync] {} フィールドが存在しません（非対応実装、スキップ）: {}",
-                direction, ap_uri
+                direction,
+                ap_uri
             );
             return Ok(());
         }
     };
 
-    let (uris, complete) = fetch_ap_collection_uris(&ctx.ap_client, &collection_url, MAX_ITEMS).await;
+    let (uris, complete) =
+        fetch_ap_collection_uris(&ctx.ap_client, &collection_url, MAX_ITEMS).await;
     tracing::info!(
         "[RemoteFollowListSync] {}件取得完了 (complete={}): actor_id={} direction={}",
-        uris.len(), complete, actor_id, direction
+        uris.len(),
+        complete,
+        actor_id,
+        direction
     );
 
-    let actor_uris_json = serde_json::to_value(&uris).map_err(|e| format!("JSON変換失敗: {}", e))?;
+    let actor_uris_json =
+        serde_json::to_value(&uris).map_err(|e| format!("JSON変換失敗: {}", e))?;
 
     sqlx::query(
         // 非後退更新: `handlers::users::save_remote_follow_snapshot`（同期フェッチ側）と
@@ -106,13 +116,21 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
 
     enqueue_unknown_actor_resolves(pool, &ctx.queue, &uris).await;
 
-    tracing::info!("[RemoteFollowListSync] 完了: actor_id={} direction={}", actor_id, direction);
+    tracing::info!(
+        "[RemoteFollowListSync] 完了: actor_id={} direction={}",
+        actor_id,
+        direction
+    );
     Ok(())
 }
 
 /// 取得した actor URI のうち、ローカル `actors` に未登録のものについて `RemoteActorResolve`
 /// ジョブを積む（マイケル指摘 #68: 未知アクターの取得もWorkerジョブキューに積む）。
-async fn enqueue_unknown_actor_resolves(pool: &sqlx::PgPool, queue: &Arc<dyn crate::traits::JobQueue>, uris: &[String]) {
+async fn enqueue_unknown_actor_resolves(
+    pool: &sqlx::PgPool,
+    queue: &Arc<dyn crate::traits::JobQueue>,
+    uris: &[String],
+) {
     let known: std::collections::HashSet<String> =
         sqlx::query_scalar::<_, String>("SELECT ap_uri FROM actors WHERE ap_uri = ANY($1)")
             .bind(uris)
@@ -126,10 +144,17 @@ async fn enqueue_unknown_actor_resolves(pool: &sqlx::PgPool, queue: &Arc<dyn cra
             continue;
         }
         if let Err(e) = queue
-            .enqueue(crate::traits::Job::RemoteActorResolve { uri: uri.clone() }, crate::queue::worker::priority::LOW)
+            .enqueue(
+                crate::traits::Job::RemoteActorResolve { uri: uri.clone() },
+                crate::queue::worker::priority::LOW,
+            )
             .await
         {
-            tracing::warn!("[RemoteFollowListSync] RemoteActorResolve enqueue失敗 (uri={}): {}", uri, e);
+            tracing::warn!(
+                "[RemoteFollowListSync] RemoteActorResolve enqueue失敗 (uri={}): {}",
+                uri,
+                e
+            );
         }
     }
 }

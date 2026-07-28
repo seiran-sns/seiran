@@ -75,7 +75,10 @@ mod tests {
         let img = image::RgbImage::from_pixel(4, 4, image::Rgb([200, 100, 50]));
         let mut buf = Vec::new();
         image::DynamicImage::ImageRgb8(img)
-            .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+            .write_to(
+                &mut std::io::Cursor::new(&mut buf),
+                image::ImageFormat::Jpeg,
+            )
             .unwrap();
         buf
     }
@@ -100,9 +103,12 @@ mod tests {
         ))));
         let with_exif = jpeg.encoder().bytes().to_vec();
 
-        let stripped =
-            strip_exif_except_orientation(&with_exif, image::ImageFormat::Jpeg, Orientation::Rotate90)
-                .expect("jpeg should be supported");
+        let stripped = strip_exif_except_orientation(
+            &with_exif,
+            image::ImageFormat::Jpeg,
+            Orientation::Rotate90,
+        )
+        .expect("jpeg should be supported");
 
         // Orientationタグは残っている
         let parsed = Jpeg::from_bytes(Bytes::copy_from_slice(&stripped)).unwrap();
@@ -145,9 +151,12 @@ mod tests {
         ))));
         let with_exif = png.encoder().bytes().to_vec();
 
-        let stripped =
-            strip_exif_except_orientation(&with_exif, image::ImageFormat::Png, Orientation::Rotate180)
-                .expect("png should be supported");
+        let stripped = strip_exif_except_orientation(
+            &with_exif,
+            image::ImageFormat::Png,
+            Orientation::Rotate180,
+        )
+        .expect("png should be supported");
 
         let parsed = Png::from_bytes(Bytes::copy_from_slice(&stripped)).unwrap();
         let exif = parsed.exif().expect("orientation exif should remain");
@@ -170,6 +179,11 @@ mod tests {
             .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Gif)
             .unwrap();
 
-        assert!(strip_exif_except_orientation(&buf, image::ImageFormat::Gif, Orientation::NoTransforms).is_none());
+        assert!(strip_exif_except_orientation(
+            &buf,
+            image::ImageFormat::Gif,
+            Orientation::NoTransforms
+        )
+        .is_none());
     }
 }

@@ -11,11 +11,12 @@ use uuid::Uuid;
 
 use seiran_common::{
     atp::sign_service_auth_jwt,
-    convert_audio_to_gray_video, ext_for_mime_type, generate_snowflake_id, is_allowed_video_or_audio_mime,
-    prepare_image, probe_video_or_audio, sniff_mime_type, ImagePipeline, MediaKind,
+    convert_audio_to_gray_video, ext_for_mime_type, generate_snowflake_id,
+    is_allowed_video_or_audio_mime, prepare_image, probe_video_or_audio,
     queue::worker::priority,
     repository::{Actor, CreateMediaFile},
-    select_provider, Job, SelectorError, S3StorageClient, StorageProviderRepository,
+    select_provider, sniff_mime_type, ImagePipeline, Job, MediaKind, S3StorageClient,
+    SelectorError, StorageProviderRepository,
 };
 
 use crate::{
@@ -107,14 +108,20 @@ pub async fn create_drive_file(
                     .map_err(|e| ApiError::BadRequest(e.to_string()))?;
             }
             Some("deliver_to_bsky") => {
-                let v = field.text().await.map_err(|e| ApiError::BadRequest(e.to_string()))?;
+                let v = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::BadRequest(e.to_string()))?;
                 deliver_to_bsky = v != "false";
             }
             // Misskeyクライアント（Aria等）はアクセストークンをAuthorizationヘッダーではなく
             // multipartの`i`フィールドとして送ってくる（misskey_dart postWithBinary仕様）。
             // JSON/クエリ用のmisskey_auth_bridgeはmultipartボディを素通りするため、ここで拾う。
             Some("i") => {
-                let v = field.text().await.map_err(|e| ApiError::BadRequest(e.to_string()))?;
+                let v = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::BadRequest(e.to_string()))?;
                 if !v.is_empty() {
                     token_field = Some(v);
                 }
@@ -124,7 +131,10 @@ pub async fn create_drive_file(
             // テキストフィールドでファイル名を送る（`createAsBinary`がfileName引数を渡さない
             // ため）。file添付側のfilename属性より優先する。
             Some("name") => {
-                let v = field.text().await.map_err(|e| ApiError::BadRequest(e.to_string()))?;
+                let v = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::BadRequest(e.to_string()))?;
                 if !v.is_empty() {
                     filename_from_name_field = Some(v);
                 }
@@ -143,7 +153,10 @@ pub async fn create_drive_file(
                 .local_auth
                 .verify_token(&token)
                 .map_err(|_| ApiError::Unauthorized("トークンが無効です"))?;
-            AuthUser { user_id: verified.user_id, email: verified.email }
+            AuthUser {
+                user_id: verified.user_id,
+                email: verified.email,
+            }
         }
     };
 
@@ -155,13 +168,14 @@ pub async fn create_drive_file(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let actor_id = actor.as_ref().map(|a| a.id);
 
-    let raw_bytes = file_bytes.ok_or_else(|| ApiError::BadRequest("ファイルが含まれていません".to_owned()))?;
+    let raw_bytes =
+        file_bytes.ok_or_else(|| ApiError::BadRequest("ファイルが含まれていません".to_owned()))?;
 
     let kind = match media_type_str.as_str() {
         "avatar" => MediaKind::Avatar,
         "banner" => MediaKind::Banner,
-        "emoji"  => MediaKind::Emoji,
-        _        => MediaKind::Post,
+        "emoji" => MediaKind::Emoji,
+        _ => MediaKind::Post,
     };
 
     // マジックバイトで実際のファイル種別を判定する。
@@ -170,7 +184,9 @@ pub async fn create_drive_file(
 
     // アバター・バナー・絵文字は画像限定（動画・音声は投稿添付のみ許可）
     if !matches!(kind, MediaKind::Post) && !is_image {
-        return Err(ApiError::BadRequest("画像ファイルのみアップロードできます".to_owned()));
+        return Err(ApiError::BadRequest(
+            "画像ファイルのみアップロードできます".to_owned(),
+        ));
     }
 
     let md5 = format!("{:x}", md5::compute(&raw_bytes));
@@ -179,7 +195,16 @@ pub async fn create_drive_file(
         return create_image_file(&state, actor_id, &raw_bytes, kind, md5, original_filename).await;
     }
 
-    create_video_or_audio_file(&state, actor.as_ref(), raw_bytes, sniffed_mime, deliver_to_bsky, md5, original_filename).await
+    create_video_or_audio_file(
+        &state,
+        actor.as_ref(),
+        raw_bytes,
+        sniffed_mime,
+        deliver_to_bsky,
+        md5,
+        original_filename,
+    )
+    .await
 }
 
 /// 画像アップロード処理（Exif整理・Orientation補正・WebP変換・重複排除）。
@@ -191,12 +216,17 @@ async fn create_image_file(
     md5: String,
     original_filename: Option<String>,
 ) -> Result<Json<DriveFileResponse>, ApiError> {
-    let pipeline = prepare_image(raw_bytes, kind)
-        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let pipeline =
+        prepare_image(raw_bytes, kind).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let outcome = media_store::store_image(state, pipeline, actor_id).await?;
     let record = outcome.record;
 
-    let url = build_public_url(state.storage_providers.as_ref(), record.storage_provider_id, &record.storage_key).await;
+    let url = build_public_url(
+        state.storage_providers.as_ref(),
+        record.storage_provider_id,
+        &record.storage_key,
+    )
+    .await;
     // 画像は別途縮小サムネイルを持たないため、本体と同じURLをthumbnailUrlとして返す。
     // Misskeyクライアント（Aria等）はDriveFile.thumbnailUrlが無いと投稿フォームの
     // プレビューで画像を表示せずアイコンにフォールバックするため必須。
@@ -240,14 +270,18 @@ async fn create_video_or_audio_file(
 ) -> Result<Json<DriveFileResponse>, ApiError> {
     let actor_id = actor.map(|a| a.id);
     if !is_allowed_video_or_audio_mime(&mime_type) {
-        return Err(ApiError::BadRequest(format!("対応していないファイル形式です: {}", mime_type)));
+        return Err(ApiError::BadRequest(format!(
+            "対応していないファイル形式です: {}",
+            mime_type
+        )));
     }
 
     let sha256 = hex::encode(Sha256::digest(&raw_bytes));
     let size = raw_bytes.len() as i64;
 
     let probed = probe_video_or_audio(&raw_bytes, ext_for_mime_type(&mime_type)).await;
-    let thumbnail = probed.thumbnail_frame
+    let thumbnail = probed
+        .thumbnail_frame
         .as_deref()
         .and_then(|frame| prepare_image(frame, MediaKind::Post).ok())
         .map(|pipeline| match pipeline {
@@ -259,7 +293,10 @@ async fn create_video_or_audio_file(
     // 重複排除: blurhash が求まった（動画）場合は (sha256, blurhash) 一致、
     // そうでない（音声）場合は sha256 のみ（blurhash IS NULL の行に限定）で判定する。
     let existing = if let Some(bh) = &blurhash {
-        state.media_files.find_by_sha256_and_blurhash(&sha256, bh).await
+        state
+            .media_files
+            .find_by_sha256_and_blurhash(&sha256, bh)
+            .await
     } else {
         state.media_files.find_by_sha256(&sha256).await
     }
@@ -275,33 +312,55 @@ async fn create_video_or_audio_file(
         let existing_is_audio = existing.mime_type.starts_with("audio/");
         if (existing_is_video || existing_is_audio) && deliver_to_bsky {
             if let Some(actor) = actor {
-                let status: Option<String> = sqlx::query_scalar(
-                    "SELECT bsky_video_status FROM media_files WHERE id = $1",
-                )
-                .bind(existing.id)
-                .fetch_optional(&state.db)
-                .await
-                .ok()
-                .flatten();
+                let status: Option<String> =
+                    sqlx::query_scalar("SELECT bsky_video_status FROM media_files WHERE id = $1")
+                        .bind(existing.id)
+                        .fetch_optional(&state.db)
+                        .await
+                        .ok()
+                        .flatten();
                 if !matches!(status.as_deref(), Some("pending") | Some("ready")) {
                     let bytes_for_pipeline = if existing_is_audio {
-                        convert_audio_to_gray_video(&raw_bytes, ext_for_mime_type(&existing.mime_type)).await
+                        convert_audio_to_gray_video(
+                            &raw_bytes,
+                            ext_for_mime_type(&existing.mime_type),
+                        )
+                        .await
                     } else {
                         Some(raw_bytes.clone())
                     };
                     if let Some(bytes_for_pipeline) = bytes_for_pipeline {
-                        submit_to_bsky_video_pipeline(state, actor, existing.id, bytes_for_pipeline).await;
+                        submit_to_bsky_video_pipeline(
+                            state,
+                            actor,
+                            existing.id,
+                            bytes_for_pipeline,
+                        )
+                        .await;
                     }
                 }
             }
         }
 
-        let url = build_public_url(state.storage_providers.as_ref(), existing.storage_provider_id, &existing.storage_key).await;
+        let url = build_public_url(
+            state.storage_providers.as_ref(),
+            existing.storage_provider_id,
+            &existing.storage_key,
+        )
+        .await;
         let thumbnail_url = match &existing.thumbnail_key {
-            Some(key) => Some(build_public_url(state.storage_providers.as_ref(), existing.storage_provider_id, key).await),
+            Some(key) => Some(
+                build_public_url(
+                    state.storage_providers.as_ref(),
+                    existing.storage_provider_id,
+                    key,
+                )
+                .await,
+            ),
             None => None,
         };
-        let name = original_filename.unwrap_or_else(|| default_file_name(existing.id, &existing.mime_type));
+        let name = original_filename
+            .unwrap_or_else(|| default_file_name(existing.id, &existing.mime_type));
         let kind = existing.mime_type.clone();
         return Ok(Json(DriveFileResponse {
             id: existing.id.to_string(),
@@ -394,7 +453,9 @@ async fn create_video_or_audio_file(
     }
 
     let thumbnail_url = match &thumbnail_key {
-        Some(key) => Some(build_public_url(state.storage_providers.as_ref(), provider.id, key).await),
+        Some(key) => {
+            Some(build_public_url(state.storage_providers.as_ref(), provider.id, key).await)
+        }
         None => None,
     };
 
@@ -431,9 +492,18 @@ const BSKY_VIDEO_SERVICE_HOST: &str = "https://video.bsky.app";
 /// （`Job::BskyVideoPoll`がバックグラウンドで完了を待つ）。
 /// 失敗しても`media_files.bsky_video_status='failed'`を記録するだけで、
 /// アップロードAPI自体は成功として扱う（動画はローカル保存済みのため）。
-async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_file_id: i64, video_bytes: Vec<u8>) {
-    let (Some(did), Some(pem)) = (actor.at_did.as_deref(), actor.at_signing_key_pem.as_deref()) else {
-        tracing::warn!("[BskyVideo] at_did/at_signing_key_pem 未設定のためスキップ media_file_id={}", media_file_id);
+async fn submit_to_bsky_video_pipeline(
+    state: &AppState,
+    actor: &Actor,
+    media_file_id: i64,
+    video_bytes: Vec<u8>,
+) {
+    let (Some(did), Some(pem)) = (actor.at_did.as_deref(), actor.at_signing_key_pem.as_deref())
+    else {
+        tracing::warn!(
+            "[BskyVideo] at_did/at_signing_key_pem 未設定のためスキップ media_file_id={}",
+            media_file_id
+        );
         mark_bsky_video_failed(state, media_file_id).await;
         return;
     };
@@ -442,7 +512,11 @@ async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_fi
     let jwt = match sign_service_auth_jwt(pem, did, &own_pds_did, "com.atproto.repo.uploadBlob") {
         Ok(j) => j,
         Err(e) => {
-            tracing::error!("[BskyVideo] JWT署名失敗 media_file_id={}: {}", media_file_id, e);
+            tracing::error!(
+                "[BskyVideo] JWT署名失敗 media_file_id={}: {}",
+                media_file_id,
+                e
+            );
             mark_bsky_video_failed(state, media_file_id).await;
             return;
         }
@@ -468,7 +542,11 @@ async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_fi
     let resp = match resp {
         Ok(r) => r,
         Err(e) => {
-            tracing::error!("[BskyVideo] uploadVideoリクエスト失敗 media_file_id={}: {}", media_file_id, e);
+            tracing::error!(
+                "[BskyVideo] uploadVideoリクエスト失敗 media_file_id={}: {}",
+                media_file_id,
+                e
+            );
             mark_bsky_video_failed(state, media_file_id).await;
             return;
         }
@@ -485,18 +563,35 @@ async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_fi
     let job_id = serde_json::from_str::<serde_json::Value>(&body_text)
         .ok()
         .and_then(|v| {
-            v.get("jobId").and_then(|j| j.as_str()).map(|s| s.to_string())
-                .or_else(|| v.get("jobStatus").and_then(|j| j.get("jobId")).and_then(|j| j.as_str()).map(|s| s.to_string()))
+            v.get("jobId")
+                .and_then(|j| j.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    v.get("jobStatus")
+                        .and_then(|j| j.get("jobId"))
+                        .and_then(|j| j.as_str())
+                        .map(|s| s.to_string())
+                })
         })
         .filter(|s| !s.is_empty());
 
     let Some(job_id) = job_id else {
-        tracing::error!("[BskyVideo] uploadVideo失敗 media_file_id={} status={} body={}", media_file_id, status, body_text);
+        tracing::error!(
+            "[BskyVideo] uploadVideo失敗 media_file_id={} status={} body={}",
+            media_file_id,
+            status,
+            body_text
+        );
         mark_bsky_video_failed(state, media_file_id).await;
         return;
     };
     if !status.is_success() {
-        tracing::info!("[BskyVideo] uploadVideo非2xxだがjobId取得 media_file_id={} status={} jobId={}", media_file_id, status, job_id);
+        tracing::info!(
+            "[BskyVideo] uploadVideo非2xxだがjobId取得 media_file_id={} status={} jobId={}",
+            media_file_id,
+            status,
+            job_id
+        );
     }
 
     if let Err(e) = sqlx::query(
@@ -511,8 +606,16 @@ async fn submit_to_bsky_video_pipeline(state: &AppState, actor: &Actor, media_fi
         return;
     }
 
-    if let Err(e) = state.job_queue.enqueue(Job::BskyVideoPoll { media_file_id }, priority::HIGH).await {
-        tracing::error!("[BskyVideo] ジョブ投入失敗 media_file_id={}: {}", media_file_id, e);
+    if let Err(e) = state
+        .job_queue
+        .enqueue(Job::BskyVideoPoll { media_file_id }, priority::HIGH)
+        .await
+    {
+        tracing::error!(
+            "[BskyVideo] ジョブ投入失敗 media_file_id={}: {}",
+            media_file_id,
+            e
+        );
     }
 }
 
@@ -528,25 +631,31 @@ async fn mark_bsky_video_failed(state: &AppState, media_file_id: i64) {
 fn default_file_name(id: i64, mime_type: &str) -> String {
     let ext = match mime_type {
         "image/jpeg" => "jpg",
-        "image/png"  => "png",
-        "image/gif"  => "gif",
+        "image/png" => "png",
+        "image/gif" => "gif",
         "image/avif" => "avif",
         "image/webp" => "webp",
-        _            => ext_for_mime_type(mime_type),
+        _ => ext_for_mime_type(mime_type),
     };
     format!("seiran-{}.{}", id, ext)
 }
 
 pub(crate) fn map_selector_error(e: SelectorError) -> ApiError {
     match e {
-        SelectorError::NoAvailableProvider => ApiError::ServiceUnavailable("ストレージプロバイダーが設定されていません"),
+        SelectorError::NoAvailableProvider => {
+            ApiError::ServiceUnavailable("ストレージプロバイダーが設定されていません")
+        }
         SelectorError::QuotaExceeded => ApiError::InsufficientStorage,
         SelectorError::Db(db_e) => ApiError::Internal(db_e.to_string()),
     }
 }
 
 /// クォータ二重チェック（プロバイダー確定後、PUT 前に明示的に確認）
-pub(crate) async fn check_quota(state: &AppState, provider: &seiran_common::repository::StorageProvider, upload_size: i64) -> Result<(), ApiError> {
+pub(crate) async fn check_quota(
+    state: &AppState,
+    provider: &seiran_common::repository::StorageProvider,
+    upload_size: i64,
+) -> Result<(), ApiError> {
     if let Some(cap_mb) = provider.capacity_mb {
         let used_bytes = state
             .storage_providers
@@ -594,8 +703,17 @@ pub async fn watch_media(
         }
     };
 
-    let url = build_public_url(state.storage_providers.as_ref(), mf.storage_provider_id, &mf.storage_key).await;
-    let tag = if mf.mime_type.starts_with("video/") { "video" } else { "audio" };
+    let url = build_public_url(
+        state.storage_providers.as_ref(),
+        mf.storage_provider_id,
+        &mf.storage_key,
+    )
+    .await;
+    let tag = if mf.mime_type.starts_with("video/") {
+        "video"
+    } else {
+        "audio"
+    };
     let html = format!(
         r#"<!doctype html>
 <html>

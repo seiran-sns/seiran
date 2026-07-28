@@ -9,12 +9,12 @@ use tokio::sync::broadcast;
 
 use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
-    build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex, cid_from_str,
-    cid_to_string, create_commit, encode_car, encode_bsky_actor_profile, encode_bsky_feed_post,
-    encode_bsky_feed_repost, encode_bsky_feed_like, encode_bsky_graph_block, encode_bsky_graph_follow,
-    encode_bsky_graph_list, encode_bsky_graph_listitem, encode_chat_actor_declaration,
-    generate_tid, Cid, CommitEvtOp, RepoError, BskyFacet, BskyImage, BskyEmbed,
-    BskyPostReply,
+    build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex,
+    cid_from_str, cid_to_string, create_commit, encode_bsky_actor_profile, encode_bsky_feed_like,
+    encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_block,
+    encode_bsky_graph_follow, encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car,
+    encode_chat_actor_declaration, generate_tid, BskyEmbed, BskyFacet, BskyImage, BskyPostReply,
+    Cid, CommitEvtOp, RepoError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -60,7 +60,10 @@ async fn run_redis_bridge_subscriber(
         let payload: String = match msg.get_payload() {
             Ok(p) => p,
             Err(e) => {
-                tracing::error!("[AtpCommitService] Redisメッセージの取得に失敗しました: {}", e);
+                tracing::error!(
+                    "[AtpCommitService] Redisメッセージの取得に失敗しました: {}",
+                    e
+                );
                 continue;
             }
         };
@@ -69,7 +72,10 @@ async fn run_redis_bridge_subscriber(
                 let _ = event_tx.send(event);
             }
             Err(e) => {
-                tracing::error!("[AtpCommitService] イベントのデシリアライズに失敗しました: {}", e);
+                tracing::error!(
+                    "[AtpCommitService] イベントのデシリアライズに失敗しました: {}",
+                    e
+                );
             }
         }
     }
@@ -110,7 +116,12 @@ impl AtpCommitService {
         event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
         http_client: Arc<reqwest::Client>,
     ) -> Self {
-        Self { pool, event_tx, http_client, redis_pub: None }
+        Self {
+            pool,
+            event_tx,
+            http_client,
+            redis_pub: None,
+        }
     }
 
     /// コミットイベントを Redis Pub/Sub 経由でプロセス間配信するブリッジを有効にする。
@@ -124,8 +135,8 @@ impl AtpCommitService {
     ///
     /// モノリスモード（`--role all`）や単一レプリカ運用では不要（`event_tx` の直接送信で十分）。
     pub async fn with_redis_bridge(&mut self, redis_url: &str) -> Result<(), String> {
-        let client = redis::Client::open(redis_url)
-            .map_err(|e| format!("Redis接続URLが不正です: {}", e))?;
+        let client =
+            redis::Client::open(redis_url).map_err(|e| format!("Redis接続URLが不正です: {}", e))?;
         let publish_conn = redis::aio::ConnectionManager::new(client.clone())
             .await
             .map_err(|e| format!("Redis接続に失敗しました: {}", e))?;
@@ -162,7 +173,10 @@ impl AtpCommitService {
             let payload = match serde_json::to_string(&event) {
                 Ok(p) => p,
                 Err(e) => {
-                    tracing::error!("[AtpCommitService] イベントのシリアライズに失敗しました: {}", e);
+                    tracing::error!(
+                        "[AtpCommitService] イベントのシリアライズに失敗しました: {}",
+                        e
+                    );
                     return;
                 }
             };
@@ -214,12 +228,11 @@ impl AtpCommitService {
         .fetch_all(&self.pool)
         .await?;
 
-        let record_rows = sqlx::query(
-            "SELECT collection, rkey, cid FROM atp_records WHERE actor_id = $1",
-        )
-        .bind(actor_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let record_rows =
+            sqlx::query("SELECT collection, rkey, cid FROM atp_records WHERE actor_id = $1")
+                .bind(actor_id)
+                .fetch_all(&self.pool)
+                .await?;
 
         let mut entries = Vec::new();
         for row in &post_rows {
@@ -295,13 +308,8 @@ impl AtpCommitService {
         let prev_data_cid_parsed = prev_data_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
-        let (commit_cid, commit_cbor) = create_commit(
-            &at_did,
-            &new_rev,
-            mst_root,
-            prev_cid_parsed,
-            &signing_key,
-        )?;
+        let (commit_cid, commit_cbor) =
+            create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
 
         // ⑥ CAR エンコード
         let mut new_blocks = mst_blocks;
@@ -356,15 +364,13 @@ impl AtpCommitService {
         // ⑨.5 posts テーブル更新（commit_post 専用: post_id が指定された場合のみ）
         if let Some(pid) = post_id {
             let at_uri = format!("at://{}/app.bsky.feed.post/{}", at_did, record.rkey);
-            sqlx::query(
-                "UPDATE posts SET at_uri = $1, at_cid = $2, at_rkey = $3 WHERE id = $4",
-            )
-            .bind(&at_uri)
-            .bind(&record_cid_str)
-            .bind(&record.rkey)
-            .bind(pid)
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query("UPDATE posts SET at_uri = $1, at_cid = $2, at_rkey = $3 WHERE id = $4")
+                .bind(&at_uri)
+                .bind(&record_cid_str)
+                .bind(&record.rkey)
+                .bind(pid)
+                .execute(&mut *tx)
+                .await?;
         }
 
         // ⑩ atp_repo_events INSERT → seq 取得
@@ -411,16 +417,15 @@ impl AtpCommitService {
             &record.blob_cids,
             &time_str,
             prev_data_cid_parsed.as_ref(),
-        ).ok();
+        )
+        .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
-                sqlx::query(
-                    "UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2",
-                )
-                .bind(&compressed)
-                .bind(seq)
-                .execute(&mut *tx)
-                .await?;
+                sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
+                    .bind(&compressed)
+                    .bind(seq)
+                    .execute(&mut *tx)
+                    .await?;
             }
         }
 
@@ -428,10 +433,18 @@ impl AtpCommitService {
 
         // WebSocket ブロードキャスト
         if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
+            self.publish_event(AtpCommitEvent {
+                frame_bytes: frame,
+                seq,
+            });
         }
 
-        Ok(CommitResult { commit_cid, rev: new_rev, seq, at_did })
+        Ok(CommitResult {
+            commit_cid,
+            rev: new_rev,
+            seq,
+            at_did,
+        })
     }
 
     /// ポスト作成コミット（posts テーブル更新を追加）
@@ -473,17 +486,26 @@ impl AtpCommitService {
             let mut non_image_url: Option<String> = None;
             for r in &rows {
                 use sqlx::Row;
-                let Ok(sha256) = r.try_get::<String, _>("sha256") else { continue };
-                let Ok(mime_type) = r.try_get::<String, _>("mime_type") else { continue };
+                let Ok(sha256) = r.try_get::<String, _>("sha256") else {
+                    continue;
+                };
+                let Ok(mime_type) = r.try_get::<String, _>("mime_type") else {
+                    continue;
+                };
                 let size: i64 = r.try_get("size").unwrap_or(0);
                 let width: Option<i32> = r.try_get("width").unwrap_or(None);
                 let height: Option<i32> = r.try_get("height").unwrap_or(None);
                 if mime_type.starts_with("image/") {
                     // CID 生成に失敗したものはスキップ
-                    if cid_from_sha256_hex(&sha256).is_err() { continue; }
+                    if cid_from_sha256_hex(&sha256).is_err() {
+                        continue;
+                    }
                     images.push(BskyImage {
-                        sha256_hex: sha256, mime_type, size,
-                        width: width.unwrap_or(0), height: height.unwrap_or(0),
+                        sha256_hex: sha256,
+                        mime_type,
+                        size,
+                        width: width.unwrap_or(0),
+                        height: height.unwrap_or(0),
                         alt: String::new(),
                     });
                     continue;
@@ -504,9 +526,13 @@ impl AtpCommitService {
                             // crate::storage::media_probe::AUDIO_VIDEO_WIDTH/HEIGHT
                             // （convert_audio_to_gray_video が実際に生成する解像度）と
                             // 必ず一致させる。
-                            let bsky_size: Option<i64> = r.try_get("bsky_video_size").unwrap_or(None);
+                            let bsky_size: Option<i64> =
+                                r.try_get("bsky_video_size").unwrap_or(None);
                             let (embed_width, embed_height) = if is_audio {
-                                (crate::AUDIO_VIDEO_WIDTH as i32, crate::AUDIO_VIDEO_HEIGHT as i32)
+                                (
+                                    crate::AUDIO_VIDEO_WIDTH as i32,
+                                    crate::AUDIO_VIDEO_HEIGHT as i32,
+                                )
                             } else {
                                 (width.unwrap_or(0), height.unwrap_or(0))
                             };
@@ -529,7 +555,10 @@ impl AtpCommitService {
                     // ダウンロードしてしまい再生できないため（2026-07-17 マイケル指摘）。
                     if let Ok(media_file_id) = r.try_get::<i64, _>("id") {
                         let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_default();
-                        non_image_url = Some(format!("https://{}/api/media/{}/watch", local_domain, media_file_id));
+                        non_image_url = Some(format!(
+                            "https://{}/api/media/{}/watch",
+                            local_domain, media_file_id
+                        ));
                     }
                 }
             }
@@ -542,7 +571,8 @@ impl AtpCommitService {
         // ポスト自体は最大 10 枚まで許容するが、Bsky embed には先頭 4 枚のみ含める。
         let bsky_images: Vec<BskyImage> = bsky_images.into_iter().take(4).collect();
 
-        let mut blob_cids: Vec<Cid> = bsky_images.iter()
+        let mut blob_cids: Vec<Cid> = bsky_images
+            .iter()
             .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
             .collect();
 
@@ -563,7 +593,8 @@ impl AtpCommitService {
                 thumb: None,
             })
         };
-        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
+        let (record_cbor, record_cid) =
+            encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
@@ -575,10 +606,16 @@ impl AtpCommitService {
             blob_cids,
         };
 
-        let result = self.commit_record_inner(actor_id, record, now, Some(post_id)).await?;
+        let result = self
+            .commit_record_inner(actor_id, record, now, Some(post_id))
+            .await?;
 
         let at_uri = format!("at://{}/app.bsky.feed.post/{}", result.at_did, rkey);
-        tracing::info!("[atp] commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
+        tracing::info!(
+            "[atp] commit 完了: at_uri={}, cid={}",
+            at_uri,
+            record_cid_str
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -609,7 +646,8 @@ impl AtpCommitService {
             blob_cids: vec![],
         };
 
-        self.commit_record_inner(actor_id, record, now, None).await?;
+        self.commit_record_inner(actor_id, record, now, None)
+            .await?;
 
         if let Some(pid) = post_id {
             sqlx::query("UPDATE posts SET atp_repost_rkey = $1 WHERE id = $2")
@@ -619,7 +657,11 @@ impl AtpCommitService {
                 .await?;
         }
 
-        tracing::info!("[atp] repost commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!(
+            "[atp] repost commit 完了: actor_id={}, rkey={}",
+            actor_id,
+            rkey
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -647,7 +689,13 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        let (record_cbor, record_cid) = encode_bsky_feed_like(target_at_uri, target_at_cid, &created_at_str, emoji, reaction_id)?;
+        let (record_cbor, record_cid) = encode_bsky_feed_like(
+            target_at_uri,
+            target_at_cid,
+            &created_at_str,
+            emoji,
+            reaction_id,
+        )?;
 
         let record = CommitRecord {
             collection: "app.bsky.feed.like",
@@ -658,7 +706,9 @@ impl AtpCommitService {
             blob_cids: vec![],
         };
 
-        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+        let result = self
+            .commit_record_inner(actor_id, record, now, None)
+            .await?;
 
         let at_uri_self = format!("at://{}/app.bsky.feed.like/{}", result.at_did, rkey);
         sqlx::query("UPDATE reactions SET at_uri = $1 WHERE post_id = $2 AND actor_id = $3")
@@ -668,7 +718,11 @@ impl AtpCommitService {
             .execute(&self.pool)
             .await?;
 
-        tracing::info!("[atp] like commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!(
+            "[atp] like commit 完了: actor_id={}, rkey={}",
+            actor_id,
+            rkey
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -695,9 +749,15 @@ impl AtpCommitService {
             blob_cids: vec![],
         };
 
-        self.commit_record_inner(actor_id, record, now, None).await?;
+        self.commit_record_inner(actor_id, record, now, None)
+            .await?;
 
-        tracing::info!("[atp] follow commit 完了: actor_id={}, subject={}, rkey={}", actor_id, subject_did, rkey);
+        tracing::info!(
+            "[atp] follow commit 完了: actor_id={}, subject={}, rkey={}",
+            actor_id,
+            subject_did,
+            rkey
+        );
         self.spawn_request_crawl();
         Ok(rkey)
     }
@@ -724,9 +784,15 @@ impl AtpCommitService {
             blob_cids: vec![],
         };
 
-        self.commit_record_inner(actor_id, record, now, None).await?;
+        self.commit_record_inner(actor_id, record, now, None)
+            .await?;
 
-        tracing::info!("[atp] block commit 完了: actor_id={}, subject={}, rkey={}", actor_id, subject_did, rkey);
+        tracing::info!(
+            "[atp] block commit 完了: actor_id={}, subject={}, rkey={}",
+            actor_id,
+            subject_did,
+            rkey
+        );
         self.spawn_request_crawl();
         Ok(rkey)
     }
@@ -738,7 +804,8 @@ impl AtpCommitService {
         rkey: &str,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
-        self.delete_atp_record_generic(actor_id, "app.bsky.graph.block", rkey, now).await
+        self.delete_atp_record_generic(actor_id, "app.bsky.graph.block", rkey, now)
+            .await
     }
 
     /// `app.bsky.graph.list` レコードをコミットする（リスト機能 #63、公開リストのみ呼ぶ）。
@@ -765,10 +832,16 @@ impl AtpCommitService {
             blob_cids: vec![],
         };
 
-        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+        let result = self
+            .commit_record_inner(actor_id, record, now, None)
+            .await?;
         let at_uri = format!("at://{}/app.bsky.graph.list/{}", result.at_did, rkey);
 
-        tracing::info!("[atp] list commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!(
+            "[atp] list commit 完了: actor_id={}, rkey={}",
+            actor_id,
+            rkey
+        );
         self.spawn_request_crawl();
         Ok((rkey, at_uri, cid_str))
     }
@@ -785,7 +858,8 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        let (record_cbor, record_cid) = encode_bsky_graph_listitem(list_uri, subject_did, &created_at_str)?;
+        let (record_cbor, record_cid) =
+            encode_bsky_graph_listitem(list_uri, subject_did, &created_at_str)?;
 
         let record = CommitRecord {
             collection: "app.bsky.graph.listitem",
@@ -796,12 +870,17 @@ impl AtpCommitService {
             blob_cids: vec![],
         };
 
-        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+        let result = self
+            .commit_record_inner(actor_id, record, now, None)
+            .await?;
         let at_uri = format!("at://{}/app.bsky.graph.listitem/{}", result.at_did, rkey);
 
         tracing::info!(
             "[atp] listitem commit 完了: actor_id={}, list={}, subject={}, rkey={}",
-            actor_id, list_uri, subject_did, rkey
+            actor_id,
+            list_uri,
+            subject_did,
+            rkey
         );
         self.spawn_request_crawl();
         Ok((rkey, at_uri))
@@ -855,13 +934,8 @@ impl AtpCommitService {
         let prev_data_cid_parsed = prev_data_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
-        let (commit_cid, commit_cbor) = create_commit(
-            &at_did,
-            &new_rev,
-            mst_root,
-            prev_cid_parsed,
-            &signing_key,
-        )?;
+        let (commit_cid, commit_cbor) =
+            create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
 
         // ⑥ CAR エンコード（削除レコードのブロックは含まない）
         let mut new_blocks = mst_blocks;
@@ -945,26 +1019,32 @@ impl AtpCommitService {
             &[],
             &time_str,
             prev_data_cid_parsed.as_ref(),
-        ).ok();
+        )
+        .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
-                sqlx::query(
-                    "UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2",
-                )
-                .bind(&compressed)
-                .bind(seq)
-                .execute(&mut *tx)
-                .await?;
+                sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
+                    .bind(&compressed)
+                    .bind(seq)
+                    .execute(&mut *tx)
+                    .await?;
             }
         }
 
         tx.commit().await?;
 
         if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
+            self.publish_event(AtpCommitEvent {
+                frame_bytes: frame,
+                seq,
+            });
         }
 
-        tracing::info!("[atp] repost delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!(
+            "[atp] repost delete commit 完了: actor_id={}, rkey={}",
+            actor_id,
+            rkey
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -979,7 +1059,8 @@ impl AtpCommitService {
         rkey: &str,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
-        self.delete_atp_record_generic(actor_id, "app.bsky.feed.post", rkey, now).await
+        self.delete_atp_record_generic(actor_id, "app.bsky.feed.post", rkey, now)
+            .await
     }
 
     /// リアクション取消/切替コミット（`app.bsky.feed.like` レコードを MST から削除する）。
@@ -1032,13 +1113,8 @@ impl AtpCommitService {
         let prev_data_cid_parsed = prev_data_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
-        let (commit_cid, commit_cbor) = create_commit(
-            &at_did,
-            &new_rev,
-            mst_root,
-            prev_cid_parsed,
-            &signing_key,
-        )?;
+        let (commit_cid, commit_cbor) =
+            create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
 
         // ⑥ CAR エンコード（削除レコードのブロックは含まない）
         let mut new_blocks = mst_blocks;
@@ -1122,26 +1198,32 @@ impl AtpCommitService {
             &[],
             &time_str,
             prev_data_cid_parsed.as_ref(),
-        ).ok();
+        )
+        .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
-                sqlx::query(
-                    "UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2",
-                )
-                .bind(&compressed)
-                .bind(seq)
-                .execute(&mut *tx)
-                .await?;
+                sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
+                    .bind(&compressed)
+                    .bind(seq)
+                    .execute(&mut *tx)
+                    .await?;
             }
         }
 
         tx.commit().await?;
 
         if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
+            self.publish_event(AtpCommitEvent {
+                frame_bytes: frame,
+                seq,
+            });
         }
 
-        tracing::info!("[atp] like delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!(
+            "[atp] like delete commit 完了: actor_id={}, rkey={}",
+            actor_id,
+            rkey
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -1189,9 +1271,8 @@ impl AtpCommitService {
         let prev_data_cid_parsed = prev_data_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
-        let (commit_cid, commit_cbor) = create_commit(
-            &at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key,
-        )?;
+        let (commit_cid, commit_cbor) =
+            create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
 
         let mut new_blocks = mst_blocks;
         new_blocks.push((commit_cid, commit_cbor));
@@ -1249,12 +1330,25 @@ impl AtpCommitService {
         let seq: i64 = event_row.try_get("id")?;
 
         let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let ws_ops = vec![CommitEvtOp { action: "delete".to_string(), path: entry_key, cid: None }];
+        let ws_ops = vec![CommitEvtOp {
+            action: "delete".to_string(),
+            path: entry_key,
+            cid: None,
+        }];
         let frame_opt = build_commit_frame(
-            seq, &at_did, &commit_cid, prev_cid_parsed.as_ref(),
-            &new_rev, prev_rev.as_deref(), &diff_car, &ws_ops, &[], &time_str,
+            seq,
+            &at_did,
+            &commit_cid,
+            prev_cid_parsed.as_ref(),
+            &new_rev,
+            prev_rev.as_deref(),
+            &diff_car,
+            &ws_ops,
+            &[],
+            &time_str,
             prev_data_cid_parsed.as_ref(),
-        ).ok();
+        )
+        .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
                 sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
@@ -1268,10 +1362,17 @@ impl AtpCommitService {
         tx.commit().await?;
 
         if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
+            self.publish_event(AtpCommitEvent {
+                frame_bytes: frame,
+                seq,
+            });
         }
 
-        tracing::info!("[atp] follow delete commit 完了: actor_id={}, rkey={}", actor_id, rkey);
+        tracing::info!(
+            "[atp] follow delete commit 完了: actor_id={}, rkey={}",
+            actor_id,
+            rkey
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -1322,9 +1423,8 @@ impl AtpCommitService {
         let prev_data_cid_parsed = prev_data_cid_str
             .as_deref()
             .and_then(|s| cid_from_str(s).ok());
-        let (commit_cid, commit_cbor) = create_commit(
-            &at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key,
-        )?;
+        let (commit_cid, commit_cbor) =
+            create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
 
         let mut new_blocks = mst_blocks;
         new_blocks.push((commit_cid, commit_cbor));
@@ -1383,12 +1483,25 @@ impl AtpCommitService {
         let seq: i64 = event_row.try_get("id")?;
 
         let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let ws_ops = vec![CommitEvtOp { action: "delete".to_string(), path: entry_key, cid: None }];
+        let ws_ops = vec![CommitEvtOp {
+            action: "delete".to_string(),
+            path: entry_key,
+            cid: None,
+        }];
         let frame_opt = build_commit_frame(
-            seq, &at_did, &commit_cid, prev_cid_parsed.as_ref(),
-            &new_rev, prev_rev.as_deref(), &diff_car, &ws_ops, &[], &time_str,
+            seq,
+            &at_did,
+            &commit_cid,
+            prev_cid_parsed.as_ref(),
+            &new_rev,
+            prev_rev.as_deref(),
+            &diff_car,
+            &ws_ops,
+            &[],
+            &time_str,
             prev_data_cid_parsed.as_ref(),
-        ).ok();
+        )
+        .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
                 sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
@@ -1402,10 +1515,18 @@ impl AtpCommitService {
         tx.commit().await?;
 
         if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
+            self.publish_event(AtpCommitEvent {
+                frame_bytes: frame,
+                seq,
+            });
         }
 
-        tracing::info!("[atp] {} delete commit 完了: actor_id={}, rkey={}", collection, actor_id, rkey);
+        tracing::info!(
+            "[atp] {} delete commit 完了: actor_id={}, rkey={}",
+            collection,
+            actor_id,
+            rkey
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -1417,7 +1538,8 @@ impl AtpCommitService {
         rkey: &str,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
-        self.delete_atp_record_generic(actor_id, "app.bsky.graph.list", rkey, now).await
+        self.delete_atp_record_generic(actor_id, "app.bsky.graph.list", rkey, now)
+            .await
     }
 
     /// `app.bsky.graph.listitem` レコードを削除する（メンバー削除・リスト削除時）。
@@ -1427,7 +1549,8 @@ impl AtpCommitService {
         rkey: &str,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
-        self.delete_atp_record_generic(actor_id, "app.bsky.graph.listitem", rkey, now).await
+        self.delete_atp_record_generic(actor_id, "app.bsky.graph.listitem", rkey, now)
+            .await
     }
 
     /// 引用投稿コミット（`app.bsky.embed.record` または `app.bsky.embed.external` 付き）。
@@ -1450,12 +1573,16 @@ impl AtpCommitService {
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
         let mut blob_cids = Vec::new();
-        if let Some(BskyEmbed::External { thumb: Some(thumb), .. }) = &embed {
+        if let Some(BskyEmbed::External {
+            thumb: Some(thumb), ..
+        }) = &embed
+        {
             if let Ok(cid) = cid_from_sha256_hex(&thumb.sha256_hex) {
                 blob_cids.push(cid);
             }
         }
-        let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
+        let (record_cbor, record_cid) =
+            encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
@@ -1467,10 +1594,16 @@ impl AtpCommitService {
             blob_cids,
         };
 
-        let result = self.commit_record_inner(actor_id, record, now, Some(post_id)).await?;
+        let result = self
+            .commit_record_inner(actor_id, record, now, Some(post_id))
+            .await?;
 
         let at_uri = format!("at://{}/app.bsky.feed.post/{}", result.at_did, rkey);
-        tracing::info!("[atp] quote commit 完了: at_uri={}, cid={}", at_uri, record_cid_str);
+        tracing::info!(
+            "[atp] quote commit 完了: at_uri={}, cid={}",
+            at_uri,
+            record_cid_str
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -1505,8 +1638,13 @@ impl AtpCommitService {
         let pinned_post_ref = pinned_post
             .as_ref()
             .map(|(uri, cid)| (uri.as_str(), cid.as_str()));
-        let (record_cbor, record_cid) =
-            encode_bsky_actor_profile(display_name, description, avatar_ref, pinned_post_ref, &created_at_str)?;
+        let (record_cbor, record_cid) = encode_bsky_actor_profile(
+            display_name,
+            description,
+            avatar_ref,
+            pinned_post_ref,
+            &created_at_str,
+        )?;
 
         let record = CommitRecord {
             collection: "app.bsky.actor.profile",
@@ -1517,9 +1655,15 @@ impl AtpCommitService {
             blob_cids: vec![],
         };
 
-        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+        let result = self
+            .commit_record_inner(actor_id, record, now, None)
+            .await?;
 
-        tracing::info!("[atp] profile commit 完了（{}）: did={}", action, result.at_did);
+        tracing::info!(
+            "[atp] profile commit 完了（{}）: did={}",
+            action,
+            result.at_did
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -1529,7 +1673,11 @@ impl AtpCommitService {
     /// 保守的にブロックする（`docs/protocols.md` 9節）。新規登録時・既存ユーザーへの
     /// バックフィルの両方から呼ばれる。既に同じ値で存在する場合も冪等に再コミットしてよい
     /// （呼び出し頻度は低いためコストは無視できる）。
-    pub async fn commit_chat_declaration(&self, actor_id: i64, now: DateTime<Utc>) -> Result<(), AtpCommitError> {
+    pub async fn commit_chat_declaration(
+        &self,
+        actor_id: i64,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
         let existing: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM atp_records \
              WHERE actor_id = $1 AND collection = 'chat.bsky.actor.declaration' AND rkey = 'self')",
@@ -1550,9 +1698,15 @@ impl AtpCommitService {
             blob_cids: vec![],
         };
 
-        let result = self.commit_record_inner(actor_id, record, now, None).await?;
+        let result = self
+            .commit_record_inner(actor_id, record, now, None)
+            .await?;
 
-        tracing::info!("[atp] chat declaration commit 完了（{}）: did={}", action, result.at_did);
+        tracing::info!(
+            "[atp] chat declaration commit 完了（{}）: did={}",
+            action,
+            result.at_did
+        );
         self.spawn_request_crawl();
         Ok(())
     }
@@ -1582,17 +1736,25 @@ impl AtpCommitService {
 
         // 実 seq でフレームを生成し、圧縮して DB に保存してからブロードキャスト。
         let frame = build_identity_frame(seq, did, handle, &time_str)?;
-        let compressed = zstd::encode_all(&frame[..], 3)
-            .map_err(|e| RepoError::Cbor(e.to_string()))?;
+        let compressed =
+            zstd::encode_all(&frame[..], 3).map_err(|e| RepoError::Cbor(e.to_string()))?;
         sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
             .bind(&compressed)
             .bind(seq)
             .execute(&self.pool)
             .await?;
 
-        self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
+        self.publish_event(AtpCommitEvent {
+            frame_bytes: frame,
+            seq,
+        });
 
-        tracing::info!("[atp] identity broadcast: did={}, handle={}, seq={}", did, handle, seq);
+        tracing::info!(
+            "[atp] identity broadcast: did={}, handle={}, seq={}",
+            did,
+            handle,
+            seq
+        );
         Ok(())
     }
 
@@ -1621,17 +1783,25 @@ impl AtpCommitService {
         .await?;
 
         let frame = build_account_frame(seq, did, handle, &time_str, active, status)?;
-        let compressed = zstd::encode_all(&frame[..], 3)
-            .map_err(|e| RepoError::Cbor(e.to_string()))?;
+        let compressed =
+            zstd::encode_all(&frame[..], 3).map_err(|e| RepoError::Cbor(e.to_string()))?;
         sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
             .bind(&compressed)
             .bind(seq)
             .execute(&self.pool)
             .await?;
 
-        self.publish_event(AtpCommitEvent { frame_bytes: frame, seq });
+        self.publish_event(AtpCommitEvent {
+            frame_bytes: frame,
+            seq,
+        });
 
-        tracing::info!("[atp] account broadcast: did={}, active={}, seq={}", did, active, seq);
+        tracing::info!(
+            "[atp] account broadcast: did={}, active={}, seq={}",
+            did,
+            active,
+            seq
+        );
         Ok(())
     }
 }

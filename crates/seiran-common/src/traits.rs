@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use std::time::Duration;
+use uuid::Uuid;
 
 // ==========================================
 // 1. データベース・共通構造体定義
@@ -66,10 +66,15 @@ impl std::error::Error for StoreError {}
 pub trait SessionStore: Send + Sync {
     /// セッションID（UUID）に紐付く検索セッションを取得します。
     async fn get_session(&self, session_id: &Uuid) -> Result<Option<SearchSession>, StoreError>;
-    
+
     /// 検索セッションを保存または更新（TTL付き）します。
-    async fn set_session(&self, session_id: Uuid, session: SearchSession, ttl: Duration) -> Result<(), StoreError>;
-    
+    async fn set_session(
+        &self,
+        session_id: Uuid,
+        session: SearchSession,
+        ttl: Duration,
+    ) -> Result<(), StoreError>;
+
     /// 指定された検索セッションを破棄します。
     async fn delete_session(&self, session_id: &Uuid) -> Result<(), StoreError>;
 }
@@ -96,9 +101,15 @@ pub enum ApDeliveryKind {
     /// のみ配送する（フォロワーコレクションではなく宛先個人のinboxのみ）。
     DirectMessage { post_id: i64 },
     /// Announce（リポスト）を配送する。
-    Announce { post_id: i64, original_ap_object_id: String },
+    Announce {
+        post_id: i64,
+        original_ap_object_id: String,
+    },
     /// Undo(Announce)（リポスト取り消し）を配送する。
-    UndoAnnounce { announce_post_id: i64, original_ap_object_id: String },
+    UndoAnnounce {
+        announce_post_id: i64,
+        original_ap_object_id: String,
+    },
     /// Delete(Note)（Bsky ネイティブポストのリポスト取り消し）を配送する。
     /// Bsky リモートポストは Fedi 側に Announce ではなく `PostToFollowers` の
     /// Create(Note) フォールバックとして配信されるため、取り消し時も Announce の
@@ -116,9 +127,17 @@ pub enum ApDeliveryKind {
         undo_prev: Option<PrevApReaction>,
     },
     /// リモートFediアンケートへの回答。選択肢ごとに Create(Note) を投票先へ配送する。
-    PollVote { post_id: i64, option_names: Vec<String> },
+    PollVote {
+        post_id: i64,
+        option_names: Vec<String>,
+    },
     /// Undo(Like/EmojiReact)（リアクション取り消し）を配送する。
-    UndoReaction { post_id: i64, prev_activity_id: String, content: String, emoji_url: Option<String> },
+    UndoReaction {
+        post_id: i64,
+        prev_activity_id: String,
+        content: String,
+        emoji_url: Option<String>,
+    },
     /// Update(Person)（プロフィール更新）を配送する。
     UpdateActor,
     /// Delete(Actor)（退会）を配送する。
@@ -136,7 +155,10 @@ pub struct PrevApReaction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Job {
     /// 新規フォローされたアクターの過去ログ（最大300件）を取得・保存する
-    ActorHistorySync { ap_uri: Option<String>, at_did: Option<String> },
+    ActorHistorySync {
+        ap_uri: Option<String>,
+        at_did: Option<String>,
+    },
 
     /// ローカルアクターの AP アクティビティ（投稿・リポスト・リアクション・プロフィール更新等）を
     /// Fedi フォロワーの Inbox へ配送する
@@ -144,10 +166,10 @@ pub enum Job {
 
     /// 外部（APのInbox等）から届いたアクティビティを非同期解析・DB保存する
     InboundActivityProcess { raw_activity: String },
-    
+
     /// リモートseiranアクターのハンドシェイク検証、Webfinger解決、アバター等プロキシ
     ActorMetadataResolve { actor_id: i64 },
-    
+
     /// AT Protocolリポジトリのコミットと、リレーへの通知
     AtpRepositoryPublish { actor_id: i64, commit_type: String },
 
@@ -158,7 +180,10 @@ pub enum Job {
     /// リスト機能（#63）: list-relay 仮想アクターによる代理フォロー/アンフォローの同期。
     /// `want_follow: true` はリストへの初回参照時、`false` は参照が0件になった時に積む
     /// （参照カウントの判定は呼び出し側の `ListRepository::actor_referenced_by_any_list` で行う）。
-    ProxyFollowSync { target_actor_id: i64, want_follow: bool },
+    ProxyFollowSync {
+        target_actor_id: i64,
+        want_follow: bool,
+    },
 
     /// 退会処理: 自分がフォローしていた相手（フォロイー）全員への一括アンフォロー
     /// （ATPフォロー解除コミット + AP Undo Follow配送 + follows削除）。フォロー数に
@@ -227,7 +252,13 @@ pub trait JobQueue: Send + Sync {
     /// InMemory 実装はプロセス内 sleep で遅延を実現するため、プロセス再起動で
     /// リトライ待ち状態は失われる（開発用途では許容）。Redis 実装は遅延キュー
     /// （sorted set）に載せるため、Worker プロセスが再起動してもリトライ状態は残る。
-    async fn enqueue_retry(&self, job: Job, priority: i32, attempt: u32, delay: Duration) -> Result<(), String>;
+    async fn enqueue_retry(
+        &self,
+        job: Job,
+        priority: i32,
+        attempt: u32,
+        delay: Duration,
+    ) -> Result<(), String>;
 
     /// 実行可能なジョブが出るまでブロックして 1 件取得する。
     /// WorkerEngine のメインループが呼ぶ。バックエンドを問わず同じインターフェースで
@@ -244,7 +275,10 @@ mod tests {
     #[test]
     fn job_serde_round_trip() {
         let jobs = vec![
-            Job::ActorHistorySync { ap_uri: Some("https://a.example/users/x".into()), at_did: None },
+            Job::ActorHistorySync {
+                ap_uri: Some("https://a.example/users/x".into()),
+                at_did: None,
+            },
             Job::ApDelivery {
                 actor_id: 1,
                 kind: ApDeliveryKind::PostToFollowers {
@@ -268,17 +302,31 @@ mod tests {
                     }),
                 },
             },
-            Job::ApDelivery { actor_id: 1, kind: ApDeliveryKind::DeleteActor },
-            Job::InboundActivityProcess { raw_activity: "{}".into() },
-            Job::AtpRepositoryPublish { actor_id: 1, commit_type: "create_post".into() },
+            Job::ApDelivery {
+                actor_id: 1,
+                kind: ApDeliveryKind::DeleteActor,
+            },
+            Job::InboundActivityProcess {
+                raw_activity: "{}".into(),
+            },
+            Job::AtpRepositoryPublish {
+                actor_id: 1,
+                commit_type: "create_post".into(),
+            },
             Job::BskyVideoPoll { media_file_id: 9 },
             Job::BskyPostCommitDeferred {
                 actor_id: 1,
                 post_id: 2,
                 text: "hello".into(),
                 attachment_ids: vec![3, 4],
-                reply_root: Some(("at://did:plc:x/app.bsky.feed.post/a".into(), "bafyrei...".into())),
-                reply_parent: Some(("at://did:plc:x/app.bsky.feed.post/b".into(), "bafyrei...".into())),
+                reply_root: Some((
+                    "at://did:plc:x/app.bsky.feed.post/a".into(),
+                    "bafyrei...".into(),
+                )),
+                reply_parent: Some((
+                    "at://did:plc:x/app.bsky.feed.post/b".into(),
+                    "bafyrei...".into(),
+                )),
                 now: Utc::now(),
             },
         ];

@@ -41,7 +41,10 @@ pub async fn fetch_ap_history(
     let outbox_url = match actor.outbox {
         Some(url) => url,
         None => {
-            tracing::warn!("[ApOutbox] {} の outbox フィールドが存在しません（スキップ）", actor_uri);
+            tracing::warn!(
+                "[ApOutbox] {} の outbox フィールドが存在しません（スキップ）",
+                actor_uri
+            );
             return Ok(vec![]);
         }
     };
@@ -50,7 +53,8 @@ pub async fn fetch_ap_history(
     let mut notes: Vec<ApNote> = Vec::new();
 
     // Outbox コレクション取得
-    let collection: serde_json::Value = match ap_client.http
+    let collection: serde_json::Value = match ap_client
+        .http
         .get(&outbox_url)
         .header("Accept", "application/activity+json, application/ld+json")
         .send()
@@ -64,7 +68,11 @@ pub async fn fetch_ap_history(
             }
         },
         Ok(r) => {
-            tracing::warn!("[ApOutbox] Outbox HTTP {} (非公開とみなしスキップ): {}", r.status(), outbox_url);
+            tracing::warn!(
+                "[ApOutbox] Outbox HTTP {} (非公開とみなしスキップ): {}",
+                r.status(),
+                outbox_url
+            );
             return Ok(vec![]);
         }
         Err(e) => {
@@ -87,7 +95,10 @@ pub async fn fetch_ap_history(
             if done {
                 return Ok(notes);
             }
-            page_val.get("next").and_then(|v| v.as_str()).map(|s| s.to_string())
+            page_val
+                .get("next")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
         }
         _ => return Ok(notes),
     };
@@ -98,7 +109,8 @@ pub async fn fetch_ap_history(
             break;
         }
 
-        let page: serde_json::Value = match ap_client.http
+        let page: serde_json::Value = match ap_client
+            .http
             .get(&url)
             .header("Accept", "application/activity+json, application/ld+json")
             .send()
@@ -125,7 +137,10 @@ pub async fn fetch_ap_history(
         if done {
             break;
         }
-        next_url = page.get("next").and_then(|v| v.as_str()).map(|s| s.to_string());
+        next_url = page
+            .get("next")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
     }
 
     Ok(notes)
@@ -176,7 +191,10 @@ fn collect_notes(
 /// 指定アクターの featured collection（ピン留め投稿, #61）を取得する。
 /// Actor に `featured` フィールドが無い場合や取得・パースに失敗した場合は
 /// ベストエフォートで空 Vec を返す（プロフィール表示自体は失敗させない）。
-pub async fn fetch_ap_featured(ap_client: &ApClient, actor_uri: &str) -> Result<Vec<ApNote>, ApError> {
+pub async fn fetch_ap_featured(
+    ap_client: &ApClient,
+    actor_uri: &str,
+) -> Result<Vec<ApNote>, ApError> {
     let actor = ap_client.fetch_actor(actor_uri).await?;
     let featured_url = match actor.featured {
         Some(url) => url,
@@ -235,12 +253,30 @@ fn extract_note_flexible(value: &serde_json::Value) -> Option<ApNote> {
     Some(ApNote {
         id: obj.get("id")?.as_str()?.to_string(),
         note_type: obj_type.to_string(),
-        content: obj.get("content").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        published: obj.get("published").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        attributed_to: obj.get("attributedTo").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        url: obj.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        in_reply_to: obj.get("inReplyTo").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        seiran_post_uuid: obj.get("seiranPostUuid").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        content: obj
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        published: obj
+            .get("published")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        attributed_to: obj
+            .get("attributedTo")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        url: obj
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        in_reply_to: obj
+            .get("inReplyTo")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        seiran_post_uuid: obj
+            .get("seiranPostUuid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     })
 }
 
@@ -251,10 +287,11 @@ pub async fn upsert_ap_note(
     actor_id: i64,
     note: &ApNote,
 ) -> Result<i64, sqlx::Error> {
-    if let Some(id) = sqlx::query_scalar::<_, i64>("SELECT id FROM posts WHERE ap_object_id = $1 LIMIT 1")
-        .bind(&note.id)
-        .fetch_optional(pool)
-        .await?
+    if let Some(id) =
+        sqlx::query_scalar::<_, i64>("SELECT id FROM posts WHERE ap_object_id = $1 LIMIT 1")
+            .bind(&note.id)
+            .fetch_optional(pool)
+            .await?
     {
         return Ok(id);
     }
@@ -311,11 +348,29 @@ fn extract_create_note(value: &serde_json::Value) -> Option<ApNote> {
     Some(ApNote {
         id: obj.get("id")?.as_str()?.to_string(),
         note_type: obj_type.to_string(),
-        content: obj.get("content").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        published: obj.get("published").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        attributed_to: obj.get("attributedTo").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        url: obj.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        in_reply_to: obj.get("inReplyTo").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        seiran_post_uuid: obj.get("seiranPostUuid").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        content: obj
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        published: obj
+            .get("published")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        attributed_to: obj
+            .get("attributedTo")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        url: obj
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        in_reply_to: obj
+            .get("inReplyTo")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        seiran_post_uuid: obj
+            .get("seiranPostUuid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     })
 }

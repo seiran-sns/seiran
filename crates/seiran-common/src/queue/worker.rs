@@ -15,15 +15,18 @@
 //! const PRIORITY_LOW      : i32 =   1;  // 過去ログ同期
 //! ```
 
+use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
-use sqlx::PgPool;
 
 use crate::ap::ApClient;
 use crate::jobs;
-use crate::repository::{ActorRepository, BlockRepository, FollowRepository, HashtagRepository, NotificationRepository, PostRepository, ReactionRepository, RemoteEmojiRepository};
+use crate::repository::{
+    ActorRepository, BlockRepository, FollowRepository, HashtagRepository, NotificationRepository,
+    PostRepository, ReactionRepository, RemoteEmojiRepository,
+};
 use crate::streaming::StreamHub;
 use crate::traits::{Job, JobQueue, QueuedJob};
 
@@ -160,7 +163,11 @@ pub struct WorkerEngine {
 impl WorkerEngine {
     pub fn new(queue: Arc<dyn JobQueue>, ap_client: Arc<ApClient>) -> Self {
         let ctx = Arc::new(JobContext::new(queue.clone(), ap_client));
-        Self { queue, ctx, max_concurrent: DEFAULT_MAX_CONCURRENT_JOBS }
+        Self {
+            queue,
+            ctx,
+            max_concurrent: DEFAULT_MAX_CONCURRENT_JOBS,
+        }
     }
 
     pub fn new_with_db(
@@ -177,7 +184,11 @@ impl WorkerEngine {
             ctx_builder = ctx_builder.with_inbox_context(inbox);
         }
         let ctx = Arc::new(ctx_builder);
-        Self { queue, ctx, max_concurrent: DEFAULT_MAX_CONCURRENT_JOBS }
+        Self {
+            queue,
+            ctx,
+            max_concurrent: DEFAULT_MAX_CONCURRENT_JOBS,
+        }
     }
 
     /// 同時実行数の上限を変更する（既定は `DEFAULT_MAX_CONCURRENT_JOBS`）。
@@ -189,7 +200,10 @@ impl WorkerEngine {
     /// バックグラウンドワーカーループを起動します
     /// このメソッドは `tokio::spawn` で呼び出してください
     pub async fn run(self) {
-        tracing::info!("[WorkerEngine] ジョブワーカー起動 (最大並列数: {})", self.max_concurrent);
+        tracing::info!(
+            "[WorkerEngine] ジョブワーカー起動 (最大並列数: {})",
+            self.max_concurrent
+        );
         let semaphore = Arc::new(Semaphore::new(self.max_concurrent));
 
         loop {
@@ -214,7 +228,11 @@ impl WorkerEngine {
 
 /// ジョブを実行し、失敗時は指数バックオフでリトライキューへ再投入します。
 async fn execute_with_retry(queued: QueuedJob, ctx: Arc<JobContext>, queue: Arc<dyn JobQueue>) {
-    let QueuedJob { job, priority, attempt } = queued;
+    let QueuedJob {
+        job,
+        priority,
+        attempt,
+    } = queued;
     let config = retry_config_for(&job);
     let job_name = job_name(&job);
 
@@ -243,20 +261,25 @@ async fn execute_with_retry(queued: QueuedJob, ctx: Arc<JobContext>, queue: Arc<
 
             tracing::error!(
                 "[Worker] 失敗: {} - {} → {}ms後にリトライ (attempt {})",
-                job_name, e, wait.as_millis(), attempt + 1
+                job_name,
+                e,
+                wait.as_millis(),
+                attempt + 1
             );
 
             if let Err(enqueue_err) = queue.enqueue_retry(job, priority, attempt + 1, wait).await {
                 tracing::error!(
                     "[Worker] リトライ再投入失敗（ジョブは失われました）: {} - {}",
-                    job_name, enqueue_err
+                    job_name,
+                    enqueue_err
                 );
             }
         }
         Err(e) => {
             tracing::error!(
                 "[Worker] 最大リトライ数に達しました（破棄）: {} - {}",
-                job_name, e
+                job_name,
+                e
             );
         }
     }
@@ -277,42 +300,55 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::ActorHistorySync { ap_uri, at_did } => {
             jobs::actor_history_sync::handle(ap_uri, at_did, ctx).await
         }
-        Job::ApDelivery { actor_id, kind } => {
-            jobs::ap_delivery::handle(actor_id, kind, ctx).await
-        }
+        Job::ApDelivery { actor_id, kind } => jobs::ap_delivery::handle(actor_id, kind, ctx).await,
         Job::InboundActivityProcess { raw_activity } => {
             jobs::inbound_activity_process::handle(raw_activity, ctx).await
         }
         Job::ActorMetadataResolve { actor_id } => {
             jobs::actor_metadata_resolve::handle(actor_id, ctx).await
         }
-        Job::AtpRepositoryPublish { actor_id, commit_type } => {
-            jobs::atp_repository_publish::handle(actor_id, commit_type, ctx).await
-        }
+        Job::AtpRepositoryPublish {
+            actor_id,
+            commit_type,
+        } => jobs::atp_repository_publish::handle(actor_id, commit_type, ctx).await,
         Job::BskyVideoPoll { media_file_id } => {
             jobs::bsky_video_poll::handle(media_file_id, ctx).await
         }
-        Job::ProxyFollowSync { target_actor_id, want_follow } => {
-            jobs::proxy_follow_sync::handle(target_actor_id, want_follow, ctx).await
-        }
+        Job::ProxyFollowSync {
+            target_actor_id,
+            want_follow,
+        } => jobs::proxy_follow_sync::handle(target_actor_id, want_follow, ctx).await,
         Job::AccountWithdrawUnfollowAll { actor_id, username } => {
             jobs::account_withdraw_unfollow_all::handle(actor_id, username, ctx).await
         }
-        Job::BskyPostCommitDeferred { actor_id, post_id, text, attachment_ids, reply_root, reply_parent, now } => {
-            jobs::bsky_post_commit_deferred::handle(actor_id, post_id, text, attachment_ids, reply_root, reply_parent, now, ctx).await
+        Job::BskyPostCommitDeferred {
+            actor_id,
+            post_id,
+            text,
+            attachment_ids,
+            reply_root,
+            reply_parent,
+            now,
+        } => {
+            jobs::bsky_post_commit_deferred::handle(
+                actor_id,
+                post_id,
+                text,
+                attachment_ids,
+                reply_root,
+                reply_parent,
+                now,
+                ctx,
+            )
+            .await
         }
-        Job::ResolveBskyMention { did } => {
-            jobs::resolve_bsky_mention::handle(did, ctx).await
-        }
-        Job::BskyDmSend { post_id } => {
-            jobs::bsky_dm_send::handle(post_id, ctx).await
-        }
-        Job::RemoteFollowListSync { actor_id, direction } => {
-            jobs::remote_follow_list_sync::handle(actor_id, direction, ctx).await
-        }
-        Job::RemoteActorResolve { uri } => {
-            jobs::remote_actor_resolve::handle(uri, ctx).await
-        }
+        Job::ResolveBskyMention { did } => jobs::resolve_bsky_mention::handle(did, ctx).await,
+        Job::BskyDmSend { post_id } => jobs::bsky_dm_send::handle(post_id, ctx).await,
+        Job::RemoteFollowListSync {
+            actor_id,
+            direction,
+        } => jobs::remote_follow_list_sync::handle(actor_id, direction, ctx).await,
+        Job::RemoteActorResolve { uri } => jobs::remote_actor_resolve::handle(uri, ctx).await,
     }
 }
 
@@ -345,7 +381,7 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         },
         Job::ApDelivery { .. } => RetryConfig {
             max_attempts: 10,
-            base_delay_ms: 5000, // 5s → 10s → ... → max
+            base_delay_ms: 5000,     // 5s → 10s → ... → max
             max_delay_ms: 3_600_000, // 最大1時間
         },
         Job::InboundActivityProcess { .. } => RetryConfig {
@@ -423,7 +459,11 @@ mod tests {
 
     #[test]
     fn backoff_grows_exponentially() {
-        let config = RetryConfig { max_attempts: 10, base_delay_ms: 1000, max_delay_ms: 30_000 };
+        let config = RetryConfig {
+            max_attempts: 10,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
+        };
         assert_eq!(backoff_delay_ms(&config, 0), 1000);
         assert_eq!(backoff_delay_ms(&config, 1), 2000);
         assert_eq!(backoff_delay_ms(&config, 2), 4000);
@@ -432,14 +472,22 @@ mod tests {
 
     #[test]
     fn backoff_is_clamped_to_max_delay() {
-        let config = RetryConfig { max_attempts: 10, base_delay_ms: 5000, max_delay_ms: 60_000 };
+        let config = RetryConfig {
+            max_attempts: 10,
+            base_delay_ms: 5000,
+            max_delay_ms: 60_000,
+        };
         assert_eq!(backoff_delay_ms(&config, 10), 60_000);
     }
 
     #[test]
     fn backoff_with_equal_base_and_max_is_fixed_interval() {
         // BskyVideoPoll の「固定3秒間隔」設定が成立していること
-        let config = RetryConfig { max_attempts: 10, base_delay_ms: 3000, max_delay_ms: 3000 };
+        let config = RetryConfig {
+            max_attempts: 10,
+            base_delay_ms: 3000,
+            max_delay_ms: 3000,
+        };
         for attempt in 0..10 {
             assert_eq!(backoff_delay_ms(&config, attempt), 3000);
         }
@@ -447,7 +495,11 @@ mod tests {
 
     #[test]
     fn backoff_does_not_overflow_on_huge_attempt() {
-        let config = RetryConfig { max_attempts: 100, base_delay_ms: 1000, max_delay_ms: 60_000 };
+        let config = RetryConfig {
+            max_attempts: 100,
+            base_delay_ms: 1000,
+            max_delay_ms: 60_000,
+        };
         // 2^attempt が u64 を溢れる領域でもパニックせず max にクランプされる
         assert_eq!(backoff_delay_ms(&config, 63), 60_000);
         assert_eq!(backoff_delay_ms(&config, 64), 60_000);
@@ -467,7 +519,12 @@ mod tests {
         let engine = WorkerEngine::new(Arc::clone(&queue), ap_client).with_max_concurrent(2);
 
         queue
-            .enqueue(Job::InboundActivityProcess { raw_activity: "{}".into() }, priority::NORMAL)
+            .enqueue(
+                Job::InboundActivityProcess {
+                    raw_activity: "{}".into(),
+                },
+                priority::NORMAL,
+            )
             .await
             .unwrap();
 

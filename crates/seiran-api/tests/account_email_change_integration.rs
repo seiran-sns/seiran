@@ -25,7 +25,11 @@ use support::{authed_json_request, body_json, test_router};
 /// テスト専用の使い捨てユーザーを登録し、(user_id, token) を返す。
 /// このDBは `require_email_verification=true` のため、`email_verifications` に直接
 /// INSERT してトークンを取得し `registration_token` 経由で登録する（メール送信を経由しない）。
-async fn register_test_user(app: &axum::Router, pool: &sqlx::PgPool, username_prefix: &str) -> (i64, String) {
+async fn register_test_user(
+    app: &axum::Router,
+    pool: &sqlx::PgPool,
+    username_prefix: &str,
+) -> (i64, String) {
     let suffix = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
     let username = format!("{}{}", username_prefix, suffix);
     let email = format!("{}@example.com", username);
@@ -56,7 +60,10 @@ async fn register_test_user(app: &axum::Router, pool: &sqlx::PgPool, username_pr
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK, "テストユーザー登録に失敗");
     let body = body_json(res).await;
-    let token = body["token"].as_str().expect("token フィールドがありません").to_string();
+    let token = body["token"]
+        .as_str()
+        .expect("token フィールドがありません")
+        .to_string();
     let user_id = body["user"]["id"].as_i64().expect("user.id は数値のはず");
     (user_id, token)
 }

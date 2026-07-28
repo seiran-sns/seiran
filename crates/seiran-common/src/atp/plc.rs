@@ -99,7 +99,11 @@ pub fn prepare_plc_genesis(
     let rotation_did_key = p256_to_did_key(rotation_signing_key.verifying_key());
     // ATPハンドルは常に小文字（`crate::username::to_atp_username` 参照。DNS/HTTPホスト名は
     // 経路上で小文字化されうるため、大文字混じりで PLC に登録すると恒久的に解決不能になる）。
-    let handle = format!("at://{}.{}", crate::username::to_atp_username(username), pds_domain);
+    let handle = format!(
+        "at://{}.{}",
+        crate::username::to_atp_username(username),
+        pds_domain
+    );
     let pds_endpoint = format!("https://{}", pds_domain);
 
     let user_signing_key = SigningKey::random(&mut OsRng);
@@ -111,7 +115,10 @@ pub fn prepare_plc_genesis(
     let mut services_unsigned = BTreeMap::new();
     services_unsigned.insert(
         "atproto_pds".to_string(),
-        PlcService { endpoint: pds_endpoint.clone(), r#type: "AtprotoPersonalDataServer".to_string() },
+        PlcService {
+            endpoint: pds_endpoint.clone(),
+            r#type: "AtprotoPersonalDataServer".to_string(),
+        },
     );
 
     // ① 署名前オペレーションを DAG-CBOR エンコード → rotation key で署名
@@ -123,8 +130,8 @@ pub fn prepare_plc_genesis(
         r#type: "plc_operation".to_string(),
         verification_methods: verification_methods.clone(),
     };
-    let unsigned_cbor = serde_ipld_dagcbor::to_vec(&unsigned_op)
-        .map_err(|e| PlcError::Cbor(e.to_string()))?;
+    let unsigned_cbor =
+        serde_ipld_dagcbor::to_vec(&unsigned_op).map_err(|e| PlcError::Cbor(e.to_string()))?;
 
     // low-S 正規化（AT Protocol/PLC の検証は low-S 必須。crates/seiran-common/src/atp/repo.rs の
     // create_commit と同じ理由）。
@@ -136,7 +143,10 @@ pub fn prepare_plc_genesis(
     let mut services_signed = BTreeMap::new();
     services_signed.insert(
         "atproto_pds".to_string(),
-        PlcService { endpoint: pds_endpoint.clone(), r#type: "AtprotoPersonalDataServer".to_string() },
+        PlcService {
+            endpoint: pds_endpoint.clone(),
+            r#type: "AtprotoPersonalDataServer".to_string(),
+        },
     );
     let signed_op = GenesisOpSigned {
         also_known_as: vec![handle.clone()],
@@ -147,8 +157,8 @@ pub fn prepare_plc_genesis(
         r#type: "plc_operation".to_string(),
         verification_methods,
     };
-    let signed_cbor = serde_ipld_dagcbor::to_vec(&signed_op)
-        .map_err(|e| PlcError::Cbor(e.to_string()))?;
+    let signed_cbor =
+        serde_ipld_dagcbor::to_vec(&signed_op).map_err(|e| PlcError::Cbor(e.to_string()))?;
     let hash = Sha256::digest(&signed_cbor);
     let b32 = base32::encode(
         base32::Alphabet::RFC4648 { padding: false },
@@ -162,7 +172,11 @@ pub fn prepare_plc_genesis(
         .map_err(|e| PlcError::KeyGen(e.to_string()))?
         .to_string();
 
-    Ok(PlcGenesis { did, signing_key_pem, signed_op })
+    Ok(PlcGenesis {
+        did,
+        signing_key_pem,
+        signed_op,
+    })
 }
 
 /// 準備済み genesis op を plc.directory に送信する（ネットワーク通信あり）。

@@ -1,14 +1,10 @@
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    Json,
-};
+use axum::{extract::State, http::HeaderMap, Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::AppState;
 use crate::error::ApiError;
 use crate::middleware::require_admin;
+use crate::AppState;
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
 
@@ -72,7 +68,13 @@ pub async fn get_site_settings(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<SiteSettingsResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     let settings = state
         .site_settings
@@ -89,9 +91,19 @@ pub async fn update_site_settings(
     State(state): State<AppState>,
     Json(req): Json<UpdateSiteSettingsRequest>,
 ) -> Result<Json<SiteSettingsResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
-    if let Some(value) = req.media_proxy_url.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(value) = req
+        .media_proxy_url
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         let url = url::Url::parse(value)
             .map_err(|_| ApiError::BadRequest("INVALID_MEDIA_PROXY_URL".to_string()))?;
         if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
@@ -100,16 +112,36 @@ pub async fn update_site_settings(
     }
 
     let pairs: Vec<(&str, String)> = [
-        req.smtp_host.as_deref().map(|v| ("smtp_host", v.to_string())),
-        req.smtp_port.as_deref().map(|v| ("smtp_port", v.to_string())),
-        req.smtp_username.as_deref().map(|v| ("smtp_username", v.to_string())),
-        req.smtp_password.as_deref().map(|v| ("smtp_password", v.to_string())),
-        req.smtp_from.as_deref().map(|v| ("smtp_from", v.to_string())),
-        req.require_email_verification.as_deref().map(|v| ("require_email_verification", v.to_string())),
-        req.site_name.as_deref().map(|v| ("site_name", v.to_string())),
-        req.site_color.as_deref().map(|v| ("site_color", v.to_string())),
-        req.site_icon_url.as_deref().map(|v| ("site_icon_url", v.to_string())),
-        req.media_proxy_url.as_deref().map(|v| ("media_proxy_url", v.trim_end_matches('/').to_string())),
+        req.smtp_host
+            .as_deref()
+            .map(|v| ("smtp_host", v.to_string())),
+        req.smtp_port
+            .as_deref()
+            .map(|v| ("smtp_port", v.to_string())),
+        req.smtp_username
+            .as_deref()
+            .map(|v| ("smtp_username", v.to_string())),
+        req.smtp_password
+            .as_deref()
+            .map(|v| ("smtp_password", v.to_string())),
+        req.smtp_from
+            .as_deref()
+            .map(|v| ("smtp_from", v.to_string())),
+        req.require_email_verification
+            .as_deref()
+            .map(|v| ("require_email_verification", v.to_string())),
+        req.site_name
+            .as_deref()
+            .map(|v| ("site_name", v.to_string())),
+        req.site_color
+            .as_deref()
+            .map(|v| ("site_color", v.to_string())),
+        req.site_icon_url
+            .as_deref()
+            .map(|v| ("site_icon_url", v.to_string())),
+        req.media_proxy_url
+            .as_deref()
+            .map(|v| ("media_proxy_url", v.trim_end_matches('/').to_string())),
     ]
     .into_iter()
     .flatten()

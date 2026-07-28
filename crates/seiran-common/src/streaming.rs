@@ -84,7 +84,10 @@ pub async fn broadcast_reaction_update(
     reactor_actor_id: i64,
     reactor_emoji: Option<&str>,
 ) {
-    let agg = reactions.aggregate_for_post(post_id).await.unwrap_or_default();
+    let agg = reactions
+        .aggregate_for_post(post_id)
+        .await
+        .unwrap_or_default();
     let reactions_json: Vec<serde_json::Value> = agg
         .into_iter()
         .filter(|(emoji, _, _)| !emoji.is_empty())
@@ -95,7 +98,10 @@ pub async fn broadcast_reaction_update(
 
     let mut recipients: HashSet<i64> = HashSet::new();
     recipients.insert(post_author_id);
-    if let Ok(rows) = follows.find_accepted_local_follower_ids(post_author_id).await {
+    if let Ok(rows) = follows
+        .find_accepted_local_follower_ids(post_author_id)
+        .await
+    {
         recipients.extend(rows);
     }
 

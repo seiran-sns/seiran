@@ -58,14 +58,17 @@ impl JetstreamLeaderElector {
     /// （post/like用とブロック監視用など、系統の異なるJetstream接続は別キーを渡して独立に
     /// リーダー選出する）。
     pub async fn connect(redis_url: &str, lease_key: &str) -> Result<Self, String> {
-        tokio::time::timeout(REDIS_CALL_TIMEOUT, Self::connect_inner(redis_url, lease_key))
-            .await
-            .map_err(|_| "Redis接続がタイムアウトしました".to_string())?
+        tokio::time::timeout(
+            REDIS_CALL_TIMEOUT,
+            Self::connect_inner(redis_url, lease_key),
+        )
+        .await
+        .map_err(|_| "Redis接続がタイムアウトしました".to_string())?
     }
 
     async fn connect_inner(redis_url: &str, lease_key: &str) -> Result<Self, String> {
-        let client = redis::Client::open(redis_url)
-            .map_err(|e| format!("Redis接続URLが不正です: {}", e))?;
+        let client =
+            redis::Client::open(redis_url).map_err(|e| format!("Redis接続URLが不正です: {}", e))?;
         let conn = ConnectionManager::new(client)
             .await
             .map_err(|e| format!("Redis接続に失敗しました: {}", e))?;

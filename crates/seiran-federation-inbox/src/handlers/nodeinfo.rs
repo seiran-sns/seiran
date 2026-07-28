@@ -1,17 +1,10 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use sqlx::Row;
 use std::sync::Arc;
 
 use crate::AppState;
 
-pub async fn nodeinfo_discovery_handler(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+pub async fn nodeinfo_discovery_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let body = serde_json::json!({
         "links": [{
             "rel": "http://nodeinfo.diaspora.software/ns/schema/2.1",
@@ -45,7 +38,8 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
 
     // サイト外観（#30/#42）を metadata として同梱する。
     // Misskey 系 nodeinfo の慣習に合わせ nodeName / themeColor / iconUrl を返す。
-    let mut appearance: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut appearance: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     if let Ok(rows) = sqlx::query(
         "SELECT key, value FROM site_settings
          WHERE key IN ('site_name', 'site_color', 'site_icon_url')",
@@ -54,7 +48,10 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
     .await
     {
         for row in rows {
-            if let (Ok(k), Ok(v)) = (row.try_get::<String, _>("key"), row.try_get::<String, _>("value")) {
+            if let (Ok(k), Ok(v)) = (
+                row.try_get::<String, _>("key"),
+                row.try_get::<String, _>("value"),
+            ) {
                 appearance.insert(k, v);
             }
         }
@@ -62,7 +59,11 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
     let get = |k: &str| appearance.get(k).cloned().unwrap_or_default();
     let site_name = {
         let n = get("site_name");
-        if n.is_empty() { "seiran".to_string() } else { n }
+        if n.is_empty() {
+            "seiran".to_string()
+        } else {
+            n
+        }
     };
     let site_color = get("site_color");
     let site_icon_url = get("site_icon_url");
@@ -97,7 +98,10 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
 
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/json; profile=\"http://nodeinfo.diaspora.software/ns/schema/2.1#\"")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/json; profile=\"http://nodeinfo.diaspora.software/ns/schema/2.1#\"",
+        )],
         Json(body),
     )
         .into_response()

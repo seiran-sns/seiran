@@ -28,7 +28,10 @@ async fn create_note_and_fetch_round_trip() {
     let app = test_router().await;
     let token = login_test_user(&app, "seiran1").await;
 
-    let text = format!("結合テスト投稿 {}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+    let text = format!(
+        "結合テスト投稿 {}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    );
     let create_req = authed_json_request(
         "POST",
         "/api/notes/create",
@@ -43,7 +46,10 @@ async fn create_note_and_fetch_round_trip() {
     assert_eq!(create_res.status(), StatusCode::OK);
     let created = body_json(create_res).await;
     assert_eq!(created["text"], text);
-    let note_id = created["id"].as_str().expect("id フィールドがありません").to_string();
+    let note_id = created["id"]
+        .as_str()
+        .expect("id フィールドがありません")
+        .to_string();
 
     let get_req = Request::builder()
         .method("GET")
@@ -77,7 +83,11 @@ async fn create_note_without_auth_returns_json_401() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
     let json = body_json(res).await;
-    assert!(json["code"].is_string(), "ApiError の JSON ボディでなければならない: {:?}", json);
+    assert!(
+        json["code"].is_string(),
+        "ApiError の JSON ボディでなければならない: {:?}",
+        json
+    );
 }
 
 /// 存在しない note_id への GET は 404 + JSON を返す。
@@ -95,7 +105,11 @@ async fn get_note_not_found_returns_json_404() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 
     let json = body_json(res).await;
-    assert!(json["code"].is_string(), "ApiError の JSON ボディでなければならない: {:?}", json);
+    assert!(
+        json["code"].is_string(),
+        "ApiError の JSON ボディでなければならない: {:?}",
+        json
+    );
 }
 
 /// リポストの `GET /api/notes/:id` レスポンスで、埋め込まれた元ポスト（`renote`）の
@@ -108,7 +122,10 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
     let app = test_router().await;
     let token = login_test_user(&app, "seiran1").await;
 
-    let text = format!("絵文字埋め込みテスト元投稿 {}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+    let text = format!(
+        "絵文字埋め込みテスト元投稿 {}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    );
     let create_req = authed_json_request(
         "POST",
         "/api/notes/create",
@@ -137,12 +154,17 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
     let voter_actor_id: i64 = sqlx::query_scalar(
         "SELECT a.id FROM actors a JOIN users u ON u.id = a.user_id WHERE u.username = 'seiran1'",
     )
-    .fetch_one(&pool).await.expect("seiran1 actor取得に失敗");
+    .fetch_one(&pool)
+    .await
+    .expect("seiran1 actor取得に失敗");
     sqlx::query(
         "INSERT INTO poll_votes (post_id, actor_id, option_index) VALUES ($1, $2, 0)
          ON CONFLICT (post_id, actor_id, option_index) DO NOTHING",
     )
-    .bind(original_id).bind(voter_actor_id).execute(&pool).await
+    .bind(original_id)
+    .bind(voter_actor_id)
+    .execute(&pool)
+    .await
     .expect("アンケート回答の準備に失敗");
 
     let repost_req = authed_json_request(
@@ -167,15 +189,17 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
     let fetched = body_json(get_res).await;
 
     assert_eq!(
-        fetched["renote"]["emojis"][":test_emoji:"],
-        "https://example.com/test.png",
+        fetched["renote"]["emojis"][":test_emoji:"], "https://example.com/test.png",
         "埋め込まれた元ポストのemojisマップが失われている: {:?}",
         fetched["renote"]
     );
     assert_eq!(fetched["renote"]["contentWarning"], "アンケート注意書き");
     assert_eq!(fetched["renote"]["poll"]["multiple"], poll["multiple"]);
     assert_eq!(fetched["renote"]["poll"]["options"], poll["options"]);
-    assert_eq!(fetched["renote"]["poll"]["votedByMe"], serde_json::json!([0]));
+    assert_eq!(
+        fetched["renote"]["poll"]["votedByMe"],
+        serde_json::json!([0])
+    );
 }
 
 /// ローカル投稿の本文中に含まれる `:shortcode:` が、既存の `custom_emojis` と照合されて
@@ -188,7 +212,10 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
 async fn create_note_resolves_local_custom_emoji_shortcode_in_body() {
     let pool = get_db_pool().await.expect("DB接続に失敗");
 
-    let shortcode = format!("test_emoji_{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+    let shortcode = format!(
+        "test_emoji_{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    );
     let media_file_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
     let emoji_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
 
@@ -249,6 +276,14 @@ async fn create_note_resolves_local_custom_emoji_shortcode_in_body() {
     );
 
     // クリーンアップ（テスト用に作成した絵文字・メディアファイルを削除）。
-    sqlx::query("DELETE FROM custom_emojis WHERE id = $1").bind(emoji_id).execute(&pool).await.ok();
-    sqlx::query("DELETE FROM media_files WHERE id = $1").bind(media_file_id).execute(&pool).await.ok();
+    sqlx::query("DELETE FROM custom_emojis WHERE id = $1")
+        .bind(emoji_id)
+        .execute(&pool)
+        .await
+        .ok();
+    sqlx::query("DELETE FROM media_files WHERE id = $1")
+        .bind(media_file_id)
+        .execute(&pool)
+        .await
+        .ok();
 }

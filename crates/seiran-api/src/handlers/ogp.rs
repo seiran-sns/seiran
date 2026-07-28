@@ -39,7 +39,9 @@ fn strip_link_markers(body: &str) -> String {
             if let Some(close_bracket_offset) = chars[i + 1..].iter().position(|&c| c == ']') {
                 let text_end = i + 1 + close_bracket_offset;
                 if chars.get(text_end + 1) == Some(&'(') {
-                    if let Some(close_paren_offset) = chars[text_end + 2..].iter().position(|&c| c == ')') {
+                    if let Some(close_paren_offset) =
+                        chars[text_end + 2..].iter().position(|&c| c == ')')
+                    {
                         let url_end = text_end + 2 + close_paren_offset;
                         result.extend(&chars[i + 1..text_end]);
                         i = url_end + 1;
@@ -66,7 +68,13 @@ fn truncate_graphemes(s: &str, max: usize) -> String {
 }
 
 /// SPA の `<head>` に注入する OGP/Twitter Card の `<meta>` 群を組み立てる。
-fn build_meta_tags(title: &str, description: &str, image: Option<&str>, page_url: &str, site_name: &str) -> String {
+fn build_meta_tags(
+    title: &str,
+    description: &str,
+    image: Option<&str>,
+    page_url: &str,
+    site_name: &str,
+) -> String {
     let title = escape_html(title);
     let description = escape_html(description);
     let page_url = escape_html(page_url);
@@ -101,7 +109,12 @@ fn replace_title(html: &str, title: &str) -> String {
         return html.to_string();
     }
     let content_start = start + "<title>".len();
-    format!("{}{}{}", &html[..content_start], escape_html(title), &html[end..])
+    format!(
+        "{}{}{}",
+        &html[..content_start],
+        escape_html(title),
+        &html[end..]
+    )
 }
 
 /// `state.frontend_origin` から SPA の index.html を取得する。フロントエンドがどのパスに
@@ -162,7 +175,11 @@ pub fn wants_html(headers: &HeaderMap) -> bool {
 async fn site_name(state: &AppState) -> String {
     let settings = state.site_settings.get_all().await.unwrap_or_default();
     let name = settings.get("site_name").cloned().unwrap_or_default();
-    if name.is_empty() { "seiran".to_string() } else { name }
+    if name.is_empty() {
+        "seiran".to_string()
+    } else {
+        name
+    }
 }
 
 /// ポスト詳細ページ用の OGP 付き SPA HTML を返す（`GET /notes/:id`、AP Accept 以外）。
@@ -180,7 +197,11 @@ pub async fn note_ogp_html(post_id: i64, state: &AppState) -> Response {
     let attachments = att_map.remove(&post_id).unwrap_or_default();
     let note = to_note_response(post, attachments);
 
-    let display_name = note.user.display_name.clone().unwrap_or_else(|| note.user.username.clone());
+    let display_name = note
+        .user
+        .display_name
+        .clone()
+        .unwrap_or_else(|| note.user.username.clone());
     let handle = match &note.user.domain {
         Some(domain) if !domain.is_empty() => format!("@{}@{}", note.user.username, domain),
         _ => format!("@{}", note.user.username),
@@ -231,7 +252,11 @@ pub async fn profile_ogp(Path(handle): Path<String>, State(state): State<AppStat
             let display_name: Option<String> = r.try_get("display_name").ok().flatten();
             let bio: Option<String> = r.try_get("bio").ok().flatten();
             let avatar_url: Option<String> = r.try_get("avatar_url").ok().flatten();
-            (display_name.unwrap_or_else(|| username.clone()), bio.unwrap_or_default(), avatar_url)
+            (
+                display_name.unwrap_or_else(|| username.clone()),
+                bio.unwrap_or_default(),
+                avatar_url,
+            )
         }
         Ok(None) => return render_spa_plain(&state).await,
         Err(e) => {
@@ -241,11 +266,25 @@ pub async fn profile_ogp(Path(handle): Path<String>, State(state): State<AppStat
     };
 
     let is_local = domain == state.local_domain;
-    let acct = if is_local { format!("@{}", username) } else { format!("@{}@{}", username, domain) };
+    let acct = if is_local {
+        format!("@{}", username)
+    } else {
+        format!("@{}@{}", username, domain)
+    };
     let title = format!("{}（{}）", display_name, acct);
     let description = truncate_graphemes(&bio, DESCRIPTION_MAX_GRAPHEMES);
-    let page_url = format!("https://{}/@{}", state.local_domain, acct.trim_start_matches('@'));
+    let page_url = format!(
+        "https://{}/@{}",
+        state.local_domain,
+        acct.trim_start_matches('@')
+    );
     let name = site_name(&state).await;
-    let meta_tags = build_meta_tags(&title, &description, avatar_url.as_deref(), &page_url, &name);
+    let meta_tags = build_meta_tags(
+        &title,
+        &description,
+        avatar_url.as_deref(),
+        &page_url,
+        &name,
+    );
     render_spa_with_ogp(&title, &meta_tags, &state).await
 }

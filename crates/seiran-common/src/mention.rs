@@ -11,7 +11,9 @@ use std::time::Duration;
 use sqlx::{PgPool, Row};
 
 use crate::atp::fetch_bsky_profile;
-use crate::atp::repo::{BskyFacet, BskyFacetFeature, BskyFacetIndex, BskyFacetLink, BskyFacetMention, BskyFacetTag};
+use crate::atp::repo::{
+    BskyFacet, BskyFacetFeature, BskyFacetIndex, BskyFacetLink, BskyFacetMention, BskyFacetTag,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bsky 向けメンション変換
@@ -172,7 +174,8 @@ pub async fn convert_mentions_for_bsky(
                         result.push_str(&domain);
                         let byte_end = result.len();
 
-                        let link_url = match get_fedi_actor_home_url(&username, &domain, pool).await {
+                        let link_url = match get_fedi_actor_home_url(&username, &domain, pool).await
+                        {
                             Some(home_url) => home_url,
                             None => format!("https://{}/@{}@{}", local_domain, username, domain),
                         };
@@ -277,7 +280,10 @@ fn scan_hashtag(text_chars: &[char], start: usize) -> Option<(String, usize)> {
 /// `BskyFacet`（tag）を生成するヘルパー。
 fn make_tag_facet(byte_start: usize, byte_end: usize, tag: String) -> BskyFacet {
     BskyFacet {
-        index: BskyFacetIndex { byte_end, byte_start },
+        index: BskyFacetIndex {
+            byte_end,
+            byte_start,
+        },
         features: vec![BskyFacetFeature::Tag(BskyFacetTag {
             tag,
             kind: "app.bsky.richtext.facet#tag".to_string(),
@@ -288,7 +294,10 @@ fn make_tag_facet(byte_start: usize, byte_end: usize, tag: String) -> BskyFacet 
 /// `BskyFacet`（mention）を生成するヘルパー。
 fn make_mention_facet(byte_start: usize, byte_end: usize, did: String) -> BskyFacet {
     BskyFacet {
-        index: BskyFacetIndex { byte_end, byte_start },
+        index: BskyFacetIndex {
+            byte_end,
+            byte_start,
+        },
         features: vec![BskyFacetFeature::Mention(BskyFacetMention {
             did,
             kind: "app.bsky.richtext.facet#mention".to_string(),
@@ -299,7 +308,10 @@ fn make_mention_facet(byte_start: usize, byte_end: usize, did: String) -> BskyFa
 /// `BskyFacet`（link）を生成するヘルパー。
 fn make_link_facet(byte_start: usize, byte_end: usize, uri: String) -> BskyFacet {
     BskyFacet {
-        index: BskyFacetIndex { byte_end, byte_start },
+        index: BskyFacetIndex {
+            byte_end,
+            byte_start,
+        },
         features: vec![BskyFacetFeature::Link(BskyFacetLink {
             uri,
             kind: "app.bsky.richtext.facet#link".to_string(),
@@ -340,24 +352,23 @@ async fn get_local_actor_did(username: &str, pool: &PgPool) -> Option<String> {
 
 /// `actors` テーブルにローカルアクター（`actor_type = 'local'`）として存在するか確認する。
 async fn is_local_actor(username: &str, pool: &PgPool) -> bool {
-    sqlx::query(
-        "SELECT 1 FROM actors WHERE actor_type = 'local' AND username = $1 LIMIT 1",
-    )
-    .bind(username)
-    .fetch_optional(pool)
-    .await
-    .map(|opt| opt.is_some())
-    .unwrap_or(false)
+    sqlx::query("SELECT 1 FROM actors WHERE actor_type = 'local' AND username = $1 LIMIT 1")
+        .bind(username)
+        .fetch_optional(pool)
+        .await
+        .map(|opt| opt.is_some())
+        .unwrap_or(false)
 }
 
 /// `actors` テーブルからローカルアクター（`actor_type = 'local'`）の `id` を取得する。
 async fn get_local_actor_id(username: &str, pool: &PgPool) -> Option<i64> {
-    let row = sqlx::query("SELECT id FROM actors WHERE actor_type = 'local' AND username = $1 LIMIT 1")
-        .bind(username)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()?;
+    let row =
+        sqlx::query("SELECT id FROM actors WHERE actor_type = 'local' AND username = $1 LIMIT 1")
+            .bind(username)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()?;
     row.try_get::<i64, _>("id").ok()
 }
 
@@ -368,7 +379,11 @@ async fn get_local_actor_id(username: &str, pool: &PgPool) -> Option<i64> {
 /// `convert_mentions_for_bsky`/`convert_mentions_for_ap` は配信対象プロトコルが有効な投稿
 /// （Bsky/AP接続あり）でのみ呼ばれる配信用テキスト変換だが、メンション通知はローカル受信者の
 /// 話であり配信設定とは独立なため、投稿保存時は常にこちらを呼ぶ必要がある。
-pub async fn extract_local_mention_actor_ids(text: &str, local_domain: &str, pool: &PgPool) -> Vec<i64> {
+pub async fn extract_local_mention_actor_ids(
+    text: &str,
+    local_domain: &str,
+    pool: &PgPool,
+) -> Vec<i64> {
     let text_chars: Vec<char> = text.chars().collect();
     let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
     let mut result_ids: Vec<i64> = Vec::new();
@@ -493,15 +508,14 @@ async fn resolve_fedi_for_bsky(
 
     // 公開 AppView で解決できなくても、DB に既知アクターとして記録済みなら
     // ハンドル自体は生きているとみなしテキストだけ変換する（facet無し）。
-    let found_in_db = sqlx::query(
-        "SELECT 1 FROM actors WHERE username = $1 AND domain = 'bsky.brid.gy' LIMIT 1",
-    )
-    .bind(&bridgy_username)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .is_some();
+    let found_in_db =
+        sqlx::query("SELECT 1 FROM actors WHERE username = $1 AND domain = 'bsky.brid.gy' LIMIT 1")
+            .bind(&bridgy_username)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
 
     if found_in_db {
         return Some((bridgy_handle, None));
@@ -514,7 +528,12 @@ async fn resolve_fedi_for_bsky(
 /// brid.gy ブリッジハンドル（`user.domain.ap.brid.gy`）・「生の」Bsky ハンドル
 /// （`alice.bsky.social` 等）のいずれも、公開 AppView は同じ `getProfile` で解決できる。
 async fn resolve_bsky_handle_did(handle: &str, http_client: &reqwest::Client) -> Option<String> {
-    match tokio::time::timeout(Duration::from_secs(2), fetch_bsky_profile(http_client, handle)).await {
+    match tokio::time::timeout(
+        Duration::from_secs(2),
+        fetch_bsky_profile(http_client, handle),
+    )
+    .await
+    {
         Ok(Ok(profile)) => Some(profile.did),
         _ => None,
     }
@@ -605,7 +624,13 @@ pub async fn convert_mentions_for_ap(
                 let byte_start = result.len();
                 result.push_str(&name);
                 let byte_end = result.len();
-                mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Hashtag });
+                mentions.push(ApInlineMention {
+                    byte_start,
+                    byte_end,
+                    href,
+                    name,
+                    kind: ApInlineSpanKind::Hashtag,
+                });
                 i = end;
                 continue;
             }
@@ -669,8 +694,15 @@ pub async fn convert_mentions_for_ap(
             let byte_start = result.len();
             result.push_str(&name);
             let byte_end = result.len();
-            if let Some(href) = resolve_fedi_mention_href(&ident, &domain, pool, http_client).await {
-                mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Mention });
+            if let Some(href) = resolve_fedi_mention_href(&ident, &domain, pool, http_client).await
+            {
+                mentions.push(ApInlineMention {
+                    byte_start,
+                    byte_end,
+                    href,
+                    name,
+                    kind: ApInlineSpanKind::Mention,
+                });
             }
             continue;
         }
@@ -695,7 +727,13 @@ pub async fn convert_mentions_for_ap(
                     let byte_start = result.len();
                     result.push_str(&name);
                     let byte_end = result.len();
-                    mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Mention });
+                    mentions.push(ApInlineMention {
+                        byte_start,
+                        byte_end,
+                        href,
+                        name,
+                        kind: ApInlineSpanKind::Mention,
+                    });
                 } else {
                     result.push('@');
                     result.push_str(&ident);
@@ -707,7 +745,13 @@ pub async fn convert_mentions_for_ap(
                         let byte_start = result.len();
                         result.push_str(&name);
                         let byte_end = result.len();
-                        mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Mention });
+                        mentions.push(ApInlineMention {
+                            byte_start,
+                            byte_end,
+                            href,
+                            name,
+                            kind: ApInlineSpanKind::Mention,
+                        });
                     }
                     None => {
                         // brid.gy で解決できない → bsky.app プロフィールへの単なるリンクとして表示する
@@ -716,7 +760,13 @@ pub async fn convert_mentions_for_ap(
                         let byte_start = result.len();
                         result.push_str(&name);
                         let byte_end = result.len();
-                        mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Link });
+                        mentions.push(ApInlineMention {
+                            byte_start,
+                            byte_end,
+                            href,
+                            name,
+                            kind: ApInlineSpanKind::Link,
+                        });
                     }
                 }
             }
@@ -727,7 +777,13 @@ pub async fn convert_mentions_for_ap(
             let byte_start = result.len();
             result.push_str(&name);
             let byte_end = result.len();
-            mentions.push(ApInlineMention { byte_start, byte_end, href, name, kind: ApInlineSpanKind::Mention });
+            mentions.push(ApInlineMention {
+                byte_start,
+                byte_end,
+                href,
+                name,
+                kind: ApInlineSpanKind::Mention,
+            });
         } else {
             result.push('@');
             result.push_str(&ident);
@@ -787,7 +843,9 @@ async fn resolve_ap_actor_href_via_webfinger(
         if !type_ok {
             return None;
         }
-        l.get("href").and_then(|v| v.as_str()).map(|s| s.to_string())
+        l.get("href")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
     })
 }
 
@@ -882,7 +940,10 @@ mod tests {
             }
             i += 1;
         }
-        assert!(skipped, "`@` in email should be detected as preceded by word char");
+        assert!(
+            skipped,
+            "`@` in email should be detected as preceded by word char"
+        );
     }
 
     #[test]
@@ -922,7 +983,10 @@ mod tests {
     #[test]
     fn mention_guard_does_not_skip_at_after_cjk_char() {
         let prev_char = 'ト'; // 「リモート」の末尾（カタカナ）
-        assert!(prev_char.is_alphanumeric(), "カタカナは Unicode 版 is_alphanumeric() では真になる");
+        assert!(
+            prev_char.is_alphanumeric(),
+            "カタカナは Unicode 版 is_alphanumeric() では真になる"
+        );
         assert!(
             !prev_char.is_ascii_alphanumeric(),
             "ASCII版では偽になり、@ をメンション開始として正しく認識できる"

@@ -19,8 +19,8 @@ use chrono::Utc;
 use seiran_common::atp::fetch_bsky_followers;
 use seiran_common::generate_snowflake_id;
 use seiran_common::repository::{
-    ActorRepository, FollowRepository, NotificationKind, NotificationRepository,
-    PgActorRepository, PgFollowRepository, PgNotificationRepository,
+    ActorRepository, FollowRepository, NotificationKind, NotificationRepository, PgActorRepository,
+    PgFollowRepository, PgNotificationRepository,
 };
 use seiran_common::streaming::StreamHub;
 use sqlx::{PgPool, Row};
@@ -76,12 +76,20 @@ async fn poll_once(pool: &PgPool, http: &reqwest::Client, stream_hub: &StreamHub
         let did: String = match row.try_get("at_did") {
             Ok(v) => v,
             Err(e) => {
-                tracing::warn!("[BskyFollowerPoll] at_did 取得失敗 actor_id={}: {}", actor_id, e);
+                tracing::warn!(
+                    "[BskyFollowerPoll] at_did 取得失敗 actor_id={}: {}",
+                    actor_id,
+                    e
+                );
                 continue;
             }
         };
         if let Err(e) = poll_user(pool, http, stream_hub, actor_id, &did).await {
-            tracing::warn!("[BskyFollowerPoll] actor_id={} のポーリング失敗: {}", actor_id, e);
+            tracing::warn!(
+                "[BskyFollowerPoll] actor_id={} のポーリング失敗: {}",
+                actor_id,
+                e
+            );
         }
     }
 }
@@ -101,21 +109,24 @@ async fn poll_user(
             .map_err(|e| format!("baseline取得失敗: {}", e))?;
     let is_baseline_done = baseline_done.is_some();
 
-    let known_follower_ids: HashSet<i64> = sqlx::query_scalar(
-        "SELECT follower_actor_id FROM follows WHERE target_actor_id = $1",
-    )
-    .bind(local_actor_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| format!("既存フォロワー取得失敗: {}", e))?
-    .into_iter()
-    .collect();
+    let known_follower_ids: HashSet<i64> =
+        sqlx::query_scalar("SELECT follower_actor_id FROM follows WHERE target_actor_id = $1")
+            .bind(local_actor_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| format!("既存フォロワー取得失敗: {}", e))?
+            .into_iter()
+            .collect();
 
     let actor_repo = PgActorRepository::new(pool.clone());
     let follow_repo = PgFollowRepository::new(pool.clone());
     let notification_repo = PgNotificationRepository::new(pool.clone());
 
-    let max_pages = if is_baseline_done { STEADY_STATE_MAX_PAGES } else { HARD_MAX_PAGES };
+    let max_pages = if is_baseline_done {
+        STEADY_STATE_MAX_PAGES
+    } else {
+        HARD_MAX_PAGES
+    };
     let mut cursor: Option<String> = None;
 
     'paging: for _ in 0..max_pages {

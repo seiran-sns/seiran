@@ -205,6 +205,8 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
   `playwright-report` / `test-results`を7日間artifactとして保存する。
 - frontendのVitestユニットテストもCIの`Frontend` jobで型チェック・lintと併せて
   必ず実行する。
+- Rustの`Rust` jobは`cargo fmt --all -- --check`と警告をエラー扱いするClippyを実行する。
+  frontendのlintもESLint警告を許容せず、エラー・警告のいずれでもCIを失敗させる。
 
 `e2e/`ディレクトリにPlaywrightプロジェクトを置く。外部の実サービス（fedi/Bskyインスタンス、PLCディレクトリ、Bsky Relay等）とは通信せず、seiranが話す相手をすべてローカルのスタブ/専用インスタンスに置き換えた上で実行する。実行は `cd e2e && npm test`。
 

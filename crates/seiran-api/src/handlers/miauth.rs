@@ -98,8 +98,12 @@ fn is_valid_callback(url: &str) -> bool {
             let Some(host) = parsed.host_str() else {
                 return false;
             };
-            !(host == "localhost" || host.starts_with("127.") || host.starts_with("192.168.")
-                || host.starts_with("10.") || host == "::1" || host == "[::1]")
+            !(host == "localhost"
+                || host.starts_with("127.")
+                || host.starts_with("192.168.")
+                || host.starts_with("10.")
+                || host == "::1"
+                || host == "[::1]")
         }
         "http" | "javascript" | "data" | "vbscript" | "file" => false,
         // それ以外はネイティブアプリのカスタム URI スキームとして許可する。
@@ -115,7 +119,10 @@ fn is_valid_callback(url: &str) -> bool {
 /// （フロントエンドのルート）へ 303 リダイレクトするだけの薄い入口にする。
 /// ログイン要否の判定・認可アクション自体は SPA 側が `RequireAuth` と
 /// `POST /api/miauth/:session_id/authorize`（Bearer 認証）で行う。
-pub async fn miauth_page(Path(session_id): Path<String>, Query(query): Query<MiAuthQuery>) -> impl IntoResponse {
+pub async fn miauth_page(
+    Path(session_id): Path<String>,
+    Query(query): Query<MiAuthQuery>,
+) -> impl IntoResponse {
     // [MED-02] callback URL を事前に検証する
     if let Some(ref cb) = query.callback {
         if !is_valid_callback(cb) {
@@ -123,7 +130,11 @@ pub async fn miauth_page(Path(session_id): Path<String>, Query(query): Query<MiA
         }
     }
 
-    let mut redirect_url = format!("/connect/{}?name={}", session_id, urlencoding::encode(&query.name));
+    let mut redirect_url = format!(
+        "/connect/{}?name={}",
+        session_id,
+        urlencoding::encode(&query.name)
+    );
     if let Some(ref cb) = query.callback {
         redirect_url.push_str(&format!("&callback={}", urlencoding::encode(cb)));
     }
@@ -142,7 +153,8 @@ pub async fn miauth_authorize(
     State(state): State<AppState>,
     body: Option<Json<AuthorizeRequest>>,
 ) -> impl IntoResponse {
-    let auth_user = match extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await {
+    let auth_user = match extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await
+    {
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
@@ -163,7 +175,10 @@ pub async fn miauth_authorize(
     // 検証できず、タイムライン閲覧（未認証で見られる）は動いても投稿等の要認証操作が
     // 401 になっていた。既知の制約: アプリ単位の失効・権限スコープは未対応
     // （自社ログインのトークンと同じ扱いのため）。
-    let (token, jti) = match state.local_auth.generate_token(auth_user.user_id, &auth_user.email) {
+    let (token, jti) = match state
+        .local_auth
+        .generate_token(auth_user.user_id, &auth_user.email)
+    {
         Ok(t) => t,
         Err(e) => {
             tracing::error!("[miauth] トークン生成失敗: {}", e);
@@ -177,7 +192,11 @@ pub async fn miauth_authorize(
         .and_then(|Json(b)| b.name)
         .filter(|n| !n.trim().is_empty())
         .unwrap_or_else(|| "Unknown".to_string());
-    if let Err(e) = state.app_tokens.insert(jti, auth_user.user_id, &client_name).await {
+    if let Err(e) = state
+        .app_tokens
+        .insert(jti, auth_user.user_id, &client_name)
+        .await
+    {
         tracing::error!("[miauth] トークン記録失敗: {}", e);
     }
 
@@ -224,7 +243,11 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
             map.get(session_id),
             Some(s) if s.token.is_some() && s.user_id.is_some() && s.username.is_some()
         );
-        if is_ready { map.remove(session_id) } else { None }
+        if is_ready {
+            map.remove(session_id)
+        } else {
+            None
+        }
     };
 
     let Some(session) = claimed else {
@@ -239,7 +262,11 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
     // isLocked/isSilenced/isSuspended/followersCount/followingCount/notesCount を
     // non-nullable 必須として要求する（欠けると Dart 側で TypeError → 未処理例外でフリーズ）。
     // フォロー数等は今回正確な集計をせず安全な既定値（0/false）で埋める。
-    let row: Option<(chrono::DateTime<chrono::Utc>, Option<String>, Option<String>)> = sqlx::query_as(
+    let row: Option<(
+        chrono::DateTime<chrono::Utc>,
+        Option<String>,
+        Option<String>,
+    )> = sqlx::query_as(
         "SELECT a.created_at, a.display_name, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
          FROM actors a \
@@ -252,7 +279,8 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
     .await
     .ok()
     .flatten();
-    let (created_at, display_name, avatar_url) = row.unwrap_or_else(|| (chrono::Utc::now(), None, None));
+    let (created_at, display_name, avatar_url) =
+        row.unwrap_or_else(|| (chrono::Utc::now(), None, None));
 
     let res = CheckResponse {
         ok: true,
@@ -319,7 +347,9 @@ mod tests {
     #[test]
     fn invalid_callback_script_schemes() {
         assert!(!is_valid_callback("javascript:alert(1)"));
-        assert!(!is_valid_callback("data:text/html,<script>alert(1)</script>"));
+        assert!(!is_valid_callback(
+            "data:text/html,<script>alert(1)</script>"
+        ));
         assert!(!is_valid_callback("file:///etc/passwd"));
     }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AdminReport,
@@ -18,16 +18,16 @@ export default function ReportsPanel() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<"open" | "closed">("open");
 
-  async function reload() {
+  const reload = useCallback(async () => {
     try {
       setReports(await api.admin.listReports());
     } catch (e) {
       showError(getErrorMessage(e));
     }
-  }
+  }, [showError]);
   useEffect(() => {
     void reload();
-  }, []);
+  }, [reload]);
 
   const filtered = useMemo(
     () => reports.filter((r) => r.status === statusFilter),

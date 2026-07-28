@@ -58,8 +58,15 @@ pub trait StorageProviderRepository: Send + Sync {
     async fn list_all(&self) -> Result<Vec<StorageProvider>, StorageProviderError>;
     async fn list_active(&self) -> Result<Vec<StorageProvider>, StorageProviderError>;
     async fn find_by_id(&self, id: i64) -> Result<Option<StorageProvider>, StorageProviderError>;
-    async fn insert(&self, req: CreateStorageProvider) -> Result<StorageProvider, StorageProviderError>;
-    async fn update(&self, id: i64, req: UpdateStorageProvider) -> Result<Option<StorageProvider>, StorageProviderError>;
+    async fn insert(
+        &self,
+        req: CreateStorageProvider,
+    ) -> Result<StorageProvider, StorageProviderError>;
+    async fn update(
+        &self,
+        id: i64,
+        req: UpdateStorageProvider,
+    ) -> Result<Option<StorageProvider>, StorageProviderError>;
     async fn delete(&self, id: i64) -> Result<(), StorageProviderError>;
     /// プロバイダーに保存済みのバイト数合計。capacity チェックに使う。
     async fn get_used_bytes(&self, provider_id: i64) -> Result<i64, StorageProviderError>;
@@ -72,13 +79,18 @@ pub struct PgStorageProviderRepository {
 
 impl PgStorageProviderRepository {
     pub fn new(pool: PgPool, encryption_key: Vec<u8>) -> Self {
-        Self { pool, encryption_key }
+        Self {
+            pool,
+            encryption_key,
+        }
     }
 
-    fn decrypt_row(&self, row: &StorageProviderRow) -> Result<StorageProvider, StorageProviderError> {
+    fn decrypt_row(
+        &self,
+        row: &StorageProviderRow,
+    ) -> Result<StorageProvider, StorageProviderError> {
         let secret_key = decrypt(&row.secret_key_enc, &self.encryption_key)?;
-        let secret_key = String::from_utf8(secret_key)
-            .map_err(|_| CryptoError::InvalidData)?;
+        let secret_key = String::from_utf8(secret_key).map_err(|_| CryptoError::InvalidData)?;
         Ok(StorageProvider {
             id: row.id,
             name: row.name.clone(),
@@ -149,7 +161,10 @@ impl StorageProviderRepository for PgStorageProviderRepository {
         row.as_ref().map(|r| self.decrypt_row(r)).transpose()
     }
 
-    async fn insert(&self, req: CreateStorageProvider) -> Result<StorageProvider, StorageProviderError> {
+    async fn insert(
+        &self,
+        req: CreateStorageProvider,
+    ) -> Result<StorageProvider, StorageProviderError> {
         let secret_key_enc = encrypt(req.secret_key.as_bytes(), &self.encryption_key)?;
         let row = sqlx::query_as::<_, StorageProviderRow>(
             "INSERT INTO storage_providers
@@ -171,7 +186,11 @@ impl StorageProviderRepository for PgStorageProviderRepository {
         self.decrypt_row(&row)
     }
 
-    async fn update(&self, id: i64, req: UpdateStorageProvider) -> Result<Option<StorageProvider>, StorageProviderError> {
+    async fn update(
+        &self,
+        id: i64,
+        req: UpdateStorageProvider,
+    ) -> Result<Option<StorageProvider>, StorageProviderError> {
         // 現在の値を取得
         let current = match self.find_by_id(id).await? {
             Some(p) => p,
@@ -212,12 +231,11 @@ impl StorageProviderRepository for PgStorageProviderRepository {
     }
 
     async fn delete(&self, id: i64) -> Result<(), StorageProviderError> {
-        let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM media_files WHERE storage_provider_id = $1"
-        )
-        .bind(id)
-        .fetch_one(&self.pool)
-        .await?;
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM media_files WHERE storage_provider_id = $1")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await?;
         if count.0 > 0 {
             return Err(StorageProviderError::HasMediaFiles);
         }
@@ -230,7 +248,7 @@ impl StorageProviderRepository for PgStorageProviderRepository {
 
     async fn get_used_bytes(&self, provider_id: i64) -> Result<i64, StorageProviderError> {
         let row: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(size), 0)::BIGINT FROM media_files WHERE storage_provider_id = $1"
+            "SELECT COALESCE(SUM(size), 0)::BIGINT FROM media_files WHERE storage_provider_id = $1",
         )
         .bind(provider_id)
         .fetch_one(&self.pool)

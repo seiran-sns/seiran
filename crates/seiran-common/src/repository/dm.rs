@@ -47,17 +47,30 @@ pub trait DmRepository: Send + Sync {
     async fn latest_post_id(&self, thread_root_post_id: i64) -> Result<Option<i64>, sqlx::Error>;
 
     /// 指定アクターが指定スレッドの参加者（投稿者 or 宛先のいずれか）かどうかを判定する。
-    async fn is_participant(&self, thread_root_post_id: i64, actor_id: i64) -> Result<bool, sqlx::Error>;
+    async fn is_participant(
+        &self,
+        thread_root_post_id: i64,
+        actor_id: i64,
+    ) -> Result<bool, sqlx::Error>;
 
     /// スレッドの最終既読ポストIDを記録する（`last_read_post_id`は単調増加のみ許可）。
-    async fn mark_read(&self, actor_id: i64, thread_root_post_id: i64, last_read_post_id: i64) -> Result<(), sqlx::Error>;
+    async fn mark_read(
+        &self,
+        actor_id: i64,
+        thread_root_post_id: i64,
+        last_read_post_id: i64,
+    ) -> Result<(), sqlx::Error>;
 
     /// 未読のあるセッション数（バッジ表示用）。
     async fn unread_session_count(&self, actor_id: i64) -> Result<i64, sqlx::Error>;
 
     /// 複数スレッドの最終既読ポストIDを一括取得する（セッション一覧の未読フラグ算出用）。
     /// 戻り値は `(thread_root_post_id, last_read_post_id)` のタプル列（未読状態が無いスレッドは含まれない）。
-    async fn read_states(&self, actor_id: i64, thread_root_post_ids: &[i64]) -> Result<Vec<(i64, i64)>, sqlx::Error>;
+    async fn read_states(
+        &self,
+        actor_id: i64,
+        thread_root_post_ids: &[i64],
+    ) -> Result<Vec<(i64, i64)>, sqlx::Error>;
 
     /// 投稿の宛先アクターID一覧を取得する（AP配送のto/cc組み立て用）。
     async fn recipient_ids(&self, post_id: i64) -> Result<Vec<i64>, sqlx::Error>;
@@ -171,7 +184,11 @@ impl DmRepository for PgDmRepository {
         .await
     }
 
-    async fn is_participant(&self, thread_root_post_id: i64, actor_id: i64) -> Result<bool, sqlx::Error> {
+    async fn is_participant(
+        &self,
+        thread_root_post_id: i64,
+        actor_id: i64,
+    ) -> Result<bool, sqlx::Error> {
         sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS (
                  SELECT 1 FROM posts p
@@ -188,7 +205,12 @@ impl DmRepository for PgDmRepository {
         .await
     }
 
-    async fn mark_read(&self, actor_id: i64, thread_root_post_id: i64, last_read_post_id: i64) -> Result<(), sqlx::Error> {
+    async fn mark_read(
+        &self,
+        actor_id: i64,
+        thread_root_post_id: i64,
+        last_read_post_id: i64,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO dm_read_states (actor_id, thread_root_post_id, last_read_post_id, updated_at)
              VALUES ($1, $2, $3, now())
@@ -229,7 +251,11 @@ impl DmRepository for PgDmRepository {
             .await
     }
 
-    async fn read_states(&self, actor_id: i64, thread_root_post_ids: &[i64]) -> Result<Vec<(i64, i64)>, sqlx::Error> {
+    async fn read_states(
+        &self,
+        actor_id: i64,
+        thread_root_post_ids: &[i64],
+    ) -> Result<Vec<(i64, i64)>, sqlx::Error> {
         sqlx::query_as::<_, (i64, i64)>(
             "SELECT thread_root_post_id, last_read_post_id FROM dm_read_states
              WHERE actor_id = $1 AND thread_root_post_id = ANY($2)",

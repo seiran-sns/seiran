@@ -30,7 +30,9 @@ pub async fn create_mute(
 ) -> impl IntoResponse {
     let target_actor = match resolve_and_upsert_target(&state, &req.target).await {
         Ok(a) => a,
-        Err(e) => return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response()
+        }
     };
 
     if target_actor.id == user.actor_id {
@@ -41,9 +43,16 @@ pub async fn create_mute(
         return ApiError::Internal(format!("[mute] mutes INSERT 失敗: {}", e)).into_response();
     }
 
-    tracing::info!("[mute] {} → {} ミュート完了", user.actor_id, target_actor.id);
+    tracing::info!(
+        "[mute] {} → {} ミュート完了",
+        user.actor_id,
+        target_actor.id
+    );
 
-    Json(MuteResponse { status: "muted".to_string() }).into_response()
+    Json(MuteResponse {
+        status: "muted".to_string(),
+    })
+    .into_response()
 }
 
 #[derive(Serialize)]
@@ -81,14 +90,27 @@ pub async fn delete_mute(
 ) -> impl IntoResponse {
     let target_actor = match resolve_and_upsert_target(&state, &req.target).await {
         Ok(a) => a,
-        Err(e) => return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response()
+        }
     };
 
-    if let Err(e) = state.mutes.delete_by_actors(user.actor_id, target_actor.id).await {
+    if let Err(e) = state
+        .mutes
+        .delete_by_actors(user.actor_id, target_actor.id)
+        .await
+    {
         return ApiError::Internal(format!("[unmute] mutes DELETE 失敗: {}", e)).into_response();
     }
 
-    tracing::info!("[unmute] {} → {} ミュート解除完了", user.actor_id, target_actor.id);
+    tracing::info!(
+        "[unmute] {} → {} ミュート解除完了",
+        user.actor_id,
+        target_actor.id
+    );
 
-    Json(MuteResponse { status: "not_muted".to_string() }).into_response()
+    Json(MuteResponse {
+        status: "not_muted".to_string(),
+    })
+    .into_response()
 }

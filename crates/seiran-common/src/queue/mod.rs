@@ -14,8 +14,8 @@ pub use memory::InMemoryJobQueue;
 pub use redis::RedisJobQueue;
 pub use worker::WorkerEngine;
 
-use std::sync::Arc;
 use crate::traits::JobQueue;
+use std::sync::Arc;
 
 /// 環境変数 `REDIS_URL` の名前（複数箇所で参照するため定数化）。
 const REDIS_URL_ENV: &str = "REDIS_URL";
@@ -45,7 +45,8 @@ pub async fn create_job_queue(is_monolith: bool) -> Arc<dyn JobQueue> {
                 tracing::error!(
                     "[seiran] Redis接続に失敗しました（{}）。InMemoryにフォールバックしますが、\
                      split-role構成では他プロセスのWorkerにジョブが届きません: {}",
-                    url, e
+                    url,
+                    e
                 );
                 Arc::new(InMemoryJobQueue::new())
             }

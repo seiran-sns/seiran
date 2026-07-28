@@ -16,7 +16,10 @@ use crate::repository::{ActorRepository, PgActorRepository};
 
 pub async fn handle(did: String, ctx: Arc<JobContext>) -> Result<(), String> {
     let Some(pool) = &ctx.db_pool else {
-        tracing::warn!("[ResolveBskyMention] DB pool 未設定のためスキップ (did={})", did);
+        tracing::warn!(
+            "[ResolveBskyMention] DB pool 未設定のためスキップ (did={})",
+            did
+        );
         return Ok(());
     };
 
@@ -47,7 +50,8 @@ pub async fn handle(did: String, ctx: Arc<JobContext>) -> Result<(), String> {
 
     tracing::info!(
         "[ResolveBskyMention] 解決完了: did={} handle={}",
-        did, profile.handle
+        did,
+        profile.handle
     );
     Ok(())
 }

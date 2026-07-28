@@ -64,7 +64,10 @@ pub async fn request_email_verification(
     .map_err(|e| ApiError::Internal(format!("DB エラー: {}", e)))?;
 
     let token = row.token;
-    let verify_url = format!("https://{}/verify-email?token={}", state.local_domain, token);
+    let verify_url = format!(
+        "https://{}/verify-email?token={}",
+        state.local_domain, token
+    );
 
     let smtp_settings = state
         .site_settings

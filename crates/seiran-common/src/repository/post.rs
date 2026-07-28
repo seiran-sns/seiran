@@ -345,13 +345,26 @@ pub trait PostRepository: Send + Sync {
     ) -> Result<(), sqlx::Error>;
 
     /// 添付ファイルを投稿に紐付ける（ローカルアップロード済みの `media_file_id` を持つケース）。
-    async fn attach_media(&self, post_id: i64, media_file_id: i64, position: i16) -> Result<(), sqlx::Error>;
+    async fn attach_media(
+        &self,
+        post_id: i64,
+        media_file_id: i64,
+        position: i16,
+    ) -> Result<(), sqlx::Error>;
 
     /// リモート添付 URL を投稿に紐付ける（`media_file_id` を持たない受信投稿用）。
     /// `mime_type` は AP attachment の `mediaType`（判別できなければ推定値）。
     /// `thumbnail_url` は Bsky の動画添付（`app.bsky.embed.video`）等、本体 URL とは別に
     /// サムネイル URL を持つケース向け（無ければ `None`）。
-    async fn attach_remote_media_url(&self, post_id: i64, url: &str, mime_type: Option<&str>, thumbnail_url: Option<&str>, is_sensitive: bool, position: i16) -> Result<(), sqlx::Error>;
+    async fn attach_remote_media_url(
+        &self,
+        post_id: i64,
+        url: &str,
+        mime_type: Option<&str>,
+        thumbnail_url: Option<&str>,
+        is_sensitive: bool,
+        position: i16,
+    ) -> Result<(), sqlx::Error>;
 
     /// 指定アクターが `note_id` に対して行ったリポストの取り消しに必要な情報を取得する。
     async fn find_repost_undo_info(
@@ -370,7 +383,10 @@ pub trait PostRepository: Send + Sync {
     async fn soft_delete_by_ap_object_id(&self, ap_object_id: &str) -> Result<u64, sqlx::Error>;
 
     /// `seiran_post_uuid` から (id, ap_object_id) を取得する（seiran 間マージ判定用）。
-    async fn find_by_seiran_uuid(&self, uuid: &str) -> Result<Option<(i64, Option<String>)>, sqlx::Error>;
+    async fn find_by_seiran_uuid(
+        &self,
+        uuid: &str,
+    ) -> Result<Option<(i64, Option<String>)>, sqlx::Error>;
 
     /// `ap_object_id` を更新する（seiran_uuid マージで AP 側が後着した場合）。
     async fn update_ap_object_id(&self, id: i64, ap_object_id: &str) -> Result<(), sqlx::Error>;
@@ -404,8 +420,16 @@ pub trait PostRepository: Send + Sync {
     /// `reply_to_post_id`はAP `inReplyTo`から解決した親ポストID（Fedi受信投稿にも設定する）。
     /// `thread_root_post_id`/`recipient_actor_ids`は`visibility='direct'`（DM受信）専用
     /// （direct以外は`None`/空スライスを渡すこと）。
-    async fn insert_remote_with_dedup(&self, params: InsertRemoteWithDedupParams<'_>) -> Result<(), sqlx::Error>;
-    async fn set_fedi_content_metadata(&self, post_id: i64, content_warning: Option<&str>, poll: Option<&serde_json::Value>) -> Result<(), sqlx::Error>;
+    async fn insert_remote_with_dedup(
+        &self,
+        params: InsertRemoteWithDedupParams<'_>,
+    ) -> Result<(), sqlx::Error>;
+    async fn set_fedi_content_metadata(
+        &self,
+        post_id: i64,
+        content_warning: Option<&str>,
+        poll: Option<&serde_json::Value>,
+    ) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgPostRepository {
@@ -1057,7 +1081,12 @@ impl PostRepository for PgPostRepository {
         .map(|_| ())
     }
 
-    async fn attach_media(&self, post_id: i64, media_file_id: i64, position: i16) -> Result<(), sqlx::Error> {
+    async fn attach_media(
+        &self,
+        post_id: i64,
+        media_file_id: i64,
+        position: i16,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO post_attachments (post_id, media_file_id, position) VALUES ($1, $2, $3)",
         )
@@ -1069,7 +1098,15 @@ impl PostRepository for PgPostRepository {
         .map(|_| ())
     }
 
-    async fn attach_remote_media_url(&self, post_id: i64, url: &str, mime_type: Option<&str>, thumbnail_url: Option<&str>, is_sensitive: bool, position: i16) -> Result<(), sqlx::Error> {
+    async fn attach_remote_media_url(
+        &self,
+        post_id: i64,
+        url: &str,
+        mime_type: Option<&str>,
+        thumbnail_url: Option<&str>,
+        is_sensitive: bool,
+        position: i16,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, remote_thumbnail_url, is_sensitive, position)
              VALUES ($1, NULL, $2, $3, $4, $5, $6)
@@ -1143,7 +1180,10 @@ impl PostRepository for PgPostRepository {
         .await
     }
 
-    async fn find_by_seiran_uuid(&self, uuid: &str) -> Result<Option<(i64, Option<String>)>, sqlx::Error> {
+    async fn find_by_seiran_uuid(
+        &self,
+        uuid: &str,
+    ) -> Result<Option<(i64, Option<String>)>, sqlx::Error> {
         let row: Option<(i64, Option<String>)> = sqlx::query_as(
             "SELECT id, ap_object_id FROM posts WHERE seiran_post_uuid = $1 LIMIT 1",
         )
@@ -1170,10 +1210,12 @@ impl PostRepository for PgPostRepository {
     }
 
     async fn find_id_by_ap_or_at_uri(&self, uri: &str) -> Result<Option<i64>, sqlx::Error> {
-        sqlx::query_scalar::<_, i64>("SELECT id FROM posts WHERE ap_object_id = $1 OR at_uri = $1 LIMIT 1")
-            .bind(uri)
-            .fetch_optional(&self.pool)
-            .await
+        sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM posts WHERE ap_object_id = $1 OR at_uri = $1 LIMIT 1",
+        )
+        .bind(uri)
+        .fetch_optional(&self.pool)
+        .await
     }
 
     async fn find_id_and_actor_by_ap_object_id(
@@ -1200,7 +1242,10 @@ impl PostRepository for PgPostRepository {
         .await
     }
 
-    async fn insert_remote_with_dedup(&self, params: InsertRemoteWithDedupParams<'_>) -> Result<(), sqlx::Error> {
+    async fn insert_remote_with_dedup(
+        &self,
+        params: InsertRemoteWithDedupParams<'_>,
+    ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let result = sqlx::query(
             "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id)
@@ -1236,9 +1281,18 @@ impl PostRepository for PgPostRepository {
         tx.commit().await
     }
 
-    async fn set_fedi_content_metadata(&self, post_id: i64, content_warning: Option<&str>, poll: Option<&serde_json::Value>) -> Result<(), sqlx::Error> {
+    async fn set_fedi_content_metadata(
+        &self,
+        post_id: i64,
+        content_warning: Option<&str>,
+        poll: Option<&serde_json::Value>,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE posts SET content_warning = $2, poll = $3 WHERE id = $1")
-            .bind(post_id).bind(content_warning).bind(poll)
-            .execute(&self.pool).await.map(|_| ())
+            .bind(post_id)
+            .bind(content_warning)
+            .bind(poll)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 }

@@ -88,8 +88,8 @@ impl RedisJobQueue {
     /// キー接頭辞を指定して接続する。本番は常に [`DEFAULT_KEY_PREFIX`] 固定（`connect` 経由）。
     /// テストが並列実行時にキー空間を衝突させないためだけに接頭辞を変えられるようにしている。
     async fn connect_with_prefix(redis_url: &str, prefix: &str) -> Result<Self, String> {
-        let client = redis::Client::open(redis_url)
-            .map_err(|e| format!("Redis接続URLが不正です: {}", e))?;
+        let client =
+            redis::Client::open(redis_url).map_err(|e| format!("Redis接続URLが不正です: {}", e))?;
         let conn = ConnectionManager::new(client.clone())
             .await
             .map_err(|e| format!("Redis接続に失敗しました: {}", e))?;
@@ -109,24 +109,46 @@ impl RedisJobQueue {
 
     async fn next_seq(&self) -> Result<u64, String> {
         let mut conn = self.conn.clone();
-        let seq: i64 = conn.incr(&self.seq_key, 1i64).await.map_err(|e| e.to_string())?;
+        let seq: i64 = conn
+            .incr(&self.seq_key, 1i64)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(seq as u64)
     }
 
     async fn push_ready(&self, job: Job, priority: i32, attempt: u32) -> Result<(), String> {
         let seq = self.next_seq().await?;
-        let member = serde_json::to_string(&Envelope { seq, priority, attempt, job })
-            .map_err(|e| format!("ジョブのシリアライズに失敗しました: {}", e))?;
+        let member = serde_json::to_string(&Envelope {
+            seq,
+            priority,
+            attempt,
+            job,
+        })
+        .map_err(|e| format!("ジョブのシリアライズに失敗しました: {}", e))?;
         let score = ready_score(priority, seq);
         let mut conn = self.conn.clone();
-        let _: () = conn.zadd(&self.ready_key, member, score).await.map_err(|e| e.to_string())?;
+        let _: () = conn
+            .zadd(&self.ready_key, member, score)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    async fn push_delayed(&self, job: Job, priority: i32, attempt: u32, delay: Duration) -> Result<(), String> {
+    async fn push_delayed(
+        &self,
+        job: Job,
+        priority: i32,
+        attempt: u32,
+        delay: Duration,
+    ) -> Result<(), String> {
         let seq = self.next_seq().await?;
-        let member = serde_json::to_string(&Envelope { seq, priority, attempt, job })
-            .map_err(|e| format!("ジョブのシリアライズに失敗しました: {}", e))?;
+        let member = serde_json::to_string(&Envelope {
+            seq,
+            priority,
+            attempt,
+            job,
+        })
+        .map_err(|e| format!("ジョブのシリアライズに失敗しました: {}", e))?;
         let ready_at_ms = chrono::Utc::now().timestamp_millis() + delay.as_millis() as i64;
         let mut conn = self.conn.clone();
         let _: () = conn
@@ -159,7 +181,13 @@ impl JobQueue for RedisJobQueue {
         self.push_ready(job, priority, 0).await
     }
 
-    async fn enqueue_retry(&self, job: Job, priority: i32, attempt: u32, delay: Duration) -> Result<(), String> {
+    async fn enqueue_retry(
+        &self,
+        job: Job,
+        priority: i32,
+        attempt: u32,
+        delay: Duration,
+    ) -> Result<(), String> {
         self.push_delayed(job, priority, attempt, delay).await
     }
 
@@ -174,7 +202,10 @@ impl JobQueue for RedisJobQueue {
                 match conn.bzpopmin(&self.ready_key, BLOCK_TIMEOUT_SECS).await {
                     Ok(v) => v,
                     Err(e) => {
-                        tracing::error!("[RedisJobQueue] BZPOPMIN に失敗しました: {} → 1秒後にリトライ", e);
+                        tracing::error!(
+                            "[RedisJobQueue] BZPOPMIN に失敗しました: {} → 1秒後にリトライ",
+                            e
+                        );
                         drop(conn);
                         tokio::time::sleep(Duration::from_secs(1)).await;
                         None
@@ -187,9 +218,19 @@ impl JobQueue for RedisJobQueue {
             };
 
             match serde_json::from_str::<Envelope>(&member) {
-                Ok(env) => return QueuedJob { job: env.job, priority: env.priority, attempt: env.attempt },
+                Ok(env) => {
+                    return QueuedJob {
+                        job: env.job,
+                        priority: env.priority,
+                        attempt: env.attempt,
+                    }
+                }
                 Err(e) => {
-                    tracing::error!("[RedisJobQueue] ジョブのデシリアライズに失敗しました（破棄）: {} raw={}", e, member);
+                    tracing::error!(
+                        "[RedisJobQueue] ジョブのデシリアライズに失敗しました（破棄）: {} raw={}",
+                        e,
+                        member
+                    );
                     continue;
                 }
             }
@@ -205,7 +246,13 @@ impl JobQueue for Arc<RedisJobQueue> {
         (**self).enqueue(job, priority).await
     }
 
-    async fn enqueue_retry(&self, job: Job, priority: i32, attempt: u32, delay: Duration) -> Result<(), String> {
+    async fn enqueue_retry(
+        &self,
+        job: Job,
+        priority: i32,
+        attempt: u32,
+        delay: Duration,
+    ) -> Result<(), String> {
         (**self).enqueue_retry(job, priority, attempt, delay).await
     }
 
@@ -254,7 +301,10 @@ mod tests {
     }
 
     fn job(id: i64) -> Job {
-        Job::ApDelivery { actor_id: id, kind: crate::traits::ApDeliveryKind::DeleteActor }
+        Job::ApDelivery {
+            actor_id: id,
+            kind: crate::traits::ApDeliveryKind::DeleteActor,
+        }
     }
 
     fn actor_id_of(job: &Job) -> i64 {
@@ -289,9 +339,15 @@ mod tests {
         q.enqueue(job(2), 100).await.unwrap();
         q.enqueue(job(3), 50).await.unwrap();
 
-        let a = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking()).await.unwrap();
-        let b = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking()).await.unwrap();
-        let c = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking()).await.unwrap();
+        let a = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking())
+            .await
+            .unwrap();
+        let b = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking())
+            .await
+            .unwrap();
+        let c = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking())
+            .await
+            .unwrap();
         assert_eq!(actor_id_of(&a.job), 2);
         assert_eq!(actor_id_of(&b.job), 3);
         assert_eq!(actor_id_of(&c.job), 1);
@@ -303,10 +359,13 @@ mod tests {
             tracing::warn!("SEIRAN_TEST_REDIS_URL 未設定のため skip");
             return;
         };
-        q.enqueue_retry(job(42), 50, 2, Duration::from_millis(500)).await.unwrap();
+        q.enqueue_retry(job(42), 50, 2, Duration::from_millis(500))
+            .await
+            .unwrap();
 
         // まだ delayed 側にあり、ready からは即座には取り出せないはず
-        let too_early = tokio::time::timeout(Duration::from_millis(300), q.dequeue_blocking()).await;
+        let too_early =
+            tokio::time::timeout(Duration::from_millis(300), q.dequeue_blocking()).await;
         assert!(too_early.is_err(), "delay 前に取り出せてしまった");
 
         // delay 経過後、promote_due のポーリングで ready へ昇格し取り出せる

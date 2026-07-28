@@ -44,7 +44,8 @@ pub async fn xrpc_resolve_handle(
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "InvalidRequest", "message": "無効なハンドルです"})),
-        ).into_response();
+        )
+            .into_response();
     }
 
     let not_found = || {
@@ -60,9 +61,7 @@ pub async fn xrpc_resolve_handle(
         .find_did_by_username_domain(&username, &state.local_domain)
         .await
     {
-        Ok(Some(did)) if !did.is_empty() => {
-            Json(serde_json::json!({"did": did})).into_response()
-        }
+        Ok(Some(did)) if !did.is_empty() => Json(serde_json::json!({"did": did})).into_response(),
         Ok(_) => not_found(),
         Err(e) => {
             tracing::error!("[resolveHandle] DB エラー: {}", e);
@@ -109,6 +108,8 @@ pub async fn well_known_atproto_did(
             ([(axum::http::header::CONTENT_TYPE, "text/plain")], did).into_response()
         }
         Ok(_) => ApiError::NotFound("").into_response(),
-        Err(e) => ApiError::Internal(format!("[well_known_atproto_did] DB エラー: {}", e)).into_response(),
+        Err(e) => {
+            ApiError::Internal(format!("[well_known_atproto_did] DB エラー: {}", e)).into_response()
+        }
     }
 }

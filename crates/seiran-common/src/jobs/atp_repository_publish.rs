@@ -18,7 +18,11 @@ use sqlx::Row;
 use crate::atp::client::{create_atp_post, create_atp_session};
 use crate::queue::worker::JobContext;
 
-pub async fn handle(actor_id: i64, commit_type: String, ctx: Arc<JobContext>) -> Result<(), String> {
+pub async fn handle(
+    actor_id: i64,
+    commit_type: String,
+    ctx: Arc<JobContext>,
+) -> Result<(), String> {
     let sem = ctx.get_actor_semaphore(actor_id).await;
     let _permit = sem
         .acquire_owned()
@@ -27,7 +31,8 @@ pub async fn handle(actor_id: i64, commit_type: String, ctx: Arc<JobContext>) ->
 
     tracing::info!(
         "[Job::AtpRepositoryPublish] 開始 - actor_id: {}, commit_type: {}",
-        actor_id, commit_type
+        actor_id,
+        commit_type
     );
 
     match commit_type.as_str() {
@@ -37,7 +42,8 @@ pub async fn handle(actor_id: i64, commit_type: String, ctx: Arc<JobContext>) ->
         other => {
             tracing::info!(
                 "[Job::AtpRepositoryPublish] 未対応のコミットタイプ: {} (actor_id={})",
-                other, actor_id
+                other,
+                actor_id
             );
         }
     }
@@ -73,8 +79,8 @@ async fn handle_create_post(actor_id: i64, ctx: &Arc<JobContext>) -> Result<(), 
             return Ok(());
         }
     };
-    let pds_url = std::env::var("ATP_PDS_URL")
-        .unwrap_or_else(|_| "https://bsky.social".to_string());
+    let pds_url =
+        std::env::var("ATP_PDS_URL").unwrap_or_else(|_| "https://bsky.social".to_string());
 
     // actor_id に紐付く最新の未配信ポストを取得
     let row = sqlx::query(
@@ -90,12 +96,17 @@ async fn handle_create_post(actor_id: i64, ctx: &Arc<JobContext>) -> Result<(), 
     let row = match row {
         Some(r) => r,
         None => {
-            tracing::info!("[AtpRepositoryPublish] 配信対象ポストなし (actor_id={})", actor_id);
+            tracing::info!(
+                "[AtpRepositoryPublish] 配信対象ポストなし (actor_id={})",
+                actor_id
+            );
             return Ok(());
         }
     };
 
-    let post_id: i64 = row.try_get("id").map_err(|e| format!("id取得失敗: {}", e))?;
+    let post_id: i64 = row
+        .try_get("id")
+        .map_err(|e| format!("id取得失敗: {}", e))?;
     let body: String = row
         .try_get("body")
         .map_err(|e| format!("body取得失敗: {}", e))?;
@@ -122,7 +133,8 @@ async fn handle_create_post(actor_id: i64, ctx: &Arc<JobContext>) -> Result<(), 
 
     tracing::info!(
         "[AtpRepositoryPublish] 外部 PDS 配信完了: post_id={}, at_uri={}",
-        post_id, at_uri
+        post_id,
+        at_uri
     );
     Ok(())
 }

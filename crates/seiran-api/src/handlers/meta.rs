@@ -16,7 +16,11 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
     // サイト外観（#30）。未設定時はデフォルト（name=seiran）。
     let site_name = {
         let n = get("site_name");
-        if n.is_empty() { "seiran".to_string() } else { n }
+        if n.is_empty() {
+            "seiran".to_string()
+        } else {
+            n
+        }
     };
 
     // Misskey クライアントの絵文字ピッカー・投稿フォームが参照する標準フィールド。

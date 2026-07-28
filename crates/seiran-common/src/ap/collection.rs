@@ -79,7 +79,10 @@ async fn fetch_ap_collection_uris_inner(
             if hit_cap {
                 return (uris, false);
             }
-            page_val.get("next").and_then(|v| v.as_str()).map(|s| s.to_string())
+            page_val
+                .get("next")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
         }
         // first も items も無い（空コレクション、あるいは未対応形式）
         None => {
@@ -92,7 +95,8 @@ async fn fetch_ap_collection_uris_inner(
         Some(other) => {
             tracing::warn!(
                 "[ApCollection] first が想定外の形式 ({}): url={}",
-                other, collection_url
+                other,
+                collection_url
             );
             return (uris, true);
         }
@@ -103,7 +107,9 @@ async fn fetch_ap_collection_uris_inner(
         if uris.len() >= max_items {
             tracing::info!(
                 "[ApCollection] 上限 {} 件に到達したため打ち切り: page={} url={}",
-                max_items, page_count, collection_url
+                max_items,
+                page_count,
+                collection_url
             );
             return (uris, false);
         }
@@ -137,12 +143,17 @@ async fn fetch_ap_collection_uris_inner(
         let hit_cap = process_page(&page, max_items, &mut uris);
         tracing::debug!(
             "[ApCollection] ページ{}件取得 (累計{}件): {}",
-            uris.len() - before, uris.len(), url
+            uris.len() - before,
+            uris.len(),
+            url
         );
         if hit_cap {
             return (uris, false);
         }
-        next_url = page.get("next").and_then(|v| v.as_str()).map(|s| s.to_string());
+        next_url = page
+            .get("next")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
     }
 
     (uris, true)
@@ -156,10 +167,14 @@ pub async fn fetch_ap_collection_uris(
     max_items: usize,
 ) -> (Vec<String>, bool) {
     let start = std::time::Instant::now();
-    let (uris, complete) = fetch_ap_collection_uris_inner(ap_client, collection_url, max_items).await;
+    let (uris, complete) =
+        fetch_ap_collection_uris_inner(ap_client, collection_url, max_items).await;
     tracing::info!(
         "[ApCollection] 呼び出し結果: {}件取得 complete={} 所要={:?} url={}",
-        uris.len(), complete, start.elapsed(), collection_url
+        uris.len(),
+        complete,
+        start.elapsed(),
+        collection_url
     );
     (uris, complete)
 }
@@ -167,7 +182,11 @@ pub async fn fetch_ap_collection_uris(
 /// ページ Value の items/orderedItems を処理して URI を追加する。
 /// `max_items` に達した場合 true を返す（呼び出し側はそこで打ち切る）。
 fn process_page(page: &serde_json::Value, max_items: usize, uris: &mut Vec<String>) -> bool {
-    match page.get("orderedItems").or_else(|| page.get("items")).and_then(|v| v.as_array()) {
+    match page
+        .get("orderedItems")
+        .or_else(|| page.get("items"))
+        .and_then(|v| v.as_array())
+    {
         Some(items) => collect_uris(items, max_items, uris),
         None => false,
     }
@@ -190,7 +209,10 @@ fn collect_uris(items: &[serde_json::Value], max_items: usize, uris: &mut Vec<St
 fn extract_uri(item: &serde_json::Value) -> Option<String> {
     match item {
         serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Object(_) => item.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        serde_json::Value::Object(_) => item
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         _ => None,
     }
 }
@@ -202,13 +224,19 @@ mod tests {
     #[test]
     fn extract_uri_from_string_item() {
         let item = serde_json::json!("https://example.com/users/alice");
-        assert_eq!(extract_uri(&item), Some("https://example.com/users/alice".to_string()));
+        assert_eq!(
+            extract_uri(&item),
+            Some("https://example.com/users/alice".to_string())
+        );
     }
 
     #[test]
     fn extract_uri_from_object_item() {
         let item = serde_json::json!({"id": "https://example.com/users/alice", "type": "Person"});
-        assert_eq!(extract_uri(&item), Some("https://example.com/users/alice".to_string()));
+        assert_eq!(
+            extract_uri(&item),
+            Some("https://example.com/users/alice".to_string())
+        );
     }
 
     #[test]

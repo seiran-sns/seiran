@@ -5,7 +5,12 @@ use sqlx::PgPool;
 #[async_trait]
 pub trait EmailChangeRepository: Send + Sync {
     /// 変更リクエストを発行する。token は DB の `DEFAULT gen_random_uuid()` で生成する。
-    async fn insert(&self, id: i64, user_id: i64, new_email: &str) -> Result<Option<String>, sqlx::Error>;
+    async fn insert(
+        &self,
+        id: i64,
+        user_id: i64,
+        new_email: &str,
+    ) -> Result<Option<String>, sqlx::Error>;
 
     /// 有効なトークン（期限内）を消費し、紐づく (user_id, new_email) を返す。
     async fn consume(&self, token: uuid::Uuid) -> Result<Option<(i64, String)>, sqlx::Error>;
@@ -23,7 +28,12 @@ impl PgEmailChangeRepository {
 
 #[async_trait]
 impl EmailChangeRepository for PgEmailChangeRepository {
-    async fn insert(&self, id: i64, user_id: i64, new_email: &str) -> Result<Option<String>, sqlx::Error> {
+    async fn insert(
+        &self,
+        id: i64,
+        user_id: i64,
+        new_email: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
         let row: Option<(String,)> = sqlx::query_as(
             "INSERT INTO email_changes (id, user_id, new_email)
              VALUES ($1, $2, $3)

@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use seiran_common::generate_snowflake_id;
 use seiran_common::repository::EmojiRow;
 
-use crate::AppState;
 use crate::error::ApiError;
 use crate::middleware::require_admin;
+use crate::AppState;
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
 
@@ -93,7 +93,10 @@ pub(crate) fn validate_category(category: &str) -> Result<(), ApiError> {
 /// ライセンス全文（Apache License 2.0 の条文等）は複数行になるのが通例のため、改行自体は許容する。
 pub(crate) fn normalize_license(license: &str) -> Result<String, ApiError> {
     let trimmed = license.trim();
-    if trimmed.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t') {
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+    {
         return Err(ApiError::BadRequest("INVALID_LICENSE".to_owned()));
     }
     Ok(trimmed.to_string())
@@ -142,7 +145,13 @@ pub async fn list_emojis(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<EmojiResponse>>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     let rows = state
         .emojis
@@ -159,7 +168,13 @@ pub async fn create_emoji(
     State(state): State<AppState>,
     Json(req): Json<CreateEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     validate_shortcode(&req.shortcode)?;
     if let Some(ref c) = req.category {
@@ -201,7 +216,13 @@ pub async fn update_emoji(
     Path(id): Path<i64>,
     Json(req): Json<UpdateEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     if let Some(ref c) = req.category {
         validate_category(c)?;
@@ -217,7 +238,12 @@ pub async fn update_emoji(
 
     let row = state
         .emojis
-        .update(id, req.category.as_deref(), tags.as_deref(), license.as_deref())
+        .update(
+            id,
+            req.category.as_deref(),
+            tags.as_deref(),
+            license.as_deref(),
+        )
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -231,7 +257,13 @@ pub async fn delete_emoji(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(&headers, &state.local_auth, state.app_tokens.as_ref(), state.users.as_ref()).await?;
+    require_admin(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     let deleted = state
         .emojis

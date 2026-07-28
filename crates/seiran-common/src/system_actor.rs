@@ -71,10 +71,9 @@ pub async fn ensure_system_proxy_actor(
 /// `site_settings` に記録済みの list-relay `actor_id` を取得する（ブートストラップ済み前提）。
 /// ジョブハンドラ等、起動時ブートストラップを経由しない箇所から呼ぶ。
 pub async fn resolve_system_proxy_actor_id(pool: &PgPool) -> Result<Option<i64>, sqlx::Error> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM site_settings WHERE key = $1")
-            .bind(SITE_SETTINGS_KEY)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM site_settings WHERE key = $1")
+        .bind(SITE_SETTINGS_KEY)
+        .fetch_optional(pool)
+        .await?;
     Ok(row.and_then(|(v,)| v.parse::<i64>().ok()))
 }

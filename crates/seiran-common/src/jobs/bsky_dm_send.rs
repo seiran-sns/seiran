@@ -18,7 +18,10 @@ const CHAT_SERVICE_AUD: &str = "did:web:api.bsky.chat";
 
 pub async fn handle(post_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
     let Some(pool) = ctx.db_pool.as_ref() else {
-        tracing::warn!("[BskyDmSend] DB pool 未設定のためスキップ (post_id={})", post_id);
+        tracing::warn!(
+            "[BskyDmSend] DB pool 未設定のためスキップ (post_id={})",
+            post_id
+        );
         return Ok(());
     };
 
@@ -45,7 +48,10 @@ pub async fn handle(post_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
     let (Some(thread_root_post_id), Some(sender_did), Some(sender_pem)) =
         (thread_root_post_id, sender_did, sender_pem)
     else {
-        tracing::error!("[BskyDmSend] post_id={} に必要な情報が無い（送信者のDID/署名鍵未設定、終了）", post_id);
+        tracing::error!(
+            "[BskyDmSend] post_id={} に必要な情報が無い（送信者のDID/署名鍵未設定、終了）",
+            post_id
+        );
         return Ok(());
     };
 
@@ -63,15 +69,31 @@ pub async fn handle(post_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
         return Ok(());
     };
 
-    let convo_id = resolve_convo_id(&ctx, pool, thread_root_post_id, &sender_did, &sender_pem, &peer_did).await?;
+    let convo_id = resolve_convo_id(
+        &ctx,
+        pool,
+        thread_root_post_id,
+        &sender_did,
+        &sender_pem,
+        &peer_did,
+    )
+    .await?;
 
-    let jwt = sign_service_auth_jwt(&sender_pem, &sender_did, CHAT_SERVICE_AUD, "chat.bsky.convo.sendMessage")
-        .map_err(|e| format!("JWT署名失敗: {}", e))?;
+    let jwt = sign_service_auth_jwt(
+        &sender_pem,
+        &sender_did,
+        CHAT_SERVICE_AUD,
+        "chat.bsky.convo.sendMessage",
+    )
+    .map_err(|e| format!("JWT署名失敗: {}", e))?;
 
     let resp = ctx
         .ap_client
         .http
-        .post(format!("{}/xrpc/chat.bsky.convo.sendMessage", CHAT_SERVICE_HOST))
+        .post(format!(
+            "{}/xrpc/chat.bsky.convo.sendMessage",
+            CHAT_SERVICE_HOST
+        ))
         .bearer_auth(&jwt)
         .json(&serde_json::json!({
             "convoId": convo_id,
@@ -85,18 +107,27 @@ pub async fn handle(post_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
     let body_text = resp.text().await.unwrap_or_default();
 
     if status.is_success() {
-        tracing::info!("[BskyDmSend] 送信成功 post_id={} convo_id={}", post_id, convo_id);
+        tracing::info!(
+            "[BskyDmSend] 送信成功 post_id={} convo_id={}",
+            post_id,
+            convo_id
+        );
         Ok(())
     } else if status.as_u16() == 400 {
         // ビジネスロジック拒否（受信者側のDM許可設定等、`docs/skill_atp_rust_programming.md` §17-3）。
         // リトライしても直らないため破棄する。
         tracing::warn!(
             "[BskyDmSend] 送信拒否 post_id={} status={} body={}（リトライ対象外）",
-            post_id, status, body_text
+            post_id,
+            status,
+            body_text
         );
         Ok(())
     } else {
-        Err(format!("sendMessage失敗 status={} body={}", status, body_text))
+        Err(format!(
+            "sendMessage失敗 status={} body={}",
+            status, body_text
+        ))
     }
 }
 
@@ -121,8 +152,13 @@ async fn resolve_convo_id(
         return Ok(cached);
     }
 
-    let jwt = sign_service_auth_jwt(sender_pem, sender_did, CHAT_SERVICE_AUD, "chat.bsky.convo.getConvoForMembers")
-        .map_err(|e| format!("JWT署名失敗: {}", e))?;
+    let jwt = sign_service_auth_jwt(
+        sender_pem,
+        sender_did,
+        CHAT_SERVICE_AUD,
+        "chat.bsky.convo.getConvoForMembers",
+    )
+    .map_err(|e| format!("JWT署名失敗: {}", e))?;
     let url = format!(
         "{}/xrpc/chat.bsky.convo.getConvoForMembers?members={}&members={}",
         CHAT_SERVICE_HOST, sender_did, peer_did,
@@ -139,11 +175,14 @@ async fn resolve_convo_id(
     let status = resp.status();
     let body_text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(format!("getConvoForMembers失敗 status={} body={}", status, body_text));
+        return Err(format!(
+            "getConvoForMembers失敗 status={} body={}",
+            status, body_text
+        ));
     }
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(&body_text).map_err(|e| format!("getConvoForMembers応答パース失敗: {}", e))?;
+    let parsed: serde_json::Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("getConvoForMembers応答パース失敗: {}", e))?;
     let convo_id = parsed
         .get("convo")
         .and_then(|c| c.get("id"))

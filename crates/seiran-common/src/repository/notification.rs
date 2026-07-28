@@ -166,10 +166,12 @@ impl NotificationRepository for PgNotificationRepository {
     }
 
     async fn mark_all_read(&self, recipient_actor_id: i64) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE notifications SET is_read = true WHERE recipient_actor_id = $1 AND NOT is_read")
-            .bind(recipient_actor_id)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
+        sqlx::query(
+            "UPDATE notifications SET is_read = true WHERE recipient_actor_id = $1 AND NOT is_read",
+        )
+        .bind(recipient_actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
     }
 }

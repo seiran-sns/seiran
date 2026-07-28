@@ -64,7 +64,8 @@ pub async fn featured_handler(
 
     // 取得した post_id のリストで添付ファイルをまとめて取得（outbox_handler と同じパターン）
     let post_ids: Vec<i64> = rows.iter().filter_map(|r| r.try_get("id").ok()).collect();
-    let mut att_map: std::collections::HashMap<i64, Vec<serde_json::Value>> = std::collections::HashMap::new();
+    let mut att_map: std::collections::HashMap<i64, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
     if !post_ids.is_empty() {
         let att_rows = sqlx::query(
             "SELECT pa.post_id, mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
@@ -80,12 +81,30 @@ pub async fn featured_handler(
         .unwrap_or_default();
 
         for r in &att_rows {
-            let pid: i64 = match r.try_get("post_id") { Ok(v) => v, Err(_) => continue };
-            let storage_key: String = match r.try_get("storage_key") { Ok(v) => v, Err(_) => continue };
-            let mime_type: String = match r.try_get("mime_type") { Ok(v) => v, Err(_) => continue };
-            let width: i32 = match r.try_get("width") { Ok(v) => v, Err(_) => continue };
-            let height: i32 = match r.try_get("height") { Ok(v) => v, Err(_) => continue };
-            let public_url: String = match r.try_get("public_url") { Ok(v) => v, Err(_) => continue };
+            let pid: i64 = match r.try_get("post_id") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let storage_key: String = match r.try_get("storage_key") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let mime_type: String = match r.try_get("mime_type") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let width: i32 = match r.try_get("width") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let height: i32 = match r.try_get("height") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let public_url: String = match r.try_get("public_url") {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
             let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
             att_map.entry(pid).or_default().push(serde_json::json!({
                 "type": "Document",
@@ -101,9 +120,18 @@ pub async fn featured_handler(
     // （Mastodon 等の実装と同じ慣習）。
     let mut ordered_items = Vec::new();
     for row in &rows {
-        let post_id: i64 = match row.try_get("id") { Ok(v) => v, Err(_) => continue };
-        let body: String = match row.try_get("body") { Ok(v) => v, Err(_) => continue };
-        let created_at: chrono::DateTime<chrono::Utc> = match row.try_get("created_at") { Ok(v) => v, Err(_) => continue };
+        let post_id: i64 = match row.try_get("id") {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let body: String = match row.try_get("body") {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let created_at: chrono::DateTime<chrono::Utc> = match row.try_get("created_at") {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
 
         let note_id = format!("{}/notes/{}", base, post_id);
         let published = created_at.to_rfc3339();
@@ -136,7 +164,10 @@ pub async fn featured_handler(
 
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/activity+json")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/activity+json",
+        )],
         Json(body),
     )
         .into_response()

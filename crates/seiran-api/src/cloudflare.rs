@@ -16,16 +16,25 @@ pub struct CloudflareClient {
 
 impl CloudflareClient {
     pub fn new(http: Arc<reqwest::Client>, token: String, zone_id: String) -> Self {
-        Self { http, token, zone_id }
+        Self {
+            http,
+            token,
+            zone_id,
+        }
     }
 
     /// `_atproto.{handle}` TXT レコードを作成し、レコード ID を返す。
-    pub async fn set_atproto_txt(&self, handle: &str, did: &str) -> Result<String, CloudflareError> {
+    pub async fn set_atproto_txt(
+        &self,
+        handle: &str,
+        did: &str,
+    ) -> Result<String, CloudflareError> {
         let url = format!(
             "https://api.cloudflare.com/client/v4/zones/{}/dns_records",
             self.zone_id
         );
-        let resp: serde_json::Value = self.http
+        let resp: serde_json::Value = self
+            .http
             .post(&url)
             .bearer_auth(&self.token)
             .json(&serde_json::json!({
@@ -57,7 +66,8 @@ impl CloudflareClient {
             "https://api.cloudflare.com/client/v4/zones/{}/dns_records?type=TXT&name={}",
             self.zone_id, name
         );
-        let list_resp: serde_json::Value = self.http
+        let list_resp: serde_json::Value = self
+            .http
             .get(&list_url)
             .bearer_auth(&self.token)
             .send()
@@ -65,7 +75,10 @@ impl CloudflareClient {
             .json()
             .await?;
 
-        let existing = list_resp["result"].as_array().map(|a| !a.is_empty()).unwrap_or(false);
+        let existing = list_resp["result"]
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
         if existing {
             return Ok(());
         }
@@ -79,7 +92,8 @@ impl CloudflareClient {
             "https://api.cloudflare.com/client/v4/zones/{}/dns_records/{}",
             self.zone_id, record_id
         );
-        let resp: serde_json::Value = self.http
+        let resp: serde_json::Value = self
+            .http
             .delete(&url)
             .bearer_auth(&self.token)
             .send()

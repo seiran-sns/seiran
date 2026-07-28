@@ -53,7 +53,12 @@ pub trait ReactionRepository: Send + Sync {
 
     /// ローカルユーザーが自分の (post_id, actor_id, content) の組み合わせでリアクションを取り消す。
     /// 返り値は削除行数（0 なら該当リアクションなし）。
-    async fn delete_local(&self, post_id: i64, actor_id: i64, content: &str) -> Result<u64, sqlx::Error>;
+    async fn delete_local(
+        &self,
+        post_id: i64,
+        actor_id: i64,
+        content: &str,
+    ) -> Result<u64, sqlx::Error>;
 
     /// 指定 (post_id, actor_id) の現在のリアクション行から `content` / `ap_activity_id` / `at_uri`
     /// / `emoji_url` を取得する。切替・取消の際、事前に「削除すべき旧リアクション（AP の Undo
@@ -69,17 +74,29 @@ pub trait ReactionRepository: Send + Sync {
     /// は含まない（API 公開用の集計は `fetch_reactions_map` を使う）。`emoji_url` は同一 `content`
     /// の行のうち非NULLな値を代表として1つ返す（異なるドメインの同名カスタム絵文字が
     /// 混在する場合は代表値のみになる簡略仕様）。
-    async fn aggregate_for_post(&self, post_id: i64) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error>;
+    async fn aggregate_for_post(
+        &self,
+        post_id: i64,
+    ) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error>;
 
     /// 指定アクターが現在付けているリアクションを `content` 単位で頻度集計する
     /// （絵文字ピッカーの「よく使う絵文字」用、多い順に最大 `limit` 件、`(content, count, emoji_url)`）。
     /// `reactions` は 1投稿1リアクションで切替時に上書きされるため、これは厳密な「過去の使用履歴」
     /// ではなく「現在も付いている自分のリアクション」の集計という近似値になる。
-    async fn aggregate_for_actor(&self, actor_id: i64, limit: i64) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error>;
+    async fn aggregate_for_actor(
+        &self,
+        actor_id: i64,
+        limit: i64,
+    ) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error>;
 
     /// 指定 (post_id, content) にリアクションを付けたアクターを新しい順に返す
     /// （リアクションチップのホバーポップオーバー「誰が付けたか」一覧用）。
-    async fn actors_for_reaction(&self, post_id: i64, content: &str, limit: i64) -> Result<Vec<ReactorInfo>, sqlx::Error>;
+    async fn actors_for_reaction(
+        &self,
+        post_id: i64,
+        content: &str,
+        limit: i64,
+    ) -> Result<Vec<ReactorInfo>, sqlx::Error>;
 }
 
 pub struct PgReactionRepository {
@@ -142,12 +159,11 @@ impl ReactionRepository for PgReactionRepository {
     }
 
     async fn delete_by_at_uri(&self, at_uri: &str) -> Result<Option<(i64, i64)>, sqlx::Error> {
-        let row = sqlx::query(
-            "DELETE FROM reactions WHERE at_uri = $1 RETURNING post_id, actor_id",
-        )
-        .bind(at_uri)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row =
+            sqlx::query("DELETE FROM reactions WHERE at_uri = $1 RETURNING post_id, actor_id")
+                .bind(at_uri)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(|r| (r.get("post_id"), r.get("actor_id"))))
     }
 
@@ -163,10 +179,22 @@ impl ReactionRepository for PgReactionRepository {
         .bind(actor_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|r| (r.get("content"), r.get("ap_activity_id"), r.get("at_uri"), r.get("emoji_url"))))
+        Ok(row.map(|r| {
+            (
+                r.get("content"),
+                r.get("ap_activity_id"),
+                r.get("at_uri"),
+                r.get("emoji_url"),
+            )
+        }))
     }
 
-    async fn delete_local(&self, post_id: i64, actor_id: i64, content: &str) -> Result<u64, sqlx::Error> {
+    async fn delete_local(
+        &self,
+        post_id: i64,
+        actor_id: i64,
+        content: &str,
+    ) -> Result<u64, sqlx::Error> {
         let result = sqlx::query(
             "DELETE FROM reactions WHERE post_id = $1 AND actor_id = $2 AND content = $3",
         )
@@ -178,7 +206,10 @@ impl ReactionRepository for PgReactionRepository {
         Ok(result.rows_affected())
     }
 
-    async fn aggregate_for_post(&self, post_id: i64) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error> {
+    async fn aggregate_for_post(
+        &self,
+        post_id: i64,
+    ) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error> {
         let rows = sqlx::query(
             "SELECT content, COUNT(*) AS cnt, MAX(emoji_url) AS emoji_url FROM reactions
              WHERE post_id = $1
@@ -188,10 +219,17 @@ impl ReactionRepository for PgReactionRepository {
         .bind(post_id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.into_iter().map(|r| (r.get("content"), r.get("cnt"), r.get("emoji_url"))).collect())
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.get("content"), r.get("cnt"), r.get("emoji_url")))
+            .collect())
     }
 
-    async fn aggregate_for_actor(&self, actor_id: i64, limit: i64) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error> {
+    async fn aggregate_for_actor(
+        &self,
+        actor_id: i64,
+        limit: i64,
+    ) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error> {
         let rows = sqlx::query(
             "SELECT content, COUNT(*) AS cnt, MAX(emoji_url) AS emoji_url FROM reactions
              WHERE actor_id = $1
@@ -203,10 +241,18 @@ impl ReactionRepository for PgReactionRepository {
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.into_iter().map(|r| (r.get("content"), r.get("cnt"), r.get("emoji_url"))).collect())
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.get("content"), r.get("cnt"), r.get("emoji_url")))
+            .collect())
     }
 
-    async fn actors_for_reaction(&self, post_id: i64, content: &str, limit: i64) -> Result<Vec<ReactorInfo>, sqlx::Error> {
+    async fn actors_for_reaction(
+        &self,
+        post_id: i64,
+        content: &str,
+        limit: i64,
+    ) -> Result<Vec<ReactorInfo>, sqlx::Error> {
         sqlx::query_as::<_, ReactorInfo>(
             "SELECT a.id, a.username, a.domain, a.display_name,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
