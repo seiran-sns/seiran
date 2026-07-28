@@ -21,7 +21,7 @@ export class ApiError extends Error {
   constructor(
     public readonly code: string,
     public readonly status: number,
-    public readonly detail?: Record<string, unknown>
+    public readonly detail?: Record<string, unknown>,
   ) {
     super(code);
     this.name = "ApiError";
@@ -71,7 +71,10 @@ export async function throwIfError(res: Response): Promise<void> {
   const contentType = res.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
     try {
-      const err = (await res.json()) as { code?: string; detail?: Record<string, unknown> };
+      const err = (await res.json()) as {
+        code?: string;
+        detail?: Record<string, unknown>;
+      };
       if (err.code) {
         throw new ApiError(err.code, res.status, err.detail);
       }
@@ -101,7 +104,7 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -128,7 +131,11 @@ async function uploadFormData<T>(path: string, formData: FormData): Promise<T> {
 }
 
 /** limit/until_id/since_id カーソルパラメータを組み立てる（7箇所の重複を共通化）。 */
-export function cursorParams(params?: { limit?: number; until_id?: string; since_id?: string }): URLSearchParams {
+export function cursorParams(params?: {
+  limit?: number;
+  until_id?: string;
+  since_id?: string;
+}): URLSearchParams {
   const q = new URLSearchParams();
   if (params?.limit) q.set("limit", String(params.limit));
   if (params?.until_id) q.set("until_id", params.until_id);
@@ -149,7 +156,7 @@ export interface User {
   actor_id: number;
   /** 左下ナビ等の自分のアイコン表示用。未設定の場合は undefined。 */
   avatar_url?: string;
-  /** 表示言語設定（`ja` / `en`）。`null`/`undefined` は「自動」（ブラウザ設定に従う）。 */
+  /** 表示言語設定（`ja` / `en` / `zh` / `ko` / `es` / `de` / `fr`）。`null`/`undefined` は「自動」。 */
   language_preference?: string | null;
 }
 
@@ -295,7 +302,10 @@ export interface PasskeySummary {
 }
 
 function decodeBase64Url(value: string): ArrayBuffer {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const base64 = value
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .padEnd(Math.ceil(value.length / 4) * 4, "=");
   return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)).buffer;
 }
 
@@ -303,7 +313,10 @@ function encodeBase64Url(value: ArrayBuffer): string {
   const bytes = new Uint8Array(value);
   let binary = "";
   bytes.forEach((byte) => (binary += String.fromCharCode(byte)));
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 type CredentialDescriptorJson = Record<string, unknown> & { id: string };
@@ -318,7 +331,9 @@ type AuthenticationOptionsJson = Record<string, unknown> & {
 };
 type WebAuthnEnvelope<T> = { token: string; public_key: { publicKey: T } };
 
-function registrationOptions(value: RegistrationOptionsJson): PublicKeyCredentialCreationOptions {
+function registrationOptions(
+  value: RegistrationOptionsJson,
+): PublicKeyCredentialCreationOptions {
   return {
     ...value,
     challenge: decodeBase64Url(value.challenge),
@@ -330,7 +345,9 @@ function registrationOptions(value: RegistrationOptionsJson): PublicKeyCredentia
   } as PublicKeyCredentialCreationOptions;
 }
 
-function authenticationOptions(value: AuthenticationOptionsJson): PublicKeyCredentialRequestOptions {
+function authenticationOptions(
+  value: AuthenticationOptionsJson,
+): PublicKeyCredentialRequestOptions {
   return {
     ...value,
     challenge: decodeBase64Url(value.challenge),
@@ -341,7 +358,9 @@ function authenticationOptions(value: AuthenticationOptionsJson): PublicKeyCrede
   } as PublicKeyCredentialRequestOptions;
 }
 
-function credentialJson(credential: PublicKeyCredential): Record<string, unknown> {
+function credentialJson(
+  credential: PublicKeyCredential,
+): Record<string, unknown> {
   const response = credential.response;
   if (response instanceof AuthenticatorAttestationResponse) {
     return {
@@ -364,7 +383,9 @@ function credentialJson(credential: PublicKeyCredential): Record<string, unknown
       authenticatorData: encodeBase64Url(assertion.authenticatorData),
       clientDataJSON: encodeBase64Url(assertion.clientDataJSON),
       signature: encodeBase64Url(assertion.signature),
-      userHandle: assertion.userHandle ? encodeBase64Url(assertion.userHandle) : null,
+      userHandle: assertion.userHandle
+        ? encodeBase64Url(assertion.userHandle)
+        : null,
     },
   };
 }
@@ -796,16 +817,27 @@ export const api = {
       return request<SetupStatus>("GET", "/setup/status", undefined, signal);
     },
     initialize(username: string, email: string, password: string) {
-      return request<AuthResponse>("POST", "/setup", { username, email, password });
+      return request<AuthResponse>("POST", "/setup", {
+        username,
+        email,
+        password,
+      });
     },
   },
 
   auth: {
     requestEmailVerification(email: string) {
-      return request<VerifyEmailResponse>("POST", "/auth/verify-email", { email });
+      return request<VerifyEmailResponse>("POST", "/auth/verify-email", {
+        email,
+      });
     },
     verifyEmailToken(token: string, signal?: AbortSignal) {
-      return request<VerifyTokenResponse>("GET", `/auth/verify-token?token=${encodeURIComponent(token)}`, undefined, signal);
+      return request<VerifyTokenResponse>(
+        "GET",
+        `/auth/verify-token?token=${encodeURIComponent(token)}`,
+        undefined,
+        signal,
+      );
     },
     register(username: string, password: string, registrationToken: string) {
       return request<AuthResponse>("POST", "/auth/register", {
@@ -822,11 +854,16 @@ export const api = {
       });
     },
     login(identifier: string, password: string) {
-      return request<LoginResult>("POST", "/auth/login", { identifier, password });
+      return request<LoginResult>("POST", "/auth/login", {
+        identifier,
+        password,
+      });
     },
     async loginWithPasskey(identifier: string) {
       const start = await request<WebAuthnEnvelope<AuthenticationOptionsJson>>(
-        "POST", "/auth/passkeys/start", { identifier }
+        "POST",
+        "/auth/passkeys/start",
+        { identifier },
       );
       const credential = (await navigator.credentials.get({
         publicKey: authenticationOptions(start.public_key.publicKey),
@@ -841,22 +878,39 @@ export const api = {
       return request<User>("GET", "/auth/me");
     },
     requestPasswordReset(email: string) {
-      return request<{ message: string }>("POST", "/auth/request-password-reset", { email });
+      return request<{ message: string }>(
+        "POST",
+        "/auth/request-password-reset",
+        { email },
+      );
     },
     verifyResetToken(token: string, signal?: AbortSignal) {
-      return request<{ valid: boolean }>("GET", `/auth/verify-reset-token?token=${encodeURIComponent(token)}`, undefined, signal);
+      return request<{ valid: boolean }>(
+        "GET",
+        `/auth/verify-reset-token?token=${encodeURIComponent(token)}`,
+        undefined,
+        signal,
+      );
     },
     resetPassword(token: string, newPassword: string) {
-      return request<{ message: string }>("POST", "/auth/reset-password", { token, new_password: newPassword });
+      return request<{ message: string }>("POST", "/auth/reset-password", {
+        token,
+        new_password: newPassword,
+      });
     },
     totp: {
       /** ログイン2段階目（#65）。`code`はTOTPコード（6桁数字）またはリカバリーコード（`nnnn-nnnn`）。 */
       verify(pendingToken: string, code: string) {
-        return request<AuthResponse>("POST", "/auth/totp/verify", { pending_token: pendingToken, code });
+        return request<AuthResponse>("POST", "/auth/totp/verify", {
+          pending_token: pendingToken,
+          code,
+        });
       },
       /** 認証アプリ・リカバリーコードを両方失った場合、登録メールアドレス宛に解除リンクを送る（#65）。 */
       requestDisableEmail(pendingToken: string) {
-        return request<void>("POST", "/auth/totp/request-disable-email", { pending_token: pendingToken });
+        return request<void>("POST", "/auth/totp/request-disable-email", {
+          pending_token: pendingToken,
+        });
       },
       /** メールのリンク（`/totp-disable?token=...`）を踏んだ際にトークンを確定する（#65）。 */
       confirmDisable(token: string) {
@@ -867,7 +921,9 @@ export const api = {
 
   notes: {
     async get(id: string) {
-      return normalizeNote(await request<RawNote>("GET", `/notes/${encodeURIComponent(id)}`));
+      return normalizeNote(
+        await request<RawNote>("GET", `/notes/${encodeURIComponent(id)}`),
+      );
     },
     async create(
       text: string,
@@ -878,7 +934,7 @@ export const api = {
       renoteId?: string,
       visibility?: "public" | "unlisted" | "followers_only" | "direct",
       recipientActorIds?: string[],
-      quoteOfId?: string
+      quoteOfId?: string,
     ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
@@ -891,81 +947,137 @@ export const api = {
           quote_of_id: quoteOfId,
           visibility,
           recipient_actor_ids: recipientActorIds,
-        })
+        }),
       );
     },
-    async localTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
+    async localTimeline(params?: {
+      limit?: number;
+      until_id?: string;
+      since_id?: string;
+      exclude_direct?: boolean;
+    }) {
       const q = cursorParams(params);
       if (params?.exclude_direct) q.set("exclude_direct", "true");
       const qs = q.toString();
-      const rows = await request<RawNote[]>("GET", `/notes/local-timeline${qs ? `?${qs}` : ""}`);
+      const rows = await request<RawNote[]>(
+        "GET",
+        `/notes/local-timeline${qs ? `?${qs}` : ""}`,
+      );
       return rows.map(normalizeNote);
     },
-    async homeTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
+    async homeTimeline(params?: {
+      limit?: number;
+      until_id?: string;
+      since_id?: string;
+      exclude_direct?: boolean;
+    }) {
       const q = cursorParams(params);
       if (params?.exclude_direct) q.set("exclude_direct", "true");
       const qs = q.toString();
-      const rows = await request<RawNote[]>("GET", `/notes/home-timeline${qs ? `?${qs}` : ""}`);
+      const rows = await request<RawNote[]>(
+        "GET",
+        `/notes/home-timeline${qs ? `?${qs}` : ""}`,
+      );
       return rows.map(normalizeNote);
     },
     /** ソーシャルタイムライン（自分 + フォロー中 + ローカル全体、#78）。 */
-    async socialTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
+    async socialTimeline(params?: {
+      limit?: number;
+      until_id?: string;
+      since_id?: string;
+      exclude_direct?: boolean;
+    }) {
       const q = cursorParams(params);
       if (params?.exclude_direct) q.set("exclude_direct", "true");
       const qs = q.toString();
-      const rows = await request<RawNote[]>("GET", `/notes/social-timeline${qs ? `?${qs}` : ""}`);
+      const rows = await request<RawNote[]>(
+        "GET",
+        `/notes/social-timeline${qs ? `?${qs}` : ""}`,
+      );
       return rows.map(normalizeNote);
     },
     /** グローバルタイムライン（postsテーブルの全投稿、#78）。 */
-    async globalTimeline(params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
+    async globalTimeline(params?: {
+      limit?: number;
+      until_id?: string;
+      since_id?: string;
+      exclude_direct?: boolean;
+    }) {
       const q = cursorParams(params);
       if (params?.exclude_direct) q.set("exclude_direct", "true");
       const qs = q.toString();
-      const rows = await request<RawNote[]>("GET", `/notes/global-timeline${qs ? `?${qs}` : ""}`);
+      const rows = await request<RawNote[]>(
+        "GET",
+        `/notes/global-timeline${qs ? `?${qs}` : ""}`,
+      );
       return rows.map(normalizeNote);
     },
     async context(id: string): Promise<{ before: Note[]; after: Note[] }> {
       const raw = await request<{ before: RawNote[]; after: RawNote[] }>(
         "GET",
-        `/notes/${encodeURIComponent(id)}/context`
+        `/notes/${encodeURIComponent(id)}/context`,
       );
-      return { before: raw.before.map(normalizeNote), after: raw.after.map(normalizeNote) };
+      return {
+        before: raw.before.map(normalizeNote),
+        after: raw.after.map(normalizeNote),
+      };
     },
     deleteRepost(noteId: string) {
-      return request<{ ok: boolean }>("DELETE", `/notes/${encodeURIComponent(noteId)}/repost`);
+      return request<{ ok: boolean }>(
+        "DELETE",
+        `/notes/${encodeURIComponent(noteId)}/repost`,
+      );
     },
     delete(noteId: string) {
-      return request<{ ok: boolean }>("DELETE", `/notes/${encodeURIComponent(noteId)}`);
+      return request<{ ok: boolean }>(
+        "DELETE",
+        `/notes/${encodeURIComponent(noteId)}`,
+      );
     },
     react(noteId: string, content: string) {
-      return request<ReactResult>("POST", `/notes/${encodeURIComponent(noteId)}/reactions`, { content });
+      return request<ReactResult>(
+        "POST",
+        `/notes/${encodeURIComponent(noteId)}/reactions`,
+        { content },
+      );
     },
     unreact(noteId: string, content: string) {
       return request<ReactResult>(
         "DELETE",
-        `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}`
+        `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}`,
       );
     },
     reactionActors(noteId: string, content: string) {
       return request<{ actors: ReactionActor[] }>(
         "GET",
-        `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}/actors`
+        `/notes/${encodeURIComponent(noteId)}/reactions/${encodeURIComponent(content)}/actors`,
       );
     },
     votePoll(noteId: string, optionIndexes: number[]) {
-      return request<{ ok: boolean; poll: NonNullable<Note["poll"]>; voted: boolean }>(
-        "POST",
-        `/notes/${encodeURIComponent(noteId)}/poll-vote`,
-        { optionIndexes }
-      );
+      return request<{
+        ok: boolean;
+        poll: NonNullable<Note["poll"]>;
+        voted: boolean;
+      }>("POST", `/notes/${encodeURIComponent(noteId)}/poll-vote`, {
+        optionIndexes,
+      });
     },
     pin(noteId: string) {
-      return request<{ ok: boolean; pinnedPostIds: string[] }>("POST", `/notes/${encodeURIComponent(noteId)}/pin`);
+      return request<{ ok: boolean; pinnedPostIds: string[] }>(
+        "POST",
+        `/notes/${encodeURIComponent(noteId)}/pin`,
+      );
     },
     unpin(noteId: string) {
-      return request<{ ok: boolean; pinnedPostIds: string[] }>("DELETE", `/notes/${encodeURIComponent(noteId)}/pin`);
+      return request<{ ok: boolean; pinnedPostIds: string[] }>(
+        "DELETE",
+        `/notes/${encodeURIComponent(noteId)}/pin`,
+      );
     },
-    async search(params: { q: string; limit?: number; session_id?: string }, signal?: AbortSignal) {
+    async search(
+      params: { q: string; limit?: number; session_id?: string },
+      signal?: AbortSignal,
+    ) {
       const qs = new URLSearchParams();
       qs.set("q", params.q);
       if (params.limit) qs.set("limit", String(params.limit));
@@ -974,15 +1086,23 @@ export const api = {
         "GET",
         `/notes/search?${qs.toString()}`,
         undefined,
-        signal
+        signal,
       );
-      return { notes: raw.notes.map(normalizeNote), session_id: raw.session_id };
+      return {
+        notes: raw.notes.map(normalizeNote),
+        session_id: raw.session_id,
+      };
     },
   },
 
   /** Misskey API 互換の `/api/i/notifications`（Doc3 §5.5）。 */
   notifications: {
-    list(params?: { limit?: number; untilId?: string; sinceId?: string; markAsRead?: boolean }) {
+    list(params?: {
+      limit?: number;
+      untilId?: string;
+      sinceId?: string;
+      markAsRead?: boolean;
+    }) {
       return request<NotificationItem[]>("POST", "/i/notifications", {
         limit: params?.limit,
         untilId: params?.untilId,
@@ -995,7 +1115,10 @@ export const api = {
   users: {
     async profile(q: string) {
       const raw = await request<
-        Omit<UserProfile, "recent_posts" | "pinned_posts"> & { recent_posts?: RawNote[]; pinned_posts?: RawNote[] }
+        Omit<UserProfile, "recent_posts" | "pinned_posts"> & {
+          recent_posts?: RawNote[];
+          pinned_posts?: RawNote[];
+        }
       >("GET", `/users/profile?q=${encodeURIComponent(q)}`);
       // recent_posts / pinned_posts はタイムラインと同じ NoteCard で描画するため Note に正規化（#43, #61）。
       return {
@@ -1006,30 +1129,56 @@ export const api = {
     },
     /** プロフィール画面の投稿一覧の追加ページ取得（無限スクロール、#64）。`actorId` は
      * `UserProfile.actor_id`（DB未登録のリモートアクターは undefined になり得る）。 */
-    async posts(actorId: string, params?: { limit?: number; until_id?: string; since_id?: string; exclude_direct?: boolean }) {
+    async posts(
+      actorId: string,
+      params?: {
+        limit?: number;
+        until_id?: string;
+        since_id?: string;
+        exclude_direct?: boolean;
+      },
+    ) {
       const q = cursorParams(params);
       q.set("actor_id", actorId);
       if (params?.exclude_direct) q.set("exclude_direct", "true");
-      const rows = await request<RawNote[]>("GET", `/users/posts?${q.toString()}`);
+      const rows = await request<RawNote[]>(
+        "GET",
+        `/users/posts?${q.toString()}`,
+      );
       return rows.map(normalizeNote);
     },
     /** プロフィール画面「フォロー中」タブの一覧取得（無限スクロール、#56）。 */
-    following(actorId: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+    following(
+      actorId: string,
+      params?: { limit?: number; until_id?: string; since_id?: string },
+    ) {
       const q = cursorParams(params);
       q.set("actor_id", actorId);
-      return request<FollowListItem[]>("GET", `/users/following?${q.toString()}`);
+      return request<FollowListItem[]>(
+        "GET",
+        `/users/following?${q.toString()}`,
+      );
     },
     /** プロフィール画面「フォロワー」タブの一覧取得（無限スクロール、#56）。 */
-    followers(actorId: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+    followers(
+      actorId: string,
+      params?: { limit?: number; until_id?: string; since_id?: string },
+    ) {
       const q = cursorParams(params);
       q.set("actor_id", actorId);
-      return request<FollowListItem[]>("GET", `/users/followers?${q.toString()}`);
+      return request<FollowListItem[]>(
+        "GET",
+        `/users/followers?${q.toString()}`,
+      );
     },
     /** リモートFediアクターのフォロー中/フォロワーをAP経由で全件取得する（#68）。
      * ローカルDBが把握している範囲を超えた「相手サーバー上の実際の全件」を返す。 */
     remoteFollowSummary(actorId: string, direction: "following" | "followers") {
       const q = new URLSearchParams({ actor_id: actorId, direction });
-      return request<RemoteFollowSummaryResponse>("GET", `/users/remote-follow-summary?${q.toString()}`);
+      return request<RemoteFollowSummaryResponse>(
+        "GET",
+        `/users/remote-follow-summary?${q.toString()}`,
+      );
     },
     updateProfile(patch: {
       display_name?: string;
@@ -1054,54 +1203,88 @@ export const api = {
       return request<AdminReport[]>("GET", "/admin/reports");
     },
     closeReport(id: string) {
-      return request<void>("POST", `/admin/reports/${encodeURIComponent(id)}/close`);
+      return request<void>(
+        "POST",
+        `/admin/reports/${encodeURIComponent(id)}/close`,
+      );
     },
     listReportComments(id: string) {
-      return request<ReportComment[]>("GET", `/admin/reports/${encodeURIComponent(id)}/comments`);
+      return request<ReportComment[]>(
+        "GET",
+        `/admin/reports/${encodeURIComponent(id)}/comments`,
+      );
     },
     addReportComment(id: string, body: string) {
-      return request<ReportComment>("POST", `/admin/reports/${encodeURIComponent(id)}/comments`, { body });
+      return request<ReportComment>(
+        "POST",
+        `/admin/reports/${encodeURIComponent(id)}/comments`,
+        { body },
+      );
     },
     deleteReportedPost(id: string) {
-      return request<void>("POST", `/admin/reports/${encodeURIComponent(id)}/delete-post`);
+      return request<void>(
+        "POST",
+        `/admin/reports/${encodeURIComponent(id)}/delete-post`,
+      );
     },
     suspendReportedUser(id: string) {
-      return request<void>("POST", `/admin/reports/${encodeURIComponent(id)}/suspend-user`);
+      return request<void>(
+        "POST",
+        `/admin/reports/${encodeURIComponent(id)}/suspend-user`,
+      );
     },
     forwardReport(id: string) {
-      return request<void>("POST", `/admin/reports/${encodeURIComponent(id)}/forward`);
+      return request<void>(
+        "POST",
+        `/admin/reports/${encodeURIComponent(id)}/forward`,
+      );
     },
     listUsers() {
       return request<AdminUser[]>("GET", "/admin/users");
     },
     suspendUser(id: string) {
-      return request<void>("POST", `/admin/users/${encodeURIComponent(id)}/suspend`);
+      return request<void>(
+        "POST",
+        `/admin/users/${encodeURIComponent(id)}/suspend`,
+      );
     },
     unsuspendUser(id: string) {
-      return request<void>("POST", `/admin/users/${encodeURIComponent(id)}/unsuspend`);
+      return request<void>(
+        "POST",
+        `/admin/users/${encodeURIComponent(id)}/unsuspend`,
+      );
     },
     changeUserRole(id: string, role: string) {
-      return request<void>("POST", `/admin/users/${encodeURIComponent(id)}/role`, { role });
+      return request<void>(
+        "POST",
+        `/admin/users/${encodeURIComponent(id)}/role`,
+        { role },
+      );
     },
     disableUserTotp(id: string) {
-      return request<void>("POST", `/admin/users/${encodeURIComponent(id)}/totp/disable`);
+      return request<void>(
+        "POST",
+        `/admin/users/${encodeURIComponent(id)}/totp/disable`,
+      );
     },
 
     getSiteSettings() {
       return request<SiteSettings>("GET", "/admin/site-settings");
     },
-    updateSiteSettings(patch: Partial<{
-      smtp_host: string;
-      smtp_port: string;
-      smtp_username: string;
-      smtp_password: string;
-      smtp_from: string;
-      require_email_verification: string;
-      site_name: string;
-      site_color: string;
-      site_icon_url: string;
-      media_proxy_url: string;
-    }>) {
+    updateSiteSettings(
+      patch: Partial<{
+        smtp_host: string;
+        smtp_port: string;
+        smtp_username: string;
+        smtp_password: string;
+        smtp_from: string;
+        require_email_verification: string;
+        site_name: string;
+        site_color: string;
+        site_icon_url: string;
+        media_proxy_url: string;
+      }>,
+    ) {
       return request<SiteSettings>("PATCH", "/admin/site-settings", patch);
     },
 
@@ -1121,7 +1304,11 @@ export const api = {
       return request<StorageProvider>("POST", "/admin/storage-providers", body);
     },
     updateStorageProvider(id: number, patch: Record<string, unknown>) {
-      return request<StorageProvider>("PATCH", `/admin/storage-providers/${id}`, patch);
+      return request<StorageProvider>(
+        "PATCH",
+        `/admin/storage-providers/${id}`,
+        patch,
+      );
     },
     deleteStorageProvider(id: number) {
       return request<void>("DELETE", `/admin/storage-providers/${id}`);
@@ -1130,11 +1317,24 @@ export const api = {
     listEmojis() {
       return request<CustomEmoji[]>("GET", "/admin/emojis");
     },
-    createEmoji(body: { shortcode: string; media_file_id: string; category?: string; tags?: string[]; license?: string }) {
+    createEmoji(body: {
+      shortcode: string;
+      media_file_id: string;
+      category?: string;
+      tags?: string[];
+      license?: string;
+    }) {
       return request<CustomEmoji>("POST", "/admin/emojis", body);
     },
-    updateEmoji(id: string, body: { category?: string; tags?: string[]; license?: string }) {
-      return request<CustomEmoji>("PATCH", `/admin/emojis/${encodeURIComponent(id)}`, body);
+    updateEmoji(
+      id: string,
+      body: { category?: string; tags?: string[]; license?: string },
+    ) {
+      return request<CustomEmoji>(
+        "PATCH",
+        `/admin/emojis/${encodeURIComponent(id)}`,
+        body,
+      );
     },
     deleteEmoji(id: string) {
       return request<void>("DELETE", `/admin/emojis/${encodeURIComponent(id)}`);
@@ -1145,13 +1345,24 @@ export const api = {
       return uploadFormData<EmojiImportJob>("/admin/emojis/import", formData);
     },
     getEmojiImportStatus(jobId: string) {
-      return request<EmojiImportJob>("GET", `/admin/emojis/import/${encodeURIComponent(jobId)}`);
+      return request<EmojiImportJob>(
+        "GET",
+        `/admin/emojis/import/${encodeURIComponent(jobId)}`,
+      );
     },
     listRemoteEmojis(keyword?: string) {
-      const q = keyword?.trim() ? `?keyword=${encodeURIComponent(keyword.trim())}` : "";
+      const q = keyword?.trim()
+        ? `?keyword=${encodeURIComponent(keyword.trim())}`
+        : "";
       return request<RemoteEmoji[]>("GET", `/admin/emojis/remote${q}`);
     },
-    importRemoteEmoji(body: { shortcode: string; image_url: string; category?: string; tags?: string[]; license?: string }) {
+    importRemoteEmoji(body: {
+      shortcode: string;
+      image_url: string;
+      category?: string;
+      tags?: string[];
+      license?: string;
+    }) {
       return request<CustomEmoji>("POST", "/admin/emojis/remote/import", body);
     },
   },
@@ -1195,27 +1406,50 @@ export const api = {
     /** DB上のアクターを表示名・ハンドルの部分一致で検索する（リスト・DM用）。 */
     search(q: string, limit = 10, signal?: AbortSignal) {
       const query = new URLSearchParams({ q, limit: String(limit) });
-      return request<ActorSuggestion[]>("GET", `/actors/search?${query.toString()}`, undefined, signal);
+      return request<ActorSuggestion[]>(
+        "GET",
+        `/actors/search?${query.toString()}`,
+        undefined,
+        signal,
+      );
     },
     /** ハンドルの前方一致で検索する（投稿欄の@サジェスト用、qに先頭@は含めない）。 */
     suggest(q: string, limit = 10, signal?: AbortSignal) {
       const query = new URLSearchParams({ q, limit: String(limit) });
-      return request<ActorSuggestion[]>("GET", `/actors/suggest?${query.toString()}`, undefined, signal);
+      return request<ActorSuggestion[]>(
+        "GET",
+        `/actors/suggest?${query.toString()}`,
+        undefined,
+        signal,
+      );
     },
   },
 
   dm: {
-    async sessions(params?: { limit?: number; until_id?: string; since_id?: string }) {
+    async sessions(params?: {
+      limit?: number;
+      until_id?: string;
+      since_id?: string;
+    }) {
       const qs = cursorParams(params).toString();
       return request<DmSession[]>("GET", `/dm/sessions${qs ? `?${qs}` : ""}`);
     },
-    async threadMessages(threadRootId: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+    async threadMessages(
+      threadRootId: string,
+      params?: { limit?: number; until_id?: string; since_id?: string },
+    ) {
       const qs = cursorParams(params).toString();
-      const rows = await request<RawNote[]>("GET", `/dm/sessions/${encodeURIComponent(threadRootId)}/messages${qs ? `?${qs}` : ""}`);
+      const rows = await request<RawNote[]>(
+        "GET",
+        `/dm/sessions/${encodeURIComponent(threadRootId)}/messages${qs ? `?${qs}` : ""}`,
+      );
       return rows.map(normalizeNote);
     },
     markRead(threadRootId: string) {
-      return request<{ ok: boolean }>("POST", `/dm/sessions/${encodeURIComponent(threadRootId)}/read`);
+      return request<{ ok: boolean }>(
+        "POST",
+        `/dm/sessions/${encodeURIComponent(threadRootId)}/read`,
+      );
     },
     unreadCount() {
       return request<{ count: number }>("GET", "/dm/unread-count");
@@ -1227,26 +1461,45 @@ export const api = {
       return request<ListSummary[]>("GET", "/lists");
     },
     create(name: string, isPublic: boolean) {
-      return request<ListSummary>("POST", "/lists", { name, is_public: isPublic });
+      return request<ListSummary>("POST", "/lists", {
+        name,
+        is_public: isPublic,
+      });
     },
     get(id: string) {
       return request<ListDetail>("GET", `/lists/${encodeURIComponent(id)}`);
     },
     update(id: string, name: string, isPublic: boolean) {
-      return request<ListSummary>("PATCH", `/lists/${encodeURIComponent(id)}`, { name, is_public: isPublic });
+      return request<ListSummary>("PATCH", `/lists/${encodeURIComponent(id)}`, {
+        name,
+        is_public: isPublic,
+      });
     },
     remove(id: string) {
       return request<void>("DELETE", `/lists/${encodeURIComponent(id)}`);
     },
     addMember(id: string, target: string) {
-      return request<ListMember[]>("POST", `/lists/${encodeURIComponent(id)}/members`, { target });
+      return request<ListMember[]>(
+        "POST",
+        `/lists/${encodeURIComponent(id)}/members`,
+        { target },
+      );
     },
     removeMember(id: string, actorId: string) {
-      return request<void>("DELETE", `/lists/${encodeURIComponent(id)}/members/${encodeURIComponent(actorId)}`);
+      return request<void>(
+        "DELETE",
+        `/lists/${encodeURIComponent(id)}/members/${encodeURIComponent(actorId)}`,
+      );
     },
-    async timeline(id: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+    async timeline(
+      id: string,
+      params?: { limit?: number; until_id?: string; since_id?: string },
+    ) {
       const qs = cursorParams(params).toString();
-      const rows = await request<RawNote[]>("GET", `/lists/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`);
+      const rows = await request<RawNote[]>(
+        "GET",
+        `/lists/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`,
+      );
       return rows.map(normalizeNote);
     },
   },
@@ -1260,18 +1513,29 @@ export const api = {
       return request<void>("POST", `/hashtags/${encodeURIComponent(name)}/pin`);
     },
     unpin(name: string) {
-      return request<void>("DELETE", `/hashtags/${encodeURIComponent(name)}/pin`);
+      return request<void>(
+        "DELETE",
+        `/hashtags/${encodeURIComponent(name)}/pin`,
+      );
     },
-    async timeline(name: string, params?: { limit?: number; until_id?: string; since_id?: string }) {
+    async timeline(
+      name: string,
+      params?: { limit?: number; until_id?: string; since_id?: string },
+    ) {
       const qs = cursorParams(params).toString();
-      const rows = await request<RawNote[]>("GET", `/hashtags/${encodeURIComponent(name)}/timeline${qs ? `?${qs}` : ""}`);
+      const rows = await request<RawNote[]>(
+        "GET",
+        `/hashtags/${encodeURIComponent(name)}/timeline${qs ? `?${qs}` : ""}`,
+      );
       return rows.map(normalizeNote);
     },
   },
 
   account: {
     withdraw(confirmHandle: string) {
-      return request<void>("POST", "/account/withdraw", { confirm_handle: confirmHandle });
+      return request<void>("POST", "/account/withdraw", {
+        confirm_handle: confirmHandle,
+      });
     },
     /** 設定画面のアカウント設定からパスワードを変更する（#55、要現パスワード確認）。 */
     changePassword(currentPassword: string, newPassword: string) {
@@ -1286,7 +1550,9 @@ export const api = {
     },
     /** 設定画面のアカウント設定からメールアドレス変更をリクエストする（#59、新アドレス宛に確認メール送信）。 */
     requestEmailChange(newEmail: string) {
-      return request<void>("POST", "/account/email/request-change", { new_email: newEmail });
+      return request<void>("POST", "/account/email/request-change", {
+        new_email: newEmail,
+      });
     },
     /** 確認メールのリンク（`/verify-email-change?token=...`）を踏んだ際にトークンを確定する（#59）。 */
     confirmEmailChange(token: string) {
@@ -1299,15 +1565,24 @@ export const api = {
       },
       /** シークレットを新規生成する（未確定、`enable`で確認コード検証するまで有効にならない）。 */
       setup() {
-        return request<{ secret: string; otpauth_url: string }>("POST", "/account/totp/setup");
+        return request<{ secret: string; otpauth_url: string }>(
+          "POST",
+          "/account/totp/setup",
+        );
       },
       /** 確認コードを検証して有効化する。成功時のみ表示するリカバリーコードを10件返す。 */
       enable(code: string) {
-        return request<{ recovery_codes: string[] }>("POST", "/account/totp/enable", { code });
+        return request<{ recovery_codes: string[] }>(
+          "POST",
+          "/account/totp/enable",
+          { code },
+        );
       },
       /** 現在のパスワード確認の上で無効化する。 */
       disable(currentPassword: string) {
-        return request<void>("POST", "/account/totp/disable", { current_password: currentPassword });
+        return request<void>("POST", "/account/totp/disable", {
+          current_password: currentPassword,
+        });
       },
     },
     passkeys: {
@@ -1316,19 +1591,28 @@ export const api = {
       },
       async register(name: string) {
         const start = await request<WebAuthnEnvelope<RegistrationOptionsJson>>(
-          "POST", "/account/passkeys/registration/start", { name }
+          "POST",
+          "/account/passkeys/registration/start",
+          { name },
         );
         const credential = (await navigator.credentials.create({
           publicKey: registrationOptions(start.public_key.publicKey),
         })) as PublicKeyCredential | null;
         if (!credential) throw new Error("Passkey registration was cancelled");
-        return request<PasskeySummary>("POST", "/account/passkeys/registration/finish", {
-          token: start.token,
-          credential: credentialJson(credential),
-        });
+        return request<PasskeySummary>(
+          "POST",
+          "/account/passkeys/registration/finish",
+          {
+            token: start.token,
+            credential: credentialJson(credential),
+          },
+        );
       },
       delete(id: string) {
-        return request<void>("DELETE", `/account/passkeys/${encodeURIComponent(id)}`);
+        return request<void>(
+          "DELETE",
+          `/account/passkeys/${encodeURIComponent(id)}`,
+        );
       },
     },
   },
@@ -1339,7 +1623,11 @@ export const api = {
      * `name` はクライアントアプリ名（#60: 発行済みトークン一覧に表示する）。
      */
     authorize(sessionId: string, name?: string) {
-      return request<{ ok: boolean }>("POST", `/miauth/${encodeURIComponent(sessionId)}/authorize`, { name });
+      return request<{ ok: boolean }>(
+        "POST",
+        `/miauth/${encodeURIComponent(sessionId)}/authorize`,
+        { name },
+      );
     },
   },
 
@@ -1350,7 +1638,10 @@ export const api = {
     },
     /** 本人所有のトークンを無効化する（#60）。 */
     revoke(id: string) {
-      return request<void>("DELETE", `/account/app-tokens/${encodeURIComponent(id)}`);
+      return request<void>(
+        "DELETE",
+        `/account/app-tokens/${encodeURIComponent(id)}`,
+      );
     },
   },
 
@@ -1360,7 +1651,11 @@ export const api = {
      * 提出可否（省略時true）。falseにすると音声・画像と同様、Bskyへは
      * externalリンクカードとして配信される。
      */
-    upload(file: File, mediaType: "post" | "emoji" | "avatar" | "banner" = "post", deliverToBsky = true): Promise<DriveFile> {
+    upload(
+      file: File,
+      mediaType: "post" | "emoji" | "avatar" | "banner" = "post",
+      deliverToBsky = true,
+    ): Promise<DriveFile> {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("media_type", mediaType);
@@ -1379,7 +1674,10 @@ export const api = {
   reactions: {
     /** 自分がよく使う絵文字を頻度順に返す（絵文字ピッカーの「よく使う」タブ用）。 */
     frequent() {
-      return request<{ items: FrequentReaction[] }>("GET", "/reactions/frequent");
+      return request<{ items: FrequentReaction[] }>(
+        "GET",
+        "/reactions/frequent",
+      );
     },
   },
 };

@@ -1,0 +1,25 @@
+{
+  "listsSettingsPage": {
+    "title": "管理列表",
+    "newListNamePlaceholder": "新名单名称",
+    "publicLabel": "民众",
+    "creatingButton": "创造...",
+    "noLists": "您还没有任何列表。",
+    "isPublicLabel": "民众",
+    "isPrivateLabel": "私人的",
+    "memberCount": "{{count}} 成员",
+    "selectListPrompt": "选择左侧的列表。",
+    "editingHeader": "编辑{{name}}",
+    "deleteListConfirm": "删除这个列表？此操作无法撤消。",
+    "memberSearchPlaceholder": "按 ID/句柄/昵称搜索，或 @user@domain · https://... · did:...",
+    "addingMemberButton": "添加...",
+    "addMemberButton": "添加会员",
+    "noMembers": "还没有会员。"
+  },
+  "listDetailPage": {
+    "title": "列表",
+    "notFound": "此列表不存在或者是私有的。",
+    "memberCount": "{{count}} 成员",
+    "emptyTimeline": "该列表成员的帖子将显示在此处。"
+  }
+}

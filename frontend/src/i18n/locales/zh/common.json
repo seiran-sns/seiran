@@ -1,0 +1,31 @@
+{
+  "sensitiveImageReveal": "显示敏感图像",
+  "inputSuggestions": "输入建议",
+  "appName": "青岚",
+  "close": "关闭",
+  "save": "节省",
+  "saving": "保存...",
+  "cancel": "取消",
+  "delete": "删除",
+  "edit": "编辑",
+  "confirm": "确认",
+  "back": "后退",
+  "retry": "重试",
+  "loading": "加载中...",
+  "submit": "提交",
+  "yes": "是的",
+  "no": "不",
+  "ok": "好的",
+  "create": "创造",
+  "add": "添加",
+  "remove": "消除",
+  "search": "搜索",
+  "settings": "设置",
+  "error": "错误",
+  "unknownError": "发生未知错误",
+  "remoteBanner": {
+    "note": "这是一个远程帖子",
+    "user": "这是远程用户",
+    "viewRemote": "在远程服务器上查看"
+  }
+}

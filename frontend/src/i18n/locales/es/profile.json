@@ -1,0 +1,74 @@
+{
+  "profilePage": {
+    "title": "Perfil",
+    "warpBanner": {
+      "prefix": "Esta cuenta es una",
+      "shadowLabel": "apoderado",
+      "suffix": "cuenta. La cuenta real ({{handle}}) está aquí →"
+    },
+    "pairedBadge": "Atado al alma",
+    "pairedBadgeTitle": "Vinculado con un usuario remoto de Seiran mediante vinculación de almas.",
+    "editProfileButton": "Editar perfil",
+    "followingBadge": "Siguiente",
+    "unfollowingButton": "Dejar de seguir...",
+    "unfollowButton": "Dejar de seguir",
+    "pendingBadge": "Solicitado",
+    "followingSubmitButton": "Envío...",
+    "followButton": "Seguir",
+    "pinnedHeader": "Fijado",
+    "publicListsHeader": "Listas públicas",
+    "postsHeader": "Publicaciones",
+    "noPosts": "Aún no hay publicaciones.",
+    "followingTab": "Siguiente",
+    "followersTab": "Seguidores",
+    "followingCountLabel": "Siguiente",
+    "followerCountLabel": "Seguidores",
+    "followList": {
+      "noFollowing": "Aún no sigo a nadie.",
+      "noFollowers": "Aún no hay seguidores.",
+      "remoteExtraPending": "Obteniendo en segundo plano. Vuelva a cargarlo en breve."
+    },
+    "actionsMenuTitle": "Acciones de cuenta",
+    "muteButton": "Silenciar",
+    "unmuteButton": "Dejar de silenciar",
+    "blockButton": "Bloquear",
+    "unblockButton": "Desatascar",
+    "blockedByNotice": "Este usuario te ha bloqueado",
+    "blockConfirmModal": {
+      "title": "Confirmar bloque",
+      "body": "El bloqueo eliminará cualquier relación de seguimiento y ocultará las publicaciones de ambos. Si este usuario está en Fediverse, se enviará un aviso de bloqueo a su servidor. ¿Estás seguro de que quieres bloquear?",
+      "confirmButton": "Bloquear",
+      "cancelButton": "Cancelar"
+    },
+    "bridgeModal": {
+      "title": "Seguir una cuenta proxy",
+      "prefix": "Esta cuenta es una proyección de un usuario {{protocol}} a través de un puente, conocido como",
+      "shadowLabel": "apoderado",
+      "suffix": ". Para aprovechar al máximo las funciones de Seiran, recomendamos seguir directamente la cuenta real (original).",
+      "goToRealButton": "Ir al perfil de la cuenta real",
+      "followAnywayButton": "Sigue la cuenta proxy de todos modos"
+    }
+  },
+  "profileEditPage": {
+    "title": "Editar perfil",
+    "savedMessage": "Guardado.",
+    "uploadingAvatar": "Subiendo...",
+    "changeAvatarButton": "Cambiar avatar",
+    "displayNameLabel": "Nombre para mostrar",
+    "bioLabel": "Biografía",
+    "bioPlaceholder": "Cuéntanos sobre ti",
+    "fieldsLabel": "Campos de perfil (enlaces, etc., hasta {{count}})",
+    "fieldNamePlaceholder": "Etiqueta (por ejemplo, sitio web)",
+    "fieldValuePlaceholder": "Valor (por ejemplo, https://example.com)",
+    "dangerZoneTitle": "Zona de peligro",
+    "withdrawButton": "Desactivar esta cuenta",
+    "withdrawConfirm": "La desactivación de su cuenta no se puede deshacer. ¿Estás seguro de que quieres continuar?",
+    "withdrawHint": {
+      "body": "La desactivación eliminará tus publicaciones y eliminará tus relaciones de seguimiento. Esta acción no se puede deshacer.",
+      "handlePrefix": "Para confirmar, ingrese su identificador (",
+      "handleSuffix": ") abajo."
+    },
+    "withdrawing": "Tratamiento...",
+    "withdrawSubmit": "Desactivar cuenta"
+  }
+}

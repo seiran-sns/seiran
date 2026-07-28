@@ -1,0 +1,8 @@
+{
+  "hashtagPage": {
+    "addToHome": "홈 화면에 추가",
+    "removeFromHome": "홈 화면에서 제거",
+    "postWithTag": "이 해시태그로 게시",
+    "empty": "이 해시태그가 포함된 게시물이 여기에 표시됩니다."
+  }
+}

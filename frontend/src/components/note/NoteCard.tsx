@@ -2,11 +2,23 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, Note } from "../../api/client";
-import { acct, deliveryBadges, displayName, formatDate, profilePath, profileQuery, protocolBadge, visibilityBadge } from "../../lib/format";
+import {
+  acct,
+  deliveryBadges,
+  displayName,
+  formatDate,
+  profilePath,
+  profileQuery,
+  protocolBadge,
+  visibilityBadge,
+} from "../../lib/format";
 import { useNoteCardActions } from "../../hooks/useNoteCardActions";
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../contexts/ToastContext";
-import { setFollowStatus as setFollowStatusStore, useFollowStatus } from "../../stores/followStatusStore";
+import {
+  setFollowStatus as setFollowStatusStore,
+  useFollowStatus,
+} from "../../stores/followStatusStore";
 import { setPollState, usePollState } from "../../stores/pollVoteStore";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
@@ -35,10 +47,19 @@ function QuoteCard({ note }: { note: Note }) {
   return (
     <section className={styles.quoteCard} onClick={(e) => e.stopPropagation()}>
       <div className={styles.quoteHeader}>
-        <Link to={profilePath(note.user.username, note.user.domain)} className={styles.quoteUser}>
-          <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={30} />
+        <Link
+          to={profilePath(note.user.username, note.user.domain)}
+          className={styles.quoteUser}
+        >
+          <Avatar
+            url={note.user.avatarUrl}
+            name={note.user.displayName || note.user.username}
+            size={30}
+          />
           <span className={styles.quoteNames}>
-            <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong>
+            <strong>
+              <EmojiText text={displayName(note)} emojis={note.emojis} />
+            </strong>
             <span>{acct(note)}</span>
           </span>
         </Link>
@@ -49,18 +70,31 @@ function QuoteCard({ note }: { note: Note }) {
 
       <div className={styles.quoteRelations}>
         {note.replyId && <ReplyIndicator replyId={note.replyId} />}
-        {note.quoteId && <span className={styles.quoteBadge}>{t("home:noteCard.hasQuote")}</span>}
+        {note.quoteId && (
+          <span className={styles.quoteBadge}>
+            {t("home:noteCard.hasQuote")}
+          </span>
+        )}
       </div>
 
       {note.contentWarning && (
         <div className={styles.quoteContentWarning}>
           <span>⚠️ {note.contentWarning}</span>
-          <button type="button" onClick={() => setShowContent((shown) => !shown)}>
-            {showContent ? t("home:noteCard.hideContent") : t("home:noteCard.showContent")}
+          <button
+            type="button"
+            onClick={() => setShowContent((shown) => !shown)}
+          >
+            {showContent
+              ? t("home:noteCard.hideContent")
+              : t("home:noteCard.showContent")}
           </button>
         </div>
       )}
-      {showContent && <p className={styles.quoteBody}><RichText text={note.text} emojis={note.emojis} /></p>}
+      {showContent && (
+        <p className={styles.quoteBody}>
+          <RichText text={note.text} emojis={note.emojis} />
+        </p>
+      )}
 
       <NoteAttachments attachments={note.attachments} />
       {note.poll && (
@@ -68,7 +102,10 @@ function QuoteCard({ note }: { note: Note }) {
           {note.poll.options.map((option) => (
             <div className={styles.pollOption} key={option.name}>
               <span>{option.name}</span>
-              <span>{option.votes}{t("home:noteCard.votesSuffix")}</span>
+              <span>
+                {option.votes}
+                {t("home:noteCard.votesSuffix")}
+              </span>
             </div>
           ))}
         </div>
@@ -80,7 +117,13 @@ function QuoteCard({ note }: { note: Note }) {
   );
 }
 
-function PostContent({ note, linkToDetail, large = false, onUnreposted, onDeleted }: {
+function PostContent({
+  note,
+  linkToDetail,
+  large = false,
+  onUnreposted,
+  onDeleted,
+}: {
   note: Note;
   linkToDetail: boolean;
   large?: boolean;
@@ -115,7 +158,11 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
 
   const targetKey = profileQuery(note.user.username, note.user.domain);
 
-  const isAuthorSelf = isSelf || (!!currentUser && currentUser.username === note.user.username && (!note.user.domain || note.user.domain === window.location.hostname));
+  const isAuthorSelf =
+    isSelf ||
+    (!!currentUser &&
+      currentUser.username === note.user.username &&
+      (!note.user.domain || note.user.domain === window.location.hostname));
 
   const [isHovered, setIsHovered] = useState(false);
   const [showContent, setShowContent] = useState(!note.contentWarning);
@@ -134,13 +181,15 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
   // ストアに未登録（undefined）なら「まだ取得していない」ことを意味する。
   const followStatus = useFollowStatus(targetKey) ?? null;
 
-  const pollClosed = !!poll && [poll.closed, poll.endTime]
-    .filter(Boolean)
-    .some((value) => new Date(value!).getTime() <= pollRenderedAt);
+  const pollClosed =
+    !!poll &&
+    [poll.closed, poll.endTime]
+      .filter(Boolean)
+      .some((value) => new Date(value!).getTime() <= pollRenderedAt);
 
   async function submitPollVote(indexes: number[]) {
     if (!currentUser) {
-      showError("投票するにはログインが必要です");
+      showError(t("home:noteCard.pollLoginRequired"));
       return;
     }
     setPollPending(true);
@@ -159,7 +208,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
     setIsHovered(true);
     if (!isAuthorSelf && followStatus === null && !loadingStatus) {
       setLoadingStatus(true);
-      api.users.profile(targetKey)
+      api.users
+        .profile(targetKey)
         .then((p) => setFollowStatusStore(targetKey, p.follow_status))
         .catch(() => setFollowStatusStore(targetKey, "not_following"))
         .finally(() => setLoadingStatus(false));
@@ -180,7 +230,10 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
     try {
       if (current === "not_following") {
         const res = await api.follows.create(targetKey);
-        setFollowStatusStore(targetKey, res.status === "accepted" ? "accepted" : "pending");
+        setFollowStatusStore(
+          targetKey,
+          res.status === "accepted" ? "accepted" : "pending",
+        );
       } else {
         await api.follows.delete(targetKey);
         setFollowStatusStore(targetKey, "not_following");
@@ -192,7 +245,9 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
     }
   }
 
-  function getFollowLabel(status: "not_following" | "pending" | "accepted" | null): string {
+  function getFollowLabel(
+    status: "not_following" | "pending" | "accepted" | null,
+  ): string {
     if (status === "accepted") return t("home:noteCard.following");
     if (status === "pending") return t("home:noteCard.followPending");
     return t("home:noteCard.notFollowing");
@@ -222,9 +277,16 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
           onMouseLeave={handleMouseLeave}
         >
           {isHovered && !isAuthorSelf && (
-            <div className={styles.followWidgetPopover} onClick={(e) => e.stopPropagation()}>
-              <span className={`${styles.followWidgetLabel} ${styles[`status_${followStatus ?? "not_following"}`]}`}>
-                {loadingStatus ? t("common:loading") : getFollowLabel(followStatus)}
+            <div
+              className={styles.followWidgetPopover}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span
+                className={`${styles.followWidgetLabel} ${styles[`status_${followStatus ?? "not_following"}`]}`}
+              >
+                {loadingStatus
+                  ? t("common:loading")
+                  : getFollowLabel(followStatus)}
               </span>
               <button
                 type="button"
@@ -240,7 +302,11 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
           )}
 
           <button className={styles.userBtn} onClick={goProfile}>
-            <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={large ? 48 : 40} />
+            <Avatar
+              url={note.user.avatarUrl}
+              name={note.user.displayName || note.user.username}
+              size={large ? 48 : 40}
+            />
             <span className={styles.names}>
               <span className={styles.displayName}>
                 <EmojiText text={displayName(note)} emojis={note.emojis} />
@@ -253,7 +319,11 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
                   </span>
                 )}
                 {delBadges.map((b) => (
-                  <span key={b.icon} className={styles.protoBadge} title={b.label}>
+                  <span
+                    key={b.icon}
+                    className={styles.protoBadge}
+                    title={b.label}
+                  >
                     {b.icon}
                   </span>
                 ))}
@@ -267,7 +337,11 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
           </button>
         </div>
         {linkToDetail ? (
-          <Link to={`/notes/${note.id}`} className={styles.time} onClick={(e) => e.stopPropagation()}>
+          <Link
+            to={`/notes/${note.id}`}
+            className={styles.time}
+            onClick={(e) => e.stopPropagation()}
+          >
             <time>{formatDate(note.createdAt)}</time>
           </Link>
         ) : (
@@ -279,7 +353,11 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
         <div className={styles.relations}>
           {note.replyId && <ReplyIndicator replyId={note.replyId} />}
           {note.quoteId && (
-            <Link to={`/notes/${note.quoteId}`} className={styles.relLink} onClick={(e) => e.stopPropagation()}>
+            <Link
+              to={`/notes/${note.quoteId}`}
+              className={styles.relLink}
+              onClick={(e) => e.stopPropagation()}
+            >
               {t("home:noteCard.quoteSourceLink")}
             </Link>
           )}
@@ -289,11 +367,16 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
       {note.contentWarning && (
         <div className={styles.contentWarningWrap}>
           <p className={styles.contentWarningText}>⚠️ {note.contentWarning}</p>
-          <button className={styles.contentWarningToggle} onClick={(e) => {
-            e.stopPropagation();
-            setShowContent((shown) => !shown);
-          }}>
-            {showContent ? "隠す" : "表示"}
+          <button
+            className={styles.contentWarningToggle}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowContent((shown) => !shown);
+            }}
+          >
+            {showContent
+              ? t("home:noteCard.hideContent")
+              : t("home:noteCard.showContent")}
           </button>
         </div>
       )}
@@ -307,35 +390,74 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
 
       {poll && (
         <div className={styles.poll}>
-          {(pollResults || pollVoted || pollClosed) ? poll.options.map((option, index) => (
-            <div className={`${styles.pollOption} ${sharedPollState?.votedByMe.includes(index) ? styles.pollOptionVoted : ""}`} key={option.name}>
-              <span>{sharedPollState?.votedByMe.includes(index) && "✓ "}{option.name}</span>
-              <span>{option.votes}票</span>
-            </div>
-          )) : poll.options.map((option, index) => poll.multiple ? (
-            <label className={styles.pollChoice} key={option.name}>
-              <input type="checkbox" checked={pollSelection.includes(index)} disabled={pollPending}
-                onChange={(e) => setPollSelection((selected) => e.target.checked
-                  ? [...selected, index]
-                  : selected.filter((i) => i !== index))} />
-              <span>{option.name}</span>
-            </label>
-          ) : (
-            <button className={styles.pollChoice} key={option.name} disabled={pollPending}
-              onClick={(e) => { e.stopPropagation(); void submitPollVote([index]); }}>
-              {option.name}
-            </button>
-          ))}
+          {pollResults || pollVoted || pollClosed
+            ? poll.options.map((option, index) => (
+                <div
+                  className={`${styles.pollOption} ${sharedPollState?.votedByMe.includes(index) ? styles.pollOptionVoted : ""}`}
+                  key={option.name}
+                >
+                  <span>
+                    {sharedPollState?.votedByMe.includes(index) && "✓ "}
+                    {option.name}
+                  </span>
+                  <span>
+                    {t("home:noteCard.votes", { count: option.votes })}
+                  </span>
+                </div>
+              ))
+            : poll.options.map((option, index) =>
+                poll.multiple ? (
+                  <label className={styles.pollChoice} key={option.name}>
+                    <input
+                      type="checkbox"
+                      checked={pollSelection.includes(index)}
+                      disabled={pollPending}
+                      onChange={(e) =>
+                        setPollSelection((selected) =>
+                          e.target.checked
+                            ? [...selected, index]
+                            : selected.filter((i) => i !== index),
+                        )
+                      }
+                    />
+                    <span>{option.name}</span>
+                  </label>
+                ) : (
+                  <button
+                    className={styles.pollChoice}
+                    key={option.name}
+                    disabled={pollPending}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void submitPollVote([index]);
+                    }}
+                  >
+                    {option.name}
+                  </button>
+                ),
+              )}
           {!pollVoted && !pollClosed && (
             <div className={styles.pollControls}>
               {poll.multiple && !pollResults && (
-                <button disabled={pollPending || pollSelection.length === 0}
-                  onClick={(e) => { e.stopPropagation(); void submitPollVote(pollSelection); }}>
-                  回答
+                <button
+                  disabled={pollPending || pollSelection.length === 0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void submitPollVote(pollSelection);
+                  }}
+                >
+                  {t("home:noteCard.pollVoteButton")}
                 </button>
               )}
-              <button onClick={(e) => { e.stopPropagation(); setPollResults((shown) => !shown); }}>
-                {pollResults ? "回答に戻る" : "結果を見る"}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPollResults((shown) => !shown);
+                }}
+              >
+                {pollResults
+                  ? t("home:noteCard.pollBackToOptions")
+                  : t("home:noteCard.pollShowResults")}
               </button>
             </div>
           )}
@@ -358,7 +480,9 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
       <NoteCardActions
         noteId={note.id}
         subjectActorId={String(note.user.id)}
-        subjectLabel={`@${note.user.username} の投稿`}
+        subjectLabel={t("home:noteCard.reportSubject", {
+          username: note.user.username,
+        })}
         reactions={reactions}
         reactionPending={reactionPending}
         onToggleReaction={toggleReaction}
@@ -380,7 +504,11 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
   );
 }
 
-export default function NoteCard({ note, linkToDetail = true, large = false }: NoteCardProps) {
+export default function NoteCard({
+  note,
+  linkToDetail = true,
+  large = false,
+}: NoteCardProps) {
   const { t } = useTranslation();
   const [hidden, setHidden] = useState(false);
 
@@ -391,12 +519,19 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
         <div className={styles.rail}>
-          🔁 <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong>{" "}
+          🔁{" "}
+          <strong>
+            <EmojiText text={displayName(note)} emojis={note.emojis} />
+          </strong>{" "}
           {t("home:noteCard.repostedConnector")}{" "}
-          <Link to={`/notes/${note.id}`} className={styles.repostTime} onClick={(e) => e.stopPropagation()}>
+          <Link
+            to={`/notes/${note.id}`}
+            className={styles.repostTime}
+            onClick={(e) => e.stopPropagation()}
+          >
             {formatDate(note.createdAt)}
           </Link>
-          {suffix && <>{" "}{suffix}</>}
+          {suffix && <> {suffix}</>}
         </div>
         <PostContent
           note={note.renote}
@@ -415,17 +550,27 @@ export default function NoteCard({ note, linkToDetail = true, large = false }: N
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
         <div className={styles.rail}>
-          🔁 <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong>{" "}
+          🔁{" "}
+          <strong>
+            <EmojiText text={displayName(note)} emojis={note.emojis} />
+          </strong>{" "}
           {t("home:noteCard.repostedNoLinkSuffix")}
         </div>
-        <p className={styles.unavailableNote}>{t("home:noteCard.unavailableRepost")}</p>
+        <p className={styles.unavailableNote}>
+          {t("home:noteCard.unavailableRepost")}
+        </p>
       </article>
     );
   }
 
   return (
     <article className={`${styles.card} ${large ? styles.large : ""}`}>
-      <PostContent note={note} linkToDetail={linkToDetail} large={large} onDeleted={() => setHidden(true)} />
+      <PostContent
+        note={note}
+        linkToDetail={linkToDetail}
+        large={large}
+        onDeleted={() => setHidden(true)}
+      />
     </article>
   );
 }

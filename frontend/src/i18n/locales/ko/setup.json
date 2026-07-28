@@ -1,0 +1,11 @@
+{
+  "setup": {
+    "title": "초기 설정",
+    "description": "관리자 계정을 생성해주세요.",
+    "usernameLabel": "사용자 이름",
+    "emailLabel": "이메일",
+    "passwordLabel": "비밀번호(8자 이상)",
+    "submitting": "설정 중...",
+    "submit": "관리자 계정 만들기"
+  }
+}

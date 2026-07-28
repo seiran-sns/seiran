@@ -1,4 +1,6 @@
 {
+  "sensitiveImageReveal": "Show sensitive image",
+  "inputSuggestions": "Input suggestions",
   "appName": "seiran",
   "close": "Close",
   "save": "Save",

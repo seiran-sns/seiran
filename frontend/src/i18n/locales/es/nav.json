@@ -1,0 +1,20 @@
+{
+  "leftNav": {
+    "home": "Hogar",
+    "search": "Buscar",
+    "notifications": "Notificaciones",
+    "messages": "Mensajes",
+    "lists": "Liza",
+    "settings": "Ajustes",
+    "admin": "Administración",
+    "composeLabel": "Correo",
+    "profileTitle": "mi perfil",
+    "logoutTitle": "Finalizar la sesión",
+    "openMenu": "Abrir menú principal",
+    "closeMenu": "Cerrar menú",
+    "menuTitle": "Menú principal"
+  },
+  "appShell": {
+    "composeModalTitle": "Nueva publicación"
+  }
+}

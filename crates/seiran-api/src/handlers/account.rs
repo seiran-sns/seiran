@@ -18,7 +18,11 @@ use crate::mailer::{send_email_change_confirmation, MailError};
 use crate::{error::ApiError, middleware::extract_auth, AppState};
 
 /// フロントの i18n が対応する言語コード（`account:languagePreference` の許可値）。
-const SUPPORTED_LANGUAGES: [&str; 2] = ["ja", "en"];
+const SUPPORTED_LANGUAGES: [&str; 7] = ["ja", "en", "zh", "ko", "es", "de", "fr"];
+
+fn is_supported_language(language: &str) -> bool {
+    SUPPORTED_LANGUAGES.contains(&language)
+}
 
 #[derive(Deserialize)]
 pub struct UpdateLanguageRequest {
@@ -36,7 +40,7 @@ pub async fn update_language(
     let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
 
     if let Some(lang) = &req.language {
-        if !SUPPORTED_LANGUAGES.contains(&lang.as_str()) {
+        if !is_supported_language(lang) {
             return Err(ApiError::BadRequest("UNSUPPORTED_LANGUAGE".to_owned()));
         }
     }
@@ -48,6 +52,20 @@ pub async fn update_language(
         .map_err(|e| ApiError::Internal(format!("[update-language] users UPDATE 失敗: {}", e)))?;
 
     Ok(Json(()))
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::{is_supported_language, SUPPORTED_LANGUAGES};
+
+    #[test]
+    fn language_allowlist_matches_frontend_locales() {
+        for language in SUPPORTED_LANGUAGES {
+            assert!(is_supported_language(language));
+        }
+        assert!(!is_supported_language("pt"));
+        assert!(!is_supported_language("zh-CN"));
+    }
 }
 
 #[derive(Deserialize)]

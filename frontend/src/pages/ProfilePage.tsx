@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note, UserProfile, getErrorMessage } from "../api/client";
 import ActionsMenu, { ActionsMenuItem } from "../components/common/ActionsMenu";
@@ -18,7 +23,10 @@ import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { profileQuery, remoteProfileUrl } from "../lib/format";
 import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
-import { setFollowStatus as setFollowStatusStore, useFollowStatus } from "../stores/followStatusStore";
+import {
+  setFollowStatus as setFollowStatusStore,
+  useFollowStatus,
+} from "../stores/followStatusStore";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfilePage.module.css";
 
@@ -32,7 +40,7 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const goBack = useGoBack();
   // permalink `/@handle`（#36）を優先し、旧 `/profile?q=` も後方互換で受ける。
-  const q = acct ? acct.replace(/^@/, "") : searchParams.get("q") ?? "";
+  const q = acct ? acct.replace(/^@/, "") : (searchParams.get("q") ?? "");
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,24 +63,36 @@ export default function ProfilePage() {
   // プロフィールカードのフォロー中/フォロワー人数表示（#68 マイケル指摘）。fediアクターの場合、
   // ローカルDB把握分（`profile.following_count`等）ではなくリモート直接取得とブレンドした
   // 実数（`total_count`）で上書きする。取得できるまでは undefined のままローカル値を表示する。
-  const [blendedCounts, setBlendedCounts] = useState<{ following?: number; followers?: number }>({});
+  const [blendedCounts, setBlendedCounts] = useState<{
+    following?: number;
+    followers?: number;
+  }>({});
 
   // 投稿一覧の無限スクロール（#64）。`profile.recent_posts`（初回最大20件）を初期値とし、
   // 下端到達で `GET /api/users/posts` から `until_id` カーソルで追加取得する。
   const actorIdRef = useRef<string | undefined>(undefined);
 
-  const onError = useCallback((e: unknown) => showError(getErrorMessage(e)), [showError]);
+  const onError = useCallback(
+    (e: unknown) => showError(getErrorMessage(e)),
+    [showError],
+  );
   const fetchPage = useCallback((untilId: string) => {
     // actorIdRef は profile 取得完了後にのみ設定され、hasMore も同時に true になるため、
     // loadMore が呼ばれる時点では必ず値が入っている。
-    return api.users.posts(actorIdRef.current as string, { limit: PAGE_SIZE, until_id: untilId, exclude_direct: true });
+    return api.users.posts(actorIdRef.current as string, {
+      limit: PAGE_SIZE,
+      until_id: untilId,
+      exclude_direct: true,
+    });
   }, []);
-  const { items: posts, setItems: setPosts, hasMore, setHasMore, loadingMore, loadMore: loadMorePosts } = useCursorPagination<Note>(
-    fetchPage,
-    (n) => n.id,
-    PAGE_SIZE,
-    onError
-  );
+  const {
+    items: posts,
+    setItems: setPosts,
+    hasMore,
+    setHasMore,
+    loadingMore,
+    loadMore: loadMorePosts,
+  } = useCursorPagination<Note>(fetchPage, (n) => n.id, PAGE_SIZE, onError);
 
   useEffect(() => {
     if (!q) return;
@@ -86,7 +106,10 @@ export default function ProfilePage() {
       .then((p) => {
         if (cancelled) return;
         setProfile(p);
-        setFollowStatusStore(profileQuery(p.username, p.domain), p.follow_status);
+        setFollowStatusStore(
+          profileQuery(p.username, p.domain),
+          p.follow_status,
+        );
         setIsBlocking(p.is_blocking);
         setIsBlockedBy(p.is_blocked_by);
         setIsMuted(p.is_muted);
@@ -98,10 +121,18 @@ export default function ProfilePage() {
         if (p.actor_id && p.actor_type === "fedi") {
           const actorId = p.actor_id;
           getRemoteFollowSummary(actorId, "following")
-            .then((res) => !cancelled && setBlendedCounts((c) => ({ ...c, following: res.total_count })))
+            .then(
+              (res) =>
+                !cancelled &&
+                setBlendedCounts((c) => ({ ...c, following: res.total_count })),
+            )
             .catch(() => {});
           getRemoteFollowSummary(actorId, "followers")
-            .then((res) => !cancelled && setBlendedCounts((c) => ({ ...c, followers: res.total_count })))
+            .then(
+              (res) =>
+                !cancelled &&
+                setBlendedCounts((c) => ({ ...c, followers: res.total_count })),
+            )
             .catch(() => {});
         }
       })
@@ -119,7 +150,9 @@ export default function ProfilePage() {
   // 右ペインのポストリスト・タイムライン上の同一ユーザーのフォロースイッチが全て同じキーを
   // 参照するため、いずれかで操作するか WebSocket の `followAccepted`（StreamingContext）を
   // 受けるだけで、表示中の全コンポーネントに同時反映される。
-  const followKey = profile ? profileQuery(profile.username, profile.domain) : "";
+  const followKey = profile
+    ? profileQuery(profile.username, profile.domain)
+    : "";
   const followStatus = useFollowStatus(followKey) ?? "not_following";
 
   const isLocal = profile?.actor_type === "local";
@@ -130,7 +163,11 @@ export default function ProfilePage() {
     if (!profile) return "";
     // ローカルユーザーはユーザー名のみ、AP は ap_uri、Bsky は at_did（DID）
     if (profile.actor_type === "local") return profile.username;
-    return profile.ap_uri || profile.at_did || `${profile.username}@${profile.domain}`;
+    return (
+      profile.ap_uri ||
+      profile.at_did ||
+      `${profile.username}@${profile.domain}`
+    );
   }
 
   async function doFollow() {
@@ -139,7 +176,10 @@ export default function ProfilePage() {
     try {
       const result = await api.follows.create(followTarget());
       // ローカルフォローは即 accepted
-      setFollowStatusStore(followKey, result.status === "accepted" ? "accepted" : "pending");
+      setFollowStatusStore(
+        followKey,
+        result.status === "accepted" ? "accepted" : "pending",
+      );
     } catch (e) {
       showError(getErrorMessage(e));
     } finally {
@@ -259,7 +299,10 @@ export default function ProfilePage() {
       </header>
 
       {profile && remoteProfileUrl(profile) && (
-        <RemoteBanner message={t("common:remoteBanner.user")} url={remoteProfileUrl(profile) as string} />
+        <RemoteBanner
+          message={t("common:remoteBanner.user")}
+          url={remoteProfileUrl(profile) as string}
+        />
       )}
 
       {loading && <p className={panel.message}>{t("common:loading")}</p>}
@@ -275,46 +318,76 @@ export default function ProfilePage() {
               </span>
               <span>
                 {t("profile:profilePage.warpBanner.prefix")}
-                <strong>{t("profile:profilePage.warpBanner.shadowLabel")}</strong>
-                {t("profile:profilePage.warpBanner.suffix", { handle: profile.bridge_real_handle })}
+                <strong>
+                  {t("profile:profilePage.warpBanner.shadowLabel")}
+                </strong>
+                {t("profile:profilePage.warpBanner.suffix", {
+                  handle: profile.bridge_real_handle,
+                })}
               </span>
             </button>
           )}
 
           <div className={styles.avatarLarge}>
-            {profile.avatar_url
-              ? <img src={profile.avatar_url} alt="" className={styles.avatarImg} />
-              : (profile.display_name || profile.username)[0]?.toUpperCase() ?? "?"}
+            {profile.avatar_url ? (
+              <img
+                src={profile.avatar_url}
+                alt=""
+                className={styles.avatarImg}
+              />
+            ) : (
+              ((profile.display_name || profile.username)[0]?.toUpperCase() ??
+              "?")
+            )}
           </div>
 
           <div className={styles.names}>
-            <span className={styles.displayName}>{profile.display_name || profile.username}</span>
+            <span className={styles.displayName}>
+              {profile.display_name || profile.username}
+            </span>
             <span className={styles.acct}>
               @{profile.username}
-              {profile.domain && profile.domain !== window.location.hostname && `@${profile.domain}`}
+              {profile.domain &&
+                profile.domain !== window.location.hostname &&
+                `@${profile.domain}`}
             </span>
           </div>
 
           {profile.actor_id && (
             <div className={styles.followCounts}>
-              <button type="button" className={styles.followCountBtn} onClick={() => setRightTab(1)}>
-                <strong>{blendedCounts.following ?? profile.following_count}</strong> {t("profile:profilePage.followingCountLabel")}
+              <button
+                type="button"
+                className={styles.followCountBtn}
+                onClick={() => setRightTab(1)}
+              >
+                <strong>
+                  {blendedCounts.following ?? profile.following_count}
+                </strong>{" "}
+                {t("profile:profilePage.followingCountLabel")}
               </button>
-              <button type="button" className={styles.followCountBtn} onClick={() => setRightTab(2)}>
-                <strong>{blendedCounts.followers ?? profile.follower_count}</strong> {t("profile:profilePage.followerCountLabel")}
+              <button
+                type="button"
+                className={styles.followCountBtn}
+                onClick={() => setRightTab(2)}
+              >
+                <strong>
+                  {blendedCounts.followers ?? profile.follower_count}
+                </strong>{" "}
+                {t("profile:profilePage.followerCountLabel")}
               </button>
             </div>
           )}
 
           <div className={styles.badges}>
             {profile.is_paired && (
-              <span className={`${styles.badge} ${styles.pairedBadge}`} title={t("profile:profilePage.pairedBadgeTitle")}>
+              <span
+                className={`${styles.badge} ${styles.pairedBadge}`}
+                title={t("profile:profilePage.pairedBadgeTitle")}
+              >
                 🀄 {t("profile:profilePage.pairedBadge")}
               </span>
             )}
-            {profile.at_did && (
-              <span className={styles.badge}>🦋 Bluesky</span>
-            )}
+            {profile.at_did && <span className={styles.badge}>🦋 Bluesky</span>}
             {!isLocal && profile.actor_type === "fedi" && (
               <span className={styles.badge}>🌐 Fediverse</span>
             )}
@@ -328,8 +401,14 @@ export default function ProfilePage() {
               {profile.profile_fields.map((field, i) => (
                 <div className={styles.idRow} key={i}>
                   <span className={styles.idLabel}>{field.name}</span>
-                  {field.value.startsWith("http://") || field.value.startsWith("https://") ? (
-                    <a className={styles.idValue} href={field.value} target="_blank" rel="noopener noreferrer">
+                  {field.value.startsWith("http://") ||
+                  field.value.startsWith("https://") ? (
+                    <a
+                      className={styles.idValue}
+                      href={field.value}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       {field.value}
                     </a>
                   ) : (
@@ -351,7 +430,12 @@ export default function ProfilePage() {
             {profile.ap_uri && (
               <div className={styles.idRow}>
                 <span className={styles.idLabel}>URI</span>
-                <a className={styles.idValue} href={profile.ap_uri} target="_blank" rel="noopener noreferrer">
+                <a
+                  className={styles.idValue}
+                  href={profile.ap_uri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   {profile.ap_uri}
                 </a>
               </div>
@@ -360,7 +444,10 @@ export default function ProfilePage() {
 
           {isSelf && (
             <div className={styles.followArea}>
-              <button className={styles.editBtn} onClick={() => navigate("/settings/profile")}>
+              <button
+                className={styles.editBtn}
+                onClick={() => navigate("/settings/profile")}
+              >
                 {t("profile:profilePage.editProfileButton")}
               </button>
             </div>
@@ -370,20 +457,40 @@ export default function ProfilePage() {
             <div className={styles.followArea}>
               {followStatus === "accepted" && (
                 <>
-                  <span className={styles.followingBadge}>{t("profile:profilePage.followingBadge")}</span>
-                  <button className={styles.unfollowBtn} onClick={doUnfollow} disabled={unfollowing}>
-                    {unfollowing ? t("profile:profilePage.unfollowingButton") : t("profile:profilePage.unfollowButton")}
+                  <span className={styles.followingBadge}>
+                    {t("profile:profilePage.followingBadge")}
+                  </span>
+                  <button
+                    className={styles.unfollowBtn}
+                    onClick={doUnfollow}
+                    disabled={unfollowing}
+                  >
+                    {unfollowing
+                      ? t("profile:profilePage.unfollowingButton")
+                      : t("profile:profilePage.unfollowButton")}
                   </button>
                 </>
               )}
-              {followStatus === "pending" && <span className={styles.pendingBadge}>{t("profile:profilePage.pendingBadge")}</span>}
+              {followStatus === "pending" && (
+                <span className={styles.pendingBadge}>
+                  {t("profile:profilePage.pendingBadge")}
+                </span>
+              )}
               {followStatus === "not_following" && (
-                <button className={styles.followBtn} onClick={handleFollowClick} disabled={following || isBlockedBy || isBlocking}>
-                  {following ? t("profile:profilePage.followingSubmitButton") : t("profile:profilePage.followButton")}
+                <button
+                  className={styles.followBtn}
+                  onClick={handleFollowClick}
+                  disabled={following || isBlockedBy || isBlocking}
+                >
+                  {following
+                    ? t("profile:profilePage.followingSubmitButton")
+                    : t("profile:profilePage.followButton")}
                 </button>
               )}
               {isBlockedBy && (
-                <span className={styles.pendingBadge}>{t("profile:profilePage.blockedByNotice")}</span>
+                <span className={styles.pendingBadge}>
+                  {t("profile:profilePage.blockedByNotice")}
+                </span>
               )}
               <ActionsMenu
                 triggerTitle={t("profile:profilePage.actionsMenuTitle")}
@@ -392,7 +499,9 @@ export default function ProfilePage() {
                   if (followStatus === "accepted") {
                     items.push({
                       key: "unfollow",
-                      label: unfollowing ? t("profile:profilePage.unfollowingButton") : t("profile:profilePage.unfollowButton"),
+                      label: unfollowing
+                        ? t("profile:profilePage.unfollowingButton")
+                        : t("profile:profilePage.unfollowButton"),
                       onClick: doUnfollow,
                       disabled: unfollowing,
                     });
@@ -406,24 +515,48 @@ export default function ProfilePage() {
                   } else {
                     items.push({
                       key: "follow",
-                      label: following ? t("profile:profilePage.followingSubmitButton") : t("profile:profilePage.followButton"),
+                      label: following
+                        ? t("profile:profilePage.followingSubmitButton")
+                        : t("profile:profilePage.followButton"),
                       onClick: handleFollowClick,
                       disabled: following || isBlockedBy || isBlocking,
                     });
                   }
                   items.push(
                     isMuted
-                      ? { key: "unmute", label: t("profile:profilePage.unmuteButton"), onClick: doUnmute, disabled: muteActionLoading }
-                      : { key: "mute", label: t("profile:profilePage.muteButton"), onClick: doMute, disabled: muteActionLoading }
+                      ? {
+                          key: "unmute",
+                          label: t("profile:profilePage.unmuteButton"),
+                          onClick: doUnmute,
+                          disabled: muteActionLoading,
+                        }
+                      : {
+                          key: "mute",
+                          label: t("profile:profilePage.muteButton"),
+                          onClick: doMute,
+                          disabled: muteActionLoading,
+                        },
                   );
                   items.push(
                     isBlocking
-                      ? { key: "unblock", label: t("profile:profilePage.unblockButton"), onClick: doUnblock, danger: true, disabled: blockActionLoading }
-                      : { key: "block", label: t("profile:profilePage.blockButton"), onClick: () => setBlockConfirmModalOpen(true), danger: true, disabled: blockActionLoading }
+                      ? {
+                          key: "unblock",
+                          label: t("profile:profilePage.unblockButton"),
+                          onClick: doUnblock,
+                          danger: true,
+                          disabled: blockActionLoading,
+                        }
+                      : {
+                          key: "block",
+                          label: t("profile:profilePage.blockButton"),
+                          onClick: () => setBlockConfirmModalOpen(true),
+                          danger: true,
+                          disabled: blockActionLoading,
+                        },
                   );
                   items.push({
                     key: "report",
-                    label: "⚠️ 通報",
+                    label: `⚠️ ${t("home:noteCard.reportButton")}`,
                     onClick: () => setReportModalOpen(true),
                     danger: true,
                     disabled: !profile.actor_id,
@@ -442,19 +575,26 @@ export default function ProfilePage() {
   // 邪魔をしないよう、最新ポストとは別セクションにする。
   const pinnedSection = profile && profile.pinned_posts.length > 0 && (
     <>
-      <div className={panel.rightHeader}>{t("profile:profilePage.pinnedHeader")}</div>
-      {profile.pinned_posts.map((post) => <NoteCard key={post.id} note={post} />)}
+      <div className={panel.rightHeader}>
+        {t("profile:profilePage.pinnedHeader")}
+      </div>
+      {profile.pinned_posts.map((post) => (
+        <NoteCard key={post.id} note={post} />
+      ))}
     </>
   );
 
   // 公開リスト一覧（#63）。現状ローカルユーザーのみ表示（リモートは将来課題）。
   const listsSection = profile && profile.public_lists.length > 0 && (
     <>
-      <div className={panel.rightHeader}>{t("profile:profilePage.publicListsHeader")}</div>
+      <div className={panel.rightHeader}>
+        {t("profile:profilePage.publicListsHeader")}
+      </div>
       <div className={styles.listsRow}>
         {profile.public_lists.map((l) => (
           <Link key={l.id} to={`/lists/${l.id}`} className={styles.listBadge}>
-            {l.name} <span className={styles.listBadgeCount}>{l.member_count}</span>
+            {l.name}{" "}
+            <span className={styles.listBadgeCount}>{l.member_count}</span>
           </Link>
         ))}
       </div>
@@ -463,7 +603,9 @@ export default function ProfilePage() {
 
   const recentSection = profile && (
     <>
-      <div className={panel.rightHeader}>{t("profile:profilePage.postsHeader")}</div>
+      <div className={panel.rightHeader}>
+        {t("profile:profilePage.postsHeader")}
+      </div>
       <NoteList
         notes={posts}
         emptyMessage={t("profile:profilePage.noPosts")}
@@ -497,10 +639,20 @@ export default function ProfilePage() {
         />
       )}
       {rightTab === 1 && (
-        <FollowListPanel actorId={profile.actor_id} kind="following" onError={onError} isRemoteFedi={profile.actor_type === "fedi"} />
+        <FollowListPanel
+          actorId={profile.actor_id}
+          kind="following"
+          onError={onError}
+          isRemoteFedi={profile.actor_type === "fedi"}
+        />
       )}
       {rightTab === 2 && (
-        <FollowListPanel actorId={profile.actor_id} kind="followers" onError={onError} isRemoteFedi={profile.actor_type === "fedi"} />
+        <FollowListPanel
+          actorId={profile.actor_id}
+          kind="followers"
+          onError={onError}
+          isRemoteFedi={profile.actor_type === "fedi"}
+        />
       )}
     </>
   );
@@ -532,7 +684,8 @@ export default function ProfilePage() {
       >
         <p className={styles.modalText}>
           {t("profile:profilePage.bridgeModal.prefix", {
-            protocol: profile?.bridge_protocol === "bsky" ? "Bluesky" : "Fediverse",
+            protocol:
+              profile?.bridge_protocol === "bsky" ? "Bluesky" : "Fediverse",
           })}
           <strong>{t("profile:profilePage.bridgeModal.shadowLabel")}</strong>
           {t("profile:profilePage.bridgeModal.suffix")}
@@ -567,12 +720,21 @@ export default function ProfilePage() {
         onClose={() => setBlockConfirmModalOpen(false)}
         title={t("profile:profilePage.blockConfirmModal.title")}
       >
-        <p className={styles.modalText}>{t("profile:profilePage.blockConfirmModal.body")}</p>
+        <p className={styles.modalText}>
+          {t("profile:profilePage.blockConfirmModal.body")}
+        </p>
         <div className={styles.modalActions}>
-          <button className={styles.modalPrimary} onClick={doBlock} disabled={blockActionLoading}>
+          <button
+            className={styles.modalPrimary}
+            onClick={doBlock}
+            disabled={blockActionLoading}
+          >
             {t("profile:profilePage.blockConfirmModal.confirmButton")}
           </button>
-          <button className={styles.modalSecondary} onClick={() => setBlockConfirmModalOpen(false)}>
+          <button
+            className={styles.modalSecondary}
+            onClick={() => setBlockConfirmModalOpen(false)}
+          >
             {t("profile:profilePage.blockConfirmModal.cancelButton")}
           </button>
         </div>

@@ -1,0 +1,31 @@
+{
+  "sensitiveImageReveal": "민감한 이미지 표시",
+  "inputSuggestions": "입력 제안",
+  "appName": "세이란",
+  "close": "닫다",
+  "save": "구하다",
+  "saving": "절약...",
+  "cancel": "취소",
+  "delete": "삭제",
+  "edit": "편집하다",
+  "confirm": "확인하다",
+  "back": "뒤쪽에",
+  "retry": "다시 해 보다",
+  "loading": "로드 중...",
+  "submit": "제출하다",
+  "yes": "예",
+  "no": "아니요",
+  "ok": "좋아요",
+  "create": "만들다",
+  "add": "추가하다",
+  "remove": "제거하다",
+  "search": "찾다",
+  "settings": "설정",
+  "error": "오류",
+  "unknownError": "알 수 없는 오류가 발생했습니다.",
+  "remoteBanner": {
+    "note": "원격 포스팅입니다",
+    "user": "원격 사용자입니다",
+    "viewRemote": "원격 서버에서 보기"
+  }
+}

@@ -19,7 +19,11 @@ interface ImageLightboxProps {
  * オーバーレイクリック・Esc キーで閉じる操作性は `Modal` を踏襲しつつ、
  * 画像ビューアとしてタイトルバー・枠のないボーダーレスな見た目にするため専用コンポーネントとする。
  */
-export default function ImageLightbox({ src, onClose, sensitive = false }: ImageLightboxProps) {
+export default function ImageLightbox({
+  src,
+  onClose,
+  sensitive = false,
+}: ImageLightboxProps) {
   const { t } = useTranslation();
   const [revealed, setRevealed] = useState(false);
 
@@ -37,7 +41,11 @@ export default function ImageLightbox({ src, onClose, sensitive = false }: Image
 
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <button className={styles.close} onClick={onClose} aria-label={t("common:close")}>
+      <button
+        className={styles.close}
+        onClick={onClose}
+        aria-label={t("common:close")}
+      >
         ×
       </button>
       <div className={styles.imageWrap} onClick={(e) => e.stopPropagation()}>
@@ -47,10 +55,16 @@ export default function ImageLightbox({ src, onClose, sensitive = false }: Image
           className={`${styles.image} ${sensitive && !revealed ? styles.blurred : ""}`}
         />
         {sensitive && !revealed && (
-          <button className={styles.reveal} aria-label="閲覧注意画像を表示" onClick={(e) => {
-            e.stopPropagation();
-            setRevealed(true);
-          }}>👁️</button>
+          <button
+            className={styles.reveal}
+            aria-label={t("common:sensitiveImageReveal")}
+            onClick={(e) => {
+              e.stopPropagation();
+              setRevealed(true);
+            }}
+          >
+            👁️
+          </button>
         )}
       </div>
     </div>

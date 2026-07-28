@@ -1,0 +1,130 @@
+{
+  "emojiContextMenu": {
+    "importButton": "Importar emojis"
+  },
+  "homePage": {
+    "title": "Hogar",
+    "homeTab": "Hogar",
+    "localTab": "Local",
+    "socialTab": "Social",
+    "globalTab": "Global",
+    "manageListsLink": "+ Administrar listas",
+    "emptyHome": "Las publicaciones de las personas que sigues aparecerán aquí.",
+    "emptyLocal": "Aún no hay publicaciones. ¡Sé el primero en publicar algo!",
+    "emptySocial": "Las publicaciones de las personas que sigues y de los usuarios locales aparecerán aquí.",
+    "emptyGlobal": "Aún no hay publicaciones.",
+    "emptyList": "Las publicaciones de los miembros de esta lista aparecerán aquí.",
+    "quickNotifications": "Notificaciones rápidas",
+    "quickNotificationsWithCount": "Notificaciones rápidas ({{count}})",
+    "trendsAndSearch": "Tendencias y búsqueda",
+    "composerToggleLabel": "Formulario de publicación"
+  },
+  "noteDetailPage": {
+    "title": "Correo",
+    "showContextButton": "Mostrar publicaciones circundantes",
+    "noContext": "No hay publicaciones circundantes.",
+    "contextLabel": "Publicaciones circundantes del autor",
+    "threadPlaceholder": "La vista del hilo de respuestas y citas estará disponible próximamente.",
+    "contextTab": "Publicaciones circundantes",
+    "reactionsTab": "Reacciones",
+    "noReactions": "Aún no hay reacciones a esta publicación."
+  },
+  "noteCard": {
+    "privateRepostError": "Las publicaciones privadas no se pueden volver a publicar.",
+    "replyButton": "Responder",
+    "quoteButton": "Cita",
+    "repostTitle": "Volver a publicar",
+    "unrepostTitle": "Deshacer volver a publicar",
+    "repostDisabledTitle": "Las publicaciones privadas no se pueden volver a publicar",
+    "repost": "Volver a publicar",
+    "reposted": "Publicado nuevamente",
+    "repostUnavailable": "no puedo volver a publicar",
+    "pinTitle": "Alfiler",
+    "unpinTitle": "Desprender",
+    "pin": "Alfiler",
+    "pinned": "Fijado",
+    "quoteSourceLink": "❝ Publicación citada",
+    "hasQuote": "❝ Tiene cotización",
+    "showContent": "Espectáculo",
+    "hideContent": "Esconder",
+    "votes": "{{count}} votos",
+    "pollLoginRequired": "Inicie sesión para votar.",
+    "pollVoteButton": "Votar",
+    "pollBackToOptions": "Volver a opciones",
+    "pollShowResults": "Mostrar resultados",
+    "reportButton": "Informe",
+    "reportSubject": "Publicación de @{{username}}",
+    "originalLinkTitle": "Esta publicación es un duplicado entregado a través de un puente/federación. Ir a la publicación original.",
+    "originalLinkText": "🀄 Ver publicación original",
+    "repostedConnector": "volvió a publicar esto en",
+    "repostedSuffix": "",
+    "repostedNoLinkSuffix": "volvió a publicar esto",
+    "unavailableRepost": "Esta publicación no se puede mostrar (es privada).",
+    "notFollowing": "No seguir",
+    "following": "Siguiente",
+    "followPending": "Seguir Pendiente",
+    "menuTitle": "Menú",
+    "deleteConfirmModal": {
+      "title": "¿Eliminar esta publicación?",
+      "body": "Esto no se puede deshacer. Al eliminarla, también se eliminará la publicación de los servidores federados y de Bluesky.",
+      "confirmButton": "Borrar"
+    }
+  },
+  "noteList": {
+    "emptyDefault": "Sin publicaciones."
+  },
+  "postComposer": {
+    "replyModalTitle": "Responder",
+    "quoteModalTitle": "Publicación de cotización",
+    "bskyPrivateConflict": "No puedes seleccionar Privado mientras la entrega Bsky esté activada. Desactiva la entrega de Bsky para cambiarla.",
+    "bskyVisibilityConflict": "La entrega de Bsky solo está disponible para publicaciones que no sean Privadas. Cambie la visibilidad para habilitarla.",
+    "placeholder": "¿Lo que está sucediendo?",
+    "replyPlaceholder": "Escribe una respuesta",
+    "quotePlaceholder": "Añadir un comentario",
+    "attachTitle": "Adjunte un archivo de imagen, vídeo o audio",
+    "replyToFedi": "Respondiendo al Fediverso",
+    "replyToBsky": "Respondiendo a Bluesky",
+    "replyToSameNetwork": "Respondiendo en la red de la publicación original",
+    "forcedPrivateNote": "🔒️ Esta respuesta también será privada porque responde a una publicación privada",
+    "visibilityPublic": "Público",
+    "visibilityUnlisted": "No estante en la lista",
+    "visibilityPrivate": "Privado",
+    "attachmentAlt": "Imagen adjunta",
+    "removeAttachmentTitle": "Quitar archivo adjunto",
+    "overLimitReply": "Esto excede el límite de caracteres de Bluesky.",
+    "overLimitDefault": "Esto excede el límite de caracteres de Bluesky. Desactiva Bsky para publicar de todos modos.",
+    "remainingCount": "{{count}} izquierda",
+    "posting": "Destino...",
+    "postButton": "Correo",
+    "replyToPrefix": "Respondiendo a:",
+    "quoteToPrefix": "Citando:"
+  },
+  "reactionChips": {
+    "clickToRemove": "Haga clic para eliminar",
+    "clickToAdd": "Haga clic para agregar la misma reacción.",
+    "customEmojiBlocked": "No puedes agregar esta reacción emoji personalizada: no está registrada en este servidor",
+    "actorsFetchFailed": "No se pudo cargar"
+  },
+  "reactionPicker": {
+    "addReactionTitle": "Añadir una reacción",
+    "addReactionButton": "Reaccionar",
+    "searchPlaceholder": "buscar emojis",
+    "tabFrequent": "Usado con frecuencia",
+    "tabUnicode": "emojis",
+    "tabCustom": "Costumbre",
+    "noResults": "No hay emojis que coincidan",
+    "noFrequent": "Aún no hay emojis de uso frecuente",
+    "noCustomEmojis": "No hay emojis personalizados registrados"
+  },
+  "replyIndicator": {
+    "goToOriginalTitle": "Ir a la publicación original",
+    "replyLabel": "Responder",
+    "fetchFailed": "No se pudo cargar la publicación original."
+  },
+  "badges": {
+    "deliveredFedi": "Entregado a Fediverse",
+    "deliveredBsky": "Entregado a cielo azul",
+    "visibilityPrivate": "Privado",
+    "visibilityUnlisted": "No estante en la lista"
+  }
+}

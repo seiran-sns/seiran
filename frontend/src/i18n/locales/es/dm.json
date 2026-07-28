@@ -1,0 +1,18 @@
+{
+  "messagesPage": {
+    "title": "Mensajes",
+    "newMessage": "Nuevo mensaje",
+    "emptySessions": "Aún no hay mensajes",
+    "composeHint": "Elija un destinatario para enviar un mensaje",
+    "unknownPeer": "Par desconocido",
+    "textPlaceholder": "Escribe un mensaje…",
+    "sendButton": "Enviar",
+    "attachButtonTitle": "Adjuntar medios",
+    "bskySingleRecipientError": "Los mensajes a los usuarios de Bsky solo se pueden enviar 1 a 1"
+  },
+  "recipientPicker": {
+    "placeholder": "Añadir un destinatario…",
+    "protocolConflictWarning": "Los mensajes a usuarios de Bsky no se pueden combinar con otros destinatarios",
+    "unresolvedWarning": "No se pudo encontrar un usuario que coincida con \"{{input}}\""
+  }
+}

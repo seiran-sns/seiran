@@ -1,0 +1,83 @@
+{
+  "menu": {
+    "title": "Paramètres",
+    "account": "Compte",
+    "profile": "Profil",
+    "mutesBlocks": "Sourdines et blocages",
+    "lists": "Listes",
+    "appearance": "Apparence",
+    "appTokens": "Jetons d'application",
+    "comingSoon": "À venir"
+  },
+  "appearanceSettings": {
+    "title": "Paramètres d'apparence",
+    "themeTitle": "Thème",
+    "themeSystem": "Suivre le système",
+    "themeLight": "Toujours clair",
+    "themeDark": "Toujours sombre",
+    "languageTitle": "Langue",
+    "languageAuto": "Automatique",
+    "languageJa": "日本語",
+    "languageEn": "English",
+    "languageZh": "中文",
+    "languageKo": "한국어",
+    "languageEs": "Español",
+    "languageDe": "Deutsch",
+    "languageFr": "Français",
+    "saved": "Préférence de langue enregistrée."
+  },
+  "accountSettings": {
+    "title": "Paramètres du compte",
+    "identityTitle": "Informations sur le compte",
+    "emailLabel": "E-mail",
+    "emailChangeTitle": "Changer l'adresse e-mail",
+    "newEmailLabel": "Nouvelle adresse e-mail",
+    "changeEmailButton": "Envoyer un e-mail de confirmation",
+    "emailChangeRequested": "Un email de confirmation a été envoyé à la nouvelle adresse. Ouvrez le lien dans l'e-mail pour finaliser la modification.",
+    "passwordTitle": "Changer le mot de passe",
+    "currentPasswordLabel": "Mot de passe actuel",
+    "newPasswordLabel": "Nouveau mot de passe (8+ caractères)",
+    "newPasswordConfirmLabel": "Confirmer le nouveau mot de passe",
+    "changePasswordButton": "Changer le mot de passe",
+    "passwordSaved": "Mot de passe modifié.",
+    "passwordMismatch": "Les nouveaux mots de passe ne correspondent pas.",
+    "totpTitle": "Authentification à deux facteurs",
+    "totpEnabled": "L'authentification à deux facteurs avec une application d'authentification est activée.",
+    "totpDisabled": "L'authentification à deux facteurs avec une application d'authentification est désactivée.",
+    "totpSetupButton": "Configurer l'application d'authentification",
+    "totpScanHint": "Scannez ce code QR avec votre application d'authentification ou saisissez le secret ci-dessous.",
+    "totpCodeLabel": "Code d'authentification à 6 chiffres",
+    "totpEnableButton": "Vérifier et activer",
+    "totpDisableButton": "Désactiver l'authentification à deux facteurs",
+    "recoveryCodesNotice": "Enregistrez ces codes de récupération dans un endroit sûr. Chaque code peut être utilisé une fois et ne sera plus affiché après avoir quitté cette page.",
+    "passkeyTitle": "Mots-clés",
+    "passkeyDescription": "Connectez-vous sans mot de passe en utilisant le verrouillage de l'écran de votre appareil, votre empreinte digitale ou votre visage. Vous pouvez enregistrer plusieurs mots de passe.",
+    "passkeyEmpty": "Aucun mot de passe n'est enregistré.",
+    "passkeyNameLabel": "Nom du mot de passe",
+    "passkeyAddButton": "Ajouter un mot de passe",
+    "passkeyDeleteButton": "Supprimer",
+    "passkeyDeleteConfirm": "Supprimer ce mot de passe ?"
+  },
+  "verifyEmailChange": {
+    "verifying": "Confirmation de votre changement d'e-mail...",
+    "invalidUrl": "URL invalide",
+    "successTitle": "Adresse e-mail modifiée",
+    "successBody": "Votre adresse e-mail a été mise à jour avec succès.",
+    "failedTitle": "Échec de la confirmation",
+    "backToSettingsLink": "Retour aux paramètres"
+  },
+  "mutesBlocks": {
+    "title": "Sourdines et blocages",
+    "mutesTab": "En sourdine",
+    "blocksTab": "Bloqué",
+    "noMutes": "Vous n'avez coupé le son de personne.",
+    "noBlocks": "Vous n'avez bloqué personne.",
+    "unmuteButton": "Activer le son",
+    "unblockButton": "Débloquer"
+  },
+  "appTokensSettings": {
+    "empty": "Aucun jeton d'application n'a été émis.",
+    "issuedAt": "Publié {{date}}",
+    "revokeButton": "Révoquer"
+  }
+}

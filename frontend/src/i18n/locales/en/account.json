@@ -19,6 +19,11 @@
     "languageAuto": "Automatic",
     "languageJa": "日本語",
     "languageEn": "English",
+    "languageZh": "中文",
+    "languageKo": "한국어",
+    "languageEs": "Español",
+    "languageDe": "Deutsch",
+    "languageFr": "Français",
     "saved": "Language preference saved."
   },
   "accountSettings": {

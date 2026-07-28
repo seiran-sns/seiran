@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { NoteAttachment } from "../../api/client";
 import HlsVideo from "./HlsVideo";
 import ImageLightbox from "../common/ImageLightbox";
@@ -11,7 +12,11 @@ interface NoteAttachmentsProps {
 
 /** 投稿に添付されたメディア（画像/動画/HLS/音声）一覧の表示。 */
 export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
-  const [lightbox, setLightbox] = useState<{ src: string; sensitive: boolean } | null>(null);
+  const { t } = useTranslation();
+  const [lightbox, setLightbox] = useState<{
+    src: string;
+    sensitive: boolean;
+  } | null>(null);
   const [revealed, setRevealed] = useState<Set<number>>(() => new Set());
 
   if (!attachments || attachments.length === 0) return null;
@@ -19,7 +24,9 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
   return (
     <div className={styles.attachments}>
       {attachments.map((att, i) => {
-        const isHls = att.mimeType === "application/vnd.apple.mpegurl" || att.mimeType === "application/x-mpegURL";
+        const isHls =
+          att.mimeType === "application/vnd.apple.mpegurl" ||
+          att.mimeType === "application/x-mpegURL";
         if (att.mimeType.startsWith("video/") || isHls) {
           return (
             <HlsVideo
@@ -60,20 +67,33 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
                     return next;
                   });
                 } else {
-                  setLightbox({ src: mediaUrl(att.url) ?? att.url, sensitive: att.isSensitive });
+                  setLightbox({
+                    src: mediaUrl(att.url) ?? att.url,
+                    sensitive: att.isSensitive,
+                  });
                 }
               }}
             />
             {att.isSensitive && !isRevealed && (
-              <button className={styles.sensitiveReveal} aria-label="閲覧注意画像を表示" onClick={(e) => {
-                e.stopPropagation();
-                setRevealed((current) => new Set(current).add(i));
-              }}>👁️</button>
+              <button
+                className={styles.sensitiveReveal}
+                aria-label={t("common:sensitiveImageReveal")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRevealed((current) => new Set(current).add(i));
+                }}
+              >
+                👁️
+              </button>
             )}
           </div>
         );
       })}
-      <ImageLightbox src={lightbox?.src ?? null} sensitive={lightbox?.sensitive} onClose={() => setLightbox(null)} />
+      <ImageLightbox
+        src={lightbox?.src ?? null}
+        sensitive={lightbox?.sensitive}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   );
 }

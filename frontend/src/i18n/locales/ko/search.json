@@ -1,0 +1,19 @@
+{
+  "searchPage": {
+    "placeholder": "검색 키워드(로컬 + Bluesky)",
+    "noResults": "일치하는 게시물이 없습니다.",
+    "prompt": "검색할 키워드를 입력하세요.",
+    "loadMoreButton": "더 로드하기",
+    "tabs": {
+      "quickNotifications": "빠른 알림",
+      "trendsSearch": "트렌드 및 검색"
+    },
+    "trendsComingSoon": "추세 집계가 곧 제공될 예정입니다."
+  },
+  "trendsSearchPanel": {
+    "placeholder": "키워드 검색",
+    "trendsHeader": "동향",
+    "comingSoon": "두 프로토콜 세계(AP/ATP)에 걸쳐 집계된 실시간 추세가 곧 제공될 예정입니다.",
+    "comingSoonDetail": "이는 집계 엔진이 구현되면 활성화됩니다."
+  }
+}

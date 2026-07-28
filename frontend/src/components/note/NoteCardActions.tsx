@@ -67,13 +67,22 @@ export default function NoteCardActions({
   }
 
   const menuItems: ActionsMenuItem[] = [
-    { key: "reply", label: `💬 ${t("home:noteCard.replyButton")}`, onClick: () => onReply() },
-    { key: "quote", label: `❝ ${t("home:noteCard.quoteButton")}`, onClick: () => onQuote() },
+    {
+      key: "reply",
+      label: `💬 ${t("home:noteCard.replyButton")}`,
+      onClick: () => onReply(),
+    },
+    {
+      key: "quote",
+      label: `❝ ${t("home:noteCard.quoteButton")}`,
+      onClick: () => onQuote(),
+    },
     {
       key: "repost",
       label: `🔁 ${reposted ? t("home:noteCard.unrepostTitle") : t("home:noteCard.repostTitle")}`,
       onClick: () => onRepost(),
-      disabled: reposting || unreposting || (isPrivateRepostTarget && !reposted),
+      disabled:
+        reposting || unreposting || (isPrivateRepostTarget && !reposted),
     },
     {
       key: "reaction",
@@ -100,7 +109,7 @@ export default function NoteCardActions({
   if (!isSelf) {
     menuItems.push({
       key: "report",
-      label: "⚠️ 通報",
+      label: `⚠️ ${t("home:noteCard.reportButton")}`,
       onClick: () => setReportOpen(true),
       danger: true,
     });
@@ -108,35 +117,50 @@ export default function NoteCardActions({
 
   return (
     <>
-      <ReactionChips noteId={noteId} reactions={reactions} onToggle={onToggleReaction} disabled={reactionPending} />
+      <ReactionChips
+        noteId={noteId}
+        reactions={reactions}
+        onToggle={onToggleReaction}
+        disabled={reactionPending}
+      />
 
       <div className={styles.actions}>
-        <button className={styles.actionBtn} onClick={onReply} title={t("home:noteCard.replyButton")}>
+        <button
+          className={styles.actionBtn}
+          onClick={onReply}
+          title={t("home:noteCard.replyButton")}
+        >
           💬 {t("home:noteCard.replyButton")}
         </button>
-        <button className={styles.actionBtn} onClick={onQuote} title={t("home:noteCard.quoteButton")}>
+        <button
+          className={styles.actionBtn}
+          onClick={onQuote}
+          title={t("home:noteCard.quoteButton")}
+        >
           ❝ {t("home:noteCard.quoteButton")}
         </button>
         <button
           className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
           onClick={onRepost}
-          disabled={reposting || unreposting || (isPrivateRepostTarget && !reposted)}
+          disabled={
+            reposting || unreposting || (isPrivateRepostTarget && !reposted)
+          }
           title={
             isPrivateRepostTarget
               ? t("home:noteCard.repostDisabledTitle")
               : reposted
-              ? t("home:noteCard.unrepostTitle")
-              : t("home:noteCard.repostTitle")
+                ? t("home:noteCard.unrepostTitle")
+                : t("home:noteCard.repostTitle")
           }
         >
           🔁{" "}
           {isPrivateRepostTarget
             ? t("home:noteCard.repostUnavailable")
             : reposted
-            ? t("home:noteCard.reposted")
-            : (reposting || unreposting)
-            ? "..."
-            : t("home:noteCard.repost")}
+              ? t("home:noteCard.reposted")
+              : reposting || unreposting
+                ? "..."
+                : t("home:noteCard.repost")}
         </button>
         <ReactionPicker
           onPick={onToggleReaction}
@@ -144,7 +168,10 @@ export default function NoteCardActions({
           open={reactionPickerOpen}
           onOpenChange={setReactionPickerOpen}
         />
-        <ActionsMenu items={menuItems} triggerTitle={t("home:noteCard.menuTitle")} />
+        <ActionsMenu
+          items={menuItems}
+          triggerTitle={t("home:noteCard.menuTitle")}
+        />
       </div>
 
       <Modal
@@ -152,12 +179,21 @@ export default function NoteCardActions({
         onClose={() => setDeleteConfirmOpen(false)}
         title={t("home:noteCard.deleteConfirmModal.title")}
       >
-        <p className={styles.modalText}>{t("home:noteCard.deleteConfirmModal.body")}</p>
+        <p className={styles.modalText}>
+          {t("home:noteCard.deleteConfirmModal.body")}
+        </p>
         <div className={styles.modalActions}>
-          <button className={styles.modalPrimaryDanger} onClick={confirmDelete} disabled={deleting}>
+          <button
+            className={styles.modalPrimaryDanger}
+            onClick={confirmDelete}
+            disabled={deleting}
+          >
             {t("home:noteCard.deleteConfirmModal.confirmButton")}
           </button>
-          <button className={styles.modalSecondary} onClick={() => setDeleteConfirmOpen(false)}>
+          <button
+            className={styles.modalSecondary}
+            onClick={() => setDeleteConfirmOpen(false)}
+          >
             {t("common:cancel")}
           </button>
         </div>

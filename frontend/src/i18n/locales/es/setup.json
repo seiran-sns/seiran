@@ -1,0 +1,11 @@
+{
+  "setup": {
+    "title": "Configuración inicial",
+    "description": "Por favor cree una cuenta de administrador.",
+    "usernameLabel": "Nombre de usuario",
+    "emailLabel": "Correo electrónico",
+    "passwordLabel": "Contraseña (8+ caracteres)",
+    "submitting": "Configurando...",
+    "submit": "Crear cuenta de administrador"
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "emojiContextMenu": {
+    "importButton": "导入表情符号"
+  },
+  "homePage": {
+    "title": "家",
+    "homeTab": "家",
+    "localTab": "当地的",
+    "socialTab": "社会的",
+    "globalTab": "全球的",
+    "manageListsLink": "+ 管理列表",
+    "emptyHome": "您关注的人的帖子将显示在此处。",
+    "emptyLocal": "还没有帖子。成为第一个发布内容的人！",
+    "emptySocial": "您关注的人和本地用户的帖子将显示在此处。",
+    "emptyGlobal": "还没有帖子。",
+    "emptyList": "该列表成员的帖子将显示在此处。",
+    "quickNotifications": "快速通知",
+    "quickNotificationsWithCount": "快速通知 ({{count}})",
+    "trendsAndSearch": "趋势和搜索",
+    "composerToggleLabel": "邮寄表格"
+  },
+  "noteDetailPage": {
+    "title": "邮政",
+    "showContextButton": "显示周围的帖子",
+    "noContext": "没有周围的帖子。",
+    "contextLabel": "作者周边帖子",
+    "threadPlaceholder": "回复和引用主题视图即将推出。",
+    "contextTab": "周边帖子",
+    "reactionsTab": "反应",
+    "noReactions": "这篇文章还没有任何反应。"
+  },
+  "noteCard": {
+    "privateRepostError": "私人帖子不能转发。",
+    "replyButton": "回复",
+    "quoteButton": "引用",
+    "repostTitle": "转发",
+    "unrepostTitle": "撤消重新发布",
+    "repostDisabledTitle": "私人帖子无法转发",
+    "repost": "转发",
+    "reposted": "转发",
+    "repostUnavailable": "无法转发",
+    "pinTitle": "别针",
+    "unpinTitle": "取消固定",
+    "pin": "别针",
+    "pinned": "已固定",
+    "quoteSourceLink": "❝ 引用的帖子",
+    "hasQuote": "❝ 有报价",
+    "showContent": "展示",
+    "hideContent": "隐藏",
+    "votes": "{{count}} 票",
+    "pollLoginRequired": "登录投票。",
+    "pollVoteButton": "投票",
+    "pollBackToOptions": "返回选项",
+    "pollShowResults": "显示结果",
+    "reportButton": "报告",
+    "reportSubject": "@{{username}} 的帖子",
+    "originalLinkTitle": "这篇文章是通过桥梁/联盟传递的副本。转到原始帖子。",
+    "originalLinkText": "🀄 查看原帖",
+    "repostedConnector": "将此转发于",
+    "repostedSuffix": "",
+    "repostedNoLinkSuffix": "转发了这个",
+    "unavailableRepost": "该帖子无法显示（它是私人的）。",
+    "notFollowing": "不关注",
+    "following": "下列的",
+    "followPending": "关注待定",
+    "menuTitle": "菜单",
+    "deleteConfirmModal": {
+      "title": "删除这个帖子吗？",
+      "body": "这无法撤消。删除也会从联合服务器和 Bluesky 中删除该帖子。",
+      "confirmButton": "删除"
+    }
+  },
+  "noteList": {
+    "emptyDefault": "没有帖子。"
+  },
+  "postComposer": {
+    "replyModalTitle": "回复",
+    "quoteModalTitle": "引用帖子",
+    "bskyPrivateConflict": "当 Bsky 传送开启时，您无法选择私人。关闭 Bsky 传送即可更改。",
+    "bskyVisibilityConflict": "Bsky 投递仅适用于私人以外的帖子。更改可见性以启用它。",
+    "placeholder": "发生什么事了？",
+    "replyPlaceholder": "写回复",
+    "quotePlaceholder": "添加评论",
+    "attachTitle": "附加图像、视频或音频文件",
+    "replyToFedi": "回复 Fediverse",
+    "replyToBsky": "回复 蓝天 的帖子",
+    "replyToSameNetwork": "网络上回复原帖",
+    "forcedPrivateNote": "🔒️此回复也将是私人的，因为它是回复私人帖子",
+    "visibilityPublic": "民众",
+    "visibilityUnlisted": "未上市",
+    "visibilityPrivate": "私人的",
+    "attachmentAlt": "附图",
+    "removeAttachmentTitle": "删除附件",
+    "overLimitReply": "这超出了 Bluesky 的字符限制。",
+    "overLimitDefault": "这超出了 Bluesky 的字符限制。无论如何，请关闭 Bsky 来发帖。",
+    "remainingCount": "{{count}} 左",
+    "posting": "发布...",
+    "postButton": "邮政",
+    "replyToPrefix": "回复:",
+    "quoteToPrefix": "引用:"
+  },
+  "reactionChips": {
+    "clickToRemove": "点击删除",
+    "clickToAdd": "单击以添加相同的反应",
+    "customEmojiBlocked": "您无法添加此自定义表情符号反应 - 它未在此服务器上注册",
+    "actorsFetchFailed": "加载失败"
+  },
+  "reactionPicker": {
+    "addReactionTitle": "添加反应",
+    "addReactionButton": "反应",
+    "searchPlaceholder": "搜索表情符号",
+    "tabFrequent": "经常使用",
+    "tabUnicode": "表情符号",
+    "tabCustom": "风俗",
+    "noResults": "没有匹配的表情符号",
+    "noFrequent": "还没有常用的表情符号",
+    "noCustomEmojis": "没有注册自定义表情符号"
+  },
+  "replyIndicator": {
+    "goToOriginalTitle": "前往原帖",
+    "replyLabel": "回复",
+    "fetchFailed": "无法加载原始帖子。"
+  },
+  "badges": {
+    "deliveredFedi": "交付给 Fediverse",
+    "deliveredBsky": "已交付至蓝天",
+    "visibilityPrivate": "私人的",
+    "visibilityUnlisted": "未上市"
+  }
+}

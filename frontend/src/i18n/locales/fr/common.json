@@ -1,0 +1,31 @@
+{
+  "sensitiveImageReveal": "Afficher l'image sensible",
+  "inputSuggestions": "Suggestions de saisie",
+  "appName": "seiran",
+  "close": "Fermer",
+  "save": "Sauvegarder",
+  "saving": "Économie...",
+  "cancel": "Annuler",
+  "delete": "Supprimer",
+  "edit": "Modifier",
+  "confirm": "Confirmer",
+  "back": "Dos",
+  "retry": "Réessayer",
+  "loading": "Chargement...",
+  "submit": "Soumettre",
+  "yes": "Oui",
+  "no": "Non",
+  "ok": "D'ACCORD",
+  "create": "Créer",
+  "add": "Ajouter",
+  "remove": "Retirer",
+  "search": "Recherche",
+  "settings": "Paramètres",
+  "error": "Erreur",
+  "unknownError": "Une erreur inconnue s'est produite",
+  "remoteBanner": {
+    "note": "Ceci est un message distant",
+    "user": "Ceci est un utilisateur distant",
+    "viewRemote": "Afficher sur un serveur distant"
+  }
+}

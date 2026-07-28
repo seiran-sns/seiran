@@ -1,0 +1,83 @@
+{
+  "menu": {
+    "title": "Einstellungen",
+    "account": "Konto",
+    "profile": "Profil",
+    "mutesBlocks": "Stummschalten und Blockieren",
+    "lists": "Listen",
+    "appearance": "Aussehen",
+    "appTokens": "App-Tokens",
+    "comingSoon": "Kommt bald"
+  },
+  "appearanceSettings": {
+    "title": "Darstellungseinstellungen",
+    "themeTitle": "Thema",
+    "themeSystem": "Systemeinstellung verwenden",
+    "themeLight": "Immer hell",
+    "themeDark": "Immer dunkel",
+    "languageTitle": "Sprache",
+    "languageAuto": "Automatisch",
+    "languageJa": "日本語",
+    "languageEn": "English",
+    "languageZh": "中文",
+    "languageKo": "한국어",
+    "languageEs": "Español",
+    "languageDe": "Deutsch",
+    "languageFr": "Français",
+    "saved": "Spracheinstellung gespeichert."
+  },
+  "accountSettings": {
+    "title": "Kontoeinstellungen",
+    "identityTitle": "Kontoinformationen",
+    "emailLabel": "E-Mail",
+    "emailChangeTitle": "E-Mail-Adresse ändern",
+    "newEmailLabel": "Neue E-Mail-Adresse",
+    "changeEmailButton": "Bestätigungs-E-Mail senden",
+    "emailChangeRequested": "Eine Bestätigungs-E-Mail wurde an die neue Adresse gesendet. Öffnen Sie den Link in der E-Mail, um die Änderung abzuschließen.",
+    "passwordTitle": "Kennwort ändern",
+    "currentPasswordLabel": "Aktuelles Passwort",
+    "newPasswordLabel": "Neues Passwort (8+ Zeichen)",
+    "newPasswordConfirmLabel": "Bestätigen Sie das neue Passwort",
+    "changePasswordButton": "Kennwort ändern",
+    "passwordSaved": "Passwort geändert.",
+    "passwordMismatch": "Neue Passwörter stimmen nicht überein.",
+    "totpTitle": "Zwei-Faktor-Authentifizierung",
+    "totpEnabled": "Die Zwei-Faktor-Authentifizierung mit einer Authentifizierungs-App ist aktiviert.",
+    "totpDisabled": "Die Zwei-Faktor-Authentifizierung mit einer Authentifizierungs-App ist deaktiviert.",
+    "totpSetupButton": "Authentifizierungs-App einrichten",
+    "totpScanHint": "Scannen Sie diesen QR-Code mit Ihrer Authentifizierungs-App oder geben Sie unten das Geheimnis ein.",
+    "totpCodeLabel": "6-stelliger Authentifizierungscode",
+    "totpEnableButton": "Überprüfen und aktivieren",
+    "totpDisableButton": "Deaktivieren Sie die Zwei-Faktor-Authentifizierung",
+    "recoveryCodesNotice": "Speichern Sie diese Wiederherstellungscodes an einem sicheren Ort. Jeder Code kann einmal verwendet werden und wird nach Verlassen dieser Seite nicht mehr angezeigt.",
+    "passkeyTitle": "Passschlüssel",
+    "passkeyDescription": "Melden Sie sich ohne Passwort mit der Bildschirmsperre, dem Fingerabdruck oder der Gesichtserkennung Ihres Geräts an. Sie können mehrere Passkeys registrieren.",
+    "passkeyEmpty": "Es sind keine Passkeys registriert.",
+    "passkeyNameLabel": "Passkey-Name",
+    "passkeyAddButton": "Passschlüssel hinzufügen",
+    "passkeyDeleteButton": "Löschen",
+    "passkeyDeleteConfirm": "Diesen Passkey löschen?"
+  },
+  "verifyEmailChange": {
+    "verifying": "Bestätigen Sie Ihre E-Mail-Änderung...",
+    "invalidUrl": "Ungültige URL",
+    "successTitle": "E-Mail-Adresse geändert",
+    "successBody": "Ihre E-Mail-Adresse wurde erfolgreich aktualisiert.",
+    "failedTitle": "Die Bestätigung ist fehlgeschlagen",
+    "backToSettingsLink": "Zurück zu den Einstellungen"
+  },
+  "mutesBlocks": {
+    "title": "Stummschalten und Blockieren",
+    "mutesTab": "Stummgeschaltet",
+    "blocksTab": "Blockiert",
+    "noMutes": "Du hast niemanden stummgeschaltet.",
+    "noBlocks": "Du hast niemanden blockiert.",
+    "unmuteButton": "Stummschaltung aufheben",
+    "unblockButton": "Entsperren"
+  },
+  "appTokensSettings": {
+    "empty": "Es wurden keine App-Tokens ausgegeben.",
+    "issuedAt": "Ausgestellt am {{date}}",
+    "revokeButton": "Widerrufen"
+  }
+}

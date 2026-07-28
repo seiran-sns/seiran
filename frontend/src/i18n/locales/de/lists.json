@@ -1,0 +1,25 @@
+{
+  "listsSettingsPage": {
+    "title": "Listen verwalten",
+    "newListNamePlaceholder": "Neuer Listenname",
+    "publicLabel": "Öffentlich",
+    "creatingButton": "Erstellen...",
+    "noLists": "Sie haben noch keine Listen.",
+    "isPublicLabel": "Öffentlich",
+    "isPrivateLabel": "Privat",
+    "memberCount": "{{count}} Mitglieder",
+    "selectListPrompt": "Wählen Sie links eine Liste aus.",
+    "editingHeader": "Bearbeiten von {{name}}",
+    "deleteListConfirm": "Diese Liste löschen? Dies kann nicht rückgängig gemacht werden.",
+    "memberSearchPlaceholder": "Suche nach ID/Handle/Spitzname oder @Benutzer@Domäne · https://... · tat:...",
+    "addingMemberButton": "Hinzufügen...",
+    "addMemberButton": "Mitglied hinzufügen",
+    "noMembers": "Noch keine Mitglieder."
+  },
+  "listDetailPage": {
+    "title": "Liste",
+    "notFound": "Diese Liste existiert nicht oder ist privat.",
+    "memberCount": "{{count}} Mitglieder",
+    "emptyTimeline": "Hier werden Beiträge der Mitglieder dieser Liste angezeigt."
+  }
+}

@@ -19,6 +19,11 @@
     "languageAuto": "自動",
     "languageJa": "日本語",
     "languageEn": "English",
+    "languageZh": "中文",
+    "languageKo": "한국어",
+    "languageEs": "Español",
+    "languageDe": "Deutsch",
+    "languageFr": "Français",
     "saved": "言語設定を保存しました。"
   },
   "accountSettings": {

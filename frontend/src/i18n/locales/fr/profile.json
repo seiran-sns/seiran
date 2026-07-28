@@ -1,0 +1,74 @@
+{
+  "profilePage": {
+    "title": "Profil",
+    "warpBanner": {
+      "prefix": "Ce compte est un",
+      "shadowLabel": "procuration",
+      "suffix": "compte. Le compte réel ({{handle}}) est ici →"
+    },
+    "pairedBadge": "Lié à l'âme",
+    "pairedBadgeTitle": "Lié à un utilisateur de Seiran distant via un lien d'âme",
+    "editProfileButton": "Modifier le profil",
+    "followingBadge": "Suivant",
+    "unfollowingButton": "Ne plus suivre...",
+    "unfollowButton": "Ne plus suivre",
+    "pendingBadge": "Demandé",
+    "followingSubmitButton": "Envoi...",
+    "followButton": "Suivre",
+    "pinnedHeader": "Épinglé",
+    "publicListsHeader": "Listes publiques",
+    "postsHeader": "Messages",
+    "noPosts": "Pas encore de messages.",
+    "followingTab": "Suivant",
+    "followersTab": "Abonnés",
+    "followingCountLabel": "Suivant",
+    "followerCountLabel": "Abonnés",
+    "followList": {
+      "noFollowing": "Je ne suis encore personne.",
+      "noFollowers": "Aucun abonné pour l'instant.",
+      "remoteExtraPending": "Récupération en arrière-plan. Veuillez recharger à nouveau sous peu."
+    },
+    "actionsMenuTitle": "Actions du compte",
+    "muteButton": "Muet",
+    "unmuteButton": "Activer le son",
+    "blockButton": "Bloc",
+    "unblockButton": "Débloquer",
+    "blockedByNotice": "Cet utilisateur vous a bloqué",
+    "blockConfirmModal": {
+      "title": "Confirmer le blocage",
+      "body": "Le blocage supprimera toute relation de suivi et masquera les publications de chacun de vous deux. Si cet utilisateur est sur Fediverse, un avis de blocage sera envoyé à son serveur. Etes-vous sûr de vouloir bloquer ?",
+      "confirmButton": "Bloc",
+      "cancelButton": "Annuler"
+    },
+    "bridgeModal": {
+      "title": "Suivre un compte proxy",
+      "prefix": "Ce compte est une projection d'un utilisateur {{protocol}} via un pont, appelé",
+      "shadowLabel": "procuration",
+      "suffix": ". Pour utiliser pleinement les fonctionnalités de Seiran, nous vous recommandons de suivre directement le compte réel (original).",
+      "goToRealButton": "Accédez au profil du compte réel",
+      "followAnywayButton": "Suivez quand même le compte proxy"
+    }
+  },
+  "profileEditPage": {
+    "title": "Modifier le profil",
+    "savedMessage": "Sauvé.",
+    "uploadingAvatar": "Téléchargement...",
+    "changeAvatarButton": "Changer d'avatar",
+    "displayNameLabel": "Nom d'affichage",
+    "bioLabel": "Biographie",
+    "bioPlaceholder": "Parlez-nous de vous",
+    "fieldsLabel": "Champs de profil (liens, etc. — jusqu'à {{count}})",
+    "fieldNamePlaceholder": "Étiquette (par exemple site Web)",
+    "fieldValuePlaceholder": "Valeur (par exemple https://example.com)",
+    "dangerZoneTitle": "Zone dangereuse",
+    "withdrawButton": "Désactiver ce compte",
+    "withdrawConfirm": "La désactivation de votre compte est irréversible. Êtes-vous sûr de vouloir continuer ?",
+    "withdrawHint": {
+      "body": "La désactivation supprimera vos publications et supprimera vos relations de suivi. Cette action ne peut pas être annulée.",
+      "handlePrefix": "Pour confirmer, veuillez saisir votre identifiant (",
+      "handleSuffix": ") ci-dessous."
+    },
+    "withdrawing": "Traitement...",
+    "withdrawSubmit": "Désactiver le compte"
+  }
+}

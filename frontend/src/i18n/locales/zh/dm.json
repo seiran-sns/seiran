@@ -1,0 +1,18 @@
+{
+  "messagesPage": {
+    "title": "留言",
+    "newMessage": "新消息",
+    "emptySessions": "还没有消息",
+    "composeHint": "选择发送消息的收件人",
+    "unknownPeer": "未知同行",
+    "textPlaceholder": "输入消息...",
+    "sendButton": "发送",
+    "attachButtonTitle": "附加媒体",
+    "bskySingleRecipientError": "给Bsky用户的消息只能一对一发送"
+  },
+  "recipientPicker": {
+    "placeholder": "添加收件人...",
+    "protocolConflictWarning": "发送给 Bsky 用户的消息不能与其他收件人合并",
+    "unresolvedWarning": "找不到与“{{input}}”匹配的用户"
+  }
+}

@@ -1,4 +1,6 @@
 {
+  "sensitiveImageReveal": "閲覧注意画像を表示",
+  "inputSuggestions": "入力候補",
   "appName": "seiran",
   "close": "閉じる",
   "save": "保存",

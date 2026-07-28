@@ -1,0 +1,83 @@
+{
+  "menu": {
+    "title": "설정",
+    "account": "계정",
+    "profile": "윤곽",
+    "mutesBlocks": "음소거 및 차단",
+    "lists": "기울기",
+    "appearance": "모습",
+    "appTokens": "앱 토큰",
+    "comingSoon": "곧 출시 예정"
+  },
+  "appearanceSettings": {
+    "title": "모양 설정",
+    "themeTitle": "테마",
+    "themeSystem": "시스템 설정 따르기",
+    "themeLight": "항상 라이트",
+    "themeDark": "항상 다크",
+    "languageTitle": "언어",
+    "languageAuto": "오토매틱",
+    "languageJa": "日本語",
+    "languageEn": "English",
+    "languageZh": "中文",
+    "languageKo": "한국어",
+    "languageEs": "Español",
+    "languageDe": "Deutsch",
+    "languageFr": "Français",
+    "saved": "언어 환경설정이 저장되었습니다."
+  },
+  "accountSettings": {
+    "title": "계정 설정",
+    "identityTitle": "계정 정보",
+    "emailLabel": "이메일",
+    "emailChangeTitle": "이메일 주소 변경",
+    "newEmailLabel": "새 이메일 주소",
+    "changeEmailButton": "확인 이메일 보내기",
+    "emailChangeRequested": "새 주소로 확인 이메일이 전송되었습니다. 변경을 완료하려면 이메일에 있는 링크를 엽니다.",
+    "passwordTitle": "비밀번호 변경",
+    "currentPasswordLabel": "현재 비밀번호",
+    "newPasswordLabel": "새 비밀번호(8자 이상)",
+    "newPasswordConfirmLabel": "새 비밀번호 확인",
+    "changePasswordButton": "비밀번호 변경",
+    "passwordSaved": "비밀번호가 변경되었습니다.",
+    "passwordMismatch": "새 비밀번호가 일치하지 않습니다.",
+    "totpTitle": "이중 인증",
+    "totpEnabled": "인증 앱을 통한 2단계 인증이 활성화되었습니다.",
+    "totpDisabled": "인증 앱을 사용한 2단계 인증이 비활성화되었습니다.",
+    "totpSetupButton": "인증자 앱 설정",
+    "totpScanHint": "인증 앱으로 이 QR 코드를 스캔하거나 아래에 비밀번호를 입력하세요.",
+    "totpCodeLabel": "6자리 인증 코드",
+    "totpEnableButton": "확인 및 활성화",
+    "totpDisableButton": "이중 인증 비활성화",
+    "recoveryCodesNotice": "복구 코드를 안전한 곳에 저장하세요. 각 코드는 한 번만 사용할 수 있으며 이 페이지를 떠난 후에는 다시 표시되지 않습니다.",
+    "passkeyTitle": "패스키",
+    "passkeyDescription": "기기 화면 잠금, 지문 또는 얼굴을 사용하여 비밀번호 없이 로그인하세요. 여러 개의 비밀번호를 등록할 수 있습니다.",
+    "passkeyEmpty": "등록된 비밀번호가 없습니다.",
+    "passkeyNameLabel": "패스키 이름",
+    "passkeyAddButton": "패스키 추가",
+    "passkeyDeleteButton": "삭제",
+    "passkeyDeleteConfirm": "이 패스키를 삭제하시겠습니까?"
+  },
+  "verifyEmailChange": {
+    "verifying": "이메일 변경 확인 중...",
+    "invalidUrl": "잘못된 URL",
+    "successTitle": "이메일 주소가 변경되었습니다.",
+    "successBody": "귀하의 이메일 주소가 성공적으로 업데이트되었습니다.",
+    "failedTitle": "확인 실패",
+    "backToSettingsLink": "설정으로 돌아가기"
+  },
+  "mutesBlocks": {
+    "title": "음소거 및 차단",
+    "mutesTab": "음소거됨",
+    "blocksTab": "막힌",
+    "noMutes": "음소거한 사람이 없습니다.",
+    "noBlocks": "차단한 사람이 없습니다.",
+    "unmuteButton": "음소거 해제",
+    "unblockButton": "차단 해제"
+  },
+  "appTokensSettings": {
+    "empty": "발행된 앱 토큰이 없습니다.",
+    "issuedAt": "{{date}} 발행됨",
+    "revokeButton": "취소"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "leftNav": {
+    "home": "家",
+    "search": "搜索",
+    "notifications": "通知",
+    "messages": "留言",
+    "lists": "列表",
+    "settings": "设置",
+    "admin": "行政",
+    "composeLabel": "邮政",
+    "profileTitle": "我的个人资料",
+    "logoutTitle": "退出",
+    "openMenu": "打开主菜单",
+    "closeMenu": "关闭菜单",
+    "menuTitle": "主菜单"
+  },
+  "appShell": {
+    "composeModalTitle": "新帖子"
+  }
+}

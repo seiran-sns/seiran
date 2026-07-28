@@ -1,0 +1,25 @@
+{
+  "listsSettingsPage": {
+    "title": "Administrar listas",
+    "newListNamePlaceholder": "Nuevo nombre de lista",
+    "publicLabel": "Público",
+    "creatingButton": "Creando...",
+    "noLists": "Aún no tienes ninguna lista.",
+    "isPublicLabel": "Público",
+    "isPrivateLabel": "Privado",
+    "memberCount": "{{count}} miembros",
+    "selectListPrompt": "Seleccione una lista a la izquierda.",
+    "editingHeader": "Editando {{name}}",
+    "deleteListConfirm": "¿Eliminar esta lista? Esto no se puede deshacer.",
+    "memberSearchPlaceholder": "Busque por ID/identificador/apodo, o @usuario@dominio · https://... · did:...",
+    "addingMemberButton": "Añadiendo...",
+    "addMemberButton": "Agregar miembro",
+    "noMembers": "Aún no hay miembros."
+  },
+  "listDetailPage": {
+    "title": "Lista",
+    "notFound": "Esta lista no existe o es privada.",
+    "memberCount": "{{count}} miembros",
+    "emptyTimeline": "Las publicaciones de los miembros de esta lista aparecerán aquí."
+  }
+}
