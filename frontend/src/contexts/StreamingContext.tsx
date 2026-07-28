@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { api, Note, noteFromStream, ReactionSummary } from "../api/client";
+import { api, Note, ReactionSummary } from "../api/client";
 import { profileQuery } from "../lib/format";
 import { setFollowStatus as setFollowStatusStore } from "../stores/followStatusStore";
 import { useAuth } from "./AuthContext";
+import { resolveStreamNote } from "./resolveStreamNote";
 import { useStreaming } from "../hooks/useStreaming";
 
 type NoteListener = (n: Note) => void;
@@ -78,13 +79,14 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
 
   useStreaming((type, body) => {
     if (type === "note") {
-      const n = noteFromStream(body);
-      if (n.visibility === "direct") {
-        dmListeners.current.forEach((cb) => cb(n));
-        refreshDmUnreadCount();
-      } else {
-        noteListeners.current.forEach((cb) => cb(n));
-      }
+      void resolveStreamNote(body).then((n) => {
+        if (n.visibility === "direct") {
+          dmListeners.current.forEach((cb) => cb(n));
+          refreshDmUnreadCount();
+        } else {
+          noteListeners.current.forEach((cb) => cb(n));
+        }
+      });
     } else if (type === "noteUpdated") {
       const update = body as ReactionUpdate;
       reactionListeners.current.get(update.postId)?.forEach((cb) => cb(update));
