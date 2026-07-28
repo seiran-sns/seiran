@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::ap::{build_emoji_map, classify_ap_visibility, ApClient};
 use crate::generate_snowflake_id;
 use crate::queue::worker::{InboxContext, JobContext};
-use crate::repository::{InsertRemoteWithDedupParams, NotificationKind};
+use crate::repository::{extract_shortcode_candidates, InsertRemoteWithDedupParams, NotificationKind};
 use crate::streaming::broadcast_reaction_update;
 
 pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), String> {
@@ -512,8 +512,8 @@ async fn handle_create_note(
     let tags = note["tag"].as_array().cloned().unwrap_or_default();
     let body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
     // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
-    let emoji_map = build_emoji_map(&tags);
     record_remote_emojis(inbox, &remote.domain, &tags).await;
+    let emoji_map = resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &body).await;
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
     let to_list = as_string_list(&note["to"]);
     let visibility = classify_ap_visibility(&to_list, &as_string_list(&note["cc"]));
@@ -1375,6 +1375,39 @@ async fn handle_delete(activity: serde_json::Value, inbox: &InboxContext) -> Res
 fn extract_emoji_tag_url(value: &serde_json::Value, shortcode: &str) -> Option<String> {
     let tags = value["tag"].as_array().cloned().unwrap_or_default();
     build_emoji_map(&tags).get(shortcode)?.as_str().map(|s| s.to_string())
+}
+
+/// AP Note の `tag` 配列由来の emoji_map を構築したうえで、本文中に現れる
+/// `:shortcode:` のうち tag に含まれていないものを、同一ドメインの `remote_emojis`
+/// カタログ（過去の受信で記録済みの絵文字）から補完する（#126）。送信元実装が
+/// リノート・編集後の再配送等で `tag` 配列を省略/欠落させても、以前に同じ
+/// ドメインから見たことのある絵文字であれば解決できるようにするフォールバック。
+async fn resolve_emoji_map_with_fallback(
+    inbox: &InboxContext,
+    domain: &str,
+    tags: &[serde_json::Value],
+    body: &str,
+) -> serde_json::Value {
+    let mut map = build_emoji_map(tags);
+    let missing: Vec<String> = extract_shortcode_candidates(body)
+        .into_iter()
+        .filter(|code| map.get(format!(":{}:", code)).is_none())
+        .collect();
+    if missing.is_empty() {
+        return map;
+    }
+    match inbox.remote_emoji_repo.find_urls_by_shortcodes(domain, &missing).await {
+        Ok(pairs) => {
+            let obj = map.as_object_mut().expect("build_emoji_map always returns an object");
+            for (code, url) in pairs {
+                obj.insert(format!(":{}:", code), serde_json::Value::String(url));
+            }
+        }
+        Err(e) => {
+            tracing::warn!("[RemoteEmoji] 本文フォールバック解決失敗 domain={}: {}", domain, e);
+        }
+    }
+    map
 }
 
 /// APのEmoji tagを `remote_emojis` へ記録する（#73）。

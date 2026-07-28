@@ -50,7 +50,7 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 | type | 処理概要 |
 |---|---|
 | `Follow` | ローカルアクター実在確認 → **ブロック済みチェック**（こちらが送信者をブロック中ならAcceptを送らずサイレントに無視）→ リモートアクターupsert → `follows` に accepted 状態でINSERT（即時承認）→ 通知 → `Accept` を返送 |
-| `Create`(Note) | リモートアクターupsert → HTML→内部リンクマーカー付きプレーンテキスト変換（6節参照）→ 絵文字tag解析 → 可視性判定 → **重複排除**（3節参照）→ `posts` にINSERT → 添付URL保存 → フォロワーへWS配信 |
+| `Create`(Note) | リモートアクターupsert → HTML→内部リンクマーカー付きプレーンテキスト変換（6節参照）→ 絵文字tag解析（tag欠落時は同一ドメインの`remote_emojis`から本文shortcodeを補完）→ 可視性判定 → **重複排除**（3節参照）→ `posts` にINSERT → 添付URL保存 → フォロワーへWS配信 |
 | `Accept`(Follow) | `follows.status` を `accepted` に更新、通知 |
 | `Block` | リモートアクターupsert → ブロックされた側がブロックした側をフォローしていた関係があれば解消（`blocks` テーブルには書き込まない、通知も生成しない。11節参照） |
 | `Undo` | `object.type` で分岐: `Like`/`EmojiReact`→リアクション削除、`Announce`→リポスト論理削除、`Follow`→フォロー解除、`Block`→ログのみ（DB上の巻き戻し対象なし） |
@@ -85,6 +85,9 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 
 ### カスタム絵文字リアクションの送信（`EmojiReact`）
 ローカルユーザーがカスタム絵文字（`:shortcode:`）でリアクションすると、`build_reaction_object`（`ap/deliver.rs`）が Misskey/Fedibird 互換の `tag: [{"type":"Emoji","name":":shortcode:","icon":{"type":"Image","url":...}}]` を付与した `EmojiReact` を組み立てる。`content`/`_misskey_reaction` には `:shortcode:` 形式の文字列をそのまま載せる。受信側の `build_emoji_map`/`extract_emoji_tag_url`（`ap/client.rs`・`jobs/inbound_activity_process.rs`）と対称的なペアになっている。画像URLの解決は `EmojiRepository::find_url_by_shortcode`（`custom_emojis`/`media_files`/`storage_providers` を JOIN）で行い、未登録shortcodeは `INVALID_REACTION_CONTENT`/`UNKNOWN_EMOJI` として拒否する（`handlers/notes/validation.rs`・`handlers/notes/mod.rs::create_reaction`）。ATP（Bsky）はカスタム絵文字非対応のため、`commit_like` の `emoji` 拡張フィールドに `:shortcode:` 文字列をベストエフォートで載せるのみ（画像は送らない）。
+
+### 投稿本文のカスタム絵文字
+ローカル投稿は作成時に本文の`:shortcode:`を`custom_emojis`と一括照合して`posts.emoji_map`へ保存する。ActivityPub配送時は保存済みmapのうち配送本文に実際に現れるものを`tag: [{"type":"Emoji","name":":shortcode:","icon":{"type":"Image","url":...}}]`へ変換し、Mention/Hashtag tagと併送する。AP受信はNoteのEmoji tagを第一情報源とし、送信元がtagを欠落させた場合のみ、同一ドメインから過去に収集した`remote_emojis`で本文shortcodeを補完する。Bluesky Jetstream受信でも、本文shortcodeをローカル`custom_emojis`と照合して`emoji_map`を保存する（いずれも#126）。
 
 ## 3. AT Protocol (Bsky) 統合
 
