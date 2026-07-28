@@ -55,6 +55,28 @@ async fn prepare_external_thumb(
     })
 }
 
+async fn build_external_post_embed(
+    state: &AppState,
+    actor_id: i64,
+    meta: &PostDeliveryMeta,
+) -> Option<BskyEmbed> {
+    let url = meta.ap_object_id.as_ref()?;
+    let title = format!(
+        "{} (@{}@{})",
+        meta.display_name.as_deref().unwrap_or(&meta.username),
+        meta.username,
+        meta.domain
+    );
+    let thumb_url = meta.first_image_url.as_deref().or(meta.avatar_url.as_deref());
+    let thumb = prepare_external_thumb(state, actor_id, thumb_url).await;
+    Some(BskyEmbed::External {
+        url: url.clone(),
+        title,
+        description: meta.body.clone(),
+        thumb,
+    })
+}
+
 /// `at://did/collection/rkey` 形式の AT URI を Bsky.app URL に変換するヘルパー。
 pub fn at_uri_to_bsky_app_url(at_uri: &str) -> String {
     let without_prefix = at_uri.strip_prefix("at://").unwrap_or(at_uri);
@@ -359,30 +381,13 @@ pub async fn resolve_quote_embed(
     );
 
     let bsky_embed = if origin == PostOrigin::FediRemote {
-        if let Some(url) = meta.ap_object_id.as_deref() {
-            let title = format!(
-                "{} (@{}@{})",
-                meta.display_name.as_deref().unwrap_or(&meta.username),
-                meta.username,
-                meta.domain
-            );
-            let thumb_url = meta.first_image_url.as_deref().or(meta.avatar_url.as_deref());
-            let thumb = prepare_external_thumb(state, actor_id, thumb_url).await;
-            Some(BskyEmbed::External {
-                url: url.to_string(),
-                title,
-                description: meta.body.clone(),
-                thumb,
-            })
-        } else {
-            None
-        }
+        build_external_post_embed(state, actor_id, &meta).await
     } else if let (Some(uri), Some(cid)) = (&meta.at_uri, &meta.at_cid) {
         Some(BskyEmbed::Record { uri: uri.clone(), cid: cid.clone() })
     } else {
-        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External {
-            url: u.to_string(), title: String::new(), description: String::new(), thumb: None,
-        })
+        // AP/ATP の両IDを持つ投稿でも、AT CID が未取得ならネイティブ引用を構築できない。
+        // このフォールバックでも空カードにせず、Fediリモートと同じメタデータを設定する。
+        build_external_post_embed(state, actor_id, &meta).await
     };
 
     let ap_url = if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
@@ -641,6 +646,33 @@ mod tests {
         // "at://" プレフィックスがない・パーツ不足の場合はそのまま返す
         assert_eq!(at_uri_to_bsky_app_url("not-an-at-uri"), "not-an-at-uri");
         assert_eq!(at_uri_to_bsky_app_url("at://did:plc:abc123"), "at://did:plc:abc123");
+    }
+
+    #[test]
+    fn ap_quote_uses_misskey_fields_for_ap_object() {
+        assert_eq!(
+            ap_delivery_quote_fields(
+                "comment",
+                Some(ApQuote::Misskey("https://fedi.example/notes/1".to_owned()))
+            ),
+            (None, Some("https://fedi.example/notes/1".to_owned()))
+        );
+    }
+
+    #[test]
+    fn ap_quote_appends_bsky_url_to_body() {
+        assert_eq!(
+            ap_delivery_quote_fields(
+                "comment",
+                Some(ApQuote::AppendUrl(
+                    "https://bsky.app/profile/did:plc:test/post/abc".to_owned()
+                ))
+            ),
+            (
+                Some("comment\n\nhttps://bsky.app/profile/did:plc:test/post/abc".to_owned()),
+                None
+            )
+        );
     }
 
     #[test]
