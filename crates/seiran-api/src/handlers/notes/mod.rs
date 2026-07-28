@@ -548,8 +548,8 @@ async fn create_regular_post(
     }
 
     // 引用元情報の取得（Bsky embed / AP quoteUrl を決定する）
-    let (bsky_quote_embed, ap_quote_url) = match quote_of_id_i64 {
-        Some(quote_id) => resolve_quote_embed(state, quote_id).await,
+    let (bsky_quote_embed, ap_quote) = match quote_of_id_i64 {
+        Some(quote_id) => resolve_quote_embed(state, actor_id, quote_id).await,
         None => (None, None),
     };
 
@@ -692,7 +692,7 @@ async fn create_regular_post(
             visibility: visibility.to_string(),
             bsky_reply: reply_ctx.bsky_reply,
             bsky_quote_embed,
-            ap_quote_url,
+            ap_quote,
             ap_in_reply_to: reply_ctx.ap_in_reply_to,
             attachment_ids: attachment_ids_i64.clone(),
         },
@@ -1050,8 +1050,21 @@ pub async fn get_note_ap(
 
     let actor_uri = format!("https://{}/users/{}", state.local_domain, post.username);
     let note_id = format!("https://{}/notes/{}", state.local_domain, post.id);
+    // 配送された Create の埋め込み object と、受信側が object.id を再取得した結果を
+    // 一致させる。Bsky-only 引用は配送時と同じく bsky.app URL を本文末尾へ追加する。
+    let (ap_body, quote_url) = if let Some(quote_id) = post.quote_of_post_id {
+        match state.posts.find_delivery_meta(quote_id).await {
+            Ok(Some(meta)) => {
+                delivery::ap_delivery_quote_fields(&post.body, delivery::ap_quote_from_meta(&meta))
+            }
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+    let ap_body = ap_body.as_deref().unwrap_or(&post.body);
     let (converted_body, mentions) = seiran_common::mention::convert_mentions_for_ap(
-        &post.body,
+        ap_body,
         &state.local_domain,
         &state.db,
         state.ap_client.http.as_ref(),
@@ -1147,6 +1160,10 @@ pub async fn get_note_ap(
     }
     if !tag.is_empty() {
         ap_note["tag"] = serde_json::Value::Array(tag);
+    }
+    if let Some(url) = quote_url {
+        ap_note["quoteUrl"] = serde_json::Value::String(url.clone());
+        ap_note["_misskey_quote"] = serde_json::Value::String(url);
     }
 
     (

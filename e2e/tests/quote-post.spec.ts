@@ -54,3 +54,39 @@ test("引用元をAPIで1段だけ埋め込み、本文下の引用カードに�
   await expect(card.getByText("❝ 引用あり")).toBeVisible();
   await expect(card.getByText(originalText)).toHaveCount(0);
 });
+
+test("投稿カードの引用ボタンからコメント付き引用を作成できる", async ({ page, request }) => {
+  const author = await registerUserViaApi(request, "e2equoteauthor");
+  const quoter = await registerUserViaApi(request, "e2equoter");
+  const originalText = `UI引用元 ${Date.now()}`;
+  const originalRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${author.token}` },
+    data: { text: originalText, deliver_to_fedi: false, deliver_to_bsky: false },
+  });
+  expect(originalRes.ok(), await originalRes.text()).toBeTruthy();
+
+  await seedAuth(page, quoter.token);
+  await page.goto(`/@${author.username}`);
+  const originalCard = page.locator("article", { hasText: originalText });
+  await originalCard.getByRole("button", { name: "引用" }).click();
+
+  await expect(page.getByText("引用ポスト", { exact: true })).toBeVisible();
+  await expect(page.getByText(originalText, { exact: true }).last()).toBeVisible();
+  const quoteText = `UIからの引用 ${Date.now()}`;
+  await page.getByPlaceholder("コメントを入力").fill(quoteText);
+  await page.getByRole("button", { name: "投稿", exact: true }).last().click();
+  await expect(page.getByText("引用ポスト", { exact: true })).toHaveCount(0);
+
+  const timelineRes = await request.get("/api/notes/home-timeline", {
+    headers: { Authorization: `Bearer ${quoter.token}` },
+  });
+  expect(timelineRes.ok(), await timelineRes.text()).toBeTruthy();
+  const notes = (await timelineRes.json()) as Array<{
+    text: string;
+    quoteId?: string;
+    quote?: { text: string };
+  }>;
+  expect(notes.find((note) => note.text === quoteText)).toMatchObject({
+    quote: { text: originalText },
+  });
+});

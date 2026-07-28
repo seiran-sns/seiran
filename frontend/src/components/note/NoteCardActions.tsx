@@ -16,6 +16,7 @@ interface NoteCardActionsProps {
   reactionPending: boolean;
   onToggleReaction: (emoji: string) => void;
   onReply: (e?: React.MouseEvent) => void;
+  onQuote: (e?: React.MouseEvent) => void;
   reposted: boolean;
   reposting: boolean;
   unreposting: boolean;
@@ -42,6 +43,7 @@ export default function NoteCardActions({
   reactionPending,
   onToggleReaction,
   onReply,
+  onQuote,
   reposted,
   reposting,
   unreposting,
@@ -66,6 +68,7 @@ export default function NoteCardActions({
 
   const menuItems: ActionsMenuItem[] = [
     { key: "reply", label: `💬 ${t("home:noteCard.replyButton")}`, onClick: () => onReply() },
+    { key: "quote", label: `❝ ${t("home:noteCard.quoteButton")}`, onClick: () => onQuote() },
     {
       key: "repost",
       label: `🔁 ${reposted ? t("home:noteCard.unrepostTitle") : t("home:noteCard.repostTitle")}`,
@@ -110,6 +113,9 @@ export default function NoteCardActions({
       <div className={styles.actions}>
         <button className={styles.actionBtn} onClick={onReply} title={t("home:noteCard.replyButton")}>
           💬 {t("home:noteCard.replyButton")}
+        </button>
+        <button className={styles.actionBtn} onClick={onQuote} title={t("home:noteCard.quoteButton")}>
+          ❝ {t("home:noteCard.quoteButton")}
         </button>
         <button
           className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}

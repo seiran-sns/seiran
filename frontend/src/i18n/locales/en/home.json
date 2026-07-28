@@ -32,6 +32,7 @@
   "noteCard": {
     "privateRepostError": "Private posts can't be reposted.",
     "replyButton": "Reply",
+    "quoteButton": "Quote",
     "repostTitle": "Repost",
     "unrepostTitle": "Undo repost",
     "repostDisabledTitle": "Private posts can't be reposted",
@@ -67,10 +68,13 @@
     "emptyDefault": "No posts."
   },
   "postComposer": {
+    "replyModalTitle": "Reply",
+    "quoteModalTitle": "Quote post",
     "bskyPrivateConflict": "You can't select Private while Bsky delivery is on. Turn off Bsky delivery to change it.",
     "bskyVisibilityConflict": "Bsky delivery is only available for posts other than Private. Change the visibility to enable it.",
     "placeholder": "What's happening?",
     "replyPlaceholder": "Write a reply",
+    "quotePlaceholder": "Add a comment",
     "attachTitle": "Attach an image, video, or audio file",
     "replyToFedi": "Replying to the Fediverse",
     "replyToBsky": "Replying to Bluesky",
@@ -86,7 +90,8 @@
     "remainingCount": "{{count}} left",
     "posting": "Posting...",
     "postButton": "Post",
-    "replyToPrefix": "Replying to:"
+    "replyToPrefix": "Replying to:",
+    "quoteToPrefix": "Quoting:"
   },
   "reactionChips": {
     "clickToRemove": "Click to remove",

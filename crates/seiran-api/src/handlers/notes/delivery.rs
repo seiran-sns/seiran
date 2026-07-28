@@ -68,6 +68,31 @@ async fn prepare_external_thumb(
     })
 }
 
+async fn build_external_post_embed(
+    state: &AppState,
+    actor_id: i64,
+    meta: &PostDeliveryMeta,
+) -> Option<BskyEmbed> {
+    let url = meta.ap_object_id.as_ref()?;
+    let title = format!(
+        "{} (@{}@{})",
+        meta.display_name.as_deref().unwrap_or(&meta.username),
+        meta.username,
+        meta.domain
+    );
+    let thumb_url = meta
+        .first_image_url
+        .as_deref()
+        .or(meta.avatar_url.as_deref());
+    let thumb = prepare_external_thumb(state, actor_id, thumb_url).await;
+    Some(BskyEmbed::External {
+        url: url.clone(),
+        title,
+        description: meta.body.clone(),
+        thumb,
+    })
+}
+
 /// `at://did/collection/rkey` 形式の AT URI を Bsky.app URL に変換するヘルパー。
 pub fn at_uri_to_bsky_app_url(at_uri: &str) -> String {
     let without_prefix = at_uri.strip_prefix("at://").unwrap_or(at_uri);
@@ -402,11 +427,44 @@ pub async fn resolve_reply_context(
     })
 }
 
-/// 引用元ポストの種別から Bsky embed（引用埋め込み）と AP quoteUrl を組み立てる。
+/// Fedi 配送で使う引用表現。
+#[derive(Debug, PartialEq, Eq)]
+pub enum ApQuote {
+    /// AP 実体を持つ投稿は Misskey 互換の quoteUrl として配送する。
+    Misskey(String),
+    /// Bsky にしか実体がない投稿は、受信サーバーが AP オブジェクトとして解決できないため、
+    /// bsky.app URL を本文末尾へ追記する。
+    AppendUrl(String),
+}
+
+pub(super) fn ap_delivery_quote_fields(
+    text: &str,
+    quote: Option<ApQuote>,
+) -> (Option<String>, Option<String>) {
+    match quote {
+        Some(ApQuote::Misskey(url)) => (None, Some(url)),
+        Some(ApQuote::AppendUrl(url)) => (Some(format!("{}\n\n{}", text, url)), None),
+        None => (None, None),
+    }
+}
+
+pub(super) fn ap_quote_from_meta(meta: &PostDeliveryMeta) -> Option<ApQuote> {
+    if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
+        meta.at_uri
+            .as_deref()
+            .map(at_uri_to_bsky_app_url)
+            .map(ApQuote::AppendUrl)
+    } else {
+        meta.ap_object_id.clone().map(ApQuote::Misskey)
+    }
+}
+
+/// 引用元ポストの種別から Bsky embed（引用埋め込み）と AP 向け引用表現を組み立てる。
 pub async fn resolve_quote_embed(
     state: &AppState,
+    actor_id: i64,
     quote_of_id: i64,
-) -> (Option<BskyEmbed>, Option<String>) {
+) -> (Option<BskyEmbed>, Option<ApQuote>) {
     let meta = match state.posts.find_delivery_meta(quote_of_id).await {
         Ok(Some(m)) => m,
         _ => return (None, None),
@@ -420,33 +478,21 @@ pub async fn resolve_quote_embed(
     );
 
     let bsky_embed = if origin == PostOrigin::FediRemote {
-        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External {
-            url: u.to_string(),
-            title: String::new(),
-            description: String::new(),
-            thumb: None,
-        })
+        build_external_post_embed(state, actor_id, &meta).await
     } else if let (Some(uri), Some(cid)) = (&meta.at_uri, &meta.at_cid) {
         Some(BskyEmbed::Record {
             uri: uri.clone(),
             cid: cid.clone(),
         })
     } else {
-        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External {
-            url: u.to_string(),
-            title: String::new(),
-            description: String::new(),
-            thumb: None,
-        })
+        // AP/ATP の両IDを持つ投稿でも、AT CID が未取得ならネイティブ引用を構築できない。
+        // このフォールバックでも空カードにせず、Fediリモートと同じメタデータを設定する。
+        build_external_post_embed(state, actor_id, &meta).await
     };
 
-    let ap_url = if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
-        meta.at_uri.as_deref().map(at_uri_to_bsky_app_url)
-    } else {
-        meta.ap_object_id.clone()
-    };
+    let ap_quote = ap_quote_from_meta(&meta);
 
-    (bsky_embed, ap_url)
+    (bsky_embed, ap_quote)
 }
 
 /// 通常投稿 / リプライ / 引用投稿の配送指示。
@@ -462,7 +508,7 @@ pub struct RegularPostDelivery {
     pub visibility: String,
     pub bsky_reply: Option<BskyPostReply>,
     pub bsky_quote_embed: Option<BskyEmbed>,
-    pub ap_quote_url: Option<String>,
+    pub ap_quote: Option<ApQuote>,
     pub ap_in_reply_to: Option<String>,
     pub attachment_ids: Vec<i64>,
 }
@@ -605,13 +651,14 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
     if d.targets.fedi {
         // body は渡さない。deliver_post_to_ap_followers 側で DB の投稿本文を取得し、
         // メンション解決（tag[]・<a> アンカー付与）まで一貫して行う。
+        let (body, quote_url) = ap_delivery_quote_fields(&d.text, d.ap_quote);
         state
             .enqueue_ap_delivery(
                 d.actor_id,
                 ApDeliveryKind::PostToFollowers {
                     post_id: d.post_id,
-                    body: None,
-                    quote_url: d.ap_quote_url,
+                    body,
+                    quote_url,
                     in_reply_to: d.ap_in_reply_to,
                 },
             )
@@ -621,8 +668,12 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
 
 #[cfg(test)]
 mod tests {
-    use super::{at_uri_to_bsky_app_url, classify_post, PostOrigin, ReplyContext};
+    use super::{
+        ap_delivery_quote_fields, ap_quote_from_meta, at_uri_to_bsky_app_url, classify_post,
+        ApQuote, PostOrigin, ReplyContext,
+    };
     use crate::error::ApiError;
+    use seiran_common::repository::post::PostDeliveryMeta;
 
     fn ctx_with_parent_visibility(parent_visibility: Option<&str>) -> ReplyContext {
         ReplyContext {
@@ -633,6 +684,23 @@ mod tests {
             parent_visibility: parent_visibility.map(str::to_owned),
             parent_thread_root_post_id: None,
             parent_local_actor_id: None,
+        }
+    }
+
+    fn delivery_meta(ap_object_id: Option<&str>, at_uri: Option<&str>) -> PostDeliveryMeta {
+        PostDeliveryMeta {
+            actor_id: 1,
+            ap_object_id: ap_object_id.map(str::to_owned),
+            at_uri: at_uri.map(str::to_owned),
+            at_cid: None,
+            domain: "example.com".to_owned(),
+            display_name: None,
+            username: "alice".to_owned(),
+            body: "quoted post".to_owned(),
+            avatar_url: None,
+            first_image_url: None,
+            visibility: "public".to_owned(),
+            thread_root_post_id: None,
         }
     }
 
@@ -768,6 +836,58 @@ mod tests {
         assert_eq!(
             at_uri_to_bsky_app_url("at://did:plc:abc123"),
             "at://did:plc:abc123"
+        );
+    }
+
+    #[test]
+    fn ap_quote_uses_misskey_fields_for_ap_object() {
+        assert_eq!(
+            ap_delivery_quote_fields(
+                "comment",
+                Some(ApQuote::Misskey("https://fedi.example/notes/1".to_owned()))
+            ),
+            (None, Some("https://fedi.example/notes/1".to_owned()))
+        );
+    }
+
+    #[test]
+    fn ap_quote_appends_bsky_url_to_body() {
+        assert_eq!(
+            ap_delivery_quote_fields(
+                "comment",
+                Some(ApQuote::AppendUrl(
+                    "https://bsky.app/profile/did:plc:test/post/abc".to_owned()
+                ))
+            ),
+            (
+                Some("comment\n\nhttps://bsky.app/profile/did:plc:test/post/abc".to_owned()),
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn ap_quote_from_meta_uses_misskey_fields_for_ap_object() {
+        let meta = delivery_meta(
+            Some("https://fedi.example/notes/1"),
+            Some("at://did:plc:test/app.bsky.feed.post/abc"),
+        );
+
+        assert_eq!(
+            ap_quote_from_meta(&meta),
+            Some(ApQuote::Misskey("https://fedi.example/notes/1".to_owned()))
+        );
+    }
+
+    #[test]
+    fn ap_quote_from_meta_appends_bsky_only_url() {
+        let meta = delivery_meta(None, Some("at://did:plc:test/app.bsky.feed.post/abc"));
+
+        assert_eq!(
+            ap_quote_from_meta(&meta),
+            Some(ApQuote::AppendUrl(
+                "https://bsky.app/profile/did:plc:test/post/abc".to_owned()
+            ))
         );
     }
 
