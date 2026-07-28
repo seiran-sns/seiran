@@ -1,0 +1,10 @@
+{
+  "connect": {
+    "unknownApp": "Application inconnue",
+    "title": "Autoriser la connexion à l'application",
+    "doneDescription": "Autorisé. Veuillez revenir à l'application.",
+    "description": "{{appName}} demande l'accès à votre compte seiran.",
+    "authorizing": "Traitement...",
+    "submit": "Autoriser"
+  }
+}

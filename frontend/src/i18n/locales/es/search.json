@@ -1,0 +1,19 @@
+{
+  "searchPage": {
+    "placeholder": "Buscar palabras clave (local + Bluesky)",
+    "noResults": "No se encontraron publicaciones coincidentes.",
+    "prompt": "Ingrese una palabra clave para buscar.",
+    "loadMoreButton": "Cargar más",
+    "tabs": {
+      "quickNotifications": "Notificaciones rápidas",
+      "trendsSearch": "Tendencias y búsqueda"
+    },
+    "trendsComingSoon": "La agregación de tendencias llegará pronto."
+  },
+  "trendsSearchPanel": {
+    "placeholder": "Buscar palabras clave",
+    "trendsHeader": "Tendencias",
+    "comingSoon": "Próximamente llegarán las tendencias en tiempo real agregadas en los dos universos de protocolos (AP/ATP).",
+    "comingSoonDetail": "Esto se habilitará una vez que se implemente el motor de agregación."
+  }
+}

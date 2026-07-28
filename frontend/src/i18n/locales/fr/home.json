@@ -1,0 +1,130 @@
+{
+  "emojiContextMenu": {
+    "importButton": "Importer des emoji"
+  },
+  "homePage": {
+    "title": "Maison",
+    "homeTab": "Maison",
+    "localTab": "Locale",
+    "socialTab": "Sociale",
+    "globalTab": "Mondial",
+    "manageListsLink": "+ Gérer les listes",
+    "emptyHome": "Les messages des personnes que vous suivez apparaîtront ici.",
+    "emptyLocal": "Pas encore de messages. Soyez le premier à publier quelque chose !",
+    "emptySocial": "Les publications des personnes que vous suivez et des utilisateurs locaux apparaîtront ici.",
+    "emptyGlobal": "Pas encore de messages.",
+    "emptyList": "Les messages des membres de cette liste apparaîtront ici.",
+    "quickNotifications": "Notifications rapides",
+    "quickNotificationsWithCount": "Notifications rapides ({{count}})",
+    "trendsAndSearch": "Tendances et recherche",
+    "composerToggleLabel": "Formulaire de publication"
+  },
+  "noteDetailPage": {
+    "title": "Poste",
+    "showContextButton": "Afficher les messages environnants",
+    "noContext": "Aucun message à proximité.",
+    "contextLabel": "Messages environnants de l'auteur",
+    "threadPlaceholder": "La vue du fil de discussion des réponses et des citations sera bientôt disponible.",
+    "contextTab": "Postes environnants",
+    "reactionsTab": "Réactions",
+    "noReactions": "Aucune réaction sur ce post pour l'instant."
+  },
+  "noteCard": {
+    "privateRepostError": "Les messages privés ne peuvent pas être republiés.",
+    "replyButton": "Répondre",
+    "quoteButton": "Citation",
+    "repostTitle": "Republier",
+    "unrepostTitle": "Annuler la republication",
+    "repostDisabledTitle": "Les messages privés ne peuvent pas être republiés",
+    "repost": "Republier",
+    "reposted": "Republié",
+    "repostUnavailable": "Je ne peux pas republier",
+    "pinTitle": "Épingle",
+    "unpinTitle": "Détacher",
+    "pin": "Épingle",
+    "pinned": "Épinglé",
+    "quoteSourceLink": "❝ Article cité",
+    "hasQuote": "❝ A un devis",
+    "showContent": "Montrer",
+    "hideContent": "Cacher",
+    "votes": "{{count}} votes",
+    "pollLoginRequired": "Connectez-vous pour voter.",
+    "pollVoteButton": "Voter",
+    "pollBackToOptions": "Retour aux options",
+    "pollShowResults": "Afficher les résultats",
+    "reportButton": "Rapport",
+    "reportSubject": "Message de @{{username}}",
+    "originalLinkTitle": "Ce message est un duplicata délivré via un pont/fédération. Accédez au message d'origine.",
+    "originalLinkText": "🀄 Voir le message original",
+    "repostedConnector": "republié ceci à",
+    "repostedSuffix": "",
+    "repostedNoLinkSuffix": "republié ceci",
+    "unavailableRepost": "Ce message ne peut pas être affiché (il est privé).",
+    "notFollowing": "Ne pas suivre",
+    "following": "Suivant",
+    "followPending": "Suivre en attente",
+    "menuTitle": "Menu",
+    "deleteConfirmModal": {
+      "title": "Supprimer ce message ?",
+      "body": "Cela ne peut pas être annulé. La suppression supprimera également la publication des serveurs fédérés et de Bluesky.",
+      "confirmButton": "Supprimer"
+    }
+  },
+  "noteList": {
+    "emptyDefault": "Aucun message."
+  },
+  "postComposer": {
+    "replyModalTitle": "Répondre",
+    "quoteModalTitle": "Article de citation",
+    "bskyPrivateConflict": "Vous ne pouvez pas sélectionner Privé lorsque la livraison Bsky est activée. Désactivez la livraison Bsky pour la modifier.",
+    "bskyVisibilityConflict": "La livraison Bsky n'est disponible que pour les publications autres que Privées. Modifiez la visibilité pour l'activer.",
+    "placeholder": "Ce qui se passe?",
+    "replyPlaceholder": "Écrivez une réponse",
+    "quotePlaceholder": "Ajouter un commentaire",
+    "attachTitle": "Joindre une image, une vidéo ou un fichier audio",
+    "replyToFedi": "Répondre au Fediverse",
+    "replyToBsky": "Répondre à Bluesky",
+    "replyToSameNetwork": "Répondre sur le réseau du message d'origine",
+    "forcedPrivateNote": "🔒️ Cette réponse sera également privée car elle répond à un message privé",
+    "visibilityPublic": "Publique",
+    "visibilityUnlisted": "Non répertorié",
+    "visibilityPrivate": "Privé",
+    "attachmentAlt": "Image ci-jointe",
+    "removeAttachmentTitle": "Supprimer la pièce jointe",
+    "overLimitReply": "Cela dépasse la limite de caractères de Bluesky.",
+    "overLimitDefault": "Cela dépasse la limite de caractères de Bluesky. Désactivez quand même Bsky pour publier.",
+    "remainingCount": "{{count}} restant",
+    "posting": "Affectation...",
+    "postButton": "Poste",
+    "replyToPrefix": "En réponse à :",
+    "quoteToPrefix": "Citant :"
+  },
+  "reactionChips": {
+    "clickToRemove": "Cliquez pour supprimer",
+    "clickToAdd": "Cliquez pour ajouter la même réaction",
+    "customEmojiBlocked": "Vous ne pouvez pas ajouter cette réaction emoji personnalisée : elle n'est pas enregistrée sur ce serveur.",
+    "actorsFetchFailed": "Échec du chargement"
+  },
+  "reactionPicker": {
+    "addReactionTitle": "Ajouter une réaction",
+    "addReactionButton": "Réagir",
+    "searchPlaceholder": "Rechercher des emoji",
+    "tabFrequent": "Fréquemment utilisé",
+    "tabUnicode": "Émoji",
+    "tabCustom": "Coutume",
+    "noResults": "Aucun emoji correspondant",
+    "noFrequent": "Pas encore d'emoji fréquemment utilisé",
+    "noCustomEmojis": "Aucun emoji personnalisé enregistré"
+  },
+  "replyIndicator": {
+    "goToOriginalTitle": "Aller au message d'origine",
+    "replyLabel": "Répondre",
+    "fetchFailed": "Impossible de charger le message d'origine."
+  },
+  "badges": {
+    "deliveredFedi": "Livré à Fediverse",
+    "deliveredBsky": "Livré à Bluesky",
+    "visibilityPrivate": "Privé",
+    "visibilityUnlisted": "Non répertorié"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "notificationsPage": {
+    "title": "Notificaciones"
+  },
+  "notificationsPanel": {
+    "unknownUser": "Alguien",
+    "reactionText": "<userLink>{{label}}</userLink> reaccionó",
+    "followText": "<userLink>{{label}}</userLink> te siguió",
+    "followAcceptedText": "<userLink>{{label}}</userLink> aceptó su solicitud de seguimiento",
+    "mentionText": "<userLink>{{label}}</userLink> te mencionó",
+    "replyText": "<userLink>{{label}}</userLink> te respondió",
+    "genericText": "Notificación de <userLink>{{label}}</userLink>",
+    "noNotifications": "No hay nuevas notificaciones.",
+    "noNotificationsDetail": "Las respuestas, reacciones y seguimientos aparecerán aquí en tiempo real."
+  }
+}

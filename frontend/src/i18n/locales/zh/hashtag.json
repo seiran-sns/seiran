@@ -1,0 +1,8 @@
+{
+  "hashtagPage": {
+    "addToHome": "添加到主屏幕",
+    "removeFromHome": "从主屏幕中删除",
+    "postWithTag": "使用此主题标签发帖",
+    "empty": "带有此主题标签的帖子将显示在此处。"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "leftNav": {
+    "home": "Maison",
+    "search": "Recherche",
+    "notifications": "Notifications",
+    "messages": "Messages",
+    "lists": "Listes",
+    "settings": "Paramètres",
+    "admin": "Administrateur",
+    "composeLabel": "Poste",
+    "profileTitle": "Mon profil",
+    "logoutTitle": "Se déconnecter",
+    "openMenu": "Ouvrir le menu principal",
+    "closeMenu": "Fermer le menu",
+    "menuTitle": "Menu principal"
+  },
+  "appShell": {
+    "composeModalTitle": "Nouveau message"
+  }
+}

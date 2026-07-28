@@ -1,0 +1,74 @@
+{
+  "profilePage": {
+    "title": "Profil",
+    "warpBanner": {
+      "prefix": "Dieses Konto ist ein",
+      "shadowLabel": "Proxy",
+      "suffix": "Konto. Das echte Konto ({{handle}}) ist hier →"
+    },
+    "pairedBadge": "Seelengebunden",
+    "pairedBadgeTitle": "Über Seelenbindung mit einem entfernten Seiran-Benutzer verbunden",
+    "editProfileButton": "Profil bearbeiten",
+    "followingBadge": "Nachfolgend",
+    "unfollowingButton": "Nicht mehr folgen...",
+    "unfollowButton": "Nicht mehr folgen",
+    "pendingBadge": "Angefordert",
+    "followingSubmitButton": "Senden...",
+    "followButton": "Folgen",
+    "pinnedHeader": "Angepinnt",
+    "publicListsHeader": "Öffentliche Listen",
+    "postsHeader": "Beiträge",
+    "noPosts": "Noch keine Beiträge.",
+    "followingTab": "Nachfolgend",
+    "followersTab": "Anhänger",
+    "followingCountLabel": "Nachfolgend",
+    "followerCountLabel": "Anhänger",
+    "followList": {
+      "noFollowing": "Folgt noch niemandem.",
+      "noFollowers": "Noch keine Follower.",
+      "remoteExtraPending": "Abruf im Hintergrund. Bitte laden Sie es in Kürze noch einmal neu."
+    },
+    "actionsMenuTitle": "Kontoaktionen",
+    "muteButton": "Stumm",
+    "unmuteButton": "Stummschaltung aufheben",
+    "blockButton": "Block",
+    "unblockButton": "Entsperren",
+    "blockedByNotice": "Dieser Benutzer hat Sie blockiert",
+    "blockConfirmModal": {
+      "title": "Sperre bestätigen",
+      "body": "Durch das Blockieren wird jede Follow-Beziehung entfernt und die Beiträge des jeweils anderen werden für Sie beide ausgeblendet. Wenn sich dieser Benutzer im Fediverse befindet, wird eine Sperrbenachrichtigung an seinen Server gesendet. Sind Sie sicher, dass Sie blockieren möchten?",
+      "confirmButton": "Block",
+      "cancelButton": "Stornieren"
+    },
+    "bridgeModal": {
+      "title": "Einem Proxy-Konto folgen",
+      "prefix": "Dieses Konto ist eine Projektion eines {{protocol}}-Benutzers über eine Brücke, die als a bezeichnet wird",
+      "shadowLabel": "Proxy",
+      "suffix": ". Um die Funktionen von seiran voll nutzen zu können, empfehlen wir, direkt dem echten (ursprünglichen) Konto zu folgen.",
+      "goToRealButton": "Gehen Sie zum Profil des echten Kontos",
+      "followAnywayButton": "Folgen Sie trotzdem dem Proxy-Konto"
+    }
+  },
+  "profileEditPage": {
+    "title": "Profil bearbeiten",
+    "savedMessage": "Gespeichert.",
+    "uploadingAvatar": "Hochladen...",
+    "changeAvatarButton": "Avatar ändern",
+    "displayNameLabel": "Anzeigename",
+    "bioLabel": "Bio",
+    "bioPlaceholder": "Erzählen Sie uns etwas über sich",
+    "fieldsLabel": "Profilfelder (Links usw. – bis zu {{count}})",
+    "fieldNamePlaceholder": "Label (z. B. Website)",
+    "fieldValuePlaceholder": "Wert (z. B. https://example.com)",
+    "dangerZoneTitle": "Gefahrenzone",
+    "withdrawButton": "Deaktivieren Sie dieses Konto",
+    "withdrawConfirm": "Die Deaktivierung Ihres Kontos kann nicht rückgängig gemacht werden. Sind Sie sicher, dass Sie fortfahren möchten?",
+    "withdrawHint": {
+      "body": "Durch die Deaktivierung werden Ihre Beiträge gelöscht und Ihre Follow-Beziehungen entfernt. Diese Aktion kann nicht rückgängig gemacht werden.",
+      "handlePrefix": "Zur Bestätigung geben Sie bitte Ihren Benutzernamen ein (",
+      "handleSuffix": ") unten."
+    },
+    "withdrawing": "Verarbeitung...",
+    "withdrawSubmit": "Konto deaktivieren"
+  }
+}

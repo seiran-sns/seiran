@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { ActorSuggestion, PublicEmoji, api } from "../../api/client";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
 import { SHORTCODE_SOURCE } from "../../lib/richTextPatterns";
@@ -25,15 +26,17 @@ interface ComposerEditorProps {
   autoFocus?: boolean;
 }
 
-const MENTION_RE = /(?<![\w])@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?/g;
+const MENTION_RE =
+  /(?<![\w])@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?/g;
 const TOKEN_RE = /(?<![\w])@[A-Za-z0-9_.@-]*$|:[A-Za-z0-9_+-]*$/;
 const DECORATION_RE = new RegExp(
   `(${SHORTCODE_SOURCE}(?![A-Za-z0-9_])|(?<![\\w])@[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?)`,
-  "g"
+  "g",
 );
 
 function nodeValue(node: Node): string {
-  if (node instanceof HTMLElement && node.dataset.value) return node.dataset.value;
+  if (node instanceof HTMLElement && node.dataset.value)
+    return node.dataset.value;
   if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
   if (node.nodeName === "BR") {
     // 末尾の改行を表示上のキャレット配置のために足した番人brは値に含めない。
@@ -45,7 +48,8 @@ function nodeValue(node: Node): string {
 
 function selectionOffset(root: HTMLElement): number | null {
   const selection = window.getSelection();
-  if (!selection?.rangeCount || !root.contains(selection.anchorNode)) return null;
+  if (!selection?.rangeCount || !root.contains(selection.anchorNode))
+    return null;
   const range = selection.getRangeAt(0).cloneRange();
   range.selectNodeContents(root);
   range.setEnd(selection.anchorNode!, selection.anchorOffset);
@@ -116,10 +120,15 @@ function actorMentionValues(actor: ActorSuggestion) {
 async function mentionIsKnown(mention: string) {
   const target = mention.slice(1);
   const queries = [target];
-  if (!target.includes("@") && target.includes(".")) queries.push(target.slice(0, target.indexOf(".")));
-  const rows = (await Promise.all(queries.map((query) => api.actors.suggest(query, 10)))).flat();
+  if (!target.includes("@") && target.includes("."))
+    queries.push(target.slice(0, target.indexOf(".")));
+  const rows = (
+    await Promise.all(queries.map((query) => api.actors.suggest(query, 10)))
+  ).flat();
   return rows.some((row) =>
-    actorMentionValues(row).some((candidate) => candidate.toLowerCase() === mention.toLowerCase())
+    actorMentionValues(row).some(
+      (candidate) => candidate.toLowerCase() === mention.toLowerCase(),
+    ),
   );
 }
 
@@ -139,6 +148,7 @@ export default function ComposerEditor({
   placeholder,
   autoFocus,
 }: ComposerEditorProps) {
+  const { t } = useTranslation();
   const editorRef = useRef<HTMLDivElement>(null);
   const pendingCaret = useRef<number | null>(null);
   const composing = useRef(false);
@@ -147,7 +157,9 @@ export default function ComposerEditor({
   const [emojis, setEmojis] = useState<PublicEmoji[]>([]);
   const [actors, setActors] = useState<ActorSuggestion[]>([]);
   const [knownMentions, setKnownMentions] = useState<Set<string>>(new Set());
-  const [checkedMentions, setCheckedMentions] = useState<Set<string>>(new Set());
+  const [checkedMentions, setCheckedMentions] = useState<Set<string>>(
+    new Set(),
+  );
   const [active, setActive] = useState(-1);
 
   function preserveCaretForRender() {
@@ -168,13 +180,15 @@ export default function ComposerEditor({
 
   useEffect(() => {
     const mentions = Array.from(new Set(value.match(MENTION_RE) ?? []));
-    const unresolved = mentions.filter((mention) => !checkedMentions.has(mention));
+    const unresolved = mentions.filter(
+      (mention) => !checkedMentions.has(mention),
+    );
     if (!unresolved.length) return;
     let cancelled = false;
     Promise.all(
       unresolved.map(async (mention) => {
         return (await mentionIsKnown(mention)) ? mention : null;
-      })
+      }),
     )
       .then((resolved) => {
         if (cancelled) return;
@@ -183,7 +197,10 @@ export default function ComposerEditor({
         // 返った時点で、その後のID入力とサジェストが壊れる。
         preserveCaretForRender();
         setCheckedMentions((current) => new Set([...current, ...unresolved]));
-        setKnownMentions((current) => new Set([...current, ...resolved.filter((v): v is string => !!v)]));
+        setKnownMentions(
+          (current) =>
+            new Set([...current, ...resolved.filter((v): v is string => !!v)]),
+        );
       })
       .catch(() => {});
     return () => {
@@ -227,14 +244,26 @@ export default function ComposerEditor({
     if (token.startsWith(":")) {
       const query = token.slice(1).toLowerCase();
       return emojis
-        .filter((emoji) => emoji.name.toLowerCase().includes(query) || emoji.aliases.some((a) => a.toLowerCase().includes(query)))
+        .filter(
+          (emoji) =>
+            emoji.name.toLowerCase().includes(query) ||
+            emoji.aliases.some((a) => a.toLowerCase().includes(query)),
+        )
         .slice(0, 8)
-        .map((emoji) => ({ kind: "emoji", key: emoji.name, value: `:${emoji.name}:`, emoji }));
+        .map((emoji) => ({
+          kind: "emoji",
+          key: emoji.name,
+          value: `:${emoji.name}:`,
+          emoji,
+        }));
     }
     return [];
   }, [actors, emojis, token]);
 
-  useEffect(() => setActive(candidates.length ? 0 : -1), [token, candidates.length]);
+  useEffect(
+    () => setActive(candidates.length ? 0 : -1),
+    [token, candidates.length],
+  );
 
   useLayoutEffect(() => {
     if (pendingCaret.current === null || !editorRef.current) return;
@@ -256,7 +285,8 @@ export default function ComposerEditor({
     setCaret(nextCaret);
     // 全選択削除などで内容が空になると、ブラウザはカーソル表示用の単独<br>を
     // 自動的に残す。これはユーザーが入力した改行ではないため空文字列として扱う。
-    const isPlaceholderBr = editor.childNodes.length === 1 && editor.firstChild?.nodeName === "BR";
+    const isPlaceholderBr =
+      editor.childNodes.length === 1 && editor.firstChild?.nodeName === "BR";
     onChange(isPlaceholderBr ? "" : nodeValue(editor));
   }
 
@@ -278,9 +308,15 @@ export default function ComposerEditor({
       onSubmitShortcut();
       return;
     }
-    if (candidates.length && ["ArrowDown", "ArrowUp", "Tab"].includes(event.key)) {
+    if (
+      candidates.length &&
+      ["ArrowDown", "ArrowUp", "Tab"].includes(event.key)
+    ) {
       event.preventDefault();
-      const direction = event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey) ? -1 : 1;
+      const direction =
+        event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)
+          ? -1
+          : 1;
       setActive((current) => {
         if (current < 0) return direction > 0 ? 0 : candidates.length - 1;
         return (current + direction + candidates.length) % candidates.length;
@@ -305,16 +341,22 @@ export default function ComposerEditor({
       onChange(next);
       return;
     }
-    if (event.key === "Backspace" && !window.getSelection()?.isCollapsed) return;
+    if (event.key === "Backspace" && !window.getSelection()?.isCollapsed)
+      return;
     if (event.key === "Backspace") {
       const emoji = emojis.find((item) => {
         const shortcode = `:${item.name}:`;
-        return value.slice(0, caret).endsWith(shortcode) || value.slice(caret).startsWith(shortcode);
+        return (
+          value.slice(0, caret).endsWith(shortcode) ||
+          value.slice(caret).startsWith(shortcode)
+        );
       });
       if (emoji) {
         event.preventDefault();
         const shortcode = `:${emoji.name}:`;
-        const start = value.slice(0, caret).endsWith(shortcode) ? caret - shortcode.length : caret;
+        const start = value.slice(0, caret).endsWith(shortcode)
+          ? caret - shortcode.length
+          : caret;
         const removeAt = start === caret ? start : start + shortcode.length - 1;
         pendingCaret.current = removeAt;
         setCaret(removeAt);
@@ -323,24 +365,29 @@ export default function ComposerEditor({
     }
   }
 
-  const emojiByCode = new Map(emojis.map((emoji) => [`:${emoji.name}:`, emoji]));
+  const emojiByCode = new Map(
+    emojis.map((emoji) => [`:${emoji.name}:`, emoji]),
+  );
   const parts = value.split(DECORATION_RE);
   // contenteditable配下をReactの子要素として管理すると、ブラウザがatomic nodeを
   // 先に編集した場合にremoveChild競合が起きる。安全にescapeしたHTMLを面全体へ
   // 一括反映し、入力値はnodeValueで常にプレーンテキストへ戻す。
-  const editorHtml = parts
-    .map((part) => {
-      const emoji = emojiByCode.get(part);
-      if (emoji) {
-        return `<span class="${styles.emoji}" contenteditable="false" data-value="${escapeHtml(part)}"><img src="${escapeHtml(emoji.url)}" alt="${escapeHtml(part)}" title="${escapeHtml(part)}"></span>`;
-      }
-      if (part.startsWith("@")) {
-        const className = knownMentions.has(part) ? styles.mentionKnown : styles.mentionUnknown;
-        return `<span class="${className}">${escapeHtml(part)}</span>`;
-      }
-      return escapeHtml(part).replace(/\n/g, "<br>");
-    })
-    .join("") + (value.endsWith("\n") ? '<br data-pad="1">' : "");
+  const editorHtml =
+    parts
+      .map((part) => {
+        const emoji = emojiByCode.get(part);
+        if (emoji) {
+          return `<span class="${styles.emoji}" contenteditable="false" data-value="${escapeHtml(part)}"><img src="${escapeHtml(emoji.url)}" alt="${escapeHtml(part)}" title="${escapeHtml(part)}"></span>`;
+        }
+        if (part.startsWith("@")) {
+          const className = knownMentions.has(part)
+            ? styles.mentionKnown
+            : styles.mentionUnknown;
+          return `<span class="${className}">${escapeHtml(part)}</span>`;
+        }
+        return escapeHtml(part).replace(/\n/g, "<br>");
+      })
+      .join("") + (value.endsWith("\n") ? '<br data-pad="1">' : "");
 
   return (
     <div className={styles.wrap}>
@@ -364,11 +411,15 @@ export default function ComposerEditor({
           // pendingCaret設定中（handleKeyDownで自前更新した直後）は、まだ
           // 再レンダー前の古いDOMを読むことになりcaretを巻き戻してしまうため待つ。
           if (composing.current || pendingCaret.current !== null) return;
-          const next = editorRef.current ? selectionOffset(editorRef.current) : null;
+          const next = editorRef.current
+            ? selectionOffset(editorRef.current)
+            : null;
           if (next !== null) setCaret(next);
         }}
         onClick={() => {
-          const next = editorRef.current ? selectionOffset(editorRef.current) : null;
+          const next = editorRef.current
+            ? selectionOffset(editorRef.current)
+            : null;
           if (next !== null) setCaret(next);
         }}
         onCompositionStart={() => (composing.current = true)}
@@ -377,7 +428,9 @@ export default function ComposerEditor({
           updateFromDom();
         }}
         onPaste={(event: ClipboardEvent<HTMLDivElement>) => {
-          const item = Array.from(event.clipboardData.items).find((entry) => entry.type.startsWith("image/"));
+          const item = Array.from(event.clipboardData.items).find((entry) =>
+            entry.type.startsWith("image/"),
+          );
           const file = item?.getAsFile();
           if (file) {
             event.preventDefault();
@@ -387,26 +440,36 @@ export default function ComposerEditor({
         dangerouslySetInnerHTML={{ __html: editorHtml }}
       />
       {candidates.length > 0 && (
-        <ul className={styles.suggestions} role="listbox" aria-label="入力候補">
+        <ul
+          className={styles.suggestions}
+          role="listbox"
+          aria-label={t("common:inputSuggestions")}
+        >
           {candidates.map((candidate, index) => (
             <li key={`${candidate.kind}-${candidate.key}`}>
               <button
                 type="button"
                 role="option"
                 aria-selected={active === index}
-                className={active === index ? styles.suggestionActive : styles.suggestion}
+                className={
+                  active === index ? styles.suggestionActive : styles.suggestion
+                }
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => insert(candidate)}
               >
                 {candidate.kind === "emoji" ? (
                   <>
-                    <img src={candidate.emoji.url} alt="" />
-                    :{candidate.emoji.name}:
+                    <img src={candidate.emoji.url} alt="" />:
+                    {candidate.emoji.name}:
                   </>
                 ) : (
                   <>
-                    {candidate.actor.avatar_url && <img src={candidate.actor.avatar_url} alt="" />}
-                    <span>{candidate.actor.display_name || candidate.actor.username}</span>
+                    {candidate.actor.avatar_url && (
+                      <img src={candidate.actor.avatar_url} alt="" />
+                    )}
+                    <span>
+                      {candidate.actor.display_name || candidate.actor.username}
+                    </span>
                     <small>{candidate.value}</small>
                   </>
                 )}

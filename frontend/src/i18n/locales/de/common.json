@@ -1,0 +1,31 @@
+{
+  "sensitiveImageReveal": "Sensibles Bild anzeigen",
+  "inputSuggestions": "Eingabevorschläge",
+  "appName": "seiran",
+  "close": "Schließen",
+  "save": "Speichern",
+  "saving": "Sparen...",
+  "cancel": "Stornieren",
+  "delete": "Löschen",
+  "edit": "Bearbeiten",
+  "confirm": "Bestätigen",
+  "back": "Zurück",
+  "retry": "Wiederholen",
+  "loading": "Laden...",
+  "submit": "Einreichen",
+  "yes": "Ja",
+  "no": "NEIN",
+  "ok": "OK",
+  "create": "Erstellen",
+  "add": "Hinzufügen",
+  "remove": "Entfernen",
+  "search": "Suchen",
+  "settings": "Einstellungen",
+  "error": "Fehler",
+  "unknownError": "Es ist ein unbekannter Fehler aufgetreten",
+  "remoteBanner": {
+    "note": "Dies ist ein Remote-Beitrag",
+    "user": "Dies ist ein Remote-Benutzer",
+    "viewRemote": "Auf Remote-Server anzeigen"
+  }
+}

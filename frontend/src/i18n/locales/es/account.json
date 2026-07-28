@@ -1,0 +1,83 @@
+{
+  "menu": {
+    "title": "Ajustes",
+    "account": "Cuenta",
+    "profile": "Perfil",
+    "mutesBlocks": "Silencios y bloques",
+    "lists": "Liza",
+    "appearance": "Apariencia",
+    "appTokens": "Fichas de aplicación",
+    "comingSoon": "Muy pronto"
+  },
+  "appearanceSettings": {
+    "title": "Configuración de apariencia",
+    "themeTitle": "Tema",
+    "themeSystem": "Seguir sistema",
+    "themeLight": "Siempre claro",
+    "themeDark": "Siempre oscuro",
+    "languageTitle": "Idioma",
+    "languageAuto": "Automático",
+    "languageJa": "日本語",
+    "languageEn": "English",
+    "languageZh": "中文",
+    "languageKo": "한국어",
+    "languageEs": "Español",
+    "languageDe": "Deutsch",
+    "languageFr": "Français",
+    "saved": "Preferencia de idioma guardada."
+  },
+  "accountSettings": {
+    "title": "Configuraciones de la cuenta",
+    "identityTitle": "Información de la cuenta",
+    "emailLabel": "Correo electrónico",
+    "emailChangeTitle": "Cambiar dirección de correo electrónico",
+    "newEmailLabel": "Nueva dirección de correo electrónico",
+    "changeEmailButton": "Enviar correo electrónico de confirmación",
+    "emailChangeRequested": "Se ha enviado un correo electrónico de confirmación a la nueva dirección. Abra el enlace en el correo electrónico para completar el cambio.",
+    "passwordTitle": "Cambiar la contraseña",
+    "currentPasswordLabel": "Contraseña actual",
+    "newPasswordLabel": "Nueva contraseña (8+ caracteres)",
+    "newPasswordConfirmLabel": "Confirmar nueva contraseña",
+    "changePasswordButton": "Cambiar la contraseña",
+    "passwordSaved": "Contraseña cambiada.",
+    "passwordMismatch": "Las nuevas contraseñas no coinciden.",
+    "totpTitle": "Autenticación de dos factores",
+    "totpEnabled": "La autenticación de dos factores con una aplicación de autenticación está habilitada.",
+    "totpDisabled": "La autenticación de dos factores con una aplicación de autenticación está deshabilitada.",
+    "totpSetupButton": "Configurar la aplicación de autenticación",
+    "totpScanHint": "Escanee este código QR con su aplicación de autenticación o ingrese el secreto a continuación.",
+    "totpCodeLabel": "Código de autenticación de 6 dígitos",
+    "totpEnableButton": "Verificar y habilitar",
+    "totpDisableButton": "Deshabilitar la autenticación de dos factores",
+    "recoveryCodesNotice": "Guarde estos códigos de recuperación en un lugar seguro. Cada código se puede usar una vez y no se mostrarán nuevamente después de salir de esta página.",
+    "passkeyTitle": "Claves de acceso",
+    "passkeyDescription": "Inicie sesión sin contraseña utilizando el bloqueo de pantalla, la huella digital o el rostro de su dispositivo. Puede registrar varias claves de acceso.",
+    "passkeyEmpty": "No se registran claves de acceso.",
+    "passkeyNameLabel": "Nombre de la clave de acceso",
+    "passkeyAddButton": "Agregar clave de acceso",
+    "passkeyDeleteButton": "Borrar",
+    "passkeyDeleteConfirm": "¿Eliminar esta clave de acceso?"
+  },
+  "verifyEmailChange": {
+    "verifying": "Confirmando su cambio de correo electrónico...",
+    "invalidUrl": "URL no válida",
+    "successTitle": "Dirección de correo electrónico cambiada",
+    "successBody": "Su dirección de correo electrónico se ha actualizado correctamente.",
+    "failedTitle": "Error de confirmación",
+    "backToSettingsLink": "Volver a la configuración"
+  },
+  "mutesBlocks": {
+    "title": "Silencios y bloques",
+    "mutesTab": "Apagado",
+    "blocksTab": "Obstruido",
+    "noMutes": "No has silenciado a nadie.",
+    "noBlocks": "No has bloqueado a nadie.",
+    "unmuteButton": "Dejar de silenciar",
+    "unblockButton": "Desatascar"
+  },
+  "appTokensSettings": {
+    "empty": "No se han emitido tokens de aplicación.",
+    "issuedAt": "Emitido {{date}}",
+    "revokeButton": "Revocar"
+  }
+}

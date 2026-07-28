@@ -1,0 +1,130 @@
+{
+  "emojiContextMenu": {
+    "importButton": "Emoji importieren"
+  },
+  "homePage": {
+    "title": "Heim",
+    "homeTab": "Heim",
+    "localTab": "Lokal",
+    "socialTab": "Sozial",
+    "globalTab": "Global",
+    "manageListsLink": "+ Listen verwalten",
+    "emptyHome": "Hier werden Beiträge von Personen angezeigt, denen Sie folgen.",
+    "emptyLocal": "Noch keine Beiträge. Seien Sie der Erste, der etwas postet!",
+    "emptySocial": "Hier werden Beiträge von Personen angezeigt, denen Sie folgen, und von lokalen Benutzern.",
+    "emptyGlobal": "Noch keine Beiträge.",
+    "emptyList": "Hier werden Beiträge der Mitglieder dieser Liste angezeigt.",
+    "quickNotifications": "Schnelle Benachrichtigungen",
+    "quickNotificationsWithCount": "Schnellbenachrichtigungen ({{count}})",
+    "trendsAndSearch": "Trends & Suche",
+    "composerToggleLabel": "Formular posten"
+  },
+  "noteDetailPage": {
+    "title": "Post",
+    "showContextButton": "Umliegende Beiträge anzeigen",
+    "noContext": "Keine umliegenden Beiträge.",
+    "contextLabel": "Umliegende Beiträge des Autors",
+    "threadPlaceholder": "Die Thread-Ansicht für Antworten und Zitate folgt bald.",
+    "contextTab": "Umliegende Beiträge",
+    "reactionsTab": "Reaktionen",
+    "noReactions": "Noch keine Reaktionen auf diesen Beitrag."
+  },
+  "noteCard": {
+    "privateRepostError": "Private Beiträge können nicht erneut gepostet werden.",
+    "replyButton": "Antwort",
+    "quoteButton": "Zitat",
+    "repostTitle": "Reposten",
+    "unrepostTitle": "Repost rückgängig machen",
+    "repostDisabledTitle": "Private Beiträge können nicht erneut gepostet werden",
+    "repost": "Reposten",
+    "reposted": "Neu gepostet",
+    "repostUnavailable": "Kann nicht erneut gepostet werden",
+    "pinTitle": "Stift",
+    "unpinTitle": "Lösen",
+    "pin": "Stift",
+    "pinned": "Angepinnt",
+    "quoteSourceLink": "❝ Zitierter Beitrag",
+    "hasQuote": "❝ Hat Zitat",
+    "showContent": "Zeigen",
+    "hideContent": "Verstecken",
+    "votes": "{{count}} Stimmen",
+    "pollLoginRequired": "Melden Sie sich an, um abzustimmen.",
+    "pollVoteButton": "Abstimmung",
+    "pollBackToOptions": "Zurück zu den Optionen",
+    "pollShowResults": "Ergebnisse anzeigen",
+    "reportButton": "Bericht",
+    "reportSubject": "@{{username}}s Beitrag",
+    "originalLinkTitle": "Dieser Beitrag ist ein Duplikat, das über eine Brücke/Föderation übermittelt wurde. Gehen Sie zum ursprünglichen Beitrag.",
+    "originalLinkText": "🀄 Originalbeitrag ansehen",
+    "repostedConnector": "habe dies erneut gepostet unter",
+    "repostedSuffix": "",
+    "repostedNoLinkSuffix": "habe dies erneut gepostet",
+    "unavailableRepost": "Dieser Beitrag kann nicht angezeigt werden (er ist privat).",
+    "notFollowing": "Nicht folgen",
+    "following": "Nachfolgend",
+    "followPending": "Folgen Ausstehend",
+    "menuTitle": "Speisekarte",
+    "deleteConfirmModal": {
+      "title": "Diesen Beitrag löschen?",
+      "body": "Dies kann nicht rückgängig gemacht werden. Durch das Löschen wird der Beitrag auch von den Verbundservern und Bluesky entfernt.",
+      "confirmButton": "Löschen"
+    }
+  },
+  "noteList": {
+    "emptyDefault": "Keine Beiträge."
+  },
+  "postComposer": {
+    "replyModalTitle": "Antwort",
+    "quoteModalTitle": "Beitrag zitieren",
+    "bskyPrivateConflict": "Sie können „Privat“ nicht auswählen, während die Bsky-Zustellung aktiviert ist. Deaktivieren Sie die Bsky-Zustellung, um sie zu ändern.",
+    "bskyVisibilityConflict": "Die Bsky-Zustellung ist nur für andere Beiträge als „Privat“ verfügbar. Ändern Sie die Sichtbarkeit, um sie zu aktivieren.",
+    "placeholder": "Was passiert?",
+    "replyPlaceholder": "Schreiben Sie eine Antwort",
+    "quotePlaceholder": "Fügen Sie einen Kommentar hinzu",
+    "attachTitle": "Hängen Sie eine Bild-, Video- oder Audiodatei an",
+    "replyToFedi": "Antwort an das Fediverse",
+    "replyToBsky": "Antwort an Bluesky",
+    "replyToSameNetwork": "Im Netzwerk des ursprünglichen Beitrags antworten",
+    "forcedPrivateNote": "🔒️ Diese Antwort ist ebenfalls privat, da es sich um eine Antwort auf einen privaten Beitrag handelt",
+    "visibilityPublic": "Öffentlich",
+    "visibilityUnlisted": "Nicht gelistet",
+    "visibilityPrivate": "Privat",
+    "attachmentAlt": "Angehängtes Bild",
+    "removeAttachmentTitle": "Anhang entfernen",
+    "overLimitReply": "Dies überschreitet die Zeichenbeschränkung von Bluesky.",
+    "overLimitDefault": "Dies überschreitet die Zeichenbeschränkung von Bluesky. Schalten Sie Bsky trotzdem aus, um etwas zu posten.",
+    "remainingCount": "{{count}} übrig",
+    "posting": "Posten...",
+    "postButton": "Post",
+    "replyToPrefix": "Antwort auf:",
+    "quoteToPrefix": "Zitat:"
+  },
+  "reactionChips": {
+    "clickToRemove": "Klicken Sie zum Entfernen",
+    "clickToAdd": "Klicken Sie, um dieselbe Reaktion hinzuzufügen",
+    "customEmojiBlocked": "Sie können diese benutzerdefinierte Emoji-Reaktion nicht hinzufügen, da sie nicht auf diesem Server registriert ist",
+    "actorsFetchFailed": "Laden fehlgeschlagen"
+  },
+  "reactionPicker": {
+    "addReactionTitle": "Fügen Sie eine Reaktion hinzu",
+    "addReactionButton": "Reagieren",
+    "searchPlaceholder": "Emoji suchen",
+    "tabFrequent": "Häufig verwendet",
+    "tabUnicode": "Emoji",
+    "tabCustom": "Brauch",
+    "noResults": "Kein passendes Emoji",
+    "noFrequent": "Noch kein häufig verwendetes Emoji",
+    "noCustomEmojis": "Kein benutzerdefiniertes Emoji registriert"
+  },
+  "replyIndicator": {
+    "goToOriginalTitle": "Gehen Sie zum ursprünglichen Beitrag",
+    "replyLabel": "Antwort",
+    "fetchFailed": "Der ursprüngliche Beitrag konnte nicht geladen werden."
+  },
+  "badges": {
+    "deliveredFedi": "An Fediverse geliefert",
+    "deliveredBsky": "An Bluesky geliefert",
+    "visibilityPrivate": "Privat",
+    "visibilityUnlisted": "Nicht gelistet"
+  }
+}

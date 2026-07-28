@@ -64,7 +64,7 @@ ID 採番は2系統ある。
 
 `actors.ap_uri`（UNIQUE）は `local` 行も含め全アクター種別が保持する。ローカル行は `https://{local_domain}/users/{username}` を持つ（自ドメインを名乗る Actor URI を誤ってリモートアクター解決経路に渡しても、`find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により `actor_type='fedi'` の影の重複行が生成されない）。リモートActor URI解決処理（`resolve_fedi`/`upsert_remote_fedi_actor`/`RemoteActorResolve`/`follow_fedi`）はこれとは別に、URIが自ドメイン形式に一致する場合は `find_by_username_domain` でローカル行へ解決する明示的なガードも入口に持つ（`docs/protocols.md` 参照）。
 
-`users.language_preference`（設定画面「表示」＞「言語」）: `ja` / `en` のいずれか、`NULL` は「自動」（ブラウザの言語設定に従う）を意味する。
+`users.language_preference`（設定画面「表示」＞「言語」）: `ja` / `en` / `zh` / `ko` / `es` / `de` / `fr` のいずれか、`NULL` は「自動」（ブラウザの言語設定に従う）を意味する。
 
 ### TOTP関連（`user_totp` / `user_totp_recovery_codes` / `totp_disable_requests`）
 

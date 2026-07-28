@@ -1,0 +1,16 @@
+{
+  "notificationsPage": {
+    "title": "通知"
+  },
+  "notificationsPanel": {
+    "unknownUser": "有人",
+    "reactionText": "<userLink>{{label}}</userLink> 做出了反应",
+    "followText": "<userLink>{{label}}</userLink> 关注了您",
+    "followAcceptedText": "<userLink>{{label}}</userLink> 已接受您的关注请求",
+    "mentionText": "<userLink>{{label}}</userLink> 提到了您",
+    "replyText": "<userLink>{{label}}</userLink> 回复了您",
+    "genericText": "来自 <userLink>{{label}}</userLink> 的通知",
+    "noNotifications": "没有新的通知。",
+    "noNotificationsDetail": "回复、反应和关注将实时显示在此处。"
+  }
+}

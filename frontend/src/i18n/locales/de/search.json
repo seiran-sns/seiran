@@ -1,0 +1,19 @@
+{
+  "searchPage": {
+    "placeholder": "Suchbegriffe (lokal + Bluesky)",
+    "noResults": "Keine passenden Beiträge gefunden.",
+    "prompt": "Geben Sie ein Schlüsselwort für die Suche ein.",
+    "loadMoreButton": "Mehr laden",
+    "tabs": {
+      "quickNotifications": "Schnelle Benachrichtigungen",
+      "trendsSearch": "Trends & Suche"
+    },
+    "trendsComingSoon": "Die Trendaggregation folgt bald."
+  },
+  "trendsSearchPanel": {
+    "placeholder": "Suchbegriffe suchen",
+    "trendsHeader": "Trends",
+    "comingSoon": "In Kürze werden über die beiden Protokolluniversen (AP/ATP) aggregierte Echtzeittrends verfügbar sein.",
+    "comingSoonDetail": "Dies wird aktiviert, sobald die Aggregations-Engine implementiert ist."
+  }
+}

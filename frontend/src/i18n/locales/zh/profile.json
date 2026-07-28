@@ -1,0 +1,74 @@
+{
+  "profilePage": {
+    "title": "轮廓",
+    "warpBanner": {
+      "prefix": "该帐户是一个",
+      "shadowLabel": "代理人",
+      "suffix": "帐户。真实账户 ({{handle}}) 在这里 →"
+    },
+    "pairedBadge": "灵魂束缚",
+    "pairedBadgeTitle": "通过灵魂绑定与远程青鸾用户连接",
+    "editProfileButton": "编辑个人资料",
+    "followingBadge": "下列的",
+    "unfollowingButton": "正在取消关注...",
+    "unfollowButton": "取消关注",
+    "pendingBadge": "已请求",
+    "followingSubmitButton": "正在发送...",
+    "followButton": "跟随",
+    "pinnedHeader": "已固定",
+    "publicListsHeader": "公开名单",
+    "postsHeader": "帖子",
+    "noPosts": "还没有帖子。",
+    "followingTab": "下列的",
+    "followersTab": "追随者",
+    "followingCountLabel": "下列的",
+    "followerCountLabel": "追随者",
+    "followList": {
+      "noFollowing": "还没有关注任何人。",
+      "noFollowers": "还没有关注者。",
+      "remoteExtraPending": "在后台获取。请稍后重新加载。"
+    },
+    "actionsMenuTitle": "账户操作",
+    "muteButton": "沉默的",
+    "unmuteButton": "取消静音",
+    "blockButton": "堵塞",
+    "unblockButton": "解锁",
+    "blockedByNotice": "该用户已屏蔽您",
+    "blockConfirmModal": {
+      "title": "确认区块",
+      "body": "屏蔽将删除任何关注关系，并对你们双方隐藏彼此的帖子。如果该用户在 Fediverse 上，则会将阻止通知发送到他们的服务器。您确定要阻止吗？",
+      "confirmButton": "堵塞",
+      "cancelButton": "取消"
+    },
+    "bridgeModal": {
+      "title": "关注代理帐户",
+      "prefix": "该帐户是 {{protocol}} 用户通过桥的投影，称为",
+      "shadowLabel": "代理人",
+      "suffix": "。为了充分利用seiran的功能，我们建议直接关注真实（原始）帐户。",
+      "goToRealButton": "转到真实账户的个人资料",
+      "followAnywayButton": "无论如何都要关注代理帐户"
+    }
+  },
+  "profileEditPage": {
+    "title": "编辑个人资料",
+    "savedMessage": "已保存。",
+    "uploadingAvatar": "正在上传...",
+    "changeAvatarButton": "更改头像",
+    "displayNameLabel": "显示名称",
+    "bioLabel": "简介",
+    "bioPlaceholder": "告诉我们你自己",
+    "fieldsLabel": "个人资料字段（链接等 - 最多 {{count}}）",
+    "fieldNamePlaceholder": "标签（例如网站）",
+    "fieldValuePlaceholder": "值（例如 https://example.com）",
+    "dangerZoneTitle": "危险区域",
+    "withdrawButton": "停用该帐户",
+    "withdrawConfirm": "停用您的帐户无法撤消。您确定要继续吗？",
+    "withdrawHint": {
+      "body": "停用将删除您的帖子并删除您的关注关系。此操作无法撤消。",
+      "handlePrefix": "如需确认，请输入您的用户名 (",
+      "handleSuffix": "） 以下。"
+    },
+    "withdrawing": "加工...",
+    "withdrawSubmit": "停用帐户"
+  }
+}

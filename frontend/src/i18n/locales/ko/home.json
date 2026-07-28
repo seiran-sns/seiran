@@ -1,0 +1,130 @@
+{
+  "emojiContextMenu": {
+    "importButton": "이모티콘 가져오기"
+  },
+  "homePage": {
+    "title": "집",
+    "homeTab": "집",
+    "localTab": "현지의",
+    "socialTab": "사회의",
+    "globalTab": "글로벌",
+    "manageListsLink": "+ 목록 관리",
+    "emptyHome": "내가 팔로우하는 사람들의 소식이 여기에 표시됩니다.",
+    "emptyLocal": "아직 게시물이 없습니다. 가장 먼저 게시물을 올려보세요!",
+    "emptySocial": "내가 팔로우하는 사람들과 로컬 사용자의 게시물이 여기에 표시됩니다.",
+    "emptyGlobal": "아직 게시물이 없습니다.",
+    "emptyList": "이 목록의 회원이 올린 게시물이 여기에 표시됩니다.",
+    "quickNotifications": "빠른 알림",
+    "quickNotificationsWithCount": "빠른 알림({{count}})",
+    "trendsAndSearch": "트렌드 및 검색",
+    "composerToggleLabel": "게시물 양식"
+  },
+  "noteDetailPage": {
+    "title": "우편",
+    "showContextButton": "주변 게시물 표시",
+    "noContext": "주변 게시물이 없습니다.",
+    "contextLabel": "작성자 주변 게시물",
+    "threadPlaceholder": "답장 및 인용 스레드 보기가 곧 제공될 예정입니다.",
+    "contextTab": "주변 게시물",
+    "reactionsTab": "반응",
+    "noReactions": "이 게시물에는 아직 반응이 없습니다."
+  },
+  "noteCard": {
+    "privateRepostError": "비공개 게시물은 재게시할 수 없습니다.",
+    "replyButton": "회신하다",
+    "quoteButton": "인용하다",
+    "repostTitle": "다시 게시",
+    "unrepostTitle": "재게시 취소",
+    "repostDisabledTitle": "비공개 게시물은 다시 게시할 수 없습니다.",
+    "repost": "다시 게시",
+    "reposted": "재게시됨",
+    "repostUnavailable": "다시 게시할 수 없습니다.",
+    "pinTitle": "핀",
+    "unpinTitle": "고정 해제",
+    "pin": "핀",
+    "pinned": "고정됨",
+    "quoteSourceLink": "❝ 인용글",
+    "hasQuote": "❝ 견적 있음",
+    "showContent": "보여주다",
+    "hideContent": "숨다",
+    "votes": "{{count}} 투표",
+    "pollLoginRequired": "투표하려면 로그인하세요.",
+    "pollVoteButton": "투표",
+    "pollBackToOptions": "옵션으로 돌아가기",
+    "pollShowResults": "결과 표시",
+    "reportButton": "보고서",
+    "reportSubject": "@{{username}}의 게시물",
+    "originalLinkTitle": "이 게시물은 브릿지/페더레이션을 통해 전달된 중복 게시물입니다. 원본 게시물로 이동합니다.",
+    "originalLinkText": "🀄 원본 게시물 보기",
+    "repostedConnector": "이것을 다음에 다시 게시했습니다.",
+    "repostedSuffix": "",
+    "repostedNoLinkSuffix": "이것을 다시 게시했습니다",
+    "unavailableRepost": "이 게시물은 표시할 수 없습니다(비공개입니다).",
+    "notFollowing": "팔로우하지 않음",
+    "following": "수행원",
+    "followPending": "팔로우 보류 중",
+    "menuTitle": "메뉴",
+    "deleteConfirmModal": {
+      "title": "이 게시물을 삭제하시겠습니까?",
+      "body": "이 작업은 취소할 수 없습니다. 삭제하면 페더레이션 서버 및 Bluesky에서도 게시물이 제거됩니다.",
+      "confirmButton": "삭제"
+    }
+  },
+  "noteList": {
+    "emptyDefault": "게시물이 없습니다."
+  },
+  "postComposer": {
+    "replyModalTitle": "회신하다",
+    "quoteModalTitle": "게시물 인용",
+    "bskyPrivateConflict": "Bsky 전송이 켜져 있는 동안에는 비공개를 선택할 수 없습니다. 변경하려면 Bsky 전달을 끄세요.",
+    "bskyVisibilityConflict": "Bsky 배송은 비공개 이외의 게시물에만 가능합니다. 활성화하려면 가시성을 변경하세요.",
+    "placeholder": "무슨 일이야?",
+    "replyPlaceholder": "답장 쓰기",
+    "quotePlaceholder": "댓글 추가",
+    "attachTitle": "이미지, 비디오, 오디오 파일 첨부",
+    "replyToFedi": "페디버스에 답장하기",
+    "replyToBsky": "답장하다 블루스카이",
+    "replyToSameNetwork": "원본 게시물의 네트워크에서 답장하기",
+    "forcedPrivateNote": "🔒️ 이 답글 역시 비공개 게시물에 대한 답글이므로 비공개입니다.",
+    "visibilityPublic": "공공의",
+    "visibilityUnlisted": "미등록",
+    "visibilityPrivate": "사적인",
+    "attachmentAlt": "첨부된 이미지",
+    "removeAttachmentTitle": "첨부파일 삭제",
+    "overLimitReply": "이는 Bluesky의 글자 수 제한을 초과합니다.",
+    "overLimitDefault": "이는 Bluesky의 글자 수 제한을 초과합니다. 어쨌든 게시하려면 Bsky를 끄세요.",
+    "remainingCount": "{{count}} 남음",
+    "posting": "전기...",
+    "postButton": "우편",
+    "replyToPrefix": "답장:",
+    "quoteToPrefix": "인용:"
+  },
+  "reactionChips": {
+    "clickToRemove": "제거하려면 클릭하세요.",
+    "clickToAdd": "동일한 반응을 추가하려면 클릭하세요.",
+    "customEmojiBlocked": "이 맞춤 이모티콘 반응은 추가할 수 없습니다. 이 이모티콘은 이 서버에 등록되어 있지 않습니다.",
+    "actorsFetchFailed": "로드하지 못했습니다."
+  },
+  "reactionPicker": {
+    "addReactionTitle": "반응 추가",
+    "addReactionButton": "반응하다",
+    "searchPlaceholder": "이모티콘 검색",
+    "tabFrequent": "자주 사용되는",
+    "tabUnicode": "이모티콘",
+    "tabCustom": "관습",
+    "noResults": "일치하는 이모티콘이 없습니다.",
+    "noFrequent": "아직 자주 사용하는 이모티콘이 없습니다.",
+    "noCustomEmojis": "등록된 맞춤 이모티콘이 없습니다."
+  },
+  "replyIndicator": {
+    "goToOriginalTitle": "원본 게시물로 이동",
+    "replyLabel": "회신하다",
+    "fetchFailed": "원본 게시물을 로드할 수 없습니다."
+  },
+  "badges": {
+    "deliveredFedi": "페다이버스로 배송됨",
+    "deliveredBsky": "블루스카이로 배송됨",
+    "visibilityPrivate": "사적인",
+    "visibilityUnlisted": "미등록"
+  }
+}

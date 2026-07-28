@@ -5,16 +5,21 @@ import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useTheme, type ThemePreference } from "../contexts/ThemeContext";
-import i18n from "../i18n";
+import i18n, { supportedLanguages, type SupportedLanguage } from "../i18n";
 import panel from "../components/common/Panel.module.css";
 import styles from "./AppearanceSettings.module.css";
 
-type LanguageOption = "auto" | "ja" | "en";
+type LanguageOption = "auto" | SupportedLanguage;
 
 const LANGUAGE_LABEL_KEYS: Record<LanguageOption, string> = {
   auto: "appearanceSettings.languageAuto",
   ja: "appearanceSettings.languageJa",
   en: "appearanceSettings.languageEn",
+  zh: "appearanceSettings.languageZh",
+  ko: "appearanceSettings.languageKo",
+  es: "appearanceSettings.languageEs",
+  de: "appearanceSettings.languageDe",
+  fr: "appearanceSettings.languageFr",
 };
 
 const THEME_OPTIONS: ThemePreference[] = ["system", "light", "dark"];
@@ -27,9 +32,14 @@ const THEME_LABEL_KEYS: Record<ThemePreference, string> = {
 
 /** ブラウザの言語設定から表示言語を推定する（「自動」選択時、`i18next-browser-languagedetector` の navigator 判定と同じ方針）。 */
 function detectAutoLanguage(): string {
-  const langs = navigator.languages && navigator.languages.length > 0 ? navigator.languages : [navigator.language];
+  const langs =
+    navigator.languages && navigator.languages.length > 0
+      ? navigator.languages
+      : [navigator.language];
   for (const lang of langs) {
-    if (lang.toLowerCase().startsWith("ja")) return "ja";
+    const language = lang.toLowerCase().split("-")[0];
+    if (supportedLanguages.includes(language as SupportedLanguage))
+      return language;
   }
   return "en";
 }
@@ -39,10 +49,13 @@ export default function AppearanceSettingsPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const goBack = useGoBack();
-  const { preference: themePreference, setPreference: setThemePreference } = useTheme();
+  const { preference: themePreference, setPreference: setThemePreference } =
+    useTheme();
 
   const [selected, setSelected] = useState<LanguageOption>(
-    user?.language_preference === "ja" || user?.language_preference === "en" ? user.language_preference : "auto"
+    supportedLanguages.includes(user?.language_preference as SupportedLanguage)
+      ? (user?.language_preference as SupportedLanguage)
+      : "auto",
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -75,11 +88,15 @@ export default function AppearanceSettingsPage() {
         <button className={panel.backBtn} onClick={goBack}>
           ← {t("common:back")}
         </button>
-        <span className={panel.title}>{t("account:appearanceSettings.title")}</span>
+        <span className={panel.title}>
+          {t("account:appearanceSettings.title")}
+        </span>
       </header>
 
       <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>{t("account:appearanceSettings.themeTitle")}</h3>
+        <h3 className={styles.sectionTitle}>
+          {t("account:appearanceSettings.themeTitle")}
+        </h3>
         <div className={styles.themeOptions}>
           {THEME_OPTIONS.map((option) => (
             <button
@@ -96,7 +113,9 @@ export default function AppearanceSettingsPage() {
       </div>
 
       <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>{t("account:appearanceSettings.languageTitle")}</h3>
+        <h3 className={styles.sectionTitle}>
+          {t("account:appearanceSettings.languageTitle")}
+        </h3>
         {error && <p className={styles.error}>{error}</p>}
         <select
           className={styles.select}
@@ -104,13 +123,19 @@ export default function AppearanceSettingsPage() {
           disabled={saving}
           onChange={(e) => selectLanguage(e.target.value as LanguageOption)}
         >
-          {(Object.keys(LANGUAGE_LABEL_KEYS) as LanguageOption[]).map((option) => (
-            <option key={option} value={option}>
-              {t(`account:${LANGUAGE_LABEL_KEYS[option]}`)}
-            </option>
-          ))}
+          {(Object.keys(LANGUAGE_LABEL_KEYS) as LanguageOption[]).map(
+            (option) => (
+              <option key={option} value={option}>
+                {t(`account:${LANGUAGE_LABEL_KEYS[option]}`)}
+              </option>
+            ),
+          )}
         </select>
-        {saved && <p className={styles.success}>{t("account:appearanceSettings.saved")}</p>}
+        {saved && (
+          <p className={styles.success}>
+            {t("account:appearanceSettings.saved")}
+          </p>
+        )}
       </div>
     </>
   );

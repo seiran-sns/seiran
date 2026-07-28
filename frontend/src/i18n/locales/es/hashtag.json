@@ -1,0 +1,8 @@
+{
+  "hashtagPage": {
+    "addToHome": "Agregar a la pantalla de inicio",
+    "removeFromHome": "Quitar de la pantalla de inicio",
+    "postWithTag": "Publicar con este hashtag",
+    "empty": "Las publicaciones con este hashtag aparecerán aquí."
+  }
+}

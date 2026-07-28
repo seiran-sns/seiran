@@ -1,7 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 
-test("設定メニューからアカウント設定画面へ遷移でき、DIDが表示される", async ({ page, request }) => {
+test("設定メニューからアカウント設定画面へ遷移でき、DIDが表示される", async ({
+  page,
+  request,
+}) => {
   const user = await registerUserViaApi(request, "e2eset");
   await seedAuth(page, user.token);
 
@@ -21,16 +24,19 @@ test("複数パスキーを登録・削除でき、パスキーでログイン�
   const user = await registerUserViaApi(request, "e2epasskey");
   const cdp = await context.newCDPSession(page);
   await cdp.send("WebAuthn.enable");
-  const firstAuthenticator = await cdp.send("WebAuthn.addVirtualAuthenticator", {
-    options: {
-      protocol: "ctap2",
-      transport: "internal",
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true,
+  const firstAuthenticator = await cdp.send(
+    "WebAuthn.addVirtualAuthenticator",
+    {
+      options: {
+        protocol: "ctap2",
+        transport: "internal",
+        hasResidentKey: true,
+        hasUserVerification: true,
+        isUserVerified: true,
+        automaticPresenceSimulation: true,
+      },
     },
-  });
+  );
 
   await seedAuth(page, user.token);
   await page.goto("/settings/account");
@@ -61,14 +67,27 @@ test("複数パスキーを登録・削除でき、パスキーでログイン�
 
   await page.goto("/settings/account");
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("listitem").filter({ hasText: "テスト端末" }).getByRole("button", { name: "削除" }).click();
+  await page
+    .getByRole("listitem")
+    .filter({ hasText: "テスト端末" })
+    .getByRole("button", { name: "削除" })
+    .click();
   await expect(page.getByText("予備端末")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("listitem").filter({ hasText: "予備端末" }).getByRole("button", { name: "削除" }).click();
-  await expect(page.getByText("登録済みのパスキーはありません。")).toBeVisible({ timeout: 15_000 });
+  await page
+    .getByRole("listitem")
+    .filter({ hasText: "予備端末" })
+    .getByRole("button", { name: "削除" })
+    .click();
+  await expect(page.getByText("登録済みのパスキーはありません。")).toBeVisible({
+    timeout: 15_000,
+  });
 });
 
-test("パスワードを変更でき、新しいパスワードでログインできる", async ({ page, request }) => {
+test("パスワードを変更でき、新しいパスワードでログインできる", async ({
+  page,
+  request,
+}) => {
   const user = await registerUserViaApi(request, "e2epw");
   await seedAuth(page, user.token);
 
@@ -76,24 +95,36 @@ test("パスワードを変更でき、新しいパスワードでログイン�
 
   // 現在のパスワードが間違っていればエラー。
   await page.getByLabel("現在のパスワード").fill("wrong-password");
-  await page.getByLabel("新しいパスワード（8文字以上）").fill("new-password-123");
+  await page
+    .getByLabel("新しいパスワード（8文字以上）")
+    .fill("new-password-123");
   await page.getByLabel("新しいパスワード（確認）").fill("new-password-123");
   await page.getByRole("button", { name: "パスワードを変更" }).click();
-  await expect(page.getByText("現在のパスワードが正しくありません")).toBeVisible({ timeout: 15_000 });
+  await expect(
+    page.getByText("現在のパスワードが正しくありません"),
+  ).toBeVisible({ timeout: 15_000 });
 
   // 正しい現在のパスワードなら成功する。
   await page.getByLabel("現在のパスワード").fill("seiranda-e2e");
   await page.getByRole("button", { name: "パスワードを変更" }).click();
-  await expect(page.getByText("パスワードを変更しました。")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("パスワードを変更しました。")).toBeVisible({
+    timeout: 15_000,
+  });
 
   // 新しいパスワードでログインできることを確認する。
   const loginRes = await request.post("/api/auth/login", {
     data: { identifier: user.username, password: "new-password-123" },
   });
-  expect(loginRes.ok(), `新パスワードでのログイン失敗: ${loginRes.status()} ${await loginRes.text()}`).toBeTruthy();
+  expect(
+    loginRes.ok(),
+    `新パスワードでのログイン失敗: ${loginRes.status()} ${await loginRes.text()}`,
+  ).toBeTruthy();
 });
 
-test("ミュート・ブロック一覧に対象者が表示され、解除するとリストから消える", async ({ page, request }) => {
+test("ミュート・ブロック一覧に対象者が表示され、解除するとリストから消える", async ({
+  page,
+  request,
+}) => {
   const alice = await registerUserViaApi(request, "e2emb1");
   const bob = await registerUserViaApi(request, "e2emb2");
 
@@ -111,14 +142,22 @@ test("ミュート・ブロック一覧に対象者が表示され、解除す�
   await seedAuth(page, alice.token);
   await page.goto("/settings/mutes-blocks");
 
-  await expect(page.getByText(`@${bob.username}`).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(`@${bob.username}`).first()).toBeVisible({
+    timeout: 15_000,
+  });
   await page.getByRole("button", { name: "ミュート解除" }).click();
-  await expect(page.getByText("ミュート中のユーザーはいません。")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("ミュート中のユーザーはいません。")).toBeVisible({
+    timeout: 15_000,
+  });
 
   await page.getByRole("button", { name: "ブロック中" }).click();
-  await expect(page.getByText(`@${bob.username}`).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(`@${bob.username}`).first()).toBeVisible({
+    timeout: 15_000,
+  });
   await page.getByRole("button", { name: "ブロック解除" }).click();
-  await expect(page.getByText("ブロック中のユーザーはいません。")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("ブロック中のユーザーはいません。")).toBeVisible({
+    timeout: 15_000,
+  });
 });
 
 test("メールアドレス変更フォームから新アドレスを送信できる（#59、E2E環境はSMTP未設定のため送信失敗まで確認）", async ({
@@ -135,7 +174,11 @@ test("メールアドレス変更フォームから新アドレスを送信で�
   // E2E専用DBにはSMTP設定が投入されていないため、確認メール送信自体は
   // SMTP_NOT_CONFIGURED で失敗する。UI側がリクエスト〜エラー表示まで正しく
   // つながっていることを確認する（実送信を伴う成功パスはRust結合テスト側で検証済み）。
-  await expect(page.getByText("メール送信機能が設定されていません。管理者にお問い合わせください")).toBeVisible({
+  await expect(
+    page.getByText(
+      "メール送信機能が設定されていません。管理者にお問い合わせください",
+    ),
+  ).toBeVisible({
     timeout: 15_000,
   });
 });
@@ -149,16 +192,25 @@ test("アプリトークン一覧に発行済みトークンが表示され、�
   // MiAuth 認可成立を模す（Aria 等サードパーティクライアントが
   // POST /api/miauth/:session_id/authorize を叩く経路の直接呼び出し）。
   const sessionId = `e2e-session-${Date.now().toString(36)}`;
-  const authorizeRes = await request.post(`/api/miauth/${sessionId}/authorize`, {
-    headers: { Authorization: `Bearer ${user.token}` },
-    data: { name: "TestClient" },
-  });
-  expect(authorizeRes.ok(), `authorize failed: ${authorizeRes.status()} ${await authorizeRes.text()}`).toBeTruthy();
+  const authorizeRes = await request.post(
+    `/api/miauth/${sessionId}/authorize`,
+    {
+      headers: { Authorization: `Bearer ${user.token}` },
+      data: { name: "TestClient" },
+    },
+  );
+  expect(
+    authorizeRes.ok(),
+    `authorize failed: ${authorizeRes.status()} ${await authorizeRes.text()}`,
+  ).toBeTruthy();
 
   const checkRes = await request.post("/api/miauth/check", {
     data: { session: sessionId },
   });
-  expect(checkRes.ok(), `check failed: ${checkRes.status()} ${await checkRes.text()}`).toBeTruthy();
+  expect(
+    checkRes.ok(),
+    `check failed: ${checkRes.status()} ${await checkRes.text()}`,
+  ).toBeTruthy();
   const clientToken = (await checkRes.json()).token as string;
 
   // 発行直後は有効なトークンとして使える。
@@ -172,7 +224,9 @@ test("アプリトークン一覧に発行済みトークンが表示され、�
 
   await expect(page.getByText("TestClient")).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "無効化" }).click();
-  await expect(page.getByText("発行済みのアプリトークンはありません。")).toBeVisible({ timeout: 15_000 });
+  await expect(
+    page.getByText("発行済みのアプリトークンはありません。"),
+  ).toBeVisible({ timeout: 15_000 });
 
   // 無効化後は同じトークンでの認証が拒否される。
   const meAfter = await request.get("/api/auth/me", {
@@ -193,8 +247,14 @@ test("設定メニューから表示設定画面へ遷移でき、言語を切�
   await expect(page).toHaveURL(/\/settings\/appearance$/);
 
   await page.getByRole("combobox").selectOption({ label: "English" });
-  await expect(page.getByText("Language preference saved.")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("heading", { name: "Appearance settings" }).or(page.getByText("Appearance settings"))).toBeVisible();
+  await expect(page.getByText("Language preference saved.")).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(
+    page
+      .getByRole("heading", { name: "Appearance settings" })
+      .or(page.getByText("Appearance settings")),
+  ).toBeVisible();
 
   const meRes = await request.get("/api/auth/me", {
     headers: { Authorization: `Bearer ${user.token}` },
@@ -202,8 +262,24 @@ test("設定メニューから表示設定画面へ遷移でき、言語を切�
   expect(meRes.ok()).toBeTruthy();
   expect((await meRes.json()).language_preference).toBe("en");
 
-  await page.getByRole("combobox").selectOption({ label: "Automatic" });
-  await expect(page.getByText("言語設定を保存しました。").or(page.getByText("Language preference saved."))).toBeVisible({
+  await page.getByRole("combobox").selectOption({ label: "Español" });
+  await expect(page.getByText("Preferencia de idioma guardada.")).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByText("Configuración de apariencia")).toBeVisible();
+
+  const meEsRes = await request.get("/api/auth/me", {
+    headers: { Authorization: `Bearer ${user.token}` },
+  });
+  expect(meEsRes.ok()).toBeTruthy();
+  expect((await meEsRes.json()).language_preference).toBe("es");
+
+  await page.getByRole("combobox").selectOption("auto");
+  await expect(
+    page
+      .getByText("言語設定を保存しました。")
+      .or(page.getByText("Language preference saved.")),
+  ).toBeVisible({
     timeout: 15_000,
   });
 
@@ -226,16 +302,22 @@ test("表示設定画面でテーマを切り替えるとhtmlのdata-theme属性
 
   await page.getByRole("button", { name: "常にダーク" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  expect(await page.evaluate(() => localStorage.getItem("seiran_theme"))).toBe("dark");
+  expect(await page.evaluate(() => localStorage.getItem("seiran_theme"))).toBe(
+    "dark",
+  );
 
   await page.getByRole("button", { name: "常にライト" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  expect(await page.evaluate(() => localStorage.getItem("seiran_theme"))).toBe("light");
+  expect(await page.evaluate(() => localStorage.getItem("seiran_theme"))).toBe(
+    "light",
+  );
 
   // リロード後も選択したテーマがちらつきなく維持される
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
   await page.getByRole("button", { name: "環境に従う" }).click();
-  expect(await page.evaluate(() => localStorage.getItem("seiran_theme"))).toBe("system");
+  expect(await page.evaluate(() => localStorage.getItem("seiran_theme"))).toBe(
+    "system",
+  );
 });

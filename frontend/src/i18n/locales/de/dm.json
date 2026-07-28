@@ -1,0 +1,18 @@
+{
+  "messagesPage": {
+    "title": "Nachrichten",
+    "newMessage": "Neue Nachricht",
+    "emptySessions": "Noch keine Nachrichten",
+    "composeHint": "Wählen Sie einen Empfänger aus, dem Sie eine Nachricht senden möchten",
+    "unknownPeer": "Unbekannter Peer",
+    "textPlaceholder": "Geben Sie eine Nachricht ein…",
+    "sendButton": "Schicken",
+    "attachButtonTitle": "Medien anhängen",
+    "bskySingleRecipientError": "Nachrichten an Bsky-Benutzer können nur 1-zu-1 gesendet werden"
+  },
+  "recipientPicker": {
+    "placeholder": "Einen Empfänger hinzufügen…",
+    "protocolConflictWarning": "Nachrichten an Bsky-Benutzer können nicht mit anderen Empfängern kombiniert werden",
+    "unresolvedWarning": "Es konnte kein Benutzer gefunden werden, der mit „{{input}}“ übereinstimmt."
+  }
+}

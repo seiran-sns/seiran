@@ -1,0 +1,10 @@
+{
+  "connect": {
+    "unknownApp": "未知应用程序",
+    "title": "授权应用程序连接",
+    "doneDescription": "已授权。请返回应用程序。",
+    "description": "{{appName}} 正在请求访问您的 Seiran 帐户。",
+    "authorizing": "加工...",
+    "submit": "授权"
+  }
+}

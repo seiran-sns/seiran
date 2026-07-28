@@ -1,0 +1,11 @@
+{
+  "setup": {
+    "title": "初始设置",
+    "description": "请创建一个管理员帐户。",
+    "usernameLabel": "用户名",
+    "emailLabel": "电子邮件",
+    "passwordLabel": "密码（8 个以上字符）",
+    "submitting": "正在设置...",
+    "submit": "创建管理员帐户"
+  }
+}

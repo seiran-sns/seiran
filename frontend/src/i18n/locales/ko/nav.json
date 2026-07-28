@@ -1,0 +1,20 @@
+{
+  "leftNav": {
+    "home": "집",
+    "search": "찾다",
+    "notifications": "알림",
+    "messages": "메시지",
+    "lists": "기울기",
+    "settings": "설정",
+    "admin": "관리자",
+    "composeLabel": "우편",
+    "profileTitle": "내 프로필",
+    "logoutTitle": "로그아웃",
+    "openMenu": "메인 메뉴 열기",
+    "closeMenu": "메뉴 닫기",
+    "menuTitle": "메인 메뉴"
+  },
+  "appShell": {
+    "composeModalTitle": "새 게시물"
+  }
+}

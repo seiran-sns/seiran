@@ -1,0 +1,31 @@
+{
+  "sensitiveImageReveal": "Mostrar imagen sensible",
+  "inputSuggestions": "Sugerencias de entrada",
+  "appName": "seirán",
+  "close": "Cerca",
+  "save": "Ahorrar",
+  "saving": "Ahorro...",
+  "cancel": "Cancelar",
+  "delete": "Borrar",
+  "edit": "Editar",
+  "confirm": "Confirmar",
+  "back": "Atrás",
+  "retry": "Rever",
+  "loading": "Cargando...",
+  "submit": "Entregar",
+  "yes": "Sí",
+  "no": "No",
+  "ok": "DE ACUERDO",
+  "create": "Crear",
+  "add": "Agregar",
+  "remove": "Eliminar",
+  "search": "Buscar",
+  "settings": "Ajustes",
+  "error": "Error",
+  "unknownError": "Se produjo un error desconocido",
+  "remoteBanner": {
+    "note": "Esta es una publicación remota.",
+    "user": "Este es un usuario remoto",
+    "viewRemote": "Ver en servidor remoto"
+  }
+}

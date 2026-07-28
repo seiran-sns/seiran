@@ -1,0 +1,83 @@
+{
+  "menu": {
+    "title": "设置",
+    "account": "帐户",
+    "profile": "轮廓",
+    "mutesBlocks": "静音和阻止",
+    "lists": "列表",
+    "appearance": "外貌",
+    "appTokens": "应用代币",
+    "comingSoon": "即将推出"
+  },
+  "appearanceSettings": {
+    "title": "外观设置",
+    "themeTitle": "主题",
+    "themeSystem": "跟随系统",
+    "themeLight": "始终使用浅色",
+    "themeDark": "始终使用深色",
+    "languageTitle": "语言",
+    "languageAuto": "自动的",
+    "languageJa": "日本語",
+    "languageEn": "English",
+    "languageZh": "中文",
+    "languageKo": "한국어",
+    "languageEs": "Español",
+    "languageDe": "Deutsch",
+    "languageFr": "Français",
+    "saved": "已保存语言首选项。"
+  },
+  "accountSettings": {
+    "title": "账户设置",
+    "identityTitle": "账户信息",
+    "emailLabel": "电子邮件",
+    "emailChangeTitle": "更改电子邮件地址",
+    "newEmailLabel": "新电子邮件地址",
+    "changeEmailButton": "发送确认电子邮件",
+    "emailChangeRequested": "确认电子邮件已发送至新地址。打开电子邮件中的链接以完成更改。",
+    "passwordTitle": "更改密码",
+    "currentPasswordLabel": "当前密码",
+    "newPasswordLabel": "新密码（8+字符）",
+    "newPasswordConfirmLabel": "确认新密码",
+    "changePasswordButton": "更改密码",
+    "passwordSaved": "密码已更改。",
+    "passwordMismatch": "新密码不匹配。",
+    "totpTitle": "双因素身份验证",
+    "totpEnabled": "已启用使用身份验证器应用程序的两因素身份验证。",
+    "totpDisabled": "使用身份验证器应用程序的两因素身份验证已禁用。",
+    "totpSetupButton": "设置身份验证器应用程序",
+    "totpScanHint": "使用您的身份验证器应用程序扫描此二维码，或输入下面的密码。",
+    "totpCodeLabel": "6 位验证码",
+    "totpEnableButton": "验证并启用",
+    "totpDisableButton": "禁用双因素身份验证",
+    "recoveryCodesNotice": "将这些恢复代码保存在安全的地方。每个代码只能使用一次，离开此页面后将不再显示。",
+    "passkeyTitle": "万能钥匙",
+    "passkeyDescription": "使用设备屏幕锁定、指纹或人脸登录，无需密码。您可以注册多个密钥。",
+    "passkeyEmpty": "没有注册密钥。",
+    "passkeyNameLabel": "密钥名称",
+    "passkeyAddButton": "添加密钥",
+    "passkeyDeleteButton": "删除",
+    "passkeyDeleteConfirm": "删除这个密钥？"
+  },
+  "verifyEmailChange": {
+    "verifying": "正在确认您的电子邮件更改...",
+    "invalidUrl": "无效网址",
+    "successTitle": "电子邮件地址已更改",
+    "successBody": "您的电子邮件地址已成功更新。",
+    "failedTitle": "确认失败",
+    "backToSettingsLink": "返回设置"
+  },
+  "mutesBlocks": {
+    "title": "静音和阻止",
+    "mutesTab": "静音",
+    "blocksTab": "被阻止",
+    "noMutes": "你没有让任何人静音。",
+    "noBlocks": "你没有屏蔽任何人。",
+    "unmuteButton": "取消静音",
+    "unblockButton": "解锁"
+  },
+  "appTokensSettings": {
+    "empty": "尚未发布任何应用程序令牌。",
+    "issuedAt": "已发布 {{date}}",
+    "revokeButton": "撤销"
+  }
+}

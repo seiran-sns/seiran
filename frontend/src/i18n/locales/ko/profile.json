@@ -1,0 +1,74 @@
+{
+  "profilePage": {
+    "title": "윤곽",
+    "warpBanner": {
+      "prefix": "이 계정은",
+      "shadowLabel": "대리",
+      "suffix": "계정. 실제 계좌({{handle}})는 여기 →"
+    },
+    "pairedBadge": "영혼에 묶인",
+    "pairedBadgeTitle": "영혼결속을 통해 원격 세이란 사용자와 연결됨",
+    "editProfileButton": "프로필 수정",
+    "followingBadge": "수행원",
+    "unfollowingButton": "팔로우 해제 중...",
+    "unfollowButton": "언팔로우",
+    "pendingBadge": "요청됨",
+    "followingSubmitButton": "배상...",
+    "followButton": "따르다",
+    "pinnedHeader": "고정됨",
+    "publicListsHeader": "공개 목록",
+    "postsHeader": "게시물",
+    "noPosts": "아직 게시물이 없습니다.",
+    "followingTab": "수행원",
+    "followersTab": "추종자",
+    "followingCountLabel": "수행원",
+    "followerCountLabel": "추종자",
+    "followList": {
+      "noFollowing": "아직 팔로우하는 사람이 없습니다.",
+      "noFollowers": "아직 팔로어가 없습니다.",
+      "remoteExtraPending": "백그라운드에서 가져오는 중입니다. 잠시 후 다시 새로고침해 주세요."
+    },
+    "actionsMenuTitle": "계정 작업",
+    "muteButton": "무음",
+    "unmuteButton": "음소거 해제",
+    "blockButton": "차단하다",
+    "unblockButton": "차단 해제",
+    "blockedByNotice": "이 사용자가 당신을 차단했습니다",
+    "blockConfirmModal": {
+      "title": "차단 확인",
+      "body": "차단하면 팔로우 관계가 모두 제거되고 두 사람 모두에게서 서로의 게시물이 숨겨집니다. 이 사용자가 Fediverse에 있는 경우 차단 알림이 해당 서버로 전달됩니다. 정말로 차단하시겠습니까?",
+      "confirmButton": "차단하다",
+      "cancelButton": "취소"
+    },
+    "bridgeModal": {
+      "title": "프록시 계정 팔로우",
+      "prefix": "이 계정은 브리지(Bridge)를 통해 {{protocol}} 사용자를 투영한 것입니다.",
+      "shadowLabel": "대리",
+      "suffix": ". seiran의 기능을 최대한 활용하려면 실제(원본) 계정을 직접 팔로우하는 것이 좋습니다.",
+      "goToRealButton": "실제 계정 프로필로 이동",
+      "followAnywayButton": "어쨌든 프록시 계정을 따르세요"
+    }
+  },
+  "profileEditPage": {
+    "title": "프로필 수정",
+    "savedMessage": "저장되었습니다.",
+    "uploadingAvatar": "업로드 중...",
+    "changeAvatarButton": "아바타 변경",
+    "displayNameLabel": "표시 이름",
+    "bioLabel": "바이오",
+    "bioPlaceholder": "자신에 대해 알려주세요",
+    "fieldsLabel": "프로필 필드(링크 등 - 최대 {{count}})",
+    "fieldNamePlaceholder": "라벨(예: 웹사이트)",
+    "fieldValuePlaceholder": "값(예: https://example.com)",
+    "dangerZoneTitle": "위험지대",
+    "withdrawButton": "이 계정을 비활성화하세요",
+    "withdrawConfirm": "계정 비활성화는 취소할 수 없습니다. 계속하시겠습니까?",
+    "withdrawHint": {
+      "body": "비활성화하면 게시물이 삭제되고 팔로우 관계가 제거됩니다. 이 작업은 취소할 수 없습니다.",
+      "handlePrefix": "확인하려면 핸들(",
+      "handleSuffix": ") 아래에."
+    },
+    "withdrawing": "처리 중...",
+    "withdrawSubmit": "계정 비활성화"
+  }
+}
