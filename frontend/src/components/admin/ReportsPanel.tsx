@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminReport, api, getErrorMessage, ReportComment } from "../../api/client";
 import { useToast } from "../../contexts/ToastContext";
 import { findReportReasonLabel } from "../report/reportReasons";
@@ -11,11 +11,11 @@ export default function ReportsPanel() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<"open" | "closed">("open");
 
-  async function reload() {
+  const reload = useCallback(async () => {
     try { setReports(await api.admin.listReports()); }
     catch (e) { showError(getErrorMessage(e)); }
-  }
-  useEffect(() => { void reload(); }, []);
+  }, [showError]);
+  useEffect(() => { void reload(); }, [reload]);
 
   const filtered = useMemo(
     () => reports.filter((r) => r.status === statusFilter),

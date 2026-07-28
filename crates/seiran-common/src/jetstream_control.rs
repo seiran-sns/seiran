@@ -25,7 +25,10 @@ pub async fn touch_jetstream_wanted_dids(pool: &PgPool) {
     .execute(pool)
     .await
     {
-        tracing::error!("[jetstream_control] wantedDids再構築トリガー記録失敗: {}", e);
+        tracing::error!(
+            "[jetstream_control] wantedDids再構築トリガー記録失敗: {}",
+            e
+        );
     }
 }
 

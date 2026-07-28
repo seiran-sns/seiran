@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use std::collections::HashMap;
 use sqlx::PgPool;
+use std::collections::HashMap;
 
 #[async_trait]
 pub trait SiteSettingsRepository: Send + Sync {
@@ -22,12 +22,11 @@ impl PgSiteSettingsRepository {
 #[async_trait]
 impl SiteSettingsRepository for PgSiteSettingsRepository {
     async fn get(&self, key: &str) -> Result<Option<String>, sqlx::Error> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT value FROM site_settings WHERE key = $1",
-        )
-        .bind(key)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT value FROM site_settings WHERE key = $1")
+                .bind(key)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(|(v,)| v))
     }
 
@@ -47,11 +46,9 @@ impl SiteSettingsRepository for PgSiteSettingsRepository {
     }
 
     async fn get_all(&self) -> Result<HashMap<String, String>, sqlx::Error> {
-        let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT key, value FROM site_settings",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM site_settings")
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows.into_iter().collect())
     }
 }

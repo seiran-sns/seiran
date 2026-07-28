@@ -60,7 +60,10 @@ impl AuthedUser {
 impl FromRequestParts<AppState> for AuthedUser {
     type Rejection = Response;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         AuthedUser::from_headers(&parts.headers, state).await
     }
 }
@@ -74,7 +77,12 @@ pub struct MaybeAuthedUser(pub Option<AuthedUser>);
 impl FromRequestParts<AppState> for MaybeAuthedUser {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        Ok(MaybeAuthedUser(AuthedUser::from_headers(&parts.headers, state).await.ok()))
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(MaybeAuthedUser(
+            AuthedUser::from_headers(&parts.headers, state).await.ok(),
+        ))
     }
 }

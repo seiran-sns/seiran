@@ -215,7 +215,11 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
     let mut emojis = json_map_to_string_map(p.post_emoji_map);
     emojis.extend(json_map_to_string_map(p.actor_emoji_map));
 
-    let actor_type = if p.actor_type.is_empty() { "local".to_string() } else { p.actor_type };
+    let actor_type = if p.actor_type.is_empty() {
+        "local".to_string()
+    } else {
+        p.actor_type
+    };
     let is_local = actor_type == "local";
 
     // リモート投稿の元URL: Fedi（AP Note ID）を優先し、無ければ Bsky（AT URI → bsky.app）を使う。
@@ -251,7 +255,11 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         reposted_by_me: None,
         emojis,
         pinned_by_me: None,
-        visibility: if p.visibility == "public" { None } else { Some(p.visibility) },
+        visibility: if p.visibility == "public" {
+            None
+        } else {
+            Some(p.visibility)
+        },
         deliver_fedi: if is_local { Some(p.deliver_fedi) } else { None },
         deliver_bsky: if is_local { Some(p.deliver_bsky) } else { None },
         remote_url,
@@ -308,7 +316,10 @@ mod tests {
         let byte_end = byte_start + "@alice.bsky.social".len();
         let mention_facets = facets(&[(byte_start, byte_end, "did:plc:alice")]);
         let mut mention_paths = HashMap::new();
-        mention_paths.insert("did:plc:alice".to_string(), "@alice.bsky.social".to_string());
+        mention_paths.insert(
+            "did:plc:alice".to_string(),
+            "@alice.bsky.social".to_string(),
+        );
 
         let result = apply_mention_facets(body, Some(&mention_facets), &mention_paths);
         assert_eq!(result, "hi @alice.bsky.social!");
@@ -356,7 +367,10 @@ mod tests {
         let mention_facets = facets(&[(0, 1000, "did:plc:x")]);
         let mut mention_paths = HashMap::new();
         mention_paths.insert("did:plc:x".to_string(), "@x.bsky.social".to_string());
-        assert_eq!(apply_mention_facets(body, Some(&mention_facets), &mention_paths), body);
+        assert_eq!(
+            apply_mention_facets(body, Some(&mention_facets), &mention_paths),
+            body
+        );
     }
 
     #[test]
@@ -371,7 +385,10 @@ mod tests {
             (bob_start, bob_end, "did:plc:bob"),
         ]);
         let mut mention_paths = HashMap::new();
-        mention_paths.insert("did:plc:alice".to_string(), "@alice.bsky.social".to_string());
+        mention_paths.insert(
+            "did:plc:alice".to_string(),
+            "@alice.bsky.social".to_string(),
+        );
         mention_paths.insert("did:plc:bob".to_string(), "@bob.bsky.social".to_string());
 
         let result = apply_mention_facets(body, Some(&mention_facets), &mention_paths);

@@ -110,7 +110,10 @@ pub trait EmojiRepository: Send + Sync {
     /// 複数の shortcode（コロンなし）に対応する画像 URL を一括解決する（本文中の
     /// カスタム絵文字を `emoji_map` へ書き込む際の N+1 回避用）。実在しない shortcode は
     /// 結果に含まれない。`(shortcode, url)` のペアを返す。
-    async fn find_urls_by_shortcodes(&self, shortcodes: &[String]) -> Result<Vec<(String, String)>, sqlx::Error>;
+    async fn find_urls_by_shortcodes(
+        &self,
+        shortcodes: &[String],
+    ) -> Result<Vec<(String, String)>, sqlx::Error>;
 }
 
 pub struct PgEmojiRepository {
@@ -238,7 +241,10 @@ impl EmojiRepository for PgEmojiRepository {
         .await
     }
 
-    async fn find_urls_by_shortcodes(&self, shortcodes: &[String]) -> Result<Vec<(String, String)>, sqlx::Error> {
+    async fn find_urls_by_shortcodes(
+        &self,
+        shortcodes: &[String],
+    ) -> Result<Vec<(String, String)>, sqlx::Error> {
         if shortcodes.is_empty() {
             return Ok(Vec::new());
         }
@@ -261,7 +267,10 @@ mod tests {
 
     #[test]
     fn extract_shortcode_candidates_finds_single() {
-        assert_eq!(extract_shortcode_candidates("絵文字 :igyo: です"), vec!["igyo"]);
+        assert_eq!(
+            extract_shortcode_candidates("絵文字 :igyo: です"),
+            vec!["igyo"]
+        );
     }
 
     #[test]
@@ -274,18 +283,27 @@ mod tests {
 
     #[test]
     fn extract_shortcode_candidates_ignores_lone_colon() {
-        assert_eq!(extract_shortcode_candidates("time is 12:34, not an emoji"), Vec::<String>::new());
+        assert_eq!(
+            extract_shortcode_candidates("time is 12:34, not an emoji"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
     fn extract_shortcode_candidates_ignores_non_word_chars_inside() {
         // '-'や'+'は許可文字種外なので、コロン間に含まれると候補として成立しない。
-        assert_eq!(extract_shortcode_candidates(":not-valid: :also_valid_1:"), vec!["also_valid_1"]);
+        assert_eq!(
+            extract_shortcode_candidates(":not-valid: :also_valid_1:"),
+            vec!["also_valid_1"]
+        );
     }
 
     #[test]
     fn extract_shortcode_candidates_handles_adjacent_shortcodes() {
-        assert_eq!(extract_shortcode_candidates(":a::b:"), vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            extract_shortcode_candidates(":a::b:"),
+            vec!["a".to_string(), "b".to_string()]
+        );
     }
 
     #[test]

@@ -13,7 +13,9 @@ use std::sync::Arc;
 use crate::ap::{build_emoji_map, classify_ap_visibility, ApClient};
 use crate::generate_snowflake_id;
 use crate::queue::worker::{InboxContext, JobContext};
-use crate::repository::{extract_shortcode_candidates, InsertRemoteWithDedupParams, NotificationKind};
+use crate::repository::{
+    extract_shortcode_candidates, InsertRemoteWithDedupParams, NotificationKind,
+};
 use crate::streaming::broadcast_reaction_update;
 
 pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), String> {
@@ -38,7 +40,10 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
                 && activity["object"]["inReplyTo"].is_string()
             {
                 handle_poll_vote(activity, &inbox, ap_client).await
-            } else if matches!(activity["object"]["type"].as_str(), Some("Note") | Some("Question")) {
+            } else if matches!(
+                activity["object"]["type"].as_str(),
+                Some("Note") | Some("Question")
+            ) {
                 handle_create_note(activity, &inbox, ap_client).await
             } else {
                 Ok(())
@@ -55,7 +60,10 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
         // content/_misskey_reaction フィールドの有無から行う。
         "Like" | "EmojiReact" => handle_reaction(activity, &inbox, ap_client).await,
         other => {
-            tracing::info!("[Job::InboundActivityProcess] 未対応の type={} を無視します", other);
+            tracing::info!(
+                "[Job::InboundActivityProcess] 未対応の type={} を無視します",
+                other
+            );
             Ok(())
         }
     }
@@ -68,7 +76,9 @@ async fn handle_flag(
     inbox: &InboxContext,
     ap_client: &ApClient,
 ) -> Result<(), String> {
-    let actor_uri = activity["actor"].as_str().ok_or("Flag: actor がありません")?;
+    let actor_uri = activity["actor"]
+        .as_str()
+        .ok_or("Flag: actor がありません")?;
     let reporter = upsert_remote_fedi_actor(inbox, ap_client, actor_uri).await?;
     let objects: Vec<&str> = match &activity["object"] {
         serde_json::Value::String(v) => vec![v.as_str()],
@@ -82,43 +92,60 @@ async fn handle_flag(
             .strip_prefix(&format!("https://{}/notes/", inbox.local_domain))
             .and_then(|v| v.parse::<i64>().ok())
         {
-            let owner: Option<i64> = sqlx::query_scalar(
-                "SELECT actor_id FROM posts WHERE id=$1"
-            ).bind(id).fetch_optional(&inbox.db_pool).await
-             .map_err(|e|format!("Flag: 投稿検索失敗: {}",e))?;
-            if let Some(owner)=owner {
-                subject_actor_id=Some(owner);
-                subject_post_id=Some(id);
+            let owner: Option<i64> = sqlx::query_scalar("SELECT actor_id FROM posts WHERE id=$1")
+                .bind(id)
+                .fetch_optional(&inbox.db_pool)
+                .await
+                .map_err(|e| format!("Flag: 投稿検索失敗: {}", e))?;
+            if let Some(owner) = owner {
+                subject_actor_id = Some(owner);
+                subject_post_id = Some(id);
                 break;
             }
         }
-        if let Some(username)=crate::ap::extract_local_username(object,&inbox.local_domain) {
-            if let Some(actor)=inbox.actor_repo.find_by_username_domain(username,&inbox.local_domain)
-                .await.map_err(|e|format!("Flag: Actor検索失敗: {}",e))?
-                .filter(|a|a.actor_type=="local")
+        if let Some(username) = crate::ap::extract_local_username(object, &inbox.local_domain) {
+            if let Some(actor) = inbox
+                .actor_repo
+                .find_by_username_domain(username, &inbox.local_domain)
+                .await
+                .map_err(|e| format!("Flag: Actor検索失敗: {}", e))?
+                .filter(|a| a.actor_type == "local")
             {
-                subject_actor_id=Some(actor.id);
+                subject_actor_id = Some(actor.id);
             }
         }
     }
-    let Some(subject_actor_id)=subject_actor_id else {
+    let Some(subject_actor_id) = subject_actor_id else {
         return Err("Flag: ローカルの通報対象を解決できません".into());
     };
-    let raw=strip_html(activity["content"].as_str().unwrap_or(""));
-    let mut reason_text=String::new();
+    let raw = strip_html(activity["content"].as_str().unwrap_or(""));
+    let mut reason_text = String::new();
     for ch in raw.chars().take(300) {
-        if reason_text.len()+ch.len_utf8()>1000 { break; }
+        if reason_text.len() + ch.len_utf8() > 1000 {
+            break;
+        }
         reason_text.push(ch);
     }
-    let report_id=generate_snowflake_id(chrono::Utc::now());
+    let report_id = generate_snowflake_id(chrono::Utc::now());
     sqlx::query(
         "INSERT INTO reports(id,reporter_actor_id,subject_type,subject_actor_id,subject_post_id,\
          reason_type,reason_text,destination,remote_host) \
-         VALUES($1,$2,$3::report_subject_type,$4,$5,'other',$6,'local',$7)"
-    ).bind(report_id).bind(reporter.actor_id)
-      .bind(if subject_post_id.is_some(){"post"}else{"actor"})
-      .bind(subject_actor_id).bind(subject_post_id).bind(reason_text).bind(reporter.domain)
-      .execute(&inbox.db_pool).await.map_err(|e|format!("Flag: 保存失敗: {}",e))?;
+         VALUES($1,$2,$3::report_subject_type,$4,$5,'other',$6,'local',$7)",
+    )
+    .bind(report_id)
+    .bind(reporter.actor_id)
+    .bind(if subject_post_id.is_some() {
+        "post"
+    } else {
+        "actor"
+    })
+    .bind(subject_actor_id)
+    .bind(subject_post_id)
+    .bind(reason_text)
+    .bind(reporter.domain)
+    .execute(&inbox.db_pool)
+    .await
+    .map_err(|e| format!("Flag: 保存失敗: {}", e))?;
     Ok(())
 }
 
@@ -127,36 +154,61 @@ async fn handle_poll_vote(
     inbox: &InboxContext,
     ap_client: &ApClient,
 ) -> Result<(), String> {
-    let actor_uri = activity["actor"].as_str().ok_or("PollVote: actor がありません")?;
+    let actor_uri = activity["actor"]
+        .as_str()
+        .ok_or("PollVote: actor がありません")?;
     let object = &activity["object"];
-    let question_id = object["inReplyTo"].as_str().ok_or("PollVote: inReplyTo がありません")?;
-    let option_name = object["name"].as_str().ok_or("PollVote: name がありません")?;
+    let question_id = object["inReplyTo"]
+        .as_str()
+        .ok_or("PollVote: inReplyTo がありません")?;
+    let option_name = object["name"]
+        .as_str()
+        .ok_or("PollVote: name がありません")?;
     let activity_id = activity["id"].as_str().or_else(|| object["id"].as_str());
 
-    let Some((post_id, post_author_id)) = inbox.post_repo
-        .find_id_and_actor_by_ap_object_id(question_id).await
+    let Some((post_id, post_author_id)) = inbox
+        .post_repo
+        .find_id_and_actor_by_ap_object_id(question_id)
+        .await
         .map_err(|e| format!("PollVote: Question検索失敗: {}", e))?
-    else { return Ok(()) };
+    else {
+        return Ok(());
+    };
     let remote = upsert_remote_fedi_actor(inbox, ap_client, actor_uri).await?;
-    let poll: Option<serde_json::Value> = sqlx::query_scalar("SELECT poll FROM posts WHERE id = $1")
-        .bind(post_id).fetch_optional(&inbox.db_pool).await
-        .map_err(|e| format!("PollVote: poll取得失敗: {}", e))?.flatten();
+    let poll: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT poll FROM posts WHERE id = $1")
+            .bind(post_id)
+            .fetch_optional(&inbox.db_pool)
+            .await
+            .map_err(|e| format!("PollVote: poll取得失敗: {}", e))?
+            .flatten();
     let Some(poll) = poll else { return Ok(()) };
-    let Some(index) = poll["options"].as_array()
-        .and_then(|options| options.iter().position(|o| o["name"].as_str() == Some(option_name)))
-    else { return Ok(()) };
+    let Some(index) = poll["options"].as_array().and_then(|options| {
+        options
+            .iter()
+            .position(|o| o["name"].as_str() == Some(option_name))
+    }) else {
+        return Ok(());
+    };
 
     let inserted = sqlx::query(
         "INSERT INTO poll_votes (post_id, actor_id, option_index, ap_activity_id)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT DO NOTHING",
     )
-    .bind(post_id).bind(remote.actor_id).bind(index as i32).bind(activity_id)
-    .execute(&inbox.db_pool).await
+    .bind(post_id)
+    .bind(remote.actor_id)
+    .bind(index as i32)
+    .bind(activity_id)
+    .execute(&inbox.db_pool)
+    .await
     .map_err(|e| format!("PollVote: 保存失敗: {}", e))?;
     if inserted.rows_affected() > 0 {
         let mut updated = poll;
-        if let Some(option) = updated["options"].as_array_mut().and_then(|options| options.get_mut(index)) {
+        if let Some(option) = updated["options"]
+            .as_array_mut()
+            .and_then(|options| options.get_mut(index))
+        {
             option["votes"] = serde_json::json!(option["votes"].as_i64().unwrap_or(0) + 1);
         }
         sqlx::query("UPDATE posts SET poll = $2 WHERE id = $1")
@@ -197,14 +249,20 @@ async fn upsert_remote_fedi_actor(
     // 新規 fedi 行を作らずローカル行をそのまま返す。ローカル行は ap_uri で照合できない
     // ため、ここでガードしないと配信ループバックやなりすましのたびに影の重複 fedi 行が
     // 生成されてしまう（#110）。
-    if let Some(local_username) = crate::ap::extract_local_username(actor_uri, &inbox.local_domain) {
+    if let Some(local_username) = crate::ap::extract_local_username(actor_uri, &inbox.local_domain)
+    {
         let local_actor = inbox
             .actor_repo
             .find_by_username_domain(local_username, &inbox.local_domain)
             .await
             .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
             .filter(|a| a.actor_type == "local")
-            .ok_or_else(|| format!("自ドメインを名乗るアクター '{}' はローカルに存在しません", actor_uri))?;
+            .ok_or_else(|| {
+                format!(
+                    "自ドメインを名乗るアクター '{}' はローカルに存在しません",
+                    actor_uri
+                )
+            })?;
         return Ok(RemoteActorInfo {
             actor_id: local_actor.id,
             username: local_actor.username,
@@ -217,10 +275,13 @@ async fn upsert_remote_fedi_actor(
 
     let remote_ap = ap_client.fetch_actor(actor_uri).await?;
     let ap_inbox = remote_ap.inbox.clone().unwrap_or_default();
-    let username = remote_ap
-        .preferred_username
-        .clone()
-        .unwrap_or_else(|| actor_uri.rsplit('/').next().unwrap_or("unknown").to_string());
+    let username = remote_ap.preferred_username.clone().unwrap_or_else(|| {
+        actor_uri
+            .rsplit('/')
+            .next()
+            .unwrap_or("unknown")
+            .to_string()
+    });
     let display_name = remote_ap.name.clone().unwrap_or_else(|| username.clone());
     let domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
     let avatar_url = remote_ap.avatar_url();
@@ -236,11 +297,30 @@ async fn upsert_remote_fedi_actor(
     let new_actor_id = generate_snowflake_id(now);
     let actor_id = inbox
         .actor_repo
-        .upsert_remote_fedi(new_actor_id, actor_uri, &ap_inbox, &username, &domain, &display_name, avatar_url.as_deref(), bio.as_deref(), now, &emoji_map, &profile_fields)
+        .upsert_remote_fedi(
+            new_actor_id,
+            actor_uri,
+            &ap_inbox,
+            &username,
+            &domain,
+            &display_name,
+            avatar_url.as_deref(),
+            bio.as_deref(),
+            now,
+            &emoji_map,
+            &profile_fields,
+        )
         .await
         .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
 
-    Ok(RemoteActorInfo { actor_id, username, display_name, domain, avatar_url, inbox: ap_inbox })
+    Ok(RemoteActorInfo {
+        actor_id,
+        username,
+        display_name,
+        domain,
+        avatar_url,
+        inbox: ap_inbox,
+    })
 }
 
 // Follow アクティビティを処理し Accept を送信する
@@ -270,7 +350,10 @@ async fn handle_follow(
         .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
         .ok_or_else(|| format!("ローカルアクター '{}' が存在しません", local_username))?;
     if local_actor.actor_type != "local" {
-        return Err(format!("'{}' はローカルアクターではありません", local_username));
+        return Err(format!(
+            "'{}' はローカルアクターではありません",
+            local_username
+        ));
     }
     let local_actor_id = local_actor.id;
 
@@ -291,7 +374,8 @@ async fn handle_follow(
     if is_blocking {
         tracing::info!(
             "[Follow] {} は '{}' にブロックされているため無視します（Accept送信なし）",
-            follower_uri, local_username
+            follower_uri,
+            local_username
         );
         return Ok(());
     }
@@ -314,7 +398,17 @@ async fn handle_follow(
     let notif_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = inbox
         .notification_repo
-        .insert(notif_id, local_actor_id, NotificationKind::Follow, Some(follower_actor_id), None, None, None, None, None)
+        .insert(
+            notif_id,
+            local_actor_id,
+            NotificationKind::Follow,
+            Some(follower_actor_id),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
     {
         tracing::error!("[Follow] notifications INSERT 失敗: {}", e);
@@ -339,11 +433,19 @@ async fn handle_follow(
     let accept_body =
         serde_json::to_string(&accept).map_err(|e| format!("Accept シリアライズ失敗: {}", e))?;
 
-    ap_client.sign_and_post(&remote.inbox, &accept_body, &actor_key_id, &inbox.ap_private_key_pem).await?;
+    ap_client
+        .sign_and_post(
+            &remote.inbox,
+            &accept_body,
+            &actor_key_id,
+            &inbox.ap_private_key_pem,
+        )
+        .await?;
 
     tracing::info!(
         "[Follow] {} → {} フォロー完了・Accept 送信済み",
-        follower_uri, local_actor_uri
+        follower_uri,
+        local_actor_uri
     );
     Ok(())
 }
@@ -378,7 +480,10 @@ async fn handle_block(
         .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
         .ok_or_else(|| format!("ローカルアクター '{}' が存在しません", local_username))?;
     if local_actor.actor_type != "local" {
-        return Err(format!("'{}' はローカルアクターではありません", local_username));
+        return Err(format!(
+            "'{}' はローカルアクターではありません",
+            local_username
+        ));
     }
 
     let remote = upsert_remote_fedi_actor(inbox, ap_client, blocker_uri).await?;
@@ -399,7 +504,8 @@ async fn handle_block(
 
     tracing::info!(
         "[Block] {} から '{}' へのブロックを受信・記録し、フォロー関係を解消しました",
-        blocker_uri, local_username
+        blocker_uri,
+        local_username
     );
     Ok(())
 }
@@ -426,16 +532,22 @@ async fn resolve_parent_original_post_id(
 ) -> Option<i64> {
     // シナリオ1: ループバック検知（note.id または note.url が LOCAL_DOMAIN の notes URL）
     let loopback_prefix = format!("https://{}/notes/", inbox.local_domain);
-    let loopback = [note_url, note_id]
-        .iter()
-        .find_map(|url| url.strip_prefix(&loopback_prefix).and_then(|id_str| id_str.parse::<i64>().ok()));
+    let loopback = [note_url, note_id].iter().find_map(|url| {
+        url.strip_prefix(&loopback_prefix)
+            .and_then(|id_str| id_str.parse::<i64>().ok())
+    });
     if loopback.is_some() {
         return loopback;
     }
 
     // シナリオ3: ブリッジ重複検知（note.url が bsky.app の場合、at_uri で既存ポストを探す）
     let at_uri = bsky_app_url_to_at_uri(note_url)?;
-    inbox.post_repo.find_id_by_at_uri(&at_uri).await.ok().flatten()
+    inbox
+        .post_repo
+        .find_id_by_at_uri(&at_uri)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// AP Note から引用元URIを抽出する（#116）。Fedibirdは `quoteUrl`、Misskeyは `quoteUrl` と
@@ -445,7 +557,8 @@ async fn resolve_parent_original_post_id(
 /// 両フィールドが無ければ最後に `tag` を走査する（`quoteUrl` → `_misskey_quote` → `tag` の順）。
 /// 送信側は `ap/deliver.rs` の `build_create_note_activity` が同じ2フィールドを付与している。
 fn extract_ap_quote_uri(note: &serde_json::Value, tags: &[serde_json::Value]) -> Option<String> {
-    note["quoteUrl"].as_str()
+    note["quoteUrl"]
+        .as_str()
         .or_else(|| note["_misskey_quote"].as_str())
         .map(|s| s.to_string())
         .or_else(|| {
@@ -504,19 +617,26 @@ fn guess_attachment_mime_type(att: &serde_json::Value, url: &str) -> Option<Stri
 }
 
 fn normalize_ap_poll(note: &serde_json::Value) -> Option<serde_json::Value> {
-    if note["type"].as_str() != Some("Question") { return None; }
+    if note["type"].as_str() != Some("Question") {
+        return None;
+    }
     let (choices, multiple) = if let Some(v) = note["oneOf"].as_array() {
         (v, false)
     } else {
         (note["anyOf"].as_array()?, true)
     };
-    let options: Vec<_> = choices.iter().filter_map(|choice| {
-        Some(serde_json::json!({
-            "name": choice["name"].as_str()?,
-            "votes": choice["replies"]["totalItems"].as_i64().unwrap_or(0).max(0)
-        }))
-    }).collect();
-    if options.is_empty() { return None; }
+    let options: Vec<_> = choices
+        .iter()
+        .filter_map(|choice| {
+            Some(serde_json::json!({
+                "name": choice["name"].as_str()?,
+                "votes": choice["replies"]["totalItems"].as_i64().unwrap_or(0).max(0)
+            }))
+        })
+        .collect();
+    if options.is_empty() {
+        return None;
+    }
     Some(serde_json::json!({
         "multiple": multiple,
         "options": options,
@@ -534,7 +654,9 @@ async fn handle_create_note(
 ) -> Result<(), String> {
     let note = &activity["object"];
     let note_id = note["id"].as_str().ok_or("Note: id がありません")?;
-    let actor_uri = activity["actor"].as_str().ok_or("Create: actor がありません")?;
+    let actor_uri = activity["actor"]
+        .as_str()
+        .ok_or("Create: actor がありません")?;
     let content_html = note["content"].as_str().unwrap_or("").to_string();
     let published = note["published"].as_str().unwrap_or("");
 
@@ -560,7 +682,12 @@ async fn handle_create_note(
     // `RE:`/`QT:` フォールバック行（引用URIと同じURLを指す）を本文から取り除く。
     let quote_uri = extract_ap_quote_uri(note, &tags);
     let quote_of_post_id: Option<i64> = match quote_uri.as_deref() {
-        Some(uri) => inbox.post_repo.find_id_by_ap_or_at_uri(uri).await.ok().flatten(),
+        Some(uri) => inbox
+            .post_repo
+            .find_id_by_ap_or_at_uri(uri)
+            .await
+            .ok()
+            .flatten(),
         None => None,
     };
     if let Some(uri) = quote_uri.as_deref() {
@@ -573,7 +700,12 @@ async fn handle_create_note(
     // AP inReplyTo からローカルの reply_to_post_id を解決する（DM機能実装以前はこの解決自体が
     // 存在しなかった。通常投稿にも有用だが、direct（DM）のスレッド起点伝播に必須のため追加）。
     let reply_to_post_id: Option<i64> = match note["inReplyTo"].as_str() {
-        Some(uri) => inbox.post_repo.find_id_by_ap_or_at_uri(uri).await.ok().flatten(),
+        Some(uri) => inbox
+            .post_repo
+            .find_id_by_ap_or_at_uri(uri)
+            .await
+            .ok()
+            .flatten(),
         None => None,
     };
 
@@ -592,39 +724,52 @@ async fn handle_create_note(
 
     // DM（visibility="direct"）の宛先・スレッド起点解決。
     // `to`に含まれるローカルアクターURI（`https://{local_domain}/users/{username}`）を宛先とする。
-    let (thread_root_post_id, recipient_actor_ids): (Option<i64>, Vec<i64>) = if visibility == "direct" {
-        let parent_thread_root = match reply_to_post_id {
-            Some(parent_id) => inbox
-                .post_repo
-                .find_delivery_meta(parent_id)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|m| if m.visibility == "direct" { m.thread_root_post_id } else { None }),
-            None => None,
-        };
-        let thread_root = parent_thread_root.unwrap_or(post_id);
+    let (thread_root_post_id, recipient_actor_ids): (Option<i64>, Vec<i64>) =
+        if visibility == "direct" {
+            let parent_thread_root = match reply_to_post_id {
+                Some(parent_id) => inbox
+                    .post_repo
+                    .find_delivery_meta(parent_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|m| {
+                        if m.visibility == "direct" {
+                            m.thread_root_post_id
+                        } else {
+                            None
+                        }
+                    }),
+                None => None,
+            };
+            let thread_root = parent_thread_root.unwrap_or(post_id);
 
-        // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
-        // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
-        // `find_by_ap_uri` では引っかからない。`handle_follow` と同じくURI末尾の
-        // セグメントをusernameとみなして `find_by_username_domain` で解決する。
-        let mut recipients = Vec::new();
-        for uri in &to_list {
-            if !uri.contains("/users/") {
-                continue;
-            }
-            let Some(local_username) = uri.rsplit('/').next() else { continue };
-            if let Ok(Some(actor)) = inbox.actor_repo.find_by_username_domain(local_username, &inbox.local_domain).await {
-                if actor.actor_type == "local" {
-                    recipients.push(actor.id);
+            // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
+            // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
+            // `find_by_ap_uri` では引っかからない。`handle_follow` と同じくURI末尾の
+            // セグメントをusernameとみなして `find_by_username_domain` で解決する。
+            let mut recipients = Vec::new();
+            for uri in &to_list {
+                if !uri.contains("/users/") {
+                    continue;
+                }
+                let Some(local_username) = uri.rsplit('/').next() else {
+                    continue;
+                };
+                if let Ok(Some(actor)) = inbox
+                    .actor_repo
+                    .find_by_username_domain(local_username, &inbox.local_domain)
+                    .await
+                {
+                    if actor.actor_type == "local" {
+                        recipients.push(actor.id);
+                    }
                 }
             }
-        }
-        (Some(thread_root), recipients)
-    } else {
-        (None, Vec::new())
-    };
+            (Some(thread_root), recipients)
+        } else {
+            (None, Vec::new())
+        };
 
     // シナリオ2: seiran_post_uuid による seiran 間マージ
     let seiran_uuid = note["seiranUuid"].as_str();
@@ -642,7 +787,10 @@ async fn handle_create_note(
                     .update_ap_object_id(existing_id, note_id)
                     .await
                     .map_err(|e| format!("ap_object_id 更新失敗: {}", e))?;
-                tracing::info!("[Create/Note] seiran_uuid マージ（AP 側更新）: id={}", existing_id);
+                tracing::info!(
+                    "[Create/Note] seiran_uuid マージ（AP 側更新）: id={}",
+                    existing_id
+                );
             }
             // 重複インサートはしない
             return Ok(());
@@ -675,11 +823,17 @@ async fn handle_create_note(
 
     let content_warning = note["summary"].as_str().filter(|s| !s.is_empty());
     let poll = normalize_ap_poll(note);
-    inbox.post_repo.set_fedi_content_metadata(post_id, content_warning, poll.as_ref())
-        .await.map_err(|e| format!("投稿メタデータ更新エラー: {}", e))?;
+    inbox
+        .post_repo
+        .set_fedi_content_metadata(post_id, content_warning, poll.as_ref())
+        .await
+        .map_err(|e| format!("投稿メタデータ更新エラー: {}", e))?;
 
     if let Err(e) = inbox.hashtag_repo.link_post(post_id, &body).await {
-        tracing::error!("[Create/Note] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
+        tracing::error!(
+            "[Create/Note] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
+            e
+        );
     }
 
     // リプライ通知: リプライ先がローカルユーザーの投稿であれば通知を作る（自己リプライは除く）。
@@ -695,7 +849,17 @@ async fn handle_create_note(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = inbox
             .notification_repo
-            .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None, None)
+            .insert(
+                notif_id,
+                parent_actor_id,
+                NotificationKind::Reply,
+                Some(actor_id),
+                Some(post_id),
+                None,
+                None,
+                None,
+                None,
+            )
             .await
         {
             tracing::error!("[Create/Note] reply notifications INSERT 失敗: {}", e);
@@ -711,12 +875,20 @@ async fn handle_create_note(
         if tag["type"].as_str() != Some("Mention") {
             continue;
         }
-        let Some(href) = tag["href"].as_str() else { continue };
+        let Some(href) = tag["href"].as_str() else {
+            continue;
+        };
         if !href.contains("/users/") {
             continue;
         }
-        let Some(local_username) = href.rsplit('/').next() else { continue };
-        if let Ok(Some(actor)) = inbox.actor_repo.find_by_username_domain(local_username, &inbox.local_domain).await {
+        let Some(local_username) = href.rsplit('/').next() else {
+            continue;
+        };
+        if let Ok(Some(actor)) = inbox
+            .actor_repo
+            .find_by_username_domain(local_username, &inbox.local_domain)
+            .await
+        {
             if actor.actor_type == "local" && !mentioned_local_actor_ids.contains(&actor.id) {
                 mentioned_local_actor_ids.push(actor.id);
             }
@@ -734,7 +906,17 @@ async fn handle_create_note(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = inbox
             .notification_repo
-            .insert(notif_id, mentioned_actor_id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None, None)
+            .insert(
+                notif_id,
+                mentioned_actor_id,
+                NotificationKind::Mention,
+                Some(actor_id),
+                Some(post_id),
+                None,
+                None,
+                None,
+                None,
+            )
             .await
         {
             tracing::error!("[Create/Note] mention notifications INSERT 失敗: {}", e);
@@ -744,7 +926,8 @@ async fn handle_create_note(
     // 添付画像・動画・音声の URL を保存（S3 には保存せず URL のみ記録）
     if let Some(attachments) = note["attachment"].as_array() {
         for (position, att) in attachments.iter().enumerate() {
-            let url = att["url"].as_str()
+            let url = att["url"]
+                .as_str()
                 .or_else(|| att.as_str())
                 .unwrap_or_default();
             if url.is_empty() {
@@ -753,7 +936,18 @@ async fn handle_create_note(
             let mime_type = guess_attachment_mime_type(att, url);
             let is_sensitive = att["sensitive"].as_bool().unwrap_or(false)
                 || note["sensitive"].as_bool().unwrap_or(false);
-            if let Err(e) = inbox.post_repo.attach_remote_media_url(post_id, url, mime_type.as_deref(), None, is_sensitive, position as i16).await {
+            if let Err(e) = inbox
+                .post_repo
+                .attach_remote_media_url(
+                    post_id,
+                    url,
+                    mime_type.as_deref(),
+                    None,
+                    is_sensitive,
+                    position as i16,
+                )
+                .await
+            {
                 tracing::error!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
             }
         }
@@ -795,15 +989,24 @@ async fn handle_create_note(
         inbox.stream_hub.publish_note(recipients, &note_json);
     }
 
-    let dup_info = parent_original_post_id.map_or(String::new(), |id| format!(" (parent_original={})", id));
-    tracing::info!("[Create/Note] {} から投稿を受信・保存: {}{}", actor_uri, note_id, dup_info);
+    let dup_info =
+        parent_original_post_id.map_or(String::new(), |id| format!(" (parent_original={})", id));
+    tracing::info!(
+        "[Create/Note] {} から投稿を受信・保存: {}{}",
+        actor_uri,
+        note_id,
+        dup_info
+    );
     Ok(())
 }
 
 /// AP の `to`/`cc` は単一文字列・配列のどちらの場合もあるため、文字列配列へ正規化する。
 fn as_string_list(v: &serde_json::Value) -> Vec<String> {
     match v {
-        serde_json::Value::Array(arr) => arr.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect(),
         serde_json::Value::String(s) => vec![s.clone()],
         _ => vec![],
     }
@@ -911,7 +1114,9 @@ fn tokenize_anchors(html: &str) -> Vec<HtmlSegment> {
         let is_mention_class = extract_class_tokens(&tag_inner)
             .iter()
             .any(|c| c == "mention" || c == "u-url");
-        let is_hashtag = extract_class_tokens(&tag_inner).iter().any(|c| c == "hashtag")
+        let is_hashtag = extract_class_tokens(&tag_inner)
+            .iter()
+            .any(|c| c == "hashtag")
             || extract_attr(&tag_inner, "rel")
                 .map(|r| r.split_whitespace().any(|t| t.eq_ignore_ascii_case("tag")))
                 .unwrap_or(false);
@@ -922,7 +1127,11 @@ fn tokenize_anchors(html: &str) -> Vec<HtmlSegment> {
         let mut in_inner_tag = false;
         while i < chars.len() {
             if chars[i] == '<' {
-                let ahead: String = chars[i + 1..].iter().take(2).collect::<String>().to_ascii_lowercase();
+                let ahead: String = chars[i + 1..]
+                    .iter()
+                    .take(2)
+                    .collect::<String>()
+                    .to_ascii_lowercase();
                 if ahead == "/a" {
                     // `</a...>` という閉じタグ（属性・空白付きの `</a >` 等も含む）。'>' まで読み飛ばす。
                     let mut k = i + 1;
@@ -948,7 +1157,12 @@ fn tokenize_anchors(html: &str) -> Vec<HtmlSegment> {
         let inner_text = decode_html_entities(inner_text.trim());
         match href {
             Some(h) if !inner_text.is_empty() => {
-                segments.push(HtmlSegment::Link { href: h, text: inner_text, is_mention_class, is_hashtag });
+                segments.push(HtmlSegment::Link {
+                    href: h,
+                    text: inner_text,
+                    is_mention_class,
+                    is_hashtag,
+                });
             }
             _ => {
                 if !inner_text.is_empty() {
@@ -998,7 +1212,11 @@ fn extract_href_attr(tag_inner: &str) -> Option<String> {
 /// `class` 属性値を空白区切りのトークン列として返す（無ければ空）。
 fn extract_class_tokens(tag_inner: &str) -> Vec<String> {
     extract_attr(tag_inner, "class")
-        .map(|c| c.split_whitespace().map(|s| s.to_ascii_lowercase()).collect())
+        .map(|c| {
+            c.split_whitespace()
+                .map(|s| s.to_ascii_lowercase())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -1038,13 +1256,19 @@ fn find_mention_name_by_href(href: &str, tags: &[serde_json::Value]) -> Option<S
 /// `@yuba` と別インスタンスの `@yuba@fedibird.com` が同一Note内に共存するケース、実機確認）に
 /// 誤った方へマッチしないよう、まず `<a href>` と `tag.href` のホスト名が一致するものを優先し、
 /// 見つからなければユーザー名のみの一致にフォールバックする。
-fn find_mention_name_by_inner_text(anchor_href: &str, inner_text: &str, tags: &[serde_json::Value]) -> Option<String> {
+fn find_mention_name_by_inner_text(
+    anchor_href: &str,
+    inner_text: &str,
+    tags: &[serde_json::Value],
+) -> Option<String> {
     let inner_username = inner_text.trim_start_matches('@').split('@').next()?;
     if inner_username.is_empty() {
         return None;
     }
-    let mentions: Vec<&serde_json::Value> =
-        tags.iter().filter(|t| t["type"].as_str() == Some("Mention")).collect();
+    let mentions: Vec<&serde_json::Value> = tags
+        .iter()
+        .filter(|t| t["type"].as_str() == Some("Mention"))
+        .collect();
 
     let username_matches = |t: &&serde_json::Value| -> bool {
         t["name"]
@@ -1057,7 +1281,11 @@ fn find_mention_name_by_inner_text(anchor_href: &str, inner_text: &str, tags: &[
     if let Some(anchor_host) = extract_host(anchor_href) {
         if let Some(found) = mentions.iter().find(|t| {
             username_matches(t)
-                && t["href"].as_str().and_then(extract_host).map(|h| h.eq_ignore_ascii_case(anchor_host)).unwrap_or(false)
+                && t["href"]
+                    .as_str()
+                    .and_then(extract_host)
+                    .map(|h| h.eq_ignore_ascii_case(anchor_host))
+                    .unwrap_or(false)
         }) {
             let name = found["name"].as_str().unwrap_or_default();
             let href = found["href"].as_str().unwrap_or_default();
@@ -1160,13 +1388,29 @@ fn normalize_whitespace_preserving_newlines(s: &str) -> String {
 /// `sender_domain` はこのNoteの投稿者（アクター）のドメイン。`class="mention"` はあるが
 /// `tag`配列に対応エントリが無くドメイン省略のメンション（`@bob`）しか得られない場合、
 /// このドメインを補って完全修飾形（`@bob@sender_domain`）にする。
-pub fn ap_content_to_markdown_body(content_html: &str, tags: &[serde_json::Value], sender_domain: &str) -> String {
+pub fn ap_content_to_markdown_body(
+    content_html: &str,
+    tags: &[serde_json::Value],
+    sender_domain: &str,
+) -> String {
     let mut out = String::new();
     for seg in tokenize_anchors(content_html) {
         match seg {
             HtmlSegment::Text(t) => out.push_str(&t),
-            HtmlSegment::Link { href, text, is_mention_class, is_hashtag } => {
-                if let Some(name) = resolve_ap_mention_text(&href, &text, is_mention_class, is_hashtag, tags, sender_domain) {
+            HtmlSegment::Link {
+                href,
+                text,
+                is_mention_class,
+                is_hashtag,
+            } => {
+                if let Some(name) = resolve_ap_mention_text(
+                    &href,
+                    &text,
+                    is_mention_class,
+                    is_hashtag,
+                    tags,
+                    sender_domain,
+                ) {
                     out.push_str(&name);
                 } else {
                     out.push('[');
@@ -1209,7 +1453,10 @@ async fn handle_accept(activity: serde_json::Value, inbox: &InboxContext) -> Res
         .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
         .ok_or_else(|| format!("ローカルアクター '{}' が見つかりません", local_username))?;
     if local_actor.actor_type != "local" {
-        return Err(format!("'{}' はローカルアクターではありません", local_username));
+        return Err(format!(
+            "'{}' はローカルアクターではありません",
+            local_username
+        ));
     }
     let local_actor_id = local_actor.id;
 
@@ -1219,7 +1466,12 @@ async fn handle_accept(activity: serde_json::Value, inbox: &InboxContext) -> Res
         .find_by_ap_uri(remote_actor_uri)
         .await
         .map_err(|e| format!("リモートアクター検索エラー: {}", e))?
-        .ok_or_else(|| format!("リモートアクター '{}' が DB に見つかりません", remote_actor_uri))?;
+        .ok_or_else(|| {
+            format!(
+                "リモートアクター '{}' が DB に見つかりません",
+                remote_actor_uri
+            )
+        })?;
     let remote_actor_id = remote_actor.id;
 
     // follows.status を accepted に更新
@@ -1252,7 +1504,17 @@ async fn handle_accept(activity: serde_json::Value, inbox: &InboxContext) -> Res
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = inbox
             .notification_repo
-            .insert(notif_id, local_actor_id, NotificationKind::FollowRequestAccepted, Some(remote_actor.id), None, None, None, None, None)
+            .insert(
+                notif_id,
+                local_actor_id,
+                NotificationKind::FollowRequestAccepted,
+                Some(remote_actor.id),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await
         {
             tracing::error!("[Accept] notifications INSERT 失敗: {}", e);
@@ -1274,7 +1536,11 @@ async fn handle_undo(activity: serde_json::Value, inbox: &InboxContext) -> Resul
                 .await
                 .map_err(|e| format!("reactions DELETE エラー: {}", e))?;
             if let Some((post_id, actor_id)) = deleted {
-                tracing::info!("[Undo/Reaction] {} を取り消し（post_id={}）", activity_id, post_id);
+                tracing::info!(
+                    "[Undo/Reaction] {} を取り消し（post_id={}）",
+                    activity_id,
+                    post_id
+                );
                 if let Ok(Some(post)) = inbox.post_repo.find_by_id(post_id).await {
                     broadcast_reaction_update(
                         &inbox.stream_hub,
@@ -1300,17 +1566,34 @@ async fn handle_undo(activity: serde_json::Value, inbox: &InboxContext) -> Resul
         let local_username = target_uri.rsplit('/').next().unwrap_or("");
 
         if let (Some(blocker), Some(target)) = (
-            inbox.actor_repo.find_by_ap_uri(blocker_uri).await.ok().flatten(),
-            inbox.actor_repo.find_by_username_domain(local_username, &inbox.local_domain).await.ok().flatten(),
+            inbox
+                .actor_repo
+                .find_by_ap_uri(blocker_uri)
+                .await
+                .ok()
+                .flatten(),
+            inbox
+                .actor_repo
+                .find_by_username_domain(local_username, &inbox.local_domain)
+                .await
+                .ok()
+                .flatten(),
         ) {
             if target.actor_type == "local" {
-                if let Err(e) = inbox.block_repo.delete_by_actors(blocker.id, target.id).await {
+                if let Err(e) = inbox
+                    .block_repo
+                    .delete_by_actors(blocker.id, target.id)
+                    .await
+                {
                     tracing::error!("[Undo/Block] blocks DELETE エラー: {}", e);
                 }
             }
         }
 
-        tracing::info!("[Undo/Block] {} からのブロック解除を受信しました", blocker_uri);
+        tracing::info!(
+            "[Undo/Block] {} からのブロック解除を受信しました",
+            blocker_uri
+        );
         return Ok(());
     }
 
@@ -1322,7 +1605,11 @@ async fn handle_undo(activity: serde_json::Value, inbox: &InboxContext) -> Resul
                 .soft_delete_by_ap_object_id(announce_id)
                 .await
                 .map_err(|e| format!("posts (Announce) UPDATE エラー: {}", e))?;
-            tracing::info!("[Undo/Announce] {} を取り消し（{} 行）", announce_id, deleted);
+            tracing::info!(
+                "[Undo/Announce] {} を取り消し（{} 行）",
+                announce_id,
+                deleted
+            );
         }
         return Ok(());
     }
@@ -1409,7 +1696,8 @@ async fn handle_delete(activity: serde_json::Value, inbox: &InboxContext) -> Res
     if sender.map(|a| a.id) != Some(post_actor_id) {
         tracing::warn!(
             "[Delete] {} の送信元アクター({})が投稿の所有者と一致しないため無視します",
-            object_id, actor_uri
+            object_id,
+            actor_uri
         );
         return Ok(());
     }
@@ -1419,7 +1707,11 @@ async fn handle_delete(activity: serde_json::Value, inbox: &InboxContext) -> Res
         .soft_delete_by_id(post_id)
         .await
         .map_err(|e| format!("posts (Delete) UPDATE エラー: {}", e))?;
-    tracing::info!("[Delete] post_id={} ({}) を削除しました", post_id, object_id);
+    tracing::info!(
+        "[Delete] post_id={} ({}) を削除しました",
+        post_id,
+        object_id
+    );
     Ok(())
 }
 
@@ -1427,7 +1719,10 @@ async fn handle_delete(activity: serde_json::Value, inbox: &InboxContext) -> Res
 /// カスタム絵文字タグの画像 URL を取り出す（`build_emoji_map` を利用）。
 fn extract_emoji_tag_url(value: &serde_json::Value, shortcode: &str) -> Option<String> {
     let tags = value["tag"].as_array().cloned().unwrap_or_default();
-    build_emoji_map(&tags).get(shortcode)?.as_str().map(|s| s.to_string())
+    build_emoji_map(&tags)
+        .get(shortcode)?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 /// AP Note の `tag` 配列由来の emoji_map を構築したうえで、本文中に現れる
@@ -1449,15 +1744,25 @@ async fn resolve_emoji_map_with_fallback(
     if missing.is_empty() {
         return map;
     }
-    match inbox.remote_emoji_repo.find_urls_by_shortcodes(domain, &missing).await {
+    match inbox
+        .remote_emoji_repo
+        .find_urls_by_shortcodes(domain, &missing)
+        .await
+    {
         Ok(pairs) => {
-            let obj = map.as_object_mut().expect("build_emoji_map always returns an object");
+            let obj = map
+                .as_object_mut()
+                .expect("build_emoji_map always returns an object");
             for (code, url) in pairs {
                 obj.insert(format!(":{}:", code), serde_json::Value::String(url));
             }
         }
         Err(e) => {
-            tracing::warn!("[RemoteEmoji] 本文フォールバック解決失敗 domain={}: {}", domain, e);
+            tracing::warn!(
+                "[RemoteEmoji] 本文フォールバック解決失敗 domain={}: {}",
+                domain,
+                e
+            );
         }
     }
     map
@@ -1471,8 +1776,12 @@ async fn record_remote_emojis(inbox: &InboxContext, domain: &str, tags: &[serde_
         if tag["type"].as_str() != Some("Emoji") {
             continue;
         }
-        let Some(name) = tag["name"].as_str() else { continue };
-        let Some(url) = tag["icon"]["url"].as_str() else { continue };
+        let Some(name) = tag["name"].as_str() else {
+            continue;
+        };
+        let Some(url) = tag["icon"]["url"].as_str() else {
+            continue;
+        };
         let shortcode = name.trim_matches(':');
         if shortcode.is_empty() {
             continue;
@@ -1494,7 +1803,12 @@ async fn record_remote_emojis(inbox: &InboxContext, domain: &str, tags: &[serde_
             .upsert_seen(shortcode, domain, url, &remote_tags, license)
             .await
         {
-            tracing::warn!("[RemoteEmoji] 記録失敗 shortcode={} domain={}: {}", shortcode, domain, e);
+            tracing::warn!(
+                "[RemoteEmoji] 記録失敗 shortcode={} domain={}: {}",
+                shortcode,
+                domain,
+                e
+            );
         }
     }
 }
@@ -1559,7 +1873,15 @@ async fn handle_reaction(
     // reactions へ INSERT（同一ユーザー・同一内容の重複、activity_id 重複はスキップ）
     inbox
         .reaction_repo
-        .insert(post_id, actor_id, reaction_type, &content, activity_id, None, emoji_url.as_deref())
+        .insert(
+            post_id,
+            actor_id,
+            reaction_type,
+            &content,
+            activity_id,
+            None,
+            emoji_url.as_deref(),
+        )
         .await
         .map_err(|e| format!("reactions INSERT エラー: {}", e))?;
 
@@ -1579,7 +1901,17 @@ async fn handle_reaction(
     let notif_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = inbox
         .notification_repo
-        .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(&content), emoji_url.as_deref(), activity_id, None)
+        .insert(
+            notif_id,
+            post_author_id,
+            NotificationKind::Reaction,
+            Some(actor_id),
+            Some(post_id),
+            Some(&content),
+            emoji_url.as_deref(),
+            activity_id,
+            None,
+        )
         .await
     {
         tracing::error!("[Reaction] notifications INSERT 失敗: {}", e);
@@ -1608,12 +1940,19 @@ async fn handle_announce(
     ap_client: &ApClient,
 ) -> Result<(), String> {
     let announce_id = activity["id"].as_str().ok_or("Announce: id がありません")?;
-    let actor_uri = activity["actor"].as_str().ok_or("Announce: actor がありません")?;
-    let object_uri = activity["object"].as_str().ok_or("Announce: object がありません")?;
+    let actor_uri = activity["actor"]
+        .as_str()
+        .ok_or("Announce: actor がありません")?;
+    let object_uri = activity["object"]
+        .as_str()
+        .ok_or("Announce: object がありません")?;
     let published = activity["published"].as_str().unwrap_or("");
     // Announce（リポスト）自身の to/cc から可視性を判定する（元ポストの可視性ではなく、
     // このリポストという行為自体が公開/フォロワー限定/ひかえめのいずれで行われたか）。
-    let visibility = classify_ap_visibility(&as_string_list(&activity["to"]), &as_string_list(&activity["cc"]));
+    let visibility = classify_ap_visibility(
+        &as_string_list(&activity["to"]),
+        &as_string_list(&activity["cc"]),
+    );
 
     // 公開日時を parse して snowflake ID を生成
     let created_at = published
@@ -1662,13 +2001,22 @@ async fn handle_announce(
     // リポストをDBに挿入
     inbox
         .post_repo
-        .insert_repost(post_id, actor_id, announce_id, repost_of_post_id, created_at, visibility)
+        .insert_repost(
+            post_id,
+            actor_id,
+            announce_id,
+            repost_of_post_id,
+            created_at,
+            visibility,
+        )
         .await
         .map_err(|e| format!("リポスト挿入失敗: {}", e))?;
 
     tracing::info!(
         "[Inbox/Announce] リポスト保存完了: id={}, actor_id={}, repost_of={}",
-        post_id, actor_id, repost_of_post_id
+        post_id,
+        actor_id,
+        repost_of_post_id
     );
 
     Ok(())
@@ -1736,7 +2084,8 @@ async fn fetch_and_save_note(
 
     tracing::info!(
         "[Inbox/Announce] 元ポストをフェッチして保存: id={}, uri={}",
-        saved_id, note_id
+        saved_id,
+        note_id
     );
     Ok(saved_id)
 }
@@ -1815,11 +2164,13 @@ mod tests {
     }
 
     #[test]
-    fn ap_content_to_markdown_body_mention_class_with_mismatched_href_falls_back_to_tag_username_match() {
+    fn ap_content_to_markdown_body_mention_class_with_mismatched_href_falls_back_to_tag_username_match(
+    ) {
         // Mastodon等は <a href> に人間向けプロフィールURL、tag[].href にAPアクターURIを使う
         // ため両者が食い違うことがある。href完全一致に失敗しても、tag配列の中からユーザー名が
         // 一致する Mention を見つけて name を採用し、本拠地サーバーへの直リンクにはしない。
-        let html = r#"<p><a href="https://example.social/@bob" class="u-url mention">@bob</a> hi</p>"#;
+        let html =
+            r#"<p><a href="https://example.social/@bob" class="u-url mention">@bob</a> hi</p>"#;
         let tags = vec![serde_json::json!({
             "type": "Mention",
             "href": "https://example.social/users/bob",
@@ -1833,7 +2184,8 @@ mod tests {
     fn ap_content_to_markdown_body_mention_class_without_tag_entry_gets_sender_domain_appended() {
         // tag配列に対応エントリが全く無い場合でも、class=mention なら本拠地サーバーへの
         // 直リンクにはせず、投稿元アクターのドメイン（sender_domain）を補って完全修飾形にする。
-        let html = r#"<p><a href="https://example.social/@carol" class="u-url mention">@carol</a> yo</p>"#;
+        let html =
+            r#"<p><a href="https://example.social/@carol" class="u-url mention">@carol</a> yo</p>"#;
         let body = ap_content_to_markdown_body(html, &[], "example.social");
         assert_eq!(body, "@carol@example.social yo");
     }
@@ -1941,7 +2293,10 @@ mod tests {
     #[test]
     fn test_strip_html_simple() {
         assert_eq!(strip_html("<p>Hello, world!</p>"), "Hello, world!");
-        assert_eq!(strip_html("<b>bold</b> and <i>italic</i>"), "bold and italic");
+        assert_eq!(
+            strip_html("<b>bold</b> and <i>italic</i>"),
+            "bold and italic"
+        );
     }
 
     #[test]
@@ -2055,15 +2410,18 @@ mod tests {
             "endTime": "2026-07-28T00:00:00Z",
             "votersCount": 3
         });
-        assert_eq!(normalize_ap_poll(&question), Some(serde_json::json!({
-            "multiple": false,
-            "options": [
-                { "name": "紅茶", "votes": 3 },
-                { "name": "珈琲", "votes": 0 }
-            ],
-            "endTime": "2026-07-28T00:00:00Z",
-            "closed": null,
-            "votersCount": 3
-        })));
+        assert_eq!(
+            normalize_ap_poll(&question),
+            Some(serde_json::json!({
+                "multiple": false,
+                "options": [
+                    { "name": "紅茶", "votes": 3 },
+                    { "name": "珈琲", "votes": 0 }
+                ],
+                "endTime": "2026-07-28T00:00:00Z",
+                "closed": null,
+                "votersCount": 3
+            }))
+        );
     }
 }

@@ -14,14 +14,18 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use seiran_common::repository::{Actor, ListMemberRow, ListRow, MAX_LISTS_PER_OWNER, MAX_MEMBERS_PER_LIST};
 use seiran_common::generate_snowflake_id;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
+use seiran_common::repository::{
+    Actor, ListMemberRow, ListRow, MAX_LISTS_PER_OWNER, MAX_MEMBERS_PER_LIST,
+};
 
 use crate::error::ApiError;
-use crate::handlers::notes::queries::{fetch_reposted_ids, resolve_mention_facets_in_place};
-use crate::handlers::notes::{embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map, to_note_response};
 use crate::handlers::notes::dto::TimelineQuery;
+use crate::handlers::notes::queries::{fetch_reposted_ids, resolve_mention_facets_in_place};
+use crate::handlers::notes::{
+    embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map, to_note_response,
+};
 use crate::handlers::target_resolve::resolve_and_upsert_target;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
@@ -111,7 +115,8 @@ pub async fn create_list(
 ) -> impl IntoResponse {
     let name = req.name.trim();
     if name.is_empty() || name.chars().count() > 100 {
-        return ApiError::BadRequest("リスト名は1〜100文字で入力してください".to_string()).into_response();
+        return ApiError::BadRequest("リスト名は1〜100文字で入力してください".to_string())
+            .into_response();
     }
 
     let count = match state.lists.count_by_owner(user.actor_id).await {
@@ -124,7 +129,11 @@ pub async fn create_list(
 
     let now = chrono::Utc::now();
     let id = generate_snowflake_id(now);
-    if let Err(e) = state.lists.create(id, user.actor_id, name, req.is_public, now).await {
+    if let Err(e) = state
+        .lists
+        .create(id, user.actor_id, name, req.is_public, now)
+        .await
+    {
         return ApiError::Internal(format!("リスト作成失敗: {}", e)).into_response();
     }
 
@@ -134,7 +143,9 @@ pub async fn create_list(
 
     match state.lists.find_by_id(id).await {
         Ok(Some(row)) => (StatusCode::CREATED, Json(ListResponse::from(row))).into_response(),
-        Ok(None) => ApiError::Internal("作成直後のリスト取得に失敗しました".to_string()).into_response(),
+        Ok(None) => {
+            ApiError::Internal("作成直後のリスト取得に失敗しました".to_string()).into_response()
+        }
         Err(e) => ApiError::Internal(format!("リスト取得失敗: {}", e)).into_response(),
     }
 }
@@ -142,10 +153,24 @@ pub async fn create_list(
 /// リストを `app.bsky.graph.list` としてコミットし、`lists.at_rkey/at_uri/at_cid` に保存する。
 /// 失敗してもFedi側の公開は独立して機能するため、ログのみでリクエストは継続させる
 /// （`AtpCommitError::ActorConfig` は Bsky実体を持たないアクター等で正常に起こりうる）。
-async fn publish_list_to_atp(state: &AppState, list_id: i64, owner_actor_id: i64, name: &str, now: chrono::DateTime<chrono::Utc>) {
-    match state.atp_service.commit_graph_list(owner_actor_id, name, now).await {
+async fn publish_list_to_atp(
+    state: &AppState,
+    list_id: i64,
+    owner_actor_id: i64,
+    name: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) {
+    match state
+        .atp_service
+        .commit_graph_list(owner_actor_id, name, now)
+        .await
+    {
         Ok((rkey, at_uri, cid)) => {
-            if let Err(e) = state.lists.set_atp_list_record(list_id, &rkey, &at_uri, &cid).await {
+            if let Err(e) = state
+                .lists
+                .set_atp_list_record(list_id, &rkey, &at_uri, &cid)
+                .await
+            {
                 tracing::error!("[lists] ATP list rkey保存失敗: {}", e);
             }
         }
@@ -169,9 +194,17 @@ async fn maybe_publish_listitem(
     if target.actor_type == "fedi" {
         return;
     }
-    match state.atp_service.commit_graph_listitem(owner_actor_id, list_uri, subject_did, now).await {
+    match state
+        .atp_service
+        .commit_graph_listitem(owner_actor_id, list_uri, subject_did, now)
+        .await
+    {
         Ok((rkey, at_uri)) => {
-            if let Err(e) = state.lists.set_member_atp_record(list_id, target.id, &rkey, &at_uri).await {
+            if let Err(e) = state
+                .lists
+                .set_member_atp_record(list_id, target.id, &rkey, &at_uri)
+                .await
+            {
                 tracing::error!("[lists] ATP listitem rkey保存失敗: {}", e);
             }
         }
@@ -180,16 +213,34 @@ async fn maybe_publish_listitem(
 }
 
 /// リストの全listitemコミットとlist本体コミットを削除する（非公開化・リスト削除時）。
-async fn unpublish_list_from_atp(state: &AppState, list_id: i64, owner_actor_id: i64, list_at_rkey: Option<&str>, now: chrono::DateTime<chrono::Utc>) {
-    let members = state.lists.members_with_atp_record(list_id).await.unwrap_or_default();
+async fn unpublish_list_from_atp(
+    state: &AppState,
+    list_id: i64,
+    owner_actor_id: i64,
+    list_at_rkey: Option<&str>,
+    now: chrono::DateTime<chrono::Utc>,
+) {
+    let members = state
+        .lists
+        .members_with_atp_record(list_id)
+        .await
+        .unwrap_or_default();
     for (actor_id, rkey) in members {
-        if let Err(e) = state.atp_service.delete_atp_graph_listitem(owner_actor_id, &rkey, now).await {
+        if let Err(e) = state
+            .atp_service
+            .delete_atp_graph_listitem(owner_actor_id, &rkey, now)
+            .await
+        {
             tracing::warn!("[lists] ATP listitem delete失敗: {}", e);
         }
         let _ = state.lists.clear_member_atp_record(list_id, actor_id).await;
     }
     if let Some(rkey) = list_at_rkey {
-        if let Err(e) = state.atp_service.delete_atp_graph_list(owner_actor_id, rkey, now).await {
+        if let Err(e) = state
+            .atp_service
+            .delete_atp_graph_list(owner_actor_id, rkey, now)
+            .await
+        {
             tracing::warn!("[lists] ATP list delete失敗: {}", e);
         }
     }
@@ -218,7 +269,8 @@ pub async fn update_list(
     };
     let name = req.name.trim();
     if name.is_empty() || name.chars().count() > 100 {
-        return ApiError::BadRequest("リスト名は1〜100文字で入力してください".to_string()).into_response();
+        return ApiError::BadRequest("リスト名は1〜100文字で入力してください".to_string())
+            .into_response();
     }
 
     let before = match state.lists.find_by_id(id).await {
@@ -228,7 +280,11 @@ pub async fn update_list(
         Err(e) => return ApiError::Internal(format!("リスト取得失敗: {}", e)).into_response(),
     };
 
-    match state.lists.update(id, user.actor_id, name, req.is_public).await {
+    match state
+        .lists
+        .update(id, user.actor_id, name, req.is_public)
+        .await
+    {
         Ok(0) => ApiError::NotFound("LIST_NOT_FOUND").into_response(),
         Ok(_) => {
             let now = chrono::Utc::now();
@@ -240,21 +296,31 @@ pub async fn update_list(
                     if let Ok(members) = state.lists.members(id).await {
                         for m in members {
                             if let Ok(Some(actor)) = state.actors.find_by_id(m.actor_id).await {
-                                maybe_publish_listitem(&state, id, list.at_uri.as_deref(), user.actor_id, &actor, now).await;
+                                maybe_publish_listitem(
+                                    &state,
+                                    id,
+                                    list.at_uri.as_deref(),
+                                    user.actor_id,
+                                    &actor,
+                                    now,
+                                )
+                                .await;
                             }
                         }
                     }
                 }
             } else if before.is_public && !req.is_public {
                 // 公開→非公開: 全listitem + list本体のATPレコードを削除する。
-                unpublish_list_from_atp(&state, id, user.actor_id, before.at_rkey.as_deref(), now).await;
+                unpublish_list_from_atp(&state, id, user.actor_id, before.at_rkey.as_deref(), now)
+                    .await;
             }
             // 公開のまま名前だけ変更した場合、既存ATPレコードの内容は追従しない
             // （既知の制約。再度非公開→公開のトグルで再コミットされる）。
 
             match state.lists.find_by_id(id).await {
                 Ok(Some(row)) => Json(ListResponse::from(row)).into_response(),
-                _ => ApiError::Internal("更新後のリスト取得に失敗しました".to_string()).into_response(),
+                _ => ApiError::Internal("更新後のリスト取得に失敗しました".to_string())
+                    .into_response(),
             }
         }
         Err(e) => ApiError::Internal(format!("リスト更新失敗: {}", e)).into_response(),
@@ -282,7 +348,11 @@ pub async fn delete_list(
             .collect(),
         Err(_) => Vec::new(),
     };
-    let member_atp_records = state.lists.members_with_atp_record(id).await.unwrap_or_default();
+    let member_atp_records = state
+        .lists
+        .members_with_atp_record(id)
+        .await
+        .unwrap_or_default();
 
     match state.lists.delete(id, user.actor_id).await {
         Ok(0) => ApiError::NotFound("LIST_NOT_FOUND").into_response(),
@@ -297,13 +367,27 @@ pub async fn delete_list(
                 if before.is_public {
                     let now = chrono::Utc::now();
                     for (_actor_id, rkey) in member_atp_records {
-                        if let Err(e) = state.atp_service.delete_atp_graph_listitem(user.actor_id, &rkey, now).await {
-                            tracing::warn!("[lists] ATP listitem delete失敗（リスト削除に伴う片付け）: {}", e);
+                        if let Err(e) = state
+                            .atp_service
+                            .delete_atp_graph_listitem(user.actor_id, &rkey, now)
+                            .await
+                        {
+                            tracing::warn!(
+                                "[lists] ATP listitem delete失敗（リスト削除に伴う片付け）: {}",
+                                e
+                            );
                         }
                     }
                     if let Some(rkey) = before.at_rkey.as_deref() {
-                        if let Err(e) = state.atp_service.delete_atp_graph_list(user.actor_id, rkey, now).await {
-                            tracing::warn!("[lists] ATP list delete失敗（リスト削除に伴う片付け）: {}", e);
+                        if let Err(e) = state
+                            .atp_service
+                            .delete_atp_graph_list(user.actor_id, rkey, now)
+                            .await
+                        {
+                            tracing::warn!(
+                                "[lists] ATP list delete失敗（リスト削除に伴う片付け）: {}",
+                                e
+                            );
                         }
                     }
                 }
@@ -377,14 +461,22 @@ pub async fn add_member(
 
     let target_actor = match resolve_and_upsert_target(&state, &req.target).await {
         Ok(a) => a,
-        Err(e) => return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response()
+        }
     };
 
     // プロキシフォロー要否（参照カウント方式）: 追加前の時点でどのリストからも
     // 参照されていなければ、追加後に初めて list-relay がフォローする必要がある。
-    let was_referenced = match state.lists.actor_referenced_by_any_list(target_actor.id).await {
+    let was_referenced = match state
+        .lists
+        .actor_referenced_by_any_list(target_actor.id)
+        .await
+    {
         Ok(v) => v,
-        Err(e) => return ApiError::Internal(format!("参照カウント取得失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("参照カウント取得失敗: {}", e)).into_response()
+        }
     };
 
     let now = chrono::Utc::now();
@@ -394,7 +486,9 @@ pub async fn add_member(
 
     tracing::info!(
         "[lists] list={} にメンバー追加 actor={} (type={})",
-        id, target_actor.id, target_actor.actor_type
+        id,
+        target_actor.id,
+        target_actor.actor_type
     );
 
     if target_actor.actor_type == "fedi" && !was_referenced {
@@ -407,12 +501,21 @@ pub async fn add_member(
     }
 
     if list.is_public {
-        maybe_publish_listitem(&state, id, list.at_uri.as_deref(), user.actor_id, &target_actor, now).await;
+        maybe_publish_listitem(
+            &state,
+            id,
+            list.at_uri.as_deref(),
+            user.actor_id,
+            &target_actor,
+            now,
+        )
+        .await;
     }
 
     match state.lists.members(id).await {
         Ok(members) => {
-            let out: Vec<ListMemberResponse> = members.into_iter().map(ListMemberResponse::from).collect();
+            let out: Vec<ListMemberResponse> =
+                members.into_iter().map(ListMemberResponse::from).collect();
             (StatusCode::CREATED, Json(out)).into_response()
         }
         Err(e) => ApiError::Internal(format!("メンバー取得失敗: {}", e)).into_response(),
@@ -441,7 +544,12 @@ pub async fn remove_member(
     };
 
     // list_members 行が削除される前にATP listitem rkeyを控えておく。
-    let atp_rkey = state.lists.find_member_atp_rkey(id, actor_id).await.ok().flatten();
+    let atp_rkey = state
+        .lists
+        .find_member_atp_rkey(id, actor_id)
+        .await
+        .ok()
+        .flatten();
 
     match state.lists.remove_member(id, actor_id).await {
         Ok(true) => {
@@ -453,7 +561,11 @@ pub async fn remove_member(
             touch_jetstream_wanted_dids(&state.db).await;
             if let Some(rkey) = atp_rkey {
                 let now = chrono::Utc::now();
-                if let Err(e) = state.atp_service.delete_atp_graph_listitem(user.actor_id, &rkey, now).await {
+                if let Err(e) = state
+                    .atp_service
+                    .delete_atp_graph_listitem(user.actor_id, &rkey, now)
+                    .await
+                {
                     tracing::warn!("[lists] ATP listitem delete失敗: {}", e);
                 }
             }

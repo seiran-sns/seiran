@@ -84,9 +84,9 @@ fn decode_p256_multikey(multibase: &str) -> Result<p256::ecdsa::VerifyingKey, Di
     let bytes = bs58::decode(encoded)
         .into_vec()
         .map_err(|e| DidResolveError::KeyDecode(e.to_string()))?;
-    let point_bytes = bytes
-        .strip_prefix(&[0x80u8, 0x24u8])
-        .ok_or_else(|| DidResolveError::KeyDecode("p256-pub multicodec接頭辞と一致しません".to_owned()))?;
+    let point_bytes = bytes.strip_prefix(&[0x80u8, 0x24u8]).ok_or_else(|| {
+        DidResolveError::KeyDecode("p256-pub multicodec接頭辞と一致しません".to_owned())
+    })?;
     p256::ecdsa::VerifyingKey::from_sec1_bytes(point_bytes)
         .map_err(|e| DidResolveError::KeyDecode(e.to_string()))
 }

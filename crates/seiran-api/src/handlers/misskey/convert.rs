@@ -10,11 +10,15 @@ use sqlx::Row;
 use seiran_common::repository::{Actor, NotificationRow, TimelinePost};
 
 use crate::handlers::notes::delivery::at_uri_to_bsky_app_url;
-use crate::handlers::notes::{fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place, AttachmentResponse, ReactionSummary};
+use crate::handlers::notes::{
+    fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place,
+    AttachmentResponse, ReactionSummary,
+};
 use crate::AppState;
 
 use super::types::{
-    MisskeyDriveFile, MisskeyDriveFileProperties, MisskeyMeDetailed, MisskeyNote, MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite,
+    MisskeyDriveFile, MisskeyDriveFileProperties, MisskeyMeDetailed, MisskeyNote,
+    MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite,
 };
 
 pub fn user_lite(
@@ -28,7 +32,11 @@ pub fn user_lite(
     MisskeyUserLite {
         id: actor_id.to_string(),
         username: username.to_string(),
-        host: if domain == local_domain { None } else { Some(domain.to_string()) },
+        host: if domain == local_domain {
+            None
+        } else {
+            Some(domain.to_string())
+        },
         name: display_name.map(|s| s.to_string()),
         avatar_url: avatar_url.map(|s| s.to_string()),
         is_bot: false,
@@ -64,21 +72,26 @@ pub async fn build_user_detailed(state: &AppState, actor: &Actor) -> MisskeyUser
         avatar_url.as_deref(),
     );
 
-    let notes_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND deleted_at IS NULL")
-        .bind(actor.id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(0);
-    let followers_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE target_actor_id = $1 AND status = 'accepted'")
-        .bind(actor.id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(0);
-    let following_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE follower_actor_id = $1 AND status = 'accepted'")
-        .bind(actor.id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(0);
+    let notes_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND deleted_at IS NULL")
+            .bind(actor.id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(0);
+    let followers_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM follows WHERE target_actor_id = $1 AND status = 'accepted'",
+    )
+    .bind(actor.id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+    let following_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM follows WHERE follower_actor_id = $1 AND status = 'accepted'",
+    )
+    .bind(actor.id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
 
     MisskeyUserDetailed {
         lite,
@@ -101,7 +114,13 @@ pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDeta
     let detailed = build_user_detailed(state, actor).await;
 
     let role = match actor.user_id {
-        Some(uid) => state.users.find_role_by_user_id(uid).await.ok().flatten().unwrap_or_else(|| "user".to_string()),
+        Some(uid) => state
+            .users
+            .find_role_by_user_id(uid)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "user".to_string()),
         None => "user".to_string(),
     };
 
@@ -135,7 +154,10 @@ fn to_misskey_emojis(value: Option<&serde_json::Value>) -> BTreeMap<String, Stri
         .flat_map(|map| map.iter())
         .filter_map(|(key, value)| {
             let url = value.as_str()?;
-            let shortcode = key.strip_prefix(':').and_then(|s| s.strip_suffix(':')).unwrap_or(key);
+            let shortcode = key
+                .strip_prefix(':')
+                .and_then(|s| s.strip_suffix(':'))
+                .unwrap_or(key);
             Some((shortcode.to_string(), url.to_string()))
         })
         .collect()
@@ -164,7 +186,10 @@ fn to_misskey_note(
         .map(|(i, a)| MisskeyDriveFile {
             id: format!("{}-{}", p.id, i),
             // リモート添付は media_files に対応行が無く取得できないため、投稿日時を代用する。
-            created_at: a.media_created_at.clone().unwrap_or_else(|| p.created_at.to_rfc3339()),
+            created_at: a
+                .media_created_at
+                .clone()
+                .unwrap_or_else(|| p.created_at.to_rfc3339()),
             name: format!("file{}", i),
             file_type: a.mime_type.clone(),
             md5: a.sha256.clone().unwrap_or_default(),
@@ -205,7 +230,10 @@ fn to_misskey_note(
 
     // seiran のリポスト（repost_of_post_id）と引用（quote_of_post_id）はどちらも
     // Misskey の renoteId に統合する（型定義のコメント参照）。text は引用時のみ残す。
-    let renote_id = p.repost_of_post_id.or(p.quote_of_post_id).map(|i| i.to_string());
+    let renote_id = p
+        .repost_of_post_id
+        .or(p.quote_of_post_id)
+        .map(|i| i.to_string());
     let is_plain_repost = p.repost_of_post_id.is_some();
 
     // Misskey本家準拠: `uri` は ActivityPub Object ID（リモート由来のノートにのみ存在し、
@@ -218,17 +246,26 @@ fn to_misskey_note(
     // `url` は人間向けURLで、AP優先・無ければBsky（at_uri→bsky.app）にフォールバックする
     // （`dto::to_note_response`のremote_urlと同じ方針）。
     let is_local = p.domain == local_domain;
-    let uri = if is_local { None } else { p.post_ap_object_id.clone().filter(|s| !s.is_empty()) };
+    let uri = if is_local {
+        None
+    } else {
+        p.post_ap_object_id.clone().filter(|s| !s.is_empty())
+    };
     let url = if is_local {
         None
     } else {
-        uri.clone().or_else(|| p.post_at_uri.as_deref().map(at_uri_to_bsky_app_url))
+        uri.clone()
+            .or_else(|| p.post_at_uri.as_deref().map(at_uri_to_bsky_app_url))
     };
 
     MisskeyNote {
         id: p.id.to_string(),
         created_at: p.created_at.to_rfc3339(),
-        text: if is_plain_repost || p.body.is_empty() { None } else { Some(p.body.clone()) },
+        text: if is_plain_repost || p.body.is_empty() {
+            None
+        } else {
+            Some(p.body.clone())
+        },
         cw: None,
         user_id: user.id.clone(),
         user,
@@ -255,7 +292,10 @@ fn to_misskey_note(
 /// （カスタムAPI側、#45で対応済み）と同じ可視性フィルタ・一括フェッチ方針を踏襲する。
 /// 埋め込むノート自身の `renote` は常に `None`（孫リノートは埋め込まない）。
 async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id: Option<i64>) {
-    let orig_ids: Vec<i64> = notes.iter().filter_map(|n| n.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok())).collect();
+    let orig_ids: Vec<i64> = notes
+        .iter()
+        .filter_map(|n| n.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok()))
+        .collect();
     if orig_ids.is_empty() {
         return;
     }
@@ -298,11 +338,18 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
         let reactions = rmap.get(&id).cloned().unwrap_or_default();
         let rc = *renote_counts.get(&id).unwrap_or(&0);
         let pc = *reply_counts.get(&id).unwrap_or(&0);
-        by_id.insert(id, to_misskey_note(&r, &state.local_domain, &atts, &reactions, rc, pc));
+        by_id.insert(
+            id,
+            to_misskey_note(&r, &state.local_domain, &atts, &reactions, rc, pc),
+        );
     }
 
     for note in notes.iter_mut() {
-        if let Some(rid) = note.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok()) {
+        if let Some(rid) = note
+            .renote_id
+            .as_deref()
+            .and_then(|s| s.parse::<i64>().ok())
+        {
             note.renote = by_id.get(&rid).cloned().map(Box::new);
         }
     }
@@ -311,7 +358,10 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
 /// `posts` テーブルへの renote数/reply数の一括集計（Misskey の `renoteCount`/`repliesCount`）。
 /// seiran のリポジトリ層にはまだ集計メソッドが無いため、既存の `fetch_reactions_map` 等と
 /// 同じ「post_id リストで一括SELECT」パターンをここで踏襲する。
-async fn fetch_counts_map(db: &sqlx::PgPool, post_ids: &[i64]) -> (HashMap<i64, i64>, HashMap<i64, i64>) {
+async fn fetch_counts_map(
+    db: &sqlx::PgPool,
+    post_ids: &[i64],
+) -> (HashMap<i64, i64>, HashMap<i64, i64>) {
     if post_ids.is_empty() {
         return (HashMap::new(), HashMap::new());
     }
@@ -348,7 +398,11 @@ async fn fetch_counts_map(db: &sqlx::PgPool, post_ids: &[i64]) -> (HashMap<i64, 
 }
 
 /// タイムライン等、複数ノートをまとめて Misskey 形式へ変換する。
-pub async fn build_notes(state: &AppState, mut rows: Vec<TimelinePost>, my_actor_id: Option<i64>) -> Vec<MisskeyNote> {
+pub async fn build_notes(
+    state: &AppState,
+    mut rows: Vec<TimelinePost>,
+    my_actor_id: Option<i64>,
+) -> Vec<MisskeyNote> {
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
@@ -372,7 +426,11 @@ pub async fn build_notes(state: &AppState, mut rows: Vec<TimelinePost>, my_actor
 }
 
 /// 単一ノートを Misskey 形式へ変換する（`/api/notes/show` 用）。
-pub async fn build_note(state: &AppState, post: TimelinePost, my_actor_id: Option<i64>) -> MisskeyNote {
+pub async fn build_note(
+    state: &AppState,
+    post: TimelinePost,
+    my_actor_id: Option<i64>,
+) -> MisskeyNote {
     build_notes(state, vec![post], my_actor_id)
         .await
         .into_iter()
@@ -389,7 +447,12 @@ pub async fn build_notifications(
 ) -> Vec<MisskeyNotification> {
     use std::collections::{HashMap, HashSet};
 
-    let notifier_ids: Vec<i64> = rows.iter().filter_map(|r| r.notifier_actor_id).collect::<HashSet<_>>().into_iter().collect();
+    let notifier_ids: Vec<i64> = rows
+        .iter()
+        .filter_map(|r| r.notifier_actor_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
     let notifier_users: HashMap<i64, MisskeyUserLite> = if notifier_ids.is_empty() {
         HashMap::new()
     } else {
@@ -407,7 +470,17 @@ pub async fn build_notifications(
         .unwrap_or_default()
         .into_iter()
         .map(|(id, username, domain, display_name, avatar_url)| {
-            (id, user_lite(id, &username, &domain, &state.local_domain, display_name.as_deref(), avatar_url.as_deref()))
+            (
+                id,
+                user_lite(
+                    id,
+                    &username,
+                    &domain,
+                    &state.local_domain,
+                    display_name.as_deref(),
+                    avatar_url.as_deref(),
+                ),
+            )
         })
         .collect()
     };
@@ -416,8 +489,15 @@ pub async fn build_notifications(
     let note_ids: HashSet<i64> = rows.iter().filter_map(|r| r.note_id).collect();
     let mut notes: HashMap<i64, MisskeyNote> = HashMap::new();
     for note_id in note_ids {
-        if let Ok(Some(post)) = state.posts.find_by_id_for_viewer(note_id, Some(recipient_actor_id)).await {
-            notes.insert(note_id, build_note(state, post, Some(recipient_actor_id)).await);
+        if let Ok(Some(post)) = state
+            .posts
+            .find_by_id_for_viewer(note_id, Some(recipient_actor_id))
+            .await
+        {
+            notes.insert(
+                note_id,
+                build_note(state, post, Some(recipient_actor_id)).await,
+            );
         }
     }
 
@@ -430,7 +510,9 @@ pub async fn build_notifications(
             // からは解決できなくなる。通知 INSERT 時点で非正規化保存した
             // `reaction_emoji_url`（存在する場合）でこの通知固有の1エントリだけ上書きし、
             // 過去の通知でも確実に画像解決できるようにする。
-            if let (Some(note), Some(reaction), Some(url)) = (&mut note, &r.reaction, &r.reaction_emoji_url) {
+            if let (Some(note), Some(reaction), Some(url)) =
+                (&mut note, &r.reaction, &r.reaction_emoji_url)
+            {
                 // `to_misskey_note` と同様に `:shortcode:` → `shortcode` に変換する。
                 let emoji_key = reaction
                     .strip_prefix(':')
@@ -444,7 +526,9 @@ pub async fn build_notifications(
                 created_at: r.created_at.to_rfc3339(),
                 kind: r.kind,
                 user_id: r.notifier_actor_id.map(|id| id.to_string()),
-                user: r.notifier_actor_id.and_then(|id| notifier_users.get(&id).cloned()),
+                user: r
+                    .notifier_actor_id
+                    .and_then(|id| notifier_users.get(&id).cloned()),
                 note,
                 reaction: r.reaction,
             }
@@ -528,8 +612,14 @@ mod tests {
 
         let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
 
-        assert_eq!(note.uri.as_deref(), Some("https://remote.example/notes/xyz"));
-        assert_eq!(note.url.as_deref(), Some("https://remote.example/notes/xyz"));
+        assert_eq!(
+            note.uri.as_deref(),
+            Some("https://remote.example/notes/xyz")
+        );
+        assert_eq!(
+            note.url.as_deref(),
+            Some("https://remote.example/notes/xyz")
+        );
         assert_eq!(note.user.host.as_deref(), Some("remote.example"));
     }
 
@@ -543,6 +633,9 @@ mod tests {
         let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
 
         assert_eq!(note.uri, None);
-        assert_eq!(note.url.as_deref(), Some("https://bsky.app/profile/did:plc:abc123/post/xyz"));
+        assert_eq!(
+            note.url.as_deref(),
+            Some("https://bsky.app/profile/did:plc:abc123/post/xyz")
+        );
     }
 }

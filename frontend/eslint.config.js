@@ -26,7 +26,9 @@ export default tseslint.config(
       'react-hooks/refs': 'off',
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/use-memo': 'off',
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      // Context provider と利用hookを同じモジュールから公開する設計のため、
+      // コンポーネント専用exportを前提とするFast Refresh規則は適用しない。
+      'react-refresh/only-export-components': 'off',
     },
   },
 )

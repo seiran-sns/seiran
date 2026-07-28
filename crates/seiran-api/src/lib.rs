@@ -6,32 +6,43 @@
 
 pub mod cloudflare;
 pub mod error;
+pub mod handlers;
 pub mod mailer;
 pub mod middleware;
-pub mod handlers;
 pub mod search;
 pub mod search_query;
 pub mod streaming;
 
+use axum::{
+    extract::DefaultBodyLimit,
+    routing::{delete, get, patch, post},
+    Router,
+};
+use dashmap::DashMap;
+use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
-use dashmap::DashMap;
 use tower_http::cors::{Any, CorsLayer};
-use axum::{extract::DefaultBodyLimit, routing::{delete, get, patch, post}, Router};
-use sqlx::PgPool;
 use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 
-use seiran_common::{
-    LocalAuthProvider, Secrets, AtpCommitService, AtpCommitEvent, ApClient,
-    StorageProviderRepository, PgStorageProviderRepository,
-    MediaFileRepository, PgMediaFileRepository,
-    SiteSettingsRepository, PgSiteSettingsRepository,
-    S3StorageClient, ApDeliveryKind, Job, JobQueue, job_priority,
-};
 use seiran_common::repository::{
-    ActorRepository, AppTokenRepository, AtpReadRepository, BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository, PinnedPostsRepository, PostRepository, ReactionRepository, RemoteEmojiRepository, TotpRepository, UserRepository,
-    PgActorRepository, PgAppTokenRepository, PgAtpReadRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgRemoteEmojiRepository, PgTotpRepository, PgUserRepository,
+    ActorRepository, AppTokenRepository, AtpReadRepository, BlockRepository, DmRepository,
+    EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository,
+    HashtagRepository, ListRepository, MuteRepository, NotificationRepository,
+    PasswordResetRepository, PgActorRepository, PgAppTokenRepository, PgAtpReadRepository,
+    PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository,
+    PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository,
+    PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository,
+    PgReactionRepository, PgRemoteEmojiRepository, PgTotpRepository, PgUserRepository,
+    PinnedPostsRepository, PostRepository, ReactionRepository, RemoteEmojiRepository,
+    TotpRepository, UserRepository,
+};
+use seiran_common::{
+    job_priority, ApClient, ApDeliveryKind, AtpCommitEvent, AtpCommitService, Job, JobQueue,
+    LocalAuthProvider, MediaFileRepository, PgMediaFileRepository, PgSiteSettingsRepository,
+    PgStorageProviderRepository, S3StorageClient, Secrets, SiteSettingsRepository,
+    StorageProviderRepository,
 };
 
 use handlers::miauth::MiAuthSession;
@@ -119,7 +130,11 @@ impl AppState {
             .enqueue(Job::ApDelivery { actor_id, kind }, job_priority::HIGH)
             .await
         {
-            tracing::error!("[job] ApDelivery enqueue 失敗 (actor_id={}): {}", actor_id, e);
+            tracing::error!(
+                "[job] ApDelivery enqueue 失敗 (actor_id={}): {}",
+                actor_id,
+                e
+            );
         }
     }
 
@@ -139,10 +154,20 @@ impl AppState {
     pub async fn enqueue_proxy_follow_sync(&self, target_actor_id: i64, want_follow: bool) {
         if let Err(e) = self
             .job_queue
-            .enqueue(Job::ProxyFollowSync { target_actor_id, want_follow }, job_priority::HIGH)
+            .enqueue(
+                Job::ProxyFollowSync {
+                    target_actor_id,
+                    want_follow,
+                },
+                job_priority::HIGH,
+            )
             .await
         {
-            tracing::error!("[job] ProxyFollowSync enqueue 失敗 (target={}): {}", target_actor_id, e);
+            tracing::error!(
+                "[job] ProxyFollowSync enqueue 失敗 (target={}): {}",
+                target_actor_id,
+                e
+            );
         }
     }
 
@@ -151,10 +176,17 @@ impl AppState {
     pub async fn enqueue_account_withdraw_unfollow_all(&self, actor_id: i64, username: String) {
         if let Err(e) = self
             .job_queue
-            .enqueue(Job::AccountWithdrawUnfollowAll { actor_id, username }, job_priority::HIGH)
+            .enqueue(
+                Job::AccountWithdrawUnfollowAll { actor_id, username },
+                job_priority::HIGH,
+            )
             .await
         {
-            tracing::error!("[job] AccountWithdrawUnfollowAll enqueue 失敗 (actor_id={}): {}", actor_id, e);
+            tracing::error!(
+                "[job] AccountWithdrawUnfollowAll enqueue 失敗 (actor_id={}): {}",
+                actor_id,
+                e
+            );
         }
     }
 
@@ -174,18 +206,34 @@ impl AppState {
         if let Err(e) = self
             .job_queue
             .enqueue(
-                Job::BskyPostCommitDeferred { actor_id, post_id, text, attachment_ids, reply_root, reply_parent, now },
+                Job::BskyPostCommitDeferred {
+                    actor_id,
+                    post_id,
+                    text,
+                    attachment_ids,
+                    reply_root,
+                    reply_parent,
+                    now,
+                },
                 job_priority::HIGH,
             )
             .await
         {
-            tracing::error!("[job] BskyPostCommitDeferred enqueue 失敗 (post_id={}): {}", post_id, e);
+            tracing::error!(
+                "[job] BskyPostCommitDeferred enqueue 失敗 (post_id={}): {}",
+                post_id,
+                e
+            );
         }
     }
 
     /// DM（`visibility='direct'`）投稿のBsky宛先への実送信（`chat.bsky.convo.sendMessage`）ジョブを積む。
     pub async fn enqueue_bsky_dm_send(&self, post_id: i64) {
-        if let Err(e) = self.job_queue.enqueue(Job::BskyDmSend { post_id }, job_priority::HIGH).await {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::BskyDmSend { post_id }, job_priority::HIGH)
+            .await
+        {
             tracing::error!("[job] BskyDmSend enqueue 失敗 (post_id={}): {}", post_id, e);
         }
     }
@@ -195,10 +243,20 @@ impl AppState {
     pub async fn enqueue_remote_follow_list_sync(&self, actor_id: i64, direction: String) {
         if let Err(e) = self
             .job_queue
-            .enqueue(Job::RemoteFollowListSync { actor_id, direction }, job_priority::LOW)
+            .enqueue(
+                Job::RemoteFollowListSync {
+                    actor_id,
+                    direction,
+                },
+                job_priority::LOW,
+            )
             .await
         {
-            tracing::error!("[job] RemoteFollowListSync enqueue 失敗 (actor_id={}): {}", actor_id, e);
+            tracing::error!(
+                "[job] RemoteFollowListSync enqueue 失敗 (actor_id={}): {}",
+                actor_id,
+                e
+            );
         }
     }
 
@@ -206,7 +264,10 @@ impl AppState {
     pub async fn enqueue_remote_actor_resolve(&self, uri: String) {
         if let Err(e) = self
             .job_queue
-            .enqueue(Job::RemoteActorResolve { uri: uri.clone() }, job_priority::LOW)
+            .enqueue(
+                Job::RemoteActorResolve { uri: uri.clone() },
+                job_priority::LOW,
+            )
             .await
         {
             tracing::error!("[job] RemoteActorResolve enqueue 失敗 (uri={}): {}", uri, e);
@@ -236,8 +297,11 @@ pub async fn init_state(
     let (atp_event_tx, _) = broadcast::channel::<AtpCommitEvent>(1024);
     let atp_event_tx = Arc::new(atp_event_tx);
 
-    let mut atp_service =
-        AtpCommitService::new(pool.clone(), Arc::clone(&atp_event_tx), Arc::clone(&http_client));
+    let mut atp_service = AtpCommitService::new(
+        pool.clone(),
+        Arc::clone(&atp_event_tx),
+        Arc::clone(&http_client),
+    );
     if let Some(redis_url) = atp_event_redis_url {
         match atp_service.with_redis_bridge(&redis_url).await {
             Ok(()) => tracing::info!("[seiran-api] ATPコミットイベント: Redisプロセス間配信ブリッジ有効"),
@@ -283,32 +347,42 @@ pub async fn init_state(
     let app_tokens: Arc<dyn AppTokenRepository> = Arc::new(PgAppTokenRepository::new(pool.clone()));
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
     let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
-    let pinned_posts: Arc<dyn PinnedPostsRepository> = Arc::new(PgPinnedPostsRepository::new(pool.clone()));
-    let notifications: Arc<dyn NotificationRepository> = Arc::new(PgNotificationRepository::new(pool.clone()));
+    let pinned_posts: Arc<dyn PinnedPostsRepository> =
+        Arc::new(PgPinnedPostsRepository::new(pool.clone()));
+    let notifications: Arc<dyn NotificationRepository> =
+        Arc::new(PgNotificationRepository::new(pool.clone()));
     let dm: Arc<dyn DmRepository> = Arc::new(PgDmRepository::new(pool.clone()));
     let lists: Arc<dyn ListRepository> = Arc::new(PgListRepository::new(pool.clone()));
     let hashtags: Arc<dyn HashtagRepository> = Arc::new(PgHashtagRepository::new(pool.clone()));
-    let password_resets: Arc<dyn PasswordResetRepository> = Arc::new(PgPasswordResetRepository::new(pool.clone()));
-    let email_verifications: Arc<dyn EmailVerificationRepository> = Arc::new(PgEmailVerificationRepository::new(pool.clone()));
-    let email_changes: Arc<dyn EmailChangeRepository> = Arc::new(PgEmailChangeRepository::new(pool.clone()));
+    let password_resets: Arc<dyn PasswordResetRepository> =
+        Arc::new(PgPasswordResetRepository::new(pool.clone()));
+    let email_verifications: Arc<dyn EmailVerificationRepository> =
+        Arc::new(PgEmailVerificationRepository::new(pool.clone()));
+    let email_changes: Arc<dyn EmailChangeRepository> =
+        Arc::new(PgEmailChangeRepository::new(pool.clone()));
     let emojis: Arc<dyn EmojiRepository> = Arc::new(PgEmojiRepository::new(pool.clone()));
-    let remote_emojis: Arc<dyn RemoteEmojiRepository> = Arc::new(PgRemoteEmojiRepository::new(pool.clone()));
+    let remote_emojis: Arc<dyn RemoteEmojiRepository> =
+        Arc::new(PgRemoteEmojiRepository::new(pool.clone()));
     let totp: Arc<dyn TotpRepository> = Arc::new(PgTotpRepository::new(pool.clone()));
 
-    let system_proxy_actor_id = match seiran_common::ensure_system_proxy_actor(&pool, &local_domain).await {
-        Ok(id) => id,
-        Err(e) => {
-            // 起動を止めるほどの障害ではない（リスト機能のプロキシフォローが動かないだけ）ため、
-            // ログのみに留めて 0（実在しない actor_id）で継続する。
-            tracing::error!("[seiran-api] list-relay プロキシアクターの準備に失敗: {}", e);
-            0
-        }
-    };
+    let system_proxy_actor_id =
+        match seiran_common::ensure_system_proxy_actor(&pool, &local_domain).await {
+            Ok(id) => id,
+            Err(e) => {
+                // 起動を止めるほどの障害ではない（リスト機能のプロキシフォローが動かないだけ）ため、
+                // ログのみに留めて 0（実在しない actor_id）で継続する。
+                tracing::error!(
+                    "[seiran-api] list-relay プロキシアクターの準備に失敗: {}",
+                    e
+                );
+                0
+            }
+        };
 
-    let rp_origin_value = std::env::var("WEBAUTHN_ORIGIN")
-        .unwrap_or_else(|_| format!("https://{}", local_domain));
-    let rp_origin = Url::parse(&rp_origin_value)
-        .expect("LOCAL_DOMAINからWebAuthn originを構築できません");
+    let rp_origin_value =
+        std::env::var("WEBAUTHN_ORIGIN").unwrap_or_else(|_| format!("https://{}", local_domain));
+    let rp_origin =
+        Url::parse(&rp_origin_value).expect("LOCAL_DOMAINからWebAuthn originを構築できません");
     let webauthn = Arc::new(
         WebauthnBuilder::new(&local_domain, &rp_origin)
             .expect("WebAuthn relying party設定が不正です")
@@ -379,49 +453,96 @@ pub fn router(state: AppState) -> Router {
         // ユーザー通報
         .route("/api/reports", post(handlers::reports::create_report))
         // 管理者 API
-        .route("/api/admin/storage-providers",
+        .route(
+            "/api/admin/storage-providers",
             get(handlers::admin::storage::list_storage_providers)
-            .post(handlers::admin::storage::create_storage_provider))
-        .route("/api/admin/storage-providers/:id",
+                .post(handlers::admin::storage::create_storage_provider),
+        )
+        .route(
+            "/api/admin/storage-providers/:id",
             patch(handlers::admin::storage::update_storage_provider)
-            .delete(handlers::admin::storage::delete_storage_provider))
+                .delete(handlers::admin::storage::delete_storage_provider),
+        )
         // 管理者ユーザー管理
         .route("/api/admin/users", get(handlers::admin::users::list_users))
-        .route("/api/admin/users/:id/suspend", post(handlers::admin::users::suspend_user))
-        .route("/api/admin/users/:id/unsuspend", post(handlers::admin::users::unsuspend_user))
-        .route("/api/admin/users/:id/role", post(handlers::admin::users::change_user_role))
-        .route("/api/admin/users/:id/totp/disable", post(handlers::admin::users::disable_user_totp))
+        .route(
+            "/api/admin/users/:id/suspend",
+            post(handlers::admin::users::suspend_user),
+        )
+        .route(
+            "/api/admin/users/:id/unsuspend",
+            post(handlers::admin::users::unsuspend_user),
+        )
+        .route(
+            "/api/admin/users/:id/role",
+            post(handlers::admin::users::change_user_role),
+        )
+        .route(
+            "/api/admin/users/:id/totp/disable",
+            post(handlers::admin::users::disable_user_totp),
+        )
         // 通報管理
-        .route("/api/admin/reports", get(handlers::admin::reports::list_reports))
-        .route("/api/admin/reports/:id/close", post(handlers::admin::reports::close_report))
-        .route("/api/admin/reports/:id/comments",
-            get(handlers::admin::reports::list_comments).post(handlers::admin::reports::add_comment))
-        .route("/api/admin/reports/:id/delete-post", post(handlers::admin::reports::delete_subject_post))
-        .route("/api/admin/reports/:id/suspend-user", post(handlers::admin::reports::suspend_subject))
-        .route("/api/admin/reports/:id/forward", post(handlers::admin::reports::forward_report))
+        .route(
+            "/api/admin/reports",
+            get(handlers::admin::reports::list_reports),
+        )
+        .route(
+            "/api/admin/reports/:id/close",
+            post(handlers::admin::reports::close_report),
+        )
+        .route(
+            "/api/admin/reports/:id/comments",
+            get(handlers::admin::reports::list_comments)
+                .post(handlers::admin::reports::add_comment),
+        )
+        .route(
+            "/api/admin/reports/:id/delete-post",
+            post(handlers::admin::reports::delete_subject_post),
+        )
+        .route(
+            "/api/admin/reports/:id/suspend-user",
+            post(handlers::admin::reports::suspend_subject),
+        )
+        .route(
+            "/api/admin/reports/:id/forward",
+            post(handlers::admin::reports::forward_report),
+        )
         // サイト設定
-        .route("/api/admin/site-settings",
+        .route(
+            "/api/admin/site-settings",
             get(handlers::admin::site_settings::get_site_settings)
-            .patch(handlers::admin::site_settings::update_site_settings))
+                .patch(handlers::admin::site_settings::update_site_settings),
+        )
         // カスタム絵文字
-        .route("/api/admin/emojis",
-            get(handlers::admin::emojis::list_emojis)
-            .post(handlers::admin::emojis::create_emoji))
-        .route("/api/admin/emojis/:id",
+        .route(
+            "/api/admin/emojis",
+            get(handlers::admin::emojis::list_emojis).post(handlers::admin::emojis::create_emoji),
+        )
+        .route(
+            "/api/admin/emojis/:id",
             patch(handlers::admin::emojis::update_emoji)
-            .delete(handlers::admin::emojis::delete_emoji))
+                .delete(handlers::admin::emojis::delete_emoji),
+        )
         // 絵文字インポート（#50）。多数のカスタム絵文字を含むZIPは数十〜数百MBになりうるため、
         // axum のデフォルトボディ上限（2MB）を明示的に引き上げる。
-        .route("/api/admin/emojis/import",
+        .route(
+            "/api/admin/emojis/import",
             post(handlers::admin::emoji_import::start_import)
-                .layer(DefaultBodyLimit::max(200 * 1024 * 1024)))
-        .route("/api/admin/emojis/import/:job_id",
-            get(handlers::admin::emoji_import::get_import_status))
+                .layer(DefaultBodyLimit::max(200 * 1024 * 1024)),
+        )
+        .route(
+            "/api/admin/emojis/import/:job_id",
+            get(handlers::admin::emoji_import::get_import_status),
+        )
         // リモート絵文字カタログの一覧・インポート（#73）
-        .route("/api/admin/emojis/remote",
-            get(handlers::admin::remote_emojis::list_remote_emojis))
-        .route("/api/admin/emojis/remote/import",
-            post(handlers::admin::remote_emojis::import_remote_emoji))
+        .route(
+            "/api/admin/emojis/remote",
+            get(handlers::admin::remote_emojis::list_remote_emojis),
+        )
+        .route(
+            "/api/admin/emojis/remote/import",
+            post(handlers::admin::remote_emojis::import_remote_emoji),
+        )
         // ドライブ（メディアアップロード）。動画・音声添付を考慮し 100MB まで許可
         // （axum のデフォルトボディ上限は小さいため明示的に上書きする）。
         .route(
@@ -431,62 +552,162 @@ pub fn router(state: AppState) -> Router {
         )
         // 音声・動画の簡易視聴ページ（Bskyの外部リンクカードの参照先。直リンクだと
         // ダウンロードになってしまうため<audio>/<video>タグのみのHTMLを返す）
-        .route("/api/media/:media_file_id/watch", get(handlers::drive::watch_media))
+        .route(
+            "/api/media/:media_file_id/watch",
+            get(handlers::drive::watch_media),
+        )
         // 認証
-        .route("/api/auth/verify-email", post(handlers::email_verify::request_email_verification))
-        .route("/api/auth/verify-token", get(handlers::email_verify::verify_email_token))
+        .route(
+            "/api/auth/verify-email",
+            post(handlers::email_verify::request_email_verification),
+        )
+        .route(
+            "/api/auth/verify-token",
+            get(handlers::email_verify::verify_email_token),
+        )
         .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/me", get(handlers::auth::me))
-        .route("/api/auth/request-password-reset", post(handlers::auth::request_password_reset))
-        .route("/api/auth/verify-reset-token", get(handlers::auth::verify_reset_token))
-        .route("/api/auth/reset-password", post(handlers::auth::reset_password))
+        .route(
+            "/api/auth/request-password-reset",
+            post(handlers::auth::request_password_reset),
+        )
+        .route(
+            "/api/auth/verify-reset-token",
+            get(handlers::auth::verify_reset_token),
+        )
+        .route(
+            "/api/auth/reset-password",
+            post(handlers::auth::reset_password),
+        )
         // TOTP（二段階認証、#65）: ログイン2段階目・認証アプリ紛失時のメール解除
         .route("/api/auth/totp/verify", post(handlers::totp::totp_verify))
-        .route("/api/auth/totp/request-disable-email", post(handlers::totp::totp_request_disable_email))
-        .route("/api/auth/totp/confirm-disable", post(handlers::totp::totp_confirm_disable))
-        .route("/api/auth/passkeys/start", post(handlers::passkeys::authentication_start))
-        .route("/api/auth/passkeys/finish", post(handlers::passkeys::authentication_finish))
+        .route(
+            "/api/auth/totp/request-disable-email",
+            post(handlers::totp::totp_request_disable_email),
+        )
+        .route(
+            "/api/auth/totp/confirm-disable",
+            post(handlers::totp::totp_confirm_disable),
+        )
+        .route(
+            "/api/auth/passkeys/start",
+            post(handlers::passkeys::authentication_start),
+        )
+        .route(
+            "/api/auth/passkeys/finish",
+            post(handlers::passkeys::authentication_finish),
+        )
         // アカウント管理（退会等）
         .route("/api/account/withdraw", post(handlers::account::withdraw))
-        .route("/api/account/change-password", post(handlers::account::change_password))
-        .route("/api/account/language", post(handlers::account::update_language))
-        .route("/api/account/email/request-change", post(handlers::account::request_email_change))
-        .route("/api/account/email/confirm-change", post(handlers::account::confirm_email_change))
-        .route("/api/account/app-tokens", get(handlers::account::list_app_tokens))
-        .route("/api/account/app-tokens/:id", delete(handlers::account::revoke_app_token))
+        .route(
+            "/api/account/change-password",
+            post(handlers::account::change_password),
+        )
+        .route(
+            "/api/account/language",
+            post(handlers::account::update_language),
+        )
+        .route(
+            "/api/account/email/request-change",
+            post(handlers::account::request_email_change),
+        )
+        .route(
+            "/api/account/email/confirm-change",
+            post(handlers::account::confirm_email_change),
+        )
+        .route(
+            "/api/account/app-tokens",
+            get(handlers::account::list_app_tokens),
+        )
+        .route(
+            "/api/account/app-tokens/:id",
+            delete(handlers::account::revoke_app_token),
+        )
         // TOTP（二段階認証、#65）: 設定画面での有効化・無効化
         .route("/api/account/totp/status", get(handlers::totp::totp_status))
         .route("/api/account/totp/setup", post(handlers::totp::totp_setup))
-        .route("/api/account/totp/enable", post(handlers::totp::totp_enable))
-        .route("/api/account/totp/disable", post(handlers::totp::totp_disable))
+        .route(
+            "/api/account/totp/enable",
+            post(handlers::totp::totp_enable),
+        )
+        .route(
+            "/api/account/totp/disable",
+            post(handlers::totp::totp_disable),
+        )
         .route("/api/account/passkeys", get(handlers::passkeys::list))
-        .route("/api/account/passkeys/registration/start", post(handlers::passkeys::registration_start))
-        .route("/api/account/passkeys/registration/finish", post(handlers::passkeys::registration_finish))
-        .route("/api/account/passkeys/:id", delete(handlers::passkeys::delete))
+        .route(
+            "/api/account/passkeys/registration/start",
+            post(handlers::passkeys::registration_start),
+        )
+        .route(
+            "/api/account/passkeys/registration/finish",
+            post(handlers::passkeys::registration_finish),
+        )
+        .route(
+            "/api/account/passkeys/:id",
+            delete(handlers::passkeys::delete),
+        )
         // 投稿
         .route("/api/notes/create", post(handlers::notes::create_note))
-        .route("/api/notes/local-timeline", get(handlers::notes::local_timeline))
-        .route("/api/notes/home-timeline", get(handlers::notes::home_timeline))
-        .route("/api/notes/social-timeline", get(handlers::notes::social_timeline))
+        .route(
+            "/api/notes/local-timeline",
+            get(handlers::notes::local_timeline),
+        )
+        .route(
+            "/api/notes/home-timeline",
+            get(handlers::notes::home_timeline),
+        )
+        .route(
+            "/api/notes/social-timeline",
+            get(handlers::notes::social_timeline),
+        )
         // Misskeyクライアント（Aria等）は`/api/notes/global-timeline`をPOSTで叩く（#78）。GET/POST共存。
-        .route("/api/notes/global-timeline", get(handlers::notes::global_timeline).post(handlers::misskey::endpoints::notes_global_timeline))
+        .route(
+            "/api/notes/global-timeline",
+            get(handlers::notes::global_timeline)
+                .post(handlers::misskey::endpoints::notes_global_timeline),
+        )
         // Misskey 互換エイリアス
         .route("/api/notes/timeline", get(handlers::notes::home_timeline))
         .route("/api/notes/search", get(handlers::search::search_notes))
         // ダイレクトメッセージ（DM本体の送受信は既存の /api/notes/create を再利用する）
         .route("/api/dm/sessions", get(handlers::dm::sessions))
-        .route("/api/dm/sessions/:thread_root_id/messages", get(handlers::dm::thread_messages))
-        .route("/api/dm/sessions/:thread_root_id/read", post(handlers::dm::mark_read))
+        .route(
+            "/api/dm/sessions/:thread_root_id/messages",
+            get(handlers::dm::thread_messages),
+        )
+        .route(
+            "/api/dm/sessions/:thread_root_id/read",
+            post(handlers::dm::mark_read),
+        )
         .route("/api/dm/unread-count", get(handlers::dm::unread_count))
         .route("/api/streaming", get(handlers::streaming::streaming))
-        .route("/api/notes/:id", get(handlers::notes::get_note).delete(handlers::notes::delete_note))
-        .route("/api/notes/:id/repost", delete(handlers::notes::delete_repost))
-        .route("/api/reactions/frequent", get(handlers::notes::frequent_reactions))
-        .route("/api/notes/:id/reactions", post(handlers::notes::create_reaction))
+        .route(
+            "/api/notes/:id",
+            get(handlers::notes::get_note).delete(handlers::notes::delete_note),
+        )
+        .route(
+            "/api/notes/:id/repost",
+            delete(handlers::notes::delete_repost),
+        )
+        .route(
+            "/api/reactions/frequent",
+            get(handlers::notes::frequent_reactions),
+        )
+        .route(
+            "/api/notes/:id/reactions",
+            post(handlers::notes::create_reaction),
+        )
         .route("/api/notes/:id/poll-vote", post(handlers::notes::vote_poll))
-        .route("/api/notes/:id/reactions/:content", delete(handlers::notes::delete_reaction))
-        .route("/api/notes/:id/reactions/:content/actors", get(handlers::notes::reaction_actors))
+        .route(
+            "/api/notes/:id/reactions/:content",
+            delete(handlers::notes::delete_reaction),
+        )
+        .route(
+            "/api/notes/:id/reactions/:content/actors",
+            get(handlers::notes::reaction_actors),
+        )
         .route("/api/notes/:id/pin", post(handlers::notes::pin_note))
         .route("/api/notes/:id/pin", delete(handlers::notes::unpin_note))
         .route("/api/notes/:id/context", get(handlers::notes::note_context))
@@ -495,8 +716,14 @@ pub fn router(state: AppState) -> Router {
         // プロフィールページ（OGP注入済みSPA HTMLを返す、`handlers::ogp`）
         .route("/@:handle", get(handlers::ogp::profile_ogp))
         // フォロー
-        .route("/api/follows/create", post(handlers::follows::create_follow))
-        .route("/api/follows/delete", post(handlers::follows::delete_follow))
+        .route(
+            "/api/follows/create",
+            post(handlers::follows::create_follow),
+        )
+        .route(
+            "/api/follows/delete",
+            post(handlers::follows::delete_follow),
+        )
         // ブロック（Bsky準拠：フォロー強制解除＋相互完全非表示。Fediへは Block 配送、Bskyへは app.bsky.graph.block をコミット）
         .route("/api/blocks/create", post(handlers::blocks::create_block))
         .route("/api/blocks/delete", post(handlers::blocks::delete_block))
@@ -506,75 +733,186 @@ pub fn router(state: AppState) -> Router {
         .route("/api/mutes/delete", post(handlers::mutes::delete_mute))
         .route("/api/mutes", get(handlers::mutes::list_mutes))
         // リスト（#63）
-        .route("/api/lists",
-            get(handlers::lists::my_lists)
-            .post(handlers::lists::create_list))
-        .route("/api/lists/:id",
+        .route(
+            "/api/lists",
+            get(handlers::lists::my_lists).post(handlers::lists::create_list),
+        )
+        .route(
+            "/api/lists/:id",
             get(handlers::lists::get_list)
-            .patch(handlers::lists::update_list)
-            .delete(handlers::lists::delete_list))
+                .patch(handlers::lists::update_list)
+                .delete(handlers::lists::delete_list),
+        )
         .route("/api/lists/:id/members", post(handlers::lists::add_member))
-        .route("/api/lists/:id/members/:actor_id", delete(handlers::lists::remove_member))
-        .route("/api/lists/:id/timeline", get(handlers::lists::list_timeline))
+        .route(
+            "/api/lists/:id/members/:actor_id",
+            delete(handlers::lists::remove_member),
+        )
+        .route(
+            "/api/lists/:id/timeline",
+            get(handlers::lists::list_timeline),
+        )
         // ハッシュタグ
-        .route("/api/hashtags/pinned", get(handlers::hashtags::pinned_hashtags))
-        .route("/api/hashtags/:name/timeline", get(handlers::hashtags::hashtag_timeline))
-        .route("/api/hashtags/:name/pin",
-            post(handlers::hashtags::pin_hashtag)
-            .delete(handlers::hashtags::unpin_hashtag))
-        .route("/api/actors/search", get(handlers::actor_search::search_actors))
-        .route("/api/actors/suggest", get(handlers::actor_search::suggest_actors))
+        .route(
+            "/api/hashtags/pinned",
+            get(handlers::hashtags::pinned_hashtags),
+        )
+        .route(
+            "/api/hashtags/:name/timeline",
+            get(handlers::hashtags::hashtag_timeline),
+        )
+        .route(
+            "/api/hashtags/:name/pin",
+            post(handlers::hashtags::pin_hashtag).delete(handlers::hashtags::unpin_hashtag),
+        )
+        .route(
+            "/api/actors/search",
+            get(handlers::actor_search::search_actors),
+        )
+        .route(
+            "/api/actors/suggest",
+            get(handlers::actor_search::suggest_actors),
+        )
         // ユーザープロフィール
-        .route("/api/users/profile",
-            get(handlers::users::user_profile)
-            .patch(handlers::users::update_profile))
+        .route(
+            "/api/users/profile",
+            get(handlers::users::user_profile).patch(handlers::users::update_profile),
+        )
         .route("/api/users/posts", get(handlers::users::user_posts))
         // Misskey クライアント（Aria等）は同パスをPOSTで叩く（#81）。GET/POST共存。
-        .route("/api/users/following", get(handlers::users::user_following).post(handlers::misskey::endpoints::users_following))
-        .route("/api/users/followers", get(handlers::users::user_followers).post(handlers::misskey::endpoints::users_followers))
-        .route("/api/users/remote-follow-summary", get(handlers::users::user_remote_follow_summary))
+        .route(
+            "/api/users/following",
+            get(handlers::users::user_following)
+                .post(handlers::misskey::endpoints::users_following),
+        )
+        .route(
+            "/api/users/followers",
+            get(handlers::users::user_followers)
+                .post(handlers::misskey::endpoints::users_followers),
+        )
+        .route(
+            "/api/users/remote-follow-summary",
+            get(handlers::users::user_remote_follow_summary),
+        )
         // Misskey 互換レイヤー
         .route("/api/meta", post(handlers::meta::api_meta))
         // カスタム絵文字一覧（未認証・Misskey クライアントのリアクションピッカー用）
         // Misskey 本家は `allowGet: true` でGET/POST両対応。Aria 等のクライアントは
         // POST で呼ぶため、GET のみだと 405 Method Not Allowed になり絵文字が出ない。
-        .route("/api/emojis", get(handlers::emojis::list_emojis).post(handlers::emojis::list_emojis))
+        .route(
+            "/api/emojis",
+            get(handlers::emojis::list_emojis).post(handlers::emojis::list_emojis),
+        )
         // Misskey 準拠の追加エンドポイント（Phase 2）。既存のカスタムAPIと並存する。
         .route("/api/i", post(handlers::misskey::endpoints::api_i))
-        .route("/api/users/show", post(handlers::misskey::endpoints::users_show))
-        .route("/api/users/notes", post(handlers::misskey::endpoints::users_notes))
-        .route("/api/notes/show", post(handlers::misskey::endpoints::notes_show))
-        .route("/api/notes/local-timeline", post(handlers::misskey::endpoints::notes_local_timeline))
-        .route("/api/notes/timeline", post(handlers::misskey::endpoints::notes_home_timeline))
-        .route("/api/notes/reactions", post(handlers::misskey::endpoints::notes_reactions))
-        .route("/api/notes/hybrid-timeline", post(handlers::misskey::endpoints::notes_hybrid_timeline))
-        .route("/api/notes/reactions/create", post(handlers::misskey::endpoints::reactions_create))
-        .route("/api/notes/reactions/delete", post(handlers::misskey::endpoints::reactions_delete))
-        .route("/api/notes/unrenote", post(handlers::misskey::endpoints::notes_unrenote))
-        .route("/api/following/create", post(handlers::misskey::endpoints::following_create))
-        .route("/api/following/delete", post(handlers::misskey::endpoints::following_delete))
-        .route("/api/i/notifications", post(handlers::misskey::endpoints::i_notifications))
+        .route(
+            "/api/users/show",
+            post(handlers::misskey::endpoints::users_show),
+        )
+        .route(
+            "/api/users/notes",
+            post(handlers::misskey::endpoints::users_notes),
+        )
+        .route(
+            "/api/notes/show",
+            post(handlers::misskey::endpoints::notes_show),
+        )
+        .route(
+            "/api/notes/local-timeline",
+            post(handlers::misskey::endpoints::notes_local_timeline),
+        )
+        .route(
+            "/api/notes/timeline",
+            post(handlers::misskey::endpoints::notes_home_timeline),
+        )
+        .route(
+            "/api/notes/reactions",
+            post(handlers::misskey::endpoints::notes_reactions),
+        )
+        .route(
+            "/api/notes/hybrid-timeline",
+            post(handlers::misskey::endpoints::notes_hybrid_timeline),
+        )
+        .route(
+            "/api/notes/reactions/create",
+            post(handlers::misskey::endpoints::reactions_create),
+        )
+        .route(
+            "/api/notes/reactions/delete",
+            post(handlers::misskey::endpoints::reactions_delete),
+        )
+        .route(
+            "/api/notes/unrenote",
+            post(handlers::misskey::endpoints::notes_unrenote),
+        )
+        .route(
+            "/api/following/create",
+            post(handlers::misskey::endpoints::following_create),
+        )
+        .route(
+            "/api/following/delete",
+            post(handlers::misskey::endpoints::following_delete),
+        )
+        .route(
+            "/api/i/notifications",
+            post(handlers::misskey::endpoints::i_notifications),
+        )
         // MiAuth（Misskey 互換クライアント用）
         .route("/miauth/:session_id", get(handlers::miauth::miauth_page))
-        .route("/api/miauth/:session_id/authorize", post(handlers::miauth::miauth_authorize))
-        .route("/api/miauth/:session_id/check", post(handlers::miauth::miauth_check_by_path))
+        .route(
+            "/api/miauth/:session_id/authorize",
+            post(handlers::miauth::miauth_authorize),
+        )
+        .route(
+            "/api/miauth/:session_id/check",
+            post(handlers::miauth::miauth_check_by_path),
+        )
         .route("/api/miauth/check", post(handlers::miauth::miauth_check))
         // AT Protocol XRPC エンドポイント
-        .route("/xrpc/com.atproto.server.describeServer", get(handlers::xrpc::server::xrpc_describe_server))
-        .route("/xrpc/com.atproto.identity.resolveHandle", get(handlers::xrpc::server::xrpc_resolve_handle))
-        .route("/xrpc/com.atproto.sync.getRepo", get(handlers::xrpc::sync::xrpc_get_repo))
-        .route("/xrpc/com.atproto.sync.getBlob", get(handlers::xrpc::sync::xrpc_get_blob))
-        .route("/xrpc/com.atproto.sync.subscribeRepos", get(handlers::xrpc::sync::xrpc_subscribe_repos))
-        .route("/xrpc/com.atproto.repo.getRecord", get(handlers::xrpc::repo::xrpc_get_record))
+        .route(
+            "/xrpc/com.atproto.server.describeServer",
+            get(handlers::xrpc::server::xrpc_describe_server),
+        )
+        .route(
+            "/xrpc/com.atproto.identity.resolveHandle",
+            get(handlers::xrpc::server::xrpc_resolve_handle),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.getRepo",
+            get(handlers::xrpc::sync::xrpc_get_repo),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.getBlob",
+            get(handlers::xrpc::sync::xrpc_get_blob),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.subscribeRepos",
+            get(handlers::xrpc::sync::xrpc_subscribe_repos),
+        )
+        .route(
+            "/xrpc/com.atproto.repo.getRecord",
+            get(handlers::xrpc::repo::xrpc_get_record),
+        )
         // Bsky公式動画パイプライン（uploadVideo）が完了後に呼び戻してくるコールバック
-        .route("/xrpc/com.atproto.repo.uploadBlob", post(handlers::xrpc::repo::xrpc_upload_blob))
+        .route(
+            "/xrpc/com.atproto.repo.uploadBlob",
+            post(handlers::xrpc::repo::xrpc_upload_blob),
+        )
         // AT Protocol DID 解決
-        .route("/.well-known/did.json", get(handlers::xrpc::server::well_known_did))
-        .route("/.well-known/atproto-did", get(handlers::xrpc::server::well_known_atproto_did))
+        .route(
+            "/.well-known/did.json",
+            get(handlers::xrpc::server::well_known_did),
+        )
+        .route(
+            "/.well-known/atproto-did",
+            get(handlers::xrpc::server::well_known_atproto_did),
+        )
         .with_state(state)
         // Misskey クライアントの `i`（ボディ/クエリ）トークンを Authorization ヘッダーへ
         // 合成するブリッジ。既存ハンドラの extract_auth 呼び出しは無改修のまま両対応になる。
-        .layer(axum::middleware::from_fn(middleware::misskey_auth_bridge::bridge))
+        .layer(axum::middleware::from_fn(
+            middleware::misskey_auth_bridge::bridge,
+        ))
         .layer(cors)
 }
 
@@ -606,7 +944,11 @@ async fn ensure_handle_txt_records(state: &AppState) {
         }
     };
     for (username, did) in rows {
-        let handle = format!("{}.{}", seiran_common::username::to_atp_username(&username), state.local_domain);
+        let handle = format!(
+            "{}.{}",
+            seiran_common::username::to_atp_username(&username),
+            state.local_domain
+        );
         match cf.ensure_atproto_txt(&handle, &did).await {
             Ok(_) => tracing::info!("[startup] TXT 確認済み: _atproto.{}", handle),
             Err(e) => tracing::error!("[startup] TXT 登録失敗: {}: {}", handle, e),
@@ -618,8 +960,8 @@ async fn ensure_handle_txt_records(state: &AppState) {
 /// ATP_RELAY_URL はカンマ区切りで複数指定でき、全てへ並行して送る
 /// （AtpCommitService::spawn_request_crawl と同じ規約）。
 async fn request_relay_crawl(state: &AppState) {
-    let relay_base_raw = std::env::var("ATP_RELAY_URL")
-        .unwrap_or_else(|_| "https://bsky.network".to_string());
+    let relay_base_raw =
+        std::env::var("ATP_RELAY_URL").unwrap_or_else(|_| "https://bsky.network".to_string());
     let relay_bases: Vec<String> = relay_base_raw
         .split(',')
         .map(|s| s.trim().trim_end_matches('/').to_string())
@@ -663,8 +1005,16 @@ async fn backfill_identity_events(state: &AppState) {
     };
 
     for (actor_id, username, did) in missing {
-        let handle = format!("{}.{}", seiran_common::username::to_atp_username(&username), state.local_domain);
-        match state.atp_service.broadcast_identity_event(actor_id, &did, &handle, now).await {
+        let handle = format!(
+            "{}.{}",
+            seiran_common::username::to_atp_username(&username),
+            state.local_domain
+        );
+        match state
+            .atp_service
+            .broadcast_identity_event(actor_id, &did, &handle, now)
+            .await
+        {
             Ok(_) => tracing::info!("[startup] #identity broadcast: {}", handle),
             Err(e) => tracing::error!("[startup] #identity 失敗 {}: {}", handle, e),
         }
@@ -696,9 +1046,17 @@ async fn backfill_chat_declarations(state: &AppState) {
     };
 
     for actor_id in missing {
-        match state.atp_service.commit_chat_declaration(actor_id, now).await {
+        match state
+            .atp_service
+            .commit_chat_declaration(actor_id, now)
+            .await
+        {
             Ok(_) => tracing::info!("[startup] chat declaration commit: actor_id={}", actor_id),
-            Err(e) => tracing::error!("[startup] chat declaration 失敗 actor_id={}: {}", actor_id, e),
+            Err(e) => tracing::error!(
+                "[startup] chat declaration 失敗 actor_id={}: {}",
+                actor_id,
+                e
+            ),
         }
     }
 }
@@ -804,7 +1162,8 @@ async fn run_media_gc(
             Ok(None) => {
                 tracing::warn!(
                     "[media-gc] プロバイダー不明 id={}, provider_id={}",
-                    row.id, row.storage_provider_id
+                    row.id,
+                    row.storage_provider_id
                 );
             }
             Err(e) => {
@@ -860,7 +1219,8 @@ async fn run_atp_blobs_gc(pool: &sqlx::PgPool, storage_providers: &dyn StoragePr
             Ok(None) => {
                 tracing::warn!(
                     "[atp-blobs-gc] プロバイダー不明 id={}, provider_id={}",
-                    row.id, row.storage_provider_id
+                    row.id,
+                    row.storage_provider_id
                 );
             }
             Err(e) => {

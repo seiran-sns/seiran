@@ -13,9 +13,12 @@ pub mod dto;
 pub mod queries;
 pub mod validation;
 
-pub use dto::{AttachmentResponse, NoteResponse, ReactRequest, ReactionSummary};
 pub use dto::to_note_response;
-pub use queries::{attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place};
+pub use dto::{AttachmentResponse, NoteResponse, ReactRequest, ReactionSummary};
+pub use queries::{
+    attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map,
+    resolve_mention_facets_in_place,
+};
 pub use validation::BSKY_MAX_TEXT_GRAPHEMES;
 
 use std::collections::HashMap;
@@ -28,9 +31,16 @@ use axum::{
 };
 use sqlx::Row;
 
-use seiran_common::repository::{extract_shortcode_candidates, Actor, InsertFullParams, NotificationKind, TimelinePost};
+use seiran_common::repository::{
+    extract_shortcode_candidates, Actor, InsertFullParams, NotificationKind, TimelinePost,
+};
 use seiran_common::streaming::broadcast_reaction_update;
-use seiran_common::{ap::{fetch_ap_history, plain_to_html_with_mentions}, generate_snowflake_id, mention::{convert_mentions_for_bsky, extract_local_mention_actor_ids}, ApDeliveryKind, PrevApReaction};
+use seiran_common::{
+    ap::{fetch_ap_history, plain_to_html_with_mentions},
+    generate_snowflake_id,
+    mention::{convert_mentions_for_bsky, extract_local_mention_actor_ids},
+    ApDeliveryKind, PrevApReaction,
+};
 
 use crate::error::ApiError;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
@@ -57,13 +67,16 @@ pub async fn vote_poll(
     if req.option_indexes.is_empty() {
         return ApiError::BadRequest("POLL_OPTION_REQUIRED".to_owned()).into_response();
     }
-    let row = match sqlx::query("SELECT poll, actor_id FROM posts WHERE id = $1 AND deleted_at IS NULL")
-        .bind(note_id).fetch_optional(&state.db).await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
-        Err(e) => return ApiError::Internal(e.to_string()).into_response(),
-    };
+    let row =
+        match sqlx::query("SELECT poll, actor_id FROM posts WHERE id = $1 AND deleted_at IS NULL")
+            .bind(note_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+            Err(e) => return ApiError::Internal(e.to_string()).into_response(),
+        };
     let Some(mut poll): Option<serde_json::Value> = row.try_get("poll").unwrap_or(None) else {
         return ApiError::BadRequest("NOT_A_POLL".to_owned()).into_response();
     };
@@ -77,14 +90,25 @@ pub async fn vote_poll(
     if (!multiple && indexes.len() != 1) || indexes.iter().any(|i| *i >= options.len()) {
         return ApiError::BadRequest("INVALID_POLL_OPTIONS".to_owned()).into_response();
     }
-    let closed = poll["closed"].as_str().and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
-        .or_else(|| poll["endTime"].as_str().and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok()))
+    let closed = poll["closed"]
+        .as_str()
+        .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
+        .or_else(|| {
+            poll["endTime"]
+                .as_str()
+                .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
+        })
         .is_some_and(|at| at <= chrono::Utc::now());
     if closed {
         return ApiError::BadRequest("POLL_CLOSED".to_owned()).into_response();
     }
-    let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM poll_votes WHERE post_id = $1 AND actor_id = $2")
-        .bind(note_id).bind(user.actor_id).fetch_one(&state.db).await.unwrap_or(0);
+    let existing: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM poll_votes WHERE post_id = $1 AND actor_id = $2")
+            .bind(note_id)
+            .bind(user.actor_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(0);
     if existing > 0 {
         return ApiError::Conflict("ALREADY_VOTED").into_response();
     }
@@ -96,7 +120,13 @@ pub async fn vote_poll(
     for index in &indexes {
         if let Err(e) = sqlx::query(
             "INSERT INTO poll_votes (post_id, actor_id, option_index) VALUES ($1, $2, $3)",
-        ).bind(note_id).bind(user.actor_id).bind(*index as i32).execute(&mut *tx).await {
+        )
+        .bind(note_id)
+        .bind(user.actor_id)
+        .bind(*index as i32)
+        .execute(&mut *tx)
+        .await
+        {
             return ApiError::Internal(e.to_string()).into_response();
         }
     }
@@ -107,7 +137,10 @@ pub async fn vote_poll(
         }
     }
     if let Err(e) = sqlx::query("UPDATE posts SET poll = $2 WHERE id = $1")
-        .bind(note_id).bind(&poll).execute(&mut *tx).await
+        .bind(note_id)
+        .bind(&poll)
+        .execute(&mut *tx)
+        .await
     {
         return ApiError::Internal(e.to_string()).into_response();
     }
@@ -115,10 +148,19 @@ pub async fn vote_poll(
         return ApiError::Internal(e.to_string()).into_response();
     }
 
-    let option_names = indexes.iter().filter_map(|i| {
-        poll["options"][*i]["name"].as_str().map(str::to_owned)
-    }).collect();
-    state.enqueue_ap_delivery(user.actor_id, ApDeliveryKind::PollVote { post_id: note_id, option_names }).await;
+    let option_names = indexes
+        .iter()
+        .filter_map(|i| poll["options"][*i]["name"].as_str().map(str::to_owned))
+        .collect();
+    state
+        .enqueue_ap_delivery(
+            user.actor_id,
+            ApDeliveryKind::PollVote {
+                post_id: note_id,
+                option_names,
+            },
+        )
+        .await;
     Json(serde_json::json!({"ok": true, "poll": poll, "voted": true})).into_response()
 }
 use delivery::{
@@ -132,7 +174,11 @@ use validation::{
 };
 
 /// 検証済みの添付ファイル ID 群を投稿に紐付ける。
-async fn attach_media_files(state: &AppState, post_id: i64, attachment_ids: &[i64]) -> Result<(), ApiError> {
+async fn attach_media_files(
+    state: &AppState,
+    post_id: i64,
+    attachment_ids: &[i64],
+) -> Result<(), ApiError> {
     for (position, media_file_id) in attachment_ids.iter().enumerate() {
         state
             .posts
@@ -162,7 +208,9 @@ async fn create_repost(
     let meta = match state.posts.find_delivery_meta(renote_id).await {
         Ok(Some(m)) => m,
         Ok(None) => return ApiError::NotFound("RENOTE_TARGET_NOT_FOUND").into_response(),
-        Err(e) => return ApiError::Internal(format!("repost 元ポスト取得失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("repost 元ポスト取得失敗: {}", e)).into_response()
+        }
     };
 
     // Misskey/Mastodon 互換: 非公開（followers_only）ポストはリポスト禁止。
@@ -173,13 +221,19 @@ async fn create_repost(
     }
 
     // 元ポストの投稿者とブロック関係にある場合はリポストを拒否する（Bsky準拠ブロック、双方向）。
-    if let Err(e) = crate::handlers::target_resolve::check_not_blocked(state, actor_id, meta.actor_id).await {
+    if let Err(e) =
+        crate::handlers::target_resolve::check_not_blocked(state, actor_id, meta.actor_id).await
+    {
         return e.into_response();
     }
 
     // リポスト自身の可視性はクライアントが選べず、元ポストから自動決定する。
     // ここに到達する時点で meta.visibility は "public" か "unlisted" のいずれかのみ。
-    let repost_visibility: &str = if meta.visibility == "unlisted" { "unlisted" } else { "public" };
+    let repost_visibility: &str = if meta.visibility == "unlisted" {
+        "unlisted"
+    } else {
+        "public"
+    };
 
     let origin = classify_post(
         meta.ap_object_id.as_deref(),
@@ -192,7 +246,18 @@ async fn create_repost(
     // リポストの AP オブジェクト ID は Announce URI として生成
     let announce_ap_id = format!("https://{}/announces/{}", state.local_domain, post_id);
 
-    match state.posts.insert_repost(post_id, actor_id, &announce_ap_id, renote_id, now, repost_visibility).await {
+    match state
+        .posts
+        .insert_repost(
+            post_id,
+            actor_id,
+            &announce_ap_id,
+            renote_id,
+            now,
+            repost_visibility,
+        )
+        .await
+    {
         Ok(()) => {}
         Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("23505") => {
             // UNIQUE 制約違反 = すでにリポスト済み
@@ -204,13 +269,18 @@ async fn create_repost(
     }
 
     deliver_repost(
-        state, post_id, actor_id, now,
+        state,
+        post_id,
+        actor_id,
+        now,
         DeliveryTargets {
             fedi: req.deliver_to_fedi.unwrap_or(true),
             bsky: req.deliver_to_bsky.unwrap_or(true),
         },
-        &meta, origin,
-    ).await;
+        &meta,
+        origin,
+    )
+    .await;
 
     let avatar_url = state.actors.find_avatar_url(actor_id).await.ok().flatten();
     let mut repost_resp = NoteResponse {
@@ -227,7 +297,9 @@ async fn create_repost(
         },
         attachments: vec![],
         renote_id: Some(renote_id.to_string()),
-        quote_id: None, reply_id: None, parent_original_id: None,
+        quote_id: None,
+        reply_id: None,
+        parent_original_id: None,
         reactions: vec![],
         renote: None,
         quote: None,
@@ -244,8 +316,18 @@ async fn create_repost(
         poll: None,
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
-    embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
-    embed_quotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
+    embed_renotes(
+        &state.db,
+        std::slice::from_mut(&mut repost_resp),
+        Some(actor_id),
+    )
+    .await;
+    embed_quotes(
+        &state.db,
+        std::slice::from_mut(&mut repost_resp),
+        Some(actor_id),
+    )
+    .await;
     broadcast_new_note(state, actor_id, &repost_resp).await;
 
     Json(repost_resp).into_response()
@@ -293,12 +375,22 @@ async fn create_regular_post(
     let recipient_actor_ids: Vec<i64> = if visibility == "direct" {
         match req.recipient_actor_ids.as_deref() {
             Some(ids) if !ids.is_empty() => {
-                match ids.iter().map(|s| s.parse::<i64>()).collect::<Result<Vec<i64>, _>>() {
+                match ids
+                    .iter()
+                    .map(|s| s.parse::<i64>())
+                    .collect::<Result<Vec<i64>, _>>()
+                {
                     Ok(v) => v,
-                    Err(_) => return ApiError::BadRequest("INVALID_RECIPIENT_ACTOR_ID".to_owned()).into_response(),
+                    Err(_) => {
+                        return ApiError::BadRequest("INVALID_RECIPIENT_ACTOR_ID".to_owned())
+                            .into_response()
+                    }
                 }
             }
-            _ => return ApiError::BadRequest("RECIPIENT_ACTOR_IDS_REQUIRED".to_owned()).into_response(),
+            _ => {
+                return ApiError::BadRequest("RECIPIENT_ACTOR_IDS_REQUIRED".to_owned())
+                    .into_response()
+            }
         }
     } else {
         Vec::new()
@@ -308,15 +400,21 @@ async fn create_regular_post(
     } else {
         match state.actors.find_by_ids(&recipient_actor_ids).await {
             Ok(a) => a,
-            Err(e) => return ApiError::Internal(format!("DM宛先アクター取得失敗: {}", e)).into_response(),
+            Err(e) => {
+                return ApiError::Internal(format!("DM宛先アクター取得失敗: {}", e)).into_response()
+            }
         }
     };
     let has_bsky_recipient = recipient_actors.iter().any(|a| a.actor_type == "bsky");
     if visibility == "direct" {
         // Bsky の DM は1対1のみのため、Bsky宛先が1人でも含まれるなら他の宛先の同居を許さない。
-        let bsky_count = recipient_actors.iter().filter(|a| a.actor_type == "bsky").count();
+        let bsky_count = recipient_actors
+            .iter()
+            .filter(|a| a.actor_type == "bsky")
+            .count();
         if bsky_count >= 1 && recipient_actors.len() > 1 {
-            return ApiError::BadRequest("BSKY_DM_SINGLE_RECIPIENT_ONLY".to_owned()).into_response();
+            return ApiError::BadRequest("BSKY_DM_SINGLE_RECIPIENT_ONLY".to_owned())
+                .into_response();
         }
     }
 
@@ -353,8 +451,13 @@ async fn create_regular_post(
         // それに対して Bsky の厳密な上限（300 書記素・3000 バイト）を検証する。
         // ここで弾けば DB への INSERT 自体が行われない（未確定状態を作らない）。
         let bsky_text_for_validation: Option<String> = if deliver_bsky {
-            let (bsky_text, _facets) =
-                convert_mentions_for_bsky(&text, &state.local_domain, &state.db, state.ap_client.http.as_ref()).await;
+            let (bsky_text, _facets) = convert_mentions_for_bsky(
+                &text,
+                &state.local_domain,
+                &state.db,
+                state.ap_client.http.as_ref(),
+            )
+            .await;
             Some(bsky_text)
         } else {
             None
@@ -384,7 +487,11 @@ async fn create_regular_post(
     let local_emoji_pairs = if shortcode_candidates.is_empty() {
         Vec::new()
     } else {
-        match state.emojis.find_urls_by_shortcodes(&shortcode_candidates).await {
+        match state
+            .emojis
+            .find_urls_by_shortcodes(&shortcode_candidates)
+            .await
+        {
             Ok(pairs) => pairs,
             Err(e) => {
                 tracing::error!("[create_regular_post] 絵文字ショートコード解決失敗: {}", e);
@@ -400,7 +507,11 @@ async fn create_regular_post(
     );
     let response_emojis: HashMap<String, String> = local_emoji_map
         .as_object()
-        .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
         .unwrap_or_default();
 
     let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
@@ -410,18 +521,28 @@ async fn create_regular_post(
     if let Some(quote_id) = quote_of_id_i64 {
         match state.posts.find_delivery_meta(quote_id).await {
             Ok(Some(meta)) => {
-                if let Err(e) = crate::handlers::target_resolve::check_not_blocked(state, actor_id, meta.actor_id).await {
+                if let Err(e) = crate::handlers::target_resolve::check_not_blocked(
+                    state,
+                    actor_id,
+                    meta.actor_id,
+                )
+                .await
+                {
                     return e.into_response();
                 }
             }
             Ok(None) => return ApiError::NotFound("QUOTE_TARGET_NOT_FOUND").into_response(),
-            Err(e) => return ApiError::Internal(format!("引用元ポスト取得失敗: {}", e)).into_response(),
+            Err(e) => {
+                return ApiError::Internal(format!("引用元ポスト取得失敗: {}", e)).into_response()
+            }
         }
     }
 
     // DM(direct)宛先とブロック関係にある場合は送信を拒否する。
     for recipient in &recipient_actors {
-        if let Err(e) = crate::handlers::target_resolve::check_not_blocked(state, actor_id, recipient.id).await {
+        if let Err(e) =
+            crate::handlers::target_resolve::check_not_blocked(state, actor_id, recipient.id).await
+        {
             return e.into_response();
         }
     }
@@ -466,13 +587,22 @@ async fn create_regular_post(
     }
 
     // attachment_ids を i64 に変換（バリデーション済みなので unwrap 安全）
-    let attachment_ids_i64: Vec<i64> = req.attachment_ids.as_deref().unwrap_or(&[]).iter().map(|s| s.parse::<i64>().unwrap()).collect();
+    let attachment_ids_i64: Vec<i64> = req
+        .attachment_ids
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|s| s.parse::<i64>().unwrap())
+        .collect();
     if let Err(e) = attach_media_files(state, post_id, &attachment_ids_i64).await {
         return e.into_response();
     }
 
     if let Err(e) = state.hashtags.link_post(post_id, &text).await {
-        tracing::error!("[create_regular_post] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
+        tracing::error!(
+            "[create_regular_post] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
+            e
+        );
     }
 
     // リプライ通知: リプライ先がローカルユーザーの投稿であれば通知を作る（自己リプライは除く）。
@@ -488,17 +618,32 @@ async fn create_regular_post(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = state
             .notifications
-            .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None, None)
+            .insert(
+                notif_id,
+                parent_actor_id,
+                NotificationKind::Reply,
+                Some(actor_id),
+                Some(post_id),
+                None,
+                None,
+                None,
+                None,
+            )
             .await
         {
-            tracing::error!("[create_regular_post] reply notifications INSERT 失敗: {}", e);
+            tracing::error!(
+                "[create_regular_post] reply notifications INSERT 失敗: {}",
+                e
+            );
         }
     }
 
     // メンション通知: 本文中で `@username` 形式によりローカルユーザーが言及されていれば通知を
     // 作る。Bsky/AP配送設定の有無とは無関係に常に処理する（配信は宛先プロトコルの話、通知は
     // ローカル受信者の話で別軸のため）。
-    for mentioned_actor_id in extract_local_mention_actor_ids(&text, &state.local_domain, &state.db).await {
+    for mentioned_actor_id in
+        extract_local_mention_actor_ids(&text, &state.local_domain, &state.db).await
+    {
         if mentioned_actor_id == actor_id {
             continue; // 自己メンションは通知しない
         }
@@ -513,26 +658,46 @@ async fn create_regular_post(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = state
             .notifications
-            .insert(notif_id, mentioned_actor_id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None, None)
+            .insert(
+                notif_id,
+                mentioned_actor_id,
+                NotificationKind::Mention,
+                Some(actor_id),
+                Some(post_id),
+                None,
+                None,
+                None,
+                None,
+            )
             .await
         {
-            tracing::error!("[create_regular_post] mention notifications INSERT 失敗: {}", e);
+            tracing::error!(
+                "[create_regular_post] mention notifications INSERT 失敗: {}",
+                e
+            );
         }
     }
 
-    deliver_regular_post(state, RegularPostDelivery {
-        post_id,
-        actor_id,
-        now,
-        text: text.clone(),
-        targets: DeliveryTargets { fedi: deliver_fedi, bsky: deliver_bsky },
-        visibility: visibility.to_string(),
-        bsky_reply: reply_ctx.bsky_reply,
-        bsky_quote_embed,
-        ap_quote_url,
-        ap_in_reply_to: reply_ctx.ap_in_reply_to,
-        attachment_ids: attachment_ids_i64.clone(),
-    }).await;
+    deliver_regular_post(
+        state,
+        RegularPostDelivery {
+            post_id,
+            actor_id,
+            now,
+            text: text.clone(),
+            targets: DeliveryTargets {
+                fedi: deliver_fedi,
+                bsky: deliver_bsky,
+            },
+            visibility: visibility.to_string(),
+            bsky_reply: reply_ctx.bsky_reply,
+            bsky_quote_embed,
+            ap_quote_url,
+            ap_in_reply_to: reply_ctx.ap_in_reply_to,
+            attachment_ids: attachment_ids_i64.clone(),
+        },
+    )
+    .await;
 
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
     let avatar_url = state.actors.find_avatar_url(actor_id).await.ok().flatten();
@@ -559,14 +724,23 @@ async fn create_regular_post(
         reposted_by_me: None,
         emojis: response_emojis,
         pinned_by_me: None,
-        visibility: if visibility == "public" { None } else { Some(visibility.to_string()) },
+        visibility: if visibility == "public" {
+            None
+        } else {
+            Some(visibility.to_string())
+        },
         deliver_fedi: Some(deliver_fedi),
         deliver_bsky: Some(deliver_bsky),
         remote_url: None,
         content_warning: None,
         poll: None,
     };
-    embed_quotes(&state.db, std::slice::from_mut(&mut note_resp), Some(actor_id)).await;
+    embed_quotes(
+        &state.db,
+        std::slice::from_mut(&mut note_resp),
+        Some(actor_id),
+    )
+    .await;
 
     if visibility == "direct" {
         delivery::broadcast_direct_message(state, actor_id, post_id, &note_resp).await;
@@ -586,9 +760,28 @@ pub async fn create_note(
 
     match &req.renote_id {
         Some(renote_id_str) => {
-            create_repost(&state, user.actor_id, user.username, user.display_name, renote_id_str, &req, now).await
+            create_repost(
+                &state,
+                user.actor_id,
+                user.username,
+                user.display_name,
+                renote_id_str,
+                &req,
+                now,
+            )
+            .await
         }
-        None => create_regular_post(&state, user.actor_id, user.username, user.display_name, &req, now).await,
+        None => {
+            create_regular_post(
+                &state,
+                user.actor_id,
+                user.username,
+                user.display_name,
+                &req,
+                now,
+            )
+            .await
+        }
     }
 }
 
@@ -603,7 +796,11 @@ pub async fn home_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.posts.home_timeline(actor_id, limit, until_id, since_id, q.exclude_direct).await {
+    let mut rows = match state
+        .posts
+        .home_timeline(actor_id, limit, until_id, since_id, q.exclude_direct)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[home_timeline] クエリ失敗: {}", e);
@@ -615,7 +812,8 @@ pub async fn home_timeline(
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
     let reposted_set = fetch_reposted_ids(&state.db, actor_id, &ids).await;
-    let mut notes: Vec<NoteResponse> = rows.into_iter()
+    let mut notes: Vec<NoteResponse> = rows
+        .into_iter()
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
@@ -641,7 +839,11 @@ pub async fn local_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.posts.local_timeline(my_actor_id, limit, until_id, since_id, q.exclude_direct).await {
+    let mut rows = match state
+        .posts
+        .local_timeline(my_actor_id, limit, until_id, since_id, q.exclude_direct)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[local_timeline] クエリ失敗: {}", e);
@@ -657,7 +859,8 @@ pub async fn local_timeline(
     } else {
         Default::default()
     };
-    let mut notes: Vec<NoteResponse> = rows.into_iter()
+    let mut notes: Vec<NoteResponse> = rows
+        .into_iter()
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
@@ -686,7 +889,11 @@ pub async fn social_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.posts.social_timeline(actor_id, limit, until_id, since_id, q.exclude_direct).await {
+    let mut rows = match state
+        .posts
+        .social_timeline(actor_id, limit, until_id, since_id, q.exclude_direct)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[social_timeline] クエリ失敗: {}", e);
@@ -698,7 +905,8 @@ pub async fn social_timeline(
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
     let reposted_set = fetch_reposted_ids(&state.db, actor_id, &ids).await;
-    let mut notes: Vec<NoteResponse> = rows.into_iter()
+    let mut notes: Vec<NoteResponse> = rows
+        .into_iter()
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
@@ -725,7 +933,11 @@ pub async fn global_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.posts.global_timeline(my_actor_id, limit, until_id, since_id, q.exclude_direct).await {
+    let mut rows = match state
+        .posts
+        .global_timeline(my_actor_id, limit, until_id, since_id, q.exclude_direct)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[global_timeline] クエリ失敗: {}", e);
@@ -741,7 +953,8 @@ pub async fn global_timeline(
     } else {
         Default::default()
     };
-    let mut notes: Vec<NoteResponse> = rows.into_iter()
+    let mut notes: Vec<NoteResponse> = rows
+        .into_iter()
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
@@ -766,9 +979,13 @@ pub async fn get_note(
 ) -> Result<Json<NoteResponse>, ApiError> {
     let my_actor_id: Option<i64> = user.as_ref().map(|u| u.actor_id);
     let is_admin = if let Some(ref authed) = user {
-        state.users.find_role_by_user_id(authed.user_id).await
+        state
+            .users
+            .find_role_by_user_id(authed.user_id)
+            .await
             .map_err(|e| ApiError::Internal(e.to_string()))?
-            .as_deref() == Some("admin")
+            .as_deref()
+            == Some("admin")
     } else {
         false
     };
@@ -777,7 +994,10 @@ pub async fn get_note(
     let mut post = if is_admin {
         state.posts.find_by_id(post_id).await
     } else {
-        state.posts.find_by_id_for_viewer(post_id, my_actor_id).await
+        state
+            .posts
+            .find_by_id_for_viewer(post_id, my_actor_id)
+            .await
     }
     .map_err(|e| ApiError::Internal(e.to_string()))?
     .ok_or(ApiError::NotFound("NOT_FOUND"))?;
@@ -831,15 +1051,23 @@ pub async fn get_note_ap(
     let actor_uri = format!("https://{}/users/{}", state.local_domain, post.username);
     let note_id = format!("https://{}/notes/{}", state.local_domain, post.id);
     let (converted_body, mentions) = seiran_common::mention::convert_mentions_for_ap(
-        &post.body, &state.local_domain, &state.db, state.ap_client.http.as_ref(),
-    ).await;
+        &post.body,
+        &state.local_domain,
+        &state.db,
+        state.ap_client.http.as_ref(),
+    )
+    .await;
     let content_html = plain_to_html_with_mentions(&converted_body, &mentions);
     let mut tag = seiran_common::mention::ap_inline_mentions_to_tag_json(&mentions);
     // 配送された Create(Note) を受信側が canonical URL から再取得しても
     // カスタム絵文字情報を失わないよう、配送JSONと同じ Emoji tag を返す。
     // Misskey系は受信時に object.id を再取得することがあるため、ここに tag が
     // 無いと Create 側に含めても shortcode のまま保存される（#126）。
-    if let Some(emoji_map) = post.post_emoji_map.as_ref().and_then(serde_json::Value::as_object) {
+    if let Some(emoji_map) = post
+        .post_emoji_map
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+    {
         for shortcode in extract_shortcode_candidates(&post.body) {
             let name = format!(":{}:", shortcode);
             let Some(url) = emoji_map.get(&name).and_then(serde_json::Value::as_str) else {
@@ -892,9 +1120,15 @@ pub async fn get_note_ap(
     // ため、ここに到達する時点で post.visibility は public/unlisted のいずれか。
     let followers_uri = format!("{}/followers", actor_uri);
     let (to, cc): (Vec<String>, Vec<String>) = if post.visibility == "unlisted" {
-        (vec![followers_uri], vec!["https://www.w3.org/ns/activitystreams#Public".to_string()])
+        (
+            vec![followers_uri],
+            vec!["https://www.w3.org/ns/activitystreams#Public".to_string()],
+        )
     } else {
-        (vec!["https://www.w3.org/ns/activitystreams#Public".to_string()], vec![followers_uri])
+        (
+            vec!["https://www.w3.org/ns/activitystreams#Public".to_string()],
+            vec![followers_uri],
+        )
     };
 
     let mut ap_note = serde_json::json!({
@@ -916,7 +1150,10 @@ pub async fn get_note_ap(
     }
 
     (
-        [(axum::http::header::CONTENT_TYPE, "application/activity+json; charset=utf-8")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/activity+json; charset=utf-8",
+        )],
         Json(ap_note),
     )
         .into_response()
@@ -1003,7 +1240,11 @@ pub async fn note_context(
     resolve_mention_facets_in_place(&state.db, &mut before_posts).await;
     resolve_mention_facets_in_place(&state.db, &mut after_posts).await;
 
-    let all_ids: Vec<i64> = before_posts.iter().chain(after_posts.iter()).map(|p| p.id).collect();
+    let all_ids: Vec<i64> = before_posts
+        .iter()
+        .chain(after_posts.iter())
+        .map(|p| p.id)
+        .collect();
     let mut att_map = fetch_attachments_map(&state.db, &all_ids).await;
     let rmap = fetch_reactions_map(&state.db, &all_ids, my_actor_id).await;
     let reposted_set = if let Some(aid) = my_actor_id {
@@ -1021,8 +1262,14 @@ pub async fn note_context(
         nr
     };
 
-    let mut before: Vec<NoteResponse> = before_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
-    let mut after: Vec<NoteResponse> = after_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
+    let mut before: Vec<NoteResponse> = before_posts
+        .into_iter()
+        .map(|p| build(p, &mut att_map))
+        .collect();
+    let mut after: Vec<NoteResponse> = after_posts
+        .into_iter()
+        .map(|p| build(p, &mut att_map))
+        .collect();
     embed_renotes(&state.db, &mut before, my_actor_id).await;
     embed_quotes(&state.db, &mut before, my_actor_id).await;
     embed_renotes(&state.db, &mut after, my_actor_id).await;
@@ -1060,7 +1307,9 @@ pub async fn delete_repost(
 
     tracing::info!(
         "[delete_repost] actor_id={} が note_id={} のリポスト（post_id={}）を取り消し",
-        actor_id, note_id, undo_info.repost_id
+        actor_id,
+        note_id,
+        undo_info.repost_id
     );
 
     // AP Undo(Announce) 配送 — 元ポストに ap_object_id がある場合のみ。
@@ -1069,16 +1318,22 @@ pub async fn delete_repost(
     // Undo(Announce) ではなく Delete(Note) でその Note を撤回する。
     if let Some(orig_ap_object_id) = undo_info.orig_ap_id {
         state
-            .enqueue_ap_delivery(actor_id, ApDeliveryKind::UndoAnnounce {
-                announce_post_id: undo_info.repost_id,
-                original_ap_object_id: orig_ap_object_id,
-            })
+            .enqueue_ap_delivery(
+                actor_id,
+                ApDeliveryKind::UndoAnnounce {
+                    announce_post_id: undo_info.repost_id,
+                    original_ap_object_id: orig_ap_object_id,
+                },
+            )
             .await;
     } else if undo_info.orig_at_uri.is_some() {
         state
-            .enqueue_ap_delivery(actor_id, ApDeliveryKind::DeleteNote {
-                post_id: undo_info.repost_id,
-            })
+            .enqueue_ap_delivery(
+                actor_id,
+                ApDeliveryKind::DeleteNote {
+                    post_id: undo_info.repost_id,
+                },
+            )
             .await;
     }
 
@@ -1136,7 +1391,11 @@ pub async fn delete_note(
         return ApiError::Internal(format!("UPDATE 失敗: {}", e)).into_response();
     }
 
-    tracing::info!("[delete_note] actor_id={} が note_id={} を削除", me.actor_id, note_id);
+    tracing::info!(
+        "[delete_note] actor_id={} が note_id={} を削除",
+        me.actor_id,
+        note_id
+    );
 
     // AP Delete(Note) 配送 — 実際に Fedi へ Create(Note) 済みの場合のみ。direct（DM）は
     // フォロワー配送ロジックしか持たないため対象外（本来の宛先には届かない）。
@@ -1168,7 +1427,10 @@ const FREQUENT_REACTIONS_LIMIT: i64 = 24;
 /// 「よく使う」タブ用）。`reactions` が 1投稿1リアクションで切替時に上書きされる都合上、
 /// これは「過去の使用履歴」ではなく「現在も自分が付けているリアクション」の集計になる
 /// （`ReactionRepository::aggregate_for_actor` 参照）。
-pub async fn frequent_reactions(me: AuthedUser, State(state): State<AppState>) -> impl IntoResponse {
+pub async fn frequent_reactions(
+    me: AuthedUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
     let rows = state
         .reactions
         .aggregate_for_actor(me.actor_id, FREQUENT_REACTIONS_LIMIT)
@@ -1201,7 +1463,11 @@ pub async fn reaction_actors(
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
-    match state.posts.find_by_id_for_viewer(note_id, my_actor_id).await {
+    match state
+        .posts
+        .find_by_id_for_viewer(note_id, my_actor_id)
+        .await
+    {
         Ok(Some(_)) => {}
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
@@ -1246,28 +1512,45 @@ pub async fn create_reaction(
     // カスタム絵文字（`:shortcode:`）は custom_emojis に実在するか確認し、画像 URL を解決する。
     // Unicode 絵文字は emoji_url を持たない。
     let emoji_url = match &parsed_content {
-        ReactionContent::Custom(shortcode) => match state.emojis.find_url_by_shortcode(shortcode).await {
-            Ok(Some(url)) => Some(url),
-            Ok(None) => return ApiError::BadRequest("UNKNOWN_EMOJI".to_owned()).into_response(),
-            Err(e) => return ApiError::Internal(format!("絵文字URL解決失敗: {}", e)).into_response(),
-        },
+        ReactionContent::Custom(shortcode) => {
+            match state.emojis.find_url_by_shortcode(shortcode).await {
+                Ok(Some(url)) => Some(url),
+                Ok(None) => {
+                    return ApiError::BadRequest("UNKNOWN_EMOJI".to_owned()).into_response()
+                }
+                Err(e) => {
+                    return ApiError::Internal(format!("絵文字URL解決失敗: {}", e)).into_response()
+                }
+            }
+        }
         ReactionContent::Unicode(_) => None,
     };
     let content = parsed_content.as_db_content();
 
-    let post = match state.posts.find_by_id_for_viewer(note_id, Some(me.actor_id)).await {
+    let post = match state
+        .posts
+        .find_by_id_for_viewer(note_id, Some(me.actor_id))
+        .await
+    {
         Ok(Some(p)) => p,
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
 
-    if let Err(e) = crate::handlers::target_resolve::check_not_blocked(&state, me.actor_id, post.actor_id).await {
+    if let Err(e) =
+        crate::handlers::target_resolve::check_not_blocked(&state, me.actor_id, post.actor_id).await
+    {
         return e.into_response();
     }
 
     // 切替時に取り消すべき旧リアクション（AP の Undo 対象 / ATP の削除対象 rkey）を退避。
     // 対象に ATP 実体が無ければ ATP 配信しない（AP/Bsky 由来でも at_uri を持たないポストへは無反応）。
-    let prev = state.reactions.find_current(note_id, me.actor_id).await.ok().flatten();
+    let prev = state
+        .reactions
+        .find_current(note_id, me.actor_id)
+        .await
+        .ok()
+        .flatten();
     let delivery_meta = state.posts.find_delivery_meta(note_id).await.ok().flatten();
 
     // AP へ配送する Like/EmojiReact 自身の activity id を発行し、Undo で参照できるよう保存する。
@@ -1281,11 +1564,21 @@ pub async fn create_reaction(
 
     let reaction_id = match state
         .reactions
-        .insert(note_id, me.actor_id, "emoji", &content, Some(&activity_id), None, emoji_url.as_deref())
+        .insert(
+            note_id,
+            me.actor_id,
+            "emoji",
+            &content,
+            Some(&activity_id),
+            None,
+            emoji_url.as_deref(),
+        )
         .await
     {
         Ok(id) => id,
-        Err(e) => return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("reactions INSERT 失敗: {}", e)).into_response()
+        }
     };
 
     // 通知ベル用（#37）: 自分の投稿への自作自演リアクションは通知しない。
@@ -1308,7 +1601,17 @@ pub async fn create_reaction(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = state
             .notifications
-            .insert(notif_id, post.actor_id, NotificationKind::Reaction, Some(me.actor_id), Some(note_id), Some(&content), emoji_url.as_deref(), None, Some(reaction_id))
+            .insert(
+                notif_id,
+                post.actor_id,
+                NotificationKind::Reaction,
+                Some(me.actor_id),
+                Some(note_id),
+                Some(&content),
+                emoji_url.as_deref(),
+                None,
+                Some(reaction_id),
+            )
             .await
         {
             tracing::error!("[create_reaction] notifications INSERT 失敗: {}", e);
@@ -1347,7 +1650,18 @@ pub async fn create_reaction(
                         tracing::error!("[create_reaction] ATP Like 削除失敗（切替前処理）: {}", e);
                     }
                 }
-                if let Err(e) = atp.commit_like(actor_id, note_id, &target_uri, &target_cid, Some(&emoji), reaction_id, now).await {
+                if let Err(e) = atp
+                    .commit_like(
+                        actor_id,
+                        note_id,
+                        &target_uri,
+                        &target_cid,
+                        Some(&emoji),
+                        reaction_id,
+                        now,
+                    )
+                    .await
+                {
                     tracing::error!("[create_reaction] ATP Like commit 失敗: {}", e);
                 }
             });
@@ -1356,21 +1670,26 @@ pub async fn create_reaction(
 
     // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ配送する。
     // 旧リアクションが既に AP へ配送済み（ap_activity_id あり）なら、ジョブ側が先に Undo してから送る（切替）。
-    let undo_prev = prev.as_ref().and_then(|(prev_content, prev_activity_id, _, prev_emoji_url)| {
-        prev_activity_id.clone().map(|id| PrevApReaction {
-            activity_id: id,
-            content: prev_content.clone(),
-            emoji_url: prev_emoji_url.clone(),
-        })
-    });
+    let undo_prev =
+        prev.as_ref()
+            .and_then(|(prev_content, prev_activity_id, _, prev_emoji_url)| {
+                prev_activity_id.clone().map(|id| PrevApReaction {
+                    activity_id: id,
+                    content: prev_content.clone(),
+                    emoji_url: prev_emoji_url.clone(),
+                })
+            });
     state
-        .enqueue_ap_delivery(me.actor_id, ApDeliveryKind::Reaction {
-            post_id: note_id,
-            activity_id: activity_id.clone(),
-            content: content.clone(),
-            emoji_url: emoji_url.clone(),
-            undo_prev,
-        })
+        .enqueue_ap_delivery(
+            me.actor_id,
+            ApDeliveryKind::Reaction {
+                post_id: note_id,
+                activity_id: activity_id.clone(),
+                content: content.clone(),
+                emoji_url: emoji_url.clone(),
+                undo_prev,
+            },
+        )
         .await;
 
     let rmap = fetch_reactions_map(&state.db, &[note_id], Some(me.actor_id)).await;
@@ -1395,18 +1714,33 @@ pub async fn delete_reaction(
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
-    let post = match state.posts.find_by_id_for_viewer(note_id, Some(actor_id)).await {
+    let post = match state
+        .posts
+        .find_by_id_for_viewer(note_id, Some(actor_id))
+        .await
+    {
         Ok(Some(p)) => p,
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
 
     // 削除前に現在の ap_activity_id（AP Undo 対象）と at_uri（ATP 削除対象の rkey）を退避しておく。
-    let prev = state.reactions.find_current(note_id, actor_id).await.ok().flatten();
+    let prev = state
+        .reactions
+        .find_current(note_id, actor_id)
+        .await
+        .ok()
+        .flatten();
 
-    let deleted = match state.reactions.delete_local(note_id, actor_id, &content).await {
+    let deleted = match state
+        .reactions
+        .delete_local(note_id, actor_id, &content)
+        .await
+    {
         Ok(n) => n,
-        Err(e) => return ApiError::Internal(format!("reactions DELETE 失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("reactions DELETE 失敗: {}", e)).into_response()
+        }
     };
     if deleted == 0 {
         return ApiError::NotFound("REACTION_NOT_FOUND").into_response();
@@ -1439,15 +1773,23 @@ pub async fn delete_reaction(
     }
 
     // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ Undo を配送する。
-    if let Some(prev_activity_id) = prev.as_ref().and_then(|(_, ap_activity_id, _, _)| ap_activity_id.clone()) {
-        let emoji_url = prev.as_ref().and_then(|(_, _, _, emoji_url)| emoji_url.clone());
+    if let Some(prev_activity_id) = prev
+        .as_ref()
+        .and_then(|(_, ap_activity_id, _, _)| ap_activity_id.clone())
+    {
+        let emoji_url = prev
+            .as_ref()
+            .and_then(|(_, _, _, emoji_url)| emoji_url.clone());
         state
-            .enqueue_ap_delivery(actor_id, ApDeliveryKind::UndoReaction {
-                post_id: note_id,
-                prev_activity_id,
-                content: content.clone(),
-                emoji_url,
-            })
+            .enqueue_ap_delivery(
+                actor_id,
+                ApDeliveryKind::UndoReaction {
+                    post_id: note_id,
+                    prev_activity_id,
+                    content: content.clone(),
+                    emoji_url,
+                },
+            )
             .await;
     }
 
@@ -1473,7 +1815,11 @@ pub async fn pin_note(
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
-    let post = match state.posts.find_by_id_for_viewer(note_id, Some(me.actor_id)).await {
+    let post = match state
+        .posts
+        .find_by_id_for_viewer(note_id, Some(me.actor_id))
+        .await
+    {
         Ok(Some(p)) => p,
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
@@ -1506,7 +1852,9 @@ pub async fn unpin_note(
     match state.pinned_posts.unpin(me.actor_id, note_id).await {
         Ok(true) => {}
         Ok(false) => return ApiError::NotFound("PIN_NOT_FOUND").into_response(),
-        Err(e) => return ApiError::Internal(format!("pinned_posts DELETE 失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("pinned_posts DELETE 失敗: {}", e)).into_response()
+        }
     }
 
     sync_bsky_pinned_post(&state, me.actor_id).await;
@@ -1538,7 +1886,9 @@ pub async fn resolve_bsky_pinned_post(state: &AppState, actor_id: i64) -> Option
     match state.posts.find_delivery_meta(latest_id).await {
         // Bsky はプロトコル上 followers_only を表現できず、pinnedPost として同期すると
         // Bsky上では誰でも見える形で公開されてしまう。direct も同様に厳格扱いし同期しない。
-        Ok(Some(meta)) if meta.visibility == "followers_only" || meta.visibility == "direct" => None,
+        Ok(Some(meta)) if meta.visibility == "followers_only" || meta.visibility == "direct" => {
+            None
+        }
         Ok(Some(meta)) => match (meta.at_uri, meta.at_cid) {
             (Some(uri), Some(cid)) => Some((uri, cid)),
             _ => None,
@@ -1553,7 +1903,8 @@ pub async fn resolve_bsky_pinned_post(state: &AppState, actor_id: i64) -> Option
 /// 呼び出し元へは伝播しない）。
 async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
     let pinned_post = resolve_bsky_pinned_post(state, actor_id).await;
-    let (display_name, bio, avatar_media) = match fetch_atp_profile_material(state, actor_id).await {
+    let (display_name, bio, avatar_media) = match fetch_atp_profile_material(state, actor_id).await
+    {
         Ok(m) => m,
         Err(e) => {
             tracing::error!("[pinned] プロフィール材料取得失敗: {}", e);
@@ -1562,7 +1913,14 @@ async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
     };
     if let Err(e) = state
         .atp_service
-        .commit_profile(actor_id, &display_name, bio.as_deref(), avatar_media, pinned_post, chrono::Utc::now())
+        .commit_profile(
+            actor_id,
+            &display_name,
+            bio.as_deref(),
+            avatar_media,
+            pinned_post,
+            chrono::Utc::now(),
+        )
         .await
     {
         tracing::error!("[pinned] ATP プロフィール再コミット失敗: {}", e);
@@ -1595,14 +1953,21 @@ pub(crate) async fn fetch_atp_profile_material(
         _ => None,
     };
     let bio_with_fields = append_profile_fields_to_bio(bio, &profile_fields);
-    Ok((display_name.unwrap_or(username), bio_with_fields, avatar_media))
+    Ok((
+        display_name.unwrap_or(username),
+        bio_with_fields,
+        avatar_media,
+    ))
 }
 
 /// bio の末尾にプロフィールのキーバリュー項目を整形して追記する（#62）。Bsky は構造化された
 /// プロフィール欄を持たず自己紹介文（`description`）のみのため、マイケルの提案通り
 /// `ラベル: 値` の行をリスト形式で bio の後ろに追記してフォールバック表示する。
 /// 項目が無ければ bio をそのまま返す。
-fn append_profile_fields_to_bio(bio: Option<String>, profile_fields: &serde_json::Value) -> Option<String> {
+fn append_profile_fields_to_bio(
+    bio: Option<String>,
+    profile_fields: &serde_json::Value,
+) -> Option<String> {
     let fields: Vec<(String, String)> = profile_fields
         .as_array()
         .map(|arr| {

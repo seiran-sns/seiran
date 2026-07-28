@@ -32,7 +32,12 @@ pub trait HashtagRepository: Send + Sync {
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
     /// ホーム画面タブへのピン留め（既に存在するタグ名を渡してもよい。無ければ作成する）。
-    async fn pin(&self, actor_id: i64, tag_name: &str, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
+    async fn pin(
+        &self,
+        actor_id: i64,
+        tag_name: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error>;
 
     /// ピン留め解除。解除できたら `true`。
     async fn unpin(&self, actor_id: i64, tag_name: &str) -> Result<bool, sqlx::Error>;
@@ -123,7 +128,12 @@ impl HashtagRepository for PgHashtagRepository {
         .await
     }
 
-    async fn pin(&self, actor_id: i64, tag_name: &str, now: DateTime<Utc>) -> Result<(), sqlx::Error> {
+    async fn pin(
+        &self,
+        actor_id: i64,
+        tag_name: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
         let hashtag_id: i64 = sqlx::query_scalar(

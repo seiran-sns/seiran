@@ -12,29 +12,46 @@ use seiran_common::repository::TimelinePost;
 use crate::error::ApiError;
 use crate::AppState;
 
-use super::dto::{apply_mention_facets, to_note_response, AttachmentResponse, NoteResponse, ReactionSummary};
+use super::dto::{
+    apply_mention_facets, to_note_response, AttachmentResponse, NoteResponse, ReactionSummary,
+};
 
 /// 認証中アクターの回答選択肢を通常投稿と埋め込みリポスト元の `poll.votedByMe` へ付与する。
-pub async fn attach_poll_votes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_actor_id: Option<i64>) {
+pub async fn attach_poll_votes(
+    db: &sqlx::PgPool,
+    notes: &mut [NoteResponse],
+    my_actor_id: Option<i64>,
+) {
     let Some(actor_id) = my_actor_id else { return };
-    let post_ids: Vec<i64> = notes.iter()
-        .flat_map(|note| std::iter::once(note.id.as_str())
-            .chain(note.renote.as_deref().map(|renote| renote.id.as_str()))
-            .chain(note.quote.as_deref().map(|quote| quote.id.as_str())))
+    let post_ids: Vec<i64> = notes
+        .iter()
+        .flat_map(|note| {
+            std::iter::once(note.id.as_str())
+                .chain(note.renote.as_deref().map(|renote| renote.id.as_str()))
+                .chain(note.quote.as_deref().map(|quote| quote.id.as_str()))
+        })
         .filter_map(|id| id.parse::<i64>().ok())
         .collect();
-    if post_ids.is_empty() { return; }
+    if post_ids.is_empty() {
+        return;
+    }
 
     let rows = sqlx::query(
         "SELECT post_id, option_index FROM poll_votes
          WHERE actor_id = $1 AND post_id = ANY($2)
          ORDER BY post_id, option_index",
     )
-    .bind(actor_id).bind(&post_ids).fetch_all(db).await.unwrap_or_default();
+    .bind(actor_id)
+    .bind(&post_ids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
     let mut votes: HashMap<i64, Vec<i32>> = HashMap::new();
     for row in rows {
-        votes.entry(row.try_get("post_id").unwrap_or_default())
-            .or_default().push(row.try_get("option_index").unwrap_or_default());
+        votes
+            .entry(row.try_get("post_id").unwrap_or_default())
+            .or_default()
+            .push(row.try_get("option_index").unwrap_or_default());
     }
 
     fn apply(note: &mut NoteResponse, votes: &HashMap<i64, Vec<i32>>) {
@@ -43,8 +60,12 @@ pub async fn attach_poll_votes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my
                 poll["votedByMe"] = serde_json::json!(indexes);
             }
         }
-        if let Some(renote) = note.renote.as_deref_mut() { apply(renote, votes); }
-        if let Some(quote) = note.quote.as_deref_mut() { apply(quote, votes); }
+        if let Some(renote) = note.renote.as_deref_mut() {
+            apply(renote, votes);
+        }
+        if let Some(quote) = note.quote.as_deref_mut() {
+            apply(quote, votes);
+        }
     }
     notes.iter_mut().for_each(|note| apply(note, &votes));
 }
@@ -132,7 +153,8 @@ pub async fn fetch_attachments_map(
     let mut map: HashMap<i64, Vec<AttachmentResponse>> = HashMap::new();
     for row in rows {
         let post_id: i64 = row.try_get("post_id").unwrap_or_default();
-        let url: String = row.try_get::<Option<String>, _>("url")
+        let url: String = row
+            .try_get::<Option<String>, _>("url")
             .unwrap_or(None)
             .unwrap_or_default();
         if url.is_empty() {
@@ -140,15 +162,19 @@ pub async fn fetch_attachments_map(
         }
         let public_url: Option<String> = row.try_get("public_url").unwrap_or(None);
         let thumbnail_key: Option<String> = row.try_get("thumbnail_key").unwrap_or(None);
-        let remote_thumbnail_url: Option<String> = row.try_get("remote_thumbnail_url").unwrap_or(None);
+        let remote_thumbnail_url: Option<String> =
+            row.try_get("remote_thumbnail_url").unwrap_or(None);
         let thumbnail_url = match (&public_url, &thumbnail_key) {
             (Some(pu), Some(tk)) => Some(format!("{}/{}", pu.trim_end_matches('/'), tk)),
             _ => remote_thumbnail_url,
         };
-        let media_created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("media_created_at").unwrap_or(None);
+        let media_created_at: Option<chrono::DateTime<chrono::Utc>> =
+            row.try_get("media_created_at").unwrap_or(None);
         map.entry(post_id).or_default().push(AttachmentResponse {
             url,
-            mime_type: row.try_get("mime_type").unwrap_or_else(|_| "image/jpeg".into()),
+            mime_type: row
+                .try_get("mime_type")
+                .unwrap_or_else(|_| "image/jpeg".into()),
             width: row.try_get("width").unwrap_or(0),
             height: row.try_get("height").unwrap_or(0),
             thumbnail_url,
@@ -187,7 +213,11 @@ pub async fn fetch_reposted_ids(
 /// リポスト（`renote_id` を持つ）ノートについて、元ポストを一括解決して
 /// `renote` フィールドへ埋め込む（#45）。表示側はこの中身をカード本体として描画する。
 /// `my_actor_id` を渡すと埋め込まれた元ポストに `reposted_by_me` が設定される。
-pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_actor_id: Option<i64>) {
+pub async fn embed_renotes(
+    db: &sqlx::PgPool,
+    notes: &mut [NoteResponse],
+    my_actor_id: Option<i64>,
+) {
     let orig_ids: Vec<i64> = notes
         .iter()
         .filter_map(|n| n.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok()))
@@ -261,8 +291,11 @@ pub async fn embed_renotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_act
 pub async fn embed_quotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_actor_id: Option<i64>) {
     let quote_ids: Vec<i64> = notes
         .iter()
-        .flat_map(|n| std::iter::once(n.quote_id.as_deref())
-            .chain(std::iter::once(n.renote.as_deref().and_then(|r| r.quote_id.as_deref()))))
+        .flat_map(|n| {
+            std::iter::once(n.quote_id.as_deref()).chain(std::iter::once(
+                n.renote.as_deref().and_then(|r| r.quote_id.as_deref()),
+            ))
+        })
         .flatten()
         .filter_map(|s| s.parse::<i64>().ok())
         .collect();
@@ -322,7 +355,11 @@ pub async fn embed_quotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_acto
             }
         }
         if let Some(renote) = n.renote.as_deref_mut() {
-            if let Some(oid) = renote.quote_id.as_deref().and_then(|s| s.parse::<i64>().ok()) {
+            if let Some(oid) = renote
+                .quote_id
+                .as_deref()
+                .and_then(|s| s.parse::<i64>().ok())
+            {
                 if let Some(orig) = by_id.get(&oid) {
                     renote.quote = Some(Box::new(orig.clone()));
                 }
@@ -383,13 +420,22 @@ pub async fn fetch_reactions_map(
             continue;
         }
         let reacted_by_me = mine.contains(&(post_id, emoji.clone()));
-        map.entry(post_id).or_default().push(ReactionSummary { emoji, count, reacted_by_me, emoji_url });
+        map.entry(post_id).or_default().push(ReactionSummary {
+            emoji,
+            count,
+            reacted_by_me,
+            emoji_url,
+        });
     }
     map
 }
 
 /// リポスト取り消し（Undo）で必要な情報が見つからなかった場合に返すエラー。
-pub async fn find_repost_for_undo(state: &AppState, actor_id: i64, note_id: i64) -> Result<seiran_common::repository::RepostUndoInfo, Response> {
+pub async fn find_repost_for_undo(
+    state: &AppState,
+    actor_id: i64,
+    note_id: i64,
+) -> Result<seiran_common::repository::RepostUndoInfo, Response> {
     state
         .posts
         .find_repost_undo_info(actor_id, note_id)

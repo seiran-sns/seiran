@@ -14,7 +14,9 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 
 use seiran_common::atp::{cid_from_sha256_hex, cid_to_string, resolve_atproto_verification_key};
-use seiran_common::{ext_for_mime_type, generate_snowflake_id, select_provider, sniff_mime_type, S3StorageClient};
+use seiran_common::{
+    ext_for_mime_type, generate_snowflake_id, select_provider, sniff_mime_type, S3StorageClient,
+};
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -36,7 +38,10 @@ fn peek_unverified_iss(jwt: &str) -> Option<String> {
     let payload_b64 = jwt.split('.').nth(1)?;
     let payload_bytes = URL_SAFE_NO_PAD.decode(payload_b64).ok()?;
     let value: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
-    value.get("iss").and_then(|v| v.as_str()).map(|s| s.to_string())
+    value
+        .get("iss")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// `com.atproto.repo.uploadBlob` 受け口。
@@ -72,13 +77,15 @@ pub async fn xrpc_upload_blob(
     let public_key_pem = match verifying_key.to_public_key_pem(LineEnding::LF) {
         Ok(pem) => pem,
         Err(e) => {
-            return ApiError::Internal(format!("[uploadBlob] 公開鍵PEM変換失敗: {}", e)).into_response();
+            return ApiError::Internal(format!("[uploadBlob] 公開鍵PEM変換失敗: {}", e))
+                .into_response();
         }
     };
     let decoding_key = match DecodingKey::from_ec_pem(public_key_pem.as_bytes()) {
         Ok(k) => k,
         Err(e) => {
-            return ApiError::Internal(format!("[uploadBlob] DecodingKey構築失敗: {}", e)).into_response();
+            return ApiError::Internal(format!("[uploadBlob] DecodingKey構築失敗: {}", e))
+                .into_response();
         }
     };
 
@@ -124,15 +131,38 @@ pub async fn xrpc_upload_blob(
     // 404 になり動画が再生できない不具合の直接原因だった（2026-07-17 マイケル実機確認）。
     match state.actors.find_by_did(&iss).await {
         Ok(Some(actor)) => {
-            if let Err(e) = store_uploaded_blob(&state, actor.id, &sha256_hex, &cid, &mime_type, body.len() as i64, &body).await {
-                tracing::error!("[uploadBlob] blob保存失敗（読み捨てて続行）cid={}: {}", cid, e);
+            if let Err(e) = store_uploaded_blob(
+                &state,
+                actor.id,
+                &sha256_hex,
+                &cid,
+                &mime_type,
+                body.len() as i64,
+                &body,
+            )
+            .await
+            {
+                tracing::error!(
+                    "[uploadBlob] blob保存失敗（読み捨てて続行）cid={}: {}",
+                    cid,
+                    e
+                );
             }
         }
-        Ok(None) => tracing::warn!("[uploadBlob] iss={} のアクターが見つからずblob保存スキップ cid={}", iss, cid),
+        Ok(None) => tracing::warn!(
+            "[uploadBlob] iss={} のアクターが見つからずblob保存スキップ cid={}",
+            iss,
+            cid
+        ),
         Err(e) => tracing::error!("[uploadBlob] アクター解決失敗 iss={}: {}", iss, e),
     }
 
-    tracing::info!("[uploadBlob] 検証OK iss={} cid={} size={}", iss, cid, body.len());
+    tracing::info!(
+        "[uploadBlob] 検証OK iss={} cid={} size={}",
+        iss,
+        cid,
+        body.len()
+    );
 
     Json(serde_json::json!({
         "blob": {
@@ -141,7 +171,8 @@ pub async fn xrpc_upload_blob(
             "mimeType": mime_type,
             "size": body.len(),
         }
-    })).into_response()
+    }))
+    .into_response()
 }
 
 /// `uploadBlob` で受信したバイト列を `atp_blobs` テーブル経由で S3 に保存する。
@@ -174,20 +205,22 @@ async fn store_uploaded_blob(
     // 既に media_files 側に同じバイト列があれば S3 への重複保存を避ける
     // （getBlob は media_files/atp_blobs 両方を検索するので、atp_blobs 側への
     // 新規保存をスキップしても解決可能なまま。2026-07-17 マイケル指摘）。
-    let in_media_files: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_files WHERE sha256 = $1)")
-        .bind(sha256_hex)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| format!("media_files重複チェック失敗: {}", e))?;
+    let in_media_files: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_files WHERE sha256 = $1)")
+            .bind(sha256_hex)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| format!("media_files重複チェック失敗: {}", e))?;
     if in_media_files {
         return Ok(());
     }
 
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM atp_blobs WHERE sha256 = $1)")
-        .bind(sha256_hex)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| format!("既存チェック失敗: {}", e))?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM atp_blobs WHERE sha256 = $1)")
+            .bind(sha256_hex)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| format!("既存チェック失敗: {}", e))?;
     if exists {
         return Ok(());
     }
@@ -276,20 +309,30 @@ async fn get_record_post(params: &GetRecordParams, state: &AppState) -> axum::re
     };
 
     if let Some(actor) = actor {
-        let block_row = sqlx::query("SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1")
-            .bind(&record.at_cid)
-            .bind(actor.id)
-            .fetch_optional(&state.db)
-            .await;
+        let block_row =
+            sqlx::query("SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1")
+                .bind(&record.at_cid)
+                .bind(actor.id)
+                .fetch_optional(&state.db)
+                .await;
         if let Ok(Some(row)) = block_row {
             let cbor_bytes: Vec<u8> = row.try_get("bytes").unwrap_or_default();
             match serde_ipld_dagcbor::from_slice::<ipld_core::ipld::Ipld>(&cbor_bytes) {
                 Ok(ipld) => {
                     let value = ipld_to_json(&ipld);
-                    return Json(GetRecordResponse { uri: record.at_uri, cid: record.at_cid, value }).into_response();
+                    return Json(GetRecordResponse {
+                        uri: record.at_uri,
+                        cid: record.at_cid,
+                        value,
+                    })
+                    .into_response();
                 }
                 Err(e) => {
-                    tracing::error!("[getRecord] CBOR デコード失敗 (cid={}): {}", record.at_cid, e);
+                    tracing::error!(
+                        "[getRecord] CBOR デコード失敗 (cid={}): {}",
+                        record.at_cid,
+                        e
+                    );
                 }
             }
         }
@@ -303,7 +346,12 @@ async fn get_record_post(params: &GetRecordParams, state: &AppState) -> axum::re
         "createdAt": record.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     });
 
-    Json(GetRecordResponse { uri: record.at_uri, cid: record.at_cid, value }).into_response()
+    Json(GetRecordResponse {
+        uri: record.at_uri,
+        cid: record.at_cid,
+        value,
+    })
+    .into_response()
 }
 
 /// `atp_records` テーブルから CID を引き、`atp_blocks` テーブルの CBOR を JSON にして返す。
@@ -316,13 +364,18 @@ async fn get_record_from_atp_records(
         Ok(Some(a)) => a,
         Ok(None) => {
             // did: でなければ username として検索（ローカルアクター）
-            match state.actors.find_by_username_domain(&params.repo, &state.local_domain).await {
+            match state
+                .actors
+                .find_by_username_domain(&params.repo, &state.local_domain)
+                .await
+            {
                 Ok(Some(a)) => a,
                 _ => return ApiError::NotFound("リポジトリが見つかりません").into_response(),
             }
         }
         Err(e) => {
-            return ApiError::Internal(format!("[getRecord] アクター取得失敗: {}", e)).into_response();
+            return ApiError::Internal(format!("[getRecord] アクター取得失敗: {}", e))
+                .into_response();
         }
     };
 
@@ -341,24 +394,25 @@ async fn get_record_from_atp_records(
         Ok(Some(row)) => row.try_get::<String, _>("cid").unwrap_or_default(),
         Ok(None) => return ApiError::NotFound("レコードが見つかりません").into_response(),
         Err(e) => {
-            return ApiError::Internal(format!("[getRecord] atp_records 取得失敗: {}", e)).into_response();
+            return ApiError::Internal(format!("[getRecord] atp_records 取得失敗: {}", e))
+                .into_response();
         }
     };
 
     // atp_blocks から CBOR バイト列を取得
-    let block_row = sqlx::query(
-        "SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1",
-    )
-    .bind(&cid_str)
-    .bind(actor.id)
-    .fetch_optional(&state.db)
-    .await;
+    let block_row =
+        sqlx::query("SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1")
+            .bind(&cid_str)
+            .bind(actor.id)
+            .fetch_optional(&state.db)
+            .await;
 
     let cbor_bytes: Vec<u8> = match block_row {
         Ok(Some(row)) => row.try_get::<Vec<u8>, _>("bytes").unwrap_or_default(),
         Ok(None) => return ApiError::NotFound("ブロックが見つかりません").into_response(),
         Err(e) => {
-            return ApiError::Internal(format!("[getRecord] atp_blocks 取得失敗: {}", e)).into_response();
+            return ApiError::Internal(format!("[getRecord] atp_blocks 取得失敗: {}", e))
+                .into_response();
         }
     };
 
@@ -366,7 +420,11 @@ async fn get_record_from_atp_records(
     let ipld: ipld_core::ipld::Ipld = match serde_ipld_dagcbor::from_slice(&cbor_bytes) {
         Ok(v) => v,
         Err(e) => {
-            return ApiError::Internal(format!("[getRecord] CBOR デコード失敗 (cid={}): {}", cid_str, e)).into_response();
+            return ApiError::Internal(format!(
+                "[getRecord] CBOR デコード失敗 (cid={}): {}",
+                cid_str, e
+            ))
+            .into_response();
         }
     };
     let value = ipld_to_json(&ipld);
@@ -374,7 +432,12 @@ async fn get_record_from_atp_records(
     let at_did = actor.at_did.as_deref().unwrap_or(&params.repo);
     let uri = format!("at://{}/{}/{}", at_did, params.collection, params.rkey);
 
-    Json(GetRecordResponse { uri, cid: cid_str, value }).into_response()
+    Json(GetRecordResponse {
+        uri,
+        cid: cid_str,
+        value,
+    })
+    .into_response()
 }
 
 /// DAG-CBOR デコード結果（`Ipld`）を AT Protocol の JSON 表現に変換する。
@@ -392,7 +455,11 @@ fn ipld_to_json(ipld: &ipld_core::ipld::Ipld) -> serde_json::Value {
         Ipld::String(s) => serde_json::Value::String(s.clone()),
         Ipld::Bytes(b) => serde_json::json!({ "$bytes": URL_SAFE_NO_PAD.encode(b) }),
         Ipld::List(l) => serde_json::Value::Array(l.iter().map(ipld_to_json).collect()),
-        Ipld::Map(m) => serde_json::Value::Object(m.iter().map(|(k, v)| (k.clone(), ipld_to_json(v))).collect()),
+        Ipld::Map(m) => serde_json::Value::Object(
+            m.iter()
+                .map(|(k, v)| (k.clone(), ipld_to_json(v)))
+                .collect(),
+        ),
         Ipld::Link(cid) => serde_json::json!({ "$link": cid.to_string() }),
     }
 }

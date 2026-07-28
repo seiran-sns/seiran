@@ -40,7 +40,8 @@ async fn fetch_username(db: &PgPool, actor_id: i64) -> Result<String, ApError> {
         .await
         .map_err(|e| ApError::Other(format!("アクター情報取得エラー: {}", e)))?
         .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
-    row.try_get("username").map_err(|e| ApError::Other(e.to_string()))
+    row.try_get("username")
+        .map_err(|e| ApError::Other(e.to_string()))
 }
 
 /// 指定アクターの AP フォロワー（actor_type='fedi'）の inbox URL 一覧を取得する。
@@ -79,7 +80,11 @@ async fn fetch_inboxes_by_ap_uris(
     ap_uris: &[String],
 ) -> Vec<String> {
     let local_prefix = format!("https://{}/", local_domain);
-    let remote_uris: Vec<String> = ap_uris.iter().filter(|u| !u.starts_with(&local_prefix)).cloned().collect();
+    let remote_uris: Vec<String> = ap_uris
+        .iter()
+        .filter(|u| !u.starts_with(&local_prefix))
+        .cloned()
+        .collect();
     if remote_uris.is_empty() {
         return Vec::new();
     }
@@ -114,7 +119,11 @@ async fn fetch_inboxes_by_ap_uris(
                 }
             }
             Err(e) => {
-                tracing::warn!("[Deliver] メンション先アクター({})の取得失敗、配送スキップ: {}", uri, e);
+                tracing::warn!(
+                    "[Deliver] メンション先アクター({})の取得失敗、配送スキップ: {}",
+                    uri,
+                    e
+                );
             }
         }
     }
@@ -144,7 +153,10 @@ async fn fan_out_activity(
     let mut ok = 0usize;
     let mut ng = 0usize;
     for inbox in inboxes {
-        match ap_client.sign_and_post(inbox, &body_str, key_id, ap_private_key_pem).await {
+        match ap_client
+            .sign_and_post(inbox, &body_str, key_id, ap_private_key_pem)
+            .await
+        {
             Ok(()) => ok += 1,
             Err(e) => {
                 tracing::error!("[Deliver] {}: {} への配送失敗: {}", log_label, inbox, e);
@@ -156,7 +168,10 @@ async fn fan_out_activity(
     tracing::error!("[Deliver] {}: {}件成功 / {}件失敗", log_label, ok, ng);
 
     if ok == 0 && ng > 0 {
-        return Err(ApError::Other(format!("{}: 全 {} 件の配送に失敗", log_label, ng)));
+        return Err(ApError::Other(format!(
+            "{}: 全 {} 件の配送に失敗",
+            log_label, ng
+        )));
     }
     Ok(())
 }
@@ -225,10 +240,18 @@ fn visibility_to_to_cc(
 }
 
 /// Create(Note) アクティビティを組み立てる。
-fn build_create_note_activity(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_json::Value {
+fn build_create_note_activity(
+    addr: &LocalActorAddress,
+    p: &NoteActivityParams,
+) -> serde_json::Value {
     let note_id = format!("https://{}/notes/{}", p.local_domain, p.post_id);
     let activity_id = format!("https://{}/activities/{}", p.local_domain, p.post_id);
-    let (to, cc) = visibility_to_to_cc(addr, p.visibility, p.direct_recipients, p.mention_recipients);
+    let (to, cc) = visibility_to_to_cc(
+        addr,
+        p.visibility,
+        p.direct_recipients,
+        p.mention_recipients,
+    );
 
     let mut note_obj = serde_json::json!({
         "type": "Note",
@@ -520,7 +543,11 @@ struct PostActivityBasis {
     attachments: Vec<serde_json::Value>,
 }
 
-async fn fetch_post_activity_basis(db: &PgPool, post_id: i64, actor_id: i64) -> Result<PostActivityBasis, ApError> {
+async fn fetch_post_activity_basis(
+    db: &PgPool,
+    post_id: i64,
+    actor_id: i64,
+) -> Result<PostActivityBasis, ApError> {
     let row = sqlx::query(
         "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username,
                 p.visibility::text AS visibility, p.emoji_map
@@ -535,16 +562,33 @@ async fn fetch_post_activity_basis(db: &PgPool, post_id: i64, actor_id: i64) -> 
     .map_err(|e| ApError::Other(format!("投稿情報取得エラー: {}", e)))?
     .ok_or_else(|| ApError::Other(format!("投稿 {} が見つかりません", post_id)))?;
 
-    let body: String = row.try_get("body").map_err(|e| ApError::Other(e.to_string()))?;
-    let created_at: chrono::DateTime<chrono::Utc> =
-        row.try_get("created_at").map_err(|e| ApError::Other(e.to_string()))?;
-    let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
+    let body: String = row
+        .try_get("body")
+        .map_err(|e| ApError::Other(e.to_string()))?;
+    let created_at: chrono::DateTime<chrono::Utc> = row
+        .try_get("created_at")
+        .map_err(|e| ApError::Other(e.to_string()))?;
+    let username: String = row
+        .try_get("username")
+        .map_err(|e| ApError::Other(e.to_string()))?;
     let seiran_uuid: Option<String> = row.try_get("seiran_post_uuid").unwrap_or(None);
-    let visibility: String = row.try_get("visibility").unwrap_or_else(|_| "public".to_string());
-    let emoji_map: serde_json::Value = row.try_get("emoji_map").unwrap_or_else(|_| serde_json::json!({}));
+    let visibility: String = row
+        .try_get("visibility")
+        .unwrap_or_else(|_| "public".to_string());
+    let emoji_map: serde_json::Value = row
+        .try_get("emoji_map")
+        .unwrap_or_else(|_| serde_json::json!({}));
     let attachments = fetch_attachment_documents(db, post_id).await?;
 
-    Ok(PostActivityBasis { body, created_at, username, seiran_uuid, visibility, emoji_map, attachments })
+    Ok(PostActivityBasis {
+        body,
+        created_at,
+        username,
+        seiran_uuid,
+        visibility,
+        emoji_map,
+        attachments,
+    })
 }
 
 /// 保存済み `posts.emoji_map` のうち、今回配送する本文に実際に現れるカスタム絵文字を
@@ -576,7 +620,8 @@ async fn html_and_tags_for_body(
     db: &PgPool,
     ap_client: &ApClient,
 ) -> (String, Vec<serde_json::Value>, Vec<String>) {
-    let (converted, mentions) = crate::mention::convert_mentions_for_ap(body, local_domain, db, &ap_client.http).await;
+    let (converted, mentions) =
+        crate::mention::convert_mentions_for_ap(body, local_domain, db, &ap_client.http).await;
     let html = plain_to_html_with_mentions(&converted, &mentions);
     let tag = crate::mention::ap_inline_mentions_to_tag_json(&mentions);
     let mut mention_uris: Vec<String> = mentions
@@ -625,11 +670,12 @@ pub async fn deliver_post_to_ap_followers(
     // override_body（リポストのフォールバックテキスト等、投稿者本人が書いた本文ではない合成テキスト）
     // の場合はメンション変換をせずそのまま HTML 化する。通常投稿（override_body なし）はここで
     // 本文中のメンションを解決し、`<a>` アンカーと `tag[]`（AP Mention）を組み立てる。
-    let (content_html, mut tag, mention_uris): (String, Vec<serde_json::Value>, Vec<String>) = if override_body.is_some() {
-        (plain_to_html(&body), Vec::new(), Vec::new())
-    } else {
-        html_and_tags_for_body(&body, local_domain, db, ap_client).await
-    };
+    let (content_html, mut tag, mention_uris): (String, Vec<serde_json::Value>, Vec<String>) =
+        if override_body.is_some() {
+            (plain_to_html(&body), Vec::new(), Vec::new())
+        } else {
+            html_and_tags_for_body(&body, local_domain, db, ap_client).await
+        };
     append_emoji_tags(&body, &basis.emoji_map, &mut tag);
 
     // 配送先はフォロワー + 本文中でメンションした相手（フォロワーでなくても通知を届ける）の和集合。
@@ -663,8 +709,15 @@ pub async fn deliver_post_to_ap_followers(
     );
 
     fan_out_activity(
-        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
-        &format!("Create(Note) post_id={} username={}", post_id, basis.username),
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
+        &format!(
+            "Create(Note) post_id={} username={}",
+            post_id, basis.username
+        ),
     )
     .await
 }
@@ -705,7 +758,8 @@ pub async fn deliver_direct_message_to_ap(
         .filter_map(|r| r.try_get::<String, _>("ap_inbox_url").ok())
         .collect();
 
-    let (content_html, mut tag, _mention_uris) = html_and_tags_for_body(&basis.body, local_domain, db, ap_client).await;
+    let (content_html, mut tag, _mention_uris) =
+        html_and_tags_for_body(&basis.body, local_domain, db, ap_client).await;
     append_emoji_tags(&basis.body, &basis.emoji_map, &mut tag);
 
     let addr = local_actor_address(local_domain, &basis.username);
@@ -729,8 +783,15 @@ pub async fn deliver_direct_message_to_ap(
     );
 
     fan_out_activity(
-        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
-        &format!("Create(Note DM) post_id={} username={}", post_id, basis.username),
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
+        &format!(
+            "Create(Note DM) post_id={} username={}",
+            post_id, basis.username
+        ),
     )
     .await
 }
@@ -763,7 +824,12 @@ async fn fetch_attachment_documents(
             let blurhash: Option<String> = r.try_get("blurhash").ok()?;
             let public_url: String = r.try_get("public_url").ok()?;
             Some(build_attachment_document(
-                &public_url, &storage_key, &mime_type, width, height, blurhash.as_deref(),
+                &public_url,
+                &storage_key,
+                &mime_type,
+                width,
+                height,
+                blurhash.as_deref(),
             ))
         })
         .collect())
@@ -793,11 +859,19 @@ pub async fn deliver_ap_announce(
     let addr = local_actor_address(local_domain, &username);
     let announce_id = format!("https://{}/announces/{}", local_domain, post_id);
     let activity = build_announce_activity(
-        &addr, &announce_id, original_ap_object_id, &chrono::Utc::now().to_rfc3339(), &visibility,
+        &addr,
+        &announce_id,
+        original_ap_object_id,
+        &chrono::Utc::now().to_rfc3339(),
+        &visibility,
     );
 
     fan_out_activity(
-        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
         &format!("Announce post_id={} username={}", post_id, username),
     )
     .await
@@ -816,12 +890,19 @@ pub async fn deliver_delete_actor(
     let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
 
     let addr = local_actor_address(local_domain, &username);
-    let activity_id = format!("https://{}/activities/delete-actor-{}", local_domain, actor_id);
+    let activity_id = format!(
+        "https://{}/activities/delete-actor-{}",
+        local_domain, actor_id
+    );
     let activity =
         build_delete_actor_activity(&addr, &activity_id, &chrono::Utc::now().to_rfc3339());
 
     fan_out_activity(
-        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
         &format!("Delete(Actor) actor_id={} username={}", actor_id, username),
     )
     .await
@@ -845,12 +926,23 @@ pub async fn deliver_undo_announce(
     let announce_id = format!("https://{}/announces/{}", local_domain, announce_post_id);
     let undo_id = format!("https://{}/undos/{}", local_domain, announce_post_id);
     let activity = build_undo_announce_activity(
-        &addr, &undo_id, &announce_id, original_ap_object_id, &chrono::Utc::now().to_rfc3339(),
+        &addr,
+        &undo_id,
+        &announce_id,
+        original_ap_object_id,
+        &chrono::Utc::now().to_rfc3339(),
     );
 
     fan_out_activity(
-        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
-        &format!("Undo(Announce) post_id={} username={}", announce_post_id, username),
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
+        &format!(
+            "Undo(Announce) post_id={} username={}",
+            announce_post_id, username
+        ),
     )
     .await
 }
@@ -871,13 +963,23 @@ pub async fn deliver_delete_note(
 
     let addr = local_actor_address(local_domain, &username);
     let note_id = format!("https://{}/notes/{}", local_domain, post_id);
-    let activity_id = format!("https://{}/activities/delete-note-{}", local_domain, post_id);
+    let activity_id = format!(
+        "https://{}/activities/delete-note-{}",
+        local_domain, post_id
+    );
     let activity = build_delete_note_activity(
-        &addr, &note_id, &activity_id, &chrono::Utc::now().to_rfc3339(),
+        &addr,
+        &note_id,
+        &activity_id,
+        &chrono::Utc::now().to_rfc3339(),
     );
 
     fan_out_activity(
-        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
         &format!("Delete(Note) post_id={} username={}", post_id, username),
     )
     .await
@@ -910,7 +1012,9 @@ pub async fn deliver_update_actor(
     .map_err(|e| ApError::Other(format!("アクター情報取得エラー: {}", e)))?
     .ok_or_else(|| ApError::Other(format!("アクター {} が見つかりません", actor_id)))?;
 
-    let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
+    let username: String = row
+        .try_get("username")
+        .map_err(|e| ApError::Other(e.to_string()))?;
     let display_name: String = row
         .try_get::<Option<String>, _>("display_name")
         .map_err(|e| ApError::Other(e.to_string()))?
@@ -946,11 +1050,19 @@ pub async fn deliver_update_actor(
         actor_id,
         chrono::Utc::now().timestamp_millis()
     );
-    let activity =
-        build_update_actor_activity(&addr, &activity_id, &chrono::Utc::now().to_rfc3339(), person);
+    let activity = build_update_actor_activity(
+        &addr,
+        &activity_id,
+        &chrono::Utc::now().to_rfc3339(),
+        person,
+    );
 
     fan_out_activity(
-        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
         &format!("Update(Actor) actor_id={} username={}", actor_id, username),
     )
     .await
@@ -1028,7 +1140,12 @@ pub async fn deliver_ap_reaction(
     let activity_type = reaction_activity_type(content);
 
     let mut activity = build_reaction_object(
-        activity_type, activity_id, &addr.actor_uri, &object_ap_id, content, emoji_url,
+        activity_type,
+        activity_id,
+        &addr.actor_uri,
+        &object_ap_id,
+        content,
+        emoji_url,
     );
     activity["@context"] =
         serde_json::Value::String("https://www.w3.org/ns/activitystreams".to_string());
@@ -1037,8 +1154,15 @@ pub async fn deliver_ap_reaction(
     activity["cc"] = serde_json::json!([addr.followers_uri]);
 
     fan_out_activity(
-        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
-        &format!("{} post_id={} actor_id={}", activity_type, post_id, actor_id),
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
+        &format!(
+            "{} post_id={} actor_id={}",
+            activity_type, post_id, actor_id
+        ),
     )
     .await
 }
@@ -1064,14 +1188,23 @@ pub async fn deliver_ap_poll_vote(
     .await
     .map_err(|e| ApError::Other(format!("アンケート配送先取得エラー: {}", e)))?;
     let Some(row) = row else { return Ok(()) };
-    let Some(question_id): Option<String> = row.try_get("ap_object_id").unwrap_or(None) else { return Ok(()) };
-    let Some(inbox): Option<String> = row.try_get("ap_inbox_url").unwrap_or(None) else { return Ok(()) };
-    let Some(author_uri): Option<String> = row.try_get("ap_uri").unwrap_or(None) else { return Ok(()) };
+    let Some(question_id): Option<String> = row.try_get("ap_object_id").unwrap_or(None) else {
+        return Ok(());
+    };
+    let Some(inbox): Option<String> = row.try_get("ap_inbox_url").unwrap_or(None) else {
+        return Ok(());
+    };
+    let Some(author_uri): Option<String> = row.try_get("ap_uri").unwrap_or(None) else {
+        return Ok(());
+    };
 
     let username = fetch_username(db, actor_id).await?;
     let addr = local_actor_address(local_domain, &username);
     for (index, name) in option_names.iter().enumerate() {
-        let activity_id = format!("https://{}/activities/poll-vote-{}-{}-{}", local_domain, post_id, actor_id, index);
+        let activity_id = format!(
+            "https://{}/activities/poll-vote-{}-{}-{}",
+            local_domain, post_id, actor_id, index
+        );
         let note_id = format!("{}/note", activity_id);
         let activity = serde_json::json!({
             "@context": "https://www.w3.org/ns/activitystreams",
@@ -1089,9 +1222,14 @@ pub async fn deliver_ap_poll_vote(
             }
         });
         fan_out_activity(
-            ap_client, std::slice::from_ref(&inbox), &activity, &addr.key_id,
-            ap_private_key_pem, &format!("PollVote post_id={} actor_id={}", post_id, actor_id),
-        ).await?;
+            ap_client,
+            std::slice::from_ref(&inbox),
+            &activity,
+            &addr.key_id,
+            ap_private_key_pem,
+            &format!("PollVote post_id={} actor_id={}", post_id, actor_id),
+        )
+        .await?;
     }
     Ok(())
 }
@@ -1122,7 +1260,12 @@ pub async fn deliver_ap_undo_reaction(
     let addr = local_actor_address(local_domain, &username);
     let activity_type = reaction_activity_type(content);
     let inner = build_reaction_object(
-        activity_type, prev_activity_id, &addr.actor_uri, &object_ap_id, content, emoji_url,
+        activity_type,
+        prev_activity_id,
+        &addr.actor_uri,
+        &object_ap_id,
+        content,
+        emoji_url,
     );
 
     let undo_id = format!(
@@ -1136,8 +1279,15 @@ pub async fn deliver_ap_undo_reaction(
         build_undo_reaction_activity(&addr, &undo_id, &chrono::Utc::now().to_rfc3339(), inner);
 
     fan_out_activity(
-        ap_client, &inboxes, &activity, &addr.key_id, ap_private_key_pem,
-        &format!("Undo({}) post_id={} actor_id={}", activity_type, post_id, actor_id),
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
+        &format!(
+            "Undo({}) post_id={} actor_id={}",
+            activity_type, post_id, actor_id
+        ),
     )
     .await
 }
@@ -1167,7 +1317,10 @@ pub fn plain_to_html(text: &str) -> String {
 /// `<a href="...">` に置き換えてから、`plain_to_html` と同じ段落分割・改行変換を行う。
 /// `mentions` は `crate::mention::convert_mentions_for_ap` の戻り値をそのまま渡す想定
 /// （byte_start 昇順・非重複であること）。
-pub fn plain_to_html_with_mentions(text: &str, mentions: &[crate::mention::ApInlineMention]) -> String {
+pub fn plain_to_html_with_mentions(
+    text: &str,
+    mentions: &[crate::mention::ApInlineMention],
+) -> String {
     let mut linked = String::with_capacity(text.len() * 2);
     let mut last = 0usize;
     for m in mentions {
@@ -1177,7 +1330,9 @@ pub fn plain_to_html_with_mentions(text: &str, mentions: &[crate::mention::ApInl
         }
         linked.push_str(&escape_html(&text[last..m.byte_start]));
         let rel = match m.kind {
-            crate::mention::ApInlineSpanKind::Mention => r#" class="mention u-url" rel="nofollow noopener""#,
+            crate::mention::ApInlineSpanKind::Mention => {
+                r#" class="mention u-url" rel="nofollow noopener""#
+            }
             // Mastodon 等が実際に送ってくる形式（`class="mention hashtag" rel="tag"`）に合わせる。
             // 受信側の `ap_content_to_markdown_body` はこの形式のアンカーを `#foo` として
             // 解決できることを確認済み（`docs/protocols.md` 6節・`jobs::inbound_activity_process`
@@ -1215,7 +1370,10 @@ mod tests {
         let a = addr();
         assert_eq!(a.actor_uri, "https://seiran.example/users/alice");
         assert_eq!(a.key_id, "https://seiran.example/users/alice#main-key");
-        assert_eq!(a.followers_uri, "https://seiran.example/users/alice/followers");
+        assert_eq!(
+            a.followers_uri,
+            "https://seiran.example/users/alice/followers"
+        );
     }
 
     #[test]
@@ -1294,8 +1452,14 @@ mod tests {
                 mention_recipients: &[],
             },
         );
-        assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
-        assert_eq!(activity["cc"], serde_json::json!(["https://www.w3.org/ns/activitystreams#Public"]));
+        assert_eq!(
+            activity["to"],
+            serde_json::json!(["https://seiran.example/users/alice/followers"])
+        );
+        assert_eq!(
+            activity["cc"],
+            serde_json::json!(["https://www.w3.org/ns/activitystreams#Public"])
+        );
         assert_eq!(activity["object"]["to"], activity["to"]);
         assert_eq!(activity["object"]["cc"], activity["cc"]);
     }
@@ -1319,7 +1483,10 @@ mod tests {
                 mention_recipients: &[],
             },
         );
-        assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
+        assert_eq!(
+            activity["to"],
+            serde_json::json!(["https://seiran.example/users/alice/followers"])
+        );
         assert_eq!(activity["cc"], serde_json::json!(Vec::<String>::new()));
     }
 
@@ -1372,9 +1539,15 @@ mod tests {
         // メンション先はフォロワーでなくても配送が届くよう to に含める（cc ではない）。
         assert_eq!(
             activity["to"],
-            serde_json::json!(["https://www.w3.org/ns/activitystreams#Public", "https://other.example/users/bob"])
+            serde_json::json!([
+                "https://www.w3.org/ns/activitystreams#Public",
+                "https://other.example/users/bob"
+            ])
         );
-        assert_eq!(activity["cc"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
+        assert_eq!(
+            activity["cc"],
+            serde_json::json!(["https://seiran.example/users/alice/followers"])
+        );
     }
 
     #[test]
@@ -1398,14 +1571,22 @@ mod tests {
         );
         assert_eq!(
             activity["to"],
-            serde_json::json!(["https://seiran.example/users/alice/followers", "https://other.example/users/bob"])
+            serde_json::json!([
+                "https://seiran.example/users/alice/followers",
+                "https://other.example/users/bob"
+            ])
         );
     }
 
     #[test]
     fn attachment_document_with_dimensions_and_blurhash() {
         let doc = build_attachment_document(
-            "https://cdn.example/", "media/1.png", "image/png", Some(100), Some(200), Some("LKO2?U"),
+            "https://cdn.example/",
+            "media/1.png",
+            "image/png",
+            Some(100),
+            Some(200),
+            Some("LKO2?U"),
         );
         assert_eq!(doc["type"], "Document");
         assert_eq!(doc["mediaType"], "image/png");
@@ -1419,7 +1600,12 @@ mod tests {
     #[test]
     fn attachment_document_without_optional_fields() {
         let doc = build_attachment_document(
-            "https://cdn.example", "media/1.mp4", "video/mp4", None, None, None,
+            "https://cdn.example",
+            "media/1.mp4",
+            "video/mp4",
+            None,
+            None,
+            None,
         );
         assert!(doc.get("width").is_none());
         assert!(doc.get("blurhash").is_none());
@@ -1437,7 +1623,10 @@ mod tests {
         assert_eq!(activity["type"], "Announce");
         assert_eq!(activity["object"], "https://other.example/notes/9");
         assert_eq!(activity["actor"], "https://seiran.example/users/alice");
-        assert_eq!(activity["cc"][0], "https://seiran.example/users/alice/followers");
+        assert_eq!(
+            activity["cc"][0],
+            "https://seiran.example/users/alice/followers"
+        );
     }
 
     #[test]
@@ -1449,8 +1638,14 @@ mod tests {
             "2026-07-15T00:00:00+00:00",
             "unlisted",
         );
-        assert_eq!(activity["to"], serde_json::json!(["https://seiran.example/users/alice/followers"]));
-        assert_eq!(activity["cc"], serde_json::json!(["https://www.w3.org/ns/activitystreams#Public"]));
+        assert_eq!(
+            activity["to"],
+            serde_json::json!(["https://seiran.example/users/alice/followers"])
+        );
+        assert_eq!(
+            activity["cc"],
+            serde_json::json!(["https://www.w3.org/ns/activitystreams#Public"])
+        );
     }
 
     #[test]
@@ -1464,8 +1659,14 @@ mod tests {
         );
         assert_eq!(activity["type"], "Undo");
         assert_eq!(activity["object"]["type"], "Announce");
-        assert_eq!(activity["object"]["id"], "https://seiran.example/announces/7");
-        assert_eq!(activity["object"]["object"], "https://other.example/notes/9");
+        assert_eq!(
+            activity["object"]["id"],
+            "https://seiran.example/announces/7"
+        );
+        assert_eq!(
+            activity["object"]["object"],
+            "https://other.example/notes/9"
+        );
     }
 
     #[test]
@@ -1535,13 +1736,20 @@ mod tests {
     #[test]
     fn reaction_object_custom_emoji_includes_tag() {
         let react = build_reaction_object(
-            "EmojiReact", "id1", "actor1", "obj1", ":blobcat:",
+            "EmojiReact",
+            "id1",
+            "actor1",
+            "obj1",
+            ":blobcat:",
             Some("https://example.com/blobcat.png"),
         );
         assert_eq!(react["content"], ":blobcat:");
         assert_eq!(react["tag"][0]["type"], "Emoji");
         assert_eq!(react["tag"][0]["name"], ":blobcat:");
-        assert_eq!(react["tag"][0]["icon"]["url"], "https://example.com/blobcat.png");
+        assert_eq!(
+            react["tag"][0]["icon"]["url"],
+            "https://example.com/blobcat.png"
+        );
     }
 
     #[test]
@@ -1552,10 +1760,7 @@ mod tests {
 
     #[test]
     fn test_plain_to_html_double_newline() {
-        assert_eq!(
-            plain_to_html("Hello\n\nWorld"),
-            "<p>Hello</p><p>World</p>"
-        );
+        assert_eq!(plain_to_html("Hello\n\nWorld"), "<p>Hello</p><p>World</p>");
         assert_eq!(
             plain_to_html("First\n\nSecond\n\nThird"),
             "<p>First</p><p>Second</p><p>Third</p>"
@@ -1571,10 +1776,7 @@ mod tests {
         assert!(!result.contains("<script>"));
         assert!(!result.contains("</script>"));
         assert!(result.contains("&lt;script&gt;"));
-        assert_eq!(
-            result,
-            "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>"
-        );
+        assert_eq!(result, "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
     }
 
     #[test]

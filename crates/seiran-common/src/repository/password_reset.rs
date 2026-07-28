@@ -71,9 +71,9 @@ impl PasswordResetRepository for PgPasswordResetRepository {
                AND expires_at > NOW()
              RETURNING user_id",
         )
-            .bind(token)
-            .fetch_optional(&mut *tx)
-            .await?;
+        .bind(token)
+        .fetch_optional(&mut *tx)
+        .await?;
         let Some(user_id) = user_id else {
             tx.rollback().await?;
             return Ok(false);

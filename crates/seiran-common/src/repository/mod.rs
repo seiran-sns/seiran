@@ -34,9 +34,9 @@ pub use block::{BlockRepository, BlockedActorRow, PgBlockRepository};
 pub use dm::{DmPeerSummary, DmRepository, PgDmRepository};
 pub use email_change::{EmailChangeRepository, PgEmailChangeRepository};
 pub use email_verification::{EmailVerificationRepository, PgEmailVerificationRepository};
+pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
-pub use mute::{MuteRepository, MutedActorRow, PgMuteRepository};
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
 pub use list::{
     ListMemberRow, ListRepository, ListRow, PgListRepository, MAX_LISTS_PER_OWNER,
@@ -45,20 +45,23 @@ pub use list::{
 pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
 };
-pub use notification::{NotificationKind, NotificationRepository, NotificationRow, PgNotificationRepository};
+pub use mute::{MuteRepository, MutedActorRow, PgMuteRepository};
+pub use notification::{
+    NotificationKind, NotificationRepository, NotificationRow, PgNotificationRepository,
+};
 pub use password_reset::{PasswordResetRepository, PgPasswordResetRepository};
 pub use pinned_post::{PgPinnedPostsRepository, PinnedPostsRepository, MAX_PINNED_POSTS};
 pub use post::{
-    DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, PgPostRepository, PostDeleteInfo,
-    PostDeliveryMeta, PostRecord, PostRepository, PostSummary, RepostUndoInfo, TimelinePost,
+    DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, PgPostRepository,
+    PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository, PostSummary, RepostUndoInfo,
+    TimelinePost,
 };
 pub use reaction::{PgReactionRepository, ReactionRepository, ReactorInfo};
-pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
 pub use remote_emoji::{PgRemoteEmojiRepository, RemoteEmojiRepository, RemoteEmojiRow};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage_provider::{
-    CreateStorageProvider, PgStorageProviderRepository, StorageProvider,
-    StorageProviderError, StorageProviderRepository, UpdateStorageProvider,
+    CreateStorageProvider, PgStorageProviderRepository, StorageProvider, StorageProviderError,
+    StorageProviderRepository, UpdateStorageProvider,
 };
 pub use totp::{PgTotpRepository, TotpRepository};
 pub use user::{AdminUserRow, LoginRow, PgUserRepository, UserRepository};

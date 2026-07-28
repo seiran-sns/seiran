@@ -57,18 +57,25 @@ impl IntoResponse for ApiError {
             ApiError::Forbidden(c) => (StatusCode::FORBIDDEN, c.to_owned()),
             ApiError::ServiceUnavailable(c) => (StatusCode::SERVICE_UNAVAILABLE, c.to_owned()),
             ApiError::BadGateway(c) => (StatusCode::BAD_GATEWAY, c),
-            ApiError::InsufficientStorage => {
-                (StatusCode::INSUFFICIENT_STORAGE, "STORAGE_QUOTA_EXCEEDED".to_owned())
-            }
+            ApiError::InsufficientStorage => (
+                StatusCode::INSUFFICIENT_STORAGE,
+                "STORAGE_QUOTA_EXCEEDED".to_owned(),
+            ),
             ApiError::Internal(msg) => {
                 tracing::error!("[ERROR] {}", msg);
-                (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR".to_owned())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "INTERNAL_ERROR".to_owned(),
+                )
             }
         };
         // message は Internal のログ詳細を漏らさないよう、常に外部公開済みの code を再利用する。
         let body = ApiErrorBody {
             code: code.clone(),
-            error: ApiErrorDetail { code: code.clone(), message: code },
+            error: ApiErrorDetail {
+                code: code.clone(),
+                message: code,
+            },
         };
         (status, Json(body)).into_response()
     }

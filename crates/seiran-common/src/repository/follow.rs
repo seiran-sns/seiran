@@ -194,14 +194,12 @@ impl FollowRepository for PgFollowRepository {
         follower_actor_id: i64,
         target_actor_id: i64,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "DELETE FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2",
-        )
-        .bind(follower_actor_id)
-        .bind(target_actor_id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        sqlx::query("DELETE FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2")
+            .bind(follower_actor_id)
+            .bind(target_actor_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 
     async fn find_atp_rkey(

@@ -22,7 +22,8 @@ pub trait MuteRepository: Send + Sync {
         muted_actor_id: i64,
     ) -> Result<(), sqlx::Error>;
 
-    async fn is_muted(&self, muter_actor_id: i64, muted_actor_id: i64) -> Result<bool, sqlx::Error>;
+    async fn is_muted(&self, muter_actor_id: i64, muted_actor_id: i64)
+        -> Result<bool, sqlx::Error>;
 
     /// ミュート中のアクター一覧を新しい順に返す（設定画面、#55）。件数は少数想定のため
     /// カーソルページネーションはせず先頭200件を返す。
@@ -59,17 +60,19 @@ impl MuteRepository for PgMuteRepository {
         muter_actor_id: i64,
         muted_actor_id: i64,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "DELETE FROM mutes WHERE muter_actor_id = $1 AND muted_actor_id = $2",
-        )
-        .bind(muter_actor_id)
-        .bind(muted_actor_id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        sqlx::query("DELETE FROM mutes WHERE muter_actor_id = $1 AND muted_actor_id = $2")
+            .bind(muter_actor_id)
+            .bind(muted_actor_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 
-    async fn is_muted(&self, muter_actor_id: i64, muted_actor_id: i64) -> Result<bool, sqlx::Error> {
+    async fn is_muted(
+        &self,
+        muter_actor_id: i64,
+        muted_actor_id: i64,
+    ) -> Result<bool, sqlx::Error> {
         let row: (bool,) = sqlx::query_as(
             "SELECT EXISTS(SELECT 1 FROM mutes WHERE muter_actor_id = $1 AND muted_actor_id = $2)",
         )

@@ -29,7 +29,9 @@ pub fn extract_hashtags(text: &str) -> Vec<String> {
     while i < chars.len() {
         if chars[i] == '#' {
             let prev_ok = i == 0
-                || !(chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_' || chars[i - 1] == '/');
+                || !(chars[i - 1].is_ascii_alphanumeric()
+                    || chars[i - 1] == '_'
+                    || chars[i - 1] == '/');
             if prev_ok {
                 let start = i + 1;
                 let mut j = start;
@@ -91,12 +93,18 @@ mod tests {
 
     #[test]
     fn ignores_url_fragment() {
-        assert_eq!(extract_hashtags("参照: https://x.com/a#section"), Vec::<String>::new());
+        assert_eq!(
+            extract_hashtags("参照: https://x.com/a#section"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
     fn ignores_pure_numeric_hashtag() {
-        assert_eq!(extract_hashtags("#2026 年もよろしく #000"), Vec::<String>::new());
+        assert_eq!(
+            extract_hashtags("#2026 年もよろしく #000"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

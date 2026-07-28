@@ -40,7 +40,10 @@ pub async fn bridge(req: Request, next: Next) -> Response {
         // 上限超過等でボディを読み切れない場合、元のバイト列を復元する術がないため
         // ここで打ち切る（ダウンストリームへ壊れたボディを渡すよりは明確なエラーにする）。
         Err(e) => {
-            return (StatusCode::PAYLOAD_TOO_LARGE, format!("リクエストボディの読み取りに失敗しました: {e}"))
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("リクエストボディの読み取りに失敗しました: {e}"),
+            )
                 .into_response();
         }
     };
@@ -49,7 +52,8 @@ pub async fn bridge(req: Request, next: Next) -> Response {
         insert_bearer(&mut parts.headers, &token);
     }
 
-    next.run(Request::from_parts(parts, Body::from(bytes))).await
+    next.run(Request::from_parts(parts, Body::from(bytes)))
+        .await
 }
 
 fn is_json_content_type(req: &Request) -> bool {
@@ -111,7 +115,9 @@ mod tests {
             .body(Body::from(r#"{"i":"secret-token","text":"hi"}"#))
             .unwrap();
         let res = app().oneshot(req).await.unwrap();
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"Bearer secret-token");
     }
 
@@ -123,7 +129,9 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let res = app().oneshot(req).await.unwrap();
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"Bearer qtoken");
     }
 
@@ -137,7 +145,9 @@ mod tests {
             .body(Body::from(r#"{"i":"body-token"}"#))
             .unwrap();
         let res = app().oneshot(req).await.unwrap();
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"Bearer header-token");
     }
 
@@ -150,7 +160,9 @@ mod tests {
             .body(Body::from("--x--"))
             .unwrap();
         let res = app().oneshot(req).await.unwrap();
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"<none>");
     }
 
@@ -163,7 +175,9 @@ mod tests {
             .body(Body::from("not json"))
             .unwrap();
         let res = app().oneshot(req).await.unwrap();
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"<none>");
     }
 
@@ -176,7 +190,9 @@ mod tests {
             .body(Body::from(r#"{"text":"hi"}"#))
             .unwrap();
         let res = app().oneshot(req).await.unwrap();
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"<none>");
     }
 }

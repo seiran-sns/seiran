@@ -24,7 +24,10 @@ fn extract_domain(uri: &str) -> String {
 
 pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
     let Some(pool) = &ctx.db_pool else {
-        tracing::warn!("[RemoteActorResolve] DB pool 未設定のためスキップ (uri={})", uri);
+        tracing::warn!(
+            "[RemoteActorResolve] DB pool 未設定のためスキップ (uri={})",
+            uri
+        );
         return Ok(());
     };
 
@@ -56,7 +59,10 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
 
     let domain = extract_domain(&uri);
     let sem = ctx.get_domain_semaphore(&domain).await;
-    let _permit = sem.acquire_owned().await.map_err(|e| format!("セマフォ取得失敗: {}", e))?;
+    let _permit = sem
+        .acquire_owned()
+        .await
+        .map_err(|e| format!("セマフォ取得失敗: {}", e))?;
 
     let actor = ctx
         .ap_client
@@ -75,7 +81,10 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
         .clone()
         .unwrap_or_else(|| uri.rsplit('/').next().unwrap_or("unknown").to_string());
     let display_name = actor.name.clone().unwrap_or_else(|| username.clone());
-    let bio = actor.summary.as_deref().map(crate::jobs::inbound_activity_process::strip_html);
+    let bio = actor
+        .summary
+        .as_deref()
+        .map(crate::jobs::inbound_activity_process::strip_html);
     let emoji_map = actor.emoji_map();
     let profile_fields = actor.profile_fields_json();
 
@@ -97,6 +106,10 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
         .await
         .map_err(|e| format!("upsert_remote_fedi 失敗: {}", e))?;
 
-    tracing::info!("[RemoteActorResolve] 未知アクター解決完了: uri={} handle={}", uri, username);
+    tracing::info!(
+        "[RemoteActorResolve] 未知アクター解決完了: uri={} handle={}",
+        uri,
+        username
+    );
     Ok(())
 }

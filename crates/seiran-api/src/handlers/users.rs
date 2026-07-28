@@ -1,11 +1,16 @@
-use axum::{extract::{Query, State}, http::HeaderMap, response::{IntoResponse, Response}, Json};
+use axum::{
+    extract::{Query, State},
+    http::HeaderMap,
+    response::{IntoResponse, Response},
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use seiran_common::ap::fetch_ap_collection_uris;
 use seiran_common::atp::fetch_bsky_profile;
-use seiran_common::ApDeliveryKind;
 use seiran_common::repository::{Actor, ActorProfileRow};
+use seiran_common::ApDeliveryKind;
 
 use crate::error::ApiError;
 use crate::handlers::notes::{
@@ -52,16 +57,34 @@ pub async fn user_posts(
     let until_id: Option<i64> = params.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = params.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let my_user_id: Option<i64> = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref())
-        .await
-        .ok()
-        .map(|u| u.user_id);
+    let my_user_id: Option<i64> =
+        extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref())
+            .await
+            .ok()
+            .map(|u| u.user_id);
     let my_actor_id: Option<i64> = match my_user_id {
-        Some(uid) => state.actors.find_local_by_user_id(uid).await.ok().flatten().map(|a| a.id),
+        Some(uid) => state
+            .actors
+            .find_local_by_user_id(uid)
+            .await
+            .ok()
+            .flatten()
+            .map(|a| a.id),
         None => None,
     };
 
-    let mut post_rows = match state.posts.timeline_by_actor(actor_id, my_actor_id, limit, until_id, since_id, params.exclude_direct).await {
+    let mut post_rows = match state
+        .posts
+        .timeline_by_actor(
+            actor_id,
+            my_actor_id,
+            limit,
+            until_id,
+            since_id,
+            params.exclude_direct,
+        )
+        .await
+    {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[user_posts] 投稿取得失敗: {}", e);
@@ -144,7 +167,12 @@ pub async fn user_following(
         .list_following(actor_id, me.map(|u| u.actor_id), limit, until_id, since_id)
         .await
     {
-        Ok(rows) => Json(rows.into_iter().map(FollowListItem::from).collect::<Vec<_>>()).into_response(),
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(FollowListItem::from)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
         Err(e) => {
             tracing::error!("[user_following] フォロー中一覧取得失敗: {}", e);
             ApiError::Internal(e.to_string()).into_response()
@@ -171,7 +199,12 @@ pub async fn user_followers(
         .list_followers(actor_id, me.map(|u| u.actor_id), limit, until_id, since_id)
         .await
     {
-        Ok(rows) => Json(rows.into_iter().map(FollowListItem::from).collect::<Vec<_>>()).into_response(),
+        Ok(rows) => Json(
+            rows.into_iter()
+                .map(FollowListItem::from)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
         Err(e) => {
             tracing::error!("[user_followers] フォロワー一覧取得失敗: {}", e);
             ApiError::Internal(e.to_string()).into_response()
@@ -273,12 +306,21 @@ async fn fetch_bsky_profile_from_appview(
             return build_profile_response(db_actor, my_user_id, state).await;
         }
         let now = chrono::Utc::now();
-        let _ = state.actors.upsert_remote_bsky(
-            db_actor.id, &bsky.did, &bsky.handle,
-            bsky.display_name.as_deref(), bsky.avatar.as_deref(), now,
-        ).await;
+        let _ = state
+            .actors
+            .upsert_remote_bsky(
+                db_actor.id,
+                &bsky.did,
+                &bsky.handle,
+                bsky.display_name.as_deref(),
+                bsky.avatar.as_deref(),
+                now,
+            )
+            .await;
         // バックグラウンドで過去ポストを取り込む（Worker の ActorHistorySync ジョブ）
-        state.enqueue_actor_history_sync(None, Some(bsky.did.clone())).await;
+        state
+            .enqueue_actor_history_sync(None, Some(bsky.did.clone()))
+            .await;
         sync_remote_bsky_pinned(state, db_actor.id, bsky.pinned_post.as_ref()).await;
         return build_profile_response(db_actor, my_user_id, state).await;
     }
@@ -316,44 +358,46 @@ pub async fn user_profile(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     // ログインユーザーの user_id（フォロー状態確認用）
-    let my_user_id: Option<i64> = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref())
-        .await
-        .ok()
-        .map(|u| u.user_id);
+    let my_user_id: Option<i64> =
+        extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref())
+            .await
+            .ok()
+            .map(|u| u.user_id);
 
     let q = params.q.trim().trim_start_matches('@');
 
     // ターゲットを解決：`user@domain` / `user`（ローカル）/ `https://...`（URI）
-    let (lookup_username, lookup_domain): (String, Option<String>) =
-        if q.starts_with("https://") || q.starts_with("http://") {
-            // Actor URI → WebFinger などは省略し、DB で ap_uri 検索
-            return lookup_by_uri(q, my_user_id, &state).await.into_response();
-        } else if q.starts_with("did:") {
-            // DID 形式 → DB で検索し、なければ AppView へ
-            return match state.actors.find_by_did(q).await {
-                Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
-                Ok(None) => fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
-                Err(e) => {
-                    tracing::error!("[profile] DB エラー: {}", e);
-                    ApiError::Internal(e.to_string()).into_response()
-                }
-            };
-        } else if q.contains('.') && !q.contains('@') {
-            // ドット含み・@なし → `user.local-domain`（自インスタンスの AT ハンドル形式）ならローカル DB を検索し、
-            // それ以外は ATP ハンドル（alice.bsky.social 等）とみなして外部 AppView へ
-            let local_suffix = format!(".{}", state.local_domain);
-            match q.strip_suffix(local_suffix.as_str()) {
-                Some(local_username) => (local_username.to_string(), Some(state.local_domain.clone())),
-                None => return fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
-            }
-        } else {
-            let parts: Vec<&str> = q.splitn(2, '@').collect();
-            if parts.len() == 2 {
-                (parts[0].to_string(), Some(parts[1].to_string()))
-            } else {
-                (parts[0].to_string(), None)
+    let (lookup_username, lookup_domain): (String, Option<String>) = if q.starts_with("https://")
+        || q.starts_with("http://")
+    {
+        // Actor URI → WebFinger などは省略し、DB で ap_uri 検索
+        return lookup_by_uri(q, my_user_id, &state).await.into_response();
+    } else if q.starts_with("did:") {
+        // DID 形式 → DB で検索し、なければ AppView へ
+        return match state.actors.find_by_did(q).await {
+            Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
+            Ok(None) => fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
+            Err(e) => {
+                tracing::error!("[profile] DB エラー: {}", e);
+                ApiError::Internal(e.to_string()).into_response()
             }
         };
+    } else if q.contains('.') && !q.contains('@') {
+        // ドット含み・@なし → `user.local-domain`（自インスタンスの AT ハンドル形式）ならローカル DB を検索し、
+        // それ以外は ATP ハンドル（alice.bsky.social 等）とみなして外部 AppView へ
+        let local_suffix = format!(".{}", state.local_domain);
+        match q.strip_suffix(local_suffix.as_str()) {
+            Some(local_username) => (local_username.to_string(), Some(state.local_domain.clone())),
+            None => return fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
+        }
+    } else {
+        let parts: Vec<&str> = q.splitn(2, '@').collect();
+        if parts.len() == 2 {
+            (parts[0].to_string(), Some(parts[1].to_string()))
+        } else {
+            (parts[0].to_string(), None)
+        }
+    };
 
     let domain = lookup_domain
         .as_deref()
@@ -361,13 +405,26 @@ pub async fn user_profile(
         .to_string();
 
     // DB で検索
-    match state.actors.find_by_username_domain(&lookup_username, &domain).await {
+    match state
+        .actors
+        .find_by_username_domain(&lookup_username, &domain)
+        .await
+    {
         Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
-        Ok(None) if lookup_domain.as_deref().is_some_and(|d| d != state.local_domain) => {
+        Ok(None)
+            if lookup_domain
+                .as_deref()
+                .is_some_and(|d| d != state.local_domain) =>
+        {
             // DB にいない → AP から取得して返す（DB には保存しない）
-            fetch_remote_profile(&lookup_username, lookup_domain.as_deref().unwrap(), my_user_id, &state)
-                .await
-                .into_response()
+            fetch_remote_profile(
+                &lookup_username,
+                lookup_domain.as_deref().unwrap(),
+                my_user_id,
+                &state,
+            )
+            .await
+            .into_response()
         }
         Ok(None) => ApiError::NotFound("USER_NOT_FOUND").into_response(),
         Err(e) => {
@@ -386,24 +443,32 @@ async fn sync_remote_bsky_pinned(
     pinned_post: Option<&seiran_common::atp::BskyPinnedPostRef>,
 ) {
     let post_ids: Vec<i64> = match pinned_post {
-        Some(pin) => match seiran_common::atp::fetch_single_bsky_post(&state.http_client, &pin.uri).await {
-            Ok(Some(post)) => match seiran_common::atp::upsert_bsky_post(&state.db, actor_id, &post).await {
-                Ok(id) => vec![id],
+        Some(pin) => {
+            match seiran_common::atp::fetch_single_bsky_post(&state.http_client, &pin.uri).await {
+                Ok(Some(post)) => {
+                    match seiran_common::atp::upsert_bsky_post(&state.db, actor_id, &post).await {
+                        Ok(id) => vec![id],
+                        Err(e) => {
+                            tracing::warn!("[profile] pinnedPost 保存失敗（スキップ）: {}", e);
+                            vec![]
+                        }
+                    }
+                }
+                Ok(None) => vec![],
                 Err(e) => {
-                    tracing::warn!("[profile] pinnedPost 保存失敗（スキップ）: {}", e);
+                    tracing::warn!("[profile] pinnedPost 取得失敗（スキップ）: {}", e);
                     vec![]
                 }
-            },
-            Ok(None) => vec![],
-            Err(e) => {
-                tracing::warn!("[profile] pinnedPost 取得失敗（スキップ）: {}", e);
-                vec![]
             }
-        },
+        }
         None => vec![],
     };
 
-    if let Err(e) = state.pinned_posts.sync_from_remote(actor_id, &post_ids, chrono::Utc::now()).await {
+    if let Err(e) = state
+        .pinned_posts
+        .sync_from_remote(actor_id, &post_ids, chrono::Utc::now())
+        .await
+    {
         tracing::warn!("[profile] pinned_posts 同期失敗: {}", e);
     }
 }
@@ -412,7 +477,9 @@ async fn sync_remote_bsky_pinned(
 /// `pinned_posts` テーブルへ同期する。ベストエフォート（取得・保存に失敗してもログのみ、
 /// プロフィール表示自体は継続する）。
 async fn sync_remote_fedi_pinned(state: &AppState, actor: &Actor) {
-    let Some(ap_uri) = actor.ap_uri.as_deref() else { return };
+    let Some(ap_uri) = actor.ap_uri.as_deref() else {
+        return;
+    };
 
     let notes = match seiran_common::ap::fetch_ap_featured(&state.ap_client, ap_uri).await {
         Ok(notes) => notes,
@@ -430,7 +497,11 @@ async fn sync_remote_fedi_pinned(state: &AppState, actor: &Actor) {
         }
     }
 
-    if let Err(e) = state.pinned_posts.sync_from_remote(actor.id, &post_ids, chrono::Utc::now()).await {
+    if let Err(e) = state
+        .pinned_posts
+        .sync_from_remote(actor.id, &post_ids, chrono::Utc::now())
+        .await
+    {
         tracing::warn!("[profile] pinned_posts 同期失敗: {}", e);
     }
 }
@@ -458,11 +529,22 @@ async fn build_profile_response(
     // 管理者が通報対象プロフィールを調査する場合は、対象本人と同じ可視範囲で
     // followers-only/directを含む投稿を表示する（操作主体自体はmy_actor_idのまま）。
     let is_admin = if let Some(uid) = my_user_id {
-        state.users.find_role_by_user_id(uid).await.ok().flatten().as_deref() == Some("admin")
+        state
+            .users
+            .find_role_by_user_id(uid)
+            .await
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("admin")
     } else {
         false
     };
-    let profile_viewer_actor_id = if is_admin { Some(actor_id) } else { my_actor_id };
+    let profile_viewer_actor_id = if is_admin {
+        Some(actor_id)
+    } else {
+        my_actor_id
+    };
 
     // フォロー状態
     let follow_status = match my_actor_id {
@@ -481,7 +563,11 @@ async fn build_profile_response(
     // actor_is_hidden_for_viewer によって既に相互非表示が効くため、ここでは表示用の
     // フラグ取得のみ行う（recent_posts/pinned_posts のショートサーキットは不要）。
     let (is_blocking, is_blocked_by) = match my_actor_id {
-        Some(mid) => state.blocks.find_relationship(mid, actor_id).await.unwrap_or((false, false)),
+        Some(mid) => state
+            .blocks
+            .find_relationship(mid, actor_id)
+            .await
+            .unwrap_or((false, false)),
         None => (false, false),
     };
     let is_muted = match my_actor_id {
@@ -498,7 +584,11 @@ async fn build_profile_response(
 
     // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
     // アクター情報・添付・リアクションを含む NoteResponse で返す（#43）。
-    let mut post_rows = match state.posts.timeline_by_actor(actor_id, profile_viewer_actor_id, 20, None, None, true).await {
+    let mut post_rows = match state
+        .posts
+        .timeline_by_actor(actor_id, profile_viewer_actor_id, 20, None, None, true)
+        .await
+    {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] 最近の投稿取得失敗: {}", e);
@@ -523,7 +613,11 @@ async fn build_profile_response(
 
     // ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
     // Fedi featured collection / Bsky pinnedPost 同期結果（`sync_remote_pinned_posts` 参照）。
-    let mut pinned_rows = match state.pinned_posts.list_timeline_by_actor(actor_id, my_actor_id).await {
+    let mut pinned_rows = match state
+        .pinned_posts
+        .list_timeline_by_actor(actor_id, my_actor_id)
+        .await
+    {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] ピン留め投稿取得失敗: {}", e);
@@ -551,7 +645,11 @@ async fn build_profile_response(
     if my_actor_id == Some(actor_id) {
         let pinned_id_set: std::collections::HashSet<i64> = pinned_ids.iter().copied().collect();
         for nr in recent_posts.iter_mut() {
-            let is_pinned = nr.id.parse::<i64>().map(|id| pinned_id_set.contains(&id)).unwrap_or(false);
+            let is_pinned = nr
+                .id
+                .parse::<i64>()
+                .map(|id| pinned_id_set.contains(&id))
+                .unwrap_or(false);
             nr.pinned_by_me = Some(is_pinned);
         }
         for nr in pinned_posts.iter_mut() {
@@ -574,7 +672,11 @@ async fn build_profile_response(
                 } else {
                     format!("@{}@{}", real.username, real.domain)
                 };
-                let proto = if real.at_did.is_some() { "bsky" } else { "fedi" };
+                let proto = if real.at_did.is_some() {
+                    "bsky"
+                } else {
+                    "fedi"
+                };
                 (Some(handle), Some(proto.to_string()))
             }
             _ => (None, None),
@@ -596,7 +698,11 @@ async fn build_profile_response(
             .await
             .map(|rows| {
                 rows.into_iter()
-                    .map(|r| PublicListSummary { id: r.id.to_string(), name: r.name, member_count: r.member_count })
+                    .map(|r| PublicListSummary {
+                        id: r.id.to_string(),
+                        name: r.name,
+                        member_count: r.member_count,
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -607,10 +713,18 @@ async fn build_profile_response(
     // 相手からブロックされている場合、Bsky準拠の相互完全非表示の一環として
     // 自己紹介文・プロフィールのキーバリュー項目も見せない
     // （recent_posts/pinned_postsは既にタイムラインクエリのフィルタで空になる）。
-    let (bio, profile_fields) = if is_blocked_by { (None, vec![]) } else { (actor.bio, profile_fields) };
+    let (bio, profile_fields) = if is_blocked_by {
+        (None, vec![])
+    } else {
+        (actor.bio, profile_fields)
+    };
 
     // フォロー中/フォロワー人数（#56）。プロフィールカードの表示・右ペインタブ切替に使う。
-    let (following_count, follower_count) = state.follows.count_relations(actor_id).await.unwrap_or((0, 0));
+    let (following_count, follower_count) = state
+        .follows
+        .count_relations(actor_id)
+        .await
+        .unwrap_or((0, 0));
 
     Json(ProfileResponse {
         actor_id: Some(actor_id.to_string()),
@@ -673,7 +787,10 @@ async fn fetch_remote_profile(
         .preferred_username
         .clone()
         .unwrap_or_else(|| username.to_string());
-    let display_name = ap_actor.name.clone().unwrap_or_else(|| resolved_username.clone());
+    let display_name = ap_actor
+        .name
+        .clone()
+        .unwrap_or_else(|| resolved_username.clone());
     let avatar_url = ap_actor.avatar_url();
     // 自己紹介文（AP Person の summary は HTML のため strip_html でプレーンテキスト化する）。
     let bio = ap_actor
@@ -688,15 +805,37 @@ async fn fetch_remote_profile(
 
     match state
         .actors
-        .upsert_remote_fedi(new_actor_id, &actor_uri, &ap_inbox, &resolved_username, domain, &display_name, avatar_url.as_deref(), bio.as_deref(), now, &emoji_map, &profile_fields)
+        .upsert_remote_fedi(
+            new_actor_id,
+            &actor_uri,
+            &ap_inbox,
+            &resolved_username,
+            domain,
+            &display_name,
+            avatar_url.as_deref(),
+            bio.as_deref(),
+            now,
+            &emoji_map,
+            &profile_fields,
+        )
         .await
     {
         Ok(actor_id) => match state.actors.find_by_id(actor_id).await {
-            Ok(Some(actor)) => return build_profile_response(actor, my_user_id, state).await.into_response(),
-            Ok(None) => tracing::error!("[profile] upsert 直後のアクター取得に失敗（存在しない）: actor_id={}", actor_id),
+            Ok(Some(actor)) => {
+                return build_profile_response(actor, my_user_id, state)
+                    .await
+                    .into_response()
+            }
+            Ok(None) => tracing::error!(
+                "[profile] upsert 直後のアクター取得に失敗（存在しない）: actor_id={}",
+                actor_id
+            ),
             Err(e) => tracing::error!("[profile] upsert 直後のアクター取得エラー: {}", e),
         },
-        Err(e) => tracing::error!("[profile] リモートアクター upsert 失敗（フォールバックで非永続表示）: {}", e),
+        Err(e) => tracing::error!(
+            "[profile] リモートアクター upsert 失敗（フォールバックで非永続表示）: {}",
+            e
+        ),
     }
 
     // upsert に失敗した場合のフォールバック（従来通りの非永続表示、ピン留めは出せない）。
@@ -728,11 +867,7 @@ async fn fetch_remote_profile(
     .into_response()
 }
 
-async fn lookup_by_uri(
-    uri: &str,
-    my_user_id: Option<i64>,
-    state: &AppState,
-) -> impl IntoResponse {
+async fn lookup_by_uri(uri: &str, my_user_id: Option<i64>, state: &AppState) -> impl IntoResponse {
     match state.actors.find_by_ap_uri(uri).await {
         Ok(Some(actor)) => build_profile_response(actor, my_user_id, state).await,
         _ => ApiError::NotFound("USER_NOT_FOUND").into_response(),
@@ -781,8 +916,11 @@ const MAX_PROFILE_FIELD_VALUE_LEN: usize = 255;
 fn validate_profile_fields(fields: Vec<ProfileField>) -> Result<serde_json::Value, Box<Response>> {
     if fields.len() > seiran_common::MAX_PROFILE_FIELDS {
         return Err(Box::new(
-            ApiError::BadRequest(format!("プロフィール項目は最大{}件までです", seiran_common::MAX_PROFILE_FIELDS))
-                .into_response(),
+            ApiError::BadRequest(format!(
+                "プロフィール項目は最大{}件までです",
+                seiran_common::MAX_PROFILE_FIELDS
+            ))
+            .into_response(),
         ));
     }
     let cleaned: Vec<ProfileField> = fields
@@ -800,18 +938,25 @@ fn validate_profile_fields(fields: Vec<ProfileField>) -> Result<serde_json::Valu
     for f in &cleaned {
         if f.name.chars().count() > MAX_PROFILE_FIELD_NAME_LEN {
             return Err(Box::new(
-                ApiError::BadRequest(format!("プロフィール項目のラベルは{}文字までです", MAX_PROFILE_FIELD_NAME_LEN))
-                    .into_response(),
+                ApiError::BadRequest(format!(
+                    "プロフィール項目のラベルは{}文字までです",
+                    MAX_PROFILE_FIELD_NAME_LEN
+                ))
+                .into_response(),
             ));
         }
         if f.value.chars().count() > MAX_PROFILE_FIELD_VALUE_LEN {
             return Err(Box::new(
-                ApiError::BadRequest(format!("プロフィール項目の値は{}文字までです", MAX_PROFILE_FIELD_VALUE_LEN))
-                    .into_response(),
+                ApiError::BadRequest(format!(
+                    "プロフィール項目の値は{}文字までです",
+                    MAX_PROFILE_FIELD_VALUE_LEN
+                ))
+                .into_response(),
             ));
         }
     }
-    serde_json::to_value(cleaned).map_err(|e| Box::new(ApiError::Internal(e.to_string()).into_response()))
+    serde_json::to_value(cleaned)
+        .map_err(|e| Box::new(ApiError::Internal(e.to_string()).into_response()))
 }
 
 pub async fn update_profile(
@@ -819,13 +964,18 @@ pub async fn update_profile(
     State(state): State<AppState>,
     Json(req): Json<UpdateProfileRequest>,
 ) -> impl IntoResponse {
-    let auth_user = match extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await {
+    let auth_user = match extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await
+    {
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
 
     // 現在のプロフィールを取得
-    let current: ActorProfileRow = match state.actors.find_profile_by_user_id(auth_user.user_id).await {
+    let current: ActorProfileRow = match state
+        .actors
+        .find_profile_by_user_id(auth_user.user_id)
+        .await
+    {
         Ok(Some(r)) => r,
         Ok(None) => return ApiError::NotFound("ACTOR_NOT_FOUND").into_response(),
         Err(e) => {
@@ -850,7 +1000,10 @@ pub async fn update_profile(
         Some(None) => None,
         Some(Some(s)) => match s.parse::<i64>() {
             Ok(id) => Some(id),
-            Err(_) => return ApiError::BadRequest("avatar_media_id が不正な値です".to_string()).into_response(),
+            Err(_) => {
+                return ApiError::BadRequest("avatar_media_id が不正な値です".to_string())
+                    .into_response()
+            }
         },
     };
     let new_banner_media_id: Option<i64> = match req.banner_media_id {
@@ -858,7 +1011,10 @@ pub async fn update_profile(
         Some(None) => None,
         Some(Some(s)) => match s.parse::<i64>() {
             Ok(id) => Some(id),
-            Err(_) => return ApiError::BadRequest("banner_media_id が不正な値です".to_string()).into_response(),
+            Err(_) => {
+                return ApiError::BadRequest("banner_media_id が不正な値です".to_string())
+                    .into_response()
+            }
         },
     };
     let new_profile_fields: serde_json::Value = match req.profile_fields {
@@ -895,18 +1051,33 @@ pub async fn update_profile(
         Ok((atp_display_name, bio_with_fields, avatar_media)) => {
             if let Err(e) = state
                 .atp_service
-                .commit_profile(current.id, &atp_display_name, bio_with_fields.as_deref(), avatar_media, pinned_post, chrono::Utc::now())
+                .commit_profile(
+                    current.id,
+                    &atp_display_name,
+                    bio_with_fields.as_deref(),
+                    avatar_media,
+                    pinned_post,
+                    chrono::Utc::now(),
+                )
                 .await
             {
-                tracing::error!("[update_profile] ATP プロフィール再コミット失敗（DB更新は完了済み）: {}", e);
+                tracing::error!(
+                    "[update_profile] ATP プロフィール再コミット失敗（DB更新は完了済み）: {}",
+                    e
+                );
             }
         }
-        Err(e) => tracing::error!("[update_profile] ATP 再コミット材料取得失敗（DB更新は完了済み）: {}", e),
+        Err(e) => tracing::error!(
+            "[update_profile] ATP 再コミット材料取得失敗（DB更新は完了済み）: {}",
+            e
+        ),
     }
 
     // AP 側: 既にフォロー中のリモートインスタンスへ Update(Person) をプッシュ配信し、
     // 相手側にキャッシュ済みの Actor 情報をすぐ更新させる（Worker の ApDelivery ジョブ）。
-    state.enqueue_ap_delivery(current.id, ApDeliveryKind::UpdateActor).await;
+    state
+        .enqueue_ap_delivery(current.id, ApDeliveryKind::UpdateActor)
+        .await;
 
     Json(UpdateProfileResponse {
         username: current.username,
@@ -1020,7 +1191,9 @@ pub async fn user_remote_follow_summary(
             // 常に同じ500件で上書きし続け、Workerが取得したより完全なスナップショットを
             // 巻き戻してしまわないよう、保存は非後退（件数が減る更新は無視）にしてある
             // （`save_remote_follow_snapshot` のON CONFLICT句参照）。
-            state.enqueue_remote_follow_list_sync(actor_id, params.direction.clone()).await;
+            state
+                .enqueue_remote_follow_list_sync(actor_id, params.direction.clone())
+                .await;
         }
         // 直近の同期フェッチ結果ではなく、非後退保存後のDB上の最善スナップショットを返す
         // （過去にWorkerがより多く取得済みなら、それを優先して見せる）。
@@ -1028,7 +1201,8 @@ pub async fn user_remote_follow_summary(
             load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
         let (items, unknown_uris) = resolve_remote_follow_items(&state.db, &best_uris).await;
         enqueue_unknown_actor_resolves(&state, unknown_uris).await;
-        let total_count = blended_follow_count(&state, actor_id, &params.direction, best_uris.len()).await;
+        let total_count =
+            blended_follow_count(&state, actor_id, &params.direction, best_uris.len()).await;
         return Json(RemoteFollowSummaryResponse {
             items,
             complete: best_complete,
@@ -1050,7 +1224,9 @@ pub async fn user_remote_follow_summary(
         "[remote_follow_summary] 同期ライブ取得不可（{}）のためWorkerへ委譲: actor_id={} direction={} ({})",
         reason, actor_id, params.direction, ap_uri
     );
-    state.enqueue_remote_follow_list_sync(actor_id, params.direction.clone()).await;
+    state
+        .enqueue_remote_follow_list_sync(actor_id, params.direction.clone())
+        .await;
 
     let (uris, complete, fetched_at) =
         load_remote_follow_snapshot(&state.db, actor_id, &params.direction).await;
@@ -1060,7 +1236,14 @@ pub async fn user_remote_follow_summary(
     // 既存スナップショットが complete=true（全件取得済み）なら、上で積んだWorkerジョブは
     // 単なる裏側の再確認に過ぎず、フロントに「まだ取得中」と伝える必要はない。
     // 以前は無条件で true を返しており、全件取得済みでも延々と pending 表示が続くバグがあった。
-    Json(RemoteFollowSummaryResponse { items, complete, pending: !complete, fetched_at, total_count }).into_response()
+    Json(RemoteFollowSummaryResponse {
+        items,
+        complete,
+        pending: !complete,
+        fetched_at,
+        total_count,
+    })
+    .into_response()
 }
 
 /// ローカルDBが把握しているフォロー数（`follows`テーブル）と、リモートへ直接問い合わせて
@@ -1069,9 +1252,22 @@ pub async fn user_remote_follow_summary(
 /// ローカルが把握しているフォロー関係は必ず相手のAPコレクションにも載っているはずなので、
 /// 通常はリモート側が superset になる。リモート取得が未完了で少なく出た場合に、既に分かって
 /// いるローカルの人数より後退して表示しないためのフォールバック。
-async fn blended_follow_count(state: &AppState, actor_id: i64, direction: &str, remote_count: usize) -> i64 {
-    let (following_count, follower_count) = state.follows.count_relations(actor_id).await.unwrap_or((0, 0));
-    let local_count = if direction == "following" { following_count } else { follower_count };
+async fn blended_follow_count(
+    state: &AppState,
+    actor_id: i64,
+    direction: &str,
+    remote_count: usize,
+) -> i64 {
+    let (following_count, follower_count) = state
+        .follows
+        .count_relations(actor_id)
+        .await
+        .unwrap_or((0, 0));
+    let local_count = if direction == "following" {
+        following_count
+    } else {
+        follower_count
+    };
     local_count.max(remote_count as i64)
 }
 
@@ -1096,7 +1292,14 @@ async fn fetch_remote_follow_live(
         "following" => actor.following,
         _ => actor.followers,
     }?;
-    Some(fetch_ap_collection_uris(&state.ap_client, &collection_url, REMOTE_FOLLOW_LIVE_MAX_ITEMS).await)
+    Some(
+        fetch_ap_collection_uris(
+            &state.ap_client,
+            &collection_url,
+            REMOTE_FOLLOW_LIVE_MAX_ITEMS,
+        )
+        .await,
+    )
 }
 
 async fn save_remote_follow_snapshot(
@@ -1160,8 +1363,9 @@ async fn load_remote_follow_snapshot(
                 .and_then(|v| serde_json::from_value(v).ok())
                 .unwrap_or_default();
             let complete: bool = r.try_get("complete").unwrap_or(false);
-            let fetched_at: chrono::DateTime<chrono::Utc> =
-                r.try_get("fetched_at").unwrap_or_else(|_| chrono::Utc::now());
+            let fetched_at: chrono::DateTime<chrono::Utc> = r
+                .try_get("fetched_at")
+                .unwrap_or_else(|_| chrono::Utc::now());
             (uris, complete, Some(fetched_at))
         }
         None => (vec![], false, None),
@@ -1174,7 +1378,10 @@ async fn load_remote_follow_snapshot(
 /// 負荷が過大になるため、既知の範囲でのみリッチ表示する）。
 /// 戻り値の2つ目は未登録だった URI 一覧（呼び出し元が `RemoteActorResolve` ジョブを
 /// 積むのに使う、マイケル指摘 #68）。
-async fn resolve_remote_follow_items(pool: &sqlx::PgPool, uris: &[String]) -> (Vec<RemoteFollowSummaryItem>, Vec<String>) {
+async fn resolve_remote_follow_items(
+    pool: &sqlx::PgPool,
+    uris: &[String],
+) -> (Vec<RemoteFollowSummaryItem>, Vec<String>) {
     if uris.is_empty() {
         return (vec![], vec![]);
     }
@@ -1187,9 +1394,12 @@ async fn resolve_remote_follow_items(pool: &sqlx::PgPool, uris: &[String]) -> (V
     .await
     .unwrap_or_default();
 
-    let mut known: std::collections::HashMap<String, RemoteFollowSummaryItem> = std::collections::HashMap::new();
+    let mut known: std::collections::HashMap<String, RemoteFollowSummaryItem> =
+        std::collections::HashMap::new();
     for row in rows {
-        let Ok(ap_uri) = row.try_get::<String, _>("ap_uri") else { continue };
+        let Ok(ap_uri) = row.try_get::<String, _>("ap_uri") else {
+            continue;
+        };
         let id: i64 = row.try_get("id").unwrap_or_default();
         let username: String = row.try_get("username").unwrap_or_default();
         let domain: String = row.try_get("domain").unwrap_or_default();
@@ -1233,7 +1443,9 @@ async fn resolve_remote_follow_items(pool: &sqlx::PgPool, uris: &[String]) -> (V
 /// 未登録の actor URI からハンドル風の表示文字列を組み立てる（ベストエフォート）。
 /// 例: `https://mastodon.social/users/alice` → (`alice`, `mastodon.social`)
 fn parse_handle_from_uri(uri: &str) -> (String, String) {
-    let without_scheme = uri.trim_start_matches("https://").trim_start_matches("http://");
+    let without_scheme = uri
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
     let mut parts = without_scheme.splitn(2, '/');
     let domain = parts.next().unwrap_or("").to_string();
     let path = parts.next().unwrap_or("");

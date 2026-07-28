@@ -77,7 +77,9 @@ pub fn prepare_image(data: &[u8], kind: MediaKind) -> Result<ImagePipeline, Imag
     // そのまま保存する。`image` 0.25 はアニメーションWebP/GIFの「書き出し」に対応していないため、
     // ここで再エンコードすると全フレームが失われ静止画になってしまう（実機で確認された回帰）。
     if let Some(mime) = animated_mime_type(data, original_format) {
-        return Ok(ImagePipeline::AnimatedPassthrough(process_animated(data, mime)?));
+        return Ok(ImagePipeline::AnimatedPassthrough(process_animated(
+            data, mime,
+        )?));
     }
 
     let reader = ImageReader::new(Cursor::new(data))
@@ -196,7 +198,10 @@ fn animated_mime_type(data: &[u8], format: Option<ImageFormat>) -> Option<&'stat
 
 /// アニメーション画像を元のバイト列のまま `ProcessedImage` にする。
 /// width/height/blurhashは先頭フレームのみをデコードして算出する（一覧・プレースホルダ表示用）。
-fn process_animated(data: &[u8], mime: &'static str) -> Result<ProcessedImage, ImageProcessingError> {
+fn process_animated(
+    data: &[u8],
+    mime: &'static str,
+) -> Result<ProcessedImage, ImageProcessingError> {
     let sha256 = hex::encode(Sha256::digest(data));
 
     let first_frame = image::load_from_memory(data)?;
@@ -271,9 +276,14 @@ mod tests {
         match result {
             ImagePipeline::AnimatedPassthrough(p) => {
                 assert_eq!(p.mime_type, "image/gif");
-                assert_eq!(p.data, gif_bytes, "アニメーションGIFは元のバイト列のまま保存すべき");
+                assert_eq!(
+                    p.data, gif_bytes,
+                    "アニメーションGIFは元のバイト列のまま保存すべき"
+                );
             }
-            ImagePipeline::Static { .. } => panic!("アニメーションGIFはAnimatedPassthroughになるべき"),
+            ImagePipeline::Static { .. } => {
+                panic!("アニメーションGIFはAnimatedPassthroughになるべき")
+            }
         }
     }
 
@@ -285,8 +295,14 @@ mod tests {
 
         match result {
             ImagePipeline::Static { original, resized } => {
-                assert!(original.is_none(), "GIFはimg-parts非対応なのでoriginalはNone");
-                assert_eq!(resized.mime_type, "image/webp", "単一フレームGIFは従来通りWebPへ変換される");
+                assert!(
+                    original.is_none(),
+                    "GIFはimg-parts非対応なのでoriginalはNone"
+                );
+                assert_eq!(
+                    resized.mime_type, "image/webp",
+                    "単一フレームGIFは従来通りWebPへ変換される"
+                );
                 assert_ne!(resized.data, gif_bytes);
             }
             ImagePipeline::AnimatedPassthrough(_) => panic!("単一フレームGIFはStaticになるべき"),
@@ -296,9 +312,7 @@ mod tests {
     fn jpeg_with_orientation(w: u32, h: u32, orientation: Orientation) -> Vec<u8> {
         use img_parts::{jpeg::Jpeg, Bytes, ImageEXIF};
 
-        let img = image::RgbImage::from_fn(w, h, |x, _y| {
-            image::Rgb([(x * 10) as u8, 100, 200])
-        });
+        let img = image::RgbImage::from_fn(w, h, |x, _y| image::Rgb([(x * 10) as u8, 100, 200]));
         let mut plain = Vec::new();
         DynamicImage::ImageRgb8(img)
             .write_to(&mut Cursor::new(&mut plain), ImageFormat::Jpeg)

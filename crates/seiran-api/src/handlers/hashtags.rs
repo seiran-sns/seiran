@@ -13,9 +13,11 @@ use axum::{
 use serde::Serialize;
 
 use crate::error::ApiError;
-use crate::handlers::notes::queries::{fetch_reposted_ids, resolve_mention_facets_in_place};
-use crate::handlers::notes::{embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map, to_note_response};
 use crate::handlers::notes::dto::TimelineQuery;
+use crate::handlers::notes::queries::{fetch_reposted_ids, resolve_mention_facets_in_place};
+use crate::handlers::notes::{
+    embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map, to_note_response,
+};
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
 
@@ -46,7 +48,11 @@ pub async fn hashtag_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.hashtags.timeline(&tag_name, limit, until_id, since_id, viewer_actor_id).await {
+    let mut rows = match state
+        .hashtags
+        .timeline(&tag_name, limit, until_id, since_id, viewer_actor_id)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[hashtag_timeline] クエリ失敗: {}", e);
@@ -89,7 +95,9 @@ pub async fn pinned_hashtags(user: AuthedUser, State(state): State<AppState>) ->
                 .collect();
             Json(out).into_response()
         }
-        Err(e) => ApiError::Internal(format!("ピン留めハッシュタグ取得失敗: {}", e)).into_response(),
+        Err(e) => {
+            ApiError::Internal(format!("ピン留めハッシュタグ取得失敗: {}", e)).into_response()
+        }
     }
 }
 
@@ -102,7 +110,11 @@ pub async fn pin_hashtag(
     if tag_name.is_empty() {
         return ApiError::BadRequest("不正なハッシュタグです".to_string()).into_response();
     }
-    match state.hashtags.pin(user.actor_id, &tag_name, chrono::Utc::now()).await {
+    match state
+        .hashtags
+        .pin(user.actor_id, &tag_name, chrono::Utc::now())
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => ApiError::Internal(format!("ハッシュタグのピン留め失敗: {}", e)).into_response(),
     }
@@ -116,6 +128,8 @@ pub async fn unpin_hashtag(
     let tag_name = normalize_tag_name(&name);
     match state.hashtags.unpin(user.actor_id, &tag_name).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => ApiError::Internal(format!("ハッシュタグのピン留め解除失敗: {}", e)).into_response(),
+        Err(e) => {
+            ApiError::Internal(format!("ハッシュタグのピン留め解除失敗: {}", e)).into_response()
+        }
     }
 }

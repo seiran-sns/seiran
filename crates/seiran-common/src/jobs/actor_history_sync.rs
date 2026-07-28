@@ -47,7 +47,11 @@ async fn handle_ap(ap_uri: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
     tracing::info!("[ActorHistorySync] AP過去ログ同期開始: {}", ap_uri);
 
     let notes = fetch_ap_history(&ctx.ap_client, ap_uri, 300, 30).await?;
-    tracing::info!("[ActorHistorySync] {}件のノートを取得: {}", notes.len(), ap_uri);
+    tracing::info!(
+        "[ActorHistorySync] {}件のノートを取得: {}",
+        notes.len(),
+        ap_uri
+    );
 
     match &ctx.db_pool {
         Some(pool) => save_ap_notes(pool, ap_uri, &notes).await?,
@@ -61,11 +65,7 @@ async fn handle_ap(ap_uri: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
     Ok(())
 }
 
-async fn save_ap_notes(
-    pool: &sqlx::PgPool,
-    ap_uri: &str,
-    notes: &[ApNote],
-) -> Result<(), String> {
+async fn save_ap_notes(pool: &sqlx::PgPool, ap_uri: &str, notes: &[ApNote]) -> Result<(), String> {
     let actor_row = sqlx::query("SELECT id FROM actors WHERE ap_uri = $1 LIMIT 1")
         .bind(ap_uri)
         .fetch_optional(pool)
@@ -73,9 +73,14 @@ async fn save_ap_notes(
         .map_err(|e| format!("アクターDB検索失敗: {}", e))?;
 
     let actor_id: i64 = match actor_row {
-        Some(row) => row.try_get("id").map_err(|e| format!("id 取得失敗: {}", e))?,
+        Some(row) => row
+            .try_get("id")
+            .map_err(|e| format!("id 取得失敗: {}", e))?,
         None => {
-            tracing::warn!("[ActorHistorySync] アクターが DB に存在しません（スキップ）: {}", ap_uri);
+            tracing::warn!(
+                "[ActorHistorySync] アクターが DB に存在しません（スキップ）: {}",
+                ap_uri
+            );
             return Ok(());
         }
     };
@@ -125,7 +130,8 @@ async fn save_ap_notes(
 
     tracing::info!(
         "[ActorHistorySync] AP {}件インサート完了 (ap_uri={})",
-        inserted, ap_uri
+        inserted,
+        ap_uri
     );
     Ok(())
 }
@@ -146,11 +152,18 @@ async fn handle_atp(at_did: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
     let posts = fetch_atp_history(&ctx.ap_client.http, at_did, 300, 30)
         .await
         .unwrap_or_else(|e| {
-            tracing::error!("[ActorHistorySync] ATP フェッチエラー（ベストエフォート）: {}", e);
+            tracing::error!(
+                "[ActorHistorySync] ATP フェッチエラー（ベストエフォート）: {}",
+                e
+            );
             vec![]
         });
 
-    tracing::info!("[ActorHistorySync] {}件のポストを取得: {}", posts.len(), at_did);
+    tracing::info!(
+        "[ActorHistorySync] {}件のポストを取得: {}",
+        posts.len(),
+        at_did
+    );
 
     match &ctx.db_pool {
         Some(pool) => save_atp_posts(pool, at_did, &posts).await?,
@@ -176,9 +189,14 @@ async fn save_atp_posts(
         .map_err(|e| format!("アクターDB検索失敗: {}", e))?;
 
     let actor_id: i64 = match actor_row {
-        Some(row) => row.try_get("id").map_err(|e| format!("id 取得失敗: {}", e))?,
+        Some(row) => row
+            .try_get("id")
+            .map_err(|e| format!("id 取得失敗: {}", e))?,
         None => {
-            tracing::warn!("[ActorHistorySync] アクターが DB に存在しません（スキップ）: {}", at_did);
+            tracing::warn!(
+                "[ActorHistorySync] アクターが DB に存在しません（スキップ）: {}",
+                at_did
+            );
             return Ok(());
         }
     };
@@ -218,7 +236,8 @@ async fn save_atp_posts(
 
     tracing::info!(
         "[ActorHistorySync] ATP {}件インサート完了 (at_did={})",
-        inserted, at_did
+        inserted,
+        at_did
     );
     Ok(())
 }

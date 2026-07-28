@@ -319,7 +319,10 @@ pub async fn upsert_bsky_post(
 ///
 /// `actor` はハンドル（`alice.bsky.social`）または DID（`did:plc:...`）。
 /// フォロー処理（アクター登録）とプロフィール表示の両方から使う共通のエントリポイント。
-pub async fn fetch_bsky_profile(client: &reqwest::Client, actor: &str) -> Result<BskyProfile, String> {
+pub async fn fetch_bsky_profile(
+    client: &reqwest::Client,
+    actor: &str,
+) -> Result<BskyProfile, String> {
     let url = format!(
         "{}/xrpc/app.bsky.actor.getProfile?actor={}",
         appview_base_url(),
@@ -333,7 +336,11 @@ pub async fn fetch_bsky_profile(client: &reqwest::Client, actor: &str) -> Result
         .map_err(|e| format!("getProfile HTTP エラー: {}", e))?;
 
     if !resp.status().is_success() {
-        return Err(format!("getProfile 失敗 ({}): actor={}", resp.status(), actor));
+        return Err(format!(
+            "getProfile 失敗 ({}): actor={}",
+            resp.status(),
+            actor
+        ));
     }
 
     resp.json::<BskyProfile>()
@@ -380,7 +387,11 @@ pub async fn fetch_bsky_followers(
         .map_err(|e| format!("getFollowers HTTP エラー: {}", e))?;
 
     if !resp.status().is_success() {
-        return Err(format!("getFollowers 失敗 ({}): actor={}", resp.status(), actor_did));
+        return Err(format!(
+            "getFollowers 失敗 ({}): actor={}",
+            resp.status(),
+            actor_did
+        ));
     }
 
     #[derive(Debug, Deserialize)]

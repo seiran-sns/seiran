@@ -15,27 +15,27 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use sqlx::{PgPool, Row};
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use futures_util::StreamExt;
 
 use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
 use seiran_common::repository::{
-    ActorRepository, EmojiRepository, HashtagRepository, NotificationKind, NotificationRepository, PostRepository, ReactionRepository,
-    PgActorRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
-    extract_shortcode_candidates, parse_custom_emoji_shortcode,
+    ActorRepository, EmojiRepository, HashtagRepository, NotificationKind, NotificationRepository,
+    PgActorRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository,
+    PgNotificationRepository, PgPostRepository, PgReactionRepository, PostRepository,
+    ReactionRepository, extract_shortcode_candidates, parse_custom_emoji_shortcode,
 };
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::traits::{Job, JobQueue};
-use seiran_common::{generate_snowflake_id, StreamHub};
+use seiran_common::{StreamHub, generate_snowflake_id};
 
-const JETSTREAM_BASE_URL: &str =
-    "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like";
+const JETSTREAM_BASE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like";
 
 /// `wantedDids` 絞り込みリスト（フォロイー + リストメンバーの Bsky DID 集合）を
 /// 再構築すべきか、受信ループ内で定期ポーリングする間隔。フォロー変更等は
@@ -79,7 +79,9 @@ pub async fn run(
             None => is_monolith,
             Some(url) => {
                 if elector.is_none() {
-                    match JetstreamLeaderElector::connect(url, jetstream_leader::DEFAULT_LEADER_KEY).await {
+                    match JetstreamLeaderElector::connect(url, jetstream_leader::DEFAULT_LEADER_KEY)
+                        .await
+                    {
                         Ok(e) => elector = Some(e),
                         Err(e) => tracing::error!("[Jetstream] Redis接続失敗: {}", e),
                     }
@@ -103,7 +105,9 @@ pub async fn run(
 
         match (should_run, current_task.is_some()) {
             (true, false) => {
-                tracing::info!("[Jetstream] リーダーに昇格（またはRedis未使用の単独運用）。接続開始。");
+                tracing::info!(
+                    "[Jetstream] リーダーに昇格（またはRedis未使用の単独運用）。接続開始。"
+                );
                 let pool = pool.clone();
                 let http = Arc::clone(&http);
                 let hub = Arc::clone(&stream_hub);
@@ -138,7 +142,11 @@ async fn run_jetstream_loop(
                 backoff_secs = 2;
             }
             Err(e) => {
-                tracing::error!("[Jetstream] エラー: {}。{}秒後に再接続します。", e, backoff_secs);
+                tracing::error!(
+                    "[Jetstream] エラー: {}。{}秒後に再接続します。",
+                    e,
+                    backoff_secs
+                );
                 sleep(Duration::from_secs(backoff_secs)).await;
                 backoff_secs = (backoff_secs * 2).min(120);
             }
@@ -205,9 +213,15 @@ async fn load_wanted_dids(pool: &PgPool) -> Vec<String> {
     .await;
 
     match rows {
-        Ok(rows) => rows.iter().filter_map(|r| r.try_get::<String, _>("did").ok()).collect(),
+        Ok(rows) => rows
+            .iter()
+            .filter_map(|r| r.try_get::<String, _>("did").ok())
+            .collect(),
         Err(e) => {
-            tracing::error!("[Jetstream] wantedDids取得失敗（無絞り込みで接続します）: {}", e);
+            tracing::error!(
+                "[Jetstream] wantedDids取得失敗（無絞り込みで接続します）: {}",
+                e
+            );
             Vec::new()
         }
     }
@@ -238,7 +252,11 @@ async fn connect_and_process(
     let wanted_dids = load_wanted_dids(pool).await;
     let wanted_dids_touch_at_connect = fetch_wanted_dids_touch(pool).await;
     let url = build_jetstream_url(cursor, &wanted_dids);
-    tracing::info!("[Jetstream] 接続中（wantedDids {}件）: {}", wanted_dids.len(), url);
+    tracing::info!(
+        "[Jetstream] 接続中（wantedDids {}件）: {}",
+        wanted_dids.len(),
+        url
+    );
 
     let (mut ws_stream, _) = connect_async(&url)
         .await
@@ -302,44 +320,85 @@ struct ParsedAttachment {
 fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedAttachment> {
     let embed_type = embed.get("$type").and_then(|v| v.as_str()).unwrap_or("");
     match embed_type {
-        "app.bsky.embed.images" => {
-            embed.get("images")
-                .and_then(|v| v.as_array())
-                .map(|images| {
-                    images.iter().filter_map(|img| {
+        "app.bsky.embed.images" => embed
+            .get("images")
+            .and_then(|v| v.as_array())
+            .map(|images| {
+                images
+                    .iter()
+                    .filter_map(|img| {
                         let cid = img.get("image")?.get("ref")?.get("$link")?.as_str()?;
-                        let mime_type = img.get("image")
+                        let mime_type = img
+                            .get("image")
                             .and_then(|i| i.get("mimeType"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("image/jpeg")
                             .to_string();
-                        let width = img.get("aspectRatio").and_then(|a| a.get("width")).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                        let height = img.get("aspectRatio").and_then(|a| a.get("height")).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                        let url = format!("https://cdn.bsky.app/img/feed_fullsize/plain/{}/{}", did, cid);
-                        Some(ParsedAttachment { url, mime_type, width, height, thumbnail_url: None })
-                    }).collect()
-                })
-                .unwrap_or_default()
-        }
+                        let width = img
+                            .get("aspectRatio")
+                            .and_then(|a| a.get("width"))
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0) as i32;
+                        let height = img
+                            .get("aspectRatio")
+                            .and_then(|a| a.get("height"))
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0) as i32;
+                        let url = format!(
+                            "https://cdn.bsky.app/img/feed_fullsize/plain/{}/{}",
+                            did, cid
+                        );
+                        Some(ParsedAttachment {
+                            url,
+                            mime_type,
+                            width,
+                            height,
+                            thumbnail_url: None,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         "app.bsky.embed.video" => {
-            let Some(cid) = embed.get("video").and_then(|v| v.get("ref")).and_then(|r| r.get("$link")).and_then(|v| v.as_str()) else {
+            let Some(cid) = embed
+                .get("video")
+                .and_then(|v| v.get("ref"))
+                .and_then(|r| r.get("$link"))
+                .and_then(|v| v.as_str())
+            else {
                 return vec![];
             };
-            let width = embed.get("aspectRatio").and_then(|a| a.get("width")).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-            let height = embed.get("aspectRatio").and_then(|a| a.get("height")).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let width = embed
+                .get("aspectRatio")
+                .and_then(|a| a.get("width"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0) as i32;
+            let height = embed
+                .get("aspectRatio")
+                .and_then(|a| a.get("height"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0) as i32;
             let did_encoded = urlencoding::encode(did);
-            let url = format!("https://video.bsky.app/watch/{}/{}/playlist.m3u8", did_encoded, cid);
-            let thumbnail_url = format!("https://video.bsky.app/watch/{}/{}/thumbnail.jpg", did_encoded, cid);
+            let url = format!(
+                "https://video.bsky.app/watch/{}/{}/playlist.m3u8",
+                did_encoded, cid
+            );
+            let thumbnail_url = format!(
+                "https://video.bsky.app/watch/{}/{}/thumbnail.jpg",
+                did_encoded, cid
+            );
             vec![ParsedAttachment {
-                url, mime_type: "application/vnd.apple.mpegurl".to_string(), width, height,
+                url,
+                mime_type: "application/vnd.apple.mpegurl".to_string(),
+                width,
+                height,
                 thumbnail_url: Some(thumbnail_url),
             }]
         }
-        "app.bsky.embed.recordWithMedia" => {
-            embed.get("media")
-                .map(|media| parse_bsky_embed_attachments(media, did))
-                .unwrap_or_default()
-        }
+        "app.bsky.embed.recordWithMedia" => embed
+            .get("media")
+            .map(|media| parse_bsky_embed_attachments(media, did))
+            .unwrap_or_default(),
         _ => vec![],
     }
 }
@@ -352,8 +411,17 @@ fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedAttac
 fn parse_bsky_embed_quote_uri(embed: &JsonValue) -> Option<String> {
     let embed_type = embed.get("$type").and_then(|v| v.as_str()).unwrap_or("");
     match embed_type {
-        "app.bsky.embed.record" => embed.get("record")?.get("uri")?.as_str().map(|s| s.to_string()),
-        "app.bsky.embed.recordWithMedia" => embed.get("record")?.get("record")?.get("uri")?.as_str().map(|s| s.to_string()),
+        "app.bsky.embed.record" => embed
+            .get("record")?
+            .get("uri")?
+            .as_str()
+            .map(|s| s.to_string()),
+        "app.bsky.embed.recordWithMedia" => embed
+            .get("record")?
+            .get("record")?
+            .get("uri")?
+            .as_str()
+            .map(|s| s.to_string()),
         _ => None,
     }
 }
@@ -440,12 +508,20 @@ fn apply_link_facets(text: &str, facets: Vec<JetstreamFacet>) -> (String, Vec<Me
     for facet in &facets {
         let start = facet.index.byte_start;
         let end = facet.index.byte_end;
-        if start >= end || end > text.len() || !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+        if start >= end
+            || end > text.len()
+            || !text.is_char_boundary(start)
+            || !text.is_char_boundary(end)
+        {
             continue;
         }
         for feature in &facet.features {
             if let JetstreamFacetFeature::Mention { did } = feature {
-                mention_spans.push(MentionFacetSpan { byte_start: start, byte_end: end, did: did.clone() });
+                mention_spans.push(MentionFacetSpan {
+                    byte_start: start,
+                    byte_end: end,
+                    did: did.clone(),
+                });
             }
         }
     }
@@ -453,7 +529,11 @@ fn apply_link_facets(text: &str, facets: Vec<JetstreamFacet>) -> (String, Vec<Me
     // 以降は #link facet のみを対象に、後ろから順に本文へ焼き込む。
     let mut link_facets: Vec<JetstreamFacet> = facets
         .into_iter()
-        .filter(|f| f.features.iter().any(|feat| matches!(feat, JetstreamFacetFeature::Link { .. })))
+        .filter(|f| {
+            f.features
+                .iter()
+                .any(|feat| matches!(feat, JetstreamFacetFeature::Link { .. }))
+        })
         .collect();
     link_facets.sort_by_key(|f| std::cmp::Reverse(f.index.byte_start));
 
@@ -470,8 +550,10 @@ fn apply_link_facets(text: &str, facets: Vec<JetstreamFacet>) -> (String, Vec<Me
             continue;
         }
 
-        let Some(JetstreamFacetFeature::Link { uri }) =
-            facet.features.into_iter().find(|f| matches!(f, JetstreamFacetFeature::Link { .. }))
+        let Some(JetstreamFacetFeature::Link { uri }) = facet
+            .features
+            .into_iter()
+            .find(|f| matches!(f, JetstreamFacetFeature::Link { .. }))
         else {
             continue;
         };
@@ -496,7 +578,10 @@ async fn resolve_local_emoji_map(pool: &PgPool, text: &str) -> JsonValue {
         return JsonValue::Object(Default::default());
     }
     let emoji_repo = PgEmojiRepository::new(pool.clone());
-    let pairs = match emoji_repo.find_urls_by_shortcodes(&shortcode_candidates).await {
+    let pairs = match emoji_repo
+        .find_urls_by_shortcodes(&shortcode_candidates)
+        .await
+    {
         Ok(pairs) => pairs,
         Err(e) => {
             tracing::error!("[Jetstream] 絵文字ショートコード解決失敗: {}", e);
@@ -535,13 +620,20 @@ async fn apply_bsky_facets(
             if !queued_dids.insert(span.did.clone()) {
                 continue;
             }
-            let known = actor_repo.find_by_did(&span.did).await.ok().flatten().is_some();
+            let known = actor_repo
+                .find_by_did(&span.did)
+                .await
+                .ok()
+                .flatten()
+                .is_some();
             if known {
                 continue;
             }
             if let Err(e) = job_queue
                 .enqueue(
-                    Job::ResolveBskyMention { did: span.did.clone() },
+                    Job::ResolveBskyMention {
+                        did: span.did.clone(),
+                    },
                     seiran_common::queue::worker::priority::NORMAL,
                 )
                 .await
@@ -630,13 +722,14 @@ async fn process_message(
                 .map(|s| s.to_string());
 
             // 添付（画像・動画）。CDN URL は DID + blob CID から決定的に組み立てる。
-            let attachments: Vec<ParsedAttachment> = record.get("embed")
+            let attachments: Vec<ParsedAttachment> = record
+                .get("embed")
                 .map(|embed| parse_bsky_embed_attachments(embed, &did))
                 .unwrap_or_default();
 
             // 引用先の at:// URI（#116）。`app.bsky.embed.record`/`recordWithMedia` のみ対象。
-            let quote_uri: Option<String> = record.get("embed")
-                .and_then(parse_bsky_embed_quote_uri);
+            let quote_uri: Option<String> =
+                record.get("embed").and_then(parse_bsky_embed_quote_uri);
 
             // この DID のアクターが「ローカルユーザーにフォローされている」、または
             // 「いずれかのリストに含まれている」場合のみ保存対象とする（リスト機能 #63:
@@ -701,7 +794,10 @@ async fn process_message(
                             Ok(Some((parent_post_id, _))) => Some(parent_post_id),
                             Ok(None) => None,
                             Err(e) => {
-                                tracing::error!("[Jetstream] リプライ親投稿検索失敗（通常投稿として保存）: {}", e);
+                                tracing::error!(
+                                    "[Jetstream] リプライ親投稿検索失敗（通常投稿として保存）: {}",
+                                    e
+                                );
                                 None
                             }
                         }
@@ -711,26 +807,40 @@ async fn process_message(
                 // 引用先のローカル post_id 解決（#116）。引用先が未取得のリモート投稿等で
                 // ローカルDBに存在しない場合は通常投稿として保存する（quote_of_post_id=None）。
                 let quote_of_post_id = match &quote_uri {
-                    Some(uri) => {
-                        match posts_repo.find_id_and_actor_by_at_uri(uri).await {
-                            Ok(Some((quote_post_id, _))) => Some(quote_post_id),
-                            Ok(None) => None,
-                            Err(e) => {
-                                tracing::error!("[Jetstream] 引用元投稿検索失敗（通常投稿として保存）: {}", e);
-                                None
-                            }
+                    Some(uri) => match posts_repo.find_id_and_actor_by_at_uri(uri).await {
+                        Ok(Some((quote_post_id, _))) => Some(quote_post_id),
+                        Ok(None) => None,
+                        Err(e) => {
+                            tracing::error!(
+                                "[Jetstream] 引用元投稿検索失敗（通常投稿として保存）: {}",
+                                e
+                            );
+                            None
                         }
-                    }
+                    },
                     None => None,
                 };
                 let (body_text, mention_facets) =
                     apply_bsky_facets(&pool2, &queue2, &body_text, parsed_facets).await;
                 let emoji_map = resolve_local_emoji_map(&pool2, &body_text).await;
                 save_bsky_post(
-                    &pool2, &hub2, &at_uri2, &cid, &body_text, &mention_facets, &emoji_map, created_at,
-                    actor_id, &username, display_name.as_deref(), avatar_url.as_deref(),
-                    reply_to_post_id, quote_of_post_id, attachments,
-                ).await;
+                    &pool2,
+                    &hub2,
+                    &at_uri2,
+                    &cid,
+                    &body_text,
+                    &mention_facets,
+                    &emoji_map,
+                    created_at,
+                    actor_id,
+                    &username,
+                    display_name.as_deref(),
+                    avatar_url.as_deref(),
+                    reply_to_post_id,
+                    quote_of_post_id,
+                    attachments,
+                )
+                .await;
             });
         }
 
@@ -747,12 +857,16 @@ async fn process_message(
                     else {
                         return Ok(());
                     };
-                    let emoji = record.get("emoji").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let emoji = record
+                        .get("emoji")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     // 自分自身がローカルAPI経由でコミットしたLikeなら、非標準拡張フィールドとして
                     // 元の reactions.id が載っている（`encode_bsky_feed_like`）。これが戻ってきた
                     // 場合、ローカル即時通知と同じ reaction_id を通知に持たせることで、
                     // `notifications.reaction_id` の UNIQUE 制約により二重通知を防げる。
-                    let seiran_reaction_id = record.get("seiranReactionId").and_then(|v| v.as_i64());
+                    let seiran_reaction_id =
+                        record.get("seiranReactionId").and_then(|v| v.as_i64());
 
                     let at_uri = format!("at://{}/app.bsky.feed.like/{}", did, commit.rkey);
                     let subject_uri = subject_uri.to_string();
@@ -760,7 +874,17 @@ async fn process_message(
                     let http2 = Arc::clone(http);
                     let hub2 = Arc::clone(stream_hub);
                     tokio::spawn(async move {
-                        handle_inbound_like_create(&pool2, &http2, &hub2, &did, &at_uri, &subject_uri, emoji.as_deref(), seiran_reaction_id).await;
+                        handle_inbound_like_create(
+                            &pool2,
+                            &http2,
+                            &hub2,
+                            &did,
+                            &at_uri,
+                            &subject_uri,
+                            emoji.as_deref(),
+                            seiran_reaction_id,
+                        )
+                        .await;
                     });
                 }
                 "delete" => {
@@ -830,8 +954,14 @@ async fn save_bsky_post(
         Ok(_) => {
             tracing::info!("[Jetstream] 保存完了: {}", at_uri);
 
-            if let Err(e) = PgHashtagRepository::new(pool.clone()).link_post(post_id, text).await {
-                tracing::error!("[Jetstream] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}", e);
+            if let Err(e) = PgHashtagRepository::new(pool.clone())
+                .link_post(post_id, text)
+                .await
+            {
+                tracing::error!(
+                    "[Jetstream] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
+                    e
+                );
             }
 
             // リプライ通知: リプライ先がローカルユーザーの投稿であれば通知を作る（自己リプライは除く）。
@@ -856,7 +986,17 @@ async fn save_bsky_post(
                     );
                     let notif_id = generate_snowflake_id(chrono::Utc::now());
                     if let Err(e) = PgNotificationRepository::new(pool.clone())
-                        .insert(notif_id, parent_actor_id, NotificationKind::Reply, Some(actor_id), Some(post_id), None, None, None, None)
+                        .insert(
+                            notif_id,
+                            parent_actor_id,
+                            NotificationKind::Reply,
+                            Some(actor_id),
+                            Some(post_id),
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
                         .await
                     {
                         tracing::error!("[Jetstream] reply notifications INSERT 失敗: {}", e);
@@ -874,7 +1014,9 @@ async fn save_bsky_post(
                 let notifications_repo = PgNotificationRepository::new(pool.clone());
                 let mut notified: HashSet<i64> = HashSet::new();
                 for span in spans {
-                    let Some(mentioned_did) = span.get("did").and_then(|v| v.as_str()) else { continue };
+                    let Some(mentioned_did) = span.get("did").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
                     if let Ok(Some(mentioned_actor)) = actor_repo.find_by_did(mentioned_did).await {
                         if mentioned_actor.actor_type != "local" || mentioned_actor.id == actor_id {
                             continue;
@@ -892,7 +1034,17 @@ async fn save_bsky_post(
                         );
                         let notif_id = generate_snowflake_id(chrono::Utc::now());
                         if let Err(e) = notifications_repo
-                            .insert(notif_id, mentioned_actor.id, NotificationKind::Mention, Some(actor_id), Some(post_id), None, None, None, None)
+                            .insert(
+                                notif_id,
+                                mentioned_actor.id,
+                                NotificationKind::Mention,
+                                Some(actor_id),
+                                Some(post_id),
+                                None,
+                                None,
+                                None,
+                                None,
+                            )
                             .await
                         {
                             tracing::error!("[Jetstream] mention notifications INSERT 失敗: {}", e);
@@ -905,9 +1057,17 @@ async fn save_bsky_post(
             if !attachments.is_empty() {
                 let posts_repo = PgPostRepository::new(pool.clone());
                 for (position, att) in attachments.iter().enumerate() {
-                    if let Err(e) = posts_repo.attach_remote_media_url(
-                        post_id, &att.url, Some(&att.mime_type), att.thumbnail_url.as_deref(), false, position as i16,
-                    ).await {
+                    if let Err(e) = posts_repo
+                        .attach_remote_media_url(
+                            post_id,
+                            &att.url,
+                            Some(&att.mime_type),
+                            att.thumbnail_url.as_deref(),
+                            false,
+                            position as i16,
+                        )
+                        .await
+                    {
                         tracing::error!("[Jetstream] 添付 URL 保存失敗（スキップ）: {}", e);
                     }
                 }
@@ -936,15 +1096,18 @@ async fn save_bsky_post(
                 .collect();
 
             if !recipients.is_empty() {
-                let attachments_json: Vec<JsonValue> = attachments.iter().map(|att| {
-                    serde_json::json!({
-                        "url": att.url,
-                        "mimeType": att.mime_type,
-                        "width": att.width,
-                        "height": att.height,
-                        "thumbnailUrl": att.thumbnail_url,
+                let attachments_json: Vec<JsonValue> = attachments
+                    .iter()
+                    .map(|att| {
+                        serde_json::json!({
+                            "url": att.url,
+                            "mimeType": att.mime_type,
+                            "width": att.width,
+                            "height": att.height,
+                            "thumbnailUrl": att.thumbnail_url,
+                        })
                     })
-                }).collect();
+                    .collect();
                 let note_json = serde_json::json!({
                     "id": post_id.to_string(),
                     "text": text,
@@ -988,7 +1151,8 @@ async fn handle_inbound_like_create(
     seiran_reaction_id: Option<i64>,
 ) {
     let posts_repo = PgPostRepository::new(pool.clone());
-    let (post_id, post_author_id) = match posts_repo.find_id_and_actor_by_at_uri(subject_uri).await {
+    let (post_id, post_author_id) = match posts_repo.find_id_and_actor_by_at_uri(subject_uri).await
+    {
         Ok(Some(pair)) => pair,
         Ok(None) => return, // ローカル投稿ではない（あるいは未取り込み）
         Err(e) => {
@@ -1017,24 +1181,40 @@ async fn handle_inbound_like_create(
     let emoji_url = match parse_custom_emoji_shortcode(content) {
         Some(shortcode) => {
             let emojis_repo = PgEmojiRepository::new(pool.clone());
-            emojis_repo.find_url_by_shortcode(shortcode).await.unwrap_or_else(|e| {
-                tracing::error!("[Jetstream/Like] 絵文字URL解決失敗: {}", e);
-                None
-            })
+            emojis_repo
+                .find_url_by_shortcode(shortcode)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::error!("[Jetstream/Like] 絵文字URL解決失敗: {}", e);
+                    None
+                })
         }
         None => None,
     };
 
     let reactions_repo = PgReactionRepository::new(pool.clone());
     if let Err(e) = reactions_repo
-        .insert(post_id, actor_id, "like", content, None, Some(at_uri), emoji_url.as_deref())
+        .insert(
+            post_id,
+            actor_id,
+            "like",
+            content,
+            None,
+            Some(at_uri),
+            emoji_url.as_deref(),
+        )
         .await
     {
         tracing::error!("[Jetstream/Like] reactions INSERT 失敗: {}", e);
         return;
     }
 
-    tracing::info!("[Jetstream/Like] post {} に {} を記録（did={}）", post_id, content, did);
+    tracing::info!(
+        "[Jetstream/Like] post {} に {} を記録（did={}）",
+        post_id,
+        content,
+        did
+    );
 
     // 通知ベル用（#37）: 自作自演（本尊が自分の投稿を Bsky 側からもいいねした等）は通知しない
     if post_author_id != actor_id {
@@ -1053,7 +1233,17 @@ async fn handle_inbound_like_create(
         let notifications_repo = PgNotificationRepository::new(pool.clone());
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = notifications_repo
-            .insert(notif_id, post_author_id, NotificationKind::Reaction, Some(actor_id), Some(post_id), Some(content), None, Some(at_uri), seiran_reaction_id)
+            .insert(
+                notif_id,
+                post_author_id,
+                NotificationKind::Reaction,
+                Some(actor_id),
+                Some(post_id),
+                Some(content),
+                None,
+                Some(at_uri),
+                seiran_reaction_id,
+            )
             .await
         {
             tracing::error!("[Jetstream/Like] notifications INSERT 失敗: {}", e);
@@ -1062,9 +1252,15 @@ async fn handle_inbound_like_create(
 
     let follows_repo = PgFollowRepository::new(pool.clone());
     broadcast_reaction_update(
-        stream_hub, &follows_repo, &reactions_repo,
-        post_id, post_author_id, actor_id, Some(content),
-    ).await;
+        stream_hub,
+        &follows_repo,
+        &reactions_repo,
+        post_id,
+        post_author_id,
+        actor_id,
+        Some(content),
+    )
+    .await;
 }
 
 /// ATP Like（`app.bsky.feed.like`）の削除（Unlike）を検知した際の処理。
@@ -1081,7 +1277,11 @@ async fn handle_inbound_like_delete(pool: &PgPool, stream_hub: &StreamHub, at_ur
         return; // 元々知らないリアクションだった（重複 delete イベント等）
     };
 
-    tracing::info!("[Jetstream/Unlike] post {} のリアクションを取消（at_uri={}）", post_id, at_uri);
+    tracing::info!(
+        "[Jetstream/Unlike] post {} のリアクションを取消（at_uri={}）",
+        post_id,
+        at_uri
+    );
 
     let posts_repo = PgPostRepository::new(pool.clone());
     let post_author_id = match posts_repo.find_by_id(post_id).await {
@@ -1091,9 +1291,15 @@ async fn handle_inbound_like_delete(pool: &PgPool, stream_hub: &StreamHub, at_ur
 
     let follows_repo = PgFollowRepository::new(pool.clone());
     broadcast_reaction_update(
-        stream_hub, &follows_repo, &reactions_repo,
-        post_id, post_author_id, actor_id, None,
-    ).await;
+        stream_hub,
+        &follows_repo,
+        &reactions_repo,
+        post_id,
+        post_author_id,
+        actor_id,
+        None,
+    )
+    .await;
 }
 
 /// ATP 投稿（`app.bsky.feed.post`）の削除を検知した際の処理。取り込み済み（`at_uri` 保存済み）の
@@ -1116,7 +1322,11 @@ async fn handle_inbound_post_delete(pool: &PgPool, at_uri: &str) {
 
 /// DID からローカル `actors` 行を解決する。無ければ AppView からプロフィールを取得して upsert する
 /// （AP 側 `upsert_remote_fedi_actor` の ATP 版）。
-pub(crate) async fn resolve_or_upsert_bsky_actor(pool: &PgPool, http: &reqwest::Client, did: &str) -> Result<i64, String> {
+pub(crate) async fn resolve_or_upsert_bsky_actor(
+    pool: &PgPool,
+    http: &reqwest::Client,
+    did: &str,
+) -> Result<i64, String> {
     let actor_repo = PgActorRepository::new(pool.clone());
     if let Ok(Some(actor)) = actor_repo.find_by_did(did).await {
         return Ok(actor.id);
@@ -1143,15 +1353,25 @@ mod facet_tests {
 
     fn link_facet(byte_start: usize, byte_end: usize, uri: &str) -> JetstreamFacet {
         JetstreamFacet {
-            index: JetstreamFacetIndex { byte_start, byte_end },
-            features: vec![JetstreamFacetFeature::Link { uri: uri.to_string() }],
+            index: JetstreamFacetIndex {
+                byte_start,
+                byte_end,
+            },
+            features: vec![JetstreamFacetFeature::Link {
+                uri: uri.to_string(),
+            }],
         }
     }
 
     fn mention_facet(byte_start: usize, byte_end: usize, did: &str) -> JetstreamFacet {
         JetstreamFacet {
-            index: JetstreamFacetIndex { byte_start, byte_end },
-            features: vec![JetstreamFacetFeature::Mention { did: did.to_string() }],
+            index: JetstreamFacetIndex {
+                byte_start,
+                byte_end,
+            },
+            features: vec![JetstreamFacetFeature::Mention {
+                did: did.to_string(),
+            }],
         }
     }
 
@@ -1240,7 +1460,10 @@ mod facet_tests {
         let text = "#rust最高";
         let byte_end = "#rust".len();
         let facets = vec![JetstreamFacet {
-            index: JetstreamFacetIndex { byte_start: 0, byte_end },
+            index: JetstreamFacetIndex {
+                byte_start: 0,
+                byte_end,
+            },
             features: vec![JetstreamFacetFeature::Tag],
         }];
         let (result, mentions) = apply_link_facets(text, facets);

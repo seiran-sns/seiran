@@ -65,7 +65,10 @@ pub async fn lists_collection_handler(
 
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/activity+json")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/activity+json",
+        )],
         Json(body),
     )
         .into_response()
@@ -148,7 +151,10 @@ pub async fn list_detail_handler(
 
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/activity+json")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/activity+json",
+        )],
         Json(body),
     )
         .into_response()

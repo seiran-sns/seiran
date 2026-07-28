@@ -40,7 +40,11 @@ struct FfprobeStream {
 /// `ffprobe`/`ffmpeg` が未インストール・タイムアウト・デコード失敗の場合は
 /// 全フィールド `None` の `ProbedMedia` を返す（アップロード自体は継続させる）。
 pub async fn probe_video_or_audio(data: &[u8], ext_hint: &str) -> ProbedMedia {
-    let tmp_path = std::env::temp_dir().join(format!("seiran-probe-{}.{}", uuid::Uuid::new_v4(), ext_hint));
+    let tmp_path = std::env::temp_dir().join(format!(
+        "seiran-probe-{}.{}",
+        uuid::Uuid::new_v4(),
+        ext_hint
+    ));
 
     if tokio::fs::write(&tmp_path, data).await.is_err() {
         return ProbedMedia::default();
@@ -55,8 +59,10 @@ pub async fn probe_video_or_audio(data: &[u8], ext_hint: &str) -> ProbedMedia {
 async fn probe_inner(tmp_path: &std::path::Path) -> ProbedMedia {
     let output = Command::new("ffprobe")
         .args([
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
         ])
@@ -74,12 +80,16 @@ async fn probe_inner(tmp_path: &std::path::Path) -> ProbedMedia {
         return ProbedMedia::default();
     };
 
-    let duration_ms = parsed.format.duration
+    let duration_ms = parsed
+        .format
+        .duration
         .as_deref()
         .and_then(|s| s.parse::<f64>().ok())
         .map(|secs| (secs * 1000.0).round() as i64);
 
-    let video_stream = parsed.streams.iter()
+    let video_stream = parsed
+        .streams
+        .iter()
         .find(|s| s.codec_type.as_deref() == Some("video"));
     let width = video_stream.and_then(|s| s.width);
     let height = video_stream.and_then(|s| s.height);
@@ -90,17 +100,36 @@ async fn probe_inner(tmp_path: &std::path::Path) -> ProbedMedia {
         None
     };
 
-    ProbedMedia { duration_ms, width, height, thumbnail_frame }
+    ProbedMedia {
+        duration_ms,
+        width,
+        height,
+        thumbnail_frame,
+    }
 }
 
 /// 動画の中間地点付近から1フレームを PNG として抽出する。
-async fn extract_thumbnail_frame(tmp_path: &std::path::Path, duration_ms: Option<i64>) -> Option<Vec<u8>> {
-    let seek_secs = duration_ms.map(|ms| (ms as f64 / 2000.0).max(0.0)).unwrap_or(0.0);
+async fn extract_thumbnail_frame(
+    tmp_path: &std::path::Path,
+    duration_ms: Option<i64>,
+) -> Option<Vec<u8>> {
+    let seek_secs = duration_ms
+        .map(|ms| (ms as f64 / 2000.0).max(0.0))
+        .unwrap_or(0.0);
 
     let mut child = Command::new("ffmpeg")
         .args(["-y", "-ss", &format!("{:.3}", seek_secs)])
-        .arg("-i").arg(tmp_path)
-        .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"])
+        .arg("-i")
+        .arg(tmp_path)
+        .args([
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "png",
+            "pipe:1",
+        ])
         .stdout(std::process::Stdio::piped())
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -113,7 +142,11 @@ async fn extract_thumbnail_frame(tmp_path: &std::path::Path, duration_ms: Option
     stdout.read_to_end(&mut buf).await.ok()?;
     let _ = child.wait().await;
 
-    if buf.is_empty() { None } else { Some(buf) }
+    if buf.is_empty() {
+        None
+    } else {
+        Some(buf)
+    }
 }
 
 const CONVERT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -134,7 +167,8 @@ pub const AUDIO_VIDEO_HEIGHT: u32 = 20;
 /// `ffmpeg` 未インストール・変換失敗時は `None` を返す（呼び出し側は従来通り
 /// `app.bsky.embed.external` フォールバックする）。
 pub async fn convert_audio_to_gray_video(audio_data: &[u8], ext_hint: &str) -> Option<Vec<u8>> {
-    let tmp_in = std::env::temp_dir().join(format!("seiran-a2v-{}.{}", uuid::Uuid::new_v4(), ext_hint));
+    let tmp_in =
+        std::env::temp_dir().join(format!("seiran-a2v-{}.{}", uuid::Uuid::new_v4(), ext_hint));
     if tokio::fs::write(&tmp_in, audio_data).await.is_err() {
         return None;
     }
@@ -150,16 +184,29 @@ async fn convert_audio_inner(tmp_in: &std::path::Path) -> Option<Vec<u8>> {
     // 生成し、音声入力と結合する。`-shortest` で音声の長さに合わせる。
     // `frag_keyframe+empty_moov` は moov アトムを断片化することで、シークできない
     // pipe:1 出力先でも正しく mp4 を書き出せるようにするため必須。
-    let color_src = format!("color=c=gray:s={}x{}:r=2", AUDIO_VIDEO_WIDTH, AUDIO_VIDEO_HEIGHT);
+    let color_src = format!(
+        "color=c=gray:s={}x{}:r=2",
+        AUDIO_VIDEO_WIDTH, AUDIO_VIDEO_HEIGHT
+    );
     let mut child = Command::new("ffmpeg")
         .args(["-y", "-f", "lavfi", "-i", &color_src])
-        .arg("-i").arg(tmp_in)
+        .arg("-i")
+        .arg(tmp_in)
         .args([
             "-shortest",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "frag_keyframe+empty_moov",
-            "-f", "mp4", "pipe:1",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "frag_keyframe+empty_moov",
+            "-f",
+            "mp4",
+            "pipe:1",
         ])
         .stdout(std::process::Stdio::piped())
         .stdin(std::process::Stdio::null())
@@ -173,7 +220,11 @@ async fn convert_audio_inner(tmp_in: &std::path::Path) -> Option<Vec<u8>> {
     stdout.read_to_end(&mut buf).await.ok()?;
     let status = child.wait().await.ok()?;
 
-    if status.success() && !buf.is_empty() { Some(buf) } else { None }
+    if status.success() && !buf.is_empty() {
+        Some(buf)
+    } else {
+        None
+    }
 }
 
 /// アップロードバイト列の実 MIME タイプを判定する（マジックバイト検査）。
@@ -188,9 +239,16 @@ pub fn sniff_mime_type(data: &[u8], fallback: &str) -> String {
 pub fn is_allowed_video_or_audio_mime(mime_type: &str) -> bool {
     matches!(
         mime_type,
-        "video/mp4" | "video/webm" | "video/quicktime"
-        | "audio/mpeg" | "audio/ogg" | "audio/wav" | "audio/x-wav"
-        | "audio/mp4" | "audio/flac" | "audio/x-flac"
+        "video/mp4"
+            | "video/webm"
+            | "video/quicktime"
+            | "audio/mpeg"
+            | "audio/ogg"
+            | "audio/wav"
+            | "audio/x-wav"
+            | "audio/mp4"
+            | "audio/flac"
+            | "audio/x-flac"
     )
 }
 

@@ -14,15 +14,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use futures_util::StreamExt;
 
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
-use seiran_common::repository::{ActorRepository, BlockRepository, PgActorRepository, PgBlockRepository};
+use seiran_common::repository::{
+    ActorRepository, BlockRepository, PgActorRepository, PgBlockRepository,
+};
 
 use crate::firehose::resolve_or_upsert_bsky_actor;
 
@@ -41,7 +43,12 @@ const CURSOR_SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// リーダー選出に応じて、無絞り込みJetstream接続の起動・停止を切り替える。
 /// `firehose.rs::run`と同じ制御パターン（`docs/protocols.md` 10節）。
-pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, redis_url: Option<String>, is_monolith: bool) {
+pub async fn run(
+    pool: PgPool,
+    http: Arc<reqwest::Client>,
+    redis_url: Option<String>,
+    is_monolith: bool,
+) {
     let mut elector: Option<JetstreamLeaderElector> = None;
     let mut current_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut poll = tokio::time::interval(jetstream_leader::LEASE_CHECK_INTERVAL);
@@ -62,7 +69,10 @@ pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, redis_url: Option<Str
                     Some(e) => match e.try_acquire_or_renew().await {
                         Ok(v) => v,
                         Err(e) => {
-                            tracing::error!("[Jetstream/BlockWatch] Redisリース確認失敗: {}。再接続を試みます。", e);
+                            tracing::error!(
+                                "[Jetstream/BlockWatch] Redisリース確認失敗: {}。再接続を試みます。",
+                                e
+                            );
                             elector = None;
                             is_monolith
                         }
@@ -74,7 +84,9 @@ pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, redis_url: Option<Str
 
         match (should_run, current_task.is_some()) {
             (true, false) => {
-                tracing::info!("[Jetstream/BlockWatch] リーダーに昇格（またはRedis未使用の単独運用）。接続開始。");
+                tracing::info!(
+                    "[Jetstream/BlockWatch] リーダーに昇格（またはRedis未使用の単独運用）。接続開始。"
+                );
                 let pool = pool.clone();
                 let http = Arc::clone(&http);
                 current_task = Some(tokio::spawn(run_loop(pool, http)));
@@ -99,7 +111,11 @@ async fn run_loop(pool: PgPool, http: Arc<reqwest::Client>) {
                 backoff_secs = 2;
             }
             Err(e) => {
-                tracing::error!("[Jetstream/BlockWatch] エラー: {}。{}秒後に再接続します。", e, backoff_secs);
+                tracing::error!(
+                    "[Jetstream/BlockWatch] エラー: {}。{}秒後に再接続します。",
+                    e,
+                    backoff_secs
+                );
                 sleep(Duration::from_secs(backoff_secs)).await;
                 backoff_secs = (backoff_secs * 2).min(120);
             }
@@ -180,21 +196,30 @@ async fn connect_and_process(pool: &PgPool, http: &Arc<reqwest::Client>) -> Resu
         }
 
         if let Err(e) = process_message(&text, pool, http).await {
-            tracing::error!("[Jetstream/BlockWatch] メッセージ処理エラー（スキップ）: {}", e);
+            tracing::error!(
+                "[Jetstream/BlockWatch] メッセージ処理エラー（スキップ）: {}",
+                e
+            );
         }
     }
 
     Ok(())
 }
 
-async fn process_message(text: &str, pool: &PgPool, http: &Arc<reqwest::Client>) -> Result<(), String> {
+async fn process_message(
+    text: &str,
+    pool: &PgPool,
+    http: &Arc<reqwest::Client>,
+) -> Result<(), String> {
     let event: JetstreamEvent =
         serde_json::from_str(text).map_err(|e| format!("JSON パースエラー: {}", e))?;
 
     if event.kind != "commit" {
         return Ok(());
     }
-    let Some(commit) = event.commit else { return Ok(()) };
+    let Some(commit) = event.commit else {
+        return Ok(());
+    };
     if commit.collection != "app.bsky.graph.block" {
         return Ok(());
     }
@@ -204,7 +229,9 @@ async fn process_message(text: &str, pool: &PgPool, http: &Arc<reqwest::Client>)
 
     match commit.operation.as_str() {
         "create" => {
-            let Some(record) = commit.record else { return Ok(()) };
+            let Some(record) = commit.record else {
+                return Ok(());
+            };
             let Some(subject_did) = record.get("subject").and_then(|v| v.as_str()) else {
                 return Ok(());
             };
@@ -233,7 +260,8 @@ async fn process_message(text: &str, pool: &PgPool, http: &Arc<reqwest::Client>)
 
             tracing::info!(
                 "[Jetstream/BlockWatch] {} が '{}' をブロック（記録完了）",
-                event.did, local_actor.username
+                event.did,
+                local_actor.username
             );
         }
         "delete" => {
@@ -252,7 +280,11 @@ async fn process_message(text: &str, pool: &PgPool, http: &Arc<reqwest::Client>)
                 .await
                 .map_err(|e| format!("blocks DELETE 失敗: {}", e))?;
 
-            tracing::info!("[Jetstream/BlockWatch] {} のブロック解除を検知（rkey={}）", event.did, commit.rkey);
+            tracing::info!(
+                "[Jetstream/BlockWatch] {} のブロック解除を検知（rkey={}）",
+                event.did,
+                commit.rkey
+            );
         }
         _ => {}
     }

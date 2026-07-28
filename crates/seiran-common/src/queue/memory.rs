@@ -88,7 +88,12 @@ impl InMemoryJobQueue {
         let mut inner = self.inner.lock().await;
         inner.sequence += 1;
         let seq = inner.sequence;
-        inner.heap.push(PrioritizedJob { priority, sequence: seq, attempt, job });
+        inner.heap.push(PrioritizedJob {
+            priority,
+            sequence: seq,
+            attempt,
+            job,
+        });
         self.notify.notify_one();
     }
 
@@ -120,7 +125,13 @@ impl JobQueue for InMemoryJobQueue {
         Ok(())
     }
 
-    async fn enqueue_retry(&self, job: Job, priority: i32, attempt: u32, delay: Duration) -> Result<(), String> {
+    async fn enqueue_retry(
+        &self,
+        job: Job,
+        priority: i32,
+        attempt: u32,
+        delay: Duration,
+    ) -> Result<(), String> {
         // InMemory はプロセス内 sleep で遅延させる。プロセス再起動でこの待ちは失われるが、
         // モノリスモード（開発・小規模運用）では許容範囲（詳細はモジュール冒頭のコメント参照）。
         let inner = Arc::clone(&self.inner);
@@ -130,7 +141,12 @@ impl JobQueue for InMemoryJobQueue {
             let mut inner = inner.lock().await;
             inner.sequence += 1;
             let seq = inner.sequence;
-            inner.heap.push(PrioritizedJob { priority, sequence: seq, attempt, job });
+            inner.heap.push(PrioritizedJob {
+                priority,
+                sequence: seq,
+                attempt,
+                job,
+            });
             notify.notify_one();
         });
         Ok(())
@@ -141,7 +157,11 @@ impl JobQueue for InMemoryJobQueue {
             {
                 let mut inner = self.inner.lock().await;
                 if let Some(pj) = inner.heap.pop() {
-                    return QueuedJob { job: pj.job, priority: pj.priority, attempt: pj.attempt };
+                    return QueuedJob {
+                        job: pj.job,
+                        priority: pj.priority,
+                        attempt: pj.attempt,
+                    };
                 }
             }
             self.notify.notified().await;
@@ -155,7 +175,10 @@ mod tests {
 
     /// テスト用のダミージョブ。actor_id で個体を識別する。
     fn job(id: i64) -> Job {
-        Job::ApDelivery { actor_id: id, kind: crate::traits::ApDeliveryKind::DeleteActor }
+        Job::ApDelivery {
+            actor_id: id,
+            kind: crate::traits::ApDeliveryKind::DeleteActor,
+        }
     }
 
     fn post_id_of(job: &Job) -> i64 {
@@ -192,7 +215,11 @@ mod tests {
             q.enqueue(job(i), 10).await.unwrap();
         }
         for i in 1..=5 {
-            assert_eq!(post_id_of(&q.dequeue().await.unwrap()), i, "同一優先度は投入順（FIFO）で取り出す");
+            assert_eq!(
+                post_id_of(&q.dequeue().await.unwrap()),
+                i,
+                "同一優先度は投入順（FIFO）で取り出す"
+            );
         }
     }
 
@@ -260,7 +287,9 @@ mod tests {
     #[tokio::test]
     async fn enqueue_retry_carries_attempt_and_priority() {
         let q = InMemoryJobQueue::new();
-        q.enqueue_retry(job(7), 50, 3, Duration::from_millis(10)).await.unwrap();
+        q.enqueue_retry(job(7), 50, 3, Duration::from_millis(10))
+            .await
+            .unwrap();
         let qj = q.dequeue_blocking().await;
         assert_eq!(post_id_of(&qj.job), 7);
         assert_eq!(qj.priority, 50);

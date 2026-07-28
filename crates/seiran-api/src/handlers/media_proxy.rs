@@ -83,7 +83,10 @@ async fn validate_url(raw: &str) -> Result<(Url, Vec<SocketAddr>), ApiError> {
 /// リダイレクト先も毎回同じ検証を通す）。`/proxy` エンドポイントとリモート絵文字インポート
 /// （`handlers::admin::remote_emojis`, #73）の両方から使う共通ロジック。
 /// `accept_prefixes` に前方一致しない `Content-Type` は `MEDIA_PROXY_UNSUPPORTED_TYPE` として拒否する。
-pub async fn fetch_validated(raw_url: &str, accept_prefixes: &[&str]) -> Result<(Bytes, String), ApiError> {
+pub async fn fetch_validated(
+    raw_url: &str,
+    accept_prefixes: &[&str],
+) -> Result<(Bytes, String), ApiError> {
     let (mut url, mut addresses) = validate_url(raw_url).await?;
 
     for redirect_count in 0..=MAX_REDIRECTS {

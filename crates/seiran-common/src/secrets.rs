@@ -110,7 +110,6 @@ impl Secrets {
         Ok(true)
     }
 
-
     /// encryption_key が未設定の場合に生成して補完する（旧 secrets.toml の移行用）
     pub fn ensure_encryption_key(&mut self) -> bool {
         if self.encryption_key.is_some() {
@@ -185,8 +184,8 @@ impl SecretsFile {
 
     /// 既存の `secrets.toml` を読み込む
     fn load(&self) -> Result<Secrets, SecretsError> {
-        let content = std::fs::read_to_string(&self.path)
-            .map_err(|e| SecretsError::Io(e.to_string()))?;
+        let content =
+            std::fs::read_to_string(&self.path).map_err(|e| SecretsError::Io(e.to_string()))?;
         toml::from_str(&content).map_err(|e| SecretsError::Parse(e.to_string()))
     }
 
@@ -207,8 +206,8 @@ impl SecretsFile {
             "# ⚠️  このファイルを紛失すると既存の JWT トークンと ATP 署名が無効になります。\n\n"
         );
 
-        let body = toml::to_string_pretty(secrets)
-            .map_err(|e| SecretsError::Serialize(e.to_string()))?;
+        let body =
+            toml::to_string_pretty(secrets).map_err(|e| SecretsError::Serialize(e.to_string()))?;
 
         std::fs::write(&self.path, format!("{}{}", header, body))
             .map_err(|e| SecretsError::Io(e.to_string()))?;
@@ -248,9 +247,7 @@ pub enum SecretsError {
 }
 
 /// RSA-2048 鍵ペアを生成し (秘密鍵 PEM, 公開鍵 PEM) を返す
-fn generate_rsa_key_pair(
-    rng: &mut OsRng,
-) -> Result<(String, String), SecretsError> {
+fn generate_rsa_key_pair(rng: &mut OsRng) -> Result<(String, String), SecretsError> {
     let private_key = RsaPrivateKey::new(rng, 2048)
         .map_err(|e| SecretsError::KeyGen(format!("RSA鍵生成失敗: {}", e)))?;
     let public_key = private_key.to_public_key();
@@ -266,4 +263,3 @@ fn generate_rsa_key_pair(
 
     Ok((private_pem, public_pem))
 }
-

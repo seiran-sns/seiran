@@ -41,15 +41,13 @@ impl PgAppTokenRepository {
 #[async_trait]
 impl AppTokenRepository for PgAppTokenRepository {
     async fn insert(&self, id: Uuid, user_id: i64, client_name: &str) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "INSERT INTO app_tokens (id, user_id, client_name) VALUES ($1, $2, $3)",
-        )
-        .bind(id)
-        .bind(user_id)
-        .bind(client_name)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        sqlx::query("INSERT INTO app_tokens (id, user_id, client_name) VALUES ($1, $2, $3)")
+            .bind(id)
+            .bind(user_id)
+            .bind(client_name)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 
     async fn list_by_user(&self, user_id: i64) -> Result<Vec<AppTokenRow>, sqlx::Error> {
@@ -76,12 +74,11 @@ impl AppTokenRepository for PgAppTokenRepository {
     }
 
     async fn is_revoked(&self, id: Uuid) -> Result<bool, sqlx::Error> {
-        let row: Option<(bool,)> = sqlx::query_as(
-            "SELECT revoked_at IS NOT NULL FROM app_tokens WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row: Option<(bool,)> =
+            sqlx::query_as("SELECT revoked_at IS NOT NULL FROM app_tokens WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(|(revoked,)| revoked).unwrap_or(false))
     }
 }

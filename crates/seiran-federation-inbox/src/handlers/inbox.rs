@@ -39,7 +39,11 @@ pub async fn inbox_handler(
     match header_map.get("digest") {
         Some(received_digest) if received_digest == &computed_digest => {}
         Some(_) => {
-            return (StatusCode::UNAUTHORIZED, "Digest ヘッダーがボディと一致しません").into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Digest ヘッダーがボディと一致しません",
+            )
+                .into_response();
         }
         None => {
             return (StatusCode::UNAUTHORIZED, "Digest ヘッダーが必要です").into_response();
@@ -55,17 +59,29 @@ pub async fn inbox_handler(
 
     // Signature の headers= に "digest" が含まれることを確認
     if !signature_covers_digest(&signature) {
-        return (StatusCode::UNAUTHORIZED, "Signature の headers= に digest が含まれていません").into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Signature の headers= に digest が含まれていません",
+        )
+            .into_response();
     }
 
     let key_id = match extract_key_id(&signature) {
         Some(k) => k,
         None => {
-            return (StatusCode::UNAUTHORIZED, "Signature に keyId が見つかりません").into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Signature に keyId が見つかりません",
+            )
+                .into_response();
         }
     };
 
-    match state.ap_client.verify_signature("POST", "/inbox", &header_map, &signature).await {
+    match state
+        .ap_client
+        .verify_signature("POST", "/inbox", &header_map, &signature)
+        .await
+    {
         Ok(true) => {}
         Ok(false) => {
             return (StatusCode::UNAUTHORIZED, "署名検証失敗").into_response();
@@ -93,7 +109,8 @@ pub async fn inbox_handler(
     if key_actor_base != activity_actor {
         tracing::info!(
             "[Inbox] keyId のアクター ({}) と activity.actor ({}) が一致しません",
-            key_actor_base, activity_actor
+            key_actor_base,
+            activity_actor
         );
         return (StatusCode::UNAUTHORIZED, "署名者とアクターが一致しません").into_response();
     }
@@ -116,7 +133,9 @@ fn signature_covers_digest(signature_header: &str) -> bool {
         let kv: Vec<&str> = part.splitn(2, '=').collect();
         if kv.len() == 2 && kv[0].trim() == "headers" {
             let headers_val = kv[1].trim().trim_matches('"');
-            return headers_val.split(' ').any(|h| h.eq_ignore_ascii_case("digest"));
+            return headers_val
+                .split(' ')
+                .any(|h| h.eq_ignore_ascii_case("digest"));
         }
     }
     false

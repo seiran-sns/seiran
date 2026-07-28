@@ -59,7 +59,11 @@ impl From<ExifSanitizedImage> for NewMedia {
     }
 }
 
-async fn find_existing(state: &AppState, sha256: &str, blurhash: &str) -> Result<Option<MediaFile>, ApiError> {
+async fn find_existing(
+    state: &AppState,
+    sha256: &str,
+    blurhash: &str,
+) -> Result<Option<MediaFile>, ApiError> {
     state
         .media_files
         .find_by_sha256_and_blurhash(sha256, blurhash)
@@ -67,7 +71,11 @@ async fn find_existing(state: &AppState, sha256: &str, blurhash: &str) -> Result
         .map_err(|e| ApiError::Internal(e.to_string()))
 }
 
-async fn persist_new(state: &AppState, new: NewMedia, actor_id: Option<i64>) -> Result<MediaFile, ApiError> {
+async fn persist_new(
+    state: &AppState,
+    new: NewMedia,
+    actor_id: Option<i64>,
+) -> Result<MediaFile, ApiError> {
     let provider = select_provider(state.storage_providers.as_ref(), new.size)
         .await
         .map_err(map_selector_error)?;
@@ -116,19 +124,34 @@ pub(crate) async fn store_image(
     match pipeline {
         ImagePipeline::AnimatedPassthrough(p) => {
             if let Some(existing) = find_existing(state, &p.sha256, &p.blurhash).await? {
-                return Ok(UploadOutcome { record: existing, is_reused: true });
+                return Ok(UploadOutcome {
+                    record: existing,
+                    is_reused: true,
+                });
             }
             let record = persist_new(state, p.into(), actor_id).await?;
-            Ok(UploadOutcome { record, is_reused: false })
+            Ok(UploadOutcome {
+                record,
+                is_reused: false,
+            })
         }
         ImagePipeline::Static { original, resized } => {
             if let Some(original) = &original {
-                if let Some(existing) = find_existing(state, &original.sha256, &original.blurhash).await? {
-                    return Ok(UploadOutcome { record: existing, is_reused: true });
+                if let Some(existing) =
+                    find_existing(state, &original.sha256, &original.blurhash).await?
+                {
+                    return Ok(UploadOutcome {
+                        record: existing,
+                        is_reused: true,
+                    });
                 }
             }
-            if let Some(existing) = find_existing(state, &resized.sha256, &resized.blurhash).await? {
-                return Ok(UploadOutcome { record: existing, is_reused: true });
+            if let Some(existing) = find_existing(state, &resized.sha256, &resized.blurhash).await?
+            {
+                return Ok(UploadOutcome {
+                    record: existing,
+                    is_reused: true,
+                });
             }
 
             // どちらも未登録 → バイトサイズが小さい方（＝容量削減に実際に役立つ方）を採用する。
@@ -143,7 +166,10 @@ pub(crate) async fn store_image(
                 resized.into()
             };
             let record = persist_new(state, new_media, actor_id).await?;
-            Ok(UploadOutcome { record, is_reused: false })
+            Ok(UploadOutcome {
+                record,
+                is_reused: false,
+            })
         }
     }
 }

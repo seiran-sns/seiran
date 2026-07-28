@@ -39,7 +39,10 @@ pub async fn handle(
     ctx: Arc<JobContext>,
 ) -> Result<(), String> {
     let Some(pool) = ctx.db_pool.as_ref() else {
-        tracing::warn!("[BskyPostCommitDeferred] DB pool 未設定のためスキップ (post_id={})", post_id);
+        tracing::warn!(
+            "[BskyPostCommitDeferred] DB pool 未設定のためスキップ (post_id={})",
+            post_id
+        );
         return Ok(());
     };
 
@@ -57,17 +60,25 @@ pub async fn handle(
         let mut oldest_created_at: Option<DateTime<Utc>> = None;
         for row in &rows {
             let status: Option<String> = row.try_get("bsky_video_status").unwrap_or(None);
-            let created_at: DateTime<Utc> = row.try_get("created_at").map_err(|e| format!("created_at取得失敗: {}", e))?;
+            let created_at: DateTime<Utc> = row
+                .try_get("created_at")
+                .map_err(|e| format!("created_at取得失敗: {}", e))?;
             if !matches!(status.as_deref(), Some("ready") | Some("failed")) {
                 all_settled = false;
             }
-            oldest_created_at = Some(oldest_created_at.map_or(created_at, |o: DateTime<Utc>| o.min(created_at)));
+            oldest_created_at =
+                Some(oldest_created_at.map_or(created_at, |o: DateTime<Utc>| o.min(created_at)));
         }
 
         if !all_settled {
-            let elapsed_secs = oldest_created_at.map(|c| (Utc::now() - c).num_seconds()).unwrap_or(0);
+            let elapsed_secs = oldest_created_at
+                .map(|c| (Utc::now() - c).num_seconds())
+                .unwrap_or(0);
             if elapsed_secs < SETTLE_TIMEOUT_SECS {
-                return Err(format!("動画パイプライン結合待ち（経過{}秒）", elapsed_secs));
+                return Err(format!(
+                    "動画パイプライン結合待ち（経過{}秒）",
+                    elapsed_secs
+                ));
             }
             tracing::warn!(
                 "[BskyPostCommitDeferred] {}秒経過してもbsky_video_statusが確定しないためフォールバックコミット post_id={}",
@@ -76,14 +87,24 @@ pub async fn handle(
         }
     }
 
-    let cfg = ctx.delivery.as_ref().ok_or_else(|| "配送設定未注入".to_string())?;
+    let cfg = ctx
+        .delivery
+        .as_ref()
+        .ok_or_else(|| "配送設定未注入".to_string())?;
     let (bsky_text, bsky_facets) =
-        convert_mentions_for_bsky(&text, &cfg.local_domain, pool, ctx.ap_client.http.as_ref()).await;
+        convert_mentions_for_bsky(&text, &cfg.local_domain, pool, ctx.ap_client.http.as_ref())
+            .await;
 
     let bsky_reply = match (reply_root, reply_parent) {
         (Some((root_uri, root_cid)), Some((parent_uri, parent_cid))) => Some(BskyPostReply {
-            root: BskyRefRecord { uri: root_uri, cid: root_cid },
-            parent: BskyRefRecord { uri: parent_uri, cid: parent_cid },
+            root: BskyRefRecord {
+                uri: root_uri,
+                cid: root_cid,
+            },
+            parent: BskyRefRecord {
+                uri: parent_uri,
+                cid: parent_cid,
+            },
         }),
         _ => None,
     };
@@ -93,10 +114,22 @@ pub async fn handle(
     // 届かないが、atp_repo_eventsテーブルへの記録自体は行われるため、他のRelayが
     // 再購読すれば最終的に一貫する）。
     let (event_tx, _rx) = broadcast::channel(16);
-    let atp_service = AtpCommitService::new(pool.clone(), Arc::new(event_tx), Arc::clone(&ctx.ap_client.http));
+    let atp_service = AtpCommitService::new(
+        pool.clone(),
+        Arc::new(event_tx),
+        Arc::clone(&ctx.ap_client.http),
+    );
 
     atp_service
-        .commit_post(actor_id, post_id, &bsky_text, bsky_facets, &attachment_ids, now, bsky_reply)
+        .commit_post(
+            actor_id,
+            post_id,
+            &bsky_text,
+            bsky_facets,
+            &attachment_ids,
+            now,
+            bsky_reply,
+        )
         .await
         .map_err(|e| format!("ATP コミット失敗: {}", e))?;
 
