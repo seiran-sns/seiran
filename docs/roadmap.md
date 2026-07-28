@@ -9,6 +9,7 @@
 
 - [x] **統一通報機能（#107）** — ローカル・Fedi・Bskyの投稿/ユーザー通報、管理台帳・内部コメント・対処、ActivityPub Flag / Bluesky Moderation Service転送。
 - [x] **国際化の言語追加（#138）** — 日本語・英語に加えて中国語・韓国語・スペイン語・ドイツ語・フランス語へ対応。フロントエンドの日本語ハードコードを翻訳キーへ移し、全言語のキーと補間変数の一致を自動検証する。
+- [x] **リモートFedi actor・投稿の重複修復（#139）** — 破損したUNIQUE indexが同じAP URIのactor・投稿を複数行へ分裂させ、プロフィール/HTLから新着が欠落していたデータを、全外部キーと複合UNIQUEの意味を保ってcanonical IDへ統合し、indexを再構築するマイグレーションを追加。
 
 - [x] **フェーズ1: DBスキーマ ＆ 統一ID採番** — `posts`/`actors`/`follows` 等の統一エンティティ設計、Snowflake ID採番エンジン。詳細: `docs/database.md`
 - [x] **フェーズ2: ローカル認証 ＆ MiAuth互換** — Argon2+JWT、MiAuth、メール確認・パスワードリセット、`secrets.toml` 自動生成。詳細: `docs/architecture.md` 4節

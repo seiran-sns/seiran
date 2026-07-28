@@ -64,6 +64,14 @@ ID 採番は2系統ある。
 
 `actors.ap_uri`（UNIQUE）は `local` 行も含め全アクター種別が保持する。ローカル行は `https://{local_domain}/users/{username}` を持つ（自ドメインを名乗る Actor URI を誤ってリモートアクター解決経路に渡しても、`find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により `actor_type='fedi'` の影の重複行が生成されない）。リモートActor URI解決処理（`resolve_fedi`/`upsert_remote_fedi_actor`/`RemoteActorResolve`/`follow_fedi`）はこれとは別に、URIが自ドメイン形式に一致する場合は `find_by_username_domain` でローカル行へ解決する明示的なガードも入口に持つ（`docs/protocols.md` 参照）。
 
+`20260728020000_repair_duplicate_fedi_actors.sql` は、物理的に破損した
+`actors.ap_uri` / `posts.ap_object_id` UNIQUE index が既存行を見落としていた環境を
+修復するデータマイグレーションである。同じAP URIのリモートFedi actorを最小IDへ
+統合し、最新プロフィールを維持したまま、投稿・フォロー・リアクション・リスト・
+DM等の全外部キー参照を付け替える。複合UNIQUEは正規化後のキーで重複排除し、
+同時期に分裂したAP投稿とactor統合で重複するrepostも統合してから両UNIQUE indexを
+再構築する。ローカル/ATP identityを含む重複は自動統合せずmigrationを停止する。
+
 `users.language_preference`（設定画面「表示」＞「言語」）: `ja` / `en` / `zh` / `ko` / `es` / `de` / `fr` のいずれか、`NULL` は「自動」（ブラウザの言語設定に従う）を意味する。
 
 ### TOTP関連（`user_totp` / `user_totp_recovery_codes` / `totp_disable_requests`）
