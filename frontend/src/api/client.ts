@@ -877,7 +877,8 @@ export const api = {
       replyToId?: string,
       renoteId?: string,
       visibility?: "public" | "unlisted" | "followers_only" | "direct",
-      recipientActorIds?: string[]
+      recipientActorIds?: string[],
+      quoteOfId?: string
     ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
@@ -887,6 +888,7 @@ export const api = {
           attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
           reply_to_id: replyToId,
           renote_id: renoteId,
+          quote_of_id: quoteOfId,
           visibility,
           recipient_actor_ids: recipientActorIds,
         })

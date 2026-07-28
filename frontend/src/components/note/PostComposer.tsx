@@ -10,6 +10,8 @@ interface PostComposerProps {
   autoFocus?: boolean;
   /** 指定時は返信として投稿する（配信先は元ポストのネットワークに自動ルーティング）。 */
   replyTo?: Note;
+  /** 指定時は対象ポストを引用して投稿する。 */
+  quoteTo?: Note;
   /** 本文の初期値（ハッシュタグ入力済みでの投稿ダイアログ起動等）。 */
   initialText?: string;
 }
@@ -32,7 +34,7 @@ export function replyVisibilityConstraint(replyTo?: Note): {
   return { forced: null, defaultValue: "public" };
 }
 
-export default function PostComposer({ onPosted, autoFocus, replyTo, initialText }: PostComposerProps) {
+export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, initialText }: PostComposerProps) {
   const { t } = useTranslation();
   const [text, setText] = useState(initialText ?? "");
   const [deliverFedi, setDeliverFedi] = useState(true);
@@ -105,7 +107,9 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
         attachmentIds,
         replyTo?.id,
         undefined,
-        visibility
+        visibility,
+        undefined,
+        quoteTo?.id
       );
       setText("");
       setAttached(null);
@@ -147,6 +151,14 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
           <span className={styles.replySnippet}>{replyTo.text}</span>
         </div>
       )}
+      {quoteTo && (
+        <div className={styles.replyBanner}>
+          <span className={styles.replyTo}>
+            {t("home:postComposer.quoteToPrefix")} <strong>{displayName(quoteTo)}</strong> {acct(quoteTo)}
+          </span>
+          <span className={styles.replySnippet}>{quoteTo.text}</span>
+        </div>
+      )}
 
       <input
         ref={fileInputRef}
@@ -162,7 +174,11 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, initialText
         onImagePaste={(file) => {
           if (!uploading && !attached) uploadFile(file);
         }}
-        placeholder={replyTo ? t("home:postComposer.replyPlaceholder") : t("home:postComposer.placeholder")}
+        placeholder={replyTo
+          ? t("home:postComposer.replyPlaceholder")
+          : quoteTo
+          ? t("home:postComposer.quotePlaceholder")
+          : t("home:postComposer.placeholder")}
         autoFocus={autoFocus}
       />
 
