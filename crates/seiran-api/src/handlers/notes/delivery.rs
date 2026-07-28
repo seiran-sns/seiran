@@ -5,15 +5,55 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use seiran_common::atp::{BskyEmbed, BskyPostReply, BskyRefRecord};
+use seiran_common::atp::{BskyEmbed, BskyImage, BskyPostReply, BskyRefRecord};
 use seiran_common::mention::convert_mentions_for_bsky;
 use seiran_common::repository::PostDeliveryMeta;
-use seiran_common::ApDeliveryKind;
+use seiran_common::{prepare_image, ApDeliveryKind, MediaKind};
 
 use crate::error::ApiError;
 use crate::AppState;
 
 use super::dto::NoteResponse;
+
+const BSKY_CARD_THUMB_MAX_BYTES: u64 = 20 * 1024 * 1024;
+
+async fn prepare_external_thumb(
+    state: &AppState,
+    actor_id: i64,
+    url: Option<&str>,
+) -> Option<BskyImage> {
+    let url = url?;
+    let response = match state.ap_client.http.get(url).send().await {
+        Ok(response) if response.status().is_success() => response,
+        Ok(response) => {
+            tracing::warn!("[deliver_repost] URLカード画像取得失敗 status={} url={}", response.status(), url);
+            return None;
+        }
+        Err(error) => {
+            tracing::warn!("[deliver_repost] URLカード画像取得失敗: {} url={}", error, url);
+            return None;
+        }
+    };
+    if response.content_length().is_some_and(|size| size > BSKY_CARD_THUMB_MAX_BYTES) {
+        tracing::warn!("[deliver_repost] URLカード画像が上限超過 url={}", url);
+        return None;
+    }
+    let bytes = response.bytes().await.ok()?;
+    if bytes.len() as u64 > BSKY_CARD_THUMB_MAX_BYTES {
+        tracing::warn!("[deliver_repost] URLカード画像が上限超過 url={}", url);
+        return None;
+    }
+    let pipeline = prepare_image(&bytes, MediaKind::Post).ok()?;
+    let stored = super::super::media_store::store_image(state, pipeline, Some(actor_id)).await.ok()?;
+    Some(BskyImage {
+        sha256_hex: stored.record.sha256,
+        mime_type: stored.record.mime_type,
+        size: stored.record.size,
+        width: stored.record.width.unwrap_or(0),
+        height: stored.record.height.unwrap_or(0),
+        alt: String::new(),
+    })
+}
 
 /// `at://did/collection/rkey` 形式の AT URI を Bsky.app URL に変換するヘルパー。
 pub fn at_uri_to_bsky_app_url(at_uri: &str) -> String {
@@ -165,9 +205,19 @@ pub async fn deliver_repost(
             // `ON CONFLICT (at_uri) DO NOTHING` により重複ポストを作らなくなる
             // （このリポストと無関係な別ノートがタイムラインに現れなくなる）。
             let ap_id = meta.ap_object_id.clone().unwrap_or_default();
+            let title = format!(
+                "{} (@{}@{})",
+                meta.display_name.as_deref().unwrap_or(&meta.username),
+                meta.username,
+                meta.domain
+            );
+            let description = meta.body.clone();
+            let thumb_url = meta.first_image_url.clone().or(meta.avatar_url.clone());
+            let state = state.clone();
             let atp = Arc::clone(&state.atp_service);
             tokio::spawn(async move {
-                let embed = BskyEmbed::External { url: ap_id };
+                let thumb = prepare_external_thumb(&state, actor_id, thumb_url.as_deref()).await;
+                let embed = BskyEmbed::External { url: ap_id, title, description, thumb };
                 if let Err(e) = atp.commit_quote(actor_id, post_id, "🔁", vec![], Some(embed), now, None).await {
                     tracing::error!("[create_note] Fedi→Bsky フォールバック投稿失敗: {}", e);
                 }
@@ -305,11 +355,15 @@ pub async fn resolve_quote_embed(state: &AppState, quote_of_id: i64) -> (Option<
     );
 
     let bsky_embed = if origin == PostOrigin::FediRemote {
-        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External { url: u.to_string() })
+        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External {
+            url: u.to_string(), title: String::new(), description: String::new(), thumb: None,
+        })
     } else if let (Some(uri), Some(cid)) = (&meta.at_uri, &meta.at_cid) {
         Some(BskyEmbed::Record { uri: uri.clone(), cid: cid.clone() })
     } else {
-        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External { url: u.to_string() })
+        meta.ap_object_id.as_deref().map(|u| BskyEmbed::External {
+            url: u.to_string(), title: String::new(), description: String::new(), thumb: None,
+        })
     };
 
     let ap_url = if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
