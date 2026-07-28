@@ -437,7 +437,7 @@ pub enum ApQuote {
     AppendUrl(String),
 }
 
-fn ap_delivery_quote_fields(
+pub(super) fn ap_delivery_quote_fields(
     text: &str,
     quote: Option<ApQuote>,
 ) -> (Option<String>, Option<String>) {
@@ -445,6 +445,17 @@ fn ap_delivery_quote_fields(
         Some(ApQuote::Misskey(url)) => (None, Some(url)),
         Some(ApQuote::AppendUrl(url)) => (Some(format!("{}\n\n{}", text, url)), None),
         None => (None, None),
+    }
+}
+
+pub(super) fn ap_quote_from_meta(meta: &PostDeliveryMeta) -> Option<ApQuote> {
+    if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
+        meta.at_uri
+            .as_deref()
+            .map(at_uri_to_bsky_app_url)
+            .map(ApQuote::AppendUrl)
+    } else {
+        meta.ap_object_id.clone().map(ApQuote::Misskey)
     }
 }
 
@@ -479,14 +490,7 @@ pub async fn resolve_quote_embed(
         build_external_post_embed(state, actor_id, &meta).await
     };
 
-    let ap_quote = if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
-        meta.at_uri
-            .as_deref()
-            .map(at_uri_to_bsky_app_url)
-            .map(ApQuote::AppendUrl)
-    } else {
-        meta.ap_object_id.clone().map(ApQuote::Misskey)
-    };
+    let ap_quote = ap_quote_from_meta(&meta);
 
     (bsky_embed, ap_quote)
 }

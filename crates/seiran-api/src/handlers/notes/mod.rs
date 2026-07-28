@@ -830,8 +830,22 @@ pub async fn get_note_ap(
 
     let actor_uri = format!("https://{}/users/{}", state.local_domain, post.username);
     let note_id = format!("https://{}/notes/{}", state.local_domain, post.id);
+    // 配送された Create の埋め込み object と、受信側が object.id を再取得した結果を
+    // 一致させる。Bsky-only 引用は配送時と同じく bsky.app URL を本文末尾へ追加する。
+    let (ap_body, quote_url) = if let Some(quote_id) = post.quote_of_post_id {
+        match state.posts.find_delivery_meta(quote_id).await {
+            Ok(Some(meta)) => delivery::ap_delivery_quote_fields(
+                &post.body,
+                delivery::ap_quote_from_meta(&meta),
+            ),
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+    let ap_body = ap_body.as_deref().unwrap_or(&post.body);
     let (converted_body, mentions) = seiran_common::mention::convert_mentions_for_ap(
-        &post.body, &state.local_domain, &state.db, state.ap_client.http.as_ref(),
+        ap_body, &state.local_domain, &state.db, state.ap_client.http.as_ref(),
     ).await;
     let content_html = plain_to_html_with_mentions(&converted_body, &mentions);
     let mut tag = seiran_common::mention::ap_inline_mentions_to_tag_json(&mentions);
@@ -913,6 +927,10 @@ pub async fn get_note_ap(
     }
     if !tag.is_empty() {
         ap_note["tag"] = serde_json::Value::Array(tag);
+    }
+    if let Some(url) = quote_url {
+        ap_note["quoteUrl"] = serde_json::Value::String(url.clone());
+        ap_note["_misskey_quote"] = serde_json::Value::String(url);
     }
 
     (
