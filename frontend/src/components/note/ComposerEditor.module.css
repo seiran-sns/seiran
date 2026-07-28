@@ -14,9 +14,8 @@
   outline: none;
 }
 
-.placeholder {
-  position: absolute;
-  inset: 0;
+.editor:empty::before {
+  content: attr(data-placeholder);
   color: var(--text-faint);
   pointer-events: none;
 }

@@ -35,7 +35,11 @@ const DECORATION_RE = new RegExp(
 function nodeValue(node: Node): string {
   if (node instanceof HTMLElement && node.dataset.value) return node.dataset.value;
   if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
-  if (node.nodeName === "BR") return "\n";
+  if (node.nodeName === "BR") {
+    // 末尾の改行を表示上のキャレット配置のために足した番人brは値に含めない。
+    if (node instanceof HTMLElement && node.dataset.pad) return "";
+    return "\n";
+  }
   return Array.from(node.childNodes).map(nodeValue).join("");
 }
 
@@ -250,7 +254,10 @@ export default function ComposerEditor({
     const nextCaret = selectionOffset(editor) ?? value.length;
     pendingCaret.current = nextCaret;
     setCaret(nextCaret);
-    onChange(nodeValue(editor).replace(/\n$/, ""));
+    // 全選択削除などで内容が空になると、ブラウザはカーソル表示用の単独<br>を
+    // 自動的に残す。これはユーザーが入力した改行ではないため空文字列として扱う。
+    const isPlaceholderBr = editor.childNodes.length === 1 && editor.firstChild?.nodeName === "BR";
+    onChange(isPlaceholderBr ? "" : nodeValue(editor));
   }
 
   function insert(candidate: Candidate) {
@@ -283,6 +290,19 @@ export default function ComposerEditor({
     if (event.key === "Enter" && active >= 0 && candidates[active]) {
       event.preventDefault();
       insert(candidates[active]);
+      return;
+    }
+    if (event.key === "Enter") {
+      // contentEditableのデフォルト改行挿入（div/br分割）に任せると、直後の
+      // selectionOffset計算がbrの前後を区別できずcaretがずれる。常に自前で
+      // valueへ\nを挿入することで、caret位置を正確に管理する。
+      if (!window.getSelection()?.isCollapsed) return;
+      event.preventDefault();
+      const next = `${value.slice(0, caret)}\n${value.slice(caret)}`;
+      const nextCaret = caret + 1;
+      pendingCaret.current = nextCaret;
+      setCaret(nextCaret);
+      onChange(next);
       return;
     }
     if (event.key === "Backspace" && !window.getSelection()?.isCollapsed) return;
@@ -320,17 +340,17 @@ export default function ComposerEditor({
       }
       return escapeHtml(part).replace(/\n/g, "<br>");
     })
-    .join("");
+    .join("") + (value.endsWith("\n") ? '<br data-pad="1">' : "");
 
   return (
     <div className={styles.wrap}>
-      {!value && <span className={styles.placeholder}>{placeholder}</span>}
       <div
         ref={editorRef}
         className={styles.editor}
         contentEditable
         role="textbox"
         aria-multiline="true"
+        data-placeholder={placeholder}
         {...({ placeholder } as Record<string, string>)}
         suppressContentEditableWarning
         onInput={() => {
@@ -341,7 +361,9 @@ export default function ComposerEditor({
         }}
         onKeyDown={handleKeyDown}
         onKeyUp={() => {
-          if (composing.current) return;
+          // pendingCaret設定中（handleKeyDownで自前更新した直後）は、まだ
+          // 再レンダー前の古いDOMを読むことになりcaretを巻き戻してしまうため待つ。
+          if (composing.current || pendingCaret.current !== null) return;
           const next = editorRef.current ? selectionOffset(editorRef.current) : null;
           if (next !== null) setCaret(next);
         }}

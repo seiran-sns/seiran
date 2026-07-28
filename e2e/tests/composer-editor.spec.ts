@@ -253,3 +253,51 @@ test("IME未確定中は入力DOMへ干渉せず、確定後に本文へ同期�
   });
   await expect(editor).toHaveText("日本");
 });
+
+test("Enterキー1回につき改行が1個だけ入り揺り戻しが起きない", async ({ page, request }) => {
+  const author = await registerUserViaApi(request, "e2ecomposerenter");
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.click();
+  await editor.pressSequentially("あ");
+  await editor.press("Enter");
+  await editor.pressSequentially("い");
+  await editor.press("Enter");
+  await editor.press("Enter");
+  await editor.pressSequentially("う");
+
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (res) => res.url().includes("/api/notes/create") && res.request().method() === "POST"
+    ),
+    editor.press("Control+Enter"),
+  ]);
+  const note = (await response.json()) as { text: string };
+  expect(note.text).toBe("あ\nい\n\nう");
+});
+
+test("IME未確定文字が入力されるとプレースホルダーが消える", async ({ page, request }) => {
+  const author = await registerUserViaApi(request, "e2ecomposerplaceholder");
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await expect(editor.evaluate((element) => element.matches(":empty"))).resolves.toBe(true);
+
+  await editor.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    element.replaceChildren(document.createTextNode("にほ"));
+    element.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      data: "にほ",
+      inputType: "insertCompositionText",
+      isComposing: true,
+    }));
+  });
+
+  await expect(editor.evaluate((element) => element.matches(":empty"))).resolves.toBe(false);
+});
