@@ -556,7 +556,12 @@ impl AtpCommitService {
             }
             Some(video_embed)
         } else {
-            non_image_url.map(|url| BskyEmbed::External { url })
+            non_image_url.map(|url| BskyEmbed::External {
+                url,
+                title: String::new(),
+                description: String::new(),
+                thumb: None,
+            })
         };
         let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
         let record_cid_str = cid_to_string(&record_cid);
@@ -965,7 +970,8 @@ impl AtpCommitService {
     }
 
     /// `app.bsky.feed.post` レコードを削除する。
-    /// Fedi リモートポストのリポスト時に作るフォールバックテキスト投稿（`commit_post` が
+    /// Fedi リモートポストのリポスト時に作るフォールバック投稿（`commit_quote` が
+    /// 本文「🔁」と元ポストURLのexternal embedをコミットし、
     /// `posts.at_rkey` に自己保存したもの）を、リポスト取り消し時に retract するために使う。
     pub async fn delete_atp_post(
         &self,
@@ -1443,6 +1449,12 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
+        let mut blob_cids = Vec::new();
+        if let Some(BskyEmbed::External { thumb: Some(thumb), .. }) = &embed {
+            if let Ok(cid) = cid_from_sha256_hex(&thumb.sha256_hex) {
+                blob_cids.push(cid);
+            }
+        }
         let (record_cbor, record_cid) = encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
         let record_cid_str = cid_to_string(&record_cid);
 
@@ -1452,7 +1464,7 @@ impl AtpCommitService {
             cbor: record_cbor,
             cid: record_cid,
             action: "create",
-            blob_cids: vec![],
+            blob_cids,
         };
 
         let result = self.commit_record_inner(actor_id, record, now, Some(post_id)).await?;

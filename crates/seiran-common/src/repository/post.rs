@@ -89,6 +89,9 @@ pub struct PostDeliveryMeta {
     pub domain: String,
     pub display_name: Option<String>,
     pub username: String,
+    pub body: String,
+    pub avatar_url: Option<String>,
+    pub first_image_url: Option<String>,
     /// 元ポストの可視性（"public"|"unlisted"|"followers_only"|"direct"）。
     /// リポスト可否判定・可視性継承・Bsky配送許可判定に使う。
     pub visibility: String,
@@ -967,10 +970,26 @@ impl PostRepository for PgPostRepository {
     async fn find_delivery_meta(&self, id: i64) -> Result<Option<PostDeliveryMeta>, sqlx::Error> {
         sqlx::query_as::<_, PostDeliveryMeta>(
             "SELECT p.actor_id, p.ap_object_id, p.at_uri, p.at_cid,
-                    a.domain, a.display_name, a.username,
+                    a.domain, a.display_name, a.username, p.body,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    (
+                        SELECT COALESCE(
+                            rtrim(msp.public_url, '/') || '/' || mf.storage_key,
+                            pa.remote_url
+                        )
+                        FROM post_attachments pa
+                        LEFT JOIN media_files mf ON mf.id = pa.media_file_id
+                        LEFT JOIN storage_providers msp ON msp.id = mf.storage_provider_id
+                        WHERE pa.post_id = p.id
+                          AND COALESCE(mf.mime_type, pa.remote_mime_type, '') LIKE 'image/%'
+                        ORDER BY pa.position
+                        LIMIT 1
+                    ) AS first_image_url,
                     p.visibility::text AS visibility, p.thread_root_post_id
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.id = $1 AND p.deleted_at IS NULL
              LIMIT 1",
         )

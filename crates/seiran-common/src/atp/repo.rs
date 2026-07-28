@@ -489,7 +489,12 @@ struct BskyFeedLike {
 pub enum BskyEmbed {
     Images(Vec<BskyImage>),
     Record { uri: String, cid: String },
-    External { url: String },
+    External {
+        url: String,
+        title: String,
+        description: String,
+        thumb: Option<BskyImage>,
+    },
     /// Bsky公式動画パイプライン（`app.bsky.video.uploadVideo`）で発行された
     /// blob CIDを使った動画embed。`bsky_video_status='ready'`の場合のみ使用する。
     Video { cid: String, mime_type: String, size: i64, width: i32, height: i32 },
@@ -508,16 +513,27 @@ fn build_embed_record_ipld(uri: &str, cid_str: &str) -> Ipld {
 }
 
 /// `app.bsky.embed.external`（URL カード）の Ipld を構築する。
-fn build_embed_external_ipld(url: &str) -> Ipld {
+fn build_embed_external_ipld(
+    url: &str,
+    title: &str,
+    description: &str,
+    thumb: Option<&BskyImage>,
+) -> Result<Ipld, RepoError> {
     let mut external = BTreeMap::new();
-    external.insert("description".to_string(), Ipld::String(String::new()));
-    external.insert("title".to_string(), Ipld::String(String::new()));
+    external.insert("description".to_string(), Ipld::String(description.to_string()));
+    if let Some(thumb) = thumb {
+        external.insert(
+            "thumb".to_string(),
+            build_blob_ipld(&thumb.sha256_hex, &thumb.mime_type, thumb.size)?,
+        );
+    }
+    external.insert("title".to_string(), Ipld::String(title.to_string()));
     external.insert("uri".to_string(), Ipld::String(url.to_string()));
 
     let mut embed = BTreeMap::new();
     embed.insert("$type".to_string(), Ipld::String("app.bsky.embed.external".to_string()));
     embed.insert("external".to_string(), Ipld::Map(external));
-    Ipld::Map(embed)
+    Ok(Ipld::Map(embed))
 }
 
 /// AT Protocol の `blob` 参照 Ipld を構築する（`app.bsky.embed.images` の画像・
@@ -609,7 +625,9 @@ pub fn encode_bsky_feed_post(
             if images.is_empty() { None } else { Some(build_embed_images_ipld(&images)?) }
         }
         Some(BskyEmbed::Record { uri, cid }) => Some(build_embed_record_ipld(&uri, &cid)),
-        Some(BskyEmbed::External { url }) => Some(build_embed_external_ipld(&url)),
+        Some(BskyEmbed::External { url, title, description, thumb }) => {
+            Some(build_embed_external_ipld(&url, &title, &description, thumb.as_ref())?)
+        }
         Some(BskyEmbed::Video { cid, mime_type, size, width, height }) => {
             Some(build_embed_video_ipld(&cid, &mime_type, size, width, height)?)
         }
@@ -1038,6 +1056,38 @@ mod tests {
         let (cbor2, cid2) = encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
         assert_eq!(cbor1, cbor2);
         assert_eq!(cid1, cid2);
+    }
+
+    #[test]
+    fn test_external_embed_contains_metadata_and_thumbnail() {
+        let thumb = BskyImage {
+            sha256_hex: "00".repeat(32),
+            mime_type: "image/webp".to_string(),
+            size: 123,
+            width: 100,
+            height: 100,
+            alt: String::new(),
+        };
+        let (cbor, _) = encode_bsky_feed_post(
+            "🔁",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            Some(BskyEmbed::External {
+                url: "https://fedi.example/@alice/1".to_string(),
+                title: "Alice (@alice@fedi.example)".to_string(),
+                description: "元投稿本文".to_string(),
+                thumb: Some(thumb),
+            }),
+            None,
+        )
+        .unwrap();
+        let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
+        let Ipld::Map(record) = value else { panic!("record must be map") };
+        let Some(Ipld::Map(embed)) = record.get("embed") else { panic!("embed must be map") };
+        let Some(Ipld::Map(external)) = embed.get("external") else { panic!("external must be map") };
+        assert_eq!(external.get("title"), Some(&Ipld::String("Alice (@alice@fedi.example)".to_string())));
+        assert_eq!(external.get("description"), Some(&Ipld::String("元投稿本文".to_string())));
+        assert!(matches!(external.get("thumb"), Some(Ipld::Map(_))));
     }
 
     #[test]
