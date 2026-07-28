@@ -15,7 +15,7 @@ pub mod validation;
 
 pub use dto::{AttachmentResponse, NoteResponse, ReactRequest, ReactionSummary};
 pub use dto::to_note_response;
-pub use queries::{attach_poll_votes, embed_renotes, fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place};
+pub use queries::{attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place};
 pub use validation::BSKY_MAX_TEXT_GRAPHEMES;
 
 use std::collections::HashMap;
@@ -230,6 +230,7 @@ async fn create_repost(
         quote_id: None, reply_id: None, parent_original_id: None,
         reactions: vec![],
         renote: None,
+        quote: None,
         reposted_by_me: None,
         emojis: HashMap::new(),
         pinned_by_me: None,
@@ -244,6 +245,7 @@ async fn create_repost(
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
     embed_renotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
+    embed_quotes(&state.db, std::slice::from_mut(&mut repost_resp), Some(actor_id)).await;
     broadcast_new_note(state, actor_id, &repost_resp).await;
 
     Json(repost_resp).into_response()
@@ -534,7 +536,7 @@ async fn create_regular_post(
 
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
     let avatar_url = state.actors.find_avatar_url(actor_id).await.ok().flatten();
-    let note_resp = NoteResponse {
+    let mut note_resp = NoteResponse {
         id: post_id.to_string(),
         text,
         created_at: now.to_rfc3339(),
@@ -553,6 +555,7 @@ async fn create_regular_post(
         parent_original_id: None,
         reactions: vec![],
         renote: None,
+        quote: None,
         reposted_by_me: None,
         emojis: response_emojis,
         pinned_by_me: None,
@@ -563,6 +566,7 @@ async fn create_regular_post(
         content_warning: None,
         poll: None,
     };
+    embed_quotes(&state.db, std::slice::from_mut(&mut note_resp), Some(actor_id)).await;
 
     if visibility == "direct" {
         delivery::broadcast_direct_message(state, actor_id, post_id, &note_resp).await;
@@ -621,6 +625,7 @@ pub async fn home_timeline(
         })
         .collect();
     embed_renotes(&state.db, &mut notes, Some(actor_id)).await;
+    embed_quotes(&state.db, &mut notes, Some(actor_id)).await;
     attach_poll_votes(&state.db, &mut notes, Some(actor_id)).await;
     Json(notes).into_response()
 }
@@ -664,6 +669,7 @@ pub async fn local_timeline(
         })
         .collect();
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
+    embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
     Json(notes).into_response()
 }
@@ -702,6 +708,7 @@ pub async fn social_timeline(
         })
         .collect();
     embed_renotes(&state.db, &mut notes, Some(actor_id)).await;
+    embed_quotes(&state.db, &mut notes, Some(actor_id)).await;
     attach_poll_votes(&state.db, &mut notes, Some(actor_id)).await;
     Json(notes).into_response()
 }
@@ -746,6 +753,7 @@ pub async fn global_timeline(
         })
         .collect();
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
+    embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
     Json(notes).into_response()
 }
@@ -783,6 +791,7 @@ pub async fn get_note(
         nr.reposted_by_me = Some(reposted_set.contains(&post_id));
     }
     embed_renotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
+    embed_quotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
     attach_poll_votes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
     Ok(Json(nr))
 }
@@ -1015,7 +1024,9 @@ pub async fn note_context(
     let mut before: Vec<NoteResponse> = before_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
     let mut after: Vec<NoteResponse> = after_posts.into_iter().map(|p| build(p, &mut att_map)).collect();
     embed_renotes(&state.db, &mut before, my_actor_id).await;
+    embed_quotes(&state.db, &mut before, my_actor_id).await;
     embed_renotes(&state.db, &mut after, my_actor_id).await;
+    embed_quotes(&state.db, &mut after, my_actor_id).await;
     attach_poll_votes(&state.db, &mut before, my_actor_id).await;
     attach_poll_votes(&state.db, &mut after, my_actor_id).await;
 

@@ -438,6 +438,47 @@ async fn resolve_parent_original_post_id(
     inbox.post_repo.find_id_by_at_uri(&at_uri).await.ok().flatten()
 }
 
+/// AP Note から引用元URIを抽出する（#116）。Fedibirdは `quoteUrl`、Misskeyは `quoteUrl` と
+/// `_misskey_quote` の両方を持つ（同一値）。`quoteUrl` が無い実装向けに `_misskey_quote` を
+/// フォールバックとして見る。さらにFedibirdは `_misskey_quote` に加え
+/// `tag[].rel == "https://misskey-hub.net/ns#_misskey_quote"` にも同じURIを持つ場合があるため、
+/// 両フィールドが無ければ最後に `tag` を走査する（`quoteUrl` → `_misskey_quote` → `tag` の順）。
+/// 送信側は `ap/deliver.rs` の `build_create_note_activity` が同じ2フィールドを付与している。
+fn extract_ap_quote_uri(note: &serde_json::Value, tags: &[serde_json::Value]) -> Option<String> {
+    note["quoteUrl"].as_str()
+        .or_else(|| note["_misskey_quote"].as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            tags.iter().find_map(|tag| {
+                if tag["rel"].as_str() == Some("https://misskey-hub.net/ns#_misskey_quote") {
+                    tag["href"].as_str().map(|s| s.to_string())
+                } else {
+                    None
+                }
+            })
+        })
+}
+
+/// Misskey/Fedibirdは引用時にNote本文末尾へ、`quote_uri` と同じURLを指す
+/// `RE: [URL](URL)`（Misskey）または `QT: [URL](URL)`（Fedibird）というプレーンテキストの
+/// フォールバックリンクを自動付加する（`ap_content_to_markdown_body` によるMarkdown化後もこの
+/// 形で本文に残る）。引用元は既に `quote_of_post_id`/`quote` フィールドとして構造化保存・表示
+/// されるため、この重複行を本文末尾から取り除く。`quote_uri` と一致するURLを含む末尾の
+/// `RE:`/`QT:` 行のみを対象とし、それ以外の本文（ユーザーが独自に書いた `RE:` 始まりの行等）は
+/// 過剰除去しない。
+fn strip_quote_fallback_line(body: &str, quote_uri: &str) -> String {
+    let trimmed = body.trim_end();
+    let last_line_start = trimmed.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let last_line = trimmed[last_line_start..].trim();
+    let is_fallback = (last_line.starts_with("RE:") || last_line.starts_with("QT:"))
+        && last_line.contains(quote_uri);
+    if is_fallback {
+        trimmed[..last_line_start].trim_end().to_string()
+    } else {
+        body.to_string()
+    }
+}
+
 /// AP attachment の実 MIME タイプを判定する。
 /// 多くの実装（Mastodon 等）は `mediaType` を明示するのでそれを優先し、
 /// 欠けている場合のみ URL の拡張子から推測する（判別不能なら `None`）。
@@ -510,10 +551,21 @@ async fn handle_create_note(
     // HTML タグを除去して本文を得る（<a href> はリンクとして保持し、Markdownリンク記法
     // `[text](url)` に変換する。メンションは `@user@host` のプレーンテキストに正規化）。
     let tags = note["tag"].as_array().cloned().unwrap_or_default();
-    let body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+    let mut body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
     // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
     record_remote_emojis(inbox, &remote.domain, &tags).await;
     let emoji_map = resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &body).await;
+
+    // 引用URI抽出・解決（#116）。取得できた場合、Misskey/Fedibirdが本文末尾に自動付加する
+    // `RE:`/`QT:` フォールバック行（引用URIと同じURLを指す）を本文から取り除く。
+    let quote_uri = extract_ap_quote_uri(note, &tags);
+    let quote_of_post_id: Option<i64> = match quote_uri.as_deref() {
+        Some(uri) => inbox.post_repo.find_id_by_ap_or_at_uri(uri).await.ok().flatten(),
+        None => None,
+    };
+    if let Some(uri) = quote_uri.as_deref() {
+        body = strip_quote_fallback_line(&body, uri);
+    }
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
     let to_list = as_string_list(&note["to"]);
     let visibility = classify_ap_visibility(&to_list, &as_string_list(&note["cc"]));
@@ -616,6 +668,7 @@ async fn handle_create_note(
             reply_to_post_id,
             thread_root_post_id,
             recipient_actor_ids: &recipient_actor_ids,
+            quote_of_post_id,
         })
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
@@ -1691,8 +1744,53 @@ async fn fetch_and_save_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_emoji_tag_url, normalize_ap_poll, strip_html,
+        ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_ap_quote_uri,
+        extract_emoji_tag_url, normalize_ap_poll, strip_html, strip_quote_fallback_line,
     };
+
+    #[test]
+    fn extracts_misskey_quote_url_and_strips_re_fallback() {
+        let uri = "https://seiran.example/notes/123";
+        let note = serde_json::json!({ "quoteUrl": uri, "_misskey_quote": uri });
+        assert_eq!(extract_ap_quote_uri(&note, &[]).as_deref(), Some(uri));
+        assert_eq!(
+            strip_quote_fallback_line(
+                "引用ポストのテスト\nRE: [https://seiran.example/notes/123](https://seiran.example/notes/123)",
+                uri,
+            ),
+            "引用ポストのテスト"
+        );
+    }
+
+    #[test]
+    fn extracts_fedibird_quote_tag_and_strips_qt_fallback() {
+        let uri = "https://seiran.example/notes/123";
+        let note = serde_json::json!({});
+        let tags = vec![serde_json::json!({
+            "type": "Link",
+            "rel": "https://misskey-hub.net/ns#_misskey_quote",
+            "href": uri
+        })];
+        assert_eq!(extract_ap_quote_uri(&note, &tags).as_deref(), Some(uri));
+        assert_eq!(
+            strip_quote_fallback_line(
+                "引用ポストのテスト\nQT: [https://seiran.example/notes/123](https://seiran.example/notes/123)",
+                uri,
+            ),
+            "引用ポストのテスト"
+        );
+    }
+
+    #[test]
+    fn does_not_strip_unrelated_re_line() {
+        assert_eq!(
+            strip_quote_fallback_line(
+                "本文\nRE: [別URL](https://example.com/other)",
+                "https://seiran.example/notes/123",
+            ),
+            "本文\nRE: [別URL](https://example.com/other)"
+        );
+    }
 
     #[test]
     fn ap_content_to_markdown_body_converts_plain_link() {

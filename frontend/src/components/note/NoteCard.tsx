@@ -14,6 +14,7 @@ import EmojiText from "./EmojiText";
 import RichText from "./RichText";
 import NoteAttachments from "./NoteAttachments";
 import NoteCardActions from "./NoteCardActions";
+import ReactionChips from "./ReactionChips";
 import { useComposer } from "../../contexts/ComposerContext";
 import styles from "./NoteCard.module.css";
 
@@ -23,6 +24,60 @@ interface NoteCardProps {
   linkToDetail?: boolean;
   /** 主役ポスト（ポスト詳細画面）用の大型表示（#43）。文字・アバターを拡大する。 */
   large?: boolean;
+}
+
+/** 引用元を1段だけ表示する共通カード。引用元の `quoteId` はバッジだけ表示し、
+ * `quote.quote` を描画しないことで引用の引用を再帰させない。 */
+function QuoteCard({ note }: { note: Note }) {
+  const { t } = useTranslation();
+  const [showContent, setShowContent] = useState(!note.contentWarning);
+
+  return (
+    <section className={styles.quoteCard} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.quoteHeader}>
+        <Link to={profilePath(note.user.username, note.user.domain)} className={styles.quoteUser}>
+          <Avatar url={note.user.avatarUrl} name={note.user.displayName || note.user.username} size={30} />
+          <span className={styles.quoteNames}>
+            <strong><EmojiText text={displayName(note)} emojis={note.emojis} /></strong>
+            <span>{acct(note)}</span>
+          </span>
+        </Link>
+        <Link to={`/notes/${note.id}`} className={styles.time}>
+          <time>{formatDate(note.createdAt)}</time>
+        </Link>
+      </div>
+
+      <div className={styles.quoteRelations}>
+        {note.replyId && <ReplyIndicator replyId={note.replyId} />}
+        {note.quoteId && <span className={styles.quoteBadge}>{t("home:noteCard.hasQuote")}</span>}
+      </div>
+
+      {note.contentWarning && (
+        <div className={styles.quoteContentWarning}>
+          <span>⚠️ {note.contentWarning}</span>
+          <button type="button" onClick={() => setShowContent((shown) => !shown)}>
+            {showContent ? t("home:noteCard.hideContent") : t("home:noteCard.showContent")}
+          </button>
+        </div>
+      )}
+      {showContent && <p className={styles.quoteBody}><RichText text={note.text} emojis={note.emojis} /></p>}
+
+      <NoteAttachments attachments={note.attachments} />
+      {note.poll && (
+        <div className={styles.quotePoll}>
+          {note.poll.options.map((option) => (
+            <div className={styles.pollOption} key={option.name}>
+              <span>{option.name}</span>
+              <span>{option.votes}{t("home:noteCard.votesSuffix")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className={styles.quoteReactions}>
+        <ReactionChips noteId={note.id} reactions={note.reactions} />
+      </div>
+    </section>
+  );
 }
 
 function PostContent({ note, linkToDetail, large = false, onUnreposted, onDeleted }: {
@@ -281,6 +336,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
           )}
         </div>
       )}
+
+      {note.quote && <QuoteCard note={note.quote} />}
 
       {note.parentOriginalId && (
         <Link

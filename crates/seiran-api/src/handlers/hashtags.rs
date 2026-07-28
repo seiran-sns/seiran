@@ -14,7 +14,7 @@ use serde::Serialize;
 
 use crate::error::ApiError;
 use crate::handlers::notes::queries::{fetch_reposted_ids, resolve_mention_facets_in_place};
-use crate::handlers::notes::{embed_renotes, fetch_attachments_map, fetch_reactions_map, to_note_response};
+use crate::handlers::notes::{embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map, to_note_response};
 use crate::handlers::notes::dto::TimelineQuery;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
@@ -76,6 +76,7 @@ pub async fn hashtag_timeline(
         })
         .collect();
     embed_renotes(&state.db, &mut notes, viewer_actor_id).await;
+    embed_quotes(&state.db, &mut notes, viewer_actor_id).await;
     Json(notes).into_response()
 }
 

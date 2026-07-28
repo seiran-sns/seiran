@@ -402,6 +402,8 @@ export interface Note {
   reactions?: ReactionSummary[];
   /** リポストの場合の元ポスト実体（#45）。この Note 自身は「リポストした」ラッパ。 */
   renote?: Note;
+  /** 引用の場合の引用元ポスト実体（#116）。引用の引用は埋め込まない。 */
+  quote?: Note;
   /** 認証ユーザーがこのノートをリポスト済みかどうか（未認証時は undefined）。 */
   repostedByMe?: boolean;
   /** 本文・投稿者表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信のみ）。
@@ -566,6 +568,7 @@ interface RawNote {
   parent_original_id?: string;
   reactions?: ReactionSummary[];
   renote?: RawNote;
+  quote?: RawNote;
   repostedByMe?: boolean;
   reposted_by_me?: boolean;
   emojis?: Record<string, string>;
@@ -602,6 +605,7 @@ function normalizeNote(r: RawNote): Note {
     parentOriginalId: r.parentOriginalId ?? r.parent_original_id,
     reactions: r.reactions ?? [],
     renote: r.renote ? normalizeNote(r.renote) : undefined,
+    quote: r.quote ? normalizeNote(r.quote) : undefined,
     repostedByMe: r.repostedByMe ?? r.reposted_by_me,
     emojis: r.emojis,
     pinnedByMe: r.pinnedByMe ?? r.pinned_by_me,
