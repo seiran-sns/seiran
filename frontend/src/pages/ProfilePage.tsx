@@ -5,6 +5,7 @@ import { api, Note, UserProfile, getErrorMessage } from "../api/client";
 import ActionsMenu, { ActionsMenuItem } from "../components/common/ActionsMenu";
 import Modal from "../components/common/Modal";
 import RemoteBanner from "../components/common/RemoteBanner";
+import ReportModal from "../components/report/ReportModal";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
@@ -45,6 +46,7 @@ export default function ProfilePage() {
   const [blockActionLoading, setBlockActionLoading] = useState(false);
   const [muteActionLoading, setMuteActionLoading] = useState(false);
   const [blockConfirmModalOpen, setBlockConfirmModalOpen] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
   // 狭幅では右ペインが無いため、ピン留め・最新ポストの両方を中央ペインへ連続表示する（#61）。
   const isNarrow = useIsNarrowViewport();
   // 右ペイン（狭幅では中央ペイン）のタブ状態: 0=投稿, 1=フォロー中, 2=フォロワー（#56）。
@@ -419,6 +421,13 @@ export default function ProfilePage() {
                       ? { key: "unblock", label: t("profile:profilePage.unblockButton"), onClick: doUnblock, danger: true, disabled: blockActionLoading }
                       : { key: "block", label: t("profile:profilePage.blockButton"), onClick: () => setBlockConfirmModalOpen(true), danger: true, disabled: blockActionLoading }
                   );
+                  items.push({
+                    key: "report",
+                    label: "⚠️ 通報",
+                    onClick: () => setReportModalOpen(true),
+                    danger: true,
+                    disabled: !profile.actor_id,
+                  });
                   return items;
                 })()}
               />
@@ -543,6 +552,15 @@ export default function ProfilePage() {
           </button>
         </div>
       </Modal>
+      {profile?.actor_id && (
+        <ReportModal
+          open={reportModalOpen}
+          onClose={() => setReportModalOpen(false)}
+          subjectType="actor"
+          subjectActorId={profile.actor_id}
+          subjectLabel={`@${profile.username}${profile.domain ? `@${profile.domain}` : ""}`}
+        />
+      )}
 
       <Modal
         open={blockConfirmModalOpen}

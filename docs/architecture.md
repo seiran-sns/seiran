@@ -2,6 +2,10 @@
 
 対象読者: seiran のコード全体に手を入れる開発者。「今のシステムがどう動いているか」だけを書く。変更の経緯や過去の不具合修正は書かない（必要なら `git log` を見る）。
 
+通報は `ReportModal` と `POST /api/reports` でローカル・Fedi・Bskyを統一し、管理画面の
+「通報」タブから台帳閲覧、クローズ、内部コメント、凍結/投稿削除、リモート転送を行う。
+SnowflakeのActor IDはブラウザで精度を失わないよう文字列で受け渡す。
+
 ## 1. プロトコル上の位置づけ
 
 seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サーバーとして参加する**。

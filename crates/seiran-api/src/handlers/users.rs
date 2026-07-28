@@ -454,6 +454,14 @@ async fn build_profile_response(
     } else {
         None
     };
+    // 管理者が通報対象プロフィールを調査する場合は、対象本人と同じ可視範囲で
+    // followers-only/directを含む投稿を表示する（操作主体自体はmy_actor_idのまま）。
+    let is_admin = if let Some(uid) = my_user_id {
+        state.users.find_role_by_user_id(uid).await.ok().flatten().as_deref() == Some("admin")
+    } else {
+        false
+    };
+    let profile_viewer_actor_id = if is_admin { Some(actor_id) } else { my_actor_id };
 
     // フォロー状態
     let follow_status = match my_actor_id {
@@ -489,7 +497,7 @@ async fn build_profile_response(
 
     // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
     // アクター情報・添付・リアクションを含む NoteResponse で返す（#43）。
-    let mut post_rows = match state.posts.timeline_by_actor(actor_id, my_actor_id, 20, None, None, true).await {
+    let mut post_rows = match state.posts.timeline_by_actor(actor_id, profile_viewer_actor_id, 20, None, None, true).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] 最近の投稿取得失敗: {}", e);

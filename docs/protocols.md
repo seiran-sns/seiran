@@ -3,6 +3,20 @@
 対象読者: ActivityPub / AT Protocol の実装やクロスプロトコル配送ロジックに触れる開発者。
 「今、何が実装されていて、どう動くか」だけを書く。不具合修正の経緯や日付は書かない（`git log` 参照）。
 
+## 通報配送
+
+通報はまずすべてローカル管理者に届き、対象がリモートの場合のみ管理者が任意にFedi/Bskyへ
+転送する（通報者自身は送信先を選ばない）。
+
+リモートFediへの転送は、通報者を `actor` としたActivityPub `Flag` を対象ActorのInboxへ
+HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通報しか表現できないため、
+`object` は常に対象ActorのURI一つのみとし、投稿通報の場合は対象投稿のURLを `content`
+（理由分類 `[分類]` ・自由記述に続けて）に付記する。Blueskyへの転送は
+`com.atproto.moderation.createReport` をBluesky Moderation Serviceへ送り、ユーザー対象は
+`repoRef`、投稿対象はAT URI/CIDの`strongRef`とする。`reasonType` は
+`tools.ozone.report.defs#<reason_type>`（Bluesky公式の2段階理由分類、39種）をそのまま渡す。
+成功時のみ`reports.forwarded_at`を記録する。
+
 ## 1. フォロー時の初期同期
 
 新規フォローが成立すると `Job::ActorHistorySync` が積まれ、相手の過去ログを非同期でバックフィルする（過去30日間 / 最大300件、ベストエフォート）。フォロー後のタイムライン表示は常にローカルDBからの読み取りのみで完結し、外部APIを都度叩かない（`docs/database.md` 4節、`docs/concept.md` 参照）。

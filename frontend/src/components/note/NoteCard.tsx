@@ -295,6 +295,8 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
 
       <NoteCardActions
         noteId={note.id}
+        subjectActorId={String(note.user.id)}
+        subjectLabel={`@${note.user.username} の投稿`}
         reactions={reactions}
         reactionPending={reactionPending}
         onToggleReaction={toggleReaction}

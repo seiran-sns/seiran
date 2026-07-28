@@ -145,7 +145,8 @@ fn json_map_to_string_map(v: Option<serde_json::Value>) -> HashMap<String, Strin
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteUserInfo {
-    pub id: i64,
+    /// Snowflake ID。JavaScript の53bit整数精度を超えるため文字列で返す。
+    pub id: String,
     pub username: String,
     pub domain: Option<String>,
     pub display_name: Option<String>,
@@ -226,7 +227,7 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         text: p.body,
         created_at: p.created_at.to_rfc3339(),
         user: NoteUserInfo {
-            id: p.actor_id,
+            id: p.actor_id.to_string(),
             username: p.username,
             domain: Some(p.domain),
             display_name: p.display_name,

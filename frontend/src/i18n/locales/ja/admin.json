@@ -2,6 +2,7 @@
   "adminPage": {
     "title": "管理",
     "tabs": {
+      "reports": "通報",
       "users": "ユーザー",
       "siteSettings": "サイト設定",
       "storage": "ストレージ",

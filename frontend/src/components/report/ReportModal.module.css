@@ -1,0 +1,10 @@
+.form { display: grid; gap: 14px; }
+.form label { display: grid; gap: 6px; }
+.form select, .form textarea { width: 100%; box-sizing: border-box; padding: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: inherit; }
+.form fieldset { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 7px; }
+.form fieldset label { display: flex; align-items: center; gap: 7px; }
+.subject { margin: 0; overflow-wrap: anywhere; }
+.categoryDescription { margin: -6px 0 0; font-size: 0.85em; color: var(--text-dim); }
+.actions { display: flex; gap: 8px; justify-content: flex-end; }
+.actions button, .primary { padding: 8px 14px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; }
+.primary { background: var(--accent-strong); color: white; }

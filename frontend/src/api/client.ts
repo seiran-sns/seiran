@@ -165,6 +165,30 @@ export interface AdminUser {
   passkey_count: number;
 }
 
+export interface AdminReport {
+  id: string;
+  reporter_actor_id: string;
+  reporter: string;
+  subject_type: "actor" | "post";
+  subject_actor_id: string;
+  subject: string;
+  subject_post_id: string | null;
+  reason_type: string;
+  reason_text: string;
+  destination: "local" | "remote";
+  remote_host: string | null;
+  status: "open" | "closed";
+  forwarded_at: string | null;
+  closed_at: string | null;
+  created_at: string;
+}
+export interface ReportComment {
+  id: string;
+  body: string;
+  author: string;
+  created_at: string;
+}
+
 export interface StorageProvider {
   id: number;
   name: string;
@@ -361,7 +385,7 @@ export interface Note {
   text: string;
   createdAt: string;
   user: {
-    id: number;
+    id: string | number;
     username: string;
     domain?: string;
     displayName?: string;
@@ -521,7 +545,7 @@ interface RawNote {
   createdAt?: string;
   created_at?: string;
   user?: {
-    id: number;
+    id: string | number;
     username: string;
     domain?: string;
     displayName?: string;
@@ -564,7 +588,7 @@ function normalizeNote(r: RawNote): Note {
     text: r.text ?? "",
     createdAt: r.createdAt ?? r.created_at ?? "",
     user: {
-      id: r.user?.id ?? 0,
+      id: String(r.user?.id ?? ""),
       username: r.user?.username ?? "",
       domain: r.user?.domain,
       displayName: r.user?.displayName ?? r.user?.display_name,
@@ -748,6 +772,17 @@ export interface MetaResponse {
 }
 
 export const api = {
+  reports: {
+    create(body: {
+      subject_type: "actor" | "post";
+      subject_actor_id: string;
+      subject_post_id?: string;
+      reason_type: string;
+      reason_text: string;
+    }) {
+      return request<{ id: string }>("POST", "/reports", body);
+    },
+  },
   meta(signal?: AbortSignal) {
     return request<MetaResponse>("POST", "/meta", undefined, signal);
   },
@@ -1009,6 +1044,27 @@ export const api = {
   },
 
   admin: {
+    listReports() {
+      return request<AdminReport[]>("GET", "/admin/reports");
+    },
+    closeReport(id: string) {
+      return request<void>("POST", `/admin/reports/${encodeURIComponent(id)}/close`);
+    },
+    listReportComments(id: string) {
+      return request<ReportComment[]>("GET", `/admin/reports/${encodeURIComponent(id)}/comments`);
+    },
+    addReportComment(id: string, body: string) {
+      return request<ReportComment>("POST", `/admin/reports/${encodeURIComponent(id)}/comments`, { body });
+    },
+    deleteReportedPost(id: string) {
+      return request<void>("POST", `/admin/reports/${encodeURIComponent(id)}/delete-post`);
+    },
+    suspendReportedUser(id: string) {
+      return request<void>("POST", `/admin/reports/${encodeURIComponent(id)}/suspend-user`);
+    },
+    forwardReport(id: string) {
+      return request<void>("POST", `/admin/reports/${encodeURIComponent(id)}/forward`);
+    },
     listUsers() {
       return request<AdminUser[]>("GET", "/admin/users");
     },
