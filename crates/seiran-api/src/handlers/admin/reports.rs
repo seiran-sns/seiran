@@ -268,7 +268,8 @@ pub async fn forward_report(
             format!("[{}] {}", row.reason_type, row.reason_text)
         };
         if let Some(post_uri) = &row.subject_post_ap_uri {
-            content = format!("{}\n\n対象投稿: {}", content, post_uri);
+            // Flagは相手サーバーの運営言語に関わらず読まれるため、定型文言は英語で統一する。
+            content = format!("{}\n\nReported post: {}", content, post_uri);
         }
         let activity = serde_json::json!({
             "@context":"https://www.w3.org/ns/activitystreams",
