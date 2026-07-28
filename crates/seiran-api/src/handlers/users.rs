@@ -9,7 +9,7 @@ use seiran_common::repository::{Actor, ActorProfileRow};
 
 use crate::error::ApiError;
 use crate::handlers::notes::{
-    attach_poll_votes, embed_renotes, fetch_attachments_map, fetch_reactions_map,
+    attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map,
     resolve_mention_facets_in_place, to_note_response, NoteResponse,
 };
 use crate::middleware::{extract_auth, MaybeAuthedUser};
@@ -82,6 +82,7 @@ pub async fn user_posts(
         })
         .collect();
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
+    embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
 
     Json(notes).into_response()
@@ -518,6 +519,7 @@ async fn build_profile_response(
         })
         .collect();
     embed_renotes(&state.db, &mut recent_posts, my_actor_id).await;
+    embed_quotes(&state.db, &mut recent_posts, my_actor_id).await;
 
     // ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
     // Fedi featured collection / Bsky pinnedPost 同期結果（`sync_remote_pinned_posts` 参照）。
@@ -541,6 +543,8 @@ async fn build_profile_response(
             nr
         })
         .collect();
+    embed_renotes(&state.db, &mut pinned_posts, my_actor_id).await;
+    embed_quotes(&state.db, &mut pinned_posts, my_actor_id).await;
 
     // 自分自身のプロフィールを見ている場合、各投稿の pinned_by_me を設定する
     // （ピン留めボタンの現在状態表示に使う）。

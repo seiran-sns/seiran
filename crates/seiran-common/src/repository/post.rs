@@ -172,6 +172,9 @@ pub struct InsertRemoteWithDedupParams<'a> {
     pub emoji_map: &'a serde_json::Value,
     pub visibility: &'a str,
     pub reply_to_post_id: Option<i64>,
+    /// AP `quoteUrl`/`_misskey_quote`（またはBsky `app.bsky.embed.record`）から解決した
+    /// 引用元投稿のローカルID（#116）。未解決・非引用なら `None`。
+    pub quote_of_post_id: Option<i64>,
     /// `visibility='direct'`（DM）専用。direct以外は`None`を渡すこと。
     pub thread_root_post_id: Option<i64>,
     /// `visibility='direct'`（DM）専用。direct以外は空スライスを渡すこと。
@@ -1181,8 +1184,8 @@ impl PostRepository for PgPostRepository {
     async fn insert_remote_with_dedup(&self, params: InsertRemoteWithDedupParams<'_>) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let result = sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::post_visibility_enum)
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::post_visibility_enum, $12)
              ON CONFLICT (ap_object_id) DO NOTHING",
         )
         .bind(params.id)
@@ -1196,6 +1199,7 @@ impl PostRepository for PgPostRepository {
         .bind(params.created_at)
         .bind(params.emoji_map)
         .bind(params.visibility)
+        .bind(params.quote_of_post_id)
         .execute(&mut *tx)
         .await?;
 

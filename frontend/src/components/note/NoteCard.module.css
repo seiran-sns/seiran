@@ -253,6 +253,107 @@
   cursor: pointer;
 }
 
+.quoteCard {
+  margin: 10px 0 0 50px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
+}
+
+.quoteHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.quoteUser {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.quoteUser:hover strong {
+  text-decoration: underline;
+}
+
+.quoteNames {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 0.82rem;
+}
+
+.quoteNames > span {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+}
+
+.quoteRelations {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.quoteBadge {
+  color: var(--accent);
+  font-size: 0.76rem;
+}
+
+.quoteBody {
+  margin: 7px 0 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.quoteContentWarning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-deep);
+  font-size: 0.82rem;
+}
+
+.quoteContentWarning button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.quoteCard .attachments,
+.quoteCard .poll,
+.quotePoll,
+.quoteReactions {
+  margin-left: 0;
+}
+
+.quotePoll {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 0.82rem;
+}
+
+.quoteReactions {
+  margin-top: 8px;
+}
+
+.large .quoteCard {
+  margin-left: 0;
+}
+
 .attachAudio {
   width: 100%;
   max-width: 400px;

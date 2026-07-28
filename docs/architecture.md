@@ -161,6 +161,7 @@ React 18 + Vite + TypeScript（react-router-dom v6）。`frontend/src/` 構成:
 - `api/client.ts` — バックエンドAPIクライアント、`ApiError`、`getErrorMessage()`
 - `components/layout/` — `AppShell`（3ペインの外枠）、`LeftNav`
 - `components/note/` — `NoteCard`（タイムライン・詳細・プロフィール共通の投稿カード）、`PostComposer`、`ReactionChips`（各チップのホバーでリアクター一覧をポップオーバー表示、`ReplyIndicator`と同じ遅延フェッチ・遅延クローズパターン）/`ReactionPicker`（トリガーボタン＋`Modal`内の`EmojiPickerPanel`。Unicode絵文字データセット（`unicode-emoji-json`）は`React.lazy`で遅延ロードし、カスタム絵文字とあわせて検索・タブ切り替えで選べる）、`HlsVideo`、`RichText`（本文中のMarkdownリンク`[text](url)`・生URL・`@mention`・`#ハッシュタグ`・絵文字ショートコードを1パスでクリック可能な要素へ変換。AP由来のハッシュタグアンカー`[#foo](リモートURL)`もリンクテキストの形状で検出し自インスタンスの`/tags/foo`へ読み替える。`EmojiText`は表示名等リンク化不要な箇所向けにショートコード置換のみ残す）等
+- `NoteCard` の引用表示（#116）は、APIの `quote` に引用元 `NoteResponse` を1段だけ埋め込み、本文直下の枠付きカードとして描画する。カードは返信マーカー、ユーザー、CW、本文、時刻、添付、アンケート、リアクションを再利用し、引用元自身の `quote_id` は「引用あり」表示だけに留めて再帰描画しない。
 - `components/right/` — 右ペインのタブ内容（`NotificationsPanel`、`TrendsSearchPanel`）
 - `components/admin/` — 管理画面パネル群
 - `components/dm/` — `RecipientPicker`（DM宛先のchip入力。サジェスト選択/手打ち確定の両対応、Bskyアクターと他プロトコルの混在を警告表示）

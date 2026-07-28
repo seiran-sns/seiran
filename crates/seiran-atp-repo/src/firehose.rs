@@ -344,6 +344,20 @@ fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedAttac
     }
 }
 
+/// `record.embed` から引用先の at:// URI を抽出する（#116）。
+/// `app.bsky.embed.record` → `record.uri`
+/// `app.bsky.embed.recordWithMedia`（引用+メディア）→ `record.record.uri`
+///   （`record` フィールドの中にさらに `record` がネストする形）
+/// 添付を持たない未知の embed 種別・`external` 等は `None` を返す。
+fn parse_bsky_embed_quote_uri(embed: &JsonValue) -> Option<String> {
+    let embed_type = embed.get("$type").and_then(|v| v.as_str()).unwrap_or("");
+    match embed_type {
+        "app.bsky.embed.record" => embed.get("record")?.get("uri")?.as_str().map(|s| s.to_string()),
+        "app.bsky.embed.recordWithMedia" => embed.get("record")?.get("record")?.get("uri")?.as_str().map(|s| s.to_string()),
+        _ => None,
+    }
+}
+
 /// `app.bsky.richtext.facet` の index（UTF-8 バイトオフセット）。
 #[derive(Deserialize)]
 struct JetstreamFacetIndex {
@@ -620,6 +634,10 @@ async fn process_message(
                 .map(|embed| parse_bsky_embed_attachments(embed, &did))
                 .unwrap_or_default();
 
+            // 引用先の at:// URI（#116）。`app.bsky.embed.record`/`recordWithMedia` のみ対象。
+            let quote_uri: Option<String> = record.get("embed")
+                .and_then(parse_bsky_embed_quote_uri);
+
             // この DID のアクターが「ローカルユーザーにフォローされている」、または
             // 「いずれかのリストに含まれている」場合のみ保存対象とする（リスト機能 #63:
             // 誰にもフォローされていないBskyユーザーでも、リストに入れれば投稿を受信できる）。
@@ -676,14 +694,29 @@ async fn process_message(
             let body_text = body_text.to_string();
 
             tokio::spawn(async move {
+                let posts_repo = PgPostRepository::new(pool2.clone());
                 let reply_to_post_id = match &reply_parent_uri {
                     Some(parent_uri) => {
-                        let posts_repo = PgPostRepository::new(pool2.clone());
                         match posts_repo.find_id_and_actor_by_at_uri(parent_uri).await {
                             Ok(Some((parent_post_id, _))) => Some(parent_post_id),
                             Ok(None) => None,
                             Err(e) => {
                                 tracing::error!("[Jetstream] リプライ親投稿検索失敗（通常投稿として保存）: {}", e);
+                                None
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                // 引用先のローカル post_id 解決（#116）。引用先が未取得のリモート投稿等で
+                // ローカルDBに存在しない場合は通常投稿として保存する（quote_of_post_id=None）。
+                let quote_of_post_id = match &quote_uri {
+                    Some(uri) => {
+                        match posts_repo.find_id_and_actor_by_at_uri(uri).await {
+                            Ok(Some((quote_post_id, _))) => Some(quote_post_id),
+                            Ok(None) => None,
+                            Err(e) => {
+                                tracing::error!("[Jetstream] 引用元投稿検索失敗（通常投稿として保存）: {}", e);
                                 None
                             }
                         }
@@ -696,7 +729,7 @@ async fn process_message(
                 save_bsky_post(
                     &pool2, &hub2, &at_uri2, &cid, &body_text, &mention_facets, &emoji_map, created_at,
                     actor_id, &username, display_name.as_deref(), avatar_url.as_deref(),
-                    reply_to_post_id, attachments,
+                    reply_to_post_id, quote_of_post_id, attachments,
                 ).await;
             });
         }
@@ -766,14 +799,15 @@ async fn save_bsky_post(
     display_name: Option<&str>,
     avatar_url: Option<&str>,
     reply_to_post_id: Option<i64>,
+    quote_of_post_id: Option<i64>,
     attachments: Vec<ParsedAttachment>,
 ) {
     let reply_id_str = reply_to_post_id.map(|id| id.to_string());
     let post_id = generate_snowflake_id(created_at);
 
     let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (at_uri) DO NOTHING",
     )
     .bind(post_id)
@@ -785,6 +819,7 @@ async fn save_bsky_post(
     .bind(reply_to_post_id)
     .bind(mention_facets)
     .bind(emoji_map)
+    .bind(quote_of_post_id)
     .execute(pool)
     .await;
 
@@ -1118,6 +1153,34 @@ mod facet_tests {
             index: JetstreamFacetIndex { byte_start, byte_end },
             features: vec![JetstreamFacetFeature::Mention { did: did.to_string() }],
         }
+    }
+
+    #[test]
+    fn bsky_record_embed_extracts_quote_uri() {
+        let embed = serde_json::json!({
+            "$type": "app.bsky.embed.record",
+            "record": { "uri": "at://did:plc:alice/app.bsky.feed.post/quoted" }
+        });
+        assert_eq!(
+            parse_bsky_embed_quote_uri(&embed).as_deref(),
+            Some("at://did:plc:alice/app.bsky.feed.post/quoted")
+        );
+    }
+
+    #[test]
+    fn bsky_record_with_media_extracts_nested_quote_uri() {
+        let embed = serde_json::json!({
+            "$type": "app.bsky.embed.recordWithMedia",
+            "record": {
+                "$type": "app.bsky.embed.record",
+                "record": { "uri": "at://did:plc:alice/app.bsky.feed.post/quoted" }
+            },
+            "media": { "$type": "app.bsky.embed.images", "images": [] }
+        });
+        assert_eq!(
+            parse_bsky_embed_quote_uri(&embed).as_deref(),
+            Some("at://did:plc:alice/app.bsky.feed.post/quoted")
+        );
     }
 
     #[test]

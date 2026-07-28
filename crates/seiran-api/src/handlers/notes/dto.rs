@@ -98,6 +98,12 @@ pub struct NoteResponse {
     /// このノート自身は「リポストした」というラッパで、表示すべき中身は `renote` 側。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub renote: Option<Box<NoteResponse>>,
+    /// 引用（quote_id を持つ）の場合の引用元ポスト実体（#116）。リポストと異なりこのノート
+    /// 自身にも本文があり、`quote` はその下に表示する引用カードの中身。孫引用（引用元がさらに
+    /// 引用している場合）は埋め込まない（`quote.quote_id` は残るため「引用あり」バッジ表示は可能、
+    /// `queries::embed_quotes` 参照）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quote: Option<Box<NoteResponse>>,
     /// 認証ユーザーがこのノートをリポスト済みかどうか。未認証時は省略。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reposted_by_me: Option<bool>,
@@ -241,6 +247,7 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         parent_original_id: p.parent_original_post_id.map(|i| i.to_string()),
         reactions: Vec::new(),
         renote: None,
+        quote: None,
         reposted_by_me: None,
         emojis,
         pinned_by_me: None,
