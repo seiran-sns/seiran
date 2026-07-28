@@ -37,6 +37,11 @@ pub trait RemoteEmojiRepository: Send + Sync {
         tags: &[String],
         license: Option<&str>,
     ) -> Result<(), sqlx::Error>;
+
+    /// 指定ドメインの複数shortcode（コロンなし）に対応する画像URLを一括解決する。
+    /// AP Note の `tag` 配列にEmoji要素が欠落していた場合の、本文再スキャンによる
+    /// フォールバック解決（同一ドメインで過去に見た絵文字カタログを頼る）用。
+    async fn find_urls_by_shortcodes(&self, domain: &str, shortcodes: &[String]) -> Result<Vec<(String, String)>, sqlx::Error>;
 }
 
 pub struct PgRemoteEmojiRepository {
@@ -95,5 +100,18 @@ impl RemoteEmojiRepository for PgRemoteEmojiRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn find_urls_by_shortcodes(&self, domain: &str, shortcodes: &[String]) -> Result<Vec<(String, String)>, sqlx::Error> {
+        if shortcodes.is_empty() {
+            return Ok(Vec::new());
+        }
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT shortcode, image_url FROM remote_emojis WHERE domain = $1 AND shortcode = ANY($2)",
+        )
+        .bind(domain)
+        .bind(shortcodes)
+        .fetch_all(&self.pool)
+        .await
     }
 }

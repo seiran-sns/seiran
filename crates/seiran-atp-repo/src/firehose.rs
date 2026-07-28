@@ -28,7 +28,7 @@ use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
 use seiran_common::repository::{
     ActorRepository, EmojiRepository, HashtagRepository, NotificationKind, NotificationRepository, PostRepository, ReactionRepository,
     PgActorRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgNotificationRepository, PgPostRepository, PgReactionRepository,
-    parse_custom_emoji_shortcode,
+    extract_shortcode_candidates, parse_custom_emoji_shortcode,
 };
 use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::traits::{Job, JobQueue};
@@ -471,6 +471,32 @@ fn apply_link_facets(text: &str, facets: Vec<JetstreamFacet>) -> (String, Vec<Me
     (result, mention_spans)
 }
 
+/// Bsky投稿本文中のカスタム絵文字（`:shortcode:`）を、このサーバーの `custom_emojis` と
+/// 照合して emoji_map を構築する（#126）。ネイティブ投稿作成（`handlers/notes/mod.rs`の
+/// `create_regular_post`）と同じ解決ロジック。ATP Jetstream経由の投稿保存にはこの解決が
+/// 無く、常に空のemoji_mapで保存されていたため、`:shortcode:` が画像化されない不具合があった。
+/// 解決に失敗しても投稿自体は継続する（絵文字がテキストのまま出るだけ）。
+async fn resolve_local_emoji_map(pool: &PgPool, text: &str) -> JsonValue {
+    let shortcode_candidates = extract_shortcode_candidates(text);
+    if shortcode_candidates.is_empty() {
+        return JsonValue::Object(Default::default());
+    }
+    let emoji_repo = PgEmojiRepository::new(pool.clone());
+    let pairs = match emoji_repo.find_urls_by_shortcodes(&shortcode_candidates).await {
+        Ok(pairs) => pairs,
+        Err(e) => {
+            tracing::error!("[Jetstream] 絵文字ショートコード解決失敗: {}", e);
+            Vec::new()
+        }
+    };
+    JsonValue::Object(
+        pairs
+            .into_iter()
+            .map(|(code, url)| (format!(":{}:", code), JsonValue::String(url)))
+            .collect(),
+    )
+}
+
 /// facet を本文へ適用する（`apply_link_facets` の DB/Job キュー連携込み版）。
 /// 戻り値は `(link 適用済み本文, mention_facets の JSON 配列)`。
 /// 未知 DID（ローカル `actors` に無い）は `Job::ResolveBskyMention` をキューに積んで
@@ -666,8 +692,9 @@ async fn process_message(
                 };
                 let (body_text, mention_facets) =
                     apply_bsky_facets(&pool2, &queue2, &body_text, parsed_facets).await;
+                let emoji_map = resolve_local_emoji_map(&pool2, &body_text).await;
                 save_bsky_post(
-                    &pool2, &hub2, &at_uri2, &cid, &body_text, &mention_facets, created_at,
+                    &pool2, &hub2, &at_uri2, &cid, &body_text, &mention_facets, &emoji_map, created_at,
                     actor_id, &username, display_name.as_deref(), avatar_url.as_deref(),
                     reply_to_post_id, attachments,
                 ).await;
@@ -732,6 +759,7 @@ async fn save_bsky_post(
     at_cid: &str,
     text: &str,
     mention_facets: &JsonValue,
+    emoji_map: &JsonValue,
     created_at: chrono::DateTime<chrono::Utc>,
     actor_id: i64,
     username: &str,
@@ -744,8 +772,8 @@ async fn save_bsky_post(
     let post_id = generate_snowflake_id(created_at);
 
     let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (at_uri) DO NOTHING",
     )
     .bind(post_id)
@@ -756,6 +784,7 @@ async fn save_bsky_post(
     .bind(created_at)
     .bind(reply_to_post_id)
     .bind(mention_facets)
+    .bind(emoji_map)
     .execute(pool)
     .await;
 

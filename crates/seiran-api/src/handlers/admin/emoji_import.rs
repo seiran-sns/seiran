@@ -19,6 +19,7 @@ use uuid::Uuid;
 use seiran_common::{generate_snowflake_id, prepare_image, MediaKind};
 
 use crate::error::ApiError;
+use crate::handlers::admin::emojis::validate_shortcode;
 use crate::handlers::media_store;
 use crate::middleware::require_admin;
 use crate::AppState;
@@ -172,6 +173,16 @@ async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: M
             update_job(&state, &job_id, |s| {
                 s.skipped += 1;
                 s.errors.push("空のショートコードをスキップ".to_owned());
+            });
+            continue;
+        }
+        // 手動登録APIと同じ文字種（英数字・アンダースコアのみ）を要求する。ここを緩めると、
+        // 本文中の `:shortcode:` 抽出（英数字・アンダースコアのみを許可）と一致しない
+        // ショートコードが登録され、絶対に投稿本文から解決できない絵文字になってしまう（#126）。
+        if validate_shortcode(&shortcode).is_err() {
+            update_job(&state, &job_id, |s| {
+                s.skipped += 1;
+                s.errors.push(format!(":{}: 使用できない文字を含むショートコードのためスキップ", shortcode));
             });
             continue;
         }

@@ -516,12 +516,14 @@ struct PostActivityBasis {
     username: String,
     seiran_uuid: Option<String>,
     visibility: String,
+    emoji_map: serde_json::Value,
     attachments: Vec<serde_json::Value>,
 }
 
 async fn fetch_post_activity_basis(db: &PgPool, post_id: i64, actor_id: i64) -> Result<PostActivityBasis, ApError> {
     let row = sqlx::query(
-        "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username, p.visibility::text AS visibility
+        "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username,
+                p.visibility::text AS visibility, p.emoji_map
          FROM posts p
          JOIN actors a ON a.id = p.actor_id
          WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
@@ -539,9 +541,29 @@ async fn fetch_post_activity_basis(db: &PgPool, post_id: i64, actor_id: i64) -> 
     let username: String = row.try_get("username").map_err(|e| ApError::Other(e.to_string()))?;
     let seiran_uuid: Option<String> = row.try_get("seiran_post_uuid").unwrap_or(None);
     let visibility: String = row.try_get("visibility").unwrap_or_else(|_| "public".to_string());
+    let emoji_map: serde_json::Value = row.try_get("emoji_map").unwrap_or_else(|_| serde_json::json!({}));
     let attachments = fetch_attachment_documents(db, post_id).await?;
 
-    Ok(PostActivityBasis { body, created_at, username, seiran_uuid, visibility, attachments })
+    Ok(PostActivityBasis { body, created_at, username, seiran_uuid, visibility, emoji_map, attachments })
+}
+
+/// 保存済み `posts.emoji_map` のうち、今回配送する本文に実際に現れるカスタム絵文字を
+/// ActivityPub `Emoji` tagへ変換して既存のMention/Hashtag tagへ追加する（#126）。
+fn append_emoji_tags(body: &str, emoji_map: &serde_json::Value, tags: &mut Vec<serde_json::Value>) {
+    for shortcode in crate::repository::extract_shortcode_candidates(body) {
+        let name = format!(":{}:", shortcode);
+        let Some(url) = emoji_map.get(&name).and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        tags.push(serde_json::json!({
+            "type": "Emoji",
+            "name": name,
+            "icon": {
+                "type": "Image",
+                "url": url
+            }
+        }));
+    }
 }
 
 /// 本文中のメンションを解決し、AP向けHTML化された本文と `tag[]`（AP Mention）、
@@ -603,11 +625,12 @@ pub async fn deliver_post_to_ap_followers(
     // override_body（リポストのフォールバックテキスト等、投稿者本人が書いた本文ではない合成テキスト）
     // の場合はメンション変換をせずそのまま HTML 化する。通常投稿（override_body なし）はここで
     // 本文中のメンションを解決し、`<a>` アンカーと `tag[]`（AP Mention）を組み立てる。
-    let (content_html, tag, mention_uris): (String, Vec<serde_json::Value>, Vec<String>) = if override_body.is_some() {
+    let (content_html, mut tag, mention_uris): (String, Vec<serde_json::Value>, Vec<String>) = if override_body.is_some() {
         (plain_to_html(&body), Vec::new(), Vec::new())
     } else {
         html_and_tags_for_body(&body, local_domain, db, ap_client).await
     };
+    append_emoji_tags(&body, &basis.emoji_map, &mut tag);
 
     // 配送先はフォロワー + 本文中でメンションした相手（フォロワーでなくても通知を届ける）の和集合。
     let mut inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
@@ -682,7 +705,8 @@ pub async fn deliver_direct_message_to_ap(
         .filter_map(|r| r.try_get::<String, _>("ap_inbox_url").ok())
         .collect();
 
-    let (content_html, tag, _mention_uris) = html_and_tags_for_body(&basis.body, local_domain, db, ap_client).await;
+    let (content_html, mut tag, _mention_uris) = html_and_tags_for_body(&basis.body, local_domain, db, ap_client).await;
+    append_emoji_tags(&basis.body, &basis.emoji_map, &mut tag);
 
     let addr = local_actor_address(local_domain, &basis.username);
     let activity = build_create_note_activity(
@@ -1224,6 +1248,31 @@ mod tests {
         assert!(note.get("quoteUrl").is_none());
         assert!(note.get("inReplyTo").is_none());
         assert!(note.get("seiranUuid").is_none());
+    }
+
+    #[test]
+    fn append_emoji_tags_only_includes_shortcodes_present_in_body() {
+        let mut tags = vec![serde_json::json!({
+            "type": "Mention",
+            "name": "@bob",
+            "href": "https://remote.example/users/bob"
+        })];
+        append_emoji_tags(
+            "hello :ablob_glitch: :unknown:",
+            &serde_json::json!({
+                ":ablob_glitch:": "https://seiran.example/emoji/ablob_glitch.webp",
+                ":unused:": "https://seiran.example/emoji/unused.webp"
+            }),
+            &mut tags,
+        );
+
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[1]["type"], "Emoji");
+        assert_eq!(tags[1]["name"], ":ablob_glitch:");
+        assert_eq!(
+            tags[1]["icon"]["url"],
+            "https://seiran.example/emoji/ablob_glitch.webp"
+        );
     }
 
     #[test]
