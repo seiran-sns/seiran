@@ -669,10 +669,11 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ap_delivery_quote_fields, at_uri_to_bsky_app_url, classify_post, ApQuote, PostOrigin,
-        ReplyContext,
+        ap_delivery_quote_fields, ap_quote_from_meta, at_uri_to_bsky_app_url, classify_post,
+        ApQuote, PostOrigin, ReplyContext,
     };
     use crate::error::ApiError;
+    use seiran_common::repository::post::PostDeliveryMeta;
 
     fn ctx_with_parent_visibility(parent_visibility: Option<&str>) -> ReplyContext {
         ReplyContext {
@@ -683,6 +684,26 @@ mod tests {
             parent_visibility: parent_visibility.map(str::to_owned),
             parent_thread_root_post_id: None,
             parent_local_actor_id: None,
+        }
+    }
+
+    fn delivery_meta(
+        ap_object_id: Option<&str>,
+        at_uri: Option<&str>,
+    ) -> PostDeliveryMeta {
+        PostDeliveryMeta {
+            actor_id: 1,
+            ap_object_id: ap_object_id.map(str::to_owned),
+            at_uri: at_uri.map(str::to_owned),
+            at_cid: None,
+            domain: "example.com".to_owned(),
+            display_name: None,
+            username: "alice".to_owned(),
+            body: "quoted post".to_owned(),
+            avatar_url: None,
+            first_image_url: None,
+            visibility: "public".to_owned(),
+            thread_root_post_id: None,
         }
     }
 
@@ -845,6 +866,36 @@ mod tests {
                 Some("comment\n\nhttps://bsky.app/profile/did:plc:test/post/abc".to_owned()),
                 None
             )
+        );
+    }
+
+    #[test]
+    fn ap_quote_from_meta_uses_misskey_fields_for_ap_object() {
+        let meta = delivery_meta(
+            Some("https://fedi.example/notes/1"),
+            Some("at://did:plc:test/app.bsky.feed.post/abc"),
+        );
+
+        assert_eq!(
+            ap_quote_from_meta(&meta),
+            Some(ApQuote::Misskey(
+                "https://fedi.example/notes/1".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn ap_quote_from_meta_appends_bsky_only_url() {
+        let meta = delivery_meta(
+            None,
+            Some("at://did:plc:test/app.bsky.feed.post/abc"),
+        );
+
+        assert_eq!(
+            ap_quote_from_meta(&meta),
+            Some(ApQuote::AppendUrl(
+                "https://bsky.app/profile/did:plc:test/post/abc".to_owned()
+            ))
         );
     }
 
