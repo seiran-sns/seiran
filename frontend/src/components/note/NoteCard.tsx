@@ -297,7 +297,6 @@ function PostContent({ note, linkToDetail, large = false, onUnreposted, onDelete
         noteId={note.id}
         subjectActorId={String(note.user.id)}
         subjectLabel={`@${note.user.username} の投稿`}
-        remoteHost={note.user.actorType === "local" ? undefined : note.user.domain}
         reactions={reactions}
         reactionPending={reactionPending}
         onToggleReaction={toggleReaction}

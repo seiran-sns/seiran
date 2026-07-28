@@ -165,7 +165,6 @@ export interface AdminUser {
   passkey_count: number;
 }
 
-export type ReportReason = "spam" | "violation" | "misleading" | "sexual" | "rude" | "other";
 export interface AdminReport {
   id: string;
   reporter_actor_id: string;
@@ -174,7 +173,7 @@ export interface AdminReport {
   subject_actor_id: string;
   subject: string;
   subject_post_id: string | null;
-  reason_type: ReportReason;
+  reason_type: string;
   reason_text: string;
   destination: "local" | "remote";
   remote_host: string | null;
@@ -778,9 +777,8 @@ export const api = {
       subject_type: "actor" | "post";
       subject_actor_id: string;
       subject_post_id?: string;
-      reason_type: ReportReason;
+      reason_type: string;
       reason_text: string;
-      destination: "local" | "remote";
     }) {
       return request<{ id: string }>("POST", "/reports", body);
     },

@@ -260,16 +260,20 @@ pub async fn forward_report(
         row.subject_ap_uri,
         row.subject_inbox,
     ) {
-        let object = row.subject_post_ap_uri.unwrap_or(subject_uri);
-        let content = if row.reason_text.is_empty() {
+        // ActivityPubのFlagはアカウント通報のみを表現できるため、objectは常に対象Actorの
+        // URIとする。投稿通報の場合は説明文に対象投稿のURLを付記して伝える。
+        let mut content = if row.reason_text.is_empty() {
             row.reason_type
         } else {
             format!("[{}] {}", row.reason_type, row.reason_text)
         };
+        if let Some(post_uri) = &row.subject_post_ap_uri {
+            content = format!("{}\n\n対象投稿: {}", content, post_uri);
+        }
         let activity = serde_json::json!({
             "@context":"https://www.w3.org/ns/activitystreams",
             "id":format!("https://{}/reports/{}",state.local_domain,id),
-            "type":"Flag","actor":actor_uri,"object":[object],"content":content
+            "type":"Flag","actor":actor_uri,"object":[subject_uri],"content":content
         });
         state
             .ap_client
@@ -298,20 +302,14 @@ pub async fn forward_report(
             }
             _ => serde_json::json!({"$type":"com.atproto.admin.defs#repoRef","did":subject_did}),
         };
-        let suffix = match row.reason_type.as_str() {
-            "spam" => "Spam",
-            "violation" => "Violation",
-            "misleading" => "Misleading",
-            "sexual" => "Sexual",
-            "rude" => "Rude",
-            _ => "Other",
-        };
+        // reason_typeはtools.ozone.report.defsのトークン名（例: reasonMisleadingSpam）を
+        // そのまま保持しているため、名前空間を付けるだけで送信できる。
         let response = state
             .http_client
             .post("https://mod.bsky.app/xrpc/com.atproto.moderation.createReport")
             .bearer_auth(jwt)
             .json(&serde_json::json!({
-                "reasonType":format!("com.atproto.moderation.defs#reason{}",suffix),
+                "reasonType":format!("tools.ozone.report.defs#{}",row.reason_type),
                 "reason":row.reason_text,"subject":subject,"modTool":{"name":"seiran"}
             }))
             .send()

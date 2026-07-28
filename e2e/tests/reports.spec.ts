@@ -20,9 +20,8 @@ test("投稿通報を作成し、管理者が内部コメントとクローズ�
       subject_type: "post",
       subject_actor_id: subject.actorId,
       subject_post_id: String(note.id),
-      reason_type: "spam",
+      reason_type: "reasonMisleadingSpam",
       reason_text: "E2E通報理由",
-      destination: "local",
     },
   });
   expect(createRes.status(), await createRes.text()).toBe(201);
@@ -34,7 +33,7 @@ test("投稿通報を作成し、管理者が内部コメントとクローズ�
   expect(listRes.ok(), await listRes.text()).toBeTruthy();
   const reports = await listRes.json();
   expect(reports).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: reportId, subject_post_id: String(note.id), reason_type: "spam" }),
+    expect.objectContaining({ id: reportId, subject_post_id: String(note.id), reason_type: "reasonMisleadingSpam" }),
   ]));
 
   const commentRes = await request.post(`/api/admin/reports/${reportId}/comments`, {

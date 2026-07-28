@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AdminReport, api, getErrorMessage, ReportComment } from "../../api/client";
 import { useToast } from "../../contexts/ToastContext";
+import { findReportReasonLabel } from "../report/reportReasons";
 import styles from "../../pages/Admin.module.css";
 
 export default function ReportsPanel() {
@@ -8,12 +9,18 @@ export default function ReportsPanel() {
   const [reports, setReports] = useState<AdminReport[]>([]);
   const [comments, setComments] = useState<Record<string, ReportComment[]>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [statusFilter, setStatusFilter] = useState<"open" | "closed">("open");
 
   async function reload() {
     try { setReports(await api.admin.listReports()); }
     catch (e) { showError(getErrorMessage(e)); }
   }
   useEffect(() => { void reload(); }, []);
+
+  const filtered = useMemo(
+    () => reports.filter((r) => r.status === statusFilter),
+    [reports, statusFilter],
+  );
 
   async function loadComments(id: string) {
     try {
@@ -39,13 +46,27 @@ export default function ReportsPanel() {
   return (
     <div className={styles.body}>
       <h2 className={styles.sectionTitle}>通報</h2>
-      {reports.length === 0 && <p>通報はありません。</p>}
-      {reports.map((r) => (
+      <div className={styles.authStatus}>
+        <button
+          className={statusFilter === "open" ? styles.btn : styles.btnGhost}
+          onClick={() => setStatusFilter("open")}
+        >
+          未処理
+        </button>
+        <button
+          className={statusFilter === "closed" ? styles.btn : styles.btnGhost}
+          onClick={() => setStatusFilter("closed")}
+        >
+          処理済み
+        </button>
+      </div>
+      {filtered.length === 0 && <p>{statusFilter === "open" ? "未処理の通報はありません。" : "処理済みの通報はありません。"}</p>}
+      {filtered.map((r) => (
         <section className={styles.card} key={r.id}>
           <div className={styles.row}>
             <div className={styles.grow}>
               <div className={styles.primaryText}>⚠️ {r.subject} {r.subject_type === "post" ? "の投稿" : "（ユーザー）"}</div>
-              <div className={styles.subText}>通報者: {r.reporter} / 理由: {r.reason_type} / 送信先: {r.destination === "local" ? "ローカル" : r.remote_host}</div>
+              <div className={styles.subText}>通報者: {r.reporter} / 理由: {findReportReasonLabel(r.reason_type)} / 対象: {r.destination === "local" ? "ローカル" : r.remote_host}</div>
               <div className={styles.subText}>{new Date(r.created_at).toLocaleString()} / {r.status}</div>
               {r.reason_text && <p>{r.reason_text}</p>}
               <div className={styles.authStatus}>

@@ -8,7 +8,57 @@ use serde::{Deserialize, Serialize};
 
 use crate::{error::ApiError, middleware::extract_auth, AppState};
 
-const REASONS: [&str; 6] = ["spam", "violation", "misleading", "sexual", "rude", "other"];
+/// Bluesky公式（`tools.ozone.report.defs`）準拠の通報理由。第1段階（カテゴリ）は
+/// クライアント側の表示分類のみに使い、DBにはこの第2段階のトークン名をそのまま保存する。
+const REASONS: [&str; 39] = [
+    // 誤解を招くこと
+    "reasonMisleadingBot",
+    "reasonMisleadingImpersonation",
+    "reasonMisleadingSpam",
+    "reasonMisleadingScam",
+    "reasonMisleadingElections",
+    "reasonMisleadingOther",
+    // 成人向けコンテンツ
+    "reasonSexualAbuseContent",
+    "reasonSexualNCII",
+    "reasonSexualDeepfake",
+    "reasonSexualAnimal",
+    "reasonSexualUnlabeled",
+    "reasonSexualOther",
+    // 嫌がらせまたはヘイト
+    "reasonHarassmentTroll",
+    "reasonHarassmentTargeted",
+    "reasonHarassmentHateSpeech",
+    "reasonHarassmentDoxxing",
+    "reasonHarassmentOther",
+    // 暴力
+    "reasonViolenceAnimal",
+    "reasonViolenceThreats",
+    "reasonViolenceGraphicContent",
+    "reasonViolenceGlorification",
+    "reasonViolenceExtremistContent",
+    "reasonViolenceTrafficking",
+    "reasonViolenceOther",
+    // 児童の安全
+    "reasonChildSafetyCSAM",
+    "reasonChildSafetyGroom",
+    "reasonChildSafetyPrivacy",
+    "reasonChildSafetyHarassment",
+    "reasonChildSafetyOther",
+    // 自傷・危険行動
+    "reasonSelfHarmContent",
+    "reasonSelfHarmED",
+    "reasonSelfHarmStunts",
+    "reasonSelfHarmSubstances",
+    "reasonSelfHarmOther",
+    // サイトルール違反
+    "reasonRuleSiteSecurity",
+    "reasonRuleProhibitedSales",
+    "reasonRuleBanEvasion",
+    "reasonRuleOther",
+    // その他
+    "reasonOther",
+];
 
 #[derive(Debug, Deserialize)]
 pub struct CreateReportRequest {
@@ -18,7 +68,6 @@ pub struct CreateReportRequest {
     pub reason_type: String,
     #[serde(default)]
     pub reason_text: String,
-    pub destination: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,11 +127,9 @@ pub async fn create_report(
             return Err(ApiError::NotFound("SUBJECT_NOT_FOUND"));
         }
     }
-    let destination = match req.destination.as_str() {
-        "local" => "local",
-        "remote" if subject.actor_type != "local" => "remote",
-        _ => return Err(ApiError::BadRequest("INVALID_DESTINATION".into())),
-    };
+    // 通報者は送信先を選ばない。すべての通報はまずローカル管理者に届き、
+    // 対象がリモートの場合のみ、管理者が判断してFedi/Bskyへ転送する。
+    let destination = if subject.actor_type != "local" { "remote" } else { "local" };
     let remote_host = (destination == "remote").then(|| subject.domain.clone());
     let id = generate_snowflake_id(chrono::Utc::now());
     sqlx::query(

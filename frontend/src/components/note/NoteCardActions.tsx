@@ -12,7 +12,6 @@ interface NoteCardActionsProps {
   noteId: string;
   subjectActorId: string;
   subjectLabel: string;
-  remoteHost?: string;
   reactions: ReactionSummary[];
   reactionPending: boolean;
   onToggleReaction: (emoji: string) => void;
@@ -39,7 +38,6 @@ export default function NoteCardActions({
   noteId,
   subjectActorId,
   subjectLabel,
-  remoteHost,
   reactions,
   reactionPending,
   onToggleReaction,
@@ -165,7 +163,6 @@ export default function NoteCardActions({
         subjectActorId={subjectActorId}
         subjectPostId={noteId}
         subjectLabel={subjectLabel}
-        remoteHost={remoteHost}
       />
     </>
   );

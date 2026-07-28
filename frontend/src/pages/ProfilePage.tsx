@@ -559,7 +559,6 @@ export default function ProfilePage() {
           subjectType="actor"
           subjectActorId={profile.actor_id}
           subjectLabel={`@${profile.username}${profile.domain ? `@${profile.domain}` : ""}`}
-          remoteHost={profile.actor_type === "local" ? undefined : profile.domain}
         />
       )}
 
