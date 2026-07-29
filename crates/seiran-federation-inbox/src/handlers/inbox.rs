@@ -4,6 +4,7 @@ use axum::{
     response::IntoResponse,
 };
 use base64::Engine as _;
+use seiran_common::repository::{PgRelayRepository, Relay, RelayRepository, RelayStatus};
 use seiran_common::traits::Job;
 use sha2::{Digest as Sha2Digest, Sha256};
 use std::collections::HashMap;
@@ -103,16 +104,45 @@ pub async fn inbox_handler(
         }
     };
 
-    // [HIGH-01-②] keyId のアクター URI とアクティビティの actor フィールドの一致検証
+    // [HIGH-01-②] keyId のアクター URI とアクティビティの actor フィールドの一致検証。
+    // リレーは元投稿者を activity.actor に保ったまま、リレー自身の鍵で配送するため、
+    // 登録済みリレーと署名者が同一originの場合だけ不一致を許可する。
     let key_actor_base = key_id.split('#').next().unwrap_or(&key_id);
     let activity_actor = activity["actor"].as_str().unwrap_or("");
     if key_actor_base != activity_actor {
-        tracing::info!(
-            "[Inbox] keyId のアクター ({}) と activity.actor ({}) が一致しません",
-            key_actor_base,
-            activity_actor
-        );
-        return (StatusCode::UNAUTHORIZED, "署名者とアクターが一致しません").into_response();
+        let relay = match registered_relay_for_signer(&state, key_actor_base).await {
+            Ok(Some(relay)) => relay,
+            Ok(None) => {
+                tracing::info!(
+                    "[Inbox] keyId のアクター ({}) と activity.actor ({}) が一致しません",
+                    key_actor_base,
+                    activity_actor
+                );
+                return (StatusCode::UNAUTHORIZED, "署名者とアクターが一致しません")
+                    .into_response();
+            }
+            Err(e) => {
+                tracing::error!("[Inbox] 登録リレー照合エラー: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "登録リレー照合エラー").into_response();
+            }
+        };
+
+        // 一部のリレー実装はAcceptを返さず、Follow直後から配送を始める。
+        // 正しい署名付き配送を受信できた時点で参加成立とみなす。
+        if relay.status == RelayStatus::Pending {
+            let relays = PgRelayRepository::new(state.db.clone());
+            if let Err(e) = relays
+                .update_status(relay.id, RelayStatus::Accepted, None)
+                .await
+            {
+                tracing::error!("[Inbox] リレー(id={}) accepted更新エラー: {}", relay.id, e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "リレー状態更新エラー").into_response();
+            }
+            tracing::info!(
+                "[Inbox] リレー(id={}) の署名付き配送を受信しacceptedへ更新",
+                relay.id
+            );
+        }
     }
 
     let activity_type = activity["type"].as_str().unwrap_or("(不明)").to_string();
@@ -125,6 +155,25 @@ pub async fn inbox_handler(
     }
 
     (StatusCode::ACCEPTED, "").into_response()
+}
+
+async fn registered_relay_for_signer(
+    state: &AppState,
+    signer_actor: &str,
+) -> Result<Option<Relay>, seiran_common::repository::RelayError> {
+    let relays = PgRelayRepository::new(state.db.clone());
+    Ok(relays
+        .list_all()
+        .await?
+        .into_iter()
+        .find(|relay| urls_have_same_origin(signer_actor, &relay.inbox_url)))
+}
+
+fn urls_have_same_origin(left: &str, right: &str) -> bool {
+    match (reqwest::Url::parse(left), reqwest::Url::parse(right)) {
+        (Ok(left), Ok(right)) => left.origin() == right.origin(),
+        _ => false,
+    }
 }
 
 /// Signature ヘッダーの headers= フィールドに "digest" が含まれているか確認する
@@ -154,7 +203,7 @@ fn extract_key_id(signature_header: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_key_id, signature_covers_digest};
+    use super::{extract_key_id, signature_covers_digest, urls_have_same_origin};
 
     #[test]
     fn signature_covers_digest_with_digest() {
@@ -187,5 +236,17 @@ mod tests {
     fn extract_key_id_missing() {
         let sig = r#"algorithm="rsa-sha256",signature="abc""#;
         assert_eq!(extract_key_id(sig), None);
+    }
+
+    #[test]
+    fn relay_signer_origin_matches_registered_inbox() {
+        assert!(urls_have_same_origin(
+            "https://relay.example/actor",
+            "https://relay.example/inbox"
+        ));
+        assert!(!urls_have_same_origin(
+            "https://attacker.example/actor",
+            "https://relay.example/inbox"
+        ));
     }
 }
