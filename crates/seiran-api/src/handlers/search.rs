@@ -1,6 +1,6 @@
 //! 検索エンドポイント（フェーズ6）
 //!
-//! GET /api/notes/search?q=<query>&limit=<n>&session_id=<id>
+//! GET /api/notes/search?q=<query>&limit=<n>&session_id=<id>&until_id=<id>&since_id=<id>
 //!
 //! ローカル DB と Bsky AppView（public.api.bsky.app）を並行検索してブレンドする。
 
@@ -22,6 +22,12 @@ pub struct SearchQuery {
     pub limit: Option<i64>,
     /// ページネーション継続用セッション ID（2ページ目以降に付与）
     pub session_id: Option<String>,
+    /// このIDより古い投稿を取得する（Misskey互換の追加検索）。
+    #[serde(alias = "untilId")]
+    pub until_id: Option<i64>,
+    /// このIDより新しい投稿を取得する。AppViewには問い合わせない。
+    #[serde(alias = "sinceId")]
+    pub since_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -44,7 +50,57 @@ pub async fn search_notes(
         .into_response();
     }
 
-    let limit = q.limit.unwrap_or(30).min(100) as usize;
+    let limit = q.limit.unwrap_or(30).clamp(1, 100) as usize;
+    let viewer = user
+        .as_ref()
+        .map(|user| (user.actor_id, user.username.as_str()));
+
+    // since指定はMisskey互換の逆方向ページング。要件どおりAppViewには問い合わせない。
+    if let Some(since_id) = q.since_id {
+        let ids = search_local_db(
+            &state.db,
+            &raw_query,
+            limit as i64,
+            None,
+            Some(since_id),
+            viewer,
+        )
+        .await;
+        return fetch_and_respond(&state, ids, None).await;
+    }
+
+    // until指定はローカルIDを時刻へ変換し、DBとAppViewの双方から同数を取得する。
+    if let Some(until_id) = q.until_id {
+        let until = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+            "SELECT created_at FROM posts WHERE id = $1",
+        )
+        .bind(until_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+        let (local_ids, (appview_posts, _)) = tokio::join!(
+            search_local_db(
+                &state.db,
+                &raw_query,
+                limit as i64,
+                Some(until_id),
+                None,
+                viewer,
+            ),
+            seiran_common::atp::search_appview_posts(
+                &state.http_client,
+                &raw_query,
+                None,
+                limit,
+                until,
+            ),
+        );
+        let mut all_ids = local_ids;
+        all_ids.append(&mut persist_appview_posts(&state, appview_posts).await);
+        let (ids, _) = merge_sort_dedup_and_split(all_ids, limit);
+        return fetch_and_respond(&state, ids, None).await;
+    }
 
     // ── セッション継続（過去掘り） ────────────────────────────────────────────
     if let Some(ref sid) = q.session_id {
@@ -63,10 +119,10 @@ pub async fn search_notes(
             let mut extra_local = search_local_db(
                 &state.db,
                 &raw_query,
-                60,
+                limit as i64,
                 local_until_id,
-                user.as_ref()
-                    .map(|user| (user.actor_id, user.username.as_str())),
+                None,
+                viewer,
             )
             .await;
             let new_local_until = extra_local.last().copied();
@@ -78,9 +134,11 @@ pub async fn search_notes(
                     &state.http_client,
                     &raw_query,
                     Some(&cursor),
+                    limit,
+                    None,
                 )
                 .await;
-                let mut av_ids_local = appview_ids_to_local(&state.db, av_ids).await;
+                let mut av_ids_local = persist_appview_posts(&state, av_ids).await;
                 buf.append(&mut av_ids_local);
                 next_cursor
             } else {
@@ -99,19 +157,12 @@ pub async fn search_notes(
 
     // ── 初回リクエスト: ローカル DB + AppView 並行フェッチ ───────────────────
     let (local_ids, (av_post_ids, appview_cursor)) = tokio::join!(
-        search_local_db(
-            &state.db,
-            &raw_query,
-            60,
-            None,
-            user.as_ref()
-                .map(|user| (user.actor_id, user.username.as_str())),
-        ),
-        seiran_common::atp::search_appview_posts(&state.http_client, &raw_query, None),
+        search_local_db(&state.db, &raw_query, limit as i64, None, None, viewer,),
+        seiran_common::atp::search_appview_posts(&state.http_client, &raw_query, None, limit, None,),
     );
     let local_until_id = local_ids.last().copied();
 
-    let mut av_local_ids = appview_ids_to_local(&state.db, av_post_ids).await;
+    let mut av_local_ids = persist_appview_posts(&state, av_post_ids).await;
     let mut all_ids = local_ids;
     all_ids.append(&mut av_local_ids);
 
@@ -147,6 +198,7 @@ async fn search_local_db(
     query: &str,
     fetch_limit: i64,
     until_id: Option<i64>,
+    since_id: Option<i64>,
     me: Option<(i64, &str)>,
 ) -> Vec<i64> {
     // pg_bigmはLIKE演算子のみ最適化対象（ILIKE非対応）のため、大文字小文字を無視した
@@ -160,6 +212,9 @@ async fn search_local_db(
     if let Some(uid) = until_id {
         sql.push(" AND p.id < ").push_bind(uid);
     }
+    if let Some(sid) = since_id {
+        sql.push(" AND p.id > ").push_bind(sid);
+    }
     sql.push(" ORDER BY p.id DESC LIMIT ")
         .push_bind(fetch_limit);
     let rows = sql.build().fetch_all(db).await;
@@ -170,21 +225,57 @@ async fn search_local_db(
         .collect()
 }
 
-/// AppView の at_uri リストをローカル DB の post_id にマッピングする。
-/// DB に存在しないポストはスキップ（オンデマンドインポートは行わない）。
-async fn appview_ids_to_local(db: &sqlx::PgPool, uris: Vec<String>) -> Vec<i64> {
-    if uris.is_empty() {
-        return vec![];
+/// AppView検索結果のactor/postをローカルDBへupsertし、ローカルpost IDへ変換する。
+async fn persist_appview_posts(
+    state: &AppState,
+    posts: Vec<seiran_common::atp::BskyPost>,
+) -> Vec<i64> {
+    let mut ids = Vec::with_capacity(posts.len());
+    for post in posts {
+        let actor_id = match state.actors.find_by_did(&post.author_did).await {
+            Ok(Some(actor)) if actor.actor_type == "local" => actor.id,
+            Ok(_) => {
+                let now = chrono::Utc::now();
+                match state
+                    .actors
+                    .upsert_remote_bsky(
+                        seiran_common::generate_snowflake_id(now),
+                        &post.author_did,
+                        &post.author_handle,
+                        post.author_display_name.as_deref(),
+                        post.author_avatar.as_deref(),
+                        now,
+                    )
+                    .await
+                {
+                    Ok(id) => id,
+                    Err(error) => {
+                        tracing::warn!(
+                            "[search] AppView actor保存失敗 did={}: {}",
+                            post.author_did,
+                            error
+                        );
+                        continue;
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "[search] AppView actor検索失敗 did={}: {}",
+                    post.author_did,
+                    error
+                );
+                continue;
+            }
+        };
+        match seiran_common::atp::upsert_bsky_post(&state.db, actor_id, &post).await {
+            Ok(id) => ids.push(id),
+            Err(error) => {
+                tracing::warn!("[search] AppView post保存失敗 uri={}: {}", post.uri, error)
+            }
+        }
     }
-    let rows = sqlx::query("SELECT id FROM posts WHERE at_uri = ANY($1) AND deleted_at IS NULL")
-        .bind(&uris)
-        .fetch_all(db)
-        .await
-        .unwrap_or_default();
-
-    rows.iter()
-        .filter_map(|r| r.try_get::<i64, _>("id").ok())
-        .collect()
+    ids
 }
 
 /// post_id リストからノートレスポンスを構築して返す。

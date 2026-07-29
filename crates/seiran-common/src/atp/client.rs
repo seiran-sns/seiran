@@ -24,6 +24,8 @@ pub struct BskyPost {
     pub cid: String,
     pub author_did: String,
     pub author_handle: String,
+    pub author_display_name: Option<String>,
+    pub author_avatar: Option<String>,
     pub text: String,
     pub created_at: DateTime<Utc>,
     pub indexed_at: DateTime<Utc>,
@@ -67,6 +69,10 @@ struct PostView {
 struct ProfileViewBasic {
     did: String,
     handle: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    avatar: Option<String>,
 }
 
 // ─── PDS セッション/レスポンス内部型 ──────────────────────────────────────
@@ -187,6 +193,8 @@ pub async fn fetch_atp_history(
                 cid: post.cid,
                 author_did: post.author.did,
                 author_handle: post.author.handle,
+                author_display_name: post.author.display_name,
+                author_avatar: post.author.avatar,
                 text,
                 created_at,
                 indexed_at,
@@ -251,6 +259,8 @@ pub async fn fetch_single_bsky_post(
         cid: p["cid"].as_str().unwrap_or("").to_string(),
         author_did: p["author"]["did"].as_str().unwrap_or("").to_string(),
         author_handle: p["author"]["handle"].as_str().unwrap_or("").to_string(),
+        author_display_name: p["author"]["displayName"].as_str().map(str::to_string),
+        author_avatar: p["author"]["avatar"].as_str().map(str::to_string),
         text,
         created_at,
         indexed_at: Utc::now(),
@@ -410,20 +420,30 @@ pub async fn fetch_bsky_followers(
 
 /// AppView `app.bsky.feed.searchPosts` でポストを全文検索する。
 ///
-/// 戻り値: (at_uri リスト, 次ページカーソル)。エラー時は空リストを返す（呼び出し元は
-/// ローカル DB 検索結果のみへフォールバックする設計のため、エラーを致命扱いしない）。
+/// 戻り値: (post viewの正規化結果, 次ページカーソル)。`limit`と`until`はAppViewへ
+/// そのまま渡す。エラー時は空リストを返す（呼び出し元はローカル DB 検索結果のみへ
+/// フォールバックする設計のため、エラーを致命扱いしない）。
 pub async fn search_appview_posts(
     client: &reqwest::Client,
     query: &str,
     cursor: Option<&str>,
-) -> (Vec<String>, Option<String>) {
+    limit: usize,
+    until: Option<DateTime<Utc>>,
+) -> (Vec<BskyPost>, Option<String>) {
     let mut url = format!(
-        "{}/xrpc/app.bsky.feed.searchPosts?q={}&limit=25",
+        "{}/xrpc/app.bsky.feed.searchPosts?q={}&limit={}",
         appview_base_url(),
-        urlencoding::encode(query)
+        urlencoding::encode(query),
+        limit.clamp(1, 100),
     );
     if let Some(c) = cursor {
         url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
+    }
+    if let Some(until) = until {
+        url.push_str(&format!(
+            "&until={}",
+            urlencoding::encode(&until.to_rfc3339())
+        ));
     }
 
     let resp = match client.get(&url).send().await {
@@ -443,16 +463,42 @@ pub async fn search_appview_posts(
     };
 
     let cursor_next = json["cursor"].as_str().map(str::to_string);
-    let uris: Vec<String> = json["posts"]
+    let posts: Vec<BskyPost> = json["posts"]
         .as_array()
         .map(|arr| {
             arr.iter()
-                .filter_map(|p| p["uri"].as_str().map(str::to_string))
+                .filter_map(|p| {
+                    let uri = p["uri"].as_str()?.to_string();
+                    let cid = p["cid"].as_str()?.to_string();
+                    let author_did = p["author"]["did"].as_str()?.to_string();
+                    let author_handle = p["author"]["handle"].as_str()?.to_string();
+                    let created_at = p["record"]["createdAt"]
+                        .as_str()
+                        .and_then(|value| value.parse::<DateTime<Utc>>().ok())
+                        .unwrap_or_else(Utc::now);
+                    let indexed_at = p["indexedAt"]
+                        .as_str()
+                        .and_then(|value| value.parse::<DateTime<Utc>>().ok())
+                        .unwrap_or(created_at);
+                    Some(BskyPost {
+                        uri,
+                        cid,
+                        author_did,
+                        author_handle,
+                        author_display_name: p["author"]["displayName"]
+                            .as_str()
+                            .map(str::to_string),
+                        author_avatar: p["author"]["avatar"].as_str().map(str::to_string),
+                        text: p["record"]["text"].as_str().unwrap_or("").to_string(),
+                        created_at,
+                        indexed_at,
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default();
 
-    (uris, cursor_next)
+    (posts, cursor_next)
 }
 
 /// PDS に対して `com.atproto.server.createSession` を呼び出し、セッションを取得する。

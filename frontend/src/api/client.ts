@@ -1084,13 +1084,21 @@ export const api = {
       );
     },
     async search(
-      params: { q: string; limit?: number; session_id?: string },
+      params: {
+        q: string;
+        limit?: number;
+        session_id?: string;
+        until_id?: string;
+        since_id?: string;
+      },
       signal?: AbortSignal,
     ) {
       const qs = new URLSearchParams();
       qs.set("q", params.q);
       if (params.limit) qs.set("limit", String(params.limit));
       if (params.session_id) qs.set("session_id", params.session_id);
+      if (params.until_id) qs.set("until_id", params.until_id);
+      if (params.since_id) qs.set("since_id", params.since_id);
       const raw = await request<{ notes: RawNote[]; session_id?: string }>(
         "GET",
         `/notes/search?${qs.toString()}`,
