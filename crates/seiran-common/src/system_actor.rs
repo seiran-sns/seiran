@@ -10,10 +10,13 @@ use chrono::Utc;
 use sqlx::PgPool;
 
 use crate::generate_snowflake_id;
-use crate::username::PROXY_ACTOR_USERNAME;
+use crate::username::{PROXY_ACTOR_USERNAME, RELAY_AGENT_USERNAME};
 
 /// list-relay の actor_id を `site_settings` に記録するキー。
 const SITE_SETTINGS_KEY: &str = "system_proxy_actor_id";
+
+/// relay-agent の actor_id を `site_settings` に記録するキー。
+const RELAY_AGENT_SITE_SETTINGS_KEY: &str = "relay_agent_actor_id";
 
 /// list-relay アクターが存在することを保証し、その `actor_id` を返す。
 /// サーバー起動時に一度だけ呼び出す想定の冪等な操作。
@@ -73,6 +76,66 @@ pub async fn ensure_system_proxy_actor(
 pub async fn resolve_system_proxy_actor_id(pool: &PgPool) -> Result<Option<i64>, sqlx::Error> {
     let row: Option<(String,)> = sqlx::query_as("SELECT value FROM site_settings WHERE key = $1")
         .bind(SITE_SETTINGS_KEY)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.and_then(|(v,)| v.parse::<i64>().ok()))
+}
+
+/// relay-agent アクター（Fediverseリレー参加機能 #140）が存在することを保証し、
+/// その `actor_id` を返す。サーバー起動時に一度だけ呼び出す想定の冪等な操作。
+pub async fn ensure_relay_agent_actor(
+    pool: &PgPool,
+    local_domain: &str,
+) -> Result<i64, sqlx::Error> {
+    if let Some(id) = resolve_relay_agent_actor_id(pool).await? {
+        return Ok(id);
+    }
+
+    let existing: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM actors WHERE username = $1 AND domain = $2 AND actor_type = 'local'",
+    )
+    .bind(RELAY_AGENT_USERNAME)
+    .bind(local_domain)
+    .fetch_optional(pool)
+    .await?;
+
+    let actual_id = if let Some((id,)) = existing {
+        id
+    } else {
+        let id = generate_snowflake_id(Utc::now());
+        sqlx::query(
+            "INSERT INTO actors (id, user_id, actor_type, username, domain, created_at, updated_at)
+             VALUES ($1, NULL, 'local', $2, $3, NOW(), NOW())",
+        )
+        .bind(id)
+        .bind(RELAY_AGENT_USERNAME)
+        .bind(local_domain)
+        .execute(pool)
+        .await?;
+        id
+    };
+
+    sqlx::query(
+        "INSERT INTO site_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+    )
+    .bind(RELAY_AGENT_SITE_SETTINGS_KEY)
+    .bind(actual_id.to_string())
+    .execute(pool)
+    .await?;
+
+    tracing::info!(
+        "[system_actor] relay-agent アクターを準備しました (actor_id={})",
+        actual_id
+    );
+
+    Ok(actual_id)
+}
+
+/// `site_settings` に記録済みの relay-agent `actor_id` を取得する（ブートストラップ済み前提）。
+pub async fn resolve_relay_agent_actor_id(pool: &PgPool) -> Result<Option<i64>, sqlx::Error> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM site_settings WHERE key = $1")
+        .bind(RELAY_AGENT_SITE_SETTINGS_KEY)
         .fetch_optional(pool)
         .await?;
     Ok(row.and_then(|(v,)| v.parse::<i64>().ok()))

@@ -267,6 +267,15 @@ export interface RemoteEmoji {
   lastSeenAt: string;
 }
 
+export interface FediverseRelay {
+  id: string;
+  inbox_url: string;
+  status: "pending" | "accepted" | "rejected";
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EmojiImportJob {
   jobId: string;
   total: number;
@@ -1364,6 +1373,15 @@ export const api = {
       license?: string;
     }) {
       return request<CustomEmoji>("POST", "/admin/emojis/remote/import", body);
+    },
+    listRelays() {
+      return request<FediverseRelay[]>("GET", "/admin/relays");
+    },
+    createRelay(inbox_url: string) {
+      return request<FediverseRelay>("POST", "/admin/relays", { inbox_url });
+    },
+    deleteRelay(id: string) {
+      return request<void>("DELETE", `/admin/relays/${encodeURIComponent(id)}`);
     },
   },
 

@@ -228,6 +228,10 @@ pub enum Job {
     /// 解決してプロフィールを upsert する（#68 マイケル指摘: 未知アクターもジョブ化）。
     /// フォロー関係は作らず、表示のリッチ化（アバター・表示名等）のみが目的。
     RemoteActorResolve { uri: String },
+
+    /// Fediverseリレー参加機能（#140）: relay-agent 仮想アクターによるリレーへの
+    /// Follow/Undo送信の同期。`want_follow: true` はリレー登録時、`false` は削除時に積む。
+    RelayFollowSync { relay_id: i64, want_follow: bool },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。
@@ -328,6 +332,10 @@ mod tests {
                     "bafyrei...".into(),
                 )),
                 now: Utc::now(),
+            },
+            Job::RelayFollowSync {
+                relay_id: 1,
+                want_follow: true,
             },
         ];
         for job in jobs {

@@ -1,5 +1,6 @@
 pub mod emoji_import;
 pub mod emojis;
+pub mod relays;
 pub mod remote_emojis;
 pub mod reports;
 pub mod site_settings;

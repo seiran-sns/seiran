@@ -371,3 +371,17 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 リモートの `Question` へのローカル回答は、選択肢ごとに
 `Create(Note)`（`name` が選択肢名、`inReplyTo` がQuestion ID）として投稿者Inboxへ配送する。
 同形式の回答を受信した場合は `poll_votes` に冪等保存し、Questionのローカル集計を更新する。
+
+# Fediverseリレー参加
+
+管理者が登録したHTTPSのinbox URLへ、専用ローカルactor
+`https://{domain}/users/relay-agent` からHTTP署名付きFollowを送る。Accept/Rejectは
+Follow activity IDと照合して状態更新し、離脱時は元Followを内包したUndoを送る。
+一部のリレー実装はAcceptを返さず配送を開始するため、登録inboxと同一originの
+リレー鍵で正しく署名された配送を受信した場合も参加成立（`accepted`）とする。
+通常のInbox受信では署名者と `activity.actor` の一致を必須とするが、リレー配送は
+元投稿者を `activity.actor` に保ったままリレー自身が署名するため、この登録済み
+同一originの場合に限って不一致を許可する。
+管理APIはSnowflake IDをJavaScriptで丸めないよう文字列として返し、離脱APIのパスにもその文字列をそのまま使用する。
+`accepted` のリレーには `visibility='public'` のローカル投稿だけを通常配送と同じ署名・
+再試行経路で追加配送し、限定・フォロワー限定・DMは配送しない。

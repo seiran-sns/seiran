@@ -349,6 +349,10 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
             direction,
         } => jobs::remote_follow_list_sync::handle(actor_id, direction, ctx).await,
         Job::RemoteActorResolve { uri } => jobs::remote_actor_resolve::handle(uri, ctx).await,
+        Job::RelayFollowSync {
+            relay_id,
+            want_follow,
+        } => jobs::relay_follow_sync::handle(relay_id, want_follow, ctx).await,
     }
 }
 
@@ -368,6 +372,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::BskyDmSend { .. } => "BskyDmSend",
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
+        Job::RelayFollowSync { .. } => "RelayFollowSync",
     }
 }
 
@@ -449,6 +454,12 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 3,
             base_delay_ms: 1000,
             max_delay_ms: 30_000,
+        },
+        Job::RelayFollowSync { .. } => RetryConfig {
+            // ProxyFollowSync と同様、リモートAP配送のため長めに構える
+            max_attempts: 10,
+            base_delay_ms: 5000,
+            max_delay_ms: 3_600_000,
         },
     }
 }

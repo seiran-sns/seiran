@@ -34,9 +34,9 @@ use seiran_common::repository::{
     PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository,
     PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository,
     PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository,
-    PgReactionRepository, PgRemoteEmojiRepository, PgTotpRepository, PgUserRepository,
-    PinnedPostsRepository, PostRepository, ReactionRepository, RemoteEmojiRepository,
-    TotpRepository, UserRepository,
+    PgReactionRepository, PgRelayRepository, PgRemoteEmojiRepository, PgTotpRepository,
+    PgUserRepository, PinnedPostsRepository, PostRepository, ReactionRepository, RelayRepository,
+    RemoteEmojiRepository, TotpRepository, UserRepository,
 };
 use seiran_common::{
     job_priority, ApClient, ApDeliveryKind, AtpCommitEvent, AtpCommitService, Job, JobQueue,
@@ -116,6 +116,8 @@ pub struct AppState {
     pub emojis: Arc<dyn EmojiRepository>,
     /// リモートカスタム絵文字カタログ（`remote_emojis` テーブル、#73）。
     pub remote_emojis: Arc<dyn RemoteEmojiRepository>,
+    /// Fediverseリレー参加先（`fediverse_relays` テーブル、#140）。
+    pub relays: Arc<dyn RelayRepository>,
     /// TOTP（二段階認証）設定・リカバリーコード・メール経由の強制解除リクエスト（#65）。
     pub totp: Arc<dyn TotpRepository>,
     pub webauthn: Arc<Webauthn>,
@@ -363,6 +365,7 @@ pub async fn init_state(
     let emojis: Arc<dyn EmojiRepository> = Arc::new(PgEmojiRepository::new(pool.clone()));
     let remote_emojis: Arc<dyn RemoteEmojiRepository> =
         Arc::new(PgRemoteEmojiRepository::new(pool.clone()));
+    let relays: Arc<dyn RelayRepository> = Arc::new(PgRelayRepository::new(pool.clone()));
     let totp: Arc<dyn TotpRepository> = Arc::new(PgTotpRepository::new(pool.clone()));
 
     let system_proxy_actor_id =
@@ -378,6 +381,10 @@ pub async fn init_state(
                 0
             }
         };
+
+    if let Err(e) = seiran_common::ensure_relay_agent_actor(&pool, &local_domain).await {
+        tracing::error!("[seiran-api] relay-agent アクターの準備に失敗: {}", e);
+    }
 
     let rp_origin_value =
         std::env::var("WEBAUTHN_ORIGIN").unwrap_or_else(|_| format!("https://{}", local_domain));
@@ -430,6 +437,7 @@ pub async fn init_state(
         email_changes,
         emojis,
         remote_emojis,
+        relays,
         totp,
         webauthn,
     }
@@ -542,6 +550,15 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/admin/emojis/remote/import",
             post(handlers::admin::remote_emojis::import_remote_emoji),
+        )
+        // Fediverseリレー参加先（#140）
+        .route(
+            "/api/admin/relays",
+            get(handlers::admin::relays::list_relays).post(handlers::admin::relays::create_relay),
+        )
+        .route(
+            "/api/admin/relays/:id",
+            delete(handlers::admin::relays::delete_relay),
         )
         // ドライブ（メディアアップロード）。動画・音声添付を考慮し 100MB まで許可
         // （axum のデフォルトボディ上限は小さいため明示的に上書きする）。

@@ -66,6 +66,19 @@ async fn fetch_fedi_follower_inboxes(db: &PgPool, actor_id: i64) -> Result<Vec<S
         .collect())
 }
 
+/// 参加中（status='accepted'）のFediverseリレー（#140）のinbox URL一覧を取得する。
+async fn fetch_accepted_relay_inboxes(db: &PgPool) -> Result<Vec<String>, ApError> {
+    let rows = sqlx::query("SELECT inbox_url FROM fediverse_relays WHERE status = 'accepted'")
+        .fetch_all(db)
+        .await
+        .map_err(|e| ApError::Other(format!("リレー取得エラー: {}", e)))?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("inbox_url").ok())
+        .collect())
+}
+
 /// メンション先アクターURI一覧を、フォロー関係と独立に inbox URL へ解決する
 /// （Mastodon等のメンション個別配送相当）。DB既知の fedi アクターは DB から、
 /// まだ一度も見たことのない相手はその場でアクタードキュメントを取得して解決する
@@ -683,6 +696,15 @@ pub async fn deliver_post_to_ap_followers(
     for inbox in fetch_inboxes_by_ap_uris(ap_client, db, local_domain, &mention_uris).await {
         if !inboxes.contains(&inbox) {
             inboxes.push(inbox);
+        }
+    }
+    // public投稿のみ、参加中のリレー（#140）にもファンアウトする。
+    // unlisted/followers_only はリレー配送対象外（リレーは公開投稿の中継が目的のため）。
+    if basis.visibility == "public" {
+        for inbox in fetch_accepted_relay_inboxes(db).await? {
+            if !inboxes.contains(&inbox) {
+                inboxes.push(inbox);
+            }
         }
     }
     if inboxes.is_empty() {

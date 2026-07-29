@@ -20,8 +20,11 @@
 /// list-relay 仮想アクター（リスト機能 #63 のプロキシフォロー用）の予約ユーザー名。
 pub const PROXY_ACTOR_USERNAME: &str = "list-relay";
 
+/// relay-agent 仮想アクター（Fediverseリレー参加機能 #140 のFollow/Undo送信用）の予約ユーザー名。
+pub const RELAY_AGENT_USERNAME: &str = "relay-agent";
+
 /// 一般ユーザーが登録できない予約ユーザー名（`register()` で明示的に拒否する）。
-pub const RESERVED_LOCAL_USERNAMES: &[&str] = &[PROXY_ACTOR_USERNAME];
+pub const RESERVED_LOCAL_USERNAMES: &[&str] = &[PROXY_ACTOR_USERNAME, RELAY_AGENT_USERNAME];
 
 /// ユーザー名がDNSラベルとして妥当か（英数字・ハイフンのみ、先頭/末尾はハイフン不可、1〜63文字）。
 pub fn is_valid_local_username(s: &str) -> bool {
@@ -90,6 +93,7 @@ mod tests {
     fn reserved_is_case_insensitive() {
         assert!(is_reserved_username("list-relay"));
         assert!(is_reserved_username("List-Relay"));
+        assert!(is_reserved_username("relay-agent"));
         assert!(!is_reserved_username("alice"));
     }
 }
