@@ -340,12 +340,12 @@ async fn create_repost(
 /// - パブリック投稿（`public`）はすべての公開範囲から引用許可。
 fn validate_quote_visibility(quoted_vis: &str, new_vis: &str) -> Result<(), ApiError> {
     match quoted_vis {
-        "followers_only" | "direct" => {
-            Err(ApiError::Forbidden("PRIVATE_POST_NOT_QUOTABLE"))
-        }
+        "followers_only" | "direct" => Err(ApiError::Forbidden("PRIVATE_POST_NOT_QUOTABLE")),
         "unlisted" => {
             if new_vis == "public" {
-                Err(ApiError::BadRequest("CANNOT_QUOTE_UNLISTED_PUBLICLY".to_owned()))
+                Err(ApiError::BadRequest(
+                    "CANNOT_QUOTE_UNLISTED_PUBLICLY".to_owned(),
+                ))
             } else {
                 Ok(())
             }
