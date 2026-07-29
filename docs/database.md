@@ -31,6 +31,7 @@ ID 採番は2系統ある。
 | `post_attachments` | 投稿とメディアの中間テーブル |
 | `custom_emojis` | ローカルのカスタム絵文字定義 |
 | `remote_emojis` | AP受信で見つけたリモートカスタム絵文字のカタログ（インポート前提、画像は`media_files`に未取込） |
+| `fediverse_relays` | 参加するFediverseリレーのinbox URL・Follow活動ID・承認状態 |
 | `storage_providers` | メディア保存先オブジェクトストレージ(S3互換)の設定 |
 | `lists` / `list_members` | ユーザーごとのリスト（Bsky `app.bsky.graph.list` 相当） |
 | `pinned_posts` | プロフィールへのピン留め投稿 |
@@ -182,3 +183,10 @@ Bluesky公式（`tools.ozone.report.defs`）準拠の理由分類、自由記述
 `report_comments` は管理者・モデレーターだけが読み書きできる内部メモで、通報削除時は
 CASCADE削除する。通報自体は監査履歴として物理削除せず、`status` と `closed_at` で
 オープン/クローズを管理する。
+
+### Fediverseリレー（`fediverse_relays`）
+
+管理者が登録したリレーを `inbox_url`（UNIQUE）単位で保持する。`status` は
+`pending` / `accepted` / `rejected`、`follow_activity_id` は参加時のFollowと
+Accept/Rejectを照合し、離脱時のUndoにも再利用する。公開投稿の配送先には
+`accepted` の行だけを使う。

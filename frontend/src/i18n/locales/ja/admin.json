@@ -6,9 +6,13 @@
       "users": "ユーザー",
       "siteSettings": "サイト設定",
       "storage": "ストレージ",
-      "emojis": "絵文字"
+      "emojis": "絵文字",
+      "relays": "リレー"
     },
     "rightPanelDescription": "管理操作はこの画面から行えます。各操作はサーバー側でも管理者権限を検証します。"
+  },
+  "relaysPanel": {
+    "title": "Fediverseリレー", "description": "公開投稿を配送・受信するリレーのinbox URLを管理します。", "inboxUrlLabel": "リレー inbox URL", "addButton": "追加", "emptyMessage": "参加中のリレーはありません。", "deleteConfirm": "リレー {{url}} から離脱しますか？", "status": { "pending": "承認待ち", "accepted": "参加中", "rejected": "拒否" }
   },
   "emojisPanel": {
     "title": "カスタム絵文字",

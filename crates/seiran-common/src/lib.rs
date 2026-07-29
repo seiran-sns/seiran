@@ -21,7 +21,10 @@ pub mod username;
 
 pub use db::{get_db_pool, run_migrations};
 pub use id::generate_snowflake_id;
-pub use system_actor::{ensure_system_proxy_actor, resolve_system_proxy_actor_id};
+pub use system_actor::{
+    ensure_relay_agent_actor, ensure_system_proxy_actor, resolve_relay_agent_actor_id,
+    resolve_system_proxy_actor_id,
+};
 pub use username::{
     is_reserved_username, is_valid_local_username, PROXY_ACTOR_USERNAME, RESERVED_LOCAL_USERNAMES,
 };

@@ -8,6 +8,7 @@ import SiteSettingsPanel from "../components/admin/SiteSettingsPanel";
 import StorageProvidersPanel from "../components/admin/StorageProvidersPanel";
 import EmojisPanel from "../components/admin/EmojisPanel";
 import ReportsPanel from "../components/admin/ReportsPanel";
+import RelaysPanel from "../components/admin/RelaysPanel";
 import { useAuth } from "../contexts/AuthContext";
 import { isAdminRole } from "../lib/roles";
 import { useSwipe } from "../hooks/useSwipe";
@@ -27,6 +28,7 @@ export default function AdminPage() {
     t("admin:adminPage.tabs.storage"),
     t("admin:adminPage.tabs.emojis"),
     t("admin:adminPage.tabs.reports"),
+    t("admin:adminPage.tabs.relays"),
   ];
 
   const handleSwipeLeft = useCallback(() => {
@@ -70,6 +72,7 @@ export default function AdminPage() {
       {tab === 2 && <StorageProvidersPanel />}
       {tab === 3 && <EmojisPanel />}
       {tab === 4 && <ReportsPanel />}
+      {tab === 5 && <RelaysPanel />}
     </div>
   );
 

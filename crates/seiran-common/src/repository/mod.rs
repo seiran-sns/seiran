@@ -21,6 +21,7 @@ pub mod password_reset;
 pub mod pinned_post;
 pub mod post;
 pub mod reaction;
+pub mod relay;
 pub mod remote_emoji;
 pub mod site_settings;
 pub mod storage_provider;
@@ -57,6 +58,7 @@ pub use post::{
     TimelinePost,
 };
 pub use reaction::{PgReactionRepository, ReactionRepository, ReactorInfo};
+pub use relay::{PgRelayRepository, Relay, RelayError, RelayRepository, RelayStatus};
 pub use remote_emoji::{PgRemoteEmojiRepository, RemoteEmojiRepository, RemoteEmojiRow};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage_provider::{
