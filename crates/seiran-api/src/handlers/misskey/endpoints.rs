@@ -12,6 +12,36 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+
+/// POST /api/endpoints
+///
+/// Misskeyクライアントが利用可能なAPIを機能検出するための一覧。
+/// Ariaはここに`emojis`がある場合だけ`POST /api/emojis`を呼ぶ。
+pub async fn endpoints() -> Json<Vec<&'static str>> {
+    Json(vec![
+        "drive/files/create",
+        "emojis",
+        "following/create",
+        "following/delete",
+        "i",
+        "i/notifications",
+        "meta",
+        "notes/create",
+        "notes/global-timeline",
+        "notes/hybrid-timeline",
+        "notes/local-timeline",
+        "notes/reactions",
+        "notes/reactions/create",
+        "notes/reactions/delete",
+        "notes/show",
+        "notes/timeline",
+        "notes/unrenote",
+        "users/followers",
+        "users/following",
+        "users/notes",
+        "users/show",
+    ])
+}
 use serde::Deserialize;
 
 use crate::error::ApiError;

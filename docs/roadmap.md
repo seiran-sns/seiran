@@ -1,5 +1,7 @@
 # 開発ロードマップ
 
+- [x] **Ariaのカスタム絵文字API検出互換（#145）** `POST /api/endpoints`で`emojis`を含む実装済みMisskey API一覧を返し、既存の`POST /api/emojis`へ誘導する。
+
 進捗管理用のチェックリスト。完了済みフェーズは概要のみ、未完了項目は詳細に残す。
 機能追加を完了したら該当箇所に `[x]` を入れ、コードの変更と同じコミットに含めること（`/home/yuba/seiran/CLAUDE.md` 参照）。
 

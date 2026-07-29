@@ -5,6 +5,20 @@ import { startStubS3Server } from "../fixtures/stub-s3-server";
 const ADMIN_USERNAME = "e2ebootstrap";
 const ADMIN_PASSWORD = "seiranda-e2e";
 
+test("Misskey互換API: endpointsでemojisを検出して絵文字一覧を取得できる（#145）", async ({
+  request,
+}) => {
+  const endpointsRes = await request.post("/api/endpoints", { data: {} });
+  expect(endpointsRes.ok(), await endpointsRes.text()).toBeTruthy();
+  expect(await endpointsRes.json()).toContain("emojis");
+
+  const emojisRes = await request.post("/api/emojis", { data: {} });
+  expect(emojisRes.ok(), await emojisRes.text()).toBeTruthy();
+  expect(await emojisRes.json()).toEqual(
+    expect.objectContaining({ emojis: expect.any(Array) }),
+  );
+});
+
 // 1x1 透明PNG。
 const MINIMAL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
