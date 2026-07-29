@@ -300,128 +300,138 @@ export default function PostComposer({
         </div>
       )}
 
-      {!replyTo && (
-        <div className={styles.controlRow}>
-          <button
-            type="button"
-            className={`${styles.iconBtn} ${deliverFedi ? styles.scopeActive : ""}`}
-            onClick={() => setDeliverFedi((v) => !v)}
-            title={t("home:postComposer.deliverFediHint")}
-            aria-label={t("home:postComposer.deliverFediHint")}
-          >
-            🌐
-          </button>
-          <button
-            type="button"
-            className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""}`}
-            onClick={handleToggleBsky}
-            title={t("home:postComposer.deliverBskyHint")}
-            aria-label={t("home:postComposer.deliverBskyHint")}
-          >
-            <img className={styles.blueskyIcon} src={blueskyLogo} alt="" />
-          </button>
-          <div className={styles.visibilityGroup}>
+      <div className={styles.bottomRow}>
+        {!replyTo && (
+          <div className={styles.controlRow}>
             <button
               type="button"
-              className={`${styles.visibilityBtn} ${styles.visibilityFirst} ${
-                visibility === "public" ? styles.scopeActive : ""
-              }`}
-              onClick={() => handleVisibilityChange("public")}
-              disabled={quoteTo?.visibility === "unlisted"}
-              title={t("home:postComposer.visibilityPublicHint")}
-              aria-label={t("home:postComposer.visibilityPublicHint")}
+              className={`${styles.iconBtn} ${deliverFedi ? styles.scopeActive : ""}`}
+              onClick={() => setDeliverFedi((v) => !v)}
+              title={t("home:postComposer.deliverFediHint")}
+              aria-label={t("home:postComposer.deliverFediHint")}
             >
-              👥
+              🌐
             </button>
             <button
               type="button"
-              className={`${styles.visibilityBtn} ${
-                visibility === "unlisted" ? styles.scopeActive : ""
-              }`}
-              onClick={() => handleVisibilityChange("unlisted")}
-              title={t("home:postComposer.visibilityUnlistedHint")}
-              aria-label={t("home:postComposer.visibilityUnlistedHint")}
+              className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""}`}
+              onClick={handleToggleBsky}
+              title={t("home:postComposer.deliverBskyHint")}
+              aria-label={t("home:postComposer.deliverBskyHint")}
             >
-              🤫
+              <img className={styles.blueskyIcon} src={blueskyLogo} alt="" />
             </button>
+            <div className={styles.visibilityGroup}>
+              <button
+                type="button"
+                className={`${styles.visibilityBtn} ${styles.visibilityFirst} ${
+                  visibility === "public" ? styles.scopeActive : ""
+                }`}
+                onClick={() => handleVisibilityChange("public")}
+                disabled={quoteTo?.visibility === "unlisted"}
+                title={t("home:postComposer.visibilityPublicHint")}
+                aria-label={t("home:postComposer.visibilityPublicHint")}
+              >
+                👥
+              </button>
+              <button
+                type="button"
+                className={`${styles.visibilityBtn} ${
+                  visibility === "unlisted" ? styles.scopeActive : ""
+                }`}
+                onClick={() => handleVisibilityChange("unlisted")}
+                title={t("home:postComposer.visibilityUnlistedHint")}
+                aria-label={t("home:postComposer.visibilityUnlistedHint")}
+              >
+                🤫
+              </button>
+              <button
+                type="button"
+                className={`${styles.visibilityBtn} ${styles.visibilityLast} ${
+                  visibility === "followers_only" ? styles.scopeActive : ""
+                }`}
+                onClick={() => handleVisibilityChange("followers_only")}
+                title={t("home:postComposer.visibilityPrivateHint")}
+                aria-label={t("home:postComposer.visibilityPrivateHint")}
+              >
+                🔒️
+              </button>
+            </div>
+            {guideMessage && (
+              <span className={styles.popover} role="status">
+                {guideMessage}
+              </span>
+            )}
+          </div>
+        )}
+
+        {attached && (
+          <div className={styles.attachPreview}>
+            {attached.mimeType.startsWith("video/") ? (
+              <video
+                src={attached.url}
+                controls
+                className={styles.attachThumb}
+              />
+            ) : attached.mimeType.startsWith("audio/") ? (
+              <audio
+                src={attached.url}
+                controls
+                className={styles.attachAudio}
+              />
+            ) : (
+              <img
+                src={attached.url}
+                alt={t("home:postComposer.attachmentAlt")}
+                className={styles.attachThumb}
+              />
+            )}
             <button
               type="button"
-              className={`${styles.visibilityBtn} ${styles.visibilityLast} ${
-                visibility === "followers_only" ? styles.scopeActive : ""
-              }`}
-              onClick={() => handleVisibilityChange("followers_only")}
-              title={t("home:postComposer.visibilityPrivateHint")}
-              aria-label={t("home:postComposer.visibilityPrivateHint")}
+              className={styles.attachRemoveBtn}
+              onClick={() => setAttached(null)}
+              title={t("home:postComposer.removeAttachmentTitle")}
             >
-              🔒️
+              ×
             </button>
           </div>
-          {guideMessage && (
-            <span className={styles.popover} role="status">
-              {guideMessage}
-            </span>
-          )}
-        </div>
-      )}
+        )}
 
-      {attached && (
-        <div className={styles.attachPreview}>
-          {attached.mimeType.startsWith("video/") ? (
-            <video src={attached.url} controls className={styles.attachThumb} />
-          ) : attached.mimeType.startsWith("audio/") ? (
-            <audio src={attached.url} controls className={styles.attachAudio} />
-          ) : (
-            <img
-              src={attached.url}
-              alt={t("home:postComposer.attachmentAlt")}
-              className={styles.attachThumb}
-            />
-          )}
+        {effectiveBsky && overLimit && (
+          <p className={styles.guide}>
+            {replyTo
+              ? t("home:postComposer.overLimitReply")
+              : t("home:postComposer.overLimitDefault")}
+          </p>
+        )}
+
+        <div className={styles.footer}>
+          <span
+            className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}
+          >
+            {t("home:postComposer.remainingCount", { count: remaining })}
+          </span>
+          {error && <span className={styles.error}>{error}</span>}
           <button
             type="button"
-            className={styles.attachRemoveBtn}
-            onClick={() => setAttached(null)}
-            title={t("home:postComposer.removeAttachmentTitle")}
+            className={styles.footerAttachBtn}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || !!attached}
+            title={t("home:postComposer.attachTitle")}
+            aria-label={t("home:postComposer.attachTitle")}
           >
-            ×
+            {uploading ? <span className={styles.spinner} /> : "📎"}
+          </button>
+          <button
+            type="submit"
+            className={styles.postBtn}
+            disabled={posting || !text.trim() || overLimit}
+          >
+            {posting
+              ? t("home:postComposer.posting")
+              : t("home:postComposer.postButton")}
           </button>
         </div>
-      )}
-
-      {effectiveBsky && overLimit && (
-        <p className={styles.guide}>
-          {replyTo
-            ? t("home:postComposer.overLimitReply")
-            : t("home:postComposer.overLimitDefault")}
-        </p>
-      )}
-
-      <div className={styles.footer}>
-        <span
-          className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}
-        >
-          {t("home:postComposer.remainingCount", { count: remaining })}
-        </span>
-        {error && <span className={styles.error}>{error}</span>}
-        <button
-          type="button"
-          className={styles.footerAttachBtn}
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading || !!attached}
-          title={t("home:postComposer.attachTitle")}
-          aria-label={t("home:postComposer.attachTitle")}
-        >
-          {uploading ? <span className={styles.spinner} /> : "📎"}
-        </button>
-        <button
-          type="submit"
-          className={styles.postBtn}
-          disabled={posting || !text.trim() || overLimit}
-        >
-          {posting
-            ? t("home:postComposer.posting")
-            : t("home:postComposer.postButton")}
-        </button>
       </div>
     </form>
   );
