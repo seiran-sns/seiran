@@ -759,8 +759,33 @@ async fn handle_create_note(
 
     // HTML タグを除去して本文を得る（<a href> はリンクとして保持し、Markdownリンク記法
     // `[text](url)` に変換する。メンションは `@user@host` のプレーンテキストに正規化）。
-    let tags = note["tag"].as_array().cloned().unwrap_or_default();
+    let mut tags = note["tag"].as_array().cloned().unwrap_or_default();
     let mut body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+    // リレー実装によっては、配送する Create の埋め込み Note から Emoji tag を
+    // 省略する一方、object.id の正規 Note には完全な tag を載せる。本文に未解決の
+    // shortcode がある場合だけ正規 Note を取得し、欠落した tag を補完する。
+    // object.id は外部入力なので、解決済み投稿者actorと同一originの場合だけ取得する。
+    if has_unresolved_emoji_shortcodes(&tags, &body) && has_same_origin(note_id, actor_uri) {
+        match ap_client.fetch_object(note_id).await {
+            Ok(canonical_note) => {
+                if let Some(canonical_tags) = canonical_note["tag"].as_array() {
+                    for tag in canonical_tags {
+                        if !tags.contains(tag) {
+                            tags.push(tag.clone());
+                        }
+                    }
+                    body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "[Create/Note] 正規Noteからの絵文字tag補完失敗 note_id={}: {}",
+                    note_id,
+                    error
+                );
+            }
+        }
+    }
     // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
     record_remote_emojis(inbox, &remote.domain, &tags).await;
     let emoji_map = resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &body).await;
@@ -1853,6 +1878,66 @@ async fn resolve_emoji_map_with_fallback(
         }
     }
     map
+}
+
+fn has_unresolved_emoji_shortcodes(tags: &[serde_json::Value], body: &str) -> bool {
+    let map = build_emoji_map(tags);
+    extract_shortcode_candidates(body)
+        .into_iter()
+        .any(|code| map.get(format!(":{code}:")).is_none())
+}
+
+fn has_same_origin(left: &str, right: &str) -> bool {
+    let (Ok(left), Ok(right)) = (url::Url::parse(left), url::Url::parse(right)) else {
+        return false;
+    };
+    left.origin() == right.origin()
+}
+
+#[cfg(test)]
+mod emoji_tag_fallback_tests {
+    use super::{has_same_origin, has_unresolved_emoji_shortcodes};
+
+    #[test]
+    fn detects_shortcode_missing_from_embedded_note_tags() {
+        assert!(has_unresolved_emoji_shortcodes(
+            &[],
+            "暑くて\u{200b}:tokeru:\u{200b}どころか蒸発する",
+        ));
+    }
+
+    #[test]
+    fn does_not_fetch_when_every_shortcode_has_an_emoji_tag() {
+        let tags = vec![serde_json::json!({
+            "type": "Emoji",
+            "name": ":tokeru:",
+            "icon": { "url": "https://example.com/tokeru.png" }
+        })];
+        assert!(!has_unresolved_emoji_shortcodes(
+            &tags,
+            "暑くて\u{200b}:tokeru:\u{200b}どころか蒸発する",
+        ));
+    }
+
+    #[test]
+    fn ignores_plain_colon_text_without_a_shortcode() {
+        assert!(!has_unresolved_emoji_shortcodes(
+            &[],
+            "時刻は12:34です https://example.com/a:b",
+        ));
+    }
+
+    #[test]
+    fn canonical_note_fetch_is_limited_to_actor_origin() {
+        assert!(has_same_origin(
+            "https://misskey.example/notes/1",
+            "https://misskey.example/users/alice",
+        ));
+        assert!(!has_same_origin(
+            "http://127.0.0.1/internal",
+            "https://misskey.example/users/alice",
+        ));
+    }
 }
 
 /// APのEmoji tagを `remote_emojis` へ記録する（#73）。
