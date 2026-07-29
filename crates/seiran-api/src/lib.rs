@@ -687,7 +687,10 @@ pub fn router(state: AppState) -> Router {
         )
         // Misskey 互換エイリアス
         .route("/api/notes/timeline", get(handlers::notes::home_timeline))
-        .route("/api/notes/search", get(handlers::search::search_notes))
+        .route(
+            "/api/notes/search",
+            get(handlers::search::search_notes).post(handlers::misskey::endpoints::notes_search),
+        )
         // ダイレクトメッセージ（DM本体の送受信は既存の /api/notes/create を再利用する）
         .route("/api/dm/sessions", get(handlers::dm::sessions))
         .route(

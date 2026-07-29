@@ -63,6 +63,19 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
         )}
       </button>
 
+      {/* スマホ表示用フローティング検索ボタン */}
+      <button
+        className={styles.floatingSearchBtn}
+        onClick={() => {
+          onBeforeNavigate?.();
+          navigate("/search");
+        }}
+        aria-label={t("nav:leftNav.search")}
+        title={t("nav:leftNav.search")}
+      >
+        <span className={styles.floatingSearchIcon}>🔍</span>
+      </button>
+
       {/* スマホ表示用フローティング通知ボタン（#75） */}
       <button
         className={styles.floatingNotifBtn}

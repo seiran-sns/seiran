@@ -237,6 +237,14 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 - **表示側**: フロントの `RichText` は `#foo` パターンとMarkdownリンクのリンクテキストが `#タグ` 形状の場合の両方を検出し、いずれも自インスタンスの `/tags/foo` へのリンクとして描画する（AP由来のハッシュタグアンカーもリモートのタグページへは飛ばさず、同列に扱う）。
 - **ホーム画面への追加**: `pinned_hashtags` にユーザーごとのピン留めを保存し、ホーム画面のフィードタブとして表示する（`pinned_posts`/`lists` と同じ「ユーザーごとの永続ショートカット」の設計思想）。
 
+## 6.1 投稿検索とBluesky AppView
+
+`GET /api/notes/search`は、初回検索でローカルDBと`api.bsky.app`の`app.bsky.feed.searchPosts`の双方から`limit`件ずつ取得する。AppView結果はURI照合だけで捨てず、authorを`actors`、post viewを`posts`へupsertしたうえで、ローカル結果とsnowflake ID降順にマージ・重複排除して`limit`件を返す。AppView障害時はHTTPステータスをログへ記録し、ローカルDB結果だけへ縮退する。検索結果には保存したactorアバターも含める。
+
+Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView検索を行い、Misskey形式のノート配列を返す。JSONの`query`、`limit`、`untilId`を受け付ける。
+
+`until_id`指定時は対象postの`created_at`をRFC 3339の`until`としてAppViewへ渡し、DBにも`p.id < until_id`を適用して同様にブレンドする。`since_id`指定はMisskey互換の逆方向ページングであり、AppViewへ問い合わせずDBの`p.id > since_id`だけを返す。既存frontendの過去掘りは互換維持のため`session_id`バッファも引き続き利用できる（#146）。
+
 ## 7. Misskey API 互換レイヤー
 
 `middleware::misskey_auth_bridge` が `Authorization` ヘッダー未指定時にJSONボディ/クエリの `i` を検出し `Authorization: Bearer` を合成する。`handlers::misskey`（`endpoints.rs`/`convert.rs`/`types.rs`）が Misskey ワイヤー形式のエンドポイントを提供する。`POST /api/drive/files/create`（`handlers::drive::create_drive_file`）は multipart/form-data のためこのブリッジの対象外であり、ハンドラ内で multipart フィールドの `i` を個別に読み取り `Authorization` ヘッダーが無い場合のフォールバックとして使う（misskey_dart の `postWithBinary` はアクセストークンを multipart フィールドとして送るため）。

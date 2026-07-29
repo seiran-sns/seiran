@@ -21,8 +21,24 @@ interface FollowerEntry {
   avatar?: string;
 }
 
+interface SearchPostEntry {
+  uri: string;
+  cid: string;
+  text: string;
+  createdAt: string;
+  indexedAt?: string;
+  author: {
+    did: string;
+    handle: string;
+    displayName?: string;
+    avatar?: string;
+  };
+}
+
 // targetDid -> フォロワー一覧（新しい順を想定、先頭が最新のフォロワー）。
 const followersByDid = new Map<string, FollowerEntry[]>();
+let searchPosts: SearchPostEntry[] = [];
+const searchRequests: { q: string; limit: string | null; until: string | null; cursor: string | null }[] = [];
 
 function respondJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
@@ -80,10 +96,53 @@ export function startStubAppviewServer(port = 0): Promise<StubAppviewServer> {
       return;
     }
 
+    if (path === "/__control__/search" && req.method === "POST") {
+      readBody(req)
+        .then((raw) => {
+          const parsed = JSON.parse(raw) as { posts: SearchPostEntry[] };
+          searchPosts = parsed.posts;
+          searchRequests.length = 0;
+          respondJson(res, 200, { ok: true });
+        })
+        .catch((e) => {
+          respondJson(res, 400, { error: "BadRequest", message: String(e) });
+        });
+      return;
+    }
+
+    if (path === "/__control__/search/requests" && req.method === "GET") {
+      respondJson(res, 200, searchRequests);
+      return;
+    }
+
     switch (path) {
-      case "/xrpc/app.bsky.feed.searchPosts":
-        respondJson(res, 200, { posts: [], cursor: null });
+      case "/xrpc/app.bsky.feed.searchPosts": {
+        const url = new URL(req.url ?? "", "http://stub");
+        searchRequests.push({
+          q: url.searchParams.get("q") ?? "",
+          limit: url.searchParams.get("limit"),
+          until: url.searchParams.get("until"),
+          cursor: url.searchParams.get("cursor"),
+        });
+        const limit = Number(url.searchParams.get("limit") ?? "25");
+        const until = url.searchParams.get("until");
+        const posts = searchPosts
+          .filter((post) => !until || new Date(post.createdAt) < new Date(until))
+          .slice(0, limit)
+          .map((post) => ({
+            uri: post.uri,
+            cid: post.cid,
+            author: post.author,
+            record: {
+              $type: "app.bsky.feed.post",
+              text: post.text,
+              createdAt: post.createdAt,
+            },
+            indexedAt: post.indexedAt ?? post.createdAt,
+          }));
+        respondJson(res, 200, { posts, cursor: null });
         return;
+      }
       case "/xrpc/app.bsky.feed.getAuthorFeed":
         respondJson(res, 200, { feed: [], cursor: null });
         return;
