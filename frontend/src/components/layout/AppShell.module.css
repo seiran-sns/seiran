@@ -209,6 +209,10 @@
   display: none;
 }
 
+.floatingSearchBtn {
+  display: none;
+}
+
 /* ── スマホ用モバイルドロワー ───────────────────────────────── */
 .mobileBackdrop {
   position: fixed;
@@ -342,6 +346,38 @@
 }
 
 @media (max-width: 768px) {
+  .floatingSearchBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    left: 38%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--accent-strong);
+    color: #ffffff;
+    border: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+    cursor: pointer;
+    z-index: 1000;
+  }
+
+  .floatingSearchBtn:hover {
+    background: var(--accent-hover);
+    transform: translateX(-50%) scale(1.05);
+  }
+
+  .floatingSearchBtn:active {
+    transform: translateX(-50%) scale(0.95);
+  }
+
+  .floatingSearchIcon {
+    font-size: 1.4rem;
+    line-height: 1;
+  }
   .desktopLeftNav {
     display: none !important;
   }
@@ -455,7 +491,7 @@
     align-items: center;
     justify-content: center;
     position: fixed;
-    left: 50%;
+    left: 63%;
     bottom: 20px;
     transform: translateX(-50%);
     width: 52px;

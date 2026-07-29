@@ -232,5 +232,5 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
 | データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`, `DATABASE_URL` |
 | ジョブキュー | `REDIS_URL`（split-role構成専用。`--role all` では不要） |
 | シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWTシークレット等は環境変数ではなく `secrets.toml` で自動生成・管理する |
-| 外部サービス連携 | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ATPハンドル検証のDNS TXT自動作成。未設定時はHTTP `.well-known` 方式のみにフォールバック）、`ATP_RELAY_URL`（Relayへの`requestCrawl`先。カンマ区切りで複数指定可、既定は`https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（`did:plc:`の登録・解決先。既定は`https://plc.directory`。E2Eテストではローカルのスタブサーバーに向ける）、`ATP_APPVIEW_URL`（Bsky AppViewのベースURL。既定は`https://public.api.bsky.app`。E2Eテストではローカルのスタブサーバーに向ける） |
+| 外部サービス連携 | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ATPハンドル検証のDNS TXT自動作成。未設定時はHTTP `.well-known` 方式のみにフォールバック）、`ATP_RELAY_URL`（Relayへの`requestCrawl`先。カンマ区切りで複数指定可、既定は`https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（`did:plc:`の登録・解決先。既定は`https://plc.directory`。E2Eテストではローカルのスタブサーバーに向ける）、`ATP_APPVIEW_URL`（Bsky AppViewのベースURL。既定は`https://api.bsky.app`。E2Eテストではローカルのスタブサーバーに向ける） |
 | SMTP | 環境変数では設定しない。`site_settings` テーブルで管理し管理者API経由で設定する |

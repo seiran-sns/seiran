@@ -1,6 +1,6 @@
 //! AT Protocol AppView クライアント & PDS コミットモジュール
 //!
-//! - 公開 AppView (`public.api.bsky.app`) から過去ログを取得する（認証不要）
+//! - 公開 AppView (`api.bsky.app`) から過去ログを取得する（認証不要）
 //! - PDS への createSession + createRecord でポストを送信する（要 App Password）
 
 use chrono::{DateTime, Duration, Utc};
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// E2E テストではローカルのスタブサーバーに向けるために使う。
 fn appview_base_url() -> String {
     std::env::var("ATP_APPVIEW_URL")
-        .unwrap_or_else(|_| "https://public.api.bsky.app".to_string())
+        .unwrap_or_else(|_| "https://api.bsky.app".to_string())
         .trim_end_matches('/')
         .to_string()
 }
@@ -454,6 +454,14 @@ pub async fn search_appview_posts(
         }
     };
 
+    if !resp.status().is_success() {
+        tracing::error!(
+            "[atp::search_appview_posts] AppView がエラーを返しました: {} ({})",
+            resp.status(),
+            url
+        );
+        return (vec![], None);
+    }
     let json: serde_json::Value = match resp.json().await {
         Ok(j) => j,
         Err(e) => {

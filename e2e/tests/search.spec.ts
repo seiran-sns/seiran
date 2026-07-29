@@ -25,6 +25,7 @@ test("AppViewの未知投稿を保存してuntil/sinceページングへ統合�
             did,
             handle: `search-${Date.now().toString(36)}.bsky.social`,
             displayName: "AppView Search User",
+            avatar: "https://example.com/appview-avatar.png",
           },
         },
       ],
@@ -37,9 +38,22 @@ test("AppViewの未知投稿を保存してuntil/sinceページングへ統合�
     { headers: { Authorization: `Bearer ${viewer.token}` } },
   );
   expect(initial.ok(), await initial.text()).toBeTruthy();
-  expect((await initial.json()).notes.map((note: { text: string }) => note.text)).toContain(
-    appviewText,
+  const initialBody = (await initial.json()) as {
+    notes: { text: string; user: { avatarUrl?: string } }[];
+  };
+  expect(initialBody.notes.map((note) => note.text)).toContain(appviewText);
+  expect(initialBody.notes.find((note) => note.text === appviewText)?.user.avatarUrl).toBe(
+    "https://example.com/appview-avatar.png",
   );
+
+  const misskey = await request.post("/api/notes/search", {
+    headers: { Authorization: `Bearer ${viewer.token}` },
+    data: { query: unique, limit: 10 },
+  });
+  expect(misskey.ok(), await misskey.text()).toBeTruthy();
+  expect(
+    ((await misskey.json()) as { text: string }[]).map((note) => note.text),
+  ).toContain(appviewText);
 
   const anchor = await request.post("/api/notes/create", {
     headers: { Authorization: `Bearer ${viewer.token}` },

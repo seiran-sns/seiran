@@ -193,7 +193,7 @@ fn merge_sort_dedup_and_split(mut ids: Vec<i64>, limit: usize) -> (Vec<i64>, Vec
     (return_ids, ids)
 }
 
-async fn search_local_db(
+pub(crate) async fn search_local_db(
     db: &sqlx::PgPool,
     query: &str,
     fetch_limit: i64,
@@ -226,7 +226,7 @@ async fn search_local_db(
 }
 
 /// AppView検索結果のactor/postをローカルDBへupsertし、ローカルpost IDへ変換する。
-async fn persist_appview_posts(
+pub(crate) async fn persist_appview_posts(
     state: &AppState,
     posts: Vec<seiran_common::atp::BskyPost>,
 ) -> Vec<i64> {
@@ -296,8 +296,12 @@ async fn fetch_and_respond(
     }
 
     let mut rows = sqlx::query_as::<_, TimelinePost>(
-        "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name, p.mention_facets
+        "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
+                a.actor_type::text AS actor_type, p.mention_facets, p.at_uri AS post_at_uri,
+                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url
          FROM posts p JOIN actors a ON a.id = p.actor_id
+         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
          WHERE p.id = ANY($1) AND p.deleted_at IS NULL
          ORDER BY p.id DESC",
     )

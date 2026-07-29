@@ -33,6 +33,7 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "notes/reactions",
         "notes/reactions/create",
         "notes/reactions/delete",
+        "notes/search",
         "notes/show",
         "notes/timeline",
         "notes/unrenote",
@@ -66,6 +67,87 @@ pub struct TimelineBody {
     pub limit: Option<i64>,
     pub since_id: Option<String>,
     pub until_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotesSearchBody {
+    pub query: String,
+    pub limit: Option<i64>,
+    pub until_id: Option<String>,
+}
+
+/// POST /api/notes/search（Misskey互換、Aria等）
+pub async fn notes_search(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<NotesSearchBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let query = body.query.trim();
+    if query.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let limit = body.limit.unwrap_or(30).clamp(1, 100);
+    let until_id = body.until_id.as_deref().and_then(|id| id.parse().ok());
+    let viewer_name = if let Some(actor_id) = my_actor_id {
+        state
+            .actors
+            .find_by_id(actor_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|actor| actor.username)
+    } else {
+        None
+    };
+    let until = if let Some(id) = until_id {
+        sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+            "SELECT created_at FROM posts WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+    } else {
+        None
+    };
+    let (local_ids, (appview_posts, _)) = tokio::join!(
+        crate::handlers::search::search_local_db(
+            &state.db,
+            query,
+            limit,
+            until_id,
+            None,
+            my_actor_id.zip(viewer_name.as_deref()),
+        ),
+        seiran_common::atp::search_appview_posts(
+            &state.http_client,
+            query,
+            None,
+            limit as usize,
+            until,
+        ),
+    );
+    let mut ids = local_ids;
+    ids.append(&mut crate::handlers::search::persist_appview_posts(&state, appview_posts).await);
+    ids.sort_unstable_by(|a, b| b.cmp(a));
+    ids.dedup();
+    ids.truncate(limit as usize);
+
+    let mut rows = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Some(post) = state
+            .posts
+            .find_by_id_for_viewer(id, my_actor_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+        {
+            rows.push(post);
+        }
+    }
+    Ok(Json(build_notes(&state, rows, my_actor_id).await))
 }
 
 #[derive(Deserialize)]
