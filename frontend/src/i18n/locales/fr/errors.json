@@ -36,6 +36,8 @@
   "PASSWORD_TOO_SHORT": "Le mot de passe doit contenir au moins 8 caractères",
   "PIN_NOT_FOUND": "Épingle introuvable",
   "PRIVATE_POST_NOT_REPOSTABLE": "Les messages privés ne peuvent pas être republiés",
+  "PRIVATE_POST_NOT_QUOTABLE": "Les messages privés ne peuvent pas être cités",
+  "CANNOT_QUOTE_UNLISTED_PUBLICLY": "Les messages non listés ne peuvent être cités qu'avec une visibilité non listée ou privée",
   "REACTION_NOT_FOUND": "Réaction introuvable",
   "REGISTRATION_TOKEN_INVALID": "Veuillez vérifier à nouveau votre adresse e-mail",
   "RENOTE_TARGET_NOT_FOUND": "Le message à republier n'a pas été trouvé",

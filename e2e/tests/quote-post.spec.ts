@@ -90,3 +90,77 @@ test("投稿カードの引用ボタンからコメント付き引用を作成�
     quote: { text: originalText },
   });
 });
+
+test("非公開（followers_only/direct）投稿の引用作成はAPIで拒否される（403 FORBIDDEN）", async ({ request }) => {
+  const user = await registerUserViaApi(request, "e2equoteprivate");
+  const headers = { Authorization: `Bearer ${user.token}` };
+
+  const privateRes = await request.post("/api/notes/create", {
+    headers,
+    data: {
+      text: "非公開投稿の本文",
+      visibility: "followers_only",
+      deliver_to_fedi: false,
+      deliver_to_bsky: false,
+    },
+  });
+  expect(privateRes.ok()).toBeTruthy();
+  const privatePost = (await privateRes.json()) as { id: string };
+
+  const quoteRes = await request.post("/api/notes/create", {
+    headers,
+    data: {
+      text: "非公開投稿を引用しようとする試み",
+      quote_of_id: privatePost.id,
+      visibility: "public",
+      deliver_to_fedi: false,
+      deliver_to_bsky: false,
+    },
+  });
+  expect(quoteRes.status()).toBe(403);
+});
+
+test("ひかえめ（unlisted）投稿をpublicで引用すると400エラーになり、unlistedで引用すると成功する", async ({ request }) => {
+  const user = await registerUserViaApi(request, "e2equoteunlisted");
+  const headers = { Authorization: `Bearer ${user.token}` };
+
+  const unlistedRes = await request.post("/api/notes/create", {
+    headers,
+    data: {
+      text: "ひかえめ投稿の本文",
+      visibility: "unlisted",
+      deliver_to_fedi: false,
+      deliver_to_bsky: false,
+    },
+  });
+  expect(unlistedRes.ok()).toBeTruthy();
+  const unlistedPost = (await unlistedRes.json()) as { id: string };
+
+  // publicでの引用は拒否される
+  const invalidQuoteRes = await request.post("/api/notes/create", {
+    headers,
+    data: {
+      text: "ひかえめ投稿をパブリックで引用しようとする試み",
+      quote_of_id: unlistedPost.id,
+      visibility: "public",
+      deliver_to_fedi: false,
+      deliver_to_bsky: false,
+    },
+  });
+  expect(invalidQuoteRes.status()).toBe(400);
+
+  // unlistedでの引用は許可される
+  const validQuoteRes = await request.post("/api/notes/create", {
+    headers,
+    data: {
+      text: "ひかえめ投稿をひかえめで引用する",
+      quote_of_id: unlistedPost.id,
+      visibility: "unlisted",
+      deliver_to_fedi: false,
+      deliver_to_bsky: false,
+    },
+  });
+  expect(validQuoteRes.ok()).toBeTruthy();
+  const validQuote = (await validQuoteRes.json()) as { quoteId: string };
+  expect(validQuote.quoteId).toBe(unlistedPost.id);
+});

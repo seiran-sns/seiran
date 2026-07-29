@@ -36,6 +36,8 @@
   "PASSWORD_TOO_SHORT": "La contraseña debe tener al menos 8 caracteres.",
   "PIN_NOT_FOUND": "Pin no encontrado",
   "PRIVATE_POST_NOT_REPOSTABLE": "Las publicaciones privadas no se pueden volver a publicar",
+  "PRIVATE_POST_NOT_QUOTABLE": "Las publicaciones privadas no se pueden citar",
+  "CANNOT_QUOTE_UNLISTED_PUBLICLY": "Las publicaciones no listadas solo se pueden citar con visibilidad no listada o privada",
   "REACTION_NOT_FOUND": "Reacción no encontrada",
   "REGISTRATION_TOKEN_INVALID": "Por favor verifique su correo electrónico nuevamente",
   "RENOTE_TARGET_NOT_FOUND": "No se encontró la publicación para volver a publicar",

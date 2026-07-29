@@ -36,6 +36,8 @@
   "PASSWORD_TOO_SHORT": "パスワードは8文字以上で入力してください",
   "PIN_NOT_FOUND": "ピン留めが見つかりません",
   "PRIVATE_POST_NOT_REPOSTABLE": "非公開の投稿はリポストできません",
+  "PRIVATE_POST_NOT_QUOTABLE": "非公開の投稿は引用できません",
+  "CANNOT_QUOTE_UNLISTED_PUBLICLY": "ひかえめな投稿の引用は、ひかえめまたは非公開の公開範囲でのみ可能です",
   "REACTION_NOT_FOUND": "リアクションが見つかりません",
   "REGISTRATION_TOKEN_INVALID": "メール確認をやり直してください",
   "RENOTE_TARGET_NOT_FOUND": "リポスト対象の投稿が見つかりません",

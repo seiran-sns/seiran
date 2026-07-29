@@ -17,6 +17,7 @@ interface NoteCardActionsProps {
   onToggleReaction: (emoji: string) => void;
   onReply: (e?: React.MouseEvent) => void;
   onQuote: (e?: React.MouseEvent) => void;
+  isPrivateQuoteTarget?: boolean;
   reposted: boolean;
   reposting: boolean;
   unreposting: boolean;
@@ -44,6 +45,7 @@ export default function NoteCardActions({
   onToggleReaction,
   onReply,
   onQuote,
+  isPrivateQuoteTarget = false,
   reposted,
   reposting,
   unreposting,
@@ -76,6 +78,7 @@ export default function NoteCardActions({
       key: "quote",
       label: `❝ ${t("home:noteCard.quoteButton")}`,
       onClick: () => onQuote(),
+      disabled: isPrivateQuoteTarget,
     },
     {
       key: "repost",
@@ -135,7 +138,12 @@ export default function NoteCardActions({
         <button
           className={styles.actionBtn}
           onClick={onQuote}
-          title={t("home:noteCard.quoteButton")}
+          disabled={isPrivateQuoteTarget}
+          title={
+            isPrivateQuoteTarget
+              ? t("home:noteCard.quoteDisabledTitle")
+              : t("home:noteCard.quoteButton")
+          }
         >
           ❝ {t("home:noteCard.quoteButton")}
         </button>

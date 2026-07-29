@@ -36,6 +36,8 @@
   "PASSWORD_TOO_SHORT": "Das Passwort muss mindestens 8 Zeichen lang sein",
   "PIN_NOT_FOUND": "Pin nicht gefunden",
   "PRIVATE_POST_NOT_REPOSTABLE": "Private Beiträge können nicht erneut gepostet werden",
+  "PRIVATE_POST_NOT_QUOTABLE": "Private Beiträge können nicht zitiert werden",
+  "CANNOT_QUOTE_UNLISTED_PUBLICLY": "Nicht gelistete Beiträge können nur mit nicht gelisteter oder privater Sichtbarkeit zitiert werden",
   "REACTION_NOT_FOUND": "Reaktion nicht gefunden",
   "REGISTRATION_TOKEN_INVALID": "Bitte bestätigen Sie Ihre E-Mail-Adresse erneut",
   "RENOTE_TARGET_NOT_FOUND": "Der erneut zu veröffentlichende Beitrag wurde nicht gefunden",
