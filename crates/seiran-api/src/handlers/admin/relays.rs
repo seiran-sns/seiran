@@ -24,7 +24,8 @@ use crate::AppState;
 
 #[derive(Serialize)]
 pub struct RelayResponse {
-    pub id: i64,
+    /// Snowflake ID は JavaScript の安全整数範囲を超えるため文字列で返す。
+    pub id: String,
     pub inbox_url: String,
     pub status: String,
     pub last_error: Option<String>,
@@ -35,7 +36,7 @@ pub struct RelayResponse {
 impl From<Relay> for RelayResponse {
     fn from(r: Relay) -> Self {
         Self {
-            id: r.id,
+            id: r.id.to_string(),
             inbox_url: r.inbox_url,
             status: r.status.as_str().to_string(),
             last_error: r.last_error,
@@ -206,7 +207,9 @@ pub async fn delete_relay(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_inbox_url;
+    use super::{validate_inbox_url, RelayResponse};
+    use chrono::Utc;
+    use seiran_common::repository::{Relay, RelayStatus};
 
     #[tokio::test]
     async fn accepts_public_https_inbox_url() {
@@ -221,5 +224,22 @@ mod tests {
             .is_err());
         assert!(validate_inbox_url("https://127.0.0.1/inbox").await.is_err());
         assert!(validate_inbox_url("not a url").await.is_err());
+    }
+
+    #[test]
+    fn serializes_snowflake_id_without_javascript_rounding() {
+        let now = Utc::now();
+        let response = RelayResponse::from(Relay {
+            id: 117_001_761_839_251_466,
+            inbox_url: "https://relay.example/inbox".into(),
+            status: RelayStatus::Pending,
+            follow_activity_id: "https://example.com/activities/follow/relay-1".into(),
+            last_error: None,
+            created_at: now,
+            updated_at: now,
+        });
+
+        let json = serde_json::to_value(response).expect("relay response must serialize");
+        assert_eq!(json["id"], "117001761839251466");
     }
 }

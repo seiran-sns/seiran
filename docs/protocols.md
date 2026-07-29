@@ -377,5 +377,6 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 管理者が登録したHTTPSのinbox URLへ、専用ローカルactor
 `https://{domain}/users/relay-agent` からHTTP署名付きFollowを送る。Accept/Rejectは
 Follow activity IDと照合して状態更新し、離脱時は元Followを内包したUndoを送る。
+管理APIはSnowflake IDをJavaScriptで丸めないよう文字列として返し、離脱APIのパスにもその文字列をそのまま使用する。
 `accepted` のリレーには `visibility='public'` のローカル投稿だけを通常配送と同じ署名・
 再試行経路で追加配送し、限定・フォロワー限定・DMは配送しない。

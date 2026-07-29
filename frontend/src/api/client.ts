@@ -268,7 +268,7 @@ export interface RemoteEmoji {
 }
 
 export interface FediverseRelay {
-  id: number;
+  id: string;
   inbox_url: string;
   status: "pending" | "accepted" | "rejected";
   last_error: string | null;
@@ -1380,7 +1380,7 @@ export const api = {
     createRelay(inbox_url: string) {
       return request<FediverseRelay>("POST", "/admin/relays", { inbox_url });
     },
-    deleteRelay(id: number) {
+    deleteRelay(id: string) {
       return request<void>("DELETE", `/admin/relays/${encodeURIComponent(id)}`);
     },
   },
