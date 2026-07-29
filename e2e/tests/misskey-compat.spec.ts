@@ -5,11 +5,106 @@ import { startStubS3Server } from "../fixtures/stub-s3-server";
 const ADMIN_USERNAME = "e2ebootstrap";
 const ADMIN_PASSWORD = "seiranda-e2e";
 
+test("Misskey互換API: endpointsでemojisを検出して絵文字一覧を取得できる（#145）", async ({
+  request,
+}) => {
+  const endpointsRes = await request.post("/api/endpoints", { data: {} });
+  expect(endpointsRes.ok(), await endpointsRes.text()).toBeTruthy();
+  expect(await endpointsRes.json()).toContain("emojis");
+
+  const emojisRes = await request.post("/api/emojis", { data: {} });
+  expect(emojisRes.ok(), await emojisRes.text()).toBeTruthy();
+  expect(await emojisRes.json()).toEqual(
+    expect.objectContaining({ emojis: expect.any(Array) }),
+  );
+});
+
 // 1x1 透明PNG。
 const MINIMAL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+test("Misskey互換API: Aria形式のローカルカスタム絵文字でリアクションできる（#145）", async ({
+  request,
+}) => {
+  const s3 = await startStubS3Server();
+  let providerId: string | null = null;
+  let adminToken: string | null = null;
+  try {
+    const alice = await registerUserViaApi(request, "e2emkreacta");
+    const bob = await registerUserViaApi(request, "e2emkreactb");
+    adminToken = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
+
+    const providerRes = await request.post("/api/admin/storage-providers", {
+      headers: { Authorization: `Bearer ${adminToken}` },
+      data: {
+        name: `e2e-misskey-reaction-${Date.now()}`,
+        endpoint: s3.url,
+        bucket: "e2e-test",
+        access_key: "stub",
+        secret_key: "stub",
+        public_url: `${s3.url}/e2e-test`,
+      },
+    });
+    expect(providerRes.ok(), await providerRes.text()).toBeTruthy();
+    providerId = (await providerRes.json()).id;
+
+    const uploadRes = await request.post("/api/drive/files/create", {
+      headers: { Authorization: `Bearer ${bob.token}` },
+      multipart: {
+        file: {
+          name: "emoji.png",
+          mimeType: "image/png",
+          buffer: MINIMAL_PNG,
+        },
+        media_type: "emoji",
+      },
+    });
+    expect(uploadRes.ok(), await uploadRes.text()).toBeTruthy();
+    const uploaded = await uploadRes.json();
+
+    const shortcode = `mkreact${Date.now().toString(36)}`;
+    const emojiRes = await request.post("/api/admin/emojis", {
+      headers: { Authorization: `Bearer ${adminToken}` },
+      data: { shortcode, media_file_id: uploaded.id },
+    });
+    expect(emojiRes.ok(), await emojiRes.text()).toBeTruthy();
+
+    const createRes = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${alice.token}` },
+      data: { text: `Ariaリアクションテスト ${Date.now()}` },
+    });
+    expect(createRes.ok(), await createRes.text()).toBeTruthy();
+    const note = await createRes.json();
+
+    const reactRes = await request.post("/api/notes/reactions/create", {
+      headers: { Authorization: `Bearer ${bob.token}` },
+      data: { noteId: note.id, reaction: `:${shortcode}@.:` },
+    });
+    expect(
+      reactRes.ok(),
+      `Aria形式リアクション失敗: ${reactRes.status()} ${await reactRes.text()}`,
+    ).toBeTruthy();
+
+    const showRes = await request.post("/api/notes/show", {
+      headers: { Authorization: `Bearer ${bob.token}` },
+      data: { noteId: note.id },
+    });
+    expect(showRes.ok(), await showRes.text()).toBeTruthy();
+    const shown = await showRes.json();
+    expect(shown.reactions[`:${shortcode}:`]).toBe(1);
+    expect(shown.myReaction).toBe(`:${shortcode}:`);
+  } finally {
+    if (providerId && adminToken) {
+      await request.patch(`/api/admin/storage-providers/${providerId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+        data: { is_active: false },
+      });
+    }
+    await s3.close();
+  }
+});
 
 test("Misskey互換API: リポストのnotes/showでrenoteに元ノート本体が埋め込まれる（#74）", async ({ request }) => {
   const alice = await registerUserViaApi(request, "e2emkrenotea");

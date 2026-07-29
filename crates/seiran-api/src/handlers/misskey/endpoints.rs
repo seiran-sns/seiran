@@ -12,6 +12,36 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+
+/// POST /api/endpoints
+///
+/// Misskeyクライアントが利用可能なAPIを機能検出するための一覧。
+/// Ariaはここに`emojis`がある場合だけ`POST /api/emojis`を呼ぶ。
+pub async fn endpoints() -> Json<Vec<&'static str>> {
+    Json(vec![
+        "drive/files/create",
+        "emojis",
+        "following/create",
+        "following/delete",
+        "i",
+        "i/notifications",
+        "meta",
+        "notes/create",
+        "notes/global-timeline",
+        "notes/hybrid-timeline",
+        "notes/local-timeline",
+        "notes/reactions",
+        "notes/reactions/create",
+        "notes/reactions/delete",
+        "notes/show",
+        "notes/timeline",
+        "notes/unrenote",
+        "users/followers",
+        "users/following",
+        "users/notes",
+        "users/show",
+    ])
+}
 use serde::Deserialize;
 
 use crate::error::ApiError;
@@ -49,6 +79,15 @@ pub struct NoteIdBody {
 pub struct ReactionCreateBody {
     pub note_id: String,
     pub reaction: String,
+}
+
+/// Misskey はローカルのカスタム絵文字を `:shortcode@.:` 形式で送る。
+/// seiran の内部表現は `:shortcode:` なので、Misskey 互換 API の境界で変換する。
+fn normalize_local_reaction(reaction: &str) -> String {
+    reaction
+        .strip_prefix(':')
+        .and_then(|value| value.strip_suffix("@.:"))
+        .map_or_else(|| reaction.to_owned(), |shortcode| format!(":{shortcode}:"))
 }
 
 #[derive(Deserialize, Default)]
@@ -363,12 +402,32 @@ pub async fn reactions_create(
         user,
         State(state),
         Json(ReactRequest {
-            content: body.reaction,
+            content: normalize_local_reaction(&body.reaction),
         }),
     )
     .await
     .into_response();
     as_no_content(resp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_local_reaction;
+
+    #[test]
+    fn normalizes_misskey_local_custom_emoji_reaction() {
+        assert_eq!(normalize_local_reaction(":blob_cat@.:"), ":blob_cat:");
+    }
+
+    #[test]
+    fn leaves_unicode_and_canonical_reactions_unchanged() {
+        assert_eq!(normalize_local_reaction("🎉"), "🎉");
+        assert_eq!(normalize_local_reaction(":blob_cat:"), ":blob_cat:");
+        assert_eq!(
+            normalize_local_reaction(":blob_cat@example.com:"),
+            ":blob_cat@example.com:"
+        );
+    }
 }
 
 /// POST /api/notes/reactions/delete

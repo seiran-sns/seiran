@@ -87,7 +87,7 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 ローカルユーザーがカスタム絵文字（`:shortcode:`）でリアクションすると、`build_reaction_object`（`ap/deliver.rs`）が Misskey/Fedibird 互換の `tag: [{"type":"Emoji","name":":shortcode:","icon":{"type":"Image","url":...}}]` を付与した `EmojiReact` を組み立てる。`content`/`_misskey_reaction` には `:shortcode:` 形式の文字列をそのまま載せる。受信側の `build_emoji_map`/`extract_emoji_tag_url`（`ap/client.rs`・`jobs/inbound_activity_process.rs`）と対称的なペアになっている。画像URLの解決は `EmojiRepository::find_url_by_shortcode`（`custom_emojis`/`media_files`/`storage_providers` を JOIN）で行い、未登録shortcodeは `INVALID_REACTION_CONTENT`/`UNKNOWN_EMOJI` として拒否する（`handlers/notes/validation.rs`・`handlers/notes/mod.rs::create_reaction`）。ATP（Bsky）はカスタム絵文字非対応のため、`commit_like` の `emoji` 拡張フィールドに `:shortcode:` 文字列をベストエフォートで載せるのみ（画像は送らない）。
 
 ### 投稿本文のカスタム絵文字
-ローカル投稿は作成時に本文の`:shortcode:`を`custom_emojis`と一括照合して`posts.emoji_map`へ保存する。ActivityPub配送時は保存済みmapのうち配送本文に実際に現れるものを`tag: [{"type":"Emoji","name":":shortcode:","icon":{"type":"Image","url":...}}]`へ変換し、Mention/Hashtag tagと併送する。受信側が`object.id`を再取得する実装でも情報を失わないよう、canonicalな`GET /notes/{id}`のNote表現にも同じEmoji tagを含める。AP受信はNoteのEmoji tagを第一情報源とし、送信元がtagを欠落させた場合のみ、同一ドメインから過去に収集した`remote_emojis`で本文shortcodeを補完する。Bluesky Jetstream受信でも、本文shortcodeをローカル`custom_emojis`と照合して`emoji_map`を保存する（いずれも#126）。
+ローカル投稿は作成時に本文の`:shortcode:`を`custom_emojis`と一括照合して`posts.emoji_map`へ保存する。ActivityPub配送時は保存済みmapのうち配送本文に実際に現れるものを`tag: [{"type":"Emoji","name":":shortcode:","icon":{"type":"Image","url":...}}]`へ変換し、Mention/Hashtag tagと併送する。受信側が`object.id`を再取得する実装でも情報を失わないよう、canonicalな`GET /notes/{id}`のNote表現にも同じEmoji tagを含める。AP受信はNoteのEmoji tagを第一情報源とし、送信元がtagを欠落させた場合は同一ドメインから過去に収集した`remote_emojis`で本文shortcodeを補完する。さらにリレー等がCreateの埋め込みNoteから未知のEmoji tagを省略している場合は、未解決shortcodeを検出したときだけ`object.id`のcanonical NoteをAP取得し、そこからtagを補完する（#148）。Bluesky Jetstream受信でも、本文shortcodeをローカル`custom_emojis`と照合して`emoji_map`を保存する（いずれも#126）。
 
 ## 3. AT Protocol (Bsky) 統合
 
@@ -264,6 +264,9 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 **通知の `user.avatarUrl` 解決**: `build_notifications` の通知起点ユーザー取得クエリは、ローカルユーザーのアバターを `actors.avatar_media_id → media_files → storage_providers` 経由で解決する（`build_user_detailed` 等、他の全ユーザー取得クエリと同じ `COALESCE(rtrim(sp.public_url,'/')||'/'||mf.storage_key, a.avatar_url)` パターン）。以前は `actors.avatar_url` を直接参照していたためローカルユーザーのアバターが常に欠落していた（同カラムはリモートアクター用の生URL格納にのみ使われるため）。
 
 **`MisskeyUserDetailed.followersVisibility`/`followingVisibility`**: 本家Misskeyのフォロー/フォロワー一覧・数の公開範囲設定に相当するフィールド。seiranはこの設定自体に未対応のため常に `"public"` を返す。値が欠落しているとクライアントは非公開とみなし、`followersCount`/`followingCount`（値自体は正しく集計されている）の数値表示を鍵アイコンに置き換える。
+
+`POST /api/endpoints`は実装済みのMisskey互換API名を配列で返す。Ariaはこの一覧に`emojis`がある場合だけ`POST /api/emojis`を呼ぶため、絵文字一覧は既存の`GET /api/emojis`と同じ`fetch_public_emojis`からGET/POST両対応で返す（#145）。
+`POST /api/notes/reactions/create`では、Misskeyクライアントがローカルカスタム絵文字に用いる`:shortcode@.:`を、seiranの内部表現`:shortcode:`へAPI境界で正規化する。Unicode絵文字と既存の`:shortcode:`はそのまま扱い、リモートホスト付き絵文字はローカル絵文字へ誤変換しない（#145）。
 
 ## 8. 通知・リアルタイム配信
 
