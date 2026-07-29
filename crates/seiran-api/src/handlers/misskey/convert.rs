@@ -147,10 +147,14 @@ fn to_misskey_visibility(v: &str) -> String {
 
 /// seiranのemoji_map（`:shortcode:` → URL）をMisskey Noteの`emojis`
 /// （`shortcode` → URL）へ変換する。
-fn to_misskey_emojis(value: Option<&serde_json::Value>) -> BTreeMap<String, String> {
-    value
-        .and_then(serde_json::Value::as_object)
+fn to_misskey_emojis(
+    post_emojis: Option<&serde_json::Value>,
+    actor_emojis: Option<&serde_json::Value>,
+) -> BTreeMap<String, String> {
+    post_emojis
         .into_iter()
+        .chain(actor_emojis)
+        .filter_map(serde_json::Value::as_object)
         .flat_map(|map| map.iter())
         .filter_map(|(key, value)| {
             let url = value.as_str()?;
@@ -275,7 +279,10 @@ fn to_misskey_note(
         file_ids: files.iter().map(|f| f.id.clone()).collect(),
         files,
         tags: vec![],
-        emojis: to_misskey_emojis(p.post_emoji_map.as_ref()),
+        // ActivityPub投稿の絵文字は、投稿固有のタグだけでなくactor取得時の
+        // emoji_mapに保持される場合がある。カスタムAPIのNoteResponseと同様に
+        // 両方を統合し、Aria等のMisskeyクライアントへ画像URLを返す。
+        emojis: to_misskey_emojis(p.post_emoji_map.as_ref(), p.actor_emoji_map.as_ref()),
         reactions: reactions_map,
         reaction_emojis,
         renote: None,
@@ -585,6 +592,22 @@ mod tests {
             Some("https://example.com/blob-cat.png")
         );
         assert!(!note.emojis.contains_key(":blob_cat:"));
+    }
+
+    #[test]
+    fn note_emojis_include_actor_map_for_activitypub_notes() {
+        let mut p = base_post();
+        p.body = ":mozu_police: hello".to_string();
+        p.actor_emoji_map = Some(serde_json::json!({
+            ":mozu_police:": "https://remote.example/mozu-police.png"
+        }));
+
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+
+        assert_eq!(
+            note.emojis.get("mozu_police").map(String::as_str),
+            Some("https://remote.example/mozu-police.png")
+        );
     }
 
     // 実際の投稿作成処理（handlers::notes::mod.rs）は、Federation配送のIDとして使うため
