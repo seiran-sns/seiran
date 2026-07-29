@@ -813,6 +813,10 @@ pub fn router(state: AppState) -> Router {
         )
         // Misskey 互換レイヤー
         .route("/api/meta", post(handlers::meta::api_meta))
+        .route(
+            "/api/endpoints",
+            post(handlers::misskey::endpoints::endpoints),
+        )
         // カスタム絵文字一覧（未認証・Misskey クライアントのリアクションピッカー用）
         // Misskey 本家は `allowGet: true` でGET/POST両対応。Aria 等のクライアントは
         // POST で呼ぶため、GET のみだと 405 Method Not Allowed になり絵文字が出ない。

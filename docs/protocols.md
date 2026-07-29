@@ -259,6 +259,9 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 
 **`MisskeyUserDetailed.followersVisibility`/`followingVisibility`**: 本家Misskeyのフォロー/フォロワー一覧・数の公開範囲設定に相当するフィールド。seiranはこの設定自体に未対応のため常に `"public"` を返す。値が欠落しているとクライアントは非公開とみなし、`followersCount`/`followingCount`（値自体は正しく集計されている）の数値表示を鍵アイコンに置き換える。
 
+`POST /api/endpoints`は実装済みのMisskey互換API名を配列で返す。Ariaはこの一覧に`emojis`がある場合だけ`POST /api/emojis`を呼ぶため、絵文字一覧は既存の`GET /api/emojis`と同じ`fetch_public_emojis`からGET/POST両対応で返す（#145）。
+`POST /api/notes/reactions/create`では、Misskeyクライアントがローカルカスタム絵文字に用いる`:shortcode@.:`を、seiranの内部表現`:shortcode:`へAPI境界で正規化する。Unicode絵文字と既存の`:shortcode:`はそのまま扱い、リモートホスト付き絵文字はローカル絵文字へ誤変換しない（#145）。
+
 ## 8. 通知・リアルタイム配信
 
 `seiran-common::streaming::StreamHub`（プロセス内 `tokio::broadcast`、容量512）が `{"type":kind,"body":body}` を配信する。`GET /api/streaming?token=<JWT>` でWebSocket接続し、`recipients` に自分の actor_id が含まれるイベントのみ転送される。
