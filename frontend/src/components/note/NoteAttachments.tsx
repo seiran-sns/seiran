@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NoteAttachment } from "../../api/client";
-import HlsVideo from "./HlsVideo";
 import ImageLightbox from "../common/ImageLightbox";
+import HlsVideo from "./HlsVideo";
 import styles from "./NoteCard.module.css";
 import { mediaUrl } from "../../utils/mediaProxy";
 
@@ -10,16 +10,22 @@ interface NoteAttachmentsProps {
   attachments?: NoteAttachment[];
 }
 
+function isImage(att: NoteAttachment) {
+  const isHls =
+    att.mimeType === "application/vnd.apple.mpegurl" ||
+    att.mimeType === "application/x-mpegURL";
+  return !att.mimeType.startsWith("video/") && !att.mimeType.startsWith("audio/") && !isHls;
+}
+
 /** 投稿に添付されたメディア（画像/動画/HLS/音声）一覧の表示。 */
 export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
   const { t } = useTranslation();
-  const [lightbox, setLightbox] = useState<{
-    src: string;
-    sensitive: boolean;
-  } | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [revealed, setRevealed] = useState<Set<number>>(() => new Set());
 
   if (!attachments || attachments.length === 0) return null;
+
+  const images = attachments.filter(isImage);
 
   return (
     <div className={styles.attachments}>
@@ -50,13 +56,17 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
             />
           );
         }
+
         const isRevealed = revealed.has(i);
+        const imageIndex = images.indexOf(att);
         return (
           <div key={i} className={styles.sensitiveImageWrap}>
             <img
               src={mediaUrl(att.url)}
               alt=""
-              className={`${styles.attachImage} ${att.isSensitive && !isRevealed ? styles.attachBlurred : ""}`}
+              className={`${styles.attachImage} ${
+                att.isSensitive && !isRevealed ? styles.attachBlurred : ""
+              }`}
               loading="lazy"
               onClick={(e) => {
                 e.stopPropagation();
@@ -67,10 +77,7 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
                     return next;
                   });
                 } else {
-                  setLightbox({
-                    src: mediaUrl(att.url) ?? att.url,
-                    sensitive: att.isSensitive,
-                  });
+                  setLightboxIndex(imageIndex);
                 }
               }}
             />
@@ -90,9 +97,23 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
         );
       })}
       <ImageLightbox
-        src={lightbox?.src ?? null}
-        sensitive={lightbox?.sensitive}
-        onClose={() => setLightbox(null)}
+        src={
+          lightboxIndex === null
+            ? null
+            : (mediaUrl(images[lightboxIndex]?.url) ?? images[lightboxIndex]?.url ?? null)
+        }
+        sensitive={lightboxIndex === null ? false : images[lightboxIndex]?.isSensitive}
+        onClose={() => setLightboxIndex(null)}
+        onPrevious={
+          lightboxIndex !== null && lightboxIndex > 0
+            ? () => setLightboxIndex(lightboxIndex - 1)
+            : undefined
+        }
+        onNext={
+          lightboxIndex !== null && lightboxIndex < images.length - 1
+            ? () => setLightboxIndex(lightboxIndex + 1)
+            : undefined
+        }
       />
     </div>
   );
