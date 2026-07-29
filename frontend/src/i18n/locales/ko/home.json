@@ -76,6 +76,11 @@
     "emptyDefault": "게시물이 없습니다."
   },
   "postComposer": {
+    "deliverFediHint": "페디버스로 전송",
+    "deliverBskyHint": "Bluesky로 전송",
+    "visibilityPublicHint": "공개: 누구나 볼 수 있음",
+    "visibilityUnlistedHint": "조용히 공개: 누구나 볼 수 있지만 로컬·글로벌 타임라인에는 표시하지 않음",
+    "visibilityPrivateHint": "비공개: 팔로워만 볼 수 있음",
     "replyModalTitle": "회신하다",
     "quoteModalTitle": "게시물 인용",
     "bskyPrivateConflict": "Bsky 전송이 켜져 있는 동안에는 비공개를 선택할 수 없습니다. 변경하려면 Bsky 전달을 끄세요.",

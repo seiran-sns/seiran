@@ -76,6 +76,11 @@
     "emptyDefault": "Keine Beiträge."
   },
   "postComposer": {
+    "deliverFediHint": "An das Fediverse senden",
+    "deliverBskyHint": "An Bluesky senden",
+    "visibilityPublicHint": "Öffentlich: für alle sichtbar",
+    "visibilityUnlistedHint": "Nicht gelistet: sichtbar, aber nicht in lokalen und globalen Timelines",
+    "visibilityPrivateHint": "Privat: nur für Follower sichtbar",
     "replyModalTitle": "Antwort",
     "quoteModalTitle": "Beitrag zitieren",
     "bskyPrivateConflict": "Sie können „Privat“ nicht auswählen, während die Bsky-Zustellung aktiviert ist. Deaktivieren Sie die Bsky-Zustellung, um sie zu ändern.",

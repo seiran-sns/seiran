@@ -4,6 +4,7 @@ import { api, DriveFile, Note, getErrorMessage } from "../../api/client";
 import { acct, calcRemaining, displayName } from "../../lib/format";
 import styles from "./PostComposer.module.css";
 import ComposerEditor from "./ComposerEditor";
+import blueskyLogo from "../../assets/bluesky-logo.svg";
 
 interface PostComposerProps {
   onPosted?: (note: Note) => void;
@@ -45,7 +46,13 @@ export function quoteVisibilityConstraint(quoteTo?: Note): {
   return { defaultValue: "public" };
 }
 
-export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, initialText }: PostComposerProps) {
+export default function PostComposer({
+  onPosted,
+  autoFocus,
+  replyTo,
+  quoteTo,
+  initialText,
+}: PostComposerProps) {
   const { t } = useTranslation();
   const [text, setText] = useState(initialText ?? "");
   const [deliverFedi, setDeliverFedi] = useState(true);
@@ -53,7 +60,10 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
   const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo) : null;
   const quoteConstraint = quoteTo ? quoteVisibilityConstraint(quoteTo) : null;
   const [visibility, setVisibility] = useState<Visibility>(
-    () => replyConstraint?.defaultValue ?? quoteConstraint?.defaultValue ?? "public"
+    () =>
+      replyConstraint?.defaultValue ??
+      quoteConstraint?.defaultValue ??
+      "public",
   );
   const [guideMessage, setGuideMessage] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
@@ -77,7 +87,10 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
   function showGuide(message: string) {
     setGuideMessage(message);
     if (guideTimerRef.current) window.clearTimeout(guideTimerRef.current);
-    guideTimerRef.current = window.setTimeout(() => setGuideMessage(null), 3200);
+    guideTimerRef.current = window.setTimeout(
+      () => setGuideMessage(null),
+      3200,
+    );
   }
 
   // Bsky はプロトコル上 followers_only（プライベート）投稿を配信できないため相互排他。
@@ -127,7 +140,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
         undefined,
         visibility,
         undefined,
-        quoteTo?.id
+        quoteTo?.id,
       );
       setText("");
       setAttached(null);
@@ -160,11 +173,15 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
   }
 
   return (
-    <form onSubmit={handlePost} className={styles.form}>
+    <form
+      onSubmit={handlePost}
+      className={`${styles.form} ${replyTo ? styles.replyForm : ""}`}
+    >
       {replyTo && (
         <div className={styles.replyBanner}>
           <span className={styles.replyTo}>
-            {t("home:postComposer.replyToPrefix")} <strong>{displayName(replyTo)}</strong> {acct(replyTo)}
+            {t("home:postComposer.replyToPrefix")}{" "}
+            <strong>{displayName(replyTo)}</strong> {acct(replyTo)}
           </span>
           <span className={styles.replySnippet}>{replyTo.text}</span>
         </div>
@@ -172,7 +189,8 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
       {quoteTo && (
         <div className={styles.replyBanner}>
           <span className={styles.replyTo}>
-            {t("home:postComposer.quoteToPrefix")} <strong>{displayName(quoteTo)}</strong> {acct(quoteTo)}
+            {t("home:postComposer.quoteToPrefix")}{" "}
+            <strong>{displayName(quoteTo)}</strong> {acct(quoteTo)}
           </span>
           <span className={styles.replySnippet}>{quoteTo.text}</span>
         </div>
@@ -188,15 +206,19 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
       <ComposerEditor
         value={text}
         onChange={setText}
-        onSubmitShortcut={() => handlePost({ preventDefault() {} } as FormEvent)}
+        onSubmitShortcut={() =>
+          handlePost({ preventDefault() {} } as FormEvent)
+        }
         onImagePaste={(file) => {
           if (!uploading && !attached) uploadFile(file);
         }}
-        placeholder={replyTo
-          ? t("home:postComposer.replyPlaceholder")
-          : quoteTo
-          ? t("home:postComposer.quotePlaceholder")
-          : t("home:postComposer.placeholder")}
+        placeholder={
+          replyTo
+            ? t("home:postComposer.replyPlaceholder")
+            : quoteTo
+              ? t("home:postComposer.quotePlaceholder")
+              : t("home:postComposer.placeholder")
+        }
         autoFocus={autoFocus}
       />
 
@@ -233,8 +255,8 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
             {replyTo.user.actorType === "fedi"
               ? t("home:postComposer.replyToFedi")
               : replyTo.user.actorType === "bsky"
-              ? t("home:postComposer.replyToBsky")
-              : t("home:postComposer.replyToSameNetwork")}
+                ? t("home:postComposer.replyToBsky")
+                : t("home:postComposer.replyToSameNetwork")}
           </span>
         )}
         {uploading && <span className={styles.spinner} />}
@@ -278,6 +300,70 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
         </div>
       )}
 
+      {!replyTo && (
+        <div className={styles.controlRow}>
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${deliverFedi ? styles.scopeActive : ""}`}
+            onClick={() => setDeliverFedi((v) => !v)}
+            title={t("home:postComposer.deliverFediHint")}
+            aria-label={t("home:postComposer.deliverFediHint")}
+          >
+            🌐
+          </button>
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""}`}
+            onClick={handleToggleBsky}
+            title={t("home:postComposer.deliverBskyHint")}
+            aria-label={t("home:postComposer.deliverBskyHint")}
+          >
+            <img className={styles.blueskyIcon} src={blueskyLogo} alt="" />
+          </button>
+          <div className={styles.visibilityGroup}>
+            <button
+              type="button"
+              className={`${styles.visibilityBtn} ${styles.visibilityFirst} ${
+                visibility === "public" ? styles.scopeActive : ""
+              }`}
+              onClick={() => handleVisibilityChange("public")}
+              disabled={quoteTo?.visibility === "unlisted"}
+              title={t("home:postComposer.visibilityPublicHint")}
+              aria-label={t("home:postComposer.visibilityPublicHint")}
+            >
+              👥
+            </button>
+            <button
+              type="button"
+              className={`${styles.visibilityBtn} ${
+                visibility === "unlisted" ? styles.scopeActive : ""
+              }`}
+              onClick={() => handleVisibilityChange("unlisted")}
+              title={t("home:postComposer.visibilityUnlistedHint")}
+              aria-label={t("home:postComposer.visibilityUnlistedHint")}
+            >
+              🤫
+            </button>
+            <button
+              type="button"
+              className={`${styles.visibilityBtn} ${styles.visibilityLast} ${
+                visibility === "followers_only" ? styles.scopeActive : ""
+              }`}
+              onClick={() => handleVisibilityChange("followers_only")}
+              title={t("home:postComposer.visibilityPrivateHint")}
+              aria-label={t("home:postComposer.visibilityPrivateHint")}
+            >
+              🔒️
+            </button>
+          </div>
+          {guideMessage && (
+            <span className={styles.popover} role="status">
+              {guideMessage}
+            </span>
+          )}
+        </div>
+      )}
+
       {attached && (
         <div className={styles.attachPreview}>
           {attached.mimeType.startsWith("video/") ? (
@@ -285,7 +371,11 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
           ) : attached.mimeType.startsWith("audio/") ? (
             <audio src={attached.url} controls className={styles.attachAudio} />
           ) : (
-            <img src={attached.url} alt={t("home:postComposer.attachmentAlt")} className={styles.attachThumb} />
+            <img
+              src={attached.url}
+              alt={t("home:postComposer.attachmentAlt")}
+              className={styles.attachThumb}
+            />
           )}
           <button
             type="button"
@@ -307,12 +397,30 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
       )}
 
       <div className={styles.footer}>
-        <span className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}>
+        <span
+          className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}
+        >
           {t("home:postComposer.remainingCount", { count: remaining })}
         </span>
         {error && <span className={styles.error}>{error}</span>}
-        <button type="submit" className={styles.postBtn} disabled={posting || !text.trim() || overLimit}>
-          {posting ? t("home:postComposer.posting") : t("home:postComposer.postButton")}
+        <button
+          type="button"
+          className={styles.footerAttachBtn}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || !!attached}
+          title={t("home:postComposer.attachTitle")}
+          aria-label={t("home:postComposer.attachTitle")}
+        >
+          {uploading ? <span className={styles.spinner} /> : "📎"}
+        </button>
+        <button
+          type="submit"
+          className={styles.postBtn}
+          disabled={posting || !text.trim() || overLimit}
+        >
+          {posting
+            ? t("home:postComposer.posting")
+            : t("home:postComposer.postButton")}
         </button>
       </div>
     </form>
