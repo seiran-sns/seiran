@@ -142,6 +142,7 @@ function PostContent({
   const {
     isSelf,
     isPrivateRepostTarget,
+    isPrivateQuoteTarget,
     reactions,
     reactionPending,
     toggleReaction,
@@ -265,6 +266,10 @@ function PostContent({
 
   function handleQuote(e?: React.MouseEvent) {
     e?.stopPropagation();
+    if (isPrivateQuoteTarget) {
+      showError(t("home:noteCard.privateQuoteError"));
+      return;
+    }
     openQuote(note);
   }
 
@@ -488,6 +493,7 @@ function PostContent({
         onToggleReaction={toggleReaction}
         onReply={handleReply}
         onQuote={handleQuote}
+        isPrivateQuoteTarget={isPrivateQuoteTarget}
         reposted={reposted}
         reposting={reposting}
         unreposting={unreposting}

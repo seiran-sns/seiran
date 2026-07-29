@@ -333,6 +333,27 @@ async fn create_repost(
     Json(repost_resp).into_response()
 }
 
+/// 引用元の公開範囲（`quoted_vis`）と、新たに作成しようとする投稿の公開範囲（`new_vis`）から、
+/// 引用の可否を検証する（#143）。
+/// - プライベート投稿（`followers_only` / `direct`）は引用不可。
+/// - ひかえめ投稿（`unlisted`）は引用投稿が `unlisted`, `followers_only`, `direct` の場合のみ許可。
+/// - パブリック投稿（`public`）はすべての公開範囲から引用許可。
+fn validate_quote_visibility(quoted_vis: &str, new_vis: &str) -> Result<(), ApiError> {
+    match quoted_vis {
+        "followers_only" | "direct" => {
+            Err(ApiError::Forbidden("PRIVATE_POST_NOT_QUOTABLE"))
+        }
+        "unlisted" => {
+            if new_vis == "public" {
+                Err(ApiError::BadRequest("CANNOT_QUOTE_UNLISTED_PUBLICLY".to_owned()))
+            } else {
+                Ok(())
+            }
+        }
+        _ => Ok(()),
+    }
+}
+
 /// 通常投稿・リプライ・引用投稿を処理する（`renote_id` を持たないケース）。
 /// バリデーション → リプライ/引用先の解決 → INSERT → 添付紐付け → 両プロトコル配信 → realtime 配信、の順で行う。
 async fn create_regular_post(
@@ -517,7 +538,7 @@ async fn create_regular_post(
     let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
     let quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
 
-    // 引用先とブロック関係にある場合は引用を拒否する（Bsky準拠ブロック、双方向）。
+    // 引用先とブロック関係にある場合、および公開範囲制約違反の場合は引用を拒否する。
     if let Some(quote_id) = quote_of_id_i64 {
         match state.posts.find_delivery_meta(quote_id).await {
             Ok(Some(meta)) => {
@@ -528,6 +549,10 @@ async fn create_regular_post(
                 )
                 .await
                 {
+                    return e.into_response();
+                }
+
+                if let Err(e) = validate_quote_visibility(&meta.visibility, visibility) {
                     return e.into_response();
                 }
             }

@@ -86,6 +86,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
 
   const isSelf = note.user.actorType === "local" && !!user && user.username === note.user.username;
   const isPrivateRepostTarget = note.visibility === "followers_only" || note.visibility === "direct";
+  const isPrivateQuoteTarget = note.visibility === "followers_only" || note.visibility === "direct";
 
   // 他ユーザー（または自分の別タブ/端末）によるリアクション追加/切替/取消をリアルタイム反映する。
   useEffect(() => {
@@ -186,6 +187,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
   return {
     isSelf,
     isPrivateRepostTarget,
+    isPrivateQuoteTarget,
     reactions,
     reactionPending,
     toggleReaction,

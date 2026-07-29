@@ -36,6 +36,8 @@
   "PASSWORD_TOO_SHORT": "密码必须至少为 8 个字符",
   "PIN_NOT_FOUND": "未找到引脚",
   "PRIVATE_POST_NOT_REPOSTABLE": "私人帖子不能转发",
+  "PRIVATE_POST_NOT_QUOTABLE": "私人帖子不能引用",
+  "CANNOT_QUOTE_UNLISTED_PUBLICLY": "未列出的帖子只能以未列出或私人可见度引用",
   "REACTION_NOT_FOUND": "未发现反应",
   "REGISTRATION_TOKEN_INVALID": "请再次验证您的电子邮件",
   "RENOTE_TARGET_NOT_FOUND": "找不到要转发的帖子",

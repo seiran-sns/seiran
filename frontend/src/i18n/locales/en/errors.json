@@ -36,6 +36,8 @@
   "PASSWORD_TOO_SHORT": "Password must be at least 8 characters",
   "PIN_NOT_FOUND": "Pin not found",
   "PRIVATE_POST_NOT_REPOSTABLE": "Private posts cannot be reposted",
+  "PRIVATE_POST_NOT_QUOTABLE": "Private posts cannot be quoted",
+  "CANNOT_QUOTE_UNLISTED_PUBLICLY": "Unlisted posts can only be quoted with unlisted or private visibility",
   "REACTION_NOT_FOUND": "Reaction not found",
   "REGISTRATION_TOKEN_INVALID": "Please verify your email again",
   "RENOTE_TARGET_NOT_FOUND": "The post to repost was not found",

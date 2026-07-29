@@ -34,13 +34,27 @@ export function replyVisibilityConstraint(replyTo?: Note): {
   return { forced: null, defaultValue: "public" };
 }
 
+/** 引用対象ポストの可視性から、この引用のデフォルト可視性を算出する。 */
+export function quoteVisibilityConstraint(quoteTo?: Note): {
+  defaultValue: Visibility;
+} {
+  const parent = quoteTo?.visibility;
+  if (parent === "unlisted") {
+    return { defaultValue: "unlisted" };
+  }
+  return { defaultValue: "public" };
+}
+
 export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, initialText }: PostComposerProps) {
   const { t } = useTranslation();
   const [text, setText] = useState(initialText ?? "");
   const [deliverFedi, setDeliverFedi] = useState(true);
   const [deliverBsky, setDeliverBsky] = useState(true);
   const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo) : null;
-  const [visibility, setVisibility] = useState<Visibility>(() => replyConstraint?.defaultValue ?? "public");
+  const quoteConstraint = quoteTo ? quoteVisibilityConstraint(quoteTo) : null;
+  const [visibility, setVisibility] = useState<Visibility>(
+    () => replyConstraint?.defaultValue ?? quoteConstraint?.defaultValue ?? "public"
+  );
   const [guideMessage, setGuideMessage] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState("");
@@ -69,6 +83,10 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
   // Bsky はプロトコル上 followers_only（プライベート）投稿を配信できないため相互排他。
   // unlisted（ひかえめ）は Bsky 配送と両立できる。
   function handleVisibilityChange(next: Visibility) {
+    if (quoteTo && quoteTo.visibility === "unlisted" && next === "public") {
+      showGuide(t("home:postComposer.quoteUnlistedPublicConflict"));
+      return;
+    }
     if (next === "followers_only" && deliverBsky) {
       showGuide(t("home:postComposer.bskyPrivateConflict"));
       return;
@@ -234,6 +252,7 @@ export default function PostComposer({ onPosted, autoFocus, replyTo, quoteTo, in
             type="button"
             className={`${styles.scopeBtn} ${visibility === "public" ? styles.scopeActive : ""}`}
             onClick={() => handleVisibilityChange("public")}
+            disabled={quoteTo?.visibility === "unlisted"}
           >
             👥 {t("home:postComposer.visibilityPublic")}
           </button>
