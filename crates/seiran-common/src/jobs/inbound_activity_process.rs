@@ -2298,8 +2298,7 @@ async fn fetch_and_save_note(
     };
 
     let note_url = note["url"].as_str().unwrap_or("");
-    let parent_original_post_id =
-        resolve_parent_original_post_id(inbox, &note_id, note_url).await;
+    let parent_original_post_id = resolve_parent_original_post_id(inbox, &note_id, note_url).await;
 
     inbox
         .post_repo
