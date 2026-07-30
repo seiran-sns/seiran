@@ -76,6 +76,11 @@
     "emptyDefault": "没有帖子。"
   },
   "postComposer": {
+    "deliverFediHint": "发送到联邦宇宙",
+    "deliverBskyHint": "发送到 Bluesky",
+    "visibilityPublicHint": "公开：所有人可见",
+    "visibilityUnlistedHint": "不列出：所有人可见，但不显示在本地和全局时间线",
+    "visibilityPrivateHint": "私密：仅关注者可见",
     "replyModalTitle": "回复",
     "quoteModalTitle": "引用帖子",
     "bskyPrivateConflict": "当 Bsky 传送开启时，您无法选择私人。关闭 Bsky 传送即可更改。",

@@ -61,6 +61,86 @@
   margin-top: 10px;
 }
 
+/* #152: 通常投稿では新しい配送・公開範囲バーを旧公開範囲バーの位置に表示する。 */
+.visibilityRow {
+  display: none;
+}
+
+.replyForm .visibilityRow {
+  display: flex;
+}
+
+.controlRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.bottomRow {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.iconBtn,
+.visibilityBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+
+.iconBtn {
+  border-radius: 8px;
+}
+
+.iconBtn:hover,
+.visibilityBtn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.blueskyIcon {
+  width: 19px;
+  height: 19px;
+}
+
+.visibilityGroup {
+  display: inline-flex;
+  margin-left: 4px;
+}
+
+.visibilityBtn {
+  margin-left: -1px;
+  border-radius: 0;
+}
+
+.visibilityFirst {
+  margin-left: 0;
+  border-radius: 8px 0 0 8px;
+}
+
+.visibilityLast {
+  border-radius: 0 8px 8px 0;
+}
+
 .scopeBtn {
   background: none;
   border: 1px solid var(--border);
@@ -69,7 +149,10 @@
   padding: 4px 12px;
   font-size: 0.78rem;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
 }
 
 .scopeBtn:hover {
@@ -111,8 +194,14 @@
 }
 
 @keyframes popoverFade {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .attachBtn {
@@ -124,7 +213,9 @@
   font-size: 0.9rem;
   cursor: pointer;
   line-height: 1;
-  transition: border-color 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
 }
 
 .attachBtn:hover:not(:disabled) {
@@ -149,7 +240,9 @@
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .attachPreview {
@@ -203,9 +296,33 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 12px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.footerAttachBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.footerAttachBtn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.footerAttachBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .charCount {

@@ -76,6 +76,11 @@
     "emptyDefault": "No posts."
   },
   "postComposer": {
+    "deliverFediHint": "Deliver to Fediverse",
+    "deliverBskyHint": "Deliver to Bluesky",
+    "visibilityPublicHint": "Public: visible to everyone",
+    "visibilityUnlistedHint": "Unlisted: visible to everyone but omitted from local and global timelines",
+    "visibilityPrivateHint": "Private: visible to followers only",
     "replyModalTitle": "Reply",
     "quoteModalTitle": "Quote post",
     "bskyPrivateConflict": "Can't select private while Bsky delivery is on. Turn off Bsky delivery to change.",

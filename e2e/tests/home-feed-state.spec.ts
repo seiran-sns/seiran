@@ -17,8 +17,10 @@ test("ホーム画面から他画面へ遷移して戻ると、選択タブと�
   await page.goto("/");
 
   // ローカルタブへ切り替える。
-  await page.getByRole("button", { name: "ローカル" }).click();
-  await expect(page.getByRole("button", { name: "ローカル" })).toHaveClass(/feedTabActive/);
+  await page.getByRole("button", { name: "ローカル", exact: true }).click();
+  await expect(page.getByRole("button", { name: "ローカル", exact: true })).toHaveClass(
+    /feedTabActive/,
+  );
 
   // 投稿一覧が描画されるのを待ってからスクロールする。
   await expect(page.locator("article").first()).toBeVisible({ timeout: 15_000 });
@@ -33,7 +35,10 @@ test("ホーム画面から他画面へ遷移して戻ると、選択タブと�
   await expect(page).toHaveURL(/\/$/);
 
   // タブ選択がローカルのまま保持されている。
-  await expect(page.getByRole("button", { name: "ローカル" })).toHaveClass(/feedTabActive/, { timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "ローカル", exact: true })).toHaveClass(
+    /feedTabActive/,
+    { timeout: 10_000 },
+  );
 
   // スクロール位置も復元されている（キャッシュ復元後にrAFで反映されるため多少の遅延を許容）。
   await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 10_000 }).toBeGreaterThan(200);
@@ -46,9 +51,14 @@ test("タイムラインの選択タブはリロード後も保持される", as
   await seedAuth(page, user.token);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "グローバル" }).click();
-  await expect(page.getByRole("button", { name: "グローバル" })).toHaveClass(/feedTabActive/);
+  await page.getByRole("button", { name: "グローバル", exact: true }).click();
+  await expect(page.getByRole("button", { name: "グローバル", exact: true })).toHaveClass(
+    /feedTabActive/,
+  );
 
   await page.reload();
-  await expect(page.getByRole("button", { name: "グローバル" })).toHaveClass(/feedTabActive/, { timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "グローバル", exact: true })).toHaveClass(
+    /feedTabActive/,
+    { timeout: 10_000 },
+  );
 });
