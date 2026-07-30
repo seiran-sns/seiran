@@ -61,9 +61,7 @@
   margin-top: 10px;
 }
 
-/* #152: 配送・公開範囲は最下段のcontrolRowへ集約。返信先表示だけは旧行に残す。 */
-.scopeRow > .scopeBtn,
-.scopeRow > .attachBtn,
+/* #152: 通常投稿では新しい配送・公開範囲バーを旧公開範囲バーの位置に表示する。 */
 .visibilityRow {
   display: none;
 }
@@ -77,6 +75,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-top: 6px;
   flex-shrink: 0;
 }
 

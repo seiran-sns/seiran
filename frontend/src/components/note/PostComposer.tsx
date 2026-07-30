@@ -223,33 +223,6 @@ export default function PostComposer({
       />
 
       <div className={styles.scopeRow}>
-        {!replyTo && (
-          <>
-            <button
-              type="button"
-              className={`${styles.scopeBtn} ${deliverFedi ? styles.scopeActive : ""}`}
-              onClick={() => setDeliverFedi((v) => !v)}
-            >
-              Fedi 🌐
-            </button>
-            <button
-              type="button"
-              className={`${styles.scopeBtn} ${deliverBsky ? styles.scopeActive : ""}`}
-              onClick={handleToggleBsky}
-            >
-              Bsky 🦋
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          className={styles.attachBtn}
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading || !!attached}
-          title={t("home:postComposer.attachTitle")}
-        >
-          📎
-        </button>
         {replyTo && (
           <span className={styles.replyScopeNote}>
             {replyTo.user.actorType === "fedi"
@@ -269,39 +242,7 @@ export default function PostComposer({
           </span>
         </div>
       ) : (
-        <div className={styles.visibilityRow}>
-          <button
-            type="button"
-            className={`${styles.scopeBtn} ${visibility === "public" ? styles.scopeActive : ""}`}
-            onClick={() => handleVisibilityChange("public")}
-            disabled={quoteTo?.visibility === "unlisted"}
-          >
-            👥 {t("home:postComposer.visibilityPublic")}
-          </button>
-          <button
-            type="button"
-            className={`${styles.scopeBtn} ${visibility === "unlisted" ? styles.scopeActive : ""}`}
-            onClick={() => handleVisibilityChange("unlisted")}
-          >
-            🤫 {t("home:postComposer.visibilityUnlisted")}
-          </button>
-          <button
-            type="button"
-            className={`${styles.scopeBtn} ${visibility === "followers_only" ? styles.scopeActive : ""}`}
-            onClick={() => handleVisibilityChange("followers_only")}
-          >
-            🔒️ {t("home:postComposer.visibilityPrivate")}
-          </button>
-          {guideMessage && (
-            <span className={styles.popover} role="status">
-              {guideMessage}
-            </span>
-          )}
-        </div>
-      )}
-
-      <div className={styles.bottomRow}>
-        {!replyTo && (
+        !replyTo && (
           <div className={styles.controlRow}>
             <button
               type="button"
@@ -363,8 +304,10 @@ export default function PostComposer({
               </span>
             )}
           </div>
-        )}
+        )
+      )}
 
+      <div className={styles.bottomRow}>
         {attached && (
           <div className={styles.attachPreview}>
             {attached.mimeType.startsWith("video/") ? (
