@@ -18,6 +18,50 @@
   max-height: min(1024px, calc(100vh - 48px));
 }
 
+.pageButton {
+  position: fixed;
+  top: 50%;
+  z-index: 1;
+  width: 48px;
+  height: 64px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.62);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pageButton:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.previous {
+  left: 24px;
+}
+
+.next {
+  right: 24px;
+}
+
+@media (max-width: 600px) {
+  .pageButton {
+    width: 40px;
+    height: 56px;
+  }
+
+  .previous {
+    left: 8px;
+  }
+
+  .next {
+    right: 8px;
+  }
+}
+
 .image {
   /* 添付画像の最大アップロードサイズ(2048px)はRetina(2倍密度)表示を見込んだサイズのため、
      ライトボックスの最大表示サイズはCSS上でその半分(1024px)とする。小さい画像を

@@ -3,6 +3,8 @@
   "inputSuggestions": "Input suggestions",
   "appName": "seiran",
   "close": "Close",
+  "previousImage": "Previous image",
+  "nextImage": "Next image",
   "save": "Save",
   "saving": "Saving...",
   "cancel": "Cancel",
