@@ -2211,7 +2211,7 @@ async fn fetch_and_save_note(
         ));
     }
 
-    let note_id = note["id"].as_str().unwrap_or(note_uri);
+    let note_id = note["id"].as_str().unwrap_or(note_uri).to_string();
     let content_html = note["content"].as_str().unwrap_or("").to_string();
     let published = note["published"].as_str().unwrap_or("");
 
@@ -2237,19 +2237,140 @@ async fn fetch_and_save_note(
     let remote = upsert_remote_fedi_actor(inbox, ap_client, &actor_uri).await?;
     let actor_id = remote.actor_id;
 
-    let tags = note["tag"].as_array().cloned().unwrap_or_default();
-    let body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+    // `handle_create_note` と同じ絵文字解決ロジック（canonical Note によるtag補完・
+    // remote_emojis カタログ記録・フォールバック解決）を適用する。Announce経由で
+    // 未知の元ポストをフェッチする経路がこれを行っていなかったため、本文中の
+    // カスタム絵文字がショートコードのまま保存される不具合があった（#148）。
+    let mut tags = note["tag"].as_array().cloned().unwrap_or_default();
+    let mut body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+    if has_unresolved_emoji_shortcodes(&tags, &body) && has_same_origin(&note_id, &actor_uri) {
+        match ap_client.fetch_object(&note_id).await {
+            Ok(canonical_note) => {
+                if let Some(canonical_tags) = canonical_note["tag"].as_array() {
+                    for tag in canonical_tags {
+                        if !tags.contains(tag) {
+                            tags.push(tag.clone());
+                        }
+                    }
+                    body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "[Inbox/Announce] 正規Noteからの絵文字tag補完失敗 note_id={}: {}",
+                    note_id,
+                    error
+                );
+            }
+        }
+    }
+    record_remote_emojis(inbox, &remote.domain, &tags).await;
+    let emoji_map = resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &body).await;
+
+    // 引用URI抽出・解決（#116）。
+    let quote_uri = extract_ap_quote_uri(&note, &tags);
+    let quote_of_post_id: Option<i64> = match quote_uri.as_deref() {
+        Some(uri) => inbox
+            .post_repo
+            .find_id_by_ap_or_at_uri(uri)
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
+    if let Some(uri) = quote_uri.as_deref() {
+        body = strip_quote_fallback_line(&body, uri);
+    }
+
+    // to/cc から可視性を判定。
+    let visibility =
+        classify_ap_visibility(&as_string_list(&note["to"]), &as_string_list(&note["cc"]));
+
+    // AP inReplyTo からローカルの reply_to_post_id を解決する。
+    let reply_to_post_id: Option<i64> = match note["inReplyTo"].as_str() {
+        Some(uri) => inbox
+            .post_repo
+            .find_id_by_ap_or_at_uri(uri)
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
+
+    let note_url = note["url"].as_str().unwrap_or("");
+    let parent_original_post_id =
+        resolve_parent_original_post_id(inbox, &note_id, note_url).await;
 
     inbox
         .post_repo
-        .insert_remote(post_id, actor_id, &body, note_id, created_at)
+        .insert_remote_with_dedup(InsertRemoteWithDedupParams {
+            id: post_id,
+            actor_id,
+            body: &body,
+            ap_object_id: &note_id,
+            seiran_uuid: note["seiranUuid"].as_str(),
+            parent_original_post_id,
+            created_at,
+            emoji_map: &emoji_map,
+            visibility,
+            reply_to_post_id,
+            // Announce（リポスト）される投稿がDMであることはAP実装上想定されないため、
+            // DMスレッド解決は行わない（direct判定でも thread_root/recipients は空のまま）。
+            thread_root_post_id: None,
+            recipient_actor_ids: &[],
+            quote_of_post_id,
+        })
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
+
+    let content_warning = note["summary"].as_str().filter(|s| !s.is_empty());
+    let poll = normalize_ap_poll(&note);
+    inbox
+        .post_repo
+        .set_fedi_content_metadata(post_id, content_warning, poll.as_ref())
+        .await
+        .map_err(|e| format!("投稿メタデータ更新エラー: {}", e))?;
+
+    if let Err(e) = inbox.hashtag_repo.link_post(post_id, &body).await {
+        tracing::error!(
+            "[Inbox/Announce] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
+            e
+        );
+    }
+
+    if let Some(attachments) = note["attachment"].as_array() {
+        for (position, att) in attachments.iter().enumerate() {
+            let url = att["url"]
+                .as_str()
+                .or_else(|| att.as_str())
+                .unwrap_or_default();
+            if url.is_empty() {
+                continue;
+            }
+            let mime_type = guess_attachment_mime_type(att, url);
+            let is_sensitive = att["sensitive"].as_bool().unwrap_or(false)
+                || note["sensitive"].as_bool().unwrap_or(false);
+            if let Err(e) = inbox
+                .post_repo
+                .attach_remote_media_url(
+                    post_id,
+                    url,
+                    mime_type.as_deref(),
+                    None,
+                    is_sensitive,
+                    position as i16,
+                )
+                .await
+            {
+                tracing::error!("[Inbox/Announce] 添付 URL 保存失敗（スキップ）: {}", e);
+            }
+        }
+    }
 
     // ON CONFLICT で既存行がある場合も含め、DB 上の id を取得する
     let saved_id = inbox
         .post_repo
-        .find_id_by_ap_or_at_uri(note_id)
+        .find_id_by_ap_or_at_uri(&note_id)
         .await
         .map_err(|e| format!("posts id 取得エラー: {}", e))?
         .ok_or_else(|| format!("posts id 取得エラー: {} が見つかりません", note_id))?;
