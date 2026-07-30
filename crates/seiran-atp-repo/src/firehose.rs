@@ -337,7 +337,8 @@ fn bsky_gif_video_attachment(uri: &str, embed: &JsonValue, did: &str) -> Option<
             format!("https://k.gifs.bsky.app/ii/{directory}/{slug}.{extension}"),
             format!("video/{extension}"),
         )
-    } else if let Some(path) = base.strip_prefix("https://media.tenor.com/") {
+    } else {
+        let path = base.strip_prefix("https://media.tenor.com/")?;
         let (id, filename) = path.split_once('/')?;
         if !id.contains("AAAAC") || !filename.ends_with(".gif") {
             return None;
@@ -354,8 +355,6 @@ fn bsky_gif_video_attachment(uri: &str, embed: &JsonValue, did: &str) -> Option<
             ),
             "video/mp4".to_string(),
         )
-    } else {
-        return None;
     };
 
     let thumbnail_url = embed
