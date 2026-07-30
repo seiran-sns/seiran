@@ -3,7 +3,7 @@
 - [x] **Ariaのハッシュタグ投稿一覧API互換（#158）** `POST /api/notes/search-by-tag`を追加し、既存の専用ハッシュタイムラインをMisskey形式で返す。
 - [x] **投稿検索へのBluesky AppView統合（#146）** AppViewの未知actor/postをDBへ保存してローカル検索結果とブレンドし、`until_id`の時刻指定とDB-onlyの`since_id`ページングに対応する。稼働AppViewホストへの接続、検索結果アバター、Misskey互換POST検索、モバイル検索ボタンも含む。
 - [x] **Ariaのカスタム絵文字API検出互換（#145）** `POST /api/endpoints`で`emojis`を含む実装済みMisskey API一覧を返し、既存の`POST /api/emojis`へ誘導する。
-- [x] **リレー経由Fedi投稿の本文カスタム絵文字補完（#148）** Createの埋め込みNoteで未知のEmoji tagが欠落していても、本文に未解決shortcodeがある場合だけcanonical Noteを取得し、`emoji_map`とリモート絵文字カタログを補完する。
+- [x] **リレー経由Fedi投稿の本文カスタム絵文字補完（#148）** Create/Announce双方の埋め込みNoteで未知のEmoji tagが欠落していても、本文に未解決shortcodeがある場合だけcanonical Noteを取得し、`emoji_map`とリモート絵文字カタログを補完する。Announce経由で未登録の元ポストをフェッチする経路（`fetch_and_save_note`）も、絵文字・可視性・引用・リプライ・CW/投票・ハッシュタグ・添付ファイルをCreate受信と同じロジックで処理する。
 
 進捗管理用のチェックリスト。完了済みフェーズは概要のみ、未完了項目は詳細に残す。
 機能追加を完了したら該当箇所に `[x]` を入れ、コードの変更と同じコミットに含めること（`/home/yuba/seiran/CLAUDE.md` 参照）。

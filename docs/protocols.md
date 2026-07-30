@@ -55,7 +55,7 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 | `Block` | リモートアクターupsert → ブロックされた側がブロックした側をフォローしていた関係があれば解消（`blocks` テーブルには書き込まない、通知も生成しない。11節参照） |
 | `Undo` | `object.type` で分岐: `Like`/`EmojiReact`→リアクション削除、`Announce`→リポスト論理削除、`Follow`→フォロー解除、`Block`→ログのみ（DB上の巻き戻し対象なし） |
 | `Delete` | `object`（文字列URIまたは`{"type":"Tombstone","id":...}`）の`ap_object_id`に一致する投稿を論理削除。**送信元アクター（`activity.actor`、HTTP Signature検証済み）が投稿者本人と一致する場合のみ**削除する（なりすまし対策）。一致する投稿が無い場合（アクター自身のDelete等）は無視。リモートアクター自体の退会（`Delete(Actor)`）は未対応 |
-| `Announce` | リポスト保存。元ポストが未登録なら `fetch_object` でリモート取得してから紐付け |
+| `Announce` | リポスト保存。元ポストが未登録なら `fetch_object` でリモート取得してから紐付け（`fetch_and_save_note`。絵文字tag解析・引用/リプライ解決・可視性判定・CW/投票・ハッシュタグ・添付URL保存は`Create`(Note)と同じ処理を適用するが、DMスレッド解決・通知・WS配信は行わない） |
 | `Like` \| `EmojiReact` | Misskey は絵文字リアクションも `type:"Like"` 固定で送るため、**wire type ではなく `content`/`_misskey_reaction` の有無**で判定する |
 
 ### 公開エンドポイント
