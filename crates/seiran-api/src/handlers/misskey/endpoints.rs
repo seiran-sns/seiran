@@ -34,6 +34,7 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "notes/reactions/create",
         "notes/reactions/delete",
         "notes/search",
+        "notes/search-by-tag",
         "notes/show",
         "notes/timeline",
         "notes/unrenote",
@@ -75,6 +76,39 @@ pub struct NotesSearchBody {
     pub query: String,
     pub limit: Option<i64>,
     pub until_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotesSearchByTagBody {
+    pub tag: String,
+    pub limit: Option<i64>,
+    pub since_id: Option<String>,
+    pub until_id: Option<String>,
+}
+
+/// POST /api/notes/search-by-tag（Misskey互換、Ariaのハッシュタグ画面）。
+pub async fn notes_search_by_tag(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<NotesSearchByTagBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let tag = body.tag.trim().trim_start_matches('#').to_lowercase();
+    if tag.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let limit = body.limit.unwrap_or(30).clamp(1, 100);
+    let until_id = body.until_id.as_deref().and_then(|id| id.parse().ok());
+    let since_id = body.since_id.as_deref().and_then(|id| id.parse().ok());
+    let rows = state
+        .hashtags
+        .timeline(&tag, limit, until_id, since_id, my_actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(build_notes(&state, rows, my_actor_id).await))
 }
 
 /// POST /api/notes/search（Misskey互換、Aria等）

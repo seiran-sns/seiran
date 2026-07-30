@@ -241,7 +241,7 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 
 `GET /api/notes/search`は、初回検索でローカルDBと`api.bsky.app`の`app.bsky.feed.searchPosts`の双方から`limit`件ずつ取得する。AppView結果はURI照合だけで捨てず、authorを`actors`、post viewを`posts`へupsertしたうえで、ローカル結果とsnowflake ID降順にマージ・重複排除して`limit`件を返す。AppView障害時はHTTPステータスをログへ記録し、ローカルDB結果だけへ縮退する。検索結果には保存したactorアバターも含める。
 
-Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView検索を行い、Misskey形式のノート配列を返す。JSONの`query`、`limit`、`untilId`を受け付ける。
+Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView検索を行い、Misskey形式のノート配列を返す。JSONの`query`、`limit`、`untilId`を受け付ける。Aria等のハッシュタグ画面向けには`POST /api/notes/search-by-tag`を提供し、JSONの`tag`、`limit`、`sinceId`、`untilId`を受け付け、専用ハッシュタイムラインをMisskey形式で返す。
 
 `until_id`指定時は対象postの`created_at`をRFC 3339の`until`としてAppViewへ渡し、DBにも`p.id < until_id`を適用して同様にブレンドする。`since_id`指定はMisskey互換の逆方向ページングであり、AppViewへ問い合わせずDBの`p.id > since_id`だけを返す。既存frontendの過去掘りは互換維持のため`session_id`バッファも引き続き利用できる（#146）。
 
