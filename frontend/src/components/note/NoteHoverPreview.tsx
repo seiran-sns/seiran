@@ -2,6 +2,7 @@ import { ReactNode, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note } from "../../api/client";
+import Avatar from "./Avatar";
 import { acct, displayName } from "../../lib/format";
 import styles from "./NoteHoverPreview.module.css";
 
@@ -60,9 +61,11 @@ export default function NoteHoverPreview({ noteId, children, className }: NoteHo
           {target && (
             <Link to={`/notes/${target.id}`} className={styles.card} onClick={(e) => e.stopPropagation()}>
               <span className={styles.head}>
-                <span className={styles.avatar}>
-                  {(target.user.displayName || target.user.username)[0]?.toUpperCase() ?? "?"}
-                </span>
+                <Avatar
+                  url={target.user.avatarUrl}
+                  name={target.user.displayName || target.user.username}
+                  size={26}
+                />
                 <span className={styles.names}>
                   <span className={styles.name}>{displayName(target)}</span>
                   <span className={styles.acctText}>{acct(target)}</span>

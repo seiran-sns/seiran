@@ -45,20 +45,6 @@
   margin-bottom: 6px;
 }
 
-.avatar {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--accent-deep);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 0.8rem;
-}
-
 .names {
   display: flex;
   flex-direction: column;
