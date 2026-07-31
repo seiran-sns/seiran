@@ -76,6 +76,9 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
     if !site_icon_url.is_empty() {
         metadata.insert("iconUrl".into(), serde_json::json!(site_icon_url));
     }
+    // kmyblue（Mastodonフォーク）は既知softwareリストに無いインスタンスに対し、
+    // ここに "emoji_reaction" が含まれるかどうかでカスタム絵文字リアクション対応を判定する。
+    metadata.insert("features".into(), serde_json::json!(["emoji_reaction"]));
 
     let body = serde_json::json!({
         "version": "2.1",

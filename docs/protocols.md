@@ -65,6 +65,8 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 ### 公開エンドポイント
 `GET /users/:username`（Actor文書）、`GET /users/:username/outbox`（`?page=true`でOrderedCollectionPage）、`GET /.well-known/webfinger`、`GET /.well-known/nodeinfo` + `GET /nodeinfo/2.1`、featured（ピン留め）・lists（公開リスト）の各コレクション。
 
+`GET /nodeinfo/2.1`の`metadata.features`には`"emoji_reaction"`を含める。kmyblue（Mastodonフォーク）はカスタム絵文字リアクション対応の可否を、既知softwareリスト（Misskey系等）に載っていないインスタンスに対してはこのフィールドで判定するため（#167）。
+
 ### HTTP Signatures 検証
 1. `Digest` ヘッダー必須（SHA-256ボディハッシュと一致確認）
 2. `Signature` の `headers=` に `digest` が含まれることを確認
