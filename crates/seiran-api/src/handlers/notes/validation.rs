@@ -65,9 +65,13 @@ pub fn validate_attachment_ids(ids: &[String]) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// リアクション内容の書記素クラスタ数の安全上限（`emojis::get` の完全一致チェックの前段で
+/// Unicode 絵文字候補の書記素クラスタ数の安全上限（`emojis::get` の完全一致チェックの前段で
 /// 極端に長い文字列を弾くためのもの。実際の絵文字判定はこの定数ではなく下記の完全一致で行う）。
 const MAX_REACTION_CONTENT_LEN: usize = 32;
+
+/// カスタム絵文字ショートコードの文字数上限。`custom_emojis.shortcode` が `VARCHAR(100)` のため
+/// それに合わせる（Unicode 絵文字と同じ32文字上限を適用すると正規のショートコードまで弾いてしまう）。
+const MAX_CUSTOM_EMOJI_SHORTCODE_LEN: usize = 100;
 
 /// 構文的に妥当な `validate_reaction_content` の結果。
 /// Unicode 絵文字とカスタム絵文字ショートコードのどちらかを判別できる形で返す
@@ -100,13 +104,17 @@ impl ReactionContent {
 /// （`custom_emojis` テーブルに登録済みか）はこの関数では確認しない（呼び出し元の責務）。
 pub fn validate_reaction_content(raw: &str) -> Result<ReactionContent, ApiError> {
     let content = raw.trim().to_string();
-    if content.is_empty() || content.graphemes(true).count() > MAX_REACTION_CONTENT_LEN {
+    if content.is_empty() {
         return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
     }
     if let Some(shortcode) = parse_custom_emoji_shortcode(&content) {
+        if shortcode.graphemes(true).count() > MAX_CUSTOM_EMOJI_SHORTCODE_LEN {
+            return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
+        }
         return Ok(ReactionContent::Custom(shortcode.to_string()));
     }
-    if emojis::get(&content).is_none() {
+    if content.graphemes(true).count() > MAX_REACTION_CONTENT_LEN || emojis::get(&content).is_none()
+    {
         return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
     }
     Ok(ReactionContent::Unicode(content))
@@ -261,6 +269,25 @@ mod tests {
         assert!(validate_reaction_content(":sm ile:").is_err());
         assert!(validate_reaction_content("::").is_err());
         assert!(validate_reaction_content(":smile").is_err());
+    }
+
+    #[test]
+    fn validate_reaction_content_accepts_shortcode_longer_than_unicode_limit() {
+        // custom_emojis.shortcode は VARCHAR(100) なので、Unicode 絵文字用の32書記素上限を
+        // 適用してしまうと正規のショートコードまで弾いてしまう（#171）。
+        let shortcode = "a".repeat(super::MAX_CUSTOM_EMOJI_SHORTCODE_LEN);
+        let raw = format!(":{}:", shortcode);
+        assert_eq!(
+            validate_reaction_content(&raw).unwrap(),
+            ReactionContent::Custom(shortcode)
+        );
+    }
+
+    #[test]
+    fn validate_reaction_content_rejects_shortcode_exceeding_db_limit() {
+        let shortcode = "a".repeat(super::MAX_CUSTOM_EMOJI_SHORTCODE_LEN + 1);
+        let raw = format!(":{}:", shortcode);
+        assert!(validate_reaction_content(&raw).is_err());
     }
 
     #[test]
