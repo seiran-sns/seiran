@@ -1,4 +1,6 @@
 {
+  "INVALID_OPEN_TARGET": "ユーザーまたはポストではないようです",
+  "OPEN_TARGET_IMPORT_PENDING": "ポストを取り込み中です。少し待ってからもう一度お試しください",
   "ACTOR_NOT_FOUND": "アクターが見つかりません",
   "ADMIN_REQUIRED": "管理者権限が必要です",
   "ALREADY_INITIALIZED": "セットアップはすでに完了しています",

@@ -1,5 +1,7 @@
 # アーキテクチャ
 
+「開く」機能の`handlers/open_target.rs`は薄いオーケストレーション層とし、Bskyは`seiran-common::atp`、ActivityPub Actorは`target_resolve`、ActivityPub投稿はインバウンドCreateジョブを再利用する。外部ActivityStreams文書の取得はメディアプロキシと共通のDNS固定・private/loopback拒否・リダイレクト再検証を通す。フロントエンドの`OpenTargetDialog`はQRを同期認識し、重いOCR Workerは読取開始後に動的importする。
+
 対象読者: seiran のコード全体に手を入れる開発者。「今のシステムがどう動いているか」だけを書く。変更の経緯や過去の不具合修正は書かない（必要なら `git log` を見る）。
 
 通報は `ReportModal` と `POST /api/reports` でローカル・Fedi・Bskyを統一し、管理画面の

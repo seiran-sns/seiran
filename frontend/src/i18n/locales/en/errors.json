@@ -1,4 +1,6 @@
 {
+  "INVALID_OPEN_TARGET": "This does not appear to be a user or post",
+  "OPEN_TARGET_IMPORT_PENDING": "The post is still being imported. Please try again shortly",
   "ACTOR_NOT_FOUND": "Actor not found",
   "ADMIN_REQUIRED": "Administrator privileges are required",
   "ALREADY_INITIALIZED": "Setup has already been completed",

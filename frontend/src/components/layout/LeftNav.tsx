@@ -24,10 +24,11 @@ const NAV_ITEMS: NavItem[] = [
 
 interface LeftNavProps {
   onCompose: () => void;
+  onOpenTarget: () => void;
   onItemClick?: () => void;
 }
 
-export default function LeftNav({ onCompose, onItemClick }: LeftNavProps) {
+export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNavProps) {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const site = useSiteMeta();
@@ -79,6 +80,17 @@ export default function LeftNav({ onCompose, onItemClick }: LeftNavProps) {
           </li>
         ))}
       </ul>
+
+      <button
+        className={styles.composeBtn}
+        onClick={() => {
+          onItemClick?.();
+          onOpenTarget();
+        }}
+      >
+        <span className={styles.navIcon}>🔗</span>
+        <span className={styles.navLabel}>{t("nav:leftNav.openTarget")}</span>
+      </button>
 
       <button
         className={styles.composeBtn}

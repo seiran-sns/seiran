@@ -806,6 +806,9 @@ export interface MetaResponse {
 }
 
 export const api = {
+  openTarget(target: string) {
+    return request<{ path: string; kind: "actor" | "post" }>("POST", "/open", { target });
+  },
   reports: {
     create(body: {
       subject_type: "actor" | "post";

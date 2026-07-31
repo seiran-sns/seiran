@@ -1,5 +1,9 @@
 # マルチプロトコル実装
 
+## URL・IDからの対象解決（`POST /api/open`、#165）
+
+認証済みSPAは `{ "target": string }` を送り、`{ "kind": "actor" | "post", "path": string }` を受け取る。bsky.appプロフィールURLと`did:plc:`はAppViewプロフィール取得後にアクターをupsertし、bsky.app投稿URLとAT URIはDIDへ正規化して単一投稿をupsertする。一般のHTTP(S) URLはActivityStreams表現を取得し、Actorなら既存のWebFinger/APアクター解決、Note等なら既存の`InboundActivityProcess` Create経路で取り込む。
+
 対象読者: ActivityPub / AT Protocol の実装やクロスプロトコル配送ロジックに触れる開発者。
 「今、何が実装されていて、どう動くか」だけを書く。不具合修正の経緯や日付は書かない（`git log` 参照）。
 

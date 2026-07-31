@@ -695,6 +695,7 @@ pub fn router(state: AppState) -> Router {
             "/api/notes/search-by-tag",
             post(handlers::misskey::endpoints::notes_search_by_tag),
         )
+        .route("/api/open", post(handlers::open_target::open_target))
         // ダイレクトメッセージ（DM本体の送受信は既存の /api/notes/create を再利用する）
         .route("/api/dm/sessions", get(handlers::dm::sessions))
         .route(

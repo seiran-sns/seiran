@@ -19,6 +19,7 @@ pub mod misskey;
 pub mod mutes;
 pub mod notes;
 pub mod ogp;
+pub mod open_target;
 pub mod passkeys;
 pub mod plc_genesis;
 pub mod reports;

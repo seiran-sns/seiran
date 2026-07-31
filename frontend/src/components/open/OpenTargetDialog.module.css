@@ -1,0 +1,65 @@
+.form {
+  display: grid;
+  gap: 14px;
+}
+
+.description {
+  margin: 0;
+  color: var(--text-muted, #667085);
+}
+
+.inputRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+}
+
+.inputRow input,
+.inputRow button {
+  min-height: 42px;
+  border: 1px solid var(--border-color, #d0d5dd);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font: inherit;
+}
+
+.inputRow button {
+  cursor: pointer;
+}
+
+.inputRow button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger-color, #c62828);
+}
+
+.scanner {
+  display: grid;
+  gap: 8px;
+  text-align: center;
+}
+
+.scanner video {
+  width: 100%;
+  max-height: 55vh;
+  border-radius: 10px;
+  background: #111;
+}
+
+.scanner p {
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .inputRow {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .inputRow input {
+    grid-column: 1 / -1;
+  }
+}

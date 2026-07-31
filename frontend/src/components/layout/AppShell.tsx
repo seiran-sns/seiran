@@ -5,6 +5,7 @@ import { Note } from "../../api/client";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import Modal from "../common/Modal";
 import PostComposer from "../note/PostComposer";
+import OpenTargetDialog from "../open/OpenTargetDialog";
 import LeftNav from "./LeftNav";
 import styles from "./AppShell.module.css";
 
@@ -25,6 +26,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
   const navigate = useNavigate();
   const { dmUnreadCount } = useStreamingContext();
   const [composeOpen, setComposeOpen] = useState(false);
+  const [openTargetOpen, setOpenTargetOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // ページ移動時にモバイルメニューを自動で閉じる
@@ -41,7 +43,11 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
     >
       {/* PC表示用の左メニュー */}
       <div className={styles.desktopLeftNav}>
-        <LeftNav onCompose={() => setComposeOpen(true)} onItemClick={onBeforeNavigate} />
+        <LeftNav
+          onCompose={() => setComposeOpen(true)}
+          onOpenTarget={() => setOpenTargetOpen(true)}
+          onItemClick={onBeforeNavigate}
+        />
       </div>
 
       <main className={styles.center}>{center}</main>
@@ -118,6 +124,10 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
                 setMobileMenuOpen(false);
                 setComposeOpen(true);
               }}
+              onOpenTarget={() => {
+                setMobileMenuOpen(false);
+                setOpenTargetOpen(true);
+              }}
               onItemClick={() => setMobileMenuOpen(false)}
             />
           </div>
@@ -133,6 +143,11 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
           }}
         />
       </Modal>
+      <OpenTargetDialog
+        open={openTargetOpen}
+        onClose={() => setOpenTargetOpen(false)}
+        onBeforeNavigate={onBeforeNavigate}
+      />
     </div>
   );
 }

@@ -1,5 +1,7 @@
 # 開発ロードマップ
 
+- [x] **URL・ユーザーIDから「開く」（#165）** — bsky.app/ActivityPub URL、AT URI、`@`ユーザーID、`did:plc:` DIDを解決・必要時取り込みして詳細画面へ遷移する。QR連続認識と2秒間隔のOCRも提供する。
+
 - [x] **Ariaのハッシュタグ投稿一覧API互換（#158）** `POST /api/notes/search-by-tag`を追加し、既存の専用ハッシュタイムラインをMisskey形式で返す。
 - [x] **投稿検索へのBluesky AppView統合（#146）** AppViewの未知actor/postをDBへ保存してローカル検索結果とブレンドし、`until_id`の時刻指定とDB-onlyの`since_id`ページングに対応する。稼働AppViewホストへの接続、検索結果アバター、Misskey互換POST検索、モバイル検索ボタンも含む。
 - [x] **Ariaのカスタム絵文字API検出互換（#145）** `POST /api/endpoints`で`emojis`を含む実装済みMisskey API一覧を返し、既存の`POST /api/emojis`へ誘導する。
