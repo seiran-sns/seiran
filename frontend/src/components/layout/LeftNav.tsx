@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
@@ -24,10 +25,11 @@ const NAV_ITEMS: NavItem[] = [
 
 interface LeftNavProps {
   onCompose: () => void;
+  onOpenTarget: () => void;
   onItemClick?: () => void;
 }
 
-export default function LeftNav({ onCompose, onItemClick }: LeftNavProps) {
+export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNavProps) {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const site = useSiteMeta();
@@ -63,20 +65,37 @@ export default function LeftNav({ onCompose, onItemClick }: LeftNavProps) {
 
       <ul className={styles.navList}>
         {navItems.map((item) => (
-          <li key={item.to}>
-            <NavLink
-              to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) =>
-                `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`
-              }
-              onClick={() => onItemClick?.()}
-            >
-              <span className={styles.navIcon}>{item.icon}</span>
-              <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
-              {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
-            </NavLink>
-          </li>
+          <Fragment key={item.to}>
+            <li>
+              <NavLink
+                to={item.to}
+                end={item.to === "/"}
+                className={({ isActive }) =>
+                  `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`
+                }
+                onClick={() => onItemClick?.()}
+              >
+                <span className={styles.navIcon}>{item.icon}</span>
+                <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
+                {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
+              </NavLink>
+            </li>
+            {item.to === "/search" && (
+              <li>
+                <button
+                  type="button"
+                  className={styles.navLink}
+                  onClick={() => {
+                    onItemClick?.();
+                    onOpenTarget();
+                  }}
+                >
+                  <span className={styles.navIcon}>🔗</span>
+                  <span className={styles.navLabel}>{t("nav:leftNav.openTarget")}</span>
+                </button>
+              </li>
+            )}
+          </Fragment>
         ))}
       </ul>
 

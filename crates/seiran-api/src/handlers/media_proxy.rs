@@ -87,6 +87,20 @@ pub async fn fetch_validated(
     raw_url: &str,
     accept_prefixes: &[&str],
 ) -> Result<(Bytes, String), ApiError> {
+    fetch_validated_with_accept(
+        raw_url,
+        accept_prefixes,
+        "image/*,video/*,audio/*;q=0.9,*/*;q=0.1",
+    )
+    .await
+}
+
+/// `fetch_validated`と同じSSRF防御を使い、用途別のAcceptヘッダーで取得する。
+pub async fn fetch_validated_with_accept(
+    raw_url: &str,
+    accept_prefixes: &[&str],
+    accept_header: &str,
+) -> Result<(Bytes, String), ApiError> {
     let (mut url, mut addresses) = validate_url(raw_url).await?;
 
     for redirect_count in 0..=MAX_REDIRECTS {
@@ -104,10 +118,7 @@ pub async fn fetch_validated(
             .map_err(|e| ApiError::Internal(e.to_string()))?;
         let upstream = client
             .get(url.clone())
-            .header(
-                reqwest::header::ACCEPT,
-                "image/*,video/*,audio/*;q=0.9,*/*;q=0.1",
-            )
+            .header(reqwest::header::ACCEPT, accept_header)
             .send()
             .await
             .map_err(|_| ApiError::BadGateway("MEDIA_PROXY_FETCH_FAILED".into()))?;

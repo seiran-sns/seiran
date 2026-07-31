@@ -1,4 +1,6 @@
 {
+  "INVALID_OPEN_TARGET": "这似乎不是用户或帖子",
+  "OPEN_TARGET_IMPORT_PENDING": "帖子仍在导入中，请稍后重试",
   "ACTOR_NOT_FOUND": "未找到演员",
   "ADMIN_REQUIRED": "需要管理员权限",
   "ALREADY_INITIALIZED": "设置已经完成",

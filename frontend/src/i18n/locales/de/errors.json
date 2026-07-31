@@ -1,4 +1,6 @@
 {
+  "INVALID_OPEN_TARGET": "Dies scheint kein Benutzer oder Beitrag zu sein",
+  "OPEN_TARGET_IMPORT_PENDING": "Der Beitrag wird noch importiert. Bitte versuchen Sie es gleich erneut",
   "ACTOR_NOT_FOUND": "Schauspieler nicht gefunden",
   "ADMIN_REQUIRED": "Es sind Administratorrechte erforderlich",
   "ALREADY_INITIALIZED": "Die Einrichtung ist bereits abgeschlossen",
