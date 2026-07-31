@@ -86,7 +86,7 @@ export default function ImageLightbox({
       )}
       <div
         className={styles.imageWrap}
-        onClick={(e) => e.stopPropagation()}
+        onClick={onClose}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
