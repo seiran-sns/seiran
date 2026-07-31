@@ -310,13 +310,84 @@ struct ParsedAttachment {
     thumbnail_url: Option<String>,
 }
 
+fn bsky_gif_video_attachment(uri: &str, embed: &JsonValue, did: &str) -> Option<ParsedAttachment> {
+    let (base, query) = uri.split_once('?')?;
+    let dimensions = query
+        .split('&')
+        .filter_map(|part| part.split_once('='))
+        .fold(
+            (None, None, None, None),
+            |(height, width, mp4, webm), (key, value)| match key {
+                "hh" => (value.parse::<i32>().ok(), width, mp4, webm),
+                "ww" => (height, value.parse::<i32>().ok(), mp4, webm),
+                "mp4" => (height, width, Some(value), webm),
+                "webm" => (height, width, mp4, Some(value)),
+                _ => (height, width, mp4, webm),
+            },
+        );
+    let (height, width, mp4_slug, webm_slug) = dimensions;
+    let height = height.filter(|value| *value > 0)?;
+    let width = width.filter(|value| *value > 0)?;
+
+    let (url, mime_type) = if let Some(path) = base.strip_prefix("https://static.klipy.com/ii/") {
+        let slug = mp4_slug.or(webm_slug)?;
+        let extension = if mp4_slug.is_some() { "mp4" } else { "webm" };
+        let (directory, _) = path.rsplit_once('/')?;
+        (
+            format!("https://k.gifs.bsky.app/ii/{directory}/{slug}.{extension}"),
+            format!("video/{extension}"),
+        )
+    } else {
+        let path = base.strip_prefix("https://media.tenor.com/")?;
+        let (id, filename) = path.split_once('/')?;
+        if !id.contains("AAAAC") || !filename.ends_with(".gif") {
+            return None;
+        }
+        (
+            format!(
+                "https://t.gifs.bsky.app/{}/{}",
+                id.replace("AAAAC", "AAAP1"),
+                filename
+                    .strip_suffix(".gif")
+                    .unwrap_or(filename)
+                    .to_string()
+                    + ".mp4"
+            ),
+            "video/mp4".to_string(),
+        )
+    };
+
+    let thumbnail_url = embed
+        .get("external")
+        .and_then(|external| external.get("thumb"))
+        .and_then(|thumb| thumb.get("ref"))
+        .and_then(|reference| reference.get("$link"))
+        .and_then(|cid| cid.as_str())
+        .map(|cid| {
+            format!(
+                "https://cdn.bsky.app/img/feed_thumbnail/plain/{}/{}",
+                urlencoding::encode(did),
+                cid
+            )
+        });
+
+    Some(ParsedAttachment {
+        url,
+        mime_type,
+        width,
+        height,
+        thumbnail_url,
+    })
+}
+
 /// AP Note の `record.embed` を解析し、添付URL一覧を組み立てる。
 /// `app.bsky.embed.images` → `https://cdn.bsky.app/img/feed_fullsize/plain/{did}/{cid}`
 /// `app.bsky.embed.video` → HLSプレイリスト `https://video.bsky.app/watch/{did}/{cid}/playlist.m3u8`
 ///   （動画本体はBluesky公式の動画処理パイプラインでHLSにトランスコードされて配信されるため、
 ///   PDS上のblob自体を指すURLではなくこの固定パターンを使う。サムネイルも同様のパターン）。
 /// `app.bsky.embed.recordWithMedia`（引用+メディア）は `media` フィールドを再帰的に見る。
-/// 未知の embed 種別や画像/動画以外（`external`/`record` 単体等）は空を返す。
+/// `app.bsky.embed.external` は Bluesky の GIF ピッカーが生成する Tenor/Klipy URL のみ動画化する。
+/// 未知の embed 種別や画像/動画以外（`record` 単体等）は空を返す。
 fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedAttachment> {
     let embed_type = embed.get("$type").and_then(|v| v.as_str()).unwrap_or("");
     match embed_type {
@@ -395,6 +466,13 @@ fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedAttac
                 thumbnail_url: Some(thumbnail_url),
             }]
         }
+        "app.bsky.embed.external" => embed
+            .get("external")
+            .and_then(|external| external.get("uri"))
+            .and_then(|uri| uri.as_str())
+            .and_then(|uri| bsky_gif_video_attachment(uri, embed, did))
+            .into_iter()
+            .collect(),
         "app.bsky.embed.recordWithMedia" => embed
             .get("media")
             .map(|media| parse_bsky_embed_attachments(media, did))
@@ -1508,5 +1586,68 @@ mod facet_tests {
         let (result, mentions) = apply_link_facets(text, facets);
         assert_eq!(result, text);
         assert!(mentions.is_empty());
+    }
+
+    #[test]
+    fn klipy_external_embed_is_parsed_as_mp4_attachment() {
+        let embed = serde_json::json!({
+            "$type": "app.bsky.embed.external",
+            "external": {
+                "uri": "https://static.klipy.com/ii/hash/af/33/file.gif?hh=498&ww=374&mp4=mp4slug&webm=webmslug",
+                "thumb": {
+                    "ref": { "$link": "thumbcid" }
+                }
+            }
+        });
+
+        let attachments = parse_bsky_embed_attachments(&embed, "did:plc:gm5vptmm3thf3vtzla5brxdd");
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0].url,
+            "https://k.gifs.bsky.app/ii/hash/af/33/mp4slug.mp4"
+        );
+        assert_eq!(attachments[0].mime_type, "video/mp4");
+        assert_eq!(attachments[0].width, 374);
+        assert_eq!(attachments[0].height, 498);
+        assert_eq!(
+            attachments[0].thumbnail_url.as_deref(),
+            Some(
+                "https://cdn.bsky.app/img/feed_thumbnail/plain/did%3Aplc%3Agm5vptmm3thf3vtzla5brxdd/thumbcid"
+            )
+        );
+    }
+
+    #[test]
+    fn tenor_external_embed_is_parsed_as_mp4_attachment() {
+        let embed = serde_json::json!({
+            "$type": "app.bsky.embed.external",
+            "external": {
+                "uri": "https://media.tenor.com/abcAAAAC/kitten.gif?hh=200&ww=300"
+            }
+        });
+
+        let attachments = parse_bsky_embed_attachments(&embed, "did:plc:test");
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0].url,
+            "https://t.gifs.bsky.app/abcAAAP1/kitten.mp4"
+        );
+        assert_eq!(attachments[0].mime_type, "video/mp4");
+        assert_eq!(attachments[0].width, 300);
+        assert_eq!(attachments[0].height, 200);
+    }
+
+    #[test]
+    fn ordinary_external_embed_is_not_treated_as_media() {
+        let embed = serde_json::json!({
+            "$type": "app.bsky.embed.external",
+            "external": {
+                "uri": "https://example.com/article?hh=200&ww=300"
+            }
+        });
+
+        assert!(parse_bsky_embed_attachments(&embed, "did:plc:test").is_empty());
     }
 }
