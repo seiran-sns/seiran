@@ -11,7 +11,16 @@ test("「開く」からローカルユーザーIDを解決してプロフィー
   await page.goto("/");
 
   await page.getByRole("button", { name: /開く/ }).click();
-  await page.getByLabel("開く対象").fill(`@${target.username}`);
+  await expect(
+    page.getByText("URLまたはユーザーID", { exact: true }),
+  ).toBeVisible();
+  const input = page.getByLabel("開く対象");
+  const cameraButton = input.locator("..").getByRole("button", {
+    name: "QRコードまたは文字を読み取る",
+  });
+  await expect(cameraButton).toBeVisible();
+  await expect(cameraButton.locator("svg")).toBeVisible();
+  await input.fill(`@${target.username}`);
   await page.getByRole("button", { name: "開く", exact: true }).click();
 
   await expect(page).toHaveURL(new RegExp(`/@${target.username}$`));
@@ -30,5 +39,7 @@ test("判別できない入力は「開く」ダイアログ内にエラー表�
   await page.getByLabel("開く対象").fill("not a user or post");
   await page.getByRole("button", { name: "開く", exact: true }).click();
 
-  await expect(page.getByRole("alert")).toHaveText("ユーザーまたはポストではないようです");
+  await expect(page.getByRole("alert")).toHaveText(
+    "ユーザーまたはポストではないようです",
+  );
 });

@@ -10,12 +10,16 @@
 
 .inputRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
 }
 
-.inputRow input,
-.inputRow button {
+.inputWithCamera {
+  position: relative;
+}
+
+.inputWithCamera input,
+.submitButton {
   min-height: 42px;
   border: 1px solid var(--border-color, #d0d5dd);
   border-radius: 8px;
@@ -23,11 +27,44 @@
   font: inherit;
 }
 
-.inputRow button {
+.inputWithCamera input {
+  box-sizing: border-box;
+  width: 100%;
+  padding-right: 48px;
+}
+
+.cameraButton {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted, #667085);
+  background: transparent;
+  transform: translateY(-50%);
+}
+
+.cameraButton:hover {
+  color: var(--text-color, #101828);
+  background: var(--hover-bg, #f2f4f7);
+}
+
+.cameraButton svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.cameraButton,
+.submitButton {
   cursor: pointer;
 }
 
-.inputRow button:disabled {
+.submitButton:disabled {
   cursor: default;
   opacity: 0.55;
 }
@@ -50,16 +87,8 @@
   background: #111;
 }
 
-.scanner p {
-  margin: 0;
-}
-
 @media (max-width: 600px) {
   .inputRow {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .inputRow input {
-    grid-column: 1 / -1;
+    grid-template-columns: 1fr;
   }
 }

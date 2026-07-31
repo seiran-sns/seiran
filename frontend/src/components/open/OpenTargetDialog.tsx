@@ -13,9 +13,14 @@ interface Props {
   onBeforeNavigate?: () => void;
 }
 
-const TARGET_PATTERN = /(?:https?:\/\/[^\s]+|at:\/\/[^\s]+|did:plc:[a-z0-9]+|@[^\s]+)/i;
+const TARGET_PATTERN =
+  /(?:https?:\/\/[^\s]+|at:\/\/[^\s]+|did:plc:[a-z0-9]+|@[^\s]+)/i;
 
-export default function OpenTargetDialog({ open, onClose, onBeforeNavigate }: Props) {
+export default function OpenTargetDialog({
+  open,
+  onClose,
+  onBeforeNavigate,
+}: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [target, setTarget] = useState("");
@@ -61,7 +66,11 @@ export default function OpenTargetDialog({ open, onClose, onBeforeNavigate }: Pr
     const scanFrame = async (now: number) => {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      if (
+        !video ||
+        !canvas ||
+        video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+      ) {
         frameId = requestAnimationFrame(scanFrame);
         return;
       }
@@ -143,28 +152,53 @@ export default function OpenTargetDialog({ open, onClose, onBeforeNavigate }: Pr
   return (
     <Modal open={open} onClose={onClose} title={t("nav:openDialog.title")}>
       <form onSubmit={submit} className={styles.form}>
-        <p className={styles.description}>{t("nav:openDialog.description")}</p>
+        <p className={styles.description}>
+          {t(
+            scanning ? "nav:openDialog.scanning" : "nav:openDialog.description",
+          )}
+        </p>
         <div className={styles.inputRow}>
-          <input
-            autoFocus
-            value={target}
-            onChange={(event) => setTarget(event.target.value)}
-            placeholder={t("nav:openDialog.placeholder")}
-            aria-label={t("nav:openDialog.inputLabel")}
-          />
-          <button type="button" onClick={scanning ? stopScanning : startScanning}>
-            {scanning ? t("nav:openDialog.stopScan") : t("nav:openDialog.scan")}
-          </button>
-          <button type="submit" disabled={!target.trim() || loading}>
+          <div className={styles.inputWithCamera}>
+            <input
+              autoFocus
+              value={target}
+              onChange={(event) => setTarget(event.target.value)}
+              placeholder={t("nav:openDialog.placeholder")}
+              aria-label={t("nav:openDialog.inputLabel")}
+            />
+            <button
+              type="button"
+              className={styles.cameraButton}
+              onClick={scanning ? stopScanning : startScanning}
+              aria-label={t(
+                scanning ? "nav:openDialog.stopScan" : "nav:openDialog.scan",
+              )}
+              title={t(
+                scanning ? "nav:openDialog.stopScan" : "nav:openDialog.scan",
+              )}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 4 7.5 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.5L15 4H9Zm3 13a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-2.2a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6Z" />
+              </svg>
+            </button>
+          </div>
+          <button
+            className={styles.submitButton}
+            type="submit"
+            disabled={!target.trim() || loading}
+          >
             {loading ? t("nav:openDialog.opening") : t("nav:openDialog.open")}
           </button>
         </div>
-        {error && <p className={styles.error} role="alert">{error}</p>}
+        {error && (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
+        )}
         {scanning && (
           <div className={styles.scanner}>
             <video ref={videoRef} muted playsInline />
             <canvas ref={canvasRef} hidden />
-            <p>{t("nav:openDialog.scanning")}</p>
           </div>
         )}
       </form>
