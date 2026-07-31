@@ -1,4 +1,6 @@
 {
+  "INVALID_OPEN_TARGET": "Esto no parece ser un usuario ni una publicación",
+  "OPEN_TARGET_IMPORT_PENDING": "La publicación se está importando. Inténtalo de nuevo en breve",
   "ACTOR_NOT_FOUND": "Actor no encontrado",
   "ADMIN_REQUIRED": "Se requieren privilegios de administrador",
   "ALREADY_INITIALIZED": "La configuración ya se ha completado",
