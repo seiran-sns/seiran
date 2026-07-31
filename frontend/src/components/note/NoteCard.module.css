@@ -179,7 +179,7 @@
   border: 1px solid var(--border);
 }
 
-.sensitiveImageWrap { position: relative; max-width: 100%; }
+.sensitiveImageWrap { position: relative; max-width: 100%; overflow: hidden; border-radius: 8px; }
 .attachBlurred { filter: blur(18px); }
 .sensitiveReveal {
   position: absolute;
