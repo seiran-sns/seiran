@@ -53,10 +53,12 @@ export default function ImageLightbox({
   if (!src) return null;
 
   function handleTouchStart(e: TouchEvent) {
+    e.stopPropagation();
     touchStartX.current = e.changedTouches[0]?.clientX ?? null;
   }
 
   function handleTouchEnd(e: TouchEvent) {
+    e.stopPropagation();
     if (touchStartX.current === null) return;
     const endX = e.changedTouches[0]?.clientX;
     if (endX === undefined) return;
@@ -68,7 +70,12 @@ export default function ImageLightbox({
   }
 
   return (
-    <div className={styles.overlay} onClick={onClose}>
+    <div
+      className={styles.overlay}
+      onClick={onClose}
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchEnd={(e) => e.stopPropagation()}
+    >
       <button className={styles.close} onClick={onClose} aria-label={t("common:close")}>
         ×
       </button>
@@ -86,7 +93,7 @@ export default function ImageLightbox({
       )}
       <div
         className={styles.imageWrap}
-        onClick={(e) => e.stopPropagation()}
+        onClick={onClose}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
