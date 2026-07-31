@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
@@ -64,33 +65,39 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
 
       <ul className={styles.navList}>
         {navItems.map((item) => (
-          <li key={item.to}>
-            <NavLink
-              to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) =>
-                `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`
-              }
-              onClick={() => onItemClick?.()}
-            >
-              <span className={styles.navIcon}>{item.icon}</span>
-              <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
-              {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
-            </NavLink>
-          </li>
+          <Fragment key={item.to}>
+            <li>
+              <NavLink
+                to={item.to}
+                end={item.to === "/"}
+                className={({ isActive }) =>
+                  `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`
+                }
+                onClick={() => onItemClick?.()}
+              >
+                <span className={styles.navIcon}>{item.icon}</span>
+                <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
+                {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
+              </NavLink>
+            </li>
+            {item.to === "/search" && (
+              <li>
+                <button
+                  type="button"
+                  className={styles.navLink}
+                  onClick={() => {
+                    onItemClick?.();
+                    onOpenTarget();
+                  }}
+                >
+                  <span className={styles.navIcon}>🔗</span>
+                  <span className={styles.navLabel}>{t("nav:leftNav.openTarget")}</span>
+                </button>
+              </li>
+            )}
+          </Fragment>
         ))}
       </ul>
-
-      <button
-        className={styles.composeBtn}
-        onClick={() => {
-          onItemClick?.();
-          onOpenTarget();
-        }}
-      >
-        <span className={styles.navIcon}>🔗</span>
-        <span className={styles.navLabel}>{t("nav:leftNav.openTarget")}</span>
-      </button>
 
       <button
         className={styles.composeBtn}

@@ -10,7 +10,14 @@ test("「開く」からローカルユーザーIDを解決してプロフィー
   await seedAuth(page, me.token);
   await page.goto("/");
 
-  await page.getByRole("button", { name: /開く/ }).click();
+  const navigation = page.getByRole("navigation");
+  const openItem = navigation.getByRole("button", { name: /開く/ });
+  await expect(
+    await openItem.evaluate(
+      (element) => element.closest("li")?.previousElementSibling?.textContent,
+    ),
+  ).toContain("検索");
+  await openItem.click();
   await expect(
     page.getByText("URLまたはユーザーID", { exact: true }),
   ).toBeVisible();
