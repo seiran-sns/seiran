@@ -13,6 +13,7 @@ import RemoteBanner from "../components/common/RemoteBanner";
 import ReportModal from "../components/report/ReportModal";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
+import EmojiText from "../components/note/EmojiText";
 import NoteCard from "../components/note/NoteCard";
 import NoteList from "../components/note/NoteList";
 import FollowListPanel from "../components/right/FollowListPanel";
@@ -393,7 +394,11 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {profile.bio && <p className={styles.bio}>{profile.bio}</p>}
+          {profile.bio && (
+            <p className={styles.bio}>
+              <EmojiText text={profile.bio} emojis={profile.emojis} />
+            </p>
+          )}
 
           {/* プロフィールのキーバリュー項目（#62） */}
           {profile.profile_fields.length > 0 && (

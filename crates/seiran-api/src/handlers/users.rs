@@ -9,7 +9,7 @@ use sqlx::Row;
 
 use seiran_common::ap::fetch_ap_collection_uris;
 use seiran_common::atp::fetch_bsky_profile;
-use seiran_common::repository::{Actor, ActorProfileRow};
+use seiran_common::repository::{extract_shortcode_candidates, Actor, ActorProfileRow};
 use seiran_common::ApDeliveryKind;
 
 use crate::error::ApiError;
@@ -226,6 +226,17 @@ fn profile_fields_from_json(v: &serde_json::Value) -> Vec<ProfileField> {
     serde_json::from_value(v.clone()).unwrap_or_default()
 }
 
+/// `actors.emoji_map`（JSONB、`:shortcode:` → 画像URL）を `HashMap` にデコードする。
+fn json_map_to_string_map(v: &serde_json::Value) -> std::collections::HashMap<String, String> {
+    v.as_object()
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[derive(Serialize)]
 pub struct ProfileResponse {
     /// アクターID（文字列化、#64）。無限スクロールで追加ページを取得する `GET /api/users/posts`
@@ -240,6 +251,10 @@ pub struct ProfileResponse {
     pub ap_uri: Option<String>,
     pub at_did: Option<String>,
     pub bio: Option<String>,
+    /// 自己紹介文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#169）。フロントは
+    /// `bio` 描画時にこのマップで `:shortcode:` を画像に置換する。空なら省略。
+    #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub emojis: std::collections::HashMap<String, String>,
     pub avatar_url: Option<String>,
     pub follow_status: String, // "not_following" | "pending" | "accepted"
     /// 閲覧者（ログイン済みの場合）がこのアクターをブロック中か。
@@ -334,6 +349,7 @@ async fn fetch_bsky_profile_from_appview(
         ap_uri: None,
         at_did: Some(bsky.did),
         bio: bsky.description,
+        emojis: std::collections::HashMap::new(),
         avatar_url: bsky.avatar,
         follow_status: "not_following".to_string(),
         is_blocking: false,
@@ -719,6 +735,37 @@ async fn build_profile_response(
         (actor.bio, profile_fields)
     };
 
+    // 自己紹介文中のカスタム絵文字（#169）。ローカルアクターは custom_emojis と都度照合して
+    // 解決し（ノート本文の解決と同じ経路）、リモート Fedi アクターは AP Actor の tag 由来
+    // `emoji_map`（表示名・自己紹介の両方のショートコードを含む）をそのまま使う。
+    // Bsky にはカスタム絵文字の概念が無いため常に空。
+    let emojis: std::collections::HashMap<String, String> = if actor.actor_type == "local" {
+        let candidates = bio
+            .as_deref()
+            .map(extract_shortcode_candidates)
+            .unwrap_or_default();
+        if candidates.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            match state.emojis.find_urls_by_shortcodes(&candidates).await {
+                Ok(pairs) => pairs
+                    .into_iter()
+                    .map(|(code, url)| (format!(":{}:", code), url))
+                    .collect(),
+                Err(e) => {
+                    tracing::error!("[profile] 自己紹介文の絵文字ショートコード解決失敗: {}", e);
+                    std::collections::HashMap::new()
+                }
+            }
+        }
+    } else {
+        actor
+            .emoji_map
+            .as_ref()
+            .map(json_map_to_string_map)
+            .unwrap_or_default()
+    };
+
     // フォロー中/フォロワー人数（#56）。プロフィールカードの表示・右ペインタブ切替に使う。
     let (following_count, follower_count) = state
         .follows
@@ -735,6 +782,7 @@ async fn build_profile_response(
         ap_uri: actor.ap_uri,
         at_did: actor.at_did,
         bio,
+        emojis,
         avatar_url,
         follow_status,
         is_blocking,
@@ -849,6 +897,7 @@ async fn fetch_remote_profile(
         ap_uri: Some(actor_uri),
         at_did: None,
         bio,
+        emojis: json_map_to_string_map(&emoji_map),
         avatar_url,
         follow_status: "not_following".to_string(),
         is_blocking: false,

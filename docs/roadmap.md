@@ -1,5 +1,6 @@
 # 開発ロードマップ
 
+- [x] **プロフィールBioのカスタム絵文字展開（#169）** — ノート本文・表示名と同様、プロフィールの自己紹介文（bio）中の`:shortcode:`を画像に展開する。ローカルアクターは`custom_emojis`照合、リモートFediアクターはAP `tag`由来の`actors.emoji_map`を使用し、Bskyアクターは展開しない。詳細: `docs/ui_spec.md` 2.2節
 - [x] **URL・ユーザーIDから「開く」（#165）** — bsky.app/ActivityPub URL、AT URI、`@`ユーザーID、`did:plc:` DIDを解決・必要時取り込みして詳細画面へ遷移する。QR連続認識と2秒間隔のOCRも提供する。
 
 - [x] **Ariaのハッシュタグ投稿一覧API互換（#158）** `POST /api/notes/search-by-tag`を追加し、既存の専用ハッシュタイムラインをMisskey形式で返す。
