@@ -500,6 +500,8 @@ export interface UserProfile {
   ap_uri?: string;
   at_did?: string;
   bio?: string;
+  /** 自己紹介文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#169）。未指定/空なら絵文字化しない。 */
+  emojis?: Record<string, string>;
   avatar_url?: string;
   follow_status: "not_following" | "pending" | "accepted";
   /** 閲覧者がこのアクターをブロック中か。 */
