@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, FrequentReaction, PublicEmoji } from "../../api/client";
+import { isSupportedLanguage } from "../../i18n";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
+import { EmojiAnnotationIndex, loadEmojiAnnotationIndex } from "../../lib/emojiAnnotations";
 import { allUnicodeEmojis, unicodeEmojiGroups } from "../../lib/emojiData";
 import styles from "./EmojiPickerPanel.module.css";
 
@@ -24,12 +26,24 @@ const SEARCH_RESULT_LIMIT = 100;
 
 /** カスタム絵文字＋Unicode絵文字を検索・タブ切り替えで選べるピッカー本体（Modal 内に描画する）。 */
 export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [customEmojis, setCustomEmojis] = useState<PublicEmoji[]>([]);
   const [frequent, setFrequent] = useState<FrequentReaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<Tab>("unicode");
+  const [annotations, setAnnotations] = useState<EmojiAnnotationIndex>(new Map());
+
+  useEffect(() => {
+    const uiLanguage = isSupportedLanguage(i18n.language) ? i18n.language : "en";
+    let cancelled = false;
+    loadEmojiAnnotationIndex(uiLanguage).then((index) => {
+      if (!cancelled) setAnnotations(index);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [i18n.language]);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,11 +87,16 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
     if (!q) return null;
     const customMatches = customItems.filter((i) => i.label.toLowerCase().includes(q));
     const unicodeMatches: PickerItem[] = allUnicodeEmojis
-      .filter((e) => e.name.toLowerCase().includes(q))
+      .filter((e) => {
+        if (e.emoji.includes(q)) return true;
+        if (e.name.toLowerCase().includes(q)) return true;
+        const words = annotations.get(e.emoji);
+        return words?.some((w) => w.toLowerCase().includes(q)) ?? false;
+      })
       .slice(0, SEARCH_RESULT_LIMIT)
       .map((e) => ({ key: `u:${e.emoji}`, content: e.emoji, label: e.name }));
     return [...customMatches, ...unicodeMatches];
-  }, [query, customItems]);
+  }, [query, customItems, annotations]);
 
   function renderItem(item: PickerItem) {
     return (
