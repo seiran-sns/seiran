@@ -495,6 +495,10 @@ fn reaction_activity_type(content: &str) -> &'static str {
 /// `emoji_url` があれば（カスタム絵文字リアクション）、Misskey/Fedibird 互換の
 /// `tag: [{type: Emoji, name, icon: {url}}]` を付与する（受信側のパースは
 /// `jobs::inbound_activity_process::build_emoji_map` / `extract_emoji_tag_url` を参照）。
+/// `tag[].id` には絵文字の canonical URI（`{local_domain}/emojis/{shortcode}`）を付与する。
+/// kmyblue（Mastodon系フォーク）は `ActivityPub::Parser::CustomEmojiParser#uri`（= `tag.id`）を
+/// `URI.split` に通してドメイン判定するため、`id` が無いと例外で絵文字リアクション処理全体が
+/// 失敗し、Unicode絵文字は届くのにカスタム絵文字だけ届かない不具合になる（#176）。
 fn build_reaction_object(
     activity_type: &str,
     id: &str,
@@ -502,6 +506,7 @@ fn build_reaction_object(
     object_ap_id: &str,
     content: &str,
     emoji_url: Option<&str>,
+    local_domain: &str,
 ) -> serde_json::Value {
     let mut obj = serde_json::json!({
         "type": activity_type,
@@ -514,7 +519,9 @@ fn build_reaction_object(
         // Misskey 系フォークとの互換のため非標準フィールドも併記する。
         obj["_misskey_reaction"] = serde_json::Value::String(content.to_string());
         if let Some(url) = emoji_url {
+            let shortcode = content.trim_matches(':');
             obj["tag"] = serde_json::json!([{
+                "id": format!("https://{}/emojis/{}", local_domain, shortcode),
                 "type": "Emoji",
                 "name": content,
                 "icon": { "type": "Image", "url": url },
@@ -606,13 +613,20 @@ async fn fetch_post_activity_basis(
 
 /// 保存済み `posts.emoji_map` のうち、今回配送する本文に実際に現れるカスタム絵文字を
 /// ActivityPub `Emoji` tagへ変換して既存のMention/Hashtag tagへ追加する（#126）。
-fn append_emoji_tags(body: &str, emoji_map: &serde_json::Value, tags: &mut Vec<serde_json::Value>) {
+/// `id` を付与する理由は `build_reaction_object` のコメント（#176）を参照。
+fn append_emoji_tags(
+    body: &str,
+    emoji_map: &serde_json::Value,
+    tags: &mut Vec<serde_json::Value>,
+    local_domain: &str,
+) {
     for shortcode in crate::repository::extract_shortcode_candidates(body) {
         let name = format!(":{}:", shortcode);
         let Some(url) = emoji_map.get(&name).and_then(serde_json::Value::as_str) else {
             continue;
         };
         tags.push(serde_json::json!({
+            "id": format!("https://{}/emojis/{}", local_domain, shortcode),
             "type": "Emoji",
             "name": name,
             "icon": {
@@ -689,7 +703,7 @@ pub async fn deliver_post_to_ap_followers(
         } else {
             html_and_tags_for_body(&body, local_domain, db, ap_client).await
         };
-    append_emoji_tags(&body, &basis.emoji_map, &mut tag);
+    append_emoji_tags(&body, &basis.emoji_map, &mut tag, local_domain);
 
     // 配送先はフォロワー + 本文中でメンションした相手（フォロワーでなくても通知を届ける）の和集合。
     let mut inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
@@ -782,7 +796,7 @@ pub async fn deliver_direct_message_to_ap(
 
     let (content_html, mut tag, _mention_uris) =
         html_and_tags_for_body(&basis.body, local_domain, db, ap_client).await;
-    append_emoji_tags(&basis.body, &basis.emoji_map, &mut tag);
+    append_emoji_tags(&basis.body, &basis.emoji_map, &mut tag, local_domain);
 
     let addr = local_actor_address(local_domain, &basis.username);
     let activity = build_create_note_activity(
@@ -1168,6 +1182,7 @@ pub async fn deliver_ap_reaction(
         &object_ap_id,
         content,
         emoji_url,
+        local_domain,
     );
     activity["@context"] =
         serde_json::Value::String("https://www.w3.org/ns/activitystreams".to_string());
@@ -1288,6 +1303,7 @@ pub async fn deliver_ap_undo_reaction(
         &object_ap_id,
         content,
         emoji_url,
+        local_domain,
     );
 
     let undo_id = format!(
@@ -1444,11 +1460,13 @@ mod tests {
                 ":unused:": "https://seiran.example/emoji/unused.webp"
             }),
             &mut tags,
+            "seiran.example",
         );
 
         assert_eq!(tags.len(), 2);
         assert_eq!(tags[1]["type"], "Emoji");
         assert_eq!(tags[1]["name"], ":ablob_glitch:");
+        assert_eq!(tags[1]["id"], "https://seiran.example/emojis/ablob_glitch");
         assert_eq!(
             tags[1]["icon"]["url"],
             "https://seiran.example/emoji/ablob_glitch.webp"
@@ -1745,11 +1763,27 @@ mod tests {
 
     #[test]
     fn reaction_object_emoji_react_has_misskey_fields() {
-        let like = build_reaction_object("Like", "id1", "actor1", "obj1", "❤️", None);
+        let like = build_reaction_object(
+            "Like",
+            "id1",
+            "actor1",
+            "obj1",
+            "❤️",
+            None,
+            "seiran.example",
+        );
         assert!(like.get("content").is_none());
         assert!(like.get("_misskey_reaction").is_none());
 
-        let react = build_reaction_object("EmojiReact", "id1", "actor1", "obj1", "🎉", None);
+        let react = build_reaction_object(
+            "EmojiReact",
+            "id1",
+            "actor1",
+            "obj1",
+            "🎉",
+            None,
+            "seiran.example",
+        );
         assert_eq!(react["content"], "🎉");
         assert_eq!(react["_misskey_reaction"], "🎉");
         assert!(react.get("tag").is_none());
@@ -1764,10 +1798,17 @@ mod tests {
             "obj1",
             ":blobcat:",
             Some("https://example.com/blobcat.png"),
+            "seiran.example",
         );
         assert_eq!(react["content"], ":blobcat:");
         assert_eq!(react["tag"][0]["type"], "Emoji");
         assert_eq!(react["tag"][0]["name"], ":blobcat:");
+        // kmyblue（Mastodon系フォーク）の CustomEmojiParser#uri（= tag.id）が
+        // URI.split に通されるため、id が無いと例外で処理が落ちる（#176）。
+        assert_eq!(
+            react["tag"][0]["id"],
+            "https://seiran.example/emojis/blobcat"
+        );
         assert_eq!(
             react["tag"][0]["icon"]["url"],
             "https://example.com/blobcat.png"
