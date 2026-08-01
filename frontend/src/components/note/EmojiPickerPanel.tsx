@@ -35,7 +35,10 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
   const [annotations, setAnnotations] = useState<EmojiAnnotationIndex>(new Map());
 
   useEffect(() => {
-    const uiLanguage = isSupportedLanguage(i18n.language) ? i18n.language : "en";
+    // `i18n.language` は検出された生の言語コード（例: "ja-JP"）を返すことがあるため、
+    // `supportedLanguages` と同じ表記に解決済みの `resolvedLanguage` を優先する。
+    const detected = i18n.resolvedLanguage ?? i18n.language;
+    const uiLanguage = isSupportedLanguage(detected) ? detected : "en";
     let cancelled = false;
     loadEmojiAnnotationIndex(uiLanguage).then((index) => {
       if (!cancelled) setAnnotations(index);
@@ -43,7 +46,7 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [i18n.language]);
+  }, [i18n.language, i18n.resolvedLanguage]);
 
   useEffect(() => {
     let cancelled = false;
