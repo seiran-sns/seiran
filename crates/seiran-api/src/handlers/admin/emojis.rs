@@ -10,7 +10,7 @@ use seiran_common::generate_snowflake_id;
 use seiran_common::repository::EmojiRow;
 
 use crate::error::ApiError;
-use crate::middleware::require_admin;
+use crate::middleware::require_emoji_admin;
 use crate::AppState;
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ pub async fn list_emojis(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<EmojiResponse>>, ApiError> {
-    require_admin(
+    require_emoji_admin(
         &headers,
         &state.local_auth,
         state.app_tokens.as_ref(),
@@ -168,7 +168,7 @@ pub async fn create_emoji(
     State(state): State<AppState>,
     Json(req): Json<CreateEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_admin(
+    require_emoji_admin(
         &headers,
         &state.local_auth,
         state.app_tokens.as_ref(),
@@ -216,7 +216,7 @@ pub async fn update_emoji(
     Path(id): Path<i64>,
     Json(req): Json<UpdateEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_admin(
+    require_emoji_admin(
         &headers,
         &state.local_auth,
         state.app_tokens.as_ref(),
@@ -257,7 +257,7 @@ pub async fn delete_emoji(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(
+    require_emoji_admin(
         &headers,
         &state.local_auth,
         state.app_tokens.as_ref(),

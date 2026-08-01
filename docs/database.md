@@ -52,6 +52,16 @@ ID 採番は2系統ある。
 
 ## 3. 主要テーブルの設計判断
 
+### `users.role`（ENUM `user_role`）
+
+`user` / `emoji-editor` / `moderator` / `admin` の4値（#179で `emoji-editor` を追加）。権限の強さは
+`admin > moderator > emoji-editor > user`。管理画面（`/admin`）へのアクセス可否・表示タブは
+トピック単位（ユーザー管理・サイト設定・ストレージ・絵文字・通報・リレー）でロールごとに決まり、
+フロント `frontend/src/lib/roles.ts` の `getAdminTopics` とバックエンド
+`crates/seiran-api/src/middleware/auth.rs` の `require_admin`（admin専用）/
+`require_emoji_admin`（admin・moderator・emoji-editor）が対応する。現状 `moderator` と
+`emoji-editor` は「絵文字」トピックのみアクセス可能。
+
 ### `users` / `actors` の分離
 「魂（`users`、当サーバーの住民としての認証アカウント）」と「肉体（`actors`、各プロトコル宇宙での登場人物）」を分離している（`docs/concept.md` 参照）。1つの `users` 行に対し、ローカルユーザーなら基本的に1つの `actors` 行（AP/ATP 両方の識別子を1行に持つ）が対応する。`actors.user_id` は `users` への参照で、ローカルユーザー以外は NULL。
 

@@ -35,7 +35,7 @@ pub struct UserInfo {
     pub id: i64,
     pub username: String,
     pub email: String,
-    /// `user` / `moderator` / `admin`。管理画面の表示制御にフロントが使用する。
+    /// `user` / `emoji-editor` / `moderator` / `admin`。管理画面の表示制御にフロントが使用する（#179）。
     pub role: String,
     /// 対応するローカル actors.id。フロントがストリーミングイベントの `reactorActorId` 等と
     /// 突き合わせて「自分自身の操作か」を判定するために使う。

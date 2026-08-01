@@ -41,6 +41,27 @@ pub async fn extract_auth(
     })
 }
 
+/// JWT 検証 + role が `allowed` のいずれかであることをチェックする。
+/// 該当しなければ 403 Forbidden を返す。
+async fn require_role_in(
+    headers: &HeaderMap,
+    auth: &LocalAuthProvider,
+    app_tokens: &dyn AppTokenRepository,
+    users: &dyn UserRepository,
+    allowed: &[&str],
+) -> Result<AuthUser, ApiError> {
+    let user = extract_auth(headers, auth, app_tokens).await?;
+    let role = users
+        .find_role_by_user_id(user.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .unwrap_or_default();
+    if !allowed.contains(&role.as_str()) {
+        return Err(ApiError::Forbidden("ADMIN_REQUIRED"));
+    }
+    Ok(user)
+}
+
 /// JWT 検証 + role = 'admin' チェック。
 /// admin 以外は 403 Forbidden を返す。
 pub async fn require_admin(
@@ -49,14 +70,23 @@ pub async fn require_admin(
     app_tokens: &dyn AppTokenRepository,
     users: &dyn UserRepository,
 ) -> Result<AuthUser, ApiError> {
-    let user = extract_auth(headers, auth, app_tokens).await?;
-    let role = users
-        .find_role_by_user_id(user.user_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .unwrap_or_default();
-    if role != "admin" {
-        return Err(ApiError::Forbidden("ADMIN_REQUIRED"));
-    }
-    Ok(user)
+    require_role_in(headers, auth, app_tokens, users, &["admin"]).await
+}
+
+/// JWT 検証 + 絵文字管理権限（admin / moderator / emoji-editor）チェック（#179）。
+/// いずれでもなければ 403 Forbidden を返す。
+pub async fn require_emoji_admin(
+    headers: &HeaderMap,
+    auth: &LocalAuthProvider,
+    app_tokens: &dyn AppTokenRepository,
+    users: &dyn UserRepository,
+) -> Result<AuthUser, ApiError> {
+    require_role_in(
+        headers,
+        auth,
+        app_tokens,
+        users,
+        &["admin", "moderator", "emoji-editor"],
+    )
+    .await
 }

@@ -21,7 +21,7 @@ use super::emojis::{
 use crate::error::ApiError;
 use crate::handlers::media_proxy::fetch_validated;
 use crate::handlers::media_store;
-use crate::middleware::require_admin;
+use crate::middleware::require_emoji_admin;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -63,7 +63,7 @@ pub async fn list_remote_emojis(
     State(state): State<AppState>,
     Query(query): Query<ListRemoteEmojisQuery>,
 ) -> Result<Json<Vec<RemoteEmojiResponse>>, ApiError> {
-    require_admin(
+    require_emoji_admin(
         &headers,
         &state.local_auth,
         state.app_tokens.as_ref(),
@@ -108,7 +108,7 @@ pub async fn import_remote_emoji(
     State(state): State<AppState>,
     Json(req): Json<ImportRemoteEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_admin(
+    require_emoji_admin(
         &headers,
         &state.local_auth,
         state.app_tokens.as_ref(),
