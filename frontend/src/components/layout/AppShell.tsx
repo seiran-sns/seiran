@@ -95,6 +95,19 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
         <span className={styles.floatingNotifIcon}>🔔</span>
       </button>
 
+      {/* スマホ表示用フローティングホームボタン（#180） */}
+      <button
+        className={styles.floatingHomeBtn}
+        onClick={() => {
+          onBeforeNavigate?.();
+          navigate("/");
+        }}
+        aria-label={t("nav:leftNav.home")}
+        title={t("nav:leftNav.home")}
+      >
+        <span className={styles.floatingHomeIcon}>🏠</span>
+      </button>
+
       {/* スマホ表示用フローティング投稿ボタン */}
       <button
         className={styles.floatingComposeBtn}
