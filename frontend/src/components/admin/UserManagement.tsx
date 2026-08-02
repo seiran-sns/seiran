@@ -4,7 +4,7 @@ import { api, AdminUser, getErrorMessage } from "../../api/client";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 
-const ROLES = ["user", "moderator", "admin"];
+const ROLES = ["user", "emoji-editor", "moderator", "admin"];
 
 export default function UserManagement() {
   const { t } = useTranslation();

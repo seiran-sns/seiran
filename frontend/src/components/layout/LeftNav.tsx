@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
-import { isAdminRole } from "../../lib/roles";
+import { canAccessAdminPage } from "../../lib/roles";
 import styles from "./AppShell.module.css";
 
 interface NavItem {
@@ -39,7 +39,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const baseItems = NAV_ITEMS.map((item) =>
     item.to === "/messages" ? { ...item, badge: dmUnreadCount } : item
   );
-  const navItems = isAdminRole(user?.role)
+  const navItems = canAccessAdminPage(user?.role)
     ? [...baseItems, { to: "/admin", icon: "🛡️", labelKey: "leftNav.admin" }]
     : baseItems;
 

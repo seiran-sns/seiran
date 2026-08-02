@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ApiError,
-    middleware::{require_admin, AuthUser},
+    middleware::{require_report_moderator, AuthUser},
     AppState,
 };
 
@@ -86,8 +86,10 @@ pub struct CommentRequest {
     pub body: String,
 }
 
+/// 通報の閲覧・対応は admin / moderator が行える（#179: moderator は調停者として
+/// 通報対応に必要な凍結・投稿削除・連合転送を含めて利用可能）。
 async fn authorize(headers: &HeaderMap, state: &AppState) -> Result<AuthUser, ApiError> {
-    require_admin(
+    require_report_moderator(
         headers,
         &state.local_auth,
         state.app_tokens.as_ref(),

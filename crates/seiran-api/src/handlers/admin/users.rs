@@ -131,7 +131,10 @@ pub async fn change_user_role(
     )
     .await?;
 
-    if !matches!(req.role.as_str(), "user" | "moderator" | "admin") {
+    if !matches!(
+        req.role.as_str(),
+        "user" | "moderator" | "emoji-editor" | "admin"
+    ) {
         return Err(ApiError::BadRequest("INVALID_ROLE".to_owned()));
     }
 

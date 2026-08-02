@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import AppShell from "../components/layout/AppShell";
@@ -10,10 +10,21 @@ import EmojisPanel from "../components/admin/EmojisPanel";
 import ReportsPanel from "../components/admin/ReportsPanel";
 import RelaysPanel from "../components/admin/RelaysPanel";
 import { useAuth } from "../contexts/AuthContext";
-import { isAdminRole } from "../lib/roles";
+import { AdminTopic, canAccessAdminPage, getAdminTopics } from "../lib/roles";
 import { useSwipe } from "../hooks/useSwipe";
 import panel from "../components/common/Panel.module.css";
 import styles from "./Admin.module.css";
+
+// タブの並び順・内容。#179: ロールが持つトピック権限（getAdminTopics）に応じて
+// 表示するタブを絞り込む（権限のないトピックはタブごと非表示になる）。
+const TAB_DEFS: { topic: AdminTopic; labelKey: string; Panel: () => JSX.Element }[] = [
+  { topic: "users", labelKey: "admin:adminPage.tabs.users", Panel: UserManagement },
+  { topic: "siteSettings", labelKey: "admin:adminPage.tabs.siteSettings", Panel: SiteSettingsPanel },
+  { topic: "storage", labelKey: "admin:adminPage.tabs.storage", Panel: StorageProvidersPanel },
+  { topic: "emojis", labelKey: "admin:adminPage.tabs.emojis", Panel: EmojisPanel },
+  { topic: "reports", labelKey: "admin:adminPage.tabs.reports", Panel: ReportsPanel },
+  { topic: "relays", labelKey: "admin:adminPage.tabs.relays", Panel: RelaysPanel },
+];
 
 export default function AdminPage() {
   const { t } = useTranslation();
@@ -22,14 +33,9 @@ export default function AdminPage() {
   const headerRef = useRef<HTMLElement>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
 
-  const tabs = [
-    t("admin:adminPage.tabs.users"),
-    t("admin:adminPage.tabs.siteSettings"),
-    t("admin:adminPage.tabs.storage"),
-    t("admin:adminPage.tabs.emojis"),
-    t("admin:adminPage.tabs.reports"),
-    t("admin:adminPage.tabs.relays"),
-  ];
+  const allowedTopics = useMemo(() => new Set(getAdminTopics(user?.role)), [user?.role]);
+  const visibleTabDefs = TAB_DEFS.filter((def) => allowedTopics.has(def.topic));
+  const tabs = visibleTabDefs.map((def) => t(def.labelKey));
 
   const handleSwipeLeft = useCallback(() => {
     setTab((prev) => (prev < tabs.length - 1 ? prev + 1 : prev));
@@ -58,8 +64,11 @@ export default function AdminPage() {
   }, []);
 
   if (loading) return null;
-  // 管理者・モデレーター以外はホームへ戻す（API 側でも require_admin で保護済み）。
-  if (!user || !isAdminRole(user.role)) return <Navigate to="/" replace />;
+  // 管理系トピックを一つも持たない役割はホームへ戻す（API 側でもトピックごとの
+  // require_admin / require_emoji_admin で保護済み、#179）。
+  if (!user || !canAccessAdminPage(user.role)) return <Navigate to="/" replace />;
+
+  const ActivePanel = visibleTabDefs[tab]?.Panel;
 
   const center = (
     <div className={styles.swipeContainer} {...swipeHandlers}>
@@ -67,12 +76,7 @@ export default function AdminPage() {
         <span className={panel.title}>{t("admin:adminPage.title")}</span>
       </header>
       <Tabs tabs={tabs} active={tab} onChange={setTab} sticky top={headerHeight} />
-      {tab === 0 && <UserManagement />}
-      {tab === 1 && <SiteSettingsPanel />}
-      {tab === 2 && <StorageProvidersPanel />}
-      {tab === 3 && <EmojisPanel />}
-      {tab === 4 && <ReportsPanel />}
-      {tab === 5 && <RelaysPanel />}
+      {ActivePanel && <ActivePanel />}
     </div>
   );
 

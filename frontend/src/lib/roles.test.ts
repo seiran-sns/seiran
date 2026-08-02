@@ -1,20 +1,53 @@
 import { describe, expect, it } from "vitest";
-import { isAdminRole } from "./roles";
+import { canAccessAdminPage, getAdminTopics } from "./roles";
 
-describe("isAdminRole", () => {
+describe("canAccessAdminPage", () => {
   it("admin を許可する", () => {
-    expect(isAdminRole("admin")).toBe(true);
+    expect(canAccessAdminPage("admin")).toBe(true);
   });
 
   it("moderator を許可する", () => {
-    expect(isAdminRole("moderator")).toBe(true);
+    expect(canAccessAdminPage("moderator")).toBe(true);
+  });
+
+  it("emoji-editor を許可する（#179）", () => {
+    expect(canAccessAdminPage("emoji-editor")).toBe(true);
   });
 
   it("一般ユーザーの role を拒否する", () => {
-    expect(isAdminRole("user")).toBe(false);
+    expect(canAccessAdminPage("user")).toBe(false);
   });
 
   it("undefined を拒否する", () => {
-    expect(isAdminRole(undefined)).toBe(false);
+    expect(canAccessAdminPage(undefined)).toBe(false);
+  });
+});
+
+describe("getAdminTopics", () => {
+  it("admin は全トピックにアクセスできる", () => {
+    expect(getAdminTopics("admin")).toEqual([
+      "users",
+      "siteSettings",
+      "storage",
+      "emojis",
+      "reports",
+      "relays",
+    ]);
+  });
+
+  it("moderator は通報・絵文字トピックにアクセスできる（#179）", () => {
+    expect(getAdminTopics("moderator")).toEqual(["reports", "emojis"]);
+  });
+
+  it("emoji-editor は絵文字トピックのみアクセスできる（#179）", () => {
+    expect(getAdminTopics("emoji-editor")).toEqual(["emojis"]);
+  });
+
+  it("user はどのトピックにもアクセスできない", () => {
+    expect(getAdminTopics("user")).toEqual([]);
+  });
+
+  it("undefined はどのトピックにもアクセスできない", () => {
+    expect(getAdminTopics(undefined)).toEqual([]);
   });
 });
