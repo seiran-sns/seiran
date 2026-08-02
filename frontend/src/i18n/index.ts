@@ -14,6 +14,10 @@ export const supportedLanguages = [
 ] as const;
 export type SupportedLanguage = (typeof supportedLanguages)[number];
 
+export function isSupportedLanguage(lang: string): lang is SupportedLanguage {
+  return (supportedLanguages as readonly string[]).includes(lang);
+}
+
 type TranslationTree = Record<string, unknown>;
 type LocaleModule = { default: TranslationTree };
 
