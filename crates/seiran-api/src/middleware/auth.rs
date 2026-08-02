@@ -90,3 +90,15 @@ pub async fn require_emoji_admin(
     )
     .await
 }
+
+/// JWT 検証 + 通報対応権限（admin / moderator）チェック（#179）。
+/// moderator は調停者として通報の閲覧・対応（凍結・投稿削除・連合転送を含む）を行える。
+/// いずれでもなければ 403 Forbidden を返す。
+pub async fn require_report_moderator(
+    headers: &HeaderMap,
+    auth: &LocalAuthProvider,
+    app_tokens: &dyn AppTokenRepository,
+    users: &dyn UserRepository,
+) -> Result<AuthUser, ApiError> {
+    require_role_in(headers, auth, app_tokens, users, &["admin", "moderator"]).await
+}

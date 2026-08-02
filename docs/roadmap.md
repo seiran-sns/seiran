@@ -1,7 +1,7 @@
 # 開発ロードマップ
 
 - [x] **スマホ下部フローティングナビへ「ホーム」ボタン追加（#180）** — メニュー・検索・通知・ホーム・投稿の順（ホームは投稿の左隣）で並ぶよう、モバイル幅（`max-width: 768px`）でのフローティングボタン群に🏠ボタンを追加し、タップで`/`へ遷移する。既存の検索・通知ボタンとあわせて3つの中間ボタンが等間隔になるよう横位置（`left: 32% / 50% / 68%`）を再調整。
-- [x] **絵文字管理者ロール `emoji-editor` を追加（#179）** — `user_role` ENUM に `emoji-editor` を追加（権限の強さ: admin > moderator > emoji-editor > user）。絵文字管理権限を `moderator` にも付与し、管理画面のトピック別アクセス制御（`frontend/src/lib/roles.ts` の `getAdminTopics`）を導入して、権限のないトピックはタブごと非表示にする。`moderator`・`emoji-editor` は現状「絵文字」タブのみアクセス可能。バックエンドは `require_admin`（admin専用）と `require_emoji_admin`（admin/moderator/emoji-editor、絵文字系管理API全8箇所に適用）を分離。詳細: `docs/database.md`
+- [x] **絵文字管理者ロール `emoji-editor` を追加（#179）** — `user_role` ENUM に `emoji-editor` を追加（権限の強さ: admin > moderator > emoji-editor > user）。絵文字管理権限を `moderator` にも付与し、管理画面のトピック別アクセス制御（`frontend/src/lib/roles.ts` の `getAdminTopics`）を導入して、権限のないトピックはタブごと非表示にする。`moderator` は調停者として「通報」（凍結・投稿削除・連合転送を含む）と「絵文字」タブに、`emoji-editor` は「絵文字」タブのみアクセス可能。バックエンドは `require_admin`（admin専用）・`require_emoji_admin`（admin/moderator/emoji-editor、絵文字系管理API全8箇所に適用）・`require_report_moderator`（admin/moderator、通報系管理APIに適用）を分離。詳細: `docs/database.md`
 - [x] **プロフィールBioのカスタム絵文字展開（#169）** — ノート本文・表示名と同様、プロフィールの自己紹介文（bio）中の`:shortcode:`を画像に展開する。ローカルアクターは`custom_emojis`照合、リモートFediアクターはAP `tag`由来の`actors.emoji_map`を使用し、Bskyアクターは展開しない。詳細: `docs/ui_spec.md` 2.2節
 - [x] **URL・ユーザーIDから「開く」（#165）** — bsky.app/ActivityPub URL、AT URI、`@`ユーザーID、`did:plc:` DIDを解決・必要時取り込みして詳細画面へ遷移する。QR連続認識と2秒間隔のOCRも提供する。
 

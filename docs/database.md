@@ -59,7 +59,9 @@ ID 採番は2系統ある。
 トピック単位（ユーザー管理・サイト設定・ストレージ・絵文字・通報・リレー）でロールごとに決まり、
 フロント `frontend/src/lib/roles.ts` の `getAdminTopics` とバックエンド
 `crates/seiran-api/src/middleware/auth.rs` の `require_admin`（admin専用）/
-`require_emoji_admin`（admin・moderator・emoji-editor）が対応する。現状 `moderator` と
+`require_emoji_admin`（admin・moderator・emoji-editor）/
+`require_report_moderator`（admin・moderator）が対応する。`moderator` は調停者として
+「通報」（凍結・投稿削除・連合転送を含む）と「絵文字」の2トピックにアクセス可能、
 `emoji-editor` は「絵文字」トピックのみアクセス可能。
 
 ### `users` / `actors` の分離

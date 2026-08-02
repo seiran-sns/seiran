@@ -13,11 +13,12 @@ const ALL_ADMIN_TOPICS: AdminTopic[] = [
 /**
  * ロールごとにアクセス可能な管理画面トピック（#179）。
  * 権限の強さ: admin > moderator > emoji-editor > user。
- * moderator・emoji-editor は現状「絵文字」トピックのみアクセス可能。
+ * moderator は調停者として「通報」対応（凍結・投稿削除・連合転送を含む）と
+ * 「絵文字」管理にアクセス可能。emoji-editor は「絵文字」トピックのみ。
  */
 const ROLE_ADMIN_TOPICS: Record<string, AdminTopic[]> = {
   admin: ALL_ADMIN_TOPICS,
-  moderator: ["emojis"],
+  moderator: ["reports", "emojis"],
   "emoji-editor": ["emojis"],
 };
 

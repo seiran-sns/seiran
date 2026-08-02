@@ -35,8 +35,8 @@ describe("getAdminTopics", () => {
     ]);
   });
 
-  it("moderator は絵文字トピックのみアクセスできる（#179）", () => {
-    expect(getAdminTopics("moderator")).toEqual(["emojis"]);
+  it("moderator は通報・絵文字トピックにアクセスできる（#179）", () => {
+    expect(getAdminTopics("moderator")).toEqual(["reports", "emojis"]);
   });
 
   it("emoji-editor は絵文字トピックのみアクセスできる（#179）", () => {
