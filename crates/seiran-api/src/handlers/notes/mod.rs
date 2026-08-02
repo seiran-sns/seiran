@@ -243,15 +243,25 @@ async fn create_repost(
     );
 
     let post_id = generate_snowflake_id(now);
-    // リポストの AP オブジェクト ID は Announce URI として生成
-    let announce_ap_id = format!("https://{}/announces/{}", state.local_domain, post_id);
+    // リポスト行の ap_object_id は、deliver_repost が実際に配送するActivity種別に合わせて
+    // 決定する。元ポストに ap_object_id がある（Fedi 側にも実体がある）場合のみ実際に
+    // Announce が配送されるため /announces/ 形式にし、元ポストが Bsky ネイティブ（at_uri
+    // のみ）の場合は PostToFollowers フォールバックとして通常の Create(Note) が配送される
+    // ため /notes/ 形式にする。ここが常に /announces/ 形式だと、DBが自称する身元と実際に
+    // 配送された身元が食い違い、外部からの参照（ブースト等）で同一投稿と認識できず重複行が
+    // 生成される（#117022998620934901 で発覚）。
+    let ap_object_id = if meta.ap_object_id.is_some() {
+        format!("https://{}/announces/{}", state.local_domain, post_id)
+    } else {
+        format!("https://{}/notes/{}", state.local_domain, post_id)
+    };
 
     match state
         .posts
         .insert_repost(
             post_id,
             actor_id,
-            &announce_ap_id,
+            &ap_object_id,
             renote_id,
             now,
             repost_visibility,

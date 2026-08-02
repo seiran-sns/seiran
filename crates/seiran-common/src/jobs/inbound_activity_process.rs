@@ -610,24 +610,24 @@ fn bsky_app_url_to_at_uri(url: &str) -> Option<String> {
     Some(format!("at://{}/app.bsky.feed.post/{}", did, rkey))
 }
 
-/// 受信した Note の重複排除（フェーズ5）判定: ループバック（シナリオ1）またはブリッジ重複（シナリオ3）
-/// を検知し、既存のオリジナル投稿 ID があれば返す。
-async fn resolve_parent_original_post_id(
-    inbox: &InboxContext,
-    note_id: &str,
-    note_url: &str,
-) -> Option<i64> {
-    // シナリオ1: ループバック検知（note.id または note.url が LOCAL_DOMAIN の notes URL）
+/// 受信した Note のループバック（シナリオ1: note.id または note.url が自ドメインの notes URL
+/// を名乗る）を検知する。配送経路の異常（リレー等が Create の object.id/url を書き換えて送り
+/// 返してくる等）で発生し、該当ノートは既にローカルに存在するため、呼び出し元はこれを新規
+/// INSERTせず、返ってきた既存 post_id をそのまま使うか活動自体を無視しなければならない
+/// （#117022998620934901 で発覚: このガードが無かったため domain はローカルだが id が
+/// 一致しない重複行が生成された）。
+fn detect_loopback_post_id(inbox: &InboxContext, note_id: &str, note_url: &str) -> Option<i64> {
     let loopback_prefix = format!("https://{}/notes/", inbox.local_domain);
-    let loopback = [note_url, note_id].iter().find_map(|url| {
+    [note_url, note_id].iter().find_map(|url| {
         url.strip_prefix(&loopback_prefix)
             .and_then(|id_str| id_str.parse::<i64>().ok())
-    });
-    if loopback.is_some() {
-        return loopback;
-    }
+    })
+}
 
-    // シナリオ3: ブリッジ重複検知（note.url が bsky.app の場合、at_uri で既存ポストを探す）
+/// 受信した Note の重複排除（フェーズ5）判定: ブリッジ重複（シナリオ3、note.url が bsky.app
+/// の場合に at_uri で既存ポストを探す）を検知し、既存のオリジナル投稿 ID があれば返す。
+/// ループバック（シナリオ1）は [`detect_loopback_post_id`] で別途・事前に弾くこと。
+async fn resolve_bridge_duplicate_post_id(inbox: &InboxContext, note_url: &str) -> Option<i64> {
     let at_uri = bsky_app_url_to_at_uri(note_url)?;
     inbox
         .post_repo
@@ -910,7 +910,18 @@ async fn handle_create_note(
     }
 
     let note_url = note["url"].as_str().unwrap_or("");
-    let parent_original_post_id = resolve_parent_original_post_id(inbox, note_id, note_url).await;
+
+    // シナリオ1: ループバックは既存のローカル投稿の重複でしかないため、新規INSERTせず無視する。
+    if let Some(existing_id) = detect_loopback_post_id(inbox, note_id, note_url) {
+        tracing::warn!(
+            "[Create/Note] ループバック検知、INSERTをスキップ: note_id={} → 既存post_id={}",
+            note_id,
+            existing_id
+        );
+        return Ok(());
+    }
+
+    let parent_original_post_id = resolve_bridge_duplicate_post_id(inbox, note_url).await;
 
     // posts テーブルに挿入（ap_object_id 重複はスキップ、seiran_post_uuid も保存）
     inbox
@@ -2298,7 +2309,18 @@ async fn fetch_and_save_note(
     };
 
     let note_url = note["url"].as_str().unwrap_or("");
-    let parent_original_post_id = resolve_parent_original_post_id(inbox, &note_id, note_url).await;
+
+    // シナリオ1: ループバックは既存のローカル投稿と同一のため、新規INSERTせずその id を返す。
+    if let Some(existing_id) = detect_loopback_post_id(inbox, &note_id, note_url) {
+        tracing::warn!(
+            "[Inbox/Announce] fetch_and_save_note: ループバック検知、INSERTをスキップ: note_id={} → 既存post_id={}",
+            note_id,
+            existing_id
+        );
+        return Ok(existing_id);
+    }
+
+    let parent_original_post_id = resolve_bridge_duplicate_post_id(inbox, note_url).await;
 
     inbox
         .post_repo
