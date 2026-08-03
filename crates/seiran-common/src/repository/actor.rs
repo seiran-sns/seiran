@@ -48,6 +48,9 @@ pub struct ActorProfileRow {
     pub avatar_media_id: Option<i64>,
     pub banner_media_id: Option<i64>,
     pub profile_fields: serde_json::Value,
+    /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186、ローカルアクターは
+    /// `display_name` 変更のたびに `update_profile` が再計算・保存する）。
+    pub emoji_map: Option<serde_json::Value>,
 }
 
 #[async_trait]
@@ -140,7 +143,8 @@ pub trait ActorRepository: Send + Sync {
         user_id: i64,
     ) -> Result<Option<ActorProfileRow>, sqlx::Error>;
 
-    /// プロフィールを更新する（`update_profile` ハンドラの UPDATE 文）。
+    /// プロフィールを更新する（`update_profile` ハンドラの UPDATE 文）。`emoji_map` は
+    /// 呼び出し側が `display_name` から解決済みのショートコード→URLマップ（#186）。
     #[allow(clippy::too_many_arguments)]
     async fn update_profile(
         &self,
@@ -150,6 +154,7 @@ pub trait ActorRepository: Send + Sync {
         avatar_media_id: Option<i64>,
         banner_media_id: Option<i64>,
         profile_fields: &serde_json::Value,
+        emoji_map: &serde_json::Value,
     ) -> Result<(), sqlx::Error>;
 }
 
@@ -374,7 +379,8 @@ impl ActorRepository for PgActorRepository {
         user_id: i64,
     ) -> Result<Option<ActorProfileRow>, sqlx::Error> {
         sqlx::query_as::<_, ActorProfileRow>(
-            "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id, profile_fields \
+            "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id, \
+                    profile_fields, emoji_map \
              FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
         )
         .bind(user_id)
@@ -390,18 +396,20 @@ impl ActorRepository for PgActorRepository {
         avatar_media_id: Option<i64>,
         banner_media_id: Option<i64>,
         profile_fields: &serde_json::Value,
+        emoji_map: &serde_json::Value,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE actors \
              SET display_name = $1, bio = $2, avatar_media_id = $3, banner_media_id = $4, \
-                 profile_fields = $5, updated_at = NOW() \
-             WHERE user_id = $6 AND actor_type = 'local'",
+                 profile_fields = $5, emoji_map = $6, updated_at = NOW() \
+             WHERE user_id = $7 AND actor_type = 'local'",
         )
         .bind(display_name)
         .bind(bio)
         .bind(avatar_media_id)
         .bind(banner_media_id)
         .bind(profile_fields)
+        .bind(emoji_map)
         .bind(user_id)
         .execute(&self.pool)
         .await

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api, AdminUser, getErrorMessage } from "../../api/client";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
+import EmojiText from "../note/EmojiText";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 
@@ -139,7 +140,11 @@ export default function UserManagement() {
               </div>
               <div className={styles.grow}>
                 <div className={styles.primaryText}>
-                  {u.display_name || u.username || t("admin:userManagement.noActorLabel")}
+                  {u.display_name || u.username ? (
+                    <EmojiText text={u.display_name || u.username || ""} emojis={u.emojis} />
+                  ) : (
+                    t("admin:userManagement.noActorLabel")
+                  )}
                 </div>
                 <div className={styles.subText}>
                   {u.username ? `@${u.username} · ` : ""}

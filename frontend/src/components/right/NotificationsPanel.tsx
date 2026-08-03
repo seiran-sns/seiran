@@ -9,19 +9,31 @@ import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
 import { profilePath } from "../../lib/format";
 import panel from "../common/Panel.module.css";
+import EmojiText from "../note/EmojiText";
 import NoteHoverPreview from "../note/NoteHoverPreview";
 import styles from "./NotificationsPanel.module.css";
+
+/** Misskey本家仕様のコロンなしshortcodeキー（`user.emojis`）を、`EmojiText` が期待する
+ * `:shortcode:` 形式のキーへ変換する（#186）。 */
+function colonizeEmojiKeys(emojis?: Record<string, string>): Record<string, string> | undefined {
+  if (!emojis) return undefined;
+  return Object.fromEntries(Object.entries(emojis).map(([code, url]) => [`:${code}:`, url]));
+}
 
 const PAGE_SIZE = 20;
 
 /** ポストへのリンクを持つ通知種別（通知文全体を対象ポストへの遷移領域にする）。 */
 const NOTE_LINKED_TYPES = new Set(["reaction", "mention", "reply"]);
 
-/** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。 */
-export function describeNotification(n: NotificationItem): { icon: string; iconUrl?: string; i18nKey: string; label: string } {
+/** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。
+ * `who`（表示名部分）は呼び出し側で `EmojiText` を通す前提でプレーンテキストのまま返す。 */
+export function describeNotification(
+  n: NotificationItem
+): { icon: string; iconUrl?: string; i18nKey: string; who: string; whoEmojis?: Record<string, string>; handleSuffix: string } {
   const who = n.user?.name || n.user?.username || i18n.t("notifications:notificationsPanel.unknownUser");
   const handle = n.user?.username && n.user?.host ? `@${n.user.username}@${n.user.host}` : "";
-  const label = handle ? `${who}（${handle}）` : who;
+  const handleSuffix = handle ? `（${handle}）` : "";
+  const whoEmojis = n.user?.emojis;
   switch (n.type) {
     case "reaction": {
       // `reactionEmojis` のキーは Misskey 本家仕様に合わせコロンなし shortcode
@@ -32,19 +44,21 @@ export function describeNotification(n: NotificationItem): { icon: string; iconU
         icon: n.reaction || "⭐",
         iconUrl: shortcode ? n.note?.reactionEmojis?.[shortcode] : undefined,
         i18nKey: "notifications:notificationsPanel.reactionText",
-        label,
+        who,
+        whoEmojis,
+        handleSuffix,
       };
     }
     case "follow":
-      return { icon: "➕", i18nKey: "notifications:notificationsPanel.followText", label };
+      return { icon: "➕", i18nKey: "notifications:notificationsPanel.followText", who, whoEmojis, handleSuffix };
     case "followRequestAccepted":
-      return { icon: "🤝", i18nKey: "notifications:notificationsPanel.followAcceptedText", label };
+      return { icon: "🤝", i18nKey: "notifications:notificationsPanel.followAcceptedText", who, whoEmojis, handleSuffix };
     case "mention":
-      return { icon: "📣", i18nKey: "notifications:notificationsPanel.mentionText", label };
+      return { icon: "📣", i18nKey: "notifications:notificationsPanel.mentionText", who, whoEmojis, handleSuffix };
     case "reply":
-      return { icon: "💬", i18nKey: "notifications:notificationsPanel.replyText", label };
+      return { icon: "💬", i18nKey: "notifications:notificationsPanel.replyText", who, whoEmojis, handleSuffix };
     default:
-      return { icon: "🔔", i18nKey: "notifications:notificationsPanel.genericText", label };
+      return { icon: "🔔", i18nKey: "notifications:notificationsPanel.genericText", who, whoEmojis, handleSuffix };
   }
 }
 
@@ -130,7 +144,7 @@ export default function NotificationsPanel() {
   return (
     <ul className={styles.list}>
       {items.map((n) => {
-        const { icon, iconUrl, i18nKey, label } = describeNotification(n);
+        const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix } = describeNotification(n);
         const noteId = NOTE_LINKED_TYPES.has(n.type) ? n.note?.id : undefined;
         const userLink = n.user?.username ? (
           <Link
@@ -141,6 +155,7 @@ export default function NotificationsPanel() {
         ) : (
           <span />
         );
+        const emojiName = <EmojiText text={who} emojis={colonizeEmojiKeys(whoEmojis)} />;
         const content = (
           <>
             {iconUrl ? (
@@ -149,7 +164,12 @@ export default function NotificationsPanel() {
               <span className={styles.icon}>{icon}</span>
             )}
             <span className={styles.text}>
-              <Trans i18n={i18n} i18nKey={i18nKey} values={{ label }} components={{ userLink }} />
+              <Trans
+                i18n={i18n}
+                i18nKey={i18nKey}
+                values={{ handleSuffix }}
+                components={{ userLink, emojiName }}
+              />
             </span>
           </>
         );

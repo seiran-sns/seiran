@@ -425,6 +425,7 @@ struct PersonObjectParams<'a> {
     avatar_url: Option<&'a str>,
     avatar_mime_type: Option<&'a str>,
     ap_public_key_pem: &'a str,
+    emoji_map: &'a serde_json::Value,
 }
 
 /// Person ドキュメントを組み立てる。
@@ -457,6 +458,12 @@ fn build_person_object(addr: &LocalActorAddress, p: &PersonObjectParams) -> serd
             "mediaType": p.avatar_mime_type.unwrap_or("image/jpeg"),
             "url": url
         });
+    }
+    // 表示名中のカスタム絵文字ショートコードをリモートが解決できるよう`tag`に付与する（#186）。
+    let mut tags = Vec::new();
+    append_emoji_tags(p.display_name, p.emoji_map, &mut tags, p.local_domain);
+    if !tags.is_empty() {
+        person["tag"] = serde_json::Value::Array(tags);
     }
     person
 }
@@ -611,10 +618,12 @@ async fn fetch_post_activity_basis(
     })
 }
 
-/// 保存済み `posts.emoji_map` のうち、今回配送する本文に実際に現れるカスタム絵文字を
-/// ActivityPub `Emoji` tagへ変換して既存のMention/Hashtag tagへ追加する（#126）。
+/// 保存済み `posts.emoji_map`/`actors.emoji_map` のうち、今回配送する本文（投稿本文や
+/// 表示名）に実際に現れるカスタム絵文字を ActivityPub `Emoji` tagへ変換して既存の
+/// Mention/Hashtag tagへ追加する（#126）。`actors.emoji_map` にも同じ形式で使うため
+/// （#186）`pub`にして `seiran-federation-inbox` の Actor ドキュメント生成からも呼ぶ。
 /// `id` を付与する理由は `build_reaction_object` のコメント（#176）を参照。
-fn append_emoji_tags(
+pub fn append_emoji_tags(
     body: &str,
     emoji_map: &serde_json::Value,
     tags: &mut Vec<serde_json::Value>,
@@ -1036,7 +1045,7 @@ pub async fn deliver_update_actor(
     let row = sqlx::query(
         "SELECT a.username, a.display_name, a.bio, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
-                mf.mime_type AS avatar_mime_type \
+                mf.mime_type AS avatar_mime_type, a.emoji_map \
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
@@ -1058,6 +1067,9 @@ pub async fn deliver_update_actor(
     let bio: Option<String> = row.try_get("bio").unwrap_or(None);
     let avatar_url: Option<String> = row.try_get("avatar_url").unwrap_or(None);
     let avatar_mime_type: Option<String> = row.try_get("avatar_mime_type").unwrap_or(None);
+    let emoji_map: serde_json::Value = row
+        .try_get("emoji_map")
+        .unwrap_or_else(|_| serde_json::json!({}));
 
     let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
     if inboxes.is_empty() {
@@ -1075,6 +1087,7 @@ pub async fn deliver_update_actor(
             avatar_url: avatar_url.as_deref(),
             avatar_mime_type: avatar_mime_type.as_deref(),
             ap_public_key_pem,
+            emoji_map: &emoji_map,
         },
     );
 
@@ -1733,10 +1746,12 @@ mod tests {
                 avatar_url: None,
                 avatar_mime_type: None,
                 ap_public_key_pem: "PEM",
+                emoji_map: &serde_json::json!({}),
             },
         );
         assert!(minimal.get("summary").is_none());
         assert!(minimal.get("icon").is_none());
+        assert!(minimal.get("tag").is_none());
         assert_eq!(minimal["publicKey"]["publicKeyPem"], "PEM");
 
         let full = build_person_object(
@@ -1749,10 +1764,35 @@ mod tests {
                 avatar_url: Some("https://cdn.example/a.png"),
                 avatar_mime_type: Some("image/png"),
                 ap_public_key_pem: "PEM",
+                emoji_map: &serde_json::json!({}),
             },
         );
         assert_eq!(full["summary"], "hi");
         assert_eq!(full["icon"]["mediaType"], "image/png");
+    }
+
+    #[test]
+    fn person_object_includes_emoji_tag_from_display_name() {
+        let a = addr();
+        let person = build_person_object(
+            &a,
+            &PersonObjectParams {
+                local_domain: "seiran.example",
+                username: "alice",
+                display_name: ":blobcat: Alice",
+                bio: None,
+                avatar_url: None,
+                avatar_mime_type: None,
+                ap_public_key_pem: "PEM",
+                emoji_map: &serde_json::json!({":blobcat:": "https://cdn.example/blobcat.png"}),
+            },
+        );
+        assert_eq!(person["tag"][0]["type"], "Emoji");
+        assert_eq!(person["tag"][0]["name"], ":blobcat:");
+        assert_eq!(
+            person["tag"][0]["icon"]["url"],
+            "https://cdn.example/blobcat.png"
+        );
     }
 
     #[test]

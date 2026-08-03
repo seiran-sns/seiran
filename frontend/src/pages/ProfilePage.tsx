@@ -344,7 +344,7 @@ export default function ProfilePage() {
 
           <div className={styles.names}>
             <span className={styles.displayName}>
-              {profile.display_name || profile.username}
+              <EmojiText text={profile.display_name || profile.username} emojis={profile.emojis} />
             </span>
             <span className={styles.acct}>
               @{profile.username}

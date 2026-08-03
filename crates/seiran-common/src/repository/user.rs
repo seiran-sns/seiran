@@ -23,6 +23,8 @@ pub struct AdminUserRow {
     pub avatar_url: Option<String>,
     pub totp_enabled: bool,
     pub passkey_count: i64,
+    /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。
+    pub emoji_map: Option<serde_json::Value>,
 }
 
 #[async_trait]
@@ -232,7 +234,8 @@ impl UserRepository for PgUserRepository {
                     (
                         SELECT COUNT(*) FROM user_passkeys p
                         WHERE p.user_id = u.id
-                    ) AS passkey_count
+                    ) AS passkey_count,
+                    a.emoji_map
              FROM users u
              LEFT JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
              LEFT JOIN media_files mf ON mf.id = a.avatar_media_id

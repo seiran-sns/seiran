@@ -37,6 +37,9 @@ struct ApActorDocument {
     public_key: ApPublicKey,
     /// プロフィールのキーバリュー項目（#62、Mastodon 等の「プロフィールのメタデータ欄」）。
     attachment: Vec<ApPropertyValue>,
+    /// 表示名中のカスタム絵文字ショートコードをリモートが解決するための`Emoji`タグ（#186）。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tag: Vec<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -92,7 +95,7 @@ pub async fn actor_handler(
     let row = sqlx::query(
         "SELECT a.display_name, a.bio, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
-                mf.mime_type AS avatar_mime_type, a.profile_fields \
+                mf.mime_type AS avatar_mime_type, a.profile_fields, a.emoji_map \
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
@@ -103,7 +106,7 @@ pub async fn actor_handler(
     .fetch_optional(&state.db)
     .await;
 
-    let (display_name, bio, avatar_url, avatar_mime_type, profile_fields) = match row {
+    let (display_name, bio, avatar_url, avatar_mime_type, profile_fields, emoji_map) = match row {
         Ok(Some(r)) => {
             let display_name = r
                 .try_get::<Option<String>, _>("display_name")
@@ -121,12 +124,16 @@ pub async fn actor_handler(
                 .ok()
                 .and_then(|v| v.as_array().cloned())
                 .unwrap_or_default();
+            let emoji_map = r
+                .try_get::<serde_json::Value, _>("emoji_map")
+                .unwrap_or_else(|_| serde_json::json!({}));
             (
                 display_name,
                 bio,
                 avatar_url,
                 avatar_mime_type,
                 profile_fields,
+                emoji_map,
             )
         }
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
@@ -135,6 +142,14 @@ pub async fn actor_handler(
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     };
+
+    let mut tag = Vec::new();
+    seiran_common::ap::deliver::append_emoji_tags(
+        &display_name,
+        &emoji_map,
+        &mut tag,
+        &state.local_domain,
+    );
 
     let attachment: Vec<ApPropertyValue> = profile_fields
         .iter()
@@ -182,6 +197,7 @@ pub async fn actor_handler(
             public_key_pem: state.ap_public_key_pem.clone(),
         },
         attachment,
+        tag,
     };
 
     (
