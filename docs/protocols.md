@@ -313,7 +313,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 
 ### リポスト・引用通知
 
-ローカル投稿が他ユーザーにリポストまたは引用された場合、`notifications` にそれぞれ `type="repost"` / `type="quote"` を作る。`note_id` は新しく作られたリポスト／引用投稿を指す。自己リポスト・自己引用は通知せず、リモート投稿者宛のローカル通知も作らない。現時点ではローカル作成経路（`handlers::notes::create_repost` / `create_regular_post`）を対象とする。
+ローカル投稿が他ユーザーにリポストまたは引用された場合、`notifications` にそれぞれ `type="repost"` / `type="quote"` を作る。`note_id` は新しく作られたリポスト／引用投稿を指す。自己リポスト・自己引用は通知せず、リモート投稿者宛のローカル通知も作らない。ローカル作成経路（`handlers::notes::create_repost` / `create_regular_post`）に加え、ActivityPub 受信経路（`inbound_activity_process::handle_announce` / `handle_create_note`）でも、対象投稿の `PostDeliveryMeta` がローカルアクターを指す場合に通知を作る。同一 `Announce` の再配送はリポストの重複チェック、同一 `Create/Note` の再配送は投稿の重複排除によって通知生成前に終了する。
 
 ## 9. ダイレクトメッセージ
 

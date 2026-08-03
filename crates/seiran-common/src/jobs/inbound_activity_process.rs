@@ -741,6 +741,19 @@ async fn handle_create_note(
 ) -> Result<(), String> {
     let note = &activity["object"];
     let note_id = note["id"].as_str().ok_or("Note: id がありません")?;
+
+    // 同一 Create/Note の再配送では投稿本体だけでなく、引用・返信・メンション通知も
+    // 二重生成しない。insert_remote_with_dedup の ON CONFLICT より前に終了する。
+    if inbox
+        .post_repo
+        .find_id_by_ap_or_at_uri(note_id)
+        .await
+        .map_err(|e| format!("Create/Note 重複チェック失敗: {}", e))?
+        .is_some()
+    {
+        return Ok(());
+    }
+
     let actor_uri = activity["actor"]
         .as_str()
         .ok_or("Create: actor がありません")?;
@@ -957,6 +970,46 @@ async fn handle_create_note(
             "[Create/Note] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
             e
         );
+    }
+
+    // 引用通知: リモート Fedi ユーザーがローカルユーザーの投稿を引用した場合に作る。
+    if let Some(quoted_post_id) = quote_of_post_id {
+        match inbox.post_repo.find_delivery_meta(quoted_post_id).await {
+            Ok(Some(meta)) if meta.domain == inbox.local_domain && meta.actor_id != actor_id => {
+                inbox.stream_hub.publish_event(
+                    HashSet::from([meta.actor_id]),
+                    "quote",
+                    serde_json::json!({
+                        "postId": post_id.to_string(),
+                        "actor": {
+                            "username": remote.username,
+                            "domain": remote.domain,
+                            "displayName": remote.display_name
+                        },
+                    }),
+                );
+                let notif_id = generate_snowflake_id(chrono::Utc::now());
+                if let Err(e) = inbox
+                    .notification_repo
+                    .insert(
+                        notif_id,
+                        meta.actor_id,
+                        NotificationKind::Quote,
+                        Some(actor_id),
+                        Some(post_id),
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    tracing::error!("[Create/Note] quote notifications INSERT 失敗: {}", e);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => tracing::error!("[Create/Note] 引用元メタ情報の取得に失敗: {}", e),
+        }
     }
 
     // リプライ通知: リプライ先がローカルユーザーの投稿であれば通知を作る（自己リプライは除く）。
@@ -2194,6 +2247,44 @@ async fn handle_announce(
         )
         .await
         .map_err(|e| format!("リポスト挿入失敗: {}", e))?;
+
+    // リポスト通知: リモート Fedi ユーザーがローカルユーザーの投稿をリポストした場合に作る。
+    match inbox.post_repo.find_delivery_meta(repost_of_post_id).await {
+        Ok(Some(meta)) if meta.domain == inbox.local_domain && meta.actor_id != actor_id => {
+            inbox.stream_hub.publish_event(
+                HashSet::from([meta.actor_id]),
+                "repost",
+                serde_json::json!({
+                    "postId": post_id.to_string(),
+                    "actor": {
+                        "username": remote.username,
+                        "domain": remote.domain,
+                        "displayName": remote.display_name
+                    },
+                }),
+            );
+            let notif_id = generate_snowflake_id(chrono::Utc::now());
+            if let Err(e) = inbox
+                .notification_repo
+                .insert(
+                    notif_id,
+                    meta.actor_id,
+                    NotificationKind::Repost,
+                    Some(actor_id),
+                    Some(post_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+            {
+                tracing::error!("[Inbox/Announce] repost notifications INSERT 失敗: {}", e);
+            }
+        }
+        Ok(_) => {}
+        Err(e) => tracing::error!("[Inbox/Announce] 元ポストメタ情報の取得に失敗: {}", e),
+    }
 
     tracing::info!(
         "[Inbox/Announce] リポスト保存完了: id={}, actor_id={}, repost_of={}",
