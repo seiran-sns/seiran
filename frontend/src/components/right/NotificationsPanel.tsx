@@ -24,7 +24,7 @@ function colonizeEmojiKeys(emojis?: Record<string, string>): Record<string, stri
 const PAGE_SIZE = 20;
 
 /** ポストへのリンクを持つ通知種別（通知文全体を対象ポストへの遷移領域にする）。 */
-const NOTE_LINKED_TYPES = new Set(["reaction", "mention", "reply"]);
+const NOTE_LINKED_TYPES = new Set(["reaction", "mention", "reply", "repost", "quote"]);
 
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。
  * `who`（表示名部分）は呼び出し側で `EmojiText` を通す前提でプレーンテキストのまま返す。 */
@@ -58,6 +58,10 @@ export function describeNotification(
       return { icon: "📣", i18nKey: "notifications:notificationsPanel.mentionText", who, whoEmojis, handleSuffix };
     case "reply":
       return { icon: "💬", i18nKey: "notifications:notificationsPanel.replyText", who, whoEmojis, handleSuffix };
+    case "repost":
+      return { icon: "🔁", i18nKey: "notifications:notificationsPanel.repostText", who, whoEmojis, handleSuffix };
+    case "quote":
+      return { icon: "❝", i18nKey: "notifications:notificationsPanel.quoteText", who, whoEmojis, handleSuffix };
     default:
       return { icon: "🔔", i18nKey: "notifications:notificationsPanel.genericText", who, whoEmojis, handleSuffix };
   }

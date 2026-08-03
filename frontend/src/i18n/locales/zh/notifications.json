@@ -9,6 +9,8 @@
     "followAcceptedText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 已接受您的关注请求",
     "mentionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 提到了您",
     "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 回复了您",
+    "repostText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 转发了您的帖子",
+    "quoteText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 引用了您的帖子",
     "genericText": "来自 <userLink><emojiName/>{{handleSuffix}}</userLink> 的通知",
     "noNotifications": "没有新的通知。",
     "noNotificationsDetail": "回复、反应和关注将实时显示在此处。"

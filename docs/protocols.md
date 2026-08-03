@@ -311,6 +311,10 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 
 いずれの経路も `source_uri` は渡さない（1リプライにつき宛先は常に1人だが、メンション通知と実装を揃えるため統一している）。
 
+### リポスト・引用通知
+
+ローカル投稿が他ユーザーにリポストまたは引用された場合、`notifications` にそれぞれ `type="repost"` / `type="quote"` を作る。`note_id` は新しく作られたリポスト／引用投稿を指す。自己リポスト・自己引用は通知せず、リモート投稿者宛のローカル通知も作らない。現時点ではローカル作成経路（`handlers::notes::create_repost` / `create_regular_post`）を対象とする。
+
 ## 9. ダイレクトメッセージ
 
 `visibility='direct'`の投稿をそのまま`posts`に格納する方式でDMを実現する（`docs/database.md`の「ダイレクトメッセージ関連」節も参照）。Misskey APIクライアントも同じ投稿テーブルを読み書きするため、Bsky DMも含めてMisskey互換の投稿・タイムライン取得APIでそのまま扱える。

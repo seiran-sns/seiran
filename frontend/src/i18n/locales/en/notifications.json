@@ -9,6 +9,8 @@
     "followAcceptedText": "<userLink><emojiName/>{{handleSuffix}}</userLink> accepted your follow request",
     "mentionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> mentioned you",
     "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink> replied to you",
+    "repostText": "<userLink><emojiName/>{{handleSuffix}}</userLink> reposted your post",
+    "quoteText": "<userLink><emojiName/>{{handleSuffix}}</userLink> quoted your post",
     "genericText": "Notification from <userLink><emojiName/>{{handleSuffix}}</userLink>",
     "noNotifications": "No new notifications.",
     "noNotificationsDetail": "Replies, reactions, and follows will appear here in real time."
