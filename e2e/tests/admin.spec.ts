@@ -49,9 +49,13 @@ test("管理者はユーザーを凍結・凍結解除できる", async ({ page,
   await page.goto("/admin");
   await expect(page.getByText("ユーザー管理")).toBeVisible({ timeout: 10_000 });
 
-  // ユーザー一覧の行構造（UserManagement.tsx）: primaryText(@username) → grow → row
-  // の2階層上に、凍結ボタン・ロール選択を含む行全体(row)がある。
-  const usernameCell = page.getByText(`@${target.username}`, { exact: true });
+  // ユーザー一覧はid昇順・1ページ30件のカーソルページネーション（UserManagement.tsx）
+  // のため、他specの実行順序次第でtargetが初期ページに載らないことがある。
+  // 絞り込みボックスで確実に対象だけを表示させてから探す。
+  // 行構造: subText(@username · email) → grow → row の2階層上に、凍結ボタン・
+  // ロール選択を含む行全体(row)がある。subTextはemail併記のため exact match しない。
+  await page.getByPlaceholder("表示名・ユーザー名・メールアドレスで絞り込み").fill(target.username);
+  const usernameCell = page.getByText(`@${target.username}`);
   await expect(usernameCell).toBeVisible({ timeout: 10_000 });
   const row = usernameCell.locator("xpath=../..");
 
@@ -78,7 +82,11 @@ test("ユーザー管理にTOTP状態とパスキー数が表示され、TOTP強
 
   await seedAuth(page, adminToken);
   await page.goto("/admin");
-  const usernameCell = page.getByText(`@${target.username}`, { exact: true });
+  await expect(page.getByText("ユーザー管理")).toBeVisible({ timeout: 10_000 });
+  // 上記凍結テストと同様、ユーザー一覧のページネーションにより初期ページに
+  // targetが載らないことがあるため絞り込みボックスで確実に表示させる。
+  await page.getByPlaceholder("表示名・ユーザー名・メールアドレスで絞り込み").fill(target.username);
+  const usernameCell = page.getByText(`@${target.username}`);
   await expect(usernameCell).toBeVisible({ timeout: 10_000 });
   const row = usernameCell.locator("xpath=../..");
   await expect(row.getByText("TOTP: 無効")).toBeVisible();
