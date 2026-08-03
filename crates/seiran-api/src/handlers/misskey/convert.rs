@@ -466,7 +466,17 @@ pub async fn build_notifications(
     let notifier_users: HashMap<i64, MisskeyUserLite> = if notifier_ids.is_empty() {
         HashMap::new()
     } else {
-        sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, Option<serde_json::Value>)>(
+        sqlx::query_as::<
+            _,
+            (
+                i64,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<serde_json::Value>,
+            ),
+        >(
             "SELECT a.id, a.username, a.domain, a.display_name, \
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url), \
                     a.emoji_map \
@@ -480,18 +490,20 @@ pub async fn build_notifications(
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|(id, username, domain, display_name, avatar_url, emoji_map)| {
-            let mut lite = user_lite(
-                id,
-                &username,
-                &domain,
-                &state.local_domain,
-                display_name.as_deref(),
-                avatar_url.as_deref(),
-            );
-            lite.emojis = to_misskey_emojis(None, emoji_map.as_ref());
-            (id, lite)
-        })
+        .map(
+            |(id, username, domain, display_name, avatar_url, emoji_map)| {
+                let mut lite = user_lite(
+                    id,
+                    &username,
+                    &domain,
+                    &state.local_domain,
+                    display_name.as_deref(),
+                    avatar_url.as_deref(),
+                );
+                lite.emojis = to_misskey_emojis(None, emoji_map.as_ref());
+                (id, lite)
+            },
+        )
         .collect()
     };
 

@@ -1102,7 +1102,10 @@ pub async fn update_profile(
                         .collect(),
                 ),
                 Err(e) => {
-                    tracing::error!("[update_profile] 表示名の絵文字ショートコード解決失敗: {}", e);
+                    tracing::error!(
+                        "[update_profile] 表示名の絵文字ショートコード解決失敗: {}",
+                        e
+                    );
                     current.emoji_map.clone().unwrap_or_else(empty_emoji_map)
                 }
             }
