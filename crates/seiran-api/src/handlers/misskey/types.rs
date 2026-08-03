@@ -19,6 +19,9 @@ pub struct MisskeyUserLite {
     pub avatar_url: Option<String>,
     pub is_bot: bool,
     pub is_cat: bool,
+    /// `name`（表示名）中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub emojis: BTreeMap<String, String>,
 }
 
 /// `misskey_dart` の `UserDetailedNotMe.fromJson`（`/api/users/show` が返す形）は
@@ -213,6 +216,7 @@ mod tests {
                     avatar_url: None,
                     is_bot: false,
                     is_cat: false,
+                    emojis: BTreeMap::new(),
                 },
                 created_at: "2026-01-01T00:00:00+00:00".to_owned(),
                 description: None,

@@ -172,6 +172,8 @@ export interface AdminUser {
   avatar_url: string | null;
   totp_enabled: boolean;
   passkey_count: number;
+  /** 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。 */
+  emojis?: Record<string, string>;
 }
 
 export interface AdminReport {
@@ -704,6 +706,9 @@ export interface NotificationUser {
   host: string | null;
   name?: string;
   avatarUrl?: string;
+  /** `name`（表示名）中のカスタム絵文字（#186）。Misskey本家仕様に合わせコロンなし
+   * shortcode がキー（`reactionEmojis` と同様、参照時は `:shortcode:` を組み立てること）。 */
+  emojis?: Record<string, string>;
 }
 
 export interface NotificationItem {

@@ -4,12 +4,12 @@
   },
   "notificationsPanel": {
     "unknownUser": "だれか",
-    "reactionText": "<userLink>{{label}}</userLink> がリアクションしました",
-    "followText": "<userLink>{{label}}</userLink> にフォローされました",
-    "followAcceptedText": "<userLink>{{label}}</userLink> がフォローを承認しました",
-    "mentionText": "<userLink>{{label}}</userLink> からメンションされました",
-    "replyText": "<userLink>{{label}}</userLink> から返信がありました",
-    "genericText": "<userLink>{{label}}</userLink> から通知",
+    "reactionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> がリアクションしました",
+    "followText": "<userLink><emojiName/>{{handleSuffix}}</userLink> にフォローされました",
+    "followAcceptedText": "<userLink><emojiName/>{{handleSuffix}}</userLink> がフォローを承認しました",
+    "mentionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> からメンションされました",
+    "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink> から返信がありました",
+    "genericText": "<userLink><emojiName/>{{handleSuffix}}</userLink> から通知",
     "noNotifications": "新しい通知はありません。",
     "noNotificationsDetail": "リプライ・リアクション・フォローがここにリアルタイム表示されます。"
   }

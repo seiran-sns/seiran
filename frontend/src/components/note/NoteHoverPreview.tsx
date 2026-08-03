@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note } from "../../api/client";
 import Avatar from "./Avatar";
+import EmojiText from "./EmojiText";
 import { acct, displayName } from "../../lib/format";
 import styles from "./NoteHoverPreview.module.css";
 
@@ -67,7 +68,9 @@ export default function NoteHoverPreview({ noteId, children, className }: NoteHo
                   size={26}
                 />
                 <span className={styles.names}>
-                  <span className={styles.name}>{displayName(target)}</span>
+                  <span className={styles.name}>
+                  <EmojiText text={displayName(target)} emojis={target.emojis} />
+                </span>
                   <span className={styles.acctText}>{acct(target)}</span>
                 </span>
               </span>

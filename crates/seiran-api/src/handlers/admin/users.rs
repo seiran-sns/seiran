@@ -25,6 +25,8 @@ pub struct AdminUserResponse {
     pub avatar_url: Option<String>,
     pub totp_enabled: bool,
     pub passkey_count: i64,
+    /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。
+    pub emojis: std::collections::HashMap<String, String>,
 }
 
 impl From<AdminUserRow> for AdminUserResponse {
@@ -39,6 +41,11 @@ impl From<AdminUserRow> for AdminUserResponse {
             avatar_url: r.avatar_url,
             totp_enabled: r.totp_enabled,
             passkey_count: r.passkey_count,
+            emojis: r
+                .emoji_map
+                .as_ref()
+                .map(crate::handlers::users::json_map_to_string_map)
+                .unwrap_or_default(),
         }
     }
 }

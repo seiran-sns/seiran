@@ -227,7 +227,9 @@ fn profile_fields_from_json(v: &serde_json::Value) -> Vec<ProfileField> {
 }
 
 /// `actors.emoji_map`（JSONB、`:shortcode:` → 画像URL）を `HashMap` にデコードする。
-fn json_map_to_string_map(v: &serde_json::Value) -> std::collections::HashMap<String, String> {
+pub(crate) fn json_map_to_string_map(
+    v: &serde_json::Value,
+) -> std::collections::HashMap<String, String> {
     v.as_object()
         .map(|obj| {
             obj.iter()
@@ -735,16 +737,18 @@ async fn build_profile_response(
         (actor.bio, profile_fields)
     };
 
-    // 自己紹介文中のカスタム絵文字（#169）。ローカルアクターは custom_emojis と都度照合して
-    // 解決し（ノート本文の解決と同じ経路）、リモート Fedi アクターは AP Actor の tag 由来
-    // `emoji_map`（表示名・自己紹介の両方のショートコードを含む）をそのまま使う。
-    // Bsky にはカスタム絵文字の概念が無いため常に空。
+    // 自己紹介文・表示名中のカスタム絵文字（#169, #186）。ローカルアクターは自己紹介文を
+    // custom_emojis と都度照合して解決し（ノート本文の解決と同じ経路）、表示名の分は
+    // `update_profile` が display_name 変更のたびに事前計算・保存した `actor.emoji_map`
+    // をマージする。リモート Fedi アクターは AP Actor の tag 由来 `emoji_map`（表示名・
+    // 自己紹介の両方のショートコードを含む）をそのまま使う。Bsky にはカスタム絵文字の
+    // 概念が無いため常に空。
     let emojis: std::collections::HashMap<String, String> = if actor.actor_type == "local" {
         let candidates = bio
             .as_deref()
             .map(extract_shortcode_candidates)
             .unwrap_or_default();
-        if candidates.is_empty() {
+        let mut resolved: std::collections::HashMap<String, String> = if candidates.is_empty() {
             std::collections::HashMap::new()
         } else {
             match state.emojis.find_urls_by_shortcodes(&candidates).await {
@@ -757,7 +761,11 @@ async fn build_profile_response(
                     std::collections::HashMap::new()
                 }
             }
+        };
+        if let Some(m) = actor.emoji_map.as_ref() {
+            resolved.extend(json_map_to_string_map(m));
         }
+        resolved
     } else {
         actor
             .emoji_map
@@ -1034,6 +1042,7 @@ pub async fn update_profile(
     };
 
     // リクエストで指定されたフィールドのみ上書き
+    let display_name_changed = req.display_name.is_some();
     let new_display_name: Option<String> = if req.display_name.is_some() {
         req.display_name
     } else {
@@ -1074,6 +1083,34 @@ pub async fn update_profile(
         None => current.profile_fields,
     };
 
+    // 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。display_name が
+    // 変わらない更新（bio のみ編集等）では再計算せず既存値を保持する。
+    let empty_emoji_map = || serde_json::Value::Object(serde_json::Map::new());
+    let new_emoji_map: serde_json::Value = if display_name_changed {
+        let candidates = new_display_name
+            .as_deref()
+            .map(extract_shortcode_candidates)
+            .unwrap_or_default();
+        if candidates.is_empty() {
+            empty_emoji_map()
+        } else {
+            match state.emojis.find_urls_by_shortcodes(&candidates).await {
+                Ok(pairs) => serde_json::Value::Object(
+                    pairs
+                        .into_iter()
+                        .map(|(code, url)| (format!(":{}:", code), serde_json::Value::String(url)))
+                        .collect(),
+                ),
+                Err(e) => {
+                    tracing::error!("[update_profile] 表示名の絵文字ショートコード解決失敗: {}", e);
+                    current.emoji_map.clone().unwrap_or_else(empty_emoji_map)
+                }
+            }
+        }
+    } else {
+        current.emoji_map.clone().unwrap_or_else(empty_emoji_map)
+    };
+
     // UPDATE
     if let Err(e) = state
         .actors
@@ -1084,6 +1121,7 @@ pub async fn update_profile(
             new_avatar_media_id,
             new_banner_media_id,
             &new_profile_fields,
+            &new_emoji_map,
         )
         .await
     {
