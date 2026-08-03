@@ -187,6 +187,7 @@
   },
   "userManagement": {
     "title": "ユーザー管理",
+    "searchPlaceholder": "表示名・ユーザー名・メールアドレスで絞り込み",
     "emptyMessage": "ユーザーがいません。",
     "noActorLabel": "(アクター未作成)",
     "suspendedBadge": "凍結中",

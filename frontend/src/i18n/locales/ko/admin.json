@@ -211,6 +211,7 @@
   },
   "userManagement": {
     "title": "사용자 관리",
+    "searchPlaceholder": "표시 이름, 사용자 이름, 이메일로 필터링",
     "emptyMessage": "사용자가 없습니다.",
     "noActorLabel": "(배우가 생성되지 않음)",
     "suspendedBadge": "정지된",

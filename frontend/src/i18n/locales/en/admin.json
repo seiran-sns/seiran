@@ -187,6 +187,7 @@
   },
   "userManagement": {
     "title": "User management",
+    "searchPlaceholder": "Filter by display name, username, or email",
     "emptyMessage": "No users.",
     "noActorLabel": "(actor not created)",
     "suspendedBadge": "Suspended",

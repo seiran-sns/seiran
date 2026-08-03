@@ -211,6 +211,7 @@
   },
   "userManagement": {
     "title": "用户管理",
+    "searchPlaceholder": "按显示名称、用户名或邮箱筛选",
     "emptyMessage": "没有用户。",
     "noActorLabel": "（演员未创建）",
     "suspendedBadge": "暂停",

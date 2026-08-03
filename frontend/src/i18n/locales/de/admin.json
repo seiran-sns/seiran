@@ -211,6 +211,7 @@
   },
   "userManagement": {
     "title": "Benutzerverwaltung",
+    "searchPlaceholder": "Nach Anzeigename, Benutzername oder E-Mail filtern",
     "emptyMessage": "Keine Benutzer.",
     "noActorLabel": "(Schauspieler nicht erstellt)",
     "suspendedBadge": "Ausgesetzt",

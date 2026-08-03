@@ -168,6 +168,8 @@ export interface AdminUser {
   role: string;
   suspended_at: string | null;
   username: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
   totp_enabled: boolean;
   passkey_count: number;
 }
@@ -1261,8 +1263,13 @@ export const api = {
         `/admin/reports/${encodeURIComponent(id)}/forward`,
       );
     },
-    listUsers() {
-      return request<AdminUser[]>("GET", "/admin/users");
+    /** 無限スクロール用カーソル(afterId)・絞り込み(q)対応のユーザー一覧取得。 */
+    listUsers(opts?: { q?: string; afterId?: string; limit?: number }) {
+      const params = new URLSearchParams();
+      if (opts?.q) params.set("q", opts.q);
+      if (opts?.afterId) params.set("after_id", opts.afterId);
+      params.set("limit", String(opts?.limit ?? 30));
+      return request<AdminUser[]>("GET", `/admin/users?${params.toString()}`);
     },
     suspendUser(id: string) {
       return request<void>(

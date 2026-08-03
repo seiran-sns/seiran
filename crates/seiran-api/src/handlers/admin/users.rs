@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -21,6 +21,8 @@ pub struct AdminUserResponse {
     pub role: String,
     pub suspended_at: Option<DateTime<Utc>>,
     pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
     pub totp_enabled: bool,
     pub passkey_count: i64,
 }
@@ -33,10 +35,19 @@ impl From<AdminUserRow> for AdminUserResponse {
             role: r.role,
             suspended_at: r.suspended_at,
             username: r.username,
+            display_name: r.display_name,
+            avatar_url: r.avatar_url,
             totp_enabled: r.totp_enabled,
             passkey_count: r.passkey_count,
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct ListUsersQuery {
+    pub q: Option<String>,
+    pub after_id: Option<String>,
+    pub limit: Option<i64>,
 }
 
 // ─── リクエスト DTO ────────────────────────────────────────────────────────
@@ -48,10 +59,15 @@ pub struct ChangeRoleRequest {
 
 // ─── ハンドラ ─────────────────────────────────────────────────────────────
 
-/// GET /api/admin/users
+/// GET /api/admin/users?q=...&after_id=...&limit=...
+///
+/// `q`: 表示名/ユーザー名/メールアドレスの部分一致絞り込み（省略可）。
+/// `after_id`: 無限スクロール用カーソル。この ID より大きい行から返す（省略可）。
+/// `limit`: 1ページの件数（省略時30、最大100）。
 pub async fn list_users(
     headers: HeaderMap,
     State(state): State<AppState>,
+    Query(query): Query<ListUsersQuery>,
 ) -> Result<Json<Vec<AdminUserResponse>>, ApiError> {
     require_admin(
         &headers,
@@ -61,9 +77,17 @@ pub async fn list_users(
     )
     .await?;
 
+    let after_id = query
+        .after_id
+        .as_deref()
+        .map(|s| s.parse::<i64>())
+        .transpose()
+        .map_err(|_| ApiError::BadRequest("INVALID_AFTER_ID".to_owned()))?;
+    let limit = query.limit.unwrap_or(30).clamp(1, 100);
+
     let rows = state
         .users
-        .list_for_admin()
+        .list_for_admin(query.q.as_deref(), after_id, limit)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 

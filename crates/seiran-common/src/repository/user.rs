@@ -19,6 +19,8 @@ pub struct AdminUserRow {
     pub role: String,
     pub suspended_at: Option<DateTime<Utc>>,
     pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
     pub totp_enabled: bool,
     pub passkey_count: i64,
 }
@@ -62,8 +64,15 @@ pub trait UserRepository: Send + Sync {
     /// メールアドレスを更新する（設定画面からのメールアドレス変更確定用）。
     async fn update_email(&self, user_id: i64, email: &str) -> Result<(), sqlx::Error>;
 
-    /// 管理画面のユーザー一覧を返す（先頭100件、ID昇順）。
-    async fn list_for_admin(&self) -> Result<Vec<AdminUserRow>, sqlx::Error>;
+    /// 管理画面のユーザー一覧をカーソルページネーションで返す（ID昇順）。
+    /// `q` は表示名/ユーザー名/メールアドレスの部分一致絞り込み（`None`/空文字なら絞り込み無し）。
+    /// `after_id` を渡すと、その ID より大きい行から返す（無限スクロール用カーソル）。
+    async fn list_for_admin(
+        &self,
+        q: Option<&str>,
+        after_id: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<AdminUserRow>, sqlx::Error>;
 
     /// アカウントの凍結状態を更新する。
     async fn set_suspended(&self, user_id: i64, suspended: bool) -> Result<(), sqlx::Error>;
@@ -197,9 +206,25 @@ impl UserRepository for PgUserRepository {
             .map(|_| ())
     }
 
-    async fn list_for_admin(&self) -> Result<Vec<AdminUserRow>, sqlx::Error> {
+    async fn list_for_admin(
+        &self,
+        q: Option<&str>,
+        after_id: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<AdminUserRow>, sqlx::Error> {
+        // リスト機能のメンバー追加サジェスト（`actor_search.rs::search_actors`）と同じ
+        // 「LOWER(...) LIKE LOWER($) ESCAPE '\'」の部分一致ロジックを、表示名/ユーザー名/
+        // メールアドレスの結合文字列に適用する。
+        let pattern = q
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("%{}%", escape_like(s)));
+
         sqlx::query_as::<_, AdminUserRow>(
             "SELECT u.id, u.email, u.role::text AS role, u.suspended_at, a.username,
+                    a.display_name,
+                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url)
+                        AS avatar_url,
                     EXISTS (
                         SELECT 1 FROM user_totp t
                         WHERE t.user_id = u.id AND t.enabled
@@ -210,9 +235,22 @@ impl UserRepository for PgUserRepository {
                     ) AS passkey_count
              FROM users u
              LEFT JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
+             LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+             LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             WHERE ($1::bigint IS NULL OR u.id > $1)
+               AND (
+                 $2::text IS NULL
+                 OR LOWER(
+                      COALESCE(a.display_name, '') || E'\\n' || u.email
+                      || CASE WHEN a.username IS NOT NULL THEN E'\\n@' || a.username ELSE '' END
+                    ) LIKE LOWER($2) ESCAPE '\\'
+               )
              ORDER BY u.id
-             LIMIT 100",
+             LIMIT $3",
         )
+        .bind(after_id)
+        .bind(pattern)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
     }
@@ -261,4 +299,12 @@ impl UserRepository for PgUserRepository {
             .await
             .map(|_| ())
     }
+}
+
+/// `ILIKE` パターン中の `%`/`_`/`\` をエスケープする（ユーザー入力をそのままワイルドカードに
+/// しないため。`actor_search.rs::escape_like` と同一ロジック）。
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
