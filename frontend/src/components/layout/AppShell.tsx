@@ -33,7 +33,11 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
 
   const closeCompose = () => {
     setComposeOpen(false);
-    if (user) refreshComposerDraft({ mode: "compose", userId: user.id });
+    // Modal 内コンポーザの入力 effect とアンマウントを先に完了させてから、
+    // 常設のホーム上部コンポーザへ保存済み下書きの再読込を依頼する。
+    if (user) {
+      window.setTimeout(() => refreshComposerDraft({ mode: "compose", userId: user.id }), 0);
+    }
   };
 
   // ページ移動時にモバイルメニューを自動で閉じる

@@ -39,10 +39,13 @@ export function ComposerProvider({ children }: { children: React.ReactNode }) {
   const openQuote = (target: Note) => setState({ mode: "quote", target });
   const openCompose = (initialText = "") => setState({ mode: "compose", initialText });
   const close = () => {
-    if (state?.mode === "compose" && user) {
-      refreshComposerDraft({ mode: "compose", userId: user.id });
-    }
     setState(null);
+    if (state?.mode === "compose" && user) {
+      window.setTimeout(
+        () => refreshComposerDraft({ mode: "compose", userId: user.id }),
+        0,
+      );
+    }
   };
 
   return (

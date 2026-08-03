@@ -19,12 +19,20 @@ test("投稿ダイアログを閉じると書きかけがホーム上部フォ�
   await seedAuth(page, user.token);
   await page.goto("/");
 
-  await page.locator("nav").getByRole("button", { name: "投稿", exact: true }).click();
+  const openCompose = page.locator("nav:visible").getByRole("button", { name: "投稿", exact: true });
+  await openCompose.click();
   const draft = `ダイアログの書きかけ ${Date.now()}`;
   await page.getByPlaceholder("いまどうしてる？").last().fill(draft);
   await page.getByRole("button", { name: "閉じる" }).click();
 
   await expect(page.getByPlaceholder("いまどうしてる？")).toHaveValue(draft);
+
+  await openCompose.click();
+  const escDraft = `Escで閉じる書きかけ ${Date.now()}`;
+  await page.getByPlaceholder("いまどうしてる？").last().fill(escDraft);
+  await page.keyboard.press("Escape");
+
+  await expect(page.getByPlaceholder("いまどうしてる？")).toHaveValue(escDraft);
 });
 
 test("投稿直後、リロードなしでも投稿者情報（表示名）がタイムラインに反映される", async ({ page, request }) => {
