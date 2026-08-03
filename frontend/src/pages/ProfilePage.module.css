@@ -11,6 +11,7 @@
   background: var(--accent-deep);
   border: 1px solid var(--accent-strong);
   color: var(--accent);
+  text-decoration: none;
   border-radius: 12px;
   padding: 12px 14px;
   font-size: 0.86rem;
@@ -160,8 +161,10 @@ a.idValue:hover {
 }
 
 .editBtn {
+  display: inline-block;
   background: none;
   color: var(--accent);
+  text-decoration: none;
   border: 1px solid var(--accent-strong);
   border-radius: 20px;
   padding: 8px 20px;
@@ -280,6 +283,8 @@ a.idValue:hover {
 .modalPrimary {
   background: var(--accent-strong);
   color: #fff;
+  text-decoration: none;
+  text-align: center;
   border: none;
   border-radius: 10px;
   padding: 12px;

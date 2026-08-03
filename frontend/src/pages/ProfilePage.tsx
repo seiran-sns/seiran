@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Link,
-  useNavigate,
   useParams,
   useSearchParams,
 } from "react-router-dom";
@@ -38,7 +37,6 @@ export default function ProfilePage() {
   const { showError } = useToast();
   const [searchParams] = useSearchParams();
   const { acct } = useParams<{ acct: string }>();
-  const navigate = useNavigate();
   const goBack = useGoBack();
   // permalink `/@handle`（#36）を優先し、旧 `/profile?q=` も後方互換で受ける。
   const q = acct ? acct.replace(/^@/, "") : (searchParams.get("q") ?? "");
@@ -283,11 +281,8 @@ export default function ProfilePage() {
     }
   }
 
-  function warpToReal() {
-    if (profile?.bridge_real_handle) {
-      setBridgeModalOpen(false);
-      navigate(`/${profile.bridge_real_handle}`);
-    }
+  function closeBridgeModal() {
+    setBridgeModalOpen(false);
   }
 
   const center = (
@@ -313,7 +308,11 @@ export default function ProfilePage() {
         <div className={styles.card}>
           {/* 本尊ワープ（Doc5 §3.1）: 影武者なら最も目立つ位置に強制表示 */}
           {isBridge && (
-            <button className={styles.warpBanner} onClick={warpToReal}>
+            <Link
+              to={`/${profile.bridge_real_handle}`}
+              className={styles.warpBanner}
+              onClick={closeBridgeModal}
+            >
               <span className={styles.warpIcon}>
                 {profile.bridge_protocol === "bsky" ? "🦋" : "🌐"}
               </span>
@@ -326,7 +325,7 @@ export default function ProfilePage() {
                   handle: profile.bridge_real_handle,
                 })}
               </span>
-            </button>
+            </Link>
           )}
 
           <div className={styles.avatarLarge}>
@@ -449,12 +448,9 @@ export default function ProfilePage() {
 
           {isSelf && (
             <div className={styles.followArea}>
-              <button
-                className={styles.editBtn}
-                onClick={() => navigate("/settings/profile")}
-              >
+              <Link className={styles.editBtn} to="/settings/profile">
                 {t("profile:profilePage.editProfileButton")}
-              </button>
+              </Link>
             </div>
           )}
 
@@ -696,9 +692,13 @@ export default function ProfilePage() {
           {t("profile:profilePage.bridgeModal.suffix")}
         </p>
         <div className={styles.modalActions}>
-          <button className={styles.modalPrimary} onClick={warpToReal}>
+          <Link
+            to={`/${profile?.bridge_real_handle}`}
+            className={styles.modalPrimary}
+            onClick={closeBridgeModal}
+          >
             {t("profile:profilePage.bridgeModal.goToRealButton")}
-          </button>
+          </Link>
           <button
             className={styles.modalSecondary}
             onClick={() => {
