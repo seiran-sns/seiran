@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, DmSession, getErrorMessage, Note } from "../api/client";
 import AppShell from "../components/layout/AppShell";
@@ -150,9 +150,9 @@ export default function MessagesPage() {
     <>
       <header className={panel.header}>
         <span className={panel.title}>{t("dm:messagesPage.title")}</span>
-        <button className={styles.newButton} onClick={() => navigate("/messages")}>
+        <Link className={styles.newButton} to="/messages">
           {t("dm:messagesPage.newMessage")}
-        </button>
+        </Link>
       </header>
       <ul className={styles.sessionList}>
         {sessionsLoading && <li className={styles.loading}>{t("common:loading")}</li>}
@@ -161,9 +161,9 @@ export default function MessagesPage() {
         )}
         {sessions.map((s) => (
           <li key={s.threadRootPostId}>
-            <button
+            <Link
+              to={`/messages/${s.threadRootPostId}`}
               className={`${styles.sessionItem} ${s.threadRootPostId === threadRootId ? styles.sessionItemActive : ""}`}
-              onClick={() => navigate(`/messages/${s.threadRootPostId}`)}
             >
               <Avatar url={s.peers[0]?.avatarUrl} name={peerLabel(s, t)} size={36} />
               <span className={styles.sessionInfo}>
@@ -171,7 +171,7 @@ export default function MessagesPage() {
                 <span className={styles.sessionPreview}>{s.lastMessage.text}</span>
               </span>
               {s.unread && <span className={styles.unreadDot} />}
-            </button>
+            </Link>
           </li>
         ))}
       </ul>

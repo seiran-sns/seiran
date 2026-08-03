@@ -156,7 +156,7 @@ test("スマホ表示の中央下フローティングボタンから通知画�
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
 
-  await page.getByRole("button", { name: "通知", exact: true }).click();
+  await page.getByRole("link", { name: "通知", exact: true }).click();
   await expect(page).toHaveURL(/\/notifications$/);
 });
 

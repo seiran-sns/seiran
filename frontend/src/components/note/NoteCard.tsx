@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, Note } from "../../api/client";
 import {
@@ -130,7 +130,6 @@ function PostContent({
   onUnreposted?: () => void;
   onDeleted?: () => void;
 }) {
-  const navigate = useNavigate();
   const { t } = useTranslation();
   const { user: currentUser } = useAuth();
   const { showError } = useToast();
@@ -254,11 +253,6 @@ function PostContent({
     return t("home:noteCard.notFollowing");
   }
 
-  function goProfile(e: React.MouseEvent) {
-    e.stopPropagation();
-    navigate(profilePath(note.user.username, note.user.domain));
-  }
-
   function handleReply(e?: React.MouseEvent) {
     e?.stopPropagation();
     openReply(note);
@@ -306,7 +300,11 @@ function PostContent({
             </div>
           )}
 
-          <button className={styles.userBtn} onClick={goProfile}>
+          <Link
+            to={profilePath(note.user.username, note.user.domain)}
+            className={styles.userBtn}
+            onClick={(e) => e.stopPropagation()}
+          >
             <Avatar
               url={note.user.avatarUrl}
               name={note.user.displayName || note.user.username}
@@ -339,7 +337,7 @@ function PostContent({
                 )}
               </span>
             </span>
-          </button>
+          </Link>
         </div>
         {linkToDetail ? (
           <Link

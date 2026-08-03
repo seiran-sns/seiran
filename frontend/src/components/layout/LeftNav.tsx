@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
@@ -49,12 +49,6 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
     navigate("/login");
   }
 
-  function handleProfileClick() {
-    onItemClick?.();
-    if (user?.username) {
-      navigate(`/@${user.username}`);
-    }
-  }
 
   return (
     <nav className={styles.leftNav}>
@@ -111,9 +105,10 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
       </button>
 
       <div className={styles.navFooter}>
-        <button
+        <Link
+          to={user?.username ? `/@${user.username}` : "#"}
           className={styles.userChip}
-          onClick={handleProfileClick}
+          onClick={() => onItemClick?.()}
           title={t("nav:leftNav.profileTitle")}
         >
           <span className={styles.userAvatar}>
@@ -124,7 +119,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
             )}
           </span>
           <span className={styles.navLabel}>@{user?.username}</span>
-        </button>
+        </Link>
         <button className={styles.logoutBtn} onClick={handleLogout} title={t("nav:leftNav.logoutTitle")}>
           ⏻
         </button>

@@ -364,6 +364,7 @@
     border-radius: 50%;
     background: var(--accent-strong);
     color: #ffffff;
+    text-decoration: none;
     border: none;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
     cursor: pointer;
@@ -505,6 +506,7 @@
     border-radius: 50%;
     background: var(--accent-strong);
     color: #ffffff;
+    text-decoration: none;
     border: none;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
     cursor: pointer;
@@ -539,6 +541,7 @@
     border-radius: 50%;
     background: var(--accent-strong);
     color: #ffffff;
+    text-decoration: none;
     border: none;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
     cursor: pointer;
