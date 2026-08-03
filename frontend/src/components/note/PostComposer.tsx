@@ -7,6 +7,7 @@ import {
   clearComposerDraft,
   DraftTarget,
   loadComposerDraft,
+  onComposerDraftRefresh,
   saveComposerDraft,
 } from "../../lib/composerDraft";
 import styles from "./PostComposer.module.css";
@@ -105,6 +106,19 @@ export default function PostComposer({
     if (!draftTarget) return;
     saveComposerDraft(draftTarget, { text, attached, deliverFedi, deliverBsky, visibility });
   }, [draftTarget, text, attached, deliverFedi, deliverBsky, visibility]);
+
+  useEffect(() => {
+    if (!draftTarget) return;
+    return onComposerDraftRefresh((target) => {
+      if (JSON.stringify(target) !== JSON.stringify(draftTarget)) return;
+      const draft = loadComposerDraft(draftTarget);
+      setText(draft?.text ?? "");
+      setAttached(draft?.attached ?? null);
+      setDeliverFedi(draft?.deliverFedi ?? true);
+      setDeliverBsky(draft?.deliverBsky ?? true);
+      setVisibility(draft?.visibility ?? "public");
+    });
+  }, [draftTarget]);
 
   useEffect(() => {
     return () => {

@@ -17,6 +17,7 @@ export type DraftTarget =
 
 /** 返信・引用の書きかけをユーザーごとに何件まで保持するか（#193）。 */
 const MAX_TARGETED_DRAFTS = 10;
+const DRAFT_REFRESH_EVENT = "seiran:composer-draft-refresh";
 
 function draftKey(target: DraftTarget): string {
   switch (target.mode) {
@@ -50,7 +51,7 @@ function touchIndex(target: Extract<DraftTarget, { mode: "reply" | "quote" }>): 
   while (ids.length > MAX_TARGETED_DRAFTS) {
     const oldest = ids.shift();
     if (oldest !== undefined) {
-      localStorage.removeItem(draftKey({ ...target, postId: oldest }));
+    localStorage.removeItem(draftKey({ ...target, postId: oldest }));
     }
   }
   localStorage.setItem(key, JSON.stringify(ids));
@@ -64,7 +65,7 @@ function removeFromIndex(target: Extract<DraftTarget, { mode: "reply" | "quote" 
 
 export function loadComposerDraft(target: DraftTarget): ComposerDraft | null {
   try {
-    const raw = localStorage.getItem(draftKey(target));
+  const raw = localStorage.getItem(draftKey(target));
     return raw ? (JSON.parse(raw) as ComposerDraft) : null;
   } catch {
     return null;
@@ -84,4 +85,17 @@ export function saveComposerDraft(target: DraftTarget, draft: ComposerDraft): vo
 export function clearComposerDraft(target: DraftTarget): void {
   localStorage.removeItem(draftKey(target));
   if (target.mode !== "compose") removeFromIndex(target);
+}
+
+/** 既にマウント済みの同一対象コンポーザへ、localStorageの再読込を依頼する。 */
+export function refreshComposerDraft(target: DraftTarget): void {
+  window.dispatchEvent(new CustomEvent(DRAFT_REFRESH_EVENT, { detail: target }));
+}
+
+export function onComposerDraftRefresh(
+  listener: (target: DraftTarget) => void,
+): () => void {
+  const handler = (event: Event) => listener((event as CustomEvent<DraftTarget>).detail);
+  window.addEventListener(DRAFT_REFRESH_EVENT, handler);
+  return () => window.removeEventListener(DRAFT_REFRESH_EVENT, handler);
 }

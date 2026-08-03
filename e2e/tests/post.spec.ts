@@ -14,6 +14,19 @@ test("投稿するとタイムラインに表示される", async ({ page, reque
   await expect(page.getByText(text)).toBeVisible({ timeout: 15_000 });
 });
 
+test("投稿ダイアログを閉じると書きかけがホーム上部フォームへ反映される", async ({ page, request }) => {
+  const user = await registerUserViaApi(request, "e2edraftsync");
+  await seedAuth(page, user.token);
+  await page.goto("/");
+
+  await page.locator("nav").getByRole("button", { name: "投稿", exact: true }).click();
+  const draft = `ダイアログの書きかけ ${Date.now()}`;
+  await page.getByPlaceholder("いまどうしてる？").last().fill(draft);
+  await page.getByRole("button", { name: "閉じる" }).click();
+
+  await expect(page.getByPlaceholder("いまどうしてる？")).toHaveValue(draft);
+});
+
 test("投稿直後、リロードなしでも投稿者情報（表示名）がタイムラインに反映される", async ({ page, request }) => {
   // POST /api/notes/create のレスポンス組み立てが display_name/avatar_url を常にNoneで
   // 固定していたため、投稿直後だけプロフィール情報が空になる不具合の回帰テスト

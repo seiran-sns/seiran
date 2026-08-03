@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Note } from "../api/client";
 import Modal from "../components/common/Modal";
 import PostComposer from "../components/note/PostComposer";
+import { useAuth } from "./AuthContext";
+import { refreshComposerDraft } from "../lib/composerDraft";
 
 /**
  * 投稿コンポーザをグローバルに開くためのコンテキスト（issue #23）。
@@ -30,12 +32,18 @@ const ComposerContext = createContext<ComposerContextValue>({
 
 export function ComposerProvider({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const [state, setState] = useState<ComposerState>(null);
 
   const openReply = (target: Note) => setState({ mode: "reply", target });
   const openQuote = (target: Note) => setState({ mode: "quote", target });
   const openCompose = (initialText = "") => setState({ mode: "compose", initialText });
-  const close = () => setState(null);
+  const close = () => {
+    if (state?.mode === "compose" && user) {
+      refreshComposerDraft({ mode: "compose", userId: user.id });
+    }
+    setState(null);
+  };
 
   return (
     <ComposerContext.Provider value={{ openReply, openQuote, openCompose }}>

@@ -2,7 +2,9 @@ import { ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { Note } from "../../api/client";
+import { useAuth } from "../../contexts/AuthContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
+import { refreshComposerDraft } from "../../lib/composerDraft";
 import Modal from "../common/Modal";
 import PostComposer from "../note/PostComposer";
 import OpenTargetDialog from "../open/OpenTargetDialog";
@@ -22,11 +24,17 @@ interface AppShellProps {
 
 export default function AppShell({ center, right, onPosted, onBeforeNavigate }: AppShellProps) {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const location = useLocation();
   const { dmUnreadCount } = useStreamingContext();
   const [composeOpen, setComposeOpen] = useState(false);
   const [openTargetOpen, setOpenTargetOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const closeCompose = () => {
+    setComposeOpen(false);
+    if (user) refreshComposerDraft({ mode: "compose", userId: user.id });
+  };
 
   // ページ移動時にモバイルメニューを自動で閉じる
   useEffect(() => {
@@ -140,11 +148,11 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
         </div>
       )}
 
-      <Modal open={composeOpen} onClose={() => setComposeOpen(false)} title={t("nav:appShell.composeModalTitle")}>
+      <Modal open={composeOpen} onClose={closeCompose} title={t("nav:appShell.composeModalTitle")}>
         <PostComposer
           autoFocus
           onPosted={(note) => {
-            setComposeOpen(false);
+            closeCompose();
             onPosted?.(note);
           }}
         />
