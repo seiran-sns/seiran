@@ -8,6 +8,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
 import { profilePath } from "../../lib/format";
+import { mediaUrl } from "../../utils/mediaProxy";
 import panel from "../common/Panel.module.css";
 import EmojiText from "../note/EmojiText";
 import NoteHoverPreview from "../note/NoteHoverPreview";
@@ -159,7 +160,7 @@ export default function NotificationsPanel() {
         const content = (
           <>
             {iconUrl ? (
-              <img className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" />
+              <img className={styles.iconImg} src={mediaUrl(iconUrl)} alt={icon} title={icon} loading="lazy" />
             ) : (
               <span className={styles.icon}>{icon}</span>
             )}
