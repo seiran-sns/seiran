@@ -9,10 +9,11 @@ test("投稿にリアクションを付けられる", async ({ page, request }) 
   const text = `リアクション対象 ${Date.now()}`;
   await page.getByPlaceholder("いまどうしてる？").fill(text);
   await page.getByRole("button", { name: "投稿", exact: true }).click();
-  await expect(page.getByText(text)).toBeVisible({ timeout: 15_000 });
+  const noteCard = page.locator("article").filter({ hasText: text });
+  await expect(noteCard).toBeVisible({ timeout: 15_000 });
 
   // リアクショントリガーボタンはキャプション文言を持たないため title 属性で特定する。
-  await page.getByTitle("リアクションを付ける", { exact: true }).click();
+  await noteCard.getByTitle("リアクションを付ける", { exact: true }).click();
   await page.getByPlaceholder("絵文字を検索").fill("thumbs up");
   await page.getByRole("button", { name: "👍", exact: true }).click();
 
