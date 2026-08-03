@@ -945,8 +945,10 @@ pub async fn deliver_ap_announce(
         .unwrap_or_else(|| "public".to_string());
     let object_actor = resolve_announce_object_actor(db, original_ap_object_id).await?;
 
-    let mut inboxes: std::collections::HashSet<String> =
-        fetch_fedi_follower_inboxes(db, actor_id).await?.into_iter().collect();
+    let mut inboxes: std::collections::HashSet<String> = fetch_fedi_follower_inboxes(db, actor_id)
+        .await?
+        .into_iter()
+        .collect();
     if let Some((inbox, _)) = &object_actor {
         inboxes.insert(inbox.clone());
     }
@@ -1026,8 +1028,10 @@ pub async fn deliver_undo_announce(
 ) -> Result<(), ApError> {
     let username = fetch_username(db, actor_id).await?;
     let object_actor = resolve_announce_object_actor(db, original_ap_object_id).await?;
-    let mut inboxes: std::collections::HashSet<String> =
-        fetch_fedi_follower_inboxes(db, actor_id).await?.into_iter().collect();
+    let mut inboxes: std::collections::HashSet<String> = fetch_fedi_follower_inboxes(db, actor_id)
+        .await?
+        .into_iter()
+        .collect();
     if let Some((inbox, _)) = &object_actor {
         inboxes.insert(inbox.clone());
     }
