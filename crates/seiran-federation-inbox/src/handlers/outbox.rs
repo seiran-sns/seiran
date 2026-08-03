@@ -211,7 +211,10 @@ pub async fn outbox_handler(
 
             if let Some(orig_id) = orig_ap_object_id {
                 let mut cc = vec![followers_uri.clone()];
-                if let Some(orig_actor_uri) = row.try_get::<Option<String>, _>("orig_actor_uri").unwrap_or(None) {
+                if let Some(orig_actor_uri) = row
+                    .try_get::<Option<String>, _>("orig_actor_uri")
+                    .unwrap_or(None)
+                {
                     cc.push(orig_actor_uri);
                 }
                 ordered_items.push(serde_json::json!({
@@ -223,19 +226,18 @@ pub async fn outbox_handler(
                     "cc": cc,
                     "object": orig_id
                 }));
-            } else if let Some(orig_at_uri) =
-                row.try_get::<Option<String>, _>("orig_at_uri").unwrap_or(None)
+            } else if let Some(orig_at_uri) = row
+                .try_get::<Option<String>, _>("orig_at_uri")
+                .unwrap_or(None)
             {
                 // Bsky ネイティブ投稿のリポスト → Fedi フォールバック（テキスト投稿）。
                 // push 配送側（deliver_repost）と同じ本文を組み立てる。
-                let orig_username: String =
-                    row.try_get("orig_username").unwrap_or_default();
+                let orig_username: String = row.try_get("orig_username").unwrap_or_default();
                 let orig_display_name: Option<String> =
                     row.try_get("orig_display_name").unwrap_or(None);
                 let author_name = orig_display_name.as_deref().unwrap_or(&orig_username);
                 let bsky_url = at_uri_to_bsky_app_url(&orig_at_uri);
-                let content_html =
-                    plain_to_html(&format!("🔁 {}: {}", author_name, bsky_url));
+                let content_html = plain_to_html(&format!("🔁 {}: {}", author_name, bsky_url));
                 let activity_id = format!("{}/activities/{}", base, post_id);
                 let note_obj = serde_json::json!({
                     "type": "Note",
