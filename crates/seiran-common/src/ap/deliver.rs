@@ -23,6 +23,21 @@ struct LocalActorAddress {
     followers_uri: String,
 }
 
+/// `at://did/collection/rkey` 形式の AT URI を Bsky.app URL に変換するヘルパー。
+/// Fedi フォールバック配送（Bskyネイティブ投稿のリポスト等）で、outbox 表示と
+/// push 配送の両方から共通利用する。
+pub fn at_uri_to_bsky_app_url(at_uri: &str) -> String {
+    let without_prefix = at_uri.strip_prefix("at://").unwrap_or(at_uri);
+    let parts: Vec<&str> = without_prefix.splitn(3, '/').collect();
+    if parts.len() >= 3 {
+        let did = parts[0];
+        let rkey = parts[2];
+        format!("https://bsky.app/profile/{}/post/{}", did, rkey)
+    } else {
+        at_uri.to_string()
+    }
+}
+
 fn local_actor_address(local_domain: &str, username: &str) -> LocalActorAddress {
     let actor_uri = format!("https://{}/users/{}", local_domain, username);
     LocalActorAddress {
@@ -178,7 +193,11 @@ async fn fan_out_activity(
         }
     }
 
-    tracing::error!("[Deliver] {}: {}件成功 / {}件失敗", log_label, ok, ng);
+    if ng > 0 {
+        tracing::warn!("[Deliver] {}: {}件成功 / {}件失敗", log_label, ok, ng);
+    } else {
+        tracing::info!("[Deliver] {}: {}件成功 / {}件失敗", log_label, ok, ng);
+    }
 
     if ok == 0 && ng > 0 {
         return Err(ApError::Other(format!(
@@ -880,7 +899,32 @@ async fn fetch_attachment_documents(
         .collect())
 }
 
-/// ローカルアクターの AP Announce アクティビティを Fedi フォロワー全員の inbox へ配送する
+/// Announce 対象の元ポストが Fedi リモートである場合、その投稿者の inbox URL と actor URI を返す。
+/// リアクション配送（`resolve_reaction_targets`）と同様、フォロワー配送だけでは元投稿者の
+/// サーバーに Announce が届かず、ブースト数の反映や通知が発生しないため必要。
+async fn resolve_announce_object_actor(
+    db: &PgPool,
+    original_ap_object_id: &str,
+) -> Result<Option<(String, String)>, ApError> {
+    let row = sqlx::query(
+        "SELECT a.ap_inbox_url, a.ap_uri
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.ap_object_id = $1 AND a.actor_type = 'fedi' LIMIT 1",
+    )
+    .bind(original_ap_object_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| ApError::Other(format!("Announce対象ポスト取得エラー: {}", e)))?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let inbox: Option<String> = row.try_get("ap_inbox_url").unwrap_or(None);
+    let actor_uri: Option<String> = row.try_get("ap_uri").unwrap_or(None);
+    Ok(inbox.zip(actor_uri))
+}
+
+/// ローカルアクターの AP Announce アクティビティを Fedi フォロワー全員 + 元ポストの投稿者へ配送する
 ///
 /// `original_ap_object_id` は Announce の対象（元ポストの AP URI）。
 pub async fn deliver_ap_announce(
@@ -899,17 +943,33 @@ pub async fn deliver_ap_announce(
         .await
         .map_err(|e| ApError::Other(e.to_string()))?
         .unwrap_or_else(|| "public".to_string());
-    let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
+    let object_actor = resolve_announce_object_actor(db, original_ap_object_id).await?;
+
+    let mut inboxes: std::collections::HashSet<String> =
+        fetch_fedi_follower_inboxes(db, actor_id).await?.into_iter().collect();
+    if let Some((inbox, _)) = &object_actor {
+        inboxes.insert(inbox.clone());
+    }
+    let inboxes: Vec<String> = inboxes.into_iter().collect();
 
     let addr = local_actor_address(local_domain, &username);
     let announce_id = format!("https://{}/announces/{}", local_domain, post_id);
-    let activity = build_announce_activity(
+    let mut activity = build_announce_activity(
         &addr,
         &announce_id,
         original_ap_object_id,
         &chrono::Utc::now().to_rfc3339(),
         &visibility,
     );
+    // 元投稿者を明示的に cc へ含める（Mastodon 互換）。フォロワー配送だけでは
+    // 相手サーバーがブースト数・通知に反映しないことがあるため。
+    if let Some((_, actor_uri)) = &object_actor {
+        if let Some(cc) = activity.get_mut("cc").and_then(|v| v.as_array_mut()) {
+            if !cc.iter().any(|v| v.as_str() == Some(actor_uri.as_str())) {
+                cc.push(serde_json::Value::String(actor_uri.clone()));
+            }
+        }
+    }
 
     fan_out_activity(
         ap_client,
@@ -953,7 +1013,7 @@ pub async fn deliver_delete_actor(
     .await
 }
 
-/// ローカルアクターの AP Undo(Announce) を Fedi フォロワー全員の inbox へ配送する。
+/// ローカルアクターの AP Undo(Announce) を Fedi フォロワー全員 + 元ポストの投稿者へ配送する。
 /// `announce_post_id` はリポスト投稿の posts.id、`original_ap_object_id` は元ポストの AP URI。
 pub async fn deliver_undo_announce(
     ap_client: &ApClient,
@@ -965,7 +1025,13 @@ pub async fn deliver_undo_announce(
     original_ap_object_id: &str,
 ) -> Result<(), ApError> {
     let username = fetch_username(db, actor_id).await?;
-    let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
+    let object_actor = resolve_announce_object_actor(db, original_ap_object_id).await?;
+    let mut inboxes: std::collections::HashSet<String> =
+        fetch_fedi_follower_inboxes(db, actor_id).await?.into_iter().collect();
+    if let Some((inbox, _)) = &object_actor {
+        inboxes.insert(inbox.clone());
+    }
+    let inboxes: Vec<String> = inboxes.into_iter().collect();
 
     let addr = local_actor_address(local_domain, &username);
     let announce_id = format!("https://{}/announces/{}", local_domain, announce_post_id);

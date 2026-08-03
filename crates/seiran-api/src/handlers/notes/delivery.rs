@@ -93,18 +93,7 @@ async fn build_external_post_embed(
     })
 }
 
-/// `at://did/collection/rkey` 形式の AT URI を Bsky.app URL に変換するヘルパー。
-pub fn at_uri_to_bsky_app_url(at_uri: &str) -> String {
-    let without_prefix = at_uri.strip_prefix("at://").unwrap_or(at_uri);
-    let parts: Vec<&str> = without_prefix.splitn(3, '/').collect();
-    if parts.len() >= 3 {
-        let did = parts[0];
-        let rkey = parts[2];
-        format!("https://bsky.app/profile/{}/post/{}", did, rkey)
-    } else {
-        at_uri.to_string()
-    }
-}
+pub use seiran_common::ap::deliver::at_uri_to_bsky_app_url;
 
 /// ポストの出自（どのプロトコル上に実体を持つか）。配信先の制御に使う。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

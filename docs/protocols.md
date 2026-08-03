@@ -65,6 +65,8 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 ### 公開エンドポイント
 `GET /users/:username`（Actor文書）、`GET /users/:username/outbox`（`?page=true`でOrderedCollectionPage）、`GET /.well-known/webfinger`、`GET /.well-known/nodeinfo` + `GET /nodeinfo/2.1`、featured（ピン留め）・lists（公開リスト）の各コレクション。
 
+`outbox`の各投稿は`posts.ap_object_id`が実際にpush配送された種別と一致するよう組み立てる: `repost_of_post_id`がある行は、元ポストが`ap_object_id`を持てば`Announce`（`id`=自身の`ap_object_id`、`object`=元ポストの`ap_object_id`、`cc`に元投稿者のactor URIも含める）、元ポストが`at_uri`のみ(Bskyネイティブ)ならFediフォールバックと同じ本文（「🔁 author: bsky.app URL」）を持つ`Create(Note)`として表現する。リポスト行の`body`列は常に空文字列のため、これを無視して素通しで`Create(Note)`化すると、push配送済みの`Announce`とは別のAP object idを持つ空の`Note`がリモートに重複出現する。
+
 `GET /nodeinfo/2.1`の`metadata.features`には`"emoji_reaction"`を含める。kmyblue（Mastodonフォーク）はカスタム絵文字リアクション対応の可否を、既知softwareリスト（Misskey系等）に載っていないインスタンスに対してはこのフィールドで判定するため（#167）。
 
 ### HTTP Signatures 検証
@@ -166,7 +168,7 @@ Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホス
 - **リプライ**: 元ポストが Fedi リモートのみなら Bsky 配信しない。Bsky リモートのみなら Fedi 配信しない。親の可視性が `followers_only` ならリプライも継承する。
 - **引用**: 元ポストの `at_uri`/`at_cid` が揃っていれば、Bsky側は `app.bsky.embed.record` でネイティブ引用する。Fediリモートのみの場合や、AP/ATPの両IDを持っていても `at_cid` が未取得の場合は、投稿者名・本文・先頭画像（なければアバター）を持つ `app.bsky.embed.external` URLカードへフォールバックする。AP側は `ap_object_id` があればMisskey互換の `quoteUrl` / `_misskey_quote` として配送し、Bskyにしか実体がない投稿は受信サーバーがAPオブジェクトとして解決できないため、bsky.app URLを本文末尾へ追記する。配送する Create の埋め込み Note と `/notes/:id` の公開 AP Note は同じ本文・引用フィールドを返し、受信側による再取得でも不整合を起こさない。ローカル・Fedi・Bskyのどの投稿も、Fedi/Bskyの両配送先を個別選択して引用できる。
 - **引用受信（#116）**: APは `quoteUrl`、`_misskey_quote`、`tag[].rel=https://misskey-hub.net/ns#_misskey_quote` の順に引用URIを抽出し、Misskey/Fedibirdが本文末尾へ付ける同一URIの `RE:` / `QT:` フォールバック行を除去する。Bsky Jetstreamは `app.bsky.embed.record.record.uri` と `recordWithMedia.record.record.uri` を抽出する。いずれも引用先がローカルDBに存在する場合だけ `quote_of_post_id` を設定し、未取得なら通常投稿として安全に保存する。
-- **リポスト**: 元ポストが `ap_object_id` を持つなら Fedi へは `Announce`。持たず `at_uri` のみ(Bskyリモート)ならテキスト投稿（「🔁 author: bsky.app URL」）にフォールバック。Fediリモート投稿をBskyへ配送する場合は、本文を「🔁」のみとし、元の`ap_object_id`を`app.bsky.embed.external`（URLカード）で添付する。カードのtitleは元投稿者の表示名とID、descriptionは元投稿本文、thumbは先頭の添付画像（画像がなければ投稿者アイコン）をPDS配信可能なblobとして設定する。`visibility` が `followers_only`/`direct` の場合、フォロワー限定配信を持たない Bsky へのリポストはスキップする。
+- **リポスト**: 元ポストが `ap_object_id` を持つなら Fedi へは `Announce`。持たず `at_uri` のみ(Bskyリモート)ならテキスト投稿（「🔁 author: bsky.app URL」）にフォールバック。Fediリモート投稿をBskyへ配送する場合は、本文を「🔁」のみとし、元の`ap_object_id`を`app.bsky.embed.external`（URLカード）で添付する。カードのtitleは元投稿者の表示名とID、descriptionは元投稿本文、thumbは先頭の添付画像（画像がなければ投稿者アイコン）をPDS配信可能なblobとして設定する。`visibility` が `followers_only`/`direct` の場合、フォロワー限定配信を持たない Bsky へのリポストはスキップする。`Announce`/`Undo(Announce)`はフォロワーのinboxに加え、元ポストがFediリモートなら元投稿者のinboxにも配送し（`cc`にも元投稿者のactor URIを含める）、相手サーバーでのブースト数反映・通知を成立させる（リアクション配送と同じ方針）。
 - **投稿削除**（`DELETE /api/notes/:id`、本人のみ）: DB上は論理削除（`posts.deleted_at`）のみで、リアクション・他ユーザーによるリポスト・通知等の関連行はカスケード削除しない（読み取り側が一貫して`deleted_at IS NULL`を見る設計）。配送は「実際に配送済みだった経路」にのみ行う: `deliver_fedi`が真かつ`visibility != 'direct'`なら`ApDeliveryKind::DeleteNote`（フォロワー全員へ`Delete(Note)`）をenqueue、`at_rkey`が保存済みならBsky側レコードを`delete_atp_post`で削除。`direct`（DM）投稿は`DeleteNote`がフォロワー配送しか持たないため配送対象外（本来の宛先には届かない、既知の制約）。
 
 ## 5. 重複排除・マージ（水際防御）
