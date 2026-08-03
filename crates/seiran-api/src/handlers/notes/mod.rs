@@ -324,6 +324,9 @@ async fn create_repost(
         remote_url: None,
         content_warning: None,
         poll: None,
+        reply_count: 0,
+        quote_count: 0,
+        repost_count: 0,
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
     embed_renotes(
@@ -769,6 +772,9 @@ async fn create_regular_post(
         remote_url: None,
         content_warning: None,
         poll: None,
+        reply_count: 0,
+        quote_count: 0,
+        repost_count: 0,
     };
     embed_quotes(
         &state.db,

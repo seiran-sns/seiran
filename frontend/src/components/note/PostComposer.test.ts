@@ -10,6 +10,9 @@ function makeNote(visibility?: string): Note {
     user: { id: 1, username: "alice", actorType: "local" },
     attachments: [],
     visibility,
+    replyCount: 0,
+    quoteCount: 0,
+    repostCount: 0,
   };
 }
 

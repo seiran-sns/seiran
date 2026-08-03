@@ -15,10 +15,18 @@ interface ActionsMenuProps {
   /** トリガーボタンの表示文字。デフォルトはケバブメニュー（⋯）。 */
   triggerLabel?: string;
   triggerTitle?: string;
+  /** 指定時、トリガーボタンのデフォルトの見た目（`styles.trigger`）の代わりに使う
+   * （呼び出し元の他のボタンと体裁を揃えたい場合）。 */
+  triggerClassName?: string;
 }
 
 /** トリガーボタン＋ポップオーバー形式の汎用アクションメニュー（`ReactionPicker` のパターンを踏襲）。 */
-export default function ActionsMenu({ items, triggerLabel = "⋯", triggerTitle }: ActionsMenuProps) {
+export default function ActionsMenu({
+  items,
+  triggerLabel = "⋯",
+  triggerTitle,
+  triggerClassName,
+}: ActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -43,7 +51,7 @@ export default function ActionsMenu({ items, triggerLabel = "⋯", triggerTitle 
     <div className={styles.wrap} ref={wrapRef}>
       <button
         type="button"
-        className={styles.trigger}
+        className={triggerClassName ?? styles.trigger}
         title={triggerTitle}
         onClick={(e) => {
           e.stopPropagation();

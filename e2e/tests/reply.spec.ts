@@ -20,7 +20,8 @@ test("他ユーザーの投稿に返信できる", async ({ page, request }) => 
   await page.goto(`/notes/${original.id}`);
   await expect(page.getByText(originalText)).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole("button", { name: "返信" }).click();
+  // 返信ボタンはキャプション文言を持たないため title 属性で特定する。
+  await page.getByTitle("返信", { exact: true }).click();
   const replyText = `返信テスト ${Date.now()}`;
   await page.getByPlaceholder("返信を入力").fill(replyText);
   await page.getByRole("button", { name: "投稿", exact: true }).click();

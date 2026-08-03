@@ -381,14 +381,17 @@
 }
 
 .actionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: none;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-dim);
   font-size: 0.78rem;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 6px;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
 .actionBtn:hover {
@@ -396,7 +399,24 @@
   color: var(--accent);
 }
 
+.actionBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.actionBtn:disabled:hover {
+  background: none;
+  color: var(--text-dim);
+}
+
+.actionCount {
+  font-variant-numeric: tabular-nums;
+}
+
+/* リポスト済み・リアクション済みの状態はボタン枠で囲って表現する（キャプション文言ではなく見た目で示す） */
 .actionBtnActive {
+  border-color: var(--accent);
+  background: var(--accent-deep);
   color: var(--accent);
   font-weight: 600;
 }

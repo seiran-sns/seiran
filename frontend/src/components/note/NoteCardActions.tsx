@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ReactionSummary } from "../../api/client";
+import { formatCount } from "../../lib/format";
 import ActionsMenu, { ActionsMenuItem } from "../common/ActionsMenu";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
@@ -12,6 +13,9 @@ interface NoteCardActionsProps {
   noteId: string;
   subjectActorId: string;
   subjectLabel: string;
+  replyCount: number;
+  quoteCount: number;
+  repostCount: number;
   reactions: ReactionSummary[];
   reactionPending: boolean;
   onToggleReaction: (emoji: string) => void;
@@ -40,6 +44,9 @@ export default function NoteCardActions({
   noteId,
   subjectActorId,
   subjectLabel,
+  replyCount,
+  quoteCount,
+  repostCount,
   reactions,
   reactionPending,
   onToggleReaction,
@@ -62,6 +69,8 @@ export default function NoteCardActions({
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const totalReactionCount = reactions.reduce((sum, r) => sum + r.count, 0);
+  const reactedByMe = reactions.some((r) => r.reactedByMe);
 
   function confirmDelete() {
     setDeleteConfirmOpen(false);
@@ -133,7 +142,10 @@ export default function NoteCardActions({
           onClick={onReply}
           title={t("home:noteCard.replyButton")}
         >
-          💬 {t("home:noteCard.replyButton")}
+          💬{" "}
+          {replyCount > 0 && (
+            <span className={styles.actionCount}>{formatCount(replyCount)}</span>
+          )}
         </button>
         <button
           className={styles.actionBtn}
@@ -145,7 +157,10 @@ export default function NoteCardActions({
               : t("home:noteCard.quoteButton")
           }
         >
-          ❝ {t("home:noteCard.quoteButton")}
+          ❝{" "}
+          {quoteCount > 0 && (
+            <span className={styles.actionCount}>{formatCount(quoteCount)}</span>
+          )}
         </button>
         <button
           className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
@@ -162,23 +177,22 @@ export default function NoteCardActions({
           }
         >
           🔁{" "}
-          {isPrivateRepostTarget
-            ? t("home:noteCard.repostUnavailable")
-            : reposted
-              ? t("home:noteCard.reposted")
-              : reposting || unreposting
-                ? "..."
-                : t("home:noteCard.repost")}
+          {repostCount > 0 && (
+            <span className={styles.actionCount}>{formatCount(repostCount)}</span>
+          )}
         </button>
         <ReactionPicker
           onPick={onToggleReaction}
           disabled={reactionPending}
           open={reactionPickerOpen}
           onOpenChange={setReactionPickerOpen}
+          count={totalReactionCount}
+          active={reactedByMe}
         />
         <ActionsMenu
           items={menuItems}
           triggerTitle={t("home:noteCard.menuTitle")}
+          triggerClassName={styles.actionBtn}
         />
       </div>
 

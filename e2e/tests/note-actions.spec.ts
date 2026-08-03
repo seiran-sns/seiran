@@ -51,14 +51,19 @@ test("他人の投稿をリポスト・取り消すとボタン表示が切り�
   await seedAuth(page, bob.token);
   await page.goto(`/@${alice.username}`);
 
-  const repostButton = page.getByRole("button", { name: /リポスト/ });
-  await expect(repostButton).toHaveText("🔁 リポスト", { timeout: 15_000 });
+  // リポストボタンはキャプション文言を持たず、状態は title 属性とボタン枠（active クラス）で示す。
+  const repostButton = page.getByTitle("リポスト", { exact: true });
+  await expect(repostButton).toBeVisible({ timeout: 15_000 });
+  await expect(repostButton).not.toHaveClass(/actionBtnActive/);
 
   await repostButton.click();
-  await expect(repostButton).toHaveText("🔁 リポスト済み", { timeout: 10_000 });
+  const unrepostButton = page.getByTitle("リポスト解除", { exact: true });
+  await expect(unrepostButton).toBeVisible({ timeout: 10_000 });
+  await expect(unrepostButton).toHaveClass(/actionBtnActive/);
 
-  await repostButton.click();
-  await expect(repostButton).toHaveText("🔁 リポスト", { timeout: 10_000 });
+  await unrepostButton.click();
+  await expect(repostButton).toBeVisible({ timeout: 10_000 });
+  await expect(repostButton).not.toHaveClass(/actionBtnActive/);
 });
 
 test("自分の投稿をケバブメニューから削除でき、確認前はキャンセルできる", async ({ page, request }) => {

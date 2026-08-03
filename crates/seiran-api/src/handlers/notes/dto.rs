@@ -133,6 +133,10 @@ pub struct NoteResponse {
     pub content_warning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poll: Option<serde_json::Value>,
+    /// このポストへの返信・引用・リポストの件数（`posts.reply_count`/`quote_count`/`repost_count`）。
+    pub reply_count: i64,
+    pub quote_count: i64,
+    pub repost_count: i64,
 }
 
 /// `serde_json::Value`（JSONB由来のオブジェクト、`None`/非オブジェクトなら空）を
@@ -265,6 +269,9 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         remote_url,
         content_warning: p.content_warning,
         poll: p.poll,
+        reply_count: p.reply_count,
+        quote_count: p.quote_count,
+        repost_count: p.repost_count,
     }
 }
 

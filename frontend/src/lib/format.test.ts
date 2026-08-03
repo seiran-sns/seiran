@@ -7,6 +7,7 @@ import {
   countUtf8Bytes,
   deliveryBadges,
   displayName,
+  formatCount,
   profilePath,
   profileQuery,
   protocolBadge,
@@ -24,9 +25,36 @@ function makeNote(overrides: Partial<Note> = {}): Note {
       actorType: "local",
     },
     attachments: [],
+    replyCount: 0,
+    quoteCount: 0,
+    repostCount: 0,
     ...overrides,
   };
 }
+
+describe("formatCount", () => {
+  it("1000未満はそのまま表示する", () => {
+    expect(formatCount(0)).toBe("0");
+    expect(formatCount(999)).toBe("999");
+  });
+
+  it("1000以上はKで小数点以下1桁まで表示する", () => {
+    expect(formatCount(1000)).toBe("1.0K");
+    expect(formatCount(1234)).toBe("1.2K");
+    expect(formatCount(9960)).toBe("9.9K");
+  });
+
+  it("1万以上のKは小数点なしで表示する", () => {
+    expect(formatCount(12345)).toBe("12K");
+    expect(formatCount(999499)).toBe("999K");
+  });
+
+  it("100万以降はMで表示する", () => {
+    expect(formatCount(1_000_000)).toBe("1.0M");
+    expect(formatCount(2_500_000)).toBe("2.5M");
+    expect(formatCount(12_000_000)).toBe("12M");
+  });
+});
 
 describe("displayName", () => {
   it("displayName があればそれを使う", () => {

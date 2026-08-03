@@ -152,7 +152,8 @@ test.describe("Fedi配送", () => {
 
     await seedAuth(page, user.token);
     await page.goto(`/notes/${original.id}`);
-    await page.getByRole("button", { name: "返信" }).click();
+    // 返信ボタンはキャプション文言を持たないため title 属性で特定する。
+    await page.getByTitle("返信", { exact: true }).click();
     const replyText = `返信配送テスト ${Date.now()}`;
     await page.getByPlaceholder("返信を入力").fill(replyText);
     await page.getByRole("button", { name: "投稿", exact: true }).click();
@@ -189,7 +190,8 @@ test.describe("Fedi配送", () => {
 
     await seedAuth(page, user.token);
     await page.goto(`/notes/${original.id}`);
-    await page.getByRole("button", { name: "リポスト" }).click();
+    // リポストボタンはキャプション文言を持たないため title 属性で特定する。
+    await page.getByTitle("リポスト", { exact: true }).click();
 
     await expect
       .poll(

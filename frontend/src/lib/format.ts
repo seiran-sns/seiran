@@ -11,6 +11,22 @@ export function formatDate(iso: string): string {
   });
 }
 
+/** 返信数・引用数・リポスト数・リアクション数などの件数表示。1000未満はそのまま、
+ * 1000以上は K（小数点以下1桁まで）、100万以降は M 表示にし、常に3桁以下に収める。 */
+export function formatCount(n: number): string {
+  if (n < 1000) return String(n);
+  const isMillion = n >= 1_000_000;
+  const divisor = isMillion ? 1_000_000 : 1000;
+  const suffix = isMillion ? "M" : "K";
+  const value = n / divisor;
+  const intPart = Math.floor(value);
+  if (intPart < 10) {
+    const truncated = Math.floor(value * 10) / 10;
+    return `${truncated.toFixed(1)}${suffix}`;
+  }
+  return `${intPart}${suffix}`;
+}
+
 /** ノートの表示名（display_name 優先、なければ username）。 */
 export function displayName(note: Note): string {
   return note.user.displayName || note.user.username;

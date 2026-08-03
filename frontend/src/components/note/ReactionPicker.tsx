@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { formatCount } from "../../lib/format";
 import Modal from "../common/Modal";
 import noteCardStyles from "./NoteCard.module.css";
 
@@ -15,10 +16,21 @@ interface ReactionPickerProps {
   /** 外部（`ActionsMenu` の「リアクション」項目等）から開閉を制御したい場合に指定する。 */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** ポストの総リアクション件数（トリガーボタンに表示）。 */
+  count?: number;
+  /** 自分が既にこのポストへリアクション済みか（トリガーボタンを枠で囲って表現）。 */
+  active?: boolean;
 }
 
 /** 投稿に絵文字リアクションを付けるためのトリガーボタン＋ピッカー（Modal 内に検索・タブ・グリッド）。 */
-export default function ReactionPicker({ onPick, disabled, open: controlledOpen, onOpenChange }: ReactionPickerProps) {
+export default function ReactionPicker({
+  onPick,
+  disabled,
+  open: controlledOpen,
+  onOpenChange,
+  count = 0,
+  active = false,
+}: ReactionPickerProps) {
   const { t } = useTranslation();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
@@ -33,7 +45,7 @@ export default function ReactionPicker({ onPick, disabled, open: controlledOpen,
     <>
       <button
         type="button"
-        className={noteCardStyles.actionBtn}
+        className={`${noteCardStyles.actionBtn} ${active ? noteCardStyles.actionBtnActive : ""}`}
         disabled={disabled}
         onClick={(e) => {
           e.stopPropagation();
@@ -41,7 +53,10 @@ export default function ReactionPicker({ onPick, disabled, open: controlledOpen,
         }}
         title={t("home:reactionPicker.addReactionTitle")}
       >
-        🙂 {t("home:reactionPicker.addReactionButton")}
+        🙂{" "}
+        {count > 0 && (
+          <span className={noteCardStyles.actionCount}>{formatCount(count)}</span>
+        )}
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title={t("home:reactionPicker.addReactionTitle")}>
         {open && (

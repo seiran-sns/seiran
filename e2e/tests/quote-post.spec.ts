@@ -68,7 +68,8 @@ test("投稿カードの引用ボタンからコメント付き引用を作成�
   await seedAuth(page, quoter.token);
   await page.goto(`/@${author.username}`);
   const originalCard = page.locator("article", { hasText: originalText });
-  await originalCard.getByRole("button", { name: "引用" }).click();
+  // 引用ボタンはキャプション文言を持たないため title 属性で特定する。
+  await originalCard.getByTitle("引用", { exact: true }).click();
 
   await expect(page.getByText("引用ポスト", { exact: true })).toBeVisible();
   await expect(page.getByText(originalText, { exact: true }).last()).toBeVisible();

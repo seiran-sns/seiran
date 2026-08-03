@@ -488,6 +488,9 @@ function PostContent({
         subjectLabel={t("home:noteCard.reportSubject", {
           username: note.user.username,
         })}
+        replyCount={note.replyCount}
+        quoteCount={note.quoteCount}
+        repostCount={note.repostCount}
         reactions={reactions}
         reactionPending={reactionPending}
         onToggleReaction={toggleReaction}

@@ -1,11 +1,10 @@
 //! `seiran_common::repository` の DTO（`TimelinePost`/`Actor`）から Misskey 形式の
 //! レスポンス型へ変換する。DB アクセスは既存の `handlers::notes` の一括フェッチ関数
-//! （`fetch_attachments_map`/`fetch_reactions_map`）を再利用し、Misskey 固有の
-//! renote数/reply数だけこのモジュールで追加取得する。
+//! （`fetch_attachments_map`/`fetch_reactions_map`）を再利用する。Misskey 固有の
+//! renote数/reply数（`renoteCount`/`repliesCount`）は `TimelinePost.repost_count`/
+//! `reply_count`（`posts` テーブルの非正規化カウンタ）をそのまま使う。
 
 use std::collections::{BTreeMap, HashMap};
-
-use sqlx::Row;
 
 use seiran_common::repository::{Actor, NotificationRow, TimelinePost};
 
@@ -315,7 +314,8 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
                 a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                 COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                 p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
-                p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri
+                p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
+                p.reply_count, p.repost_count
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
          LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -339,15 +339,14 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
-    let (renote_counts, reply_counts) = fetch_counts_map(&state.db, &ids).await;
 
     let mut by_id: HashMap<i64, MisskeyNote> = HashMap::new();
     for r in rows {
         let id = r.id;
         let atts = att_map.remove(&id).unwrap_or_default();
         let reactions = rmap.get(&id).cloned().unwrap_or_default();
-        let rc = *renote_counts.get(&id).unwrap_or(&0);
-        let pc = *reply_counts.get(&id).unwrap_or(&0);
+        let rc = r.repost_count;
+        let pc = r.reply_count;
         by_id.insert(
             id,
             to_misskey_note(&r, &state.local_domain, &atts, &reactions, rc, pc),
@@ -365,48 +364,6 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
     }
 }
 
-/// `posts` テーブルへの renote数/reply数の一括集計（Misskey の `renoteCount`/`repliesCount`）。
-/// seiran のリポジトリ層にはまだ集計メソッドが無いため、既存の `fetch_reactions_map` 等と
-/// 同じ「post_id リストで一括SELECT」パターンをここで踏襲する。
-async fn fetch_counts_map(
-    db: &sqlx::PgPool,
-    post_ids: &[i64],
-) -> (HashMap<i64, i64>, HashMap<i64, i64>) {
-    if post_ids.is_empty() {
-        return (HashMap::new(), HashMap::new());
-    }
-
-    let to_map = |rows: Vec<sqlx::postgres::PgRow>| -> HashMap<i64, i64> {
-        rows.iter()
-            .filter_map(|r| {
-                let id: i64 = r.try_get("id").ok()?;
-                let cnt: i64 = r.try_get("cnt").ok()?;
-                Some((id, cnt))
-            })
-            .collect()
-    };
-
-    let renote_rows = sqlx::query(
-        "SELECT repost_of_post_id AS id, COUNT(*) AS cnt FROM posts \
-         WHERE repost_of_post_id = ANY($1) AND deleted_at IS NULL GROUP BY repost_of_post_id",
-    )
-    .bind(post_ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
-
-    let reply_rows = sqlx::query(
-        "SELECT reply_to_post_id AS id, COUNT(*) AS cnt FROM posts \
-         WHERE reply_to_post_id = ANY($1) AND deleted_at IS NULL GROUP BY reply_to_post_id",
-    )
-    .bind(post_ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
-
-    (to_map(renote_rows), to_map(reply_rows))
-}
-
 /// タイムライン等、複数ノートをまとめて Misskey 形式へ変換する。
 pub async fn build_notes(
     state: &AppState,
@@ -417,7 +374,6 @@ pub async fn build_notes(
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
-    let (renote_counts, reply_counts) = fetch_counts_map(&state.db, &ids).await;
 
     let mut notes: Vec<MisskeyNote> = rows
         .into_iter()
@@ -425,8 +381,8 @@ pub async fn build_notes(
             let id = p.id;
             let atts = att_map.remove(&id).unwrap_or_default();
             let reactions = rmap.get(&id).cloned().unwrap_or_default();
-            let rc = *renote_counts.get(&id).unwrap_or(&0);
-            let pc = *reply_counts.get(&id).unwrap_or(&0);
+            let rc = p.repost_count;
+            let pc = p.reply_count;
             to_misskey_note(&p, &state.local_domain, &atts, &reactions, rc, pc)
         })
         .collect();
@@ -589,6 +545,9 @@ mod tests {
             post_at_uri: None,
             content_warning: None,
             poll: None,
+            reply_count: 0,
+            quote_count: 0,
+            repost_count: 0,
         }
     }
 

@@ -10,6 +10,9 @@ function note(id: string, visibility: Note["visibility"]): Note {
     user: { id: 1, username: "me", actorType: "local" },
     attachments: [],
     visibility,
+    replyCount: 0,
+    quoteCount: 0,
+    repostCount: 0,
   };
 }
 

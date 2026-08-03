@@ -463,6 +463,10 @@ export interface Note {
     /** ログイン中ユーザーが回答した選択肢番号。回答前・未認証時は省略。 */
     votedByMe?: number[];
   };
+  /** このポストへの返信・引用・リポストの件数。 */
+  replyCount: number;
+  quoteCount: number;
+  repostCount: number;
 }
 
 export interface ReactionSummary {
@@ -618,6 +622,12 @@ interface RawNote {
   contentWarning?: string;
   content_warning?: string;
   poll?: Note["poll"];
+  replyCount?: number;
+  reply_count?: number;
+  quoteCount?: number;
+  quote_count?: number;
+  repostCount?: number;
+  repost_count?: number;
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -651,6 +661,9 @@ function normalizeNote(r: RawNote): Note {
     remoteUrl: r.remoteUrl ?? r.remote_url,
     contentWarning: r.contentWarning ?? r.content_warning,
     poll: r.poll,
+    replyCount: r.replyCount ?? r.reply_count ?? 0,
+    quoteCount: r.quoteCount ?? r.quote_count ?? 0,
+    repostCount: r.repostCount ?? r.repost_count ?? 0,
   };
 }
 

@@ -109,6 +109,7 @@ DM等の全外部キー参照を付け替える。複合UNIQUEは正規化後の
 - 重複排除・マージに使うカラム: `seiran_post_uuid`（他 seiran サーバー間マージのキー。**ATP側レコードには埋め込まれていないため、Bsky経由で先に取り込まれた投稿は AP 側の同一投稿と現状マージされない** — 既知の制約）、`parent_original_post_id`（ループバック・一般ブリッジ重複のハードリンク）。
 - `visibility`（ENUM `post_visibility_enum`: `public`/`unlisted`/`followers_only`/`direct`）と `deliver_fedi`/`deliver_bsky`（配信先トグル）は独立した軸。リプライは親の可視性を継承する。
 - `thread_root_post_id`: `direct`投稿（DM）のスレッド起点ポストID。DM関連テーブルの節を参照。`direct`以外の投稿では常にNULL。
+- `reply_count`/`quote_count`/`repost_count`（非正規化 + トリガー）: このポストへの返信・引用・リポストの件数（NoteCardのアクション行に表示）。都度 `COUNT()` するとタイムライン1件ごとにN+1クエリが発生するため、`is_local` と同様に非正規化カウンタ + トリガー方式にしている。`AFTER INSERT` トリガー `trg_posts_relation_counts_insert` が `reply_to_post_id`/`quote_of_post_id`/`repost_of_post_id` を持つ行の INSERT 時に親側のカウンタを+1し、`AFTER UPDATE OF deleted_at` トリガー `trg_posts_relation_counts_delete` が論理削除（`deleted_at` が NULL→非NULL）時に-1する。ローカル作成・Fedi受信・ATP受信・DM同期など `posts` への挿入経路が複数あるため、Rust側の各挿入関数に増減処理を個別実装せずDBトリガーへ一元化している（経路追加時の実装漏れを防ぐため）。
 
 ### ダイレクトメッセージ関連（`post_recipients` / `dm_read_states` / `bsky_convo_links`)
 DMは`visibility='direct'`の投稿をそのまま`posts`に格納する方式で実現し、Misskey APIクライアントからも読み書きできるようにしている（フロントエンドはタイムライン取得時に`direct`を除外するパラメータを付与することで、Misskey本家の`specified`投稿がタイムラインに現れうる挙動と両立させている）。

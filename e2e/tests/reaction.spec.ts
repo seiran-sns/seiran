@@ -11,7 +11,8 @@ test("投稿にリアクションを付けられる", async ({ page, request }) 
   await page.getByRole("button", { name: "投稿", exact: true }).click();
   await expect(page.getByText(text)).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole("button", { name: "リアクション" }).click();
+  // リアクショントリガーボタンはキャプション文言を持たないため title 属性で特定する。
+  await page.getByTitle("リアクションを付ける", { exact: true }).click();
   await page.getByPlaceholder("絵文字を検索").fill("thumbs up");
   await page.getByRole("button", { name: "👍", exact: true }).click();
 
