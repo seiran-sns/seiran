@@ -10,6 +10,7 @@ import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel
 import { profilePath } from "../../lib/format";
 import { mediaUrl } from "../../utils/mediaProxy";
 import panel from "../common/Panel.module.css";
+import Avatar from "../note/Avatar";
 import EmojiText from "../note/EmojiText";
 import NoteHoverPreview from "../note/NoteHoverPreview";
 import styles from "./NotificationsPanel.module.css";
@@ -164,6 +165,7 @@ export default function NotificationsPanel() {
             ) : (
               <span className={styles.icon}>{icon}</span>
             )}
+            <Avatar url={n.user?.avatarUrl} name={who} size={20} />
             <span className={styles.text}>
               <Trans
                 i18n={i18n}
