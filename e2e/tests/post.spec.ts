@@ -19,7 +19,7 @@ test("投稿ダイアログを閉じると書きかけがホーム上部フォ�
   await seedAuth(page, user.token);
   await page.goto("/");
 
-  const openCompose = page.locator("nav:visible").getByRole("button", { name: "投稿", exact: true });
+  const openCompose = page.locator("nav:visible").getByRole("button", { name: "投稿" });
   await openCompose.click();
   const draft = `ダイアログの書きかけ ${Date.now()}`;
   await page.getByPlaceholder("いまどうしてる？").last().fill(draft);
