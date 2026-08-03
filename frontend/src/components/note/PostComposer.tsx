@@ -1,7 +1,14 @@
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, DriveFile, Note, getErrorMessage } from "../../api/client";
 import { acct, calcRemaining, displayName } from "../../lib/format";
+import { useAuth } from "../../contexts/AuthContext";
+import {
+  clearComposerDraft,
+  DraftTarget,
+  loadComposerDraft,
+  saveComposerDraft,
+} from "../../lib/composerDraft";
 import styles from "./PostComposer.module.css";
 import ComposerEditor from "./ComposerEditor";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
@@ -54,21 +61,37 @@ export default function PostComposer({
   initialText,
 }: PostComposerProps) {
   const { t } = useTranslation();
-  const [text, setText] = useState(initialText ?? "");
-  const [deliverFedi, setDeliverFedi] = useState(true);
-  const [deliverBsky, setDeliverBsky] = useState(true);
+  const { user } = useAuth();
   const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo) : null;
   const quoteConstraint = quoteTo ? quoteVisibilityConstraint(quoteTo) : null;
-  const [visibility, setVisibility] = useState<Visibility>(
-    () =>
+
+  // 投稿ダイアログを閉じても書きかけを失わないよう、ユーザー×対象ポスト単位でローカル
+  // ストレージに自動保存する（#193）。マウント時に一度だけ読み込み、以降は入力の都度保存。
+  const draftTarget: DraftTarget | null = useMemo(() => {
+    if (!user) return null;
+    if (replyTo) return { mode: "reply", userId: user.id, postId: replyTo.id };
+    if (quoteTo) return { mode: "quote", userId: user.id, postId: quoteTo.id };
+    return { mode: "compose", userId: user.id };
+  }, [user, replyTo, quoteTo]);
+  const [initialDraft] = useState(() =>
+    draftTarget ? loadComposerDraft(draftTarget) : null,
+  );
+
+  const [text, setText] = useState(initialDraft?.text ?? initialText ?? "");
+  const [deliverFedi, setDeliverFedi] = useState(initialDraft?.deliverFedi ?? true);
+  const [deliverBsky, setDeliverBsky] = useState(initialDraft?.deliverBsky ?? true);
+  const [visibility, setVisibility] = useState<Visibility>(() => {
+    if (initialDraft && !replyConstraint?.forced) return initialDraft.visibility;
+    return (
       replyConstraint?.defaultValue ??
       quoteConstraint?.defaultValue ??
-      "public",
-  );
+      "public"
+    );
+  });
   const [guideMessage, setGuideMessage] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState("");
-  const [attached, setAttached] = useState<DriveFile | null>(null);
+  const [attached, setAttached] = useState<DriveFile | null>(initialDraft?.attached ?? null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const guideTimerRef = useRef<number | null>(null);
@@ -77,6 +100,11 @@ export default function PostComposer({
     if (!autoFocus) return;
     // ComposerEditor が装飾DOMの構築後にフォーカスとcaret復元を行う。
   }, [autoFocus]);
+
+  useEffect(() => {
+    if (!draftTarget) return;
+    saveComposerDraft(draftTarget, { text, attached, deliverFedi, deliverBsky, visibility });
+  }, [draftTarget, text, attached, deliverFedi, deliverBsky, visibility]);
 
   useEffect(() => {
     return () => {
@@ -145,6 +173,7 @@ export default function PostComposer({
       setText("");
       setAttached(null);
       setVisibility(replyConstraint?.defaultValue ?? "public");
+      if (draftTarget) clearComposerDraft(draftTarget);
       onPosted?.(note);
     } catch (err) {
       setError(getErrorMessage(err));

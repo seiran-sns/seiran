@@ -41,6 +41,11 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: "jsdom",
+      // jsdomのデフォルトURL(about:blank)はopaque originとなりlocalStorageが
+      // 使えないため、下書き自動保存（#193）のテストのため実URLを与える。
+      environmentOptions: {
+        jsdom: { url: "http://localhost/" },
+      },
     },
   };
 });
