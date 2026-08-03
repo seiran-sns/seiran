@@ -1,4 +1,5 @@
 import { createContext, useContext, useState } from "react";
+import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Note } from "../api/client";
 import Modal from "../components/common/Modal";
@@ -39,12 +40,10 @@ export function ComposerProvider({ children }: { children: React.ReactNode }) {
   const openQuote = (target: Note) => setState({ mode: "quote", target });
   const openCompose = (initialText = "") => setState({ mode: "compose", initialText });
   const close = () => {
-    setState(null);
-    if (state?.mode === "compose" && user) {
-      window.setTimeout(
-        () => refreshComposerDraft({ mode: "compose", userId: user.id }),
-        0,
-      );
+    const refreshHomeComposer = state?.mode === "compose" && user;
+    flushSync(() => setState(null));
+    if (refreshHomeComposer) {
+      refreshComposerDraft({ mode: "compose", userId: refreshHomeComposer.id });
     }
   };
 

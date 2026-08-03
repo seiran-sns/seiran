@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { Note } from "../../api/client";
@@ -32,11 +33,12 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const closeCompose = () => {
-    setComposeOpen(false);
-    // Modal 内コンポーザの入力 effect とアンマウントを先に完了させてから、
-    // 常設のホーム上部コンポーザへ保存済み下書きの再読込を依頼する。
+    // Modal 内コンポーザを同期的にアンマウントしてから、常設のホーム上部
+    // コンポーザへ保存済み下書きの再読込を依頼する。
+    // setTimeout(0) では React の commit より先に再読込される場合がある。
+    flushSync(() => setComposeOpen(false));
     if (user) {
-      window.setTimeout(() => refreshComposerDraft({ mode: "compose", userId: user.id }), 0);
+      refreshComposerDraft({ mode: "compose", userId: user.id });
     }
   };
 
