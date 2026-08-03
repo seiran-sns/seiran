@@ -399,6 +399,7 @@
     max-width: 100%;
     min-height: auto;
     border-right: none;
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
   }
 
   .right {
