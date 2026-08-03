@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Note } from "../../api/client";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import Modal from "../common/Modal";
@@ -23,7 +23,6 @@ interface AppShellProps {
 export default function AppShell({ center, right, onPosted, onBeforeNavigate }: AppShellProps) {
   const { t } = useTranslation();
   const location = useLocation();
-  const navigate = useNavigate();
   const { dmUnreadCount } = useStreamingContext();
   const [composeOpen, setComposeOpen] = useState(false);
   const [openTargetOpen, setOpenTargetOpen] = useState(false);
@@ -70,43 +69,37 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
       </button>
 
       {/* スマホ表示用フローティング検索ボタン */}
-      <button
+      <Link
+        to="/search"
         className={styles.floatingSearchBtn}
-        onClick={() => {
-          onBeforeNavigate?.();
-          navigate("/search");
-        }}
+        onClick={() => onBeforeNavigate?.()}
         aria-label={t("nav:leftNav.search")}
         title={t("nav:leftNav.search")}
       >
         <span className={styles.floatingSearchIcon}>🔍</span>
-      </button>
+      </Link>
 
       {/* スマホ表示用フローティング通知ボタン（#75） */}
-      <button
+      <Link
+        to="/notifications"
         className={styles.floatingNotifBtn}
-        onClick={() => {
-          onBeforeNavigate?.();
-          navigate("/notifications");
-        }}
+        onClick={() => onBeforeNavigate?.()}
         aria-label={t("nav:leftNav.notifications")}
         title={t("nav:leftNav.notifications")}
       >
         <span className={styles.floatingNotifIcon}>🔔</span>
-      </button>
+      </Link>
 
       {/* スマホ表示用フローティングホームボタン（#180） */}
-      <button
+      <Link
+        to="/"
         className={styles.floatingHomeBtn}
-        onClick={() => {
-          onBeforeNavigate?.();
-          navigate("/");
-        }}
+        onClick={() => onBeforeNavigate?.()}
         aria-label={t("nav:leftNav.home")}
         title={t("nav:leftNav.home")}
       >
         <span className={styles.floatingHomeIcon}>🏠</span>
-      </button>
+      </Link>
 
       {/* スマホ表示用フローティング投稿ボタン */}
       <button
