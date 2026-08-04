@@ -27,6 +27,15 @@ const PAGE_SIZE = 20;
 /** ポストへのリンクを持つ通知種別（通知文全体を対象ポストへの遷移領域にする）。 */
 const NOTE_LINKED_TYPES = new Set(["reaction", "mention", "reply", "repost", "quote"]);
 
+/** 通知のダイジェスト表示・遷移先とすべきポストIDを求める。
+ * "repost" 通知の `note` は本文を持たないリポストラッパー投稿自体を指すため、
+ * リポスト元の実体投稿（`note.renote`、`build_notes`/`embed_renotes` が埋め込む）を優先する。 */
+export function resolveTargetNoteId(n: NotificationItem): string | undefined {
+  if (!NOTE_LINKED_TYPES.has(n.type)) return undefined;
+  const targetNote = n.type === "repost" ? (n.note?.renote ?? n.note) : n.note;
+  return targetNote?.id;
+}
+
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。
  * `who`（表示名部分）は呼び出し側で `EmojiText` を通す前提でプレーンテキストのまま返す。 */
 export function describeNotification(
@@ -151,7 +160,7 @@ export default function NotificationsPanel() {
     <ul className={styles.list}>
       {items.map((n) => {
         const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix } = describeNotification(n);
-        const noteId = NOTE_LINKED_TYPES.has(n.type) ? n.note?.id : undefined;
+        const noteId = resolveTargetNoteId(n);
         const userLink = n.user?.username ? (
           <Link
             to={profilePath(n.user.username, n.user.host ?? undefined)}
