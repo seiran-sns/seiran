@@ -23,6 +23,7 @@ import { setPollState, usePollState } from "../../stores/pollVoteStore";
 import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import RichText from "./RichText";
 import NoteAttachments from "./NoteAttachments";
 import NoteCardActions from "./NoteCardActions";
@@ -86,7 +87,7 @@ function QuoteCard({ note }: { note: Note }) {
       {note.contentWarning && (
         <div className={styles.quoteContentWarning}>
           <span>
-            ⚠️ <EmojiText text={note.contentWarning} emojis={note.emojis} />
+            <TwemojiEmoji emoji="⚠️" /> <EmojiText text={note.contentWarning} emojis={note.emojis} />
           </span>
           <button
             type="button"
@@ -326,7 +327,7 @@ function PostContent({
                 {acct(note)}
                 {badge && (
                   <span className={styles.protoBadge} title={badge.label}>
-                    {badge.icon}
+                    <TwemojiEmoji emoji={badge.icon} />
                   </span>
                 )}
                 {delBadges.map((b) => (
@@ -335,12 +336,12 @@ function PostContent({
                     className={styles.protoBadge}
                     title={b.label}
                   >
-                    {b.icon}
+                    <TwemojiEmoji emoji={b.icon} />
                   </span>
                 ))}
                 {visBadge && (
                   <span className={styles.protoBadge} title={visBadge.label}>
-                    {visBadge.icon}
+                    <TwemojiEmoji emoji={visBadge.icon} />
                   </span>
                 )}
               </span>
@@ -378,7 +379,7 @@ function PostContent({
       {note.contentWarning && (
         <div className={styles.contentWarningWrap}>
           <p className={styles.contentWarningText}>
-            ⚠️ <EmojiText text={note.contentWarning} emojis={note.emojis} />
+            <TwemojiEmoji emoji="⚠️" /> <EmojiText text={note.contentWarning} emojis={note.emojis} />
           </p>
           <button
             className={styles.contentWarningToggle}
@@ -536,7 +537,7 @@ export default function NoteCard({
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
         <div className={styles.rail}>
-          🔁{" "}
+          <TwemojiEmoji emoji="🔁" />{" "}
           <strong>
             <EmojiText text={displayName(note)} emojis={note.emojis} />
           </strong>{" "}
@@ -567,7 +568,7 @@ export default function NoteCard({
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
         <div className={styles.rail}>
-          🔁{" "}
+          <TwemojiEmoji emoji="🔁" />{" "}
           <strong>
             <EmojiText text={displayName(note)} emojis={note.emojis} />
           </strong>{" "}

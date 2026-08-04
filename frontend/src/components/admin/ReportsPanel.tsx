@@ -8,6 +8,7 @@ import {
 } from "../../api/client";
 import { useToast } from "../../contexts/ToastContext";
 import { findReportReasonLabel } from "../report/reportReasons";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "../../pages/Admin.module.css";
 
 export default function ReportsPanel() {
@@ -91,7 +92,7 @@ export default function ReportsPanel() {
           <div className={styles.row}>
             <div className={styles.grow}>
               <div className={styles.primaryText}>
-                ⚠️{" "}
+                <TwemojiEmoji emoji="⚠️" />{" "}
                 {t(
                   `admin:reports.${r.subject_type === "post" ? "postSubject" : "actorSubject"}`,
                   { subject: r.subject },

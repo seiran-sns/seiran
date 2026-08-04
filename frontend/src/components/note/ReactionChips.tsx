@@ -5,6 +5,7 @@ import { fetchCustomEmojiShortcodes, parseCustomEmojiShortcode } from "../../lib
 import { mediaUrl } from "../../utils/mediaProxy";
 import Avatar from "./Avatar";
 import EmojiContextMenu from "./EmojiContextMenu";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./ReactionChips.module.css";
 
 interface ReactionChipsProps {
@@ -109,7 +110,7 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
         ) : r.emojiUrl ? (
           <img className={styles.emojiImg} src={mediaUrl(r.emojiUrl)} alt={r.emoji} loading="lazy" />
         ) : (
-          <span className={styles.emoji}>{r.emoji}</span>
+          <TwemojiEmoji emoji={r.emoji} className={styles.emojiImg} />
         )}
         <span className={styles.count}>{r.count}</span>
       </button>

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import TwemojiEmoji from "./TwemojiEmoji";
 import styles from "./RemoteBanner.module.css";
 
 interface RemoteBannerProps {
@@ -13,7 +14,7 @@ export default function RemoteBanner({ message, url }: RemoteBannerProps) {
   const { t } = useTranslation();
   return (
     <div className={styles.remoteBanner}>
-      <span className={styles.icon}>🌐</span>
+      <TwemojiEmoji emoji="🌐" className={styles.icon} />
       <span className={styles.message}>{message}</span>
       <a className={styles.link} href={url} target="_blank" rel="noopener noreferrer">
         {t("common:remoteBanner.viewRemote")} ↗

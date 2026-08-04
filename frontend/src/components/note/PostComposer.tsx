@@ -12,6 +12,7 @@ import {
 } from "../../lib/composerDraft";
 import styles from "./PostComposer.module.css";
 import ComposerEditor from "./ComposerEditor";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 
 interface PostComposerProps {
@@ -281,7 +282,7 @@ export default function PostComposer({
       {replyConstraint?.forced ? (
         <div className={styles.visibilityRow}>
           <span className={styles.replyScopeNote}>
-            🔒️ {t("home:postComposer.forcedPrivateNote")}
+            <TwemojiEmoji emoji="🔒️" /> {t("home:postComposer.forcedPrivateNote")}
           </span>
         </div>
       ) : (
@@ -294,7 +295,7 @@ export default function PostComposer({
               title={t("home:postComposer.deliverFediHint")}
               aria-label={t("home:postComposer.deliverFediHint")}
             >
-              🌐
+              <TwemojiEmoji emoji="🌐" />
             </button>
             <button
               type="button"
@@ -316,7 +317,7 @@ export default function PostComposer({
                 title={t("home:postComposer.visibilityPublicHint")}
                 aria-label={t("home:postComposer.visibilityPublicHint")}
               >
-                👥
+                <TwemojiEmoji emoji="👥" />
               </button>
               <button
                 type="button"
@@ -327,7 +328,7 @@ export default function PostComposer({
                 title={t("home:postComposer.visibilityUnlistedHint")}
                 aria-label={t("home:postComposer.visibilityUnlistedHint")}
               >
-                🤫
+                <TwemojiEmoji emoji="🤫" />
               </button>
               <button
                 type="button"
@@ -338,7 +339,7 @@ export default function PostComposer({
                 title={t("home:postComposer.visibilityPrivateHint")}
                 aria-label={t("home:postComposer.visibilityPrivateHint")}
               >
-                🔒️
+                <TwemojiEmoji emoji="🔒️" />
               </button>
             </div>
             {guideMessage && (
@@ -406,7 +407,7 @@ export default function PostComposer({
             title={t("home:postComposer.attachTitle")}
             aria-label={t("home:postComposer.attachTitle")}
           >
-            {uploading ? <span className={styles.spinner} /> : "📎"}
+            {uploading ? <span className={styles.spinner} /> : <TwemojiEmoji emoji="📎" />}
           </button>
           <button
             type="submit"

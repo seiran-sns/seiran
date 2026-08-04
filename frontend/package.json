@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/copy-twemoji-assets.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
@@ -13,6 +14,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@twemoji/parser": "^17.0.2",
+    "@twemoji/svg": "^15.0.0",
     "emojibase-data": "^17.0.0",
     "hls.js": "^1.6.16",
     "i18next": "^26.3.6",

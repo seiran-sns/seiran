@@ -5,6 +5,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { canAccessAdminPage } from "../../lib/roles";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./AppShell.module.css";
 
 interface NavItem {
@@ -69,7 +70,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
                 }
                 onClick={() => onItemClick?.()}
               >
-                <span className={styles.navIcon}>{item.icon}</span>
+                <TwemojiEmoji emoji={item.icon} className={styles.navIcon} />
                 <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
                 {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
               </NavLink>
@@ -84,7 +85,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
                     onOpenTarget();
                   }}
                 >
-                  <span className={styles.navIcon}>🔗</span>
+                  <TwemojiEmoji emoji="🔗" className={styles.navIcon} />
                   <span className={styles.navLabel}>{t("nav:leftNav.openTarget")}</span>
                 </button>
               </li>
@@ -100,7 +101,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
           onCompose();
         }}
       >
-        <span className={styles.navIcon}>✏️</span>
+        <TwemojiEmoji emoji="✏️" className={styles.navIcon} />
         <span className={styles.navLabel}>{t("nav:leftNav.composeLabel")}</span>
       </button>
 

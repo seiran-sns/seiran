@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import AppShell from "../components/layout/AppShell";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
 import panel from "../components/common/Panel.module.css";
+import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import styles from "./SettingsMenu.module.css";
 
 interface SettingsMenuItem {
@@ -44,7 +45,7 @@ export default function SettingsMenuPage() {
               disabled={item.disabled}
               onClick={() => item.to && navigate(item.to)}
             >
-              <span className={styles.icon}>{item.icon}</span>
+              <TwemojiEmoji emoji={item.icon} className={styles.icon} />
               <span className={styles.label}>{t(`account:${item.labelKey}`)}</span>
               {item.disabled ? (
                 <span className={styles.comingSoon}>{t("account:menu.comingSoon")}</span>

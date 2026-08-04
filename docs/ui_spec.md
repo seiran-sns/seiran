@@ -208,3 +208,14 @@ LightBoxで開いた際の解除ボタンは、画面全体ではなくLightBox�
 引用ポストは自身の本文を通常どおり表示し、その直下に引用元を枠付きカードで1段だけ表示する。引用カードには返信マーカー、ユーザー名、本文（CWは案内文・開閉ボタン付き）、時刻、添付メディア、アンケート、リアクションを表示する。引用元がさらに引用を持つ場合は「引用あり」とだけ表示し、その先のカードは入れ子にしない。引用元が閲覧者から見えない場合はAPIが `quote` を埋め込まず、従来の引用元リンクだけを表示する。
 
 各投稿カードのアクション列とメニューには「引用」を表示する。選択すると引用元の投稿者・本文を確認できるコンポーザを開き、通常投稿と同じ本文・添付・可視性・Fedi/Bsky配送先を指定してコメント付き引用を作成する。
+
+# Unicode絵文字の表示（twemoji）
+
+Unicode絵文字（本文中・表示名中・絵文字リアクション・絵文字ピッカーのグリッド・アクションメニューやナビの装飾アイコン等）は、OS/ブラウザのネイティブグリフに任せず、jdecked/twemoji（`@twemoji/parser` + `@twemoji/svg`）のSVGをセルフホストして統一表示する。アセットは `frontend/scripts/copy-twemoji-assets.mjs` が `npm install` の `postinstall` で `node_modules/@twemoji/svg` から `frontend/public/twemoji/` へコピーする（git管理外、`.gitignore`）。
+
+- `lib/twemoji.tsx`: `@twemoji/parser` を `buildUrl: (codepoints) => "/twemoji/${codepoints}.svg"` でラップし、テキスト中のUnicode絵文字を検出してセルフホストURLを返す。
+- `components/common/TwemojiEmoji`: 単一の絵文字文字列を `<img>` へ変換する（絵文字と判定できなければ元の文字列のままフォールバック）。ナビアイコン・バッジ・通知アイコン等で使う。
+- `components/common/TwemojiText`: 絵文字混在テキスト（`"💬 返信"` のようなラベル）のUnicode絵文字部分だけを変換する。`ActionsMenu` の項目ラベルはここを通す。
+- `components/note/EmojiText`: カスタム絵文字（`:shortcode:`）を`emojis`マップで画像化した残りのプレーンテキスト部分にも、上記と同じUnicode絵文字変換をかける（本文・表示名共通）。
+
+絵文字部分がDOMの`textContent`に含まれなくなる（`<img alt="...">` になる）ため、テストや実装でテキスト内容から絵文字混在ラベルを判定する場合は `textContent` ではなく `getByRole` のaccessible name（role + name）ベースで判定すること。

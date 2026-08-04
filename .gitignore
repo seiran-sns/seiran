@@ -13,6 +13,9 @@ config/
 frontend/node_modules/
 frontend/dist/
 
+# node_modules由来の生成物（postinstallでコピーされるtwemoji SVGアセット）
+frontend/public/twemoji/
+
 # エディタ・OS メタデータ
 .DS_Store
 .idea/

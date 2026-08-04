@@ -5,6 +5,7 @@ import { isSupportedLanguage } from "../../i18n";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
 import { EmojiAnnotationIndex, loadEmojiAnnotationIndex } from "../../lib/emojiAnnotations";
 import { allUnicodeEmojis, unicodeEmojiGroups } from "../../lib/emojiData";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./EmojiPickerPanel.module.css";
 
 type Tab = "frequent" | "unicode" | "custom";
@@ -116,7 +117,7 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
         {item.imageUrl ? (
           <img className={styles.itemImg} src={item.imageUrl} alt={item.label} loading="lazy" />
         ) : (
-          item.content
+          <TwemojiEmoji emoji={item.content} className={styles.itemImg} />
         )}
       </button>
     );

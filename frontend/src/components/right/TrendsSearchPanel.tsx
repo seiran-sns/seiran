@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import panel from "../common/Panel.module.css";
 import styles from "./RightPanels.module.css";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 
 /** ホーム右ペイン タブ1: トレンド＆検索（Doc5 §2.1）。 */
 export default function TrendsSearchPanel() {
@@ -30,7 +31,7 @@ export default function TrendsSearchPanel() {
 
       <div className={panel.rightHeader}>{t("search:trendsSearchPanel.trendsHeader")}</div>
       <div className={panel.placeholder}>
-        <span className={panel.placeholderIcon}>📈</span>
+        <TwemojiEmoji emoji="📈" className={panel.placeholderIcon} />
         {t("search:trendsSearchPanel.comingSoon")}
         <br />
         {t("search:trendsSearchPanel.comingSoonDetail")}

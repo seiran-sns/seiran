@@ -14,6 +14,7 @@ import { AdminTopic, canAccessAdminPage, getAdminTopics } from "../lib/roles";
 import { useSwipe } from "../hooks/useSwipe";
 import panel from "../components/common/Panel.module.css";
 import styles from "./Admin.module.css";
+import TwemojiEmoji from "../components/common/TwemojiEmoji";
 
 // タブの並び順・内容。#179: ロールが持つトピック権限（getAdminTopics）に応じて
 // 表示するタブを絞り込む（権限のないトピックはタブごと非表示になる）。
@@ -82,7 +83,7 @@ export default function AdminPage() {
 
   const right = (
     <div className={panel.placeholder}>
-      <span className={panel.placeholderIcon}>🛡️</span>
+      <TwemojiEmoji emoji="🛡️" className={panel.placeholderIcon} />
       {t("admin:adminPage.rightPanelDescription")}
     </div>
   );

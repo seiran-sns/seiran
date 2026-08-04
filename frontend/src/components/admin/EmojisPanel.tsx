@@ -4,6 +4,7 @@ import { api, CustomEmoji, DriveFile, EmojiImportJob, RemoteEmoji, getErrorMessa
 import { mediaUrl } from "../../utils/mediaProxy";
 import EmojiImportDialog from "./EmojiImportDialog";
 import panel from "../common/Panel.module.css";
+import TwemojiText from "../common/TwemojiText";
 import styles from "../../pages/Admin.module.css";
 
 type EmojiTab = "local" | "remote";
@@ -360,8 +361,8 @@ export default function EmojisPanel() {
                     </div>
                   ) : (
                     <>
-                      {em.tags.length > 0 && <div className={styles.subText}>🏷 {em.tags.join(" / ")}</div>}
-                      {em.license && <div className={styles.subText}>📄 {em.license}</div>}
+                      {em.tags.length > 0 && <div className={styles.subText}><TwemojiText text={`🏷 ${em.tags.join(" / ")}`} /></div>}
+                      {em.license && <div className={styles.subText}><TwemojiText text={`📄 ${em.license}`} /></div>}
                     </>
                   )}
                 </div>
@@ -403,8 +404,8 @@ export default function EmojisPanel() {
                   <div className={styles.grow}>
                     <div className={styles.primaryText}>:{em.shortcode}:</div>
                     <div className={styles.subText}>{em.domain}</div>
-                    {em.tags.length > 0 && <div className={styles.subText}>🏷 {em.tags.join(" / ")}</div>}
-                    {em.license && <div className={styles.subText}>📄 {em.license}</div>}
+                    {em.tags.length > 0 && <div className={styles.subText}><TwemojiText text={`🏷 ${em.tags.join(" / ")}`} /></div>}
+                    {em.license && <div className={styles.subText}><TwemojiText text={`📄 ${em.license}`} /></div>}
                   </div>
                   <button className={styles.btn} onClick={() => setImportTarget(em)}>
                     {t("admin:emojisPanel.remoteImportButton")}

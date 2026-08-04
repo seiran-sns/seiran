@@ -1,4 +1,5 @@
 import { SHORTCODE_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
+import { renderTextWithTwemoji } from "../../lib/twemoji";
 import { mediaUrl } from "../../utils/mediaProxy";
 import styles from "./EmojiText.module.css";
 
@@ -13,6 +14,8 @@ interface EmojiTextProps {
 /**
  * 本文・表示名中の `:shortcode:` を、`emojis` マップで解決できるものだけ画像に置換する。
  * 解決できないショートコード（マップに無い・単なるコロン記法）はそのままテキスト表示する。
+ * さらに、それ以外のプレーンテキスト部分に含まれるUnicode絵文字もセルフホストのtwemoji SVGへ
+ * 置換する（OS/ブラウザ依存のネイティブグリフでは見た目が揃わないため）。
  * ラップ要素を持たない（呼び出し側の `<span>`/`<p>` 等のスタイルをそのまま活かすため）。
  *
  * 境界条件: 左端は何が接触していても良い（"わこつ:blobcatwave:" 等）。右端だけは
@@ -20,34 +23,38 @@ interface EmojiTextProps {
  * コロン記法を誤って絵文字化しないため）。
  */
 export default function EmojiText({ text, emojis }: EmojiTextProps) {
-  if (!emojis || Object.keys(emojis).length === 0) {
-    return <>{text}</>;
+  const rawParts: React.ReactNode[] = [];
+  if (emojis && Object.keys(emojis).length > 0) {
+    let lastIndex = 0;
+    let key = 0;
+    const re = new RegExp(SHORTCODE_RE);
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(text)) !== null) {
+      const shortcode = match[0];
+      const endIndex = match.index + shortcode.length;
+      const nextChar = text[endIndex];
+      if (nextChar && WORD_CHAR_RE.test(nextChar)) {
+        continue;
+      }
+      const url = emojis[shortcode];
+      if (!url) continue;
+      if (match.index > lastIndex) {
+        rawParts.push(text.slice(lastIndex, match.index));
+      }
+      rawParts.push(
+        <img key={key++} className={styles.emojiImg} src={mediaUrl(url)} alt={shortcode} title={shortcode} loading="lazy" />
+      );
+      lastIndex = endIndex;
+    }
+    if (lastIndex < text.length) {
+      rawParts.push(text.slice(lastIndex));
+    }
+  } else {
+    rawParts.push(text);
   }
 
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let key = 0;
-  const re = new RegExp(SHORTCODE_RE);
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(text)) !== null) {
-    const shortcode = match[0];
-    const endIndex = match.index + shortcode.length;
-    const nextChar = text[endIndex];
-    if (nextChar && WORD_CHAR_RE.test(nextChar)) {
-      continue;
-    }
-    const url = emojis[shortcode];
-    if (!url) continue;
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-    parts.push(
-      <img key={key++} className={styles.emojiImg} src={mediaUrl(url)} alt={shortcode} title={shortcode} loading="lazy" />
-    );
-    lastIndex = endIndex;
-  }
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
+  const parts = rawParts.flatMap((part, i) =>
+    typeof part === "string" ? renderTextWithTwemoji(part, `p${i}`, styles.emojiImg) : [part]
+  );
   return <>{parts}</>;
 }

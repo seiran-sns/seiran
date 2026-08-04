@@ -10,6 +10,7 @@ import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
 import rp from "../components/right/RightPanels.module.css";
 import styles from "./HomePage.module.css";
+import TwemojiEmoji from "../components/common/TwemojiEmoji";
 
 export default function SearchPage() {
   const { t } = useTranslation();
@@ -124,7 +125,7 @@ export default function SearchPage() {
         <NotificationsPanel />
       ) : (
         <div className={panel.placeholder}>
-          <span className={panel.placeholderIcon}>📈</span>
+          <TwemojiEmoji emoji="📈" className={panel.placeholderIcon} />
           {t("search:searchPage.trendsComingSoon")}
         </div>
       )}

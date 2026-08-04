@@ -28,6 +28,8 @@ import {
   useFollowStatus,
 } from "../stores/followStatusStore";
 import panel from "../components/common/Panel.module.css";
+import TwemojiEmoji from "../components/common/TwemojiEmoji";
+import TwemojiText from "../components/common/TwemojiText";
 import styles from "./ProfilePage.module.css";
 
 const PAGE_SIZE = 20;
@@ -313,9 +315,10 @@ export default function ProfilePage() {
               className={styles.warpBanner}
               onClick={closeBridgeModal}
             >
-              <span className={styles.warpIcon}>
-                {profile.bridge_protocol === "bsky" ? "🦋" : "🌐"}
-              </span>
+              <TwemojiEmoji
+                emoji={profile.bridge_protocol === "bsky" ? "🦋" : "🌐"}
+                className={styles.warpIcon}
+              />
               <span>
                 {t("profile:profilePage.warpBanner.prefix")}
                 <strong>
@@ -384,12 +387,18 @@ export default function ProfilePage() {
                 className={`${styles.badge} ${styles.pairedBadge}`}
                 title={t("profile:profilePage.pairedBadgeTitle")}
               >
-                🀄 {t("profile:profilePage.pairedBadge")}
+                <TwemojiText text={`🀄 ${t("profile:profilePage.pairedBadge")}`} />
               </span>
             )}
-            {profile.at_did && <span className={styles.badge}>🦋 Bluesky</span>}
+            {profile.at_did && (
+              <span className={styles.badge}>
+                <TwemojiText text="🦋 Bluesky" />
+              </span>
+            )}
             {!isLocal && profile.actor_type === "fedi" && (
-              <span className={styles.badge}>🌐 Fediverse</span>
+              <span className={styles.badge}>
+                <TwemojiText text="🌐 Fediverse" />
+              </span>
             )}
           </div>
 

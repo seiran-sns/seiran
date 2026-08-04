@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import TwemojiText from "./TwemojiText";
 import styles from "./ActionsMenu.module.css";
 
 export interface ActionsMenuItem {
@@ -70,7 +71,7 @@ export default function ActionsMenu({
               disabled={item.disabled}
               onClick={() => pick(item)}
             >
-              {item.label}
+              <TwemojiText text={item.label} />
             </button>
           ))}
         </div>

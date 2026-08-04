@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatCount } from "../../lib/format";
 import Modal from "../common/Modal";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import noteCardStyles from "./NoteCard.module.css";
 
 // Unicode 絵文字データセット（unicode-emoji-json、非圧縮で数百KB）を含むため、ピッカーを
@@ -53,7 +54,7 @@ export default function ReactionPicker({
         }}
         title={t("home:reactionPicker.addReactionTitle")}
       >
-        🙂{" "}
+        <TwemojiEmoji emoji="🙂" />{" "}
         {count > 0 && (
           <span className={noteCardStyles.actionCount}>{formatCount(count)}</span>
         )}

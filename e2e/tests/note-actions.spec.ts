@@ -20,11 +20,13 @@ test("自分の投稿をピン留め・解除するとメニュー表示が切�
   await expect(menuTrigger).toBeVisible({ timeout: 15_000 });
 
   // メニューを開いて📌項目のラベルを読み、閉じる（トリガー再クリックでトグル閉じる）。
+  // 絵文字部分はtwemoji画像（<img alt="📌">）としてレンダリングされるためDOMのtextContentには
+  // 含まれない。accessible name（role + name）ベースでどちらのラベルかを判定する。
   async function readPinLabel(): Promise<string> {
     await menuTrigger.click();
-    const label = (await card.getByRole("button", { name: /^📌/ }).textContent()) ?? "";
+    const isUnpin = (await card.getByRole("button", { name: "📌 ピン留め解除" }).count()) > 0;
     await menuTrigger.click();
-    return label.trim();
+    return isUnpin ? "📌 ピン留め解除" : "📌 ピン留め";
   }
 
   await expect.poll(readPinLabel, { timeout: 15_000 }).toBe("📌 ピン留め");

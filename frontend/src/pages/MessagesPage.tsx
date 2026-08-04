@@ -8,6 +8,7 @@ import RecipientPicker, { RecipientChip } from "../components/dm/RecipientPicker
 import { useAuth } from "../contexts/AuthContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
 import panel from "../components/common/Panel.module.css";
+import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import styles from "./MessagesPage.module.css";
 
 /** バックエンドの上限と対応（`validate_dm_text_length`）。 */
@@ -212,7 +213,7 @@ export default function MessagesPage() {
         <div className={styles.textRow}>
           {canShowAttachmentButton && (
             <button type="button" className={styles.attachButton} disabled title={t("dm:messagesPage.attachButtonTitle")}>
-              📎
+              <TwemojiEmoji emoji="📎" />
             </button>
           )}
           <textarea

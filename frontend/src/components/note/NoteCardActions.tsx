@@ -7,6 +7,7 @@ import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
 import ReactionPicker from "./ReactionPicker";
 import ReportModal from "../report/ReportModal";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./NoteCard.module.css";
 
 interface NoteCardActionsProps {
@@ -142,7 +143,7 @@ export default function NoteCardActions({
           onClick={onReply}
           title={t("home:noteCard.replyButton")}
         >
-          💬{" "}
+          <TwemojiEmoji emoji="💬" />{" "}
           {replyCount > 0 && (
             <span className={styles.actionCount}>{formatCount(replyCount)}</span>
           )}
@@ -176,7 +177,7 @@ export default function NoteCardActions({
                 : t("home:noteCard.repostTitle")
           }
         >
-          🔁{" "}
+          <TwemojiEmoji emoji="🔁" />{" "}
           {repostCount > 0 && (
             <span className={styles.actionCount}>{formatCount(repostCount)}</span>
           )}

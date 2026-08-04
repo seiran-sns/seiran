@@ -11,6 +11,7 @@ import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./NoteDetailPage.module.css";
+import TwemojiEmoji from "../components/common/TwemojiEmoji";
 
 export default function NoteDetailPage() {
   const { t } = useTranslation();
@@ -123,7 +124,7 @@ export default function NoteDetailPage() {
 
           {/* 直系リプライ・引用（専用 API 未実装のためプレースホルダ） */}
           <div className={panel.placeholder}>
-            <span className={panel.placeholderIcon}>💬</span>
+            <TwemojiEmoji emoji="💬" className={panel.placeholderIcon} />
             {t("home:noteDetailPage.threadPlaceholder")}
           </div>
         </>
@@ -146,7 +147,7 @@ export default function NoteDetailPage() {
         </div>
       ) : (
         <div className={panel.placeholder}>
-          <span className={panel.placeholderIcon}>😀</span>
+          <TwemojiEmoji emoji="😀" className={panel.placeholderIcon} />
           {t("home:noteDetailPage.noReactions")}
         </div>
       )}

@@ -14,4 +14,28 @@ describe("EmojiText", () => {
     expect(html).toContain('alt=":blobcat:"');
     expect(html).toContain("blobcat.png");
   });
+
+  it("カスタム絵文字マップが無くても本文中のUnicode絵文字はtwemoji画像へ変換する", () => {
+    const html = renderToStaticMarkup(<EmojiText text="やった🎉！" />);
+
+    expect(html).toContain("やった");
+    expect(html).toContain("！");
+    expect(html).toContain('alt="🎉"');
+    expect(html).toContain("/twemoji/1f389.svg");
+  });
+
+  it("カスタム絵文字とUnicode絵文字が混在していても両方展開する", () => {
+    const html = renderToStaticMarkup(
+      <EmojiText text="わこつ:blobcat:🎉" emojis={{ ":blobcat:": "https://example.com/blobcat.png" }} />,
+    );
+
+    expect(html).toContain("わこつ");
+    expect(html).toContain("blobcat.png");
+    expect(html).toContain("/twemoji/1f389.svg");
+  });
+
+  it("Unicode絵文字を含まないプレーンテキストはそのまま表示する", () => {
+    const html = renderToStaticMarkup(<EmojiText text="こんにちは" />);
+    expect(html).toBe("こんにちは");
+  });
 });

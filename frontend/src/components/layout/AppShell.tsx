@@ -7,6 +7,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { refreshComposerDraft } from "../../lib/composerDraft";
 import Modal from "../common/Modal";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import PostComposer from "../note/PostComposer";
 import OpenTargetDialog from "../open/OpenTargetDialog";
 import LeftNav from "./LeftNav";
@@ -74,7 +75,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
         aria-label={t("nav:leftNav.openMenu")}
         title={t("nav:leftNav.openMenu")}
       >
-        <span className={styles.floatingMenuIcon}>☰</span>
+        <TwemojiEmoji emoji="☰" className={styles.floatingMenuIcon} />
         {dmUnreadCount > 0 && (
           <span className={styles.floatingMenuBadge}>
             {dmUnreadCount > 99 ? "99+" : dmUnreadCount}
@@ -90,7 +91,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
         aria-label={t("nav:leftNav.search")}
         title={t("nav:leftNav.search")}
       >
-        <span className={styles.floatingSearchIcon}>🔍</span>
+        <TwemojiEmoji emoji="🔍" className={styles.floatingSearchIcon} />
       </Link>
 
       {/* スマホ表示用フローティング通知ボタン（#75） */}
@@ -101,7 +102,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
         aria-label={t("nav:leftNav.notifications")}
         title={t("nav:leftNav.notifications")}
       >
-        <span className={styles.floatingNotifIcon}>🔔</span>
+        <TwemojiEmoji emoji="🔔" className={styles.floatingNotifIcon} />
       </Link>
 
       {/* スマホ表示用フローティングホームボタン（#180） */}
@@ -112,7 +113,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
         aria-label={t("nav:leftNav.home")}
         title={t("nav:leftNav.home")}
       >
-        <span className={styles.floatingHomeIcon}>🏠</span>
+        <TwemojiEmoji emoji="🏠" className={styles.floatingHomeIcon} />
       </Link>
 
       {/* スマホ表示用フローティング投稿ボタン */}
@@ -122,7 +123,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
         aria-label={t("nav:appShell.composeModalTitle")}
         title={t("nav:appShell.composeModalTitle")}
       >
-        <span className={styles.floatingComposeIcon}>✏️</span>
+        <TwemojiEmoji emoji="✏️" className={styles.floatingComposeIcon} />
       </button>
 
       {/* スマホ表示用モバイルドロワーメニュー */}

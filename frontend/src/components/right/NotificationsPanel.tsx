@@ -14,6 +14,7 @@ import Avatar from "../note/Avatar";
 import EmojiText from "../note/EmojiText";
 import NoteHoverPreview from "../note/NoteHoverPreview";
 import styles from "./NotificationsPanel.module.css";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 
 /** Misskey本家仕様のコロンなしshortcodeキー（`user.emojis`）を、`EmojiText` が期待する
  * `:shortcode:` 形式のキーへ変換する（#186）。 */
@@ -148,7 +149,7 @@ export default function NotificationsPanel() {
   if (items.length === 0) {
     return (
       <div className={panel.placeholder}>
-        <span className={panel.placeholderIcon}>🔔</span>
+        <TwemojiEmoji emoji="🔔" className={panel.placeholderIcon} />
         {t("notifications:notificationsPanel.noNotifications")}
         <br />
         {t("notifications:notificationsPanel.noNotificationsDetail")}
@@ -176,7 +177,7 @@ export default function NotificationsPanel() {
             {iconUrl ? (
               <img className={styles.iconImg} src={mediaUrl(iconUrl)} alt={icon} title={icon} loading="lazy" />
             ) : (
-              <span className={styles.icon}>{icon}</span>
+              <TwemojiEmoji emoji={icon} className={styles.icon} />
             )}
             <Avatar url={n.user?.avatarUrl} name={who} size={20} />
             <span className={styles.text}>
