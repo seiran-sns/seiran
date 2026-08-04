@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import type { ReactionSummary } from "../../api/client";
 import type { ReactionUpdate } from "../../contexts/StreamingContext";
 import { applyReactionUpdate, optimisticSetReaction } from "../../hooks/useNoteCardActions";
+import { followToggleAction } from "./NoteCard";
+
+describe("followToggleAction", () => {
+  it("フォロー承認待ち状態では解除する", () => {
+    expect(followToggleAction("pending")).toBe("delete");
+  });
+
+  it("未フォロー状態ではフォローを作成する", () => {
+    expect(followToggleAction("not_following")).toBe("create");
+  });
+});
 
 describe("optimisticSetReaction", () => {
   it("未リアクション状態から新規リアクションを追加する", () => {
