@@ -30,6 +30,12 @@ import ReactionChips from "./ReactionChips";
 import { useComposer } from "../../contexts/ComposerContext";
 import styles from "./NoteCard.module.css";
 
+export function followToggleAction(
+  status: "not_following" | "pending" | "accepted" | null,
+): "create" | "delete" {
+  return status === null || status === "not_following" ? "create" : "delete";
+}
+
 interface NoteCardProps {
   note: Note;
   /** クリックでポスト詳細へ遷移させるか（デフォルト true）。 */
@@ -230,7 +236,7 @@ function PostContent({
     const current = followStatus ?? "not_following";
 
     try {
-      if (current === "not_following") {
+      if (followToggleAction(current) === "create") {
         const res = await api.follows.create(targetKey);
         setFollowStatusStore(
           targetKey,

@@ -473,9 +473,20 @@ export default function ProfilePage() {
                 </>
               )}
               {followStatus === "pending" && (
-                <span className={styles.pendingBadge}>
-                  {t("profile:profilePage.pendingBadge")}
-                </span>
+                <>
+                  <span className={styles.pendingBadge}>
+                    {t("profile:profilePage.pendingBadge")}
+                  </span>
+                  <button
+                    className={styles.unfollowBtn}
+                    onClick={doUnfollow}
+                    disabled={unfollowing}
+                  >
+                    {unfollowing
+                      ? t("profile:profilePage.unfollowingButton")
+                      : t("profile:profilePage.unfollowButton")}
+                  </button>
+                </>
               )}
               {followStatus === "not_following" && (
                 <button
@@ -508,10 +519,12 @@ export default function ProfilePage() {
                     });
                   } else if (followStatus === "pending") {
                     items.push({
-                      key: "pending",
-                      label: t("profile:profilePage.pendingBadge"),
-                      onClick: () => {},
-                      disabled: true,
+                      key: "cancel-pending-follow",
+                      label: unfollowing
+                        ? t("profile:profilePage.unfollowingButton")
+                        : t("profile:profilePage.unfollowButton"),
+                      onClick: doUnfollow,
+                      disabled: unfollowing,
                     });
                   } else {
                     items.push({
