@@ -1,13 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { StaticRouter } from "react-router-dom/server.mjs";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import RichText from "./RichText";
 
 function render(text: string, emojis?: Record<string, string>) {
   return renderToStaticMarkup(
-    <StaticRouter location="/">
+    <MemoryRouter initialEntries={["/"]}>
       <RichText text={text} emojis={emojis} />
-    </StaticRouter>,
+    </MemoryRouter>,
   );
 }
 

@@ -404,6 +404,18 @@ pub async fn build_note(
         .expect("build_notes は入力1件に対し出力1件を返す")
 }
 
+/// `notifications.type`（seiran内部の語彙）を Misskey 本家 API の `notificationTypes`
+/// （`packages/backend/src/types.ts`）へ変換する。値が異なるのは `repost` → `renote`
+/// のみ（Misskey は「リポスト」を「リノート」と呼ぶ）。他の種別は綴りが一致している。
+/// 未知の値をそのまま通すと `Notification` の `oneOf` スキーマに一致せず、Misskey
+/// 互換クライアント（Aria等）が種別を判別できず「不明」表示になる。
+fn to_misskey_notification_type(kind: &str) -> String {
+    match kind {
+        "repost" => "renote".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// 通知一覧（`POST /api/i/notifications`）を Misskey 形式へ変換する。
 /// `recipient_actor_id` は通知の宛先本人（ノートを包む際の `myReaction` 等の視点に使う）。
 pub async fn build_notifications(
@@ -463,38 +475,33 @@ pub async fn build_notifications(
         .collect()
     };
 
-    // "repost" 通知の note_id は本文を持たないリポストラッパー投稿自体を指す。ラッパーの
-    // 可視性（Fedi受信時は Followers 限定になりうる）を先にチェックすると、リポスト元が
-    // public でも通知者を未フォローの受信者には note が丸ごと握りつぶされてしまうため、
-    // 可視性チェックなしでラッパーの `repost_of_post_id` を解決し、実際に表示すべき
-    // リポスト元投稿の方へ可視性チェックをかける。
-    let repost_wrapper_ids: Vec<i64> = rows
+    // "repost"（Misskey API では "renote"）通知の note_id は、本文を持たないリポストラッパー
+    // 投稿自体を指す。Misskey本家（`NotificationEntityService#packInternal`）はこのラッパーを
+    // 素朴に note pack するだけで、リポスト元の埋め込み（`note.renote`）は通常のノートpack処理
+    // （このファイル内 `embed_renotes`、SQLで可視性チェック済み）に任せている。ここでも同様に
+    // ラッパー投稿自体には独自の可視性チェックをかけない（Fedi受信時はFollowers限定になりうるが、
+    // 通知は既に受信者向けに絞られたエントリであり、ラッパーの可視性で note 全体を握りつぶすと
+    // リポスト元が public でも `note`/`note.renote` の入れ子構造ごと壊れ、Misskey互換クライアント
+    // （Aria等）がRenoteとして描画できず「不明」表示になる）。
+    let repost_wrapper_ids: HashSet<i64> = rows
         .iter()
         .filter(|r| r.kind == "repost")
         .filter_map(|r| r.note_id)
         .collect();
-    let mut resolved_ids: HashMap<i64, i64> = HashMap::new();
-    for wrapper_id in repost_wrapper_ids {
-        if let Ok(Some(wrapper)) = state.posts.find_by_id(wrapper_id).await {
-            if let Some(orig_id) = wrapper.repost_of_post_id {
-                resolved_ids.insert(wrapper_id, orig_id);
-            }
-        }
-    }
 
     // note_id は重複がありうる（同じ投稿への複数リアクション等）ため、一意な ID ごとに1回だけ取得する。
-    let note_ids: HashSet<i64> = rows
-        .iter()
-        .filter_map(|r| r.note_id)
-        .map(|id| resolved_ids.get(&id).copied().unwrap_or(id))
-        .collect();
+    let note_ids: HashSet<i64> = rows.iter().filter_map(|r| r.note_id).collect();
     let mut notes: HashMap<i64, MisskeyNote> = HashMap::new();
     for note_id in note_ids {
-        if let Ok(Some(post)) = state
-            .posts
-            .find_by_id_for_viewer(note_id, Some(recipient_actor_id))
-            .await
-        {
+        let post = if repost_wrapper_ids.contains(&note_id) {
+            state.posts.find_by_id(note_id).await
+        } else {
+            state
+                .posts
+                .find_by_id_for_viewer(note_id, Some(recipient_actor_id))
+                .await
+        };
+        if let Ok(Some(post)) = post {
             notes.insert(
                 note_id,
                 build_note(state, post, Some(recipient_actor_id)).await,
@@ -504,10 +511,7 @@ pub async fn build_notifications(
 
     rows.into_iter()
         .map(|r| {
-            let mut note = r
-                .note_id
-                .map(|id| resolved_ids.get(&id).copied().unwrap_or(id))
-                .and_then(|id| notes.get(&id).cloned());
+            let mut note = r.note_id.and_then(|id| notes.get(&id).cloned());
             // ノート単位で共有キャッシュした `reactionEmojis` は投稿の「現在の」リアクション
             // 集計にすぎない。`reactions` は1人1投稿1リアクションのため、通知発生後に
             // 同じアクターが別の絵文字へ切り替えると過去の行は上書きされて消え、共有キャッシュ
@@ -528,7 +532,7 @@ pub async fn build_notifications(
             MisskeyNotification {
                 id: r.id.to_string(),
                 created_at: r.created_at.to_rfc3339(),
-                kind: r.kind,
+                kind: to_misskey_notification_type(&r.kind),
                 user_id: r.notifier_actor_id.map(|id| id.to_string()),
                 user: r
                     .notifier_actor_id
@@ -660,5 +664,20 @@ mod tests {
             note.url.as_deref(),
             Some("https://bsky.app/profile/did:plc:abc123/post/xyz")
         );
+    }
+
+    #[test]
+    fn notification_type_repost_maps_to_misskey_renote() {
+        // Misskey本家の notificationTypes（packages/backend/src/types.ts）に "repost" は
+        // 存在せず "renote" が正式名称。ここがズレるとMisskey互換クライアントが種別を
+        // 判別できず「不明」表示になる（実機で確認済みの回帰）。
+        assert_eq!(to_misskey_notification_type("repost"), "renote");
+    }
+
+    #[test]
+    fn notification_type_other_kinds_pass_through_unchanged() {
+        for kind in ["reaction", "follow", "followRequestAccepted", "mention", "reply", "quote"] {
+            assert_eq!(to_misskey_notification_type(kind), kind);
+        }
     }
 }

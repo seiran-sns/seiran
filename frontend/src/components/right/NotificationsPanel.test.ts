@@ -37,16 +37,16 @@ describe("describeNotification（#61: カスタム絵文字リアクション通
 });
 
 describe("resolveTargetNoteId（リポスト通知のダイジェスト対象は元投稿にする）", () => {
-  it("repost通知はリポストラッパー自身ではなく note.renote.id を返す", () => {
+  it("renote通知（Misskey本家仕様のリポスト種別名）はリポストラッパー自身ではなく note.renote.id を返す", () => {
     const n = makeReactionNotification({
-      type: "repost",
+      type: "renote",
       note: { id: "999", renote: { id: "42" } },
     });
     expect(resolveTargetNoteId(n)).toBe("42");
   });
 
-  it("repost通知でも renote が埋め込まれていなければラッパー自身の id にフォールバックする", () => {
-    const n = makeReactionNotification({ type: "repost", note: { id: "999" } });
+  it("renote通知でも renote が埋め込まれていなければラッパー自身の id にフォールバックする", () => {
+    const n = makeReactionNotification({ type: "renote", note: { id: "999" } });
     expect(resolveTargetNoteId(n)).toBe("999");
   });
 

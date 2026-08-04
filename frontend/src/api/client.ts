@@ -731,7 +731,9 @@ export interface NotificationUser {
 export interface NotificationItem {
   id: string;
   createdAt: string;
-  type: string; // "reaction" | "follow" | "followRequestAccepted" | "mention" | "reply" | "repost" | "quote"
+  // Misskey本家の notificationTypes（packages/backend/src/types.ts）準拠。
+  // seiran内部では「リポスト」と呼ぶ種別もAPI上は "renote" で返す（バックエンド convert.rs で変換）。
+  type: string; // "reaction" | "follow" | "followRequestAccepted" | "mention" | "reply" | "renote" | "quote"
   userId?: string;
   user?: NotificationUser;
   /** `type === "reaction"` の場合のみ。カスタム絵文字は `:shortcode:` 形式。 */
@@ -741,10 +743,10 @@ export interface NotificationItem {
    * 入っている場合のみ画像表示する（Unicode絵文字は入らない）。キーは Misskey
    * 本家仕様に合わせコロンなし shortcode（`reaction` はコロン付き `:shortcode:`
    * 形式のため、参照時は先頭末尾の ':' を除いて引く必要がある）。
-   * `type` が `"mention"` / `"reaction"` / `"reply"` / `"repost"` / `"quote"` の場合は
+   * `type` が `"mention"` / `"reaction"` / `"reply"` / `"renote"` / `"quote"` の場合は
    * `id` があれば該当ポストへのリンクに使う。
    */
-  /** `type === "repost"` の場合、この note はリポストラッパー投稿（本文なし）自体であり、
+  /** `type === "renote"` の場合、この note はリポストラッパー投稿（本文なし）自体であり、
    * リポスト元の実体投稿が `renote` に埋め込まれる（`build_notes`/`embed_renotes`）。 */
   note?: { id?: string; reactionEmojis?: Record<string, string>; renote?: { id?: string } };
 }

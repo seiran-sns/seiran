@@ -25,15 +25,16 @@ function colonizeEmojiKeys(emojis?: Record<string, string>): Record<string, stri
 
 const PAGE_SIZE = 20;
 
-/** ポストへのリンクを持つ通知種別（通知文全体を対象ポストへの遷移領域にする）。 */
-const NOTE_LINKED_TYPES = new Set(["reaction", "mention", "reply", "repost", "quote"]);
+/** ポストへのリンクを持つ通知種別（通知文全体を対象ポストへの遷移領域にする）。
+ * `renote` は Misskey 本家の呼称（seiran内部では「リポスト」と呼ぶ処理と同じもの）。 */
+const NOTE_LINKED_TYPES = new Set(["reaction", "mention", "reply", "renote", "quote"]);
 
 /** 通知のダイジェスト表示・遷移先とすべきポストIDを求める。
- * "repost" 通知の `note` は本文を持たないリポストラッパー投稿自体を指すため、
+ * "renote"（リポスト）通知の `note` は本文を持たないリポストラッパー投稿自体を指すため、
  * リポスト元の実体投稿（`note.renote`、`build_notes`/`embed_renotes` が埋め込む）を優先する。 */
 export function resolveTargetNoteId(n: NotificationItem): string | undefined {
   if (!NOTE_LINKED_TYPES.has(n.type)) return undefined;
-  const targetNote = n.type === "repost" ? (n.note?.renote ?? n.note) : n.note;
+  const targetNote = n.type === "renote" ? (n.note?.renote ?? n.note) : n.note;
   return targetNote?.id;
 }
 
@@ -69,7 +70,7 @@ export function describeNotification(
       return { icon: "📣", i18nKey: "notifications:notificationsPanel.mentionText", who, whoEmojis, handleSuffix };
     case "reply":
       return { icon: "💬", i18nKey: "notifications:notificationsPanel.replyText", who, whoEmojis, handleSuffix };
-    case "repost":
+    case "renote":
       return { icon: "🔁", i18nKey: "notifications:notificationsPanel.repostText", who, whoEmojis, handleSuffix };
     case "quote":
       return { icon: "❝", i18nKey: "notifications:notificationsPanel.quoteText", who, whoEmojis, handleSuffix };

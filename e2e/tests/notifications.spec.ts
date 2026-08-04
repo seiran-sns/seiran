@@ -82,7 +82,8 @@ test("他ユーザーによるリポストと引用が通知される（#198）"
   });
   expect(notifsRes.ok(), await notifsRes.text()).toBeTruthy();
   const notifs = (await notifsRes.json()) as Array<{ type: string; user?: { username: string } }>;
-  expect(notifs.some((n) => n.type === "repost" && n.user?.username === sharer.username)).toBeTruthy();
+  // "renote" はMisskey本家API仕様での呼称（seiran内部では「リポスト」と呼ぶ種別と同じもの）。
+  expect(notifs.some((n) => n.type === "renote" && n.user?.username === sharer.username)).toBeTruthy();
   expect(notifs.some((n) => n.type === "quote" && n.user?.username === sharer.username)).toBeTruthy();
 });
 
