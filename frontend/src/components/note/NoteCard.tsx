@@ -79,7 +79,9 @@ function QuoteCard({ note }: { note: Note }) {
 
       {note.contentWarning && (
         <div className={styles.quoteContentWarning}>
-          <span>⚠️ {note.contentWarning}</span>
+          <span>
+            ⚠️ <EmojiText text={note.contentWarning} emojis={note.emojis} />
+          </span>
           <button
             type="button"
             onClick={() => setShowContent((shown) => !shown)}
@@ -369,7 +371,9 @@ function PostContent({
 
       {note.contentWarning && (
         <div className={styles.contentWarningWrap}>
-          <p className={styles.contentWarningText}>⚠️ {note.contentWarning}</p>
+          <p className={styles.contentWarningText}>
+            ⚠️ <EmojiText text={note.contentWarning} emojis={note.emojis} />
+          </p>
           <button
             className={styles.contentWarningToggle}
             onClick={(e) => {

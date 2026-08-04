@@ -17,6 +17,7 @@
 
 ## 完了済みフェーズ（概要）
 
+- [x] **CWガイド文のカスタム絵文字展開（#201）** — 通常投稿カード・引用カードのCW警告文中にある`:shortcode:`を、投稿の絵文字マップで画像へ展開する。
 - [x] **MitraのURI形式Follow承認に対応（#200）** — `Accept.object` が埋め込みオブジェクトではなくFollow ActivityのURI文字列でも、送信元・送信先actor ID入りのActivity IDから対象関係を復元し、承認actorを検証してフォロー待機状態を解消する。
 
 - [x] **統一通報機能（#107）** — ローカル・Fedi・Bskyの投稿/ユーザー通報、管理台帳・内部コメント・対処、ActivityPub Flag / Bluesky Moderation Service転送。
