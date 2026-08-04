@@ -1,6 +1,20 @@
 import { expect, test } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 
+test("モバイルでも投稿エディタの文字サイズを16px以上に保つ", async ({
+  page,
+  request,
+}) => {
+  const author = await registerUserViaApi(request, "e2ecomposerzoom");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedAuth(page, author.token);
+  await page.goto("/");
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await expect(editor).toBeVisible();
+  await expect(editor).toHaveCSS("font-size", "16px");
+});
+
 test("投稿本文のメンション候補をキーボードで選択し既知IDとして表示できる", async ({ page, request }) => {
   const author = await registerUserViaApi(request, "e2ecomposer");
   const target = await registerUserViaApi(request, "e2ecomposertarget");
