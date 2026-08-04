@@ -9,7 +9,9 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 7px 10px;
-  font-size: 0.9rem;
+  /* iOS Safari はフォーカス対象が16px未満だとページを自動拡大する。
+     rem/root設定に左右されず、入力欄自身で下限を保証する。 */
+  font-size: 16px;
   color: var(--text);
   background: var(--bg);
 }

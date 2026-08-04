@@ -1,6 +1,6 @@
 # 開発ロードマップ
 
-- [x] **iPhoneの投稿フォーム自動ズーム防止（#208）** `ComposerEditor`の実入力文字サイズを16pxに固定し、iOS Safariのフォーカス時自動拡大を防止。
+- [x] **iPhoneのフォーム自動ズーム防止（#208）** `ComposerEditor`をはじめ、絵文字ピッカー検索欄・認証フォーム・DM・設定画面・管理画面など全ての`input`/`textarea`/`select`の実入力文字サイズを16pxに固定し、iOS Safariのフォーカス時自動拡大を防止。
 
 - [x] **Blueskyリポスト・引用通知（#206）** Jetstreamで `app.bsky.feed.repost` を購読し、ローカル投稿へのリポストを通知する。取り込み対象のBsky投稿がローカル投稿を引用した場合も引用通知を生成する。詳細: `docs/protocols.md` 8節
 
