@@ -159,8 +159,8 @@ pub async fn unfollow_target(
                 format!("https://{}/users/{}", state.local_domain, local_username);
             let actor_key_id = format!("{}#main-key", local_actor_uri);
             let follow_id = format!(
-                "https://{}/activities/follow/{}",
-                state.local_domain, target_actor.id
+                "https://{}/activities/follow/{}-{}",
+                state.local_domain, local_actor_id, target_actor.id
             );
             let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
 
@@ -472,8 +472,8 @@ async fn follow_fedi(
     let local_actor_uri = format!("https://{}/users/{}", state.local_domain, local_username);
     let actor_key_id = format!("{}#main-key", local_actor_uri);
     let follow_id = format!(
-        "https://{}/activities/follow/{}",
-        state.local_domain, remote_actor_id
+        "https://{}/activities/follow/{}-{}",
+        state.local_domain, local_actor_id, remote_actor_id
     );
     let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
 

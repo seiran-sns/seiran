@@ -17,6 +17,8 @@
 
 ## 完了済みフェーズ（概要）
 
+- [x] **MitraのURI形式Follow承認に対応（#200）** — `Accept.object` が埋め込みオブジェクトではなくFollow ActivityのURI文字列でも、送信元・送信先actor ID入りのActivity IDから対象関係を復元し、承認actorを検証してフォロー待機状態を解消する。
+
 - [x] **統一通報機能（#107）** — ローカル・Fedi・Bskyの投稿/ユーザー通報、管理台帳・内部コメント・対処、ActivityPub Flag / Bluesky Moderation Service転送。
 - [x] **国際化の言語追加（#138）** — 日本語・英語に加えて中国語・韓国語・スペイン語・ドイツ語・フランス語へ対応。フロントエンドの日本語ハードコードを翻訳キーへ移し、全言語のキーと補間変数の一致を自動検証する。
 - [x] **リモートFedi actor・投稿の重複修復（#139）** — 破損したUNIQUE indexが同じAP URIのactor・投稿を複数行へ分裂させ、プロフィール/HTLから新着が欠落していたデータを、全外部キーと複合UNIQUEの意味を保ってcanonical IDへ統合し、indexを再構築するマイグレーションを追加。

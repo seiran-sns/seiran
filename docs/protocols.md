@@ -55,7 +55,7 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 |---|---|
 | `Follow` | ローカルアクター実在確認 → **ブロック済みチェック**（こちらが送信者をブロック中ならAcceptを送らずサイレントに無視）→ リモートアクターupsert → `follows` に accepted 状態でINSERT（即時承認）→ 通知 → `Accept` を返送 |
 | `Create`(Note) | リモートアクターupsert → HTML→内部リンクマーカー付きプレーンテキスト変換（6節参照）→ 絵文字tag解析（tag欠落時は同一ドメインの`remote_emojis`から本文shortcodeを補完）→ 可視性判定 → **重複排除**（3節参照）→ `posts` にINSERT → 添付URL保存 → フォロワーへWS配信 |
-| `Accept`(Follow) | `follows.status` を `accepted` に更新、通知 |
+| `Accept`(Follow) | `follows.status` を `accepted` に更新、通知。`object` は埋め込み Follow と URI 文字列の両形式を受理する。送信する Follow ID は `activities/follow/{local_actor_id}-{remote_actor_id}` とし、URI形式の応答でも関係を一意に復元した上で `Accept.actor` と送信先リモートactorの一致を検証する（Mitra互換、#200） |
 | `Block` | リモートアクターupsert → ブロックされた側がブロックした側をフォローしていた関係があれば解消（`blocks` テーブルには書き込まない、通知も生成しない。11節参照） |
 | `Undo` | `object.type` で分岐: `Like`/`EmojiReact`→リアクション削除、`Announce`→リポスト論理削除、`Follow`→フォロー解除、`Block`→ログのみ（DB上の巻き戻し対象なし） |
 | `Delete` | `object`（文字列URIまたは`{"type":"Tombstone","id":...}`）の`ap_object_id`に一致する投稿を論理削除。**送信元アクター（`activity.actor`、HTTP Signature検証済み）が投稿者本人と一致する場合のみ**削除する（なりすまし対策）。一致する投稿が無い場合（アクター自身のDelete等）は無視。リモートアクター自体の退会（`Delete(Actor)`）は未対応 |
