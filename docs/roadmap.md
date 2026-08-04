@@ -136,3 +136,5 @@
 - [x] 設定画面のE2E化（#55、`e2e/tests/settings.spec.ts`）。設定メニューからアカウント設定への遷移とDID表示、現在パスワード誤り時のエラー表示から正しいパスワードでの変更成功・新パスワードでのログインまでの一連、ミュート・ブロック一覧の表示とタブ切り替え・解除操作、表示設定での言語切り替え（英語選択→保存確認→自動に戻す→`/api/auth/me`の`language_preference`検証）を検証
 
 既存の結合テスト基盤: `crates/seiran-api/tests/`（実DB + 実 `seiran_api::router` を使用、`#[ignore]` で通常の `cargo test` から除外し `cargo test -p seiran-api --test <name> -- --ignored` で明示実行）。
+
+- [x] **リポスト・引用通知 (#198)** ローカルユーザーの投稿を他ユーザーがリポスト／引用したとき、`type="repost"` / `type="quote"` の通知を永続化してリアルタイム反映する。自己操作とリモート投稿宛は除外し、通知から新しいリポスト／引用投稿へ遷移できる。詳細: `docs/protocols.md` 8節、`docs/ui_spec.md`

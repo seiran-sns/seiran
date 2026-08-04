@@ -50,6 +50,42 @@ test("他ユーザーのリアクション通知をホバーすると対象ポ�
   await expect(page.getByRole("link", { name: new RegExp(noteText) })).toBeVisible({ timeout: 5_000 });
 });
 
+test("他ユーザーによるリポストと引用が通知される（#198）", async ({ page, request }) => {
+  const author = await registerUserViaApi(request, "e2enotifshareauthor");
+  const sharer = await registerUserViaApi(request, "e2enotifsharer");
+  const createRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${author.token}` },
+    data: { text: `リポスト・引用通知元 ${Date.now()}` },
+  });
+  expect(createRes.ok(), await createRes.text()).toBeTruthy();
+  const original = (await createRes.json()) as { id: string };
+
+  const repostRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${sharer.token}` },
+    data: { renote_id: original.id, deliver_to_fedi: false, deliver_to_bsky: false },
+  });
+  expect(repostRes.ok(), await repostRes.text()).toBeTruthy();
+  const quoteRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${sharer.token}` },
+    data: {
+      text: "引用通知テスト",
+      quote_of_id: original.id,
+      deliver_to_fedi: false,
+      deliver_to_bsky: false,
+    },
+  });
+  expect(quoteRes.ok(), await quoteRes.text()).toBeTruthy();
+
+  const notifsRes = await request.post("/api/i/notifications", {
+    headers: { Authorization: `Bearer ${author.token}` },
+    data: { limit: 20, markAsRead: false },
+  });
+  expect(notifsRes.ok(), await notifsRes.text()).toBeTruthy();
+  const notifs = (await notifsRes.json()) as Array<{ type: string; user?: { username: string } }>;
+  expect(notifs.some((n) => n.type === "repost" && n.user?.username === sharer.username)).toBeTruthy();
+  expect(notifs.some((n) => n.type === "quote" && n.user?.username === sharer.username)).toBeTruthy();
+});
+
 test("カスタム絵文字でリアクションされた通知にカスタム絵文字画像が表示される（#61回帰防止）", async ({ page, request }) => {
   // E2E環境にはS3互換ストレージが無いため、画像アップロードを通すためだけにスタブを起動し、
   // 管理者APIでストレージプロバイダーとして登録する。

@@ -292,6 +292,36 @@ async fn create_repost(
     )
     .await;
 
+    // リポスト通知: ローカルユーザーの投稿が他ユーザーにリポストされた場合に作る。
+    if meta.domain == state.local_domain && meta.actor_id != actor_id {
+        state.stream_hub.publish_event(
+            std::collections::HashSet::from([meta.actor_id]),
+            "repost",
+            serde_json::json!({
+                "postId": post_id.to_string(),
+                "actor": { "username": username, "domain": serde_json::Value::Null }
+            }),
+        );
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = state
+            .notifications
+            .insert(
+                notif_id,
+                meta.actor_id,
+                NotificationKind::Repost,
+                Some(actor_id),
+                Some(post_id),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+        {
+            tracing::error!("[create_repost] notifications INSERT 失敗: {}", e);
+        }
+    }
+
     let avatar_url = state.actors.find_avatar_url(actor_id).await.ok().flatten();
     let mut repost_resp = NoteResponse {
         id: post_id.to_string(),
@@ -550,6 +580,7 @@ async fn create_regular_post(
 
     let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
     let quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
+    let mut quote_notif_recipient = None;
 
     // 引用先とブロック関係にある場合、および公開範囲制約違反の場合は引用を拒否する。
     if let Some(quote_id) = quote_of_id_i64 {
@@ -567,6 +598,9 @@ async fn create_regular_post(
 
                 if let Err(e) = validate_quote_visibility(&meta.visibility, visibility) {
                     return e.into_response();
+                }
+                if meta.domain == state.local_domain && meta.actor_id != actor_id {
+                    quote_notif_recipient = Some(meta.actor_id);
                 }
             }
             Ok(None) => return ApiError::NotFound("QUOTE_TARGET_NOT_FOUND").into_response(),
@@ -671,6 +705,39 @@ async fn create_regular_post(
         {
             tracing::error!(
                 "[create_regular_post] reply notifications INSERT 失敗: {}",
+                e
+            );
+        }
+    }
+
+    // 引用通知: ローカルユーザーの投稿が他ユーザーに引用された場合に作る。
+    if let Some(quoted_actor_id) = quote_notif_recipient {
+        state.stream_hub.publish_event(
+            std::collections::HashSet::from([quoted_actor_id]),
+            "quote",
+            serde_json::json!({
+                "postId": post_id.to_string(),
+                "actor": { "username": username, "domain": serde_json::Value::Null }
+            }),
+        );
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = state
+            .notifications
+            .insert(
+                notif_id,
+                quoted_actor_id,
+                NotificationKind::Quote,
+                Some(actor_id),
+                Some(post_id),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+        {
+            tracing::error!(
+                "[create_regular_post] quote notifications INSERT 失敗: {}",
                 e
             );
         }
