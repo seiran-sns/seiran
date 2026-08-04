@@ -177,6 +177,8 @@ React 18 + Vite + TypeScript（react-router-dom v6）。`frontend/src/` 構成:
 
 **開発用プロキシとVite内部パスの衝突**: `frontend/vite.config.ts` の開発サーバー（ローカル `cargo run` 直接起動時のみ有効）は `GET /@:handle`（プロフィールページ）をバックエンドへ転送するが、単純なプレフィックスマッチだとVite自身の内部モジュール（`/@vite/client`・`/@react-refresh`・`/@fs/...`・`/@id/...`）まで巻き込んでバックエンドへ転送してしまい、Viteクライアントが読み込めず白画面になる（実機確認）。そのためこれらを除外する正規表現（`^`始まりはVite側でregex扱い）を使う。
 
+`AuthContext`のグローバル401処理は、任意APIの401で即時ログアウトせず、通知を抑止した`GET /api/auth/me`を上記と同じリトライ方針で再確認する。認証失効が確定した場合だけログアウトし、複数APIの同時401では再確認を一本化する（#108）。
+
 ## 8.1 OGP (Open Graph) 対応
 
 フロントエンドは SPA のため、素の index.html には投稿・プロフィールごとの `<meta>` が無い。

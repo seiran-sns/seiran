@@ -71,13 +71,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   // トークン失効時（401）にログイン画面へ誘導する共通処理。
-  // ログイン試行自体の401（認証情報間違い）はトークン未保持のため client.ts 側で発火しない。
+  // 任意のAPIの401だけでは即座にログアウトせず、/auth/me でセッション失効を
+  // 再確認する。バックエンド停止中にプロキシ等から一時的な401が返っても、
+  // トークンと表示中のログイン状態を失わないため（#108）。
   useEffect(() => {
+    let active = true;
+    let verificationInFlight = false;
+
     setUnauthorizedHandler(() => {
-      logout();
-      navigate("/login", { replace: true });
+      if (verificationInFlight) return;
+      verificationInFlight = true;
+
+      void resolveSession(() => api.auth.me())
+        .then((result) => {
+          if (!active) return;
+          if (result.kind === "expired") {
+            logout();
+            navigate("/login", { replace: true });
+          } else if (result.kind === "authenticated") {
+            setUser(result.user);
+            applyLanguagePreference(result.user);
+          }
+        })
+        .finally(() => {
+          verificationInFlight = false;
+        });
     });
-    return () => setUnauthorizedHandler(null);
+    return () => {
+      active = false;
+      setUnauthorizedHandler(null);
+    };
   }, [navigate]);
 
   return (
