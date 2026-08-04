@@ -317,7 +317,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 
 Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri` がローカルユーザーの投稿を指す場合にリポスト通知を生成する。取り込み対象のBsky投稿に `embed.record.uri` がある場合は引用先を解決して引用通知を生成する。いずれも通知者をDIDから解決し、自己通知を除外する。リポストレコード／引用投稿の `at://` URIを `notifications.source_uri` に保存して多重受信を重複排除する。
 
-`type="repost"` の `note_id` が指すのは本文を持たないリポストラッパー投稿自体である一方、`type="quote"` の `note_id` は引用コメント本文を持つ実体の投稿である。フロントエンド（`NotificationsPanel.tsx` の `resolveTargetNoteId`）は、この違いを踏まえ `repost` 通知のみ `note.renote`（リポスト元の実体投稿、`build_notes`/`embed_renotes` が埋め込む）をダイジェスト表示・遷移先に使い、`quote` は `note` 自身をそのまま使う。
+`type="repost"` の `notifications.note_id` が指すのは本文を持たないリポストラッパー投稿自体で、その可視性はリポスト元とは独立（Fedi受信時はFollowers限定になりうる）である。`build_notifications`（`handlers::misskey::convert.rs`）はラッパー自体には可視性チェックをかけず、`repost_of_post_id` を可視性チェックなしで解決してから、実際に表示すべきリポスト元投稿の方へ可視性チェック（`find_by_id_for_viewer`）をかけて `note` として返す。こうしないと、ラッパーがFollowers限定な場合に通知者を未フォローの受信者は `note` が丸ごと `null` になり、リポスト元がpublicでもダイジェスト表示・遷移ができなくなる。`type="quote"` の `note_id` は引用コメント本文を持つ実体の投稿なのでこの解決は不要。フロントエンド（`NotificationsPanel.tsx` の `resolveTargetNoteId`）は `repost` 通知について `note.renote` があれば優先し、なければ `note` 自身を使う（バックエンドが既に実体投稿を返すため通常は後者）。
 
 ## 9. ダイレクトメッセージ
 

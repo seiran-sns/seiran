@@ -463,8 +463,31 @@ pub async fn build_notifications(
         .collect()
     };
 
+    // "repost" 通知の note_id は本文を持たないリポストラッパー投稿自体を指す。ラッパーの
+    // 可視性（Fedi受信時は Followers 限定になりうる）を先にチェックすると、リポスト元が
+    // public でも通知者を未フォローの受信者には note が丸ごと握りつぶされてしまうため、
+    // 可視性チェックなしでラッパーの `repost_of_post_id` を解決し、実際に表示すべき
+    // リポスト元投稿の方へ可視性チェックをかける。
+    let repost_wrapper_ids: Vec<i64> = rows
+        .iter()
+        .filter(|r| r.kind == "repost")
+        .filter_map(|r| r.note_id)
+        .collect();
+    let mut resolved_ids: HashMap<i64, i64> = HashMap::new();
+    for wrapper_id in repost_wrapper_ids {
+        if let Ok(Some(wrapper)) = state.posts.find_by_id(wrapper_id).await {
+            if let Some(orig_id) = wrapper.repost_of_post_id {
+                resolved_ids.insert(wrapper_id, orig_id);
+            }
+        }
+    }
+
     // note_id は重複がありうる（同じ投稿への複数リアクション等）ため、一意な ID ごとに1回だけ取得する。
-    let note_ids: HashSet<i64> = rows.iter().filter_map(|r| r.note_id).collect();
+    let note_ids: HashSet<i64> = rows
+        .iter()
+        .filter_map(|r| r.note_id)
+        .map(|id| resolved_ids.get(&id).copied().unwrap_or(id))
+        .collect();
     let mut notes: HashMap<i64, MisskeyNote> = HashMap::new();
     for note_id in note_ids {
         if let Ok(Some(post)) = state
@@ -481,7 +504,10 @@ pub async fn build_notifications(
 
     rows.into_iter()
         .map(|r| {
-            let mut note = r.note_id.and_then(|id| notes.get(&id).cloned());
+            let mut note = r
+                .note_id
+                .map(|id| resolved_ids.get(&id).copied().unwrap_or(id))
+                .and_then(|id| notes.get(&id).cloned());
             // ノート単位で共有キャッシュした `reactionEmojis` は投稿の「現在の」リアクション
             // 集計にすぎない。`reactions` は1人1投稿1リアクションのため、通知発生後に
             // 同じアクターが別の絵文字へ切り替えると過去の行は上書きされて消え、共有キャッシュ
