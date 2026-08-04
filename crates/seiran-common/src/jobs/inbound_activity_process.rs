@@ -1603,38 +1603,72 @@ pub fn ap_content_to_markdown_body(
 
 // Accept(Follow) を受け取り follows.status を accepted に更新する
 async fn handle_accept(activity: serde_json::Value, inbox: &InboxContext) -> Result<(), String> {
-    // object が {type:"Follow", actor:"...", object:"..."} 形式のみ対応
     let obj = &activity["object"];
-    if obj["type"].as_str() != Some("Follow") {
-        return Ok(());
-    }
-
-    let local_actor_uri = obj["actor"]
-        .as_str()
-        .ok_or("Accept/Follow: object.actor がありません")?;
     let remote_actor_uri = activity["actor"]
         .as_str()
         .ok_or("Accept: actor がありません")?;
 
-    // ローカルアクターを username から特定
-    let suffix = format!("https://{}/users/", inbox.local_domain);
-    let local_username = local_actor_uri
-        .strip_prefix(&suffix)
-        .ok_or("Accept: object.actor がローカルアクターではありません")?;
+    // Mitra などは Accept.object に Follow オブジェクトではなく、その URI を返す。
+    // URI 形式には送信元・送信先の actor ID を含め、署名主体である Accept.actor と
+    // 送信先が一致することを後段で検証する。
+    let local_actor_id_from_uri = obj
+        .as_str()
+        .and_then(|uri| parse_local_follow_activity_id(uri, &inbox.local_domain));
 
-    let local_actor = inbox
-        .actor_repo
-        .find_by_username_domain(local_username, &inbox.local_domain)
-        .await
-        .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
-        .ok_or_else(|| format!("ローカルアクター '{}' が見つかりません", local_username))?;
+    let local_actor = if let Some((local_actor_id, expected_remote_actor_id)) =
+        local_actor_id_from_uri
+    {
+        let remote_actor = inbox
+            .actor_repo
+            .find_by_ap_uri(remote_actor_uri)
+            .await
+            .map_err(|e| format!("リモートアクター検索エラー: {}", e))?
+            .ok_or_else(|| {
+                format!(
+                    "リモートアクター '{}' が DB に見つかりません",
+                    remote_actor_uri
+                )
+            })?;
+        if remote_actor.id != expected_remote_actor_id {
+            return Err("Accept: actor が Follow Activity の送信先と一致しません".to_string());
+        }
+        inbox
+            .actor_repo
+            .find_by_id(local_actor_id)
+            .await
+            .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
+            .ok_or_else(|| format!("ローカルアクター ID '{}' が見つかりません", local_actor_id))?
+    } else {
+        if obj["type"].as_str() != Some("Follow") {
+            return Ok(());
+        }
+        let local_actor_uri = obj["actor"]
+            .as_str()
+            .ok_or("Accept/Follow: object.actor がありません")?;
+
+        // 埋め込み Follow 形式との後方互換性を維持する。
+        let suffix = format!("https://{}/users/", inbox.local_domain);
+        let local_username = local_actor_uri
+            .strip_prefix(&suffix)
+            .ok_or("Accept: object.actor がローカルアクターではありません")?;
+        inbox
+            .actor_repo
+            .find_by_username_domain(local_username, &inbox.local_domain)
+            .await
+            .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
+            .ok_or_else(|| format!("ローカルアクター '{}' が見つかりません", local_username))?
+    };
     if local_actor.actor_type != "local" {
         return Err(format!(
-            "'{}' はローカルアクターではありません",
-            local_username
+            "actor ID '{}' はローカルアクターではありません",
+            local_actor.id
         ));
     }
     let local_actor_id = local_actor.id;
+    let local_actor_uri = format!(
+        "https://{}/users/{}",
+        inbox.local_domain, local_actor.username
+    );
 
     // リモートアクターを ap_uri から特定
     let remote_actor = inbox
@@ -1697,6 +1731,46 @@ async fn handle_accept(activity: serde_json::Value, inbox: &InboxContext) -> Res
         }
     }
     Ok(())
+}
+
+fn parse_local_follow_activity_id(uri: &str, local_domain: &str) -> Option<(i64, i64)> {
+    let ids = uri.strip_prefix(&format!("https://{}/activities/follow/", local_domain))?;
+    let (local_actor_id, remote_actor_id) = ids.split_once('-')?;
+    Some((local_actor_id.parse().ok()?, remote_actor_id.parse().ok()?))
+}
+
+#[cfg(test)]
+mod follow_accept_tests {
+    use super::parse_local_follow_activity_id;
+
+    #[test]
+    fn parses_local_and_remote_actor_ids() {
+        assert_eq!(
+            parse_local_follow_activity_id(
+                "https://seiran.example/activities/follow/123-456",
+                "seiran.example",
+            ),
+            Some((123, 456))
+        );
+    }
+
+    #[test]
+    fn rejects_foreign_or_legacy_follow_activity_ids() {
+        assert_eq!(
+            parse_local_follow_activity_id(
+                "https://other.example/activities/follow/123-456",
+                "seiran.example",
+            ),
+            None
+        );
+        assert_eq!(
+            parse_local_follow_activity_id(
+                "https://seiran.example/activities/follow/456",
+                "seiran.example",
+            ),
+            None
+        );
+    }
 }
 
 // Undo(Follow) アクティビティを処理してフォロー解除する

@@ -105,8 +105,8 @@ pub async fn handle(actor_id: i64, username: String, ctx: Arc<JobContext>) -> Re
                 (target.ap_inbox_url.as_deref(), target.ap_uri.as_deref())
             {
                 let follow_id = format!(
-                    "https://{}/activities/follow/{}",
-                    cfg.local_domain, target.id
+                    "https://{}/activities/follow/{}-{}",
+                    cfg.local_domain, actor_id, target.id
                 );
                 let undo_activity = json!({
                     "@context": "https://www.w3.org/ns/activitystreams",
