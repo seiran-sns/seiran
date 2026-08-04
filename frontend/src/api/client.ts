@@ -744,7 +744,9 @@ export interface NotificationItem {
    * `type` が `"mention"` / `"reaction"` / `"reply"` / `"repost"` / `"quote"` の場合は
    * `id` があれば該当ポストへのリンクに使う。
    */
-  note?: { id?: string; reactionEmojis?: Record<string, string> };
+  /** `type === "repost"` の場合、この note はリポストラッパー投稿（本文なし）自体であり、
+   * リポスト元の実体投稿が `renote` に埋め込まれる（`build_notes`/`embed_renotes`）。 */
+  note?: { id?: string; reactionEmojis?: Record<string, string>; renote?: { id?: string } };
 }
 
 // =====================================================================

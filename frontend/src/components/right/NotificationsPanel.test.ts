@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NotificationItem } from "../../api/client";
-import { describeNotification } from "./NotificationsPanel";
+import { describeNotification, resolveTargetNoteId } from "./NotificationsPanel";
 
 function makeReactionNotification(overrides: Partial<NotificationItem> = {}): NotificationItem {
   return {
@@ -33,5 +33,33 @@ describe("describeNotification（#61: カスタム絵文字リアクション通
     const result = describeNotification(n);
     expect(result.icon).toBe("🎉");
     expect(result.iconUrl).toBeUndefined();
+  });
+});
+
+describe("resolveTargetNoteId（リポスト通知のダイジェスト対象は元投稿にする）", () => {
+  it("repost通知はリポストラッパー自身ではなく note.renote.id を返す", () => {
+    const n = makeReactionNotification({
+      type: "repost",
+      note: { id: "999", renote: { id: "42" } },
+    });
+    expect(resolveTargetNoteId(n)).toBe("42");
+  });
+
+  it("repost通知でも renote が埋め込まれていなければラッパー自身の id にフォールバックする", () => {
+    const n = makeReactionNotification({ type: "repost", note: { id: "999" } });
+    expect(resolveTargetNoteId(n)).toBe("999");
+  });
+
+  it("quote通知は引用投稿自体（note.id）を対象にする（renoteは見ない）", () => {
+    const n = makeReactionNotification({
+      type: "quote",
+      note: { id: "999", renote: { id: "42" } },
+    });
+    expect(resolveTargetNoteId(n)).toBe("999");
+  });
+
+  it("followのようにポストへのリンクを持たない通知種別は undefined を返す", () => {
+    const n = makeReactionNotification({ type: "follow", note: { id: "999" } });
+    expect(resolveTargetNoteId(n)).toBeUndefined();
   });
 });

@@ -317,6 +317,8 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 
 Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri` がローカルユーザーの投稿を指す場合にリポスト通知を生成する。取り込み対象のBsky投稿に `embed.record.uri` がある場合は引用先を解決して引用通知を生成する。いずれも通知者をDIDから解決し、自己通知を除外する。リポストレコード／引用投稿の `at://` URIを `notifications.source_uri` に保存して多重受信を重複排除する。
 
+`type="repost"` の `note_id` が指すのは本文を持たないリポストラッパー投稿自体である一方、`type="quote"` の `note_id` は引用コメント本文を持つ実体の投稿である。フロントエンド（`NotificationsPanel.tsx` の `resolveTargetNoteId`）は、この違いを踏まえ `repost` 通知のみ `note.renote`（リポスト元の実体投稿、`build_notes`/`embed_renotes` が埋め込む）をダイジェスト表示・遷移先に使い、`quote` は `note` 自身をそのまま使う。
+
 ## 9. ダイレクトメッセージ
 
 `visibility='direct'`の投稿をそのまま`posts`に格納する方式でDMを実現する（`docs/database.md`の「ダイレクトメッセージ関連」節も参照）。Misskey APIクライアントも同じ投稿テーブルを読み書きするため、Bsky DMも含めてMisskey互換の投稿・タイムライン取得APIでそのまま扱える。
