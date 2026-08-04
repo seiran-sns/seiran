@@ -65,9 +65,12 @@ function notifyIfUnauthorized(status: number) {
 }
 
 /** レスポンスが失敗（`!res.ok`）であれば `ApiError` を投げる（`request`/`uploadFormData` で共通）。 */
-export async function throwIfError(res: Response): Promise<void> {
+export async function throwIfError(
+  res: Response,
+  notifyUnauthorized = true,
+): Promise<void> {
   if (res.ok) return;
-  notifyIfUnauthorized(res.status);
+  if (notifyUnauthorized) notifyIfUnauthorized(res.status);
   const contentType = res.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
     try {
@@ -105,6 +108,7 @@ async function request<T>(
   path: string,
   body?: unknown,
   signal?: AbortSignal,
+  notifyUnauthorized = true,
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -115,7 +119,7 @@ async function request<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal,
   });
-  await throwIfError(res);
+  await throwIfError(res, notifyUnauthorized);
   return parseJsonBody<T>(res);
 }
 
@@ -830,7 +834,9 @@ export interface MetaResponse {
 
 export const api = {
   openTarget(target: string) {
-    return request<{ path: string; kind: "actor" | "post" }>("POST", "/open", { target });
+    return request<{ path: string; kind: "actor" | "post" }>("POST", "/open", {
+      target,
+    });
   },
   reports: {
     create(body: {
@@ -910,7 +916,10 @@ export const api = {
       });
     },
     me() {
-      return request<User>("GET", "/auth/me");
+      // /auth/me は AuthContext がリトライ結果を見て認証失効を判断する。
+      // ここでグローバル401ハンドラを発火すると、一時的な401でも確認前に
+      // トークンを破棄してしまうため通知を抑止する（#108）。
+      return request<User>("GET", "/auth/me", undefined, undefined, false);
     },
     requestPasswordReset(email: string) {
       return request<{ message: string }>(

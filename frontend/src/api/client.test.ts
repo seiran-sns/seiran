@@ -1,6 +1,15 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../i18n";
-import { ApiError, cursorParams, getErrorMessage, noteFromStream, parseJsonBody, throwIfError } from "./client";
+import {
+  ApiError,
+  api,
+  cursorParams,
+  getErrorMessage,
+  noteFromStream,
+  parseJsonBody,
+  setUnauthorizedHandler,
+  throwIfError,
+} from "./client";
 
 // メッセージ文言はロケール依存のため、テストでは言語を固定してから検証する。
 beforeAll(async () => {
@@ -15,7 +24,9 @@ describe("getErrorMessage", () => {
 
   it("未知のエラーコード・5xxはSERVER_UNAVAILABLEにフォールバックする", () => {
     const err = new ApiError("SOME_UNKNOWN_CODE", 503);
-    expect(getErrorMessage(err)).toBe("サーバーが応答していません。しばらく待ってから再試行してください");
+    expect(getErrorMessage(err)).toBe(
+      "サーバーが応答していません。しばらく待ってから再試行してください",
+    );
   });
 
   it("未知のエラーコード・非5xxはUNKNOWN_WITH_CODEにフォールバックする", () => {
@@ -25,12 +36,14 @@ describe("getErrorMessage", () => {
 
   it("TypeError（fetch失敗・オフライン等）はNETWORK_ERRORになる", () => {
     expect(getErrorMessage(new TypeError("Failed to fetch"))).toBe(
-      "サーバーに接続できません。ネットワーク接続を確認してください"
+      "サーバーに接続できません。ネットワーク接続を確認してください",
     );
   });
 
   it("ApiError/TypeError以外のErrorはmessageをそのまま返す", () => {
-    expect(getErrorMessage(new Error("何か予期せぬ例外"))).toBe("何か予期せぬ例外");
+    expect(getErrorMessage(new Error("何か予期せぬ例外"))).toBe(
+      "何か予期せぬ例外",
+    );
   });
 
   it("Errorですらない値はUNKNOWNになる", () => {
@@ -77,28 +90,72 @@ describe("parseJsonBody", () => {
   });
 
   it("JSON文字列ボディはパースして返す", async () => {
-    const res = new Response(JSON.stringify({ ok: true, count: 3 }), { status: 200 });
+    const res = new Response(JSON.stringify({ ok: true, count: 3 }), {
+      status: 200,
+    });
     expect(await parseJsonBody(res)).toEqual({ ok: true, count: 3 });
   });
 });
 
 describe("throwIfError", () => {
+  it("/auth/meの401はグローバル認証失効ハンドラを呼ばない（#108）", async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn().mockReturnValue("token"),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
+      key: vi.fn(),
+      length: 1,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: "UNAUTHORIZED" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(api.auth.me()).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      status: 401,
+    });
+    expect(handler).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+    setUnauthorizedHandler(null);
+  });
   it("res.okがtrueなら何もしない", async () => {
     const res = new Response(null, { status: 200 });
     await expect(throwIfError(res)).resolves.toBeUndefined();
   });
 
   it("JSONエラーボディにcodeがあればApiErrorとしてそれを投げる", async () => {
-    const res = new Response(JSON.stringify({ code: "NOT_FOUND", detail: { id: "1" } }), {
+    const res = new Response(
+      JSON.stringify({ code: "NOT_FOUND", detail: { id: "1" } }),
+      {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      },
+    );
+    await expect(throwIfError(res)).rejects.toMatchObject({
+      code: "NOT_FOUND",
       status: 404,
-      headers: { "content-type": "application/json" },
     });
-    await expect(throwIfError(res)).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
   });
 
   it("非JSONレスポンス（アップロードAPI等のエラー）はUNKNOWN_ERRORになる", async () => {
-    const res = new Response("Internal Server Error", { status: 500, headers: { "content-type": "text/plain" } });
-    await expect(throwIfError(res)).rejects.toMatchObject({ code: "UNKNOWN_ERROR", status: 500 });
+    const res = new Response("Internal Server Error", {
+      status: 500,
+      headers: { "content-type": "text/plain" },
+    });
+    await expect(throwIfError(res)).rejects.toMatchObject({
+      code: "UNKNOWN_ERROR",
+      status: 500,
+    });
   });
 
   it("JSONだがcodeフィールドが無ければUNKNOWN_ERRORになる", async () => {
@@ -106,7 +163,10 @@ describe("throwIfError", () => {
       status: 400,
       headers: { "content-type": "application/json" },
     });
-    await expect(throwIfError(res)).rejects.toMatchObject({ code: "UNKNOWN_ERROR", status: 400 });
+    await expect(throwIfError(res)).rejects.toMatchObject({
+      code: "UNKNOWN_ERROR",
+      status: 400,
+    });
   });
 });
 
@@ -123,7 +183,10 @@ describe("noteFromStream（RawNote正規化）", () => {
     };
     const note = noteFromStream(raw);
     expect(note.contentWarning).toBe("注意書き");
-    expect(note.poll).toEqual({ multiple: false, options: [{ name: "A", votes: 1 }] });
+    expect(note.poll).toEqual({
+      multiple: false,
+      options: [{ name: "A", votes: 1 }],
+    });
   });
 
   it("contentWarning/pollが無ければundefinedのまま", () => {
