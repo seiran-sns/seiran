@@ -74,7 +74,9 @@ export default function NoteHoverPreview({ noteId, children, className }: NoteHo
                   <span className={styles.acctText}>{acct(target)}</span>
                 </span>
               </span>
-              <span className={styles.text}>{target.text}</span>
+              <span className={styles.text}>
+                <EmojiText text={target.text} emojis={target.emojis} />
+              </span>
             </Link>
           )}
         </span>

@@ -9,6 +9,7 @@ import {
 import { useToast } from "../../contexts/ToastContext";
 import { findReportReasonLabel } from "../report/reportReasons";
 import TwemojiEmoji from "../common/TwemojiEmoji";
+import TwemojiText from "../common/TwemojiText";
 import styles from "../../pages/Admin.module.css";
 
 export default function ReportsPanel() {
@@ -111,7 +112,11 @@ export default function ReportsPanel() {
               <div className={styles.subText}>
                 {new Date(r.created_at).toLocaleString()} / {r.status}
               </div>
-              {r.reason_text && <p>{r.reason_text}</p>}
+              {r.reason_text && (
+                <p>
+                  <TwemojiText text={r.reason_text} />
+                </p>
+              )}
               <div className={styles.authStatus}>
                 <a href={`/@${r.subject}`} target="_blank" rel="noreferrer">
                   {t("admin:reports.viewActor")}

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api, DmSession, getErrorMessage, Note } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import Avatar from "../components/note/Avatar";
+import EmojiText from "../components/note/EmojiText";
 import RecipientPicker, { RecipientChip } from "../components/dm/RecipientPicker";
 import { useAuth } from "../contexts/AuthContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
@@ -169,7 +170,9 @@ export default function MessagesPage() {
               <Avatar url={s.peers[0]?.avatarUrl} name={peerLabel(s, t)} size={36} />
               <span className={styles.sessionInfo}>
                 <span className={styles.sessionName}>{peerLabel(s, t)}</span>
-                <span className={styles.sessionPreview}>{s.lastMessage.text}</span>
+                <span className={styles.sessionPreview}>
+                  <EmojiText text={s.lastMessage.text} emojis={s.lastMessage.emojis} />
+                </span>
               </span>
               {s.unread && <span className={styles.unreadDot} />}
             </Link>
@@ -199,7 +202,9 @@ export default function MessagesPage() {
               <div key={m.id} className={`${styles.messageRow} ${isMine ? styles.messageRowMine : ""}`}>
                 {!isMine && <Avatar url={m.user.avatarUrl} name={m.user.displayName || m.user.username} size={28} />}
                 <div className={`${styles.messageBubble} ${isMine ? styles.messageBubbleMine : ""}`}>
-                  <p className={styles.messageText}>{m.text}</p>
+                  <p className={styles.messageText}>
+                    <EmojiText text={m.text} emojis={m.emojis} />
+                  </p>
                   <span className={styles.messageTime}>{new Date(m.createdAt).toLocaleString()}</span>
                 </div>
               </div>

@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { ActorSuggestion, PublicEmoji, api } from "../../api/client";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
 import { SHORTCODE_SOURCE } from "../../lib/richTextPatterns";
+import { findTwemojiMatches } from "../../lib/twemoji";
 import styles from "./ComposerEditor.module.css";
 
 type Candidate =
@@ -138,6 +139,29 @@ function escapeHtml(value: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** プレーンテキスト片中のUnicode絵文字を、カスタム絵文字ショートコードと同じ「編集不可の
+ * atomicノード（`contenteditable="false"` + `data-value`）」としてtwemoji画像へ変換したHTML
+ * にする。`nodeValue`/`restoreSelection`はdata-value属性を持つ要素をそのまま1つの値として
+ * 扱うため、既存のcaret計算ロジックを変えずに絵文字を画像化できる。 */
+function twemojiHtml(text: string, emojiClassName: string): string {
+  const matches = findTwemojiMatches(text);
+  if (matches.length === 0) return escapeHtml(text).replace(/\n/g, "<br>");
+  let html = "";
+  let cursor = 0;
+  for (const m of matches) {
+    const [start, end] = m.indices;
+    if (start > cursor) {
+      html += escapeHtml(text.slice(cursor, start)).replace(/\n/g, "<br>");
+    }
+    html += `<span class="${emojiClassName}" contenteditable="false" data-value="${escapeHtml(m.text)}"><img src="${m.url}" alt="${escapeHtml(m.text)}"></span>`;
+    cursor = end;
+  }
+  if (cursor < text.length) {
+    html += escapeHtml(text.slice(cursor)).replace(/\n/g, "<br>");
+  }
+  return html;
 }
 
 export default function ComposerEditor({
@@ -385,7 +409,7 @@ export default function ComposerEditor({
             : styles.mentionUnknown;
           return `<span class="${className}">${escapeHtml(part)}</span>`;
         }
-        return escapeHtml(part).replace(/\n/g, "<br>");
+        return twemojiHtml(part, styles.emoji);
       })
       .join("") + (value.endsWith("\n") ? '<br data-pad="1">' : "");
 

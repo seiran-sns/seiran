@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { HASHTAG_LINK_TEXT_RE, RICH_TEXT_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
+import { renderTextWithTwemoji } from "../../lib/twemoji";
 import { mediaUrl } from "../../utils/mediaProxy";
 import EmojiContextMenu from "./EmojiContextMenu";
 import styles from "./RichText.module.css";
@@ -131,5 +132,12 @@ export default function RichText({ text, emojis }: RichTextProps) {
   if (lastIndex < text.length) {
     parts.push(text.slice(lastIndex));
   }
-  return <>{parts}</>;
+
+  // 上記トークナイズはリンク・メンション・ハッシュタグ・カスタム絵文字ショートコードのみを
+  // 扱うため、残るプレーンテキスト片に含まれるUnicode絵文字は別途twemoji画像へ変換する
+  // （OS/ブラウザ依存のネイティブグリフでは見た目が揃わないため）。
+  const withTwemoji = parts.flatMap((part, i) =>
+    typeof part === "string" ? renderTextWithTwemoji(part, `rt${i}`, styles.emojiImg) : [part]
+  );
+  return <>{withTwemoji}</>;
 }
