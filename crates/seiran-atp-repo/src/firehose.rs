@@ -35,7 +35,7 @@ use seiran_common::streaming::broadcast_reaction_update;
 use seiran_common::traits::{Job, JobQueue};
 use seiran_common::{StreamHub, generate_snowflake_id};
 
-const JETSTREAM_BASE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like";
+const JETSTREAM_BASE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.feed.repost";
 
 /// `wantedDids` 絞り込みリスト（フォロイー + リストメンバーの Bsky DID 集合）を
 /// 再構築すべきか、受信ループ内で定期ポーリングする間隔。フォロー変更等は
@@ -922,6 +922,31 @@ async fn process_message(
             });
         }
 
+        "app.bsky.feed.repost" => {
+            if commit.operation != "create" {
+                return Ok(());
+            }
+            let Some(record) = commit.record else {
+                return Ok(());
+            };
+            let Some(subject_uri) = record
+                .get("subject")
+                .and_then(|subject| subject.get("uri"))
+                .and_then(|value| value.as_str())
+            else {
+                return Ok(());
+            };
+            let at_uri = format!("at://{}/app.bsky.feed.repost/{}", did, commit.rkey);
+            let pool2 = pool.clone();
+            let http2 = Arc::clone(http);
+            let hub2 = Arc::clone(stream_hub);
+            let subject_uri = subject_uri.to_string();
+            tokio::spawn(async move {
+                handle_inbound_repost_create(&pool2, &http2, &hub2, &did, &at_uri, &subject_uri)
+                    .await;
+            });
+        }
+
         "app.bsky.feed.like" => {
             match commit.operation.as_str() {
                 "create" => {
@@ -1082,6 +1107,47 @@ async fn save_bsky_post(
                 }
             }
 
+            // 引用通知: 引用先がローカルユーザーの投稿なら、フォロー関係にかかわらず通知する。
+            if let Some(quoted_id) = quote_of_post_id {
+                let quoted_local_actor_id: Option<i64> = sqlx::query(
+                    "SELECT p.actor_id FROM posts p JOIN actors a ON a.id = p.actor_id
+                     WHERE p.id = $1 AND a.actor_type = 'local'",
+                )
+                .bind(quoted_id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|row| row.try_get::<i64, _>("actor_id").ok());
+                if let Some(quoted_actor_id) = quoted_local_actor_id.filter(|id| *id != actor_id) {
+                    stream_hub.publish_event(
+                        HashSet::from([quoted_actor_id]),
+                        "quote",
+                        serde_json::json!({
+                            "postId": post_id.to_string(),
+                            "actor": { "username": username, "domain": serde_json::Value::Null, "displayName": display_name },
+                        }),
+                    );
+                    let notif_id = generate_snowflake_id(chrono::Utc::now());
+                    if let Err(e) = PgNotificationRepository::new(pool.clone())
+                        .insert(
+                            notif_id,
+                            quoted_actor_id,
+                            NotificationKind::Quote,
+                            Some(actor_id),
+                            Some(post_id),
+                            None,
+                            None,
+                            Some(at_uri),
+                            None,
+                        )
+                        .await
+                    {
+                        tracing::error!("[Jetstream] quote notifications INSERT 失敗: {}", e);
+                    }
+                }
+            }
+
             // メンション通知: mention_facets の各 did がローカルアクターを指す場合、通知を作る。
             // source_uri は渡さない（1投稿に複数の宛先がありうるため、投稿の at_uri を
             // 共有すると2人目以降が部分UNIQUEインデックスで弾かれてしまう。posts 自体は
@@ -1205,6 +1271,72 @@ async fn save_bsky_post(
             }
         }
         Err(e) => tracing::error!("[Jetstream] DB 保存失敗: {}", e),
+    }
+}
+
+// ─── リポスト通知（app.bsky.feed.repost）───────────────────────────────
+
+/// ローカルユーザーの投稿をBskyユーザーがリポストした場合に通知を作る。
+/// リポスト自体はタイムライン投稿として保存せず、通知内のnoteは対象投稿を参照する。
+async fn handle_inbound_repost_create(
+    pool: &PgPool,
+    http: &reqwest::Client,
+    stream_hub: &StreamHub,
+    did: &str,
+    at_uri: &str,
+    subject_uri: &str,
+) {
+    let target: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT p.id, p.actor_id FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.at_uri = $1 AND a.actor_type = 'local' LIMIT 1",
+    )
+    .bind(subject_uri)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("[Jetstream/Repost] 対象ポスト検索失敗: {}", e);
+        None
+    });
+    let Some((post_id, post_author_id)) = target else {
+        return;
+    };
+
+    let actor_id = match resolve_or_upsert_bsky_actor(pool, http, did).await {
+        Ok(id) if id != post_author_id => id,
+        Ok(_) => return,
+        Err(e) => {
+            tracing::error!("[Jetstream/Repost] reposter アクター解決失敗: {}", e);
+            return;
+        }
+    };
+
+    let actor_repo = PgActorRepository::new(pool.clone());
+    if let Ok(Some(reposter)) = actor_repo.find_by_id(actor_id).await {
+        stream_hub.publish_event(
+            HashSet::from([post_author_id]),
+            "repost",
+            serde_json::json!({
+                "postId": post_id.to_string(),
+                "actor": { "username": reposter.username, "domain": reposter.domain, "displayName": reposter.display_name },
+            }),
+        );
+    }
+    let notif_id = generate_snowflake_id(chrono::Utc::now());
+    if let Err(e) = PgNotificationRepository::new(pool.clone())
+        .insert(
+            notif_id,
+            post_author_id,
+            NotificationKind::Repost,
+            Some(actor_id),
+            Some(post_id),
+            None,
+            None,
+            Some(at_uri),
+            None,
+        )
+        .await
+    {
+        tracing::error!("[Jetstream/Repost] notifications INSERT 失敗: {}", e);
     }
 }
 
@@ -1428,6 +1560,12 @@ pub(crate) async fn resolve_or_upsert_bsky_actor(
 #[cfg(test)]
 mod facet_tests {
     use super::*;
+
+    #[test]
+    fn jetstream_subscription_includes_reposts() {
+        let url = build_jetstream_url(None, &[]);
+        assert!(url.contains("wantedCollections=app.bsky.feed.repost"));
+    }
 
     fn link_facet(byte_start: usize, byte_end: usize, uri: &str) -> JetstreamFacet {
         JetstreamFacet {
