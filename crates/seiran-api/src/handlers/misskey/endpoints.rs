@@ -44,7 +44,11 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "users/show",
     ])
 }
+use std::collections::HashMap;
+
 use serde::Deserialize;
+
+use seiran_common::repository::Actor;
 
 use crate::error::ApiError;
 use crate::handlers::follows::{CreateFollowRequest, DeleteFollowRequest};
@@ -53,7 +57,8 @@ use crate::middleware::{extract_auth, AuthedUser};
 use crate::AppState;
 
 use super::convert::{
-    build_me_detailed, build_note, build_notes, build_notifications, build_user_detailed, user_lite,
+    build_me_detailed, build_note, build_notes, build_notifications, build_user_detailed,
+    build_users_detailed, user_lite,
 };
 use super::types::{
     MisskeyFollowRelation, MisskeyMeDetailed, MisskeyNote, MisskeyNoteReaction,
@@ -273,9 +278,14 @@ pub struct NotificationsBody {
 
 /// ログイン済みなら actor_id を返し、未ログインなら `None`（読み取り系は匿名許可のため）。
 async fn optional_actor_id(headers: &HeaderMap, state: &AppState) -> Option<i64> {
-    let auth_user = extract_auth(headers, &state.local_auth, state.app_tokens.as_ref())
-        .await
-        .ok()?;
+    let auth_user = extract_auth(
+        headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await
+    .ok()?;
     state
         .actors
         .find_local_by_user_id(auth_user.user_id)
@@ -324,7 +334,13 @@ pub async fn api_i(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<MisskeyMeDetailed>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
     let actor = state
         .actors
         .find_local_by_user_id(auth_user.user_id)
@@ -436,7 +452,13 @@ pub async fn notes_home_timeline(
     State(state): State<AppState>,
     Json(body): Json<TimelineBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
     let actor_id = state
         .actors
         .find_local_by_user_id(auth_user.user_id)
@@ -463,7 +485,13 @@ pub async fn notes_hybrid_timeline(
     State(state): State<AppState>,
     Json(body): Json<TimelineBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
     let actor_id = state
         .actors
         .find_local_by_user_id(auth_user.user_id)
@@ -715,20 +743,29 @@ pub async fn users_following(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // アクターごとに`find_by_id`+`build_user_detailed`（計4クエリ）を呼ぶと
+    // limit=100件で最大400クエリになるN+1だったため、一括取得する（#81改善）。
+    let actor_ids: Vec<i64> = rows.iter().map(|r| r.actor_id).collect();
+    let actors = state
+        .actors
+        .find_by_ids(&actor_ids)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let actor_by_id: HashMap<i64, Actor> = actors.into_iter().map(|a| (a.id, a)).collect();
+    let mut detailed_by_id =
+        build_users_detailed(&state, &actor_by_id.values().cloned().collect::<Vec<_>>()).await;
+
     let mut relations = Vec::with_capacity(rows.len());
     for r in rows {
-        let actor = state
-            .actors
-            .find_by_id(r.actor_id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?
-            .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
+        if !actor_by_id.contains_key(&r.actor_id) {
+            return Err(ApiError::NotFound("USER_NOT_FOUND"));
+        }
         relations.push(MisskeyFollowRelation {
             id: r.follow_id.to_string(),
             created_at: r.created_at.to_rfc3339(),
             followee_id: r.actor_id.to_string(),
             follower_id: actor_id.to_string(),
-            followee: Some(build_user_detailed(&state, &actor).await),
+            followee: detailed_by_id.remove(&r.actor_id),
             follower: None,
         });
     }
@@ -757,21 +794,29 @@ pub async fn users_followers(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // users_following と同様、アクター件数分のN+1を避けて一括取得する（#81改善）。
+    let actor_ids: Vec<i64> = rows.iter().map(|r| r.actor_id).collect();
+    let actors = state
+        .actors
+        .find_by_ids(&actor_ids)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let actor_by_id: HashMap<i64, Actor> = actors.into_iter().map(|a| (a.id, a)).collect();
+    let mut detailed_by_id =
+        build_users_detailed(&state, &actor_by_id.values().cloned().collect::<Vec<_>>()).await;
+
     let mut relations = Vec::with_capacity(rows.len());
     for r in rows {
-        let actor = state
-            .actors
-            .find_by_id(r.actor_id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?
-            .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
+        if !actor_by_id.contains_key(&r.actor_id) {
+            return Err(ApiError::NotFound("USER_NOT_FOUND"));
+        }
         relations.push(MisskeyFollowRelation {
             id: r.follow_id.to_string(),
             created_at: r.created_at.to_rfc3339(),
             followee_id: actor_id.to_string(),
             follower_id: r.actor_id.to_string(),
             followee: None,
-            follower: Some(build_user_detailed(&state, &actor).await),
+            follower: detailed_by_id.remove(&r.actor_id),
         });
     }
 

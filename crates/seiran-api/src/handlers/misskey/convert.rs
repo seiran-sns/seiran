@@ -48,69 +48,132 @@ pub fn user_lite(
 }
 
 /// 自分自身 (`/api/i`) または他者 (`/api/users/show`) の `UserDetailed` を組み立てる。
-/// `actors` テーブルにしか無い `created_at`/`avatar_url` はここで直接 SELECT する
-/// （`handlers::users::build_profile_response` と同じクエリパターン）。
+/// 単一アクター用。一覧（`users/following`・`users/followers`等）で複数アクター分を
+/// 組み立てる場合は、アクターごとに4クエリ発行するN+1を避けるため`build_users_detailed`
+/// を使うこと。
 pub async fn build_user_detailed(state: &AppState, actor: &Actor) -> MisskeyUserDetailed {
-    let row: Option<(chrono::DateTime<chrono::Utc>, Option<String>)> = sqlx::query_as(
-        "SELECT a.created_at, COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
+    let mut map = build_users_detailed(state, std::slice::from_ref(actor)).await;
+    map.remove(&actor.id).unwrap_or_else(|| {
+        // 通常到達しない（アクター自身の行を渡しているため）。バッチクエリが
+        // 何らかの理由で行を返さなかった場合のフォールバック。
+        let mut lite = user_lite(
+            actor.id,
+            &actor.username,
+            &actor.domain,
+            &state.local_domain,
+            actor.display_name.as_deref(),
+            None,
+        );
+        lite.emojis = to_misskey_emojis(None, actor.emoji_map.as_ref());
+        MisskeyUserDetailed {
+            lite,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            description: actor.bio.clone(),
+            banner_url: None,
+            is_locked: false,
+            is_silenced: false,
+            is_suspended: false,
+            notes_count: 0,
+            followers_count: 0,
+            following_count: 0,
+            followers_visibility: "public".to_string(),
+            following_visibility: "public".to_string(),
+        }
+    })
+}
+
+/// `build_user_detailed`の一括版。`actors`のアクターID一覧に対して、アバター/作成日時・
+/// 投稿数・フォロワー数・フォロー数をそれぞれ1クエリ（計4クエリ）で取得する。
+/// `users/following`・`users/followers`のような一覧系エンドポイントで、アクター件数分
+/// クエリが増えるN+1を避けるために使う。戻り値は`actor.id`をキーとするマップ
+/// （入力の順序は保持しない。呼び出し側で元の順序に並べ直すこと）。
+pub async fn build_users_detailed(
+    state: &AppState,
+    actors: &[Actor],
+) -> HashMap<i64, MisskeyUserDetailed> {
+    if actors.is_empty() {
+        return HashMap::new();
+    }
+    let ids: Vec<i64> = actors.iter().map(|a| a.id).collect();
+
+    let profile_rows: Vec<(i64, chrono::DateTime<chrono::Utc>, Option<String>)> = sqlx::query_as(
+        "SELECT a.id, a.created_at, COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
-         WHERE a.id = $1",
+         WHERE a.id = ANY($1)",
     )
-    .bind(actor.id)
-    .fetch_optional(&state.db)
+    .bind(&ids)
+    .fetch_all(&state.db)
     .await
-    .ok()
-    .flatten();
+    .unwrap_or_default();
+    let mut profile_by_id: HashMap<i64, (chrono::DateTime<chrono::Utc>, Option<String>)> =
+        profile_rows
+            .into_iter()
+            .map(|(id, created_at, avatar_url)| (id, (created_at, avatar_url)))
+            .collect();
 
-    let (created_at, avatar_url) = row.unwrap_or_else(|| (chrono::Utc::now(), None));
-
-    let mut lite = user_lite(
-        actor.id,
-        &actor.username,
-        &actor.domain,
-        &state.local_domain,
-        actor.display_name.as_deref(),
-        avatar_url.as_deref(),
-    );
-    lite.emojis = to_misskey_emojis(None, actor.emoji_map.as_ref());
-
-    let notes_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND deleted_at IS NULL")
-            .bind(actor.id)
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(0);
-    let followers_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM follows WHERE target_actor_id = $1 AND status = 'accepted'",
+    let notes_counts: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT actor_id, COUNT(*) FROM posts WHERE actor_id = ANY($1) AND deleted_at IS NULL GROUP BY actor_id",
     )
-    .bind(actor.id)
-    .fetch_one(&state.db)
+    .bind(&ids)
+    .fetch_all(&state.db)
     .await
-    .unwrap_or(0);
-    let following_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM follows WHERE follower_actor_id = $1 AND status = 'accepted'",
-    )
-    .bind(actor.id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
+    .unwrap_or_default();
+    let notes_count_by_id: HashMap<i64, i64> = notes_counts.into_iter().collect();
 
-    MisskeyUserDetailed {
-        lite,
-        created_at: created_at.to_rfc3339(),
-        description: actor.bio.clone(),
-        banner_url: None,
-        is_locked: false,
-        is_silenced: false,
-        is_suspended: false,
-        notes_count,
-        followers_count,
-        following_count,
-        followers_visibility: "public".to_string(),
-        following_visibility: "public".to_string(),
-    }
+    let followers_counts: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT target_actor_id, COUNT(*) FROM follows WHERE target_actor_id = ANY($1) AND status = 'accepted' GROUP BY target_actor_id",
+    )
+    .bind(&ids)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let followers_count_by_id: HashMap<i64, i64> = followers_counts.into_iter().collect();
+
+    let following_counts: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT follower_actor_id, COUNT(*) FROM follows WHERE follower_actor_id = ANY($1) AND status = 'accepted' GROUP BY follower_actor_id",
+    )
+    .bind(&ids)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let following_count_by_id: HashMap<i64, i64> = following_counts.into_iter().collect();
+
+    actors
+        .iter()
+        .map(|actor| {
+            let (created_at, avatar_url) = profile_by_id
+                .remove(&actor.id)
+                .unwrap_or_else(|| (chrono::Utc::now(), None));
+
+            let mut lite = user_lite(
+                actor.id,
+                &actor.username,
+                &actor.domain,
+                &state.local_domain,
+                actor.display_name.as_deref(),
+                avatar_url.as_deref(),
+            );
+            lite.emojis = to_misskey_emojis(None, actor.emoji_map.as_ref());
+
+            let detailed = MisskeyUserDetailed {
+                lite,
+                created_at: created_at.to_rfc3339(),
+                description: actor.bio.clone(),
+                banner_url: None,
+                is_locked: false,
+                is_silenced: false,
+                is_suspended: false,
+                notes_count: notes_count_by_id.get(&actor.id).copied().unwrap_or(0),
+                followers_count: followers_count_by_id.get(&actor.id).copied().unwrap_or(0),
+                following_count: following_count_by_id.get(&actor.id).copied().unwrap_or(0),
+                followers_visibility: "public".to_string(),
+                following_visibility: "public".to_string(),
+            };
+            (actor.id, detailed)
+        })
+        .collect()
 }
 
 /// `/api/i` 用（`MisskeyMeDetailed`）。`build_user_detailed` に自分専用フィールドを足す。
