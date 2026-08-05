@@ -8,6 +8,7 @@
 //! - `build_*`（純関数）: アクティビティ JSON の組み立て。DB・ネットワーク非依存でテスト可能
 //! - `fetch_*` / `fan_out_activity`（共通ヘルパー）: 配送に必要なデータ取得と署名 POST の実行
 
+use futures_util::stream::{self, StreamExt};
 use sqlx::{PgPool, Row};
 
 use super::client::{ApClient, ApError};
@@ -178,20 +179,33 @@ async fn fan_out_activity(
 
     let body_str = serde_json::to_string(activity).map_err(ApError::Json)?;
 
-    let mut ok = 0usize;
-    let mut ng = 0usize;
-    for inbox in inboxes {
-        match ap_client
-            .sign_and_post(inbox, &body_str, key_id, ap_private_key_pem)
-            .await
-        {
-            Ok(()) => ok += 1,
-            Err(e) => {
-                tracing::error!("[Deliver] {}: {} への配送失敗: {}", log_label, inbox, e);
-                ng += 1;
+    // 1件のポストにフォロワーが多数（数十〜数百inbox）いる場合、逐次POSTだと1件ずつ
+    // 配送していた（応答の遅い相手が混ざると配送全体が線形に伸びる）。Workerジョブ実行の
+    // 枠内（追加のtokio::spawnはしない）で`buffer_unordered`により同時ポーリングし、
+    // 応答の遅い宛先が他の宛先をブロックしないようにする（docs/code_audit_2026-08-05.md P-3）。
+    const MAX_CONCURRENT_DELIVERIES: usize = 8;
+    let results: Vec<Result<(), ApError>> = stream::iter(inboxes.to_vec())
+        .map(|inbox| {
+            let body_str = body_str.clone();
+            let key_id = key_id.to_owned();
+            let ap_private_key_pem = ap_private_key_pem.to_owned();
+            let log_label = log_label.to_owned();
+            async move {
+                ap_client
+                    .sign_and_post(&inbox, &body_str, &key_id, &ap_private_key_pem)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("[Deliver] {}: {} への配送失敗: {}", log_label, inbox, e);
+                        e
+                    })
             }
-        }
-    }
+        })
+        .buffer_unordered(MAX_CONCURRENT_DELIVERIES)
+        .collect()
+        .await;
+
+    let ok = results.iter().filter(|r| r.is_ok()).count();
+    let ng = results.len() - ok;
 
     if ng > 0 {
         tracing::warn!("[Deliver] {}: {}件成功 / {}件失敗", log_label, ok, ng);
