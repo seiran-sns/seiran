@@ -31,7 +31,7 @@
 1. コード実装・修正
 2. 新しいマイグレーションファイルを追加した場合は `cargo sqlx migrate run` でローカル DB に適用する（後述）
 3. `cargo build` でコンパイルエラーがないことを確認
-4. `cargo clippy --workspace -- -D warnings` を実行し、指摘が無いことを確認（CI と同じコマンド）
+4. `cargo clippy --workspace --all-targets -- -D warnings` を実行し、指摘が無いことを確認（CI と同じコマンド）
 5. `sqlx::query!` を追加・変更した場合は `cargo sqlx prepare --workspace` を実行して `.sqlx/` キャッシュを更新する（忘れると Docker ビルドが失敗する）
 6. `frontend/package.json` を変更した場合（依存追加・更新・削除）は、CI と同じ Node バージョン（20系）で `frontend/` 内から `npm ci` を実行し、`package-lock.json` が package.json と整合していることを確認する（`npm install` は lockfile のずれを黙って許容してしまい検出できない。`npm ci` は CI が実際に叩くコマンドそのものなので、ローカルで通れば CI でも通る）
 7. フロントエンド・バックエンドの挙動に関わる変更をした場合は `cd e2e && npm test` を実行し、E2Eテストが全て成功することを確認する（E2E側はバックエンド3100・フロントエンド5273という専用ポート（`e2e/ports.ts`）で動くため、`scripts/dev-up.sh` 等の開発サーバー（3000/5173）を止める必要はない）

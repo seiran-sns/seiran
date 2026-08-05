@@ -16,6 +16,7 @@
 //! ワーカー負荷分散などのスケールアウトを行う。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use seiran_common::repository::{
     PgActorRepository, PgBlockRepository, PgFollowRepository, PgHashtagRepository,
@@ -152,6 +153,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let http_client = Arc::new(
             reqwest::Client::builder()
                 .user_agent("seiran-federation/0.1.0")
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(30))
                 .build()?,
         );
         let worker_local_domain =
@@ -193,6 +196,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_client = Arc::new(
         reqwest::Client::builder()
             .user_agent("seiran-federation/0.1.0")
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(30))
             .build()?,
     );
     let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());

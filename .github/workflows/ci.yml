@@ -45,7 +45,7 @@ jobs:
       - name: Type check
         run: cargo check --workspace
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
 

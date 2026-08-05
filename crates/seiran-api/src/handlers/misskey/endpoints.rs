@@ -526,26 +526,6 @@ pub async fn reactions_create(
     as_no_content(resp)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::normalize_local_reaction;
-
-    #[test]
-    fn normalizes_misskey_local_custom_emoji_reaction() {
-        assert_eq!(normalize_local_reaction(":blob_cat@.:"), ":blob_cat:");
-    }
-
-    #[test]
-    fn leaves_unicode_and_canonical_reactions_unchanged() {
-        assert_eq!(normalize_local_reaction("🎉"), "🎉");
-        assert_eq!(normalize_local_reaction(":blob_cat:"), ":blob_cat:");
-        assert_eq!(
-            normalize_local_reaction(":blob_cat@example.com:"),
-            ":blob_cat@example.com:"
-        );
-    }
-}
-
 /// POST /api/notes/reactions/delete
 /// Misskey は `noteId` のみを受け取る（1投稿1ユーザー1リアクションが前提のため対象の絵文字を
 /// 指定する必要がない）。既存の `delete_reaction` は絵文字をパスパラメータに取るため、
@@ -849,4 +829,24 @@ pub async fn notes_reactions(
             })
             .collect(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_local_reaction;
+
+    #[test]
+    fn normalizes_misskey_local_custom_emoji_reaction() {
+        assert_eq!(normalize_local_reaction(":blob_cat@.:"), ":blob_cat:");
+    }
+
+    #[test]
+    fn leaves_unicode_and_canonical_reactions_unchanged() {
+        assert_eq!(normalize_local_reaction("🎉"), "🎉");
+        assert_eq!(normalize_local_reaction(":blob_cat:"), ":blob_cat:");
+        assert_eq!(
+            normalize_local_reaction(":blob_cat@example.com:"),
+            ":blob_cat@example.com:"
+        );
+    }
 }
