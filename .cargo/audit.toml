@@ -1,0 +1,19 @@
+# cargo-audit / rustsec/audit-check（CI）の設定（docs/code_audit_2026-08-05.md S-9）。
+#
+# 現時点で修正版が存在しない、または修正に大きな依存アップグレードを要する既知の
+# advisoryを一時的に無視する。新規に混入する脆弱性はここに無いものだけがCIを
+# 落とすため、監視自体は機能する。無視した項目は定期的に見直すこと。
+[advisories]
+ignore = [
+    # rsa: Marvin Attack（タイミングサイドチャネル）。修正版が存在しない
+    # （2026-08-05時点）。seiran-common がAP HTTP SignaturesのRSA-SHA256署名に
+    # 使用しており、フェディバース標準に合わせるための直接依存で代替が無い。
+    "RUSTSEC-2023-0071",
+    # rustls-webpki 0.101.7: aws-sdk-s3 経由の rustls 0.21系に固定されており、
+    # 解消には aws-sdk-s3 の大きなメジャーアップグレードが必要（S3ストレージ
+    # プロバイダのコードに影響しうる）。ワイルドカード証明書名・URI名の検証と
+    # CRL解析の問題で、outbound専用のS3クライアント用途では悪用経路が乏しい。
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+]
