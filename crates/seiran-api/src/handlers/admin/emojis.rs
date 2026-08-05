@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -10,7 +10,6 @@ use seiran_common::generate_snowflake_id;
 use seiran_common::repository::EmojiRow;
 
 use crate::error::ApiError;
-use crate::middleware::require_emoji_admin;
 use crate::AppState;
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
@@ -142,17 +141,8 @@ fn map_emoji_db_error(e: sqlx::Error) -> ApiError {
 
 /// GET /api/admin/emojis
 pub async fn list_emojis(
-    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<EmojiResponse>>, ApiError> {
-    require_emoji_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     let rows = state
         .emojis
         .list_all()
@@ -164,18 +154,9 @@ pub async fn list_emojis(
 
 /// POST /api/admin/emojis
 pub async fn create_emoji(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<CreateEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_emoji_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     validate_shortcode(&req.shortcode)?;
     if let Some(ref c) = req.category {
         validate_category(c)?;
@@ -211,19 +192,10 @@ pub async fn create_emoji(
 
 /// PATCH /api/admin/emojis/:id — カテゴリ・タグ・ライセンスを更新する（#49, #63）。
 pub async fn update_emoji(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(req): Json<UpdateEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_emoji_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     if let Some(ref c) = req.category {
         validate_category(c)?;
     }
@@ -253,18 +225,9 @@ pub async fn update_emoji(
 
 /// DELETE /api/admin/emojis/:id
 pub async fn delete_emoji(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    require_emoji_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     let deleted = state
         .emojis
         .delete(id)

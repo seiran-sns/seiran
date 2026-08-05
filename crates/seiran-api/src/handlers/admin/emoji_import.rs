@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Multipart, Path, State},
-    http::HeaderMap,
     Json,
 };
 use chrono::Utc;
@@ -21,7 +20,6 @@ use seiran_common::{generate_snowflake_id, prepare_image, MediaKind};
 use crate::error::ApiError;
 use crate::handlers::admin::emojis::validate_shortcode;
 use crate::handlers::media_store;
-use crate::middleware::require_emoji_admin;
 use crate::AppState;
 
 // ─── ジョブ状態 ─────────────────────────────────────────────────────────
@@ -75,17 +73,8 @@ pub struct ImportStartResponse {
 /// `POST /api/admin/emojis/import`
 pub async fn start_import(
     State(state): State<AppState>,
-    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<ImportStartResponse>, ApiError> {
-    require_emoji_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        &*state.users,
-    )
-    .await?;
-
     // ZIP バイト列を取得
     let mut zip_bytes: Option<Vec<u8>> = None;
     while let Some(field) = multipart
@@ -154,17 +143,8 @@ pub async fn start_import(
 /// `GET /api/admin/emojis/import/:job_id`
 pub async fn get_import_status(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(job_id): Path<String>,
 ) -> Result<Json<ImportJobStatus>, ApiError> {
-    require_emoji_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        &*state.users,
-    )
-    .await?;
-
     let status = state
         .emoji_import_jobs
         .get(&job_id)

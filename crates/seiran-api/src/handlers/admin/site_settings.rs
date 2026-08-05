@@ -1,9 +1,8 @@
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::error::ApiError;
-use crate::middleware::require_admin;
 use crate::AppState;
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
@@ -65,17 +64,8 @@ pub struct UpdateSiteSettingsRequest {
 
 /// GET /api/admin/site-settings
 pub async fn get_site_settings(
-    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<SiteSettingsResponse>, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     let settings = state
         .site_settings
         .get_all()
@@ -87,18 +77,9 @@ pub async fn get_site_settings(
 
 /// PATCH /api/admin/site-settings
 pub async fn update_site_settings(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<UpdateSiteSettingsRequest>,
 ) -> Result<Json<SiteSettingsResponse>, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     if let Some(value) = req
         .media_proxy_url
         .as_deref()

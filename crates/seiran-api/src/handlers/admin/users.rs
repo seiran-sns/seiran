@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use seiran_common::repository::AdminUserRow;
 
 use crate::error::ApiError;
-use crate::middleware::require_admin;
 use crate::AppState;
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
@@ -72,18 +71,9 @@ pub struct ChangeRoleRequest {
 /// `after_id`: 無限スクロール用カーソル。この ID より大きい行から返す（省略可）。
 /// `limit`: 1ページの件数（省略時30、最大100）。
 pub async fn list_users(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Query(query): Query<ListUsersQuery>,
 ) -> Result<Json<Vec<AdminUserResponse>>, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     let after_id = query
         .after_id
         .as_deref()
@@ -103,18 +93,9 @@ pub async fn list_users(
 
 /// POST /api/admin/users/:id/suspend
 pub async fn suspend_user(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     state
         .users
         .set_suspended(id, true)
@@ -126,18 +107,9 @@ pub async fn suspend_user(
 
 /// POST /api/admin/users/:id/unsuspend
 pub async fn unsuspend_user(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     state
         .users
         .set_suspended(id, false)
@@ -149,19 +121,10 @@ pub async fn unsuspend_user(
 
 /// POST /api/admin/users/:id/role
 pub async fn change_user_role(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(req): Json<ChangeRoleRequest>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     if !matches!(
         req.role.as_str(),
         "user" | "moderator" | "emoji-editor" | "admin"
@@ -183,18 +146,9 @@ pub async fn change_user_role(
 /// 管理者が、認証手段を失ったユーザーのTOTP設定を強制解除する。
 /// `user_totp` の削除によりリカバリーコードとメール解除要求もCASCADE削除される。
 pub async fn disable_user_totp(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     state
         .totp
         .delete(id)

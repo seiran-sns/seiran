@@ -11,6 +11,7 @@ pub mod emojis;
 pub mod favicon;
 pub mod follows;
 pub mod hashtags;
+pub mod health;
 pub mod lists;
 pub mod media_proxy;
 pub mod media_store;

@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    extract::{Extension, Path, State},
+    http::StatusCode,
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -8,11 +8,7 @@ use seiran_common::atp::sign_service_auth_jwt;
 use seiran_common::generate_snowflake_id;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    error::ApiError,
-    middleware::{require_report_moderator, AuthUser},
-    AppState,
-};
+use crate::{error::ApiError, middleware::AuthUser, AppState};
 
 #[derive(Debug, sqlx::FromRow)]
 struct ReportRow {
@@ -86,23 +82,13 @@ pub struct CommentRequest {
     pub body: String,
 }
 
-/// 通報の閲覧・対応は admin / moderator が行える（#179: moderator は調停者として
-/// 通報対応に必要な凍結・投稿削除・連合転送を含めて利用可能）。
-async fn authorize(headers: &HeaderMap, state: &AppState) -> Result<AuthUser, ApiError> {
-    require_report_moderator(
-        headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await
-}
+// 通報の閲覧・対応は admin / moderator が行える（#179: moderator は調停者として
+// 通報対応に必要な凍結・投稿削除・連合転送を含めて利用可能）。認可自体は
+// ルータ層の`middleware::report_moderator_only`で強制済み（#221）。
 
 pub async fn list_reports(
-    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ReportResponse>>, ApiError> {
-    authorize(&headers, &state).await?;
     let rows = sqlx::query_as::<_, ReportRow>(
         "SELECT r.id,r.reporter_actor_id,concat(ra.username,'@',ra.domain) reporter,\
          r.subject_type::text subject_type,r.subject_actor_id,concat(sa.username,'@',sa.domain) subject,\
@@ -115,11 +101,9 @@ pub async fn list_reports(
 }
 
 pub async fn close_report(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&headers, &state).await?;
     let done = sqlx::query("UPDATE reports SET status='closed',closed_at=NOW() WHERE id=$1")
         .bind(id)
         .execute(&state.db)
@@ -132,11 +116,9 @@ pub async fn close_report(
 }
 
 pub async fn list_comments(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<CommentResponse>>, ApiError> {
-    authorize(&headers, &state).await?;
     let rows = sqlx::query_as::<_, (i64,String,String,DateTime<Utc>)>(
         "SELECT c.id,c.body,u.email,c.created_at FROM report_comments c JOIN users u ON u.id=c.author_user_id \
          WHERE c.report_id=$1 ORDER BY c.created_at"
@@ -154,12 +136,11 @@ pub async fn list_comments(
 }
 
 pub async fn add_comment(
-    headers: HeaderMap,
+    Extension(admin): Extension<AuthUser>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(req): Json<CommentRequest>,
 ) -> Result<(StatusCode, Json<CommentResponse>), ApiError> {
-    let admin = authorize(&headers, &state).await?;
     let body = req.body.trim();
     if body.is_empty() || body.chars().count() > 2000 {
         return Err(ApiError::BadRequest("INVALID_REPORT_COMMENT".into()));
@@ -181,11 +162,9 @@ pub async fn add_comment(
 }
 
 pub async fn delete_subject_post(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&headers, &state).await?;
     let done=sqlx::query(
         "UPDATE posts SET deleted_at=NOW() WHERE id=(SELECT subject_post_id FROM reports WHERE id=$1) AND deleted_at IS NULL"
     ).bind(id).execute(&state.db).await.map_err(|e|ApiError::Internal(e.to_string()))?;
@@ -196,11 +175,9 @@ pub async fn delete_subject_post(
 }
 
 pub async fn suspend_subject(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&headers, &state).await?;
     let user_id: Option<i64> = sqlx::query_scalar(
         "SELECT a.user_id FROM reports r JOIN actors a ON a.id=r.subject_actor_id WHERE r.id=$1",
     )
@@ -239,11 +216,9 @@ struct ForwardRow {
 }
 
 pub async fn forward_report(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&headers, &state).await?;
     let row=sqlx::query_as::<_,ForwardRow>(
         "SELECT ra.ap_uri reporter_ap_uri,ra.at_signing_key_pem reporter_ap_key,ra.at_did reporter_did,\
          sa.ap_uri subject_ap_uri,sa.ap_inbox_url subject_inbox,sa.at_did subject_did,\

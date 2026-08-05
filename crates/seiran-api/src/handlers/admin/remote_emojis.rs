@@ -7,7 +7,6 @@
 
 use axum::{
     extract::{Query, State},
-    http::HeaderMap,
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -21,7 +20,6 @@ use super::emojis::{
 use crate::error::ApiError;
 use crate::handlers::media_proxy::fetch_validated;
 use crate::handlers::media_store;
-use crate::middleware::require_emoji_admin;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -59,18 +57,9 @@ pub struct ListRemoteEmojisQuery {
 
 /// `GET /api/admin/emojis/remote`
 pub async fn list_remote_emojis(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Query(query): Query<ListRemoteEmojisQuery>,
 ) -> Result<Json<Vec<RemoteEmojiResponse>>, ApiError> {
-    require_emoji_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     let keyword = query.keyword.as_deref().filter(|k| !k.trim().is_empty());
     let rows = state
         .remote_emojis
@@ -104,18 +93,9 @@ fn map_emoji_db_error(e: sqlx::Error) -> ApiError {
 
 /// `POST /api/admin/emojis/remote/import`
 pub async fn import_remote_emoji(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<ImportRemoteEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    require_emoji_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     validate_shortcode(&req.shortcode)?;
     if let Some(ref c) = req.category {
         validate_category(c)?;

@@ -450,21 +450,10 @@ pub fn router(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
-        // サイトアイコンを favicon として返す（#42）
-        .route("/favicon.ico", get(handlers::favicon::favicon))
-        .route(
-            "/api/avatars/:actor_id",
-            get(handlers::avatar::fallback_avatar),
-        )
-        // Misskey互換メディアプロキシ（リモート画像のCORS回避、SSRF防止付き）
-        .route("/proxy", get(handlers::media_proxy::proxy))
-        // セットアップ（初回管理者作成）
-        .route("/api/setup/status", get(handlers::setup::setup_status))
-        .route("/api/setup", post(handlers::setup::setup))
-        // ユーザー通報
-        .route("/api/reports", post(handlers::reports::create_report))
-        // 管理者 API
+    // 管理系ルートはロールごとに専用ルータへ分割し、`route_layer`で認可を強制する（#221）。
+    // ハンドラ側では認可チェックを一切行わない（呼び忘れによる無認可到達を構造的に防ぐ、
+    // docs/code_audit_2026-08-05.md R-1）。
+    let admin_router = Router::new()
         .route(
             "/api/admin/storage-providers",
             get(handlers::admin::storage::list_storage_providers)
@@ -475,7 +464,6 @@ pub fn router(state: AppState) -> Router {
             patch(handlers::admin::storage::update_storage_provider)
                 .delete(handlers::admin::storage::delete_storage_provider),
         )
-        // 管理者ユーザー管理
         .route("/api/admin/users", get(handlers::admin::users::list_users))
         .route(
             "/api/admin/users/:id/suspend",
@@ -493,7 +481,59 @@ pub fn router(state: AppState) -> Router {
             "/api/admin/users/:id/totp/disable",
             post(handlers::admin::users::disable_user_totp),
         )
-        // 通報管理
+        .route(
+            "/api/admin/site-settings",
+            get(handlers::admin::site_settings::get_site_settings)
+                .patch(handlers::admin::site_settings::update_site_settings),
+        )
+        .route(
+            "/api/admin/relays",
+            get(handlers::admin::relays::list_relays).post(handlers::admin::relays::create_relay),
+        )
+        .route(
+            "/api/admin/relays/:id",
+            delete(handlers::admin::relays::delete_relay),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::admin_only,
+        ));
+
+    let emoji_admin_router = Router::new()
+        .route(
+            "/api/admin/emojis",
+            get(handlers::admin::emojis::list_emojis).post(handlers::admin::emojis::create_emoji),
+        )
+        .route(
+            "/api/admin/emojis/:id",
+            patch(handlers::admin::emojis::update_emoji)
+                .delete(handlers::admin::emojis::delete_emoji),
+        )
+        // 絵文字インポート（#50）。多数のカスタム絵文字を含むZIPは数十〜数百MBになりうるため、
+        // axum のデフォルトボディ上限（2MB）を明示的に引き上げる。
+        .route(
+            "/api/admin/emojis/import",
+            post(handlers::admin::emoji_import::start_import)
+                .layer(DefaultBodyLimit::max(200 * 1024 * 1024)),
+        )
+        .route(
+            "/api/admin/emojis/import/:job_id",
+            get(handlers::admin::emoji_import::get_import_status),
+        )
+        .route(
+            "/api/admin/emojis/remote",
+            get(handlers::admin::remote_emojis::list_remote_emojis),
+        )
+        .route(
+            "/api/admin/emojis/remote/import",
+            post(handlers::admin::remote_emojis::import_remote_emoji),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::emoji_admin_only,
+        ));
+
+    let report_moderator_router = Router::new()
         .route(
             "/api/admin/reports",
             get(handlers::admin::reports::list_reports),
@@ -519,51 +559,30 @@ pub fn router(state: AppState) -> Router {
             "/api/admin/reports/:id/forward",
             post(handlers::admin::reports::forward_report),
         )
-        // サイト設定
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::report_moderator_only,
+        ));
+
+    Router::new()
+        .merge(admin_router)
+        .merge(emoji_admin_router)
+        .merge(report_moderator_router)
+        // ヘルスチェック（外形監視用、認証不要、#221監査R-9）
+        .route("/health", get(handlers::health::health))
+        // サイトアイコンを favicon として返す（#42）
+        .route("/favicon.ico", get(handlers::favicon::favicon))
         .route(
-            "/api/admin/site-settings",
-            get(handlers::admin::site_settings::get_site_settings)
-                .patch(handlers::admin::site_settings::update_site_settings),
+            "/api/avatars/:actor_id",
+            get(handlers::avatar::fallback_avatar),
         )
-        // カスタム絵文字
-        .route(
-            "/api/admin/emojis",
-            get(handlers::admin::emojis::list_emojis).post(handlers::admin::emojis::create_emoji),
-        )
-        .route(
-            "/api/admin/emojis/:id",
-            patch(handlers::admin::emojis::update_emoji)
-                .delete(handlers::admin::emojis::delete_emoji),
-        )
-        // 絵文字インポート（#50）。多数のカスタム絵文字を含むZIPは数十〜数百MBになりうるため、
-        // axum のデフォルトボディ上限（2MB）を明示的に引き上げる。
-        .route(
-            "/api/admin/emojis/import",
-            post(handlers::admin::emoji_import::start_import)
-                .layer(DefaultBodyLimit::max(200 * 1024 * 1024)),
-        )
-        .route(
-            "/api/admin/emojis/import/:job_id",
-            get(handlers::admin::emoji_import::get_import_status),
-        )
-        // リモート絵文字カタログの一覧・インポート（#73）
-        .route(
-            "/api/admin/emojis/remote",
-            get(handlers::admin::remote_emojis::list_remote_emojis),
-        )
-        .route(
-            "/api/admin/emojis/remote/import",
-            post(handlers::admin::remote_emojis::import_remote_emoji),
-        )
-        // Fediverseリレー参加先（#140）
-        .route(
-            "/api/admin/relays",
-            get(handlers::admin::relays::list_relays).post(handlers::admin::relays::create_relay),
-        )
-        .route(
-            "/api/admin/relays/:id",
-            delete(handlers::admin::relays::delete_relay),
-        )
+        // Misskey互換メディアプロキシ（リモート画像のCORS回避、SSRF防止付き）
+        .route("/proxy", get(handlers::media_proxy::proxy))
+        // セットアップ（初回管理者作成）
+        .route("/api/setup/status", get(handlers::setup::setup_status))
+        .route("/api/setup", post(handlers::setup::setup))
+        // ユーザー通報
+        .route("/api/reports", post(handlers::reports::create_report))
         // ドライブ（メディアアップロード）。動画・音声添付を考慮し 100MB まで許可
         // （axum のデフォルトボディ上限は小さいため明示的に上書きする）。
         .route(
@@ -624,6 +643,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/account/change-password",
             post(handlers::account::change_password),
+        )
+        .route(
+            "/api/account/revoke-all-sessions",
+            post(handlers::account::revoke_all_sessions),
         )
         .route(
             "/api/account/language",

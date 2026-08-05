@@ -1,6 +1,5 @@
 use axum::{
     extract::{Path, State},
-    http::HeaderMap,
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -11,7 +10,6 @@ use seiran_common::repository::{
 };
 
 use crate::error::ApiError;
-use crate::middleware::require_admin;
 use crate::AppState;
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
@@ -97,33 +95,17 @@ fn sp_err(e: StorageProviderError) -> ApiError {
 
 /// GET /api/admin/storage-providers
 pub async fn list_storage_providers(
-    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<StorageProviderResponse>>, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
     let providers = state.storage_providers.list_all().await.map_err(sp_err)?;
     Ok(Json(providers.into_iter().map(Into::into).collect()))
 }
 
 /// POST /api/admin/storage-providers
 pub async fn create_storage_provider(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<CreateStorageProviderRequest>,
 ) -> Result<Json<StorageProviderResponse>, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
     if req.name.is_empty()
         || req.endpoint.is_empty()
         || req.bucket.is_empty()
@@ -152,18 +134,10 @@ pub async fn create_storage_provider(
 
 /// PATCH /api/admin/storage-providers/:id
 pub async fn update_storage_provider(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(req): Json<UpdateStorageProviderRequest>,
 ) -> Result<Json<StorageProviderResponse>, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
     let provider = state
         .storage_providers
         .update(
@@ -188,17 +162,9 @@ pub async fn update_storage_provider(
 
 /// DELETE /api/admin/storage-providers/:id
 pub async fn delete_storage_provider(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<axum::http::StatusCode, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
     state.storage_providers.delete(id).await.map_err(sp_err)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }

@@ -5,7 +5,6 @@
 
 use axum::{
     extract::{Path, State},
-    http::HeaderMap,
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -17,7 +16,6 @@ use seiran_common::repository::{Relay, RelayError};
 use seiran_common::{job_priority, Job};
 
 use crate::error::ApiError;
-use crate::middleware::require_admin;
 use crate::AppState;
 
 // ─── レスポンス DTO ────────────────────────────────────────────────────────
@@ -119,33 +117,17 @@ async fn validate_inbox_url(raw: &str) -> Result<(), ApiError> {
 
 /// GET /api/admin/relays
 pub async fn list_relays(
-    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<RelayResponse>>, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
     let relays = state.relays.list_all().await.map_err(relay_err)?;
     Ok(Json(relays.into_iter().map(Into::into).collect()))
 }
 
 /// POST /api/admin/relays
 pub async fn create_relay(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<CreateRelayRequest>,
 ) -> Result<Json<RelayResponse>, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
     validate_inbox_url(&req.inbox_url).await?;
 
     let relay = state
@@ -171,18 +153,9 @@ pub async fn create_relay(
 
 /// DELETE /api/admin/relays/:id
 pub async fn delete_relay(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<axum::http::StatusCode, ApiError> {
-    require_admin(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-
     state
         .relays
         .find_by_id(id)
