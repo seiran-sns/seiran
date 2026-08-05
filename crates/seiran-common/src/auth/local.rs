@@ -73,6 +73,16 @@ impl LocalAuthProvider {
             .is_ok())
     }
 
+    /// ユーザーが存在しない/パスワード未設定の場合に検証時間を揃えるためのダミーハッシュ。
+    /// 実在ユーザーとの応答時間差でアカウントの存在を判定できてしまうタイミング攻撃を防ぐ。
+    pub fn dummy_hash() -> &'static str {
+        static DUMMY_HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        DUMMY_HASH.get_or_init(|| {
+            Self::hash_password("dummy-password-for-timing-safety")
+                .expect("固定文字列のハッシュ化は失敗しない")
+        })
+    }
+
     /// 発行した JWT と、その `jti`（#60: アプリトークン管理での識別用）を返す。
     pub fn generate_token(
         &self,

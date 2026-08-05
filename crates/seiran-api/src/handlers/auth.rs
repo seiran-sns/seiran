@@ -345,16 +345,22 @@ pub async fn login(
     .map_err(|e| {
         tracing::error!("[login] DB エラー: {}", e);
         ApiError::Internal(e.to_string())
-    })?
-    .ok_or(ApiError::Unauthorized("INVALID_CREDENTIALS"))?;
+    })?;
 
+    // ユーザー不在・パスワード未設定の場合もダミーハッシュに対してArgon2検証を実行し、
+    // Argon2の計算時間の有無で応答時間に差が出てユーザー列挙につながるのを防ぐ
+    // （タイミング攻撃対策）。
+    let row = match row {
+        Some(r) if r.password_hash.is_some() => r,
+        _ => {
+            let _ = LocalAuthProvider::verify_password(&req.password, LocalAuthProvider::dummy_hash());
+            return Err(ApiError::Unauthorized("INVALID_CREDENTIALS"));
+        }
+    };
     let user_id = row.id;
     let email = row.email;
     let username = row.username;
-
-    let hash = row
-        .password_hash
-        .ok_or(ApiError::Unauthorized("INVALID_CREDENTIALS"))?;
+    let hash = row.password_hash.expect("直前のガードでSomeを確認済み");
 
     match LocalAuthProvider::verify_password(&req.password, &hash) {
         Ok(true) => {}
