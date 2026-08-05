@@ -101,6 +101,33 @@ pub struct CommitResult {
     pub at_did: String,
 }
 
+/// `atp_blocks` へ新規ブロックを一括INSERTする。コミットのたびに数個〜数十個の
+/// ブロックが生じるため、1件ずつ`INSERT`するとラウンドトリップがブロック数分かかる。
+/// `UNNEST`で配列を展開し1回のクエリにまとめる。
+async fn insert_blocks(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    actor_id: i64,
+    blocks: &[(Cid, Vec<u8>)],
+) -> Result<(), sqlx::Error> {
+    if blocks.is_empty() {
+        return Ok(());
+    }
+    let cids: Vec<String> = blocks.iter().map(|(cid, _)| cid_to_string(cid)).collect();
+    let actor_ids: Vec<i64> = vec![actor_id; blocks.len()];
+    let bytes: Vec<Vec<u8>> = blocks.iter().map(|(_, b)| b.clone()).collect();
+    sqlx::query(
+        "INSERT INTO atp_blocks (cid, actor_id, bytes)
+         SELECT * FROM UNNEST($1::text[], $2::bigint[], $3::bytea[])
+         ON CONFLICT (cid, actor_id) DO NOTHING",
+    )
+    .bind(&cids)
+    .bind(&actor_ids)
+    .bind(&bytes)
+    .execute(&mut **tx)
+    .await
+    .map(|_| ())
+}
+
 pub struct AtpCommitService {
     pool: PgPool,
     event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
@@ -324,17 +351,7 @@ impl AtpCommitService {
         let mut tx = self.pool.begin().await?;
 
         // ⑦ atp_blocks INSERT
-        for (cid, bytes) in &new_blocks {
-            sqlx::query(
-                "INSERT INTO atp_blocks (cid, actor_id, bytes) VALUES ($1, $2, $3)
-                 ON CONFLICT (cid, actor_id) DO NOTHING",
-            )
-            .bind(cid_to_string(cid))
-            .bind(actor_id)
-            .bind(bytes.as_slice())
-            .execute(&mut *tx)
-            .await?;
-        }
+        insert_blocks(&mut tx, actor_id, &new_blocks).await?;
 
         // ⑧ actors UPDATE
         sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
@@ -948,17 +965,7 @@ impl AtpCommitService {
         let mut tx = self.pool.begin().await?;
 
         // ⑦ atp_blocks INSERT
-        for (cid, bytes) in &new_blocks {
-            sqlx::query(
-                "INSERT INTO atp_blocks (cid, actor_id, bytes) VALUES ($1, $2, $3)
-                 ON CONFLICT (cid, actor_id) DO NOTHING",
-            )
-            .bind(cid_to_string(cid))
-            .bind(actor_id)
-            .bind(bytes.as_slice())
-            .execute(&mut *tx)
-            .await?;
-        }
+        insert_blocks(&mut tx, actor_id, &new_blocks).await?;
 
         // ⑧ actors UPDATE
         sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
@@ -1127,17 +1134,7 @@ impl AtpCommitService {
         let mut tx = self.pool.begin().await?;
 
         // ⑦ atp_blocks INSERT
-        for (cid, bytes) in &new_blocks {
-            sqlx::query(
-                "INSERT INTO atp_blocks (cid, actor_id, bytes) VALUES ($1, $2, $3)
-                 ON CONFLICT (cid, actor_id) DO NOTHING",
-            )
-            .bind(cid_to_string(cid))
-            .bind(actor_id)
-            .bind(bytes.as_slice())
-            .execute(&mut *tx)
-            .await?;
-        }
+        insert_blocks(&mut tx, actor_id, &new_blocks).await?;
 
         // ⑧ actors UPDATE
         sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
@@ -1282,17 +1279,7 @@ impl AtpCommitService {
 
         let mut tx = self.pool.begin().await?;
 
-        for (cid, bytes) in &new_blocks {
-            sqlx::query(
-                "INSERT INTO atp_blocks (cid, actor_id, bytes) VALUES ($1, $2, $3)
-                 ON CONFLICT (cid, actor_id) DO NOTHING",
-            )
-            .bind(cid_to_string(cid))
-            .bind(actor_id)
-            .bind(bytes.as_slice())
-            .execute(&mut *tx)
-            .await?;
-        }
+        insert_blocks(&mut tx, actor_id, &new_blocks).await?;
 
         sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
             .bind(&commit_cid_str)
@@ -1434,17 +1421,7 @@ impl AtpCommitService {
 
         let mut tx = self.pool.begin().await?;
 
-        for (cid, bytes) in &new_blocks {
-            sqlx::query(
-                "INSERT INTO atp_blocks (cid, actor_id, bytes) VALUES ($1, $2, $3)
-                 ON CONFLICT (cid, actor_id) DO NOTHING",
-            )
-            .bind(cid_to_string(cid))
-            .bind(actor_id)
-            .bind(bytes.as_slice())
-            .execute(&mut *tx)
-            .await?;
-        }
+        insert_blocks(&mut tx, actor_id, &new_blocks).await?;
 
         sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
             .bind(&commit_cid_str)

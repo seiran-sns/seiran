@@ -85,16 +85,21 @@ async fn save_ap_notes(pool: &sqlx::PgPool, ap_uri: &str, notes: &[ApNote]) -> R
         }
     };
 
-    let mut inserted = 0usize;
-    for note in notes {
-        let exists = sqlx::query("SELECT id FROM posts WHERE ap_object_id = $1 LIMIT 1")
-            .bind(&note.id)
-            .fetch_optional(pool)
+    // 過去ログは最大300件のため、1件ずつ重複チェックSELECTを発行せず、
+    // 対象の ap_object_id 全件を1クエリでまとめて引いてから判定する。
+    let note_ids: Vec<&str> = notes.iter().map(|n| n.id.as_str()).collect();
+    let existing_ids: std::collections::HashSet<String> =
+        sqlx::query_scalar("SELECT ap_object_id FROM posts WHERE ap_object_id = ANY($1)")
+            .bind(&note_ids)
+            .fetch_all(pool)
             .await
             .map_err(|e| format!("投稿重複チェック失敗: {}", e))?
-            .is_some();
+            .into_iter()
+            .collect();
 
-        if exists {
+    let mut inserted = 0usize;
+    for note in notes {
+        if existing_ids.contains(&note.id) {
             continue;
         }
 
@@ -201,16 +206,20 @@ async fn save_atp_posts(
         }
     };
 
-    let mut inserted = 0usize;
-    for post in posts {
-        let exists = sqlx::query("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
-            .bind(&post.uri)
-            .fetch_optional(pool)
+    // AP側と同様、at_uri全件を1クエリでまとめて引いてから判定する。
+    let post_uris: Vec<&str> = posts.iter().map(|p| p.uri.as_str()).collect();
+    let existing_uris: std::collections::HashSet<String> =
+        sqlx::query_scalar("SELECT at_uri FROM posts WHERE at_uri = ANY($1)")
+            .bind(&post_uris)
+            .fetch_all(pool)
             .await
             .map_err(|e| format!("投稿重複チェック失敗: {}", e))?
-            .is_some();
+            .into_iter()
+            .collect();
 
-        if exists {
+    let mut inserted = 0usize;
+    for post in posts {
+        if existing_uris.contains(&post.uri) {
             continue;
         }
 
