@@ -676,7 +676,14 @@ mod tests {
 
     #[test]
     fn notification_type_other_kinds_pass_through_unchanged() {
-        for kind in ["reaction", "follow", "followRequestAccepted", "mention", "reply", "quote"] {
+        for kind in [
+            "reaction",
+            "follow",
+            "followRequestAccepted",
+            "mention",
+            "reply",
+            "quote",
+        ] {
             assert_eq!(to_misskey_notification_type(kind), kind);
         }
     }
