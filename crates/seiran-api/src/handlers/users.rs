@@ -678,7 +678,16 @@ async fn build_profile_response(
     attach_poll_votes(&state.db, &mut pinned_posts, my_actor_id).await;
 
     // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
-    let avatar_url: Option<String> = state.actors.find_avatar_url(actor_id).await.ok().flatten();
+    let avatar_url: Option<String> = state
+        .actors
+        .find_avatar_url(actor_id)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| {
+            (actor.actor_type == "local")
+                .then(|| seiran_common::avatar::fallback_avatar_url(&state.local_domain, actor_id))
+        });
 
     // 本尊（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
     // その本尊アクターのハンドルとプロトコルをフロントの「本尊ワープ」導線に渡す。

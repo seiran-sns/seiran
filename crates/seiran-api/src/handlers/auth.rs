@@ -50,7 +50,18 @@ pub struct UserInfo {
 /// actors.avatar_media_id がある場合は storage_providers から公開 URL を解決し、
 /// なければ actors.avatar_url（リモート由来）をそのまま使う。
 async fn fetch_avatar_url(state: &AppState, actor_id: i64) -> Option<String> {
-    state.actors.find_avatar_url(actor_id).await.ok().flatten()
+    state
+        .actors
+        .find_avatar_url(actor_id)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| {
+            Some(seiran_common::avatar::fallback_avatar_url(
+                &state.local_domain,
+                actor_id,
+            ))
+        })
 }
 
 #[derive(Deserialize)]
@@ -242,7 +253,10 @@ pub async fn register(
             email,
             role: "user".to_string(),
             actor_id,
-            avatar_url: None,          // 登録直後はアバター未設定
+            avatar_url: Some(seiran_common::avatar::fallback_avatar_url(
+                &state.local_domain,
+                actor_id,
+            )),
             language_preference: None, // 登録直後は「自動」
         },
     }))

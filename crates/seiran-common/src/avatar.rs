@@ -14,7 +14,7 @@ fn seeded(actor_id: i64) -> u64 {
 
 /// actor ID から常に同じ代替アバター URL を組み立てる。
 pub fn fallback_avatar_url(local_domain: &str, actor_id: i64) -> String {
-    format!("https://{local_domain}/api/avatars/{actor_id}?v=3")
+    format!("https://{local_domain}/api/avatars/{actor_id}?v=4")
 }
 
 /// actor ID をシードに、背景・顔色・表情を決定論的に生成する。
@@ -43,7 +43,7 @@ pub fn fallback_avatar_svg(actor_id: i64) -> String {
             center_x + 14
         ),
         3 => format!(
-            r#"<path d="M{} 51 H{} Q{} 79 {} 51 Z"/>"#,
+            r#"<path d="M{} 59 H{} Q{} 87 {} 59 Z"/>"#,
             center_x + 7,
             center_x - 7,
             center_x,
@@ -85,7 +85,7 @@ mod tests {
     fn url_uses_actor_id() {
         assert_eq!(
             fallback_avatar_url("example.com", 42),
-            "https://example.com/api/avatars/42?v=3"
+            "https://example.com/api/avatars/42?v=4"
         );
     }
 }

@@ -225,6 +225,9 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         p.actor_type
     };
     let is_local = actor_type == "local";
+    let avatar_url = p.avatar_url.or_else(|| {
+        is_local.then(|| seiran_common::avatar::fallback_avatar_url(&p.domain, p.actor_id))
+    });
 
     // リモート投稿の元URL: Fedi（AP Note ID）を優先し、無ければ Bsky（AT URI → bsky.app）を使う。
     // seiranリモート投稿は両方の実体を持つことがあるが、seiran自体はAP側が正規表現のためAP優先。
@@ -246,7 +249,7 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
             domain: Some(p.domain),
             display_name: p.display_name,
             actor_type,
-            avatar_url: p.avatar_url,
+            avatar_url,
         },
         attachments,
         renote_id: p.repost_of_post_id.map(|i| i.to_string()),
