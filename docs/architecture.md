@@ -154,7 +154,13 @@ pub struct SearchSession {
 
 **リモートメディアプロキシ（#87）**: フロントエンドは別オリジンのアバター、添付、サムネイル、本文・リアクションのカスタム絵文字を `GET /proxy?url=...` に変換する。同一オリジンのストレージURLは直接参照する。内蔵プロキシはHTTP(S)のみを許可し、資格情報・fragmentを拒否、DNS解決した全IPについてloopback/private/link-local/CGNAT等を拒否する。リダイレクト先も都度同じ検証を行い、5回・25MiB・20秒を上限とし、画像・動画・音声以外は中継しない。`site_settings.media_proxy_url` が設定されている場合は、Misskey互換の外部プロキシ `{base}/proxy?url=...` を利用する。SSRF対策を含むこの検証・取得ロジックは `handlers/media_proxy.rs::fetch_validated()` として切り出されており、`/proxy` エンドポイント自体と、リモート絵文字インポート（`handlers/admin/remote_emojis.rs`、#73。取得後は `prepare_image` → `media_store::store_image` を通して通常のアップロードと同じ経路で `media_files`/`custom_emojis` に登録する）の両方から使う。
 
+**未設定アバター（#211）**: ローカル actor にアップロード済みアバターがない場合は、`actor_id` をシードに色相・口・目の配置を決めた SVG を API ロールの `GET /api/avatars/:actor_id` で返す。同じ ID の画像は不変なため `immutable` で長期キャッシュする。生成ロジックと URL 組み立ては `seiran-common::avatar` に集約する。公開 URL を `/api` 配下に置くことで Cloudflare Tunnel の既存 backend ルーティングを利用する。
+
 **リモート絵文字カタログ・インポート（#73）**: AP受信（投稿本文・表示名・絵文字リアクションのいずれか）で見つけたカスタム絵文字は `remote_emojis` テーブルへ都度 `upsert_seen` される（画像自体は取り込まない、カタログのみ）。管理画面「絵文字」パネルの「リモート」タブと、NoteCard本文・絵文字リアクションの右クリックメニュー（管理者にのみ表示、`components/note/EmojiContextMenu.tsx`）の双方が、この一覧からの1件選択→カテゴリ/タグ/ライセンス入力ダイアログ（`components/admin/EmojiImportDialog.tsx`）→`POST /api/admin/emojis/remote/import` という同じ導線でローカルの `custom_emojis` へ取り込む。
+
+未設定アバターの顔は、目の間隔を 18/23/28 の3段階、口を各原型の80%サイズとする。笑顔の一種は上辺が直線で下側が曲線のD型とし、上端をほかの口と同程度の高さに揃える。フロントエンド用API・Misskey互換APIとも、ローカルアクターの画像が未設定なら同じ代替URLを返す。生成仕様を変更した際は、immutableキャッシュを更新できるよう代替アバターURLの `v` クエリも更新する。
+
+代替アバターの配信形式は、SVG非対応のMisskeyクライアントでも表示できるようPNGとする。APIは `image/png` を返し、形式変更時のimmutableキャッシュを避けるためURL版数を `v=5` とする。`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE=1` でAPIロールを一度だけ起動すると、画像未設定の全ローカルactorについて現在のATPプロフィールを再コミットし、Relay/AppViewへ再取得を促せる。通常起動では実行しない。
 
 ## 8. フロントエンド
 

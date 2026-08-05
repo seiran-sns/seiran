@@ -322,7 +322,18 @@ async fn create_repost(
         }
     }
 
-    let avatar_url = state.actors.find_avatar_url(actor_id).await.ok().flatten();
+    let avatar_url = state
+        .actors
+        .find_avatar_url(actor_id)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| {
+            Some(seiran_common::avatar::fallback_avatar_url(
+                &state.local_domain,
+                actor_id,
+            ))
+        });
     let mut repost_resp = NoteResponse {
         id: post_id.to_string(),
         text: String::new(),
@@ -805,7 +816,18 @@ async fn create_regular_post(
     .await;
 
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
-    let avatar_url = state.actors.find_avatar_url(actor_id).await.ok().flatten();
+    let avatar_url = state
+        .actors
+        .find_avatar_url(actor_id)
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| {
+            Some(seiran_common::avatar::fallback_avatar_url(
+                &state.local_domain,
+                actor_id,
+            ))
+        });
     let mut note_resp = NoteResponse {
         id: post_id.to_string(),
         text,

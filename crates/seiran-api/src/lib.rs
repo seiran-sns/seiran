@@ -453,6 +453,10 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         // サイトアイコンを favicon として返す（#42）
         .route("/favicon.ico", get(handlers::favicon::favicon))
+        .route(
+            "/api/avatars/:actor_id",
+            get(handlers::avatar::fallback_avatar),
+        )
         // Misskey互換メディアプロキシ（リモート画像のCORS回避、SSRF防止付き）
         .route("/proxy", get(handlers::media_proxy::proxy))
         // セットアップ（初回管理者作成）
@@ -956,8 +960,73 @@ pub fn spawn_startup_tasks(state: &AppState) {
         // #identity をブロードキャストする。
         tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
         backfill_identity_events(&state).await;
+        backfill_unset_avatar_profiles(&state).await;
         backfill_chat_declarations(&state).await;
     });
+}
+
+/// 明示的に有効化した起動時だけ、アバター未設定ユーザーのプロフィールを再コミットする。
+/// 既存レコードから新しい #commit を生成し、Relay/AppView にプロフィール再取得を促す。
+async fn backfill_unset_avatar_profiles(state: &AppState) {
+    if std::env::var("ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE").as_deref() != Ok("1") {
+        return;
+    }
+
+    let actor_ids = match sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM actors
+         WHERE actor_type = 'local' AND avatar_media_id IS NULL AND at_did IS NOT NULL
+         ORDER BY id",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(ids) => ids,
+        Err(error) => {
+            tracing::error!(
+                "[startup] 未設定アバタープロフィール対象取得失敗: {}",
+                error
+            );
+            return;
+        }
+    };
+
+    let total = actor_ids.len();
+    let mut succeeded = 0usize;
+    for actor_id in actor_ids {
+        let material = handlers::notes::fetch_atp_profile_material(state, actor_id).await;
+        let pinned_post = handlers::notes::resolve_bsky_pinned_post(state, actor_id).await;
+        match material {
+            Ok((display_name, description, _)) => match state
+                .atp_service
+                .commit_profile(
+                    actor_id,
+                    &display_name,
+                    description.as_deref(),
+                    None,
+                    pinned_post,
+                    chrono::Utc::now(),
+                )
+                .await
+            {
+                Ok(()) => succeeded += 1,
+                Err(error) => tracing::error!(
+                    "[startup] actor_id={} の未設定アバタープロフィール再コミット失敗: {}",
+                    actor_id,
+                    error
+                ),
+            },
+            Err(error) => tracing::error!(
+                "[startup] actor_id={} のATPプロフィール材料取得失敗: {}",
+                actor_id,
+                error
+            ),
+        }
+    }
+    tracing::info!(
+        "[startup] 未設定アバタープロフィール再コミット完了: {}/{}",
+        succeeded,
+        total
+    );
 }
 
 /// 全ローカルユーザーの ATP ハンドル TXT レコードを確保する（再デプロイ後の消失対策）。

@@ -93,7 +93,7 @@ pub async fn actor_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let row = sqlx::query(
-        "SELECT a.display_name, a.bio, \
+        "SELECT a.id, a.display_name, a.bio, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
                 mf.mime_type AS avatar_mime_type, a.profile_fields, a.emoji_map \
          FROM actors a \
@@ -108,17 +108,25 @@ pub async fn actor_handler(
 
     let (display_name, bio, avatar_url, avatar_mime_type, profile_fields, emoji_map) = match row {
         Ok(Some(r)) => {
+            let actor_id = r.try_get::<i64, _>("id").unwrap_or_default();
             let display_name = r
                 .try_get::<Option<String>, _>("display_name")
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| username.clone());
             let bio = r.try_get::<Option<String>, _>("bio").ok().flatten();
-            let avatar_url = r.try_get::<Option<String>, _>("avatar_url").ok().flatten();
-            let avatar_mime_type = r
-                .try_get::<Option<String>, _>("avatar_mime_type")
-                .ok()
-                .flatten();
+            let stored_avatar_url = r.try_get::<Option<String>, _>("avatar_url").ok().flatten();
+            let avatar_url = Some(stored_avatar_url.clone().unwrap_or_else(|| {
+                seiran_common::avatar::fallback_avatar_url(&state.local_domain, actor_id)
+            }));
+            let avatar_mime_type = stored_avatar_url
+                .as_ref()
+                .and_then(|_| {
+                    r.try_get::<Option<String>, _>("avatar_mime_type")
+                        .ok()
+                        .flatten()
+                })
+                .or_else(|| Some("image/svg+xml".to_string()));
             let profile_fields = r
                 .try_get::<serde_json::Value, _>("profile_fields")
                 .ok()

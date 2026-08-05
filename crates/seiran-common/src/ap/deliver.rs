@@ -1135,8 +1135,17 @@ pub async fn deliver_update_actor(
         .map_err(|e| ApError::Other(e.to_string()))?
         .unwrap_or_else(|| username.clone());
     let bio: Option<String> = row.try_get("bio").unwrap_or(None);
-    let avatar_url: Option<String> = row.try_get("avatar_url").unwrap_or(None);
-    let avatar_mime_type: Option<String> = row.try_get("avatar_mime_type").unwrap_or(None);
+    let stored_avatar_url: Option<String> = row.try_get("avatar_url").unwrap_or(None);
+    let avatar_url = Some(
+        stored_avatar_url
+            .clone()
+            .unwrap_or_else(|| crate::avatar::fallback_avatar_url(local_domain, actor_id)),
+    );
+    let avatar_mime_type: Option<String> = if stored_avatar_url.is_some() {
+        row.try_get("avatar_mime_type").unwrap_or(None)
+    } else {
+        Some("image/png".to_string())
+    };
     let emoji_map: serde_json::Value = row
         .try_get("emoji_map")
         .unwrap_or_else(|_| serde_json::json!({}));

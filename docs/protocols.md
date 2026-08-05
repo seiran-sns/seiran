@@ -273,10 +273,14 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 
 **通知の `user.avatarUrl` 解決**: `build_notifications` の通知起点ユーザー取得クエリは、ローカルユーザーのアバターを `actors.avatar_media_id → media_files → storage_providers` 経由で解決する（`build_user_detailed` 等、他の全ユーザー取得クエリと同じ `COALESCE(rtrim(sp.public_url,'/')||'/'||mf.storage_key, a.avatar_url)` パターン）。以前は `actors.avatar_url` を直接参照していたためローカルユーザーのアバターが常に欠落していた（同カラムはリモートアクター用の生URL格納にのみ使われるため）。
 
+**ローカル actor の代替アバター（#211）**: Misskey互換 API のユーザー変換では、ローカル actor の解決済みアバター URL が空なら `https://{LOCAL_DOMAIN}/api/avatars/{actor_id}` を `avatarUrl` に設定する。ActivityPub の Actor ドキュメントおよびプロフィール Update(Person) も同じ URLを `icon`（`mediaType: image/svg+xml`）として配送し、API の `GET /api/avatars/:actor_id` が SVG を返す。リモート actor の未設定アバターは送信元の状態を尊重し、代替しない。
+
 **`MisskeyUserDetailed.followersVisibility`/`followingVisibility`**: 本家Misskeyのフォロー/フォロワー一覧・数の公開範囲設定に相当するフィールド。seiranはこの設定自体に未対応のため常に `"public"` を返す。値が欠落しているとクライアントは非公開とみなし、`followersCount`/`followingCount`（値自体は正しく集計されている）の数値表示を鍵アイコンに置き換える。
 
 `POST /api/endpoints`は実装済みのMisskey互換API名を配列で返す。Ariaはこの一覧に`emojis`がある場合だけ`POST /api/emojis`を呼ぶため、絵文字一覧は既存の`GET /api/emojis`と同じ`fetch_public_emojis`からGET/POST両対応で返す（#145）。
 `POST /api/notes/reactions/create`では、Misskeyクライアントがローカルカスタム絵文字に用いる`:shortcode@.:`を、seiranの内部表現`:shortcode:`へAPI境界で正規化する。Unicode絵文字と既存の`:shortcode:`はそのまま扱い、リモートホスト付き絵文字はローカル絵文字へ誤変換しない（#145）。
+
+代替アバターの実体とActivityPub `icon.mediaType` は `image/png` とする。Misskey互換APIの `avatarUrl` はPNG URL（`?v=5`）を返す。AT ProtocolのプロフィールはURL型アバターを格納できないためavatar blob未設定のままだが、`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE=1` の一回限りの起動処理で画像未設定ユーザーの `app.bsky.actor.profile/self` を再コミットし、各コミット後の `requestCrawl` によりRelayへ新しい #commit の取得を促す。
 
 ## 8. 通知・リアルタイム配信
 
