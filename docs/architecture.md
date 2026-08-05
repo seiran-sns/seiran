@@ -64,7 +64,7 @@ seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サ�
 
 - `docker-compose.yml`（split-role）: `db` / `redis`（ジョブキュー共有に必須）/ `api` / `federation-inbox` / `worker` / `atp-repo` / `frontend` / `nginx`（`docker/nginx.conf`）/ `tunnel`。`config-data` ボリュームで `secrets.toml` を全バックエンド間で共有永続化する。サービス間通信はコンテナ内部DNS（`db:5432`等）を使うため`db`のホスト公開は本来不要だが、運用機へのSSHトンネル経由psqlアクセス（DBeaver等）のため`127.0.0.1:5432`（ループバックのみ）でホストへ公開する（`0.0.0.0`にはしない、#220）。
 - `docker-compose.mono.yml`（単一コンテナ）: `db` / `seiran-server`（role=all）/ `frontend` / `nginx`（`docker/nginx.mono.conf`）/ `docker-gen`（`--scale seiran-server=N` によるスケールアウト時に nginx へ反映）/ `tunnel`。Redis サービス自体が存在しない（同一プロセス内で完結するため不要）。`scripts/dev-up.sh`は`db`だけをこのcomposeで起動し、backend（`seiran-server`）はネイティブ`cargo run`でホスト側から接続するため、`db`は同じく`127.0.0.1:5432`（ループバックのみ）でホストへ公開する。
-- `db` サービスは両 compose とも `docker/Dockerfile.postgres`（`postgres:16-bookworm` ベースに pg_bigm をソースビルドで組み込み）からビルドする（#97）。`shared_preload_libraries=pg_bigm` を起動コマンドで渡す。
+- `db` サービスは両 compose とも `docker/Dockerfile.postgres`（`postgres:16-bookworm` ベースに pg_bigm をソースビルドで組み込み）からビルドする（#97）。`shared_preload_libraries=pg_bigm,pg_stat_statements` を起動コマンドで渡す。`pg_stat_statements`は公式イメージ標準同梱の拡張で、クエリ別の実行時間・呼び出し回数を計測できる（パフォーマンス調査の計測基盤、docs/code_audit_2026-08-05.md P-9）。`shared_preload_libraries`の変更はpostmaster再起動が必要なため、コンテナ再作成前は`CREATE EXTENSION`済みでも`pg_stat_statements`ビューへのクエリは失敗する。
 - `GET /health`（`seiran-api`、認証不要）: DBへ`SELECT 1`を発行できるかで200/503を返す外形監視用エンドポイント。「プロセスは起動しているがDBプールが枯渇/切断している」状態を外部監視から検知できるようにする（docs/code_audit_2026-08-05.md R-9）。`Role::All`/`Role::Api`のみで提供され、federation/worker/firehoseロールには無い。
 
 ## 4. 認証

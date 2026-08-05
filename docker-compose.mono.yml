@@ -16,12 +16,16 @@ services:
   # pg_bigm 組み込み済みイメージ（docker/Dockerfile.postgres, #97）。
   # LIKE 検索用の bigm インデックスを効かせるため shared_preload_libraries に
   # pg_bigm を積む（公式イメージの postgresql.conf を書き換えず起動引数で渡す）。
+  # pg_stat_statements は公式イメージに標準同梱の拡張で、クエリ別の実行時間・
+  # 呼び出し回数を計測できる（パフォーマンス調査の計測基盤、
+  # docs/code_audit_2026-08-05.md P-9）。shared_preload_libraries変更は
+  # postmasterの再起動が必要（コンテナ再作成が要る）。
   db:
     build:
       context: .
       dockerfile: docker/Dockerfile.postgres
     image: seiran-postgres:16-pgbigm
-    command: ["postgres", "-c", "shared_preload_libraries=pg_bigm"]
+    command: ["postgres", "-c", "shared_preload_libraries=pg_bigm,pg_stat_statements"]
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
