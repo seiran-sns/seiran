@@ -4,7 +4,7 @@ use axum::{
     response::IntoResponse,
 };
 
-/// GET /avatars/:actor_id — 未設定アバターの決定論的 SVG。
+/// GET /api/avatars/:actor_id — 未設定アバターの決定論的 SVG。
 pub async fn fallback_avatar(Path(actor_id): Path<i64>) -> impl IntoResponse {
     (
         [

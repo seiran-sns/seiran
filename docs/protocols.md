@@ -273,7 +273,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 
 **通知の `user.avatarUrl` 解決**: `build_notifications` の通知起点ユーザー取得クエリは、ローカルユーザーのアバターを `actors.avatar_media_id → media_files → storage_providers` 経由で解決する（`build_user_detailed` 等、他の全ユーザー取得クエリと同じ `COALESCE(rtrim(sp.public_url,'/')||'/'||mf.storage_key, a.avatar_url)` パターン）。以前は `actors.avatar_url` を直接参照していたためローカルユーザーのアバターが常に欠落していた（同カラムはリモートアクター用の生URL格納にのみ使われるため）。
 
-**ローカル actor の代替アバター（#211）**: Misskey互換 API のユーザー変換では、ローカル actor の解決済みアバター URL が空なら `https://{LOCAL_DOMAIN}/avatars/{actor_id}` を `avatarUrl` に設定する。ActivityPub の Actor ドキュメントおよびプロフィール Update(Person) も同じ URLを `icon`（`mediaType: image/svg+xml`）として配送する。リモート actor の未設定アバターは送信元の状態を尊重し、代替しない。
+**ローカル actor の代替アバター（#211）**: Misskey互換 API のユーザー変換では、ローカル actor の解決済みアバター URL が空なら `https://{LOCAL_DOMAIN}/api/avatars/{actor_id}` を `avatarUrl` に設定する。ActivityPub の Actor ドキュメントおよびプロフィール Update(Person) も同じ URLを `icon`（`mediaType: image/svg+xml`）として配送し、API の `GET /api/avatars/:actor_id` が SVG を返す。リモート actor の未設定アバターは送信元の状態を尊重し、代替しない。
 
 **`MisskeyUserDetailed.followersVisibility`/`followingVisibility`**: 本家Misskeyのフォロー/フォロワー一覧・数の公開範囲設定に相当するフィールド。seiranはこの設定自体に未対応のため常に `"public"` を返す。値が欠落しているとクライアントは非公開とみなし、`followersCount`/`followingCount`（値自体は正しく集計されている）の数値表示を鍵アイコンに置き換える。
 
