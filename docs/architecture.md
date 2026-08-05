@@ -160,6 +160,8 @@ pub struct SearchSession {
 
 未設定アバターの顔は、目の間隔を 18/23/28 の3段階、口を各原型の80%サイズとする。笑顔の一種は上辺が直線で下側が曲線のD型とし、上端をほかの口と同程度の高さに揃える。フロントエンド用API・Misskey互換APIとも、ローカルアクターの画像が未設定なら同じ代替URLを返す。生成仕様を変更した際は、immutableキャッシュを更新できるよう代替アバターURLの `v` クエリも更新する。
 
+代替アバターの配信形式は、SVG非対応のMisskeyクライアントでも表示できるようPNGとする。APIは `image/png` を返し、形式変更時のimmutableキャッシュを避けるためURL版数を `v=5` とする。`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE=1` でAPIロールを一度だけ起動すると、画像未設定の全ローカルactorについて現在のATPプロフィールを再コミットし、Relay/AppViewへ再取得を促せる。通常起動では実行しない。
+
 ## 8. フロントエンド
 
 React 18 + Vite + TypeScript（react-router-dom v6）。`frontend/src/` 構成:

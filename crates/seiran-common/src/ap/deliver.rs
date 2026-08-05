@@ -1144,7 +1144,7 @@ pub async fn deliver_update_actor(
     let avatar_mime_type: Option<String> = if stored_avatar_url.is_some() {
         row.try_get("avatar_mime_type").unwrap_or(None)
     } else {
-        Some("image/svg+xml".to_string())
+        Some("image/png".to_string())
     };
     let emoji_map: serde_json::Value = row
         .try_get("emoji_map")

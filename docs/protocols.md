@@ -280,6 +280,8 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 `POST /api/endpoints`は実装済みのMisskey互換API名を配列で返す。Ariaはこの一覧に`emojis`がある場合だけ`POST /api/emojis`を呼ぶため、絵文字一覧は既存の`GET /api/emojis`と同じ`fetch_public_emojis`からGET/POST両対応で返す（#145）。
 `POST /api/notes/reactions/create`では、Misskeyクライアントがローカルカスタム絵文字に用いる`:shortcode@.:`を、seiranの内部表現`:shortcode:`へAPI境界で正規化する。Unicode絵文字と既存の`:shortcode:`はそのまま扱い、リモートホスト付き絵文字はローカル絵文字へ誤変換しない（#145）。
 
+代替アバターの実体とActivityPub `icon.mediaType` は `image/png` とする。Misskey互換APIの `avatarUrl` はPNG URL（`?v=5`）を返す。AT ProtocolのプロフィールはURL型アバターを格納できないためavatar blob未設定のままだが、`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE=1` の一回限りの起動処理で画像未設定ユーザーの `app.bsky.actor.profile/self` を再コミットし、各コミット後の `requestCrawl` によりRelayへ新しい #commit の取得を促す。
+
 ## 8. 通知・リアルタイム配信
 
 `seiran-common::streaming::StreamHub`（プロセス内 `tokio::broadcast`、容量512）が `{"type":kind,"body":body}` を配信する。`GET /api/streaming?token=<JWT>` でWebSocket接続し、`recipients` に自分の actor_id が含まれるイベントのみ転送される。
