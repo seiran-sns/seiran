@@ -152,7 +152,7 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
         .await
         .expect("表示メタデータ更新に失敗");
     let voter_actor_id: i64 = sqlx::query_scalar(
-        "SELECT a.id FROM actors a JOIN users u ON u.id = a.user_id WHERE u.username = 'seiran1'",
+        "SELECT a.id FROM actors a JOIN users u ON u.id = a.user_id WHERE a.username = 'seiran1'",
     )
     .fetch_one(&pool)
     .await
