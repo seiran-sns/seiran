@@ -29,8 +29,13 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - db-data:/var/lib/postgresql/data
+    # ループバックのみへバインド（#220）。scripts/dev-up.sh はdbだけこのcomposeで
+    # 起動し、backend（seiran-server）はネイティブ`cargo run`でホスト側から
+    # DATABASE_URL=localhost:5432 として接続するため、ホストへの公開自体は必要。
+    # 0.0.0.0 ではなく127.0.0.1に限定することで、外部（インターネット）からの
+    # 直接アクセスは防ぎつつローカル開発・admin用psqlアクセスは維持する。
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     networks:
       - internal
     healthcheck:
