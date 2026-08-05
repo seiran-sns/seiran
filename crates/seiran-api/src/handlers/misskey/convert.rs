@@ -37,7 +37,10 @@ pub fn user_lite(
             Some(domain.to_string())
         },
         name: display_name.map(|s| s.to_string()),
-        avatar_url: avatar_url.map(|s| s.to_string()),
+        avatar_url: avatar_url.map(str::to_string).or_else(|| {
+            (domain == local_domain)
+                .then(|| seiran_common::avatar::fallback_avatar_url(local_domain, actor_id))
+        }),
         is_bot: false,
         is_cat: false,
         emojis: BTreeMap::new(),
@@ -676,7 +679,14 @@ mod tests {
 
     #[test]
     fn notification_type_other_kinds_pass_through_unchanged() {
-        for kind in ["reaction", "follow", "followRequestAccepted", "mention", "reply", "quote"] {
+        for kind in [
+            "reaction",
+            "follow",
+            "followRequestAccepted",
+            "mention",
+            "reply",
+            "quote",
+        ] {
             assert_eq!(to_misskey_notification_type(kind), kind);
         }
     }

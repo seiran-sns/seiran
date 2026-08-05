@@ -2,6 +2,7 @@ pub mod account;
 pub mod actor_search;
 pub mod admin;
 pub mod auth;
+pub mod avatar;
 pub mod blocks;
 pub mod dm;
 pub mod drive;
