@@ -91,6 +91,7 @@ async fn create_note(...) -> impl IntoResponse {
 | 8 | `reqwest::Client::new()` を関数内でローカルに生成する | `AppState` または引数から受け取る |
 | 9 | ビジネスロジック関数でファイルパスに `main.rs` を選ぶ | `handlers/` または `common/src/*/service.rs` に置く |
 | 10 | スタブ値（`user_id = 1`, `username = "test_user"`）を本番コードに残す | セッションまたはトークンから実際のユーザーを取得する |
+| 11 | 新規クエリを `sqlx::query`/`query_as`（実行時検証）で書く | `sqlx::query!`/`query_as!`/`query_scalar!`（コンパイル時検証）を使う。SELECT列と構造体のズレを実行時ではなくビルド時に検出できる（docs/code_audit_2026-08-05.md R-6）。`cargo sqlx prepare --workspace`の実行を忘れないこと |
 
 ---
 
