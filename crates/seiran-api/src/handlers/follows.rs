@@ -1,10 +1,12 @@
+use std::collections::HashSet;
+
 use axum::{extract::State, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use seiran_common::atp::fetch_bsky_profile;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
-use seiran_common::repository::Actor;
+use seiran_common::repository::{Actor, NotificationKind};
 use seiran_common::{generate_snowflake_id, ApError};
 
 use crate::error::ApiError;
@@ -55,13 +57,13 @@ pub async fn create_follow(
     // ローカルユーザー名（@ なし・ドットなし）→ ローカルフォロー
     let parts: Vec<&str> = t.splitn(2, '@').collect();
     if parts.len() == 1 {
-        return follow_local(parts[0], user.actor_id, &state)
+        return follow_local(parts[0], user.actor_id, &user.username, &state)
             .await
             .into_response();
     }
     // `alice@seiran.org` → ローカルフォロー
     if parts.len() == 2 && parts[1] == state.local_domain {
-        return follow_local(parts[0], user.actor_id, &state)
+        return follow_local(parts[0], user.actor_id, &user.username, &state)
             .await
             .into_response();
     }
@@ -203,7 +205,12 @@ pub async fn unfollow_target(
 ///
 /// `local_actor_id` は `AuthedUser` extractor が既に解決済みのため、ここで改めて
 /// `find_local_by_user_id` を呼ばない（重複クエリの排除）。
-async fn follow_local(username: &str, local_actor_id: i64, state: &AppState) -> impl IntoResponse {
+async fn follow_local(
+    username: &str,
+    local_actor_id: i64,
+    local_username: &str,
+    state: &AppState,
+) -> impl IntoResponse {
     let target_actor = match state
         .actors
         .find_by_username_domain(username, &state.local_domain)
@@ -251,13 +258,50 @@ async fn follow_local(username: &str, local_actor_id: i64, state: &AppState) -> 
         }
     };
 
-    if let Err(e) = state
+    let inserted = match state
         .follows
         .insert_accepted_bsky(local_actor_id, target_actor.id, &rkey)
         .await
     {
-        return ApiError::Internal(format!("[follow/local] follows INSERT 失敗: {}", e))
-            .into_response();
+        Ok(inserted) => inserted,
+        Err(e) => {
+            return ApiError::Internal(format!("[follow/local] follows INSERT 失敗: {}", e))
+                .into_response();
+        }
+    };
+
+    // 外部から受信した Follow と同様、成立したローカルフォローも相手へ通知する。
+    // 既存関係への再リクエストでは通知を重複させない。
+    if inserted {
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = state
+            .notifications
+            .insert(
+                notif_id,
+                target_actor.id,
+                NotificationKind::Follow,
+                Some(local_actor_id),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+        {
+            tracing::error!("[follow/local] notifications INSERT 失敗: {}", e);
+        }
+
+        state.stream_hub.publish_event(
+            HashSet::from([target_actor.id]),
+            "follow",
+            json!({
+                "actor": {
+                    "username": local_username,
+                    "domain": &state.local_domain,
+                }
+            }),
+        );
     }
 
     tracing::info!(

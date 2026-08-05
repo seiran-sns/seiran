@@ -21,6 +21,33 @@ test("ローカルユーザーをフォローすると即座にフォロー中�
   await expect(page.getByRole("button", { name: "フォロー解除" })).toBeVisible();
 });
 
+test("ローカルユーザーをフォローすると相手に通知され、再リクエストでは重複しない（#212）", async ({ request }) => {
+  const follower = await registerUserViaApi(request, "e2efolnotif");
+  const target = await registerUserViaApi(request, "e2efolnotiftgt");
+
+  for (let i = 0; i < 2; i += 1) {
+    const followRes = await request.post("/api/follows/create", {
+      headers: { Authorization: `Bearer ${follower.token}` },
+      data: { target: target.username },
+    });
+    expect(followRes.ok(), `follow failed: ${followRes.status()} ${await followRes.text()}`).toBeTruthy();
+  }
+
+  const notificationsRes = await request.post("/api/i/notifications", {
+    headers: { Authorization: `Bearer ${target.token}` },
+    data: { limit: 20, markAsRead: false },
+  });
+  expect(notificationsRes.ok(), await notificationsRes.text()).toBeTruthy();
+  const notifications = (await notificationsRes.json()) as Array<{
+    type: string;
+    user?: { username: string };
+  }>;
+  const matching = notifications.filter(
+    (notification) => notification.type === "follow" && notification.user?.username === follower.username,
+  );
+  expect(matching).toHaveLength(1);
+});
+
 test("プロフィール画面のフォロー中/フォロワータブに一覧が表示される（#56）", async ({ page, request }) => {
   const follower = await registerUserViaApi(request, "e2eflw");
   const target = await registerUserViaApi(request, "e2eflwtgt");
