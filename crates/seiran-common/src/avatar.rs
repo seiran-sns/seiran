@@ -24,7 +24,7 @@ pub fn fallback_avatar_svg(actor_id: i64) -> String {
     let background_hue = (hue + 90) % 360;
     let horizontal = ((seed >> 9) % 3) as i32 - 1;
     let eye_y = 43 + (((seed >> 17) % 3) as i32 - 1) * 5;
-    let eye_gap = 13 + ((seed >> 25) % 3) as i32 * 5;
+    let eye_gap = 18 + ((seed >> 25) % 3) as i32 * 5;
     let center_x = 50 + horizontal * 9;
     let left_eye = center_x - eye_gap / 2;
     let right_eye = center_x + eye_gap / 2;
@@ -43,11 +43,9 @@ pub fn fallback_avatar_svg(actor_id: i64) -> String {
             center_x + 14
         ),
         3 => format!(
-            r#"<path d="M{} 58 Q{} 65 {} 72 Q{} 65 {} 58 Z"/>"#,
+            r#"<path d="M{} 58 V72 Q{} 65 {} 58 Z"/>"#,
             center_x - 14,
-            center_x + 3,
-            center_x - 14,
-            center_x - 2,
+            center_x + 14,
             center_x - 14
         ),
         4 => format!(
@@ -68,7 +66,7 @@ pub fn fallback_avatar_svg(actor_id: i64) -> String {
     };
 
     format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="hsl({background_hue} 65% 72%)"/><circle cx="50" cy="50" r="40" fill="hsl({hue} 65% 72%)"/><g fill="#000"><circle cx="{left_eye}" cy="{eye_y}" r="3"/><circle cx="{right_eye}" cy="{eye_y}" r="3"/></g><g fill="none" stroke="#000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">{mouth}</g></svg>"##
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="hsl({background_hue} 65% 72%)"/><circle cx="50" cy="50" r="40" fill="hsl({hue} 65% 72%)"/><g fill="#000"><circle cx="{left_eye}" cy="{eye_y}" r="3"/><circle cx="{right_eye}" cy="{eye_y}" r="3"/></g><g fill="none" stroke="#000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" transform="translate({center_x} 65) scale(.8) translate(-{center_x} -65)">{mouth}</g></svg>"##
     )
 }
 
