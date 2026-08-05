@@ -124,7 +124,7 @@ pub async fn setup(
         })?;
 
     Ok(Json(AuthResponse {
-        token,
+        token: token.clone(),
         user: UserInfo {
             id: user_id,
             username: req.username,
@@ -133,6 +133,7 @@ pub async fn setup(
             actor_id,
             avatar_url: None,          // セットアップ直後はアバター未設定
             language_preference: None, // セットアップ直後は「自動」
+            token,
         },
     }))
 }

@@ -46,6 +46,10 @@ export default function AccountSettingsPage() {
   const [passwordError, setPasswordError] = useState("");
   const [passwordSaved, setPasswordSaved] = useState(false);
 
+  // 全セッションからログアウト（発行済みJWTの一括失効）
+  const [revoking, setRevoking] = useState(false);
+  const [revokeError, setRevokeError] = useState("");
+
   // 退会
   const [withdrawHandle, setWithdrawHandle] = useState("");
   const [withdrawing, setWithdrawing] = useState(false);
@@ -175,6 +179,21 @@ export default function AccountSettingsPage() {
     }
   }
 
+  async function revokeAllSessions() {
+    if (!confirm(t("account:accountSettings.revokeAllSessionsConfirm"))) return;
+    setRevoking(true);
+    setRevokeError("");
+    try {
+      await api.account.revokeAllSessions();
+      // このリクエスト自身のトークンも失効するため、自分自身もログアウトする。
+      logout();
+      navigate("/login");
+    } catch (err) {
+      setRevokeError(getErrorMessage(err));
+      setRevoking(false);
+    }
+  }
+
   async function withdraw(e: FormEvent) {
     e.preventDefault();
     if (!confirm(t("profile:profileEditPage.withdrawConfirm"))) return;
@@ -281,6 +300,20 @@ export default function AccountSettingsPage() {
           {changingPassword ? t("common:saving") : t("account:accountSettings.changePasswordButton")}
         </button>
       </form>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>{t("account:accountSettings.revokeAllSessionsTitle")}</h3>
+        <p>{t("account:accountSettings.revokeAllSessionsDescription")}</p>
+        {revokeError && <p className={styles.error}>{revokeError}</p>}
+        <button
+          className={styles.save}
+          type="button"
+          onClick={revokeAllSessions}
+          disabled={revoking}
+        >
+          {revoking ? t("common:saving") : t("account:accountSettings.revokeAllSessionsButton")}
+        </button>
+      </section>
 
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>{t("account:accountSettings.totpTitle")}</h3>

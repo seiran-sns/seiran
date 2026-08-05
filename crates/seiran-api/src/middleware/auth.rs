@@ -14,6 +14,7 @@ pub async fn extract_auth(
     headers: &HeaderMap,
     auth: &LocalAuthProvider,
     app_tokens: &dyn AppTokenRepository,
+    users: &dyn UserRepository,
 ) -> Result<AuthUser, ApiError> {
     let bearer = headers
         .get("authorization")
@@ -35,6 +36,20 @@ pub async fn extract_auth(
         return Err(ApiError::Unauthorized("トークンが無効化されています"));
     }
 
+    // パスワード変更・リセットより前に発行されたトークンを一括拒否する
+    // （token_valid_after が未設定なら制約なし）。
+    if let Some(valid_after) = users
+        .find_token_valid_after(verified.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+    {
+        if (verified.iat as i64) < valid_after.timestamp() {
+            return Err(ApiError::Unauthorized(
+                "パスワード変更により無効化されたトークンです",
+            ));
+        }
+    }
+
     Ok(AuthUser {
         user_id: verified.user_id,
         email: verified.email,
@@ -50,7 +65,7 @@ async fn require_role_in(
     users: &dyn UserRepository,
     allowed: &[&str],
 ) -> Result<AuthUser, ApiError> {
-    let user = extract_auth(headers, auth, app_tokens).await?;
+    let user = extract_auth(headers, auth, app_tokens, users).await?;
     let role = users
         .find_role_by_user_id(user.user_id)
         .await

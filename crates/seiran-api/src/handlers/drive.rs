@@ -145,7 +145,14 @@ pub async fn create_drive_file(
 
     let original_filename = filename_from_name_field.or(filename_from_file_field);
 
-    let auth = match extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await {
+    let auth = match extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await
+    {
         Ok(auth) => auth,
         Err(err) => {
             let token = token_field.ok_or(err)?;

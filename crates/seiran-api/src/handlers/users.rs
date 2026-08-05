@@ -57,11 +57,15 @@ pub async fn user_posts(
     let until_id: Option<i64> = params.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = params.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let my_user_id: Option<i64> =
-        extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref())
-            .await
-            .ok()
-            .map(|u| u.user_id);
+    let my_user_id: Option<i64> = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await
+    .ok()
+    .map(|u| u.user_id);
     let my_actor_id: Option<i64> = match my_user_id {
         Some(uid) => state
             .actors
@@ -376,11 +380,15 @@ pub async fn user_profile(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     // ログインユーザーの user_id（フォロー状態確認用）
-    let my_user_id: Option<i64> =
-        extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref())
-            .await
-            .ok()
-            .map(|u| u.user_id);
+    let my_user_id: Option<i64> = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await
+    .ok()
+    .map(|u| u.user_id);
 
     let q = params.q.trim().trim_start_matches('@');
 
@@ -1030,7 +1038,13 @@ pub async fn update_profile(
     State(state): State<AppState>,
     Json(req): Json<UpdateProfileRequest>,
 ) -> impl IntoResponse {
-    let auth_user = match extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await
+    let auth_user = match extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await
     {
         Ok(u) => u,
         Err(e) => return e.into_response(),

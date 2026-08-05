@@ -23,6 +23,12 @@ struct LocalClaims {
     sub: String,
     email: String,
     exp: usize,
+    /// 発行時刻（UNIX秒）。パスワード変更等による一括失効（`token_valid_after`）の
+    /// 判定に使う。この機能追加前に発行された既存トークンには含まれないため、
+    /// 欠落時は0（1970年）として扱い、`token_valid_after`が未設定のユーザーには
+    /// 影響しないようにする（デプロイ時の強制全ログアウトを避けるための移行措置）。
+    #[serde(default)]
+    iat: usize,
     /// トークン個体の識別子（#60: アプリトークン管理）。MiAuth 発行分のみ
     /// `app_tokens` テーブルに記録され、無効化チェックに使われる。
     jti: uuid::Uuid,
@@ -45,6 +51,8 @@ pub struct VerifiedUser {
     pub user_id: i64,
     pub email: String,
     pub jti: uuid::Uuid,
+    /// トークン発行時刻（UNIX秒）。
+    pub iat: usize,
 }
 
 pub struct LocalAuthProvider {
@@ -89,7 +97,8 @@ impl LocalAuthProvider {
         user_id: i64,
         email: &str,
     ) -> Result<(String, uuid::Uuid), AuthError> {
-        let exp = chrono::Utc::now()
+        let now = chrono::Utc::now();
+        let exp = now
             .checked_add_signed(chrono::Duration::days(7))
             .unwrap()
             .timestamp() as usize;
@@ -99,6 +108,7 @@ impl LocalAuthProvider {
             sub: format!("local|{}", user_id),
             email: email.to_string(),
             exp,
+            iat: now.timestamp() as usize,
             jti,
         };
 
@@ -129,6 +139,7 @@ impl LocalAuthProvider {
             user_id,
             email: token_data.claims.email,
             jti: token_data.claims.jti,
+            iat: token_data.claims.iat,
         })
     }
 

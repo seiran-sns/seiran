@@ -4,6 +4,14 @@ import i18n from "../i18n";
 import { api, User, getToken, setUnauthorizedHandler } from "../api/client";
 import { resolveSession } from "./authSession";
 
+/**
+ * JWTのスライディング延命（有効期限7日）ポーリング間隔。使い続けている限り
+ * ログアウトされないよう、期限より十分短い間隔で`/auth/me`を呼び新しいトークンへ
+ * 差し替える（タブを開いたままにしている間だけ効く。閉じて7日超放置すれば
+ * 再ログインが必要になるのは意図どおり）。
+ */
+const TOKEN_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 /** サーバーに保存された言語設定（#55）があれば、ブラウザ判定・localStorage より優先して適用する。 */
 function applyLanguagePreference(user: User) {
   if (user.language_preference) {
@@ -41,6 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     resolveSession(() => api.auth.me()).then((result) => {
       if (cancelled) return;
       if (result.kind === "authenticated") {
+        localStorage.setItem("seiran_token", result.user.token);
         setUser(result.user);
         applyLanguagePreference(result.user);
       } else if (result.kind === "expired") {
@@ -89,6 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             logout();
             navigate("/login", { replace: true });
           } else if (result.kind === "authenticated") {
+            localStorage.setItem("seiran_token", result.user.token);
             setUser(result.user);
             applyLanguagePreference(result.user);
           }
@@ -102,6 +112,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUnauthorizedHandler(null);
     };
   }, [navigate]);
+
+  // JWTのスライディング延命: タブを開いたまま使い続けている限り、7日の有効期限が
+  // 切れる前に定期的に新しいトークンへ差し替える。ログインしていない間は
+  // `/auth/me`を呼ばない（getTokenで都度確認する。userステートを依存配列に
+  // 入れるとリフレッシュのたびにuserオブジェクトが新しくなりintervalが
+  // 張り直されてしまうため、mount時に一度だけ張る）。
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!getToken()) return;
+      void resolveSession(() => api.auth.me()).then((result) => {
+        if (result.kind === "authenticated") {
+          localStorage.setItem("seiran_token", result.user.token);
+        } else if (result.kind === "expired") {
+          logout();
+          navigate("/login", { replace: true });
+        }
+      });
+    }, TOKEN_REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout }}>

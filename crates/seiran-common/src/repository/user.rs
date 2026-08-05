@@ -56,12 +56,26 @@ pub trait UserRepository: Send + Sync {
     /// メールアドレスから user_id を取得する（パスワードリセット申請用）。
     async fn find_id_by_email(&self, email: &str) -> Result<Option<i64>, sqlx::Error>;
 
-    /// パスワードハッシュを更新する。
+    /// パスワードハッシュを更新する。パスワード変更で古いJWTを一括失効させるため、
+    /// `token_valid_after` も同時に現在時刻へ更新する。
     async fn update_password_hash(
         &self,
         user_id: i64,
         password_hash: &str,
     ) -> Result<(), sqlx::Error>;
+
+    /// JWT失効判定用の基準時刻を取得する（`token_valid_after`）。
+    /// `None` は「制約なし」（一度もパスワード変更していない等）。
+    async fn find_token_valid_after(
+        &self,
+        user_id: i64,
+    ) -> Result<Option<DateTime<Utc>>, sqlx::Error>;
+
+    /// `token_valid_after` を現在時刻へ更新し、それより前に発行された全JWT
+    /// （このリクエストの認証に使ったトークン自身を含む）を一括失効させる。
+    /// アカウント設定画面の「全セッションからログアウト」ボタン用（パスワード変更・
+    /// リセット以外の明示的な一括失効操作）。
+    async fn revoke_all_tokens(&self, user_id: i64) -> Result<(), sqlx::Error>;
 
     /// メールアドレスを更新する（設定画面からのメールアドレス変更確定用）。
     async fn update_email(&self, user_id: i64, email: &str) -> Result<(), sqlx::Error>;
@@ -191,8 +205,30 @@ impl UserRepository for PgUserRepository {
         user_id: i64,
         password_hash: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
+        sqlx::query(
+            "UPDATE users SET password_hash = $1, updated_at = NOW(), token_valid_after = NOW() WHERE id = $2",
+        )
             .bind(password_hash)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn find_token_valid_after(
+        &self,
+        user_id: i64,
+    ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+        let row: Option<(Option<DateTime<Utc>>,)> =
+            sqlx::query_as("SELECT token_valid_after FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.and_then(|(v,)| v))
+    }
+
+    async fn revoke_all_tokens(&self, user_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET token_valid_after = NOW() WHERE id = $1")
             .bind(user_id)
             .execute(&self.pool)
             .await

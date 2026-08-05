@@ -45,6 +45,10 @@ pub struct UserInfo {
     pub avatar_url: Option<String>,
     /// 表示言語設定（`ja` / `en`）。`None` は「自動」（ブラウザ設定に従う）。
     pub language_preference: Option<String>,
+    /// JWTのスライディング延命（#222関連）。`GET /api/auth/me`の成功のたびに新しい
+    /// 有効期限7日のトークンを発行し直す。フロントは定期ポーリングでこれを受け取り
+    /// 保存し直すことで、使い続けている限りログアウトされないようにする。
+    pub token: String,
 }
 
 /// actors.avatar_media_id がある場合は storage_providers から公開 URL を解決し、
@@ -246,7 +250,7 @@ pub async fn register(
         })?;
 
     Ok(Json(AuthResponse {
-        token,
+        token: token.clone(),
         user: UserInfo {
             id: user_id,
             username: req.username,
@@ -258,6 +262,7 @@ pub async fn register(
                 actor_id,
             )),
             language_preference: None, // 登録直後は「自動」
+            token,
         },
     }))
 }
@@ -307,7 +312,7 @@ pub(crate) async fn finish_login(
         .flatten();
 
     Ok(AuthResponse {
-        token,
+        token: token.clone(),
         user: UserInfo {
             id: user_id,
             username,
@@ -316,6 +321,7 @@ pub(crate) async fn finish_login(
             actor_id,
             avatar_url,
             language_preference,
+            token,
         },
     })
 }
@@ -353,7 +359,8 @@ pub async fn login(
     let row = match row {
         Some(r) if r.password_hash.is_some() => r,
         _ => {
-            let _ = LocalAuthProvider::verify_password(&req.password, LocalAuthProvider::dummy_hash());
+            let _ =
+                LocalAuthProvider::verify_password(&req.password, LocalAuthProvider::dummy_hash());
             return Err(ApiError::Unauthorized("INVALID_CREDENTIALS"));
         }
     };
@@ -399,9 +406,14 @@ pub async fn me(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<UserInfo>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref())
-        .await
-        .map_err(|_| ApiError::Unauthorized("UNAUTHORIZED"))?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await
+    .map_err(|_| ApiError::Unauthorized("UNAUTHORIZED"))?;
 
     let actor = state
         .actors
@@ -430,6 +442,12 @@ pub async fn me(
         .ok()
         .flatten();
 
+    // スライディング延命（#222関連）: 呼ぶたびに新しい7日間有効なトークンを発行する。
+    let (token, _jti) = state
+        .local_auth
+        .generate_token(auth_user.user_id, &auth_user.email)
+        .map_err(|e| ApiError::Internal(format!("[me] トークン再発行失敗: {}", e)))?;
+
     Ok(Json(UserInfo {
         id: auth_user.user_id,
         username: actor.username,
@@ -438,6 +456,7 @@ pub async fn me(
         actor_id: actor.id,
         avatar_url,
         language_preference,
+        token,
     }))
 }
 

@@ -62,9 +62,10 @@ seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サ�
 
 同じ Docker イメージを `command`（`--role`）違いで複数コンテナに分けるか、単一コンテナで `all` 起動するかは**運用モードの選択**であり、コード上の分岐は `main.rs` の `Role` 列挙とその配線だけ。
 
-- `docker-compose.yml`（split-role）: `db` / `redis`（ジョブキュー共有に必須）/ `api` / `federation-inbox` / `worker` / `atp-repo` / `frontend` / `nginx`（`docker/nginx.conf`）/ `tunnel`。`config-data` ボリュームで `secrets.toml` を全バックエンド間で共有永続化する。
-- `docker-compose.mono.yml`（単一コンテナ）: `db` / `seiran-server`（role=all）/ `frontend` / `nginx`（`docker/nginx.mono.conf`）/ `docker-gen`（`--scale seiran-server=N` によるスケールアウト時に nginx へ反映）/ `tunnel`。Redis サービス自体が存在しない（同一プロセス内で完結するため不要）。
+- `docker-compose.yml`（split-role）: `db` / `redis`（ジョブキュー共有に必須）/ `api` / `federation-inbox` / `worker` / `atp-repo` / `frontend` / `nginx`（`docker/nginx.conf`）/ `tunnel`。`config-data` ボリュームで `secrets.toml` を全バックエンド間で共有永続化する。サービス間通信はコンテナ内部DNS（`db:5432`等）を使うため`db`のホスト公開は本来不要だが、運用機へのSSHトンネル経由psqlアクセス（DBeaver等）のため`127.0.0.1:5432`（ループバックのみ）でホストへ公開する（`0.0.0.0`にはしない、#220）。
+- `docker-compose.mono.yml`（単一コンテナ）: `db` / `seiran-server`（role=all）/ `frontend` / `nginx`（`docker/nginx.mono.conf`）/ `docker-gen`（`--scale seiran-server=N` によるスケールアウト時に nginx へ反映）/ `tunnel`。Redis サービス自体が存在しない（同一プロセス内で完結するため不要）。`scripts/dev-up.sh`は`db`だけをこのcomposeで起動し、backend（`seiran-server`）はネイティブ`cargo run`でホスト側から接続するため、`db`は同じく`127.0.0.1:5432`（ループバックのみ）でホストへ公開する。
 - `db` サービスは両 compose とも `docker/Dockerfile.postgres`（`postgres:16-bookworm` ベースに pg_bigm をソースビルドで組み込み）からビルドする（#97）。`shared_preload_libraries=pg_bigm` を起動コマンドで渡す。
+- `GET /health`（`seiran-api`、認証不要）: DBへ`SELECT 1`を発行できるかで200/503を返す外形監視用エンドポイント。「プロセスは起動しているがDBプールが枯渇/切断している」状態を外部監視から検知できるようにする（docs/code_audit_2026-08-05.md R-9）。`Role::All`/`Role::Api`のみで提供され、federation/worker/firehoseロールには無い。
 
 ## 4. 認証
 
@@ -75,7 +76,7 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 パスキーはWebAuthn relying party（RP ID=`LOCAL_DOMAIN`、originは既定で`https://{LOCAL_DOMAIN}`、ローカル/E2Eのみ`WEBAUTHN_ORIGIN`で上書き）として実装する。ユーザーは設定画面から複数credentialを名前付きで登録・削除できる。登録・認証チャレンジの状態は`passkey_challenges`へ保存し、5分で失効、完了APIで原子的に削除する。認証成功時は署名カウンター等を含むcredentialを更新して通常JWTを発行する。パスキー自体がフィッシング耐性を持つ強い認証方式のため、パスキーログインではパスワードおよびTOTP入力を要求しない。
 
 - パスワード: Argon2（`argon2` クレート既定パラメータ、`OsRng` で salt生成）
-- トークン: `jsonwebtoken` による JWT（HS256相当）。`sub` は `"local|{user_id}"`、有効期限7日。secret は `secrets.toml` の `jwt_secret`（256bit hex、起動時自動生成）。
+- トークン: `jsonwebtoken` による JWT（HS256相当）。`sub` は `"local|{user_id}"`、有効期限7日。secret は `secrets.toml` の `jwt_secret`（256bit hex、起動時自動生成）。クレームに `iat`（発行時刻）を含み、`users.token_valid_after` より前に発行されたトークンは `extract_auth` で拒否する。パスワード変更（`change-password`・パスワードリセット）時に `token_valid_after` を現在時刻へ更新することで、攻撃者が窃取した旧トークンをパスワード変更だけで一括失効させられる。`iat` を持たない旧トークン（この仕組み導入前に発行）は `token_valid_after` が未設定なら従来どおり有効期限まで有効（デプロイ時の強制全ログアウトを避けるための移行措置）。
 
 **MiAuth 互換**（Misskeyクライアント向け）: `GET /miauth/:session_id`（認可ページ）→ `POST /api/miauth/:session_id/authorize`（要Bearer、認可するとそのユーザーのJWTを発行）→ `POST /api/miauth/:session_id/check`（クライアントがポーリングして受け取る）。セッション状態は `AppState.miauth_sessions`（プロセス内メモリ、DB永続化なし）。
 
@@ -109,7 +110,7 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 | `RemoteFollowListSync{actor_id, direction}` | リモートFediアクターのfollowers/following全件取得（プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック、`docs/protocols.md` 2節） | 低 |
 | `RemoteActorResolve{uri}` | リモートfollowers/following一覧中、ローカルDB未登録のactor URIのプロフィールを解決し`actors`へupsert（フォロー関係は作らない、`docs/protocols.md` 2節） | 低 |
 
-**並列・排他制御**: グローバル同時実行数上限（`Semaphore`、既定32）、ドメイン単位の同時接続数制限（最大2並列、AP配送用）、アクターID単位の直列化（ATPコミットの順序保証）、指数バックオフ+ジッターでのリトライ。
+**並列・排他制御**: グローバル同時実行数上限（`Semaphore`、既定32、ジョブ単位）、ドメイン単位の同時接続数制限（最大2並列、`RemoteActorResolve`/`RemoteFollowListSync`/`ActorHistorySync`などリモートから取得する系のジョブ用。`JobContext::get_domain_semaphore`）、アクターID単位の直列化（ATPコミットの順序保証）、指数バックオフ+ジッターでのリトライ。AP配送（`ApDelivery`）のinboxファンアウト自体は`fan_out_activity`内で`buffer_unordered`により最大8並列（`crates/seiran-common/src/ap/deliver.rs`）。追加の`tokio::spawn`は行わず、Workerジョブ実行のタスク内でポーリングを並列化するのみ（docs/code_audit_2026-08-05.md P-3）。
 
 ## 6. 検索セッション管理
 
@@ -239,7 +240,7 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
 |---|---|
 | ドメイン | `LOCAL_DOMAIN`, `ATP_PDS_ORIGIN` |
 | 起動ポート | `PORT`(既定3000), `FEDERATION_INBOX_PORT`(既定3001) |
-| データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`, `DATABASE_URL` |
+| データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`, `DATABASE_URL`, `DB_MAX_CONNECTIONS`（プール最大接続数、既定10。split-roleではプロセスごとに持つ） |
 | ジョブキュー | `REDIS_URL`（split-role構成専用。`--role all` では不要） |
 | シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWTシークレット等は環境変数ではなく `secrets.toml` で自動生成・管理する |
 | 外部サービス連携 | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ATPハンドル検証のDNS TXT自動作成。未設定時はHTTP `.well-known` 方式のみにフォールバック）、`ATP_RELAY_URL`（Relayへの`requestCrawl`先。カンマ区切りで複数指定可、既定は`https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（`did:plc:`の登録・解決先。既定は`https://plc.directory`。E2Eテストではローカルのスタブサーバーに向ける）、`ATP_APPVIEW_URL`（Bsky AppViewのベースURL。既定は`https://api.bsky.app`。E2Eテストではローカルのスタブサーバーに向ける） |

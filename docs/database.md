@@ -87,6 +87,8 @@ DM等の全外部キー参照を付け替える。複合UNIQUEは正規化後の
 
 `users.language_preference`（設定画面「表示」＞「言語」）: `ja` / `en` / `zh` / `ko` / `es` / `de` / `fr` のいずれか、`NULL` は「自動」（ブラウザの言語設定に従う）を意味する。
 
+`users.token_valid_after`: この時刻より前に発行されたJWTを一括失効させる基準時刻（`docs/architecture.md` 認証節参照）。`NULL` は「制約なし」。パスワード変更・パスワードリセット時に現在時刻へ更新する。
+
 ### TOTP関連（`user_totp` / `user_totp_recovery_codes` / `totp_disable_requests`）
 
 `user_totp`はユーザーごとに最大1行を持つ。セットアップ開始時は`enabled=false`で暗号化済みbase32シークレットを保存し、入力された初回コードの検証と10件のリカバリーコード発行が成功したトランザクション内で`enabled=true`にする。シークレットの暗号化は共通のAES-256-GCM鍵を使う。

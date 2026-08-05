@@ -78,7 +78,7 @@ impl PasswordResetRepository for PgPasswordResetRepository {
             tx.rollback().await?;
             return Ok(false);
         };
-        sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        sqlx::query("UPDATE users SET password_hash = $1, token_valid_after = NOW() WHERE id = $2")
             .bind(password_hash)
             .bind(user_id)
             .execute(&mut *tx)

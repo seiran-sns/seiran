@@ -22,7 +22,13 @@ pub async fn totp_status(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<TotpStatusResponse>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
     let enabled = state
         .totp
         .find_by_user_id(auth_user.user_id)
@@ -64,7 +70,13 @@ pub async fn totp_setup(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<TotpSetupResponse>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     if let Some((_, true)) = state
         .totp
@@ -116,7 +128,13 @@ pub async fn totp_enable(
     State(state): State<AppState>,
     Json(req): Json<TotpEnableRequest>,
 ) -> Result<Json<TotpEnableResponse>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     let (secret_encrypted, enabled) = state
         .totp
@@ -172,7 +190,13 @@ pub async fn totp_disable(
     State(state): State<AppState>,
     Json(req): Json<TotpDisableRequest>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     let hash = sqlx::query_scalar!(
         "SELECT password_hash FROM users WHERE id = $1",

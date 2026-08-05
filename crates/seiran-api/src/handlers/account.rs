@@ -37,7 +37,13 @@ pub async fn update_language(
     State(state): State<AppState>,
     Json(req): Json<UpdateLanguageRequest>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     if let Some(lang) = &req.language {
         if !is_supported_language(lang) {
@@ -82,7 +88,13 @@ pub async fn change_password(
     State(state): State<AppState>,
     Json(req): Json<ChangePasswordRequest>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     if req.new_password.len() < 8 {
         return Err(ApiError::BadRequest("PASSWORD_TOO_SHORT".to_owned()));
@@ -122,6 +134,35 @@ pub async fn change_password(
     Ok(Json(()))
 }
 
+/// `POST /api/account/revoke-all-sessions`
+/// 発行済みの全JWT（このリクエスト自身のトークンも含む）を一括失効させる。
+/// 端末紛失・不審なログインに気付いた際に、パスワードを変えずとも即座に
+/// 全セッションを切断できるようにする（docs/code_audit_2026-08-05.md S-2関連）。
+/// 実行後はこのリクエストのトークンも無効になるため、フロントは成功後に
+/// ログイン画面へ誘導すること。
+pub async fn revoke_all_sessions(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<()>, ApiError> {
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+
+    state
+        .users
+        .revoke_all_tokens(auth_user.user_id)
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!("[revoke-all-sessions] users UPDATE 失敗: {}", e))
+        })?;
+
+    Ok(Json(()))
+}
+
 #[derive(Deserialize)]
 pub struct RequestEmailChangeRequest {
     pub new_email: String,
@@ -135,7 +176,13 @@ pub async fn request_email_change(
     State(state): State<AppState>,
     Json(req): Json<RequestEmailChangeRequest>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     let new_email = req.new_email.trim().to_lowercase();
     if new_email.is_empty() || !new_email.contains('@') {
@@ -250,7 +297,13 @@ pub async fn withdraw(
     State(state): State<AppState>,
     Json(req): Json<WithdrawRequest>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     // actor を取得してハンドル確認
     let actor = sqlx::query!(
@@ -350,7 +403,13 @@ pub async fn list_app_tokens(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AppTokenRow>>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     let tokens = state
         .app_tokens
@@ -368,7 +427,13 @@ pub async fn revoke_app_token(
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<Json<()>, ApiError> {
-    let auth_user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
 
     let revoked = state
         .app_tokens

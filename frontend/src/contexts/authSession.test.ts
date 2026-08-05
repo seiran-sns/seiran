@@ -10,6 +10,7 @@ function makeUser(): User {
     role: "user",
     actor_id: 1,
     language_preference: null,
+    token: "test-token",
   };
 }
 

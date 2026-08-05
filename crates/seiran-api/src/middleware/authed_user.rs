@@ -35,9 +35,14 @@ impl AuthedUser {
     /// `HeaderMap` から直接解決する（Misskey 互換ブリッジ等、既に `headers`/`state` を
     /// 手元に持っている非 extractor 経路から呼ぶための共通ロジック）。
     pub async fn from_headers(headers: &HeaderMap, state: &AppState) -> Result<Self, Response> {
-        let auth_user = extract_auth(headers, &state.local_auth, state.app_tokens.as_ref())
-            .await
-            .map_err(IntoResponse::into_response)?;
+        let auth_user = extract_auth(
+            headers,
+            &state.local_auth,
+            state.app_tokens.as_ref(),
+            state.users.as_ref(),
+        )
+        .await
+        .map_err(IntoResponse::into_response)?;
         let actor = state
             .actors
             .find_local_by_user_id(auth_user.user_id)

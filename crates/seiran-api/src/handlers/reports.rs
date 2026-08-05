@@ -80,7 +80,13 @@ pub async fn create_report(
     State(state): State<AppState>,
     Json(req): Json<CreateReportRequest>,
 ) -> Result<(StatusCode, Json<CreateReportResponse>), ApiError> {
-    let auth = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let auth = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
     let reporter = state
         .actors
         .find_local_by_user_id(auth.user_id)

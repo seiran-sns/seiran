@@ -28,7 +28,13 @@ pub async fn list(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<PasskeySummary>>, ApiError> {
-    let user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
     let rows = sqlx::query(
         "SELECT id, name, created_at, last_used_at
          FROM user_passkeys WHERE user_id = $1 ORDER BY created_at",
@@ -65,7 +71,13 @@ pub async fn registration_start(
     State(state): State<AppState>,
     Json(req): Json<RegistrationStartRequest>,
 ) -> Result<Json<ChallengeResponse<webauthn_rs::prelude::CreationChallengeResponse>>, ApiError> {
-    let user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
     let name = req.name.trim();
     if name.is_empty() || name.chars().count() > 100 {
         return Err(ApiError::BadRequest("PASSKEY_NAME_INVALID".into()));
@@ -111,7 +123,13 @@ pub async fn registration_finish(
     State(state): State<AppState>,
     Json(req): Json<RegistrationFinishRequest>,
 ) -> Result<Json<PasskeySummary>, ApiError> {
-    let user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
     let value = consume_challenge(&state, req.token, user.user_id, "registration").await?;
     let name = value["name"]
         .as_str()
@@ -149,7 +167,13 @@ pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<(), ApiError> {
-    let user = extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await?;
+    let user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
     let result = sqlx::query("DELETE FROM user_passkeys WHERE id = $1 AND user_id = $2")
         .bind(id)
         .bind(user.user_id)

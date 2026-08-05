@@ -153,7 +153,13 @@ pub async fn miauth_authorize(
     State(state): State<AppState>,
     body: Option<Json<AuthorizeRequest>>,
 ) -> impl IntoResponse {
-    let auth_user = match extract_auth(&headers, &state.local_auth, state.app_tokens.as_ref()).await
+    let auth_user = match extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await
     {
         Ok(u) => u,
         Err(e) => return e.into_response(),
