@@ -60,13 +60,13 @@ pub trait FollowRepository: Send + Sync {
     ) -> Result<Option<String>, sqlx::Error>;
 
     /// ATP フォロー完了後に accepted で挿入する（rkey を保存）。
-    /// 既にフォロー済みの場合は何もしない。
+    /// 新規に挿入した場合は true、既にフォロー済みだった場合は false を返す。
     async fn insert_accepted_bsky(
         &self,
         follower_actor_id: i64,
         target_actor_id: i64,
         atp_rkey: &str,
-    ) -> Result<(), sqlx::Error>;
+    ) -> Result<bool, sqlx::Error>;
 
     /// `target_actor_id` を accepted な status でフォローしているローカルアクターの ID 一覧を取得する。
     /// 新規投稿の realtime WebSocket 配信対象を決めるために使う。
@@ -223,7 +223,7 @@ impl FollowRepository for PgFollowRepository {
         follower_actor_id: i64,
         target_actor_id: i64,
         atp_rkey: &str,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<bool, sqlx::Error> {
         sqlx::query(
             "INSERT INTO follows (follower_actor_id, target_actor_id, status, atp_rkey)
              VALUES ($1, $2, 'accepted', $3)
@@ -234,7 +234,7 @@ impl FollowRepository for PgFollowRepository {
         .bind(atp_rkey)
         .execute(&self.pool)
         .await
-        .map(|_| ())
+        .map(|result| result.rows_affected() > 0)
     }
 
     async fn find_accepted_local_follower_ids(
