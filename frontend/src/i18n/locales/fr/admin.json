@@ -109,7 +109,22 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Clé de site",
     "turnstileSecretKeyLabel": "Clé secrète",
-    "turnstileHint": "Turnstile est activé sur les pages de connexion et d'inscription une fois les deux clés configurées."
+    "turnstileHint": "Turnstile est activé sur les pages de connexion et d'inscription une fois les deux clés configurées.",
+    "roleRateLimitSectionTitle": "Limites de taux par rôle",
+    "roleRateLimitHint": "Ces limites ne s'appliquent pas aux administrateurs. Les modérateurs ont une limite plus élevée ; les utilisateurs et éditeurs d'emojis partagent la même limite.",
+    "postRateLimitWindowMinutesLabel": "Fenêtre de limite de publication (minutes)",
+    "postRateLimitMaxUserLabel": "Max. publications (utilisateur)",
+    "postRateLimitMaxModeratorLabel": "Max. publications (modérateur)",
+    "followRateLimitWindowHoursLabel": "Fenêtre de limite d'abonnements (heures)",
+    "followRateLimitMaxUserLabel": "Max. nouveaux abonnements (utilisateur)",
+    "followRateLimitMaxModeratorLabel": "Max. nouveaux abonnements (modérateur)",
+    "listMaxCountUserLabel": "Max. listes (utilisateur)",
+    "listMaxCountModeratorLabel": "Max. listes (modérateur)",
+    "listMemberMaxUserLabel": "Max. membres par liste (utilisateur)",
+    "listMemberMaxModeratorLabel": "Max. membres par liste (modérateur)",
+    "searchRateLimitWindowMinutesLabel": "Fenêtre de limite de recherche (minutes)",
+    "searchRateLimitMaxUserLabel": "Max. recherches (utilisateur)",
+    "searchRateLimitMaxModeratorLabel": "Max. recherches (modérateur)"
   },
   "storageProvidersPanel": {
     "title": "Stockage d'objets",

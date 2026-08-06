@@ -35,6 +35,20 @@ pub struct SiteSettingsResponse {
     // アカウント生成のIPレート制限（#223）
     pub account_creation_ip_window_minutes: String,
     pub account_creation_ip_max: String,
+    // ロール別レート制限（#223フォローアップ）
+    pub post_rate_limit_window_minutes: String,
+    pub post_rate_limit_max_user: String,
+    pub post_rate_limit_max_moderator: String,
+    pub follow_rate_limit_window_hours: String,
+    pub follow_rate_limit_max_user: String,
+    pub follow_rate_limit_max_moderator: String,
+    pub list_max_count_user: String,
+    pub list_max_count_moderator: String,
+    pub list_member_max_user: String,
+    pub list_member_max_moderator: String,
+    pub search_rate_limit_window_minutes: String,
+    pub search_rate_limit_max_user: String,
+    pub search_rate_limit_max_moderator: String,
 }
 
 fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
@@ -95,6 +109,58 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .get("account_creation_ip_max")
             .cloned()
             .unwrap_or_else(|| "5".to_string()),
+        post_rate_limit_window_minutes: settings
+            .get("post_rate_limit_window_minutes")
+            .cloned()
+            .unwrap_or_else(|| "60".to_string()),
+        post_rate_limit_max_user: settings
+            .get("post_rate_limit_max_user")
+            .cloned()
+            .unwrap_or_else(|| "30".to_string()),
+        post_rate_limit_max_moderator: settings
+            .get("post_rate_limit_max_moderator")
+            .cloned()
+            .unwrap_or_else(|| "100".to_string()),
+        follow_rate_limit_window_hours: settings
+            .get("follow_rate_limit_window_hours")
+            .cloned()
+            .unwrap_or_else(|| "24".to_string()),
+        follow_rate_limit_max_user: settings
+            .get("follow_rate_limit_max_user")
+            .cloned()
+            .unwrap_or_else(|| "100".to_string()),
+        follow_rate_limit_max_moderator: settings
+            .get("follow_rate_limit_max_moderator")
+            .cloned()
+            .unwrap_or_else(|| "300".to_string()),
+        list_max_count_user: settings
+            .get("list_max_count_user")
+            .cloned()
+            .unwrap_or_else(|| "5".to_string()),
+        list_max_count_moderator: settings
+            .get("list_max_count_moderator")
+            .cloned()
+            .unwrap_or_else(|| "30".to_string()),
+        list_member_max_user: settings
+            .get("list_member_max_user")
+            .cloned()
+            .unwrap_or_else(|| "50".to_string()),
+        list_member_max_moderator: settings
+            .get("list_member_max_moderator")
+            .cloned()
+            .unwrap_or_else(|| "300".to_string()),
+        search_rate_limit_window_minutes: settings
+            .get("search_rate_limit_window_minutes")
+            .cloned()
+            .unwrap_or_else(|| "60".to_string()),
+        search_rate_limit_max_user: settings
+            .get("search_rate_limit_max_user")
+            .cloned()
+            .unwrap_or_else(|| "10".to_string()),
+        search_rate_limit_max_moderator: settings
+            .get("search_rate_limit_max_moderator")
+            .cloned()
+            .unwrap_or_else(|| "50".to_string()),
     }
 }
 
@@ -122,6 +188,19 @@ pub struct UpdateSiteSettingsRequest {
     pub password_reset_max_active: Option<String>,
     pub account_creation_ip_window_minutes: Option<String>,
     pub account_creation_ip_max: Option<String>,
+    pub post_rate_limit_window_minutes: Option<String>,
+    pub post_rate_limit_max_user: Option<String>,
+    pub post_rate_limit_max_moderator: Option<String>,
+    pub follow_rate_limit_window_hours: Option<String>,
+    pub follow_rate_limit_max_user: Option<String>,
+    pub follow_rate_limit_max_moderator: Option<String>,
+    pub list_max_count_user: Option<String>,
+    pub list_max_count_moderator: Option<String>,
+    pub list_member_max_user: Option<String>,
+    pub list_member_max_moderator: Option<String>,
+    pub search_rate_limit_window_minutes: Option<String>,
+    pub search_rate_limit_max_user: Option<String>,
+    pub search_rate_limit_max_moderator: Option<String>,
 }
 
 // ─── ハンドラ ─────────────────────────────────────────────────────────────
@@ -180,6 +259,46 @@ pub async fn update_site_settings(
             &req.account_creation_ip_window_minutes,
         ),
         ("account_creation_ip_max", &req.account_creation_ip_max),
+        (
+            "post_rate_limit_window_minutes",
+            &req.post_rate_limit_window_minutes,
+        ),
+        ("post_rate_limit_max_user", &req.post_rate_limit_max_user),
+        (
+            "post_rate_limit_max_moderator",
+            &req.post_rate_limit_max_moderator,
+        ),
+        (
+            "follow_rate_limit_window_hours",
+            &req.follow_rate_limit_window_hours,
+        ),
+        (
+            "follow_rate_limit_max_user",
+            &req.follow_rate_limit_max_user,
+        ),
+        (
+            "follow_rate_limit_max_moderator",
+            &req.follow_rate_limit_max_moderator,
+        ),
+        ("list_max_count_user", &req.list_max_count_user),
+        ("list_max_count_moderator", &req.list_max_count_moderator),
+        ("list_member_max_user", &req.list_member_max_user),
+        (
+            "list_member_max_moderator",
+            &req.list_member_max_moderator,
+        ),
+        (
+            "search_rate_limit_window_minutes",
+            &req.search_rate_limit_window_minutes,
+        ),
+        (
+            "search_rate_limit_max_user",
+            &req.search_rate_limit_max_user,
+        ),
+        (
+            "search_rate_limit_max_moderator",
+            &req.search_rate_limit_max_moderator,
+        ),
     ] {
         if let Some(v) = value.as_deref() {
             if !matches!(v.parse::<i64>(), Ok(n) if n > 0) {
@@ -252,6 +371,45 @@ pub async fn update_site_settings(
         req.account_creation_ip_max
             .as_deref()
             .map(|v| ("account_creation_ip_max", v.to_string())),
+        req.post_rate_limit_window_minutes
+            .as_deref()
+            .map(|v| ("post_rate_limit_window_minutes", v.to_string())),
+        req.post_rate_limit_max_user
+            .as_deref()
+            .map(|v| ("post_rate_limit_max_user", v.to_string())),
+        req.post_rate_limit_max_moderator
+            .as_deref()
+            .map(|v| ("post_rate_limit_max_moderator", v.to_string())),
+        req.follow_rate_limit_window_hours
+            .as_deref()
+            .map(|v| ("follow_rate_limit_window_hours", v.to_string())),
+        req.follow_rate_limit_max_user
+            .as_deref()
+            .map(|v| ("follow_rate_limit_max_user", v.to_string())),
+        req.follow_rate_limit_max_moderator
+            .as_deref()
+            .map(|v| ("follow_rate_limit_max_moderator", v.to_string())),
+        req.list_max_count_user
+            .as_deref()
+            .map(|v| ("list_max_count_user", v.to_string())),
+        req.list_max_count_moderator
+            .as_deref()
+            .map(|v| ("list_max_count_moderator", v.to_string())),
+        req.list_member_max_user
+            .as_deref()
+            .map(|v| ("list_member_max_user", v.to_string())),
+        req.list_member_max_moderator
+            .as_deref()
+            .map(|v| ("list_member_max_moderator", v.to_string())),
+        req.search_rate_limit_window_minutes
+            .as_deref()
+            .map(|v| ("search_rate_limit_window_minutes", v.to_string())),
+        req.search_rate_limit_max_user
+            .as_deref()
+            .map(|v| ("search_rate_limit_max_user", v.to_string())),
+        req.search_rate_limit_max_moderator
+            .as_deref()
+            .map(|v| ("search_rate_limit_max_moderator", v.to_string())),
     ]
     .into_iter()
     .flatten()

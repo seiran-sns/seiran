@@ -41,10 +41,7 @@ pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
-pub use list::{
-    ListMemberRow, ListRepository, ListRow, PgListRepository, MAX_LISTS_PER_OWNER,
-    MAX_MEMBERS_PER_LIST,
-};
+pub use list::{ListMemberRow, ListRepository, ListRow, PgListRepository};
 pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
 };

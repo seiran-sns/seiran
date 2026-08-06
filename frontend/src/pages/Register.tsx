@@ -45,7 +45,7 @@ export default function Register() {
     setError("");
     setLoading(true);
     try {
-      await api.auth.requestEmailVerification(email);
+      await api.auth.requestEmailVerification(email, turnstileToken);
       setSent(true);
     } catch (err) {
       setError(getErrorMessage(err));
@@ -92,8 +92,13 @@ export default function Register() {
                 autoFocus
               />
             </label>
+            <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
             {error && <p className={styles.error}>{error}</p>}
-            <button type="submit" className={styles.button} disabled={loading}>
+            <button
+              type="submit"
+              className={styles.button}
+              disabled={loading || (!!turnstileSiteKey && !turnstileToken)}
+            >
               {loading ? t("auth:register.sending") : t("auth:register.sendVerificationEmail")}
             </button>
           </form>

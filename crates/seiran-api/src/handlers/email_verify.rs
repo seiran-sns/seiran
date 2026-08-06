@@ -7,12 +7,16 @@ use serde::{Deserialize, Serialize};
 use seiran_common::generate_snowflake_id;
 
 use crate::error::ApiError;
+use crate::handlers::auth::verify_turnstile;
 use crate::mailer::{send_verification_email, MailError};
+use crate::middleware::ClientIp;
 use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct VerifyEmailRequest {
     pub email: String,
+    /// Cloudflare Turnstile widgetが返すトークン。サイト鍵/秘密鍵が設定済みの場合は必須。
+    pub turnstile_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -34,8 +38,11 @@ pub struct VerifyTokenResponse {
 /// Step 1: メールアドレスを受け取り確認メールを送信する
 pub async fn request_email_verification(
     State(state): State<AppState>,
+    ip: ClientIp,
     Json(payload): Json<VerifyEmailRequest>,
 ) -> Result<Json<VerifyEmailResponse>, ApiError> {
+    verify_turnstile(&state, payload.turnstile_token.as_deref(), &ip).await?;
+
     let email = payload.email.trim().to_lowercase();
     if email.is_empty() || !email.contains('@') {
         return Err(ApiError::BadRequest("EMAIL_INVALID".into()));

@@ -4,11 +4,6 @@ use sqlx::PgPool;
 
 use super::TimelinePost;
 
-/// 1アクターが持てるリスト数の上限（提案値、Mastodon本家に確定値の前例が無いため）。
-pub const MAX_LISTS_PER_OWNER: i64 = 30;
-/// 1リストに追加できるメンバー数の上限（提案値）。
-pub const MAX_MEMBERS_PER_LIST: i64 = 500;
-
 /// リストの1行。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ListRow {

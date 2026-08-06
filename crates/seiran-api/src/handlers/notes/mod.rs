@@ -423,6 +423,10 @@ async fn create_regular_post(
         return ApiError::BadRequest("text は空にできません".to_owned()).into_response();
     }
 
+    if let Err(e) = crate::rate_limit::check_post_rate_limit(state, actor_id).await {
+        return e.into_response();
+    }
+
     let reply_ctx = match &req.reply_to_id {
         Some(id) => match resolve_reply_context(state, id, actor_id).await {
             Ok(ctx) => ctx,
