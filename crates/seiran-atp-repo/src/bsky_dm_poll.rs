@@ -243,7 +243,7 @@ async fn sync_convo(
         let inserted_id: Option<i64> = sqlx::query_scalar(
             "INSERT INTO posts (id, actor_id, body, visibility, thread_root_post_id, created_at, bsky_message_id)
              VALUES ($1, $2, $3, 'direct', $4, $5, $6)
-             ON CONFLICT (bsky_message_id) DO NOTHING
+             ON CONFLICT (bsky_message_id) WHERE bsky_message_id IS NOT NULL DO NOTHING
              RETURNING id",
         )
         .bind(candidate_post_id)
