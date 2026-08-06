@@ -7,12 +7,23 @@
       "siteSettings": "站点设置",
       "storage": "贮存",
       "emojis": "表情符号",
-      "relays": "Relays"
+      "relays": "Relays",
+      "authIpBlocks": "已封锁IP"
     },
     "rightPanelDescription": "从此屏幕管理实例。每个操作都会经过服务器管理员权限的验证。"
   },
   "relaysPanel": {
-    "title": "Fediverse relays", "description": "Manage relay inbox URLs used to send and receive public posts.", "inboxUrlLabel": "Relay inbox URL", "addButton": "Add", "emptyMessage": "No relays configured.", "deleteConfirm": "Leave relay {{url}}?", "status": { "pending": "Pending approval", "accepted": "Joined", "rejected": "Rejected" }
+    "title": "Fediverse relays",
+    "description": "Manage relay inbox URLs used to send and receive public posts.",
+    "inboxUrlLabel": "Relay inbox URL",
+    "addButton": "Add",
+    "emptyMessage": "No relays configured.",
+    "deleteConfirm": "Leave relay {{url}}?",
+    "status": {
+      "pending": "Pending approval",
+      "accepted": "Joined",
+      "rejected": "Rejected"
+    }
   },
   "emojisPanel": {
     "title": "自定义表情符号",
@@ -83,7 +94,22 @@
     "passwordUnsetPlaceholder": "未设置",
     "fromAddressLabel": "发件人地址",
     "requireVerifyLabel": "注册时需要验证电子邮件",
-    "requireVerifyHint": "在要求电子邮件验证之前必须配置 SMTP。"
+    "requireVerifyHint": "在要求电子邮件验证之前必须配置 SMTP。",
+    "authRateLimitSectionTitle": "认证速率限制",
+    "bruteforceWindowMinutesLabel": "暴力破解判定窗口（分钟）",
+    "bruteforceMaxVariantsLabel": "允许的尝试种类数",
+    "bruteforceHint": "对同一用户名（或邮箱地址），在此窗口内（或自最近一次密码重置以来，取更新者）尝试过的不同密码种类数超过该值时将拒绝登录。同一数值也用于反向判定（针对同一密码尝试的不同用户名）以及TOTP验证码校验。",
+    "ipBlockWindowMinutesLabel": "IP封锁判定窗口（分钟）",
+    "ipBlockThresholdLabel": "IP封锁拒绝次数阈值",
+    "ipBlockDurationHoursLabel": "IP封锁时长（小时）",
+    "ipBlockHint": "在该窗口内因暴力破解判定被拒绝的次数达到阈值的IP地址，将被封锁指定时长。可在「已封锁IP」标签页查看或解除封锁。",
+    "passwordResetMaxActiveLabel": "每个地址密码重置/验证邮件的同时有效数量上限",
+    "accountCreationIpWindowMinutesLabel": "账号创建IP限制窗口（分钟）",
+    "accountCreationIpMaxLabel": "每个IP账号创建数上限",
+    "turnstileSectionTitle": "Cloudflare Turnstile",
+    "turnstileSiteKeyLabel": "Site Key",
+    "turnstileSecretKeyLabel": "Secret Key",
+    "turnstileHint": "两个密钥都设置后，登录和注册页面将启用Turnstile验证。"
   },
   "storageProvidersPanel": {
     "title": "对象存储",
@@ -222,5 +248,13 @@
     "passkeyCount": "密钥：{{count}}",
     "disableTotpButton": "强制禁用 TOTP",
     "disableTotpConfirm": "强制禁用 {{username}} 的 TOTP？"
+  },
+  "authIpBlocksPanel": {
+    "title": "已封锁IP",
+    "description": "登录/TOTP暴力破解检测后自动封锁的IP地址列表，可单独解除封锁。",
+    "emptyMessage": "当前没有被封锁的IP地址。",
+    "blockedUntilLabel": "解封时间：{{date}}",
+    "unblockButton": "解除封锁",
+    "unblockConfirm": "确定要解除IP {{ip}} 的封锁吗？"
   }
 }

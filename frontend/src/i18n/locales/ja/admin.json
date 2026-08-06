@@ -7,12 +7,31 @@
       "siteSettings": "サイト設定",
       "storage": "ストレージ",
       "emojis": "絵文字",
-      "relays": "リレー"
+      "relays": "リレー",
+      "authIpBlocks": "認証ブロック"
     },
     "rightPanelDescription": "管理操作はこの画面から行えます。各操作はサーバー側でも管理者権限を検証します。"
   },
   "relaysPanel": {
-    "title": "Fediverseリレー", "description": "公開投稿を配送・受信するリレーのinbox URLを管理します。", "inboxUrlLabel": "リレー inbox URL", "addButton": "追加", "emptyMessage": "参加中のリレーはありません。", "deleteConfirm": "リレー {{url}} から離脱しますか？", "status": { "pending": "承認待ち", "accepted": "参加中", "rejected": "拒否" }
+    "title": "Fediverseリレー",
+    "description": "公開投稿を配送・受信するリレーのinbox URLを管理します。",
+    "inboxUrlLabel": "リレー inbox URL",
+    "addButton": "追加",
+    "emptyMessage": "参加中のリレーはありません。",
+    "deleteConfirm": "リレー {{url}} から離脱しますか？",
+    "status": {
+      "pending": "承認待ち",
+      "accepted": "参加中",
+      "rejected": "拒否"
+    }
+  },
+  "authIpBlocksPanel": {
+    "title": "認証ブロックIP",
+    "description": "ログイン・TOTPのブルートフォース検知により自動ブロックされたIPアドレスの一覧です。個別に解除できます。",
+    "emptyMessage": "現在ブロック中のIPアドレスはありません。",
+    "blockedUntilLabel": "解除予定: {{date}}",
+    "unblockButton": "解除",
+    "unblockConfirm": "IP {{ip}} のブロックを解除しますか？"
   },
   "emojisPanel": {
     "title": "カスタム絵文字",
@@ -83,7 +102,22 @@
     "passwordUnsetPlaceholder": "未設定",
     "fromAddressLabel": "差出人アドレス（From）",
     "requireVerifyLabel": "新規登録時にメール確認を必須にする",
-    "requireVerifyHint": "メール確認を必須にする場合は SMTP 設定が完了している必要があります。"
+    "requireVerifyHint": "メール確認を必須にする場合は SMTP 設定が完了している必要があります。",
+    "authRateLimitSectionTitle": "認証レート制限",
+    "bruteforceWindowMinutesLabel": "ブルートフォース判定ウィンドウ（分）",
+    "bruteforceMaxVariantsLabel": "許容する試行の種類数",
+    "bruteforceHint": "同一ユーザー名（またはメールアドレス）に対して、このウィンドウ内（もしくは直近のパスワードリセット時刻以降）に試された異なるパスワードの種類数がこの数を超えたら拒否します。パスワードとユーザー名を入れ替えた逆方向の判定にも同じ値を使います。TOTPコードの検証にも同じパラメータを使用します。",
+    "ipBlockWindowMinutesLabel": "IPブロック判定ウィンドウ（分）",
+    "ipBlockThresholdLabel": "IPブロックの拒否回数しきい値",
+    "ipBlockDurationHoursLabel": "IPブロック時間（時間）",
+    "ipBlockHint": "このウィンドウ内でブルートフォース判定による拒否がしきい値回数以上発生したIPアドレスを、指定時間ブロックします。ブロック中のIP一覧は「認証ブロックIP」タブで確認・解除できます。",
+    "passwordResetMaxActiveLabel": "パスワードリセット/確認メールの同時有効数上限",
+    "accountCreationIpWindowMinutesLabel": "アカウント生成 IP制限ウィンドウ（分）",
+    "accountCreationIpMaxLabel": "アカウント生成 IP当たり上限数",
+    "turnstileSectionTitle": "Cloudflare Turnstile",
+    "turnstileSiteKeyLabel": "Site Key",
+    "turnstileSecretKeyLabel": "Secret Key",
+    "turnstileHint": "両方設定するとログイン画面・アカウント作成画面でTurnstile認証が有効になります。未設定の場合は発動しません。"
   },
   "storageProvidersPanel": {
     "title": "オブジェクトストレージ",
@@ -134,14 +168,38 @@
     "submitting": "送信中…",
     "submit": "通報する",
     "categories": {
-      "misleading": { "title": "誤解を招くこと", "description": "スパムやその他の不正行為・欺瞞" },
-      "sexualAdultContent": { "title": "成人向けコンテンツ", "description": "ラベルのない、虐待的、または非同意の成人向けコンテンツ" },
-      "harassmentHate": { "title": "嫌がらせまたはヘイト", "description": "虐待的または差別的な行為" },
-      "violencePhysicalHarm": { "title": "暴力", "description": "暴力的または脅迫的なコンテンツ" },
-      "childSafety": { "title": "児童の安全", "description": "未成年者への加害・危険行為" },
-      "selfHarm": { "title": "自傷・危険行動", "description": "有害または危険性の高い行為" },
-      "ruleBreaking": { "title": "サイトルール違反", "description": "禁止行為・セキュリティ違反" },
-      "other": { "title": "その他", "description": "上記のいずれにも当てはまらない問題" }
+      "misleading": {
+        "title": "誤解を招くこと",
+        "description": "スパムやその他の不正行為・欺瞞"
+      },
+      "sexualAdultContent": {
+        "title": "成人向けコンテンツ",
+        "description": "ラベルのない、虐待的、または非同意の成人向けコンテンツ"
+      },
+      "harassmentHate": {
+        "title": "嫌がらせまたはヘイト",
+        "description": "虐待的または差別的な行為"
+      },
+      "violencePhysicalHarm": {
+        "title": "暴力",
+        "description": "暴力的または脅迫的なコンテンツ"
+      },
+      "childSafety": {
+        "title": "児童の安全",
+        "description": "未成年者への加害・危険行為"
+      },
+      "selfHarm": {
+        "title": "自傷・危険行動",
+        "description": "有害または危険性の高い行為"
+      },
+      "ruleBreaking": {
+        "title": "サイトルール違反",
+        "description": "禁止行為・セキュリティ違反"
+      },
+      "other": {
+        "title": "その他",
+        "description": "上記のいずれにも当てはまらない問題"
+      }
     },
     "reasons": {
       "reasonMisleadingSpam": "スパム",

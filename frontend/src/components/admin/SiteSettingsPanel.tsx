@@ -27,6 +27,19 @@ export default function SiteSettingsPanel() {
   const [uploadingIcon, setUploadingIcon] = useState(false);
   const iconRef = useRef<HTMLInputElement>(null);
 
+  // 認証系レート制限（#223）
+  const [bruteforceWindowMinutes, setBruteforceWindowMinutes] = useState("");
+  const [bruteforceMaxVariants, setBruteforceMaxVariants] = useState("");
+  const [ipBlockWindowMinutes, setIpBlockWindowMinutes] = useState("");
+  const [ipBlockThreshold, setIpBlockThreshold] = useState("");
+  const [ipBlockDurationHours, setIpBlockDurationHours] = useState("");
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
+  const [turnstileSecretKey, setTurnstileSecretKey] = useState("");
+  const [turnstileSecretKeySet, setTurnstileSecretKeySet] = useState(false);
+  const [passwordResetMaxActive, setPasswordResetMaxActive] = useState("");
+  const [accountCreationIpWindowMinutes, setAccountCreationIpWindowMinutes] = useState("");
+  const [accountCreationIpMax, setAccountCreationIpMax] = useState("");
+
   useEffect(() => {
     api.admin
       .getSiteSettings()
@@ -41,6 +54,16 @@ export default function SiteSettingsPanel() {
         setSiteColor(s.site_color);
         setSiteIconUrl(s.site_icon_url);
         setMediaProxyUrl(s.media_proxy_url);
+        setBruteforceWindowMinutes(s.auth_bruteforce_window_minutes);
+        setBruteforceMaxVariants(s.auth_bruteforce_max_variants);
+        setIpBlockWindowMinutes(s.auth_ip_block_window_minutes);
+        setIpBlockThreshold(s.auth_ip_block_threshold);
+        setIpBlockDurationHours(s.auth_ip_block_duration_hours);
+        setTurnstileSiteKey(s.turnstile_site_key);
+        setTurnstileSecretKeySet(s.turnstile_secret_key_set);
+        setPasswordResetMaxActive(s.password_reset_max_active);
+        setAccountCreationIpWindowMinutes(s.account_creation_ip_window_minutes);
+        setAccountCreationIpMax(s.account_creation_ip_max);
       })
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
@@ -78,12 +101,24 @@ export default function SiteSettingsPanel() {
         site_color: siteColor,
         site_icon_url: siteIconUrl,
         media_proxy_url: mediaProxyUrl,
+        auth_bruteforce_window_minutes: bruteforceWindowMinutes,
+        auth_bruteforce_max_variants: bruteforceMaxVariants,
+        auth_ip_block_window_minutes: ipBlockWindowMinutes,
+        auth_ip_block_threshold: ipBlockThreshold,
+        auth_ip_block_duration_hours: ipBlockDurationHours,
+        turnstile_site_key: turnstileSiteKey,
+        password_reset_max_active: passwordResetMaxActive,
+        account_creation_ip_window_minutes: accountCreationIpWindowMinutes,
+        account_creation_ip_max: accountCreationIpMax,
       };
-      // パスワードは入力があったときだけ送る（未入力なら既存値を維持）。
+      // パスワード/シークレットは入力があったときだけ送る（未入力なら既存値を維持）。
       if (password) patch.smtp_password = password;
+      if (turnstileSecretKey) patch.turnstile_secret_key = turnstileSecretKey;
       const s = await api.admin.updateSiteSettings(patch);
       setPasswordSet(s.smtp_password_set);
+      setTurnstileSecretKeySet(s.turnstile_secret_key_set);
       setPassword("");
+      setTurnstileSecretKey("");
       setSaved(true);
     } catch (e) {
       setError(getErrorMessage(e));
@@ -177,6 +212,63 @@ export default function SiteSettingsPanel() {
         <p className={styles.hint}>
           {t("admin:siteSettingsPanel.requireVerifyHint")}
         </p>
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.authRateLimitSectionTitle")}</div>
+        <div className={styles.card}>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.bruteforceWindowMinutesLabel")}
+            <input className={styles.input} type="number" min={1} value={bruteforceWindowMinutes} onChange={(e) => setBruteforceWindowMinutes(e.target.value)} />
+          </label>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.bruteforceMaxVariantsLabel")}
+            <input className={styles.input} type="number" min={1} value={bruteforceMaxVariants} onChange={(e) => setBruteforceMaxVariants(e.target.value)} />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.bruteforceHint")}</p>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.ipBlockWindowMinutesLabel")}
+            <input className={styles.input} type="number" min={1} value={ipBlockWindowMinutes} onChange={(e) => setIpBlockWindowMinutes(e.target.value)} />
+          </label>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.ipBlockThresholdLabel")}
+            <input className={styles.input} type="number" min={1} value={ipBlockThreshold} onChange={(e) => setIpBlockThreshold(e.target.value)} />
+          </label>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.ipBlockDurationHoursLabel")}
+            <input className={styles.input} type="number" min={1} value={ipBlockDurationHours} onChange={(e) => setIpBlockDurationHours(e.target.value)} />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.ipBlockHint")}</p>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.passwordResetMaxActiveLabel")}
+            <input className={styles.input} type="number" min={1} value={passwordResetMaxActive} onChange={(e) => setPasswordResetMaxActive(e.target.value)} />
+          </label>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.accountCreationIpWindowMinutesLabel")}
+            <input className={styles.input} type="number" min={1} value={accountCreationIpWindowMinutes} onChange={(e) => setAccountCreationIpWindowMinutes(e.target.value)} />
+          </label>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.accountCreationIpMaxLabel")}
+            <input className={styles.input} type="number" min={1} value={accountCreationIpMax} onChange={(e) => setAccountCreationIpMax(e.target.value)} />
+          </label>
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.turnstileSectionTitle")}</div>
+        <div className={styles.card}>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.turnstileSiteKeyLabel")}
+            <input className={styles.input} value={turnstileSiteKey} onChange={(e) => setTurnstileSiteKey(e.target.value)} />
+          </label>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.turnstileSecretKeyLabel")}
+            <input
+              className={styles.input}
+              type="password"
+              value={turnstileSecretKey}
+              onChange={(e) => setTurnstileSecretKey(e.target.value)}
+              placeholder={turnstileSecretKeySet ? t("admin:siteSettingsPanel.passwordSetPlaceholder") : t("admin:siteSettingsPanel.passwordUnsetPlaceholder")}
+            />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.turnstileHint")}</p>
         </div>
 
         <button className={styles.btn} type="submit" disabled={saving}>

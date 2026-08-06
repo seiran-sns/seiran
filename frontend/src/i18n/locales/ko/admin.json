@@ -7,12 +7,23 @@
       "siteSettings": "사이트 설정",
       "storage": "저장",
       "emojis": "이모티콘",
-      "relays": "Relays"
+      "relays": "Relays",
+      "authIpBlocks": "차단된 IP"
     },
     "rightPanelDescription": "이 화면에서 인스턴스를 관리하세요. 모든 작업은 서버의 관리자 권한에 대해서도 확인됩니다."
   },
   "relaysPanel": {
-    "title": "Fediverse relays", "description": "Manage relay inbox URLs used to send and receive public posts.", "inboxUrlLabel": "Relay inbox URL", "addButton": "Add", "emptyMessage": "No relays configured.", "deleteConfirm": "Leave relay {{url}}?", "status": { "pending": "Pending approval", "accepted": "Joined", "rejected": "Rejected" }
+    "title": "Fediverse relays",
+    "description": "Manage relay inbox URLs used to send and receive public posts.",
+    "inboxUrlLabel": "Relay inbox URL",
+    "addButton": "Add",
+    "emptyMessage": "No relays configured.",
+    "deleteConfirm": "Leave relay {{url}}?",
+    "status": {
+      "pending": "Pending approval",
+      "accepted": "Joined",
+      "rejected": "Rejected"
+    }
   },
   "emojisPanel": {
     "title": "맞춤 이모티콘",
@@ -83,7 +94,22 @@
     "passwordUnsetPlaceholder": "설정되지 않음",
     "fromAddressLabel": "발신지 주소",
     "requireVerifyLabel": "가입 시 이메일 확인 필요",
-    "requireVerifyHint": "이메일 확인을 요구하기 전에 SMTP를 구성해야 합니다."
+    "requireVerifyHint": "이메일 확인을 요구하기 전에 SMTP를 구성해야 합니다.",
+    "authRateLimitSectionTitle": "인증 속도 제한",
+    "bruteforceWindowMinutesLabel": "무차별 대입 판정 기간(분)",
+    "bruteforceMaxVariantsLabel": "허용되는 시도 종류 수",
+    "bruteforceHint": "동일한 사용자 이름(또는 이메일 주소)에 대해 이 기간 내(또는 최근 비밀번호 재설정 이후) 시도된 서로 다른 비밀번호의 종류 수가 이 값을 초과하면 로그인을 거부합니다. 동일한 값이 반대 방향 판정(같은 비밀번호에 대한 서로 다른 사용자 이름)과 TOTP 코드 확인에도 사용됩니다.",
+    "ipBlockWindowMinutesLabel": "IP 차단 판정 기간(분)",
+    "ipBlockThresholdLabel": "IP 차단 거부 횟수 임계값",
+    "ipBlockDurationHoursLabel": "IP 차단 시간(시간)",
+    "ipBlockHint": "이 기간 내에 무차별 대입 판정에 의한 거부가 임계값 이상 발생한 IP 주소를 지정된 시간 동안 차단합니다. 차단된 IP 목록은 '차단된 IP' 탭에서 확인·해제할 수 있습니다.",
+    "passwordResetMaxActiveLabel": "주소당 비밀번호 재설정/확인 메일 동시 유효 개수 상한",
+    "accountCreationIpWindowMinutesLabel": "계정 생성 IP 제한 기간(분)",
+    "accountCreationIpMaxLabel": "IP당 계정 생성 상한 수",
+    "turnstileSectionTitle": "Cloudflare Turnstile",
+    "turnstileSiteKeyLabel": "Site Key",
+    "turnstileSecretKeyLabel": "Secret Key",
+    "turnstileHint": "두 키를 모두 설정하면 로그인/계정 생성 화면에서 Turnstile 인증이 활성화됩니다."
   },
   "storageProvidersPanel": {
     "title": "객체 스토리지",
@@ -222,5 +248,13 @@
     "passkeyCount": "패스키: {{count}}",
     "disableTotpButton": "TOTP 강제 비활성화",
     "disableTotpConfirm": "{{username}}에 대한 TOTP를 강제로 비활성화하시겠습니까?"
+  },
+  "authIpBlocksPanel": {
+    "title": "차단된 IP",
+    "description": "로그인/TOTP 무차별 대입 탐지로 자동 차단된 IP 주소 목록입니다. 개별적으로 차단을 해제할 수 있습니다.",
+    "emptyMessage": "현재 차단된 IP 주소가 없습니다.",
+    "blockedUntilLabel": "차단 해제 예정: {{date}}",
+    "unblockButton": "차단 해제",
+    "unblockConfirm": "IP {{ip}}의 차단을 해제하시겠습니까?"
   }
 }

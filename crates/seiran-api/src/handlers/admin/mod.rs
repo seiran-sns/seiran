@@ -1,3 +1,4 @@
+pub mod auth_ip_blocks;
 pub mod emoji_import;
 pub mod emojis;
 pub mod relays;

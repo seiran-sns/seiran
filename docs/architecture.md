@@ -70,6 +70,10 @@ seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サ�
 
 ## 4. 認証
 
+ログインとTOTP検証は、暗号鍵をpepperにしたkeyed hashだけを`auth_attempt_log`へ保存し、同一識別子に対する資格情報および同一資格情報に対する識別子を既定10分・5種類までに制限する。制限拒否が同一IPで既定10分に5回発生すると24時間`auth_ip_blocks`で認証を遮断する。各値、Turnstile鍵、登録IP制限（既定60分・5件）は`site_settings`から管理する。登録時はTurnstile設定済みの場合にCloudflare Siteverifyを必須とする。
+
+`user`/`emoji-editor`はDMを除くメンション・返信・引用の宛先を1時間30ユニークユーザーまで、アップロードを1ファイル10MBまでに制限する。`moderator`のアップロード上限は50MB、`admin`はAPI全体の既存上限100MBとする。
+
 認証の起点はローカル ID/PW（`seiran-common::auth::local::LocalAuthProvider`）。TOTPを有効化したユーザーはパスワード検証後に5分間有効な用途限定JWTを受け取り、`POST /api/auth/totp/verify`でTOTPまたは使い切りリカバリーコードを検証して初めて通常のJWTを取得する。用途限定JWTは通常JWTとクレーム形状を分け、一般APIの認証には利用できない。管理者はユーザー管理APIでTOTP有効状態とパスキー登録数を確認でき、本人が認証手段を失った場合はTOTP設定を強制解除できる。外部認証プロバイダとの連携や、認証方式を切り替える抽象化レイヤーは存在しない。
 
 TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリーコードはArgon2ハッシュのみを保存する。認証アプリとリカバリーコードを両方失った場合は、パスワード検証済みの用途限定JWTから登録メールアドレスへ1時間有効な解除リンクを送り、リンクのワンタイムトークン消費時にTOTP設定を削除する。

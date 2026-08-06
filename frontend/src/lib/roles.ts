@@ -1,5 +1,12 @@
 /** 管理画面の各トピック（タブ）。 */
-export type AdminTopic = "users" | "siteSettings" | "storage" | "emojis" | "reports" | "relays";
+export type AdminTopic =
+  | "users"
+  | "siteSettings"
+  | "storage"
+  | "emojis"
+  | "reports"
+  | "relays"
+  | "authIpBlocks";
 
 const ALL_ADMIN_TOPICS: AdminTopic[] = [
   "users",
@@ -8,6 +15,7 @@ const ALL_ADMIN_TOPICS: AdminTopic[] = [
   "emojis",
   "reports",
   "relays",
+  "authIpBlocks",
 ];
 
 /**

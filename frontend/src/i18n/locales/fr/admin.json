@@ -7,12 +7,23 @@
       "siteSettings": "Paramètres du site",
       "storage": "Stockage",
       "emojis": "Émojis",
-      "relays": "Relays"
+      "relays": "Relays",
+      "authIpBlocks": "IP bloquées"
     },
     "rightPanelDescription": "Gérez l'instance à partir de cet écran. Chaque action est également vérifiée pour l'autorisation d'administrateur sur le serveur."
   },
   "relaysPanel": {
-    "title": "Fediverse relays", "description": "Manage relay inbox URLs used to send and receive public posts.", "inboxUrlLabel": "Relay inbox URL", "addButton": "Add", "emptyMessage": "No relays configured.", "deleteConfirm": "Leave relay {{url}}?", "status": { "pending": "Pending approval", "accepted": "Joined", "rejected": "Rejected" }
+    "title": "Fediverse relays",
+    "description": "Manage relay inbox URLs used to send and receive public posts.",
+    "inboxUrlLabel": "Relay inbox URL",
+    "addButton": "Add",
+    "emptyMessage": "No relays configured.",
+    "deleteConfirm": "Leave relay {{url}}?",
+    "status": {
+      "pending": "Pending approval",
+      "accepted": "Joined",
+      "rejected": "Rejected"
+    }
   },
   "emojisPanel": {
     "title": "Émojis personnalisés",
@@ -83,7 +94,22 @@
     "passwordUnsetPlaceholder": "Non défini",
     "fromAddressLabel": "De l'adresse",
     "requireVerifyLabel": "Exiger une vérification par e-mail lors de l'inscription",
-    "requireVerifyHint": "SMTP doit être configuré avant d'exiger la vérification du courrier électronique."
+    "requireVerifyHint": "SMTP doit être configuré avant d'exiger la vérification du courrier électronique.",
+    "authRateLimitSectionTitle": "Limitation du taux d'authentification",
+    "bruteforceWindowMinutesLabel": "Fenêtre de détection de force brute (minutes)",
+    "bruteforceMaxVariantsLabel": "Nombre autorisé de tentatives distinctes",
+    "bruteforceHint": "La connexion est refusée dès que le nombre de mots de passe distincts essayés pour le même nom d'utilisateur (dans cette fenêtre, ou depuis la dernière réinitialisation du mot de passe si plus récente) dépasse ce nombre. La même valeur est utilisée pour la vérification inverse (noms d'utilisateur distincts essayés contre le même mot de passe) et pour la vérification du code TOTP.",
+    "ipBlockWindowMinutesLabel": "Fenêtre de détection de blocage IP (minutes)",
+    "ipBlockThresholdLabel": "Seuil de rejet pour le blocage IP",
+    "ipBlockDurationHoursLabel": "Durée du blocage IP (heures)",
+    "ipBlockHint": "Une adresse IP qui déclenche ce nombre de rejets par force brute dans la fenêtre est bloquée pour la durée indiquée. Consultez l'onglet « IP bloquées » pour voir ou lever les blocages.",
+    "passwordResetMaxActiveLabel": "Nombre maximal d'e-mails actifs de réinitialisation/vérification par adresse",
+    "accountCreationIpWindowMinutesLabel": "Fenêtre de création de compte par IP (minutes)",
+    "accountCreationIpMaxLabel": "Nombre maximal de comptes par IP",
+    "turnstileSectionTitle": "Cloudflare Turnstile",
+    "turnstileSiteKeyLabel": "Clé de site",
+    "turnstileSecretKeyLabel": "Clé secrète",
+    "turnstileHint": "Turnstile est activé sur les pages de connexion et d'inscription une fois les deux clés configurées."
   },
   "storageProvidersPanel": {
     "title": "Stockage d'objets",
@@ -222,5 +248,13 @@
     "passkeyCount": "Clés d'accès : {{count}}",
     "disableTotpButton": "Forcer la désactivation du TOTP",
     "disableTotpConfirm": "Forcer la désactivation du TOTP pour {{username}} ?"
+  },
+  "authIpBlocksPanel": {
+    "title": "IP bloquées",
+    "description": "Adresses IP bloquées automatiquement après détection de force brute sur la connexion/TOTP. Vous pouvez lever un blocage individuellement.",
+    "emptyMessage": "Aucune adresse IP n'est actuellement bloquée.",
+    "blockedUntilLabel": "Bloquée jusqu'à : {{date}}",
+    "unblockButton": "Débloquer",
+    "unblockConfirm": "Débloquer l'IP {{ip}} ?"
   }
 }

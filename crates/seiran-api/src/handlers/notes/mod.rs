@@ -621,6 +621,18 @@ async fn create_regular_post(
         }
     }
 
+    if visibility != "direct" {
+        let mut contact_targets =
+            extract_local_mention_actor_ids(&text, &state.local_domain, &state.db).await;
+        contact_targets.extend(reply_ctx.parent_local_actor_id);
+        contact_targets.extend(quote_notif_recipient);
+        if let Err(error) =
+            crate::rate_limit::check_and_record_contacts(state, actor_id, contact_targets).await
+        {
+            return error.into_response();
+        }
+    }
+
     // DM(direct)宛先とブロック関係にある場合は送信を拒否する。
     for recipient in &recipient_actors {
         if let Err(e) =
