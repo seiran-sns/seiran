@@ -283,10 +283,7 @@ pub async fn update_site_settings(
         ("list_max_count_user", &req.list_max_count_user),
         ("list_max_count_moderator", &req.list_max_count_moderator),
         ("list_member_max_user", &req.list_member_max_user),
-        (
-            "list_member_max_moderator",
-            &req.list_member_max_moderator,
-        ),
+        ("list_member_max_moderator", &req.list_member_max_moderator),
         (
             "search_rate_limit_window_minutes",
             &req.search_rate_limit_window_minutes,

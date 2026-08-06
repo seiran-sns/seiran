@@ -127,14 +127,17 @@ pub async fn check_post_rate_limit(state: &AppState, actor_id: i64) -> Result<()
     else {
         return Ok(());
     };
-    let window_minutes = setting_i64(state, "post_rate_limit_window_minutes", 60).await.max(1);
-    let since = Utc::now() - Duration::minutes(window_minutes);
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND created_at >= $2")
-        .bind(actor_id)
-        .bind(since)
-        .fetch_one(&state.db)
+    let window_minutes = setting_i64(state, "post_rate_limit_window_minutes", 60)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .max(1);
+    let since = Utc::now() - Duration::minutes(window_minutes);
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND created_at >= $2")
+            .bind(actor_id)
+            .bind(since)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
     if count >= max {
         return Err(ApiError::TooManyRequests(
             "POST_RATE_LIMITED",
@@ -160,7 +163,9 @@ pub async fn check_follow_rate_limit(state: &AppState, actor_id: i64) -> Result<
     else {
         return Ok(());
     };
-    let window_hours = setting_i64(state, "follow_rate_limit_window_hours", 24).await.max(1);
+    let window_hours = setting_i64(state, "follow_rate_limit_window_hours", 24)
+        .await
+        .max(1);
     let since = Utc::now() - Duration::hours(window_hours);
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM follows WHERE follower_actor_id = $1 AND created_at >= $2",
@@ -230,15 +235,18 @@ pub async fn check_search_rate_limit(
     else {
         return Ok(());
     };
-    let window_minutes = setting_i64(state, "search_rate_limit_window_minutes", 60).await.max(1);
+    let window_minutes = setting_i64(state, "search_rate_limit_window_minutes", 60)
+        .await
+        .max(1);
     let since = Utc::now() - Duration::minutes(window_minutes);
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM search_log WHERE actor_id = $1 AND created_at >= $2")
-            .bind(actor_id)
-            .bind(since)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM search_log WHERE actor_id = $1 AND created_at >= $2",
+    )
+    .bind(actor_id)
+    .bind(since)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
     if count >= max {
         return Err(ApiError::TooManyRequests(
             "SEARCH_RATE_LIMITED",
