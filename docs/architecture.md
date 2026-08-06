@@ -166,7 +166,7 @@ pub struct SearchSession {
 
 ## 8. フロントエンド
 
-React 18 + Vite + TypeScript（react-router-dom v6）。`frontend/src/` 構成:
+React 18 + Vite + TypeScript（react-router-dom v7、declarative mode。`<BrowserRouter>`＋`useNavigate`/`useParams`等のフック中心で、データルーター（`createBrowserRouter`等）は不使用）。`frontend/src/` 構成:
 
 - `api/client.ts` — バックエンドAPIクライアント、`ApiError`、`getErrorMessage()`
 - `components/layout/` — `AppShell`（3ペインの外枠）、`LeftNav`

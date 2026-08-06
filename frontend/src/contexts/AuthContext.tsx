@@ -23,7 +23,16 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (token: string, user: User) => void;
-  logout: () => void;
+  /**
+   * `preserveRedirect: false`（既定は`true`）を指定すると、ログアウトを検知した
+   * `RequireAuth`が`/login`へリダイレクトする際に`?redirect=`を付与しない
+   * （ホームへ戻したい設定画面の「ログアウト」ボタン等の明示的操作向け）。
+   * トークン失効（401）・スライディング延命失敗による自動ログアウトは
+   * 既定どおり`?redirect=`を残し、再ログイン後に元の画面へ戻れるようにする。
+   */
+  logout: (opts?: { preserveRedirect?: boolean }) => void;
+  /** `logout({ preserveRedirect: false })`直後の1回だけ`true`。`RequireAuth`が参照する。 */
+  suppressLoginRedirect: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -31,11 +40,13 @@ const AuthContext = createContext<AuthContextValue>({
   loading: true,
   login: () => {},
   logout: () => {},
+  suppressLoginRedirect: false,
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [suppressLoginRedirect, setSuppressLoginRedirect] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -69,12 +80,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   function login(token: string, user: User) {
+    setSuppressLoginRedirect(false);
     localStorage.setItem("seiran_token", token);
     setUser(user);
     applyLanguagePreference(user);
   }
 
-  function logout() {
+  function logout(opts?: { preserveRedirect?: boolean }) {
+    setSuppressLoginRedirect(opts?.preserveRedirect === false);
     localStorage.removeItem("seiran_token");
     setUser(null);
   }
@@ -135,7 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, suppressLoginRedirect }}>
       {children}
     </AuthContext.Provider>
   );

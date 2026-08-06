@@ -1,5 +1,4 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import { api, getErrorMessage, type PasskeySummary } from "../api/client";
@@ -13,7 +12,6 @@ import styles from "./AccountSettings.module.css";
 export default function AccountSettingsPage() {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const goBack = useGoBack();
 
   const [did, setDid] = useState<string | undefined>(undefined);
@@ -185,9 +183,9 @@ export default function AccountSettingsPage() {
     setRevokeError("");
     try {
       await api.account.revokeAllSessions();
-      // このリクエスト自身のトークンも失効するため、自分自身もログアウトする。
-      logout();
-      navigate("/login");
+      // このリクエスト自身のトークンも失効するため、自分自身もログアウトする
+      // （preserveRedirect: falseの理由はLeftNav.tsxのhandleLogout参照）。
+      logout({ preserveRedirect: false });
     } catch (err) {
       setRevokeError(getErrorMessage(err));
       setRevoking(false);
@@ -201,8 +199,7 @@ export default function AccountSettingsPage() {
     setWithdrawError("");
     try {
       await api.account.withdraw(withdrawHandle.trim());
-      logout();
-      navigate("/login");
+      logout({ preserveRedirect: false });
     } catch (err) {
       setWithdrawError(getErrorMessage(err));
     } finally {

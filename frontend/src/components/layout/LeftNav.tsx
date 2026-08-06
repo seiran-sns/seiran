@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
@@ -34,7 +34,6 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const site = useSiteMeta();
-  const navigate = useNavigate();
   const { dmUnreadCount } = useStreamingContext();
 
   const baseItems = NAV_ITEMS.map((item) =>
@@ -46,8 +45,12 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
 
   function handleLogout() {
     onItemClick?.();
-    logout();
-    navigate("/login");
+    // preserveRedirect: false により、未認証化を検知したRequireAuthが
+    // `?redirect=`無しの`/login`へ遷移する（明示的なログアウトなのでホームへ
+    // 戻したい。自分でnavigate()も呼ぶと、react-router-dom v7でのnavigate()の
+    // transitionラップとRequireAuthの再描画が競合し、redirect付与が
+    // 意図せず勝ってしまうことがあるため、ここでは呼ばずRequireAuthに委ねる）。
+    logout({ preserveRedirect: false });
   }
 
 

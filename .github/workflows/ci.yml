@@ -70,7 +70,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: |
+          set +e
+          output="$(npm audit --audit-level=high 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          # GHSA-qwww-vcr4-c8h2（react-router、severity: high）のみ許容する。
+          # 「unstable RSC APIsを使っている場合のみ影響」と勧告に明記されており、
+          # 本アプリはdeclarative mode（<BrowserRouter>）のみでRSC不使用のため対象外。
+          # 修正は8.3.0以降のみで、react-router-domパッケージ自体がv8で廃止
+          # （React 19 / Node 22必須の`react-router`単体パッケージへの全面移行が必要）
+          # なため、現時点では追随しない（issue #219）。
+          unexpected="$(echo "$output" | grep -oE 'GHSA-[a-z0-9-]+' | sort -u | grep -v '^GHSA-qwww-vcr4-c8h2$' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "許容リスト外の脆弱性が見つかりました:"
+            echo "$unexpected"
+            exit 1
+          fi
+          echo "既知の許容済み脆弱性（GHSA-qwww-vcr4-c8h2、本アプリのRSC不使用構成には非該当）のみ検出。CI続行。"
       - name: Type check
         run: npm run typecheck
       - name: Lint

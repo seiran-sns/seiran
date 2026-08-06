@@ -38,10 +38,11 @@ const VerifyEmailChange = lazy(() => import("./pages/VerifyEmailChange"));
 const TotpDisable = lazy(() => import("./pages/TotpDisable"));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, suppressLoginRedirect } = useAuth();
   const location = useLocation();
   if (loading) return null;
   if (!user) {
+    if (suppressLoginRedirect) return <Navigate to="/login" replace />;
     const redirect = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?redirect=${redirect}`} replace />;
   }
