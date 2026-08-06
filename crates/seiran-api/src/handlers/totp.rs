@@ -8,7 +8,12 @@ use seiran_common::{crypto, generate_snowflake_id, totp as totp_util, LocalAuthP
 
 use crate::handlers::auth::{finish_login, AuthResponse};
 use crate::mailer::send_totp_disable_email;
-use crate::{error::ApiError, middleware::extract_auth, AppState};
+use crate::rate_limit::{self, AttemptKind};
+use crate::{
+    error::ApiError,
+    middleware::{extract_auth, ClientIp},
+    AppState,
+};
 
 const RECOVERY_CODE_COUNT: usize = 10;
 
@@ -235,8 +240,11 @@ pub struct TotpVerifyRequest {
 /// ログイン2段階目。`code`は6桁のTOTPコード、または`nnnn-nnnn`形式のリカバリーコード。
 pub async fn totp_verify(
     State(state): State<AppState>,
+    ip: ClientIp,
     Json(req): Json<TotpVerifyRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
+    rate_limit::check_ip_not_blocked(&state, &ip).await?;
+
     let user_id = state
         .local_auth
         .verify_pending_totp_token(&req.pending_token)
@@ -262,6 +270,24 @@ pub async fn totp_verify(
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?
     .ok_or(ApiError::Unauthorized("INVALID_CREDENTIALS"))?;
+
+    // ログインと同じ「試行種類数」ベースのブルートフォース対策をTOTPコード/リカバリー
+    // コードにも適用する（issue #223: パラメータ共用）。
+    let last_reset_at = state
+        .password_resets
+        .find_last_used_at(user_id)
+        .await
+        .ok()
+        .flatten();
+    rate_limit::check_and_record_credential_attempt(
+        &state,
+        AttemptKind::Totp,
+        &ip,
+        &row.username,
+        &req.code,
+        last_reset_at,
+    )
+    .await?;
 
     let code_trimmed = req.code.trim();
     // 6桁の数字のみ = TOTPコード、それ以外（"nnnn-nnnn"形式含む）はリカバリーコードとして扱う。

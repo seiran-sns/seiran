@@ -14,6 +14,14 @@
   "relaysPanel": {
     "title": "Fediverse relays", "description": "Manage relay inbox URLs used to send and receive public posts.", "inboxUrlLabel": "Relay inbox URL", "addButton": "Add", "emptyMessage": "No relays configured.", "deleteConfirm": "Leave relay {{url}}?", "status": { "pending": "Pending approval", "accepted": "Joined", "rejected": "Rejected" }
   },
+  "authIpBlocksPanel": {
+    "title": "Blocked IPs",
+    "description": "IP addresses automatically blocked after triggering login/TOTP brute-force detection. You can lift a block individually.",
+    "emptyMessage": "No IP addresses are currently blocked.",
+    "blockedUntilLabel": "Blocked until: {{date}}",
+    "unblockButton": "Unblock",
+    "unblockConfirm": "Unblock IP {{ip}}?"
+  },
   "emojisPanel": {
     "title": "Custom emojis",
     "localTab": "Local",
@@ -83,7 +91,22 @@
     "passwordUnsetPlaceholder": "Not set",
     "fromAddressLabel": "From address",
     "requireVerifyLabel": "Require email verification on sign-up",
-    "requireVerifyHint": "SMTP must be configured before requiring email verification."
+    "requireVerifyHint": "SMTP must be configured before requiring email verification.",
+    "authRateLimitSectionTitle": "Auth rate limiting",
+    "bruteforceWindowMinutesLabel": "Brute-force detection window (minutes)",
+    "bruteforceMaxVariantsLabel": "Allowed number of distinct attempts",
+    "bruteforceHint": "Login is rejected once the number of distinct passwords tried for the same username (within this window, or since the user's last password reset if more recent) exceeds this number. The same value is also used for the reverse check (distinct usernames tried against the same password) and for TOTP code verification.",
+    "ipBlockWindowMinutesLabel": "IP block detection window (minutes)",
+    "ipBlockThresholdLabel": "IP block rejection threshold",
+    "ipBlockDurationHoursLabel": "IP block duration (hours)",
+    "ipBlockHint": "An IP address that triggers this many brute-force rejections within the window is blocked for the given duration. See the \"Blocked IPs\" tab to view or lift blocks.",
+    "passwordResetMaxActiveLabel": "Max active password reset/verification emails per address",
+    "accountCreationIpWindowMinutesLabel": "Account creation IP window (minutes)",
+    "accountCreationIpMaxLabel": "Max accounts per IP",
+    "turnstileSectionTitle": "Cloudflare Turnstile",
+    "turnstileSiteKeyLabel": "Site key",
+    "turnstileSecretKeyLabel": "Secret key",
+    "turnstileHint": "Turnstile is enabled on the login and sign-up pages once both keys are set."
   },
   "storageProvidersPanel": {
     "title": "Object storage",

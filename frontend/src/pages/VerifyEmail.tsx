@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
+import Turnstile from "../components/Turnstile";
 import styles from "./Auth.module.css";
 
 type State =
@@ -21,6 +22,12 @@ export default function VerifyEmail() {
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
+
+  useEffect(() => {
+    api.meta().then((meta) => setTurnstileSiteKey(meta.turnstileSiteKey ?? ""));
+  }, []);
 
   // マウント時にトークンを検証する
   useEffect(() => {
@@ -49,7 +56,7 @@ export default function VerifyEmail() {
     }
     setSubmitting(true);
     try {
-      const res = await api.auth.register(username, password, state.registrationToken);
+      const res = await api.auth.register(username, password, state.registrationToken, turnstileToken);
       login(res.token, res.user);
       navigate("/");
     } catch (err) {
@@ -117,9 +124,10 @@ export default function VerifyEmail() {
               required
               minLength={8}
             />
-          </label>
-          {formError && <p className={styles.error}>{formError}</p>}
-          <button type="submit" className={styles.button} disabled={submitting}>
+      </label>
+      <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
+      {formError && <p className={styles.error}>{formError}</p>}
+      <button type="submit" className={styles.button} disabled={submitting || (!!turnstileSiteKey && !turnstileToken)}>
             {submitting ? t("auth:verifyEmail.submitting") : t("auth:verifyEmail.submit")}
           </button>
         </form>

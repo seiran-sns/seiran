@@ -36,6 +36,7 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
             "miauth": true
         },
         "requireEmailVerification": require_email_verification,
+        "turnstileSiteKey": get("turnstile_site_key"),
         "siteColor": get("site_color"),
         "siteIconUrl": get("site_icon_url"),
         "mediaProxyUrl": get("media_proxy_url"),

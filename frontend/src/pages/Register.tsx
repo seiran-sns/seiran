@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
+import Turnstile from "../components/Turnstile";
 import styles from "./Auth.module.css";
 
 export default function Register() {
@@ -12,6 +13,8 @@ export default function Register() {
 
   // requireEmailVerification フラグ（null = まだロード中）
   const [requireEmailVerification, setRequireEmailVerification] = useState<boolean | null>(null);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
 
   // メール確認フロー用
   const [email, setEmail] = useState("");
@@ -28,6 +31,7 @@ export default function Register() {
   useEffect(() => {
     api.meta().then((meta) => {
       setRequireEmailVerification(meta.requireEmailVerification ?? false);
+      setTurnstileSiteKey(meta.turnstileSiteKey ?? "");
     }).catch(() => {
       // メタ取得失敗時はデフォルト false
       setRequireEmailVerification(false);
@@ -108,7 +112,7 @@ export default function Register() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.auth.registerDirect(directEmail, username, password);
+      const res = await api.auth.registerDirect(directEmail, username, password, turnstileToken);
       login(res.token, res.user);
       navigate("/");
     } catch (err) {
@@ -159,9 +163,10 @@ export default function Register() {
               className={styles.input}
               required
             />
-          </label>
-          {error && <p className={styles.error}>{error}</p>}
-          <button type="submit" className={styles.button} disabled={loading}>
+      </label>
+      <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
+      {error && <p className={styles.error}>{error}</p>}
+      <button type="submit" className={styles.button} disabled={loading || (!!turnstileSiteKey && !turnstileToken)}>
             {loading ? t("auth:register.submitting") : t("auth:register.submit")}
           </button>
         </form>

@@ -150,3 +150,4 @@
 既存の結合テスト基盤: `crates/seiran-api/tests/`（実DB + 実 `seiran_api::router` を使用、`#[ignore]` で通常の `cargo test` から除外し `cargo test -p seiran-api --test <name> -- --ignored` で明示実行）。
 
 - [x] **リポスト・引用通知 (#198)** ローカルユーザーの投稿を他ユーザーがリポスト／引用したとき、`type="repost"` / `type="quote"` の通知を永続化してリアルタイム反映する。自己操作とリモート投稿宛は除外し、通知から新しいリポスト／引用投稿へ遷移できる。詳細: `docs/protocols.md` 8節、`docs/ui_spec.md`
+- [x] **認証・ユーザー操作レート制限（#223）** ログイン/TOTPの資格情報種類数制限、IP自動ブロックと管理UI、Turnstile付きアカウント登録・IP別登録数制限、通常ユーザーの1時間30ユニーク宛先制限、ロール別メディア容量制限を追加。詳細: `docs/architecture.md`、`docs/database.md`、`docs/ui_spec.md`

@@ -1,5 +1,5 @@
 use axum::{
-    http::StatusCode,
+    http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -42,6 +42,10 @@ pub enum ApiError {
     /// ストレージプロバイダーのクォータ超過（HTTP 507）
     #[error("ストレージ容量が不足しています")]
     InsufficientStorage,
+    /// レート制限超過（HTTP 429）。`code`はクライアント表示用エラーコード、
+    /// `retry_after_secs`は`Retry-After`ヘッダーに設定する秒数。
+    #[error("{0}")]
+    TooManyRequests(&'static str, Option<u64>),
     /// `msg` はサーバーログにのみ出力され、クライアントには `INTERNAL_ERROR` コードのみ返す
     #[error("内部エラー: {0}")]
     Internal(String),
@@ -49,6 +53,10 @@ pub enum ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let retry_after_secs = match &self {
+            ApiError::TooManyRequests(_, secs) => *secs,
+            _ => None,
+        };
         let (status, code) = match self {
             ApiError::Unauthorized(c) => (StatusCode::UNAUTHORIZED, c.to_owned()),
             ApiError::NotFound(c) => (StatusCode::NOT_FOUND, c.to_owned()),
@@ -61,6 +69,7 @@ impl IntoResponse for ApiError {
                 StatusCode::INSUFFICIENT_STORAGE,
                 "STORAGE_QUOTA_EXCEEDED".to_owned(),
             ),
+            ApiError::TooManyRequests(c, _) => (StatusCode::TOO_MANY_REQUESTS, c.to_owned()),
             ApiError::Internal(msg) => {
                 tracing::error!("[ERROR] {}", msg);
                 (
@@ -77,6 +86,12 @@ impl IntoResponse for ApiError {
                 message: code,
             },
         };
-        (status, Json(body)).into_response()
+        let mut response = (status, Json(body)).into_response();
+        if let Some(secs) = retry_after_secs {
+            if let Ok(value) = HeaderValue::from_str(&secs.to_string()) {
+                response.headers_mut().insert("Retry-After", value);
+            }
+        }
+        response
     }
 }

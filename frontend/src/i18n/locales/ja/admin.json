@@ -14,6 +14,14 @@
   "relaysPanel": {
     "title": "Fediverseリレー", "description": "公開投稿を配送・受信するリレーのinbox URLを管理します。", "inboxUrlLabel": "リレー inbox URL", "addButton": "追加", "emptyMessage": "参加中のリレーはありません。", "deleteConfirm": "リレー {{url}} から離脱しますか？", "status": { "pending": "承認待ち", "accepted": "参加中", "rejected": "拒否" }
   },
+  "authIpBlocksPanel": {
+    "title": "認証ブロックIP",
+    "description": "ログイン・TOTPのブルートフォース検知により自動ブロックされたIPアドレスの一覧です。個別に解除できます。",
+    "emptyMessage": "現在ブロック中のIPアドレスはありません。",
+    "blockedUntilLabel": "解除予定: {{date}}",
+    "unblockButton": "解除",
+    "unblockConfirm": "IP {{ip}} のブロックを解除しますか？"
+  },
   "emojisPanel": {
     "title": "カスタム絵文字",
     "localTab": "ローカル",
@@ -83,7 +91,22 @@
     "passwordUnsetPlaceholder": "未設定",
     "fromAddressLabel": "差出人アドレス（From）",
     "requireVerifyLabel": "新規登録時にメール確認を必須にする",
-    "requireVerifyHint": "メール確認を必須にする場合は SMTP 設定が完了している必要があります。"
+    "requireVerifyHint": "メール確認を必須にする場合は SMTP 設定が完了している必要があります。",
+    "authRateLimitSectionTitle": "認証レート制限",
+    "bruteforceWindowMinutesLabel": "ブルートフォース判定ウィンドウ（分）",
+    "bruteforceMaxVariantsLabel": "許容する試行の種類数",
+    "bruteforceHint": "同一ユーザー名（またはメールアドレス）に対して、このウィンドウ内（もしくは直近のパスワードリセット時刻以降）に試された異なるパスワードの種類数がこの数を超えたら拒否します。パスワードとユーザー名を入れ替えた逆方向の判定にも同じ値を使います。TOTPコードの検証にも同じパラメータを使用します。",
+    "ipBlockWindowMinutesLabel": "IPブロック判定ウィンドウ（分）",
+    "ipBlockThresholdLabel": "IPブロックの拒否回数しきい値",
+    "ipBlockDurationHoursLabel": "IPブロック時間（時間）",
+    "ipBlockHint": "このウィンドウ内でブルートフォース判定による拒否がしきい値回数以上発生したIPアドレスを、指定時間ブロックします。ブロック中のIP一覧は「認証ブロックIP」タブで確認・解除できます。",
+    "passwordResetMaxActiveLabel": "パスワードリセット/確認メールの同時有効数上限",
+    "accountCreationIpWindowMinutesLabel": "アカウント生成 IP制限ウィンドウ（分）",
+    "accountCreationIpMaxLabel": "アカウント生成 IP当たり上限数",
+    "turnstileSectionTitle": "Cloudflare Turnstile",
+    "turnstileSiteKeyLabel": "Site Key",
+    "turnstileSecretKeyLabel": "Secret Key",
+    "turnstileHint": "両方設定するとログイン画面・アカウント作成画面でTurnstile認証が有効になります。未設定の場合は発動しません。"
   },
   "storageProvidersPanel": {
     "title": "オブジェクトストレージ",

@@ -10,7 +10,8 @@ use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 
 use crate::error::ApiError;
 use crate::mailer::send_password_reset_email;
-use crate::middleware::extract_auth;
+use crate::middleware::{extract_auth, ClientIp};
+use crate::rate_limit::{self, AttemptKind};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -22,6 +23,55 @@ pub struct RegisterRequest {
     pub registration_token: Option<String>,
     /// registration_token を省略する場合（メール確認不要フロー）に直接指定するメールアドレス。
     pub email: Option<String>,
+    /// Cloudflare Turnstile widgetが返すトークン。サイト鍵/秘密鍵が設定済みの場合は必須。
+    pub turnstile_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TurnstileResponse {
+    success: bool,
+}
+
+async fn verify_turnstile(
+    state: &AppState,
+    token: Option<&str>,
+    ip: &ClientIp,
+) -> Result<(), ApiError> {
+    let secret = state
+        .site_settings
+        .get("turnstile_secret_key")
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .unwrap_or_default();
+    let site_key = state
+        .site_settings
+        .get("turnstile_site_key")
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .unwrap_or_default();
+    if secret.trim().is_empty() || site_key.trim().is_empty() {
+        return Ok(());
+    }
+    let token = token
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| ApiError::BadRequest("TURNSTILE_REQUIRED".into()))?;
+    let mut form = vec![("secret", secret.as_str()), ("response", token)];
+    if let Some(remote_ip) = ip.0.as_deref() {
+        form.push(("remoteip", remote_ip));
+    }
+    let response = reqwest::Client::new()
+        .post("https://challenges.cloudflare.com/turnstile/v0/siteverify")
+        .form(&form)
+        .send()
+        .await
+        .map_err(|e| ApiError::Internal(format!("Turnstile verification failed: {e}")))?
+        .json::<TurnstileResponse>()
+        .await
+        .map_err(|e| ApiError::Internal(format!("Invalid Turnstile response: {e}")))?;
+    if !response.success {
+        return Err(ApiError::BadRequest("TURNSTILE_FAILED".into()));
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -76,8 +126,12 @@ pub struct LoginRequest {
 
 pub async fn register(
     State(state): State<AppState>,
+    ip: ClientIp,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
+    rate_limit::check_ip_not_blocked(&state, &ip).await?;
+    rate_limit::check_account_creation_limit(&state, &ip).await?;
+    verify_turnstile(&state, req.turnstile_token.as_deref(), &ip).await?;
     if req.username.is_empty() || req.password.len() < 8 {
         return Err(ApiError::BadRequest("INVALID_INPUT".into()));
     }
@@ -249,6 +303,8 @@ pub async fn register(
             ApiError::Internal("トークン生成エラー".to_string())
         })?;
 
+    rate_limit::record_account_creation(&state, &ip).await?;
+
     Ok(Json(AuthResponse {
         token: token.clone(),
         user: UserInfo {
@@ -341,8 +397,11 @@ pub struct TotpRequiredResponse {
 
 pub async fn login(
     State(state): State<AppState>,
+    ip: ClientIp,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
+    rate_limit::check_ip_not_blocked(&state, &ip).await?;
+
     let row = if req.identifier.contains('@') {
         state.users.find_login_by_email(&req.identifier).await
     } else {
@@ -359,6 +418,17 @@ pub async fn login(
     let row = match row {
         Some(r) if r.password_hash.is_some() => r,
         _ => {
+            // ユーザーが実在しない場合も試行として記録する（存在しないユーザー名を
+            // 騙ったブルートフォースも同じ種類数制限で捕捉するため）。
+            rate_limit::check_and_record_credential_attempt(
+                &state,
+                AttemptKind::Login,
+                &ip,
+                &req.identifier,
+                &req.password,
+                None,
+            )
+            .await?;
             let _ =
                 LocalAuthProvider::verify_password(&req.password, LocalAuthProvider::dummy_hash());
             return Err(ApiError::Unauthorized("INVALID_CREDENTIALS"));
@@ -368,6 +438,22 @@ pub async fn login(
     let email = row.email;
     let username = row.username;
     let hash = row.password_hash.expect("直前のガードでSomeを確認済み");
+
+    let last_reset_at = state
+        .password_resets
+        .find_last_used_at(user_id)
+        .await
+        .ok()
+        .flatten();
+    rate_limit::check_and_record_credential_attempt(
+        &state,
+        AttemptKind::Login,
+        &ip,
+        &req.identifier,
+        &req.password,
+        last_reset_at,
+    )
+    .await?;
 
     match LocalAuthProvider::verify_password(&req.password, &hash) {
         Ok(true) => {}
@@ -507,6 +593,26 @@ pub async fn request_password_reset(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     if let Some(user_id) = user_id {
+        let max_active = state
+            .site_settings
+            .get("password_reset_max_active")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(10)
+            .max(1);
+        let active = state
+            .password_resets
+            .count_active_by_user(user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        // アドレスの存在や制限到達を外部へ漏らさないため、同じ成功レスポンスで終了する。
+        if active >= max_active {
+            return Ok(Json(MessageResponse {
+                message: "リセットリンクを送信しました（メールが存在する場合）".to_owned(),
+            }));
+        }
         let reset_id = generate_snowflake_id(chrono::Utc::now());
 
         // password_resets に INSERT。token は DB の DEFAULT gen_random_uuid() で生成。

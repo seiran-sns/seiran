@@ -52,6 +52,13 @@ ID 採番は2系統ある。
 
 ## 3. 主要テーブルの設計判断
 
+### 認証・ユーザー操作レート制限（#223）
+
+- `auth_attempt_log`: ログイン/TOTPの識別子・資格情報をkeyed hashで記録する。平文資格情報は保持しない。制限超過行は`rejected`でIPブロック集計対象になる。
+- `auth_ip_blocks`: `INET`主キーごとの認証ブロック期限・理由。期限内の行を管理画面に表示し、個別削除で解除する。
+- `account_creation_log`: 同一IPからのアカウント作成成功時刻。
+- `user_contact_log`: DM以外のメンション・返信・引用について、送信actorと宛先actorを記録し、1時間内のユニーク宛先数を算出する。
+
 ### `users.role`（ENUM `user_role`）
 
 `user` / `emoji-editor` / `moderator` / `admin` の4値（#179で `emoji-editor` を追加）。権限の強さは

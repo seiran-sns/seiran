@@ -167,6 +167,13 @@ pub async fn create_drive_file(
         }
     };
 
+    let role = state
+        .users
+        .find_role_by_user_id(auth.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .unwrap_or_else(|| "user".to_owned());
+
     // アップローダーのアクター情報を取得（Bsky動画パイプライン結合にはDID/署名鍵も必要）
     let actor = state
         .actors
@@ -177,6 +184,14 @@ pub async fn create_drive_file(
 
     let raw_bytes =
         file_bytes.ok_or_else(|| ApiError::BadRequest("ファイルが含まれていません".to_owned()))?;
+    let max_bytes = match role.as_str() {
+        "admin" => 100 * 1024 * 1024,
+        "moderator" => 50 * 1024 * 1024,
+        _ => 10 * 1024 * 1024,
+    };
+    if raw_bytes.len() > max_bytes {
+        return Err(ApiError::BadRequest("MEDIA_FILE_TOO_LARGE".to_owned()));
+    }
 
     let kind = match media_type_str.as_str() {
         "avatar" => MediaKind::Avatar,

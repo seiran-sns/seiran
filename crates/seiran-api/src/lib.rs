@@ -9,6 +9,7 @@ pub mod error;
 pub mod handlers;
 pub mod mailer;
 pub mod middleware;
+pub mod rate_limit;
 pub mod search;
 pub mod search_query;
 pub mod streaming;
@@ -27,15 +28,16 @@ use tower_http::cors::{Any, CorsLayer};
 use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 
 use seiran_common::repository::{
-    ActorRepository, AppTokenRepository, AtpReadRepository, BlockRepository, DmRepository,
-    EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository,
-    HashtagRepository, ListRepository, MuteRepository, NotificationRepository,
-    PasswordResetRepository, PgActorRepository, PgAppTokenRepository, PgAtpReadRepository,
-    PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository,
-    PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgListRepository, PgMuteRepository,
-    PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository,
-    PgReactionRepository, PgRelayRepository, PgRemoteEmojiRepository, PgTotpRepository,
-    PgUserRepository, PinnedPostsRepository, PostRepository, ReactionRepository, RelayRepository,
+    ActorRepository, AppTokenRepository, AtpReadRepository, AuthRateLimitRepository,
+    BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository,
+    EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository,
+    NotificationRepository, PasswordResetRepository, PgActorRepository, PgAppTokenRepository,
+    PgAtpReadRepository, PgAuthRateLimitRepository, PgBlockRepository, PgDmRepository,
+    PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository,
+    PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository,
+    PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository,
+    PgRelayRepository, PgRemoteEmojiRepository, PgTotpRepository, PgUserRepository,
+    PinnedPostsRepository, PostRepository, ReactionRepository, RelayRepository,
     RemoteEmojiRepository, TotpRepository, UserRepository,
 };
 use seiran_common::{
@@ -108,6 +110,8 @@ pub struct AppState {
     pub system_proxy_actor_id: i64,
     /// パスワードリセットフロー（`password_resets` テーブル）。
     pub password_resets: Arc<dyn PasswordResetRepository>,
+    /// 認証ブルートフォース対策（`auth_attempt_log` / `auth_ip_blocks`、#223）。
+    pub auth_rate_limits: Arc<dyn AuthRateLimitRepository>,
     /// 新規登録時のメール確認フロー（`email_verifications` テーブル）。
     pub email_verifications: Arc<dyn EmailVerificationRepository>,
     /// 設定画面からのメールアドレス変更フロー（`email_changes` テーブル、#59）。
@@ -358,6 +362,8 @@ pub async fn init_state(
     let hashtags: Arc<dyn HashtagRepository> = Arc::new(PgHashtagRepository::new(pool.clone()));
     let password_resets: Arc<dyn PasswordResetRepository> =
         Arc::new(PgPasswordResetRepository::new(pool.clone()));
+    let auth_rate_limits: Arc<dyn AuthRateLimitRepository> =
+        Arc::new(PgAuthRateLimitRepository::new(pool.clone()));
     let email_verifications: Arc<dyn EmailVerificationRepository> =
         Arc::new(PgEmailVerificationRepository::new(pool.clone()));
     let email_changes: Arc<dyn EmailChangeRepository> =
@@ -433,6 +439,7 @@ pub async fn init_state(
         hashtags,
         system_proxy_actor_id,
         password_resets,
+        auth_rate_limits,
         email_verifications,
         email_changes,
         emojis,
@@ -493,6 +500,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/admin/relays/:id",
             delete(handlers::admin::relays::delete_relay),
+        )
+        .route(
+            "/api/admin/auth-ip-blocks",
+            get(handlers::admin::auth_ip_blocks::list_ip_blocks),
+        )
+        .route(
+            "/api/admin/auth-ip-blocks/:ip",
+            delete(handlers::admin::auth_ip_blocks::unblock_ip),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

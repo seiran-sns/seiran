@@ -232,6 +232,23 @@ export interface SiteSettings {
   site_color: string;
   site_icon_url: string;
   media_proxy_url: string;
+  auth_bruteforce_window_minutes: string;
+  auth_bruteforce_max_variants: string;
+  auth_ip_block_window_minutes: string;
+  auth_ip_block_threshold: string;
+  auth_ip_block_duration_hours: string;
+  turnstile_site_key: string;
+  turnstile_secret_key_set: boolean;
+  password_reset_max_active: string;
+  account_creation_ip_window_minutes: string;
+  account_creation_ip_max: string;
+}
+
+export interface AuthIpBlock {
+  ip_address: string;
+  blocked_until: string;
+  reason: string;
+  created_at: string;
 }
 
 export interface CustomEmoji {
@@ -834,6 +851,7 @@ export interface MetaResponse {
     miauth: boolean;
   };
   requireEmailVerification: boolean;
+  turnstileSiteKey: string;
   siteColor?: string;
   siteIconUrl?: string;
   mediaProxyUrl?: string;
@@ -887,18 +905,20 @@ export const api = {
         signal,
       );
     },
-    register(username: string, password: string, registrationToken: string) {
+    register(username: string, password: string, registrationToken: string, turnstileToken?: string) {
       return request<AuthResponse>("POST", "/auth/register", {
         username,
         password,
         registration_token: registrationToken,
+        turnstile_token: turnstileToken,
       });
     },
-    registerDirect(email: string, username: string, password: string) {
+    registerDirect(email: string, username: string, password: string, turnstileToken?: string) {
       return request<AuthResponse>("POST", "/auth/register", {
         username,
         password,
         email,
+        turnstile_token: turnstileToken,
       });
     },
     login(identifier: string, password: string) {
@@ -1347,9 +1367,29 @@ export const api = {
         site_color: string;
         site_icon_url: string;
         media_proxy_url: string;
+        auth_bruteforce_window_minutes: string;
+        auth_bruteforce_max_variants: string;
+        auth_ip_block_window_minutes: string;
+        auth_ip_block_threshold: string;
+        auth_ip_block_duration_hours: string;
+        turnstile_site_key: string;
+        turnstile_secret_key: string;
+        password_reset_max_active: string;
+        account_creation_ip_window_minutes: string;
+        account_creation_ip_max: string;
       }>,
     ) {
       return request<SiteSettings>("PATCH", "/admin/site-settings", patch);
+    },
+
+    listAuthIpBlocks() {
+      return request<AuthIpBlock[]>("GET", "/admin/auth-ip-blocks");
+    },
+    unblockAuthIp(ip: string) {
+      return request<void>(
+        "DELETE",
+        `/admin/auth-ip-blocks/${encodeURIComponent(ip)}`,
+      );
     },
 
     listStorageProviders() {

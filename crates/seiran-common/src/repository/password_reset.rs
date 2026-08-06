@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 /// `password_resets` テーブル（パスワードリセットフロー）へのアクセス。
@@ -17,6 +18,13 @@ pub trait PasswordResetRepository: Send + Sync {
         token: &str,
         password_hash: &str,
     ) -> Result<bool, sqlx::Error>;
+
+    /// このユーザーが直近にパスワードリセットを完了した時刻（#223 ブルートフォース対策の
+    /// ウィンドウ起点に使う。リセット直後は過去の試行種類数をリセットしたいため）。
+    async fn find_last_used_at(&self, user_id: i64) -> Result<Option<DateTime<Utc>>, sqlx::Error>;
+
+    /// 有効期限内（`expires_at > NOW()`）のリクエスト件数（#223 メール送信レート制限用）。
+    async fn count_active_by_user(&self, user_id: i64) -> Result<i64, sqlx::Error>;
 }
 
 pub struct PgPasswordResetRepository {
@@ -85,5 +93,28 @@ impl PasswordResetRepository for PgPasswordResetRepository {
             .await?;
         tx.commit().await?;
         Ok(true)
+    }
+
+    async fn find_last_used_at(&self, user_id: i64) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+        let row: Option<(DateTime<Utc>,)> = sqlx::query_as(
+            "SELECT used_at FROM password_resets
+             WHERE user_id = $1 AND used_at IS NOT NULL
+             ORDER BY used_at DESC LIMIT 1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(t,)| t))
+    }
+
+    async fn count_active_by_user(&self, user_id: i64) -> Result<i64, sqlx::Error> {
+        let row: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM password_resets
+             WHERE user_id = $1 AND used_at IS NULL AND expires_at > NOW()",
+        )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
     }
 }

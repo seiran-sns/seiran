@@ -9,6 +9,7 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CryptoError {
@@ -61,4 +62,16 @@ pub fn decrypt(encoded: &str, key: &[u8]) -> Result<Vec<u8>, CryptoError> {
     cipher
         .decrypt(nonce, ciphertext)
         .map_err(|e| CryptoError::Decrypt(e.to_string()))
+}
+
+/// `key`（サーバー秘密鍵）付きの一方向ハッシュ。認証ブルートフォース対策
+/// （`auth_attempt_log`）で、平文のパスワード/TOTPコードを保存せずに
+/// 「同じ値を試したか」だけを識別するために使う。可逆性は不要なため
+/// [`encrypt`]/[`decrypt`]とは別に軽量な keyed hash として提供する。
+pub fn keyed_hash(key: &[u8], value: &str) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(key);
+    hasher.update(b"|");
+    hasher.update(value.as_bytes());
+    hasher.finalize().to_vec()
 }

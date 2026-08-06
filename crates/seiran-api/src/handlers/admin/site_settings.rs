@@ -21,6 +21,20 @@ pub struct SiteSettingsResponse {
     pub site_color: String,
     pub site_icon_url: String,
     pub media_proxy_url: String,
+    // 認証ブルートフォース対策（#223）
+    pub auth_bruteforce_window_minutes: String,
+    pub auth_bruteforce_max_variants: String,
+    pub auth_ip_block_window_minutes: String,
+    pub auth_ip_block_threshold: String,
+    pub auth_ip_block_duration_hours: String,
+    // Cloudflare Turnstile（#223）: secret_key はレスポンスに含めず設定有無のみ返す
+    pub turnstile_site_key: String,
+    pub turnstile_secret_key_set: bool,
+    // パスワードリセット/確認メールのレート制限（#223）
+    pub password_reset_max_active: String,
+    // アカウント生成のIPレート制限（#223）
+    pub account_creation_ip_window_minutes: String,
+    pub account_creation_ip_max: String,
 }
 
 fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
@@ -41,6 +55,46 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
         site_color: settings.get("site_color").cloned().unwrap_or_default(),
         site_icon_url: settings.get("site_icon_url").cloned().unwrap_or_default(),
         media_proxy_url: settings.get("media_proxy_url").cloned().unwrap_or_default(),
+        auth_bruteforce_window_minutes: settings
+            .get("auth_bruteforce_window_minutes")
+            .cloned()
+            .unwrap_or_else(|| "10".to_string()),
+        auth_bruteforce_max_variants: settings
+            .get("auth_bruteforce_max_variants")
+            .cloned()
+            .unwrap_or_else(|| "5".to_string()),
+        auth_ip_block_window_minutes: settings
+            .get("auth_ip_block_window_minutes")
+            .cloned()
+            .unwrap_or_else(|| "10".to_string()),
+        auth_ip_block_threshold: settings
+            .get("auth_ip_block_threshold")
+            .cloned()
+            .unwrap_or_else(|| "5".to_string()),
+        auth_ip_block_duration_hours: settings
+            .get("auth_ip_block_duration_hours")
+            .cloned()
+            .unwrap_or_else(|| "24".to_string()),
+        turnstile_site_key: settings
+            .get("turnstile_site_key")
+            .cloned()
+            .unwrap_or_default(),
+        turnstile_secret_key_set: settings
+            .get("turnstile_secret_key")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false),
+        password_reset_max_active: settings
+            .get("password_reset_max_active")
+            .cloned()
+            .unwrap_or_else(|| "10".to_string()),
+        account_creation_ip_window_minutes: settings
+            .get("account_creation_ip_window_minutes")
+            .cloned()
+            .unwrap_or_else(|| "60".to_string()),
+        account_creation_ip_max: settings
+            .get("account_creation_ip_max")
+            .cloned()
+            .unwrap_or_else(|| "5".to_string()),
     }
 }
 
@@ -58,6 +112,16 @@ pub struct UpdateSiteSettingsRequest {
     pub site_color: Option<String>,
     pub site_icon_url: Option<String>,
     pub media_proxy_url: Option<String>,
+    pub auth_bruteforce_window_minutes: Option<String>,
+    pub auth_bruteforce_max_variants: Option<String>,
+    pub auth_ip_block_window_minutes: Option<String>,
+    pub auth_ip_block_threshold: Option<String>,
+    pub auth_ip_block_duration_hours: Option<String>,
+    pub turnstile_site_key: Option<String>,
+    pub turnstile_secret_key: Option<String>,
+    pub password_reset_max_active: Option<String>,
+    pub account_creation_ip_window_minutes: Option<String>,
+    pub account_creation_ip_max: Option<String>,
 }
 
 // ─── ハンドラ ─────────────────────────────────────────────────────────────
@@ -92,6 +156,41 @@ pub async fn update_site_settings(
         }
     }
 
+    for (field, value) in [
+        (
+            "auth_bruteforce_window_minutes",
+            &req.auth_bruteforce_window_minutes,
+        ),
+        (
+            "auth_bruteforce_max_variants",
+            &req.auth_bruteforce_max_variants,
+        ),
+        (
+            "auth_ip_block_window_minutes",
+            &req.auth_ip_block_window_minutes,
+        ),
+        ("auth_ip_block_threshold", &req.auth_ip_block_threshold),
+        (
+            "auth_ip_block_duration_hours",
+            &req.auth_ip_block_duration_hours,
+        ),
+        ("password_reset_max_active", &req.password_reset_max_active),
+        (
+            "account_creation_ip_window_minutes",
+            &req.account_creation_ip_window_minutes,
+        ),
+        ("account_creation_ip_max", &req.account_creation_ip_max),
+    ] {
+        if let Some(v) = value.as_deref() {
+            if !matches!(v.parse::<i64>(), Ok(n) if n > 0) {
+                return Err(ApiError::BadRequest(format!(
+                    "INVALID_{}",
+                    field.to_uppercase()
+                )));
+            }
+        }
+    }
+
     let pairs: Vec<(&str, String)> = [
         req.smtp_host
             .as_deref()
@@ -123,6 +222,36 @@ pub async fn update_site_settings(
         req.media_proxy_url
             .as_deref()
             .map(|v| ("media_proxy_url", v.trim_end_matches('/').to_string())),
+        req.auth_bruteforce_window_minutes
+            .as_deref()
+            .map(|v| ("auth_bruteforce_window_minutes", v.to_string())),
+        req.auth_bruteforce_max_variants
+            .as_deref()
+            .map(|v| ("auth_bruteforce_max_variants", v.to_string())),
+        req.auth_ip_block_window_minutes
+            .as_deref()
+            .map(|v| ("auth_ip_block_window_minutes", v.to_string())),
+        req.auth_ip_block_threshold
+            .as_deref()
+            .map(|v| ("auth_ip_block_threshold", v.to_string())),
+        req.auth_ip_block_duration_hours
+            .as_deref()
+            .map(|v| ("auth_ip_block_duration_hours", v.to_string())),
+        req.turnstile_site_key
+            .as_deref()
+            .map(|v| ("turnstile_site_key", v.to_string())),
+        req.turnstile_secret_key
+            .as_deref()
+            .map(|v| ("turnstile_secret_key", v.to_string())),
+        req.password_reset_max_active
+            .as_deref()
+            .map(|v| ("password_reset_max_active", v.to_string())),
+        req.account_creation_ip_window_minutes
+            .as_deref()
+            .map(|v| ("account_creation_ip_window_minutes", v.to_string())),
+        req.account_creation_ip_max
+            .as_deref()
+            .map(|v| ("account_creation_ip_max", v.to_string())),
     ]
     .into_iter()
     .flatten()
