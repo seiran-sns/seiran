@@ -32,7 +32,7 @@ struct TurnstileResponse {
     success: bool,
 }
 
-async fn verify_turnstile(
+pub(crate) async fn verify_turnstile(
     state: &AppState,
     token: Option<&str>,
     ip: &ClientIp,
@@ -122,6 +122,8 @@ async fn fetch_avatar_url(state: &AppState, actor_id: i64) -> Option<String> {
 pub struct LoginRequest {
     pub identifier: String, // メールアドレス OR ユーザーネーム
     pub password: String,
+    /// Cloudflare Turnstile widgetが返すトークン。サイト鍵/秘密鍵が設定済みの場合は必須。
+    pub turnstile_token: Option<String>,
 }
 
 pub async fn register(
@@ -331,6 +333,12 @@ pub(crate) async fn finish_login(
     email: String,
     username: String,
 ) -> Result<AuthResponse, ApiError> {
+    // ログイン成功でブルートフォース判定ウィンドウをリセットする（#223フォローアップ）。
+    // 失敗しても致命的ではないためログのみ（ログイン自体は継続する）。
+    if let Err(e) = state.users.touch_last_login_success(user_id).await {
+        tracing::warn!("[login] last_login_success_at 更新失敗: {}", e);
+    }
+
     let (token, _jti) = state
         .local_auth
         .generate_token(user_id, &email)
@@ -401,6 +409,7 @@ pub async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     rate_limit::check_ip_not_blocked(&state, &ip).await?;
+    verify_turnstile(&state, req.turnstile_token.as_deref(), &ip).await?;
 
     let row = if req.identifier.contains('@') {
         state.users.find_login_by_email(&req.identifier).await
@@ -439,19 +448,14 @@ pub async fn login(
     let username = row.username;
     let hash = row.password_hash.expect("直前のガードでSomeを確認済み");
 
-    let last_reset_at = state
-        .password_resets
-        .find_last_used_at(user_id)
-        .await
-        .ok()
-        .flatten();
+    let window_reset_at = rate_limit::window_reset_at(&state, user_id).await;
     rate_limit::check_and_record_credential_attempt(
         &state,
         AttemptKind::Login,
         &ip,
         &req.identifier,
         &req.password,
-        last_reset_at,
+        window_reset_at,
     )
     .await?;
 

@@ -109,7 +109,22 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site Key",
     "turnstileSecretKeyLabel": "Secret Key",
-    "turnstileHint": "두 키를 모두 설정하면 로그인/계정 생성 화면에서 Turnstile 인증이 활성화됩니다."
+    "turnstileHint": "두 키를 모두 설정하면 로그인/계정 생성 화면에서 Turnstile 인증이 활성화됩니다.",
+    "roleRateLimitSectionTitle": "역할별 속도 제한",
+    "roleRateLimitHint": "admin에는 적용되지 않습니다. moderator는 더 높은 한도를 가지며, user와 emoji-editor는 동일한 한도를 공유합니다.",
+    "postRateLimitWindowMinutesLabel": "게시물 제한 기간(분)",
+    "postRateLimitMaxUserLabel": "게시물 상한(user)",
+    "postRateLimitMaxModeratorLabel": "게시물 상한(moderator)",
+    "followRateLimitWindowHoursLabel": "팔로우 제한 기간(시간)",
+    "followRateLimitMaxUserLabel": "신규 팔로우 상한(user)",
+    "followRateLimitMaxModeratorLabel": "신규 팔로우 상한(moderator)",
+    "listMaxCountUserLabel": "리스트 생성 수 상한(user)",
+    "listMaxCountModeratorLabel": "리스트 생성 수 상한(moderator)",
+    "listMemberMaxUserLabel": "리스트 최대 인원(user)",
+    "listMemberMaxModeratorLabel": "리스트 최대 인원(moderator)",
+    "searchRateLimitWindowMinutesLabel": "검색 제한 기간(분)",
+    "searchRateLimitMaxUserLabel": "검색 횟수 상한(user)",
+    "searchRateLimitMaxModeratorLabel": "검색 횟수 상한(moderator)"
   },
   "storageProvidersPanel": {
     "title": "객체 스토리지",

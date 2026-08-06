@@ -16,9 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use seiran_common::generate_snowflake_id;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
-use seiran_common::repository::{
-    Actor, ListMemberRow, ListRow, MAX_LISTS_PER_OWNER, MAX_MEMBERS_PER_LIST,
-};
+use seiran_common::repository::{Actor, ListMemberRow, ListRow};
 
 use crate::error::ApiError;
 use crate::handlers::notes::dto::TimelineQuery;
@@ -123,8 +121,10 @@ pub async fn create_list(
         Ok(c) => c,
         Err(e) => return ApiError::Internal(format!("リスト数取得失敗: {}", e)).into_response(),
     };
-    if count >= MAX_LISTS_PER_OWNER {
-        return ApiError::Conflict("LIST_LIMIT_EXCEEDED").into_response();
+    if let Some(max) = crate::rate_limit::list_creation_max(&state, user.actor_id).await {
+        if count >= max {
+            return ApiError::Conflict("LIST_LIMIT_EXCEEDED").into_response();
+        }
     }
 
     let now = chrono::Utc::now();
@@ -455,8 +455,10 @@ pub async fn add_member(
         Ok(c) => c,
         Err(e) => return ApiError::Internal(format!("メンバー数取得失敗: {}", e)).into_response(),
     };
-    if member_count >= MAX_MEMBERS_PER_LIST {
-        return ApiError::Conflict("LIST_MEMBER_LIMIT_EXCEEDED").into_response();
+    if let Some(max) = crate::rate_limit::list_member_max(&state, user.actor_id).await {
+        if member_count >= max {
+            return ApiError::Conflict("LIST_MEMBER_LIMIT_EXCEEDED").into_response();
+        }
     }
 
     let target_actor = match resolve_and_upsert_target(&state, &req.target).await {

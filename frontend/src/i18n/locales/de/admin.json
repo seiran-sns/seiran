@@ -109,7 +109,22 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site Key",
     "turnstileSecretKeyLabel": "Secret Key",
-    "turnstileHint": "Turnstile wird auf der Login- und Registrierungsseite aktiviert, sobald beide Schlüssel gesetzt sind."
+    "turnstileHint": "Turnstile wird auf der Login- und Registrierungsseite aktiviert, sobald beide Schlüssel gesetzt sind.",
+    "roleRateLimitSectionTitle": "Rollenbasierte Ratenbegrenzungen",
+    "roleRateLimitHint": "Diese Grenzwerte gelten nicht für Admins. Moderatoren erhalten ein höheres Limit; User und Emoji-Editoren teilen sich dasselbe Limit.",
+    "postRateLimitWindowMinutesLabel": "Zeitfenster für Beitragslimit (Minuten)",
+    "postRateLimitMaxUserLabel": "Max. Beiträge (User)",
+    "postRateLimitMaxModeratorLabel": "Max. Beiträge (Moderator)",
+    "followRateLimitWindowHoursLabel": "Zeitfenster für Folgen-Limit (Stunden)",
+    "followRateLimitMaxUserLabel": "Max. neue Follows (User)",
+    "followRateLimitMaxModeratorLabel": "Max. neue Follows (Moderator)",
+    "listMaxCountUserLabel": "Max. Listen (User)",
+    "listMaxCountModeratorLabel": "Max. Listen (Moderator)",
+    "listMemberMaxUserLabel": "Max. Mitglieder pro Liste (User)",
+    "listMemberMaxModeratorLabel": "Max. Mitglieder pro Liste (Moderator)",
+    "searchRateLimitWindowMinutesLabel": "Zeitfenster für Suchlimit (Minuten)",
+    "searchRateLimitMaxUserLabel": "Max. Suchen (User)",
+    "searchRateLimitMaxModeratorLabel": "Max. Suchen (Moderator)"
   },
   "storageProvidersPanel": {
     "title": "Objektspeicher",

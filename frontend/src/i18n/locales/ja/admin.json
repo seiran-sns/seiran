@@ -117,7 +117,22 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site Key",
     "turnstileSecretKeyLabel": "Secret Key",
-    "turnstileHint": "両方設定するとログイン画面・アカウント作成画面でTurnstile認証が有効になります。未設定の場合は発動しません。"
+    "turnstileHint": "両方設定するとログイン画面・アカウント作成画面でTurnstile認証が有効になります。未設定の場合は発動しません。",
+    "roleRateLimitSectionTitle": "ロール別レート制限",
+    "roleRateLimitHint": "adminには適用されません。moderatorはuser/emoji-editorより緩い上限になります。",
+    "postRateLimitWindowMinutesLabel": "投稿数制限ウィンドウ（分）",
+    "postRateLimitMaxUserLabel": "投稿数上限（user）",
+    "postRateLimitMaxModeratorLabel": "投稿数上限（moderator）",
+    "followRateLimitWindowHoursLabel": "フォロー数制限ウィンドウ（時間）",
+    "followRateLimitMaxUserLabel": "新規フォロー数上限（user）",
+    "followRateLimitMaxModeratorLabel": "新規フォロー数上限（moderator）",
+    "listMaxCountUserLabel": "リスト作成数上限（user）",
+    "listMaxCountModeratorLabel": "リスト作成数上限（moderator）",
+    "listMemberMaxUserLabel": "リスト最大人数（user）",
+    "listMemberMaxModeratorLabel": "リスト最大人数（moderator）",
+    "searchRateLimitWindowMinutesLabel": "検索回数制限ウィンドウ（分）",
+    "searchRateLimitMaxUserLabel": "検索回数上限（user）",
+    "searchRateLimitMaxModeratorLabel": "検索回数上限（moderator）"
   },
   "storageProvidersPanel": {
     "title": "オブジェクトストレージ",

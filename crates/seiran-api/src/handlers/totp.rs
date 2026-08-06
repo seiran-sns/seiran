@@ -273,19 +273,14 @@ pub async fn totp_verify(
 
     // ログインと同じ「試行種類数」ベースのブルートフォース対策をTOTPコード/リカバリー
     // コードにも適用する（issue #223: パラメータ共用）。
-    let last_reset_at = state
-        .password_resets
-        .find_last_used_at(user_id)
-        .await
-        .ok()
-        .flatten();
+    let window_reset_at = rate_limit::window_reset_at(&state, user_id).await;
     rate_limit::check_and_record_credential_attempt(
         &state,
         AttemptKind::Totp,
         &ip,
         &row.username,
         &req.code,
-        last_reset_at,
+        window_reset_at,
     )
     .await?;
 

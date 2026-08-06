@@ -31,8 +31,23 @@ export async function registerUserViaApi(
   request: APIRequestContext,
   usernamePrefix = "e2e",
 ): Promise<E2eUser> {
+  return registerUserWithPasswordViaApi(request, usernamePrefix, "seiranda-e2e");
+}
+
+/**
+ * `registerUserViaApi`と同様だが、パスワードを呼び出し側が指定できる。
+ * `registerUserViaApi`は全テスト共通の固定パスワードを使うため、ログイン
+ * ブルートフォース対策のE2E（`rate-limit.spec.ts`）のように「同一パスワードに対する
+ * 異なるユーザー名の試行種類数」（逆方向判定）を検証する場合、他テストが同じ
+ * パスワードでログイン試行しているとカウントが汚染される。そのため一意パスワードで
+ * 隔離したいテストはこちらを使うこと。
+ */
+export async function registerUserWithPasswordViaApi(
+  request: APIRequestContext,
+  usernamePrefix: string,
+  password: string,
+): Promise<E2eUser> {
   const username = uniqueUsername(usernamePrefix);
-  const password = "seiranda-e2e";
   const email = `${username}@example.com`;
 
   const res = await request.post("/api/auth/register", {
@@ -78,6 +93,27 @@ export async function seedAuth(page: Page, token: string): Promise<void> {
   await page.addInitScript((t) => {
     window.localStorage.setItem("seiran_token", t);
   }, token);
+}
+
+// global-setup.ts が作成する初期管理者アカウント（role=admin）。
+export const ADMIN_USERNAME = "e2ebootstrap";
+export const ADMIN_PASSWORD = "seiranda-e2e";
+
+/**
+ * 管理画面のサイト設定をAPI経由で更新する（レート制限系E2Eで閾値を一時的に下げるため）。
+ * `workers: 1`（playwright.config.ts）で全テストが直列実行される前提のグローバル設定変更
+ * のため、呼び出し側は必ず `try/finally` で元の値へ戻すこと。
+ */
+export async function patchSiteSettings(
+  request: APIRequestContext,
+  adminToken: string,
+  patch: Record<string, string>,
+): Promise<void> {
+  const res = await request.patch("/api/admin/site-settings", {
+    headers: { Authorization: `Bearer ${adminToken}` },
+    data: patch,
+  });
+  expect(res.ok(), `site-settings更新失敗: ${res.status()} ${await res.text()}`).toBeTruthy();
 }
 
 /**

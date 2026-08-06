@@ -58,6 +58,8 @@ ID 採番は2系統ある。
 - `auth_ip_blocks`: `INET`主キーごとの認証ブロック期限・理由。期限内の行を管理画面に表示し、個別削除で解除する。
 - `account_creation_log`: 同一IPからのアカウント作成成功時刻。
 - `user_contact_log`: DM以外のメンション・返信・引用について、送信actorと宛先actorを記録し、1時間内のユニーク宛先数を算出する。
+- `search_log`: 検索実行時刻を`actor_id`単位で記録する（初回検索のみ、スクロールによるページング取得は記録しない）。1時間あたりの検索回数レート制限に使う。
+- `users.last_login_success_at`: 直近ログイン成功時刻。ブルートフォース判定ウィンドウの起点（パスワードリセット時刻と合わせ、より新しい方を採用）に使う。投稿数・フォロー数・リスト数/人数の各制限は専用ログテーブルを持たず、既存の`posts`（`actor_id`+`created_at`）・`follows`（`follower_actor_id`+`created_at`）・`lists`（`owner_actor_id`）・`list_members`（`list_id`）を直接COUNTして判定する。
 
 ### `users.role`（ENUM `user_role`）
 

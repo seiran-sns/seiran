@@ -35,6 +35,10 @@ pub async fn create_follow(
     State(state): State<AppState>,
     Json(req): Json<CreateFollowRequest>,
 ) -> impl IntoResponse {
+    if let Err(e) = crate::rate_limit::check_follow_rate_limit(&state, user.actor_id).await {
+        return e.into_response();
+    }
+
     let t = req.target.trim().trim_start_matches('@');
 
     // HTTP(S) URI → Fedi AP フォロー（ATP ハンドル判定より先に弾く）

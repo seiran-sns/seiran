@@ -242,6 +242,19 @@ export interface SiteSettings {
   password_reset_max_active: string;
   account_creation_ip_window_minutes: string;
   account_creation_ip_max: string;
+  post_rate_limit_window_minutes: string;
+  post_rate_limit_max_user: string;
+  post_rate_limit_max_moderator: string;
+  follow_rate_limit_window_hours: string;
+  follow_rate_limit_max_user: string;
+  follow_rate_limit_max_moderator: string;
+  list_max_count_user: string;
+  list_max_count_moderator: string;
+  list_member_max_user: string;
+  list_member_max_moderator: string;
+  search_rate_limit_window_minutes: string;
+  search_rate_limit_max_user: string;
+  search_rate_limit_max_moderator: string;
 }
 
 export interface AuthIpBlock {
@@ -892,9 +905,10 @@ export const api = {
   },
 
   auth: {
-    requestEmailVerification(email: string) {
+    requestEmailVerification(email: string, turnstileToken?: string) {
       return request<VerifyEmailResponse>("POST", "/auth/verify-email", {
         email,
+        turnstile_token: turnstileToken,
       });
     },
     verifyEmailToken(token: string, signal?: AbortSignal) {
@@ -921,10 +935,11 @@ export const api = {
         turnstile_token: turnstileToken,
       });
     },
-    login(identifier: string, password: string) {
+    login(identifier: string, password: string, turnstileToken?: string) {
       return request<LoginResult>("POST", "/auth/login", {
         identifier,
         password,
+        turnstile_token: turnstileToken,
       });
     },
     async loginWithPasskey(identifier: string) {
@@ -1377,6 +1392,19 @@ export const api = {
         password_reset_max_active: string;
         account_creation_ip_window_minutes: string;
         account_creation_ip_max: string;
+        post_rate_limit_window_minutes: string;
+        post_rate_limit_max_user: string;
+        post_rate_limit_max_moderator: string;
+        follow_rate_limit_window_hours: string;
+        follow_rate_limit_max_user: string;
+        follow_rate_limit_max_moderator: string;
+        list_max_count_user: string;
+        list_max_count_moderator: string;
+        list_member_max_user: string;
+        list_member_max_moderator: string;
+        search_rate_limit_window_minutes: string;
+        search_rate_limit_max_user: string;
+        search_rate_limit_max_moderator: string;
       }>,
     ) {
       return request<SiteSettings>("PATCH", "/admin/site-settings", patch);

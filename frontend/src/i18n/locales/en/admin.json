@@ -117,7 +117,22 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site key",
     "turnstileSecretKeyLabel": "Secret key",
-    "turnstileHint": "Turnstile is enabled on the login and sign-up pages once both keys are set."
+    "turnstileHint": "Turnstile is enabled on the login and sign-up pages once both keys are set.",
+    "roleRateLimitSectionTitle": "Role-based rate limits",
+    "roleRateLimitHint": "These limits do not apply to admins. Moderators get a higher limit; users and emoji-editors share the same limit.",
+    "postRateLimitWindowMinutesLabel": "Post limit window (minutes)",
+    "postRateLimitMaxUserLabel": "Max posts (user)",
+    "postRateLimitMaxModeratorLabel": "Max posts (moderator)",
+    "followRateLimitWindowHoursLabel": "Follow limit window (hours)",
+    "followRateLimitMaxUserLabel": "Max new follows (user)",
+    "followRateLimitMaxModeratorLabel": "Max new follows (moderator)",
+    "listMaxCountUserLabel": "Max lists (user)",
+    "listMaxCountModeratorLabel": "Max lists (moderator)",
+    "listMemberMaxUserLabel": "Max members per list (user)",
+    "listMemberMaxModeratorLabel": "Max members per list (moderator)",
+    "searchRateLimitWindowMinutesLabel": "Search limit window (minutes)",
+    "searchRateLimitMaxUserLabel": "Max searches (user)",
+    "searchRateLimitMaxModeratorLabel": "Max searches (moderator)"
   },
   "storageProvidersPanel": {
     "title": "Object storage",

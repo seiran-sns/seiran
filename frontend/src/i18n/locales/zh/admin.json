@@ -109,7 +109,22 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site Key",
     "turnstileSecretKeyLabel": "Secret Key",
-    "turnstileHint": "两个密钥都设置后，登录和注册页面将启用Turnstile验证。"
+    "turnstileHint": "两个密钥都设置后，登录和注册页面将启用Turnstile验证。",
+    "roleRateLimitSectionTitle": "按角色的速率限制",
+    "roleRateLimitHint": "这些限制不适用于admin。moderator的上限更高；user与emoji-editor共用同一上限。",
+    "postRateLimitWindowMinutesLabel": "发帖限制窗口（分钟）",
+    "postRateLimitMaxUserLabel": "发帖数上限（user）",
+    "postRateLimitMaxModeratorLabel": "发帖数上限（moderator）",
+    "followRateLimitWindowHoursLabel": "关注限制窗口（小时）",
+    "followRateLimitMaxUserLabel": "新增关注数上限（user）",
+    "followRateLimitMaxModeratorLabel": "新增关注数上限（moderator）",
+    "listMaxCountUserLabel": "列表创建数上限（user）",
+    "listMaxCountModeratorLabel": "列表创建数上限（moderator）",
+    "listMemberMaxUserLabel": "列表最大人数（user）",
+    "listMemberMaxModeratorLabel": "列表最大人数（moderator）",
+    "searchRateLimitWindowMinutesLabel": "搜索限制窗口（分钟）",
+    "searchRateLimitMaxUserLabel": "搜索次数上限（user）",
+    "searchRateLimitMaxModeratorLabel": "搜索次数上限（moderator）"
   },
   "storageProvidersPanel": {
     "title": "对象存储",

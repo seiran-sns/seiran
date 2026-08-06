@@ -50,6 +50,17 @@ pub async fn search_notes(
         .into_response();
     }
 
+    // スクロールによる続き取得（session_id/until_id/since_idのいずれかを指定）は
+    // レート制限の回数に含めない（issue #223）。
+    let is_initial_search = q.session_id.is_none() && q.until_id.is_none() && q.since_id.is_none();
+    if let Some(actor_id) = user.as_ref().map(|u| u.actor_id) {
+        if let Err(e) =
+            crate::rate_limit::check_search_rate_limit(&state, actor_id, is_initial_search).await
+        {
+            return e.into_response();
+        }
+    }
+
     let limit = q.limit.unwrap_or(30).clamp(1, 100) as usize;
     let viewer = user
         .as_ref()

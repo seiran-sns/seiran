@@ -70,9 +70,9 @@ seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サ�
 
 ## 4. 認証
 
-ログインとTOTP検証は、暗号鍵をpepperにしたkeyed hashだけを`auth_attempt_log`へ保存し、同一識別子に対する資格情報および同一資格情報に対する識別子を既定10分・5種類までに制限する。制限拒否が同一IPで既定10分に5回発生すると24時間`auth_ip_blocks`で認証を遮断する。各値、Turnstile鍵、登録IP制限（既定60分・5件）は`site_settings`から管理する。登録時はTurnstile設定済みの場合にCloudflare Siteverifyを必須とする。
+ログインとTOTP検証は、暗号鍵をpepperにしたkeyed hashだけを`auth_attempt_log`へ保存し、同一識別子に対する資格情報および同一資格情報に対する識別子を既定10分・5種類までに制限する。ウィンドウ起点は「既定10分前」「直近パスワードリセット完了時刻」「直近ログイン成功時刻（`users.last_login_success_at`）」のうち最も新しい時刻で、ログイン成功のたびに試行種類数カウントがリセットされる。制限拒否が同一IPで既定10分に5回発生すると24時間`auth_ip_blocks`で認証を遮断する。各値、Turnstile鍵、登録IP制限（既定60分・5件）は`site_settings`から管理する。ログイン・登録（メール確認送信・直接登録の両方）はTurnstile設定済みの場合にCloudflare Siteverifyを必須とする。クライアントIPは`ClientIp`（`cf-connecting-ip`/`x-real-ip`/`x-forwarded-for`の順で信頼済みヘッダーからのみ解決、無ければ`None`＝IP系制限は素通り）で解決する。
 
-`user`/`emoji-editor`はDMを除くメンション・返信・引用の宛先を1時間30ユニークユーザーまで、アップロードを1ファイル10MBまでに制限する。`moderator`のアップロード上限は50MB、`admin`はAPI全体の既存上限100MBとする。
+`user`/`emoji-editor`はDMを除くメンション・返信・引用の宛先を1時間30ユニークユーザーまで、投稿を1時間30通（`moderator`は100通）まで、新規フォローを24時間100人（`moderator`は300人）まで、リスト作成数を5本（`moderator`は30本）まで、リスト最大人数を50人（`moderator`は300人）まで、検索を1時間10回（`moderator`は50回、スクロールによるページング取得は回数に含まない）まで、アップロードを1ファイル10MBまでに制限する。`moderator`のアップロード上限は50MB、`admin`はいずれの制限も対象外でAPI全体の既存アップロード上限100MBのみが適用される。閾値は全て`site_settings`から変更可能（`crates/seiran-api/src/rate_limit.rs`の`role_limit`ヘルパー）。
 
 認証の起点はローカル ID/PW（`seiran-common::auth::local::LocalAuthProvider`）。TOTPを有効化したユーザーはパスワード検証後に5分間有効な用途限定JWTを受け取り、`POST /api/auth/totp/verify`でTOTPまたは使い切りリカバリーコードを検証して初めて通常のJWTを取得する。用途限定JWTは通常JWTとクレーム形状を分け、一般APIの認証には利用できない。管理者はユーザー管理APIでTOTP有効状態とパスキー登録数を確認でき、本人が認証手段を失った場合はTOTP設定を強制解除できる。外部認証プロバイダとの連携や、認証方式を切り替える抽象化レイヤーは存在しない。
 

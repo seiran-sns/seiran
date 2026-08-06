@@ -108,6 +108,16 @@ pub trait UserRepository: Send + Sync {
         user_id: i64,
         language: Option<&str>,
     ) -> Result<(), sqlx::Error>;
+
+    /// 最終ログイン成功時刻を取得する（ブルートフォース判定ウィンドウの起点用、#223）。
+    async fn find_last_login_success_at(
+        &self,
+        user_id: i64,
+    ) -> Result<Option<DateTime<Utc>>, sqlx::Error>;
+
+    /// 最終ログイン成功時刻を現在時刻へ更新する。ログイン成功でブルートフォース試行の
+    /// 種類数カウントをリセットするため、パスワード認証成功時・TOTP検証成功時の両方で呼ぶ。
+    async fn touch_last_login_success(&self, user_id: i64) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgUserRepository {
@@ -333,6 +343,26 @@ impl UserRepository for PgUserRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users SET language_preference = $1, updated_at = NOW() WHERE id = $2")
             .bind(language)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn find_last_login_success_at(
+        &self,
+        user_id: i64,
+    ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+        let row: Option<(Option<DateTime<Utc>>,)> =
+            sqlx::query_as("SELECT last_login_success_at FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.and_then(|(v,)| v))
+    }
+
+    async fn touch_last_login_success(&self, user_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET last_login_success_at = NOW() WHERE id = $1")
             .bind(user_id)
             .execute(&self.pool)
             .await
