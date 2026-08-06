@@ -505,20 +505,7 @@ impl PostRepository for PgPostRepository {
                      WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
                        AND ($2::bigint IS NULL OR p.id < $2)
                        AND ($3::bigint IS NULL OR p.id > $3)
-                       AND (
-                           p.visibility NOT IN ('followers_only', 'direct')
-                           OR (p.visibility = 'followers_only' AND (
-                               p.actor_id = $1
-                               OR EXISTS (
-                                   SELECT 1 FROM follows f
-                                   WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                               )
-                           ))
-                           OR (p.visibility = 'direct' AND NOT $5 AND (
-                               p.actor_id = $1
-                               OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
-                           ))
-                       )
+                       AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
                      ORDER BY p.id DESC LIMIT $4
                  ) p
                  ORDER BY p.id DESC LIMIT $4
@@ -566,20 +553,7 @@ impl PostRepository for PgPostRepository {
                AND ($3::bigint IS NULL OR p.id > $3)
                AND p.visibility NOT IN ('unlisted', 'followers_only')
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
-               AND (
-                   p.visibility NOT IN ('followers_only', 'direct')
-                   OR (p.visibility = 'followers_only' AND (
-                       p.actor_id = $1
-                       OR EXISTS (
-                           SELECT 1 FROM follows f
-                           WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                       )
-                   ))
-                   OR (p.visibility = 'direct' AND NOT $5 AND (
-                       p.actor_id = $1
-                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
-                   ))
-               )
+               AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
              ORDER BY p.id DESC LIMIT $4",
         )
         .bind(viewer_actor_id)
@@ -619,20 +593,7 @@ impl PostRepository for PgPostRepository {
                          WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
                            AND ($2::bigint IS NULL OR p.id < $2)
                            AND ($3::bigint IS NULL OR p.id > $3)
-                           AND (
-                               p.visibility NOT IN ('followers_only', 'direct')
-                               OR (p.visibility = 'followers_only' AND (
-                                   p.actor_id = $1
-                                   OR EXISTS (
-                                       SELECT 1 FROM follows f
-                                       WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                                   )
-                               ))
-                               OR (p.visibility = 'direct' AND NOT $5 AND (
-                                   p.actor_id = $1
-                                   OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
-                               ))
-                           )
+                           AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
                          ORDER BY p.id DESC LIMIT $4
                      ) p
                  )
@@ -647,20 +608,7 @@ impl PostRepository for PgPostRepository {
                        AND ($3::bigint IS NULL OR p.id > $3)
                        AND (p.visibility != 'unlisted' OR p.actor_id = $1)
                        AND (p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
-                       AND (
-                           p.visibility NOT IN ('followers_only', 'direct')
-                           OR (p.visibility = 'followers_only' AND (
-                               p.actor_id = $1
-                               OR EXISTS (
-                                   SELECT 1 FROM follows f
-                                   WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                               )
-                           ))
-                           OR (p.visibility = 'direct' AND NOT $5 AND (
-                               p.actor_id = $1
-                               OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
-                           ))
-                       )
+                       AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
                      ORDER BY p.id DESC LIMIT $4
                  )
              )
@@ -708,20 +656,7 @@ impl PostRepository for PgPostRepository {
                AND ($3::bigint IS NULL OR p.id > $3)
                AND p.visibility NOT IN ('unlisted', 'followers_only')
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
-               AND (
-                   p.visibility NOT IN ('followers_only', 'direct')
-                   OR (p.visibility = 'followers_only' AND (
-                       p.actor_id = $1
-                       OR EXISTS (
-                           SELECT 1 FROM follows f
-                           WHERE f.follower_actor_id = $1 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                       )
-                   ))
-                   OR (p.visibility = 'direct' AND NOT $5 AND (
-                       p.actor_id = $1
-                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
-                   ))
-               )
+               AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
              ORDER BY p.id DESC LIMIT $4",
         )
         .bind(viewer_actor_id)
@@ -772,20 +707,7 @@ impl PostRepository for PgPostRepository {
                AND ($3::bigint IS NULL OR p.id < $3)
                AND ($4::bigint IS NULL OR p.id > $4)
                AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_is_hidden_for_viewer($2, $1))
-               AND (
-                   p.visibility NOT IN ('followers_only', 'direct')
-                   OR (p.visibility = 'followers_only' AND (
-                       p.actor_id = $2
-                       OR EXISTS (
-                           SELECT 1 FROM follows f
-                           WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                       )
-                   ))
-                   OR (p.visibility = 'direct' AND NOT $6 AND (
-                       p.actor_id = $2
-                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $2)
-                   ))
-               )
+               AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, $6)
              ORDER BY p.id DESC
              LIMIT $5",
         )
@@ -866,20 +788,7 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.id = $1 AND p.deleted_at IS NULL
-               AND (
-                   p.visibility NOT IN ('followers_only', 'direct')
-                   OR (p.visibility = 'followers_only' AND (
-                       p.actor_id = $2
-                       OR EXISTS (
-                           SELECT 1 FROM follows f
-                           WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                       )
-                   ))
-                   OR (p.visibility = 'direct' AND (
-                       p.actor_id = $2
-                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $2)
-                   ))
-               )
+               AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, false)
              LIMIT 1",
         )
         .bind(id)
@@ -930,20 +839,7 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.id < $2 AND p.deleted_at IS NULL
                AND ($4::bigint IS NULL OR p.actor_id = $4 OR NOT actor_is_hidden_for_viewer($4, p.actor_id))
-               AND (
-                   p.visibility NOT IN ('followers_only', 'direct')
-                   OR (p.visibility = 'followers_only' AND (
-                       p.actor_id = $4
-                       OR EXISTS (
-                           SELECT 1 FROM follows f
-                           WHERE f.follower_actor_id = $4 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                       )
-                   ))
-                   OR (p.visibility = 'direct' AND (
-                       p.actor_id = $4
-                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $4)
-                   ))
-               )
+               AND post_is_visible_to($4, p.actor_id, p.visibility::text, p.id, false)
              ORDER BY p.id DESC
              LIMIT $3",
         )
@@ -974,20 +870,7 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.actor_id = $1 AND p.id > $2 AND p.deleted_at IS NULL
                AND ($4::bigint IS NULL OR p.actor_id = $4 OR NOT actor_is_hidden_for_viewer($4, p.actor_id))
-               AND (
-                   p.visibility NOT IN ('followers_only', 'direct')
-                   OR (p.visibility = 'followers_only' AND (
-                       p.actor_id = $4
-                       OR EXISTS (
-                           SELECT 1 FROM follows f
-                           WHERE f.follower_actor_id = $4 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                       )
-                   ))
-                   OR (p.visibility = 'direct' AND (
-                       p.actor_id = $4
-                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $4)
-                   ))
-               )
+               AND post_is_visible_to($4, p.actor_id, p.visibility::text, p.id, false)
              ORDER BY p.id ASC
              LIMIT $3",
         )
