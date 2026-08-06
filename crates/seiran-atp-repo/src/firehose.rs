@@ -854,7 +854,8 @@ async fn process_message(
                     },
                     None => None,
                 };
-                let (body_text, mention_facets) = apply_bsky_facets(&body_text, parsed_facets).await;
+                let (body_text, mention_facets) =
+                    apply_bsky_facets(&body_text, parsed_facets).await;
                 let emoji_map = resolve_local_emoji_map(&pool2, &body_text).await;
                 save_bsky_post(
                     &pool2,
