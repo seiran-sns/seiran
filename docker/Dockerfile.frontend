@@ -2,7 +2,15 @@ FROM node:22-alpine
 WORKDIR /app
 # package*.json だけ先にコピーして npm install をキャッシュ
 COPY package*.json ./
-RUN npm install --no-audit
+# postinstall（copy-twemoji-assets.mjs）がnpm install中に実行されるため、
+# npm install より前にscripts/を置いておく必要がある。
+COPY scripts ./scripts
+# node:22-alpine にはuid/gid 1000のnodeユーザーが標準で存在する。
+# npm installはroot権限で走らせ、生成物の所有権だけnodeへ渡してから
+# 非rootに切り替える（bind mountされるsrc等はホスト側の一般ユーザー所有なので
+# 読み取りだけなら権限問題は起きない）。
+RUN npm install --no-audit && chown -R node:node /app
+USER node
 # ソースは docker-compose でマウントするため COPY しない
 EXPOSE 5173
 CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]
