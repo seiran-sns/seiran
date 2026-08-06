@@ -9,14 +9,17 @@ interface EmojibaseEntry {
 /** 絵文字 → 検索対象語（CLDR 正式名＋アノテーションキーワード）の索引。 */
 export type EmojiAnnotationIndex = Map<string, string[]>;
 
+// emojibase-dataの生JSON（hexcode/group/order/skins等を含み1言語700〜800kB）を直接
+// importせず、postinstall（scripts/build-emoji-annotations.mjs）が生成する
+// emoji/label/tagsだけの軽量版を読む（ダウンロードサイズ対策、docs/code_audit_2026-08-05.md P-7）。
 const dataLoaders: Record<SupportedLanguage, () => Promise<EmojibaseEntry[]>> = {
-  en: () => import("emojibase-data/en/data.json").then((m) => m.default as EmojibaseEntry[]),
-  ja: () => import("emojibase-data/ja/data.json").then((m) => m.default as EmojibaseEntry[]),
-  zh: () => import("emojibase-data/zh/data.json").then((m) => m.default as EmojibaseEntry[]),
-  ko: () => import("emojibase-data/ko/data.json").then((m) => m.default as EmojibaseEntry[]),
-  es: () => import("emojibase-data/es/data.json").then((m) => m.default as EmojibaseEntry[]),
-  de: () => import("emojibase-data/de/data.json").then((m) => m.default as EmojibaseEntry[]),
-  fr: () => import("emojibase-data/fr/data.json").then((m) => m.default as EmojibaseEntry[]),
+  en: () => import("../generated/emoji-annotations/en.json").then((m) => m.default as EmojibaseEntry[]),
+  ja: () => import("../generated/emoji-annotations/ja.json").then((m) => m.default as EmojibaseEntry[]),
+  zh: () => import("../generated/emoji-annotations/zh.json").then((m) => m.default as EmojibaseEntry[]),
+  ko: () => import("../generated/emoji-annotations/ko.json").then((m) => m.default as EmojibaseEntry[]),
+  es: () => import("../generated/emoji-annotations/es.json").then((m) => m.default as EmojibaseEntry[]),
+  de: () => import("../generated/emoji-annotations/de.json").then((m) => m.default as EmojibaseEntry[]),
+  fr: () => import("../generated/emoji-annotations/fr.json").then((m) => m.default as EmojibaseEntry[]),
 };
 
 function buildIndex(entries: EmojibaseEntry[]): EmojiAnnotationIndex {

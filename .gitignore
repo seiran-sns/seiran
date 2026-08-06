@@ -16,6 +16,9 @@ frontend/dist/
 # node_modules由来の生成物（postinstallでコピーされるtwemoji SVGアセット）
 frontend/public/twemoji/
 
+# node_modules由来の生成物（postinstallで生成される軽量絵文字アノテーションJSON）
+frontend/src/generated/emoji-annotations/
+
 # エディタ・OS メタデータ
 .DS_Store
 .idea/
