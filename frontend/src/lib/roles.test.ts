@@ -32,6 +32,7 @@ describe("getAdminTopics", () => {
       "emojis",
       "reports",
       "relays",
+      "authIpBlocks",
     ]);
   });
 

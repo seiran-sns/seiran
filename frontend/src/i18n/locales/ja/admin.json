@@ -7,12 +7,23 @@
       "siteSettings": "サイト設定",
       "storage": "ストレージ",
       "emojis": "絵文字",
-      "relays": "リレー"
+      "relays": "リレー",
+      "authIpBlocks": "認証ブロック"
     },
     "rightPanelDescription": "管理操作はこの画面から行えます。各操作はサーバー側でも管理者権限を検証します。"
   },
   "relaysPanel": {
-    "title": "Fediverseリレー", "description": "公開投稿を配送・受信するリレーのinbox URLを管理します。", "inboxUrlLabel": "リレー inbox URL", "addButton": "追加", "emptyMessage": "参加中のリレーはありません。", "deleteConfirm": "リレー {{url}} から離脱しますか？", "status": { "pending": "承認待ち", "accepted": "参加中", "rejected": "拒否" }
+    "title": "Fediverseリレー",
+    "description": "公開投稿を配送・受信するリレーのinbox URLを管理します。",
+    "inboxUrlLabel": "リレー inbox URL",
+    "addButton": "追加",
+    "emptyMessage": "参加中のリレーはありません。",
+    "deleteConfirm": "リレー {{url}} から離脱しますか？",
+    "status": {
+      "pending": "承認待ち",
+      "accepted": "参加中",
+      "rejected": "拒否"
+    }
   },
   "authIpBlocksPanel": {
     "title": "認証ブロックIP",
@@ -157,14 +168,38 @@
     "submitting": "送信中…",
     "submit": "通報する",
     "categories": {
-      "misleading": { "title": "誤解を招くこと", "description": "スパムやその他の不正行為・欺瞞" },
-      "sexualAdultContent": { "title": "成人向けコンテンツ", "description": "ラベルのない、虐待的、または非同意の成人向けコンテンツ" },
-      "harassmentHate": { "title": "嫌がらせまたはヘイト", "description": "虐待的または差別的な行為" },
-      "violencePhysicalHarm": { "title": "暴力", "description": "暴力的または脅迫的なコンテンツ" },
-      "childSafety": { "title": "児童の安全", "description": "未成年者への加害・危険行為" },
-      "selfHarm": { "title": "自傷・危険行動", "description": "有害または危険性の高い行為" },
-      "ruleBreaking": { "title": "サイトルール違反", "description": "禁止行為・セキュリティ違反" },
-      "other": { "title": "その他", "description": "上記のいずれにも当てはまらない問題" }
+      "misleading": {
+        "title": "誤解を招くこと",
+        "description": "スパムやその他の不正行為・欺瞞"
+      },
+      "sexualAdultContent": {
+        "title": "成人向けコンテンツ",
+        "description": "ラベルのない、虐待的、または非同意の成人向けコンテンツ"
+      },
+      "harassmentHate": {
+        "title": "嫌がらせまたはヘイト",
+        "description": "虐待的または差別的な行為"
+      },
+      "violencePhysicalHarm": {
+        "title": "暴力",
+        "description": "暴力的または脅迫的なコンテンツ"
+      },
+      "childSafety": {
+        "title": "児童の安全",
+        "description": "未成年者への加害・危険行為"
+      },
+      "selfHarm": {
+        "title": "自傷・危険行動",
+        "description": "有害または危険性の高い行為"
+      },
+      "ruleBreaking": {
+        "title": "サイトルール違反",
+        "description": "禁止行為・セキュリティ違反"
+      },
+      "other": {
+        "title": "その他",
+        "description": "上記のいずれにも当てはまらない問題"
+      }
     },
     "reasons": {
       "reasonMisleadingSpam": "スパム",
