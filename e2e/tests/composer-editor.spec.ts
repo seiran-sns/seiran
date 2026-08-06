@@ -315,3 +315,45 @@ test("IME未確定文字が入力されるとプレースホルダーが消え�
 
   await expect(editor.evaluate((element) => element.matches(":empty"))).resolves.toBe(false);
 });
+
+test("Safariの漢字変換確定Enter（compositionendがkeydownより先行しkeyCode 229）で改行が入らない", async ({
+  page,
+  request,
+}) => {
+  const author = await registerUserViaApi(request, "e2ecomposerimeenter");
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.click();
+
+  await editor.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    element.replaceChildren(document.createTextNode("にほん"));
+    element.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      data: "にほん",
+      inputType: "insertCompositionText",
+      isComposing: true,
+    }));
+  });
+
+  // SafariはIME確定のEnterで、確定によるcompositionendがEnterのkeydownより
+  // 先に発火する。この時点でcomposing.currentは既にfalseへ戻っているため、
+  // keyCode 229でしか変換確定のEnterだと判別できない。
+  await editor.evaluate((element) => {
+    element.textContent = "日本";
+    element.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "日本" }));
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        keyCode: 229,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  await expect(editor).toHaveText("日本");
+});

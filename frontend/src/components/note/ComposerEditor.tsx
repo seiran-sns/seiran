@@ -326,7 +326,11 @@ export default function ComposerEditor({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (composing.current) return;
+    // Safariでは変換確定のEnterでcompositionendがkeydownより先に発火し、
+    // composing.currentが既にfalseへ戻ってしまう。この場合もkeyCodeは229の
+    // ままなので、変換確定イベントとして扱い通常のEnter処理をスキップする。
+    // https://zenn.dev/spacemarket/articles/149aa284ef7b08
+    if (composing.current || event.keyCode === 229) return;
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
       onSubmitShortcut();
