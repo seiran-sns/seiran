@@ -32,7 +32,6 @@ use seiran_common::repository::{
     ReactionRepository, extract_shortcode_candidates, parse_custom_emoji_shortcode,
 };
 use seiran_common::streaming::broadcast_reaction_update;
-use seiran_common::traits::{Job, JobQueue};
 use seiran_common::{StreamHub, generate_snowflake_id};
 
 const JETSTREAM_BASE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.feed.repost";
@@ -59,14 +58,12 @@ const JETSTREAM_CURSOR_SAVE_INTERVAL: Duration = Duration::from_secs(5);
 /// フェイルオープン/フェイルクローズする（`is_monolith`）。monolith（`all`ロール）は
 /// 複数起動時の非効率を許容する方針のため接続を維持し、split-role構成の`firehose`ロールは
 /// Redisが死ねばジョブキュー等の他機能も共倒れになるため接続を切る。
-#[allow(clippy::too_many_arguments)]
 pub async fn run(
     pool: PgPool,
     http: Arc<reqwest::Client>,
     stream_hub: Arc<StreamHub>,
     redis_url: Option<String>,
     is_monolith: bool,
-    job_queue: Arc<dyn JobQueue>,
 ) {
     let mut elector: Option<JetstreamLeaderElector> = None;
     let mut current_task: Option<tokio::task::JoinHandle<()>> = None;
@@ -111,8 +108,7 @@ pub async fn run(
                 let pool = pool.clone();
                 let http = Arc::clone(&http);
                 let hub = Arc::clone(&stream_hub);
-                let queue = Arc::clone(&job_queue);
-                current_task = Some(tokio::spawn(run_jetstream_loop(pool, http, hub, queue)));
+                current_task = Some(tokio::spawn(run_jetstream_loop(pool, http, hub)));
             }
             (false, true) => {
                 tracing::info!("[Jetstream] リーダーでなくなったため切断。");
@@ -127,16 +123,11 @@ pub async fn run(
 
 /// Jetstream接続を維持し続けるループ（エラー時は指数バックオフで再接続）。
 /// リーダー選出で「非リーダー」と判定されると、呼び出し元がこのタスクごと`abort`する。
-async fn run_jetstream_loop(
-    pool: PgPool,
-    http: Arc<reqwest::Client>,
-    stream_hub: Arc<StreamHub>,
-    job_queue: Arc<dyn JobQueue>,
-) {
+async fn run_jetstream_loop(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<StreamHub>) {
     let mut backoff_secs = 2u64;
 
     loop {
-        match connect_and_process(&pool, &http, &stream_hub, &job_queue).await {
+        match connect_and_process(&pool, &http, &stream_hub).await {
             Ok(()) => {
                 tracing::info!("[Jetstream] 接続終了（正常）。再接続します。");
                 backoff_secs = 2;
@@ -246,7 +237,6 @@ async fn connect_and_process(
     pool: &PgPool,
     http: &Arc<reqwest::Client>,
     stream_hub: &Arc<StreamHub>,
-    job_queue: &Arc<dyn JobQueue>,
 ) -> Result<(), String> {
     let cursor = load_jetstream_cursor(pool).await;
     let wanted_dids = load_wanted_dids(pool).await;
@@ -282,7 +272,7 @@ async fn connect_and_process(
                         last_saved_at = tokio::time::Instant::now();
                     }
 
-                    if let Err(e) = process_message(&text, pool, http, stream_hub, job_queue).await {
+                    if let Err(e) = process_message(&text, pool, http, stream_hub).await {
                         tracing::error!("[Jetstream] メッセージ処理エラー（スキップ）: {}", e);
                     }
                 }
@@ -679,50 +669,18 @@ async fn resolve_local_emoji_map(pool: &PgPool, text: &str) -> JsonValue {
 /// 未知 DID（ローカル `actors` に無い）は `Job::ResolveBskyMention` をキューに積んで
 /// 非同期解決を促す（ベストエフォート。enqueue に失敗しても投稿保存は継続し、
 /// 表示時の都度解決に委ねる）。
-async fn apply_bsky_facets(
-    pool: &PgPool,
-    job_queue: &Arc<dyn JobQueue>,
-    text: &str,
-    facets: Vec<JetstreamFacet>,
-) -> (String, JsonValue) {
+async fn apply_bsky_facets(text: &str, facets: Vec<JetstreamFacet>) -> (String, JsonValue) {
     if facets.is_empty() {
         return (text.to_string(), JsonValue::Array(vec![]));
     }
 
     let (body, mention_spans) = apply_link_facets(text, facets);
 
-    if !mention_spans.is_empty() {
-        let actor_repo = PgActorRepository::new(pool.clone());
-        let mut queued_dids = HashSet::new();
-        for span in &mention_spans {
-            if !queued_dids.insert(span.did.clone()) {
-                continue;
-            }
-            let known = actor_repo
-                .find_by_did(&span.did)
-                .await
-                .ok()
-                .flatten()
-                .is_some();
-            if known {
-                continue;
-            }
-            if let Err(e) = job_queue
-                .enqueue(
-                    Job::ResolveBskyMention {
-                        did: span.did.clone(),
-                    },
-                    seiran_common::queue::worker::priority::NORMAL,
-                )
-                .await
-            {
-                tracing::warn!(
-                    "[Jetstream] ResolveBskyMention enqueue失敗（次回表示時に再試行）: {}",
-                    e
-                );
-            }
-        }
-    }
+    // メンション先DIDは actors への先行 upsert をしない（#216）。Bsky流入アクターは
+    // フォロー・リスト・ローカル投稿への関与等がある場合のみ保存する方針のため、
+    // 単に「フォロー中の相手の投稿からメンションされた」だけでは保存条件を満たさない。
+    // 表示時（`NoteResponse` 生成時）に既知（他経路で保存済み）なDIDのみ解決され、
+    // 未知のDIDはメンション元テキストのまま表示される。
 
     let mention_facets_json = JsonValue::Array(
         mention_spans
@@ -745,7 +703,6 @@ async fn process_message(
     pool: &PgPool,
     http: &Arc<reqwest::Client>,
     stream_hub: &Arc<StreamHub>,
-    job_queue: &Arc<dyn JobQueue>,
 ) -> Result<(), String> {
     let event: JetstreamEvent =
         serde_json::from_str(text).map_err(|e| format!("JSON パースエラー: {}", e))?;
@@ -860,7 +817,6 @@ async fn process_message(
 
             let pool2 = pool.clone();
             let hub2 = Arc::clone(stream_hub);
-            let queue2 = Arc::clone(job_queue);
             let at_uri2 = at_uri.clone();
             let body_text = body_text.to_string();
 
@@ -898,8 +854,7 @@ async fn process_message(
                     },
                     None => None,
                 };
-                let (body_text, mention_facets) =
-                    apply_bsky_facets(&pool2, &queue2, &body_text, parsed_facets).await;
+                let (body_text, mention_facets) = apply_bsky_facets(&body_text, parsed_facets).await;
                 let emoji_map = resolve_local_emoji_map(&pool2, &body_text).await;
                 save_bsky_post(
                     &pool2,

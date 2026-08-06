@@ -208,12 +208,6 @@ pub enum Job {
         now: DateTime<Utc>,
     },
 
-    /// Bsky投稿のメンションfacetに含まれるDIDが未解決（ローカル`actors`に無い）の場合、
-    /// AppView からプロフィールを取得して upsert する。`posts.mention_facets` に保存された
-    /// DID は表示時（`NoteResponse` 生成時）に都度解決を試みるため、このジョブは
-    /// 「次回表示までに解決を終えておく」ためのベストエフォート先行解決。
-    ResolveBskyMention { did: String },
-
     /// DM（`visibility='direct'`）投稿を、宛先の中のBskyアクターへ`chat.bsky.convo.sendMessage`
     /// で送信する。convoIdが`bsky_convo_links`に未キャッシュなら`getConvoForMembers`で先に解決する。
     BskyDmSend { post_id: i64 },

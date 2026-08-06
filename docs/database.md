@@ -67,6 +67,13 @@ ID 採番は2系統ある。
 ### `users` / `actors` の分離
 「魂（`users`、当サーバーの住民としての認証アカウント）」と「肉体（`actors`、各プロトコル宇宙での登場人物）」を分離している（`docs/concept.md` 参照）。1つの `users` 行に対し、ローカルユーザーなら基本的に1つの `actors` 行（AP/ATP 両方の識別子を1行に持つ）が対応する。`actors.user_id` は `users` への参照で、ローカルユーザー以外は NULL。
 
+### Bsky流入アクターの保存方針（`bsky_actor_is_engaged`）
+JetStreamは「ローカルユーザーのフォロー中/リストメンバーのBsky DID」だけを`wantedDids`として購読する（`crates/seiran-atp-repo/src/firehose.rs`）が、それらの投稿本文中のメンションfacetに現れる無関係な第三者まで`actors`へ永続化してしまうと、自インスタンスと一切関わりのない行が際限なく増える（issue #216、実測で全477,511行中467,603行がbsky型、うち467,008行が投稿0件）。
+
+`bsky_actor_is_engaged(actor_id)`（SQL関数、`LANGUAGE sql STABLE`）が「保存すべきか」を判定する唯一の場所。判定条件（いずれか1つでも真なら保存）: (1) 投稿を1件以上保存した、(2) ローカルユーザーのフォロワーかフォロイーである、(3) リストに含まれる、(4) ローカルポストへの返信・引用・リポスト・リアクション主である、(5) ローカルユーザーとのDM送受信がある、に加えて `blocks`/`mutes`/`poll_votes`/`reports` からの参照（構造的にFK制約があるため）。この関数はJetStream経由の受動的発見（`firehose.rs`の`resolve_or_upsert_bsky_actor`系呼び出し）にのみ適用され、`follows.rs`/`users.rs`/`target_resolve.rs`/`search.rs`のようにユーザーが能動的に参照（フォロー・プロフィール閲覧・「開く」・検索）した経路は無条件で保存する（そちらまで絞ると、関与ゼロから始まる新規フォロー等ができなくなってしまうため）。
+
+メンションfacet由来の未知DID（`posts.mention_facets`に記録されるが`actors`には存在しない）は先行解決・永続化しない。表示時（`NoteResponse`生成時）に他経路で既に保存済みのDIDのみハンドルへ解決され、未解決のまま残ることを許容する。
+
 `actors.actor_type`（ENUM `actor_type_enum`）は6種:
 `local` / `remote_seiran` / `fedi` / `bsky` / `fedi_bridge_to_bsky` / `bsky_bridge_to_fedi`
 

@@ -106,7 +106,6 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 | `ProxyFollowSync` | list-relay仮想アクターの代理フォロー同期 | — |
 | `AccountWithdrawUnfollowAll` | 退会時の一括アンフォロー | — |
 | `BskyPostCommitDeferred` | 動画添付投稿のATPコミットを動画結合完了まで遅延 | — |
-| `ResolveBskyMention{did}` | Bskyメンションfacetの未知DIDをAppViewから先行解決し`actors`へupsert（`docs/protocols.md` 6節）。ベストエフォート、表示時にも都度解決するため必須ではない | 中 |
 | `BskyDmSend{post_id}` | DM宛先のBskyアクターへ`chat.bsky.convo.sendMessage`で送信（`docs/protocols.md` 9節） | 高 |
 | `RemoteFollowListSync{actor_id, direction}` | リモートFediアクターのfollowers/following全件取得（プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック、`docs/protocols.md` 2節） | 低 |
 | `RemoteActorResolve{uri}` | リモートfollowers/following一覧中、ローカルDB未登録のactor URIのプロフィールを解決し`actors`へupsert（フォロー関係は作らない、`docs/protocols.md` 2節） | 低 |

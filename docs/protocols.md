@@ -205,7 +205,7 @@ Bluesky facet・ActivityPub `<a href>` が示すリンク情報を、Misskey API
   `class` に `mention`/`u-url` が無い通常の `<a href>` は、この解決を試みず通常のURLリンク（`[text](href)`）として扱う。Fediverseのハンドルはほぼ不変なので受信時に確定してよく、DB照会は不要。
 - **Bsky `#mention` facet**: facetにはDIDしか無く、ハンドルは可変（DIDが不変の識別子）なため、`posts.body` は書き換えず、`{byteStart, byteEnd, did}` を `posts.mention_facets`（JSONB配列）に保存する。表示時（`NoteResponse` 生成時）に都度DIDを解決してハンドルへ置換する（`crates/seiran-api/src/handlers/notes/dto.rs` の `apply_mention_facets`）。未解決のDIDは投稿時点の表示テキストのまま返す。
   - **N+1回避**: タイムライン等でまとめて複数投稿を返す箇所は、`crates/seiran-api/src/handlers/notes/queries.rs` の `resolve_mention_facets_in_place` が登場する全DIDを1回の `IN` 句クエリでバッチ解決してから `to_note_response` を呼ぶ。
-  - **未知DIDの先行解決**: ローカル `actors` に無いDIDは `Job::ResolveBskyMention` をキューに積み、Bsky AppViewから非同期でプロフィールを取得して `actors` へupsertする（ベストエフォート。次回表示までに間に合わなくても実害はない＝その回は元テキストのまま表示されるだけ）。
+  - **未知DIDは先行解決しない**: ローカル `actors` に無いDIDは能動的にupsertしない（`docs/database.md` の `bsky_actor_is_engaged` 参照、issue #216）。フォロー・DM等の他経路で既に保存済みのDIDのみハンドルへ解決され、未知のDIDは投稿時点の表示テキストのまま返る。
 
 ### 送信（seiranユーザー投稿 → Fedi/Bsky）のメンション/リンク解決
 `crates/seiran-common/src/mention.rs` が本文中の `@...` メンション・生URL（`http(s)://` から空白/`<>()[]` の手前まで）を配信先プロトコルごとに解決する。`@`直前のメールアドレス誤判定ガードはASCII英数字のみ見る（`is_ascii_alphanumeric()`）。Unicode版 `is_alphanumeric()` だと日本語等の文字も真になり、「文章@handle」のようにCJK文字に直接続くメンションを誤ってメールアドレスの一部とみなしスキップしてしまう（実機確認: 全角括弧直後にスペース無しで続くメンションが完全に無処理になっていた）。

@@ -342,7 +342,6 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
             )
             .await
         }
-        Job::ResolveBskyMention { did } => jobs::resolve_bsky_mention::handle(did, ctx).await,
         Job::BskyDmSend { post_id } => jobs::bsky_dm_send::handle(post_id, ctx).await,
         Job::RemoteFollowListSync {
             actor_id,
@@ -368,7 +367,6 @@ fn job_name(job: &Job) -> &'static str {
         Job::ProxyFollowSync { .. } => "ProxyFollowSync",
         Job::AccountWithdrawUnfollowAll { .. } => "AccountWithdrawUnfollowAll",
         Job::BskyPostCommitDeferred { .. } => "BskyPostCommitDeferred",
-        Job::ResolveBskyMention { .. } => "ResolveBskyMention",
         Job::BskyDmSend { .. } => "BskyDmSend",
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
@@ -431,12 +429,6 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             base_delay_ms: 3000,
             max_delay_ms: 3000,
         },
-        Job::ResolveBskyMention { .. } => RetryConfig {
-            // ActorMetadataResolve と同様の軽量ベストエフォート解決。
-            max_attempts: 3,
-            base_delay_ms: 1000,
-            max_delay_ms: 30_000,
-        },
         Job::BskyDmSend { .. } => RetryConfig {
             // ApDelivery と同様、外部サービス（Bluesky公式chatサービス）への配送のため長めに構える。
             max_attempts: 10,
@@ -450,7 +442,7 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_delay_ms: 30_000,
         },
         Job::RemoteActorResolve { .. } => RetryConfig {
-            // ResolveBskyMention と同様の軽量ベストエフォート解決。
+            // ActorMetadataResolve と同様の軽量ベストエフォート解決。
             max_attempts: 3,
             base_delay_ms: 1000,
             max_delay_ms: 30_000,
