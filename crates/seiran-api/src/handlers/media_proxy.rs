@@ -150,21 +150,32 @@ pub async fn fetch_validated_with_accept(
         {
             return Err(ApiError::BadGateway("MEDIA_PROXY_TOO_LARGE".into()));
         }
-        let content_type = upstream
+        let header_content_type = upstream
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("application/octet-stream")
             .to_owned();
-        if !accept_prefixes.iter().any(|p| content_type.starts_with(p)) {
-            return Err(ApiError::BadGateway("MEDIA_PROXY_UNSUPPORTED_TYPE".into()));
-        }
         let bytes = upstream
             .bytes()
             .await
             .map_err(|_| ApiError::BadGateway("MEDIA_PROXY_FETCH_FAILED".into()))?;
         if bytes.len() as u64 > MAX_MEDIA_BYTES {
             return Err(ApiError::BadGateway("MEDIA_PROXY_TOO_LARGE".into()));
+        }
+        // ヘッダーのContent-Typeがホワイトリストに一致しない場合（media.misskeyusercontent.com等が
+        // application/octet-streamを返すケースがある）、アップロード機能と同じマジックバイト判定
+        // （seiran_common::sniff_mime_type）で救済を試みる。
+        let content_type = if accept_prefixes
+            .iter()
+            .any(|p| header_content_type.starts_with(p))
+        {
+            header_content_type
+        } else {
+            seiran_common::sniff_mime_type(&bytes, &header_content_type)
+        };
+        if !accept_prefixes.iter().any(|p| content_type.starts_with(p)) {
+            return Err(ApiError::BadGateway("MEDIA_PROXY_UNSUPPORTED_TYPE".into()));
         }
         return Ok((bytes, content_type));
     }
