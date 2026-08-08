@@ -21,7 +21,11 @@ const tsxBin = path.join(e2eDir, "node_modules", ".bin", "tsx");
 // E2E が本物の外部サービス（Bsky Relay・Cloudflare DNS等）に触れないよう、
 // 関係する変数は必ずここで明示的に上書き/空値にする。
 const backendEnv: Record<string, string> = {
-  DATABASE_URL: "postgres://seiran_e2e:seiran_e2e@localhost:5433/seiran_e2e",
+  POSTGRES_USER: "seiran_e2e",
+  POSTGRES_PASSWORD: "seiran_e2e",
+  POSTGRES_DB: "seiran_e2e",
+  DB_HOST: "localhost",
+  DB_PORT: "5433",
   PORT: String(backendPort),
   LOCAL_DOMAIN: "localhost",
   // OGP付きの直リンクHTMLをAPIが取得する先。未指定だとDocker向けの

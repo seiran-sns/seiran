@@ -5,7 +5,7 @@
 //!
 //! 実行方法:
 //! ```sh
-//! DATABASE_URL=postgres://seiran_e2e:seiran_e2e@localhost:5433/seiran_e2e \
+//! POSTGRES_USER=seiran_e2e POSTGRES_PASSWORD=seiran_e2e POSTGRES_DB=seiran_e2e DB_PORT=5433 \
 //!   cargo test -p seiran-api --test notes_integration -- --ignored
 //! ```
 //! 事前に専用DB上へ `seiran1`（パスワード `seiranda`）を作成しておくこと

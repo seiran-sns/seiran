@@ -35,7 +35,8 @@ services:
       - db-data:/var/lib/postgresql/data
     # ループバックのみへバインド（#220）。scripts/dev-up.sh はdbだけこのcomposeで
     # 起動し、backend（seiran-server）はネイティブ`cargo run`でホスト側から
-    # DATABASE_URL=localhost:5432 として接続するため、ホストへの公開自体は必要。
+    # DB_HOST未設定のデフォルト（localhost:5432）として接続するため、ホストへの
+    # 公開自体は必要。
     # 0.0.0.0 ではなく127.0.0.1に限定することで、外部（インターネット）からの
     # 直接アクセスは防ぎつつローカル開発・admin用psqlアクセスは維持する。
     ports:
@@ -57,7 +58,7 @@ services:
     restart: always
     env_file: .env
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DB_HOST: db
     volumes:
       - config-data:/app/config
     ports:

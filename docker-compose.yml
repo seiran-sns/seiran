@@ -24,7 +24,7 @@ x-seiran-backend: &seiran-backend
   restart: always
   env_file: .env
   environment:
-    DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    DB_HOST: db
     REDIS_URL: redis://redis:6379
   volumes:
     - config-data:/app/config
