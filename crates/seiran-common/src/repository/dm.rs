@@ -108,9 +108,36 @@ impl DmRepository for PgDmRepository {
                        OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
                    )
              ),
+             peers AS (
+                 SELECT p.thread_root_post_id, p.actor_id AS peer_id
+                 FROM posts p
+                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM my_threads) AND p.deleted_at IS NULL
+                 UNION
+                 SELECT p.thread_root_post_id, pr.actor_id AS peer_id
+                 FROM posts p JOIN post_recipients pr ON pr.post_id = p.id
+                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM my_threads) AND p.deleted_at IS NULL
+             ),
+             -- 参加者（自分以外）が1人もいない、または全員がミュート/ブロック対象のスレッドは
+             -- 一覧から除外する（ミュートは自分視点、ブロックは双方向＝seiranのブロック方針
+             -- 「相互完全非表示」に合わせる。`handlers::target_resolve::check_not_blocked` 参照）。
+             visible_threads AS (
+                 SELECT DISTINCT mt.thread_root_post_id
+                 FROM my_threads mt
+                 WHERE NOT EXISTS (SELECT 1 FROM peers pe WHERE pe.thread_root_post_id = mt.thread_root_post_id AND pe.peer_id != $1)
+                    OR EXISTS (
+                        SELECT 1 FROM peers pe
+                        WHERE pe.thread_root_post_id = mt.thread_root_post_id AND pe.peer_id != $1
+                          AND NOT EXISTS (SELECT 1 FROM mutes m WHERE m.muter_actor_id = $1 AND m.muted_actor_id = pe.peer_id)
+                          AND NOT EXISTS (
+                              SELECT 1 FROM blocks b
+                              WHERE (b.blocker_actor_id = $1 AND b.blocked_actor_id = pe.peer_id)
+                                 OR (b.blocker_actor_id = pe.peer_id AND b.blocked_actor_id = $1)
+                          )
+                    )
+             ),
              latest AS (
                  SELECT tr.thread_root_post_id, lp.id AS last_post_id, lp.body AS last_body, lp.created_at AS last_created_at
-                 FROM my_threads tr
+                 FROM visible_threads tr
                  JOIN LATERAL (
                      SELECT id, body, created_at FROM posts
                      WHERE thread_root_post_id = tr.thread_root_post_id AND deleted_at IS NULL
@@ -118,15 +145,6 @@ impl DmRepository for PgDmRepository {
                  ) lp ON true
                  WHERE ($2::bigint IS NULL OR lp.id < $2)
                    AND ($3::bigint IS NULL OR lp.id > $3)
-             ),
-             peers AS (
-                 SELECT p.thread_root_post_id, p.actor_id AS peer_id
-                 FROM posts p
-                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM latest) AND p.deleted_at IS NULL
-                 UNION
-                 SELECT p.thread_root_post_id, pr.actor_id AS peer_id
-                 FROM posts p JOIN post_recipients pr ON pr.post_id = p.id
-                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM latest) AND p.deleted_at IS NULL
              )
              SELECT l.thread_root_post_id, l.last_post_id, l.last_body, l.last_created_at,
                     COALESCE(array_agg(DISTINCT pe.peer_id) FILTER (WHERE pe.peer_id IS NOT NULL AND pe.peer_id != $1), ARRAY[]::bigint[]) AS peer_actor_ids
@@ -228,10 +246,43 @@ impl DmRepository for PgDmRepository {
 
     async fn unread_session_count(&self, actor_id: i64) -> Result<i64, sqlx::Error> {
         sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM (
+            "WITH my_threads AS (
                  SELECT DISTINCT p.thread_root_post_id
                  FROM posts p
                  WHERE p.thread_root_post_id IS NOT NULL AND p.deleted_at IS NULL
+                   AND EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
+             ),
+             peers AS (
+                 SELECT p.thread_root_post_id, p.actor_id AS peer_id
+                 FROM posts p
+                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM my_threads) AND p.deleted_at IS NULL
+                 UNION
+                 SELECT p.thread_root_post_id, pr.actor_id AS peer_id
+                 FROM posts p JOIN post_recipients pr ON pr.post_id = p.id
+                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM my_threads) AND p.deleted_at IS NULL
+             ),
+             -- sessions() と同じ「全参加者がミュート/ブロック対象のスレッドは除外」ロジック
+             -- （新着バッジにミュート/ブロック済み相手からのDMを反映させないため）。
+             visible_threads AS (
+                 SELECT DISTINCT mt.thread_root_post_id
+                 FROM my_threads mt
+                 WHERE NOT EXISTS (SELECT 1 FROM peers pe WHERE pe.thread_root_post_id = mt.thread_root_post_id AND pe.peer_id != $1)
+                    OR EXISTS (
+                        SELECT 1 FROM peers pe
+                        WHERE pe.thread_root_post_id = mt.thread_root_post_id AND pe.peer_id != $1
+                          AND NOT EXISTS (SELECT 1 FROM mutes m WHERE m.muter_actor_id = $1 AND m.muted_actor_id = pe.peer_id)
+                          AND NOT EXISTS (
+                              SELECT 1 FROM blocks b
+                              WHERE (b.blocker_actor_id = $1 AND b.blocked_actor_id = pe.peer_id)
+                                 OR (b.blocker_actor_id = pe.peer_id AND b.blocked_actor_id = $1)
+                          )
+                    )
+             )
+             SELECT COUNT(*) FROM (
+                 SELECT DISTINCT p.thread_root_post_id
+                 FROM posts p
+                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM visible_threads)
+                   AND p.deleted_at IS NULL
                    AND EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
                    AND p.id > COALESCE(
                        (SELECT last_read_post_id FROM dm_read_states WHERE actor_id = $1 AND thread_root_post_id = p.thread_root_post_id),

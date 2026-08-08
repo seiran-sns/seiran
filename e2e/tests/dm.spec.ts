@@ -207,3 +207,78 @@ test.describe("Fedi宛DM配送", () => {
     expect((await unreadRes.json()).count).toBeGreaterThan(0);
   });
 });
+
+test("ミュート・ブロックした相手からのDMは一覧にも未読バッジにも現れない", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2dmmutea");
+  const bob = await registerUserViaApi(request, "e2dmmuteb");
+  const carol = await registerUserViaApi(request, "e2dmmutec");
+
+  const sendDm = async (fromToken: string, toActorId: string, text: string) => {
+    const res = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${fromToken}` },
+      data: { text, visibility: "direct", recipient_actor_ids: [toActorId] },
+    });
+    expect(res.ok(), `DM作成失敗: ${res.status()} ${await res.text()}`).toBeTruthy();
+  };
+
+  const sessionTexts = async (token: string) => {
+    const res = await request.get("/api/dm/sessions", { headers: { Authorization: `Bearer ${token}` } });
+    expect(res.ok()).toBeTruthy();
+    const sessions = (await res.json()) as { lastMessage: { text: string } }[];
+    return sessions.map((s) => s.lastMessage.text);
+  };
+
+  const unreadCount = async (token: string) => {
+    const res = await request.get("/api/dm/unread-count", { headers: { Authorization: `Bearer ${token}` } });
+    expect(res.ok()).toBeTruthy();
+    return (await res.json()).count as number;
+  };
+
+  const textFromBob = `bob→alice ${Date.now()}`;
+  const textFromCarol = `carol→alice ${Date.now()}`;
+  await sendDm(bob.token, alice.actorId, textFromBob);
+  await sendDm(carol.token, alice.actorId, textFromCarol);
+
+  // ミュート・ブロック前: 両方のセッションが見え、未読数も2件。
+  await expect
+    .poll(async () => sessionTexts(alice.token), { timeout: 10_000 })
+    .toEqual(expect.arrayContaining([textFromBob, textFromCarol]));
+  expect(await unreadCount(alice.token)).toBe(2);
+
+  // bobをミュート: bobとのセッションだけ一覧・未読数から消える。
+  const muteRes = await request.post("/api/mutes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { target: bob.username },
+  });
+  expect(muteRes.ok(), `ミュート失敗: ${muteRes.status()} ${await muteRes.text()}`).toBeTruthy();
+
+  await expect
+    .poll(async () => sessionTexts(alice.token), { timeout: 10_000 })
+    .not.toEqual(expect.arrayContaining([textFromBob]));
+  expect(await sessionTexts(alice.token)).toEqual(expect.arrayContaining([textFromCarol]));
+  expect(await unreadCount(alice.token)).toBe(1);
+
+  // carolもブロック: 残っていたセッションも消え、未読数は0になる。
+  const blockRes = await request.post("/api/blocks/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { target: carol.username },
+  });
+  expect(blockRes.ok(), `ブロック失敗: ${blockRes.status()} ${await blockRes.text()}`).toBeTruthy();
+
+  await expect
+    .poll(async () => sessionTexts(alice.token), { timeout: 10_000 })
+    .toEqual([]);
+  expect(await unreadCount(alice.token)).toBe(0);
+
+  // ミュート解除でbobとのセッションが復帰する。
+  const unmuteRes = await request.post("/api/mutes/delete", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { target: bob.username },
+  });
+  expect(unmuteRes.ok(), `ミュート解除失敗: ${unmuteRes.status()} ${await unmuteRes.text()}`).toBeTruthy();
+
+  await expect
+    .poll(async () => sessionTexts(alice.token), { timeout: 10_000 })
+    .toEqual(expect.arrayContaining([textFromBob]));
+  expect(await unreadCount(alice.token)).toBe(1);
+});
