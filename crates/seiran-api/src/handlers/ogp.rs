@@ -231,7 +231,7 @@ pub async fn note_ogp_html(post_id: i64, state: &AppState) -> Response {
 pub async fn profile_ogp(Path(handle): Path<String>, State(state): State<AppState>) -> Response {
     let (username, domain) = match handle.split_once('@') {
         Some((u, d)) => (u.to_string(), d.to_string()),
-        None => (handle.clone(), state.local_domain.clone()),
+        None => (handle.clone(), state.local_domain.to_string()),
     };
 
     let row = sqlx::query(

@@ -9,6 +9,7 @@ pub mod id;
 pub mod jetstream_control;
 pub mod jetstream_leader;
 pub mod jobs;
+pub mod local_domain;
 pub mod mention;
 pub mod queue;
 pub mod repository;
@@ -22,6 +23,7 @@ pub mod username;
 
 pub use db::{get_db_pool, run_migrations};
 pub use id::generate_snowflake_id;
+pub use local_domain::{resolve_local_domain, LocalDomain};
 pub use system_actor::{
     ensure_relay_agent_actor, ensure_system_proxy_actor, resolve_relay_agent_actor_id,
     resolve_system_proxy_actor_id,

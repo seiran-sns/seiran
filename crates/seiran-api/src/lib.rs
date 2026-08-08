@@ -30,15 +30,16 @@ use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 use seiran_common::repository::{
     ActorRepository, AppTokenRepository, AtpReadRepository, AuthRateLimitRepository,
     BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository,
-    EmojiRepository, FollowRepository, HashtagRepository, ListRepository, MuteRepository,
-    NotificationRepository, PasswordResetRepository, PgActorRepository, PgAppTokenRepository,
-    PgAtpReadRepository, PgAuthRateLimitRepository, PgBlockRepository, PgDmRepository,
-    PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository,
-    PgHashtagRepository, PgListRepository, PgMuteRepository, PgNotificationRepository,
-    PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository,
-    PgRelayRepository, PgRemoteEmojiRepository, PgTotpRepository, PgUserRepository,
-    PinnedPostsRepository, PostRepository, ReactionRepository, RelayRepository,
-    RemoteEmojiRepository, TotpRepository, UserRepository,
+    EmojiRepository, FollowRepository, HashtagRepository, InstanceDomainRepository,
+    ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository,
+    PgActorRepository, PgAppTokenRepository, PgAtpReadRepository, PgAuthRateLimitRepository,
+    PgBlockRepository, PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository,
+    PgEmojiRepository, PgFollowRepository, PgHashtagRepository, PgInstanceDomainRepository,
+    PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository,
+    PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgRelayRepository,
+    PgRemoteEmojiRepository, PgTotpRepository, PgUserRepository, PinnedPostsRepository,
+    PostRepository, ReactionRepository, RelayRepository, RemoteEmojiRepository, TotpRepository,
+    UserRepository,
 };
 use seiran_common::{
     job_priority, ApClient, ApDeliveryKind, AtpCommitEvent, AtpCommitService, Job, JobQueue,
@@ -82,7 +83,8 @@ pub struct AppState {
     pub db: PgPool,
     pub local_auth: Arc<LocalAuthProvider>,
     pub miauth_sessions: Arc<RwLock<HashMap<String, MiAuthSession>>>,
-    pub local_domain: String,
+    pub local_domain: seiran_common::LocalDomain,
+    pub instance_domain: Arc<dyn InstanceDomainRepository>,
     /// OGP対応（`handlers::ogp`）で SPA の index.html を取得する先。未設定時は Docker
     /// 構成のデフォルト（`http://frontend:5173`）を使う。
     pub frontend_origin: String,
@@ -290,7 +292,7 @@ pub async fn init_state(
     pool: PgPool,
     secrets: Arc<Secrets>,
     http_client: Arc<reqwest::Client>,
-    local_domain: String,
+    local_domain: seiran_common::LocalDomain,
     job_queue: Arc<dyn JobQueue>,
     // `Some` なら ATP コミットイベントを Redis Pub/Sub 経由でプロセス間配信する
     // ブリッジを有効にする（`api` ロールを複数レプリカで水平スケールする場合に必要。
@@ -344,6 +346,8 @@ pub async fn init_state(
         Arc::new(PgMediaFileRepository::new(pool.clone()));
     let site_settings: Arc<dyn SiteSettingsRepository> =
         Arc::new(PgSiteSettingsRepository::new(pool.clone()));
+    let instance_domain: Arc<dyn InstanceDomainRepository> =
+        Arc::new(PgInstanceDomainRepository::new(pool.clone()));
     let actors: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
@@ -421,6 +425,7 @@ pub async fn init_state(
         local_auth,
         miauth_sessions: Arc::new(RwLock::new(HashMap::new())),
         local_domain,
+        instance_domain,
         frontend_origin: std::env::var("FRONTEND_ORIGIN")
             .unwrap_or_else(|_| "http://frontend:5173".to_string()),
         secrets,
@@ -1108,7 +1113,7 @@ async fn request_relay_crawl(state: &AppState) {
         match state
             .http_client
             .post(&url)
-            .json(&serde_json::json!({"hostname": state.local_domain}))
+            .json(&serde_json::json!({"hostname": state.local_domain.as_str()}))
             .send()
             .await
         {

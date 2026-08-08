@@ -413,7 +413,7 @@ pub async fn user_profile(
         // それ以外は ATP ハンドル（alice.bsky.social 等）とみなして外部 AppView へ
         let local_suffix = format!(".{}", state.local_domain);
         match q.strip_suffix(local_suffix.as_str()) {
-            Some(local_username) => (local_username.to_string(), Some(state.local_domain.clone())),
+            Some(local_username) => (local_username.to_string(), Some(state.local_domain.to_string())),
             None => return fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
         }
     } else {

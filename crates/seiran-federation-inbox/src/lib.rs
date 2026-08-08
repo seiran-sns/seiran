@@ -37,7 +37,7 @@ pub struct AppState {
     pub follow_repo: Arc<dyn FollowRepository>,
     pub post_repo: Arc<dyn PostRepository>,
     pub reaction_repo: Arc<dyn ReactionRepository>,
-    pub local_domain: String,
+    pub local_domain: seiran_common::LocalDomain,
     pub ap_public_key_pem: String,
     pub ap_private_key_pem: String,
     pub ap_client: Arc<ApClient>,
@@ -53,7 +53,7 @@ pub fn init_state(
     pool: PgPool,
     secrets: &Secrets,
     http_client: Arc<reqwest::Client>,
-    local_domain: String,
+    local_domain: seiran_common::LocalDomain,
     stream_hub: Arc<StreamHub>,
     job_queue: Arc<dyn JobQueue>,
 ) -> Arc<AppState> {

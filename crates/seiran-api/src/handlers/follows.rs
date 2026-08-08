@@ -312,7 +312,7 @@ async fn follow_local(
             json!({
                 "actor": {
                     "username": local_username,
-                    "domain": &state.local_domain,
+                    "domain": state.local_domain.as_str(),
                 }
             }),
         );

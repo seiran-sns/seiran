@@ -21,7 +21,7 @@ pub async fn lists_collection_handler(
         "SELECT id FROM actors WHERE username = $1 AND domain = $2 AND actor_type = 'local' LIMIT 1",
     )
     .bind(&username)
-    .bind(&state.local_domain)
+    .bind(state.local_domain.as_str())
     .fetch_optional(&state.db)
     .await;
 
@@ -94,7 +94,7 @@ pub async fn list_detail_handler(
     )
     .bind(list_id)
     .bind(&username)
-    .bind(&state.local_domain)
+    .bind(state.local_domain.as_str())
     .fetch_optional(&state.db)
     .await;
 

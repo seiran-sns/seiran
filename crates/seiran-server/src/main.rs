@@ -19,12 +19,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use seiran_common::repository::{
-    PgActorRepository, PgBlockRepository, PgFollowRepository, PgHashtagRepository,
-    PgNotificationRepository, PgPostRepository, PgReactionRepository, PgRemoteEmojiRepository,
+    InstanceDomainRepository, PgActorRepository, PgBlockRepository, PgFollowRepository,
+    PgHashtagRepository, PgInstanceDomainRepository, PgNotificationRepository, PgPostRepository,
+    PgReactionRepository, PgRemoteEmojiRepository,
 };
 use seiran_common::{
-    ap::ApClient, create_job_queue, get_db_pool, run_migrations, DeliveryConfig, InboxContext,
-    SecretsFile, StreamHub,
+    ap::ApClient, create_job_queue, get_db_pool, resolve_local_domain, run_migrations,
+    DeliveryConfig, InboxContext, LocalDomain, SecretsFile, StreamHub,
 };
 use sqlx::PgPool;
 
@@ -32,7 +33,7 @@ use sqlx::PgPool;
 /// standalone worker と `all` ロール埋め込み worker の両方から呼ばれる共通ヘルパー。
 fn build_inbox_context(
     pool: &PgPool,
-    local_domain: &str,
+    local_domain: &LocalDomain,
     ap_private_key_pem: Option<String>,
     stream_hub: Arc<StreamHub>,
 ) -> InboxContext {
@@ -46,10 +47,19 @@ fn build_inbox_context(
         notification_repo: Arc::new(PgNotificationRepository::new(pool.clone())),
         hashtag_repo: Arc::new(PgHashtagRepository::new(pool.clone())),
         remote_emoji_repo: Arc::new(PgRemoteEmojiRepository::new(pool.clone())),
-        local_domain: local_domain.to_string(),
+        local_domain: local_domain.clone(),
         ap_private_key_pem: ap_private_key_pem.unwrap_or_default(),
         stream_hub,
     }
+}
+
+/// `instance_domain` テーブルから自ホストドメインを解決する。`.env`の`LOCAL_DOMAIN`が
+/// 設定されていれば、DBが未確定の場合の後方互換パス（自動移行）に使う。
+async fn resolve_local_domain_from_env(pool: &PgPool) -> LocalDomain {
+    let instance_domain: Arc<dyn InstanceDomainRepository> =
+        Arc::new(PgInstanceDomainRepository::new(pool.clone()));
+    let legacy_env_domain = std::env::var("LOCAL_DOMAIN").ok();
+    resolve_local_domain(instance_domain.as_ref(), legacy_env_domain).await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,8 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .timeout(Duration::from_secs(30))
                 .build()?,
         );
-        let worker_local_domain =
-            std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+        let worker_local_domain = resolve_local_domain_from_env(&pool).await;
         let delivery = DeliveryConfig {
             local_domain: worker_local_domain.clone(),
             ap_private_key_pem: secrets.ap_private_key_pem.clone(),
@@ -200,7 +209,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .timeout(Duration::from_secs(30))
             .build()?,
     );
-    let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+    let local_domain = resolve_local_domain_from_env(&pool).await;
     // `all` ロールは常に InMemory（同一プロセス内で api/federation/worker が動くため
     // 外部ミドルウェア不要）。split-role（api/federation 単独起動）は REDIS_URL の
     // 有無で Redis/InMemory を切り替える（create_job_queue のロジック参照）。

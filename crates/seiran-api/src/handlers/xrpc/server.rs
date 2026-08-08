@@ -17,7 +17,7 @@ pub struct ResolveHandleQuery {
 pub async fn xrpc_describe_server(State(state): State<AppState>) -> impl IntoResponse {
     Json(serde_json::json!({
         "did": format!("did:web:{}", state.local_domain),
-        "availableUserDomains": [state.local_domain],
+        "availableUserDomains": [state.local_domain.as_str()],
         "inviteCodeRequired": false,
         "phoneVerificationRequired": false,
     }))

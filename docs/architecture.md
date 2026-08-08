@@ -242,7 +242,7 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
 
 | カテゴリ | 変数 |
 |---|---|
-| ドメイン | `LOCAL_DOMAIN`, `ATP_PDS_ORIGIN` |
+| ドメイン | 自ホストドメインは`instance_domain`テーブル（一度確定したら不変、`seiran_common::LocalDomain`/`repository::InstanceDomainRepository`）から起動時に一度だけ読み込む。未確定の場合のみ`LOCAL_DOMAIN`環境変数の値をそのままDBへ書き込んで確定させる後方互換パスがある（確定済み環境では無視される）。`ATP_PDS_ORIGIN`は廃止済み（未使用だったため） |
 | 起動ポート | `PORT`(既定3000), `FEDERATION_INBOX_PORT`(既定3001) |
 | データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`、`DB_HOST`/`DB_PORT`（既定`localhost`/5432。Docker運用では`docker-compose.yml`が`DB_HOST=db`を注入）、`DB_MAX_CONNECTIONS`（プール最大接続数、既定10。split-roleではプロセスごとに持つ）。接続先はこれらから組み立てる（`DATABASE_URL`という完成済みURL変数は持たない、`seiran_common::db::get_db_pool`） |
 | ジョブキュー | `REDIS_URL`（split-role構成専用。`--role all` では不要） |

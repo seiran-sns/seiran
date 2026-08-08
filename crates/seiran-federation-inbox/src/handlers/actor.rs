@@ -102,7 +102,7 @@ pub async fn actor_handler(
          WHERE a.username = $1 AND a.domain = $2 AND a.actor_type = 'local' LIMIT 1",
     )
     .bind(&username)
-    .bind(&state.local_domain)
+    .bind(state.local_domain.as_str())
     .fetch_optional(&state.db)
     .await;
 

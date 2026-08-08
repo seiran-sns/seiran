@@ -56,7 +56,7 @@ struct RetryConfig {
 /// 起動時に `seiran-server` が secrets / 環境変数から一度だけ組み立てて注入する。
 #[derive(Clone)]
 pub struct DeliveryConfig {
-    pub local_domain: String,
+    pub local_domain: crate::LocalDomain,
     pub ap_private_key_pem: Option<String>,
     pub ap_public_key_pem: Option<String>,
 }
@@ -79,7 +79,7 @@ pub struct InboxContext {
     pub hashtag_repo: Arc<dyn HashtagRepository>,
     /// AP受信で見つけたリモートカスタム絵文字のカタログ記録（#73）。
     pub remote_emoji_repo: Arc<dyn RemoteEmojiRepository>,
-    pub local_domain: String,
+    pub local_domain: crate::LocalDomain,
     pub ap_private_key_pem: String,
     /// リアルタイム更新（#37）の共有ストリーミングハブ。standalone Worker では
     /// 接続クライアントの居ない空ハブになる（`Role::Firehose` と同じ扱い）。

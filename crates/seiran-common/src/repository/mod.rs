@@ -14,6 +14,7 @@ pub mod email_verification;
 pub mod emoji;
 pub mod follow;
 pub mod hashtag;
+pub mod instance_domain;
 pub mod list;
 pub mod media_file;
 pub mod mute;
@@ -41,6 +42,7 @@ pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
+pub use instance_domain::{ConfirmOutcome, InstanceDomainRepository, PgInstanceDomainRepository};
 pub use list::{ListMemberRow, ListRepository, ListRow, PgListRepository};
 pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,

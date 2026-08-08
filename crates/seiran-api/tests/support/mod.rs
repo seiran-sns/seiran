@@ -28,7 +28,8 @@ use axum::{
     http::{Request, StatusCode},
     Router,
 };
-use seiran_common::{create_job_queue, get_db_pool, SecretsFile};
+use seiran_common::repository::{InstanceDomainRepository, PgInstanceDomainRepository};
+use seiran_common::{create_job_queue, get_db_pool, resolve_local_domain, SecretsFile};
 use tower::ServiceExt;
 
 /// 結合テストの接続先として許可するDB名。`e2e/docker-compose.yml` の `POSTGRES_DB` と一致させる。
@@ -81,7 +82,13 @@ pub async fn test_router() -> Router {
             .build()
             .unwrap(),
     );
-    let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+    let instance_domain: Arc<dyn InstanceDomainRepository> =
+        Arc::new(PgInstanceDomainRepository::new(pool.clone()));
+    let local_domain = resolve_local_domain(
+        instance_domain.as_ref(),
+        std::env::var("LOCAL_DOMAIN").ok(),
+    )
+    .await;
     // テストは split-role の検証が目的ではないため常にモノリスの InMemory キューを使う
     // （ジョブは enqueue されるが、テストプロセス内に Worker はいないため実行はされない。
     // 配送を伴わないテストにしたい場合は create_note の `deliver_to_fedi`/`deliver_to_bsky`

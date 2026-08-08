@@ -45,6 +45,7 @@ ID 採番は2系統ある。
 | `atp_repo_events` | ATP `subscribeRepos` 配信用のイベントログ（commit/identity） |
 | `atp_blobs` | ATP `uploadBlob` で受信したバイナリ |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP 設定、Jetstream カーソル等の汎用格納庫） |
+| `instance_domain` | 自ホストドメインの確定値（単一行のみ、一度確定したら不変） |
 | `email_verifications` / `email_changes` / `password_resets` | 認証系のワンタイムトークン |
 | `user_totp` / `user_totp_recovery_codes` / `totp_disable_requests` | TOTP設定、使い切りリカバリーコード、メール経由の解除トークン |
 | `user_passkeys` / `passkey_challenges` | 複数WebAuthn credentialと短命な登録・認証チャレンジ |
@@ -156,6 +157,9 @@ AP受信（投稿本文・表示名・絵文字リアクションのいずれか
 タイムライン・通知の相互非表示は、両テーブルを1箇所でOR判定する SQL 関数 `actor_is_hidden_for_viewer(viewer_id, other_id)` に集約している。ブロックは `blocks` テーブルの存在だけでミュート相当のローカル非表示も兼ねる設計（ブロック専用の `mutes` 行を別途作らない）。
 
 投稿の`visibility`（`followers_only`/`direct`）判定も同様にSQL関数 `post_is_visible_to(viewer_id, post_actor_id, post_visibility, post_id, exclude_direct)` に集約している（`docs/code_audit_2026-08-05.md` R-2）。`home_timeline`/`local_timeline`/`social_timeline`/`global_timeline`/`timeline_by_actor`/`find_by_id_for_viewer`/`context_before`/`context_after`の9箇所に同一のOR判定が一字一句コピペされていたのを1関数へ集約した。呼び出し側が既にJOIN済みの`p.actor_id`/`p.visibility`/`p.id`をそのまま渡す設計（関数内で`posts`を再取得しない）で、`actor_is_hidden_for_viewer`と同じ`LANGUAGE sql STABLE`方式によりプランナのインライン展開・既存インデックス（`idx_posts_actor_id`等）でのフィルタ適用を妨げない（EXPLAIN ANALYZEで確認済み）。`local_timeline`/`global_timeline`は関数呼び出しの手前で`p.visibility NOT IN ('unlisted', 'followers_only')`を別途課しており、これらの経路では関数内の`followers_only`分岐は常に到達しない（ローカル/グローバルタイムラインは公開投稿のみを表示する設計のため意図的）。
+
+### `instance_domain`
+自ホストドメインの確定値を持つ。`site_settings`（いつでもPATCH経由で書き換え可能な汎用設定）とは別の専用テーブルにしているのは、ドメイン変更が`actors.domain`・PLC DID Document・`ap_uri`に深く食い込みDB整合性を崩壊させるため、「一度確定したら不変」を構造的に保証したいから。`id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1)`で単一行のみを許容し、このテーブルへの`UPDATE`文はコード上どこにも書かない設計にしている（レビューで機械的に確認できる）。`repository::InstanceDomainRepository::confirm`は`INSERT ... ON CONFLICT (id) DO NOTHING`による冪等な確定操作のみを提供する。Rust側の実行時表現は`seiran_common::LocalDomain`（`Arc<OnceLock<String>>`ラッパー、起動時に一度だけこのテーブルを読み込む）。
 
 ### `app_tokens`
 MiAuth（`/api/miauth/:session_id/authorize`）認可成立時に発行するJWTは自社ログインと同じ`LocalAuthProvider`を再利用しており、専用のトークン形式を持たない。本テーブルはそのJWTの`jti`（クレームに追加済み）をキーに、クライアント名・発行日時・無効化日時を記録する管理台帳で、JWT自体の検証ロジックには関与しない。認証ミドルウェア（`extract_auth`）はトークン検証成功後に必ず`app_tokens.is_revoked(jti)`を照会し、`revoked_at`が立っていれば拒否する。**このテーブルに行が無いjti（自社ログイン・setup等）は「管理対象外」として常に有効**として扱う（全トークンを網羅する台帳ではない）。設定画面の一覧・無効化操作は本人（`user_id`一致）のみ可能。

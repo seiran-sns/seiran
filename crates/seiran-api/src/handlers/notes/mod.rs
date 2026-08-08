@@ -341,7 +341,7 @@ async fn create_repost(
         user: NoteUserInfo {
             id: actor_id.to_string(),
             username,
-            domain: Some(state.local_domain.clone()),
+            domain: Some(state.local_domain.to_string()),
             display_name,
             actor_type: "local".to_string(),
             avatar_url,
@@ -851,7 +851,7 @@ async fn create_regular_post(
         user: NoteUserInfo {
             id: actor_id.to_string(),
             username,
-            domain: Some(state.local_domain.clone()),
+            domain: Some(state.local_domain.to_string()),
             display_name,
             actor_type: "local".to_string(),
             avatar_url,

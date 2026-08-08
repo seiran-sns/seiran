@@ -361,7 +361,7 @@ pub async fn users_show(
             .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
         state.actors.find_by_id(id).await
     } else if let Some(username) = body.username {
-        let domain = body.host.unwrap_or_else(|| state.local_domain.clone());
+        let domain = body.host.unwrap_or_else(|| state.local_domain.to_string());
         state
             .actors
             .find_by_username_domain(&username, &domain)
