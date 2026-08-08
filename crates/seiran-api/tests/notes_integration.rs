@@ -1,11 +1,15 @@
 //! notes ハンドラの結合テスト（実 DB 使用）。
 //!
+//! 接続先DB・実行手順は `tests/support/mod.rs` のモジュールdoc参照（結合テスト専用DB
+//! `seiran_e2e` 必須。開発DBへは接続できないガードが入っている）。
+//!
 //! 実行方法:
 //! ```sh
-//! cargo test -p seiran-api --test notes_integration -- --ignored
+//! DATABASE_URL=postgres://seiran_e2e:seiran_e2e@localhost:5433/seiran_e2e \
+//!   cargo test -p seiran-api --test notes_integration -- --ignored
 //! ```
-//! 事前に `seiran1`（パスワード `seiranda`）がローカル DB に存在すること
-//! （CLAUDE.md の規約：無ければ `/api/setup` や `/api/auth/register` で作成してよい）。
+//! 事前に専用DB上へ `seiran1`（パスワード `seiranda`）を作成しておくこと
+//! （`/api/setup` または `/api/auth/register` で作成。CLAUDE.mdの命名規約に沿う）。
 
 mod support;
 

@@ -1,15 +1,26 @@
 //! 結合テスト用の共通ハーネス。
 //!
-//! 実際の Postgres（`DATABASE_URL`。未設定時は `postgres://postgres:postgrespassword@localhost:5432/seiran`
-//! — `seiran_common::get_db_pool` のデフォルトと同一）に接続し、本物の `seiran_api::router` を
-//! 組み立てて HTTP リクエストを直接投げる。DB が必要なため各テストは `#[ignore]` を付け、
-//! 明示的に `cargo test -p seiran-api --test <name> -- --ignored` で実行する運用とする
+//! 実際の Postgres（`DATABASE_URL`）に接続し、本物の `seiran_api::router` を組み立てて
+//! HTTP リクエストを直接投げる。DB が必要なため各テストは `#[ignore]` を付け、明示的に
+//! `cargo test -p seiran-api --test <name> -- --ignored` で実行する運用とする
 //! （CLAUDE.md の「DB関連ツールはローカルで利用可能」という前提に沿う）。
 //!
-//! テストユーザーは CLAUDE.md の規約に従い `seiran1`（パスワード `seiranda`）を使う。
-//! 存在しない場合はテストが失敗するので、あらかじめ `/api/setup` や `/api/auth/register`
-//! で作成しておくこと（既存ユーザーがいれば新規作成不要）。
+//! **接続先DBは `e2e/docker-compose.yml` が定義する結合テスト専用DB
+//! （dbname=`seiran_e2e`、ポート5433）のみを許可する**（`ensure_test_database` 参照）。
+//! `seiran_common::get_db_pool` のデフォルト接続先は開発DB（dbname=`seiran`、ポート5432、
+//! `docker-compose.yml`のdbサービス）と同一のため、これをそのまま使うと結合テストが実データを
+//! 書き換える事故になる（2026-07-20、E2E `reuseExistingServer:true` 経由で実際に発生。
+//! `docs/protocols.md` 等の再発防止と同種の対策。詳細は #withdraw 事故対応の会話参照）。
+//!
+//! 実行手順:
+//! 1. `docker compose -f e2e/docker-compose.yml up -d` で専用DBを起動
+//! 2. `DATABASE_URL=postgres://seiran_e2e:seiran_e2e@localhost:5433/seiran_e2e cargo run -p seiran-server`
+//!    を一度起動してマイグレーションを適用（起動時に自動実行される）
+//! 3. `notes_integration.rs` 等 `seiran1` ユーザー前提のテストを動かす場合は、専用DB上で
+//!    `/api/setup` または `/api/auth/register` により `seiran1`（パスワード `seiranda`）を作成
+//! 4. `DATABASE_URL=postgres://seiran_e2e:seiran_e2e@localhost:5433/seiran_e2e cargo test -p seiran-api --test <name> -- --ignored`
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::{
@@ -18,7 +29,11 @@ use axum::{
     Router,
 };
 use seiran_common::{create_job_queue, get_db_pool, SecretsFile};
+use sqlx::postgres::PgConnectOptions;
 use tower::ServiceExt;
+
+/// 結合テストの接続先として許可するDB名。`e2e/docker-compose.yml` の `POSTGRES_DB` と一致させる。
+const ALLOWED_TEST_DB_NAME: &str = "seiran_e2e";
 
 /// ワークスペースルートの `config/` ディレクトリ（`CARGO_MANIFEST_DIR` からの相対パスで
 /// 解決するため、`cargo test` の実行時カレントディレクトリに依存しない）。
@@ -32,10 +47,33 @@ fn load_workspace_env() {
     let _ = dotenvy::from_path(env_path);
 }
 
+/// `DATABASE_URL` の接続先DB名が結合テスト専用DB（`seiran_e2e`）であることを、
+/// 実際に接続する前に検証する。`get_db_pool` は `DATABASE_URL` 未設定時に開発DB
+/// （dbname=`seiran`）へフォールバックするため、ここで先に弾かないと専用DBを
+/// 起動し忘れた状態で実行しても（本来エラーになってほしいところ）開発DBに
+/// サイレントに接続してしまう。
+fn ensure_test_database() {
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://postgres:postgrespassword@localhost:5432/seiran".to_string()
+    });
+    let db_name = PgConnectOptions::from_str(&database_url)
+        .ok()
+        .and_then(|opts| opts.get_database().map(str::to_string))
+        .unwrap_or_default();
+    assert_eq!(
+        db_name, ALLOWED_TEST_DB_NAME,
+        "結合テストは専用DB（dbname={ALLOWED_TEST_DB_NAME}）以外への接続を拒否します（現在の接続先dbname: {db_name:?}）。\n\
+         `docker compose -f e2e/docker-compose.yml up -d` でテスト専用DBを起動し、\n\
+         `DATABASE_URL=postgres://seiran_e2e:seiran_e2e@localhost:5433/seiran_e2e` を明示的に指定してください。\n\
+         開発DB（dbname=seiran）を誤って汚さないための安全装置です（このファイルのモジュールdoc参照）。"
+    );
+}
+
 /// 本物の DB・secrets を使って `seiran_api::router` を構築する。
-/// マイグレーションは既に適用済みである前提（開発 DB は起動時に適用されている）。
+/// マイグレーションは既に適用済みである前提（`seiran-server` 起動時に自動実行される）。
 pub async fn test_router() -> Router {
     load_workspace_env();
+    ensure_test_database();
 
     let secrets = Arc::new(
         SecretsFile::new(workspace_config_dir())

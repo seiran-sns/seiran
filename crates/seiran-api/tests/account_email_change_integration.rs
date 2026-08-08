@@ -4,11 +4,17 @@
 //! ここではテストしない。`email_changes` テーブルへの INSERT を直接行うことで
 //! `confirm-change` （トークン消費 → `users.email` 更新）側のみを検証する。
 //!
-//! 既存の `seiran1` 等を汚さないよう、テストごとに使い捨てユーザーを新規登録して使う。
+//! 既存の `seiran1` 等を汚さないよう、テストごとに使い捨てユーザーを新規登録して使う
+//! （後片付け＝退会処理は行わないため、実行するたびに専用DBへ蓄積する。専用DBは
+//! `docker compose -f e2e/docker-compose.yml down -v` で丸ごと破棄できる）。
+//!
+//! 接続先DB・実行手順は `tests/support/mod.rs` のモジュールdoc参照（結合テスト専用DB
+//! `seiran_e2e` 必須。開発DBへは接続できないガードが入っている）。
 //!
 //! 実行方法:
 //! ```sh
-//! cargo test -p seiran-api --test account_email_change_integration -- --ignored
+//! DATABASE_URL=postgres://seiran_e2e:seiran_e2e@localhost:5433/seiran_e2e \
+//!   cargo test -p seiran-api --test account_email_change_integration -- --ignored
 //! ```
 
 mod support;
