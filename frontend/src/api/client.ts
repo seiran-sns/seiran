@@ -798,6 +798,8 @@ export interface VerifyTokenResponse {
 
 export interface SetupStatus {
   initialized: boolean;
+  /** 自ホストドメインが未確定の場合のみ、Hostヘッダーから判定した候補が入る。 */
+  domain_candidate: string | null;
 }
 
 // ── リスト機能（#63） ──────────────────────────────────────────────────
@@ -895,11 +897,17 @@ export const api = {
     status(signal?: AbortSignal) {
       return request<SetupStatus>("GET", "/setup/status", undefined, signal);
     },
-    initialize(username: string, email: string, password: string) {
+    initialize(
+      username: string,
+      email: string,
+      password: string,
+      domainCandidate: string | null,
+    ) {
       return request<AuthResponse>("POST", "/setup", {
         username,
         email,
         password,
+        domain_candidate: domainCandidate,
       });
     },
   },

@@ -208,22 +208,26 @@ pub async fn register(
         ApiError::Internal("パスワード処理エラー".to_string())
     })?;
 
-    let rotation_key =
-        signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
-            tracing::error!("[register] 回転鍵ロード失敗: {}", e);
-            ApiError::Internal("ATP鍵ロードエラー".to_string())
-        })?;
-
     // DID確定 → TXT セット → PLC送信（最大3回リトライ）。DB 書き込みはここより後
-    // — 失敗時に孤立レコードが残らないようにするため。
-    let (at_did, at_signing_key_pem, cf_record_id) =
-        crate::handlers::plc_genesis::register_plc_did(
+    // — 失敗時に孤立レコードが残らないようにするため。自ホストドメインが未確定
+    // （シングルホストモード）の間はPLC genesisを行わない（`state.local_domain`参照）。
+    let (at_did, at_signing_key_pem, cf_record_id) = if state.local_domain.is_confirmed() {
+        let rotation_key =
+            signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
+                tracing::error!("[register] 回転鍵ロード失敗: {}", e);
+                ApiError::Internal("ATP鍵ロードエラー".to_string())
+            })?;
+        let (did, pem, cf_id) = crate::handlers::plc_genesis::register_plc_did(
             &state,
             &req.username,
             &rotation_key,
             "register",
         )
         .await?;
+        (Some(did), Some(pem), cf_id)
+    } else {
+        (None, None, None)
+    };
 
     // 4. DB 書き込み（PLC 送信成功後）
     let user_id = state
@@ -243,8 +247,8 @@ pub async fn register(
             user_id,
             &req.username,
             &state.local_domain,
-            &at_did,
-            &at_signing_key_pem,
+            at_did.as_deref(),
+            at_signing_key_pem.as_deref(),
         )
         .await
         .map_err(|e| {
@@ -253,45 +257,47 @@ pub async fn register(
         })?;
 
     let now = chrono::Utc::now();
-    if let Err(e) = state
-        .atp_service
-        .commit_profile(actor_id, &req.username, None, None, None, now)
-        .await
-    {
-        tracing::error!(
-            "[register] ATP プロフィールコミット失敗（登録は完了済み）: {}",
-            e
-        );
-    }
-    // Bsky公式クライアントからのDM受信を許可する設定（`docs/protocols.md` 9節）。
-    // 無いとBluesky公式クライアントが相手（このユーザー）へのDM送信を保守的にブロックする。
-    if let Err(e) = state
-        .atp_service
-        .commit_chat_declaration(actor_id, now)
-        .await
-    {
-        tracing::error!(
-            "[register] chat declaration コミット失敗（登録は完了済み）: {}",
-            e
-        );
-    }
+    if let Some(at_did) = at_did.as_deref() {
+        if let Err(e) = state
+            .atp_service
+            .commit_profile(actor_id, &req.username, None, None, None, now)
+            .await
+        {
+            tracing::error!(
+                "[register] ATP プロフィールコミット失敗（登録は完了済み）: {}",
+                e
+            );
+        }
+        // Bsky公式クライアントからのDM受信を許可する設定（`docs/protocols.md` 9節）。
+        // 無いとBluesky公式クライアントが相手（このユーザー）へのDM送信を保守的にブロックする。
+        if let Err(e) = state
+            .atp_service
+            .commit_chat_declaration(actor_id, now)
+            .await
+        {
+            tracing::error!(
+                "[register] chat declaration コミット失敗（登録は完了済み）: {}",
+                e
+            );
+        }
 
-    // #identity フレームを Relay に送信して AppView の handle キャッシュを更新させる。
-    // commit_profile より後に送信することで seq 順序が保たれる。
-    let handle = format!(
-        "{}.{}",
-        seiran_common::username::to_atp_username(&req.username),
-        state.local_domain
-    );
-    if let Err(e) = state
-        .atp_service
-        .broadcast_identity_event(actor_id, &at_did, &handle, now)
-        .await
-    {
-        tracing::error!(
-            "[register] #identity broadcast 失敗（登録は完了済み）: {}",
-            e
+        // #identity フレームを Relay に送信して AppView の handle キャッシュを更新させる。
+        // commit_profile より後に送信することで seq 順序が保たれる。
+        let handle = format!(
+            "{}.{}",
+            seiran_common::username::to_atp_username(&req.username),
+            state.local_domain
         );
+        if let Err(e) = state
+            .atp_service
+            .broadcast_identity_event(actor_id, at_did, &handle, now)
+            .await
+        {
+            tracing::error!(
+                "[register] #identity broadcast 失敗（登録は完了済み）: {}",
+                e
+            );
+        }
     }
 
     // TXT レコードはそのまま残す（bsky.app はハンドル解決に常時使用するため）

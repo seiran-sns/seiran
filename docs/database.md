@@ -94,6 +94,8 @@ JetStreamは「ローカルユーザーのフォロー中/リストメンバー�
 
 `actors.ap_uri`（UNIQUE）は `local` 行も含め全アクター種別が保持する。ローカル行は `https://{local_domain}/users/{username}` を持つ（自ドメインを名乗る Actor URI を誤ってリモートアクター解決経路に渡しても、`find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により `actor_type='fedi'` の影の重複行が生成されない）。リモートActor URI解決処理（`resolve_fedi`/`upsert_remote_fedi_actor`/`RemoteActorResolve`/`follow_fedi`）はこれとは別に、URIが自ドメイン形式に一致する場合は `find_by_username_domain` でローカル行へ解決する明示的なガードも入口に持つ（`docs/protocols.md` 参照）。
 
+自ホストドメイン未確定（シングルホストモード、`instance_domain`参照）の間に作成されたローカルユーザーは `domain='localhost'` で、`at_did`/`at_signing_key_pem` は両方 `NULL`（PLC genesisを行わないため、AT Protocol非対応のローカルユーザーとして存在する）。両カラムは元々 `UNIQUE` かつ `NOT NULL` 制約が無いためスキーマ変更なしでこの状態を表現できる。
+
 `20260728020000_repair_duplicate_fedi_actors.sql` は、物理的に破損した
 `actors.ap_uri` / `posts.ap_object_id` UNIQUE index が既存行を見落としていた環境を
 修復するデータマイグレーションである。同じAP URIのリモートFedi actorを最小IDへ

@@ -6,6 +6,8 @@
     "emailLabel": "E-Mail",
     "passwordLabel": "Passwort (8+ Zeichen)",
     "submitting": "Einrichten...",
-    "submit": "Erstellen Sie ein Administratorkonto"
+    "submit": "Erstellen Sie ein Administratorkonto",
+    "domainConfirmedNotice": "Diese Instanz wird als https://{{domain}} betrieben (kann später nicht geändert werden).",
+    "singleHostModeNotice": "Die Domain, von der aus Sie sich verbinden, konnte nicht erkannt werden. Diese Instanz startet daher im Single-Host-Modus ohne Föderation."
   }
 }

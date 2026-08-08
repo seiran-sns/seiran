@@ -6,6 +6,8 @@
     "emailLabel": "Correo electrónico",
     "passwordLabel": "Contraseña (8+ caracteres)",
     "submitting": "Configurando...",
-    "submit": "Crear cuenta de administrador"
+    "submit": "Crear cuenta de administrador",
+    "domainConfirmedNotice": "Esta instancia funcionará como https://{{domain}} (no se puede cambiar después).",
+    "singleHostModeNotice": "No se pudo detectar el dominio de conexión, por lo que esta instancia se iniciará en modo de host único sin federación."
   }
 }

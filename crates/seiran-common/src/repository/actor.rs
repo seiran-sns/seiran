@@ -84,15 +84,16 @@ pub trait ActorRepository: Send + Sync {
         domain: &str,
     ) -> Result<Option<String>, sqlx::Error>;
 
-    /// 新規ローカルアクターを挿入する。
+    /// 新規ローカルアクターを挿入する。`at_did`/`at_signing_key_pem`は、自ホストドメインが
+    /// 未確定（シングルホストモード）でPLC genesisを行っていない場合は`None`になる。
     async fn insert_local(
         &self,
         id: i64,
         user_id: i64,
         username: &str,
         domain: &str,
-        at_did: &str,
-        at_signing_key_pem: &str,
+        at_did: Option<&str>,
+        at_signing_key_pem: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
     /// リモート（Bsky）アクターを upsert し、その actor_id を返す。
@@ -255,8 +256,8 @@ impl ActorRepository for PgActorRepository {
         user_id: i64,
         username: &str,
         domain: &str,
-        at_did: &str,
-        at_signing_key_pem: &str,
+        at_did: Option<&str>,
+        at_signing_key_pem: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         // ap_uri を格納しておくことで、万一リモートActor解決処理が自ドメインURIを
         // 誤って渡してきても find_by_ap_uri / upsert_remote_fedi の ON CONFLICT (ap_uri)

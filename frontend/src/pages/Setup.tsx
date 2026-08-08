@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
@@ -16,13 +16,28 @@ export default function Setup({ onComplete }: Props) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // undefined: 未取得、null: 未確定かつHostヘッダーからも判定できなかった
+  // （シングルホストモードで開始）、string: この値で確定される見込み。
+  const [domainCandidate, setDomainCandidate] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    api.setup
+      .status()
+      .then((res) => setDomainCandidate(res.domain_candidate))
+      .catch(() => setDomainCandidate(null));
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const res = await api.setup.initialize(username, email, password);
+      const res = await api.setup.initialize(
+        username,
+        email,
+        password,
+        domainCandidate ?? null,
+      );
       login(res.token, res.user);
       onComplete();
     } catch (err) {
@@ -40,6 +55,13 @@ export default function Setup({ onComplete }: Props) {
         <p className={styles.description}>
           {t("setup:setup.description")}
         </p>
+        {domainCandidate !== undefined && (
+          <p className={styles.description}>
+            {domainCandidate === null
+              ? t("setup:setup.singleHostModeNotice")
+              : t("setup:setup.domainConfirmedNotice", { domain: domainCandidate })}
+          </p>
+        )}
         <form onSubmit={handleSubmit} className={styles.form}>
           <label className={styles.label}>
             {t("setup:setup.usernameLabel")}

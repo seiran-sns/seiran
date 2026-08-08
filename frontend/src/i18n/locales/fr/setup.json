@@ -6,6 +6,8 @@
     "emailLabel": "E-mail",
     "passwordLabel": "Mot de passe (8+ caractères)",
     "submitting": "Mise en place...",
-    "submit": "Créer un compte administrateur"
+    "submit": "Créer un compte administrateur",
+    "domainConfirmedNotice": "Cette instance fonctionnera en tant que https://{{domain}} (impossible à modifier ultérieurement).",
+    "singleHostModeNotice": "Le domaine de connexion n'a pas pu être détecté ; cette instance démarrera en mode hôte unique sans fédération."
   }
 }

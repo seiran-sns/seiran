@@ -6,6 +6,8 @@
     "emailLabel": "이메일",
     "passwordLabel": "비밀번호(8자 이상)",
     "submitting": "설정 중...",
-    "submit": "관리자 계정 만들기"
+    "submit": "관리자 계정 만들기",
+    "domainConfirmedNotice": "이 인스턴스는 https://{{domain}} 로 운영됩니다(이후 변경할 수 없습니다).",
+    "singleHostModeNotice": "접속 도메인을 감지할 수 없어 연합 기능 없이 싱글호스트 모드로 시작합니다."
   }
 }

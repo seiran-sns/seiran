@@ -4,9 +4,11 @@
 //! 参照）。プロセス起動時に一度だけDBを読み、確定済みなら以後読み取り専用（ロックフリー）で
 //! 全ハンドラ・全ロール（api/federation/worker）から参照される。
 //!
-//! 現状（フェーズ1）は「`.env`の`LOCAL_DOMAIN`があればそれをそのままDBへ移行する」後方互換
-//! パスのみを持つ。Hostヘッダーからの確定フロー・シングルホストモードは次フェーズで追加する。
+//! 後方互換パス（`.env`の`LOCAL_DOMAIN`があればそのままDBへ移行する）に加え、初回セットアップ
+//! （`handlers::setup`）でHostヘッダーから確定するフローも持つ（`domain_candidate_from_host`）。
 
+use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 
 use crate::repository::{ConfirmOutcome, InstanceDomainRepository};
@@ -127,4 +129,107 @@ pub async fn resolve_local_domain(
     }
 
     domain
+}
+
+/// HTTPリクエストの`Host`ヘッダー値からDBに確定してよいドメイン候補を判定する
+/// （純粋関数、HTTP層に依存しない）。連合には固定ドメインが必須なため、以下は
+/// 確定候補として扱わない（`None`を返す）:
+/// - ヘッダーが空
+/// - `localhost`
+/// - IPアドレス直打ち（IPv4/IPv6、`[::1]:port`形式含む）
+///
+/// ポート番号（`:port`、IPv6の`[::1]:port`形式含む）は除去し、小文字化・末尾ドット除去のみ
+/// 行う。それ以外の文字列はそのままドメイン候補として採用する。
+pub fn domain_candidate_from_host(host: &str) -> Option<String> {
+    let host = host.trim();
+    if host.is_empty() {
+        return None;
+    }
+
+    let without_port = strip_port(host);
+    let normalized = without_port.trim_end_matches('.').to_ascii_lowercase();
+
+    if normalized.is_empty() || normalized == "localhost" {
+        return None;
+    }
+    if IpAddr::from_str(&normalized).is_ok() {
+        return None;
+    }
+
+    Some(normalized)
+}
+
+/// `Host`ヘッダーからポート番号を除去する。IPv6の`[::1]:8080`形式では
+/// 角括弧内（`::1`）を返す。角括弧なしでコロンが2個以上の場合はIPv6アドレス本体と
+/// みなしそのまま返す（本来`[...]`必須だが、角括弧なしの生IPv6を誤ってポート分離
+/// しないための保険）。それ以外は最後の`:`より前を返す。
+fn strip_port(host: &str) -> &str {
+    if let Some(rest) = host.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            return &rest[..end];
+        }
+        return host;
+    }
+    if host.matches(':').count() >= 2 {
+        return host;
+    }
+    match host.rfind(':') {
+        Some(idx) => &host[..idx],
+        None => host,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_plain_domain() {
+        assert_eq!(
+            domain_candidate_from_host("seiran-beta.org"),
+            Some("seiran-beta.org".to_string())
+        );
+    }
+
+    #[test]
+    fn strips_port_and_lowercases() {
+        assert_eq!(
+            domain_candidate_from_host("Seiran-Beta.org:3000"),
+            Some("seiran-beta.org".to_string())
+        );
+    }
+
+    #[test]
+    fn strips_trailing_dot() {
+        assert_eq!(
+            domain_candidate_from_host("seiran-beta.org."),
+            Some("seiran-beta.org".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_localhost() {
+        assert_eq!(domain_candidate_from_host("localhost"), None);
+        assert_eq!(domain_candidate_from_host("localhost:3000"), None);
+        assert_eq!(domain_candidate_from_host("LOCALHOST"), None);
+    }
+
+    #[test]
+    fn rejects_ipv4() {
+        assert_eq!(domain_candidate_from_host("127.0.0.1"), None);
+        assert_eq!(domain_candidate_from_host("192.168.1.1:8080"), None);
+    }
+
+    #[test]
+    fn rejects_ipv6() {
+        assert_eq!(domain_candidate_from_host("::1"), None);
+        assert_eq!(domain_candidate_from_host("[::1]"), None);
+        assert_eq!(domain_candidate_from_host("[::1]:8080"), None);
+    }
+
+    #[test]
+    fn rejects_empty() {
+        assert_eq!(domain_candidate_from_host(""), None);
+        assert_eq!(domain_candidate_from_host("   "), None);
+    }
 }

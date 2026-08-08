@@ -242,7 +242,7 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
 
 | カテゴリ | 変数 |
 |---|---|
-| ドメイン | 自ホストドメインは`instance_domain`テーブル（一度確定したら不変、`seiran_common::LocalDomain`/`repository::InstanceDomainRepository`）から起動時に一度だけ読み込む。未確定の場合のみ`LOCAL_DOMAIN`環境変数の値をそのままDBへ書き込んで確定させる後方互換パスがある（確定済み環境では無視される）。`ATP_PDS_ORIGIN`は廃止済み（未使用だったため） |
+| ドメイン | 自ホストドメインは`instance_domain`テーブル（一度確定したら不変、`seiran_common::LocalDomain`/`repository::InstanceDomainRepository`）から起動時に一度だけ読み込む。未確定の場合のみ`LOCAL_DOMAIN`環境変数の値をそのままDBへ書き込んで確定させる後方互換パスがある（確定済み環境では無視される）。`.env`にも`LOCAL_DOMAIN`もDB確定値も無い新規インストールでは、初回セットアップ（`POST /api/setup`）時にリクエストの`Host`ヘッダー（`X-Forwarded-Host`等は見ない生の`Host`のみ、`handlers::setup::host_domain_candidate`）から自動確定する。`GET /api/setup/status`が事前にHostヘッダー由来の候補を`domain_candidate`として返し、フロントが確認表示後にそのまま`POST /api/setup`のリクエストボディへ送り返す。サーバー側は送信時点の実際の`Host`ヘッダーとリクエストボディの値が完全一致することを検証してから確定する（`handlers::setup::try_confirm_domain`、不一致は`DOMAIN_MISMATCH`で拒否）。Hostヘッダーが無い・`localhost`・IPアドレス直打ちの場合は「シングルホストモード」（連合なし、PLC genesisを行わずAT Protocol DIDを持たないローカルユーザーとして開始、`actors.domain='localhost'`）で起動する。`ATP_PDS_ORIGIN`は廃止済み（未使用だったため） |
 | 起動ポート | `PORT`(既定3000), `FEDERATION_INBOX_PORT`(既定3001) |
 | データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`、`DB_HOST`/`DB_PORT`（既定`localhost`/5432。Docker運用では`docker-compose.yml`が`DB_HOST=db`を注入）、`DB_MAX_CONNECTIONS`（プール最大接続数、既定10。split-roleではプロセスごとに持つ）。接続先はこれらから組み立てる（`DATABASE_URL`という完成済みURL変数は持たない、`seiran_common::db::get_db_pool`） |
 | ジョブキュー | `REDIS_URL`（split-role構成専用。`--role all` では不要） |

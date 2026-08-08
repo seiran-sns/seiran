@@ -6,6 +6,8 @@
     "emailLabel": "メールアドレス",
     "passwordLabel": "パスワード（8文字以上）",
     "submitting": "セットアップ中...",
-    "submit": "管理者アカウントを作成"
+    "submit": "管理者アカウントを作成",
+    "domainConfirmedNotice": "このインスタンスは https://{{domain}} として運用されます（後から変更できません）。",
+    "singleHostModeNotice": "接続元のドメインを検出できなかったため、連合機能なしのシングルホストモードで開始します。"
   }
 }

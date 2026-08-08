@@ -6,6 +6,8 @@
     "emailLabel": "Email",
     "passwordLabel": "Password (8+ characters)",
     "submitting": "Setting up...",
-    "submit": "Create administrator account"
+    "submit": "Create administrator account",
+    "domainConfirmedNotice": "This instance will operate as https://{{domain}} (cannot be changed later).",
+    "singleHostModeNotice": "Could not detect the domain you connected from, so this instance will start in single-host mode without federation."
   }
 }

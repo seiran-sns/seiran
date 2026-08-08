@@ -160,6 +160,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("[seiran-server] シークレット読み込み完了");
         let pool = get_db_pool().await?;
         tracing::info!("[seiran-server] DB 接続完了");
+        // instance_domain含む全テーブルがこの時点で必要（resolve_local_domain_from_env
+        // より前に完了させる。未適用のままだと instance_domain 読み取りが失敗し、
+        // local_domain が常に未確定のまま起動してしまう）。
+        run_migrations(&pool).await?;
+        tracing::info!("[seiran-server] マイグレーション適用完了");
         let http_client = Arc::new(
             reqwest::Client::builder()
                 .user_agent("seiran-federation/0.1.0")
@@ -201,6 +206,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let pool = get_db_pool().await?;
     tracing::info!("[seiran-server] DB 接続完了");
+    // instance_domain含む全テーブルがこの時点で必要（resolve_local_domain_from_env
+    // より前に完了させる。未適用のままだと instance_domain 読み取りが失敗し、
+    // local_domain が常に未確定のまま起動してしまう）。Firehose/Federation単独起動
+    // でも必ずマイグレーション済みの状態にするため、ロールに関わらずここで実行する
+    // （sqlxのマイグレーションは冪等・アドバイザリロック付きのため複数プロセス
+    // 同時実行でも安全）。
+    run_migrations(&pool).await?;
+    tracing::info!("[seiran-server] マイグレーション適用完了");
 
     let http_client = Arc::new(
         reqwest::Client::builder()
@@ -236,9 +249,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Role::Api => {
-            run_migrations(&pool).await?;
-            tracing::info!("[seiran-server] マイグレーション適用完了");
-
             let state = seiran_api::init_state(
                 pool,
                 secrets,
@@ -271,9 +281,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Role::All => {
-            run_migrations(&pool).await?;
-            tracing::info!("[seiran-server] マイグレーション適用完了");
-
             // api ロール
             let api_state = seiran_api::init_state(
                 pool.clone(),
