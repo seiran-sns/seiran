@@ -42,22 +42,33 @@ pub async fn resolve_and_upsert_target(state: &AppState, target: &str) -> Result
         return resolve_bsky(state, t).await;
     }
 
+    // ローカルユーザーの完全な ATP ハンドル表記（`user.{local_domain}`）→ AppView へ問い合わせず
+    // ローカルDBで解決する。判定せず Bsky 経路に流すと、AppView 解決結果（ハンドル表記そのもの）
+    // で `upsert_remote_bsky` の `ON CONFLICT (at_did)` が発火し、ローカルアクターの
+    // `username` 列を壊す（実際に発生した事故、`docs/protocols.md` 4節参照）。
+    if let Some(username) = seiran_common::strip_local_domain_suffix(t, &state.local_domain) {
+        return resolve_local(state, username).await;
+    }
+
     if t.contains('.') && !t.contains('@') {
         return resolve_bsky(state, t).await;
     }
 
     let parts: Vec<&str> = t.splitn(2, '@').collect();
     if parts.len() == 1 || (parts.len() == 2 && parts[1] == state.local_domain) {
-        let username = parts[0];
-        return state
-            .actors
-            .find_by_username_domain(username, &state.local_domain)
-            .await
-            .map_err(|e| ApError::Other(format!("DBエラー: {}", e)))?
-            .ok_or_else(|| ApError::Other("ローカルユーザーが見つかりません".to_string()));
+        return resolve_local(state, parts[0]).await;
     }
 
     resolve_fedi(state, t).await
+}
+
+async fn resolve_local(state: &AppState, username: &str) -> Result<Actor, ApError> {
+    state
+        .actors
+        .find_by_username_domain(username, &state.local_domain)
+        .await
+        .map_err(|e| ApError::Other(format!("DBエラー: {}", e)))?
+        .ok_or_else(|| ApError::Other("ローカルユーザーが見つかりません".to_string()))
 }
 
 async fn resolve_bsky(state: &AppState, actor_id_or_handle: &str) -> Result<Actor, ApError> {

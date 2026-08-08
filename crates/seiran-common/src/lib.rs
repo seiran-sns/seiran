@@ -27,7 +27,8 @@ pub use system_actor::{
     resolve_system_proxy_actor_id,
 };
 pub use username::{
-    is_reserved_username, is_valid_local_username, PROXY_ACTOR_USERNAME, RESERVED_LOCAL_USERNAMES,
+    is_reserved_username, is_valid_local_username, strip_local_domain_suffix,
+    PROXY_ACTOR_USERNAME, RESERVED_LOCAL_USERNAMES,
 };
 
 /// プロフィールのキーバリュー項目（#62）の最大件数。Mastodon 等のデフォルト（4件）に合わせる。

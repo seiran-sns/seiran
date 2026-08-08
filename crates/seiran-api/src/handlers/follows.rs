@@ -53,6 +53,16 @@ pub async fn create_follow(
         return follow_bsky(t, user.actor_id, &state).await.into_response();
     }
 
+    // ローカルユーザーの完全な ATP ハンドル表記（`user.{local_domain}`）→ AppView へ問い合わせず
+    // ローカルフォローとして処理する。判定せず Bsky 経路に流すと、AppView 解決結果（ハンドル
+    // 表記そのもの）で `upsert_remote_bsky` の `ON CONFLICT (at_did)` が発火し、ローカル
+    // アクターの `username` 列を壊す（実際に発生した事故、`docs/protocols.md` 4節参照）。
+    if let Some(username) = seiran_common::strip_local_domain_suffix(t, &state.local_domain) {
+        return follow_local(username, user.actor_id, &user.username, &state)
+            .await
+            .into_response();
+    }
+
     // ATP ハンドル（ドット含み・@なし・http なし）→ Bsky ATP フォロー
     if t.contains('.') && !t.contains('@') {
         return follow_bsky(t, user.actor_id, &state).await.into_response();

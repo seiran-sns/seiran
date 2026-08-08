@@ -52,6 +52,26 @@ pub fn is_reserved_username(s: &str) -> bool {
         .any(|r| r.eq_ignore_ascii_case(s))
 }
 
+/// `{username}.{local_domain}` 形式（ローカルユーザーのATPハンドル表記）から
+/// username部分を取り出す。`local_domain` サフィックスでないか、その手前が空なら `None`。
+/// 大文字小文字は区別しない（`ActorRepository::find_by_username_domain` と同じ扱い）。
+///
+/// Bskyリモートアクター解決系（`resolve_bsky`/`follow_bsky` 等）は、この形式の文字列を
+/// AppViewへ問い合わせる前にここでローカル判定できる。判定を怠ると、AppView解決結果を
+/// `at_did` の `ON CONFLICT` でupsertする際にローカルアクターの `username` 列を
+/// このハンドル表記自体で上書きしてしまう事故につながる（過去に実際発生）。
+pub fn strip_local_domain_suffix<'a>(s: &'a str, local_domain: &str) -> Option<&'a str> {
+    let suffix_len = local_domain.len();
+    if s.len() <= suffix_len + 1 || !s.is_char_boundary(s.len() - suffix_len) {
+        return None;
+    }
+    let (prefix, domain_part) = s.split_at(s.len() - suffix_len);
+    if !domain_part.eq_ignore_ascii_case(local_domain) {
+        return None;
+    }
+    prefix.strip_suffix('.')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +115,39 @@ mod tests {
         assert!(is_reserved_username("List-Relay"));
         assert!(is_reserved_username("relay-agent"));
         assert!(!is_reserved_username("alice"));
+    }
+
+    #[test]
+    fn strip_local_domain_suffix_extracts_username() {
+        assert_eq!(
+            strip_local_domain_suffix("alice.seiran-beta.org", "seiran-beta.org"),
+            Some("alice")
+        );
+        assert_eq!(
+            strip_local_domain_suffix("Alice.Seiran-Beta.org", "seiran-beta.org"),
+            Some("Alice")
+        );
+    }
+
+    #[test]
+    fn strip_local_domain_suffix_rejects_other_domain() {
+        assert_eq!(
+            strip_local_domain_suffix("alice.bsky.social", "seiran-beta.org"),
+            None
+        );
+        assert_eq!(
+            strip_local_domain_suffix("alice.other-seiran-beta.org", "seiran-beta.org"),
+            None
+        );
+    }
+
+    #[test]
+    fn strip_local_domain_suffix_rejects_bare_domain_and_short_input() {
+        assert_eq!(
+            strip_local_domain_suffix("seiran-beta.org", "seiran-beta.org"),
+            None
+        );
+        assert_eq!(strip_local_domain_suffix(".seiran-beta.org", "seiran-beta.org"), None);
+        assert_eq!(strip_local_domain_suffix("org", "seiran-beta.org"), None);
     }
 }
