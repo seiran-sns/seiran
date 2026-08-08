@@ -66,6 +66,16 @@ async fn resolve_bsky(state: &AppState, actor_id_or_handle: &str) -> Result<Acto
         .map_err(|e| ApError::Other(format!("Bskyプロフィール取得失敗: {}", e)))?;
     let did = bsky_resp.did.clone();
 
+    // 自インスタンスのローカルアクター本人が DID 経由で見つかった場合は、AppView 側の
+    // ハンドル表記（`user.domain` 形式）で username 列を上書きしてしまわないよう upsert を
+    // スキップする（`handlers::users::fetch_bsky_profile_from_appview` と同じ理由。
+    // ローカルユーザーの完全な Bsky ハンドルを target に指定した場合にここへ来うる）。
+    if let Ok(Some(existing)) = state.actors.find_by_did(&did).await {
+        if existing.actor_type == "local" {
+            return Ok(existing);
+        }
+    }
+
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
     let actor_id = state

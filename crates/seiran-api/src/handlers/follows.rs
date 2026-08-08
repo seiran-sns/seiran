@@ -338,25 +338,35 @@ async fn follow_bsky(
         }
     };
     let did = bsky_resp.did.clone();
-
     let now = chrono::Utc::now();
-    let new_actor_id = generate_snowflake_id(now);
-    let remote_actor_id = match state
-        .actors
-        .upsert_remote_bsky(
-            new_actor_id,
-            &did,
-            &bsky_resp.handle,
-            bsky_resp.display_name.as_deref(),
-            bsky_resp.avatar.as_deref(),
-            now,
-        )
-        .await
-    {
-        Ok(id) => id,
-        Err(e) => {
-            return ApiError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e))
-                .into_response();
+
+    // 自インスタンスのローカルアクター本人が DID 経由で見つかった場合は、AppView 側の
+    // ハンドル表記（`user.domain` 形式）で username 列を上書きしてしまわないよう upsert を
+    // スキップする（`handlers::users::fetch_bsky_profile_from_appview` と同じ理由。
+    // ローカルユーザーの完全な Bsky ハンドルを target に指定してフォローしようとした場合に
+    // ここへ来うる）。
+    let remote_actor_id = match state.actors.find_by_did(&did).await {
+        Ok(Some(existing)) if existing.actor_type == "local" => existing.id,
+        _ => {
+            let new_actor_id = generate_snowflake_id(now);
+            match state
+                .actors
+                .upsert_remote_bsky(
+                    new_actor_id,
+                    &did,
+                    &bsky_resp.handle,
+                    bsky_resp.display_name.as_deref(),
+                    bsky_resp.avatar.as_deref(),
+                    now,
+                )
+                .await
+            {
+                Ok(id) => id,
+                Err(e) => {
+                    return ApiError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e))
+                        .into_response();
+                }
+            }
         }
     };
 

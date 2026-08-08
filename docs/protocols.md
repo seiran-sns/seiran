@@ -182,6 +182,8 @@ Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホス
 
 **Actor解決の自ドメインガード**: リモートActor URI解決処理（`upsert_remote_fedi_actor`/`resolve_fedi`）は、URIが `https://{local_domain}/users/{username}` 形式で自ドメインを指す場合、`seiran_common::ap::extract_local_username` で判定してローカル行をそのまま返す（新規 `fedi` 行は作らない）。ローカル行は `insert_local` が設定する `ap_uri`（`https://{domain}/users/{username}`）を持つため、万一このガードを経由しなくても `find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により重複INSERTは自然に防がれる（二重防御）。
 
+**Bsky側Actor解決の自DIDガード**: Bskyリモートアクター解決処理（`follow_bsky`/`resolve_bsky`/`fetch_bsky_profile_from_appview`/`persist_appview_posts`等）は、`fetch_bsky_profile`等で得たDIDが `find_by_did` でローカル行にヒットした場合、そのローカル行をそのまま返し `upsert_remote_bsky` を呼ばない。ローカルユーザーの完全なBskyハンドル表記（`{username}.{local_domain}`、`.`を含み`@`を含まないため `create_follow`/`resolve_and_upsert_target` のターゲット判別ロジック上はBsky ATPハンドルと区別できない）を宛先文字列としてこの経路に入ることがあり、ガードを欠くと `upsert_remote_bsky` の `ON CONFLICT (at_did) DO UPDATE` でローカル行の `username` 列がAppView側のハンドル表記（ドット付き）で上書きされてしまう（実際に発生した事故: `actors.username` がDNSラベルとして不正な形になり `seiran_common::username::is_valid_local_username` の前提が壊れる）。フォロワー検知ポーリング（`bsky_follower_poll`）・Jetstream受信（`firehose::resolve_or_upsert_bsky_actor`）・検索結果取り込み（`search::persist_appview_posts`）は元々 `find_by_did` 経由のローカル判定を先に行う実装だったため影響を受けない。
+
 ## 6. 本文中のリンク・メンション表現
 
 Bluesky facet・ActivityPub `<a href>` が示すリンク情報を、Misskey API互換（`NoteResponse.text`はプレーンテキストのまま）を保ちつつ画面上でクリック可能にするため、Misskey本家のMFM同様「`text`フィールドの中に内部リンクマーカーを埋め込み、フロントがパースする」方式を採る。
