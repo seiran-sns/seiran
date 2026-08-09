@@ -7,6 +7,7 @@ pub struct ReactorInfo {
     pub id: i64,
     pub username: String,
     pub domain: String,
+    pub actor_type: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     /// Misskey互換API（`POST /api/notes/reactions`）の`id`/`createdAt`用（`reactions.id`/`created_at`）。
@@ -254,7 +255,7 @@ impl ReactionRepository for PgReactionRepository {
         limit: i64,
     ) -> Result<Vec<ReactorInfo>, sqlx::Error> {
         sqlx::query_as::<_, ReactorInfo>(
-            "SELECT a.id, a.username, a.domain, a.display_name,
+            "SELECT a.id, a.username, a.domain, a.actor_type::text AS actor_type, a.display_name,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     r.id AS reaction_id, r.created_at AS reaction_created_at
              FROM reactions r

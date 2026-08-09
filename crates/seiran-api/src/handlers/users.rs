@@ -604,7 +604,7 @@ async fn build_profile_response(
     // リモート Fedi アクターの場合、featured collection（ピン留め投稿, #61）を都度同期する。
     // ベストエフォート（失敗してもプロフィール表示自体は継続する）。DB 未登録の未知アクター
     // （`fetch_remote_profile`）はここを通らないため対象外。
-    if actor.actor_type == "fedi" && actor.domain != state.local_domain {
+    if actor.actor_type == "fedi" {
         sync_remote_fedi_pinned(state, &actor).await;
     }
 
@@ -702,7 +702,7 @@ async fn build_profile_response(
     let (bridge_real_handle, bridge_protocol) = match actor.bridge_real_actor_id {
         Some(real_id) => match state.actors.find_by_id(real_id).await {
             Ok(Some(real)) => {
-                let handle = if real.domain == state.local_domain {
+                let handle = if real.actor_type == "local" {
                     format!("@{}", real.username)
                 } else {
                     format!("@{}@{}", real.username, real.domain)

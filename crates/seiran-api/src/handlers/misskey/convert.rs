@@ -20,10 +20,14 @@ use super::types::{
     MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite,
 };
 
+/// `is_local`は`actors.actor_type == "local"`（呼び出し元が`Actor`/`TimelinePost`等の
+/// `actor_type`から渡す）。`local_domain`はアバターURLのフォールバック組み立てにのみ使う。
+#[allow(clippy::too_many_arguments)]
 pub fn user_lite(
     actor_id: i64,
     username: &str,
     domain: &str,
+    is_local: bool,
     local_domain: &str,
     display_name: Option<&str>,
     avatar_url: Option<&str>,
@@ -31,15 +35,14 @@ pub fn user_lite(
     MisskeyUserLite {
         id: actor_id.to_string(),
         username: username.to_string(),
-        host: if domain == local_domain {
+        host: if is_local {
             None
         } else {
             Some(domain.to_string())
         },
         name: display_name.map(|s| s.to_string()),
         avatar_url: avatar_url.map(str::to_string).or_else(|| {
-            (domain == local_domain)
-                .then(|| seiran_common::avatar::fallback_avatar_url(local_domain, actor_id))
+            is_local.then(|| seiran_common::avatar::fallback_avatar_url(local_domain, actor_id))
         }),
         is_bot: false,
         is_cat: false,
@@ -60,6 +63,7 @@ pub async fn build_user_detailed(state: &AppState, actor: &Actor) -> MisskeyUser
             actor.id,
             &actor.username,
             &actor.domain,
+            actor.actor_type == "local",
             &state.local_domain,
             actor.display_name.as_deref(),
             None,
@@ -151,6 +155,7 @@ pub async fn build_users_detailed(
                 actor.id,
                 &actor.username,
                 &actor.domain,
+                actor.actor_type == "local",
                 &state.local_domain,
                 actor.display_name.as_deref(),
                 avatar_url.as_deref(),
@@ -246,6 +251,7 @@ fn to_misskey_note(
         p.actor_id,
         &p.username,
         &p.domain,
+        p.actor_type == "local",
         local_domain,
         p.display_name.as_deref(),
         p.avatar_url.as_deref(),
@@ -314,10 +320,10 @@ fn to_misskey_note(
     // ノート扱いされてしまう。なお seiran はローカル投稿にも自己参照的な AP Object ID
     // （`https://{local_domain}/notes/{id}`）を常に posts.ap_object_id へ持たせている
     // （Federation送信時にIDとして使うため）ので、`post_ap_object_id` の有無だけでは
-    // ローカル/リモートを判定できず、`p.domain` で判定する必要がある。
+    // ローカル/リモートを判定できず、`p.actor_type` で判定する必要がある。
     // `url` は人間向けURLで、AP優先・無ければBsky（at_uri→bsky.app）にフォールバックする
     // （`dto::to_note_response`のremote_urlと同じ方針）。
-    let is_local = p.domain == local_domain;
+    let is_local = p.actor_type == "local";
     let uri = if is_local {
         None
     } else {
@@ -506,12 +512,13 @@ pub async fn build_notifications(
                 i64,
                 String,
                 String,
+                String,
                 Option<String>,
                 Option<String>,
                 Option<serde_json::Value>,
             ),
         >(
-            "SELECT a.id, a.username, a.domain, a.display_name, \
+            "SELECT a.id, a.username, a.domain, a.actor_type::text AS actor_type, a.display_name, \
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url), \
                     a.emoji_map \
              FROM actors a \
@@ -525,11 +532,12 @@ pub async fn build_notifications(
         .unwrap_or_default()
         .into_iter()
         .map(
-            |(id, username, domain, display_name, avatar_url, emoji_map)| {
+            |(id, username, domain, actor_type, display_name, avatar_url, emoji_map)| {
                 let mut lite = user_lite(
                     id,
                     &username,
                     &domain,
+                    actor_type == "local",
                     &state.local_domain,
                     display_name.as_deref(),
                     avatar_url.as_deref(),

@@ -95,6 +95,11 @@ pub struct PostDeliveryMeta {
     pub at_uri: Option<String>,
     pub at_cid: Option<String>,
     pub domain: String,
+    /// `actors.actor_type`（`"local"`/`"fedi"`/`"bsky"`等）。ローカル/リモート判定は
+    /// `domain == local_domain`の文字列比較ではなくこちらを使う
+    /// （`insert_local`の不変条件によりlocal⇔domain=local_domainは常に一致するが、
+    /// actor_type判定の方が環境非依存でSQL側の意味とも一致する）。
+    pub actor_type: String,
     pub display_name: Option<String>,
     pub username: String,
     pub body: String,
@@ -885,7 +890,7 @@ impl PostRepository for PgPostRepository {
     async fn find_delivery_meta(&self, id: i64) -> Result<Option<PostDeliveryMeta>, sqlx::Error> {
         sqlx::query_as::<_, PostDeliveryMeta>(
             "SELECT p.actor_id, p.ap_object_id, p.at_uri, p.at_cid,
-                    a.domain, a.display_name, a.username, p.body,
+                    a.domain, a.actor_type::text AS actor_type, a.display_name, a.username, p.body,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     (
                         SELECT COALESCE(

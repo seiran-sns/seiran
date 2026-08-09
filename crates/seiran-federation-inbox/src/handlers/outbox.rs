@@ -28,12 +28,11 @@ pub async fn outbox_handler(
         "SELECT a.id, COUNT(p.id) AS total
          FROM actors a
          LEFT JOIN posts p ON p.actor_id = a.id AND p.deleted_at IS NULL
-         WHERE a.username = $1 AND a.domain = $2 AND a.actor_type = 'local'
+         WHERE a.username = $1 AND a.actor_type = 'local'
          GROUP BY a.id
          LIMIT 1",
     )
     .bind(&username)
-    .bind(state.local_domain.as_str())
     .fetch_optional(&state.db)
     .await;
 

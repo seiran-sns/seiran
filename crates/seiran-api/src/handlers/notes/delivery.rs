@@ -106,15 +106,10 @@ pub enum PostOrigin {
     BskyRemote,
 }
 
-/// 元ポストの種別を判定する。
-pub fn classify_post(
-    ap_object_id: Option<&str>,
-    at_uri: Option<&str>,
-    actor_domain: &str,
-    local_domain: &str,
-) -> PostOrigin {
-    // ローカルポストは actors.domain == local_domain
-    if actor_domain == local_domain {
+/// 元ポストの種別を判定する。`is_local`は`actors.actor_type == "local"`（呼び出し元は
+/// `PostDeliveryMeta::actor_type`から渡す）。
+pub fn classify_post(ap_object_id: Option<&str>, at_uri: Option<&str>, is_local: bool) -> PostOrigin {
+    if is_local {
         return PostOrigin::LocalOrSeiran;
     }
     match (ap_object_id.is_some(), at_uri.is_some()) {
@@ -372,8 +367,7 @@ pub async fn resolve_reply_context(
     let origin = classify_post(
         meta.ap_object_id.as_deref(),
         meta.at_uri.as_deref(),
-        &meta.domain,
-        &state.local_domain,
+        meta.actor_type == "local",
     );
 
     // 配信先制御: 元ポストが存在しないプロトコルには配信しない
@@ -399,7 +393,7 @@ pub async fn resolve_reply_context(
         None
     };
 
-    let parent_local_actor_id = if meta.domain == state.local_domain {
+    let parent_local_actor_id = if meta.actor_type == "local" {
         Some(meta.actor_id)
     } else {
         None
@@ -462,8 +456,7 @@ pub async fn resolve_quote_embed(
     let origin = classify_post(
         meta.ap_object_id.as_deref(),
         meta.at_uri.as_deref(),
-        &meta.domain,
-        &state.local_domain,
+        meta.actor_type == "local",
     );
 
     let bsky_embed = if origin == PostOrigin::FediRemote {
@@ -683,6 +676,7 @@ mod tests {
             at_uri: at_uri.map(str::to_owned),
             at_cid: None,
             domain: "example.com".to_owned(),
+            actor_type: "fedi".to_owned(),
             display_name: None,
             username: "alice".to_owned(),
             body: "quoted post".to_owned(),
@@ -882,22 +876,14 @@ mod tests {
 
     #[test]
     fn classify_post_local_domain_match() {
-        // domain が local_domain と一致する場合は ap_object_id / at_uri の値によらずローカル扱い
-        assert_eq!(
-            classify_post(None, None, "seiran.example", "seiran.example"),
-            PostOrigin::LocalOrSeiran
-        );
+        // is_local=true の場合は ap_object_id / at_uri の値によらずローカル扱い
+        assert_eq!(classify_post(None, None, true), PostOrigin::LocalOrSeiran);
     }
 
     #[test]
     fn classify_post_seiran_remote_has_both_ids() {
         assert_eq!(
-            classify_post(
-                Some("https://a/notes/1"),
-                Some("at://did/x/y"),
-                "other.example",
-                "seiran.example"
-            ),
+            classify_post(Some("https://a/notes/1"), Some("at://did/x/y"), false),
             PostOrigin::LocalOrSeiran
         );
     }
@@ -905,12 +891,7 @@ mod tests {
     #[test]
     fn classify_post_fedi_remote_ap_only() {
         assert_eq!(
-            classify_post(
-                Some("https://mastodon.example/notes/1"),
-                None,
-                "mastodon.example",
-                "seiran.example"
-            ),
+            classify_post(Some("https://mastodon.example/notes/1"), None, false),
             PostOrigin::FediRemote
         );
     }
@@ -918,16 +899,13 @@ mod tests {
     #[test]
     fn classify_post_bsky_remote_at_uri_only() {
         assert_eq!(
-            classify_post(None, Some("at://did/x/y"), "bsky.example", "seiran.example"),
+            classify_post(None, Some("at://did/x/y"), false),
             PostOrigin::BskyRemote
         );
     }
 
     #[test]
     fn classify_post_unknown_defaults_to_local() {
-        assert_eq!(
-            classify_post(None, None, "other.example", "seiran.example"),
-            PostOrigin::LocalOrSeiran
-        );
+        assert_eq!(classify_post(None, None, false), PostOrigin::LocalOrSeiran);
     }
 }

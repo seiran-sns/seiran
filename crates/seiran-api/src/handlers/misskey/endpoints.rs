@@ -305,7 +305,7 @@ async fn actor_id_to_target(state: &AppState, actor_id: i64) -> Result<String, A
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
 
-    let target = if actor.domain == state.local_domain {
+    let target = if actor.actor_type == "local" {
         actor.username.clone()
     } else if let Some(did) = &actor.at_did {
         did.clone()
@@ -866,6 +866,7 @@ pub async fn notes_reactions(
                     a.id,
                     &a.username,
                     &a.domain,
+                    a.actor_type == "local",
                     &state.local_domain,
                     a.display_name.as_deref(),
                     a.avatar_url.as_deref(),

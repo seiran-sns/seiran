@@ -18,10 +18,9 @@ pub async fn lists_collection_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let actor_row = sqlx::query(
-        "SELECT id FROM actors WHERE username = $1 AND domain = $2 AND actor_type = 'local' LIMIT 1",
+        "SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' LIMIT 1",
     )
     .bind(&username)
-    .bind(state.local_domain.as_str())
     .fetch_optional(&state.db)
     .await;
 
@@ -89,12 +88,11 @@ pub async fn list_detail_handler(
     let row = sqlx::query(
         "SELECT l.id FROM lists l
          JOIN actors a ON a.id = l.owner_actor_id
-         WHERE l.id = $1 AND a.username = $2 AND a.domain = $3
+         WHERE l.id = $1 AND a.username = $2
            AND a.actor_type = 'local' AND l.is_public = true",
     )
     .bind(list_id)
     .bind(&username)
-    .bind(state.local_domain.as_str())
     .fetch_optional(&state.db)
     .await;
 

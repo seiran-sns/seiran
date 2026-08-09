@@ -88,7 +88,7 @@ async fn open_actor(state: &AppState, target: &str) -> Result<OpenTargetResponse
     let actor = resolve_and_upsert_target(state, target)
         .await
         .map_err(|_| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let acct = if actor.domain == state.local_domain {
+    let acct = if actor.actor_type == "local" {
         format!("@{}", actor.username)
     } else {
         format!("@{}@{}", actor.username, actor.domain)

@@ -842,7 +842,7 @@ async fn handle_create_note(
             .await
             .ok()
             .flatten()
-            .filter(|m| m.domain == inbox.local_domain)
+            .filter(|m| m.actor_type == "local")
             .map(|m| m.actor_id),
         None => None,
     };
@@ -975,7 +975,7 @@ async fn handle_create_note(
     // 引用通知: リモート Fedi ユーザーがローカルユーザーの投稿を引用した場合に作る。
     if let Some(quoted_post_id) = quote_of_post_id {
         match inbox.post_repo.find_delivery_meta(quoted_post_id).await {
-            Ok(Some(meta)) if meta.domain == inbox.local_domain && meta.actor_id != actor_id => {
+            Ok(Some(meta)) if meta.actor_type == "local" && meta.actor_id != actor_id => {
                 inbox.stream_hub.publish_event(
                     HashSet::from([meta.actor_id]),
                     "quote",
@@ -2324,7 +2324,7 @@ async fn handle_announce(
 
     // リポスト通知: リモート Fedi ユーザーがローカルユーザーの投稿をリポストした場合に作る。
     match inbox.post_repo.find_delivery_meta(repost_of_post_id).await {
-        Ok(Some(meta)) if meta.domain == inbox.local_domain && meta.actor_id != actor_id => {
+        Ok(Some(meta)) if meta.actor_type == "local" && meta.actor_id != actor_id => {
             inbox.stream_hub.publish_event(
                 HashSet::from([meta.actor_id]),
                 "repost",

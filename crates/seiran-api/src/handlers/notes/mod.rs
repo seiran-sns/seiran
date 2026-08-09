@@ -238,8 +238,7 @@ async fn create_repost(
     let origin = classify_post(
         meta.ap_object_id.as_deref(),
         meta.at_uri.as_deref(),
-        &meta.domain,
-        &state.local_domain,
+        meta.actor_type == "local",
     );
 
     let post_id = generate_snowflake_id(now);
@@ -293,7 +292,7 @@ async fn create_repost(
     .await;
 
     // リポスト通知: ローカルユーザーの投稿が他ユーザーにリポストされた場合に作る。
-    if meta.domain == state.local_domain && meta.actor_id != actor_id {
+    if meta.actor_type == "local" && meta.actor_id != actor_id {
         state.stream_hub.publish_event(
             std::collections::HashSet::from([meta.actor_id]),
             "repost",
@@ -614,7 +613,7 @@ async fn create_regular_post(
                 if let Err(e) = validate_quote_visibility(&meta.visibility, visibility) {
                     return e.into_response();
                 }
-                if meta.domain == state.local_domain && meta.actor_id != actor_id {
+                if meta.actor_type == "local" && meta.actor_id != actor_id {
                     quote_notif_recipient = Some(meta.actor_id);
                 }
             }
@@ -1190,7 +1189,7 @@ pub async fn get_note_ap(
     };
 
     // ローカルポストのみ AP として提供する
-    if post.domain != state.local_domain {
+    if post.actor_type != "local" {
         return ApiError::NotFound("NOT_FOUND").into_response();
     }
 
@@ -1349,7 +1348,7 @@ pub async fn note_context(
     let actor_id = post.actor_id;
 
     // 2. リモートアクターの場合、Outbox から追加フェッチ
-    if post.domain != state.local_domain {
+    if post.actor_type != "local" {
         // 閲覧者がこのアクターをフォロー中か確認（my_actor_id は既に取得済み）
         let viewer_follows = if let Some(vid) = my_actor_id {
             matches!(state.follows.find_status(vid, actor_id).await, Ok(Some(_)))
