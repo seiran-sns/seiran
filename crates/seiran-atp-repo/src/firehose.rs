@@ -1094,7 +1094,10 @@ async fn save_bsky_post(
                 .execute(pool)
                 .await;
                 if let Err(e) = result {
-                    tracing::error!("[Jetstream] post_link_cards INSERT失敗（投稿自体は成功済み）: {}", e);
+                    tracing::error!(
+                        "[Jetstream] post_link_cards INSERT失敗（投稿自体は成功済み）: {}",
+                        e
+                    );
                 }
             }
 

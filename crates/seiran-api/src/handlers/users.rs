@@ -398,37 +398,39 @@ pub async fn user_profile(
     let q = params.q.trim().trim_start_matches('@');
 
     // ターゲットを解決：`user@domain` / `user`（ローカル）/ `https://...`（URI）
-    let (lookup_username, lookup_domain): (String, Option<String>) = if q.starts_with("https://")
-        || q.starts_with("http://")
-    {
-        // Actor URI → WebFinger などは省略し、DB で ap_uri 検索
-        return lookup_by_uri(q, my_user_id, &state).await.into_response();
-    } else if q.starts_with("did:") {
-        // DID 形式 → DB で検索し、なければ AppView へ
-        return match state.actors.find_by_did(q).await {
-            Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
-            Ok(None) => fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
-            Err(e) => {
-                tracing::error!("[profile] DB エラー: {}", e);
-                ApiError::Internal(e.to_string()).into_response()
+    let (lookup_username, lookup_domain): (String, Option<String>) =
+        if q.starts_with("https://") || q.starts_with("http://") {
+            // Actor URI → WebFinger などは省略し、DB で ap_uri 検索
+            return lookup_by_uri(q, my_user_id, &state).await.into_response();
+        } else if q.starts_with("did:") {
+            // DID 形式 → DB で検索し、なければ AppView へ
+            return match state.actors.find_by_did(q).await {
+                Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
+                Ok(None) => fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
+                Err(e) => {
+                    tracing::error!("[profile] DB エラー: {}", e);
+                    ApiError::Internal(e.to_string()).into_response()
+                }
+            };
+        } else if q.contains('.') && !q.contains('@') {
+            // ドット含み・@なし → `user.local-domain`（自インスタンスの AT ハンドル形式）ならローカル DB を検索し、
+            // それ以外は ATP ハンドル（alice.bsky.social 等）とみなして外部 AppView へ
+            let local_suffix = format!(".{}", state.local_domain);
+            match q.strip_suffix(local_suffix.as_str()) {
+                Some(local_username) => (
+                    local_username.to_string(),
+                    Some(state.local_domain.to_string()),
+                ),
+                None => return fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
+            }
+        } else {
+            let parts: Vec<&str> = q.splitn(2, '@').collect();
+            if parts.len() == 2 {
+                (parts[0].to_string(), Some(parts[1].to_string()))
+            } else {
+                (parts[0].to_string(), None)
             }
         };
-    } else if q.contains('.') && !q.contains('@') {
-        // ドット含み・@なし → `user.local-domain`（自インスタンスの AT ハンドル形式）ならローカル DB を検索し、
-        // それ以外は ATP ハンドル（alice.bsky.social 等）とみなして外部 AppView へ
-        let local_suffix = format!(".{}", state.local_domain);
-        match q.strip_suffix(local_suffix.as_str()) {
-            Some(local_username) => (local_username.to_string(), Some(state.local_domain.to_string())),
-            None => return fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
-        }
-    } else {
-        let parts: Vec<&str> = q.splitn(2, '@').collect();
-        if parts.len() == 2 {
-            (parts[0].to_string(), Some(parts[1].to_string()))
-        } else {
-            (parts[0].to_string(), None)
-        }
-    };
 
     let domain = lookup_domain
         .as_deref()

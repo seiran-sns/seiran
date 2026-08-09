@@ -965,10 +965,10 @@ pub async fn home_timeline(
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(
-            p,
-            att_map.remove(&id).unwrap_or_default(),
-            lc_map.remove(&id).unwrap_or_default(),
-        );
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             nr.reposted_by_me = Some(reposted_set.contains(&id));
             nr
@@ -1017,10 +1017,10 @@ pub async fn local_timeline(
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(
-            p,
-            att_map.remove(&id).unwrap_or_default(),
-            lc_map.remove(&id).unwrap_or_default(),
-        );
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             if my_actor_id.is_some() {
                 nr.reposted_by_me = Some(reposted_set.contains(&id));
@@ -1068,10 +1068,10 @@ pub async fn social_timeline(
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(
-            p,
-            att_map.remove(&id).unwrap_or_default(),
-            lc_map.remove(&id).unwrap_or_default(),
-        );
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             nr.reposted_by_me = Some(reposted_set.contains(&id));
             nr
@@ -1121,10 +1121,10 @@ pub async fn global_timeline(
         .map(|p| {
             let id = p.id;
             let mut nr = to_note_response(
-            p,
-            att_map.remove(&id).unwrap_or_default(),
-            lc_map.remove(&id).unwrap_or_default(),
-        );
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             if my_actor_id.is_some() {
                 nr.reposted_by_me = Some(reposted_set.contains(&id));
@@ -1173,10 +1173,10 @@ pub async fn get_note(
     let mut lc_map = fetch_link_cards_map(&state.db, &[post_id]).await;
     let rmap = fetch_reactions_map(&state.db, &[post_id], my_actor_id).await;
     let mut nr = to_note_response(
-            post,
-            att_map.remove(&post_id).unwrap_or_default(),
-            lc_map.remove(&post_id).unwrap_or_default(),
-        );
+        post,
+        att_map.remove(&post_id).unwrap_or_default(),
+        lc_map.remove(&post_id).unwrap_or_default(),
+    );
     nr.reactions = rmap.get(&post_id).cloned().unwrap_or_default();
     if let Some(actor_id) = my_actor_id {
         let reposted_set = fetch_reposted_ids(&state.db, actor_id, &[post_id]).await;

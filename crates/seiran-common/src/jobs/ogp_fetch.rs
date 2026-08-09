@@ -35,7 +35,10 @@ pub async fn handle(
     ctx: Arc<JobContext>,
 ) -> Result<(), String> {
     let Some(pool) = &ctx.db_pool else {
-        tracing::warn!("[OgpFetch] DB pool 未設定のためスキップ (post_id={})", post_id);
+        tracing::warn!(
+            "[OgpFetch] DB pool 未設定のためスキップ (post_id={})",
+            post_id
+        );
         return Ok(());
     };
 

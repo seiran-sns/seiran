@@ -155,7 +155,10 @@ pub async fn fetch_validated_with_accept(
             .and_then(|v| v.to_str().ok())
             .unwrap_or("application/octet-stream")
             .to_owned();
-        let bytes = upstream.bytes().await.map_err(|_| FetchError::FetchFailed)?;
+        let bytes = upstream
+            .bytes()
+            .await
+            .map_err(|_| FetchError::FetchFailed)?;
         if bytes.len() as u64 > MAX_FETCH_BYTES {
             return Err(FetchError::TooLarge);
         }

@@ -43,7 +43,11 @@ fn extract_link_card_urls(body: &str, max: usize) -> Vec<String> {
         if text.starts_with('#') {
             continue;
         }
-        let url = cap.get(2).expect("group 2 always matches").as_str().to_string();
+        let url = cap
+            .get(2)
+            .expect("group 2 always matches")
+            .as_str()
+            .to_string();
         if seen.insert(url.clone()) {
             urls.push(url);
         }
@@ -92,7 +96,10 @@ fn youtube_thumbnail_url(url: &str) -> Option<String> {
     if video_id.is_empty() {
         return None;
     }
-    Some(format!("https://img.youtube.com/vi/{}/hqdefault.jpg", video_id))
+    Some(format!(
+        "https://img.youtube.com/vi/{}/hqdefault.jpg",
+        video_id
+    ))
 }
 
 /// 投稿本文中のURLカード化対象URLを処理する。YouTube/Spotify/x.comは判定のみで即座に
@@ -3039,7 +3046,10 @@ mod tests {
         let urls = extract_link_card_urls(body, 5);
         assert_eq!(
             urls,
-            vec!["https://example.com/a".to_string(), "https://example.com/b".to_string()]
+            vec![
+                "https://example.com/a".to_string(),
+                "https://example.com/b".to_string()
+            ]
         );
     }
 
@@ -3059,7 +3069,8 @@ mod tests {
 
     #[test]
     fn extract_link_card_urls_respects_max() {
-        let body = "[a](https://example.com/1) [b](https://example.com/2) [c](https://example.com/3)";
+        let body =
+            "[a](https://example.com/1) [b](https://example.com/2) [c](https://example.com/3)";
         let urls = extract_link_card_urls(body, 2);
         assert_eq!(urls.len(), 2);
     }

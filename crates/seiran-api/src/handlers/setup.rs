@@ -78,18 +78,16 @@ async fn try_confirm_domain(
 
     match (host_candidate.as_deref(), requested) {
         (None, None) => Ok(false),
-        (Some(host), Some(req)) if host == req => {
-            match state.instance_domain.confirm(host).await {
-                Ok(ConfirmOutcome::Confirmed(d) | ConfirmOutcome::AlreadyConfirmed(d)) => {
-                    state.local_domain.set_confirmed(d);
-                    Ok(true)
-                }
-                Err(e) => {
-                    tracing::error!("[setup] ドメイン確定に失敗しました: {}", e);
-                    Err(ApiError::Internal("ドメイン確定に失敗しました".to_string()))
-                }
+        (Some(host), Some(req)) if host == req => match state.instance_domain.confirm(host).await {
+            Ok(ConfirmOutcome::Confirmed(d) | ConfirmOutcome::AlreadyConfirmed(d)) => {
+                state.local_domain.set_confirmed(d);
+                Ok(true)
             }
-        }
+            Err(e) => {
+                tracing::error!("[setup] ドメイン確定に失敗しました: {}", e);
+                Err(ApiError::Internal("ドメイン確定に失敗しました".to_string()))
+            }
+        },
         _ => Err(ApiError::BadRequest("DOMAIN_MISMATCH".into())),
     }
 }

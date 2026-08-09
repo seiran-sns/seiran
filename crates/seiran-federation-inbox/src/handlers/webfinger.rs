@@ -50,12 +50,11 @@ pub async fn webfinger_handler(
         return (StatusCode::NOT_FOUND, "このドメインは管理対象外です").into_response();
     }
 
-    let exists = sqlx::query(
-        "SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' LIMIT 1",
-    )
-    .bind(username)
-    .fetch_optional(&state.db)
-    .await;
+    let exists =
+        sqlx::query("SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' LIMIT 1")
+            .bind(username)
+            .fetch_optional(&state.db)
+            .await;
 
     match exists {
         Ok(Some(_)) => {}

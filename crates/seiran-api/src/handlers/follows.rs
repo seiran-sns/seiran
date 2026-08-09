@@ -373,8 +373,11 @@ async fn follow_bsky(
             {
                 Ok(id) => id,
                 Err(e) => {
-                    return ApiError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e))
-                        .into_response();
+                    return ApiError::Internal(format!(
+                        "[follow/bsky] アクター upsert 失敗: {}",
+                        e
+                    ))
+                    .into_response();
                 }
             }
         }

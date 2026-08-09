@@ -294,7 +294,10 @@ pub trait PostRepository: Send + Sync {
     /// 元のリポスト情報（`repost_of_post_id`経由で`embed_renotes`が解決する元投稿）を
     /// 復元する用途専用（`misskey::convert::build_notifications`）。通常の表示・操作では
     /// `find_by_id`/`find_by_id_for_viewer`を使うこと。
-    async fn find_by_id_including_deleted(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error>;
+    async fn find_by_id_including_deleted(
+        &self,
+        id: i64,
+    ) -> Result<Option<TimelinePost>, sqlx::Error>;
 
     /// 複数IDでポストとアクター情報を一括取得する（可視性チェック無し）。呼び出し元が
     /// 別途アクセス制御を済ませている場合のみ使うこと（DMセッション一覧の最終メッセージ取得等）。
@@ -772,7 +775,10 @@ impl PostRepository for PgPostRepository {
         .await
     }
 
-    async fn find_by_id_including_deleted(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error> {
+    async fn find_by_id_including_deleted(
+        &self,
+        id: i64,
+    ) -> Result<Option<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
             "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,

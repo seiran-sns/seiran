@@ -108,7 +108,11 @@ pub enum PostOrigin {
 
 /// 元ポストの種別を判定する。`is_local`は`actors.actor_type == "local"`（呼び出し元は
 /// `PostDeliveryMeta::actor_type`から渡す）。
-pub fn classify_post(ap_object_id: Option<&str>, at_uri: Option<&str>, is_local: bool) -> PostOrigin {
+pub fn classify_post(
+    ap_object_id: Option<&str>,
+    at_uri: Option<&str>,
+    is_local: bool,
+) -> PostOrigin {
     if is_local {
         return PostOrigin::LocalOrSeiran;
     }

@@ -147,7 +147,10 @@ mod tests {
             strip_local_domain_suffix("seiran-beta.org", "seiran-beta.org"),
             None
         );
-        assert_eq!(strip_local_domain_suffix(".seiran-beta.org", "seiran-beta.org"), None);
+        assert_eq!(
+            strip_local_domain_suffix(".seiran-beta.org", "seiran-beta.org"),
+            None
+        );
         assert_eq!(strip_local_domain_suffix("org", "seiran-beta.org"), None);
     }
 }

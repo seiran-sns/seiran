@@ -18,12 +18,11 @@ pub async fn featured_handler(
     Path(username): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let actor_row = sqlx::query(
-        "SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' LIMIT 1",
-    )
-    .bind(&username)
-    .fetch_optional(&state.db)
-    .await;
+    let actor_row =
+        sqlx::query("SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' LIMIT 1")
+            .bind(&username)
+            .fetch_optional(&state.db)
+            .await;
 
     let actor_id: i64 = match actor_row {
         Ok(Some(r)) => r.try_get("id").unwrap_or(0),

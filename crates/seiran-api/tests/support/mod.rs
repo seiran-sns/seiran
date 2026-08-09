@@ -84,11 +84,8 @@ pub async fn test_router() -> Router {
     );
     let instance_domain: Arc<dyn InstanceDomainRepository> =
         Arc::new(PgInstanceDomainRepository::new(pool.clone()));
-    let local_domain = resolve_local_domain(
-        instance_domain.as_ref(),
-        std::env::var("LOCAL_DOMAIN").ok(),
-    )
-    .await;
+    let local_domain =
+        resolve_local_domain(instance_domain.as_ref(), std::env::var("LOCAL_DOMAIN").ok()).await;
     // テストは split-role の検証が目的ではないため常にモノリスの InMemory キューを使う
     // （ジョブは enqueue されるが、テストプロセス内に Worker はいないため実行はされない。
     // 配送を伴わないテストにしたい場合は create_note の `deliver_to_fedi`/`deliver_to_bsky`
