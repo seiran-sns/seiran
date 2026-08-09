@@ -12,12 +12,134 @@ use std::sync::Arc;
 
 use crate::ap::{build_emoji_map, classify_ap_visibility, ApClient};
 use crate::generate_snowflake_id;
-use crate::queue::worker::{InboxContext, JobContext};
+use crate::queue::worker::{priority, InboxContext, JobContext};
 use crate::repository::{
     extract_shortcode_candidates, InsertRemoteWithDedupParams, NotificationKind, PgRelayRepository,
     RelayRepository, RelayStatus,
 };
 use crate::streaming::broadcast_reaction_update;
+use crate::traits::{Job, JobQueue};
+
+/// 1投稿から抽出するURLカード候補の上限。大量リンクを含む投稿でのOGPフェッチ暴走を防ぐ。
+const MAX_LINK_CARDS_PER_POST: usize = 5;
+
+/// 本文（`ap_content_to_markdown_body`が生成したMarkdown）中のリンク`[text](url)`から
+/// カード化対象のURLを重複排除しつつ抽出する。画像記法`![...]()`とハッシュタグリンク
+/// （表示テキストが`#`始まり）は対象外（メンションはそもそもMarkdownリンクにならない）。
+fn extract_link_card_urls(body: &str, max: usize) -> Vec<String> {
+    use std::collections::HashSet as Set;
+    let re = regex::Regex::new(r"\[([^\]]*)\]\((https?://[^)\s]+)\)").expect("valid regex");
+    let mut seen: Set<String> = Set::new();
+    let mut urls = Vec::new();
+    for cap in re.captures_iter(body) {
+        if urls.len() >= max {
+            break;
+        }
+        let full_start = cap.get(0).expect("group 0 always matches").start();
+        if full_start > 0 && body.as_bytes().get(full_start - 1) == Some(&b'!') {
+            continue;
+        }
+        let text = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        if text.starts_with('#') {
+            continue;
+        }
+        let url = cap.get(2).expect("group 2 always matches").as_str().to_string();
+        if seen.insert(url.clone()) {
+            urls.push(url);
+        }
+    }
+    urls
+}
+
+/// URLのホストがYouTubeかどうか（HTTPフェッチ不要）。YouTubeだけは`youtube_thumbnail_url`で
+/// サムネイルを決定的に組み立てられるため、title/description無しで即座にカード化しても
+/// `EmbedPlayerCard`のプレビューが破綻しない。Spotify/x.comにはURLだけで組み立てられる
+/// 決定的なサムネイルが無く、情報無しで即時保存するとプレビューがほぼ空になってしまうため、
+/// Bskyのexternal embed同等のリッチな見た目に揃うよう一般URLと同じくOGP取得
+/// （`Job::OgpFetch`）に回す（フロント側の表示振り分け自体はホスト名判定のみなので、
+/// OGP経由で保存されてもSpotify/x.com用のコンポーネントで正しく表示される）。
+fn is_known_platform_url(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    let host = parsed.host_str().unwrap_or("");
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    let host = host.strip_prefix("m.").unwrap_or(host);
+    matches!(host, "youtube.com" | "youtu.be" | "music.youtube.com")
+}
+
+/// YouTube動画URLから決定的に組み立てられるサムネイルURL（HTTPフェッチ不要）。
+/// YouTube以外、または動画IDを抽出できない場合は`None`。
+fn youtube_thumbnail_url(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    let video_id = if host == "youtu.be" {
+        parsed.path_segments()?.next()?.to_string()
+    } else if host == "youtube.com" || host == "music.youtube.com" {
+        if let Some((_, v)) = parsed.query_pairs().find(|(k, _)| k == "v") {
+            v.to_string()
+        } else {
+            let segs: Vec<&str> = parsed.path_segments()?.collect();
+            match segs.as_slice() {
+                ["shorts", id, ..] | ["embed", id, ..] => id.to_string(),
+                _ => return None,
+            }
+        }
+    } else {
+        return None;
+    };
+    if video_id.is_empty() {
+        return None;
+    }
+    Some(format!("https://img.youtube.com/vi/{}/hqdefault.jpg", video_id))
+}
+
+/// 投稿本文中のURLカード化対象URLを処理する。YouTube/Spotify/x.comは判定のみで即座に
+/// `post_link_cards`へ保存し、それ以外の一般URLはOGP取得ジョブ（`Job::OgpFetch`）を積む。
+/// 投稿保存自体は既に完了しているため、ここでの失敗はログのみでハンドラ全体を失敗させない。
+async fn queue_link_cards_for_post(
+    db_pool: &sqlx::PgPool,
+    queue: &Arc<dyn JobQueue>,
+    post_id: i64,
+    body: &str,
+) {
+    let urls = extract_link_card_urls(body, MAX_LINK_CARDS_PER_POST);
+    for (position, url) in urls.into_iter().enumerate() {
+        let position = position as i16;
+        if is_known_platform_url(&url) {
+            let thumbnail_url = youtube_thumbnail_url(&url);
+            let result = sqlx::query(
+                "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
+                 VALUES ($1, $2, $3, '', '', $4)",
+            )
+            .bind(post_id)
+            .bind(position)
+            .bind(&url)
+            .bind(thumbnail_url.as_deref())
+            .execute(db_pool)
+            .await;
+            if let Err(e) = result {
+                tracing::error!(
+                    "[Create/Note] post_link_cards INSERT失敗（既知プラットフォーム）: {}",
+                    e
+                );
+            }
+        } else if let Err(e) = queue
+            .enqueue(
+                Job::OgpFetch {
+                    post_id,
+                    url,
+                    position,
+                },
+                priority::LOW,
+            )
+            .await
+        {
+            tracing::error!("[Create/Note] OgpFetch enqueue失敗: {}", e);
+        }
+    }
+}
 
 pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), String> {
     let Some(inbox) = ctx.inbox.clone() else {
@@ -45,7 +167,7 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
                 activity["object"]["type"].as_str(),
                 Some("Note") | Some("Question")
             ) {
-                handle_create_note(activity, &inbox, ap_client).await
+                handle_create_note(activity, &inbox, ap_client, &ctx.queue).await
             } else {
                 Ok(())
             }
@@ -738,6 +860,7 @@ async fn handle_create_note(
     activity: serde_json::Value,
     inbox: &InboxContext,
     ap_client: &ApClient,
+    queue: &Arc<dyn JobQueue>,
 ) -> Result<(), String> {
     let note = &activity["object"];
     let note_id = note["id"].as_str().ok_or("Note: id がありません")?;
@@ -971,6 +1094,9 @@ async fn handle_create_note(
             e
         );
     }
+
+    // URLカード（YouTube/Spotify/x.comは即時保存、それ以外はOGP取得ジョブ）。
+    queue_link_cards_for_post(&inbox.db_pool, queue, post_id, &body).await;
 
     // 引用通知: リモート Fedi ユーザーがローカルユーザーの投稿を引用した場合に作る。
     if let Some(quoted_post_id) = quote_of_post_id {
@@ -2573,7 +2699,8 @@ async fn fetch_and_save_note(
 mod tests {
     use super::{
         ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_ap_quote_uri,
-        extract_emoji_tag_url, normalize_ap_poll, strip_html, strip_quote_fallback_line,
+        extract_emoji_tag_url, extract_link_card_urls, is_known_platform_url, normalize_ap_poll,
+        strip_html, strip_quote_fallback_line, youtube_thumbnail_url,
     };
 
     #[test]
@@ -2901,6 +3028,79 @@ mod tests {
                 "closed": null,
                 "votersCount": 3
             }))
+        );
+    }
+
+    #[test]
+    fn extract_link_card_urls_finds_multiple_and_dedups() {
+        let body = "見て [記事](https://example.com/a) それと [同じ記事](https://example.com/a) [別記事](https://example.com/b)";
+        let urls = extract_link_card_urls(body, 5);
+        assert_eq!(
+            urls,
+            vec!["https://example.com/a".to_string(), "https://example.com/b".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_link_card_urls_ignores_hashtag_links() {
+        let body = "[#foo](https://example.social/tags/foo) [記事](https://example.com/a)";
+        let urls = extract_link_card_urls(body, 5);
+        assert_eq!(urls, vec!["https://example.com/a".to_string()]);
+    }
+
+    #[test]
+    fn extract_link_card_urls_ignores_image_markdown() {
+        let body = "![alt](https://example.com/pic.png) [記事](https://example.com/a)";
+        let urls = extract_link_card_urls(body, 5);
+        assert_eq!(urls, vec!["https://example.com/a".to_string()]);
+    }
+
+    #[test]
+    fn extract_link_card_urls_respects_max() {
+        let body = "[a](https://example.com/1) [b](https://example.com/2) [c](https://example.com/3)";
+        let urls = extract_link_card_urls(body, 2);
+        assert_eq!(urls.len(), 2);
+    }
+
+    #[test]
+    fn is_known_platform_url_matches_youtube_only() {
+        for url in [
+            "https://www.youtube.com/watch?v=abc123",
+            "https://youtu.be/abc123",
+            "https://music.youtube.com/watch?v=abc123",
+        ] {
+            assert!(is_known_platform_url(url), "{url}");
+        }
+        // Spotify/x.com/twitter.comはURLだけで組み立てられる決定的なサムネイルが無く、
+        // 情報無しで即時保存するとプレビューがほぼ空になるため、Bskyと同等の見た目に
+        // 揃うようOGP取得（一般URL扱い）に回す。
+        for url in [
+            "https://open.spotify.com/track/abc123",
+            "https://x.com/user/status/123",
+            "https://twitter.com/user/status/123",
+            "https://example.com/article",
+        ] {
+            assert!(!is_known_platform_url(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn youtube_thumbnail_url_extracts_video_id_from_various_formats() {
+        assert_eq!(
+            youtube_thumbnail_url("https://www.youtube.com/watch?v=abc123"),
+            Some("https://img.youtube.com/vi/abc123/hqdefault.jpg".to_string())
+        );
+        assert_eq!(
+            youtube_thumbnail_url("https://youtu.be/abc123"),
+            Some("https://img.youtube.com/vi/abc123/hqdefault.jpg".to_string())
+        );
+        assert_eq!(
+            youtube_thumbnail_url("https://www.youtube.com/shorts/abc123"),
+            Some("https://img.youtube.com/vi/abc123/hqdefault.jpg".to_string())
+        );
+        assert_eq!(
+            youtube_thumbnail_url("https://open.spotify.com/track/abc123"),
+            None
         );
     }
 }

@@ -11,6 +11,7 @@ const streamed = {
   replyCount: 0,
   quoteCount: 0,
   repostCount: 0,
+  linkCards: [],
 };
 
 describe("resolveStreamNote", () => {

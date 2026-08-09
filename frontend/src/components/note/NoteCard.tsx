@@ -107,7 +107,9 @@ function QuoteCard({ note }: { note: Note }) {
       )}
 
       <NoteAttachments attachments={note.attachments} />
-      {note.linkCard && <LinkCard card={note.linkCard} indent={false} />}
+      {note.linkCards.map((card) => (
+        <LinkCard key={card.url} card={card} indent={false} />
+      ))}
       {note.poll && (
         <div className={styles.quotePoll}>
           {note.poll.options.map((option) => (
@@ -403,7 +405,9 @@ function PostContent({
       )}
 
       <NoteAttachments attachments={note.attachments} />
-      {note.linkCard && <LinkCard card={note.linkCard} />}
+      {note.linkCards.map((card) => (
+        <LinkCard key={card.url} card={card} />
+      ))}
 
       {poll && (
         <div className={styles.poll}>

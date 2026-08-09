@@ -504,8 +504,9 @@ export interface Note {
   replyCount: number;
   quoteCount: number;
   repostCount: number;
-  /** URLカード（`app.bsky.embed.external`、GIFピッカー由来を除く）。存在する場合のみ。 */
-  linkCard?: LinkCard;
+  /** URLカード。Bskyは`app.bsky.embed.external`由来で最大1件、Fediは本文中の複数リンクぶん
+   * 複数件になりうる。無ければ空配列。 */
+  linkCards: LinkCard[];
 }
 
 export interface LinkCard {
@@ -674,8 +675,8 @@ interface RawNote {
   quote_count?: number;
   repostCount?: number;
   repost_count?: number;
-  linkCard?: LinkCard;
-  link_card?: LinkCard;
+  linkCards?: LinkCard[];
+  link_cards?: LinkCard[];
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -712,7 +713,7 @@ function normalizeNote(r: RawNote): Note {
     replyCount: r.replyCount ?? r.reply_count ?? 0,
     quoteCount: r.quoteCount ?? r.quote_count ?? 0,
     repostCount: r.repostCount ?? r.repost_count ?? 0,
-    linkCard: r.linkCard ?? r.link_card,
+    linkCards: r.linkCards ?? r.link_cards ?? [],
   };
 }
 

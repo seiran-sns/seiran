@@ -28,6 +28,7 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     replyCount: 0,
     quoteCount: 0,
     repostCount: 0,
+    linkCards: [],
     ...overrides,
   };
 }

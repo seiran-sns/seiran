@@ -16,7 +16,8 @@ use crate::error::ApiError;
 use crate::handlers::notes::dto::TimelineQuery;
 use crate::handlers::notes::queries::{fetch_reposted_ids, resolve_mention_facets_in_place};
 use crate::handlers::notes::{
-    embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map, to_note_response,
+    embed_quotes, embed_renotes, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
+    to_note_response,
 };
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
@@ -63,6 +64,7 @@ pub async fn hashtag_timeline(
 
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, viewer_actor_id).await;
     let reposted_set = if let Some(actor_id) = viewer_actor_id {
         fetch_reposted_ids(&state.db, actor_id, &ids).await
@@ -73,7 +75,11 @@ pub async fn hashtag_timeline(
         .into_iter()
         .map(|p| {
             let pid = p.id;
-            let mut nr = to_note_response(p, att_map.remove(&pid).unwrap_or_default());
+            let mut nr = to_note_response(
+                p,
+                att_map.remove(&pid).unwrap_or_default(),
+                lc_map.remove(&pid).unwrap_or_default(),
+            );
             nr.reactions = rmap.get(&pid).cloned().unwrap_or_default();
             if viewer_actor_id.is_some() {
                 nr.reposted_by_me = Some(reposted_set.contains(&pid));

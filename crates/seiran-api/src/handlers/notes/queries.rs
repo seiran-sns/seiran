@@ -13,7 +13,8 @@ use crate::error::ApiError;
 use crate::AppState;
 
 use super::dto::{
-    apply_mention_facets, to_note_response, AttachmentResponse, NoteResponse, ReactionSummary,
+    apply_mention_facets, to_note_response, AttachmentResponse, LinkCardResponse, NoteResponse,
+    ReactionSummary,
 };
 
 /// 認証中アクターの回答選択肢を通常投稿と埋め込みリポスト元の `poll.votedByMe` へ付与する。
@@ -188,6 +189,39 @@ pub async fn fetch_attachments_map(
     map
 }
 
+/// 投稿ごとのURLカード一覧を一括取得する（`post_link_cards`、`position`昇順）。
+/// Bskyは常に最大1件、Fediは本文中の複数リンクぶん複数件になりうる。
+pub async fn fetch_link_cards_map(
+    db: &sqlx::PgPool,
+    post_ids: &[i64],
+) -> HashMap<i64, Vec<LinkCardResponse>> {
+    if post_ids.is_empty() {
+        return HashMap::new();
+    }
+    let rows = sqlx::query(
+        "SELECT post_id, url, title, description, thumbnail_url
+         FROM post_link_cards
+         WHERE post_id = ANY($1)
+         ORDER BY post_id, position",
+    )
+    .bind(post_ids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+
+    let mut map: HashMap<i64, Vec<LinkCardResponse>> = HashMap::new();
+    for row in rows {
+        let post_id: i64 = row.try_get("post_id").unwrap_or_default();
+        map.entry(post_id).or_default().push(LinkCardResponse {
+            url: row.try_get("url").unwrap_or_default(),
+            title: row.try_get("title").unwrap_or_default(),
+            description: row.try_get("description").unwrap_or_default(),
+            thumbnail_url: row.try_get("thumbnail_url").unwrap_or(None),
+        });
+    }
+    map
+}
+
 /// 指定アクターが post_ids のどれをリポスト済みかを一括取得する。
 pub async fn fetch_reposted_ids(
     db: &sqlx::PgPool,
@@ -233,7 +267,7 @@ pub async fn embed_renotes(
                 p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
                 p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
                 p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.link_card_url, p.link_card_title, p.link_card_description, p.link_card_thumbnail_url
+                p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
          LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -255,11 +289,16 @@ pub async fn embed_renotes(
     resolve_mention_facets_in_place(db, &mut rows).await;
 
     let mut att_map = fetch_attachments_map(db, &orig_ids).await;
+    let mut lc_map = fetch_link_cards_map(db, &orig_ids).await;
     let rmap = fetch_reactions_map(db, &orig_ids, my_actor_id).await;
     let mut by_id: HashMap<i64, NoteResponse> = HashMap::new();
     for r in rows {
         let id = r.id;
-        let mut nr = to_note_response(r, att_map.remove(&id).unwrap_or_default());
+        let mut nr = to_note_response(
+            r,
+            att_map.remove(&id).unwrap_or_default(),
+            lc_map.remove(&id).unwrap_or_default(),
+        );
         nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
         by_id.insert(id, nr);
     }
@@ -310,7 +349,7 @@ pub async fn embed_quotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_acto
                 p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
                 p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
                 p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.link_card_url, p.link_card_title, p.link_card_description, p.link_card_thumbnail_url
+                p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
          LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -332,11 +371,16 @@ pub async fn embed_quotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_acto
     resolve_mention_facets_in_place(db, &mut rows).await;
 
     let mut att_map = fetch_attachments_map(db, &quote_ids).await;
+    let mut lc_map = fetch_link_cards_map(db, &quote_ids).await;
     let rmap = fetch_reactions_map(db, &quote_ids, my_actor_id).await;
     let mut by_id: HashMap<i64, NoteResponse> = HashMap::new();
     for r in rows {
         let id = r.id;
-        let mut nr = to_note_response(r, att_map.remove(&id).unwrap_or_default());
+        let mut nr = to_note_response(
+            r,
+            att_map.remove(&id).unwrap_or_default(),
+            lc_map.remove(&id).unwrap_or_default(),
+        );
         nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
         by_id.insert(id, nr);
     }

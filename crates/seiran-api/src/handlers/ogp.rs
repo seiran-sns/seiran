@@ -195,7 +195,7 @@ pub async fn note_ogp_html(post_id: i64, state: &AppState) -> Response {
 
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
     let attachments = att_map.remove(&post_id).unwrap_or_default();
-    let note = to_note_response(post, attachments);
+    let note = to_note_response(post, attachments, vec![]);
 
     let display_name = note
         .user

@@ -39,6 +39,29 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 閲覧注意としてAPIへ返す。アンケートは外部サーバー上の集計結果を表示し、seiranからの投票配送は
 現時点では行わない。
 
+### Fedi投稿のURLカード（`jobs::inbound_activity_process::handle_create_note`）
+
+APには`app.bsky.embed.external`のような明示的なembed概念が無いため、`posts` INSERT後に
+本文（`ap_content_to_markdown_body`が生成したMarkdown `[text](url)`）中のリンクURLから
+`extract_link_card_urls`で最大5件（`MAX_LINK_CARDS_PER_POST`、重複排除・画像記法`![...]()`と
+表示テキストが`#`始まりのハッシュタグリンクは除外）を抽出する。Bskyは1投稿につき最大1件だが、
+Fediは本文中の複数リンクぶん**複数件のURLカードが並ぶことがある**のが特徴。
+
+抽出した各URLは`is_known_platform_url`でYouTubeかどうかをドメインのみで判定し、フェッチ無しで
+`post_link_cards`へ即時保存する（`youtube_thumbnail_url`で`img.youtube.com/vi/{id}/hqdefault.jpg`
+を決定的に組み立ててthumbnailに設定、titleは空のまま。フロント`LinkCard.tsx`側がURLから
+プレイヤーを再構築する）。Spotify/x.com（twitter.com含む）はURLだけで組み立てられる決定的な
+サムネイルが無く、情報無しで即時保存するとプレビューがほぼ空になるため対象外
+（フロント側の表示振り分け自体はホスト名判定のみなので、以下のOGP取得経由で保存されても
+Spotify/x.com用のコンポーネントで正しく表示される）。それ以外の一般URL（Spotify/x.com含む）は
+HTTPフェッチが要るため`Job::OgpFetch`をpriority::LOWで積み、非同期で
+OGP（`og:title`/`og:description`/`og:image`、正規表現による簡易メタタグ抽出）を取得できた分だけ
+`post_link_cards`へ追加保存する（`crates/seiran-common/src/jobs/ogp_fetch.rs`）。取得失敗
+（DNS/SSRF拒否/非対応Content-Type等の恒久的失敗）は静かに諦め、投稿自体の保存は妨げない。
+HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_accept`
+（`/proxy`・リモート絵文字インポートと共有、private/loopback/link-local等のIPを拒否し
+リダイレクト先も毎回再検証する）を使う。
+
 ### 構成
 - `seiran-common::ap`: プロトコル非依存の共通ロジック
   - `client.rs` — `ApClient`（`reqwest::Client` + 公開鍵キャッシュ）。アクターフェッチ、HTTP Signatures 検証・署名、可視性判定（to/cc → 4値）、カスタム絵文字 tag 解析
@@ -144,7 +167,7 @@ Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホス
 - **wantedDids絞り込み**: ローカルユーザーがフォロー中、またはいずれかのリストのメンバーであるBsky DIDの集合を30秒間隔でポーリングし変化があれば再接続。無関係な投稿・Likeの際限ない取り込みを防ぐための必須の絞り込み。
 - **リーダー選出**: 複数プロセス起動時の重複接続を避けるため、Redisベースの `JetstreamLeaderElector` でリース制御。モノリスモードはRedis無しでも常時接続、split-role構成はRedis障害時にフェイルクローズ。
 - **cursor永続化**: 直近処理イベントの `time_us` を `site_settings`（汎用KV）に5秒間隔で保存し、再接続時に引き継ぐ（プロセス停止中のイベント取りこぼし防止）。
-- 保存対象は wantedDids に含まれるDIDのみ。投稿は同梱の `record.text`/`record.createdAt` をそのまま使う（AppView再取得不要）。`app.bsky.embed.images`/`video`/`recordWithMedia` を解析しCDN URLを組み立てて添付保存。`app.bsky.embed.external` のうち、Bluesky GIFピッカーが生成するTenor/Klipy URLは、クエリに埋め込まれた動画識別子から `t.gifs.bsky.app` / `k.gifs.bsky.app` のMP4（MP4がないKlipyはWebM）URLへ変換して添付保存する。GIF判定に失敗した`external`（YouTube/Spotify/x.com/一般URL等）は、`url`/`title`/`description`/`thumb`を`posts.link_card_*`（`docs/database.md`参照）にそのまま保存し、フロントで4種のカード表示に振り分ける（`frontend/src/components/note/LinkCard.tsx`）。`record.facets`（`#link`/`#mention`/`#tag`）は6節の方式で処理する。
+- 保存対象は wantedDids に含まれるDIDのみ。投稿は同梱の `record.text`/`record.createdAt` をそのまま使う（AppView再取得不要）。`app.bsky.embed.images`/`video`/`recordWithMedia` を解析しCDN URLを組み立てて添付保存。`app.bsky.embed.external` のうち、Bluesky GIFピッカーが生成するTenor/Klipy URLは、クエリに埋め込まれた動画識別子から `t.gifs.bsky.app` / `k.gifs.bsky.app` のMP4（MP4がないKlipyはWebM）URLへ変換して添付保存する。GIF判定に失敗した`external`（YouTube/Spotify/x.com/一般URL等）は、`url`/`title`/`description`/`thumb`を`post_link_cards`（`docs/database.md`参照、`position=0`固定）にそのまま保存し、フロントで4種のカード表示に振り分ける（`frontend/src/components/note/LinkCard.tsx`）。`record.facets`（`#link`/`#mention`/`#tag`）は6節の方式で処理する。
 - Like（`app.bsky.feed.like`）は create/delete で `reactions` へINSERT/DELETE、通知・リアルタイム配信。
 - `app.bsky.feed.post` の delete commit（`operation:"delete"`）は `at://{did}/app.bsky.feed.post/{rkey}` を組み立て、一致する `posts.at_uri` を論理削除する。`at_uri` 自体がイベント発行元の `did` から組み立てられるためLikeと同様になりすましは原理上不可能（他者のdidの投稿を指せない）。取り込んでいない投稿（フォロー対象外だった等）の delete イベントは無視。
 

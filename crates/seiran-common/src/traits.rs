@@ -226,6 +226,15 @@ pub enum Job {
     /// Fediverseリレー参加機能（#140）: relay-agent 仮想アクターによるリレーへの
     /// Follow/Undo送信の同期。`want_follow: true` はリレー登録時、`false` は削除時に積む。
     RelayFollowSync { relay_id: i64, want_follow: bool },
+
+    /// Fedi受信投稿の本文中URL（YouTube/Spotify/x.com以外の一般URL）へアクセスし、
+    /// OGPメタタグ（og:title/description/image）を取得して`post_link_cards`へ保存する。
+    /// 取得できなければ静かに諦める（リトライ後も失敗し続けたらそのURLはカード無しのまま）。
+    OgpFetch {
+        post_id: i64,
+        url: String,
+        position: i16,
+    },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

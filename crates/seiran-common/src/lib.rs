@@ -11,6 +11,7 @@ pub mod jetstream_leader;
 pub mod jobs;
 pub mod local_domain;
 pub mod mention;
+pub mod net;
 pub mod queue;
 pub mod repository;
 pub mod secrets;

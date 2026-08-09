@@ -149,8 +149,10 @@ pub struct NoteResponse {
     pub reply_count: i64,
     pub quote_count: i64,
     pub repost_count: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub link_card: Option<LinkCardResponse>,
+    /// URLカード。Bskyは`app.bsky.embed.external`由来で最大1件、Fediは本文中の複数リンクぶん
+    /// 複数件になりうる（`post_link_cards`、`fetch_link_cards_map`）。空なら省略。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub link_cards: Vec<LinkCardResponse>,
 }
 
 /// `serde_json::Value`（JSONB由来のオブジェクト、`None`/非オブジェクトなら空）を
@@ -229,13 +231,11 @@ pub fn apply_mention_facets(
     result
 }
 
-pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -> NoteResponse {
-    let link_card = p.link_card_url.map(|url| LinkCardResponse {
-        url,
-        title: p.link_card_title.unwrap_or_default(),
-        description: p.link_card_description.unwrap_or_default(),
-        thumbnail_url: p.link_card_thumbnail_url,
-    });
+pub fn to_note_response(
+    p: TimelinePost,
+    attachments: Vec<AttachmentResponse>,
+    link_cards: Vec<LinkCardResponse>,
+) -> NoteResponse {
     let mut emojis = json_map_to_string_map(p.post_emoji_map);
     emojis.extend(json_map_to_string_map(p.actor_emoji_map));
 
@@ -295,7 +295,7 @@ pub fn to_note_response(p: TimelinePost, attachments: Vec<AttachmentResponse>) -
         reply_count: p.reply_count,
         quote_count: p.quote_count,
         repost_count: p.repost_count,
-        link_card,
+        link_cards,
     }
 }
 

@@ -352,6 +352,11 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
             relay_id,
             want_follow,
         } => jobs::relay_follow_sync::handle(relay_id, want_follow, ctx).await,
+        Job::OgpFetch {
+            post_id,
+            url,
+            position,
+        } => jobs::ogp_fetch::handle(post_id, url, position, ctx).await,
     }
 }
 
@@ -371,6 +376,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
         Job::RelayFollowSync { .. } => "RelayFollowSync",
+        Job::OgpFetch { .. } => "OgpFetch",
     }
 }
 
@@ -452,6 +458,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 10,
             base_delay_ms: 5000,
             max_delay_ms: 3_600_000,
+        },
+        Job::OgpFetch { .. } => RetryConfig {
+            // ActorMetadataResolve と同様の軽量ベストエフォート取得。取得できなければ
+            // そのURLはカード無しのまま諦めてよい（投稿自体は既に保存済みのため実害が小さい）。
+            max_attempts: 3,
+            base_delay_ms: 2000,
+            max_delay_ms: 30_000,
         },
     }
 }

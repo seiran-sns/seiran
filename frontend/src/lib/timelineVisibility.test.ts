@@ -13,6 +13,7 @@ function note(id: string, visibility: Note["visibility"]): Note {
     replyCount: 0,
     quoteCount: 0,
     repostCount: 0,
+    linkCards: [],
   };
 }
 

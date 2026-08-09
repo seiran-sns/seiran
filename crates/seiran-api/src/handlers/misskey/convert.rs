@@ -654,10 +654,6 @@ mod tests {
             reply_count: 0,
             quote_count: 0,
             repost_count: 0,
-            link_card_url: None,
-            link_card_title: None,
-            link_card_description: None,
-            link_card_thumbnail_url: None,
         }
     }
 

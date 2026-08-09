@@ -17,7 +17,10 @@ use crate::middleware::AuthedUser;
 use crate::AppState;
 
 use super::notes::dto::{to_note_response, NoteResponse, TimelineQuery};
-use super::notes::{fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place};
+use super::notes::{
+    fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
+    resolve_mention_facets_in_place,
+};
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -109,12 +112,17 @@ pub async fn sessions(
     };
     resolve_mention_facets_in_place(&state.db, &mut last_posts).await;
     let mut att_map = fetch_attachments_map(&state.db, &last_post_ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &last_post_ids).await;
     let rmap = fetch_reactions_map(&state.db, &last_post_ids, Some(actor_id)).await;
     let mut last_post_by_id: HashMap<i64, NoteResponse> = last_posts
         .into_iter()
         .map(|p| {
             let id = p.id;
-            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            let mut nr = to_note_response(
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             (id, nr)
         })
@@ -176,12 +184,17 @@ pub async fn thread_messages(
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
     let notes: Vec<NoteResponse> = rows
         .into_iter()
         .map(|p| {
             let id = p.id;
-            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            let mut nr = to_note_response(
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             nr
         })

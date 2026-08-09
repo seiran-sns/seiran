@@ -14,10 +14,10 @@ pub mod queries;
 pub mod validation;
 
 pub use dto::to_note_response;
-pub use dto::{AttachmentResponse, NoteResponse, ReactRequest, ReactionSummary};
+pub use dto::{AttachmentResponse, LinkCardResponse, NoteResponse, ReactRequest, ReactionSummary};
 pub use queries::{
-    attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map,
-    resolve_mention_facets_in_place,
+    attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_link_cards_map,
+    fetch_reactions_map, resolve_mention_facets_in_place,
 };
 pub use validation::BSKY_MAX_TEXT_GRAPHEMES;
 
@@ -367,7 +367,7 @@ async fn create_repost(
         reply_count: 0,
         quote_count: 0,
         repost_count: 0,
-        link_card: None,
+        link_cards: vec![],
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
     embed_renotes(
@@ -880,7 +880,7 @@ async fn create_regular_post(
         reply_count: 0,
         quote_count: 0,
         repost_count: 0,
-        link_card: None,
+        link_cards: vec![],
     };
     embed_quotes(
         &state.db,
@@ -957,13 +957,18 @@ pub async fn home_timeline(
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
     let reposted_set = fetch_reposted_ids(&state.db, actor_id, &ids).await;
     let mut notes: Vec<NoteResponse> = rows
         .into_iter()
         .map(|p| {
             let id = p.id;
-            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            let mut nr = to_note_response(
+            p,
+            att_map.remove(&id).unwrap_or_default(),
+            lc_map.remove(&id).unwrap_or_default(),
+        );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             nr.reposted_by_me = Some(reposted_set.contains(&id));
             nr
@@ -1000,6 +1005,7 @@ pub async fn local_timeline(
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
     let reposted_set = if let Some(actor_id) = my_actor_id {
         fetch_reposted_ids(&state.db, actor_id, &ids).await
@@ -1010,7 +1016,11 @@ pub async fn local_timeline(
         .into_iter()
         .map(|p| {
             let id = p.id;
-            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            let mut nr = to_note_response(
+            p,
+            att_map.remove(&id).unwrap_or_default(),
+            lc_map.remove(&id).unwrap_or_default(),
+        );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             if my_actor_id.is_some() {
                 nr.reposted_by_me = Some(reposted_set.contains(&id));
@@ -1050,13 +1060,18 @@ pub async fn social_timeline(
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
     let reposted_set = fetch_reposted_ids(&state.db, actor_id, &ids).await;
     let mut notes: Vec<NoteResponse> = rows
         .into_iter()
         .map(|p| {
             let id = p.id;
-            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            let mut nr = to_note_response(
+            p,
+            att_map.remove(&id).unwrap_or_default(),
+            lc_map.remove(&id).unwrap_or_default(),
+        );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             nr.reposted_by_me = Some(reposted_set.contains(&id));
             nr
@@ -1094,6 +1109,7 @@ pub async fn global_timeline(
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
     let reposted_set = if let Some(actor_id) = my_actor_id {
         fetch_reposted_ids(&state.db, actor_id, &ids).await
@@ -1104,7 +1120,11 @@ pub async fn global_timeline(
         .into_iter()
         .map(|p| {
             let id = p.id;
-            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            let mut nr = to_note_response(
+            p,
+            att_map.remove(&id).unwrap_or_default(),
+            lc_map.remove(&id).unwrap_or_default(),
+        );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             if my_actor_id.is_some() {
                 nr.reposted_by_me = Some(reposted_set.contains(&id));
@@ -1150,8 +1170,13 @@ pub async fn get_note(
     .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     resolve_mention_facets_in_place(&state.db, std::slice::from_mut(&mut post)).await;
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &[post_id]).await;
     let rmap = fetch_reactions_map(&state.db, &[post_id], my_actor_id).await;
-    let mut nr = to_note_response(post, att_map.remove(&post_id).unwrap_or_default());
+    let mut nr = to_note_response(
+            post,
+            att_map.remove(&post_id).unwrap_or_default(),
+            lc_map.remove(&post_id).unwrap_or_default(),
+        );
     nr.reactions = rmap.get(&post_id).cloned().unwrap_or_default();
     if let Some(actor_id) = my_actor_id {
         let reposted_set = fetch_reposted_ids(&state.db, actor_id, &[post_id]).await;
@@ -1410,15 +1435,22 @@ pub async fn note_context(
         .map(|p| p.id)
         .collect();
     let mut att_map = fetch_attachments_map(&state.db, &all_ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &all_ids).await;
     let rmap = fetch_reactions_map(&state.db, &all_ids, my_actor_id).await;
     let reposted_set = if let Some(aid) = my_actor_id {
         fetch_reposted_ids(&state.db, aid, &all_ids).await
     } else {
         Default::default()
     };
-    let build = |p: TimelinePost, att_map: &mut HashMap<i64, Vec<dto::AttachmentResponse>>| {
+    let build = |p: TimelinePost,
+                 att_map: &mut HashMap<i64, Vec<dto::AttachmentResponse>>,
+                 lc_map: &mut HashMap<i64, Vec<dto::LinkCardResponse>>| {
         let id = p.id;
-        let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+        let mut nr = to_note_response(
+            p,
+            att_map.remove(&id).unwrap_or_default(),
+            lc_map.remove(&id).unwrap_or_default(),
+        );
         nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
         if my_actor_id.is_some() {
             nr.reposted_by_me = Some(reposted_set.contains(&id));
@@ -1428,11 +1460,11 @@ pub async fn note_context(
 
     let mut before: Vec<NoteResponse> = before_posts
         .into_iter()
-        .map(|p| build(p, &mut att_map))
+        .map(|p| build(p, &mut att_map, &mut lc_map))
         .collect();
     let mut after: Vec<NoteResponse> = after_posts
         .into_iter()
-        .map(|p| build(p, &mut att_map))
+        .map(|p| build(p, &mut att_map, &mut lc_map))
         .collect();
     embed_renotes(&state.db, &mut before, my_actor_id).await;
     embed_quotes(&state.db, &mut before, my_actor_id).await;

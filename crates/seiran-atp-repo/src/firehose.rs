@@ -1044,8 +1044,8 @@ async fn save_bsky_post(
     let post_id = generate_snowflake_id(created_at);
 
     let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id, link_card_url, link_card_title, link_card_description, link_card_thumbnail_url)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (at_uri) DO NOTHING",
     )
     .bind(post_id)
@@ -1058,10 +1058,6 @@ async fn save_bsky_post(
     .bind(mention_facets)
     .bind(emoji_map)
     .bind(quote_of_post_id)
-    .bind(link_card.as_ref().map(|c| c.url.as_str()))
-    .bind(link_card.as_ref().map(|c| c.title.as_str()))
-    .bind(link_card.as_ref().map(|c| c.description.as_str()))
-    .bind(link_card.as_ref().and_then(|c| c.thumbnail_url.as_deref()))
     .execute(pool)
     .await;
 
@@ -1071,6 +1067,24 @@ async fn save_bsky_post(
         }
         Ok(_) => {
             tracing::info!("[Jetstream] 保存完了: {}", at_uri);
+
+            // URLカード（Bskyは常に最大1件、position=0固定）。
+            if let Some(card) = &link_card {
+                let result = sqlx::query(
+                    "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
+                     VALUES ($1, 0, $2, $3, $4, $5)",
+                )
+                .bind(post_id)
+                .bind(&card.url)
+                .bind(&card.title)
+                .bind(&card.description)
+                .bind(card.thumbnail_url.as_deref())
+                .execute(pool)
+                .await;
+                if let Err(e) = result {
+                    tracing::error!("[Jetstream] post_link_cards INSERT失敗（投稿自体は成功済み）: {}", e);
+                }
+            }
 
             if let Err(e) = PgHashtagRepository::new(pool.clone())
                 .link_post(post_id, text)

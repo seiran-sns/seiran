@@ -295,7 +295,10 @@ async fn fetch_and_respond(
     ids: Vec<i64>,
     session_id: Option<String>,
 ) -> axum::response::Response {
-    use super::notes::{fetch_attachments_map, resolve_mention_facets_in_place, to_note_response};
+    use super::notes::{
+        fetch_attachments_map, fetch_link_cards_map, resolve_mention_facets_in_place,
+        to_note_response,
+    };
     use seiran_common::repository::TimelinePost;
 
     if ids.is_empty() {
@@ -310,8 +313,7 @@ async fn fetch_and_respond(
         "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                 a.actor_type::text AS actor_type, p.mention_facets, p.at_uri AS post_at_uri,
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
-                p.reply_count, p.quote_count, p.repost_count,
-                p.link_card_url, p.link_card_title, p.link_card_description, p.link_card_thumbnail_url
+                p.reply_count, p.quote_count, p.repost_count
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -326,12 +328,17 @@ async fn fetch_and_respond(
 
     let row_ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &row_ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &row_ids).await;
 
     let notes: Vec<NoteResponse> = rows
         .into_iter()
         .map(|p| {
             let id = p.id;
-            to_note_response(p, att_map.remove(&id).unwrap_or_default())
+            to_note_response(
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            )
         })
         .collect();
 

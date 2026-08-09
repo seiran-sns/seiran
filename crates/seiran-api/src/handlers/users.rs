@@ -14,8 +14,8 @@ use seiran_common::ApDeliveryKind;
 
 use crate::error::ApiError;
 use crate::handlers::notes::{
-    attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_reactions_map,
-    resolve_mention_facets_in_place, to_note_response, NoteResponse,
+    attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_link_cards_map,
+    fetch_reactions_map, resolve_mention_facets_in_place, to_note_response, NoteResponse,
 };
 use crate::middleware::{extract_auth, MaybeAuthedUser};
 use crate::AppState;
@@ -98,12 +98,17 @@ pub async fn user_posts(
     resolve_mention_facets_in_place(&state.db, &mut post_rows).await;
     let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &post_ids).await;
     let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
     let mut notes: Vec<NoteResponse> = post_rows
         .into_iter()
         .map(|p| {
             let id = p.id;
-            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            let mut nr = to_note_response(
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             nr
         })
@@ -624,12 +629,17 @@ async fn build_profile_response(
     resolve_mention_facets_in_place(&state.db, &mut post_rows).await;
     let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &post_ids).await;
     let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
     let mut recent_posts: Vec<NoteResponse> = post_rows
         .into_iter()
         .map(|p| {
             let id = p.id;
-            let mut nr = to_note_response(p, att_map.remove(&id).unwrap_or_default());
+            let mut nr = to_note_response(
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
             nr
         })
@@ -653,12 +663,17 @@ async fn build_profile_response(
     resolve_mention_facets_in_place(&state.db, &mut pinned_rows).await;
     let pinned_ids: Vec<i64> = pinned_rows.iter().map(|p| p.id).collect();
     let mut pinned_att_map = fetch_attachments_map(&state.db, &pinned_ids).await;
+    let mut pinned_lc_map = fetch_link_cards_map(&state.db, &pinned_ids).await;
     let pinned_rmap = fetch_reactions_map(&state.db, &pinned_ids, my_actor_id).await;
     let mut pinned_posts: Vec<NoteResponse> = pinned_rows
         .into_iter()
         .map(|p| {
             let id = p.id;
-            let mut nr = to_note_response(p, pinned_att_map.remove(&id).unwrap_or_default());
+            let mut nr = to_note_response(
+                p,
+                pinned_att_map.remove(&id).unwrap_or_default(),
+                pinned_lc_map.remove(&id).unwrap_or_default(),
+            );
             nr.reactions = pinned_rmap.get(&id).cloned().unwrap_or_default();
             nr
         })

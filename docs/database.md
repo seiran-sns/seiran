@@ -187,12 +187,10 @@ MiAuth（`/api/miauth/:session_id/authorize`）認可成立時に発行するJWT
 ActivityPub受信添付の`is_sensitive`は画像単位の`attachment[].sensitive`を保存し、投稿全体の
 `sensitive=true`も全添付へ安全側に伝播する。`posts.content_warning`はAP `summary`、
 `posts.poll`はAP `Question`の`oneOf`/`anyOf`・票数・締切を表示用JSONとして保存する。
-`posts.link_card_url`/`link_card_title`/`link_card_description`/`link_card_thumbnail_url`は
-Bsky `app.bsky.embed.external`のURLカード情報（GIFピッカー由来のTenor/Klipyを除く）。
-GIF/Klipy由来の`external`は`post_attachments`側で動画添付として扱うため、
-両者は排他（`link_card_url`が非NULLならGIF判定に失敗した一般URLカード）。
-
 `atp_blobs` は `uploadBlob` で受信した任意バイナリ（Bsky動画パイプラインが提出してくるトランスコード済み動画等）を保存する。`sha256` に UNIQUE を張り、content-addressable な重複排除を行う。
+
+### `post_link_cards`（URLカード）
+1投稿につき0件以上のURLカードを`post_id`/`position`で保持する（`id`はGENERATED ALWAYS AS IDENTITYの補助テーブル、順序は`position`が担う）。Bskyは`app.bsky.embed.external`（GIFピッカー由来のTenor/Klipyを除く。GIFは`post_attachments`側で動画添付として扱うため排他）由来で常に`position=0`の最大1件。Fediは本文中の複数リンクぶん複数件になりうる（`docs/protocols.md`参照）。`title`/`description`は空文字列を許容し、`thumbnail_url`のみNULL許容。取得は`fetch_link_cards_map`（`post_id`一覧→`HashMap<i64, Vec<LinkCardResponse>>`、`crates/seiran-api/src/handlers/notes/queries.rs`）で一括解決し、`NoteResponse.link_cards`へ差し込む（`post_attachments`の`fetch_attachments_map`と同じ構造）。
 
 ### ATP リポジトリ関連（`atp_records` / `atp_blocks` / `atp_repo_events`)
 seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（MST）を管理する。`app.bsky.feed.post` は `posts` テーブルで一元管理し、`atp_records` にはそれ以外のコレクション（`app.bsky.actor.profile` 等）だけを持つ。`atp_blocks` は CAR ブロックの実体、`atp_repo_events` は Relay へブロードキャストする `subscribeRepos` フレームのログで、`id`（BIGSERIAL）がそのまま Relay カーソル(seq)になる。`frame_bytes` にコミット時点で生成したフレームのバイト列をそのまま保存しており、再送時に再構築しない（バイト列差異による Relay 切断を避けるため）。

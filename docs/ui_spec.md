@@ -79,7 +79,7 @@ Misskey等に代表される「自己紹介やメタデータが縦に非常に�
 * 複数枚添付時も次/前送りナビゲーションは持たず、クリックした1枚のみを表示する。
 
 #### URLカード（`LinkCard`）
-* Bsky受信投稿の`app.bsky.embed.external`（GIFピッカー由来を除く。GIFは添付動画として`NoteAttachments`側で表示）を、添付メディアの直下にドメイン別4種で表示する（`frontend/src/components/note/LinkCard.tsx`）。
+* Bsky受信投稿の`app.bsky.embed.external`（GIFピッカー由来を除く。GIFは添付動画として`NoteAttachments`側で表示）、およびFedi受信投稿の本文中リンク（`docs/protocols.md`「Fedi投稿のURLカード」参照）を、添付メディアの直下にドメイン別4種で表示する（`frontend/src/components/note/LinkCard.tsx`）。`Note.linkCards`は配列で、Bskyは常に0〜1件だがFediは本文中の複数リンクぶん**複数枚が縦に並ぶことがある**（各カードは`key={card.url}`で独立してmapされ、`indent`propで通常カード/QuoteCard内の左インデントを出し分ける点はBsky・Fedi共通）。
   * **YouTube**（youtube.com/youtu.be/music.youtube.com）: 初期状態はサムネイル+再生ボタンのみ。クリックした時点で`youtube-nocookie.com`の公式iframeプレイヤーを読み込む。
   * **Spotify**（open.spotify.com）: YouTubeと同様、クリックした時点で`open.spotify.com/embed/...`のiframeプレイヤーを読み込む。
   * **x.com**（x.com/twitter.com）: 初期状態はサムネイル+タイトル+説明のカード。クリックした時点で`platform.twitter.com/widgets.js`を読み込み、ツイート本文をライブ埋め込み表示する（widgets.jsは複数カードがあっても1回だけ読み込む）。
