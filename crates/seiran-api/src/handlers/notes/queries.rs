@@ -139,7 +139,8 @@ pub async fn fetch_attachments_map(
                 mf.sha256 AS sha256,
                 mf.size AS size,
                 mf.created_at AS media_created_at,
-                pa.is_sensitive
+                pa.is_sensitive,
+                pa.is_gif
          FROM post_attachments pa
          LEFT JOIN media_files mf ON mf.id = pa.media_file_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -184,6 +185,7 @@ pub async fn fetch_attachments_map(
             size: row.try_get("size").unwrap_or(None),
             media_created_at: media_created_at.map(|dt| dt.to_rfc3339()),
             is_sensitive: row.try_get("is_sensitive").unwrap_or(false),
+            is_gif: row.try_get("is_gif").unwrap_or(false),
         });
     }
     map

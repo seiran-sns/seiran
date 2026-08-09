@@ -448,6 +448,9 @@ export interface NoteAttachment {
   thumbnailUrl?: string;
   durationMs?: number;
   isSensitive: boolean;
+  /** GIFアニメ由来（Tenor/Klipy GIFピッカー、またはBskyのGIF直接アップロード由来）。
+   * trueの場合、動画添付を自動再生・ミュート・ループ・コントロール無しで表示する。 */
+  isGif: boolean;
 }
 
 /** NoteResponse（バックエンドは `#[serde(rename_all = "camelCase")]`）。 */

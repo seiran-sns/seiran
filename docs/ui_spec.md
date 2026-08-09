@@ -78,6 +78,11 @@ Misskey等に代表される「自己紹介やメタデータが縦に非常に�
 * リモートサーバー由来の添付・アバター・カスタム絵文字はメディアプロキシ経由で表示する。同一オリジンのアップロード画像は直接表示する。管理画面「サイト設定」で外部Misskey互換メディアプロキシのベースURLを設定でき、空欄時は内蔵 `/proxy` を使う（#87）。
 * 複数枚添付時も次/前送りナビゲーションは持たず、クリックした1枚のみを表示する。
 
+#### GIFアニメの自動再生表示
+* Tenor/Klipy GIFピッカー由来、またはBskyのGIFファイル直接アップロード由来（`presentation:"gif"`、`docs/protocols.md`参照）の動画添付は、`NoteAttachment.isGif`が`true`の場合`HlsVideo`を自動再生・ミュート・ループ・コントロール無し表示に切り替える（`autoplay muted loop playsinline`、`controls`は付けない）。それ以外の通常動画添付は従来通り`controls`付きで、クリック/再生ボタン操作するまではポスター（サムネイル）静止画のまま。
+* HLS（`.m3u8`、GIFファイル直接アップロード由来を含むBsky動画全般）はsrcを`mediaUrl`によるメディアプロキシ経由にせず、動画CDN（`video.bsky.app`、`access-control-allow-origin: *`でCORS許可済み）を直接参照する。プロキシの許可Content-Type（`image/`/`video/`/`audio/`）に`application/vnd.apple.mpegurl`が一致せず502になる上、プロキシ経由だとHLSプレイリスト内のセグメント相対パスもブラウザ側で正しく解決できないため（`NoteAttachments.tsx`）。サムネイル（poster）は通常の画像なので引き続きプロキシ経由。
+* HLSは`src`をJS側で遅延セット（hls.js `attachMedia`、またはSafariネイティブ再生時の`video.src`代入）するため、マウント時点の`autoPlay`属性だけでは再生が始まらない。GIF表示時はHLSソース確定後（hls.jsは`Hls.Events.MANIFEST_PARSED`、ネイティブ再生は`src`代入直後）に明示的に`video.play()`を呼んで開始する（`HlsVideo.tsx`）。
+
 #### URLカード（`LinkCard`）
 * Bsky受信投稿の`app.bsky.embed.external`（GIFピッカー由来を除く。GIFは添付動画として`NoteAttachments`側で表示）、およびFedi受信投稿の本文中リンク（`docs/protocols.md`「Fedi投稿のURLカード」参照）を、添付メディアの直下にドメイン別4種で表示する（`frontend/src/components/note/LinkCard.tsx`）。`Note.linkCards`は配列で、Bskyは常に0〜1件だがFediは本文中の複数リンクぶん**複数枚が縦に並ぶことがある**（各カードは`key={card.url}`で独立してmapされ、`indent`propで通常カード/QuoteCard内の左インデントを出し分ける点はBsky・Fedi共通）。
   * **YouTube**（youtube.com/youtu.be/music.youtube.com）: 初期状態はサムネイル+再生ボタンのみ。クリックした時点で`youtube-nocookie.com`の公式iframeプレイヤーを読み込む。

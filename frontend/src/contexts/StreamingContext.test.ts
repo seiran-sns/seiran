@@ -27,6 +27,7 @@ describe("resolveStreamNote", () => {
         width: 640,
         height: 480,
         isSensitive: false,
+        isGif: false,
       }],
     } satisfies Note;
     const fetchNote = vi.fn().mockResolvedValue(complete);

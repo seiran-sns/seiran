@@ -377,6 +377,9 @@ pub trait PostRepository: Send + Sync {
     /// `mime_type` は AP attachment の `mediaType`（判別できなければ推定値）。
     /// `thumbnail_url` は Bsky の動画添付（`app.bsky.embed.video`）等、本体 URL とは別に
     /// サムネイル URL を持つケース向け（無ければ `None`）。
+    /// `is_gif` は GIF アニメ由来（Tenor/Klipy、または `presentation:"gif"`）で、
+    /// フロントが自動再生・ミュート・ループ・コントロール無し表示に切り替える。
+    #[allow(clippy::too_many_arguments)]
     async fn attach_remote_media_url(
         &self,
         post_id: i64,
@@ -384,6 +387,7 @@ pub trait PostRepository: Send + Sync {
         mime_type: Option<&str>,
         thumbnail_url: Option<&str>,
         is_sensitive: bool,
+        is_gif: bool,
         position: i16,
     ) -> Result<(), sqlx::Error>;
 
@@ -1027,11 +1031,12 @@ impl PostRepository for PgPostRepository {
         mime_type: Option<&str>,
         thumbnail_url: Option<&str>,
         is_sensitive: bool,
+        is_gif: bool,
         position: i16,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, remote_thumbnail_url, is_sensitive, position)
-             VALUES ($1, NULL, $2, $3, $4, $5, $6)
+            "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, remote_thumbnail_url, is_sensitive, is_gif, position)
+             VALUES ($1, NULL, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (post_id, position) DO NOTHING",
         )
         .bind(post_id)
@@ -1039,6 +1044,7 @@ impl PostRepository for PgPostRepository {
         .bind(mime_type)
         .bind(thumbnail_url)
         .bind(is_sensitive)
+        .bind(is_gif)
         .bind(position)
         .execute(&self.pool)
         .await

@@ -34,12 +34,18 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
           att.mimeType === "application/vnd.apple.mpegurl" ||
           att.mimeType === "application/x-mpegURL";
         if (att.mimeType.startsWith("video/") || isHls) {
+          // HLS(.m3u8)は `application/vnd.apple.mpegurl` が /proxy の許可Content-Type
+          // （image/video/audio）に一致せず502になる上、プロキシ経由だとプレイリスト内の
+          // セグメント相対パスもブラウザ側で正しく解決できない。Bsky動画CDNは
+          // `access-control-allow-origin: *` を返しCORS制約が無いため、HLSのみ直接
+          // 参照する（通常のmp4/webm添付は引き続きプロキシを経由する）。
           return (
             <HlsVideo
               key={i}
-              src={mediaUrl(att.url) ?? att.url}
+              src={isHls ? att.url : (mediaUrl(att.url) ?? att.url)}
               poster={mediaUrl(att.thumbnailUrl)}
               isHls={isHls}
+              isGif={att.isGif}
               className={styles.attachImage}
               onClick={(e) => e.stopPropagation()}
             />

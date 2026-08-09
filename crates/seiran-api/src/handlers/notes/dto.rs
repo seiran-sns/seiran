@@ -60,6 +60,10 @@ pub struct AttachmentResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_created_at: Option<String>,
     pub is_sensitive: bool,
+    /// GIFアニメ由来（Tenor/Klipy GIFピッカー、またはBsky動画パイプラインが
+    /// `presentation:"gif"`を付与したGIF直接アップロード）。フロントは自動再生・
+    /// ミュート・ループ・コントロール無し表示に切り替える。
+    pub is_gif: bool,
 }
 
 /// URLカード（`app.bsky.embed.external`、GIFピッカー由来を除く）。

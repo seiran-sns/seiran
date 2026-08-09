@@ -187,6 +187,11 @@ MiAuth（`/api/miauth/:session_id/authorize`）認可成立時に発行するJWT
 ActivityPub受信添付の`is_sensitive`は画像単位の`attachment[].sensitive`を保存し、投稿全体の
 `sensitive=true`も全添付へ安全側に伝播する。`posts.content_warning`はAP `summary`、
 `posts.poll`はAP `Question`の`oneOf`/`anyOf`・票数・締切を表示用JSONとして保存する。
+`post_attachments.is_gif`はGIFアニメ由来（Tenor/Klipy GIFピッカー、またはBsky動画パイプラインが
+`presentation:"gif"`を付与するGIFファイル直接アップロード。`docs/protocols.md`参照）を示し、
+フロントは動画添付を自動再生・ミュート・ループ・コントロール無しで表示する（`HlsVideo`の
+`isGif` prop）。デフォルト`FALSE`、既存のTenor/Klipy由来行はURLパターン
+（`t.gifs.bsky.app`/`k.gifs.bsky.app`）でバックフィル済み。
 `atp_blobs` は `uploadBlob` で受信した任意バイナリ（Bsky動画パイプラインが提出してくるトランスコード済み動画等）を保存する。`sha256` に UNIQUE を張り、content-addressable な重複排除を行う。
 
 ### `post_link_cards`（URLカード）

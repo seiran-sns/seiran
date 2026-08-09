@@ -1246,6 +1246,7 @@ async fn handle_create_note(
                     mime_type.as_deref(),
                     None,
                     is_sensitive,
+                    false,
                     position as i16,
                 )
                 .await
@@ -2670,6 +2671,7 @@ async fn fetch_and_save_note(
                     mime_type.as_deref(),
                     None,
                     is_sensitive,
+                    false,
                     position as i16,
                 )
                 .await

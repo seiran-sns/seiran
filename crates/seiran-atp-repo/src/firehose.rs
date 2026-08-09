@@ -298,6 +298,10 @@ struct ParsedAttachment {
     width: i32,
     height: i32,
     thumbnail_url: Option<String>,
+    /// GIFアニメ由来（Tenor/Klipy GIFピッカー、または`app.bsky.embed.video`の
+    /// `presentation:"gif"`＝GIFファイル直接アップロード）。フロントで自動再生・
+    /// ミュート・ループ・コントロール無し表示に切り替えるためのフラグ。
+    is_gif: bool,
 }
 
 /// `embed.external.thumb`（blob参照）から Bsky CDN のサムネイル URL を組み立てる。
@@ -373,6 +377,7 @@ fn bsky_gif_video_attachment(uri: &str, embed: &JsonValue, did: &str) -> Option<
         width,
         height,
         thumbnail_url,
+        is_gif: true,
     })
 }
 
@@ -422,6 +427,7 @@ fn parse_bsky_embed_link_card(embed: &JsonValue, did: &str) -> Option<ParsedLink
 /// `app.bsky.embed.video` → HLSプレイリスト `https://video.bsky.app/watch/{did}/{cid}/playlist.m3u8`
 ///   （動画本体はBluesky公式の動画処理パイプラインでHLSにトランスコードされて配信されるため、
 ///   PDS上のblob自体を指すURLではなくこの固定パターンを使う。サムネイルも同様のパターン）。
+///   `presentation:"gif"`付きはGIFファイル直接アップロード由来として`is_gif=true`にする。
 /// `app.bsky.embed.recordWithMedia`（引用+メディア）は `media` フィールドを再帰的に見る。
 /// `app.bsky.embed.external` は Bluesky の GIF ピッカーが生成する Tenor/Klipy URL のみ動画化する。
 /// 未知の embed 種別や画像/動画以外（`record` 単体等）は空を返す。
@@ -462,6 +468,7 @@ fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedAttac
                             width,
                             height,
                             thumbnail_url: None,
+                            is_gif: false,
                         })
                     })
                     .collect()
@@ -495,12 +502,17 @@ fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedAttac
                 "https://video.bsky.app/watch/{}/{}/thumbnail.jpg",
                 did_encoded, cid
             );
+            // GIFファイルを直接アップロードした場合、Bluesky動画パイプラインでMP4に
+            // トランスコードされつつ`presentation:"gif"`が付与される（Tenor/Klipyの
+            // GIFピッカーとは別経路）。
+            let is_gif = embed.get("presentation").and_then(|v| v.as_str()) == Some("gif");
             vec![ParsedAttachment {
                 url,
                 mime_type: "application/vnd.apple.mpegurl".to_string(),
                 width,
                 height,
                 thumbnail_url: Some(thumbnail_url),
+                is_gif,
             }]
         }
         "app.bsky.embed.external" => embed
@@ -1237,6 +1249,7 @@ async fn save_bsky_post(
                             Some(&att.mime_type),
                             att.thumbnail_url.as_deref(),
                             false,
+                            att.is_gif,
                             position as i16,
                         )
                         .await
