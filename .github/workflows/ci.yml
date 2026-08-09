@@ -32,6 +32,9 @@ jobs:
   rust:
     name: Rust
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     env:
       SQLX_OFFLINE: "true"
     steps:
