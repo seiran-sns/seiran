@@ -310,7 +310,8 @@ async fn fetch_and_respond(
         "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
                 a.actor_type::text AS actor_type, p.mention_facets, p.at_uri AS post_at_uri,
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
-                p.reply_count, p.quote_count, p.repost_count
+                p.reply_count, p.quote_count, p.repost_count,
+                p.link_card_url, p.link_card_title, p.link_card_description, p.link_card_thumbnail_url
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id

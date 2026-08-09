@@ -144,7 +144,7 @@ Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホス
 - **wantedDids絞り込み**: ローカルユーザーがフォロー中、またはいずれかのリストのメンバーであるBsky DIDの集合を30秒間隔でポーリングし変化があれば再接続。無関係な投稿・Likeの際限ない取り込みを防ぐための必須の絞り込み。
 - **リーダー選出**: 複数プロセス起動時の重複接続を避けるため、Redisベースの `JetstreamLeaderElector` でリース制御。モノリスモードはRedis無しでも常時接続、split-role構成はRedis障害時にフェイルクローズ。
 - **cursor永続化**: 直近処理イベントの `time_us` を `site_settings`（汎用KV）に5秒間隔で保存し、再接続時に引き継ぐ（プロセス停止中のイベント取りこぼし防止）。
-- 保存対象は wantedDids に含まれるDIDのみ。投稿は同梱の `record.text`/`record.createdAt` をそのまま使う（AppView再取得不要）。`app.bsky.embed.images`/`video`/`recordWithMedia` を解析しCDN URLを組み立てて添付保存。`app.bsky.embed.external` は通常のURLカードを添付扱いにせず、Bluesky GIFピッカーが生成するTenor/Klipy URLだけを検証して、クエリに埋め込まれた動画識別子から `t.gifs.bsky.app` / `k.gifs.bsky.app` のMP4（MP4がないKlipyはWebM）URLへ変換して保存する。`record.facets`（`#link`/`#mention`/`#tag`）は6節の方式で処理する。
+- 保存対象は wantedDids に含まれるDIDのみ。投稿は同梱の `record.text`/`record.createdAt` をそのまま使う（AppView再取得不要）。`app.bsky.embed.images`/`video`/`recordWithMedia` を解析しCDN URLを組み立てて添付保存。`app.bsky.embed.external` のうち、Bluesky GIFピッカーが生成するTenor/Klipy URLは、クエリに埋め込まれた動画識別子から `t.gifs.bsky.app` / `k.gifs.bsky.app` のMP4（MP4がないKlipyはWebM）URLへ変換して添付保存する。GIF判定に失敗した`external`（YouTube/Spotify/x.com/一般URL等）は、`url`/`title`/`description`/`thumb`を`posts.link_card_*`（`docs/database.md`参照）にそのまま保存し、フロントで4種のカード表示に振り分ける（`frontend/src/components/note/LinkCard.tsx`）。`record.facets`（`#link`/`#mention`/`#tag`）は6節の方式で処理する。
 - Like（`app.bsky.feed.like`）は create/delete で `reactions` へINSERT/DELETE、通知・リアルタイム配信。
 - `app.bsky.feed.post` の delete commit（`operation:"delete"`）は `at://{did}/app.bsky.feed.post/{rkey}` を組み立て、一致する `posts.at_uri` を論理削除する。`at_uri` 自体がイベント発行元の `did` から組み立てられるためLikeと同様になりすましは原理上不可能（他者のdidの投稿を指せない）。取り込んでいない投稿（フォロー対象外だった等）の delete イベントは無視。
 

@@ -77,6 +77,7 @@
 - [x] **引用投稿機能（#134）** — 投稿カードからローカル・Fedi・Bsky投稿を引用するコンポーザを開き、Fedi/Bskyへ配送できる。Fedi配送はMisskey互換引用（Bsky元はbsky.app URL）、Bsky配送はネイティブ引用（Fedi元はメタデータ付きURLカード）を使い分ける。
 - [x] **クロスプロトコル・リポストのURLカード化（#132）** — Fediリモート投稿をBskyへリポスト配送する際、代替本文を「🔁」のみにして元投稿URLをexternal embedカードとして添付する。カードには元投稿者名（ID）・投稿本文・先頭画像（画像なしなら投稿者アイコン）のサムネイルも設定する。
 - [x] **Bluesky GIF添付の受信（#160）** — `app.bsky.embed.external` のTenor/Klipy GIF URLをBluesky配信用MP4/WebM URLへ変換し、通常の動画添付として保存・表示する。
+- [x] **BskyのURLカード（external embed）表示** — GIFピッカー由来を除く`app.bsky.embed.external`の`url`/`title`/`description`/`thumb`を`posts.link_card_*`へ保存し、フロントでYouTube/Spotify/x.com/一般URLの4種のカード表示（`LinkCard`）に振り分ける。YouTube/Spotifyはクリック時にのみ公式iframeプレイヤーを読み込み、x.comはクリック時に公式`widgets.js`でツイートをライブ埋め込みする。詳細: `docs/database.md`、`docs/protocols.md`、`docs/ui_spec.md`
 - [x] **LTL/GTLの公開範囲修正（#91）** — フォロワーで閲覧権限があっても、フォロワー限定投稿はローカル/グローバルタイムラインへ表示せず、ホーム/ソーシャルタイムラインにだけ表示する。
 - [x] **タイムライン選択タブの永続化（#90）** — 最後に選択したホーム/ローカル/ソーシャル/グローバル/リスト/ハッシュタグをLocalStorageへ保存し、リロード後に復元する。
 - [x] **リモート絵文字インポート（#73）** — AP受信（投稿本文・表示名・絵文字リアクション）で見つけたカスタム絵文字を`remote_emojis`テーブルへカタログ化し、管理画面「カスタム絵文字」パネルの「リモート」タブ（検索・インポートボタン）、およびNoteCard本文・絵文字リアクションの右クリックメニュー（管理者のみ）の2経路から、カテゴリ・タグ・ライセンスを指定してローカルの`custom_emojis`へ取り込めるようにした。画像取得は既存のメディアプロキシのSSRF対策ロジック（`fetch_validated`として共通化）を再利用する。詳細: `docs/architecture.md`、`docs/database.md`、`docs/ui_spec.md` 2.8節

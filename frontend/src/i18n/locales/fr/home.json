@@ -67,7 +67,8 @@
       "title": "Supprimer ce message ?",
       "body": "Cela ne peut pas être annulé. La suppression supprimera également la publication des serveurs fédérés et de Bluesky.",
       "confirmButton": "Supprimer"
-    }
+    },
+    "linkCardLoadEmbed": "Charger l'intégration"
   },
   "noteList": {
     "emptyDefault": "Aucun message."

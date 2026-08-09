@@ -67,7 +67,8 @@
       "title": "이 게시물을 삭제하시겠습니까?",
       "body": "이 작업은 취소할 수 없습니다. 삭제하면 페더레이션 서버 및 Bluesky에서도 게시물이 제거됩니다.",
       "confirmButton": "삭제"
-    }
+    },
+    "linkCardLoadEmbed": "임베드 불러오기"
   },
   "noteList": {
     "emptyDefault": "게시물이 없습니다."

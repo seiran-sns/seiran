@@ -67,7 +67,8 @@
       "title": "投稿を削除しますか？",
       "body": "この操作は取り消せません。削除すると連合先・Bluesky上の投稿も削除されます。",
       "confirmButton": "削除する"
-    }
+    },
+    "linkCardLoadEmbed": "埋め込みを読み込む"
   },
   "noteList": {
     "emptyDefault": "投稿がありません。"

@@ -300,6 +300,24 @@ struct ParsedAttachment {
     thumbnail_url: Option<String>,
 }
 
+/// `embed.external.thumb`（blob参照）から Bsky CDN のサムネイル URL を組み立てる。
+/// GIF/動画添付・URLカードの双方から共有される。
+fn bsky_external_thumb_url(embed: &JsonValue, did: &str) -> Option<String> {
+    embed
+        .get("external")
+        .and_then(|external| external.get("thumb"))
+        .and_then(|thumb| thumb.get("ref"))
+        .and_then(|reference| reference.get("$link"))
+        .and_then(|cid| cid.as_str())
+        .map(|cid| {
+            format!(
+                "https://cdn.bsky.app/img/feed_thumbnail/plain/{}/{}",
+                urlencoding::encode(did),
+                cid
+            )
+        })
+}
+
 fn bsky_gif_video_attachment(uri: &str, embed: &JsonValue, did: &str) -> Option<ParsedAttachment> {
     let (base, query) = uri.split_once('?')?;
     let dimensions = query
@@ -347,25 +365,54 @@ fn bsky_gif_video_attachment(uri: &str, embed: &JsonValue, did: &str) -> Option<
         )
     };
 
-    let thumbnail_url = embed
-        .get("external")
-        .and_then(|external| external.get("thumb"))
-        .and_then(|thumb| thumb.get("ref"))
-        .and_then(|reference| reference.get("$link"))
-        .and_then(|cid| cid.as_str())
-        .map(|cid| {
-            format!(
-                "https://cdn.bsky.app/img/feed_thumbnail/plain/{}/{}",
-                urlencoding::encode(did),
-                cid
-            )
-        });
+    let thumbnail_url = bsky_external_thumb_url(embed, did);
 
     Some(ParsedAttachment {
         url,
         mime_type,
         width,
         height,
+        thumbnail_url,
+    })
+}
+
+/// Bsky embed の URL カード（`app.bsky.embed.external`）から復元したメタデータ。
+/// GIF ピッカー由来（Tenor/Klipy、`bsky_gif_video_attachment` が動画化する）は除く。
+struct ParsedLinkCard {
+    url: String,
+    title: String,
+    description: String,
+    thumbnail_url: Option<String>,
+}
+
+/// `record.embed` が `app.bsky.embed.external` かつ GIF ピッカー由来でない場合のみ、
+/// URL カード（YouTube/Spotify/x.com/一般）として表示するためのメタデータを返す。
+/// `recordWithMedia` は AT Protocol の制約上 `external` を内包できないため対象外。
+fn parse_bsky_embed_link_card(embed: &JsonValue, did: &str) -> Option<ParsedLinkCard> {
+    let embed_type = embed.get("$type").and_then(|v| v.as_str()).unwrap_or("");
+    if embed_type != "app.bsky.embed.external" {
+        return None;
+    }
+    let external = embed.get("external")?;
+    let uri = external.get("uri").and_then(|v| v.as_str())?;
+    if bsky_gif_video_attachment(uri, embed, did).is_some() {
+        return None;
+    }
+    let title = external
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let description = external
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let thumbnail_url = bsky_external_thumb_url(embed, did);
+    Some(ParsedLinkCard {
+        url: uri.to_string(),
+        title,
+        description,
         thumbnail_url,
     })
 }
@@ -766,6 +813,12 @@ async fn process_message(
             let quote_uri: Option<String> =
                 record.get("embed").and_then(parse_bsky_embed_quote_uri);
 
+            // URLカード（YouTube/Spotify/x.com/一般）。GIFピッカー由来の`external`は
+            // 既に`attachments`側で動画として扱われているためここには含まれない。
+            let link_card: Option<ParsedLinkCard> = record
+                .get("embed")
+                .and_then(|embed| parse_bsky_embed_link_card(embed, &did));
+
             // この DID のアクターが「ローカルユーザーにフォローされている」、または
             // 「いずれかのリストに含まれている」場合のみ保存対象とする（リスト機能 #63:
             // 誰にもフォローされていないBskyユーザーでも、リストに入れれば投稿を受信できる）。
@@ -873,6 +926,7 @@ async fn process_message(
                     reply_to_post_id,
                     quote_of_post_id,
                     attachments,
+                    link_card,
                 )
                 .await;
             });
@@ -984,13 +1038,14 @@ async fn save_bsky_post(
     reply_to_post_id: Option<i64>,
     quote_of_post_id: Option<i64>,
     attachments: Vec<ParsedAttachment>,
+    link_card: Option<ParsedLinkCard>,
 ) {
     let reply_id_str = reply_to_post_id.map(|id| id.to_string());
     let post_id = generate_snowflake_id(created_at);
 
     let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id, link_card_url, link_card_title, link_card_description, link_card_thumbnail_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          ON CONFLICT (at_uri) DO NOTHING",
     )
     .bind(post_id)
@@ -1003,6 +1058,10 @@ async fn save_bsky_post(
     .bind(mention_facets)
     .bind(emoji_map)
     .bind(quote_of_post_id)
+    .bind(link_card.as_ref().map(|c| c.url.as_str()))
+    .bind(link_card.as_ref().map(|c| c.title.as_str()))
+    .bind(link_card.as_ref().map(|c| c.description.as_str()))
+    .bind(link_card.as_ref().and_then(|c| c.thumbnail_url.as_deref()))
     .execute(pool)
     .await;
 

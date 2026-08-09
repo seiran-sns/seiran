@@ -78,6 +78,14 @@ Misskey等に代表される「自己紹介やメタデータが縦に非常に�
 * リモートサーバー由来の添付・アバター・カスタム絵文字はメディアプロキシ経由で表示する。同一オリジンのアップロード画像は直接表示する。管理画面「サイト設定」で外部Misskey互換メディアプロキシのベースURLを設定でき、空欄時は内蔵 `/proxy` を使う（#87）。
 * 複数枚添付時も次/前送りナビゲーションは持たず、クリックした1枚のみを表示する。
 
+#### URLカード（`LinkCard`）
+* Bsky受信投稿の`app.bsky.embed.external`（GIFピッカー由来を除く。GIFは添付動画として`NoteAttachments`側で表示）を、添付メディアの直下にドメイン別4種で表示する（`frontend/src/components/note/LinkCard.tsx`）。
+  * **YouTube**（youtube.com/youtu.be/music.youtube.com）: 初期状態はサムネイル+再生ボタンのみ。クリックした時点で`youtube-nocookie.com`の公式iframeプレイヤーを読み込む。
+  * **Spotify**（open.spotify.com）: YouTubeと同様、クリックした時点で`open.spotify.com/embed/...`のiframeプレイヤーを読み込む。
+  * **x.com**（x.com/twitter.com）: 初期状態はサムネイル+タイトル+説明のカード。クリックした時点で`platform.twitter.com/widgets.js`を読み込み、ツイート本文をライブ埋め込み表示する（widgets.jsは複数カードがあっても1回だけ読み込む）。
+  * **上記以外の一般URL**: サムネイル+タイトル+説明+ドメイン名のカードをクリック可能なリンクとして表示するのみ（埋め込みなし、クリックで新規タブ遷移）。
+  * いずれも埋め込みの実読み込みはユーザーのクリックまで発生させない（第三者トラッキング・iframe読み込みの既定回避、Mastodon等と同様の方針）。
+
 #### 絵文字リアクションピッカー（`ReactionPicker`）
 * トリガーボタンをクリックすると `Modal`（`EmojiPickerPanel`）が開く。検索欄＋タブ（よく使う／絵文字／カスタム）＋グリッドの構成。
 * 検索欄に文字を入力すると、タブ表示を隠し、カスタム絵文字（shortcode/タグの部分一致）とUnicode絵文字（英語名の部分一致）を横断した検索結果を表示する。

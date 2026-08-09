@@ -26,6 +26,7 @@ import EmojiText from "./EmojiText";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import RichText from "./RichText";
 import NoteAttachments from "./NoteAttachments";
+import LinkCard from "./LinkCard";
 import NoteCardActions from "./NoteCardActions";
 import ReactionChips from "./ReactionChips";
 import { useComposer } from "../../contexts/ComposerContext";
@@ -106,6 +107,7 @@ function QuoteCard({ note }: { note: Note }) {
       )}
 
       <NoteAttachments attachments={note.attachments} />
+      {note.linkCard && <LinkCard card={note.linkCard} indent={false} />}
       {note.poll && (
         <div className={styles.quotePoll}>
           {note.poll.options.map((option) => (
@@ -401,6 +403,7 @@ function PostContent({
       )}
 
       <NoteAttachments attachments={note.attachments} />
+      {note.linkCard && <LinkCard card={note.linkCard} />}
 
       {poll && (
         <div className={styles.poll}>

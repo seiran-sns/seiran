@@ -67,7 +67,8 @@
       "title": "删除这个帖子吗？",
       "body": "这无法撤消。删除也会从联合服务器和 Bluesky 中删除该帖子。",
       "confirmButton": "删除"
-    }
+    },
+    "linkCardLoadEmbed": "加载嵌入内容"
   },
   "noteList": {
     "emptyDefault": "没有帖子。"

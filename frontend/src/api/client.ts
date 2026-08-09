@@ -504,6 +504,15 @@ export interface Note {
   replyCount: number;
   quoteCount: number;
   repostCount: number;
+  /** URLカード（`app.bsky.embed.external`、GIFピッカー由来を除く）。存在する場合のみ。 */
+  linkCard?: LinkCard;
+}
+
+export interface LinkCard {
+  url: string;
+  title: string;
+  description: string;
+  thumbnailUrl?: string;
 }
 
 export interface ReactionSummary {
@@ -665,6 +674,8 @@ interface RawNote {
   quote_count?: number;
   repostCount?: number;
   repost_count?: number;
+  linkCard?: LinkCard;
+  link_card?: LinkCard;
 }
 
 /** snake_case / camelCase 混在に耐えるノート正規化。 */
@@ -701,6 +712,7 @@ function normalizeNote(r: RawNote): Note {
     replyCount: r.replyCount ?? r.reply_count ?? 0,
     quoteCount: r.quoteCount ?? r.quote_count ?? 0,
     repostCount: r.repostCount ?? r.repost_count ?? 0,
+    linkCard: r.linkCard ?? r.link_card,
   };
 }
 

@@ -67,7 +67,8 @@
       "title": "Delete this post?",
       "body": "This can't be undone. Deleting will also remove the post from federated servers and Bluesky.",
       "confirmButton": "Delete"
-    }
+    },
+    "linkCardLoadEmbed": "Load embed"
   },
   "noteList": {
     "emptyDefault": "No posts."
