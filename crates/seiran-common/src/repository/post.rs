@@ -288,6 +288,14 @@ pub trait PostRepository: Send + Sync {
     /// HTTP公開エンドポイントからは呼ばないこと（`find_by_id_for_viewer` を使う）。
     async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error>;
 
+    /// `find_by_id` と同じだが `deleted_at` を問わず取得する（論理削除済みでも返す）。
+    /// リポストラッパー投稿が取り消し済み（`delete_repost`で論理削除）でも、その
+    /// リポストに対して過去に発生した通知自体はDBに残り続けるため、通知一覧構築時に
+    /// 元のリポスト情報（`repost_of_post_id`経由で`embed_renotes`が解決する元投稿）を
+    /// 復元する用途専用（`misskey::convert::build_notifications`）。通常の表示・操作では
+    /// `find_by_id`/`find_by_id_for_viewer`を使うこと。
+    async fn find_by_id_including_deleted(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error>;
+
     /// 複数IDでポストとアクター情報を一括取得する（可視性チェック無し）。呼び出し元が
     /// 別途アクセス制御を済ませている場合のみ使うこと（DMセッション一覧の最終メッセージ取得等）。
     async fn find_by_ids(&self, ids: &[i64]) -> Result<Vec<TimelinePost>, sqlx::Error>;
@@ -753,6 +761,24 @@ impl PostRepository for PgPostRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.id = $1 AND p.deleted_at IS NULL
+             LIMIT 1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn find_by_id_including_deleted(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error> {
+        sqlx::query_as::<_, TimelinePost>(
+            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count
+             FROM posts p JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             WHERE p.id = $1
              LIMIT 1",
         )
         .bind(id)

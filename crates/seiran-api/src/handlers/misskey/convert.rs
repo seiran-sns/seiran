@@ -568,7 +568,9 @@ pub async fn build_notifications(
     let mut notes: HashMap<i64, MisskeyNote> = HashMap::new();
     for note_id in note_ids {
         let post = if repost_wrapper_ids.contains(&note_id) {
-            state.posts.find_by_id(note_id).await
+            // リポストが取り消し済み（ラッパー投稿が論理削除済み）でも、その通知自体は
+            // 残り続けるため、`find_by_id`（削除済み除外）ではなくこちらを使う。
+            state.posts.find_by_id_including_deleted(note_id).await
         } else {
             state
                 .posts

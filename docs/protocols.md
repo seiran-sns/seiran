@@ -325,6 +325,8 @@ Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri`
 
 `type="repost"` の `notifications.note_id` が指すのは本文を持たないリポストラッパー投稿自体で、その可視性はリポスト元とは独立（Fedi受信時はFollowers限定になりうる）である。`build_notifications`（`handlers::misskey::convert.rs`）は Misskey本家（`NotificationEntityService#packInternal`）と同じ方針で、ラッパー投稿自体には独自の可視性チェックをかけずそのまま `note` として pack する（通知は既に受信者向けに絞られたエントリのため）。リポスト元投稿の埋め込み（`note.renote`）は通常のノートpack処理と共有する `embed_renotes` に任せ、そちらのSQLで可視性チェック（投稿者本人 or フォロワー限定でなければ許可 or 閲覧者がフォロワー）を行う。`note`（ラッパー、`text: null` で `renoteId` を持つ）と `note.renote`（リポスト元の実体投稿）という入れ子構造は Misskey 本家のレスポンスと一致させており、崩すとRenoteとして描画できず「不明」表示になる（Aria等で実機確認済みの回帰）。`type="quote"` の `note_id` は引用コメント本文を持つ実体の投稿なのでこの解決は不要。フロントエンド（`NotificationsPanel.tsx` の `resolveTargetNoteId`）は `repost`（Misskey API上は `renote`）通知について `note.renote` があれば優先し、なければ `note` 自身を使う。
 
+リポストが取り消し（アンリポスト、`DELETE /api/notes/:id/repost`）されるとラッパー投稿は論理削除されるが、`notifications` 行自体は削除しない（過去の出来事の記録として残す設計）。`build_notifications` はラッパー投稿の取得に `PostRepository::find_by_id_including_deleted`（`deleted_at` を問わない）を使う。通常の `find_by_id`（`deleted_at IS NULL` 必須）を使うと取り消し済みラッパーが取得できず `note` 全体が `null` になり、生きているはずの `note.renote`（リポスト元の実体投稿）まで失われてポップアップ・遷移が機能しなくなる（過去に実際発生した回帰）。
+
 `notifications.type` の値自体は seiran 内部の語彙（`repost`/`quote`/`reaction`/`follow`/`followRequestAccepted`/`mention`/`reply`）で、DB・Rustコード全体でこの表記に統一している。Misskey本家の `notificationTypes`（`packages/backend/src/types.ts`）には `repost` という値は存在せず `renote` が正式名称のため、`build_notifications` は Misskey API（`POST /api/i/notifications`）のレスポンス直前で `repost` → `renote` にのみ変換する（`to_misskey_notification_type`、他の種別は綴りが一致）。ここがズレるとMisskey互換クライアント（Aria等）が種別を判別できず通知が「不明」表示になる。フロントエンド（seiranクライアント自身もこのAPIの一利用者）はAPIレスポンスの値に合わせ `"renote"` で判定する。
 
 ## 9. ダイレクトメッセージ

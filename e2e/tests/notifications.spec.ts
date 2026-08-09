@@ -87,6 +87,42 @@ test("他ユーザーによるリポストと引用が通知される（#198）"
   expect(notifs.some((n) => n.type === "quote" && n.user?.username === sharer.username)).toBeTruthy();
 });
 
+test("アンリポスト（取り消し）後もリポスト通知をホバーすると元ポストが表示される", async ({ page, request }) => {
+  const author = await registerUserViaApi(request, "e2enotifundoauthor");
+  const sharer = await registerUserViaApi(request, "e2enotifundosharer");
+
+  const noteText = `アンリポスト通知テスト ${Date.now()}`;
+  const createRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${author.token}` },
+    data: { text: noteText },
+  });
+  expect(createRes.ok(), await createRes.text()).toBeTruthy();
+  const original = (await createRes.json()) as { id: string };
+
+  const repostRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${sharer.token}` },
+    data: { renote_id: original.id, deliver_to_fedi: false, deliver_to_bsky: false },
+  });
+  expect(repostRes.ok(), await repostRes.text()).toBeTruthy();
+
+  // リポストを取り消す（リポストラッパー投稿が論理削除される）。通知自体は残るが、
+  // 通知一覧APIが取り消し済みラッパー経由で元ポスト情報（note.renote）を正しく
+  // 復元できることを検証する回帰テスト。
+  const undoRes = await request.delete(`/api/notes/${original.id}/repost`, {
+    headers: { Authorization: `Bearer ${sharer.token}` },
+  });
+  expect(undoRes.ok(), await undoRes.text()).toBeTruthy();
+
+  await seedAuth(page, author.token);
+  await page.goto("/");
+
+  const notifText = page.getByText(`${sharer.username} がリポストしました`);
+  await expect(notifText).toBeVisible({ timeout: 15_000 });
+
+  await notifText.hover();
+  await expect(page.getByRole("link", { name: new RegExp(noteText) })).toBeVisible({ timeout: 5_000 });
+});
+
 test("カスタム絵文字でリアクションされた通知にカスタム絵文字画像が表示される（#61回帰防止）", async ({ page, request }) => {
   // E2E環境にはS3互換ストレージが無いため、画像アップロードを通すためだけにスタブを起動し、
   // 管理者APIでストレージプロバイダーとして登録する。
