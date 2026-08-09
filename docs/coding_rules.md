@@ -92,6 +92,7 @@ async fn create_note(...) -> impl IntoResponse {
 | 9 | ビジネスロジック関数でファイルパスに `main.rs` を選ぶ | `handlers/` または `common/src/*/service.rs` に置く |
 | 10 | スタブ値（`user_id = 1`, `username = "test_user"`）を本番コードに残す | セッションまたはトークンから実際のユーザーを取得する |
 | 11 | 新規クエリを `sqlx::query`/`query_as`（実行時検証）で書く | `sqlx::query!`/`query_as!`/`query_scalar!`（コンパイル時検証）を使う。SELECT列と構造体のズレを実行時ではなくビルド時に検出できる（docs/code_audit_2026-08-05.md R-6）。`cargo sqlx prepare --workspace`の実行を忘れないこと |
+| 12 | DBから取得済みのActor/投稿レコードに対して `domain == local_domain`（または`state.local_domain`）でローカル/リモート判定する | `actor_type == "local"` を使う（`actors.actor_type`列、`insert_local`の不変条件によりlocal⇔domain=local_domainは常に一致）。Actor/TimelinePostは既にactor_typeを保持、他の型はSELECTに`a.actor_type::text AS actor_type`を1列足すだけで済むことが多い。Hostヘッダー・WebFingerクエリ・ユーザー入力文字列など、DBレコードではない外部入力のdomain比較は対象外（そちらは元々SQL化できない） |
 
 ---
 
