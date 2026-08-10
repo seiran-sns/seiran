@@ -323,6 +323,18 @@ pub struct NoteContextResponse {
     pub after: Vec<NoteResponse>,
 }
 
+/// `GET /api/notes/:id/context` のクエリパラメータ（#226 前後の投稿タブ、最大5件＋読み込みボタン）。
+/// `before_id`/`after_id` を省略すると対象ポスト自身のIDを起点にする（初回読み込み）。
+/// 「もっと読み込む」時は、呼び出し側が現在読み込み済みの最古/最新ポストIDを渡して続きを取得する。
+/// `limit` を0にするとその方向は取得しない（片方向のみの読み込みボタン用）。
+#[derive(Deserialize)]
+pub struct NoteContextQuery {
+    pub before_id: Option<String>,
+    pub after_id: Option<String>,
+    pub before_limit: Option<i64>,
+    pub after_limit: Option<i64>,
+}
+
 /// 対象ポストへの直系リプライ・引用の再帰取得（#226 返信タブ）。フラットな配列で返し、
 /// フロント側で各ノートの `replyId`/`quoteId` から対象ポストを根とするツリーを組み立てる。
 #[derive(Serialize)]

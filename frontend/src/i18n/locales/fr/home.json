@@ -30,7 +30,9 @@
     "authorTab": "Auteur",
     "noPinnedPosts": "Aucun post épinglé.",
     "repliesTab": "Réponses",
-    "noReplies": "Aucune réponse ni citation sur ce post pour l'instant."
+    "noReplies": "Aucune réponse ni citation sur ce post pour l'instant.",
+    "loadNewerButton": "Charger les posts plus récents",
+    "loadOlderButton": "Charger les posts plus anciens"
   },
   "noteCard": {
     "privateRepostError": "Les messages privés ne peuvent pas être republiés.",

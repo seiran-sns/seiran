@@ -30,7 +30,9 @@
     "authorTab": "작성자",
     "noPinnedPosts": "고정된 게시물이 없습니다.",
     "repliesTab": "답글",
-    "noReplies": "아직 이 게시물에 답글이나 인용이 없습니다."
+    "noReplies": "아직 이 게시물에 답글이나 인용이 없습니다.",
+    "loadNewerButton": "더 최신 게시물 불러오기",
+    "loadOlderButton": "더 오래된 게시물 불러오기"
   },
   "noteCard": {
     "privateRepostError": "비공개 게시물은 재게시할 수 없습니다.",

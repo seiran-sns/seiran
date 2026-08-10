@@ -24,12 +24,17 @@ export default function NoteDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // 前後の投稿はボタン押下で初めて読み込む（遅延ロード）。
+  // 前後の投稿はボタン押下で初めて読み込む（遅延ロード）。最大5件ずつ、読み込みボタンで継続取得する（#226）。
+  // before: 対象ポストに近い順（DESC）。after: 対象ポストに近い順（ASC）。
   const [before, setBefore] = useState<Note[]>([]);
   const [after, setAfter] = useState<Note[]>([]);
   const [ctxRequested, setCtxRequested] = useState(false);
   const [ctxLoading, setCtxLoading] = useState(false);
   const [ctxLoaded, setCtxLoaded] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [hasMoreNewer, setHasMoreNewer] = useState(false);
+  const [loadingMoreOlder, setLoadingMoreOlder] = useState(false);
+  const [loadingMoreNewer, setLoadingMoreNewer] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -42,6 +47,8 @@ export default function NoteDetailPage() {
     setCtxRequested(false);
     setCtxLoading(false);
     setCtxLoaded(false);
+    setHasMoreOlder(false);
+    setHasMoreNewer(false);
     api.notes
       .get(id)
       .then((n) => !cancelled && setNote(n))
@@ -52,26 +59,61 @@ export default function NoteDetailPage() {
     };
   }, [id]);
 
+  const CONTEXT_PAGE_SIZE = 5;
+
   function loadContext() {
     if (!id || ctxRequested) return;
     setCtxRequested(true);
     setCtxLoading(true);
     api.notes
-      .context(id)
+      .context(id, { beforeLimit: CONTEXT_PAGE_SIZE, afterLimit: CONTEXT_PAGE_SIZE })
       .then((ctx) => {
         setBefore(ctx.before);
         setAfter(ctx.after);
+        setHasMoreOlder(ctx.before.length === CONTEXT_PAGE_SIZE);
+        setHasMoreNewer(ctx.after.length === CONTEXT_PAGE_SIZE);
         setCtxLoaded(true);
       })
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setCtxLoading(false));
   }
 
+  function loadMoreOlder() {
+    if (!id || loadingMoreOlder) return;
+    const anchor = before[before.length - 1]?.id;
+    if (!anchor) return;
+    setLoadingMoreOlder(true);
+    api.notes
+      .context(id, { beforeId: anchor, beforeLimit: CONTEXT_PAGE_SIZE, afterLimit: 0 })
+      .then((ctx) => {
+        setBefore((prev) => [...prev, ...ctx.before]);
+        setHasMoreOlder(ctx.before.length === CONTEXT_PAGE_SIZE);
+      })
+      .catch((e) => setError(getErrorMessage(e)))
+      .finally(() => setLoadingMoreOlder(false));
+  }
+
+  function loadMoreNewer() {
+    if (!id || loadingMoreNewer) return;
+    const anchor = after[after.length - 1]?.id;
+    if (!anchor) return;
+    setLoadingMoreNewer(true);
+    api.notes
+      .context(id, { afterId: anchor, afterLimit: CONTEXT_PAGE_SIZE, beforeLimit: 0 })
+      .then((ctx) => {
+        setAfter((prev) => [...prev, ...ctx.after]);
+        setHasMoreNewer(ctx.after.length === CONTEXT_PAGE_SIZE);
+      })
+      .catch((e) => setError(getErrorMessage(e)))
+      .finally(() => setLoadingMoreNewer(false));
+  }
+
   // リポスト詳細（#45）: リアクションタブはリポスト元のリアクションを表示する。
   const display = note?.renote ?? note;
-  const contextList = [...before].reverse().concat(after);
 
   // 「投稿主の前後」ブロック（ボタン → 読み込み → 一覧）。中央・右ペインで共用。
+  // 表示順は上から: [もっと新しいポストを読み込む] 新しいポスト(最大5件、対象に近い順で下寄り)
+  // → 古いポスト(最大5件、対象に近い順で上寄り) → [もっと古いポストを読み込む]。
   function renderContext() {
     if (!ctxRequested) {
       return (
@@ -83,14 +125,32 @@ export default function NoteDetailPage() {
       );
     }
     if (ctxLoading) return <p className={panel.message}>{t("common:loading")}</p>;
-    if (ctxLoaded && contextList.length === 0) {
+    if (ctxLoaded && before.length === 0 && after.length === 0) {
       return <p className={panel.message}>{t("home:noteDetailPage.noContext")}</p>;
     }
+    const newerDesc = [...after].reverse();
     return (
       <div>
-        {contextList.map((n) => (
+        {hasMoreNewer && (
+          <div className={styles.ctxTrigger}>
+            <button className={styles.ctxButton} onClick={loadMoreNewer} disabled={loadingMoreNewer}>
+              {loadingMoreNewer ? t("common:loading") : t("home:noteDetailPage.loadNewerButton")}
+            </button>
+          </div>
+        )}
+        {newerDesc.map((n) => (
           <NoteCard key={n.id} note={n} />
         ))}
+        {before.map((n) => (
+          <NoteCard key={n.id} note={n} />
+        ))}
+        {hasMoreOlder && (
+          <div className={styles.ctxTrigger}>
+            <button className={styles.ctxButton} onClick={loadMoreOlder} disabled={loadingMoreOlder}>
+              {loadingMoreOlder ? t("common:loading") : t("home:noteDetailPage.loadOlderButton")}
+            </button>
+          </div>
+        )}
       </div>
     );
   }

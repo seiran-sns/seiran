@@ -30,7 +30,9 @@
     "authorTab": "Autor",
     "noPinnedPosts": "No hay publicaciones fijadas.",
     "repliesTab": "Respuestas",
-    "noReplies": "Aún no hay respuestas ni citas de esta publicación."
+    "noReplies": "Aún no hay respuestas ni citas de esta publicación.",
+    "loadNewerButton": "Cargar publicaciones más recientes",
+    "loadOlderButton": "Cargar publicaciones más antiguas"
   },
   "noteCard": {
     "privateRepostError": "Las publicaciones privadas no se pueden volver a publicar.",

@@ -30,7 +30,9 @@
     "authorTab": "Author",
     "noPinnedPosts": "No pinned posts.",
     "repliesTab": "Replies",
-    "noReplies": "No replies or quotes on this post yet."
+    "noReplies": "No replies or quotes on this post yet.",
+    "loadNewerButton": "Load newer posts",
+    "loadOlderButton": "Load older posts"
   },
   "noteCard": {
     "privateRepostError": "Private posts can't be reposted.",

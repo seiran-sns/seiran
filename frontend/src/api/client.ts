@@ -1122,10 +1122,22 @@ export const api = {
       );
       return rows.map(normalizeNote);
     },
-    async context(id: string): Promise<{ before: Note[]; after: Note[] }> {
+    /** 投稿主の前後の投稿（#226、最大5件＋読み込みボタン）。`beforeId`/`afterId`を渡すと
+     * そのIDを起点に続きを取得する（省略時は対象ポスト自身が起点＝初回読み込み）。
+     * `beforeLimit`/`afterLimit`を0にするとその方向は取得しない（片方向のみの読み込みボタン用）。 */
+    async context(
+      id: string,
+      opts?: { beforeId?: string; afterId?: string; beforeLimit?: number; afterLimit?: number },
+    ): Promise<{ before: Note[]; after: Note[] }> {
+      const q = new URLSearchParams();
+      if (opts?.beforeId) q.set("before_id", opts.beforeId);
+      if (opts?.afterId) q.set("after_id", opts.afterId);
+      if (opts?.beforeLimit !== undefined) q.set("before_limit", String(opts.beforeLimit));
+      if (opts?.afterLimit !== undefined) q.set("after_limit", String(opts.afterLimit));
+      const qs = q.toString();
       const raw = await request<{ before: RawNote[]; after: RawNote[] }>(
         "GET",
-        `/notes/${encodeURIComponent(id)}/context`,
+        `/notes/${encodeURIComponent(id)}/context${qs ? `?${qs}` : ""}`,
       );
       return {
         before: raw.before.map(normalizeNote),

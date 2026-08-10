@@ -1357,12 +1357,28 @@ pub async fn get_note_ap(
 /// リモートアクターかつ未フォローの場合は AP Outbox から最大50件を同期フェッチしてから返す。
 pub async fn note_context(
     Path(id): Path<String>,
+    Query(query): Query<dto::NoteContextQuery>,
     MaybeAuthedUser(user): MaybeAuthedUser,
     State(state): State<AppState>,
 ) -> Result<Json<NoteContextResponse>, ApiError> {
     let my_actor_id: Option<i64> = user.map(|u| u.actor_id);
 
     let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
+    // 「もっと読み込む」時は現在読み込み済みの最古/最新ポストIDを起点にする（省略時は対象ポスト自身）。
+    let before_anchor: i64 = query
+        .before_id
+        .as_deref()
+        .map(|s| s.parse().map_err(|_| ApiError::NotFound("NOT_FOUND")))
+        .transpose()?
+        .unwrap_or(post_id);
+    let after_anchor: i64 = query
+        .after_id
+        .as_deref()
+        .map(|s| s.parse().map_err(|_| ApiError::NotFound("NOT_FOUND")))
+        .transpose()?
+        .unwrap_or(post_id);
+    let before_limit = query.before_limit.unwrap_or(5).clamp(0, 5);
+    let after_limit = query.after_limit.unwrap_or(5).clamp(0, 5);
 
     // 1. 対象ノートを取得
     let post = state
@@ -1415,17 +1431,26 @@ pub async fn note_context(
         }
     }
 
-    // 3. DB からコンテキストを取得
-    let mut before_posts = state
-        .posts
-        .context_before(actor_id, post_id, 10, my_actor_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let mut after_posts = state
-        .posts
-        .context_after(actor_id, post_id, 10, my_actor_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    // 3. DB からコンテキストを取得（最大5件ずつ、読み込みボタンによる継続取得は
+    // before_id/after_id を起点IDとして渡す。該当方向のlimitが0ならクエリを省略する）。
+    let mut before_posts = if before_limit > 0 {
+        state
+            .posts
+            .context_before(actor_id, before_anchor, before_limit, my_actor_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+    } else {
+        Vec::new()
+    };
+    let mut after_posts = if after_limit > 0 {
+        state
+            .posts
+            .context_after(actor_id, after_anchor, after_limit, my_actor_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+    } else {
+        Vec::new()
+    };
     resolve_mention_facets_in_place(&state.db, &mut before_posts).await;
     resolve_mention_facets_in_place(&state.db, &mut after_posts).await;
 

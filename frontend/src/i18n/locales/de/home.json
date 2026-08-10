@@ -30,7 +30,9 @@
     "authorTab": "Autor",
     "noPinnedPosts": "Keine angehefteten Beiträge.",
     "repliesTab": "Antworten",
-    "noReplies": "Noch keine Antworten oder Zitate zu diesem Beitrag."
+    "noReplies": "Noch keine Antworten oder Zitate zu diesem Beitrag.",
+    "loadNewerButton": "Neuere Beiträge laden",
+    "loadOlderButton": "Ältere Beiträge laden"
   },
   "noteCard": {
     "privateRepostError": "Private Beiträge können nicht erneut gepostet werden.",

@@ -30,7 +30,9 @@
     "authorTab": "作者",
     "noPinnedPosts": "没有置顶帖子。",
     "repliesTab": "回复",
-    "noReplies": "这篇文章还没有回复或引用。"
+    "noReplies": "这篇文章还没有回复或引用。",
+    "loadNewerButton": "加载更新的帖子",
+    "loadOlderButton": "加载更早的帖子"
   },
   "noteCard": {
     "privateRepostError": "私人帖子不能转发。",

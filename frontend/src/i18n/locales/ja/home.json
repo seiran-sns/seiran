@@ -30,7 +30,9 @@
     "authorTab": "投稿者",
     "noPinnedPosts": "固定されたポストはありません。",
     "repliesTab": "返信",
-    "noReplies": "まだ返信・引用はありません。"
+    "noReplies": "まだ返信・引用はありません。",
+    "loadNewerButton": "もっと新しい投稿を読み込む",
+    "loadOlderButton": "もっと古い投稿を読み込む"
   },
   "noteCard": {
     "privateRepostError": "非公開の投稿はリポストできません。",
