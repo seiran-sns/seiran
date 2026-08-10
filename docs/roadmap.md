@@ -100,6 +100,7 @@
   - [x] 投稿者タブ（プロフィール概要＋固定ポスト、`AuthorPanel`）
   - [x] 返信タブ（再帰的な返信・引用ツリー、`ReplyThreadPanel`。`GET /api/notes/:id/replies`は`WITH RECURSIVE`で`reply_to_post_id`/`quote_of_post_id`を辿る自前実装。真のMisskey APIワイヤー互換ではなく、再帰トラバーサルの考え方をMisskeyの`notes/children`に倣った内部API）
   - [x] 前後のポストタブの仕様調整（最大5件、タブを開くと同時に自動読み込み、対象ポストへ自動スクロール）
+  - [x] タブシートを右ペイン上端にsticky固定、タブ選択状態のURL同期（リロード後も維持）、前後のポストのスクロール位置をポストIDごとに記憶しブラウザバックで復元
   - [x] リアクションタブの一覧化（絵文字×ユーザー一覧、`ReactionListPanel`）
   - [x] リポストタブ（`RepostListPanel`、取り消し済みも履歴として表示）
 - [ ] **ユーザー製翻訳ファイルの適用・配布機能** — ユーザーが独自の言語ファイル（`i18n/locales/{lng}/*.json` と同形式）を作成し、アプリに読み込ませて適用・配布できるようにする構想。現状の名前空間分割構成は `i18n.addResourceBundle()` によるこの拡張を見据えたもの

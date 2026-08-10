@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note, getErrorMessage } from "../api/client";
 import RemoteBanner from "../components/common/RemoteBanner";
@@ -15,11 +15,14 @@ import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./NoteDetailPage.module.css";
 
+const TAB_COUNT = 5;
+
 export default function NoteDetailPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const goBack = useGoBack();
-  const { noteDetailTab, setNoteDetailTab } = useRightPane();
+  const { noteDetailTab, setNoteDetailTab, noteContextScroll, setNoteContextScroll } = useRightPane();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,8 +40,11 @@ export default function NoteDetailPage() {
   const [hasMoreNewer, setHasMoreNewer] = useState(false);
   const [loadingMoreOlder, setLoadingMoreOlder] = useState(false);
   const [loadingMoreNewer, setLoadingMoreNewer] = useState(false);
-  // 「前後のポスト」タブを開いた際、読み込み完了後に対象ポスト自身へスクロールするための参照。
+  // 「前後のポスト」タブを開いた際、読み込み完了後（かつ復元すべきスクロール位置が
+  // 無い場合）に対象ポスト自身へスクロールするための参照。
   const targetCardRef = useRef<HTMLDivElement>(null);
+  // 右ペイン全体（AppShellの独立スクロール領域である<aside>）を closest() で辿るための参照。
+  const rightPaneRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -54,6 +60,30 @@ export default function NoteDetailPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // タブ選択状態をURLの?tab=と同期する（#226）。マウント時（＝ノート切り替え時）に
+  // URLへ既にタブ番号が入っていればそれを復元し（ブラウザリロード後もタブ選択を維持するため）、
+  // 無ければ RightPaneContext が持つ現在値（他ポスト間でのセッション内タブ記憶）をそのまま使う。
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === null) return;
+    const n = Number(tabParam);
+    if (Number.isInteger(n) && n >= 0 && n < TAB_COUNT) setNoteDetailTab(n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  // タブが変わるたびURLへ反映する（履歴を汚さないよう置き換え）。
+  useEffect(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", String(noteDetailTab));
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteDetailTab]);
 
   useEffect(() => {
     if (!id) return;
@@ -82,12 +112,31 @@ export default function NoteDetailPage() {
   }, [id]);
 
   // 「前後のポスト」タブ（noteDetailTab === 2）を開いていて読み込みが完了したら、
-  // 対象ポスト自身の位置までスクロールする。
+  // このポストについて記憶済みのスクロール位置があればそれを復元し（ブラウザバックで
+  // 同じポストへ戻った際の再現用）、無ければ対象ポスト自身の位置までスクロールする。
   useEffect(() => {
-    if (noteDetailTab === 2 && ctxLoaded && targetCardRef.current) {
+    if (noteDetailTab !== 2 || !ctxLoaded || !id) return;
+    const asideEl = rightPaneRef.current?.closest("aside");
+    const saved = noteContextScroll[id];
+    if (asideEl && saved !== undefined) {
+      asideEl.scrollTop = saved;
+    } else if (targetCardRef.current) {
       targetCardRef.current.scrollIntoView({ block: "center" });
     }
-  }, [noteDetailTab, ctxLoaded]);
+    // noteContextScroll自体を依存に含めると復元直後の保存で無限ループするため、idの変化のみを見る。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteDetailTab, ctxLoaded, id]);
+
+  // 「前後のポスト」タブから離れる（タブ切り替え・ポスト切り替え・アンマウント）直前に
+  // 右ペインのスクロール位置を保存する（#226）。
+  useEffect(() => {
+    if (noteDetailTab !== 2 || !id) return;
+    const asideEl = rightPaneRef.current?.closest("aside");
+    return () => {
+      if (asideEl) setNoteContextScroll(id, asideEl.scrollTop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteDetailTab, id]);
 
   function loadMoreOlder() {
     if (!id || loadingMoreOlder) return;
@@ -206,7 +255,9 @@ export default function NoteDetailPage() {
   );
 
   const right = (
-    <>
+    // display: contents でレイアウトに影響を与えず、closest("aside") で
+    // AppShellの独立スクロール領域（右ペイン本体）を辿るための参照だけを提供する。
+    <div ref={rightPaneRef} style={{ display: "contents" }}>
       <Tabs
         tabs={[
           t("home:noteDetailPage.authorTab"),
@@ -217,13 +268,15 @@ export default function NoteDetailPage() {
         ]}
         active={noteDetailTab}
         onChange={setNoteDetailTab}
+        sticky
+        top={0}
       />
       {noteDetailTab === 0 && display && <AuthorPanel note={display} />}
       {noteDetailTab === 1 && display && <ReplyThreadPanel note={display} />}
       {noteDetailTab === 2 && renderContext(true)}
       {noteDetailTab === 3 && display && <ReactionListPanel note={display} />}
       {noteDetailTab === 4 && display && <RepostListPanel note={display} />}
-    </>
+    </div>
   );
 
   return <AppShell center={center} right={right} />;
