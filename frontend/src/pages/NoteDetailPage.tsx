@@ -6,14 +6,13 @@ import RemoteBanner from "../components/common/RemoteBanner";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
-import ReactionChips from "../components/note/ReactionChips";
 import AuthorPanel from "../components/right/AuthorPanel";
+import ReactionListPanel from "../components/right/ReactionListPanel";
 import ReplyThreadPanel from "../components/right/ReplyThreadPanel";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./NoteDetailPage.module.css";
-import TwemojiEmoji from "../components/common/TwemojiEmoji";
 
 export default function NoteDetailPage() {
   const { t } = useTranslation();
@@ -143,17 +142,7 @@ export default function NoteDetailPage() {
       {noteDetailTab === 0 && display && <AuthorPanel note={display} />}
       {noteDetailTab === 1 && display && <ReplyThreadPanel note={display} />}
       {noteDetailTab === 2 && renderContext()}
-      {noteDetailTab === 3 &&
-        (display && display.reactions && display.reactions.length > 0 ? (
-          <div style={{ padding: "12px 16px" }}>
-            <ReactionChips noteId={display.id} reactions={display.reactions} />
-          </div>
-        ) : (
-          <div className={panel.placeholder}>
-            <TwemojiEmoji emoji="😀" className={panel.placeholderIcon} />
-            {t("home:noteDetailPage.noReactions")}
-          </div>
-        ))}
+      {noteDetailTab === 3 && display && <ReactionListPanel note={display} />}
     </>
   );
 
