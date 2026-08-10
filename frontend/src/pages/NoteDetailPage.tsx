@@ -114,8 +114,12 @@ export default function NoteDetailPage() {
 
   // 「投稿主の前後」ブロック（ボタン → 読み込み → 一覧）。中央・右ペインで共用。
   // 表示順は上から: [もっと新しいポストを読み込む] 新しいポスト(最大5件、対象に近い順で下寄り)
-  // → 古いポスト(最大5件、対象に近い順で上寄り) → [もっと古いポストを読み込む]。
-  function renderContext() {
+  // → 対象ポスト自身(拡大文字表示NoteCard) → 古いポスト(最大5件、対象に近い順で上寄り)
+  // → [もっと古いポストを読み込む]。
+  // `includeTarget`: 対象ポスト自身をリスト中央に埋め込むか。中央ペインの狭幅表示では
+  // 直上に同じ大型NoteCardが既に表示されているため二重表示を避け、右ペインの
+  // 「投稿主の前後」タブでのみ埋め込む。
+  function renderContext(includeTarget = false) {
     if (!ctxRequested) {
       return (
         <div className={styles.ctxTrigger}>
@@ -126,8 +130,14 @@ export default function NoteDetailPage() {
       );
     }
     if (ctxLoading) return <p className={panel.message}>{t("common:loading")}</p>;
+    const targetCard = includeTarget && note ? <NoteCard note={note} large linkToDetail={false} /> : null;
     if (ctxLoaded && before.length === 0 && after.length === 0) {
-      return <p className={panel.message}>{t("home:noteDetailPage.noContext")}</p>;
+      return (
+        <div>
+          {targetCard}
+          <p className={panel.message}>{t("home:noteDetailPage.noContext")}</p>
+        </div>
+      );
     }
     const newerDesc = [...after].reverse();
     return (
@@ -142,6 +152,7 @@ export default function NoteDetailPage() {
         {newerDesc.map((n) => (
           <NoteCard key={n.id} note={n} />
         ))}
+        {targetCard}
         {before.map((n) => (
           <NoteCard key={n.id} note={n} />
         ))}
@@ -203,7 +214,7 @@ export default function NoteDetailPage() {
       />
       {noteDetailTab === 0 && display && <AuthorPanel note={display} />}
       {noteDetailTab === 1 && display && <ReplyThreadPanel note={display} />}
-      {noteDetailTab === 2 && renderContext()}
+      {noteDetailTab === 2 && renderContext(true)}
       {noteDetailTab === 3 && display && <ReactionListPanel note={display} />}
       {noteDetailTab === 4 && display && <RepostListPanel note={display} />}
     </>

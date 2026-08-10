@@ -37,6 +37,9 @@ test("前後の投稿タブが最大5件表示され読み込みボタンで続�
   await rightPane.getByRole("button", { name: "投稿主の前後", exact: true }).click();
   await rightPane.getByRole("button", { name: "前後の投稿を表示", exact: true }).click();
 
+  // 対象ポスト自身（拡大文字表示NoteCard）がリスト中央に含まれる。
+  await expect(rightPane.getByText(`対象ポスト ${ts}`)).toBeVisible({ timeout: 15_000 });
+
   // 対象に近い5件ずつ（古い投稿2〜6、新しい投稿1〜5）が表示される。
   for (let i = 2; i <= 6; i++) {
     await expect(rightPane.getByText(`古い投稿${i} ${ts}`)).toBeVisible({ timeout: 15_000 });
