@@ -34,6 +34,8 @@ interface NoteCardActionsProps {
   onTogglePin: (e?: React.MouseEvent) => void;
   deleting: boolean;
   onDelete: () => void;
+  /** リアクションチップに50pxインデントを付けるか（`ReactionChips`の`indent`をそのまま透過）。 */
+  indent?: boolean;
 }
 
 /**
@@ -65,6 +67,7 @@ export default function NoteCardActions({
   onTogglePin,
   deleting,
   onDelete,
+  indent = true,
 }: NoteCardActionsProps) {
   const { t } = useTranslation();
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
@@ -135,6 +138,7 @@ export default function NoteCardActions({
         reactions={reactions}
         onToggle={onToggleReaction}
         disabled={reactionPending}
+        indent={indent}
       />
 
       <div className={styles.actions}>

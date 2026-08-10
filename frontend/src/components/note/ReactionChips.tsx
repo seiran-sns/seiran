@@ -15,6 +15,10 @@ interface ReactionChipsProps {
   onToggle?: (emoji: string) => void;
   /** リアクション操作中は true。全チップのクリックを無効化する（1投稿1リアクションまでのため）。 */
   disabled?: boolean;
+  /** 本文・添付等と同じ50pxインデントを付けるか（`LinkCard`の`indent`と同じ役割）。
+   * 通常のNoteCardではtrue（アバター分のインデント）、ポスト詳細の拡大表示（large）や
+   * 引用カード内など、呼び出し側で既にインデントを解消済みの文脈ではfalseを渡す。 */
+  indent?: boolean;
 }
 
 /** 届いたリアクションの集計チップ表示。クリックで同じ絵文字を自分も付ける/取り消す/切り替える。
@@ -22,7 +26,13 @@ interface ReactionChipsProps {
  * カスタム絵文字（`:shortcode:`）はこのサーバーの `custom_emojis` に登録済みのものしか送信できない
  * （Fedi/Bsky受信のよそのサーバー由来のカスタム絵文字リアクションはクリックで追いリアクションできず、
  * 自分が既に付けている分の取消のみ許可する）。 */
-export default function ReactionChips({ noteId, reactions, onToggle, disabled }: ReactionChipsProps) {
+export default function ReactionChips({
+  noteId,
+  reactions,
+  onToggle,
+  disabled,
+  indent = true,
+}: ReactionChipsProps) {
   const [knownShortcodes, setKnownShortcodes] = useState<Set<string> | null>(null);
 
   useEffect(() => {
@@ -31,7 +41,7 @@ export default function ReactionChips({ noteId, reactions, onToggle, disabled }:
 
   if (!reactions || reactions.length === 0) return null;
   return (
-    <div className={styles.wrap}>
+    <div className={`${styles.wrap} ${indent ? styles.indent : ""}`}>
       {reactions.map((r) => (
         <ReactionChip
           key={r.emoji}

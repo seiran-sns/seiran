@@ -2,7 +2,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 8px 0 0 50px;
+  margin: 8px 0 0;
+}
+
+.indent {
+  margin-left: 50px;
 }
 
 .chipWrap {

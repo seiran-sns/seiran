@@ -124,7 +124,7 @@ function QuoteCard({ note }: { note: Note }) {
         </div>
       )}
       <div className={styles.quoteReactions}>
-        <ReactionChips noteId={note.id} reactions={note.reactions} />
+        <ReactionChips noteId={note.id} reactions={note.reactions} indent={false} />
       </div>
     </section>
   );
@@ -524,6 +524,7 @@ function PostContent({
         onTogglePin={handleTogglePin}
         deleting={deleting}
         onDelete={handleDelete}
+        indent={!large}
       />
     </>
   );
