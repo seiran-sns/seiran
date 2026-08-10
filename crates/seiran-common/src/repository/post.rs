@@ -344,6 +344,17 @@ pub trait PostRepository: Send + Sync {
         viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
+    /// 指定ノートへの直系リプライ・引用を再帰的に取得する（#226 返信タブ）。
+    /// `reply_to_post_id`/`quote_of_post_id` のいずれかが親を指す投稿を子として辿る
+    /// `WITH RECURSIVE`。深さ20・件数`limit`で打ち切る。呼び出し側で親子関係から
+    /// ツリーを再構築する（`reply_id`/`quote_id` を辿る）。
+    async fn thread_descendants(
+        &self,
+        note_id: i64,
+        limit: i64,
+        viewer_actor_id: Option<i64>,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
+
     /// リポスト・リプライ・引用の配送先判定に使う、元ポストのメタ情報を取得する。
     async fn find_delivery_meta(&self, id: i64) -> Result<Option<PostDeliveryMeta>, sqlx::Error>;
 
@@ -916,6 +927,48 @@ impl PostRepository for PgPostRepository {
              LIMIT $3",
         )
         .bind(actor_id)
+        .bind(note_id)
+        .bind(limit)
+        .bind(viewer_actor_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn thread_descendants(
+        &self,
+        note_id: i64,
+        limit: i64,
+        viewer_actor_id: Option<i64>,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        sqlx::query_as::<_, TimelinePost>(
+            "WITH RECURSIVE descendants AS (
+                 SELECT p.id, 1 AS depth
+                 FROM posts p
+                 WHERE (p.reply_to_post_id = $1 OR p.quote_of_post_id = $1)
+                   AND p.deleted_at IS NULL
+                   AND ($3::bigint IS NULL OR p.actor_id = $3 OR NOT actor_is_hidden_for_viewer($3, p.actor_id))
+                   AND post_is_visible_to($3, p.actor_id, p.visibility::text, p.id, false)
+                 UNION ALL
+                 SELECT p.id, d.depth + 1
+                 FROM posts p
+                 JOIN descendants d ON (p.reply_to_post_id = d.id OR p.quote_of_post_id = d.id)
+                 WHERE p.deleted_at IS NULL AND d.depth < 20
+                   AND ($3::bigint IS NULL OR p.actor_id = $3 OR NOT actor_is_hidden_for_viewer($3, p.actor_id))
+                   AND post_is_visible_to($3, p.actor_id, p.visibility::text, p.id, false)
+             )
+             SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count
+             FROM descendants d
+             JOIN posts p ON p.id = d.id
+             JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             ORDER BY d.depth, p.id
+             LIMIT $2",
+        )
         .bind(note_id)
         .bind(limit)
         .bind(viewer_actor_id)

@@ -24,12 +24,13 @@
     "showContextButton": "Afficher les messages environnants",
     "noContext": "Aucun message à proximité.",
     "contextLabel": "Messages environnants de l'auteur",
-    "threadPlaceholder": "La vue du fil de discussion des réponses et des citations sera bientôt disponible.",
     "contextTab": "Postes environnants",
     "reactionsTab": "Réactions",
     "noReactions": "Aucune réaction sur ce post pour l'instant.",
     "authorTab": "Auteur",
-    "noPinnedPosts": "Aucun post épinglé."
+    "noPinnedPosts": "Aucun post épinglé.",
+    "repliesTab": "Réponses",
+    "noReplies": "Aucune réponse ni citation sur ce post pour l'instant."
   },
   "noteCard": {
     "privateRepostError": "Les messages privés ne peuvent pas être republiés.",

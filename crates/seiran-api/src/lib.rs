@@ -782,6 +782,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/:id/pin", post(handlers::notes::pin_note))
         .route("/api/notes/:id/pin", delete(handlers::notes::unpin_note))
         .route("/api/notes/:id/context", get(handlers::notes::note_context))
+        .route("/api/notes/:id/replies", get(handlers::notes::note_replies))
         // ActivityPub Note / OGP注入済みSPA（Accept ヘッダーで振り分け、`handlers::ogp`）
         .route("/notes/:id", get(handlers::notes::get_note_ap))
         // プロフィールページ（OGP注入済みSPA HTMLを返す、`handlers::ogp`）

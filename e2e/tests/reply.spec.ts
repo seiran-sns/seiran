@@ -1,9 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 
-// スレッド表示UI（他ユーザーからの返信一覧）は未実装（NoteDetailPage.tsxの
-// 「直系リプライ・引用（専用API未実装のためプレースホルダ）」）。そのため返信成功の
-// 確認はモーダルが閉じる（=エラーなく投稿完了した）ことをもって行う。
 test("他ユーザーの投稿に返信できる", async ({ page, request }) => {
   const author = await registerUserViaApi(request, "e2ereplyauthor");
   const replier = await registerUserViaApi(request, "e2ereplier");

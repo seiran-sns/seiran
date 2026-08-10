@@ -11,7 +11,7 @@ interface RightPaneState {
   /** ホーム画面の右ペインタブ（0: クイック通知, 1: トレンド＆検索）。トレンド集計はまだ未実装のため、機能しているクイック通知をデフォルトタブにしている。 */
   timelineTab: number;
   setTimelineTab: (i: number) => void;
-  /** ポスト詳細の右ペインタブ（0: 投稿者, 1: 投稿主の前後, 2: リアクション）。 */
+  /** ポスト詳細の右ペインタブ（0: 投稿者, 1: 返信, 2: 投稿主の前後, 3: リアクション）。 */
   noteDetailTab: number;
   setNoteDetailTab: (i: number) => void;
 }

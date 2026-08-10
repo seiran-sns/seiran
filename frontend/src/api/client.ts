@@ -1132,6 +1132,14 @@ export const api = {
         after: raw.after.map(normalizeNote),
       };
     },
+    /** 対象ノートへの直系リプライ・引用の再帰取得（#226 返信タブ）。フラット配列で返る。 */
+    async replies(id: string): Promise<Note[]> {
+      const raw = await request<{ notes: RawNote[] }>(
+        "GET",
+        `/notes/${encodeURIComponent(id)}/replies`,
+      );
+      return raw.notes.map(normalizeNote);
+    },
     deleteRepost(noteId: string) {
       return request<{ ok: boolean }>(
         "DELETE",

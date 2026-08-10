@@ -24,12 +24,13 @@
     "showContextButton": "显示周围的帖子",
     "noContext": "没有周围的帖子。",
     "contextLabel": "作者周边帖子",
-    "threadPlaceholder": "回复和引用主题视图即将推出。",
     "contextTab": "周边帖子",
     "reactionsTab": "反应",
     "noReactions": "这篇文章还没有任何反应。",
     "authorTab": "作者",
-    "noPinnedPosts": "没有置顶帖子。"
+    "noPinnedPosts": "没有置顶帖子。",
+    "repliesTab": "回复",
+    "noReplies": "这篇文章还没有回复或引用。"
   },
   "noteCard": {
     "privateRepostError": "私人帖子不能转发。",

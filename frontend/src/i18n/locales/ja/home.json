@@ -24,12 +24,13 @@
     "showContextButton": "前後の投稿を表示",
     "noContext": "前後の投稿はありません。",
     "contextLabel": "投稿主の前後の投稿",
-    "threadPlaceholder": "直系リプライ・引用ポストのツリー表示は準備中です。",
     "contextTab": "投稿主の前後",
     "reactionsTab": "リアクション",
     "noReactions": "このポストにはまだリアクションがありません。",
     "authorTab": "投稿者",
-    "noPinnedPosts": "固定されたポストはありません。"
+    "noPinnedPosts": "固定されたポストはありません。",
+    "repliesTab": "返信",
+    "noReplies": "まだ返信・引用はありません。"
   },
   "noteCard": {
     "privateRepostError": "非公開の投稿はリポストできません。",

@@ -24,12 +24,13 @@
     "showContextButton": "Umliegende Beiträge anzeigen",
     "noContext": "Keine umliegenden Beiträge.",
     "contextLabel": "Umliegende Beiträge des Autors",
-    "threadPlaceholder": "Die Thread-Ansicht für Antworten und Zitate folgt bald.",
     "contextTab": "Umliegende Beiträge",
     "reactionsTab": "Reaktionen",
     "noReactions": "Noch keine Reaktionen auf diesen Beitrag.",
     "authorTab": "Autor",
-    "noPinnedPosts": "Keine angehefteten Beiträge."
+    "noPinnedPosts": "Keine angehefteten Beiträge.",
+    "repliesTab": "Antworten",
+    "noReplies": "Noch keine Antworten oder Zitate zu diesem Beitrag."
   },
   "noteCard": {
     "privateRepostError": "Private Beiträge können nicht erneut gepostet werden.",

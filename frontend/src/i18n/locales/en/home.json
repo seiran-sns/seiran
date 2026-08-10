@@ -24,12 +24,13 @@
     "showContextButton": "Show surrounding posts",
     "noContext": "No surrounding posts.",
     "contextLabel": "Author's surrounding posts",
-    "threadPlaceholder": "Reply and quote thread view is coming soon.",
     "contextTab": "Surrounding posts",
     "reactionsTab": "Reactions",
     "noReactions": "No reactions on this post yet.",
     "authorTab": "Author",
-    "noPinnedPosts": "No pinned posts."
+    "noPinnedPosts": "No pinned posts.",
+    "repliesTab": "Replies",
+    "noReplies": "No replies or quotes on this post yet."
   },
   "noteCard": {
     "privateRepostError": "Private posts can't be reposted.",

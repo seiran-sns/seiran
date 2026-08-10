@@ -8,6 +8,7 @@ import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
 import ReactionChips from "../components/note/ReactionChips";
 import AuthorPanel from "../components/right/AuthorPanel";
+import ReplyThreadPanel from "../components/right/ReplyThreadPanel";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
@@ -122,12 +123,6 @@ export default function NoteDetailPage() {
             <div className={styles.contextLabel}>{t("home:noteDetailPage.contextLabel")}</div>
             {renderContext()}
           </section>
-
-          {/* 直系リプライ・引用（専用 API 未実装のためプレースホルダ） */}
-          <div className={panel.placeholder}>
-            <TwemojiEmoji emoji="💬" className={panel.placeholderIcon} />
-            {t("home:noteDetailPage.threadPlaceholder")}
-          </div>
         </>
       )}
     </>
@@ -138,6 +133,7 @@ export default function NoteDetailPage() {
       <Tabs
         tabs={[
           t("home:noteDetailPage.authorTab"),
+          t("home:noteDetailPage.repliesTab"),
           t("home:noteDetailPage.contextTab"),
           t("home:noteDetailPage.reactionsTab"),
         ]}
@@ -145,8 +141,9 @@ export default function NoteDetailPage() {
         onChange={setNoteDetailTab}
       />
       {noteDetailTab === 0 && display && <AuthorPanel note={display} />}
-      {noteDetailTab === 1 && renderContext()}
-      {noteDetailTab === 2 &&
+      {noteDetailTab === 1 && display && <ReplyThreadPanel note={display} />}
+      {noteDetailTab === 2 && renderContext()}
+      {noteDetailTab === 3 &&
         (display && display.reactions && display.reactions.length > 0 ? (
           <div style={{ padding: "12px 16px" }}>
             <ReactionChips noteId={display.id} reactions={display.reactions} />

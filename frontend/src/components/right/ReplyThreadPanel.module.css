@@ -1,0 +1,4 @@
+.node {
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}

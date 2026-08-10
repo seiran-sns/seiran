@@ -46,7 +46,7 @@ use crate::error::ApiError;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
 
-use dto::{CreateNoteRequest, NoteContextResponse, NoteUserInfo, TimelineQuery};
+use dto::{CreateNoteRequest, NoteContextResponse, NoteRepliesResponse, NoteUserInfo, TimelineQuery};
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1474,6 +1474,65 @@ pub async fn note_context(
     attach_poll_votes(&state.db, &mut after, my_actor_id).await;
 
     Ok(Json(NoteContextResponse { before, after }))
+}
+
+/// GET /api/notes/:id/replies
+/// 対象ポストへの直系リプライ・引用を再帰的に取得する（#226 返信タブ）。フラットな配列で返し、
+/// フロント側で `replyId`/`quoteId` から対象ポストを根とするツリーを組み立てる。
+pub async fn note_replies(
+    Path(id): Path<String>,
+    MaybeAuthedUser(user): MaybeAuthedUser,
+    State(state): State<AppState>,
+) -> Result<Json<NoteRepliesResponse>, ApiError> {
+    let my_actor_id: Option<i64> = user.map(|u| u.actor_id);
+    let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
+
+    // 対象ノートの存在・可視性確認
+    state
+        .posts
+        .find_by_id_for_viewer(post_id, my_actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+
+    let mut posts = state
+        .posts
+        .thread_descendants(post_id, 200, my_actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    resolve_mention_facets_in_place(&state.db, &mut posts).await;
+
+    let ids: Vec<i64> = posts.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
+    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
+    let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
+    let reposted_set = if let Some(aid) = my_actor_id {
+        fetch_reposted_ids(&state.db, aid, &ids).await
+    } else {
+        Default::default()
+    };
+
+    let mut notes: Vec<NoteResponse> = posts
+        .into_iter()
+        .map(|p| {
+            let id = p.id;
+            let mut nr = to_note_response(
+                p,
+                att_map.remove(&id).unwrap_or_default(),
+                lc_map.remove(&id).unwrap_or_default(),
+            );
+            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            if my_actor_id.is_some() {
+                nr.reposted_by_me = Some(reposted_set.contains(&id));
+            }
+            nr
+        })
+        .collect();
+    embed_renotes(&state.db, &mut notes, my_actor_id).await;
+    embed_quotes(&state.db, &mut notes, my_actor_id).await;
+    attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
+
+    Ok(Json(NoteRepliesResponse { notes }))
 }
 
 /// DELETE /api/notes/:note_id/repost

@@ -323,6 +323,13 @@ pub struct NoteContextResponse {
     pub after: Vec<NoteResponse>,
 }
 
+/// 対象ポストへの直系リプライ・引用の再帰取得（#226 返信タブ）。フラットな配列で返し、
+/// フロント側で各ノートの `replyId`/`quoteId` から対象ポストを根とするツリーを組み立てる。
+#[derive(Serialize)]
+pub struct NoteRepliesResponse {
+    pub notes: Vec<NoteResponse>,
+}
+
 #[derive(Deserialize)]
 pub struct ReactRequest {
     pub content: String,
