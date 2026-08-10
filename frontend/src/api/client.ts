@@ -536,6 +536,16 @@ export interface ReactionActor {
   avatarUrl?: string;
 }
 
+/** `GET /notes/:id/reposts` の1件（#226 リポストタブ）。 */
+export interface RepostEntry {
+  /** リポストラッパー自身のポストID。`deleted`がtrueの場合は詳細画面が存在しないためリンク化しない。 */
+  id: string;
+  user: Note["user"];
+  createdAt: string;
+  /** 取り消し済み（Undo済み）リポストか。 */
+  deleted: boolean;
+}
+
 export interface ReactResult {
   ok: boolean;
   reactions: ReactionSummary[];
@@ -1151,6 +1161,15 @@ export const api = {
         `/notes/${encodeURIComponent(id)}/replies`,
       );
       return raw.notes.map(normalizeNote);
+    },
+    /** 対象ノートへのリポスト一覧（#226 リポストタブ）。取り消し済みも履歴として含む。 */
+    async reposts(id: string): Promise<RepostEntry[]> {
+      return (
+        await request<{ reposts: RepostEntry[] }>(
+          "GET",
+          `/notes/${encodeURIComponent(id)}/reposts`,
+        )
+      ).reposts;
     },
     deleteRepost(noteId: string) {
       return request<{ ok: boolean }>(

@@ -32,7 +32,10 @@
     "repliesTab": "回复",
     "noReplies": "这篇文章还没有回复或引用。",
     "loadNewerButton": "加载更新的帖子",
-    "loadOlderButton": "加载更早的帖子"
+    "loadOlderButton": "加载更早的帖子",
+    "repostsTab": "转发",
+    "noReposts": "这篇文章还没有转发。",
+    "repostUndone": "已取消"
   },
   "noteCard": {
     "privateRepostError": "私人帖子不能转发。",

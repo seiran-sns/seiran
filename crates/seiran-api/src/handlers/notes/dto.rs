@@ -342,6 +342,23 @@ pub struct NoteRepliesResponse {
     pub notes: Vec<NoteResponse>,
 }
 
+/// リポストタブ（#226）の1件。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepostEntryResponse {
+    /// リポストラッパー自身のポストID。取り消し済み（`deleted`）の場合は詳細画面が存在しないため
+    /// フロント側でリンク化しない。
+    pub id: String,
+    pub user: NoteUserInfo,
+    pub created_at: String,
+    pub deleted: bool,
+}
+
+#[derive(Serialize)]
+pub struct RepostListResponse {
+    pub reposts: Vec<RepostEntryResponse>,
+}
+
 #[derive(Deserialize)]
 pub struct ReactRequest {
     pub content: String,

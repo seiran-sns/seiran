@@ -32,7 +32,10 @@
     "repliesTab": "답글",
     "noReplies": "아직 이 게시물에 답글이나 인용이 없습니다.",
     "loadNewerButton": "더 최신 게시물 불러오기",
-    "loadOlderButton": "더 오래된 게시물 불러오기"
+    "loadOlderButton": "더 오래된 게시물 불러오기",
+    "repostsTab": "리포스트",
+    "noReposts": "아직 이 게시물에 리포스트가 없습니다.",
+    "repostUndone": "취소됨"
   },
   "noteCard": {
     "privateRepostError": "비공개 게시물은 재게시할 수 없습니다.",

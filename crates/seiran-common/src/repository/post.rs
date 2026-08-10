@@ -141,6 +141,23 @@ pub struct RepostUndoInfo {
     pub orig_at_uri: Option<String>,
 }
 
+/// リポストタブ（#226）の1件。リポストラッパー自身の投稿行（`repost_of_post_id`が
+/// 対象ポストを指す行）から取る。`deleted_at`が非NULLなら取り消し済み（履歴として残す）。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct RepostEntry {
+    /// リポストラッパー自身の投稿ID（詳細画面へのリンク先、`deleted_at`がNULLの場合のみ有効）。
+    pub id: i64,
+    pub actor_id: i64,
+    pub username: String,
+    pub domain: String,
+    pub display_name: Option<String>,
+    pub actor_type: String,
+    pub avatar_url: Option<String>,
+    pub created_at: DateTime<Utc>,
+    /// 取り消し済み（Undo済み）リポストなら`Some`。
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
 /// 投稿削除（`DELETE /api/notes/:id`）に必要な情報。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PostDeleteInfo {
@@ -354,6 +371,10 @@ pub trait PostRepository: Send + Sync {
         limit: i64,
         viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
+
+    /// 対象ポストへのリポスト一覧を取得する（#226 リポストタブ）。取り消し済み
+    /// （`deleted_at`非NULL）も含めて履歴として返す。新しい順、`limit`件まで。
+    async fn reposts_of(&self, post_id: i64, limit: i64) -> Result<Vec<RepostEntry>, sqlx::Error>;
 
     /// リポスト・リプライ・引用の配送先判定に使う、元ポストのメタ情報を取得する。
     async fn find_delivery_meta(&self, id: i64) -> Result<Option<PostDeliveryMeta>, sqlx::Error>;
@@ -972,6 +993,26 @@ impl PostRepository for PgPostRepository {
         .bind(note_id)
         .bind(limit)
         .bind(viewer_actor_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn reposts_of(&self, post_id: i64, limit: i64) -> Result<Vec<RepostEntry>, sqlx::Error> {
+        sqlx::query_as::<_, RepostEntry>(
+            "SELECT p.id, p.actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.created_at, p.deleted_at
+             FROM posts p
+             JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             WHERE p.repost_of_post_id = $1
+             ORDER BY p.id DESC
+             LIMIT $2",
+        )
+        .bind(post_id)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
     }

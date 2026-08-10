@@ -32,7 +32,10 @@
     "repliesTab": "Respuestas",
     "noReplies": "Aún no hay respuestas ni citas de esta publicación.",
     "loadNewerButton": "Cargar publicaciones más recientes",
-    "loadOlderButton": "Cargar publicaciones más antiguas"
+    "loadOlderButton": "Cargar publicaciones más antiguas",
+    "repostsTab": "Republicaciones",
+    "noReposts": "Aún no hay republicaciones de esta publicación.",
+    "repostUndone": "deshecha"
   },
   "noteCard": {
     "privateRepostError": "Las publicaciones privadas no se pueden volver a publicar.",

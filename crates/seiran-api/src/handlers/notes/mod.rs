@@ -1771,6 +1771,49 @@ pub async fn reaction_actors(
     .into_response()
 }
 
+/// GET /api/notes/:id/reposts
+/// 対象ポストへのリポスト一覧を取得する（#226 リポストタブ）。取り消し済みも履歴として含む。
+pub async fn note_reposts(
+    Path(id): Path<String>,
+    MaybeAuthedUser(user): MaybeAuthedUser,
+    State(state): State<AppState>,
+) -> Result<Json<dto::RepostListResponse>, ApiError> {
+    let my_actor_id: Option<i64> = user.map(|u| u.actor_id);
+    let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
+
+    state
+        .posts
+        .find_by_id_for_viewer(post_id, my_actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+
+    let entries = state
+        .posts
+        .reposts_of(post_id, 100)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let reposts = entries
+        .into_iter()
+        .map(|e| dto::RepostEntryResponse {
+            id: e.id.to_string(),
+            user: dto::NoteUserInfo {
+                id: e.actor_id.to_string(),
+                username: e.username,
+                domain: Some(e.domain),
+                display_name: e.display_name,
+                actor_type: e.actor_type,
+                avatar_url: e.avatar_url,
+            },
+            created_at: e.created_at.to_rfc3339(),
+            deleted: e.deleted_at.is_some(),
+        })
+        .collect();
+
+    Ok(Json(dto::RepostListResponse { reposts }))
+}
+
 /// POST /api/notes/:id/reactions
 /// 自分の絵文字リアクションを追加する。ローカル保存に加え、AP（対象ポスト著者 + 自分の Fedi
 /// フォロワー全員）・ATP（対象に at_uri がある場合）の双方へ配送する。

@@ -32,7 +32,10 @@
     "repliesTab": "Réponses",
     "noReplies": "Aucune réponse ni citation sur ce post pour l'instant.",
     "loadNewerButton": "Charger les posts plus récents",
-    "loadOlderButton": "Charger les posts plus anciens"
+    "loadOlderButton": "Charger les posts plus anciens",
+    "repostsTab": "Reposts",
+    "noReposts": "Aucun repost sur ce post pour l'instant.",
+    "repostUndone": "annulé"
   },
   "noteCard": {
     "privateRepostError": "Les messages privés ne peuvent pas être republiés.",

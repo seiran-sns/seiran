@@ -9,6 +9,7 @@ import NoteCard from "../components/note/NoteCard";
 import AuthorPanel from "../components/right/AuthorPanel";
 import ReactionListPanel from "../components/right/ReactionListPanel";
 import ReplyThreadPanel from "../components/right/ReplyThreadPanel";
+import RepostListPanel from "../components/right/RepostListPanel";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
@@ -195,6 +196,7 @@ export default function NoteDetailPage() {
           t("home:noteDetailPage.repliesTab"),
           t("home:noteDetailPage.contextTab"),
           t("home:noteDetailPage.reactionsTab"),
+          t("home:noteDetailPage.repostsTab"),
         ]}
         active={noteDetailTab}
         onChange={setNoteDetailTab}
@@ -203,6 +205,7 @@ export default function NoteDetailPage() {
       {noteDetailTab === 1 && display && <ReplyThreadPanel note={display} />}
       {noteDetailTab === 2 && renderContext()}
       {noteDetailTab === 3 && display && <ReactionListPanel note={display} />}
+      {noteDetailTab === 4 && display && <RepostListPanel note={display} />}
     </>
   );
 

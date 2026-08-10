@@ -32,7 +32,10 @@
     "repliesTab": "返信",
     "noReplies": "まだ返信・引用はありません。",
     "loadNewerButton": "もっと新しい投稿を読み込む",
-    "loadOlderButton": "もっと古い投稿を読み込む"
+    "loadOlderButton": "もっと古い投稿を読み込む",
+    "repostsTab": "リポスト",
+    "noReposts": "まだリポストはありません。",
+    "repostUndone": "取り消し済み"
   },
   "noteCard": {
     "privateRepostError": "非公開の投稿はリポストできません。",

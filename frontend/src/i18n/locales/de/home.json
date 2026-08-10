@@ -32,7 +32,10 @@
     "repliesTab": "Antworten",
     "noReplies": "Noch keine Antworten oder Zitate zu diesem Beitrag.",
     "loadNewerButton": "Neuere Beiträge laden",
-    "loadOlderButton": "Ältere Beiträge laden"
+    "loadOlderButton": "Ältere Beiträge laden",
+    "repostsTab": "Reposts",
+    "noReposts": "Noch keine Reposts zu diesem Beitrag.",
+    "repostUndone": "zurückgenommen"
   },
   "noteCard": {
     "privateRepostError": "Private Beiträge können nicht erneut gepostet werden.",

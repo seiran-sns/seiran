@@ -32,7 +32,10 @@
     "repliesTab": "Replies",
     "noReplies": "No replies or quotes on this post yet.",
     "loadNewerButton": "Load newer posts",
-    "loadOlderButton": "Load older posts"
+    "loadOlderButton": "Load older posts",
+    "repostsTab": "Reposts",
+    "noReposts": "No reposts on this post yet.",
+    "repostUndone": "undone"
   },
   "noteCard": {
     "privateRepostError": "Private posts can't be reposted.",
