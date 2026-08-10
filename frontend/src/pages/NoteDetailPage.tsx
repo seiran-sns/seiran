@@ -7,6 +7,7 @@ import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import NoteCard from "../components/note/NoteCard";
 import ReactionChips from "../components/note/ReactionChips";
+import AuthorPanel from "../components/right/AuthorPanel";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
@@ -135,22 +136,27 @@ export default function NoteDetailPage() {
   const right = (
     <>
       <Tabs
-        tabs={[t("home:noteDetailPage.contextTab"), t("home:noteDetailPage.reactionsTab")]}
+        tabs={[
+          t("home:noteDetailPage.authorTab"),
+          t("home:noteDetailPage.contextTab"),
+          t("home:noteDetailPage.reactionsTab"),
+        ]}
         active={noteDetailTab}
         onChange={setNoteDetailTab}
       />
-      {noteDetailTab === 0 ? (
-        renderContext()
-      ) : display && display.reactions && display.reactions.length > 0 ? (
-        <div style={{ padding: "12px 16px" }}>
-          <ReactionChips noteId={display.id} reactions={display.reactions} />
-        </div>
-      ) : (
-        <div className={panel.placeholder}>
-          <TwemojiEmoji emoji="😀" className={panel.placeholderIcon} />
-          {t("home:noteDetailPage.noReactions")}
-        </div>
-      )}
+      {noteDetailTab === 0 && display && <AuthorPanel note={display} />}
+      {noteDetailTab === 1 && renderContext()}
+      {noteDetailTab === 2 &&
+        (display && display.reactions && display.reactions.length > 0 ? (
+          <div style={{ padding: "12px 16px" }}>
+            <ReactionChips noteId={display.id} reactions={display.reactions} />
+          </div>
+        ) : (
+          <div className={panel.placeholder}>
+            <TwemojiEmoji emoji="😀" className={panel.placeholderIcon} />
+            {t("home:noteDetailPage.noReactions")}
+          </div>
+        ))}
     </>
   );
 

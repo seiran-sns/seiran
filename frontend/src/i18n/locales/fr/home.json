@@ -27,7 +27,9 @@
     "threadPlaceholder": "La vue du fil de discussion des réponses et des citations sera bientôt disponible.",
     "contextTab": "Postes environnants",
     "reactionsTab": "Réactions",
-    "noReactions": "Aucune réaction sur ce post pour l'instant."
+    "noReactions": "Aucune réaction sur ce post pour l'instant.",
+    "authorTab": "Auteur",
+    "noPinnedPosts": "Aucun post épinglé."
   },
   "noteCard": {
     "privateRepostError": "Les messages privés ne peuvent pas être republiés.",

@@ -27,7 +27,9 @@
     "threadPlaceholder": "답장 및 인용 스레드 보기가 곧 제공될 예정입니다.",
     "contextTab": "주변 게시물",
     "reactionsTab": "반응",
-    "noReactions": "이 게시물에는 아직 반응이 없습니다."
+    "noReactions": "이 게시물에는 아직 반응이 없습니다.",
+    "authorTab": "작성자",
+    "noPinnedPosts": "고정된 게시물이 없습니다."
   },
   "noteCard": {
     "privateRepostError": "비공개 게시물은 재게시할 수 없습니다.",

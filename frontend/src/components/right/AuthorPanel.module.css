@@ -1,0 +1,61 @@
+.card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.card:hover {
+  background: var(--bg-elev);
+}
+
+.names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.displayName {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acct {
+  font-size: 0.85rem;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bio {
+  margin: 0 16px 12px;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.counts {
+  display: flex;
+  gap: 16px;
+  padding: 0 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.countItem {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.countItem:hover {
+  text-decoration: underline;
+}

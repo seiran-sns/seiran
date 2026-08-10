@@ -27,7 +27,9 @@
     "threadPlaceholder": "直系リプライ・引用ポストのツリー表示は準備中です。",
     "contextTab": "投稿主の前後",
     "reactionsTab": "リアクション",
-    "noReactions": "このポストにはまだリアクションがありません。"
+    "noReactions": "このポストにはまだリアクションがありません。",
+    "authorTab": "投稿者",
+    "noPinnedPosts": "固定されたポストはありません。"
   },
   "noteCard": {
     "privateRepostError": "非公開の投稿はリポストできません。",

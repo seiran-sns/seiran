@@ -27,7 +27,9 @@
     "threadPlaceholder": "La vista del hilo de respuestas y citas estará disponible próximamente.",
     "contextTab": "Publicaciones circundantes",
     "reactionsTab": "Reacciones",
-    "noReactions": "Aún no hay reacciones a esta publicación."
+    "noReactions": "Aún no hay reacciones a esta publicación.",
+    "authorTab": "Autor",
+    "noPinnedPosts": "No hay publicaciones fijadas."
   },
   "noteCard": {
     "privateRepostError": "Las publicaciones privadas no se pueden volver a publicar.",

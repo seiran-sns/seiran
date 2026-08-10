@@ -27,7 +27,9 @@
     "threadPlaceholder": "Reply and quote thread view is coming soon.",
     "contextTab": "Surrounding posts",
     "reactionsTab": "Reactions",
-    "noReactions": "No reactions on this post yet."
+    "noReactions": "No reactions on this post yet.",
+    "authorTab": "Author",
+    "noPinnedPosts": "No pinned posts."
   },
   "noteCard": {
     "privateRepostError": "Private posts can't be reposted.",
