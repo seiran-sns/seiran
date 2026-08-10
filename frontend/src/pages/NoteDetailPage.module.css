@@ -166,7 +166,7 @@
   border-color: var(--accent-strong);
 }
 
-/* 投稿主の前後の投稿は、通常は右ペインに表示する。
+/* 前後のポストは、通常は右ペインに表示する。
    右ペインが隠れる幅（≤1400px, AppShell と一致）でのみ中央に表示する。 */
 .narrowContext {
   display: none;

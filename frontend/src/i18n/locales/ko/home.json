@@ -21,7 +21,6 @@
   },
   "noteDetailPage": {
     "title": "우편",
-    "showContextButton": "주변 게시물 표시",
     "noContext": "주변 게시물이 없습니다.",
     "contextLabel": "작성자 주변 게시물",
     "contextTab": "주변 게시물",

@@ -21,7 +21,6 @@
   },
   "noteDetailPage": {
     "title": "Correo",
-    "showContextButton": "Mostrar publicaciones circundantes",
     "noContext": "No hay publicaciones circundantes.",
     "contextLabel": "Publicaciones circundantes del autor",
     "contextTab": "Publicaciones circundantes",

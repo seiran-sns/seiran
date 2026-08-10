@@ -67,11 +67,11 @@ test("ポスト詳細の返信タブに返信・引用・孫リプライが再�
 
   // NoteCard自体にも同名（title="返信"）の返信アクションボタンがあるため、
   // タブ切り替え時点ではまだそれらが描画されていない右ペイン（aside）内に絞って特定する。
-  await page
-    .getByRole("complementary")
-    .getByRole("button", { name: "返信", exact: true })
-    .click();
-  await expect(page.getByText(replyText)).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(quoteText)).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(grandchildText)).toBeVisible({ timeout: 15_000 });
+  // 「前後のポスト」も自動読み込みされ中央ペインの狭幅表示に同じ本文が出うるため、
+  // 以降のアサーションも右ペインに絞る。
+  const rightPane = page.getByRole("complementary");
+  await rightPane.getByRole("button", { name: "返信", exact: true }).click();
+  await expect(rightPane.getByText(replyText)).toBeVisible({ timeout: 15_000 });
+  await expect(rightPane.getByText(quoteText)).toBeVisible({ timeout: 15_000 });
+  await expect(rightPane.getByText(grandchildText)).toBeVisible({ timeout: 15_000 });
 });

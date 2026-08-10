@@ -21,7 +21,6 @@
   },
   "noteDetailPage": {
     "title": "Post",
-    "showContextButton": "Show surrounding posts",
     "noContext": "No surrounding posts.",
     "contextLabel": "Author's surrounding posts",
     "contextTab": "Surrounding posts",

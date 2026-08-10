@@ -21,7 +21,6 @@
   },
   "noteDetailPage": {
     "title": "Poste",
-    "showContextButton": "Afficher les messages environnants",
     "noContext": "Aucun message à proximité.",
     "contextLabel": "Messages environnants de l'auteur",
     "contextTab": "Postes environnants",

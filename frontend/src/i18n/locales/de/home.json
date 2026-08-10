@@ -21,7 +21,6 @@
   },
   "noteDetailPage": {
     "title": "Post",
-    "showContextButton": "Umliegende Beiträge anzeigen",
     "noContext": "Keine umliegenden Beiträge.",
     "contextLabel": "Umliegende Beiträge des Autors",
     "contextTab": "Umliegende Beiträge",

@@ -21,7 +21,6 @@
   },
   "noteDetailPage": {
     "title": "邮政",
-    "showContextButton": "显示周围的帖子",
     "noContext": "没有周围的帖子。",
     "contextLabel": "作者周边帖子",
     "contextTab": "周边帖子",

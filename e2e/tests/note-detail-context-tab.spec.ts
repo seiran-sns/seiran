@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 
-// ポスト詳細画面の「投稿主の前後の投稿」タブ（#226）: 最大5件ずつ表示し、
-// 読み込みボタンで続きの1件（対象から遠い方）を追加取得できる。
+// ポスト詳細画面の「前後のポスト」タブ（#226）: タブを開くと同時に自動読み込みし、
+// 最大5件ずつ表示。読み込みボタンで続きの1件（対象から遠い方）を追加取得できる。
 test("前後の投稿タブが最大5件表示され読み込みボタンで続きが表示される", async ({
   page,
   request,
@@ -34,10 +34,9 @@ test("前後の投稿タブが最大5件表示され読み込みボタンで続�
   await expect(page.getByText(`対象ポスト ${ts}`)).toBeVisible({ timeout: 15_000 });
 
   const rightPane = page.getByRole("complementary");
-  await rightPane.getByRole("button", { name: "投稿主の前後", exact: true }).click();
-  await rightPane.getByRole("button", { name: "前後の投稿を表示", exact: true }).click();
+  await rightPane.getByRole("button", { name: "前後のポスト", exact: true }).click();
 
-  // 対象ポスト自身（拡大文字表示NoteCard）がリスト中央に含まれる。
+  // 対象ポスト自身（拡大文字表示NoteCard）がリスト中央に含まれる。ボタン操作不要で自動読み込みされる。
   await expect(rightPane.getByText(`対象ポスト ${ts}`)).toBeVisible({ timeout: 15_000 });
 
   // 対象に近い5件ずつ（古い投稿2〜6、新しい投稿1〜5）が表示される。

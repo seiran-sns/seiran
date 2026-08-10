@@ -1132,7 +1132,7 @@ export const api = {
       );
       return rows.map(normalizeNote);
     },
-    /** 投稿主の前後の投稿（#226、最大5件＋読み込みボタン）。`beforeId`/`afterId`を渡すと
+    /** 前後のポスト（#226、最大5件＋読み込みボタン）。`beforeId`/`afterId`を渡すと
      * そのIDを起点に続きを取得する（省略時は対象ポスト自身が起点＝初回読み込み）。
      * `beforeLimit`/`afterLimit`を0にするとその方向は取得しない（片方向のみの読み込みボタン用）。 */
     async context(
