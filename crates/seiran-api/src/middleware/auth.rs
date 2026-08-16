@@ -22,18 +22,32 @@ pub async fn extract_auth(
         .and_then(|s| s.strip_prefix("Bearer "))
         .ok_or(ApiError::Unauthorized("Authorization ヘッダーが必要です"))?;
 
+    // `exp` はここでは検証しない。MiAuth（#60）発行トークンは `app_tokens` に登録された
+    // 管理対象トークンであれば、この仕組み導入前に発行された個体で `exp`（自社ログインと
+    // 同じ7日）が埋め込まれていても、無効化されていない限り有効として扱いたいため。
+    // 管理対象外（自社ログイン等）のトークンは、下の分岐で `exp` を別途厳密にチェックする。
     let verified = auth
-        .verify_token(bearer)
+        .verify_token_ignoring_exp(bearer)
         .map_err(|_| ApiError::Unauthorized("トークンが無効です"))?;
 
-    // #60: MiAuth 発行分は app_tokens に記録され、無効化されていれば拒否する
-    // （記録が無い jti は自社ログイン等の管理対象外トークンとして常に有効）。
-    let revoked = app_tokens
-        .is_revoked(verified.jti)
+    // #60: MiAuth 発行分は app_tokens に記録され、無効化されていれば拒否する。
+    match app_tokens
+        .status(verified.jti)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    if revoked {
-        return Err(ApiError::Unauthorized("トークンが無効化されています"));
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+    {
+        Some(true) => return Err(ApiError::Unauthorized("トークンが無効化されています")),
+        Some(false) => {
+            // app_tokens に登録された有効な管理対象トークン。exp は無視する。
+        }
+        None => {
+            // 記録が無い＝自社ログイン等の管理対象外トークン。exp を厳密に検証する。
+            if let Some(exp) = verified.exp {
+                if (exp as i64) < chrono::Utc::now().timestamp() {
+                    return Err(ApiError::Unauthorized("トークンの有効期限が切れています"));
+                }
+            }
+        }
     }
 
     // パスワード変更・リセットより前に発行されたトークンを一括拒否する

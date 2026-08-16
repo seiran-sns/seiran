@@ -23,9 +23,13 @@ pub trait AppTokenRepository: Send + Sync {
     /// 本人所有のトークンのみ無効化する。無効化できたら true。
     async fn revoke(&self, id: Uuid, user_id: i64) -> Result<bool, sqlx::Error>;
 
-    /// 認証ミドルウェアからの照会用。このテーブルに記録が無い jti（自社ログイン等、
-    /// 管理対象外のトークン）は false（＝有効）を返す。
-    async fn is_revoked(&self, id: Uuid) -> Result<bool, sqlx::Error>;
+    /// 認証ミドルウェアからの照会用。`None` はこのテーブルに記録が無い jti（自社ログイン
+    /// 等、管理対象外のトークン）、`Some(true)` は無効化済み、`Some(false)` は
+    /// 有効な管理対象トークンを表す。`None` と `Some(false)` の区別が必要な理由:
+    /// MiAuth 発行トークン（`Some`側）は `exp` クレームを持たない、またはJWT自体の
+    /// `exp` が過ぎていても無効化されていなければ有効として扱うため（`extract_auth`側で
+    /// この結果を見て exp 検証をスキップするかどうかを分岐する）。
+    async fn status(&self, id: Uuid) -> Result<Option<bool>, sqlx::Error>;
 }
 
 pub struct PgAppTokenRepository {
@@ -73,12 +77,12 @@ impl AppTokenRepository for PgAppTokenRepository {
         Ok(result.rows_affected() > 0)
     }
 
-    async fn is_revoked(&self, id: Uuid) -> Result<bool, sqlx::Error> {
+    async fn status(&self, id: Uuid) -> Result<Option<bool>, sqlx::Error> {
         let row: Option<(bool,)> =
             sqlx::query_as("SELECT revoked_at IS NOT NULL FROM app_tokens WHERE id = $1")
                 .bind(id)
                 .fetch_optional(&self.pool)
                 .await?;
-        Ok(row.map(|(revoked,)| revoked).unwrap_or(false))
+        Ok(row.map(|(revoked,)| revoked))
     }
 }

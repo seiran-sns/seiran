@@ -176,14 +176,19 @@ pub async fn miauth_authorize(
 
     // third-party クライアントへ渡すアクセストークンは、既存の `Authorization: Bearer`
     // 認証（`extract_auth`/`LocalAuthProvider::verify_token`）がそのまま検証できるよう、
-    // 自社ログインと同じ JWT を発行する（トークン検証の経路をもう一本増やさない）。
+    // 自社ログインと同じ JWT 検証経路を使う（トークン検証の経路をもう一本増やさない）。
+    // ただし有効期限は自社ログイン（7日）とは分け、`exp` クレームを持たない
+    // 無期限トークンを発行する（`generate_app_token`）。Misskey 互換クライアント
+    // （Aria 等）は「連携したら明示的に取り消すまで有効」という前提で作られており、
+    // 自社ログインと同じ 7 日失効にすると再連携なしに突然 401 になる不具合があった。
+    // 失効は `app_tokens.revoked_at`（本関数末尾で記録）でのみ行う。
     // 以前は無意味なダミー文字列（`miauth-token-<uuid>`）を発行していたため、JWT として
     // 検証できず、タイムライン閲覧（未認証で見られる）は動いても投稿等の要認証操作が
-    // 401 になっていた。既知の制約: アプリ単位の失効・権限スコープは未対応
+    // 401 になっていた。既知の制約: アプリ単位の権限スコープは未対応
     // （自社ログインのトークンと同じ扱いのため）。
     let (token, jti) = match state
         .local_auth
-        .generate_token(auth_user.user_id, &auth_user.email)
+        .generate_app_token(auth_user.user_id, &auth_user.email)
     {
         Ok(t) => t,
         Err(e) => {
