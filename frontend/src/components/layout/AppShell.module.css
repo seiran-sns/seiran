@@ -194,27 +194,8 @@
   padding: 0;
 }
 
-/* ── スマホ用フローティングメニューボタン ─────────────────────── */
-.floatingMenuBtn {
-  display: none;
-}
-
-/* ── スマホ用フローティング投稿ボタン ─────────────────────────── */
-.floatingComposeBtn {
-  display: none;
-}
-
-/* ── スマホ用フローティング通知ボタン（#75） ───────────────────── */
-.floatingNotifBtn {
-  display: none;
-}
-
-.floatingSearchBtn {
-  display: none;
-}
-
-/* ── スマホ用フローティングホームボタン（#180） ─────────────────── */
-.floatingHomeBtn {
+/* ── スマホ用フローティングボタン群（PCでは非表示） ────────────── */
+.floatingNavBar {
   display: none;
 }
 
@@ -351,14 +332,36 @@
 }
 
 @media (max-width: 768px) {
-  .floatingSearchBtn {
+  /* 5個のボタンを1つのfixedコンテナにまとめ、flexで均等配置する。個別に
+     left:20px/32%/50%/68%/right:20pxを混在させていた旧実装は、画面幅が
+     狭いと隣接ボタン同士が重なる（実測で幅320px以下だと隙間が数px、
+     280px以下だと重なりが発生）ため、コンテナ幅基準の均等配置に置き換えた。 */
+  .floatingNavBar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+    z-index: 1000;
+    pointer-events: none;
+  }
+
+  .floatingNavBar > * {
+    pointer-events: auto;
+  }
+
+  .floatingMenuBtn,
+  .floatingComposeBtn,
+  .floatingNotifBtn,
+  .floatingSearchBtn,
+  .floatingHomeBtn {
     display: flex;
     align-items: center;
     justify-content: center;
-    position: fixed;
-    left: 32%;
-    bottom: 20px;
-    transform: translateX(-50%);
+    position: relative;
+    flex: 0 0 auto;
     width: 52px;
     height: 52px;
     border-radius: 50%;
@@ -368,16 +371,24 @@
     border: none;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
     cursor: pointer;
-    z-index: 1000;
+    transition: transform 0.15s ease, background 0.15s ease;
   }
 
-  .floatingSearchBtn:hover {
+  .floatingMenuBtn:hover,
+  .floatingComposeBtn:hover,
+  .floatingNotifBtn:hover,
+  .floatingSearchBtn:hover,
+  .floatingHomeBtn:hover {
     background: var(--accent-hover);
-    transform: translateX(-50%) scale(1.05);
+    transform: scale(1.05);
   }
 
-  .floatingSearchBtn:active {
-    transform: translateX(-50%) scale(0.95);
+  .floatingMenuBtn:active,
+  .floatingComposeBtn:active,
+  .floatingNotifBtn:active,
+  .floatingSearchBtn:active,
+  .floatingHomeBtn:active {
+    transform: scale(0.95);
   }
 
   .floatingSearchIcon {
@@ -413,34 +424,6 @@
     border-right: none;
   }
 
-  .floatingMenuBtn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: fixed;
-    left: 20px;
-    bottom: 20px;
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background: var(--accent-strong);
-    color: #ffffff;
-    border: none;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
-    cursor: pointer;
-    z-index: 1000;
-    transition: transform 0.15s ease, background 0.15s ease;
-  }
-
-  .floatingMenuBtn:hover {
-    background: var(--accent-hover);
-    transform: scale(1.05);
-  }
-
-  .floatingMenuBtn:active {
-    transform: scale(0.95);
-  }
-
   .floatingMenuIcon {
     font-size: 1.4rem;
     line-height: 1;
@@ -460,102 +443,14 @@
     border: 2px solid var(--bg);
   }
 
-  .floatingComposeBtn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: fixed;
-    right: 20px;
-    bottom: 20px;
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background: var(--accent-strong);
-    color: #ffffff;
-    border: none;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
-    cursor: pointer;
-    z-index: 1000;
-    transition: transform 0.15s ease, background 0.15s ease;
-  }
-
-  .floatingComposeBtn:hover {
-    background: var(--accent-hover);
-    transform: scale(1.05);
-  }
-
-  .floatingComposeBtn:active {
-    transform: scale(0.95);
-  }
-
   .floatingComposeIcon {
     font-size: 1.3rem;
     line-height: 1;
   }
 
-  .floatingNotifBtn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: fixed;
-    left: 50%;
-    bottom: 20px;
-    transform: translateX(-50%);
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background: var(--accent-strong);
-    color: #ffffff;
-    text-decoration: none;
-    border: none;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
-    cursor: pointer;
-    z-index: 1000;
-    transition: transform 0.15s ease, background 0.15s ease;
-  }
-
-  .floatingNotifBtn:hover {
-    background: var(--accent-hover);
-    transform: translateX(-50%) scale(1.05);
-  }
-
-  .floatingNotifBtn:active {
-    transform: translateX(-50%) scale(0.95);
-  }
-
   .floatingNotifIcon {
     font-size: 1.3rem;
     line-height: 1;
-  }
-
-  .floatingHomeBtn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: fixed;
-    left: 68%;
-    bottom: 20px;
-    transform: translateX(-50%);
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background: var(--accent-strong);
-    color: #ffffff;
-    text-decoration: none;
-    border: none;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
-    cursor: pointer;
-    z-index: 1000;
-    transition: transform 0.15s ease, background 0.15s ease;
-  }
-
-  .floatingHomeBtn:hover {
-    background: var(--accent-hover);
-    transform: translateX(-50%) scale(1.05);
-  }
-
-  .floatingHomeBtn:active {
-    transform: translateX(-50%) scale(0.95);
   }
 
   .floatingHomeIcon {

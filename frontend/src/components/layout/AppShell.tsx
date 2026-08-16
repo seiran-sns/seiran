@@ -68,63 +68,64 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
 
       <aside className={styles.right}>{right}</aside>
 
-      {/* スマホ表示用フローティングメニューボタン */}
-      <button
-        className={styles.floatingMenuBtn}
-        onClick={() => setMobileMenuOpen(true)}
-        aria-label={t("nav:leftNav.openMenu")}
-        title={t("nav:leftNav.openMenu")}
-      >
-        <TwemojiEmoji emoji="☰" className={styles.floatingMenuIcon} />
-        {dmUnreadCount > 0 && (
-          <span className={styles.floatingMenuBadge}>
-            {dmUnreadCount > 99 ? "99+" : dmUnreadCount}
-          </span>
-        )}
-      </button>
+      {/* スマホ表示用フローティングボタン群（5個をflexで均等配置し、狭い画面幅でも
+          重なりやはみ出しが起きないようにする） */}
+      <div className={styles.floatingNavBar}>
+        <button
+          className={styles.floatingMenuBtn}
+          onClick={() => setMobileMenuOpen(true)}
+          aria-label={t("nav:leftNav.openMenu")}
+          title={t("nav:leftNav.openMenu")}
+        >
+          <TwemojiEmoji emoji="☰" className={styles.floatingMenuIcon} />
+          {dmUnreadCount > 0 && (
+            <span className={styles.floatingMenuBadge}>
+              {dmUnreadCount > 99 ? "99+" : dmUnreadCount}
+            </span>
+          )}
+        </button>
 
-      {/* スマホ表示用フローティング検索ボタン */}
-      <Link
-        to="/search"
-        className={styles.floatingSearchBtn}
-        onClick={() => onBeforeNavigate?.()}
-        aria-label={t("nav:leftNav.search")}
-        title={t("nav:leftNav.search")}
-      >
-        <TwemojiEmoji emoji="🔍" className={styles.floatingSearchIcon} />
-      </Link>
+        <Link
+          to="/search"
+          className={styles.floatingSearchBtn}
+          onClick={() => onBeforeNavigate?.()}
+          aria-label={t("nav:leftNav.search")}
+          title={t("nav:leftNav.search")}
+        >
+          <TwemojiEmoji emoji="🔍" className={styles.floatingSearchIcon} />
+        </Link>
 
-      {/* スマホ表示用フローティング通知ボタン（#75） */}
-      <Link
-        to="/notifications"
-        className={styles.floatingNotifBtn}
-        onClick={() => onBeforeNavigate?.()}
-        aria-label={t("nav:leftNav.notifications")}
-        title={t("nav:leftNav.notifications")}
-      >
-        <TwemojiEmoji emoji="🔔" className={styles.floatingNotifIcon} />
-      </Link>
+        {/* #75 */}
+        <Link
+          to="/notifications"
+          className={styles.floatingNotifBtn}
+          onClick={() => onBeforeNavigate?.()}
+          aria-label={t("nav:leftNav.notifications")}
+          title={t("nav:leftNav.notifications")}
+        >
+          <TwemojiEmoji emoji="🔔" className={styles.floatingNotifIcon} />
+        </Link>
 
-      {/* スマホ表示用フローティングホームボタン（#180） */}
-      <Link
-        to="/"
-        className={styles.floatingHomeBtn}
-        onClick={() => onBeforeNavigate?.()}
-        aria-label={t("nav:leftNav.home")}
-        title={t("nav:leftNav.home")}
-      >
-        <TwemojiEmoji emoji="🏠" className={styles.floatingHomeIcon} />
-      </Link>
+        {/* #180 */}
+        <Link
+          to="/"
+          className={styles.floatingHomeBtn}
+          onClick={() => onBeforeNavigate?.()}
+          aria-label={t("nav:leftNav.home")}
+          title={t("nav:leftNav.home")}
+        >
+          <TwemojiEmoji emoji="🏠" className={styles.floatingHomeIcon} />
+        </Link>
 
-      {/* スマホ表示用フローティング投稿ボタン */}
-      <button
-        className={styles.floatingComposeBtn}
-        onClick={() => setComposeOpen(true)}
-        aria-label={t("nav:appShell.composeModalTitle")}
-        title={t("nav:appShell.composeModalTitle")}
-      >
-        <TwemojiEmoji emoji="✏️" className={styles.floatingComposeIcon} />
-      </button>
+        <button
+          className={styles.floatingComposeBtn}
+          onClick={() => setComposeOpen(true)}
+          aria-label={t("nav:appShell.composeModalTitle")}
+          title={t("nav:appShell.composeModalTitle")}
+        >
+          <TwemojiEmoji emoji="✏️" className={styles.floatingComposeIcon} />
+        </button>
+      </div>
 
       {/* スマホ表示用モバイルドロワーメニュー */}
       {mobileMenuOpen && (
