@@ -17,7 +17,7 @@ use crate::repository::{
     extract_shortcode_candidates, InsertRemoteWithDedupParams, NotificationKind, PgRelayRepository,
     RelayRepository, RelayStatus,
 };
-use crate::streaming::broadcast_reaction_update;
+use crate::streaming::{broadcast_reaction_update, ChannelScope};
 use crate::traits::{Job, JobQueue};
 
 /// 1投稿から抽出するURLカード候補の上限。大量リンクを含む投稿でのOGPフェッチ暴走を防ぐ。
@@ -1273,39 +1273,55 @@ async fn handle_create_note(
     }
 
     // WebSocket リアルタイム配信。directは宛先のみ（フォロワーには配信しない、本文漏洩防止）、
-    // それ以外はローカルフォロワー全体。
-    let recipients: HashSet<i64> = if visibility == "direct" {
-        recipient_actor_ids.iter().copied().collect()
+    // それ以外はタイムラインチャンネル（homeTimeline/localTimeline/hybridTimeline/
+    // globalTimeline/userList/hashtag）購読者へ。
+    let note_json = serde_json::json!({
+        "id": post_id.to_string(),
+        "text": body,
+        "createdAt": created_at.to_rfc3339(),
+        "user": {
+            "id": actor_id,
+            "username": remote.username,
+            "domain": remote.domain,
+            "displayName": remote.display_name,
+            "actorType": "fedi",
+            "avatarUrl": remote.avatar_url,
+        },
+        "attachments": [],
+        "emojis": emoji_map,
+    });
+    if visibility == "direct" {
+        let recipients: HashSet<i64> = recipient_actor_ids.iter().copied().collect();
+        if !recipients.is_empty() {
+            let mut note_json = note_json;
+            note_json["visibility"] = serde_json::json!("direct");
+            inbox.stream_hub.publish_note(recipients, &note_json);
+        }
     } else {
-        inbox
+        let mut home_recipients: HashSet<i64> = inbox
             .follow_repo
             .find_accepted_local_follower_ids(actor_id)
             .await
             .unwrap_or_default()
             .into_iter()
-            .collect()
-    };
-
-    if !recipients.is_empty() {
-        let mut note_json = serde_json::json!({
-            "id": post_id.to_string(),
-            "text": body,
-            "createdAt": created_at.to_rfc3339(),
-            "user": {
-                "id": actor_id,
-                "username": remote.username,
-                "domain": remote.domain,
-                "displayName": remote.display_name,
-                "actorType": "fedi",
-                "avatarUrl": remote.avatar_url,
-            },
-            "attachments": [],
-            "emojis": emoji_map,
-        });
-        if visibility == "direct" {
-            note_json["visibility"] = serde_json::json!("direct");
-        }
-        inbox.stream_hub.publish_note(recipients, &note_json);
+            .collect();
+        home_recipients.insert(actor_id);
+        let list_ids: HashSet<i64> = inbox
+            .list_repo
+            .list_ids_containing_actor(actor_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let hashtags: HashSet<String> = crate::hashtag::extract_hashtags(&body).into_iter().collect();
+        let scope = ChannelScope {
+            is_local: false,
+            visibility: visibility.to_string(),
+            home_recipients: Arc::new(home_recipients),
+            list_ids: Arc::new(list_ids),
+            hashtags: Arc::new(hashtags),
+        };
+        inbox.stream_hub.publish_channel_note(scope, note_json);
     }
 
     let dup_info =

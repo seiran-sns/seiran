@@ -10,7 +10,7 @@ import NotificationsPanel from "../components/right/NotificationsPanel";
 import TrendsSearchPanel from "../components/right/TrendsSearchPanel";
 import { useRightPane } from "../contexts/RightPaneContext";
 import { Feed, feedKey, useHomeFeed } from "../contexts/HomeFeedContext";
-import { useStreamingContext } from "../contexts/StreamingContext";
+import { ChannelSpec, useStreamingContext } from "../contexts/StreamingContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useSwipe } from "../hooks/useSwipe";
@@ -49,6 +49,24 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
   return request.then((notes) => filterTimelineNotes(feed, notes));
 }
 
+/** タブ（Feed）を対応するWebSocketタイムラインチャンネルへ変換する。 */
+function feedToChannelSpec(feed: Feed): ChannelSpec {
+  switch (feed.kind) {
+    case "home":
+      return { channel: "homeTimeline" };
+    case "local":
+      return { channel: "localTimeline" };
+    case "social":
+      return { channel: "hybridTimeline" };
+    case "global":
+      return { channel: "globalTimeline" };
+    case "list":
+      return { channel: "userList", params: { listId: feed.id } };
+    case "hashtag":
+      return { channel: "hashtag", params: { tag: feed.name } };
+  }
+}
+
 export default function HomePage() {
   const { t } = useTranslation();
   const { showError } = useToast();
@@ -61,7 +79,7 @@ export default function HomePage() {
     () => localStorage.getItem(COMPOSER_COLLAPSED_KEY) === "1"
   );
   const { timelineTab, setTimelineTab } = useRightPane();
-  const { registerNote, unread } = useStreamingContext();
+  const { subscribeChannel, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
   const navigatingAway = useRef(false);
   const headerRef = useRef<HTMLElement>(null);
@@ -240,8 +258,18 @@ export default function HomePage() {
     }
   }, [setNotes]);
 
-  // リアルタイム更新（#37）: ストリームで届いたポストをアニメ付きで先頭挿入。
-  useEffect(() => registerNote((n) => prepend(n, true)), [prepend, registerNote]);
+  // リアルタイム更新（#37）: 表示中タブに対応するチャンネルを購読し、届いたポストを
+  // アニメ付きで先頭挿入する。タブ切替のたびに旧チャンネルをdisconnectし新チャンネルへ
+  // connectし直す（依存配列の`feed`変化でクリーンアップ→再購読される）。
+  useEffect(() => {
+    const spec = feedToChannelSpec(feed);
+    return subscribeChannel(spec, (n) => {
+      // バックエンドのチャンネル判定に加え、可視性（unlisted/followers_only）の
+      // クライアント側最終防御をWS由来のノートにも適用する（RESTフェッチと同じ二重防御）。
+      if (filterTimelineNotes(feed, [n]).length === 0) return;
+      prepend(n, true);
+    });
+  }, [feed, subscribeChannel, prepend]);
 
   function toggleComposerCollapsed() {
     setComposerCollapsed((prev) => {

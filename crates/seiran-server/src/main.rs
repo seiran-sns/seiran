@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use seiran_common::repository::{
     InstanceDomainRepository, PgActorRepository, PgBlockRepository, PgFollowRepository,
-    PgHashtagRepository, PgInstanceDomainRepository, PgNotificationRepository, PgPostRepository,
-    PgReactionRepository, PgRemoteEmojiRepository,
+    PgHashtagRepository, PgInstanceDomainRepository, PgListRepository, PgNotificationRepository,
+    PgPostRepository, PgReactionRepository, PgRemoteEmojiRepository,
 };
 use seiran_common::{
     ap::ApClient, create_job_queue, get_db_pool, resolve_local_domain, run_migrations,
@@ -47,6 +47,7 @@ fn build_inbox_context(
         notification_repo: Arc::new(PgNotificationRepository::new(pool.clone())),
         hashtag_repo: Arc::new(PgHashtagRepository::new(pool.clone())),
         remote_emoji_repo: Arc::new(PgRemoteEmojiRepository::new(pool.clone())),
+        list_repo: Arc::new(PgListRepository::new(pool.clone())),
         local_domain: local_domain.clone(),
         ap_private_key_pem: ap_private_key_pem.unwrap_or_default(),
         stream_hub,

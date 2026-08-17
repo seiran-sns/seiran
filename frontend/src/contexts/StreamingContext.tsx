@@ -8,6 +8,15 @@ import { useStreaming } from "../hooks/useStreaming";
 
 type NoteListener = (n: Note) => void;
 
+/** Misskey互換のタイムラインチャンネル指定（バックエンド`ChannelKind`と対応）。 */
+export type ChannelSpec =
+  | { channel: "homeTimeline" }
+  | { channel: "localTimeline" }
+  | { channel: "hybridTimeline" }
+  | { channel: "globalTimeline" }
+  | { channel: "userList"; params: { listId: string } }
+  | { channel: "hashtag"; params: { tag: string } };
+
 /** `noteUpdated`（リアクション追加/切替/取消）のライブ更新1件。 */
 export interface ReactionUpdate {
   postId: string;
@@ -31,8 +40,12 @@ type NotifListener = () => void;
 interface StreamingValue {
   unread: number;
   markRead: () => void;
-  /** 新規ポスト受信リスナーを登録する（HomePage が TL 先頭挿入に使用）。戻り値で解除。 */
-  registerNote: (cb: NoteListener) => () => void;
+  /**
+   * タイムラインチャンネルを購読する（HomePage が表示中タブに応じて呼ぶ）。
+   * `connect`/`disconnect`メッセージの送受信を内部で扱い、該当チャンネルの新着ノートのみ
+   * `onNote`に届く。戻り値の関数で`disconnect`を送り購読解除する。
+   */
+  subscribeChannel: (spec: ChannelSpec, onNote: NoteListener) => () => void;
   /** 指定ノートIDのリアクションのライブ更新を購読する（NoteCard が使用）。戻り値で解除。 */
   registerReaction: (noteId: string, cb: ReactionListener) => () => void;
   /** 通知の新着シグナルを購読する（NotificationsPanel が使用）。戻り値で解除。 */
@@ -48,7 +61,7 @@ interface StreamingValue {
 const StreamingContext = createContext<StreamingValue>({
   unread: 0,
   markRead: () => {},
-  registerNote: () => () => {},
+  subscribeChannel: () => () => {},
   registerReaction: () => () => {},
   registerNotifArrived: () => () => {},
   registerDirectMessage: () => () => {},
@@ -62,10 +75,16 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [unread, setUnread] = useState(0);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
-  const noteListeners = useRef<Set<NoteListener>>(new Set());
   const reactionListeners = useRef<Map<string, Set<ReactionListener>>>(new Map());
   const notifListeners = useRef<Set<NotifListener>>(new Set());
   const dmListeners = useRef<Set<NoteListener>>(new Set());
+  /** subscription id -> {spec, onNote}。再接続時の`connect`再送、`channel`イベントの配り先に使う。 */
+  const channelSubs = useRef<Map<string, { spec: ChannelSpec; onNote: NoteListener }>>(new Map());
+  // useStreaming の戻り値 send を onOpen コールバック内で使うための ref。
+  // useStreaming 呼び出し自体の引数（onOpen）から戻り値（send）を参照する循環を避けるため、
+  // onOpen 内では直接 send を閉じ込めず sendRef.current 経由で読む（useStreaming.ts の
+  // onEventRef と同じ「レンダー中に直接代入してrefを最新に保つ」パターン）。
+  const sendRef = useRef<(msg: unknown) => void>(() => {});
 
   const refreshDmUnreadCount = useCallback(() => {
     if (!user) return;
@@ -77,40 +96,69 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  useStreaming((type, body) => {
-    if (type === "note") {
-      void resolveStreamNote(body).then((n) => {
-        if (n.visibility === "direct") {
-          dmListeners.current.forEach((cb) => cb(n));
-          refreshDmUnreadCount();
-        } else {
-          noteListeners.current.forEach((cb) => cb(n));
-        }
-      });
-    } else if (type === "noteUpdated") {
-      const update = body as ReactionUpdate;
-      reactionListeners.current.get(update.postId)?.forEach((cb) => cb(update));
-    } else if (NOTIF_KINDS.has(type)) {
-      setUnread((u) => u + 1);
-      notifListeners.current.forEach((cb) => cb());
-      if (type === "followAccepted") {
-        // フォロー状態は共有ストア（stores/followStatusStore）に一本化しているため、ここで直接
-        // 更新するだけで、プロフィール画面・タイムライン上のフォロースイッチなど表示中の
-        // 全コンポーネントに伝播する（専用リスナーの配線は不要）。
-        const actor = (body as { actor?: { username?: string; domain?: string } })?.actor;
-        if (actor?.username && actor?.domain) {
-          setFollowStatusStore(profileQuery(actor.username, actor.domain), "accepted");
+  const { send } = useStreaming(
+    (type, body) => {
+      if (type === "note") {
+        // DM（visibility="direct"）は既存の`recipients`方式のまま届く。チャンネル購読不要。
+        void resolveStreamNote(body).then((n) => {
+          if (n.visibility === "direct") {
+            dmListeners.current.forEach((cb) => cb(n));
+            refreshDmUnreadCount();
+          }
+        });
+      } else if (type === "channel") {
+        const { id, type: innerType, body: innerBody } = body as {
+          id: string;
+          type: string;
+          body: unknown;
+        };
+        if (innerType !== "note") return;
+        const sub = channelSubs.current.get(id);
+        if (!sub) return;
+        void resolveStreamNote(innerBody).then((n) => sub.onNote(n));
+      } else if (type === "noteUpdated") {
+        const update = body as ReactionUpdate;
+        reactionListeners.current.get(update.postId)?.forEach((cb) => cb(update));
+      } else if (NOTIF_KINDS.has(type)) {
+        setUnread((u) => u + 1);
+        notifListeners.current.forEach((cb) => cb());
+        if (type === "followAccepted") {
+          // フォロー状態は共有ストア（stores/followStatusStore）に一本化しているため、ここで直接
+          // 更新するだけで、プロフィール画面・タイムライン上のフォロースイッチなど表示中の
+          // 全コンポーネントに伝播する（専用リスナーの配線は不要）。
+          const actor = (body as { actor?: { username?: string; domain?: string } })?.actor;
+          if (actor?.username && actor?.domain) {
+            setFollowStatusStore(profileQuery(actor.username, actor.domain), "accepted");
+          }
         }
       }
-    }
-  }, user?.id ?? null);
+    },
+    user?.id ?? null,
+    // 再接続のたびに、現在購読中の全チャンネルを再度 connect し直す
+    // （WebSocket再接続でサーバー側の購読状態は失われるため）。
+    useCallback(() => {
+      channelSubs.current.forEach(({ spec }, id) => {
+        sendRef.current({
+          type: "connect",
+          body: { channel: spec.channel, id, params: "params" in spec ? spec.params : {} },
+        });
+      });
+    }, [])
+  );
+  sendRef.current = send;
 
-  const registerNote = useCallback((cb: NoteListener) => {
-    noteListeners.current.add(cb);
-    return () => {
-      noteListeners.current.delete(cb);
-    };
-  }, []);
+  const subscribeChannel = useCallback(
+    (spec: ChannelSpec, onNote: NoteListener) => {
+      const id = crypto.randomUUID();
+      channelSubs.current.set(id, { spec, onNote });
+      send({ type: "connect", body: { channel: spec.channel, id, params: "params" in spec ? spec.params : {} } });
+      return () => {
+        channelSubs.current.delete(id);
+        send({ type: "disconnect", body: { id } });
+      };
+    },
+    [send]
+  );
 
   const registerReaction = useCallback((noteId: string, cb: ReactionListener) => {
     let set = reactionListeners.current.get(noteId);
@@ -148,7 +196,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
       value={{
         unread,
         markRead,
-        registerNote,
+        subscribeChannel,
         registerReaction,
         registerNotifArrived,
         registerDirectMessage,

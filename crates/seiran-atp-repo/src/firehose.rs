@@ -31,7 +31,7 @@ use seiran_common::repository::{
     PgNotificationRepository, PgPostRepository, PgReactionRepository, PostRepository,
     ReactionRepository, extract_shortcode_candidates, parse_custom_emoji_shortcode,
 };
-use seiran_common::streaming::broadcast_reaction_update;
+use seiran_common::streaming::{broadcast_reaction_update, ChannelScope};
 use seiran_common::{StreamHub, generate_snowflake_id};
 
 const JETSTREAM_BASE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.feed.repost";
@@ -1262,58 +1262,69 @@ async fn save_bsky_post(
                 }
             }
 
-            // ローカルフォロワー + この投稿者をリストに含めているリスト所有者へ WebSocket 配信
-            // （リスト機能 #63: リストタブを開いている間もリアルタイム更新されるように）。
-            let follower_rows = sqlx::query(
+            // タイムラインチャンネル（homeTimeline/hybridTimeline/userList/hashtag。Bsky投稿は
+            // is_local=falseのためlocalTimeline/globalTimelineには載らない）へ WebSocket 配信。
+            let home_recipients: HashSet<i64> = sqlx::query(
                 "SELECT f.follower_actor_id AS recipient_id FROM follows f
                  JOIN actors a ON a.id = f.follower_actor_id
                  WHERE f.target_actor_id = $1 AND f.status = 'accepted'
-                   AND a.actor_type = 'local'
-                 UNION
-                 SELECT l.owner_actor_id AS recipient_id FROM list_members lm
-                 JOIN lists l ON l.id = lm.list_id
-                 WHERE lm.actor_id = $1",
+                   AND a.actor_type = 'local'",
             )
             .bind(actor_id)
             .fetch_all(pool)
             .await
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|r| r.try_get::<i64, _>("recipient_id").ok())
+            .collect();
 
-            let recipients: HashSet<i64> = follower_rows
-                .iter()
-                .filter_map(|r| r.try_get::<i64, _>("recipient_id").ok())
-                .collect();
-
-            if !recipients.is_empty() {
-                let attachments_json: Vec<JsonValue> = attachments
-                    .iter()
-                    .map(|att| {
-                        serde_json::json!({
-                            "url": att.url,
-                            "mimeType": att.mime_type,
-                            "width": att.width,
-                            "height": att.height,
-                            "thumbnailUrl": att.thumbnail_url,
-                        })
-                    })
+            let list_ids: HashSet<i64> =
+                sqlx::query_scalar::<_, i64>("SELECT list_id FROM list_members WHERE actor_id = $1")
+                    .bind(actor_id)
+                    .fetch_all(pool)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
                     .collect();
-                let note_json = serde_json::json!({
-                    "id": post_id.to_string(),
-                    "text": text,
-                    "createdAt": created_at.to_rfc3339(),
-                    "user": {
-                        "id": actor_id,
-                        "username": username,
-                        "domain": serde_json::Value::Null,
-                        "displayName": display_name,
-                        "actorType": "bsky",
-                        "avatarUrl": avatar_url,
-                    },
-                    "attachments": attachments_json,
-                    "replyId": reply_id_str,
-                });
-                stream_hub.publish_note(recipients, &note_json);
-            }
+
+            let hashtags: HashSet<String> =
+                seiran_common::hashtag::extract_hashtags(text).into_iter().collect();
+
+            let attachments_json: Vec<JsonValue> = attachments
+                .iter()
+                .map(|att| {
+                    serde_json::json!({
+                        "url": att.url,
+                        "mimeType": att.mime_type,
+                        "width": att.width,
+                        "height": att.height,
+                        "thumbnailUrl": att.thumbnail_url,
+                    })
+                })
+                .collect();
+            let note_json = serde_json::json!({
+                "id": post_id.to_string(),
+                "text": text,
+                "createdAt": created_at.to_rfc3339(),
+                "user": {
+                    "id": actor_id,
+                    "username": username,
+                    "domain": serde_json::Value::Null,
+                    "displayName": display_name,
+                    "actorType": "bsky",
+                    "avatarUrl": avatar_url,
+                },
+                "attachments": attachments_json,
+                "replyId": reply_id_str,
+            });
+            let scope = ChannelScope {
+                is_local: false,
+                visibility: "public".to_string(),
+                home_recipients: Arc::new(home_recipients),
+                list_ids: Arc::new(list_ids),
+                hashtags: Arc::new(hashtags),
+            };
+            stream_hub.publish_channel_note(scope, note_json);
         }
         Err(e) => tracing::error!("[Jetstream] DB 保存失敗: {}", e),
     }

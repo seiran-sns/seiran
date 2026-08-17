@@ -92,6 +92,10 @@ pub trait ListRepository: Send + Sync {
     /// プロキシフォローの要否・維持判定（参照カウント方式）に使う。
     async fn actor_referenced_by_any_list(&self, actor_id: i64) -> Result<bool, sqlx::Error>;
 
+    /// 指定アクターをメンバーに含むリストのID一覧（`streaming::ChannelScope`構築用、
+    /// `userList`チャンネルへのリアルタイム配信判定に使う）。
+    async fn list_ids_containing_actor(&self, actor_id: i64) -> Result<Vec<i64>, sqlx::Error>;
+
     /// リストタイムライン（home_timeline と同じ形の `TimelinePost` を返す）。
     async fn timeline(
         &self,
@@ -303,6 +307,13 @@ impl ListRepository for PgListRepository {
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM list_members WHERE actor_id = $1)")
             .bind(actor_id)
             .fetch_one(&self.pool)
+            .await
+    }
+
+    async fn list_ids_containing_actor(&self, actor_id: i64) -> Result<Vec<i64>, sqlx::Error> {
+        sqlx::query_scalar("SELECT list_id FROM list_members WHERE actor_id = $1")
+            .bind(actor_id)
+            .fetch_all(&self.pool)
             .await
     }
 

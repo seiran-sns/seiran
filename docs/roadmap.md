@@ -130,7 +130,7 @@
 
 ### サードパーティクライアント互換
 
-- [ ] **Misskeyストリーミングのチャンネル購読対応**（現状は認証ユーザー宛て一律ブロードキャストのみ）
+- [x] **Misskeyストリーミングのチャンネル購読対応**（homeTimeline/localTimeline/hybridTimeline/globalTimeline/userList/hashtag）
 - [ ] **フロントエンドのMisskeyスキーマへの追従改修**、検証済み旧カスタムエンドポイントの整理
 - [ ] APIレスポンスの `bio` 末尾に本尊URLを自動挿入するフォールバック（ZonePane/Miria/Aria等の非Misskey互換画面向け）
 - [x] **`visibility` の値語彙をMisskey本家（`public`/`home`/`followers`/`specified`）にマッピング**。詳細: `docs/protocols.md` 7節

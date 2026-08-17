@@ -128,21 +128,40 @@ pub fn classify_post(
     }
 }
 
-/// 新規投稿を著者本人 + accepted なローカルフォロワーへ WebSocket でリアルタイム配信する（#37）。
+/// 新規投稿を著者本人 + accepted なローカルフォロワーへ、購読中のタイムラインチャンネル
+/// （homeTimeline/localTimeline/hybridTimeline/globalTimeline/userList/hashtag）へ
+/// WebSocket でリアルタイム配信する（#37）。
 /// `direct`（DM）投稿はこの関数を使わないこと（フォロワーにまで本文が届いてしまう）。
 /// 代わりに `broadcast_direct_message` を使う。
 pub async fn broadcast_new_note(state: &AppState, actor_id: i64, note: &NoteResponse) {
-    let mut recipients: HashSet<i64> = HashSet::new();
-    recipients.insert(actor_id);
+    let mut home_recipients: HashSet<i64> = HashSet::new();
+    home_recipients.insert(actor_id);
     if let Ok(rows) = state
         .follows
         .find_accepted_local_follower_ids(actor_id)
         .await
     {
-        recipients.extend(rows);
+        home_recipients.extend(rows);
     }
+    let list_ids: HashSet<i64> = state
+        .lists
+        .list_ids_containing_actor(actor_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let hashtags: HashSet<String> = seiran_common::hashtag::extract_hashtags(&note.text)
+        .into_iter()
+        .collect();
+    let scope = seiran_common::streaming::ChannelScope {
+        is_local: true,
+        visibility: note.visibility.clone().unwrap_or_else(|| "public".to_string()),
+        home_recipients: Arc::new(home_recipients),
+        list_ids: Arc::new(list_ids),
+        hashtags: Arc::new(hashtags),
+    };
     if let Ok(v) = serde_json::to_value(note) {
-        state.stream_hub.publish_note(recipients, &v);
+        state.stream_hub.publish_channel_note(scope, v);
     }
 }
 

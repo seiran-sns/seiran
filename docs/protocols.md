@@ -289,7 +289,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 
 書き込み系は既存の `handlers::notes`/`handlers::follows` をそのまま呼び出し、レスポンスだけMisskey形状に整形する。
 
-**既知の非互換点**: `cw` は常に `null`、書き込み系のエラー形状はMisskey本家のエラーID体系を再現していない。ストリーミングはMisskeyのチャンネル購読方式ではなく単純な認証ユーザー宛てブロードキャストのみ。`MisskeyDriveFile.isSensitive` は概念自体をDBに持たないため常に `false`。
+**既知の非互換点**: `cw` は常に `null`、書き込み系のエラー形状はMisskey本家のエラーID体系を再現していない。`MisskeyDriveFile.isSensitive` は概念自体をDBに持たないため常に `false`。（ストリーミングのチャンネル購読方式は8節参照、対応済み）
 
 **`MisskeyNote.uri`/`url` の算出**（`handlers::misskey::convert::to_misskey_note`）: `uri` はActivityPub Object IDで、Misskey本家準拠のためローカルノートでは常に `null`、Fedi受信ノートのみ非null。seiranはローカル投稿にもFederation配送用の自己参照的な `posts.ap_object_id`（`https://{local_domain}/notes/{id}`）を常に持たせているため、`ap_object_id` の有無だけでは出自を判定できず、`domain == local_domain` で判定する（実機確認: Ariaがこれを見てローカルノートをリモート扱いする不具合の原因だった）。`url`は人間向けURLで、Fedi（`ap_object_id`）優先、無ければBsky（`at_uri`→bsky.app URL）にフォールバックする。ローカルノートは両方 `null`。
 
@@ -310,7 +310,12 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 
 ## 8. 通知・リアルタイム配信
 
-`seiran-common::streaming::StreamHub`（プロセス内 `tokio::broadcast`、容量512）が `{"type":kind,"body":body}` を配信する。`GET /api/streaming?token=<JWT>` でWebSocket接続し、`recipients` に自分の actor_id が含まれるイベントのみ転送される。
+`seiran-common::streaming::StreamHub`（プロセス内 `tokio::broadcast`、容量512）が `{"type":kind,"body":body}` を配信する。`GET /api/streaming?token=<JWT>` でWebSocket接続する。配信方式は2系統ある。
+
+- **`recipients`方式**（通知・DM・`noteUpdated`）: `StreamEvent.recipients`（`HashSet<i64>`）に自分の actor_id が含まれるイベントのみ、各コネクションが自前フィルタして転送される。従来からの方式で購読操作は不要（認証済み接続には自動的に届く）。
+- **チャンネル方式**（タイムライン新着ノート、Misskey互換）: クライアントが`{"type":"connect","body":{"channel":"localTimeline","id":"<uuid>","params":{}}}`を送ると、以後そのチャンネルに該当する新着ノートが`{"type":"channel","body":{"id":"<uuid>","type":"note","body":{...}}}`で届く。`{"type":"disconnect","body":{"id":"<uuid>"}}`で購読解除する。対応チャンネル: `homeTimeline`/`localTimeline`/`hybridTimeline`(social)/`globalTimeline`/`userList`(`params.listId`必須)/`hashtag`(`params.tag`必須)。publish側（`seiran-api::handlers::notes::delivery::broadcast_new_note`、`seiran-common::jobs::inbound_activity_process::handle_create_note`、`seiran-atp-repo::firehose::save_bsky_post`）は投稿ごとに1回`ChannelScope`（`is_local`・`visibility`・著者+承認済みローカルフォロワーの集合・所属リストID集合・本文由来ハッシュタグ集合）を組み立てて`publish_channel_note`で送出し、各WSコネクションが自分の購読チャンネル一覧に対し`ChannelScope::matches`でO(1)照合する（コネクションごとのDB再問い合わせは発生しない）。各チャンネルの配信条件は対応するRESTタイムラインクエリ（`repository::post`の`home_timeline`/`local_timeline`/`social_timeline`/`global_timeline`、`repository::list::timeline`、`repository::hashtag::timeline`）のスコープに合わせている。`userList`チャンネルへの`connect`は所有者本人または公開リストのみ許可する（`GET /api/lists/:id`と同じ判定）。
+  - **既知の制限**: ブロック/ミュート（`actor_is_hidden_for_viewer`）はチャンネル配信では考慮しない（コネクション数に比例するDBコストになるため。通知系は`notifications`テーブルINSERT時にのみチェックされる）。リストタイムラインは10節の通り「viewer概念が無い」設計のため、`userList`チャンネルもメンバーシップのみで判定し（`visibility != 'direct'`のみ除外）、フォロー関係やブロックは考慮しない。
+  - DM（`visibility="direct"`）は引き続き`recipients`方式の`publish_note`のまま配信される（チャンネル購読は不要）。
 
 `notifications` テーブルへの書き込みは、ローカルユーザー間のフォロー成立・ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。ローカルフォローは `follows` への新規挿入時だけ `Follow` 通知を生成し、既存関係への再リクエストでは重複させない。種別は `Follow`/`Reaction`/`FollowRequestAccepted`/`Mention`/`Reply` の5種。WebSocketは基本的に「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
 
@@ -426,7 +431,6 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 - **ゼロトラストハンドシェイク**（他seiranサーバー間の `/verify-actor` 検証、`remote_seiran` への昇格）: 未実装。`actors.seiran_pair_actor_id` はスキーマ上・読み取りコードは存在するが書き込みロジックが無い（常にNULL）。
 - **`actor_metadata_resolve` ジョブ**: ハンドラはdispatchに登録されているが中身はスタブ（即座に `Ok(())`）。enqueueする呼び出し箇所がプロダクションコードに存在しない。
 - **トレンド集計**: 完全に未着手（テーブル・エンドポイントとも存在しない）。
-- **Misskey互換ストリーミング（チャンネル購読方式）**: 未着手、現状はブロードキャストのみ。
 - **ドメイン単位のレート制限**（`inbound_activity_process` 向け）: 未実装。現状 `actor_history_sync` キューのみドメイン単位の同時実行制限を持つ。
 - **リモートFedi/Bskyユーザー自身の公開リストのオンデマンド取得**: 未実装（`public_lists` はローカルユーザーのみ対象）。
 - **ブロック・ミュート関連の未実装項目**: 10節「スコープ外」参照（リアクション一覧でのブロック/ミュート除外、公開リストタイムラインでのフィルタリング）。
