@@ -491,13 +491,17 @@ async fn upsert_remote_fedi_actor(
 
     let remote_ap = ap_client.fetch_actor(actor_uri).await?;
     let ap_inbox = remote_ap.inbox.clone().unwrap_or_default();
-    let username = remote_ap.preferred_username.clone().unwrap_or_else(|| {
-        actor_uri
-            .rsplit('/')
-            .next()
-            .unwrap_or("unknown")
-            .to_string()
-    });
+    // `preferredUsername`（AS2語彙のプロパティ、必須ではないがWebFinger解決の前提として
+    // fediverse全体で事実上必須）が無い場合、URI末尾のパスセグメントをusername代わりに
+    // 使うフォールバックは行わない。ActivityPub仕様はActor URIのパス構造を一切規定して
+    // おらず（例: Misskeyは末尾が内部の不透明なIDでusernameではない）、それを推測に使うと
+    // 誤ったusernameで upsert してしまう。取得失敗として扱い呼び出し元へエラーを返す。
+    let username = remote_ap.preferred_username.clone().ok_or_else(|| {
+        format!(
+            "リモートアクター '{}' に preferredUsername がありません",
+            actor_uri
+        )
+    })?;
     let display_name = remote_ap.name.clone().unwrap_or_else(|| username.clone());
     let domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
     let avatar_url = remote_ap.avatar_url();
@@ -552,11 +556,12 @@ async fn handle_follow(
         .as_str()
         .ok_or("Follow: object フィールドがありません")?;
 
-    // target_uri から "https://{domain}/users/{username}" のユーザー名を抽出
-    let local_username = target_uri
-        .rsplit('/')
-        .next()
-        .ok_or("Follow: object URI からユーザー名を抽出できません")?;
+    // target_uri から "https://{local_domain}/users/{username}" のユーザー名を抽出。
+    // ホスト名の一致まで確認しないと、リモートの同名ユーザー（例:
+    // https://fedibird.com/users/momozou）宛の Follow をローカルの同名ユーザーへの
+    // Follow と誤認してしまう（末尾セグメントだけを見る rsplit('/') はドメインを見ない）。
+    let local_username = crate::ap::extract_local_username(target_uri, &inbox.local_domain)
+        .ok_or("Follow: object URI が自ドメインのアクターを指していません")?;
 
     // ローカルアクターが実在するか確認
     let local_actor = inbox
@@ -684,10 +689,10 @@ async fn handle_block(
         .as_str()
         .ok_or("Block: object フィールドがありません")?;
 
-    let local_username = target_uri
-        .rsplit('/')
-        .next()
-        .ok_or("Block: object URI からユーザー名を抽出できません")?;
+    // ホスト名まで確認する（handle_follow と同じ理由。リモートの同名ユーザーの
+    // Block をローカルの同名ユーザーへの Block と誤認しないため）。
+    let local_username = crate::ap::extract_local_username(target_uri, &inbox.local_domain)
+        .ok_or("Block: object URI が自ドメインのアクターを指していません")?;
 
     let local_actor = inbox
         .actor_repo
@@ -862,6 +867,20 @@ fn normalize_ap_poll(note: &serde_json::Value) -> Option<serde_json::Value> {
     }))
 }
 
+/// `tag[]` の `Mention` エントリから、自ドメインのローカルユーザーを指すものだけを
+/// username として抽出する（`extract_local_username` でホスト名まで検証するため、
+/// 同一usernameを名乗る他インスタンスのアクターへの参照タグは含まれない）。
+fn extract_mentioned_local_usernames<'a>(
+    tags: &'a [serde_json::Value],
+    local_domain: &str,
+) -> Vec<&'a str> {
+    tags.iter()
+        .filter(|tag| tag["type"].as_str() == Some("Mention"))
+        .filter_map(|tag| tag["href"].as_str())
+        .filter_map(|href| crate::ap::extract_local_username(href, local_domain))
+        .collect()
+}
+
 // Create(Note) を受け取り posts テーブルに保存する
 async fn handle_create_note(
     activity: serde_json::Value,
@@ -1001,14 +1020,15 @@ async fn handle_create_note(
 
             // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
             // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
-            // `find_by_ap_uri` では引っかからない。`handle_follow` と同じくURI末尾の
-            // セグメントをusernameとみなして `find_by_username_domain` で解決する。
+            // `find_by_ap_uri` では引っかからない。`extract_local_username` で
+            // ホスト名まで含めて自ドメインのURIか検証してから解決する（末尾セグメント
+            // だけを見ると、リモートの同名ユーザー宛のDMをローカルの同名ユーザー宛だと
+            // 誤認してしまう）。
             let mut recipients = Vec::new();
             for uri in &to_list {
-                if !uri.contains("/users/") {
-                    continue;
-                }
-                let Some(local_username) = uri.rsplit('/').next() else {
+                let Some(local_username) =
+                    crate::ap::extract_local_username(uri, &inbox.local_domain)
+                else {
                     continue;
                 };
                 if let Ok(Some(actor)) = inbox
@@ -1178,21 +1198,10 @@ async fn handle_create_note(
     // メンション通知: `tag[]` の `Mention` がローカルユーザーの AP actor URI
     // （`https://{local_domain}/users/{username}`）を指す場合、通知を作る。
     // ローカルユーザーの `ap_uri` は動的組み立てのため、DM宛先解決（上記）と同じ
-    // 「URI末尾セグメントをusernameとみなして解決する」方式を使う。
+    // `extract_local_username` でホスト名まで検証してから解決する（他インスタンスの
+    // 同名ユーザーを誤って拾わないため。詳細は下のテスト参照）。
     let mut mentioned_local_actor_ids: Vec<i64> = Vec::new();
-    for tag in &tags {
-        if tag["type"].as_str() != Some("Mention") {
-            continue;
-        }
-        let Some(href) = tag["href"].as_str() else {
-            continue;
-        };
-        if !href.contains("/users/") {
-            continue;
-        }
-        let Some(local_username) = href.rsplit('/').next() else {
-            continue;
-        };
+    for local_username in extract_mentioned_local_usernames(&tags, &inbox.local_domain) {
         if let Ok(Some(actor)) = inbox
             .actor_repo
             .find_by_username_domain(local_username, &inbox.local_domain)
@@ -1947,7 +1956,9 @@ async fn handle_undo(activity: serde_json::Value, inbox: &InboxContext) -> Resul
     if obj["type"].as_str() == Some("Block") {
         let blocker_uri = activity["actor"].as_str().unwrap_or("");
         let target_uri = obj["object"].as_str().unwrap_or("");
-        let local_username = target_uri.rsplit('/').next().unwrap_or("");
+        // ホスト名まで検証する（handle_block と同じ理由）。
+        let local_username =
+            crate::ap::extract_local_username(target_uri, &inbox.local_domain).unwrap_or("");
 
         if let (Some(blocker), Some(target)) = (
             inbox
@@ -2009,10 +2020,9 @@ async fn handle_undo(activity: serde_json::Value, inbox: &InboxContext) -> Resul
         .as_str()
         .ok_or("Undo/Follow: object.object フィールドがありません")?;
 
-    let local_username = target_uri
-        .rsplit('/')
-        .next()
-        .ok_or("Undo/Follow: object.object URI からユーザー名を抽出できません")?;
+    // ホスト名まで検証する（handle_follow と同じ理由）。
+    let local_username = crate::ap::extract_local_username(target_uri, &inbox.local_domain)
+        .ok_or("Undo/Follow: object.object URI が自ドメインのアクターを指していません")?;
 
     let follower = match inbox
         .actor_repo
@@ -2708,9 +2718,41 @@ async fn fetch_and_save_note(
 mod tests {
     use super::{
         ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_ap_quote_uri,
-        extract_emoji_tag_url, extract_link_card_urls, is_known_platform_url, normalize_ap_poll,
-        strip_html, strip_quote_fallback_line, youtube_thumbnail_url,
+        extract_emoji_tag_url, extract_link_card_urls, extract_mentioned_local_usernames,
+        is_known_platform_url, normalize_ap_poll, strip_html, strip_quote_fallback_line,
+        youtube_thumbnail_url,
     };
+
+    #[test]
+    fn extract_mentioned_local_usernames_ignores_same_name_actor_on_foreign_host() {
+        // 本人が複数インスタンスに同名アカウントを持ち、その一つ（他インスタンス）への
+        // 自己参照Mentionタグが本文中に見えない形で含まれるケース（WordPress
+        // ActivityPubプラグイン等のクロスポストで実際に観測された）。ローカルの
+        // 同名ユーザー宛のタグだけが拾われ、他ホストのタグは無視されるべき。
+        let tags = vec![
+            serde_json::json!({
+                "type": "Mention",
+                "href": "https://mstdn.jp/users/atasinti"
+            }),
+            serde_json::json!({
+                "type": "Mention",
+                "href": "https://seiran-beta.org/users/atasinti"
+            }),
+        ];
+        assert_eq!(
+            extract_mentioned_local_usernames(&tags, "seiran-beta.org"),
+            vec!["atasinti"]
+        );
+    }
+
+    #[test]
+    fn extract_mentioned_local_usernames_empty_when_only_foreign_host_tags() {
+        let tags = vec![serde_json::json!({
+            "type": "Mention",
+            "href": "https://fedibird.com/users/momozou"
+        })];
+        assert!(extract_mentioned_local_usernames(&tags, "seiran-beta.org").is_empty());
+    }
 
     #[test]
     fn extracts_misskey_quote_url_and_strips_re_fallback() {

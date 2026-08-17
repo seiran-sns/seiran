@@ -9,3 +9,12 @@ export const APPVIEW_STUB_PORT = Number(process.env.APPVIEW_STUB_PORT ?? "2583")
 
 export const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 export const FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
+
+// バックエンドに渡す LOCAL_DOMAIN env と同じ値（playwright.config.ts の backendEnv 参照）。
+// ローカルアクターの AP actor URI は `https://{LOCAL_DOMAIN}/users/{username}`
+// （https固定・ポート番号なし）で組み立てられ、BACKEND_URL（http://localhost:PORT）とは
+// 別物。fixtures/stub-fedi-server.ts がリモートActor視点でローカルアクターを参照する際
+// （Follow.object・Create.to/cc・Mention.href）はこちらを使うこと。BACKEND_URLを流用すると
+// スキーム・ポートの不一致で seiran_common::ap::extract_local_username の自ドメイン判定に
+// 一致せず、フォロー・メンション・DM宛先解決が黙って失敗する。
+export const LOCAL_DOMAIN = "localhost";

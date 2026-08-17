@@ -8,6 +8,17 @@
 
 import { createServer, type Server } from "node:http";
 import { createHash, createSign, generateKeyPairSync } from "node:crypto";
+import { LOCAL_DOMAIN } from "../ports.ts";
+
+// ローカルアクターの正規 AP actor URI（`https://{LOCAL_DOMAIN}/users/{username}`）を組み立てる。
+// `seiranBaseUrl`（`http://localhost:PORT`、実際のPOST送信先）をそのまま使うと、seiran側の
+// `seiran_common::ap::extract_local_username` が要求するスキーム・ホストと一致せず、
+// フォロー・メンション・DM宛先解決が自ドメイン非該当として黙って弾かれる
+// （実際のリモートサーバーはWebFinger等で得た正規URIを使うのであって、
+// こちらが最初にPOSTしたホスト:ポートをそのまま使い回すことはない）。
+function localActorUri(username: string): string {
+  return `https://${LOCAL_DOMAIN}/users/${username}`;
+}
 
 export interface StubFediServer {
   url: string;
@@ -151,7 +162,7 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
         inboxUrl: `${base}/inbox`,
         receivedActivities: () => received,
         async sendFollow(seiranBaseUrl, targetUsername) {
-          const targetActorUri = `${seiranBaseUrl}/users/${targetUsername}`;
+          const targetActorUri = localActorUri(targetUsername);
           const activity = {
             "@context": "https://www.w3.org/ns/activitystreams",
             type: "Follow",
@@ -172,13 +183,13 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
           await signedPost(`${seiranBaseUrl}/inbox`, acceptActivity, stub.actorUri, privateKey);
         },
         async sendCreateNote(seiranBaseUrl, targetUsername, text, opts) {
-          const targetActorUri = `${seiranBaseUrl}/users/${targetUsername}`;
+          const targetActorUri = localActorUri(targetUsername);
           const noteId = `${base}/notes/${Date.now()}-${Math.random().toString(36).slice(2)}`;
           const tag: Record<string, unknown>[] = [];
           if (opts?.mentionTargetUsername) {
             tag.push({
               type: "Mention",
-              href: `${seiranBaseUrl}/users/${opts.mentionTargetUsername}`,
+              href: localActorUri(opts.mentionTargetUsername),
               name: `@${opts.mentionTargetUsername}`,
             });
           }

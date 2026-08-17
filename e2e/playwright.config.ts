@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 import path from "node:path";
-import { BACKEND_PORT as backendPort, FRONTEND_PORT as frontendPort, PLC_STUB_PORT as plcStubPort, APPVIEW_STUB_PORT as appviewStubPort } from "./ports.ts";
+import { BACKEND_PORT as backendPort, FRONTEND_PORT as frontendPort, PLC_STUB_PORT as plcStubPort, APPVIEW_STUB_PORT as appviewStubPort, LOCAL_DOMAIN as localDomain } from "./ports.ts";
 
 const e2eDir = path.dirname(new URL(import.meta.url).pathname);
 const repoRoot = path.resolve(e2eDir, "..");
@@ -27,7 +27,7 @@ const backendEnv: Record<string, string> = {
   DB_HOST: "localhost",
   DB_PORT: "5433",
   PORT: String(backendPort),
-  LOCAL_DOMAIN: "localhost",
+  LOCAL_DOMAIN: localDomain,
   // OGP付きの直リンクHTMLをAPIが取得する先。未指定だとDocker向けの
   // http://frontend:5173 を参照して502になり、/notes/:id・/@userのE2Eが空になる。
   FRONTEND_ORIGIN: `http://127.0.0.1:${frontendPort}`,

@@ -327,7 +327,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 本文中で `@username` 形式によりローカルユーザーが言及された場合、`notifications`（`type="mention"`, `note_id`=言及元投稿）を作る。配信設定（Bsky/AP接続の有無）とは無関係に、投稿の出自（ローカル/Fedi受信/Bsky受信）ごとに以下で解決する。自己メンションは通知しない。
 
 - **ローカル投稿**（`handlers::notes::create_regular_post`）: `mention::extract_local_mention_actor_ids` が本文を走査し、`@username`（ドメイン省略）・`@username.{local_domain}`（AT Protocol ハンドル表記）・`@username@{local_domain}`（Fediverse表記）のいずれかで書かれたローカルアクターの `actor_id` を重複除去して返す。6節の配信用メンション変換（`convert_mentions_for_bsky`/`convert_mentions_for_ap`）は配信対象プロトコルが有効な場合のみ呼ばれるため、これとは独立した専用スキャンとして常に実行する。
-- **Fedi受信**（`jobs::inbound_activity_process::handle_create_note`）: `tag[]` の `Mention` エントリのうち、`href` が `https://{local_domain}/users/{username}` を指すものを、DM宛先解決と同じ「URI末尾セグメントをusernameとみなして `find_by_username_domain` で解決する」方式で判定する。
+- **Fedi受信**（`jobs::inbound_activity_process::handle_create_note`）: `tag[]` の `Mention` エントリのうち、`href` が `https://{local_domain}/users/{username}` を指すものを、DM宛先解決と同じ `seiran_common::ap::extract_local_username`（ホスト名まで含めて自ドメインのURIかを検証してからusernameを取り出す）で判定する。URI末尾のセグメントだけを見て判定すると、リモートの同名ユーザー（例: `https://fedibird.com/users/momozou`）宛のメンションをローカルの同名ユーザー宛と取り違えるため、必ずホスト名の一致確認を経由する。
 - **Bsky受信**（`seiran-atp-repo::firehose::save_bsky_post`）: 保存済みの `mention_facets`（6節）の各 `did` を `actors.at_did` で引き、`actor_type = 'local'` なら通知する。
 
 いずれの経路も `source_uri` は渡さない（1投稿に複数の宛先がありうるため、投稿の一意識別子を共有すると2人目以降が `notifications.source_uri` の部分UNIQUEインデックスで弾かれてしまう。posts 自体の重複排除は各経路で別途完結しているため、このブロックへの到達自体が新規保存時のみに限られ、重複INSERT対策は不要）。
@@ -366,7 +366,7 @@ Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri`
 ### Fedi受信（`jobs::inbound_activity_process::handle_create_note`）
 `to`/`cc`から`classify_ap_visibility`が`direct`と判定した場合、通常投稿受信経路とは別に以下を行う。
 - `note["inReplyTo"]`から`reply_to_post_id`を解決する（`find_id_by_ap_or_at_uri`。DM以外の通常投稿にも設定するようになった。以前はFedi受信投稿は`reply_to_post_id`を一切保存しない実装だった）。
-- `to`に含まれるローカルアクターURIから宛先を解決し`post_recipients`へ保存する。ローカルユーザーの`actors.ap_uri`は登録時に設定されない（都度`https://{local_domain}/users/{username}`として動的組み立てされる）ため`find_by_ap_uri`では引っかからない。`handle_follow`と同じくURI末尾のセグメントをusernameとみなし`find_by_username_domain`で解決する。
+- `to`に含まれるローカルアクターURIから宛先を解決し`post_recipients`へ保存する。ローカルユーザーの`actors.ap_uri`は登録時に設定されない（都度`https://{local_domain}/users/{username}`として動的組み立てされる）ため`find_by_ap_uri`では引っかからない。`seiran_common::ap::extract_local_username`でホスト名まで含めて自ドメインのURIかを検証してからusernameを取り出し`find_by_username_domain`で解決する（末尾セグメントだけでは同名リモートユーザーと取り違える）。
 - `reply_to_post_id`の親が`direct`ならその`thread_root_post_id`を継承、そうでなければ自分自身のIDをスレッド起点とする（伝播コピー方式はローカル投稿と共通）。
 - WS配信は宛先のみ（フォロワーには配信しない）。
 
