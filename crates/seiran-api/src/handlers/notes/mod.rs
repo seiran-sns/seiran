@@ -46,7 +46,9 @@ use crate::error::ApiError;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
 
-use dto::{CreateNoteRequest, NoteContextResponse, NoteRepliesResponse, NoteUserInfo, TimelineQuery};
+use dto::{
+    CreateNoteRequest, NoteContextResponse, NoteRepliesResponse, NoteUserInfo, TimelineQuery,
+};
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

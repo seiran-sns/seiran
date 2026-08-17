@@ -998,53 +998,53 @@ async fn handle_create_note(
 
     // DM（visibility="direct"）の宛先・スレッド起点解決。
     // `to`に含まれるローカルアクターURI（`https://{local_domain}/users/{username}`）を宛先とする。
-    let (thread_root_post_id, recipient_actor_ids): (Option<i64>, Vec<i64>) =
-        if visibility == "direct" {
-            let parent_thread_root = match reply_to_post_id {
-                Some(parent_id) => inbox
-                    .post_repo
-                    .find_delivery_meta(parent_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|m| {
-                        if m.visibility == "direct" {
-                            m.thread_root_post_id
-                        } else {
-                            None
-                        }
-                    }),
-                None => None,
-            };
-            let thread_root = parent_thread_root.unwrap_or(post_id);
-
-            // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
-            // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
-            // `find_by_ap_uri` では引っかからない。`extract_local_username` で
-            // ホスト名まで含めて自ドメインのURIか検証してから解決する（末尾セグメント
-            // だけを見ると、リモートの同名ユーザー宛のDMをローカルの同名ユーザー宛だと
-            // 誤認してしまう）。
-            let mut recipients = Vec::new();
-            for uri in &to_list {
-                let Some(local_username) =
-                    crate::ap::extract_local_username(uri, &inbox.local_domain)
-                else {
-                    continue;
-                };
-                if let Ok(Some(actor)) = inbox
-                    .actor_repo
-                    .find_by_username_domain(local_username, &inbox.local_domain)
-                    .await
-                {
-                    if actor.actor_type == "local" {
-                        recipients.push(actor.id);
+    let (thread_root_post_id, recipient_actor_ids): (Option<i64>, Vec<i64>) = if visibility
+        == "direct"
+    {
+        let parent_thread_root = match reply_to_post_id {
+            Some(parent_id) => inbox
+                .post_repo
+                .find_delivery_meta(parent_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|m| {
+                    if m.visibility == "direct" {
+                        m.thread_root_post_id
+                    } else {
+                        None
                     }
+                }),
+            None => None,
+        };
+        let thread_root = parent_thread_root.unwrap_or(post_id);
+
+        // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
+        // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
+        // `find_by_ap_uri` では引っかからない。`extract_local_username` で
+        // ホスト名まで含めて自ドメインのURIか検証してから解決する（末尾セグメント
+        // だけを見ると、リモートの同名ユーザー宛のDMをローカルの同名ユーザー宛だと
+        // 誤認してしまう）。
+        let mut recipients = Vec::new();
+        for uri in &to_list {
+            let Some(local_username) = crate::ap::extract_local_username(uri, &inbox.local_domain)
+            else {
+                continue;
+            };
+            if let Ok(Some(actor)) = inbox
+                .actor_repo
+                .find_by_username_domain(local_username, &inbox.local_domain)
+                .await
+            {
+                if actor.actor_type == "local" {
+                    recipients.push(actor.id);
                 }
             }
-            (Some(thread_root), recipients)
-        } else {
-            (None, Vec::new())
-        };
+        }
+        (Some(thread_root), recipients)
+    } else {
+        (None, Vec::new())
+    };
 
     // シナリオ2: seiran_post_uuid による seiran 間マージ
     let seiran_uuid = note["seiranUuid"].as_str();
@@ -1313,7 +1313,9 @@ async fn handle_create_note(
             .unwrap_or_default()
             .into_iter()
             .collect();
-        let hashtags: HashSet<String> = crate::hashtag::extract_hashtags(&body).into_iter().collect();
+        let hashtags: HashSet<String> = crate::hashtag::extract_hashtags(&body)
+            .into_iter()
+            .collect();
         let scope = ChannelScope {
             is_local: false,
             visibility: visibility.to_string(),

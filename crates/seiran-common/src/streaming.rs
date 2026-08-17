@@ -224,7 +224,13 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
 
-    fn scope(is_local: bool, visibility: &str, home: &[i64], lists: &[i64], tags: &[&str]) -> ChannelScope {
+    fn scope(
+        is_local: bool,
+        visibility: &str,
+        home: &[i64],
+        lists: &[i64],
+        tags: &[&str],
+    ) -> ChannelScope {
         ChannelScope {
             is_local,
             visibility: visibility.to_string(),
@@ -237,10 +243,22 @@ mod tests {
     #[test]
     fn channel_kind_parse_recognizes_all_known_channels() {
         let empty = serde_json::json!({});
-        assert_eq!(ChannelKind::parse("homeTimeline", &empty), Some(ChannelKind::HomeTimeline));
-        assert_eq!(ChannelKind::parse("localTimeline", &empty), Some(ChannelKind::LocalTimeline));
-        assert_eq!(ChannelKind::parse("hybridTimeline", &empty), Some(ChannelKind::HybridTimeline));
-        assert_eq!(ChannelKind::parse("globalTimeline", &empty), Some(ChannelKind::GlobalTimeline));
+        assert_eq!(
+            ChannelKind::parse("homeTimeline", &empty),
+            Some(ChannelKind::HomeTimeline)
+        );
+        assert_eq!(
+            ChannelKind::parse("localTimeline", &empty),
+            Some(ChannelKind::LocalTimeline)
+        );
+        assert_eq!(
+            ChannelKind::parse("hybridTimeline", &empty),
+            Some(ChannelKind::HybridTimeline)
+        );
+        assert_eq!(
+            ChannelKind::parse("globalTimeline", &empty),
+            Some(ChannelKind::GlobalTimeline)
+        );
         assert_eq!(
             ChannelKind::parse("userList", &serde_json::json!({"listId": "42"})),
             Some(ChannelKind::UserList(42))

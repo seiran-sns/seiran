@@ -167,7 +167,11 @@ impl LocalAuthProvider {
         self.verify_token_internal(token, false)
     }
 
-    fn verify_token_internal(&self, token: &str, validate_exp: bool) -> Result<VerifiedUser, AuthError> {
+    fn verify_token_internal(
+        &self,
+        token: &str,
+        validate_exp: bool,
+    ) -> Result<VerifiedUser, AuthError> {
         let key = DecodingKey::from_secret(&self.secret);
         // MiAuth（#60）発行分は `exp` クレーム自体を持たない（無期限、`app_tokens.revoked_at`
         // で管理）ため、`exp` を必須クレームから外す。`exp` が存在するトークン

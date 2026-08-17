@@ -155,7 +155,10 @@ pub async fn broadcast_new_note(state: &AppState, actor_id: i64, note: &NoteResp
         .collect();
     let scope = seiran_common::streaming::ChannelScope {
         is_local: true,
-        visibility: note.visibility.clone().unwrap_or_else(|| "public".to_string()),
+        visibility: note
+            .visibility
+            .clone()
+            .unwrap_or_else(|| "public".to_string()),
         home_recipients: Arc::new(home_recipients),
         list_ids: Arc::new(list_ids),
         hashtags: Arc::new(hashtags),

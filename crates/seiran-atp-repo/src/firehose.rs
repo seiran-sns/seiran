@@ -31,7 +31,7 @@ use seiran_common::repository::{
     PgNotificationRepository, PgPostRepository, PgReactionRepository, PostRepository,
     ReactionRepository, extract_shortcode_candidates, parse_custom_emoji_shortcode,
 };
-use seiran_common::streaming::{broadcast_reaction_update, ChannelScope};
+use seiran_common::streaming::{ChannelScope, broadcast_reaction_update};
 use seiran_common::{StreamHub, generate_snowflake_id};
 
 const JETSTREAM_BASE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.feed.repost";
@@ -1278,17 +1278,19 @@ async fn save_bsky_post(
             .filter_map(|r| r.try_get::<i64, _>("recipient_id").ok())
             .collect();
 
-            let list_ids: HashSet<i64> =
-                sqlx::query_scalar::<_, i64>("SELECT list_id FROM list_members WHERE actor_id = $1")
-                    .bind(actor_id)
-                    .fetch_all(pool)
-                    .await
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect();
+            let list_ids: HashSet<i64> = sqlx::query_scalar::<_, i64>(
+                "SELECT list_id FROM list_members WHERE actor_id = $1",
+            )
+            .bind(actor_id)
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
 
-            let hashtags: HashSet<String> =
-                seiran_common::hashtag::extract_hashtags(text).into_iter().collect();
+            let hashtags: HashSet<String> = seiran_common::hashtag::extract_hashtags(text)
+                .into_iter()
+                .collect();
 
             let attachments_json: Vec<JsonValue> = attachments
                 .iter()
