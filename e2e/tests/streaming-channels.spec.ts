@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import WebSocket from "ws";
 import { registerUserViaApi } from "../fixtures/api-helpers";
 import { startStubFediServer, type StubFediServer } from "../fixtures/stub-fedi-server";
 import { BACKEND_PORT, BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
@@ -6,6 +7,8 @@ import { BACKEND_PORT, BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 // Misskey互換のタイムラインチャンネル購読（connect/channel/disconnect）のE2E。
 // ローカルタイムライン表示中にリモートフォロー先の投稿が混入していたバグ（#通知調査時に発見）
 // の直接的な回帰テストと、リストチャンネル・disconnectの動作確認を行う。
+// CIはNode 20固定（グローバルWebSocket非搭載）のため、`ws`パッケージを使う
+// （`fixtures/subscribe-repos-client.ts`と同じ方式）。
 
 interface ChannelEvent {
   type: string;
@@ -28,8 +31,8 @@ function openStream(token: string): { ws: WebSocket; received: ChannelEvent[] } 
 async function waitOpen(ws: WebSocket): Promise<void> {
   if (ws.readyState === WebSocket.OPEN) return;
   await new Promise<void>((resolve, reject) => {
-    ws.addEventListener("open", () => resolve(), { once: true });
-    ws.addEventListener("error", () => reject(new Error("WebSocket接続に失敗しました")), { once: true });
+    ws.once("open", () => resolve());
+    ws.once("error", () => reject(new Error("WebSocket接続に失敗しました")));
   });
 }
 
