@@ -21,9 +21,12 @@ export interface E2eUser {
 
 let counter = 0;
 
+// `Date.now()` + プロセス内カウンタだけだと、E2Eの並列化（複数workerプロセス）で
+// 別workerが同一ミリ秒に同じprefixで登録した場合に衝突しうる。process.pidを混ぜて
+// worker間でも一意にする（usernameは63バイト上限、通常のprefix長なら十分収まる）。
 function uniqueUsername(prefix: string): string {
   counter += 1;
-  return `${prefix}${Date.now().toString(36)}${counter}`;
+  return `${prefix}${Date.now().toString(36)}${process.pid.toString(36)}${counter}`;
 }
 
 /** requireEmailVerification=false（E2E専用DBの既定値）を前提にした直接登録。 */

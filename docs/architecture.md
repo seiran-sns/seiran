@@ -219,6 +219,10 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
 - PRおよび`main`へのpushではGitHub Actionsの`E2E` jobが、Node.js 20・Chromium・
   E2E専用PostgreSQLを用いて全Playwrightテストを実行する。失敗時はtrace等の
   `playwright-report` / `test-results`を7日間artifactとして保存する。
+  セットアップ短縮のため、rust-cacheを`Rust` jobと`shared-key`で共有（`E2E`側は
+  `save-if: false`の読み取り専用）、pg_bigm入りPostgresイメージ（`docker/Dockerfile.postgres`）
+  はDocker BuildxのGHAキャッシュでビルド、Playwrightブラウザ本体も`actions/cache`で
+  キャッシュする。
 - frontendのVitestユニットテストもCIの`Frontend` jobで型チェック・lintと併せて
   必ず実行する。
 - Rustの`Rust` jobは`cargo fmt --all -- --check`と警告をエラー扱いするClippyを実行する。
@@ -229,6 +233,7 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
 - `e2e/playwright.config.ts`: `webServer`にスタブPLCサーバー・スタブAppViewサーバー・スタブFediサーバー（`stub-fedi-server.ts`、後述）・backend（`cargo run -p seiran-server`）・frontend（`npm run dev`）をまとめて起動する。backendには`PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL`をそれぞれのスタブサーバーへ、`ATP_RELAY_URL`を存在しないローカルポートへ向け、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`を空文字にして、外部への実通信を確実に遮断している。`SQLX_OFFLINE=true`も設定し、マイグレーション未適用の空DBに対してsqlxのコンパイル時クエリ検証が失敗しないようコミット済み`.sqlx/`キャッシュを使わせる。
   - 【重要】全`webServer`エントリの`reuseExistingServer`は`false`固定（変更禁止）。backendPort(3000)/frontendPort(5173)は`scripts/dev-up.sh`のネイティブ開発サーバーとも共有しており、`true`だと起動中の実開発サーバーへ無条件に相乗りしてしまう。2026-07-20に実際に発生し、実開発DBへのテストデータ混入・本物のplc.directoryへの誤登録という事故になった（後者は`did:plc:`のtombstoneオペレーションで収束済み）。`false`ならポート競合時に明確なエラーで停止する。
   - 【重要】Playwrightの実行順序は直感に反して「webServer起動 → globalSetup」（`globalSetup`ではwebServerの起動には間に合わない）。そのためE2E専用Postgres（`e2e/docker-compose.yml`、ポート5433）の起動待ちは`globalSetup`ではなく`e2e/scripts/wait-for-db.ts`としてbackendの`command`自体の前段に組み込んでいる。逆に`e2e/global-setup.ts`は「backendが起動済み」を前提にできるので、初期管理者アカウントのbootstrapに使っている（`GET /api/setup/status`は`users`テーブルが1件でもあれば`initialized:true`を返し、未初期化だとフロントは`App.tsx`のルーティングを無視して常に`<Setup>`画面を表示するため、E2E専用DBは空の状態からテストを始める都合上これが必要）。`globalTeardown`はE2E専用Postgresを`down -v`で破棄する。
+  - テストは3つのPlaywright projectに分けて並列実行する（`workers: 3`(CI)/`4`(ローカル)）。大半のspecは`main`で並列実行し、`storage_providers`（`is_active`先頭優先のためstub S3登録が競合する）に触れる`notifications`/`misskey-compat`/`federation-delivery`は`storage-serial`（project内`workers: 1`で直列、`main`とはインターリーブ）、`site_settings`のグローバル変更や外部サービススタブのプロセスグローバル状態に触れる`admin`/`rate-limit`/`search`は`globals-serial`（`dependencies`で`main`・`storage-serial`完了後の排他テール）に隔離する。
 - `e2e/fixtures/stub-plc-server.ts`: `plc.directory`のスタブ実装。TypeScriptを`tsx`で直接実行するため、CIのNode.js 20を含め事前ビルドは不要。genesis opを受け取ってメモリに保持し、GET時にDIDドキュメント形式へ組み直して返す。
 - `e2e/fixtures/stub-appview-server.ts`: Bsky AppView（`public.api.bsky.app`）のスタブ実装。`app.bsky.feed.searchPosts`等の主要エンドポイントに対し常に空の結果を返す（seiranのローカルDB検索はこれと独立して機能するため、ローカル投稿の検索はAppViewが空でも成立する）。
 - `e2e/fixtures/stub-fedi-server.ts`: リモートのActivityPubアクター（Mastodon等）のスタブ実装。正規のHTTP Signatures（RSA-SHA256、Digestヘッダー必須。`crates/seiran-common/src/ap/client.rs`のcanonical signing string規約に準拠）で署名したFollowをseiranの`/inbox`へ送り、フォロー成立後の投稿・返信・リポスト配送（Fedi配送はローカルアクターのacceptedフォロワー全員へのファンアウトのみで、返信先個人への直接配送やsharedInboxは無い。`crates/seiran-common/src/ap/deliver.rs`）を自身のinboxで受信・記録できる。
@@ -237,7 +242,6 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
 - フロントは`i18next-browser-languagedetector`がブラウザロケールを見て言語を決めるため、Playwright側は`use.locale`を`ja-JP`に固定している（既定の`en-US`だとUIが英語化される）。
 - DBはE2E専用インスタンスを使い、テスト実行のたびに空の状態から始める（アカウントは各テストが必要に応じて新規作成する）。手動検証用の`seiran{n}`アカウント（本ファイル冒頭のCLAUDE.md参照）とは分離されている。
 - Cloudflare DNS（ATPハンドル検証のTXT自動登録）、通知UI（未実装）はE2Eのスコープ外。
-- GitHub Actionsへの組み込みは未対応（当面はローカル実行のみ）。
 
 ## 10. 環境変数
 

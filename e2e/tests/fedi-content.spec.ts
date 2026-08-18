@@ -15,13 +15,26 @@ async function findSessionByText(request: import("@playwright/test").APIRequestC
   return sessions.find((s) => s.lastMessage.text === text);
 }
 
+// GTLは並列実行中の他specの投稿も乗るため、直近1ページ（100件）だけを見ると
+// 探している投稿が押し出されてflakyになりうる。until_idページネーションで
+// 数ページ分（最大500件）まで遡って探す。
 async function findGlobalNoteByText(request: import("@playwright/test").APIRequestContext, token: string, text: string) {
-  const res = await request.get("/api/notes/global-timeline?limit=100", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok()) return undefined;
-  const notes = (await res.json()) as { id: string; text: string }[];
-  return notes.find((note) => note.text === text);
+  let untilId: string | undefined;
+  for (let page = 0; page < 5; page++) {
+    const url = untilId
+      ? `/api/notes/global-timeline?limit=100&until_id=${untilId}`
+      : "/api/notes/global-timeline?limit=100";
+    const res = await request.get(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok()) return undefined;
+    const notes = (await res.json()) as { id: string; text: string }[];
+    const found = notes.find((note) => note.text === text);
+    if (found) return found;
+    if (notes.length < 100) return undefined; // 最終ページまで見終えた
+    untilId = notes[notes.length - 1].id;
+  }
+  return undefined;
 }
 
 test.describe("Fediから受信したCW・アンケート付き投稿の表示", () => {

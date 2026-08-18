@@ -53,12 +53,63 @@ const backendEnv: Record<string, string> = {
   SQLX_OFFLINE: "true",
 };
 
+// 全specが同じE2E DBを共有するが、実際にグローバル状態（site_settings・
+// appviewスタブのプロセスグローバルなsearchRequests・storage_providersの
+// アクティブプロバイダ選択順）に触れるのは以下の6ファイルだけで、残りは自前ユーザー・
+// 動的ポートstubで完結し並列安全（調査・検証済み）。
+//
+// - storage_providers: バックエンドの `list_active` が `WHERE is_active = true
+//   ORDER BY id` の先頭プロバイダを全アップロードに使うため、複数specが同時に
+//   stub S3 を登録すると相互に取り違える。3specはproject内で直列にしつつ、
+//   `main` とはインターリーブする。
+const STORAGE_SERIAL_SPECS = [
+  "**/notifications.spec.ts",
+  "**/misskey-compat.spec.ts",
+  "**/federation-delivery.spec.ts",
+];
+// - site_settings（rate-limit/admin）・appviewスタブのグローバルsearchRequests
+//   （search）は他specを巻き込んで壊すため、全テスト完了後の排他テールで実行する。
+const GLOBALS_SERIAL_SPECS = [
+  "**/admin.spec.ts",
+  "**/rate-limit.spec.ts",
+  "**/search.spec.ts",
+];
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
-  // 全specが同じE2E DB・初期管理者・site_settingsを共有するため、ファイル間も直列化する。
-  // `fullyParallel: false`だけではspecファイル同士は複数workerで並行実行される。
-  workers: 1,
+  workers: process.env.CI ? 3 : 4,
+  // 3プロジェクト・2フェーズ構成（詳細は各projectのコメント参照）。
+  // 【注意】`dependencies` はCLIのファイルフィルタを無視するため、ローカルで
+  // 例えば `npx playwright test tests/search.spec.ts` と単体実行すると
+  // main/storage-serial が先に全部走ってしまう。単体実行したい場合は
+  // `--no-deps` を付けること。
+  projects: [
+    {
+      name: "main",
+      testIgnore: [...STORAGE_SERIAL_SPECS, ...GLOBALS_SERIAL_SPECS],
+    },
+    {
+      // project内は workers:1 でファイル直列（同じstorage_providersを取り合わない）。
+      // dependenciesチェーンにはしない（Playwrightのフェーズ実行は前フェーズ全体の
+      // 完了を待つ逐次実行のため、チェーンにすると main とインターリーブされず
+      // 丸ごと直列テールに落ちてしまう。per-project workers:1 なら同一フェーズ内で
+      // 他projectとインターリーブしながら自分のspecだけ1つずつ実行できる）。
+      name: "storage-serial",
+      workers: 1,
+      testMatch: STORAGE_SERIAL_SPECS,
+    },
+    {
+      // main・storage-serial の完了を待ってから排他実行する（フェーズ2）。
+      // テール内の3ファイルの実行順は任意で安全（例えばrate-limitが検索APIを
+      // 複数回叩いても、search.specは自分のテストの直前でappviewスタブの
+      // searchRequestsをリセットしてから検証する）。
+      name: "globals-serial",
+      workers: 1,
+      testMatch: GLOBALS_SERIAL_SPECS,
+      dependencies: ["main", "storage-serial"],
+    },
+  ],
   // dm.spec.ts等、複数の expect.poll/toBeVisible(timeout:15_000) を逐次連結するテストが
   // デフォルトの30秒制限に対して余裕が無くflakyになりうるため明示的に延長する。
   timeout: 60_000,

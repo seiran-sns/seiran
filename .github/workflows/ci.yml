@@ -43,6 +43,12 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          # e2eジョブと依存クレートのビルド成果物を共有する（e2e側はsave-if:falseで
+          # 読み取り専用にし、保存はこちらに一本化する。同一キーへの保存はGitHub
+          # Actionsキャッシュの仕様上「先勝ち」で、両方保存にすると後発ジョブの
+          # 保存が反映されず、キャッシュの中身がジョブ間で行ったり来たりする）。
+          shared-key: "ci-rust"
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Type check
@@ -113,6 +119,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci-rust"
+          save-if: "false" # 保存はrustジョブに一本化（上記コメント参照）
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -126,9 +135,33 @@ jobs:
       - name: Install E2E dependencies
         working-directory: e2e
         run: npm ci
+      - name: Get Playwright version
+        id: pw-version
+        working-directory: e2e
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
       - name: Install Chromium
         working-directory: e2e
         run: npx playwright install --with-deps chromium
+      - uses: docker/setup-buildx-action@v3
+      - name: Build E2E Postgres image (cached)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.postgres
+          tags: seiran-postgres:16-pgbigm
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          load: true # buildxのコンテナドライバはデフォルトでdockerデーモンに載せないため必須
+      - name: Build backend binary
+        run: cargo build -p seiran-server
+        # webServerのtimeout(600s)内でビルドが走る現状だと、ビルド失敗とサーバー起動
+        # 失敗の切り分けがCIログ上でしづらい。ここで明示的にビルドしてから
+        # npm testに進むことで、失敗ステップの意味を明確にする。
       - name: Run E2E
         working-directory: e2e
         run: npm test

@@ -280,8 +280,18 @@ test("他ユーザーから返信をもらうと返信通知が届き、通知�
   const userLink = page.getByRole("link", { name: new RegExp(bob.username) });
   await expect(userLink).toHaveAttribute("href", `/@${bob.username}`);
 
-  // 通知文全体（クリック可能領域）はリプライ投稿へ遷移する。
-  await notifText.click();
+  // 通知文全体（クリック可能領域）はリプライ投稿へ遷移する。ユーザー名リンクは
+  // クリック伝播を止める実装（NotificationsPanel.tsx）で、userLinkとサフィックス
+  // テキストは同じ`.text`span内の兄弟ノードのため、`getByText`でサフィックス文字列
+  // だけを指定してもPlaywrightはその文字列を含む最小の要素（結局この`.text`span
+  // 全体）に解決し、クリックはその要素のバウンディングボックス中心に対して行われる。
+  // usernameが長いとその中心がuserLink側に寄ってしまいクリックを奪われる
+  // （trace調査で実際に`.text`spanへ解決されクリック座標がuserLink上に乗っていたことを確認済み）。
+  // username長に依存しない安全な標的として、`.text`の外側にあるリプライ種別アイコン
+  // （常にstopPropagationを持たない）をクリックする。ノートカードの返信ボタンも同じ
+  // 絵文字（💬）を使うため、通知の行（li）にスコープしてから探す。
+  const notifItem = page.locator("li", { hasText: `${bob.username} から返信がありました` });
+  await notifItem.getByAltText("💬").click();
   await expect(page).toHaveURL(new RegExp(`/notes/${reply.id}$`));
 });
 

@@ -2,6 +2,11 @@ import { test, expect } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 
 test("投稿にリアクションを付けられる", async ({ page, request }) => {
+  // 絵文字ピッカーの初回読み込みが重く、単独実行でも55秒前後かかることがあり
+  // デフォルトの60秒制限に対して余裕が無い。E2E並列化でCPU競合が増えると閾値超過
+  // しうるため、このテストだけ明示的に延長する。
+  test.setTimeout(120_000);
+
   const user = await registerUserViaApi(request, "e2ereact");
   await seedAuth(page, user.token);
   await page.goto("/");

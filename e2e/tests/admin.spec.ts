@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginViaApi, registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
+import { loginViaApi, patchSiteSettings, registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 import { startStubFediServer } from "../fixtures/stub-fedi-server";
 import { BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 
@@ -20,25 +20,41 @@ test("管理者はサイト設定を変更でき、リロード後も反映さ�
   const adminToken = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
   await seedAuth(page, adminToken);
 
-  await page.goto("/admin");
-  // 既定タブ（ユーザー管理）が描画されるまで待ってから「サイト設定」タブへ切り替える。
-  await expect(page.getByText("ユーザー管理")).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: "サイト設定" }).click();
+  // site_settingsは全specが共有するグローバル状態のため、変更前の値を保存しておき
+  // 必ず元に戻す（このspecはglobals-serialプロジェクトで他specと排他実行されるが、
+  // 復元を怠ると次回以降の実行や手動確認に影響する）。
+  const before = await request.get("/api/admin/site-settings", {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  expect(before.ok(), `site-settings取得失敗: ${before.status()} ${await before.text()}`).toBeTruthy();
+  const beforeBody = (await before.json()) as { site_name: string; media_proxy_url: string };
 
-  const newName = `seiran-e2e-${Date.now()}`;
-  const mediaProxyUrl = "http://localhost:3100";
-  const nameInput = page.getByLabel("サイト名称");
-  await nameInput.fill(newName);
-  await page.getByLabel("外部メディアプロキシURL").fill(mediaProxyUrl);
-  await page.getByRole("button", { name: "保存" }).click();
+  try {
+    await page.goto("/admin");
+    // 既定タブ（ユーザー管理）が描画されるまで待ってから「サイト設定」タブへ切り替える。
+    await expect(page.getByText("ユーザー管理")).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "サイト設定" }).click();
 
-  await expect(page.getByText("保存しました。")).toBeVisible({ timeout: 10_000 });
+    const newName = `seiran-e2e-${Date.now()}`;
+    const mediaProxyUrl = "http://localhost:3100";
+    const nameInput = page.getByLabel("サイト名称");
+    await nameInput.fill(newName);
+    await page.getByLabel("外部メディアプロキシURL").fill(mediaProxyUrl);
+    await page.getByRole("button", { name: "保存" }).click();
 
-  await page.reload();
-  await expect(page.getByText("ユーザー管理")).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: "サイト設定" }).click();
-  await expect(page.getByLabel("サイト名称")).toHaveValue(newName, { timeout: 10_000 });
-  await expect(page.getByLabel("外部メディアプロキシURL")).toHaveValue(mediaProxyUrl);
+    await expect(page.getByText("保存しました。")).toBeVisible({ timeout: 10_000 });
+
+    await page.reload();
+    await expect(page.getByText("ユーザー管理")).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "サイト設定" }).click();
+    await expect(page.getByLabel("サイト名称")).toHaveValue(newName, { timeout: 10_000 });
+    await expect(page.getByLabel("外部メディアプロキシURL")).toHaveValue(mediaProxyUrl);
+  } finally {
+    await patchSiteSettings(request, adminToken, {
+      site_name: beforeBody.site_name,
+      media_proxy_url: beforeBody.media_proxy_url,
+    });
+  }
 });
 
 test("管理者はユーザーを凍結・凍結解除できる", async ({ page, request }) => {
