@@ -16,6 +16,7 @@
   display: inline-flex;
   max-width: min(1024px, calc(100vw - 48px));
   max-height: min(1024px, calc(100vh - 48px));
+  overflow: hidden; /* NSFWぼかし(filter:blur)のにじみが画像の外にはみ出るのを防ぐ */
 }
 
 .pageButton {

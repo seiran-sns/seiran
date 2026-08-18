@@ -2,6 +2,7 @@ import { CSSProperties, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NoteAttachment } from "../../api/client";
 import ImageLightbox from "../common/ImageLightbox";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import HlsVideo from "./HlsVideo";
 import styles from "./NoteCard.module.css";
 import { mediaUrl } from "../../utils/mediaProxy";
@@ -165,7 +166,7 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
               reveal(index);
             }}
           >
-            👁️
+            <TwemojiEmoji emoji="👀" />
           </button>
         )}
       </div>

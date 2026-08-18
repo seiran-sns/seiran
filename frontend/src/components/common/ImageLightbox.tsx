@@ -1,5 +1,6 @@
 import { TouchEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import TwemojiEmoji from "./TwemojiEmoji";
 import styles from "./ImageLightbox.module.css";
 
 interface ImageLightboxProps {
@@ -111,7 +112,7 @@ export default function ImageLightbox({
               setRevealed(true);
             }}
           >
-            👁️
+            <TwemojiEmoji emoji="👀" />
           </button>
         )}
       </div>
