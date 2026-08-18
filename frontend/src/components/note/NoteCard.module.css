@@ -165,23 +165,120 @@
   word-break: break-word;
 }
 
+/* 添付メディア一覧。動画/音声（幅いっぱい、タイリング対象外）を境目に、連続する画像を
+ * ブロックへ切り分けてタイル状に並べる（詳細はNoteAttachments.tsxのbuildBlocks参照）。
+ * `container-type`で子孫が`cqw`単位（=このブロック自身の幅の%）を使えるようにする。 */
 .attachments {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
   margin: 8px 0 0 50px;
+  container-type: inline-size;
 }
 
-.attachImage {
+/* 動画（HlsVideo）。画像タイルとは別クラス（幅いっぱい・高さ固定なし、タイリング対象外）。 */
+.attachMedia {
   max-width: 100%;
   max-height: 300px;
   border-radius: 8px;
-  object-fit: cover;
   cursor: pointer;
-  border: 1px solid var(--border);
 }
 
-.sensitiveImageWrap { position: relative; max-width: 100%; overflow: hidden; border-radius: 8px; }
+/* ── 画像タイル共通 ──
+ * `--nw`/`--nh`（実寸px、NoteAttachments.tsxがinline styleで注入）を使い、
+ * 「実寸の2倍までは拡大してよいが、それ以上は縮小のみ」という上限をCSSだけで表現する。
+ * CSSのcalc()は長さ同士の除算ができない（比率を直接計算できない）ため、
+ * 「拡大率」を求める代わりに「画像を当てはめる箱自体を実寸の2倍で頭打ちにしてから
+ * object-fitに丸投げする」方式を使う。box=min(タイルの箱, 実寸*2)なら、
+ * object-fitが計算する実効倍率は自動的にmin(2, 箱/実寸)と一致する。 */
+
+.imgBlockSingle,
+.imgBlockStack {
+  display: flex;
+  flex-direction: column;
+}
+.imgBlockStack { gap: 2px; }
+
+.imgCellSingle {
+  display: flex;
+  justify-content: center; /* 2倍ズームしても幅に届かない場合の中央揃え */
+  position: relative;
+  overflow: hidden; /* 角丸クリップ用。NSFWぼかし(filter:blur)のにじみもここで切れる */
+}
+.imgFitCover {
+  width: min(100%, calc(var(--nw) * 2));
+  height: auto;
+  max-height: 100cqw;
+  object-fit: cover; /* 縦がmax-heightを超えたら中央クロップ */
+  cursor: pointer;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+/* 横並びの行（2枚ブロック・3枚ブロック・4枚以上グリッドの各行で共通）。 */
+.imgRow {
+  display: flex;
+  gap: 2px;
+}
+/* 縦長の大タイル（2枚ブロックの各枚・3枚ブロックの左）。cqwはブロック全体の幅基準。 */
+.imgCellBig {
+  width: calc(50% - 1px);
+  height: 70cqw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+/* 3枚ブロックの右列（縦にスタックする2小タイルの入れ物）。 */
+.imgColSmall {
+  width: calc(50% - 1px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* 3枚ブロック右列内の小タイル（親が既に50%幅なので自身は100%）。 */
+.imgCellSmallFull {
+  width: 100%;
+  height: calc(35cqw - 1px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+/* 4枚以上グリッドの小タイル（親.imgRowがブロック全幅なので50%基準）。 */
+.imgCellSmallHalf {
+  width: calc(50% - 1px);
+  height: calc(35cqw - 1px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+/* 4枚以上「偶数枚パターン」の行を縦に積む入れ物。 */
+.imgGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 固定サイズの箱（2枚ブロック・3枚ブロック・4枚以上グリッドの各タイル）用。
+ * 「実寸2倍を超える拡大はしない」という制約は維持しつつ、それ以外は箱の縦横比と
+ * 画像の縦横比が違っても余白を作らずクロップして箱を満たす（object-fit: cover）。
+ * `min(max(a,b), k) = max(min(a,k), min(b,k))` という一般恒等式により、
+ * 「箱を実寸2倍で頭打ちにしてからobject-fitに丸投げする」という同じトリックが
+ * contain（前段のmin採用）だけでなくcover（内部でmax採用）でもそのまま成立する。
+ * 2倍キャップに実際に掛かって箱に満たない場合だけ、親（.imgCellBig等）の
+ * flexセンタリングにより縦横中央揃えの余白が生まれる。 */
+.imgFitCropCapped {
+  width: min(100%, calc(var(--nw) * 2));
+  height: min(100%, calc(var(--nh) * 2));
+  object-fit: cover;
+  cursor: pointer;
+}
+
 .attachBlurred { filter: blur(18px); }
 .sensitiveReveal {
   position: absolute;
