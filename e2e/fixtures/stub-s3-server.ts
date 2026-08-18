@@ -14,7 +14,10 @@ export async function startStubS3Server(): Promise<StubS3Server> {
   const objects = new Map<string, Buffer>();
 
   const server: Server = createServer((req, res) => {
-    const key = req.url ?? "/";
+    // AWS SDKはPUT時に`?x-id=PutObject`等のクエリを付与するが、seiranが後で組み立てる
+    // GET用public_urlにはクエリが無いため、クエリ込みのreq.urlをそのままキーにすると
+    // PUT/GETで一致せず常に404になる。パス部分だけをキーにする。
+    const key = (req.url ?? "/").split("?")[0];
     if (req.method === "PUT") {
       const chunks: Buffer[] = [];
       req.on("data", (c) => chunks.push(c));
