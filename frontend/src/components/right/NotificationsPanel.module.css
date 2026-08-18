@@ -9,7 +9,15 @@
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border, #e3e8ef);
+  margin: 12px 12px 0;
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  transition: background 0.1s, box-shadow 0.15s;
+}
+
+.clickable:hover {
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .previewWrap {

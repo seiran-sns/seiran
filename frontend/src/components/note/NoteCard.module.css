@@ -1,11 +1,14 @@
 .card {
+  margin: 12px 12px 0;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  transition: background 0.1s;
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+  transition: background 0.1s, box-shadow 0.15s;
 }
 
 .card:hover {
   background: var(--bg-elev);
+  box-shadow: var(--shadow-card-hover);
 }
 
 /* 主役ポスト（ポスト詳細画面）用の大型表示（#43） */
@@ -16,6 +19,7 @@
 
 .large:hover {
   background: none;
+  box-shadow: var(--shadow-card);
 }
 
 .large .displayName {
