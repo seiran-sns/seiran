@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use seiran_common::{
     atp::sign_service_auth_jwt,
-    convert_audio_to_gray_video, ext_for_mime_type, generate_snowflake_id,
-    is_allowed_video_or_audio_mime, prepare_image, probe_video_or_audio,
+    convert_audio_to_gray_video, ext_for_mime_type, faststart_video, generate_snowflake_id,
+    is_allowed_video_or_audio_mime, is_faststart_eligible_mime, prepare_image, probe_video_or_audio,
     queue::worker::priority,
     repository::{Actor, CreateMediaFile},
     select_provider, sniff_mime_type, ImagePipeline, Job, MediaKind, S3StorageClient,
@@ -442,8 +442,15 @@ async fn create_video_or_audio_file(
 
     let ext = ext_for_mime_type(&mime_type);
     let storage_key = format!("media/{}.{}", Uuid::new_v4(), ext);
+    // 保存用バイト列のみfaststart化する（sha256による重複排除やBsky動画パイプライン
+    // 提出は、アップロードされた生バイト列のまま扱う）。
+    let bytes_to_store = if is_faststart_eligible_mime(&mime_type) {
+        faststart_video(&raw_bytes, ext).await
+    } else {
+        raw_bytes
+    };
     let public_url = s3
-        .put(&storage_key, raw_bytes, &mime_type)
+        .put(&storage_key, bytes_to_store, &mime_type)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 

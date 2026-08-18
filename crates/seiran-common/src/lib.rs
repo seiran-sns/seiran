@@ -53,10 +53,11 @@ pub use repository::{
 pub use repository::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use secrets::{Secrets, SecretsError, SecretsFile};
 pub use storage::{
-    convert_audio_to_gray_video, ext_for_mime_type, is_allowed_video_or_audio_mime, prepare_image,
-    probe_video_or_audio, select_provider, sniff_mime_type, ExifSanitizedImage, ImagePipeline,
-    ImageProcessingError, MediaKind, MediaProbeError, ProbedMedia, ProcessedImage, S3Error,
-    S3StorageClient, SelectorError, AUDIO_VIDEO_HEIGHT, AUDIO_VIDEO_WIDTH,
+    convert_audio_to_gray_video, ext_for_mime_type, faststart_video, is_allowed_video_or_audio_mime,
+    is_faststart_eligible_mime, prepare_image, probe_video_or_audio, select_provider,
+    sniff_mime_type, ExifSanitizedImage, ImagePipeline, ImageProcessingError, MediaKind,
+    MediaProbeError, ProbedMedia, ProcessedImage, S3Error, S3StorageClient, SelectorError,
+    AUDIO_VIDEO_HEIGHT, AUDIO_VIDEO_WIDTH,
 };
 pub use streaming::{StreamEvent, StreamHub};
 pub use traits::{ApDeliveryKind, Job, JobQueue, PrevApReaction};

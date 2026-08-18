@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { configureMediaProxy, mediaUrl } from "./mediaProxy";
+import { configureInternalMediaOrigins, configureMediaProxy, mediaUrl } from "./mediaProxy";
 
 describe("mediaUrl", () => {
-  beforeEach(() => configureMediaProxy(""));
+  beforeEach(() => {
+    configureMediaProxy("");
+    configureInternalMediaOrigins([]);
+  });
 
   it("proxies remote URLs through the built-in endpoint", () => {
     expect(mediaUrl("https://remote.example/emoji.png")).toBe(

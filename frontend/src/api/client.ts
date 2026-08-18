@@ -896,6 +896,7 @@ export interface MetaResponse {
   siteColor?: string;
   siteIconUrl?: string;
   mediaProxyUrl?: string;
+  internalMediaOrigins?: string[];
 }
 
 export const api = {

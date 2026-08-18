@@ -272,3 +272,64 @@ pub enum MediaProbeError {
     #[error("許可されていないファイル形式です: {0}")]
     UnsupportedMimeType(String),
 }
+
+const FASTSTART_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// mp4/mov系コンテナのみfaststart化の対象（`-movflags`はこれらのコンテナにのみ意味を持つ）。
+pub fn is_faststart_eligible_mime(mime_type: &str) -> bool {
+    matches!(mime_type, "video/mp4" | "video/quicktime")
+}
+
+/// 動画バイト列の `moov` アトム（再生に必須のメタデータ・シークテーブル）を
+/// ファイル先頭（`mdat`より前）へ移動する（faststart化）。ブラウザの `<video>`
+/// によるプログレッシブ再生は `moov` を読み込むまで開始できないため、スマホの
+/// カメラ録画などmoovがファイル末尾にある「非faststart」なmp4は、ファイルが
+/// 大きいほど再生開始が遅延・失敗しやすい（特にSafari/iOSはほぼ再生不能）。
+/// `-c copy` によるコンテナの再mux処理のみで再エンコードは行わないため、
+/// ロスレス・低負荷。`ffmpeg` 未インストール・失敗・タイムアウト時は元のバイト列を
+/// そのまま返す（アップロード自体は継続させる）。
+pub async fn faststart_video(data: &[u8], ext_hint: &str) -> Vec<u8> {
+    let tmp_in = std::env::temp_dir().join(format!(
+        "seiran-faststart-in-{}.{}",
+        uuid::Uuid::new_v4(),
+        ext_hint
+    ));
+    let tmp_out = std::env::temp_dir().join(format!(
+        "seiran-faststart-out-{}.{}",
+        uuid::Uuid::new_v4(),
+        ext_hint
+    ));
+
+    if tokio::fs::write(&tmp_in, data).await.is_err() {
+        return data.to_vec();
+    }
+
+    let result = tokio::time::timeout(FASTSTART_TIMEOUT, faststart_inner(&tmp_in, &tmp_out)).await;
+    let _ = tokio::fs::remove_file(&tmp_in).await;
+    let out = result.ok().flatten();
+    let _ = tokio::fs::remove_file(&tmp_out).await;
+
+    out.unwrap_or_else(|| data.to_vec())
+}
+
+async fn faststart_inner(tmp_in: &std::path::Path, tmp_out: &std::path::Path) -> Option<Vec<u8>> {
+    // faststartはmoov再配置のため出力側のシークを要する（pipe:1のような非シーク可能な
+    // 出力では書き出せない）ので、probe_video_or_audio と同様に一時ファイル経由にする。
+    let status = Command::new("ffmpeg")
+        .args(["-y", "-i"])
+        .arg(tmp_in)
+        .args(["-c", "copy", "-movflags", "+faststart"])
+        .arg(tmp_out)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .ok()?;
+
+    if !status.success() {
+        return None;
+    }
+
+    tokio::fs::read(tmp_out).await.ok()
+}

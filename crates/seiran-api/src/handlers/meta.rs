@@ -11,6 +11,18 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
     let settings = state.site_settings.get_all().await.unwrap_or_default();
     let get = |k: &str| settings.get(k).cloned().unwrap_or_default();
 
+    // 自インスタンスのストレージ（R2等、`window.location.origin`とは別サブドメインで
+    // 運用されることが多い）はフロントの`/proxy`（SSRF対策・容量上限付き）を経由せず
+    // 直接参照させるため、有効なプロバイダーの公開URLをそのまま返す。
+    let internal_media_origins: Vec<String> = state
+        .storage_providers
+        .list_active()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| p.public_url)
+        .collect();
+
     let require_email_verification = get("require_email_verification") == "true";
 
     // サイト外観（#30）。未設定時はデフォルト（name=seiran）。
@@ -40,6 +52,7 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
         "siteColor": get("site_color"),
         "siteIconUrl": get("site_icon_url"),
         "mediaProxyUrl": get("media_proxy_url"),
+        "internalMediaOrigins": internal_media_origins,
         "emojis": emojis,
         // Bsky 配信時の書記素クラスタ上限（validate_text_length と同じ値）。
         // Fedi のみ配信時は上限が緩む（10,000バイト/3,000書記素）が、Misskey クライアントの
