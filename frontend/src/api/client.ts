@@ -589,6 +589,8 @@ export interface UserProfile {
   is_blocked_by: boolean;
   /** 閲覧者がこのアクターをミュート中か。 */
   is_muted: boolean;
+  /** アカウントが凍結中か。ローカルユーザーのみ判定対象（リモートアクターは常に false）。 */
+  is_suspended: boolean;
   /** 最近の投稿。タイムラインと同じ NoteCard で描画する（#43）。 */
   recent_posts: Note[];
   /** ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの

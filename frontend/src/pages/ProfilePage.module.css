@@ -71,6 +71,18 @@
   word-break: break-all;
 }
 
+.suspendedBadge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 20px;
+  padding: 1px 8px;
+  vertical-align: middle;
+}
+
 .followCounts {
   display: flex;
   gap: 16px;

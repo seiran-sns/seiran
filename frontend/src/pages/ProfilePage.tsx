@@ -353,6 +353,11 @@ export default function ProfilePage() {
               {profile.domain &&
                 profile.domain !== window.location.hostname &&
                 `@${profile.domain}`}
+              {profile.is_suspended && (
+                <span className={styles.suspendedBadge}>
+                  {t("profile:profilePage.suspendedBadge")}
+                </span>
+              )}
             </span>
           </div>
 

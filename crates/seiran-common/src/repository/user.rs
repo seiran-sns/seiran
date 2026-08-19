@@ -118,6 +118,9 @@ pub trait UserRepository: Send + Sync {
     /// 最終ログイン成功時刻を現在時刻へ更新する。ログイン成功でブルートフォース試行の
     /// 種類数カウントをリセットするため、パスワード認証成功時・TOTP検証成功時の両方で呼ぶ。
     async fn touch_last_login_success(&self, user_id: i64) -> Result<(), sqlx::Error>;
+
+    /// アカウントが凍結中かを返す（プロフィールページの【凍結中】インジケーター用）。
+    async fn is_suspended_by_user_id(&self, user_id: i64) -> Result<bool, sqlx::Error>;
 }
 
 pub struct PgUserRepository {
@@ -367,6 +370,15 @@ impl UserRepository for PgUserRepository {
             .execute(&self.pool)
             .await
             .map(|_| ())
+    }
+
+    async fn is_suspended_by_user_id(&self, user_id: i64) -> Result<bool, sqlx::Error> {
+        let row: Option<(bool,)> =
+            sqlx::query_as("SELECT suspended_at IS NOT NULL FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|(v,)| v).unwrap_or(false))
     }
 }
 

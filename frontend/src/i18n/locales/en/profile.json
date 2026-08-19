@@ -8,6 +8,7 @@
     },
     "pairedBadge": "Soul-bound",
     "pairedBadgeTitle": "Linked with a remote seiran user via soul-binding",
+    "suspendedBadge": "Suspended",
     "editProfileButton": "Edit profile",
     "followingBadge": "Following",
     "unfollowingButton": "Unfollowing...",

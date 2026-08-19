@@ -277,6 +277,8 @@ pub struct ProfileResponse {
     pub is_blocked_by: bool,
     /// 閲覧者がこのアクターをミュート中か。
     pub is_muted: bool,
+    /// アカウントが凍結中か。ローカルユーザーのみ判定対象（リモートアクターは常に false）。
+    pub is_suspended: bool,
     /// 最近の投稿。タイムラインと同じ NoteCard で描画するため NoteResponse で返す（#43）。
     pub recent_posts: Vec<NoteResponse>,
     /// ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
@@ -368,6 +370,7 @@ async fn fetch_bsky_profile_from_appview(
         is_blocking: false,
         is_blocked_by: false,
         is_muted: false,
+        is_suspended: false,
         recent_posts: vec![],
         pinned_posts: vec![],
         profile_fields: vec![],
@@ -610,6 +613,16 @@ async fn build_profile_response(
         None => false,
     };
 
+    // アカウント凍結状態（ローカルユーザーのみ判定対象、リモートアクターは常に false）。
+    let is_suspended = match actor.user_id {
+        Some(uid) => state
+            .users
+            .is_suspended_by_user_id(uid)
+            .await
+            .unwrap_or(false),
+        None => false,
+    };
+
     // リモート Fedi アクターの場合、featured collection（ピン留め投稿, #61）を都度同期する。
     // ベストエフォート（失敗してもプロフィール表示自体は継続する）。DB 未登録の未知アクター
     // （`fetch_remote_profile`）はここを通らないため対象外。
@@ -834,6 +847,7 @@ async fn build_profile_response(
         is_blocking,
         is_blocked_by,
         is_muted,
+        is_suspended,
         recent_posts,
         pinned_posts,
         profile_fields,
@@ -949,6 +963,7 @@ async fn fetch_remote_profile(
         is_blocking: false,
         is_blocked_by: false,
         is_muted: false,
+        is_suspended: false,
         recent_posts: vec![],
         pinned_posts: vec![],
         profile_fields: vec![],
