@@ -359,6 +359,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
             url,
             position,
         } => jobs::ogp_fetch::handle(post_id, url, position, ctx).await,
+        Job::RemoteInstanceInfoResolve { domain } => {
+            jobs::remote_instance_info_resolve::handle(domain, ctx).await
+        }
     }
 }
 
@@ -379,6 +382,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
         Job::RelayFollowSync { .. } => "RelayFollowSync",
         Job::OgpFetch { .. } => "OgpFetch",
+        Job::RemoteInstanceInfoResolve { .. } => "RemoteInstanceInfoResolve",
     }
 }
 
@@ -464,6 +468,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         Job::OgpFetch { .. } => RetryConfig {
             // ActorMetadataResolve と同様の軽量ベストエフォート取得。取得できなければ
             // そのURLはカード無しのまま諦めてよい（投稿自体は既に保存済みのため実害が小さい）。
+            max_attempts: 3,
+            base_delay_ms: 2000,
+            max_delay_ms: 30_000,
+        },
+        Job::RemoteInstanceInfoResolve { .. } => RetryConfig {
+            // ActorMetadataResolve と同様の軽量ベストエフォート取得。取得できなくても
+            // 汎用デフォルト色でキャッシュして諦める（表示のリッチ化が目的のため実害は小さい）。
             max_attempts: 3,
             base_delay_ms: 2000,
             max_delay_ms: 30_000,

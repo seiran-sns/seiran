@@ -235,6 +235,11 @@ pub enum Job {
         url: String,
         position: i16,
     },
+
+    /// リモートインスタンス（Fedi、`actors.domain`単位）のnodeinfoを取得し
+    /// `remote_instance_meta` へキャッシュする（#NoteCardリモートサーバー表示）。
+    /// notes API / Misskey互換API がキャッシュ未登録のドメインを見つけた際に積む。
+    RemoteInstanceInfoResolve { domain: String },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

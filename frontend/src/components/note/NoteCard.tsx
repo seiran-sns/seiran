@@ -30,7 +30,39 @@ import LinkCard from "./LinkCard";
 import NoteCardActions from "./NoteCardActions";
 import ReactionChips from "./ReactionChips";
 import { useComposer } from "../../contexts/ComposerContext";
+import blueskyLogo from "../../assets/bluesky-logo.svg";
 import styles from "./NoteCard.module.css";
+
+/** themeColor未宣言・Bsky共通の汎用デフォルト（薄いグレー）。バックエンドの
+ * `remote_instance_info_resolve::DEFAULT_THEME_COLOR` と揃えている。 */
+const REMOTE_BADGE_FALLBACK_COLOR = "#e4e4e7";
+
+/** リモートサーバー表示（#NoteCardリモートサーバー表示）。Bskyは固定表示、Fediは
+ * バックエンドが解決したインスタンス情報（`note.user.instance`）を使う。
+ * ローカル・seiran間連合（remote_seiran、既存の小バッジのまま）では表示しない。 */
+function remoteServerInfo(
+  note: Note,
+): { icon: React.ReactNode | null; label: string; bg: string } | null {
+  if (note.user.actorType === "bsky") {
+    return {
+      icon: <img src={blueskyLogo} alt="" className={styles.remoteServerIcon} />,
+      label: "Bluesky",
+      bg: REMOTE_BADGE_FALLBACK_COLOR,
+    };
+  }
+  if (note.user.actorType === "fedi") {
+    // バックエンドはfaviconの実在確認まで済ませてからiconUrlを返すため、ここでは
+    // 有無だけで判定すればよい。取得できなかった場合はアイコン無し（🌐等への
+    // フォールバックはしない）。
+    const iconUrl = note.user.instance?.iconUrl;
+    return {
+      icon: iconUrl ? <img src={iconUrl} alt="" className={styles.remoteServerIcon} /> : null,
+      label: note.user.instance?.name || note.user.domain || "",
+      bg: note.user.instance?.themeColor || REMOTE_BADGE_FALLBACK_COLOR,
+    };
+  }
+  return null;
+}
 
 export function followToggleAction(
   status: "not_following" | "pending" | "accepted" | null,
@@ -280,6 +312,8 @@ function PostContent({
     openQuote(note);
   }
 
+  const remoteInfo = remoteServerInfo(note);
+
   return (
     <>
       <div className={styles.header}>
@@ -315,7 +349,7 @@ function PostContent({
 
           <Link
             to={profilePath(note.user.username, note.user.domain)}
-            className={styles.userBtn}
+            className={styles.avatarLink}
             onClick={(e) => e.stopPropagation()}
           >
             <Avatar
@@ -323,46 +357,76 @@ function PostContent({
               name={note.user.displayName || note.user.username}
               size={large ? 48 : 40}
             />
-            <span className={styles.names}>
-              <span className={styles.displayName}>
-                <EmojiText text={displayName(note)} emojis={note.emojis} />
-              </span>
-              <span className={styles.acct}>
-                {acct(note)}
-                {badge && (
-                  <span className={styles.protoBadge} title={badge.label}>
-                    <TwemojiEmoji emoji={badge.icon} />
-                  </span>
-                )}
-                {delBadges.map((b) => (
-                  <span
-                    key={b.icon}
-                    className={styles.protoBadge}
-                    title={b.label}
-                  >
-                    <TwemojiEmoji emoji={b.icon} />
-                  </span>
-                ))}
-                {visBadge && (
-                  <span className={styles.protoBadge} title={visBadge.label}>
-                    <TwemojiEmoji emoji={visBadge.icon} />
-                  </span>
-                )}
-              </span>
+          </Link>
+          <span className={styles.names}>
+            <span className={styles.nameRow}>
+              <Link
+                to={profilePath(note.user.username, note.user.domain)}
+                className={styles.displayNameLink}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className={styles.displayName}>
+                  <EmojiText text={displayName(note)} emojis={note.emojis} />
+                </span>
+              </Link>
+              {linkToDetail ? (
+                <Link
+                  to={`/notes/${note.id}`}
+                  className={styles.time}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <time>{formatDate(note.createdAt)}</time>
+                </Link>
+              ) : (
+                <time className={styles.time}>{formatDate(note.createdAt)}</time>
+              )}
             </span>
-          </Link>
+            <span className={styles.acctRow}>
+              <Link
+                to={profilePath(note.user.username, note.user.domain)}
+                className={styles.acctLink}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className={styles.acct}>
+                  {acct(note)}
+                  {badge && note.user.actorType === "remote_seiran" && (
+                    <span className={styles.protoBadge} title={badge.label}>
+                      <TwemojiEmoji emoji={badge.icon} />
+                    </span>
+                  )}
+                  {delBadges.map((b) => (
+                    <span
+                      key={b.protocol}
+                      className={styles.protoBadge}
+                      title={b.label}
+                    >
+                      {b.protocol === "bsky" ? (
+                        <img src={blueskyLogo} alt="" className={styles.deliveryBskyIcon} />
+                      ) : (
+                        <TwemojiEmoji emoji="🌐" />
+                      )}
+                    </span>
+                  ))}
+                  {visBadge && (
+                    <span className={styles.protoBadge} title={visBadge.label}>
+                      <TwemojiEmoji emoji={visBadge.icon} />
+                    </span>
+                  )}
+                </span>
+              </Link>
+              {remoteInfo && (
+                <span
+                  className={styles.remoteServerBadge}
+                  style={{ background: remoteInfo.bg }}
+                  title={remoteInfo.label}
+                >
+                  {remoteInfo.icon}
+                  <span className={styles.remoteServerLabel}>{remoteInfo.label}</span>
+                </span>
+              )}
+            </span>
+          </span>
         </div>
-        {linkToDetail ? (
-          <Link
-            to={`/notes/${note.id}`}
-            className={styles.time}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <time>{formatDate(note.createdAt)}</time>
-          </Link>
-        ) : (
-          <time className={styles.time}>{formatDate(note.createdAt)}</time>
-        )}
       </div>
 
       {(note.replyId || note.quoteId) && (

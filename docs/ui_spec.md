@@ -33,6 +33,17 @@ followers-only/directを含む非公開投稿も閲覧できる。
   * **右から2番目（#180）:** `/`（ホーム画面）へ遷移するボタン。
   * **右下:** 新規投稿モーダルを開くボタン。
 * 中央ペイン・右ペインは縦積みの1カラムになる。
+* `body`単独（`frontend/src/index.css`）に`overflow-x: hidden`を設定し、子孫（NoteCard等）が万一横方向にはみ出してもページ全体の実効幅（モバイルブラウザのレイアウトビューポート）が広がらないようにする。モバイルでは中央ペインが画面幅いっぱいのため、これによりフローティングボタン列（`position: fixed`、`left`/`right`指定）の位置基準は常に中央ペインの実寸と一致する（はみ出しに引きずられてボタン位置が画面外へ流れる事故の防止、#長いニックネームはみ出し対策）。`html`側は触らずvisibleのままにすること（CSS仕様の「body→viewport」伝播ルールが効き、bodyが独自スクロールコンテナ化しない）。`html, body`両方や`.shell`等ネストした`div`に付けると、`overflow-x`/`overflow-y`連動の仕様によりそのdiv/bodyが独自の縦スクロールコンテナ化し`window.scrollY`ベースのスクロール位置復元が壊れる（実機確認済みの回帰）。
+
+### 1.2 NoteCardヘッダー（投稿者名・日付・アカウント行）
+
+* 1行目: 表示名（あふれる分は`hidden`+ellipsis）と、右寄せの投稿日付。日付は常に全文表示を優先し、表示名側だけを縮める。
+* 2行目: アカウントID（`@user@domain`、配送先/公開範囲の小バッジ込み、あふれる分は`hidden`+ellipsis）と、その右に続く「リモートサーバー表示」。
+  * ローカル投稿者・seiran間連合（`remote_seiran`）では表示しない（`remote_seiran`は従来通りアカウントID直後の小バッジ🀄のみ）。
+  * Fedi/Bskyのリモート投稿者にのみ表示する。Fediはサーバーアイコン（`note.user.instance.iconUrl`、バックエンドが`<link rel="icon">`/`/favicon.ico`から解決・未取得時は🌐絵文字にフォールバック）＋サーバー名称（`note.user.instance.name`、nodeinfo未取得時はドメイン名で暫定表示）、Bskyは投稿フォームと同じBlueskyロゴSVG＋「Bluesky」固定表示。
+  * ローカル投稿の配送先バッジ（アカウントID直後の小バッジ）も、Bsky配送分は🦋絵文字ではなく同じBlueskyロゴSVGを使う。
+  * 背景色はバックエンドが解決済みの最終値（`note.user.instance.themeColor`）をそのまま使う。フロントエンド側にsoftware別の色分けロジックは持たない（`docs/database.md`の`remote_instance_meta`参照）。リモートが宣言する`themeColor`は暗色もありうるため、文字色は常時濃色固定（サイトのダーク/ライトテーマに関わらず読める必要があるため）に加えて白いドロップシャドウで縁取り、暗い背景色でも文字が沈まないようにする。
+  * アカウントID表示の右からNoteCard右端まで幅いっぱいに広がり（`flex: 1 1 0`）、あふれる分は表示名と同様`hidden`+ellipsisで切る。
 
 ---
 

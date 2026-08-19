@@ -37,8 +37,9 @@ use seiran_common::repository::{
     PgFollowRepository, PgHashtagRepository, PgInstanceDomainRepository, PgListRepository,
     PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository,
     PgPostRepository, PgReactionRepository, PgRelayRepository, PgRemoteEmojiRepository,
-    PgTotpRepository, PgUserRepository, PinnedPostsRepository, PostRepository, ReactionRepository,
-    RelayRepository, RemoteEmojiRepository, TotpRepository, UserRepository,
+    PgRemoteInstanceMetaRepository, PgTotpRepository, PgUserRepository, PinnedPostsRepository,
+    PostRepository, ReactionRepository, RelayRepository, RemoteEmojiRepository,
+    RemoteInstanceMetaRepository, TotpRepository, UserRepository,
 };
 use seiran_common::{
     job_priority, ApClient, ApDeliveryKind, AtpCommitEvent, AtpCommitService, Job, JobQueue,
@@ -84,6 +85,8 @@ pub struct AppState {
     pub miauth_sessions: Arc<RwLock<HashMap<String, MiAuthSession>>>,
     pub local_domain: seiran_common::LocalDomain,
     pub instance_domain: Arc<dyn InstanceDomainRepository>,
+    /// リモートインスタンス（Fedi）のnodeinfoキャッシュ（#NoteCardリモートサーバー表示）。
+    pub remote_instance_meta: Arc<dyn RemoteInstanceMetaRepository>,
     /// OGP対応（`handlers::ogp`）で SPA の index.html を取得する先。未設定時は Docker
     /// 構成のデフォルト（`http://frontend:5173`）を使う。
     pub frontend_origin: String,
@@ -280,6 +283,27 @@ impl AppState {
             tracing::error!("[job] RemoteActorResolve enqueue 失敗 (uri={}): {}", uri, e);
         }
     }
+
+    /// リモートインスタンスのnodeinfo取得ジョブを積む（#NoteCardリモートサーバー表示）。
+    /// `remote_instance_meta` に未登録のドメインを見つけた際、表示のリッチ化目的で積む。
+    pub async fn enqueue_remote_instance_info_resolve(&self, domain: String) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::RemoteInstanceInfoResolve {
+                    domain: domain.clone(),
+                },
+                job_priority::LOW,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] RemoteInstanceInfoResolve enqueue 失敗 (domain={}): {}",
+                domain,
+                e
+            );
+        }
+    }
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り
@@ -347,6 +371,8 @@ pub async fn init_state(
         Arc::new(PgSiteSettingsRepository::new(pool.clone()));
     let instance_domain: Arc<dyn InstanceDomainRepository> =
         Arc::new(PgInstanceDomainRepository::new(pool.clone()));
+    let remote_instance_meta: Arc<dyn RemoteInstanceMetaRepository> =
+        Arc::new(PgRemoteInstanceMetaRepository::new(pool.clone()));
     let actors: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
@@ -425,6 +451,7 @@ pub async fn init_state(
         miauth_sessions: Arc::new(RwLock::new(HashMap::new())),
         local_domain,
         instance_domain,
+        remote_instance_meta,
         frontend_origin: std::env::var("FRONTEND_ORIGIN")
             .unwrap_or_else(|_| "http://frontend:5173".to_string()),
         secrets,
@@ -1006,7 +1033,47 @@ pub fn spawn_startup_tasks(state: &AppState) {
         backfill_identity_events(&state).await;
         backfill_unset_avatar_profiles(&state).await;
         backfill_chat_declarations(&state).await;
+        backfill_remote_instance_meta(&state).await;
     });
+}
+
+/// 既存の全リモートFedi/seiran間連合ドメインのうち`remote_instance_meta`未登録のものを
+/// まとめて`RemoteInstanceInfoResolve`ジョブへ積む（#NoteCardリモートサーバー表示）。
+/// 通常はnotes API呼び出し時の遅延解決（`queries::attach_remote_instance_info`）で
+/// 徐々に埋まっていくが、起動時にこれを走らせることで新規デプロイ直後の
+/// 大量未解決状態（既存ドメイン全件が対象）を素早く解消する。
+/// `icon_url IS NULL`の行も対象に含める: サーバーアイコン取得機能を後から追加した際、
+/// それ以前に解決済みだった行（`icon_url`列自体は追加されているが値は未取得）が
+/// `NOT EXISTS`だけの判定だと永久に再取得されず放置される事故があったため
+/// （2026-08-19実機確認、misskey.dev等の主要インスタンスがこれで固定的に🌐表示のままになった）。
+/// favicon非対応サーバーは毎回再チャレンジすることになるが、起動時のみの発生でありコストは小さい。
+async fn backfill_remote_instance_meta(state: &AppState) {
+    let domains = match sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT a.domain FROM actors a
+         WHERE a.actor_type IN ('fedi', 'remote_seiran') AND a.domain != ''
+           AND NOT EXISTS (
+               SELECT 1 FROM remote_instance_meta rim
+               WHERE rim.domain = a.domain AND rim.icon_url IS NOT NULL
+           )",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("[startup] remote_instance_meta backfill対象取得失敗: {}", e);
+            return;
+        }
+    };
+
+    let total = domains.len();
+    for domain in domains {
+        state.enqueue_remote_instance_info_resolve(domain).await;
+    }
+    tracing::info!(
+        "[startup] remote_instance_meta backfill: {}件のドメインを解決ジョブへ積みました",
+        total
+    );
 }
 
 /// 明示的に有効化した起動時だけ、アバター未設定ユーザーのプロフィールを再コミットする。

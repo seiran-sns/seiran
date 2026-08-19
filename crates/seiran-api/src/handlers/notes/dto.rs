@@ -183,6 +183,63 @@ pub struct NoteUserInfo {
     pub actor_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
+    /// リモート投稿者の出身インスタンス情報（Misskey API `UserLite.instance` 準拠、
+    /// ローカル投稿者では省略）。`queries::attach_remote_instance_info` が事後に埋める
+    /// （`to_note_response` 単体では常に `None`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance: Option<RemoteInstanceInfo>,
+}
+
+/// Misskey本家 `UserLite.instance` に合わせたリモートインスタンス情報。フィールド名・形は
+/// Misskeyクライアント（misskey_dart等）との上位互換のためこの形に揃える（マイケル指摘）。
+/// `theme_color` は宣言値、または未宣言時に既知software代替色・汎用デフォルトへ
+/// フォールバック済みの「表示に使う最終値」（`jobs::remote_instance_info_resolve` 参照）。
+/// クライアント側はこの値をそのまま描画すればよく、software別の色分けロジックは持たない。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteInstanceInfo {
+    pub name: Option<String>,
+    pub software_name: Option<String>,
+    pub software_version: Option<String>,
+    pub icon_url: Option<String>,
+    pub favicon_url: Option<String>,
+    pub theme_color: Option<String>,
+}
+
+/// `actor_type`/`domain` とキャッシュ済みnodeinfoマップから `RemoteInstanceInfo` を組み立てる。
+/// ローカル投稿者は `None`。Bskyは全ドメイン共通の固定値（PDSごとのnodeinfoは存在しないため）。
+/// Fedi/seiran間連合はキャッシュ行があればそれを使い、無ければ`name`をドメイン名にフォールバック
+/// （バックグラウンドジョブが後日取得するまでの暫定表示）。
+pub fn build_instance_info(
+    actor_type: &str,
+    domain: Option<&str>,
+    cached: &std::collections::HashMap<String, seiran_common::repository::RemoteInstanceMeta>,
+) -> Option<RemoteInstanceInfo> {
+    match actor_type {
+        "local" => None,
+        "bsky" => Some(RemoteInstanceInfo {
+            name: Some("Bluesky".to_string()),
+            software_name: Some("bluesky".to_string()),
+            software_version: None,
+            icon_url: None,
+            favicon_url: None,
+            theme_color: None,
+        }),
+        _ => {
+            let domain = domain.filter(|d| !d.is_empty())?;
+            let meta = cached.get(domain);
+            Some(RemoteInstanceInfo {
+                name: meta
+                    .and_then(|m| m.node_name.clone())
+                    .or_else(|| Some(domain.to_string())),
+                software_name: meta.and_then(|m| m.software_name.clone()),
+                software_version: None,
+                icon_url: meta.and_then(|m| m.icon_url.clone()),
+                favicon_url: meta.and_then(|m| m.icon_url.clone()),
+                theme_color: meta.and_then(|m| m.theme_color.clone()),
+            })
+        }
+    }
 }
 
 /// `mention_facets`（`[{"byteStart":N,"byteEnd":M,"did":"did:plc:..."}]`）を使い、`body` 中の
@@ -274,6 +331,7 @@ pub fn to_note_response(
             display_name: p.display_name,
             actor_type,
             avatar_url,
+            instance: None,
         },
         attachments,
         renote_id: p.repost_of_post_id.map(|i| i.to_string()),

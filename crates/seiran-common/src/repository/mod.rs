@@ -25,6 +25,7 @@ pub mod post;
 pub mod reaction;
 pub mod relay;
 pub mod remote_emoji;
+pub mod remote_instance_meta;
 pub mod site_settings;
 pub mod storage_provider;
 pub mod totp;
@@ -61,6 +62,9 @@ pub use post::{
 pub use reaction::{PgReactionRepository, ReactionRepository, ReactorInfo};
 pub use relay::{PgRelayRepository, Relay, RelayError, RelayRepository, RelayStatus};
 pub use remote_emoji::{PgRemoteEmojiRepository, RemoteEmojiRepository, RemoteEmojiRow};
+pub use remote_instance_meta::{
+    PgRemoteInstanceMetaRepository, RemoteInstanceMeta, RemoteInstanceMetaRepository,
+};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage_provider::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider, StorageProviderError,

@@ -465,6 +465,17 @@ export interface Note {
     displayName?: string;
     actorType: string; // "local" | "fedi" | "bsky" | "remote_seiran" | ...
     avatarUrl?: string;
+    /** リモート投稿者の出身インスタンス情報（Misskey API `UserLite.instance` 準拠）。
+     * ローカル投稿者では省略。`themeColor` はバックエンドが宣言値/代替色/デフォルトの
+     * どれかへ解決済みの最終値なので、フロントはそのまま描画すればよい。 */
+    instance?: {
+      name?: string;
+      softwareName?: string;
+      themeColor?: string;
+      /** サーバーアイコン（`<link rel="icon">`優先、無ければ`/favicon.ico`）。
+       * バックエンドが取得できなかった場合は省略（フロントは🌐絵文字にフォールバック）。 */
+      iconUrl?: string;
+    };
   };
   attachments: NoteAttachment[];
   // 7.2 拡張メタデータ（存在する場合のみ）
@@ -656,6 +667,12 @@ interface RawNote {
     actor_type?: string;
     avatarUrl?: string;
     avatar_url?: string;
+    instance?: {
+      name?: string;
+      softwareName?: string;
+      themeColor?: string;
+      iconUrl?: string;
+    };
   };
   attachments?: NoteAttachment[];
   renoteId?: string;
@@ -705,6 +722,7 @@ function normalizeNote(r: RawNote): Note {
       displayName: r.user?.displayName ?? r.user?.display_name,
       actorType: r.user?.actorType ?? r.user?.actor_type ?? "local",
       avatarUrl: r.user?.avatarUrl ?? r.user?.avatar_url,
+      instance: r.user?.instance,
     },
     attachments: r.attachments ?? [],
     renoteId: r.renoteId ?? r.renote_id,

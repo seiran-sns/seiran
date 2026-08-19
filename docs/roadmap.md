@@ -1,5 +1,7 @@
 # 開発ロードマップ
 
+- [x] **NoteCardリモートサーバー表示・長いニックネームのはみ出し修正** — NoteCardヘッダーを表示名+日付／アカウントID+リモートサーバー表示の2行構成へ再編し、長いニックネームがカード右端・投稿日付にはみ出す不具合（`.userContainer`の`min-width:0`欠落が原因）を修正。あわせて`body`（`html`側は触らない）に`overflow-x: hidden`を設定し、はみ出しがモバイルのフローティングボタン位置をずらす連鎖を防止。Fedi/Bskyのリモート投稿には、アカウントID行の右にサーバーアイコン＋サーバー名称（Bskyは固定表示、Fediは`remote_instance_meta`のnodeinfoキャッシュ由来）を背景色付きで表示する新UIを追加し、ローカル投稿の配送先バッジもBsky分は🦋絵文字からBlueskyロゴSVGに変更。バックエンドはMisskey API `UserLite.instance`準拠の`instance`フィールド（`themeColor`/`iconUrl`含む）をnotes API・Misskey互換APIの両方に追加し、リモートインスタンスのnodeinfo・サーバーアイコン（`<link rel="icon">`/`/favicon.ico`）を`RemoteInstanceInfoResolve`ジョブでベストエフォート取得・キャッシュする。既存の全リモートドメインを起動時に一括バックフィルし、新規デプロイ直後の大量未解決状態を素早く解消する。詳細: `docs/database.md`、`docs/architecture.md`、`docs/protocols.md`、`docs/ui_spec.md`
+
 - [x] **Unicode絵文字のtwemoji統一表示** OS/ブラウザごとにグリフが異なるUnicode絵文字（本文・表示名・リアクション・絵文字ピッカー・装飾アイコン等）を、jdecked/twemojiのSVGをセルフホストして統一表示。詳細: `docs/ui_spec.md`「Unicode絵文字の表示（twemoji）」節
 
 - [x] **iPhoneのフォーム自動ズーム防止（#208）** `ComposerEditor`をはじめ、絵文字ピッカー検索欄・認証フォーム・DM・設定画面・管理画面など全ての`input`/`textarea`/`select`の実入力文字サイズを16pxに固定し、iOS Safariのフォーカス時自動拡大を防止。

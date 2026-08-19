@@ -60,6 +60,20 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 子孫が万一横方向にはみ出しても、ページ全体の実効幅（モバイルブラウザの
+ * レイアウトビューポート）が広がらないようにする。`body`単独にのみ指定すること:
+ * `html`側がvisibleのままなら、CSS仕様の「body → viewport」伝播ルールにより
+ * bodyのoverflowはこのdivが独自スクロールコンテナ化せずviewport自体に適用される。
+ * `html, body`両方や`.shell`等ネストしたdivに付けると、overflow-x/overflow-y
+ * 連動の仕様によりそのdivが独自の縦スクロールコンテナ化してしまい、
+ * window.scrollYベースのスクロール位置復元が壊れる（実機確認済みの回帰）。
+ * これが無いと、はみ出しが起きた瞬間に画面下部フローティングボタン群の
+ * position:fixed(left/right指定)の基準がビューポート実寸からずれ、
+ * ボタン位置が画面外へ流れる（#長いニックネームはみ出し対策）。 */
+body {
+  overflow-x: hidden;
+}
+
 a {
   color: inherit;
 }

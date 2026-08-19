@@ -16,8 +16,9 @@ pub mod validation;
 pub use dto::to_note_response;
 pub use dto::{AttachmentResponse, LinkCardResponse, NoteResponse, ReactRequest, ReactionSummary};
 pub use queries::{
-    attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_link_cards_map,
-    fetch_reactions_map, resolve_mention_facets_in_place,
+    attach_poll_votes, attach_remote_instance_info, build_instance_cache, embed_quotes,
+    embed_renotes, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
+    resolve_mention_facets_in_place,
 };
 pub use validation::BSKY_MAX_TEXT_GRAPHEMES;
 
@@ -346,6 +347,7 @@ async fn create_repost(
             display_name,
             actor_type: "local".to_string(),
             avatar_url,
+            instance: None,
         },
         attachments: vec![],
         renote_id: Some(renote_id.to_string()),
@@ -384,6 +386,7 @@ async fn create_repost(
         Some(actor_id),
     )
     .await;
+    attach_remote_instance_info(state, std::slice::from_mut(&mut repost_resp)).await;
     broadcast_new_note(state, actor_id, &repost_resp).await;
 
     Json(repost_resp).into_response()
@@ -857,6 +860,7 @@ async fn create_regular_post(
             display_name,
             actor_type: "local".to_string(),
             avatar_url,
+            instance: None,
         },
         attachments: att_map.remove(&post_id).unwrap_or_default(),
         renote_id: None,
@@ -890,6 +894,7 @@ async fn create_regular_post(
         Some(actor_id),
     )
     .await;
+    attach_remote_instance_info(state, std::slice::from_mut(&mut note_resp)).await;
 
     if visibility == "direct" {
         delivery::broadcast_direct_message(state, actor_id, post_id, &note_resp).await;
@@ -979,6 +984,7 @@ pub async fn home_timeline(
     embed_renotes(&state.db, &mut notes, Some(actor_id)).await;
     embed_quotes(&state.db, &mut notes, Some(actor_id)).await;
     attach_poll_votes(&state.db, &mut notes, Some(actor_id)).await;
+    attach_remote_instance_info(&state, &mut notes).await;
     Json(notes).into_response()
 }
 
@@ -1033,6 +1039,7 @@ pub async fn local_timeline(
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
     embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
+    attach_remote_instance_info(&state, &mut notes).await;
     Json(notes).into_response()
 }
 
@@ -1082,6 +1089,7 @@ pub async fn social_timeline(
     embed_renotes(&state.db, &mut notes, Some(actor_id)).await;
     embed_quotes(&state.db, &mut notes, Some(actor_id)).await;
     attach_poll_votes(&state.db, &mut notes, Some(actor_id)).await;
+    attach_remote_instance_info(&state, &mut notes).await;
     Json(notes).into_response()
 }
 
@@ -1137,6 +1145,7 @@ pub async fn global_timeline(
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
     embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
+    attach_remote_instance_info(&state, &mut notes).await;
     Json(notes).into_response()
 }
 
@@ -1187,6 +1196,7 @@ pub async fn get_note(
     embed_renotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
     embed_quotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
     attach_poll_votes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
+    attach_remote_instance_info(&state, std::slice::from_mut(&mut nr)).await;
     Ok(Json(nr))
 }
 
@@ -1498,7 +1508,9 @@ pub async fn note_context(
     embed_renotes(&state.db, &mut after, my_actor_id).await;
     embed_quotes(&state.db, &mut after, my_actor_id).await;
     attach_poll_votes(&state.db, &mut before, my_actor_id).await;
+    attach_remote_instance_info(&state, &mut before).await;
     attach_poll_votes(&state.db, &mut after, my_actor_id).await;
+    attach_remote_instance_info(&state, &mut after).await;
 
     Ok(Json(NoteContextResponse { before, after }))
 }
@@ -1558,6 +1570,7 @@ pub async fn note_replies(
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
     embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
+    attach_remote_instance_info(&state, &mut notes).await;
 
     Ok(Json(NoteRepliesResponse { notes }))
 }
@@ -1807,6 +1820,7 @@ pub async fn note_reposts(
                 display_name: e.display_name,
                 actor_type: e.actor_type,
                 avatar_url: e.avatar_url,
+                instance: None,
             },
             created_at: e.created_at.to_rfc3339(),
             deleted: e.deleted_at.is_some(),

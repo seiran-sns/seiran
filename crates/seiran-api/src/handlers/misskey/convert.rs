@@ -6,12 +6,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use seiran_common::repository::{Actor, NotificationRow, TimelinePost};
+use seiran_common::repository::{Actor, NotificationRow, RemoteInstanceMeta, TimelinePost};
 
 use crate::handlers::notes::delivery::at_uri_to_bsky_app_url;
+use crate::handlers::notes::dto::build_instance_info;
 use crate::handlers::notes::{
-    fetch_attachments_map, fetch_reactions_map, resolve_mention_facets_in_place,
-    AttachmentResponse, ReactionSummary,
+    build_instance_cache, fetch_attachments_map, fetch_reactions_map,
+    resolve_mention_facets_in_place, AttachmentResponse, ReactionSummary,
 };
 use crate::AppState;
 
@@ -47,6 +48,7 @@ pub fn user_lite(
         is_bot: false,
         is_cat: false,
         emojis: BTreeMap::new(),
+        instance: None,
     }
 }
 
@@ -239,6 +241,7 @@ fn to_misskey_emojis(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn to_misskey_note(
     p: &TimelinePost,
     local_domain: &str,
@@ -246,6 +249,7 @@ fn to_misskey_note(
     reactions: &[ReactionSummary],
     renote_count: i64,
     replies_count: i64,
+    instance_cache: &HashMap<String, RemoteInstanceMeta>,
 ) -> MisskeyNote {
     let mut user = user_lite(
         p.actor_id,
@@ -257,6 +261,7 @@ fn to_misskey_note(
         p.avatar_url.as_deref(),
     );
     user.emojis = to_misskey_emojis(None, p.actor_emoji_map.as_ref());
+    user.instance = build_instance_info(&p.actor_type, Some(&p.domain), instance_cache);
 
     let files: Vec<MisskeyDriveFile> = attachments
         .iter()
@@ -411,6 +416,7 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
+    let instance_cache = build_instance_cache(state, &rows).await;
 
     let mut by_id: HashMap<i64, MisskeyNote> = HashMap::new();
     for r in rows {
@@ -421,7 +427,15 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
         let pc = r.reply_count;
         by_id.insert(
             id,
-            to_misskey_note(&r, &state.local_domain, &atts, &reactions, rc, pc),
+            to_misskey_note(
+                &r,
+                &state.local_domain,
+                &atts,
+                &reactions,
+                rc,
+                pc,
+                &instance_cache,
+            ),
         );
     }
 
@@ -446,6 +460,7 @@ pub async fn build_notes(
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
+    let instance_cache = build_instance_cache(state, &rows).await;
 
     let mut notes: Vec<MisskeyNote> = rows
         .into_iter()
@@ -455,7 +470,15 @@ pub async fn build_notes(
             let reactions = rmap.get(&id).cloned().unwrap_or_default();
             let rc = p.repost_count;
             let pc = p.reply_count;
-            to_misskey_note(&p, &state.local_domain, &atts, &reactions, rc, pc)
+            to_misskey_note(
+                &p,
+                &state.local_domain,
+                &atts,
+                &reactions,
+                rc,
+                pc,
+                &instance_cache,
+            )
         })
         .collect();
 
@@ -665,7 +688,7 @@ mod tests {
             ":blob_cat:": "https://example.com/blob-cat.png"
         }));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
 
         assert_eq!(
             note.emojis.get("blob_cat").map(String::as_str),
@@ -682,7 +705,7 @@ mod tests {
             ":mozu_police:": "https://remote.example/mozu-police.png"
         }));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
 
         assert_eq!(
             note.emojis.get("mozu_police").map(String::as_str),
@@ -699,7 +722,7 @@ mod tests {
         let mut p = base_post();
         p.post_ap_object_id = Some(format!("https://{}/notes/{}", LOCAL_DOMAIN, p.id));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
 
         assert_eq!(note.uri, None);
         assert_eq!(note.url, None);
@@ -713,7 +736,7 @@ mod tests {
         p.actor_type = "fedi".to_string();
         p.post_ap_object_id = Some("https://remote.example/notes/xyz".to_string());
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
 
         assert_eq!(
             note.uri.as_deref(),
@@ -733,7 +756,7 @@ mod tests {
         p.actor_type = "bsky".to_string();
         p.post_at_uri = Some("at://did:plc:abc123/app.bsky.feed.post/xyz".to_string());
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
 
         assert_eq!(note.uri, None);
         assert_eq!(

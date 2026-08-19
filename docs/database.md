@@ -46,6 +46,7 @@ ID 採番は2系統ある。
 | `atp_blobs` | ATP `uploadBlob` で受信したバイナリ |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP 設定、Jetstream カーソル等の汎用格納庫） |
 | `instance_domain` | 自ホストドメインの確定値（単一行のみ、一度確定したら不変） |
+| `remote_instance_meta` | リモートインスタンス（`actors.domain`単位）のnodeinfoキャッシュ（NoteCardリモートサーバー表示用） |
 | `email_verifications` / `email_changes` / `password_resets` | 認証系のワンタイムトークン |
 | `user_totp` / `user_totp_recovery_codes` / `totp_disable_requests` | TOTP設定、使い切りリカバリーコード、メール経由の解除トークン |
 | `user_passkeys` / `passkey_challenges` | 複数WebAuthn credentialと短命な登録・認証チャレンジ |
@@ -162,6 +163,12 @@ AP受信（投稿本文・表示名・絵文字リアクションのいずれか
 
 ### `instance_domain`
 自ホストドメインの確定値を持つ。`site_settings`（いつでもPATCH経由で書き換え可能な汎用設定）とは別の専用テーブルにしているのは、ドメイン変更が`actors.domain`・PLC DID Document・`ap_uri`に深く食い込みDB整合性を崩壊させるため、「一度確定したら不変」を構造的に保証したいから。`id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1)`で単一行のみを許容し、このテーブルへの`UPDATE`文はコード上どこにも書かない設計にしている（レビューで機械的に確認できる）。`repository::InstanceDomainRepository::confirm`は`INSERT ... ON CONFLICT (id) DO NOTHING`による冪等な確定操作のみを提供する。Rust側の実行時表現は`seiran_common::LocalDomain`（`Arc<OnceLock<String>>`ラッパー、起動時に一度だけこのテーブルを読み込む）。
+
+### `remote_instance_meta`
+
+`domain`（`actors.domain`と同一値）をPKに持つ、Fedi/seiran間連合の相手サーバー1台につき1行のnodeinfoキャッシュ。`software_name`/`node_name`/`theme_color`/`icon_url`を保持し、更新はしない（`ON CONFLICT (domain) DO UPDATE`の全列上書き、`jobs::remote_instance_info_resolve`が唯一の書き込み元）。`theme_color`は「リモートが宣言した値、または未宣言時に既知フォーク（fedibird/kmyblue/mitra/akkoma）固有色・汎用デフォルト（薄いグレー）へフォールバックした最終表示値」であり、nodeinfo未対応サーバーも含め常に非NULLになる（フロントエンド・Misskey互換クライアントはこの値をそのまま描画すればよく、software別の色分けロジックを持たない設計、Misskey API `UserLite.instance.themeColor` 上位互換）。`icon_url`はサーバーホームページの`<link rel="icon">`（無ければ`/favicon.ico`を実際に取得できるか検証した上で）から解決したサーバーアイコンURLで、取得できなければNULL（フロントエンドは🌐絵文字にフォールバック）。Bskyはこのテーブルを使わず、notes API側で`{name: "Bluesky", softwareName: "bluesky"}`を固定値合成する（PDSごとのnodeinfoが存在しないため）。
+
+notes API / Misskey互換API がノート一覧を組み立てる際、対象ドメインが未キャッシュならその場で`RemoteInstanceInfoResolve`ジョブを積み、今回のレスポンスにはドメイン名を暫定表示名としたフォールバック値を返す（次回以降のリクエストで正式なnodeName/themeColor/icon_urlに置き換わる、`remote_actor_resolve`と同じ「表示のリッチ化はベストエフォート」方針）。加えて`seiran-api::spawn_startup_tasks`が起動のたびに、`remote_instance_meta`未登録の既存リモートドメインを全件まとめて解決ジョブへ積む（新規デプロイ直後に大量の未解決ドメインが残る問題を素早く解消するための起動時バックフィル。解決済みドメインは対象外なので通常運用時のコストは新規ドメイン分のみ）。
 
 ### `app_tokens`
 MiAuth（`/api/miauth/:session_id/authorize`）認可成立時に発行するJWTは自社ログインと同じ`LocalAuthProvider`を再利用しており、専用のトークン形式を持たない。本テーブルはそのJWTの`jti`（クレームに追加済み）をキーに、クライアント名・発行日時・無効化日時を記録する管理台帳で、JWT自体の検証ロジックには関与しない。認証ミドルウェア（`extract_auth`）はトークン検証成功後に必ず`app_tokens.is_revoked(jti)`を照会し、`revoked_at`が立っていれば拒否する。**このテーブルに行が無いjti（自社ログイン・setup等）は「管理対象外」として常に有効**として扱う（全トークンを網羅する台帳ではない）。設定画面の一覧・無効化操作は本人（`user_id`一致）のみ可能。

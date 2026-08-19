@@ -75,12 +75,16 @@ export function protocolBadge(actorType: string): { icon: string; label: string 
   }
 }
 
-/** ローカル投稿の配送先バッジ（Fedi配送あり=🌐、Bsky配送あり=🦋）。ローカル投稿以外は空。 */
-export function deliveryBadges(note: Note): { icon: string; label: string }[] {
+/** ローカル投稿の配送先バッジ。`protocol`はアイコン文字列ではなく配送先そのものを表す
+ * 判別子で、描画側（NoteCard）がこれを見てアイコン（絵文字/SVGロゴ等）を選ぶ。
+ * ローカル投稿以外は空。 */
+export function deliveryBadges(
+  note: Note,
+): { protocol: "fedi" | "bsky"; label: string }[] {
   if (note.user.actorType !== "local") return [];
-  const badges: { icon: string; label: string }[] = [];
-  if (note.deliverFedi) badges.push({ icon: "🌐", label: i18n.t("home:badges.deliveredFedi") });
-  if (note.deliverBsky) badges.push({ icon: "🦋", label: i18n.t("home:badges.deliveredBsky") });
+  const badges: { protocol: "fedi" | "bsky"; label: string }[] = [];
+  if (note.deliverFedi) badges.push({ protocol: "fedi", label: i18n.t("home:badges.deliveredFedi") });
+  if (note.deliverBsky) badges.push({ protocol: "bsky", label: i18n.t("home:badges.deliveredBsky") });
   return badges;
 }
 

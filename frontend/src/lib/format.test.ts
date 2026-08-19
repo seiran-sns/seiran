@@ -122,14 +122,14 @@ describe("deliveryBadges", () => {
     expect(deliveryBadges(makeNote({ user: { id: 1, username: "a", actorType: "fedi" }, deliverFedi: true }))).toEqual([]);
   });
 
-  it("Fedi配送ありのローカル投稿は🌐バッジを含む", () => {
+  it("Fedi配送ありのローカル投稿はfediバッジを含む", () => {
     const badges = deliveryBadges(makeNote({ deliverFedi: true }));
-    expect(badges.map((b) => b.icon)).toContain("🌐");
+    expect(badges.map((b) => b.protocol)).toContain("fedi");
   });
 
-  it("Bsky配送ありのローカル投稿は🦋バッジを含む", () => {
+  it("Bsky配送ありのローカル投稿はbskyバッジを含む", () => {
     const badges = deliveryBadges(makeNote({ deliverBsky: true }));
-    expect(badges.map((b) => b.icon)).toContain("🦋");
+    expect(badges.map((b) => b.protocol)).toContain("bsky");
   });
 
   it("配送先が無ければ空配列", () => {

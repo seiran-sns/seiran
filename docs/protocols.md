@@ -92,6 +92,8 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 
 `GET /nodeinfo/2.1`の`metadata.features`には`"emoji_reaction"`を含める。kmyblue（Mastodonフォーク）はカスタム絵文字リアクション対応の可否を、既知softwareリスト（Misskey系等）に載っていないインスタンスに対してはこのフィールドで判定するため（#167）。
 
+**リモートnodeinfoの取得（受信側）**: 自分の`GET /nodeinfo/2.1`とは逆に、リモートFedi/seiran間連合の相手サーバーの`/.well-known/nodeinfo` → 実体ドキュメントを`jobs::remote_instance_info_resolve`が取得し、`software.name`/`metadata.nodeName`/`metadata.themeColor`を`remote_instance_meta`へキャッシュする（NoteCardリモートサーバー表示、`docs/database.md`参照）。`themeColor`未宣言時のfedibird/kmyblue/mitra/akkoma向け代替色もこのジョブ内で解決する。Bskyはこの経路を使わない（`docs/database.md`参照）。
+
 ### HTTP Signatures 検証
 1. `Digest` ヘッダー必須（SHA-256ボディハッシュと一致確認）
 2. `Signature` の `headers=` に `digest` が含まれることを確認

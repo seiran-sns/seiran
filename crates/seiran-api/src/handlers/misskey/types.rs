@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+use crate::handlers::notes::dto::RemoteInstanceInfo;
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MisskeyUserLite {
@@ -22,6 +24,10 @@ pub struct MisskeyUserLite {
     /// `name`（表示名）中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub emojis: BTreeMap<String, String>,
+    /// Misskey本家準拠のリモートインスタンス情報（`host`がある場合のみ設定されうる）。
+    /// 現状 `to_misskey_note` 経由（notes系エンドポイント）でのみ埋まる。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance: Option<RemoteInstanceInfo>,
 }
 
 /// `misskey_dart` の `UserDetailedNotMe.fromJson`（`/api/users/show` が返す形）は
@@ -217,6 +223,7 @@ mod tests {
                     is_bot: false,
                     is_cat: false,
                     emojis: BTreeMap::new(),
+                    instance: None,
                 },
                 created_at: "2026-01-01T00:00:00+00:00".to_owned(),
                 description: None,

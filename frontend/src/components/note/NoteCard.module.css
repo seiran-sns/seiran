@@ -63,22 +63,12 @@
 }
 
 .header {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
   margin-bottom: 6px;
 }
 
-.userBtn {
+.avatarLink {
+  flex: 0 0 auto;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-  min-width: 0;
   color: inherit;
   text-decoration: none;
 }
@@ -97,10 +87,31 @@
   font-size: 1.1rem;
 }
 
+/* ニックネーム行・アカウント行の2行を、日付/リモートサーバー表示それぞれと
+ * 同じ行内に持つ縦積みコンテナ。`.userContainer`がavatarと合わせて
+ * flex:1で幅を確保しているため、この2行はどちらもカード右端まで
+ * 使える（日付は1行目のみ・リモートサーバー表示は2行目のみを圧迫する）。 */
 .names {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1 1 auto;
+  gap: 1px;
+}
+
+.nameRow,
+.acctRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.displayNameLink {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
 }
 
 .displayName {
@@ -110,10 +121,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: block;
 }
 
-.userBtn:hover .displayName {
+.displayNameLink:hover .displayName {
   text-decoration: underline;
+}
+
+.acctLink {
+  min-width: 0;
+  flex-shrink: 1;
+  color: inherit;
+  text-decoration: none;
 }
 
 .acct {
@@ -129,6 +148,63 @@
 
 .protoBadge {
   font-size: 0.72rem;
+}
+
+/* 配送先バッジ内のBlueskyロゴ（🦋絵文字の代わり）。TwemojiEmoji（1.2em角）と
+ * 見た目の大きさを揃える。 */
+.deliveryBskyIcon {
+  height: 1.2em;
+  width: 1.2em;
+  vertical-align: -0.2em;
+  object-fit: contain;
+}
+
+/* ── リモートサーバー表示（Fedi/Bsky）。アカウント行の残り幅いっぱいに広がり、
+ * あふれる分はhiddenで切る（ニックネームと同じ方針）。 */
+.remoteServerBadge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 1px 8px 1px 6px;
+  line-height: 1.5;
+}
+
+.remoteServerIcon {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+}
+
+.remoteServerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 600;
+  /* text-shadowは±1pxはみ出すため、paddingが無いとoverflow:hiddenで
+   * 左右端の縁取りだけ欠けてしまう。 */
+  padding-left: 1px;
+  padding-right: 1px;
+  /* 背景はリモートが宣言した任意のthemeColor（暗色もありうる）なので、サイトの
+   * ダーク/ライトテーマに関わらず常に濃色固定にし（テーマ変数は不使用）、
+   * さらに白いドロップシャドウで縁取ることで暗い背景色でも文字が沈まないようにする。 */
+  color: #3a3a3a;
+  /* ぼかしのハローではなく縁取りにする。斜め4方向だけ・blur無しだと上下左右に
+   * 隙間ができて輪郭がカクつくため、上下左右4方向も足し、1pxだけblurして
+   * 継ぎ目を滑らかにする。 */
+  text-shadow:
+    -1px -1px 1px #fff,
+    1px -1px 1px #fff,
+    -1px 1px 1px #fff,
+    1px 1px 1px #fff,
+    0 -1px 1px #fff,
+    0 1px 1px #fff,
+    -1px 0 1px #fff,
+    1px 0 1px #fff;
 }
 
 .time {
@@ -569,8 +645,14 @@
 /* ── 投稿者ホバー時のフォロースライドスイッチ ────────────────────── */
 .userContainer {
   position: relative;
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  /* min-width:0が無いと、子孫(.displayName/.acct)にoverflow:hidden+ellipsisを
+   * 設定していても、このflexアイテム自体が中身の全幅（＝長いニックネームの
+   * 実寸）まで縮まずに描画され、カード右端・投稿日付の上にはみ出す。 */
+  min-width: 0;
 }
 
 .followWidgetPopover {

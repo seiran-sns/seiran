@@ -13,8 +13,8 @@ use crate::error::ApiError;
 use crate::AppState;
 
 use super::dto::{
-    apply_mention_facets, to_note_response, AttachmentResponse, LinkCardResponse, NoteResponse,
-    ReactionSummary,
+    apply_mention_facets, build_instance_info, to_note_response, AttachmentResponse,
+    LinkCardResponse, NoteResponse, ReactionSummary,
 };
 
 /// 認証中アクターの回答選択肢を通常投稿と埋め込みリポスト元の `poll.votedByMe` へ付与する。
@@ -474,6 +474,100 @@ pub async fn fetch_reactions_map(
         });
     }
     map
+}
+
+/// `TimelinePost` 群からリモートドメインを収集し、`remote_instance_meta` キャッシュを
+/// まとめて引く（Misskey互換API側、`misskey::convert::to_misskey_note` 呼び出し前に使う）。
+/// 未キャッシュのドメインは `RemoteInstanceInfoResolve` ジョブを積む。
+pub async fn build_instance_cache(
+    state: &AppState,
+    posts: &[seiran_common::repository::TimelinePost],
+) -> HashMap<String, seiran_common::repository::RemoteInstanceMeta> {
+    let domains: HashSet<String> = posts
+        .iter()
+        .filter(|p| !matches!(p.actor_type.as_str(), "local" | "bsky"))
+        .filter(|p| !p.domain.is_empty())
+        .map(|p| p.domain.clone())
+        .collect();
+    if domains.is_empty() {
+        return HashMap::new();
+    }
+    let domain_list: Vec<String> = domains.into_iter().collect();
+    let cached = state
+        .remote_instance_meta
+        .get_many(&domain_list)
+        .await
+        .unwrap_or_default();
+    for domain in &domain_list {
+        if !cached.contains_key(domain) {
+            state
+                .enqueue_remote_instance_info_resolve(domain.clone())
+                .await;
+        }
+    }
+    cached
+}
+
+/// リモート投稿者（renote/quote越しも含む）のインスタンス情報（Misskey `UserLite.instance`
+/// 準拠、#NoteCardリモートサーバー表示）を一括解決して各 `NoteResponse.user.instance` へ埋める。
+/// キャッシュ未登録のドメインは `RemoteInstanceInfoResolve` ジョブを積み、今回は
+/// ドメイン名を暫定表示名としたフォールバック値を返す（次回以降のリクエストで正式な
+/// nodeName/themeColorに置き換わる）。`embed_renotes`/`embed_quotes` の後に呼ぶこと。
+pub async fn attach_remote_instance_info(state: &AppState, notes: &mut [NoteResponse]) {
+    fn collect_domains(n: &NoteResponse, domains: &mut HashSet<String>) {
+        if !matches!(n.user.actor_type.as_str(), "local" | "bsky") {
+            if let Some(d) = n.user.domain.as_deref().filter(|d| !d.is_empty()) {
+                domains.insert(d.to_string());
+            }
+        }
+        if let Some(r) = n.renote.as_deref() {
+            collect_domains(r, domains);
+        }
+        if let Some(q) = n.quote.as_deref() {
+            collect_domains(q, domains);
+        }
+    }
+
+    let mut domains = HashSet::new();
+    for n in notes.iter() {
+        collect_domains(n, &mut domains);
+    }
+    // Bskyは固定値のためキャッシュ対象ドメインが空でも`apply`は常に実行する（早期returnしない）。
+    let domain_list: Vec<String> = domains.iter().cloned().collect();
+
+    let cached = if domain_list.is_empty() {
+        HashMap::new()
+    } else {
+        state
+            .remote_instance_meta
+            .get_many(&domain_list)
+            .await
+            .unwrap_or_default()
+    };
+
+    for domain in &domain_list {
+        if !cached.contains_key(domain) {
+            state
+                .enqueue_remote_instance_info_resolve(domain.clone())
+                .await;
+        }
+    }
+
+    fn apply(
+        n: &mut NoteResponse,
+        cached: &HashMap<String, seiran_common::repository::RemoteInstanceMeta>,
+    ) {
+        n.user.instance = build_instance_info(&n.user.actor_type, n.user.domain.as_deref(), cached);
+        if let Some(r) = n.renote.as_deref_mut() {
+            apply(r, cached);
+        }
+        if let Some(q) = n.quote.as_deref_mut() {
+            apply(q, cached);
+        }
+    }
+    for n in notes.iter_mut() {
+        apply(n, &cached);
+    }
 }
 
 /// リポスト取り消し（Undo）で必要な情報が見つからなかった場合に返すエラー。
