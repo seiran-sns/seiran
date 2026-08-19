@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ListSummary, Note } from "../api/client";
@@ -243,9 +243,24 @@ export default function HomePage() {
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
 
+  // スクロールが最上部にない状態で先頭挿入すると、増えた分だけ見えているポストが
+  // 下へ押しやられてしまう。最上部でない場合は挿入前のscrollHeight/scrollYを控えておき、
+  // DOM反映直後（下記useLayoutEffect）に増えた高さぶんだけscrollYを足して見た目を相殺する。
+  const scrollAdjustRef = useRef<{ scrollHeight: number; scrollY: number } | null>(null);
+
   const prepend = useCallback((note: Note, animate = false) => {
+    const preserveScroll = window.scrollY > 0;
+    if (preserveScroll) {
+      scrollAdjustRef.current = {
+        scrollHeight: document.documentElement.scrollHeight,
+        scrollY: window.scrollY,
+      };
+    }
     setNotes((prev) => (prev.some((n) => n.id === note.id) ? prev : [note, ...prev]));
-    if (animate) {
+    // push-downアニメーション（.entering、max-heightを0.4秒かけて展開）は高さがじわじわ
+    // 伸びるため、非最上部でのスクロール補正（差分を一度に足し込む方式）と噛み合わない。
+    // 最上部にいる時だけ演出する。
+    if (animate && !preserveScroll) {
       setEnteringIds((prev) => new Set(prev).add(note.id));
       const t = window.setTimeout(() => {
         setEnteringIds((prev) => {
@@ -257,6 +272,16 @@ export default function HomePage() {
       timers.current.push(t);
     }
   }, [setNotes]);
+
+  useLayoutEffect(() => {
+    const adjust = scrollAdjustRef.current;
+    scrollAdjustRef.current = null;
+    if (!adjust) return;
+    const diff = document.documentElement.scrollHeight - adjust.scrollHeight;
+    if (diff !== 0) {
+      window.scrollTo(0, adjust.scrollY + diff);
+    }
+  }, [notes]);
 
   // リアルタイム更新（#37）: 表示中タブに対応するチャンネルを購読し、届いたポストを
   // アニメ付きで先頭挿入する。タブ切替のたびに旧チャンネルをdisconnectし新チャンネルへ
