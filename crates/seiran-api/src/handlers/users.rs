@@ -14,8 +14,9 @@ use seiran_common::ApDeliveryKind;
 
 use crate::error::ApiError;
 use crate::handlers::notes::{
-    attach_poll_votes, embed_quotes, embed_renotes, fetch_attachments_map, fetch_link_cards_map,
-    fetch_reactions_map, resolve_mention_facets_in_place, to_note_response, NoteResponse,
+    attach_poll_votes, attach_remote_instance_info, embed_quotes, embed_renotes,
+    fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
+    resolve_mention_facets_in_place, to_note_response, NoteResponse,
 };
 use crate::middleware::{extract_auth, MaybeAuthedUser};
 use crate::AppState;
@@ -116,6 +117,7 @@ pub async fn user_posts(
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
     embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
+    attach_remote_instance_info(&state, &mut notes).await;
 
     Json(notes).into_response()
 }
@@ -701,6 +703,8 @@ async fn build_profile_response(
     }
     attach_poll_votes(&state.db, &mut recent_posts, my_actor_id).await;
     attach_poll_votes(&state.db, &mut pinned_posts, my_actor_id).await;
+    attach_remote_instance_info(state, &mut recent_posts).await;
+    attach_remote_instance_info(state, &mut pinned_posts).await;
 
     // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
     let avatar_url: Option<String> = state

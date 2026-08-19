@@ -18,8 +18,8 @@ use crate::AppState;
 
 use super::notes::dto::{to_note_response, NoteResponse, TimelineQuery};
 use super::notes::{
-    fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
-    resolve_mention_facets_in_place,
+    attach_remote_instance_info, fetch_attachments_map, fetch_link_cards_map,
+    fetch_reactions_map, resolve_mention_facets_in_place,
 };
 
 #[derive(Serialize, Clone)]
@@ -114,7 +114,7 @@ pub async fn sessions(
     let mut att_map = fetch_attachments_map(&state.db, &last_post_ids).await;
     let mut lc_map = fetch_link_cards_map(&state.db, &last_post_ids).await;
     let rmap = fetch_reactions_map(&state.db, &last_post_ids, Some(actor_id)).await;
-    let mut last_post_by_id: HashMap<i64, NoteResponse> = last_posts
+    let mut last_post_list: Vec<NoteResponse> = last_posts
         .into_iter()
         .map(|p| {
             let id = p.id;
@@ -124,8 +124,13 @@ pub async fn sessions(
                 lc_map.remove(&id).unwrap_or_default(),
             );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
-            (id, nr)
+            nr
         })
+        .collect();
+    attach_remote_instance_info(&state, &mut last_post_list).await;
+    let mut last_post_by_id: HashMap<i64, NoteResponse> = last_post_list
+        .into_iter()
+        .filter_map(|nr| nr.id.parse::<i64>().ok().map(|id| (id, nr)))
         .collect();
 
     let result: Vec<DmSessionResponse> = summaries
@@ -186,7 +191,7 @@ pub async fn thread_messages(
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
-    let notes: Vec<NoteResponse> = rows
+    let mut notes: Vec<NoteResponse> = rows
         .into_iter()
         .map(|p| {
             let id = p.id;
@@ -199,6 +204,7 @@ pub async fn thread_messages(
             nr
         })
         .collect();
+    attach_remote_instance_info(&state, &mut notes).await;
     Json(notes).into_response()
 }
 

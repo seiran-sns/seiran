@@ -4,6 +4,9 @@
 //! notes API / Misskey互換API がノート一覧を組み立てる際、キャッシュ未登録のドメインを
 //! 見つけるとこのジョブを積む（`AppState::enqueue_remote_instance_info_resolve`）。
 //! 取得できてもできなくても必ず1行キャッシュする（未対応サーバーへ毎回リトライしないため）。
+//! `node_name`（サーバー名称）はnodeinfoの`metadata.nodeName`を優先し、未宣言なら
+//! トップページの`<title>`タグへフォールバックする（両方無ければ読み出し側
+//! `build_instance_info` がドメイン名で暫定表示する）。
 //! `theme_color` はリモートの宣言値を優先し、未宣言なら既知フォーク固有色→汎用デフォルト
 //! （薄いグレー）の順にフォールバックした「表示に使う最終値」を書き込む（フロントエンドは
 //! この値をそのまま描画するだけでよい設計、Misskey API `UserLite.instance.themeColor` 上位互換）。
@@ -93,27 +96,82 @@ fn extract_favicon_link(html: &str) -> Option<String> {
     None
 }
 
-/// サーバーアイコンURLを解決する。まず`<link rel="icon">`をトップページHTMLから探し、
-/// 無ければ`/favicon.ico`を実際に取得できるか試す（存在しないURLをそのまま返すと
-/// フロントで壊れた画像アイコンになるため）。どちらも失敗すれば`None`。
-async fn fetch_favicon_url(domain: &str) -> Option<String> {
+/// `<title>...</title>`の中身を抽出する（前後空白除去・HTMLエンティティデコード、空なら`None`）。
+fn extract_title(html: &str) -> Option<String> {
+    let re = Regex::new(r#"(?is)<title[^>]*>(.*?)</title>"#).ok()?;
+    let raw = re.captures(html)?.get(1)?.as_str().trim();
+    if raw.is_empty() {
+        return None;
+    }
+    // `node_name` は VARCHAR(255)。DB列長を超える<title>で INSERT が失敗しないよう
+    // 文字数（バイト数ではなく）で切り詰める。
+    Some(
+        html_escape::decode_html_entities(raw)
+            .chars()
+            .take(255)
+            .collect(),
+    )
+}
+
+/// Mastodon系に多い`<title>`の「{ドメイン} - {サイト名}」（逆順の「{サイト名} - {ドメイン}」も
+/// 稀にある）という慣習に対応し、ドメイン部分だけ取り除く
+/// （例: "fedibird.com - Fedibird" → "Fedibird"、マイケル指摘）。
+/// `to_ascii_lowercase()`はASCIIのみを変換しバイト長を変えないため、
+/// 比較用に小文字化した文字列上で見つけたバイト位置でそのまま元の`title`を安全にスライスできる。
+fn strip_domain_from_title(title: &str, domain: &str) -> String {
+    let title_lower = title.to_ascii_lowercase();
+    let domain_lower = domain.to_ascii_lowercase();
+
+    let prefix = format!("{domain_lower} - ");
+    let stripped = if title_lower.starts_with(&prefix) {
+        Some(title[prefix.len()..].trim())
+    } else {
+        let suffix = format!(" - {domain_lower}");
+        if title_lower.ends_with(&suffix) {
+            Some(title[..title.len() - suffix.len()].trim())
+        } else {
+            None
+        }
+    };
+    // 剥がした結果が空（titleが"{ドメイン} - "だけだった等）なら元のtitleを使う。
+    match stripped {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => title.to_string(),
+    }
+}
+
+/// トップページHTMLを1回だけ取得し、サーバーアイコンURLと`<title>`をまとめて解決する。
+/// アイコンはまず`<link rel="icon">`をHTMLから探し、無ければ`/favicon.ico`を実際に
+/// 取得できるか試す（存在しないURLをそのまま返すとフロントで壊れた画像になるため）。
+/// `title`はnodeinfoが`metadata.nodeName`を宣言しないサーバー向けのサーバー名フォールバック
+/// （`build_instance_info`のドメイン名フォールバックより優先、マイケル指摘）。
+async fn fetch_homepage_meta(domain: &str) -> (Option<String>, Option<String>) {
     let home_url = format!("https://{domain}/");
+    let mut icon_url = None;
+    let mut title = None;
     if let Ok((bytes, _)) = fetch_validated_with_accept(&home_url, ACCEPT_HTML, "text/html").await
     {
         let html = String::from_utf8_lossy(&bytes);
         if let Some(href) = extract_favicon_link(&html) {
             if let Ok(resolved) = reqwest::Url::parse(&home_url).and_then(|base| base.join(&href))
             {
-                return Some(resolved.to_string());
+                icon_url = Some(resolved.to_string());
             }
+        }
+        title = extract_title(&html).map(|t| strip_domain_from_title(&t, domain));
+    }
+
+    if icon_url.is_none() {
+        let fallback = format!("https://{domain}/favicon.ico");
+        if fetch_validated_with_accept(&fallback, ACCEPT_IMAGE, "image/*")
+            .await
+            .is_ok()
+        {
+            icon_url = Some(fallback);
         }
     }
 
-    let fallback = format!("https://{domain}/favicon.ico");
-    fetch_validated_with_accept(&fallback, ACCEPT_IMAGE, "image/*")
-        .await
-        .ok()
-        .map(|_| fallback)
+    (icon_url, title)
 }
 
 fn pick_nodeinfo_link(links: &[NodeinfoLink]) -> Option<&str> {
@@ -160,7 +218,10 @@ pub async fn handle(domain: String, ctx: Arc<JobContext>) -> Result<(), String> 
         .filter(|c| is_valid_hex_color(c))
         .or_else(|| software_name.as_deref().and_then(fallback_color_for_software).map(str::to_string))
         .unwrap_or_else(|| DEFAULT_THEME_COLOR.to_string());
-    let icon_url = fetch_favicon_url(&domain).await;
+    let (icon_url, homepage_title) = fetch_homepage_meta(&domain).await;
+    // nodeinfoの metadata.nodeName を優先し、無ければ<title>タグへフォールバックする
+    // （ドメイン名そのものへのフォールバックは読み出し側 build_instance_info が担う）。
+    let node_name = node_name.or(homepage_title);
 
     repo.upsert(
         &domain,
@@ -201,4 +262,57 @@ async fn fetch_nodeinfo(
         None => (None, None),
     };
     Ok((software_name, node_name, theme_color))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_domain_prefix() {
+        assert_eq!(
+            strip_domain_from_title("fedibird.com - Fedibird", "fedibird.com"),
+            "Fedibird"
+        );
+    }
+
+    #[test]
+    fn strips_domain_prefix_case_insensitively() {
+        assert_eq!(
+            strip_domain_from_title("Fedibird.COM - Fedibird", "fedibird.com"),
+            "Fedibird"
+        );
+    }
+
+    #[test]
+    fn strips_domain_suffix() {
+        assert_eq!(
+            strip_domain_from_title("Fedibird - fedibird.com", "fedibird.com"),
+            "Fedibird"
+        );
+    }
+
+    #[test]
+    fn keeps_title_unchanged_when_domain_not_present() {
+        assert_eq!(
+            strip_domain_from_title("Misskey.dev", "misskey.dev"),
+            "Misskey.dev"
+        );
+    }
+
+    #[test]
+    fn keeps_original_title_when_stripped_result_would_be_empty() {
+        assert_eq!(
+            strip_domain_from_title("fedibird.com - ", "fedibird.com"),
+            "fedibird.com - "
+        );
+    }
+
+    #[test]
+    fn handles_multibyte_title_without_panicking() {
+        assert_eq!(
+            strip_domain_from_title("misskey.dev - みすきー公式", "misskey.dev"),
+            "みすきー公式"
+        );
+    }
 }

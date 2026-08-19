@@ -1042,18 +1042,21 @@ pub fn spawn_startup_tasks(state: &AppState) {
 /// 通常はnotes API呼び出し時の遅延解決（`queries::attach_remote_instance_info`）で
 /// 徐々に埋まっていくが、起動時にこれを走らせることで新規デプロイ直後の
 /// 大量未解決状態（既存ドメイン全件が対象）を素早く解消する。
-/// `icon_url IS NULL`の行も対象に含める: サーバーアイコン取得機能を後から追加した際、
-/// それ以前に解決済みだった行（`icon_url`列自体は追加されているが値は未取得）が
-/// `NOT EXISTS`だけの判定だと永久に再取得されず放置される事故があったため
-/// （2026-08-19実機確認、misskey.dev等の主要インスタンスがこれで固定的に🌐表示のままになった）。
-/// favicon非対応サーバーは毎回再チャレンジすることになるが、起動時のみの発生でありコストは小さい。
+/// `icon_url`/`node_name`がNULLの行も対象に含める: サーバーアイコン取得・
+/// `<title>`タグフォールバック機能をそれぞれ後から追加した際、それ以前に解決済み
+/// だった行（列自体は追加されているが値は未取得）が`NOT EXISTS`だけの判定だと
+/// 永久に再取得されず放置される事故があったため（2026-08-19実機確認、misskey.dev等の
+/// 主要インスタンスがこれで固定的に🌐表示・ドメイン名表示のままになった）。
+/// 非対応サーバーは毎回再チャレンジすることになるが、起動時のみの発生でありコストは小さい。
 async fn backfill_remote_instance_meta(state: &AppState) {
     let domains = match sqlx::query_scalar::<_, String>(
         "SELECT DISTINCT a.domain FROM actors a
          WHERE a.actor_type IN ('fedi', 'remote_seiran') AND a.domain != ''
            AND NOT EXISTS (
                SELECT 1 FROM remote_instance_meta rim
-               WHERE rim.domain = a.domain AND rim.icon_url IS NOT NULL
+               WHERE rim.domain = a.domain
+                 AND rim.icon_url IS NOT NULL
+                 AND rim.node_name IS NOT NULL
            )",
     )
     .fetch_all(&state.db)

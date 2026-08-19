@@ -296,8 +296,8 @@ async fn fetch_and_respond(
     session_id: Option<String>,
 ) -> axum::response::Response {
     use super::notes::{
-        fetch_attachments_map, fetch_link_cards_map, resolve_mention_facets_in_place,
-        to_note_response,
+        attach_remote_instance_info, fetch_attachments_map, fetch_link_cards_map,
+        resolve_mention_facets_in_place, to_note_response,
     };
     use seiran_common::repository::TimelinePost;
 
@@ -330,7 +330,7 @@ async fn fetch_and_respond(
     let mut att_map = fetch_attachments_map(&state.db, &row_ids).await;
     let mut lc_map = fetch_link_cards_map(&state.db, &row_ids).await;
 
-    let notes: Vec<NoteResponse> = rows
+    let mut notes: Vec<NoteResponse> = rows
         .into_iter()
         .map(|p| {
             let id = p.id;
@@ -341,6 +341,7 @@ async fn fetch_and_respond(
             )
         })
         .collect();
+    attach_remote_instance_info(state, &mut notes).await;
 
     Json(SearchResponse { notes, session_id }).into_response()
 }
