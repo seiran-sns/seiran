@@ -227,6 +227,11 @@ export default function HomePage() {
     }
 
     let cancelled = false;
+    // キャッシュもスクロール位置の記憶も無い（一度も表示していない）タブへ切り替えた場合、
+    // 前のタブのスクロール位置をそのまま持ち越すと、新しい一覧が読み込まれる前後で
+    // 見た目上の高さが変わりスマホでは右ペイン領域まで巻き込んでスクロールしてしまう
+    // （実機確認）。先頭へ明示的にリセットする。
+    window.scrollTo(0, 0);
     setLoading(true);
     setHasMore(true);
     setGapBeforeIds(new Set());
