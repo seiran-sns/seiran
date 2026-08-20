@@ -132,9 +132,9 @@ pub struct CreateSessionRequest {
     pub password: String,
 }
 
-/// `com.atproto.server.createSession` — ハンドルまたはDID + アプリパスワードでログインし、
-/// accessJwt/refreshJwt を発行する。本アカウントのメインパスワードは受け付けない
-/// （`createAppPassword` で発行した専用パスワードのみ照合対象）。
+/// `com.atproto.server.createSession` — ハンドルまたはDID + パスワードでログインし、
+/// accessJwt/refreshJwt を発行する。本アカウントのメインパスワードと、`createAppPassword`
+/// で発行した専用アプリパスワードの両方を照合対象とする（公式Bluesky PDS準拠）。
 /// アカウント存在有無が応答の分岐やタイミングから漏れないよう、identifier解決失敗時も
 /// ダミーハッシュ照合を行ってから同一の `AuthenticationRequired` を返す。
 pub async fn xrpc_create_session(
@@ -173,12 +173,30 @@ pub async fn xrpc_create_session(
             return ApiError::Internal(format!("[createSession] DB エラー: {}", e)).into_response()
         }
     };
-    let password_ok = hashes
+    let mut password_ok = hashes
         .iter()
         .any(|h| LocalAuthProvider::verify_password(&req.password, h).unwrap_or(false));
-    if hashes.is_empty() {
-        let _ = LocalAuthProvider::verify_password(&req.password, LocalAuthProvider::dummy_hash());
-    }
+
+    // 本アカウントのメインパスワードでもログインできる（公式Bluesky PDS準拠。bsky.app自身も
+    // メインパスワードでcreateSessionを呼んでおり、PDS側はメインパスワードを拒否していない。
+    // アプリパスワードはサードパーティに安全に権限を渡すための任意のオプションであって、
+    // PDSが強制する必須要件ではない）。
+    let main_hash = match state.users.find_login_by_username(&actor.username).await {
+        Ok(Some(login)) => login.password_hash,
+        _ => None,
+    };
+    password_ok = password_ok
+        || match &main_hash {
+            Some(h) => LocalAuthProvider::verify_password(&req.password, h).unwrap_or(false),
+            None => {
+                let _ = LocalAuthProvider::verify_password(
+                    &req.password,
+                    LocalAuthProvider::dummy_hash(),
+                );
+                false
+            }
+        };
+
     if !password_ok {
         return auth_required_error();
     }

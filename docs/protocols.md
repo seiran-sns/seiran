@@ -172,8 +172,8 @@ Clearsky等のサードパーティツールは firehose を購読し続ける�
 ### セッション認証（外部ATプロトコルクライアント対応）
 公式Blueskyアプリ等の外部ATプロトコルクライアントがseiranアカウントへ直接ログインできるようにする仕組み。既存のMisskey API互換ログイン（`LocalAuthProvider`、`sub: "local|{user_id}"`のJWT）とは完全に別の認証系で、`LocalAuthProvider`に追加したメソッド群（`generate_atp_session`/`verify_atp_access_token`/`verify_atp_refresh_token`、`crates/seiran-common/src/auth/local.rs`）が同じ`secret`でHS256署名・検証する（`sub`にDIDそのものを積むため既存の`sub.strip_prefix("local|")`とは自然に衝突しない）。
 
-- **本アカウントのメインパスワードではログインできない**。`com.atproto.server.createAppPassword`（既存のseiranログイン、`Authorization: Bearer`の自社トークンで保護）で発行する専用アプリパスワード（`xxxx-xxxx-xxxx-xxxx`形式、`atp_app_passwords`テーブルにargon2ハッシュで保存）のみが`createSession`の照合対象。`listAppPasswords`/`revokeAppPassword`も同じ自社トークン認証で保護する。
-- `POST /xrpc/com.atproto.server.createSession` — `identifier`（ハンドルまたはDID）+ `password`（アプリパスワード）でログインし、accessJwt（2時間）とrefreshJwt（90日）を発行する。identifier解決失敗・アプリパスワード未発行時もダミーハッシュ照合を行ってから同一の`AuthenticationRequired`（401）を返し、アカウント存在有無が応答やタイミングから漏れないようにする。
+- `createSession`は**本アカウントのメインパスワードと、`com.atproto.server.createAppPassword`（既存のseiranログイン、`Authorization: Bearer`の自社トークンで保護）で発行する専用アプリパスワード（`xxxx-xxxx-xxxx-xxxx`形式、`atp_app_passwords`テーブルにargon2ハッシュで保存）の両方を照合対象とする**（公式Bluesky PDS準拠。bsky.app自身もメインパスワードで`createSession`を呼んでおり、PDSはメインパスワードを拒否していない。アプリパスワードはサードパーティに安全に権限を渡すための任意のオプション）。`listAppPasswords`/`revokeAppPassword`も同じ自社トークン認証で保護する。
+- `POST /xrpc/com.atproto.server.createSession` — `identifier`（ハンドルまたはDID）+ `password`でログインし、accessJwt（2時間）とrefreshJwt（90日）を発行する。identifier解決失敗・パスワード未設定時もダミーハッシュ照合を行ってから同一の`AuthenticationRequired`（401）を返し、アカウント存在有無が応答やタイミングから漏れないようにする。
 - `POST /xrpc/com.atproto.server.refreshSession` — refreshJwtを検証し新しいペアを発行する。古いrefreshJwtの`jti`は同時に失効させる（ワンタイム・ローテーション、`atp_refresh_tokens`テーブルで管理）。
 - `POST /xrpc/com.atproto.server.deleteSession` — refreshJwtの`jti`を失効させる（ログアウト）。
 - `GET /xrpc/com.atproto.server.getSession` — accessJwtを検証し、現在のセッション情報（did/handle）を返す。
