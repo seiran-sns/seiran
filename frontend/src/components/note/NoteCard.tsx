@@ -146,10 +146,7 @@ function QuoteCard({ note }: { note: Note }) {
               {note.poll.options.map((option) => (
                 <div className={styles.pollOption} key={option.name}>
                   <span>{option.name}</span>
-                  <span>
-                    {option.votes}
-                    {t("home:noteCard.votesSuffix")}
-                  </span>
+                  <span>{t("home:noteCard.votes", { count: option.votes })}</span>
                 </div>
               ))}
             </div>
