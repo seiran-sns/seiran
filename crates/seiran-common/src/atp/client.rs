@@ -29,6 +29,9 @@ pub struct BskyPost {
     pub text: String,
     pub created_at: DateTime<Utc>,
     pub indexed_at: DateTime<Utc>,
+    /// `record.embed`（画像・動画・URLカード・引用）。存在すればそのまま保持し、
+    /// `upsert_bsky_post` で `parse_bsky_embed_attachments` 等により添付を復元する。
+    pub embed: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -188,6 +191,8 @@ pub async fn fetch_atp_history(
                 .parse::<DateTime<Utc>>()
                 .unwrap_or_else(|_| Utc::now());
 
+            let embed = record.get("embed").cloned();
+
             posts.push(BskyPost {
                 uri: post.uri,
                 cid: post.cid,
@@ -198,6 +203,7 @@ pub async fn fetch_atp_history(
                 text,
                 created_at,
                 indexed_at,
+                embed,
             });
 
             if posts.len() >= max_posts {
@@ -253,6 +259,9 @@ pub async fn fetch_single_bsky_post(
     let created_at = created_at_str
         .parse::<DateTime<Utc>>()
         .unwrap_or_else(|_| Utc::now());
+    let embed = p["record"]["embed"]
+        .as_object()
+        .map(|_| p["record"]["embed"].clone());
 
     Ok(Some(BskyPost {
         uri: p["uri"].as_str().unwrap_or("").to_string(),
@@ -264,6 +273,7 @@ pub async fn fetch_single_bsky_post(
         text,
         created_at,
         indexed_at: Utc::now(),
+        embed,
     }))
 }
 
@@ -304,7 +314,7 @@ pub async fn upsert_bsky_post(
     }
 
     let post_id = crate::generate_snowflake_id(post.created_at);
-    sqlx::query(
+    let result = sqlx::query(
         "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at)
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (at_uri) DO NOTHING",
@@ -319,10 +329,55 @@ pub async fn upsert_bsky_post(
     .await?;
 
     // ON CONFLICT で INSERT がスキップされた場合（並行同期の競合）に備え、確定した id を引き直す。
-    sqlx::query_scalar::<_, i64>("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
+    let final_id = sqlx::query_scalar::<_, i64>("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
         .bind(&post.uri)
         .fetch_one(pool)
-        .await
+        .await?;
+
+    // 実際にこのリクエストで新規作成できた場合のみ添付・URLカードを復元する。
+    // ON CONFLICT でスキップされた場合（並行競合）は、先に作成した側で処理済みのはず。
+    if result.rows_affected() > 0 {
+        if let Some(embed) = &post.embed {
+            let attachments = crate::atp::parse_bsky_embed_attachments(embed, &post.author_did);
+            for (position, att) in attachments.iter().enumerate() {
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, remote_thumbnail_url, is_sensitive, is_gif, position)
+                     VALUES ($1, NULL, $2, $3, $4, false, $5, $6)
+                     ON CONFLICT (post_id, position) DO NOTHING",
+                )
+                .bind(final_id)
+                .bind(&att.url)
+                .bind(&att.mime_type)
+                .bind(att.thumbnail_url.as_deref())
+                .bind(att.is_gif)
+                .bind(position as i16)
+                .execute(pool)
+                .await
+                {
+                    tracing::error!("[upsert_bsky_post] 添付URL保存失敗（スキップ）: {}", e);
+                }
+            }
+
+            if let Some(card) = crate::atp::parse_bsky_embed_link_card(embed, &post.author_did) {
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
+                     VALUES ($1, 0, $2, $3, $4, $5)",
+                )
+                .bind(final_id)
+                .bind(&card.url)
+                .bind(&card.title)
+                .bind(&card.description)
+                .bind(card.thumbnail_url.as_deref())
+                .execute(pool)
+                .await
+                {
+                    tracing::error!("[upsert_bsky_post] post_link_cards 保存失敗（スキップ）: {}", e);
+                }
+            }
+        }
+    }
+
+    Ok(final_id)
 }
 
 /// AppView `app.bsky.actor.getProfile` でプロフィールを取得する。
@@ -500,6 +555,7 @@ pub async fn search_appview_posts(
                         text: p["record"]["text"].as_str().unwrap_or("").to_string(),
                         created_at,
                         indexed_at,
+                        embed: p["record"].get("embed").cloned(),
                     })
                 })
                 .collect()

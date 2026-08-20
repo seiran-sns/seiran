@@ -1,5 +1,6 @@
 pub mod client;
 pub mod did_resolve;
+pub mod embed;
 pub mod plc;
 pub mod repo;
 pub mod service;
@@ -9,6 +10,10 @@ pub use client::{
     create_atp_post, create_atp_session, fetch_atp_history, fetch_bsky_followers,
     fetch_bsky_profile, fetch_single_bsky_post, search_appview_posts, upsert_bsky_post, AtpSession,
     BskyFollowerProfile, BskyPinnedPostRef, BskyPost, BskyProfile,
+};
+pub use embed::{
+    bsky_external_thumb_url, bsky_gif_video_attachment, parse_bsky_embed_attachments,
+    parse_bsky_embed_link_card, parse_bsky_embed_quote_uri, ParsedAttachment, ParsedLinkCard,
 };
 pub use did_resolve::{
     fetch_raw_did_document, resolve_atproto_verification_key, resolve_service_endpoint,

@@ -412,6 +412,18 @@ pub trait PostRepository: Send + Sync {
         visibility: &str,
     ) -> Result<(), sqlx::Error>;
 
+    /// リポストレコードを挿入する（Bsky Jetstream `app.bsky.feed.repost` 受信時、`insert_repost`の
+    /// ATP版）。`at_uri`はリポストレコード自体のURI（`at://{did}/app.bsky.feed.repost/{rkey}`）。
+    /// Bskyのリポストに可視性の概念は無いため常に`public`固定。
+    async fn insert_repost_bsky(
+        &self,
+        id: i64,
+        actor_id: i64,
+        at_uri: &str,
+        repost_of_post_id: i64,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error>;
+
     /// 添付ファイルを投稿に紐付ける（ローカルアップロード済みの `media_file_id` を持つケース）。
     async fn attach_media(
         &self,
@@ -1152,6 +1164,28 @@ impl PostRepository for PgPostRepository {
         .bind(repost_of_post_id)
         .bind(created_at)
         .bind(visibility)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    async fn insert_repost_bsky(
+        &self,
+        id: i64,
+        actor_id: i64,
+        at_uri: &str,
+        repost_of_post_id: i64,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO posts (id, actor_id, body, at_uri, repost_of_post_id, created_at, visibility)
+             VALUES ($1, $2, '', $3, $4, $5, 'public')",
+        )
+        .bind(id)
+        .bind(actor_id)
+        .bind(at_uri)
+        .bind(repost_of_post_id)
+        .bind(created_at)
         .execute(&self.pool)
         .await
         .map(|_| ())
