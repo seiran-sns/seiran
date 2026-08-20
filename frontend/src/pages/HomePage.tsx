@@ -83,6 +83,7 @@ export default function HomePage() {
     () => localStorage.getItem(COMPOSER_COLLAPSED_KEY) === "1"
   );
   const { timelineTab, setTimelineTab } = useRightPane();
+  const rightPaneRef = useRef<HTMLDivElement>(null);
   const { subscribeChannel, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
   const navigatingAway = useRef(false);
@@ -127,6 +128,18 @@ export default function HomePage() {
     onSwipeLeft: handleSwipeLeft,
     onSwipeRight: handleSwipeRight,
   });
+
+  // 選択中のタブを再度クリックした場合はタブ切替（実質no-op）ではなく先頭へスクロールする。
+  const handleFeedTabClick = useCallback(
+    (target: Feed) => {
+      if (feedKey(target) === currentFeedKey) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      setFeed(target);
+    },
+    [currentFeedKey, setFeed],
+  );
 
   // フィード切り替え時にアクティブなタブ要素が見えるようにスクロール
   useEffect(() => {
@@ -390,25 +403,25 @@ export default function HomePage() {
       <div className={styles.feedTabs} ref={feedTabsRef} style={{ top: headerHeight }}>
         <button
           className={`${styles.feedTab} ${feed.kind === "home" ? styles.feedTabActive : ""}`}
-          onClick={() => setFeed({ kind: "home" })}
+          onClick={() => handleFeedTabClick({ kind: "home" })}
         >
           {t("home:homePage.homeTab")}
         </button>
         <button
           className={`${styles.feedTab} ${feed.kind === "local" ? styles.feedTabActive : ""}`}
-          onClick={() => setFeed({ kind: "local" })}
+          onClick={() => handleFeedTabClick({ kind: "local" })}
         >
           {t("home:homePage.localTab")}
         </button>
         <button
           className={`${styles.feedTab} ${feed.kind === "social" ? styles.feedTabActive : ""}`}
-          onClick={() => setFeed({ kind: "social" })}
+          onClick={() => handleFeedTabClick({ kind: "social" })}
         >
           {t("home:homePage.socialTab")}
         </button>
         <button
           className={`${styles.feedTab} ${feed.kind === "global" ? styles.feedTabActive : ""}`}
-          onClick={() => setFeed({ kind: "global" })}
+          onClick={() => handleFeedTabClick({ kind: "global" })}
         >
           {t("home:homePage.globalTab")}
         </button>
@@ -416,7 +429,7 @@ export default function HomePage() {
           <button
             key={l.id}
             className={`${styles.feedTab} ${feed.kind === "list" && feed.id === l.id ? styles.feedTabActive : ""}`}
-            onClick={() => setFeed({ kind: "list", id: l.id })}
+            onClick={() => handleFeedTabClick({ kind: "list", id: l.id })}
           >
             {l.name}
           </button>
@@ -428,7 +441,7 @@ export default function HomePage() {
           <button
             key={h.name}
             className={`${styles.feedTab} ${feed.kind === "hashtag" && feed.name === h.name ? styles.feedTabActive : ""}`}
-            onClick={() => setFeed({ kind: "hashtag", name: h.name })}
+            onClick={() => handleFeedTabClick({ kind: "hashtag", name: h.name })}
           >
             #{h.name}
           </button>
@@ -460,18 +473,35 @@ export default function HomePage() {
     </div>
   );
 
+  // 選択中のタブシート（通知/トレンド・検索）を再度クリックした場合はタブ切替ではなく、
+  // 右ペイン（PCではaside自体がoverflow-y:autoで独立スクロール、スマホでは通常のwindowスクロール
+  // に合流する）の先頭へスクロールする。scrollIntoViewはどちらの場合も適切な祖先を辿って
+  // 「このブロックの先頭」を画面上端に合わせてくれる。
+  const handleTimelineTabChange = useCallback(
+    (index: number) => {
+      if (index === timelineTab) {
+        rightPaneRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      setTimelineTab(index);
+    },
+    [timelineTab, setTimelineTab],
+  );
+
   const right = (
-    <>
+    <div ref={rightPaneRef}>
       <Tabs
         tabs={[
           unread > 0 ? t("home:homePage.quickNotificationsWithCount", { count: unread }) : t("home:homePage.quickNotifications"),
           t("home:homePage.trendsAndSearch"),
         ]}
         active={timelineTab}
-        onChange={setTimelineTab}
+        onChange={handleTimelineTabChange}
+        sticky
+        top={0}
       />
       {timelineTab === 0 ? <NotificationsPanel /> : <TrendsSearchPanel />}
-    </>
+    </div>
   );
 
   return <AppShell center={center} right={right} onPosted={prepend} onBeforeNavigate={saveCurrentScroll} />;
