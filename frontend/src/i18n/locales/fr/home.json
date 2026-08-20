@@ -22,7 +22,6 @@
   "noteDetailPage": {
     "title": "Poste",
     "noContext": "Aucun message à proximité.",
-    "contextLabel": "Messages environnants de l'auteur",
     "contextTab": "Postes environnants",
     "reactionsTab": "Réactions",
     "noReactions": "Aucune réaction sur ce post pour l'instant.",

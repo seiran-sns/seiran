@@ -22,7 +22,6 @@
   "noteDetailPage": {
     "title": "Post",
     "noContext": "Keine umliegenden Beiträge.",
-    "contextLabel": "Umliegende Beiträge des Autors",
     "contextTab": "Umliegende Beiträge",
     "reactionsTab": "Reaktionen",
     "noReactions": "Noch keine Reaktionen auf diesen Beitrag.",

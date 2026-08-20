@@ -22,7 +22,6 @@
   "noteDetailPage": {
     "title": "邮政",
     "noContext": "没有周围的帖子。",
-    "contextLabel": "作者周边帖子",
     "contextTab": "周边帖子",
     "reactionsTab": "反应",
     "noReactions": "这篇文章还没有任何反应。",

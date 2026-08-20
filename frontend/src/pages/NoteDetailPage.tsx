@@ -171,21 +171,17 @@ export default function NoteDetailPage() {
   // リポスト詳細（#45）: リアクションタブはリポスト元のリアクションを表示する。
   const display = note?.renote ?? note;
 
-  // 「前後のポスト」ブロック（自動読み込み → 一覧）。中央・右ペインで共用。
+  // 「前後のポスト」ブロック（自動読み込み → 一覧、右ペインの「前後のポスト」タブでのみ使う）。
   // 表示順は上から: [もっと新しいポストを読み込む] 新しいポスト(最大5件、対象に近い順で下寄り)
   // → 対象ポスト自身(拡大文字表示NoteCard) → 古いポスト(最大5件、対象に近い順で上寄り)
   // → [もっと古いポストを読み込む]。
-  // `includeTarget`: 対象ポスト自身をリスト中央に埋め込むか。中央ペインの狭幅表示では
-  // 直上に同じ大型NoteCardが既に表示されているため二重表示を避け、右ペインの
-  // 「前後のポスト」タブでのみ埋め込む。
-  function renderContext(includeTarget = false) {
+  function renderContext() {
     if (ctxLoading) return <p className={panel.message}>{t("common:loading")}</p>;
-    const targetCard =
-      includeTarget && note ? (
-        <div ref={targetCardRef}>
-          <NoteCard note={note} large linkToDetail={false} />
-        </div>
-      ) : null;
+    const targetCard = note ? (
+      <div ref={targetCardRef}>
+        <NoteCard note={note} large linkToDetail={false} />
+      </div>
+    ) : null;
     if (ctxLoaded && before.length === 0 && after.length === 0) {
       return (
         <div>
@@ -240,24 +236,20 @@ export default function NoteDetailPage() {
       )}
 
       {note && (
-        <>
-          {/* 主役ポストはタイムラインと同じ NoteCard を大型表示で共用する（#43）。リポスト表示は NoteCard 内部で処理（#45）。 */}
-          <NoteCard note={note} large linkToDetail={false} />
-
-          {/* 前後のポスト（右ペインが隠れる幅でのみ中央に表示。自動読み込み）。 */}
-          <section className={styles.narrowContext}>
-            <div className={styles.contextLabel}>{t("home:noteDetailPage.contextLabel")}</div>
-            {renderContext()}
-          </section>
-        </>
+        // 主役ポストはタイムラインと同じ NoteCard を大型表示で共用する（#43）。リポスト表示は NoteCard 内部で処理（#45）。
+        <NoteCard note={note} large linkToDetail={false} />
       )}
     </>
   );
 
   const right = (
-    // display: contents でレイアウトに影響を与えず、closest("aside") で
-    // AppShellの独立スクロール領域（右ペイン本体）を辿るための参照だけを提供する。
-    <div ref={rightPaneRef} style={{ display: "contents" }}>
+    // closest("aside")でAppShellの右ペイン本体を辿るための参照を提供する（#226）。
+    // 以前はdisplay:contentsでレイアウトへの影響を避けていたが、通常のdiv（block要素、
+    // 子はTabsと切り替え表示パネル1つずつなので縦積みの見た目は変わらない）に変更しても
+    // 支障が無いため単純化した。狭幅でposition:stickyが効かなくなる不具合の実体は
+    // display:contentsではなくAppShell.module.cssの.rightのoverflow-y残留だった
+    // （修正はAppShell.module.css側、#241）。
+    <div ref={rightPaneRef}>
       <Tabs
         tabs={[
           t("home:noteDetailPage.authorTab"),
@@ -273,7 +265,7 @@ export default function NoteDetailPage() {
       />
       {noteDetailTab === 0 && display && <AuthorPanel note={display} />}
       {noteDetailTab === 1 && display && <ReplyThreadPanel note={display} />}
-      {noteDetailTab === 2 && renderContext(true)}
+      {noteDetailTab === 2 && renderContext()}
       {noteDetailTab === 3 && display && <ReactionListPanel note={display} />}
       {noteDetailTab === 4 && display && <RepostListPanel note={display} />}
     </div>

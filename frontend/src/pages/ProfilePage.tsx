@@ -61,6 +61,14 @@ export default function ProfilePage() {
   // 右ペイン（狭幅では中央ペイン）のタブ状態: 0=投稿, 1=フォロー中, 2=フォロワー（#56）。
   // プロフィール切替時にリセットする（他ユーザーのフォロワータブを見たまま遷移してもタブは投稿に戻る）。
   const [rightTab, setRightTab] = useState(0);
+  // 狭幅専用タブシート（ピン留め統合、下記narrowTabbedSection）のタブ状態。ピン留めがあれば
+  // 0=ピン留め・無ければ0=投稿から始まる。rightTabと同じくプロフィール切替時にリセットする。
+  const [narrowTab, setNarrowTab] = useState(0);
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  // 狭幅タブシートにピン留めタブが挿入されるかどうか。挿入される場合、投稿/フォロー中/
+  // フォロワーのインデックスは1つずつ後ろにずれる（下記narrowTabItems・followCountBtn参照）。
+  const hasPinned = !!profile && profile.pinned_posts.length > 0;
   // プロフィールカードのフォロー中/フォロワー人数表示（#68 マイケル指摘）。fediアクターの場合、
   // ローカルDB把握分（`profile.following_count`等）ではなくリモート直接取得とブレンドした
   // 実数（`total_count`）で上書きする。取得できるまでは undefined のままローカル値を表示する。
@@ -95,12 +103,26 @@ export default function ProfilePage() {
     loadMore: loadMorePosts,
   } = useCursorPagination<Note>(fetchPage, (n) => n.id, PAGE_SIZE, onError);
 
+  // 狭幅専用タブシート（下記narrowTabbedSection）はheaderの直下にstickyで張り付ける。
+  // 両者ともposition: sticky; top: 0 だと重なってしまうため、headerの実高さ分だけオフセットする
+  // （HomePage/AdminPageの同様のフィードタブ・タブシート実装と同じ手法）。
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const update = () => setHeaderHeight(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     if (!q) return;
     let cancelled = false;
     setLoading(true);
     setError("");
     setRightTab(0);
+    setNarrowTab(0);
     setBlendedCounts({});
     api.users
       .profile(q)
@@ -289,7 +311,7 @@ export default function ProfilePage() {
 
   const center = (
     <>
-      <header className={panel.header}>
+      <header className={panel.header} ref={headerRef}>
         <button className={panel.backBtn} onClick={goBack}>
           ← {t("common:back")}
         </button>
@@ -366,7 +388,10 @@ export default function ProfilePage() {
               <button
                 type="button"
                 className={styles.followCountBtn}
-                onClick={() => setRightTab(1)}
+                onClick={() => {
+                  setRightTab(1);
+                  setNarrowTab(hasPinned ? 2 : 1);
+                }}
               >
                 <strong>
                   {blendedCounts.following ?? profile.following_count}
@@ -376,7 +401,10 @@ export default function ProfilePage() {
               <button
                 type="button"
                 className={styles.followCountBtn}
-                onClick={() => setRightTab(2)}
+                onClick={() => {
+                  setRightTab(2);
+                  setNarrowTab(hasPinned ? 3 : 2);
+                }}
               >
                 <strong>
                   {blendedCounts.followers ?? profile.follower_count}
@@ -687,8 +715,81 @@ export default function ProfilePage() {
 
   const tabbedSection = followTabsSection ?? recentSection;
 
-  // 狭幅（スマホ等、右ペインが無い）では中央ペインにピン留め→タブシートを連続表示する。
-  // 広幅では中央にピン留めのみ、右ペインにタブシートを表示する。
+  // 狭幅専用: ピン留めを1番目（デフォルト）タブとして統合したタブシート。広幅では
+  // ピン留め・タブシートを別セクションとして分けて表示するが（下記）、狭幅では中央ペインへ
+  // 連続して並べると縦に長くなりすぎるため、ピン留めをタブの1項目に統合してsticky固定する。
+  const narrowTabItems = profile
+    ? [
+        ...(hasPinned
+          ? [
+              {
+                label: t("profile:profilePage.pinnedHeader"),
+                content: (
+                  <>
+                    {profile.pinned_posts.map((post) => (
+                      <NoteCard key={post.id} note={post} />
+                    ))}
+                  </>
+                ),
+              },
+            ]
+          : []),
+        {
+          label: t("profile:profilePage.postsHeader"),
+          content: (
+            <NoteList
+              notes={posts}
+              emptyMessage={t("profile:profilePage.noPosts")}
+              onLoadMore={loadMorePosts}
+              hasMore={hasMore}
+              loadingMore={loadingMore}
+            />
+          ),
+        },
+        ...(profile.actor_id
+          ? [
+              {
+                label: t("profile:profilePage.followingTab"),
+                content: (
+                  <FollowListPanel
+                    actorId={profile.actor_id}
+                    kind="following"
+                    onError={onError}
+                    isRemoteFedi={profile.actor_type === "fedi"}
+                  />
+                ),
+              },
+              {
+                label: t("profile:profilePage.followersTab"),
+                content: (
+                  <FollowListPanel
+                    actorId={profile.actor_id}
+                    kind="followers"
+                    onError={onError}
+                    isRemoteFedi={profile.actor_type === "fedi"}
+                  />
+                ),
+              },
+            ]
+          : []),
+      ]
+    : [];
+
+  const narrowTabbedSection = narrowTabItems.length > 0 && (
+    <>
+      <Tabs
+        tabs={narrowTabItems.map((item) => item.label)}
+        active={narrowTab}
+        onChange={setNarrowTab}
+        sticky
+        top={headerHeight}
+      />
+      {(narrowTabItems[narrowTab] ?? narrowTabItems[0]).content}
+    </>
+  );
+
+  // 狭幅（スマホ等、右ペインが無い）では中央ペインにピン留め統合タブシートを表示する。
+  // 広幅では中央にピン留めのみ、右ペインに（ピン留めを含まない）タブシートを表示する。
   const right = !isNarrow ? tabbedSection : null;
 
   return (
@@ -697,9 +798,9 @@ export default function ProfilePage() {
         center={
           <>
             {center}
-            {pinnedSection}
+            {!isNarrow && pinnedSection}
             {listsSection}
-            {isNarrow && tabbedSection}
+            {isNarrow && narrowTabbedSection}
           </>
         }
         right={right}

@@ -22,7 +22,6 @@
   "noteDetailPage": {
     "title": "ポスト",
     "noContext": "前後の投稿はありません。",
-    "contextLabel": "投稿主の前後の投稿",
     "contextTab": "前後のポスト",
     "reactionsTab": "リアクション",
     "noReactions": "このポストにはまだリアクションがありません。",

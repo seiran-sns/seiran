@@ -13,6 +13,7 @@ import { Feed, feedKey, useHomeFeed } from "../contexts/HomeFeedContext";
 import { ChannelSpec, useStreamingContext } from "../contexts/StreamingContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
+import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { useSwipe } from "../hooks/useSwipe";
 import { filterTimelineNotes } from "../lib/timelineVisibility";
 import panel from "../components/common/Panel.module.css";
@@ -84,6 +85,7 @@ export default function HomePage() {
   );
   const { timelineTab, setTimelineTab } = useRightPane();
   const rightPaneRef = useRef<HTMLDivElement>(null);
+  const isNarrow = useIsNarrowViewport();
   const { subscribeChannel, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
   const navigatingAway = useRef(false);
@@ -493,7 +495,11 @@ export default function HomePage() {
     [timelineTab, setTimelineTab],
   );
 
-  const right = (
+  // 狭幅では右ペインが中央ペインの下に落ちる（AppShell.module.css）。中央ペインはタイムライン
+  // の無限スクロールでどこまでも続くため、その状態では右ペインへ確実にたどり着く手段が無い。
+  // にもかかわらずNotificationsPanelはマウント時点で通知を既読マークしてしまうため、実際には
+  // 一度も見ていない通知が既読扱いになる不具合があった。狭幅では右ペイン自体を描画しない。
+  const right = isNarrow ? undefined : (
     <div ref={rightPaneRef}>
       <Tabs
         tabs={[

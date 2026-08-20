@@ -303,6 +303,11 @@
     max-width: 600px;
     height: auto;
     position: static;
+    /* 幅広時の overflow-y: auto をリセットする。position: static; height: auto の状態でも
+       overflow-y が auto のまま残ると、実際にはスクロールしない（内容が伸びるだけの）
+       .right 自身が子孫のスクロールコンテナとみなされてしまい、子の position: sticky が
+       ウィンドウスクロールに追従しなくなる（実機・Playwright実測で確認、#241）。 */
+    overflow-y: visible;
   }
 }
 

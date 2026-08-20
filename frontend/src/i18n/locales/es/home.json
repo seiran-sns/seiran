@@ -22,7 +22,6 @@
   "noteDetailPage": {
     "title": "Correo",
     "noContext": "No hay publicaciones circundantes.",
-    "contextLabel": "Publicaciones circundantes del autor",
     "contextTab": "Publicaciones circundantes",
     "reactionsTab": "Reacciones",
     "noReactions": "Aún no hay reacciones a esta publicación.",

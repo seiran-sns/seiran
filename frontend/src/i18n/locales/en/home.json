@@ -22,7 +22,6 @@
   "noteDetailPage": {
     "title": "Post",
     "noContext": "No surrounding posts.",
-    "contextLabel": "Author's surrounding posts",
     "contextTab": "Surrounding posts",
     "reactionsTab": "Reactions",
     "noReactions": "No reactions on this post yet.",
