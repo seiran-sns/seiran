@@ -28,19 +28,19 @@ use tower_http::cors::{Any, CorsLayer};
 use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 
 use seiran_common::repository::{
-    ActorRepository, AppTokenRepository, AtpReadRepository, AtpSessionRepository,
-    AuthRateLimitRepository, BlockRepository, DmRepository, EmailChangeRepository,
-    EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository,
-    InstanceDomainRepository, ListRepository, MuteRepository, NotificationRepository,
-    PasswordResetRepository, PgActorRepository, PgAppTokenRepository, PgAtpReadRepository,
-    PgAtpSessionRepository, PgAuthRateLimitRepository, PgBlockRepository, PgDmRepository,
-    PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository,
-    PgHashtagRepository, PgInstanceDomainRepository, PgListRepository, PgMuteRepository,
-    PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository,
-    PgReactionRepository, PgRelayRepository, PgRemoteEmojiRepository,
-    PgRemoteInstanceMetaRepository, PgTotpRepository, PgUserRepository, PinnedPostsRepository,
-    PostRepository, ReactionRepository, RelayRepository, RemoteEmojiRepository,
-    RemoteInstanceMetaRepository, TotpRepository, UserRepository,
+    ActorRepository, AppTokenRepository, AtpPreferencesRepository, AtpReadRepository,
+    AtpSessionRepository, AuthRateLimitRepository, BlockRepository, DmRepository,
+    EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository,
+    HashtagRepository, InstanceDomainRepository, ListRepository, MuteRepository,
+    NotificationRepository, PasswordResetRepository, PgActorRepository, PgAppTokenRepository,
+    PgAtpPreferencesRepository, PgAtpReadRepository, PgAtpSessionRepository,
+    PgAuthRateLimitRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository,
+    PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository,
+    PgInstanceDomainRepository, PgListRepository, PgMuteRepository, PgNotificationRepository,
+    PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository,
+    PgRelayRepository, PgRemoteEmojiRepository, PgRemoteInstanceMetaRepository, PgTotpRepository,
+    PgUserRepository, PinnedPostsRepository, PostRepository, ReactionRepository, RelayRepository,
+    RemoteEmojiRepository, RemoteInstanceMetaRepository, TotpRepository, UserRepository,
 };
 use seiran_common::{
     job_priority, ApClient, ApDeliveryKind, AtpCommitEvent, AtpCommitService, Job, JobQueue,
@@ -73,6 +73,8 @@ pub struct AppState {
     pub atp_repo: Arc<dyn AtpReadRepository>,
     /// AT Protocol セッション認証（アプリパスワード・リフレッシュトークン）リポジトリ。
     pub atp_sessions: Arc<dyn AtpSessionRepository>,
+    /// AT Protocol クライアント設定（`app.bsky.actor.getPreferences`等）リポジトリ。
+    pub atp_preferences: Arc<dyn AtpPreferencesRepository>,
     /// リアクション（絵文字リアクション・いいね）リポジトリ。
     pub reactions: Arc<dyn ReactionRepository>,
     /// ピン留めポスト（ローカルユーザーの pin/unpin 操作結果 + リモートアクターの同期結果の共通ストア）。
@@ -386,6 +388,8 @@ pub async fn init_state(
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
     let atp_sessions: Arc<dyn AtpSessionRepository> =
         Arc::new(PgAtpSessionRepository::new(pool.clone()));
+    let atp_preferences: Arc<dyn AtpPreferencesRepository> =
+        Arc::new(PgAtpPreferencesRepository::new(pool.clone()));
     let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
     let pinned_posts: Arc<dyn PinnedPostsRepository> =
         Arc::new(PgPinnedPostsRepository::new(pool.clone()));
@@ -448,6 +452,7 @@ pub async fn init_state(
         app_tokens,
         atp_repo,
         atp_sessions,
+        atp_preferences,
         reactions,
         pinned_posts,
         notifications,
@@ -1054,6 +1059,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.server.getSession",
             get(handlers::xrpc::server::xrpc_get_session),
+        )
+        .route(
+            "/xrpc/app.bsky.actor.getPreferences",
+            get(handlers::xrpc::actor::xrpc_get_preferences),
+        )
+        .route(
+            "/xrpc/app.bsky.actor.putPreferences",
+            post(handlers::xrpc::actor::xrpc_put_preferences),
         )
         .route(
             "/xrpc/com.atproto.server.createAppPassword",

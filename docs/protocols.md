@@ -187,6 +187,9 @@ Clearsky等のサードパーティツールは firehose を購読し続ける�
 - `applyWrites`は**単一commitではなく、要素ごとに個別のcommitとして順番に処理する**（AT Protocol仕様とは異なる簡易実装）。途中の要素が失敗すると、それより前の要素は既にコミット済みのまま残る（部分適用、全体ロールバックなし）。
 - `app.bsky.actor.profile`のみ特別扱いする。`createRecord`/`putRecord`/`applyWrites`が受け取った場合、ATPリポジトリへのコミットに加えて`sync_profile_to_actors`（`crates/seiran-api/src/handlers/xrpc/repo.rs`）が`actors`テーブル（`display_name`/`bio`/`avatar_media_id`/`banner_media_id`）にも反映する。既存の`AtpCommitService::commit_profile`は「`actors`→ATPレコード」の片方向だったため、これが無いと外部ATクライアント（bsky.app等）からのプロフィール編集がseiranのUI/APIに反映されない不整合が生じる。`avatar`/`banner`はCID参照（`{"$type":"blob","ref":{"$link":cid}}`）なので、CIDのmultihash（sha256そのもの）を逆算して`media_files.sha256`と突き合わせ、対応する行があれば`avatar_media_id`/`banner_media_id`をそこに向ける（`resolve_blob_media_id`、`xrpc_get_blob`と同じ手法）。対応する`media_files`行が無い場合（bsky.app経由で新規アップロードされ`atp_blobs`にしか無い画像等）は該当フィールドを更新せず既存値を維持する（`atp_blobs`→`media_files`への変換は未実装）。
 
+### クライアント設定（`app.bsky.actor.getPreferences`/`putPreferences`）
+`GET`/`POST /xrpc/app.bsky.actor.{get,put}Preferences` はaccessJwt認証必須（本人のみ）。`preferences`配列はATPリポジトリのMSTには入らないプライベートデータで、`atp_preferences`テーブル（`actor_id` PRIMARY KEY、`preferences` JSONB）に不透明な配列としてそのまま保存・返却する（中身の`$type`ごとの意味は解釈しない）。`putPreferences`は全置換（差分マージではなく配列を丸ごと差し替える、AT Protocol仕様通り）。Bluesky公式の年齢確認フロー（`#personalDetailsPref`の`birthDate`）はこのエンドポイントが無いと動作せず、bsky.appから「生年月日の設定を読み込むことができませんでした」エラーになる。
+
 ### Bsky公式Relayの新規PDSアカウント数上限に注意
 Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホスト単位のアカウント数上限を設けており、上限を超えて登録されたアカウント（作成順で後の方）は `host-throttled` 扱いとなり、そのアカウントのコミットは `subscribeRepos` の配信対象から意図的に除外される（PDS側にエラーは一切返らず、`requestCrawl` も200 OKを返し続けるため、PDS側のログからは検知できない）。「特定ユーザーだけ投稿がbsky.appに反映されない」という報告を受けたら、まずこの上限超過を疑う。indigoの`cmd/relay/relay/account.go`にロジックがあり、ローカルでindigo/relayを動かして自PDSのホストレコード（`account_count`/`account_limit`）を直接確認することで検証できる。
 

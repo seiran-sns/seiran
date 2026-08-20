@@ -46,6 +46,7 @@ ID 採番は2系統ある。
 | `atp_blobs` | ATP `uploadBlob` で受信したバイナリ |
 | `atp_app_passwords` | ATP `createAppPassword` で発行したアプリパスワードのハッシュ・無効化管理 |
 | `atp_refresh_tokens` | ATP `refreshSession` が発行するrefreshJwtの `jti` 管理（失効・ローテーション） |
+| `atp_preferences` | ATP `app.bsky.actor.getPreferences`/`putPreferences` の不透明なJSON配列（年齢確認等） |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP 設定、Jetstream カーソル等の汎用格納庫） |
 | `instance_domain` | 自ホストドメインの確定値（単一行のみ、一度確定したら不変） |
 | `remote_instance_meta` | リモートインスタンス（`actors.domain`単位）のnodeinfoキャッシュ（NoteCardリモートサーバー表示用） |
@@ -211,6 +212,9 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 
 ### ATP セッション認証関連（`atp_app_passwords` / `atp_refresh_tokens`）
 外部ATプロトコルクライアント向けのセッション認証（`docs/protocols.md` 3節）が使うテーブル。`atp_app_passwords` は `com.atproto.server.createAppPassword` で発行したアプリパスワードをargon2ハッシュで保存し（生パスワードは保持しない）、`revoked_at` で無効化管理する。`atp_refresh_tokens` は `refreshSession` が発行するrefreshJwtの `jti` をキーに `expires_at`/`revoked_at` を管理し、リフレッシュのたびに古い `jti` を失効させてローテーションする（ワンタイム）。いずれも `actor_id` に紐づき、JWT自体（accessJwt/refreshJwt）はDBに保存しない。
+
+### `atp_preferences`
+`app.bsky.actor.getPreferences`/`putPreferences`（`docs/protocols.md` 3節）が読み書きするテーブル。`preferences` カラム（JSONB）はAT Protocolクライアント設定の不透明な配列で、`$type`ごとの意味は解釈せずそのまま保存・返却する。`actor_id` 単位で最大1行（`putPreferences` は全置換）。年齢確認（`#personalDetailsPref` の `birthDate`）を含むが、seiranの `users` テーブルとは同期しない（別データソース）。
 
 ## 4. 典型的なクエリパターン
 
