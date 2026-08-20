@@ -133,27 +133,28 @@ function QuoteCard({ note }: { note: Note }) {
         </div>
       )}
       {showContent && (
-        <p className={styles.quoteBody}>
-          <RichText text={note.text} emojis={note.emojis} />
-        </p>
-      )}
-
-      <NoteAttachments attachments={note.attachments} />
-      {note.linkCards.map((card) => (
-        <LinkCard key={card.url} card={card} indent={false} />
-      ))}
-      {note.poll && (
-        <div className={styles.quotePoll}>
-          {note.poll.options.map((option) => (
-            <div className={styles.pollOption} key={option.name}>
-              <span>{option.name}</span>
-              <span>
-                {option.votes}
-                {t("home:noteCard.votesSuffix")}
-              </span>
-            </div>
+        <>
+          <p className={styles.quoteBody}>
+            <RichText text={note.text} emojis={note.emojis} />
+          </p>
+          <NoteAttachments attachments={note.attachments} />
+          {note.linkCards.map((card) => (
+            <LinkCard key={card.url} card={card} indent={false} />
           ))}
-        </div>
+          {note.poll && (
+            <div className={styles.quotePoll}>
+              {note.poll.options.map((option) => (
+                <div className={styles.pollOption} key={option.name}>
+                  <span>{option.name}</span>
+                  <span>
+                    {option.votes}
+                    {t("home:noteCard.votesSuffix")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
       <div className={styles.quoteReactions}>
         <ReactionChips noteId={note.id} reactions={note.reactions} indent={false} />
@@ -463,17 +464,18 @@ function PostContent({
         </div>
       )}
       {showContent && (
-        <p className={styles.body}>
-          <RichText text={note.text} emojis={note.emojis} />
-        </p>
+        <>
+          <p className={styles.body}>
+            <RichText text={note.text} emojis={note.emojis} />
+          </p>
+          <NoteAttachments attachments={note.attachments} />
+          {note.linkCards.map((card) => (
+            <LinkCard key={card.url} card={card} />
+          ))}
+        </>
       )}
 
-      <NoteAttachments attachments={note.attachments} />
-      {note.linkCards.map((card) => (
-        <LinkCard key={card.url} card={card} />
-      ))}
-
-      {poll && (
+      {showContent && poll && (
         <div className={styles.poll}>
           {pollResults || pollVoted || pollClosed
             ? poll.options.map((option, index) => (
@@ -549,7 +551,7 @@ function PostContent({
         </div>
       )}
 
-      {note.quote && <QuoteCard note={note.quote} />}
+      {showContent && note.quote && <QuoteCard note={note.quote} />}
 
       {note.parentOriginalId && (
         <Link
