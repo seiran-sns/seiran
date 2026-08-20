@@ -52,6 +52,36 @@ struct PendingTotpClaims {
     purpose: String,
 }
 
+/// AT Protocol セッション（`com.atproto.server.createSession`等）用JWT。
+/// `LocalClaims`（`sub: "local|{user_id}"`）とは `sub` の形式が異なる（`sub` はDIDそのもの）
+/// ため、既存の `verify_token`/`verify_token_ignoring_exp` には誤ってデコードされない。
+#[derive(Debug, Serialize, Deserialize)]
+struct AtpSessionClaims {
+    /// "com.atproto.access" または "com.atproto.refresh"。
+    scope: String,
+    /// アカウントのDID。
+    sub: String,
+    /// PDSのサービスDID（`did:web:{local_domain}`）。
+    aud: String,
+    iat: usize,
+    exp: usize,
+    /// refreshJwt の失効・ローテーション管理用（`atp_refresh_tokens.jti`）。
+    /// accessJwt にも便宜上同じ値を積むが、accessJwt側のjtiはDB管理しない。
+    jti: uuid::Uuid,
+}
+
+pub struct VerifiedAtpAccess {
+    pub did: String,
+}
+
+pub struct VerifiedAtpRefresh {
+    pub did: String,
+    pub jti: uuid::Uuid,
+}
+
+const ATP_ACCESS_SCOPE: &str = "com.atproto.access";
+const ATP_REFRESH_SCOPE: &str = "com.atproto.refresh";
+
 #[derive(Debug, Clone)]
 pub struct VerifiedUser {
     pub user_id: i64,
@@ -89,6 +119,20 @@ impl LocalAuthProvider {
         Ok(argon2
             .verify_password(password.as_bytes(), &parsed_hash)
             .is_ok())
+    }
+
+    /// `com.atproto.server.createAppPassword` 用のアプリパスワード生成（`xxxx-xxxx-xxxx-xxxx`
+    /// 形式、Bluesky公式と同じ見た目）。
+    pub fn generate_app_password() -> String {
+        use argon2::password_hash::rand_core::{OsRng, RngCore};
+        const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567890";
+        let mut rng = OsRng;
+        let mut group = || -> String {
+            (0..4)
+                .map(|_| CHARS[(rng.next_u32() as usize) % CHARS.len()] as char)
+                .collect::<String>()
+        };
+        format!("{}-{}-{}-{}", group(), group(), group(), group())
     }
 
     /// ユーザーが存在しない/パスワード未設定の場合に検証時間を揃えるためのダミーハッシュ。
@@ -238,6 +282,91 @@ impl LocalAuthProvider {
             .strip_prefix("local|")
             .and_then(|s| s.parse().ok())
             .ok_or(AuthError::MalformedToken)
+    }
+
+    /// `com.atproto.server.createSession`/`refreshSession` 用。accessJwt（2時間）と
+    /// refreshJwt（90日）のペアを発行する。refreshJwt の `jti` は呼び出し側が
+    /// `atp_refresh_tokens` に記録すること（失効・ローテーション管理用）。
+    pub fn generate_atp_session(
+        &self,
+        did: &str,
+        service_did: &str,
+    ) -> Result<(String, String, uuid::Uuid, chrono::DateTime<chrono::Utc>), AuthError> {
+        let now = chrono::Utc::now();
+        let access_exp = now + chrono::Duration::hours(2);
+        let refresh_exp = now + chrono::Duration::days(90);
+        let jti = uuid::Uuid::new_v4();
+
+        let access_claims = AtpSessionClaims {
+            scope: ATP_ACCESS_SCOPE.to_string(),
+            sub: did.to_string(),
+            aud: service_did.to_string(),
+            iat: now.timestamp() as usize,
+            exp: access_exp.timestamp() as usize,
+            jti,
+        };
+        let refresh_claims = AtpSessionClaims {
+            scope: ATP_REFRESH_SCOPE.to_string(),
+            sub: did.to_string(),
+            aud: service_did.to_string(),
+            iat: now.timestamp() as usize,
+            exp: refresh_exp.timestamp() as usize,
+            jti,
+        };
+
+        let key = EncodingKey::from_secret(&self.secret);
+        let access_jwt = encode(&Header::default(), &access_claims, &key)
+            .map_err(|e| AuthError::TokenGeneration(e.to_string()))?;
+        let refresh_jwt = encode(&Header::default(), &refresh_claims, &key)
+            .map_err(|e| AuthError::TokenGeneration(e.to_string()))?;
+
+        Ok((access_jwt, refresh_jwt, jti, refresh_exp))
+    }
+
+    /// accessJwt を検証する（`scope`/`aud` 不一致は拒否）。
+    pub fn verify_atp_access_token(
+        &self,
+        token: &str,
+        service_did: &str,
+    ) -> Result<VerifiedAtpAccess, AuthError> {
+        let claims = self.decode_atp_claims(token, service_did)?;
+        if claims.scope != ATP_ACCESS_SCOPE || claims.aud != service_did {
+            return Err(AuthError::InvalidToken);
+        }
+        Ok(VerifiedAtpAccess { did: claims.sub })
+    }
+
+    /// refreshJwt を検証する（`scope`/`aud` 不一致は拒否）。有効性（失効・ローテーション）の
+    /// 最終判定は呼び出し側が `jti` で `atp_refresh_tokens` を確認すること。
+    pub fn verify_atp_refresh_token(
+        &self,
+        token: &str,
+        service_did: &str,
+    ) -> Result<VerifiedAtpRefresh, AuthError> {
+        let claims = self.decode_atp_claims(token, service_did)?;
+        if claims.scope != ATP_REFRESH_SCOPE || claims.aud != service_did {
+            return Err(AuthError::InvalidToken);
+        }
+        Ok(VerifiedAtpRefresh {
+            did: claims.sub,
+            jti: claims.jti,
+        })
+    }
+
+    /// `aud` クレームを検証するには `jsonwebtoken` 側で `set_audience` の明示呼び出しが必須
+    /// （`Validation::default()` は `validate_aud: true` かつ `aud: None` のため、クレーム側に
+    /// `aud` が存在するだけで `InvalidAudience` として一律拒否してしまう）。
+    fn decode_atp_claims(
+        &self,
+        token: &str,
+        service_did: &str,
+    ) -> Result<AtpSessionClaims, AuthError> {
+        let key = DecodingKey::from_secret(&self.secret);
+        let mut validation = Validation::default();
+        validation.set_audience(&[service_did]);
+        decode::<AtpSessionClaims>(token, &key, &validation)
+            .map(|d| d.claims)
+            .map_err(|_| AuthError::InvalidToken)
     }
 }
 

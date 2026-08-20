@@ -1,3 +1,3 @@
 pub mod local;
 
-pub use local::{AuthError, LocalAuthProvider};
+pub use local::{AuthError, LocalAuthProvider, VerifiedAtpAccess, VerifiedAtpRefresh};

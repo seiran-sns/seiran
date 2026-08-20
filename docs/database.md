@@ -44,6 +44,8 @@ ID 採番は2系統ある。
 | `atp_blocks` | ATP MST の CAR ブロックストア（CID → バイト列） |
 | `atp_repo_events` | ATP `subscribeRepos` 配信用のイベントログ（commit/identity） |
 | `atp_blobs` | ATP `uploadBlob` で受信したバイナリ |
+| `atp_app_passwords` | ATP `createAppPassword` で発行したアプリパスワードのハッシュ・無効化管理 |
+| `atp_refresh_tokens` | ATP `refreshSession` が発行するrefreshJwtの `jti` 管理（失効・ローテーション） |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP 設定、Jetstream カーソル等の汎用格納庫） |
 | `instance_domain` | 自ホストドメインの確定値（単一行のみ、一度確定したら不変） |
 | `remote_instance_meta` | リモートインスタンス（`actors.domain`単位）のnodeinfoキャッシュ（NoteCardリモートサーバー表示用） |
@@ -206,6 +208,9 @@ ActivityPub受信添付の`is_sensitive`は画像単位の`attachment[].sensitiv
 
 ### ATP リポジトリ関連（`atp_records` / `atp_blocks` / `atp_repo_events`)
 seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（MST）を管理する。`app.bsky.feed.post` は `posts` テーブルで一元管理し、`atp_records` にはそれ以外のコレクション（`app.bsky.actor.profile` 等）だけを持つ。`atp_blocks` は CAR ブロックの実体、`atp_repo_events` は Relay へブロードキャストする `subscribeRepos` フレームのログで、`id`（BIGSERIAL）がそのまま Relay カーソル(seq)になる。`frame_bytes` にコミット時点で生成したフレームのバイト列をそのまま保存しており、再送時に再構築しない（バイト列差異による Relay 切断を避けるため）。
+
+### ATP セッション認証関連（`atp_app_passwords` / `atp_refresh_tokens`）
+外部ATプロトコルクライアント向けのセッション認証（`docs/protocols.md` 3節）が使うテーブル。`atp_app_passwords` は `com.atproto.server.createAppPassword` で発行したアプリパスワードをargon2ハッシュで保存し（生パスワードは保持しない）、`revoked_at` で無効化管理する。`atp_refresh_tokens` は `refreshSession` が発行するrefreshJwtの `jti` をキーに `expires_at`/`revoked_at` を管理し、リフレッシュのたびに古い `jti` を失効させてローテーションする（ワンタイム）。いずれも `actor_id` に紐づき、JWT自体（accessJwt/refreshJwt）はDBに保存しない。
 
 ## 4. 典型的なクエリパターン
 

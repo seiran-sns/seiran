@@ -446,7 +446,7 @@ async fn get_record_from_atp_records(
 /// `repo` パラメータ（DID または `{username}.{local_domain}` ハンドル）からアクターを解決する。
 /// `listRecords`/`describeRepo` など、アクターが必須で見つからなければ 404 を返すエンドポイント用
 /// （`getRecord` のような「見つからなくても簡易フォールバックする」経路とは異なる）。
-async fn resolve_repo_actor(
+pub(crate) async fn resolve_repo_actor(
     state: &AppState,
     repo: &str,
 ) -> Result<Actor, axum::response::Response> {

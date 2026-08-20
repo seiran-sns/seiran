@@ -39,7 +39,7 @@ pub const MAX_PROFILE_FIELDS: usize = 4;
 pub use ap::{ApClient, ApError};
 pub use atp::{AtpCommitError, AtpCommitEvent, AtpCommitService};
 pub use auth::local::VerifiedUser;
-pub use auth::{AuthError, LocalAuthProvider};
+pub use auth::{AuthError, LocalAuthProvider, VerifiedAtpAccess, VerifiedAtpRefresh};
 pub use crypto::{decrypt as crypto_decrypt, encrypt as crypto_encrypt, CryptoError};
 pub use queue::worker::{priority as job_priority, DeliveryConfig, InboxContext, JobContext};
 pub use queue::{create_job_queue, InMemoryJobQueue, RedisJobQueue, WorkerEngine};
@@ -53,11 +53,11 @@ pub use repository::{
 pub use repository::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use secrets::{Secrets, SecretsError, SecretsFile};
 pub use storage::{
-    convert_audio_to_gray_video, ext_for_mime_type, faststart_video, is_allowed_video_or_audio_mime,
-    is_faststart_eligible_mime, prepare_image, probe_video_or_audio, select_provider,
-    sniff_mime_type, ExifSanitizedImage, ImagePipeline, ImageProcessingError, MediaKind,
-    MediaProbeError, ProbedMedia, ProcessedImage, S3Error, S3StorageClient, SelectorError,
-    AUDIO_VIDEO_HEIGHT, AUDIO_VIDEO_WIDTH,
+    convert_audio_to_gray_video, ext_for_mime_type, faststart_video,
+    is_allowed_video_or_audio_mime, is_faststart_eligible_mime, prepare_image,
+    probe_video_or_audio, select_provider, sniff_mime_type, ExifSanitizedImage, ImagePipeline,
+    ImageProcessingError, MediaKind, MediaProbeError, ProbedMedia, ProcessedImage, S3Error,
+    S3StorageClient, SelectorError, AUDIO_VIDEO_HEIGHT, AUDIO_VIDEO_WIDTH,
 };
 pub use streaming::{StreamEvent, StreamHub};
 pub use traits::{ApDeliveryKind, Job, JobQueue, PrevApReaction};

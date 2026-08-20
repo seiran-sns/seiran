@@ -28,15 +28,16 @@ use tower_http::cors::{Any, CorsLayer};
 use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 
 use seiran_common::repository::{
-    ActorRepository, AppTokenRepository, AtpReadRepository, AuthRateLimitRepository,
-    BlockRepository, DmRepository, EmailChangeRepository, EmailVerificationRepository,
-    EmojiRepository, FollowRepository, HashtagRepository, InstanceDomainRepository, ListRepository,
-    MuteRepository, NotificationRepository, PasswordResetRepository, PgActorRepository,
-    PgAppTokenRepository, PgAtpReadRepository, PgAuthRateLimitRepository, PgBlockRepository,
-    PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository,
-    PgFollowRepository, PgHashtagRepository, PgInstanceDomainRepository, PgListRepository,
-    PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository,
-    PgPostRepository, PgReactionRepository, PgRelayRepository, PgRemoteEmojiRepository,
+    ActorRepository, AppTokenRepository, AtpReadRepository, AtpSessionRepository,
+    AuthRateLimitRepository, BlockRepository, DmRepository, EmailChangeRepository,
+    EmailVerificationRepository, EmojiRepository, FollowRepository, HashtagRepository,
+    InstanceDomainRepository, ListRepository, MuteRepository, NotificationRepository,
+    PasswordResetRepository, PgActorRepository, PgAppTokenRepository, PgAtpReadRepository,
+    PgAtpSessionRepository, PgAuthRateLimitRepository, PgBlockRepository, PgDmRepository,
+    PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository,
+    PgHashtagRepository, PgInstanceDomainRepository, PgListRepository, PgMuteRepository,
+    PgNotificationRepository, PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository,
+    PgReactionRepository, PgRelayRepository, PgRemoteEmojiRepository,
     PgRemoteInstanceMetaRepository, PgTotpRepository, PgUserRepository, PinnedPostsRepository,
     PostRepository, ReactionRepository, RelayRepository, RemoteEmojiRepository,
     RemoteInstanceMetaRepository, TotpRepository, UserRepository,
@@ -70,6 +71,8 @@ pub struct AppState {
     /// 発行済みアプリトークン（MiAuth 経由、#60）の一覧・無効化リポジトリ。
     pub app_tokens: Arc<dyn AppTokenRepository>,
     pub atp_repo: Arc<dyn AtpReadRepository>,
+    /// AT Protocol セッション認証（アプリパスワード・リフレッシュトークン）リポジトリ。
+    pub atp_sessions: Arc<dyn AtpSessionRepository>,
     /// リアクション（絵文字リアクション・いいね）リポジトリ。
     pub reactions: Arc<dyn ReactionRepository>,
     /// ピン留めポスト（ローカルユーザーの pin/unpin 操作結果 + リモートアクターの同期結果の共通ストア）。
@@ -381,6 +384,8 @@ pub async fn init_state(
     let mutes: Arc<dyn MuteRepository> = Arc::new(PgMuteRepository::new(pool.clone()));
     let app_tokens: Arc<dyn AppTokenRepository> = Arc::new(PgAppTokenRepository::new(pool.clone()));
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
+    let atp_sessions: Arc<dyn AtpSessionRepository> =
+        Arc::new(PgAtpSessionRepository::new(pool.clone()));
     let reactions: Arc<dyn ReactionRepository> = Arc::new(PgReactionRepository::new(pool.clone()));
     let pinned_posts: Arc<dyn PinnedPostsRepository> =
         Arc::new(PgPinnedPostsRepository::new(pool.clone()));
@@ -442,6 +447,7 @@ pub async fn init_state(
         mutes,
         app_tokens,
         atp_repo,
+        atp_sessions,
         reactions,
         pinned_posts,
         notifications,
@@ -1016,6 +1022,34 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.sync.listBlobs",
             get(handlers::xrpc::sync::xrpc_list_blobs),
+        )
+        .route(
+            "/xrpc/com.atproto.server.createSession",
+            post(handlers::xrpc::server::xrpc_create_session),
+        )
+        .route(
+            "/xrpc/com.atproto.server.refreshSession",
+            post(handlers::xrpc::server::xrpc_refresh_session),
+        )
+        .route(
+            "/xrpc/com.atproto.server.deleteSession",
+            post(handlers::xrpc::server::xrpc_delete_session),
+        )
+        .route(
+            "/xrpc/com.atproto.server.getSession",
+            get(handlers::xrpc::server::xrpc_get_session),
+        )
+        .route(
+            "/xrpc/com.atproto.server.createAppPassword",
+            post(handlers::xrpc::server::xrpc_create_app_password),
+        )
+        .route(
+            "/xrpc/com.atproto.server.listAppPasswords",
+            get(handlers::xrpc::server::xrpc_list_app_passwords),
+        )
+        .route(
+            "/xrpc/com.atproto.server.revokeAppPassword",
+            post(handlers::xrpc::server::xrpc_revoke_app_password),
         )
         // Bsky公式動画パイプライン（uploadVideo）が完了後に呼び戻してくるコールバック
         .route(

@@ -134,7 +134,7 @@ seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）�
   - `did_resolve.rs` — サービス間認証JWT検証用のDID解決
   - `service_auth.rs` — 外部サービス呼び出し用の自己署名JWT(ES256、low-S正規化必須)
 - `seiran-atp-repo::firehose` — Jetstream WebSocketクライアント本体
-- `seiran-api::handlers::xrpc::{repo,server,sync}` — `getRecord`/`listRecords`/`describeRepo`/`uploadBlob`（repo）、`describeServer`/`resolveHandle`（server）、`getRepo`/`getBlob`/`listBlobs`/`listRepos`/`getLatestCommit`/`subscribeRepos`（sync）
+- `seiran-api::handlers::xrpc::{repo,server,sync}` — `getRecord`/`listRecords`/`describeRepo`/`uploadBlob`（repo）、`describeServer`/`resolveHandle`/`createSession`/`refreshSession`/`deleteSession`/`getSession`/`createAppPassword`/`listAppPasswords`/`revokeAppPassword`（server）、`getRepo`/`getBlob`/`listBlobs`/`listRepos`/`getLatestCommit`/`subscribeRepos`（sync）
 
 ローカルユーザーの投稿は `AtpCommitService` が**ジョブキューを介さず直接** MSTコミット・署名し、`atp_repo_events` にイベント記録、公式Relay（`bsky.network`）へ `requestCrawl` を送って購読される。
 
@@ -168,6 +168,16 @@ Clearsky等のサードパーティツールは firehose を購読し続ける�
 - `GET /xrpc/com.atproto.sync.listRepos` — `at_did IS NOT NULL` なアクター（＝ATPリポジトリを持つ）をid順にページングして返す。PDSクローラーがアカウント一覧を発見するためのエンドポイント。
 - `GET /xrpc/com.atproto.sync.getLatestCommit` — `actors.at_repo_cid`/`at_repo_rev` をそのまま返す。
 - `GET /xrpc/com.atproto.sync.listBlobs` — `atp_blobs`（動画パイプライン提出物）のCID一覧をid順にページングして返す。
+
+### セッション認証（外部ATプロトコルクライアント対応）
+公式Blueskyアプリ等の外部ATプロトコルクライアントがseiranアカウントへ直接ログインできるようにする仕組み。既存のMisskey API互換ログイン（`LocalAuthProvider`、`sub: "local|{user_id}"`のJWT）とは完全に別の認証系で、`LocalAuthProvider`に追加したメソッド群（`generate_atp_session`/`verify_atp_access_token`/`verify_atp_refresh_token`、`crates/seiran-common/src/auth/local.rs`）が同じ`secret`でHS256署名・検証する（`sub`にDIDそのものを積むため既存の`sub.strip_prefix("local|")`とは自然に衝突しない）。
+
+- **本アカウントのメインパスワードではログインできない**。`com.atproto.server.createAppPassword`（既存のseiranログイン、`Authorization: Bearer`の自社トークンで保護）で発行する専用アプリパスワード（`xxxx-xxxx-xxxx-xxxx`形式、`atp_app_passwords`テーブルにargon2ハッシュで保存）のみが`createSession`の照合対象。`listAppPasswords`/`revokeAppPassword`も同じ自社トークン認証で保護する。
+- `POST /xrpc/com.atproto.server.createSession` — `identifier`（ハンドルまたはDID）+ `password`（アプリパスワード）でログインし、accessJwt（2時間）とrefreshJwt（90日）を発行する。identifier解決失敗・アプリパスワード未発行時もダミーハッシュ照合を行ってから同一の`AuthenticationRequired`（401）を返し、アカウント存在有無が応答やタイミングから漏れないようにする。
+- `POST /xrpc/com.atproto.server.refreshSession` — refreshJwtを検証し新しいペアを発行する。古いrefreshJwtの`jti`は同時に失効させる（ワンタイム・ローテーション、`atp_refresh_tokens`テーブルで管理）。
+- `POST /xrpc/com.atproto.server.deleteSession` — refreshJwtの`jti`を失効させる（ログアウト）。
+- `GET /xrpc/com.atproto.server.getSession` — accessJwtを検証し、現在のセッション情報（did/handle）を返す。
+- **`jsonwebtoken`の`Validation::default()`は`validate_aud: true`かつ`aud: None`のため、クレームに`aud`が存在するだけで`InvalidAudience`として一律拒否する**。`aud`クレームを積むJWT（`AtpSessionClaims`）を検証する際は`set_audience`の明示呼び出しが必須。
 
 ### Bsky公式Relayの新規PDSアカウント数上限に注意
 Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホスト単位のアカウント数上限を設けており、上限を超えて登録されたアカウント（作成順で後の方）は `host-throttled` 扱いとなり、そのアカウントのコミットは `subscribeRepos` の配信対象から意図的に除外される（PDS側にエラーは一切返らず、`requestCrawl` も200 OKを返し続けるため、PDS側のログからは検知できない）。「特定ユーザーだけ投稿がbsky.appに反映されない」という報告を受けたら、まずこの上限超過を疑う。indigoの`cmd/relay/relay/account.go`にロジックがあり、ローカルでindigo/relayを動かして自PDSのホストレコード（`account_count`/`account_limit`）を直接確認することで検証できる。

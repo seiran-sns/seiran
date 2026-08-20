@@ -6,6 +6,7 @@
 pub mod actor;
 pub mod app_token;
 pub mod atp;
+pub mod atp_session;
 pub mod auth_rate_limit;
 pub mod block;
 pub mod dm;
@@ -34,6 +35,7 @@ pub mod user;
 pub use actor::{Actor, ActorProfileRow, ActorRepository, PgActorRepository};
 pub use app_token::{AppTokenRepository, AppTokenRow, PgAppTokenRepository};
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
+pub use atp_session::{AppPasswordRow, AtpSessionRepository, PgAtpSessionRepository};
 pub use auth_rate_limit::{AuthRateLimitRepository, IpBlockRow, PgAuthRateLimitRepository};
 pub use block::{BlockRepository, BlockedActorRow, PgBlockRepository};
 pub use dm::{DmPeerSummary, DmRepository, PgDmRepository};

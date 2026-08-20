@@ -126,7 +126,7 @@
 - [ ] **公開リストタイムラインのブロック/ミュートフィルタリング** — `list.rs::timeline` は「閲覧者情報を持たない」設計のため未対応。対応するには閲覧制御全体の見直しが必要（`docs/protocols.md` 10節）
 - [x] **AT Protocol PDS 読み取り・同期系エンドポイント拡充** — `com.atproto.repo.listRecords`/`describeRepo`、`com.atproto.sync.listRepos`/`getLatestCommit`/`listBlobs`。詳細: `docs/protocols.md` 3節
 - [ ] **AT Protocol PDS 書き込み系エンドポイント** — `com.atproto.repo.createRecord`/`putRecord`/`deleteRecord`/`applyWrites`（外部ATクライアントからの直接書き込み対応）
-- [ ] **AT Protocol PDS セッション認証系エンドポイント** — `com.atproto.server.createSession`/`refreshSession`/`deleteSession`/`getSession`/`createAppPassword`等（外部ATクライアントからの直接ログイン対応）
+- [x] **AT Protocol PDS セッション認証系エンドポイント** — `com.atproto.server.createSession`/`refreshSession`/`deleteSession`/`getSession`/`createAppPassword`/`listAppPasswords`/`revokeAppPassword`。詳細: `docs/protocols.md` 3節
 
 ### インフラ・パフォーマンス
 
@@ -146,6 +146,7 @@
 - [ ] 未来補正タイムスタンプ採番のテスト
 - [x] 検索ブレンドアルゴリズムの挙動テスト
 - [ ] 連合（Federation）統合テスト（モックAP/ATPサーバー、他seiranハンドシェイク・特権同期のテスト）
+- [ ] **`e2e/tests/home-feed-state.spec.ts`「選択タブとスクロール位置が保持される」がflaky** — フルスイート実行時にごく稀に失敗する（スクロール位置差分が閾値50pxを超える）。単独実行では再現しない。原因未特定
 - [ ] 高負荷・スケールアウト検証（`RedisJobQueue` + `RedisSessionStore` 環境での動作確認、プロダクションビルド・デプロイ手順の検証）
 - [x] Playwright E2E基盤の構築（`e2e/`、スタブPLCサーバー、E2E専用DB）と新規登録フローの疎通テスト
 - [x] PR CIでfrontendユニットテストとPlaywright E2E全件を実行し、E2E失敗時のtraceをartifactとして保存（#98）
