@@ -82,6 +82,13 @@
   "appTokensSettings": {
     "empty": "Aucun jeton d'application n'a été émis.",
     "issuedAt": "Publié {{date}}",
-    "revokeButton": "Révoquer"
+    "revokeButton": "Révoquer",
+    "nameLabel": "Usage (optionnel)",
+    "createButton": "Émettre",
+    "creatingButton": "Émission…",
+    "issuedWarning": "Ce jeton n'est affiché que maintenant. Il ne pourra plus être affiché après la fermeture.",
+    "copyButton": "Copier",
+    "copiedButton": "Copié",
+    "dismissButton": "Fermer"
   }
 }

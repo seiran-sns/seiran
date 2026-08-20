@@ -784,6 +784,15 @@ export interface AppTokenRow {
   created_at: string;
 }
 
+/** アプリトークン発行直後のレスポンス（`POST /account/app-tokens`）。`token`はこの
+ * レスポンスでしか返らない（DBには検証用のjtiしか保存せず、再表示できないため）。 */
+export interface CreateAppTokenResponse {
+  id: string;
+  token: string;
+  client_name: string;
+  created_at: string;
+}
+
 export interface DriveFile {
   id: string;
   url: string;
@@ -1873,6 +1882,10 @@ export const api = {
     /** 設定画面の発行済みアプリトークン一覧（#60）。 */
     list() {
       return request<AppTokenRow[]>("GET", "/account/app-tokens");
+    },
+    /** 設定画面から直接アプリトークンを発行する（MiAuth連携を介さない）。 */
+    create(name?: string) {
+      return request<CreateAppTokenResponse>("POST", "/account/app-tokens", { name });
     },
     /** 本人所有のトークンを無効化する（#60）。 */
     revoke(id: string) {

@@ -82,6 +82,13 @@
   "appTokensSettings": {
     "empty": "尚未发布任何应用程序令牌。",
     "issuedAt": "已发布 {{date}}",
-    "revokeButton": "撤销"
+    "revokeButton": "撤销",
+    "nameLabel": "用途（可选）",
+    "createButton": "发行",
+    "creatingButton": "发行中…",
+    "issuedWarning": "此令牌仅现在显示。关闭后将无法再次显示。",
+    "copyButton": "复制",
+    "copiedButton": "已复制",
+    "dismissButton": "关闭"
   }
 }

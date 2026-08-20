@@ -54,3 +54,106 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.createForm {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.createInput {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.createBtn {
+  flex-shrink: 0;
+  background: var(--accent-strong);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.createBtn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.createBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.issuedBox {
+  margin: 12px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-strong);
+  border-radius: 10px;
+  background: var(--accent-deep);
+}
+
+.issuedWarning {
+  margin: 0 0 8px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.issuedTokenRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.issuedToken {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.copyBtn {
+  flex-shrink: 0;
+  background: var(--accent-strong);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.copyBtn:hover {
+  background: var(--accent-hover);
+}
+
+.dismissBtn {
+  margin-top: 10px;
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.dismissBtn:hover {
+  border-color: var(--accent-strong);
+  color: var(--text);
+}

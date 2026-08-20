@@ -171,7 +171,7 @@ AP受信（投稿本文・表示名・絵文字リアクションのいずれか
 notes API / Misskey互換API がノート一覧を組み立てる際、対象ドメインが未キャッシュならその場で`RemoteInstanceInfoResolve`ジョブを積み、今回のレスポンスにはドメイン名を暫定表示名としたフォールバック値を返す（次回以降のリクエストで正式なnodeName/themeColor/icon_urlに置き換わる、`remote_actor_resolve`と同じ「表示のリッチ化はベストエフォート」方針）。加えて`seiran-api::spawn_startup_tasks`が起動のたびに、`remote_instance_meta`未登録、または`icon_url`/`node_name`のいずれかが未取得の既存リモートドメインをまとめて解決ジョブへ積む（新規デプロイ直後の大量未解決状態や、アイコン取得・titleタグフォールバックのような機能追加以前に解決済みだった行の再取得漏れを防ぐための起動時バックフィル）。
 
 ### `app_tokens`
-MiAuth（`/api/miauth/:session_id/authorize`）認可成立時に発行するJWTは自社ログインと同じ`LocalAuthProvider`を再利用しており、専用のトークン形式を持たない。本テーブルはそのJWTの`jti`（クレームに追加済み）をキーに、クライアント名・発行日時・無効化日時を記録する管理台帳で、JWT自体の検証ロジックには関与しない。認証ミドルウェア（`extract_auth`）はトークン検証成功後に必ず`app_tokens.is_revoked(jti)`を照会し、`revoked_at`が立っていれば拒否する。**このテーブルに行が無いjti（自社ログイン・setup等）は「管理対象外」として常に有効**として扱う（全トークンを網羅する台帳ではない）。設定画面の一覧・無効化操作は本人（`user_id`一致）のみ可能。
+MiAuth（`/api/miauth/:session_id/authorize`）認可成立時、または設定画面から直接発行（`POST /api/account/app-tokens`、MiAuth連携を介さない即時発行）した際に生成するJWTは、いずれも自社ログインと同じ`LocalAuthProvider::generate_app_token`を再利用しており、専用のトークン形式を持たない。本テーブルはそのJWTの`jti`（クレームに追加済み）をキーに、クライアント名・発行日時・無効化日時を記録する管理台帳で、JWT自体の検証ロジックには関与しない。認証ミドルウェア（`extract_auth`）はトークン検証成功後に必ず`app_tokens.is_revoked(jti)`を照会し、`revoked_at`が立っていれば拒否する。**このテーブルに行が無いjti（自社ログイン・setup等）は「管理対象外」として常に有効**として扱う（全トークンを網羅する台帳ではない）。設定画面の一覧・無効化操作は本人（`user_id`一致）のみ可能。生のトークン文字列自体はDBに保存されない（`jti`のみ）ため、直接発行APIのレスポンスでのみ一度だけ返す。
 
 ### `notifications`
 `type` はフォロー・リアクション・メンション・返信に加えて、ローカル投稿へのリポスト（`repost`）と引用（`quote`）を保持する。リポスト・引用通知の `note_id` は通知の契機になった新しいリポスト／引用投稿を指す。

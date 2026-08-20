@@ -82,6 +82,13 @@
   "appTokensSettings": {
     "empty": "発行済みのアプリトークンはありません。",
     "issuedAt": "{{date}} に発行",
-    "revokeButton": "無効化"
+    "revokeButton": "無効化",
+    "nameLabel": "用途（任意）",
+    "createButton": "発行",
+    "creatingButton": "発行中…",
+    "issuedWarning": "このトークンは今だけ表示されます。閉じると二度と表示できません。",
+    "copyButton": "コピー",
+    "copiedButton": "コピーしました",
+    "dismissButton": "閉じる"
   }
 }

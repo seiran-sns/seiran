@@ -82,6 +82,13 @@
   "appTokensSettings": {
     "empty": "No se han emitido tokens de aplicación.",
     "issuedAt": "Emitido {{date}}",
-    "revokeButton": "Revocar"
+    "revokeButton": "Revocar",
+    "nameLabel": "Uso (opcional)",
+    "createButton": "Emitir",
+    "creatingButton": "Emitiendo…",
+    "issuedWarning": "Este token solo se muestra ahora. No se podrá volver a mostrar después de cerrar esto.",
+    "copyButton": "Copiar",
+    "copiedButton": "Copiado",
+    "dismissButton": "Cerrar"
   }
 }

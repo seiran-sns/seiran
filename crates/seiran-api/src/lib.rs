@@ -708,7 +708,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/account/app-tokens",
-            get(handlers::account::list_app_tokens),
+            get(handlers::account::list_app_tokens).post(handlers::account::create_app_token),
         )
         .route(
             "/api/account/app-tokens/:id",

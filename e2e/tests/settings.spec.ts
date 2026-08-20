@@ -235,6 +235,34 @@ test("アプリトークン一覧に発行済みトークンが表示され、�
   expect(meAfter.status()).toBe(401);
 });
 
+test("アプリトークン設定画面から直接発行でき、発行したトークンで認証できる", async ({
+  page,
+  request,
+}) => {
+  const user = await registerUserViaApi(request, "e2eapptokdirect");
+
+  await seedAuth(page, user.token);
+  await page.goto("/settings/app-tokens");
+
+  await page.getByPlaceholder("用途（任意）").fill("直接発行テスト");
+  await page.getByRole("button", { name: "発行", exact: true }).click();
+
+  await expect(page.getByText("直接発行テスト")).toBeVisible({ timeout: 15_000 });
+  const issuedToken = await page.locator("code").first().textContent();
+  expect(issuedToken).toBeTruthy();
+
+  // 発行したトークンでAPI認証できる。
+  const meRes = await request.get("/api/auth/me", {
+    headers: { Authorization: `Bearer ${issuedToken}` },
+  });
+  expect(meRes.ok(), `me failed: ${meRes.status()} ${await meRes.text()}`).toBeTruthy();
+
+  // 「閉じる」で表示エリアが消え、一覧には残る。
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(page.locator("code")).toHaveCount(0);
+  await expect(page.getByText("直接発行テスト")).toBeVisible();
+});
+
 test("設定メニューから表示設定画面へ遷移でき、言語を切り替えるとUIの表示言語が変わり保存される", async ({
   page,
   request,

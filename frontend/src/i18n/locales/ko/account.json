@@ -82,6 +82,13 @@
   "appTokensSettings": {
     "empty": "발행된 앱 토큰이 없습니다.",
     "issuedAt": "{{date}} 발행됨",
-    "revokeButton": "취소"
+    "revokeButton": "취소",
+    "nameLabel": "용도(선택 사항)",
+    "createButton": "발행",
+    "creatingButton": "발행 중…",
+    "issuedWarning": "이 토큰은 지금만 표시됩니다. 닫으면 다시 표시할 수 없습니다.",
+    "copyButton": "복사",
+    "copiedButton": "복사됨",
+    "dismissButton": "닫기"
   }
 }

@@ -397,6 +397,64 @@ pub async fn withdraw(
     Ok(Json(()))
 }
 
+#[derive(Deserialize)]
+pub struct CreateAppTokenRequest {
+    /// トークンの用途を示す表示名（一覧に出す）。空白のみ・省略時は "Unknown"。
+    pub name: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct CreateAppTokenResponse {
+    pub id: uuid::Uuid,
+    /// トークン文字列そのもの。発行直後のこのレスポンスでしか返さない
+    /// （DBには`app_tokens.id`＝JWTの`jti`しか保存せず、後から再表示できない）。
+    pub token: String,
+    pub client_name: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// `POST /api/account/app-tokens`
+/// MiAuth（外部クライアント連携）を介さず、設定画面から直接アプリトークンを発行する。
+/// 生成・記録のロジックはMiAuth認可成立時（`miauth::miauth_authorize`）と同じで、
+/// 無期限（`exp`クレーム無し）・`app_tokens.revoked_at`でのみ失効する点も共通。
+pub async fn create_app_token(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    body: Option<Json<CreateAppTokenRequest>>,
+) -> Result<Json<CreateAppTokenResponse>, ApiError> {
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+
+    let (token, jti) = state
+        .local_auth
+        .generate_app_token(auth_user.user_id, &auth_user.email)
+        .map_err(|e| ApiError::Internal(format!("[create-app-token] トークン生成失敗: {}", e)))?;
+
+    let client_name = body
+        .and_then(|Json(b)| b.name)
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    state
+        .app_tokens
+        .insert(jti, auth_user.user_id, &client_name)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[create-app-token] DB エラー: {}", e)))?;
+
+    Ok(Json(CreateAppTokenResponse {
+        id: jti,
+        token,
+        client_name,
+        created_at: chrono::Utc::now(),
+    }))
+}
+
 /// `GET /api/account/app-tokens`（#60）
 /// 発行済みアプリトークン（MiAuth 経由のみ、自社ログインは対象外）の一覧。
 pub async fn list_app_tokens(
