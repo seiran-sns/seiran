@@ -78,7 +78,8 @@
     "linkCardLoadEmbed": "Load embed"
   },
   "noteList": {
-    "emptyDefault": "No posts."
+    "emptyDefault": "No posts.",
+    "gapLabel": "Some posts may be missing here"
   },
   "postComposer": {
     "deliverFediHint": "Deliver to Fediverse",

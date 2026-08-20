@@ -12,6 +12,8 @@ interface NoteListProps {
   linkToDetail?: boolean;
   /** リアルタイム挿入されたばかりのノート ID。押し出しアニメーションを付与する（#37）。 */
   enteringIds?: Set<string>;
+  /** このノートIDの直前に「取りこぼし区間」の区切り（二重波線）を表示する。 */
+  gapBeforeIds?: Set<string>;
   /** 末尾の sentinel が画面内に入ったら過去分を追加取得する（無限スクロール）。未指定なら無効。 */
   onLoadMore?: () => void;
   hasMore?: boolean;
@@ -24,6 +26,7 @@ export default function NoteList({
   emptyMessage,
   linkToDetail = true,
   enteringIds,
+  gapBeforeIds,
   onLoadMore,
   hasMore,
   loadingMore,
@@ -37,8 +40,13 @@ export default function NoteList({
   return (
     <div>
       {notes.map((note) => (
-        <div key={note.id} className={enteringIds?.has(note.id) ? styles.entering : undefined}>
-          <NoteCard note={note} linkToDetail={linkToDetail} />
+        <div key={note.id}>
+          {gapBeforeIds?.has(note.id) && (
+            <div className={styles.gap} role="separator" aria-label={t("home:noteList.gapLabel")} />
+          )}
+          <div className={enteringIds?.has(note.id) ? styles.entering : undefined}>
+            <NoteCard note={note} linkToDetail={linkToDetail} />
+          </div>
         </div>
       ))}
       {onLoadMore && hasMore && (

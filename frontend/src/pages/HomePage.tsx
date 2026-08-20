@@ -74,7 +74,11 @@ export default function HomePage() {
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [pinnedHashtags, setPinnedHashtags] = useState<{ name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
+  // このIDの直前に「取りこぼし区間」の区切り（二重波線）を表示する対象ノートID群。
+  const [gapBeforeIds, setGapBeforeIds] = useState<Set<string>>(new Set());
   const [composerCollapsed, setComposerCollapsed] = useState(
     () => localStorage.getItem(COMPOSER_COLLAPSED_KEY) === "1"
   );
@@ -161,6 +165,8 @@ export default function HomePage() {
     PAGE_SIZE,
     onError
   );
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
 
   useEffect(() => {
     api.lists.list().then(setLists).catch(() => {});
@@ -198,14 +204,19 @@ export default function HomePage() {
     if (cached) {
       setNotes(cached.notes);
       setHasMore(cached.hasMore);
+      setGapBeforeIds(cached.gapBeforeIds);
       setLoading(false);
       pendingScrollRestore.current = Math.max(cached.scrollY, loadScrollPosition(key));
+      // 離脱中に取りこぼした新着・状態変化を補うため、先頭ページ相当を再取得してマージする
+      // （WS再接続時の補完と同じ処理、詳細は下記 mergeHeadIntoTimeline）。
+      mergeHeadIntoTimeline();
       return;
     }
 
     let cancelled = false;
     setLoading(true);
     setHasMore(true);
+    setGapBeforeIds(new Set());
     fetchFeed(feed, { limit: PAGE_SIZE })
       .then((n) => {
         if (cancelled) return;
@@ -217,6 +228,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFeedKey, feed, getCache, onError, setHasMore, setNotes]);
 
   // 一覧・hasMoreが変わるたびキャッシュへ反映（scrollYは触らずマージする）。
@@ -228,8 +240,8 @@ export default function HomePage() {
   // 常に確定した値だけをキャッシュへ反映する。
   useEffect(() => {
     if (loading) return;
-    setCache(currentFeedKey, { notes, hasMore });
-  }, [notes, hasMore, loading, feed, currentFeedKey, setCache]);
+    setCache(currentFeedKey, { notes, hasMore, gapBeforeIds });
+  }, [notes, hasMore, gapBeforeIds, loading, feed, currentFeedKey, setCache]);
 
   // キャッシュから復元した一覧がDOMへ反映された後に、一度だけスクロール位置を復元する。
   useEffect(() => {
@@ -247,15 +259,18 @@ export default function HomePage() {
   // 下へ押しやられてしまう。最上部でない場合は挿入前のscrollHeight/scrollYを控えておき、
   // DOM反映直後（下記useLayoutEffect）に増えた高さぶんだけscrollYを足して見た目を相殺する。
   const scrollAdjustRef = useRef<{ scrollHeight: number; scrollY: number } | null>(null);
-
-  const prepend = useCallback((note: Note, animate = false) => {
-    const preserveScroll = window.scrollY > 0;
-    if (preserveScroll) {
+  const captureScrollAdjust = useCallback(() => {
+    if (window.scrollY > 0) {
       scrollAdjustRef.current = {
         scrollHeight: document.documentElement.scrollHeight,
         scrollY: window.scrollY,
       };
     }
+  }, []);
+
+  const prepend = useCallback((note: Note, animate = false) => {
+    const preserveScroll = window.scrollY > 0;
+    captureScrollAdjust();
     setNotes((prev) => (prev.some((n) => n.id === note.id) ? prev : [note, ...prev]));
     // push-downアニメーション（.entering、max-heightを0.4秒かけて展開）は高さがじわじわ
     // 伸びるため、非最上部でのスクロール補正（差分を一度に足し込む方式）と噛み合わない。
@@ -271,7 +286,7 @@ export default function HomePage() {
       }, 450);
       timers.current.push(t);
     }
-  }, [setNotes]);
+  }, [setNotes, captureScrollAdjust]);
 
   useLayoutEffect(() => {
     const adjust = scrollAdjustRef.current;
@@ -283,18 +298,60 @@ export default function HomePage() {
     }
   }, [notes]);
 
+  // 離脱中（他画面へ遷移・WebSocket切断）に取りこぼした新着・状態変化を補うため、
+  // 先頭ページ相当を再取得して現在の一覧の先頭とマージする。復帰時（上記キャッシュ復元時）と
+  // WS再接続時（下記subscribeChannelのonResync）の両方から共通で呼ばれる。
+  const mergeHeadIntoTimeline = useCallback(() => {
+    fetchFeed(feed, { limit: PAGE_SIZE })
+      .then((fetched) => {
+        if (fetched.length === 0) return;
+        const prev = notesRef.current;
+        if (prev.length === 0) {
+          setNotes(fetched);
+          return;
+        }
+        const prevIds = new Set(prev.map((n) => n.id));
+        const overlapIndex = fetched.findIndex((n) => prevIds.has(n.id));
+        if (overlapIndex === -1) {
+          // 取得した先頭ページと既存の一覧がまったく重ならない＝間に取りこぼしがある。
+          // 境目に区切り（二重波線）を挟んで、取得できた分だけ先頭へ追加する。
+          captureScrollAdjust();
+          setGapBeforeIds((g) => new Set(g).add(prev[0].id));
+          setNotes((p) => [...fetched, ...p]);
+          return;
+        }
+        const newOnes = fetched.slice(0, overlapIndex);
+        if (newOnes.length === 0) return;
+        captureScrollAdjust();
+        setNotes((p) => [...newOnes, ...p]);
+      })
+      .catch(() => {
+        // 復帰時・再接続時の補完フェッチはベストエフォート。失敗してもエラー表示はしない
+        // （元々表示中の一覧はそのまま残るため、ユーザー体験上は無視して問題ない）。
+      });
+  }, [feed, captureScrollAdjust, setNotes]);
+
   // リアルタイム更新（#37）: 表示中タブに対応するチャンネルを購読し、届いたポストを
   // アニメ付きで先頭挿入する。タブ切替のたびに旧チャンネルをdisconnectし新チャンネルへ
   // connectし直す（依存配列の`feed`変化でクリーンアップ→再購読される）。
   useEffect(() => {
     const spec = feedToChannelSpec(feed);
-    return subscribeChannel(spec, (n) => {
-      // バックエンドのチャンネル判定に加え、可視性（unlisted/followers_only）の
-      // クライアント側最終防御をWS由来のノートにも適用する（RESTフェッチと同じ二重防御）。
-      if (filterTimelineNotes(feed, [n]).length === 0) return;
-      prepend(n, true);
-    });
-  }, [feed, subscribeChannel, prepend]);
+    return subscribeChannel(
+      spec,
+      (n) => {
+        // バックエンドのチャンネル判定に加え、可視性（unlisted/followers_only）の
+        // クライアント側最終防御をWS由来のノートにも適用する（RESTフェッチと同じ二重防御）。
+        if (filterTimelineNotes(feed, [n]).length === 0) return;
+        prepend(n, true);
+      },
+      () => {
+        // WebSocketが不意に切断して再接続した場合の補完（初回接続時にも呼ばれるが、
+        // その時点ではまだ何もフェッチしていないので二重フェッチを避けてスキップする）。
+        if (loadingRef.current) return;
+        mergeHeadIntoTimeline();
+      }
+    );
+  }, [feed, subscribeChannel, prepend, mergeHeadIntoTimeline]);
 
   function toggleComposerCollapsed() {
     setComposerCollapsed((prev) => {
@@ -382,6 +439,7 @@ export default function HomePage() {
         notes={notes}
         loading={loading}
         enteringIds={enteringIds}
+        gapBeforeIds={gapBeforeIds}
         onLoadMore={loadMore}
         hasMore={hasMore}
         loadingMore={loadingMore}

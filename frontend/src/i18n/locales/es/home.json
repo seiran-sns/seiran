@@ -78,7 +78,8 @@
     "linkCardLoadEmbed": "Cargar contenido incrustado"
   },
   "noteList": {
-    "emptyDefault": "Sin publicaciones."
+    "emptyDefault": "Sin publicaciones.",
+    "gapLabel": "Puede que falten publicaciones aquí"
   },
   "postComposer": {
     "deliverFediHint": "Enviar al Fediverso",

@@ -7,6 +7,8 @@ import { resolveStreamNote } from "./resolveStreamNote";
 import { useStreaming } from "../hooks/useStreaming";
 
 type NoteListener = (n: Note) => void;
+/** チャンネル購読が（再）確立されたことのみを知らせるリスナー。ペイロードは無い。 */
+type ResyncListener = () => void;
 
 /** Misskey互換のタイムラインチャンネル指定（バックエンド`ChannelKind`と対応）。 */
 export type ChannelSpec =
@@ -44,8 +46,11 @@ interface StreamingValue {
    * タイムラインチャンネルを購読する（HomePage が表示中タブに応じて呼ぶ）。
    * `connect`/`disconnect`メッセージの送受信を内部で扱い、該当チャンネルの新着ノートのみ
    * `onNote`に届く。戻り値の関数で`disconnect`を送り購読解除する。
+   * `onResync`は同一チャンネルの購読が（再）確立されるたびに呼ばれる。WebSocketが不意に
+   * 切断して再接続した場合、切断中の新着を取りこぼしている可能性があるため、呼び出し元は
+   * ここで最新分の再取得・マージを行う想定（HomePage参照）。
    */
-  subscribeChannel: (spec: ChannelSpec, onNote: NoteListener) => () => void;
+  subscribeChannel: (spec: ChannelSpec, onNote: NoteListener, onResync?: ResyncListener) => () => void;
   /** 指定ノートIDのリアクションのライブ更新を購読する（NoteCard が使用）。戻り値で解除。 */
   registerReaction: (noteId: string, cb: ReactionListener) => () => void;
   /** 通知の新着シグナルを購読する（NotificationsPanel が使用）。戻り値で解除。 */
@@ -78,8 +83,10 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const reactionListeners = useRef<Map<string, Set<ReactionListener>>>(new Map());
   const notifListeners = useRef<Set<NotifListener>>(new Set());
   const dmListeners = useRef<Set<NoteListener>>(new Set());
-  /** subscription id -> {spec, onNote}。再接続時の`connect`再送、`channel`イベントの配り先に使う。 */
-  const channelSubs = useRef<Map<string, { spec: ChannelSpec; onNote: NoteListener }>>(new Map());
+  /** subscription id -> {spec, onNote, onResync}。再接続時の`connect`再送、`channel`イベントの配り先に使う。 */
+  const channelSubs = useRef<Map<string, { spec: ChannelSpec; onNote: NoteListener; onResync?: ResyncListener }>>(
+    new Map()
+  );
   // useStreaming の戻り値 send を onOpen コールバック内で使うための ref。
   // useStreaming 呼び出し自体の引数（onOpen）から戻り値（send）を参照する循環を避けるため、
   // onOpen 内では直接 send を閉じ込めず sendRef.current 経由で読む（useStreaming.ts の
@@ -135,22 +142,24 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     },
     user?.id ?? null,
     // 再接続のたびに、現在購読中の全チャンネルを再度 connect し直す
-    // （WebSocket再接続でサーバー側の購読状態は失われるため）。
+    // （WebSocket再接続でサーバー側の購読状態は失われるため）。あわせて各購読の`onResync`を
+    // 呼び、切断中に取りこぼした可能性のある更新の補完を呼び出し元に促す。
     useCallback(() => {
-      channelSubs.current.forEach(({ spec }, id) => {
+      channelSubs.current.forEach(({ spec, onResync }, id) => {
         sendRef.current({
           type: "connect",
           body: { channel: spec.channel, id, params: "params" in spec ? spec.params : {} },
         });
+        onResync?.();
       });
     }, [])
   );
   sendRef.current = send;
 
   const subscribeChannel = useCallback(
-    (spec: ChannelSpec, onNote: NoteListener) => {
+    (spec: ChannelSpec, onNote: NoteListener, onResync?: ResyncListener) => {
       const id = crypto.randomUUID();
-      channelSubs.current.set(id, { spec, onNote });
+      channelSubs.current.set(id, { spec, onNote, onResync });
       send({ type: "connect", body: { channel: spec.channel, id, params: "params" in spec ? spec.params : {} } });
       return () => {
         channelSubs.current.delete(id);

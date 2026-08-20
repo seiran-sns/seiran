@@ -23,6 +23,8 @@ interface FeedCacheEntry {
   notes: Note[];
   hasMore: boolean;
   scrollY: number;
+  /** このIDの直前に「取りこぼし区間」の区切り（二重波線）を表示する対象ノートID群。 */
+  gapBeforeIds: Set<string>;
 }
 
 interface HomeFeedState {
@@ -60,7 +62,7 @@ export function HomeFeedProvider({ children }: { children: React.ReactNode }) {
 
   const getCache = useCallback((key: string) => cacheRef.current.get(key), []);
   const setCache = useCallback((key: string, patch: Partial<FeedCacheEntry>) => {
-    const prev = cacheRef.current.get(key) ?? { notes: [], hasMore: true, scrollY: 0 };
+    const prev = cacheRef.current.get(key) ?? { notes: [], hasMore: true, scrollY: 0, gapBeforeIds: new Set<string>() };
     cacheRef.current.set(key, { ...prev, ...patch });
   }, []);
 

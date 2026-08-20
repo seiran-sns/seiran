@@ -24,3 +24,19 @@
   font-size: 12px;
   color: var(--text-faint, #8a94a6);
 }
+
+/* 復帰時・WS再接続時の補完フェッチで、既存の一覧と取得できた先頭ページがまったく
+   重ならなかった＝間に取りこぼしがあることを示す区切り線（二重の波線）。 */
+.gap {
+  height: 22px;
+  /* 下側はNoteCard(.card)のmargin-top:12pxと合わさって14pxになる。NoteCard同士の
+     margin-bottomは0のため、上側もこのmargin-topだけで同じ14pxに揃える。 */
+  margin: 14px 0 2px;
+  background-color: var(--border-strong);
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxNicgaGVpZ2h0PScyMicgdmlld0JveD0nMCAwIDE2IDIyJz48cGF0aCBkPSdNMCA3IFE0IDQgOCA3IFQxNiA3JyBzdHJva2U9J3doaXRlJyBzdHJva2Utd2lkdGg9JzEuNicgZmlsbD0nbm9uZScvPjxwYXRoIGQ9J00wIDE1IFE0IDEyIDggMTUgVDE2IDE1JyBzdHJva2U9J3doaXRlJyBzdHJva2Utd2lkdGg9JzEuNicgZmlsbD0nbm9uZScvPjwvc3ZnPg==");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxNicgaGVpZ2h0PScyMicgdmlld0JveD0nMCAwIDE2IDIyJz48cGF0aCBkPSdNMCA3IFE0IDQgOCA3IFQxNiA3JyBzdHJva2U9J3doaXRlJyBzdHJva2Utd2lkdGg9JzEuNicgZmlsbD0nbm9uZScvPjxwYXRoIGQ9J00wIDE1IFE0IDEyIDggMTUgVDE2IDE1JyBzdHJva2U9J3doaXRlJyBzdHJva2Utd2lkdGg9JzEuNicgZmlsbD0nbm9uZScvPjwvc3ZnPg==");
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
+  -webkit-mask-size: 16px 22px;
+  mask-size: 16px 22px;
+}

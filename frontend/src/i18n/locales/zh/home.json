@@ -78,7 +78,8 @@
     "linkCardLoadEmbed": "加载嵌入内容"
   },
   "noteList": {
-    "emptyDefault": "没有帖子。"
+    "emptyDefault": "没有帖子。",
+    "gapLabel": "这里可能有遗漏的帖子"
   },
   "postComposer": {
     "deliverFediHint": "发送到联邦宇宙",

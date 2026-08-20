@@ -78,7 +78,8 @@
     "linkCardLoadEmbed": "Charger l'intégration"
   },
   "noteList": {
-    "emptyDefault": "Aucun message."
+    "emptyDefault": "Aucun message.",
+    "gapLabel": "Des messages sont peut-être manquants ici"
   },
   "postComposer": {
     "deliverFediHint": "Publier sur le Fédiverse",

@@ -78,7 +78,8 @@
     "linkCardLoadEmbed": "Einbettung laden"
   },
   "noteList": {
-    "emptyDefault": "Keine Beiträge."
+    "emptyDefault": "Keine Beiträge.",
+    "gapLabel": "Hier könnten Beiträge fehlen"
   },
   "postComposer": {
     "deliverFediHint": "An das Fediverse senden",

@@ -78,7 +78,8 @@
     "linkCardLoadEmbed": "埋め込みを読み込む"
   },
   "noteList": {
-    "emptyDefault": "投稿がありません。"
+    "emptyDefault": "投稿がありません。",
+    "gapLabel": "この間に取りこぼした投稿がある可能性があります"
   },
   "postComposer": {
     "deliverFediHint": "Fediverseに配送",
