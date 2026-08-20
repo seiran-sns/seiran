@@ -10,7 +10,10 @@ pub use client::{
     fetch_bsky_profile, fetch_single_bsky_post, search_appview_posts, upsert_bsky_post, AtpSession,
     BskyFollowerProfile, BskyPinnedPostRef, BskyPost, BskyProfile,
 };
-pub use did_resolve::{fetch_raw_did_document, resolve_atproto_verification_key, DidResolveError};
+pub use did_resolve::{
+    fetch_raw_did_document, resolve_atproto_verification_key, resolve_service_endpoint,
+    DidResolveError,
+};
 pub use plc::{
     p256_to_did_key, plc_directory_base_url, prepare_plc_genesis, signing_key_from_pem,
     submit_plc_genesis, PlcError, PlcGenesis,

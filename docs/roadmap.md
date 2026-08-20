@@ -127,6 +127,7 @@
 - [x] **AT Protocol PDS 読み取り・同期系エンドポイント拡充** — `com.atproto.repo.listRecords`/`describeRepo`、`com.atproto.sync.listRepos`/`getLatestCommit`/`listBlobs`。詳細: `docs/protocols.md` 3節
 - [x] **AT Protocol PDS 書き込み系エンドポイント** — `com.atproto.repo.createRecord`/`putRecord`/`deleteRecord`/`applyWrites`（`app.bsky.feed.post`以外の任意コレクション。`createSession`のaccessJwtで認証）。詳細: `docs/protocols.md` 3節
 - [x] **AT Protocol PDS セッション認証系エンドポイント** — `com.atproto.server.createSession`/`refreshSession`/`deleteSession`/`getSession`/`createAppPassword`/`listAppPasswords`/`revokeAppPassword`。詳細: `docs/protocols.md` 3節
+- [x] **AT Protocol PDS XRPCプロキシ（`atproto-proxy`ヘッダー）** — `app.bsky.feed.getTimeline`/`searchPosts`/`app.bsky.notification.listNotifications`等のAppView専用メソッドをAppViewへ透過転送する。詳細: `docs/protocols.md` 3節
 
 ### インフラ・パフォーマンス
 

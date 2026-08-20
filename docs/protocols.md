@@ -190,6 +190,14 @@ Clearsky等のサードパーティツールは firehose を購読し続ける�
 ### クライアント設定（`app.bsky.actor.getPreferences`/`putPreferences`）
 `GET`/`POST /xrpc/app.bsky.actor.{get,put}Preferences` はaccessJwt認証必須（本人のみ）。`preferences`配列はATPリポジトリのMSTには入らないプライベートデータで、`atp_preferences`テーブル（`actor_id` PRIMARY KEY、`preferences` JSONB）に不透明な配列としてそのまま保存・返却する（中身の`$type`ごとの意味は解釈しない）。`putPreferences`は全置換（差分マージではなく配列を丸ごと差し替える、AT Protocol仕様通り）。Bluesky公式の年齢確認フロー（`#personalDetailsPref`の`birthDate`）はこのエンドポイントが無いと動作せず、bsky.appから「生年月日の設定を読み込むことができませんでした」エラーになる。
 
+### XRPCプロキシ（`atproto-proxy`ヘッダー）
+`app.bsky.feed.getTimeline`/`searchPosts`/`app.bsky.notification.listNotifications`等のAppView専用メソッドは、PDS自身が実装するのではなく、**PDSがAppView（`api.bsky.app`等）への透過プロキシとして振る舞う**ことで実現される。これが無いとBluesky公式クライアントはログインできてもタイムライン・検索・通知が「接続できません」で軒並み失敗する（2026-08-20 マイケル実機確認）。
+
+- 明示的な`.route()`にマッチしなかったXRPCリクエストは`Router::fallback`（`crates/seiran-api/src/handlers/xrpc/proxy.rs`の`xrpc_proxy_fallback`）が受け止める。`atproto-proxy: <did>#<service-id>`ヘッダー（例: `did:web:api.bsky.app#bsky_appview`）が無ければ`MethodNotImplemented`（404）を返す。
+- ヘッダーがあれば、`resolve_service_endpoint`（`crates/seiran-common/src/atp/did_resolve.rs`）が`<did>`のDIDドキュメントの`service`配列から`#<service-id>`に対応する`serviceEndpoint`を解決する。
+- クライアントのaccessJwtをそのまま転送するのではなく、ユーザーの`at_signing_key_pem`で新たに短命サービス間認証JWTを署名して転送する（`sign_service_auth_jwt`、`uploadBlob`コールバック検証と共通のロジック）。**`aud`クレームはサービスDIDのみ（`#service-id`フラグメントを含めない）**にすること。フラグメント込みで署名すると対象サービス側で`BadJwtAudience`になる（実機確認）。`#service-id`はエンドポイント解決にのみ使う。
+- レスポンス（ステータス・Content-Type・ボディ）はそのままクライアントへ返す。
+
 ### Bsky公式Relayの新規PDSアカウント数上限に注意
 Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホスト単位のアカウント数上限を設けており、上限を超えて登録されたアカウント（作成順で後の方）は `host-throttled` 扱いとなり、そのアカウントのコミットは `subscribeRepos` の配信対象から意図的に除外される（PDS側にエラーは一切返らず、`requestCrawl` も200 OKを返し続けるため、PDS側のログからは検知できない）。「特定ユーザーだけ投稿がbsky.appに反映されない」という報告を受けたら、まずこの上限超過を疑う。indigoの`cmd/relay/relay/account.go`にロジックがあり、ローカルでindigo/relayを動かして自PDSのホストレコード（`account_count`/`account_limit`）を直接確認することで検証できる。
 

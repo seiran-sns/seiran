@@ -18,6 +18,8 @@ pub enum DidResolveError {
     Parse(String),
     #[error("#atproto verificationMethod が見つかりません")]
     NoVerificationMethod,
+    #[error("service が見つかりません: {0}")]
+    NoService(String),
     #[error("公開鍵デコード失敗: {0}")]
     KeyDecode(String),
     #[error("非対応のDIDメソッド: {0}")]
@@ -60,6 +62,35 @@ pub async fn fetch_raw_did_document(
     resp.json()
         .await
         .map_err(|e| DidResolveError::Parse(e.to_string()))
+}
+
+/// DIDドキュメントの `service` 配列から `#<service_id>` に対応する `serviceEndpoint` を取得する
+/// （`atproto-proxy` ヘッダー経由のXRPCプロキシ、`crates/seiran-api/src/handlers/xrpc/proxy.rs`用）。
+/// `service[].id` は実装により相対フラグメント（`#bsky_appview`）と完全修飾
+/// （`did:web:api.bsky.app#bsky_appview`）の両方がありうるため両対応する。
+pub async fn resolve_service_endpoint(
+    did: &str,
+    service_id: &str,
+    http: &reqwest::Client,
+) -> Result<String, DidResolveError> {
+    let doc = fetch_raw_did_document(did, http).await?;
+    let fragment = format!("#{}", service_id);
+    let services = doc
+        .get("service")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| DidResolveError::NoService(fragment.clone()))?;
+    let qualified = format!("{}{}", did, fragment);
+
+    services
+        .iter()
+        .find(|s| {
+            let id = s.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            id == fragment || id == qualified
+        })
+        .and_then(|s| s.get("serviceEndpoint"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or(DidResolveError::NoService(fragment))
 }
 
 /// DIDを解決してAT Protocol検証鍵（P-256公開鍵）を取得する。

@@ -1094,6 +1094,10 @@ pub fn router(state: AppState) -> Router {
             "/.well-known/atproto-did",
             get(handlers::xrpc::server::well_known_atproto_did),
         )
+        // 未実装のXRPCメソッドへの `atproto-proxy` ヘッダー付きリクエストをAppView等へ
+        // 透過転送する（明示的な `.route()` の方が優先されるため、ここに置いても既存の
+        // XRPCハンドラを妨げない）。
+        .fallback(handlers::xrpc::proxy::xrpc_proxy_fallback)
         .with_state(state)
         // Misskey クライアントの `i`（ボディ/クエリ）トークンを Authorization ヘッダーへ
         // 合成するブリッジ。既存ハンドラの extract_auth 呼び出しは無改修のまま両対応になる。
