@@ -134,7 +134,7 @@ seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）�
   - `did_resolve.rs` — サービス間認証JWT検証用のDID解決
   - `service_auth.rs` — 外部サービス呼び出し用の自己署名JWT(ES256、low-S正規化必須)
 - `seiran-atp-repo::firehose` — Jetstream WebSocketクライアント本体
-- `seiran-api::handlers::xrpc::{repo,server,sync}` — `getBlob`/`getRepo`/`subscribeRepos`/`describeServer`/`resolveHandle` 等
+- `seiran-api::handlers::xrpc::{repo,server,sync}` — `getRecord`/`listRecords`/`describeRepo`/`uploadBlob`（repo）、`describeServer`/`resolveHandle`（server）、`getRepo`/`getBlob`/`listBlobs`/`listRepos`/`getLatestCommit`/`subscribeRepos`（sync）
 
 ローカルユーザーの投稿は `AtpCommitService` が**ジョブキューを介さず直接** MSTコミット・署名し、`atp_repo_events` にイベント記録、公式Relay（`bsky.network`）へ `requestCrawl` を送って購読される。
 
@@ -160,8 +160,27 @@ seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）�
 
 > `atp_repository_publish` ジョブ（外部PDSへのミラーリング用に定義されている）は enqueue する呼び出し箇所が存在せず、実質デッドコードになっている。
 
+### レコード一覧・同期系エンドポイント（サードパーティインデクサー対応）
+Clearsky等のサードパーティツールは firehose を購読し続ける代わりに、PDS へ直接 `listRecords` を叩いて投稿履歴を取得することがあるため、以下を実装している。
+
+- `GET /xrpc/com.atproto.repo.listRecords` — `repo`（DIDまたは`{username}.{local_domain}`ハンドル）+ `collection` を指定し rkey 順にページングする（`cursor`/`reverse`/`limit`(1-100, デフォルト50) 対応）。`app.bsky.feed.post` は `posts` テーブル、それ以外は `atp_records` テーブルを起点にし、いずれも `atp_blocks` のDAG-CBORをデコードして `value` を返す。
+- `GET /xrpc/com.atproto.repo.describeRepo` — `handle`/`did`/保持コレクション一覧（`app.bsky.feed.post`を含む）/`didDoc`（`did:plc`ならplc.directoryへプロキシ取得）を返す。
+- `GET /xrpc/com.atproto.sync.listRepos` — `at_did IS NOT NULL` なアクター（＝ATPリポジトリを持つ）をid順にページングして返す。PDSクローラーがアカウント一覧を発見するためのエンドポイント。
+- `GET /xrpc/com.atproto.sync.getLatestCommit` — `actors.at_repo_cid`/`at_repo_rev` をそのまま返す。
+- `GET /xrpc/com.atproto.sync.listBlobs` — `atp_blobs`（動画パイプライン提出物）のCID一覧をid順にページングして返す。
+
 ### Bsky公式Relayの新規PDSアカウント数上限に注意
-Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホスト単位のアカウント数上限を設けており、上限を超えて登録されたアカウント（作成順で後の方）は `host-throttled` 扱いとなり、そのアカウントのコミットは `subscribeRepos` の配信対象から意図的に除外される（PDS側にエラーは一切返らず、`requestCrawl` も200 OKを返し続けるため、PDS側のログからは検知できない）。「特定ユーザーだけ投稿がbsky.appに反映されない」という報告を受けたら、まずこの上限超過を疑う。indigoの`cmd/relay/relay/account.go`にロジックがあり、ローカルでindigo/relayを動かして自PDSのホストレコード（`account_count`/`account_limit`）を直接確認することで検証できる。上限緩和にはBsky公式のPDS Administrators Discordへの参加・申請が必要（[Early Access Federation for Self-Hosters](https://docs.bsky.app/blog/self-host-federation)参照）。
+Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホスト単位のアカウント数上限を設けており、上限を超えて登録されたアカウント（作成順で後の方）は `host-throttled` 扱いとなり、そのアカウントのコミットは `subscribeRepos` の配信対象から意図的に除外される（PDS側にエラーは一切返らず、`requestCrawl` も200 OKを返し続けるため、PDS側のログからは検知できない）。「特定ユーザーだけ投稿がbsky.appに反映されない」という報告を受けたら、まずこの上限超過を疑う。indigoの`cmd/relay/relay/account.go`にロジックがあり、ローカルでindigo/relayを動かして自PDSのホストレコード（`account_count`/`account_limit`）を直接確認することで検証できる。
+
+`GET https://bsky.network/xrpc/com.atproto.sync.getHostStatus?hostname=seiran-beta.org` で自ホストの `accountCount`/`status` は取得できるが、`accountLimit`（上限値そのもの）は非公開で分からない。
+
+**上限緩和の申請先は `github.com/bluesky-social/pds` リポジトリのissue**（Discordではない。例: [#357](https://github.com/bluesky-social/pds/issues/357)）。ただし対応は不安定であてにできない: 上限緩和自体はされることがあっても、既に `host-throttled` になった個別アカウントのステータス解除はされない。issueが応答なく放置され続けることもある（例: [#359](https://github.com/bluesky-social/pds/issues/359)）。恒久的な解決手段として期待しないこと。
+
+**`AccountTakedown` と `host-throttled` は別症状であり切り分けが必要**。`public.api.bsky.app` の `app.bsky.actor.getProfile?actor={did}` を対象DIDに叩いて判定する:
+- `{"error":"AccountTakedown","message":"Account has been suspended"}` → モデレーションによる個別アカウントの意図的な停止（`host-throttled`とは無関係）。異議申し立ての実効的な窓口は無い
+- `{"error":"InvalidRequest","message":"Profile not found"}`（PDS側には `app.bsky.actor.profile` レコードが存在するにもかかわらず）→ `host-throttled` が疑わしい
+
+複数アカウントの一括切り分けは、`com.atproto.repo.listRecords` で対象アクター一覧のDIDを集め、各DIDに対して上記 `getProfile` を順に叩いて `error` フィールドで分類するとよい（1件ずつでは判別しにくいが、傾向を見れば `AccountTakedown`（個別・少数）と `Profile not found`（複数アカウントにまたがる場合は上限超過を疑う）を区別しやすい）。
 
 ### Jetstream 経由の取り込み（`seiran-atp-repo::firehose`）
 `wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like` に接続。

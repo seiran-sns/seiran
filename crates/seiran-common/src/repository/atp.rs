@@ -45,6 +45,30 @@ pub trait AtpReadRepository: Send + Sync {
         handle: &str,
         frame_bytes: &[u8],
     ) -> Result<i64, sqlx::Error>;
+
+    /// 指定コレクション（`app.bsky.feed.post` を除く）のレコード一覧を rkey 順にページングして返す
+    /// （`com.atproto.repo.listRecords` 用）。`reverse=false` は rkey 昇順（古い順）、
+    /// `true` は降順（新しい順）。`cursor_rkey` は前回レスポンス最後の rkey。
+    async fn list_records(
+        &self,
+        actor_id: i64,
+        collection: &str,
+        limit: i64,
+        cursor_rkey: Option<&str>,
+        reverse: bool,
+    ) -> Result<Vec<(String, String)>, sqlx::Error>;
+
+    /// 指定アクターが `atp_records` に持つコレクション名の一覧（重複なし）を返す
+    /// （`com.atproto.repo.describeRepo` 用）。
+    async fn list_collections(&self, actor_id: i64) -> Result<Vec<String>, sqlx::Error>;
+
+    /// 指定アクターの blob CID 一覧を id 順にページングして返す（`com.atproto.sync.listBlobs` 用）。
+    async fn list_blob_cids(
+        &self,
+        actor_id: i64,
+        limit: i64,
+        cursor_id: Option<i64>,
+    ) -> Result<Vec<(i64, String)>, sqlx::Error>;
 }
 
 pub struct PgAtpReadRepository {
@@ -103,6 +127,73 @@ impl AtpReadRepository for PgAtpReadRepository {
         .bind(handle)
         .bind(frame_bytes)
         .fetch_one(&self.pool)
+        .await
+    }
+
+    async fn list_records(
+        &self,
+        actor_id: i64,
+        collection: &str,
+        limit: i64,
+        cursor_rkey: Option<&str>,
+        reverse: bool,
+    ) -> Result<Vec<(String, String)>, sqlx::Error> {
+        if reverse {
+            sqlx::query_as::<_, (String, String)>(
+                "SELECT rkey, cid FROM atp_records
+                 WHERE actor_id = $1 AND collection = $2
+                   AND ($4::text IS NULL OR rkey < $4)
+                 ORDER BY rkey DESC
+                 LIMIT $3",
+            )
+            .bind(actor_id)
+            .bind(collection)
+            .bind(limit)
+            .bind(cursor_rkey)
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as::<_, (String, String)>(
+                "SELECT rkey, cid FROM atp_records
+                 WHERE actor_id = $1 AND collection = $2
+                   AND ($4::text IS NULL OR rkey > $4)
+                 ORDER BY rkey ASC
+                 LIMIT $3",
+            )
+            .bind(actor_id)
+            .bind(collection)
+            .bind(limit)
+            .bind(cursor_rkey)
+            .fetch_all(&self.pool)
+            .await
+        }
+    }
+
+    async fn list_collections(&self, actor_id: i64) -> Result<Vec<String>, sqlx::Error> {
+        sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT collection FROM atp_records WHERE actor_id = $1",
+        )
+        .bind(actor_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn list_blob_cids(
+        &self,
+        actor_id: i64,
+        limit: i64,
+        cursor_id: Option<i64>,
+    ) -> Result<Vec<(i64, String)>, sqlx::Error> {
+        sqlx::query_as::<_, (i64, String)>(
+            "SELECT id, cid FROM atp_blobs
+             WHERE actor_id = $1 AND ($3::bigint IS NULL OR id > $3)
+             ORDER BY id ASC
+             LIMIT $2",
+        )
+        .bind(actor_id)
+        .bind(limit)
+        .bind(cursor_id)
+        .fetch_all(&self.pool)
         .await
     }
 }

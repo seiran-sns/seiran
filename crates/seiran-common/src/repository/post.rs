@@ -77,13 +77,14 @@ pub struct PostSummary {
     pub created_at: DateTime<Utc>,
 }
 
-/// XRPC getRecord 用のレコード行。
+/// XRPC getRecord / listRecords 用のレコード行。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PostRecord {
     pub body: String,
     pub created_at: DateTime<Utc>,
     pub at_uri: String,
     pub at_cid: String,
+    pub at_rkey: String,
 }
 
 /// リポスト・リプライ・引用の配送先を判定するために必要な、元ポストのメタ情報。
@@ -300,6 +301,17 @@ pub trait PostRepository: Send + Sync {
 
     /// DID + rkey で app.bsky.feed.post レコードを取得する。
     async fn find_record(&self, did: &str, rkey: &str) -> Result<Option<PostRecord>, sqlx::Error>;
+
+    /// 指定アクターの app.bsky.feed.post レコード一覧を at_rkey 順にページングして返す
+    /// （`com.atproto.repo.listRecords` 用）。`reverse=false` は rkey 昇順（古い順）、
+    /// `true` は降順（新しい順）。`cursor_rkey` は前回レスポンス最後の rkey。
+    async fn list_records_by_actor(
+        &self,
+        actor_id: i64,
+        limit: i64,
+        cursor_rkey: Option<&str>,
+        reverse: bool,
+    ) -> Result<Vec<PostRecord>, sqlx::Error>;
 
     /// ID でポストとアクター情報を取得する（可視性チェック無し、内部整合性チェック専用）。
     /// HTTP公開エンドポイントからは呼ばないこと（`find_by_id_for_viewer` を使う）。
@@ -775,7 +787,7 @@ impl PostRepository for PgPostRepository {
 
     async fn find_record(&self, did: &str, rkey: &str) -> Result<Option<PostRecord>, sqlx::Error> {
         sqlx::query_as::<_, PostRecord>(
-            "SELECT p.body, p.created_at, p.at_uri, p.at_cid
+            "SELECT p.body, p.created_at, p.at_uri, p.at_cid, p.at_rkey
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -787,6 +799,44 @@ impl PostRepository for PgPostRepository {
         .bind(rkey)
         .fetch_optional(&self.pool)
         .await
+    }
+
+    async fn list_records_by_actor(
+        &self,
+        actor_id: i64,
+        limit: i64,
+        cursor_rkey: Option<&str>,
+        reverse: bool,
+    ) -> Result<Vec<PostRecord>, sqlx::Error> {
+        if reverse {
+            sqlx::query_as::<_, PostRecord>(
+                "SELECT p.body, p.created_at, p.at_uri, p.at_cid, p.at_rkey
+                 FROM posts p
+                 WHERE p.actor_id = $1 AND p.deleted_at IS NULL AND p.at_rkey IS NOT NULL
+                   AND ($3::text IS NULL OR p.at_rkey < $3)
+                 ORDER BY p.at_rkey DESC
+                 LIMIT $2",
+            )
+            .bind(actor_id)
+            .bind(limit)
+            .bind(cursor_rkey)
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as::<_, PostRecord>(
+                "SELECT p.body, p.created_at, p.at_uri, p.at_cid, p.at_rkey
+                 FROM posts p
+                 WHERE p.actor_id = $1 AND p.deleted_at IS NULL AND p.at_rkey IS NOT NULL
+                   AND ($3::text IS NULL OR p.at_rkey > $3)
+                 ORDER BY p.at_rkey ASC
+                 LIMIT $2",
+            )
+            .bind(actor_id)
+            .bind(limit)
+            .bind(cursor_rkey)
+            .fetch_all(&self.pool)
+            .await
+        }
     }
 
     async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error> {

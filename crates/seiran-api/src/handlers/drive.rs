@@ -12,7 +12,8 @@ use uuid::Uuid;
 use seiran_common::{
     atp::sign_service_auth_jwt,
     convert_audio_to_gray_video, ext_for_mime_type, faststart_video, generate_snowflake_id,
-    is_allowed_video_or_audio_mime, is_faststart_eligible_mime, prepare_image, probe_video_or_audio,
+    is_allowed_video_or_audio_mime, is_faststart_eligible_mime, prepare_image,
+    probe_video_or_audio,
     queue::worker::priority,
     repository::{Actor, CreateMediaFile},
     select_provider, sniff_mime_type, ImagePipeline, Job, MediaKind, S3StorageClient,

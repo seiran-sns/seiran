@@ -23,8 +23,7 @@ use crate::handlers::notes::dto::TimelineQuery;
 use crate::handlers::notes::queries::{fetch_reposted_ids, resolve_mention_facets_in_place};
 use crate::handlers::notes::{
     attach_remote_instance_info, embed_quotes, embed_renotes, fetch_attachments_map,
-    fetch_link_cards_map, fetch_reactions_map,
-    to_note_response,
+    fetch_link_cards_map, fetch_reactions_map, to_note_response,
 };
 use crate::handlers::target_resolve::resolve_and_upsert_target;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};

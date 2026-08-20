@@ -139,6 +139,121 @@ pub async fn xrpc_get_repo(
     }
 }
 
+#[derive(Deserialize)]
+pub struct ListReposParams {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// `com.atproto.sync.listRepos` — この PDS が保持する全リポジトリ（＝ATPアカウントを持つ
+/// アクター）を id 順にページングして返す。クローラー・インデクサーが PDS 上の全アカウントを
+/// 発見するために使う標準エンドポイント。
+pub async fn xrpc_list_repos(
+    Query(params): Query<ListReposParams>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let limit = params.limit.unwrap_or(500).clamp(1, 1000);
+    let cursor_id = params.cursor.as_deref().and_then(|c| c.parse::<i64>().ok());
+
+    let actors = match state.actors.list_atp_repos(limit, cursor_id).await {
+        Ok(a) => a,
+        Err(e) => {
+            return ApiError::Internal(format!("[listRepos] DB エラー: {}", e)).into_response();
+        }
+    };
+
+    let next_cursor = actors.last().map(|a| a.id.to_string());
+    let repos: Vec<_> = actors
+        .into_iter()
+        .filter_map(|a| {
+            let did = a.at_did?;
+            Some(serde_json::json!({
+                "did": did,
+                "head": a.at_repo_cid,
+                "rev": a.at_repo_rev,
+                "active": true,
+            }))
+        })
+        .collect();
+
+    axum::Json(serde_json::json!({
+        "cursor": next_cursor,
+        "repos": repos,
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct GetLatestCommitParams {
+    pub did: String,
+}
+
+/// `com.atproto.sync.getLatestCommit` — 指定 DID の現在の commit CID / rev を返す。
+pub async fn xrpc_get_latest_commit(
+    Query(params): Query<GetLatestCommitParams>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor = match state.actors.find_by_did(&params.did).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return ApiError::NotFound("DID が見つかりません").into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("[getLatestCommit] アクター取得失敗: {}", e))
+                .into_response();
+        }
+    };
+    let cid = match actor.at_repo_cid {
+        Some(c) => c,
+        None => return ApiError::NotFound("リポジトリが未初期化です").into_response(),
+    };
+    let rev = actor.at_repo_rev.unwrap_or_default();
+
+    axum::Json(serde_json::json!({ "cid": cid, "rev": rev })).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct ListBlobsParams {
+    pub did: String,
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// `com.atproto.sync.listBlobs` — 指定 DID がアップロードした blob の CID 一覧をページングして返す。
+pub async fn xrpc_list_blobs(
+    Query(params): Query<ListBlobsParams>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor = match state.actors.find_by_did(&params.did).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return ApiError::NotFound("DID が見つかりません").into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("[listBlobs] アクター取得失敗: {}", e))
+                .into_response();
+        }
+    };
+    let limit = params.limit.unwrap_or(500).clamp(1, 1000);
+    let cursor_id = params.cursor.as_deref().and_then(|c| c.parse::<i64>().ok());
+
+    let rows = match state
+        .atp_repo
+        .list_blob_cids(actor.id, limit, cursor_id)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return ApiError::Internal(format!("[listBlobs] DB エラー: {}", e)).into_response();
+        }
+    };
+
+    let next_cursor = rows.last().map(|(id, _)| id.to_string());
+    let cids: Vec<String> = rows.into_iter().map(|(_, cid)| cid).collect();
+
+    axum::Json(serde_json::json!({
+        "cursor": next_cursor,
+        "cids": cids,
+    }))
+    .into_response()
+}
+
 pub async fn xrpc_subscribe_repos(
     ws: WebSocketUpgrade,
     Query(params): Query<SubscribeReposParams>,

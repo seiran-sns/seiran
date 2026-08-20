@@ -149,12 +149,10 @@ async fn fetch_homepage_meta(domain: &str) -> (Option<String>, Option<String>) {
     let home_url = format!("https://{domain}/");
     let mut icon_url = None;
     let mut title = None;
-    if let Ok((bytes, _)) = fetch_validated_with_accept(&home_url, ACCEPT_HTML, "text/html").await
-    {
+    if let Ok((bytes, _)) = fetch_validated_with_accept(&home_url, ACCEPT_HTML, "text/html").await {
         let html = String::from_utf8_lossy(&bytes);
         if let Some(href) = extract_favicon_link(&html) {
-            if let Ok(resolved) = reqwest::Url::parse(&home_url).and_then(|base| base.join(&href))
-            {
+            if let Ok(resolved) = reqwest::Url::parse(&home_url).and_then(|base| base.join(&href)) {
                 icon_url = Some(resolved.to_string());
             }
         }
@@ -198,9 +196,7 @@ pub async fn handle(domain: String, ctx: Arc<JobContext>) -> Result<(), String> 
         Ok(v) => v,
         Err(FetchError::FetchFailed | FetchError::UpstreamError | FetchError::DnsFailed) => {
             // 一時的な失敗の可能性があるためリトライさせる（キャッシュ行はまだ書かない）。
-            return Err(format!(
-                "nodeinfo取得失敗（リトライ対象）: domain={domain}"
-            ));
+            return Err(format!("nodeinfo取得失敗（リトライ対象）: domain={domain}"));
         }
         Err(e) => {
             // nodeinfo未対応・不正レスポンス等は再試行しても無駄。汎用デフォルトで
@@ -216,7 +212,12 @@ pub async fn handle(domain: String, ctx: Arc<JobContext>) -> Result<(), String> 
 
     let theme_color = declared_theme_color
         .filter(|c| is_valid_hex_color(c))
-        .or_else(|| software_name.as_deref().and_then(fallback_color_for_software).map(str::to_string))
+        .or_else(|| {
+            software_name
+                .as_deref()
+                .and_then(fallback_color_for_software)
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| DEFAULT_THEME_COLOR.to_string());
     let (icon_url, homepage_title) = fetch_homepage_meta(&domain).await;
     // nodeinfoの metadata.nodeName を優先し、無ければ<title>タグへフォールバックする
@@ -246,8 +247,8 @@ async fn fetch_nodeinfo(
     domain: &str,
 ) -> Result<(Option<String>, Option<String>, Option<String>), FetchError> {
     let discovery_url = format!("https://{domain}/.well-known/nodeinfo");
-    let (bytes, _) = fetch_validated_with_accept(&discovery_url, ACCEPT_JSON, "application/json")
-        .await?;
+    let (bytes, _) =
+        fetch_validated_with_accept(&discovery_url, ACCEPT_JSON, "application/json").await?;
     let discovery: NodeinfoDiscovery =
         serde_json::from_slice(&bytes).map_err(|_| FetchError::UnsupportedType)?;
     let href = pick_nodeinfo_link(&discovery.links).ok_or(FetchError::UnsupportedType)?;

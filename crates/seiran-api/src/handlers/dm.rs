@@ -18,8 +18,8 @@ use crate::AppState;
 
 use super::notes::dto::{to_note_response, NoteResponse, TimelineQuery};
 use super::notes::{
-    attach_remote_instance_info, fetch_attachments_map, fetch_link_cards_map,
-    fetch_reactions_map, resolve_mention_facets_in_place,
+    attach_remote_instance_info, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
+    resolve_mention_facets_in_place,
 };
 
 #[derive(Serialize, Clone)]

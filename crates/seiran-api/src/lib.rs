@@ -997,6 +997,26 @@ pub fn router(state: AppState) -> Router {
             "/xrpc/com.atproto.repo.getRecord",
             get(handlers::xrpc::repo::xrpc_get_record),
         )
+        .route(
+            "/xrpc/com.atproto.repo.listRecords",
+            get(handlers::xrpc::repo::xrpc_list_records),
+        )
+        .route(
+            "/xrpc/com.atproto.repo.describeRepo",
+            get(handlers::xrpc::repo::xrpc_describe_repo),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.listRepos",
+            get(handlers::xrpc::sync::xrpc_list_repos),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.getLatestCommit",
+            get(handlers::xrpc::sync::xrpc_get_latest_commit),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.listBlobs",
+            get(handlers::xrpc::sync::xrpc_list_blobs),
+        )
         // Bsky公式動画パイプライン（uploadVideo）が完了後に呼び戻してくるコールバック
         .route(
             "/xrpc/com.atproto.repo.uploadBlob",

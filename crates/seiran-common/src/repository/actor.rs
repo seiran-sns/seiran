@@ -71,6 +71,14 @@ pub trait ActorRepository: Send + Sync {
     /// AT Protocol DID でアクターを取得する。
     async fn find_by_did(&self, did: &str) -> Result<Option<Actor>, sqlx::Error>;
 
+    /// `at_did IS NOT NULL` なアクター（＝ATP リポジトリを持つ）を id 順にページングして返す
+    /// （`com.atproto.sync.listRepos` 用）。
+    async fn list_atp_repos(
+        &self,
+        limit: i64,
+        cursor_id: Option<i64>,
+    ) -> Result<Vec<Actor>, sqlx::Error>;
+
     /// アクター ID でアクターを取得する。
     async fn find_by_id(&self, id: i64) -> Result<Option<Actor>, sqlx::Error>;
 
@@ -211,6 +219,23 @@ impl ActorRepository for PgActorRepository {
         ))
         .bind(did)
         .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn list_atp_repos(
+        &self,
+        limit: i64,
+        cursor_id: Option<i64>,
+    ) -> Result<Vec<Actor>, sqlx::Error> {
+        sqlx::query_as::<_, Actor>(&format!(
+            "SELECT {ACTOR_COLS} FROM actors
+             WHERE at_did IS NOT NULL AND ($2::bigint IS NULL OR id > $2)
+             ORDER BY id ASC
+             LIMIT $1"
+        ))
+        .bind(limit)
+        .bind(cursor_id)
+        .fetch_all(&self.pool)
         .await
     }
 

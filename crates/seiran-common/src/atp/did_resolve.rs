@@ -37,6 +37,31 @@ struct VerificationMethod {
     public_key_multibase: Option<String>,
 }
 
+/// DIDドキュメントを生JSONのまま取得する（`com.atproto.repo.describeRepo` の `didDoc` 用）。
+/// 検証鍵の抽出は行わず、取得したドキュメントをそのまま返す。
+pub async fn fetch_raw_did_document(
+    did: &str,
+    http: &reqwest::Client,
+) -> Result<serde_json::Value, DidResolveError> {
+    let doc_url = if did.starts_with("did:plc:") {
+        format!("{}/{}", plc_directory_base_url(), did)
+    } else if let Some(domain) = did.strip_prefix("did:web:") {
+        let domain = domain.replace(':', "/");
+        format!("https://{}/.well-known/did.json", domain)
+    } else {
+        return Err(DidResolveError::UnsupportedMethod(did.to_string()));
+    };
+
+    let resp = http
+        .get(&doc_url)
+        .send()
+        .await
+        .map_err(|e| DidResolveError::Fetch(e.to_string()))?;
+    resp.json()
+        .await
+        .map_err(|e| DidResolveError::Parse(e.to_string()))
+}
+
 /// DIDを解決してAT Protocol検証鍵（P-256公開鍵）を取得する。
 pub async fn resolve_atproto_verification_key(
     did: &str,

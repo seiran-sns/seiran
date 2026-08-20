@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 
-use seiran_common::atp::{cid_from_sha256_hex, cid_to_string, resolve_atproto_verification_key};
+use seiran_common::atp::{
+    cid_from_sha256_hex, cid_to_string, fetch_raw_did_document, resolve_atproto_verification_key,
+};
+use seiran_common::repository::Actor;
 use seiran_common::{
     ext_for_mime_type, generate_snowflake_id, select_provider, sniff_mime_type, S3StorageClient,
 };
@@ -437,6 +440,192 @@ async fn get_record_from_atp_records(
         cid: cid_str,
         value,
     })
+    .into_response()
+}
+
+/// `repo` パラメータ（DID または `{username}.{local_domain}` ハンドル）からアクターを解決する。
+/// `listRecords`/`describeRepo` など、アクターが必須で見つからなければ 404 を返すエンドポイント用
+/// （`getRecord` のような「見つからなくても簡易フォールバックする」経路とは異なる）。
+async fn resolve_repo_actor(
+    state: &AppState,
+    repo: &str,
+) -> Result<Actor, axum::response::Response> {
+    match state.actors.find_by_did(repo).await {
+        Ok(Some(a)) => Ok(a),
+        Ok(None) => match state
+            .actors
+            .find_by_username_domain(repo, &state.local_domain)
+            .await
+        {
+            Ok(Some(a)) => Ok(a),
+            Ok(None) => Err(ApiError::NotFound("リポジトリが見つかりません").into_response()),
+            Err(e) => Err(
+                ApiError::Internal(format!("[repo解決] アクター取得失敗: {}", e)).into_response(),
+            ),
+        },
+        Err(e) => {
+            Err(ApiError::Internal(format!("[repo解決] アクター取得失敗: {}", e)).into_response())
+        }
+    }
+}
+
+/// `atp_blocks` から CID のレコードを取得し DAG-CBOR → JSON にデコードする。
+/// 見つからない・デコード失敗の場合は `None`（呼び出し元は空オブジェクト等でフォールバックする）。
+async fn fetch_record_value(
+    state: &AppState,
+    actor_id: i64,
+    cid_str: &str,
+) -> Option<serde_json::Value> {
+    let row = sqlx::query("SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1")
+        .bind(cid_str)
+        .bind(actor_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()??;
+    let cbor_bytes: Vec<u8> = row.try_get("bytes").ok()?;
+    let ipld: ipld_core::ipld::Ipld = serde_ipld_dagcbor::from_slice(&cbor_bytes).ok()?;
+    Some(ipld_to_json(&ipld))
+}
+
+#[derive(Deserialize)]
+pub struct ListRecordsParams {
+    pub repo: String,
+    pub collection: String,
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub reverse: bool,
+}
+
+#[derive(Serialize)]
+struct ListRecordsEntry {
+    uri: String,
+    cid: String,
+    value: serde_json::Value,
+}
+
+/// `com.atproto.repo.listRecords` — 指定コレクションのレコード一覧を rkey 順にページングして返す。
+/// サードパーティのインデクサー（Clearsky等）はこのエンドポイントで PDS から直接投稿履歴を
+/// 取得するため、未実装だと「投稿が1件も見えないユーザー」として扱われる
+/// （2026-08-20 マイケル報告で発覚。firehose 配信自体は正常だった）。
+pub async fn xrpc_list_records(
+    Query(params): Query<ListRecordsParams>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor = match resolve_repo_actor(&state, &params.repo).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let limit = params.limit.unwrap_or(50).clamp(1, 100);
+    let at_did = actor.at_did.clone().unwrap_or_else(|| params.repo.clone());
+
+    let rows: Vec<(String, String)> = if params.collection == "app.bsky.feed.post" {
+        match state
+            .posts
+            .list_records_by_actor(actor.id, limit, params.cursor.as_deref(), params.reverse)
+            .await
+        {
+            Ok(recs) => recs.into_iter().map(|r| (r.at_rkey, r.at_cid)).collect(),
+            Err(e) => {
+                return ApiError::Internal(format!("[listRecords] DB エラー: {}", e))
+                    .into_response()
+            }
+        }
+    } else {
+        match state
+            .atp_repo
+            .list_records(
+                actor.id,
+                &params.collection,
+                limit,
+                params.cursor.as_deref(),
+                params.reverse,
+            )
+            .await
+        {
+            Ok(recs) => recs,
+            Err(e) => {
+                return ApiError::Internal(format!("[listRecords] DB エラー: {}", e))
+                    .into_response()
+            }
+        }
+    };
+
+    let next_cursor = rows.last().map(|(rkey, _)| rkey.clone());
+
+    let mut records = Vec::with_capacity(rows.len());
+    for (rkey, cid) in rows {
+        let value = fetch_record_value(&state, actor.id, &cid)
+            .await
+            .unwrap_or_else(|| serde_json::json!({}));
+        records.push(ListRecordsEntry {
+            uri: format!("at://{}/{}/{}", at_did, params.collection, rkey),
+            cid,
+            value,
+        });
+    }
+
+    Json(serde_json::json!({
+        "records": records,
+        "cursor": next_cursor,
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct DescribeRepoParams {
+    pub repo: String,
+}
+
+/// `com.atproto.repo.describeRepo` — ハンドル・DID・保持コレクション一覧・DIDドキュメントを返す。
+/// `pdsls.dev` 等の ATP 汎用エクスプローラーは通常このエンドポイントでコレクション一覧を得てから
+/// `listRecords` を呼ぶため、`listRecords` と対で実装する。
+pub async fn xrpc_describe_repo(
+    Query(params): Query<DescribeRepoParams>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor = match resolve_repo_actor(&state, &params.repo).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let did = match actor.at_did.clone() {
+        Some(d) => d,
+        None => {
+            return ApiError::NotFound("このアクターはATPリポジトリを持ちません").into_response()
+        }
+    };
+    let handle = format!("{}.{}", actor.username, state.local_domain);
+
+    let mut collections = match state.atp_repo.list_collections(actor.id).await {
+        Ok(c) => c,
+        Err(e) => {
+            return ApiError::Internal(format!("[describeRepo] コレクション取得失敗: {}", e))
+                .into_response()
+        }
+    };
+    let has_posts: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM posts WHERE actor_id = $1 AND deleted_at IS NULL AND at_rkey IS NOT NULL)",
+    )
+    .bind(actor.id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(false);
+    if has_posts && !collections.iter().any(|c| c == "app.bsky.feed.post") {
+        collections.push("app.bsky.feed.post".to_string());
+    }
+    collections.sort();
+
+    let did_doc = fetch_raw_did_document(&did, &state.ap_client.http)
+        .await
+        .ok();
+
+    Json(serde_json::json!({
+        "handle": handle,
+        "did": did,
+        "didDoc": did_doc,
+        "collections": collections,
+        "handleIsCorrect": true,
+    }))
     .into_response()
 }
 
