@@ -309,6 +309,14 @@ pub struct ProfileResponse {
     pub following_count: i64,
     /// フォロワーの人数（#56）。following_count と同様、DB 未登録のリモートアクターは常に0。
     pub follower_count: i64,
+    /// 生年月日（Misskey互換の`birthday`）。本人が閲覧している場合は常に返す（編集フォームの
+    /// 初期値用）。他人が閲覧している場合は`birth_date_public=true`の時のみ返す。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birthday: Option<chrono::NaiveDate>,
+    /// `true`ならFediverseへ`vcard:bday`として公開する。本人が閲覧している場合のみ返す
+    /// （編集フォームの現在値用、他人には無関係な内部設定のため省略）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birthday_public: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -415,6 +423,8 @@ async fn fetch_bsky_profile_from_appview(
         public_lists: vec![],
         following_count: 0,
         follower_count: 0,
+        birthday: None,
+        birthday_public: None,
     })
     .into_response()
 }
@@ -869,6 +879,17 @@ async fn build_profile_response(
 
     let instance = resolve_profile_instance_info(state, &actor.actor_type, &actor.domain).await;
 
+    // 本人が閲覧している場合は編集フォームの初期値として常に返す。他人には
+    // birth_date_public=trueの場合のみ（Fediverse連合と同じ可視性ルール）。
+    let is_self = my_actor_id == Some(actor_id);
+    let (birthday, birthday_public) = if is_self {
+        (actor.birth_date, Some(actor.birth_date_public))
+    } else if actor.birth_date_public {
+        (actor.birth_date, None)
+    } else {
+        (None, None)
+    };
+
     Json(ProfileResponse {
         actor_id: Some(actor_id.to_string()),
         username: actor.username,
@@ -895,6 +916,8 @@ async fn build_profile_response(
         public_lists,
         following_count,
         follower_count,
+        birthday,
+        birthday_public,
     })
     .into_response()
 }
@@ -1012,6 +1035,8 @@ async fn fetch_remote_profile(
         public_lists: vec![],
         following_count: 0,
         follower_count: 0,
+        birthday: None,
+        birthday_public: None,
     })
     .into_response()
 }
@@ -1043,6 +1068,14 @@ pub struct UpdateProfileRequest {
     /// （空・空白のみの行は保存時に除外する）。
     #[serde(default)]
     pub profile_fields: Option<Vec<ProfileField>>,
+    /// 生年月日（`YYYY-MM-DD`、Misskey互換の`birthday`）。`None` = 現在値を保持、
+    /// `Some(None)` = 削除、`Some(Some(date))` = 設定。
+    #[serde(default)]
+    pub birthday: Option<Option<String>>,
+    /// `true`ならFediverseへ`vcard:bday`として公開する（デフォルト`false`、Misskey本家には
+    /// 無いseiran独自拡張）。`None` = 現在値を保持。
+    #[serde(default)]
+    pub birthday_public: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -1053,6 +1086,8 @@ pub struct UpdateProfileResponse {
     pub avatar_media_id: Option<i64>,
     pub banner_media_id: Option<i64>,
     pub profile_fields: Vec<ProfileField>,
+    pub birthday: Option<chrono::NaiveDate>,
+    pub birthday_public: bool,
 }
 
 /// プロフィールのキーバリュー項目のラベル・値の最大文字数（#62）。
@@ -1180,6 +1215,20 @@ pub async fn update_profile(
         },
         None => current.profile_fields,
     };
+    let new_birth_date: Option<chrono::NaiveDate> = match req.birthday {
+        None => current.birth_date,
+        Some(None) => None,
+        Some(Some(s)) => match chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d") {
+            Ok(d) => Some(d),
+            Err(_) => {
+                return ApiError::BadRequest(
+                    "birthday はYYYY-MM-DD形式で指定してください".to_string(),
+                )
+                .into_response()
+            }
+        },
+    };
+    let new_birth_date_public = req.birthday_public.unwrap_or(current.birth_date_public);
 
     // 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。display_name が
     // 変わらない更新（bio のみ編集等）では再計算せず既存値を保持する。
@@ -1223,6 +1272,8 @@ pub async fn update_profile(
             new_banner_media_id,
             &new_profile_fields,
             &new_emoji_map,
+            new_birth_date,
+            new_birth_date_public,
         )
         .await
     {
@@ -1274,6 +1325,8 @@ pub async fn update_profile(
         avatar_media_id: new_avatar_media_id,
         banner_media_id: new_banner_media_id,
         profile_fields: profile_fields_from_json(&new_profile_fields),
+        birthday: new_birth_date,
+        birthday_public: new_birth_date_public,
     })
     .into_response()
 }

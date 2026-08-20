@@ -56,6 +56,8 @@
     "uploadingAvatar": "正在上传...",
     "changeAvatarButton": "更改头像",
     "displayNameLabel": "显示名称",
+    "birthdayLabel": "生日",
+    "birthdayPublicLabel": "在Fediverse上公开",
     "bioLabel": "简介",
     "bioPlaceholder": "告诉我们你自己",
     "fieldsLabel": "个人资料字段（链接等 - 最多 {{count}}）",

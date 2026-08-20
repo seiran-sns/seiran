@@ -24,6 +24,7 @@ export default function Register() {
   const [directEmail, setDirectEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [birthday, setBirthday] = useState("");
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -117,7 +118,7 @@ export default function Register() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.auth.registerDirect(directEmail, username, password, turnstileToken);
+      const res = await api.auth.registerDirect(directEmail, username, password, turnstileToken, birthday);
       login(res.token, res.user);
       navigate("/");
     } catch (err) {
@@ -168,6 +169,15 @@ export default function Register() {
               className={styles.input}
               required
             />
+      </label>
+      <label className={styles.label}>
+        {t("auth:register.birthdayLabel")}
+        <input
+          type="date"
+          value={birthday}
+          onChange={(e) => setBirthday(e.target.value)}
+          className={styles.input}
+        />
       </label>
       <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
       {error && <p className={styles.error}>{error}</p>}

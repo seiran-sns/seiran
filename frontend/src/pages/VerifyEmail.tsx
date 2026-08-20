@@ -20,6 +20,7 @@ export default function VerifyEmail() {
   const [state, setState] = useState<State>({ phase: "verifying" });
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [birthday, setBirthday] = useState("");
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
@@ -56,7 +57,7 @@ export default function VerifyEmail() {
     }
     setSubmitting(true);
     try {
-      const res = await api.auth.register(username, password, state.registrationToken, turnstileToken);
+      const res = await api.auth.register(username, password, state.registrationToken, turnstileToken, birthday);
       login(res.token, res.user);
       navigate("/");
     } catch (err) {
@@ -124,6 +125,15 @@ export default function VerifyEmail() {
               required
               minLength={8}
             />
+      </label>
+      <label className={styles.label}>
+        {t("auth:verifyEmail.birthdayLabel")}
+        <input
+          type="date"
+          value={birthday}
+          onChange={(e) => setBirthday(e.target.value)}
+          className={styles.input}
+        />
       </label>
       <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
       {formError && <p className={styles.error}>{formError}</p>}

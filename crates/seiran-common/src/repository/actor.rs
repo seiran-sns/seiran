@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::PgPool;
 
 /// `actors` テーブルの 1 行（アプリで使用するカラムのみ）。
@@ -31,12 +31,18 @@ pub struct Actor {
     /// `MAX_PROFILE_FIELDS` 件）。ローカルユーザーが編集した値、またはリモート Fedi アクター
     /// の AP Actor `attachment`（`type: "PropertyValue"`）から取り込んだ値。
     pub profile_fields: Option<serde_json::Value>,
+    /// 生年月日（Misskey互換の`birthday`プロフィール項目）。
+    pub birth_date: Option<NaiveDate>,
+    /// `true`ならFediverseへ`vcard:bday`として公開する（デフォルト`false`、Misskey本家には
+    /// この可視性切り替え自体が無くseiran独自の拡張）。
+    pub birth_date_public: bool,
 }
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
     display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem, \
-    bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields";
+    bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields, \
+    birth_date, birth_date_public";
 
 /// プロフィール編集画面（`PATCH /api/users/me/profile`）が読み書きする行の部分集合。
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -51,6 +57,11 @@ pub struct ActorProfileRow {
     /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186、ローカルアクターは
     /// `display_name` 変更のたびに `update_profile` が再計算・保存する）。
     pub emoji_map: Option<serde_json::Value>,
+    /// 生年月日（Misskey互換の`birthday`プロフィール項目）。
+    pub birth_date: Option<NaiveDate>,
+    /// `true`ならFediverseへ`vcard:bday`として公開する（デフォルト`false`、Misskey本家には
+    /// この可視性切り替え自体が無くseiran独自の拡張）。
+    pub birth_date_public: bool,
 }
 
 #[async_trait]
@@ -94,6 +105,7 @@ pub trait ActorRepository: Send + Sync {
 
     /// 新規ローカルアクターを挿入する。`at_did`/`at_signing_key_pem`は、自ホストドメインが
     /// 未確定（シングルホストモード）でPLC genesisを行っていない場合は`None`になる。
+    #[allow(clippy::too_many_arguments)]
     async fn insert_local(
         &self,
         id: i64,
@@ -102,6 +114,7 @@ pub trait ActorRepository: Send + Sync {
         domain: &str,
         at_did: Option<&str>,
         at_signing_key_pem: Option<&str>,
+        birth_date: Option<NaiveDate>,
     ) -> Result<(), sqlx::Error>;
 
     /// リモート（Bsky）アクターを upsert し、その actor_id を返す。
@@ -164,7 +177,21 @@ pub trait ActorRepository: Send + Sync {
         banner_media_id: Option<i64>,
         profile_fields: &serde_json::Value,
         emoji_map: &serde_json::Value,
+        birth_date: Option<NaiveDate>,
+        birth_date_public: bool,
     ) -> Result<(), sqlx::Error>;
+
+    /// `actor_id` から生年月日を直接更新する（ATP `putPreferences`
+    /// の`#personalDetailsPref`同期用）。公開設定（`birth_date_public`）は変更しない。
+    async fn update_birth_date_by_actor_id(
+        &self,
+        actor_id: i64,
+        birth_date: Option<NaiveDate>,
+    ) -> Result<(), sqlx::Error>;
+
+    /// `actor_id` から生年月日を取得する（ATP `getPreferences`
+    /// の`#personalDetailsPref`生成用）。行が無い/生年月日未設定なら`None`。
+    async fn find_birth_date(&self, actor_id: i64) -> Result<Option<NaiveDate>, sqlx::Error>;
 }
 
 pub struct PgActorRepository {
@@ -283,14 +310,15 @@ impl ActorRepository for PgActorRepository {
         domain: &str,
         at_did: Option<&str>,
         at_signing_key_pem: Option<&str>,
+        birth_date: Option<NaiveDate>,
     ) -> Result<(), sqlx::Error> {
         // ap_uri を格納しておくことで、万一リモートActor解決処理が自ドメインURIを
         // 誤って渡してきても find_by_ap_uri / upsert_remote_fedi の ON CONFLICT (ap_uri)
         // による自然な重複排除が効く（#110 の防御的二重チェック）。
         let ap_uri = format!("https://{}/users/{}", domain, username);
         sqlx::query(
-            "INSERT INTO actors (id, user_id, actor_type, username, domain, ap_uri, at_did, at_signing_key_pem, created_at, updated_at)
-             VALUES ($1, $2, 'local', $3, $4, $5, $6, $7, NOW(), NOW())",
+            "INSERT INTO actors (id, user_id, actor_type, username, domain, ap_uri, at_did, at_signing_key_pem, birth_date, created_at, updated_at)
+             VALUES ($1, $2, 'local', $3, $4, $5, $6, $7, $8, NOW(), NOW())",
         )
         .bind(id)
         .bind(user_id)
@@ -299,6 +327,7 @@ impl ActorRepository for PgActorRepository {
         .bind(&ap_uri)
         .bind(at_did)
         .bind(at_signing_key_pem)
+        .bind(birth_date)
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -406,7 +435,7 @@ impl ActorRepository for PgActorRepository {
     ) -> Result<Option<ActorProfileRow>, sqlx::Error> {
         sqlx::query_as::<_, ActorProfileRow>(
             "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id, \
-                    profile_fields, emoji_map \
+                    profile_fields, emoji_map, birth_date, birth_date_public \
              FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1",
         )
         .bind(user_id)
@@ -423,12 +452,15 @@ impl ActorRepository for PgActorRepository {
         banner_media_id: Option<i64>,
         profile_fields: &serde_json::Value,
         emoji_map: &serde_json::Value,
+        birth_date: Option<NaiveDate>,
+        birth_date_public: bool,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE actors \
              SET display_name = $1, bio = $2, avatar_media_id = $3, banner_media_id = $4, \
-                 profile_fields = $5, emoji_map = $6, updated_at = NOW() \
-             WHERE user_id = $7 AND actor_type = 'local'",
+                 profile_fields = $5, emoji_map = $6, birth_date = $7, birth_date_public = $8, \
+                 updated_at = NOW() \
+             WHERE user_id = $9 AND actor_type = 'local'",
         )
         .bind(display_name)
         .bind(bio)
@@ -436,9 +468,32 @@ impl ActorRepository for PgActorRepository {
         .bind(banner_media_id)
         .bind(profile_fields)
         .bind(emoji_map)
+        .bind(birth_date)
+        .bind(birth_date_public)
         .bind(user_id)
         .execute(&self.pool)
         .await
         .map(|_| ())
+    }
+
+    async fn update_birth_date_by_actor_id(
+        &self,
+        actor_id: i64,
+        birth_date: Option<NaiveDate>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE actors SET birth_date = $1, updated_at = NOW() WHERE id = $2")
+            .bind(birth_date)
+            .bind(actor_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn find_birth_date(&self, actor_id: i64) -> Result<Option<NaiveDate>, sqlx::Error> {
+        sqlx::query_scalar::<_, Option<NaiveDate>>("SELECT birth_date FROM actors WHERE id = $1")
+            .bind(actor_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|r| r.flatten())
     }
 }

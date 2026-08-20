@@ -459,14 +459,25 @@ struct PersonObjectParams<'a> {
     avatar_mime_type: Option<&'a str>,
     ap_public_key_pem: &'a str,
     emoji_map: &'a serde_json::Value,
+    /// `birth_date_public=true`の場合のみ`Some`（呼び出し元が既にフィルタ済みの値を渡す）。
+    /// `vcard:bday`として公開する（Misskey互換、`crates/seiran-federation-inbox/src/handlers/actor.rs`
+    /// と同じ表現）。
+    birth_date: Option<chrono::NaiveDate>,
 }
 
 /// Person ドキュメントを組み立てる。
 /// `actor_handler`（federation-inbox の `GET /users/:username`）が返すものと同一構造にする。
 fn build_person_object(addr: &LocalActorAddress, p: &PersonObjectParams) -> serde_json::Value {
     let base = format!("https://{}", p.local_domain);
+    let mut context = vec![
+        serde_json::json!("https://www.w3.org/ns/activitystreams"),
+        serde_json::json!("https://w3id.org/security/v1"),
+    ];
+    if p.birth_date.is_some() {
+        context.push(serde_json::json!({"vcard": "http://www.w3.org/2006/vcard/ns#"}));
+    }
     let mut person = serde_json::json!({
-        "@context": ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
+        "@context": context,
         "id": addr.actor_uri,
         "type": "Person",
         "preferredUsername": p.username,
@@ -497,6 +508,9 @@ fn build_person_object(addr: &LocalActorAddress, p: &PersonObjectParams) -> serd
     append_emoji_tags(p.display_name, p.emoji_map, &mut tags, p.local_domain);
     if !tags.is_empty() {
         person["tag"] = serde_json::Value::Array(tags);
+    }
+    if let Some(bday) = p.birth_date {
+        person["vcard:bday"] = serde_json::Value::String(bday.format("%Y-%m-%d").to_string());
     }
     person
 }
@@ -1129,7 +1143,7 @@ pub async fn deliver_update_actor(
     let row = sqlx::query(
         "SELECT a.username, a.display_name, a.bio, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
-                mf.mime_type AS avatar_mime_type, a.emoji_map \
+                mf.mime_type AS avatar_mime_type, a.emoji_map, a.birth_date, a.birth_date_public \
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
@@ -1163,6 +1177,13 @@ pub async fn deliver_update_actor(
     let emoji_map: serde_json::Value = row
         .try_get("emoji_map")
         .unwrap_or_else(|_| serde_json::json!({}));
+    let birth_date_public: bool = row.try_get("birth_date_public").unwrap_or(false);
+    let birth_date = if birth_date_public {
+        row.try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+            .unwrap_or(None)
+    } else {
+        None
+    };
 
     let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
     if inboxes.is_empty() {
@@ -1181,6 +1202,7 @@ pub async fn deliver_update_actor(
             avatar_mime_type: avatar_mime_type.as_deref(),
             ap_public_key_pem,
             emoji_map: &emoji_map,
+            birth_date,
         },
     );
 
@@ -1840,6 +1862,7 @@ mod tests {
                 avatar_mime_type: None,
                 ap_public_key_pem: "PEM",
                 emoji_map: &serde_json::json!({}),
+                birth_date: None,
             },
         );
         assert!(minimal.get("summary").is_none());
@@ -1858,6 +1881,7 @@ mod tests {
                 avatar_mime_type: Some("image/png"),
                 ap_public_key_pem: "PEM",
                 emoji_map: &serde_json::json!({}),
+                birth_date: None,
             },
         );
         assert_eq!(full["summary"], "hi");
@@ -1878,6 +1902,7 @@ mod tests {
                 avatar_mime_type: None,
                 ap_public_key_pem: "PEM",
                 emoji_map: &serde_json::json!({":blobcat:": "https://cdn.example/blobcat.png"}),
+                birth_date: None,
             },
         );
         assert_eq!(person["tag"][0]["type"], "Emoji");

@@ -56,6 +56,8 @@
     "uploadingAvatar": "업로드 중...",
     "changeAvatarButton": "아바타 변경",
     "displayNameLabel": "표시 이름",
+    "birthdayLabel": "생년월일",
+    "birthdayPublicLabel": "Fediverse에 공개",
     "bioLabel": "바이오",
     "bioPlaceholder": "자신에 대해 알려주세요",
     "fieldsLabel": "프로필 필드(링크 등 - 최대 {{count}})",

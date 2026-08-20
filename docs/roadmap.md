@@ -128,6 +128,7 @@
 - [x] **AT Protocol PDS 書き込み系エンドポイント** — `com.atproto.repo.createRecord`/`putRecord`/`deleteRecord`/`applyWrites`（`app.bsky.feed.post`以外の任意コレクション。`createSession`のaccessJwtで認証）。詳細: `docs/protocols.md` 3節
 - [x] **AT Protocol PDS セッション認証系エンドポイント** — `com.atproto.server.createSession`/`refreshSession`/`deleteSession`/`getSession`/`createAppPassword`/`listAppPasswords`/`revokeAppPassword`。詳細: `docs/protocols.md` 3節
 - [x] **AT Protocol PDS XRPCプロキシ（`atproto-proxy`ヘッダー）** — `app.bsky.feed.getTimeline`/`searchPosts`/`app.bsky.notification.listNotifications`等のAppView専用メソッドをAppViewへ透過転送する。詳細: `docs/protocols.md` 3節
+- [x] **生年月日プロフィール項目（Misskey互換`birthday`、AP `vcard:bday`連合、ATP `personalDetailsPref`同期）** — `actors.birth_date`/`birth_date_public`。詳細: `docs/protocols.md` 3節、`docs/database.md`
 
 ### インフラ・パフォーマンス
 

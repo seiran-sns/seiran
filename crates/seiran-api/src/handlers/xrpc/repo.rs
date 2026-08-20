@@ -705,6 +705,8 @@ async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_j
             banner_media_id,
             &current.profile_fields,
             &emoji_map,
+            current.birth_date,
+            current.birth_date_public,
         )
         .await
     {

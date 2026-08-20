@@ -56,6 +56,8 @@
     "uploadingAvatar": "Subiendo...",
     "changeAvatarButton": "Cambiar avatar",
     "displayNameLabel": "Nombre para mostrar",
+    "birthdayLabel": "Fecha de nacimiento",
+    "birthdayPublicLabel": "Publicar en Fediverse",
     "bioLabel": "Biografía",
     "bioPlaceholder": "Cuéntanos sobre ti",
     "fieldsLabel": "Campos de perfil (enlaces, etc., hasta {{count}})",

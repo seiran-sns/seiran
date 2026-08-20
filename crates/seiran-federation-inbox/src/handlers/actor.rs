@@ -13,7 +13,7 @@ use crate::AppState;
 #[derive(Serialize)]
 struct ApActorDocument {
     #[serde(rename = "@context")]
-    context: Vec<String>,
+    context: Vec<serde_json::Value>,
     id: String,
     #[serde(rename = "type")]
     actor_type: String,
@@ -40,6 +40,9 @@ struct ApActorDocument {
     /// 表示名中のカスタム絵文字ショートコードをリモートが解決するための`Emoji`タグ（#186）。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tag: Vec<serde_json::Value>,
+    /// 生年月日（`birth_date_public=true`の場合のみ、Misskey互換の`vcard:bday`）。
+    #[serde(rename = "vcard:bday", skip_serializing_if = "Option::is_none")]
+    vcard_bday: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -95,7 +98,8 @@ pub async fn actor_handler(
     let row = sqlx::query(
         "SELECT a.id, a.display_name, a.bio, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
-                mf.mime_type AS avatar_mime_type, a.profile_fields, a.emoji_map \
+                mf.mime_type AS avatar_mime_type, a.profile_fields, a.emoji_map, \
+                a.birth_date, a.birth_date_public \
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
@@ -105,50 +109,59 @@ pub async fn actor_handler(
     .fetch_optional(&state.db)
     .await;
 
-    let (display_name, bio, avatar_url, avatar_mime_type, profile_fields, emoji_map) = match row {
-        Ok(Some(r)) => {
-            let actor_id = r.try_get::<i64, _>("id").unwrap_or_default();
-            let display_name = r
-                .try_get::<Option<String>, _>("display_name")
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| username.clone());
-            let bio = r.try_get::<Option<String>, _>("bio").ok().flatten();
-            let stored_avatar_url = r.try_get::<Option<String>, _>("avatar_url").ok().flatten();
-            let avatar_url = Some(stored_avatar_url.clone().unwrap_or_else(|| {
-                seiran_common::avatar::fallback_avatar_url(&state.local_domain, actor_id)
-            }));
-            let avatar_mime_type = stored_avatar_url
-                .as_ref()
-                .and_then(|_| {
-                    r.try_get::<Option<String>, _>("avatar_mime_type")
-                        .ok()
-                        .flatten()
-                })
-                .or_else(|| Some("image/svg+xml".to_string()));
-            let profile_fields = r
-                .try_get::<serde_json::Value, _>("profile_fields")
-                .ok()
-                .and_then(|v| v.as_array().cloned())
-                .unwrap_or_default();
-            let emoji_map = r
-                .try_get::<serde_json::Value, _>("emoji_map")
-                .unwrap_or_else(|_| serde_json::json!({}));
-            (
-                display_name,
-                bio,
-                avatar_url,
-                avatar_mime_type,
-                profile_fields,
-                emoji_map,
-            )
-        }
-        Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
-        Err(e) => {
-            tracing::error!("[Actor] DB エラー: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
+    let (display_name, bio, avatar_url, avatar_mime_type, profile_fields, emoji_map, birth_date) =
+        match row {
+            Ok(Some(r)) => {
+                let actor_id = r.try_get::<i64, _>("id").unwrap_or_default();
+                let display_name = r
+                    .try_get::<Option<String>, _>("display_name")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| username.clone());
+                let bio = r.try_get::<Option<String>, _>("bio").ok().flatten();
+                let stored_avatar_url = r.try_get::<Option<String>, _>("avatar_url").ok().flatten();
+                let avatar_url = Some(stored_avatar_url.clone().unwrap_or_else(|| {
+                    seiran_common::avatar::fallback_avatar_url(&state.local_domain, actor_id)
+                }));
+                let avatar_mime_type = stored_avatar_url
+                    .as_ref()
+                    .and_then(|_| {
+                        r.try_get::<Option<String>, _>("avatar_mime_type")
+                            .ok()
+                            .flatten()
+                    })
+                    .or_else(|| Some("image/svg+xml".to_string()));
+                let profile_fields = r
+                    .try_get::<serde_json::Value, _>("profile_fields")
+                    .ok()
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default();
+                let emoji_map = r
+                    .try_get::<serde_json::Value, _>("emoji_map")
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                let birth_date_public: bool = r.try_get("birth_date_public").unwrap_or(false);
+                let birth_date = if birth_date_public {
+                    r.try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+                        .unwrap_or(None)
+                } else {
+                    None
+                };
+                (
+                    display_name,
+                    bio,
+                    avatar_url,
+                    avatar_mime_type,
+                    profile_fields,
+                    emoji_map,
+                    birth_date,
+                )
+            }
+            Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
+            Err(e) => {
+                tracing::error!("[Actor] DB エラー: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            }
+        };
 
     let mut tag = Vec::new();
     seiran_common::ap::deliver::append_emoji_tags(
@@ -180,11 +193,16 @@ pub async fn actor_handler(
         url,
     });
 
+    let mut context = vec![
+        serde_json::json!("https://www.w3.org/ns/activitystreams"),
+        serde_json::json!("https://w3id.org/security/v1"),
+    ];
+    if birth_date.is_some() {
+        context.push(serde_json::json!({"vcard": "http://www.w3.org/2006/vcard/ns#"}));
+    }
+
     let doc = ApActorDocument {
-        context: vec![
-            "https://www.w3.org/ns/activitystreams".to_string(),
-            "https://w3id.org/security/v1".to_string(),
-        ],
+        context,
         id: actor_uri.clone(),
         actor_type: "Person".to_string(),
         preferred_username: username.clone(),
@@ -205,6 +223,7 @@ pub async fn actor_handler(
         },
         attachment,
         tag,
+        vcard_bday: birth_date.map(|d| d.format("%Y-%m-%d").to_string()),
     };
 
     (

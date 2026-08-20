@@ -28,6 +28,8 @@ export default function ProfileEditPage() {
 
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
+  const [birthday, setBirthday] = useState("");
+  const [birthdayPublic, setBirthdayPublic] = useState(false);
   const [profileFields, setProfileFields] = useState<ProfileField[]>(emptyProfileFields());
   const [avatar, setAvatar] = useState<DriveFile | null>(null);
   /** 既存のアイコンURL（未変更時のプレビュー用）。新規アップロード後は avatar.url を優先する。 */
@@ -44,6 +46,8 @@ export default function ProfileEditPage() {
         if (cancelled) return;
         setDisplayName(p.display_name ?? "");
         setBio(p.bio ?? "");
+        setBirthday(p.birthday ?? "");
+        setBirthdayPublic(p.birthday_public ?? false);
         setCurrentAvatarUrl(p.avatar_url ?? null);
         const slots = emptyProfileFields();
         p.profile_fields.slice(0, PROFILE_FIELD_SLOTS).forEach((f, i) => { slots[i] = f; });
@@ -82,6 +86,8 @@ export default function ProfileEditPage() {
         bio,
         ...(avatar ? { avatar_media_id: avatar.id } : {}),
         profile_fields: profileFields.filter((f) => f.name.trim() && f.value.trim()),
+        birthday: birthday || null,
+        birthday_public: birthdayPublic,
       });
       setSaved(true);
       setTimeout(() => navigate(`/@${user?.username ?? ""}`), 500);
@@ -142,6 +148,25 @@ export default function ProfileEditPage() {
               rows={5}
               placeholder={t("profile:profileEditPage.bioPlaceholder")}
             />
+          </label>
+
+          <label className={styles.label}>
+            {t("profile:profileEditPage.birthdayLabel")}
+            <input
+              className={styles.input}
+              type="date"
+              value={birthday}
+              onChange={(e) => setBirthday(e.target.value)}
+            />
+          </label>
+
+          <label className={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={birthdayPublic}
+              onChange={(e) => setBirthdayPublic(e.target.checked)}
+            />
+            {t("profile:profileEditPage.birthdayPublicLabel")}
           </label>
 
           <div className={styles.fieldsSection}>

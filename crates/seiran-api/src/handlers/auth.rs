@@ -25,6 +25,9 @@ pub struct RegisterRequest {
     pub email: Option<String>,
     /// Cloudflare Turnstile widgetが返すトークン。サイト鍵/秘密鍵が設定済みの場合は必須。
     pub turnstile_token: Option<String>,
+    /// 生年月日（`YYYY-MM-DD`、任意入力）。Fediverseへの公開はデフォルトOFFで登録され、
+    /// 設定画面から後で有効化できる。
+    pub birthday: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -208,6 +211,14 @@ pub async fn register(
         ApiError::Internal("パスワード処理エラー".to_string())
     })?;
 
+    let birth_date = match req.birthday.as_deref().filter(|s| !s.is_empty()) {
+        Some(s) => Some(
+            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map_err(|_| ApiError::BadRequest("BIRTHDAY_INVALID_FORMAT".into()))?,
+        ),
+        None => None,
+    };
+
     // DID確定 → TXT セット → PLC送信（最大3回リトライ）。DB 書き込みはここより後
     // — 失敗時に孤立レコードが残らないようにするため。自ホストドメインが未確定
     // （シングルホストモード）の間はPLC genesisを行わない（`state.local_domain`参照）。
@@ -249,6 +260,7 @@ pub async fn register(
             &state.local_domain,
             at_did.as_deref(),
             at_signing_key_pem.as_deref(),
+            birth_date,
         )
         .await
         .map_err(|e| {

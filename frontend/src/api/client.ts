@@ -617,6 +617,11 @@ export interface UserProfile {
   following_count: number;
   /** フォロワーの人数（#56）。following_count と同様、DB未登録のリモートアクターは常に0。 */
   follower_count: number;
+  /** 生年月日（`YYYY-MM-DD`、Misskey互換の`birthday`）。本人が閲覧している場合は常に含まれる
+   * （編集フォームの初期値用）。他人が閲覧している場合は`birthday_public=true`の時のみ。 */
+  birthday?: string;
+  /** `true`ならFediverseへ`vcard:bday`として公開する。本人が閲覧している場合のみ含まれる。 */
+  birthday_public?: boolean;
 }
 
 /** フォロー中/フォロワー一覧の1件（#56、`GET /users/following` `/users/followers`）。 */
@@ -991,20 +996,34 @@ export const api = {
         signal,
       );
     },
-    register(username: string, password: string, registrationToken: string, turnstileToken?: string) {
+    register(
+      username: string,
+      password: string,
+      registrationToken: string,
+      turnstileToken?: string,
+      birthday?: string,
+    ) {
       return request<AuthResponse>("POST", "/auth/register", {
         username,
         password,
         registration_token: registrationToken,
         turnstile_token: turnstileToken,
+        birthday: birthday || undefined,
       });
     },
-    registerDirect(email: string, username: string, password: string, turnstileToken?: string) {
+    registerDirect(
+      email: string,
+      username: string,
+      password: string,
+      turnstileToken?: string,
+      birthday?: string,
+    ) {
       return request<AuthResponse>("POST", "/auth/register", {
         username,
         password,
         email,
         turnstile_token: turnstileToken,
+        birthday: birthday || undefined,
       });
     },
     login(identifier: string, password: string, turnstileToken?: string) {
@@ -1381,6 +1400,10 @@ export const api = {
       avatar_media_id?: string | null;
       banner_media_id?: string | null;
       profile_fields?: ProfileField[];
+      /** `YYYY-MM-DD`、`null`で削除。 */
+      birthday?: string | null;
+      /** `true`ならFediverseへ`vcard:bday`として公開する（デフォルト`false`）。 */
+      birthday_public?: boolean;
     }) {
       return request<{
         username: string;
@@ -1389,6 +1412,8 @@ export const api = {
         avatar_media_id?: number;
         banner_media_id?: number;
         profile_fields: ProfileField[];
+        birthday?: string;
+        birthday_public: boolean;
       }>("PATCH", "/users/profile", patch);
     },
   },

@@ -161,6 +161,7 @@ pub async fn setup(
             &state.local_domain,
             at_did.as_deref(),
             at_signing_key_pem.as_deref(),
+            None,
         )
         .await
         .map_err(|e| {
