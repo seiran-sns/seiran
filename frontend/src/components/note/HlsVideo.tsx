@@ -3,6 +3,11 @@ import Hls from "hls.js";
 
 interface HlsVideoProps {
   src: string;
+  /** メディアプロキシを経由しない直URL。src(プロキシ経由)と異なる場合のみ、
+   * <source>を2本並べてプロキシ→直の順にブラウザへフォールバックさせる
+   * （プロキシのサイズ上限等で失敗した際に直アクセスへ自動的に切り替わる）。 */
+  fallbackSrc?: string;
+  mimeType?: string;
   poster?: string;
   className?: string;
   /** true の場合 src は HLS(.m3u8)プレイリスト。Safari はネイティブ再生、
@@ -19,7 +24,16 @@ interface HlsVideoProps {
  * 配信される（`.m3u8`）。ネイティブHLS再生はSafariのみ対応のため、それ以外の
  * ブラウザでは hls.js でMediaSource Extensions経由で再生する。
  */
-export default function HlsVideo({ src, poster, className, isHls, isGif, onClick }: HlsVideoProps) {
+export default function HlsVideo({
+  src,
+  fallbackSrc,
+  mimeType,
+  poster,
+  className,
+  isHls,
+  isGif,
+  onClick,
+}: HlsVideoProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -49,10 +63,12 @@ export default function HlsVideo({ src, poster, className, isHls, isGif, onClick
     }
   }, [src, isHls, isGif]);
 
+  const hasFallback = !isHls && !!fallbackSrc && fallbackSrc !== src;
+
   return (
     <video
       ref={videoRef}
-      src={isHls ? undefined : src}
+      src={isHls || hasFallback ? undefined : src}
       poster={poster}
       controls={!isGif}
       autoPlay={isGif}
@@ -61,6 +77,13 @@ export default function HlsVideo({ src, poster, className, isHls, isGif, onClick
       playsInline={isGif}
       className={className}
       onClick={onClick}
-    />
+    >
+      {hasFallback && (
+        <>
+          <source src={src} type={mimeType} />
+          <source src={fallbackSrc} type={mimeType} />
+        </>
+      )}
+    </video>
   );
 }

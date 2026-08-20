@@ -278,6 +278,8 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
             <HlsVideo
               key={index}
               src={isHls ? att.url : (mediaUrl(att.url) ?? att.url)}
+              fallbackSrc={isHls ? undefined : att.url}
+              mimeType={att.mimeType}
               poster={mediaUrl(att.thumbnailUrl)}
               isHls={isHls}
               isGif={att.isGif}
