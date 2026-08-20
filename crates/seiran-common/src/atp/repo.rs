@@ -4,6 +4,7 @@
 //! および subscribeRepos WebSocket フレームの構築を担当する。
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hex;
 pub use ipld_core::cid::Cid;
 use ipld_core::ipld::Ipld;
@@ -42,6 +43,96 @@ pub fn cid_from_dagcbor(cbor: &[u8]) -> Cid {
 /// CID を base32lower 文字列に変換する（例: "bafyrei..."）。
 pub fn cid_to_string(cid: &Cid) -> String {
     cid.to_string()
+}
+
+/// AT Protocol の JSON 表現（CID リンク → `{"$link": "..."}`、バイト列 → `{"$bytes": "..."}`）を
+/// `Ipld` に変換する。`seiran-api::handlers::xrpc::repo::ipld_to_json`（getRecord/listRecords が
+/// 使うデコード側）の逆変換で、`com.atproto.repo.createRecord`/`putRecord` が外部クライアントから
+/// 受け取った任意コレクションのレコードJSONをコミットする際に使う。
+pub fn json_to_ipld(value: &serde_json::Value) -> Result<Ipld, RepoError> {
+    match value {
+        serde_json::Value::Null => Ok(Ipld::Null),
+        serde_json::Value::Bool(b) => Ok(Ipld::Bool(*b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Ipld::Integer(i as i128))
+            } else if let Some(f) = n.as_f64() {
+                Ok(Ipld::Float(f))
+            } else {
+                Err(RepoError::Cbor("数値をi64/f64に変換できません".to_string()))
+            }
+        }
+        serde_json::Value::String(s) => Ok(Ipld::String(s.clone())),
+        serde_json::Value::Array(a) => {
+            let items = a.iter().map(json_to_ipld).collect::<Result<Vec<_>, _>>()?;
+            Ok(Ipld::List(items))
+        }
+        serde_json::Value::Object(o) => {
+            if let Some(serde_json::Value::String(link)) = o.get("$link") {
+                if o.len() == 1 {
+                    return Ok(Ipld::Link(cid_from_str(link)?));
+                }
+            }
+            if let Some(serde_json::Value::String(b64)) = o.get("$bytes") {
+                if o.len() == 1 {
+                    let bytes = URL_SAFE_NO_PAD
+                        .decode(b64)
+                        .map_err(|e| RepoError::Cbor(format!("$bytes デコード失敗: {}", e)))?;
+                    return Ok(Ipld::Bytes(bytes));
+                }
+            }
+            let mut map = BTreeMap::new();
+            for (k, v) in o {
+                map.insert(k.clone(), json_to_ipld(v)?);
+            }
+            Ok(Ipld::Map(map))
+        }
+    }
+}
+
+/// レコードのJSON値をDAG-CBORへエンコードし、CIDを計算する
+/// （`com.atproto.repo.createRecord`/`putRecord` 用）。
+pub fn encode_generic_record(value: &serde_json::Value) -> Result<(Vec<u8>, Cid), RepoError> {
+    let ipld = json_to_ipld(value)?;
+    let cbor = serde_ipld_dagcbor::to_vec(&ipld).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
+/// レコードのJSON値から blob の CID を再帰的に収集する
+/// （`{"$type":"blob","ref":{"$link":"..."}}` パターンを検出）。
+/// `subscribeRepos` フレームの `blobs` フィールドに積む対象を決めるために使う。
+pub fn collect_blob_cids(value: &serde_json::Value) -> Vec<Cid> {
+    let mut out = Vec::new();
+    collect_blob_cids_inner(value, &mut out);
+    out
+}
+
+fn collect_blob_cids_inner(value: &serde_json::Value, out: &mut Vec<Cid>) {
+    match value {
+        serde_json::Value::Object(o) => {
+            if o.get("$type").and_then(|v| v.as_str()) == Some("blob") {
+                if let Some(link) = o
+                    .get("ref")
+                    .and_then(|r| r.get("$link"))
+                    .and_then(|l| l.as_str())
+                {
+                    if let Ok(cid) = cid_from_str(link) {
+                        out.push(cid);
+                    }
+                }
+            }
+            for v in o.values() {
+                collect_blob_cids_inner(v, out);
+            }
+        }
+        serde_json::Value::Array(a) => {
+            for v in a {
+                collect_blob_cids_inner(v, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// CID 文字列をパースする。

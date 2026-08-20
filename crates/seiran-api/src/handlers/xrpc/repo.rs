@@ -14,7 +14,8 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 
 use seiran_common::atp::{
-    cid_from_sha256_hex, cid_to_string, fetch_raw_did_document, resolve_atproto_verification_key,
+    cid_from_sha256_hex, cid_to_string, fetch_raw_did_document, generate_tid,
+    resolve_atproto_verification_key,
 };
 use seiran_common::repository::Actor;
 use seiran_common::{
@@ -22,6 +23,7 @@ use seiran_common::{
 };
 use uuid::Uuid;
 
+use super::{extract_bearer, service_did};
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -627,6 +629,318 @@ pub async fn xrpc_describe_repo(
         "handleIsCorrect": true,
     }))
     .into_response()
+}
+
+/// ATPセッション（`Authorization: Bearer <accessJwt>`、`com.atproto.server.createSession` で
+/// 発行したもの）を検証し、`repo`パラメータが認証されたDIDと一致するアクターを返す。
+/// `createRecord`/`putRecord`/`deleteRecord`/`applyWrites` の共通認証ゲート
+/// （他人のリポジトリへの書き込みを防ぐ）。
+async fn authenticate_atp_write(
+    state: &AppState,
+    headers: &HeaderMap,
+    repo_param: &str,
+) -> Result<Actor, axum::response::Response> {
+    let Some(token) = extract_bearer(headers) else {
+        return Err(ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response());
+    };
+    let verified = state
+        .local_auth
+        .verify_atp_access_token(token, &service_did(state))
+        .map_err(|_| ApiError::Unauthorized("トークンが無効です").into_response())?;
+
+    let actor = resolve_repo_actor(state, repo_param).await?;
+    let Some(actor_did) = actor.at_did.as_deref() else {
+        return Err(
+            ApiError::Unauthorized("このアクターはATPリポジトリを持ちません").into_response(),
+        );
+    };
+    if actor_did != verified.did {
+        return Err(ApiError::Forbidden("他のリポジトリへは書き込めません").into_response());
+    }
+    Ok(actor)
+}
+
+/// `app.bsky.feed.post` は画像/動画embed組み立て等の専用ロジック（`AtpCommitService::commit_post`、
+/// `posts`テーブル更新込み）を経由する必要があり、汎用書き込みエンドポイントでは扱えない。
+fn reject_post_collection(collection: &str) -> Option<axum::response::Response> {
+    if collection == "app.bsky.feed.post" {
+        Some(
+            ApiError::BadRequest(
+                "app.bsky.feed.post はseiranネイティブの投稿APIを使用してください".to_string(),
+            )
+            .into_response(),
+        )
+    } else {
+        None
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRecordRequest {
+    pub repo: String,
+    pub collection: String,
+    pub rkey: Option<String>,
+    pub record: serde_json::Value,
+}
+
+/// `com.atproto.repo.createRecord` — 新規レコードを作成する（`rkey`省略時はTIDを自動生成）。
+pub async fn xrpc_create_record(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<CreateRecordRequest>,
+) -> impl IntoResponse {
+    if let Some(resp) = reject_post_collection(&req.collection) {
+        return resp;
+    }
+    let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let at_did = actor
+        .at_did
+        .clone()
+        .expect("authenticate_atp_writeで確認済み");
+    let rkey = req.rkey.unwrap_or_else(generate_tid);
+
+    match state
+        .atp_service
+        .commit_generic_record(
+            actor.id,
+            req.collection.clone(),
+            rkey.clone(),
+            &req.record,
+            "create",
+            chrono::Utc::now(),
+        )
+        .await
+    {
+        Ok((_, record_cid)) => Json(serde_json::json!({
+            "uri": format!("at://{}/{}/{}", at_did, req.collection, rkey),
+            "cid": cid_to_string(&record_cid),
+        }))
+        .into_response(),
+        Err(e) => ApiError::Internal(format!("[createRecord] コミット失敗: {}", e)).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PutRecordRequest {
+    pub repo: String,
+    pub collection: String,
+    pub rkey: String,
+    pub record: serde_json::Value,
+}
+
+/// `com.atproto.repo.putRecord` — `rkey`を指定してレコードを作成/上書きする。
+pub async fn xrpc_put_record(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<PutRecordRequest>,
+) -> impl IntoResponse {
+    if let Some(resp) = reject_post_collection(&req.collection) {
+        return resp;
+    }
+    let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let at_did = actor
+        .at_did
+        .clone()
+        .expect("authenticate_atp_writeで確認済み");
+
+    match state
+        .atp_service
+        .commit_generic_record(
+            actor.id,
+            req.collection.clone(),
+            req.rkey.clone(),
+            &req.record,
+            "update",
+            chrono::Utc::now(),
+        )
+        .await
+    {
+        Ok((_, record_cid)) => Json(serde_json::json!({
+            "uri": format!("at://{}/{}/{}", at_did, req.collection, req.rkey),
+            "cid": cid_to_string(&record_cid),
+        }))
+        .into_response(),
+        Err(e) => ApiError::Internal(format!("[putRecord] コミット失敗: {}", e)).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteRecordRequest {
+    pub repo: String,
+    pub collection: String,
+    pub rkey: String,
+}
+
+/// `com.atproto.repo.deleteRecord` — レコードを削除する。
+pub async fn xrpc_delete_record(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<DeleteRecordRequest>,
+) -> impl IntoResponse {
+    if let Some(resp) = reject_post_collection(&req.collection) {
+        return resp;
+    }
+    let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+
+    match state
+        .atp_service
+        .delete_atp_record_generic(actor.id, &req.collection, &req.rkey, chrono::Utc::now())
+        .await
+    {
+        Ok(()) => Json(serde_json::json!({})).into_response(),
+        Err(e) => ApiError::Internal(format!("[deleteRecord] 削除失敗: {}", e)).into_response(),
+    }
+}
+
+/// `com.atproto.repo.applyWrites` の `writes[]` 各要素。
+#[derive(Deserialize)]
+#[serde(tag = "$type")]
+pub enum ApplyWritesOp {
+    #[serde(rename = "com.atproto.repo.applyWrites#create")]
+    Create {
+        collection: String,
+        rkey: Option<String>,
+        value: serde_json::Value,
+    },
+    #[serde(rename = "com.atproto.repo.applyWrites#update")]
+    Update {
+        collection: String,
+        rkey: String,
+        value: serde_json::Value,
+    },
+    #[serde(rename = "com.atproto.repo.applyWrites#delete")]
+    Delete { collection: String, rkey: String },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyWritesRequest {
+    pub repo: String,
+    pub writes: Vec<ApplyWritesOp>,
+}
+
+/// `com.atproto.repo.applyWrites` — 複数レコードの作成・更新・削除をまとめて行う。
+/// **注意**: AT Protocol仕様は本来これを単一commitで行うが、この実装は各要素を
+/// `createRecord`/`putRecord`/`deleteRecord`と同じ経路で順番にコミットする
+/// （＝要素ごとに別のcommitになる。途中で失敗すると、それより前の要素は既にコミット済みのまま
+/// 残る＝部分適用される。トランザクション的な全体ロールバックは行わない）。
+pub async fn xrpc_apply_writes(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<ApplyWritesRequest>,
+) -> impl IntoResponse {
+    for write in &req.writes {
+        let collection = match write {
+            ApplyWritesOp::Create { collection, .. } => collection,
+            ApplyWritesOp::Update { collection, .. } => collection,
+            ApplyWritesOp::Delete { collection, .. } => collection,
+        };
+        if let Some(resp) = reject_post_collection(collection) {
+            return resp;
+        }
+    }
+
+    let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let at_did = actor
+        .at_did
+        .clone()
+        .expect("authenticate_atp_writeで確認済み");
+
+    let mut results = Vec::with_capacity(req.writes.len());
+    for write in req.writes {
+        let now = chrono::Utc::now();
+        match write {
+            ApplyWritesOp::Create {
+                collection,
+                rkey,
+                value,
+            } => {
+                let rkey = rkey.unwrap_or_else(generate_tid);
+                match state
+                    .atp_service
+                    .commit_generic_record(
+                        actor.id,
+                        collection.clone(),
+                        rkey.clone(),
+                        &value,
+                        "create",
+                        now,
+                    )
+                    .await
+                {
+                    Ok((_, record_cid)) => results.push(serde_json::json!({
+                        "$type": "com.atproto.repo.applyWrites#createResult",
+                        "uri": format!("at://{}/{}/{}", at_did, collection, rkey),
+                        "cid": cid_to_string(&record_cid),
+                    })),
+                    Err(e) => {
+                        return ApiError::Internal(format!("[applyWrites] create失敗: {}", e))
+                            .into_response()
+                    }
+                }
+            }
+            ApplyWritesOp::Update {
+                collection,
+                rkey,
+                value,
+            } => {
+                match state
+                    .atp_service
+                    .commit_generic_record(
+                        actor.id,
+                        collection.clone(),
+                        rkey.clone(),
+                        &value,
+                        "update",
+                        now,
+                    )
+                    .await
+                {
+                    Ok((_, record_cid)) => results.push(serde_json::json!({
+                        "$type": "com.atproto.repo.applyWrites#updateResult",
+                        "uri": format!("at://{}/{}/{}", at_did, collection, rkey),
+                        "cid": cid_to_string(&record_cid),
+                    })),
+                    Err(e) => {
+                        return ApiError::Internal(format!("[applyWrites] update失敗: {}", e))
+                            .into_response()
+                    }
+                }
+            }
+            ApplyWritesOp::Delete { collection, rkey } => {
+                match state
+                    .atp_service
+                    .delete_atp_record_generic(actor.id, &collection, &rkey, now)
+                    .await
+                {
+                    Ok(()) => results.push(serde_json::json!({
+                        "$type": "com.atproto.repo.applyWrites#deleteResult",
+                    })),
+                    Err(e) => {
+                        return ApiError::Internal(format!("[applyWrites] delete失敗: {}", e))
+                            .into_response()
+                    }
+                }
+            }
+        }
+    }
+
+    Json(serde_json::json!({ "results": results })).into_response()
 }
 
 /// DAG-CBOR デコード結果（`Ipld`）を AT Protocol の JSON 表現に変換する。

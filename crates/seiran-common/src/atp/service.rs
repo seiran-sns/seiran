@@ -10,11 +10,11 @@ use tokio::sync::broadcast;
 use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
     build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex,
-    cid_from_str, cid_to_string, create_commit, encode_bsky_actor_profile, encode_bsky_feed_like,
-    encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_block,
+    cid_from_str, cid_to_string, collect_blob_cids, create_commit, encode_bsky_actor_profile,
+    encode_bsky_feed_like, encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_block,
     encode_bsky_graph_follow, encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car,
-    encode_chat_actor_declaration, generate_tid, BskyEmbed, BskyFacet, BskyImage, BskyPostReply,
-    Cid, CommitEvtOp, RepoError,
+    encode_chat_actor_declaration, encode_generic_record, generate_tid, BskyEmbed, BskyFacet,
+    BskyImage, BskyPostReply, Cid, CommitEvtOp, RepoError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -85,7 +85,7 @@ async fn run_redis_bridge_subscriber(
 
 /// コミット処理に渡すレコード情報
 pub struct CommitRecord {
-    pub collection: &'static str,
+    pub collection: String,
     pub rkey: String,
     pub cbor: Vec<u8>,
     pub cid: Cid,
@@ -464,6 +464,40 @@ impl AtpCommitService {
         })
     }
 
+    /// 外部ATクライアントの `com.atproto.repo.createRecord`/`putRecord` 用。
+    /// 任意コレクションのレコードJSONをそのままコミットする。`app.bsky.feed.post` は
+    /// 画像/動画embed組み立て等の投稿専用ロジックを経由する `commit_post` を使うこと
+    /// （このメソッドはレコード値をそのままDAG-CBORエンコードするだけで、`posts` テーブルの
+    /// 更新も行わない）。
+    /// 戻り値は `(コミット結果, 作成したレコード自体のCID)`。`CommitResult::commit_cid` は
+    /// リポジトリ全体のcommit CIDであり、`createRecord`/`putRecord` のレスポンスが返すべき
+    /// 「レコードのCID」とは別物のため、レコードCIDを別途返す。
+    pub async fn commit_generic_record(
+        &self,
+        actor_id: i64,
+        collection: String,
+        rkey: String,
+        value: &serde_json::Value,
+        action: &'static str,
+        now: DateTime<Utc>,
+    ) -> Result<(CommitResult, Cid), AtpCommitError> {
+        let (cbor, cid) = encode_generic_record(value)?;
+        let blob_cids = collect_blob_cids(value);
+        let record = CommitRecord {
+            collection,
+            rkey,
+            cbor,
+            cid,
+            action,
+            blob_cids,
+        };
+        let result = self
+            .commit_record_inner(actor_id, record, now, None)
+            .await?;
+        self.spawn_request_crawl();
+        Ok((result, cid))
+    }
+
     /// ポスト作成コミット（posts テーブル更新を追加）
     ///
     /// `reply` が Some の場合は ATP `app.bsky.feed.post` の `reply` フィールドを設定する（リプライ投稿）。
@@ -615,7 +649,7 @@ impl AtpCommitService {
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
-            collection: "app.bsky.feed.post",
+            collection: "app.bsky.feed.post".to_string(),
             rkey: rkey.clone(),
             cbor: record_cbor,
             cid: record_cid,
@@ -655,7 +689,7 @@ impl AtpCommitService {
         let (record_cbor, record_cid) = encode_bsky_feed_repost(at_uri, at_cid, &created_at_str)?;
 
         let record = CommitRecord {
-            collection: "app.bsky.feed.repost",
+            collection: "app.bsky.feed.repost".to_string(),
             rkey: rkey.clone(),
             cbor: record_cbor,
             cid: record_cid,
@@ -715,7 +749,7 @@ impl AtpCommitService {
         )?;
 
         let record = CommitRecord {
-            collection: "app.bsky.feed.like",
+            collection: "app.bsky.feed.like".to_string(),
             rkey: rkey.clone(),
             cbor: record_cbor,
             cid: record_cid,
@@ -758,7 +792,7 @@ impl AtpCommitService {
         let (record_cbor, record_cid) = encode_bsky_graph_follow(subject_did, &created_at_str)?;
 
         let record = CommitRecord {
-            collection: "app.bsky.graph.follow",
+            collection: "app.bsky.graph.follow".to_string(),
             rkey: rkey.clone(),
             cbor: record_cbor,
             cid: record_cid,
@@ -793,7 +827,7 @@ impl AtpCommitService {
         let (record_cbor, record_cid) = encode_bsky_graph_block(subject_did, &created_at_str)?;
 
         let record = CommitRecord {
-            collection: "app.bsky.graph.block",
+            collection: "app.bsky.graph.block".to_string(),
             rkey: rkey.clone(),
             cbor: record_cbor,
             cid: record_cid,
@@ -841,7 +875,7 @@ impl AtpCommitService {
         let cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
-            collection: "app.bsky.graph.list",
+            collection: "app.bsky.graph.list".to_string(),
             rkey: rkey.clone(),
             cbor: record_cbor,
             cid: record_cid,
@@ -879,7 +913,7 @@ impl AtpCommitService {
             encode_bsky_graph_listitem(list_uri, subject_did, &created_at_str)?;
 
         let record = CommitRecord {
-            collection: "app.bsky.graph.listitem",
+            collection: "app.bsky.graph.listitem".to_string(),
             rkey: rkey.clone(),
             cbor: record_cbor,
             cid: record_cid,
@@ -1367,7 +1401,7 @@ impl AtpCommitService {
     /// 指定コレクション種別のレコードを MST から削除する汎用ヘルパー（リスト機能 #63）。
     /// `delete_atp_repost`/`commit_delete_follow` と同型だが、`app.bsky.graph.list` /
     /// `app.bsky.graph.listitem` の2種を1つの実装で賄うため collection を引数化する。
-    async fn delete_atp_record_generic(
+    pub async fn delete_atp_record_generic(
         &self,
         actor_id: i64,
         collection: &str,
@@ -1563,7 +1597,7 @@ impl AtpCommitService {
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
-            collection: "app.bsky.feed.post",
+            collection: "app.bsky.feed.post".to_string(),
             rkey: rkey.clone(),
             cbor: record_cbor,
             cid: record_cid,
@@ -1624,7 +1658,7 @@ impl AtpCommitService {
         )?;
 
         let record = CommitRecord {
-            collection: "app.bsky.actor.profile",
+            collection: "app.bsky.actor.profile".to_string(),
             rkey: "self".to_string(),
             cbor: record_cbor,
             cid: record_cid,
@@ -1667,7 +1701,7 @@ impl AtpCommitService {
         let (record_cbor, record_cid) = encode_chat_actor_declaration("all")?;
 
         let record = CommitRecord {
-            collection: "chat.bsky.actor.declaration",
+            collection: "chat.bsky.actor.declaration".to_string(),
             rkey: "self".to_string(),
             cbor: record_cbor,
             cid: record_cid,

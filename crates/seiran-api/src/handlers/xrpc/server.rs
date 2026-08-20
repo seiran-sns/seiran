@@ -8,6 +8,7 @@ use serde::Deserialize;
 
 use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 
+use super::{extract_bearer, service_did};
 use crate::error::ApiError;
 use crate::middleware::extract_auth;
 use crate::AppState;
@@ -15,17 +16,6 @@ use crate::AppState;
 #[derive(Deserialize)]
 pub struct ResolveHandleQuery {
     pub handle: String,
-}
-
-fn service_did(state: &AppState) -> String {
-    format!("did:web:{}", state.local_domain)
-}
-
-fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
 }
 
 fn auth_required_error() -> axum::response::Response {

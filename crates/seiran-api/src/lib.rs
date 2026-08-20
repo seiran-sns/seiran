@@ -1012,6 +1012,22 @@ pub fn router(state: AppState) -> Router {
             get(handlers::xrpc::repo::xrpc_describe_repo),
         )
         .route(
+            "/xrpc/com.atproto.repo.createRecord",
+            post(handlers::xrpc::repo::xrpc_create_record),
+        )
+        .route(
+            "/xrpc/com.atproto.repo.putRecord",
+            post(handlers::xrpc::repo::xrpc_put_record),
+        )
+        .route(
+            "/xrpc/com.atproto.repo.deleteRecord",
+            post(handlers::xrpc::repo::xrpc_delete_record),
+        )
+        .route(
+            "/xrpc/com.atproto.repo.applyWrites",
+            post(handlers::xrpc::repo::xrpc_apply_writes),
+        )
+        .route(
             "/xrpc/com.atproto.sync.listRepos",
             get(handlers::xrpc::sync::xrpc_list_repos),
         )

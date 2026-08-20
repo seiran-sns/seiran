@@ -179,6 +179,13 @@ Clearsky等のサードパーティツールは firehose を購読し続ける�
 - `GET /xrpc/com.atproto.server.getSession` — accessJwtを検証し、現在のセッション情報（did/handle）を返す。
 - **`jsonwebtoken`の`Validation::default()`は`validate_aud: true`かつ`aud: None`のため、クレームに`aud`が存在するだけで`InvalidAudience`として一律拒否する**。`aud`クレームを積むJWT（`AtpSessionClaims`）を検証する際は`set_audience`の明示呼び出しが必須。
 
+### 書き込み系エンドポイント（外部ATプロトコルクライアントからの直接書き込み対応）
+`createSession`で取得したaccessJwtを使い、外部ATクライアントが任意コレクションのレコードを直接書き込めるようにする。共通の認証ゲート（`crates/seiran-api/src/handlers/xrpc/repo.rs`の`authenticate_atp_write`）が、accessJwt検証済みDIDと`repo`パラメータが一致するかを確認し、他人のリポジトリへの書き込みを拒否する。
+
+- `POST /xrpc/com.atproto.repo.createRecord`/`putRecord`/`deleteRecord`/`applyWrites` — `app.bsky.feed.post`は画像/動画embed組み立てや`posts`テーブル更新を伴う専用パイプライン（`AtpCommitService::commit_post`）を経由する必要があるため、この4エンドポイントでは明示的に拒否する（`reject_post_collection`）。それ以外のコレクション（`app.bsky.graph.list`等）は`AtpCommitService::commit_generic_record`/`delete_atp_record_generic`が汎用に処理する。
+- `commit_generic_record`は受け取ったレコードJSONを`seiran_common::atp::json_to_ipld`でDAG-CBORへ変換してコミットする（`getRecord`/`listRecords`が使う`ipld_to_json`の逆変換）。`{"$type":"blob","ref":{"$link":cid}}`パターンは`collect_blob_cids`が再帰的に検出し、`subscribeRepos`フレームの`blobs`に積む。
+- `applyWrites`は**単一commitではなく、要素ごとに個別のcommitとして順番に処理する**（AT Protocol仕様とは異なる簡易実装）。途中の要素が失敗すると、それより前の要素は既にコミット済みのまま残る（部分適用、全体ロールバックなし）。
+
 ### Bsky公式Relayの新規PDSアカウント数上限に注意
 Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホスト単位のアカウント数上限を設けており、上限を超えて登録されたアカウント（作成順で後の方）は `host-throttled` 扱いとなり、そのアカウントのコミットは `subscribeRepos` の配信対象から意図的に除外される（PDS側にエラーは一切返らず、`requestCrawl` も200 OKを返し続けるため、PDS側のログからは検知できない）。「特定ユーザーだけ投稿がbsky.appに反映されない」という報告を受けたら、まずこの上限超過を疑う。indigoの`cmd/relay/relay/account.go`にロジックがあり、ローカルでindigo/relayを動かして自PDSのホストレコード（`account_count`/`account_limit`）を直接確認することで検証できる。
 
