@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::Deserialize;
 
+use seiran_common::atp::resolve_external_handle;
 use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 
 use super::{extract_bearer, service_did};
@@ -41,15 +42,23 @@ pub async fn xrpc_resolve_handle(
 ) -> impl IntoResponse {
     let handle = params.handle.trim().to_lowercase();
 
-    // {username}.{local_domain} 形式かチェック
+    let not_found = || {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "NotFound", "message": "ハンドルが見つかりません"})),
+        )
+            .into_response()
+    };
+
+    // {username}.{local_domain} 形式でなければ自ドメイン管理外。
+    // DNS TXT / HTTP well-known 経由で解決を試みる（bsky.app 等が任意ハンドルの
+    // resolveHandle をログイン中PDSに投げてくるため、即400で拒否すると呼び出し元が壊れる）。
     let suffix = format!(".{}", state.local_domain);
-    let username = if let Some(u) = handle.strip_suffix(&suffix) {
-        u.to_string()
-    } else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "InvalidRequest", "message": "このPDSが管理していないハンドルです"})),
-        ).into_response();
+    let Some(username) = handle.strip_suffix(&suffix) else {
+        return match resolve_external_handle(&handle, &state.http_client).await {
+            Some(did) => Json(serde_json::json!({"did": did})).into_response(),
+            None => not_found(),
+        };
     };
 
     if username.is_empty() || username.contains('.') {
@@ -60,17 +69,9 @@ pub async fn xrpc_resolve_handle(
             .into_response();
     }
 
-    let not_found = || {
-        (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "NotFound", "message": "ハンドルが見つかりません"})),
-        )
-            .into_response()
-    };
-
     match state
         .actors
-        .find_did_by_username_domain(&username, &state.local_domain)
+        .find_did_by_username_domain(username, &state.local_domain)
         .await
     {
         Ok(Some(did)) if !did.is_empty() => Json(serde_json::json!({"did": did})).into_response(),

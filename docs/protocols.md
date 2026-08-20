@@ -144,7 +144,7 @@ seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）�
 3. `plc.directory` へ genesis operation をPOST
 4. 失敗時は新しい鍵で再生成し最大3回リトライ
 
-`com.atproto.identity.resolveHandle` は `{username}.{local_domain}` 形式のみ対応し、DBの `actors.at_did` から即答する（自PDS管轄のみ、外部問い合わせ不要）。
+`com.atproto.identity.resolveHandle` は `{username}.{local_domain}` 形式ならDBの `actors.at_did` から即答する（自PDS管轄）。それ以外のハンドルは `seiran_common::atp::resolve_external_handle` がDNS TXT（`_atproto.{handle}`、Cloudflare DNS-over-HTTPS経由）とHTTP well-known（`https://{handle}/.well-known/atproto-did`）を並行で試して解決する（各5秒タイムアウト、両方失敗時は404）。bsky.app等のクライアントはログイン中PDSに任意ハンドルの`resolveHandle`を投げてくるため、自ドメイン外を無条件で400拒否すると呼び出し元が壊れる（該当ハンドルのプロフィールページがフリーズする等）。
 
 **ATPハンドルは常に小文字**（`seiran_common::username::to_atp_username`）。`actors.username` 自体は表示上大文字を許可するが、PLC genesis の `alsoKnownAs`・Cloudflare TXTレコード・`resolveHandle`/`.well-known/atproto-did` の応答・`#identity` ブロードキャストは全てこの小文字化した値を使う。DNS/HTTPホスト名は経路上（プロキシ・リゾルバ・Bluesky側の正規化）で小文字化されるため、大文字混じりのハンドルを一度でも `alsoKnownAs` に載せると恒久的に解決不能（bsky.app上で`handle.invalid`）になる実障害が過去にあった。`ActorRepository::find_by_username_domain`/`find_did_by_username_domain` は `LOWER()` 比較で大文字小文字を区別しない（ユーザー名の大文字小文字違いだけで衝突するのを防ぐため）。
 

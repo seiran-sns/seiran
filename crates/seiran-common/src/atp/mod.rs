@@ -1,6 +1,7 @@
 pub mod client;
 pub mod did_resolve;
 pub mod embed;
+pub mod handle_resolve;
 pub mod plc;
 pub mod repo;
 pub mod service;
@@ -19,6 +20,7 @@ pub use did_resolve::{
     fetch_raw_did_document, resolve_atproto_verification_key, resolve_service_endpoint,
     DidResolveError,
 };
+pub use handle_resolve::resolve_external_handle;
 pub use plc::{
     p256_to_did_key, plc_directory_base_url, prepare_plc_genesis, signing_key_from_pem,
     submit_plc_genesis, PlcError, PlcGenesis,
