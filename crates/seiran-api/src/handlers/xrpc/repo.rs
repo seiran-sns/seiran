@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 
 use seiran_common::atp::{
-    cid_from_sha256_hex, cid_to_string, fetch_raw_did_document, generate_tid,
+    cid_from_sha256_hex, cid_from_str, cid_to_string, fetch_raw_did_document, generate_tid,
     resolve_atproto_verification_key,
 };
 use seiran_common::repository::Actor;
@@ -660,6 +660,88 @@ async fn authenticate_atp_write(
     Ok(actor)
 }
 
+/// `putRecord`/`createRecord`/`applyWrites` が `app.bsky.actor.profile` を受け取った際、
+/// `actors`テーブル（`display_name`/`bio`/`avatar_media_id`/`banner_media_id`）にも反映する。
+/// ATPリポジトリ（`atp_blocks`/`atp_records`）は`commit_generic_record`が既に更新済みで、
+/// これとは別データソースである`actors`（seiranのUI/APIが表示に使う値）を追従させるための
+/// 「ATP→actors」逆方向同期（`AtpCommitService::commit_profile`の「actors→ATP」とは逆向き）。
+/// ローカルユーザーでない場合、または`avatar`/`banner`のCIDに対応する`media_files`行が
+/// まだ存在しない場合（bsky.app等から新規アップロードされ、seiran側に未取り込みの画像）は
+/// 該当フィールドを更新せず既存値を維持する。
+async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_json::Value) {
+    let Some(user_id) = actor.user_id else {
+        return;
+    };
+    let Ok(Some(current)) = state.actors.find_profile_by_user_id(user_id).await else {
+        return;
+    };
+
+    let display_name = value
+        .get("displayName")
+        .and_then(|v| v.as_str())
+        .or(current.display_name.as_deref());
+    let bio = value
+        .get("description")
+        .and_then(|v| v.as_str())
+        .or(current.bio.as_deref());
+    let avatar_media_id = resolve_blob_media_id(state, value.get("avatar"), actor.id)
+        .await
+        .or(current.avatar_media_id);
+    let banner_media_id = resolve_blob_media_id(state, value.get("banner"), actor.id)
+        .await
+        .or(current.banner_media_id);
+    let emoji_map = current
+        .emoji_map
+        .clone()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    if let Err(e) = state
+        .actors
+        .update_profile(
+            user_id,
+            display_name,
+            bio,
+            avatar_media_id,
+            banner_media_id,
+            &current.profile_fields,
+            &emoji_map,
+        )
+        .await
+    {
+        tracing::error!(
+            "[putRecord] app.bsky.actor.profile → actors 同期失敗 actor_id={}: {}",
+            actor.id,
+            e
+        );
+    }
+}
+
+/// blob参照（`{"$type":"blob","ref":{"$link":"<CID>"},...}`）のCIDから、対応する
+/// `media_files` 行（既にseiran経由でアップロード済みの画像）を検索する。CIDのmultihashは
+/// sha256そのものなので、逆算して一致検索する（`xrpc_get_blob`と同じ手法）。
+async fn resolve_blob_media_id(
+    state: &AppState,
+    blob_value: Option<&serde_json::Value>,
+    actor_id: i64,
+) -> Option<i64> {
+    let cid_str = blob_value?.get("ref")?.get("$link")?.as_str()?;
+    let cid = cid_from_str(cid_str).ok()?;
+    let mh = cid.hash();
+    if mh.code() != 0x12 {
+        return None;
+    }
+    let sha256_hex = hex::encode(mh.digest());
+    sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM media_files WHERE sha256 = $1 AND uploaded_by_actor_id = $2 LIMIT 1",
+    )
+    .bind(&sha256_hex)
+    .bind(actor_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+}
+
 /// `app.bsky.feed.post` は画像/動画embed組み立て等の専用ロジック（`AtpCommitService::commit_post`、
 /// `posts`テーブル更新込み）を経由する必要があり、汎用書き込みエンドポイントでは扱えない。
 fn reject_post_collection(collection: &str) -> Option<axum::response::Response> {
@@ -715,11 +797,16 @@ pub async fn xrpc_create_record(
         )
         .await
     {
-        Ok((_, record_cid)) => Json(serde_json::json!({
-            "uri": format!("at://{}/{}/{}", at_did, req.collection, rkey),
-            "cid": cid_to_string(&record_cid),
-        }))
-        .into_response(),
+        Ok((_, record_cid)) => {
+            if req.collection == "app.bsky.actor.profile" {
+                sync_profile_to_actors(&state, &actor, &req.record).await;
+            }
+            Json(serde_json::json!({
+                "uri": format!("at://{}/{}/{}", at_did, req.collection, rkey),
+                "cid": cid_to_string(&record_cid),
+            }))
+            .into_response()
+        }
         Err(e) => ApiError::Internal(format!("[createRecord] コミット失敗: {}", e)).into_response(),
     }
 }
@@ -763,11 +850,16 @@ pub async fn xrpc_put_record(
         )
         .await
     {
-        Ok((_, record_cid)) => Json(serde_json::json!({
-            "uri": format!("at://{}/{}/{}", at_did, req.collection, req.rkey),
-            "cid": cid_to_string(&record_cid),
-        }))
-        .into_response(),
+        Ok((_, record_cid)) => {
+            if req.collection == "app.bsky.actor.profile" {
+                sync_profile_to_actors(&state, &actor, &req.record).await;
+            }
+            Json(serde_json::json!({
+                "uri": format!("at://{}/{}/{}", at_did, req.collection, req.rkey),
+                "cid": cid_to_string(&record_cid),
+            }))
+            .into_response()
+        }
         Err(e) => ApiError::Internal(format!("[putRecord] コミット失敗: {}", e)).into_response(),
     }
 }
@@ -883,11 +975,16 @@ pub async fn xrpc_apply_writes(
                     )
                     .await
                 {
-                    Ok((_, record_cid)) => results.push(serde_json::json!({
-                        "$type": "com.atproto.repo.applyWrites#createResult",
-                        "uri": format!("at://{}/{}/{}", at_did, collection, rkey),
-                        "cid": cid_to_string(&record_cid),
-                    })),
+                    Ok((_, record_cid)) => {
+                        if collection == "app.bsky.actor.profile" {
+                            sync_profile_to_actors(&state, &actor, &value).await;
+                        }
+                        results.push(serde_json::json!({
+                            "$type": "com.atproto.repo.applyWrites#createResult",
+                            "uri": format!("at://{}/{}/{}", at_did, collection, rkey),
+                            "cid": cid_to_string(&record_cid),
+                        }))
+                    }
                     Err(e) => {
                         return ApiError::Internal(format!("[applyWrites] create失敗: {}", e))
                             .into_response()
@@ -911,11 +1008,16 @@ pub async fn xrpc_apply_writes(
                     )
                     .await
                 {
-                    Ok((_, record_cid)) => results.push(serde_json::json!({
-                        "$type": "com.atproto.repo.applyWrites#updateResult",
-                        "uri": format!("at://{}/{}/{}", at_did, collection, rkey),
-                        "cid": cid_to_string(&record_cid),
-                    })),
+                    Ok((_, record_cid)) => {
+                        if collection == "app.bsky.actor.profile" {
+                            sync_profile_to_actors(&state, &actor, &value).await;
+                        }
+                        results.push(serde_json::json!({
+                            "$type": "com.atproto.repo.applyWrites#updateResult",
+                            "uri": format!("at://{}/{}/{}", at_did, collection, rkey),
+                            "cid": cid_to_string(&record_cid),
+                        }))
+                    }
                     Err(e) => {
                         return ApiError::Internal(format!("[applyWrites] update失敗: {}", e))
                             .into_response()
