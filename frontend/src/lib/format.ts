@@ -59,6 +59,43 @@ export function remoteProfileUrl(profile: UserProfile): string | null {
   return null;
 }
 
+/** themeColor未宣言・Bsky共通の汎用デフォルト（薄いグレー）。バックエンドの
+ * `remote_instance_info_resolve::DEFAULT_THEME_COLOR` と揃えている。 */
+export const REMOTE_SERVER_BADGE_FALLBACK_COLOR = "#e4e4e7";
+
+/** リモートサーバー表示（#NoteCardリモートサーバー表示）の元データ。NoteCardの
+ * `note.user`、プロフィール画面の `profile` のどちらからも同じ形に正規化して渡す。 */
+export interface RemoteServerSubject {
+  actorType: string;
+  domain?: string;
+  instance?: { name?: string; themeColor?: string; iconUrl?: string };
+}
+
+/** リモートサーバー表示のバッジ情報（アイコン種別・ラベル・背景色）を計算する。
+ * 実際のアイコン描画（Blueskyロゴ/instanceアイコン画像）は呼び出し側に委ねる
+ * （NoteCardは横並びの小バッジ、プロフィール画面はIDの下のブロックと見た目が異なるため）。
+ * Bskyは固定表示、Fediはバックエンドが解決したインスタンス情報（`instance`）を使う。
+ * ローカル・seiran間連合（remote_seiran）では表示しない。 */
+export function remoteServerBadgeInfo(
+  subject: RemoteServerSubject,
+): { useBlueskyLogo: boolean; iconUrl?: string; label: string; bg: string } | null {
+  if (subject.actorType === "bsky") {
+    return { useBlueskyLogo: true, label: "Bluesky", bg: REMOTE_SERVER_BADGE_FALLBACK_COLOR };
+  }
+  if (subject.actorType === "fedi") {
+    // バックエンドはfaviconの実在確認まで済ませてからiconUrlを返すため、ここでは
+    // 有無だけで判定すればよい。取得できなかった場合はアイコン無し（🌐等への
+    // フォールバックはしない）。
+    return {
+      useBlueskyLogo: false,
+      iconUrl: subject.instance?.iconUrl,
+      label: subject.instance?.name || subject.domain || "",
+      bg: subject.instance?.themeColor || REMOTE_SERVER_BADGE_FALLBACK_COLOR,
+    };
+  }
+  return null;
+}
+
 /** アクター種別に対応するプロトコルバッジ（絵文字 + ラベル）。 */
 export function protocolBadge(actorType: string): { icon: string; label: string } | null {
   switch (actorType) {

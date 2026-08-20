@@ -21,7 +21,7 @@ import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
-import { profileQuery, remoteProfileUrl } from "../lib/format";
+import { profileQuery, remoteProfileUrl, remoteServerBadgeInfo } from "../lib/format";
 import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
 import {
   setFollowStatus as setFollowStatusStore,
@@ -30,6 +30,7 @@ import {
 import panel from "../components/common/Panel.module.css";
 import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import TwemojiText from "../components/common/TwemojiText";
+import blueskyLogo from "../assets/bluesky-logo.svg";
 import styles from "./ProfilePage.module.css";
 
 const PAGE_SIZE = 20;
@@ -181,6 +182,14 @@ export default function ProfilePage() {
   const isLocal = profile?.actor_type === "local";
   const isBridge = !!profile?.bridge_real_handle;
   const isSelf = isLocal && !!user && user.username === profile?.username;
+  // サーバー名表示エリア（IDのすぐ下、#NoteCardリモートサーバー表示と共通のロジック）。
+  const remoteInfo = profile
+    ? remoteServerBadgeInfo({
+        actorType: profile.actor_type,
+        domain: profile.domain,
+        instance: profile.instance,
+      })
+    : null;
 
   function followTarget(): string {
     if (!profile) return "";
@@ -370,18 +379,58 @@ export default function ProfilePage() {
             <span className={styles.displayName}>
               <EmojiText text={profile.display_name || profile.username} emojis={profile.emojis} />
             </span>
-            <span className={styles.acct}>
-              @{profile.username}
-              {profile.domain &&
-                profile.domain !== window.location.hostname &&
-                `@${profile.domain}`}
-              {profile.is_suspended && (
-                <span className={styles.suspendedBadge}>
-                  {t("profile:profilePage.suspendedBadge")}
+            {isLocal ? (
+              <>
+                {/* ローカルユーザーは他サーバーが存在しないためサーバー名表示エリアを持たず、
+                    代わりにFedi形式・Bsky形式の両IDを2行で書き並べる。 */}
+                <span className={styles.acct}>
+                  <TwemojiEmoji emoji="🌐" className={styles.acctProtoIcon} />
+                  @{profile.username}@{profile.domain}
+                  {profile.is_suspended && (
+                    <span className={styles.suspendedBadge}>
+                      {t("profile:profilePage.suspendedBadge")}
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
+                <span className={styles.acct}>
+                  <img src={blueskyLogo} alt="" className={styles.acctProtoIcon} />
+                  @{profile.username}.{profile.domain}
+                </span>
+              </>
+            ) : (
+              <span className={styles.acct}>
+                {profile.actor_type === "bsky" && (
+                  <img src={blueskyLogo} alt="" className={styles.acctProtoIcon} />
+                )}
+                {profile.actor_type === "fedi" && (
+                  <TwemojiEmoji emoji="🌐" className={styles.acctProtoIcon} />
+                )}
+                @{profile.username}
+                {profile.domain &&
+                  profile.domain !== window.location.hostname &&
+                  `@${profile.domain}`}
+              </span>
+            )}
           </div>
+
+          {/* サーバー名表示エリア（NoteCardの#NoteCardリモートサーバー表示と共通、
+              #46の🌐Fediverse/🦋Blueskyバッジの代替）。ローカルユーザーには表示しない。 */}
+          {remoteInfo && (
+            <span
+              className={styles.remoteServerBadge}
+              style={{ background: remoteInfo.bg }}
+              title={remoteInfo.label}
+            >
+              {remoteInfo.useBlueskyLogo ? (
+                <img src={blueskyLogo} alt="" className={styles.remoteServerIcon} />
+              ) : (
+                remoteInfo.iconUrl && (
+                  <img src={remoteInfo.iconUrl} alt="" className={styles.remoteServerIcon} />
+                )
+              )}
+              <span className={styles.remoteServerLabel}>{remoteInfo.label}</span>
+            </span>
+          )}
 
           {profile.actor_id && (
             <div className={styles.followCounts}>
@@ -421,16 +470,6 @@ export default function ProfilePage() {
                 title={t("profile:profilePage.pairedBadgeTitle")}
               >
                 <TwemojiText text={`🀄 ${t("profile:profilePage.pairedBadge")}`} />
-              </span>
-            )}
-            {profile.at_did && (
-              <span className={styles.badge}>
-                <TwemojiText text="🦋 Bluesky" />
-              </span>
-            )}
-            {!isLocal && profile.actor_type === "fedi" && (
-              <span className={styles.badge}>
-                <TwemojiText text="🌐 Fediverse" />
               </span>
             )}
           </div>

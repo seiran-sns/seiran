@@ -66,9 +66,60 @@
 }
 
 .acct {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 0.86rem;
   color: var(--text-dim);
   word-break: break-all;
+}
+
+.acctProtoIcon {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+}
+
+/* サーバー名表示エリア（NoteCard.module.cssの.remoteServerBadge等と同じ見た目、
+   #NoteCardリモートサーバー表示）。IDのすぐ下に単独ブロックとして表示する。 */
+.remoteServerBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 2px 10px 2px 7px;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.remoteServerIcon {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+}
+
+.remoteServerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding-left: 1px;
+  padding-right: 1px;
+  /* NoteCard.module.cssの.remoteServerLabelと同じ理由（背景は任意のthemeColorのため
+     常に濃色固定＋白縁取りで暗い背景色でも文字が沈まないようにする）。 */
+  color: #3a3a3a;
+  text-shadow:
+    -1px -1px 1px #fff,
+    1px -1px 1px #fff,
+    -1px 1px 1px #fff,
+    1px 1px 1px #fff,
+    0 -1px 1px #fff,
+    0 1px 1px #fff,
+    -1px 0 1px #fff,
+    1px 0 1px #fff;
 }
 
 .suspendedBadge {

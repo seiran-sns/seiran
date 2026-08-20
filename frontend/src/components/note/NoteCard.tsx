@@ -10,6 +10,7 @@ import {
   profilePath,
   profileQuery,
   protocolBadge,
+  remoteServerBadgeInfo,
   visibilityBadge,
 } from "../../lib/format";
 import { useNoteCardActions } from "../../hooks/useNoteCardActions";
@@ -32,37 +33,6 @@ import ReactionChips from "./ReactionChips";
 import { useComposer } from "../../contexts/ComposerContext";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import styles from "./NoteCard.module.css";
-
-/** themeColor未宣言・Bsky共通の汎用デフォルト（薄いグレー）。バックエンドの
- * `remote_instance_info_resolve::DEFAULT_THEME_COLOR` と揃えている。 */
-const REMOTE_BADGE_FALLBACK_COLOR = "#e4e4e7";
-
-/** リモートサーバー表示（#NoteCardリモートサーバー表示）。Bskyは固定表示、Fediは
- * バックエンドが解決したインスタンス情報（`note.user.instance`）を使う。
- * ローカル・seiran間連合（remote_seiran、既存の小バッジのまま）では表示しない。 */
-function remoteServerInfo(
-  note: Note,
-): { icon: React.ReactNode | null; label: string; bg: string } | null {
-  if (note.user.actorType === "bsky") {
-    return {
-      icon: <img src={blueskyLogo} alt="" className={styles.remoteServerIcon} />,
-      label: "Bluesky",
-      bg: REMOTE_BADGE_FALLBACK_COLOR,
-    };
-  }
-  if (note.user.actorType === "fedi") {
-    // バックエンドはfaviconの実在確認まで済ませてからiconUrlを返すため、ここでは
-    // 有無だけで判定すればよい。取得できなかった場合はアイコン無し（🌐等への
-    // フォールバックはしない）。
-    const iconUrl = note.user.instance?.iconUrl;
-    return {
-      icon: iconUrl ? <img src={iconUrl} alt="" className={styles.remoteServerIcon} /> : null,
-      label: note.user.instance?.name || note.user.domain || "",
-      bg: note.user.instance?.themeColor || REMOTE_BADGE_FALLBACK_COLOR,
-    };
-  }
-  return null;
-}
 
 export function followToggleAction(
   status: "not_following" | "pending" | "accepted" | null,
@@ -310,7 +280,11 @@ function PostContent({
     openQuote(note);
   }
 
-  const remoteInfo = remoteServerInfo(note);
+  const remoteInfo = remoteServerBadgeInfo({
+    actorType: note.user.actorType,
+    domain: note.user.domain,
+    instance: note.user.instance,
+  });
 
   return (
     <>
@@ -418,7 +392,13 @@ function PostContent({
                   style={{ background: remoteInfo.bg }}
                   title={remoteInfo.label}
                 >
-                  {remoteInfo.icon}
+                  {remoteInfo.useBlueskyLogo ? (
+                    <img src={blueskyLogo} alt="" className={styles.remoteServerIcon} />
+                  ) : (
+                    remoteInfo.iconUrl && (
+                      <img src={remoteInfo.iconUrl} alt="" className={styles.remoteServerIcon} />
+                    )
+                  )}
                   <span className={styles.remoteServerLabel}>{remoteInfo.label}</span>
                 </span>
               )}

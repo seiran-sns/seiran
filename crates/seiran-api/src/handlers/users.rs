@@ -13,6 +13,7 @@ use seiran_common::repository::{extract_shortcode_candidates, Actor, ActorProfil
 use seiran_common::ApDeliveryKind;
 
 use crate::error::ApiError;
+use crate::handlers::notes::dto::{build_instance_info, RemoteInstanceInfo};
 use crate::handlers::notes::{
     attach_poll_votes, attach_remote_instance_info, embed_quotes, embed_renotes,
     fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
@@ -261,6 +262,11 @@ pub struct ProfileResponse {
     pub domain: String,
     pub display_name: Option<String>,
     pub actor_type: String,
+    /// プロフィールカードのサーバー名表示エリア用インスタンス情報（NoteCardの
+    /// `NoteUserInfo.instance` と同じ形、#NoteCardリモートサーバー表示）。fedi/bskyのみ、
+    /// local/remote_seiran（自インスタンスとの連合）は省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance: Option<RemoteInstanceInfo>,
     pub ap_uri: Option<String>,
     pub at_did: Option<String>,
     pub bio: Option<String>,
@@ -312,6 +318,34 @@ pub struct PublicListSummary {
     pub member_count: i64,
 }
 
+/// プロフィールカードのサーバー名表示エリア用インスタンス情報を解決する
+/// （`queries::attach_remote_instance_info` のプロフィール単体版）。fediはキャッシュ済み
+/// nodeinfoを引き、無ければ解決ジョブを積んでドメイン名を暫定表示する。bskyは固定値、
+/// local/remote_seiranはNone。
+async fn resolve_profile_instance_info(
+    state: &AppState,
+    actor_type: &str,
+    domain: &str,
+) -> Option<RemoteInstanceInfo> {
+    match actor_type {
+        "bsky" => build_instance_info("bsky", None, &std::collections::HashMap::new()),
+        "fedi" if !domain.is_empty() => {
+            let cached = state
+                .remote_instance_meta
+                .get_many(&[domain.to_string()])
+                .await
+                .unwrap_or_default();
+            if !cached.contains_key(domain) {
+                state
+                    .enqueue_remote_instance_info_resolve(domain.to_string())
+                    .await;
+            }
+            build_instance_info("fedi", Some(domain), &cached)
+        }
+        _ => None,
+    }
+}
+
 /// Bsky AppView からプロフィールを取得して ProfileResponse を返す。
 /// `actor` はハンドル（`alice.bsky.social`）または DID（`did:plc:...`）。
 /// AppView フェッチ後に DB でアクターが登録済みかを確認し、フォロー状態も含めて返す。
@@ -361,6 +395,7 @@ async fn fetch_bsky_profile_from_appview(
         domain: String::new(),
         display_name: bsky.display_name,
         actor_type: "bsky".to_string(),
+        instance: resolve_profile_instance_info(state, "bsky", "").await,
         ap_uri: None,
         at_did: Some(bsky.did),
         bio: bsky.description,
@@ -832,12 +867,15 @@ async fn build_profile_response(
         .await
         .unwrap_or((0, 0));
 
+    let instance = resolve_profile_instance_info(state, &actor.actor_type, &actor.domain).await;
+
     Json(ProfileResponse {
         actor_id: Some(actor_id.to_string()),
         username: actor.username,
         domain: actor.domain,
         display_name: actor.display_name,
         actor_type: actor.actor_type,
+        instance,
         ap_uri: actor.ap_uri,
         at_did: actor.at_did,
         bio,
@@ -954,6 +992,7 @@ async fn fetch_remote_profile(
         domain: domain.to_string(),
         display_name: Some(display_name),
         actor_type: "fedi".to_string(),
+        instance: resolve_profile_instance_info(state, "fedi", domain).await,
         ap_uri: Some(actor_uri),
         at_did: None,
         bio,

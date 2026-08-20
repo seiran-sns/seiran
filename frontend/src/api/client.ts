@@ -576,6 +576,14 @@ export interface UserProfile {
   domain: string;
   display_name?: string;
   actor_type: string;
+  /** サーバー名表示エリア用インスタンス情報（`Note.user.instance`と同じ形、
+   * #NoteCardリモートサーバー表示）。fedi/bskyのみ、local/remote_seiranでは省略。 */
+  instance?: {
+    name?: string;
+    softwareName?: string;
+    themeColor?: string;
+    iconUrl?: string;
+  };
   ap_uri?: string;
   at_did?: string;
   bio?: string;
