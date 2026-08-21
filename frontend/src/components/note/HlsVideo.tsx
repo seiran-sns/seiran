@@ -21,8 +21,14 @@ interface HlsVideoProps {
 
 /**
  * Bsky発の動画添付はBluesky公式の動画パイプラインでHLSにトランスコードされて
- * 配信される（`.m3u8`）。ネイティブHLS再生はSafariのみ対応のため、それ以外の
- * ブラウザでは hls.js でMediaSource Extensions経由で再生する。
+ * 配信される（`.m3u8`）。`video.canPlayType("application/vnd.apple.mpegurl")`は
+ * 仕様上「型として認識できるかもしれない」程度の判定で、実際にデコードできるかは
+ * 保証しない。一部のChrome環境で`"maybe"`を誤って返し、ネイティブHLS対応と誤判定
+ * されてhls.jsが一切初期化されず、`video.src`をセットするだけで実際には全く
+ * 再生できない（データはダウンロードされるが再生可能状態にならない）不具合が
+ * 実機で確認された。`Hls.isSupported()`（Media Source Extensionsの実サポートを
+ * 正確にチェックする）を優先し、それが使えない環境（iOS Safari等）でのみ
+ * ネイティブHLSにフォールバックする。
  */
 export default function HlsVideo({
   src,
@@ -40,16 +46,6 @@ export default function HlsVideo({
     const video = videoRef.current;
     if (!video || !isHls) return;
 
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = src;
-      // HLSはsrcをJS側で遅延セットするため、マウント時点のautoPlay属性だけでは
-      // 再生が始まらない（srcが無い状態でブラウザに解釈されるため）。GIF表示は
-      // 明示的にplay()を呼んで開始する。
-      if (isGif) {
-        video.play().catch(() => {});
-      }
-      return;
-    }
     if (Hls.isSupported()) {
       const hls = new Hls();
       hls.loadSource(src);
@@ -60,6 +56,16 @@ export default function HlsVideo({
         });
       }
       return () => hls.destroy();
+    }
+
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = src;
+      // HLSはsrcをJS側で遅延セットするため、マウント時点のautoPlay属性だけでは
+      // 再生が始まらない（srcが無い状態でブラウザに解釈されるため）。GIF表示は
+      // 明示的にplay()を呼んで開始する。
+      if (isGif) {
+        video.play().catch(() => {});
+      }
     }
   }, [src, isHls, isGif]);
 

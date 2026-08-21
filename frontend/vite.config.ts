@@ -13,13 +13,19 @@ export default defineConfig(({ mode }) => {
   // ポートを別値に上書きできるようにしている。未設定時は通常の開発時の既定値。
   const frontendPort = Number(env.FRONTEND_PORT ?? "5173");
   const backendTarget = `http://localhost:${env.BACKEND_PORT ?? "3000"}`;
+  // エージェント主導の開発では、HMR付きdevサーバー（StrictModeのeffect二重実行等、
+  // 開発ビルド固有の挙動が本物のバグの調査を遠回りさせることがある）より、
+  // 常時ビルド済み・本番相当のコードを配信するpreviewサーバーを標準にする
+  // （`npm run build:watch` + `npm run preview` の2プロセス常駐運用）。
+  const previewPort = Number(env.PREVIEW_PORT ?? "4174");
+  const allowedHosts = [env.LOCAL_DOMAIN ?? "localhost"];
 
   return {
     plugins: [react()],
     server: {
       host: "0.0.0.0",
       port: frontendPort,
-      allowedHosts: [env.LOCAL_DOMAIN ?? "localhost"],
+      allowedHosts,
       proxy: {
         // ローカル開発（cargo run 直接起動）時のみ有効。
         // Docker + nginx 構成では nginx がルーティングを担うため不使用。
@@ -37,6 +43,17 @@ export default defineConfig(({ mode }) => {
         // （実機確認）。それらを除外する正規表現（`^`始まりはVite側でregex扱い）にする。
         "/notes": backendTarget,
         "^/@(?!vite|react-refresh|fs/|id/)": backendTarget,
+      },
+    },
+    preview: {
+      host: "0.0.0.0",
+      port: previewPort,
+      allowedHosts,
+      proxy: {
+        "/api": { target: backendTarget, ws: true },
+        "/proxy": backendTarget,
+        "/miauth": backendTarget,
+        "/notes": backendTarget,
       },
     },
     test: {

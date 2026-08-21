@@ -190,6 +190,8 @@ React 18 + Vite + TypeScript（react-router-dom v7、declarative mode。`<Browse
 
 3ペインUIのレイアウト仕様は `docs/ui_spec.md` を参照。
 
+**ローカル開発サーバーの標準運用**: seiranの開発はagentic codingが主体のため、HMR付きdevサーバー（`npm run dev`、5173番、React `<StrictMode>`のeffect二重実行など開発ビルド固有の挙動を持つ）ではなく、`npm run build:watch`（`vite build --watch`、ファイル変更のたびに本番相当のプロダクションビルドへ差分ビルド）と`npm run preview`（`vite preview`、`dist/`を配信する静的サーバー、既定4174番・`PREVIEW_PORT`で上書き可）の2プロセスを常駐させ、常にビルド済み・本番相当のコードで動作確認するのを標準とする。バックエンドの`FRONTEND_ORIGIN`（OGP注入・`/notes`等の転送先）も既定でこのpreviewサーバーを指す。開発ビルド固有の挙動は本番ビルドと異なりうるため、不具合調査は常にビルド済みの状態で行う。人力でUIを細かく調整する際は`FRONTEND_ORIGIN`を一時的に`http://localhost:5173`へ書き換えて`npm run dev`を使ってよい。
+
 **開発用プロキシとVite内部パスの衝突**: `frontend/vite.config.ts` の開発サーバー（ローカル `cargo run` 直接起動時のみ有効）は `GET /@:handle`（プロフィールページ）をバックエンドへ転送するが、単純なプレフィックスマッチだとVite自身の内部モジュール（`/@vite/client`・`/@react-refresh`・`/@fs/...`・`/@id/...`）まで巻き込んでバックエンドへ転送してしまい、Viteクライアントが読み込めず白画面になる（実機確認）。そのためこれらを除外する正規表現（`^`始まりはVite側でregex扱い）を使う。
 
 `AuthContext`のグローバル401処理は、任意APIの401で即時ログアウトせず、通知を抑止した`GET /api/auth/me`を上記と同じリトライ方針で再確認する。認証失効が確定した場合だけログアウトし、複数APIの同時401では再確認を一本化する（#108）。
@@ -204,11 +206,12 @@ User-Agent で既知の bot だけを判定して出し分ける方式は、リ�
 index.html）、クローラーは JS を実行しないため `<meta>` だけを読んで終わる。
 
 - `crates/seiran-api/src/handlers/ogp.rs` — DB から投稿/アクターの情報を取得し、
-  `state.frontend_origin`（Vite dev server、Docker既定は`http://frontend:5173`、環境変数
-  `FRONTEND_ORIGIN`で上書き可）から index.html を取得して `<title>`・OGP/Twitter Card の
-  `<meta>` を注入する。`GET /notes/:id` は既存の AP Note エンドポイント（`get_note_ap`）が
-  `Accept` ヘッダーで分岐し、AP クライアント向け JSON-LD とこの OGP 注入 HTML を出し分ける。
-  `GET /@:handle` はプロフィール専用の新規エンドポイント。
+  `state.frontend_origin`（Docker既定は`http://frontend:5173`、ローカルネイティブ開発の
+  標準は`vite preview`＝ビルド済み本番相当、環境変数`FRONTEND_ORIGIN`で上書き可）から
+  index.html を取得して `<title>`・OGP/Twitter Card の `<meta>` を注入する。`GET /notes/:id`
+  は既存の AP Note エンドポイント（`get_note_ap`）が `Accept` ヘッダーで分岐し、AP クライアント
+  向け JSON-LD とこの OGP 注入 HTML を出し分ける。`GET /@:handle` はプロフィール専用の
+  新規エンドポイント。
 - 投稿・アクターが見つからない/DBエラー時は `<meta>` を注入せず index.html をそのまま返す
   （ここで 404 等を返すと SPA 自体が起動できず、フロント側の「見つかりません」表示や
   リモートアクターの都度フェッチが機能しなくなるため）。
