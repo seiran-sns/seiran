@@ -537,6 +537,11 @@ export default function ProfilePage() {
 
           {!isSelf && (
             <div className={styles.followArea}>
+              {profile.is_followed && (
+                <span className={styles.followedByBadge}>
+                  {t("profile:profilePage.followedByLabel")}
+                </span>
+              )}
               {followStatus === "accepted" && (
                 <>
                   <span className={styles.followingBadge}>

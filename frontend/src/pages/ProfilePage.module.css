@@ -303,6 +303,17 @@ a.idValue:hover {
   border-color: var(--warn);
 }
 
+.followedByBadge {
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 8px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--bg-elev);
+  margin-right: 8px;
+}
+
 /* 右ペイン: そのユーザーの投稿リスト */
 .rightPost {
   display: block;

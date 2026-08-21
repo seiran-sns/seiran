@@ -276,6 +276,8 @@ pub struct ProfileResponse {
     pub emojis: std::collections::HashMap<String, String>,
     pub avatar_url: Option<String>,
     pub follow_status: String, // "not_following" | "pending" | "accepted"
+    /// このアクターが閲覧者をフォロー中か（Misskey互換API `UserDetailed.isFollowed` に準拠）。
+    pub is_followed: bool,
     /// 閲覧者（ログイン済みの場合）がこのアクターをブロック中か。
     pub is_blocking: bool,
     /// このアクターが閲覧者をブロック中か（Bsky準拠ブロックは相互完全非表示のため、
@@ -410,6 +412,7 @@ async fn fetch_bsky_profile_from_appview(
         emojis: std::collections::HashMap::new(),
         avatar_url: bsky.avatar,
         follow_status: "not_following".to_string(),
+        is_followed: false,
         is_blocking: false,
         is_blocked_by: false,
         is_muted: false,
@@ -640,6 +643,17 @@ async fn build_profile_response(
             }
         },
         None => "not_following".to_string(),
+    };
+
+    // 相手が閲覧者をフォロー中か（Misskey互換API `isFollowed` に準拠）。follows テーブルの
+    // UNIQUE(follower_actor_id, target_actor_id) インデックスに乗るよう、find_status の
+    // 引数を follow_status とは逆順（相手→閲覧者）で呼ぶだけでフルスキャンを避けられる。
+    let is_followed = match my_actor_id {
+        Some(mid) => matches!(
+            state.follows.find_status(actor_id, mid).await,
+            Ok(Some(s)) if s == "accepted"
+        ),
+        None => false,
     };
 
     // ブロック・ミュート状態。タイムライン取得（timeline_by_actor/list_timeline_by_actor）は
@@ -903,6 +917,7 @@ async fn build_profile_response(
         emojis,
         avatar_url,
         follow_status,
+        is_followed,
         is_blocking,
         is_blocked_by,
         is_muted,
@@ -1022,6 +1037,7 @@ async fn fetch_remote_profile(
         emojis: json_map_to_string_map(&emoji_map),
         avatar_url,
         follow_status: "not_following".to_string(),
+        is_followed: false,
         is_blocking: false,
         is_blocked_by: false,
         is_muted: false,

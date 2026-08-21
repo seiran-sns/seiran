@@ -591,6 +591,8 @@ export interface UserProfile {
   emojis?: Record<string, string>;
   avatar_url?: string;
   follow_status: "not_following" | "pending" | "accepted";
+  /** このアクターが閲覧者をフォロー中か（Misskey互換API `UserDetailed.isFollowed` に準拠）。 */
+  is_followed: boolean;
   /** 閲覧者がこのアクターをブロック中か。 */
   is_blocking: boolean;
   /** このアクターが閲覧者をブロック中か（Bsky準拠ブロックは相互完全非表示）。 */
