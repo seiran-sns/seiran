@@ -150,7 +150,7 @@
 - [ ] 未来補正タイムスタンプ採番のテスト
 - [x] 検索ブレンドアルゴリズムの挙動テスト
 - [ ] 連合（Federation）統合テスト（モックAP/ATPサーバー、他seiranハンドシェイク・特権同期のテスト）
-- [ ] **`e2e/tests/home-feed-state.spec.ts`「選択タブとスクロール位置が保持される」がflaky** — フルスイート実行時にごく稀に失敗する（スクロール位置差分が閾値50pxを超える）。単独実行では再現しない。原因未特定
+- [x] **`e2e/tests/home-feed-state.spec.ts`「選択タブとスクロール位置が保持される」のflaky対策** — スクロール位置が200pxを超えた瞬間の値ではなく、値が安定してから比較するよう変更（ブラウザのscroll anchoring等で復元直後にわずかに動くケースを許容する）。
 - [ ] 高負荷・スケールアウト検証（`RedisJobQueue` + `RedisSessionStore` 環境での動作確認、プロダクションビルド・デプロイ手順の検証）
 - [x] Playwright E2E基盤の構築（`e2e/`、スタブPLCサーバー、E2E専用DB）と新規登録フローの疎通テスト
 - [x] PR CIでfrontendユニットテストとPlaywright E2E全件を実行し、E2E失敗時のtraceをartifactとして保存（#98）

@@ -41,7 +41,16 @@ test("ホーム画面から他画面へ遷移して戻ると、選択タブと�
   );
 
   // スクロール位置も復元されている（キャッシュ復元後にrAFで反映されるため多少の遅延を許容）。
-  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 10_000 }).toBeGreaterThan(200);
+  // 復元直後は画像読み込み等に伴うブラウザのscroll anchoringでscrollYがわずかに動くことが
+  // あるため、しきい値超えを検出した瞬間の値ではなく、値が安定してから比較する
+  // （フルスイート実行時のみ稀に失敗していたflaky対策）。
+  await expect(async () => {
+    const y1 = await page.evaluate(() => window.scrollY);
+    expect(y1).toBeGreaterThan(200);
+    await page.waitForTimeout(200);
+    const y2 = await page.evaluate(() => window.scrollY);
+    expect(y2).toBe(y1);
+  }).toPass({ timeout: 10_000 });
   const scrollYAfter = await page.evaluate(() => window.scrollY);
   expect(Math.abs(scrollYAfter - scrollYBefore)).toBeLessThan(50);
 });
