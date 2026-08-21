@@ -240,6 +240,10 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
   必ず実行する。
 - Rustの`Rust` jobは`cargo fmt --all -- --check`と警告をエラー扱いするClippyを実行する。
   frontendのlintもESLint警告を許容せず、エラー・警告のいずれでもCIを失敗させる。
+- `Rust`/`E2E`両jobの`dtolnay/rust-toolchain@stable`は`toolchain`をバージョン固定している
+  （実機確認: 固定していないとRustの新しいstableリリースのたびにClippyへ新規lintが追加され、
+  コード変更が無くてもCIが突然落ちることがある）。更新は意図したタイミングでのみ、両jobの
+  バージョン文字列を揃えて行う。
 
 `e2e/`ディレクトリにPlaywrightプロジェクトを置く。外部の実サービス（fedi/Bskyインスタンス、PLCディレクトリ、Bsky Relay等）とは通信せず、seiranが話す相手をすべてローカルのスタブ/専用インスタンスに置き換えた上で実行する。実行は `cd e2e && npm test`。
 
