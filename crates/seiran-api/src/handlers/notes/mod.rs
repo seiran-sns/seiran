@@ -372,6 +372,7 @@ async fn create_repost(
         quote_count: 0,
         repost_count: 0,
         link_cards: vec![],
+        content_html: None,
     };
     // 元ポストを埋め込んでから返す（#45: リポストカードの中身）。
     embed_renotes(
@@ -887,6 +888,7 @@ async fn create_regular_post(
         quote_count: 0,
         repost_count: 0,
         link_cards: vec![],
+        content_html: None,
     };
     embed_quotes(
         &state.db,

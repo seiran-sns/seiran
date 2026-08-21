@@ -457,6 +457,9 @@ export interface NoteAttachment {
 export interface Note {
   id: string;
   text: string;
+  /** サニタイズ済みHTML（seiran Web UIでのリッチ表示用、`<blockquote>`/`<ruby>`等の構造保持）。
+   * リモートFedi投稿のみ設定。無ければ`text`のプレーンテキスト描画（`RichText`）にフォールバック。 */
+  contentHtml?: string;
   createdAt: string;
   user: {
     id: string | number;
@@ -672,6 +675,7 @@ export interface SearchResult {
 interface RawNote {
   id: string | number;
   text?: string;
+  contentHtml?: string;
   createdAt?: string;
   created_at?: string;
   user?: {
@@ -731,6 +735,7 @@ function normalizeNote(r: RawNote): Note {
   return {
     id: String(r.id),
     text: r.text ?? "",
+    contentHtml: r.contentHtml,
     createdAt: r.createdAt ?? r.created_at ?? "",
     user: {
       id: String(r.user?.id ?? ""),

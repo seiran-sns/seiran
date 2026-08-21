@@ -157,6 +157,11 @@ pub struct NoteResponse {
     /// 複数件になりうる（`post_link_cards`、`fetch_link_cards_map`）。空なら省略。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub link_cards: Vec<LinkCardResponse>,
+    /// サニタイズ済みHTML（seiran Web UIでのリッチ表示用、`<blockquote>`/`<ruby>`等の構造保持、
+    /// #233）。リモートFedi投稿のみ設定。`None`ならフロントは`text`のプレーンテキスト
+    /// 描画（`RichText`）にフォールバックする。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_html: Option<String>,
 }
 
 /// `serde_json::Value`（JSONB由来のオブジェクト、`None`/非オブジェクトなら空）を
@@ -358,6 +363,7 @@ pub fn to_note_response(
         quote_count: p.quote_count,
         repost_count: p.repost_count,
         link_cards,
+        content_html: p.content_html,
     }
 }
 

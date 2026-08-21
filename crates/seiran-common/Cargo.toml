@@ -23,6 +23,7 @@ hex = "0.4.3"
 thiserror = "2.0.18"
 url = "2.5.8"
 urlencoding = "2.1.3"
+ammonia = "4"
 rsa = { version = "0.9.10", features = ["sha2", "pem"] }
 sha2 = "0.10"
 serde_ipld_dagcbor = "0.6"

@@ -339,6 +339,42 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
 - **表示側**: フロントの `RichText` は `#foo` パターンとMarkdownリンクのリンクテキストが `#タグ` 形状の場合の両方を検出し、いずれも自インスタンスの `/tags/foo` へのリンクとして描画する（AP由来のハッシュタグアンカーもリモートのタグページへは飛ばさず、同列に扱う）。
 - **ホーム画面への追加**: `pinned_hashtags` にユーザーごとのピン留めを保存し、ホーム画面のフィードタブとして表示する（`pinned_posts`/`lists` と同じ「ユーザーごとの永続ショートカット」の設計思想）。
 
+### seiran Web UIでのリッチ表示（`content_html`）
+
+`body`（上記の内部リンクマーカー方式のプレーンテキストもどき）とは別に、リモートFedi投稿は
+`sanitize_ap_content_html`（`crates/seiran-common/src/jobs/inbound_activity_process.rs`）が
+AP `Note.content`（HTML）から意味的構造を保持したままクレンジングした `posts.content_html` を
+持つ（`docs/database.md` の `posts` セクション参照）。`body`はMisskey互換API・Bsky配送・検索・
+ハッシュタグ抽出が前提とする唯一のフォーマットなので一切変更しない。`content_html`はseiran Web
+UIの表示専用の追加チャンネルで、フロントは値があれば`RichHtml`コンポーネントで描画し、無ければ
+`body`の`RichText`描画にフォールバックする。
+
+**許可タグ**: `br p div a b i s code pre blockquote ruby rt rp h1 h2 figure img ul ol li small center`。
+**許可属性**: `a`→`href`のみ、`img`→`src alt width height`のみ、全タグ共通で`style`（`text-align:
+left|right|center|justify` の1プロパティのみ許可、それ以外のCSSプロパティは属性ごと除去）。
+`class`はどのタグからも除去する。`href`/`src`は`http`/`https`スキームのみ許可（`ammonia`クレート）。
+`rel`/`target`は一切保持しない（信用できるのはこちらが強制する値だけであるべきなので、フロントの
+`RichHtml`が`<a>`に`target="_blank" rel="nofollow noopener noreferrer"`を固定で付与する）。
+
+**メンション/ハッシュタグの`<a>`**: `body`生成時と同じ解決ロジック（`resolve_ap_mention_text`等、
+上記「メンションは内部リンクマーカーで包まない」節参照）を`rewrite_mention_hashtag_hrefs`が再利用し、
+`<a>`の`href`だけをseiran内部パス（メンション→`/@user@host`、ハッシュタグ→
+`/tags/{urlencode(小文字化タグ)}`）へ書き換える。タグ構造・内側HTML・他の属性は一切変更しない。
+`RichHtml`はこの内部パス形状（`/@`/`/tags/`始まり）を検出したら`<Link>`によるアプリ内遷移、
+それ以外は通常の外部`<a>`として描画する。
+
+**MFM装飾関数（`blur`/`spin`/`jelly`/`shake`/`twitch`/`flip`/`x2`/`position`等）**: Misskey側の
+HTML変換時点でこれらは全て`<i>`（イタリック）に縮退しており、`content_html`経由では相互に区別
+できない（実機確認: `$[blur ...]`も`$[spin ...]`も同じ`<i>...</i>`になる）。`ruby`（`$[ruby 本文
+ルビ]` → `<ruby><rt>...</rt></ruby>`）だけは意味のある変換が得られるため許可タグに含めている。
+
+**引用フォールバック行の除去**: Misskey/Fedibirdが引用時に自動付加する`RE:`/`QT:`行は、`body`と
+同様`content_html`側でも`strip_quote_fallback_line_html`が末尾の`<br>`以降を対象に除去する。
+
+**既知の制約**: 元の生HTMLはDBに永続化しないため、既存投稿（この機能実装前に受信した行）の
+`content_html`は`NULL`のまま（バックフィル不可）。ローカル投稿・Bsky投稿も常に`NULL`
+（コンポーザーがMarkdown風記法を持たないため構造保持の余地がない）。
+
 ## 6.1 投稿検索とBluesky AppView
 
 `GET /api/notes/search`は、初回検索でローカルDBと`api.bsky.app`の`app.bsky.feed.searchPosts`の双方から`limit`件ずつ取得する。AppView結果はURI照合だけで捨てず、authorを`actors`、post viewを`posts`へupsertしたうえで、ローカル結果とsnowflake ID降順にマージ・重複排除して`limit`件を返す。AppView障害時はHTTPステータスをログへ記録し、ローカルDB結果だけへ縮退する。検索結果には保存したactorアバターも含める。

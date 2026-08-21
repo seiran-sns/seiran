@@ -25,6 +25,7 @@ import ReplyIndicator from "./ReplyIndicator";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
 import TwemojiEmoji from "../common/TwemojiEmoji";
+import RichHtml from "./RichHtml";
 import RichText from "./RichText";
 import NoteAttachments from "./NoteAttachments";
 import LinkCard from "./LinkCard";
@@ -105,7 +106,11 @@ function QuoteCard({ note }: { note: Note }) {
       {showContent && (
         <>
           <p className={styles.quoteBody}>
-            <RichText text={note.text} emojis={note.emojis} />
+            {note.contentHtml ? (
+              <RichHtml html={note.contentHtml} emojis={note.emojis} />
+            ) : (
+              <RichText text={note.text} emojis={note.emojis} />
+            )}
           </p>
           <NoteAttachments attachments={note.attachments} />
           {note.linkCards.map((card) => (
@@ -443,7 +448,11 @@ function PostContent({
       {showContent && (
         <>
           <p className={styles.body}>
-            <RichText text={note.text} emojis={note.emojis} />
+            {note.contentHtml ? (
+              <RichHtml html={note.contentHtml} emojis={note.emojis} />
+            ) : (
+              <RichText text={note.text} emojis={note.emojis} />
+            )}
           </p>
           <NoteAttachments attachments={note.attachments} />
           {note.linkCards.map((card) => (

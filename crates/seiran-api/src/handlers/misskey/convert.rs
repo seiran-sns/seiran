@@ -677,6 +677,7 @@ mod tests {
             reply_count: 0,
             quote_count: 0,
             repost_count: 0,
+            content_html: None,
         }
     }
 

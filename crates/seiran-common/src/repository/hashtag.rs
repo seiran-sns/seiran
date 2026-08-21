@@ -106,7 +106,7 @@ impl HashtagRepository for PgHashtagRepository {
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
                     p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
-                    p.reply_count, p.quote_count, p.repost_count
+                    p.reply_count, p.quote_count, p.repost_count, p.content_html
              FROM post_hashtags ph
              JOIN hashtags h ON h.id = ph.hashtag_id
              JOIN posts p ON p.id = ph.post_id

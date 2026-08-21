@@ -132,6 +132,7 @@ DM等の全外部キー参照を付け替える。複合UNIQUEは正規化後の
 - `deleted_at`: 物理削除ではなく論理削除（Tombstone）。ATP は MST 上の署名付き履歴を壊せないため。`atp_tombstone_cid` に削除証明の CID を保持する。
 - `metadata`（JSONB）: プロトコル別の変形レシピなど拡張情報の汎用格納庫。
 - `emoji_map`（JSONB）: 本文中のカスタム絵文字 `:shortcode:` → 画像URL のマップ。Fedi 受信時は AP の `tag` 配列から、ローカル投稿作成時は本文中のショートコード候補（`extract_shortcode_candidates`）を `custom_emojis` と一括照合して、それぞれ投稿作成時に解決・保存する（表示側で都度解決しない静的スナップショット）。
+- `content_html`（TEXT、nullable）: リモートFedi投稿のみ設定する、allowlistでサニタイズ済みのHTML。`body`（プレーンテキストもどき、検索・ハッシュタグ抽出・Misskey互換API・Bsky配送等が前提とする唯一のフォーマットなので無変更で維持）とは別に、seiran Web UIでの構造保持表示（`<blockquote>`/`<ruby>`/`<b>`/`<i>`/`<s>`/`<code>`/`<pre>`等）専用に持つ。フロントは`content_html`があればそれを描画し（`RichHtml`）、無ければ`body`のプレーンテキスト描画（`RichText`）にフォールバックする。ローカル投稿・Bsky投稿・移行前の既存行は常に`NULL`（元の生HTMLを保存していないためバックフィル不可）。許可タグ・属性・メンション/ハッシュタグ`<a>`の内部リンク書き換えルールは`docs/protocols.md`参照。
 - `mention_facets`（JSONB、デフォルト `[]`）: Bsky投稿のメンションfacet位置情報 `[{"byteStart":N,"byteEnd":M,"did":"did:plc:..."}]`。`emoji_map`とは対照的に、DIDのハンドル解決は保存時ではなく表示時（`NoteResponse`生成時）に都度行う（Bskyハンドルは可変なため。`docs/protocols.md` 6節参照）。ローカル投稿・Fedi受信は常に空配列。
 - `is_local`（非正規化 + トリガー）: ローカルタイムライン取得がリモート投稿優勢な環境で劣化する問題への対策。`BEFORE INSERT` トリガー `trg_posts_set_is_local` が `actors.actor_type` から自動導出するため、書き込み漏れの心配がない。
 - 重複排除・マージに使うカラム: `seiran_post_uuid`（他 seiran サーバー間マージのキー。**ATP側レコードには埋め込まれていないため、Bsky経由で先に取り込まれた投稿は AP 側の同一投稿と現状マージされない** — 既知の制約）、`parent_original_post_id`（ループバック・一般ブリッジ重複のハードリンク）。

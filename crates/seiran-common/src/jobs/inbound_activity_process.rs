@@ -923,6 +923,9 @@ async fn handle_create_note(
     // `[text](url)` に変換する。メンションは `@user@host` のプレーンテキストに正規化）。
     let mut tags = note["tag"].as_array().cloned().unwrap_or_default();
     let mut body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+    // seiran Web UI でのリッチ表示用（`<blockquote>`/`<ruby>`等の構造保持、#233）。
+    // `body`とは別に、意味的構造をクレンジングして保持したHTMLを`content_html`列に持つ。
+    let mut content_html_sanitized = sanitize_ap_content_html(&content_html, &tags, &remote.domain);
     // リレー実装によっては、配送する Create の埋め込み Note から Emoji tag を
     // 省略する一方、object.id の正規 Note には完全な tag を載せる。本文に未解決の
     // shortcode がある場合だけ正規 Note を取得し、欠落した tag を補完する。
@@ -937,6 +940,8 @@ async fn handle_create_note(
                         }
                     }
                     body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+                    content_html_sanitized =
+                        sanitize_ap_content_html(&content_html, &tags, &remote.domain);
                 }
             }
             Err(error) => {
@@ -966,6 +971,7 @@ async fn handle_create_note(
     };
     if let Some(uri) = quote_uri.as_deref() {
         body = strip_quote_fallback_line(&body, uri);
+        content_html_sanitized = strip_quote_fallback_line_html(&content_html_sanitized, uri);
     }
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
     let to_list = as_string_list(&note["to"]);
@@ -1093,6 +1099,7 @@ async fn handle_create_note(
             id: post_id,
             actor_id,
             body: &body,
+            content_html: Some(&content_html_sanitized),
             ap_object_id: note_id,
             seiran_uuid,
             parent_original_post_id,
@@ -1760,6 +1767,247 @@ pub fn ap_content_to_markdown_body(
         }
     }
     normalize_whitespace_preserving_newlines(&decode_html_entities(&out))
+}
+
+/// メンション/ハッシュタグの `<a>` の `href` だけを内部パス（`/@user@host`・`/tags/xxx`）へ
+/// 書き換え、それ以外のHTML構造（ネストしたタグ・属性・非アンカー要素・地の文）は一切変更せず
+/// バイト単位でそのまま残す。判定ロジックは `resolve_ap_mention_text` 系を`ap_content_to_markdown_body`
+/// と全く同じ精度で再利用する（`href`完全一致優先→class由来のフォールバック→内側テキストの
+/// 完全修飾化）。`sanitize_ap_content_html` の前処理として使う。
+///
+/// `ap_content_to_markdown_body`の`tokenize_anchors`とは別実装（あちらは非アンカータグを
+/// 空白/改行1個に潰してしまうため、構造保持が目的のここでは使えない）。
+fn rewrite_mention_hashtag_hrefs(html: &str, tags: &[serde_json::Value], sender_domain: &str) -> String {
+    let chars: Vec<char> = html.chars().collect();
+    let mut out = String::with_capacity(html.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '<' {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+
+        let mut j = i + 1;
+        while j < chars.len() && chars[j] != '>' {
+            j += 1;
+        }
+        let tag_inner: String = chars[i + 1..j].iter().collect();
+        let after_tag = if j < chars.len() { j + 1 } else { j };
+
+        let trimmed = tag_inner.trim_start();
+        let lower = trimmed.to_ascii_lowercase();
+        let is_anchor_open = (lower == "a" || lower.starts_with("a ") || lower.starts_with("a\t"))
+            && !trimmed.ends_with('/');
+
+        if !is_anchor_open {
+            out.extend(&chars[i..after_tag]);
+            i = after_tag;
+            continue;
+        }
+
+        let href = extract_href_attr(&tag_inner).unwrap_or_default();
+        let is_mention_class = extract_class_tokens(&tag_inner)
+            .iter()
+            .any(|c| c == "mention" || c == "u-url");
+        let is_hashtag = extract_class_tokens(&tag_inner)
+            .iter()
+            .any(|c| c == "hashtag")
+            || extract_attr(&tag_inner, "rel")
+                .map(|r| r.split_whitespace().any(|t| t.eq_ignore_ascii_case("tag")))
+                .unwrap_or(false);
+        i = after_tag;
+
+        let inner_start = i;
+        let mut plain_text = String::new();
+        let mut in_inner_tag = false;
+        let mut closed = false;
+        while i < chars.len() {
+            if chars[i] == '<' {
+                let ahead: String = chars[i + 1..]
+                    .iter()
+                    .take(2)
+                    .collect::<String>()
+                    .to_ascii_lowercase();
+                if ahead == "/a" {
+                    let mut k = i + 1;
+                    while k < chars.len() && chars[k] != '>' {
+                        k += 1;
+                    }
+                    let inner_end = i;
+                    let raw_inner: String = chars[inner_start..inner_end].iter().collect();
+                    i = if k < chars.len() { k + 1 } else { k };
+
+                    let decoded_text = decode_html_entities(plain_text.trim());
+                    let new_href = if is_hashtag {
+                        let tag_text = decoded_text.trim_start_matches('#');
+                        (!tag_text.is_empty())
+                            .then(|| format!("/tags/{}", urlencoding::encode(&tag_text.to_lowercase())))
+                    } else {
+                        resolve_ap_mention_text(
+                            &href,
+                            &decoded_text,
+                            is_mention_class,
+                            is_hashtag,
+                            tags,
+                            sender_domain,
+                        )
+                        .map(|name| format!("/@{}", name.trim_start_matches('@')))
+                    };
+
+                    out.push_str("<a href=\"");
+                    match &new_href {
+                        Some(internal) => out.push_str(&escape_html_attr(internal)),
+                        None => out.push_str(&href),
+                    }
+                    out.push_str("\">");
+                    out.push_str(&raw_inner);
+                    out.push_str("</a>");
+                    closed = true;
+                    break;
+                }
+                in_inner_tag = true;
+            }
+            if chars[i] == '>' {
+                in_inner_tag = false;
+                i += 1;
+                continue;
+            }
+            if !in_inner_tag {
+                plain_text.push(chars[i]);
+            }
+            i += 1;
+        }
+        if !closed {
+            // 閉じタグ `</a>` が無い不正なHTML。ここまでの内容をそのまま出力して打ち切る
+            // （`tokenize_anchors`と同じ「パニックしない」方針）。
+            out.push_str("<a href=\"");
+            out.push_str(&href);
+            out.push_str("\">");
+            out.extend(&chars[inner_start..i]);
+        }
+    }
+    out
+}
+
+/// HTML属性値として安全な形にエスケープする（`&`/`"`/`<`/`>`）。ここでは新規生成した内部パス
+/// （`/@user@host`・`/tags/xxx`）にのみ使う。元のHTMLから抽出した`href`はソース側で既に
+/// エスケープ済みの生文字列なので、そのまま書き戻す（二重エスケープを避けるため通さない）。
+fn escape_html_attr(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// `style` 属性値が `text-align: left|right|center|justify` という1プロパティのみで
+/// 構成されているか判定する。それ以外のCSSプロパティ・`!important`・複数プロパティの
+/// 混入は許可しない（CSSインジェクション面を最小化する）。
+fn is_allowed_style_value(value: &str) -> bool {
+    let v = value.trim().trim_end_matches(';').trim();
+    let Some(rest) = v.strip_prefix("text-align") else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    let Some(rest) = rest.strip_prefix(':') else {
+        return false;
+    };
+    matches!(rest.trim(), "left" | "right" | "center" | "justify")
+}
+
+/// Misskey/Fedibirdが引用時に自動付加する`RE:`/`QT:`フォールバック行を、HTML本文
+/// （`content_html`）の末尾から取り除く。`strip_quote_fallback_line`のHTML版
+/// （プレーンテキストの`\n`区切りの代わりに`<br>`をおおよその行区切りとして使う）。
+/// `<br>`が無い（フォールバック行しかない）場合は空文字列を返す。
+fn strip_quote_fallback_line_html(html: &str, quote_uri: &str) -> String {
+    fn strip_tags(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut in_tag = false;
+        for c in s.chars() {
+            match c {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                _ if !in_tag => out.push(c),
+                _ => {}
+            }
+        }
+        decode_html_entities(out.trim())
+    }
+
+    let trimmed = html.trim_end();
+    let last_br = {
+        let lower = trimmed.to_ascii_lowercase();
+        lower.rfind("<br")
+    };
+    let (before, after) = match last_br {
+        Some(idx) => {
+            // `<br>`/`<br/>`/`<br />` いずれの終端 `>` も飛ばす。
+            let close = trimmed[idx..].find('>').map(|o| idx + o + 1).unwrap_or(idx);
+            (&trimmed[..idx], &trimmed[close..])
+        }
+        None => ("", trimmed),
+    };
+
+    let last_line = strip_tags(after);
+    let is_fallback = (last_line.starts_with("RE:") || last_line.starts_with("QT:"))
+        && last_line.contains(quote_uri);
+
+    if is_fallback {
+        before.trim_end().to_string()
+    } else {
+        html.to_string()
+    }
+}
+
+/// AP Note の `content`（HTML）を、意味的な構造（引用・強調・ルビ・リンク等）を保持したまま
+/// サニタイズする。`ap_content_to_markdown_body`（プレーンテキスト化・`body`列用）とは別に、
+/// `content_html`列（seiran Web UIでのリッチ表示専用、リモートFedi投稿のみ）を作るために使う。
+///
+/// 1. `rewrite_mention_hashtag_hrefs` でメンション/ハッシュタグの`<a>`だけ内部リンクへ書き換え。
+/// 2. allowlist（タグ・属性）でサニタイズ（`ammonia`）。`class`はどのタグからも除去し、
+///    `style`は`text-align`のみ許可、`href`/`src`は`http`/`https`スキームのみ許可する。
+///    `rel`/`target`はここでは一切保持しない（信用できるのはこちらが強制する値だけであるべき
+///    なので、フロントのレンダラ側で固定値を付与する）。
+pub fn sanitize_ap_content_html(
+    content_html: &str,
+    tags: &[serde_json::Value],
+    sender_domain: &str,
+) -> String {
+    let rewritten = rewrite_mention_hashtag_hrefs(content_html, tags, sender_domain);
+
+    let allowed_tags: HashSet<&str> = [
+        "br", "p", "div", "a", "b", "i", "s", "code", "pre", "blockquote", "ruby", "rt", "rp",
+        "h1", "h2", "figure", "img", "ul", "ol", "li", "small", "center",
+    ]
+    .into_iter()
+    .collect();
+
+    let mut tag_attributes: std::collections::HashMap<&str, HashSet<&str>> =
+        std::collections::HashMap::new();
+    tag_attributes.insert("a", ["href"].into_iter().collect());
+    tag_attributes.insert("img", ["src", "alt", "width", "height"].into_iter().collect());
+
+    ammonia::Builder::new()
+        .tags(allowed_tags)
+        .tag_attributes(tag_attributes)
+        .generic_attributes(["style"].into_iter().collect())
+        .url_schemes(["http", "https"].into_iter().collect())
+        // `rel`/`target`はここでは一切保持しない（フロントのレンダラ側で固定値を強制する）。
+        // ammoniaのデフォルトは`<a>`に`rel="noopener noreferrer"`を自動付与するため明示的に無効化する。
+        .link_rel(None)
+        .attribute_filter(|_element, attribute, value| {
+            if attribute == "style" {
+                if is_allowed_style_value(value) {
+                    Some(value.trim().to_string().into())
+                } else {
+                    None
+                }
+            } else {
+                Some(value.into())
+            }
+        })
+        .clean(&rewritten)
+        .to_string()
 }
 
 // Accept(Follow) を受け取り follows.status を accepted に更新する
@@ -2581,6 +2829,7 @@ async fn fetch_and_save_note(
     // カスタム絵文字がショートコードのまま保存される不具合があった（#148）。
     let mut tags = note["tag"].as_array().cloned().unwrap_or_default();
     let mut body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+    let mut content_html_sanitized = sanitize_ap_content_html(&content_html, &tags, &remote.domain);
     if has_unresolved_emoji_shortcodes(&tags, &body) && has_same_origin(&note_id, &actor_uri) {
         match ap_client.fetch_object(&note_id).await {
             Ok(canonical_note) => {
@@ -2591,6 +2840,8 @@ async fn fetch_and_save_note(
                         }
                     }
                     body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+                    content_html_sanitized =
+                        sanitize_ap_content_html(&content_html, &tags, &remote.domain);
                 }
             }
             Err(error) => {
@@ -2618,6 +2869,7 @@ async fn fetch_and_save_note(
     };
     if let Some(uri) = quote_uri.as_deref() {
         body = strip_quote_fallback_line(&body, uri);
+        content_html_sanitized = strip_quote_fallback_line_html(&content_html_sanitized, uri);
     }
 
     // to/cc から可視性を判定。
@@ -2655,6 +2907,7 @@ async fn fetch_and_save_note(
             id: post_id,
             actor_id,
             body: &body,
+            content_html: Some(&content_html_sanitized),
             ap_object_id: &note_id,
             seiran_uuid: note["seiranUuid"].as_str(),
             parent_original_post_id,
@@ -2737,8 +2990,8 @@ mod tests {
     use super::{
         ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_ap_quote_uri,
         extract_emoji_tag_url, extract_link_card_urls, extract_mentioned_local_usernames,
-        is_known_platform_url, normalize_ap_poll, strip_html, strip_quote_fallback_line,
-        youtube_thumbnail_url,
+        is_known_platform_url, normalize_ap_poll, sanitize_ap_content_html, strip_html,
+        strip_quote_fallback_line, strip_quote_fallback_line_html, youtube_thumbnail_url,
     };
 
     #[test]
@@ -2963,6 +3216,102 @@ mod tests {
         let html = "<p>foo</p><p></p><p></p><p>bar</p>";
         let body = ap_content_to_markdown_body(html, &[], "example.social");
         assert_eq!(body, "foo\n\nbar");
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_preserves_blockquote() {
+        // 元不具合の直接的な回帰テスト（#233）: MFM引用構文由来の<blockquote>が
+        // ap_content_to_markdown_bodyでは失われるが、sanitize_ap_content_htmlでは保持される。
+        // `<blockquote>`はブロック要素なので、HTML5パーサーが`<p>`を自動的に閉じる
+        // （実際のMisskey content HTMLもこの入れ子で届く。空`<p></p>`は無害）。
+        let html = "<p><blockquote><span>quoted text</span></blockquote>after</p>";
+        let out = sanitize_ap_content_html(html, &[], "example.social");
+        assert_eq!(out, "<p></p><blockquote>quoted text</blockquote>after<p></p>");
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_preserves_ruby() {
+        let html = "<ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby>";
+        let out = sanitize_ap_content_html(html, &[], "example.social");
+        assert_eq!(out, html);
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_preserves_inline_formatting() {
+        let html = "<b>bold</b><i>italic</i><s>strike</s><code>code</code><pre>pre</pre>";
+        let out = sanitize_ap_content_html(html, &[], "example.social");
+        assert_eq!(out, html);
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_rewrites_mention_href() {
+        let html = r#"<a href="https://remote.example/@bob" class="u-url mention">@bob@remote.example</a>"#;
+        let tags = vec![serde_json::json!({
+            "type": "Mention",
+            "href": "https://remote.example/@bob",
+            "name": "@bob@remote.example"
+        })];
+        let out = sanitize_ap_content_html(html, &tags, "remote.example");
+        assert_eq!(out, r#"<a href="/@bob@remote.example">@bob@remote.example</a>"#);
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_rewrites_hashtag_href() {
+        let html = r#"<a href="https://remote.example/tags/foo" rel="tag">#foo</a>"#;
+        let out = sanitize_ap_content_html(html, &[], "remote.example");
+        assert_eq!(out, r#"<a href="/tags/foo">#foo</a>"#);
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_keeps_ordinary_link_href_but_drops_rel_target() {
+        let html = r#"<a href="https://example.com/" rel="nofollow noopener" target="_blank">link</a>"#;
+        let out = sanitize_ap_content_html(html, &[], "example.social");
+        assert_eq!(out, r#"<a href="https://example.com/">link</a>"#);
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_strips_disallowed_tag_and_script() {
+        let html = "<script>alert(1)</script><span>plain</span>";
+        let out = sanitize_ap_content_html(html, &[], "example.social");
+        assert_eq!(out, "plain");
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_rejects_javascript_scheme() {
+        let html = r#"<a href="javascript:alert(1)">click</a>"#;
+        let out = sanitize_ap_content_html(html, &[], "example.social");
+        assert!(!out.contains("javascript:"), "got: {out}");
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_strips_class_attribute() {
+        let html = r#"<p class="foo">text</p>"#;
+        let out = sanitize_ap_content_html(html, &[], "example.social");
+        assert_eq!(out, "<p>text</p>");
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_keeps_only_text_align_style() {
+        let html = r#"<div style="text-align: center">c</div><div style="color: red">r</div>"#;
+        let out = sanitize_ap_content_html(html, &[], "example.social");
+        assert_eq!(
+            out,
+            r#"<div style="text-align: center">c</div><div>r</div>"#
+        );
+    }
+
+    #[test]
+    fn strip_quote_fallback_line_html_removes_trailing_re_line() {
+        let html = "<p>本文<br>RE: <a href=\"https://q.example/1\">https://q.example/1</a></p>";
+        let out = strip_quote_fallback_line_html(html, "https://q.example/1");
+        assert_eq!(out, "<p>本文");
+    }
+
+    #[test]
+    fn strip_quote_fallback_line_html_keeps_unrelated_content() {
+        let html = "<p>本文<br>RE: not a match</p>";
+        let out = strip_quote_fallback_line_html(html, "https://q.example/1");
+        assert_eq!(out, html);
     }
 
     #[test]

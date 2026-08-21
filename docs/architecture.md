@@ -192,6 +192,13 @@ React 18 + Vite + TypeScript（react-router-dom v7、declarative mode。`<Browse
 
 **ローカル開発サーバーの標準運用**: seiranの開発はagentic codingが主体のため、HMR付きdevサーバー（`npm run dev`、5173番、React `<StrictMode>`のeffect二重実行など開発ビルド固有の挙動を持つ）ではなく、`npm run build:watch`（`vite build --watch`、ファイル変更のたびに本番相当のプロダクションビルドへ差分ビルド）と`npm run preview`（`vite preview`、`dist/`を配信する静的サーバー、既定4174番・`PREVIEW_PORT`で上書き可）の2プロセスを常駐させ、常にビルド済み・本番相当のコードで動作確認するのを標準とする。バックエンドの`FRONTEND_ORIGIN`（OGP注入・`/notes`等の転送先）も既定でこのpreviewサーバーを指す。開発ビルド固有の挙動は本番ビルドと異なりうるため、不具合調査は常にビルド済みの状態で行う。人力でUIを細かく調整する際は`FRONTEND_ORIGIN`を一時的に`http://localhost:5173`へ書き換えて`npm run dev`を使ってよい。
 
+**ローカル開発サーバーの健全性確認・復旧**: `ps`でプロセスが生きていることは、正しく機能していることを保証しない。特に`vite build --watch`は、ネイティブのファイル監視（inotify）が本開発環境では信頼できず、**ファイル変更検知だけが静かに止まってもプロセス自体は生き続け、エラーも出さない**ことがある（実機確認: 再起動しても再発した）。この状態だと`dist/`は古いビルドのまま固定され、コードを変更したのに`vite preview`（4174番）で確認しても反映されないという分かりにくい不具合になる。そのため`scripts/dev-up.sh`は`vite build --watch`起動時に常に`CHOKIDAR_USEPOLLING=true`（ポーリング方式でのファイル監視）を付与し、この問題を回避している。それでも疑わしいときは:
+
+- `ls -la frontend/dist/assets/*.js` の更新時刻が直近の編集より新しいか確認する（`vite build --watch`のログに`built in ...ms`が出ているだけでは、それが最新の編集を含むビルドとは限らない。ビルド後の成果物ファイル名にはコンテンツハッシュが含まれるため、編集前後でファイル名が変わっていなければ内容も変わっていない）。
+- 更新されていなければ、既存プロセスを`kill`してから`cd frontend && CHOKIDAR_USEPOLLING=true npm run build:watch`を再実行する（`vite preview`側は`dist/`を読み直すだけなので再起動不要）。
+- バックエンド（`cargo run -p seiran-server`、3000番）が応答しない場合も同様に、まず`ps`ではなく`curl localhost:3000/`等の実応答で確認し、落ちていれば`cargo run -p seiran-server`を再実行する。
+- 上記のような「プロセスは生きているのに動作がおかしい」系の不具合に遭遇したら、`df -h`でディスク容量も疑う。`target/`（Rustビルドキャッシュ）は肥大化しやすく、逼迫するとビルド・プロセスの挙動が原因不明な形で壊れる。空き容量が少なければ`cargo clean`で回収できる。
+
 **開発用プロキシとVite内部パスの衝突**: `frontend/vite.config.ts` の開発サーバー（ローカル `cargo run` 直接起動時のみ有効）は `GET /@:handle`（プロフィールページ）をバックエンドへ転送するが、単純なプレフィックスマッチだとVite自身の内部モジュール（`/@vite/client`・`/@react-refresh`・`/@fs/...`・`/@id/...`）まで巻き込んでバックエンドへ転送してしまい、Viteクライアントが読み込めず白画面になる（実機確認）。そのためこれらを除外する正規表現（`^`始まりはVite側でregex扱い）を使う。
 
 `AuthContext`のグローバル401処理は、任意APIの401で即時ログアウトせず、通知を抑止した`GET /api/auth/me`を上記と同じリトライ方針で再確認する。認証失効が確定した場合だけログアウトし、複数APIの同時401では再確認を一本化する（#108）。

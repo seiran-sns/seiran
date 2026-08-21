@@ -10,6 +10,14 @@
   text-decoration: underline;
 }
 
+.blockquote {
+  /* ブラウザ既定のインデント（margin: 1em 40px）だと引用に見えづらいため、
+   * 左ボーダーで引用であることを示す方式に変える（マイケル指摘）。 */
+  margin: 0.3em 0;
+  padding-left: 0.75em;
+  border-left: 3px solid var(--border-strong);
+}
+
 .emojiImg {
   /* 縦幅だけ行の高さに合わせ、横幅は画像本来の比率で自動決定する（正方形とは限らない
      カスタム絵文字を歪ませず、横長の絵文字はそのぶん横に長く表示されるようにする）。 */
