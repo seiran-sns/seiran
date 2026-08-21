@@ -85,14 +85,15 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
           )}
         </button>
 
+        {/* #180 */}
         <Link
-          to="/search"
-          className={styles.floatingSearchBtn}
+          to="/"
+          className={styles.floatingHomeBtn}
           onClick={() => onBeforeNavigate?.()}
-          aria-label={t("nav:leftNav.search")}
-          title={t("nav:leftNav.search")}
+          aria-label={t("nav:leftNav.home")}
+          title={t("nav:leftNav.home")}
         >
-          <TwemojiEmoji emoji="🔍" className={styles.floatingSearchIcon} />
+          <TwemojiEmoji emoji="🏠" className={styles.floatingHomeIcon} />
         </Link>
 
         {/* #75 */}
@@ -106,15 +107,14 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
           <TwemojiEmoji emoji="🔔" className={styles.floatingNotifIcon} />
         </Link>
 
-        {/* #180 */}
         <Link
-          to="/"
-          className={styles.floatingHomeBtn}
+          to="/search"
+          className={styles.floatingSearchBtn}
           onClick={() => onBeforeNavigate?.()}
-          aria-label={t("nav:leftNav.home")}
-          title={t("nav:leftNav.home")}
+          aria-label={t("nav:leftNav.search")}
+          title={t("nav:leftNav.search")}
         >
-          <TwemojiEmoji emoji="🏠" className={styles.floatingHomeIcon} />
+          <TwemojiEmoji emoji="🔍" className={styles.floatingSearchIcon} />
         </Link>
 
         <button
