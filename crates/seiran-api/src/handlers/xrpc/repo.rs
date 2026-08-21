@@ -771,23 +771,6 @@ pub(crate) async fn resolve_blob_media_id(
     .flatten()
 }
 
-/// `app.bsky.feed.post` の `deleteRecord` は、投稿削除に伴う配送・論理削除処理
-/// （`handlers::notes::delete_note` 相当）が未実装のため、引き続き拒否する。
-/// create/put/applyWrites は `post_from_record::create_post_from_record` を経由する。
-fn reject_post_collection(collection: &str) -> Option<axum::response::Response> {
-    if collection == "app.bsky.feed.post" {
-        Some(
-            ApiError::BadRequest(
-                "app.bsky.feed.post の削除はseiranネイティブの投稿APIを使用してください"
-                    .to_string(),
-            )
-            .into_response(),
-        )
-    } else {
-        None
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRecordRequest {
@@ -933,19 +916,25 @@ pub struct DeleteRecordRequest {
     pub rkey: String,
 }
 
-/// `com.atproto.repo.deleteRecord` — レコードを削除する。
+/// `com.atproto.repo.deleteRecord` — レコードを削除する。`app.bsky.feed.post`は
+/// `post_from_record::delete_post_by_rkey`（`handlers::notes::delete_note`と同じ処理）を経由する。
 pub async fn xrpc_delete_record(
     headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<DeleteRecordRequest>,
 ) -> impl IntoResponse {
-    if let Some(resp) = reject_post_collection(&req.collection) {
-        return resp;
-    }
     let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
         Ok(a) => a,
         Err(resp) => return resp,
     };
+
+    if req.collection == "app.bsky.feed.post" {
+        return match super::post_from_record::delete_post_by_rkey(&state, &actor, &req.rkey).await
+        {
+            Ok(()) => Json(serde_json::json!({})).into_response(),
+            Err(e) => e.into_response(),
+        };
+    }
 
     match state
         .atp_service
@@ -994,15 +983,6 @@ pub async fn xrpc_apply_writes(
     State(state): State<AppState>,
     Json(req): Json<ApplyWritesRequest>,
 ) -> impl IntoResponse {
-    // app.bsky.feed.post の削除のみ拒否する（作成・更新は create_post_from_record 経由で許可）。
-    for write in &req.writes {
-        if let ApplyWritesOp::Delete { collection, .. } = write {
-            if let Some(resp) = reject_post_collection(collection) {
-                return resp;
-            }
-        }
-    }
-
     let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -1118,6 +1098,18 @@ pub async fn xrpc_apply_writes(
                 }
             }
             ApplyWritesOp::Delete { collection, rkey } => {
+                if collection == "app.bsky.feed.post" {
+                    match super::post_from_record::delete_post_by_rkey(&state, &actor, &rkey).await
+                    {
+                        Ok(()) => {
+                            results.push(serde_json::json!({
+                                "$type": "com.atproto.repo.applyWrites#deleteResult",
+                            }));
+                            continue;
+                        }
+                        Err(e) => return e.into_response(),
+                    }
+                }
                 match state
                     .atp_service
                     .delete_atp_record_generic(actor.id, &collection, &rkey, now)

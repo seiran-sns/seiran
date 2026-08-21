@@ -428,3 +428,63 @@ pub async fn create_post_from_record(
         cid: seiran_common::atp::cid_to_string(&record_cid),
     })
 }
+
+/// `com.atproto.repo.deleteRecord`/`applyWrites#delete` で受けた `app.bsky.feed.post` の
+/// 削除。`handlers::notes::delete_note`（`DELETE /api/notes/:id`）と同じ処理（論理削除・
+/// 実際に配送済みだったFedi宛へのDelete(Note)配送）を行った上で、ATPリポジトリからも
+/// レコードを削除する（`delete_atp_record_generic`、他コレクションの`deleteRecord`と同じ経路）。
+pub async fn delete_post_by_rkey(
+    state: &AppState,
+    actor: &Actor,
+    rkey: &str,
+) -> Result<(), ApiError> {
+    let at_did = actor
+        .at_did
+        .clone()
+        .ok_or_else(|| ApiError::Internal("at_did が未設定です".to_string()))?;
+    let at_uri = format!("at://{}/app.bsky.feed.post/{}", at_did, rkey);
+
+    let post_id = state
+        .posts
+        .find_id_by_at_uri(&at_uri)
+        .await
+        .map_err(|e| ApiError::Internal(format!("投稿検索失敗: {}", e)))?
+        .ok_or(ApiError::NotFound("RECORD_NOT_FOUND"))?;
+
+    let info = state
+        .posts
+        .find_delete_info(post_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("投稿取得失敗: {}", e)))?
+        .ok_or(ApiError::NotFound("RECORD_NOT_FOUND"))?;
+    if info.actor_id != actor.id {
+        return Err(ApiError::Forbidden("NOT_YOUR_POST"));
+    }
+
+    state
+        .posts
+        .soft_delete_by_id(post_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("UPDATE 失敗: {}", e)))?;
+
+    tracing::info!(
+        "[deleteRecord] actor_id={} が post_id={} (rkey={}) を削除",
+        actor.id,
+        post_id,
+        rkey
+    );
+
+    if info.deliver_fedi && info.visibility != "direct" {
+        state
+            .enqueue_ap_delivery(actor.id, ApDeliveryKind::DeleteNote { post_id })
+            .await;
+    }
+
+    state
+        .atp_service
+        .delete_atp_record_generic(actor.id, "app.bsky.feed.post", rkey, Utc::now())
+        .await
+        .map_err(|e| ApiError::Internal(format!("[deleteRecord] ATP 削除失敗: {}", e)))?;
+
+    Ok(())
+}
