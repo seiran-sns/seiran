@@ -46,7 +46,7 @@ jobs:
           # lintが新しいstableで有効化され既存コード6箇所が引っかかった）。
           # 明示的にバージョンを固定し、更新は意図した時にだけ行う。
           toolchain: "1.96.1"
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           # e2eジョブと依存クレートのビルド成果物を共有する（e2e側はsave-if:falseで
