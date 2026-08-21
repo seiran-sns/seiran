@@ -23,8 +23,9 @@ use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use seiran_common::atp::{
-    fetch_bsky_profile, parse_bsky_embed_attachments, parse_bsky_embed_link_card,
-    parse_bsky_embed_quote_uri, ParsedAttachment, ParsedLinkCard,
+    apply_bsky_facets, fetch_bsky_profile, parse_bsky_embed_attachments,
+    parse_bsky_embed_link_card, parse_bsky_embed_quote_uri, ParsedAttachment, ParsedFacet,
+    ParsedLinkCard,
 };
 use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
@@ -293,36 +294,6 @@ async fn connect_and_process(
     Ok(())
 }
 
-/// `app.bsky.richtext.facet` の index（UTF-8 バイトオフセット）。
-#[derive(Deserialize)]
-struct JetstreamFacetIndex {
-    #[serde(rename = "byteStart")]
-    byte_start: usize,
-    #[serde(rename = "byteEnd")]
-    byte_end: usize,
-}
-
-/// facet の feature 種別（`$type` で判別）。未知の種別はパース全体を失敗させないよう
-/// `Unknown` に落とす。
-#[derive(Deserialize)]
-#[serde(tag = "$type")]
-enum JetstreamFacetFeature {
-    #[serde(rename = "app.bsky.richtext.facet#link")]
-    Link { uri: String },
-    #[serde(rename = "app.bsky.richtext.facet#mention")]
-    Mention { did: String },
-    #[serde(rename = "app.bsky.richtext.facet#tag")]
-    Tag,
-    #[serde(other)]
-    Unknown,
-}
-
-#[derive(Deserialize)]
-struct JetstreamFacet {
-    index: JetstreamFacetIndex,
-    features: Vec<JetstreamFacetFeature>,
-}
-
 /// Jetstream の commit イベント（`kind: "commit"`）。`identity`/`account` は無視する。
 #[derive(Deserialize)]
 struct JetstreamEvent {
@@ -342,96 +313,6 @@ struct JetstreamCommit {
     /// create/update のみ存在。
     #[serde(default)]
     cid: Option<String>,
-}
-
-/// mention facet 1件分の位置情報（本文は書き換えず、別途 `posts.mention_facets` へ
-/// 保存する。ハンドルは可変なので表示時（`NoteResponse` 生成時）に都度解決する）。
-struct MentionFacetSpan {
-    byte_start: usize,
-    byte_end: usize,
-    did: String,
-}
-
-/// `#link` facet が示すテキスト範囲を、内部リンクマーカー `[表示テキスト](URL)`
-/// （Markdownリンク記法）に書き換える。URL は不変なのでここで確定してよい。
-///
-/// `#mention` facet は本文を書き換えない（メンション先のハンドルは DID 解決状況や
-/// ハンドル変更で変わりうるため、表示時に都度解決する方針。フロントの MFM 描画コンポーネント
-/// が `@user@host` パターンを自動でプロフィールリンクに変換するので、Markdownリンクで
-/// 包む必要も無い）。代わりに `(byteStart, byteEnd, did)` を戻り値として返す。
-/// `#tag` facet も無変換（`#tag` は既に地の文にありフロント側の自動検出に委ねる）。
-///
-/// `byteStart`/`byteEnd` は他 PDS から届く未検証の値のため、範囲外・非文字境界・他 facet
-/// との重なりはそのfacetだけスキップする（投稿保存自体を失敗させない）。DB アクセスを含まない
-/// 純粋関数にしてあるため単体テストしやすい。
-fn apply_link_facets(text: &str, facets: Vec<JetstreamFacet>) -> (String, Vec<MentionFacetSpan>) {
-    if facets.is_empty() {
-        return (text.to_string(), Vec::new());
-    }
-
-    // mention facet はテキストを変更しないため、位置情報だけ先に抜き出しておく
-    // （範囲外・非文字境界のものは保存対象から除外）。
-    let mut mention_spans = Vec::new();
-    for facet in &facets {
-        let start = facet.index.byte_start;
-        let end = facet.index.byte_end;
-        if start >= end
-            || end > text.len()
-            || !text.is_char_boundary(start)
-            || !text.is_char_boundary(end)
-        {
-            continue;
-        }
-        for feature in &facet.features {
-            if let JetstreamFacetFeature::Mention { did } = feature {
-                mention_spans.push(MentionFacetSpan {
-                    byte_start: start,
-                    byte_end: end,
-                    did: did.clone(),
-                });
-            }
-        }
-    }
-
-    // 以降は #link facet のみを対象に、後ろから順に本文へ焼き込む。
-    let mut link_facets: Vec<JetstreamFacet> = facets
-        .into_iter()
-        .filter(|f| {
-            f.features
-                .iter()
-                .any(|feat| matches!(feat, JetstreamFacetFeature::Link { .. }))
-        })
-        .collect();
-    link_facets.sort_by_key(|f| std::cmp::Reverse(f.index.byte_start));
-
-    let mut result = text.to_string();
-    let mut upper_bound = result.len();
-
-    for facet in link_facets {
-        let start = facet.index.byte_start;
-        let end = facet.index.byte_end;
-        if start >= end || end > result.len() || end > upper_bound {
-            continue;
-        }
-        if !result.is_char_boundary(start) || !result.is_char_boundary(end) {
-            continue;
-        }
-
-        let Some(JetstreamFacetFeature::Link { uri }) = facet
-            .features
-            .into_iter()
-            .find(|f| matches!(f, JetstreamFacetFeature::Link { .. }))
-        else {
-            continue;
-        };
-
-        let original = result[start..end].to_string();
-        let replacement = format!("[{}]({})", original, uri);
-        result.replace_range(start..end, &replacement);
-        upper_bound = start;
-    }
-
-    (result, mention_spans)
 }
 
 /// Bsky投稿本文中のカスタム絵文字（`:shortcode:`）を、このサーバーの `custom_emojis` と
@@ -461,40 +342,6 @@ async fn resolve_local_emoji_map(pool: &PgPool, text: &str) -> JsonValue {
             .map(|(code, url)| (format!(":{}:", code), JsonValue::String(url)))
             .collect(),
     )
-}
-
-/// facet を本文へ適用する（`apply_link_facets` の DB/Job キュー連携込み版）。
-/// 戻り値は `(link 適用済み本文, mention_facets の JSON 配列)`。
-/// 未知 DID（ローカル `actors` に無い）は `Job::ResolveBskyMention` をキューに積んで
-/// 非同期解決を促す（ベストエフォート。enqueue に失敗しても投稿保存は継続し、
-/// 表示時の都度解決に委ねる）。
-async fn apply_bsky_facets(text: &str, facets: Vec<JetstreamFacet>) -> (String, JsonValue) {
-    if facets.is_empty() {
-        return (text.to_string(), JsonValue::Array(vec![]));
-    }
-
-    let (body, mention_spans) = apply_link_facets(text, facets);
-
-    // メンション先DIDは actors への先行 upsert をしない（#216）。Bsky流入アクターは
-    // フォロー・リスト・ローカル投稿への関与等がある場合のみ保存する方針のため、
-    // 単に「フォロー中の相手の投稿からメンションされた」だけでは保存条件を満たさない。
-    // 表示時（`NoteResponse` 生成時）に既知（他経路で保存済み）なDIDのみ解決され、
-    // 未知のDIDはメンション元テキストのまま表示される。
-
-    let mention_facets_json = JsonValue::Array(
-        mention_spans
-            .iter()
-            .map(|s| {
-                serde_json::json!({
-                    "byteStart": s.byte_start,
-                    "byteEnd": s.byte_end,
-                    "did": s.did,
-                })
-            })
-            .collect(),
-    );
-
-    (body, mention_facets_json)
 }
 
 async fn process_message(
@@ -535,7 +382,7 @@ async fn process_message(
             };
             // リンク・メンションの facet（byteStart/byteEnd で示される範囲）。
             // 未指定・パース失敗時は空のまま（投稿保存自体はブロックしない）。
-            let parsed_facets: Vec<JetstreamFacet> = record
+            let parsed_facets: Vec<ParsedFacet> = record
                 .get("facets")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default();
@@ -659,8 +506,7 @@ async fn process_message(
                     },
                     None => None,
                 };
-                let (body_text, mention_facets) =
-                    apply_bsky_facets(&body_text, parsed_facets).await;
+                let (body_text, mention_facets) = apply_bsky_facets(&body_text, parsed_facets);
                 let emoji_map = resolve_local_emoji_map(&pool2, &body_text).await;
                 save_bsky_post(
                     &pool2,
@@ -1453,136 +1299,4 @@ mod facet_tests {
         let url = build_jetstream_url(None, &[]);
         assert!(url.contains("wantedCollections=app.bsky.feed.repost"));
     }
-
-    fn link_facet(byte_start: usize, byte_end: usize, uri: &str) -> JetstreamFacet {
-        JetstreamFacet {
-            index: JetstreamFacetIndex {
-                byte_start,
-                byte_end,
-            },
-            features: vec![JetstreamFacetFeature::Link {
-                uri: uri.to_string(),
-            }],
-        }
-    }
-
-    fn mention_facet(byte_start: usize, byte_end: usize, did: &str) -> JetstreamFacet {
-        JetstreamFacet {
-            index: JetstreamFacetIndex {
-                byte_start,
-                byte_end,
-            },
-            features: vec![JetstreamFacetFeature::Mention {
-                did: did.to_string(),
-            }],
-        }
-    }
-
-    #[test]
-    fn single_link_facet_becomes_markdown_link() {
-        let text = "見て example.com だよ";
-        let byte_start = text.find("example.com").unwrap();
-        let byte_end = byte_start + "example.com".len();
-        let facets = vec![link_facet(byte_start, byte_end, "https://example.com")];
-        let (result, mentions) = apply_link_facets(text, facets);
-        assert_eq!(result, "見て [example.com](https://example.com) だよ");
-        assert!(mentions.is_empty());
-    }
-
-    #[test]
-    fn multiple_facets_applied_back_to_front_preserve_offsets() {
-        let text = "foo.com and bar.com";
-        let foo_start = text.find("foo.com").unwrap();
-        let foo_end = foo_start + "foo.com".len();
-        let bar_start = text.find("bar.com").unwrap();
-        let bar_end = bar_start + "bar.com".len();
-        // わざと昇順で渡し、関数側のソートが正しく後ろから処理することを確認する。
-        let facets = vec![
-            link_facet(foo_start, foo_end, "https://foo.com"),
-            link_facet(bar_start, bar_end, "https://bar.com"),
-        ];
-        let (result, _) = apply_link_facets(text, facets);
-        assert_eq!(
-            result,
-            "[foo.com](https://foo.com) and [bar.com](https://bar.com)"
-        );
-    }
-
-    #[test]
-    fn mention_facet_does_not_rewrite_body_but_is_extracted() {
-        // メンションは本文を書き換えない（ハンドルは可変なので表示時に都度解決する）。
-        // 呼び出し側が byteStart/byteEnd/did を mention_facets として保存できるよう返す。
-        let text = "hi @alice.bsky.social and @unknown.bsky.social";
-        let alice_start = text.find("@alice.bsky.social").unwrap();
-        let alice_end = alice_start + "@alice.bsky.social".len();
-        let unknown_start = text.find("@unknown.bsky.social").unwrap();
-        let unknown_end = unknown_start + "@unknown.bsky.social".len();
-        let facets = vec![
-            mention_facet(alice_start, alice_end, "did:plc:alice"),
-            mention_facet(unknown_start, unknown_end, "did:plc:unknown"),
-        ];
-        let (result, mentions) = apply_link_facets(text, facets);
-        assert_eq!(result, text, "mention facet は本文を変更しない");
-        assert_eq!(mentions.len(), 2);
-        assert_eq!(mentions[0].did, "did:plc:alice");
-        assert_eq!(mentions[0].byte_start, alice_start);
-        assert_eq!(mentions[0].byte_end, alice_end);
-        assert_eq!(mentions[1].did, "did:plc:unknown");
-    }
-
-    #[test]
-    fn tag_only_facet_is_left_unchanged() {
-        let text = "#rust最高";
-        let byte_end = "#rust".len();
-        let facets = vec![JetstreamFacet {
-            index: JetstreamFacetIndex {
-                byte_start: 0,
-                byte_end,
-            },
-            features: vec![JetstreamFacetFeature::Tag],
-        }];
-        let (result, mentions) = apply_link_facets(text, facets);
-        assert_eq!(result, text);
-        assert!(mentions.is_empty());
-    }
-
-    #[test]
-    fn out_of_range_facet_is_skipped_without_panicking() {
-        let text = "short";
-        let facets = vec![link_facet(0, 1000, "https://example.com")];
-        let (result, _) = apply_link_facets(text, facets);
-        assert_eq!(result, text);
-    }
-
-    #[test]
-    fn non_char_boundary_facet_is_skipped_without_panicking() {
-        // "あ" は UTF-8 で3バイト。境界外の1バイト目を指定してもパニックしないこと。
-        let text = "あいう";
-        let facets = vec![link_facet(1, 2, "https://example.com")];
-        let (result, _) = apply_link_facets(text, facets);
-        assert_eq!(result, text);
-    }
-
-    #[test]
-    fn overlapping_facets_second_one_is_skipped() {
-        let text = "abcdef";
-        // [0,4) と [2,6) が重なる。降順ソートで先に [2,6) が処理され、
-        // 後続の [0,4) は upper_bound (=2) を超えるためスキップされる。
-        let facets = vec![
-            link_facet(0, 4, "https://a.example.com"),
-            link_facet(2, 6, "https://b.example.com"),
-        ];
-        let (result, _) = apply_link_facets(text, facets);
-        assert_eq!(result, "ab[cdef](https://b.example.com)");
-    }
-
-    #[test]
-    fn out_of_range_mention_facet_is_dropped_without_panicking() {
-        let text = "short";
-        let facets = vec![mention_facet(0, 1000, "did:plc:x")];
-        let (result, mentions) = apply_link_facets(text, facets);
-        assert_eq!(result, text);
-        assert!(mentions.is_empty());
-    }
-
 }

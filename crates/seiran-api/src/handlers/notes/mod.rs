@@ -177,7 +177,7 @@ use validation::{
 };
 
 /// 検証済みの添付ファイル ID 群を投稿に紐付ける。
-async fn attach_media_files(
+pub(crate) async fn attach_media_files(
     state: &AppState,
     post_id: i64,
     attachment_ids: &[i64],

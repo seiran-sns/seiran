@@ -446,7 +446,7 @@ pub enum ApQuote {
     AppendUrl(String),
 }
 
-pub(super) fn ap_delivery_quote_fields(
+pub(crate) fn ap_delivery_quote_fields(
     text: &str,
     quote: Option<ApQuote>,
 ) -> (Option<String>, Option<String>) {
@@ -457,7 +457,7 @@ pub(super) fn ap_delivery_quote_fields(
     }
 }
 
-pub(super) fn ap_quote_from_meta(meta: &PostDeliveryMeta) -> Option<ApQuote> {
+pub(crate) fn ap_quote_from_meta(meta: &PostDeliveryMeta) -> Option<ApQuote> {
     if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
         meta.at_uri
             .as_deref()

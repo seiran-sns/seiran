@@ -1,6 +1,7 @@
 pub mod client;
 pub mod did_resolve;
 pub mod embed;
+pub mod facets;
 pub mod handle_resolve;
 pub mod plc;
 pub mod repo;
@@ -15,6 +16,10 @@ pub use client::{
 pub use embed::{
     bsky_external_thumb_url, bsky_gif_video_attachment, parse_bsky_embed_attachments,
     parse_bsky_embed_link_card, parse_bsky_embed_quote_uri, ParsedAttachment, ParsedLinkCard,
+};
+pub use facets::{
+    apply_bsky_facets, apply_link_facets, MentionFacetSpan, ParsedFacet, ParsedFacetFeature,
+    ParsedFacetIndex,
 };
 pub use did_resolve::{
     fetch_raw_did_document, resolve_atproto_verification_key, resolve_service_endpoint,

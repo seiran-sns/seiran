@@ -498,6 +498,37 @@ impl AtpCommitService {
         Ok((result, cid))
     }
 
+    /// `com.atproto.repo.createRecord`/`putRecord` で `app.bsky.feed.post` を受けた場合の
+    /// 専用コミット。クライアントが既に完成させた `record` JSON（text/facets/embed/reply等）を
+    /// そのままDAG-CBORエンコードしてコミットする点が `commit_post` と異なる（`commit_post` は
+    /// seiranネイティブ投稿API向けに、DB上の添付情報から embed を再構築する）。`posts` テーブルの
+    /// `at_uri`/`at_cid`/`at_rkey` 更新は `commit_record_inner` に `post_id` を渡すことで行う。
+    pub async fn commit_post_record(
+        &self,
+        actor_id: i64,
+        post_id: i64,
+        rkey: String,
+        value: &serde_json::Value,
+        action: &'static str,
+        now: DateTime<Utc>,
+    ) -> Result<(CommitResult, Cid), AtpCommitError> {
+        let (cbor, cid) = encode_generic_record(value)?;
+        let blob_cids = collect_blob_cids(value);
+        let record = CommitRecord {
+            collection: "app.bsky.feed.post".to_string(),
+            rkey,
+            cbor,
+            cid,
+            action,
+            blob_cids,
+        };
+        let result = self
+            .commit_record_inner(actor_id, record, now, Some(post_id))
+            .await?;
+        self.spawn_request_crawl();
+        Ok((result, cid))
+    }
+
     /// ポスト作成コミット（posts テーブル更新を追加）
     ///
     /// `reply` が Some の場合は ATP `app.bsky.feed.post` の `reply` フィールドを設定する（リプライ投稿）。

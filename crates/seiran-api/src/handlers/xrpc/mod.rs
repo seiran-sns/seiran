@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod post_from_record;
 pub mod proxy;
 pub mod repo;
 pub mod server;

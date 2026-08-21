@@ -49,13 +49,16 @@ fn peek_unverified_iss(jwt: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// `com.atproto.repo.uploadBlob` 受け口。
+/// `com.atproto.repo.uploadBlob` 受け口。2種類の呼び出し元を区別して扱う。
 ///
-/// Bsky公式動画パイプライン（`app.bsky.video.uploadVideo`）がトランスコード完了後に
-/// 呼び戻してくるコールバック。`Authorization` のサービス間認証JWTを検証した上で、
-/// 受信バイト列のSHA-256からCIDを計算して返す。**受信バイト列自体はS3に保存せず
-/// 読み捨てる**（ローカル/Fedi配信は常にアップロード時のオリジナルファイルを使うため
-/// このコピーは不要。詳細は docs/03_multi_protocol_engine_specification.md §12）。
+/// 1. **ATP標準クライアント本人**（bsky.app等が画像/動画添付のために呼ぶ通常経路）:
+///    `createSession` で発行した通常のセッションJWT（HS256、`local_auth.verify_atp_access_token`
+///    で検証）。バイト列を無条件でS3へ保存する。
+/// 2. **Bsky公式動画パイプラインのコールバック**（`app.bsky.video.uploadVideo` がトランスコード
+///    完了後に呼び戻す）: サービス間認証JWT（ES256、`iss`/`aud`/`lxm`）。1と区別できるよう、
+///    まず1の検証を試み、失敗した場合のみこちらにフォールバックする。
+///
+/// 受信バイト列のSHA-256からCIDを計算して返す（`getBlob`と対になる`sha256`→CID変換）。
 pub async fn xrpc_upload_blob(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -68,47 +71,75 @@ pub async fn xrpc_upload_blob(
         return ApiError::Unauthorized("Bearer トークンが必要です").into_response();
     };
 
-    let Some(iss) = peek_unverified_iss(jwt) else {
-        return ApiError::Unauthorized("JWTのissクレームを読み取れません").into_response();
-    };
+    // 3要素目は「進行中の動画パイプラインジョブが必須か」（`store_uploaded_blob`参照）。
+    // 通常セッションJWT経由はユーザー本人であることを検証済みのため不要、サービス間認証JWT
+    // 経由（DIDの署名鍵さえあれば誰でも自己署名JWTを作れる）は必須にして悪用を防ぐ。
+    let (actor_id, did_for_log, require_pending_video_job): (i64, String, bool) = if let Ok(
+        verified,
+    ) =
+        state
+            .local_auth
+            .verify_atp_access_token(jwt, &service_did(&state))
+    {
+        match state.actors.find_by_did(&verified.did).await {
+            Ok(Some(actor)) => (actor.id, verified.did, false),
+            _ => {
+                return ApiError::Unauthorized("アクターが見つかりません").into_response();
+            }
+        }
+    } else {
+        let Some(iss) = peek_unverified_iss(jwt) else {
+            return ApiError::Unauthorized("JWTのissクレームを読み取れません").into_response();
+        };
 
-    let verifying_key = match resolve_atproto_verification_key(&iss, &state.ap_client.http).await {
-        Ok(k) => k,
-        Err(e) => {
-            tracing::error!("[uploadBlob] 検証鍵解決失敗 iss={}: {}", iss, e);
-            return ApiError::Unauthorized("検証鍵の解決に失敗しました").into_response();
-        }
-    };
-    let public_key_pem = match verifying_key.to_public_key_pem(LineEnding::LF) {
-        Ok(pem) => pem,
-        Err(e) => {
-            return ApiError::Internal(format!("[uploadBlob] 公開鍵PEM変換失敗: {}", e))
-                .into_response();
-        }
-    };
-    let decoding_key = match DecodingKey::from_ec_pem(public_key_pem.as_bytes()) {
-        Ok(k) => k,
-        Err(e) => {
-            return ApiError::Internal(format!("[uploadBlob] DecodingKey構築失敗: {}", e))
-                .into_response();
-        }
-    };
+        let verifying_key =
+            match resolve_atproto_verification_key(&iss, &state.ap_client.http).await {
+                Ok(k) => k,
+                Err(e) => {
+                    tracing::error!("[uploadBlob] 検証鍵解決失敗 iss={}: {}", iss, e);
+                    return ApiError::Unauthorized("検証鍵の解決に失敗しました").into_response();
+                }
+            };
+        let public_key_pem = match verifying_key.to_public_key_pem(LineEnding::LF) {
+            Ok(pem) => pem,
+            Err(e) => {
+                return ApiError::Internal(format!("[uploadBlob] 公開鍵PEM変換失敗: {}", e))
+                    .into_response();
+            }
+        };
+        let decoding_key = match DecodingKey::from_ec_pem(public_key_pem.as_bytes()) {
+            Ok(k) => k,
+            Err(e) => {
+                return ApiError::Internal(format!("[uploadBlob] DecodingKey構築失敗: {}", e))
+                    .into_response();
+            }
+        };
 
-    let expected_aud = format!("did:web:{}", state.local_domain);
-    let mut validation = Validation::new(Algorithm::ES256);
-    validation.set_audience(&[&expected_aud]);
+        let expected_aud = format!("did:web:{}", state.local_domain);
+        let mut validation = Validation::new(Algorithm::ES256);
+        validation.set_audience(&[&expected_aud]);
 
-    let claims = match jsonwebtoken::decode::<UploadBlobClaims>(jwt, &decoding_key, &validation) {
-        Ok(data) => data.claims,
-        Err(e) => {
-            tracing::error!("[uploadBlob] JWT検証失敗 iss={}: {}", iss, e);
-            return ApiError::Unauthorized("JWT検証に失敗しました").into_response();
+        let claims = match jsonwebtoken::decode::<UploadBlobClaims>(jwt, &decoding_key, &validation)
+        {
+            Ok(data) => data.claims,
+            Err(e) => {
+                tracing::error!("[uploadBlob] JWT検証失敗 iss={}: {}", iss, e);
+                return ApiError::Unauthorized("JWT検証に失敗しました").into_response();
+            }
+        };
+        if claims.lxm != "com.atproto.repo.uploadBlob" {
+            tracing::info!("[uploadBlob] lxm不一致: {}", claims.lxm);
+            return ApiError::Unauthorized("lxmが一致しません").into_response();
+        }
+
+        match state.actors.find_by_did(&iss).await {
+            Ok(Some(actor)) => (actor.id, iss, true),
+            _ => {
+                tracing::warn!("[uploadBlob] iss={} のアクターが見つかりません", iss);
+                return ApiError::Unauthorized("アクターが見つかりません").into_response();
+            }
         }
     };
-    if claims.lxm != "com.atproto.repo.uploadBlob" {
-        tracing::info!("[uploadBlob] lxm不一致: {}", claims.lxm);
-        return ApiError::Unauthorized("lxmが一致しません").into_response();
-    }
 
     // Content-Type ヘッダーをそのまま信用しない。Bsky公式動画パイプラインからの代理POSTは
     // 実機確認で `Content-Type: */*` という無効なワイルドカード値を送ってくることがあり
@@ -129,42 +160,28 @@ pub async fn xrpc_upload_blob(
         }
     };
 
-    // 受信バイト列を実際に S3 へ保存する。以前は「ローカル/Fedi配信は常にアップロード時の
-    // オリジナルファイルを使うため不要」として読み捨てていたが、Bsky公式動画パイプライン
-    // （video.bsky.app）はトランスコード完了後にこのエンドポイントへ代理POSTしてきており、
-    // 後で video.bsky.app 自身（または視聴者）がこの CID を getBlob で取得しようとすると
-    // 404 になり動画が再生できない不具合の直接原因だった（2026-07-17 マイケル実機確認）。
-    match state.actors.find_by_did(&iss).await {
-        Ok(Some(actor)) => {
-            if let Err(e) = store_uploaded_blob(
-                &state,
-                actor.id,
-                &sha256_hex,
-                &cid,
-                &mime_type,
-                body.len() as i64,
-                &body,
-            )
-            .await
-            {
-                tracing::error!(
-                    "[uploadBlob] blob保存失敗（読み捨てて続行）cid={}: {}",
-                    cid,
-                    e
-                );
-            }
-        }
-        Ok(None) => tracing::warn!(
-            "[uploadBlob] iss={} のアクターが見つからずblob保存スキップ cid={}",
-            iss,
-            cid
-        ),
-        Err(e) => tracing::error!("[uploadBlob] アクター解決失敗 iss={}: {}", iss, e),
+    if let Err(e) = store_uploaded_blob(
+        &state,
+        actor_id,
+        &sha256_hex,
+        &cid,
+        &mime_type,
+        body.len() as i64,
+        &body,
+        require_pending_video_job,
+    )
+    .await
+    {
+        tracing::error!(
+            "[uploadBlob] blob保存失敗（読み捨てて続行）cid={}: {}",
+            cid,
+            e
+        );
     }
 
     tracing::info!(
-        "[uploadBlob] 検証OK iss={} cid={} size={}",
-        iss,
+        "[uploadBlob] 検証OK did={} cid={} size={}",
+        did_for_log,
         cid,
         body.len()
     );
@@ -184,6 +201,12 @@ pub async fn xrpc_upload_blob(
 /// 既に同じ SHA-256（= 同じ内容）が保存済みならスキップする（content-addressable な
 /// ので重複排除で十分。動画パイプラインが複数アカウント分の同一トランスコード結果を
 /// 提出してくるケースもこれで安全）。
+///
+/// 呼び出し元は2種類（`xrpc_upload_blob`参照）だが、保存処理自体は共通でよい
+/// （悪用防止のレート制御は呼び出し元の認証方式で既に区別済み: 通常セッションJWTは
+/// ユーザー本人であることが検証済み、サービス間認証JWTは進行中の動画パイプライン
+/// ジョブの有無で絞り込む）。
+#[allow(clippy::too_many_arguments)]
 async fn store_uploaded_blob(
     state: &AppState,
     actor_id: i64,
@@ -192,19 +215,23 @@ async fn store_uploaded_blob(
     mime_type: &str,
     size: i64,
     body: &[u8],
+    require_pending_video_job: bool,
 ) -> Result<(), String> {
     // 進行中の動画パイプラインジョブに対応するコールバックのみを受理する。これが無いと、
     // 正当な自己署名JWT（DID本人なら誰でも作れる）さえあれば無制限回数・任意サイズで
-    // S3を消費できてしまう（2026-07-17 マイケル指摘）。
-    let has_pending_job: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM media_files WHERE uploaded_by_actor_id = $1 AND bsky_video_status = 'pending')",
-    )
-    .bind(actor_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| format!("pendingジョブ確認失敗: {}", e))?;
-    if !has_pending_job {
-        return Err("進行中の動画パイプラインジョブが無いため保存を拒否".to_string());
+    // S3を消費できてしまう（2026-07-17 マイケル指摘）。通常セッションJWT経由（ユーザー
+    // 本人であることを既に検証済み）はこのチェックをスキップする。
+    if require_pending_video_job {
+        let has_pending_job: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM media_files WHERE uploaded_by_actor_id = $1 AND bsky_video_status = 'pending')",
+        )
+        .bind(actor_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| format!("pendingジョブ確認失敗: {}", e))?;
+        if !has_pending_job {
+            return Err("進行中の動画パイプラインジョブが無いため保存を拒否".to_string());
+        }
     }
 
     // 既に media_files 側に同じバイト列があれば S3 への重複保存を避ける
@@ -721,7 +748,7 @@ async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_j
 /// blob参照（`{"$type":"blob","ref":{"$link":"<CID>"},...}`）のCIDから、対応する
 /// `media_files` 行（既にseiran経由でアップロード済みの画像）を検索する。CIDのmultihashは
 /// sha256そのものなので、逆算して一致検索する（`xrpc_get_blob`と同じ手法）。
-async fn resolve_blob_media_id(
+pub(crate) async fn resolve_blob_media_id(
     state: &AppState,
     blob_value: Option<&serde_json::Value>,
     actor_id: i64,
@@ -744,13 +771,15 @@ async fn resolve_blob_media_id(
     .flatten()
 }
 
-/// `app.bsky.feed.post` は画像/動画embed組み立て等の専用ロジック（`AtpCommitService::commit_post`、
-/// `posts`テーブル更新込み）を経由する必要があり、汎用書き込みエンドポイントでは扱えない。
+/// `app.bsky.feed.post` の `deleteRecord` は、投稿削除に伴う配送・論理削除処理
+/// （`handlers::notes::delete_note` 相当）が未実装のため、引き続き拒否する。
+/// create/put/applyWrites は `post_from_record::create_post_from_record` を経由する。
 fn reject_post_collection(collection: &str) -> Option<axum::response::Response> {
     if collection == "app.bsky.feed.post" {
         Some(
             ApiError::BadRequest(
-                "app.bsky.feed.post はseiranネイティブの投稿APIを使用してください".to_string(),
+                "app.bsky.feed.post の削除はseiranネイティブの投稿APIを使用してください"
+                    .to_string(),
             )
             .into_response(),
         )
@@ -769,23 +798,38 @@ pub struct CreateRecordRequest {
 }
 
 /// `com.atproto.repo.createRecord` — 新規レコードを作成する（`rkey`省略時はTIDを自動生成）。
+/// `app.bsky.feed.post` のみ `post_from_record::create_post_from_record` の専用パイプライン
+/// （`posts` テーブル反映・Fedi配送込み）を経由する。
 pub async fn xrpc_create_record(
     headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<CreateRecordRequest>,
 ) -> impl IntoResponse {
-    if let Some(resp) = reject_post_collection(&req.collection) {
-        return resp;
-    }
     let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
         Ok(a) => a,
         Err(resp) => return resp,
     };
+    let rkey = req.rkey.unwrap_or_else(generate_tid);
+
+    if req.collection == "app.bsky.feed.post" {
+        return match super::post_from_record::create_post_from_record(
+            &state, &actor, rkey, &req.record,
+        )
+        .await
+        {
+            Ok(result) => Json(serde_json::json!({
+                "uri": result.uri,
+                "cid": result.cid,
+            }))
+            .into_response(),
+            Err(e) => e.into_response(),
+        };
+    }
+
     let at_did = actor
         .at_did
         .clone()
         .expect("authenticate_atp_writeで確認済み");
-    let rkey = req.rkey.unwrap_or_else(generate_tid);
 
     match state
         .atp_service
@@ -823,18 +867,33 @@ pub struct PutRecordRequest {
 }
 
 /// `com.atproto.repo.putRecord` — `rkey`を指定してレコードを作成/上書きする。
+/// `app.bsky.feed.post` は Bsky に投稿編集機能が無いため常に新規作成として扱う
+/// （既存の `at_uri` と衝突する `rkey` を指定した場合は `posts.at_uri` の UNIQUE 制約でエラーになる）。
 pub async fn xrpc_put_record(
     headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<PutRecordRequest>,
 ) -> impl IntoResponse {
-    if let Some(resp) = reject_post_collection(&req.collection) {
-        return resp;
-    }
     let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
         Ok(a) => a,
         Err(resp) => return resp,
     };
+
+    if req.collection == "app.bsky.feed.post" {
+        return match super::post_from_record::create_post_from_record(
+            &state, &actor, req.rkey, &req.record,
+        )
+        .await
+        {
+            Ok(result) => Json(serde_json::json!({
+                "uri": result.uri,
+                "cid": result.cid,
+            }))
+            .into_response(),
+            Err(e) => e.into_response(),
+        };
+    }
+
     let at_did = actor
         .at_did
         .clone()
@@ -935,14 +994,12 @@ pub async fn xrpc_apply_writes(
     State(state): State<AppState>,
     Json(req): Json<ApplyWritesRequest>,
 ) -> impl IntoResponse {
+    // app.bsky.feed.post の削除のみ拒否する（作成・更新は create_post_from_record 経由で許可）。
     for write in &req.writes {
-        let collection = match write {
-            ApplyWritesOp::Create { collection, .. } => collection,
-            ApplyWritesOp::Update { collection, .. } => collection,
-            ApplyWritesOp::Delete { collection, .. } => collection,
-        };
-        if let Some(resp) = reject_post_collection(collection) {
-            return resp;
+        if let ApplyWritesOp::Delete { collection, .. } = write {
+            if let Some(resp) = reject_post_collection(collection) {
+                return resp;
+            }
         }
     }
 
@@ -965,6 +1022,23 @@ pub async fn xrpc_apply_writes(
                 value,
             } => {
                 let rkey = rkey.unwrap_or_else(generate_tid);
+                if collection == "app.bsky.feed.post" {
+                    match super::post_from_record::create_post_from_record(
+                        &state, &actor, rkey, &value,
+                    )
+                    .await
+                    {
+                        Ok(result) => {
+                            results.push(serde_json::json!({
+                                "$type": "com.atproto.repo.applyWrites#createResult",
+                                "uri": result.uri,
+                                "cid": result.cid,
+                            }));
+                            continue;
+                        }
+                        Err(e) => return e.into_response(),
+                    }
+                }
                 match state
                     .atp_service
                     .commit_generic_record(
@@ -998,6 +1072,23 @@ pub async fn xrpc_apply_writes(
                 rkey,
                 value,
             } => {
+                if collection == "app.bsky.feed.post" {
+                    match super::post_from_record::create_post_from_record(
+                        &state, &actor, rkey, &value,
+                    )
+                    .await
+                    {
+                        Ok(result) => {
+                            results.push(serde_json::json!({
+                                "$type": "com.atproto.repo.applyWrites#updateResult",
+                                "uri": result.uri,
+                                "cid": result.cid,
+                            }));
+                            continue;
+                        }
+                        Err(e) => return e.into_response(),
+                    }
+                }
                 match state
                     .atp_service
                     .commit_generic_record(

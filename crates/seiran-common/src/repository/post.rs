@@ -399,6 +399,16 @@ pub trait PostRepository: Send + Sync {
     /// `post_recipients` へも一括挿入する。
     async fn insert_full(&self, params: InsertFullParams<'_>) -> Result<(), sqlx::Error>;
 
+    /// `mention_facets`（Bsky流入DIDメンションの位置情報、`[{"byteStart","byteEnd","did"}, ...]`）
+    /// を更新する。ATPレコード起点の投稿作成（`com.atproto.repo.createRecord`等）専用。
+    /// `insert_full` は本文からのメンション抽出（`@username`）のみでBsky facetsを扱わないため、
+    /// facets由来のDIDメンションは作成後に別途この関数で反映する。
+    async fn update_mention_facets(
+        &self,
+        post_id: i64,
+        mention_facets: &serde_json::Value,
+    ) -> Result<(), sqlx::Error>;
+
     /// リポストレコードを挿入する（`UNIQUE(actor_id, repost_of_post_id)` 制約違反はそのまま呼び出し元へ伝播する）。
     /// `visibility` は元ポストから継承した値（"public"|"unlisted"）。呼び出し元が
     /// `followers_only`/`direct` を渡さないことを保証する（`create_repost` で事前に禁止）。
@@ -1143,6 +1153,19 @@ impl PostRepository for PgPostRepository {
         }
 
         tx.commit().await
+    }
+
+    async fn update_mention_facets(
+        &self,
+        post_id: i64,
+        mention_facets: &serde_json::Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE posts SET mention_facets = $1 WHERE id = $2")
+            .bind(mention_facets)
+            .bind(post_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 
     async fn insert_repost(
