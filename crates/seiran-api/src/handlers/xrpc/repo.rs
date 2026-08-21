@@ -74,72 +74,71 @@ pub async fn xrpc_upload_blob(
     // 3要素目は「進行中の動画パイプラインジョブが必須か」（`store_uploaded_blob`参照）。
     // 通常セッションJWT経由はユーザー本人であることを検証済みのため不要、サービス間認証JWT
     // 経由（DIDの署名鍵さえあれば誰でも自己署名JWTを作れる）は必須にして悪用を防ぐ。
-    let (actor_id, did_for_log, require_pending_video_job): (i64, String, bool) = if let Ok(
-        verified,
-    ) =
-        state
+    let (actor_id, did_for_log, require_pending_video_job): (i64, String, bool) =
+        if let Ok(verified) = state
             .local_auth
             .verify_atp_access_token(jwt, &service_did(&state))
-    {
-        match state.actors.find_by_did(&verified.did).await {
-            Ok(Some(actor)) => (actor.id, verified.did, false),
-            _ => {
-                return ApiError::Unauthorized("アクターが見つかりません").into_response();
+        {
+            match state.actors.find_by_did(&verified.did).await {
+                Ok(Some(actor)) => (actor.id, verified.did, false),
+                _ => {
+                    return ApiError::Unauthorized("アクターが見つかりません").into_response();
+                }
             }
-        }
-    } else {
-        let Some(iss) = peek_unverified_iss(jwt) else {
-            return ApiError::Unauthorized("JWTのissクレームを読み取れません").into_response();
-        };
+        } else {
+            let Some(iss) = peek_unverified_iss(jwt) else {
+                return ApiError::Unauthorized("JWTのissクレームを読み取れません").into_response();
+            };
 
-        let verifying_key =
-            match resolve_atproto_verification_key(&iss, &state.ap_client.http).await {
+            let verifying_key = match resolve_atproto_verification_key(&iss, &state.ap_client.http)
+                .await
+            {
                 Ok(k) => k,
                 Err(e) => {
                     tracing::error!("[uploadBlob] 検証鍵解決失敗 iss={}: {}", iss, e);
                     return ApiError::Unauthorized("検証鍵の解決に失敗しました").into_response();
                 }
             };
-        let public_key_pem = match verifying_key.to_public_key_pem(LineEnding::LF) {
-            Ok(pem) => pem,
-            Err(e) => {
-                return ApiError::Internal(format!("[uploadBlob] 公開鍵PEM変換失敗: {}", e))
-                    .into_response();
+            let public_key_pem = match verifying_key.to_public_key_pem(LineEnding::LF) {
+                Ok(pem) => pem,
+                Err(e) => {
+                    return ApiError::Internal(format!("[uploadBlob] 公開鍵PEM変換失敗: {}", e))
+                        .into_response();
+                }
+            };
+            let decoding_key = match DecodingKey::from_ec_pem(public_key_pem.as_bytes()) {
+                Ok(k) => k,
+                Err(e) => {
+                    return ApiError::Internal(format!("[uploadBlob] DecodingKey構築失敗: {}", e))
+                        .into_response();
+                }
+            };
+
+            let expected_aud = format!("did:web:{}", state.local_domain);
+            let mut validation = Validation::new(Algorithm::ES256);
+            validation.set_audience(&[&expected_aud]);
+
+            let claims =
+                match jsonwebtoken::decode::<UploadBlobClaims>(jwt, &decoding_key, &validation) {
+                    Ok(data) => data.claims,
+                    Err(e) => {
+                        tracing::error!("[uploadBlob] JWT検証失敗 iss={}: {}", iss, e);
+                        return ApiError::Unauthorized("JWT検証に失敗しました").into_response();
+                    }
+                };
+            if claims.lxm != "com.atproto.repo.uploadBlob" {
+                tracing::info!("[uploadBlob] lxm不一致: {}", claims.lxm);
+                return ApiError::Unauthorized("lxmが一致しません").into_response();
+            }
+
+            match state.actors.find_by_did(&iss).await {
+                Ok(Some(actor)) => (actor.id, iss, true),
+                _ => {
+                    tracing::warn!("[uploadBlob] iss={} のアクターが見つかりません", iss);
+                    return ApiError::Unauthorized("アクターが見つかりません").into_response();
+                }
             }
         };
-        let decoding_key = match DecodingKey::from_ec_pem(public_key_pem.as_bytes()) {
-            Ok(k) => k,
-            Err(e) => {
-                return ApiError::Internal(format!("[uploadBlob] DecodingKey構築失敗: {}", e))
-                    .into_response();
-            }
-        };
-
-        let expected_aud = format!("did:web:{}", state.local_domain);
-        let mut validation = Validation::new(Algorithm::ES256);
-        validation.set_audience(&[&expected_aud]);
-
-        let claims = match jsonwebtoken::decode::<UploadBlobClaims>(jwt, &decoding_key, &validation)
-        {
-            Ok(data) => data.claims,
-            Err(e) => {
-                tracing::error!("[uploadBlob] JWT検証失敗 iss={}: {}", iss, e);
-                return ApiError::Unauthorized("JWT検証に失敗しました").into_response();
-            }
-        };
-        if claims.lxm != "com.atproto.repo.uploadBlob" {
-            tracing::info!("[uploadBlob] lxm不一致: {}", claims.lxm);
-            return ApiError::Unauthorized("lxmが一致しません").into_response();
-        }
-
-        match state.actors.find_by_did(&iss).await {
-            Ok(Some(actor)) => (actor.id, iss, true),
-            _ => {
-                tracing::warn!("[uploadBlob] iss={} のアクターが見つかりません", iss);
-                return ApiError::Unauthorized("アクターが見つかりません").into_response();
-            }
-        }
-    };
 
     // Content-Type ヘッダーをそのまま信用しない。Bsky公式動画パイプラインからの代理POSTは
     // 実機確認で `Content-Type: */*` という無効なワイルドカード値を送ってくることがあり
@@ -796,7 +795,10 @@ pub async fn xrpc_create_record(
 
     if req.collection == "app.bsky.feed.post" {
         return match super::post_from_record::create_post_from_record(
-            &state, &actor, rkey, &req.record,
+            &state,
+            &actor,
+            rkey,
+            &req.record,
         )
         .await
         {
@@ -864,7 +866,10 @@ pub async fn xrpc_put_record(
 
     if req.collection == "app.bsky.feed.post" {
         return match super::post_from_record::create_post_from_record(
-            &state, &actor, req.rkey, &req.record,
+            &state,
+            &actor,
+            req.rkey,
+            &req.record,
         )
         .await
         {
@@ -929,8 +934,7 @@ pub async fn xrpc_delete_record(
     };
 
     if req.collection == "app.bsky.feed.post" {
-        return match super::post_from_record::delete_post_by_rkey(&state, &actor, &req.rkey).await
-        {
+        return match super::post_from_record::delete_post_by_rkey(&state, &actor, &req.rkey).await {
             Ok(()) => Json(serde_json::json!({})).into_response(),
             Err(e) => e.into_response(),
         };

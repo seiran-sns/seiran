@@ -23,9 +23,8 @@ use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use seiran_common::atp::{
-    apply_bsky_facets, fetch_bsky_profile, parse_bsky_embed_attachments,
-    parse_bsky_embed_link_card, parse_bsky_embed_quote_uri, ParsedAttachment, ParsedFacet,
-    ParsedLinkCard,
+    ParsedAttachment, ParsedFacet, ParsedLinkCard, apply_bsky_facets, fetch_bsky_profile,
+    parse_bsky_embed_attachments, parse_bsky_embed_link_card, parse_bsky_embed_quote_uri,
 };
 use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};

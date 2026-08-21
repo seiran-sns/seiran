@@ -13,6 +13,10 @@ pub use client::{
     fetch_bsky_profile, fetch_single_bsky_post, search_appview_posts, upsert_bsky_post, AtpSession,
     BskyFollowerProfile, BskyPinnedPostRef, BskyPost, BskyProfile,
 };
+pub use did_resolve::{
+    fetch_raw_did_document, resolve_atproto_verification_key, resolve_service_endpoint,
+    DidResolveError,
+};
 pub use embed::{
     bsky_external_thumb_url, bsky_gif_video_attachment, parse_bsky_embed_attachments,
     parse_bsky_embed_link_card, parse_bsky_embed_quote_uri, ParsedAttachment, ParsedLinkCard,
@@ -20,10 +24,6 @@ pub use embed::{
 pub use facets::{
     apply_bsky_facets, apply_link_facets, MentionFacetSpan, ParsedFacet, ParsedFacetFeature,
     ParsedFacetIndex,
-};
-pub use did_resolve::{
-    fetch_raw_did_document, resolve_atproto_verification_key, resolve_service_endpoint,
-    DidResolveError,
 };
 pub use handle_resolve::resolve_external_handle;
 pub use plc::{

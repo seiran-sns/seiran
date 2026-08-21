@@ -1777,7 +1777,11 @@ pub fn ap_content_to_markdown_body(
 ///
 /// `ap_content_to_markdown_body`の`tokenize_anchors`とは別実装（あちらは非アンカータグを
 /// 空白/改行1個に潰してしまうため、構造保持が目的のここでは使えない）。
-fn rewrite_mention_hashtag_hrefs(html: &str, tags: &[serde_json::Value], sender_domain: &str) -> String {
+fn rewrite_mention_hashtag_hrefs(
+    html: &str,
+    tags: &[serde_json::Value],
+    sender_domain: &str,
+) -> String {
     let chars: Vec<char> = html.chars().collect();
     let mut out = String::with_capacity(html.len());
     let mut i = 0;
@@ -1841,8 +1845,9 @@ fn rewrite_mention_hashtag_hrefs(html: &str, tags: &[serde_json::Value], sender_
                     let decoded_text = decode_html_entities(plain_text.trim());
                     let new_href = if is_hashtag {
                         let tag_text = decoded_text.trim_start_matches('#');
-                        (!tag_text.is_empty())
-                            .then(|| format!("/tags/{}", urlencoding::encode(&tag_text.to_lowercase())))
+                        (!tag_text.is_empty()).then(|| {
+                            format!("/tags/{}", urlencoding::encode(&tag_text.to_lowercase()))
+                        })
                     } else {
                         resolve_ap_mention_text(
                             &href,
@@ -1976,8 +1981,28 @@ pub fn sanitize_ap_content_html(
     let rewritten = rewrite_mention_hashtag_hrefs(content_html, tags, sender_domain);
 
     let allowed_tags: HashSet<&str> = [
-        "br", "p", "div", "a", "b", "i", "s", "code", "pre", "blockquote", "ruby", "rt", "rp",
-        "h1", "h2", "figure", "img", "ul", "ol", "li", "small", "center",
+        "br",
+        "p",
+        "div",
+        "a",
+        "b",
+        "i",
+        "s",
+        "code",
+        "pre",
+        "blockquote",
+        "ruby",
+        "rt",
+        "rp",
+        "h1",
+        "h2",
+        "figure",
+        "img",
+        "ul",
+        "ol",
+        "li",
+        "small",
+        "center",
     ]
     .into_iter()
     .collect();
@@ -1985,7 +2010,10 @@ pub fn sanitize_ap_content_html(
     let mut tag_attributes: std::collections::HashMap<&str, HashSet<&str>> =
         std::collections::HashMap::new();
     tag_attributes.insert("a", ["href"].into_iter().collect());
-    tag_attributes.insert("img", ["src", "alt", "width", "height"].into_iter().collect());
+    tag_attributes.insert(
+        "img",
+        ["src", "alt", "width", "height"].into_iter().collect(),
+    );
 
     ammonia::Builder::new()
         .tags(allowed_tags)
@@ -3226,7 +3254,10 @@ mod tests {
         // （実際のMisskey content HTMLもこの入れ子で届く。空`<p></p>`は無害）。
         let html = "<p><blockquote><span>quoted text</span></blockquote>after</p>";
         let out = sanitize_ap_content_html(html, &[], "example.social");
-        assert_eq!(out, "<p></p><blockquote>quoted text</blockquote>after<p></p>");
+        assert_eq!(
+            out,
+            "<p></p><blockquote>quoted text</blockquote>after<p></p>"
+        );
     }
 
     #[test]
@@ -3252,7 +3283,10 @@ mod tests {
             "name": "@bob@remote.example"
         })];
         let out = sanitize_ap_content_html(html, &tags, "remote.example");
-        assert_eq!(out, r#"<a href="/@bob@remote.example">@bob@remote.example</a>"#);
+        assert_eq!(
+            out,
+            r#"<a href="/@bob@remote.example">@bob@remote.example</a>"#
+        );
     }
 
     #[test]
@@ -3264,7 +3298,8 @@ mod tests {
 
     #[test]
     fn sanitize_ap_content_html_keeps_ordinary_link_href_but_drops_rel_target() {
-        let html = r#"<a href="https://example.com/" rel="nofollow noopener" target="_blank">link</a>"#;
+        let html =
+            r#"<a href="https://example.com/" rel="nofollow noopener" target="_blank">link</a>"#;
         let out = sanitize_ap_content_html(html, &[], "example.social");
         assert_eq!(out, r#"<a href="https://example.com/">link</a>"#);
     }

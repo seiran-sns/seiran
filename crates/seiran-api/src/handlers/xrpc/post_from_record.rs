@@ -112,12 +112,10 @@ async fn resolve_embed_attachments(
             }
             resolved
         }
-        "app.bsky.embed.video" => {
-            match resolve_blob(state, media.get("video"), actor_id).await {
-                Some(blob) => vec![blob],
-                None => vec![],
-            }
-        }
+        "app.bsky.embed.video" => match resolve_blob(state, media.get("video"), actor_id).await {
+            Some(blob) => vec![blob],
+            None => vec![],
+        },
         _ => vec![],
     }
 }
@@ -185,9 +183,7 @@ pub async fn create_post_from_record(
                     quote_of_post_id = Some(qid);
                 }
                 Ok(None) => {}
-                Err(e) => {
-                    return Err(ApiError::Internal(format!("引用元ポスト取得失敗: {}", e)))
-                }
+                Err(e) => return Err(ApiError::Internal(format!("引用元ポスト取得失敗: {}", e))),
             }
         }
     }
@@ -263,7 +259,10 @@ pub async fn create_post_from_record(
         let position = position as i16;
         match blob {
             ResolvedBlob::Local { media_file_id } => {
-                if let Err(e) = state.posts.attach_media(post_id, media_file_id, position).await
+                if let Err(e) = state
+                    .posts
+                    .attach_media(post_id, media_file_id, position)
+                    .await
                 {
                     tracing::error!("[post_from_record] 添付 INSERT 失敗: {}", e);
                 }
@@ -271,7 +270,15 @@ pub async fn create_post_from_record(
             ResolvedBlob::RemoteUrl { url, mime_type } => {
                 if let Err(e) = state
                     .posts
-                    .attach_remote_media_url(post_id, &url, Some(&mime_type), None, false, false, position)
+                    .attach_remote_media_url(
+                        post_id,
+                        &url,
+                        Some(&mime_type),
+                        None,
+                        false,
+                        false,
+                        position,
+                    )
                     .await
                 {
                     tracing::error!("[post_from_record] 添付 URL 保存失敗: {}", e);
@@ -326,10 +333,7 @@ pub async fn create_post_from_record(
             )
             .await
         {
-            tracing::error!(
-                "[post_from_record] reply notifications INSERT 失敗: {}",
-                e
-            );
+            tracing::error!("[post_from_record] reply notifications INSERT 失敗: {}", e);
         }
     }
 
@@ -358,10 +362,7 @@ pub async fn create_post_from_record(
             )
             .await
         {
-            tracing::error!(
-                "[post_from_record] quote notifications INSERT 失敗: {}",
-                e
-            );
+            tracing::error!("[post_from_record] quote notifications INSERT 失敗: {}", e);
         }
     }
 

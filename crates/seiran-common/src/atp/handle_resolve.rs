@@ -30,8 +30,10 @@ struct DohAnswer {
 /// `handle` を DNS TXT または HTTP well-known 経由で DID に解決する。
 /// 両方失敗、またはタイムアウトした場合は `None`。
 pub async fn resolve_external_handle(handle: &str, http: &reqwest::Client) -> Option<String> {
-    let (dns, well_known) =
-        tokio::join!(resolve_via_dns_txt(handle, http), resolve_via_well_known(handle, http));
+    let (dns, well_known) = tokio::join!(
+        resolve_via_dns_txt(handle, http),
+        resolve_via_well_known(handle, http)
+    );
     dns.or(well_known)
 }
 
