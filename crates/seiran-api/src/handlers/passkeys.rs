@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
 use webauthn_rs::prelude::{
-    Passkey, PasskeyAuthentication, PasskeyRegistration, PublicKeyCredential,
-    RegisterPublicKeyCredential,
+    DiscoverableAuthentication, DiscoverableKey, Passkey, PasskeyRegistration,
+    PublicKeyCredential, RegisterPublicKeyCredential,
 };
 
 use crate::handlers::auth::{finish_login, AuthResponse};
@@ -94,9 +94,11 @@ pub async fn registration_start(
         .iter()
         .map(|(_, passkey)| passkey.cred_id().clone())
         .collect();
+    // usernameless(discoverable credential)ログインのため、resident key必須・
+    // プラットフォーム認証器限定で登録する(#65-2)。USBセキュリティキーでの登録は不可になる。
     let (public_key, reg_state) = state
         .webauthn
-        .start_passkey_registration(
+        .start_google_passkey_in_google_password_manager_only_registration(
             Uuid::from_u128(user.user_id as u128),
             &username,
             &username,
@@ -108,7 +110,7 @@ pub async fn registration_start(
         "name": name,
         "registration": reg_state,
     });
-    save_challenge(&state, token, user.user_id, "registration", state_json).await?;
+    save_challenge(&state, token, Some(user.user_id), "registration", state_json).await?;
     Ok(Json(ChallengeResponse { token, public_key }))
 }
 
@@ -186,36 +188,18 @@ pub async fn delete(
     Ok(())
 }
 
-#[derive(Deserialize)]
-pub struct AuthenticationStartRequest {
-    pub identifier: String,
-}
-
 pub async fn authentication_start(
     State(state): State<AppState>,
-    Json(req): Json<AuthenticationStartRequest>,
 ) -> Result<Json<ChallengeResponse<webauthn_rs::prelude::RequestChallengeResponse>>, ApiError> {
-    let row = if req.identifier.contains('@') {
-        state.users.find_login_by_email(&req.identifier).await
-    } else {
-        state.users.find_login_by_username(&req.identifier).await
-    }
-    .map_err(internal)?
-    .ok_or(ApiError::Unauthorized("PASSKEY_NOT_AVAILABLE"))?;
-    let passkeys = load_passkeys(&state, row.id).await?;
-    if passkeys.is_empty() {
-        return Err(ApiError::Unauthorized("PASSKEY_NOT_AVAILABLE"));
-    }
-    let credentials: Vec<Passkey> = passkeys.into_iter().map(|(_, passkey)| passkey).collect();
     let (public_key, auth_state) = state
         .webauthn
-        .start_passkey_authentication(&credentials)
+        .start_discoverable_authentication()
         .map_err(webauthn_error)?;
     let token = Uuid::new_v4();
     save_challenge(
         &state,
         token,
-        row.id,
+        None,
         "authentication",
         serde_json::to_value(auth_state).map_err(internal)?,
     )
@@ -236,23 +220,31 @@ pub async fn authentication_finish(
     let row = sqlx::query(
         "DELETE FROM passkey_challenges
          WHERE token = $1 AND kind = 'authentication' AND expires_at > now()
-         RETURNING user_id, state",
+         RETURNING state",
     )
     .bind(req.token)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?
     .ok_or_else(|| ApiError::BadRequest("PASSKEY_CHALLENGE_INVALID".into()))?;
-    let user_id: i64 = row.get("user_id");
-    let auth_state: PasskeyAuthentication =
+    let auth_state: DiscoverableAuthentication =
         serde_json::from_value(row.get("state")).map_err(internal)?;
+
+    let (user_unique_id, _) = state
+        .webauthn
+        .identify_discoverable_authentication(&req.credential)
+        .map_err(webauthn_error)?;
+    let user_id = user_unique_id.as_u128() as i64;
+
+    let passkeys = load_passkeys(&state, user_id).await?;
+    let discoverable_creds: Vec<DiscoverableKey> =
+        passkeys.iter().map(|(_, passkey)| passkey.into()).collect();
     let result = state
         .webauthn
-        .finish_passkey_authentication(&req.credential, &auth_state)
+        .finish_discoverable_authentication(&req.credential, auth_state, &discoverable_creds)
         .map_err(webauthn_error)?;
 
     let credential_id = result.cred_id();
-    let passkeys = load_passkeys(&state, user_id).await?;
     let (id, mut passkey) = passkeys
         .into_iter()
         .find(|(_, passkey)| passkey.cred_id() == credential_id)
@@ -308,7 +300,7 @@ async fn load_passkeys(state: &AppState, user_id: i64) -> Result<Vec<(Uuid, Pass
 async fn save_challenge(
     state: &AppState,
     token: Uuid,
-    user_id: i64,
+    user_id: Option<i64>,
     kind: &str,
     value: serde_json::Value,
 ) -> Result<(), ApiError> {

@@ -1040,11 +1040,10 @@ export const api = {
         turnstile_token: turnstileToken,
       });
     },
-    async loginWithPasskey(identifier: string) {
+    async loginWithPasskey() {
       const start = await request<WebAuthnEnvelope<AuthenticationOptionsJson>>(
         "POST",
         "/auth/passkeys/start",
-        { identifier },
       );
       const credential = (await navigator.credentials.get({
         publicKey: authenticationOptions(start.public_key.publicKey),

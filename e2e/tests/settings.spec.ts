@@ -20,48 +20,32 @@ test("複数パスキーを登録・削除でき、パスキーでログイン�
   page,
   request,
   context,
+  browser,
 }) => {
   const user = await registerUserViaApi(request, "e2epasskey");
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("WebAuthn.enable");
-  const firstAuthenticator = await cdp.send(
-    "WebAuthn.addVirtualAuthenticator",
-    {
-      options: {
-        protocol: "ctap2",
-        transport: "internal",
-        hasResidentKey: true,
-        hasUserVerification: true,
-        isUserVerified: true,
-        automaticPresenceSimulation: true,
-      },
-    },
-  );
+  await context.credentials.install();
 
   await seedAuth(page, user.token);
   await page.goto("/settings/account");
   await page.getByLabel("パスキーの名前").fill("テスト端末");
   await page.getByRole("button", { name: "パスキーを追加" }).click();
   await expect(page.getByText("テスト端末")).toBeVisible({ timeout: 15_000 });
-  await cdp.send("WebAuthn.removeVirtualAuthenticator", {
-    authenticatorId: firstAuthenticator.authenticatorId,
-  });
-  await cdp.send("WebAuthn.addVirtualAuthenticator", {
-    options: {
-      protocol: "ctap2",
-      transport: "internal",
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true,
-    },
-  });
-  await page.getByLabel("パスキーの名前").fill("予備端末");
-  await page.getByRole("button", { name: "パスキーを追加" }).click();
+
+  // 同一認証器では同一ユーザーのresident credentialが上書きされてしまうため、
+  // 2本目は別デバイスとして新しいbrowserContextで登録する。
+  const context2 = await browser.newContext();
+  await context2.credentials.install();
+  const page2 = await context2.newPage();
+  await seedAuth(page2, user.token);
+  await page2.goto("/settings/account");
+  await page2.getByLabel("パスキーの名前").fill("予備端末");
+  await page2.getByRole("button", { name: "パスキーを追加" }).click();
+  await expect(page2.getByText("予備端末")).toBeVisible({ timeout: 15_000 });
+  await context2.close();
+  await page.reload();
   await expect(page.getByText("予備端末")).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: "⏻" }).click();
-  await page.getByLabel("メールアドレス / ユーザーネーム").fill(user.username);
   await page.getByRole("button", { name: "パスキーを使う" }).click();
   await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
 

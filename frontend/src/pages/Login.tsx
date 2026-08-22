@@ -56,13 +56,9 @@ export default function Login() {
 
   async function handlePasskeyLogin() {
     setError("");
-    if (!identifier.trim()) {
-      setError(t("auth:login.passkeyIdentifierRequired"));
-      return;
-    }
     setLoading(true);
     try {
-      finishLogin(await api.auth.loginWithPasskey(identifier.trim()));
+      finishLogin(await api.auth.loginWithPasskey());
     } catch (err) {
       setError(getErrorMessage(err) || t("auth:login.genericError"));
     } finally {

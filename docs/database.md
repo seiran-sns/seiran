@@ -124,7 +124,7 @@ DM等の全外部キー参照を付け替える。複合UNIQUEは正規化後の
 ### パスキー（`user_passkeys` / `passkey_challenges`）
 
 - `user_passkeys`: `user_id`ごとに複数行を許可し、表示名、WebAuthn credential JSON、登録日時、最終利用日時を保持する。ユーザー削除時はCASCADE削除。
-- `passkey_challenges`: 登録または認証のWebAuthn stateをUUIDトークンに対応づける。5分で失効し、finish時に`DELETE ... RETURNING`で一度だけ消費する。
+- `passkey_challenges`: 登録または認証のWebAuthn stateをUUIDトークンに対応づける。5分で失効し、finish時に`DELETE ... RETURNING`で一度だけ消費する。`user_id`はNULL許容（usernamelessログイン開始時点ではユーザーが未確定なため）。
 
 ### `posts` の設計
 統一ポストID（`id`）はタイムスタンプ内包の Snowflake で、`sinceId`/`untilId` ページネーションの主軸になる。
