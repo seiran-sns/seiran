@@ -25,6 +25,8 @@ function makeNote(overrides: Partial<Note> = {}): Note {
       actorType: "local",
     },
     attachments: [],
+    replyFediAllowed: true,
+    replyBskyAllowed: true,
     replyCount: 0,
     quoteCount: 0,
     repostCount: 0,

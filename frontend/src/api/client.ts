@@ -505,6 +505,11 @@ export interface Note {
   /** ローカル投稿がFedi/Bskyへ実際に配送されたか。ローカル投稿以外では省略。 */
   deliverFedi?: boolean;
   deliverBsky?: boolean;
+  /** このノートへの返信をFedi/Bskyへ配送できるか（ノート自身が実体を持つプロトコルのみ
+   * true。ローカル・リモート問わず常に設定される）。リプライフォームの配送先トグルの
+   * 表示・非表示に使う。 */
+  replyFediAllowed: boolean;
+  replyBskyAllowed: boolean;
   /** リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。ローカル投稿は省略。 */
   remoteUrl?: string;
   contentWarning?: string;
@@ -715,6 +720,8 @@ interface RawNote {
   visibility?: string;
   deliverFedi?: boolean;
   deliverBsky?: boolean;
+  replyFediAllowed?: boolean;
+  replyBskyAllowed?: boolean;
   remoteUrl?: string;
   remote_url?: string;
   contentWarning?: string;
@@ -760,6 +767,8 @@ function normalizeNote(r: RawNote): Note {
     visibility: r.visibility,
     deliverFedi: r.deliverFedi,
     deliverBsky: r.deliverBsky,
+    replyFediAllowed: r.replyFediAllowed ?? false,
+    replyBskyAllowed: r.replyBskyAllowed ?? false,
     remoteUrl: r.remoteUrl ?? r.remote_url,
     contentWarning: r.contentWarning ?? r.content_warning,
     poll: r.poll,

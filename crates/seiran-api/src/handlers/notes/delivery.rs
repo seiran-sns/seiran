@@ -368,6 +368,28 @@ fn normalize_misskey_visibility(v: &str) -> &str {
     }
 }
 
+/// リプライ先ポストの実体の有無から、返信の配信先制御
+/// `(deliver_fedi_allowed, deliver_bsky_allowed)` を決定する。
+///
+/// ローカル投稿は `posts.deliver_fedi`/`deliver_bsky`（投稿作成時に実際に配送対象とした値）を
+/// 直接見る。`ap_object_id` はローカル投稿なら `deliver_fedi` の値に関わらず常に生成される
+/// （投稿URLとして常時pull取得可能なだけで、フォロワーへのpush配送有無とは別概念）ため、
+/// その有無を配送可否のフラグとして使えない（`at_uri` は逆にコミットして初めて実体を持つため
+/// 有無がそのまま配送可否と一致する、という非対称性がある）。
+/// リモート投稿は逆に `deliver_fedi`/`deliver_bsky` カラムに意味が無い（受信経路はこのカラムに
+/// 触れずDBデフォルト`true`のまま）ため、実体（`ap_object_id`/`at_uri`）の有無を直接見る。
+///
+/// classify_post の `is_local` 早期判定（`LocalOrSeiran` = 両実体持ち扱い）に頼ると、
+/// ローカル投稿で片方のプロトコルにしか配送していない場合でも両方許可扱いになってしまい、
+/// 親と無関係な独立ポストとして誤配信される（当初発見した不具合の修正）。
+fn reply_delivery_allowed(meta: &PostDeliveryMeta) -> (bool, bool) {
+    if meta.actor_type == "local" {
+        (meta.deliver_fedi, meta.deliver_bsky)
+    } else {
+        (meta.ap_object_id.is_some(), meta.at_uri.is_some())
+    }
+}
+
 /// リプライ先ポストの種別を判定し、配信先制御（元ポストが存在しないプロトコルには配信しない）と
 /// ATP reply フィールドを組み立てる。`viewer_actor_id` はリプライしようとしている本人で、
 /// リプライ先の投稿者とブロック関係にある場合はリプライ自体を拒否する（Bsky準拠のブロック定義）。
@@ -390,15 +412,7 @@ pub async fn resolve_reply_context(
     crate::handlers::target_resolve::check_not_blocked(state, viewer_actor_id, meta.actor_id)
         .await?;
 
-    let origin = classify_post(
-        meta.ap_object_id.as_deref(),
-        meta.at_uri.as_deref(),
-        meta.actor_type == "local",
-    );
-
-    // 配信先制御: 元ポストが存在しないプロトコルには配信しない
-    let deliver_fedi_allowed = origin != PostOrigin::BskyRemote; // Bsky リモートへのリプライ → Fedi 配信しない
-    let deliver_bsky_allowed = origin != PostOrigin::FediRemote; // Fedi リモートへのリプライ → Bsky 配信しない
+    let (deliver_fedi_allowed, deliver_bsky_allowed) = reply_delivery_allowed(&meta);
 
     // ATP reply フィールド: Bsky 配信する場合かつ at_uri/at_cid が取得できる場合のみ設定
     let bsky_reply = if deliver_bsky_allowed {
@@ -710,6 +724,21 @@ mod tests {
             first_image_url: None,
             visibility: "public".to_owned(),
             thread_root_post_id: None,
+            // リモート想定のヘルパーのため意味を持たない（DBデフォルトのtrue固定を模す）。
+            deliver_fedi: true,
+            deliver_bsky: true,
+        }
+    }
+
+    /// ローカル投稿想定の `PostDeliveryMeta`。`ap_object_id` はローカルなら
+    /// `deliver_fedi` の値に関わらず常に生成されるため常に `Some` を渡す。
+    fn local_delivery_meta(deliver_fedi: bool, deliver_bsky: bool) -> PostDeliveryMeta {
+        PostDeliveryMeta {
+            actor_type: "local".to_owned(),
+            at_uri: deliver_bsky.then(|| "at://did/x/y".to_owned()),
+            deliver_fedi,
+            deliver_bsky,
+            ..delivery_meta(Some("https://local.example/notes/1"), None)
         }
     }
 
@@ -933,5 +962,61 @@ mod tests {
     #[test]
     fn classify_post_unknown_defaults_to_local() {
         assert_eq!(classify_post(None, None, false), PostOrigin::LocalOrSeiran);
+    }
+
+    // ─── reply_delivery_allowed ────────────────────────────────────────────
+    // リプライの配信先制御（間違えると親と無関係な独立ポストとして誤配信され、
+    // スレッドが繋がらない不具合になるため、実体の有無の組み合わせを網羅する）。
+    // リモート投稿は実体（ap_object_id/at_uri）の有無、ローカル投稿は
+    // deliver_fedi/deliver_bsky カラムの値で判定が分かれる点に注意
+    // （ローカル投稿の ap_object_id は deliver_fedi に関わらず常に存在するため）。
+
+    #[test]
+    fn reply_delivery_allowed_remote_both_entities_allows_both() {
+        let meta = delivery_meta(Some("https://a/notes/1"), Some("at://did/x/y"));
+        assert_eq!(super::reply_delivery_allowed(&meta), (true, true));
+    }
+
+    #[test]
+    fn reply_delivery_allowed_remote_fedi_entity_only_disallows_bsky() {
+        // Fediリモート投稿（ap_object_idはあるがat_uriが無い）への返信は、
+        // Bsky上に親を持たないため Bsky 配信してはならない。
+        let meta = delivery_meta(Some("https://a/notes/1"), None);
+        assert_eq!(super::reply_delivery_allowed(&meta), (true, false));
+    }
+
+    #[test]
+    fn reply_delivery_allowed_remote_bsky_entity_only_disallows_fedi() {
+        let meta = delivery_meta(None, Some("at://did/x/y"));
+        assert_eq!(super::reply_delivery_allowed(&meta), (false, true));
+    }
+
+    #[test]
+    fn reply_delivery_allowed_remote_no_entity_disallows_both() {
+        let meta = delivery_meta(None, None);
+        assert_eq!(super::reply_delivery_allowed(&meta), (false, false));
+    }
+
+    #[test]
+    fn reply_delivery_allowed_local_both_delivered_allows_both() {
+        let meta = local_delivery_meta(true, true);
+        assert_eq!(super::reply_delivery_allowed(&meta), (true, true));
+    }
+
+    #[test]
+    fn reply_delivery_allowed_local_fedi_only_disallows_bsky() {
+        // fedi配送のみのローカル投稿（deliver_bsky=false）への返信は、ap_object_idが
+        // 常に存在していても Bsky 実体を持たないため Bsky 配信してはならない
+        // （実体の有無だけで判定すると誤って許可されてしまう、当初発見した不具合）。
+        let meta = local_delivery_meta(true, false);
+        assert_eq!(super::reply_delivery_allowed(&meta), (true, false));
+    }
+
+    #[test]
+    fn reply_delivery_allowed_local_bsky_only_disallows_fedi() {
+        // Bsky配送のみのローカル投稿（deliver_fedi=false）への返信は、ap_object_idが
+        // 常に生成されていても Fedi 実体の有無では判定できないため deliver_fedi を直接見る。
+        let meta = local_delivery_meta(false, true);
+        assert_eq!(super::reply_delivery_allowed(&meta), (false, true));
     }
 }

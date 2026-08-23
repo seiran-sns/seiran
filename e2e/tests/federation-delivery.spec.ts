@@ -142,10 +142,13 @@ test.describe("Fedi配送", () => {
     const user = await registerUserViaApi(request, "e2afedireply");
     await followAndWaitAccepted(fedi, user.username);
 
+    // 返信フォームの配送先トグルは親ポストが実際に持つプロトコルのみ表示されるため
+    // （reply_fedi_allowed/reply_bsky_allowed、PostComposer.tsx）、Fedi配送を検証する
+    // このテストでは親ポストも deliver_to_fedi=true で作る必要がある。
     const originalText = `元投稿 ${Date.now()}`;
     const createRes = await request.post("/api/notes/create", {
       headers: { Authorization: `Bearer ${user.token}` },
-      data: { text: originalText, deliver_to_fedi: false, deliver_to_bsky: false, visibility: "public" },
+      data: { text: originalText, deliver_to_fedi: true, deliver_to_bsky: false, visibility: "public" },
     });
     expect(createRes.ok(), `create failed: ${createRes.status()} ${await createRes.text()}`).toBeTruthy();
     const original = await createRes.json();
@@ -173,6 +176,32 @@ test.describe("Fedi配送", () => {
       .receivedActivities()
       .find((a) => a.type === "Create" && (a.object as any)?.content?.includes(replyText)) as any;
     expect(activity.object.inReplyTo).toBeTruthy();
+  });
+
+  // 元ポストが deliver_to_bsky=false のFedi限定ローカル投稿（at_uri を持たない）の場合、
+  // 返信も Bsky に配送されてはならない（親と無関係な独立ポストとして誤配信される不具合の
+  // 回帰防止。crates/seiran-api/src/handlers/notes/delivery.rs の reply_delivery_allowed）。
+  test("Fedi限定投稿への返信はBsky配送されない", async ({ request }) => {
+    const user = await registerUserViaApi(request, "e2afedionlyreply");
+
+    const originalText = `fedi限定元投稿 ${Date.now()}`;
+    const createRes = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${user.token}` },
+      data: { text: originalText, deliver_to_fedi: true, deliver_to_bsky: false, visibility: "public" },
+    });
+    expect(createRes.ok(), await createRes.text()).toBeTruthy();
+    const original = await createRes.json();
+    expect(original.deliverBsky).toBe(false);
+
+    const replyText = `fedi限定への返信 ${Date.now()}`;
+    const replyRes = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${user.token}` },
+      data: { text: replyText, reply_to_id: original.id, visibility: "public" },
+    });
+    expect(replyRes.ok(), await replyRes.text()).toBeTruthy();
+    const reply = await replyRes.json();
+    expect(reply.deliverFedi).toBe(true);
+    expect(reply.deliverBsky).toBe(false);
   });
 
   test("リポストがFediフォロワーへAnnounceとして配送される", async ({ page, request }) => {

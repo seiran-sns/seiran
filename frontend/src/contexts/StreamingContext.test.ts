@@ -8,6 +8,8 @@ const streamed = {
   createdAt: "2026-07-28T00:00:00Z",
   user: { id: 1, username: "alice", actorType: "fedi" },
   attachments: [],
+  replyFediAllowed: true,
+  replyBskyAllowed: true,
   replyCount: 0,
   quoteCount: 0,
   repostCount: 0,

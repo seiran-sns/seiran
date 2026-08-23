@@ -117,6 +117,13 @@ pub struct PostDeliveryMeta {
     /// 元ポストが`direct`の場合のスレッド起点ポストID。DM返信時、この値を子ポストへ
     /// そのまま伝播コピーする（元ポストが`direct`でなければ`None`）。
     pub thread_root_post_id: Option<i64>,
+    /// ローカル投稿が実際にFedi/Bskyへ配送されたか（投稿作成時の`deliver_to_fedi`/
+    /// `deliver_to_bsky`を永続化したもの）。ローカル投稿以外では常に`true`固定で意味を持たない
+    /// （リモート受信時はこのカラムに触れずDBデフォルトのままのため）。`ap_object_id`はローカル
+    /// 投稿なら`deliver_fedi`の値に関わらず常に生成されるため、返信の配送先制御はローカル投稿では
+    /// 実体の有無ではなくこのフラグを直接見る必要がある（`notes::delivery::reply_delivery_allowed`）。
+    pub deliver_fedi: bool,
+    pub deliver_bsky: bool,
 }
 
 /// DMメッセージセッション（スレッド起点を同じくするdirect投稿の集合）の要約。
@@ -1116,7 +1123,8 @@ impl PostRepository for PgPostRepository {
                         ORDER BY pa.position
                         LIMIT 1
                     ) AS first_image_url,
-                    p.visibility::text AS visibility, p.thread_root_post_id
+                    p.visibility::text AS visibility, p.thread_root_post_id,
+                    p.deliver_fedi, p.deliver_bsky
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id

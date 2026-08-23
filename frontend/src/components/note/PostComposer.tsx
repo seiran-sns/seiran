@@ -67,6 +67,13 @@ export default function PostComposer({
   const { user } = useAuth();
   const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo) : null;
   const quoteConstraint = quoteTo ? quoteVisibilityConstraint(quoteTo) : null;
+  // 返信の配送先トグルは、返信先ポストが実際に持つプロトコル実体のみ表示する（持たない
+  // プロトコルへ配送すると親と無関係な独立ポストとして誤配信されるため）。Bsky は
+  // followers_only 可視性を配信できないため、親の可視性制約でそれが強制される場合は
+  // 通常投稿時のプライベートボタンと同様に選択肢から外す。
+  const fediReplyAllowed = !replyTo || replyTo.replyFediAllowed;
+  const bskyReplyAllowed =
+    !replyTo || (replyTo.replyBskyAllowed && replyConstraint?.forced !== "followers_only");
 
   // 投稿ダイアログを閉じても書きかけを失わないよう、ユーザー×対象ポスト単位でローカル
   // ストレージに自動保存する（#193）。マウント時に一度だけ読み込み、以降は入力の都度保存。
@@ -81,8 +88,8 @@ export default function PostComposer({
   );
 
   const [text, setText] = useState(initialDraft?.text ?? initialText ?? "");
-  const [deliverFedi, setDeliverFedi] = useState(initialDraft?.deliverFedi ?? true);
-  const [deliverBsky, setDeliverBsky] = useState(initialDraft?.deliverBsky ?? true);
+  const [deliverFedi, setDeliverFedi] = useState(initialDraft?.deliverFedi ?? fediReplyAllowed);
+  const [deliverBsky, setDeliverBsky] = useState(initialDraft?.deliverBsky ?? bskyReplyAllowed);
   const [visibility, setVisibility] = useState<Visibility>(() => {
     if (initialDraft && !replyConstraint?.forced) return initialDraft.visibility;
     return (
@@ -116,11 +123,11 @@ export default function PostComposer({
       const draft = loadComposerDraft(draftTarget);
       setText(draft?.text ?? "");
       setAttached(draft?.attached ?? null);
-      setDeliverFedi(draft?.deliverFedi ?? true);
-      setDeliverBsky(draft?.deliverBsky ?? true);
+      setDeliverFedi(draft?.deliverFedi ?? fediReplyAllowed);
+      setDeliverBsky(draft?.deliverBsky ?? bskyReplyAllowed);
       setVisibility(draft?.visibility ?? "public");
     });
-  }, [draftTarget]);
+  }, [draftTarget, fediReplyAllowed, bskyReplyAllowed]);
 
   useEffect(() => {
     return () => {
@@ -149,13 +156,7 @@ export default function PostComposer({
     );
   }
 
-  // 返信時は配信先が元ポストのネットワークに固定される。fedi リモートへの返信のみ
-  // Fedi の緩い上限、それ以外（bsky / ローカル・seiran＝両方）は Bsky の厳しい上限を適用。
-  // 可視性がプライベートの場合は Bsky に配送されないため上限判定からも除外する。
-  const effectiveBsky = replyTo
-    ? replyTo.user.actorType !== "fedi" && visibility !== "followers_only"
-    : deliverBsky;
-  const remaining = calcRemaining(text, effectiveBsky);
+  const remaining = calcRemaining(text, deliverBsky);
   const overLimit = remaining < 0;
 
   async function submitWithVisibility(v: Visibility) {
@@ -166,8 +167,8 @@ export default function PostComposer({
       const attachmentIds = attached ? [attached.id] : [];
       const note = await api.notes.create(
         text.trim(),
-        replyTo ? true : deliverFedi,
-        replyTo ? true : deliverBsky,
+        deliverFedi,
+        deliverBsky,
         attachmentIds,
         replyTo?.id,
         undefined,
@@ -263,15 +264,6 @@ export default function PostComposer({
       />
 
       <div className={styles.scopeRow}>
-        {replyTo && (
-          <span className={styles.replyScopeNote}>
-            {replyTo.user.actorType === "fedi"
-              ? t("home:postComposer.replyToFedi")
-              : replyTo.user.actorType === "bsky"
-                ? t("home:postComposer.replyToBsky")
-                : t("home:postComposer.replyToSameNetwork")}
-          </span>
-        )}
         {uploading && <span className={styles.spinner} />}
       </div>
 
@@ -284,27 +276,27 @@ export default function PostComposer({
       )}
 
       <div className={styles.controlRow}>
-        {!replyTo && (
-          <>
-            <button
-              type="button"
-              className={`${styles.iconBtn} ${deliverFedi ? styles.scopeActive : ""}`}
-              onClick={() => setDeliverFedi((v) => !v)}
-              title={t("home:postComposer.deliverFediHint")}
-              aria-label={t("home:postComposer.deliverFediHint")}
-            >
-              <img className={styles.fediverseIcon} src={fediverseLogo} alt="" />
-            </button>
-            <button
-              type="button"
-              className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""}`}
-              onClick={() => setDeliverBsky((v) => !v)}
-              title={t("home:postComposer.deliverBskyHint")}
-              aria-label={t("home:postComposer.deliverBskyHint")}
-            >
-              <img className={styles.blueskyIcon} src={blueskyLogo} alt="" />
-            </button>
-          </>
+        {fediReplyAllowed && (
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${deliverFedi ? styles.scopeActive : ""}`}
+            onClick={() => setDeliverFedi((v) => !v)}
+            title={t("home:postComposer.deliverFediHint")}
+            aria-label={t("home:postComposer.deliverFediHint")}
+          >
+            <img className={styles.fediverseIcon} src={fediverseLogo} alt="" />
+          </button>
+        )}
+        {bskyReplyAllowed && (
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""}`}
+            onClick={() => setDeliverBsky((v) => !v)}
+            title={t("home:postComposer.deliverBskyHint")}
+            aria-label={t("home:postComposer.deliverBskyHint")}
+          >
+            <img className={styles.blueskyIcon} src={blueskyLogo} alt="" />
+          </button>
         )}
         <button
           type="button"
@@ -364,7 +356,7 @@ export default function PostComposer({
           </div>
         )}
 
-        {effectiveBsky && overLimit && (
+        {deliverBsky && overLimit && (
           <p className={styles.guide}>
             {replyTo
               ? t("home:postComposer.overLimitReply")

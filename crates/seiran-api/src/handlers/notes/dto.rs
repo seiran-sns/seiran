@@ -141,6 +141,13 @@ pub struct NoteResponse {
     pub deliver_fedi: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deliver_bsky: Option<bool>,
+    /// このノートへの返信をFedi/Bskyへ配送できるか（ノート自身が `ap_object_id`/`at_uri` の
+    /// 実体を持つか、`handlers::notes::delivery::reply_delivery_allowed` と同じ判定）。
+    /// ローカル・リモート問わず全ノートに設定する。フロントはリプライフォームの配送先
+    /// トグルの表示・非表示をこれで決める（実体を持たないプロトコルへの配送は誤配信になるため
+    /// 選択肢として出さない）。
+    pub reply_fedi_allowed: bool,
+    pub reply_bsky_allowed: bool,
     /// リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。
     /// ローカル投稿、または元URIを未取得のリモート投稿では省略（#リモートで表示バナー）。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -315,6 +322,15 @@ pub fn to_note_response(
         is_local.then(|| seiran_common::avatar::fallback_avatar_url(&p.domain, p.actor_id))
     });
 
+    // ローカル投稿は deliver_fedi/deliver_bsky カラム（実際に配送対象とした値）を直接見る。
+    // ap_object_id はローカルなら deliver_fedi に関わらず常に生成されるため、実体の有無を
+    // そのまま配送可否として使えない（`notes::delivery::reply_delivery_allowed` と同じ理由）。
+    let (reply_fedi_allowed, reply_bsky_allowed) = if is_local {
+        (p.deliver_fedi, p.deliver_bsky)
+    } else {
+        (p.post_ap_object_id.is_some(), p.post_at_uri.is_some())
+    };
+
     // リモート投稿の元URL: Fedi（AP Note ID）を優先し、無ければ Bsky（AT URI → bsky.app）を使う。
     // seiranリモート投稿は両方の実体を持つことがあるが、seiran自体はAP側が正規表現のためAP優先。
     let remote_url = if is_local {
@@ -356,6 +372,8 @@ pub fn to_note_response(
         },
         deliver_fedi: if is_local { Some(p.deliver_fedi) } else { None },
         deliver_bsky: if is_local { Some(p.deliver_bsky) } else { None },
+        reply_fedi_allowed,
+        reply_bsky_allowed,
         remote_url,
         content_warning: p.content_warning,
         poll: p.poll,

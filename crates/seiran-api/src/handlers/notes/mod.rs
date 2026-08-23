@@ -365,6 +365,8 @@ async fn create_repost(
         visibility: None,
         deliver_fedi: None,
         deliver_bsky: None,
+        reply_fedi_allowed: false,
+        reply_bsky_allowed: false,
         remote_url: None,
         content_warning: None,
         poll: None,
@@ -881,6 +883,10 @@ async fn create_regular_post(
         },
         deliver_fedi: Some(deliver_fedi),
         deliver_bsky: Some(deliver_bsky),
+        // ローカル投稿なので実際に配送対象とした値そのものが返信可否になる
+        // （`notes::delivery::reply_delivery_allowed` と同じ判定基準）。
+        reply_fedi_allowed: deliver_fedi,
+        reply_bsky_allowed: deliver_bsky,
         remote_url: None,
         content_warning: None,
         poll: None,
