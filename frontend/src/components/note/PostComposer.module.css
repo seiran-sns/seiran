@@ -1,6 +1,7 @@
 .form {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .replyBanner {
@@ -77,6 +78,8 @@
   gap: 8px;
   margin-top: 6px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .bottomRow {
@@ -86,10 +89,10 @@
   margin-top: 12px;
   border-top: 1px solid var(--border);
   padding-top: 12px;
+  min-width: 0;
 }
 
-.iconBtn,
-.visibilityBtn {
+.iconBtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -101,20 +104,21 @@
   color: var(--text-dim);
   font-size: 1rem;
   cursor: pointer;
+  border-radius: 8px;
   transition:
     border-color 0.15s,
     color 0.15s,
     background 0.15s;
 }
 
-.iconBtn {
-  border-radius: 8px;
-}
-
-.iconBtn:hover,
-.visibilityBtn:hover {
+.iconBtn:hover:not(:disabled) {
   border-color: var(--border-strong);
   color: var(--text);
+}
+
+.iconBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .blueskyIcon {
@@ -122,23 +126,9 @@
   height: 19px;
 }
 
-.visibilityGroup {
-  display: inline-flex;
-  margin-left: 4px;
-}
-
-.visibilityBtn {
-  margin-left: -1px;
-  border-radius: 0;
-}
-
-.visibilityFirst {
-  margin-left: 0;
-  border-radius: 8px 0 0 8px;
-}
-
-.visibilityLast {
-  border-radius: 0 8px 8px 0;
+.fediverseIcon {
+  width: 19px;
+  height: 19px;
 }
 
 .scopeBtn {
@@ -300,35 +290,26 @@
   min-width: 0;
 }
 
-.footerAttachBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  align-self: stretch;
-  min-width: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: none;
-  color: var(--text-dim);
-  font-size: 1rem;
-  cursor: pointer;
+.pictureIcon {
+  width: 28px;
+  height: 28px;
 }
 
-.footerAttachBtn:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  color: var(--text);
+.pictureIcon rect {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
 }
 
-.footerAttachBtn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.pictureIcon circle,
+.pictureIcon path {
+  fill: currentColor;
 }
 
 .charCount {
   font-size: 0.8rem;
   color: var(--text-faint);
-  margin-right: auto;
+  margin-left: auto;
 }
 
 .charCountOver {
@@ -342,6 +323,7 @@
 }
 
 .postBtn {
+  margin-left: auto;
   background: var(--accent-strong);
   color: #fff;
   border: none;
@@ -360,4 +342,75 @@
 .postBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.postBtnGroup {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.postBtnVariant {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--accent-strong);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 8px 14px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.postBtnVariant:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.postBtnVariant:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.postBtnTooltipWrap {
+  position: relative;
+}
+
+/* disabled状態のボタンはネイティブでmouseenter/clickを拾わないため、ホバー・クリック
+ * 判定は親wrapperで行い、ボタン自体はイベントを透過させる。 */
+.postBtnTooltipWrap .postBtnVariant:disabled {
+  pointer-events: none;
+}
+
+.popoverBelow {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  padding: 6px 10px;
+  border-radius: 6px;
+  max-width: 260px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+  animation: popoverFade 0.15s ease-out;
+}
+
+.popoverBskyIcon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }

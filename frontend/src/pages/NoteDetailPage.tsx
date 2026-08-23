@@ -232,7 +232,11 @@ export default function NoteDetailPage() {
 
       {/* リポスト詳細（#45）: 表示すべき実体（リポスト元があればそちら）でリモート判定する。 */}
       {display && display.user.actorType !== "local" && display.remoteUrl && (
-        <RemoteBanner message={t("common:remoteBanner.note")} url={display.remoteUrl} />
+        <RemoteBanner
+          message={t("common:remoteBanner.note")}
+          url={display.remoteUrl}
+          protocol={display.user.actorType === "bsky" ? "bsky" : "fedi"}
+        />
       )}
 
       {note && (

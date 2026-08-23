@@ -159,6 +159,14 @@
   object-fit: contain;
 }
 
+/* 配送先バッジ内のFediverseロゴ（🌐絵文字の代わり）。 */
+.deliveryFediIcon {
+  height: 1.2em;
+  width: 1.2em;
+  vertical-align: -0.2em;
+  object-fit: contain;
+}
+
 /* ── リモートサーバー表示（Fedi/Bsky）。アカウント行の残り幅いっぱいに広がり、
  * あふれる分はhiddenで切る（ニックネームと同じ方針）。 */
 .remoteServerBadge {

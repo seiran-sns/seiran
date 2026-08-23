@@ -28,7 +28,10 @@
 
 .warpIcon {
   font-size: 1.3rem;
+  height: 1.2em;
+  width: 1.2em;
   flex-shrink: 0;
+  object-fit: contain;
 }
 
 .avatarLarge {

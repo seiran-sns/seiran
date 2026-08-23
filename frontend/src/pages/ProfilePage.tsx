@@ -31,6 +31,7 @@ import panel from "../components/common/Panel.module.css";
 import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import TwemojiText from "../components/common/TwemojiText";
 import blueskyLogo from "../assets/bluesky-logo.svg";
+import fediverseLogo from "../assets/fediverse-logo.svg";
 import styles from "./ProfilePage.module.css";
 
 const PAGE_SIZE = 20;
@@ -331,6 +332,7 @@ export default function ProfilePage() {
         <RemoteBanner
           message={t("common:remoteBanner.user")}
           url={remoteProfileUrl(profile) as string}
+          protocol={profile.actor_type === "bsky" ? "bsky" : "fedi"}
         />
       )}
 
@@ -346,10 +348,11 @@ export default function ProfilePage() {
               className={styles.warpBanner}
               onClick={closeBridgeModal}
             >
-              <TwemojiEmoji
-                emoji={profile.bridge_protocol === "bsky" ? "🦋" : "🌐"}
-                className={styles.warpIcon}
-              />
+              {profile.bridge_protocol === "bsky" ? (
+                <TwemojiEmoji emoji="🦋" className={styles.warpIcon} />
+              ) : (
+                <img src={fediverseLogo} alt="" className={styles.warpIcon} />
+              )}
               <span>
                 {t("profile:profilePage.warpBanner.prefix")}
                 <strong>
@@ -384,7 +387,7 @@ export default function ProfilePage() {
                 {/* ローカルユーザーは他サーバーが存在しないためサーバー名表示エリアを持たず、
                     代わりにFedi形式・Bsky形式の両IDを2行で書き並べる。 */}
                 <span className={styles.acct}>
-                  <TwemojiEmoji emoji="🌐" className={styles.acctProtoIcon} />
+                  <img src={fediverseLogo} alt="" className={styles.acctProtoIcon} />
                   @{profile.username}@{profile.domain}
                   {profile.is_suspended && (
                     <span className={styles.suspendedBadge}>
@@ -403,7 +406,7 @@ export default function ProfilePage() {
                   <img src={blueskyLogo} alt="" className={styles.acctProtoIcon} />
                 )}
                 {profile.actor_type === "fedi" && (
-                  <TwemojiEmoji emoji="🌐" className={styles.acctProtoIcon} />
+                  <img src={fediverseLogo} alt="" className={styles.acctProtoIcon} />
                 )}
                 @{profile.username}
                 {profile.domain &&

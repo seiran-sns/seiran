@@ -14,6 +14,7 @@ import styles from "./PostComposer.module.css";
 import ComposerEditor from "./ComposerEditor";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
+import fediverseLogo from "../../assets/fediverse-logo.svg";
 
 interface PostComposerProps {
   onPosted?: (note: Note) => void;
@@ -90,13 +91,13 @@ export default function PostComposer({
       "public"
     );
   });
-  const [guideMessage, setGuideMessage] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState("");
   const [attached, setAttached] = useState<DriveFile | null>(initialDraft?.attached ?? null);
   const [uploading, setUploading] = useState(false);
+  const [showPrivateTooltip, setShowPrivateTooltip] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const guideTimerRef = useRef<number | null>(null);
+  const privateTooltipTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -123,39 +124,29 @@ export default function PostComposer({
 
   useEffect(() => {
     return () => {
-      if (guideTimerRef.current) window.clearTimeout(guideTimerRef.current);
+      if (privateTooltipTimerRef.current) window.clearTimeout(privateTooltipTimerRef.current);
     };
   }, []);
 
-  function showGuide(message: string) {
-    setGuideMessage(message);
-    if (guideTimerRef.current) window.clearTimeout(guideTimerRef.current);
-    guideTimerRef.current = window.setTimeout(
-      () => setGuideMessage(null),
+  // Bsky 配送オンの間は🔒️プライベート投稿ボタンをグレーアウトする（Bsky はプロトコル上
+  // followers_only を配信できないため相互排他）。吹き出しはホバー・クリックの両方で出す。
+  function handlePrivateTooltipEnter() {
+    if (!deliverBsky) return;
+    setShowPrivateTooltip(true);
+  }
+
+  function handlePrivateTooltipLeave() {
+    setShowPrivateTooltip(false);
+  }
+
+  function handlePrivateTooltipClick() {
+    if (!deliverBsky) return;
+    setShowPrivateTooltip(true);
+    if (privateTooltipTimerRef.current) window.clearTimeout(privateTooltipTimerRef.current);
+    privateTooltipTimerRef.current = window.setTimeout(
+      () => setShowPrivateTooltip(false),
       3200,
     );
-  }
-
-  // Bsky はプロトコル上 followers_only（プライベート）投稿を配信できないため相互排他。
-  // unlisted（ひかえめ）は Bsky 配送と両立できる。
-  function handleVisibilityChange(next: Visibility) {
-    if (quoteTo && quoteTo.visibility === "unlisted" && next === "public") {
-      showGuide(t("home:postComposer.quoteUnlistedPublicConflict"));
-      return;
-    }
-    if (next === "followers_only" && deliverBsky) {
-      showGuide(t("home:postComposer.bskyPrivateConflict"));
-      return;
-    }
-    setVisibility(next);
-  }
-
-  function handleToggleBsky() {
-    if (!deliverBsky && visibility === "followers_only") {
-      showGuide(t("home:postComposer.bskyVisibilityConflict"));
-      return;
-    }
-    setDeliverBsky((v) => !v);
   }
 
   // 返信時は配信先が元ポストのネットワークに固定される。fedi リモートへの返信のみ
@@ -167,8 +158,7 @@ export default function PostComposer({
   const remaining = calcRemaining(text, effectiveBsky);
   const overLimit = remaining < 0;
 
-  async function handlePost(e: FormEvent) {
-    e.preventDefault();
+  async function submitWithVisibility(v: Visibility) {
     if (!text.trim() || overLimit || posting) return;
     setError("");
     setPosting(true);
@@ -181,7 +171,7 @@ export default function PostComposer({
         attachmentIds,
         replyTo?.id,
         undefined,
-        visibility,
+        v,
         undefined,
         quoteTo?.id,
       );
@@ -195,6 +185,12 @@ export default function PostComposer({
     } finally {
       setPosting(false);
     }
+  }
+
+  // 返信は可視性が固定（forced）されるため単一の投稿ボタンで送信する。
+  function handlePost(e: FormEvent) {
+    e.preventDefault();
+    submitWithVisibility(replyConstraint?.forced ?? visibility);
   }
 
   async function uploadFile(file: File) {
@@ -279,15 +275,17 @@ export default function PostComposer({
         {uploading && <span className={styles.spinner} />}
       </div>
 
-      {replyConstraint?.forced ? (
+      {replyConstraint?.forced && (
         <div className={styles.visibilityRow}>
           <span className={styles.replyScopeNote}>
             <TwemojiEmoji emoji="🔒️" /> {t("home:postComposer.forcedPrivateNote")}
           </span>
         </div>
-      ) : (
-        !replyTo && (
-          <div className={styles.controlRow}>
+      )}
+
+      <div className={styles.controlRow}>
+        {!replyTo && (
+          <>
             <button
               type="button"
               className={`${styles.iconBtn} ${deliverFedi ? styles.scopeActive : ""}`}
@@ -295,61 +293,43 @@ export default function PostComposer({
               title={t("home:postComposer.deliverFediHint")}
               aria-label={t("home:postComposer.deliverFediHint")}
             >
-              <TwemojiEmoji emoji="🌐" />
+              <img className={styles.fediverseIcon} src={fediverseLogo} alt="" />
             </button>
             <button
               type="button"
               className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""}`}
-              onClick={handleToggleBsky}
+              onClick={() => setDeliverBsky((v) => !v)}
               title={t("home:postComposer.deliverBskyHint")}
               aria-label={t("home:postComposer.deliverBskyHint")}
             >
               <img className={styles.blueskyIcon} src={blueskyLogo} alt="" />
             </button>
-            <div className={styles.visibilityGroup}>
-              <button
-                type="button"
-                className={`${styles.visibilityBtn} ${styles.visibilityFirst} ${
-                  visibility === "public" ? styles.scopeActive : ""
-                }`}
-                onClick={() => handleVisibilityChange("public")}
-                disabled={quoteTo?.visibility === "unlisted"}
-                title={t("home:postComposer.visibilityPublicHint")}
-                aria-label={t("home:postComposer.visibilityPublicHint")}
-              >
-                <TwemojiEmoji emoji="👥" />
-              </button>
-              <button
-                type="button"
-                className={`${styles.visibilityBtn} ${
-                  visibility === "unlisted" ? styles.scopeActive : ""
-                }`}
-                onClick={() => handleVisibilityChange("unlisted")}
-                title={t("home:postComposer.visibilityUnlistedHint")}
-                aria-label={t("home:postComposer.visibilityUnlistedHint")}
-              >
-                <TwemojiEmoji emoji="🤫" />
-              </button>
-              <button
-                type="button"
-                className={`${styles.visibilityBtn} ${styles.visibilityLast} ${
-                  visibility === "followers_only" ? styles.scopeActive : ""
-                }`}
-                onClick={() => handleVisibilityChange("followers_only")}
-                title={t("home:postComposer.visibilityPrivateHint")}
-                aria-label={t("home:postComposer.visibilityPrivateHint")}
-              >
-                <TwemojiEmoji emoji="🔒️" />
-              </button>
-            </div>
-            {guideMessage && (
-              <span className={styles.popover} role="status">
-                {guideMessage}
-              </span>
-            )}
-          </div>
-        )
-      )}
+          </>
+        )}
+        <button
+          type="button"
+          className={styles.iconBtn}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || !!attached}
+          title={t("home:postComposer.attachTitle")}
+          aria-label={t("home:postComposer.attachTitle")}
+        >
+          {uploading ? (
+            <span className={styles.spinner} />
+          ) : (
+            <svg className={styles.pictureIcon} viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+              <circle cx="8.5" cy="9.5" r="1.6" />
+              <path d="M4.5 18 9 12.8l3 3.2 3.5-4.2L19.5 18Z" />
+            </svg>
+          )}
+        </button>
+        <span
+          className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}
+        >
+          {t("home:postComposer.remainingCount", { count: remaining })}
+        </span>
+      </div>
 
       <div className={styles.bottomRow}>
         {attached && (
@@ -393,31 +373,74 @@ export default function PostComposer({
         )}
 
         <div className={styles.footer}>
-          <span
-            className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}
-          >
-            {t("home:postComposer.remainingCount", { count: remaining })}
-          </span>
           {error && <span className={styles.error}>{error}</span>}
-          <button
-            type="button"
-            className={styles.footerAttachBtn}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || !!attached}
-            title={t("home:postComposer.attachTitle")}
-            aria-label={t("home:postComposer.attachTitle")}
-          >
-            {uploading ? <span className={styles.spinner} /> : <TwemojiEmoji emoji="📎" />}
-          </button>
-          <button
-            type="submit"
-            className={styles.postBtn}
-            disabled={posting || !text.trim() || overLimit}
-          >
-            {posting
-              ? t("home:postComposer.posting")
-              : t("home:postComposer.postButton")}
-          </button>
+          {replyTo ? (
+            <button
+              type="submit"
+              className={styles.postBtn}
+              disabled={posting || !text.trim() || overLimit}
+            >
+              {posting
+                ? t("home:postComposer.posting")
+                : t("home:postComposer.postButton")}
+            </button>
+          ) : (
+            <div className={styles.postBtnGroup}>
+              <button
+                type="button"
+                className={styles.postBtnVariant}
+                disabled={
+                  posting || !text.trim() || overLimit || quoteTo?.visibility === "unlisted"
+                }
+                title={
+                  quoteTo?.visibility === "unlisted"
+                    ? t("home:postComposer.quoteUnlistedPublicConflict")
+                    : undefined
+                }
+                onClick={() => submitWithVisibility("public")}
+              >
+                <span aria-hidden="true">
+                  <TwemojiEmoji emoji="🌐" />
+                </span>
+                {t("home:postComposer.postButtonPublic")}
+              </button>
+              <button
+                type="button"
+                className={styles.postBtnVariant}
+                disabled={posting || !text.trim() || overLimit}
+                onClick={() => submitWithVisibility("unlisted")}
+              >
+                <span aria-hidden="true">
+                  <TwemojiEmoji emoji="🌙" />
+                </span>
+                {t("home:postComposer.postButtonUnlisted")}
+              </button>
+              <div
+                className={styles.postBtnTooltipWrap}
+                onMouseEnter={handlePrivateTooltipEnter}
+                onMouseLeave={handlePrivateTooltipLeave}
+                onClick={handlePrivateTooltipClick}
+              >
+                <button
+                  type="button"
+                  className={styles.postBtnVariant}
+                  disabled={posting || !text.trim() || overLimit || deliverBsky}
+                  onClick={() => submitWithVisibility("followers_only")}
+                >
+                  <span aria-hidden="true">
+                    <TwemojiEmoji emoji="🔒️" />
+                  </span>
+                  {t("home:postComposer.postButtonPrivate")}
+                </button>
+                {showPrivateTooltip && (
+                  <span className={styles.popoverBelow} role="status">
+                    <img className={styles.popoverBskyIcon} src={blueskyLogo} alt="" />
+                    {t("home:postComposer.bskyOffToPrivateHint")}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </form>

@@ -33,6 +33,7 @@ import NoteCardActions from "./NoteCardActions";
 import ReactionChips from "./ReactionChips";
 import { useComposer } from "../../contexts/ComposerContext";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
+import fediverseLogo from "../../assets/fediverse-logo.svg";
 import styles from "./NoteCard.module.css";
 
 export function followToggleAction(
@@ -380,7 +381,7 @@ function PostContent({
                       {b.protocol === "bsky" ? (
                         <img src={blueskyLogo} alt="" className={styles.deliveryBskyIcon} />
                       ) : (
-                        <TwemojiEmoji emoji="🌐" />
+                        <img src={fediverseLogo} alt="" className={styles.deliveryFediIcon} />
                       )}
                     </span>
                   ))}
