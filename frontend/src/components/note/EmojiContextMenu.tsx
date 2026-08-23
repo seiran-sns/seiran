@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { fetchCustomEmojiShortcodes } from "../../lib/customEmojis";
+import { getAdminTopics } from "../../lib/roles";
 import EmojiImportDialog from "../admin/EmojiImportDialog";
 import styles from "./EmojiContextMenu.module.css";
 
@@ -21,9 +22,10 @@ function hostnameOf(url: string): string | undefined {
 }
 
 /**
- * 本文内絵文字・絵文字リアクションを右クリックすると、管理者にのみリモート絵文字の
- * インポートメニューを出す（#73）。ローカル絵文字や非管理者には介入せず、渡された
- * 要素（`<img>`）をそのまま返す。
+ * 本文内絵文字・絵文字リアクションを右クリックすると、絵文字管理権限を持つ
+ * ロール（admin/moderator/emoji-editor）にのみリモート絵文字のインポートメニューを
+ * 出す（#73、#179）。バックエンド側の `emoji_admin_only` と同じ権限範囲に揃えている。
+ * ローカル絵文字や権限のないユーザーには介入せず、渡された要素（`<img>`）をそのまま返す。
  *
  * ローカル/リモートの判定は画像URLのオリジンでは行わない。ローカルのカスタム絵文字も
  * S3/CDN 等の外部ストレージから配信されることがあり、その場合オリジン比較だと常に
@@ -61,7 +63,7 @@ export default function EmojiContextMenu({ shortcode, imageUrl, children }: Emoj
     };
   }, [menuPos]);
 
-  if (user?.role !== "admin" || !isRemote || !isValidElement(children)) {
+  if (!getAdminTopics(user?.role).includes("emojis") || !isRemote || !isValidElement(children)) {
     return children;
   }
 
