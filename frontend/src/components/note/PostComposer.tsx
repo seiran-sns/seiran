@@ -29,20 +29,28 @@ interface PostComposerProps {
 
 type Visibility = "public" | "unlisted" | "followers_only";
 
-/** 返信先ポストの可視性から、この返信の選択肢・デフォルト・強制値を算出する。 */
+/** 公開範囲を狭い順に並べたもの（`direct`は別軸のためここには含めない）。 */
+const VISIBILITY_NARROWING_ORDER: Visibility[] = ["public", "unlisted", "followers_only"];
+
+/**
+ * 返信先ポストの可視性から、この返信で選択可能な公開範囲（狭める方向のみ）・デフォルト値を
+ * 算出する。バックエンド（`ReplyContext::resolve_visibility`）は親より広い範囲への変更も
+ * 技術的には許容するが、UIでは「狭めることはできるべき」という要件に合わせて狭める方向の
+ * 選択肢のみ提示する。
+ */
 export function replyVisibilityConstraint(replyTo?: Note): {
-  forced: Visibility | null;
+  options: Visibility[];
   defaultValue: Visibility;
 } {
   const parent = replyTo?.visibility;
   if (parent === "followers_only") {
-    return { forced: "followers_only", defaultValue: "followers_only" };
+    return { options: ["followers_only"], defaultValue: "followers_only" };
   }
   if (parent === "unlisted") {
-    return { forced: null, defaultValue: "unlisted" };
+    return { options: ["unlisted", "followers_only"], defaultValue: "unlisted" };
   }
-  // undefined(public) / "direct" / 想定外値 → 制約なし
-  return { forced: null, defaultValue: "public" };
+  // undefined(public) / "direct" / 想定外値 → 制約なし（3段階すべて選択可）
+  return { options: VISIBILITY_NARROWING_ORDER, defaultValue: "public" };
 }
 
 /** 引用対象ポストの可視性から、この引用のデフォルト可視性を算出する。 */
@@ -69,11 +77,11 @@ export default function PostComposer({
   const quoteConstraint = quoteTo ? quoteVisibilityConstraint(quoteTo) : null;
   // 返信の配送先トグルは、返信先ポストが実際に持つプロトコル実体のみ表示する（持たない
   // プロトコルへ配送すると親と無関係な独立ポストとして誤配信されるため）。Bsky は
-  // followers_only 可視性を配信できないため、親の可視性制約でそれが強制される場合は
-  // 通常投稿時のプライベートボタンと同様に選択肢から外す。
+  // followers_only 可視性を配信できないため、親自体が非公開（＝この返信も非公開固定）
+  // の場合は通常投稿時のプライベートボタンと同様に選択肢から外す。
   const fediReplyAllowed = !replyTo || replyTo.replyFediAllowed;
   const bskyReplyAllowed =
-    !replyTo || (replyTo.replyBskyAllowed && replyConstraint?.forced !== "followers_only");
+    !replyTo || (replyTo.replyBskyAllowed && replyTo.visibility !== "followers_only");
 
   // 投稿ダイアログを閉じても書きかけを失わないよう、ユーザー×対象ポスト単位でローカル
   // ストレージに自動保存する（#193）。マウント時に一度だけ読み込み、以降は入力の都度保存。
@@ -91,7 +99,7 @@ export default function PostComposer({
   const [deliverFedi, setDeliverFedi] = useState(initialDraft?.deliverFedi ?? fediReplyAllowed);
   const [deliverBsky, setDeliverBsky] = useState(initialDraft?.deliverBsky ?? bskyReplyAllowed);
   const [visibility, setVisibility] = useState<Visibility>(() => {
-    if (initialDraft && !replyConstraint?.forced) return initialDraft.visibility;
+    if (initialDraft && !replyTo) return initialDraft.visibility;
     return (
       replyConstraint?.defaultValue ??
       quoteConstraint?.defaultValue ??
@@ -159,6 +167,15 @@ export default function PostComposer({
   const remaining = calcRemaining(text, deliverBsky);
   const overLimit = remaining < 0;
 
+  // 返信で表示する公開範囲ボタン。親から狭める方向のみ（replyVisibilityConstraint）、
+  // かつ Bsky 配送中は followers_only を除く（プロトコル上フォロワー限定配信ができない
+  // ため。新規投稿・引用は常に3段階全て表示し、followers_only はグレーアウト＋ツール
+  // チップで理由を説明する既存方式のまま。返信は選択肢が親から動的に絞られるため、
+  // 常にグレーアウトされ続けるボタンを出すより非表示にする方が分かりやすい）。
+  const replyVisibilityOptions: Visibility[] = (
+    replyConstraint?.options ?? []
+  ).filter((v) => v !== "followers_only" || !deliverBsky);
+
   async function submitWithVisibility(v: Visibility) {
     if (!text.trim() || overLimit || posting) return;
     setError("");
@@ -188,10 +205,11 @@ export default function PostComposer({
     }
   }
 
-  // 返信は可視性が固定（forced）されるため単一の投稿ボタンで送信する。
+  // キーボードショートカット（Ctrl+Enter等）送信時はデフォルトの公開範囲を使う
+  // （通常投稿・返信いずれもボタン群からのクリックが主経路のため）。
   function handlePost(e: FormEvent) {
     e.preventDefault();
-    submitWithVisibility(replyConstraint?.forced ?? visibility);
+    submitWithVisibility(visibility);
   }
 
   async function uploadFile(file: File) {
@@ -267,7 +285,7 @@ export default function PostComposer({
         {uploading && <span className={styles.spinner} />}
       </div>
 
-      {replyConstraint?.forced && (
+      {replyTo?.visibility === "followers_only" && (
         <div className={styles.visibilityRow}>
           <span className={styles.replyScopeNote}>
             <TwemojiEmoji emoji="🔒️" /> {t("home:postComposer.forcedPrivateNote")}
@@ -367,15 +385,47 @@ export default function PostComposer({
         <div className={styles.footer}>
           {error && <span className={styles.error}>{error}</span>}
           {replyTo ? (
-            <button
-              type="submit"
-              className={styles.postBtn}
-              disabled={posting || !text.trim() || overLimit}
-            >
-              {posting
-                ? t("home:postComposer.posting")
-                : t("home:postComposer.postButton")}
-            </button>
+            <div className={styles.postBtnGroup}>
+              {replyVisibilityOptions.includes("public") && (
+                <button
+                  type="button"
+                  className={styles.postBtnVariant}
+                  disabled={posting || !text.trim() || overLimit}
+                  onClick={() => submitWithVisibility("public")}
+                >
+                  <span aria-hidden="true">
+                    <TwemojiEmoji emoji="🌐" />
+                  </span>
+                  {t("home:postComposer.postButtonPublic")}
+                </button>
+              )}
+              {replyVisibilityOptions.includes("unlisted") && (
+                <button
+                  type="button"
+                  className={styles.postBtnVariant}
+                  disabled={posting || !text.trim() || overLimit}
+                  onClick={() => submitWithVisibility("unlisted")}
+                >
+                  <span aria-hidden="true">
+                    <TwemojiEmoji emoji="🌙" />
+                  </span>
+                  {t("home:postComposer.postButtonUnlisted")}
+                </button>
+              )}
+              {replyVisibilityOptions.includes("followers_only") && (
+                <button
+                  type="button"
+                  className={styles.postBtnVariant}
+                  disabled={posting || !text.trim() || overLimit}
+                  onClick={() => submitWithVisibility("followers_only")}
+                >
+                  <span aria-hidden="true">
+                    <TwemojiEmoji emoji="🔒️" />
+                  </span>
+                  {t("home:postComposer.postButtonPrivate")}
+                </button>
+              )}
+            </div>
           ) : (
             <div className={styles.postBtnGroup}>
               <button

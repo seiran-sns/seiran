@@ -103,8 +103,6 @@
     "overLimitReply": "This exceeds Bluesky's character limit.",
     "overLimitDefault": "This exceeds Bluesky's character limit. Turn off Bsky to post anyway.",
     "remainingCount": "{{count}} left",
-    "posting": "Posting...",
-    "postButton": "Post",
     "postButtonPublic": "Post",
     "postButtonUnlisted": "Unlisted",
     "postButtonPrivate": "Private",

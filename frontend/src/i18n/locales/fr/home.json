@@ -103,8 +103,6 @@
     "overLimitReply": "Cela dépasse la limite de caractères de Bluesky.",
     "overLimitDefault": "Cela dépasse la limite de caractères de Bluesky. Désactivez quand même Bsky pour publier.",
     "remainingCount": "{{count}} restant",
-    "posting": "Affectation...",
-    "postButton": "Poste",
     "postButtonPublic": "Publier",
     "postButtonUnlisted": "Non répertorié",
     "postButtonPrivate": "Privé",

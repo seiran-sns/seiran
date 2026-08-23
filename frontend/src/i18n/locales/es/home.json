@@ -103,8 +103,6 @@
     "overLimitReply": "Esto excede el límite de caracteres de Bluesky.",
     "overLimitDefault": "Esto excede el límite de caracteres de Bluesky. Desactiva Bsky para publicar de todos modos.",
     "remainingCount": "{{count}} izquierda",
-    "posting": "Destino...",
-    "postButton": "Correo",
     "postButtonPublic": "Publicar",
     "postButtonUnlisted": "No listado",
     "postButtonPrivate": "Privado",

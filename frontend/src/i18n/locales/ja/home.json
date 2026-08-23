@@ -103,8 +103,6 @@
     "overLimitReply": "Bluesky の文字数制限を超えています。",
     "overLimitDefault": "Bluesky の文字数制限を超えています。Bsky をオフにすると投稿できます。",
     "remainingCount": "残り {{count}}",
-    "posting": "投稿中...",
-    "postButton": "投稿",
     "postButtonPublic": "投稿",
     "postButtonUnlisted": "ひかえめ",
     "postButtonPrivate": "プライベート",

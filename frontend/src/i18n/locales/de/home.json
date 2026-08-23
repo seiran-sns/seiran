@@ -103,8 +103,6 @@
     "overLimitReply": "Dies überschreitet die Zeichenbeschränkung von Bluesky.",
     "overLimitDefault": "Dies überschreitet die Zeichenbeschränkung von Bluesky. Schalten Sie Bsky trotzdem aus, um etwas zu posten.",
     "remainingCount": "{{count}} übrig",
-    "posting": "Posten...",
-    "postButton": "Post",
     "postButtonPublic": "Posten",
     "postButtonUnlisted": "Nicht gelistet",
     "postButtonPrivate": "Privat",

@@ -103,8 +103,6 @@
     "overLimitReply": "이는 Bluesky의 글자 수 제한을 초과합니다.",
     "overLimitDefault": "이는 Bluesky의 글자 수 제한을 초과합니다. 어쨌든 게시하려면 Bsky를 끄세요.",
     "remainingCount": "{{count}} 남음",
-    "posting": "전기...",
-    "postButton": "우편",
     "postButtonPublic": "게시",
     "postButtonUnlisted": "미등록",
     "postButtonPrivate": "비공개",

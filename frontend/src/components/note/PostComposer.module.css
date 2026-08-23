@@ -322,28 +322,6 @@
   color: var(--danger);
 }
 
-.postBtn {
-  margin-left: auto;
-  background: var(--accent-strong);
-  color: #fff;
-  border: none;
-  border-radius: 20px;
-  padding: 8px 22px;
-  font-size: 0.9rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.postBtn:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
-.postBtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .postBtnGroup {
   display: flex;
   flex-wrap: wrap;

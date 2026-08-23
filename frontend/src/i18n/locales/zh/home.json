@@ -103,8 +103,6 @@
     "overLimitReply": "这超出了 Bluesky 的字符限制。",
     "overLimitDefault": "这超出了 Bluesky 的字符限制。无论如何，请关闭 Bsky 来发帖。",
     "remainingCount": "{{count}} 左",
-    "posting": "发布...",
-    "postButton": "邮政",
     "postButtonPublic": "发布",
     "postButtonUnlisted": "不列出",
     "postButtonPrivate": "私密",

@@ -86,3 +86,84 @@ test.describe("返信フォームの配送先トグル出現制御", () => {
     await expect(page.getByTitle("Blueskyに配送")).toBeVisible();
   });
 });
+
+// 返信フォームの公開範囲ボタンは、返信先の公開範囲より狭める方向のみ選択可能にする
+// （PostComposer.tsx replyVisibilityConstraint）。バックエンドは広げる方向も技術的には
+// 許容するが、UIでは意図しない公開範囲の拡大を防ぐため狭める方向のみ提示する。
+test.describe("返信フォームの公開範囲ボタン絞り込み", () => {
+  async function createLocalPost(
+    request: import("@playwright/test").APIRequestContext,
+    token: string,
+    visibility: "public" | "unlisted" | "followers_only",
+    deliverBsky = false,
+  ) {
+    const text = `公開範囲確認元投稿 ${Date.now()}-${Math.random()}`;
+    const res = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { text, deliver_to_fedi: true, deliver_to_bsky: deliverBsky, visibility },
+    });
+    expect(res.ok(), `create failed: ${res.status()} ${await res.text()}`).toBeTruthy();
+    return res.json();
+  }
+
+  test("パブリック投稿への返信は3段階すべて選べる", async ({ page, request }) => {
+    const user = await registerUserViaApi(request, "e2avispublic");
+    const original = await createLocalPost(request, user.token, "public");
+
+    await seedAuth(page, user.token);
+    await page.goto(`/notes/${original.id}`);
+    await page.getByTitle("返信", { exact: true }).click();
+    await expect(page.getByPlaceholder("返信を入力")).toBeVisible();
+
+    await expect(page.getByRole("button", { name: "投稿", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "ひかえめ", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "プライベート", exact: true })).toBeVisible();
+  });
+
+  test("ひかえめ投稿への返信はひかえめ・プライベートのみ選べる（パブリックは選べない）", async ({
+    page,
+    request,
+  }) => {
+    const user = await registerUserViaApi(request, "e2avisunlist");
+    const original = await createLocalPost(request, user.token, "unlisted");
+
+    await seedAuth(page, user.token);
+    await page.goto(`/notes/${original.id}`);
+    await page.getByTitle("返信", { exact: true }).click();
+    await expect(page.getByPlaceholder("返信を入力")).toBeVisible();
+
+    await expect(page.getByRole("button", { name: "投稿", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "ひかえめ", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "プライベート", exact: true })).toBeVisible();
+  });
+
+  test("プライベート投稿への返信はプライベートのみ選べる", async ({ page, request }) => {
+    const user = await registerUserViaApi(request, "e2avisprivate");
+    const original = await createLocalPost(request, user.token, "followers_only");
+
+    await seedAuth(page, user.token);
+    await page.goto(`/notes/${original.id}`);
+    await page.getByTitle("返信", { exact: true }).click();
+    await expect(page.getByPlaceholder("返信を入力")).toBeVisible();
+
+    await expect(page.getByRole("button", { name: "投稿", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "ひかえめ", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "プライベート", exact: true })).toBeVisible();
+  });
+
+  test("Bsky配送される返信ではプライベートボタンが表示されない", async ({ page, request }) => {
+    const user = await registerUserViaApi(request, "e2avisbsky");
+    const original = await createLocalPost(request, user.token, "public", true);
+
+    await seedAuth(page, user.token);
+    await page.goto(`/notes/${original.id}`);
+    await page.getByTitle("返信", { exact: true }).click();
+    await expect(page.getByPlaceholder("返信を入力")).toBeVisible();
+
+    // 初期状態は Bsky トグルON（親が両方配送）なのでプライベートは出ない。
+    await expect(page.getByRole("button", { name: "プライベート", exact: true })).toHaveCount(0);
+    // Bskyトグルをオフにすれば選択肢に戻ってくる。
+    await page.getByTitle("Blueskyに配送").click();
+    await expect(page.getByRole("button", { name: "プライベート", exact: true })).toBeVisible();
+  });
+});
