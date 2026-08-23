@@ -1,4 +1,5 @@
 import { ReactNode, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import styles from "./Modal.module.css";
 
@@ -23,7 +24,10 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
 
   if (!open) return null;
 
-  return (
+  // NoteCard内の右クリックメニュー等、深くネストした場所からも開かれる。祖先の transform 等が
+  // 作るスタッキングコンテキストに閉じ込められると z-index が効かず、他のポップオーバーの裏に
+  // 隠れたり逆にヘッダー等の上に埋もれずかぶさったりするため、body 直下へポータルして描画する。
+  return createPortal(
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
@@ -34,6 +38,7 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
         </div>
         <div className={styles.body}>{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

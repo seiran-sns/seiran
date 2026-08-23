@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ReactionActor, ReactionSummary } from "../../api/client";
 import { fetchCustomEmojiShortcodes, parseCustomEmojiShortcode } from "../../lib/customEmojis";
@@ -73,6 +73,7 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
   const [failed, setFailed] = useState(false);
   const fetchedRef = useRef(false);
   const timerRef = useRef<number | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   // 自分が既に付けているリアクションの取消は常に許可する（バックエンドは絵文字の実在確認をせず削除する）。
   // 新規追加は、カスタム絵文字ならこのサーバーに登録済みの場合のみ許可する
@@ -80,30 +81,54 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
   const shortcode = parseCustomEmojiShortcode(r.emoji);
   const addBlocked = !r.reactedByMe && shortcode !== null && !(knownShortcodes?.has(shortcode) ?? false);
 
-  function ensureFetched() {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-    setLoading(true);
-    api.notes
-      .reactionActors(noteId, r.emoji)
-      .then((res) => setActors(res.actors))
-      .catch(() => setFailed(true))
-      .finally(() => setLoading(false));
-  }
-
-  function onEnter() {
-    ensureFetched();
+  const onEnter = useCallback(() => {
+    if (!fetchedRef.current) {
+      fetchedRef.current = true;
+      setLoading(true);
+      api.notes
+        .reactionActors(noteId, r.emoji)
+        .then((res) => setActors(res.actors))
+        .catch(() => setFailed(true))
+        .finally(() => setLoading(false));
+    }
     if (timerRef.current) window.clearTimeout(timerRef.current);
     setOpen(true);
-  }
+  }, [noteId, r.emoji]);
 
-  function onLeave() {
+  const onLeave = useCallback(() => {
     // 少し遅延させてから閉じる（ポップオーバーへのカーソル移動を許容）。
     timerRef.current = window.setTimeout(() => setOpen(false), 120);
-  }
+  }, []);
+
+  // `onMouseEnter`/`onMouseLeave`（Reactの合成イベント）はDOM階層ではなくReactツリー上の
+  // 親子関係に基づいて伝播範囲が決まる。EmojiContextMenu配下のメニュー・インポートダイアログは
+  // `createPortal`でDOM上はbody直下に描画されるが、Reactツリー上はこの chipWrap の子孫のまま
+  // なので合成イベントの mouseleave が発火せず、マウスをそちらへ移動してもポップオーバーが
+  // 開いたままになってしまう。DOM階層（`relatedTarget`が実際にこの要素の外かどうか）で正しく
+  // 判定するため、ネイティブイベントリスナーで実装する。
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    function handleOver(e: MouseEvent) {
+      const related = e.relatedTarget as Node | null;
+      if (related && wrapRef.current?.contains(related)) return;
+      onEnter();
+    }
+    function handleOut(e: MouseEvent) {
+      const related = e.relatedTarget as Node | null;
+      if (related && wrapRef.current?.contains(related)) return;
+      onLeave();
+    }
+    el.addEventListener("mouseover", handleOver);
+    el.addEventListener("mouseout", handleOut);
+    return () => {
+      el.removeEventListener("mouseover", handleOver);
+      el.removeEventListener("mouseout", handleOut);
+    };
+  }, [onEnter, onLeave]);
 
   return (
-    <div className={styles.chipWrap} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+    <div className={styles.chipWrap} ref={wrapRef}>
       <button
         type="button"
         className={`${styles.chip} ${r.reactedByMe ? styles.chipActive : ""}`}
@@ -126,12 +151,7 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
       </button>
 
       {open && (
-        <div
-          className={styles.popover}
-          onMouseEnter={onEnter}
-          onMouseLeave={onLeave}
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
           {loading && <p className={styles.dim}>{t("common:loading")}</p>}
           {failed && <p className={styles.dim}>{t("home:reactionChips.actorsFetchFailed")}</p>}
           {actors && actors.length > 0 && (
