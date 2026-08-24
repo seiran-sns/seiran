@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note, getErrorMessage } from "../api/client";
 import RemoteBanner from "../components/common/RemoteBanner";
@@ -22,11 +22,15 @@ export default function NoteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const goBack = useGoBack();
   const { noteDetailTab, setNoteDetailTab, noteContextScroll, setNoteContextScroll } = useRightPane();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // `#open_cw` 付きURLでの遷移時、CWを開いた状態で表示する（#229）。
+  const [forceOpenCw, setForceOpenCw] = useState(false);
 
   // 前後の投稿は対象ポストの取得と同時に自動で読み込む（#226、ボタン操作不要）。
   // 最大5件ずつ、続きは読み込みボタンで継続取得する。
@@ -61,6 +65,12 @@ export default function NoteDetailPage() {
     };
   }, [id]);
 
+  // `#open_cw` ハッシュ付きでの遷移を検出する（#229）。タブ同期effect（下記）が
+  // URLへ書き戻す際にハッシュを保持するため、ここで読んでも消えていない。
+  useEffect(() => {
+    setForceOpenCw(window.location.hash === "#open_cw");
+  }, [id]);
+
   // タブ選択状態をURLの?tab=と同期する（#226）。マウント時（＝ノート切り替え時）に
   // URLへ既にタブ番号が入っていればそれを復元し（ブラウザリロード後もタブ選択を維持するため）、
   // 無ければ RightPaneContext が持つ現在値（他ポスト間でのセッション内タブ記憶）をそのまま使う。
@@ -73,15 +83,13 @@ export default function NoteDetailPage() {
   }, [id]);
 
   // タブが変わるたびURLへ反映する（履歴を汚さないよう置き換え）。
+  // react-router-dom v6のsetSearchParamsはsearch部分のみでナビゲートし
+  // location.hashを消してしまうため（#open_cwハッシュ経由のCW展開が壊れる）、
+  // navigateでハッシュを保ったままURLを組み立てる。
   useEffect(() => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("tab", String(noteDetailTab));
-        return next;
-      },
-      { replace: true },
-    );
+    const next = new URLSearchParams(location.search);
+    next.set("tab", String(noteDetailTab));
+    navigate(`${location.pathname}?${next.toString()}${location.hash}`, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteDetailTab]);
 
@@ -179,7 +187,7 @@ export default function NoteDetailPage() {
     if (ctxLoading) return <p className={panel.message}>{t("common:loading")}</p>;
     const targetCard = note ? (
       <div ref={targetCardRef}>
-        <NoteCard note={note} large linkToDetail={false} />
+        <NoteCard note={note} large linkToDetail={false} forceOpenCw={forceOpenCw} />
       </div>
     ) : null;
     if (ctxLoaded && before.length === 0 && after.length === 0) {
@@ -241,7 +249,7 @@ export default function NoteDetailPage() {
 
       {note && (
         // 主役ポストはタイムラインと同じ NoteCard を大型表示で共用する（#43）。リポスト表示は NoteCard 内部で処理（#45）。
-        <NoteCard note={note} large linkToDetail={false} />
+        <NoteCard note={note} large linkToDetail={false} forceOpenCw={forceOpenCw} />
       )}
     </>
   );

@@ -21,6 +21,9 @@ export interface ComposerDraft {
   pollChoices: string[];
   pollMultiple: boolean;
   pollExpiry: DraftPollExpiry;
+  /** CW（閲覧注意）編集中かどうか（#229）。 */
+  cwEnabled: boolean;
+  cwGuide: string;
 }
 
 export type DraftTarget =
@@ -87,7 +90,12 @@ export function loadComposerDraft(target: DraftTarget): ComposerDraft | null {
 
 /** 本文・添付とも空の下書きは保存せず、既存の下書きがあれば消す（クリア相当）。 */
 export function saveComposerDraft(target: DraftTarget, draft: ComposerDraft): void {
-  if (!draft.text.trim() && draft.attachments.length === 0 && !draft.pollEnabled) {
+  if (
+    !draft.text.trim() &&
+    draft.attachments.length === 0 &&
+    !draft.pollEnabled &&
+    !draft.cwEnabled
+  ) {
     clearComposerDraft(target);
     return;
   }

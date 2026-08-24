@@ -49,6 +49,8 @@ interface NoteCardProps {
   linkToDetail?: boolean;
   /** 主役ポスト（ポスト詳細画面）用の大型表示（#43）。文字・アバターを拡大する。 */
   large?: boolean;
+  /** `#open_cw` 付きURLでの遷移時、CWを開いた状態で初期表示する（#229）。 */
+  forceOpenCw?: boolean;
 }
 
 /** 引用元を1段だけ表示する共通カード。引用元の `quoteId` はバッジだけ表示し、
@@ -143,12 +145,14 @@ function PostContent({
   large = false,
   onUnreposted,
   onDeleted,
+  forceOpenCw = false,
 }: {
   note: Note;
   linkToDetail: boolean;
   large?: boolean;
   onUnreposted?: () => void;
   onDeleted?: () => void;
+  forceOpenCw?: boolean;
 }) {
   const { t } = useTranslation();
   const { user: currentUser } = useAuth();
@@ -185,7 +189,7 @@ function PostContent({
       (!note.user.domain || note.user.domain === window.location.hostname));
 
   const [isHovered, setIsHovered] = useState(false);
-  const [showContent, setShowContent] = useState(!note.contentWarning);
+  const [showContent, setShowContent] = useState(!note.contentWarning || forceOpenCw);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [followActionPending, setFollowActionPending] = useState(false);
   const sharedPollState = usePollState(note.id, note.poll);
@@ -591,6 +595,7 @@ export default function NoteCard({
   note,
   linkToDetail = true,
   large = false,
+  forceOpenCw = false,
 }: NoteCardProps) {
   const { t } = useTranslation();
   const [hidden, setHidden] = useState(false);
@@ -622,6 +627,7 @@ export default function NoteCard({
           large={large}
           onUnreposted={() => setHidden(true)}
           onDeleted={() => setHidden(true)}
+          forceOpenCw={forceOpenCw}
         />
       </article>
     );
@@ -653,6 +659,7 @@ export default function NoteCard({
         linkToDetail={linkToDetail}
         large={large}
         onDeleted={() => setHidden(true)}
+        forceOpenCw={forceOpenCw}
       />
     </article>
   );

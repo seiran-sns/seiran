@@ -257,6 +257,9 @@ struct NoteActivityParams<'a> {
     /// アンケート（#228）。`Some`の場合、Note objectを`Question`型に切り替え`oneOf`/`anyOf`・
     /// `endTime`を組み立てる。`{multiple, options:[{name,votes}], endTime}`の形。
     poll: Option<&'a serde_json::Value>,
+    /// CW（閲覧注意）ガイド文（#229）。`Some`の場合、`summary`フィールドとして設定する
+    /// （Mastodon/Misskey互換のCW表現。本文・添付・アンケート・引用は通常通り配送する）。
+    content_warning: Option<&'a str>,
 }
 
 /// 可視性から Create(Note)/Note 共通の to/cc を決める。
@@ -364,6 +367,9 @@ fn build_create_note_activity(
     }
     if let Some(poll) = p.poll {
         apply_poll_to_note_object(&mut note_obj, poll);
+    }
+    if let Some(cw) = p.content_warning {
+        note_obj["summary"] = serde_json::Value::String(cw.to_string());
     }
 
     serde_json::json!({
@@ -656,6 +662,8 @@ struct PostActivityBasis {
     attachments: Vec<serde_json::Value>,
     /// アンケート（#228）。`{multiple, options:[{name,votes}], endTime}`。無ければ`None`。
     poll: Option<serde_json::Value>,
+    /// CW（閲覧注意）ガイド文（#229）。無ければ`None`。
+    content_warning: Option<String>,
 }
 
 async fn fetch_post_activity_basis(
@@ -665,7 +673,7 @@ async fn fetch_post_activity_basis(
 ) -> Result<PostActivityBasis, ApError> {
     let row = sqlx::query(
         "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username,
-                p.visibility::text AS visibility, p.emoji_map, p.poll
+                p.visibility::text AS visibility, p.emoji_map, p.poll, p.content_warning
          FROM posts p
          JOIN actors a ON a.id = p.actor_id
          WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
@@ -695,6 +703,7 @@ async fn fetch_post_activity_basis(
         .unwrap_or_else(|_| serde_json::json!({}));
     let attachments = fetch_attachment_documents(db, post_id).await?;
     let poll: Option<serde_json::Value> = row.try_get("poll").unwrap_or(None);
+    let content_warning: Option<String> = row.try_get("content_warning").unwrap_or(None);
 
     Ok(PostActivityBasis {
         body,
@@ -705,6 +714,7 @@ async fn fetch_post_activity_basis(
         emoji_map,
         attachments,
         poll,
+        content_warning,
     })
 }
 
@@ -841,6 +851,7 @@ pub async fn deliver_post_to_ap_followers(
             direct_recipients: &[],
             mention_recipients: &mention_uris,
             poll: basis.poll.as_ref(),
+            content_warning: basis.content_warning.as_deref(),
         },
     );
 
@@ -918,6 +929,8 @@ pub async fn deliver_direct_message_to_ap(
             // DMではアンケート作成自体が禁止されているため常にNone（`notes/mod.rs`の
             // `POLL_NOT_ALLOWED_FOR_DM`参照）。
             poll: None,
+            // DMではCW作成自体が禁止されているため常にNone（`CW_NOT_ALLOWED_FOR_DM`参照）。
+            content_warning: None,
         },
     );
 
@@ -1607,6 +1620,7 @@ mod tests {
                 direct_recipients: &[],
                 mention_recipients: &[],
                 poll: None,
+                content_warning: None,
             },
         );
         assert_eq!(activity["type"], "Create");
@@ -1620,6 +1634,57 @@ mod tests {
         assert!(note.get("quoteUrl").is_none());
         assert!(note.get("inReplyTo").is_none());
         assert!(note.get("seiranUuid").is_none());
+    }
+
+    #[test]
+    fn create_note_activity_with_content_warning_sets_summary() {
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                visibility: "public",
+                tag: vec![],
+                direct_recipients: &[],
+                mention_recipients: &[],
+                poll: None,
+                content_warning: Some("ネタバレ"),
+            },
+        );
+        let note = &activity["object"];
+        assert_eq!(note["type"], "Note");
+        assert_eq!(note["summary"], "ネタバレ");
+        assert_eq!(note["content"], "<p>hello</p>");
+    }
+
+    #[test]
+    fn create_note_activity_without_content_warning_omits_summary() {
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                visibility: "public",
+                tag: vec![],
+                direct_recipients: &[],
+                mention_recipients: &[],
+                poll: None,
+                content_warning: None,
+            },
+        );
+        assert!(activity["object"].get("summary").is_none());
     }
 
     #[test]
@@ -1648,6 +1713,7 @@ mod tests {
                 direct_recipients: &[],
                 mention_recipients: &[],
                 poll: Some(&poll),
+                content_warning: None,
             },
         );
         let note = &activity["object"];
@@ -1685,6 +1751,7 @@ mod tests {
                 direct_recipients: &[],
                 mention_recipients: &[],
                 poll: Some(&poll),
+                content_warning: None,
             },
         );
         let note = &activity["object"];
@@ -1740,6 +1807,7 @@ mod tests {
                 direct_recipients: &[],
                 mention_recipients: &[],
                 poll: None,
+                content_warning: None,
             },
         );
         assert_eq!(
@@ -1772,6 +1840,7 @@ mod tests {
                 direct_recipients: &[],
                 mention_recipients: &[],
                 poll: None,
+                content_warning: None,
             },
         );
         assert_eq!(
@@ -1799,6 +1868,7 @@ mod tests {
                 direct_recipients: &[],
                 mention_recipients: &[],
                 poll: None,
+                content_warning: None,
             },
         );
         let note = &activity["object"];
@@ -1827,6 +1897,7 @@ mod tests {
                 direct_recipients: &[],
                 mention_recipients: &["https://other.example/users/bob".to_string()],
                 poll: None,
+                content_warning: None,
             },
         );
         // メンション先はフォロワーでなくても配送が届くよう to に含める（cc ではない）。
@@ -1861,6 +1932,7 @@ mod tests {
                 direct_recipients: &[],
                 mention_recipients: &["https://other.example/users/bob".to_string()],
                 poll: None,
+                content_warning: None,
             },
         );
         assert_eq!(

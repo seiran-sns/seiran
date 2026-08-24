@@ -48,6 +48,13 @@ pub struct CreateNoteRequest {
     /// URLをリンクカードとして添付する（`bsky_embed_choice`の`Poll`候補）、Fedi向けには
     /// `Question`アクティビティとして配送する。
     pub poll: Option<PollCreateRequest>,
+    /// CW（閲覧注意）ガイド文（#229）。指定時は`posts.content_warning`を構築し、AP配送では
+    /// `summary`フィールドとして送る。Bsky向けにはこのポスト自身のURL（`#open_cw`付き）を
+    /// 「Open」というタイトルのリンクカードとして添付する（Bsky embed選択（#227/#228）の
+    /// 候補選択は一切行わず常にこれを使う）。Misskey本家の`cw`パラメータもエイリアスとして
+    /// 受け付ける。
+    #[serde(alias = "cw")]
+    pub content_warning: Option<String>,
 }
 
 /// [`CreateNoteRequest::poll`] の中身。

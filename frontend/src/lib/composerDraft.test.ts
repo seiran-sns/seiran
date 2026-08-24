@@ -18,6 +18,8 @@ function makeDraft(text: string): ComposerDraft {
     pollChoices: ["", ""],
     pollMultiple: false,
     pollExpiry: { kind: "none" },
+    cwEnabled: false,
+    cwGuide: "",
   };
 }
 

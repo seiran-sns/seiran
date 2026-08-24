@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api, Note } from "../../api/client";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import { acct, displayName } from "../../lib/format";
 import styles from "./NoteHoverPreview.module.css";
 
@@ -23,6 +24,7 @@ export default function NoteHoverPreview({ noteId, children, className }: NoteHo
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
+  const [showContent, setShowContent] = useState(false);
   const fetchedRef = useRef(false);
   const timerRef = useRef<number | null>(null);
 
@@ -74,9 +76,30 @@ export default function NoteHoverPreview({ noteId, children, className }: NoteHo
                   <span className={styles.acctText}>{acct(target)}</span>
                 </span>
               </span>
-              <span className={styles.text}>
-                <EmojiText text={target.text} emojis={target.emojis} />
-              </span>
+              {target.contentWarning && (
+                <span className={styles.cw}>
+                  <span className={styles.cwText}>
+                    <TwemojiEmoji emoji="⚠️" /> <EmojiText text={target.contentWarning} emojis={target.emojis} />
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowContent((shown) => !shown);
+                    }}
+                  >
+                    {showContent
+                      ? t("home:noteCard.hideContent")
+                      : t("home:noteCard.showContent")}
+                  </button>
+                </span>
+              )}
+              {(!target.contentWarning || showContent) && (
+                <span className={styles.text}>
+                  <EmojiText text={target.text} emojis={target.emojis} />
+                </span>
+              )}
             </Link>
           )}
         </span>

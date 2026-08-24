@@ -200,10 +200,11 @@ MiAuth（`/api/miauth/:session_id/authorize`）認可成立時、または設定
 
 `post_attachments` は `media_file_id`（ローカル添付）と `remote_url`/`remote_mime_type`/`remote_thumbnail_url`（リモート受信添付）が排他的に埋まる設計。
 ActivityPub受信添付の`is_sensitive`は画像単位の`attachment[].sensitive`を保存し、投稿全体の
-`sensitive=true`も全添付へ安全側に伝播する。`posts.content_warning`はAP `summary`、
+`sensitive=true`も全添付へ安全側に伝播する。`posts.content_warning`はAP `summary`（CWガイド文）、
 `posts.poll`はAP `Question`の`oneOf`/`anyOf`・票数・締切を表示用JSONとして保存する。ローカル作成
-アンケート（#228）も同じ列・同じJSON形（`{multiple, options:[{name,votes}], endTime}`）をそのまま
-使う（スキーマ変更・専用カラム追加は無い）。
+アンケート（#228）・CW（#229）もどちらも同じ列（`content_warning`はプレーンテキスト、`poll`は
+`{multiple, options:[{name,votes}], endTime}`のJSON）をそのまま使う（スキーマ変更・専用カラム
+追加は無い）。
 `post_attachments.is_gif`はGIFアニメ由来（Tenor/Klipy GIFピッカー、またはBsky動画パイプラインが
 `presentation:"gif"`を付与するGIFファイル直接アップロード。`docs/protocols.md`参照）を示し、
 フロントは動画添付を自動再生・ミュート・ループ・コントロール無しで表示する（`HlsVideo`の

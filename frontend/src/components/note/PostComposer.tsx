@@ -8,7 +8,13 @@ import {
   PollCreateInput,
   getErrorMessage,
 } from "../../api/client";
-import { acct, calcRemaining, displayName, extractBodyUrls } from "../../lib/format";
+import {
+  acct,
+  calcRemaining,
+  countGraphemes,
+  displayName,
+  extractBodyUrls,
+} from "../../lib/format";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   clearComposerDraft,
@@ -57,6 +63,9 @@ const POLL_DURATION_PRESETS: { seconds: number; labelKey: string }[] = [
   { seconds: 259200, labelKey: "day3" },
   { seconds: 604800, labelKey: "day7" },
 ];
+
+/** CWガイド文の書記素数上限（#229、バックエンド`validate_cw`と同じ）。 */
+const MAX_CW_LEN = 100;
 
 /** 公開範囲を狭い順に並べたもの（`direct`は別軸のためここには含めない）。 */
 const VISIBILITY_NARROWING_ORDER: Visibility[] = ["public", "unlisted", "followers_only"];
@@ -236,6 +245,8 @@ export default function PostComposer({
   const [pollExpiry, setPollExpiry] = useState<PollExpiry>(
     initialDraft?.pollExpiry ?? { kind: "none" },
   );
+  const [cwEnabled, setCwEnabled] = useState(initialDraft?.cwEnabled ?? false);
+  const [cwGuide, setCwGuide] = useState(initialDraft?.cwGuide ?? "");
   const [uploading, setUploading] = useState(false);
   const [showPrivateTooltip, setShowPrivateTooltip] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -259,6 +270,8 @@ export default function PostComposer({
       pollChoices,
       pollMultiple,
       pollExpiry,
+      cwEnabled,
+      cwGuide,
     });
   }, [
     draftTarget,
@@ -272,6 +285,8 @@ export default function PostComposer({
     pollChoices,
     pollMultiple,
     pollExpiry,
+    cwEnabled,
+    cwGuide,
   ]);
 
   useEffect(() => {
@@ -286,6 +301,8 @@ export default function PostComposer({
       setPollChoices(draft?.pollChoices ?? ["", ""]);
       setPollMultiple(draft?.pollMultiple ?? false);
       setPollExpiry(draft?.pollExpiry ?? { kind: "none" });
+      setCwEnabled(draft?.cwEnabled ?? false);
+      setCwGuide(draft?.cwGuide ?? "");
       setDeliverFedi(draft?.deliverFedi ?? fediReplyAllowed);
       setDeliverBsky(draft?.deliverBsky ?? bskyReplyAllowed);
       setVisibility(draft?.visibility ?? "public");
@@ -359,14 +376,22 @@ export default function PostComposer({
   // これを可能にするため、候補が1件でも「URL関連（本文URLがある、または既にURL選択済み）」
   // なら曖昧さの有無に関わらずリストを表示する（マイケル指摘）。
   const hasUrlCandidate = bodyUrls.length > 0 || bskyEmbedChoice?.kind === "url";
-  const showEmbedChoiceList = deliverBsky && (displayCandidates.length >= 2 || hasUrlCandidate);
+  // CW（#229）が有効な間は、Bsky embed選択自体を行わない（隠された本文・添付物を見るには
+  // 常にURLリンクカードからseiranの記事詳細ページへ飛ぶ設計のため、選ぶ余地が無い）。
+  // そのためラジオボタンリストも表示しない。
+  const showEmbedChoiceList =
+    deliverBsky && !cwEnabled && (displayCandidates.length >= 2 || hasUrlCandidate);
   // 送信ブロックは「候補が2件以上あるのに未選択」という本当の曖昧さがある場合のみ（候補が
   // URL単独1件だけの場合は選ばなくても送信でき、その場合バックエンドの自動優先順位が
-  // そのURLをそのまま採用する）。
-  const embedChoiceMissing = deliverBsky && displayCandidates.length >= 2 && !bskyEmbedChoice;
+  // そのURLをそのまま採用する）。CW中は候補計算自体を行わないため常にfalse。
+  const embedChoiceMissing =
+    deliverBsky && !cwEnabled && displayCandidates.length >= 2 && !bskyEmbedChoice;
   // アンケート編集を開いているのに有効な選択肢（2件以上の非空テキスト）が揃っていない間は
   // 送信できない。
   const pollInvalid = pollEnabled && !pollChoicesValid;
+  // CWガイド文が空（trim後）、または100書記素を超える間は送信できない。
+  const cwInvalid =
+    cwEnabled && (cwGuide.trim().length === 0 || countGraphemes(cwGuide) > MAX_CW_LEN);
 
   // Bsky配送オフ、または選択済みの静止画/GIF/動画がその添付自体の削除で候補から
   // 消えた場合は選択をクリアする（URL選択のみ孤児として残す、上記参照）。
@@ -391,7 +416,15 @@ export default function PostComposer({
   ).filter((v) => v !== "followers_only" || !deliverBsky);
 
   async function submitWithVisibility(v: Visibility) {
-    if (!text.trim() || overLimit || posting || embedChoiceMissing || pollInvalid) return;
+    if (
+      !text.trim() ||
+      overLimit ||
+      posting ||
+      embedChoiceMissing ||
+      pollInvalid ||
+      cwInvalid
+    )
+      return;
     setError("");
     setPosting(true);
     try {
@@ -420,6 +453,7 @@ export default function PostComposer({
         quoteTo?.id,
         bskyEmbedChoice ?? undefined,
         pollPayload,
+        cwEnabled ? cwGuide.trim() : undefined,
       );
       setText("");
       setAttachments([]);
@@ -428,6 +462,8 @@ export default function PostComposer({
       setPollChoices(["", ""]);
       setPollMultiple(false);
       setPollExpiry({ kind: "none" });
+      setCwEnabled(false);
+      setCwGuide("");
       setVisibility(replyConstraint?.defaultValue ?? "public");
       if (draftTarget) clearComposerDraft(draftTarget);
       onPosted?.(note);
@@ -601,6 +637,22 @@ export default function PostComposer({
         >
           <TwemojiEmoji emoji="📊" />
         </button>
+        <button
+          type="button"
+          className={`${styles.iconBtn} ${cwEnabled ? styles.scopeActive : ""}`}
+          onClick={() => {
+            if (cwEnabled) {
+              setCwEnabled(false);
+              setCwGuide("");
+            } else {
+              setCwEnabled(true);
+            }
+          }}
+          title={t("home:postComposer.cw.toggleTitle")}
+          aria-label={t("home:postComposer.cw.toggleTitle")}
+        >
+          <TwemojiEmoji emoji="⚠️" />
+        </button>
         <span
           className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}
         >
@@ -609,6 +661,27 @@ export default function PostComposer({
       </div>
 
       <div className={styles.bottomRow}>
+        {cwEnabled && (
+          <div className={styles.cwEditor}>
+            <input
+              type="text"
+              className={styles.cwGuideInput}
+              value={cwGuide}
+              placeholder={t("home:postComposer.cw.guidePlaceholder")}
+              onChange={(e) => setCwGuide(e.target.value)}
+            />
+            <span
+              className={`${styles.cwGuideCount} ${
+                countGraphemes(cwGuide) > MAX_CW_LEN ? styles.charCountOver : ""
+              }`}
+            >
+              {t("home:postComposer.cw.guideRemainingCount", {
+                count: MAX_CW_LEN - countGraphemes(cwGuide),
+              })}
+            </span>
+          </div>
+        )}
+
         {pollEnabled && (
           <div className={styles.pollEditor}>
             {pollChoices.map((choice, index) => (
@@ -807,7 +880,7 @@ export default function PostComposer({
                 <button
                   type="button"
                   className={styles.postBtnVariant}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                   onClick={() => submitWithVisibility("public")}
                 >
                   <span aria-hidden="true">
@@ -820,7 +893,7 @@ export default function PostComposer({
                 <button
                   type="button"
                   className={styles.postBtnVariant}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                   onClick={() => submitWithVisibility("unlisted")}
                 >
                   <span aria-hidden="true">
@@ -833,7 +906,7 @@ export default function PostComposer({
                 <button
                   type="button"
                   className={styles.postBtnVariant}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                   onClick={() => submitWithVisibility("followers_only")}
                 >
                   <span aria-hidden="true">
@@ -854,6 +927,7 @@ export default function PostComposer({
                   overLimit ||
                   embedChoiceMissing ||
                   pollInvalid ||
+                  cwInvalid ||
                   quoteTo?.visibility === "unlisted"
                 }
                 title={
@@ -871,7 +945,7 @@ export default function PostComposer({
               <button
                 type="button"
                 className={styles.postBtnVariant}
-                disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid}
+                disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                 onClick={() => submitWithVisibility("unlisted")}
               >
                 <span aria-hidden="true">

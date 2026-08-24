@@ -139,6 +139,11 @@
         "day3": "3日",
         "day7": "7日"
       }
+    },
+    "cw": {
+      "toggleTitle": "CW（閲覧注意）を追加",
+      "guidePlaceholder": "閲覧注意の案内文",
+      "guideRemainingCount": "残り{{count}}"
     }
   },
   "reactionChips": {

@@ -817,6 +817,23 @@ pub struct RegularPostDelivery {
     /// アンケート（#228、`posts.poll`と同じ形のJSON）。Bsky embed選択の`Poll`候補・
     /// AP `Question`配送の両方で使う。
     pub poll: Option<serde_json::Value>,
+    /// CW（閲覧注意）ガイド文（#229）。`Some`の場合、Bsky配送は画像/動画/URL/アンケートの
+    /// 候補選択を一切行わず（`bsky_embed_choice`・`bsky_quote_embed`も無視）、常に
+    /// `build_cw_bsky_embed`のURLリンクカードのみを添付し、本文もこのガイド文に差し替える。
+    /// AP配送では`summary`フィールドとして送る（本文・添付・アンケート・引用は通常通り）。
+    pub content_warning: Option<String>,
+}
+
+/// CW（閲覧注意）投稿のBsky embedを組み立てる（#229）。投稿詳細ページのURLに
+/// `#open_cw`（開いた状態を表すハッシュ）を付けたものを、「Open」という言語非依存の
+/// タイトルでリンクカード化する（descriptionは無し、thumbも無し）。
+fn build_cw_bsky_embed(local_domain: &str, post_id: i64) -> BskyEmbed {
+    BskyEmbed::External {
+        url: format!("https://{}/notes/{}#open_cw", local_domain, post_id),
+        title: "Open".to_string(),
+        description: String::new(),
+        thumb: None,
+    }
 }
 
 /// ATP レコードの `(uri, cid)` 参照。
@@ -866,25 +883,47 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
 
     // Bsky embed選択がURL（#227）の場合、ActivityPub配信でも同じURLを参照できるようにする
     // （マイケル指摘）。引用投稿（`bsky_quote_embed`がSome）は`bsky_embed_choice`自体が
-    // 無視されるため対象外。
-    let fedi_append_url: Option<String> = if bsky_target {
+    // 無視されるため対象外。CW（#229）中も`bsky_embed_choice`自体を無視するため対象外。
+    let fedi_append_url: Option<String> = if bsky_target && d.content_warning.is_none() {
         fedi_url_append_needed(&d.text, d.bsky_quote_embed.is_some(), d.bsky_embed_choice.as_ref())
     } else {
         None
     };
 
     if bsky_target {
+        // CW（#229）が設定されている場合、Bsky配送は画像/動画/URL/アンケート・引用embedの
+        // 選択を一切行わず（隠された本文・添付物すべてを見るにはURLリンクカードから
+        // seiranの記事詳細ページへ飛ぶ設計のため）、常にCWガイド文を本文として
+        // build_cw_bsky_embedのリンクカード1件だけをコミットする。
+        let bsky_source_text: &str = d.content_warning.as_deref().unwrap_or(&d.text);
         // メンション変換（変換失敗時は元テキストをそのまま使用する）
         // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
         let (bsky_text, bsky_facets) = convert_mentions_for_bsky(
-            &d.text,
+            bsky_source_text,
             &state.local_domain,
             &state.db,
             state.ap_client.http.as_ref(),
         )
         .await;
 
-        if let Some(embed) = d.bsky_quote_embed {
+        if d.content_warning.is_some() {
+            let embed = build_cw_bsky_embed(&state.local_domain, d.post_id);
+            if let Err(e) = state
+                .atp_service
+                .commit_post(
+                    d.actor_id,
+                    d.post_id,
+                    &bsky_text,
+                    bsky_facets,
+                    Some(embed),
+                    d.now,
+                    d.bsky_reply,
+                )
+                .await
+            {
+                tracing::error!("[create_note] ATP CW commit 失敗（投稿は保存済み）: {}", e);
+            }
+        } else if let Some(embed) = d.bsky_quote_embed {
             // 引用投稿: embed を付けて commit_quote を使う（画像/動画/URL embed選択と共存しない）
             if let Err(e) = state
                 .atp_service
@@ -986,9 +1025,9 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ap_delivery_quote_fields, ap_quote_from_meta, at_uri_to_bsky_app_url, classify_post,
-        fedi_url_append_needed, resolve_poll_embed, ApQuote, BskyEmbed, BskyEmbedChoice,
-        PostOrigin, ReplyContext,
+        ap_delivery_quote_fields, ap_quote_from_meta, at_uri_to_bsky_app_url, build_cw_bsky_embed,
+        classify_post, fedi_url_append_needed, resolve_poll_embed, ApQuote, BskyEmbed,
+        BskyEmbedChoice, PostOrigin, ReplyContext,
     };
     use crate::error::ApiError;
     use seiran_common::repository::post::PostDeliveryMeta;
@@ -1239,6 +1278,25 @@ mod tests {
             url: "https://example.com/article".to_owned(),
         };
         assert_eq!(fedi_url_append_needed("本文", true, Some(&choice)), None);
+    }
+
+    #[test]
+    fn build_cw_bsky_embed_uses_open_cw_hash_and_open_title() {
+        let embed = build_cw_bsky_embed("seiran.example", 42);
+        match embed {
+            BskyEmbed::External {
+                url,
+                title,
+                description,
+                thumb,
+            } => {
+                assert_eq!(url, "https://seiran.example/notes/42#open_cw");
+                assert_eq!(title, "Open");
+                assert_eq!(description, "");
+                assert!(thumb.is_none());
+            }
+            _ => panic!("expected External embed"),
+        }
     }
 
     #[test]

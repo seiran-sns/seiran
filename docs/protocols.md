@@ -256,6 +256,29 @@ Fediverse仕様のアンケート（選択肢2〜10・単一/複数選択・期�
 - **Bsky向け自己URLリンクカード（`resolve_bsky_embed`の`Target::Poll`、`resolve_poll_embed`）**: ATPにはアンケート概念が無いため、`url`をこのポスト自身の詳細ページ（`https://{local_domain}/notes/{post_id}`、`ap_object_id`と同一形式）、`title`は空文字列（投稿の言語が決定できないため言語依存の見出しは付けない）、`description`は選択肢名だけのプレーンテキスト箇条書き（`- 選択肢A\n- 選択肢B`、HTMLタグ無し・得票バー無し。作成時点の得票は常に0でBsky embedは再コミットされず得票を反映できないため）、`thumb`は無し、で`app.bsky.embed.external`を組み立てる。`post_link_cards`へのINSERTは行わない（投稿自身が`NoteResponse.poll`経由で既にリッチなアンケートUIを表示するため、自分自身を指すリンクカードを重ねるのは冗長・表示上不自然）。Bskyユーザーは現状この詳細ページに来ても投票できない（Bskyクレデンシャルでのログイン投票は将来のステップ）。
 - **優先順位**: アンケートは「Bsky embed候補」の中で常に最優先（静止画より前）。本文にURLがあってもアンケートと競合するラジオボタンリストの1候補として並ぶだけで、アンケート自体は自動的には他候補に優先される。
 
+### CW（閲覧注意、#229）
+`posts.content_warning`は既存列（Fedi受信CW用）で、ローカル作成でも同じ列をそのまま流用する
+（スキーマ変更なし）。CWは「Bsky embed候補」の1つとして並ぶのではなく、**すべてを無条件で
+上書きする**点がアンケート（#228）と異なる。
+
+- **受理・保存（`CreateNoteRequest.content_warning`、Misskey本家`cw`パラメータもエイリアス）**:
+  `validate_cw`が空文字（trim後）禁止・100書記素以内を検証する。
+  `visibility=="direct"`（DM）ではCW作成自体を`CW_NOT_ALLOWED_FOR_DM`で拒否する。
+- **AP `summary`配送**: `posts.content_warning`があれば`Create(Note)`の`object.summary`に
+  そのままセットする（Mastodon/Misskey互換のCW表現）。本文（`content`）・添付・アンケート・
+  引用は通常通り配送し、Fedi側クライアントが`summary`の有無でCW UIを出し分ける。
+- **Bsky配送（`deliver_regular_post`のCW分岐、`build_cw_bsky_embed`）**: CWが設定されている
+  投稿は、画像/GIF/動画/URL/アンケートの候補選択（`resolve_bsky_embed`）も引用embed
+  （`bsky_quote_embed`）も一切参照せず、常に次の1件だけをコミットする:
+  - 本文（`app.bsky.feed.post`の`text`）: 投稿本文ではなく**CWガイド文**（メンション変換・
+    facet生成もガイド文に対して行う）
+  - embed: `url`はこのポスト詳細ページに`#open_cw`ハッシュ（開いた状態を表すフラグメント）を
+    付けたもの、`title`は言語非依存の固定文字列`"Open"`、`description`・`thumb`は無し
+  - 引用投稿であってもCWが優先される（「隠された本文・添付物・引用すべてを見るには
+    URLリンクカードからseiranの記事詳細ページへ飛ぶ」という設計を引用にも適用する拡張）
+  - Bsky embed選択のURL追記ロジック（`fedi_url_append_needed`）もCW中は呼ばない
+    （`bsky_embed_choice`自体を無視するため）
+
 ### フォロワー検知ポーリング（`seiran-atp-repo::bsky_follower_poll`）
 リモート Bsky アクターがローカルユーザーをフォローしたことを検知する経路。Jetstream の `wantedDids` は投稿・Likeの「発行者DID」でのフィルタであり、フォロー元（＝新規に自分をフォローしてきたアクター）を事前に知る手段が無いため、Jetstream購読では検知できない。そのため `app.bsky.graph.getFollowers`（AppView公開エンドポイント、認証不要）をローカルBskyリンク済みユーザーごとに`BSKY_FOLLOWER_POLL_INTERVAL_SECS`環境変数（デフォルト60秒）間隔でポーリングし、`follows`テーブルの既存フォロワー集合との差分から新規フォローを検知する常駐タスク（`seiran-atp-repo::run`内で`tokio::spawn`）。
 

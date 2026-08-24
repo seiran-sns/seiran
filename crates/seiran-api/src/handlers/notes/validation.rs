@@ -85,6 +85,19 @@ pub fn validate_poll_choices(choices: &[String]) -> Result<Vec<String>, ApiError
     Ok(trimmed)
 }
 
+/// CWガイド文の書記素クラスタ数上限（#229）。
+const MAX_CW_LEN: usize = 100;
+
+/// CW（閲覧注意）ガイド文を検証し、trim済みの文字列を返す（#229）。
+/// 空文字（trim後）禁止、100書記素以内。
+pub fn validate_cw(text: &str) -> Result<String, ApiError> {
+    let trimmed = text.trim().to_owned();
+    if trimmed.is_empty() || trimmed.graphemes(true).count() > MAX_CW_LEN {
+        return Err(ApiError::BadRequest("INVALID_CONTENT_WARNING".to_owned()));
+    }
+    Ok(trimmed)
+}
+
 /// Unicode 絵文字候補の書記素クラスタ数の安全上限（`emojis::get` の完全一致チェックの前段で
 /// 極端に長い文字列を弾くためのもの。実際の絵文字判定はこの定数ではなく下記の完全一致で行う）。
 const MAX_REACTION_CONTENT_LEN: usize = 32;
@@ -164,9 +177,32 @@ pub fn strip_html_tags(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        strip_html_tags, validate_dm_text_length, validate_poll_choices, validate_reaction_content,
-        validate_text_length, ReactionContent,
+        strip_html_tags, validate_cw, validate_dm_text_length, validate_poll_choices,
+        validate_reaction_content, validate_text_length, ReactionContent,
     };
+
+    #[test]
+    fn validate_cw_trims_and_accepts_within_limit() {
+        assert_eq!(validate_cw(" ネタバレ ").unwrap(), "ネタバレ".to_owned());
+    }
+
+    #[test]
+    fn validate_cw_rejects_empty_after_trim() {
+        assert!(validate_cw("").is_err());
+        assert!(validate_cw("   ").is_err());
+    }
+
+    #[test]
+    fn validate_cw_accepts_exactly_100_graphemes() {
+        let text = "あ".repeat(super::MAX_CW_LEN);
+        assert!(validate_cw(&text).is_ok());
+    }
+
+    #[test]
+    fn validate_cw_rejects_over_100_graphemes() {
+        let text = "あ".repeat(super::MAX_CW_LEN + 1);
+        assert!(validate_cw(&text).is_err());
+    }
 
     #[test]
     fn validate_poll_choices_trims_and_accepts_two_to_ten() {

@@ -1157,6 +1157,7 @@ export const api = {
       quoteOfId?: string,
       bskyEmbedChoice?: BskyEmbedChoice,
       poll?: PollCreateInput,
+      contentWarning?: string,
     ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
@@ -1176,6 +1177,7 @@ export const api = {
             expiresAtIso: poll.expiresAtIso,
             expiresInSeconds: poll.expiresInSeconds,
           },
+          content_warning: contentWarning,
         }),
       );
     },

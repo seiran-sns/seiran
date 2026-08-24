@@ -139,6 +139,11 @@
         "day3": "3天",
         "day7": "7天"
       }
+    },
+    "cw": {
+      "toggleTitle": "添加内容警告",
+      "guidePlaceholder": "内容警告说明",
+      "guideRemainingCount": "剩余{{count}}"
     }
   },
   "reactionChips": {

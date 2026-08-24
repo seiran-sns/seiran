@@ -139,6 +139,11 @@
         "day3": "3 días",
         "day7": "7 días"
       }
+    },
+    "cw": {
+      "toggleTitle": "Añadir aviso de contenido",
+      "guidePlaceholder": "Texto del aviso de contenido",
+      "guideRemainingCount": "quedan {{count}}"
     }
   },
   "reactionChips": {

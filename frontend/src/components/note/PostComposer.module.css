@@ -336,6 +336,38 @@
   flex-shrink: 0;
 }
 
+/* #229: CW（閲覧注意）ガイド入力欄。 */
+.cwEditor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+
+.cwGuideInput {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.cwGuideInput::placeholder {
+  color: var(--text-faint);
+}
+
+.cwGuideCount {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+
 /* #228: アンケート編集ブロック。 */
 .pollEditor {
   display: flex;

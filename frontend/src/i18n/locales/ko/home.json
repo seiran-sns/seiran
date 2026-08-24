@@ -139,6 +139,11 @@
         "day3": "3일",
         "day7": "7일"
       }
+    },
+    "cw": {
+      "toggleTitle": "열람 주의 추가",
+      "guidePlaceholder": "열람 주의 안내문",
+      "guideRemainingCount": "{{count}} 남음"
     }
   },
   "reactionChips": {

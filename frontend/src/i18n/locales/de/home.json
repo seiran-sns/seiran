@@ -139,6 +139,11 @@
         "day3": "3 Tage",
         "day7": "7 Tage"
       }
+    },
+    "cw": {
+      "toggleTitle": "Inhaltswarnung hinzufügen",
+      "guidePlaceholder": "Text der Inhaltswarnung",
+      "guideRemainingCount": "noch {{count}}"
     }
   },
   "reactionChips": {

@@ -252,6 +252,7 @@ pub async fn create_post_from_record(
             recipient_actor_ids: &[],
             emoji_map: &local_emoji_map,
             poll: None,
+            content_warning: None,
         })
         .await
         .map_err(|e| ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)))?;

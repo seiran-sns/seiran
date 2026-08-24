@@ -77,3 +77,30 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.cw {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-deep);
+  font-size: 0.8rem;
+}
+
+.cwText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cw button {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.78rem;
+}

@@ -172,8 +172,8 @@ use delivery::{
 };
 use queries::{fetch_reposted_ids, find_repost_for_undo};
 use validation::{
-    strip_html_tags, validate_attachment_ids, validate_dm_text_length, validate_poll_choices,
-    validate_reaction_content, validate_text_length, ReactionContent,
+    strip_html_tags, validate_attachment_ids, validate_cw, validate_dm_text_length,
+    validate_poll_choices, validate_reaction_content, validate_text_length, ReactionContent,
 };
 
 /// 検証済みの添付ファイル ID 群を投稿に紐付ける。
@@ -611,6 +611,18 @@ async fn create_regular_post(
         None => None,
     };
 
+    // CW（閲覧注意、#229）: DMには馴染まないため禁止する（POLL_NOT_ALLOWED_FOR_DMと同じ理由）。
+    if visibility == "direct" && req.content_warning.is_some() {
+        return ApiError::BadRequest("CW_NOT_ALLOWED_FOR_DM".to_owned()).into_response();
+    }
+    let content_warning: Option<String> = match &req.content_warning {
+        Some(cw) => match validate_cw(cw) {
+            Ok(c) => Some(c),
+            Err(e) => return e.into_response(),
+        },
+        None => None,
+    };
+
     let post_id = generate_snowflake_id(now);
     let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
     let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
@@ -737,6 +749,7 @@ async fn create_regular_post(
             recipient_actor_ids: &recipient_actor_ids,
             emoji_map: &local_emoji_map,
             poll: poll_json.as_ref(),
+            content_warning: content_warning.as_deref(),
         })
         .await
     {
@@ -887,6 +900,7 @@ async fn create_regular_post(
             attachment_ids: attachment_ids_i64.clone(),
             bsky_embed_choice: req.bsky_embed_choice.clone(),
             poll: poll_json.clone(),
+            content_warning: content_warning.clone(),
         },
     )
     .await;
@@ -940,8 +954,8 @@ async fn create_regular_post(
         reply_fedi_allowed: deliver_fedi,
         reply_bsky_allowed: deliver_bsky,
         remote_url: None,
-        content_warning: None,
-        poll: None,
+        content_warning: content_warning.clone(),
+        poll: poll_json.clone(),
         reply_count: 0,
         quote_count: 0,
         repost_count: 0,
