@@ -121,6 +121,9 @@
       "url": "URL {{index}}: {{url}}",
       "urlOrphan": "URL: {{url}} (본문에서 삭제됨)"
     },
+    "linkCardCheckbox": {
+      "heading": "링크 카드로 첨부할 URL(복수 선택 가능)"
+    },
     "poll": {
       "toggleTitle": "설문조사 추가",
       "choicePlaceholder": "선택지 {{index}}",

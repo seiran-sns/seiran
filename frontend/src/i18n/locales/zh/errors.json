@@ -61,6 +61,7 @@
   "STORAGE_PROVIDER_NOT_FOUND": "未找到存储提供商",
   "STORAGE_QUOTA_EXCEEDED": "已超出存储容量",
   "TEXT_TOO_LONG": "文本超出长度限制（扩展@usernames后可能会发生这种情况）",
+  "TOO_MANY_LINK_CARD_URLS": "URL链接卡最多10个",
   "TURNSTILE_FAILED": "验证失败，请重试。",
   "TURNSTILE_REQUIRED": "请完成验证。",
   "UNAUTHORIZED": "请登录",

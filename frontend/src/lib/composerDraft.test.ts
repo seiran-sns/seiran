@@ -20,6 +20,7 @@ function makeDraft(text: string): ComposerDraft {
     pollExpiry: { kind: "none" },
     cwEnabled: false,
     cwGuide: "",
+    linkCardUrls: [],
   };
 }
 

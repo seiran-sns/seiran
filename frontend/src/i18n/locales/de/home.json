@@ -121,6 +121,9 @@
       "url": "URL {{index}}: {{url}}",
       "urlOrphan": "URL: {{url}} (aus dem Text entfernt)"
     },
+    "linkCardCheckbox": {
+      "heading": "URLs zum Anhängen als Link-Karten (Mehrfachauswahl möglich)"
+    },
     "poll": {
       "toggleTitle": "Umfrage hinzufügen",
       "choicePlaceholder": "Option {{index}}",

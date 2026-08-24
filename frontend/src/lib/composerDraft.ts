@@ -24,6 +24,10 @@ export interface ComposerDraft {
   /** CW（閲覧注意）編集中かどうか（#229）。 */
   cwEnabled: boolean;
   cwGuide: string;
+  /** URLリンクカード添付のチェックボックス選択（Bsky embed選択のラジオボタンリストを
+   * 出せない場合の代替、Bsky配送オフ or CW中）。本文から消えてもチェック自体は
+   * 孤児として残る（`bskyEmbedChoice`のURL孤児化と同じ仕様）。 */
+  linkCardUrls: string[];
 }
 
 export type DraftTarget =
@@ -94,7 +98,8 @@ export function saveComposerDraft(target: DraftTarget, draft: ComposerDraft): vo
     !draft.text.trim() &&
     draft.attachments.length === 0 &&
     !draft.pollEnabled &&
-    !draft.cwEnabled
+    !draft.cwEnabled &&
+    draft.linkCardUrls.length === 0
   ) {
     clearComposerDraft(target);
     return;

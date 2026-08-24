@@ -61,6 +61,7 @@
   "STORAGE_PROVIDER_NOT_FOUND": "ストレージプロバイダーが見つかりません",
   "STORAGE_QUOTA_EXCEEDED": "ストレージ容量が不足しています",
   "TEXT_TOO_LONG": "文字数制限を超えています（@ユーザー名の展開後に超過した可能性があります）",
+  "TOO_MANY_LINK_CARD_URLS": "URLリンクカードは最大10件までです",
   "TURNSTILE_FAILED": "認証に失敗しました。もう一度お試しください",
   "TURNSTILE_REQUIRED": "認証チャレンジを完了してください",
   "UNAUTHORIZED": "ログインが必要です",

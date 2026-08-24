@@ -61,6 +61,7 @@
   "STORAGE_PROVIDER_NOT_FOUND": "Storage provider not found",
   "STORAGE_QUOTA_EXCEEDED": "Storage capacity has been exceeded",
   "TEXT_TOO_LONG": "The text exceeds the length limit (this may happen after expanding @usernames)",
+  "TOO_MANY_LINK_CARD_URLS": "URL link cards are limited to 10.",
   "TURNSTILE_FAILED": "Verification failed. Please try again.",
   "TURNSTILE_REQUIRED": "Please complete the verification challenge.",
   "UNAUTHORIZED": "Please sign in",

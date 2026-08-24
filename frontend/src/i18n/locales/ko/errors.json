@@ -61,6 +61,7 @@
   "STORAGE_PROVIDER_NOT_FOUND": "저장소 제공업체를 찾을 수 없습니다.",
   "STORAGE_QUOTA_EXCEEDED": "저장 용량이 초과되었습니다",
   "TEXT_TOO_LONG": "텍스트가 길이 제한을 초과했습니다(@usernames를 확장한 후에 발생할 수 있음).",
+  "TOO_MANY_LINK_CARD_URLS": "URL 링크 카드는 최대 10개까지입니다.",
   "TURNSTILE_FAILED": "인증에 실패했습니다. 다시 시도해 주세요.",
   "TURNSTILE_REQUIRED": "인증을 완료해 주세요.",
   "UNAUTHORIZED": "로그인하세요",

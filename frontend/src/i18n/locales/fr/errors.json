@@ -61,6 +61,7 @@
   "STORAGE_PROVIDER_NOT_FOUND": "Fournisseur de stockage introuvable",
   "STORAGE_QUOTA_EXCEEDED": "La capacité de stockage a été dépassée",
   "TEXT_TOO_LONG": "Le texte dépasse la limite de longueur (cela peut se produire après avoir développé @usernames)",
+  "TOO_MANY_LINK_CARD_URLS": "Les cartes de lien URL sont limitées à 10.",
   "TURNSTILE_FAILED": "La vérification a échoué. Veuillez réessayer.",
   "TURNSTILE_REQUIRED": "Veuillez compléter la vérification.",
   "UNAUTHORIZED": "Veuillez vous connecter",

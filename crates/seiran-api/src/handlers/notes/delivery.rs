@@ -219,6 +219,43 @@ async fn resolve_url_embed(state: &AppState, actor_id: i64, post_id: i64, url: S
     }
 }
 
+/// URLリンクカードのチェックボックス選択で選ばれた各URLを、指定順どおり`post_link_cards`
+/// のpositionとして保存する。Bsky embed選択のラジオボタンリスト（`resolve_url_embed`、
+/// 単一選択）を出せない場合（Bsky配送オフ or CW中）の代替で、複数URLを同時に保存できる。
+/// Bsky embed用のサムネイル再ホスト（`prepare_external_thumb`）は行わず、OGP取得した
+/// `thumbnail_url`をそのまま保存する（seiranローカル表示専用のURLカードのため、Bskyの
+/// blob要件は関係ない）。取得・INSERTに失敗したURLはスキップし、他のURLの処理は続ける。
+pub async fn attach_link_cards_from_urls(state: &AppState, post_id: i64, urls: &[String]) {
+    for (position, url) in urls.iter().enumerate() {
+        let ogp = fetch_ogp(url).await.ok().flatten();
+        let title = ogp.as_ref().map(|o| o.title.clone()).unwrap_or_default();
+        let description = ogp
+            .as_ref()
+            .map(|o| o.description.clone())
+            .unwrap_or_default();
+        let thumbnail_url = ogp.as_ref().and_then(|o| o.thumbnail_url.clone());
+
+        if let Err(e) = sqlx::query(
+            "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(post_id)
+        .bind(position as i32)
+        .bind(url)
+        .bind(&title)
+        .bind(&description)
+        .bind(&thumbnail_url)
+        .execute(&state.db)
+        .await
+        {
+            tracing::warn!(
+                "[attach_link_cards_from_urls] post_link_cards INSERT失敗 post_id={} url={} err={}",
+                post_id, url, e
+            );
+        }
+    }
+}
+
 /// アンケート（#228）をBsky embed選択した場合の `External` embed を組み立てる。このポスト
 /// 自身のURLを、選択肢名だけの箇条書きプレーンテキスト（`- 選択肢A\n- 選択肢B`）を
 /// descriptionにしてリンクカード化する。投稿の言語が決定できないため見出し文・案内文は
@@ -749,6 +786,18 @@ fn fedi_url_append_needed(
     }
 }
 
+/// URLリンクカードのチェックボックス選択（`link_card_urls`）のうち、Fedi配送本文に
+/// まだ含まれていないものを出現順に返す（本文追記が必要なURL一覧）。`fedi_url_append_needed`
+/// と異なり、Bsky配送オフ・CW中でも常に判定する（このリストが使われる場面自体がその2ケース
+/// のため）。
+fn fedi_link_card_urls_append_needed(base_text: &str, link_card_urls: &[String]) -> Vec<String> {
+    link_card_urls
+        .iter()
+        .filter(|url| !base_text.contains(url.as_str()))
+        .cloned()
+        .collect()
+}
+
 pub(crate) fn ap_quote_from_meta(meta: &PostDeliveryMeta) -> Option<ApQuote> {
     if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
         meta.at_uri
@@ -822,6 +871,12 @@ pub struct RegularPostDelivery {
     /// `build_cw_bsky_embed`のURLリンクカードのみを添付し、本文もこのガイド文に差し替える。
     /// AP配送では`summary`フィールドとして送る（本文・添付・アンケート・引用は通常通り）。
     pub content_warning: Option<String>,
+    /// URLリンクカードのチェックボックス選択（Bsky embed選択のラジオボタンリストを出せない
+    /// 場合の代替、Bsky配送オフ or CW中）で選ばれたURL一覧。`post_link_cards`への保存自体は
+    /// （このBsky/Fedi配送とは独立に）呼び出し元が`attach_link_cards_from_urls`で済ませて
+    /// いるが、Fedi配送本文への追記要否（本文に含まれないURLがあれば末尾に追記）の判定に
+    /// ここでも使う（`bsky_embed_choice`のURL選択と同じ「AP配送だけ上書き」の仕組み）。
+    pub link_card_urls: Vec<String>,
 }
 
 /// CW（閲覧注意）投稿のBsky embedを組み立てる（#229）。投稿詳細ページのURLに
@@ -1002,10 +1057,22 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
         // メンション解決（tag[]・<a> アンカー付与）まで一貫して行う（ただし上のURL追記が
         // 必要な場合、または引用URL追記が必要な場合はここで上書き本文を渡す）。
         let (quote_body, quote_url) = ap_delivery_quote_fields(&d.text, d.ap_quote);
-        let body = match (quote_body, fedi_append_url) {
-            (Some(b), Some(url)) => Some(format!("{}\n\n{}", b, url)),
+        // 本文に含まれないURLを末尾へ追記する対象を集める: (1) Bsky embed選択のURL
+        // （fedi_append_url、bsky_target && CW無しの場合のみ計算済み）、(2) URLリンクカード
+        // のチェックボックス選択（link_card_urls、Bsky配送オフ or CW中でも本文追記自体は
+        // 常に必要）。判定は最終的なFedi本文（引用ならquote_body、無ければd.text）に対して行う。
+        let base_text_for_append_check: &str = quote_body.as_deref().unwrap_or(&d.text);
+        let mut append_lines: Vec<String> = Vec::new();
+        append_lines.extend(fedi_append_url);
+        append_lines.extend(fedi_link_card_urls_append_needed(
+            base_text_for_append_check,
+            &d.link_card_urls,
+        ));
+        let append_block = (!append_lines.is_empty()).then(|| append_lines.join("\n"));
+        let body = match (quote_body, append_block) {
+            (Some(b), Some(block)) => Some(format!("{}\n\n{}", b, block)),
             (Some(b), None) => Some(b),
-            (None, Some(url)) => Some(format!("{}\n\n{}", d.text, url)),
+            (None, Some(block)) => Some(format!("{}\n\n{}", d.text, block)),
             (None, None) => None,
         };
         state
@@ -1026,8 +1093,8 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
 mod tests {
     use super::{
         ap_delivery_quote_fields, ap_quote_from_meta, at_uri_to_bsky_app_url, build_cw_bsky_embed,
-        classify_post, fedi_url_append_needed, resolve_poll_embed, ApQuote, BskyEmbed,
-        BskyEmbedChoice, PostOrigin, ReplyContext,
+        classify_post, fedi_link_card_urls_append_needed, fedi_url_append_needed,
+        resolve_poll_embed, ApQuote, BskyEmbed, BskyEmbedChoice, PostOrigin, ReplyContext,
     };
     use crate::error::ApiError;
     use seiran_common::repository::post::PostDeliveryMeta;
@@ -1278,6 +1345,34 @@ mod tests {
             url: "https://example.com/article".to_owned(),
         };
         assert_eq!(fedi_url_append_needed("本文", true, Some(&choice)), None);
+    }
+
+    #[test]
+    fn fedi_link_card_urls_append_needed_returns_only_missing_urls_in_order() {
+        let urls = vec![
+            "https://example.com/a".to_owned(),
+            "https://example.com/b".to_owned(),
+            "https://example.com/c".to_owned(),
+        ];
+        assert_eq!(
+            fedi_link_card_urls_append_needed(
+                "本文中に https://example.com/b があります",
+                &urls,
+            ),
+            vec![
+                "https://example.com/a".to_owned(),
+                "https://example.com/c".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn fedi_link_card_urls_append_needed_empty_when_all_present() {
+        let urls = vec!["https://example.com/a".to_owned()];
+        assert_eq!(
+            fedi_link_card_urls_append_needed("見て https://example.com/a", &urls),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

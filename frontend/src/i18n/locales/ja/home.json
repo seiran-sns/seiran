@@ -121,6 +121,9 @@
       "url": "URL {{index}}: {{url}}",
       "urlOrphan": "URL: {{url}}（本文からは削除済み）"
     },
+    "linkCardCheckbox": {
+      "heading": "リンクカードとして添付するURL（複数選択可）"
+    },
     "poll": {
       "toggleTitle": "アンケートを追加",
       "choicePlaceholder": "選択肢 {{index}}",

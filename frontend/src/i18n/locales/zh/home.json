@@ -121,6 +121,9 @@
       "url": "URL {{index}}：{{url}}",
       "urlOrphan": "URL：{{url}}（已从正文中删除）"
     },
+    "linkCardCheckbox": {
+      "heading": "作为链接卡附加的URL(可多选)"
+    },
     "poll": {
       "toggleTitle": "添加投票",
       "choicePlaceholder": "选项 {{index}}",

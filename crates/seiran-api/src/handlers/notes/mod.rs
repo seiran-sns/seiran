@@ -173,7 +173,8 @@ use delivery::{
 use queries::{fetch_reposted_ids, find_repost_for_undo};
 use validation::{
     strip_html_tags, validate_attachment_ids, validate_cw, validate_dm_text_length,
-    validate_poll_choices, validate_reaction_content, validate_text_length, ReactionContent,
+    validate_link_card_urls, validate_poll_choices, validate_reaction_content,
+    validate_text_length, ReactionContent,
 };
 
 /// 検証済みの添付ファイル ID 群を投稿に紐付ける。
@@ -623,6 +624,12 @@ async fn create_regular_post(
         None => None,
     };
 
+    // URLリンクカードのチェックボックス選択（Bsky embed選択のラジオボタンリストを出せない
+    // 場合の代替、Bsky配送オフ or CW中）。
+    if let Err(e) = validate_link_card_urls(&req.link_card_urls) {
+        return e.into_response();
+    }
+
     let post_id = generate_snowflake_id(now);
     let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
     let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
@@ -768,6 +775,10 @@ async fn create_regular_post(
         return e.into_response();
     }
 
+    if !req.link_card_urls.is_empty() {
+        delivery::attach_link_cards_from_urls(state, post_id, &req.link_card_urls).await;
+    }
+
     if let Err(e) = state.hashtags.link_post(post_id, &text).await {
         tracing::error!(
             "[create_regular_post] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
@@ -901,11 +912,16 @@ async fn create_regular_post(
             bsky_embed_choice: req.bsky_embed_choice.clone(),
             poll: poll_json.clone(),
             content_warning: content_warning.clone(),
+            link_card_urls: req.link_card_urls.clone(),
         },
     )
     .await;
 
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
+    // URLリンクカード（ラジオ選択・チェックボックス選択いずれも上のdeliver_regular_post内/
+    // attach_link_cards_from_urlsで既に保存済み）をここでまとめて読み戻す。投稿直後の
+    // レスポンス・WebSocketブロードキャストにも反映されるようにするため。
+    let mut lc_map = fetch_link_cards_map(&state.db, &[post_id]).await;
     let avatar_url = state
         .actors
         .find_avatar_url(actor_id)
@@ -959,7 +975,7 @@ async fn create_regular_post(
         reply_count: 0,
         quote_count: 0,
         repost_count: 0,
-        link_cards: vec![],
+        link_cards: lc_map.remove(&post_id).unwrap_or_default(),
         content_html: None,
     };
     embed_quotes(

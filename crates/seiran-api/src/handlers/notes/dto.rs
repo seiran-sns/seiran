@@ -55,6 +55,13 @@ pub struct CreateNoteRequest {
     /// 受け付ける。
     #[serde(alias = "cw")]
     pub content_warning: Option<String>,
+    /// URLリンクカードとして添付するURLの一覧（チェックボックス選択、複数可）。
+    /// Bsky embed選択のラジオボタンリスト（`bsky_embed_choice`、単一選択）を出せない場合
+    /// （Bsky配送オフ or CW中）の代替手段。seiranは（Bskyと違い）1投稿に複数のURLリンク
+    /// カードを同時に持てるため、こちらはラジオボタンでなくチェックボックスにしている。
+    /// 指定順がそのまま`post_link_cards.position`になる。
+    #[serde(default)]
+    pub link_card_urls: Vec<String>,
 }
 
 /// [`CreateNoteRequest::poll`] の中身。

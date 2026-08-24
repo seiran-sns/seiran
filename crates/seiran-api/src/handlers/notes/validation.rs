@@ -65,6 +65,16 @@ pub fn validate_attachment_ids(ids: &[String]) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// URLリンクカード添付（チェックボックスリスト）の件数上限。Bsky embed選択のラジオボタン
+/// リストが出せない場合（Bsky配送オフ or CW中）の代替手段で、`extract_body_urls`の上限
+/// （5件）に、本文から消えても選択が残る「孤児化」ぶんの余裕を持たせた値。
+pub fn validate_link_card_urls(urls: &[String]) -> Result<(), ApiError> {
+    if urls.len() > 10 {
+        return Err(ApiError::BadRequest("TOO_MANY_LINK_CARD_URLS".to_owned()));
+    }
+    Ok(())
+}
+
 /// アンケート選択肢テキストの書記素クラスタ数上限（#228）。
 const MAX_POLL_CHOICE_LEN: usize = 100;
 

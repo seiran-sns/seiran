@@ -247,6 +247,9 @@ export default function PostComposer({
   );
   const [cwEnabled, setCwEnabled] = useState(initialDraft?.cwEnabled ?? false);
   const [cwGuide, setCwGuide] = useState(initialDraft?.cwGuide ?? "");
+  const [checkedLinkCardUrls, setCheckedLinkCardUrls] = useState<string[]>(
+    initialDraft?.linkCardUrls ?? [],
+  );
   const [uploading, setUploading] = useState(false);
   const [showPrivateTooltip, setShowPrivateTooltip] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -272,6 +275,7 @@ export default function PostComposer({
       pollExpiry,
       cwEnabled,
       cwGuide,
+      linkCardUrls: checkedLinkCardUrls,
     });
   }, [
     draftTarget,
@@ -287,6 +291,7 @@ export default function PostComposer({
     pollExpiry,
     cwEnabled,
     cwGuide,
+    checkedLinkCardUrls,
   ]);
 
   useEffect(() => {
@@ -303,6 +308,7 @@ export default function PostComposer({
       setPollExpiry(draft?.pollExpiry ?? { kind: "none" });
       setCwEnabled(draft?.cwEnabled ?? false);
       setCwGuide(draft?.cwGuide ?? "");
+      setCheckedLinkCardUrls(draft?.linkCardUrls ?? []);
       setDeliverFedi(draft?.deliverFedi ?? fediReplyAllowed);
       setDeliverBsky(draft?.deliverBsky ?? bskyReplyAllowed);
       setVisibility(draft?.visibility ?? "public");
@@ -393,6 +399,46 @@ export default function PostComposer({
   const cwInvalid =
     cwEnabled && (cwGuide.trim().length === 0 || countGraphemes(cwGuide) > MAX_CW_LEN);
 
+  // Bsky embed選択のラジオボタンリストが出せない場合（Bsky配送オフ or CW中）の代替。
+  // seiranは複数のURLリンクカードを同時に持てるため、URL候補はラジオでなくチェックボックス
+  // で複数選択できるようにする。本文URL（出現順）の後ろに、チェック済みだが本文から消えた
+  // URL（孤児）を追加する点はラジオボタン版の孤児化仕様と同じ。
+  const urlCardCandidates = useMemo(() => {
+    const list = bodyUrls.map((url, i) => ({
+      url,
+      label: t("home:postComposer.bskyEmbedChoice.url", { index: i + 1, url }),
+    }));
+    checkedLinkCardUrls.forEach((url) => {
+      if (!list.some((c) => c.url === url)) {
+        list.push({
+          url,
+          label: t("home:postComposer.bskyEmbedChoice.urlOrphan", { url }),
+        });
+      }
+    });
+    return list;
+  }, [bodyUrls, checkedLinkCardUrls, t]);
+  const showUrlCardCheckboxList = (!deliverBsky || cwEnabled) && urlCardCandidates.length > 0;
+
+  function toggleLinkCardUrl(url: string) {
+    setCheckedLinkCardUrls((prev) =>
+      prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url],
+    );
+  }
+
+  // チェックボックスリスト表示中（Bsky配送オフ or CW中）からラジオボタンリストを表示する
+  // 状態（Bsky配送オン かつ CWオフ）へ切り替わった瞬間、チェック済みURLのうち最もインデックス
+  // の小さいもの（urlCardCandidates内での出現順）をラジオボタンリストの選択へ引き継ぐ
+  // （マイケル指摘）。既に明示選択がある場合は上書きしない。
+  useEffect(() => {
+    if (!showEmbedChoiceList || bskyEmbedChoice !== null || checkedLinkCardUrls.length === 0) {
+      return;
+    }
+    const candidate = urlCardCandidates.find((c) => checkedLinkCardUrls.includes(c.url));
+    if (candidate) setBskyEmbedChoice({ kind: "url", url: candidate.url });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEmbedChoiceList]);
+
   // Bsky配送オフ、または選択済みの静止画/GIF/動画がその添付自体の削除で候補から
   // 消えた場合は選択をクリアする（URL選択のみ孤児として残す、上記参照）。
   useEffect(() => {
@@ -454,6 +500,7 @@ export default function PostComposer({
         bskyEmbedChoice ?? undefined,
         pollPayload,
         cwEnabled ? cwGuide.trim() : undefined,
+        showUrlCardCheckboxList ? checkedLinkCardUrls : undefined,
       );
       setText("");
       setAttachments([]);
@@ -464,6 +511,7 @@ export default function PostComposer({
       setPollExpiry({ kind: "none" });
       setCwEnabled(false);
       setCwGuide("");
+      setCheckedLinkCardUrls([]);
       setVisibility(replyConstraint?.defaultValue ?? "public");
       if (draftTarget) clearComposerDraft(draftTarget);
       onPosted?.(note);
@@ -858,6 +906,24 @@ export default function PostComposer({
                     className={styles.embedChoiceThumb}
                   />
                 )}
+                {candidate.label}
+              </label>
+            ))}
+          </div>
+        )}
+
+        {showUrlCardCheckboxList && (
+          <div className={styles.embedChoiceList} role="group" aria-label={t("home:postComposer.linkCardCheckbox.heading")}>
+            <p className={styles.embedChoiceHeading}>
+              {t("home:postComposer.linkCardCheckbox.heading")}
+            </p>
+            {urlCardCandidates.map((candidate) => (
+              <label key={candidate.url} className={styles.embedChoiceItem}>
+                <input
+                  type="checkbox"
+                  checked={checkedLinkCardUrls.includes(candidate.url)}
+                  onChange={() => toggleLinkCardUrl(candidate.url)}
+                />
                 {candidate.label}
               </label>
             ))}
