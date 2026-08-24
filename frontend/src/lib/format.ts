@@ -176,3 +176,36 @@ export function extractBodyUrls(text: string): string[] {
   }
   return result;
 }
+
+export type PollRemaining =
+  | { tier: "seconds"; seconds: number }
+  | { tier: "minutes"; minutes: number }
+  | { tier: "hours"; hours: number; minutes: number }
+  | { tier: "days"; days: number; hours: number; minutes: number };
+
+/**
+ * アンケート期限（`poll.endTime`、ISO8601）までの残り時間を算出する（#228）。粒度は
+ * 残り時間に応じて自動選択する（マイケル指摘）: 1分未満は秒単位、1分以上1時間未満は
+ * 分単位、1時間以上1日未満は「時間+分」、1日以上は「日+時間+分」（いずれも切り捨て）。
+ * 期限切れ・不正な日時なら`null`（呼び出し側は非表示にする）。`nowMs`を外から渡すことで、
+ * 1秒ごとに更新される共有タイマー（`stores/secondTicker`）と組み合わせてライブ
+ * カウントダウンにできる。
+ */
+export function pollRemainingTime(endTimeIso: string, nowMs: number): PollRemaining | null {
+  const remainingMs = new Date(endTimeIso).getTime() - nowMs;
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null;
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  if (totalSeconds < 60) {
+    return { tier: "seconds", seconds: totalSeconds };
+  }
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    return { tier: "minutes", minutes: totalMinutes };
+  }
+  const totalHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (totalHours < 24) {
+    return { tier: "hours", hours: totalHours, minutes };
+  }
+  return { tier: "days", days: Math.floor(totalHours / 24), hours: totalHours % 24, minutes };
+}

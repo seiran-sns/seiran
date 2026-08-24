@@ -8,6 +8,7 @@ import {
   deliveryBadges,
   displayName,
   formatCount,
+  pollRemainingTime,
   profilePath,
   profileQuery,
   protocolBadge,
@@ -195,5 +196,76 @@ describe("calcRemaining", () => {
 
   it("上限超過時は負数になる", () => {
     expect(calcRemaining("a".repeat(301), true)).toBeLessThan(0);
+  });
+});
+
+describe("pollRemainingTime", () => {
+  it("残り1分未満なら秒単位（切り捨て）で返す", () => {
+    const now = Date.parse("2026-08-24T00:00:00Z");
+    const endTime = new Date(now + 45 * 1000).toISOString();
+    expect(pollRemainingTime(endTime, now)).toEqual({ tier: "seconds", seconds: 45 });
+  });
+
+  it("残り1分以上1時間未満なら分単位（切り捨て）で返す", () => {
+    const now = Date.parse("2026-08-24T00:00:00Z");
+    const endTime = new Date(now + 90 * 1000).toISOString(); // 残り1分30秒
+    expect(pollRemainingTime(endTime, now)).toEqual({ tier: "minutes", minutes: 1 });
+  });
+
+  it("ちょうど60秒は分単位になる", () => {
+    const now = Date.parse("2026-08-24T00:00:00Z");
+    const endTime = new Date(now + 60 * 1000).toISOString();
+    expect(pollRemainingTime(endTime, now)).toEqual({ tier: "minutes", minutes: 1 });
+  });
+
+  it("残り1時間以上1日未満なら「時間+分」で返す", () => {
+    const now = Date.parse("2026-08-24T00:00:00Z");
+    const endTime = new Date(now + (90 * 60 + 5) * 1000).toISOString(); // 1時間30分5秒
+    expect(pollRemainingTime(endTime, now)).toEqual({ tier: "hours", hours: 1, minutes: 30 });
+  });
+
+  it("ちょうど60分は「1時間0分」になる", () => {
+    const now = Date.parse("2026-08-24T00:00:00Z");
+    const endTime = new Date(now + 60 * 60 * 1000).toISOString();
+    expect(pollRemainingTime(endTime, now)).toEqual({ tier: "hours", hours: 1, minutes: 0 });
+  });
+
+  it("残り1日以上なら「日+時間+分」で返す", () => {
+    const now = Date.parse("2026-08-24T00:00:00Z");
+    // 2日1時間30分
+    const totalSeconds = (2 * 24 * 60 + 1 * 60 + 30) * 60;
+    const endTime = new Date(now + totalSeconds * 1000).toISOString();
+    expect(pollRemainingTime(endTime, now)).toEqual({
+      tier: "days",
+      days: 2,
+      hours: 1,
+      minutes: 30,
+    });
+  });
+
+  it("ちょうど24時間は「1日0時間0分」になる", () => {
+    const now = Date.parse("2026-08-24T00:00:00Z");
+    const endTime = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+    expect(pollRemainingTime(endTime, now)).toEqual({
+      tier: "days",
+      days: 1,
+      hours: 0,
+      minutes: 0,
+    });
+  });
+
+  it("期限を過ぎていればnull", () => {
+    const now = Date.parse("2026-08-24T00:00:00Z");
+    const endTime = new Date(now - 1000).toISOString();
+    expect(pollRemainingTime(endTime, now)).toBeNull();
+  });
+
+  it("ちょうど期限（残り0）もnull", () => {
+    const now = Date.parse("2026-08-24T00:00:00Z");
+    expect(pollRemainingTime(new Date(now).toISOString(), now)).toBeNull();
+  });
+
+  it("不正な日時文字列ならnull", () => {
+    expect(pollRemainingTime("not-a-date", Date.now())).toBeNull();
   });
 });

@@ -1,10 +1,18 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, BskyEmbedChoice, DriveFile, Note, getErrorMessage } from "../../api/client";
+import {
+  api,
+  BskyEmbedChoice,
+  DriveFile,
+  Note,
+  PollCreateInput,
+  getErrorMessage,
+} from "../../api/client";
 import { acct, calcRemaining, displayName, extractBodyUrls } from "../../lib/format";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   clearComposerDraft,
+  DraftPollExpiry,
   DraftTarget,
   loadComposerDraft,
   onComposerDraftRefresh,
@@ -31,6 +39,24 @@ type Visibility = "public" | "unlisted" | "followers_only";
 
 /** 添付ファイルの最大件数（バックエンド`validate_attachment_ids`と同じ上限）。 */
 const MAX_ATTACHMENTS = 10;
+
+/** アンケート選択肢の件数上限・下限（#228、バックエンド`validate_poll_choices`と同じ）。 */
+const MAX_POLL_CHOICES = 10;
+const MIN_POLL_CHOICES = 2;
+
+/** アンケートの期限指定（#228）。`DraftPollExpiry`と同じ形。 */
+type PollExpiry = DraftPollExpiry;
+
+/** 「経過時間」期限指定のプリセット（秒）。Mastodon等の慣例に合わせる。 */
+const POLL_DURATION_PRESETS: { seconds: number; labelKey: string }[] = [
+  { seconds: 300, labelKey: "min5" },
+  { seconds: 1800, labelKey: "min30" },
+  { seconds: 3600, labelKey: "hour1" },
+  { seconds: 21600, labelKey: "hour6" },
+  { seconds: 86400, labelKey: "day1" },
+  { seconds: 259200, labelKey: "day3" },
+  { seconds: 604800, labelKey: "day7" },
+];
 
 /** 公開範囲を狭い順に並べたもの（`direct`は別軸のためここには含めない）。 */
 const VISIBILITY_NARROWING_ORDER: Visibility[] = ["public", "unlisted", "followers_only"];
@@ -80,6 +106,8 @@ interface EmbedCandidate {
 
 function embedChoiceKey(choice: BskyEmbedChoice): string {
   switch (choice.kind) {
+    case "poll":
+      return "poll";
     case "images":
       return "images";
     case "attachment":
@@ -90,13 +118,15 @@ function embedChoiceKey(choice: BskyEmbedChoice): string {
 }
 
 /**
- * 添付・本文URLから、Bsky embed候補一覧を組み立てる（#227）。静止画は非アニメ画像が
- * 1件でもあれば全体で1アイテム（Bsky embed.imagesは最大4枚を1つのembedとして送る）、
- * アニメGIF・動画/音声・本文URLはそれぞれ1件ずつ独立したアイテムになる。
+ * 添付・本文URL・アンケートから、Bsky embed候補一覧を組み立てる（#227、アンケートは#228で
+ * 追加）。アンケートは存在すれば常に先頭・最優先の1アイテム（バックエンドの自動優先順位と
+ * 対称）。静止画は非アニメ画像が1件でもあれば全体で1アイテム（Bsky embed.imagesは最大4枚を
+ * 1つのembedとして送る）、アニメGIF・動画/音声・本文URLはそれぞれ1件ずつ独立したアイテムになる。
  */
 function buildEmbedCandidates(
   attachments: DriveFile[],
   bodyUrls: string[],
+  hasPoll: boolean,
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): EmbedCandidate[] {
   const images = attachments.filter(
@@ -108,6 +138,13 @@ function buildEmbedCandidates(
   );
 
   const candidates: EmbedCandidate[] = [];
+  if (hasPoll) {
+    candidates.push({
+      key: "poll",
+      choice: { kind: "poll" },
+      label: t("home:postComposer.bskyEmbedChoice.poll"),
+    });
+  }
   if (images.length > 0) {
     candidates.push({
       key: "images",
@@ -191,6 +228,14 @@ export default function PostComposer({
   const [bskyEmbedChoice, setBskyEmbedChoice] = useState<BskyEmbedChoice | null>(
     initialDraft?.bskyEmbedChoice ?? null,
   );
+  const [pollEnabled, setPollEnabled] = useState(initialDraft?.pollEnabled ?? false);
+  const [pollChoices, setPollChoices] = useState<string[]>(
+    initialDraft?.pollChoices ?? ["", ""],
+  );
+  const [pollMultiple, setPollMultiple] = useState(initialDraft?.pollMultiple ?? false);
+  const [pollExpiry, setPollExpiry] = useState<PollExpiry>(
+    initialDraft?.pollExpiry ?? { kind: "none" },
+  );
   const [uploading, setUploading] = useState(false);
   const [showPrivateTooltip, setShowPrivateTooltip] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -210,8 +255,24 @@ export default function PostComposer({
       deliverBsky,
       visibility,
       bskyEmbedChoice,
+      pollEnabled,
+      pollChoices,
+      pollMultiple,
+      pollExpiry,
     });
-  }, [draftTarget, text, attachments, deliverFedi, deliverBsky, visibility, bskyEmbedChoice]);
+  }, [
+    draftTarget,
+    text,
+    attachments,
+    deliverFedi,
+    deliverBsky,
+    visibility,
+    bskyEmbedChoice,
+    pollEnabled,
+    pollChoices,
+    pollMultiple,
+    pollExpiry,
+  ]);
 
   useEffect(() => {
     if (!draftTarget) return;
@@ -221,6 +282,10 @@ export default function PostComposer({
       setText(draft?.text ?? "");
       setAttachments(draft?.attachments ?? []);
       setBskyEmbedChoice(draft?.bskyEmbedChoice ?? null);
+      setPollEnabled(draft?.pollEnabled ?? false);
+      setPollChoices(draft?.pollChoices ?? ["", ""]);
+      setPollMultiple(draft?.pollMultiple ?? false);
+      setPollExpiry(draft?.pollExpiry ?? { kind: "none" });
       setDeliverFedi(draft?.deliverFedi ?? fediReplyAllowed);
       setDeliverBsky(draft?.deliverBsky ?? bskyReplyAllowed);
       setVisibility(draft?.visibility ?? "public");
@@ -258,9 +323,13 @@ export default function PostComposer({
   const overLimit = remaining < 0;
 
   const bodyUrls = useMemo(() => extractBodyUrls(text), [text]);
+  // 2件以上の非空選択肢が揃って初めて有効なアンケートとして候補化する（未完成のアンケートは
+  // どのみち送信ブロックされるため、embed候補としても数えない）。
+  const pollNonEmptyChoiceCount = pollChoices.filter((c) => c.trim().length > 0).length;
+  const pollChoicesValid = pollEnabled && pollNonEmptyChoiceCount >= MIN_POLL_CHOICES;
   const embedCandidates = useMemo(
-    () => buildEmbedCandidates(attachments, bodyUrls, t),
-    [attachments, bodyUrls, t],
+    () => buildEmbedCandidates(attachments, bodyUrls, pollChoicesValid, t),
+    [attachments, bodyUrls, pollChoicesValid, t],
   );
   // URL選択は本文からそのURLを削除しても選択自体は孤児として有効なまま残す（issue #227
   // 仕様）。他の選択肢へ切り替えれば自然にこのリストから消える。静止画/GIF/動画の選択は、
@@ -295,6 +364,9 @@ export default function PostComposer({
   // URL単独1件だけの場合は選ばなくても送信でき、その場合バックエンドの自動優先順位が
   // そのURLをそのまま採用する）。
   const embedChoiceMissing = deliverBsky && displayCandidates.length >= 2 && !bskyEmbedChoice;
+  // アンケート編集を開いているのに有効な選択肢（2件以上の非空テキスト）が揃っていない間は
+  // 送信できない。
+  const pollInvalid = pollEnabled && !pollChoicesValid;
 
   // Bsky配送オフ、または選択済みの静止画/GIF/動画がその添付自体の削除で候補から
   // 消えた場合は選択をクリアする（URL選択のみ孤児として残す、上記参照）。
@@ -319,11 +391,23 @@ export default function PostComposer({
   ).filter((v) => v !== "followers_only" || !deliverBsky);
 
   async function submitWithVisibility(v: Visibility) {
-    if (!text.trim() || overLimit || posting || embedChoiceMissing) return;
+    if (!text.trim() || overLimit || posting || embedChoiceMissing || pollInvalid) return;
     setError("");
     setPosting(true);
     try {
       const attachmentIds = attachments.map((a) => a.id);
+      const pollPayload: PollCreateInput | undefined = pollChoicesValid
+        ? {
+            choices: pollChoices.map((c) => c.trim()).filter((c) => c.length > 0),
+            multiple: pollMultiple,
+            ...(pollExpiry.kind === "at" && pollExpiry.value
+              ? { expiresAtIso: new Date(pollExpiry.value).toISOString() }
+              : {}),
+            ...(pollExpiry.kind === "duration"
+              ? { expiresInSeconds: pollExpiry.seconds }
+              : {}),
+          }
+        : undefined;
       const note = await api.notes.create(
         text.trim(),
         deliverFedi,
@@ -335,10 +419,15 @@ export default function PostComposer({
         undefined,
         quoteTo?.id,
         bskyEmbedChoice ?? undefined,
+        pollPayload,
       );
       setText("");
       setAttachments([]);
       setBskyEmbedChoice(null);
+      setPollEnabled(false);
+      setPollChoices(["", ""]);
+      setPollMultiple(false);
+      setPollExpiry({ kind: "none" });
       setVisibility(replyConstraint?.defaultValue ?? "public");
       if (draftTarget) clearComposerDraft(draftTarget);
       onPosted?.(note);
@@ -494,6 +583,24 @@ export default function PostComposer({
             </svg>
           )}
         </button>
+        <button
+          type="button"
+          className={`${styles.iconBtn} ${pollEnabled ? styles.scopeActive : ""}`}
+          onClick={() => {
+            if (pollEnabled) {
+              setPollEnabled(false);
+              setPollChoices(["", ""]);
+              setPollMultiple(false);
+              setPollExpiry({ kind: "none" });
+            } else {
+              setPollEnabled(true);
+            }
+          }}
+          title={t("home:postComposer.poll.toggleTitle")}
+          aria-label={t("home:postComposer.poll.toggleTitle")}
+        >
+          <TwemojiEmoji emoji="📊" />
+        </button>
         <span
           className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}
         >
@@ -502,6 +609,122 @@ export default function PostComposer({
       </div>
 
       <div className={styles.bottomRow}>
+        {pollEnabled && (
+          <div className={styles.pollEditor}>
+            {pollChoices.map((choice, index) => (
+              <div key={index} className={styles.pollChoiceRow}>
+                <input
+                  type="text"
+                  className={styles.pollChoiceInput}
+                  value={choice}
+                  maxLength={100}
+                  placeholder={t("home:postComposer.poll.choicePlaceholder", {
+                    index: index + 1,
+                  })}
+                  onChange={(e) => {
+                    const next = [...pollChoices];
+                    next[index] = e.target.value;
+                    setPollChoices(next);
+                  }}
+                />
+                {pollChoices.length > MIN_POLL_CHOICES && (
+                  <button
+                    type="button"
+                    className={styles.pollRemoveChoiceBtn}
+                    onClick={() =>
+                      setPollChoices((prev) => prev.filter((_, i) => i !== index))
+                    }
+                    title={t("home:postComposer.poll.removeChoice")}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+            {pollChoices.length < MAX_POLL_CHOICES && (
+              <button
+                type="button"
+                className={styles.pollAddChoiceBtn}
+                onClick={() => setPollChoices((prev) => [...prev, ""])}
+              >
+                + {t("home:postComposer.poll.addChoice")}
+              </button>
+            )}
+
+            <label className={styles.pollMultipleLabel}>
+              <input
+                type="checkbox"
+                checked={pollMultiple}
+                onChange={(e) => setPollMultiple(e.target.checked)}
+              />
+              {t("home:postComposer.poll.multipleLabel")}
+            </label>
+
+            <div className={styles.pollExpiryRow}>
+              <label className={styles.pollExpiryOption}>
+                <input
+                  type="radio"
+                  name="pollExpiryKind"
+                  checked={pollExpiry.kind === "none"}
+                  onChange={() => setPollExpiry({ kind: "none" })}
+                />
+                {t("home:postComposer.poll.expiryNone")}
+              </label>
+              <label className={styles.pollExpiryOption}>
+                <input
+                  type="radio"
+                  name="pollExpiryKind"
+                  checked={pollExpiry.kind === "at"}
+                  onChange={() => setPollExpiry({ kind: "at", value: "" })}
+                />
+                {t("home:postComposer.poll.expiryAt")}
+              </label>
+              {pollExpiry.kind === "at" && (
+                <input
+                  type="datetime-local"
+                  className={styles.pollExpiryDatetime}
+                  value={pollExpiry.value}
+                  onChange={(e) =>
+                    setPollExpiry({ kind: "at", value: e.target.value })
+                  }
+                />
+              )}
+              <label className={styles.pollExpiryOption}>
+                <input
+                  type="radio"
+                  name="pollExpiryKind"
+                  checked={pollExpiry.kind === "duration"}
+                  onChange={() =>
+                    setPollExpiry({
+                      kind: "duration",
+                      seconds: POLL_DURATION_PRESETS[0].seconds,
+                    })
+                  }
+                />
+                {t("home:postComposer.poll.expiryDuration")}
+              </label>
+              {pollExpiry.kind === "duration" && (
+                <div className={styles.pollDurationPresets}>
+                  {POLL_DURATION_PRESETS.map((preset) => (
+                    <button
+                      key={preset.seconds}
+                      type="button"
+                      className={`${styles.pollDurationPresetBtn} ${
+                        pollExpiry.seconds === preset.seconds ? styles.scopeActive : ""
+                      }`}
+                      onClick={() =>
+                        setPollExpiry({ kind: "duration", seconds: preset.seconds })
+                      }
+                    >
+                      {t(`home:postComposer.poll.duration.${preset.labelKey}`)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {attachments.length > 0 && (
           <div className={styles.attachGrid}>
             {attachments.map((attached) => (
@@ -584,7 +807,7 @@ export default function PostComposer({
                 <button
                   type="button"
                   className={styles.postBtnVariant}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid}
                   onClick={() => submitWithVisibility("public")}
                 >
                   <span aria-hidden="true">
@@ -597,7 +820,7 @@ export default function PostComposer({
                 <button
                   type="button"
                   className={styles.postBtnVariant}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid}
                   onClick={() => submitWithVisibility("unlisted")}
                 >
                   <span aria-hidden="true">
@@ -610,7 +833,7 @@ export default function PostComposer({
                 <button
                   type="button"
                   className={styles.postBtnVariant}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid}
                   onClick={() => submitWithVisibility("followers_only")}
                 >
                   <span aria-hidden="true">
@@ -630,6 +853,7 @@ export default function PostComposer({
                   !text.trim() ||
                   overLimit ||
                   embedChoiceMissing ||
+                  pollInvalid ||
                   quoteTo?.visibility === "unlisted"
                 }
                 title={
@@ -647,7 +871,7 @@ export default function PostComposer({
               <button
                 type="button"
                 className={styles.postBtnVariant}
-                disabled={posting || !text.trim() || overLimit || embedChoiceMissing}
+                disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid}
                 onClick={() => submitWithVisibility("unlisted")}
               >
                 <span aria-hidden="true">

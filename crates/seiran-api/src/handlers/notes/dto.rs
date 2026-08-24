@@ -44,6 +44,28 @@ pub struct CreateNoteRequest {
     /// （`delivery::resolve_bsky_embed`）。Misskey互換クライアント等、本フィールドを
     /// 送らないクライアントとの後方互換のため必須にはしない。
     pub bsky_embed_choice: Option<BskyEmbedChoice>,
+    /// アンケート作成（#228）。指定時は`posts.poll`を構築し、Bsky向けにはこのポスト自身の
+    /// URLをリンクカードとして添付する（`bsky_embed_choice`の`Poll`候補）、Fedi向けには
+    /// `Question`アクティビティとして配送する。
+    pub poll: Option<PollCreateRequest>,
+}
+
+/// [`CreateNoteRequest::poll`] の中身。
+#[derive(Deserialize, Debug, Clone)]
+pub struct PollCreateRequest {
+    /// 選択肢テキスト（2〜10件、`validation::validate_poll_choices`で検証）。
+    pub choices: Vec<String>,
+    pub multiple: Option<bool>,
+    /// 絶対時刻（ISO8601、seiranネイティブUI用）。JSONキーは`expiresAtIso`
+    /// （Misskey本家の`expiresAt`＝epoch ミリ秒と衝突しないよう区別する）。
+    #[serde(rename = "expiresAtIso")]
+    pub expires_at: Option<String>,
+    /// 送信時刻からの相対秒数（seiranネイティブUI用、期限プリセットの計算結果）。
+    #[serde(rename = "expiresInSeconds")]
+    pub expires_in_seconds: Option<i64>,
+    /// Unix epoch ミリ秒。Misskey本家の`poll.expiresAt`と同じJSONキー（互換のため）。
+    #[serde(rename = "expiresAt")]
+    pub expires_at_epoch_ms: Option<i64>,
 }
 
 /// [`CreateNoteRequest::bsky_embed_choice`] の中身。
@@ -56,6 +78,8 @@ pub enum BskyEmbedChoice {
     Attachment { id: String },
     /// 本文中の特定URL（本文から削除されても選択自体は有効なまま、issue #227仕様）。
     Url { url: String },
+    /// アンケート（#228）。このポスト自身のURLをリンクカードとして添付する。
+    Poll,
 }
 
 #[derive(Serialize, Clone)]

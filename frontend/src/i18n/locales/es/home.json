@@ -53,6 +53,10 @@
     "showContent": "Espectáculo",
     "hideContent": "Esconder",
     "votes": "{{count}} votos",
+    "pollRemainingMinutes": "quedan {{count}} min",
+    "pollRemainingSeconds": "quedan {{count}} s",
+    "pollRemainingHours": "quedan {{hours}} h {{minutes}} min",
+    "pollRemainingDays": "quedan {{days}} d {{hours}} h {{minutes}} min",
     "pollLoginRequired": "Inicie sesión para votar.",
     "pollVoteButton": "Votar",
     "pollBackToOptions": "Volver a opciones",
@@ -110,11 +114,31 @@
     "quoteToPrefix": "Citando:",
     "bskyEmbedChoice": {
       "heading": "¿Cuál debe enviarse a Bluesky?",
+      "poll": "Encuesta",
       "images": "Imágenes ({{count}})",
       "gif": "GIF animado {{index}}",
       "video": "Vídeo {{index}}",
       "url": "URL {{index}}: {{url}}",
       "urlOrphan": "URL: {{url}} (eliminada del texto)"
+    },
+    "poll": {
+      "toggleTitle": "Añadir encuesta",
+      "choicePlaceholder": "Opción {{index}}",
+      "addChoice": "Añadir opción",
+      "removeChoice": "Eliminar opción",
+      "multipleLabel": "Permitir selección múltiple",
+      "expiryNone": "Sin caducidad",
+      "expiryAt": "Fecha y hora específica",
+      "expiryDuration": "Duración",
+      "duration": {
+        "min5": "5 min",
+        "min30": "30 min",
+        "hour1": "1 hora",
+        "hour6": "6 horas",
+        "day1": "1 día",
+        "day3": "3 días",
+        "day7": "7 días"
+      }
     }
   },
   "reactionChips": {

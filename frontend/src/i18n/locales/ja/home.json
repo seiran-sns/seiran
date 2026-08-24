@@ -53,6 +53,10 @@
     "showContent": "表示",
     "hideContent": "隠す",
     "votes": "{{count}}票",
+    "pollRemainingMinutes": "残り{{count}}分",
+    "pollRemainingSeconds": "残り{{count}}秒",
+    "pollRemainingHours": "残り{{hours}}時間{{minutes}}分",
+    "pollRemainingDays": "残り{{days}}日{{hours}}時間{{minutes}}分",
     "pollLoginRequired": "投票するにはログインが必要です",
     "pollVoteButton": "回答",
     "pollBackToOptions": "回答に戻る",
@@ -110,11 +114,31 @@
     "quoteToPrefix": "引用元:",
     "bskyEmbedChoice": {
       "heading": "Bskyへはどれを添付しますか？",
+      "poll": "アンケート",
       "images": "静止画（{{count}}枚）",
       "gif": "アニメGIF {{index}}",
       "video": "動画 {{index}}",
       "url": "URL {{index}}: {{url}}",
       "urlOrphan": "URL: {{url}}（本文からは削除済み）"
+    },
+    "poll": {
+      "toggleTitle": "アンケートを追加",
+      "choicePlaceholder": "選択肢 {{index}}",
+      "addChoice": "選択肢を追加",
+      "removeChoice": "選択肢を削除",
+      "multipleLabel": "複数選択を許可",
+      "expiryNone": "無期限",
+      "expiryAt": "日時指定",
+      "expiryDuration": "経過時間",
+      "duration": {
+        "min5": "5分",
+        "min30": "30分",
+        "hour1": "1時間",
+        "hour6": "6時間",
+        "day1": "1日",
+        "day3": "3日",
+        "day7": "7日"
+      }
     }
   },
   "reactionChips": {

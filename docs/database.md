@@ -201,7 +201,9 @@ MiAuth（`/api/miauth/:session_id/authorize`）認可成立時、または設定
 `post_attachments` は `media_file_id`（ローカル添付）と `remote_url`/`remote_mime_type`/`remote_thumbnail_url`（リモート受信添付）が排他的に埋まる設計。
 ActivityPub受信添付の`is_sensitive`は画像単位の`attachment[].sensitive`を保存し、投稿全体の
 `sensitive=true`も全添付へ安全側に伝播する。`posts.content_warning`はAP `summary`、
-`posts.poll`はAP `Question`の`oneOf`/`anyOf`・票数・締切を表示用JSONとして保存する。
+`posts.poll`はAP `Question`の`oneOf`/`anyOf`・票数・締切を表示用JSONとして保存する。ローカル作成
+アンケート（#228）も同じ列・同じJSON形（`{multiple, options:[{name,votes}], endTime}`）をそのまま
+使う（スキーマ変更・専用カラム追加は無い）。
 `post_attachments.is_gif`はGIFアニメ由来（Tenor/Klipy GIFピッカー、またはBsky動画パイプラインが
 `presentation:"gif"`を付与するGIFファイル直接アップロード。`docs/protocols.md`参照）を示し、
 フロントは動画添付を自動再生・ミュート・ループ・コントロール無しで表示する（`HlsVideo`の
@@ -233,7 +235,9 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 複数回答では同一Actorが複数行を持ち、`ap_activity_id` の一意制約でリモートからの再配送を
 冪等化する。集計表示用の票数は `posts.poll` にも反映する。認証付きの投稿読取APIは
 `poll_votes` から回答者自身の選択肢番号を `poll.votedByMe` として付与し、クライアントが
-リロード後も回答済み状態と選択内容を復元できるようにする。
+リロード後も回答済み状態と選択内容を復元できるようにする。ローカルユーザー自身の投票は
+`ap_activity_id`が`NULL`の行として同じテーブルに記録される（#228でローカル作成した
+アンケートへの投票も同じテーブル・同じ集計ロジックをそのまま使う）。
 
 ### 通報（`reports` / `report_comments`）
 

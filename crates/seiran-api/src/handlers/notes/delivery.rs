@@ -219,15 +219,44 @@ async fn resolve_url_embed(state: &AppState, actor_id: i64, post_id: i64, url: S
     }
 }
 
+/// アンケート（#228）をBsky embed選択した場合の `External` embed を組み立てる。このポスト
+/// 自身のURLを、選択肢名だけの箇条書きプレーンテキスト（`- 選択肢A\n- 選択肢B`）を
+/// descriptionにしてリンクカード化する。投稿の言語が決定できないため見出し文・案内文は
+/// 付けない。作成時点の得票は常に0で、Bsky embedは一度コミットすると再コミットされず
+/// 得票を反映できないため、得票バー・パーセンテージ表示も行わない（マイケル指摘）。
+/// `post_link_cards`へのINSERTは行わない（このポスト自身が`NoteResponse.poll`経由で既に
+/// リッチなアンケートUIを表示するため、自分自身を指すリンクカードを重ねて表示するのは
+/// 冗長・表示上不自然なため）。
+fn resolve_poll_embed(local_domain: &str, post_id: i64, poll: &serde_json::Value) -> BskyEmbed {
+    let description = poll["options"]
+        .as_array()
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(|o| o["name"].as_str())
+                .map(|name| format!("- {name}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    BskyEmbed::External {
+        url: format!("https://{}/notes/{}", local_domain, post_id),
+        title: String::new(),
+        description,
+        thumb: None,
+    }
+}
+
 /// Bsky配送するローカル投稿の embed を、明示選択（`CreateNoteRequest::bsky_embed_choice`）
-/// または省略時の固定優先順位（静止画 > アニメGIF先頭 > 動画/音声先頭 > 本文URL先頭）から
-/// 解決する（#227）。
+/// または省略時の固定優先順位（アンケート > 静止画 > アニメGIF先頭 > 動画/音声先頭 >
+/// 本文URL先頭）から解決する（#227、アンケートは#228で追加）。
 pub async fn resolve_bsky_embed(
     state: &AppState,
     actor_id: i64,
     post_id: i64,
     attachment_ids: &[i64],
     body_text: &str,
+    poll: Option<&serde_json::Value>,
     choice: Option<BskyEmbedChoice>,
 ) -> BskyEmbedResolution {
     let rows: Vec<EmbedCandidateRow> = if attachment_ids.is_empty() {
@@ -245,6 +274,7 @@ pub async fn resolve_bsky_embed(
     };
 
     enum Target<'a> {
+        Poll,
         Images,
         Attachment(&'a EmbedCandidateRow),
         Url(String),
@@ -252,6 +282,13 @@ pub async fn resolve_bsky_embed(
     }
 
     let target = match choice {
+        Some(BskyEmbedChoice::Poll) => {
+            if poll.is_some() {
+                Target::Poll
+            } else {
+                Target::None
+            }
+        }
         Some(BskyEmbedChoice::Images) => Target::Images,
         Some(BskyEmbedChoice::Attachment { id }) => match id.parse::<i64>() {
             Ok(id) => rows
@@ -263,7 +300,9 @@ pub async fn resolve_bsky_embed(
         },
         Some(BskyEmbedChoice::Url { url }) => Target::Url(url),
         None => {
-            if rows
+            if poll.is_some() {
+                Target::Poll
+            } else if rows
                 .iter()
                 .any(|r| r.mime_type.starts_with("image/") && !r.is_animated_image)
             {
@@ -285,6 +324,15 @@ pub async fn resolve_bsky_embed(
 
     match target {
         Target::None => BskyEmbedResolution::Ready(None),
+        Target::Poll => {
+            // `Target::Poll`はchoiceがPollかつpollがSomeの場合、またはNone（自動選択）で
+            // pollがSomeの場合のみ到達するため、ここでのunwrapは安全。
+            BskyEmbedResolution::Ready(Some(resolve_poll_embed(
+                &state.local_domain,
+                post_id,
+                poll.expect("Target::Poll implies poll.is_some()"),
+            )))
+        }
         Target::Images => {
             let images: Vec<BskyImage> = rows
                 .iter()
@@ -766,6 +814,9 @@ pub struct RegularPostDelivery {
     /// Bsky embedの明示選択（#227、`resolve_bsky_embed`参照）。引用投稿（`bsky_quote_embed`が
     /// `Some`）の場合は無視される（引用embedと画像/動画/URL embedは共存しない）。
     pub bsky_embed_choice: Option<BskyEmbedChoice>,
+    /// アンケート（#228、`posts.poll`と同じ形のJSON）。Bsky embed選択の`Poll`候補・
+    /// AP `Question`配送の両方で使う。
+    pub poll: Option<serde_json::Value>,
 }
 
 /// ATP レコードの `(uri, cid)` 参照。
@@ -867,6 +918,7 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
                 d.post_id,
                 &d.attachment_ids,
                 &d.text,
+                d.poll.as_ref(),
                 d.bsky_embed_choice,
             )
             .await
@@ -935,7 +987,8 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
 mod tests {
     use super::{
         ap_delivery_quote_fields, ap_quote_from_meta, at_uri_to_bsky_app_url, classify_post,
-        fedi_url_append_needed, ApQuote, BskyEmbedChoice, PostOrigin, ReplyContext,
+        fedi_url_append_needed, resolve_poll_embed, ApQuote, BskyEmbed, BskyEmbedChoice,
+        PostOrigin, ReplyContext,
     };
     use crate::error::ApiError;
     use seiran_common::repository::post::PostDeliveryMeta;
@@ -1186,6 +1239,32 @@ mod tests {
             url: "https://example.com/article".to_owned(),
         };
         assert_eq!(fedi_url_append_needed("本文", true, Some(&choice)), None);
+    }
+
+    #[test]
+    fn resolve_poll_embed_builds_bullet_list_description_and_self_url() {
+        let poll = serde_json::json!({
+            "multiple": false,
+            "options": [
+                {"name": "選択肢A", "votes": 0},
+                {"name": "選択肢B", "votes": 0}
+            ]
+        });
+        let embed = resolve_poll_embed("seiran.example", 42, &poll);
+        match embed {
+            BskyEmbed::External {
+                url,
+                title,
+                description,
+                thumb,
+            } => {
+                assert_eq!(url, "https://seiran.example/notes/42");
+                assert_eq!(title, "");
+                assert_eq!(description, "- 選択肢A\n- 選択肢B");
+                assert!(thumb.is_none());
+            }
+            _ => panic!("expected External embed"),
+        }
     }
 
     #[test]

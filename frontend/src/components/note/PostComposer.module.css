@@ -336,6 +336,137 @@
   flex-shrink: 0;
 }
 
+/* #228: アンケート編集ブロック。 */
+.pollEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+
+.pollChoiceRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pollChoiceInput {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.pollChoiceInput::placeholder {
+  color: var(--text-faint);
+}
+
+.pollRemoveChoiceBtn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  background: var(--border-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+
+.pollAddChoiceBtn {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.pollAddChoiceBtn:hover {
+  color: var(--text);
+  border-color: var(--accent-strong);
+}
+
+.pollMultipleLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.pollExpiryRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.pollExpiryOption {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pollExpiryDatetime {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.pollDurationPresets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.pollDurationPresetBtn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 14px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.pollDurationPresetBtn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* 詳細度を`.pollDurationPresetBtn`単体より上げ、CSSソース順に関わらず選択状態
+ * （`.scopeActive`）の見た目が確実に勝つようにする（マイケル指摘: 選択しても
+ * 色が変わらず分からなかった不具合の修正）。 */
+.pollDurationPresetBtn.scopeActive {
+  background: var(--accent-deep);
+  border-color: var(--accent-strong);
+  color: var(--accent);
+}
+
 .footer {
   display: flex;
   align-items: center;

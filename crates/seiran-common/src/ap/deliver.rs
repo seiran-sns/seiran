@@ -254,6 +254,9 @@ struct NoteActivityParams<'a> {
     /// （`to`に含めるのはAP的な作法・実際の配送先は別途 `deliver_post_to_ap_followers` が解決する）。
     /// directでは無視される（`direct_recipients`が既に実際の宛先そのもののため）。
     mention_recipients: &'a [String],
+    /// アンケート（#228）。`Some`の場合、Note objectを`Question`型に切り替え`oneOf`/`anyOf`・
+    /// `endTime`を組み立てる。`{multiple, options:[{name,votes}], endTime}`の形。
+    poll: Option<&'a serde_json::Value>,
 }
 
 /// 可視性から Create(Note)/Note 共通の to/cc を決める。
@@ -282,6 +285,39 @@ fn visibility_to_to_cc(
             to.extend(mention_recipients.iter().cloned());
             (to, vec![addr.followers_uri.clone()])
         }
+    }
+}
+
+/// `note_obj` をアンケート付き投稿用に`Question`型へ書き換える（#228）。
+/// `poll`は`{multiple, options:[{name,votes}], endTime}`（`posts.poll`と同じ形、
+/// 受信側`normalize_ap_poll`と対称の構築）。
+fn apply_poll_to_note_object(note_obj: &mut serde_json::Value, poll: &serde_json::Value) {
+    note_obj["type"] = serde_json::Value::String("Question".to_string());
+    let multiple = poll["multiple"].as_bool().unwrap_or(false);
+    let choices: Vec<serde_json::Value> = poll["options"]
+        .as_array()
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(|o| {
+                    let name = o["name"].as_str()?;
+                    let votes = o["votes"].as_i64().unwrap_or(0);
+                    Some(serde_json::json!({
+                        "type": "Note",
+                        "name": name,
+                        "replies": {
+                            "type": "Collection",
+                            "totalItems": votes
+                        }
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let key = if multiple { "anyOf" } else { "oneOf" };
+    note_obj[key] = serde_json::Value::Array(choices);
+    if let Some(end_time) = poll["endTime"].as_str() {
+        note_obj["endTime"] = serde_json::Value::String(end_time.to_string());
     }
 }
 
@@ -325,6 +361,9 @@ fn build_create_note_activity(
     }
     if let Some(uuid) = p.seiran_uuid {
         note_obj["seiranUuid"] = serde_json::Value::String(uuid.to_string());
+    }
+    if let Some(poll) = p.poll {
+        apply_poll_to_note_object(&mut note_obj, poll);
     }
 
     serde_json::json!({
@@ -615,6 +654,8 @@ struct PostActivityBasis {
     visibility: String,
     emoji_map: serde_json::Value,
     attachments: Vec<serde_json::Value>,
+    /// アンケート（#228）。`{multiple, options:[{name,votes}], endTime}`。無ければ`None`。
+    poll: Option<serde_json::Value>,
 }
 
 async fn fetch_post_activity_basis(
@@ -624,7 +665,7 @@ async fn fetch_post_activity_basis(
 ) -> Result<PostActivityBasis, ApError> {
     let row = sqlx::query(
         "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username,
-                p.visibility::text AS visibility, p.emoji_map
+                p.visibility::text AS visibility, p.emoji_map, p.poll
          FROM posts p
          JOIN actors a ON a.id = p.actor_id
          WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
@@ -653,6 +694,7 @@ async fn fetch_post_activity_basis(
         .try_get("emoji_map")
         .unwrap_or_else(|_| serde_json::json!({}));
     let attachments = fetch_attachment_documents(db, post_id).await?;
+    let poll: Option<serde_json::Value> = row.try_get("poll").unwrap_or(None);
 
     Ok(PostActivityBasis {
         body,
@@ -662,6 +704,7 @@ async fn fetch_post_activity_basis(
         visibility,
         emoji_map,
         attachments,
+        poll,
     })
 }
 
@@ -797,6 +840,7 @@ pub async fn deliver_post_to_ap_followers(
             tag,
             direct_recipients: &[],
             mention_recipients: &mention_uris,
+            poll: basis.poll.as_ref(),
         },
     );
 
@@ -871,6 +915,9 @@ pub async fn deliver_direct_message_to_ap(
             direct_recipients: &direct_recipients,
             // directは`direct_recipients`が既に実際の宛先そのものなので無視される（visibility_to_to_cc参照）。
             mention_recipients: &[],
+            // DMではアンケート作成自体が禁止されているため常にNone（`notes/mod.rs`の
+            // `POLL_NOT_ALLOWED_FOR_DM`参照）。
+            poll: None,
         },
     );
 
@@ -1559,6 +1606,7 @@ mod tests {
                 tag: vec![],
                 direct_recipients: &[],
                 mention_recipients: &[],
+                poll: None,
             },
         );
         assert_eq!(activity["type"], "Create");
@@ -1572,6 +1620,79 @@ mod tests {
         assert!(note.get("quoteUrl").is_none());
         assert!(note.get("inReplyTo").is_none());
         assert!(note.get("seiranUuid").is_none());
+    }
+
+    #[test]
+    fn create_note_activity_with_single_choice_poll_becomes_question_with_one_of() {
+        let poll = serde_json::json!({
+            "multiple": false,
+            "options": [
+                {"name": "A", "votes": 0},
+                {"name": "B", "votes": 0}
+            ],
+            "endTime": "2026-08-01T00:00:00+00:00"
+        });
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>どっち？</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                visibility: "public",
+                tag: vec![],
+                direct_recipients: &[],
+                mention_recipients: &[],
+                poll: Some(&poll),
+            },
+        );
+        let note = &activity["object"];
+        assert_eq!(note["type"], "Question");
+        assert!(note.get("anyOf").is_none());
+        let one_of = note["oneOf"].as_array().unwrap();
+        assert_eq!(one_of.len(), 2);
+        assert_eq!(one_of[0]["type"], "Note");
+        assert_eq!(one_of[0]["name"], "A");
+        assert_eq!(one_of[0]["replies"]["totalItems"], 0);
+        assert_eq!(one_of[1]["name"], "B");
+        assert_eq!(note["endTime"], "2026-08-01T00:00:00+00:00");
+    }
+
+    #[test]
+    fn create_note_activity_with_multiple_choice_poll_uses_any_of_and_omits_end_time() {
+        let poll = serde_json::json!({
+            "multiple": true,
+            "options": [{"name": "A", "votes": 3}],
+            "endTime": null
+        });
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>複数選択</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                visibility: "public",
+                tag: vec![],
+                direct_recipients: &[],
+                mention_recipients: &[],
+                poll: Some(&poll),
+            },
+        );
+        let note = &activity["object"];
+        assert_eq!(note["type"], "Question");
+        assert!(note.get("oneOf").is_none());
+        let any_of = note["anyOf"].as_array().unwrap();
+        assert_eq!(any_of[0]["replies"]["totalItems"], 3);
+        assert!(note.get("endTime").is_none());
     }
 
     #[test]
@@ -1618,6 +1739,7 @@ mod tests {
                 tag: vec![],
                 direct_recipients: &[],
                 mention_recipients: &[],
+                poll: None,
             },
         );
         assert_eq!(
@@ -1649,6 +1771,7 @@ mod tests {
                 tag: vec![],
                 direct_recipients: &[],
                 mention_recipients: &[],
+                poll: None,
             },
         );
         assert_eq!(
@@ -1675,6 +1798,7 @@ mod tests {
                 tag: vec![],
                 direct_recipients: &[],
                 mention_recipients: &[],
+                poll: None,
             },
         );
         let note = &activity["object"];
@@ -1702,6 +1826,7 @@ mod tests {
                 tag: vec![],
                 direct_recipients: &[],
                 mention_recipients: &["https://other.example/users/bob".to_string()],
+                poll: None,
             },
         );
         // メンション先はフォロワーでなくても配送が届くよう to に含める（cc ではない）。
@@ -1735,6 +1860,7 @@ mod tests {
                 tag: vec![],
                 direct_recipients: &[],
                 mention_recipients: &["https://other.example/users/bob".to_string()],
+                poll: None,
             },
         );
         assert_eq!(

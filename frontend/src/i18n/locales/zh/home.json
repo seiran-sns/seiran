@@ -53,6 +53,10 @@
     "showContent": "展示",
     "hideContent": "隐藏",
     "votes": "{{count}} 票",
+    "pollRemainingMinutes": "剩余{{count}}分钟",
+    "pollRemainingSeconds": "剩余{{count}}秒",
+    "pollRemainingHours": "剩余{{hours}}小时{{minutes}}分钟",
+    "pollRemainingDays": "剩余{{days}}天{{hours}}小时{{minutes}}分钟",
     "pollLoginRequired": "登录投票。",
     "pollVoteButton": "投票",
     "pollBackToOptions": "返回选项",
@@ -110,11 +114,31 @@
     "quoteToPrefix": "引用:",
     "bskyEmbedChoice": {
       "heading": "要发送到 Bluesky 的是哪一个？",
+      "poll": "投票",
       "images": "静态图片（{{count}}张）",
       "gif": "动图 {{index}}",
       "video": "视频 {{index}}",
       "url": "URL {{index}}：{{url}}",
       "urlOrphan": "URL：{{url}}（已从正文中删除）"
+    },
+    "poll": {
+      "toggleTitle": "添加投票",
+      "choicePlaceholder": "选项 {{index}}",
+      "addChoice": "添加选项",
+      "removeChoice": "删除选项",
+      "multipleLabel": "允许多选",
+      "expiryNone": "无期限",
+      "expiryAt": "指定日期时间",
+      "expiryDuration": "经过时间",
+      "duration": {
+        "min5": "5分钟",
+        "min30": "30分钟",
+        "hour1": "1小时",
+        "hour6": "6小时",
+        "day1": "1天",
+        "day3": "3天",
+        "day7": "7天"
+      }
     }
   },
   "reactionChips": {

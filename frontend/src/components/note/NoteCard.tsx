@@ -29,6 +29,7 @@ import RichHtml from "./RichHtml";
 import RichText from "./RichText";
 import NoteAttachments from "./NoteAttachments";
 import LinkCard from "./LinkCard";
+import PollCountdown from "./PollCountdown";
 import NoteCardActions from "./NoteCardActions";
 import ReactionChips from "./ReactionChips";
 import { useComposer } from "../../contexts/ComposerContext";
@@ -533,6 +534,9 @@ function PostContent({
                   ? t("home:noteCard.pollBackToOptions")
                   : t("home:noteCard.pollShowResults")}
               </button>
+              {poll.endTime && (
+                <PollCountdown endTime={poll.endTime} className={styles.pollRemaining} />
+              )}
             </div>
           )}
         </div>

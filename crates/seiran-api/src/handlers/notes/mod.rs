@@ -172,8 +172,8 @@ use delivery::{
 };
 use queries::{fetch_reposted_ids, find_repost_for_undo};
 use validation::{
-    strip_html_tags, validate_attachment_ids, validate_dm_text_length, validate_reaction_content,
-    validate_text_length, ReactionContent,
+    strip_html_tags, validate_attachment_ids, validate_dm_text_length, validate_poll_choices,
+    validate_reaction_content, validate_text_length, ReactionContent,
 };
 
 /// 検証済みの添付ファイル ID 群を投稿に紐付ける。
@@ -572,6 +572,44 @@ async fn create_regular_post(
             return ApiError::BadRequest("INVALID_BSKY_EMBED_CHOICE".to_owned()).into_response();
         }
     }
+    // Bsky embed選択（#228）: `Poll`を選んだ場合、このリクエストが実際にアンケートを
+    // 作成していなければならない。
+    if matches!(req.bsky_embed_choice, Some(dto::BskyEmbedChoice::Poll)) && req.poll.is_none() {
+        return ApiError::BadRequest("INVALID_BSKY_EMBED_CHOICE".to_owned()).into_response();
+    }
+
+    // アンケート作成（#228）: DMには馴染まないため禁止する（BSKY_DM_NO_ATTACHMENTSと同じ理由）。
+    if visibility == "direct" && req.poll.is_some() {
+        return ApiError::BadRequest("POLL_NOT_ALLOWED_FOR_DM".to_owned()).into_response();
+    }
+    let poll_json: Option<serde_json::Value> = match &req.poll {
+        Some(p) => {
+            let choices = match validate_poll_choices(&p.choices) {
+                Ok(c) => c,
+                Err(e) => return e.into_response(),
+            };
+            // 期限: 絶対時刻（ISO8601） > Misskey互換epochミリ秒 > 相対秒数 の優先順で解決する。
+            // いずれも無ければ無期限（endTimeを省略）。
+            let end_time: Option<chrono::DateTime<chrono::Utc>> = p
+                .expires_at
+                .as_deref()
+                .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
+                .or_else(|| {
+                    p.expires_at_epoch_ms
+                        .and_then(chrono::DateTime::from_timestamp_millis)
+                })
+                .or_else(|| {
+                    p.expires_in_seconds
+                        .map(|secs| now + chrono::Duration::seconds(secs))
+                });
+            Some(serde_json::json!({
+                "multiple": p.multiple.unwrap_or(false),
+                "options": choices.into_iter().map(|name| serde_json::json!({"name": name, "votes": 0})).collect::<Vec<_>>(),
+                "endTime": end_time.map(|t| t.to_rfc3339()),
+            }))
+        }
+        None => None,
+    };
 
     let post_id = generate_snowflake_id(now);
     let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
@@ -698,6 +736,7 @@ async fn create_regular_post(
             thread_root_post_id,
             recipient_actor_ids: &recipient_actor_ids,
             emoji_map: &local_emoji_map,
+            poll: poll_json.as_ref(),
         })
         .await
     {
@@ -847,6 +886,7 @@ async fn create_regular_post(
             ap_in_reply_to: reply_ctx.ap_in_reply_to,
             attachment_ids: attachment_ids_i64.clone(),
             bsky_embed_choice: req.bsky_embed_choice.clone(),
+            poll: poll_json.clone(),
         },
     )
     .await;

@@ -2,6 +2,12 @@ import { BskyEmbedChoice, DriveFile } from "../api/client";
 
 export type DraftVisibility = "public" | "unlisted" | "followers_only";
 
+/** アンケートの期限指定（#228）。`PostComposer`のpollExpiry stateと同じ形。 */
+export type DraftPollExpiry =
+  | { kind: "none" }
+  | { kind: "at"; value: string }
+  | { kind: "duration"; seconds: number };
+
 export interface ComposerDraft {
   text: string;
   attachments: DriveFile[];
@@ -10,6 +16,11 @@ export interface ComposerDraft {
   visibility: DraftVisibility;
   /** Bsky embed選択（#227）。候補が2件以上ある間の選択中の値、または孤児化したURL選択。 */
   bskyEmbedChoice: BskyEmbedChoice | null;
+  /** アンケート編集中かどうか（#228）。 */
+  pollEnabled: boolean;
+  pollChoices: string[];
+  pollMultiple: boolean;
+  pollExpiry: DraftPollExpiry;
 }
 
 export type DraftTarget =
@@ -76,7 +87,7 @@ export function loadComposerDraft(target: DraftTarget): ComposerDraft | null {
 
 /** 本文・添付とも空の下書きは保存せず、既存の下書きがあれば消す（クリア相当）。 */
 export function saveComposerDraft(target: DraftTarget, draft: ComposerDraft): void {
-  if (!draft.text.trim() && draft.attachments.length === 0) {
+  if (!draft.text.trim() && draft.attachments.length === 0 && !draft.pollEnabled) {
     clearComposerDraft(target);
     return;
   }

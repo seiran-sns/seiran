@@ -53,6 +53,10 @@
     "showContent": "보여주다",
     "hideContent": "숨다",
     "votes": "{{count}} 투표",
+    "pollRemainingMinutes": "{{count}}분 남음",
+    "pollRemainingSeconds": "{{count}}초 남음",
+    "pollRemainingHours": "{{hours}}시간 {{minutes}}분 남음",
+    "pollRemainingDays": "{{days}}일 {{hours}}시간 {{minutes}}분 남음",
     "pollLoginRequired": "투표하려면 로그인하세요.",
     "pollVoteButton": "투표",
     "pollBackToOptions": "옵션으로 돌아가기",
@@ -110,11 +114,31 @@
     "quoteToPrefix": "인용:",
     "bskyEmbedChoice": {
       "heading": "Bluesky에는 어느 것을 첨부할까요?",
+      "poll": "설문조사",
       "images": "정지 이미지 ({{count}}장)",
       "gif": "움짤(GIF) {{index}}",
       "video": "동영상 {{index}}",
       "url": "URL {{index}}: {{url}}",
       "urlOrphan": "URL: {{url}} (본문에서 삭제됨)"
+    },
+    "poll": {
+      "toggleTitle": "설문조사 추가",
+      "choicePlaceholder": "선택지 {{index}}",
+      "addChoice": "선택지 추가",
+      "removeChoice": "선택지 삭제",
+      "multipleLabel": "복수 선택 허용",
+      "expiryNone": "무기한",
+      "expiryAt": "날짜/시간 지정",
+      "expiryDuration": "경과 시간",
+      "duration": {
+        "min5": "5분",
+        "min30": "30분",
+        "hour1": "1시간",
+        "hour6": "6시간",
+        "day1": "1일",
+        "day3": "3일",
+        "day7": "7일"
+      }
     }
   },
   "reactionChips": {

@@ -53,6 +53,10 @@
     "showContent": "Zeigen",
     "hideContent": "Verstecken",
     "votes": "{{count}} Stimmen",
+    "pollRemainingMinutes": "noch {{count}} Min.",
+    "pollRemainingSeconds": "noch {{count}} Sek.",
+    "pollRemainingHours": "noch {{hours}} Std. {{minutes}} Min.",
+    "pollRemainingDays": "noch {{days}} Tage {{hours}} Std. {{minutes}} Min.",
     "pollLoginRequired": "Melden Sie sich an, um abzustimmen.",
     "pollVoteButton": "Abstimmung",
     "pollBackToOptions": "Zurück zu den Optionen",
@@ -110,11 +114,31 @@
     "quoteToPrefix": "Zitat:",
     "bskyEmbedChoice": {
       "heading": "Was soll an Bluesky gesendet werden?",
+      "poll": "Umfrage",
       "images": "Bilder ({{count}})",
       "gif": "Animiertes GIF {{index}}",
       "video": "Video {{index}}",
       "url": "URL {{index}}: {{url}}",
       "urlOrphan": "URL: {{url}} (aus dem Text entfernt)"
+    },
+    "poll": {
+      "toggleTitle": "Umfrage hinzufügen",
+      "choicePlaceholder": "Option {{index}}",
+      "addChoice": "Option hinzufügen",
+      "removeChoice": "Option entfernen",
+      "multipleLabel": "Mehrfachauswahl zulassen",
+      "expiryNone": "Kein Ablauf",
+      "expiryAt": "Bestimmtes Datum/Uhrzeit",
+      "expiryDuration": "Dauer",
+      "duration": {
+        "min5": "5 Min.",
+        "min30": "30 Min.",
+        "hour1": "1 Stunde",
+        "hour6": "6 Stunden",
+        "day1": "1 Tag",
+        "day3": "3 Tage",
+        "day7": "7 Tage"
+      }
     }
   },
   "reactionChips": {

@@ -430,7 +430,9 @@
   cursor: pointer;
 }
 .pollChoice:hover { background: var(--accent-deep); }
-.pollControls { display: flex; gap: 8px; }
+/* #228: アンケート期限までの残り時間（1秒ごとにカウントダウン）。 */
+.pollRemaining { font-size: 0.78rem; color: var(--text-faint); }
+.pollControls { display: flex; align-items: center; gap: 8px; }
 .pollControls button {
   border: 1px solid var(--border);
   border-radius: 6px;

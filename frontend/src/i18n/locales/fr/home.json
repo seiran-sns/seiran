@@ -53,6 +53,10 @@
     "showContent": "Montrer",
     "hideContent": "Cacher",
     "votes": "{{count}} votes",
+    "pollRemainingMinutes": "{{count}} min restantes",
+    "pollRemainingSeconds": "{{count}} s restantes",
+    "pollRemainingHours": "{{hours}} h {{minutes}} min restantes",
+    "pollRemainingDays": "{{days}} j {{hours}} h {{minutes}} min restantes",
     "pollLoginRequired": "Connectez-vous pour voter.",
     "pollVoteButton": "Voter",
     "pollBackToOptions": "Retour aux options",
@@ -110,11 +114,31 @@
     "quoteToPrefix": "Citant :",
     "bskyEmbedChoice": {
       "heading": "Lequel envoyer à Bluesky ?",
+      "poll": "Sondage",
       "images": "Images ({{count}})",
       "gif": "GIF animé {{index}}",
       "video": "Vidéo {{index}}",
       "url": "URL {{index}} : {{url}}",
       "urlOrphan": "URL : {{url}} (supprimée du texte)"
+    },
+    "poll": {
+      "toggleTitle": "Ajouter un sondage",
+      "choicePlaceholder": "Choix {{index}}",
+      "addChoice": "Ajouter un choix",
+      "removeChoice": "Supprimer le choix",
+      "multipleLabel": "Autoriser les choix multiples",
+      "expiryNone": "Sans expiration",
+      "expiryAt": "Date/heure précise",
+      "expiryDuration": "Durée",
+      "duration": {
+        "min5": "5 min",
+        "min30": "30 min",
+        "hour1": "1 heure",
+        "hour6": "6 heures",
+        "day1": "1 jour",
+        "day3": "3 jours",
+        "day7": "7 jours"
+      }
     }
   },
   "reactionChips": {

@@ -204,6 +204,9 @@ pub struct InsertFullParams<'a> {
     /// 抽出・解決した値を渡す（Fedi受信時と同様、これが空だと本文中のショートコードが
     /// 画像化されない）。無ければ `serde_json::json!({})` を渡すこと。
     pub emoji_map: &'a serde_json::Value,
+    /// アンケート（#228）。`{multiple, options:[{name,votes}], endTime}`
+    /// （Fedi受信Questionと同じ形、`normalize_ap_poll`参照）。無ければ`None`。
+    pub poll: Option<&'a serde_json::Value>,
 }
 
 /// `PostRepository::insert_remote_with_dedup` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
@@ -1140,8 +1143,8 @@ impl PostRepository for PgPostRepository {
     async fn insert_full(&self, params: InsertFullParams<'_>) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky, thread_root_post_id, emoji_map)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11, $12, $13)",
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky, thread_root_post_id, emoji_map, poll)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11, $12, $13, $14)",
         )
         .bind(params.id)
         .bind(params.actor_id)
@@ -1156,6 +1159,7 @@ impl PostRepository for PgPostRepository {
         .bind(params.deliver_bsky)
         .bind(params.thread_root_post_id)
         .bind(params.emoji_map)
+        .bind(params.poll)
         .execute(&mut *tx)
         .await?;
 

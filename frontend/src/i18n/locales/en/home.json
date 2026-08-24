@@ -53,6 +53,10 @@
     "showContent": "Show",
     "hideContent": "Hide",
     "votes": "{{count}} votes",
+    "pollRemainingMinutes": "{{count}} min left",
+    "pollRemainingSeconds": "{{count}} sec left",
+    "pollRemainingHours": "{{hours}}h {{minutes}}m left",
+    "pollRemainingDays": "{{days}}d {{hours}}h {{minutes}}m left",
     "pollLoginRequired": "Log in to vote.",
     "pollVoteButton": "Vote",
     "pollBackToOptions": "Back to options",
@@ -110,11 +114,31 @@
     "quoteToPrefix": "Quoting:",
     "bskyEmbedChoice": {
       "heading": "Which one should go to Bluesky?",
+      "poll": "Poll",
       "images": "Images ({{count}})",
       "gif": "Animated GIF {{index}}",
       "video": "Video {{index}}",
       "url": "URL {{index}}: {{url}}",
       "urlOrphan": "URL: {{url}} (removed from the text)"
+    },
+    "poll": {
+      "toggleTitle": "Add a poll",
+      "choicePlaceholder": "Choice {{index}}",
+      "addChoice": "Add choice",
+      "removeChoice": "Remove choice",
+      "multipleLabel": "Allow multiple selections",
+      "expiryNone": "No expiration",
+      "expiryAt": "Specific date/time",
+      "expiryDuration": "Duration",
+      "duration": {
+        "min5": "5 min",
+        "min30": "30 min",
+        "hour1": "1 hour",
+        "hour6": "6 hours",
+        "day1": "1 day",
+        "day3": "3 days",
+        "day7": "7 days"
+      }
     }
   },
   "reactionChips": {

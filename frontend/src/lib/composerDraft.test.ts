@@ -14,6 +14,10 @@ function makeDraft(text: string): ComposerDraft {
     deliverBsky: true,
     visibility: "public",
     bskyEmbedChoice: null,
+    pollEnabled: false,
+    pollChoices: ["", ""],
+    pollMultiple: false,
+    pollExpiry: { kind: "none" },
   };
 }
 

@@ -835,14 +835,26 @@ export interface DriveFile {
 }
 
 /**
- * Bsky配送時、複数の添付候補（静止画グループ・アニメGIF・動画・本文URL）のうちどれを
- * Bsky embedにするかの明示選択（#227、バックエンド`CreateNoteRequest::bsky_embed_choice`）。
- * 省略時はバックエンドが固定優先順位（静止画→アニメGIF→動画/音声→本文URL）で自動選択する。
+ * Bsky配送時、複数の添付候補（アンケート・静止画グループ・アニメGIF・動画・本文URL）の
+ * うちどれをBsky embedにするかの明示選択（#227、バックエンド
+ * `CreateNoteRequest::bsky_embed_choice`）。省略時はバックエンドが固定優先順位
+ * （アンケート→静止画→アニメGIF→動画/音声→本文URL）で自動選択する。
  */
 export type BskyEmbedChoice =
   | { kind: "images" }
   | { kind: "attachment"; id: string }
-  | { kind: "url"; url: string };
+  | { kind: "url"; url: string }
+  | { kind: "poll" };
+
+/** アンケート作成（#228）。`api.notes.create`の`poll`引数、`CreateNoteRequest::poll`と対応。 */
+export interface PollCreateInput {
+  choices: string[];
+  multiple?: boolean;
+  /** 絶対時刻（ISO8601）。期限指定（日時）用。 */
+  expiresAtIso?: string;
+  /** 送信時刻からの相対秒数。期限プリセット（経過時間）用。 */
+  expiresInSeconds?: number;
+}
 
 /**
  * `POST /api/i/notifications`（Misskey API 互換）のレスポンス要素。
@@ -1144,6 +1156,7 @@ export const api = {
       recipientActorIds?: string[],
       quoteOfId?: string,
       bskyEmbedChoice?: BskyEmbedChoice,
+      poll?: PollCreateInput,
     ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
@@ -1157,6 +1170,12 @@ export const api = {
           visibility,
           recipient_actor_ids: recipientActorIds,
           bsky_embed_choice: bskyEmbedChoice,
+          poll: poll && {
+            choices: poll.choices,
+            multiple: poll.multiple,
+            expiresAtIso: poll.expiresAtIso,
+            expiresInSeconds: poll.expiresInSeconds,
+          },
         }),
       );
     },

@@ -65,6 +65,26 @@ pub fn validate_attachment_ids(ids: &[String]) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// アンケート選択肢テキストの書記素クラスタ数上限（#228）。
+const MAX_POLL_CHOICE_LEN: usize = 100;
+
+/// アンケート選択肢を検証し、trim済みの選択肢一覧を返す（#228）。
+/// 2〜10件、各1〜100書記素、空文字（trim後）禁止。
+pub fn validate_poll_choices(choices: &[String]) -> Result<Vec<String>, ApiError> {
+    let trimmed: Vec<String> = choices.iter().map(|c| c.trim().to_owned()).collect();
+    if trimmed.len() < 2 || trimmed.len() > 10 {
+        return Err(ApiError::BadRequest(
+            "アンケートの選択肢は2〜10件です".to_owned(),
+        ));
+    }
+    if trimmed.iter().any(|c| {
+        c.is_empty() || c.graphemes(true).count() > MAX_POLL_CHOICE_LEN
+    }) {
+        return Err(ApiError::BadRequest("INVALID_POLL_CHOICE".to_owned()));
+    }
+    Ok(trimmed)
+}
+
 /// Unicode 絵文字候補の書記素クラスタ数の安全上限（`emojis::get` の完全一致チェックの前段で
 /// 極端に長い文字列を弾くためのもの。実際の絵文字判定はこの定数ではなく下記の完全一致で行う）。
 const MAX_REACTION_CONTENT_LEN: usize = 32;
@@ -144,9 +164,43 @@ pub fn strip_html_tags(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        strip_html_tags, validate_dm_text_length, validate_reaction_content, validate_text_length,
-        ReactionContent,
+        strip_html_tags, validate_dm_text_length, validate_poll_choices, validate_reaction_content,
+        validate_text_length, ReactionContent,
     };
+
+    #[test]
+    fn validate_poll_choices_trims_and_accepts_two_to_ten() {
+        let choices = vec![" A ".to_owned(), "B".to_owned()];
+        assert_eq!(
+            validate_poll_choices(&choices).unwrap(),
+            vec!["A".to_owned(), "B".to_owned()]
+        );
+        let ten = (0..10).map(|i| format!("choice{i}")).collect::<Vec<_>>();
+        assert!(validate_poll_choices(&ten).is_ok());
+    }
+
+    #[test]
+    fn validate_poll_choices_rejects_fewer_than_two() {
+        assert!(validate_poll_choices(&["A".to_owned()]).is_err());
+        assert!(validate_poll_choices(&[]).is_err());
+    }
+
+    #[test]
+    fn validate_poll_choices_rejects_more_than_ten() {
+        let eleven = (0..11).map(|i| format!("choice{i}")).collect::<Vec<_>>();
+        assert!(validate_poll_choices(&eleven).is_err());
+    }
+
+    #[test]
+    fn validate_poll_choices_rejects_empty_after_trim() {
+        assert!(validate_poll_choices(&["A".to_owned(), "   ".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn validate_poll_choices_rejects_too_long() {
+        let long = "a".repeat(super::MAX_POLL_CHOICE_LEN + 1);
+        assert!(validate_poll_choices(&["A".to_owned(), long]).is_err());
+    }
 
     #[test]
     fn validate_dm_text_length_bsky_recipient_uses_tighter_grapheme_limit() {
