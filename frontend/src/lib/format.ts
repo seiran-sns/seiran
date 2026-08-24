@@ -156,3 +156,23 @@ export function calcRemaining(text: string, deliverBsky: boolean): number {
   const bytes = countUtf8Bytes(text);
   return Math.min(maxGraphemes - graphemes, Math.floor((maxBytes - bytes) / 3));
 }
+
+const BODY_URL_RE = /https?:\/\/[^\s<>()[\]]+/g;
+
+/**
+ * 本文中の生URLを出現順に検出し、重複を除いて返す（上限5件）。バックエンドの
+ * `seiran_common::net::extract_body_urls` と同じルール・上限で、Bsky embed選択（#227）の
+ * 投稿フォーム側候補一覧の算出に使う。
+ */
+export function extractBodyUrls(text: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const match of text.matchAll(BODY_URL_RE)) {
+    const url = match[0];
+    if (seen.has(url)) continue;
+    seen.add(url);
+    result.push(url);
+    if (result.length >= 5) break;
+  }
+  return result;
+}

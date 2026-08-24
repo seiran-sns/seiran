@@ -56,6 +56,9 @@ pub struct DriveFileResponse {
     pub md5: String,
     pub is_sensitive: bool,
     pub properties: DriveFileProperties,
+    /// アニメーション画像（GIF/APNG/WebPアニメ）由来かどうか。Bsky embed選択（#227）で
+    /// 投稿フォームが「静止画」「アニメGIF」のラジオボタン項目を分けるために使う。
+    pub is_animated_image: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -277,6 +280,7 @@ async fn create_image_file(
             width: record.width.map(|w| w as u32),
             height: record.height.map(|h| h as u32),
         },
+        is_animated_image: record.is_animated_image,
     }))
 }
 
@@ -406,6 +410,7 @@ async fn create_video_or_audio_file(
                 width: existing.width.map(|w| w as u32),
                 height: existing.height.map(|h| h as u32),
             },
+            is_animated_image: existing.is_animated_image,
         }));
     }
 
@@ -471,6 +476,7 @@ async fn create_video_or_audio_file(
             duration_ms: probed.duration_ms.map(|d| d as i32),
             thumbnail_key: thumbnail_key.clone(),
             uploaded_by_actor_id: actor_id,
+            is_animated_image: false,
         })
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -512,6 +518,7 @@ async fn create_video_or_audio_file(
             width: probed.width,
             height: probed.height,
         },
+        is_animated_image: false,
     }))
 }
 

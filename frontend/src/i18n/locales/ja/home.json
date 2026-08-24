@@ -107,7 +107,15 @@
     "postButtonUnlisted": "ひかえめ",
     "postButtonPrivate": "プライベート",
     "replyToPrefix": "返信先:",
-    "quoteToPrefix": "引用元:"
+    "quoteToPrefix": "引用元:",
+    "bskyEmbedChoice": {
+      "heading": "Bskyへはどれを添付しますか？",
+      "images": "静止画（{{count}}枚）",
+      "gif": "アニメGIF {{index}}",
+      "video": "動画 {{index}}",
+      "url": "URL {{index}}: {{url}}",
+      "urlOrphan": "URL: {{url}}（本文からは削除済み）"
+    }
   },
   "reactionChips": {
     "clickToRemove": "クリックで取り消す",

@@ -180,9 +180,113 @@ pub async fn fetch_validated_with_accept(
     unreachable!()
 }
 
+/// 本文中の生URL（`https?://\S+`、末尾の `)`/`]`/`.`/`,` 等の区切り記号は含めない）を
+/// 出現順に検出し、重複を除いて返す（上限5件、Fediの本文URLカード抽出と同じ上限に揃える）。
+/// Bsky embed選択（#227）の候補URL算出、および選択IDのバリデーションで使う。
+pub fn extract_body_urls(text: &str) -> Vec<String> {
+    const MAX_URLS: usize = 5;
+    static URL_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = URL_RE.get_or_init(|| regex::Regex::new(r#"https?://[^\s<>()\[\]]+"#).unwrap());
+
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::new();
+    for m in re.find_iter(text) {
+        let url = m.as_str();
+        if seen.insert(url.to_string()) {
+            result.push(url.to_string());
+            if result.len() >= MAX_URLS {
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// ページのOGPメタデータ（`og:title`/`og:description`/`og:image`）。
+pub struct OgpData {
+    pub title: String,
+    pub description: String,
+    pub thumbnail_url: Option<String>,
+}
+
+/// `<meta property="..." content="...">`（属性順序は問わない）から`content`を抽出する。
+/// HTML5準拠の厳密なパースはせず、OGPメタタグの一般的な形だけを対象にした簡易実装。
+fn extract_og_content(html: &str, property: &str) -> Option<String> {
+    let escaped = regex::escape(property);
+    let patterns = [
+        format!(r#"<meta[^>]*?property=["']{escaped}["'][^>]*?content=["']([^"']*)["']"#),
+        format!(r#"<meta[^>]*?content=["']([^"']*)["'][^>]*?property=["']{escaped}["']"#),
+    ];
+    for pattern in patterns {
+        if let Ok(re) = regex::Regex::new(&pattern) {
+            if let Some(cap) = re.captures(html) {
+                let raw = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                return Some(html_escape::decode_html_entities(raw).into_owned());
+            }
+        }
+    }
+    None
+}
+
+/// URLのOGPメタデータを取得する（SSRF対策込み、`fetch_validated_with_accept`経由）。
+/// フェッチ自体が失敗した場合は`Err`（呼び出し元がリトライ要否を判断できるよう
+/// `FetchError`をそのまま返す）、フェッチはできたが`og:title`が無い場合は
+/// `Ok(None)`（リトライしても無駄）。`Job::OgpFetch`・Bsky embed選択の
+/// URLカード生成の両方から共有する。
+pub async fn fetch_ogp(url: &str) -> Result<Option<OgpData>, FetchError> {
+    let (bytes, _content_type) = fetch_validated_with_accept(
+        url,
+        &["text/html", "application/xhtml+xml"],
+        "text/html,application/xhtml+xml;q=0.9",
+    )
+    .await?;
+
+    let html = String::from_utf8_lossy(&bytes);
+    let Some(title) = extract_og_content(&html, "og:title") else {
+        return Ok(None);
+    };
+    let description = extract_og_content(&html, "og:description").unwrap_or_default();
+    let thumbnail_url = extract_og_content(&html, "og:image").and_then(|raw| {
+        // 相対URLで書かれているサイトもあるため、対象ページのURLを基点に絶対URL化する。
+        Url::parse(url)
+            .ok()
+            .and_then(|base| base.join(&raw).ok())
+            .map(|u| u.to_string())
+    });
+
+    Ok(Some(OgpData {
+        title,
+        description,
+        thumbnail_url,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_public_ip;
+    use super::{extract_body_urls, is_public_ip};
+
+    #[test]
+    fn extract_body_urls_dedupes_and_preserves_order() {
+        let text = "見て https://a.example/x これも https://b.example/y そしてまた https://a.example/x";
+        assert_eq!(
+            extract_body_urls(text),
+            vec!["https://a.example/x", "https://b.example/y"]
+        );
+    }
+
+    #[test]
+    fn extract_body_urls_caps_at_five() {
+        let text = (0..8)
+            .map(|i| format!("https://example.com/{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(extract_body_urls(&text).len(), 5);
+    }
+
+    #[test]
+    fn extract_body_urls_empty_when_no_url() {
+        assert!(extract_body_urls("こんにちは").is_empty());
+    }
 
     #[test]
     fn rejects_non_public_addresses() {

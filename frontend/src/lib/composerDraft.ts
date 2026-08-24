@@ -1,13 +1,15 @@
-import { DriveFile } from "../api/client";
+import { BskyEmbedChoice, DriveFile } from "../api/client";
 
 export type DraftVisibility = "public" | "unlisted" | "followers_only";
 
 export interface ComposerDraft {
   text: string;
-  attached: DriveFile | null;
+  attachments: DriveFile[];
   deliverFedi: boolean;
   deliverBsky: boolean;
   visibility: DraftVisibility;
+  /** Bsky embed選択（#227）。候補が2件以上ある間の選択中の値、または孤児化したURL選択。 */
+  bskyEmbedChoice: BskyEmbedChoice | null;
 }
 
 export type DraftTarget =
@@ -74,7 +76,7 @@ export function loadComposerDraft(target: DraftTarget): ComposerDraft | null {
 
 /** 本文・添付とも空の下書きは保存せず、既存の下書きがあれば消す（クリア相当）。 */
 export function saveComposerDraft(target: DraftTarget, draft: ComposerDraft): void {
-  if (!draft.text.trim() && !draft.attached) {
+  if (!draft.text.trim() && draft.attachments.length === 0) {
     clearComposerDraft(target);
     return;
   }

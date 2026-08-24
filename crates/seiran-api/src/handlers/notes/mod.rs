@@ -561,6 +561,17 @@ async fn create_regular_post(
             return ApiError::BadRequest("BSKY_DM_NO_ATTACHMENTS".to_owned()).into_response();
         }
     }
+    // Bsky embed選択（#227）: `Attachment{id}`を選んだ場合、そのidは今回の投稿の添付として
+    // 実際に指定されていなければならない（含まれないidの選択は不正リクエストとして拒否する）。
+    if let Some(dto::BskyEmbedChoice::Attachment { id }) = &req.bsky_embed_choice {
+        let attached = req
+            .attachment_ids
+            .as_ref()
+            .is_some_and(|ids| ids.iter().any(|i| i == id));
+        if !attached {
+            return ApiError::BadRequest("INVALID_BSKY_EMBED_CHOICE".to_owned()).into_response();
+        }
+    }
 
     let post_id = generate_snowflake_id(now);
     let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
@@ -835,6 +846,7 @@ async fn create_regular_post(
             ap_quote,
             ap_in_reply_to: reply_ctx.ap_in_reply_to,
             attachment_ids: attachment_ids_i64.clone(),
+            bsky_embed_choice: req.bsky_embed_choice.clone(),
         },
     )
     .await;

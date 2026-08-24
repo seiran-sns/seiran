@@ -205,15 +205,16 @@ impl AppState {
         }
     }
 
-    /// 動画添付を含む投稿の Bsky コミットを、動画パイプライン結合完了待ちで
-    /// Worker（`jobs::bsky_post_commit_deferred`）へ委譲する。
+    /// Bsky embedとして選択された動画/音声添付のパイプライン結合完了待ちで、投稿のBsky
+    /// コミットをWorker（`jobs::bsky_post_commit_deferred`）へ委譲する。`pending_media_file_id`
+    /// は選択が解決した先の`media_files.id`1件のみ（#227、`resolve_bsky_embed`参照）。
     #[allow(clippy::too_many_arguments)]
     pub async fn enqueue_bsky_post_commit_deferred(
         &self,
         actor_id: i64,
         post_id: i64,
         text: String,
-        attachment_ids: Vec<i64>,
+        pending_media_file_id: i64,
         reply_root: Option<(String, String)>,
         reply_parent: Option<(String, String)>,
         now: chrono::DateTime<chrono::Utc>,
@@ -225,7 +226,7 @@ impl AppState {
                     actor_id,
                     post_id,
                     text,
-                    attachment_ids,
+                    pending_media_file_id,
                     reply_root,
                     reply_parent,
                     now,

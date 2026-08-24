@@ -1,0 +1,1 @@
+ALTER TABLE media_files ADD COLUMN is_animated_image BOOLEAN NOT NULL DEFAULT FALSE;

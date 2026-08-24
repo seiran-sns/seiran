@@ -17,6 +17,11 @@ pub struct MediaFile {
     pub thumbnail_key: Option<String>,
     pub uploaded_by_actor_id: Option<i64>,
     pub created_at: DateTime<Utc>,
+    /// アニメーション画像（GIF/APNG/WebPアニメ）由来かどうか。`storage::image::ImagePipeline`
+    /// が `AnimatedPassthrough` を返した場合のみ `true`（静止画は再エンコードでアニメでない
+    /// フォーマットへ確定するため常に `false`）。Bsky embed選択（#227）で「静止画」と
+    /// 「アニメGIF」を区別するために使う。
+    pub is_animated_image: bool,
 }
 
 pub struct CreateMediaFile {
@@ -32,6 +37,7 @@ pub struct CreateMediaFile {
     pub duration_ms: Option<i32>,
     pub thumbnail_key: Option<String>,
     pub uploaded_by_actor_id: Option<i64>,
+    pub is_animated_image: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -41,7 +47,7 @@ pub enum MediaFileError {
 }
 
 const SELECT_COLS: &str =
-    "id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id, created_at";
+    "id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id, created_at, is_animated_image";
 
 #[async_trait]
 pub trait MediaFileRepository: Send + Sync {
@@ -113,8 +119,8 @@ impl MediaFileRepository for PgMediaFileRepository {
     async fn insert(&self, req: CreateMediaFile) -> Result<MediaFile, MediaFileError> {
         let row = sqlx::query_as::<_, MediaFile>(&format!(
             "INSERT INTO media_files \
-             (id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) \
+             (id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id, is_animated_image) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) \
              RETURNING {SELECT_COLS}"
         ))
         .bind(req.id)
@@ -129,6 +135,7 @@ impl MediaFileRepository for PgMediaFileRepository {
         .bind(req.duration_ms)
         .bind(req.thumbnail_key)
         .bind(req.uploaded_by_actor_id)
+        .bind(req.is_animated_image)
         .fetch_one(&self.pool)
         .await?;
         Ok(row)

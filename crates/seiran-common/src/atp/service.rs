@@ -14,7 +14,7 @@ use crate::atp::repo::{
     encode_bsky_feed_like, encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_block,
     encode_bsky_graph_follow, encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car,
     encode_chat_actor_declaration, encode_generic_record, generate_tid, BskyEmbed, BskyFacet,
-    BskyImage, BskyPostReply, Cid, CommitEvtOp, RepoError,
+    BskyPostReply, Cid, CommitEvtOp, RepoError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -126,6 +126,24 @@ async fn insert_blocks(
     .execute(&mut **tx)
     .await
     .map(|_| ())
+}
+
+/// `BskyEmbed` が参照するblob（画像/動画/外部カードサムネイル）のCIDを列挙する。
+/// `CommitRecord::blob_cids`（MSTコミットに含めるblobの一覧）の算出に使う。
+fn blob_cids_for_embed(embed: &Option<BskyEmbed>) -> Vec<Cid> {
+    match embed {
+        Some(BskyEmbed::Images(images)) => images
+            .iter()
+            .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
+            .collect(),
+        Some(BskyEmbed::Video { cid, .. }) => cid_from_str(cid).ok().into_iter().collect(),
+        Some(BskyEmbed::External {
+            thumb: Some(thumb), ..
+        }) => cid_from_sha256_hex(&thumb.sha256_hex).ok().into_iter().collect(),
+        Some(BskyEmbed::External { thumb: None, .. }) | Some(BskyEmbed::Record { .. }) | None => {
+            Vec::new()
+        }
+    }
 }
 
 pub struct AtpCommitService {
@@ -539,142 +557,14 @@ impl AtpCommitService {
         post_id: i64,
         text: &str,
         facets: Vec<BskyFacet>,
-        attachment_ids: &[i64],
+        embed: Option<BskyEmbed>,
         now: DateTime<Utc>,
         reply: Option<BskyPostReply>,
     ) -> Result<(), AtpCommitError> {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        // 添付ファイル情報を DB から取得して画像/動画/その他に分類する。
-        // 動画は bsky_video_status='ready'（Bsky公式動画パイプライン結合済み）の
-        // 場合のみ app.bsky.embed.video を使う。それ以外（音声・未完了の動画）は
-        // 外部リンクカード（app.bsky.embed.external）にフォールバックする。
-        let (bsky_images, video_candidate, non_image_url) = if !attachment_ids.is_empty() {
-            let rows = sqlx::query(
-                "SELECT mf.id, mf.sha256, mf.size, mf.mime_type, mf.width, mf.height, mf.storage_key, sp.public_url,
-                        mf.bsky_video_cid, mf.bsky_video_status, mf.bsky_video_size
-                 FROM media_files mf
-                 JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-                 WHERE mf.id = ANY($1)
-                 ORDER BY array_position($1, mf.id)",
-            )
-            .bind(attachment_ids)
-            .fetch_all(&self.pool)
-            .await?;
-
-            let mut images: Vec<BskyImage> = Vec::new();
-            let mut video_candidate: Option<BskyEmbed> = None;
-            let mut non_image_url: Option<String> = None;
-            for r in &rows {
-                use sqlx::Row;
-                let Ok(sha256) = r.try_get::<String, _>("sha256") else {
-                    continue;
-                };
-                let Ok(mime_type) = r.try_get::<String, _>("mime_type") else {
-                    continue;
-                };
-                let size: i64 = r.try_get("size").unwrap_or(0);
-                let width: Option<i32> = r.try_get("width").unwrap_or(None);
-                let height: Option<i32> = r.try_get("height").unwrap_or(None);
-                if mime_type.starts_with("image/") {
-                    // CID 生成に失敗したものはスキップ
-                    if cid_from_sha256_hex(&sha256).is_err() {
-                        continue;
-                    }
-                    images.push(BskyImage {
-                        sha256_hex: sha256,
-                        mime_type,
-                        size,
-                        width: width.unwrap_or(0),
-                        height: height.unwrap_or(0),
-                        alt: String::new(),
-                    });
-                    continue;
-                }
-                let is_video = mime_type.starts_with("video/");
-                let is_audio = mime_type.starts_with("audio/");
-                if (is_video || is_audio) && video_candidate.is_none() {
-                    let status: Option<String> = r.try_get("bsky_video_status").unwrap_or(None);
-                    let video_cid: Option<String> = r.try_get("bsky_video_cid").unwrap_or(None);
-                    if status.as_deref() == Some("ready") {
-                        if let Some(video_cid) = video_cid {
-                            // Bsky側は必ずmp4へトランスコードするため、embedのmime_typeは
-                            // 元がaudio/*でも常にvideo/mp4を報告する。size もオリジナルの
-                            // アップロードサイズではなく、実際にトランスコードされた
-                            // バイト列サイズ（bsky_video_size）を優先する
-                            // （無ければ従来通り media_files.size にフォールバック）。
-                            // 音声を変換したグレー背景動画の解像度は
-                            // crate::storage::media_probe::AUDIO_VIDEO_WIDTH/HEIGHT
-                            // （convert_audio_to_gray_video が実際に生成する解像度）と
-                            // 必ず一致させる。
-                            let bsky_size: Option<i64> =
-                                r.try_get("bsky_video_size").unwrap_or(None);
-                            let (embed_width, embed_height) = if is_audio {
-                                (
-                                    crate::AUDIO_VIDEO_WIDTH as i32,
-                                    crate::AUDIO_VIDEO_HEIGHT as i32,
-                                )
-                            } else {
-                                (width.unwrap_or(0), height.unwrap_or(0))
-                            };
-                            video_candidate = Some(BskyEmbed::Video {
-                                cid: video_cid,
-                                mime_type: "video/mp4".to_string(),
-                                size: bsky_size.unwrap_or(size),
-                                width: embed_width,
-                                height: embed_height,
-                            });
-                            continue;
-                        }
-                    }
-                }
-                if non_image_url.is_none() {
-                    // 音声（Bsky に専用embedが無い）・動画パイプライン未完了時の
-                    // フォールバックリンク先は、メディアファイルの直リンクではなく
-                    // 簡易視聴ページ（<audio>/<video> タグ1個だけのHTML、
-                    // `handlers::drive::watch_media`）にする。直リンクだとブラウザが
-                    // ダウンロードしてしまい再生できないため（2026-07-17 マイケル指摘）。
-                    if let Ok(media_file_id) = r.try_get::<i64, _>("id") {
-                        let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_default();
-                        non_image_url = Some(format!(
-                            "https://{}/api/media/{}/watch",
-                            local_domain, media_file_id
-                        ));
-                    }
-                }
-            }
-            (images, video_candidate, non_image_url)
-        } else {
-            (vec![], None, None)
-        };
-
-        // app.bsky.embed.images の上限は 4 枚（AT Protocol 仕様）。
-        // ポスト自体は最大 10 枚まで許容するが、Bsky embed には先頭 4 枚のみ含める。
-        let bsky_images: Vec<BskyImage> = bsky_images.into_iter().take(4).collect();
-
-        let mut blob_cids: Vec<Cid> = bsky_images
-            .iter()
-            .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
-            .collect();
-
-        let embed = if !bsky_images.is_empty() {
-            Some(BskyEmbed::Images(bsky_images))
-        } else if let Some(video_embed) = video_candidate {
-            if let BskyEmbed::Video { ref cid, .. } = video_embed {
-                if let Ok(video_cid) = cid_from_str(cid) {
-                    blob_cids.push(video_cid);
-                }
-            }
-            Some(video_embed)
-        } else {
-            non_image_url.map(|url| BskyEmbed::External {
-                url,
-                title: String::new(),
-                description: String::new(),
-                thumb: None,
-            })
-        };
+        let blob_cids = blob_cids_for_embed(&embed);
         let (record_cbor, record_cid) =
             encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
         let record_cid_str = cid_to_string(&record_cid);
@@ -1614,15 +1504,7 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        let mut blob_cids = Vec::new();
-        if let Some(BskyEmbed::External {
-            thumb: Some(thumb), ..
-        }) = &embed
-        {
-            if let Ok(cid) = cid_from_sha256_hex(&thumb.sha256_hex) {
-                blob_cids.push(cid);
-            }
-        }
+        let blob_cids = blob_cids_for_embed(&embed);
         let (record_cbor, record_cid) =
             encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
         let record_cid_str = cid_to_string(&record_cid);

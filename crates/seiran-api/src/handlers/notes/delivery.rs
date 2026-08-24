@@ -5,15 +5,16 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use seiran_common::atp::{BskyEmbed, BskyImage, BskyPostReply, BskyRefRecord};
+use seiran_common::atp::{cid_from_sha256_hex, BskyEmbed, BskyImage, BskyPostReply, BskyRefRecord};
 use seiran_common::mention::convert_mentions_for_bsky;
+use seiran_common::net::{extract_body_urls, fetch_ogp};
 use seiran_common::repository::PostDeliveryMeta;
-use seiran_common::{prepare_image, ApDeliveryKind, MediaKind};
+use seiran_common::{prepare_image, ApDeliveryKind, MediaKind, AUDIO_VIDEO_HEIGHT, AUDIO_VIDEO_WIDTH};
 
 use crate::error::ApiError;
 use crate::AppState;
 
-use super::dto::NoteResponse;
+use super::dto::{BskyEmbedChoice, NoteResponse};
 
 const BSKY_CARD_THUMB_MAX_BYTES: u64 = 20 * 1024 * 1024;
 
@@ -91,6 +92,215 @@ async fn build_external_post_embed(
         description: meta.body.clone(),
         thumb,
     })
+}
+
+/// Bsky embed候補の分類に使う `media_files` 行（#227 Bsky embed選択）。
+#[derive(sqlx::FromRow)]
+struct EmbedCandidateRow {
+    id: i64,
+    sha256: String,
+    size: i64,
+    mime_type: String,
+    width: Option<i32>,
+    height: Option<i32>,
+    is_animated_image: bool,
+    bsky_video_cid: Option<String>,
+    bsky_video_status: Option<String>,
+    bsky_video_size: Option<i64>,
+}
+
+/// [`resolve_bsky_embed`] の結果。
+pub enum BskyEmbedResolution {
+    /// 即座にcommitできる（`None`は「候補なし」＝embed無しで投稿）。
+    Ready(Option<BskyEmbed>),
+    /// 選択された添付が Bsky 動画パイプライン結合未確定のため、確定を待つ必要がある
+    /// （`Job::BskyPostCommitDeferred` へ委譲、対象は `media_files.id`）。
+    Pending(i64),
+}
+
+fn watch_page_fallback_embed(state: &AppState, media_file_id: i64) -> BskyEmbed {
+    // 音声（Bskyに専用embedが無い）・動画パイプライン未完了/失敗時のフォールバックリンク先は、
+    // メディアファイルの直リンクではなく簡易視聴ページ（`handlers::drive::watch_media`）にする。
+    // 直リンクだとブラウザがダウンロードしてしまい再生できないため（2026-07-17 マイケル指摘）。
+    BskyEmbed::External {
+        url: format!(
+            "https://{}/api/media/{}/watch",
+            state.local_domain, media_file_id
+        ),
+        title: String::new(),
+        description: String::new(),
+        thumb: None,
+    }
+}
+
+fn to_bsky_image(row: &EmbedCandidateRow) -> Option<BskyImage> {
+    // CID 生成に失敗したものはスキップ
+    cid_from_sha256_hex(&row.sha256).ok()?;
+    Some(BskyImage {
+        sha256_hex: row.sha256.clone(),
+        mime_type: row.mime_type.clone(),
+        size: row.size,
+        width: row.width.unwrap_or(0),
+        height: row.height.unwrap_or(0),
+        alt: String::new(),
+    })
+}
+
+/// 1件の添付行をBsky embedへ変換する（`Attachment{id}`選択・優先順位フォールバックの
+/// 動画/音声/アニメGIF枠の共通処理）。画像（アニメGIF含む）は単独の`Images`embed、
+/// 動画/音声はパイプライン状態に応じて`Video`/視聴ページへの`External`フォールバック、
+/// もしくは未確定として`Pending`を返す。
+fn resolve_attachment_embed(state: &AppState, row: &EmbedCandidateRow) -> BskyEmbedResolution {
+    if row.mime_type.starts_with("image/") {
+        return BskyEmbedResolution::Ready(to_bsky_image(row).map(|img| BskyEmbed::Images(vec![img])));
+    }
+    match row.bsky_video_status.as_deref() {
+        Some("ready") => match &row.bsky_video_cid {
+            Some(video_cid) => {
+                let is_audio = row.mime_type.starts_with("audio/");
+                let (width, height) = if is_audio {
+                    (AUDIO_VIDEO_WIDTH as i32, AUDIO_VIDEO_HEIGHT as i32)
+                } else {
+                    (row.width.unwrap_or(0), row.height.unwrap_or(0))
+                };
+                BskyEmbedResolution::Ready(Some(BskyEmbed::Video {
+                    cid: video_cid.clone(),
+                    mime_type: "video/mp4".to_string(),
+                    size: row.bsky_video_size.unwrap_or(row.size),
+                    width,
+                    height,
+                }))
+            }
+            None => BskyEmbedResolution::Ready(Some(watch_page_fallback_embed(state, row.id))),
+        },
+        Some("failed") => BskyEmbedResolution::Ready(Some(watch_page_fallback_embed(state, row.id))),
+        _ => BskyEmbedResolution::Pending(row.id),
+    }
+}
+
+/// 本文中の特定URLをBsky embed選択した場合の `External` embed を組み立てる。OGP
+/// （title/description/thumbnail）を同期取得し、取得できてもできなくても選択自体は常に
+/// 尊重する（取得失敗時は素の `External`）。あわせて、seiranローカルでも同じURLをカード表示
+/// できるよう `post_link_cards`（position=0）へ保存する（マイケル指摘。選択が無ければ
+/// ローカル表示にカードが出ないのは「選んで初めてカード化する」という仕様のため）。
+async fn resolve_url_embed(state: &AppState, actor_id: i64, post_id: i64, url: String) -> BskyEmbed {
+    let ogp = fetch_ogp(&url).await.ok().flatten();
+    let title = ogp.as_ref().map(|o| o.title.clone()).unwrap_or_default();
+    let description = ogp
+        .as_ref()
+        .map(|o| o.description.clone())
+        .unwrap_or_default();
+    let thumbnail_url = ogp.as_ref().and_then(|o| o.thumbnail_url.clone());
+    let thumb = prepare_external_thumb(state, actor_id, thumbnail_url.as_deref()).await;
+
+    if let Err(e) = sqlx::query(
+        "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
+         VALUES ($1, 0, $2, $3, $4, $5)",
+    )
+    .bind(post_id)
+    .bind(&url)
+    .bind(&title)
+    .bind(&description)
+    .bind(&thumbnail_url)
+    .execute(&state.db)
+    .await
+    {
+        tracing::warn!(
+            "[resolve_url_embed] post_link_cards INSERT失敗（Bsky embed自体は継続） post_id={} err={}",
+            post_id, e
+        );
+    }
+
+    BskyEmbed::External {
+        url,
+        title,
+        description,
+        thumb,
+    }
+}
+
+/// Bsky配送するローカル投稿の embed を、明示選択（`CreateNoteRequest::bsky_embed_choice`）
+/// または省略時の固定優先順位（静止画 > アニメGIF先頭 > 動画/音声先頭 > 本文URL先頭）から
+/// 解決する（#227）。
+pub async fn resolve_bsky_embed(
+    state: &AppState,
+    actor_id: i64,
+    post_id: i64,
+    attachment_ids: &[i64],
+    body_text: &str,
+    choice: Option<BskyEmbedChoice>,
+) -> BskyEmbedResolution {
+    let rows: Vec<EmbedCandidateRow> = if attachment_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, EmbedCandidateRow>(
+            "SELECT id, sha256, size, mime_type, width, height, is_animated_image, \
+                    bsky_video_cid, bsky_video_status, bsky_video_size \
+             FROM media_files WHERE id = ANY($1) ORDER BY array_position($1, id)",
+        )
+        .bind(attachment_ids)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    };
+
+    enum Target<'a> {
+        Images,
+        Attachment(&'a EmbedCandidateRow),
+        Url(String),
+        None,
+    }
+
+    let target = match choice {
+        Some(BskyEmbedChoice::Images) => Target::Images,
+        Some(BskyEmbedChoice::Attachment { id }) => match id.parse::<i64>() {
+            Ok(id) => rows
+                .iter()
+                .find(|r| r.id == id)
+                .map(Target::Attachment)
+                .unwrap_or(Target::None),
+            Err(_) => Target::None,
+        },
+        Some(BskyEmbedChoice::Url { url }) => Target::Url(url),
+        None => {
+            if rows
+                .iter()
+                .any(|r| r.mime_type.starts_with("image/") && !r.is_animated_image)
+            {
+                Target::Images
+            } else if let Some(row) = rows.iter().find(|r| r.is_animated_image) {
+                Target::Attachment(row)
+            } else if let Some(row) = rows
+                .iter()
+                .find(|r| r.mime_type.starts_with("video/") || r.mime_type.starts_with("audio/"))
+            {
+                Target::Attachment(row)
+            } else if let Some(url) = extract_body_urls(body_text).into_iter().next() {
+                Target::Url(url)
+            } else {
+                Target::None
+            }
+        }
+    };
+
+    match target {
+        Target::None => BskyEmbedResolution::Ready(None),
+        Target::Images => {
+            let images: Vec<BskyImage> = rows
+                .iter()
+                .filter(|r| r.mime_type.starts_with("image/") && !r.is_animated_image)
+                .filter_map(to_bsky_image)
+                // app.bsky.embed.images の上限は4枚（AT Protocol仕様）。ポスト自体は最大10枚
+                // まで許容するが、Bsky embedには先頭4枚のみ含める。
+                .take(4)
+                .collect();
+            BskyEmbedResolution::Ready((!images.is_empty()).then_some(BskyEmbed::Images(images)))
+        }
+        Target::Attachment(row) => resolve_attachment_embed(state, row),
+        Target::Url(url) => {
+            BskyEmbedResolution::Ready(Some(resolve_url_embed(state, actor_id, post_id, url).await))
+        }
+    }
 }
 
 pub use seiran_common::ap::deliver::at_uri_to_bsky_app_url;
@@ -471,6 +681,26 @@ pub(crate) fn ap_delivery_quote_fields(
     }
 }
 
+/// Bsky embed選択（#227）がURLで、かつ本文にそのURLが含まれない場合、ActivityPub配送用
+/// 本文への追記が必要かどうかを判定する。Fedi（AP）にはBskyのembed概念が無く、本文でしか
+/// URLを参照できないため、選択後に本文からそのURLを削除した「孤児」状態のままだとFedi側の
+/// 読者だけがそのURLを一切見られなくなってしまう（マイケル指摘）。本文に既に含まれている
+/// 場合、および引用投稿（`quote_embed_present`、`bsky_embed_choice`自体が無視される）は
+/// 何もしない。
+fn fedi_url_append_needed(
+    text: &str,
+    quote_embed_present: bool,
+    choice: Option<&BskyEmbedChoice>,
+) -> Option<String> {
+    if quote_embed_present {
+        return None;
+    }
+    match choice {
+        Some(BskyEmbedChoice::Url { url }) if !text.contains(url.as_str()) => Some(url.clone()),
+        _ => None,
+    }
+}
+
 pub(crate) fn ap_quote_from_meta(meta: &PostDeliveryMeta) -> Option<ApQuote> {
     if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
         meta.at_uri
@@ -533,25 +763,9 @@ pub struct RegularPostDelivery {
     pub ap_quote: Option<ApQuote>,
     pub ap_in_reply_to: Option<String>,
     pub attachment_ids: Vec<i64>,
-}
-
-/// `attachment_ids` の中に、Bsky 動画パイプライン結合がまだ確定状態
-/// （`ready`/`failed`）に達していない動画添付が1件でもあるか判定する。
-async fn has_pending_video(pool: &sqlx::PgPool, attachment_ids: &[i64]) -> bool {
-    if attachment_ids.is_empty() {
-        return false;
-    }
-    sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM media_files
-         WHERE id = ANY($1) AND mime_type LIKE 'video/%'
-           AND bsky_video_status IS DISTINCT FROM 'ready'
-           AND bsky_video_status IS DISTINCT FROM 'failed'",
-    )
-    .bind(attachment_ids)
-    .fetch_one(pool)
-    .await
-    .map(|c| c > 0)
-    .unwrap_or(false)
+    /// Bsky embedの明示選択（#227、`resolve_bsky_embed`参照）。引用投稿（`bsky_quote_embed`が
+    /// `Some`）の場合は無視される（引用embedと画像/動画/URL embedは共存しない）。
+    pub bsky_embed_choice: Option<BskyEmbedChoice>,
 }
 
 /// ATP レコードの `(uri, cid)` 参照。
@@ -599,30 +813,16 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
         );
     }
 
-    // 動画添付があり、まだ Bsky 動画パイプライン結合（トランスコード）が確定していない場合、
-    // ここで即座に commit_post すると常に app.bsky.embed.external にフォールバックしてしまう
-    // （一度 external でコミットされた投稿は再コミットされないため、以後 video embed 化
-    // されることもない）。投稿ボタンを押すタイミングが早すぎるだけで起きる問題なので、
-    // Bsky コミット自体を Worker（Job::BskyPostCommitDeferred）に委譲し、結合完了を
-    // 待ってからコミットする（2026-07-17 マイケル指摘・実機再現確認。引用投稿は対象外）。
-    let defer_for_video = bsky_target
-        && d.bsky_quote_embed.is_none()
-        && has_pending_video(&state.db, &d.attachment_ids).await;
+    // Bsky embed選択がURL（#227）の場合、ActivityPub配信でも同じURLを参照できるようにする
+    // （マイケル指摘）。引用投稿（`bsky_quote_embed`がSome）は`bsky_embed_choice`自体が
+    // 無視されるため対象外。
+    let fedi_append_url: Option<String> = if bsky_target {
+        fedi_url_append_needed(&d.text, d.bsky_quote_embed.is_some(), d.bsky_embed_choice.as_ref())
+    } else {
+        None
+    };
 
-    if defer_for_video {
-        let (reply_root, reply_parent) = split_bsky_reply(&d.bsky_reply);
-        state
-            .enqueue_bsky_post_commit_deferred(
-                d.actor_id,
-                d.post_id,
-                d.text.clone(),
-                d.attachment_ids.clone(),
-                reply_root,
-                reply_parent,
-                d.now,
-            )
-            .await;
-    } else if bsky_target {
+    if bsky_target {
         // メンション変換（変換失敗時は元テキストをそのまま使用する）
         // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
         let (bsky_text, bsky_facets) = convert_mentions_for_bsky(
@@ -634,7 +834,7 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
         .await;
 
         if let Some(embed) = d.bsky_quote_embed {
-            // 引用投稿: embed を付けて commit_quote を使う（画像 embed と共存しない）
+            // 引用投稿: embed を付けて commit_quote を使う（画像/動画/URL embed選択と共存しない）
             if let Err(e) = state
                 .atp_service
                 .commit_quote(
@@ -653,27 +853,70 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
                     e
                 );
             }
-        } else if let Err(e) = state
-            .atp_service
-            .commit_post(
+        } else {
+            // 選択（またはその省略時の固定優先順位）からBsky embedを解決する（#227）。
+            // 選択された添付がBsky動画パイプライン結合未確定の場合のみ、ここで即座に
+            // commit_postすると常にapp.bsky.embed.externalへフォールバックしてしまう
+            // （一度externalでコミットされた投稿は再コミットされないため、以後video embed化
+            // されることもない）。投稿ボタンを押すタイミングが早すぎるだけで起きる問題なので、
+            // その添付1件についてだけBskyコミット自体をWorker（Job::BskyPostCommitDeferred）
+            // に委譲し、結合完了を待ってからコミットする（2026-07-17 マイケル指摘・実機再現確認）。
+            match resolve_bsky_embed(
+                state,
                 d.actor_id,
                 d.post_id,
-                &bsky_text,
-                bsky_facets,
                 &d.attachment_ids,
-                d.now,
-                d.bsky_reply,
+                &d.text,
+                d.bsky_embed_choice,
             )
             .await
-        {
-            tracing::error!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
+            {
+                BskyEmbedResolution::Pending(media_file_id) => {
+                    let (reply_root, reply_parent) = split_bsky_reply(&d.bsky_reply);
+                    state
+                        .enqueue_bsky_post_commit_deferred(
+                            d.actor_id,
+                            d.post_id,
+                            d.text.clone(),
+                            media_file_id,
+                            reply_root,
+                            reply_parent,
+                            d.now,
+                        )
+                        .await;
+                }
+                BskyEmbedResolution::Ready(embed) => {
+                    if let Err(e) = state
+                        .atp_service
+                        .commit_post(
+                            d.actor_id,
+                            d.post_id,
+                            &bsky_text,
+                            bsky_facets,
+                            embed,
+                            d.now,
+                            d.bsky_reply,
+                        )
+                        .await
+                    {
+                        tracing::error!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
+                    }
+                }
+            }
         }
     }
 
     if d.targets.fedi {
         // body は渡さない。deliver_post_to_ap_followers 側で DB の投稿本文を取得し、
-        // メンション解決（tag[]・<a> アンカー付与）まで一貫して行う。
-        let (body, quote_url) = ap_delivery_quote_fields(&d.text, d.ap_quote);
+        // メンション解決（tag[]・<a> アンカー付与）まで一貫して行う（ただし上のURL追記が
+        // 必要な場合、または引用URL追記が必要な場合はここで上書き本文を渡す）。
+        let (quote_body, quote_url) = ap_delivery_quote_fields(&d.text, d.ap_quote);
+        let body = match (quote_body, fedi_append_url) {
+            (Some(b), Some(url)) => Some(format!("{}\n\n{}", b, url)),
+            (Some(b), None) => Some(b),
+            (None, Some(url)) => Some(format!("{}\n\n{}", d.text, url)),
+            (None, None) => None,
+        };
         state
             .enqueue_ap_delivery(
                 d.actor_id,
@@ -692,7 +935,7 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
 mod tests {
     use super::{
         ap_delivery_quote_fields, ap_quote_from_meta, at_uri_to_bsky_app_url, classify_post,
-        ApQuote, PostOrigin, ReplyContext,
+        fedi_url_append_needed, ApQuote, BskyEmbedChoice, PostOrigin, ReplyContext,
     };
     use crate::error::ApiError;
     use seiran_common::repository::post::PostDeliveryMeta;
@@ -902,6 +1145,47 @@ mod tests {
                 None
             )
         );
+    }
+
+    #[test]
+    fn fedi_url_append_needed_appends_when_url_missing_from_text() {
+        let choice = BskyEmbedChoice::Url {
+            url: "https://example.com/article".to_owned(),
+        };
+        assert_eq!(
+            fedi_url_append_needed("本文からURLを消した後", false, Some(&choice)),
+            Some("https://example.com/article".to_owned())
+        );
+    }
+
+    #[test]
+    fn fedi_url_append_needed_no_op_when_url_already_in_text() {
+        let choice = BskyEmbedChoice::Url {
+            url: "https://example.com/article".to_owned(),
+        };
+        assert_eq!(
+            fedi_url_append_needed(
+                "見て https://example.com/article",
+                false,
+                Some(&choice)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn fedi_url_append_needed_no_op_for_non_url_choice() {
+        let choice = BskyEmbedChoice::Images;
+        assert_eq!(fedi_url_append_needed("本文", false, Some(&choice)), None);
+        assert_eq!(fedi_url_append_needed("本文", false, None), None);
+    }
+
+    #[test]
+    fn fedi_url_append_needed_no_op_when_quote_embed_present() {
+        let choice = BskyEmbedChoice::Url {
+            url: "https://example.com/article".to_owned(),
+        };
+        assert_eq!(fedi_url_append_needed("本文", true, Some(&choice)), None);
     }
 
     #[test]

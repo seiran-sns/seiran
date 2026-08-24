@@ -107,7 +107,15 @@
     "postButtonUnlisted": "미등록",
     "postButtonPrivate": "비공개",
     "replyToPrefix": "답장:",
-    "quoteToPrefix": "인용:"
+    "quoteToPrefix": "인용:",
+    "bskyEmbedChoice": {
+      "heading": "Bluesky에는 어느 것을 첨부할까요?",
+      "images": "정지 이미지 ({{count}}장)",
+      "gif": "움짤(GIF) {{index}}",
+      "video": "동영상 {{index}}",
+      "url": "URL {{index}}: {{url}}",
+      "urlOrphan": "URL: {{url}} (본문에서 삭제됨)"
+    }
   },
   "reactionChips": {
     "clickToRemove": "제거하려면 클릭하세요.",

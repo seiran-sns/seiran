@@ -190,17 +190,18 @@ pub enum Job {
     /// 比例して時間がかかるため、Delete(Actor)配送（`ApDelivery`）と同様にジョブ化する。
     AccountWithdrawUnfollowAll { actor_id: i64, username: String },
 
-    /// 動画添付を含む投稿の Bsky ATP コミットを、動画パイプライン結合
-    /// （`media_files.bsky_video_status`）が確定状態（`ready`/`failed`）になるまで
-    /// 遅延する。投稿作成時点でまだトランスコード中の動画に対して即座に `commit_post`
-    /// すると、その時点の状態でしか判定できず常に `external` フォールバックになって
-    /// しまうため（2026-07-17 マイケル指摘・実機再現確認）。`reply_root`/`reply_parent`
-    /// は `(uri, cid)` のタプルで、リプライでない場合は両方 `None`。
+    /// Bsky embedとして選択された（#227、明示選択または省略時の固定優先順位）動画/音声添付の
+    /// Bsky ATP コミットを、動画パイプライン結合（`media_files.bsky_video_status`）が確定状態
+    /// （`ready`/`failed`）になるまで遅延する。投稿作成時点でまだトランスコード中の動画に
+    /// 対して即座に `commit_post` すると、その時点の状態でしか判定できず常に `external`
+    /// フォールバックになってしまうため（2026-07-17 マイケル指摘・実機再現確認）。
+    /// `pending_media_file_id` は選択が解決した先の`media_files.id`1件のみ。
+    /// `reply_root`/`reply_parent` は `(uri, cid)` のタプルで、リプライでない場合は両方 `None`。
     BskyPostCommitDeferred {
         actor_id: i64,
         post_id: i64,
         text: String,
-        attachment_ids: Vec<i64>,
+        pending_media_file_id: i64,
         reply_root: Option<(String, String)>,
         reply_parent: Option<(String, String)>,
         /// 投稿作成時点の時刻。ATP レコードの `createdAt` は実行時ではなく
@@ -330,7 +331,7 @@ mod tests {
                 actor_id: 1,
                 post_id: 2,
                 text: "hello".into(),
-                attachment_ids: vec![3, 4],
+                pending_media_file_id: 3,
                 reply_root: Some((
                     "at://did:plc:x/app.bsky.feed.post/a".into(),
                     "bafyrei...".into(),

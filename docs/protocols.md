@@ -239,6 +239,15 @@ Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホス
 
 動画・音声は原本をそのまま保存（トランスコードなし）、ffmpegでメタデータとサムネイルのみ抽出。`deliver_to_bsky=true` の場合、Bsky公式動画パイプライン（`app.bsky.video.uploadVideo`）へ提出する。**音声ファイルはBskyに専用embedが無いため、グレー背景の静止画+音声トラックのmp4に変換**してから動画として提出する。提出は非同期で `Job::BskyVideoPoll` が完了をポーリングし、間に合わなければ `app.bsky.embed.external`（URLカード）にフォールバックする。動画添付投稿は結合未確定の間 `Job::BskyPostCommitDeferred` でBskyコミット自体を遅延させ、早すぎるコミットによるexternal固定化を防ぐ。
 
+### Bsky embed選択（#227）
+AT Protocolは1投稿につきembedを1種類（画像最大4枚 / 動画1本 / 外部リンクカード1件）しか持てないため、ローカル投稿が静止画・アニメGIF・動画・本文URLの複数を同時に使っている場合、どれをBsky向けembedにするかを選ぶ必要がある。
+
+- **選択の単位（`CreateNoteRequest.bsky_embed_choice`、`crates/seiran-api/src/handlers/notes/dto.rs::BskyEmbedChoice`）**: `Images`（添付済みの非アニメ静止画グループ全体、最大4枚）／`Attachment{id}`（特定の添付ファイル1件、アニメGIFまたは動画/音声のいずれか）／`Url{url}`（本文中の特定URL）の3種類。省略可能で、その場合は`resolve_bsky_embed`（`crates/seiran-api/src/handlers/notes/delivery.rs`）が固定優先順位（静止画→アニメGIF→動画/音声→本文URL、いずれも添付順・出現順が最も早いもの）で自動選択する。Misskey互換API等、本フィールドを送らないクライアントとの後方互換のため、バックエンドはこの省略を許可し「選択必須」のハードエラーは持たない。「候補が2種類以上あるのに選ばせない」という制約は、seiran自身のフロントエンド（`PostComposer`）が送信ボタンを`disabled`にすることでのみ担保する。
+- **アニメGIF判定**: `media_files.is_animated_image`（`storage::image::ImagePipeline::AnimatedPassthrough`由来の場合に`true`、`docs/database.md`参照）で、ローカルアップロードの静止画/アニメGIFを区別する。音声添付は動画同様の枠（「動画」候補）として扱う（音声→グレー背景動画変換機能により実際にBsky video embedになるため）。
+- **URL選択とローカル表示の同期**: `Url{url}`選択時、`resolve_bsky_embed`は選択されたURLのOGP（`og:title`/`og:description`/`og:image`、`crate::net::fetch_ogp`、SSRF対策込み）を同期取得して`app.bsky.embed.external`を組み立てると同時に、同じデータを`post_link_cards`（`position=0`）へINSERTする。これは、静止画/GIF/動画の選択と異なりURLは「選んで初めてカード化する」ものであり、ローカル（seiran自身のNoteCard/LinkCard表示）でも選択結果を反映するための明示的な永続化（マイケル指摘）。本文からそのURLを削除しても選択自体は孤児として有効なまま残る（フロントは他の選択肢を選ぶまでラジオボタンリストにそのURL項目を残し続ける）。OGP取得に失敗しても選択は常に尊重し、素の`External`（title/description空）でコミットする。
+- **URL選択のActivityPub配送への反映（`fedi_url_append_needed`）**: Fedi（AP）にはBskyのembed概念が無く、本文に書かれたURLでしか参照先を示せない。`Url{url}`選択時、選択したURLが投稿本文に既に含まれていれば何もしないが、含まれない場合（本文からそのURLを削除した後の孤児選択等）は、AP配送用の本文（DBの`posts.body`自体は変更しない、`ApDeliveryKind::PostToFollowers.body`の上書きのみ）の末尾に`\n\n{url}`を追記する。これはクロスプロトコル引用（`ApQuote::AppendUrl`）と同じ「AP配送時だけ上書きする」仕組みの流用。引用投稿（`bsky_quote_embed`がSome）は`bsky_embed_choice`自体が無視されるため対象外。
+- **動画パイプライン結合待ち（`Job::BskyPostCommitDeferred`の簡素化）**: 選択（または自動選択）が指す動画/音声添付がBsky動画パイプライン結合未確定（`bsky_video_status`が`ready`/`failed`のいずれでもない）の場合のみ、`resolve_bsky_embed`は`Pending(media_file_id)`を返し、その1件のIDだけをジョブへ渡してコミットを遅延させる（画像/URL選択、または既に確定済みの動画/音声選択は即座にコミットする）。ジョブは対象1件の状態だけを再確認し、`ready`ならVideo embed、`failed`または`SETTLE_TIMEOUT_SECS`（70秒）超過ならフォールバックURL（`/api/media/{id}/watch`、簡易視聴ページへのリンクカード）でコミットする。
+
 ### フォロワー検知ポーリング（`seiran-atp-repo::bsky_follower_poll`）
 リモート Bsky アクターがローカルユーザーをフォローしたことを検知する経路。Jetstream の `wantedDids` は投稿・Likeの「発行者DID」でのフィルタであり、フォロー元（＝新規に自分をフォローしてきたアクター）を事前に知る手段が無いため、Jetstream購読では検知できない。そのため `app.bsky.graph.getFollowers`（AppView公開エンドポイント、認証不要）をローカルBskyリンク済みユーザーごとに`BSKY_FOLLOWER_POLL_INTERVAL_SECS`環境変数（デフォルト60秒）間隔でポーリングし、`follows`テーブルの既存フォロワー集合との差分から新規フォローを検知する常駐タスク（`seiran-atp-repo::run`内で`tokio::spawn`）。
 

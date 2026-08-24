@@ -29,6 +29,7 @@ struct NewMedia {
     height: u32,
     mime_type: String,
     data: Vec<u8>,
+    is_animated_image: bool,
 }
 
 impl From<ProcessedImage> for NewMedia {
@@ -41,6 +42,7 @@ impl From<ProcessedImage> for NewMedia {
             height: p.height,
             mime_type: p.mime_type,
             data: p.data,
+            is_animated_image: false,
         }
     }
 }
@@ -55,6 +57,7 @@ impl From<ExifSanitizedImage> for NewMedia {
             height: o.height,
             mime_type: o.mime_type,
             data: o.data,
+            is_animated_image: false,
         }
     }
 }
@@ -110,6 +113,7 @@ async fn persist_new(
             duration_ms: None,
             thumbnail_key: None,
             uploaded_by_actor_id: actor_id,
+            is_animated_image: new.is_animated_image,
         })
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))
@@ -129,7 +133,9 @@ pub(crate) async fn store_image(
                     is_reused: true,
                 });
             }
-            let record = persist_new(state, p.into(), actor_id).await?;
+            let mut new_media: NewMedia = p.into();
+            new_media.is_animated_image = true;
+            let record = persist_new(state, new_media, actor_id).await?;
             Ok(UploadOutcome {
                 record,
                 is_reused: false,

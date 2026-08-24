@@ -9,10 +9,11 @@ import {
 function makeDraft(text: string): ComposerDraft {
   return {
     text,
-    attached: null,
+    attachments: [],
     deliverFedi: true,
     deliverBsky: true,
     visibility: "public",
+    bskyEmbedChoice: null,
   };
 }
 

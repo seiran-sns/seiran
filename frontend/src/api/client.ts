@@ -451,6 +451,9 @@ export interface NoteAttachment {
   /** GIFアニメ由来（Tenor/Klipy GIFピッカー、またはBskyのGIF直接アップロード由来）。
    * trueの場合、動画添付を自動再生・ミュート・ループ・コントロール無しで表示する。 */
   isGif: boolean;
+  /** ローカルアップロードのアニメーション画像（GIF/APNG/WebPアニメ）由来かどうか。
+   * リモート受信添付は常にfalse（`isGif`が別途カバーする）。Bsky embed選択（#227）で使う。 */
+  isAnimatedImage: boolean;
 }
 
 /** NoteResponse（バックエンドは `#[serde(rename_all = "camelCase")]`）。 */
@@ -826,7 +829,20 @@ export interface DriveFile {
   isReused: boolean;
   durationMs?: number;
   thumbnailUrl?: string;
+  /** アニメーション画像（GIF/APNG/WebPアニメ）由来かどうか。Bsky embed選択（#227）で
+   * 「静止画」「アニメGIF」のラジオボタン項目を分けるために使う。 */
+  isAnimatedImage: boolean;
 }
+
+/**
+ * Bsky配送時、複数の添付候補（静止画グループ・アニメGIF・動画・本文URL）のうちどれを
+ * Bsky embedにするかの明示選択（#227、バックエンド`CreateNoteRequest::bsky_embed_choice`）。
+ * 省略時はバックエンドが固定優先順位（静止画→アニメGIF→動画/音声→本文URL）で自動選択する。
+ */
+export type BskyEmbedChoice =
+  | { kind: "images" }
+  | { kind: "attachment"; id: string }
+  | { kind: "url"; url: string };
 
 /**
  * `POST /api/i/notifications`（Misskey API 互換）のレスポンス要素。
@@ -1127,6 +1143,7 @@ export const api = {
       visibility?: "public" | "unlisted" | "followers_only" | "direct",
       recipientActorIds?: string[],
       quoteOfId?: string,
+      bskyEmbedChoice?: BskyEmbedChoice,
     ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
@@ -1139,6 +1156,7 @@ export const api = {
           quote_of_id: quoteOfId,
           visibility,
           recipient_actor_ids: recipientActorIds,
+          bsky_embed_choice: bskyEmbedChoice,
         }),
       );
     },

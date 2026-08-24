@@ -107,7 +107,15 @@
     "postButtonUnlisted": "不列出",
     "postButtonPrivate": "私密",
     "replyToPrefix": "回复:",
-    "quoteToPrefix": "引用:"
+    "quoteToPrefix": "引用:",
+    "bskyEmbedChoice": {
+      "heading": "要发送到 Bluesky 的是哪一个？",
+      "images": "静态图片（{{count}}张）",
+      "gif": "动图 {{index}}",
+      "video": "视频 {{index}}",
+      "url": "URL {{index}}：{{url}}",
+      "urlOrphan": "URL：{{url}}（已从正文中删除）"
+    }
   },
   "reactionChips": {
     "clickToRemove": "点击删除",

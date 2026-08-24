@@ -107,7 +107,15 @@
     "postButtonUnlisted": "No listado",
     "postButtonPrivate": "Privado",
     "replyToPrefix": "Respondiendo a:",
-    "quoteToPrefix": "Citando:"
+    "quoteToPrefix": "Citando:",
+    "bskyEmbedChoice": {
+      "heading": "¿Cuál debe enviarse a Bluesky?",
+      "images": "Imágenes ({{count}})",
+      "gif": "GIF animado {{index}}",
+      "video": "Vídeo {{index}}",
+      "url": "URL {{index}}: {{url}}",
+      "urlOrphan": "URL: {{url}} (eliminada del texto)"
+    }
   },
   "reactionChips": {
     "clickToRemove": "Haga clic para eliminar",

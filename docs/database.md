@@ -196,6 +196,7 @@ MiAuth（`/api/miauth/:session_id/authorize`）認可成立時、または設定
 
 ### メディア関連（`media_files` / `post_attachments` / `atp_blobs`)
 `media_files` は画像専用として始まったため `width`/`height`/`blurhash` は NULL 許容(動画・音声はこれらを持たない)。`bsky_video_*` 系カラムは Bluesky 公式動画パイプライン（`app.bsky.video.uploadVideo`）との連携状態を追跡する。`(sha256, blurhash)` の複合 UNIQUE でグローバル重複排除。
+`is_animated_image`（デフォルト`FALSE`）はアニメーション画像（GIF/APNG/WebPアニメ）由来かどうかを示す。`storage::image::ImagePipeline::AnimatedPassthrough`を返した場合のみ`store_image`が`TRUE`で保存する（静止画は再エンコードでアニメでないフォーマットへ確定するため常に`FALSE`）。投稿作成時のBsky embed選択（#227、`docs/protocols.md`3節「Bsky embed選択」参照）で「静止画」と「アニメGIF」のラジオボタン項目を分けるために使う。
 
 `post_attachments` は `media_file_id`（ローカル添付）と `remote_url`/`remote_mime_type`/`remote_thumbnail_url`（リモート受信添付）が排他的に埋まる設計。
 ActivityPub受信添付の`is_sensitive`は画像単位の`attachment[].sensitive`を保存し、投稿全体の

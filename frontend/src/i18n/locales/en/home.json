@@ -107,7 +107,15 @@
     "postButtonUnlisted": "Unlisted",
     "postButtonPrivate": "Private",
     "replyToPrefix": "Replying to:",
-    "quoteToPrefix": "Quoting:"
+    "quoteToPrefix": "Quoting:",
+    "bskyEmbedChoice": {
+      "heading": "Which one should go to Bluesky?",
+      "images": "Images ({{count}})",
+      "gif": "Animated GIF {{index}}",
+      "video": "Video {{index}}",
+      "url": "URL {{index}}: {{url}}",
+      "urlOrphan": "URL: {{url}} (removed from the text)"
+    }
   },
   "reactionChips": {
     "clickToRemove": "Click to remove",

@@ -38,6 +38,24 @@ pub struct CreateNoteRequest {
     /// ための互換対応）。
     #[serde(alias = "visibleUserIds")]
     pub recipient_actor_ids: Option<Vec<String>>,
+    /// Bsky配送時、複数の添付候補（静止画グループ・アニメGIF・動画・本文URL）のうち
+    /// どれをBsky embedにするかの明示選択（#227）。省略時は固定優先順位（静止画→アニメGIF
+    /// →動画/音声→本文URL、いずれもindex/出現順が小さいもの優先）で自動選択する
+    /// （`delivery::resolve_bsky_embed`）。Misskey互換クライアント等、本フィールドを
+    /// 送らないクライアントとの後方互換のため必須にはしない。
+    pub bsky_embed_choice: Option<BskyEmbedChoice>,
+}
+
+/// [`CreateNoteRequest::bsky_embed_choice`] の中身。
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BskyEmbedChoice {
+    /// 添付済みの非アニメ静止画グループ全体（最大4枚、AT Protocol embed.images上限）。
+    Images,
+    /// 特定の添付ファイル（アニメGIFまたは動画/音声のうちの1件）。
+    Attachment { id: String },
+    /// 本文中の特定URL（本文から削除されても選択自体は有効なまま、issue #227仕様）。
+    Url { url: String },
 }
 
 #[derive(Serialize, Clone)]
@@ -64,6 +82,11 @@ pub struct AttachmentResponse {
     /// `presentation:"gif"`を付与したGIF直接アップロード）。フロントは自動再生・
     /// ミュート・ループ・コントロール無し表示に切り替える。
     pub is_gif: bool,
+    /// ローカルアップロードのアニメーション画像（GIF/APNG/WebPアニメ）かどうか
+    /// （`media_files.is_animated_image`）。リモート受信添付は常に`false`
+    /// （`is_gif`が別途カバーする）。Bsky embed選択（#227）で「静止画」と
+    /// 「アニメGIF」のラジオボタン項目を分けるために使う。
+    pub is_animated_image: bool,
 }
 
 /// URLカード（`app.bsky.embed.external`、GIFピッカー由来を除く）。
