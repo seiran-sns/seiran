@@ -35,7 +35,7 @@ use sqlx::Row;
 use seiran_common::repository::{
     extract_shortcode_candidates, Actor, InsertFullParams, NotificationKind, TimelinePost,
 };
-use seiran_common::streaming::broadcast_reaction_update;
+use seiran_common::streaming::{broadcast_poll_update, broadcast_reaction_update};
 use seiran_common::{
     ap::{fetch_ap_history, plain_to_html_with_mentions},
     generate_snowflake_id,
@@ -82,6 +82,10 @@ pub async fn vote_poll(
         };
     let Some(mut poll): Option<serde_json::Value> = row.try_get("poll").unwrap_or(None) else {
         return ApiError::BadRequest("NOT_A_POLL".to_owned()).into_response();
+    };
+    let post_author_id: i64 = match row.try_get("actor_id") {
+        Ok(id) => id,
+        Err(e) => return ApiError::Internal(e.to_string()).into_response(),
     };
     let Some(options) = poll["options"].as_array() else {
         return ApiError::BadRequest("INVALID_POLL".to_owned()).into_response();
@@ -150,6 +154,10 @@ pub async fn vote_poll(
     if let Err(e) = tx.commit().await {
         return ApiError::Internal(e.to_string()).into_response();
     }
+
+    // タイムライン/ノート詳細のアンケート結果をリアルタイム更新する（`broadcast_reaction_update`
+    // と同じ考え方。自作自演でも送出し、他タブ・他端末の即時反映も担う）。
+    broadcast_poll_update(&state.stream_hub, state.follows.as_ref(), note_id, post_author_id, &poll).await;
 
     let option_names = indexes
         .iter()

@@ -17,7 +17,7 @@ use crate::repository::{
     extract_shortcode_candidates, InsertRemoteWithDedupParams, NotificationKind, PgRelayRepository,
     RelayRepository, RelayStatus,
 };
-use crate::streaming::{broadcast_reaction_update, ChannelScope};
+use crate::streaming::{broadcast_poll_update, broadcast_reaction_update, ChannelScope};
 use crate::traits::{Job, JobQueue};
 
 /// 1投稿から抽出するURLカード候補の上限。大量リンクを含む投稿でのOGPフェッチ暴走を防ぐ。
@@ -363,6 +363,16 @@ async fn handle_poll_vote(
             .execute(&inbox.db_pool)
             .await
             .map_err(|e| format!("PollVote: 集計更新失敗: {}", e))?;
+        // タイムライン/ノート詳細のアンケート結果をリアルタイム更新する
+        // （`broadcast_reaction_update` と同じ考え方）。
+        broadcast_poll_update(
+            &inbox.stream_hub,
+            inbox.follow_repo.as_ref(),
+            post_id,
+            post_author_id,
+            &updated,
+        )
+        .await;
     }
     if post_author_id != remote.actor_id {
         inbox.stream_hub.publish_event(

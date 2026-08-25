@@ -218,6 +218,36 @@ pub async fn broadcast_reaction_update(
     );
 }
 
+/// アンケート投票結果の更新（ローカル投票・AP 受信のいずれも）を `pollUpdated` イベントとして
+/// 送出する。配信先・考え方は `broadcast_reaction_update` と同じ（投稿の著者 + 著者をフォロー中
+/// のローカルアクター）。`poll` は更新後の`posts.poll`そのもの（`votedByMe`は含まない。閲覧者
+/// ごとに異なるため、受信側は自分の投票済み選択肢はローカル状態を保ったまま票数のみ更新する）。
+pub async fn broadcast_poll_update(
+    stream_hub: &StreamHub,
+    follows: &dyn FollowRepository,
+    post_id: i64,
+    post_author_id: i64,
+    poll: &serde_json::Value,
+) {
+    let mut recipients: HashSet<i64> = HashSet::new();
+    recipients.insert(post_author_id);
+    if let Ok(rows) = follows
+        .find_accepted_local_follower_ids(post_author_id)
+        .await
+    {
+        recipients.extend(rows);
+    }
+
+    stream_hub.publish_event(
+        recipients,
+        "pollUpdated",
+        serde_json::json!({
+            "postId": post_id.to_string(),
+            "poll": poll,
+        }),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ChannelKind, ChannelScope};

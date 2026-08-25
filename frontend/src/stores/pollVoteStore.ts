@@ -18,6 +18,14 @@ export function setPollState(noteId: string, state: PollState): void {
   listeners.get(noteId)?.forEach((listener) => listener());
 }
 
+/** WS `pollUpdated` 受信時の反映。`poll`（票数）のみ差し替え、`votedByMe`（閲覧者依存）は
+ * 既存のローカル状態を保つ。まだ誰も見ていない（state未登録の）ノートは無視してよい。 */
+export function updatePollResults(noteId: string, poll: NonNullable<Note["poll"]>): void {
+  const existing = states.get(noteId);
+  if (!existing) return;
+  setPollState(noteId, { poll, votedByMe: existing.votedByMe });
+}
+
 export function subscribePollState(noteId: string, listener: () => void): () => void {
   let noteListeners = listeners.get(noteId);
   if (!noteListeners) {

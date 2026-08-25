@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { api, Note, ReactionSummary } from "../api/client";
 import { profileQuery } from "../lib/format";
 import { setFollowStatus as setFollowStatusStore } from "../stores/followStatusStore";
+import { updatePollResults } from "../stores/pollVoteStore";
 import { useAuth } from "./AuthContext";
 import { resolveStreamNote } from "./resolveStreamNote";
 import { useStreaming } from "../hooks/useStreaming";
@@ -126,6 +127,12 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
       } else if (type === "noteUpdated") {
         const update = body as ReactionUpdate;
         reactionListeners.current.get(update.postId)?.forEach((cb) => cb(update));
+      } else if (type === "pollUpdated") {
+        // NoteCard は共有ストア（stores/pollVoteStore）をサブスクライブ済みのため、ここで
+        // ストアを更新するだけで表示中の全 NoteCard に伝播する（専用リスナーの配線は不要、
+        // registerReaction と違い NoteCard 側の useState ではなくグローバルストアなため）。
+        const update = body as { postId: string; poll: NonNullable<Note["poll"]> };
+        updatePollResults(update.postId, update.poll);
       } else if (NOTIF_KINDS.has(type)) {
         setUnread((u) => u + 1);
         notifListeners.current.forEach((cb) => cb());
