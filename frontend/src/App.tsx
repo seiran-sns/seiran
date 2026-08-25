@@ -118,14 +118,7 @@ function AppRoutes() {
         />
         {/* ポスト詳細はログイン不要で閲覧できる（未ログイン時のアクション操作はAPI側の401で弾かれる）。 */}
         <Route path="/notes/:id" element={<NoteDetailPage />} />
-        <Route
-          path="/profile"
-          element={
-            <RequireAuth>
-              <ProfilePage />
-            </RequireAuth>
-          }
-        />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route
           path="/admin"
           element={
@@ -230,14 +223,8 @@ function AppRoutes() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/:acct"
-          element={
-            <RequireAuth>
-              <ProfileByAcct />
-            </RequireAuth>
-          }
-        />
+        {/* ユーザープロフィールもログイン不要で閲覧できる（未ログイン時のフォロー操作はガイダンス表示に差し替え）。 */}
+        <Route path="/:acct" element={<ProfileByAcct />} />
         <Route
           path="/login"
           element={

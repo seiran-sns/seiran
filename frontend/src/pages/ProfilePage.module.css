@@ -317,6 +317,12 @@ a.idValue:hover {
   margin-right: 8px;
 }
 
+.loginGuidance {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
 /* 右ペイン: そのユーザーの投稿リスト */
 .rightPost {
   display: block;

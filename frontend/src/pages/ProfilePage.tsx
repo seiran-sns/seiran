@@ -538,7 +538,15 @@ export default function ProfilePage() {
             </div>
           )}
 
-          {!isSelf && (
+          {!isSelf && !user && (
+            <div className={styles.followArea}>
+              <p className={styles.loginGuidance}>
+                {t("profile:profilePage.loginGuidance")}
+              </p>
+            </div>
+          )}
+
+          {!isSelf && user && (
             <div className={styles.followArea}>
               {profile.is_followed && (
                 <span className={styles.followedByBadge}>

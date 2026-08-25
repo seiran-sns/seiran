@@ -129,6 +129,7 @@
   - [x] リアクションタブの一覧化（絵文字×ユーザー一覧、`ReactionListPanel`）
   - [x] リポストタブ（`RepostListPanel`、取り消し済みも履歴として表示）
 - [x] **ポスト詳細画面のログイン不要化** — `/notes/:id`から`RequireAuth`ガードを撤去。閲覧系API（`GET /api/notes/:id`・`/context`・`/replies`・`/reposts`・`/reactions/:content/actors`・`/api/users/profile`）は元々`MaybeAuthedUser`で未ログイン対応済みだったため、フロント側のルーティング変更のみで対応。未ログイン時は左メニュー最下部のユーザーチップが現在画面への`redirect`付き`/login`誘導ボタンに差し替わる。詳細: `docs/ui_spec.md` 2.3節
+- [x] **ユーザープロフィール画面のログイン不要化** — `/:acct`（`/@handle`）・旧`/profile?q=`から`RequireAuth`ガードを撤去。未ログイン時は対ユーザー操作メニュー（フォロー/ミュート/ブロック/通報）の代わりにログイン誘導ガイダンス文を表示。詳細: `docs/ui_spec.md` 2.2節
 - [ ] **ユーザー製翻訳ファイルの適用・配布機能** — ユーザーが独自の言語ファイル（`i18n/locales/{lng}/*.json` と同形式）を作成し、アプリに読み込ませて適用・配布できるようにする構想。現状の名前空間分割構成は `i18n.addResourceBundle()` によるこの拡張を見据えたもの
 
 ### プロトコル
