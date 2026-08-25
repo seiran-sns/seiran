@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
@@ -35,6 +35,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const { user, logout } = useAuth();
   const site = useSiteMeta();
   const { dmUnreadCount } = useStreamingContext();
+  const location = useLocation();
 
   const baseItems = NAV_ITEMS.map((item) =>
     item.to === "/messages" ? { ...item, badge: dmUnreadCount } : item
@@ -109,24 +110,41 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
       </button>
 
       <div className={styles.navFooter}>
-        <Link
-          to={user?.username ? `/@${user.username}` : "#"}
-          className={styles.userChip}
-          onClick={() => onItemClick?.()}
-          title={t("nav:leftNav.profileTitle")}
-        >
-          <span className={styles.userAvatar}>
-            {user?.avatar_url ? (
-              <img src={user.avatar_url} alt="" className={styles.userAvatarImg} />
-            ) : (
-              user?.username?.[0]?.toUpperCase() ?? "?"
-            )}
-          </span>
-          <span className={styles.navLabel}>@{user?.username}</span>
-        </Link>
-        <button className={styles.logoutBtn} onClick={handleLogout} title={t("nav:leftNav.logoutTitle")}>
-          ⏻
-        </button>
+        {user ? (
+          <>
+            <Link
+              to={`/@${user.username}`}
+              className={styles.userChip}
+              onClick={() => onItemClick?.()}
+              title={t("nav:leftNav.profileTitle")}
+            >
+              <span className={styles.userAvatar}>
+                {user.avatar_url ? (
+                  <img src={user.avatar_url} alt="" className={styles.userAvatarImg} />
+                ) : (
+                  user.username[0]?.toUpperCase() ?? "?"
+                )}
+              </span>
+              <span className={styles.navLabel}>@{user.username}</span>
+            </Link>
+            <button className={styles.logoutBtn} onClick={handleLogout} title={t("nav:leftNav.logoutTitle")}>
+              ⏻
+            </button>
+          </>
+        ) : (
+          // 未ログイン状態でポスト詳細等を閲覧中の場合、現在の画面を`redirect`に載せてログインへ誘導する。
+          <Link
+            to={`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`}
+            className={styles.loginBtn}
+            onClick={() => onItemClick?.()}
+            title={t("nav:leftNav.loginTitle")}
+          >
+            {/* 左メニューがアイコンのみ幅（769〜900px）に畳まれた際、ラベルが消えて
+                空ボタンになるのを防ぐアイコン。通常幅・モバイルドロワーでは非表示。 */}
+            <TwemojiEmoji emoji="🔑" className={styles.loginIcon} />
+            <span className={styles.navLabel}>{t("nav:leftNav.loginLabel")}</span>
+          </Link>
+        )}
       </div>
     </nav>
   );

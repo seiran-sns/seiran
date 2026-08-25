@@ -116,14 +116,8 @@ function AppRoutes() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/notes/:id"
-          element={
-            <RequireAuth>
-              <NoteDetailPage />
-            </RequireAuth>
-          }
-        />
+        {/* ポスト詳細はログイン不要で閲覧できる（未ログイン時のアクション操作はAPI側の401で弾かれる）。 */}
+        <Route path="/notes/:id" element={<NoteDetailPage />} />
         <Route
           path="/profile"
           element={

@@ -58,7 +58,8 @@
 
 .navLink,
 .composeBtn,
-.userChip {
+.userChip,
+.loginBtn {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -113,14 +114,27 @@
 
 .composeBtn {
   margin-top: 10px;
+}
+
+.composeBtn,
+.loginBtn {
   background: var(--accent-strong);
   color: #fff;
   font-weight: 700;
   justify-content: center;
 }
 
-.composeBtn:hover {
+.composeBtn:hover,
+.loginBtn:hover {
   background: var(--accent-hover);
+}
+
+.loginBtn {
+  flex: 1;
+}
+
+.loginIcon {
+  display: none;
 }
 
 .navFooter {
@@ -326,7 +340,11 @@
     justify-content: center;
     padding: 8px 0 16px;
   }
-  .composeBtn {
+  .loginIcon {
+    display: block;
+  }
+  .composeBtn,
+  .loginBtn {
     padding: 10px;
   }
 }
