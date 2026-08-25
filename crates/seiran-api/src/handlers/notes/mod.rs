@@ -1439,6 +1439,12 @@ pub async fn get_note_ap(
         ap_note["quoteUrl"] = serde_json::Value::String(url.clone());
         ap_note["_misskey_quote"] = serde_json::Value::String(url);
     }
+    // フォロー関係が無いリモート（Mastodon等）は Create 配送を受け取らず、
+    // このエンドポイントを直接 GET してオブジェクトを取得することがある。
+    // Create 側と同じ Question 変換をしないと本文だけの Note に見えてしまう。
+    if let Some(poll) = post.poll.as_ref() {
+        seiran_common::ap::apply_poll_to_note_object(&mut ap_note, poll);
+    }
 
     (
         [(

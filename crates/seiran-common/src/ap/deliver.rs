@@ -294,7 +294,9 @@ fn visibility_to_to_cc(
 /// `note_obj` をアンケート付き投稿用に`Question`型へ書き換える（#228）。
 /// `poll`は`{multiple, options:[{name,votes}], endTime}`（`posts.poll`と同じ形、
 /// 受信側`normalize_ap_poll`と対称の構築）。
-fn apply_poll_to_note_object(note_obj: &mut serde_json::Value, poll: &serde_json::Value) {
+/// Create 配送だけでなく、`GET /notes/:id` の AP レスポンス（`handlers::notes::get_note_ap`）
+/// からもフォロー関係なしの直接取得時に同じ変換が必要なため公開する。
+pub fn apply_poll_to_note_object(note_obj: &mut serde_json::Value, poll: &serde_json::Value) {
     note_obj["type"] = serde_json::Value::String("Question".to_string());
     let multiple = poll["multiple"].as_bool().unwrap_or(false);
     let choices: Vec<serde_json::Value> = poll["options"]

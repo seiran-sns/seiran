@@ -11,10 +11,10 @@ pub use client::{
 };
 pub use collection::fetch_ap_collection_uris;
 pub use deliver::{
-    deliver_ap_announce, deliver_ap_poll_vote, deliver_ap_reaction, deliver_ap_undo_reaction,
-    deliver_delete_actor, deliver_delete_note, deliver_direct_message_to_ap,
-    deliver_post_to_ap_followers, deliver_undo_announce, deliver_update_actor, plain_to_html,
-    plain_to_html_with_mentions,
+    apply_poll_to_note_object, deliver_ap_announce, deliver_ap_poll_vote, deliver_ap_reaction,
+    deliver_ap_undo_reaction, deliver_delete_actor, deliver_delete_note,
+    deliver_direct_message_to_ap, deliver_post_to_ap_followers, deliver_undo_announce,
+    deliver_update_actor, plain_to_html, plain_to_html_with_mentions,
 };
 pub use outbox::{fetch_ap_featured, fetch_ap_history, upsert_ap_note, ApNote};
 pub use webfinger::{WebFingerLink, WebFingerResponse};
