@@ -103,6 +103,8 @@ pub struct AppState {
     pub storage_providers: Arc<dyn StorageProviderRepository>,
     pub media_files: Arc<dyn MediaFileRepository>,
     pub site_settings: Arc<dyn SiteSettingsRepository>,
+    /// URLカード埋め込みプレーヤー（oEmbed discovery）の許可ドメイン判定。TTLキャッシュ済み。
+    pub oembed_whitelist: Arc<seiran_common::oembed_whitelist::OembedWhitelist>,
     pub search_store: Arc<InMemorySearchStore>,
     /// リアルタイム更新（#37）のストリーミングハブ。
     pub stream_hub: Arc<StreamHub>,
@@ -375,6 +377,9 @@ pub async fn init_state(
         Arc::new(PgMediaFileRepository::new(pool.clone()));
     let site_settings: Arc<dyn SiteSettingsRepository> =
         Arc::new(PgSiteSettingsRepository::new(pool.clone()));
+    let oembed_whitelist = Arc::new(seiran_common::oembed_whitelist::OembedWhitelist::new(
+        site_settings.clone(),
+    ));
     let instance_domain: Arc<dyn InstanceDomainRepository> =
         Arc::new(PgInstanceDomainRepository::new(pool.clone()));
     let remote_instance_meta: Arc<dyn RemoteInstanceMetaRepository> =
@@ -474,6 +479,7 @@ pub async fn init_state(
         storage_providers,
         media_files,
         site_settings,
+        oembed_whitelist,
         search_store: Arc::new(InMemorySearchStore::new()),
         stream_hub: Arc::new(StreamHub::new()),
         emoji_import_jobs: Arc::new(DashMap::new()),

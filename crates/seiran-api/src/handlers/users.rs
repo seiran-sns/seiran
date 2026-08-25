@@ -532,7 +532,7 @@ async fn sync_remote_bsky_pinned(
         Some(pin) => {
             match seiran_common::atp::fetch_single_bsky_post(&state.http_client, &pin.uri).await {
                 Ok(Some(post)) => {
-                    match seiran_common::atp::upsert_bsky_post(&state.db, actor_id, &post).await {
+                    match seiran_common::atp::upsert_bsky_post(&state.db, &state.job_queue, actor_id, &post).await {
                         Ok(id) => vec![id],
                         Err(e) => {
                             tracing::warn!("[profile] pinnedPost 保存失敗（スキップ）: {}", e);

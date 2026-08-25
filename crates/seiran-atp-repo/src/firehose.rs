@@ -28,6 +28,7 @@ use seiran_common::atp::{
 };
 use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
+use seiran_common::queue::worker::priority;
 use seiran_common::repository::{
     ActorRepository, EmojiRepository, HashtagRepository, NotificationKind, NotificationRepository,
     PgActorRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository,
@@ -35,6 +36,7 @@ use seiran_common::repository::{
     ReactionRepository, extract_shortcode_candidates, parse_custom_emoji_shortcode,
 };
 use seiran_common::streaming::{ChannelScope, broadcast_reaction_update};
+use seiran_common::traits::{Job, JobQueue};
 use seiran_common::{StreamHub, generate_snowflake_id};
 
 const JETSTREAM_BASE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.feed.repost";
@@ -67,6 +69,7 @@ pub async fn run(
     stream_hub: Arc<StreamHub>,
     redis_url: Option<String>,
     is_monolith: bool,
+    job_queue: Arc<dyn JobQueue>,
 ) {
     let mut elector: Option<JetstreamLeaderElector> = None;
     let mut current_task: Option<tokio::task::JoinHandle<()>> = None;
@@ -111,7 +114,8 @@ pub async fn run(
                 let pool = pool.clone();
                 let http = Arc::clone(&http);
                 let hub = Arc::clone(&stream_hub);
-                current_task = Some(tokio::spawn(run_jetstream_loop(pool, http, hub)));
+                let queue = Arc::clone(&job_queue);
+                current_task = Some(tokio::spawn(run_jetstream_loop(pool, http, hub, queue)));
             }
             (false, true) => {
                 tracing::info!("[Jetstream] リーダーでなくなったため切断。");
@@ -126,11 +130,16 @@ pub async fn run(
 
 /// Jetstream接続を維持し続けるループ（エラー時は指数バックオフで再接続）。
 /// リーダー選出で「非リーダー」と判定されると、呼び出し元がこのタスクごと`abort`する。
-async fn run_jetstream_loop(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<StreamHub>) {
+async fn run_jetstream_loop(
+    pool: PgPool,
+    http: Arc<reqwest::Client>,
+    stream_hub: Arc<StreamHub>,
+    job_queue: Arc<dyn JobQueue>,
+) {
     let mut backoff_secs = 2u64;
 
     loop {
-        match connect_and_process(&pool, &http, &stream_hub).await {
+        match connect_and_process(&pool, &http, &stream_hub, &job_queue).await {
             Ok(()) => {
                 tracing::info!("[Jetstream] 接続終了（正常）。再接続します。");
                 backoff_secs = 2;
@@ -240,6 +249,7 @@ async fn connect_and_process(
     pool: &PgPool,
     http: &Arc<reqwest::Client>,
     stream_hub: &Arc<StreamHub>,
+    job_queue: &Arc<dyn JobQueue>,
 ) -> Result<(), String> {
     let cursor = load_jetstream_cursor(pool).await;
     let wanted_dids = load_wanted_dids(pool).await;
@@ -275,7 +285,7 @@ async fn connect_and_process(
                         last_saved_at = tokio::time::Instant::now();
                     }
 
-                    if let Err(e) = process_message(&text, pool, http, stream_hub).await {
+                    if let Err(e) = process_message(&text, pool, http, stream_hub, job_queue).await {
                         tracing::error!("[Jetstream] メッセージ処理エラー（スキップ）: {}", e);
                     }
                 }
@@ -348,6 +358,7 @@ async fn process_message(
     pool: &PgPool,
     http: &Arc<reqwest::Client>,
     stream_hub: &Arc<StreamHub>,
+    job_queue: &Arc<dyn JobQueue>,
 ) -> Result<(), String> {
     let event: JetstreamEvent =
         serde_json::from_str(text).map_err(|e| format!("JSON パースエラー: {}", e))?;
@@ -468,6 +479,7 @@ async fn process_message(
 
             let pool2 = pool.clone();
             let hub2 = Arc::clone(stream_hub);
+            let queue2 = Arc::clone(job_queue);
             let at_uri2 = at_uri.clone();
             let body_text = body_text.to_string();
 
@@ -509,6 +521,7 @@ async fn process_message(
                 let emoji_map = resolve_local_emoji_map(&pool2, &body_text).await;
                 save_bsky_post(
                     &pool2,
+                    &queue2,
                     &hub2,
                     &at_uri2,
                     &cid,
@@ -562,10 +575,12 @@ async fn process_message(
             let pool2 = pool.clone();
             let http2 = Arc::clone(http);
             let hub2 = Arc::clone(stream_hub);
+            let queue2 = Arc::clone(job_queue);
             let subject_uri = subject_uri.to_string();
             tokio::spawn(async move {
                 handle_inbound_repost_create(
                     &pool2,
+                    &queue2,
                     &http2,
                     &hub2,
                     &did,
@@ -644,6 +659,7 @@ async fn process_message(
 #[allow(clippy::too_many_arguments)]
 async fn save_bsky_post(
     pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
     stream_hub: &StreamHub,
     at_uri: &str,
     at_cid: &str,
@@ -688,7 +704,9 @@ async fn save_bsky_post(
         Ok(_) => {
             tracing::info!("[Jetstream] 保存完了: {}", at_uri);
 
-            // URLカード（Bskyは常に最大1件、position=0固定）。
+            // URLカード（Bskyは常に最大1件、position=0固定）。埋め込みプレーヤーのiframe src
+            // （oEmbed discovery）はここでは未解決のため、後追いでJob::LinkCardEmbedResolveへ
+            // 委ねる（Bskyのexternal embedにはiframe情報が無いため）。
             if let Some(card) = &link_card {
                 let result = sqlx::query(
                     "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
@@ -701,11 +719,28 @@ async fn save_bsky_post(
                 .bind(card.thumbnail_url.as_deref())
                 .execute(pool)
                 .await;
-                if let Err(e) = result {
-                    tracing::error!(
-                        "[Jetstream] post_link_cards INSERT失敗（投稿自体は成功済み）: {}",
-                        e
-                    );
+                match result {
+                    Ok(_) => {
+                        if let Err(e) = job_queue
+                            .enqueue(
+                                Job::LinkCardEmbedResolve {
+                                    post_id,
+                                    position: 0,
+                                    url: card.url.clone(),
+                                },
+                                priority::LOW,
+                            )
+                            .await
+                        {
+                            tracing::error!("[Jetstream] LinkCardEmbedResolve enqueue失敗: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "[Jetstream] post_link_cards INSERT失敗（投稿自体は成功済み）: {}",
+                            e
+                        );
+                    }
                 }
             }
 
@@ -946,8 +981,10 @@ async fn save_bsky_post(
 /// （`handle_announce`、`crates/seiran-common/src/jobs/inbound_activity_process.rs`）と対称の処理）。
 /// リポスト対象がDBに未存在（Jetstreamの`wantedDids`絞り込みで取り込んでいなかった投稿等）
 /// なら AppView から直接フェッチして保存する。対象がローカル投稿の場合は通知も作る。
+#[allow(clippy::too_many_arguments)]
 async fn handle_inbound_repost_create(
     pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
     did: &str,
@@ -982,7 +1019,9 @@ async fn handle_inbound_repost_create(
                                 return;
                             }
                         };
-                    match seiran_common::atp::upsert_bsky_post(pool, author_id, &post).await {
+                    match seiran_common::atp::upsert_bsky_post(pool, job_queue, author_id, &post)
+                        .await
+                    {
                         Ok(id) => id,
                         Err(e) => {
                             tracing::error!("[Jetstream/Repost] 対象ポスト保存失敗: {}", e);

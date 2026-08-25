@@ -132,7 +132,11 @@
     "listMemberMaxModeratorLabel": "リスト最大人数（moderator）",
     "searchRateLimitWindowMinutesLabel": "検索回数制限ウィンドウ（分）",
     "searchRateLimitMaxUserLabel": "検索回数上限（user）",
-    "searchRateLimitMaxModeratorLabel": "検索回数上限（moderator）"
+    "searchRateLimitMaxModeratorLabel": "検索回数上限（moderator）",
+    "oembedSectionTitle": "URLカード埋め込みプレーヤー",
+    "oembedAllowedDomainsLabel": "許可ドメイン（1行1ドメイン）",
+    "oembedAllowedDomainsHint": "不特定多数がサイトをホスティングできるドメイン（例：github.io, amazonaws.com など）を指定すると悪意あるスクリプトをサイト上に埋め込まれるおそれがあります",
+    "oembedEndpointHint": "サイトがoEmbedを提供していてもHTMLに検出用タグを載せていない場合、「ドメイン,oEmbedエンドポイントURL」の形式（例: vimeo.com,https://vimeo.com/api/oembed.json）でエンドポイントを直接指定できます"
   },
   "storageProvidersPanel": {
     "title": "オブジェクトストレージ",

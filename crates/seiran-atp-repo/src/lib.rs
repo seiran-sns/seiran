@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use seiran_common::traits::JobQueue;
 use seiran_common::StreamHub;
 use sqlx::PgPool;
 
@@ -26,6 +27,7 @@ pub async fn run(
     stream_hub: Arc<StreamHub>,
     redis_url: Option<String>,
     is_monolith: bool,
+    job_queue: Arc<dyn JobQueue>,
 ) {
     tracing::info!("[seiran-atp-repo] Firehose リスナーを起動します。");
     tokio::spawn(bsky_dm_poll::run(
@@ -44,5 +46,5 @@ pub async fn run(
         redis_url.clone(),
         is_monolith,
     ));
-    firehose::run(pool, http, stream_hub, redis_url, is_monolith).await;
+    firehose::run(pool, http, stream_hub, redis_url, is_monolith, job_queue).await;
 }

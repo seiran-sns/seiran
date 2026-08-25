@@ -124,7 +124,11 @@
     "listMemberMaxModeratorLabel": "列表最大人数（moderator）",
     "searchRateLimitWindowMinutesLabel": "搜索限制窗口（分钟）",
     "searchRateLimitMaxUserLabel": "搜索次数上限（user）",
-    "searchRateLimitMaxModeratorLabel": "搜索次数上限（moderator）"
+    "searchRateLimitMaxModeratorLabel": "搜索次数上限（moderator）",
+    "oembedSectionTitle": "URL卡片嵌入播放器",
+    "oembedAllowedDomainsLabel": "允许的域名（每行一个）",
+    "oembedAllowedDomainsHint": "指定任何人都可以托管内容的域名（例如 github.io、amazonaws.com）可能会导致恶意脚本被嵌入到您的网站上。",
+    "oembedEndpointHint": "如果某网站支持oEmbed但未在HTML中提供发现标签，可以用「域名,oEmbed端点URL」的格式（例如 vimeo.com,https://vimeo.com/api/oembed.json）直接指定该端点。"
   },
   "storageProvidersPanel": {
     "title": "对象存储",

@@ -228,13 +228,25 @@ pub enum Job {
     /// Follow/Undo送信の同期。`want_follow: true` はリレー登録時、`false` は削除時に積む。
     RelayFollowSync { relay_id: i64, want_follow: bool },
 
-    /// Fedi受信投稿の本文中URL（YouTube/Spotify/x.com以外の一般URL）へアクセスし、
-    /// OGPメタタグ（og:title/description/image）を取得して`post_link_cards`へ保存する。
-    /// 取得できなければ静かに諦める（リトライ後も失敗し続けたらそのURLはカード無しのまま）。
+    /// Fedi受信投稿の本文中URLへアクセスし、OGPメタタグ（og:title/description/image）と
+    /// oEmbed discoveryによる埋め込みプレーヤー情報（`embed_src`/`embed_type`、ホワイトリスト
+    /// 判定込み）を取得して`post_link_cards`へ保存する。取得できなければ静かに諦める
+    /// （リトライ後も失敗し続けたらそのURLはカード無しのまま）。
     OgpFetch {
         post_id: i64,
         url: String,
         position: i16,
+    },
+
+    /// Bsky受信投稿（`app.bsky.embed.external`）のURLカードに対し、oEmbed discoveryで
+    /// 見つかった埋め込みプレーヤーのiframe srcを非同期に追記する。Bskyのexternal embedには
+    /// iframe情報が無く、title/description/thumbnailは既に同期的にINSERT済みのため、
+    /// このジョブはUPDATEのみ行う（INSERTは行わない）。取得できなければ諦めてembed_src無し
+    /// のまま（一般URLカード表示にフォールバック）。
+    LinkCardEmbedResolve {
+        post_id: i64,
+        position: i16,
+        url: String,
     },
 
     /// リモートインスタンス（Fedi、`actors.domain`単位）のnodeinfoを取得し
@@ -345,6 +357,11 @@ mod tests {
             Job::RelayFollowSync {
                 relay_id: 1,
                 want_follow: true,
+            },
+            Job::LinkCardEmbedResolve {
+                post_id: 2,
+                position: 0,
+                url: "https://youtube.com/watch?v=x".into(),
             },
         ];
         for job in jobs {

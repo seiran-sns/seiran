@@ -128,7 +128,8 @@ pub struct AttachmentResponse {
 }
 
 /// URLカード（`app.bsky.embed.external`、GIFピッカー由来を除く）。
-/// フロント側でドメインに応じてYouTube/Spotify/x.com/一般の4種の表示に振り分ける。
+/// フロント側は`embed_src`の有無で埋め込みプレーヤー表示（oEmbed discovery経由、
+/// YouTube/Spotify/Apple Music/SoundCloud/Vimeo等）とx.com/一般URL表示に振り分ける。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LinkCardResponse {
@@ -137,6 +138,12 @@ pub struct LinkCardResponse {
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thumbnail_url: Option<String>,
+    /// oEmbed discoveryで解決され、管理者ホワイトリスト判定を通過した埋め込みプレーヤーのiframe src。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embed_src: Option<String>,
+    /// oEmbedレスポンスの`type`（"video"/"rich"等）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embed_type: Option<String>,
 }
 
 /// ポストに対するリアクション集計（絵文字ごとの件数）(#22)。

@@ -124,7 +124,11 @@
     "listMemberMaxModeratorLabel": "Max. membres par liste (modérateur)",
     "searchRateLimitWindowMinutesLabel": "Fenêtre de limite de recherche (minutes)",
     "searchRateLimitMaxUserLabel": "Max. recherches (utilisateur)",
-    "searchRateLimitMaxModeratorLabel": "Max. recherches (modérateur)"
+    "searchRateLimitMaxModeratorLabel": "Max. recherches (modérateur)",
+    "oembedSectionTitle": "Lecteur intégré des cartes URL",
+    "oembedAllowedDomainsLabel": "Domaines autorisés (un par ligne)",
+    "oembedAllowedDomainsHint": "Indiquer un domaine sur lequel n'importe qui peut héberger du contenu (ex. github.io, amazonaws.com) risque de permettre l'intégration de scripts malveillants sur votre site.",
+    "oembedEndpointHint": "Si un site prend en charge oEmbed mais ne le signale pas via une balise de découverte HTML, vous pouvez indiquer le point de terminaison directement au format \"domaine,url-du-point-de-terminaison-oembed\" (ex. vimeo.com,https://vimeo.com/api/oembed.json)."
   },
   "storageProvidersPanel": {
     "title": "Stockage d'objets",

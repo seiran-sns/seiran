@@ -124,7 +124,11 @@
     "listMemberMaxModeratorLabel": "Max. Mitglieder pro Liste (Moderator)",
     "searchRateLimitWindowMinutesLabel": "Zeitfenster für Suchlimit (Minuten)",
     "searchRateLimitMaxUserLabel": "Max. Suchen (User)",
-    "searchRateLimitMaxModeratorLabel": "Max. Suchen (Moderator)"
+    "searchRateLimitMaxModeratorLabel": "Max. Suchen (Moderator)",
+    "oembedSectionTitle": "URL-Karten-Einbettungsplayer",
+    "oembedAllowedDomainsLabel": "Erlaubte Domains (eine pro Zeile)",
+    "oembedAllowedDomainsHint": "Die Angabe einer Domain, auf der beliebige Personen Inhalte hosten können (z. B. github.io, amazonaws.com), birgt das Risiko, dass bösartige Skripte auf Ihrer Website eingebettet werden.",
+    "oembedEndpointHint": "Wenn eine Seite oEmbed unterstützt, dies aber nicht über ein HTML-Discovery-Tag bekannt gibt, können Sie den Endpunkt direkt im Format \"domain,oembed-endpunkt-url\" angeben (z. B. vimeo.com,https://vimeo.com/api/oembed.json)."
   },
   "storageProvidersPanel": {
     "title": "Objektspeicher",

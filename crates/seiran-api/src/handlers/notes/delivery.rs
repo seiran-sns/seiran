@@ -184,7 +184,8 @@ fn resolve_attachment_embed(state: &AppState, row: &EmbedCandidateRow) -> BskyEm
 /// できるよう `post_link_cards`（position=0）へ保存する（マイケル指摘。選択が無ければ
 /// ローカル表示にカードが出ないのは「選んで初めてカード化する」という仕様のため）。
 async fn resolve_url_embed(state: &AppState, actor_id: i64, post_id: i64, url: String) -> BskyEmbed {
-    let ogp = fetch_ogp(&url).await.ok().flatten();
+    let fixed_endpoint = state.oembed_whitelist.fixed_endpoint_for(&url).await;
+    let ogp = fetch_ogp(&url, fixed_endpoint.as_deref()).await.ok().flatten();
     let title = ogp.as_ref().map(|o| o.title.clone()).unwrap_or_default();
     let description = ogp
         .as_ref()
@@ -192,16 +193,25 @@ async fn resolve_url_embed(state: &AppState, actor_id: i64, post_id: i64, url: S
         .unwrap_or_default();
     let thumbnail_url = ogp.as_ref().and_then(|o| o.thumbnail_url.clone());
     let thumb = prepare_external_thumb(state, actor_id, thumbnail_url.as_deref()).await;
+    let embed_src = state
+        .oembed_whitelist
+        .filter_embed_src(ogp.as_ref().and_then(|o| o.embed_src.as_deref()))
+        .await;
+    let embed_type = embed_src
+        .as_ref()
+        .and_then(|_| ogp.as_ref().and_then(|o| o.embed_type.clone()));
 
     if let Err(e) = sqlx::query(
-        "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
-         VALUES ($1, 0, $2, $3, $4, $5)",
+        "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url, embed_src, embed_type)
+         VALUES ($1, 0, $2, $3, $4, $5, $6, $7)",
     )
     .bind(post_id)
     .bind(&url)
     .bind(&title)
     .bind(&description)
     .bind(&thumbnail_url)
+    .bind(&embed_src)
+    .bind(&embed_type)
     .execute(&state.db)
     .await
     {
@@ -227,17 +237,25 @@ async fn resolve_url_embed(state: &AppState, actor_id: i64, post_id: i64, url: S
 /// blob要件は関係ない）。取得・INSERTに失敗したURLはスキップし、他のURLの処理は続ける。
 pub async fn attach_link_cards_from_urls(state: &AppState, post_id: i64, urls: &[String]) {
     for (position, url) in urls.iter().enumerate() {
-        let ogp = fetch_ogp(url).await.ok().flatten();
+        let fixed_endpoint = state.oembed_whitelist.fixed_endpoint_for(url).await;
+        let ogp = fetch_ogp(url, fixed_endpoint.as_deref()).await.ok().flatten();
         let title = ogp.as_ref().map(|o| o.title.clone()).unwrap_or_default();
         let description = ogp
             .as_ref()
             .map(|o| o.description.clone())
             .unwrap_or_default();
         let thumbnail_url = ogp.as_ref().and_then(|o| o.thumbnail_url.clone());
+        let embed_src = state
+            .oembed_whitelist
+            .filter_embed_src(ogp.as_ref().and_then(|o| o.embed_src.as_deref()))
+            .await;
+        let embed_type = embed_src
+            .as_ref()
+            .and_then(|_| ogp.as_ref().and_then(|o| o.embed_type.clone()));
 
         if let Err(e) = sqlx::query(
-            "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+            "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url, embed_src, embed_type)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(post_id)
         .bind(position as i32)
@@ -245,6 +263,8 @@ pub async fn attach_link_cards_from_urls(state: &AppState, post_id: i64, urls: &
         .bind(&title)
         .bind(&description)
         .bind(&thumbnail_url)
+        .bind(&embed_src)
+        .bind(&embed_type)
         .execute(&state.db)
         .await
         {

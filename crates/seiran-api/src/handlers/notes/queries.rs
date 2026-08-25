@@ -203,7 +203,7 @@ pub async fn fetch_link_cards_map(
         return HashMap::new();
     }
     let rows = sqlx::query(
-        "SELECT post_id, url, title, description, thumbnail_url
+        "SELECT post_id, url, title, description, thumbnail_url, embed_src, embed_type
          FROM post_link_cards
          WHERE post_id = ANY($1)
          ORDER BY post_id, position",
@@ -221,6 +221,8 @@ pub async fn fetch_link_cards_map(
             title: row.try_get("title").unwrap_or_default(),
             description: row.try_get("description").unwrap_or_default(),
             thumbnail_url: row.try_get("thumbnail_url").unwrap_or(None),
+            embed_src: row.try_get("embed_src").unwrap_or(None),
+            embed_type: row.try_get("embed_type").unwrap_or(None),
         });
     }
     map

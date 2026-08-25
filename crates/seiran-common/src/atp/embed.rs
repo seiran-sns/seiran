@@ -113,7 +113,7 @@ pub struct ParsedLinkCard {
 }
 
 /// `record.embed` が `app.bsky.embed.external` かつ GIF ピッカー由来でない場合のみ、
-/// URL カード（YouTube/Spotify/x.com/一般）として表示するためのメタデータを返す。
+/// URL カード（YouTube/Spotify/Apple Music/x.com/一般）として表示するためのメタデータを返す。
 /// `recordWithMedia` は AT Protocol の制約上 `external` を内包できないため対象外。
 pub fn parse_bsky_embed_link_card(embed: &JsonValue, did: &str) -> Option<ParsedLinkCard> {
     let embed_type = embed.get("$type").and_then(|v| v.as_str()).unwrap_or("");

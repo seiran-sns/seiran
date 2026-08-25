@@ -255,6 +255,7 @@ export interface SiteSettings {
   search_rate_limit_window_minutes: string;
   search_rate_limit_max_user: string;
   search_rate_limit_max_moderator: string;
+  oembed_allowed_domains: string;
 }
 
 export interface AuthIpBlock {
@@ -539,6 +540,10 @@ export interface LinkCard {
   title: string;
   description: string;
   thumbnailUrl?: string;
+  /** oEmbed discoveryで解決され、管理者ホワイトリスト判定を通過した埋め込みプレーヤーのiframe src。 */
+  embedSrc?: string;
+  /** oEmbedレスポンスの`type`（"video"/"rich"等）。フロントのaspect判定には使わず、デバッグ用。 */
+  embedType?: string;
 }
 
 export interface ReactionSummary {
@@ -1587,6 +1592,7 @@ export const api = {
         search_rate_limit_window_minutes: string;
         search_rate_limit_max_user: string;
         search_rate_limit_max_moderator: string;
+        oembed_allowed_domains: string;
       }>,
     ) {
       return request<SiteSettings>("PATCH", "/admin/site-settings", patch);

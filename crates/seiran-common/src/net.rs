@@ -202,11 +202,19 @@ pub fn extract_body_urls(text: &str) -> Vec<String> {
     result
 }
 
-/// ページのOGPメタデータ（`og:title`/`og:description`/`og:image`）。
+/// ページのOGPメタデータ（`og:title`/`og:description`/`og:image`）＋
+/// oEmbed discoveryで見つかった埋め込みプレーヤー情報。
 pub struct OgpData {
     pub title: String,
     pub description: String,
     pub thumbnail_url: Option<String>,
+    /// oEmbed discoveryで見つかったiframe src（ホワイトリスト判定前の生値）。
+    /// `net.rs`はDBに依存しないためここではフィルタしない。呼び出し元が
+    /// `oembed_whitelist::OembedWhitelist::is_allowed`で判定してから
+    /// `post_link_cards.embed_src`へ保存すること。
+    pub embed_src: Option<String>,
+    /// oEmbedレスポンスの`type`（"video"/"rich"等）。
+    pub embed_type: Option<String>,
 }
 
 /// `<meta property="..." content="...">`（属性順序は問わない）から`content`を抽出する。
@@ -228,12 +236,26 @@ fn extract_og_content(html: &str, property: &str) -> Option<String> {
     None
 }
 
-/// URLのOGPメタデータを取得する（SSRF対策込み、`fetch_validated_with_accept`経由）。
+/// URLのOGPメタデータ + oEmbed埋め込み情報を取得する（SSRF対策込み、
+/// `fetch_validated_with_accept`経由）。1回目のページ取得でog:*メタタグと
+/// `<link rel="alternate" type=".../json+oembed">`を同時に抽出し、
+/// oEmbedリンクタグが見つかった場合のみ2回目のJSON取得を行う。
+///
+/// `fixed_oembed_endpoint`が`Some`の場合、HTML内のdiscoveryタグ探索はスキップし、
+/// 常にこのエンドポイントへ`?url=<url>&format=json`付きで直接oEmbedを取得する
+/// （Vimeo等、oEmbed自体は提供するがHTMLにdiscoveryタグを載せていないサイト向けの
+/// 管理者設定による救済、`oembed_whitelist::OembedWhitelist::fixed_endpoint_for`が
+/// 解決する）。
+///
 /// フェッチ自体が失敗した場合は`Err`（呼び出し元がリトライ要否を判断できるよう
-/// `FetchError`をそのまま返す）、フェッチはできたが`og:title`が無い場合は
-/// `Ok(None)`（リトライしても無駄）。`Job::OgpFetch`・Bsky embed選択の
-/// URLカード生成の両方から共有する。
-pub async fn fetch_ogp(url: &str) -> Result<Option<OgpData>, FetchError> {
+/// `FetchError`をそのまま返す）。フェッチはできたがog:title・oEmbedのいずれも
+/// 見つからない場合は`Ok(None)`（リトライしても無駄）。どちらか一方でも見つかれば
+/// `Ok(Some(..))`（titleが無ければ空文字列のまま）。`Job::OgpFetch`・
+/// `Job::LinkCardEmbedResolve`・Bsky embed選択のURLカード生成から共有する。
+pub async fn fetch_ogp(
+    url: &str,
+    fixed_oembed_endpoint: Option<&str>,
+) -> Result<Option<OgpData>, FetchError> {
     let (bytes, _content_type) = fetch_validated_with_accept(
         url,
         &["text/html", "application/xhtml+xml"],
@@ -242,23 +264,107 @@ pub async fn fetch_ogp(url: &str) -> Result<Option<OgpData>, FetchError> {
     .await?;
 
     let html = String::from_utf8_lossy(&bytes);
-    let Some(title) = extract_og_content(&html, "og:title") else {
-        return Ok(None);
-    };
+    let base = Url::parse(url).ok();
+
+    let title = extract_og_content(&html, "og:title");
     let description = extract_og_content(&html, "og:description").unwrap_or_default();
     let thumbnail_url = extract_og_content(&html, "og:image").and_then(|raw| {
         // 相対URLで書かれているサイトもあるため、対象ページのURLを基点に絶対URL化する。
-        Url::parse(url)
-            .ok()
-            .and_then(|base| base.join(&raw).ok())
-            .map(|u| u.to_string())
+        base.as_ref().and_then(|b| b.join(&raw).ok()).map(|u| u.to_string())
     });
 
+    let oembed_url = match fixed_oembed_endpoint {
+        Some(endpoint) => build_fixed_oembed_url(endpoint, url),
+        None => extract_oembed_link(&html, base.as_ref()),
+    };
+    let (embed_src, embed_type) = match oembed_url {
+        Some(oembed_url) => fetch_oembed_embed(&oembed_url).await.unwrap_or((None, None)),
+        None => (None, None),
+    };
+
+    if title.is_none() && embed_src.is_none() {
+        return Ok(None);
+    }
+
     Ok(Some(OgpData {
-        title,
+        title: title.unwrap_or_default(),
         description,
         thumbnail_url,
+        embed_src,
+        embed_type,
     }))
+}
+
+/// 管理者設定の固定oEmbedエンドポイント（例: `https://vimeo.com/api/oembed.json`）に
+/// 対象URLを`url`クエリパラメータとして付与する（oEmbed仕様の標準的な呼び出し形）。
+fn build_fixed_oembed_url(endpoint: &str, target_url: &str) -> Option<Url> {
+    let mut u = Url::parse(endpoint).ok()?;
+    u.query_pairs_mut()
+        .append_pair("url", target_url)
+        .append_pair("format", "json");
+    Some(u)
+}
+
+/// `<link rel="alternate" type=".../json+oembed" href="...">`（属性順序不同）から
+/// oEmbedエンドポイントURLを抽出する。`type`は仕様上`application/json+oembed`だが、
+/// SoundCloud等が非準拠の`text/json+oembed`を使うため、プレフィックスは問わず
+/// `json+oembed`部分一致で判定する（`.../xml+oembed`は対象外、5サービスとも
+/// JSON形式のため）。`extract_og_content`のような属性順の全パターン列挙ではなく、
+/// `<link ...>`タグ全体を1つ取り出してからタグ内でrel/type/hrefを個別に判定する
+/// （rel・type・hrefの出現順序は不定なため）。
+fn extract_oembed_link(html: &str, base: Option<&Url>) -> Option<Url> {
+    static LINK_TAG_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static HREF_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let link_tag_re = LINK_TAG_RE.get_or_init(|| regex::Regex::new(r#"<link\b[^>]*>"#).unwrap());
+    let href_re = HREF_RE.get_or_init(|| regex::Regex::new(r#"href=["']([^"']*)["']"#).unwrap());
+
+    for tag in link_tag_re.find_iter(html) {
+        let tag_str = tag.as_str();
+        let has_rel_alternate =
+            tag_str.contains(r#"rel="alternate""#) || tag_str.contains(r#"rel='alternate'"#);
+        let has_oembed_type = tag_str.contains("json+oembed");
+        if has_rel_alternate && has_oembed_type {
+            if let Some(href) = href_re.captures(tag_str).and_then(|c| c.get(1)) {
+                let raw = html_escape::decode_html_entities(href.as_str()).into_owned();
+                return base
+                    .and_then(|b| b.join(&raw).ok())
+                    .or_else(|| Url::parse(&raw).ok());
+            }
+        }
+    }
+    None
+}
+
+/// oEmbedエンドポイントからJSONを取得し、`html`フィールドからiframe srcを、
+/// `type`フィールドをそのまま抽出する。SSRF対策は`fetch_validated_with_accept`を
+/// 再利用する（oEmbed discoveryで見つかった`href`も外部サイトが自由に指定できる値のため、
+/// OGPページ取得と同じ検証が必要）。
+async fn fetch_oembed_embed(
+    oembed_url: &Url,
+) -> Result<(Option<String>, Option<String>), FetchError> {
+    let (bytes, _) =
+        fetch_validated_with_accept(oembed_url.as_str(), &["application/json", "text/json"], "application/json")
+            .await?;
+    let json: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| FetchError::UpstreamError)?;
+    let embed_type = json.get("type").and_then(|v| v.as_str()).map(str::to_string);
+    let embed_src = json
+        .get("html")
+        .and_then(|v| v.as_str())
+        .and_then(extract_iframe_src);
+    Ok((embed_src, embed_type))
+}
+
+/// oEmbedレスポンスの`html`フィールドからiframeのsrc属性を抽出する。対象5サービスとも
+/// 単一の`<iframe>`しか返さない前提だが、最初の1マッチだけを採用する（`find_iter`による
+/// 全マッチ列挙ではなく`captures`による単発マッチ）ことで、万一複数`<iframe>`が混入した
+/// レスポンスが返ってきても最初の要素だけを信頼し、誤ったiframe srcの採用を防ぐ。
+fn extract_iframe_src(html_fragment: &str) -> Option<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r#"<iframe\b[^>]*\bsrc=["']([^"']+)["']"#).unwrap());
+    re.captures(html_fragment)
+        .and_then(|c| c.get(1))
+        .map(|m| html_escape::decode_html_entities(m.as_str()).into_owned())
 }
 
 #[cfg(test)]

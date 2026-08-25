@@ -98,10 +98,9 @@ Misskey等に代表される「自己紹介やメタデータが縦に非常に�
 * HLS以外の通常動画添付（自インスタンス以外＝メディアプロキシ経由になるもの）は、`<video>`に`<source>`をプロキシ経由URL・直URLの順で2本並べる。プロキシが容量上限（25MiB）超過等で読み込みに失敗した場合、ブラウザが自動的に次の`<source>`（直URL）へフォールバックする。自インスタンス由来（`mediaUrl`が直URLのまま返る）の場合は元々プロキシを経由しないため`<source>`は1本のまま（`HlsVideo.tsx`のfallbackSrc、`NoteAttachments.tsx`）。
 
 #### URLカード（`LinkCard`）
-* Bsky受信投稿の`app.bsky.embed.external`（GIFピッカー由来を除く。GIFは添付動画として`NoteAttachments`側で表示）、およびFedi受信投稿の本文中リンク（`docs/protocols.md`「Fedi投稿のURLカード」参照）を、添付メディアの直下にドメイン別4種で表示する（`frontend/src/components/note/LinkCard.tsx`）。`Note.linkCards`は配列で、Bskyは常に0〜1件だがFediは本文中の複数リンクぶん**複数枚が縦に並ぶことがある**（各カードは`key={card.url}`で独立してmapされ、`indent`propで通常カード/QuoteCard内の左インデントを出し分ける点はBsky・Fedi共通）。
-  * **YouTube**（youtube.com/youtu.be/music.youtube.com）: 初期状態はサムネイル+再生ボタンのみ。クリックした時点で`youtube-nocookie.com`の公式iframeプレイヤーを読み込む。
-  * **Spotify**（open.spotify.com）: YouTubeと同様、クリックした時点で`open.spotify.com/embed/...`のiframeプレイヤーを読み込む。
-  * **x.com**（x.com/twitter.com）: 初期状態はサムネイル+タイトル+説明のカード。クリックした時点で`platform.twitter.com/widgets.js`を読み込み、ツイート本文をライブ埋め込み表示する（widgets.jsは複数カードがあっても1回だけ読み込む）。
+* Bsky受信投稿の`app.bsky.embed.external`（GIFピッカー由来を除く。GIFは添付動画として`NoteAttachments`側で表示）、およびFedi受信投稿の本文中リンク（`docs/protocols.md`「Fedi投稿のURLカード」参照）を、添付メディアの直下に表示する（`frontend/src/components/note/LinkCard.tsx`）。`Note.linkCards`は配列で、Bskyは常に0〜1件だがFediは本文中の複数リンクぶん**複数枚が縦に並ぶことがある**（各カードは`key={card.url}`で独立してmapされ、`indent`propで通常カード/QuoteCard内の左インデントを出し分ける点はBsky・Fedi共通）。表示は`card.embedSrc`の有無だけで振り分ける3種（個別サービスのURL解析はフロントでは行わない）。
+  * **埋め込みプレーヤー**（`card.embedSrc`が存在する場合）: 初期状態はサムネイル+再生ボタンのみ。クリックした時点で`embedSrc`（バックエンド側のoEmbed discoveryで解決され、管理画面のホワイトリスト判定を通過したiframe src）を読み込む。既定でYouTube/Spotify/Apple Music/SoundCloud/Vimeoが対象（`site_settings.oembed_allowed_domains`、`docs/database.md`参照）。管理者がホワイトリストへドメインを追加するだけで対応サービスを増やせる。iframeには`sandbox`属性（トップレベルナビゲーション禁止等）を付与する。
+  * **x.com**（x.com/twitter.com、`embedSrc`が無い場合のみ）: 初期状態はサムネイル+タイトル+説明のカード。クリックした時点で`platform.twitter.com/widgets.js`を読み込み、ツイート本文をライブ埋め込み表示する（widgets.jsは複数カードがあっても1回だけ読み込む）。
   * **上記以外の一般URL**: サムネイル+タイトル+説明+ドメイン名のカードをクリック可能なリンクとして表示するのみ（埋め込みなし、クリックで新規タブ遷移）。
   * いずれも埋め込みの実読み込みはユーザーのクリックまで発生させない（第三者トラッキング・iframe読み込みの既定回避、Mastodon等と同様の方針）。
 

@@ -132,7 +132,11 @@
     "listMemberMaxModeratorLabel": "Max members per list (moderator)",
     "searchRateLimitWindowMinutesLabel": "Search limit window (minutes)",
     "searchRateLimitMaxUserLabel": "Max searches (user)",
-    "searchRateLimitMaxModeratorLabel": "Max searches (moderator)"
+    "searchRateLimitMaxModeratorLabel": "Max searches (moderator)",
+    "oembedSectionTitle": "URL card embed player",
+    "oembedAllowedDomainsLabel": "Allowed domains (one per line)",
+    "oembedAllowedDomainsHint": "Specifying a domain that anyone can host content on (e.g. github.io, amazonaws.com) risks embedding malicious scripts on your site.",
+    "oembedEndpointHint": "If a site supports oEmbed but doesn't advertise it via an HTML discovery tag, you can specify the endpoint directly using the format \"domain,oembed-endpoint-url\" (e.g. vimeo.com,https://vimeo.com/api/oembed.json)."
   },
   "storageProvidersPanel": {
     "title": "Object storage",

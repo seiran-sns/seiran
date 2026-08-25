@@ -23,9 +23,11 @@ use tokio::sync::Semaphore;
 
 use crate::ap::ApClient;
 use crate::jobs;
+use crate::oembed_whitelist::OembedWhitelist;
 use crate::repository::{
     ActorRepository, BlockRepository, FollowRepository, HashtagRepository, ListRepository,
-    NotificationRepository, PostRepository, ReactionRepository, RemoteEmojiRepository,
+    NotificationRepository, PgSiteSettingsRepository, PostRepository, ReactionRepository,
+    RemoteEmojiRepository,
 };
 use crate::streaming::StreamHub;
 use crate::traits::{Job, JobQueue, QueuedJob};
@@ -103,6 +105,8 @@ pub struct JobContext {
     pub delivery: Option<DeliveryConfig>,
     /// インバウンド AP アクティビティ処理設定（InboundActivityProcess ジョブが使用）
     pub inbox: Option<InboxContext>,
+    /// oEmbed embed機能の許可ドメイン判定（OgpFetch・LinkCardEmbedResolve ジョブが使用）
+    pub oembed_whitelist: Option<Arc<crate::oembed_whitelist::OembedWhitelist>>,
 }
 
 impl JobContext {
@@ -118,11 +122,20 @@ impl JobContext {
             ap_client,
             delivery: None,
             inbox: None,
+            oembed_whitelist: None,
         }
     }
 
     pub fn with_db_pool(mut self, pool: sqlx::PgPool) -> Self {
         self.db_pool = Some(pool);
+        self
+    }
+
+    pub fn with_oembed_whitelist(
+        mut self,
+        whitelist: Arc<crate::oembed_whitelist::OembedWhitelist>,
+    ) -> Self {
+        self.oembed_whitelist = Some(whitelist);
         self
     }
 
@@ -179,9 +192,13 @@ impl WorkerEngine {
         delivery: DeliveryConfig,
         inbox: Option<InboxContext>,
     ) -> Self {
+        let oembed_whitelist = Arc::new(OembedWhitelist::new(Arc::new(
+            PgSiteSettingsRepository::new(pool.clone()),
+        )));
         let mut ctx_builder = JobContext::new(queue.clone(), ap_client)
             .with_db_pool(pool)
-            .with_delivery_config(delivery);
+            .with_delivery_config(delivery)
+            .with_oembed_whitelist(oembed_whitelist);
         if let Some(inbox) = inbox {
             ctx_builder = ctx_builder.with_inbox_context(inbox);
         }
@@ -359,6 +376,11 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
             url,
             position,
         } => jobs::ogp_fetch::handle(post_id, url, position, ctx).await,
+        Job::LinkCardEmbedResolve {
+            post_id,
+            position,
+            url,
+        } => jobs::link_card_embed_resolve::handle(post_id, position, url, ctx).await,
         Job::RemoteInstanceInfoResolve { domain } => {
             jobs::remote_instance_info_resolve::handle(domain, ctx).await
         }
@@ -382,6 +404,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
         Job::RelayFollowSync { .. } => "RelayFollowSync",
         Job::OgpFetch { .. } => "OgpFetch",
+        Job::LinkCardEmbedResolve { .. } => "LinkCardEmbedResolve",
         Job::RemoteInstanceInfoResolve { .. } => "RemoteInstanceInfoResolve",
     }
 }
@@ -468,6 +491,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         Job::OgpFetch { .. } => RetryConfig {
             // ActorMetadataResolve と同様の軽量ベストエフォート取得。取得できなければ
             // そのURLはカード無しのまま諦めてよい（投稿自体は既に保存済みのため実害が小さい）。
+            max_attempts: 3,
+            base_delay_ms: 2000,
+            max_delay_ms: 30_000,
+        },
+        Job::LinkCardEmbedResolve { .. } => RetryConfig {
+            // OgpFetch と同様の軽量ベストエフォート取得。取得できなければembed_src無しの
+            // まま諦めてよい（一般URLカード表示にフォールバック、投稿自体は保存済み）。
             max_attempts: 3,
             base_delay_ms: 2000,
             max_delay_ms: 30_000,

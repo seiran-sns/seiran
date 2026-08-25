@@ -31,40 +31,15 @@ function hostnameOf(url: string): string {
   }
 }
 
-/** YouTube の動画ID（`v=`/`youtu.be/ID`/`/shorts/ID`/`/embed/ID`）を抽出する。 */
-function extractYouTubeVideoId(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.replace(/^www\./, "").replace(/^m\./, "");
-    if (host === "youtu.be") {
-      return u.pathname.slice(1).split("/")[0] || null;
-    }
-    if (host === "youtube.com" || host === "music.youtube.com") {
-      const v = u.searchParams.get("v");
-      if (v) return v;
-      const shorts = u.pathname.match(/^\/shorts\/([^/]+)/);
-      if (shorts) return shorts[1];
-      const embed = u.pathname.match(/^\/embed\/([^/]+)/);
-      if (embed) return embed[1];
-    }
-  } catch {
-    // 不正なURLはgenericカードにフォールバック
-  }
-  return null;
-}
-
-/** Spotify の embed パス（`track/ID` 等）を抽出する。地域プレフィックス（`/intl-ja/track/ID` 等）も許容する。 */
-function extractSpotifyEmbedPath(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const match = u.pathname.match(
-      /^\/(?:intl-[a-z]{2}\/)?(track|album|playlist|episode|show|artist)\/([A-Za-z0-9]+)/,
-    );
-    if (match) return `${match[1]}/${match[2]}`;
-  } catch {
-    // 不正なURLはgenericカードにフォールバック
-  }
-  return null;
+/** `card.embedSrc`（oEmbed discoveryで解決済み、バックエンド側でホワイトリスト判定済み）の
+ * ホストから、CSS aspect比（video/audio）を決める最小限のマッピング。個別サービスの
+ * URL解析（動画ID抽出等）はバックエンド側のoEmbed discoveryに一本化されており、ここでは
+ * 行わない。未知ホスト（管理者がホワイトリストに追加した将来のサービス等）はvideo扱いに
+ * フォールバックする。 */
+function embedAspectOf(embedSrc: string): "video" | "audio" {
+  const host = hostnameOf(embedSrc);
+  const audioHosts = ["open.spotify.com", "w.soundcloud.com", "embed.music.apple.com"];
+  return audioHosts.some((h) => host === h || host.endsWith(`.${h}`)) ? "audio" : "video";
 }
 
 function extractTweetId(url: string): string | null {
@@ -92,7 +67,7 @@ function loadTwitterWidgets(): Promise<void> {
   return twitterWidgetsPromise;
 }
 
-/** 一般URLカード（YouTube/Spotify/x.com以外、またはIDが抽出できなかった場合）。 */
+/** 一般URLカード（埋め込みプレーヤー・x.com以外）。 */
 function GenericCard({ card }: { card: LinkCardData }) {
   return (
     <a
@@ -121,8 +96,12 @@ function GenericCard({ card }: { card: LinkCardData }) {
   );
 }
 
-/** YouTube/Spotify共通: クリックするまではサムネイル+再生ボタンのみ表示し、
- * クリックした時点で初めて公式iframeプレイヤーを読み込む（プライバシー・パフォーマンス配慮）。 */
+/** oEmbed discoveryで解決された埋め込みプレーヤー（YouTube/Spotify/Apple Music/SoundCloud/
+ * Vimeo等、管理者ホワイトリストで許可されたドメインのみ）共通: クリックするまではサムネイル+
+ * 再生ボタンのみ表示し、クリックした時点で初めて公式iframeプレイヤーを読み込む
+ * （プライバシー・パフォーマンス配慮）。`sandbox`はトップレベルナビゲーションを禁止しつつ
+ * 埋め込みプレーヤーの動作に必要な最小限の権限を許可する（Apple Music公式oEmbedの
+ * sandbox値を参考）。 */
 function EmbedPlayerCard({
   card,
   embedSrc,
@@ -146,6 +125,7 @@ function EmbedPlayerCard({
           src={embedSrc}
           className={styles.playerFrame}
           allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+          sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-storage-access-by-user-activation allow-top-navigation-by-user-activation"
           title={card.title || card.url}
         />
       </div>
@@ -233,38 +213,24 @@ function TwitterCard({ card, tweetId }: { card: LinkCardData; tweetId: string })
   );
 }
 
-/** 投稿に添付されたURLカード（YouTube/Spotify/x.com/一般の4種）の表示。 */
+/** 投稿に添付されたURLカード（oEmbed埋め込みプレーヤー/x.com/一般の3種）の表示。
+ * 埋め込みプレーヤーの対象サービス（YouTube/Spotify/Apple Music/SoundCloud/Vimeo等）は
+ * バックエンド側のoEmbed discovery＋管理者ホワイトリスト判定で決まり、フロントは
+ * `card.embedSrc`の有無だけで振り分ける（個別サービスのURL解析は行わない）。 */
 export default function LinkCard({ card, indent = true }: LinkCardProps) {
   const { t } = useTranslation();
   const host = hostnameOf(card.url);
 
   const content = (() => {
-    if (host === "youtube.com" || host === "youtu.be" || host === "music.youtube.com") {
-      const videoId = extractYouTubeVideoId(card.url);
-      if (videoId) {
-        return (
-          <EmbedPlayerCard
-            card={card}
-            embedSrc={`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1`}
-            aspect="video"
-            label={t("home:noteCard.linkCardLoadEmbed")}
-          />
-        );
-      }
-    }
-
-    if (host === "open.spotify.com") {
-      const embedPath = extractSpotifyEmbedPath(card.url);
-      if (embedPath) {
-        return (
-          <EmbedPlayerCard
-            card={card}
-            embedSrc={`https://open.spotify.com/embed/${embedPath}`}
-            aspect="audio"
-            label={t("home:noteCard.linkCardLoadEmbed")}
-          />
-        );
-      }
+    if (card.embedSrc) {
+      return (
+        <EmbedPlayerCard
+          card={card}
+          embedSrc={card.embedSrc}
+          aspect={embedAspectOf(card.embedSrc)}
+          label={t("home:noteCard.linkCardLoadEmbed")}
+        />
+      );
     }
 
     if (host === "x.com" || host === "twitter.com") {

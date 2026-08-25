@@ -47,20 +47,31 @@ APには`app.bsky.embed.external`のような明示的なembed概念が無いた
 表示テキストが`#`始まりのハッシュタグリンクは除外）を抽出する。Bskyは1投稿につき最大1件だが、
 Fediは本文中の複数リンクぶん**複数件のURLカードが並ぶことがある**のが特徴。
 
-抽出した各URLは`is_known_platform_url`でYouTubeかどうかをドメインのみで判定し、フェッチ無しで
-`post_link_cards`へ即時保存する（`youtube_thumbnail_url`で`img.youtube.com/vi/{id}/hqdefault.jpg`
-を決定的に組み立ててthumbnailに設定、titleは空のまま。フロント`LinkCard.tsx`側がURLから
-プレイヤーを再構築する）。Spotify/x.com（twitter.com含む）はURLだけで組み立てられる決定的な
-サムネイルが無く、情報無しで即時保存するとプレビューがほぼ空になるため対象外
-（フロント側の表示振り分け自体はホスト名判定のみなので、以下のOGP取得経由で保存されても
-Spotify/x.com用のコンポーネントで正しく表示される）。それ以外の一般URL（Spotify/x.com含む）は
-HTTPフェッチが要るため`Job::OgpFetch`をpriority::LOWで積み、非同期で
-OGP（`og:title`/`og:description`/`og:image`、正規表現による簡易メタタグ抽出）を取得できた分だけ
-`post_link_cards`へ追加保存する（`crates/seiran-common/src/jobs/ogp_fetch.rs`）。取得失敗
-（DNS/SSRF拒否/非対応Content-Type等の恒久的失敗）は静かに諦め、投稿自体の保存は妨げない。
+抽出した各URLは一律`Job::OgpFetch`をpriority::LOWで積み、非同期で
+OGP（`og:title`/`og:description`/`og:image`、正規表現による簡易メタタグ抽出）に加えて
+oEmbed discovery（`<link rel="alternate" type=".../json+oembed">`の検出→JSON取得→
+`html`フィールドからiframe src抽出、`crates/seiran-common/src/net.rs`の`fetch_ogp`が同じ
+ページ取得で両方処理する）も行い、取得できた分だけ`post_link_cards`へ保存する
+（`crates/seiran-common/src/jobs/ogp_fetch.rs`）。`type`属性は仕様上`application/json+oembed`
+だがSoundCloud等が非準拠の`text/json+oembed`を使うため、プレフィックスを問わず
+`json+oembed`部分一致で判定する。取得失敗（DNS/SSRF拒否/非対応Content-Type等の
+恒久的失敗）は静かに諦め、投稿自体の保存は妨げない。
+
+Vimeoのように、oEmbed自体は提供するがHTMLにdiscoveryタグを載せていないサイト向けに、
+`site_settings.oembed_allowed_domains`の各行は「domain」または
+「domain,oembedエンドポイントURL」の形式を取れる。後者が指定されたドメインのURLは
+HTML discoveryを試みず、常にそのエンドポイントへ`?url=<対象URL>&format=json`付きで
+直接アクセスする（`oembed_whitelist::OembedWhitelist::fixed_endpoint_for`が解決、
+`net::build_fixed_oembed_url`がクエリを組み立てる）。
+
+oEmbedで見つかったiframe srcは、行の左側（domain）を許可ドメインとして後方一致判定し
+（`crates/seiran-common/src/oembed_whitelist.rs`がTTL 60秒でキャッシュ）、許可された
+場合のみ`post_link_cards.embed_src`/`embed_type`へ保存する（フロント`LinkCard.tsx`は
+`embedSrc`の有無だけで埋め込みプレーヤー表示に振り分ける、`docs/ui_spec.md`参照）。
 HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_accept`
 （`/proxy`・リモート絵文字インポートと共有、private/loopback/link-local等のIPを拒否し
-リダイレクト先も毎回再検証する）を使う。
+リダイレクト先も毎回再検証する）を使う。oEmbedエンドポイント自体（discovery経由・
+固定エンドポイントいずれも）も外部指定URLのため同じSSRF検証を通す。
 
 ### 構成
 - `seiran-common::ap`: プロトコル非依存の共通ロジック
@@ -227,12 +238,12 @@ Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホス
 - **wantedDids絞り込み**: ローカルユーザーがフォロー中、またはいずれかのリストのメンバーであるBsky DIDの集合を30秒間隔でポーリングし変化があれば再接続。無関係な投稿・Likeの際限ない取り込みを防ぐための必須の絞り込み。
 - **リーダー選出**: 複数プロセス起動時の重複接続を避けるため、Redisベースの `JetstreamLeaderElector` でリース制御。モノリスモードはRedis無しでも常時接続、split-role構成はRedis障害時にフェイルクローズ。
 - **cursor永続化**: 直近処理イベントの `time_us` を `site_settings`（汎用KV）に5秒間隔で保存し、再接続時に引き継ぐ（プロセス停止中のイベント取りこぼし防止）。
-- 保存対象は wantedDids に含まれるDIDのみ。投稿は同梱の `record.text`/`record.createdAt` をそのまま使う（AppView再取得不要）。`app.bsky.embed.images`/`video`/`recordWithMedia` を解析しCDN URLを組み立てて添付保存。`app.bsky.embed.external` のうち、Bluesky GIFピッカーが生成するTenor/Klipy URLは、クエリに埋め込まれた動画識別子から `t.gifs.bsky.app` / `k.gifs.bsky.app` のMP4（MP4がないKlipyはWebM）URLへ変換して添付保存する。GIF判定に失敗した`external`（YouTube/Spotify/x.com/一般URL等）は、`url`/`title`/`description`/`thumb`を`post_link_cards`（`docs/database.md`参照、`position=0`固定）にそのまま保存し、フロントで4種のカード表示に振り分ける（`frontend/src/components/note/LinkCard.tsx`）。`record.facets`（`#link`/`#mention`/`#tag`）は6節の方式で処理する。
+- 保存対象は wantedDids に含まれるDIDのみ。投稿は同梱の `record.text`/`record.createdAt` をそのまま使う（AppView再取得不要）。`app.bsky.embed.images`/`video`/`recordWithMedia` を解析しCDN URLを組み立てて添付保存。`app.bsky.embed.external` のうち、Bluesky GIFピッカーが生成するTenor/Klipy URLは、クエリに埋め込まれた動画識別子から `t.gifs.bsky.app` / `k.gifs.bsky.app` のMP4（MP4がないKlipyはWebM）URLへ変換して添付保存する。GIF判定に失敗した`external`（YouTube/Spotify/x.com/一般URL等）は、`url`/`title`/`description`/`thumb`を`post_link_cards`（`docs/database.md`参照、`position=0`固定）にそのまま保存する。`app.bsky.embed.external`にはiframe情報が無いため、INSERT成功後に非同期の`Job::LinkCardEmbedResolve{post_id, position: 0, url}`（`priority::LOW`）をenqueueし、oEmbed discoveryで見つかったembed srcをホワイトリスト判定した上で`embed_src`/`embed_type`だけをUPDATEする（`crates/seiran-common/src/jobs/link_card_embed_resolve.rs`）。フロントは`embedSrc`の有無で埋め込みプレーヤー表示/x.com/一般URLの3種に振り分ける（`frontend/src/components/note/LinkCard.tsx`）。`record.facets`（`#link`/`#mention`/`#tag`）は6節の方式で処理する。
 - **GIFアニメの2つの経路**: (1) Tenor/Klipy GIFピッカー由来（上記の`app.bsky.embed.external`、Bluesky動画CDNのMP4/WebM URLへ変換）。(2) GIFファイル直接アップロード由来。Bluesky動画パイプラインでMP4にトランスコードされ`app.bsky.embed.video`として配信されるが、元がGIFだったことを示す`presentation:"gif"`が付与される（通常の動画添付との唯一の違い）。いずれも`post_attachments.is_gif=TRUE`で保存し、フロントは`HlsVideo`の`isGif` propで自動再生・ミュート・ループ・コントロール無し表示に切り替える（`docs/database.md`参照）。
 - Like（`app.bsky.feed.like`）は create/delete で `reactions` へINSERT/DELETE、通知・リアルタイム配信。
 - `app.bsky.feed.post` の delete commit（`operation:"delete"`）は `at://{did}/app.bsky.feed.post/{rkey}` を組み立て、一致する `posts.at_uri` を論理削除する。`at_uri` 自体がイベント発行元の `did` から組み立てられるためLikeと同様になりすましは原理上不可能（他者のdidの投稿を指せない）。取り込んでいない投稿（フォロー対象外だった等）の delete イベントは無視。
 - **Repost（`app.bsky.feed.repost`）はタイムライン投稿として`posts`に保存する**（`handle_inbound_repost_create`、Fediverseの`Announce`受信〔`handle_announce`〕と対称の処理）。リポスト対象がDBに未取り込み（`wantedDids`絞り込みで元々購読対象外だった投稿等）なら`app.bsky.feed.getPosts`でAppViewから直接フェッチして著者ごと保存してから`repost_of_post_id`でリンクする。`posts.at_uri`にリポストレコード自体のURI（`at://{did}/app.bsky.feed.repost/{rkey}`）を保存し、Fedi版の`ap_object_id`と対になる（Bskyのリポストに可視性の概念は無いため`visibility`は常に`public`固定）。delete commitは`app.bsky.feed.post`と同じ`at_uri`ベースの論理削除（`handle_inbound_post_delete`／`soft_delete_by_at_uri`はコレクションを問わず共用）。対象がローカル投稿の場合のみ通知も作る。
-- **AppView直接フェッチ経路（`fetch_single_bsky_post`/`upsert_bsky_post`、`seiran-common::atp::client`）の添付復元**: 上記のリポスト未取り込みフェッチに加え、検索結果保存・ピン留め投稿同期・「開く」機能（`POST /api/open`）でも同じ`fetch_single_bsky_post`/`upsert_bsky_post`を使う。取得した`record.embed`は、Jetstream経由の通常投稿取り込みと同じ解析ロジック（`seiran-common::atp::embed`の`parse_bsky_embed_attachments`/`parse_bsky_embed_link_card`、画像・動画・GIF・URLカードに対応）で添付・URLカードへ復元する（新規作成時のみ。既存投稿への`upsert`はスキップ）。
+- **AppView直接フェッチ経路（`fetch_single_bsky_post`/`upsert_bsky_post`、`seiran-common::atp::client`）の添付復元**: 上記のリポスト未取り込みフェッチに加え、検索結果保存・ピン留め投稿同期・「開く」機能（`POST /api/open`）でも同じ`fetch_single_bsky_post`/`upsert_bsky_post`を使う。取得した`record.embed`は、Jetstream経由の通常投稿取り込みと同じ解析ロジック（`seiran-common::atp::embed`の`parse_bsky_embed_attachments`/`parse_bsky_embed_link_card`、画像・動画・GIF・URLカードに対応）で添付・URLカードへ復元する（新規作成時のみ。既存投稿への`upsert`はスキップ）。`upsert_bsky_post`はJetstream経由と同様、URLカードINSERT成功後に`Job::LinkCardEmbedResolve`をenqueueする（呼び出し元は`Arc<dyn JobQueue>`を引数で渡す）。
 
 ### uploadBlob / getBlob・動画パイプライン
 `getBlob` はCIDのmultihashからsha256を逆算し `media_files`/`atp_blobs` を検索してCDN URLへリダイレクトする（ストレージ本体を自前で再配信しない）。
@@ -244,7 +255,7 @@ AT Protocolは1投稿につきembedを1種類（画像最大4枚 / 動画1本 / 
 
 - **選択の単位（`CreateNoteRequest.bsky_embed_choice`、`crates/seiran-api/src/handlers/notes/dto.rs::BskyEmbedChoice`）**: `Poll`（アンケート、#228）／`Images`（添付済みの非アニメ静止画グループ全体、最大4枚）／`Attachment{id}`（特定の添付ファイル1件、アニメGIFまたは動画/音声のいずれか）／`Url{url}`（本文中の特定URL）の4種類。省略可能で、その場合は`resolve_bsky_embed`（`crates/seiran-api/src/handlers/notes/delivery.rs`）が固定優先順位（アンケート→静止画→アニメGIF→動画/音声→本文URL、いずれも添付順・出現順が最も早いもの）で自動選択する。Misskey互換API等、本フィールドを送らないクライアントとの後方互換のため、バックエンドはこの省略を許可し「選択必須」のハードエラーは持たない。「候補が2種類以上あるのに選ばせない」という制約は、seiran自身のフロントエンド（`PostComposer`）が送信ボタンを`disabled`にすることでのみ担保する。
 - **アニメGIF判定**: `media_files.is_animated_image`（`storage::image::ImagePipeline::AnimatedPassthrough`由来の場合に`true`、`docs/database.md`参照）で、ローカルアップロードの静止画/アニメGIFを区別する。音声添付は動画同様の枠（「動画」候補）として扱う（音声→グレー背景動画変換機能により実際にBsky video embedになるため）。
-- **URL選択とローカル表示の同期**: `Url{url}`選択時、`resolve_bsky_embed`は選択されたURLのOGP（`og:title`/`og:description`/`og:image`、`crate::net::fetch_ogp`、SSRF対策込み）を同期取得して`app.bsky.embed.external`を組み立てると同時に、同じデータを`post_link_cards`（`position=0`）へINSERTする。これは、静止画/GIF/動画の選択と異なりURLは「選んで初めてカード化する」ものであり、ローカル（seiran自身のNoteCard/LinkCard表示）でも選択結果を反映するための明示的な永続化（マイケル指摘）。本文からそのURLを削除しても選択自体は孤児として有効なまま残る（フロントは他の選択肢を選ぶまでラジオボタンリストにそのURL項目を残し続ける）。OGP取得に失敗しても選択は常に尊重し、素の`External`（title/description空）でコミットする。
+- **URL選択とローカル表示の同期**: `Url{url}`選択時、`resolve_bsky_embed`は選択されたURLのOGP（`og:title`/`og:description`/`og:image`、`crate::net::fetch_ogp`、SSRF対策込み）を同期取得して`app.bsky.embed.external`を組み立てると同時に、同じデータを`post_link_cards`（`position=0`）へINSERTする。`fetch_ogp`はoEmbed discoveryも同時に行うため、ホワイトリスト判定を通過すれば`embed_src`/`embed_type`も同じINSERTで保存される（`app.bsky.embed.external`自体にはiframe概念が無いためBsky配送ペイロードには影響しない、seiranローカル表示専用）。これは、静止画/GIF/動画の選択と異なりURLは「選んで初めてカード化する」ものであり、ローカル（seiran自身のNoteCard/LinkCard表示）でも選択結果を反映するための明示的な永続化（マイケル指摘）。本文からそのURLを削除しても選択自体は孤児として有効なまま残る（フロントは他の選択肢を選ぶまでラジオボタンリストにそのURL項目を残し続ける）。OGP取得に失敗しても選択は常に尊重し、素の`External`（title/description空）でコミットする。
 - **URL選択のActivityPub配送への反映（`fedi_url_append_needed`）**: Fedi（AP）にはBskyのembed概念が無く、本文に書かれたURLでしか参照先を示せない。`Url{url}`選択時、選択したURLが投稿本文に既に含まれていれば何もしないが、含まれない場合（本文からそのURLを削除した後の孤児選択等）は、AP配送用の本文（DBの`posts.body`自体は変更しない、`ApDeliveryKind::PostToFollowers.body`の上書きのみ）の末尾に`\n\n{url}`を追記する。これはクロスプロトコル引用（`ApQuote::AppendUrl`）と同じ「AP配送時だけ上書きする」仕組みの流用。引用投稿（`bsky_quote_embed`がSome）は`bsky_embed_choice`自体が無視されるため対象外。
 - **動画パイプライン結合待ち（`Job::BskyPostCommitDeferred`の簡素化）**: 選択（または自動選択）が指す動画/音声添付がBsky動画パイプライン結合未確定（`bsky_video_status`が`ready`/`failed`のいずれでもない）の場合のみ、`resolve_bsky_embed`は`Pending(media_file_id)`を返し、その1件のIDだけをジョブへ渡してコミットを遅延させる（画像/URL選択、または既に確定済みの動画/音声選択は即座にコミットする）。ジョブは対象1件の状態だけを再確認し、`ready`ならVideo embed、`failed`または`SETTLE_TIMEOUT_SECS`（70秒）超過ならフォールバックURL（`/api/media/{id}/watch`、簡易視聴ページへのリンクカード）でコミットする。
 - **ラジオボタンリストを出せない場合のURLリンクカード添付（`CreateNoteRequest.link_card_urls`、`delivery::attach_link_cards_from_urls`）**: Bsky embed選択のラジオボタンリスト（単一選択）は「Bsky配送オンかつCW中でない」場合にしか表示されない。それ以外（Bsky配送オフ、またはCW中）でも本文中にURLがあれば、seiranは（Bskyと違い）1投稿に複数のURLリンクカードを同時に持てるため、フロントエンドは代わりにチェックボックスリスト（複数選択）を表示する。チェックしたURLは`link_card_urls`として指定順どおり送られ、各URLを`fetch_ogp`で取得して`post_link_cards`へ`position=0..N`で保存する（`resolve_url_embed`と異なりBsky embed用のサムネイル再ホストは行わない、seiranローカル表示専用のため）。本文からそのURLを削除してもチェック自体は孤児として有効なまま残る（ラジオボタン版のURL孤児化と同じ仕様）。チェックボックスリストが出せる状態からラジオボタンリストを出せる状態（Bsky配送オン かつ CWオフ）へ切り替わった瞬間、チェック済みURLのうち最もインデックスの小さいものが`bskyEmbedChoice`のURL選択へ引き継がれる。

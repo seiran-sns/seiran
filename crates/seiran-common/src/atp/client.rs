@@ -3,8 +3,13 @@
 //! - 公開 AppView (`api.bsky.app`) から過去ログを取得する（認証不要）
 //! - PDS への createSession + createRecord でポストを送信する（要 App Password）
 
+use std::sync::Arc;
+
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::queue::worker::priority;
+use crate::traits::{Job, JobQueue};
 
 /// Bsky AppView のベース URL。未設定時は本番の公開AppView。
 /// E2E テストではローカルのスタブサーバーに向けるために使う。
@@ -302,6 +307,7 @@ pub struct BskyProfile {
 /// 無ければ新規挿入）。リモートアクターのピン留め（`pinnedPost`）同期専用（#61）。
 pub async fn upsert_bsky_post(
     pool: &sqlx::PgPool,
+    queue: &Arc<dyn JobQueue>,
     actor_id: i64,
     post: &BskyPost,
 ) -> Result<i64, sqlx::Error> {
@@ -359,7 +365,7 @@ pub async fn upsert_bsky_post(
             }
 
             if let Some(card) = crate::atp::parse_bsky_embed_link_card(embed, &post.author_did) {
-                if let Err(e) = sqlx::query(
+                let insert_result = sqlx::query(
                     "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
                      VALUES ($1, 0, $2, $3, $4, $5)",
                 )
@@ -369,9 +375,29 @@ pub async fn upsert_bsky_post(
                 .bind(&card.description)
                 .bind(card.thumbnail_url.as_deref())
                 .execute(pool)
-                .await
-                {
-                    tracing::error!("[upsert_bsky_post] post_link_cards 保存失敗（スキップ）: {}", e);
+                .await;
+                match insert_result {
+                    Ok(_) => {
+                        if let Err(e) = queue
+                            .enqueue(
+                                Job::LinkCardEmbedResolve {
+                                    post_id: final_id,
+                                    position: 0,
+                                    url: card.url.clone(),
+                                },
+                                priority::LOW,
+                            )
+                            .await
+                        {
+                            tracing::error!(
+                                "[upsert_bsky_post] LinkCardEmbedResolve enqueue失敗: {}",
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("[upsert_bsky_post] post_link_cards 保存失敗（スキップ）: {}", e);
+                    }
                 }
             }
         }

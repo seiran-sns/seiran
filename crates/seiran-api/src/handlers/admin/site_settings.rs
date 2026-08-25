@@ -49,6 +49,8 @@ pub struct SiteSettingsResponse {
     pub search_rate_limit_window_minutes: String,
     pub search_rate_limit_max_user: String,
     pub search_rate_limit_max_moderator: String,
+    // URLカード埋め込みプレーヤー（oEmbed discovery）の許可ドメイン（改行区切り、後方一致）
+    pub oembed_allowed_domains: String,
 }
 
 fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
@@ -161,6 +163,10 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .get("search_rate_limit_max_moderator")
             .cloned()
             .unwrap_or_else(|| "50".to_string()),
+        oembed_allowed_domains: settings
+            .get("oembed_allowed_domains")
+            .cloned()
+            .unwrap_or_default(),
     }
 }
 
@@ -201,6 +207,7 @@ pub struct UpdateSiteSettingsRequest {
     pub search_rate_limit_window_minutes: Option<String>,
     pub search_rate_limit_max_user: Option<String>,
     pub search_rate_limit_max_moderator: Option<String>,
+    pub oembed_allowed_domains: Option<String>,
 }
 
 // ─── ハンドラ ─────────────────────────────────────────────────────────────
@@ -407,6 +414,9 @@ pub async fn update_site_settings(
         req.search_rate_limit_max_moderator
             .as_deref()
             .map(|v| ("search_rate_limit_max_moderator", v.to_string())),
+        req.oembed_allowed_domains
+            .as_deref()
+            .map(|v| ("oembed_allowed_domains", v.to_string())),
     ]
     .into_iter()
     .flatten()

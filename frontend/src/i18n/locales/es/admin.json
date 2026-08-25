@@ -124,7 +124,11 @@
     "listMemberMaxModeratorLabel": "Máx. miembros por lista (moderador)",
     "searchRateLimitWindowMinutesLabel": "Ventana de límite de búsquedas (minutos)",
     "searchRateLimitMaxUserLabel": "Máx. búsquedas (usuario)",
-    "searchRateLimitMaxModeratorLabel": "Máx. búsquedas (moderador)"
+    "searchRateLimitMaxModeratorLabel": "Máx. búsquedas (moderador)",
+    "oembedSectionTitle": "Reproductor incrustado de tarjetas URL",
+    "oembedAllowedDomainsLabel": "Dominios permitidos (uno por línea)",
+    "oembedAllowedDomainsHint": "Especificar un dominio donde cualquiera puede alojar contenido (p. ej. github.io, amazonaws.com) puede permitir que se incrusten scripts maliciosos en tu sitio.",
+    "oembedEndpointHint": "Si un sitio soporta oEmbed pero no lo anuncia mediante una etiqueta de descubrimiento HTML, puedes indicar el endpoint directamente con el formato \"dominio,url-del-endpoint-oembed\" (p. ej. vimeo.com,https://vimeo.com/api/oembed.json)."
   },
   "storageProvidersPanel": {
     "title": "Almacenamiento de objetos",

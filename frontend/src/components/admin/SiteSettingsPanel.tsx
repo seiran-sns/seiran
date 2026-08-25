@@ -55,6 +55,9 @@ export default function SiteSettingsPanel() {
   const [searchRateLimitMaxUser, setSearchRateLimitMaxUser] = useState("");
   const [searchRateLimitMaxModerator, setSearchRateLimitMaxModerator] = useState("");
 
+  // URLカード埋め込みプレーヤー（oEmbed discovery）の許可ドメイン
+  const [oembedAllowedDomains, setOembedAllowedDomains] = useState("");
+
   useEffect(() => {
     api.admin
       .getSiteSettings()
@@ -92,6 +95,7 @@ export default function SiteSettingsPanel() {
         setSearchRateLimitWindowMinutes(s.search_rate_limit_window_minutes);
         setSearchRateLimitMaxUser(s.search_rate_limit_max_user);
         setSearchRateLimitMaxModerator(s.search_rate_limit_max_moderator);
+        setOembedAllowedDomains(s.oembed_allowed_domains);
       })
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
@@ -151,6 +155,7 @@ export default function SiteSettingsPanel() {
         search_rate_limit_window_minutes: searchRateLimitWindowMinutes,
         search_rate_limit_max_user: searchRateLimitMaxUser,
         search_rate_limit_max_moderator: searchRateLimitMaxModerator,
+        oembed_allowed_domains: oembedAllowedDomains,
       };
       // パスワード/シークレットは入力があったときだけ送る（未入力なら既存値を維持）。
       if (password) patch.smtp_password = password;
@@ -367,6 +372,24 @@ export default function SiteSettingsPanel() {
             {t("admin:siteSettingsPanel.searchRateLimitMaxModeratorLabel")}
             <input className={styles.input} type="number" min={1} value={searchRateLimitMaxModerator} onChange={(e) => setSearchRateLimitMaxModerator(e.target.value)} />
           </label>
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.oembedSectionTitle")}</div>
+        <div className={styles.card}>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.oembedAllowedDomainsLabel")}
+            <textarea
+              className={styles.input}
+              rows={6}
+              value={oembedAllowedDomains}
+              onChange={(e) => setOembedAllowedDomains(e.target.value)}
+              placeholder={
+                "youtube.com\nopen.spotify.com\nmusic.apple.com\nsoundcloud.com\nvimeo.com,https://vimeo.com/api/oembed.json"
+              }
+            />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.oembedAllowedDomainsHint")}</p>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.oembedEndpointHint")}</p>
         </div>
 
         <button className={styles.btn} type="submit" disabled={saving}>

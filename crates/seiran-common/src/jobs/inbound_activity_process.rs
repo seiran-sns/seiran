@@ -55,84 +55,14 @@ fn extract_link_card_urls(body: &str, max: usize) -> Vec<String> {
     urls
 }
 
-/// URLのホストがYouTubeかどうか（HTTPフェッチ不要）。YouTubeだけは`youtube_thumbnail_url`で
-/// サムネイルを決定的に組み立てられるため、title/description無しで即座にカード化しても
-/// `EmbedPlayerCard`のプレビューが破綻しない。Spotify/x.comにはURLだけで組み立てられる
-/// 決定的なサムネイルが無く、情報無しで即時保存するとプレビューがほぼ空になってしまうため、
-/// Bskyのexternal embed同等のリッチな見た目に揃うよう一般URLと同じくOGP取得
-/// （`Job::OgpFetch`）に回す（フロント側の表示振り分け自体はホスト名判定のみなので、
-/// OGP経由で保存されてもSpotify/x.com用のコンポーネントで正しく表示される）。
-fn is_known_platform_url(url: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(url) else {
-        return false;
-    };
-    let host = parsed.host_str().unwrap_or("");
-    let host = host.strip_prefix("www.").unwrap_or(host);
-    let host = host.strip_prefix("m.").unwrap_or(host);
-    matches!(host, "youtube.com" | "youtu.be" | "music.youtube.com")
-}
-
-/// YouTube動画URLから決定的に組み立てられるサムネイルURL（HTTPフェッチ不要）。
-/// YouTube以外、または動画IDを抽出できない場合は`None`。
-fn youtube_thumbnail_url(url: &str) -> Option<String> {
-    let parsed = url::Url::parse(url).ok()?;
-    let host = parsed.host_str()?;
-    let host = host.strip_prefix("www.").unwrap_or(host);
-    let video_id = if host == "youtu.be" {
-        parsed.path_segments()?.next()?.to_string()
-    } else if host == "youtube.com" || host == "music.youtube.com" {
-        if let Some((_, v)) = parsed.query_pairs().find(|(k, _)| k == "v") {
-            v.to_string()
-        } else {
-            let segs: Vec<&str> = parsed.path_segments()?.collect();
-            match segs.as_slice() {
-                ["shorts", id, ..] | ["embed", id, ..] => id.to_string(),
-                _ => return None,
-            }
-        }
-    } else {
-        return None;
-    };
-    if video_id.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "https://img.youtube.com/vi/{}/hqdefault.jpg",
-        video_id
-    ))
-}
-
-/// 投稿本文中のURLカード化対象URLを処理する。YouTube/Spotify/x.comは判定のみで即座に
-/// `post_link_cards`へ保存し、それ以外の一般URLはOGP取得ジョブ（`Job::OgpFetch`）を積む。
-/// 投稿保存自体は既に完了しているため、ここでの失敗はログのみでハンドラ全体を失敗させない。
-async fn queue_link_cards_for_post(
-    db_pool: &sqlx::PgPool,
-    queue: &Arc<dyn JobQueue>,
-    post_id: i64,
-    body: &str,
-) {
+/// 投稿本文中のURLカード化対象URLを、一律OGP取得ジョブ（`Job::OgpFetch`、OGPタグに加えて
+/// oEmbed discoveryによる埋め込みプレーヤー解決も行う）へ積む。投稿保存自体は既に完了して
+/// いるため、ここでの失敗はログのみでハンドラ全体を失敗させない。
+async fn queue_link_cards_for_post(queue: &Arc<dyn JobQueue>, post_id: i64, body: &str) {
     let urls = extract_link_card_urls(body, MAX_LINK_CARDS_PER_POST);
     for (position, url) in urls.into_iter().enumerate() {
         let position = position as i16;
-        if is_known_platform_url(&url) {
-            let thumbnail_url = youtube_thumbnail_url(&url);
-            let result = sqlx::query(
-                "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
-                 VALUES ($1, $2, $3, '', '', $4)",
-            )
-            .bind(post_id)
-            .bind(position)
-            .bind(&url)
-            .bind(thumbnail_url.as_deref())
-            .execute(db_pool)
-            .await;
-            if let Err(e) = result {
-                tracing::error!(
-                    "[Create/Note] post_link_cards INSERT失敗（既知プラットフォーム）: {}",
-                    e
-                );
-            }
-        } else if let Err(e) = queue
+        if let Err(e) = queue
             .enqueue(
                 Job::OgpFetch {
                     post_id,
@@ -1129,8 +1059,8 @@ async fn handle_create_note(
         );
     }
 
-    // URLカード（YouTube/Spotify/x.comは即時保存、それ以外はOGP取得ジョブ）。
-    queue_link_cards_for_post(&inbox.db_pool, queue, post_id, &body).await;
+    // URLカード（OGP取得ジョブがoEmbed discoveryによる埋め込みプレーヤー解決も行う）。
+    queue_link_cards_for_post(queue, post_id, &body).await;
 
     // 引用通知: リモート Fedi ユーザーがローカルユーザーの投稿を引用した場合に作る。
     if let Some(quoted_post_id) = quote_of_post_id {
@@ -3018,8 +2948,8 @@ mod tests {
     use super::{
         ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_ap_quote_uri,
         extract_emoji_tag_url, extract_link_card_urls, extract_mentioned_local_usernames,
-        is_known_platform_url, normalize_ap_poll, sanitize_ap_content_html, strip_html,
-        strip_quote_fallback_line, strip_quote_fallback_line_html, youtube_thumbnail_url,
+        normalize_ap_poll, sanitize_ap_content_html, strip_html,
+        strip_quote_fallback_line, strip_quote_fallback_line_html,
     };
 
     #[test]
@@ -3519,45 +3449,4 @@ mod tests {
         assert_eq!(urls.len(), 2);
     }
 
-    #[test]
-    fn is_known_platform_url_matches_youtube_only() {
-        for url in [
-            "https://www.youtube.com/watch?v=abc123",
-            "https://youtu.be/abc123",
-            "https://music.youtube.com/watch?v=abc123",
-        ] {
-            assert!(is_known_platform_url(url), "{url}");
-        }
-        // Spotify/x.com/twitter.comはURLだけで組み立てられる決定的なサムネイルが無く、
-        // 情報無しで即時保存するとプレビューがほぼ空になるため、Bskyと同等の見た目に
-        // 揃うようOGP取得（一般URL扱い）に回す。
-        for url in [
-            "https://open.spotify.com/track/abc123",
-            "https://x.com/user/status/123",
-            "https://twitter.com/user/status/123",
-            "https://example.com/article",
-        ] {
-            assert!(!is_known_platform_url(url), "{url}");
-        }
-    }
-
-    #[test]
-    fn youtube_thumbnail_url_extracts_video_id_from_various_formats() {
-        assert_eq!(
-            youtube_thumbnail_url("https://www.youtube.com/watch?v=abc123"),
-            Some("https://img.youtube.com/vi/abc123/hqdefault.jpg".to_string())
-        );
-        assert_eq!(
-            youtube_thumbnail_url("https://youtu.be/abc123"),
-            Some("https://img.youtube.com/vi/abc123/hqdefault.jpg".to_string())
-        );
-        assert_eq!(
-            youtube_thumbnail_url("https://www.youtube.com/shorts/abc123"),
-            Some("https://img.youtube.com/vi/abc123/hqdefault.jpg".to_string())
-        );
-        assert_eq!(
-            youtube_thumbnail_url("https://open.spotify.com/track/abc123"),
-            None
-        );
-    }
 }

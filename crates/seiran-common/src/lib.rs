@@ -12,6 +12,7 @@ pub mod jobs;
 pub mod local_domain;
 pub mod mention;
 pub mod net;
+pub mod oembed_whitelist;
 pub mod queue;
 pub mod repository;
 pub mod secrets;
