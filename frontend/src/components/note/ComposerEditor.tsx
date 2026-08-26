@@ -1,7 +1,9 @@
 import {
   ClipboardEvent,
   KeyboardEvent,
+  forwardRef,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -164,16 +166,15 @@ function twemojiHtml(text: string, emojiClassName: string): string {
   return html;
 }
 
-export default function ComposerEditor({
-  value,
-  onChange,
-  onSubmitShortcut,
-  onImagePaste,
-  placeholder,
-  autoFocus,
-}: ComposerEditorProps) {
+const ComposerEditor = forwardRef<HTMLDivElement, ComposerEditorProps>(function ComposerEditor(
+  { value, onChange, onSubmitShortcut, onImagePaste, placeholder, autoFocus },
+  forwardedRef,
+) {
   const { t } = useTranslation();
   const editorRef = useRef<HTMLDivElement>(null);
+  // 投稿ボタン群からの矢印キーナビゲーション（上矢印で本文へフォーカスを戻す）用に、
+  // 本文のcontentEditable DOM要素を親（PostComposer）へ公開する。
+  useImperativeHandle(forwardedRef, () => editorRef.current as HTMLDivElement);
   const pendingCaret = useRef<number | null>(null);
   const composing = useRef(false);
   const initialCaret = useRef(value.length);
@@ -508,4 +509,6 @@ export default function ComposerEditor({
       )}
     </div>
   );
-}
+});
+
+export default ComposerEditor;

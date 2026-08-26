@@ -1,4 +1,12 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   api,
@@ -253,6 +261,15 @@ export default function PostComposer({
   const [showPrivateTooltip, setShowPrivateTooltip] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const privateTooltipTimerRef = useRef<number | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  // 矢印キーナビゲーション（操作ボタン列⇄投稿ボタン列⇄本文）用のボタンref。
+  const fediBtnRef = useRef<HTMLButtonElement>(null);
+  const bskyBtnRef = useRef<HTMLButtonElement>(null);
+  const attachBtnRef = useRef<HTMLButtonElement>(null);
+  const pollBtnRef = useRef<HTMLButtonElement>(null);
+  const cwBtnRef = useRef<HTMLButtonElement>(null);
+  const unlistedBtnRef = useRef<HTMLButtonElement>(null);
+  const privateBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -595,6 +612,81 @@ export default function PostComposer({
 
   const attachLimitReached = attachments.length >= MAX_ATTACHMENTS;
 
+  // 矢印キーナビゲーション（マイケル指摘: フォーカスが投稿ボタン上にある間は左右矢印で
+  // 3種の投稿ボタンを行き来でき、上矢印でBsky配送ボタンへ。Fedi配送・Bsky配送・添付・
+  // アンケート・CWの操作ボタン列にフォーカスがある間は左右矢印でその5個を行き来でき、
+  // 上矢印で本文へ、下矢印でデフォルトの投稿ボタン〔無効化中ならパブリック、それも
+  // 無効化中なら無反応〕へ）。
+
+  const postButtonsGenericDisabled =
+    posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid;
+
+  function isPostButtonDisabled(v: Visibility): boolean {
+    if (postButtonsGenericDisabled) return true;
+    return !replyTo && isVisibilityDisabled(v);
+  }
+
+  function postBtnRefFor(v: Visibility) {
+    if (v === "public") return publicBtnRef;
+    if (v === "unlisted") return unlistedBtnRef;
+    return privateBtnRef;
+  }
+
+  const postButtonOrder: Visibility[] = replyTo
+    ? replyVisibilityOptions
+    : (["public", "unlisted", "followers_only"] as Visibility[]);
+
+  function handlePostBtnKeyDown(e: KeyboardEvent<HTMLButtonElement>, v: Visibility) {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const focusable = postButtonOrder.filter((x) => !isPostButtonDisabled(x));
+      const idx = focusable.indexOf(v);
+      if (idx === -1) return;
+      const delta = e.key === "ArrowLeft" ? -1 : 1;
+      const next = focusable[(idx + delta + focusable.length) % focusable.length];
+      postBtnRefFor(next).current?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      bskyBtnRef.current?.focus();
+    }
+  }
+
+  const controlBtnKeys = ["fedi", "bsky", "attach", "poll", "cw"] as const;
+  type ControlBtnKey = (typeof controlBtnKeys)[number];
+  const controlBtnRefs: Record<ControlBtnKey, typeof fediBtnRef> = {
+    fedi: fediBtnRef,
+    bsky: bskyBtnRef,
+    attach: attachBtnRef,
+    poll: pollBtnRef,
+    cw: cwBtnRef,
+  };
+  const controlBtnOrder: ControlBtnKey[] = controlBtnKeys.filter((key) => {
+    if (key === "fedi") return fediReplyAllowed;
+    if (key === "bsky") return bskyReplyAllowed;
+    if (key === "attach") return !(uploading || attachLimitReached);
+    return true;
+  });
+
+  function handleControlBtnKeyDown(e: KeyboardEvent<HTMLButtonElement>, key: ControlBtnKey) {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const idx = controlBtnOrder.indexOf(key);
+      if (idx === -1) return;
+      const delta = e.key === "ArrowLeft" ? -1 : 1;
+      const next = controlBtnOrder[(idx + delta + controlBtnOrder.length) % controlBtnOrder.length];
+      controlBtnRefs[next].current?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      editorRef.current?.focus();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      let target = effectiveDefaultVisibility;
+      if (isPostButtonDisabled(target)) target = "public";
+      if (isPostButtonDisabled(target)) return;
+      postBtnRefFor(target).current?.focus();
+    }
+  }
+
   return (
     <form
       onSubmit={handlePost}
@@ -628,6 +720,7 @@ export default function PostComposer({
         onChange={handleFileSelect}
       />
       <ComposerEditor
+        ref={editorRef}
         value={text}
         onChange={setText}
         onSubmitShortcut={() =>
@@ -661,9 +754,11 @@ export default function PostComposer({
       <div className={styles.controlRow}>
         {fediReplyAllowed && (
           <button
+            ref={fediBtnRef}
             type="button"
             className={`${styles.iconBtn} ${deliverFedi ? styles.scopeActive : ""}`}
             onClick={() => setDeliverFedi((v) => !v)}
+            onKeyDown={(e) => handleControlBtnKeyDown(e, "fedi")}
             title={t("home:postComposer.deliverFediHint")}
             aria-label={t("home:postComposer.deliverFediHint")}
           >
@@ -672,9 +767,11 @@ export default function PostComposer({
         )}
         {bskyReplyAllowed && (
           <button
+            ref={bskyBtnRef}
             type="button"
             className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""}`}
             onClick={() => setDeliverBsky((v) => !v)}
+            onKeyDown={(e) => handleControlBtnKeyDown(e, "bsky")}
             title={t("home:postComposer.deliverBskyHint")}
             aria-label={t("home:postComposer.deliverBskyHint")}
           >
@@ -682,9 +779,11 @@ export default function PostComposer({
           </button>
         )}
         <button
+          ref={attachBtnRef}
           type="button"
           className={styles.iconBtn}
           onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => handleControlBtnKeyDown(e, "attach")}
           disabled={uploading || attachLimitReached}
           title={t("home:postComposer.attachTitle")}
           aria-label={t("home:postComposer.attachTitle")}
@@ -700,6 +799,7 @@ export default function PostComposer({
           )}
         </button>
         <button
+          ref={pollBtnRef}
           type="button"
           className={`${styles.iconBtn} ${pollEnabled ? styles.scopeActive : ""}`}
           onClick={() => {
@@ -712,12 +812,14 @@ export default function PostComposer({
               setPollEnabled(true);
             }
           }}
+          onKeyDown={(e) => handleControlBtnKeyDown(e, "poll")}
           title={t("home:postComposer.poll.toggleTitle")}
           aria-label={t("home:postComposer.poll.toggleTitle")}
         >
           <TwemojiEmoji emoji="📊" />
         </button>
         <button
+          ref={cwBtnRef}
           type="button"
           className={`${styles.iconBtn} ${cwEnabled ? styles.scopeActive : ""}`}
           onClick={() => {
@@ -728,6 +830,7 @@ export default function PostComposer({
               setCwEnabled(true);
             }
           }}
+          onKeyDown={(e) => handleControlBtnKeyDown(e, "cw")}
           title={t("home:postComposer.cw.toggleTitle")}
           aria-label={t("home:postComposer.cw.toggleTitle")}
         >
@@ -976,12 +1079,14 @@ export default function PostComposer({
             <div className={styles.postBtnGroup}>
               {replyVisibilityOptions.includes("public") && (
                 <button
+                  ref={publicBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "public" ? styles.postBtnDefault : ""}`}
                   disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                   onClick={() => submitWithVisibility("public")}
                   onFocus={() => handleSubmitBtnFocus("public")}
                   onBlur={handleSubmitBtnBlur}
+                  onKeyDown={(e) => handlePostBtnKeyDown(e, "public")}
                 >
                   <span aria-hidden="true">
                     <TwemojiEmoji emoji="🌐" />
@@ -991,12 +1096,14 @@ export default function PostComposer({
               )}
               {replyVisibilityOptions.includes("unlisted") && (
                 <button
+                  ref={unlistedBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "unlisted" ? styles.postBtnDefault : ""}`}
                   disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                   onClick={() => submitWithVisibility("unlisted")}
                   onFocus={() => handleSubmitBtnFocus("unlisted")}
                   onBlur={handleSubmitBtnBlur}
+                  onKeyDown={(e) => handlePostBtnKeyDown(e, "unlisted")}
                 >
                   <span aria-hidden="true">
                     <TwemojiEmoji emoji="🌙" />
@@ -1006,12 +1113,14 @@ export default function PostComposer({
               )}
               {replyVisibilityOptions.includes("followers_only") && (
                 <button
+                  ref={privateBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "followers_only" ? styles.postBtnDefault : ""}`}
                   disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                   onClick={() => submitWithVisibility("followers_only")}
                   onFocus={() => handleSubmitBtnFocus("followers_only")}
                   onBlur={handleSubmitBtnBlur}
+                  onKeyDown={(e) => handlePostBtnKeyDown(e, "followers_only")}
                 >
                   <span aria-hidden="true">
                     <TwemojiEmoji emoji="🔒️" />
@@ -1043,6 +1152,7 @@ export default function PostComposer({
                 onClick={() => submitWithVisibility("public")}
                 onFocus={() => handleSubmitBtnFocus("public")}
                 onBlur={handleSubmitBtnBlur}
+                onKeyDown={(e) => handlePostBtnKeyDown(e, "public")}
               >
                 <span aria-hidden="true">
                   <TwemojiEmoji emoji="🌐" />
@@ -1050,12 +1160,14 @@ export default function PostComposer({
                 {t("home:postComposer.postButtonPublic")}
               </button>
               <button
+                ref={unlistedBtnRef}
                 type="button"
                 className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "unlisted" ? styles.postBtnDefault : ""}`}
                 disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                 onClick={() => submitWithVisibility("unlisted")}
                 onFocus={() => handleSubmitBtnFocus("unlisted")}
                 onBlur={handleSubmitBtnBlur}
+                onKeyDown={(e) => handlePostBtnKeyDown(e, "unlisted")}
               >
                 <span aria-hidden="true">
                   <TwemojiEmoji emoji="🌙" />
@@ -1069,12 +1181,14 @@ export default function PostComposer({
                 onClick={handlePrivateTooltipClick}
               >
                 <button
+                  ref={privateBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "followers_only" ? styles.postBtnDefault : ""}`}
                   disabled={posting || !text.trim() || overLimit || deliverBsky}
                   onClick={() => submitWithVisibility("followers_only")}
                   onFocus={() => handleSubmitBtnFocus("followers_only")}
                   onBlur={handleSubmitBtnBlur}
+                  onKeyDown={(e) => handlePostBtnKeyDown(e, "followers_only")}
                 >
                   <span aria-hidden="true">
                     <TwemojiEmoji emoji="🔒️" />
