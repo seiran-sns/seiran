@@ -573,6 +573,13 @@
   cursor: not-allowed;
 }
 
+/* Ctrl+Enter等のショートカット送信先を示す赤枠マーカー。グレーアウト中のボタンにも
+ * (:disabledのopacityで薄まった状態のまま)付け続け、送信先が不可能になっていることを
+ * ボタンの見た目だけで気付けるようにする。 */
+.postBtnDefault {
+  box-shadow: 0 0 0 2px var(--danger);
+}
+
 .postBtnTooltipWrap {
   position: relative;
 }

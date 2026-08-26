@@ -12,7 +12,6 @@ function makeDraft(text: string): ComposerDraft {
     attachments: [],
     deliverFedi: true,
     deliverBsky: true,
-    visibility: "public",
     bskyEmbedChoice: null,
     pollEnabled: false,
     pollChoices: ["", ""],

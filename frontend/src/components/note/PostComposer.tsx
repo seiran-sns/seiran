@@ -24,6 +24,7 @@ import {
   onComposerDraftRefresh,
   saveComposerDraft,
 } from "../../lib/composerDraft";
+import { loadComposerDefaults, saveComposerDefaults } from "../../lib/composerDefaults";
 import styles from "./PostComposer.module.css";
 import ComposerEditor from "./ComposerEditor";
 import TwemojiEmoji from "../common/TwemojiEmoji";
@@ -89,17 +90,6 @@ export function replyVisibilityConstraint(replyTo?: Note): {
   }
   // undefined(public) / "direct" / 想定外値 → 制約なし（3段階すべて選択可）
   return { options: VISIBILITY_NARROWING_ORDER, defaultValue: "public" };
-}
-
-/** 引用対象ポストの可視性から、この引用のデフォルト可視性を算出する。 */
-export function quoteVisibilityConstraint(quoteTo?: Note): {
-  defaultValue: Visibility;
-} {
-  const parent = quoteTo?.visibility;
-  if (parent === "unlisted") {
-    return { defaultValue: "unlisted" };
-  }
-  return { defaultValue: "public" };
 }
 
 /** Bsky embed候補1件（ラジオボタンリストの1アイテム）。 */
@@ -197,7 +187,6 @@ export default function PostComposer({
   const { t } = useTranslation();
   const { user } = useAuth();
   const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo) : null;
-  const quoteConstraint = quoteTo ? quoteVisibilityConstraint(quoteTo) : null;
   // 返信の配送先トグルは、返信先ポストが実際に持つプロトコル実体のみ表示する（持たない
   // プロトコルへ配送すると親と無関係な独立ポストとして誤配信されるため）。Bsky は
   // followers_only 可視性を配信できないため、親自体が非公開（＝この返信も非公開固定）
@@ -217,18 +206,28 @@ export default function PostComposer({
   const [initialDraft] = useState(() =>
     draftTarget ? loadComposerDraft(draftTarget) : null,
   );
+  // 新規投稿・引用の「最後に送信した公開範囲・配送先」（返信は親ポストから決まる専用の
+  // デフォルトを持つため対象外、後述のdefaultVisibility参照）。
+  const [composerDefaults] = useState(() => (replyTo ? null : loadComposerDefaults()));
 
   const [text, setText] = useState(initialDraft?.text ?? initialText ?? "");
-  const [deliverFedi, setDeliverFedi] = useState(initialDraft?.deliverFedi ?? fediReplyAllowed);
-  const [deliverBsky, setDeliverBsky] = useState(initialDraft?.deliverBsky ?? bskyReplyAllowed);
-  const [visibility, setVisibility] = useState<Visibility>(() => {
-    if (initialDraft && !replyTo) return initialDraft.visibility;
-    return (
-      replyConstraint?.defaultValue ??
-      quoteConstraint?.defaultValue ??
-      "public"
-    );
-  });
+  const [deliverFedi, setDeliverFedi] = useState(
+    initialDraft?.deliverFedi ?? composerDefaults?.deliverFedi ?? fediReplyAllowed,
+  );
+  const [deliverBsky, setDeliverBsky] = useState(
+    initialDraft?.deliverBsky ?? composerDefaults?.deliverBsky ?? bskyReplyAllowed,
+  );
+  // Ctrl+Enter等のショートカット送信・赤枠マーカーが指す「デフォルトの投稿ボタン」。
+  // 新規投稿・引用はローカルストレージへ永続化した最後の選択、返信は親ポストから決まる
+  // replyConstraint.defaultValueを使う（下のeffectiveDefaultVisibility参照）ため、
+  // ここでの初期値はreplyの場合使われない。
+  const [defaultVisibility, setDefaultVisibility] = useState<Visibility>(
+    composerDefaults?.visibility ?? "public",
+  );
+  // Tabキーで投稿ボタンにフォーカスが乗っている間は、そのボタンが赤枠マーカー対象になる
+  // （マイケル指摘: Ctrl+Enterの送信先が打鍵するまで分からないUXを避けるため）。
+  const [focusedVisibility, setFocusedVisibility] = useState<Visibility | null>(null);
+  const publicBtnRef = useRef<HTMLButtonElement>(null);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState("");
   const [attachments, setAttachments] = useState<DriveFile[]>(
@@ -267,7 +266,6 @@ export default function PostComposer({
       attachments,
       deliverFedi,
       deliverBsky,
-      visibility,
       bskyEmbedChoice,
       pollEnabled,
       pollChoices,
@@ -283,7 +281,6 @@ export default function PostComposer({
     attachments,
     deliverFedi,
     deliverBsky,
-    visibility,
     bskyEmbedChoice,
     pollEnabled,
     pollChoices,
@@ -311,7 +308,6 @@ export default function PostComposer({
       setCheckedLinkCardUrls(draft?.linkCardUrls ?? []);
       setDeliverFedi(draft?.deliverFedi ?? fediReplyAllowed);
       setDeliverBsky(draft?.deliverBsky ?? bskyReplyAllowed);
-      setVisibility(draft?.visibility ?? "public");
     });
   }, [draftTarget, fediReplyAllowed, bskyReplyAllowed]);
 
@@ -340,6 +336,24 @@ export default function PostComposer({
       () => setShowPrivateTooltip(false),
       3200,
     );
+  }
+
+  // 新規投稿・引用の投稿ボタンのうち、公開範囲固有の理由でグレーアウトしているものを判定する
+  // （Bsky配送オンとプライベートの相互排他、ひかえめ投稿の引用とパブリックの相互排他）。
+  // 文字数超過・送信中等の汎用的な送信ブロック条件はsubmitWithVisibility側で別途弾かれる
+  // ため、ここでは含めない。
+  function isVisibilityDisabled(v: Visibility): boolean {
+    if (v === "followers_only") return deliverBsky;
+    if (v === "public") return quoteTo?.visibility === "unlisted";
+    return false;
+  }
+
+  function handleSubmitBtnFocus(v: Visibility) {
+    setFocusedVisibility(v);
+  }
+
+  function handleSubmitBtnBlur() {
+    setFocusedVisibility(null);
   }
 
   const remaining = calcRemaining(text, deliverBsky);
@@ -512,8 +526,13 @@ export default function PostComposer({
       setCwEnabled(false);
       setCwGuide("");
       setCheckedLinkCardUrls([]);
-      setVisibility(replyConstraint?.defaultValue ?? "public");
       if (draftTarget) clearComposerDraft(draftTarget);
+      // 新規投稿・引用は、実際に送信した公開範囲・配送先を次回以降のデフォルトボタンとして
+      // 記憶する（返信は親ポストから決まる専用のデフォルトを持つため対象外）。
+      if (!replyTo) {
+        setDefaultVisibility(v);
+        saveComposerDefaults({ visibility: v, deliverFedi, deliverBsky });
+      }
       onPosted?.(note);
     } catch (err) {
       setError(getErrorMessage(err));
@@ -522,11 +541,24 @@ export default function PostComposer({
     }
   }
 
-  // キーボードショートカット（Ctrl+Enter等）送信時はデフォルトの公開範囲を使う
-  // （通常投稿・返信いずれもボタン群からのクリックが主経路のため）。
+  // Tabフォーカス中の投稿ボタンがあればそれを、無ければ「デフォルトの投稿ボタン」（返信は
+  // 親ポストから決まるreplyConstraint.defaultValue、新規投稿・引用はローカルストレージへ
+  // 永続化したdefaultVisibility）を、キーボードショートカット（Ctrl+Enter等）の送信先および
+  // 赤枠マーカーの対象として使う。
+  const effectiveDefaultVisibility: Visibility = replyTo
+    ? focusedVisibility ?? replyConstraint?.defaultValue ?? "public"
+    : focusedVisibility ?? defaultVisibility;
+
   function handlePost(e: FormEvent) {
     e.preventDefault();
-    submitWithVisibility(visibility);
+    if (!replyTo && isVisibilityDisabled(effectiveDefaultVisibility)) {
+      // デフォルトボタンが公開範囲の相互排他でグレーアウトしている間は、無言で意図しない
+      // 公開範囲へ送信してしまわないよう、送信の代わりにパブリック投稿へフォーカスを移す
+      // （マイケル指摘）。
+      publicBtnRef.current?.focus();
+      return;
+    }
+    submitWithVisibility(effectiveDefaultVisibility);
   }
 
   async function uploadFile(file: File) {
@@ -945,9 +977,11 @@ export default function PostComposer({
               {replyVisibilityOptions.includes("public") && (
                 <button
                   type="button"
-                  className={styles.postBtnVariant}
+                  className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "public" ? styles.postBtnDefault : ""}`}
                   disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                   onClick={() => submitWithVisibility("public")}
+                  onFocus={() => handleSubmitBtnFocus("public")}
+                  onBlur={handleSubmitBtnBlur}
                 >
                   <span aria-hidden="true">
                     <TwemojiEmoji emoji="🌐" />
@@ -958,9 +992,11 @@ export default function PostComposer({
               {replyVisibilityOptions.includes("unlisted") && (
                 <button
                   type="button"
-                  className={styles.postBtnVariant}
+                  className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "unlisted" ? styles.postBtnDefault : ""}`}
                   disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                   onClick={() => submitWithVisibility("unlisted")}
+                  onFocus={() => handleSubmitBtnFocus("unlisted")}
+                  onBlur={handleSubmitBtnBlur}
                 >
                   <span aria-hidden="true">
                     <TwemojiEmoji emoji="🌙" />
@@ -971,9 +1007,11 @@ export default function PostComposer({
               {replyVisibilityOptions.includes("followers_only") && (
                 <button
                   type="button"
-                  className={styles.postBtnVariant}
+                  className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "followers_only" ? styles.postBtnDefault : ""}`}
                   disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                   onClick={() => submitWithVisibility("followers_only")}
+                  onFocus={() => handleSubmitBtnFocus("followers_only")}
+                  onBlur={handleSubmitBtnBlur}
                 >
                   <span aria-hidden="true">
                     <TwemojiEmoji emoji="🔒️" />
@@ -985,8 +1023,9 @@ export default function PostComposer({
           ) : (
             <div className={styles.postBtnGroup}>
               <button
+                ref={publicBtnRef}
                 type="button"
-                className={styles.postBtnVariant}
+                className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "public" ? styles.postBtnDefault : ""}`}
                 disabled={
                   posting ||
                   !text.trim() ||
@@ -1002,6 +1041,8 @@ export default function PostComposer({
                     : undefined
                 }
                 onClick={() => submitWithVisibility("public")}
+                onFocus={() => handleSubmitBtnFocus("public")}
+                onBlur={handleSubmitBtnBlur}
               >
                 <span aria-hidden="true">
                   <TwemojiEmoji emoji="🌐" />
@@ -1010,9 +1051,11 @@ export default function PostComposer({
               </button>
               <button
                 type="button"
-                className={styles.postBtnVariant}
+                className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "unlisted" ? styles.postBtnDefault : ""}`}
                 disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
                 onClick={() => submitWithVisibility("unlisted")}
+                onFocus={() => handleSubmitBtnFocus("unlisted")}
+                onBlur={handleSubmitBtnBlur}
               >
                 <span aria-hidden="true">
                   <TwemojiEmoji emoji="🌙" />
@@ -1027,9 +1070,11 @@ export default function PostComposer({
               >
                 <button
                   type="button"
-                  className={styles.postBtnVariant}
+                  className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "followers_only" ? styles.postBtnDefault : ""}`}
                   disabled={posting || !text.trim() || overLimit || deliverBsky}
                   onClick={() => submitWithVisibility("followers_only")}
+                  onFocus={() => handleSubmitBtnFocus("followers_only")}
+                  onBlur={handleSubmitBtnBlur}
                 >
                   <span aria-hidden="true">
                     <TwemojiEmoji emoji="🔒️" />

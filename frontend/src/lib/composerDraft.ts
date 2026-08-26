@@ -1,7 +1,5 @@
 import { BskyEmbedChoice, DriveFile } from "../api/client";
 
-export type DraftVisibility = "public" | "unlisted" | "followers_only";
-
 /** アンケートの期限指定（#228）。`PostComposer`のpollExpiry stateと同じ形。 */
 export type DraftPollExpiry =
   | { kind: "none" }
@@ -13,7 +11,6 @@ export interface ComposerDraft {
   attachments: DriveFile[];
   deliverFedi: boolean;
   deliverBsky: boolean;
-  visibility: DraftVisibility;
   /** Bsky embed選択（#227）。候補が2件以上ある間の選択中の値、または孤児化したURL選択。 */
   bskyEmbedChoice: BskyEmbedChoice | null;
   /** アンケート編集中かどうか（#228）。 */
