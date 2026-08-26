@@ -159,10 +159,12 @@ fn encode_webp(img: &DynamicImage) -> Result<ProcessedImage, ImageProcessingErro
     })
 }
 
-/// blurhash 0.2.x にオフバイワンバグがあるため catch_unwind でガードする。
+/// `blurhash::encode` は内部で `bytes_per_row = width * 4`（RGBA前提）としてインデックス計算するため、
+/// RGB（3byte/px）バッファを渡すと境界外アクセスでpanicする。RGBAで渡す必要がある。
+/// catch_unwindは想定外の入力（極端に小さい画像等）に対する保険として残す。
 fn compute_blurhash(img: &DynamicImage, width: u32, height: u32) -> String {
-    let rgb_raw = img.to_rgb8().as_raw().to_vec();
-    std::panic::catch_unwind(move || blurhash::encode(4, 3, width, height, &rgb_raw))
+    let rgba_raw = img.to_rgba8().as_raw().to_vec();
+    std::panic::catch_unwind(move || blurhash::encode(4, 3, width, height, &rgba_raw))
         .unwrap_or_else(|_| Ok(String::new()))
         .unwrap_or_default()
 }
@@ -261,6 +263,16 @@ mod tests {
         encoder.encode_frames(frames).unwrap();
         drop(encoder);
         bytes
+    }
+
+    #[test]
+    fn compute_blurhash_returns_non_empty_hash() {
+        // blurhash::encode は内部でRGBA前提（bytes_per_row = width * 4）のインデックス計算をするため、
+        // RGB（3byte/px）バッファを渡すと境界外アクセスでpanicし、catch_unwindで握りつぶされて
+        // 空文字列になっていた（回帰防止）。
+        let img = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(8, 6, Rgba([200, 100, 50, 255])));
+        let hash = compute_blurhash(&img, 8, 6);
+        assert!(!hash.is_empty(), "blurhashが空文字列（RGBA前提バグの回帰）");
     }
 
     #[test]
