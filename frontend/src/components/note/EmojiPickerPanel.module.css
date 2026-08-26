@@ -74,6 +74,7 @@
   align-items: center;
   justify-content: center;
   height: 36px;
+  grid-column: span 1;
   border: none;
   border-radius: 6px;
   background: none;
@@ -81,6 +82,22 @@
   line-height: 1;
   cursor: pointer;
   transition: background-color 0.12s;
+}
+
+.span1 {
+  grid-column: span 1;
+}
+
+.span2 {
+  grid-column: span 2;
+}
+
+.span3 {
+  grid-column: span 3;
+}
+
+.span4 {
+  grid-column: span 4;
 }
 
 .item:hover {

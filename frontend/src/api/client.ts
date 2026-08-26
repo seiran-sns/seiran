@@ -288,6 +288,11 @@ export interface PublicEmoji {
   host: string | null;
   url: string;
   license: string | null;
+  /** 画像の実寸（px）。ピッカーのアスペクト比グリッド配置に使う。 */
+  width: number;
+  height: number;
+  /** 画像フェッチ完了までのプレースホルダ用。 */
+  blurhash: string;
 }
 
 /** `GET /api/reactions/frequent` の1件（よく使う絵文字ピッカー用）。 */

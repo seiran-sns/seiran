@@ -5,7 +5,9 @@ import { isSupportedLanguage } from "../../i18n";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
 import { EmojiAnnotationIndex, loadEmojiAnnotationIndex } from "../../lib/emojiAnnotations";
 import { allUnicodeEmojis, unicodeEmojiGroups } from "../../lib/emojiData";
+import { emojiAspectSpan } from "../../lib/emojiAspect";
 import TwemojiEmoji from "../common/TwemojiEmoji";
+import EmojiImage from "./EmojiImage";
 import styles from "./EmojiPickerPanel.module.css";
 
 type Tab = "frequent" | "unicode" | "custom";
@@ -17,6 +19,10 @@ interface PickerItem {
   /** 検索対象・alt/title 文字列。 */
   label: string;
   imageUrl?: string;
+  /** 画像の実寸・プレースホルダ（`imageUrl`がある場合のみ意味を持つ）。 */
+  width?: number;
+  height?: number;
+  blurhash?: string;
 }
 
 interface EmojiPickerPanelProps {
@@ -73,6 +79,9 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
         content: `:${e.name}:`,
         label: [e.name, ...e.aliases].join(" "),
         imageUrl: e.url,
+        width: e.width,
+        height: e.height,
+        blurhash: e.blurhash,
       })),
     [customEmojis]
   );
@@ -103,11 +112,12 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
   }, [query, customItems, annotations]);
 
   function renderItem(item: PickerItem) {
+    const span = item.imageUrl ? emojiAspectSpan(item.width, item.height) : 1;
     return (
       <button
         key={item.key}
         type="button"
-        className={styles.item}
+        className={`${styles.item} ${styles[`span${span}`]}`}
         title={item.label}
         onClick={(e) => {
           e.stopPropagation();
@@ -115,7 +125,7 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
         }}
       >
         {item.imageUrl ? (
-          <img className={styles.itemImg} src={item.imageUrl} alt={item.label} loading="lazy" />
+          <EmojiImage src={item.imageUrl} alt={item.label} blurhash={item.blurhash} span={span} />
         ) : (
           <TwemojiEmoji emoji={item.content} className={styles.itemImg} />
         )}

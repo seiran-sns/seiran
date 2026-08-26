@@ -23,6 +23,12 @@ pub struct PublicEmoji {
     pub host: Option<String>,
     pub url: String,
     pub license: Option<String>,
+    /// 画像の実寸（`media_files`由来）。ピッカーのアスペクト比に応じたグリッド配置に使う。
+    /// Misskey互換形状への追加フィールドなので、知らないクライアントは無視すればよい。
+    pub width: i32,
+    pub height: i32,
+    /// 画像フェッチ完了までのプレースホルダ用（`media_files.blurhash`）。
+    pub blurhash: String,
 }
 
 #[derive(Serialize)]
@@ -35,7 +41,8 @@ pub struct EmojisResponse {
 pub async fn fetch_public_emojis(db: &sqlx::PgPool) -> Vec<PublicEmoji> {
     let rows = sqlx::query(
         "SELECT ce.id, ce.shortcode, ce.category, ce.tags, ce.license,
-                rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url
+                rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url,
+                mf.width, mf.height, mf.blurhash
          FROM custom_emojis ce
          JOIN media_files mf ON mf.id = ce.media_file_id
          JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -50,6 +57,9 @@ pub async fn fetch_public_emojis(db: &sqlx::PgPool) -> Vec<PublicEmoji> {
             let id: i64 = row.try_get("id").ok()?;
             let shortcode: String = row.try_get("shortcode").ok()?;
             let url: String = row.try_get("url").ok()?;
+            let width: i32 = row.try_get("width").ok()?;
+            let height: i32 = row.try_get("height").ok()?;
+            let blurhash: String = row.try_get("blurhash").ok()?;
             Some(PublicEmoji {
                 id: id.to_string(),
                 aliases: row.try_get("tags").unwrap_or_default(),
@@ -58,6 +68,9 @@ pub async fn fetch_public_emojis(db: &sqlx::PgPool) -> Vec<PublicEmoji> {
                 host: None,
                 url,
                 license: row.try_get::<Option<String>, _>("license").unwrap_or(None),
+                width,
+                height,
+                blurhash,
             })
         })
         .collect()
