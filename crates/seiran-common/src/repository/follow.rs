@@ -75,6 +75,17 @@ pub trait FollowRepository: Send + Sync {
         target_actor_id: i64,
     ) -> Result<Vec<i64>, sqlx::Error>;
 
+    /// `find_accepted_local_follower_ids` に、ホームタイムラインのリプライ先フォロー条件
+    /// （`post_reply_target_followed`、`repository::post`の`home_timeline`/`social_timeline`と
+    /// 同じ判定をDB関数として共有）を追加したもの。新規投稿のホームタイムライン
+    /// WebSocket配信対象（`home_recipients`）を決めるために使う。`reply_to_post_id`が`None`なら
+    /// `find_accepted_local_follower_ids`と同じ結果になる。
+    async fn find_home_recipient_ids(
+        &self,
+        target_actor_id: i64,
+        reply_to_post_id: Option<i64>,
+    ) -> Result<Vec<i64>, sqlx::Error>;
+
     /// `follower_actor_id` が accepted な status でフォローしている全ての
     /// `target_actor_id` を取得する（退会時、フォロー先全員への一括アンフォロー用）。
     async fn find_accepted_target_ids(
@@ -247,6 +258,23 @@ impl FollowRepository for PgFollowRepository {
              WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'",
         )
         .bind(target_actor_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn find_home_recipient_ids(
+        &self,
+        target_actor_id: i64,
+        reply_to_post_id: Option<i64>,
+    ) -> Result<Vec<i64>, sqlx::Error> {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT f.follower_actor_id FROM follows f
+             JOIN actors a ON a.id = f.follower_actor_id
+             WHERE f.target_actor_id = $1 AND f.status = 'accepted' AND a.actor_type = 'local'
+               AND post_reply_target_followed(f.follower_actor_id, $2)",
+        )
+        .bind(target_actor_id)
+        .bind(reply_to_post_id)
         .fetch_all(&self.pool)
         .await
     }

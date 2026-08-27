@@ -1247,7 +1247,7 @@ async fn handle_create_note(
     } else {
         let mut home_recipients: HashSet<i64> = inbox
             .follow_repo
-            .find_accepted_local_follower_ids(actor_id)
+            .find_home_recipient_ids(actor_id, reply_to_post_id)
             .await
             .unwrap_or_default()
             .into_iter()

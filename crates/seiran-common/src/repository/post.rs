@@ -249,6 +249,8 @@ pub trait PostRepository: Send + Sync {
     ) -> Result<(), sqlx::Error>;
 
     /// ホームタイムライン（自分 + フォロー中の accepted アクターの投稿）を取得する。
+    /// リプライ投稿は、リプライ先投稿の投稿者も自分がフォロー中（または自分自身）の場合のみ
+    /// 含める（`post_reply_target_followed`）。
     /// `exclude_direct=true` の場合、自分が宛先の`direct`投稿も含め`direct`を一切含めない
     /// （DM機能のため、フロントエンドはタイムライン取得時に常にこれを指定する。
     /// Misskey API互換のためデフォルト`false`＝自分が宛先の`direct`は含まれる）。
@@ -276,6 +278,9 @@ pub trait PostRepository: Send + Sync {
 
     /// ソーシャルタイムライン（自分 + フォロー中 + ローカル全アクターの投稿、リプライ含む、#78）を取得する。
     /// `home_timeline`（自分+フォロー中のみ）と`local_timeline`（ローカル全体のみ）を合成した形。
+    /// フォロー中経由（自分+フォロー中）のパートは`home_timeline`と同じリプライ先フォロー条件を
+    /// 適用するが、ローカル全体パートはフォロー云々に関係なく無条件で含めるため対象外
+    /// （リプライ先フォロー条件は付けない）。
     async fn social_timeline(
         &self,
         actor_id: i64,
@@ -613,6 +618,7 @@ impl PostRepository for PgPostRepository {
                        AND ($2::bigint IS NULL OR p.id < $2)
                        AND ($3::bigint IS NULL OR p.id > $3)
                        AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
+                       AND post_reply_target_followed($1, p.reply_to_post_id)
                      ORDER BY p.id DESC LIMIT $4
                  ) p
                  ORDER BY p.id DESC LIMIT $4
@@ -701,6 +707,7 @@ impl PostRepository for PgPostRepository {
                            AND ($2::bigint IS NULL OR p.id < $2)
                            AND ($3::bigint IS NULL OR p.id > $3)
                            AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
+                           AND post_reply_target_followed($1, p.reply_to_post_id)
                          ORDER BY p.id DESC LIMIT $4
                      ) p
                  )

@@ -907,18 +907,22 @@ async fn save_bsky_post(
 
             // タイムラインチャンネル（homeTimeline/hybridTimeline/userList/hashtag。Bsky投稿は
             // is_local=falseのためlocalTimeline/globalTimelineには載らない）へ WebSocket 配信。
-            let home_recipients: HashSet<i64> = sqlx::query(
-                "SELECT f.follower_actor_id AS recipient_id FROM follows f
+            // リプライの場合、リプライ先投稿者もフォロー中（または本人）のフォロワーのみに絞り込む
+            // （`post_reply_target_followed`、REST の home_timeline/social_timeline や
+            // `FollowRepository::find_home_recipient_ids` と同じ判定を共有するDB関数）。
+            let home_recipients: HashSet<i64> = sqlx::query_scalar::<_, i64>(
+                "SELECT f.follower_actor_id FROM follows f
                  JOIN actors a ON a.id = f.follower_actor_id
                  WHERE f.target_actor_id = $1 AND f.status = 'accepted'
-                   AND a.actor_type = 'local'",
+                   AND a.actor_type = 'local'
+                   AND post_reply_target_followed(f.follower_actor_id, $2)",
             )
             .bind(actor_id)
+            .bind(reply_to_post_id)
             .fetch_all(pool)
             .await
             .unwrap_or_default()
-            .iter()
-            .filter_map(|r| r.try_get::<i64, _>("recipient_id").ok())
+            .into_iter()
             .collect();
 
             let list_ids: HashSet<i64> = sqlx::query_scalar::<_, i64>(

@@ -449,11 +449,12 @@ pub fn classify_post(
 /// `direct`（DM）投稿はこの関数を使わないこと（フォロワーにまで本文が届いてしまう）。
 /// 代わりに `broadcast_direct_message` を使う。
 pub async fn broadcast_new_note(state: &AppState, actor_id: i64, note: &NoteResponse) {
+    let reply_to_post_id: Option<i64> = note.reply_id.as_deref().and_then(|s| s.parse().ok());
     let mut home_recipients: HashSet<i64> = HashSet::new();
     home_recipients.insert(actor_id);
     if let Ok(rows) = state
         .follows
-        .find_accepted_local_follower_ids(actor_id)
+        .find_home_recipient_ids(actor_id, reply_to_post_id)
         .await
     {
         home_recipients.extend(rows);

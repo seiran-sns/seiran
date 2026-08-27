@@ -131,6 +131,62 @@ test.describe("WebSocketタイムラインチャンネル購読", () => {
     }
   });
 
+  test("ホームタイムラインチャンネルはフォロー中ユーザーのリプライでもリプライ先未フォローなら届かない", async ({
+    request,
+  }) => {
+    const viewer = await registerUserViaApi(request, "e2estreamhtlviewer");
+    const followed = await registerUserViaApi(request, "e2estreamhtlfollowed");
+    const unfollowed = await registerUserViaApi(request, "e2estreamhtlunfollowed");
+
+    const follow = await request.post("/api/follows/create", {
+      headers: { Authorization: `Bearer ${viewer.token}` },
+      data: { target: followed.username },
+    });
+    expect(follow.ok(), `follow failed: ${follow.status()} ${await follow.text()}`).toBeTruthy();
+
+    const unfollowedPost = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${unfollowed.token}` },
+      data: {
+        text: `htl reply base post ${Date.now()}`,
+        deliver_to_fedi: false,
+        deliver_to_bsky: false,
+        visibility: "public",
+      },
+    });
+    expect(unfollowedPost.ok()).toBeTruthy();
+    const unfollowedPostBody = (await unfollowedPost.json()) as { id: string };
+
+    const { ws, received } = openStream(viewer.token);
+    try {
+      await waitOpen(ws);
+      connectChannel(ws, "homeTimeline", "htl");
+
+      const replyText = `htl reply to unfollowed ${Date.now()}`;
+      const replyPost = await request.post("/api/notes/create", {
+        headers: { Authorization: `Bearer ${followed.token}` },
+        data: {
+          text: replyText,
+          deliver_to_fedi: false,
+          deliver_to_bsky: false,
+          visibility: "public",
+          reply_to_id: unfollowedPostBody.id,
+        },
+      });
+      expect(replyPost.ok(), `reply failed: ${replyPost.status()} ${await replyPost.text()}`).toBeTruthy();
+      await expectChannelNoteAbsent(received, "htl", replyText);
+
+      const normalText = `htl normal followed post ${Date.now()}`;
+      const normalPost = await request.post("/api/notes/create", {
+        headers: { Authorization: `Bearer ${followed.token}` },
+        data: { text: normalText, deliver_to_fedi: false, deliver_to_bsky: false, visibility: "public" },
+      });
+      expect(normalPost.ok()).toBeTruthy();
+      await expectChannelNoteArrives(received, "htl", normalText);
+    } finally {
+      ws.close();
+    }
+  });
+
   test("disconnect後は該当チャンネルのイベントが届かなくなる", async ({ request }) => {
     const viewer = await registerUserViaApi(request, "e2estreamdisconnect");
 
