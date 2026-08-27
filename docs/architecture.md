@@ -226,6 +226,14 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
   `direct` は非表示、`PostRepository::find_by_id_for_viewer` を viewer なしで呼ぶ）。
 - nginx（`docker/nginx.conf`/`docker/nginx.mono.conf`）・ローカル開発（`frontend/vite.config.ts`
   の proxy）とも、`/notes`・`/@` は bot 判定なしで常に api（バックエンド）へ転送する。
+- リポスト（Announce）の AP canonical URL は `/notes/:id` ではなく `/announces/:id`
+  （`create_repost`、`ap/deliver.rs`）。フロントエンド上のリポストラッパー個別ページは
+  通常ポストと同じ `/notes/:id` で表示するため、リモートユーザーが `/announces/:id` へ
+  直接ブラウザでジャンプしてきた場合は `GET /announces/:id`
+  （`handlers::notes::get_announce_redirect`）が `/notes/:id` へリダイレクトする
+  （AP クライアント向け Accept の場合は Announce オブジェクト応答が未実装のため 404）。
+  nginx・Vite proxy とも `/notes` と同様に `/announces` を api（バックエンド）へ転送する
+  設定が必要。
 
 ## 9. E2Eテスト
 

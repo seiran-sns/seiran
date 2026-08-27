@@ -42,6 +42,7 @@ export default defineConfig(({ mode }) => {
         // バックエンドへ転送してしまい、Viteクライアントが読み込めず白画面になる
         // （実機確認）。それらを除外する正規表現（`^`始まりはVite側でregex扱い）にする。
         "/notes": backendTarget,
+        "/announces": backendTarget,
         "^/@(?!vite|react-refresh|fs/|id/)": backendTarget,
       },
     },
@@ -54,6 +55,7 @@ export default defineConfig(({ mode }) => {
         "/proxy": backendTarget,
         "/miauth": backendTarget,
         "/notes": backendTarget,
+        "/announces": backendTarget,
       },
     },
     test: {

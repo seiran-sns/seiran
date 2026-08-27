@@ -1298,6 +1298,29 @@ pub async fn get_note(
     Ok(Json(nr))
 }
 
+/// GET /announces/:id
+/// リポストラッパー（Announce）の canonical URL。AP 上ではこの URL で広報されるが、
+/// リポストラッパー自体の個別ページは通常ポストと同じ `/notes/:id` で表示する
+/// （`create_repost` 参照）。そのためリモートユーザーがこの URL にブラウザで
+/// 直接ジャンプしてきた場合は `/notes/:id` へリダイレクトする。
+/// AP クライアント向け（Accept: activity+json 等）は Announce オブジェクト応答が
+/// 未実装のため 404 のまま。
+pub async fn get_announce_redirect(
+    Path(id): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let post_id: i64 = match id.parse() {
+        Ok(i) => i,
+        Err(_) => return ApiError::NotFound("NOT_FOUND").into_response(),
+    };
+
+    if crate::handlers::ogp::wants_html(&headers) {
+        return axum::response::Redirect::to(&format!("/notes/{}", post_id)).into_response();
+    }
+
+    ApiError::NotFound("NOT_FOUND").into_response()
+}
+
 /// GET /notes/:id
 /// nginx は常にここへ転送する（`docker/nginx.conf`）。Accept ヘッダーにより、AP クライアント
 /// 向け JSON-LD と、それ以外（ブラウザ・bot 問わず）向けの OGP 注入済み SPA HTML

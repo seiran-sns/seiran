@@ -831,6 +831,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notes/:id/reposts", get(handlers::notes::note_reposts))
         // ActivityPub Note / OGP注入済みSPA（Accept ヘッダーで振り分け、`handlers::ogp`）
         .route("/notes/:id", get(handlers::notes::get_note_ap))
+        // Announce（リポストラッパー）canonical URL。ブラウザは /notes/:id へリダイレクト
+        .route("/announces/:id", get(handlers::notes::get_announce_redirect))
         // プロフィールページ（OGP注入済みSPA HTMLを返す、`handlers::ogp`）
         .route("/@:handle", get(handlers::ogp::profile_ogp))
         // フォロー
