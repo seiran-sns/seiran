@@ -624,7 +624,10 @@ export default function NoteCard({
         </div>
         <PostContent
           note={note.renote}
-          linkToDetail={linkToDetail}
+          // 元投稿(note.renote)は常にリポストラッパー自身(note)とは別ページのため、
+          // 親から渡されたlinkToDetail（詳細ページ自身が自分自身へのリンクを消すためのフラグ）
+          // を伝播させず、常にリンクを有効にする（元投稿の日付が無反応だった不具合の修正）。
+          linkToDetail
           large={large}
           onUnreposted={() => setHidden(true)}
           onDeleted={() => setHidden(true)}

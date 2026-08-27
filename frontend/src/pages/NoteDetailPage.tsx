@@ -78,7 +78,9 @@ export default function NoteDetailPage() {
     const tabParam = searchParams.get("tab");
     if (tabParam === null) return;
     const n = Number(tabParam);
-    if (Number.isInteger(n) && n >= 0 && n < TAB_COUNT) setNoteDetailTab(n);
+    // リポストラッパー時は「元投稿者」タブが末尾に増えるため上限を+1しておく（TAB_COUNTの
+    // 確定はnote読み込み後のためタイミングに依存せず安全側に倒す）。
+    if (Number.isInteger(n) && n >= 0 && n < TAB_COUNT + 1) setNoteDetailTab(n);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -176,8 +178,11 @@ export default function NoteDetailPage() {
       .finally(() => setLoadingMoreNewer(false));
   }
 
-  // リポスト詳細（#45）: リアクションタブはリポスト元のリアクションを表示する。
+  // リポスト詳細（#45）: 返信・前後の投稿・リアクション・リポスト一覧タブはリポスト元の実体を表示する。
   const display = note?.renote ?? note;
+  // リポストという行為自体はリポストした人(note自身)の自己表現であるため、投稿者欄・
+  // リモート判定・「元投稿者」タブの出し分けはnote自身（B）を基準にする（display=Aとは区別）。
+  const hasRenote = Boolean(note?.renote);
 
   // 「前後のポスト」ブロック（自動読み込み → 一覧、右ペインの「前後のポスト」タブでのみ使う）。
   // 表示順は上から: [もっと新しいポストを読み込む] 新しいポスト(最大5件、対象に近い順で下寄り)
@@ -238,12 +243,12 @@ export default function NoteDetailPage() {
       {loading && <p className={panel.message}>{t("common:loading")}</p>}
       {error && <p className={panel.message}>{error}</p>}
 
-      {/* リポスト詳細（#45）: 表示すべき実体（リポスト元があればそちら）でリモート判定する。 */}
-      {display && display.user.actorType !== "local" && display.remoteUrl && (
+      {/* リポストという行為自体の主体(note自身、リポストラッパーならB)でリモート判定する。 */}
+      {note && note.user.actorType !== "local" && note.remoteUrl && (
         <RemoteBanner
           message={t("common:remoteBanner.note")}
-          url={display.remoteUrl}
-          protocol={display.user.actorType === "bsky" ? "bsky" : "fedi"}
+          url={note.remoteUrl}
+          protocol={note.user.actorType === "bsky" ? "bsky" : "fedi"}
         />
       )}
 
@@ -269,17 +274,21 @@ export default function NoteDetailPage() {
           t("home:noteDetailPage.contextTab"),
           t("home:noteDetailPage.reactionsTab"),
           t("home:noteDetailPage.repostsTab"),
+          // 既存タブのインデックス(0〜4)を保ったまま末尾に追加する（noteDetailTabは
+          // ノートを跨いで保持されるため、間に挿入すると他ノートとインデックスの意味がズレる）。
+          ...(hasRenote ? [t("home:noteDetailPage.originalAuthorTab")] : []),
         ]}
         active={noteDetailTab}
         onChange={setNoteDetailTab}
         sticky
         top={0}
       />
-      {noteDetailTab === 0 && display && <AuthorPanel note={display} />}
+      {noteDetailTab === 0 && note && <AuthorPanel note={note} />}
       {noteDetailTab === 1 && display && <ReplyThreadPanel note={display} />}
       {noteDetailTab === 2 && renderContext()}
       {noteDetailTab === 3 && display && <ReactionListPanel note={display} />}
       {noteDetailTab === 4 && display && <RepostListPanel note={display} />}
+      {noteDetailTab === 5 && hasRenote && display && <AuthorPanel note={display} />}
     </div>
   );
 

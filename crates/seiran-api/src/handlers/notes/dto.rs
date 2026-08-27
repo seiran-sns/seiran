@@ -372,6 +372,13 @@ pub fn apply_mention_facets(
     result
 }
 
+/// Misskey・Mastodon等のAP実装は Activity（Announce/Create）の `id` を
+/// `{Note/Status自体の閲覧可能URL}/activity` の形で発行する（実測: misskey.io）。
+/// 末尾がこのサフィックスであれば取り除き、閲覧可能URL側に寄せる。
+fn strip_ap_activity_suffix(url: &str) -> &str {
+    url.strip_suffix("/activity").unwrap_or(url)
+}
+
 pub fn to_note_response(
     p: TimelinePost,
     attachments: Vec<AttachmentResponse>,
@@ -401,10 +408,14 @@ pub fn to_note_response(
 
     // リモート投稿の元URL: Fedi（AP Note ID）を優先し、無ければ Bsky（AT URI → bsky.app）を使う。
     // seiranリモート投稿は両方の実体を持つことがあるが、seiran自体はAP側が正規表現のためAP優先。
+    // Misskey・Mastodon等は Activity（Announce/Create）の id を `{閲覧可能URL}/activity` の形で
+    // 発行する（Note/Status自体のURLとActivity idを末尾/activityの有無だけで区別する）ため、
+    // このサフィックスを外すことで実際にブラウザで閲覧できるURLへ寄せる。リポストラッパーで
+    // 特に顕著（ap_object_idがAnnounce由来のidをそのまま持つ）。
     let remote_url = if is_local {
         None
     } else if let Some(ap_uri) = p.post_ap_object_id.filter(|s| !s.is_empty()) {
-        Some(ap_uri)
+        Some(strip_ap_activity_suffix(&ap_uri).to_string())
     } else {
         p.post_at_uri.as_deref().map(at_uri_to_bsky_app_url)
     };
