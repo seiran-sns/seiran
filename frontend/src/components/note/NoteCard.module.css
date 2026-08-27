@@ -185,6 +185,7 @@
   flex: 0 0 auto;
   width: 17px;
   height: 17px;
+  border-radius: 4px;
 }
 
 .remoteServerLabel {
