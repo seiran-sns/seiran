@@ -520,9 +520,12 @@ pub async fn build_notifications(
 ) -> Vec<MisskeyNotification> {
     use std::collections::{HashMap, HashSet};
 
+    // `related_actor_id`（Move独自拡張の移転先）も同じ `MisskeyUserLite` 形で解決するため
+    // notifier と同じマップに合流させる。
     let notifier_ids: Vec<i64> = rows
         .iter()
         .filter_map(|r| r.notifier_actor_id)
+        .chain(rows.iter().filter_map(|r| r.related_actor_id))
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -638,6 +641,10 @@ pub async fn build_notifications(
                     .and_then(|id| notifier_users.get(&id).cloned()),
                 note,
                 reaction: r.reaction,
+                related_user_id: r.related_actor_id.map(|id| id.to_string()),
+                related_user: r
+                    .related_actor_id
+                    .and_then(|id| notifier_users.get(&id).cloned()),
             }
         })
         .collect()

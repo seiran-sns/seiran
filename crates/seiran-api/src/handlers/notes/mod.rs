@@ -326,6 +326,7 @@ async fn create_repost(
                 None,
                 None,
                 None,
+                None,
             )
             .await
         {
@@ -817,6 +818,7 @@ async fn create_regular_post(
                 None,
                 None,
                 None,
+                None,
             )
             .await
         {
@@ -846,6 +848,7 @@ async fn create_regular_post(
                 NotificationKind::Quote,
                 Some(actor_id),
                 Some(post_id),
+                None,
                 None,
                 None,
                 None,
@@ -886,6 +889,7 @@ async fn create_regular_post(
                 NotificationKind::Mention,
                 Some(actor_id),
                 Some(post_id),
+                None,
                 None,
                 None,
                 None,
@@ -2077,6 +2081,7 @@ pub async fn create_reaction(
                 emoji_url.as_deref(),
                 None,
                 Some(reaction_id),
+                None,
             )
             .await
         {

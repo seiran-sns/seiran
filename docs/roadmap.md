@@ -1,5 +1,6 @@
 # 開発ロードマップ
 
+- [x] **ActivityPub Move（アカウント引っ越し）受信対応・第1段階** — 他サーバーからの`Move`アクティビティ受信のみ対応（送信側=自分のアカウントを引っ越す操作は未実装）。移転先アクター文書の`alsoKnownAs`が移転元URIを含むことを確認できた場合のみ処理する（なりすまし対策）。移転元をフォロー中/フォロー申請中だったローカルアクター（実ユーザー・リスト機能の`list-relay`プロキシアクターの双方）を移転先へ付け替え、対象がリストのメンバーだった場合はリストメンバーシップも移転先へ差し替える。実ユーザーには結果に応じて`moveRefollowed`（フォローし直した）/`moveAlreadyFollowing`（既にフォロー済みだった）というMisskey APIに無い独自拡張の通知を送る。詳細: `docs/protocols.md` 2節「アカウント引っ越し（Move）の受信」・8節、`docs/database.md`
 - [x] **CW（閲覧注意）機能（#229）** — 投稿フォームにCWトグルを追加し、ONにするとCWガイド文
   入力欄（100書記素まで）が現れる。バックエンドは`CreateNoteRequest.content_warning`
   （Misskey本家`cw`パラメータもエイリアス）を受理し`posts.content_warning`（Fedi受信CW用の

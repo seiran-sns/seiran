@@ -300,6 +300,7 @@ async fn follow_local(
                 None,
                 None,
                 None,
+                None,
             )
             .await
         {

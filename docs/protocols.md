@@ -95,6 +95,7 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 | `Delete` | `object`（文字列URIまたは`{"type":"Tombstone","id":...}`）の`ap_object_id`に一致する投稿を論理削除。**送信元アクター（`activity.actor`、HTTP Signature検証済み）が投稿者本人と一致する場合のみ**削除する（なりすまし対策）。一致する投稿が無い場合（アクター自身のDelete等）は無視。リモートアクター自体の退会（`Delete(Actor)`）は未対応 |
 | `Announce` | リポスト保存。元ポストが未登録なら `fetch_object` でリモート取得してから紐付け（`fetch_and_save_note`。絵文字tag解析・引用/リプライ解決・可視性判定・CW/投票・ハッシュタグ・添付URL保存は`Create`(Note)と同じ処理を適用するが、DMスレッド解決・通知・WS配信は行わない） |
 | `Like` \| `EmojiReact` | Misskey は絵文字リアクションも `type:"Like"` 固定で送るため、**wire type ではなく `content`/`_misskey_reaction` の有無**で判定する |
+| `Move` | アカウント引っ越しの受信処理（第1段階、送信側=引っ越し実行UIは未実装）。詳細は下記「アカウント引っ越し（Move）の受信」節参照 |
 
 ### 公開エンドポイント
 `GET /users/:username`（Actor文書）、`GET /users/:username/outbox`（`?page=true`でOrderedCollectionPage）、`GET /.well-known/webfinger`、`GET /.well-known/nodeinfo` + `GET /nodeinfo/2.1`、featured（ピン留め）・lists（公開リスト）の各コレクション。
@@ -132,6 +133,19 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 
 ### 投稿本文のカスタム絵文字
 ローカル投稿は作成時に本文の`:shortcode:`を`custom_emojis`と一括照合して`posts.emoji_map`へ保存する。ActivityPub配送時は保存済みmapのうち配送本文に実際に現れるものを`tag: [{"type":"Emoji","name":":shortcode:","icon":{"type":"Image","url":...}}]`へ変換し、Mention/Hashtag tagと併送する。受信側が`object.id`を再取得する実装でも情報を失わないよう、canonicalな`GET /notes/{id}`のNote表現にも同じEmoji tagを含める。AP受信はNoteのEmoji tagを第一情報源とし、送信元がtagを欠落させた場合は同一ドメインから過去に収集した`remote_emojis`で本文shortcodeを補完する。さらにリレー等がCreateの埋め込みNoteから未知のEmoji tagを省略している場合は、未解決shortcodeを検出したときだけ`object.id`のcanonical NoteをAP取得し、そこからtagを補完する（#148）。Bluesky Jetstream受信でも、本文shortcodeをローカル`custom_emojis`と照合して`emoji_map`を保存する（いずれも#126）。
+
+### アカウント引っ越し（Move）の受信（第1段階）
+`jobs::inbound_activity_process::handle_move`。送信側（自分のアカウントを他インスタンスへ引っ越す操作）は未実装で、他サーバーからの`Move`受信のみ対応する。
+
+- **アクティビティ形式**: Mastodon実装慣習に合わせ、`actor`（移転元本人、`object`と同一）→`target`（移転先URI）として扱う。`object`が`actor`と異なる場合は処理しない。
+- **なりすまし対策**: `target`のアクター文書を取得し、`alsoKnownAs`（`ApActor::also_known_as`、単一文字列/配列いずれの形式も受理）に移転元の`actor`URIが含まれている場合のみ処理する。含まれていない（移転先が引っ越しに同意していない）場合はログのみで無視する。
+- **移転元が未知の場合**: `actors`にAP URIで見つからない（誰もフォロー・リスト登録していない）場合は移行すべき関係が無いため無視する。
+- **フォロー関係の付け替え**: `FollowRepository::find_all_local_followers_with_status`で移転元をフォロー中/フォロー申請中（status問わず）のローカルアクター全員（実ユーザーと、リスト機能の`list-relay`プロキシアクター（10節参照）の両方を含む）を取得し、1件ずつ移転先へ付け替える。
+  - 既に移転先をフォロー中/フォロー申請中なら、移転元の`follows`行を削除するだけ（重複フォローしない）。
+  - そうでなければ、当該フォロワー自身の身元でフォロー先へ`Follow`を送信し、移転元の`follows`行を削除して移転先へ`upsert_pending`する。
+  - `list-relay`プロキシアクターも「フォロワーの一種」としてこのループで自然に付け替わるため、移転元をリストに入れていたことによる代理フォロー（1節・10節参照）も同じ経路でカバーされる。
+  - 実ユーザー（`actors.user_id`が`Some`）宛にのみ、結果に応じて`notifications.type = "moveRefollowed"`（フォローし直した）または`"moveAlreadyFollowing"`（既にフォロー済みだった）を生成する。Misskey APIには無いseiran独自拡張で、`notifier_actor_id`=移転元、`related_actor_id`（`notifications`テーブル拡張列）=移転先を指す。8節参照。
+- **リストメンバーシップの付け替え**: `ListRepository::list_ids_containing_actor`で移転元を含むリストを列挙し、各リストで移転元を`remove_member`・移転先を`add_member`する（ATP側の公開リスト同期は対象外、未対応）。
 
 ## 3. AT Protocol (Bsky) 統合
 
@@ -475,7 +489,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
   - **既知の制限**: ブロック/ミュート（`actor_is_hidden_for_viewer`）はチャンネル配信では考慮しない（コネクション数に比例するDBコストになるため。通知系は`notifications`テーブルINSERT時にのみチェックされる）。リストタイムラインは10節の通り「viewer概念が無い」設計のため、`userList`チャンネルもメンバーシップのみで判定し（`visibility != 'direct'`のみ除外）、フォロー関係やブロックは考慮しない。
   - DM（`visibility="direct"`）は引き続き`recipients`方式の`publish_note`のまま配信される（チャンネル購読は不要）。
 
-`notifications` テーブルへの書き込みは、ローカルユーザー間のフォロー成立・ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。ローカルフォローは `follows` への新規挿入時だけ `Follow` 通知を生成し、既存関係への再リクエストでは重複させない。種別は `Follow`/`Reaction`/`FollowRequestAccepted`/`Mention`/`Reply` の5種。WebSocketは基本的に「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
+`notifications` テーブルへの書き込みは、ローカルユーザー間のフォロー成立・ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。ローカルフォローは `follows` への新規挿入時だけ `Follow` 通知を生成し、既存関係への再リクエストでは重複させない。種別は `Follow`/`Reaction`/`FollowRequestAccepted`/`Mention`/`Reply`/`Repost`/`Quote`/`MoveRefollowed`/`MoveAlreadyFollowing` の9種（最後の2つはMisskey APIに無いMove受信専用のseiran独自拡張、2節「アカウント引っ越し（Move）の受信」参照）。WebSocketは基本的に「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
 
 ### リアクション通知の重複排除（`reaction_id`）
 ローカルユーザーが ATP 実体（`at_uri`/`at_cid`）を持つ投稿へリアクションすると、(1) `notes::create_reaction` がその場でローカル通知を即時INSERTし、(2) 同じリアクションを非同期で `AtpCommitService::commit_like` が `app.bsky.feed.like` としてコミットし、それが自分自身の firehose 受信（`seiran-atp-repo::firehose::handle_inbound_like_create`）で戻ってきて再度通知INSERTを試みる、という2経路が走る。この2つは「経路が違うだけの同一操作」であり、素朴に両方INSERTすると通知が重複表示される。

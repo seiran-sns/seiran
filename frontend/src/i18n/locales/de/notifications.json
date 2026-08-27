@@ -11,6 +11,8 @@
     "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink> hat Ihnen geantwortet",
     "repostText": "<userLink><emojiName/>{{handleSuffix}}</userLink> hat Ihren Beitrag erneut gepostet",
     "quoteText": "<userLink><emojiName/>{{handleSuffix}}</userLink> hat Ihren Beitrag zitiert",
+    "moveRefollowedText": "<userLink><emojiName/>{{handleSuffix}}</userLink>, dem Sie folgten, ist zu <newUserLink>{{newHandle}}</newUserLink> umgezogen. Eine neue Follow-Anfrage wird gesendet",
+    "moveAlreadyFollowingText": "<userLink><emojiName/>{{handleSuffix}}</userLink>, dem Sie folgten, ist zu <newUserLink>{{newHandle}}</newUserLink> umgezogen. Sie folgen bereits",
     "genericText": "Benachrichtigung von <userLink><emojiName/>{{handleSuffix}}</userLink>",
     "noNotifications": "Keine neuen Benachrichtigungen.",
     "noNotificationsDetail": "Antworten, Reaktionen und Follower werden hier in Echtzeit angezeigt."

@@ -10,7 +10,8 @@ use sqlx::PgPool;
 
 /// 通知の種別。Misskey 本家の `type` 値に合わせる
 /// （`follow` / `reaction` / `followRequestAccepted` / `mention` / `reply` /
-/// `repost` / `quote`）。
+/// `repost` / `quote`）。`MoveRefollowed`/`MoveAlreadyFollowing` は Misskey API に無い
+/// seiran 独自拡張（ActivityPub Move＝引っ越し受信時の再フォロー通知、`docs/protocols.md`参照）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationKind {
     Follow,
@@ -20,6 +21,8 @@ pub enum NotificationKind {
     Reply,
     Repost,
     Quote,
+    MoveRefollowed,
+    MoveAlreadyFollowing,
 }
 
 impl NotificationKind {
@@ -32,6 +35,8 @@ impl NotificationKind {
             NotificationKind::Reply => "reply",
             NotificationKind::Repost => "repost",
             NotificationKind::Quote => "quote",
+            NotificationKind::MoveRefollowed => "moveRefollowed",
+            NotificationKind::MoveAlreadyFollowing => "moveAlreadyFollowing",
         }
     }
 }
@@ -47,6 +52,8 @@ pub struct NotificationRow {
     pub reaction: Option<String>,
     /// 通知発生時点で確定していたカスタム絵文字の画像URL（非正規化保存、下記 insert 参照）。
     pub reaction_emoji_url: Option<String>,
+    /// `MoveRefollowed`/`MoveAlreadyFollowing` の移転先アクター（他の種別では常にNULL）。
+    pub related_actor_id: Option<i64>,
     pub is_read: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -69,6 +76,8 @@ pub trait NotificationRepository: Send + Sync {
     /// firehose受信で戻ってきた同一リアクションも同じ id を持つため、部分ユニークインデックス
     /// で「ローカル即時通知」と「firehose再受信通知」の二重発生を防げる。follow系・他人発の
     /// リアクション（自分がATPへコミットしていないもの）は`None`のままでよい。
+    /// `related_actor_id` は `MoveRefollowed`/`MoveAlreadyFollowing`（引っ越し先アクター）
+    /// 専用の2つ目のアクター参照。他の種別では `None` のままでよい。
     #[allow(clippy::too_many_arguments)]
     async fn insert(
         &self,
@@ -81,6 +90,7 @@ pub trait NotificationRepository: Send + Sync {
         reaction_emoji_url: Option<&str>,
         source_uri: Option<&str>,
         reaction_id: Option<i64>,
+        related_actor_id: Option<i64>,
     ) -> Result<(), sqlx::Error>;
 
     /// 自分宛ての通知を新しい順に取得する（カーソルページネーション、`posts` の
@@ -120,6 +130,7 @@ impl NotificationRepository for PgNotificationRepository {
         reaction_emoji_url: Option<&str>,
         source_uri: Option<&str>,
         reaction_id: Option<i64>,
+        related_actor_id: Option<i64>,
     ) -> Result<(), sqlx::Error> {
         // ブロック・ミュート関係にある相手からの通知は生成しない（$4=notifier_actor_idが
         // NULL のシステム通知は素通り）。呼び出し元（リアクション作成・inbound Follow/Accept/
@@ -127,8 +138,8 @@ impl NotificationRepository for PgNotificationRepository {
         // ON CONFLICT はターゲット未指定（DO NOTHING）にして、source_uri・reaction_id
         // どちらの部分ユニークインデックス違反でも無視する（1つのINSERTで両方に対応するため）。
         sqlx::query(
-            "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, source_uri, reaction_id)
-             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+            "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, source_uri, reaction_id, related_actor_id)
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
              WHERE $4::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, $4)
              ON CONFLICT DO NOTHING",
         )
@@ -141,6 +152,7 @@ impl NotificationRepository for PgNotificationRepository {
         .bind(reaction_emoji_url)
         .bind(source_uri)
         .bind(reaction_id)
+        .bind(related_actor_id)
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -154,7 +166,7 @@ impl NotificationRepository for PgNotificationRepository {
         since_id: Option<i64>,
     ) -> Result<Vec<NotificationRow>, sqlx::Error> {
         sqlx::query_as::<_, NotificationRow>(
-            "SELECT id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, is_read, created_at
+            "SELECT id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, related_actor_id, is_read, created_at
              FROM notifications
              WHERE recipient_actor_id = $1
                AND ($2::bigint IS NULL OR id < $2)

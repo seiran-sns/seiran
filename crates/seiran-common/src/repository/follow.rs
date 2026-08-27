@@ -93,6 +93,15 @@ pub trait FollowRepository: Send + Sync {
         follower_actor_id: i64,
     ) -> Result<Vec<i64>, sqlx::Error>;
 
+    /// `target_actor_id` をフォロー中/フォロー申請中（status問わず）のローカルアクター
+    /// （実ユーザー・list-relayプロキシアクター含む）を `(follower_actor_id, status)` で
+    /// 取得する。ActivityPub Move（引っ越し）受信時、フォロー関係を移転先へ付け替える
+    /// 対象を洗い出すために使う。
+    async fn find_all_local_followers_with_status(
+        &self,
+        target_actor_id: i64,
+    ) -> Result<Vec<(i64, String)>, sqlx::Error>;
+
     /// `actor_id` の (following_count, follower_count) を返す（プロフィール画面表示用、#56）。
     /// status='accepted' のみをカウントする（pending は含まない）。
     async fn count_relations(&self, actor_id: i64) -> Result<(i64, i64), sqlx::Error>;
@@ -288,6 +297,20 @@ impl FollowRepository for PgFollowRepository {
              WHERE follower_actor_id = $1 AND status = 'accepted'",
         )
         .bind(follower_actor_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn find_all_local_followers_with_status(
+        &self,
+        target_actor_id: i64,
+    ) -> Result<Vec<(i64, String)>, sqlx::Error> {
+        sqlx::query_as::<_, (i64, String)>(
+            "SELECT f.follower_actor_id, f.status FROM follows f
+             JOIN actors a ON a.id = f.follower_actor_id
+             WHERE f.target_actor_id = $1 AND a.actor_type = 'local'",
+        )
+        .bind(target_actor_id)
         .fetch_all(&self.pool)
         .await
     }

@@ -11,6 +11,8 @@
     "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink> から返信がありました",
     "repostText": "<userLink><emojiName/>{{handleSuffix}}</userLink> がリポストしました",
     "quoteText": "<userLink><emojiName/>{{handleSuffix}}</userLink> が引用しました",
+    "moveRefollowedText": "フォローしていた <userLink><emojiName/>{{handleSuffix}}</userLink> が <newUserLink>{{newHandle}}</newUserLink> に移転しました。フォローし直します",
+    "moveAlreadyFollowingText": "フォローしていた <userLink><emojiName/>{{handleSuffix}}</userLink> が <newUserLink>{{newHandle}}</newUserLink> に移転しました。すでにフォロー済みです",
     "genericText": "<userLink><emojiName/>{{handleSuffix}}</userLink> から通知",
     "noNotifications": "新しい通知はありません。",
     "noNotificationsDetail": "リプライ・リアクション・フォローがここにリアルタイム表示されます。"

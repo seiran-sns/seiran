@@ -88,7 +88,7 @@ pub async fn inbox_handler(
             return (StatusCode::UNAUTHORIZED, "署名検証失敗").into_response();
         }
         Err(e) => {
-            tracing::error!("[Inbox] 署名検証エラー: {}", e);
+            tracing::error!("[Inbox] 署名検証エラー (keyId={}): {}", key_id, e);
             return (StatusCode::UNAUTHORIZED, format!("署名エラー: {}", e)).into_response();
         }
     }

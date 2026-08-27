@@ -83,6 +83,29 @@ pub struct ApActor {
     /// `property_values()` で `(name, value)` のペアに変換する。
     #[serde(default)]
     pub attachment: Vec<serde_json::Value>,
+    /// アカウント引っ越し（Move）の検証に使う「この身元が別名として名乗っているURI」一覧。
+    /// 実装によって単一文字列/配列のどちらでも来うるため `deserialize_string_or_vec` で吸収する。
+    #[serde(rename = "alsoKnownAs", default, deserialize_with = "deserialize_string_or_vec")]
+    pub also_known_as: Vec<String>,
+}
+
+/// AS2の`alsoKnownAs`等、実装により単一文字列/配列のどちらでも来うるフィールド用の
+/// 寛容なデシリアライザ。
+fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        Single(String),
+        Multiple(Vec<String>),
+    }
+    Ok(match Option::<StringOrVec>::deserialize(deserializer)? {
+        Some(StringOrVec::Single(s)) => vec![s],
+        Some(StringOrVec::Multiple(v)) => v,
+        None => Vec::new(),
+    })
 }
 
 impl ApActor {
@@ -115,6 +138,11 @@ impl ApActor {
                 Some((name, value))
             })
             .collect()
+    }
+
+    /// `alsoKnownAs` に指定のURIが含まれるか（Move受信時の本人確認、`docs/protocols.md`参照）。
+    pub fn claims_also_known_as(&self, uri: &str) -> bool {
+        self.also_known_as.iter().any(|a| a == uri)
     }
 
     /// `property_values()` を `MAX_PROFILE_FIELDS` 件までに切り詰め、`value` を `strip_html`
@@ -669,5 +697,45 @@ mod tests {
             .get_public_key_pem("https://127.0.0.1.invalid/users/alice#main-key")
             .await;
         assert!(result.is_err());
+    }
+
+    // ─── ApActor::also_known_as（Move受信の本人確認、docs/protocols.md参照） ────────
+
+    fn minimal_actor_json(also_known_as: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "id": "https://newhost.example/users/alice",
+            "type": "Person",
+            "alsoKnownAs": also_known_as,
+        })
+    }
+
+    #[test]
+    fn also_known_as_accepts_array_form() {
+        let actor: ApActor = serde_json::from_value(minimal_actor_json(serde_json::json!([
+            "https://oldhost.example/users/alice",
+            "https://third.example/users/alice"
+        ])))
+        .unwrap();
+        assert!(actor.claims_also_known_as("https://oldhost.example/users/alice"));
+        assert!(!actor.claims_also_known_as("https://unrelated.example/users/alice"));
+    }
+
+    #[test]
+    fn also_known_as_accepts_single_string_form() {
+        let actor: ApActor = serde_json::from_value(minimal_actor_json(serde_json::json!(
+            "https://oldhost.example/users/alice"
+        )))
+        .unwrap();
+        assert!(actor.claims_also_known_as("https://oldhost.example/users/alice"));
+    }
+
+    #[test]
+    fn also_known_as_missing_field_defaults_to_empty() {
+        let actor: ApActor = serde_json::from_value(serde_json::json!({
+            "id": "https://newhost.example/users/alice",
+            "type": "Person",
+        }))
+        .unwrap();
+        assert!(!actor.claims_also_known_as("https://oldhost.example/users/alice"));
     }
 }

@@ -332,6 +332,7 @@ pub async fn create_post_from_record(
                 None,
                 None,
                 None,
+                None,
             )
             .await
         {
@@ -357,6 +358,7 @@ pub async fn create_post_from_record(
                 NotificationKind::Quote,
                 Some(actor.id),
                 Some(post_id),
+                None,
                 None,
                 None,
                 None,
@@ -391,6 +393,7 @@ pub async fn create_post_from_record(
                 NotificationKind::Mention,
                 Some(actor.id),
                 Some(post_id),
+                None,
                 None,
                 None,
                 None,

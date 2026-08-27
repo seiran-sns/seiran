@@ -36,6 +36,38 @@ describe("describeNotification（#61: カスタム絵文字リアクション通
   });
 });
 
+describe("describeNotification（AP Move受信時の独自拡張通知）", () => {
+  it("moveRefollowed は移転先の relatedUser からハンドルを組み立てる", () => {
+    const n = makeReactionNotification({
+      type: "moveRefollowed",
+      user: { id: "1", username: "alice", host: "old.example" },
+      relatedUser: { id: "2", username: "alice", host: "new.example" },
+    });
+    const result = describeNotification(n);
+    expect(result.i18nKey).toBe("notifications:notificationsPanel.moveRefollowedText");
+    expect(result.newHandle).toBe("@alice@new.example");
+  });
+
+  it("moveAlreadyFollowing も同様に relatedUser のハンドルを組み立てる", () => {
+    const n = makeReactionNotification({
+      type: "moveAlreadyFollowing",
+      user: { id: "1", username: "alice", host: "old.example" },
+      relatedUser: { id: "2", username: "alice", host: "new.example" },
+    });
+    expect(describeNotification(n).i18nKey).toBe(
+      "notifications:notificationsPanel.moveAlreadyFollowingText"
+    );
+  });
+
+  it("relatedUser の host が無ければ name/username にフォールバックする", () => {
+    const n = makeReactionNotification({
+      type: "moveRefollowed",
+      relatedUser: { id: "2", username: "alice", host: null, name: "Alice" },
+    });
+    expect(describeNotification(n).newHandle).toBe("Alice");
+  });
+});
+
 describe("resolveTargetNoteId（リポスト通知のダイジェスト対象は元投稿にする）", () => {
   it("renote通知（Misskey本家仕様のリポスト種別名）はリポストラッパー自身ではなく note.renote.id を返す", () => {
     const n = makeReactionNotification({

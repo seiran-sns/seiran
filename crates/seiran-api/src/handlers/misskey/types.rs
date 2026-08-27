@@ -172,6 +172,13 @@ pub struct MisskeyNotification {
     /// `type == "reaction"` の場合のみ。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reaction: Option<String>,
+    /// `type == "moveRefollowed" | "moveAlreadyFollowing"`（seiran独自拡張、ActivityPub
+    /// Move受信時の再フォロー通知）の場合のみ。移転先アクターのID。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_user_id: Option<String>,
+    /// 上記と同じく独自拡張専用。移転先アクターの詳細。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_user: Option<MisskeyUserLite>,
 }
 
 /// `POST /api/users/following`（フォロー中一覧）の要素。Misskey 本家の `Following` エンティティ

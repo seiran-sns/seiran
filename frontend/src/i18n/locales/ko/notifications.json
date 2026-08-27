@@ -11,6 +11,8 @@
     "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink>이(가) 귀하에게 답변했습니다.",
     "repostText": "<userLink><emojiName/>{{handleSuffix}}</userLink>이(가) 내 게시물을 리포스트했습니다",
     "quoteText": "<userLink><emojiName/>{{handleSuffix}}</userLink>이(가) 내 게시물을 인용했습니다",
+    "moveRefollowedText": "팔로우하던 <userLink><emojiName/>{{handleSuffix}}</userLink>님이 <newUserLink>{{newHandle}}</newUserLink>(으)로 이전했습니다. 팔로우 요청을 다시 보냅니다",
+    "moveAlreadyFollowingText": "팔로우하던 <userLink><emojiName/>{{handleSuffix}}</userLink>님이 <newUserLink>{{newHandle}}</newUserLink>(으)로 이전했습니다. 이미 팔로우 중입니다",
     "genericText": "<userLink><emojiName/>{{handleSuffix}}</userLink>의 알림",
     "noNotifications": "새로운 알림이 없습니다.",
     "noNotificationsDetail": "답글, 반응, 팔로우가 여기에 실시간으로 표시됩니다."

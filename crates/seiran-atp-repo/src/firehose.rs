@@ -786,6 +786,7 @@ async fn save_bsky_post(
                             None,
                             None,
                             None,
+                            None,
                         )
                         .await
                     {
@@ -826,6 +827,7 @@ async fn save_bsky_post(
                             None,
                             None,
                             Some(at_uri),
+                            None,
                             None,
                         )
                         .await
@@ -871,6 +873,7 @@ async fn save_bsky_post(
                                 NotificationKind::Mention,
                                 Some(actor_id),
                                 Some(post_id),
+                                None,
                                 None,
                                 None,
                                 None,
@@ -1097,6 +1100,7 @@ async fn handle_inbound_repost_create(
                     None,
                     Some(at_uri),
                     None,
+                    None,
                 )
                 .await
             {
@@ -1228,6 +1232,7 @@ async fn handle_inbound_like_create(
                 None,
                 Some(at_uri),
                 seiran_reaction_id,
+                None,
             )
             .await
         {

@@ -75,7 +75,17 @@ const StreamingContext = createContext<StreamingValue>({
   refreshDmUnreadCount: () => {},
 });
 
-const NOTIF_KINDS = new Set(["reaction", "follow", "followAccepted", "mention", "reply", "repost", "quote"]);
+const NOTIF_KINDS = new Set([
+  "reaction",
+  "follow",
+  "followAccepted",
+  "mention",
+  "reply",
+  "repost",
+  "quote",
+  "moveRefollowed",
+  "moveAlreadyFollowing",
+]);
 
 export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();

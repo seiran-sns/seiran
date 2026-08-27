@@ -40,13 +40,23 @@ export function resolveTargetNoteId(n: NotificationItem): string | undefined {
 
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。
  * `who`（表示名部分）は呼び出し側で `EmojiText` を通す前提でプレーンテキストのまま返す。 */
-export function describeNotification(
-  n: NotificationItem
-): { icon: string; iconUrl?: string; i18nKey: string; who: string; whoEmojis?: Record<string, string>; handleSuffix: string } {
+export function describeNotification(n: NotificationItem): {
+  icon: string;
+  iconUrl?: string;
+  i18nKey: string;
+  who: string;
+  whoEmojis?: Record<string, string>;
+  handleSuffix: string;
+  newHandle?: string;
+} {
   const who = n.user?.name || n.user?.username || i18n.t("notifications:notificationsPanel.unknownUser");
   const handle = n.user?.username && n.user?.host ? `@${n.user.username}@${n.user.host}` : "";
   const handleSuffix = handle ? `（${handle}）` : "";
   const whoEmojis = n.user?.emojis;
+  const newHandle =
+    n.relatedUser?.username && n.relatedUser?.host
+      ? `@${n.relatedUser.username}@${n.relatedUser.host}`
+      : n.relatedUser?.name || n.relatedUser?.username;
   switch (n.type) {
     case "reaction": {
       // `reactionEmojis` のキーは Misskey 本家仕様に合わせコロンなし shortcode
@@ -74,6 +84,24 @@ export function describeNotification(
       return { icon: "🔁", i18nKey: "notifications:notificationsPanel.repostText", who, whoEmojis, handleSuffix };
     case "quote":
       return { icon: "❝", i18nKey: "notifications:notificationsPanel.quoteText", who, whoEmojis, handleSuffix };
+    case "moveRefollowed":
+      return {
+        icon: "🚚",
+        i18nKey: "notifications:notificationsPanel.moveRefollowedText",
+        who,
+        whoEmojis,
+        handleSuffix,
+        newHandle,
+      };
+    case "moveAlreadyFollowing":
+      return {
+        icon: "🚚",
+        i18nKey: "notifications:notificationsPanel.moveAlreadyFollowingText",
+        who,
+        whoEmojis,
+        handleSuffix,
+        newHandle,
+      };
     default:
       return { icon: "🔔", i18nKey: "notifications:notificationsPanel.genericText", who, whoEmojis, handleSuffix };
   }
@@ -161,11 +189,20 @@ export default function NotificationsPanel() {
   return (
     <ul className={styles.list}>
       {items.map((n) => {
-        const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix } = describeNotification(n);
+        const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix, newHandle } = describeNotification(n);
         const noteId = resolveTargetNoteId(n);
         const userLink = n.user?.username ? (
           <Link
             to={profilePath(n.user.username, n.user.host ?? undefined)}
+            className={styles.userLink}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span />
+        );
+        const newUserLink = n.relatedUser?.username ? (
+          <Link
+            to={profilePath(n.relatedUser.username, n.relatedUser.host ?? undefined)}
             className={styles.userLink}
             onClick={(e) => e.stopPropagation()}
           />
@@ -185,8 +222,8 @@ export default function NotificationsPanel() {
               <Trans
                 i18n={i18n}
                 i18nKey={i18nKey}
-                values={{ handleSuffix }}
-                components={{ userLink, emojiName }}
+                values={{ handleSuffix, newHandle }}
+                components={{ userLink, emojiName, newUserLink }}
               />
             </span>
           </>

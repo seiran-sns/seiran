@@ -183,9 +183,11 @@ notes API / Misskey互換API がノート一覧を組み立てる際、対象ド
 MiAuth（`/api/miauth/:session_id/authorize`）認可成立時、または設定画面から直接発行（`POST /api/account/app-tokens`、MiAuth連携を介さない即時発行）した際に生成するJWTは、いずれも自社ログインと同じ`LocalAuthProvider::generate_app_token`を再利用しており、専用のトークン形式を持たない。本テーブルはそのJWTの`jti`（クレームに追加済み）をキーに、クライアント名・発行日時・無効化日時を記録する管理台帳で、JWT自体の検証ロジックには関与しない。認証ミドルウェア（`extract_auth`）はトークン検証成功後に必ず`app_tokens.is_revoked(jti)`を照会し、`revoked_at`が立っていれば拒否する。**このテーブルに行が無いjti（自社ログイン・setup等）は「管理対象外」として常に有効**として扱う（全トークンを網羅する台帳ではない）。設定画面の一覧・無効化操作は本人（`user_id`一致）のみ可能。生のトークン文字列自体はDBに保存されない（`jti`のみ）ため、直接発行APIのレスポンスでのみ一度だけ返す。
 
 ### `notifications`
-`type` はフォロー・リアクション・メンション・返信に加えて、ローカル投稿へのリポスト（`repost`）と引用（`quote`）を保持する。リポスト・引用通知の `note_id` は通知の契機になった新しいリポスト／引用投稿を指す。
+`type` はフォロー・リアクション・メンション・返信に加えて、ローカル投稿へのリポスト（`repost`）と引用（`quote`）、ActivityPub Move（アカウント引っ越し）受信時の再フォロー通知（`moveRefollowed`/`moveAlreadyFollowing`、Misskey APIに無いseiran独自拡張）を保持する。リポスト・引用通知の `note_id` は通知の契機になった新しいリポスト／引用投稿を指す。
 
 `source_uri`（発生源イベントの一意識別子、ATP Like の `at_uri` や AP の `ap_activity_id`）に部分 UNIQUE インデックスを張り、Jetstream/AP の複線受信による重複 INSERT を防いでいる。`reaction_emoji_url` は通知発生時点の絵文字画像URLをスナップショット保存する非正規化カラム（`reactions` が1人1リアクションのため、後から絵文字を切り替えると過去のリアクション内容を復元できなくなる問題への対処）。
+
+`related_actor_id` は `moveRefollowed`/`moveAlreadyFollowing` 専用の2つ目のアクター参照（移転先）。既存の `notifier_actor_id` が移転元を指すため、1つのアクター参照しか持てない他の種別とは異なりこの2種別だけ2アクターを必要とする（他の種別では常に `NULL`）。`docs/protocols.md` 2節・8節参照。
 
 `reaction_id`（`reactions.id` を保存、部分 UNIQUE インデックス）は `source_uri` とは別目的の重複排除トークン。ローカルユーザーが ATP 実体を持つ投稿へリアクションすると「ローカル即時通知」と「その ATP コミットが自分自身の firehose 経由で戻ってきた再受信通知」の2経路が走ってしまうため、両方に同じ `reactions.id` を持たせて UNIQUE 制約で片方を弾く（`docs/protocols.md` 8節）。他人発のリアクションでは常に `NULL` になり、同じ投稿への複数回の連続リアクション（絵文字を変えて通知欄に文章を書く等）を妨げない設計を維持している。
 

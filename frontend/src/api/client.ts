@@ -888,11 +888,16 @@ export interface NotificationItem {
   createdAt: string;
   // Misskey本家の notificationTypes（packages/backend/src/types.ts）準拠。
   // seiran内部では「リポスト」と呼ぶ種別もAPI上は "renote" で返す（バックエンド convert.rs で変換）。
-  type: string; // "reaction" | "follow" | "followRequestAccepted" | "mention" | "reply" | "renote" | "quote"
+  // "moveRefollowed" | "moveAlreadyFollowing" は Misskey本家に無いseiran独自拡張
+  // （ActivityPub Move＝アカウント引っ越し受信時の再フォロー通知、`docs/protocols.md`参照）。
+  type: string; // "reaction" | "follow" | "followRequestAccepted" | "mention" | "reply" | "renote" | "quote" | "moveRefollowed" | "moveAlreadyFollowing"
   userId?: string;
   user?: NotificationUser;
   /** `type === "reaction"` の場合のみ。カスタム絵文字は `:shortcode:` 形式。 */
   reaction?: string;
+  /** `type === "moveRefollowed" | "moveAlreadyFollowing"` の場合のみ。引っ越し先アクター。 */
+  relatedUserId?: string;
+  relatedUser?: NotificationUser;
   /**
    * `type === "reaction"` の場合は `reactionEmojis` にカスタム絵文字の画像URLが
    * 入っている場合のみ画像表示する（Unicode絵文字は入らない）。キーは Misskey
