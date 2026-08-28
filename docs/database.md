@@ -85,6 +85,9 @@ ID 採番は2系統ある。
 ### `actors.birth_date` / `birth_date_public`
 生年月日はプロフィール項目として`actors`に持たせる（Misskey互換の`birthday`）。`birth_date_public`（デフォルト`false`）は`vcard:bday`としてFediverseへ連合するかどうかのseiran独自拡張フラグ（Misskey本家にはこの可視性切り替え自体が無い）。Bsky向けの`app.bsky.actor.defs#personalDetailsPref`（`docs/protocols.md` 3節）は可視性設定と無関係に常に非公開（本人のみ`getPreferences`で取得可）で、`actors.birth_date`と直接同期する。詳細な連合仕様は`docs/protocols.md` 4節参照。
 
+### `actors.hide_from_algorithmic_recommendations`
+Bskyの`app.bsky.actor.contentVisibilityDeclaration`（rkey固定`self`、`hideFromAlgorithmicRecommendations`）に対応するローカルキャッシュ（デフォルト`false`）。設定画面「プライバシー」から切り替え、`true`にするとDiscoverフィード等のBsky側アルゴリズムレコメンドから除外するよう要求するアカウントレベルの宣言をPDSへコミットする。詳細は`docs/protocols.md` 3節「アルゴリズムレコメンドからの除外」参照。
+
 ### Bsky流入アクターの保存方針（`bsky_actor_is_engaged`）
 JetStreamは「ローカルユーザーのフォロー中/リストメンバーのBsky DID」だけを`wantedDids`として購読する（`crates/seiran-atp-repo/src/firehose.rs`）が、それらの投稿本文中のメンションfacetに現れる無関係な第三者まで`actors`へ永続化してしまうと、自インスタンスと一切関わりのない行が際限なく増える（issue #216、実測で全477,511行中467,603行がbsky型、うち467,008行が投稿0件）。
 

@@ -4,6 +4,7 @@
     "account": "Konto",
     "profile": "Profil",
     "mutesBlocks": "Stummschalten und Blockieren",
+    "privacy": "Datenschutz",
     "lists": "Listen",
     "appearance": "Aussehen",
     "appTokens": "App-Tokens",
@@ -25,6 +26,13 @@
     "languageDe": "Deutsch",
     "languageFr": "Français",
     "saved": "Spracheinstellung gespeichert."
+  },
+  "privacySettings": {
+    "title": "Datenschutzeinstellungen",
+    "discoverabilityTitle": "Auffindbarkeit",
+    "hideFromAlgorithmicRecommendationsLabel": "Meine Beiträge aus algorithmischen Empfehlungen (z. B. dem Bsky-Discover-Feed) ausblenden",
+    "hideFromAlgorithmicRecommendationsDescription": "Wenn aktiviert, erscheinen deine Beiträge auf Bluesky im Discover-Feed nur noch für Personen, die dir bereits folgen. Diese Einstellung wird auf Kontoebene in deinem PDS gespeichert, sodass auch andere AT-Protocol-Apps sie auslesen können – ob sie sie berücksichtigen, entscheidet jede App selbst. Es kann bis zu einer Stunde dauern, bis die Änderung vollständig wirksam ist.",
+    "saved": "Einstellung gespeichert."
   },
   "accountSettings": {
     "title": "Kontoeinstellungen",

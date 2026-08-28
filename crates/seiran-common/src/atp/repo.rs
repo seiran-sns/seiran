@@ -910,6 +910,29 @@ pub fn encode_chat_actor_declaration(allow_incoming: &str) -> Result<(Vec<u8>, C
     Ok((cbor, cid))
 }
 
+/// `app.bsky.actor.contentVisibilityDeclaration` レコード（アルゴリズムレコメンド
+/// （Discoverフィード等）からの除外要求、rkey固定`self`）の DAG-CBOR バイト列と CID を生成する。
+/// レコードが存在しない場合は `false`（除外しない）とみなされる。
+pub fn encode_content_visibility_declaration(
+    hide_from_algorithmic_recommendations: bool,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    // canonical順: $type(5) < hideFromAlgorithmicRecommendations(34)
+    #[derive(Serialize)]
+    struct ContentVisibilityDeclaration {
+        #[serde(rename = "$type")]
+        kind: String,
+        #[serde(rename = "hideFromAlgorithmicRecommendations")]
+        hide_from_algorithmic_recommendations: bool,
+    }
+    let record = ContentVisibilityDeclaration {
+        kind: "app.bsky.actor.contentVisibilityDeclaration".to_string(),
+        hide_from_algorithmic_recommendations,
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
 /// `app.bsky.graph.follow` レコードの DAG-CBOR バイト列と CID を生成する。
 pub fn encode_bsky_graph_follow(
     subject_did: &str,

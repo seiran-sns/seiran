@@ -192,6 +192,20 @@ pub trait ActorRepository: Send + Sync {
     /// `actor_id` から生年月日を取得する（ATP `getPreferences`
     /// の`#personalDetailsPref`生成用）。行が無い/生年月日未設定なら`None`。
     async fn find_birth_date(&self, actor_id: i64) -> Result<Option<NaiveDate>, sqlx::Error>;
+
+    /// 設定画面「プライバシー」から、Bsky Discoverフィード等のアルゴリズムレコメンドから
+    /// 除外するよう要求するかどうかを更新する。
+    async fn update_hide_from_algorithmic_recommendations(
+        &self,
+        actor_id: i64,
+        hide: bool,
+    ) -> Result<(), sqlx::Error>;
+
+    /// 現在の除外設定を取得する。行が無ければ`false`（デフォルト）。
+    async fn find_hide_from_algorithmic_recommendations(
+        &self,
+        actor_id: i64,
+    ) -> Result<bool, sqlx::Error>;
 }
 
 pub struct PgActorRepository {
@@ -495,5 +509,33 @@ impl ActorRepository for PgActorRepository {
             .fetch_optional(&self.pool)
             .await
             .map(|r| r.flatten())
+    }
+
+    async fn update_hide_from_algorithmic_recommendations(
+        &self,
+        actor_id: i64,
+        hide: bool,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE actors SET hide_from_algorithmic_recommendations = $1, updated_at = NOW() WHERE id = $2",
+        )
+        .bind(hide)
+        .bind(actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    async fn find_hide_from_algorithmic_recommendations(
+        &self,
+        actor_id: i64,
+    ) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT hide_from_algorithmic_recommendations FROM actors WHERE id = $1",
+        )
+        .bind(actor_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map(|r| r.unwrap_or(false))
     }
 }

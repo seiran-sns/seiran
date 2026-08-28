@@ -74,6 +74,70 @@ mod language_tests {
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct ContentVisibilityResponse {
+    pub hide_from_algorithmic_recommendations: bool,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateContentVisibilityRequest {
+    pub hide_from_algorithmic_recommendations: bool,
+}
+
+/// `GET /api/account/content-visibility`（設定画面「プライバシー」）
+/// Bsky `app.bsky.actor.contentVisibilityDeclaration` の現在値を返す。
+pub async fn get_content_visibility(
+    user: crate::middleware::AuthedUser,
+    State(state): State<AppState>,
+) -> Result<Json<ContentVisibilityResponse>, ApiError> {
+    let hide = state
+        .actors
+        .find_hide_from_algorithmic_recommendations(user.actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[content-visibility] SELECT 失敗: {}", e)))?;
+
+    Ok(Json(ContentVisibilityResponse {
+        hide_from_algorithmic_recommendations: hide,
+    }))
+}
+
+/// `POST /api/account/content-visibility`（設定画面「プライバシー」）
+/// DBを更新した上で、Bsky PDS へ `app.bsky.actor.contentVisibilityDeclaration/self` を
+/// 再コミットする（他のATProtoアプリからも参照される account-level の宣言のため）。
+pub async fn update_content_visibility(
+    user: crate::middleware::AuthedUser,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateContentVisibilityRequest>,
+) -> Result<Json<ContentVisibilityResponse>, ApiError> {
+    state
+        .actors
+        .update_hide_from_algorithmic_recommendations(
+            user.actor_id,
+            req.hide_from_algorithmic_recommendations,
+        )
+        .await
+        .map_err(|e| ApiError::Internal(format!("[content-visibility] UPDATE 失敗: {}", e)))?;
+
+    if let Err(e) = state
+        .atp_service
+        .commit_content_visibility(
+            user.actor_id,
+            req.hide_from_algorithmic_recommendations,
+            chrono::Utc::now(),
+        )
+        .await
+    {
+        tracing::error!(
+            "[content-visibility] ATP コミット失敗（DB更新は完了済み）: {}",
+            e
+        );
+    }
+
+    Ok(Json(ContentVisibilityResponse {
+        hide_from_algorithmic_recommendations: req.hide_from_algorithmic_recommendations,
+    }))
+}
+
 #[derive(Deserialize)]
 pub struct ChangePasswordRequest {
     pub current_password: String,

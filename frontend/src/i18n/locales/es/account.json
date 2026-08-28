@@ -4,6 +4,7 @@
     "account": "Cuenta",
     "profile": "Perfil",
     "mutesBlocks": "Silencios y bloques",
+    "privacy": "Privacidad",
     "lists": "Liza",
     "appearance": "Apariencia",
     "appTokens": "Fichas de aplicación",
@@ -25,6 +26,13 @@
     "languageDe": "Deutsch",
     "languageFr": "Français",
     "saved": "Preferencia de idioma guardada."
+  },
+  "privacySettings": {
+    "title": "Configuración de privacidad",
+    "discoverabilityTitle": "Visibilidad en recomendaciones",
+    "hideFromAlgorithmicRecommendationsLabel": "Ocultar mis publicaciones de las recomendaciones algorítmicas (p. ej., el feed Discover de Bsky)",
+    "hideFromAlgorithmicRecommendationsDescription": "Al activarlo, en Bluesky tus publicaciones solo aparecerán en el feed Discover para las personas que ya te siguen. Esta preferencia se registra a nivel de cuenta en tu PDS, por lo que otras apps de AT Protocol también pueden leerla, aunque respetarla o no depende de cada app. Puede tardar hasta una hora en aplicarse por completo.",
+    "saved": "Configuración guardada."
   },
   "accountSettings": {
     "title": "Configuraciones de la cuenta",

@@ -1921,6 +1921,22 @@ export const api = {
     updateLanguage(language: string | null) {
       return request<void>("POST", "/account/language", { language });
     },
+    /** 設定画面「プライバシー」の現在値を取得する。Bsky Discoverフィード等からの除外要求。 */
+    getContentVisibility() {
+      return request<{ hide_from_algorithmic_recommendations: boolean }>(
+        "GET",
+        "/account/content-visibility",
+      );
+    },
+    /** 設定画面「プライバシー」から、Bsky Discoverフィード等のアルゴリズムレコメンドから
+     * 除外するよう要求するかどうかを更新する。 */
+    updateContentVisibility(hideFromAlgorithmicRecommendations: boolean) {
+      return request<{ hide_from_algorithmic_recommendations: boolean }>(
+        "POST",
+        "/account/content-visibility",
+        { hide_from_algorithmic_recommendations: hideFromAlgorithmicRecommendations },
+      );
+    },
     /** 設定画面のアカウント設定からメールアドレス変更をリクエストする（#59、新アドレス宛に確認メール送信）。 */
     requestEmailChange(newEmail: string) {
       return request<void>("POST", "/account/email/request-change", {

@@ -4,6 +4,7 @@
     "account": "Account",
     "profile": "Profile",
     "mutesBlocks": "Mutes & Blocks",
+    "privacy": "Privacy",
     "lists": "Lists",
     "appearance": "Appearance",
     "appTokens": "App tokens",
@@ -25,6 +26,13 @@
     "languageDe": "Deutsch",
     "languageFr": "Français",
     "saved": "Language preference saved."
+  },
+  "privacySettings": {
+    "title": "Privacy settings",
+    "discoverabilityTitle": "Discoverability",
+    "hideFromAlgorithmicRecommendationsLabel": "Hide my posts from algorithmic recommendations (e.g. Bsky Discover feed)",
+    "hideFromAlgorithmicRecommendationsDescription": "When enabled, your posts will only appear in the Bluesky Discover feed to people who follow you. This preference is recorded at the account level in your PDS, so other AT Protocol apps can also read it, but whether they honor it is up to each app. It may take up to an hour to fully take effect.",
+    "saved": "Setting saved."
   },
   "accountSettings": {
     "title": "Account settings",

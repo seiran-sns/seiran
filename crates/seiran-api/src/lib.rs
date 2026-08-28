@@ -796,6 +796,11 @@ pub fn router(state: AppState) -> Router {
             post(handlers::account::update_language),
         )
         .route(
+            "/api/account/content-visibility",
+            get(handlers::account::get_content_visibility)
+                .post(handlers::account::update_content_visibility),
+        )
+        .route(
             "/api/account/email/request-change",
             post(handlers::account::request_email_change),
         )

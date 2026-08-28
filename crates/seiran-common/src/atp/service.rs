@@ -13,8 +13,8 @@ use crate::atp::repo::{
     cid_from_str, cid_to_string, collect_blob_cids, create_commit, encode_bsky_actor_profile,
     encode_bsky_feed_like, encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_block,
     encode_bsky_graph_follow, encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car,
-    encode_chat_actor_declaration, encode_generic_record, generate_tid, BskyEmbed, BskyFacet,
-    BskyPostReply, Cid, CommitEvtOp, RepoError,
+    encode_chat_actor_declaration, encode_content_visibility_declaration, encode_generic_record,
+    generate_tid, BskyEmbed, BskyFacet, BskyPostReply, Cid, CommitEvtOp, RepoError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -1630,6 +1630,50 @@ impl AtpCommitService {
             "[atp] chat declaration commit 完了（{}）: did={}",
             action,
             result.at_did
+        );
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
+    /// `app.bsky.actor.contentVisibilityDeclaration`（Discoverフィード等のアルゴリズム
+    /// レコメンドからの除外要求、rkey固定`self`）をコミットする。設定画面のプライバシー
+    /// セクションからトグルするたびに呼ばれる（毎回 create/update を判定して冪等にコミット）。
+    pub async fn commit_content_visibility(
+        &self,
+        actor_id: i64,
+        hide_from_algorithmic_recommendations: bool,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let existing: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM atp_records \
+             WHERE actor_id = $1 AND collection = 'app.bsky.actor.contentVisibilityDeclaration' AND rkey = 'self')",
+        )
+        .bind(actor_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let action: &'static str = if existing { "update" } else { "create" };
+
+        let (record_cbor, record_cid) =
+            encode_content_visibility_declaration(hide_from_algorithmic_recommendations)?;
+
+        let record = CommitRecord {
+            collection: "app.bsky.actor.contentVisibilityDeclaration".to_string(),
+            rkey: "self".to_string(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action,
+            blob_cids: vec![],
+        };
+
+        let result = self
+            .commit_record_inner(actor_id, record, now, None)
+            .await?;
+
+        tracing::info!(
+            "[atp] content visibility declaration commit 完了（{}）: did={}, hide={}",
+            action,
+            result.at_did,
+            hide_from_algorithmic_recommendations
         );
         self.spawn_request_crawl();
         Ok(())

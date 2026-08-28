@@ -4,6 +4,7 @@
     "account": "계정",
     "profile": "윤곽",
     "mutesBlocks": "음소거 및 차단",
+    "privacy": "개인정보 보호",
     "lists": "기울기",
     "appearance": "모습",
     "appTokens": "앱 토큰",
@@ -25,6 +26,13 @@
     "languageDe": "Deutsch",
     "languageFr": "Français",
     "saved": "언어 환경설정이 저장되었습니다."
+  },
+  "privacySettings": {
+    "title": "개인정보 보호 설정",
+    "discoverabilityTitle": "노출 설정",
+    "hideFromAlgorithmicRecommendationsLabel": "내 게시물을 알고리즘 추천(Bsky Discover 피드 등)에 표시하지 않기",
+    "hideFromAlgorithmicRecommendationsDescription": "이 설정을 켜면 Bluesky에서 나를 팔로우하지 않는 사람에게는 Discover 피드에 게시물이 표시되지 않습니다. 이 설정은 계정 단위로 PDS에 기록되어 다른 AT Protocol 앱에서도 참조할 수 있지만, 실제로 이를 존중할지는 각 앱의 구현에 따라 다릅니다. 완전히 반영되기까지 최대 1시간 정도 걸릴 수 있습니다.",
+    "saved": "설정이 저장되었습니다."
   },
   "accountSettings": {
     "title": "계정 설정",

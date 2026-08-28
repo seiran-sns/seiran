@@ -4,6 +4,7 @@
     "account": "帐户",
     "profile": "轮廓",
     "mutesBlocks": "静音和阻止",
+    "privacy": "隐私",
     "lists": "列表",
     "appearance": "外貌",
     "appTokens": "应用代币",
@@ -25,6 +26,13 @@
     "languageDe": "Deutsch",
     "languageFr": "Français",
     "saved": "已保存语言首选项。"
+  },
+  "privacySettings": {
+    "title": "隐私设置",
+    "discoverabilityTitle": "可发现性",
+    "hideFromAlgorithmicRecommendationsLabel": "不在算法推荐（如Bsky的Discover信息流）中显示我的帖子",
+    "hideFromAlgorithmicRecommendationsDescription": "启用后，在Bluesky上你的帖子只会在Discover信息流中向关注你的人显示。此偏好设置会记录在你的PDS账户级别，其他AT Protocol应用也能读取，但是否遵循由各应用自行决定。完全生效最多可能需要一小时。",
+    "saved": "设置已保存。"
   },
   "accountSettings": {
     "title": "账户设置",

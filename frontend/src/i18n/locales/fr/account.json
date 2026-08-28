@@ -4,6 +4,7 @@
     "account": "Compte",
     "profile": "Profil",
     "mutesBlocks": "Sourdines et blocages",
+    "privacy": "Confidentialité",
     "lists": "Listes",
     "appearance": "Apparence",
     "appTokens": "Jetons d'application",
@@ -25,6 +26,13 @@
     "languageDe": "Deutsch",
     "languageFr": "Français",
     "saved": "Préférence de langue enregistrée."
+  },
+  "privacySettings": {
+    "title": "Paramètres de confidentialité",
+    "discoverabilityTitle": "Découvrabilité",
+    "hideFromAlgorithmicRecommendationsLabel": "Masquer mes publications des recommandations algorithmiques (ex. le fil Discover de Bsky)",
+    "hideFromAlgorithmicRecommendationsDescription": "Une fois activé, sur Bluesky vos publications n'apparaîtront dans le fil Discover que pour les personnes qui vous suivent déjà. Cette préférence est enregistrée au niveau du compte dans votre PDS ; d'autres applications AT Protocol peuvent donc aussi la lire, mais c'est à chaque application de décider si elle la respecte. La prise en compte complète peut prendre jusqu'à une heure.",
+    "saved": "Paramètre enregistré."
   },
   "accountSettings": {
     "title": "Paramètres du compte",

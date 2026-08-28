@@ -25,6 +25,7 @@ const MiAuthConnectPage = lazy(() => import("./pages/MiAuthConnectPage"));
 const MutesBlocksSettingsPage = lazy(() => import("./pages/MutesBlocksSettingsPage"));
 const NoteDetailPage = lazy(() => import("./pages/NoteDetailPage"));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
+const PrivacySettingsPage = lazy(() => import("./pages/PrivacySettingsPage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const ProfileEditPage = lazy(() => import("./pages/ProfileEditPage"));
 const Register = lazy(() => import("./pages/Register"));
@@ -172,6 +173,14 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <AppearanceSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/privacy"
+          element={
+            <RequireAuth>
+              <PrivacySettingsPage />
             </RequireAuth>
           }
         />
