@@ -8,7 +8,7 @@ use std::sync::Arc;
 use sqlx::Row;
 
 use crate::ap::outbox::{fetch_ap_history, ApNote};
-use crate::atp::client::{fetch_atp_history, BskyPost};
+use crate::atp::client::{apply_bsky_post_facets, fetch_atp_history, BskyPost};
 use crate::generate_snowflake_id;
 use crate::jobs::inbound_activity_process::strip_html;
 use crate::queue::worker::JobContext;
@@ -224,18 +224,20 @@ async fn save_atp_posts(
         }
 
         let post_id = generate_snowflake_id(post.created_at);
+        let (body, mention_facets) = apply_bsky_post_facets(&post.text, post.facets.as_ref());
 
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)
+            "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, mention_facets)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (at_uri) DO NOTHING",
         )
         .bind(post_id)
         .bind(actor_id)
-        .bind(&post.text)
+        .bind(&body)
         .bind(&post.uri)
         .bind(&post.cid)
         .bind(post.created_at)
+        .bind(&mention_facets)
         .execute(pool)
         .await
         .map_err(|e| format!("投稿インサート失敗: {}", e))?;

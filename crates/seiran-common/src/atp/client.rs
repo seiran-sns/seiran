@@ -37,6 +37,9 @@ pub struct BskyPost {
     /// `record.embed`（画像・動画・URLカード・引用）。存在すればそのまま保持し、
     /// `upsert_bsky_post` で `parse_bsky_embed_attachments` 等により添付を復元する。
     pub embed: Option<serde_json::Value>,
+    /// `record.facets`（リンク・メンション）。存在すればそのまま保持し、`apply_bsky_facets`
+    /// で本文への焼き込みと mention_facets 抽出に使う。
+    pub facets: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +112,18 @@ struct CreateRecordResp {
 }
 
 // ─── 公開 API ─────────────────────────────────────────────────────────────
+
+/// `BskyPost::facets`（AppView `record.facets` の生 JSON）を本文へ焼き込む。
+/// facets が無い・パース失敗時は本文をそのまま返す（取得経路自体は失敗させない）。
+pub fn apply_bsky_post_facets(
+    text: &str,
+    facets: Option<&serde_json::Value>,
+) -> (String, serde_json::Value) {
+    let parsed_facets: Vec<crate::atp::ParsedFacet> = facets
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    crate::atp::apply_bsky_facets(text, parsed_facets)
+}
 
 /// Bluesky AppView から過去ログを最大 `max_posts` 件 / `max_days` 日分取得する。
 ///
@@ -197,6 +212,7 @@ pub async fn fetch_atp_history(
                 .unwrap_or_else(|_| Utc::now());
 
             let embed = record.get("embed").cloned();
+            let facets = record.get("facets").cloned();
 
             posts.push(BskyPost {
                 uri: post.uri,
@@ -209,6 +225,7 @@ pub async fn fetch_atp_history(
                 created_at,
                 indexed_at,
                 embed,
+                facets,
             });
 
             if posts.len() >= max_posts {
@@ -267,6 +284,9 @@ pub async fn fetch_single_bsky_post(
     let embed = p["record"]["embed"]
         .as_object()
         .map(|_| p["record"]["embed"].clone());
+    let facets = p["record"]["facets"]
+        .as_array()
+        .map(|_| p["record"]["facets"].clone());
 
     Ok(Some(BskyPost {
         uri: p["uri"].as_str().unwrap_or("").to_string(),
@@ -279,6 +299,7 @@ pub async fn fetch_single_bsky_post(
         created_at,
         indexed_at: Utc::now(),
         embed,
+        facets,
     }))
 }
 
@@ -320,17 +341,19 @@ pub async fn upsert_bsky_post(
     }
 
     let post_id = crate::generate_snowflake_id(post.created_at);
+    let (body, mention_facets) = apply_bsky_post_facets(&post.text, post.facets.as_ref());
     let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, mention_facets)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (at_uri) DO NOTHING",
     )
     .bind(post_id)
     .bind(actor_id)
-    .bind(&post.text)
+    .bind(&body)
     .bind(&post.uri)
     .bind(&post.cid)
     .bind(post.created_at)
+    .bind(&mention_facets)
     .execute(pool)
     .await?;
 
@@ -582,6 +605,7 @@ pub async fn search_appview_posts(
                         created_at,
                         indexed_at,
                         embed: p["record"].get("embed").cloned(),
+                        facets: p["record"].get("facets").cloned(),
                     })
                 })
                 .collect()

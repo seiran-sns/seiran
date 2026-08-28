@@ -364,7 +364,7 @@ Bluesky facet・ActivityPub `<a href>` が示すリンク情報を、Misskey API
 ### 内部リンクマーカー
 `[表示テキスト](URL)`（Markdownリンク記法）をURLリンクのマーカーとして使う。`URL`が`/`始まり（`//`除く）ならフロント（`RichText`コンポーネント、`frontend/src/components/note/RichText.tsx`）は内部ルーティング、`https?://`ならタブ外部リンクとして描画する。
 
-- **Bsky `#link` facet**: `crates/seiran-atp-repo/src/firehose.rs` の `apply_link_facets` が、facetの `byteStart`/`byteEnd` が指すテキスト範囲を `[元テキスト](facet.uri)` に書き換えてから `posts.body` へ保存する（受信時に確定。URLは不変なので都度解決不要）。
+- **Bsky `#link` facet**: `crates/seiran-common/src/atp/facets.rs` の `apply_link_facets` が、facetの `byteStart`/`byteEnd` が指すテキスト範囲を `[元テキスト](facet.uri)` に書き換えてから `posts.body` へ保存する（受信時に確定。URLは不変なので都度解決不要）。Bskyの投稿を保存する全経路（Jetstream経由のリアルタイム受信 `seiran-atp-repo::firehose`、新規フォロー時の過去ログ同期・ピン留め投稿同期・検索結果保存 `seiran-common::atp::client`）がこの共通関数を通す。AppViewの `getAuthorFeed`/`getPosts` レスポンスにも `record.facets` が含まれるため、`BskyPost::facets` として保持し `apply_bsky_post_facets` 経由で同じ処理にかける。
 - **AP `<a href>`**: `crates/seiran-common/src/jobs/inbound_activity_process.rs` の `ap_content_to_markdown_body` が `content` のHTMLをタグ除去する際、`<a href="URL">text</a>` を `[text](URL)` に変換する（Mention以外のアンカー。ハッシュタグアンカーもここに含まれ、リモートインスタンスのタグページへの外部リンクになる）。`<br>`/`</p>`/`</div>` は改行として保持し（`\n`/`\n\n`）、Mastodon等がcontentを複数段落のHTMLで表現しても本文の改行が失われないようにする（`tag_break_text`/`normalize_whitespace_preserving_newlines`）。タグ除去後は名前付き・10進・16進のHTML文字参照をデコードする（例: `&apos;`、`&#039;`、`&#x27;` はすべて `'`）。文字参照表記を`posts.body`へ残さない。
 
 ### メンションは内部リンクマーカーで包まない
