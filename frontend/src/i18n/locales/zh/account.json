@@ -8,6 +8,7 @@
     "lists": "列表",
     "appearance": "外貌",
     "appTokens": "应用代币",
+    "followImport": "导入与导出",
     "comingSoon": "即将推出"
   },
   "appearanceSettings": {
@@ -98,5 +99,21 @@
     "copyButton": "复制",
     "copiedButton": "已复制",
     "dismissButton": "关闭"
+  },
+  "importExport": {
+    "title": "导入与导出",
+    "followImportTitle": "关注导入",
+    "description": "每行输入一个要导入的账户ID。也可以拖放文本文件来加载。",
+    "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "importButton": "开始导入",
+    "importing": "启动中…",
+    "cancelButton": "取消",
+    "fileReadError": "读取文件失败。",
+    "remainingLabel": "剩余 {{count}} 项",
+    "succeededLabel": "成功 {{count}} 项",
+    "failedLabel": "失败 {{count}} 项",
+    "statusRunning": "导入中",
+    "statusCompleted": "导入完成",
+    "statusCancelled": "已取消"
   }
 }

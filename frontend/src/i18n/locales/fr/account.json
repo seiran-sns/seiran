@@ -8,6 +8,7 @@
     "lists": "Listes",
     "appearance": "Apparence",
     "appTokens": "Jetons d'application",
+    "followImport": "Import & export",
     "comingSoon": "À venir"
   },
   "appearanceSettings": {
@@ -98,5 +99,21 @@
     "copyButton": "Copier",
     "copiedButton": "Copié",
     "dismissButton": "Fermer"
+  },
+  "importExport": {
+    "title": "Import & export",
+    "followImportTitle": "Import des abonnements",
+    "description": "Saisissez un identifiant de compte par ligne pour importer vos abonnements. Vous pouvez aussi glisser-déposer un fichier texte pour le charger.",
+    "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "importButton": "Démarrer l'import",
+    "importing": "Démarrage…",
+    "cancelButton": "Annuler",
+    "fileReadError": "Échec de la lecture du fichier.",
+    "remainingLabel": "{{count}} restants",
+    "succeededLabel": "{{count}} réussis",
+    "failedLabel": "{{count}} échoués",
+    "statusRunning": "Import en cours",
+    "statusCompleted": "Import terminé",
+    "statusCancelled": "Annulé"
   }
 }

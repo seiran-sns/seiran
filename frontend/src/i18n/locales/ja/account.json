@@ -8,6 +8,7 @@
     "lists": "リスト",
     "appearance": "表示",
     "appTokens": "アプリトークン",
+    "followImport": "インポート・エクスポート",
     "comingSoon": "近日公開"
   },
   "appearanceSettings": {
@@ -98,5 +99,21 @@
     "copyButton": "コピー",
     "copiedButton": "コピーしました",
     "dismissButton": "閉じる"
+  },
+  "importExport": {
+    "title": "インポート・エクスポート",
+    "followImportTitle": "フォローインポート",
+    "description": "フォローしたいアカウントのIDを1行に1件ずつ入力してインポートしてください。テキストファイルをドラッグ&ドロップして読み込むこともできます。",
+    "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "importButton": "インポート開始",
+    "importing": "開始中…",
+    "cancelButton": "キャンセル",
+    "fileReadError": "ファイルの読み込みに失敗しました。",
+    "remainingLabel": "残り {{count}} 件",
+    "succeededLabel": "成功 {{count}} 件",
+    "failedLabel": "失敗 {{count}} 件",
+    "statusRunning": "インポート中",
+    "statusCompleted": "インポート完了",
+    "statusCancelled": "キャンセルしました"
   }
 }

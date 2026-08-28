@@ -13,6 +13,7 @@
 use chrono::{DateTime, Duration, Utc};
 
 use seiran_common::crypto::keyed_hash;
+use seiran_common::rate_limit::CheckFollowRateLimitError;
 
 use crate::error::ApiError;
 use crate::middleware::ClientIp;
@@ -34,15 +35,9 @@ impl AttemptKind {
     }
 }
 
+/// `seiran_common::rate_limit::setting_i64` を `&AppState` から呼ぶための薄いラッパー。
 async fn setting_i64(state: &AppState, key: &str, default: i64) -> i64 {
-    state
-        .site_settings
-        .get(key)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(default)
+    seiran_common::rate_limit::setting_i64(state.site_settings.as_ref(), key, default).await
 }
 
 pub async fn check_account_creation_limit(state: &AppState, ip: &ClientIp) -> Result<(), ApiError> {
@@ -84,15 +79,7 @@ pub async fn record_account_creation(state: &AppState, ip: &ClientIp) -> Result<
 /// actor_id からロール文字列（"user" / "emoji-editor" / "moderator" / "admin"）を取得する。
 /// 取得失敗・未特定時は最も制限が強い "user" にフォールバックする。
 pub async fn actor_role(state: &AppState, actor_id: i64) -> String {
-    let role: Option<(String,)> = sqlx::query_as(
-        "SELECT u.role::text FROM users u JOIN actors a ON a.user_id = u.id WHERE a.id = $1",
-    )
-    .bind(actor_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
-    role.map(|row| row.0).unwrap_or_else(|| "user".to_owned())
+    seiran_common::rate_limit::actor_role(&state.db, actor_id).await
 }
 
 /// ロール別のレート制限上限値を`site_settings`から取得する。admin は常に無制限（`None`）。
@@ -105,11 +92,15 @@ async fn role_limit(
     moderator_key: &str,
     moderator_default: i64,
 ) -> Option<i64> {
-    match role {
-        "admin" => None,
-        "moderator" => Some(setting_i64(state, moderator_key, moderator_default).await),
-        _ => Some(setting_i64(state, user_key, user_default).await),
-    }
+    seiran_common::rate_limit::role_limit(
+        state.site_settings.as_ref(),
+        role,
+        user_key,
+        user_default,
+        moderator_key,
+        moderator_default,
+    )
+    .await
 }
 
 /// user/emoji-editorロールの1時間あたり投稿数（DM含む）を制限する（既定30通、moderatorは既定100通）。
@@ -149,39 +140,21 @@ pub async fn check_post_rate_limit(state: &AppState, actor_id: i64) -> Result<()
 
 /// user/emoji-editorロールの24時間あたり新規フォロー数を制限する（既定100人、moderatorは既定300人）。
 /// フォロー成立状態（accepted/pending問わず）を`follows`テーブルの行数でカウントする。
+/// フォローインポートジョブ（`jobs::follow_import`）も同じチェックを共有する
+/// （`seiran_common::rate_limit::check_follow_rate_limit`、`AppState` 非依存版）。
 pub async fn check_follow_rate_limit(state: &AppState, actor_id: i64) -> Result<(), ApiError> {
-    let role = actor_role(state, actor_id).await;
-    let Some(max) = role_limit(
-        state,
-        &role,
-        "follow_rate_limit_max_user",
-        100,
-        "follow_rate_limit_max_moderator",
-        300,
+    seiran_common::rate_limit::check_follow_rate_limit(
+        &state.db,
+        state.site_settings.as_ref(),
+        actor_id,
     )
     .await
-    else {
-        return Ok(());
-    };
-    let window_hours = setting_i64(state, "follow_rate_limit_window_hours", 24)
-        .await
-        .max(1);
-    let since = Utc::now() - Duration::hours(window_hours);
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM follows WHERE follower_actor_id = $1 AND created_at >= $2",
-    )
-    .bind(actor_id)
-    .bind(since)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-    if count >= max {
-        return Err(ApiError::TooManyRequests(
-            "FOLLOW_RATE_LIMITED",
-            Some((window_hours * 3600) as u64),
-        ));
-    }
-    Ok(())
+    .map_err(|e| match e {
+        CheckFollowRateLimitError::Exceeded { retry_after_secs } => {
+            ApiError::TooManyRequests("FOLLOW_RATE_LIMITED", Some(retry_after_secs))
+        }
+        CheckFollowRateLimitError::Db(err) => ApiError::Internal(err.to_string()),
+    })
 }
 
 /// user/emoji-editorロールが作成できるリストの本数上限を返す（既定5本、moderatorは既定30本、adminは無制限）。

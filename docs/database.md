@@ -24,6 +24,7 @@ ID 採番は2系統ある。
 | `reactions` | 投稿への絵文字/いいねリアクション |
 | `follows` | フォロー関係（リクエスト中/成立） |
 | `remote_follow_snapshots` | リモートFediアクターのfollowers/following全件スナップショット（AP経由の直接取得キャッシュ、`follows`とは独立） |
+| `follow_import_requests` / `follow_import_items` | フォローインポート（設定画面から改行区切りのID一覧を貼り付けて一括フォロー）の実行1回分と、対象識別子ごとの処理状態 |
 | `blocks` | ブロック関係（Bsky準拠：フォロー強制解除＋相互完全非表示） |
 | `mutes` | ミュート関係（ローカル効果のみ、AP/ATP配送なし） |
 | `notifications` | 永続化された通知 |

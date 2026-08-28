@@ -8,6 +8,7 @@
     "lists": "Listen",
     "appearance": "Aussehen",
     "appTokens": "App-Tokens",
+    "followImport": "Import & Export",
     "comingSoon": "Kommt bald"
   },
   "appearanceSettings": {
@@ -98,5 +99,21 @@
     "copyButton": "Kopieren",
     "copiedButton": "Kopiert",
     "dismissButton": "Schließen"
+  },
+  "importExport": {
+    "title": "Import & Export",
+    "followImportTitle": "Folge-Import",
+    "description": "Geben Sie pro Zeile eine Konto-ID ein, um Ihre Folgen zu importieren. Sie können auch eine Textdatei per Drag & Drop laden.",
+    "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "importButton": "Import starten",
+    "importing": "Wird gestartet…",
+    "cancelButton": "Abbrechen",
+    "fileReadError": "Datei konnte nicht gelesen werden.",
+    "remainingLabel": "{{count}} verbleibend",
+    "succeededLabel": "{{count}} erfolgreich",
+    "failedLabel": "{{count}} fehlgeschlagen",
+    "statusRunning": "Import läuft",
+    "statusCompleted": "Import abgeschlossen",
+    "statusCancelled": "Abgebrochen"
   }
 }

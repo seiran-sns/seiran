@@ -18,6 +18,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use seiran_common::atp::{AtpCommitEvent, AtpCommitService};
 use seiran_common::repository::{
     InstanceDomainRepository, PgActorRepository, PgBlockRepository, PgFollowRepository,
     PgHashtagRepository, PgInstanceDomainRepository, PgListRepository, PgNotificationRepository,
@@ -25,9 +26,31 @@ use seiran_common::repository::{
 };
 use seiran_common::{
     ap::ApClient, create_job_queue, get_db_pool, resolve_local_domain, run_migrations,
-    DeliveryConfig, InboxContext, LocalDomain, SecretsFile, StreamHub,
+    DeliveryConfig, FollowExecConfig, InboxContext, LocalDomain, SecretsFile, StreamHub,
 };
 use sqlx::PgPool;
+use tokio::sync::broadcast;
+
+/// `FollowExecConfig`（`Job::FollowImportProcess` ジョブ用）を組み立てる。standalone worker
+/// と `all` ロール埋め込み worker の両方から呼ばれる共通ヘルパー。
+fn build_follow_exec_config(
+    pool: &PgPool,
+    local_domain: &LocalDomain,
+    ap_private_key_pem: Option<String>,
+    stream_hub: Arc<StreamHub>,
+    atp_service: Arc<AtpCommitService>,
+) -> FollowExecConfig {
+    FollowExecConfig {
+        actors: Arc::new(PgActorRepository::new(pool.clone())),
+        follows: Arc::new(PgFollowRepository::new(pool.clone())),
+        blocks: Arc::new(PgBlockRepository::new(pool.clone())),
+        notifications: Arc::new(PgNotificationRepository::new(pool.clone())),
+        atp_service,
+        stream_hub,
+        local_domain: local_domain.clone(),
+        ap_private_key_pem: ap_private_key_pem.unwrap_or_default(),
+    }
+}
 
 /// `InboxContext`（InboundActivityProcess ジョブ用）を組み立てる。
 /// standalone worker と `all` ロール埋め込み worker の両方から呼ばれる共通ヘルパー。
@@ -187,6 +210,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             secrets.ap_private_key_pem.clone(),
             Arc::new(StreamHub::new()),
         );
+        // standalone worker には WS 購読者もATPコミットイベントの他プロセス購読者も
+        // 居ないため、ここ専用の使い捨て event チャンネルで良い（`AtpCommitService`
+        // 自体はDBへのコミット・`atp_repo_events`記録は行う。リアルタイム配信不要な
+        // フォローインポートの用途では実害がない、`account_withdraw_unfollow_all` と同じ判断）。
+        let (follow_exec_atp_tx, _) = broadcast::channel::<AtpCommitEvent>(16);
+        let worker_atp_service = Arc::new(AtpCommitService::new(
+            pool.clone(),
+            Arc::new(follow_exec_atp_tx),
+            Arc::clone(&http_client),
+        ));
+        let follow_exec = build_follow_exec_config(
+            &pool,
+            &worker_local_domain,
+            secrets.ap_private_key_pem.clone(),
+            Arc::new(StreamHub::new()),
+            worker_atp_service,
+        );
         // split-role（standalone worker）: REDIS_URL があれば api/federation プロセスと
         // キューを共有できる。未設定なら自分専用の InMemory になる既知の制約（create_job_queue 参照）。
         let queue = create_job_queue(false).await;
@@ -196,6 +236,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arc::new(ApClient::new(http_client)),
             delivery,
             Some(inbox),
+            Some(follow_exec),
         )
         .await;
         return Ok(());
@@ -338,6 +379,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 secrets.ap_private_key_pem.clone(),
                 Arc::clone(&api_state.stream_hub),
             );
+            // api ロールと同じリポジトリ・AtpCommitService・StreamHub を共有するため、
+            // フォローインポートで成立したフォローの通知もリアルタイムに配信される。
+            let worker_follow_exec = api_state.follow_exec_config();
             tokio::spawn(async move {
                 seiran_federation_worker::run(
                     worker_queue,
@@ -345,6 +389,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     worker_ap_client,
                     worker_delivery,
                     Some(worker_inbox),
+                    Some(worker_follow_exec),
                 )
                 .await
             });

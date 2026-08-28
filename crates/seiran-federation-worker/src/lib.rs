@@ -13,23 +13,26 @@ use sqlx::PgPool;
 
 use seiran_common::ap::ApClient;
 use seiran_common::queue::WorkerEngine;
-use seiran_common::{DeliveryConfig, InboxContext, JobQueue};
+use seiran_common::{DeliveryConfig, FollowExecConfig, InboxContext, JobQueue};
 
 /// ワーカーエンジンを起動し、ジョブを処理し続ける（常駐）。
 /// `queue`/`pool`/`ap_client` は呼び出し元が生成した共有インスタンスを受け取る
 /// （`all` ロールでは api/federation と同じキュー・DBプール・コネクションプールを
 /// 再利用する）。`delivery` は AP 配送ジョブ用の設定（ドメイン・AP 鍵）。
 /// `inbox` は `Job::InboundActivityProcess`（AP Inbox 受信処理）に必要な設定。
+/// `follow_exec` は `Job::FollowImportProcess`（フォローインポート）に必要な設定。
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     queue: Arc<dyn JobQueue>,
     pool: PgPool,
     ap_client: Arc<ApClient>,
     delivery: DeliveryConfig,
     inbox: Option<InboxContext>,
+    follow_exec: Option<FollowExecConfig>,
 ) {
     tracing::info!("[federation-worker] 起動中...");
 
-    let engine = WorkerEngine::new_with_db(queue, pool, ap_client, delivery, inbox);
+    let engine = WorkerEngine::new_with_db(queue, pool, ap_client, delivery, inbox, follow_exec);
 
     // デキュー・実行・リトライを永続的に回す
     engine.run().await;

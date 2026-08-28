@@ -8,6 +8,7 @@
     "lists": "기울기",
     "appearance": "모습",
     "appTokens": "앱 토큰",
+    "followImport": "가져오기·내보내기",
     "comingSoon": "곧 출시 예정"
   },
   "appearanceSettings": {
@@ -98,5 +99,21 @@
     "copyButton": "복사",
     "copiedButton": "복사됨",
     "dismissButton": "닫기"
+  },
+  "importExport": {
+    "title": "가져오기·내보내기",
+    "followImportTitle": "팔로우 가져오기",
+    "description": "가져올 계정 ID를 한 줄에 하나씩 입력하세요. 텍스트 파일을 드래그 앤 드롭하여 불러올 수도 있습니다.",
+    "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "importButton": "가져오기 시작",
+    "importing": "시작 중…",
+    "cancelButton": "취소",
+    "fileReadError": "파일을 읽는 데 실패했습니다.",
+    "remainingLabel": "{{count}}건 남음",
+    "succeededLabel": "성공 {{count}}건",
+    "failedLabel": "실패 {{count}}건",
+    "statusRunning": "가져오는 중",
+    "statusCompleted": "가져오기 완료",
+    "statusCancelled": "취소됨"
   }
 }

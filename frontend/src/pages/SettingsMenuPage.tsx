@@ -21,6 +21,7 @@ const ITEMS: SettingsMenuItem[] = [
   { to: "/settings/lists", icon: "📋", labelKey: "menu.lists" },
   { to: "/settings/appearance", icon: "🎨", labelKey: "menu.appearance" },
   { to: "/settings/app-tokens", icon: "🔑", labelKey: "menu.appTokens" },
+  { to: "/settings/follow-import", icon: "🚚", labelKey: "menu.followImport" },
 ];
 
 /** メインメニューの「設定」から遷移する設定項目一覧（#55）。 */

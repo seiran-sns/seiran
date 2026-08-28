@@ -22,6 +22,7 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 
 use crate::ap::ApClient;
+use crate::atp::AtpCommitService;
 use crate::jobs;
 use crate::oembed_whitelist::OembedWhitelist;
 use crate::repository::{
@@ -31,6 +32,7 @@ use crate::repository::{
 };
 use crate::streaming::StreamHub;
 use crate::traits::{Job, JobQueue, QueuedJob};
+use crate::LocalDomain;
 
 /// ジョブの優先度定数
 pub mod priority {
@@ -61,6 +63,22 @@ pub struct DeliveryConfig {
     pub local_domain: crate::LocalDomain,
     pub ap_private_key_pem: Option<String>,
     pub ap_public_key_pem: Option<String>,
+}
+
+/// フォロー実行ジョブ（`Job::FollowImportProcess`）に必要な設定。`seiran-api` の
+/// `AppState` が持つフォロー実行に必要なリポジトリ群・サービスを、ハンドラ専用の
+/// `AppState` に依存せず `JobContext` からも使えるようにするための設定の束。
+/// `follow_exec::execute_follow` に渡す（`docs/architecture.md` 参照）。
+#[derive(Clone)]
+pub struct FollowExecConfig {
+    pub actors: Arc<dyn ActorRepository>,
+    pub follows: Arc<dyn FollowRepository>,
+    pub blocks: Arc<dyn BlockRepository>,
+    pub notifications: Arc<dyn NotificationRepository>,
+    pub atp_service: Arc<AtpCommitService>,
+    pub stream_hub: Arc<StreamHub>,
+    pub local_domain: LocalDomain,
+    pub ap_private_key_pem: String,
 }
 
 /// インバウンド AP アクティビティ処理ジョブ（`Job::InboundActivityProcess`）に必要な設定。
@@ -107,6 +125,8 @@ pub struct JobContext {
     pub inbox: Option<InboxContext>,
     /// oEmbed embed機能の許可ドメイン判定（OgpFetch・LinkCardEmbedResolve ジョブが使用）
     pub oembed_whitelist: Option<Arc<crate::oembed_whitelist::OembedWhitelist>>,
+    /// フォロー実行ジョブ（`Job::FollowImportProcess`）が使用
+    pub follow_exec: Option<FollowExecConfig>,
 }
 
 impl JobContext {
@@ -123,6 +143,7 @@ impl JobContext {
             delivery: None,
             inbox: None,
             oembed_whitelist: None,
+            follow_exec: None,
         }
     }
 
@@ -146,6 +167,11 @@ impl JobContext {
 
     pub fn with_inbox_context(mut self, inbox: InboxContext) -> Self {
         self.inbox = Some(inbox);
+        self
+    }
+
+    pub fn with_follow_exec_config(mut self, follow_exec: FollowExecConfig) -> Self {
+        self.follow_exec = Some(follow_exec);
         self
     }
 
@@ -185,12 +211,14 @@ impl WorkerEngine {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_db(
         queue: Arc<dyn JobQueue>,
         pool: sqlx::PgPool,
         ap_client: Arc<ApClient>,
         delivery: DeliveryConfig,
         inbox: Option<InboxContext>,
+        follow_exec: Option<FollowExecConfig>,
     ) -> Self {
         let oembed_whitelist = Arc::new(OembedWhitelist::new(Arc::new(
             PgSiteSettingsRepository::new(pool.clone()),
@@ -201,6 +229,9 @@ impl WorkerEngine {
             .with_oembed_whitelist(oembed_whitelist);
         if let Some(inbox) = inbox {
             ctx_builder = ctx_builder.with_inbox_context(inbox);
+        }
+        if let Some(follow_exec) = follow_exec {
+            ctx_builder = ctx_builder.with_follow_exec_config(follow_exec);
         }
         let ctx = Arc::new(ctx_builder);
         Self {
@@ -391,6 +422,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::RemoteInstanceInfoResolve { domain } => {
             jobs::remote_instance_info_resolve::handle(domain, ctx).await
         }
+        Job::FollowImportProcess { request_id } => {
+            jobs::follow_import::handle(request_id, ctx).await
+        }
     }
 }
 
@@ -415,6 +449,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::OgpFetch { .. } => "OgpFetch",
         Job::LinkCardEmbedResolve { .. } => "LinkCardEmbedResolve",
         Job::RemoteInstanceInfoResolve { .. } => "RemoteInstanceInfoResolve",
+        Job::FollowImportProcess { .. } => "FollowImportProcess",
     }
 }
 
@@ -530,6 +565,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 3,
             base_delay_ms: 2000,
             max_delay_ms: 30_000,
+        },
+        Job::FollowImportProcess { .. } => RetryConfig {
+            // レート制限待機は `enqueue_retry` を直接呼ぶ独自経路（このリトライ設定を
+            // 経由しない）。ここは真のDBエラー等、予期しない失敗時のみ使われる軽量設定。
+            max_attempts: 5,
+            base_delay_ms: 2000,
+            max_delay_ms: 60_000,
         },
     }
 }

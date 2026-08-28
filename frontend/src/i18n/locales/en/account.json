@@ -8,6 +8,7 @@
     "lists": "Lists",
     "appearance": "Appearance",
     "appTokens": "App tokens",
+    "followImport": "Import & Export",
     "comingSoon": "Coming soon"
   },
   "appearanceSettings": {
@@ -98,5 +99,21 @@
     "copyButton": "Copy",
     "copiedButton": "Copied",
     "dismissButton": "Close"
+  },
+  "importExport": {
+    "title": "Import & Export",
+    "followImportTitle": "Follow import",
+    "description": "Enter one account ID per line to import your follows. You can also drag and drop a text file to load it.",
+    "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "importButton": "Start import",
+    "importing": "Starting…",
+    "cancelButton": "Cancel",
+    "fileReadError": "Failed to read the file.",
+    "remainingLabel": "{{count}} remaining",
+    "succeededLabel": "{{count}} succeeded",
+    "failedLabel": "{{count}} failed",
+    "statusRunning": "Importing",
+    "statusCompleted": "Import complete",
+    "statusCancelled": "Cancelled"
   }
 }

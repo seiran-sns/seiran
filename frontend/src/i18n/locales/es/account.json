@@ -8,6 +8,7 @@
     "lists": "Liza",
     "appearance": "Apariencia",
     "appTokens": "Fichas de aplicación",
+    "followImport": "Importar y exportar",
     "comingSoon": "Muy pronto"
   },
   "appearanceSettings": {
@@ -98,5 +99,21 @@
     "copyButton": "Copiar",
     "copiedButton": "Copiado",
     "dismissButton": "Cerrar"
+  },
+  "importExport": {
+    "title": "Importar y exportar",
+    "followImportTitle": "Importar seguidos",
+    "description": "Introduce un ID de cuenta por línea para importar tus seguidos. También puedes arrastrar y soltar un archivo de texto para cargarlo.",
+    "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "importButton": "Iniciar importación",
+    "importing": "Iniciando…",
+    "cancelButton": "Cancelar",
+    "fileReadError": "No se pudo leer el archivo.",
+    "remainingLabel": "{{count}} restantes",
+    "succeededLabel": "{{count}} correctos",
+    "failedLabel": "{{count}} fallidos",
+    "statusRunning": "Importando",
+    "statusCompleted": "Importación completa",
+    "statusCancelled": "Cancelada"
   }
 }

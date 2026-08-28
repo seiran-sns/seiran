@@ -4,6 +4,8 @@ pub mod auth;
 pub mod avatar;
 pub mod crypto;
 pub mod db;
+pub mod follow_exec;
+pub mod follow_target;
 pub mod hashtag;
 pub mod id;
 pub mod jetstream_control;
@@ -14,6 +16,7 @@ pub mod mention;
 pub mod net;
 pub mod oembed_whitelist;
 pub mod queue;
+pub mod rate_limit;
 pub mod repository;
 pub mod secrets;
 pub mod storage;
@@ -46,7 +49,9 @@ pub use atp::{AtpCommitError, AtpCommitEvent, AtpCommitService};
 pub use auth::local::VerifiedUser;
 pub use auth::{AuthError, LocalAuthProvider, VerifiedAtpAccess, VerifiedAtpRefresh};
 pub use crypto::{decrypt as crypto_decrypt, encrypt as crypto_encrypt, CryptoError};
-pub use queue::worker::{priority as job_priority, DeliveryConfig, InboxContext, JobContext};
+pub use queue::worker::{
+    priority as job_priority, DeliveryConfig, FollowExecConfig, InboxContext, JobContext,
+};
 pub use queue::{create_job_queue, InMemoryJobQueue, RedisJobQueue, WorkerEngine};
 pub use repository::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,

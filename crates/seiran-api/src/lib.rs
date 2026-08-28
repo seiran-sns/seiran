@@ -31,11 +31,12 @@ use seiran_common::repository::{
     ActorRepository, AlsoKnownAsRepository, AppTokenRepository, AtpPreferencesRepository,
     AtpReadRepository, AtpSessionRepository, AuthRateLimitRepository, BlockRepository,
     DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository,
-    FollowRepository, HashtagRepository, InstanceDomainRepository, ListRepository, MuteRepository,
-    NotificationRepository, PasswordResetRepository, PgActorRepository, PgAlsoKnownAsRepository,
-    PgAppTokenRepository, PgAtpPreferencesRepository, PgAtpReadRepository, PgAtpSessionRepository,
-    PgAuthRateLimitRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository,
-    PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository,
+    FollowImportRepository, FollowRepository, HashtagRepository, InstanceDomainRepository,
+    ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository,
+    PgActorRepository, PgAlsoKnownAsRepository, PgAppTokenRepository, PgAtpPreferencesRepository,
+    PgAtpReadRepository, PgAtpSessionRepository, PgAuthRateLimitRepository, PgBlockRepository,
+    PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository,
+    PgFollowImportRepository, PgFollowRepository, PgHashtagRepository,
     PgInstanceDomainRepository, PgListRepository, PgMuteRepository, PgNotificationRepository,
     PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository,
     PgRelayRepository, PgRemoteEmojiRepository, PgRemoteInstanceMetaRepository, PgTotpRepository,
@@ -67,6 +68,9 @@ pub struct AppState {
     pub users: Arc<dyn UserRepository>,
     pub posts: Arc<dyn PostRepository>,
     pub follows: Arc<dyn FollowRepository>,
+    /// フォローインポート（設定画面から改行区切りのID一覧を貼り付けて一括フォロー）の
+    /// 進捗管理（`follow_import_requests`/`follow_import_items`）。
+    pub follow_imports: Arc<dyn FollowImportRepository>,
     /// ブロック関係（Bsky準拠：フォロー強制解除＋相互完全非表示）。
     pub blocks: Arc<dyn BlockRepository>,
     /// ミュート関係（ローカル効果のみ、AP/ATP配送なし）。
@@ -153,6 +157,22 @@ pub struct AppState {
 const REMOTE_FOLLOW_SYNC_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(600);
 
 impl AppState {
+    /// `seiran_common::follow_exec::execute_follow` に渡す設定を組み立てる。
+    /// フォローインポートジョブ（`JobContext::follow_exec`）と全く同じ実処理を
+    /// API ハンドラからも呼べるようにするための橋渡し（軽量な Arc クローンのみ）。
+    pub fn follow_exec_config(&self) -> seiran_common::FollowExecConfig {
+        seiran_common::FollowExecConfig {
+            actors: Arc::clone(&self.actors),
+            follows: Arc::clone(&self.follows),
+            blocks: Arc::clone(&self.blocks),
+            notifications: Arc::clone(&self.notifications),
+            atp_service: Arc::clone(&self.atp_service),
+            stream_hub: Arc::clone(&self.stream_hub),
+            local_domain: self.local_domain.clone(),
+            ap_private_key_pem: self.secrets.ap_private_key_pem.clone().unwrap_or_default(),
+        }
+    }
+
     /// AP 配送ジョブを積む。配送の実行・リトライは Worker（`jobs::ap_delivery`）が担う。
     /// enqueue 失敗はログのみ（投稿等の主処理は成功済みのため呼び出し元へは伝播しない）。
     pub async fn enqueue_ap_delivery(&self, actor_id: i64, kind: ApDeliveryKind) {
@@ -177,6 +197,22 @@ impl AppState {
             .await
         {
             tracing::error!("[job] ActorHistorySync enqueue 失敗: {}", e);
+        }
+    }
+
+    /// フォローインポートジョブ（自己再enqueue型、`jobs::follow_import`）を積む。
+    /// インポート開始時・1件処理完了後の両方から呼ばれる。
+    pub async fn enqueue_follow_import_process(&self, request_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::FollowImportProcess { request_id }, job_priority::LOW)
+            .await
+        {
+            tracing::error!(
+                "[job] FollowImportProcess enqueue 失敗 (request_id={}): {}",
+                request_id,
+                e
+            );
         }
     }
 
@@ -463,6 +499,8 @@ pub async fn init_state(
     let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
     let follows: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
+    let follow_imports: Arc<dyn FollowImportRepository> =
+        Arc::new(PgFollowImportRepository::new(pool.clone()));
     let blocks: Arc<dyn BlockRepository> = Arc::new(PgBlockRepository::new(pool.clone()));
     let mutes: Arc<dyn MuteRepository> = Arc::new(PgMuteRepository::new(pool.clone()));
     let app_tokens: Arc<dyn AppTokenRepository> = Arc::new(PgAppTokenRepository::new(pool.clone()));
@@ -531,6 +569,7 @@ pub async fn init_state(
         users,
         posts,
         follows,
+        follow_imports,
         blocks,
         mutes,
         app_tokens,
@@ -930,6 +969,15 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/follows/delete",
             post(handlers::follows::delete_follow),
+        )
+        // フォローインポート（設定画面から改行区切りのID一覧を貼り付けて一括フォロー）
+        .route(
+            "/api/account/follow-import",
+            post(handlers::follow_import::start_import).get(handlers::follow_import::get_status),
+        )
+        .route(
+            "/api/account/follow-import/cancel",
+            post(handlers::follow_import::cancel_import),
         )
         // ブロック（Bsky準拠：フォロー強制解除＋相互完全非表示。Fediへは Block 配送、Bskyへは app.bsky.graph.block をコミット）
         .route("/api/blocks/create", post(handlers::blocks::create_block))

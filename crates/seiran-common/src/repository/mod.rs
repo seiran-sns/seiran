@@ -16,6 +16,7 @@ pub mod email_change;
 pub mod email_verification;
 pub mod emoji;
 pub mod follow;
+pub mod follow_import;
 pub mod hashtag;
 pub mod instance_domain;
 pub mod list;
@@ -48,6 +49,10 @@ pub use email_verification::{EmailVerificationRepository, PgEmailVerificationRep
 pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
+pub use follow_import::{
+    FollowImportProgress, FollowImportRepository, FollowImportRequestRow,
+    PgFollowImportRepository,
+};
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
 pub use instance_domain::{ConfirmOutcome, InstanceDomainRepository, PgInstanceDomainRepository};
 pub use list::{ListMemberRow, ListRepository, ListRow, PgListRepository};
