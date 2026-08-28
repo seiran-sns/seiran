@@ -113,6 +113,13 @@ pub struct AppState {
     pub stream_hub: Arc<StreamHub>,
     /// 絵文字インポートジョブの進捗状態（#50）。job_id → ImportJobStatus。
     pub emoji_import_jobs: Arc<DashMap<String, handlers::admin::emoji_import::ImportJobStatus>>,
+    /// `RemoteFollowListSync` 重複投入防止用クールダウン（#229）。
+    /// (actor_id, direction) → 直近enqueue時刻。プロフィールリロードのたびに同一ジョブが
+    /// 積まれ続け、低優先度ジョブキューが埋め尽くされる問題への対処。プロセス内のみで
+    /// 完結する簡易ガードのため、split-role構成でAPIプロセスが複数台ある場合は台数分だけ
+    /// クールダウンが緩む（許容: 根本的な多重防止はWorker側のジョブ重複排除で行うべきだが、
+    /// まずは支配的なケース＝同一プロセスへの連続リロードを塞ぐ）。
+    pub remote_follow_sync_recent: Arc<DashMap<(i64, String), std::time::Instant>>,
     /// 非同期ジョブキュー（AP配送・Bsky動画パイプライン結合等）。`all` ロールでは
     /// `seiran-federation-worker`のWorkerEngineと同一インスタンスを共有する。
     pub job_queue: Arc<dyn JobQueue>,
@@ -140,6 +147,10 @@ pub struct AppState {
     pub totp: Arc<dyn TotpRepository>,
     pub webauthn: Arc<Webauthn>,
 }
+
+/// `enqueue_remote_follow_list_sync` の重複投入防止クールダウン（#229）。
+/// この時間内の同一 (actor_id, direction) への再投入は無視する。
+const REMOTE_FOLLOW_SYNC_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(600);
 
 impl AppState {
     /// AP 配送ジョブを積む。配送の実行・リトライは Worker（`jobs::ap_delivery`）が担う。
@@ -261,7 +272,25 @@ impl AppState {
 
     /// リモート Fedi アクターの followers/following 全件同期ジョブを積む（#68）。
     /// プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック。
+    ///
+    /// #229: 同一 (actor_id, direction) を直近 [`REMOTE_FOLLOW_SYNC_COOLDOWN`] 以内に既に
+    /// 積んでいれば再投入しない。フォロー数の多いアクターのプロフィールを何度もリロードする
+    /// と、そのたびに最大5000件の`RemoteActorResolve`（優先度低）を積む重いジョブが重複投入
+    /// され、同じ優先度を共有する他のジョブ（`AlsoKnownAsVerify`等）が飢餓状態になっていた。
     pub async fn enqueue_remote_follow_list_sync(&self, actor_id: i64, direction: String) {
+        let key = (actor_id, direction.clone());
+        let now = std::time::Instant::now();
+        if let Some(last) = self.remote_follow_sync_recent.get(&key) {
+            if now.duration_since(*last) < REMOTE_FOLLOW_SYNC_COOLDOWN {
+                tracing::debug!(
+                    "[job] RemoteFollowListSync enqueue 抑制（クールダウン中）: actor_id={} direction={}",
+                    actor_id, direction
+                );
+                return;
+            }
+        }
+        self.remote_follow_sync_recent.insert(key, now);
+
         if let Err(e) = self
             .job_queue
             .enqueue(
@@ -532,6 +561,7 @@ pub async fn init_state(
         search_store: Arc::new(InMemorySearchStore::new()),
         stream_hub: Arc::new(StreamHub::new()),
         emoji_import_jobs: Arc::new(DashMap::new()),
+        remote_follow_sync_recent: Arc::new(DashMap::new()),
         job_queue,
         lists,
         hashtags,

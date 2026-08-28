@@ -123,6 +123,7 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 
 - 同期取得は200msタイムアウト・最大500件のキャップ付き。成功すれば `remote_follow_snapshots` テーブル（`docs/database.md` 参照）へ丸ごと上書き保存しつつその場でレスポンスに含める。
 - タイムアウト・取得失敗（非公開設定を含む）の場合は、既存スナップショット（あれば）を返しつつ `Job::RemoteFollowListSync{actor_id, direction}`（優先度低）を積む。このジョブはキャップ5000件でバックグラウンド全件取得し、スナップショットを更新する。次回リロード時に反映される。
+- 同一 `(actor_id, direction)` への `RemoteFollowListSync` 投入は、APIプロセス内メモリのクールダウン（10分、`AppState::remote_follow_sync_recent`）で抑制する。フォロー数の多いアクターのプロフィールを短時間に何度もリロードしても、そのたびに最大5000件の`RemoteActorResolve`を積む重いジョブが積み直されないようにするため（#229。抑制されなければ`RemoteActorResolve`が低優先度キューを埋め尽くし、同じ優先度の`AlsoKnownAsVerify`等が飢餓状態になる）。
 - レスポンスの各アイテムはローカルDBに `ap_uri` が登録済みなら display_name/avatar_url 等を付与し、未登録の URI はハンドル文字列のみの簡易表示にする（全件のプロフィールを都度リモート取得すると負荷・レイテンシが過大なため）。未登録の URI は同期取得・`RemoteFollowListSync` の双方で `Job::RemoteActorResolve{uri}`（優先度低）を積み、バックグラウンドでプロフィールを解決・`actors` へ upsert する（フォロー関係は作らない。次回表示からリッチ表示になる）。
 - ローカルアクター・Bskyアクター（`ap_uri` を持たない）は対象外。Mastodon等はフォロー/フォロワー一覧をアカウント設定で非公開にできるため、HTTPエラーはエラー扱いにせず「非公開」として静かに空を返す。
 - フロントエンドは `FollowListPanel`（タブが開かれた時点）でのAPIコールに加え、`ProfilePage` がプロフィール取得完了直後（タブ選択前）に `getRemoteFollowSummary` で先読みを開始する（`frontend/src/lib/remoteFollowSummaryCache.ts`）。タブを開いた瞬間に読み込み待ちが発生する体感を減らすための先読みキャッシュで、`FollowListPanel` はキャッシュ済みならそれを再利用する。
