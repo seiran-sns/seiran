@@ -16,7 +16,7 @@ use std::sync::Arc;
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::net::{fetch_validated_with_accept, FetchError};
+use crate::net::{decode_html_body, fetch_validated_with_accept, FetchError};
 use crate::queue::worker::JobContext;
 use crate::repository::{PgRemoteInstanceMetaRepository, RemoteInstanceMetaRepository};
 
@@ -149,8 +149,10 @@ async fn fetch_homepage_meta(domain: &str) -> (Option<String>, Option<String>) {
     let home_url = format!("https://{domain}/");
     let mut icon_url = None;
     let mut title = None;
-    if let Ok((bytes, _)) = fetch_validated_with_accept(&home_url, ACCEPT_HTML, "text/html").await {
-        let html = String::from_utf8_lossy(&bytes);
+    if let Ok((bytes, content_type)) =
+        fetch_validated_with_accept(&home_url, ACCEPT_HTML, "text/html").await
+    {
+        let html = decode_html_body(&bytes, &content_type);
         if let Some(href) = extract_favicon_link(&html) {
             if let Ok(resolved) = reqwest::Url::parse(&home_url).and_then(|base| base.join(&href)) {
                 icon_url = Some(resolved.to_string());

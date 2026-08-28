@@ -217,6 +217,48 @@ pub struct OgpData {
     pub embed_type: Option<String>,
 }
 
+/// HTTPヘッダーの`Content-Type`（`charset`パラメータ）と`<meta charset>`/
+/// `<meta http-equiv="Content-Type" content="...">`から実際の文字コードを検出し、UTF-8文字列に
+/// デコードする。日本語圏のサイトはEUC-JP/Shift_JISを使うことが少なくなく、常にUTF-8として
+/// デコードすると本文が文字化けする（例: 楽天市場の商品ページは`charset=EUC-JP`）。
+/// 優先順位はHTML5仕様のcharset検出に準じ、HTTPヘッダー→HTML内のmetaタグ→UTF-8フォールバック。
+pub fn decode_html_body(bytes: &[u8], header_content_type: &str) -> String {
+    let encoding = extract_charset_param(header_content_type)
+        .or_else(|| extract_meta_charset(bytes))
+        .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
+        .unwrap_or(encoding_rs::UTF_8);
+    encoding.decode(bytes).0.into_owned()
+}
+
+/// `Content-Type: text/html; charset=EUC-JP`のような文字列から`charset`パラメータの値を取り出す。
+fn extract_charset_param(content_type: &str) -> Option<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r#"(?i)charset=["']?([^;"'\s]+)"#).unwrap());
+    re.captures(content_type)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().trim_end_matches('"').to_string())
+}
+
+/// HTML先頭部分（HTML5仕様のprescanに合わせ1024バイトまで）から`<meta charset="...">`または
+/// `<meta http-equiv="Content-Type" content="text/html; charset=...">`のcharsetを検出する。
+/// `<meta>`タグ自体はASCII文字のみで構成されるため、実際のエンコーディングが何であっても
+/// `from_utf8_lossy`によるここでの走査でタグの構造が壊れることはない。
+fn extract_meta_charset(bytes: &[u8]) -> Option<String> {
+    static TAG_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static CHARSET_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let tag_re = TAG_RE.get_or_init(|| regex::Regex::new(r#"(?i)<meta\b[^>]*>"#).unwrap());
+    let charset_re =
+        CHARSET_RE.get_or_init(|| regex::Regex::new(r#"(?i)charset=["']?([^;"'\s>]+)"#).unwrap());
+
+    let prefix_len = bytes.len().min(1024);
+    let prefix = String::from_utf8_lossy(&bytes[..prefix_len]);
+    tag_re
+        .find_iter(&prefix)
+        .find_map(|tag| charset_re.captures(tag.as_str()))
+        .and_then(|cap| cap.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
 /// `<meta property="..." content="...">`（属性順序は問わない）から`content`を抽出する。
 /// HTML5準拠の厳密なパースはせず、OGPメタタグの一般的な形だけを対象にした簡易実装。
 fn extract_og_content(html: &str, property: &str) -> Option<String> {
@@ -256,14 +298,14 @@ pub async fn fetch_ogp(
     url: &str,
     fixed_oembed_endpoint: Option<&str>,
 ) -> Result<Option<OgpData>, FetchError> {
-    let (bytes, _content_type) = fetch_validated_with_accept(
+    let (bytes, content_type) = fetch_validated_with_accept(
         url,
         &["text/html", "application/xhtml+xml"],
         "text/html,application/xhtml+xml;q=0.9",
     )
     .await?;
 
-    let html = String::from_utf8_lossy(&bytes);
+    let html = decode_html_body(&bytes, &content_type);
     let base = Url::parse(url).ok();
 
     let title = extract_og_content(&html, "og:title");
@@ -369,7 +411,7 @@ fn extract_iframe_src(html_fragment: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_body_urls, is_public_ip};
+    use super::{decode_html_body, extract_body_urls, is_public_ip};
 
     #[test]
     fn extract_body_urls_dedupes_and_preserves_order() {
@@ -392,6 +434,36 @@ mod tests {
     #[test]
     fn extract_body_urls_empty_when_no_url() {
         assert!(extract_body_urls("こんにちは").is_empty());
+    }
+
+    #[test]
+    fn decode_html_body_uses_http_header_charset() {
+        let (bytes, _, _) = encoding_rs::EUC_JP.encode("<html><body>楽天市場</body></html>");
+        let html = decode_html_body(&bytes, "text/html; charset=EUC-JP");
+        assert!(html.contains("楽天市場"));
+    }
+
+    #[test]
+    fn decode_html_body_uses_meta_http_equiv_when_header_missing() {
+        let (bytes, _, _) = encoding_rs::SHIFT_JIS.encode(
+            r#"<html><head><meta http-equiv="Content-Type" content="text/html; charset=Shift_JIS"></head><body>日本語</body></html>"#,
+        );
+        let html = decode_html_body(&bytes, "text/html");
+        assert!(html.contains("日本語"));
+    }
+
+    #[test]
+    fn decode_html_body_uses_meta_charset_when_header_missing() {
+        let (bytes, _, _) = encoding_rs::SHIFT_JIS
+            .encode(r#"<html><head><meta charset="Shift_JIS"></head><body>日本語</body></html>"#);
+        let html = decode_html_body(&bytes, "text/html");
+        assert!(html.contains("日本語"));
+    }
+
+    #[test]
+    fn decode_html_body_defaults_to_utf8() {
+        let html = decode_html_body("<html><body>hello</body></html>".as_bytes(), "text/html");
+        assert!(html.contains("hello"));
     }
 
     #[test]

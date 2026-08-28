@@ -51,7 +51,15 @@ Fediは本文中の複数リンクぶん**複数件のURLカードが並ぶこ�
 OGP（`og:title`/`og:description`/`og:image`、正規表現による簡易メタタグ抽出）に加えて
 oEmbed discovery（`<link rel="alternate" type=".../json+oembed">`の検出→JSON取得→
 `html`フィールドからiframe src抽出、`crates/seiran-common/src/net.rs`の`fetch_ogp`が同じ
-ページ取得で両方処理する）も行い、取得できた分だけ`post_link_cards`へ保存する
+ページ取得で両方処理する）も行い、取得できた分だけ`post_link_cards`へ保存する。
+取得したHTMLはUTF-8固定ではデコードせず、`net::decode_html_body`がHTTPレスポンスヘッダー
+`Content-Type`の`charset`パラメータ→無ければHTML先頭（HTML5仕様のprescanに合わせ1024バイト
+まで）の`<meta charset="...">`/`<meta http-equiv="Content-Type" content="...charset=...">`の
+順で文字コードを検出し（`encoding_rs`でデコード）、いずれも無ければUTF-8にフォールバックする。
+日本語圏のECサイト等にEUC-JP/Shift_JISでHTMLを返すものが少なくないため
+（実例: 楽天市場の商品ページは`charset=EUC-JP`）、これを行わないとタイトル・説明文が
+文字化けする。同じ`decode_html_body`はリモートインスタンスのトップページ取得
+（`jobs::remote_instance_info_resolve::fetch_homepage_meta`、サーバー名・favicon取得）でも使う
 （`crates/seiran-common/src/jobs/ogp_fetch.rs`）。`type`属性は仕様上`application/json+oembed`
 だがSoundCloud等が非準拠の`text/json+oembed`を使うため、プレフィックスを問わず
 `json+oembed`部分一致で判定する。取得失敗（DNS/SSRF拒否/非対応Content-Type等の
