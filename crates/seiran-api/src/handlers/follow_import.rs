@@ -44,6 +44,9 @@ pub struct FollowImportStatusResponse {
     pub total: i32,
     pub processed: i64,
     pub succeeded: i64,
+    /// 呼び出し前から既にフォロー関係が存在していたため、新規フォローが成立しなかった件数
+    /// （`succeeded` とは別枠）。
+    pub already_following: i64,
     pub failed: i64,
 }
 
@@ -111,8 +114,9 @@ pub async fn get_status(
         Some(p) => FollowImportStatusResponse {
             status: p.status,
             total: p.total,
-            processed: p.succeeded + p.failed,
+            processed: p.succeeded + p.already_following + p.failed,
             succeeded: p.succeeded,
+            already_following: p.already_following,
             failed: p.failed,
         },
         None => FollowImportStatusResponse {
@@ -120,6 +124,7 @@ pub async fn get_status(
             total: 0,
             processed: 0,
             succeeded: 0,
+            already_following: 0,
             failed: 0,
         },
     };

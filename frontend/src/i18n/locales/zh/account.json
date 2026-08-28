@@ -111,6 +111,7 @@
     "fileReadError": "读取文件失败。",
     "remainingLabel": "剩余 {{count}} 项",
     "succeededLabel": "成功 {{count}} 项",
+    "alreadyFollowingLabel": "已关注 {{count}} 项",
     "failedLabel": "失败 {{count}} 项",
     "statusRunning": "导入中",
     "statusCompleted": "导入完成",

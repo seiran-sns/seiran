@@ -166,6 +166,11 @@ AP受信（投稿本文・表示名・絵文字リアクションのいずれか
 ### `remote_follow_snapshots`
 `follows` はseiranが認知している関係（ローカルアクターが片方に絡む場合のみ）しか持たない。本テーブルはそれとは独立に、リモートFediアクターのfollowers/following OrderedCollectionをAP経由で直接取得した結果を、`actor_id`×`direction`（`following`/`followers`）単位で丸ごと上書きキャッシュする（`UNIQUE(actor_id, direction)`）。`actor_uris` は取得できたactor URIのJSONB配列、`complete` は上限件数に達せずコレクション全体を取得しきれたか。`docs/protocols.md` 2節参照。
 
+### フォローインポート（`follow_import_requests` / `follow_import_items`）
+`follow_import_requests` は設定画面からのインポート実行1回=1行（`status`: `running`/`completed`/`cancelled`）。`UNIQUE (actor_id) WHERE status='running'` の部分インデックスで、1アクターにつき実行中のインポートを常に1本のみに制限する。`follow_import_items` は対象識別子1件=1行（`status`: `pending`/`succeeded`/`already_following`/`failed`）。`already_following` は、呼び出し前から既にそのターゲットへのフォロー関係が存在していた場合（`follows`への新規INSERTが発生しなかった場合）を`succeeded`と区別するステータスで、`seiran-common::follow_exec::execute_follow`はこのケースもエラーにせず成功として返すため、進捗表示の「成功」件数が実際の`follows`新規行数と食い違わないよう分けている。
+
+進捗集計カラム（`processed`/`succeeded`/`already_following`/`failed`）は`follow_import_requests`側に持たず、`follow_import_items`への`COUNT(*) FILTER (WHERE status=...)`で都度算出する（2テーブル間のカウンタ不整合を構造的に排除するため）。キャンセル時は`follow_import_requests.status`を`cancelled`にするのみで、残りの`pending`な`follow_import_items`はそのまま放置する（`failed`扱いにはしない）。ジョブ（`Job::FollowImportProcess`）は実行のたびにリクエストの`status`を確認し、`running`でなくなっていれば処理を打ち切る。ジョブの`request_id`単位排他制御（`pg_try_advisory_lock`）と起動時リカバリについては`docs/architecture.md` 5節参照。
+
 ### `blocks` / `mutes`
 `follows` と同型（`blocker_actor_id`/`blocked_actor_id`、`muter_actor_id`/`muted_actor_id` の有向関係 + `UNIQUE`制約）。ブロックはBsky準拠の定義（フォロー関係の強制解除＋相互完全非表示）を採用しており、相手がBskyなら `app.bsky.graph.block` コミット後の `atp_rkey` を保存、相手がFediならAP `Block` を配送する（`docs/protocols.md` 参照）。ミュートはFedi/Bsky共通でローカル効果のみ（AP/ATP配送なし）のため `atp_rkey` 相当のカラムを持たない。
 

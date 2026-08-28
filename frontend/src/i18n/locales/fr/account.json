@@ -111,6 +111,7 @@
     "fileReadError": "Échec de la lecture du fichier.",
     "remainingLabel": "{{count}} restants",
     "succeededLabel": "{{count}} réussis",
+    "alreadyFollowingLabel": "{{count}} déjà suivis",
     "failedLabel": "{{count}} échoués",
     "statusRunning": "Import en cours",
     "statusCompleted": "Import terminé",

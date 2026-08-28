@@ -18,11 +18,12 @@ pub struct FollowListRow {
 #[async_trait]
 pub trait FollowRepository: Send + Sync {
     /// フォローを pending で挿入する（既存なら status を pending に戻す）。
+    /// 新規に挿入した場合は true、既存の関係を更新した場合は false を返す。
     async fn upsert_pending(
         &self,
         follower_actor_id: i64,
         target_actor_id: i64,
-    ) -> Result<(), sqlx::Error>;
+    ) -> Result<bool, sqlx::Error>;
 
     /// フォロー関係の status を取得する（未フォローなら None）。
     async fn find_status(
@@ -146,18 +147,21 @@ impl FollowRepository for PgFollowRepository {
         &self,
         follower_actor_id: i64,
         target_actor_id: i64,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+    ) -> Result<bool, sqlx::Error> {
+        // `xmax = 0` は「このコマンドで新規挿入された行か」の判定に使うPostgresの定石
+        // （UPDATEされた既存行はxmaxに現在のトランザクションIDが入る）。
+        let row: (bool,) = sqlx::query_as(
             "INSERT INTO follows (follower_actor_id, target_actor_id, status)
              VALUES ($1, $2, 'pending')
              ON CONFLICT (follower_actor_id, target_actor_id) DO UPDATE
-               SET status = 'pending'",
+               SET status = 'pending'
+             RETURNING (xmax = 0)",
         )
         .bind(follower_actor_id)
         .bind(target_actor_id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
     }
 
     async fn find_status(

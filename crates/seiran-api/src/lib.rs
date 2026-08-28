@@ -1265,6 +1265,7 @@ pub fn router(state: AppState) -> Router {
 pub fn spawn_startup_tasks(state: &AppState) {
     let state = state.clone();
     tokio::spawn(async move {
+        resume_running_follow_imports(&state).await;
         ensure_handle_txt_records(&state).await;
         request_relay_crawl(&state).await;
         // requestCrawl 後、Relay が subscribeRepos に接続するまで待機してから
@@ -1275,6 +1276,39 @@ pub fn spawn_startup_tasks(state: &AppState) {
         backfill_chat_declarations(&state).await;
         backfill_remote_instance_meta(&state).await;
     });
+}
+
+/// 起動時リカバリ: プロセス再起動で停止したフォローインポートのジョブチェーンを再開する。
+/// `Job::FollowImportProcess` の遅延リトライ（レート制限待ち）はInMemoryJobQueueでは
+/// プロセス内メモリのみで管理されており、プロセス再起動で消失するため、`running` 状態の
+/// リクエストは自然には再開しない。ここで無条件に全件再enqueueする（「最後の進捗から
+/// 一定時間経過したものだけ」のように絞り込むと、絞り込み条件の見積もり次第で
+/// 本当に停止しているチェーンを見逃す投入漏れの方が実害として大きいため、あえて絞らない）。
+/// 重複投入（正常に動いているチェーンへの余分な再enqueue）は
+/// `jobs::follow_import` の `request_id` 単位 advisory lock が自然に解消する。
+async fn resume_running_follow_imports(state: &AppState) {
+    let request_ids: Vec<i64> = match sqlx::query_scalar(
+        "SELECT id FROM follow_import_requests WHERE status = 'running'",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::error!("[startup] 実行中フォローインポートの取得失敗: {}", e);
+            return;
+        }
+    };
+    if request_ids.is_empty() {
+        return;
+    }
+    tracing::info!(
+        "[startup] 実行中フォローインポート {} 件を再開します",
+        request_ids.len()
+    );
+    for request_id in request_ids {
+        state.enqueue_follow_import_process(request_id).await;
+    }
 }
 
 /// 既存の全リモートFedi/seiran間連合ドメインのうち`remote_instance_meta`未登録のものを

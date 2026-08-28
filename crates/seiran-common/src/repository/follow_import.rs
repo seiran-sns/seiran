@@ -22,7 +22,21 @@ pub struct FollowImportProgress {
     pub status: String,
     pub total: i32,
     pub succeeded: i64,
+    /// 呼び出し前から既にフォロー関係が存在していたため、新規INSERTが発生しなかった件数
+    /// （`succeeded` とは別枠。実際のフォロー成立数は `succeeded` のみがカウントする）。
+    pub already_following: i64,
     pub failed: i64,
+}
+
+/// `mark_item_result` に渡す処理結果。`Succeeded`/`Failed` の2値ではなく、
+/// 「呼び出し前から既にフォロー関係が存在していた」場合を区別する
+/// （`execute_follow` はエラーにせず成功として返すため、これを区別しないと
+/// 進捗の「成功」件数が実際の `follows` テーブルの新規行数より多く見えてしまう）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowImportItemOutcome {
+    Succeeded,
+    AlreadyFollowing,
+    Failed,
 }
 
 #[async_trait]
@@ -57,7 +71,7 @@ pub trait FollowImportRepository: Send + Sync {
     async fn mark_item_result(
         &self,
         item_id: i64,
-        succeeded: bool,
+        outcome: FollowImportItemOutcome,
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error>;
 
@@ -118,9 +132,10 @@ impl FollowImportRepository for PgFollowImportRepository {
         &self,
         actor_id: i64,
     ) -> Result<Option<FollowImportProgress>, sqlx::Error> {
-        let row: Option<(i64, String, i32, i64, i64)> = sqlx::query_as(
+        let row: Option<(i64, String, i32, i64, i64, i64)> = sqlx::query_as(
             "SELECT r.id, r.status::text, r.total,
                     COUNT(i.id) FILTER (WHERE i.status = 'succeeded') AS succeeded,
+                    COUNT(i.id) FILTER (WHERE i.status = 'already_following') AS already_following,
                     COUNT(i.id) FILTER (WHERE i.status = 'failed') AS failed
              FROM follow_import_requests r
              LEFT JOIN follow_import_items i ON i.request_id = r.id
@@ -133,13 +148,16 @@ impl FollowImportRepository for PgFollowImportRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|(request_id, status, total, succeeded, failed)| FollowImportProgress {
-            request_id,
-            status,
-            total,
-            succeeded,
-            failed,
-        }))
+        Ok(row.map(
+            |(request_id, status, total, succeeded, already_following, failed)| FollowImportProgress {
+                request_id,
+                status,
+                total,
+                succeeded,
+                already_following,
+                failed,
+            },
+        ))
     }
 
     async fn find_active_for_actor(&self, actor_id: i64) -> Result<Option<i64>, sqlx::Error> {
@@ -181,10 +199,14 @@ impl FollowImportRepository for PgFollowImportRepository {
     async fn mark_item_result(
         &self,
         item_id: i64,
-        succeeded: bool,
+        outcome: FollowImportItemOutcome,
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
-        let status = if succeeded { "succeeded" } else { "failed" };
+        let status = match outcome {
+            FollowImportItemOutcome::Succeeded => "succeeded",
+            FollowImportItemOutcome::AlreadyFollowing => "already_following",
+            FollowImportItemOutcome::Failed => "failed",
+        };
         sqlx::query(
             "UPDATE follow_import_items SET status = $1::follow_import_item_status, processed_at = $2
              WHERE id = $3 AND status = 'pending'",

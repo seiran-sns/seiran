@@ -831,6 +831,8 @@ export interface FollowImportStatusResponse {
   total: number;
   processed: number;
   succeeded: number;
+  /** 呼び出し前から既にフォロー関係が存在していたため、新規フォローが成立しなかった件数。 */
+  alreadyFollowing: number;
   failed: number;
 }
 

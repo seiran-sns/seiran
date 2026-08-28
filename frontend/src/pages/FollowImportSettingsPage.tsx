@@ -178,6 +178,8 @@ export default function FollowImportSettingsPage() {
             <p className={styles.progressLine}>
               {t("account:importExport.succeededLabel", { count: status.succeeded })}
               {" / "}
+              {t("account:importExport.alreadyFollowingLabel", { count: status.alreadyFollowing })}
+              {" / "}
               {t("account:importExport.failedLabel", { count: status.failed })}
             </p>
             {isRunning && (

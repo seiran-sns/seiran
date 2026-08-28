@@ -49,12 +49,12 @@ pub async fn create_follow(
     .await;
 
     match result {
-        Ok(FollowOutcome::Accepted { target_uri }) => Json(FollowResponse {
+        Ok(FollowOutcome::Accepted { target_uri, .. }) => Json(FollowResponse {
             status: "accepted".to_string(),
             target_uri,
         })
         .into_response(),
-        Ok(FollowOutcome::Pending { target_uri }) => Json(FollowResponse {
+        Ok(FollowOutcome::Pending { target_uri, .. }) => Json(FollowResponse {
             status: "pending".to_string(),
             target_uri,
         })

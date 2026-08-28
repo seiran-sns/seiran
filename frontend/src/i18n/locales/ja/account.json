@@ -111,6 +111,7 @@
     "fileReadError": "ファイルの読み込みに失敗しました。",
     "remainingLabel": "残り {{count}} 件",
     "succeededLabel": "成功 {{count}} 件",
+    "alreadyFollowingLabel": "既存 {{count}} 件",
     "failedLabel": "失敗 {{count}} 件",
     "statusRunning": "インポート中",
     "statusCompleted": "インポート完了",

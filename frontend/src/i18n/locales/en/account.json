@@ -111,6 +111,7 @@
     "fileReadError": "Failed to read the file.",
     "remainingLabel": "{{count}} remaining",
     "succeededLabel": "{{count}} succeeded",
+    "alreadyFollowingLabel": "{{count}} already following",
     "failedLabel": "{{count}} failed",
     "statusRunning": "Importing",
     "statusCompleted": "Import complete",

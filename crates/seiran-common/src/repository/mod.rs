@@ -50,8 +50,8 @@ pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
 pub use follow_import::{
-    FollowImportProgress, FollowImportRepository, FollowImportRequestRow,
-    PgFollowImportRepository,
+    FollowImportItemOutcome, FollowImportProgress, FollowImportRepository,
+    FollowImportRequestRow, PgFollowImportRepository,
 };
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
 pub use instance_domain::{ConfirmOutcome, InstanceDomainRepository, PgInstanceDomainRepository};

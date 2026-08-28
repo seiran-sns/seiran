@@ -25,10 +25,18 @@ use crate::traits::{Job, JobQueue};
 
 #[derive(Debug, Clone)]
 pub enum FollowOutcome {
-    /// フォローが即座に成立した（ローカル・Bsky）
-    Accepted { target_uri: String },
-    /// Follow を送信したが相手の Accept 待ち（Fedi）
-    Pending { target_uri: String },
+    /// フォローが即座に成立した（ローカル・Bsky）。`already_following` は呼び出し前から
+    /// 既にこの関係が存在していたか（`follows` テーブルへの新規INSERTが発生しなかったか）。
+    Accepted {
+        target_uri: String,
+        already_following: bool,
+    },
+    /// Follow を送信したが相手の Accept 待ち（Fedi）。`already_following` の意味は
+    /// `Accepted` と同じ（既にpending/acceptedの関係があった場合に true）。
+    Pending {
+        target_uri: String,
+        already_following: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -178,6 +186,7 @@ async fn follow_local(
 
     Ok(FollowOutcome::Accepted {
         target_uri: format!("https://{}/users/{}", config.local_domain, username),
+        already_following: !inserted,
     })
 }
 
@@ -231,7 +240,7 @@ async fn follow_bsky(
         .await
         .map_err(|e| FollowError::Internal(format!("[follow/bsky] ATP コミット失敗: {}", e)))?;
 
-    config
+    let inserted = config
         .follows
         .insert_accepted_bsky(local_actor_id, remote_actor_id, &rkey)
         .await
@@ -261,6 +270,7 @@ async fn follow_bsky(
 
     Ok(FollowOutcome::Accepted {
         target_uri: format!("at://{}", did),
+        already_following: !inserted,
     })
 }
 
@@ -336,7 +346,7 @@ async fn follow_fedi(
 
     check_not_blocked(config, local_actor_id, remote_actor_id).await?;
 
-    config
+    let inserted = config
         .follows
         .upsert_pending(local_actor_id, remote_actor_id)
         .await
@@ -374,7 +384,10 @@ async fn follow_fedi(
         target_uri
     );
 
-    Ok(FollowOutcome::Pending { target_uri })
+    Ok(FollowOutcome::Pending {
+        target_uri,
+        already_following: !inserted,
+    })
 }
 
 /// `@alice@mastodon.social` または `https://...` 形式のターゲットを Actor URI に解決する

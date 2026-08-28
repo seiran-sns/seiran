@@ -111,6 +111,7 @@
     "fileReadError": "파일을 읽는 데 실패했습니다.",
     "remainingLabel": "{{count}}건 남음",
     "succeededLabel": "성공 {{count}}건",
+    "alreadyFollowingLabel": "기존 {{count}}건",
     "failedLabel": "실패 {{count}}건",
     "statusRunning": "가져오는 중",
     "statusCompleted": "가져오기 완료",
