@@ -147,6 +147,18 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
   - 実ユーザー（`actors.user_id`が`Some`）宛にのみ、結果に応じて`notifications.type = "moveRefollowed"`（フォローし直した）または`"moveAlreadyFollowing"`（既にフォロー済みだった）を生成する。Misskey APIには無いseiran独自拡張で、`notifier_actor_id`=移転元、`related_actor_id`（`notifications`テーブル拡張列）=移転先を指す。8節参照。
 - **リストメンバーシップの付け替え**: `ListRepository::list_ids_containing_actor`で移転元を含むリストを列挙し、各リストで移転元を`remove_member`・移転先を`add_member`する（ATP側の公開リスト同期は対象外、未対応）。
 
+### プロフィールの「別のアカウント」（alsoKnownAs）
+AP Moveの`alsoKnownAs`と同じ語彙を、引っ越し検証とは独立に「同一人物が持つ複数アカウントの相互リンク表示」用途へ転用したseiran独自拡張。`actor_also_known_as`テーブル（`docs/database.md`参照）で管理する。owner（登録主）にはローカルユーザー（プロフィール編集画面での自己登録）とリモートFediアクター（本人のAP actor文書が公開する`alsoKnownAs`を取り込んだもの）の2種類がある。
+
+- **ローカルユーザーの登録**: プロフィール編集画面（リストのメンバー追加UIを流用）から`POST /api/users/also-known-as`（`target`はユーザー名/`@user@domain`/URL/DID、`handlers::target_resolve::resolve_and_upsert_target`で解決）で追加、`DELETE /api/users/also-known-as/:actor_id`で削除。上限は`MAX_ALSO_KNOWN_AS`（10件）。
+- **リモートFediアクターの取り込み**: リモートFediアクターのプロフィール表示のたびに`Job::RemoteAlsoKnownAsSync{owner_actor_id}`（優先度低）を積み、本人のAP actor文書を取得して`alsoKnownAs`配列の各URIを解決（自ドメインはローカルDB参照、`did:`はBsky、それ以外の`https://`はFediアクターとして`jobs::remote_actor_resolve`と同様にupsert）し、`actor_also_known_as`へ同期する（無くなったエントリは削除、新規のみ追加。既存エントリの`verified`/`last_checked_at`は保持）。このAPI経由の登録・削除は行わない（本人のAP文書の内容をそのまま反映するのみ）。
+- **表示**: `GET /api/users/profile`のレスポンス（`ProfileResponse.also_known_as`）に含まれる。ローカル・リモートFedi両方のプロフィールで「別のアカウント」として登録済みアカウント一覧をアイコン付きで表示する（bskyアクターのプロフィールは対象外）。
+- **相互検証（✅バッジ）**: 相手側（fedi/ローカルのみ、bskyは対象外——Bsky DID documentの`alsoKnownAs`はハンドル↔DID対応専用で任意URI列挙の仕組みが無いため）も逆向きにこちらを`also_known_as`として指定していれば`verified=true`として✅を表示する。
+  - **表示時再検証パターン**: プロフィール表示のたびに、ローカルownerなら登録エントリごとに`Job::AlsoKnownAsVerify{owner_actor_id, target_actor_id}`を、リモートFedi ownerなら上記の`RemoteAlsoKnownAsSync`（同期後に取り込んだ各エントリへ`AlsoKnownAsVerify`を積む）を積み、キャッシュ済みの`verified`/`last_checked_at`（`actor_also_known_as`テーブル）を更新する。表示自体は常にキャッシュ値を返すだけで、ユーザーが情報の古さを感じてリロードする頃には反映されている想定（`docs/architecture.md`参照。このパターンは今後の他機能でも再利用予定）。
+  - ローカルターゲットはDB直接参照（相手の`actor_also_known_as`にこちらの`actor_id`があるか）で完結。fediターゲットは`ApClient::fetch_actor`でリモートのAP actor文書を取得し、`ApActor::claims_also_known_as`（Move検証と共用）でowner側のURI（ownerがリモートなら`actors.ap_uri`、ローカルなら自ドメインから組み立てたURI）が含まれるか確認する。
+- **AP文書への公開**: `GET /users/:username`のレスポンスに、ローカルユーザーが登録した「別のアカウント」を自己申告として`alsoKnownAs`に含める（検証は読み手側の責務、Mastodon等と同じ流儀）。ターゲット種別に応じてURI形式を作り分ける: ローカルは自ドメインのactor URI、fediは保存済みの`ap_uri`、bskyは`did:...`形式（Bridgy Fedと同じ流儀、実機確認済み）。
+- **Misskey側の設定方法**: 相手がMisskeyの場合、「設定→その他→アカウントの移行」の「移行元のアカウント」欄にこちらのハンドルを追加すると、Misskey側のAP actor文書の`alsoKnownAs`にこちらのURIが載る。Mastodon等は対応方法がサーバーにより異なる。
+
 ## 3. AT Protocol (Bsky) 統合
 
 seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）は使わない。

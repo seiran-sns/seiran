@@ -224,6 +224,19 @@ pub enum Job {
     /// フォロー関係は作らず、表示のリッチ化（アバター・表示名等）のみが目的。
     RemoteActorResolve { uri: String },
 
+    /// プロフィールの「別のアカウント」（alsoKnownAs、AP Moveの語彙をプロフィール表示・
+    /// 相互検証用途に転用したseiran独自拡張、`docs/protocols.md`参照）の相互検証。
+    /// プロフィール表示のたびに積まれ、キャッシュ済みの検証結果を非同期で更新する。
+    AlsoKnownAsVerify {
+        owner_actor_id: i64,
+        target_actor_id: i64,
+    },
+
+    /// プロフィールの「別のアカウント」表示: リモートFediアクター自身のAP actor文書が
+    /// 公開している`alsoKnownAs`を`actor_also_known_as`へ同期する（本人の自己申告を
+    /// そのまま取り込む）。同期後、取り込んだ各エントリについて`AlsoKnownAsVerify`を積む。
+    RemoteAlsoKnownAsSync { owner_actor_id: i64 },
+
     /// Fediverseリレー参加機能（#140）: relay-agent 仮想アクターによるリレーへの
     /// Follow/Undo送信の同期。`want_follow: true` はリレー登録時、`false` は削除時に積む。
     RelayFollowSync { relay_id: i64, want_follow: bool },

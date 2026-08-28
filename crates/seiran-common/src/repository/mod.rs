@@ -4,6 +4,7 @@
 //! テストでは Mock 実装を差し込める。SQL は各 `Pg*Repository` の `impl` 内にのみ記述する。
 
 pub mod actor;
+pub mod also_known_as;
 pub mod app_token;
 pub mod atp;
 pub mod atp_preferences;
@@ -34,6 +35,7 @@ pub mod totp;
 pub mod user;
 
 pub use actor::{Actor, ActorProfileRow, ActorRepository, PgActorRepository};
+pub use also_known_as::{AlsoKnownAsRepository, AlsoKnownAsRow, PgAlsoKnownAsRepository};
 pub use app_token::{AppTokenRepository, AppTokenRow, PgAppTokenRepository};
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
 pub use atp_preferences::{AtpPreferencesRepository, PgAtpPreferencesRepository};

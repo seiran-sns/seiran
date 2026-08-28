@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { api, DriveFile, getErrorMessage, ProfileField } from "../api/client";
+import { ActorSuggestion, AlsoKnownAsItem, api, DriveFile, getErrorMessage, ProfileField } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
@@ -31,6 +31,12 @@ export default function ProfileEditPage() {
   const [birthday, setBirthday] = useState("");
   const [birthdayPublic, setBirthdayPublic] = useState(false);
   const [profileFields, setProfileFields] = useState<ProfileField[]>(emptyProfileFields());
+  const [akaItems, setAkaItems] = useState<AlsoKnownAsItem[]>([]);
+  const [akaTarget, setAkaTarget] = useState("");
+  const [addingAka, setAddingAka] = useState(false);
+  const [akaError, setAkaError] = useState("");
+  const [akaSuggestions, setAkaSuggestions] = useState<ActorSuggestion[]>([]);
+  const [showAkaSuggestions, setShowAkaSuggestions] = useState(false);
   const [avatar, setAvatar] = useState<DriveFile | null>(null);
   /** 既存のアイコンURL（未変更時のプレビュー用）。新規アップロード後は avatar.url を優先する。 */
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
@@ -52,6 +58,7 @@ export default function ProfileEditPage() {
         const slots = emptyProfileFields();
         p.profile_fields.slice(0, PROFILE_FIELD_SLOTS).forEach((f, i) => { slots[i] = f; });
         setProfileFields(slots);
+        setAkaItems(p.also_known_as);
       })
       .catch((e) => !cancelled && setError(getErrorMessage(e)))
       .finally(() => !cancelled && setLoading(false));
@@ -59,6 +66,65 @@ export default function ProfileEditPage() {
       cancelled = true;
     };
   }, [user]);
+
+  // 「別のアカウント」追加入力のサジェスト（デバウンス300ms）。lists機能のメンバー追加
+  // （`useListsSettings.ts`）と同じ仕組みを流用している。
+  useEffect(() => {
+    const q = akaTarget.trim();
+    if (q.length === 0) {
+      setAkaSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      api.actors
+        .search(q, 8, controller.signal)
+        .then((rows) => !cancelled && setAkaSuggestions(rows))
+        .catch(() => {});
+    }, 300);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [akaTarget]);
+
+  function selectAkaSuggestion(s: ActorSuggestion) {
+    setAkaTarget(s.target);
+    setAkaSuggestions([]);
+    setShowAkaSuggestions(false);
+  }
+
+  // ボタン型は button（submit ではない）: この節はプロフィール編集の外側 <form> の内側に
+  // あるため、ここに <form> を入れ子にすると（HTML仕様上不正）ブラウザのネイティブ送信
+  // （ページリロード）が発火して外側の onSubmit を巻き込み、意図しない挙動になる
+  // （実際に発生した不具合: 「追加」を押しても何も起きずページがリロードされたように見える）。
+  async function addAka() {
+    const target = akaTarget.trim();
+    if (!target) return;
+    setAddingAka(true);
+    setAkaError("");
+    try {
+      setAkaItems(await api.alsoKnownAs.add(target));
+      setAkaTarget("");
+      setAkaSuggestions([]);
+      setShowAkaSuggestions(false);
+    } catch (err) {
+      setAkaError(getErrorMessage(err));
+    } finally {
+      setAddingAka(false);
+    }
+  }
+
+  async function removeAka(actorId: string) {
+    setAkaError("");
+    try {
+      setAkaItems(await api.alsoKnownAs.remove(actorId));
+    } catch (err) {
+      setAkaError(getErrorMessage(err));
+    }
+  }
 
   async function onAvatar(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -199,6 +265,103 @@ export default function ProfileEditPage() {
                 />
               </div>
             ))}
+          </div>
+
+          <div className={styles.akaSection}>
+            <p className={styles.akaLabel}>{t("profile:profileEditPage.akaLabel")}</p>
+            <p className={styles.hint}>{t("profile:profileEditPage.akaVerifiedExplanation")}</p>
+
+            <div className={styles.akaForm}>
+              <div className={styles.akaInputWrap}>
+                <input
+                  className={styles.input}
+                  value={akaTarget}
+                  onChange={(e) => {
+                    setAkaTarget(e.target.value);
+                    setShowAkaSuggestions(true);
+                  }}
+                  onFocus={() => setShowAkaSuggestions(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (!addingAka && akaTarget.trim()) void addAka();
+                    }
+                  }}
+                  placeholder={t("profile:profileEditPage.akaSearchPlaceholder")}
+                  autoComplete="off"
+                />
+                {showAkaSuggestions && akaSuggestions.length > 0 && (
+                  <ul className={styles.suggestList}>
+                    {akaSuggestions.map((s) => (
+                      <li key={s.actor_id}>
+                        <button
+                          type="button"
+                          className={styles.suggestItem}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => selectAkaSuggestion(s)}
+                        >
+                          <span className={styles.suggestAvatar}>
+                            {s.avatar_url ? (
+                              <img src={s.avatar_url} alt="" />
+                            ) : (
+                              <span>{(s.display_name || s.username)[0]?.toUpperCase()}</span>
+                            )}
+                          </span>
+                          <span className={styles.suggestName}>
+                            {s.display_name || s.username}
+                            <span className={styles.suggestHandle}>
+                              @{s.username}
+                              {s.domain ? `@${s.domain}` : ""}
+                            </span>
+                          </span>
+                          <span className={styles.suggestType}>{s.actor_type}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <button
+                className={styles.save}
+                type="button"
+                onClick={() => void addAka()}
+                disabled={addingAka || !akaTarget.trim()}
+              >
+                {addingAka ? t("profile:profileEditPage.addingAkaButton") : t("profile:profileEditPage.addAkaButton")}
+              </button>
+            </div>
+            {akaError && <p className={styles.error}>{akaError}</p>}
+
+            <ul className={styles.akaList}>
+              {akaItems.map((item) => (
+                <li key={item.actor_id} className={styles.akaRow}>
+                  <span className={styles.akaAvatar}>
+                    {item.avatar_url ? (
+                      <img src={item.avatar_url} alt="" />
+                    ) : (
+                      <span>{(item.display_name || item.username)[0]?.toUpperCase()}</span>
+                    )}
+                  </span>
+                  <span className={styles.akaName}>
+                    {item.display_name || item.username}
+                    <span className={styles.akaHandle}>
+                      @{item.username}
+                      {item.domain ? `@${item.domain}` : ""}
+                    </span>
+                  </span>
+                  <span className={styles.akaType}>{item.actor_type}</span>
+                  {item.verified && (
+                    <span className={styles.akaVerified} title={t("profile:profileEditPage.akaVerifiedExplanation")}>
+                      ✅
+                    </span>
+                  )}
+                  <button type="button" className={styles.removeBtn} onClick={() => removeAka(item.actor_id)}>
+                    {t("common:delete")}
+                  </button>
+                </li>
+              ))}
+              {akaItems.length === 0 && <p className={styles.hint}>{t("profile:profileEditPage.noAka")}</p>}
+            </ul>
           </div>
 
           <button className={styles.save} type="submit" disabled={saving}>

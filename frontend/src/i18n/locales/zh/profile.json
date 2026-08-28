@@ -43,6 +43,7 @@
       "confirmButton": "堵塞",
       "cancelButton": "取消"
     },
+    "alsoKnownAsVerifiedTitle": "该账户也将您列为其\"其他账户\"之一（已验证）",
     "bridgeModal": {
       "title": "关注代理帐户",
       "prefix": "该帐户是 {{protocol}} 用户通过桥的投影，称为",
@@ -65,6 +66,12 @@
     "fieldsLabel": "个人资料字段（链接等 - 最多 {{count}}）",
     "fieldNamePlaceholder": "标签（例如网站）",
     "fieldValuePlaceholder": "值（例如 https://example.com）",
+    "akaLabel": "其他账户",
+    "akaVerifiedExplanation": "如果对方账户也登记了您，则会显示✅。",
+    "akaSearchPlaceholder": "按用户名・URL・DID搜索",
+    "addAkaButton": "添加",
+    "addingAkaButton": "添加中...",
+    "noAka": "尚未注册其他账户。",
     "dangerZoneTitle": "危险区域",
     "withdrawButton": "停用该帐户",
     "withdrawConfirm": "停用您的帐户无法撤消。您确定要继续吗？",

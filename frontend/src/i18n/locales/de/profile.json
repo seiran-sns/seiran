@@ -43,6 +43,7 @@
       "confirmButton": "Block",
       "cancelButton": "Stornieren"
     },
+    "alsoKnownAsVerifiedTitle": "Dieses Konto listet Sie ebenfalls als eines seiner \"anderen Konten\" (verifiziert)",
     "bridgeModal": {
       "title": "Einem Proxy-Konto folgen",
       "prefix": "Dieses Konto ist eine Projektion eines {{protocol}}-Benutzers über eine Brücke, die als a bezeichnet wird",
@@ -65,6 +66,12 @@
     "fieldsLabel": "Profilfelder (Links usw. – bis zu {{count}})",
     "fieldNamePlaceholder": "Label (z. B. Website)",
     "fieldValuePlaceholder": "Wert (z. B. https://example.com)",
+    "akaLabel": "Andere Konten",
+    "akaVerifiedExplanation": "Sie erhalten ein ✅, wenn das andere Konto Sie ebenfalls registriert.",
+    "akaSearchPlaceholder": "Nach Benutzername, URL oder DID suchen",
+    "addAkaButton": "Hinzufügen",
+    "addingAkaButton": "Wird hinzugefügt...",
+    "noAka": "Keine anderen Konten registriert.",
     "dangerZoneTitle": "Gefahrenzone",
     "withdrawButton": "Deaktivieren Sie dieses Konto",
     "withdrawConfirm": "Die Deaktivierung Ihres Kontos kann nicht rückgängig gemacht werden. Sind Sie sicher, dass Sie fortfahren möchten?",

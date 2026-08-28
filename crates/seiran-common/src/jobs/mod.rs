@@ -7,6 +7,8 @@
 pub mod account_withdraw_unfollow_all;
 pub mod actor_history_sync;
 pub mod actor_metadata_resolve;
+pub mod also_known_as_sync;
+pub mod also_known_as_verify;
 pub mod ap_delivery;
 pub mod atp_repository_publish;
 pub mod bsky_dm_send;

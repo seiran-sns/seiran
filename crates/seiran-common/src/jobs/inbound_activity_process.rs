@@ -789,7 +789,12 @@ async fn migrate_one_follow(
         .find_by_id(follower_actor_id)
         .await
         .map_err(|e| format!("フォロワーアクター取得エラー: {}", e))?
-        .ok_or_else(|| format!("フォロワーアクター(id={})が見つかりません", follower_actor_id))?;
+        .ok_or_else(|| {
+            format!(
+                "フォロワーアクター(id={})が見つかりません",
+                follower_actor_id
+            )
+        })?;
 
     let already_status = inbox
         .follow_repo
@@ -3280,8 +3285,8 @@ mod tests {
     use super::{
         ap_content_to_markdown_body, bsky_app_url_to_at_uri, extract_ap_quote_uri,
         extract_emoji_tag_url, extract_link_card_urls, extract_mentioned_local_usernames,
-        normalize_ap_poll, sanitize_ap_content_html, strip_html,
-        strip_quote_fallback_line, strip_quote_fallback_line_html,
+        normalize_ap_poll, sanitize_ap_content_html, strip_html, strip_quote_fallback_line,
+        strip_quote_fallback_line_html,
     };
 
     #[test]
@@ -3780,5 +3785,4 @@ mod tests {
         let urls = extract_link_card_urls(body, 2);
         assert_eq!(urls.len(), 2);
     }
-
 }

@@ -85,7 +85,11 @@ pub struct ApActor {
     pub attachment: Vec<serde_json::Value>,
     /// アカウント引っ越し（Move）の検証に使う「この身元が別名として名乗っているURI」一覧。
     /// 実装によって単一文字列/配列のどちらでも来うるため `deserialize_string_or_vec` で吸収する。
-    #[serde(rename = "alsoKnownAs", default, deserialize_with = "deserialize_string_or_vec")]
+    #[serde(
+        rename = "alsoKnownAs",
+        default,
+        deserialize_with = "deserialize_string_or_vec"
+    )]
     pub also_known_as: Vec<String>,
 }
 

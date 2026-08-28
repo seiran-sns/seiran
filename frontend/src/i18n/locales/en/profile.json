@@ -43,6 +43,7 @@
       "confirmButton": "Block",
       "cancelButton": "Cancel"
     },
+    "alsoKnownAsVerifiedTitle": "This account also lists you as one of its \"other accounts\" (verified)",
     "bridgeModal": {
       "title": "Following a proxy account",
       "prefix": "This account is a projection of a {{protocol}} user via a bridge, known as a ",
@@ -65,6 +66,12 @@
     "fieldsLabel": "Profile fields (links, etc. — up to {{count}})",
     "fieldNamePlaceholder": "Label (e.g. Website)",
     "fieldValuePlaceholder": "Value (e.g. https://example.com)",
+    "akaLabel": "Other accounts",
+    "akaVerifiedExplanation": "You'll get a ✅ if the other account also registers you back.",
+    "akaSearchPlaceholder": "Search by username, URL, or DID",
+    "addAkaButton": "Add",
+    "addingAkaButton": "Adding...",
+    "noAka": "No other accounts registered.",
     "dangerZoneTitle": "Danger zone",
     "withdrawButton": "Deactivate this account",
     "withdrawConfirm": "Deactivating your account cannot be undone. Are you sure you want to proceed?",

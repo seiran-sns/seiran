@@ -115,6 +115,10 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 | `RemoteFollowListSync{actor_id, direction}` | リモートFediアクターのfollowers/following全件取得（プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック、`docs/protocols.md` 2節） | 低 |
 | `RemoteActorResolve{uri}` | リモートfollowers/following一覧中、ローカルDB未登録のactor URIのプロフィールを解決し`actors`へupsert（フォロー関係は作らない、`docs/protocols.md` 2節） | 低 |
 | `RemoteInstanceInfoResolve{domain}` | リモートインスタンスのnodeinfoを取得し`remote_instance_meta`へキャッシュ（NoteCardリモートサーバー表示、`docs/database.md`参照）。notes API/Misskey互換APIが未キャッシュのドメインを見つけた際に積む | 低 |
+| `AlsoKnownAsVerify{owner_actor_id, target_actor_id}` | プロフィールの「別のアカウント」（alsoKnownAs、`docs/protocols.md` 2節）の相互検証結果を`actor_also_known_as`テーブルへキャッシュ更新する。「表示時再検証」パターン（下記）の実例 | 低 |
+| `RemoteAlsoKnownAsSync{owner_actor_id}` | リモートFediアクター自身のAP actor文書が公開する`alsoKnownAs`を`actor_also_known_as`へ同期し、取り込んだ各エントリに`AlsoKnownAsVerify`を積む（`docs/protocols.md` 2節） | 低 |
+
+**「表示時再検証」パターン**: 外部（他インスタンス等）の状態に依存する値をリアルタイムで検証すると表示のたびに外部フェッチが走り遅延・相手サーバーへの負荷が生じる。かといって一度きりの検証では相手側の状態変化に追随できない。そこで、表示は常にDBキャッシュ済みの値を即座に返しつつ、表示のたびに低優先度の再検証ジョブを積んで非同期でキャッシュを更新する（「今見ている値は少し古いかもしれないが、リロードすればその頃には最新化されている」という体験を許容する設計）。`AlsoKnownAsVerify`が最初の実例で、同様の「外部状態のキャッシュ+閲覧トリガーの非同期再検証」が必要になった箇所では踏襲する想定。
 
 **並列・排他制御**: グローバル同時実行数上限（`Semaphore`、既定32、ジョブ単位）、ドメイン単位の同時接続数制限（最大2並列、`RemoteActorResolve`/`RemoteFollowListSync`/`ActorHistorySync`などリモートから取得する系のジョブ用。`JobContext::get_domain_semaphore`）、アクターID単位の直列化（ATPコミットの順序保証）、指数バックオフ+ジッターでのリトライ。AP配送（`ApDelivery`）のinboxファンアウト自体は`fan_out_activity`内で`buffer_unordered`により最大8並列（`crates/seiran-common/src/ap/deliver.rs`）。追加の`tokio::spawn`は行わず、Workerジョブ実行のタスク内でポーリングを並列化するのみ（docs/code_audit_2026-08-05.md P-3）。
 

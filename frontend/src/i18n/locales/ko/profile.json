@@ -43,6 +43,7 @@
       "confirmButton": "차단하다",
       "cancelButton": "취소"
     },
+    "alsoKnownAsVerifiedTitle": "이 계정도 당신을 \"다른 계정\" 중 하나로 지정하고 있습니다(검증됨)",
     "bridgeModal": {
       "title": "프록시 계정 팔로우",
       "prefix": "이 계정은 브리지(Bridge)를 통해 {{protocol}} 사용자를 투영한 것입니다.",
@@ -65,6 +66,12 @@
     "fieldsLabel": "프로필 필드(링크 등 - 최대 {{count}})",
     "fieldNamePlaceholder": "라벨(예: 웹사이트)",
     "fieldValuePlaceholder": "값(예: https://example.com)",
+    "akaLabel": "다른 계정",
+    "akaVerifiedExplanation": "상대 계정도 이쪽을 등록하고 있으면 ✅가 표시됩니다.",
+    "akaSearchPlaceholder": "사용자 이름・URL・DID로 검색",
+    "addAkaButton": "추가",
+    "addingAkaButton": "추가 중...",
+    "noAka": "등록된 계정이 없습니다.",
     "dangerZoneTitle": "위험지대",
     "withdrawButton": "이 계정을 비활성화하세요",
     "withdrawConfirm": "계정 비활성화는 취소할 수 없습니다. 계속하시겠습니까?",

@@ -21,7 +21,7 @@ import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
-import { profileQuery, remoteProfileUrl, remoteServerBadgeInfo } from "../lib/format";
+import { profilePath, profileQuery, remoteProfileUrl, remoteServerBadgeInfo } from "../lib/format";
 import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
 import {
   setFollowStatus as setFollowStatusStore,
@@ -503,6 +503,37 @@ export default function ProfilePage() {
                     <span className={styles.idValue}>{field.value}</span>
                   )}
                 </div>
+              ))}
+            </div>
+          )}
+
+          {/* プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。現状ローカル
+              ユーザーのみ対応（public_listsと同様、リモートは将来課題）。 */}
+          {profile.also_known_as.length > 0 && (
+            <div className={styles.akaRow}>
+              {profile.also_known_as.map((item) => (
+                <Link
+                  key={item.actor_id}
+                  to={profilePath(item.username, item.domain)}
+                  className={styles.akaBadge}
+                >
+                  <span className={styles.akaBadgeAvatar}>
+                    {item.avatar_url ? (
+                      <img src={item.avatar_url} alt="" />
+                    ) : (
+                      <span>{(item.display_name || item.username)[0]?.toUpperCase()}</span>
+                    )}
+                  </span>
+                  {item.display_name || item.username}
+                  {item.verified && (
+                    <span
+                      className={styles.akaBadgeVerified}
+                      title={t("profile:profilePage.alsoKnownAsVerifiedTitle")}
+                    >
+                      ✅
+                    </span>
+                  )}
+                </Link>
               ))}
             </div>
           )}

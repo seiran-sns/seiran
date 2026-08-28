@@ -43,6 +43,7 @@
       "confirmButton": "ブロックする",
       "cancelButton": "キャンセル"
     },
+    "alsoKnownAsVerifiedTitle": "相手側も相互に「別のアカウント」として指定しています（検証済み）",
     "bridgeModal": {
       "title": "影武者アカウントのフォロー",
       "prefix": "このアカウントは、{{protocol}}のユーザーがブリッジ経由で投影されている",
@@ -65,6 +66,12 @@
     "fieldsLabel": "プロフィール項目（リンク等、最大{{count}}件）",
     "fieldNamePlaceholder": "ラベル（例: サイト）",
     "fieldValuePlaceholder": "値（例: https://example.com）",
+    "akaLabel": "別のアカウント",
+    "akaVerifiedExplanation": "相手アカウントからもこちらを登録していれば✅️がつきます。",
+    "akaSearchPlaceholder": "ユーザー名・URL・DIDで検索",
+    "addAkaButton": "追加",
+    "addingAkaButton": "追加中...",
+    "noAka": "登録されているアカウントはありません。",
     "dangerZoneTitle": "危険な操作",
     "withdrawButton": "このアカウントを退会する",
     "withdrawConfirm": "退会すると元に戻せません。本当に退会しますか？",

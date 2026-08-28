@@ -319,6 +319,9 @@ pub struct ProfileResponse {
     /// （編集フォームの現在値用、他人には無関係な内部設定のため省略）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub birthday_public: Option<bool>,
+    /// プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。現状ローカル
+    /// ユーザーのみ対応（`public_lists`と同様、リモートは将来課題）。
+    pub also_known_as: Vec<crate::handlers::also_known_as::AlsoKnownAsItem>,
 }
 
 #[derive(Serialize)]
@@ -428,6 +431,7 @@ async fn fetch_bsky_profile_from_appview(
         follower_count: 0,
         birthday: None,
         birthday_public: None,
+        also_known_as: vec![],
     })
     .into_response()
 }
@@ -532,7 +536,14 @@ async fn sync_remote_bsky_pinned(
         Some(pin) => {
             match seiran_common::atp::fetch_single_bsky_post(&state.http_client, &pin.uri).await {
                 Ok(Some(post)) => {
-                    match seiran_common::atp::upsert_bsky_post(&state.db, &state.job_queue, actor_id, &post).await {
+                    match seiran_common::atp::upsert_bsky_post(
+                        &state.db,
+                        &state.job_queue,
+                        actor_id,
+                        &post,
+                    )
+                    .await
+                    {
                         Ok(id) => vec![id],
                         Err(e) => {
                             tracing::warn!("[profile] pinnedPost 保存失敗（スキップ）: {}", e);
@@ -893,6 +904,39 @@ async fn build_profile_response(
 
     let instance = resolve_profile_instance_info(state, &actor.actor_type, &actor.domain).await;
 
+    // プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。ローカルユーザー
+    // （プロフィール編集画面での自己登録）とリモートFediアクター（本人のAP actor文書の
+    // alsoKnownAs自己申告を`jobs::also_known_as_sync`が取り込む）の両方に対応する。bsky
+    // アクターは対象外（public_listsと同じくbskyアクターは非対応）。表示は常にキャッシュ
+    // 済みの検証結果（`verified`）を返しつつ、表示のたびに非同期の再検証/同期ジョブを積む
+    // （「表示時再検証」パターン）。ユーザーが情報が古いと感じたらリロードすれば、次に開く
+    // 頃には反映されている想定（`docs/architecture.md`参照）。
+    let also_known_as: Vec<crate::handlers::also_known_as::AlsoKnownAsItem> =
+        if actor.actor_type == "local" || actor.actor_type == "fedi" {
+            match state.also_known_as.list_with_actor_info(actor_id).await {
+                Ok(rows) => {
+                    if actor.actor_type == "fedi" {
+                        state.enqueue_remote_also_known_as_sync(actor_id).await;
+                    } else {
+                        for row in &rows {
+                            if row.actor_type != "bsky" {
+                                state
+                                    .enqueue_also_known_as_verify(actor_id, row.target_actor_id)
+                                    .await;
+                            }
+                        }
+                    }
+                    rows.into_iter().map(Into::into).collect()
+                }
+                Err(e) => {
+                    tracing::error!("[profile] also_known_as 取得失敗: {}", e);
+                    vec![]
+                }
+            }
+        } else {
+            vec![]
+        };
+
     // 本人が閲覧している場合は編集フォームの初期値として常に返す。他人には
     // birth_date_public=trueの場合のみ（Fediverse連合と同じ可視性ルール）。
     let is_self = my_actor_id == Some(actor_id);
@@ -933,6 +977,7 @@ async fn build_profile_response(
         follower_count,
         birthday,
         birthday_public,
+        also_known_as,
     })
     .into_response()
 }
@@ -1053,6 +1098,7 @@ async fn fetch_remote_profile(
         follower_count: 0,
         birthday: None,
         birthday_public: None,
+        also_known_as: vec![],
     })
     .into_response()
 }

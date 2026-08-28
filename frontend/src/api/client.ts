@@ -589,6 +589,19 @@ export interface ProfileField {
   value: string;
 }
 
+/** プロフィールの「別のアカウント」1件（alsoKnownAs、seiran独自拡張）。 */
+export interface AlsoKnownAsItem {
+  actor_id: string;
+  username: string;
+  domain: string;
+  display_name?: string;
+  actor_type: string;
+  avatar_url?: string;
+  /** 相手側（fedi/ローカルのみ）も逆向きにこちらを指定していれば`true`。 */
+  verified: boolean;
+  last_checked_at?: string;
+}
+
 /** ProfileResponse（バックエンドは snake_case のまま）。 */
 export interface UserProfile {
   /** DB未登録のリモートアクター（AppView直取得で未フォローのBskyユーザー等）は undefined。 */
@@ -645,6 +658,9 @@ export interface UserProfile {
   birthday?: string;
   /** `true`ならFediverseへ`vcard:bday`として公開する。本人が閲覧している場合のみ含まれる。 */
   birthday_public?: boolean;
+  /** プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。現状ローカルユーザーのみ
+   * （`public_lists`と同様、リモートは将来課題）。 */
+  also_known_as: AlsoKnownAsItem[];
 }
 
 /** フォロー中/フォロワー一覧の1件（#56、`GET /users/following` `/users/followers`）。 */
@@ -1486,6 +1502,19 @@ export const api = {
         birthday?: string;
         birthday_public: boolean;
       }>("PATCH", "/users/profile", patch);
+    },
+  },
+
+  /** プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。 */
+  alsoKnownAs: {
+    add(target: string) {
+      return request<AlsoKnownAsItem[]>("POST", "/users/also-known-as", { target });
+    },
+    remove(actorId: string) {
+      return request<AlsoKnownAsItem[]>(
+        "DELETE",
+        `/users/also-known-as/${encodeURIComponent(actorId)}`,
+      );
     },
   },
 

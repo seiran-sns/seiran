@@ -28,12 +28,12 @@ use tower_http::cors::{Any, CorsLayer};
 use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 
 use seiran_common::repository::{
-    ActorRepository, AppTokenRepository, AtpPreferencesRepository, AtpReadRepository,
-    AtpSessionRepository, AuthRateLimitRepository, BlockRepository, DmRepository,
-    EmailChangeRepository, EmailVerificationRepository, EmojiRepository, FollowRepository,
-    HashtagRepository, InstanceDomainRepository, ListRepository, MuteRepository,
-    NotificationRepository, PasswordResetRepository, PgActorRepository, PgAppTokenRepository,
-    PgAtpPreferencesRepository, PgAtpReadRepository, PgAtpSessionRepository,
+    ActorRepository, AlsoKnownAsRepository, AppTokenRepository, AtpPreferencesRepository,
+    AtpReadRepository, AtpSessionRepository, AuthRateLimitRepository, BlockRepository,
+    DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository,
+    FollowRepository, HashtagRepository, InstanceDomainRepository, ListRepository, MuteRepository,
+    NotificationRepository, PasswordResetRepository, PgActorRepository, PgAlsoKnownAsRepository,
+    PgAppTokenRepository, PgAtpPreferencesRepository, PgAtpReadRepository, PgAtpSessionRepository,
     PgAuthRateLimitRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository,
     PgEmailVerificationRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository,
     PgInstanceDomainRepository, PgListRepository, PgMuteRepository, PgNotificationRepository,
@@ -61,6 +61,9 @@ use streaming::StreamHub;
 pub struct AppState {
     /// リポジトリ層（SQL アクセスはここを経由する）
     pub actors: Arc<dyn ActorRepository>,
+    /// プロフィールの「別のアカウント」（alsoKnownAs、AP Moveの語彙をプロフィール表示・
+    /// 相互検証用途に転用したseiran独自拡張）。
+    pub also_known_as: Arc<dyn AlsoKnownAsRepository>,
     pub users: Arc<dyn UserRepository>,
     pub posts: Arc<dyn PostRepository>,
     pub follows: Arc<dyn FollowRepository>,
@@ -292,6 +295,49 @@ impl AppState {
         }
     }
 
+    /// プロフィールの「別のアカウント」相互検証ジョブを積む。プロフィール表示のたびに
+    /// 呼ばれ、表示は常にキャッシュ済みの検証結果を読むだけで、この結果は次回表示時に
+    /// 反映される（「表示時再検証」パターン、`docs/architecture.md`参照）。
+    pub async fn enqueue_also_known_as_verify(&self, owner_actor_id: i64, target_actor_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::AlsoKnownAsVerify {
+                    owner_actor_id,
+                    target_actor_id,
+                },
+                job_priority::LOW,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] AlsoKnownAsVerify enqueue 失敗 (owner={}, target={}): {}",
+                owner_actor_id,
+                target_actor_id,
+                e
+            );
+        }
+    }
+
+    /// プロフィールの「別のアカウント」表示: リモートFediアクター自身のalsoKnownAs自己申告を
+    /// 取り込む同期ジョブを積む。
+    pub async fn enqueue_remote_also_known_as_sync(&self, owner_actor_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::RemoteAlsoKnownAsSync { owner_actor_id },
+                job_priority::LOW,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] RemoteAlsoKnownAsSync enqueue 失敗 (owner={}): {}",
+                owner_actor_id,
+                e
+            );
+        }
+    }
+
     /// リモートインスタンスのnodeinfo取得ジョブを積む（#NoteCardリモートサーバー表示）。
     /// `remote_instance_meta` に未登録のドメインを見つけた際、表示のリッチ化目的で積む。
     pub async fn enqueue_remote_instance_info_resolve(&self, domain: String) {
@@ -403,6 +449,8 @@ pub async fn init_state(
         Arc::new(PgNotificationRepository::new(pool.clone()));
     let dm: Arc<dyn DmRepository> = Arc::new(PgDmRepository::new(pool.clone()));
     let lists: Arc<dyn ListRepository> = Arc::new(PgListRepository::new(pool.clone()));
+    let also_known_as: Arc<dyn AlsoKnownAsRepository> =
+        Arc::new(PgAlsoKnownAsRepository::new(pool.clone()));
     let hashtags: Arc<dyn HashtagRepository> = Arc::new(PgHashtagRepository::new(pool.clone()));
     let password_resets: Arc<dyn PasswordResetRepository> =
         Arc::new(PgPasswordResetRepository::new(pool.clone()));
@@ -450,6 +498,7 @@ pub async fn init_state(
 
     AppState {
         actors,
+        also_known_as,
         users,
         posts,
         follows,
@@ -832,7 +881,10 @@ pub fn router(state: AppState) -> Router {
         // ActivityPub Note / OGP注入済みSPA（Accept ヘッダーで振り分け、`handlers::ogp`）
         .route("/notes/:id", get(handlers::notes::get_note_ap))
         // Announce（リポストラッパー）canonical URL。ブラウザは /notes/:id へリダイレクト
-        .route("/announces/:id", get(handlers::notes::get_announce_redirect))
+        .route(
+            "/announces/:id",
+            get(handlers::notes::get_announce_redirect),
+        )
         // プロフィールページ（OGP注入済みSPA HTMLを返す、`handlers::ogp`）
         .route("/@:handle", get(handlers::ogp::profile_ogp))
         // フォロー
@@ -913,6 +965,15 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/users/remote-follow-summary",
             get(handlers::users::user_remote_follow_summary),
+        )
+        // プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）
+        .route(
+            "/api/users/also-known-as",
+            post(handlers::also_known_as::add),
+        )
+        .route(
+            "/api/users/also-known-as/:actor_id",
+            delete(handlers::also_known_as::remove),
         )
         // Misskey 互換レイヤー
         .route("/api/meta", post(handlers::meta::api_meta))

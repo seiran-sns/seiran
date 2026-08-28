@@ -34,6 +34,7 @@ ID 採番は2系統ある。
 | `fediverse_relays` | 参加するFediverseリレーのinbox URL・Follow活動ID・承認状態 |
 | `storage_providers` | メディア保存先オブジェクトストレージ(S3互換)の設定 |
 | `lists` / `list_members` | ユーザーごとのリスト（Bsky `app.bsky.graph.list` 相当） |
+| `actor_also_known_as` | プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張。AP Moveの語彙をプロフィール表示・相互検証用途に転用） |
 | `pinned_posts` | プロフィールへのピン留め投稿 |
 | `hashtags` / `post_hashtags` | ハッシュタグ（正規化済みタグ名）とポストのm:n関係 |
 | `pinned_hashtags` | ユーザーごとのハッシュタグタブのピン留め（ホーム画面への追加） |
@@ -190,6 +191,13 @@ MiAuth（`/api/miauth/:session_id/authorize`）認可成立時、または設定
 `related_actor_id` は `moveRefollowed`/`moveAlreadyFollowing` 専用の2つ目のアクター参照（移転先）。既存の `notifier_actor_id` が移転元を指すため、1つのアクター参照しか持てない他の種別とは異なりこの2種別だけ2アクターを必要とする（他の種別では常に `NULL`）。`docs/protocols.md` 2節・8節参照。
 
 `reaction_id`（`reactions.id` を保存、部分 UNIQUE インデックス）は `source_uri` とは別目的の重複排除トークン。ローカルユーザーが ATP 実体を持つ投稿へリアクションすると「ローカル即時通知」と「その ATP コミットが自分自身の firehose 経由で戻ってきた再受信通知」の2経路が走ってしまうため、両方に同じ `reactions.id` を持たせて UNIQUE 制約で片方を弾く（`docs/protocols.md` 8節）。他人発のリアクションでは常に `NULL` になり、同じ投稿への複数回の連続リアクション（絵文字を変えて通知欄に文章を書く等）を妨げない設計を維持している。
+
+### `actor_also_known_as`
+プロフィールの「別のアカウント」機能（AP Moveの`alsoKnownAs`と同じ語彙を、引っ越し検証とは独立にプロフィール表示・相互検証用途へ転用したseiran独自拡張）。`owner_actor_id`が「`target_actor_id`も自分だ」と申告する片方向の関係で、`target_actor_id`は`list_members`同様に解決済みの`actors.id`をそのまま指す。`owner_actor_id`は2種類ある: ローカルユーザー（プロフィール編集画面の入力、`handlers::target_resolve::resolve_and_upsert_target`で解決・本人がAPI経由で追加/削除）と、リモートFediアクター（`jobs::also_known_as_sync`が本人のAP actor文書の`alsoKnownAs`自己申告を取り込んだもの、API経由の追加/削除は行わずジョブが同期する）。bskyアクターはowner・targetいずれにも対応しない。
+
+`verified`/`last_checked_at`は「相手側（fedi/ローカルのみ、bskyは対象外）も逆向きに同じ申告をしているか」の検証結果キャッシュ。プロフィール表示のたびに、ローカルownerは`Job::AlsoKnownAsVerify`が、リモートFedi ownerは`Job::RemoteAlsoKnownAsSync`（同期後に取り込んだ各エントリへ`AlsoKnownAsVerify`を積む）が積まれ、表示自体は常にキャッシュ値を返す「表示時再検証」パターン（`docs/architecture.md`参照）。ローカルターゲットはDB直接参照、fediターゲットは`ApClient::fetch_actor`でリモートのAP actor文書の`alsoKnownAs`を確認する。
+
+`docs/protocols.md` 2節「プロフィールの『別のアカウント』（alsoKnownAs）」参照。
 
 ### `hashtags` / `post_hashtags` / `pinned_hashtags`
 ハッシュタグは検索結果の即席表示ではなく、ポストとm:nの関係を持つ永続化オブジェクトとして扱う。`hashtags.name` は正規化済み（先頭`#`除去・小文字化、グルーピング用の内部表現）。表示上の大文字小文字は各投稿の `posts.body` 原文に委ねる（`hashtags` テーブル自体は表示用の値を持たない）。

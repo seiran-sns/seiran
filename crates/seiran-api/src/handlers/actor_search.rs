@@ -72,11 +72,13 @@ pub async fn search_actors(
         .into_iter()
         .map(
             |(id, username, domain, display_name, actor_type, avatar_url)| {
-                // add_member にそのまま渡せるターゲット文字列を計算する。
+                // add_member/also-known-as にそのまま渡せるターゲット文字列を計算する。
+                // `resolve_and_upsert_target` は先頭の`@`を無条件で除去するため無くても
+                // 動作はするが、ハンドルの慣習的な表記（`@user`/`@user@domain`）に揃える。
                 let target = match actor_type.as_str() {
-                    "local" => username.clone(),
-                    "bsky" => username.clone(), // ハンドル（domainは空文字のため username がハンドル本体）
-                    _ => format!("{}@{}", username, domain),
+                    "local" => format!("@{}", username),
+                    "bsky" => format!("@{}", username), // ハンドル（domainは空文字のため username がハンドル本体）
+                    _ => format!("@{}@{}", username, domain),
                 };
                 serde_json::json!({
                     "actor_id": id.to_string(),

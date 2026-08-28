@@ -37,6 +37,10 @@ pub use username::{
 
 /// プロフィールのキーバリュー項目（#62）の最大件数。Mastodon 等のデフォルト（4件）に合わせる。
 pub const MAX_PROFILE_FIELDS: usize = 4;
+
+/// プロフィールの「別のアカウント」（alsoKnownAs、AP Moveの語彙をプロフィール表示・
+/// 相互検証用途に転用したseiran独自拡張）の最大登録件数。
+pub const MAX_ALSO_KNOWN_AS: usize = 10;
 pub use ap::{ApClient, ApError};
 pub use atp::{AtpCommitError, AtpCommitEvent, AtpCommitService};
 pub use auth::local::VerifiedUser;

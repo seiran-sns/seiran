@@ -367,6 +367,13 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
             direction,
         } => jobs::remote_follow_list_sync::handle(actor_id, direction, ctx).await,
         Job::RemoteActorResolve { uri } => jobs::remote_actor_resolve::handle(uri, ctx).await,
+        Job::AlsoKnownAsVerify {
+            owner_actor_id,
+            target_actor_id,
+        } => jobs::also_known_as_verify::handle(owner_actor_id, target_actor_id, ctx).await,
+        Job::RemoteAlsoKnownAsSync { owner_actor_id } => {
+            jobs::also_known_as_sync::handle(owner_actor_id, ctx).await
+        }
         Job::RelayFollowSync {
             relay_id,
             want_follow,
@@ -402,6 +409,8 @@ fn job_name(job: &Job) -> &'static str {
         Job::BskyDmSend { .. } => "BskyDmSend",
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
+        Job::AlsoKnownAsVerify { .. } => "AlsoKnownAsVerify",
+        Job::RemoteAlsoKnownAsSync { .. } => "RemoteAlsoKnownAsSync",
         Job::RelayFollowSync { .. } => "RelayFollowSync",
         Job::OgpFetch { .. } => "OgpFetch",
         Job::LinkCardEmbedResolve { .. } => "LinkCardEmbedResolve",
@@ -478,6 +487,19 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         },
         Job::RemoteActorResolve { .. } => RetryConfig {
             // ActorMetadataResolve と同様の軽量ベストエフォート解決。
+            max_attempts: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
+        },
+        Job::AlsoKnownAsVerify { .. } => RetryConfig {
+            // RemoteActorResolve と同様の軽量ベストエフォート検証。表示のたびに再度積まれる
+            // ため、失敗しても次回表示時に自然にリトライされる。
+            max_attempts: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
+        },
+        Job::RemoteAlsoKnownAsSync { .. } => RetryConfig {
+            // AlsoKnownAsVerify と同様、表示のたびに再度積まれるため軽量リトライで十分。
             max_attempts: 3,
             base_delay_ms: 1000,
             max_delay_ms: 30_000,

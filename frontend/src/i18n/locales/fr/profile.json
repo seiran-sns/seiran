@@ -43,6 +43,7 @@
       "confirmButton": "Bloc",
       "cancelButton": "Annuler"
     },
+    "alsoKnownAsVerifiedTitle": "Ce compte vous répertorie également comme l'un de ses \"autres comptes\" (vérifié)",
     "bridgeModal": {
       "title": "Suivre un compte proxy",
       "prefix": "Ce compte est une projection d'un utilisateur {{protocol}} via un pont, appelé",
@@ -65,6 +66,12 @@
     "fieldsLabel": "Champs de profil (liens, etc. — jusqu'à {{count}})",
     "fieldNamePlaceholder": "Étiquette (par exemple site Web)",
     "fieldValuePlaceholder": "Valeur (par exemple https://example.com)",
+    "akaLabel": "Autres comptes",
+    "akaVerifiedExplanation": "Vous obtiendrez un ✅ si l'autre compte vous enregistre également.",
+    "akaSearchPlaceholder": "Rechercher par nom d'utilisateur, URL ou DID",
+    "addAkaButton": "Ajouter",
+    "addingAkaButton": "Ajout...",
+    "noAka": "Aucun autre compte enregistré.",
     "dangerZoneTitle": "Zone dangereuse",
     "withdrawButton": "Désactiver ce compte",
     "withdrawConfirm": "La désactivation de votre compte est irréversible. Êtes-vous sûr de vouloir continuer ?",

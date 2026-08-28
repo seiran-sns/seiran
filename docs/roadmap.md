@@ -1,5 +1,6 @@
 # 開発ロードマップ
 
+- [x] **プロフィールの「別のアカウント」機能（alsoKnownAs）** — AP Moveの`alsoKnownAs`の語彙を、引っ越し検証とは独立にプロフィール表示・相互検証用途へ転用。ローカルユーザーはプロフィール編集画面（リストのメンバー追加UIを流用）から複数のbsky/fedi/seiranアカウントを登録でき、プロフィール表示画面に「別のアカウント」としてアイコン付きで一覧表示する。リモートFediアクターのプロフィールでも、本人のAP actor文書が公開する`alsoKnownAs`自己申告を`Job::RemoteAlsoKnownAsSync`が取り込み同じ見た目で表示する。相手側（fedi/ローカルのみ、bskyは対象外）も逆向きにこちらを指定していれば✅バッジで相互検証済みと分かる。検証結果は表示のたびに積む非同期ジョブ（`Job::AlsoKnownAsVerify`）でキャッシュ更新する「表示時再検証」パターンの最初の実例（`docs/architecture.md`参照、今後の他機能でも再利用予定）。ローカルユーザー自身のAP actor文書（`GET /users/:username`）にも登録済みアカウントを自己申告として公開する。詳細: `docs/protocols.md` 2節「プロフィールの『別のアカウント』（alsoKnownAs）」、`docs/database.md`、`docs/ui_spec.md`
 - [x] **ActivityPub Move（アカウント引っ越し）受信対応・第1段階** — 他サーバーからの`Move`アクティビティ受信のみ対応（送信側=自分のアカウントを引っ越す操作は未実装）。移転先アクター文書の`alsoKnownAs`が移転元URIを含むことを確認できた場合のみ処理する（なりすまし対策）。移転元をフォロー中/フォロー申請中だったローカルアクター（実ユーザー・リスト機能の`list-relay`プロキシアクターの双方）を移転先へ付け替え、対象がリストのメンバーだった場合はリストメンバーシップも移転先へ差し替える。実ユーザーには結果に応じて`moveRefollowed`（フォローし直した）/`moveAlreadyFollowing`（既にフォロー済みだった）というMisskey APIに無い独自拡張の通知を送る。詳細: `docs/protocols.md` 2節「アカウント引っ越し（Move）の受信」・8節、`docs/database.md`
 - [x] **CW（閲覧注意）機能（#229）** — 投稿フォームにCWトグルを追加し、ONにするとCWガイド文
   入力欄（100書記素まで）が現れる。バックエンドは`CreateNoteRequest.content_warning`
