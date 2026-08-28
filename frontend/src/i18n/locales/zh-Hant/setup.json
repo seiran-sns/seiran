@@ -1,0 +1,13 @@
+{
+  "setup": {
+    "title": "初始設定",
+    "description": "請建立一個管理員帳戶。",
+    "usernameLabel": "使用者名稱",
+    "emailLabel": "電子郵件",
+    "passwordLabel": "密碼（8個字元以上）",
+    "submitting": "正在設定...",
+    "submit": "建立管理員帳戶",
+    "domainConfirmedNotice": "此實例將以 https://{{domain}} 運作（之後無法變更）。",
+    "singleHostModeNotice": "無法偵測到您的連線網域，因此將以不含聯邦功能的單主機模式啟動。"
+  }
+}

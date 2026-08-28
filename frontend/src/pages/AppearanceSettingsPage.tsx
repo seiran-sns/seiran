@@ -5,17 +5,22 @@ import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useTheme, type ThemePreference } from "../contexts/ThemeContext";
-import i18n, { supportedLanguages, type SupportedLanguage } from "../i18n";
+import i18n, {
+  normalizeDetectedLanguage,
+  isDisplayLanguage,
+  type DisplayLanguage,
+} from "../i18n";
 import panel from "../components/common/Panel.module.css";
 import styles from "./AppearanceSettings.module.css";
 
-type LanguageOption = "auto" | SupportedLanguage;
+type LanguageOption = "auto" | DisplayLanguage;
 
 const LANGUAGE_LABEL_KEYS: Record<LanguageOption, string> = {
   auto: "appearanceSettings.languageAuto",
   ja: "appearanceSettings.languageJa",
   en: "appearanceSettings.languageEn",
-  zh: "appearanceSettings.languageZh",
+  "zh-Hant": "appearanceSettings.languageZhHant",
+  "zh-Hans": "appearanceSettings.languageZhHans",
   ko: "appearanceSettings.languageKo",
   es: "appearanceSettings.languageEs",
   de: "appearanceSettings.languageDe",
@@ -37,9 +42,8 @@ function detectAutoLanguage(): string {
       ? navigator.languages
       : [navigator.language];
   for (const lang of langs) {
-    const language = lang.toLowerCase().split("-")[0];
-    if (supportedLanguages.includes(language as SupportedLanguage))
-      return language;
+    const normalized = normalizeDetectedLanguage(lang);
+    if (isDisplayLanguage(normalized)) return normalized;
   }
   return "en";
 }
@@ -53,8 +57,8 @@ export default function AppearanceSettingsPage() {
     useTheme();
 
   const [selected, setSelected] = useState<LanguageOption>(
-    supportedLanguages.includes(user?.language_preference as SupportedLanguage)
-      ? (user?.language_preference as SupportedLanguage)
+    isDisplayLanguage(user?.language_preference ?? "")
+      ? (user?.language_preference as DisplayLanguage)
       : "auto",
   );
   const [saving, setSaving] = useState(false);

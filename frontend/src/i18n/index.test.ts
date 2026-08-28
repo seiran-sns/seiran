@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resources, supportedLanguages } from "./index";
+import { resources, displayLanguages } from "./index";
 
 function flatten(
   value: Record<string, unknown>,
@@ -29,7 +29,7 @@ describe("i18n resources", () => {
       ]),
     );
 
-    for (const language of supportedLanguages) {
+    for (const language of displayLanguages) {
       expect(Object.keys(resources[language]).sort(), language).toEqual(
         referenceNamespaces,
       );
@@ -43,7 +43,7 @@ describe("i18n resources", () => {
   });
 
   it("preserves interpolation placeholders in every translation", () => {
-    for (const language of supportedLanguages) {
+    for (const language of displayLanguages) {
       for (const [namespace, tree] of Object.entries(resources.en)) {
         const reference = flatten(tree);
         const translated = flatten(resources[language][namespace]);

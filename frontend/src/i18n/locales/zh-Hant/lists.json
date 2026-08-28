@@ -1,0 +1,25 @@
+{
+  "listsSettingsPage": {
+    "title": "管理列表",
+    "newListNamePlaceholder": "新列表名稱",
+    "publicLabel": "公開",
+    "creatingButton": "建立中...",
+    "noLists": "您尚未建立任何列表。",
+    "isPublicLabel": "公開",
+    "isPrivateLabel": "私密",
+    "memberCount": "{{count}} 位成員",
+    "selectListPrompt": "請選擇左側的列表。",
+    "editingHeader": "編輯「{{name}}」",
+    "deleteListConfirm": "要刪除這個列表嗎？此操作無法復原。",
+    "memberSearchPlaceholder": "以 ID／代號／暱稱搜尋，或輸入 @user@domain · https://... · did:...",
+    "addingMemberButton": "新增中...",
+    "addMemberButton": "新增成員",
+    "noMembers": "尚無成員。"
+  },
+  "listDetailPage": {
+    "title": "列表",
+    "notFound": "這個列表不存在，或設為私密。",
+    "memberCount": "{{count}} 位成員",
+    "emptyTimeline": "此列表成員的貼文將顯示在這裡。"
+  }
+}

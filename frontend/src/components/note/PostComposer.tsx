@@ -33,17 +33,23 @@ import {
   saveComposerDraft,
 } from "../../lib/composerDraft";
 import { loadComposerDefaults, saveComposerDefaults } from "../../lib/composerDefaults";
-import i18n, { supportedLanguages, type SupportedLanguage } from "../../i18n";
+import i18n, {
+  postLanguages,
+  postLanguageBase,
+  isPostLanguage,
+  type PostLanguage,
+} from "../../i18n";
 import styles from "./PostComposer.module.css";
 import ComposerEditor from "./ComposerEditor";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
 
-/** ポスト言語選択リスト（#表示言語設定と同じ7言語、`i18n.supportedLanguages`）の表示名キー。
- * 値は`AppearanceSettingsPage`の言語ラベルと同じ翻訳キーを再利用する（言語の自称は
- * 表示言語に関わらず常に同じネイティブ表記のため、翻訳文言を専用に持つ必要がない）。 */
-const POST_LANGUAGE_LABEL_KEYS: Record<SupportedLanguage, string> = {
+/** ポスト言語選択リスト（`i18n.postLanguages`、表示言語と異なり中国語はバリエーションを
+ * 持たない7言語）の表示名キー。値は`AppearanceSettingsPage`の言語ラベルと同じ翻訳キーを
+ * 再利用する（言語の自称は表示言語に関わらず常に同じネイティブ表記のため、翻訳文言を
+ * 専用に持つ必要がない）。 */
+const POST_LANGUAGE_LABEL_KEYS: Record<PostLanguage, string> = {
   ja: "appearanceSettings.languageJa",
   en: "appearanceSettings.languageEn",
   zh: "appearanceSettings.languageZh",
@@ -53,11 +59,10 @@ const POST_LANGUAGE_LABEL_KEYS: Record<SupportedLanguage, string> = {
   fr: "appearanceSettings.languageFr",
 };
 
-/** ポスト言語選択の初期値（デフォルトは現在の表示言語、マイケル指示）。 */
-function defaultPostLanguage(): SupportedLanguage {
-  return supportedLanguages.includes(i18n.language as SupportedLanguage)
-    ? (i18n.language as SupportedLanguage)
-    : "en";
+/** ポスト言語選択の初期値（デフォルトは現在の表示言語、マイケル指示）。表示言語が
+ * `zh-Hant`/`zh-Hans`のどちらでも、ポスト言語のデフォルトは`zh`に丸める。 */
+function defaultPostLanguage(): PostLanguage {
+  return postLanguageBase(i18n.language);
 }
 
 interface PostComposerProps {
@@ -280,9 +285,9 @@ export default function PostComposer({
   );
   // ポスト言語（Bsky配送の`langs`にのみ意味を持つ）。デフォルトは現在の表示言語
   // （マイケル指示、`composerDefaults`の「最後に送信した値」方式とは異なる）。
-  const [language, setLanguage] = useState<SupportedLanguage>(
-    supportedLanguages.includes(initialDraft?.language as SupportedLanguage)
-      ? (initialDraft?.language as SupportedLanguage)
+  const [language, setLanguage] = useState<PostLanguage>(
+    isPostLanguage(initialDraft?.language ?? "")
+      ? (initialDraft?.language as PostLanguage)
       : defaultPostLanguage(),
   );
   const [langPickerOpen, setLangPickerOpen] = useState(false);
@@ -357,8 +362,8 @@ export default function PostComposer({
       setCwGuide(draft?.cwGuide ?? "");
       setCheckedLinkCardUrls(draft?.linkCardUrls ?? []);
       setLanguage(
-        supportedLanguages.includes(draft?.language as SupportedLanguage)
-          ? (draft?.language as SupportedLanguage)
+        isPostLanguage(draft?.language ?? "")
+          ? (draft?.language as PostLanguage)
           : defaultPostLanguage(),
       );
       setDeliverFedi(draft?.deliverFedi ?? fediReplyAllowed);
@@ -383,7 +388,7 @@ export default function PostComposer({
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [langPickerOpen]);
 
-  function selectLanguage(code: SupportedLanguage) {
+  function selectLanguage(code: PostLanguage) {
     setLanguage(code);
     setLangPickerOpen(false);
   }
@@ -833,7 +838,7 @@ export default function PostComposer({
                 role="listbox"
                 aria-label={t("home:postComposer.postLanguageHint")}
               >
-                {supportedLanguages.map((code) => (
+                {postLanguages.map((code) => (
                   <button
                     key={code}
                     type="button"

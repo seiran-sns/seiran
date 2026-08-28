@@ -1,4 +1,4 @@
-import type { SupportedLanguage } from "../i18n";
+import type { PostLanguage } from "../i18n";
 
 interface EmojibaseEntry {
   emoji?: string;
@@ -12,7 +12,7 @@ export type EmojiAnnotationIndex = Map<string, string[]>;
 // emojibase-dataの生JSON（hexcode/group/order/skins等を含み1言語700〜800kB）を直接
 // importせず、postinstall（scripts/build-emoji-annotations.mjs）が生成する
 // emoji/label/tagsだけの軽量版を読む（ダウンロードサイズ対策、docs/code_audit_2026-08-05.md P-7）。
-const dataLoaders: Record<SupportedLanguage, () => Promise<EmojibaseEntry[]>> = {
+const dataLoaders: Record<PostLanguage, () => Promise<EmojibaseEntry[]>> = {
   en: () => import("../generated/emoji-annotations/en.json").then((m) => m.default as EmojibaseEntry[]),
   ja: () => import("../generated/emoji-annotations/ja.json").then((m) => m.default as EmojibaseEntry[]),
   zh: () => import("../generated/emoji-annotations/zh.json").then((m) => m.default as EmojibaseEntry[]),
@@ -31,10 +31,10 @@ function buildIndex(entries: EmojibaseEntry[]): EmojiAnnotationIndex {
   return index;
 }
 
-const indexCache = new Map<SupportedLanguage, Promise<EmojiAnnotationIndex>>();
+const indexCache = new Map<PostLanguage, Promise<EmojiAnnotationIndex>>();
 
 /** 指定言語の CLDR アノテーション索引を遅延ロードする（言語ごとに一度だけフェッチ）。 */
-function loadEmojiAnnotations(language: SupportedLanguage): Promise<EmojiAnnotationIndex> {
+function loadEmojiAnnotations(language: PostLanguage): Promise<EmojiAnnotationIndex> {
   let cached = indexCache.get(language);
   if (!cached) {
     cached = dataLoaders[language]().then(buildIndex);
@@ -47,7 +47,7 @@ function loadEmojiAnnotations(language: SupportedLanguage): Promise<EmojiAnnotat
  * UI 言語向けの検索索引を組み立てる。ショートコードが英語であるため英語版は常に含み、
  * UI 言語が英語以外ならその言語版も加える（例: 日本語 UI なら英語＋日本語のみ）。
  */
-export async function loadEmojiAnnotationIndex(uiLanguage: SupportedLanguage): Promise<EmojiAnnotationIndex> {
+export async function loadEmojiAnnotationIndex(uiLanguage: PostLanguage): Promise<EmojiAnnotationIndex> {
   const languages = uiLanguage === "en" ? ([uiLanguage] as const) : (["en", uiLanguage] as const);
   const indexes = await Promise.all(languages.map(loadEmojiAnnotations));
   if (indexes.length === 1) return indexes[0];

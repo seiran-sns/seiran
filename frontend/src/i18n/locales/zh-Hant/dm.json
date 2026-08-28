@@ -1,0 +1,18 @@
+{
+  "messagesPage": {
+    "title": "私訊",
+    "newMessage": "新訊息",
+    "emptySessions": "尚無訊息",
+    "composeHint": "請選擇要傳送訊息的收件者",
+    "unknownPeer": "未知的對象",
+    "textPlaceholder": "輸入訊息...",
+    "sendButton": "傳送",
+    "attachButtonTitle": "附加媒體",
+    "bskySingleRecipientError": "傳送給 Bsky 使用者的訊息只能一對一傳送"
+  },
+  "recipientPicker": {
+    "placeholder": "新增收件者...",
+    "protocolConflictWarning": "傳送給 Bsky 使用者的訊息不能與其他收件者合併",
+    "unresolvedWarning": "找不到與「{{input}}」相符的使用者"
+  }
+}

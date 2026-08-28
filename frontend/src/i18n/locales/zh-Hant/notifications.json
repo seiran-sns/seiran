@@ -1,0 +1,20 @@
+{
+  "notificationsPage": {
+    "title": "通知"
+  },
+  "notificationsPanel": {
+    "unknownUser": "有人",
+    "reactionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 做出了反應",
+    "followText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 追蹤了您",
+    "followAcceptedText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 已接受您的追蹤請求",
+    "mentionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 提到了您",
+    "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 回覆了您",
+    "repostText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 轉發了您的貼文",
+    "quoteText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 引用了您的貼文",
+    "moveRefollowedText": "您追蹤的 <userLink><emojiName/>{{handleSuffix}}</userLink> 已遷移到 <newUserLink>{{newHandle}}</newUserLink>，正在重新傳送追蹤請求",
+    "moveAlreadyFollowingText": "您追蹤的 <userLink><emojiName/>{{handleSuffix}}</userLink> 已遷移到 <newUserLink>{{newHandle}}</newUserLink>，您已經追蹤對方",
+    "genericText": "來自 <userLink><emojiName/>{{handleSuffix}}</userLink> 的通知",
+    "noNotifications": "沒有新的通知。",
+    "noNotificationsDetail": "回覆、反應和追蹤將即時顯示在這裡。"
+  }
+}

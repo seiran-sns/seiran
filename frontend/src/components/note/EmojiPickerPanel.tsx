@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, FrequentReaction, PublicEmoji } from "../../api/client";
-import { isSupportedLanguage } from "../../i18n";
+import { postLanguageBase } from "../../i18n";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
 import { EmojiAnnotationIndex, loadEmojiAnnotationIndex } from "../../lib/emojiAnnotations";
 import { allUnicodeEmojis, unicodeEmojiGroups } from "../../lib/emojiData";
@@ -43,9 +43,11 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
 
   useEffect(() => {
     // `i18n.language` は検出された生の言語コード（例: "ja-JP"）を返すことがあるため、
-    // `supportedLanguages` と同じ表記に解決済みの `resolvedLanguage` を優先する。
+    // `displayLanguages` と同じ表記に解決済みの `resolvedLanguage` を優先する。絵文字
+    // アノテーションデータは表示言語と異なり中国語のバリエーションを持たないため、
+    // `postLanguageBase` で `zh-Hant`/`zh-Hans` を `zh` に丸める。
     const detected = i18n.resolvedLanguage ?? i18n.language;
-    const uiLanguage = isSupportedLanguage(detected) ? detected : "en";
+    const uiLanguage = postLanguageBase(detected);
     let cancelled = false;
     loadEmojiAnnotationIndex(uiLanguage).then((index) => {
       if (!cancelled) setAnnotations(index);

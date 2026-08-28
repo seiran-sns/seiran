@@ -10,7 +10,7 @@ use serde::Deserialize;
 use seiran_common::repository::AppTokenRow;
 
 use seiran_common::generate_snowflake_id;
-use seiran_common::is_supported_language;
+use seiran_common::is_supported_display_language;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 use seiran_common::ApDeliveryKind;
 use seiran_common::LocalAuthProvider;
@@ -40,7 +40,7 @@ pub async fn update_language(
     .await?;
 
     if let Some(lang) = &req.language {
-        if !is_supported_language(lang) {
+        if !is_supported_display_language(lang) {
             return Err(ApiError::BadRequest("UNSUPPORTED_LANGUAGE".to_owned()));
         }
     }
@@ -56,7 +56,10 @@ pub async fn update_language(
 
 #[cfg(test)]
 mod language_tests {
-    use seiran_common::{is_supported_language, SUPPORTED_LANGUAGES};
+    use seiran_common::{
+        is_supported_display_language, is_supported_language, SUPPORTED_DISPLAY_LANGUAGES,
+        SUPPORTED_LANGUAGES,
+    };
 
     #[test]
     fn language_allowlist_matches_frontend_locales() {
@@ -65,6 +68,16 @@ mod language_tests {
         }
         assert!(!is_supported_language("pt"));
         assert!(!is_supported_language("zh-CN"));
+    }
+
+    #[test]
+    fn display_language_allowlist_matches_frontend_locales() {
+        for language in SUPPORTED_DISPLAY_LANGUAGES {
+            assert!(is_supported_display_language(language));
+        }
+        assert!(!is_supported_display_language("pt"));
+        assert!(!is_supported_display_language("zh"));
+        assert!(!is_supported_display_language("zh-CN"));
     }
 }
 

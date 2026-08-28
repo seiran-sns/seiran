@@ -1,30 +1,30 @@
 {
   "profilePage": {
-    "title": "轮廓",
+    "title": "个人资料",
     "warpBanner": {
       "prefix": "该帐户是一个",
-      "shadowLabel": "代理人",
+      "shadowLabel": "代理账户",
       "suffix": "帐户。真实账户 ({{handle}}) 在这里 →"
     },
-    "pairedBadge": "灵魂束缚",
+    "pairedBadge": "灵魂绑定",
     "pairedBadgeTitle": "通过灵魂绑定与远程青鸾用户连接",
     "suspendedBadge": "已冻结",
     "editProfileButton": "编辑个人资料",
-    "followingBadge": "下列的",
+    "followingBadge": "关注中",
     "unfollowingButton": "正在取消关注...",
     "unfollowButton": "取消关注",
-    "pendingBadge": "已请求",
+    "pendingBadge": "已发送请求",
     "followedByLabel": "关注了你",
     "followingSubmitButton": "正在发送...",
-    "followButton": "跟随",
+    "followButton": "关注",
     "loginGuidance": "要关注请登录，或在您常用的服务器上打开该用户ID。",
-    "pinnedHeader": "已固定",
+    "pinnedHeader": "已置顶",
     "publicListsHeader": "公开名单",
     "postsHeader": "帖子",
     "noPosts": "还没有帖子。",
-    "followingTab": "下列的",
+    "followingTab": "关注中",
     "followersTab": "追随者",
-    "followingCountLabel": "下列的",
+    "followingCountLabel": "关注中",
     "followerCountLabel": "追随者",
     "followList": {
       "noFollowing": "还没有关注任何人。",
@@ -32,22 +32,22 @@
       "remoteExtraPending": "在后台获取。请稍后重新加载。"
     },
     "actionsMenuTitle": "账户操作",
-    "muteButton": "沉默的",
+    "muteButton": "静音",
     "unmuteButton": "取消静音",
-    "blockButton": "堵塞",
-    "unblockButton": "解锁",
-    "blockedByNotice": "该用户已屏蔽您",
+    "blockButton": "封锁",
+    "unblockButton": "解除封锁",
+    "blockedByNotice": "该用户已封锁您",
     "blockConfirmModal": {
-      "title": "确认区块",
-      "body": "屏蔽将删除任何关注关系，并对你们双方隐藏彼此的帖子。如果该用户在 Fediverse 上，则会将阻止通知发送到他们的服务器。您确定要阻止吗？",
-      "confirmButton": "堵塞",
+      "title": "确认封锁",
+      "body": "封锁将解除任何关注关系，并对你们双方隐藏彼此的帖子。如果该用户在 Fediverse 上，则会将封锁通知发送到他们的服务器。您确定要封锁吗？",
+      "confirmButton": "封锁",
       "cancelButton": "取消"
     },
     "alsoKnownAsVerifiedTitle": "该账户也将您列为其\"其他账户\"之一（已验证）",
     "bridgeModal": {
       "title": "关注代理帐户",
-      "prefix": "该帐户是 {{protocol}} 用户通过桥的投影，称为",
-      "shadowLabel": "代理人",
+      "prefix": "该帐户是 {{protocol}} 用户透过桥接服务产生的投影，称为",
+      "shadowLabel": "代理账户",
       "suffix": "。为了充分利用seiran的功能，我们建议直接关注真实（原始）帐户。",
       "goToRealButton": "转到真实账户的个人资料",
       "followAnywayButton": "无论如何都要关注代理帐户"
@@ -74,13 +74,13 @@
     "noAka": "尚未注册其他账户。",
     "dangerZoneTitle": "危险区域",
     "withdrawButton": "停用该帐户",
-    "withdrawConfirm": "停用您的帐户无法撤消。您确定要继续吗？",
+    "withdrawConfirm": "停用您的帐户无法撤销。您确定要继续吗？",
     "withdrawHint": {
-      "body": "停用将删除您的帖子并删除您的关注关系。此操作无法撤消。",
+      "body": "停用将删除您的帖子并解除您的关注关系。此操作无法撤销。",
       "handlePrefix": "如需确认，请输入您的用户名 (",
       "handleSuffix": "） 以下。"
     },
-    "withdrawing": "加工...",
+    "withdrawing": "处理中...",
     "withdrawSubmit": "停用帐户"
   }
 }

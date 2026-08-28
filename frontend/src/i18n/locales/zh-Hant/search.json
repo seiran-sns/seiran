@@ -1,0 +1,19 @@
+{
+  "searchPage": {
+    "placeholder": "搜尋關鍵字（本地＋Bluesky）",
+    "noResults": "找不到符合的貼文。",
+    "prompt": "請輸入關鍵字進行搜尋。",
+    "loadMoreButton": "載入更多",
+    "tabs": {
+      "quickNotifications": "快速通知",
+      "trendsSearch": "趨勢與搜尋"
+    },
+    "trendsComingSoon": "趨勢彙整功能即將推出。"
+  },
+  "trendsSearchPanel": {
+    "placeholder": "搜尋關鍵字",
+    "trendsHeader": "趨勢",
+    "comingSoon": "彙整兩個協定領域（AP／ATP）的即時趨勢功能即將推出。",
+    "comingSoonDetail": "彙整引擎完成後即會啟用此功能。"
+  }
+}

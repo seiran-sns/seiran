@@ -1,0 +1,182 @@
+{
+  "emojiContextMenu": {
+    "importButton": "匯入表情符號"
+  },
+  "homePage": {
+    "title": "首頁",
+    "homeTab": "首頁",
+    "localTab": "本地",
+    "socialTab": "社群",
+    "globalTab": "全球",
+    "manageListsLink": "＋ 管理列表",
+    "emptyHome": "您追蹤的人的貼文將顯示在這裡。",
+    "emptyLocal": "尚無貼文。成為第一個發文的人！",
+    "emptySocial": "您追蹤的人與本地使用者的貼文將顯示在這裡。",
+    "emptyGlobal": "尚無貼文。",
+    "emptyList": "此列表成員的貼文將顯示在這裡。",
+    "quickNotifications": "快速通知",
+    "quickNotificationsWithCount": "快速通知（{{count}}）",
+    "trendsAndSearch": "趨勢與搜尋",
+    "composerToggleLabel": "發文表單"
+  },
+  "noteDetailPage": {
+    "title": "貼文",
+    "noContext": "沒有周邊貼文。",
+    "contextTab": "周邊貼文",
+    "reactionsTab": "反應",
+    "noReactions": "這則貼文還沒有任何反應。",
+    "authorTab": "作者",
+    "originalAuthorTab": "原作者",
+    "noPinnedPosts": "沒有置頂貼文。",
+    "repliesTab": "回覆",
+    "noReplies": "這則貼文還沒有回覆或引用。",
+    "loadNewerButton": "載入較新的貼文",
+    "loadOlderButton": "載入較舊的貼文",
+    "repostsTab": "轉發",
+    "noReposts": "這則貼文還沒有被轉發過。",
+    "repostUndone": "已取消"
+  },
+  "noteCard": {
+    "privateRepostError": "私密貼文無法轉發。",
+    "privateQuoteError": "私密貼文無法引用。",
+    "replyButton": "回覆",
+    "quoteButton": "引用",
+    "repostTitle": "轉發",
+    "unrepostTitle": "取消轉發",
+    "repostDisabledTitle": "私密貼文無法轉發",
+    "quoteDisabledTitle": "私密貼文無法引用",
+    "pinTitle": "置頂",
+    "unpinTitle": "取消置頂",
+    "pin": "置頂",
+    "pinned": "已置頂",
+    "quoteSourceLink": "❝ 被引用的貼文",
+    "hasQuote": "❝ 有引用內容",
+    "showContent": "顯示",
+    "hideContent": "隱藏",
+    "votes": "{{count}} 票",
+    "pollRemainingMinutes": "剩餘{{count}}分鐘",
+    "pollRemainingSeconds": "剩餘{{count}}秒",
+    "pollRemainingHours": "剩餘{{hours}}小時{{minutes}}分鐘",
+    "pollRemainingDays": "剩餘{{days}}天{{hours}}小時{{minutes}}分鐘",
+    "pollLoginRequired": "請登入以投票。",
+    "pollVoteButton": "投票",
+    "pollBackToOptions": "返回選項",
+    "pollShowResults": "顯示結果",
+    "reportButton": "檢舉",
+    "reportSubject": "@{{username}} 的貼文",
+    "originalLinkTitle": "這則貼文是透過橋接／聯邦傳遞的副本。前往原始貼文。",
+    "originalLinkText": "🀄 檢視原始貼文",
+    "repostedConnector": "轉發於",
+    "repostedSuffix": "",
+    "repostedNoLinkSuffix": "轉發了這則貼文",
+    "unavailableRepost": "此貼文無法顯示（因為它是私密的）。",
+    "notFollowing": "未追蹤",
+    "following": "追蹤中",
+    "followPending": "待審核",
+    "menuTitle": "選單",
+    "deleteConfirmModal": {
+      "title": "要刪除這則貼文嗎？",
+      "body": "此操作無法復原。刪除也會從聯邦伺服器和 Bluesky 中移除這則貼文。",
+      "confirmButton": "刪除"
+    },
+    "linkCardLoadEmbed": "載入嵌入內容"
+  },
+  "noteList": {
+    "emptyDefault": "沒有貼文。",
+    "gapLabel": "這裡可能有遺漏的貼文"
+  },
+  "postComposer": {
+    "deliverFediHint": "傳送到聯邦宇宙",
+    "deliverBskyHint": "傳送到 Bluesky",
+    "postLanguageHint": "貼文語言（用於傳送到 Bluesky）",
+    "visibilityPublicHint": "公開：所有人可見",
+    "visibilityUnlistedHint": "不列出：所有人可見，但不會顯示在本地與全域時間軸",
+    "visibilityPrivateHint": "私密：僅追蹤者可見",
+    "replyModalTitle": "回覆",
+    "quoteModalTitle": "引用貼文",
+    "quoteUnlistedPublicConflict": "不列出貼文的引用只能以不列出或私密發布。",
+    "bskyOffToPrivateHint": "關閉 Bluesky 傳送後即可發布私密貼文",
+    "placeholder": "發生什麼事了？",
+    "replyPlaceholder": "寫下回覆",
+    "quotePlaceholder": "新增留言",
+    "attachTitle": "附加圖片、影片或音訊檔案",
+    "forcedPrivateNote": "🔒️這則回覆也將是私密的，因為它是私密貼文的回覆",
+    "visibilityPublic": "公開",
+    "visibilityUnlisted": "不列出",
+    "visibilityPrivate": "私密",
+    "attachmentAlt": "附加圖片",
+    "removeAttachmentTitle": "移除附件",
+    "overLimitReply": "這超出了 Bluesky 的字數限制。",
+    "overLimitDefault": "這超出了 Bluesky 的字數限制。若要發文，請關閉 Bsky 傳送。",
+    "remainingCount": "剩餘 {{count}} 字",
+    "postButtonPublic": "發布",
+    "postButtonUnlisted": "不列出",
+    "postButtonPrivate": "私密",
+    "replyToPrefix": "回覆：",
+    "quoteToPrefix": "引用：",
+    "bskyEmbedChoice": {
+      "heading": "要傳送到 Bluesky 的是哪一項？",
+      "poll": "投票",
+      "images": "靜態圖片（{{count}}張）",
+      "gif": "動圖 {{index}}",
+      "video": "影片 {{index}}",
+      "url": "URL {{index}}：{{url}}",
+      "urlOrphan": "URL：{{url}}（已從內文中移除）"
+    },
+    "linkCardCheckbox": {
+      "heading": "作為連結卡附加的URL（可複選）"
+    },
+    "poll": {
+      "toggleTitle": "新增投票",
+      "choicePlaceholder": "選項 {{index}}",
+      "addChoice": "新增選項",
+      "removeChoice": "移除選項",
+      "multipleLabel": "允許多選",
+      "expiryNone": "無期限",
+      "expiryAt": "指定日期時間",
+      "expiryDuration": "經過時間",
+      "duration": {
+        "min5": "5分鐘",
+        "min30": "30分鐘",
+        "hour1": "1小時",
+        "hour6": "6小時",
+        "day1": "1天",
+        "day3": "3天",
+        "day7": "7天"
+      }
+    },
+    "cw": {
+      "toggleTitle": "新增內容警告",
+      "guidePlaceholder": "內容警告說明",
+      "guideRemainingCount": "剩餘{{count}}"
+    }
+  },
+  "reactionChips": {
+    "clickToRemove": "點擊以移除",
+    "clickToAdd": "點擊以新增相同的反應",
+    "customEmojiBlocked": "您無法新增此自訂表情符號反應——它未在此伺服器上註冊",
+    "actorsFetchFailed": "載入失敗"
+  },
+  "reactionPicker": {
+    "addReactionTitle": "新增反應",
+    "addReactionButton": "反應",
+    "searchPlaceholder": "搜尋表情符號",
+    "tabFrequent": "常用",
+    "tabUnicode": "表情符號",
+    "tabCustom": "自訂",
+    "noResults": "沒有符合的表情符號",
+    "noFrequent": "尚無常用的表情符號",
+    "noCustomEmojis": "沒有註冊自訂表情符號"
+  },
+  "replyIndicator": {
+    "goToOriginalTitle": "前往原始貼文",
+    "replyLabel": "回覆",
+    "fetchFailed": "無法載入原始貼文。"
+  },
+  "badges": {
+    "deliveredFedi": "已傳送到聯邦宇宙",
+    "deliveredBsky": "已傳送到 Bluesky",
+    "visibilityPrivate": "私密",
+    "visibilityUnlisted": "不列出"
+  }
+}

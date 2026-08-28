@@ -1,0 +1,86 @@
+{
+  "profilePage": {
+    "title": "個人檔案",
+    "warpBanner": {
+      "prefix": "此帳戶是一個",
+      "shadowLabel": "代理帳戶",
+      "suffix": "帳戶。真實帳戶（{{handle}}）在這裡 →"
+    },
+    "pairedBadge": "靈魂繫結",
+    "pairedBadgeTitle": "透過靈魂繫結與遠端青嵐使用者連接",
+    "suspendedBadge": "已停權",
+    "editProfileButton": "編輯個人檔案",
+    "followingBadge": "追蹤中",
+    "unfollowingButton": "正在取消追蹤...",
+    "unfollowButton": "取消追蹤",
+    "pendingBadge": "已送出請求",
+    "followedByLabel": "已追蹤您",
+    "followingSubmitButton": "正在傳送...",
+    "followButton": "追蹤",
+    "loginGuidance": "要追蹤請先登入，或在您慣用的伺服器上開啟此使用者ID。",
+    "pinnedHeader": "已置頂",
+    "publicListsHeader": "公開列表",
+    "postsHeader": "貼文",
+    "noPosts": "尚無貼文。",
+    "followingTab": "追蹤中",
+    "followersTab": "追蹤者",
+    "followingCountLabel": "追蹤中",
+    "followerCountLabel": "追蹤者",
+    "followList": {
+      "noFollowing": "尚未追蹤任何人。",
+      "noFollowers": "尚無追蹤者。",
+      "remoteExtraPending": "正在背景取得資料，請稍後重新載入。"
+    },
+    "actionsMenuTitle": "帳戶操作",
+    "muteButton": "靜音",
+    "unmuteButton": "取消靜音",
+    "blockButton": "封鎖",
+    "unblockButton": "取消封鎖",
+    "blockedByNotice": "此使用者已封鎖您",
+    "blockConfirmModal": {
+      "title": "確認封鎖",
+      "body": "封鎖將解除任何追蹤關係，並對雙方隱藏彼此的貼文。如果此使用者位於 Fediverse 上，封鎖通知將會傳送到對方的伺服器。確定要封鎖嗎？",
+      "confirmButton": "封鎖",
+      "cancelButton": "取消"
+    },
+    "alsoKnownAsVerifiedTitle": "此帳戶也將您列為其「其他帳戶」之一（已驗證）",
+    "bridgeModal": {
+      "title": "追蹤代理帳戶",
+      "prefix": "此帳戶是 {{protocol}} 使用者透過橋接服務產生的投影，稱為",
+      "shadowLabel": "代理帳戶",
+      "suffix": "。為了充分運用seiran的功能，建議直接追蹤真實（原始）帳戶。",
+      "goToRealButton": "前往真實帳戶的個人檔案",
+      "followAnywayButton": "仍然追蹤此代理帳戶"
+    }
+  },
+  "profileEditPage": {
+    "title": "編輯個人檔案",
+    "savedMessage": "已儲存。",
+    "uploadingAvatar": "正在上傳...",
+    "changeAvatarButton": "更換頭像",
+    "displayNameLabel": "顯示名稱",
+    "birthdayLabel": "生日",
+    "birthdayPublicLabel": "在Fediverse上公開",
+    "bioLabel": "簡介",
+    "bioPlaceholder": "介紹一下自己",
+    "fieldsLabel": "個人檔案欄位（連結等，最多 {{count}} 項）",
+    "fieldNamePlaceholder": "標籤（例如網站）",
+    "fieldValuePlaceholder": "值（例如 https://example.com）",
+    "akaLabel": "其他帳戶",
+    "akaVerifiedExplanation": "如果對方帳戶也登記了您，將會顯示✅。",
+    "akaSearchPlaceholder": "以使用者名稱・URL・DID搜尋",
+    "addAkaButton": "新增",
+    "addingAkaButton": "新增中...",
+    "noAka": "尚未註冊其他帳戶。",
+    "dangerZoneTitle": "危險區域",
+    "withdrawButton": "停用此帳戶",
+    "withdrawConfirm": "停用您的帳戶後無法復原。確定要繼續嗎？",
+    "withdrawHint": {
+      "body": "停用將刪除您的貼文並解除您的追蹤關係。此操作無法復原。",
+      "handlePrefix": "如需確認，請在下方輸入您的使用者名稱（",
+      "handleSuffix": "）。"
+    },
+    "withdrawing": "處理中...",
+    "withdrawSubmit": "停用帳戶"
+  }
+}

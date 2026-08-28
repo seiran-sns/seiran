@@ -3,19 +3,60 @@ import { initReactI18next } from "react-i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 
 export const defaultNS = "common";
-export const supportedLanguages = [
+
+/** 表示言語（設定画面「表示」＞「言語」、`users.language_preference`）。中国語のみ
+ * `zh-Hant`（繁體中文）/`zh-Hans`（简体中文）のバリエーションを持つ。 */
+export const displayLanguages = [
   "en",
   "ja",
-  "zh",
+  "zh-Hant",
+  "zh-Hans",
   "ko",
   "es",
   "de",
   "fr",
 ] as const;
-export type SupportedLanguage = (typeof supportedLanguages)[number];
+export type DisplayLanguage = (typeof displayLanguages)[number];
 
-export function isSupportedLanguage(lang: string): lang is SupportedLanguage {
-  return (supportedLanguages as readonly string[]).includes(lang);
+export function isDisplayLanguage(lang: string): lang is DisplayLanguage {
+  return (displayLanguages as readonly string[]).includes(lang);
+}
+
+/** ポスト言語（`posts.language`、Bsky配送の`langs`にのみ反映、`docs/protocols.md`参照）。
+ * 表示言語と異なり中国語はバリエーションを持たない7言語。バックエンドの
+ * `seiran_common::SUPPORTED_LANGUAGES` と一致させる。 */
+export const postLanguages = ["en", "ja", "zh", "ko", "es", "de", "fr"] as const;
+export type PostLanguage = (typeof postLanguages)[number];
+
+export function isPostLanguage(lang: string): lang is PostLanguage {
+  return (postLanguages as readonly string[]).includes(lang);
+}
+
+/** ポスト言語選択フォームのデフォルト値（表示言語→ポスト言語への丸め）。`zh-Hant`/`zh-Hans`
+ * のどちらを表示言語に選んでいても、ポスト言語のデフォルトは`zh`になる（マイケル指示）。 */
+export function postLanguageBase(displayLanguage: string): PostLanguage {
+  const base = displayLanguage.startsWith("zh") ? "zh" : displayLanguage;
+  return isPostLanguage(base) ? base : "en";
+}
+
+const TRADITIONAL_ZH_REGIONS = ["tw", "hk", "mo"];
+
+/**
+ * ブラウザ検出（`navigator.languages`）等から得た言語コードを、`displayLanguages`の
+ * 値へ正規化する。中国語は地域コードで繁體(`zh-Hant`)/简体(`zh-Hans`)を判別し、
+ * 地域コードが無い/未知の地域の素の`zh`は简体字（`zh-Hans`）扱いにする。既に
+ * `displayLanguages`の値そのもの（localStorageのキャッシュ値等）ならそのまま返す。
+ * `isDisplayLanguage`未対応の言語コードはそのまま（i18nextのfallbackLngに委ねる）。
+ */
+export function normalizeDetectedLanguage(lang: string): string {
+  if (isDisplayLanguage(lang)) return lang;
+  const lower = lang.toLowerCase();
+  if (lower.startsWith("zh")) {
+    return TRADITIONAL_ZH_REGIONS.some((region) => lower.includes(`-${region}`))
+      ? "zh-Hant"
+      : "zh-Hans";
+  }
+  return lower.split("-")[0];
 }
 
 type TranslationTree = Record<string, unknown>;
@@ -32,7 +73,7 @@ const localeModules = import.meta.glob<LocaleModule>("./locales/*/*.json", {
 });
 
 export const resources = Object.fromEntries(
-  supportedLanguages.map((language) => [
+  displayLanguages.map((language) => [
     language,
     Object.fromEntries(
       Object.entries(localeModules)
@@ -43,7 +84,7 @@ export const resources = Object.fromEntries(
         ]),
     ),
   ]),
-) as Record<SupportedLanguage, Record<string, TranslationTree>>;
+) as Record<DisplayLanguage, Record<string, TranslationTree>>;
 
 i18n
   .use(LanguageDetector)
@@ -51,8 +92,11 @@ i18n
   .init({
     resources,
     fallbackLng: "en",
-    supportedLngs: supportedLanguages,
-    load: "languageOnly",
+    supportedLngs: displayLanguages,
+    // "currentOnly": convertDetectedLanguageで既にdisplayLanguagesの値へ正規化済みの
+    // コードをそのまま使う（"languageOnly"だと`zh-Hant`/`zh-Hans`が`zh`に丸められて
+    // 区別できなくなってしまう）。
+    load: "currentOnly",
     defaultNS,
     ns: Object.keys(resources.en),
     interpolation: { escapeValue: false },
@@ -63,6 +107,7 @@ i18n
       // 保存値（`AuthContext` 経由）がさらに優先される。
       order: ["localStorage", "navigator"],
       caches: ["localStorage"],
+      convertDetectedLanguage: normalizeDetectedLanguage,
     },
     returnEmptyString: false,
   });

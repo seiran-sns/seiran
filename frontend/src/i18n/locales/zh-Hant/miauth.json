@@ -1,0 +1,10 @@
+{
+  "connect": {
+    "unknownApp": "未知應用程式",
+    "title": "授權應用程式連接",
+    "doneDescription": "已授權。請返回應用程式。",
+    "description": "{{appName}} 正在請求存取您的 Seiran 帳戶。",
+    "authorizing": "處理中...",
+    "submit": "授權"
+  }
+}
