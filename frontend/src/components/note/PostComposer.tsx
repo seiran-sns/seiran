@@ -33,11 +33,32 @@ import {
   saveComposerDraft,
 } from "../../lib/composerDraft";
 import { loadComposerDefaults, saveComposerDefaults } from "../../lib/composerDefaults";
+import i18n, { supportedLanguages, type SupportedLanguage } from "../../i18n";
 import styles from "./PostComposer.module.css";
 import ComposerEditor from "./ComposerEditor";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
+
+/** ポスト言語選択リスト（#表示言語設定と同じ7言語、`i18n.supportedLanguages`）の表示名キー。
+ * 値は`AppearanceSettingsPage`の言語ラベルと同じ翻訳キーを再利用する（言語の自称は
+ * 表示言語に関わらず常に同じネイティブ表記のため、翻訳文言を専用に持つ必要がない）。 */
+const POST_LANGUAGE_LABEL_KEYS: Record<SupportedLanguage, string> = {
+  ja: "appearanceSettings.languageJa",
+  en: "appearanceSettings.languageEn",
+  zh: "appearanceSettings.languageZh",
+  ko: "appearanceSettings.languageKo",
+  es: "appearanceSettings.languageEs",
+  de: "appearanceSettings.languageDe",
+  fr: "appearanceSettings.languageFr",
+};
+
+/** ポスト言語選択の初期値（デフォルトは現在の表示言語、マイケル指示）。 */
+function defaultPostLanguage(): SupportedLanguage {
+  return supportedLanguages.includes(i18n.language as SupportedLanguage)
+    ? (i18n.language as SupportedLanguage)
+    : "en";
+}
 
 interface PostComposerProps {
   onPosted?: (note: Note) => void;
@@ -257,6 +278,16 @@ export default function PostComposer({
   const [checkedLinkCardUrls, setCheckedLinkCardUrls] = useState<string[]>(
     initialDraft?.linkCardUrls ?? [],
   );
+  // ポスト言語（Bsky配送の`langs`にのみ意味を持つ）。デフォルトは現在の表示言語
+  // （マイケル指示、`composerDefaults`の「最後に送信した値」方式とは異なる）。
+  const [language, setLanguage] = useState<SupportedLanguage>(
+    supportedLanguages.includes(initialDraft?.language as SupportedLanguage)
+      ? (initialDraft?.language as SupportedLanguage)
+      : defaultPostLanguage(),
+  );
+  const [langPickerOpen, setLangPickerOpen] = useState(false);
+  const langWrapRef = useRef<HTMLDivElement>(null);
+  const langBtnRef = useRef<HTMLButtonElement>(null);
   const [uploading, setUploading] = useState(false);
   const [showPrivateTooltip, setShowPrivateTooltip] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -291,6 +322,7 @@ export default function PostComposer({
       cwEnabled,
       cwGuide,
       linkCardUrls: checkedLinkCardUrls,
+      language,
     });
   }, [
     draftTarget,
@@ -306,6 +338,7 @@ export default function PostComposer({
     cwEnabled,
     cwGuide,
     checkedLinkCardUrls,
+    language,
   ]);
 
   useEffect(() => {
@@ -323,6 +356,11 @@ export default function PostComposer({
       setCwEnabled(draft?.cwEnabled ?? false);
       setCwGuide(draft?.cwGuide ?? "");
       setCheckedLinkCardUrls(draft?.linkCardUrls ?? []);
+      setLanguage(
+        supportedLanguages.includes(draft?.language as SupportedLanguage)
+          ? (draft?.language as SupportedLanguage)
+          : defaultPostLanguage(),
+      );
       setDeliverFedi(draft?.deliverFedi ?? fediReplyAllowed);
       setDeliverBsky(draft?.deliverBsky ?? bskyReplyAllowed);
     });
@@ -333,6 +371,22 @@ export default function PostComposer({
       if (privateTooltipTimerRef.current) window.clearTimeout(privateTooltipTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!langPickerOpen) return;
+    function handleOutsideClick(e: MouseEvent) {
+      if (langWrapRef.current && !langWrapRef.current.contains(e.target as Node)) {
+        setLangPickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [langPickerOpen]);
+
+  function selectLanguage(code: SupportedLanguage) {
+    setLanguage(code);
+    setLangPickerOpen(false);
+  }
 
   // Bsky 配送オンの間は🔒️プライベート投稿ボタンをグレーアウトする（Bsky はプロトコル上
   // followers_only を配信できないため相互排他）。吹き出しはホバー・クリックの両方で出す。
@@ -532,6 +586,7 @@ export default function PostComposer({
         pollPayload,
         cwEnabled ? cwGuide.trim() : undefined,
         showUrlCardCheckboxList ? checkedLinkCardUrls : undefined,
+        language,
       );
       setText("");
       setAttachments([]);
@@ -543,6 +598,7 @@ export default function PostComposer({
       setCwEnabled(false);
       setCwGuide("");
       setCheckedLinkCardUrls([]);
+      setLanguage(defaultPostLanguage());
       if (draftTarget) clearComposerDraft(draftTarget);
       // 新規投稿・引用は、実際に送信した公開範囲・配送先を次回以降のデフォルトボタンとして
       // 記憶する（返信は親ポストから決まる専用のデフォルトを持つため対象外）。
@@ -651,9 +707,10 @@ export default function PostComposer({
     }
   }
 
-  const controlBtnKeys = ["fedi", "bsky", "attach", "poll", "cw"] as const;
+  const controlBtnKeys = ["lang", "fedi", "bsky", "attach", "poll", "cw"] as const;
   type ControlBtnKey = (typeof controlBtnKeys)[number];
   const controlBtnRefs: Record<ControlBtnKey, typeof fediBtnRef> = {
+    lang: langBtnRef,
     fedi: fediBtnRef,
     bsky: bskyBtnRef,
     attach: attachBtnRef,
@@ -661,6 +718,9 @@ export default function PostComposer({
     cw: cwBtnRef,
   };
   const controlBtnOrder: ControlBtnKey[] = controlBtnKeys.filter((key) => {
+    // 言語選択はBsky配送の`langs`にのみ意味を持つため、Bskyボタン自体が出せない
+    // （Bsky実体を持たない返信先等）場合は言語選択も出さない。
+    if (key === "lang") return bskyReplyAllowed;
     if (key === "fedi") return fediReplyAllowed;
     if (key === "bsky") return bskyReplyAllowed;
     if (key === "attach") return !(uploading || attachLimitReached);
@@ -752,6 +812,44 @@ export default function PostComposer({
       )}
 
       <div className={styles.controlRow}>
+        {bskyReplyAllowed && (
+          <div className={styles.langBtnWrap} ref={langWrapRef}>
+            <button
+              ref={langBtnRef}
+              type="button"
+              className={styles.iconBtn}
+              onClick={() => setLangPickerOpen((v) => !v)}
+              onKeyDown={(e) => handleControlBtnKeyDown(e, "lang")}
+              title={t("home:postComposer.postLanguageHint")}
+              aria-label={t("home:postComposer.postLanguageHint")}
+              aria-haspopup="listbox"
+              aria-expanded={langPickerOpen}
+            >
+              {language.toUpperCase()}
+            </button>
+            {langPickerOpen && (
+              <div
+                className={styles.langPopover}
+                role="listbox"
+                aria-label={t("home:postComposer.postLanguageHint")}
+              >
+                {supportedLanguages.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    role="option"
+                    aria-selected={code === language}
+                    className={`${styles.langOption} ${code === language ? styles.scopeActive : ""}`}
+                    onClick={() => selectLanguage(code)}
+                  >
+                    <span className={styles.langOptionCode}>{code.toUpperCase()}</span>
+                    {t(`account:${POST_LANGUAGE_LABEL_KEYS[code]}`)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {fediReplyAllowed && (
           <button
             ref={fediBtnRef}

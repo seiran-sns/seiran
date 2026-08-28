@@ -10,19 +10,13 @@ use serde::Deserialize;
 use seiran_common::repository::AppTokenRow;
 
 use seiran_common::generate_snowflake_id;
+use seiran_common::is_supported_language;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 use seiran_common::ApDeliveryKind;
 use seiran_common::LocalAuthProvider;
 
 use crate::mailer::{send_email_change_confirmation, MailError};
 use crate::{error::ApiError, middleware::extract_auth, AppState};
-
-/// フロントの i18n が対応する言語コード（`account:languagePreference` の許可値）。
-const SUPPORTED_LANGUAGES: [&str; 7] = ["ja", "en", "zh", "ko", "es", "de", "fr"];
-
-fn is_supported_language(language: &str) -> bool {
-    SUPPORTED_LANGUAGES.contains(&language)
-}
 
 #[derive(Deserialize)]
 pub struct UpdateLanguageRequest {
@@ -62,7 +56,7 @@ pub async fn update_language(
 
 #[cfg(test)]
 mod language_tests {
-    use super::{is_supported_language, SUPPORTED_LANGUAGES};
+    use seiran_common::{is_supported_language, SUPPORTED_LANGUAGES};
 
     #[test]
     fn language_allowlist_matches_frontend_locales() {

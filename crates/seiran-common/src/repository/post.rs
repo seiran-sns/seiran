@@ -209,6 +209,9 @@ pub struct InsertFullParams<'a> {
     pub poll: Option<&'a serde_json::Value>,
     /// CW（閲覧注意）ガイド文（#229）。無ければ`None`。
     pub content_warning: Option<&'a str>,
+    /// ポストの言語（ISO 639-1、2文字コード）。Bsky配送の`langs`にのみ意味を持つ
+    /// （AP配送では使わない）。無ければ`None`（従来通り言語情報なし）。
+    pub language: Option<&'a str>,
 }
 
 /// `PostRepository::insert_remote_with_dedup` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
@@ -1152,8 +1155,8 @@ impl PostRepository for PgPostRepository {
     async fn insert_full(&self, params: InsertFullParams<'_>) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky, thread_root_post_id, emoji_map, poll, content_warning)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11, $12, $13, $14, $15)",
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky, thread_root_post_id, emoji_map, poll, content_warning, language)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11, $12, $13, $14, $15, $16)",
         )
         .bind(params.id)
         .bind(params.actor_id)
@@ -1170,6 +1173,7 @@ impl PostRepository for PgPostRepository {
         .bind(params.emoji_map)
         .bind(params.poll)
         .bind(params.content_warning)
+        .bind(params.language)
         .execute(&mut *tx)
         .await?;
 

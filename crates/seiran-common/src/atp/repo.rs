@@ -518,8 +518,8 @@ pub struct BskyPostReply {
 // app.bsky.feed.post レコード構造体
 // ─────────────────────────────────────────────────────────────────────────────
 
-// canonical 順: text(4) < $type(5) < embed(5) < reply(5) < facets(6) < createdAt(9)
-// 5文字のキー同士: "$type"($ = 0x24) < "embed"(e = 0x65) < "reply"(r = 0x72)
+// canonical 順: text(4) < $type(5) < embed(5) < langs(5) < reply(5) < facets(6) < createdAt(9)
+// 5文字のキー同士: "$type"($ = 0x24) < "embed"(e = 0x65) < "langs"(l = 0x6C) < "reply"(r = 0x72)
 #[derive(Serialize)]
 struct BskyFeedPost {
     text: String,
@@ -527,6 +527,10 @@ struct BskyFeedPost {
     kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     embed: Option<Ipld>,
+    /// 投稿の言語（ISO 639-1）。0〜1件（seiranのUIは単一言語選択のみ、#TODO複数選択は非対応）。
+    /// 空なら`langs`フィールド自体を省略する（言語情報なし、Misskey互換API等）。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    langs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reply: Option<BskyPostReply>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -742,12 +746,15 @@ fn build_embed_images_ipld(images: &[BskyImage]) -> Result<Ipld, RepoError> {
 /// `facets` が空の場合は `facets` フィールドを省略する。
 /// `embed` が Some の場合は embed フィールドを含める（画像・引用・URL カード）。
 /// `reply` が Some の場合は `reply` フィールドを含める（リプライ投稿）。
+/// `lang` が Some の場合は `langs` フィールドを1件の配列として含める（`None`なら省略、
+/// Misskey互換API等、言語情報を送らないクライアントとの後方互換のため）。
 pub fn encode_bsky_feed_post(
     text: &str,
     created_at_rfc3339: &str,
     facets: Vec<BskyFacet>,
     embed: Option<BskyEmbed>,
     reply: Option<BskyPostReply>,
+    lang: Option<String>,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
     let embed = match embed {
         None => None,
@@ -784,6 +791,7 @@ pub fn encode_bsky_feed_post(
         text: text.to_string(),
         kind: "app.bsky.feed.post".to_string(),
         embed,
+        langs: lang.into_iter().collect(),
         reply,
         facets,
         created_at: created_at_rfc3339.to_string(),
@@ -1239,11 +1247,46 @@ mod tests {
     #[test]
     fn test_encode_bsky_feed_post_deterministic() {
         let (cbor1, cid1) =
-            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
+            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None, None)
+                .unwrap();
         let (cbor2, cid2) =
-            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
+            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None, None)
+                .unwrap();
         assert_eq!(cbor1, cbor2);
         assert_eq!(cid1, cid2);
+    }
+
+    #[test]
+    fn test_encode_bsky_feed_post_lang_none_omits_langs_field() {
+        let (cbor, _) =
+            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None, None)
+                .unwrap();
+        let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
+        let Ipld::Map(record) = value else {
+            panic!("record must be map")
+        };
+        assert!(!record.contains_key("langs"));
+    }
+
+    #[test]
+    fn test_encode_bsky_feed_post_lang_some_sets_single_element_langs() {
+        let (cbor, _) = encode_bsky_feed_post(
+            "hello",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            None,
+            None,
+            Some("ja".to_string()),
+        )
+        .unwrap();
+        let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
+        let Ipld::Map(record) = value else {
+            panic!("record must be map")
+        };
+        assert_eq!(
+            record.get("langs"),
+            Some(&Ipld::List(vec![Ipld::String("ja".to_string())]))
+        );
     }
 
     #[test]
@@ -1266,6 +1309,7 @@ mod tests {
                 description: "元投稿本文".to_string(),
                 thumb: Some(thumb),
             }),
+            None,
             None,
         )
         .unwrap();
@@ -1300,7 +1344,8 @@ mod tests {
     #[test]
     fn test_build_mst_single_entry() {
         let (_, cid) =
-            encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z", vec![], None, None).unwrap();
+            encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z", vec![], None, None, None)
+                .unwrap();
         let entries = vec![("app.bsky.feed.post/test123".to_string(), cid)];
         let result = build_mst(&entries);
         assert!(result.is_ok());

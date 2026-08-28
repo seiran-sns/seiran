@@ -550,6 +550,8 @@ impl AtpCommitService {
     /// ポスト作成コミット（posts テーブル更新を追加）
     ///
     /// `reply` が Some の場合は ATP `app.bsky.feed.post` の `reply` フィールドを設定する（リプライ投稿）。
+    /// `lang` が Some の場合は `langs` フィールドを1件の配列として設定する（投稿の言語プロパティ、
+    /// `None`なら省略。AP配送には影響しない、Bskyのみの概念）。
     #[allow(clippy::too_many_arguments)]
     pub async fn commit_post(
         &self,
@@ -560,13 +562,14 @@ impl AtpCommitService {
         embed: Option<BskyEmbed>,
         now: DateTime<Utc>,
         reply: Option<BskyPostReply>,
+        lang: Option<String>,
     ) -> Result<(), AtpCommitError> {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
         let blob_cids = blob_cids_for_embed(&embed);
         let (record_cbor, record_cid) =
-            encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
+            encode_bsky_feed_post(text, &created_at_str, facets, embed, reply, lang)?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
@@ -1490,6 +1493,7 @@ impl AtpCommitService {
     /// `embed` に `BskyEmbed::Record` を渡すと Bsky ネイティブ引用、
     /// `BskyEmbed::External` を渡すと URL カードとして送信する。
     /// DB の posts レコードは呼び出し元で更新済みである前提。
+    /// `lang` は `commit_post` と同じ（投稿の言語プロパティ、`None`なら`langs`フィールド省略）。
     #[allow(clippy::too_many_arguments)]
     pub async fn commit_quote(
         &self,
@@ -1500,13 +1504,14 @@ impl AtpCommitService {
         embed: Option<BskyEmbed>,
         now: DateTime<Utc>,
         reply: Option<BskyPostReply>,
+        lang: Option<String>,
     ) -> Result<(), AtpCommitError> {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
         let blob_cids = blob_cids_for_embed(&embed);
         let (record_cbor, record_cid) =
-            encode_bsky_feed_post(text, &created_at_str, facets, embed, reply)?;
+            encode_bsky_feed_post(text, &created_at_str, facets, embed, reply, lang)?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {

@@ -88,6 +88,7 @@
   "postComposer": {
     "deliverFediHint": "페디버스로 전송",
     "deliverBskyHint": "Bluesky로 전송",
+    "postLanguageHint": "게시물 언어 (Bluesky 전송용)",
     "visibilityPublicHint": "공개: 누구나 볼 수 있음",
     "visibilityUnlistedHint": "조용히 공개: 누구나 볼 수 있지만 로컬·글로벌 타임라인에는 표시하지 않음",
     "visibilityPrivateHint": "비공개: 팔로워만 볼 수 있음",

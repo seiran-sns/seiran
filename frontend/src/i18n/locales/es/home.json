@@ -88,6 +88,7 @@
   "postComposer": {
     "deliverFediHint": "Enviar al Fediverso",
     "deliverBskyHint": "Enviar a Bluesky",
+    "postLanguageHint": "Idioma de la publicación (usado para el envío a Bluesky)",
     "visibilityPublicHint": "Público: visible para todos",
     "visibilityUnlistedHint": "No listado: visible, pero fuera de las cronologías local y global",
     "visibilityPrivateHint": "Privado: visible solo para seguidores",

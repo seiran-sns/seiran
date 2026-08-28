@@ -62,6 +62,12 @@ pub struct CreateNoteRequest {
     /// 指定順がそのまま`post_link_cards.position`になる。
     #[serde(default)]
     pub link_card_urls: Vec<String>,
+    /// ポストの言語（ISO 639-1、2文字コード）。Bsky配送（`app.bsky.feed.post`の`langs`
+    /// フィールド、1言語のみ）にのみ意味を持ち、AP配送では使わない。許可値は表示言語設定と
+    /// 同じ`seiran_common::SUPPORTED_LANGUAGES`。Misskey互換APIクライアント等、本フィールドを
+    /// 送らないクライアントとの後方互換のため省略可能で、省略時は従来通り言語情報なしで
+    /// Bsky配送する（`langs`フィールド自体を省略）。
+    pub language: Option<String>,
 }
 
 /// [`CreateNoteRequest::poll`] の中身。

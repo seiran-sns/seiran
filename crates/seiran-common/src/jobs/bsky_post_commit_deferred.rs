@@ -111,6 +111,9 @@ async fn resolve_reply_uris(
     })
 }
 
+/// (body, created_at, reply_to_post_id, language)
+type PostRow = (String, DateTime<Utc>, Option<i64>, Option<String>);
+
 async fn process_locked(
     actor_id: i64,
     post_id: i64,
@@ -123,15 +126,15 @@ async fn process_locked(
         .as_ref()
         .ok_or_else(|| "配送設定未注入".to_string())?;
 
-    let post_row: Option<(String, DateTime<Utc>, Option<i64>)> = sqlx::query_as(
-        "SELECT body, created_at, reply_to_post_id FROM posts WHERE id = $1",
+    let post_row: Option<PostRow> = sqlx::query_as(
+        "SELECT body, created_at, reply_to_post_id, language FROM posts WHERE id = $1",
     )
     .bind(post_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| format!("投稿取得失敗: {}", e))?;
 
-    let Some((text, now, reply_to_post_id)) = post_row else {
+    let Some((text, now, reply_to_post_id, language)) = post_row else {
         tracing::warn!(
             "[BskyPostCommitDeferred] post_id={} が見つからないため終了",
             post_id
@@ -234,6 +237,7 @@ async fn process_locked(
             Some(embed),
             now,
             bsky_reply,
+            language,
         )
         .await
         .map_err(|e| format!("ATP コミット失敗: {}", e))?;

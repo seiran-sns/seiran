@@ -611,7 +611,7 @@ pub async fn deliver_repost(
                     thumb,
                 };
                 if let Err(e) = atp
-                    .commit_quote(actor_id, post_id, "🔁", vec![], Some(embed), now, None)
+                    .commit_quote(actor_id, post_id, "🔁", vec![], Some(embed), now, None, None)
                     .await
                 {
                     tracing::error!("[create_note] Fedi→Bsky フォールバック投稿失敗: {}", e);
@@ -898,6 +898,9 @@ pub struct RegularPostDelivery {
     /// いるが、Fedi配送本文への追記要否（本文に含まれないURLがあれば末尾に追記）の判定に
     /// ここでも使う（`bsky_embed_choice`のURL選択と同じ「AP配送だけ上書き」の仕組み）。
     pub link_card_urls: Vec<String>,
+    /// ポストの言語（ISO 639-1）。Bsky配送の`app.bsky.feed.post`の`langs`にのみ反映する
+    /// （AP配送では使わない）。`None`なら`langs`フィールド自体を省略する。
+    pub language: Option<String>,
 }
 
 /// CW（閲覧注意）投稿のBsky embedを組み立てる（#229）。投稿詳細ページのURLに
@@ -980,6 +983,7 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
                     Some(embed),
                     d.now,
                     d.bsky_reply,
+                    d.language.clone(),
                 )
                 .await
             {
@@ -997,6 +1001,7 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
                     Some(embed),
                     d.now,
                     d.bsky_reply,
+                    d.language.clone(),
                 )
                 .await
             {
@@ -1040,6 +1045,7 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
                             embed,
                             d.now,
                             d.bsky_reply,
+                            d.language.clone(),
                         )
                         .await
                     {

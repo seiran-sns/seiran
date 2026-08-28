@@ -20,6 +20,7 @@ function makeDraft(text: string): ComposerDraft {
     cwEnabled: false,
     cwGuide: "",
     linkCardUrls: [],
+    language: "ja",
   };
 }
 

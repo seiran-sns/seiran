@@ -1208,6 +1208,7 @@ export const api = {
       poll?: PollCreateInput,
       contentWarning?: string,
       linkCardUrls?: string[],
+      language?: string,
     ) {
       return normalizeNote(
         await request<RawNote>("POST", "/notes/create", {
@@ -1229,6 +1230,7 @@ export const api = {
           },
           content_warning: contentWarning,
           link_card_urls: linkCardUrls && linkCardUrls.length > 0 ? linkCardUrls : undefined,
+          language,
         }),
       );
     },

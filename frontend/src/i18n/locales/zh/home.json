@@ -88,6 +88,7 @@
   "postComposer": {
     "deliverFediHint": "发送到联邦宇宙",
     "deliverBskyHint": "发送到 Bluesky",
+    "postLanguageHint": "帖子语言（用于 Bluesky 发送）",
     "visibilityPublicHint": "公开：所有人可见",
     "visibilityUnlistedHint": "不列出：所有人可见，但不显示在本地和全局时间线",
     "visibilityPrivateHint": "私密：仅关注者可见",

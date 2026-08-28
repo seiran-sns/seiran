@@ -342,6 +342,13 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
 - **AP側**: `birth_date_public=true`の場合のみActorオブジェクトに`vcard:bday`（`@context`に`"vcard": "http://www.w3.org/2006/vcard/ns#"`を追加）として含める。表現はMisskeyの`ApRendererService`実装に合わせている（`packages/backend/src/core/activitypub/ApRendererService.ts`）。`birth_date_public`のデフォルトは`false`で、Misskey本家自体にはこの可視性切り替えが無いseiran独自拡張。Pull取得（`GET /users/:username`、`crates/seiran-federation-inbox/src/handlers/actor.rs`）とPush配信（`Update(Person)`、`crates/seiran-common/src/ap/deliver.rs`の`build_person_object`）の両方で同じ条件分岐を行う。
 - **ATP側**: `app.bsky.actor.defs#personalDetailsPref`（`docs/protocols.md`3節「クライアント設定」参照）は`birth_date_public`と無関係に常に非公開（accessJwt認証済みの本人のみ`getPreferences`で取得可）。`putPreferences`で`#personalDetailsPref`を受け取ると`actors.birth_date`を更新するが、`birth_date_public`（Fediverse公開設定）自体は変更しない。
 
+### ポストの言語（`app.bsky.feed.post`の`langs`）
+ポストは言語プロパティ（ISO 639-1、2文字コード）を持てる。Bsky配送（`app.bsky.feed.post`の`langs`フィールド、1言語のみ）にのみ意味を持ち、AP配送では使わない。
+
+- **選択肢（`CreateNoteRequest.language`）**: 表示言語設定と同じ許可リスト（`seiran_common::SUPPORTED_LANGUAGES`、ja/en/zh/ko/es/de/frの7言語）。`crates/seiran-api/src/handlers/notes/mod.rs::create_regular_post`が`seiran_common::is_supported_language`で検証し、未対応言語は`UNSUPPORTED_LANGUAGE`で拒否する。省略可能で、その場合は`posts.language`が`NULL`のまま、Bskyコミット時に`langs`フィールド自体を省略する（Misskey互換APIクライアント等、本フィールドを送らないクライアントとの後方互換）。
+- **保存とBskyコミットへの反映**: `posts.language`に保存し、`AtpCommitService::commit_post`/`commit_quote`の`lang`引数として`encode_bsky_feed_post`（`crates/seiran-common/src/atp/repo.rs`）へ渡す。`Some`なら`langs`を1件の配列として設定し、`None`ならフィールド自体を省略する。動画パイプライン結合待ち（`Job::BskyPostCommitDeferred`）でコミットが遅延する場合も、ジョブが`posts.language`を都度読み直して同じ`lang`を渡す。
+- **フロントエンドのデフォルト**: 投稿フォームの言語選択ボタン（`docs/ui_spec.md` 2.4b節）の初期値は現在の表示言語（`i18n.language`）で、送信のたびに変わる「最後に送信した値」方式（Fedi/Bsky配送先トグル等の`composerDefaults`）とは異なる。
+
 ### アルゴリズムレコメンドからの除外（`app.bsky.actor.contentVisibilityDeclaration`）
 設定画面「プライバシー」のチェックボックス1件から、Bsky Discoverフィード等のアルゴリズムレコメンドから自分の投稿を除外するよう要求する。`GET`/`POST /api/account/content-visibility`（`crates/seiran-api/src/handlers/account.rs`）がローカルキャッシュ`actors.hide_from_algorithmic_recommendations`（`docs/database.md`参照）を読み書きし、更新時に`AtpCommitService::commit_content_visibility`（`crates/seiran-common/src/atp/service.rs`）が`app.bsky.actor.contentVisibilityDeclaration/self`（rkey固定`self`、フィールドは`hideFromAlgorithmicRecommendations`のみ）をPDSへコミットする。既に`chat.bsky.actor.declaration`（DM受信可否設定）と同じ「単一boolean値のself-keyレコード」パターンで、`atp_records`の既存有無でcreate/updateを判定する。レコードが存在しない場合は`false`として扱われる（Bluesky公式仕様）。ActivityPub側に対応する概念が無いため、この設定はBsky限定。
 

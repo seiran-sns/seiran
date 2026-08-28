@@ -88,6 +88,7 @@
   "postComposer": {
     "deliverFediHint": "Deliver to Fediverse",
     "deliverBskyHint": "Deliver to Bluesky",
+    "postLanguageHint": "Post language (used for Bluesky delivery)",
     "visibilityPublicHint": "Public: visible to everyone",
     "visibilityUnlistedHint": "Unlisted: visible to everyone but omitted from local and global timelines",
     "visibilityPrivateHint": "Private: visible to followers only",

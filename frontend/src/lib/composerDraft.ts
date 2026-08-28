@@ -25,6 +25,10 @@ export interface ComposerDraft {
    * 出せない場合の代替、Bsky配送オフ or CW中）。本文から消えてもチェック自体は
    * 孤児として残る（`bskyEmbedChoice`のURL孤児化と同じ仕様）。 */
   linkCardUrls: string[];
+  /** ポストの言語（Bsky配送の`langs`にのみ反映、2文字コード）。`composerDefaults`と異なり
+   * 「最後に送信した値」ではなく毎回現在の表示言語がデフォルトになる仕様のため、ここでは
+   * あくまで書きかけ下書きの一時保存としてのみ扱う。 */
+  language: string;
 }
 
 export type DraftTarget =

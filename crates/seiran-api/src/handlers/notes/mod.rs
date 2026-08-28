@@ -633,6 +633,16 @@ async fn create_regular_post(
         None => None,
     };
 
+    // ポスト言語（Bsky配送の`langs`にのみ意味を持つ、AP配送では使わない）。表示言語設定と
+    // 同じ許可リストで検証する。Misskey互換APIクライアント等、本フィールドを送らない
+    // クライアントとの後方互換のため`None`は許可し（従来通り言語情報なしで配送）、
+    // `Some`だが未対応言語の場合のみ拒否する。
+    if let Some(lang) = &req.language {
+        if !seiran_common::is_supported_language(lang) {
+            return ApiError::BadRequest("UNSUPPORTED_LANGUAGE".to_owned()).into_response();
+        }
+    }
+
     // URLリンクカードのチェックボックス選択（Bsky embed選択のラジオボタンリストを出せない
     // 場合の代替、Bsky配送オフ or CW中）。
     if let Err(e) = validate_link_card_urls(&req.link_card_urls) {
@@ -766,6 +776,7 @@ async fn create_regular_post(
             emoji_map: &local_emoji_map,
             poll: poll_json.as_ref(),
             content_warning: content_warning.as_deref(),
+            language: req.language.as_deref(),
         })
         .await
     {
@@ -925,6 +936,7 @@ async fn create_regular_post(
             poll: poll_json.clone(),
             content_warning: content_warning.clone(),
             link_card_urls: req.link_card_urls.clone(),
+            language: req.language.clone(),
         },
     )
     .await;
