@@ -65,41 +65,17 @@ pub async fn handle(request_id: i64, ctx: Arc<JobContext>) -> Result<(), String>
         return Err("[FollowImportProcess] DB pool 未設定".to_string());
     };
 
-    let mut lock_conn = pool
-        .acquire()
-        .await
-        .map_err(|e| format!("[FollowImportProcess] DB接続取得失敗: {}", e))?;
-
-    let (acquired,): (bool,) = sqlx::query_as("SELECT pg_try_advisory_lock($1)")
-        .bind(request_id)
-        .fetch_one(&mut *lock_conn)
-        .await
-        .map_err(|e| format!("[FollowImportProcess] advisory lock 取得失敗: {}", e))?;
-
-    if !acquired {
+    let Some(lock_conn) = crate::advisory_lock::try_acquire(pool, request_id).await? else {
         tracing::info!(
             "[FollowImportProcess] request_id={} は既に別のジョブが処理中のためスキップ",
             request_id
         );
         return Ok(());
-    }
+    };
 
     let result = process_locked(request_id, pool, &ctx).await;
 
-    if let Err(e) = sqlx::query("SELECT pg_advisory_unlock($1)")
-        .bind(request_id)
-        .execute(&mut *lock_conn)
-        .await
-    {
-        tracing::error!(
-            "[FollowImportProcess] request_id={} advisory unlock 失敗: {}",
-            request_id,
-            e
-        );
-    }
-    // lock_conn はここで用済み。以降の enqueue は別コネクションで行われるため、
-    // 明示的にプールへ返却してからにする。
-    drop(lock_conn);
+    crate::advisory_lock::release(lock_conn, request_id).await;
 
     let next = match result {
         Ok(next) => next,

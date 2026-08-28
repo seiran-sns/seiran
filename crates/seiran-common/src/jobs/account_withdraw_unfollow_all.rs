@@ -10,6 +10,12 @@
 //! 処理済みのターゲットが自然にスキップされる（`find_atp_rkey`/AP送信対象の判定は
 //! `follows` 行が残っている前提のため、削除済みなら該当ターゲットへの処理は
 //! 事実上のno-opになる）。
+//!
+//! **`actor_id` 単位の排他ロック**: このジョブは起動時リカバリ（`seiran-api`
+//! `spawn_startup_tasks`）により、プロセス再起動のたびに「退会済みなのに`follows`が
+//! 残っているアクター」が無条件で再enqueueされる。直前のジョブがまだ生きていれば
+//! 同一`actor_id`に対して複数のジョブが同時に走りうるため、`advisory_lock::try_acquire`
+//! で排他制御する（詳細は`crate::advisory_lock`のドキュメント参照）。
 
 use serde_json::json;
 use std::sync::Arc;
@@ -28,6 +34,28 @@ pub async fn handle(actor_id: i64, username: String, ctx: Arc<JobContext>) -> Re
         );
         return Ok(());
     };
+
+    let Some(lock_conn) = crate::advisory_lock::try_acquire(pool, actor_id).await? else {
+        tracing::info!(
+            "[AccountWithdrawUnfollowAll] actor_id={} は既に別のジョブが処理中のためスキップ",
+            actor_id
+        );
+        return Ok(());
+    };
+
+    let result = process_locked(actor_id, &username, pool, &ctx).await;
+
+    crate::advisory_lock::release(lock_conn, actor_id).await;
+
+    result
+}
+
+async fn process_locked(
+    actor_id: i64,
+    username: &str,
+    pool: &sqlx::PgPool,
+    ctx: &JobContext,
+) -> Result<(), String> {
     let Some(cfg) = ctx.delivery.as_ref() else {
         tracing::warn!(
             "[AccountWithdrawUnfollowAll] 配送設定未注入のためスキップ (actor_id={})",

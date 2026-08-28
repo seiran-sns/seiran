@@ -107,10 +107,10 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 | `InboundActivityProcess` | 受信AP活動の非同期解析・DB保存（inboxハンドラは署名検証のみ同期実行し即202を返す） | 中 |
 | `ActorMetadataResolve` | リモートアクター検証・メタデータ取得 | — （**スタブのみ、enqueueする箇所が実装されていない**） |
 | `AtpRepositoryPublish` | 外部PDSへのミラーリング目的で定義されているが、**enqueueする呼び出し箇所が実質存在しない**（現在の投稿配送は `AtpCommitService` を直接 await する経路に一本化されている。デッドコード） | 最高 |
-| `BskyVideoPoll` | Bsky公式動画パイプラインの完了ポーリング | — |
+| `BskyVideoPoll{media_file_id}` | Bsky公式動画パイプラインの完了ポーリング。起動時リカバリ対象（下記） | — |
 | `ProxyFollowSync` | list-relay仮想アクターの代理フォロー同期 | — |
-| `AccountWithdrawUnfollowAll` | 退会時の一括アンフォロー | — |
-| `BskyPostCommitDeferred` | 動画添付投稿のATPコミットを動画結合完了まで遅延 | — |
+| `AccountWithdrawUnfollowAll{actor_id, username}` | 退会時の一括アンフォロー。起動時リカバリ対象（下記） | — |
+| `BskyPostCommitDeferred{actor_id, post_id, pending_media_file_id}` | 動画添付投稿のATPコミットを動画結合完了まで遅延。起動時リカバリ対象（下記） | — |
 | `BskyDmSend{post_id}` | DM宛先のBskyアクターへ`chat.bsky.convo.sendMessage`で送信（`docs/protocols.md` 9節） | 高 |
 | `RemoteFollowListSync{actor_id, direction}` | リモートFediアクターのfollowers/following全件取得（プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック、`docs/protocols.md` 2節） | 低 |
 | `RemoteActorResolve{uri}` | リモートfollowers/following一覧中、ローカルDB未登録のactor URIのプロフィールを解決し`actors`へupsert（フォロー関係は作らない、`docs/protocols.md` 2節） | 低 |
@@ -123,9 +123,22 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 
 フォロー作成の実処理（ATPコミット・`follows` INSERT・AP Follow送信・通知等）は元々 `handlers::follows::create_follow` 内の `&AppState` 依存関数だったが、`FollowImportProcess` ジョブ（`JobContext`から実行される）からも同じ処理を呼ぶ必要が生じたため、`seiran-common::follow_exec::execute_follow` へ `AppState` 非依存の共通関数として切り出した（`FollowExecConfig`が必要なリポジトリ・`AtpCommitService`・`StreamHub`等を束ねる。APIハンドラは`AppState::follow_exec_config()`で組み立て、`JobContext::follow_exec`はWorker起動時に同内容を注入する）。ターゲット文字列（ローカルユーザー名/`user@domain`/`https://...`/`did:...`/ATPハンドル）の種別判定ロジックも`seiran-common::follow_target::classify_follow_target`へ同様に統合されており、`create_follow`・`resolve_and_upsert_target`（リスト機能のメンバー追加）・`FollowImportProcess`の3箇所から共有される。`execute_follow`は呼び出し前から既に対象をフォロー済みだった場合も（`follows`への新規INSERTが発生しないだけで）エラーにせず成功として返すため、`FollowOutcome`に`already_following`フラグを持たせて区別できるようにしている（`FollowRepository::upsert_pending`/`insert_accepted_bsky`の戻り値が新規挿入か既存更新かを返す設計を利用）。フォローインポートの進捗表示はこれを見て「成功」と「既存」を別枠に集計する（`follow_import_item_status`の`already_following`、`docs/database.md`参照）。
 
-**`FollowImportProcess`の`request_id`単位排他ロックと起動時リカバリ**: `Job::FollowImportProcess`の遅延リトライ（レート制限超過時の`enqueue_retry`）は`InMemoryJobQueue`ではプロセス内メモリのみで管理され、プロセス再起動で消失する。これを放置すると、レート制限待ちの間にプロセスが再起動しただけで、そのインポートのジョブチェーンが永久に停止してしまう。対策として、`seiran-api::spawn_startup_tasks`が起動のたびに`follow_import_requests`の`status='running'`な行を無条件で全件再enqueueする（`resume_running_follow_imports`）。「最後に進捗があってから一定時間経過したものだけ」のように絞り込むと、絞り込み条件の見積もり次第で本当に停止しているチェーンを再開し損なう投入漏れの方が実害として大きいため、あえて絞らない。
+**起動時リカバリと`advisory_lock`共通ヘルパー**: `Job::FollowImportProcess`の遅延リトライ（レート制限超過時の`enqueue_retry`）に限らず、`InMemoryJobQueue`のリトライ待ち状態はプロセス内メモリのみで管理され、プロセス再起動で消失する。DB上に「未完了」を示す永続状態を持つ自己完結ジョブがこの影響を受けると、リトライ待ち中にプロセスが再起動しただけで処理が誰にも気づかれず永久に止まってしまう。対策として、`seiran-api::spawn_startup_tasks`が起動のたびに「未完了」を示すDB状態を検出して無条件で全件再enqueueする。現在4つのジョブがこのパターンを採用している:
 
-この無条件再enqueueは、正常に動いている既存チェーンに対しても重複してジョブを積みうる（split-role構成で複数APIレプリカが同時に起動する場合や、Redisキューでプロセス再起動をまたいでジョブが残っていた場合も同様）。`claim_next_item`自体はアイテム単位でアトミックなため二重処理は起きないが、複数チェーンが並行すると`check_follow_rate_limit`のTOCTOU（チェックと実際のフォロー成立の間に他のトランザクションを排除できない）で上限をわずかに超過しうる。これを防ぐため、`jobs::follow_import::handle`は処理開始時に`pg_try_advisory_lock(request_id)`を取得できたジョブだけが実処理を行い、取れなければ（既に別のジョブが処理中とみなし）何もせず終了する（re-enqueueもしない。動いている方のジョブが自分でチェーンを継続するため）。advisory lockはセッションスコープのため、`PgPool`から都度借りる接続では`lock`と`unlock`が別コネクションになりうることに注意し、`pool.acquire()`で明示的に確保した1本の接続を両方に使う。**次のジョブのenqueueは必ずunlock完了後に行う**（unlock前にenqueueすると、別ワーカーが即dequeueして`pg_try_advisory_lock`を試み、まだロックが残っていて失敗し、re-enqueueもされずチェーンが途切れてしまうため）。
+| ジョブ | 未完了の検出条件 | 起動時リカバリ関数 |
+|---|---|---|
+| `FollowImportProcess{request_id}` | `follow_import_requests.status='running'` | `resume_running_follow_imports` |
+| `AccountWithdrawUnfollowAll{actor_id, username}` | `actors.withdrawn_at IS NOT NULL` かつ `follows`に残存行あり | `resume_account_withdraw_unfollow_all` |
+| `BskyVideoPoll{media_file_id}` | `media_files.bsky_video_status = 'pending'` | `resume_bsky_video_poll` |
+| `BskyPostCommitDeferred{actor_id, post_id, pending_media_file_id}` | `posts.pending_bsky_media_file_id IS NOT NULL AND at_uri IS NULL` | `resume_bsky_post_commit_deferred` |
+
+「最後に進捗があってから一定時間経過したものだけ」のように絞り込むと、絞り込み条件の見積もり次第で本当に停止している処理を再開し損なう投入漏れの方が実害として大きいため、いずれもあえて絞らない。
+
+この無条件再enqueueは、正常に動いている既存の処理に対しても重複してジョブを積みうる（split-role構成で複数APIレプリカが同時に起動する場合や、Redisキューでプロセス再起動をまたいでジョブが残っていた場合も同様）。特に`FollowImportProcess`は複数チェーンが並行すると`check_follow_rate_limit`のTOCTOU（チェックと実際のフォロー成立の間に他のトランザクションを排除できない）で上限をわずかに超過しうる。これを防ぐため、上記4ジョブはいずれも処理開始時に`crate::advisory_lock::try_acquire(pool, key)`（`FollowImportProcess`は`request_id`、`AccountWithdrawUnfollowAll`は`actor_id`、`BskyVideoPoll`/`BskyPostCommitDeferred`は`media_file_id`/`post_id`をキーに使う）で`pg_try_advisory_lock`を取得できた場合だけ実処理を行い、取れなければ（既に別のジョブが処理中とみなし）何もせず終了する（re-enqueueもしない。動いている方のジョブが自分で処理を継続するため）。異なるジョブ種別のキー空間はそれぞれ別のsnowflake ID採番元（`follow_import_requests.id`/`actors.id`/`media_files.id`/`posts.id`）であり、advisory lockの単一引数版は名前空間を分けていないが、64bit空間での偶然の衝突確率は無視できるため許容している。
+
+advisory lockはセッションスコープのため、`PgPool`から都度借りる接続では`lock`と`unlock`が別コネクションになりうることに注意し、`try_acquire`は`pool.acquire()`で明示的に確保した1本の接続を返し、呼び出し側はそれをそのまま`release`に渡す。**`FollowImportProcess`のように次のジョブをenqueueする設計のものは、そのenqueueを必ずunlock完了後に行う**（unlock前にenqueueすると、別ワーカーが即dequeueして`pg_try_advisory_lock`を試み、まだロックが残っていて失敗し、re-enqueueもされずチェーンが途切れてしまうため）。
+
+**`BskyPostCommitDeferred`のペイロード最小化**: このジョブは元々`text`（本文）・`reply_root`/`reply_parent`（リプライ先at_uri/at_cid）・`now`（投稿作成時刻）をジョブのペイロードとして直接保持していたが、これらはいずれも`posts`テーブルに既に永続化されている情報の写しであり、`InMemoryJobQueue`が消えるとこの写しごと失われ、起動時リカバリで`post_id`だけから元のジョブを再現できなかった。そこで`actor_id`/`post_id`/`pending_media_file_id`のみを持つ設計に変更し、ハンドラが`post_id`から`posts.body`/`created_at`/`reply_to_post_id`を都度取得する（リプライ先at_uri/at_cidは`reply_to_post_id`が指す投稿の`at_uri`/`at_cid`から再構築し、root/parentは常に同じ値を使う。`handlers::notes::delivery::resolve_reply_context`と同じ規約）。`pending_media_file_id`自体は`resolve_bsky_embed`（複数添付間の優先順位判定を含む）の結果を起動時リカバリで再現不要にするため、投稿作成時点で`posts.pending_bsky_media_file_id`へ永続化しておき（`enqueue_bsky_post_commit_deferred`）、コミット成功後にNULLへ戻す。
 
 なお、この排他ロックは同一`request_id`（同一インポート）内の重複実行のみを防ぐものであり、フォローインポート実行中に通常の`POST /api/follows/create`（手動フォロー）が同時に行われた場合の`check_follow_rate_limit`のTOCTOUまでは解消しない。この経路でのレート制限超過は実害が小さいと判断し、あえて対応範囲に含めていない。
 

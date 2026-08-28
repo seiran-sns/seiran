@@ -13,11 +13,21 @@
 //! 呼ぶ。`media_files.created_at` からの経過時間が `SETTLE_TIMEOUT_SECS` を超えたら、
 //! 未確定のままでも諦めて視聴ページへのリンクカードでコミットする。
 //! 2026-07-17 マイケル指摘・実機再現確認。
+//!
+//! **ペイロード最小化と `post_id` 単位の排他ロック**: このジョブは `post_id`/
+//! `pending_media_file_id` のみを持ち、本文・投稿時刻・リプライ先at_uri/at_cidは
+//! `posts` テーブルから都度取得する（DBの別の場所に既にある情報をジョブのペイロードとして
+//! 二重に持たない設計）。これにより、`InMemoryJobQueue`がプロセス再起動でリトライ待ち
+//! ジョブを失っても、起動時リカバリ（`seiran-api` `spawn_startup_tasks`）が
+//! `posts.pending_bsky_media_file_id IS NOT NULL AND at_uri IS NULL` を検出して
+//! `post_id`だけから元のジョブを完全に再現できる。直前のジョブがまだ生きていれば
+//! 同一`post_id`に対して複数のジョブが同時に走りうるため、`advisory_lock::try_acquire`
+//! で排他制御する（詳細は`crate::advisory_lock`のドキュメント参照）。
 
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use sqlx::Row;
+use sqlx::{PgPool, Row};
 use tokio::sync::broadcast;
 
 use crate::atp::repo::{BskyEmbed, BskyPostReply, BskyRefRecord};
@@ -42,15 +52,10 @@ fn watch_page_fallback_embed(local_domain: &str, media_file_id: i64) -> BskyEmbe
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn handle(
     actor_id: i64,
     post_id: i64,
-    text: String,
     pending_media_file_id: i64,
-    reply_root: Option<(String, String)>,
-    reply_parent: Option<(String, String)>,
-    now: DateTime<Utc>,
     ctx: Arc<JobContext>,
 ) -> Result<(), String> {
     let Some(pool) = ctx.db_pool.as_ref() else {
@@ -60,10 +65,81 @@ pub async fn handle(
         );
         return Ok(());
     };
+
+    let Some(lock_conn) = crate::advisory_lock::try_acquire(pool, post_id).await? else {
+        tracing::info!(
+            "[BskyPostCommitDeferred] post_id={} は既に別のジョブが処理中のためスキップ",
+            post_id
+        );
+        return Ok(());
+    };
+
+    let result = process_locked(actor_id, post_id, pending_media_file_id, pool, &ctx).await;
+
+    crate::advisory_lock::release(lock_conn, post_id).await;
+
+    result
+}
+
+/// `post_id` のリプライ先（`reply_to_post_id`）を辿り、Bsky reply フィールド用の
+/// `(root, parent)` を組み立てる。root/parent は常に同じ値（直接の親のat_uri/at_cid）で、
+/// `seiran-api::handlers::notes::delivery::resolve_reply_context` と同じ規約
+/// （スレッド全体のrootを別途辿ることはしない）。
+async fn resolve_reply_uris(
+    pool: &PgPool,
+    reply_to_post_id: Option<i64>,
+) -> Result<Option<BskyPostReply>, String> {
+    let Some(reply_to_post_id) = reply_to_post_id else {
+        return Ok(None);
+    };
+    let row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT at_uri, at_cid FROM posts WHERE id = $1")
+            .bind(reply_to_post_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("親ポストのat_uri/at_cid取得失敗: {}", e))?;
+
+    Ok(match row {
+        Some((Some(uri), Some(cid))) => Some(BskyPostReply {
+            root: BskyRefRecord {
+                uri: uri.clone(),
+                cid: cid.clone(),
+            },
+            parent: BskyRefRecord { uri, cid },
+        }),
+        _ => None,
+    })
+}
+
+async fn process_locked(
+    actor_id: i64,
+    post_id: i64,
+    pending_media_file_id: i64,
+    pool: &PgPool,
+    ctx: &JobContext,
+) -> Result<(), String> {
     let cfg = ctx
         .delivery
         .as_ref()
         .ok_or_else(|| "配送設定未注入".to_string())?;
+
+    let post_row: Option<(String, DateTime<Utc>, Option<i64>)> = sqlx::query_as(
+        "SELECT body, created_at, reply_to_post_id FROM posts WHERE id = $1",
+    )
+    .bind(post_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("投稿取得失敗: {}", e))?;
+
+    let Some((text, now, reply_to_post_id)) = post_row else {
+        tracing::warn!(
+            "[BskyPostCommitDeferred] post_id={} が見つからないため終了",
+            post_id
+        );
+        return Ok(());
+    };
+
+    let bsky_reply = resolve_reply_uris(pool, reply_to_post_id).await?;
 
     let row = sqlx::query(
         "SELECT mime_type, width, height, bsky_video_cid, bsky_video_status, bsky_video_size, size, created_at
@@ -138,20 +214,6 @@ pub async fn handle(
         convert_mentions_for_bsky(&text, &cfg.local_domain, pool, ctx.ap_client.http.as_ref())
             .await;
 
-    let bsky_reply = match (reply_root, reply_parent) {
-        (Some((root_uri, root_cid)), Some((parent_uri, parent_cid))) => Some(BskyPostReply {
-            root: BskyRefRecord {
-                uri: root_uri,
-                cid: root_cid,
-            },
-            parent: BskyRefRecord {
-                uri: parent_uri,
-                cid: parent_cid,
-            },
-        }),
-        _ => None,
-    };
-
     // ATPコミット用のサービス。event_txはこのジョブ専用の使い捨てチャンネルで良い
     // （account_withdraw_unfollow_all と同じ理由: subscribeReposのリアルタイム購読者には
     // 届かないが、atp_repo_eventsテーブルへの記録自体は行われるため、他のRelayが
@@ -175,6 +237,21 @@ pub async fn handle(
         )
         .await
         .map_err(|e| format!("ATP コミット失敗: {}", e))?;
+
+    // 結合待ちを解消（起動時リカバリの再検出対象から外す）。commit_post成功時点で
+    // posts.at_uri が設定されているはずだが、pending_bsky_media_file_id自体も明示的に
+    // クリアしておく（at_uri判定だけに頼らず、意図をカラムの値としても残すため）。
+    if let Err(e) = sqlx::query("UPDATE posts SET pending_bsky_media_file_id = NULL WHERE id = $1")
+        .bind(post_id)
+        .execute(pool)
+        .await
+    {
+        tracing::error!(
+            "[BskyPostCommitDeferred] pending_bsky_media_file_id クリア失敗 post_id={}: {}",
+            post_id,
+            e
+        );
+    }
 
     tracing::info!("[BskyPostCommitDeferred] コミット完了 post_id={}", post_id);
     Ok(())

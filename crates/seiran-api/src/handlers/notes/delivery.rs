@@ -912,20 +912,6 @@ fn build_cw_bsky_embed(local_domain: &str, post_id: i64) -> BskyEmbed {
     }
 }
 
-/// ATP レコードの `(uri, cid)` 参照。
-type AtUriCid = (String, String);
-
-/// `BskyPostReply` を `Job::BskyPostCommitDeferred` へ渡せる `(uri, cid)` タプルに分解する。
-fn split_bsky_reply(reply: &Option<BskyPostReply>) -> (Option<AtUriCid>, Option<AtUriCid>) {
-    match reply {
-        Some(r) => (
-            Some((r.root.uri.clone(), r.root.cid.clone())),
-            Some((r.parent.uri.clone(), r.parent.cid.clone())),
-        ),
-        None => (None, None),
-    }
-}
-
 /// 通常投稿 / リプライ / 引用投稿を Fedi・Bsky へ配送する。
 /// Bsky は ATP コミット（firehose 結合のため in-process）、Fedi は ApDelivery ジョブ。
 pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
@@ -1039,17 +1025,8 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
             .await
             {
                 BskyEmbedResolution::Pending(media_file_id) => {
-                    let (reply_root, reply_parent) = split_bsky_reply(&d.bsky_reply);
                     state
-                        .enqueue_bsky_post_commit_deferred(
-                            d.actor_id,
-                            d.post_id,
-                            d.text.clone(),
-                            media_file_id,
-                            reply_root,
-                            reply_parent,
-                            d.now,
-                        )
+                        .enqueue_bsky_post_commit_deferred(d.actor_id, d.post_id, media_file_id)
                         .await;
                 }
                 BskyEmbedResolution::Ready(embed) => {

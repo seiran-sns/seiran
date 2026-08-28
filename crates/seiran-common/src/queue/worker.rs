@@ -374,24 +374,8 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
         Job::BskyPostCommitDeferred {
             actor_id,
             post_id,
-            text,
             pending_media_file_id,
-            reply_root,
-            reply_parent,
-            now,
-        } => {
-            jobs::bsky_post_commit_deferred::handle(
-                actor_id,
-                post_id,
-                text,
-                pending_media_file_id,
-                reply_root,
-                reply_parent,
-                now,
-                ctx,
-            )
-            .await
-        }
+        } => jobs::bsky_post_commit_deferred::handle(actor_id, post_id, pending_media_file_id, ctx).await,
         Job::BskyDmSend { post_id } => jobs::bsky_dm_send::handle(post_id, ctx).await,
         Job::RemoteFollowListSync {
             actor_id,

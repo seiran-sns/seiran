@@ -195,18 +195,16 @@ pub enum Job {
     /// （`ready`/`failed`）になるまで遅延する。投稿作成時点でまだトランスコード中の動画に
     /// 対して即座に `commit_post` すると、その時点の状態でしか判定できず常に `external`
     /// フォールバックになってしまうため（2026-07-17 マイケル指摘・実機再現確認）。
-    /// `pending_media_file_id` は選択が解決した先の`media_files.id`1件のみ。
-    /// `reply_root`/`reply_parent` は `(uri, cid)` のタプルで、リプライでない場合は両方 `None`。
+    /// `pending_media_file_id` は選択が解決した先の`media_files.id`1件（`resolve_bsky_embed`の
+    /// 優先順位判定結果を `posts.pending_bsky_media_file_id` へ投稿作成時点で永続化した値を
+    /// そのまま渡す）。本文・投稿時刻・リプライ先at_uri/at_cidはジョブのペイロードには
+    /// 持たせず、ハンドラが `post_id` から `posts` テーブルを都度参照して取得する
+    /// （プロセス再起動でジョブのペイロードが失われても、`post_id`さえ分かれば起動時
+    /// リカバリで完全に再現できるようにするため。詳細は`docs/architecture.md`参照）。
     BskyPostCommitDeferred {
         actor_id: i64,
         post_id: i64,
-        text: String,
         pending_media_file_id: i64,
-        reply_root: Option<(String, String)>,
-        reply_parent: Option<(String, String)>,
-        /// 投稿作成時点の時刻。ATP レコードの `createdAt` は実行時ではなく
-        /// この時刻を使う（ジョブの実行がずれても投稿日時がずれないように）。
-        now: DateTime<Utc>,
     },
 
     /// DM（`visibility='direct'`）投稿を、宛先の中のBskyアクターへ`chat.bsky.convo.sendMessage`
@@ -364,17 +362,7 @@ mod tests {
             Job::BskyPostCommitDeferred {
                 actor_id: 1,
                 post_id: 2,
-                text: "hello".into(),
                 pending_media_file_id: 3,
-                reply_root: Some((
-                    "at://did:plc:x/app.bsky.feed.post/a".into(),
-                    "bafyrei...".into(),
-                )),
-                reply_parent: Some((
-                    "at://did:plc:x/app.bsky.feed.post/b".into(),
-                    "bafyrei...".into(),
-                )),
-                now: Utc::now(),
             },
             Job::RelayFollowSync {
                 relay_id: 1,

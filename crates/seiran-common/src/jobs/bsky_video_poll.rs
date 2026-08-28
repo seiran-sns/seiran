@@ -5,6 +5,12 @@
 //! `Err` を返して `WorkerEngine` の既存リトライ機構（固定3秒間隔・最大10回=30秒、
 //! `crates/seiran-common/src/queue/worker.rs` の `retry_config_for`）に
 //! 判断を委ねる。詳細仕様は `docs/03_multi_protocol_engine_specification.md` §12。
+//!
+//! **`media_file_id` 単位の排他ロック**: このジョブは起動時リカバリ（`seiran-api`
+//! `spawn_startup_tasks`）により、プロセス再起動のたびに`bsky_video_status='pending'`な
+//! 行が無条件で再enqueueされる。直前のリトライがまだ生きていれば同一`media_file_id`に
+//! 対して複数のジョブが同時に走りうるため、`advisory_lock::try_acquire`で排他制御する
+//! （詳細は`crate::advisory_lock`のドキュメント参照）。
 
 use std::sync::Arc;
 
@@ -27,6 +33,26 @@ pub async fn handle(media_file_id: i64, ctx: Arc<JobContext>) -> Result<(), Stri
         }
     };
 
+    let Some(lock_conn) = crate::advisory_lock::try_acquire(pool, media_file_id).await? else {
+        tracing::info!(
+            "[BskyVideoPoll] media_file_id={} は既に別のジョブが処理中のためスキップ",
+            media_file_id
+        );
+        return Ok(());
+    };
+
+    let result = process_locked(media_file_id, pool, &ctx).await;
+
+    crate::advisory_lock::release(lock_conn, media_file_id).await;
+
+    result
+}
+
+async fn process_locked(
+    media_file_id: i64,
+    pool: &sqlx::PgPool,
+    ctx: &JobContext,
+) -> Result<(), String> {
     let row = sqlx::query(
         "SELECT mf.bsky_video_job_id, a.at_did, a.at_signing_key_pem
          FROM media_files mf

@@ -260,28 +260,37 @@ impl AppState {
     /// Bsky embedとして選択された動画/音声添付のパイプライン結合完了待ちで、投稿のBsky
     /// コミットをWorker（`jobs::bsky_post_commit_deferred`）へ委譲する。`pending_media_file_id`
     /// は選択が解決した先の`media_files.id`1件のみ（#227、`resolve_bsky_embed`参照）。
-    #[allow(clippy::too_many_arguments)]
+    /// 本文・投稿時刻・リプライ先at_uri/at_cidはジョブのペイロードに持たせず、ハンドラが
+    /// `post_id`から`posts`テーブルを都度参照する設計のため、ここでは`posts.pending_bsky_media_file_id`
+    /// を先に永続化してから（起動時リカバリが検出できるようにする）enqueueする。
     pub async fn enqueue_bsky_post_commit_deferred(
         &self,
         actor_id: i64,
         post_id: i64,
-        text: String,
         pending_media_file_id: i64,
-        reply_root: Option<(String, String)>,
-        reply_parent: Option<(String, String)>,
-        now: chrono::DateTime<chrono::Utc>,
     ) {
+        if let Err(e) = sqlx::query(
+            "UPDATE posts SET pending_bsky_media_file_id = $1 WHERE id = $2",
+        )
+        .bind(pending_media_file_id)
+        .bind(post_id)
+        .execute(&self.db)
+        .await
+        {
+            tracing::error!(
+                "[job] pending_bsky_media_file_id 設定失敗 (post_id={}): {}",
+                post_id,
+                e
+            );
+        }
+
         if let Err(e) = self
             .job_queue
             .enqueue(
                 Job::BskyPostCommitDeferred {
                     actor_id,
                     post_id,
-                    text,
                     pending_media_file_id,
-                    reply_root,
-                    reply_parent,
-                    now,
                 },
                 job_priority::HIGH,
             )
@@ -1266,6 +1275,9 @@ pub fn spawn_startup_tasks(state: &AppState) {
     let state = state.clone();
     tokio::spawn(async move {
         resume_running_follow_imports(&state).await;
+        resume_account_withdraw_unfollow_all(&state).await;
+        resume_bsky_video_poll(&state).await;
+        resume_bsky_post_commit_deferred(&state).await;
         ensure_handle_txt_records(&state).await;
         request_relay_crawl(&state).await;
         // requestCrawl 後、Relay が subscribeRepos に接続するまで待機してから
@@ -1308,6 +1320,113 @@ async fn resume_running_follow_imports(state: &AppState) {
     );
     for request_id in request_ids {
         state.enqueue_follow_import_process(request_id).await;
+    }
+}
+
+/// 起動時リカバリ: プロセス再起動で停止した退会時一括アンフォロー（`Job::AccountWithdrawUnfollowAll`）
+/// を再開する。`actors.withdrawn_at` が設定済み（退会済み）なのに `follows` にまだ
+/// フォロー先が残っているアクターを検出し、無条件で全件再enqueueする（`resume_running_follow_imports`
+/// と同じ理由で絞り込まない）。重複投入は`jobs::account_withdraw_unfollow_all`の
+/// `actor_id` 単位 advisory lock が解消する。
+async fn resume_account_withdraw_unfollow_all(state: &AppState) {
+    let rows: Vec<(i64, String)> = match sqlx::query_as(
+        "SELECT a.id, a.username FROM actors a
+         WHERE a.withdrawn_at IS NOT NULL
+           AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_actor_id = a.id)",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[startup] 退会済みアクターの残存フォロー確認失敗: {}", e);
+            return;
+        }
+    };
+    if rows.is_empty() {
+        return;
+    }
+    tracing::info!(
+        "[startup] 退会済みアクターの一括アンフォロー未完了 {} 件を再開します",
+        rows.len()
+    );
+    for (actor_id, username) in rows {
+        state
+            .enqueue_account_withdraw_unfollow_all(actor_id, username)
+            .await;
+    }
+}
+
+/// 起動時リカバリ: プロセス再起動で停止したBsky動画パイプライン結合待ち（`Job::BskyVideoPoll`）
+/// を再開する。`media_files.bsky_video_status = 'pending'`（`app.bsky.video.uploadVideo`へ
+/// 提出済みだが `ready`/`failed` に未確定）を無条件で全件再enqueueする。重複投入は
+/// `jobs::bsky_video_poll`の `media_file_id` 単位 advisory lock が解消する。
+async fn resume_bsky_video_poll(state: &AppState) {
+    let media_file_ids: Vec<i64> = match sqlx::query_scalar(
+        "SELECT id FROM media_files WHERE bsky_video_status = 'pending'",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::error!("[startup] Bsky動画パイプライン結合待ちの確認失敗: {}", e);
+            return;
+        }
+    };
+    if media_file_ids.is_empty() {
+        return;
+    }
+    tracing::info!(
+        "[startup] Bsky動画パイプライン結合待ち {} 件を再開します",
+        media_file_ids.len()
+    );
+    for media_file_id in media_file_ids {
+        if let Err(e) = state
+            .job_queue
+            .enqueue(Job::BskyVideoPoll { media_file_id }, job_priority::HIGH)
+            .await
+        {
+            tracing::error!(
+                "[startup] BskyVideoPoll enqueue 失敗 (media_file_id={}): {}",
+                media_file_id,
+                e
+            );
+        }
+    }
+}
+
+/// 起動時リカバリ: プロセス再起動で停止した動画添付投稿のBskyコミット遅延
+/// （`Job::BskyPostCommitDeferred`）を再開する。`posts.pending_bsky_media_file_id`が
+/// 設定済み（`enqueue_bsky_post_commit_deferred`が投稿作成時点で永続化した値）かつ
+/// `at_uri`が未確定（まだBskyへコミットされていない）投稿を無条件で全件再enqueueする
+/// （`resume_running_follow_imports`と同じ理由で絞り込まない）。重複投入は
+/// `jobs::bsky_post_commit_deferred`の`post_id`単位advisory lockが解消する。
+async fn resume_bsky_post_commit_deferred(state: &AppState) {
+    let rows: Vec<(i64, i64, i64)> = match sqlx::query_as(
+        "SELECT id, actor_id, pending_bsky_media_file_id FROM posts
+         WHERE pending_bsky_media_file_id IS NOT NULL AND at_uri IS NULL",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[startup] Bskyコミット遅延未完了の確認失敗: {}", e);
+            return;
+        }
+    };
+    if rows.is_empty() {
+        return;
+    }
+    tracing::info!(
+        "[startup] Bskyコミット遅延未完了 {} 件を再開します",
+        rows.len()
+    );
+    for (post_id, actor_id, pending_media_file_id) in rows {
+        state
+            .enqueue_bsky_post_commit_deferred(actor_id, post_id, pending_media_file_id)
+            .await;
     }
 }
 
