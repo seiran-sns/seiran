@@ -114,10 +114,15 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
   投稿・フォローの増減箇所で更新。整合性維持のため**更新箇所の網羅**が肝（漏れると数字がずれる）。
   フォロー increment/decrement は `repository/follow.rs` の状態遷移に、notes は投稿作成/削除に集約。
 
-### [PERF-5・低] `atp_repo_events` の CAR バイト列を定期 NULL 化（前回 P-6）
+### [PERF-5・対応済み] `atp_repo_events` の CAR バイト列を定期 NULL 化（前回 P-6）
 
-- 一定期間（Relay の再取得要求が来なくなる 72h 程度）を過ぎた `car_bytes` を NULL 化する定期ジョブ。
-  メタデータ行は残す。既存ジョブ基盤に 1 本足すだけ。
+- 2026-08-29 対応済み。ジョブキュー経由ではなく、`spawn_gc_tasks`（`crates/seiran-api/src/lib.rs`、
+  media_files/atp_blobs の孤立ファイルGCと同じ1時間ごとの`tokio::time::interval`ループ）に
+  `run_atp_repo_events_car_bytes_gc`を追加する形にした（既存の定期実行パターンに合わせた。
+  ジョブキューには「一定間隔で永続的に走り続ける」ためのdelay付き再投入の仕組みはあるが
+  自己再enqueue型は「完了したら止まる」チェーン用途で使われており、GC専用の
+  `tokio::time::interval`ループの方が既存踏襲として自然だった）。
+  72時間経過した`car_bytes`をUPDATE一括でNULL化、行・`ops_json`は残す。
 
 ### [PERF-6・低] 未使用インデックスの棚卸し（前回 P-2）
 

@@ -1694,7 +1694,8 @@ async fn backfill_chat_declarations(state: &AppState) {
 /// アップロードされたが参照されていない media_files を定期的に削除するタスク。
 ///
 /// 1時間ごとに孤立ファイル（7日以上経過かつどのテーブルからも参照なし）を
-/// S3 → DB の順でベストエフォートで削除する。
+/// S3 → DB の順でベストエフォートで削除する。同じ周期で atp_blobs のGCと、
+/// atp_repo_events.car_bytes の定期NULL化（PERF-5）も行う。
 pub fn spawn_gc_tasks(state: &AppState) {
     // 検索セッション GC（1分ごとにタイムアウトしたセッションを削除）
     let search_store = Arc::clone(&state.search_store);
@@ -1728,6 +1729,19 @@ pub fn spawn_gc_tasks(state: &AppState) {
         loop {
             interval.tick().await;
             run_atp_blobs_gc(&db2, storage_providers2.as_ref()).await;
+        }
+    });
+
+    // [PERF-5] atp_repo_events.car_bytes（subscribeReposバックフィル用の差分CAR）の定期NULL化。
+    // Relay側が過去イベントの再取得を要求してくるのは実運用上せいぜい数十時間程度で、
+    // それを過ぎたら car_bytes を保持し続ける理由がない（イベントの行自体・seq・
+    // ops_jsonは残し、容量の大半を占めるバイト列のみ落とす）。
+    let db3 = state.db.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            run_atp_repo_events_car_bytes_gc(&db3).await;
         }
     });
 }
@@ -1852,6 +1866,31 @@ async fn run_atp_blobs_gc(pool: &sqlx::PgPool, storage_providers: &dyn StoragePr
             Err(e) => {
                 tracing::error!("[atp-blobs-gc] プロバイダー取得失敗: {}", e);
             }
+        }
+    }
+}
+
+/// [PERF-5] 72時間以上経過した `atp_repo_events.car_bytes` を NULL 化する
+/// （イベント行・`ops_json`は残し、容量の大半を占めるバイト列のみ落とす）。
+async fn run_atp_repo_events_car_bytes_gc(pool: &sqlx::PgPool) {
+    match sqlx::query(
+        "UPDATE atp_repo_events
+         SET car_bytes = NULL
+         WHERE car_bytes IS NOT NULL
+           AND created_at < NOW() - INTERVAL '72 hours'",
+    )
+    .execute(pool)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            tracing::info!(
+                "[atp-repo-events-gc] car_bytes を {} 件NULL化しました",
+                result.rows_affected()
+            );
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("[atp-repo-events-gc] car_bytes NULL化失敗: {}", e);
         }
     }
 }
