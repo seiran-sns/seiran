@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use axum::{
     body::Bytes,
     extract::State,
@@ -5,6 +7,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use reqwest::redirect::Policy;
 
 use seiran_common::atp::{resolve_service_endpoint, sign_service_auth_jwt};
 
@@ -74,14 +77,14 @@ pub async fn xrpc_proxy_fallback(
         return ApiError::Internal("署名鍵が未設定です".to_string()).into_response();
     };
 
-    let target_endpoint =
-        match resolve_service_endpoint(target_did, service_id, &state.http_client).await {
-            Ok(ep) => ep,
-            Err(e) => {
-                return ApiError::Internal(format!("プロキシ先解決失敗 ({}): {}", proxy_header, e))
-                    .into_response()
-            }
-        };
+    let resolved = match resolve_service_endpoint(target_did, service_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            return ApiError::Internal(format!("プロキシ先解決失敗 ({}): {}", proxy_header, e))
+                .into_response()
+        }
+    };
+    let target_endpoint = resolved.url;
 
     // `aud` クレームはサービスDIDのみ（フラグメント無し）。`atproto-proxy` ヘッダーの
     // `#service-id` 部分はサービスエンドポイント解決にのみ使い、JWTには含めない
@@ -99,8 +102,32 @@ pub async fn xrpc_proxy_fallback(
         None => format!("{}/xrpc/{}", target_endpoint, xrpc_method),
     };
 
-    let mut req = state
-        .http_client
+    // [SEC-3] `resolve_service_endpoint`が検証したIPへ接続を固定する（`state.http_client`を
+    // そのまま使うと、SSRF検証後に再度DNS解決が走りDNS rebindingの余地が残る）。
+    // リダイレクトも追わない（追う場合は再検証が必要になり、XRPC呼び出しに通常リダイレクトは
+    // 想定されないため単純に拒否する）。
+    let Some(target_host) = reqwest::Url::parse(&target_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+    else {
+        return ApiError::Internal(format!("プロキシ先URLが不正です: {}", target_url))
+            .into_response();
+    };
+    let pinned_client = match reqwest::Client::builder()
+        .redirect(Policy::none())
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(30))
+        .resolve_to_addrs(&target_host, &resolved.addresses)
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return ApiError::Internal(format!("プロキシ用クライアント構築失敗: {}", e))
+                .into_response()
+        }
+    };
+
+    let mut req = pinned_client
         .request(method, &target_url)
         .header("Authorization", format!("Bearer {}", service_auth_jwt));
     if !body.is_empty() {

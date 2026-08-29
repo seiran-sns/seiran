@@ -90,9 +90,7 @@ pub async fn xrpc_upload_blob(
                 return ApiError::Unauthorized("JWTのissクレームを読み取れません").into_response();
             };
 
-            let verifying_key = match resolve_atproto_verification_key(&iss, &state.ap_client.http)
-                .await
-            {
+            let verifying_key = match resolve_atproto_verification_key(&iss).await {
                 Ok(k) => k,
                 Err(e) => {
                     tracing::error!("[uploadBlob] 検証鍵解決失敗 iss={}: {}", iss, e);
@@ -643,9 +641,7 @@ pub async fn xrpc_describe_repo(
     }
     collections.sort();
 
-    let did_doc = fetch_raw_did_document(&did, &state.ap_client.http)
-        .await
-        .ok();
+    let did_doc = fetch_raw_did_document(&did).await.ok();
 
     Json(serde_json::json!({
         "handle": handle,

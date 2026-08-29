@@ -71,7 +71,7 @@ fn is_public_ip(ip: IpAddr) -> bool {
     }
 }
 
-async fn validate_url(raw: &str) -> Result<(Url, Vec<SocketAddr>), FetchError> {
+pub(crate) async fn validate_url(raw: &str) -> Result<(Url, Vec<SocketAddr>), FetchError> {
     let url = Url::parse(raw).map_err(|_| FetchError::InvalidUrl)?;
     if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
@@ -176,6 +176,71 @@ pub async fn fetch_validated_with_accept(
             return Err(FetchError::UnsupportedType);
         }
         return Ok((bytes, content_type));
+    }
+    unreachable!()
+}
+
+/// SSRF対策込みでJSON文書を取得する（DIDドキュメント解決専用、[SEC-3]）。
+/// `did:plc:`はPLCディレクトリ、`did:web:`は対象ドメイン自身の`.well-known/did.json`から
+/// 取得するが、いずれもDID主体（＝リクエスト送信者が名乗るだけで取得できる相手）が内容を
+/// 完全に制御できるため、`serviceEndpoint`はもちろんドキュメント取得自体のURLも
+/// `fetch_validated_with_accept`と同じprivate/loopback/link-local等IP拒否・
+/// DNS rebinding対策（検証済みIPへの接続固定）・リダイレクト先の再検証を経由させる。
+/// メディア取得と異なりContent-Typeホワイトリストは適用しない（DID文書はJSONそのものを
+/// パースできるかで妥当性を判断すれば十分なため）。
+pub async fn fetch_json_validated(raw_url: &str) -> Result<serde_json::Value, FetchError> {
+    let (mut url, mut addresses) = validate_url(raw_url).await?;
+
+    for redirect_count in 0..=MAX_REDIRECTS {
+        let host = url.host_str().ok_or(FetchError::InvalidUrl)?;
+        let client = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(10))
+            .user_agent("seiran-fetch/1.0")
+            .resolve_to_addrs(host, &addresses)
+            .build()
+            .map_err(|_| FetchError::FetchFailed)?;
+        let upstream = client
+            .get(url.clone())
+            .header(reqwest::header::ACCEPT, "application/json, application/did+json")
+            .send()
+            .await
+            .map_err(|_| FetchError::FetchFailed)?;
+
+        if upstream.status().is_redirection() {
+            if redirect_count == MAX_REDIRECTS {
+                return Err(FetchError::TooManyRedirects);
+            }
+            let location = upstream
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .ok_or(FetchError::InvalidRedirect)?;
+            let next = url
+                .join(location)
+                .map_err(|_| FetchError::InvalidRedirect)?;
+            (url, addresses) = validate_url(next.as_str()).await?;
+            continue;
+        }
+
+        if !upstream.status().is_success() {
+            return Err(FetchError::UpstreamError);
+        }
+        if upstream
+            .content_length()
+            .is_some_and(|size| size > MAX_FETCH_BYTES)
+        {
+            return Err(FetchError::TooLarge);
+        }
+        let bytes = upstream
+            .bytes()
+            .await
+            .map_err(|_| FetchError::FetchFailed)?;
+        if bytes.len() as u64 > MAX_FETCH_BYTES {
+            return Err(FetchError::TooLarge);
+        }
+        return serde_json::from_slice(&bytes).map_err(|_| FetchError::UpstreamError);
     }
     unreachable!()
 }
