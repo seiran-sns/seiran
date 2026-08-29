@@ -416,7 +416,8 @@
   border-radius: 6px;
   padding: 6px 10px;
   color: var(--text);
-  font-size: 0.85rem;
+  /* iOS Safariは16px未満のinput/textareaにフォーカスすると自動ズームするため16px未満にしない */
+  font-size: 16px;
 }
 
 .cwGuideInput::placeholder {
@@ -454,7 +455,8 @@
   border-radius: 6px;
   padding: 6px 10px;
   color: var(--text);
-  font-size: 0.85rem;
+  /* iOS Safariは16px未満のinput/textareaにフォーカスすると自動ズームするため16px未満にしない */
+  font-size: 16px;
 }
 
 .pollChoiceInput::placeholder {

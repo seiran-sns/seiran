@@ -1,7 +1,7 @@
 # seiran コーディングルール
 
 > 作成日: 2026-06-30  
-> このドキュメントは seiran プロジェクトのすべての Rust コードに適用される。
+> このドキュメントは seiran プロジェクトのすべての Rust コードに適用される（末尾のフロントエンド向けセクションを除く）。
 
 ---
 
@@ -492,3 +492,15 @@ Axum のハンドラ（`async fn inbox_handler(...) -> impl IntoResponse`）は 
 あるか」を説明しない（GitHub を開かないと分からない上、番号だけでは検索性も低い）。理由そのものを
 書いた上で、参照として issue 番号を併記するのはよい。既存コメントの一斉置換は不要、触った箇所から
 直す。
+
+## 5. フロントエンド: テキスト入力要素の `font-size`
+
+`input[type="text"|"search"|"email"|"url"|"tel"|"password"|"number"]` や `textarea` など、
+テキストカーソルが立つフォーカス可能な入力要素の `font-size` は必ず 16px 相当（ルート
+font-size が 16px の環境では `1rem`）以上にする。iOS Safari はこれらの要素にフォーカスした
+際、`font-size` が 16px 未満だとページ全体を自動的にズームインし、ユーザーが手動で戻すまで
+UI が崩れて見える。見た目を小さくしたい場合は `font-size` を下げるのではなく `transform:
+scale()` 等で対処する。
+
+`type="radio"`/`type="checkbox"`/`type="date"`/`type="datetime-local"`/`<select>` はネイティブ
+ピッカー UI になりテキストカーソルを持たないため、この制約の対象外。
