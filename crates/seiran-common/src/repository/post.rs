@@ -2,6 +2,56 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
+/// リプライ/引用/リポストのどの参照を指すか（#230/#233）。投稿詳細取得時の同期フェッチ・
+/// 手動「取り込む」APIエンドポイントで、対象列を選ぶために使う。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceKind {
+    Reply,
+    Quote,
+    Repost,
+}
+
+impl ReferenceKind {
+    /// (post_idカラム名, ap_uriカラム名, ref_statusカラム名) のリテラル3つ組。
+    /// バリアントは3値のみでユーザー入力を含まないため、SQL文字列への直接埋め込みでも安全。
+    fn columns(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            ReferenceKind::Reply => (
+                "reply_to_post_id",
+                "reply_to_ap_uri",
+                "reply_to_ref_status",
+            ),
+            ReferenceKind::Quote => (
+                "quote_of_post_id",
+                "quote_of_ap_uri",
+                "quote_of_ref_status",
+            ),
+            ReferenceKind::Repost => (
+                "repost_of_post_id",
+                "repost_of_ap_uri",
+                "repost_of_ref_status",
+            ),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReferenceKind::Reply => "reply",
+            ReferenceKind::Quote => "quote",
+            ReferenceKind::Repost => "repost",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "reply" => Some(ReferenceKind::Reply),
+            "quote" => Some(ReferenceKind::Quote),
+            "repost" => Some(ReferenceKind::Repost),
+            _ => None,
+        }
+    }
+}
+
 /// タイムライン表示用のポスト + アクター結合行。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct TimelinePost {
@@ -72,6 +122,21 @@ pub struct TimelinePost {
     /// プレーンテキスト描画にフォールバックする）。
     #[sqlx(default)]
     pub content_html: Option<String>,
+    /// 参照が未解決の場合の生AP URIと状態（`"pending"`/`"gone"`、#230）。
+    /// 対応する`*_post_id`がSomeなら意味を持たない。現状は投稿詳細取得（`find_by_id`/
+    /// `find_by_id_for_viewer`）のみ取得する（他のタイムラインクエリでは常に`None`）。
+    #[sqlx(default)]
+    pub reply_to_ap_uri: Option<String>,
+    #[sqlx(default)]
+    pub reply_to_ref_status: Option<String>,
+    #[sqlx(default)]
+    pub quote_of_ap_uri: Option<String>,
+    #[sqlx(default)]
+    pub quote_of_ref_status: Option<String>,
+    #[sqlx(default)]
+    pub repost_of_ap_uri: Option<String>,
+    #[sqlx(default)]
+    pub repost_of_ref_status: Option<String>,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -230,13 +295,36 @@ pub struct InsertRemoteWithDedupParams<'a> {
     pub emoji_map: &'a serde_json::Value,
     pub visibility: &'a str,
     pub reply_to_post_id: Option<i64>,
+    /// `reply_to_post_id`が`None`でもリプライ先URIが存在する場合の生AP URI（#230）。
+    /// 参照が元から無いなら`None`、解決済みなら（`reply_to_post_id`がSomeなら）意味を持たない。
+    pub reply_to_ap_uri: Option<&'a str>,
+    /// `reply_to_ap_uri`があるときの状態（`"pending"`/`"gone"`）。DB側で`post_reference_status`にキャストする。
+    pub reply_to_ref_status: Option<&'a str>,
     /// AP `quoteUrl`/`_misskey_quote`（またはBsky `app.bsky.embed.record`）から解決した
     /// 引用元投稿のローカルID（#116）。未解決・非引用なら `None`。
     pub quote_of_post_id: Option<i64>,
+    /// `quote_of_post_id`が`None`でも引用元URIが存在する場合の生AP URI（#230）。
+    pub quote_of_ap_uri: Option<&'a str>,
+    /// `quote_of_ap_uri`があるときの状態（`"pending"`/`"gone"`）。
+    pub quote_of_ref_status: Option<&'a str>,
     /// `visibility='direct'`（DM）専用。direct以外は`None`を渡すこと。
     pub thread_root_post_id: Option<i64>,
     /// `visibility='direct'`（DM）専用。direct以外は空スライスを渡すこと。
     pub recipient_actor_ids: &'a [i64],
+}
+
+/// `PostRepository::insert_repost` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
+pub struct InsertRepostParams<'a> {
+    pub id: i64,
+    pub actor_id: i64,
+    pub ap_object_id: &'a str,
+    pub repost_of_post_id: Option<i64>,
+    /// `repost_of_post_id`が`None`でもリポスト対象URIが存在する場合の生AP URI（#230）。
+    pub repost_of_ap_uri: Option<&'a str>,
+    /// `repost_of_ap_uri`があるときの状態（`"pending"`/`"gone"`）。DB側で`post_reference_status`にキャストする。
+    pub repost_of_ref_status: Option<&'a str>,
+    pub created_at: DateTime<Utc>,
+    pub visibility: &'a str,
 }
 
 #[async_trait]
@@ -438,17 +526,25 @@ pub trait PostRepository: Send + Sync {
         mention_facets: &serde_json::Value,
     ) -> Result<(), sqlx::Error>;
 
-    /// リポストレコードを挿入する（`UNIQUE(actor_id, repost_of_post_id)` 制約違反はそのまま呼び出し元へ伝播する）。
+    /// リポストレコードを挿入する（`ap_object_id`の重複はDO NOTHINGで無視する。#231で
+    /// リポスト対象が未解決でも箱行だけは必ず保存する設計にしたため、Announce再配送時の
+    /// 冪等性を`UNIQUE(actor_id, repost_of_post_id)`だけに頼れなくなった）。
+    /// `repost_of_post_id`が`None`の場合、`repost_of_ap_uri`/`repost_of_ref_status`
+    /// （`"pending"`/`"gone"`、DB側で`post_reference_status`にキャスト）に未解決状態を記録する（#230）。
     /// `visibility` は元ポストから継承した値（"public"|"unlisted"）。呼び出し元が
     /// `followers_only`/`direct` を渡さないことを保証する（`create_repost` で事前に禁止）。
-    async fn insert_repost(
+    async fn insert_repost(&self, params: InsertRepostParams<'_>) -> Result<(), sqlx::Error>;
+
+    /// `pending`な参照が後から解決された（`resolved_post_id`）、または`gone`と新たに確定した
+    /// （`ref_status`）場合に、該当行の`*_post_id`/`*_ref_status`を更新する（#233）。
+    /// `resolved_post_id`が`Some`なら`*_post_id`を、`None`なら`ref_status`（`"gone"`想定）を
+    /// 更新する。両方`None`の呼び出しは何もしない。
+    async fn apply_reference_resolution(
         &self,
-        id: i64,
-        actor_id: i64,
-        ap_object_id: &str,
-        repost_of_post_id: i64,
-        created_at: DateTime<Utc>,
-        visibility: &str,
+        post_id: i64,
+        kind: ReferenceKind,
+        resolved_post_id: Option<i64>,
+        ref_status: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
     /// リポストレコードを挿入する（Bsky Jetstream `app.bsky.feed.repost` 受信時、`insert_repost`の
@@ -903,7 +999,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -964,7 +1063,10 @@ impl PostRepository for PgPostRepository {
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
                     p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri
+                    p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -1218,30 +1320,51 @@ impl PostRepository for PgPostRepository {
             .map(|_| ())
     }
 
-    async fn insert_repost(
+    async fn apply_reference_resolution(
         &self,
-        id: i64,
-        actor_id: i64,
-        ap_object_id: &str,
-        repost_of_post_id: i64,
-        created_at: DateTime<Utc>,
-        visibility: &str,
+        post_id: i64,
+        kind: ReferenceKind,
+        resolved_post_id: Option<i64>,
+        ref_status: Option<&str>,
     ) -> Result<(), sqlx::Error> {
+        let (post_id_col, _uri_col, status_col) = kind.columns();
+        if let Some(resolved) = resolved_post_id {
+            let sql = format!("UPDATE posts SET {post_id_col} = $1 WHERE id = $2");
+            sqlx::query(&sql)
+                .bind(resolved)
+                .bind(post_id)
+                .execute(&self.pool)
+                .await?;
+        } else if let Some(status) = ref_status {
+            let sql = format!("UPDATE posts SET {status_col} = $1::post_reference_status WHERE id = $2");
+            sqlx::query(&sql)
+                .bind(status)
+                .bind(post_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn insert_repost(&self, params: InsertRepostParams<'_>) -> Result<(), sqlx::Error> {
         sqlx::query(
             "WITH inserted AS (
-                 INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at, visibility)
-                 VALUES ($1, $2, '', $3, $4, $5, $6::post_visibility_enum)
+                 INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at, visibility, repost_of_ap_uri, repost_of_ref_status)
+                 VALUES ($1, $2, '', $3, $4, $5, $6::post_visibility_enum, $7, $8::post_reference_status)
+                 ON CONFLICT (ap_object_id) DO NOTHING
                  RETURNING actor_id
              )
              UPDATE actors SET notes_count = notes_count + 1
              WHERE id = (SELECT actor_id FROM inserted)",
         )
-        .bind(id)
-        .bind(actor_id)
-        .bind(ap_object_id)
-        .bind(repost_of_post_id)
-        .bind(created_at)
-        .bind(visibility)
+        .bind(params.id)
+        .bind(params.actor_id)
+        .bind(params.ap_object_id)
+        .bind(params.repost_of_post_id)
+        .bind(params.created_at)
+        .bind(params.visibility)
+        .bind(params.repost_of_ap_uri)
+        .bind(params.repost_of_ref_status)
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -1473,8 +1596,8 @@ impl PostRepository for PgPostRepository {
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let result = sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, content_html, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::post_visibility_enum, $13)
+            "INSERT INTO posts (id, actor_id, body, content_html, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id, reply_to_ap_uri, reply_to_ref_status, quote_of_ap_uri, quote_of_ref_status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::post_visibility_enum, $13, $14, $15::post_reference_status, $16, $17::post_reference_status)
              ON CONFLICT (ap_object_id) DO NOTHING",
         )
         .bind(params.id)
@@ -1490,6 +1613,10 @@ impl PostRepository for PgPostRepository {
         .bind(params.emoji_map)
         .bind(params.visibility)
         .bind(params.quote_of_post_id)
+        .bind(params.reply_to_ap_uri)
+        .bind(params.reply_to_ref_status)
+        .bind(params.quote_of_ap_uri)
+        .bind(params.quote_of_ref_status)
         .execute(&mut *tx)
         .await?;
 

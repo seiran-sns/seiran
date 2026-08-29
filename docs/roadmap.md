@@ -151,6 +151,12 @@
   - [ ] 相手サーバーからの生データ一括インポート（最大300件）
 - [ ] **他seiranサーバー間マージの ATP 経路対応** — `seiran_post_uuid` を Bsky レコード本体にも埋め込み、Jetstream経由で先に取り込まれた投稿ともマージできるようにする（`docs/protocols.md` 5節の既知の制約）
 - [ ] **`actor_metadata_resolve` ジョブの実装** — 現状ハンドラはスタブ、enqueueする箇所も無い。`/verify-actor` ハンドシェイク検証・Webfinger解決・アバター等のキャッシュを実処理として実装する
+- **リプライ/引用/リポスト参照の未取り込み表示・その場取り込み（#230-234）**
+  - [x] 参照の`pending`/`gone`状態を表すスキーマ追加（#230）
+  - [x] 新規フェッチ時の1段階参照解決＋404/410判定の共通化（#231） — `jobs::inbound_activity_process::reference::resolve_reference`。詳細: `docs/protocols.md` 4節「引用受信」
+  - [x] 「開く」でMisskeyの素リノート/他鯖ミラーURL（Announce）を正しくリポストとして取り込む（#232） — `open_target::open_announce`。詳細: `docs/protocols.md` 1節
+  - [ ] 投稿詳細取得時の同期フェッチ＋pending参照を手動で取り込むAPIエンドポイント（#233）
+  - [ ] NoteCardに未取り込み/参照消失の表示と「取り込む」ボタン（#234）
 - [ ] **`inbound_activity_process` のドメイン単位レート制限**
 - [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ表示）
 - [ ] **ユーザー設定に「Bsky DM受信許可」項目を追加** — 現状 `chat.bsky.actor.declaration` の `allowIncoming` は登録時・バックフィルとも `"all"` 固定でコミットする（`docs/protocols.md` 9節）。ユーザーが `"all"`/`"following"`/`"none"` を選べる設定画面UIとAPIを追加する

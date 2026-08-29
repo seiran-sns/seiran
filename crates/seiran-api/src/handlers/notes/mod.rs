@@ -58,7 +58,8 @@ use axum::{
 use sqlx::Row;
 
 use seiran_common::repository::{
-    extract_shortcode_candidates, Actor, InsertFullParams, NotificationKind, TimelinePost,
+    extract_shortcode_candidates, Actor, InsertFullParams, InsertRepostParams, NotificationKind,
+    TimelinePost,
 };
 use seiran_common::streaming::{broadcast_poll_update, broadcast_reaction_update};
 use seiran_common::{

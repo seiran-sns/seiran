@@ -2,7 +2,9 @@
 
 ## URL・IDからの対象解決（`POST /api/open`、#165）
 
-認証済みSPAは `{ "target": string }` を送り、`{ "kind": "actor" | "post", "path": string }` を受け取る。bsky.appプロフィールURLと`did:plc:`はAppViewプロフィール取得後にアクターをupsertし、bsky.app投稿URLとAT URIはDIDへ正規化して単一投稿をupsertする。一般のHTTP(S) URLはActivityStreams表現を取得し、Actorなら既存のWebFinger/APアクター解決、Note等なら既存の`InboundActivityProcess` Create経路で取り込む。
+認証済みSPAは `{ "target": string }` を送り、`{ "kind": "actor" | "post", "path": string }` を受け取る。bsky.appプロフィールURLと`did:plc:`はAppViewプロフィール取得後にアクターをupsertし、bsky.app投稿URLとAT URIはDIDへ正規化して単一投稿をupsertする。一般のHTTP(S) URLはActivityStreams表現を取得し、Actorなら既存のWebFinger/APアクター解決、Note/Article/Question/Pageなら既存の`InboundActivityProcess` Create経路で取り込む。
+
+フェッチしたオブジェクトが`Announce`型の場合はリポストラッパーとして取り込む（#232）。Misskeyの素リノート（コメント無しブースト）は、`notes/{id}`への直接アクセスでは`quoteUrl`付きの`Note`（空リプ引用として扱われる）になるが、他鯖ミラーURL（ローカルにコンテンツを持たないサーバーが元サーバーの`/activity`へ302リダイレクトする）や`notes/{id}/activity`への直接アクセスでは`Announce`（`object`は対象ノートのURI文字列）として得られる。`open_target::open_announce`はこのAnnounceオブジェクトをそのまま`InboundActivityProcess`（既存の`handle_announce`経路）へ積む。対象ノート（`object`）が未取得なら`resolve_reference`が1段階だけフェッチを試みるが、失敗してもリポストの箱自体は保存される（4節「リポスト」参照）ため、「開く」のポーリングは箱の保存だけを待てば完了する。
 
 対象読者: ActivityPub / AT Protocol の実装やクロスプロトコル配送ロジックに触れる開発者。
 「今、何が実装されていて、どう動くか」だけを書く。不具合修正の経緯や日付は書かない（`git log` 参照）。
@@ -101,7 +103,7 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 | `Block` | リモートアクターupsert → ブロックされた側がブロックした側をフォローしていた関係があれば解消（`blocks` テーブルには書き込まない、通知も生成しない。11節参照） |
 | `Undo` | `object.type` で分岐: `Like`/`EmojiReact`→リアクション削除、`Announce`→リポスト論理削除、`Follow`→フォロー解除、`Block`→ログのみ（DB上の巻き戻し対象なし） |
 | `Delete` | `object`（文字列URIまたは`{"type":"Tombstone","id":...}`）の`ap_object_id`に一致する投稿を論理削除。**送信元アクター（`activity.actor`、HTTP Signature検証済み）が投稿者本人と一致する場合のみ**削除する（なりすまし対策）。一致する投稿が無い場合（アクター自身のDelete等）は無視。リモートアクター自体の退会（`Delete(Actor)`）は未対応 |
-| `Announce` | リポスト保存。元ポストが未登録なら `fetch_object` でリモート取得してから紐付け（`fetch_and_save_note`。絵文字tag解析・引用/リプライ解決・可視性判定・CW/投票・ハッシュタグ・添付URL保存は`Create`(Note)と同じ処理を適用するが、DMスレッド解決・通知・WS配信は行わない） |
+| `Announce` | リポスト保存。元ポストが未登録なら `resolve_reference`（`jobs::inbound_activity_process::reference`）で1段階だけリモート取得を試みてから紐付け。取得失敗（404/410は`gone`、それ以外は`pending`。#230/#231）でもリポストの箱（wrapper post行）自体は必ず保存する。取得できた場合の元ポスト保存処理（絵文字tag解析・引用/リプライ解決・可視性判定・CW/投票・ハッシュタグ・添付URL保存）は`Create`(Note)と同じ処理を適用するが、DMスレッド解決・通知・WS配信は行わない。元ポストが未解決（pending/gone）の間はリポスト通知も行わない |
 | `Like` \| `EmojiReact` | Misskey は絵文字リアクションも `type:"Like"` 固定で送るため、**wire type ではなく `content`/`_misskey_reaction` の有無**で判定する |
 | `Move` | アカウント引っ越しの受信処理（第1段階、送信側=引っ越し実行UIは未実装）。詳細は下記「アカウント引っ越し（Move）の受信」節参照 |
 
@@ -358,7 +360,7 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
 
 - **リプライ**: 配信先制御（`resolve_reply_context`内`reply_delivery_allowed`）は`classify_post`の分類を使わず、元ポストの`ap_object_id`/`at_uri`の実体の有無を直接見る。`ap_object_id`が無ければ Fedi 配信しない、`at_uri`が無ければ Bsky 配信しない（ローカル投稿でも`deliver_to_bsky=false`等で`at_uri`を持たない場合を含む。実体を持たないプロトコルへ配信すると親と無関係な独立ポストとして誤配信されるため）。親の可視性が `followers_only` ならリプライも継承する。
 - **引用**: 元ポストの `at_uri`/`at_cid` が揃っていれば、Bsky側は `app.bsky.embed.record` でネイティブ引用する。Fediリモートのみの場合や、AP/ATPの両IDを持っていても `at_cid` が未取得の場合は、投稿者名・本文・先頭画像（なければアバター）を持つ `app.bsky.embed.external` URLカードへフォールバックする。AP側は `ap_object_id` があればMisskey互換の `quoteUrl` / `_misskey_quote` として配送し、Bskyにしか実体がない投稿は受信サーバーがAPオブジェクトとして解決できないため、bsky.app URLを本文末尾へ追記する。配送する Create の埋め込み Note と `/notes/:id` の公開 AP Note は同じ本文・引用フィールドを返し、受信側による再取得でも不整合を起こさない。ローカル・Fedi・Bskyのどの投稿も、Fedi/Bskyの両配送先を個別選択して引用できる。
-- **引用受信（#116）**: APは `quoteUrl`、`_misskey_quote`、`tag[].rel=https://misskey-hub.net/ns#_misskey_quote` の順に引用URIを抽出し、Misskey/Fedibirdが本文末尾へ付ける同一URIの `RE:` / `QT:` フォールバック行を除去する。Bsky Jetstreamは `app.bsky.embed.record.record.uri` と `recordWithMedia.record.record.uri` を抽出する。いずれも引用先がローカルDBに存在する場合だけ `quote_of_post_id` を設定し、未取得なら通常投稿として安全に保存する。
+- **引用受信（#116）**: APは `quoteUrl`、`_misskey_quote`、`tag[].rel=https://misskey-hub.net/ns#_misskey_quote` の順に引用URIを抽出し、Misskey/Fedibirdが本文末尾へ付ける同一URIの `RE:` / `QT:` フォールバック行を除去する。Bsky Jetstreamは `app.bsky.embed.record.record.uri` と `recordWithMedia.record.record.uri` を抽出する。引用先がローカルDBに存在すれば `quote_of_post_id` を設定し、無ければ`resolve_reference`が1段階だけフェッチを試みる（#230/#231）。それでも解決できなければ`quote_of_ap_uri`/`quote_of_ref_status`（`pending`/`gone`）に未解決状態を記録した上で通常投稿として保存する（フォールバック行は引用URI抽出さえできていれば解決可否に関わらず除去する）。リプライ（`inReplyTo`）の解決も同じ`resolve_reference`を使い、同様に`reply_to_ap_uri`/`reply_to_ref_status`へ未解決状態を記録する。1段階フェッチで新たに取得したノート自身が持つリプライ/引用/リポスト参照はさらに辿らず、DB照合のみで`pending`/`gone`を記録する（無限再帰防止）。
 - **リポスト**: 元ポストが `ap_object_id` を持つなら Fedi へは `Announce`。持たず `at_uri` のみ(Bskyリモート)ならテキスト投稿（「🔁 author: bsky.app URL」）にフォールバック。Fediリモート投稿をBskyへ配送する場合は、本文を「🔁」のみとし、元の`ap_object_id`を`app.bsky.embed.external`（URLカード）で添付する。カードのtitleは元投稿者の表示名とID、descriptionは元投稿本文、thumbは先頭の添付画像（画像がなければ投稿者アイコン）をPDS配信可能なblobとして設定する。`visibility` が `followers_only`/`direct` の場合、フォロワー限定配信を持たない Bsky へのリポストはスキップする。`Announce`/`Undo(Announce)`はフォロワーのinboxに加え、元ポストがFediリモートなら元投稿者のinboxにも配送し（`cc`にも元投稿者のactor URIを含める）、相手サーバーでのブースト数反映・通知を成立させる（リアクション配送と同じ方針）。`Announce`のAP `id`は`/notes/:id`ではなく`/announces/:id`（`docs/architecture.md` 8.1節参照、リモートユーザーがブラウザで踏んだ場合は`/notes/:id`へリダイレクトする）。
 - **投稿削除**（`DELETE /api/notes/:id`、本人のみ）: DB上は論理削除（`posts.deleted_at`）のみで、リアクション・他ユーザーによるリポスト・通知等の関連行はカスケード削除しない（読み取り側が一貫して`deleted_at IS NULL`を見る設計）。配送は「実際に配送済みだった経路」にのみ行う: `deliver_fedi`が真かつ`visibility != 'direct'`なら`ApDeliveryKind::DeleteNote`（フォロワー全員へ`Delete(Note)`）をenqueue、`at_rkey`が保存済みならBsky側レコードを`delete_atp_post`で削除。`direct`（DM）投稿は`DeleteNote`がフォロワー配送しか持たないため配送対象外（本来の宛先には届かない、既知の制約）。
 

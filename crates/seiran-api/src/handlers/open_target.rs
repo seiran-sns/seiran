@@ -155,6 +155,12 @@ async fn open_activitypub_url(state: &AppState, url: &str) -> Result<OpenTargetR
     ) {
         return open_actor(state, object["id"].as_str().unwrap_or(url)).await;
     }
+    // Misskeyの素リノート（コメント無しブースト）は、notes URLへの直接アクセスや他鯖ミラー
+    // URLからの302リダイレクトの結果として`Announce`（`object`は対象ノートのURI文字列）に
+    // 行き着く。通常投稿としてではなく正しくリポストラッパーとして取り込む（#232）。
+    if object_type == "Announce" {
+        return open_announce(state, url, object).await;
+    }
     if !matches!(object_type, "Note" | "Article" | "Question" | "Page") {
         return Err(ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()));
     }
@@ -171,6 +177,38 @@ async fn open_activitypub_url(state: &AppState, url: &str) -> Result<OpenTargetR
         "actor": actor,
         "object": object,
     });
+    enqueue_and_await_import(state, activity, note_id).await
+}
+
+/// フェッチしたAnnounce（Misskeyの素リノート・他鯖ミラー経由でのAnnounce解決を含む）を
+/// リポストラッパーとして取り込む。既存のCreate用合成ラップとは異なり、フェッチしたAnnounce
+/// オブジェクト自体が`handle_announce`の期待する形（`id`/`actor`/`object`/`to`/`cc`/`published`）
+/// を満たすため、そのまま`InboundActivityProcess`へ積む（#232）。対象ポスト（`object`）が
+/// 未取得なら`resolve_reference`が1段階だけフェッチする（#231）。対象の取得に失敗しても
+/// リポストの箱自体は保存されるため、ここでの完了待ちは箱の保存だけを待てば良い。
+async fn open_announce(
+    state: &AppState,
+    url: &str,
+    announce: serde_json::Value,
+) -> Result<OpenTargetResponse, ApiError> {
+    let announce_id = announce["id"].as_str().unwrap_or(url).to_string();
+    if announce["actor"].as_str().is_none() {
+        return Err(ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()));
+    }
+    if announce["object"].as_str().is_none() {
+        return Err(ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()));
+    }
+    enqueue_and_await_import(state, announce, &announce_id).await
+}
+
+/// `Job::InboundActivityProcess`へ積み、`dedup_uri`（`ap_object_id`として保存されるはずの
+/// URI）で該当投稿が保存されるまで短時間だけポーリングする。Note（Create経由）・
+/// Announce（リポスト経由）の両方の「開く」経路で共有する。
+async fn enqueue_and_await_import(
+    state: &AppState,
+    activity: serde_json::Value,
+    dedup_uri: &str,
+) -> Result<OpenTargetResponse, ApiError> {
     state
         .job_queue
         .enqueue(
@@ -182,11 +220,11 @@ async fn open_activitypub_url(state: &AppState, url: &str) -> Result<OpenTargetR
         .await
         .map_err(|e| ApiError::Internal(format!("投稿取り込みキュー投入失敗: {e}")))?;
 
-    // インバウンド処理は既存のCreate経路を再利用する。短時間だけ完了を待ち、詳細画面へ確実に遷移する。
+    // インバウンド処理は既存のCreate/Announce経路を再利用する。短時間だけ完了を待ち、詳細画面へ確実に遷移する。
     for _ in 0..40 {
         if let Some(post_id) = state
             .posts
-            .find_id_by_ap_or_at_uri(note_id)
+            .find_id_by_ap_or_at_uri(dedup_uri)
             .await
             .map_err(|e| ApiError::Internal(format!("投稿検索失敗: {e}")))?
         {

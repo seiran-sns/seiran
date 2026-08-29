@@ -28,6 +28,8 @@ pub enum ApError {
     Signature(String),
     #[error("アクター取得失敗: {0}")]
     FetchActor(String),
+    #[error("オブジェクトが削除済み: {0}")]
+    Gone(String),
     #[error("{0}")]
     Other(String),
 }
@@ -46,10 +48,11 @@ impl From<ApError> for String {
 /// - `FetchActor` / `Other`: リモートアクター解決失敗は一時的な到達不能・恒久的な404の
 ///   両方があり得て呼び出し側では判別できないため、安全側（見逃しよりリトライ超過の方が無害）
 ///   に倒して Transient のままにする。
+/// - `Gone`: 404/410が明示的に確認できているため、リトライしても直らない（Permanent）。
 impl From<ApError> for crate::traits::JobError {
     fn from(e: ApError) -> Self {
         match &e {
-            ApError::Json(_) | ApError::Signature(_) => {
+            ApError::Json(_) | ApError::Signature(_) | ApError::Gone(_) => {
                 crate::traits::JobError::Permanent(e.to_string())
             }
             ApError::Http(_) | ApError::FetchActor(_) | ApError::Other(_) => {
@@ -464,6 +467,13 @@ impl ApClient {
             .send()
             .await?;
 
+        if matches!(res.status(), reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE) {
+            return Err(ApError::Gone(format!(
+                "ステータス {} ({})",
+                res.status(),
+                object_uri
+            )));
+        }
         if !res.status().is_success() {
             return Err(ApError::Other(format!(
                 "オブジェクト取得失敗: ステータス {} ({})",

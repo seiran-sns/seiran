@@ -667,6 +667,12 @@ mod tests {
             quote_count: 0,
             repost_count: 0,
             content_html: None,
+            reply_to_ap_uri: None,
+            reply_to_ref_status: None,
+            quote_of_ap_uri: None,
+            quote_of_ref_status: None,
+            repost_of_ap_uri: None,
+            repost_of_ref_status: None,
         }
     }
 

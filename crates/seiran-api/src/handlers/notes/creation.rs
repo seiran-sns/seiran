@@ -92,14 +92,16 @@ async fn create_repost(
 
     match state
         .posts
-        .insert_repost(
-            post_id,
+        .insert_repost(InsertRepostParams {
+            id: post_id,
             actor_id,
-            &ap_object_id,
-            renote_id,
-            now,
-            repost_visibility,
-        )
+            ap_object_id: &ap_object_id,
+            repost_of_post_id: Some(renote_id),
+            repost_of_ap_uri: None,
+            repost_of_ref_status: None,
+            created_at: now,
+            visibility: repost_visibility,
+        })
         .await
     {
         Ok(()) => {}

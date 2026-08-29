@@ -66,9 +66,9 @@ pub use notification::{
 pub use password_reset::{PasswordResetRepository, PgPasswordResetRepository};
 pub use pinned_post::{PgPinnedPostsRepository, PinnedPostsRepository, MAX_PINNED_POSTS};
 pub use post::{
-    DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, PgPostRepository,
-    PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository, PostSummary, RepostEntry,
-    RepostUndoInfo, TimelinePost,
+    DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, InsertRepostParams,
+    PgPostRepository, PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository,
+    PostSummary, ReferenceKind, RepostEntry, RepostUndoInfo, TimelinePost,
 };
 pub use reaction::{PgReactionRepository, ReactionRepository, ReactorInfo};
 pub use relay::{PgRelayRepository, Relay, RelayError, RelayRepository, RelayStatus};

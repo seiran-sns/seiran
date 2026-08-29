@@ -14,8 +14,8 @@ use crate::ap::{build_emoji_map, classify_ap_visibility, ApClient};
 use crate::generate_snowflake_id;
 use crate::queue::worker::{priority, InboxContext, JobContext};
 use crate::repository::{
-    extract_shortcode_candidates, Actor, InsertRemoteWithDedupParams, NotificationKind,
-    PgRelayRepository, RelayRepository, RelayStatus,
+    extract_shortcode_candidates, Actor, InsertRemoteWithDedupParams, InsertRepostParams,
+    NotificationKind, PgRelayRepository, RelayRepository, RelayStatus,
 };
 use crate::streaming::{broadcast_poll_update, broadcast_reaction_update, ChannelScope};
 use crate::traits::{Job, JobQueue};
@@ -32,10 +32,12 @@ mod move_actor;
 mod note_input;
 mod poll_vote;
 mod reaction;
+mod reference;
 mod relay;
 mod undo;
 
 pub use content::{ap_content_to_markdown_body, sanitize_ap_content_html, strip_html};
+pub use reference::{resolve_pending_reference_with_timeout, RefStatus, ReferenceOutcome};
 
 use announce::handle_announce;
 use block::handle_block;

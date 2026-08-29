@@ -2,6 +2,7 @@ use super::*;
 use super::content::strip_quote_fallback_line_html;
 use super::emoji::{has_same_origin, has_unresolved_emoji_shortcodes, record_remote_emojis, resolve_emoji_map_with_fallback};
 use super::note_input::{detect_loopback_post_id, extract_ap_quote_uri, extract_mentioned_local_usernames, guess_attachment_mime_type, normalize_ap_poll, resolve_bridge_duplicate_post_id, strip_quote_fallback_line};
+use super::reference::{resolve_reference, RefStatus};
 
 
 /// 1投稿から抽出するURLカード候補の上限。大量リンクを含む投稿でのOGPフェッチ暴走を防ぐ。
@@ -287,18 +288,14 @@ pub(super) async fn handle_create_note(
     record_remote_emojis(inbox, &remote.domain, &tags).await;
     let emoji_map = resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &body).await;
 
-    // 引用URI抽出・解決（#116）。取得できた場合、Misskey/Fedibirdが本文末尾に自動付加する
+    // 引用URI抽出・解決（#116）。DBに無ければ1段階だけフェッチを試みる（#231）。
+    // 取得できた場合、Misskey/Fedibirdが本文末尾に自動付加する
     // `RE:`/`QT:` フォールバック行（引用URIと同じURLを指す）を本文から取り除く。
     let quote_uri = extract_ap_quote_uri(note, &tags);
-    let quote_of_post_id: Option<i64> = match quote_uri.as_deref() {
-        Some(uri) => inbox
-            .post_repo
-            .find_id_by_ap_or_at_uri(uri)
+    let (quote_of_post_id, quote_of_ap_uri, quote_of_ref_status) =
+        resolve_reference(quote_uri.as_deref(), inbox, ap_client)
             .await
-            .ok()
-            .flatten(),
-        None => None,
-    };
+            .into_parts();
     if let Some(uri) = quote_uri.as_deref() {
         body = strip_quote_fallback_line(&body, uri);
         content_html_sanitized = strip_quote_fallback_line_html(&content_html_sanitized, uri);
@@ -309,15 +306,11 @@ pub(super) async fn handle_create_note(
 
     // AP inReplyTo からローカルの reply_to_post_id を解決する（DM機能実装以前はこの解決自体が
     // 存在しなかった。通常投稿にも有用だが、direct（DM）のスレッド起点伝播に必須のため追加）。
-    let reply_to_post_id: Option<i64> = match note["inReplyTo"].as_str() {
-        Some(uri) => inbox
-            .post_repo
-            .find_id_by_ap_or_at_uri(uri)
+    // DBに無ければ1段階だけフェッチを試みる（#231）。
+    let (reply_to_post_id, reply_to_ap_uri, reply_to_ref_status) =
+        resolve_reference(note["inReplyTo"].as_str(), inbox, ap_client)
             .await
-            .ok()
-            .flatten(),
-        None => None,
-    };
+            .into_parts();
 
     // リプライ先投稿者のactor_id（ローカルユーザーの場合のみ）。リプライ通知の宛先に使う。
     let reply_parent_local_actor_id: Option<i64> = match reply_to_post_id {
@@ -437,9 +430,13 @@ pub(super) async fn handle_create_note(
             emoji_map: &emoji_map,
             visibility,
             reply_to_post_id,
+            reply_to_ap_uri: reply_to_ap_uri.as_deref(),
+            reply_to_ref_status: reply_to_ref_status.map(RefStatus::as_db_str),
             thread_root_post_id,
             recipient_actor_ids: &recipient_actor_ids,
             quote_of_post_id,
+            quote_of_ap_uri: quote_of_ap_uri.as_deref(),
+            quote_of_ref_status: quote_of_ref_status.map(RefStatus::as_db_str),
         })
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
