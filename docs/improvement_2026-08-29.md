@@ -154,18 +154,21 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
     `parseJsonBody` を `api/core.ts` に残す（前回監査 R-3 の素案どおり）。
 - 規模が大きく文脈保持力を要するため §7 参照。
 
-### [REF-2・中] `Result<_, String>` 93 箇所の型付け（前回 R-4、悪化していないが未着手）
+### [REF-2・対応済み（着手分）] `Result<_, String>` の型付け（前回 R-4）
 
-- ジョブ層のエラーが文字列のままで、一時障害/恒久失敗の区別ができずリトライ戦略を書けない。
-- 対応: `JobError { Transient(..), Permanent(..) }` を導入し、**リトライ判断が要るジョブ
-  （配送・外部 API 呼び出し）から順に**移す。一括置換はしない。
+- `traits::JobError { Transient(String), Permanent(String) }` を新設（`From<String>`で
+  未移行のジョブは自動的にTransient扱いになり後方互換）。`execute_with_retry`（`queue/worker.rs`）
+  がPermanentなら残り試行回数に関わらず即座に諦めるよう変更。
+- 配送・外部API呼び出し系の代表として `jobs::ap_delivery` を移行し、`ap::client::ApError`
+  から`JobError`への分類（`Json`/`Signature`→Permanent、`Http`/`FetchActor`/`Other`→Transient）を
+  実装・テスト済み。`coding_rules.md` #13 に移行方針を明記。
+- 残り（他のジョブへの展開）は一括置換しない方針のまま。触った箇所から順次移行する。
 
-### [REF-3・中] `sqlx::query!` 採用率が極端に低い（10 対 467）
+### [REF-3・対応済み] `sqlx::query!` 採用方針の明記（前回 R-4 関連）
 
-- コンパイル時検証される `query!`/`query_as!` は 10 箇所のみ、実行時検証の `query`/`query_as::<_,T>`
-  が 467 箇所。`TimelinePost` のような 20 カラム超の SELECT と struct のズレが実行時まで露見しない。
-- 対応: 一斉移行はコスト過大。`coding_rules.md` に「新規クエリは `query_as!` を既定とする」を明記し、
-  触った箇所から移す。SELECT カラムが多く壊れやすいタイムライン系を優先候補に。
+- 2026-08-09 時点で既に `coding_rules.md` #11「新規クエリは `query_as!` を既定とする」が
+  明記済みだった（本改善大会の診断時点でこれも見落としていた。既存の実行時検証クエリの
+  一斉移行はコスト過大なので対象外のまま、触った箇所から移行する運用を継続）。
 
 ### [REF-4・中] テストが手薄な中心部（前回 R-8）
 

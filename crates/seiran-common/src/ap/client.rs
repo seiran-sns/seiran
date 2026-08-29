@@ -39,6 +39,26 @@ impl From<ApError> for String {
     }
 }
 
+/// ジョブのリトライ判断（`crate::traits::JobError`）向けの分類。
+/// - `Http`: 接続断・タイムアウト等はリトライで回復し得る（Transient）。
+/// - `Json`: リモートが返す本文が壊れている場合、リトライしても直らない（Permanent）。
+/// - `Signature`: 自インスタンスの署名鍵設定が原因のため、リトライしても直らない（Permanent）。
+/// - `FetchActor` / `Other`: リモートアクター解決失敗は一時的な到達不能・恒久的な404の
+///   両方があり得て呼び出し側では判別できないため、安全側（見逃しよりリトライ超過の方が無害）
+///   に倒して Transient のままにする。
+impl From<ApError> for crate::traits::JobError {
+    fn from(e: ApError) -> Self {
+        match &e {
+            ApError::Json(_) | ApError::Signature(_) => {
+                crate::traits::JobError::Permanent(e.to_string())
+            }
+            ApError::Http(_) | ApError::FetchActor(_) | ApError::Other(_) => {
+                crate::traits::JobError::Transient(e.to_string())
+            }
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PublicKeyInfo {
     pub id: String,
@@ -511,6 +531,22 @@ fn build_signing_string(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traits::JobError;
+
+    // ─── ApError → JobError（リトライ判断）─────────────────────────────────
+
+    #[test]
+    fn json_and_signature_errors_are_permanent() {
+        let json_err: serde_json::Error = serde_json::from_str::<()>("not json").unwrap_err();
+        assert!(JobError::from(ApError::Json(json_err)).is_permanent());
+        assert!(JobError::from(ApError::Signature("bad key".to_string())).is_permanent());
+    }
+
+    #[test]
+    fn fetch_actor_and_other_errors_are_transient() {
+        assert!(!JobError::from(ApError::FetchActor("timeout".to_string())).is_permanent());
+        assert!(!JobError::from(ApError::Other("unknown".to_string())).is_permanent());
+    }
 
     // ─── parse_signature_header ───────────────────────────────────────────
 

@@ -31,7 +31,7 @@ use crate::repository::{
     RemoteEmojiRepository,
 };
 use crate::streaming::StreamHub;
-use crate::traits::{Job, JobQueue, QueuedJob};
+use crate::traits::{Job, JobError, JobQueue, QueuedJob};
 use crate::LocalDomain;
 
 /// ジョブの優先度定数
@@ -300,6 +300,15 @@ async fn execute_with_retry(queued: QueuedJob, ctx: Arc<JobContext>, queue: Arc<
         Ok(()) => {
             tracing::info!("[Worker] 完了: {}", job_name);
         }
+        // 恒久的失敗（不正な入力・署名鍵未設定等）はリトライしても結果が変わらないため、
+        // 残り試行回数に関わらず即座に諦める。
+        Err(e) if e.is_permanent() => {
+            tracing::error!(
+                "[Worker] 恒久的失敗のため破棄（リトライしない）: {} - {}",
+                job_name,
+                e
+            );
+        }
         Err(e) if attempt + 1 < config.max_attempts => {
             // 指数バックオフ + ジッター（0〜1秒）
             let jitter_ms = {
@@ -345,70 +354,102 @@ fn backoff_delay_ms(config: &RetryConfig, attempt: u32) -> u64 {
 }
 
 /// ジョブ種別ごとにハンドラを呼び出します（所有権を受け取る）
-async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), String> {
+async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
     match job {
         Job::ActorHistorySync { ap_uri, at_did } => {
-            jobs::actor_history_sync::handle(ap_uri, at_did, ctx).await
+            jobs::actor_history_sync::handle(ap_uri, at_did, ctx)
+                .await
+                .map_err(JobError::from)
         }
+        // AP配送は ApError の種類（署名鍵未設定・不正なJSON応答等）から恒久/一時を判別できるため、
+        // JobError をネイティブに返す（`ap/client.rs` の `From<ApError> for JobError` 参照）。
         Job::ApDelivery { actor_id, kind } => jobs::ap_delivery::handle(actor_id, kind, ctx).await,
         Job::InboundActivityProcess { raw_activity } => {
-            jobs::inbound_activity_process::handle(raw_activity, ctx).await
+            jobs::inbound_activity_process::handle(raw_activity, ctx)
+                .await
+                .map_err(JobError::from)
         }
-        Job::ActorMetadataResolve { actor_id } => {
-            jobs::actor_metadata_resolve::handle(actor_id, ctx).await
-        }
+        Job::ActorMetadataResolve { actor_id } => jobs::actor_metadata_resolve::handle(actor_id, ctx)
+            .await
+            .map_err(JobError::from),
         Job::AtpRepositoryPublish {
             actor_id,
             commit_type,
-        } => jobs::atp_repository_publish::handle(actor_id, commit_type, ctx).await,
-        Job::BskyVideoPoll { media_file_id } => {
-            jobs::bsky_video_poll::handle(media_file_id, ctx).await
-        }
+        } => jobs::atp_repository_publish::handle(actor_id, commit_type, ctx)
+            .await
+            .map_err(JobError::from),
+        Job::BskyVideoPoll { media_file_id } => jobs::bsky_video_poll::handle(media_file_id, ctx)
+            .await
+            .map_err(JobError::from),
         Job::ProxyFollowSync {
             target_actor_id,
             want_follow,
-        } => jobs::proxy_follow_sync::handle(target_actor_id, want_follow, ctx).await,
+        } => jobs::proxy_follow_sync::handle(target_actor_id, want_follow, ctx)
+            .await
+            .map_err(JobError::from),
         Job::AccountWithdrawUnfollowAll { actor_id, username } => {
-            jobs::account_withdraw_unfollow_all::handle(actor_id, username, ctx).await
+            jobs::account_withdraw_unfollow_all::handle(actor_id, username, ctx)
+                .await
+                .map_err(JobError::from)
         }
         Job::BskyPostCommitDeferred {
             actor_id,
             post_id,
             pending_media_file_id,
-        } => jobs::bsky_post_commit_deferred::handle(actor_id, post_id, pending_media_file_id, ctx).await,
-        Job::BskyDmSend { post_id } => jobs::bsky_dm_send::handle(post_id, ctx).await,
+        } => jobs::bsky_post_commit_deferred::handle(actor_id, post_id, pending_media_file_id, ctx)
+            .await
+            .map_err(JobError::from),
+        Job::BskyDmSend { post_id } => jobs::bsky_dm_send::handle(post_id, ctx)
+            .await
+            .map_err(JobError::from),
         Job::RemoteFollowListSync {
             actor_id,
             direction,
-        } => jobs::remote_follow_list_sync::handle(actor_id, direction, ctx).await,
-        Job::RemoteActorResolve { uri } => jobs::remote_actor_resolve::handle(uri, ctx).await,
+        } => jobs::remote_follow_list_sync::handle(actor_id, direction, ctx)
+            .await
+            .map_err(JobError::from),
+        Job::RemoteActorResolve { uri } => jobs::remote_actor_resolve::handle(uri, ctx)
+            .await
+            .map_err(JobError::from),
         Job::AlsoKnownAsVerify {
             owner_actor_id,
             target_actor_id,
-        } => jobs::also_known_as_verify::handle(owner_actor_id, target_actor_id, ctx).await,
+        } => jobs::also_known_as_verify::handle(owner_actor_id, target_actor_id, ctx)
+            .await
+            .map_err(JobError::from),
         Job::RemoteAlsoKnownAsSync { owner_actor_id } => {
-            jobs::also_known_as_sync::handle(owner_actor_id, ctx).await
+            jobs::also_known_as_sync::handle(owner_actor_id, ctx)
+                .await
+                .map_err(JobError::from)
         }
         Job::RelayFollowSync {
             relay_id,
             want_follow,
-        } => jobs::relay_follow_sync::handle(relay_id, want_follow, ctx).await,
+        } => jobs::relay_follow_sync::handle(relay_id, want_follow, ctx)
+            .await
+            .map_err(JobError::from),
         Job::OgpFetch {
             post_id,
             url,
             position,
-        } => jobs::ogp_fetch::handle(post_id, url, position, ctx).await,
+        } => jobs::ogp_fetch::handle(post_id, url, position, ctx)
+            .await
+            .map_err(JobError::from),
         Job::LinkCardEmbedResolve {
             post_id,
             position,
             url,
-        } => jobs::link_card_embed_resolve::handle(post_id, position, url, ctx).await,
+        } => jobs::link_card_embed_resolve::handle(post_id, position, url, ctx)
+            .await
+            .map_err(JobError::from),
         Job::RemoteInstanceInfoResolve { domain } => {
-            jobs::remote_instance_info_resolve::handle(domain, ctx).await
+            jobs::remote_instance_info_resolve::handle(domain, ctx)
+                .await
+                .map_err(JobError::from)
         }
-        Job::FollowImportProcess { request_id } => {
-            jobs::follow_import::handle(request_id, ctx).await
-        }
+        Job::FollowImportProcess { request_id } => jobs::follow_import::handle(request_id, ctx)
+            .await
+            .map_err(JobError::from),
     }
 }
 

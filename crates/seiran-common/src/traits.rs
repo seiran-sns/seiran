@@ -277,6 +277,46 @@ pub enum Job {
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。
 /// `priority`/`attempt` はリトライ時に同じ値で `enqueue_retry` へ引き継ぐために保持する。
+/// ジョブハンドラの実行結果エラー。一時的障害（ネットワーク断・タイムアウト等、
+/// リトライすれば成功し得る）と恒久的失敗（不正な入力・署名鍵未設定等、リトライしても
+/// 同じ結果になる）を区別し、Worker のリトライ戦略（`execute_with_retry`）に反映する。
+///
+/// 既存の `Result<(), String>` を返すジョブハンドラは `From<String>` で自動的に
+/// `Transient` 扱いになる（従来通り最大試行回数までリトライする）ため、この型への
+/// 移行は破壊的変更にならない。恒久的失敗と判断できるジョブから順に `Permanent` を
+/// 明示的に返すよう移行する。
+#[derive(Debug)]
+pub enum JobError {
+    /// リトライで回復し得る一時的な障害。
+    Transient(String),
+    /// リトライしても結果が変わらない恒久的な失敗。即座に諦めてよい。
+    Permanent(String),
+}
+
+impl JobError {
+    pub fn message(&self) -> &str {
+        match self {
+            JobError::Transient(m) | JobError::Permanent(m) => m,
+        }
+    }
+
+    pub fn is_permanent(&self) -> bool {
+        matches!(self, JobError::Permanent(_))
+    }
+}
+
+impl std::fmt::Display for JobError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message())
+    }
+}
+
+impl From<String> for JobError {
+    fn from(s: String) -> Self {
+        JobError::Transient(s)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct QueuedJob {
     pub job: Job,

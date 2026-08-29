@@ -12,13 +12,13 @@ use crate::ap::{
     deliver_post_to_ap_followers, deliver_undo_announce, deliver_update_actor,
 };
 use crate::queue::worker::JobContext;
-use crate::traits::ApDeliveryKind;
+use crate::traits::{ApDeliveryKind, JobError};
 
 pub async fn handle(
     actor_id: i64,
     kind: ApDeliveryKind,
     ctx: Arc<JobContext>,
-) -> Result<(), String> {
+) -> Result<(), JobError> {
     let Some(pool) = ctx.db_pool.as_ref() else {
         tracing::warn!(
             "[ApDelivery] DB pool 未設定のためスキップ (actor_id={})",
@@ -63,11 +63,11 @@ pub async fn handle(
             in_reply_to.as_deref(),
         )
         .await
-        .map_err(|e| e.to_string()),
+        .map_err(JobError::from),
         ApDeliveryKind::DirectMessage { post_id } => {
             deliver_direct_message_to_ap(ap_client, pool, post_id, actor_id, domain, private_pem)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(JobError::from)
         }
         ApDeliveryKind::Announce {
             post_id,
@@ -82,7 +82,7 @@ pub async fn handle(
             &original_ap_object_id,
         )
         .await
-        .map_err(|e| e.to_string()),
+        .map_err(JobError::from),
         ApDeliveryKind::UndoAnnounce {
             announce_post_id,
             original_ap_object_id,
@@ -96,11 +96,11 @@ pub async fn handle(
             &original_ap_object_id,
         )
         .await
-        .map_err(|e| e.to_string()),
+        .map_err(JobError::from),
         ApDeliveryKind::DeleteNote { post_id } => {
             deliver_delete_note(ap_client, pool, post_id, actor_id, domain, private_pem)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(JobError::from)
         }
         ApDeliveryKind::Reaction {
             post_id,
@@ -140,7 +140,7 @@ pub async fn handle(
                 emoji_url.as_deref(),
             )
             .await
-            .map_err(|e| e.to_string())
+            .map_err(JobError::from)
         }
         ApDeliveryKind::PollVote {
             post_id,
@@ -155,7 +155,7 @@ pub async fn handle(
             &option_names,
         )
         .await
-        .map_err(|e| e.to_string()),
+        .map_err(JobError::from),
         ApDeliveryKind::UndoReaction {
             post_id,
             prev_activity_id,
@@ -173,7 +173,7 @@ pub async fn handle(
             emoji_url.as_deref(),
         )
         .await
-        .map_err(|e| e.to_string()),
+        .map_err(JobError::from),
         ApDeliveryKind::UpdateActor => {
             let Some(public_pem) = cfg.ap_public_key_pem.as_deref().filter(|s| !s.is_empty())
             else {
@@ -185,12 +185,12 @@ pub async fn handle(
             };
             deliver_update_actor(ap_client, pool, actor_id, domain, private_pem, public_pem)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(JobError::from)
         }
         ApDeliveryKind::DeleteActor => {
             deliver_delete_actor(ap_client, pool, actor_id, domain, private_pem)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(JobError::from)
         }
     }
 }
