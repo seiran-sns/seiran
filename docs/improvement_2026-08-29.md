@@ -133,11 +133,25 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
   `tokio::time::interval`ループの方が既存踏襲として自然だった）。
   72時間経過した`car_bytes`をUPDATE一括でNULL化、行・`ops_json`は残す。
 
-### [PERF-6・低] 未使用インデックスの棚卸し（前回 P-2）
+### [PERF-6・見送り（判断材料不足）] 未使用インデックスの棚卸し（前回 P-2）
 
-- PERF-1 で `pg_stat_user_indexes` を確認できるようになった後、`idx_scan = 0` が続くインデックスを
-  DROP。**採用実績を EXPLAIN で確認してからコミットする**運用に切り替える（過去、追加した
-  カバリングインデックスがプランナに選ばれず 155 MB のデッドウェイトになった前例あり）。
+- 2026-08-29 に `pg_stat_user_indexes` で `idx_scan = 0` のインデックスを洗い出したが、
+  **統計収集期間が `pg_postmaster_start_time()` 基準で 10 日間しかなく**、判断材料として
+  不十分と判断し実施を見送った。候補に挙がった約30本は `idx_actors_search_bigm`
+  （`GET /api/actors/search`）・`idx_password_resets_token`・`idx_reports_*`・
+  `idx_poll_votes_*`・`idx_atp_blobs_*` 等で、いずれも実装上は正当な低頻度機能
+  （検索・パスワードリセット・通報・投票・ATPブロブ）のインデックスであり、
+  「10日間たまたま踏まれなかっただけ」の可能性が高い。前回 P-2 で実際に無駄と判明した
+  `idx_follows_target_follower`/`idx_follows_follower_accepted`（計155MB）は既に
+  DROP済みで現存しない（対応時期不明、本改善大会以前）。
+- 再判断の目安: 統計収集期間が最低でも1〜2ヶ月に達してから、`idx_scan=0`が継続している
+  ものだけを対象にする。DROP前に必ず`EXPLAIN`でプランナが実際に不採用であることを
+  確認する運用は維持する。
+- 別件として、`follows_pkey`（43MB, idx_scan=2）・`follows_follower_actor_id_target_actor_id_key`
+  （75MB, idx_scan=606）はテーブル本体（400kB）に対し明らかに肥大化したままだった
+  （過去の大量書き込みによるB-tree空きページ、前回 P-1 と同種の事象）。これはPK/UNIQUE制約
+  実装なのでDROP対象外だが、`REINDEX TABLE CONCURRENTLY follows`で縮小可能。本改善大会の
+  スコープ外（前回P-1として既出、今回未着手）として次回に残す。
 
 ---
 
