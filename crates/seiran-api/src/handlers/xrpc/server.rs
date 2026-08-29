@@ -11,7 +11,8 @@ use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 
 use super::{extract_bearer, service_did};
 use crate::error::ApiError;
-use crate::middleware::extract_auth;
+use crate::middleware::{extract_auth, ClientIp};
+use crate::rate_limit::{self, AttemptKind};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -140,8 +141,16 @@ pub struct CreateSessionRequest {
 /// ダミーハッシュ照合を行ってから同一の `AuthenticationRequired` を返す。
 pub async fn xrpc_create_session(
     State(state): State<AppState>,
+    ip: ClientIp,
     Json(req): Json<CreateSessionRequest>,
 ) -> impl IntoResponse {
+    // [SEC-1] メインパスワードでの認証も受け付けるため（下記コメント参照）、
+    // /api/auth/login と同じ総当たり対策を通す。login 側と同じ AttemptKind::Login
+    // バケットを共有し、identifier を変えた試行の合算でも検知できるようにする。
+    if let Err(e) = rate_limit::check_ip_not_blocked(&state, &ip).await {
+        return e.into_response();
+    }
+
     let identifier = req.identifier.trim();
 
     let actor = match state.actors.find_by_did(identifier).await {
@@ -159,10 +168,40 @@ pub async fn xrpc_create_session(
     };
 
     let Some(actor) = actor.filter(|a| a.at_did.is_some()) else {
+        // ユーザーが実在しない場合も試行として記録する（login と同じ扱い）。
+        if let Err(e) = rate_limit::check_and_record_credential_attempt(
+            &state,
+            AttemptKind::Login,
+            &ip,
+            identifier,
+            &req.password,
+            None,
+        )
+        .await
+        {
+            return e.into_response();
+        }
         let _ = LocalAuthProvider::verify_password(&req.password, LocalAuthProvider::dummy_hash());
         return auth_required_error();
     };
     let did = actor.at_did.clone().expect("filter済み");
+
+    let window_reset_at = match actor.user_id {
+        Some(user_id) => rate_limit::window_reset_at(&state, user_id).await,
+        None => None,
+    };
+    if let Err(e) = rate_limit::check_and_record_credential_attempt(
+        &state,
+        AttemptKind::Login,
+        &ip,
+        identifier,
+        &req.password,
+        window_reset_at,
+    )
+    .await
+    {
+        return e.into_response();
+    }
 
     let hashes = match state
         .atp_sessions

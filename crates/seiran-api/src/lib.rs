@@ -24,7 +24,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{Any, AllowOrigin, CorsLayer};
 use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 
 use seiran_common::repository::{
@@ -628,10 +628,31 @@ pub async fn init_state(
 
 /// api ロールの axum ルーターを構築する（CORS 適用込み）。
 pub fn router(state: AppState) -> Router {
+    // [SEC-2] `frontend_origin`（`FRONTEND_ORIGIN`環境変数）と自ドメインのみ許可する。
+    // `local_domain`は初回セットアップ完了まで未確定（`OnceLock`）なため、CORSレイヤ構築時
+    // ではなくリクエストごとに評価する`predicate`を使う（起動時点の値を静的に焼き込むと、
+    // セットアップ完了前後で判定がずれる）。認証は`Authorization`ヘッダー方式で
+    // Cookieを使わない（`allow_credentials`は付与していない）ため古典的CSRFは成立しないが、
+    // `Any`のままだと任意サイトのJSが公開APIを無制限に叩ける（docs/code_audit_2026-08-05.md S-3）。
+    let frontend_origin = state.frontend_origin.clone();
+    let local_domain = state.local_domain.clone();
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(AllowOrigin::predicate(move |origin, _req| {
+            let Ok(origin_str) = origin.to_str() else {
+                return false;
+            };
+            if origin_str == frontend_origin {
+                return true;
+            }
+            let local_domain = local_domain.as_str();
+            origin_str == format!("https://{}", local_domain)
+                || origin_str == format!("http://{}", local_domain)
+        }))
         .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+        ]);
 
     // 管理系ルートはロールごとに専用ルータへ分割し、`route_layer`で認可を強制する（#221）。
     // ハンドラ側では認可チェックを一切行わない（呼び忘れによる無認可到達を構造的に防ぐ、
