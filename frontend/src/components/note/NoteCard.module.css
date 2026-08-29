@@ -2,12 +2,13 @@
   margin: 12px 12px 0;
   padding: 14px 16px;
   border-radius: 16px;
+  background: var(--card-bg);
   box-shadow: var(--shadow-card);
   transition: background 0.1s, box-shadow 0.15s;
 }
 
 .card:hover {
-  background: var(--bg-elev);
+  background: var(--card-bg-hover);
   box-shadow: var(--shadow-card-hover);
 }
 
@@ -18,7 +19,8 @@
 }
 
 .large:hover {
-  background: none;
+  /* 主役ポストはホバーで背景を変化させない（通常時の.cardの背景のまま維持する）。 */
+  background: var(--card-bg);
   box-shadow: var(--shadow-card);
 }
 
