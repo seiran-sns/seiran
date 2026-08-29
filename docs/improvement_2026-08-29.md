@@ -136,12 +136,12 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
 
 ### [REF-1・高] 巨大ファイルの再分割（how/what 混在の解消）
 
-| ファイル | 行数 | 混在している what と how |
+| ファイル | 行数 | 状態 |
 |---|---|---|
-| `jobs/inbound_activity_process.rs` | 3,788 | 受信アクティビティ種別のディスパッチ(what) と Follow/Create/Announce/Like/Delete/Flag/Move 各処理(how) が同居 |
-| `handlers/notes/mod.rs` | 2,478 | 入力バリデーション(what)・DB 操作(how)・配送トリガ(how)・レスポンス整形(what) が 1 関数に |
-| `frontend/src/api/client.ts` | 2,113 | REST クライアント全ドメインが 1 モジュール |
-| `ap/deliver.rs` | 2,277 | 配送先決定(what) と署名・POST・集計(how) |
+| `jobs/inbound_activity_process.rs` | 3,788 | **対応済み**（`jobs/inbound_activity_process/` へ15ファイル分割。`handle_create_note`を検証/永続化・配送のhow/whatに分離） |
+| `handlers/notes/mod.rs` | 2,478 | **対応済み**（`handlers/notes/{creation,timelines,retrieval,deletion,reactions,pins,poll,profile_material}.rs`へ分割。`create_regular_post`を`validate_create_regular_post_input`(what)/`persist_regular_post`(how)に分離） |
+| `ap/deliver.rs` | 2,277 | **対応済み**（`ap/deliver/{infra,activity,note,announce,actor,reaction,text}.rs`へ分割。`infra`=配送機構(how)、`activity`=JSON構築純関数(what)、他は種別別オーケストレーション(how)） |
+| `frontend/src/api/client.ts` | 2,113 | 未着手 |
 
 - 方針（how/what 分離）:
   - `inbound_activity_process.rs` → `activity_type` ごとにモジュール分割（`inbound/{follow,create,announce,...}.rs`）。

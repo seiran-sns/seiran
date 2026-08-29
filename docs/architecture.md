@@ -146,7 +146,7 @@ advisory lockはセッションスコープのため、`PgPool`から都度借�
 
 このパターンを採用するジョブが、1回の実行で他の低優先度ジョブを大量にファンアウトする重い処理（例: `RemoteFollowListSync`が未知アクターごとに`RemoteActorResolve`を積む）の場合、表示のたびに無条件でenqueueすると、同じ内容の重いジョブが何度もリロードされるだけで積み重なり、同一優先度を共有する他のジョブを飢餓状態にしうる（#229）。この種のジョブは`AppState`側にプロセス内メモリのクールダウン（`(キー) → 直近enqueue時刻`の`DashMap`、一定時間内の再投入を無視する）を設け、根本的な重複投入を抑える。`enqueue_remote_follow_list_sync`（`remote_follow_sync_recent`、10分）が実例。
 
-**並列・排他制御**: グローバル同時実行数上限（`Semaphore`、既定32、ジョブ単位）、ドメイン単位の同時接続数制限（最大2並列、`RemoteActorResolve`/`RemoteFollowListSync`/`ActorHistorySync`などリモートから取得する系のジョブ用。`JobContext::get_domain_semaphore`）、アクターID単位の直列化（ATPコミットの順序保証）、指数バックオフ+ジッターでのリトライ。AP配送（`ApDelivery`）のinboxファンアウト自体は`fan_out_activity`内で`buffer_unordered`により最大8並列（`crates/seiran-common/src/ap/deliver.rs`）。追加の`tokio::spawn`は行わず、Workerジョブ実行のタスク内でポーリングを並列化するのみ（docs/code_audit_2026-08-05.md P-3）。
+**並列・排他制御**: グローバル同時実行数上限（`Semaphore`、既定32、ジョブ単位）、ドメイン単位の同時接続数制限（最大2並列、`RemoteActorResolve`/`RemoteFollowListSync`/`ActorHistorySync`などリモートから取得する系のジョブ用。`JobContext::get_domain_semaphore`）、アクターID単位の直列化（ATPコミットの順序保証）、指数バックオフ+ジッターでのリトライ。AP配送（`ApDelivery`）のinboxファンアウト自体は`fan_out_activity`内で`buffer_unordered`により最大8並列（`crates/seiran-common/src/ap/deliver/infra.rs`）。追加の`tokio::spawn`は行わず、Workerジョブ実行のタスク内でポーリングを並列化するのみ（docs/code_audit_2026-08-05.md P-3）。
 
 ## 6. 検索セッション管理
 
@@ -257,7 +257,7 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
 - nginx（`docker/nginx.conf`/`docker/nginx.mono.conf`）・ローカル開発（`frontend/vite.config.ts`
   の proxy）とも、`/notes`・`/@` は bot 判定なしで常に api（バックエンド）へ転送する。
 - リポスト（Announce）の AP canonical URL は `/notes/:id` ではなく `/announces/:id`
-  （`create_repost`、`ap/deliver.rs`）。フロントエンド上のリポストラッパー個別ページは
+  （`create_repost`、`ap/deliver/announce.rs`）。フロントエンド上のリポストラッパー個別ページは
   通常ポストと同じ `/notes/:id` で表示するため、リモートユーザーが `/announces/:id` へ
   直接ブラウザでジャンプしてきた場合は `GET /announces/:id`
   （`handlers::notes::get_announce_redirect`）が `/notes/:id` へリダイレクトする
@@ -291,7 +291,7 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
   - テストは3つのPlaywright projectに分けて並列実行する（`workers: 3`(CI)/`4`(ローカル)）。大半のspecは`main`で並列実行し、`storage_providers`（`is_active`先頭優先のためstub S3登録が競合する）に触れる`notifications`/`misskey-compat`/`federation-delivery`は`storage-serial`（project内`workers: 1`で直列、`main`とはインターリーブ）、`site_settings`のグローバル変更や外部サービススタブのプロセスグローバル状態に触れる`admin`/`rate-limit`/`search`は`globals-serial`（`dependencies`で`main`・`storage-serial`完了後の排他テール）に隔離する。
 - `e2e/fixtures/stub-plc-server.ts`: `plc.directory`のスタブ実装。TypeScriptを`tsx`で直接実行するため、CIのNode.js 20を含め事前ビルドは不要。genesis opを受け取ってメモリに保持し、GET時にDIDドキュメント形式へ組み直して返す。
 - `e2e/fixtures/stub-appview-server.ts`: Bsky AppView（`public.api.bsky.app`）のスタブ実装。`app.bsky.feed.searchPosts`等の主要エンドポイントに対し常に空の結果を返す（seiranのローカルDB検索はこれと独立して機能するため、ローカル投稿の検索はAppViewが空でも成立する）。
-- `e2e/fixtures/stub-fedi-server.ts`: リモートのActivityPubアクター（Mastodon等）のスタブ実装。正規のHTTP Signatures（RSA-SHA256、Digestヘッダー必須。`crates/seiran-common/src/ap/client.rs`のcanonical signing string規約に準拠）で署名したFollowをseiranの`/inbox`へ送り、フォロー成立後の投稿・返信・リポスト配送（Fedi配送はローカルアクターのacceptedフォロワー全員へのファンアウトのみで、返信先個人への直接配送やsharedInboxは無い。`crates/seiran-common/src/ap/deliver.rs`）を自身のinboxで受信・記録できる。
+- `e2e/fixtures/stub-fedi-server.ts`: リモートのActivityPubアクター（Mastodon等）のスタブ実装。正規のHTTP Signatures（RSA-SHA256、Digestヘッダー必須。`crates/seiran-common/src/ap/client.rs`のcanonical signing string規約に準拠）で署名したFollowをseiranの`/inbox`へ送り、フォロー成立後の投稿・返信・リポスト配送（Fedi配送はローカルアクターのacceptedフォロワー全員へのファンアウトのみで、返信先個人への直接配送やsharedInboxは無い。`crates/seiran-common/src/ap/deliver/`）を自身のinboxで受信・記録できる。
 - `e2e/fixtures/api-helpers.ts`: テスト対象でないセットアップ（フォロー相手ユーザーの作成等）はUI操作ではなく`/api/auth/register`を直接叩いて済ませ、各テストは検証したいUI操作に集中させる。ログイン状態が前提のテストは`seedAuth()`でlocalStorageにtokenを仕込みUIログイン操作自体を省略できる（ログインフロー自体を検証する`login.spec.ts`だけは実際にフォームを操作する）。
 - テストファイルは`e2e/tests/`配下（`signup`・`login`・`post`・`follow`・`reply`・`reaction`・`search`・`profile-edit`・`hashtag`・`federation-delivery`）。DBはテスト実行全体で共有されるため、各テストはユーザー名が衝突しないよう一意なプレフィックス+タイムスタンプで登録する。
 - フロントは`i18next-browser-languagedetector`がブラウザロケールを見て言語を決めるため、Playwright側は`use.locale`を`ja-JP`に固定している（既定の`en-US`だとUIが英語化される）。
