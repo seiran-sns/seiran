@@ -223,21 +223,19 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
 方針: docs/ は「今の状態」と「これからやること」だけを持つ。過去のスナップショット診断・実施報告・
 廃止経緯は、次セッションが現状把握する際にノイズになるため統廃合する。
 
-### 棚卸し表
+### 棚卸し表（2026-08-29 実施済み）
 
 | ファイル | 最終更新 | 判定 |
 |---|---|---|
-| `architecture.md` `database.md` `protocols.md` `ui_spec.md` `roadmap.md` | 08-28 | **維持**。現状仕様。CLAUDE.md の同期対象。 |
+| `architecture.md` `database.md` `protocols.md` `ui_spec.md` `roadmap.md` | 08-28〜 | **維持**。現状仕様。CLAUDE.md の同期対象。 |
 | `concept.md` `coding_rules.md` `roles.md` `skill_atp_rust_programming.md` | 07〜08 | **維持**。思想・規約・リファレンス。 |
-| `improvement_security.md`(07-02) `improvement_db_performance.md`(07-10) `improvement_code_quality.md`(07-15) | — | **アーカイブ/削除候補**。大半が消化済み。未消化分は本書に取り込んだ。過去診断のスナップショットを現状把握用 docs に残す意味は薄い。 |
-| `code_audit_2026-07-26.md` | 07-27 | **削除候補**。08-05 監査に置換済み。 |
-| `code_audit_2026-08-05.md` | 08-05 | 当面**維持**（本書が参照する消化元）。本書消化後は削除してよい。 |
-| `refactoring_report_2026-07.md` | 07-15 | **削除候補**。実施済み作業の報告＝過去経緯。ただし `notes/queries.rs` 非昇格の設計判断（B-7）だけは `coding_rules.md` か当該ファイル冒頭コメントに移してから削除。 |
-| `refactoring_plan.md` | 07-18 | **要確認**。未着手項目が残るなら本書へ集約して削除、全消化なら削除。 |
+| `improvement_security.md` `improvement_db_performance.md` `improvement_code_quality.md` | — | **削除済み**。未消化分は本書（SEC-1〜4/PERF-1〜6/REF-1〜5）に取り込み済み。 |
+| `code_audit_2026-07-26.md` | — | **削除済み**。08-05 監査に置換済みだった。 |
+| `code_audit_2026-08-05.md` | 08-05 | **維持**（マイケルの判断により残置。本書が参照する消化元・実測値の記録として参照価値ありと判断）。 |
+| `refactoring_report_2026-07.md` | — | **削除済み**。`notes/queries.rs` 非昇格の設計判断（B-7）は同ファイル冒頭コメントへ自己完結する形で移設済み。 |
+| `refactoring_plan.md` | — | **削除済み**。未消化だった1項目（ハンドラ層の生SQL残存）はREF-5として本書へ集約。 |
 
-- 実行タスク: 上表の「削除候補」を削除し、生きている未消化項目は本書へ寄せる。
-  `improvement_*.md` 3 本は本書に統合済みとして削除してよい（マイケルの最終判断を仰ぐ）。
-  結果として「診断/改善は本書 1 本、仕様は architecture/database/protocols/ui_spec」に集約する。
+結果: 「診断/改善は本書 + `code_audit_2026-08-05.md`、仕様は architecture/database/protocols/ui_spec」に集約した。
 
 ### コード内コメント
 
