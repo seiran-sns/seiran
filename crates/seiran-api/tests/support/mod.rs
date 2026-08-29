@@ -37,6 +37,7 @@ const ALLOWED_TEST_DB_NAME: &str = "seiran_e2e";
 
 /// ワークスペースルートの `config/` ディレクトリ（`CARGO_MANIFEST_DIR` からの相対パスで
 /// 解決するため、`cargo test` の実行時カレントディレクトリに依存しない）。
+#[allow(dead_code)]
 fn workspace_config_dir() -> std::path::PathBuf {
     std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../config")).to_path_buf()
 }
@@ -62,8 +63,20 @@ fn ensure_test_database() {
     );
 }
 
+/// DB接続のみが必要なテスト（axumルータ・認証を経由しない、SQL関数の直接検証など）向けの
+/// 軽量ハーネス。`test_router()` と同じ接続先ガード（結合テスト専用DB必須）を適用する。
+#[allow(dead_code)]
+pub async fn test_db_pool() -> sqlx::PgPool {
+    load_workspace_env();
+    ensure_test_database();
+    get_db_pool()
+        .await
+        .expect("DB接続に失敗（POSTGRES_* 環境変数 / docker compose の起動を確認してください）")
+}
+
 /// 本物の DB・secrets を使って `seiran_api::router` を構築する。
 /// マイグレーションは既に適用済みである前提（`seiran-server` 起動時に自動実行される）。
+#[allow(dead_code)]
 pub async fn test_router() -> Router {
     load_workspace_env();
     ensure_test_database();
@@ -129,6 +142,7 @@ pub async fn login_test_user(app: &Router, username: &str) -> String {
 }
 
 /// JSON ボディ付きの認証済みリクエストを組み立てる。
+#[allow(dead_code)]
 pub fn authed_json_request(
     method: &str,
     uri: &str,
@@ -145,6 +159,7 @@ pub fn authed_json_request(
 }
 
 /// レスポンスボディを JSON として読み取る。
+#[allow(dead_code)]
 pub async fn body_json(res: axum::response::Response) -> serde_json::Value {
     let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await

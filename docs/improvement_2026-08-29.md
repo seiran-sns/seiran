@@ -141,7 +141,7 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
 | `jobs/inbound_activity_process.rs` | 3,788 | **対応済み**（`jobs/inbound_activity_process/` へ15ファイル分割。`handle_create_note`を検証/永続化・配送のhow/whatに分離） |
 | `handlers/notes/mod.rs` | 2,478 | **対応済み**（`handlers/notes/{creation,timelines,retrieval,deletion,reactions,pins,poll,profile_material}.rs`へ分割。`create_regular_post`を`validate_create_regular_post_input`(what)/`persist_regular_post`(how)に分離） |
 | `ap/deliver.rs` | 2,277 | **対応済み**（`ap/deliver/{infra,activity,note,announce,actor,reaction,text}.rs`へ分割。`infra`=配送機構(how)、`activity`=JSON構築純関数(what)、他は種別別オーケストレーション(how)） |
-| `frontend/src/api/client.ts` | 2,113 | 未着手 |
+| `frontend/src/api/client.ts` | 2,113 | **対応済み**（`api/{core,types,webauthn,auth,notes,users,admin,follows,lists,misc}.ts`へ分割。`client.ts`は再エクスポート+`api`オブジェクト組み立てのみの薄い集約ファイルとして残し、既存の`import ... from "../api/client"`は無変更で動く） |
 
 - 方針（how/what 分離）:
   - `inbound_activity_process.rs` → `activity_type` ごとにモジュール分割（`inbound/{follow,create,announce,...}.rs`）。
@@ -170,12 +170,19 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
   明記済みだった（本改善大会の診断時点でこれも見落としていた。既存の実行時検証クエリの
   一斉移行はコスト過大なので対象外のまま、触った箇所から移行する運用を継続）。
 
-### [REF-4・中] テストが手薄な中心部（前回 R-8）
+### [REF-4・対応済み（着手分）] テストが手薄な中心部（前回 R-8）
 
-- 可視性判定は `post_is_visible_to` 関数化で DB レベルにテスト可能になったが、
-  followers_only/direct/block の組み合わせテストがまだ無い。`deliver_to_inboxes` の部分失敗集計、
-  `follow.rs` の状態遷移（pending→accepted→取り消し）も未カバー。
-- 対応: `crates/seiran-api/tests/support` の隔離 DB 基盤を使い、REF-1 で純粋関数化した what と併せて追加。
+- 可視性判定（`post_is_visible_to`/`actor_is_hidden_for_viewer`、followers_only/direct/
+  block/mute の組み合わせ）と `repository/follow.rs` の状態遷移（pending→accepted→取り消し、
+  リモートFollow受信の`insert_accepted`冪等性）を結合テストとして追加
+  （`crates/seiran-api/tests/{post_visibility_integration,follow_state_transition_integration}.rs`）。
+  `tests/support/mod.rs` に軽量ハーネス `test_db_pool()`（axumルータ・認証を経由せず
+  `PgPool` のみ取得）を新設。FK制約（`follows`/`blocks`/`mutes`/`post_recipients`が
+  `actors`/`posts`を参照）があるため、テスト専用の固定ID fixtureを`ON CONFLICT DO NOTHING`で
+  用意し、各テストが実際に検証する状態変更はトランザクション内で行いcommitしないことで
+  ロールバックする設計にした。
+- 残り: `fan_out_activity`（`ap/deliver/infra.rs`）の部分失敗集計はモックHTTPサーバーが
+  要るため未着手。
 
 ---
 
