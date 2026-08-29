@@ -207,6 +207,15 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
 - 残り: `fan_out_activity`（`ap/deliver/infra.rs`）の部分失敗集計はモックHTTPサーバーが
   要るため未着手。
 
+### [REF-5・低] ハンドラ層の生SQL残存（`refactoring_plan.md` §3-5 より、唯一の未消化項目）
+
+- `handlers/users.rs`（3箇所、1625/1651/1692行目付近）・`handlers/admin/reports.rs`（8箇所）が
+  Repository層を経由せず`sqlx::query`を直接呼んでいる（`coding_rules.md` #1違反）。
+  `refactoring_plan.md`（2026-07-10版）に記載されていた4項目のうち、`eprintln!`除去・
+  ジョブスタブ解消・`key_cache` TTLは既に対応済みと確認済みで、これだけが残っていた。
+- 対応: `ReportRepository`（新設）・既存`UserRepository`への移行。優先度低（機能的には
+  動いており、テスト容易性・一貫性の問題）。
+
 ---
 
 ## 4. ドキュメント整理（読み手＝次セッションの自分）
