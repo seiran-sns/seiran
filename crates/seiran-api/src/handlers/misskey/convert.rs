@@ -102,8 +102,15 @@ pub async fn build_users_detailed(
     }
     let ids: Vec<i64> = actors.iter().map(|a| a.id).collect();
 
-    let profile_rows: Vec<(i64, chrono::DateTime<chrono::Utc>, Option<String>)> = sqlx::query_as(
-        "SELECT a.id, a.created_at, COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
+    // notes_count/followers_count/following_countはactorsの非正規化カラムを読む
+    // （書き込みはrepository/post.rs・repository/follow.rsでのみ行う、唯一の真実の情報源。
+    // docs/improvement_2026-08-29.md PERF-4）。以前はposts/followsへの3本のGROUP BY COUNTを
+    // 毎回実行していた。
+    // (created_at, avatar_url, notes_count, followers_count, following_count)
+    type ProfileRow = (chrono::DateTime<chrono::Utc>, Option<String>, i64, i64, i64);
+    let profile_rows: Vec<(i64, ProfileRow)> = sqlx::query_as::<_, (i64, chrono::DateTime<chrono::Utc>, Option<String>, i64, i64, i64)>(
+        "SELECT a.id, a.created_at, COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url), \
+         a.notes_count, a.followers_count, a.following_count \
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
@@ -112,46 +119,21 @@ pub async fn build_users_detailed(
     .bind(&ids)
     .fetch_all(&state.db)
     .await
-    .unwrap_or_default();
-    let mut profile_by_id: HashMap<i64, (chrono::DateTime<chrono::Utc>, Option<String>)> =
-        profile_rows
-            .into_iter()
-            .map(|(id, created_at, avatar_url)| (id, (created_at, avatar_url)))
-            .collect();
-
-    let notes_counts: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT actor_id, COUNT(*) FROM posts WHERE actor_id = ANY($1) AND deleted_at IS NULL GROUP BY actor_id",
-    )
-    .bind(&ids)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-    let notes_count_by_id: HashMap<i64, i64> = notes_counts.into_iter().collect();
-
-    let followers_counts: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT target_actor_id, COUNT(*) FROM follows WHERE target_actor_id = ANY($1) AND status = 'accepted' GROUP BY target_actor_id",
-    )
-    .bind(&ids)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-    let followers_count_by_id: HashMap<i64, i64> = followers_counts.into_iter().collect();
-
-    let following_counts: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT follower_actor_id, COUNT(*) FROM follows WHERE follower_actor_id = ANY($1) AND status = 'accepted' GROUP BY follower_actor_id",
-    )
-    .bind(&ids)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-    let following_count_by_id: HashMap<i64, i64> = following_counts.into_iter().collect();
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(id, created_at, avatar_url, notes_count, followers_count, following_count)| {
+        (id, (created_at, avatar_url, notes_count, followers_count, following_count))
+    })
+    .collect();
+    let mut profile_by_id: HashMap<i64, ProfileRow> = profile_rows.into_iter().collect();
 
     actors
         .iter()
         .map(|actor| {
-            let (created_at, avatar_url) = profile_by_id
-                .remove(&actor.id)
-                .unwrap_or_else(|| (chrono::Utc::now(), None));
+            let (created_at, avatar_url, notes_count, followers_count, following_count) =
+                profile_by_id
+                    .remove(&actor.id)
+                    .unwrap_or_else(|| (chrono::Utc::now(), None, 0, 0, 0));
 
             let mut lite = user_lite(
                 actor.id,
@@ -172,9 +154,9 @@ pub async fn build_users_detailed(
                 is_locked: false,
                 is_silenced: false,
                 is_suspended: false,
-                notes_count: notes_count_by_id.get(&actor.id).copied().unwrap_or(0),
-                followers_count: followers_count_by_id.get(&actor.id).copied().unwrap_or(0),
-                following_count: following_count_by_id.get(&actor.id).copied().unwrap_or(0),
+                notes_count,
+                followers_count,
+                following_count,
                 followers_visibility: "public".to_string(),
                 following_visibility: "public".to_string(),
             };

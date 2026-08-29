@@ -576,8 +576,13 @@ impl PostRepository for PgPostRepository {
         created_at: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
-             VALUES ($1, $2, $3, $4, $5)",
+            "WITH inserted AS (
+                 INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING actor_id
+             )
+             UPDATE actors SET notes_count = notes_count + 1
+             WHERE id = (SELECT actor_id FROM inserted)",
         )
         .bind(id)
         .bind(actor_id)
@@ -982,9 +987,14 @@ impl PostRepository for PgPostRepository {
         created_at: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (ap_object_id) DO NOTHING",
+            "WITH inserted AS (
+                 INSERT INTO posts (id, actor_id, body, ap_object_id, created_at)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (ap_object_id) DO NOTHING
+                 RETURNING actor_id
+             )
+             UPDATE actors SET notes_count = notes_count + 1
+             WHERE id = (SELECT actor_id FROM inserted)",
         )
         .bind(id)
         .bind(actor_id)
@@ -1187,6 +1197,11 @@ impl PostRepository for PgPostRepository {
             .await?;
         }
 
+        sqlx::query("UPDATE actors SET notes_count = notes_count + 1 WHERE id = $1")
+            .bind(params.actor_id)
+            .execute(&mut *tx)
+            .await?;
+
         tx.commit().await
     }
 
@@ -1213,8 +1228,13 @@ impl PostRepository for PgPostRepository {
         visibility: &str,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at, visibility)
-             VALUES ($1, $2, '', $3, $4, $5, $6::post_visibility_enum)",
+            "WITH inserted AS (
+                 INSERT INTO posts (id, actor_id, body, ap_object_id, repost_of_post_id, created_at, visibility)
+                 VALUES ($1, $2, '', $3, $4, $5, $6::post_visibility_enum)
+                 RETURNING actor_id
+             )
+             UPDATE actors SET notes_count = notes_count + 1
+             WHERE id = (SELECT actor_id FROM inserted)",
         )
         .bind(id)
         .bind(actor_id)
@@ -1236,8 +1256,13 @@ impl PostRepository for PgPostRepository {
         created_at: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, at_uri, repost_of_post_id, created_at, visibility)
-             VALUES ($1, $2, '', $3, $4, $5, 'public')",
+            "WITH inserted AS (
+                 INSERT INTO posts (id, actor_id, body, at_uri, repost_of_post_id, created_at, visibility)
+                 VALUES ($1, $2, '', $3, $4, $5, 'public')
+                 RETURNING actor_id
+             )
+             UPDATE actors SET notes_count = notes_count + 1
+             WHERE id = (SELECT actor_id FROM inserted)",
         )
         .bind(id)
         .bind(actor_id)
@@ -1326,24 +1351,54 @@ impl PostRepository for PgPostRepository {
     }
 
     async fn soft_delete_by_id(&self, id: i64) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE posts SET deleted_at = NOW() WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
+        // `deleted_at IS NULL` ガードで「実際に未削除→削除済みへ遷移したか」を判定し、
+        // 既に削除済みの行への重複呼び出しでnotes_countを二重に減らさないようにする。
+        sqlx::query(
+            "WITH deleted AS (
+                 UPDATE posts SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
+                 RETURNING actor_id
+             )
+             UPDATE actors SET notes_count = GREATEST(notes_count - 1, 0)
+             WHERE id = (SELECT actor_id FROM deleted)",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
     }
 
     async fn soft_delete_by_ap_object_id(&self, ap_object_id: &str) -> Result<u64, sqlx::Error> {
-        let result = sqlx::query("UPDATE posts SET deleted_at = NOW() WHERE ap_object_id = $1")
-            .bind(ap_object_id)
-            .execute(&self.pool)
-            .await?;
+        // `ap_object_id` はUNIQUE制約があるため高々1行のみ対象。`deleted_at IS NULL`
+        // ガードで重複Delete受信時の二重デクリメントを防ぐ（soft_delete_by_id参照）。
+        let result = sqlx::query(
+            "WITH deleted AS (
+                 UPDATE posts SET deleted_at = NOW()
+                 WHERE ap_object_id = $1 AND deleted_at IS NULL
+                 RETURNING actor_id
+             )
+             UPDATE actors SET notes_count = GREATEST(notes_count - 1, 0)
+             WHERE id = (SELECT actor_id FROM deleted)",
+        )
+        .bind(ap_object_id)
+        .execute(&self.pool)
+        .await?;
         Ok(result.rows_affected())
     }
 
     async fn soft_delete_by_at_uri(&self, at_uri: &str) -> Result<Option<(i64, i64)>, sqlx::Error> {
+        // `decremented` CTEは最終SELECTからLEFT JOINで参照することで実行を保証する
+        // （どこからも参照されないdata-modifying CTEはPostgresが実行しない可能性があるため）。
         sqlx::query_as::<_, (i64, i64)>(
-            "UPDATE posts SET deleted_at = NOW() WHERE at_uri = $1 AND deleted_at IS NULL RETURNING id, actor_id",
+            "WITH deleted AS (
+                 UPDATE posts SET deleted_at = NOW() WHERE at_uri = $1 AND deleted_at IS NULL
+                 RETURNING id, actor_id
+             ),
+             decremented AS (
+                 UPDATE actors SET notes_count = GREATEST(notes_count - 1, 0)
+                 WHERE id = (SELECT actor_id FROM deleted)
+                 RETURNING 1
+             )
+             SELECT deleted.id, deleted.actor_id FROM deleted LEFT JOIN decremented ON true",
         )
         .bind(at_uri)
         .fetch_optional(&self.pool)
@@ -1438,15 +1493,21 @@ impl PostRepository for PgPostRepository {
         .execute(&mut *tx)
         .await?;
 
-        // ON CONFLICT DO NOTHINGで重複スキップされた場合はpost_recipientsも書き込まない。
-        if result.rows_affected() > 0 && !params.recipient_actor_ids.is_empty() {
-            sqlx::query(
-                "INSERT INTO post_recipients (post_id, actor_id) SELECT $1, unnest($2::bigint[])",
-            )
-            .bind(params.id)
-            .bind(params.recipient_actor_ids)
-            .execute(&mut *tx)
-            .await?;
+        // ON CONFLICT DO NOTHINGで重複スキップされた場合はpost_recipientsもnotes_countも更新しない。
+        if result.rows_affected() > 0 {
+            if !params.recipient_actor_ids.is_empty() {
+                sqlx::query(
+                    "INSERT INTO post_recipients (post_id, actor_id) SELECT $1, unnest($2::bigint[])",
+                )
+                .bind(params.id)
+                .bind(params.recipient_actor_ids)
+                .execute(&mut *tx)
+                .await?;
+            }
+            sqlx::query("UPDATE actors SET notes_count = notes_count + 1 WHERE id = $1")
+                .bind(params.actor_id)
+                .execute(&mut *tx)
+                .await?;
         }
 
         tx.commit().await

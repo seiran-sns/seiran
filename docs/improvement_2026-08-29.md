@@ -105,14 +105,23 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
 - 案 B（`atp_repo_events` 等の `UNLOGGED` 化）: クラッシュでテーブル全消失・将来のレプリカに
   乗らない制約があるため、明確に再構築可能なデータ限定。優先度は案 A より下。
 
-### [PERF-4・中] フォロー/投稿カウントの非正規化（前回 P-4 の第 2 案、未対応）
+### [PERF-4・対応済み] フォロー/投稿カウントの非正規化（前回 P-4 の第 2 案）
 
-- `build_user_detailed` の COUNT 3 種（notes / followers / following）は一覧では `user_lite` で
-  回避済みだが、プロフィール詳細では毎回 3 本の COUNT が走る。`posts` には既に
-  `reply_count`/`quote_count`/`repost_count` の非正規化実績がある。
-- 対応: `actors` に `notes_count`/`followers_count`/`following_count` を追加し、
-  投稿・フォローの増減箇所で更新。整合性維持のため**更新箇所の網羅**が肝（漏れると数字がずれる）。
-  フォロー increment/decrement は `repository/follow.rs` の状態遷移に、notes は投稿作成/削除に集約。
+- `actors` に `notes_count`/`followers_count`/`following_count` を追加（マイグレーション
+  `20260829070000_actors_denormalized_counts.sql`、既存データからバックフィル済み）。
+  `build_users_detailed`（Misskey互換）と`count_relations`（プロフィール画面）を読み替え、
+  毎回のCOUNT(*)クエリ（`posts`全件・`follows`全件）を廃止した。
+- 書き込み経路を全て洗い出して対応（`repository/post.rs`の`insert`/`insert_full`/`insert_repost`/
+  `insert_repost_bsky`/`insert_remote`/`insert_remote_with_dedup`と`soft_delete_by_id`/
+  `soft_delete_by_ap_object_id`/`soft_delete_by_at_uri`、`repository/follow.rs`の
+  `insert_accepted`/`insert_accepted_bsky`/`accept`/`delete_by_actors`）。各メソッドは
+  data-modifying CTE（`WITH x AS (INSERT/UPDATE/DELETE ... RETURNING ...) UPDATE actors ...`）で
+  「実際に行が変化した場合のみ」単一SQL文内で加減算する設計にし、`ON CONFLICT DO NOTHING`で
+  スキップされた場合や既に削除済みの行への重複操作で二重カウントしないようにした
+  （`soft_delete_by_ap_object_id`/`soft_delete_by_at_uri`は元々`deleted_at IS NULL`ガードが
+  無い/片方のみだった実装上の穴も同時に修正）。詳細は`docs/database.md`「非正規化カウンタ」・
+  `coding_rules.md` #14参照。実DB上でCTEパターンの単体動作・冪等性・`follow_state_transition_integration`/
+  `post_visibility_integration`の全既存テスト通過を確認済み。
 
 ### [PERF-5・対応済み] `atp_repo_events` の CAR バイト列を定期 NULL 化（前回 P-6）
 

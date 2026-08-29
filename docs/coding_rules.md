@@ -94,6 +94,7 @@ async fn create_note(...) -> impl IntoResponse {
 | 11 | 新規クエリを `sqlx::query`/`query_as`（実行時検証）で書く | `sqlx::query!`/`query_as!`/`query_scalar!`（コンパイル時検証）を使う。SELECT列と構造体のズレを実行時ではなくビルド時に検出できる（docs/code_audit_2026-08-05.md R-6）。`cargo sqlx prepare --workspace`の実行を忘れないこと |
 | 12 | DBから取得済みのActor/投稿レコードに対して `domain == local_domain`（または`state.local_domain`）でローカル/リモート判定する | `actor_type == "local"` を使う（`actors.actor_type`列、`insert_local`の不変条件によりlocal⇔domain=local_domainは常に一致）。Actor/TimelinePostは既にactor_typeを保持、他の型はSELECTに`a.actor_type::text AS actor_type`を1列足すだけで済むことが多い。Hostヘッダー・WebFingerクエリ・ユーザー入力文字列など、DBレコードではない外部入力のdomain比較は対象外（そちらは元々SQL化できない） |
 | 13 | `jobs::*::handle()` が既存の `Result<(), String>` のまま新規エラー分岐を追加する | 一時的障害（ネットワーク・タイムアウト等）と恒久的失敗（不正な入力・鍵未設定等）を区別できる場合は `Result<(), JobError>`（`traits::JobError`）を返す。`String`は`From`で自動的に`Transient`扱いになるため、触っていないジョブは変更不要。配送・外部API呼び出し系ジョブから優先的に移行する（`jobs::ap_delivery`が実例） |
+| 14 | `actors.notes_count`/`followers_count`/`following_count` を `repository/post.rs`・`repository/follow.rs` 以外から直接 `UPDATE` する、または `posts`/`follows` への都度の `COUNT(*)` で代替する | 投稿・フォローの増減はこの2ファイルの既存の書き込みメソッド（`insert_full`等・`accept`等）を必ず経由する。新しい投稿INSERT/削除経路やフォロー状態遷移を追加する場合も、既存メソッド内のCTEパターン（`docs/database.md`「非正規化カウンタ」参照）に倣ってこの3カラムを同じSQL文中で加減算すること |
 
 ---
 
