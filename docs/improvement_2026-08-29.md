@@ -50,35 +50,38 @@
 - 対応: `resolve_service_endpoint` の結果 URL を `net.rs` の検証（IP レンジ拒否）に通してから転送する。
   転送クライアントもリダイレクトを追わない設定にする。※実装前に proxy.rs の現状挙動を精読して要否を判断。
 
-### [SEC-4・低] backend コンテナが root 実行（前回 S-8 の残り）
+### [SEC-4・対応済み] backend コンテナの非 root 実行（前回 S-8）
 
-- 場所: `docker/Dockerfile`（frontend 側は `USER node` 済み、backend 側が未対応）
-- 対応: runtime ステージで `useradd -r appuser` → `USER appuser`。`config/`（secrets.toml）の
-  オーナーを合わせる。
+- 2026-08-29 に確認したところ、commit `9fb7e89`「seiran-server/frontendコンテナを非rootユーザーで
+  実行する」で**既に完了済み**（08-06）。`docker/Dockerfile` で uid 10001 の `seiran` ユーザーを
+  作成し、`docker/entrypoint.sh` が起動時に root で `/app/config` の所有権を揃えたのち
+  `gosu seiran` で降格して本体を exec する。本改善大会の診断時点でこれも見落としていた。
 
 ---
 
 ## 2. RDB パフォーマンス
 
-### [PERF-1・高] 計測基盤が無いまま（前回 P-9）— 他の判断を先送りさせている根本原因
+### [PERF-1・対応済み] 計測基盤（前回 P-9）
 
-- `pg_stat_statements` 未導入、アプリ側 `/metrics` も無い。キャッシュ TTL やインデックス採否を
-  「実測してから決める」としつつ、その実測手段が無い状態が監査をまたいで継続している。
-- 対応: `docker/Dockerfile.postgres` の設定に
-  `shared_preload_libraries = 'pg_stat_statements'` を追加し、拡張を有効化するマイグレーション
-  （`CREATE EXTENSION IF NOT EXISTS pg_stat_statements`）を入れる。これが入って初めて以下の
-  効果測定ができる。**本タスクを他の PERF より先に。**
+- 2026-08-29 に確認したところ、`docker-compose.yml`/`docker-compose.mono.yml` の
+  `command: ["postgres", "-c", "shared_preload_libraries=pg_bigm,pg_stat_statements"]`と
+  マイグレーション `20260805030000_enable_pg_stat_statements.sql` で**既に対応済み**
+  （08-05、監査当日中に着手されていた）。ローカルDBで `pg_extension` に存在確認済み。
+  本改善大会の診断時点でこの事実を見落として「未着手」と誤記していた。以後の PERF 診断は
+  `pg_stat_statements` を実測に使える前提で進めてよい。
 
-### [PERF-2・高] `actors` の Bsky 流入分が肥大し続ける（前回 P-5 未対応）
+### [PERF-2・対応済み（主要部）] `actors` の Bsky 流入分肥大（前回 P-5）
 
-- 前回時点で actors 47 万行 / 292 MB、99% が投稿を持たない Bsky 流入アクター。ローカルは 131 人。
-  ユーザー検索インデックスの対象を 47 万件に膨らませている。
-- 対応（大胆に）:
-  1. Bsky アクターの**永続化条件を「自インスタンスと関与あり」に限定**する
-     （投稿・フォロー・言及・DM のいずれかで関わったもの。判定基盤は
-     `bsky_actor_is_engaged` 関数が既にある）。関与なしは保存しないか、TTL 付きで定期掃除。
-  2. `ALTER TABLE actors SET (autovacuum_vacuum_scale_factor = 0.02)`。
-  3. ユーザー検索インデックスを部分インデックス化（`WHERE actor_type='local' OR <関与あり>`）。
+- 主要対応（永続化条件を関与ベースに絞る）は commit `127ae32`
+  「Bsky流入アクターの保存を関与ベースへ絞る（issue #216）」で**既に完了済み**
+  （`bsky_actor_is_engaged` 関数を保存判定の唯一の場所とし、無条件保存経路
+  `Job::ResolveBskyMention` も削除済み）。本改善大会の診断時点でこれも見落としていた。
+  2026-08-29 実測: actors 18,890 行 / 24MB（前回監査時 47 万行 / 292MB から大幅減）。
+- 残作業（低優先度、将来の再肥大化への予防）:
+  1. `ALTER TABLE actors SET (autovacuum_vacuum_scale_factor = 0.02)` — 2026-08-29 対応済み
+     （マイグレーション `20260829060000_actors_autovacuum_tuning.sql`）。
+  2. ユーザー検索インデックスの部分インデックス化: 現状の行数（18,890）では効果が
+     ほぼ無いため見送り。actors が再び大きく増えた場合に再検討する。
 - 注意: 現在の実測件数を先に取り直すこと（144 コミット分で状況が変わっている可能性）。
 
 ### [PERF-3・中] 大胆な整合性緩和 — リモート投稿取り込みの耐久性を落として書き込みスループットを稼ぐ
