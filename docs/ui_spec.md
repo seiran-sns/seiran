@@ -320,6 +320,16 @@ LightBoxで開いた際の解除ボタンは、画面全体ではなくLightBox�
 
 各投稿カードのアクション列とメニューには「引用」を表示する。選択すると引用元の投稿者・本文を確認できるコンポーザを開き、通常投稿と同じ本文・添付・可視性・Fedi/Bsky配送先を指定してコメント付き引用を作成する。
 
+### 2.2g 未取り込み参照の表示（`PendingReferenceIndicator`、#234）
+
+リプライ・引用・リポストの参照先が`pending`（未取り込み）/`gone`（消失確定）な場合、`Note.replyStatus`/`quoteStatus`/`renoteStatus`（対応する`*Id`が無い時だけ意味を持つ）に応じて以下を表示する。
+
+* **リプライ**: 通常カード最上部の関係行（返信・引用リンクを並べる箇所）に、`ReplyIndicator`の代わりに`pending`なら「未取り込み」案内＋取り込むボタン、`gone`なら案内のみを表示する。
+* **引用**: 引用カード（2.2f節）の位置に、`pending`なら「未取り込み」案内＋取り込むボタン、`gone`なら案内のみを表示する（引用元が閲覧者から見えないケース＝APIが`quote`を返さないだけで`quoteId`はある場合とは別の状態）。
+* **リポストラッパー**: rail（🔁 + リポストした人 + 日時）は通常通り表示し、その下の元投稿カードの位置に、`pending`なら「未取り込み」案内＋取り込むボタン、`gone`なら案内のみを表示する（対象が見当たらないが誰かが何かをリポストしたこと自体は分かるようにする）。
+
+取り込むボタンは`POST /api/notes/:id/resolve-reference`（body: `{"kind": "reply"|"quote"|"repost"}`）を呼ぶ。`resolved`が返れば、リプライは解決先IDでその場`ReplyIndicator`へ切り替え、引用・リポストは解決先を`GET /api/notes/:id`で取得して埋め込みカードへ切り替える（ページ全体の再読み込みは不要）。`pending`/`gone`が返れば表示をその状態へ更新する（再試行可能）。投稿詳細画面（`GET /api/notes/:id`）を開いた時点でも`pending`な参照はサーバー側が自動で解決を試みる（`docs/protocols.md` 1節「pending参照の遅延解決」）ため、ボタンを押す前に解決済みの表示へ変わっていることも多い。
+
 # Unicode絵文字の表示（twemoji）
 
 Unicode絵文字（本文中・表示名中・絵文字リアクション・絵文字ピッカーのグリッド・アクションメニューやナビの装飾アイコン等）は、OS/ブラウザのネイティブグリフに任せず、jdecked/twemoji（`@twemoji/parser` + `@twemoji/svg`）のSVGをセルフホストして統一表示する。アセットは `frontend/scripts/copy-twemoji-assets.mjs` が `npm install` の `postinstall` で `node_modules/@twemoji/svg` から `frontend/public/twemoji/` へコピーする（git管理外、`.gitignore`）。

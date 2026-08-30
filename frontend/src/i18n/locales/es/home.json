@@ -79,7 +79,11 @@
       "body": "Esto no se puede deshacer. Al eliminarla, también se eliminará la publicación de los servidores federados y de Bluesky.",
       "confirmButton": "Borrar"
     },
-    "linkCardLoadEmbed": "Cargar contenido incrustado"
+    "linkCardLoadEmbed": "Cargar contenido incrustado",
+    "referencePendingNotice": "Aún no importado",
+    "referenceGoneNotice": "No se encontró la referencia",
+    "referenceImportButton": "Importar",
+    "referenceImporting": "Importando…"
   },
   "noteList": {
     "emptyDefault": "Sin publicaciones.",

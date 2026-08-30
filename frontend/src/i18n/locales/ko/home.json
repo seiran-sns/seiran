@@ -79,7 +79,11 @@
       "body": "이 작업은 취소할 수 없습니다. 삭제하면 페더레이션 서버 및 Bluesky에서도 게시물이 제거됩니다.",
       "confirmButton": "삭제"
     },
-    "linkCardLoadEmbed": "임베드 불러오기"
+    "linkCardLoadEmbed": "임베드 불러오기",
+    "referencePendingNotice": "아직 가져오지 않았습니다",
+    "referenceGoneNotice": "참조를 찾을 수 없습니다",
+    "referenceImportButton": "가져오기",
+    "referenceImporting": "가져오는 중…"
   },
   "noteList": {
     "emptyDefault": "게시물이 없습니다.",

@@ -79,7 +79,11 @@
       "body": "此操作無法復原。刪除也會從聯邦伺服器和 Bluesky 中移除這則貼文。",
       "confirmButton": "刪除"
     },
-    "linkCardLoadEmbed": "載入嵌入內容"
+    "linkCardLoadEmbed": "載入嵌入內容",
+    "referencePendingNotice": "尚未匯入",
+    "referenceGoneNotice": "找不到參照對象",
+    "referenceImportButton": "匯入",
+    "referenceImporting": "匯入中…"
   },
   "noteList": {
     "emptyDefault": "沒有貼文。",

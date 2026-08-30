@@ -79,7 +79,11 @@
       "body": "この操作は取り消せません。削除すると連合先・Bluesky上の投稿も削除されます。",
       "confirmButton": "削除する"
     },
-    "linkCardLoadEmbed": "埋め込みを読み込む"
+    "linkCardLoadEmbed": "埋め込みを読み込む",
+    "referencePendingNotice": "まだ取り込まれていません",
+    "referenceGoneNotice": "参照先が見つかりませんでした",
+    "referenceImportButton": "取り込む",
+    "referenceImporting": "取り込み中…"
   },
   "noteList": {
     "emptyDefault": "投稿がありません。",

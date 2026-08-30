@@ -22,6 +22,7 @@ import {
 } from "../../stores/followStatusStore";
 import { setPollState, usePollState } from "../../stores/pollVoteStore";
 import ReplyIndicator from "./ReplyIndicator";
+import PendingReferenceIndicator from "./PendingReferenceIndicator";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
 import TwemojiEmoji from "../common/TwemojiEmoji";
@@ -191,6 +192,18 @@ function PostContent({
 
   const [isHovered, setIsHovered] = useState(false);
   const [showContent, setShowContent] = useState(!note.contentWarning || forceOpenCw);
+  // pending参照が「取り込む」で解決された場合のローカル反映（#234）。
+  const [resolvedReplyId, setResolvedReplyId] = useState<string | null>(null);
+  const [resolvedQuote, setResolvedQuote] = useState<Note | null>(null);
+  const effectiveReplyId = resolvedReplyId ?? note.replyId;
+
+  async function handleQuoteResolved(resolvedId: string) {
+    try {
+      setResolvedQuote(await api.notes.get(resolvedId));
+    } catch {
+      // 取得に失敗しても致命的ではない（引用元IDは解決済みのため次回リロードでは表示される）
+    }
+  }
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [followActionPending, setFollowActionPending] = useState(false);
   const sharedPollState = usePollState(note.id, note.poll);
@@ -419,9 +432,20 @@ function PostContent({
         </div>
       </div>
 
-      {(note.replyId || note.quoteId) && (
+      {(effectiveReplyId || note.replyStatus || note.quoteId) && (
         <div className={styles.relations}>
-          {note.replyId && <ReplyIndicator replyId={note.replyId} />}
+          {effectiveReplyId ? (
+            <ReplyIndicator replyId={effectiveReplyId} />
+          ) : (
+            note.replyStatus && (
+              <PendingReferenceIndicator
+                noteId={note.id}
+                kind="reply"
+                status={note.replyStatus}
+                onResolved={setResolvedReplyId}
+              />
+            )
+          )}
           {note.quoteId && (
             <Link
               to={`/notes/${note.quoteId}`}
@@ -547,7 +571,19 @@ function PostContent({
         </div>
       )}
 
-      {showContent && note.quote && <QuoteCard note={note.quote} />}
+      {showContent && (note.quote || resolvedQuote) && (
+        <QuoteCard note={resolvedQuote ?? note.quote!} />
+      )}
+      {showContent && !note.quote && !resolvedQuote && note.quoteStatus && (
+        <div className={styles.pendingQuoteWrap}>
+          <PendingReferenceIndicator
+            noteId={note.id}
+            kind="quote"
+            status={note.quoteStatus}
+            onResolved={handleQuoteResolved}
+          />
+        </div>
+      )}
 
       {note.parentOriginalId && (
         <Link
@@ -600,10 +636,21 @@ export default function NoteCard({
 }: NoteCardProps) {
   const { t } = useTranslation();
   const [hidden, setHidden] = useState(false);
+  // pendingなリポスト対象が「取り込む」で解決された場合のローカル反映（#234）。
+  const [resolvedRenote, setResolvedRenote] = useState<Note | null>(null);
 
   if (hidden) return null;
 
-  if (note.renote) {
+  async function handleRenoteResolved(resolvedId: string) {
+    try {
+      setResolvedRenote(await api.notes.get(resolvedId));
+    } catch {
+      // 取得に失敗しても致命的ではない（対象IDは解決済みのため次回リロードでは表示される）
+    }
+  }
+
+  const effectiveRenote = note.renote ?? resolvedRenote;
+  if (effectiveRenote) {
     const suffix = t("home:noteCard.repostedSuffix");
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
@@ -623,8 +670,8 @@ export default function NoteCard({
           {suffix && <> {suffix}</>}
         </div>
         <PostContent
-          note={note.renote}
-          // 元投稿(note.renote)は常にリポストラッパー自身(note)とは別ページのため、
+          note={effectiveRenote}
+          // 元投稿は常にリポストラッパー自身(note)とは別ページのため、
           // 親から渡されたlinkToDetail（詳細ページ自身が自分自身へのリンクを消すためのフラグ）
           // を伝播させず、常にリンクを有効にする（元投稿の日付が無反応だった不具合の修正）。
           linkToDetail
@@ -652,6 +699,30 @@ export default function NoteCard({
         <p className={styles.unavailableNote}>
           {t("home:noteCard.unavailableRepost")}
         </p>
+      </article>
+    );
+  }
+
+  // 対象が見当たらないが誰かが何かをリポストしたこと自体は分かるケース
+  // （取り込み時にリポスト対象のフェッチに失敗した、#230〜#232）。
+  if (note.renoteStatus) {
+    return (
+      <article className={`${styles.card} ${large ? styles.large : ""}`}>
+        <div className={styles.rail}>
+          <TwemojiEmoji emoji="🔁" />{" "}
+          <strong>
+            <EmojiText text={displayName(note)} emojis={note.emojis} />
+          </strong>{" "}
+          {t("home:noteCard.repostedNoLinkSuffix")}
+        </div>
+        <div className={styles.pendingQuoteWrap}>
+          <PendingReferenceIndicator
+            noteId={note.id}
+            kind="repost"
+            status={note.renoteStatus}
+            onResolved={handleRenoteResolved}
+          />
+        </div>
       </article>
     );
   }

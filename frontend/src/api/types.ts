@@ -252,6 +252,11 @@ export interface Note {
   renoteId?: string;
   quoteId?: string;
   replyId?: string;
+  /** `renoteId`/`quoteId`/`replyId`が無くても参照自体は存在する場合の状態
+   * （`"pending"`未取り込み・`"gone"`参照先消失、#234）。対応する`*Id`があれば常に未設定。 */
+  renoteStatus?: "pending" | "gone";
+  quoteStatus?: "pending" | "gone";
+  replyStatus?: "pending" | "gone";
   parentOriginalId?: string;
   // リアクション集計（#22）
   reactions?: ReactionSummary[];
@@ -494,6 +499,12 @@ export interface RawNote {
   quote_id?: string;
   replyId?: string;
   reply_id?: string;
+  renoteStatus?: "pending" | "gone";
+  renote_status?: "pending" | "gone";
+  quoteStatus?: "pending" | "gone";
+  quote_status?: "pending" | "gone";
+  replyStatus?: "pending" | "gone";
+  reply_status?: "pending" | "gone";
   parentOriginalId?: string;
   parent_original_id?: string;
   reactions?: ReactionSummary[];
@@ -544,6 +555,9 @@ export function normalizeNote(r: RawNote): Note {
     renoteId: r.renoteId ?? r.renote_id,
     quoteId: r.quoteId ?? r.quote_id,
     replyId: r.replyId ?? r.reply_id,
+    renoteStatus: r.renoteStatus ?? r.renote_status,
+    quoteStatus: r.quoteStatus ?? r.quote_status,
+    replyStatus: r.replyStatus ?? r.reply_status,
     parentOriginalId: r.parentOriginalId ?? r.parent_original_id,
     reactions: r.reactions ?? [],
     renote: r.renote ? normalizeNote(r.renote) : undefined,

@@ -201,6 +201,14 @@ export const notes = {
       `/notes/${encodeURIComponent(noteId)}/pin`,
     );
   },
+  /** pendingなリプライ/引用/リポスト参照をその場で取り込む（#233/#234）。 */
+  resolveReference(noteId: string, kind: "reply" | "quote" | "repost") {
+    return request<{ status: "resolved" | "pending" | "gone" | "none"; postId: string | null }>(
+      "POST",
+      `/notes/${encodeURIComponent(noteId)}/resolve-reference`,
+      { kind },
+    );
+  },
   async search(
     params: {
       q: string;

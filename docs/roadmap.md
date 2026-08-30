@@ -1,5 +1,6 @@
 # 開発ロードマップ
 
+- [x] **リプライ/引用/リポスト参照の未取り込み表示・その場取り込み（#230-234）** — リモート投稿受信時、リプライ/引用/リポスト参照先がDBに無ければ1段階だけフェッチを試みる（`jobs::inbound_activity_process::reference::resolve_reference`）。404/410なら`gone`（リトライしない）、それ以外の失敗なら`pending`（再試行余地あり）として`posts`に記録し（`{reply_to,quote_of,repost_of}_ap_uri`/`_ref_status`、ENUM `post_reference_status`）、リポストは対象取得に失敗しても箱（wrapper post行）自体は必ず保存するようにした（従来はサイレントに無かったことにしていた）。「開く」機能はMisskeyの素リノート（他鯖ミラーURL・`/activity`直叩きで得られる`Announce`）を通常投稿でなく正しくリポストラッパーとして取り込む（`open_target::open_announce`）。`pending`な参照は投稿詳細取得時（`GET /api/notes/:id`、最大1秒×3種並行）に自動で再解決を試み、`POST /api/notes/:id/resolve-reference`（`kind: reply|quote|repost`、最大8秒）でも明示的に取り込める。NoteCard上には`PendingReferenceIndicator`が「未取り込み」＋取り込むボタン（`pending`）または案内のみ（`gone`）を表示する。詳細: `docs/protocols.md` 1節「pending参照の遅延解決」・4節「引用受信」、`docs/database.md`、`docs/ui_spec.md` 2.2g節
 - [x] **表示言語のバリエーション（中国語の繁體/简体分割）** — 表示言語設定（`users.language_preference`）に、1言語内で複数のバリエーションを持てる仕組みを追加。第一弾として中国語を繁體中文（`zh-Hant`）/简体中文（`zh-Hans`）の2つに分割し、`seiran_common::SUPPORTED_DISPLAY_LANGUAGES`（8言語）で許可する。ポスト言語（`posts.language`、`seiran_common::SUPPORTED_LANGUAGES`）は7言語のまま据え置き、`zh-Hant`/`zh-Hans`のどちらを表示言語に選んでいても投稿フォームの言語選択デフォルトは`zh`になる（`i18n.postLanguageBase()`）。「自動」判定は`navigator.languages`の地域コード（`zh-TW`/`zh-HK`/`zh-MO`→繁體、それ以外の`zh`系→简体）で振り分ける（`i18n.normalizeDetectedLanguage()`）。詳細: `docs/architecture.md`（i18n節）、`docs/ui_spec.md`（表示設定節）、`docs/database.md`、`docs/protocols.md` 3節
 - [x] **ポストの言語プロパティ** — 投稿フォームのFedi/Bluesky配送トグルの左隣に、正方形の言語選択ボタン（`JA`のような2文字コード表示）を追加。クリックすると表示言語設定と同じ7言語（`JA 日本語`のように2文字コード＋ネイティブ表記併記）のポップアップリストから選べる。初期値は現在の表示言語で、Fedi/Bsky配送先トグルのような「最後に送信した値」記憶方式ではなく毎回現在の表示言語に戻る。バックエンドは`CreateNoteRequest.language`（表示言語設定と共通の`seiran_common::SUPPORTED_LANGUAGES`で検証）を`posts.language`に保存し、Bsky配送時のみ`app.bsky.feed.post`の`langs`フィールド（1言語）へ反映する（AP配送には影響しない）。省略時（Misskey互換APIクライアント等）は従来通り`langs`フィールド自体を省略する。詳細: `docs/protocols.md` 3節「ポストの言語」、`docs/ui_spec.md` 2.4b節、`docs/database.md`
 - [x] **フォローインポート機能** — 設定画面「🚚 インポート・エクスポート」から、改行区切りのID一覧を貼り付け（または`.txt`ファイルのドラッグ&ドロップ）で一括フォローできる。隠し仕様として各行をカンマ区切りで分割し1列目のみを識別子として読む（Misskeyのフォローエクスポート形式`id,withRepliesフラグ`のヘッダ無しCSVにそのまま対応）。処理は「未処理が1件あれば処理して自分自身を再度キューに積む」自己再enqueue型ジョブ（`Job::FollowImportProcess`）で非同期に行い、設定画面には残数・成功/失敗件数を表示、キャンセルボタンを設置。既存のフォローレート制限（24時間あたりの上限）は通常のフォローと合算でそのまま適用する。フォロー作成の実処理は`AppState`非依存の`seiran-common::follow_exec::execute_follow`へ切り出し、APIハンドラ（`create_follow`）とジョブの両方から共有する形にリファクタした。詳細: `docs/architecture.md` 5節、`docs/database.md`
@@ -151,12 +152,6 @@
   - [ ] 相手サーバーからの生データ一括インポート（最大300件）
 - [ ] **他seiranサーバー間マージの ATP 経路対応** — `seiran_post_uuid` を Bsky レコード本体にも埋め込み、Jetstream経由で先に取り込まれた投稿ともマージできるようにする（`docs/protocols.md` 5節の既知の制約）
 - [ ] **`actor_metadata_resolve` ジョブの実装** — 現状ハンドラはスタブ、enqueueする箇所も無い。`/verify-actor` ハンドシェイク検証・Webfinger解決・アバター等のキャッシュを実処理として実装する
-- **リプライ/引用/リポスト参照の未取り込み表示・その場取り込み（#230-234）**
-  - [x] 参照の`pending`/`gone`状態を表すスキーマ追加（#230）
-  - [x] 新規フェッチ時の1段階参照解決＋404/410判定の共通化（#231） — `jobs::inbound_activity_process::reference::resolve_reference`。詳細: `docs/protocols.md` 4節「引用受信」
-  - [x] 「開く」でMisskeyの素リノート/他鯖ミラーURL（Announce）を正しくリポストとして取り込む（#232） — `open_target::open_announce`。詳細: `docs/protocols.md` 1節
-  - [x] 投稿詳細取得時の同期フェッチ＋pending参照を手動で取り込むAPIエンドポイント（#233） — `resolve_pending_post_references`/`POST /api/notes/:id/resolve-reference`。詳細: `docs/protocols.md` 1節「pending参照の遅延解決」
-  - [ ] NoteCardに未取り込み/参照消失の表示と「取り込む」ボタン（#234）
 - [ ] **`inbound_activity_process` のドメイン単位レート制限**
 - [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ表示）
 - [ ] **ユーザー設定に「Bsky DM受信許可」項目を追加** — 現状 `chat.bsky.actor.declaration` の `allowIncoming` は登録時・バックフィルとも `"all"` 固定でコミットする（`docs/protocols.md` 9節）。ユーザーが `"all"`/`"following"`/`"none"` を選べる設定画面UIとAPIを追加する

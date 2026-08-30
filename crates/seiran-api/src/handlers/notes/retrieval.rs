@@ -552,6 +552,7 @@ pub struct ResolveReferenceRequest {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolveReferenceResponse {
     /// `"resolved"`（解決済み・postId同梱）| `"pending"`（未解決のまま）|
     /// `"gone"`（消失確定）| `"none"`（そもそも参照が無い）。

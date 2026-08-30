@@ -79,7 +79,11 @@
       "body": "Dies kann nicht rückgängig gemacht werden. Durch das Löschen wird der Beitrag auch von den Verbundservern und Bluesky entfernt.",
       "confirmButton": "Löschen"
     },
-    "linkCardLoadEmbed": "Einbettung laden"
+    "linkCardLoadEmbed": "Einbettung laden",
+    "referencePendingNotice": "Noch nicht importiert",
+    "referenceGoneNotice": "Referenz nicht gefunden",
+    "referenceImportButton": "Importieren",
+    "referenceImporting": "Importiere…"
   },
   "noteList": {
     "emptyDefault": "Keine Beiträge.",

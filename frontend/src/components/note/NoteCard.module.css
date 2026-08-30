@@ -453,6 +453,10 @@
   background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
 }
 
+.pendingQuoteWrap {
+  margin: 10px 0 0 50px;
+}
+
 .quoteHeader {
   display: flex;
   align-items: flex-start;

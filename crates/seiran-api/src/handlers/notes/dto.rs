@@ -179,6 +179,15 @@ pub struct NoteResponse {
     pub quote_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_id: Option<String>,
+    /// `renote_id`/`quote_id`/`reply_id` が`None`でも参照自体は存在する場合の状態
+    /// （`"pending"`未取り込み・`"gone"`参照先消失、#230/#234）。対応する`*_id`が
+    /// `Some`なら常に`None`（解決済みであれば状態を気にする必要が無いため）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub renote_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quote_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_original_id: Option<String>,
     // リアクション集計（#22）。空なら省略。
@@ -443,6 +452,9 @@ pub fn to_note_response(
         renote_id: p.repost_of_post_id.map(|i| i.to_string()),
         quote_id: p.quote_of_post_id.map(|i| i.to_string()),
         reply_id: p.reply_to_post_id.map(|i| i.to_string()),
+        renote_status: p.repost_of_post_id.is_none().then_some(p.repost_of_ref_status).flatten(),
+        quote_status: p.quote_of_post_id.is_none().then_some(p.quote_of_ref_status).flatten(),
+        reply_status: p.reply_to_post_id.is_none().then_some(p.reply_to_ref_status).flatten(),
         parent_original_id: p.parent_original_post_id.map(|i| i.to_string()),
         reactions: Vec::new(),
         renote: None,

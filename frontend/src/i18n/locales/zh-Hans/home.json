@@ -79,7 +79,11 @@
       "body": "此操作无法撤销。删除也会从联邦服务器和 Bluesky 中删除该帖子。",
       "confirmButton": "删除"
     },
-    "linkCardLoadEmbed": "加载嵌入内容"
+    "linkCardLoadEmbed": "加载嵌入内容",
+    "referencePendingNotice": "尚未导入",
+    "referenceGoneNotice": "找不到引用对象",
+    "referenceImportButton": "导入",
+    "referenceImporting": "导入中…"
   },
   "noteList": {
     "emptyDefault": "没有帖子。",

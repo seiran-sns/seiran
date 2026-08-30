@@ -79,7 +79,11 @@
       "body": "This can't be undone. Deleting will also remove the post from federated servers and Bluesky.",
       "confirmButton": "Delete"
     },
-    "linkCardLoadEmbed": "Load embed"
+    "linkCardLoadEmbed": "Load embed",
+    "referencePendingNotice": "Not imported yet",
+    "referenceGoneNotice": "Reference not found",
+    "referenceImportButton": "Import",
+    "referenceImporting": "Importing…"
   },
   "noteList": {
     "emptyDefault": "No posts.",
