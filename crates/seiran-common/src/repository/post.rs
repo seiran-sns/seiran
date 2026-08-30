@@ -731,7 +731,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM candidate_ids ci
              JOIN posts p ON p.id = ci.id
              JOIN actors a ON a.id = p.actor_id
@@ -761,7 +764,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -834,7 +840,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM candidate_ids ci
              JOIN posts p ON p.id = ci.id
              JOIN actors a ON a.id = p.actor_id
@@ -865,7 +874,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -916,7 +928,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -1023,7 +1038,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -1041,7 +1059,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -1120,7 +1141,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -1151,7 +1175,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -1196,7 +1223,10 @@ impl PostRepository for PgPostRepository {
                     a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
              FROM descendants d
              JOIN posts p ON p.id = d.id
              JOIN actors a ON a.id = p.actor_id
