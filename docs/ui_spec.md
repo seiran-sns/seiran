@@ -335,8 +335,9 @@ LightBoxで開いた際の解除ボタンは、画面全体ではなくLightBox�
 Unicode絵文字（本文中・表示名中・絵文字リアクション・絵文字ピッカーのグリッド・アクションメニューやナビの装飾アイコン等）は、OS/ブラウザのネイティブグリフに任せず、jdecked/twemoji（`@twemoji/parser` + `@twemoji/svg`）のSVGをセルフホストして統一表示する。アセットは `frontend/scripts/copy-twemoji-assets.mjs` が `npm install` の `postinstall` で `node_modules/@twemoji/svg` から `frontend/public/twemoji/` へコピーする（git管理外、`.gitignore`）。
 
 - `lib/twemoji.tsx`: `@twemoji/parser` を `buildUrl: (codepoints) => "/twemoji/${codepoints}.svg"` でラップし、テキスト中のUnicode絵文字を検出してセルフホストURLを返す。
-- `components/common/TwemojiEmoji`: 単一の絵文字文字列を `<img>` へ変換する（絵文字と判定できなければ元の文字列のままフォールバック）。ナビアイコン・バッジ・通知アイコン等で使う。
+- `components/common/TwemojiImg`: 実際の`<img>`描画を担う共通部品。読み込み失敗時（`onError`）はOSネイティブの絵文字グリフへフォールバックする。`@twemoji/parser`（npm最新17系）と`@twemoji/svg`（npm最新15.0.0で更新停止）のUnicodeカバレッジにズレがあり、parserが検出した絵文字でもsvg側にアセットが無く404になることがあるため（新しめの結合絵文字・ZWJシーケンス等）、パッケージのバージョンを揃えるのではなくこのフォールバックで恒久対応している。
+- `components/common/TwemojiEmoji`: 単一の絵文字文字列を`TwemojiImg`へ変換する（絵文字と判定できなければ元の文字列のままフォールバック）。ナビアイコン・バッジ・通知アイコン等で使う。
 - `components/common/TwemojiText`: 絵文字混在テキスト（`"💬 返信"` のようなラベル）のUnicode絵文字部分だけを変換する。`ActionsMenu` の項目ラベルはここを通す。
 - `components/note/EmojiText`: カスタム絵文字（`:shortcode:`）を`emojis`マップで画像化した残りのプレーンテキスト部分にも、上記と同じUnicode絵文字変換をかける（本文・表示名共通）。
 
-絵文字部分がDOMの`textContent`に含まれなくなる（`<img alt="...">` になる）ため、テストや実装でテキスト内容から絵文字混在ラベルを判定する場合は `textContent` ではなく `getByRole` のaccessible name（role + name）ベースで判定すること。
+絵文字部分がDOMの`textContent`に含まれなくなる（`<img alt="...">` になる。ただしtwemojiアセット読み込み失敗時はテキストへ戻る）ため、テストや実装でテキスト内容から絵文字混在ラベルを判定する場合は `textContent` ではなく `getByRole` のaccessible name（role + name）ベースで判定すること。

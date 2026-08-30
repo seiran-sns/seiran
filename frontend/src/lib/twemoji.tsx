@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { parse as parseTwemoji } from "@twemoji/parser";
+import TwemojiImg from "../components/common/TwemojiImg";
 
 /**
  * Unicode絵文字はOS/ブラウザごとにグリフが異なり見た目が揃わないため、jdecked/twemoji（旧
@@ -40,13 +41,11 @@ export function renderTextWithTwemoji(text: string, keyPrefix: string, imgClassN
     const [start, end] = m.indices;
     if (start > cursor) nodes.push(text.slice(cursor, start));
     nodes.push(
-      <img
+      <TwemojiImg
         key={`${keyPrefix}-tw${i}`}
+        emoji={m.text}
+        url={m.url}
         className={imgClassName}
-        src={m.url}
-        alt={m.text}
-        draggable={false}
-        loading="lazy"
       />
     );
     cursor = end;
