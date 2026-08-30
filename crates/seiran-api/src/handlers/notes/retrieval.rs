@@ -1,5 +1,10 @@
 use super::*;
 use queries::fetch_reposted_ids;
+use seiran_common::jobs::inbound_activity_process::{
+    resolve_pending_reference_with_timeout, RefStatus, ReferenceOutcome,
+};
+use seiran_common::repository::ReferenceKind;
+use serde::{Deserialize, Serialize};
 use validation::strip_html_tags;
 
 
@@ -33,6 +38,7 @@ pub async fn get_note(
     }
     .map_err(|e| ApiError::Internal(e.to_string()))?
     .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+    resolve_pending_post_references(&state, &mut post).await;
     resolve_mention_facets_in_place(&state.db, std::slice::from_mut(&mut post)).await;
     let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
     let mut lc_map = fetch_link_cards_map(&state.db, &[post_id]).await;
@@ -52,6 +58,83 @@ pub async fn get_note(
     attach_poll_votes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
     attach_remote_instance_info(&state, std::slice::from_mut(&mut nr)).await;
     Ok(Json(nr))
+}
+
+/// 投稿詳細取得のタイムアウト（1秒）。この画面はログイン不要（未ログイン閲覧・OGP等)でも
+/// 呼ばれる経路のため、単一のフェッチ待ちで応答全体を長々と止めないよう短めに設定する。
+/// `gone`な参照は対象外（呼び出し側でリトライしない）、`pending`のみ試みる。
+const PENDING_REFERENCE_RESOLVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// 投稿詳細取得（`GET /api/notes/:id`）時、リプライ/引用/リポストの`pending`参照があれば
+/// タイムアウト付きでその場フェッチを試みる（#233）。タイムアウトすれば`pending`のまま
+/// 応答する（呼び出し元はそのままレスポンスを返せば良い）。3種は独立に並行実行する。
+async fn resolve_pending_post_references(state: &AppState, post: &mut TimelinePost) {
+    let post_id = post.id;
+    let inbox = state.inbox_context();
+
+    async fn try_resolve(
+        post_id: i64,
+        kind: ReferenceKind,
+        post_id_set: bool,
+        status: Option<String>,
+        uri: Option<String>,
+        inbox: &seiran_common::queue::worker::InboxContext,
+        ap_client: &seiran_common::ApClient,
+    ) -> Option<i64> {
+        if post_id_set || status.as_deref() != Some("pending") {
+            return None;
+        }
+        resolve_pending_reference_with_timeout(
+            post_id,
+            kind,
+            &uri?,
+            inbox,
+            ap_client,
+            PENDING_REFERENCE_RESOLVE_TIMEOUT,
+        )
+        .await
+        .into_parts()
+        .0
+    }
+
+    let (reply_id, quote_id, repost_id) = tokio::join!(
+        try_resolve(
+            post_id,
+            ReferenceKind::Reply,
+            post.reply_to_post_id.is_some(),
+            post.reply_to_ref_status.clone(),
+            post.reply_to_ap_uri.clone(),
+            &inbox,
+            &state.ap_client,
+        ),
+        try_resolve(
+            post_id,
+            ReferenceKind::Quote,
+            post.quote_of_post_id.is_some(),
+            post.quote_of_ref_status.clone(),
+            post.quote_of_ap_uri.clone(),
+            &inbox,
+            &state.ap_client,
+        ),
+        try_resolve(
+            post_id,
+            ReferenceKind::Repost,
+            post.repost_of_post_id.is_some(),
+            post.repost_of_ref_status.clone(),
+            post.repost_of_ap_uri.clone(),
+            &inbox,
+            &state.ap_client,
+        ),
+    );
+    if let Some(id) = reply_id {
+        post.reply_to_post_id = Some(id);
+    }
+    if let Some(id) = quote_id {
+        post.quote_of_post_id = Some(id);
+    }
+    if let Some(id) = repost_id {
+        post.repost_of_post_id = Some(id);
+    }
 }
 
 /// GET /announces/:id
@@ -456,4 +539,115 @@ pub async fn note_replies(
     attach_remote_instance_info(&state, &mut notes).await;
 
     Ok(Json(NoteRepliesResponse { notes }))
+}
+
+/// 手動「取り込む」の解決タイムアウト（8秒）。ユーザーが明示的にボタンを押して待つ操作
+/// のため、詳細画面表示時の受動的フェッチ（`PENDING_REFERENCE_RESOLVE_TIMEOUT`）より長く取る。
+const MANUAL_RESOLVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+
+#[derive(Deserialize)]
+pub struct ResolveReferenceRequest {
+    /// `"reply"` | `"quote"` | `"repost"`。
+    pub kind: String,
+}
+
+#[derive(Serialize)]
+pub struct ResolveReferenceResponse {
+    /// `"resolved"`（解決済み・postId同梱）| `"pending"`（未解決のまま）|
+    /// `"gone"`（消失確定）| `"none"`（そもそも参照が無い）。
+    pub status: &'static str,
+    pub post_id: Option<String>,
+}
+
+/// `POST /api/notes/:id/resolve-reference`
+/// pendingなリプライ/引用/リポスト参照を、その場でフェッチして解決を試みる（#233）。
+/// NoteCard/投稿詳細画面の「取り込む」ボタンから呼ぶ。
+pub async fn resolve_note_reference(
+    Path(id): Path<String>,
+    _user: AuthedUser,
+    State(state): State<AppState>,
+    Json(req): Json<ResolveReferenceRequest>,
+) -> Result<Json<ResolveReferenceResponse>, ApiError> {
+    let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
+    let kind = ReferenceKind::parse(&req.kind)
+        .ok_or_else(|| ApiError::BadRequest("INVALID_REFERENCE_KIND".to_string()))?;
+
+    let post = state
+        .posts
+        .find_by_id(post_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+
+    let (resolved_post_id, status, uri) = match kind {
+        ReferenceKind::Reply => (
+            post.reply_to_post_id,
+            post.reply_to_ref_status,
+            post.reply_to_ap_uri,
+        ),
+        ReferenceKind::Quote => (
+            post.quote_of_post_id,
+            post.quote_of_ref_status,
+            post.quote_of_ap_uri,
+        ),
+        ReferenceKind::Repost => (
+            post.repost_of_post_id,
+            post.repost_of_ref_status,
+            post.repost_of_ap_uri,
+        ),
+    };
+
+    if let Some(resolved) = resolved_post_id {
+        return Ok(Json(ResolveReferenceResponse {
+            status: "resolved",
+            post_id: Some(resolved.to_string()),
+        }));
+    }
+    if status.as_deref() == Some("gone") {
+        return Ok(Json(ResolveReferenceResponse {
+            status: "gone",
+            post_id: None,
+        }));
+    }
+    let Some(uri) = uri else {
+        return Ok(Json(ResolveReferenceResponse {
+            status: "none",
+            post_id: None,
+        }));
+    };
+
+    let inbox = state.inbox_context();
+    let outcome = resolve_pending_reference_with_timeout(
+        post_id,
+        kind,
+        &uri,
+        &inbox,
+        &state.ap_client,
+        MANUAL_RESOLVE_TIMEOUT,
+    )
+    .await;
+    Ok(Json(match outcome {
+        ReferenceOutcome::Resolved(id) => ResolveReferenceResponse {
+            status: "resolved",
+            post_id: Some(id.to_string()),
+        },
+        ReferenceOutcome::Unresolved {
+            status: RefStatus::Gone,
+            ..
+        } => ResolveReferenceResponse {
+            status: "gone",
+            post_id: None,
+        },
+        ReferenceOutcome::Unresolved {
+            status: RefStatus::Pending,
+            ..
+        } => ResolveReferenceResponse {
+            status: "pending",
+            post_id: None,
+        },
+        ReferenceOutcome::None => ResolveReferenceResponse {
+            status: "none",
+            post_id: None,
+        },
+    }))
 }

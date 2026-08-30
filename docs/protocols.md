@@ -6,6 +6,13 @@
 
 フェッチしたオブジェクトが`Announce`型の場合はリポストラッパーとして取り込む（#232）。Misskeyの素リノート（コメント無しブースト）は、`notes/{id}`への直接アクセスでは`quoteUrl`付きの`Note`（空リプ引用として扱われる）になるが、他鯖ミラーURL（ローカルにコンテンツを持たないサーバーが元サーバーの`/activity`へ302リダイレクトする）や`notes/{id}/activity`への直接アクセスでは`Announce`（`object`は対象ノートのURI文字列）として得られる。`open_target::open_announce`はこのAnnounceオブジェクトをそのまま`InboundActivityProcess`（既存の`handle_announce`経路）へ積む。対象ノート（`object`）が未取得なら`resolve_reference`が1段階だけフェッチを試みるが、失敗してもリポストの箱自体は保存される（4節「リポスト」参照）ため、「開く」のポーリングは箱の保存だけを待てば完了する。
 
+### pending参照の遅延解決（#233）
+
+取り込み時点のフェッチ失敗で`pending`のまま保存された参照（4節「引用受信」参照）は、以下2つの経路でその場フェッチを再試行できる。いずれも`jobs::inbound_activity_process::resolve_pending_reference_with_timeout`を共有し、成功時は`*_post_id`を、404/410を新たに確認できた時は`ref_status`を`gone`へ更新する（それ以外の失敗ならDBは`pending`のまま据え置く）。`gone`確定後はどちらの経路も再フェッチを試みない。
+
+- **投稿詳細取得時の受動的フェッチ**（`GET /api/notes/:id`、`handlers::notes::retrieval::resolve_pending_post_references`）: リプライ/引用/リポストの3種を並行して最大1秒ずつ試みる。未ログイン閲覧（OGP等）でも通る経路のため短めに設定している。
+- **手動「取り込む」API**（`POST /api/notes/:id/resolve-reference`、body `{"kind": "reply"|"quote"|"repost"}`、認証必須）: ユーザーが明示的に待つ操作のため最大8秒。レスポンスは`{"status": "resolved"|"pending"|"gone"|"none", "post_id": string|null}`。
+
 対象読者: ActivityPub / AT Protocol の実装やクロスプロトコル配送ロジックに触れる開発者。
 「今、何が実装されていて、どう動くか」だけを書く。不具合修正の経緯や日付は書かない（`git log` 参照）。
 

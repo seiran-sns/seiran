@@ -155,7 +155,7 @@
   - [x] 参照の`pending`/`gone`状態を表すスキーマ追加（#230）
   - [x] 新規フェッチ時の1段階参照解決＋404/410判定の共通化（#231） — `jobs::inbound_activity_process::reference::resolve_reference`。詳細: `docs/protocols.md` 4節「引用受信」
   - [x] 「開く」でMisskeyの素リノート/他鯖ミラーURL（Announce）を正しくリポストとして取り込む（#232） — `open_target::open_announce`。詳細: `docs/protocols.md` 1節
-  - [ ] 投稿詳細取得時の同期フェッチ＋pending参照を手動で取り込むAPIエンドポイント（#233）
+  - [x] 投稿詳細取得時の同期フェッチ＋pending参照を手動で取り込むAPIエンドポイント（#233） — `resolve_pending_post_references`/`POST /api/notes/:id/resolve-reference`。詳細: `docs/protocols.md` 1節「pending参照の遅延解決」
   - [ ] NoteCardに未取り込み/参照消失の表示と「取り込む」ボタン（#234）
 - [ ] **`inbound_activity_process` のドメイン単位レート制限**
 - [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ表示）

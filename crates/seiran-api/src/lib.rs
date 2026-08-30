@@ -173,6 +173,27 @@ impl AppState {
         }
     }
 
+    /// リプライ/引用/リポストの`pending`参照解決（`resolve_pending_reference_with_timeout`、#233）
+    /// が必要とする`InboxContext`を組み立てる。ジョブワーカー専用だった同構造体をAPI
+    /// ハンドラからも使えるようにする橋渡し（軽量なArcクローンのみ）。
+    pub fn inbox_context(&self) -> seiran_common::queue::worker::InboxContext {
+        seiran_common::queue::worker::InboxContext {
+            db_pool: self.db.clone(),
+            actor_repo: Arc::clone(&self.actors),
+            follow_repo: Arc::clone(&self.follows),
+            block_repo: Arc::clone(&self.blocks),
+            post_repo: Arc::clone(&self.posts),
+            reaction_repo: Arc::clone(&self.reactions),
+            notification_repo: Arc::clone(&self.notifications),
+            hashtag_repo: Arc::clone(&self.hashtags),
+            remote_emoji_repo: Arc::clone(&self.remote_emojis),
+            list_repo: Arc::clone(&self.lists),
+            local_domain: self.local_domain.clone(),
+            ap_private_key_pem: self.secrets.ap_private_key_pem.clone().unwrap_or_default(),
+            stream_hub: Arc::clone(&self.stream_hub),
+        }
+    }
+
     /// AP 配送ジョブを積む。配送の実行・リトライは Worker（`jobs::ap_delivery`）が担う。
     /// enqueue 失敗はログのみ（投稿等の主処理は成功済みのため呼び出し元へは伝播しない）。
     pub async fn enqueue_ap_delivery(&self, actor_id: i64, kind: ApDeliveryKind) {
@@ -979,6 +1000,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/notes/:id/pin", post(handlers::notes::pin_note))
         .route("/api/notes/:id/pin", delete(handlers::notes::unpin_note))
+        .route(
+            "/api/notes/:id/resolve-reference",
+            post(handlers::notes::resolve_note_reference),
+        )
         .route("/api/notes/:id/context", get(handlers::notes::note_context))
         .route("/api/notes/:id/replies", get(handlers::notes::note_replies))
         .route("/api/notes/:id/reposts", get(handlers::notes::note_reposts))

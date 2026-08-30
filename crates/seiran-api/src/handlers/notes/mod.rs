@@ -43,7 +43,10 @@ pub use queries::{
     resolve_mention_facets_in_place,
 };
 pub use reactions::{create_reaction, delete_reaction, frequent_reactions, note_reposts, reaction_actors};
-pub use retrieval::{get_announce_redirect, get_note, get_note_ap, note_context, note_replies};
+pub use retrieval::{
+    get_announce_redirect, get_note, get_note_ap, note_context, note_replies,
+    resolve_note_reference,
+};
 pub use timelines::{global_timeline, home_timeline, local_timeline, social_timeline};
 pub use validation::BSKY_MAX_TEXT_GRAPHEMES;
 
