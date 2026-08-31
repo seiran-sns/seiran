@@ -87,11 +87,11 @@ ID 採番は2系統ある。
 生年月日はプロフィール項目として`actors`に持たせる（Misskey互換の`birthday`）。`birth_date_public`（デフォルト`false`）は`vcard:bday`としてFediverseへ連合するかどうかのseiran独自拡張フラグ（Misskey本家にはこの可視性切り替え自体が無い）。Bsky向けの`app.bsky.actor.defs#personalDetailsPref`（`docs/protocols.md` 3節）は可視性設定と無関係に常に非公開（本人のみ`getPreferences`で取得可）で、`actors.birth_date`と直接同期する。詳細な連合仕様は`docs/protocols.md` 4節参照。
 
 ### `actors.notes_count` / `followers_count` / `following_count`（非正規化カウンタ）
-投稿数・フォロワー数・フォロー数を`posts`/`follows`への都度のCOUNT(*)ではなくこの3カラムから読む（Misskey互換`users/show`のバッチ取得`build_users_detailed`、プロフィール画面`count_relations`）。書き込みは`repository/post.rs`（投稿の各INSERT系メソッド・`soft_delete_by_*`）と`repository/follow.rs`（`upsert_pending`以外の状態遷移系: `insert_accepted`/`insert_accepted_bsky`/`accept`/`delete_by_actors`）でのみ行う、この3カラムの唯一の真実の情報源。他の場所から直接UPDATEしないこと。
+投稿数・フォロワー数・フォロー数を`posts`/`follows`への都度のCOUNT(*)ではなくこの3カラムから読む（Misskey互換`users/show`のバッチ取得`build_users_detailed`、プロフィール画面`count_relations`）。
 
-各書き込みはPostgresのdata-modifying CTE（`WITH x AS (INSERT/UPDATE/DELETE ... RETURNING ...) UPDATE actors ...`）で「実際に行が変化した場合のみ」加減算する単一SQL文になっている（例: `ON CONFLICT DO NOTHING`で実際は挿入されなかった場合や、既に`deleted_at`が立っている行への重複削除では加減算しない）。CTEが後続文から直接参照されなくてもPostgresは必ず実行する（未参照でも実行されることを実機で確認済み）。`GREATEST(count - 1, 0)`で万一のマイナス化を防ぐフロアも入れている。
+`notes_count`は`repository/post.rs`（投稿の各INSERT系メソッド・`soft_delete_by_*`）がPostgresのdata-modifying CTE（`WITH x AS (INSERT/UPDATE/DELETE ... RETURNING ...) UPDATE actors ...`）で「実際に行が変化した場合のみ」加減算する方式（`GREATEST(count - 1, 0)`でマイナス化防止のフロアあり）。「`actor_id`に紐づく`posts`行で`deleted_at IS NULL`なもの」の数（リポストも1行として計上、既存の生COUNTクエリと同じ条件）と一致させる。
 
-`notes_count`は「`actor_id`に紐づく`posts`行で`deleted_at IS NULL`なもの」の数（リポストも1行として計上、既存の生COUNTクエリと同じ条件）。`followers_count`/`following_count`は`status='accepted'`の`follows`行の数。
+`followers_count`/`following_count`は`trg_follows_sync_counts`トリガー（`AFTER INSERT OR UPDATE OR DELETE ON follows`）が一元管理する。`repository/follow.rs`は`follows`テーブルへの素朴なINSERT/UPDATE/DELETEを発行するだけでよく、カウンタ更新を意識する必要はない。トリガーはインクリメント/デクリメントではなく、対象アクター（`follower_actor_id`/`target_actor_id`）について`SELECT COUNT(*) FROM follows WHERE ... AND status='accepted'`を都度再計算してSETする方式（`follows_sync_counts()`関数、`20260831000000_follows_count_trigger.sql`）。導入経緯: 当初はPERF-4でnotes_countと同じCTEインクリメント方式にしていたが、稼働実績で複数アクターの値が実測値より少なくなる不整合が確認された。インクリメント方式はどこか1箇所でも更新が競合・漏れると差分が積み上がって二度と自然には戻らないため、書き込みのたびに実測値へ再計算する方式に切り替えた（`posts.reply_count`等とはあえて方式が異なる。follows書き込みはpostsほど高頻度ではなく、`idx_follows_follower`/`idx_follows_target`を使ったCOUNT(*)のコストは許容範囲と判断）。
 
 ### `actors.hide_from_algorithmic_recommendations`
 Bskyの`app.bsky.actor.contentVisibilityDeclaration`（rkey固定`self`、`hideFromAlgorithmicRecommendations`）に対応するローカルキャッシュ（デフォルト`false`）。設定画面「プライバシー」から切り替え、`true`にするとDiscoverフィード等のBsky側アルゴリズムレコメンドから除外するよう要求するアカウントレベルの宣言をPDSへコミットする。詳細は`docs/protocols.md` 3節「アルゴリズムレコメンドからの除外」参照。

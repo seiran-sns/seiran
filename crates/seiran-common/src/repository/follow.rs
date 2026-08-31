@@ -185,17 +185,12 @@ impl FollowRepository for PgFollowRepository {
         follower_actor_id: i64,
         target_actor_id: i64,
     ) -> Result<(), sqlx::Error> {
+        // followers_count/following_count は trg_follows_sync_counts トリガーが
+        // follows への書き込みのたびに実測値へ再計算する（docs/database.md「非正規化カウンタ」参照）。
         sqlx::query(
-            "WITH inserted AS (
-                 INSERT INTO follows (follower_actor_id, target_actor_id, status)
-                 VALUES ($1, $2, 'accepted')
-                 ON CONFLICT (follower_actor_id, target_actor_id) DO NOTHING
-                 RETURNING 1
-             )
-             UPDATE actors SET
-               following_count = following_count + CASE WHEN id = $1 THEN (SELECT count(*) FROM inserted) ELSE 0 END,
-               followers_count = followers_count + CASE WHEN id = $2 THEN (SELECT count(*) FROM inserted) ELSE 0 END
-             WHERE id IN ($1, $2) AND EXISTS (SELECT 1 FROM inserted)",
+            "INSERT INTO follows (follower_actor_id, target_actor_id, status)
+             VALUES ($1, $2, 'accepted')
+             ON CONFLICT (follower_actor_id, target_actor_id) DO NOTHING",
         )
         .bind(follower_actor_id)
         .bind(target_actor_id)
@@ -209,23 +204,8 @@ impl FollowRepository for PgFollowRepository {
         follower_actor_id: i64,
         target_actor_id: i64,
     ) -> Result<u64, sqlx::Error> {
-        // counter_update CTEはどこからも参照されないが、data-modifying CTEはPostgresが
-        // 必ず実行する（未参照でも副作用として確実に走る、実測確認済み）。返り値の
-        // rows_affected()は最終文（follows UPDATE）のものになるため、呼び出し側から見た
-        // 「pending→acceptedへの遷移が起きたか」の意味は変わらない。
         let result = sqlx::query(
-            "WITH counter_update AS (
-                 UPDATE actors SET
-                   following_count = following_count + CASE WHEN id = $1 THEN 1 ELSE 0 END,
-                   followers_count = followers_count + CASE WHEN id = $2 THEN 1 ELSE 0 END
-                 WHERE id IN ($1, $2)
-                   AND EXISTS (
-                       SELECT 1 FROM follows
-                       WHERE follower_actor_id = $1 AND target_actor_id = $2 AND status = 'pending'
-                   )
-                 RETURNING 1
-             )
-             UPDATE follows SET status = 'accepted'
+            "UPDATE follows SET status = 'accepted'
              WHERE follower_actor_id = $1 AND target_actor_id = $2 AND status = 'pending'",
         )
         .bind(follower_actor_id)
@@ -240,27 +220,12 @@ impl FollowRepository for PgFollowRepository {
         follower_actor_id: i64,
         target_actor_id: i64,
     ) -> Result<(), sqlx::Error> {
-        // 削除自体はstatusに関わらず行う（pendingの取り消しも対象）が、カウンタを
-        // 減らすのは実際にacceptedだった行を消した場合のみ（acceptに同じくCTEは未参照でも実行される）。
-        sqlx::query(
-            "WITH counter_update AS (
-                 UPDATE actors SET
-                   following_count = GREATEST(following_count - CASE WHEN id = $1 THEN 1 ELSE 0 END, 0),
-                   followers_count = GREATEST(followers_count - CASE WHEN id = $2 THEN 1 ELSE 0 END, 0)
-                 WHERE id IN ($1, $2)
-                   AND EXISTS (
-                       SELECT 1 FROM follows
-                       WHERE follower_actor_id = $1 AND target_actor_id = $2 AND status = 'accepted'
-                   )
-                 RETURNING 1
-             )
-             DELETE FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2",
-        )
-        .bind(follower_actor_id)
-        .bind(target_actor_id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        sqlx::query("DELETE FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2")
+            .bind(follower_actor_id)
+            .bind(target_actor_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 
     async fn find_atp_rkey(
@@ -286,17 +251,7 @@ impl FollowRepository for PgFollowRepository {
         atp_rkey: &str,
     ) -> Result<bool, sqlx::Error> {
         sqlx::query(
-            "WITH counter_update AS (
-                 UPDATE actors SET
-                   following_count = following_count + CASE WHEN id = $1 THEN 1 ELSE 0 END,
-                   followers_count = followers_count + CASE WHEN id = $2 THEN 1 ELSE 0 END
-                 WHERE id IN ($1, $2)
-                   AND NOT EXISTS (
-                       SELECT 1 FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2
-                   )
-                 RETURNING 1
-             )
-             INSERT INTO follows (follower_actor_id, target_actor_id, status, atp_rkey)
+            "INSERT INTO follows (follower_actor_id, target_actor_id, status, atp_rkey)
              VALUES ($1, $2, 'accepted', $3)
              ON CONFLICT (follower_actor_id, target_actor_id) DO NOTHING",
         )
@@ -368,8 +323,9 @@ impl FollowRepository for PgFollowRepository {
 
     async fn count_relations(&self, actor_id: i64) -> Result<(i64, i64), sqlx::Error> {
         // 非正規化カラム（actors.following_count/followers_count）を読む。
-        // 書き込みはrepository/follow.rsのupsert_pending/accept/insert_accepted/
-        // insert_accepted_bsky/delete_by_actorsでのみ行う（唯一の真実の情報源）。
+        // 書き込みはtrg_follows_sync_countsトリガー（followsへのINSERT/UPDATE/DELETE時に
+        // 実測COUNT(*)で再計算）が一元的に行う。アプリ側はfollowsテーブルへの素朴な
+        // INSERT/UPDATE/DELETEを発行するだけでよい（docs/database.md「非正規化カウンタ」参照）。
         let row: (i64, i64) = sqlx::query_as(
             "SELECT following_count, followers_count FROM actors WHERE id = $1",
         )

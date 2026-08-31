@@ -111,16 +111,19 @@ Jetstream 経由のリモート投稿 INSERT が posts 書き込みの主成分�
   `20260829070000_actors_denormalized_counts.sql`、既存データからバックフィル済み）。
   `build_users_detailed`（Misskey互換）と`count_relations`（プロフィール画面）を読み替え、
   毎回のCOUNT(*)クエリ（`posts`全件・`follows`全件）を廃止した。
-- 書き込み経路を全て洗い出して対応（`repository/post.rs`の`insert`/`insert_full`/`insert_repost`/
+- `notes_count`は`repository/post.rs`の書き込み経路（`insert`/`insert_full`/`insert_repost`/
   `insert_repost_bsky`/`insert_remote`/`insert_remote_with_dedup`と`soft_delete_by_id`/
-  `soft_delete_by_ap_object_id`/`soft_delete_by_at_uri`、`repository/follow.rs`の
-  `insert_accepted`/`insert_accepted_bsky`/`accept`/`delete_by_actors`）。各メソッドは
+  `soft_delete_by_ap_object_id`/`soft_delete_by_at_uri`）を全て洗い出して対応。各メソッドは
   data-modifying CTE（`WITH x AS (INSERT/UPDATE/DELETE ... RETURNING ...) UPDATE actors ...`）で
   「実際に行が変化した場合のみ」単一SQL文内で加減算する設計にし、`ON CONFLICT DO NOTHING`で
   スキップされた場合や既に削除済みの行への重複操作で二重カウントしないようにした
   （`soft_delete_by_ap_object_id`/`soft_delete_by_at_uri`は元々`deleted_at IS NULL`ガードが
-  無い/片方のみだった実装上の穴も同時に修正）。詳細は`docs/database.md`「非正規化カウンタ」・
-  `coding_rules.md` #14参照。実DB上でCTEパターンの単体動作・冪等性・`follow_state_transition_integration`/
+  無い/片方のみだった実装上の穴も同時に修正）。
+- `followers_count`/`following_count`は当初`repository/follow.rs`側でnotes_countと同じCTE
+  インクリメント方式にしていたが、実測値との不整合が確認されたため`trg_follows_sync_counts`
+  トリガー（`follows`への書き込み時に`SELECT COUNT(*)`で実測値へ再計算する方式、
+  `20260831000000_follows_count_trigger.sql`）に切り替えた。詳細は`docs/database.md`
+  「非正規化カウンタ」・`coding_rules.md` #14参照。`follow_state_transition_integration`/
   `post_visibility_integration`の全既存テスト通過を確認済み。
 
 ### [PERF-5・対応済み] `atp_repo_events` の CAR バイト列を定期 NULL 化（前回 P-6）
