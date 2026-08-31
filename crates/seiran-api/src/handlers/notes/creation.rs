@@ -205,6 +205,8 @@ async fn create_repost(
         deliver_bsky: None,
         reply_fedi_allowed: false,
         reply_bsky_allowed: false,
+        reply_blocked: false,
+        quote_blocked: false,
         remote_url: None,
         content_warning: None,
         poll: None,
@@ -223,6 +225,12 @@ async fn create_repost(
     .await;
     embed_quotes(
         &state.db,
+        std::slice::from_mut(&mut repost_resp),
+        Some(actor_id),
+    )
+    .await;
+    attach_reply_quote_gates(
+        state,
         std::slice::from_mut(&mut repost_resp),
         Some(actor_id),
     )
@@ -325,14 +333,17 @@ async fn validate_create_regular_post_input<'a>(
                 {
                     Ok(v) => v,
                     Err(_) => {
-                        return Err(ApiError::BadRequest("INVALID_RECIPIENT_ACTOR_ID".to_owned())
-                            .into_response())
+                        return Err(
+                            ApiError::BadRequest("INVALID_RECIPIENT_ACTOR_ID".to_owned())
+                                .into_response(),
+                        )
                     }
                 }
             }
             _ => {
-                return Err(ApiError::BadRequest("RECIPIENT_ACTOR_IDS_REQUIRED".to_owned())
-                    .into_response())
+                return Err(
+                    ApiError::BadRequest("RECIPIENT_ACTOR_IDS_REQUIRED".to_owned()).into_response(),
+                )
             }
         }
     } else {
@@ -344,7 +355,9 @@ async fn validate_create_regular_post_input<'a>(
         match state.actors.find_by_ids(&recipient_actor_ids).await {
             Ok(a) => a,
             Err(e) => {
-                return Err(ApiError::Internal(format!("DM宛先アクター取得失敗: {}", e)).into_response())
+                return Err(
+                    ApiError::Internal(format!("DM宛先アクター取得失敗: {}", e)).into_response()
+                )
             }
         }
     };
@@ -356,8 +369,9 @@ async fn validate_create_regular_post_input<'a>(
             .filter(|a| a.actor_type == "bsky")
             .count();
         if bsky_count >= 1 && recipient_actors.len() > 1 {
-            return Err(ApiError::BadRequest("BSKY_DM_SINGLE_RECIPIENT_ONLY".to_owned())
-                .into_response());
+            return Err(
+                ApiError::BadRequest("BSKY_DM_SINGLE_RECIPIENT_ONLY".to_owned()).into_response(),
+            );
         }
     }
 
@@ -425,7 +439,9 @@ async fn validate_create_regular_post_input<'a>(
             .as_ref()
             .is_some_and(|ids| ids.iter().any(|i| i == id));
         if !attached {
-            return Err(ApiError::BadRequest("INVALID_BSKY_EMBED_CHOICE".to_owned()).into_response());
+            return Err(
+                ApiError::BadRequest("INVALID_BSKY_EMBED_CHOICE".to_owned()).into_response()
+            );
         }
     }
     // Bsky embed選択（#228）: `Poll`を選んだ場合、このリクエストが実際にアンケートを
@@ -522,7 +538,9 @@ async fn validate_create_regular_post_input<'a>(
             }
             Ok(None) => return Err(ApiError::NotFound("QUOTE_TARGET_NOT_FOUND").into_response()),
             Err(e) => {
-                return Err(ApiError::Internal(format!("引用元ポスト取得失敗: {}", e)).into_response())
+                return Err(
+                    ApiError::Internal(format!("引用元ポスト取得失敗: {}", e)).into_response()
+                )
             }
         }
     }
@@ -630,7 +648,11 @@ async fn notify_local_actor(
         )
         .await
     {
-        tracing::error!("[create_regular_post] {} notifications INSERT 失敗: {}", event_name, e);
+        tracing::error!(
+            "[create_regular_post] {} notifications INSERT 失敗: {}",
+            event_name,
+            e
+        );
     }
 }
 
@@ -892,6 +914,8 @@ async fn persist_regular_post(
         // （`notes::delivery::reply_delivery_allowed` と同じ判定基準）。
         reply_fedi_allowed: deliver_fedi,
         reply_bsky_allowed: deliver_bsky,
+        reply_blocked: false,
+        quote_blocked: false,
         remote_url: None,
         content_warning: content_warning.clone(),
         poll: poll_json.clone(),
@@ -907,6 +931,7 @@ async fn persist_regular_post(
         Some(actor_id),
     )
     .await;
+    attach_reply_quote_gates(state, std::slice::from_mut(&mut note_resp), Some(actor_id)).await;
     attach_remote_instance_info(state, std::slice::from_mut(&mut note_resp)).await;
 
     if visibility == "direct" {

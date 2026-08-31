@@ -14,8 +14,8 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 
 use seiran_common::atp::{
-    cid_from_sha256_hex, cid_from_str, cid_to_string, fetch_raw_did_document, generate_tid,
-    resolve_atproto_verification_key,
+    cid_from_sha256_hex, cid_from_str, cid_to_string, encode_generic_record,
+    fetch_raw_did_document, generate_tid, resolve_atproto_verification_key,
 };
 use seiran_common::repository::Actor;
 use seiran_common::{
@@ -308,8 +308,72 @@ pub async fn xrpc_get_record(
         return get_record_post(&params, &state).await;
     }
 
+    // postgate（引用可否）は専用パス。実レコードが無くても無制限スタブを返す。
+    if params.collection == "app.bsky.feed.postgate" {
+        return get_record_postgate(&params, &state).await;
+    }
+
     // それ以外は atp_records + atp_blocks から返す
     get_record_from_atp_records(&params, &state).await
+}
+
+/// `com.atproto.repo.getRecord`（`collection=app.bsky.feed.postgate`）専用パス。
+///
+/// seiranはpostgate（引用可否の制限）作成機能を持たないため実レコードは基本存在せず、
+/// AT Protocol の規約では「レコード不在 = 制限なし（誰でも引用可）」と解釈すべきだが、
+/// bsky.app 側クライアントは 404 を保守的に「引用不可」として扱ってしまうことがある
+/// （2026-08-31 マイケル報告・実機確認: `getRecord?...&collection=app.bsky.feed.postgate`
+/// が 404 を返し、bsky.app上での引用可否判定に影響していた）。そのため、実レコードが
+/// 無い場合は「制限なし」を明示するスタブレコードを合成して返す。
+/// 実レコードが存在する場合（将来postgate作成機能を実装した場合）はそちらを優先する。
+async fn get_record_postgate(
+    params: &GetRecordParams,
+    state: &AppState,
+) -> axum::response::Response {
+    let actor = match resolve_repo_actor(state, &params.repo).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let Some(did) = actor.at_did.clone() else {
+        return ApiError::NotFound("このアクターはATPリポジトリを持ちません").into_response();
+    };
+
+    let has_real_record: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM atp_records WHERE actor_id = $1 AND collection = $2 AND rkey = $3)",
+    )
+    .bind(actor.id)
+    .bind(&params.collection)
+    .bind(&params.rkey)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(false);
+
+    if has_real_record {
+        return get_record_from_atp_records(params, state).await;
+    }
+
+    let post_uri = format!("at://{}/app.bsky.feed.post/{}", did, params.rkey);
+    let value = serde_json::json!({
+        "$type": "app.bsky.feed.postgate",
+        "post": post_uri,
+        "createdAt": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "detachedEmbeddingUris": [],
+        "embeddingRules": [],
+    });
+    let cid = match encode_generic_record(&value) {
+        Ok((_, cid)) => cid,
+        Err(e) => {
+            return ApiError::Internal(format!("[getRecord/postgate] CBORエンコード失敗: {}", e))
+                .into_response();
+        }
+    };
+
+    Json(GetRecordResponse {
+        uri: format!("at://{}/app.bsky.feed.postgate/{}", did, params.rkey),
+        cid: cid_to_string(&cid),
+        value,
+    })
+    .into_response()
 }
 
 async fn get_record_post(params: &GetRecordParams, state: &AppState) -> axum::response::Response {

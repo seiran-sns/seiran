@@ -303,6 +303,135 @@ pub async fn fetch_single_bsky_post(
     }))
 }
 
+/// `com.atproto.repo.getRecord` で任意コレクションのレコード`value`だけを取得する
+/// （AppView経由、`api.bsky.app`は主要`com.atproto.*`読み取りメソッドの透過プロキシとして
+/// 動作する）。レコード不在（404）・取得失敗時は`None`（呼び出し側は「制限なし」として扱う）。
+async fn get_record_value(
+    client: &reqwest::Client,
+    repo: &str,
+    collection: &str,
+    rkey: &str,
+) -> Option<serde_json::Value> {
+    let url = format!(
+        "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection={}&rkey={}",
+        appview_base_url(),
+        urlencoding::encode(repo),
+        urlencoding::encode(collection),
+        urlencoding::encode(rkey),
+    );
+    let resp = client.get(&url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = resp.json().await.ok()?;
+    json.get("value").cloned()
+}
+
+/// Bsky投稿の `at://` URI から末尾の rkey を取り出す。
+fn rkey_from_at_uri(at_uri: &str) -> Option<&str> {
+    at_uri.rsplit('/').next().filter(|s| !s.is_empty())
+}
+
+/// Bsky投稿のthreadgate（返信許可ルール）・postgate（引用可否）を取得する。
+///
+/// 両方とも投稿と同じ`rkey`を持つ（AT Protocol標準の規約）ため、投稿の`at_uri`から
+/// 直接rkeyを取り出して個別に`getRecord`する。
+///
+/// 戻り値:
+/// - `reply_allow`: `None`=制限なし（threadgateレコード無し）。`Some(値)`はthreadgateレコードの
+///   `allow`フィールドそのもの（未指定なら空配列として正規化、`[]`は「誰も返信不可」を意味する）。
+///   評価（メンション/フォロー/リスト判定）は表示側（`seiran-api`）が`posts.mention_facets`・
+///   `follows`・`lists`テーブルを使って行う（ここでは生ルールの取得のみ）。
+/// - `quote_disabled`: postgateの`embeddingRules`に`#disableRule`が含まれるか
+///   （postgateは仕様上「全員可」「全員不可」の二値のみで部分許可は無い）。
+pub async fn fetch_bsky_gates(
+    client: &reqwest::Client,
+    author_did: &str,
+    post_at_uri: &str,
+) -> (Option<serde_json::Value>, bool) {
+    let Some(rkey) = rkey_from_at_uri(post_at_uri) else {
+        return (None, false);
+    };
+
+    let (threadgate, postgate) = tokio::join!(
+        get_record_value(client, author_did, "app.bsky.feed.threadgate", rkey),
+        get_record_value(client, author_did, "app.bsky.feed.postgate", rkey),
+    );
+
+    let reply_allow = threadgate.map(|v| {
+        v.get("allow")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([]))
+    });
+
+    let quote_disabled = postgate
+        .and_then(|v| v.get("embeddingRules").and_then(|r| r.as_array().cloned()))
+        .map(|rules| {
+            rules.iter().any(|r| {
+                r.get("$type").and_then(|t| t.as_str())
+                    == Some("app.bsky.feed.postgate#disableRule")
+            })
+        })
+        .unwrap_or(false);
+
+    (reply_allow, quote_disabled)
+}
+
+/// `app.bsky.graph.getList` でリストの全メンバーDIDを取得する（ページング込み）。
+/// threadgate の listRule 評価用（`bsky_remote_list_membership_cache`、
+/// `Job::BskyListMembershipResolve`）。取得失敗時はこれまでに集められた分のみ返す。
+pub async fn fetch_bsky_list_members(client: &reqwest::Client, list_uri: &str) -> Vec<String> {
+    let mut dids = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut url = format!(
+            "{}/xrpc/app.bsky.graph.getList?list={}&limit=100",
+            appview_base_url(),
+            urlencoding::encode(list_uri)
+        );
+        if let Some(c) = &cursor {
+            url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
+        }
+
+        let resp = match client.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    "[fetch_bsky_list_members] HTTPエラー list={}: {}",
+                    list_uri,
+                    e
+                );
+                break;
+            }
+        };
+        if !resp.status().is_success() {
+            break;
+        }
+        let json: serde_json::Value = match resp.json().await {
+            Ok(j) => j,
+            Err(_) => break,
+        };
+        let Some(items) = json["items"].as_array() else {
+            break;
+        };
+        for item in items {
+            if let Some(did) = item["subject"]["did"].as_str() {
+                dids.push(did.to_string());
+            }
+        }
+
+        cursor = json["cursor"].as_str().map(str::to_string);
+        if cursor.is_none() || items.is_empty() {
+            break;
+        }
+        // 想定外の巨大リストで無限ループ・過剰リクエストにならないよう上限を設ける。
+        if dids.len() >= 5000 {
+            break;
+        }
+    }
+    dids
+}
+
 /// `app.bsky.actor.profile` の `pinnedPost`（`com.atproto.repo.strongRef`）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct BskyPinnedPostRef {
@@ -329,6 +458,7 @@ pub struct BskyProfile {
 pub async fn upsert_bsky_post(
     pool: &sqlx::PgPool,
     queue: &Arc<dyn JobQueue>,
+    http: &reqwest::Client,
     actor_id: i64,
     post: &BskyPost,
 ) -> Result<i64, sqlx::Error> {
@@ -419,10 +549,30 @@ pub async fn upsert_bsky_post(
                         }
                     }
                     Err(e) => {
-                        tracing::error!("[upsert_bsky_post] post_link_cards 保存失敗（スキップ）: {}", e);
+                        tracing::error!(
+                            "[upsert_bsky_post] post_link_cards 保存失敗（スキップ）: {}",
+                            e
+                        );
                     }
                 }
             }
+        }
+
+        // 返信許可（threadgate）・引用可否（postgate）を取得して保存する（#返信/引用グレーアウト）。
+        // 取得失敗時は両方とも「制限なし」のまま（デフォルト値: bsky_reply_allow=NULL,
+        // bsky_quote_disabled=false）にしておくのが安全（誤ってボタンをグレーアウトしない）。
+        let (reply_allow, quote_disabled) =
+            fetch_bsky_gates(http, &post.author_did, &post.uri).await;
+        if let Err(e) = sqlx::query(
+            "UPDATE posts SET bsky_reply_allow = $1, bsky_quote_disabled = $2 WHERE id = $3",
+        )
+        .bind(&reply_allow)
+        .bind(quote_disabled)
+        .bind(final_id)
+        .execute(pool)
+        .await
+        {
+            tracing::error!("[upsert_bsky_post] gate情報保存失敗（スキップ）: {}", e);
         }
     }
 

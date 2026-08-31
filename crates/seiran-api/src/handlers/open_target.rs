@@ -113,9 +113,15 @@ async fn open_bsky_post(state: &AppState, at_uri: &str) -> Result<OpenTargetResp
     let actor = resolve_and_upsert_target(state, &post.author_did)
         .await
         .map_err(|_| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let post_id = seiran_common::atp::upsert_bsky_post(&state.db, &state.job_queue, actor.id, &post)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Bsky post保存失敗: {e}")))?;
+    let post_id = seiran_common::atp::upsert_bsky_post(
+        &state.db,
+        &state.job_queue,
+        &state.http_client,
+        actor.id,
+        &post,
+    )
+    .await
+    .map_err(|e| ApiError::Internal(format!("Bsky post保存失敗: {e}")))?;
     Ok(OpenTargetResponse {
         path: format!("/notes/{post_id}"),
         kind: "post",

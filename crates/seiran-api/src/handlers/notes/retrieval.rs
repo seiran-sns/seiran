@@ -7,7 +7,6 @@ use seiran_common::repository::ReferenceKind;
 use serde::{Deserialize, Serialize};
 use validation::strip_html_tags;
 
-
 /// フロントエンド向け: GET /api/notes/:id
 pub async fn get_note(
     Path(id): Path<String>,
@@ -56,6 +55,7 @@ pub async fn get_note(
     embed_renotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
     embed_quotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
     attach_poll_votes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
+    attach_reply_quote_gates(&state, std::slice::from_mut(&mut nr), my_actor_id).await;
     attach_remote_instance_info(&state, std::slice::from_mut(&mut nr)).await;
     Ok(Json(nr))
 }
@@ -474,8 +474,10 @@ pub async fn note_context(
     embed_renotes(&state.db, &mut after, my_actor_id).await;
     embed_quotes(&state.db, &mut after, my_actor_id).await;
     attach_poll_votes(&state.db, &mut before, my_actor_id).await;
+    attach_reply_quote_gates(&state, &mut before, my_actor_id).await;
     attach_remote_instance_info(&state, &mut before).await;
     attach_poll_votes(&state.db, &mut after, my_actor_id).await;
+    attach_reply_quote_gates(&state, &mut after, my_actor_id).await;
     attach_remote_instance_info(&state, &mut after).await;
 
     Ok(Json(NoteContextResponse { before, after }))
@@ -536,6 +538,7 @@ pub async fn note_replies(
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
     embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
+    attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
     attach_remote_instance_info(&state, &mut notes).await;
 
     Ok(Json(NoteRepliesResponse { notes }))

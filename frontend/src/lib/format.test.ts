@@ -28,6 +28,8 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     attachments: [],
     replyFediAllowed: true,
     replyBskyAllowed: true,
+    replyBlocked: false,
+    quoteBlocked: false,
     replyCount: 0,
     quoteCount: 0,
     repostCount: 0,

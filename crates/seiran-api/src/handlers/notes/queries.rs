@@ -10,6 +10,7 @@ use axum::response::{IntoResponse, Response};
 use sqlx::Row;
 
 use seiran_common::repository::TimelinePost;
+use seiran_common::{job_priority, Job};
 
 use crate::error::ApiError;
 use crate::AppState;
@@ -416,6 +417,220 @@ pub async fn embed_quotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_acto
                     renote.quote = Some(Box::new(orig.clone()));
                 }
             }
+        }
+    }
+}
+
+/// リモートBsky投稿のthreadgate（返信許可ルール）・postgate（引用可否）を、閲覧中ユーザー視点で
+/// 評価し `NoteResponse.reply_blocked`/`quote_blocked` に反映する。ローカル投稿・Fedi受信投稿・
+/// ゲート情報の無いBsky投稿（`posts.bsky_reply_allow IS NULL AND bsky_quote_disabled = false`）は
+/// 常に両方 `false`（`to_note_response`のデフォルト値のまま）。未ログイン時は評価しない
+/// （投稿・返信自体がログイン必須のため）。
+pub async fn attach_reply_quote_gates(
+    state: &AppState,
+    notes: &mut [NoteResponse],
+    my_actor_id: Option<i64>,
+) {
+    let Some(viewer_id) = my_actor_id else {
+        return;
+    };
+
+    fn collect_ids(n: &NoteResponse, ids: &mut Vec<i64>) {
+        if let Ok(id) = n.id.parse::<i64>() {
+            ids.push(id);
+        }
+        if let Some(r) = n.renote.as_deref() {
+            collect_ids(r, ids);
+        }
+        if let Some(q) = n.quote.as_deref() {
+            collect_ids(q, ids);
+        }
+    }
+    let mut ids = Vec::new();
+    for n in notes.iter() {
+        collect_ids(n, &mut ids);
+    }
+    if ids.is_empty() {
+        return;
+    }
+
+    #[derive(sqlx::FromRow)]
+    struct GateRow {
+        id: i64,
+        actor_id: i64,
+        bsky_reply_allow: Option<serde_json::Value>,
+        bsky_quote_disabled: bool,
+        mention_facets: Option<serde_json::Value>,
+    }
+    let rows: Vec<GateRow> = sqlx::query_as(
+        "SELECT id, actor_id, bsky_reply_allow, bsky_quote_disabled, mention_facets
+         FROM posts
+         WHERE id = ANY($1) AND (bsky_reply_allow IS NOT NULL OR bsky_quote_disabled)",
+    )
+    .bind(&ids)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    if rows.is_empty() {
+        return;
+    }
+
+    let viewer_did: Option<String> = sqlx::query_scalar("SELECT at_did FROM actors WHERE id = $1")
+        .bind(viewer_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
+    let mut gates: HashMap<i64, (bool, bool)> = HashMap::new();
+    for row in rows {
+        let quote_blocked = row.bsky_quote_disabled;
+        let reply_blocked = match &row.bsky_reply_allow {
+            None => false,
+            Some(allow) => {
+                !evaluate_reply_allow(
+                    state,
+                    allow,
+                    row.actor_id,
+                    viewer_id,
+                    viewer_did.as_deref(),
+                    row.mention_facets.as_ref(),
+                )
+                .await
+            }
+        };
+        gates.insert(row.id, (reply_blocked, quote_blocked));
+    }
+
+    fn apply(n: &mut NoteResponse, gates: &HashMap<i64, (bool, bool)>) {
+        if let Ok(id) = n.id.parse::<i64>() {
+            if let Some(&(reply_blocked, quote_blocked)) = gates.get(&id) {
+                n.reply_blocked = reply_blocked;
+                n.quote_blocked = quote_blocked;
+            }
+        }
+        if let Some(r) = n.renote.as_deref_mut() {
+            apply(r, gates);
+        }
+        if let Some(q) = n.quote.as_deref_mut() {
+            apply(q, gates);
+        }
+    }
+    for n in notes.iter_mut() {
+        apply(n, &gates);
+    }
+}
+
+/// threadgateの`allow`配列（生のAT Protocolルール表現、`fetch_bsky_gates`参照）を、閲覧中ユーザーが
+/// 満たすか評価する。`allow`が非配列（不正形式）なら制限なし扱い（フェイルオープン）、空配列なら
+/// 投稿者以外誰も返信不可。ルールはOR条件（いずれか1つでも満たせば返信可）。
+async fn evaluate_reply_allow(
+    state: &AppState,
+    allow: &serde_json::Value,
+    author_actor_id: i64,
+    viewer_actor_id: i64,
+    viewer_did: Option<&str>,
+    mention_facets: Option<&serde_json::Value>,
+) -> bool {
+    // スレッド作者（投稿者）自身は常に自分のスレッドに返信できる（AT Protocol仕様）。
+    if author_actor_id == viewer_actor_id {
+        return true;
+    }
+    let Some(rules) = allow.as_array() else {
+        return true;
+    };
+    if rules.is_empty() {
+        return false;
+    }
+
+    for rule in rules {
+        let rule_type = rule.get("$type").and_then(|t| t.as_str()).unwrap_or("");
+        let matched = match rule_type {
+            "app.bsky.feed.threadgate#mentionRule" => match (mention_facets, viewer_did) {
+                (Some(facets), Some(did)) => facets.as_array().is_some_and(|arr| {
+                    arr.iter()
+                        .any(|f| f.get("did").and_then(|d| d.as_str()) == Some(did))
+                }),
+                _ => false,
+            },
+            "app.bsky.feed.threadgate#followingRule" => sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2)",
+            )
+            .bind(author_actor_id)
+            .bind(viewer_actor_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(false),
+            "app.bsky.feed.threadgate#listRule" => {
+                match (rule.get("list").and_then(|l| l.as_str()), viewer_did) {
+                    (Some(list_uri), Some(did)) => is_list_member(state, list_uri, did).await,
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+        if matched {
+            return true;
+        }
+    }
+    false
+}
+
+/// リストのメンバーシップ（`viewer_did`がリストに含まれるか）を判定する。ローカルseiranユーザー
+/// 所有のリストは`lists`/`list_members`に既に答えがあるためそちらを使い、リモート所有リストのみ
+/// `bsky_remote_list_membership_cache`（24時間TTL）を参照する。キャッシュ未登録・期限切れの場合は
+/// バックグラウンド更新ジョブを積み、今回はフェイルオープン（誤って返信ボタンをグレーアウトしない、
+/// `docs/protocols.md`参照）。
+async fn is_list_member(state: &AppState, list_uri: &str, viewer_did: &str) -> bool {
+    if let Ok(Some(list_id)) =
+        sqlx::query_scalar::<_, i64>("SELECT id FROM lists WHERE at_uri = $1")
+            .bind(list_uri)
+            .fetch_optional(&state.db)
+            .await
+    {
+        return sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                 SELECT 1 FROM list_members lm JOIN actors a ON a.id = lm.actor_id
+                 WHERE lm.list_id = $1 AND a.at_did = $2
+             )",
+        )
+        .bind(list_id)
+        .bind(viewer_did)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+    }
+
+    #[derive(sqlx::FromRow)]
+    struct CacheRow {
+        member_dids: serde_json::Value,
+        checked_at: chrono::DateTime<chrono::Utc>,
+    }
+    let cached: Option<CacheRow> = sqlx::query_as(
+        "SELECT member_dids, checked_at FROM bsky_remote_list_membership_cache WHERE list_uri = $1",
+    )
+    .bind(list_uri)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    match cached {
+        Some(row) if chrono::Utc::now() - row.checked_at < chrono::Duration::hours(24) => row
+            .member_dids
+            .as_array()
+            .is_some_and(|arr| arr.iter().any(|d| d.as_str() == Some(viewer_did))),
+        _ => {
+            let _ = state
+                .job_queue
+                .enqueue(
+                    Job::BskyListMembershipResolve {
+                        list_uri: list_uri.to_string(),
+                    },
+                    job_priority::LOW,
+                )
+                .await;
+            true
         }
     }
 }

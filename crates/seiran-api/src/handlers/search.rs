@@ -279,7 +279,15 @@ pub(crate) async fn persist_appview_posts(
                 continue;
             }
         };
-        match seiran_common::atp::upsert_bsky_post(&state.db, &state.job_queue, actor_id, &post).await {
+        match seiran_common::atp::upsert_bsky_post(
+            &state.db,
+            &state.job_queue,
+            &state.http_client,
+            actor_id,
+            &post,
+        )
+        .await
+        {
             Ok(id) => ids.push(id),
             Err(error) => {
                 tracing::warn!("[search] AppView post保存失敗 uri={}: {}", post.uri, error)

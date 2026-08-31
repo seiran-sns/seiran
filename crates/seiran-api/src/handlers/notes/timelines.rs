@@ -1,7 +1,6 @@
 use super::*;
 use queries::fetch_reposted_ids;
 
-
 pub async fn home_timeline(
     Query(q): Query<TimelineQuery>,
     user: AuthedUser,
@@ -47,6 +46,7 @@ pub async fn home_timeline(
     embed_renotes(&state.db, &mut notes, Some(actor_id)).await;
     embed_quotes(&state.db, &mut notes, Some(actor_id)).await;
     attach_poll_votes(&state.db, &mut notes, Some(actor_id)).await;
+    attach_reply_quote_gates(&state, &mut notes, Some(actor_id)).await;
     attach_remote_instance_info(&state, &mut notes).await;
     Json(notes).into_response()
 }
@@ -102,6 +102,7 @@ pub async fn local_timeline(
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
     embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
+    attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
     attach_remote_instance_info(&state, &mut notes).await;
     Json(notes).into_response()
 }
@@ -152,6 +153,7 @@ pub async fn social_timeline(
     embed_renotes(&state.db, &mut notes, Some(actor_id)).await;
     embed_quotes(&state.db, &mut notes, Some(actor_id)).await;
     attach_poll_votes(&state.db, &mut notes, Some(actor_id)).await;
+    attach_reply_quote_gates(&state, &mut notes, Some(actor_id)).await;
     attach_remote_instance_info(&state, &mut notes).await;
     Json(notes).into_response()
 }
@@ -208,6 +210,7 @@ pub async fn global_timeline(
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
     embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
+    attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
     attach_remote_instance_info(&state, &mut notes).await;
     Json(notes).into_response()
 }

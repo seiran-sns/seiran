@@ -333,7 +333,9 @@ async fn create_xxx(
 
 ### ステップ 4: ルートを登録する
 
-`crates/seiran-api/src/main.rs` の `Router::new()` にルートを追加する。
+`crates/seiran-api/src/lib.rs` の `Router::new()` にルートを追加する。
+
+**`/xrpc/*`・`/.well-known/*`（AT Protocol XRPCエンドポイント）を追加する場合、CORS設定は不要**。`lib.rs`のCORS `AllowOrigin::predicate`が`path.starts_with("/xrpc/")`または`/.well-known/`で無条件にオリジンを許可する設計になっており、新規追加したXRPCルートも自動的にこの対象に含まれる（個別ルートごとのCORS設定・許可オリジン追加は不要かつ禁止。bsky.app等の外部ATクライアントがブラウザから直接叩く前提の公開APIのため、AT Protocol関連エンドポイントは常に全オリジン許可が正しい）。
 
 ### ステップ 5: `AppState` を更新する
 

@@ -168,6 +168,8 @@ function PostContent({
     isSelf,
     isPrivateRepostTarget,
     isPrivateQuoteTarget,
+    isGateReplyBlocked,
+    isGateQuoteBlocked,
     reactions,
     reactionPending,
     toggleReaction,
@@ -293,6 +295,10 @@ function PostContent({
 
   function handleReply(e?: React.MouseEvent) {
     e?.stopPropagation();
+    if (isGateReplyBlocked) {
+      showError(t("home:noteCard.replyGateError"));
+      return;
+    }
     openReply(note);
   }
 
@@ -300,6 +306,10 @@ function PostContent({
     e?.stopPropagation();
     if (isPrivateQuoteTarget) {
       showError(t("home:noteCard.privateQuoteError"));
+      return;
+    }
+    if (isGateQuoteBlocked) {
+      showError(t("home:noteCard.quoteGateError"));
       return;
     }
     openQuote(note);
@@ -611,6 +621,8 @@ function PostContent({
         onReply={handleReply}
         onQuote={handleQuote}
         isPrivateQuoteTarget={isPrivateQuoteTarget}
+        isGateReplyBlocked={isGateReplyBlocked}
+        isGateQuoteBlocked={isGateQuoteBlocked}
         reposted={reposted}
         reposting={reposting}
         unreposting={unreposting}

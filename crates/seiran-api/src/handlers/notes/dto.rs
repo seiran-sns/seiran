@@ -231,6 +231,14 @@ pub struct NoteResponse {
     /// 選択肢として出さない）。
     pub reply_fedi_allowed: bool,
     pub reply_bsky_allowed: bool,
+    /// リモートBsky投稿のthreadgate（返信許可ルール）により、閲覧中ユーザーが返信できないか。
+    /// `queries::attach_reply_quote_gates`が事後に評価・設定する（`to_note_response`単体では常に
+    /// `false`）。ローカル投稿・Fedi受信投稿・ゲート情報の無いBsky投稿は常に`false`。
+    pub reply_blocked: bool,
+    /// リモートBsky投稿のpostgate（引用可否）により、閲覧中ユーザーが引用できないか。
+    /// `queries::attach_reply_quote_gates`が事後に評価・設定する（`to_note_response`単体では常に
+    /// `false`）。
+    pub quote_blocked: bool,
     /// リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。
     /// ローカル投稿、または元URIを未取得のリモート投稿では省略（#リモートで表示バナー）。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -452,9 +460,21 @@ pub fn to_note_response(
         renote_id: p.repost_of_post_id.map(|i| i.to_string()),
         quote_id: p.quote_of_post_id.map(|i| i.to_string()),
         reply_id: p.reply_to_post_id.map(|i| i.to_string()),
-        renote_status: p.repost_of_post_id.is_none().then_some(p.repost_of_ref_status).flatten(),
-        quote_status: p.quote_of_post_id.is_none().then_some(p.quote_of_ref_status).flatten(),
-        reply_status: p.reply_to_post_id.is_none().then_some(p.reply_to_ref_status).flatten(),
+        renote_status: p
+            .repost_of_post_id
+            .is_none()
+            .then_some(p.repost_of_ref_status)
+            .flatten(),
+        quote_status: p
+            .quote_of_post_id
+            .is_none()
+            .then_some(p.quote_of_ref_status)
+            .flatten(),
+        reply_status: p
+            .reply_to_post_id
+            .is_none()
+            .then_some(p.reply_to_ref_status)
+            .flatten(),
         parent_original_id: p.parent_original_post_id.map(|i| i.to_string()),
         reactions: Vec::new(),
         renote: None,
@@ -471,6 +491,8 @@ pub fn to_note_response(
         deliver_bsky: if is_local { Some(p.deliver_bsky) } else { None },
         reply_fedi_allowed,
         reply_bsky_allowed,
+        reply_blocked: false,
+        quote_blocked: false,
         remote_url,
         content_warning: p.content_warning,
         poll: p.poll,
@@ -513,7 +535,9 @@ pub fn to_reaction_event_response(r: ReactionFeedRow) -> ReactionEventResponse {
     };
     let is_local = target_actor_type == "local";
     let target_avatar_url = r.target_avatar_url.or_else(|| {
-        is_local.then(|| seiran_common::avatar::fallback_avatar_url(&r.target_domain, r.target_actor_id))
+        is_local.then(|| {
+            seiran_common::avatar::fallback_avatar_url(&r.target_domain, r.target_actor_id)
+        })
     });
 
     ReactionEventResponse {

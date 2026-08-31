@@ -273,6 +273,13 @@ pub enum Job {
     /// attemptカウンタは消費しない）。対象が尽きるか`follow_import_requests.status`が
     /// `running`でなくなったら（完了/キャンセル）再enqueueせず終了する。
     FollowImportProcess { request_id: i64 },
+
+    /// リモート（seiranユーザー所有でない）Bskyリストの全メンバーDIDを`app.bsky.graph.getList`
+    /// から取得し、`bsky_remote_list_membership_cache`へ24時間TTLで保存する。
+    /// threadgate の listRule 評価（`docs/protocols.md`参照）でキャッシュ未登録/期限切れの
+    /// リストを見つけた際に積む。ローカルseiranユーザー所有のリストは`lists`/`list_members`に
+    /// 既に答えがあるためこのジョブの対象にならない。
+    BskyListMembershipResolve { list_uri: String },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

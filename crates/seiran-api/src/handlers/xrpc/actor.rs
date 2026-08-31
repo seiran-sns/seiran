@@ -88,6 +88,14 @@ pub async fn xrpc_get_preferences(
     Json(serde_json::json!({ "preferences": preferences })).into_response()
 }
 
+/// `app.bsky.unspecced.getTrends` — トレンド機能は未実装のため常に空配列を返す。
+/// 実装が無いと`atproto-proxy`ヘッダー無しで呼ぶbsky.appクライアントに対し
+/// 404（`xrpc_proxy_fallback`のMethodNotImplemented）を返してしまい、表示側で
+/// エラー扱いになる（2026-08-31 マイケル指摘）。空のトレンド一覧は仕様上妥当な応答。
+pub async fn xrpc_get_trends() -> impl IntoResponse {
+    Json(serde_json::json!({ "trends": [] }))
+}
+
 #[derive(Deserialize)]
 pub struct PutPreferencesRequest {
     pub preferences: serde_json::Value,

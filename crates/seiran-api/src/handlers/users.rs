@@ -15,8 +15,8 @@ use seiran_common::ApDeliveryKind;
 use crate::error::ApiError;
 use crate::handlers::notes::dto::{build_instance_info, RemoteInstanceInfo};
 use crate::handlers::notes::{
-    attach_poll_votes, attach_remote_instance_info, embed_quotes, embed_renotes,
-    fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
+    attach_poll_votes, attach_remote_instance_info, attach_reply_quote_gates, embed_quotes,
+    embed_renotes, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
     resolve_mention_facets_in_place, to_note_response, to_reaction_event_response, NoteResponse,
     ProfileFeedItem,
 };
@@ -124,6 +124,7 @@ pub async fn user_posts(
     embed_renotes(&state.db, &mut notes, my_actor_id).await;
     embed_quotes(&state.db, &mut notes, my_actor_id).await;
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
+    attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
     attach_remote_instance_info(&state, &mut notes).await;
 
     if !params.include_reactions {
@@ -154,13 +155,18 @@ pub async fn user_posts(
 
     let mut items: Vec<(i64, ProfileFeedItem)> = notes
         .into_iter()
-        .filter_map(|n| n.id.parse::<i64>().ok().map(|id| (id, ProfileFeedItem::Note(Box::new(n)))))
+        .filter_map(|n| {
+            n.id.parse::<i64>()
+                .ok()
+                .map(|id| (id, ProfileFeedItem::Note(Box::new(n))))
+        })
         .collect();
-    items.extend(
-        reaction_rows
-            .into_iter()
-            .map(|r| (r.id, ProfileFeedItem::Reaction(Box::new(to_reaction_event_response(r))))),
-    );
+    items.extend(reaction_rows.into_iter().map(|r| {
+        (
+            r.id,
+            ProfileFeedItem::Reaction(Box::new(to_reaction_event_response(r))),
+        )
+    }));
     items.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
     items.truncate(limit as usize);
 
@@ -583,6 +589,7 @@ async fn sync_remote_bsky_pinned(
                     match seiran_common::atp::upsert_bsky_post(
                         &state.db,
                         &state.job_queue,
+                        &state.http_client,
                         actor_id,
                         &post,
                     )
@@ -830,6 +837,8 @@ async fn build_profile_response(
     }
     attach_poll_votes(&state.db, &mut recent_posts, my_actor_id).await;
     attach_poll_votes(&state.db, &mut pinned_posts, my_actor_id).await;
+    attach_reply_quote_gates(state, &mut recent_posts, my_actor_id).await;
+    attach_reply_quote_gates(state, &mut pinned_posts, my_actor_id).await;
     attach_remote_instance_info(state, &mut recent_posts).await;
     attach_remote_instance_info(state, &mut pinned_posts).await;
 

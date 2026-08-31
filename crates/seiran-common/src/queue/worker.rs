@@ -369,9 +369,11 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
                 .await
                 .map_err(JobError::from)
         }
-        Job::ActorMetadataResolve { actor_id } => jobs::actor_metadata_resolve::handle(actor_id, ctx)
-            .await
-            .map_err(JobError::from),
+        Job::ActorMetadataResolve { actor_id } => {
+            jobs::actor_metadata_resolve::handle(actor_id, ctx)
+                .await
+                .map_err(JobError::from)
+        }
         Job::AtpRepositoryPublish {
             actor_id,
             commit_type,
@@ -450,6 +452,11 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::FollowImportProcess { request_id } => jobs::follow_import::handle(request_id, ctx)
             .await
             .map_err(JobError::from),
+        Job::BskyListMembershipResolve { list_uri } => {
+            jobs::bsky_list_membership_resolve::handle(list_uri, ctx)
+                .await
+                .map_err(JobError::from)
+        }
     }
 }
 
@@ -475,6 +482,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::LinkCardEmbedResolve { .. } => "LinkCardEmbedResolve",
         Job::RemoteInstanceInfoResolve { .. } => "RemoteInstanceInfoResolve",
         Job::FollowImportProcess { .. } => "FollowImportProcess",
+        Job::BskyListMembershipResolve { .. } => "BskyListMembershipResolve",
     }
 }
 
@@ -597,6 +605,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 5,
             base_delay_ms: 2000,
             max_delay_ms: 60_000,
+        },
+        Job::BskyListMembershipResolve { .. } => RetryConfig {
+            // ActorMetadataResolve と同様のベストエフォート取得。失敗してもキャッシュが
+            // 埋まらないだけで、表示側はフェイルオープン（グレーアウトしない）にフォールバックする。
+            max_attempts: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
         },
     }
 }

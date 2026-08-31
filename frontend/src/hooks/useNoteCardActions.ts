@@ -87,6 +87,10 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
   const isSelf = note.user.actorType === "local" && !!user && user.username === note.user.username;
   const isPrivateRepostTarget = note.visibility === "followers_only" || note.visibility === "direct";
   const isPrivateQuoteTarget = note.visibility === "followers_only" || note.visibility === "direct";
+  // Bsky postgate（引用可否）による制限。可視性由来の isPrivateQuoteTarget とは理由が異なる
+  // （ツールチップ・トースト文言を分けるため別フラグで持つ）。
+  const isGateQuoteBlocked = note.quoteBlocked ?? false;
+  const isGateReplyBlocked = note.replyBlocked ?? false;
 
   // 他ユーザー（または自分の別タブ/端末）によるリアクション追加/切替/取消をリアルタイム反映する。
   useEffect(() => {
@@ -188,6 +192,8 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
     isSelf,
     isPrivateRepostTarget,
     isPrivateQuoteTarget,
+    isGateQuoteBlocked,
+    isGateReplyBlocked,
     reactions,
     reactionPending,
     toggleReaction,

@@ -152,6 +152,7 @@ DM等の全外部キー参照を付け替える。複合UNIQUEは正規化後の
 - `thread_root_post_id`: `direct`投稿（DM）のスレッド起点ポストID。DM関連テーブルの節を参照。`direct`以外の投稿では常にNULL。
 - `reply_count`/`quote_count`/`repost_count`（非正規化 + トリガー）: このポストへの返信・引用・リポストの件数（NoteCardのアクション行に表示）。都度 `COUNT()` するとタイムライン1件ごとにN+1クエリが発生するため、`is_local` と同様に非正規化カウンタ + トリガー方式にしている。`AFTER INSERT` トリガー `trg_posts_relation_counts_insert` が `reply_to_post_id`/`quote_of_post_id`/`repost_of_post_id` を持つ行の INSERT 時に親側のカウンタを+1し、`AFTER UPDATE OF deleted_at` トリガー `trg_posts_relation_counts_delete` が論理削除（`deleted_at` が NULL→非NULL）時に-1する。ローカル作成・Fedi受信・ATP受信・DM同期など `posts` への挿入経路が複数あるため、Rust側の各挿入関数に増減処理を個別実装せずDBトリガーへ一元化している（経路追加時の実装漏れを防ぐため）。
 - `pending_bsky_media_file_id`（nullable）: 動画/音声添付のBsky動画パイプライン結合待ち（`Job::BskyPostCommitDeferred`）で、どの`media_files.id`の結合を待っているかを投稿作成時点で永続化する。ジョブのペイロードには`post_id`/`pending_media_file_id`のみを持たせ、本文・投稿時刻・リプライ先at_uri/at_cidはハンドラが`posts`から都度取得する設計にしているため、このカラムが「起動時リカバリが`resolve_bsky_embed`の複数添付間の優先順位判定を再現せずに済む」ための唯一の手がかりになる。コミット成功（`at_uri`確定）時にNULLへ戻す。詳細は`docs/architecture.md` 5節参照。
+- `bsky_reply_allow`（JSONB、nullable）: リモートBsky投稿のthreadgateレコードの`allow`配列そのもの（`NULL`=制限なし、`[]`=投稿者以外誰も返信不可）。ローカル投稿・Fedi受信投稿は常に`NULL`。`bsky_quote_disabled`（BOOLEAN、デフォルト`false`）: postgateの`embeddingRules`に`#disableRule`が含まれるか（postgateは仕様上「全員可」「全員不可」の二値のみ）。いずれも`upsert_bsky_post`が投稿を新規保存した直後に`fetch_bsky_gates`で取得・保存し、表示側（`queries::attach_reply_quote_gates`）が閲覧者視点で評価してNoteCardの返信/引用ボタンをグレーアウトする。`docs/protocols.md` 3節参照。
 - `language`（nullable TEXT）: ポストの言語（ISO 639-1、2文字コード）。Bsky配送（`app.bsky.feed.post`の`langs`）にのみ反映し、AP配送では使わない。許可値は`seiran_common::SUPPORTED_LANGUAGES`（7言語）で、DB制約ではなくアプリ層（`handlers::notes::create_regular_post`）で検証する。表示言語設定（`users.language_preference`）と異なり中国語のバリエーションを持たず`zh`単一（フロントの`postLanguageBase()`が表示言語の`zh-Hant`/`zh-Hans`をどちらも`zh`へ丸める）。`NULL`は「言語情報なし」を表し、Bskyコミット時に`langs`フィールド自体を省略する（Misskey互換APIクライアント等、本フィールドを送らないクライアントの後方互換）。`docs/protocols.md` 3節参照。
 
 ### ダイレクトメッセージ関連（`post_recipients` / `dm_read_states` / `bsky_convo_links`)
@@ -171,6 +172,9 @@ AP受信（投稿本文・表示名・絵文字リアクションのいずれか
 
 ### `follows`
 `status`（`pending`/`accepted`）を持つ。パフォーマンス上重要な2つの部分インデックスがある: フォロワー取得・AP配送方向の `(target_actor_id, follower_actor_id) WHERE status='accepted'` と、自分のフォロー先取得用のカバリングインデックス `(follower_actor_id) INCLUDE (target_actor_id) WHERE status='accepted'`。
+
+### `bsky_remote_list_membership_cache`
+`list_uri`をPKに持つ、リモート（seiranユーザー所有でない）Bskyリストの全メンバーDID一覧の共有キャッシュ（`member_dids` JSONB配列、`checked_at`から24時間TTL）。threadgateの`#listRule`評価（`queries::is_list_member`）専用で、ローカルseiranユーザー所有のリストは`lists`/`list_members`に既に答えがあるため対象にならない。未登録・期限切れの参照は`Job::BskyListMembershipResolve`（`app.bsky.graph.getList`をページングして取得、`ON CONFLICT (list_uri) DO UPDATE`で全体を丸ごと置き換え）を積んでバックグラウンド更新し、その場ではフェイルオープン（制限なし扱い）で応答する。`docs/protocols.md` 3節参照。
 
 ### `remote_follow_snapshots`
 `follows` はseiranが認知している関係（ローカルアクターが片方に絡む場合のみ）しか持たない。本テーブルはそれとは独立に、リモートFediアクターのfollowers/following OrderedCollectionをAP経由で直接取得した結果を、`actor_id`×`direction`（`following`/`followers`）単位で丸ごと上書きキャッシュする（`UNIQUE(actor_id, direction)`）。`actor_uris` は取得できたactor URIのJSONB配列、`complete` は上限件数に達せずコレクション全体を取得しきれたか。`docs/protocols.md` 2節参照。

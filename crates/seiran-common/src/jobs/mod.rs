@@ -12,6 +12,7 @@ pub mod also_known_as_verify;
 pub mod ap_delivery;
 pub mod atp_repository_publish;
 pub mod bsky_dm_send;
+pub mod bsky_list_membership_resolve;
 pub mod bsky_post_commit_deferred;
 pub mod bsky_video_poll;
 pub mod follow_import;

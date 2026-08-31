@@ -24,7 +24,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
-use tower_http::cors::{Any, AllowOrigin, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 
 use seiran_common::repository::{
@@ -36,11 +36,11 @@ use seiran_common::repository::{
     PgActorRepository, PgAlsoKnownAsRepository, PgAppTokenRepository, PgAtpPreferencesRepository,
     PgAtpReadRepository, PgAtpSessionRepository, PgAuthRateLimitRepository, PgBlockRepository,
     PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository,
-    PgFollowImportRepository, PgFollowRepository, PgHashtagRepository,
-    PgInstanceDomainRepository, PgListRepository, PgMuteRepository, PgNotificationRepository,
-    PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository,
-    PgRelayRepository, PgRemoteEmojiRepository, PgRemoteInstanceMetaRepository, PgTotpRepository,
-    PgUserRepository, PinnedPostsRepository, PostRepository, ReactionRepository, RelayRepository,
+    PgFollowImportRepository, PgFollowRepository, PgHashtagRepository, PgInstanceDomainRepository,
+    PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository,
+    PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgRelayRepository,
+    PgRemoteEmojiRepository, PgRemoteInstanceMetaRepository, PgTotpRepository, PgUserRepository,
+    PinnedPostsRepository, PostRepository, ReactionRepository, RelayRepository,
     RemoteEmojiRepository, RemoteInstanceMetaRepository, TotpRepository, UserRepository,
 };
 use seiran_common::{
@@ -290,13 +290,12 @@ impl AppState {
         post_id: i64,
         pending_media_file_id: i64,
     ) {
-        if let Err(e) = sqlx::query(
-            "UPDATE posts SET pending_bsky_media_file_id = $1 WHERE id = $2",
-        )
-        .bind(pending_media_file_id)
-        .bind(post_id)
-        .execute(&self.db)
-        .await
+        if let Err(e) =
+            sqlx::query("UPDATE posts SET pending_bsky_media_file_id = $1 WHERE id = $2")
+                .bind(pending_media_file_id)
+                .bind(post_id)
+                .execute(&self.db)
+                .await
         {
             tracing::error!(
                 "[job] pending_bsky_media_file_id 設定失敗 (post_id={}): {}",
@@ -680,16 +679,14 @@ pub fn router(state: AppState) -> Router {
                 || origin_str == format!("http://{}", local_domain)
         }))
         .allow_methods(Any)
-        .allow_headers([
-            axum::http::header::AUTHORIZATION,
-            axum::http::header::CONTENT_TYPE,
-            // AT Protocol標準クライアントがXRPC経由で送ってくるカスタムヘッダー。
-            // `atproto-proxy`（XRPCプロキシ、`handlers::xrpc::proxy`）が無いと
-            // ブラウザのプリフライトで弾かれ、bsky.appのタイムライン取得等
-            // AppView委譲メソッドが軒並み失敗する（2026-08-31実機確認）。
-            axum::http::HeaderName::from_static("atproto-proxy"),
-            axum::http::HeaderName::from_static("atproto-accept-labelers"),
-        ]);
+        // ヘッダーも `Any`（ワイルドカード）にする。bsky.app等の外部ATクライアントが送ってくる
+        // カスタムヘッダー（`atproto-proxy`/`atproto-accept-labelers`/`x-bsky-topics`等）を
+        // 個別に列挙していたが、新しいヘッダーが増えるたびにプリフライトで弾かれる
+        // モグラ叩きになっていた（2026-08-31実機確認、`x-bsky-topics`未許可で`getTrends`失敗）。
+        // `allow_credentials`を付与していない（Cookie不使用）ため、ヘッダーを`Any`にしても
+        // ブラウザのCORS仕様上安全（`Access-Control-Allow-Headers: *`は非credentialedリクエストで
+        // のみ有効、credentialed併用時のみ禁止される組み合わせ）。
+        .allow_headers(Any);
 
     // 管理系ルートはロールごとに専用ルータへ分割し、`route_layer`で認可を強制する（#221）。
     // ハンドラ側では認可チェックを一切行わない（呼び忘れによる無認可到達を構造的に防ぐ、
@@ -1300,6 +1297,10 @@ pub fn router(state: AppState) -> Router {
             post(handlers::xrpc::actor::xrpc_put_preferences),
         )
         .route(
+            "/xrpc/app.bsky.unspecced.getTrends",
+            get(handlers::xrpc::actor::xrpc_get_trends),
+        )
+        .route(
             "/xrpc/com.atproto.server.createAppPassword",
             post(handlers::xrpc::server::xrpc_create_app_password),
         )
@@ -1368,18 +1369,17 @@ pub fn spawn_startup_tasks(state: &AppState) {
 /// 重複投入（正常に動いているチェーンへの余分な再enqueue）は
 /// `jobs::follow_import` の `request_id` 単位 advisory lock が自然に解消する。
 async fn resume_running_follow_imports(state: &AppState) {
-    let request_ids: Vec<i64> = match sqlx::query_scalar(
-        "SELECT id FROM follow_import_requests WHERE status = 'running'",
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(ids) => ids,
-        Err(e) => {
-            tracing::error!("[startup] 実行中フォローインポートの取得失敗: {}", e);
-            return;
-        }
-    };
+    let request_ids: Vec<i64> =
+        match sqlx::query_scalar("SELECT id FROM follow_import_requests WHERE status = 'running'")
+            .fetch_all(&state.db)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!("[startup] 実行中フォローインポートの取得失敗: {}", e);
+                return;
+            }
+        };
     if request_ids.is_empty() {
         return;
     }
@@ -1431,18 +1431,17 @@ async fn resume_account_withdraw_unfollow_all(state: &AppState) {
 /// 提出済みだが `ready`/`failed` に未確定）を無条件で全件再enqueueする。重複投入は
 /// `jobs::bsky_video_poll`の `media_file_id` 単位 advisory lock が解消する。
 async fn resume_bsky_video_poll(state: &AppState) {
-    let media_file_ids: Vec<i64> = match sqlx::query_scalar(
-        "SELECT id FROM media_files WHERE bsky_video_status = 'pending'",
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(ids) => ids,
-        Err(e) => {
-            tracing::error!("[startup] Bsky動画パイプライン結合待ちの確認失敗: {}", e);
-            return;
-        }
-    };
+    let media_file_ids: Vec<i64> =
+        match sqlx::query_scalar("SELECT id FROM media_files WHERE bsky_video_status = 'pending'")
+            .fetch_all(&state.db)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!("[startup] Bsky動画パイプライン結合待ちの確認失敗: {}", e);
+                return;
+            }
+        };
     if media_file_ids.is_empty() {
         return;
     }

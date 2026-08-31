@@ -193,7 +193,7 @@ seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）�
 
 ローカルユーザーの投稿は `AtpCommitService` が**ジョブキューを介さず直接** MSTコミット・署名し、`atp_repo_events` にイベント記録、公式Relay（`bsky.network`）へ `requestCrawl` を送って購読される。
 
-**CORS**: `crates/seiran-api/src/lib.rs::router` の `CorsLayer`（`allow_origin`のpredicate）は、リクエストパスが`/xrpc/`または`/.well-known/`で始まる場合は無条件でオリジンを許可する。`/api/*`（seiranネイティブAPI、フロントエンド専用）は`FRONTEND_ORIGIN`＋自ドメインのみに制限するが、AT ProtocolのXRPCは仕様上bsky.app等の外部クライアントがブラウザから直接叩くことを前提とした公開APIのため対象外にする必要がある（公式Bluesky PDSも`Access-Control-Allow-Origin: *`を返す）。この分岐が無いと、bsky.appのログイン画面で「サービスに接続できません」となりATクライアントからのアクセスが一切成立しない。
+**CORS**: `crates/seiran-api/src/lib.rs::router` の `CorsLayer`（`allow_origin`のpredicate）は、リクエストパスが`/xrpc/`または`/.well-known/`で始まる場合は無条件でオリジンを許可する。`/api/*`（seiranネイティブAPI、フロントエンド専用）は`FRONTEND_ORIGIN`＋自ドメインのみに制限するが、AT ProtocolのXRPCは仕様上bsky.app等の外部クライアントがブラウザから直接叩くことを前提とした公開APIのため対象外にする必要がある（公式Bluesky PDSも`Access-Control-Allow-Origin: *`を返す）。この分岐が無いと、bsky.appのログイン画面で「サービスに接続できません」となりATクライアントからのアクセスが一切成立しない。`allow_headers`も`Any`（ワイルドカード）にしている。bsky.appは`atproto-proxy`/`x-bsky-topics`等、事前に予測しづらいカスタムヘッダーを様々なXRPCメソッドで送ってくるため、個別ヘッダーを列挙するとヘッダーが増えるたびにプリフライトで弾かれるモグラ叩きになる（2026-08-31実機確認、`x-bsky-topics`未許可で`getTrends`失敗）。`allow_credentials`を付与していない（Cookie不使用）ため`Any`にしても安全（`docs/coding_rules.md`参照）。
 
 ### DID解決・PLC登録・ハンドル検証（アカウント登録時）
 1. ローカルでP-256鍵生成、`did:plc:xxx` をローカル計算のみで確定
@@ -225,6 +225,12 @@ Clearsky等のサードパーティツールは firehose を購読し続ける�
 - `GET /xrpc/com.atproto.sync.listRepos` — `at_did IS NOT NULL` なアクター（＝ATPリポジトリを持つ）をid順にページングして返す。PDSクローラーがアカウント一覧を発見するためのエンドポイント。
 - `GET /xrpc/com.atproto.sync.getLatestCommit` — `actors.at_repo_cid`/`at_repo_rev` をそのまま返す。
 - `GET /xrpc/com.atproto.sync.listBlobs` — `atp_blobs`（動画パイプライン提出物）のCID一覧をid順にページングして返す。
+
+### postgateスタブ応答・getTrendsスタブ
+seiranはpostgate（引用可否の制限）・トレンド機能の作成/実装を持たないが、bsky.appクライアントがこれらのエンドポイントを叩いた際に保守的にエラー扱いされるのを防ぐため、無害なスタブ応答を返す。
+
+- `GET /xrpc/com.atproto.repo.getRecord?collection=app.bsky.feed.postgate`（`crates/seiran-api/src/handlers/xrpc/repo.rs`の`get_record_postgate`）— `atp_records`に実レコードが無い場合、`embeddingRules: []`（誰でも引用可）の合成レコードを返す。AT Protocol仕様では「レコード不在=制限なし」のはずだが、404のままだとbsky.app側が引用不可として扱うことがあった（2026-08-31 マイケル報告）。CIDは`encode_generic_record`で実際にDAG-CBORエンコードした値から計算する（ダミー値ではない）。実レコードが存在する場合（将来postgate作成機能を実装した場合）はそちらを優先する。
+- `GET /xrpc/app.bsky.unspecced.getTrends`（`xrpc_get_trends`）— 常に`{"trends": []}`を返す。未実装だと`atproto-proxy`ヘッダー無しの直接呼び出しが`xrpc_proxy_fallback`の`MethodNotImplemented`（404）になる。
 
 ### セッション認証（外部ATプロトコルクライアント対応）
 公式Blueskyアプリ等の外部ATプロトコルクライアントがseiranアカウントへ直接ログインできるようにする仕組み。既存のMisskey API互換ログイン（`LocalAuthProvider`、`sub: "local|{user_id}"`のJWT）とは完全に別の認証系で、`LocalAuthProvider`に追加したメソッド群（`generate_atp_session`/`verify_atp_access_token`/`verify_atp_refresh_token`、`crates/seiran-common/src/auth/local.rs`）が同じ`secret`でHS256署名・検証する（`sub`にDIDそのものを積むため既存の`sub.strip_prefix("local|")`とは自然に衝突しない）。
@@ -290,6 +296,16 @@ Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホス
 - `app.bsky.feed.post` の delete commit（`operation:"delete"`）は `at://{did}/app.bsky.feed.post/{rkey}` を組み立て、一致する `posts.at_uri` を論理削除する。`at_uri` 自体がイベント発行元の `did` から組み立てられるためLikeと同様になりすましは原理上不可能（他者のdidの投稿を指せない）。取り込んでいない投稿（フォロー対象外だった等）の delete イベントは無視。
 - **Repost（`app.bsky.feed.repost`）はタイムライン投稿として`posts`に保存する**（`handle_inbound_repost_create`、Fediverseの`Announce`受信〔`handle_announce`〕と対称の処理）。リポスト対象がDBに未取り込み（`wantedDids`絞り込みで元々購読対象外だった投稿等）なら`app.bsky.feed.getPosts`でAppViewから直接フェッチして著者ごと保存してから`repost_of_post_id`でリンクする。`posts.at_uri`にリポストレコード自体のURI（`at://{did}/app.bsky.feed.repost/{rkey}`）を保存し、Fedi版の`ap_object_id`と対になる（Bskyのリポストに可視性の概念は無いため`visibility`は常に`public`固定）。delete commitは`app.bsky.feed.post`と同じ`at_uri`ベースの論理削除（`handle_inbound_post_delete`／`soft_delete_by_at_uri`はコレクションを問わず共用）。対象がローカル投稿の場合のみ通知も作る。
 - **AppView直接フェッチ経路（`fetch_single_bsky_post`/`upsert_bsky_post`、`seiran-common::atp::client`）の添付復元**: 上記のリポスト未取り込みフェッチに加え、検索結果保存・ピン留め投稿同期・「開く」機能（`POST /api/open`）でも同じ`fetch_single_bsky_post`/`upsert_bsky_post`を使う。取得した`record.embed`は、Jetstream経由の通常投稿取り込みと同じ解析ロジック（`seiran-common::atp::embed`の`parse_bsky_embed_attachments`/`parse_bsky_embed_link_card`、画像・動画・GIF・URLカードに対応）で添付・URLカードへ復元する（新規作成時のみ。既存投稿への`upsert`はスキップ）。`upsert_bsky_post`はJetstream経由と同様、URLカードINSERT成功後に`Job::LinkCardEmbedResolve`をenqueueする（呼び出し元は`Arc<dyn JobQueue>`を引数で渡す）。
+
+### 返信許可（threadgate）・引用可否（postgate）のグレーアウト表示
+リモートBsky投稿に対し、閲覧中ユーザーが実際に返信・引用できるかを`posts`テーブルに保存されたゲート情報から評価し、NoteCardの返信/引用ボタンをグレーアウト＋ツールチップ表示する。
+
+- **取得**: `upsert_bsky_post`（`seiran-common::atp::client`、投稿を新規保存した直後のみ）が`fetch_bsky_gates`で投稿と同じrkeyの`app.bsky.feed.threadgate`/`app.bsky.feed.postgate`を`com.atproto.repo.getRecord`（AppView経由）で個別取得し、`posts.bsky_reply_allow`（threadgateの`allow`配列そのもの、レコード不在なら`NULL`=制限なし）・`posts.bsky_quote_disabled`（postgateの`embeddingRules`に`#disableRule`が含まれるか）へ保存する。postgateは仕様上「全員可」「全員不可」の二値のみで部分許可は無い。
+- **評価**（`queries::attach_reply_quote_gates`、`crates/seiran-api/src/handlers/notes/queries.rs`）: タイムライン/詳細/返信一覧等の`NoteResponse`組み立て後に一括評価し`replyBlocked`/`quoteBlocked`へ反映する（未ログイン時は評価しない）。`bsky_reply_allow`のルールはOR条件、投稿者自身は常に許可:
+  - `#mentionRule` — 投稿の`mention_facets`に閲覧者のDIDが含まれるか（追加問い合わせ不要）。
+  - `#followingRule` — `follows`テーブルに`author→viewer`の行があるか（追加問い合わせ不要。リモート投稿者が閲覧者をフォロー中なら、その関係はfirehose経由で既に`follows`に取り込まれている）。
+  - `#listRule` — リスト所有者がseiranローカルユーザーなら`lists`/`list_members`で即判定。リモート所有リストは`bsky_remote_list_membership_cache`（24時間TTL）を参照し、未登録/期限切れなら`Job::BskyListMembershipResolve`（`app.bsky.graph.getList`をページングして全メンバーDIDを取得）を積んでフェイルオープン（今回は「制限なし」として扱い、誤ってボタンをグレーアウトしない。次回表示時にはキャッシュが埋まっている）。
+- フロント（`NoteCardActions`）は`isGateReplyBlocked`/`isGateQuoteBlocked`でボタンを`disabled`にし、ツールチップ「投稿者が返信（引用）を許可していません」を表示する。可視性由来の`isPrivateQuoteTarget`（followers_only/direct）とは理由が異なる別フラグ。
 
 ### uploadBlob / getBlob・動画パイプライン
 `getBlob` はCIDのmultihashからsha256を逆算し `media_files`/`atp_blobs` を検索してCDN URLへリダイレクトする（ストレージ本体を自前で再配信しない）。

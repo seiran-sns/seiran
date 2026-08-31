@@ -23,6 +23,10 @@ interface NoteCardActionsProps {
   onReply: (e?: React.MouseEvent) => void;
   onQuote: (e?: React.MouseEvent) => void;
   isPrivateQuoteTarget?: boolean;
+  /** Bsky threadgateにより閲覧中ユーザーが返信できないか。 */
+  isGateReplyBlocked?: boolean;
+  /** Bsky postgateにより閲覧中ユーザーが引用できないか（可視性由来の isPrivateQuoteTarget とは別）。 */
+  isGateQuoteBlocked?: boolean;
   reposted: boolean;
   reposting: boolean;
   unreposting: boolean;
@@ -56,6 +60,8 @@ export default function NoteCardActions({
   onReply,
   onQuote,
   isPrivateQuoteTarget = false,
+  isGateReplyBlocked = false,
+  isGateQuoteBlocked = false,
   reposted,
   reposting,
   unreposting,
@@ -86,12 +92,13 @@ export default function NoteCardActions({
       key: "reply",
       label: `💬 ${t("home:noteCard.replyButton")}`,
       onClick: () => onReply(),
+      disabled: isGateReplyBlocked,
     },
     {
       key: "quote",
       label: `❝ ${t("home:noteCard.quoteButton")}`,
       onClick: () => onQuote(),
-      disabled: isPrivateQuoteTarget,
+      disabled: isPrivateQuoteTarget || isGateQuoteBlocked,
     },
     {
       key: "repost",
@@ -145,7 +152,12 @@ export default function NoteCardActions({
         <button
           className={styles.actionBtn}
           onClick={onReply}
-          title={t("home:noteCard.replyButton")}
+          disabled={isGateReplyBlocked}
+          title={
+            isGateReplyBlocked
+              ? t("home:noteCard.replyGateDisabledTitle")
+              : t("home:noteCard.replyButton")
+          }
         >
           <TwemojiEmoji emoji="💬" />{" "}
           {replyCount > 0 && (
@@ -155,11 +167,13 @@ export default function NoteCardActions({
         <button
           className={styles.actionBtn}
           onClick={onQuote}
-          disabled={isPrivateQuoteTarget}
+          disabled={isPrivateQuoteTarget || isGateQuoteBlocked}
           title={
             isPrivateQuoteTarget
               ? t("home:noteCard.quoteDisabledTitle")
-              : t("home:noteCard.quoteButton")
+              : isGateQuoteBlocked
+                ? t("home:noteCard.quoteGateDisabledTitle")
+                : t("home:noteCard.quoteButton")
           }
         >
           ❝{" "}

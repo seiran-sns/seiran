@@ -32,18 +32,20 @@ pub mod validation;
 pub use creation::create_note;
 pub use deletion::{delete_note, delete_repost};
 pub use dto::to_note_response;
-pub use dto::{AttachmentResponse, LinkCardResponse, NoteResponse, ReactRequest, ReactionSummary};
 pub use dto::{to_reaction_event_response, ProfileFeedItem, ReactionEventResponse};
+pub use dto::{AttachmentResponse, LinkCardResponse, NoteResponse, ReactRequest, ReactionSummary};
 pub use pins::{pin_note, unpin_note};
 pub use poll::vote_poll;
 pub(crate) use profile_material::fetch_atp_profile_material;
 pub use profile_material::resolve_bsky_pinned_post;
 pub use queries::{
-    attach_poll_votes, attach_remote_instance_info, build_instance_cache, embed_quotes,
-    embed_renotes, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
+    attach_poll_votes, attach_remote_instance_info, attach_reply_quote_gates, build_instance_cache,
+    embed_quotes, embed_renotes, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
     resolve_mention_facets_in_place,
 };
-pub use reactions::{create_reaction, delete_reaction, frequent_reactions, note_reposts, reaction_actors};
+pub use reactions::{
+    create_reaction, delete_reaction, frequent_reactions, note_reposts, reaction_actors,
+};
 pub use retrieval::{
     get_announce_redirect, get_note, get_note_ap, note_context, note_replies,
     resolve_note_reference,

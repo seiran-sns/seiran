@@ -480,7 +480,9 @@ async fn process_message(
             let pool2 = pool.clone();
             let hub2 = Arc::clone(stream_hub);
             let queue2 = Arc::clone(job_queue);
+            let http2 = Arc::clone(http);
             let at_uri2 = at_uri.clone();
+            let author_did = did.clone();
             let body_text = body_text.to_string();
 
             tokio::spawn(async move {
@@ -522,8 +524,10 @@ async fn process_message(
                 save_bsky_post(
                     &pool2,
                     &queue2,
+                    &http2,
                     &hub2,
                     &at_uri2,
+                    &author_did,
                     &cid,
                     &body_text,
                     &mention_facets,
@@ -660,8 +664,10 @@ async fn process_message(
 async fn save_bsky_post(
     pool: &PgPool,
     job_queue: &Arc<dyn JobQueue>,
+    http: &Arc<reqwest::Client>,
     stream_hub: &StreamHub,
     at_uri: &str,
+    author_did: &str,
     at_cid: &str,
     text: &str,
     mention_facets: &JsonValue,
@@ -703,6 +709,23 @@ async fn save_bsky_post(
         }
         Ok(_) => {
             tracing::info!("[Jetstream] 保存完了: {}", at_uri);
+
+            // 返信許可（threadgate）・引用可否（postgate）を取得して保存する
+            // （#返信/引用グレーアウト、`docs/protocols.md`参照）。取得失敗時は両方とも
+            // 「制限なし」のまま（誤ってボタンをグレーアウトしない）。
+            let (reply_allow, quote_disabled) =
+                seiran_common::atp::fetch_bsky_gates(http, author_did, at_uri).await;
+            if let Err(e) = sqlx::query(
+                "UPDATE posts SET bsky_reply_allow = $1, bsky_quote_disabled = $2 WHERE id = $3",
+            )
+            .bind(&reply_allow)
+            .bind(quote_disabled)
+            .bind(post_id)
+            .execute(pool)
+            .await
+            {
+                tracing::error!("[Jetstream] gate情報保存失敗（スキップ）: {}", e);
+            }
 
             // URLカード（Bskyは常に最大1件、position=0固定）。埋め込みプレーヤーのiframe src
             // （oEmbed discovery）はここでは未解決のため、後追いでJob::LinkCardEmbedResolveへ
@@ -1026,8 +1049,10 @@ async fn handle_inbound_repost_create(
                                 return;
                             }
                         };
-                    match seiran_common::atp::upsert_bsky_post(pool, job_queue, author_id, &post)
-                        .await
+                    match seiran_common::atp::upsert_bsky_post(
+                        pool, job_queue, http, author_id, &post,
+                    )
+                    .await
                     {
                         Ok(id) => id,
                         Err(e) => {
