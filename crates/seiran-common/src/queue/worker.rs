@@ -483,6 +483,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
                 .await
                 .map_err(JobError::from)
         }
+        Job::PollFetch { post_id } => jobs::poll_fetch::handle(post_id, ctx)
+            .await
+            .map_err(JobError::from),
     }
 }
 
@@ -510,6 +513,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::RemoteInstanceInfoResolve { .. } => "RemoteInstanceInfoResolve",
         Job::FollowImportProcess { .. } => "FollowImportProcess",
         Job::BskyListMembershipResolve { .. } => "BskyListMembershipResolve",
+        Job::PollFetch { .. } => "PollFetch",
     }
 }
 
@@ -644,6 +648,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             // 埋まらないだけで、表示側はフェイルオープン（グレーアウトしない）にフォールバックする。
             max_attempts: 3,
             base_delay_ms: 1000,
+            max_delay_ms: 30_000,
+        },
+        Job::PollFetch { .. } => RetryConfig {
+            // RemoteInstanceInfoResolve と同様の軽量ベストエフォート取得。失敗しても
+            // poll_fetched_at は進まないため、次回表示読み込み時に自然に再度積まれる。
+            max_attempts: 3,
+            base_delay_ms: 2000,
             max_delay_ms: 30_000,
         },
     }

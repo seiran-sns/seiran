@@ -236,6 +236,7 @@ async fn create_repost(
     )
     .await;
     attach_remote_instance_info(state, std::slice::from_mut(&mut repost_resp)).await;
+    enqueue_stale_poll_fetches(state, std::slice::from_ref(&repost_resp)).await;
     broadcast_new_note(state, actor_id, &repost_resp).await;
 
     Json(repost_resp).into_response()
@@ -933,6 +934,7 @@ async fn persist_regular_post(
     .await;
     attach_reply_quote_gates(state, std::slice::from_mut(&mut note_resp), Some(actor_id)).await;
     attach_remote_instance_info(state, std::slice::from_mut(&mut note_resp)).await;
+    enqueue_stale_poll_fetches(state, std::slice::from_ref(&note_resp)).await;
 
     if visibility == "direct" {
         delivery::broadcast_direct_message(state, actor_id, post_id, &note_resp).await;

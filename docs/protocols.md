@@ -110,6 +110,7 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 | `Block` | リモートアクターupsert → ブロックされた側がブロックした側をフォローしていた関係があれば解消（`blocks` テーブルには書き込まない、通知も生成しない。11節参照） |
 | `Undo` | `object.type` で分岐: `Like`/`EmojiReact`→リアクション削除、`Announce`→リポスト論理削除、`Follow`→フォロー解除、`Block`→ログのみ（DB上の巻き戻し対象なし） |
 | `Delete` | `object`（文字列URIまたは`{"type":"Tombstone","id":...}`）の`ap_object_id`に一致する投稿を論理削除。**送信元アクター（`activity.actor`、HTTP Signature検証済み）が投稿者本人と一致する場合のみ**削除する（なりすまし対策）。一致する投稿が無い場合（アクター自身のDelete等）は無視。リモートアクター自体の退会（`Delete(Actor)`）は未対応 |
+| `Update` | `object.type == "Question"`（アンケート票数更新）のみ受理する。`Delete`と同じなりすまし対策の上で`posts.poll`を更新し、`poll_update_received=true`・`poll_fetched_at=now()`をセットして`pollUpdated` WebSocketイベントを配信する。本文再編集の`Update`（`object.type == "Note"`等）は未対応で無視する。詳細は「アンケート」節「リモートアンケートの生存監視」参照 |
 | `Announce` | リポスト保存。元ポストが未登録なら `resolve_reference`（`jobs::inbound_activity_process::reference`）で1段階だけリモート取得を試みてから紐付け。取得失敗（404/410は`gone`、それ以外は`pending`。#230/#231）でもリポストの箱（wrapper post行）自体は必ず保存する。取得できた場合の元ポスト保存処理（絵文字tag解析・引用/リプライ解決・可視性判定・CW/投票・ハッシュタグ・添付URL保存）は`Create`(Note)と同じ処理を適用するが、DMスレッド解決・通知・WS配信は行わない。元ポストが未解決（pending/gone）の間はリポスト通知も行わない |
 | `Like` \| `EmojiReact` | Misskey は絵文字リアクションも `type:"Like"` 固定で送るため、**wire type ではなく `content`/`_misskey_reaction` の有無**で判定する |
 | `Move` | アカウント引っ越しの受信処理（第1段階、送信側=引っ越し実行UIは未実装）。詳細は下記「アカウント引っ越し（Move）の受信」節参照 |
@@ -357,6 +358,33 @@ Fediverse仕様のアンケート（選択肢2〜10・単一/複数選択・期�
 - **AP `Question`配送（`ap/deliver/activity.rs::apply_poll_to_note_object`）**: `posts.poll`がある投稿は`Create(Note)`の`object.type`を`"Note"`ではなく`"Question"`にし、`multiple`に応じて`oneOf`（単一選択）/`anyOf`（複数選択）へ選択肢を`{"type":"Note","name","replies":{"type":"Collection","totalItems"}}`の形で列挙、`endTime`があれば設定する（受信側`normalize_ap_poll`と対称）。同じ変換は`GET /notes/:id`のAP直接取得（`handlers::notes::get_note_ap`）でも必須：フォロワーでないリモート（Mastodon等）は`Create`配送を受け取らず、投稿URLを検索・閲覧した際にこのエンドポイントを直接GETしてobjectを取得するため、ここで`"Note"`のまま返すと本文だけでアンケートが添付されていないように見える。リモートユーザーがこのアンケートに投票した際の受信処理は`handle_poll_vote`（`inbound_activity_process`）が`find_id_and_actor_by_ap_object_id`でローカル/リモート問わず汎用的に処理するため追加実装不要。DM配送（`deliver_direct_message_to_ap`）はアンケート作成自体が禁止されているため常に`poll: None`。
 - **Bsky向け自己URLリンクカード（`resolve_bsky_embed`の`Target::Poll`、`resolve_poll_embed`）**: ATPにはアンケート概念が無いため、`url`をこのポスト自身の詳細ページ（`https://{local_domain}/notes/{post_id}`、`ap_object_id`と同一形式）、`title`は空文字列（投稿の言語が決定できないため言語依存の見出しは付けない）、`description`は選択肢名だけのプレーンテキスト箇条書き（`- 選択肢A\n- 選択肢B`、HTMLタグ無し・得票バー無し。作成時点の得票は常に0でBsky embedは再コミットされず得票を反映できないため）、`thumb`は無し、で`app.bsky.embed.external`を組み立てる。`post_link_cards`へのINSERTは行わない（投稿自身が`NoteResponse.poll`経由で既にリッチなアンケートUIを表示するため、自分自身を指すリンクカードを重ねるのは冗長・表示上不自然）。Bskyユーザーは現状この詳細ページに来ても投票できない（Bskyクレデンシャルでのログイン投票は将来のステップ）。
 - **優先順位**: アンケートは「Bsky embed候補」の中で常に最優先（静止画より前）。本文にURLがあってもアンケートと競合するラジオボタンリストの1候補として並ぶだけで、アンケート自体は自動的には他候補に優先される。
+
+#### リモートアンケートの生存監視
+
+`posts.poll`は取り込み時点のスナップショットのため、そのままでは以後の投票増加が反映されない。
+push（`Update(Question)`受理）とpull（フォールバック再フェッチ）の2経路で追従させる。
+スキーマの詳細は`docs/database.md`「リモートアンケートの生存監視」参照。
+
+- **push**: `jobs::inbound_activity_process::update::handle_update`が`Update`アクティビティのうち
+  `object.type == "Question"`のみを受理する（本文再編集の`Update`は別件、今回は非対応）。
+  `delete.rs`と同じなりすまし対策（`activity.actor`が投稿者本人と一致するか）を行った上で
+  `normalize_ap_poll`で正規化し、`posts.poll`・`poll_update_received=true`・
+  `poll_fetched_at=now()`を更新する。
+- **pull（フォールバック）**: `Update(Question)`を送ってこない実装への保険。投稿を表示用に
+  読み込む経路（`handlers::notes::queries::enqueue_stale_poll_fetches`、17箇所ある
+  `attach_remote_instance_info`呼び出しすべてに隣接して呼ぶ）が、renote/quote越しも含めて
+  「pollを持つ・リモート投稿・`poll_update_received=false`」な投稿ごとにしきい値を計算し
+  `PostRepository::find_stale_remote_poll_post_ids`へ照会し、対象を`Job::PollFetch{post_id}`
+  として積む。しきい値は締切前は
+  「`poll_fetched_at`が直近10分より古いか」、締切後（`poll.closed`優先、無ければ`endTime`）は
+  「`poll_fetched_at`が締切時刻より古いか（＝締切後まだ一度も取得できていないか）」で、
+  締切済みでも一律除外しない（締切前に取り逃した票数を締切後も取り戻せるようにするため）。
+  ジョブは`ap_client.fetch_object`（`resolve_reference`と同じシステム署名鍵）で対象Noteを
+  再GETし、`normalize_ap_poll`で正規化して`posts.poll`・`poll_fetched_at`を更新する。取得結果
+  が`Question`でなくなっていた場合は`poll_fetched_at`だけ進めて以後叩き直さない。
+- **反映**: push/pullいずれの経路も最後に`broadcast_poll_update`（`streaming.rs`）で
+  `pollUpdated` WebSocketイベントを配信する。ローカル投票時と同じイベントのため、
+  フロントエンド（`usePollState`）は無改修で追従する。
 
 ### CW（閲覧注意、#229）
 `posts.content_warning`は既存列（Fedi受信CW用）で、ローカル作成でも同じ列をそのまま流用する

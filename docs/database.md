@@ -277,6 +277,36 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 `ap_activity_id`が`NULL`の行として同じテーブルに記録される（#228でローカル作成した
 アンケートへの投票も同じテーブル・同じ集計ロジックをそのまま使う）。
 
+## リモートアンケートの生存監視
+
+`posts.poll_update_received`（`BOOLEAN`）と`posts.poll_fetched_at`（`TIMESTAMPTZ`、NULL許容）は、
+リモート（Fedi）アンケートの票数が投稿取り込み後も追従するようにするための列。
+`posts.poll`自体はNote取り込み時のスナップショットなので、これらが無いと以後の投票増加が
+一切反映されない。
+
+- `poll_update_received`: このNoteについて`Update(Question)`アクティビティを一度でも受理した
+  かどうか（`jobs::inbound_activity_process::update::handle_update`）。trueになったら
+  送信元がpush型実装と判明したとみなし、以後は下記のフォールバック再フェッチ対象から外れる。
+- `poll_fetched_at`: pollを最後に取得・反映した日時。pollを持たない投稿では意味を持たずNULLの
+  まま。リモートNote初期取り込み時（`PostRepository::set_fedi_content_metadata`）は`created_at`
+  と同値で初期化する。
+
+`Update(Question)`を送ってこない実装への保険として、`handlers::notes::queries::
+enqueue_stale_poll_fetches`が投稿読み込み時（renote/quote越しも含む）に`poll_update_received=
+false`なリモート投稿を検出し、投稿ごとのしきい値を計算した上で`PostRepository::
+find_stale_remote_poll_post_ids`（`(post_id, しきい値)`のペアを渡す）へ照会、対象を
+`Job::PollFetch`に積む。しきい値は締切前後で異なる: **締切前**（`poll`の`closed`/`endTime`
+が未到来、または両方無し）は「`poll_fetched_at`が直近10分より古ければ」の周期ルール、
+**締切後**（`closed`があればそれ、無ければ`endTime`が現在時刻以前）は「`poll_fetched_at`が
+締切時刻より古ければ（＝締切後まだ一度も取得できていなければ）」1回だけの最終ルール。
+締切済みだからといって対象から一律除外すると、締切前に取り逃した票数を永久に取り戻せなく
+なる（締切前に一度もフェッチされないまま締切を迎えたアンケートが、投稿時点のスナップショット
+に固定されたままになる）ため、この2段階のしきい値にしている。
+このジョブは`ap_client.fetch_object`で対象Noteを再GETし、`posts.poll`と`poll_fetched_at`を
+更新する。どちらの経路（push/pull）で更新されても、結果は`pollUpdated` WebSocketイベント
+（`broadcast_poll_update`）で同じように配信され、既に表示中のNoteCardの票数もリアルタイムに
+更新される。
+
 ### 通報（`reports` / `report_comments`）
 
 `reports` はローカル・Fedi・Bsky共通の管理台帳で、通報者、対象Actor、任意の対象Post、

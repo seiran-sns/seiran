@@ -66,6 +66,7 @@
     "pollVoteButton": "投票",
     "pollBackToOptions": "返回选项",
     "pollShowResults": "显示结果",
+    "pollClosed": "投票已结束",
     "reportButton": "举报",
     "reportSubject": "@{{username}} 的帖子",
     "originalLinkTitle": "这篇帖子是通过桥接/联邦传递的副本。前往原始帖子。",

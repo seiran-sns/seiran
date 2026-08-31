@@ -66,6 +66,7 @@
     "pollVoteButton": "투표",
     "pollBackToOptions": "옵션으로 돌아가기",
     "pollShowResults": "결과 표시",
+    "pollClosed": "설문 종료",
     "reportButton": "보고서",
     "reportSubject": "@{{username}}의 게시물",
     "originalLinkTitle": "이 게시물은 브릿지/페더레이션을 통해 전달된 중복 게시물입니다. 원본 게시물로 이동합니다.",

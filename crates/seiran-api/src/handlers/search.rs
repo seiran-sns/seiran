@@ -304,8 +304,8 @@ async fn fetch_and_respond(
     session_id: Option<String>,
 ) -> axum::response::Response {
     use super::notes::{
-        attach_remote_instance_info, fetch_attachments_map, fetch_link_cards_map,
-        resolve_mention_facets_in_place, to_note_response,
+        attach_remote_instance_info, enqueue_stale_poll_fetches, fetch_attachments_map,
+        fetch_link_cards_map, resolve_mention_facets_in_place, to_note_response,
     };
     use seiran_common::repository::TimelinePost;
 
@@ -350,6 +350,7 @@ async fn fetch_and_respond(
         })
         .collect();
     attach_remote_instance_info(state, &mut notes).await;
+    enqueue_stale_poll_fetches(state, &notes).await;
 
     Json(SearchResponse { notes, session_id }).into_response()
 }

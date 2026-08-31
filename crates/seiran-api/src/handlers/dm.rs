@@ -18,8 +18,8 @@ use crate::AppState;
 
 use super::notes::dto::{to_note_response, NoteResponse, TimelineQuery};
 use super::notes::{
-    attach_remote_instance_info, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
-    resolve_mention_facets_in_place,
+    attach_remote_instance_info, enqueue_stale_poll_fetches, fetch_attachments_map,
+    fetch_link_cards_map, fetch_reactions_map, resolve_mention_facets_in_place,
 };
 
 #[derive(Serialize, Clone)]
@@ -128,6 +128,7 @@ pub async fn sessions(
         })
         .collect();
     attach_remote_instance_info(&state, &mut last_post_list).await;
+    enqueue_stale_poll_fetches(&state, &last_post_list).await;
     let mut last_post_by_id: HashMap<i64, NoteResponse> = last_post_list
         .into_iter()
         .filter_map(|nr| nr.id.parse::<i64>().ok().map(|id| (id, nr)))
@@ -205,6 +206,7 @@ pub async fn thread_messages(
         })
         .collect();
     attach_remote_instance_info(&state, &mut notes).await;
+    enqueue_stale_poll_fetches(&state, &notes).await;
     Json(notes).into_response()
 }
 

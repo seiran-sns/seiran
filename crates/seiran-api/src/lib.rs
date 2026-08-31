@@ -480,6 +480,18 @@ impl AppState {
             );
         }
     }
+
+    /// リモートアンケートの生存監視フォールバック取得ジョブを積む（Update(Question)を
+    /// 送ってこない実装への保険、`handlers::notes::queries::enqueue_stale_poll_fetches`が使う）。
+    pub async fn enqueue_poll_fetch(&self, post_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::PollFetch { post_id }, job_priority::LOW)
+            .await
+        {
+            tracing::error!("[job] PollFetch enqueue 失敗 (post_id={}): {}", post_id, e);
+        }
+    }
 }
 
 /// 共有リソース（DB プール・シークレット・HTTP クライアント・ドメイン）を受け取り

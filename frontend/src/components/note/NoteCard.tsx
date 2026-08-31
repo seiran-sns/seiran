@@ -550,6 +550,13 @@ function PostContent({
                   </button>
                 ),
               )}
+          {pollClosed && (
+            <div className={styles.pollControls}>
+              <span className={styles.pollClosedLabel}>
+                {t("home:noteCard.pollClosed")}
+              </span>
+            </div>
+          )}
           {!pollVoted && !pollClosed && (
             <div className={styles.pollControls}>
               {poll.multiple && !pollResults && (

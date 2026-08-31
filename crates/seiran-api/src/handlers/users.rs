@@ -16,9 +16,9 @@ use crate::error::ApiError;
 use crate::handlers::notes::dto::{build_instance_info, RemoteInstanceInfo};
 use crate::handlers::notes::{
     attach_poll_votes, attach_remote_instance_info, attach_reply_quote_gates, embed_quotes,
-    embed_renotes, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
-    resolve_mention_facets_in_place, to_note_response, to_reaction_event_response, NoteResponse,
-    ProfileFeedItem,
+    embed_renotes, enqueue_stale_poll_fetches, fetch_attachments_map, fetch_link_cards_map,
+    fetch_reactions_map, resolve_mention_facets_in_place, to_note_response,
+    to_reaction_event_response, NoteResponse, ProfileFeedItem,
 };
 use crate::middleware::{extract_auth, MaybeAuthedUser};
 use crate::AppState;
@@ -126,6 +126,7 @@ pub async fn user_posts(
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
     attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
     attach_remote_instance_info(&state, &mut notes).await;
+    enqueue_stale_poll_fetches(&state, &notes).await;
 
     if !params.include_reactions {
         return Json(notes).into_response();
@@ -869,6 +870,8 @@ async fn build_profile_response_inner(
     attach_reply_quote_gates(state, &mut pinned_posts, my_actor_id).await;
     attach_remote_instance_info(state, &mut recent_posts).await;
     attach_remote_instance_info(state, &mut pinned_posts).await;
+    enqueue_stale_poll_fetches(state, &recent_posts).await;
+    enqueue_stale_poll_fetches(state, &pinned_posts).await;
 
     // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
     let avatar_url: Option<String> = state

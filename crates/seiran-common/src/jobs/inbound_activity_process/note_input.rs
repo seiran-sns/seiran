@@ -107,7 +107,7 @@ pub(super) fn guess_attachment_mime_type(att: &serde_json::Value, url: &str) -> 
     Some(guessed.to_string())
 }
 
-pub(super) fn normalize_ap_poll(note: &serde_json::Value) -> Option<serde_json::Value> {
+pub(crate) fn normalize_ap_poll(note: &serde_json::Value) -> Option<serde_json::Value> {
     if note["type"].as_str() != Some("Question") {
         return None;
     }

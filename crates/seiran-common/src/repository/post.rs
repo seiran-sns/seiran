@@ -649,6 +649,19 @@ pub trait PostRepository: Send + Sync {
         content_warning: Option<&str>,
         poll: Option<&serde_json::Value>,
     ) -> Result<(), sqlx::Error>;
+
+    /// 候補`post_id`群のうち、リモートアンケートの生存監視フォールバック
+    /// （`Job::PollFetch`）の対象となるものを返す。`poll_update_received=false`
+    /// （Update(Question)を一度も受理していない＝未対応実装の可能性）かつ`poll_fetched_at`が
+    /// その投稿ごとの`threshold`より古いものが対象。`threshold`は呼び出し側（`handlers::notes::
+    /// queries::enqueue_stale_poll_fetches`）が「締切前=直近10分より古いか」「締切後=締切時刻
+    /// より古いか（＝締切後まだ一度も取得できていないか）」を投稿ごとに計算して渡す
+    /// （締切前に取り逃した票数を締切後も永久に取り戻せなくなるのを防ぐため、一律の
+    /// カットオフではなく投稿ごとの`threshold`にしている）。
+    async fn find_stale_remote_poll_post_ids(
+        &self,
+        candidates: &[(i64, DateTime<Utc>)],
+    ) -> Result<Vec<i64>, sqlx::Error>;
 }
 
 pub struct PgPostRepository {
@@ -1676,12 +1689,37 @@ impl PostRepository for PgPostRepository {
         content_warning: Option<&str>,
         poll: Option<&serde_json::Value>,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE posts SET content_warning = $2, poll = $3 WHERE id = $1")
-            .bind(post_id)
-            .bind(content_warning)
-            .bind(poll)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
+        sqlx::query(
+            "UPDATE posts SET content_warning = $2, poll = $3,
+                 poll_fetched_at = CASE WHEN $3 IS NOT NULL THEN created_at ELSE poll_fetched_at END
+             WHERE id = $1",
+        )
+        .bind(post_id)
+        .bind(content_warning)
+        .bind(poll)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    async fn find_stale_remote_poll_post_ids(
+        &self,
+        candidates: &[(i64, DateTime<Utc>)],
+    ) -> Result<Vec<i64>, sqlx::Error> {
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<i64> = candidates.iter().map(|(id, _)| *id).collect();
+        let thresholds: Vec<DateTime<Utc>> = candidates.iter().map(|(_, t)| *t).collect();
+        sqlx::query_scalar(
+            "SELECT p.id FROM posts p
+             JOIN UNNEST($1::bigint[], $2::timestamptz[]) AS t(id, threshold) ON p.id = t.id
+             WHERE p.poll IS NOT NULL AND p.poll_update_received = false
+               AND p.poll_fetched_at < t.threshold",
+        )
+        .bind(&ids)
+        .bind(&thresholds)
+        .fetch_all(&self.pool)
+        .await
     }
 }

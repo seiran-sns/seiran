@@ -57,6 +57,7 @@ pub async fn get_note(
     attach_poll_votes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
     attach_reply_quote_gates(&state, std::slice::from_mut(&mut nr), my_actor_id).await;
     attach_remote_instance_info(&state, std::slice::from_mut(&mut nr)).await;
+    enqueue_stale_poll_fetches(&state, std::slice::from_ref(&nr)).await;
     Ok(Json(nr))
 }
 
@@ -486,6 +487,8 @@ pub async fn note_context(
     attach_poll_votes(&state.db, &mut after, my_actor_id).await;
     attach_reply_quote_gates(&state, &mut after, my_actor_id).await;
     attach_remote_instance_info(&state, &mut after).await;
+    enqueue_stale_poll_fetches(&state, &before).await;
+    enqueue_stale_poll_fetches(&state, &after).await;
 
     Ok(Json(NoteContextResponse { before, after }))
 }
@@ -547,6 +550,7 @@ pub async fn note_replies(
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
     attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
     attach_remote_instance_info(&state, &mut notes).await;
+    enqueue_stale_poll_fetches(&state, &notes).await;
 
     Ok(Json(NoteRepliesResponse { notes }))
 }

@@ -66,6 +66,7 @@
     "pollVoteButton": "Abstimmung",
     "pollBackToOptions": "Zurück zu den Optionen",
     "pollShowResults": "Ergebnisse anzeigen",
+    "pollClosed": "Umfrage beendet",
     "reportButton": "Bericht",
     "reportSubject": "@{{username}}s Beitrag",
     "originalLinkTitle": "Dieser Beitrag ist ein Duplikat, das über eine Brücke/Föderation übermittelt wurde. Gehen Sie zum ursprünglichen Beitrag.",

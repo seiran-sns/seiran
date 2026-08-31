@@ -289,6 +289,13 @@ pub enum Job {
     /// リストを見つけた際に積む。ローカルseiranユーザー所有のリストは`lists`/`list_members`に
     /// 既に答えがあるためこのジョブの対象にならない。
     BskyListMembershipResolve { list_uri: String },
+
+    /// リモートアンケート（AP Question）の生存監視フォールバック。Update(Question)を
+    /// 送ってこない実装への保険として、締切前かつ長時間未フェッチのpollを表示読み込み時に
+    /// 能動的に再GETし直す（`AppState::enqueue_poll_fetch`、`handlers::notes::queries::
+    /// enqueue_stale_poll_fetches`）。既にUpdate(Question)を受理済み（`posts.
+    /// poll_update_received`）のNoteは対象外。
+    PollFetch { post_id: i64 },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

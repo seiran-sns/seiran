@@ -729,6 +729,69 @@ pub async fn build_instance_cache(
     cached
 }
 
+/// `poll`の`closed`（明示的な締切済み時刻、無ければ`None`）/`endTime`（予定締切時刻）から
+/// 「締切済みとみなす時刻」を取り出す。`closed`が無ければ`endTime`へフォールバックする
+/// （Mastodon等は開票締切時に`closed`へ実際の締切時刻を書き込むため、両方あれば`closed`優先）。
+fn poll_closed_at(poll: &serde_json::Value) -> Option<chrono::DateTime<chrono::Utc>> {
+    poll["closed"]
+        .as_str()
+        .or_else(|| poll["endTime"].as_str())
+        .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
+}
+
+/// `NoteResponse`群（renote/quote越しも含む）からリモートアンケートの生存監視フォールバック
+/// （`Job::PollFetch`）対象を集め、必要なものだけenqueueする。対象は「pollを持つ・
+/// リモート（Fedi）投稿・`poll_update_received=false`」なノート。締切前は「10分より古い
+/// フェッチなら再取得」の周期ルール、締切後は「締切後に一度もフェッチできていなければ
+/// 最後に1回だけ再取得」というルール（`(post_id, しきい値)`のペアを
+/// `PostRepository::find_stale_remote_poll_post_ids`へ渡す）。締切前に取り逃していた票数を
+/// 締切後も永久に取り戻せなくなる事故を防ぐため、締切済みだからといって対象から除外しない。
+/// 一度でも`Update(Question)`を受理した（`poll_update_received=true`）Noteは、送信元がpush型と
+/// 判明しているためフォールバック対象から永久に外れる。
+pub async fn enqueue_stale_poll_fetches(state: &AppState, notes: &[NoteResponse]) {
+    fn collect(
+        n: &NoteResponse,
+        candidates: &mut Vec<(i64, chrono::DateTime<chrono::Utc>)>,
+        now: chrono::DateTime<chrono::Utc>,
+        stale_before: chrono::DateTime<chrono::Utc>,
+    ) {
+        if let Some(poll) = &n.poll {
+            if !matches!(n.user.actor_type.as_str(), "local" | "bsky") {
+                if let Ok(id) = n.id.parse::<i64>() {
+                    let threshold = match poll_closed_at(poll) {
+                        Some(closed_at) if closed_at <= now => closed_at,
+                        _ => stale_before,
+                    };
+                    candidates.push((id, threshold));
+                }
+            }
+        }
+        if let Some(r) = n.renote.as_deref() {
+            collect(r, candidates, now, stale_before);
+        }
+        if let Some(q) = n.quote.as_deref() {
+            collect(q, candidates, now, stale_before);
+        }
+    }
+
+    let now = chrono::Utc::now();
+    let stale_before = now - chrono::Duration::minutes(10);
+    let mut candidates = Vec::new();
+    for n in notes {
+        collect(n, &mut candidates, now, stale_before);
+    }
+    if candidates.is_empty() {
+        return;
+    }
+
+    let Ok(stale_ids) = state.posts.find_stale_remote_poll_post_ids(&candidates).await else {
+        return;
+    };
+    for post_id in stale_ids {
+        state.enqueue_poll_fetch(post_id).await;
+    }
+}
+
 /// リモート投稿者（renote/quote越しも含む）のインスタンス情報（Misskey `UserLite.instance`
 /// 準拠、#NoteCardリモートサーバー表示）を一括解決して各 `NoteResponse.user.instance` へ埋める。
 /// キャッシュ未登録のドメインは `RemoteInstanceInfoResolve` ジョブを積み、今回は

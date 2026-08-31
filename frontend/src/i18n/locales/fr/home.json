@@ -66,6 +66,7 @@
     "pollVoteButton": "Voter",
     "pollBackToOptions": "Retour aux options",
     "pollShowResults": "Afficher les résultats",
+    "pollClosed": "Sondage terminé",
     "reportButton": "Rapport",
     "reportSubject": "Message de @{{username}}",
     "originalLinkTitle": "Ce message est un duplicata délivré via un pont/fédération. Accédez au message d'origine.",

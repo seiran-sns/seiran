@@ -66,6 +66,7 @@
     "pollVoteButton": "Vote",
     "pollBackToOptions": "Back to options",
     "pollShowResults": "Show results",
+    "pollClosed": "Poll closed",
     "reportButton": "Report",
     "reportSubject": "@{{username}}'s post",
     "originalLinkTitle": "This post is a duplicate delivered via a bridge/federation. Go to the original post.",
