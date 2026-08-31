@@ -61,6 +61,7 @@ pub use queue::worker::{
 pub use queue::{create_job_queue, InMemoryJobQueue, RedisJobQueue, WorkerEngine};
 pub use repository::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
+    ResolvedMediaFile,
 };
 pub use repository::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider, StorageProviderError,

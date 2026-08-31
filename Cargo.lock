@@ -3845,6 +3845,7 @@ dependencies = [
  "emojis",
  "hex",
  "html-escape",
+ "image",
  "ipld-core",
  "jsonwebtoken",
  "lettre",

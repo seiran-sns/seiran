@@ -19,6 +19,9 @@ frontend/public/twemoji/
 # node_modules由来の生成物（postinstallで生成される軽量絵文字アノテーションJSON）
 frontend/src/generated/emoji-annotations/
 
+# この環境固有のローカル運用メモ（コミットしない）
+OPERATIONS.local.md
+
 # エディタ・OS メタデータ
 .DS_Store
 .idea/

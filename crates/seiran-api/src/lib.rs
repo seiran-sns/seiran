@@ -805,6 +805,13 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(handlers::health::health))
         // サイトアイコンを favicon として返す（#42）
         .route("/favicon.ico", get(handlers::favicon::favicon))
+        // PWA Web App Manifest（サイト設定から動的生成）
+        .route("/manifest.webmanifest", get(handlers::manifest::manifest))
+        // サイトアイコンのリサイズ配信（favicon/PWAアイコン共通）
+        .route(
+            "/api/site-icon/:sha256/:size",
+            get(handlers::site_icon::site_icon),
+        )
         .route(
             "/api/avatars/:actor_id",
             get(handlers::avatar::fallback_avatar),

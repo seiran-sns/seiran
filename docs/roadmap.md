@@ -140,6 +140,8 @@
 - [x] **ポスト詳細画面のログイン不要化** — `/notes/:id`から`RequireAuth`ガードを撤去。閲覧系API（`GET /api/notes/:id`・`/context`・`/replies`・`/reposts`・`/reactions/:content/actors`・`/api/users/profile`）は元々`MaybeAuthedUser`で未ログイン対応済みだったため、フロント側のルーティング変更のみで対応。未ログイン時は左メニュー最下部のユーザーチップが現在画面への`redirect`付き`/login`誘導ボタンに差し替わる。詳細: `docs/ui_spec.md` 2.3節
 - [x] **ユーザープロフィール画面のログイン不要化** — `/:acct`（`/@handle`）・旧`/profile?q=`から`RequireAuth`ガードを撤去。未ログイン時は対ユーザー操作メニュー（フォロー/ミュート/ブロック/通報）の代わりにログイン誘導ガイダンス文を表示。詳細: `docs/ui_spec.md` 2.2節
 - [ ] **ユーザー製翻訳ファイルの適用・配布機能** — ユーザーが独自の言語ファイル（`i18n/locales/{lng}/*.json` と同形式）を作成し、アプリに読み込ませて適用・配布できるようにする構想。現状の名前空間分割構成は `i18n.addResourceBundle()` によるこの拡張を見据えたもの
+- [x] **PWA対応（ホーム画面への追加）** — `manifest.webmanifest`を管理画面のサイト設定（サイト名・テーマカラー・サイトアイコン）から動的生成し、ホーム画面/デスクトップへのインストールに対応。サイトアイコンは`/api/site-icon/:sha256/:size`でfavicon/PWAアイコン共通のリサイズ配信（アニメーション画像はリサイズせずそのまま配信）。詳細: `docs/architecture.md`
+- [ ] **プッシュ通知対応** — Service Worker経由のプッシュ通知（購読管理API・VAPID鍵・通知許諾UI）は未着手
 
 ### プロトコル
 

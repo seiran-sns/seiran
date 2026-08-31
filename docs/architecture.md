@@ -201,6 +201,8 @@ pub struct SearchSession {
 
 代替アバターの配信形式は、SVG非対応のMisskeyクライアントでも表示できるようPNGとする。APIは `image/png` を返し、形式変更時のimmutableキャッシュを避けるためURL版数を `v=5` とする。`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE=1` でAPIロールを一度だけ起動すると、画像未設定の全ローカルactorについて現在のATPプロフィールを再コミットし、Relay/AppViewへ再取得を促せる。通常起動では実行しない。
 
+**PWA対応（ホーム画面追加）**: `GET /manifest.webmanifest` が `site_settings`（`site_name`/`site_color`/`site_icon_sha256`）から Web App Manifest を都度動的生成する（`display: standalone`）。アイコンは `GET /api/site-icon/:sha256/:size` が管理画面でアップロードしたサイトアイコン（`media_files`）を指定サイズのPNGへリサイズして返す。URLがsha256をパスに含むcontent-addressableな形式のため `Cache-Control: immutable` で長期キャッシュできる（同じ画像に戻せばCDN上の古いキャッシュがそのまま再利用される）。アニメーション画像（GIF/APNG/WebPアニメ）はリサイズせず元バイト列のまま返す（`image` crateがアニメーションPNG/WebPの書き出しに非対応なことに加え、管理者が意図した演出を静止画化しないため）。`/favicon.ico` は `site_icon_sha256` が設定されていれば `/api/site-icon/:sha256/32` へ、未設定なら従来通り `site_icon_url` へ直接リダイレクトする。`nginx.conf`/`nginx.mono.conf` は `/favicon.ico` 同様 `/manifest.webmanifest` をAPIロールへ振り分ける（`/api/site-icon/...` は既存の `/api/` プレフィックスでカバーされる）。オフライン動作・プッシュ通知は非対応（Service Workerを導入していない）。
+
 ## 8. フロントエンド
 
 React 18 + Vite + TypeScript（react-router-dom v7、declarative mode。`<BrowserRouter>`＋`useNavigate`/`useParams`等のフック中心で、データルーター（`createBrowserRouter`等）は不使用）。`frontend/src/` 構成:

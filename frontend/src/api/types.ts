@@ -78,6 +78,7 @@ export interface SiteSettings {
   site_name: string;
   site_color: string;
   site_icon_url: string;
+  site_icon_sha256: string;
   media_proxy_url: string;
   auth_bruteforce_window_minutes: string;
   auth_bruteforce_max_variants: string;

@@ -20,6 +20,8 @@ pub struct SiteSettingsResponse {
     pub site_name: String,
     pub site_color: String,
     pub site_icon_url: String,
+    /// アップロード経由で設定した場合の対応 `media_files.sha256`（PWAアイコン配信用）。
+    pub site_icon_sha256: String,
     pub media_proxy_url: String,
     // 認証ブルートフォース対策（#223）
     pub auth_bruteforce_window_minutes: String,
@@ -70,6 +72,10 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
         site_name: settings.get("site_name").cloned().unwrap_or_default(),
         site_color: settings.get("site_color").cloned().unwrap_or_default(),
         site_icon_url: settings.get("site_icon_url").cloned().unwrap_or_default(),
+        site_icon_sha256: settings
+            .get("site_icon_sha256")
+            .cloned()
+            .unwrap_or_default(),
         media_proxy_url: settings.get("media_proxy_url").cloned().unwrap_or_default(),
         auth_bruteforce_window_minutes: settings
             .get("auth_bruteforce_window_minutes")
@@ -183,6 +189,7 @@ pub struct UpdateSiteSettingsRequest {
     pub site_name: Option<String>,
     pub site_color: Option<String>,
     pub site_icon_url: Option<String>,
+    pub site_icon_sha256: Option<String>,
     pub media_proxy_url: Option<String>,
     pub auth_bruteforce_window_minutes: Option<String>,
     pub auth_bruteforce_max_variants: Option<String>,
@@ -342,6 +349,9 @@ pub async fn update_site_settings(
         req.site_icon_url
             .as_deref()
             .map(|v| ("site_icon_url", v.to_string())),
+        req.site_icon_sha256
+            .as_deref()
+            .map(|v| ("site_icon_sha256", v.to_string())),
         req.media_proxy_url
             .as_deref()
             .map(|v| ("media_proxy_url", v.trim_end_matches('/').to_string())),

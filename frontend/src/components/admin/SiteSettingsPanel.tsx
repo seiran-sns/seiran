@@ -23,6 +23,7 @@ export default function SiteSettingsPanel() {
   const [siteName, setSiteName] = useState("");
   const [siteColor, setSiteColor] = useState("");
   const [siteIconUrl, setSiteIconUrl] = useState("");
+  const [siteIconSha256, setSiteIconSha256] = useState("");
   const [mediaProxyUrl, setMediaProxyUrl] = useState("");
   const [uploadingIcon, setUploadingIcon] = useState(false);
   const iconRef = useRef<HTMLInputElement>(null);
@@ -71,6 +72,7 @@ export default function SiteSettingsPanel() {
         setSiteName(s.site_name);
         setSiteColor(s.site_color);
         setSiteIconUrl(s.site_icon_url);
+        setSiteIconSha256(s.site_icon_sha256);
         setMediaProxyUrl(s.media_proxy_url);
         setBruteforceWindowMinutes(s.auth_bruteforce_window_minutes);
         setBruteforceMaxVariants(s.auth_bruteforce_max_variants);
@@ -110,6 +112,7 @@ export default function SiteSettingsPanel() {
     try {
       const f = await api.media.upload(file, "avatar");
       setSiteIconUrl(f.url);
+      setSiteIconSha256(f.sha256);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -132,6 +135,7 @@ export default function SiteSettingsPanel() {
         site_name: siteName,
         site_color: siteColor,
         site_icon_url: siteIconUrl,
+        site_icon_sha256: siteIconSha256,
         media_proxy_url: mediaProxyUrl,
         auth_bruteforce_window_minutes: bruteforceWindowMinutes,
         auth_bruteforce_max_variants: bruteforceMaxVariants,

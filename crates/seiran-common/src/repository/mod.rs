@@ -58,6 +58,7 @@ pub use instance_domain::{ConfirmOutcome, InstanceDomainRepository, PgInstanceDo
 pub use list::{ListMemberRow, ListRepository, ListRow, PgListRepository};
 pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
+    ResolvedMediaFile,
 };
 pub use mute::{MuteRepository, MutedActorRow, PgMuteRepository};
 pub use notification::{

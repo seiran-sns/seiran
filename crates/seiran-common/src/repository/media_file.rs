@@ -24,6 +24,13 @@ pub struct MediaFile {
     pub is_animated_image: bool,
 }
 
+/// `resolve_public_by_sha256` の戻り値。
+pub struct ResolvedMediaFile {
+    pub url: String,
+    pub mime_type: String,
+    pub is_animated_image: bool,
+}
+
 pub struct CreateMediaFile {
     pub id: i64,
     pub storage_provider_id: i64,
@@ -63,6 +70,14 @@ pub trait MediaFileRepository: Send + Sync {
     async fn find_by_sha256(&self, sha256: &str) -> Result<Option<MediaFile>, MediaFileError>;
 
     async fn find_by_id(&self, id: i64) -> Result<Option<MediaFile>, MediaFileError>;
+
+    /// SHA-256 から公開URL・MIMEタイプ・アニメーション画像かどうかを解決する
+    /// （`/api/site-icon/:sha256/:size` 用。`storage_providers.public_url` と
+    /// `media_files.storage_key` を結合して公開URLを組み立てる）。
+    async fn resolve_public_by_sha256(
+        &self,
+        sha256: &str,
+    ) -> Result<Option<ResolvedMediaFile>, MediaFileError>;
 
     async fn insert(&self, req: CreateMediaFile) -> Result<MediaFile, MediaFileError>;
 
@@ -114,6 +129,30 @@ impl MediaFileRepository for PgMediaFileRepository {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row)
+    }
+
+    async fn resolve_public_by_sha256(
+        &self,
+        sha256: &str,
+    ) -> Result<Option<ResolvedMediaFile>, MediaFileError> {
+        let row: Option<(String, String, String, bool)> = sqlx::query_as(
+            "SELECT sp.public_url, mf.storage_key, mf.mime_type, mf.is_animated_image \
+             FROM media_files mf \
+             JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+             WHERE mf.sha256 = $1 \
+             ORDER BY mf.id LIMIT 1",
+        )
+        .bind(sha256)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|(public_url, storage_key, mime_type, is_animated_image)| {
+            ResolvedMediaFile {
+                url: format!("{}/{}", public_url.trim_end_matches('/'), storage_key),
+                mime_type,
+                is_animated_image,
+            }
+        }))
     }
 
     async fn insert(&self, req: CreateMediaFile) -> Result<MediaFile, MediaFileError> {
