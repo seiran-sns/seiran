@@ -193,6 +193,8 @@ seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）�
 
 ローカルユーザーの投稿は `AtpCommitService` が**ジョブキューを介さず直接** MSTコミット・署名し、`atp_repo_events` にイベント記録、公式Relay（`bsky.network`）へ `requestCrawl` を送って購読される。
 
+**CORS**: `crates/seiran-api/src/lib.rs::router` の `CorsLayer`（`allow_origin`のpredicate）は、リクエストパスが`/xrpc/`または`/.well-known/`で始まる場合は無条件でオリジンを許可する。`/api/*`（seiranネイティブAPI、フロントエンド専用）は`FRONTEND_ORIGIN`＋自ドメインのみに制限するが、AT ProtocolのXRPCは仕様上bsky.app等の外部クライアントがブラウザから直接叩くことを前提とした公開APIのため対象外にする必要がある（公式Bluesky PDSも`Access-Control-Allow-Origin: *`を返す）。この分岐が無いと、bsky.appのログイン画面で「サービスに接続できません」となりATクライアントからのアクセスが一切成立しない。
+
 ### DID解決・PLC登録・ハンドル検証（アカウント登録時）
 1. ローカルでP-256鍵生成、`did:plc:xxx` をローカル計算のみで確定
 2. Cloudflare API で `_atproto.{username}.{domain}` TXTレコードをセット（ハンドル検証用）

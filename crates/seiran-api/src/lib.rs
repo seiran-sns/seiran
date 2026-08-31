@@ -655,10 +655,20 @@ pub fn router(state: AppState) -> Router {
     // セットアップ完了前後で判定がずれる）。認証は`Authorization`ヘッダー方式で
     // Cookieを使わない（`allow_credentials`は付与していない）ため古典的CSRFは成立しないが、
     // `Any`のままだと任意サイトのJSが公開APIを無制限に叩ける（docs/code_audit_2026-08-05.md S-3）。
+    //
+    // `/xrpc/*`・`/.well-known/*`はAT Protocol標準のXRPCエンドポイントで、bsky.app等の
+    // 外部ATクライアントがブラウザから直接叩くことを前提とした公開APIのため、この
+    // オリジン制限の対象外とする（公式Bluesky PDSも`Access-Control-Allow-Origin: *`を返す）。
+    // これが無いとbsky.appのログイン画面で「サービスに接続できません」となり、ATクライアント
+    // からのアクセスが一切成立しない（2026-08-29 SEC-2導入時の巻き添え、2026-08-31実機確認）。
     let frontend_origin = state.frontend_origin.clone();
     let local_domain = state.local_domain.clone();
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(move |origin, _req| {
+        .allow_origin(AllowOrigin::predicate(move |origin, req| {
+            let path = req.uri.path();
+            if path.starts_with("/xrpc/") || path.starts_with("/.well-known/") {
+                return true;
+            }
             let Ok(origin_str) = origin.to_str() else {
                 return false;
             };
@@ -673,6 +683,12 @@ pub fn router(state: AppState) -> Router {
         .allow_headers([
             axum::http::header::AUTHORIZATION,
             axum::http::header::CONTENT_TYPE,
+            // AT Protocol標準クライアントがXRPC経由で送ってくるカスタムヘッダー。
+            // `atproto-proxy`（XRPCプロキシ、`handlers::xrpc::proxy`）が無いと
+            // ブラウザのプリフライトで弾かれ、bsky.appのタイムライン取得等
+            // AppView委譲メソッドが軒並み失敗する（2026-08-31実機確認）。
+            axum::http::HeaderName::from_static("atproto-proxy"),
+            axum::http::HeaderName::from_static("atproto-accept-labelers"),
         ]);
 
     // 管理系ルートはロールごとに専用ルータへ分割し、`route_layer`で認可を強制する（#221）。
