@@ -46,7 +46,15 @@ async fn handle_ap(ap_uri: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
 
     tracing::info!("[ActorHistorySync] AP過去ログ同期開始: {}", ap_uri);
 
-    let notes = fetch_ap_history(&ctx.ap_client, ap_uri, 300, 30).await?;
+    let signing_key = ctx.system_signing_key();
+    let notes = fetch_ap_history(
+        &ctx.ap_client,
+        ap_uri,
+        300,
+        30,
+        signing_key.as_ref().map(|(k, p)| (k.as_str(), p.as_str())),
+    )
+    .await?;
     tracing::info!(
         "[ActorHistorySync] {}件のノートを取得: {}",
         notes.len(),

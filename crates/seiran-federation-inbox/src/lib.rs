@@ -45,6 +45,21 @@ pub struct AppState {
     pub stream_hub: Arc<StreamHub>,
 }
 
+impl AppState {
+    /// list-relayプロキシアクターの署名鍵（キーID, 秘密鍵PEM）。Authorized Fetch
+    /// （secure mode）を要求する送信元からの受信検証（`verify_signature`が`keyId`へGET
+    /// する公開鍵取得）でも検証できるようにする。秘密鍵未設定時は`None`。
+    pub fn system_signing_key(&self) -> Option<(String, String)> {
+        if self.ap_private_key_pem.is_empty() {
+            return None;
+        }
+        Some(seiran_common::system_actor::system_signing_key(
+            &self.local_domain,
+            &self.ap_private_key_pem,
+        ))
+    }
+}
+
 /// 共有リソースを受け取り federation ロールの [`AppState`] を構築する。
 /// `stream_hub` は api ロールと共有する（federation 単独時は新規で可）。
 /// `job_queue` は呼び出し元（`seiran-server`）がロールに応じて一度だけ生成した

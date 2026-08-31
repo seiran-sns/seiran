@@ -36,8 +36,12 @@ pub async fn fetch_ap_history(
     actor_uri: &str,
     max_posts: usize,
     max_days: i64,
+    signing_key: Option<(&str, &str)>,
 ) -> Result<Vec<ApNote>, ApError> {
-    let actor = ap_client.fetch_actor(actor_uri).await?;
+    let actor = match signing_key {
+        Some(key) => ap_client.fetch_actor_signed(actor_uri, key).await?,
+        None => ap_client.fetch_actor(actor_uri).await?,
+    };
     let outbox_url = match actor.outbox {
         Some(url) => url,
         None => {
@@ -53,13 +57,7 @@ pub async fn fetch_ap_history(
     let mut notes: Vec<ApNote> = Vec::new();
 
     // Outbox コレクション取得
-    let collection: serde_json::Value = match ap_client
-        .http
-        .get(&outbox_url)
-        .header("Accept", "application/activity+json, application/ld+json")
-        .send()
-        .await
-    {
+    let collection: serde_json::Value = match ap_client.get_maybe_signed(&outbox_url, signing_key).await {
         Ok(r) if r.status().is_success() => match r.json().await {
             Ok(v) => v,
             Err(e) => {
@@ -109,13 +107,7 @@ pub async fn fetch_ap_history(
             break;
         }
 
-        let page: serde_json::Value = match ap_client
-            .http
-            .get(&url)
-            .header("Accept", "application/activity+json, application/ld+json")
-            .send()
-            .await
-        {
+        let page: serde_json::Value = match ap_client.get_maybe_signed(&url, signing_key).await {
             Ok(r) if r.status().is_success() => match r.json().await {
                 Ok(v) => v,
                 Err(e) => {
@@ -194,20 +186,18 @@ fn collect_notes(
 pub async fn fetch_ap_featured(
     ap_client: &ApClient,
     actor_uri: &str,
+    signing_key: Option<(&str, &str)>,
 ) -> Result<Vec<ApNote>, ApError> {
-    let actor = ap_client.fetch_actor(actor_uri).await?;
+    let actor = match signing_key {
+        Some(key) => ap_client.fetch_actor_signed(actor_uri, key).await?,
+        None => ap_client.fetch_actor(actor_uri).await?,
+    };
     let featured_url = match actor.featured {
         Some(url) => url,
         None => return Ok(vec![]),
     };
 
-    let collection: serde_json::Value = match ap_client
-        .http
-        .get(&featured_url)
-        .header("Accept", "application/activity+json, application/ld+json")
-        .send()
-        .await
-    {
+    let collection: serde_json::Value = match ap_client.get_maybe_signed(&featured_url, signing_key).await {
         Ok(r) if r.status().is_success() => match r.json().await {
             Ok(v) => v,
             Err(e) => {

@@ -268,8 +268,34 @@ impl ApClient {
         Ok(actor)
     }
 
-    /// 指定した key_id (URL) から公開鍵 PEM を取得する（TTL付きキャッシュ対応）
-    pub async fn get_public_key_pem(&self, key_id: &str) -> Result<String, ApError> {
+    /// リモートアクター情報を HTTP Signatures 付き GET で取得する。`fetch_actor`と同じだが、
+    /// Authorized Fetch（secure mode）を要求するインスタンス（songbird.cloud等）は
+    /// 未署名GETに401を返すため、`upsert_remote_fedi_actor`（Follow/Create/Like/EmojiReact/
+    /// Announce等すべての受信経路が投稿・リアクション送信元アクターの解決に使う共通処理）
+    /// はこちらを使う。
+    pub async fn fetch_actor_signed(
+        &self,
+        actor_uri: &str,
+        signing_key: (&str, &str),
+    ) -> Result<ApActor, ApError> {
+        let res = self.signed_get(actor_uri, signing_key.0, signing_key.1).await?;
+
+        if !res.status().is_success() {
+            return Err(ApError::FetchActor(format!("ステータス {}", res.status())));
+        }
+
+        let actor = res.json::<ApActor>().await?;
+        Ok(actor)
+    }
+
+    /// 指定した key_id (URL) から公開鍵 PEM を取得する（TTL付きキャッシュ対応）。
+    /// `signing_key` があれば HTTP Signatures 付き GET で取得する（Authorized Fetch/secure mode
+    /// を要求する送信元、例: songbird.cloud からの受信でも検証できるように）。
+    pub async fn get_public_key_pem(
+        &self,
+        key_id: &str,
+        signing_key: Option<(&str, &str)>,
+    ) -> Result<String, ApError> {
         // 1. キャッシュヒット確認（TTL内のみ有効）
         {
             let cache = self.key_cache.read().await;
@@ -280,12 +306,16 @@ impl ApClient {
             }
         }
 
-        self.fetch_and_cache_public_key_pem(key_id).await
+        self.fetch_and_cache_public_key_pem(key_id, signing_key).await
     }
 
     /// キャッシュの有無・TTLを無視して公開鍵を再フェッチし、結果でキャッシュを上書きする。
     /// リモートの鍵ローテーション後に署名検証が失敗した際のリトライで使う。
-    async fn fetch_and_cache_public_key_pem(&self, key_id: &str) -> Result<String, ApError> {
+    async fn fetch_and_cache_public_key_pem(
+        &self,
+        key_id: &str,
+        signing_key: Option<(&str, &str)>,
+    ) -> Result<String, ApError> {
         tracing::info!("[ApClient] 公開鍵フェッチ中: {}", key_id);
 
         // アクターもしくは鍵を直接フェッチする。
@@ -293,7 +323,10 @@ impl ApClient {
         // アクター情報そのもの、あるいは鍵オブジェクト単体が返る。
         // フラグメント部分 (#main-key) を除外したベースURIを叩くのが安全。
         let base_uri = key_id.split('#').next().unwrap_or(key_id);
-        let actor = self.fetch_actor(base_uri).await?;
+        let actor = match signing_key {
+            Some(key) => self.fetch_actor_signed(base_uri, key).await?,
+            None => self.fetch_actor(base_uri).await?,
+        };
 
         if let Some(pubkey_info) = actor.public_key {
             if pubkey_info.id == key_id || base_uri == pubkey_info.owner {
@@ -317,12 +350,15 @@ impl ApClient {
     /// - `path`: リクエストパス (e.g. "/inbox")
     /// - `headers`: 受信した HTTP ヘッダー一覧
     /// - `signature_header`: 受信した `Signature` ヘッダーの内容
+    /// - `signing_key`: 送信元の公開鍵取得（`keyId`へのGET）に使う署名鍵。Authorized Fetch
+    ///   （secure mode）を要求するインスタンスからの受信でも検証できるようにする。
     pub async fn verify_signature(
         &self,
         method: &str,
         path: &str,
         headers: &HashMap<String, String>,
         signature_header: &str,
+        signing_key: Option<(&str, &str)>,
     ) -> Result<bool, ApError> {
         // 1. Signature ヘッダーの要素をパース
         // 例: keyId="...",algorithm="rsa-sha256",headers="...",signature="..."
@@ -347,7 +383,7 @@ impl ApClient {
                 .map_err(|e| ApError::Signature(format!("署名base64デコード失敗: {}", e)))?;
 
         // 4. 公開鍵 PEM の取得（キャッシュ利用）と検証
-        let pem = self.get_public_key_pem(key_id).await?;
+        let pem = self.get_public_key_pem(key_id, signing_key).await?;
         if Self::verify_with_pem(&pem, &signing_string, &signature_bytes).is_ok() {
             return Ok(true);
         }
@@ -355,7 +391,7 @@ impl ApClient {
         // 5. キャッシュ済みの鍵での検証に失敗した場合、リモートが鍵をローテーションした
         // 可能性があるため、キャッシュを無視して1回だけ再フェッチし再検証する。
         // 同じ鍵しか得られなかった場合は無駄な再検証をせず最初の失敗をそのまま返す。
-        let fresh_pem = self.fetch_and_cache_public_key_pem(key_id).await?;
+        let fresh_pem = self.fetch_and_cache_public_key_pem(key_id, signing_key).await?;
         if fresh_pem == pem {
             return Err(ApError::Signature("署名検証失敗".to_string()));
         }
@@ -378,6 +414,70 @@ impl ApClient {
         public_key
             .verify(Pkcs1v15Sign::new::<Sha256>(), &hashed, signature_bytes)
             .map_err(|e| ApError::Signature(format!("署名検証失敗: {:?}", e)))
+    }
+
+    /// HTTP Signatures 付きで GET する。POST 用の署名（`(request-target) host date
+    /// content-type digest`）と異なり、GET にはボディが無いため `digest`/`content-type`
+    /// を含めない `(request-target) host date` の3つのみを署名対象にする
+    /// （Misskeyの`createSignedGet`と同じ組み合わせ）。
+    pub(crate) async fn signed_get(
+        &self,
+        url: &str,
+        actor_key_id: &str,
+        private_key_pem: &str,
+    ) -> Result<reqwest::Response, ApError> {
+        let parsed_url =
+            url::Url::parse(url).map_err(|e| ApError::Other(format!("URL パースエラー: {}", e)))?;
+        let host = parsed_url.host_str().unwrap_or("").to_string();
+        let path = parsed_url.path().to_string();
+
+        let now = chrono::Utc::now();
+        let date_str = now.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+
+        let signing_string =
+            format!("(request-target): get {}\nhost: {}\ndate: {}", path, host, date_str);
+
+        // RSA鍵パース・署名計算はCPUバウンドの同期処理（実測 約50ms/回）。コレクション
+        // ページネーション（`fetch_ap_collection_uris`等）はページごとにこれを呼ぶため、
+        // async関数内で直接実行するとtokioワーカースレッドを長時間ブロックし、同時実行中の
+        // 他リクエスト（`tokio::time::timeout`のタイマー含む）まで巻き込んで遅延させる
+        // （2026-08-31実測、プロフィール表示が数秒〜10秒規模に劣化した不具合の原因）。
+        // spawn_blockingで専用スレッドプールへ逃がす。
+        let actor_key_id_owned = actor_key_id.to_string();
+        let private_key_pem_owned = private_key_pem.to_string();
+        let signature_header = tokio::task::spawn_blocking(move || -> Result<String, ApError> {
+            let private_key = RsaPrivateKey::from_pkcs8_pem(&private_key_pem_owned)
+                .map_err(|e| ApError::Signature(format!("RSA 秘密鍵パース失敗: {}", e)))?;
+
+            let mut hasher = Sha256::new();
+            hasher.update(signing_string.as_bytes());
+            let hashed = hasher.finalize();
+
+            let sig_bytes = private_key
+                .sign(Pkcs1v15Sign::new::<Sha256>(), &hashed)
+                .map_err(|e| ApError::Signature(format!("RSA 署名失敗: {}", e)))?;
+
+            let sig_b64 = base64::Engine::encode(&base64::prelude::BASE64_STANDARD, sig_bytes);
+
+            Ok(format!(
+                r#"keyId="{}",algorithm="rsa-sha256",headers="(request-target) host date",signature="{}""#,
+                actor_key_id_owned, sig_b64
+            ))
+        })
+        .await
+        .map_err(|e| ApError::Signature(format!("spawn_blocking 失敗: {}", e)))??;
+
+        let res = self
+            .http
+            .get(url)
+            .header("Accept", "application/activity+json, application/ld+json")
+            .header("Date", &date_str)
+            .header("Host", &host)
+            .header("Signature", &signature_header)
+            .send()
+            .await?;
+
+        Ok(res)
     }
 
     /// HTTP Signatures 付きで ActivityPub エンドポイントへ POST する
@@ -458,14 +558,17 @@ impl ApClient {
         Ok(())
     }
 
-    /// リモート AP オブジェクト（Note 等）を URI から取得する
-    pub async fn fetch_object(&self, object_uri: &str) -> Result<serde_json::Value, ApError> {
-        let res = self
-            .http
-            .get(object_uri)
-            .header("Accept", "application/activity+json, application/ld+json")
-            .send()
-            .await?;
+    /// リモート AP オブジェクト（Note 等）を URI から取得する。
+    /// `signing_key`（キーID, RSA秘密鍵PEM）で HTTP Signatures 付き GET
+    /// （Authorized Fetch/secure mode対応、Misskeyの`ApRequestCreator#createSignedGet`と同形）
+    /// を送る。songbird.cloud 等 `AUTHORIZED_FETCH` を有効にしたインスタンスは未署名GETに
+    /// 401 `Request not signed` を返し、参照解決（#233等）が pending のまま固着するため。
+    pub async fn fetch_object(
+        &self,
+        object_uri: &str,
+        signing_key: (&str, &str),
+    ) -> Result<serde_json::Value, ApError> {
+        let res = self.signed_get(object_uri, signing_key.0, signing_key.1).await?;
 
         if matches!(res.status(), reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE) {
             return Err(ApError::Gone(format!(
@@ -484,6 +587,25 @@ impl ApClient {
 
         let obj = res.json::<serde_json::Value>().await?;
         Ok(obj)
+    }
+
+    /// 署名鍵があればHTTP Signatures付き、無ければ従来通り未署名のGETを送る汎用ヘルパー。
+    /// `fetch_ap_collection_uris`（followers/following）・`fetch_ap_history`（outbox過去ログ）・
+    /// `fetch_ap_featured`（ピン留め）等、ページネーションを自前で辿るフェッチ経路で使う。
+    pub async fn get_maybe_signed(
+        &self,
+        url: &str,
+        signing_key: Option<(&str, &str)>,
+    ) -> Result<reqwest::Response, ApError> {
+        match signing_key {
+            Some((key_id, pem)) => self.signed_get(url, key_id, pem).await,
+            None => Ok(self
+                .http
+                .get(url)
+                .header("Accept", "application/activity+json, application/ld+json")
+                .send()
+                .await?),
+        }
     }
 
     /// Webfinger 解決を実行する
@@ -722,7 +844,7 @@ mod tests {
         }
         // TTL内のキャッシュヒットのため、ネットワークアクセスなしで即座に返る。
         let pem = client
-            .get_public_key_pem("https://example.com/users/alice#main-key")
+            .get_public_key_pem("https://example.com/users/alice#main-key", None)
             .await
             .unwrap();
         assert_eq!(pem, "PEM-DATA");
@@ -744,7 +866,7 @@ mod tests {
         // TTL切れのためキャッシュを使わず再フェッチを試みる。到達不能ホストなのでエラーになるが、
         // 「古いPEMをそのまま返してしまう」ことがないのが検証したい点。
         let result = client
-            .get_public_key_pem("https://127.0.0.1.invalid/users/alice#main-key")
+            .get_public_key_pem("https://127.0.0.1.invalid/users/alice#main-key", None)
             .await;
         assert!(result.is_err());
     }

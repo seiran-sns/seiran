@@ -295,8 +295,10 @@ async fn follow_fedi(
         return Err(FollowError::LocalViaFediGuard);
     }
 
+    let signing_key =
+        crate::system_actor::system_signing_key(&config.local_domain, &config.ap_private_key_pem);
     let remote_ap = ap_client
-        .fetch_actor(&target_uri)
+        .fetch_actor_signed(&target_uri, (&signing_key.0, &signing_key.1))
         .await
         .map_err(|e| FollowError::BadGateway(format!("リモートアクター取得失敗: {}", e)))?;
 

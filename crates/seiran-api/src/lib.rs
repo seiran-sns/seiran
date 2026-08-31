@@ -194,6 +194,17 @@ impl AppState {
         }
     }
 
+    /// list-relayプロキシアクターの署名鍵（キーID, 秘密鍵PEM）。Authorized Fetch
+    /// （secure mode）対応のGET（`ApClient::fetch_actor_signed`/`fetch_ap_collection_uris`等）に使う。
+    /// 秘密鍵未設定時は`None`（呼び出し側は未署名フェッチへフォールバックする）。
+    pub fn system_signing_key(&self) -> Option<(String, String)> {
+        let pem = self.secrets.ap_private_key_pem.as_deref()?;
+        Some(seiran_common::system_actor::system_signing_key(
+            &self.local_domain,
+            pem,
+        ))
+    }
+
     /// AP 配送ジョブを積む。配送の実行・リトライは Worker（`jobs::ap_delivery`）が担う。
     /// enqueue 失敗はログのみ（投稿等の主処理は成功済みのため呼び出し元へは伝播しない）。
     pub async fn enqueue_ap_delivery(&self, actor_id: i64, kind: ApDeliveryKind) {
@@ -369,6 +380,23 @@ impl AppState {
         {
             tracing::error!(
                 "[job] RemoteFollowListSync enqueue 失敗 (actor_id={}): {}",
+                actor_id,
+                e
+            );
+        }
+    }
+
+    /// リモートFediアクターのfeatured collection（ピン留め投稿, #61）同期ジョブを積む。
+    /// プロフィール表示のたびに呼ばれ、表示は常にDB上の既存`pinned_posts`をそのまま返す
+    /// （「表示時再検証」パターン、`enqueue_also_known_as_verify`と同様）。
+    pub async fn enqueue_remote_featured_sync(&self, actor_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::RemoteFeaturedSync { actor_id }, job_priority::LOW)
+            .await
+        {
+            tracing::error!(
+                "[job] RemoteFeaturedSync enqueue 失敗 (actor_id={}): {}",
                 actor_id,
                 e
             );

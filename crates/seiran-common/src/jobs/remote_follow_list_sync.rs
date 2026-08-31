@@ -59,11 +59,21 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
         ap_uri
     );
 
-    let actor = ctx
-        .ap_client
-        .fetch_actor(&ap_uri)
-        .await
-        .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?;
+    // Authorized Fetch（secure mode）対応。
+    let signing_key = ctx.system_signing_key();
+
+    let actor = match &signing_key {
+        Some((key_id, pem)) => ctx
+            .ap_client
+            .fetch_actor_signed(&ap_uri, (key_id, pem))
+            .await
+            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
+        None => ctx
+            .ap_client
+            .fetch_actor(&ap_uri)
+            .await
+            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
+    };
 
     let collection_url = match direction.as_str() {
         "following" => actor.following,
@@ -81,8 +91,13 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
         }
     };
 
-    let (uris, complete) =
-        fetch_ap_collection_uris(&ctx.ap_client, &collection_url, MAX_ITEMS).await;
+    let (uris, complete) = fetch_ap_collection_uris(
+        &ctx.ap_client,
+        &collection_url,
+        MAX_ITEMS,
+        signing_key.as_ref().map(|(k, p)| (k.as_str(), p.as_str())),
+    )
+    .await;
     tracing::info!(
         "[RemoteFollowListSync] {}件取得完了 (complete={}): actor_id={} direction={}",
         uris.len(),

@@ -128,7 +128,15 @@ async fn resolve_fedi(state: &AppState, target: &str) -> Result<Actor, ApError> 
         return Ok(existing);
     }
 
-    let remote_ap = state.ap_client.fetch_actor(&target_uri).await?;
+    let remote_ap = match state.system_signing_key() {
+        Some((key_id, pem)) => {
+            state
+                .ap_client
+                .fetch_actor_signed(&target_uri, (&key_id, &pem))
+                .await?
+        }
+        None => state.ap_client.fetch_actor(&target_uri).await?,
+    };
     let remote_inbox = remote_ap
         .inbox
         .clone()

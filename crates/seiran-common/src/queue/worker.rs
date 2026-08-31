@@ -190,6 +190,29 @@ impl JobContext {
             .or_insert_with(|| Arc::new(Semaphore::new(1)))
             .clone()
     }
+
+    /// list-relayプロキシアクターの署名鍵（キーID, 秘密鍵PEM）を`inbox`/`delivery`いずれか
+    /// 設定済みの方から組み立てる。Authorized Fetch（secure mode）対応のGET
+    /// （`ApClient::fetch_actor_signed`/`fetch_ap_collection_uris`）に使う。
+    /// どちらも未設定（`ap_private_key_pem`欠落を含む）ならNoneを返し、呼び出し側は
+    /// 未署名フェッチにフォールバックする。
+    pub fn system_signing_key(&self) -> Option<(String, String)> {
+        let local_and_pem = self
+            .inbox
+            .as_ref()
+            .map(|i| (i.local_domain.clone(), i.ap_private_key_pem.clone()))
+            .or_else(|| {
+                self.delivery.as_ref().and_then(|d| {
+                    d.ap_private_key_pem
+                        .clone()
+                        .map(|pem| (d.local_domain.clone(), pem))
+                })
+            })?;
+        Some(crate::system_actor::system_signing_key(
+            &local_and_pem.0,
+            &local_and_pem.1,
+        ))
+    }
 }
 
 /// WorkerEngine: ジョブキューを監視し、ジョブを実行するバックグラウンドエンジン。
@@ -413,6 +436,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::RemoteActorResolve { uri } => jobs::remote_actor_resolve::handle(uri, ctx)
             .await
             .map_err(JobError::from),
+        Job::RemoteFeaturedSync { actor_id } => jobs::remote_featured_sync::handle(actor_id, ctx)
+            .await
+            .map_err(JobError::from),
         Job::AlsoKnownAsVerify {
             owner_actor_id,
             target_actor_id,
@@ -475,6 +501,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::BskyDmSend { .. } => "BskyDmSend",
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
+        Job::RemoteFeaturedSync { .. } => "RemoteFeaturedSync",
         Job::AlsoKnownAsVerify { .. } => "AlsoKnownAsVerify",
         Job::RemoteAlsoKnownAsSync { .. } => "RemoteAlsoKnownAsSync",
         Job::RelayFollowSync { .. } => "RelayFollowSync",
@@ -555,6 +582,12 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         },
         Job::RemoteActorResolve { .. } => RetryConfig {
             // ActorMetadataResolve と同様の軽量ベストエフォート解決。
+            max_attempts: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
+        },
+        Job::RemoteFeaturedSync { .. } => RetryConfig {
+            // AlsoKnownAsVerify と同様、表示のたびに再度積まれるため軽量リトライで十分。
             max_attempts: 3,
             base_delay_ms: 1000,
             max_delay_ms: 30_000,

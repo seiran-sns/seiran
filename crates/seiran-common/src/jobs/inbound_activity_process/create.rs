@@ -262,7 +262,11 @@ pub(super) async fn handle_create_note(
     // shortcode がある場合だけ正規 Note を取得し、欠落した tag を補完する。
     // object.id は外部入力なので、解決済み投稿者actorと同一originの場合だけ取得する。
     if has_unresolved_emoji_shortcodes(&tags, &body) && has_same_origin(note_id, actor_uri) {
-        match ap_client.fetch_object(note_id).await {
+        let signing_key = super::reference::system_signing_key(inbox);
+        match ap_client
+            .fetch_object(note_id, (&signing_key.0, &signing_key.1))
+            .await
+        {
             Ok(canonical_note) => {
                 if let Some(canonical_tags) = canonical_note["tag"].as_array() {
                     for tag in canonical_tags {

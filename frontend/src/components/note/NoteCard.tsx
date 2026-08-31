@@ -640,6 +640,34 @@ function PostContent({
   );
 }
 
+/**
+ * リポストラッパーの先頭行（🔁 + リポストした人 + リポスト日時へのリンク）。
+ * 元投稿の取り込み状況（正常/非公開/pending/gone）によらず、
+ * リポストラッパー自身（note.id）の詳細ページへは常に遷移できる必要があるため、
+ * renote/renoteId/renoteStatusの各分岐で共通利用する。
+ */
+function RepostRail({ note }: { note: Note }) {
+  const { t } = useTranslation();
+  const suffix = t("home:noteCard.repostedSuffix");
+  return (
+    <div className={styles.rail}>
+      <TwemojiEmoji emoji="🔁" />{" "}
+      <strong>
+        <EmojiText text={displayName(note)} emojis={note.emojis} />
+      </strong>{" "}
+      {t("home:noteCard.repostedConnector")}{" "}
+      <Link
+        to={`/notes/${note.id}`}
+        className={styles.repostTime}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {formatDate(note.createdAt)}
+      </Link>
+      {suffix && <> {suffix}</>}
+    </div>
+  );
+}
+
 export default function NoteCard({
   note,
   linkToDetail = true,
@@ -663,24 +691,9 @@ export default function NoteCard({
 
   const effectiveRenote = note.renote ?? resolvedRenote;
   if (effectiveRenote) {
-    const suffix = t("home:noteCard.repostedSuffix");
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
-        <div className={styles.rail}>
-          <TwemojiEmoji emoji="🔁" />{" "}
-          <strong>
-            <EmojiText text={displayName(note)} emojis={note.emojis} />
-          </strong>{" "}
-          {t("home:noteCard.repostedConnector")}{" "}
-          <Link
-            to={`/notes/${note.id}`}
-            className={styles.repostTime}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {formatDate(note.createdAt)}
-          </Link>
-          {suffix && <> {suffix}</>}
-        </div>
+        <RepostRail note={note} />
         <PostContent
           note={effectiveRenote}
           // 元投稿は常にリポストラッパー自身(note)とは別ページのため、
@@ -701,13 +714,7 @@ export default function NoteCard({
   if (note.renoteId) {
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
-        <div className={styles.rail}>
-          <TwemojiEmoji emoji="🔁" />{" "}
-          <strong>
-            <EmojiText text={displayName(note)} emojis={note.emojis} />
-          </strong>{" "}
-          {t("home:noteCard.repostedNoLinkSuffix")}
-        </div>
+        <RepostRail note={note} />
         <p className={styles.unavailableNote}>
           {t("home:noteCard.unavailableRepost")}
         </p>
@@ -720,13 +727,7 @@ export default function NoteCard({
   if (note.renoteStatus) {
     return (
       <article className={`${styles.card} ${large ? styles.large : ""}`}>
-        <div className={styles.rail}>
-          <TwemojiEmoji emoji="🔁" />{" "}
-          <strong>
-            <EmojiText text={displayName(note)} emojis={note.emojis} />
-          </strong>{" "}
-          {t("home:noteCard.repostedNoLinkSuffix")}
-        </div>
+        <RepostRail note={note} />
         <div className={styles.pendingQuoteWrap}>
           <PendingReferenceIndicator
             noteId={note.id}

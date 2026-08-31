@@ -130,6 +130,32 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 4. `keyId` から公開鍵PEM取得（TTL付きキャッシュ、既定1時間）してRSA-SHA256検証。キャッシュ済み鍵での検証に失敗した場合はキャッシュを無視して1回だけ再フェッチし再検証する（リモートの鍵ローテーション対応）
 5. 検証OK後、実処理はジョブキューへ委譲するのみ
 
+### 署名付きGET（Authorized Fetch対応）
+MastodonのAuthorized Fetch（`AUTHORIZED_FETCH=true`）等secure modeを有効にしたインスタンス
+（例: songbird.cloud）は、未署名GETに401 `Request not signed`を返す。これはNote/Actor取得
+だけでなく**受信検証（`verify_signature`が`keyId`へGETする公開鍵取得）にも及ぶ**ため、
+対応していないと該当インスタンスとのフォロー・投稿受信・プロフィール表示等が軒並み失敗する。
+
+`ApClient`はこれに対応するHTTP Signatures付きGET（`signed_get`/`fetch_object`/
+`fetch_actor_signed`/`get_maybe_signed`）を持つ。署名対象は`(request-target) host date`の
+3つのみ（POST用署名と異なりdigest/content-typeは含めない。Misskeyの
+`ApRequestCreator#createSignedGet`と同形）。署名鍵はlist-relayプロキシアクター
+（`system_actor::system_signing_key`）を流用し、専用の鍵ペアは持たない。
+
+適用箇所（呼び出し元が`Option<(&str, &str)>`の署名鍵を渡せない場合のみ未署名にフォールバック）:
+- `resolve_reference`（リプライ/引用/リポストの1段階フェッチ）、`upsert_remote_fedi_actor`
+  （投稿・リアクション送信元アクターの解決。Follow/Create/Like/EmojiReact/Announce/Block/
+  Flag/PollVote/Moveの全受信経路が共有）
+- フォロー実行（`follow_exec::execute_follow`）、ターゲット解決（`handlers::target_resolve`）、
+  未知アクター解決ジョブ（`jobs::remote_actor_resolve`）、フォロー中/フォロワー一覧同期・
+  ライブ取得（`jobs::remote_follow_list_sync`、`ap::collection::fetch_ap_collection_uris`、
+  `handlers::users::fetch_remote_follow_live`）
+- メンション先inbox解決（`ap::deliver::infra::fetch_inboxes_by_ap_uris`）、過去ログ/featured
+  取得（`ap::outbox::fetch_ap_history`/`fetch_ap_featured`）、Move/alsoKnownAs関連
+  （`jobs::move_actor`/`also_known_as_sync`/`also_known_as_verify`）
+- **受信側のHTTP Signature検証**（`ApClient::verify_signature`→`get_public_key_pem`。
+  `seiran-federation-inbox::AppState::system_signing_key()`から渡す）
+
 ### 配送
 `Job::ApDelivery{actor_id, kind}`（優先度高、最大10回リトライの指数バックオフ）。宛先は `follows` の `status='accepted' AND actor_type='fedi'` の `ap_inbox_url` 一覧（リアクションは対象ポスト著者のinboxも追加）。全inboxへ署名付きPOSTをファンアウトし、**1件でも成功すればOk**（全滅時のみリトライ対象）。秘密鍵未設定時はリトライしても直らないため即座に破棄。
 

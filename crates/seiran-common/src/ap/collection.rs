@@ -22,16 +22,11 @@ async fn fetch_ap_collection_uris_inner(
     ap_client: &ApClient,
     collection_url: &str,
     max_items: usize,
+    signing_key: Option<(&str, &str)>,
 ) -> (Vec<String>, bool) {
     let mut uris = Vec::new();
 
-    let collection: serde_json::Value = match ap_client
-        .http
-        .get(collection_url)
-        .header("Accept", "application/activity+json, application/ld+json")
-        .send()
-        .await
-    {
+    let collection: serde_json::Value = match ap_client.get_maybe_signed(collection_url, signing_key).await {
         Ok(r) if r.status().is_success() => match r.json().await {
             Ok(v) => v,
             Err(e) => {
@@ -114,13 +109,7 @@ async fn fetch_ap_collection_uris_inner(
             return (uris, false);
         }
 
-        let page: serde_json::Value = match ap_client
-            .http
-            .get(&url)
-            .header("Accept", "application/activity+json, application/ld+json")
-            .send()
-            .await
-        {
+        let page: serde_json::Value = match ap_client.get_maybe_signed(&url, signing_key).await {
             Ok(r) if r.status().is_success() => match r.json().await {
                 Ok(v) => v,
                 Err(e) => {
@@ -165,10 +154,11 @@ pub async fn fetch_ap_collection_uris(
     ap_client: &ApClient,
     collection_url: &str,
     max_items: usize,
+    signing_key: Option<(&str, &str)>,
 ) -> (Vec<String>, bool) {
     let start = std::time::Instant::now();
     let (uris, complete) =
-        fetch_ap_collection_uris_inner(ap_client, collection_url, max_items).await;
+        fetch_ap_collection_uris_inner(ap_client, collection_url, max_items, signing_key).await;
     tracing::info!(
         "[ApCollection] 呼び出し結果: {}件取得 complete={} 所要={:?} url={}",
         uris.len(),

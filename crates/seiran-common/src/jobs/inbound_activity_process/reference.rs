@@ -59,6 +59,13 @@ pub(super) async fn resolve_reference_db_only(
     }
 }
 
+/// `ap_client.fetch_object`に渡すシステムアクター（list-relay）の署名鍵（キーID, 秘密鍵PEM）
+/// を組み立てる。Authorized Fetch（secure mode）を要求するリモートでも参照解決できるよう、
+/// 1段階フェッチは常にこの鍵で署名する。
+pub(super) fn system_signing_key(inbox: &InboxContext) -> (String, String) {
+    crate::system_actor::system_signing_key(&inbox.local_domain, &inbox.ap_private_key_pem)
+}
+
 /// DB照合 → 未解決なら1段階だけフェッチを試みて参照を解決する。
 /// リプライ/引用/リポストいずれの新規取り込みトップレベル処理からも呼ばれる。
 /// フェッチして得たノート自身が持つ参照はさらに辿らず（`resolve_reference_db_only`を使う
@@ -74,7 +81,11 @@ pub async fn resolve_reference(
     if let Ok(Some(id)) = inbox.post_repo.find_id_by_ap_or_at_uri(uri).await {
         return ReferenceOutcome::Resolved(id);
     }
-    match ap_client.fetch_object(uri).await {
+    let signing_key = system_signing_key(inbox);
+    match ap_client
+        .fetch_object(uri, (&signing_key.0, &signing_key.1))
+        .await
+    {
         Ok(note) => match save_fetched_remote_note(note, inbox, ap_client).await {
             Ok(id) => ReferenceOutcome::Resolved(id),
             Err(e) => {
@@ -157,7 +168,11 @@ pub(super) async fn save_fetched_remote_note(
     let mut body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
     let mut content_html_sanitized = sanitize_ap_content_html(&content_html, &tags, &remote.domain);
     if has_unresolved_emoji_shortcodes(&tags, &body) && has_same_origin(&note_id, &actor_uri) {
-        match ap_client.fetch_object(&note_id).await {
+        let signing_key = system_signing_key(inbox);
+        match ap_client
+            .fetch_object(&note_id, (&signing_key.0, &signing_key.1))
+            .await
+        {
             Ok(canonical_note) => {
                 if let Some(canonical_tags) = canonical_note["tag"].as_array() {
                     for tag in canonical_tags {

@@ -79,6 +79,7 @@ pub(super) async fn fetch_inboxes_by_ap_uris(
     ap_client: &ApClient,
     db: &PgPool,
     local_domain: &str,
+    ap_private_key_pem: &str,
     ap_uris: &[String],
 ) -> Vec<String> {
     let local_prefix = format!("https://{}/", local_domain);
@@ -113,8 +114,12 @@ pub(super) async fn fetch_inboxes_by_ap_uris(
         }
     }
 
+    let signing_key = crate::system_actor::system_signing_key(local_domain, ap_private_key_pem);
     for uri in remote_uris.iter().filter(|u| !known_uris.contains(*u)) {
-        match ap_client.fetch_actor(uri).await {
+        match ap_client
+            .fetch_actor_signed(uri, (&signing_key.0, &signing_key.1))
+            .await
+        {
             Ok(actor) => {
                 if let Some(inbox) = actor.inbox {
                     inboxes.push(inbox);

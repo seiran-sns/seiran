@@ -64,11 +64,20 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
         .await
         .map_err(|e| format!("セマフォ取得失敗: {}", e))?;
 
-    let actor = ctx
-        .ap_client
-        .fetch_actor(&uri)
-        .await
-        .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?;
+    // Authorized Fetch（secure mode）対応。署名鍵が組み立てられない場合のみ未署名フェッチへ
+    // フォールバックする。
+    let actor = match ctx.system_signing_key() {
+        Some((key_id, pem)) => ctx
+            .ap_client
+            .fetch_actor_signed(&uri, (&key_id, &pem))
+            .await
+            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
+        None => ctx
+            .ap_client
+            .fetch_actor(&uri)
+            .await
+            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
+    };
 
     let Some(inbox) = actor.inbox.clone() else {
         tracing::info!("[RemoteActorResolve] inbox が無いためスキップ: {}", uri);

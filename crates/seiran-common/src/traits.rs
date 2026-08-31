@@ -222,6 +222,15 @@ pub enum Job {
     /// フォロー関係は作らず、表示のリッチ化（アバター・表示名等）のみが目的。
     RemoteActorResolve { uri: String },
 
+    /// リモートFediアクターのfeatured collection（ピン留め投稿, #61）を同期する。
+    /// DB登録済みアクターのプロフィール表示のたびに積まれ、表示自体は常にDB上の
+    /// 既存`pinned_posts`をそのまま返す（「表示時再検証」パターン、`AlsoKnownAsVerify`と同様）。
+    /// Authorized Fetch（secure mode）を要求するリモートだと同期フェッチが数秒かかることが
+    /// あり、プロフィール表示のたびにブロッキングで待つのは体感速度を損なうため（2026-08-31
+    /// マイケル指摘）、ジョブへ切り出した。初回アクセス時（DB未登録アクターの初回upsert
+    /// 直後）だけは`handlers::users::fetch_remote_profile`が同期で取得する。
+    RemoteFeaturedSync { actor_id: i64 },
+
     /// プロフィールの「別のアカウント」（alsoKnownAs、AP Moveの語彙をプロフィール表示・
     /// 相互検証用途に転用したseiran独自拡張、`docs/protocols.md`参照）の相互検証。
     /// プロフィール表示のたびに積まれ、キャッシュ済みの検証結果を非同期で更新する。

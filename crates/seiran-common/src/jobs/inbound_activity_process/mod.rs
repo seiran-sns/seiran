@@ -168,7 +168,10 @@ async fn upsert_remote_fedi_actor(
         });
     }
 
-    let remote_ap = ap_client.fetch_actor(actor_uri).await?;
+    let signing_key = reference::system_signing_key(inbox);
+    let remote_ap = ap_client
+        .fetch_actor_signed(actor_uri, (&signing_key.0, &signing_key.1))
+        .await?;
     let ap_inbox = remote_ap.inbox.clone().unwrap_or_default();
     // `preferredUsername`（AS2語彙のプロパティ、必須ではないがWebFinger解決の前提として
     // fediverse全体で事実上必須）が無い場合、URI末尾のパスセグメントをusername代わりに

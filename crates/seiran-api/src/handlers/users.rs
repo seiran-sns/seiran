@@ -629,7 +629,14 @@ async fn sync_remote_fedi_pinned(state: &AppState, actor: &Actor) {
         return;
     };
 
-    let notes = match seiran_common::ap::fetch_ap_featured(&state.ap_client, ap_uri).await {
+    let signing_key = state.system_signing_key();
+    let notes = match seiran_common::ap::fetch_ap_featured(
+        &state.ap_client,
+        ap_uri,
+        signing_key.as_ref().map(|(k, p)| (k.as_str(), p.as_str())),
+    )
+    .await
+    {
         Ok(notes) => notes,
         Err(e) => {
             tracing::warn!("[profile] featured collection 取得失敗（スキップ）: {}", e);
@@ -658,6 +665,20 @@ async fn build_profile_response(
     actor: Actor,
     my_user_id: Option<i64>,
     state: &AppState,
+) -> Response {
+    build_profile_response_inner(actor, my_user_id, state, false).await
+}
+
+/// `is_first_fetch`: 直前に`fetch_remote_profile`がDB未登録アクターを新規upsertした直後の
+/// 初回表示なら`true`（featured collectionを同期で取得し、初回表示から見せる）。それ以外
+/// （DB既存アクターの通常表示）は`false`（`RemoteFeaturedSync`ジョブを積むだけで、表示は
+/// 既存の`pinned_posts`をそのまま返す。「表示時再検証」パターン、2026-08-31マイケル指摘：
+/// Authorized Fetch対応でリモートフェッチが遅くなり、毎回の同期待ちが体感速度を損なうため）。
+async fn build_profile_response_inner(
+    actor: Actor,
+    my_user_id: Option<i64>,
+    state: &AppState,
+    is_first_fetch: bool,
 ) -> Response {
     let actor_id = actor.id;
 
@@ -744,11 +765,18 @@ async fn build_profile_response(
         None => false,
     };
 
-    // リモート Fedi アクターの場合、featured collection（ピン留め投稿, #61）を都度同期する。
-    // ベストエフォート（失敗してもプロフィール表示自体は継続する）。DB 未登録の未知アクター
-    // （`fetch_remote_profile`）はここを通らないため対象外。
+    // リモート Fedi アクターの場合、featured collection（ピン留め投稿, #61）を同期する。
+    // 初回表示（`fetch_remote_profile`がDB未登録アクターを新規upsertした直後）だけは
+    // その場で同期取得し、初回表示から見せる。それ以外（DB既存アクターの通常表示）は
+    // `RemoteFeaturedSync`ジョブを積むだけにし、表示は既存の`pinned_posts`をそのまま返す
+    // （Authorized Fetch対応でリモートフェッチが数秒かかることがあり、毎回同期で待つのは
+    // 体感速度を損なうため）。
     if actor.actor_type == "fedi" {
-        sync_remote_fedi_pinned(state, &actor).await;
+        if is_first_fetch {
+            sync_remote_fedi_pinned(state, &actor).await;
+        } else {
+            state.enqueue_remote_featured_sync(actor.id).await;
+        }
     }
 
     // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
@@ -1050,7 +1078,16 @@ async fn fetch_remote_profile(
         }
     };
 
-    let ap_actor = match state.ap_client.fetch_actor(&actor_uri).await {
+    let fetch_result = match state.system_signing_key() {
+        Some((key_id, pem)) => {
+            state
+                .ap_client
+                .fetch_actor_signed(&actor_uri, (&key_id, &pem))
+                .await
+        }
+        None => state.ap_client.fetch_actor(&actor_uri).await,
+    };
+    let ap_actor = match fetch_result {
         Ok(a) => a,
         Err(e) => {
             return (
@@ -1104,7 +1141,7 @@ async fn fetch_remote_profile(
     {
         Ok(actor_id) => match state.actors.find_by_id(actor_id).await {
             Ok(Some(actor)) => {
-                return build_profile_response(actor, my_user_id, state)
+                return build_profile_response_inner(actor, my_user_id, state, true)
                     .await
                     .into_response()
             }
@@ -1643,7 +1680,17 @@ async fn fetch_remote_follow_live(
     ap_uri: &str,
     direction: &str,
 ) -> Option<(Vec<String>, bool)> {
-    let actor = state.ap_client.fetch_actor(ap_uri).await.ok()?;
+    // Authorized Fetch（secure mode）を要求するインスタンスでも取得できるよう、
+    // list-relayプロキシアクターの鍵で署名する。
+    let signing_key = state.system_signing_key();
+    let actor = match &signing_key {
+        Some((key_id, pem)) => state
+            .ap_client
+            .fetch_actor_signed(ap_uri, (key_id, pem))
+            .await
+            .ok()?,
+        None => state.ap_client.fetch_actor(ap_uri).await.ok()?,
+    };
     let collection_url = match direction {
         "following" => actor.following,
         _ => actor.followers,
@@ -1653,6 +1700,7 @@ async fn fetch_remote_follow_live(
             &state.ap_client,
             &collection_url,
             REMOTE_FOLLOW_LIVE_MAX_ITEMS,
+            signing_key.as_ref().map(|(k, p)| (k.as_str(), p.as_str())),
         )
         .await,
     )

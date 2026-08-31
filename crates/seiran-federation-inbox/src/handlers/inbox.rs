@@ -78,9 +78,16 @@ pub async fn inbox_handler(
         }
     };
 
+    let signing_key = state.system_signing_key();
     match state
         .ap_client
-        .verify_signature("POST", "/inbox", &header_map, &signature)
+        .verify_signature(
+            "POST",
+            "/inbox",
+            &header_map,
+            &signature,
+            signing_key.as_ref().map(|(k, p)| (k.as_str(), p.as_str())),
+        )
         .await
     {
         Ok(true) => {}

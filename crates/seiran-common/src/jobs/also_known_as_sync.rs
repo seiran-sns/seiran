@@ -53,10 +53,18 @@ pub async fn handle(owner_actor_id: i64, ctx: Arc<JobContext>) -> Result<(), Str
             .acquire_owned()
             .await
             .map_err(|e| format!("セマフォ取得失敗: {}", e))?;
-        ctx.ap_client
-            .fetch_actor(&owner_ap_uri)
-            .await
-            .map_err(|e| format!("移転元アクター取得失敗: {}", e))?
+        match ctx.system_signing_key() {
+            Some((key_id, pem)) => ctx
+                .ap_client
+                .fetch_actor_signed(&owner_ap_uri, (&key_id, &pem))
+                .await
+                .map_err(|e| format!("移転元アクター取得失敗: {}", e))?,
+            None => ctx
+                .ap_client
+                .fetch_actor(&owner_ap_uri)
+                .await
+                .map_err(|e| format!("移転元アクター取得失敗: {}", e))?,
+        }
     };
 
     let mut target_ids: Vec<i64> = Vec::new();
@@ -153,10 +161,18 @@ async fn resolve_also_known_as_uri(
                 .acquire_owned()
                 .await
                 .map_err(|e| format!("セマフォ取得失敗: {}", e))?;
-            ctx.ap_client
-                .fetch_actor(uri)
-                .await
-                .map_err(|e| format!("アクター取得失敗: {}", e))?
+            match ctx.system_signing_key() {
+                Some((key_id, pem)) => ctx
+                    .ap_client
+                    .fetch_actor_signed(uri, (&key_id, &pem))
+                    .await
+                    .map_err(|e| format!("アクター取得失敗: {}", e))?,
+                None => ctx
+                    .ap_client
+                    .fetch_actor(uri)
+                    .await
+                    .map_err(|e| format!("アクター取得失敗: {}", e))?,
+            }
         };
         let Some(inbox) = remote_ap.inbox.clone() else {
             return Ok(None);

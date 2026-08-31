@@ -65,7 +65,11 @@ pub(super) async fn handle_move(
     // なりすまし対策: target アクター文書の alsoKnownAs に移転元URIが含まれることを
     // 確認できた場合のみ処理する。恒久的に検証を通らないケース（移転先が未承認）は
     // リトライしても解決しないため、エラーにはせずログのみで無視する。
-    let target_ap = match ap_client.fetch_actor(target_uri).await {
+    let signing_key = super::reference::system_signing_key(inbox);
+    let target_ap = match ap_client
+        .fetch_actor_signed(target_uri, (&signing_key.0, &signing_key.1))
+        .await
+    {
         Ok(a) => a,
         Err(e) => {
             tracing::warn!("[Move] 移転先 {} の取得に失敗: {}", target_uri, e);

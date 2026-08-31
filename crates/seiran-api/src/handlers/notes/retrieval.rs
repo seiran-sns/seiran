@@ -382,9 +382,16 @@ pub async fn note_context(
             if let Ok(Some(actor)) = state.actors.find_by_id(actor_id).await {
                 if let Some(ap_uri) = actor.ap_uri {
                     let ap_client = Arc::clone(&state.ap_client);
+                    let signing_key = state.system_signing_key();
                     let fetch_result = tokio::time::timeout(
                         std::time::Duration::from_secs(5),
-                        fetch_ap_history(&ap_client, &ap_uri, 50, 30),
+                        fetch_ap_history(
+                            &ap_client,
+                            &ap_uri,
+                            50,
+                            30,
+                            signing_key.as_ref().map(|(k, p)| (k.as_str(), p.as_str())),
+                        ),
                     )
                     .await;
 

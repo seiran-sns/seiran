@@ -15,6 +15,22 @@ use crate::username::{PROXY_ACTOR_USERNAME, RELAY_AGENT_USERNAME};
 /// list-relay の actor_id を `site_settings` に記録するキー。
 const SITE_SETTINGS_KEY: &str = "system_proxy_actor_id";
 
+/// list-relay プロキシアクターの AP `keyId`。Authorized Fetch（secure mode）を要求する
+/// リモートへの署名付き取得（`ApClient::fetch_object`、参照解決 #233等）で、
+/// システムアクターとして使う。専用の鍵ペアは持たず、他のローカルアクターと同様
+/// `Secrets.ap_private_key_pem` を流用する（モジュールコメント参照）。
+/// `local_domain` は `&str` を受け取る（`LocalDomain` は `Deref<Target = str>` のため
+/// `&LocalDomain` もそのまま渡せる）。
+pub fn system_proxy_actor_key_id(local_domain: &str) -> String {
+    format!("https://{}/users/{}#main-key", local_domain, PROXY_ACTOR_USERNAME)
+}
+
+/// `ApClient::fetch_object`/`fetch_actor_signed`にそのまま渡せる署名鍵（キーID, 秘密鍵PEM）を
+/// list-relayプロキシアクターとして組み立てる。
+pub fn system_signing_key(local_domain: &str, ap_private_key_pem: &str) -> (String, String) {
+    (system_proxy_actor_key_id(local_domain), ap_private_key_pem.to_string())
+}
+
 /// relay-agent の actor_id を `site_settings` に記録するキー。
 const RELAY_AGENT_SITE_SETTINGS_KEY: &str = "relay_agent_actor_id";
 
