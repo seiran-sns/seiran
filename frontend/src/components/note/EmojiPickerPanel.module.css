@@ -110,6 +110,11 @@
   object-fit: contain;
 }
 
+.sentinel {
+  grid-column: 1 / -1;
+  height: 1px;
+}
+
 .message {
   color: var(--text-dim);
   font-size: 0.85rem;

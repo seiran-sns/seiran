@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, FrequentReaction, PublicEmoji } from "../../api/client";
+import { useLazyVisible } from "../../hooks/useLazyVisible";
 import { postLanguageBase } from "../../i18n";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
 import { EmojiAnnotationIndex, loadEmojiAnnotationIndex } from "../../lib/emojiAnnotations";
@@ -31,6 +32,57 @@ interface EmojiPickerPanelProps {
 
 const SEARCH_RESULT_LIMIT = 100;
 
+/**
+ * カスタム絵文字が数千件規模になりうる一覧・検索結果で一度に描画する button DOM の初期件数、
+ * および末尾のセンチネルが可視になるたびに追加する件数。全件を一度に `.map` すると、
+ * 特にサーバー到達後はじめて「カスタム」タブを開いた際に描画だけで数秒固まる原因になっていた。
+ */
+const GRID_PAGE_SIZE = 200;
+
+interface LoadMoreSentinelProps {
+  rootRef: RefObject<Element | null>;
+  onVisible: () => void;
+}
+
+/** `rootRef` のスクロールコンテナ内で可視になるたびに `onVisible` を呼ぶ、高さ1pxの監視用要素。 */
+function LoadMoreSentinel({ rootRef, onVisible }: LoadMoreSentinelProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const visible = useLazyVisible(ref, rootRef, "300px");
+  useEffect(() => {
+    if (visible) onVisible();
+  }, [visible, onVisible]);
+  return <div ref={ref} className={styles.sentinel} aria-hidden="true" />;
+}
+
+interface PagedGridProps {
+  items: PickerItem[];
+  rootRef: RefObject<Element | null>;
+  renderItem: (item: PickerItem) => JSX.Element;
+}
+
+/**
+ * `items` を `GRID_PAGE_SIZE` 件ずつ段階的に描画するグリッド。`items` の参照が変わると
+ * （検索クエリの変更、タブ切り替えによる再マウント）表示件数を初期値に戻す。
+ */
+function PagedGrid({ items, rootRef, renderItem }: PagedGridProps) {
+  const [visibleCount, setVisibleCount] = useState(GRID_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(GRID_PAGE_SIZE);
+  }, [items]);
+
+  return (
+    <div className={styles.grid}>
+      {items.slice(0, visibleCount).map(renderItem)}
+      {visibleCount < items.length && (
+        <LoadMoreSentinel
+          rootRef={rootRef}
+          onVisible={() => setVisibleCount((c) => Math.min(c + GRID_PAGE_SIZE, items.length))}
+        />
+      )}
+    </div>
+  );
+}
+
 /** カスタム絵文字＋Unicode絵文字を検索・タブ切り替えで選べるピッカー本体（Modal 内に描画する）。 */
 export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
   const { t, i18n } = useTranslation();
@@ -40,6 +92,7 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<Tab>("unicode");
   const [annotations, setAnnotations] = useState<EmojiAnnotationIndex>(new Map());
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // `i18n.language` は検出された生の言語コード（例: "ja-JP"）を返すことがあるため、
@@ -127,7 +180,7 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
         }}
       >
         {item.imageUrl ? (
-          <EmojiImage src={item.imageUrl} alt={item.label} blurhash={item.blurhash} span={span} />
+          <EmojiImage src={item.imageUrl} alt={item.label} blurhash={item.blurhash} span={span} rootRef={bodyRef} />
         ) : (
           <TwemojiEmoji emoji={item.content} className={styles.itemImg} />
         )}
@@ -172,12 +225,12 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
         </div>
       )}
 
-      <div className={styles.body}>
+      <div className={styles.body} ref={bodyRef}>
         {loading ? (
           <p className={styles.message}>{t("common:loading")}</p>
         ) : query.trim() ? (
           searchResults && searchResults.length > 0 ? (
-            <div className={styles.grid}>{searchResults.map(renderItem)}</div>
+            <PagedGrid items={searchResults} rootRef={bodyRef} renderItem={renderItem} />
           ) : (
             <p className={styles.message}>{t("home:reactionPicker.noResults")}</p>
           )
@@ -189,7 +242,7 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
           )
         ) : tab === "custom" ? (
           customItems.length > 0 ? (
-            <div className={styles.grid}>{customItems.map(renderItem)}</div>
+            <PagedGrid items={customItems} rootRef={bodyRef} renderItem={renderItem} />
           ) : (
             <p className={styles.message}>{t("home:reactionPicker.noCustomEmojis")}</p>
           )
