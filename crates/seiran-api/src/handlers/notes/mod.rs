@@ -33,6 +33,7 @@ pub use creation::create_note;
 pub use deletion::{delete_note, delete_repost};
 pub use dto::to_note_response;
 pub use dto::{AttachmentResponse, LinkCardResponse, NoteResponse, ReactRequest, ReactionSummary};
+pub use dto::{to_reaction_event_response, ProfileFeedItem, ReactionEventResponse};
 pub use pins::{pin_note, unpin_note};
 pub use poll::vote_poll;
 pub(crate) use profile_material::fetch_atp_profile_material;

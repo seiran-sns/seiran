@@ -189,9 +189,11 @@ pub async fn create_reaction(
         chrono::Utc::now().timestamp_millis()
     );
 
+    let new_reaction_id = generate_snowflake_id(chrono::Utc::now());
     let reaction_id = match state
         .reactions
         .insert(
+            new_reaction_id,
             note_id,
             me.actor_id,
             "emoji",

@@ -60,9 +60,11 @@ pub(super) async fn handle_reaction(
     }
 
     // reactions へ INSERT（同一ユーザー・同一内容の重複、activity_id 重複はスキップ）
+    let new_reaction_id = generate_snowflake_id(chrono::Utc::now());
     inbox
         .reaction_repo
         .insert(
+            new_reaction_id,
             post_id,
             actor_id,
             reaction_type,

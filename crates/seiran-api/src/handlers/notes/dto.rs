@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use seiran_common::repository::TimelinePost;
+use seiran_common::repository::{ReactionFeedRow, TimelinePost};
 
 use super::delivery::at_uri_to_bsky_app_url;
 
@@ -479,6 +479,59 @@ pub fn to_note_response(
         repost_count: p.repost_count,
         link_cards,
         content_html: p.content_html,
+    }
+}
+
+/// プロフィール「投稿」タブの投稿＋リアクション混合フィード（`handlers::users::user_posts`の
+/// `include_reactions=true`時）における1件のリアクションイベント。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionEventResponse {
+    pub id: String,
+    pub created_at: String,
+    pub reaction: String,
+    pub reaction_emoji_url: Option<String>,
+    pub target_note_id: String,
+    /// 対象ポストの投稿者。このイベントカードはサーバーバッジを表示しないため `instance` は常に `None`。
+    pub target_user: NoteUserInfo,
+    pub target_user_emojis: HashMap<String, String>,
+}
+
+/// プロフィール「投稿」タブの混合フィード1件（投稿 or リアクションイベント）。
+#[derive(Serialize)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum ProfileFeedItem {
+    Note(Box<NoteResponse>),
+    Reaction(Box<ReactionEventResponse>),
+}
+
+pub fn to_reaction_event_response(r: ReactionFeedRow) -> ReactionEventResponse {
+    let target_actor_type = if r.target_actor_type.is_empty() {
+        "local".to_string()
+    } else {
+        r.target_actor_type
+    };
+    let is_local = target_actor_type == "local";
+    let target_avatar_url = r.target_avatar_url.or_else(|| {
+        is_local.then(|| seiran_common::avatar::fallback_avatar_url(&r.target_domain, r.target_actor_id))
+    });
+
+    ReactionEventResponse {
+        id: r.id.to_string(),
+        created_at: r.created_at.to_rfc3339(),
+        reaction: r.content,
+        reaction_emoji_url: r.emoji_url,
+        target_note_id: r.post_id.to_string(),
+        target_user: NoteUserInfo {
+            id: r.target_actor_id.to_string(),
+            username: r.target_username,
+            domain: Some(r.target_domain),
+            display_name: r.target_display_name,
+            actor_type: target_actor_type,
+            avatar_url: target_avatar_url,
+            instance: None,
+        },
+        target_user_emojis: json_map_to_string_map(r.target_actor_emoji_map),
     }
 }
 

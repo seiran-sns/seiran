@@ -1,6 +1,6 @@
 import { cursorParams, request } from "./core";
-import type { ActorSuggestion, AlsoKnownAsItem, FollowListItem, MutedOrBlockedActor, PasskeySummary, ProfileField, RawNote, RemoteFollowSummaryResponse, UserProfile } from "./types";
-import { normalizeNote } from "./types";
+import type { ActorSuggestion, AlsoKnownAsItem, FollowListItem, MutedOrBlockedActor, PasskeySummary, ProfileField, ProfileFeedItem, RawNote, RawProfileFeedItem, RemoteFollowSummaryResponse, UserProfile } from "./types";
+import { normalizeNote, normalizeProfileFeedItem } from "./types";
 import { credentialJson, registrationOptions } from "./webauthn";
 import type { RegistrationOptionsJson, WebAuthnEnvelope } from "./webauthn";
 
@@ -19,8 +19,11 @@ export const users = {
       pinned_posts: (raw.pinned_posts ?? []).map(normalizeNote),
     } as UserProfile;
   },
-  /** プロフィール画面の投稿一覧の追加ページ取得（無限スクロール、#64）。`actorId` は
-   * `UserProfile.actor_id`（DB未登録のリモートアクターは undefined になり得る）。 */
+  /** プロフィール画面「投稿」タブの一覧取得（初回・無限スクロール追加ページとも、#64）。
+   * `actorId` は `UserProfile.actor_id`（DB未登録のリモートアクターは undefined になり得る）。
+   * このユーザーが行った絵文字リアクションイベントも投稿と時系列混合で返す
+   * （`includeReactions=true`、ユーザープロフィールページ「投稿」タブの絵文字リアクション
+   * イベント混合表示）。 */
   async posts(
     actorId: string,
     params?: {
@@ -29,15 +32,16 @@ export const users = {
       since_id?: string;
       exclude_direct?: boolean;
     },
-  ) {
+  ): Promise<ProfileFeedItem[]> {
     const q = cursorParams(params);
     q.set("actor_id", actorId);
     if (params?.exclude_direct) q.set("exclude_direct", "true");
-    const rows = await request<RawNote[]>(
+    q.set("include_reactions", "true");
+    const rows = await request<RawProfileFeedItem[]>(
       "GET",
       `/users/posts?${q.toString()}`,
     );
-    return rows.map(normalizeNote);
+    return rows.map(normalizeProfileFeedItem);
   },
   /** プロフィール画面「フォロー中」タブの一覧取得（無限スクロール、#56）。 */
   following(

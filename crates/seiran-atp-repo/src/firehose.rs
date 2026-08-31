@@ -1182,8 +1182,10 @@ async fn handle_inbound_like_create(
     };
 
     let reactions_repo = PgReactionRepository::new(pool.clone());
+    let new_reaction_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = reactions_repo
         .insert(
+            new_reaction_id,
             post_id,
             actor_id,
             "like",

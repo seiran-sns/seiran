@@ -71,7 +71,7 @@ pub use post::{
     PgPostRepository, PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository,
     PostSummary, ReferenceKind, RepostEntry, RepostUndoInfo, TimelinePost,
 };
-pub use reaction::{PgReactionRepository, ReactionRepository, ReactorInfo};
+pub use reaction::{PgReactionRepository, ReactionFeedRow, ReactionRepository, ReactorInfo};
 pub use relay::{PgRelayRepository, Relay, RelayError, RelayRepository, RelayStatus};
 pub use remote_emoji::{PgRemoteEmojiRepository, RemoteEmojiRepository, RemoteEmojiRow};
 pub use remote_instance_meta::{

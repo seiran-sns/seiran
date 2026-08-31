@@ -5,7 +5,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { api, Note, UserProfile, getErrorMessage } from "../api/client";
+import { api, ProfileFeedItem, UserProfile, getErrorMessage } from "../api/client";
 import ActionsMenu, { ActionsMenuItem } from "../components/common/ActionsMenu";
 import Modal from "../components/common/Modal";
 import RemoteBanner from "../components/common/RemoteBanner";
@@ -14,7 +14,7 @@ import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import EmojiText from "../components/note/EmojiText";
 import NoteCard from "../components/note/NoteCard";
-import NoteList from "../components/note/NoteList";
+import ProfileFeedList from "../components/note/ProfileFeedList";
 import FollowListPanel from "../components/right/FollowListPanel";
 import { useAuth } from "../contexts/AuthContext";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
@@ -79,9 +79,11 @@ export default function ProfilePage() {
     followers?: number;
   }>({});
 
-  // 投稿一覧の無限スクロール（#64）。`profile.recent_posts`（初回最大20件）を初期値とし、
-  // 下端到達で `GET /api/users/posts` から `until_id` カーソルで追加取得する。
+  // 投稿＋リアクションイベント混合フィードの無限スクロール（#64、絵文字リアクションイベント
+  // 混合表示）。初回・追加取得とも `GET /api/users/posts`（`includeReactions=true`）から
+  // `until_id` カーソルで取得する。
   const actorIdRef = useRef<string | undefined>(undefined);
+  const [postsLoading, setPostsLoading] = useState(false);
 
   const onError = useCallback(
     (e: unknown) => showError(getErrorMessage(e)),
@@ -96,6 +98,11 @@ export default function ProfilePage() {
       exclude_direct: true,
     });
   }, []);
+  // 初回ページ取得（`actor_id` が無い＝DB未登録のリモートアクターは常に空）。
+  const fetchInitialFeed = useCallback((actorId?: string): Promise<ProfileFeedItem[]> => {
+    if (!actorId) return Promise.resolve([]);
+    return api.users.posts(actorId, { limit: PAGE_SIZE, exclude_direct: true });
+  }, []);
   const {
     items: posts,
     setItems: setPosts,
@@ -103,7 +110,12 @@ export default function ProfilePage() {
     setHasMore,
     loadingMore,
     loadMore: loadMorePosts,
-  } = useCursorPagination<Note>(fetchPage, (n) => n.id, PAGE_SIZE, onError);
+  } = useCursorPagination<ProfileFeedItem>(
+    fetchPage,
+    (item) => (item.kind === "note" ? item.note.id : item.event.id),
+    PAGE_SIZE,
+    onError,
+  );
 
   // 狭幅専用タブシート（下記narrowTabbedSection）はheaderの直下にstickyで張り付ける。
   // 両者ともposition: sticky; top: 0 だと重なってしまうため、headerの実高さ分だけオフセットする
@@ -139,8 +151,15 @@ export default function ProfilePage() {
         setIsBlockedBy(p.is_blocked_by);
         setIsMuted(p.is_muted);
         actorIdRef.current = p.actor_id;
-        setPosts(p.recent_posts);
-        setHasMore(!!p.actor_id && p.recent_posts.length >= PAGE_SIZE);
+        setPostsLoading(true);
+        fetchInitialFeed(p.actor_id)
+          .then((items) => {
+            if (cancelled) return;
+            setPosts(items);
+            setHasMore(!!p.actor_id && items.length >= PAGE_SIZE);
+          })
+          .catch((e) => !cancelled && onError(e))
+          .finally(() => !cancelled && setPostsLoading(false));
         // フォロー中/フォロワータブがまだ開かれていない段階から先読みを開始する（#68 マイケル指摘）。
         // 結果はプロフィールカードの人数表示のブレンドにも使う（#68 マイケル指摘）。
         if (p.actor_id && p.actor_type === "fedi") {
@@ -245,8 +264,9 @@ export default function ProfilePage() {
       setIsBlocking(p.is_blocking);
       setIsBlockedBy(p.is_blocked_by);
       setIsMuted(p.is_muted);
-      setPosts(p.recent_posts);
-      setHasMore(!!p.actor_id && p.recent_posts.length >= PAGE_SIZE);
+      const items = await fetchInitialFeed(p.actor_id);
+      setPosts(items);
+      setHasMore(!!p.actor_id && items.length >= PAGE_SIZE);
     } catch {
       // ベストエフォート（ブロック/ミュート操作自体は既に成功しているため、再取得失敗はエラー表示しない）
     }
@@ -748,8 +768,9 @@ export default function ProfilePage() {
       <div className={panel.rightHeader}>
         {t("profile:profilePage.postsHeader")}
       </div>
-      <NoteList
-        notes={posts}
+      <ProfileFeedList
+        items={posts}
+        loading={postsLoading}
         emptyMessage={t("profile:profilePage.noPosts")}
         onLoadMore={loadMorePosts}
         hasMore={hasMore}
@@ -772,8 +793,9 @@ export default function ProfilePage() {
         onChange={setRightTab}
       />
       {rightTab === 0 && (
-        <NoteList
-          notes={posts}
+        <ProfileFeedList
+          items={posts}
+          loading={postsLoading}
           emptyMessage={t("profile:profilePage.noPosts")}
           onLoadMore={loadMorePosts}
           hasMore={hasMore}
@@ -823,8 +845,9 @@ export default function ProfilePage() {
         {
           label: t("profile:profilePage.postsHeader"),
           content: (
-            <NoteList
-              notes={posts}
+            <ProfileFeedList
+              items={posts}
+              loading={postsLoading}
               emptyMessage={t("profile:profilePage.noPosts")}
               onLoadMore={loadMorePosts}
               hasMore={hasMore}

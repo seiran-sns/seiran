@@ -534,7 +534,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 ### リアクション通知の重複排除（`reaction_id`）
 ローカルユーザーが ATP 実体（`at_uri`/`at_cid`）を持つ投稿へリアクションすると、(1) `notes::create_reaction` がその場でローカル通知を即時INSERTし、(2) 同じリアクションを非同期で `AtpCommitService::commit_like` が `app.bsky.feed.like` としてコミットし、それが自分自身の firehose 受信（`seiran-atp-repo::firehose::handle_inbound_like_create`）で戻ってきて再度通知INSERTを試みる、という2経路が走る。この2つは「経路が違うだけの同一操作」であり、素朴に両方INSERTすると通知が重複表示される。
 
-これを防ぐため、`reactions.id`（`GENERATED ALWAYS AS IDENTITY`）を「リアクション実体の識別子」として2経路で共有する。ローカルINSERT時に採番された `reactions.id` を (a) `notifications.reaction_id` に保存し、(b) `commit_like` が `app.bsky.feed.like` レコードの非標準拡張フィールド `seiranReactionId` として埋め込む（`emoji` 拡張フィールドと同じ流儀）。自分自身の firehose 受信時、このLikeが `seiranReactionId` を持っていればそれをそのまま `notifications.reaction_id` として渡し、`idx_notifications_reaction_id`（`reaction_id IS NOT NULL` の部分UNIQUEインデックス、`ON CONFLICT DO NOTHING`）で2つ目のINSERTが弾かれる。
+これを防ぐため、`reactions.id`（`posts`/`notifications`と同じsnowflake ID名前空間、`docs/database.md`参照）を「リアクション実体の識別子」として2経路で共有する。ローカルINSERT時に採番された `reactions.id` を (a) `notifications.reaction_id` に保存し、(b) `commit_like` が `app.bsky.feed.like` レコードの非標準拡張フィールド `seiranReactionId` として埋め込む（`emoji` 拡張フィールドと同じ流儀）。自分自身の firehose 受信時、このLikeが `seiranReactionId` を持っていればそれをそのまま `notifications.reaction_id` として渡し、`idx_notifications_reaction_id`（`reaction_id IS NOT NULL` の部分UNIQUEインデックス、`ON CONFLICT DO NOTHING`）で2つ目のINSERTが弾かれる。
 
 `source_uri` によるUNIQUE制約（既存）とは目的が異なる: `source_uri` は「他人発のイベントの複線受信対策」（Doc6既知の課題）だが、`reaction_id` は「自分が起点の同一操作が別経路で戻ってくることの対策」。他人（他インスタンスのMisskey/Mastodonユーザーや他のBskyユーザー）からのリアクションには `seiranReactionId` が付かないため `reaction_id` は常に `NULL` で、同じ投稿に複数の絵文字で連投する（通知欄に文章のようなものを書く遊び）動作は妨げない。
 

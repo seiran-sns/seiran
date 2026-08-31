@@ -11,8 +11,8 @@
 seiran の DB は「ローカル・ActivityPub(Fedi)・AT Protocol(Bsky) という3つの宇宙のアクター・投稿・フォロー関係を1つのテーブルに統一して格納する」ことを核とする。`actors` / `posts` / `follows` / `lists` / `list_members` はいずれもこのパターンで、プロトコル固有の識別子（`ap_uri` / `ap_object_id` / `at_did` / `at_uri` / `at_rkey` 等）を NULL 許容カラムとして併存させている。「ローカル用テーブル」「Fedi用テーブル」のように分けていない。
 
 ID 採番は2系統ある。
-- **アプリ側 Snowflake 採番**（`generate_snowflake_id()`、タイムスタンプ内包の BIGINT）: `actors` / `posts` / `media_files` / `custom_emojis` / `notifications` / `lists` / `email_verifications` / `email_changes` / `password_resets` / `atp_blobs`。`posts.id` はタイムライン表示順のソート主軸そのものであり、これが `docs/concept.md` の「統一ポストID」にあたる。
-- **DB 側 `GENERATED ALWAYS AS IDENTITY`**: `users` / `reactions` / `follows` / `storage_providers` / `list_members` / `pinned_posts`。順序に意味を持たせる必要がない補助テーブル。
+- **アプリ側 Snowflake 採番**（`generate_snowflake_id()`、タイムスタンプ内包の BIGINT）: `actors` / `posts` / `media_files` / `custom_emojis` / `notifications` / `reactions` / `lists` / `email_verifications` / `email_changes` / `password_resets` / `atp_blobs`。`posts.id` はタイムライン表示順のソート主軸そのものであり、これが `docs/concept.md` の「統一ポストID」にあたる。
+- **DB 側 `GENERATED ALWAYS AS IDENTITY`**: `users` / `follows` / `storage_providers` / `list_members` / `pinned_posts`。順序に意味を持たせる必要がない補助テーブル。
 
 ## 2. テーブル一覧
 
@@ -164,7 +164,7 @@ DMは`visibility='direct'`の投稿をそのまま`posts`に格納する方式�
 - `posts.bsky_message_id`（`posts`本体のカラム、Bsky受信DMのみ設定）: Bsky側メッセージIDを保持し部分UNIQUEインデックスを張ることで、DM受信ポーリングの再実行（DB瞬断等での中断からの再開）によるメッセージの重複取り込みを防ぐ冪等キーとして使う。
 
 ### `reactions`
-`UNIQUE(post_id, actor_id)` — 1投稿につき1ユーザー1リアクション（Misskey 準拠）。切り替え時は `ON CONFLICT DO UPDATE`。`content` は Unicode 絵文字文字列、またはカスタム絵文字の場合 `:shortcode:` 形式。`emoji_url` はカスタム絵文字の画像URL（ローカル送信は `custom_emojis` から解決、Fedi 受信は activity の `tag` から解決、ATP 自己firehose再受信も `custom_emojis` から再解決、Unicode 絵文字は NULL）。`ON CONFLICT DO UPDATE` は `emoji_url` も無条件で上書きするため、insert元となる3経路（`create_reaction`／AP受信の`handle_reaction`／ATP受信の`handle_inbound_like_create`）は全て、`content` が `:shortcode:` 形式なら emoji_url を解決してから渡す必要がある（未解決のまま `None` を渡すと既存の正しい値を消してしまう）。`id`（`GENERATED ALWAYS AS IDENTITY`）は集計用途ではなく、`notifications.reaction_id`（リアクション通知の重複排除トークン、下記参照）としても使う。
+`UNIQUE(post_id, actor_id)` — 1投稿につき1ユーザー1リアクション（Misskey 準拠）。切り替え時は `ON CONFLICT DO UPDATE`。`content` は Unicode 絵文字文字列、またはカスタム絵文字の場合 `:shortcode:` 形式。`emoji_url` はカスタム絵文字の画像URL（ローカル送信は `custom_emojis` から解決、Fedi 受信は activity の `tag` から解決、ATP 自己firehose再受信も `custom_emojis` から再解決、Unicode 絵文字は NULL）。`ON CONFLICT DO UPDATE` は `emoji_url` も無条件で上書きするため、insert元となる3経路（`create_reaction`／AP受信の`handle_reaction`／ATP受信の`handle_inbound_like_create`）は全て、`content` が `:shortcode:` 形式なら emoji_url を解決してから渡す必要がある（未解決のまま `None` を渡すと既存の正しい値を消してしまう）。`id` は `posts`/`notifications` と同じ snowflake ID 名前空間（呼び出し側が `generate_snowflake_id(Utc::now())` で事前採番して渡す）で、`notifications.reaction_id`（リアクション通知の重複排除トークン、下記参照）に加えて、プロフィール「投稿」タブの投稿＋リアクション混合フィード（`GET /api/users/posts?includeReactions=true`）の時系列マージ・カーソルページネーションにも使う。`ON CONFLICT DO UPDATE` では `id`/`created_at` も新しい値へ更新する（切り替え＝新しいイベントとして時系列の先頭に来るべきため）。
 
 ### `remote_emojis`
 AP受信（投稿本文・表示名・絵文字リアクションのいずれか）で見つけたカスタム絵文字を`(shortcode, domain)`単位で`upsert_seen`し、`first_seen_at`/`last_seen_at`を更新するカタログテーブル。`tags`にはAP Emoji tagの`aliases`/`tags`/`keywords`、`license`にはMisskey拡張`_misskey_license.freeText`を保存し、再受信時に空の値で既知メタデータを消さない。画像は`media_files`へ取り込まない（表示は既存のメディアプロキシ経由でリモートURLを直接参照する）。管理画面「リモート」タブおよびNoteCard右クリックのインポート導線がここを起点に、選ばれた1件だけを`fetch_validated`でダウンロードし`custom_emojis`へ登録する。

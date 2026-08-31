@@ -1,5 +1,24 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
+
+/// プロフィール「投稿」タブの投稿＋リアクション混合フィード用の1行（このアクターが行った
+/// リアクション＋対象ポストの投稿者情報）。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ReactionFeedRow {
+    pub id: i64,
+    pub content: String,
+    pub emoji_url: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub post_id: i64,
+    pub target_actor_id: i64,
+    pub target_username: String,
+    pub target_domain: String,
+    pub target_display_name: Option<String>,
+    pub target_actor_type: String,
+    pub target_avatar_url: Option<String>,
+    pub target_actor_emoji_map: Option<serde_json::Value>,
+}
 
 /// リアクションを付けたアクターの表示用情報（ホバーポップオーバーの「誰が付けたか」一覧用）。
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -27,11 +46,16 @@ pub trait ReactionRepository: Send + Sync {
     /// `custom_emojis` から解決した URL、Fedi 受信は activity の `tag` から解決した URL）。
     /// Unicode 絵文字リアクションでは `None`。`at_uri` と異なり毎回そのまま上書きする
     /// （都度解決した URL か `None` を渡すため、旧値を保持する必要が無い）。
-    /// 戻り値は当該行の `id`（切り替え時も同じ (post_id, actor_id) の既存行の id）。
+    /// `id` は呼び出し側が `generate_snowflake_id(Utc::now())` で事前採番した値
+    /// （posts/notifications と同じ名前空間）。切り替え時も `id`/`created_at` を新しい値へ
+    /// 更新する（プロフィール混合フィードで「切り替え＝新しいイベント」として時系列先頭に
+    /// 来るべきため）。
+    /// 戻り値は当該行の `id`（新規作成時は渡した `id` そのもの、切り替え時も更新後の `id`）。
     /// 通知の重複排除用トークン（`notifications.reaction_id`）として使う。
     #[allow(clippy::too_many_arguments)]
     async fn insert(
         &self,
+        id: i64,
         post_id: i64,
         actor_id: i64,
         reaction_type: &str,
@@ -98,6 +122,21 @@ pub trait ReactionRepository: Send + Sync {
         content: &str,
         limit: i64,
     ) -> Result<Vec<ReactorInfo>, sqlx::Error>;
+
+    /// 指定アクターが行ったリアクションを、対象ポスト・その投稿者情報付きで新しい順に返す
+    /// （プロフィール「投稿」タブの投稿＋リアクション混合フィード専用、`until_id`/`since_id` は
+    /// `reactions.id` 基準・`timeline_by_actor` と同じカーソル規約）。対象ポストが論理削除済み、
+    /// または `viewer_actor_id` から可視でない（`post_is_visible_to` が false）場合は除外する。
+    #[allow(clippy::too_many_arguments)]
+    async fn reactions_by_actor_for_feed(
+        &self,
+        actor_id: i64,
+        viewer_actor_id: Option<i64>,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+        exclude_direct: bool,
+        limit: i64,
+    ) -> Result<Vec<ReactionFeedRow>, sqlx::Error>;
 }
 
 pub struct PgReactionRepository {
@@ -114,6 +153,7 @@ impl PgReactionRepository {
 impl ReactionRepository for PgReactionRepository {
     async fn insert(
         &self,
+        id: i64,
         post_id: i64,
         actor_id: i64,
         reaction_type: &str,
@@ -123,9 +163,10 @@ impl ReactionRepository for PgReactionRepository {
         emoji_url: Option<&str>,
     ) -> Result<i64, sqlx::Error> {
         let row = sqlx::query(
-            "INSERT INTO reactions (post_id, actor_id, reaction_type, content, ap_activity_id, at_uri, emoji_url)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "INSERT INTO reactions (id, post_id, actor_id, reaction_type, content, ap_activity_id, at_uri, emoji_url)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (post_id, actor_id) DO UPDATE SET
+                 id = EXCLUDED.id,
                  reaction_type = EXCLUDED.reaction_type,
                  content = EXCLUDED.content,
                  ap_activity_id = EXCLUDED.ap_activity_id,
@@ -134,6 +175,7 @@ impl ReactionRepository for PgReactionRepository {
                  created_at = CURRENT_TIMESTAMP
              RETURNING id",
         )
+        .bind(id)
         .bind(post_id)
         .bind(actor_id)
         .bind(reaction_type)
@@ -268,6 +310,45 @@ impl ReactionRepository for PgReactionRepository {
         )
         .bind(post_id)
         .bind(content)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn reactions_by_actor_for_feed(
+        &self,
+        actor_id: i64,
+        viewer_actor_id: Option<i64>,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+        exclude_direct: bool,
+        limit: i64,
+    ) -> Result<Vec<ReactionFeedRow>, sqlx::Error> {
+        sqlx::query_as::<_, ReactionFeedRow>(
+            "SELECT r.id, r.content, r.emoji_url, r.created_at, r.post_id,
+                    a.id AS target_actor_id, a.username AS target_username, a.domain AS target_domain,
+                    a.display_name AS target_display_name, a.actor_type::text AS target_actor_type,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS target_avatar_url,
+                    a.emoji_map AS target_actor_emoji_map
+             FROM reactions r
+             JOIN posts p ON p.id = r.post_id
+             JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             WHERE r.actor_id = $1
+               AND p.deleted_at IS NULL
+               AND ($2::bigint IS NULL OR r.id < $2)
+               AND ($3::bigint IS NULL OR r.id > $3)
+               AND ($4::bigint IS NULL OR $4 = $1 OR NOT actor_is_hidden_for_viewer($4, $1))
+               AND post_is_visible_to($4, p.actor_id, p.visibility::text, p.id, $5)
+             ORDER BY r.id DESC
+             LIMIT $6",
+        )
+        .bind(actor_id)
+        .bind(until_id)
+        .bind(since_id)
+        .bind(viewer_actor_id)
+        .bind(exclude_direct)
         .bind(limit)
         .fetch_all(&self.pool)
         .await

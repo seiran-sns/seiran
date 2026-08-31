@@ -17,7 +17,8 @@ use crate::handlers::notes::dto::{build_instance_info, RemoteInstanceInfo};
 use crate::handlers::notes::{
     attach_poll_votes, attach_remote_instance_info, embed_quotes, embed_renotes,
     fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
-    resolve_mention_facets_in_place, to_note_response, NoteResponse,
+    resolve_mention_facets_in_place, to_note_response, to_reaction_event_response, NoteResponse,
+    ProfileFeedItem,
 };
 use crate::middleware::{extract_auth, MaybeAuthedUser};
 use crate::AppState;
@@ -42,6 +43,11 @@ pub struct UserPostsQuery {
     /// `home_timeline`等と同じ`exclude_direct`規約（DMをプロフィール投稿一覧から除外する）。
     #[serde(alias = "excludeDirect", default)]
     pub exclude_direct: bool,
+    /// `true`の場合、このアクターが行った絵文字リアクションイベントも投稿と時系列混合で返す
+    /// （プロフィール「投稿」タブ用）。レスポンス形状が `NoteResponse[]` から
+    /// `ProfileFeedItem[]`（`{"kind":"note"|"reaction","data":...}`）に変わる。
+    #[serde(alias = "includeReactions", default)]
+    pub include_reactions: bool,
 }
 
 /// `GET /api/users/posts` — プロフィール画面の投稿一覧の追加ページ取得（無限スクロール、#64）。
@@ -120,7 +126,45 @@ pub async fn user_posts(
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
     attach_remote_instance_info(&state, &mut notes).await;
 
-    Json(notes).into_response()
+    if !params.include_reactions {
+        return Json(notes).into_response();
+    }
+
+    // プロフィール「投稿」タブの投稿＋リアクション混合フィード（ユーザープロフィールページ
+    // 「投稿」タブ、絵文字リアクションイベント混合表示）。投稿とリアクションは別々に snowflake
+    // ID 降順で取得し、id（=時系列）でマージして limit 件に切り詰める。
+    let reaction_rows = match state
+        .reactions
+        .reactions_by_actor_for_feed(
+            actor_id,
+            my_actor_id,
+            until_id,
+            since_id,
+            params.exclude_direct,
+            limit,
+        )
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[user_posts] リアクション取得失敗: {}", e);
+            return ApiError::Internal(e.to_string()).into_response();
+        }
+    };
+
+    let mut items: Vec<(i64, ProfileFeedItem)> = notes
+        .into_iter()
+        .filter_map(|n| n.id.parse::<i64>().ok().map(|id| (id, ProfileFeedItem::Note(Box::new(n)))))
+        .collect();
+    items.extend(
+        reaction_rows
+            .into_iter()
+            .map(|r| (r.id, ProfileFeedItem::Reaction(Box::new(to_reaction_event_response(r))))),
+    );
+    items.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+    items.truncate(limit as usize);
+
+    Json(items.into_iter().map(|(_, item)| item).collect::<Vec<_>>()).into_response()
 }
 
 /// フォロー中/フォロワー一覧の1件（#56）。

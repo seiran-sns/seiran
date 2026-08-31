@@ -581,6 +581,40 @@ export function normalizeNote(r: RawNote): Note {
   };
 }
 
+/** プロフィール「投稿」タブの投稿＋リアクション混合フィードにおける1件のリアクションイベント。 */
+export interface ReactionEvent {
+  id: string;
+  createdAt: string;
+  reaction: string;
+  reactionEmojiUrl?: string;
+  targetNoteId: string;
+  targetUser: {
+    id: string;
+    username: string;
+    domain?: string;
+    displayName?: string;
+    actorType: string;
+    avatarUrl?: string;
+  };
+  targetUserEmojis?: Record<string, string>;
+}
+
+/** `GET /api/users/posts?includeReactions=true` の生レスポンス1件。 */
+export type RawProfileFeedItem =
+  | { kind: "note"; data: RawNote }
+  | { kind: "reaction"; data: ReactionEvent };
+
+/** プロフィール「投稿」タブの投稿＋リアクション混合フィード1件（正規化後）。 */
+export type ProfileFeedItem =
+  | { kind: "note"; note: Note }
+  | { kind: "reaction"; event: ReactionEvent };
+
+export function normalizeProfileFeedItem(raw: RawProfileFeedItem): ProfileFeedItem {
+  return raw.kind === "note"
+    ? { kind: "note", note: normalizeNote(raw.data) }
+    : { kind: "reaction", event: raw.data };
+}
+
 /** ストリーミング（#37）で受け取った note ペイロードを Note に正規化する。 */
 export function noteFromStream(body: unknown): Note {
   return normalizeNote(body as RawNote);
