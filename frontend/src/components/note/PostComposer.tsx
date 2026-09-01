@@ -306,11 +306,70 @@ export default function PostComposer({
   const cwBtnRef = useRef<HTMLButtonElement>(null);
   const unlistedBtnRef = useRef<HTMLButtonElement>(null);
   const privateBtnRef = useRef<HTMLButtonElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (!autoFocus) return;
     // ComposerEditor が装飾DOMの構築後にフォーカスとcaret復元を行う。
   }, [autoFocus]);
+
+  // 本文入力欄（ComposerEditorのcontentEditable要素）の高さ上限を、画面の残り
+  // スペースに応じて動的に計算する（マイケル指摘: 固定vh値だと画面が低い時に
+  // 投稿ボタンが画面外へ押し出され、逆に画面が高い時は伸び足りず余白が余る）。
+  // 「フォーム内の本文欄以外の部分の高さ」を実測し、モーダル内ならダイアログの
+  // スクロール可能な祖先の下端、無ければビューポート下端までの残りをそこから
+  // 割り当てることで、投稿ボタン等は常に見える位置に留まり、本文欄だけが
+  // スクロールに切り替わる。
+  useEffect(() => {
+    const form = formRef.current;
+    const editor = editorRef.current;
+    if (!form || !editor) return;
+
+    const MIN_EDITOR_HEIGHT = 72;
+    const BOTTOM_MARGIN = 16;
+
+    function findScrollableAncestor(el: HTMLElement): HTMLElement | null {
+      let node: HTMLElement | null = el.parentElement;
+      while (node && node !== document.body) {
+        const style = window.getComputedStyle(node);
+        if (
+          (style.overflowY === "auto" || style.overflowY === "scroll") &&
+          node.scrollHeight > node.clientHeight
+        ) {
+          return node;
+        }
+        node = node.parentElement;
+      }
+      return null;
+    }
+
+    function recalc() {
+      if (!form || !editor) return;
+      const formRect = form.getBoundingClientRect();
+      const editorRect = editor.getBoundingClientRect();
+      const otherPartsHeight = formRect.height - editorRect.height;
+      const scrollableAncestor = findScrollableAncestor(form);
+      const containerBottom = scrollableAncestor
+        ? Math.min(window.innerHeight, scrollableAncestor.getBoundingClientRect().bottom)
+        : window.innerHeight;
+      const available = containerBottom - formRect.top - otherPartsHeight - BOTTOM_MARGIN;
+      const next = `${Math.max(MIN_EDITOR_HEIGHT, Math.floor(available))}px`;
+      if (editor.style.maxHeight !== next) {
+        editor.style.maxHeight = next;
+      }
+    }
+
+    recalc();
+    const ro = new ResizeObserver(recalc);
+    ro.observe(form);
+    window.addEventListener("resize", recalc);
+    window.addEventListener("scroll", recalc, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", recalc);
+      window.removeEventListener("scroll", recalc, true);
+    };
+  }, []);
 
   useEffect(() => {
     if (!draftTarget) return;
@@ -754,6 +813,7 @@ export default function PostComposer({
 
   return (
     <form
+      ref={formRef}
       onSubmit={handlePost}
       className={`${styles.form} ${replyTo ? styles.replyForm : ""}`}
     >

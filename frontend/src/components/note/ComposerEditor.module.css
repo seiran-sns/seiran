@@ -5,6 +5,11 @@
 .editor {
   width: 100%;
   min-height: 72px;
+  /* 行数が増えてもフォーム全体が画面外へ伸び続けないよう、本文欄自体を頭打ちに
+   * してスクロールへ切り替える（マイケル指摘）。実際の上限値（max-height）は
+   * 画面の残りスペースに応じてPostComposer側がJSで動的に設定する
+   * （固定vh値では画面が低い/高いケースに追従できないため、マイケル指摘）。 */
+  overflow-y: auto;
   color: var(--text);
   font: inherit;
   /* iOS Safari はフォーカス対象が16px未満だとページを自動拡大する。

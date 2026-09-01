@@ -17,6 +17,11 @@
   border-radius: 14px;
   width: 100%;
   max-width: 540px;
+  /* .overlay の padding（上10vh・下16px）を差し引いた分を超えないようにし、
+   * 中身が多くても画面外へはみ出さずダイアログ自身がスクロールするようにする。 */
+  max-height: calc(90vh - 16px);
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 20px 60px rgba(22, 32, 58, 0.22);
   animation: pop 0.14s ease-out;
 }
@@ -27,6 +32,7 @@
   justify-content: space-between;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .title {
@@ -50,6 +56,8 @@
 
 .body {
   padding: 18px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 @keyframes fade {
