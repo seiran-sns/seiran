@@ -4,6 +4,7 @@ import { api, ApiError, getErrorMessage, Note, ReactionSummary } from "../api/cl
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { ReactionUpdate, useStreamingContext } from "../contexts/StreamingContext";
+import { getReactionState, setReactionState, useReactionState } from "../stores/reactionStore";
 
 /**
  * リアクションの楽観的更新を適用した新しい配列を返す。
@@ -76,7 +77,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
   const [reposting, setReposting] = useState(false);
   const [unreposting, setUnreposting] = useState(false);
   const [reposted, setReposted] = useState(note.repostedByMe ?? false);
-  const [reactions, setReactions] = useState<ReactionSummary[]>(note.reactions ?? []);
+  const reactions = useReactionState(note.id, note.reactions);
   const [pinned, setPinned] = useState(note.pinnedByMe ?? false);
   const [pinning, setPinning] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -95,7 +96,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
   // 他ユーザー（または自分の別タブ/端末）によるリアクション追加/切替/取消をリアルタイム反映する。
   useEffect(() => {
     return registerReaction(note.id, (update) => {
-      setReactions((prev) => applyReactionUpdate(prev, update, user?.actor_id));
+      setReactionState(note.id, applyReactionUpdate(getReactionState(note.id) ?? [], update, user?.actor_id));
     });
   }, [note.id, registerReaction, user?.actor_id]);
 
@@ -142,14 +143,14 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
     const prevReactions = reactions;
 
     setReactionPending(true);
-    setReactions((prev) => optimisticSetReaction(prev, emoji, reacting));
+    setReactionState(note.id, optimisticSetReaction(prevReactions, emoji, reacting));
     try {
       const res = reacting
         ? await api.notes.react(note.id, emoji)
         : await api.notes.unreact(note.id, emoji);
-      setReactions(res.reactions);
+      setReactionState(note.id, res.reactions);
     } catch (err) {
-      setReactions(prevReactions);
+      setReactionState(note.id, prevReactions);
       showError(getErrorMessage(err));
     } finally {
       setReactionPending(false);
