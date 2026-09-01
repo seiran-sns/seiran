@@ -604,6 +604,14 @@ pub enum BskyEmbed {
         width: i32,
         height: i32,
     },
+    /// `app.bsky.embed.recordWithMedia`（引用＋メディアの併記）。`media`は
+    /// `Images`/`Video`/`External`のいずれか（`Record`/`RecordWithMedia`は不正、
+    /// `encode_bsky_feed_post`でエラーにする）。
+    RecordWithMedia {
+        uri: String,
+        cid: String,
+        media: Box<BskyEmbed>,
+    },
 }
 
 /// `app.bsky.embed.record`（引用ポスト）の Ipld を構築する。
@@ -618,6 +626,24 @@ fn build_embed_record_ipld(uri: &str, cid_str: &str) -> Ipld {
         Ipld::String("app.bsky.embed.record".to_string()),
     );
     embed.insert("record".to_string(), Ipld::Map(record));
+    Ipld::Map(embed)
+}
+
+/// `app.bsky.embed.recordWithMedia`（引用＋メディア併記）の Ipld を構築する。
+/// `media`は`build_embed_images_ipld`/`build_embed_video_ipld`/`build_embed_external_ipld`
+/// のいずれかが返す（既に`$type`付きの）Ipldをそのまま渡す。
+///
+/// canonical 順: $type(5) < media(5) < record(6)（同長の$typeとmediaは辞書順で$typeが先）
+fn build_embed_record_with_media_ipld(uri: &str, cid_str: &str, media: Ipld) -> Ipld {
+    let record_view = build_embed_record_ipld(uri, cid_str);
+
+    let mut embed = BTreeMap::new();
+    embed.insert(
+        "$type".to_string(),
+        Ipld::String("app.bsky.embed.recordWithMedia".to_string()),
+    );
+    embed.insert("media".to_string(), media);
+    embed.insert("record".to_string(), record_view);
     Ipld::Map(embed)
 }
 
@@ -786,6 +812,33 @@ pub fn encode_bsky_feed_post(
         }) => Some(build_embed_video_ipld(
             &cid, &mime_type, size, width, height,
         )?),
+        Some(BskyEmbed::RecordWithMedia { uri, cid, media }) => {
+            let media_ipld = match *media {
+                BskyEmbed::Images(images) if !images.is_empty() => {
+                    build_embed_images_ipld(&images)?
+                }
+                BskyEmbed::External {
+                    url,
+                    title,
+                    description,
+                    thumb,
+                } => build_embed_external_ipld(&url, &title, &description, thumb.as_ref())?,
+                BskyEmbed::Video {
+                    cid,
+                    mime_type,
+                    size,
+                    width,
+                    height,
+                } => build_embed_video_ipld(&cid, &mime_type, size, width, height)?,
+                _ => {
+                    return Err(RepoError::Cbor(
+                        "recordWithMedia: media は Images/Video/External のいずれかである必要がある"
+                            .to_string(),
+                    ))
+                }
+            };
+            Some(build_embed_record_with_media_ipld(&uri, &cid, media_ipld))
+        }
     };
     let record = BskyFeedPost {
         text: text.to_string(),
@@ -1350,6 +1403,86 @@ mod tests {
             Some(&Ipld::String("元投稿本文".to_string()))
         );
         assert!(matches!(external.get("thumb"), Some(Ipld::Map(_))));
+    }
+
+    #[test]
+    fn test_record_with_media_embed_contains_record_and_media() {
+        let image = BskyImage {
+            sha256_hex: "11".repeat(32),
+            mime_type: "image/jpeg".to_string(),
+            size: 456,
+            width: 800,
+            height: 600,
+            alt: String::new(),
+        };
+        let (cbor, _) = encode_bsky_feed_post(
+            "引用+画像",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            Some(BskyEmbed::RecordWithMedia {
+                uri: "at://did:plc:abc/app.bsky.feed.post/xyz".to_string(),
+                cid: "bafyreidummycid".to_string(),
+                media: Box::new(BskyEmbed::Images(vec![image])),
+            }),
+            None,
+            None,
+        )
+        .unwrap();
+        let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
+        let Ipld::Map(record) = value else {
+            panic!("record must be map")
+        };
+        let Some(Ipld::Map(embed)) = record.get("embed") else {
+            panic!("embed must be map")
+        };
+        assert_eq!(
+            embed.get("$type"),
+            Some(&Ipld::String("app.bsky.embed.recordWithMedia".to_string()))
+        );
+        let Some(Ipld::Map(media)) = embed.get("media") else {
+            panic!("media must be map")
+        };
+        assert_eq!(
+            media.get("$type"),
+            Some(&Ipld::String("app.bsky.embed.images".to_string()))
+        );
+        assert!(matches!(media.get("images"), Some(Ipld::List(_))));
+        let Some(Ipld::Map(record_ref)) = embed.get("record") else {
+            panic!("record must be map")
+        };
+        assert_eq!(
+            record_ref.get("$type"),
+            Some(&Ipld::String("app.bsky.embed.record".to_string()))
+        );
+        let Some(Ipld::Map(inner)) = record_ref.get("record") else {
+            panic!("record.record must be map")
+        };
+        assert_eq!(
+            inner.get("uri"),
+            Some(&Ipld::String(
+                "at://did:plc:abc/app.bsky.feed.post/xyz".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_record_with_media_rejects_non_media_inner_embed() {
+        let result = encode_bsky_feed_post(
+            "不正な組み合わせ",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            Some(BskyEmbed::RecordWithMedia {
+                uri: "at://did:plc:abc/app.bsky.feed.post/xyz".to_string(),
+                cid: "bafyreidummycid".to_string(),
+                media: Box::new(BskyEmbed::Record {
+                    uri: "at://did:plc:def/app.bsky.feed.post/other".to_string(),
+                    cid: "bafyreiothercid".to_string(),
+                }),
+            }),
+            None,
+            None,
+        );
+        assert!(result.is_err());
     }
 
     #[test]

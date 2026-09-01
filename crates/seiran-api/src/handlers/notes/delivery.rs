@@ -321,6 +321,40 @@ fn resolve_poll_embed(local_domain: &str, post_id: i64, poll: &serde_json::Value
     }
 }
 
+/// `attachment_ids`から添付候補行（`media_files`の関連列）をまとめて取得する。
+/// `resolve_bsky_embed`と`collect_bsky_quote_images`（引用＋静止画のrecordWithMedia化）
+/// で共有するクエリ。
+async fn fetch_embed_candidate_rows(state: &AppState, attachment_ids: &[i64]) -> Vec<EmbedCandidateRow> {
+    if attachment_ids.is_empty() {
+        return Vec::new();
+    }
+    sqlx::query_as::<_, EmbedCandidateRow>(
+        "SELECT id, sha256, size, mime_type, width, height, is_animated_image, \
+                bsky_video_cid, bsky_video_status, bsky_video_size \
+         FROM media_files WHERE id = ANY($1) ORDER BY array_position($1, id)",
+    )
+    .bind(attachment_ids)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default()
+}
+
+/// 引用投稿（`app.bsky.embed.record`）に静止画添付があれば、`app.bsky.embed.recordWithMedia`
+/// のmedia部分として使う`BskyImage`一覧を返す（マイケル指摘。#227の`bsky_embed_choice`は
+/// 引用投稿では無視されるため、常に「静止画があれば先頭4枚」の自動選択のみを行う）。
+/// アニメGIF・動画・URLカード・アンケートは対象外（動画はBskyPostCommitDeferredの結合待ち
+/// フローと絡み複雑なため、当面は静止画のみ対応）。添付が無い/静止画が無ければ空を返す。
+async fn collect_bsky_quote_images(state: &AppState, attachment_ids: &[i64]) -> Vec<BskyImage> {
+    fetch_embed_candidate_rows(state, attachment_ids)
+        .await
+        .iter()
+        .filter(|r| r.mime_type.starts_with("image/") && !r.is_animated_image)
+        .filter_map(to_bsky_image)
+        // app.bsky.embed.images の上限は4枚（AT Protocol仕様）。
+        .take(4)
+        .collect()
+}
+
 /// Bsky配送するローカル投稿の embed を、明示選択（`CreateNoteRequest::bsky_embed_choice`）
 /// または省略時の固定優先順位（アンケート > 静止画 > アニメGIF先頭 > 動画/音声先頭 >
 /// 本文URL先頭）から解決する（#227、アンケートは#228で追加）。
@@ -333,19 +367,7 @@ pub async fn resolve_bsky_embed(
     poll: Option<&serde_json::Value>,
     choice: Option<BskyEmbedChoice>,
 ) -> BskyEmbedResolution {
-    let rows: Vec<EmbedCandidateRow> = if attachment_ids.is_empty() {
-        Vec::new()
-    } else {
-        sqlx::query_as::<_, EmbedCandidateRow>(
-            "SELECT id, sha256, size, mime_type, width, height, is_animated_image, \
-                    bsky_video_cid, bsky_video_status, bsky_video_size \
-             FROM media_files WHERE id = ANY($1) ORDER BY array_position($1, id)",
-        )
-        .bind(attachment_ids)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default()
-    };
+    let rows: Vec<EmbedCandidateRow> = fetch_embed_candidate_rows(state, attachment_ids).await;
 
     enum Target<'a> {
         Poll,
@@ -908,7 +930,9 @@ pub struct RegularPostDelivery {
     pub ap_in_reply_to: Option<String>,
     pub attachment_ids: Vec<i64>,
     /// Bsky embedの明示選択（#227、`resolve_bsky_embed`参照）。引用投稿（`bsky_quote_embed`が
-    /// `Some`）の場合は無視される（引用embedと画像/動画/URL embedは共存しない）。
+    /// `Some`）の場合は無視される（動画/GIF/URL embed選択は引用と共存しない）。ただし静止画
+    /// 添付は明示選択に関わらず自動でrecordWithMediaとして引用と一緒に配送される
+    /// （`collect_bsky_quote_images`参照、マイケル指摘）。
     pub bsky_embed_choice: Option<BskyEmbedChoice>,
     /// アンケート（#228、`posts.poll`と同じ形のJSON）。Bsky embed選択の`Poll`候補・
     /// AP `Question`配送の両方で使う。
@@ -1019,8 +1043,26 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
             {
                 tracing::error!("[create_note] ATP CW commit 失敗（投稿は保存済み）: {}", e);
             }
-        } else if let Some(embed) = d.bsky_quote_embed {
-            // 引用投稿: embed を付けて commit_quote を使う（画像/動画/URL embed選択と共存しない）
+        } else if let Some(quote_embed) = d.bsky_quote_embed {
+            // 引用投稿: embed を付けて commit_quote を使う。静止画添付があれば
+            // app.bsky.embed.recordWithMedia として引用と画像を両方配送する（マイケル指摘、
+            // 添付物が画像だけなら選択の余地なく画像も送られるべき）。動画/GIF/URL embed選択
+            // （`bsky_embed_choice`）は引き続き無視する（引用と共存しない）。
+            let embed = match quote_embed {
+                BskyEmbed::Record { uri, cid } => {
+                    let images = collect_bsky_quote_images(state, &d.attachment_ids).await;
+                    if images.is_empty() {
+                        BskyEmbed::Record { uri, cid }
+                    } else {
+                        BskyEmbed::RecordWithMedia {
+                            uri,
+                            cid,
+                            media: Box::new(BskyEmbed::Images(images)),
+                        }
+                    }
+                }
+                other => other,
+            };
             if let Err(e) = state
                 .atp_service
                 .commit_quote(

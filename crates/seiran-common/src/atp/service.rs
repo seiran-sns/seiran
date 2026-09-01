@@ -146,6 +146,27 @@ fn blob_cids_for_embed(embed: &Option<BskyEmbed>) -> Vec<Cid> {
         Some(BskyEmbed::External { thumb: None, .. }) | Some(BskyEmbed::Record { .. }) | None => {
             Vec::new()
         }
+        Some(BskyEmbed::RecordWithMedia { media, .. }) => blob_cids_for_media(media),
+    }
+}
+
+/// `blob_cids_for_embed`の`media`（`Images`/`Video`/`External`のいずれか）専用版。
+fn blob_cids_for_media(media: &BskyEmbed) -> Vec<Cid> {
+    match media {
+        BskyEmbed::Images(images) => images
+            .iter()
+            .filter_map(|img| cid_from_sha256_hex(&img.sha256_hex).ok())
+            .collect(),
+        BskyEmbed::Video { cid, .. } => cid_from_str(cid).ok().into_iter().collect(),
+        BskyEmbed::External {
+            thumb: Some(thumb), ..
+        } => cid_from_sha256_hex(&thumb.sha256_hex)
+            .ok()
+            .into_iter()
+            .collect(),
+        BskyEmbed::External { thumb: None, .. }
+        | BskyEmbed::Record { .. }
+        | BskyEmbed::RecordWithMedia { .. } => Vec::new(),
     }
 }
 
