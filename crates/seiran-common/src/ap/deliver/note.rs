@@ -57,6 +57,19 @@ pub async fn deliver_post_to_ap_followers(
             inboxes.push(inbox);
         }
     }
+    // リプライ/引用の場合は対象ポストを巡る会話の参加者にも配送を広げる
+    // （`resolve_conversation_broadcast_inboxes` 参照、#235）。
+    let refs = fetch_post_reference_ids(db, post_id).await?;
+    for target_post_id in [refs.reply_to_post_id, refs.quote_of_post_id]
+        .into_iter()
+        .flatten()
+    {
+        for inbox in resolve_conversation_broadcast_inboxes(db, target_post_id).await? {
+            if !inboxes.contains(&inbox) {
+                inboxes.push(inbox);
+            }
+        }
+    }
     // public投稿のみ、参加中のリレー（#140）にもファンアウトする。
     // unlisted/followers_only はリレー配送対象外（リレーは公開投稿の中継が目的のため）。
     if basis.visibility == "public" {

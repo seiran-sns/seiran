@@ -55,6 +55,119 @@ pub(super) async fn fetch_fedi_follower_inboxes(db: &PgPool, actor_id: i64) -> R
         .collect())
 }
 
+/// 反応アクティビティ（絵文字リアクション・返信・引用・リポスト）の配送先を、reactor 本人の
+/// フォロワーだけでなく「対象ポストを巡る会話の参加者」全体へ広げるための共通解決（#235）。
+/// 以下の inbox の和集合を返す:
+/// 1. 対象ポストの受信者 = 投稿者自身（Fedi remoteの場合のみ）とそのフォロワー
+/// 2. 対象ポストへの子ポスト（リポストラッパー・返信・引用）がある場合、その投稿者自身
+///    （Fedi remoteの場合のみ）とそのフォロワー
+/// 3. 対象ポストに付いている絵文字リアクションの reactor（Fedi remoteのみ）
+///
+/// `target_post_id` は絵文字リアクション/リプライ/引用/リポストそれぞれの「対象ポスト」の
+/// `posts.id`（絵文字リアクションはリアクション対象そのもの、リプライ/引用は
+/// `reply_to_post_id`/`quote_of_post_id`、リポストは `repost_of_post_id` の参照先）。
+pub(super) async fn resolve_conversation_broadcast_inboxes(
+    db: &PgPool,
+    target_post_id: i64,
+) -> Result<std::collections::HashSet<String>, ApError> {
+    let mut inboxes: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let author_row = sqlx::query(
+        "SELECT a.id AS actor_id, a.actor_type::text AS actor_type, a.ap_inbox_url
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.id = $1 LIMIT 1",
+    )
+    .bind(target_post_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| ApError::Other(format!("対象ポスト著者取得エラー: {}", e)))?;
+
+    if let Some(row) = author_row {
+        let actor_id: i64 = row.try_get("actor_id").unwrap_or_default();
+        let actor_type: String = row.try_get("actor_type").unwrap_or_default();
+        if actor_type == "fedi" {
+            if let Ok(Some(inbox)) = row.try_get::<Option<String>, _>("ap_inbox_url") {
+                inboxes.insert(inbox);
+            }
+        }
+        inboxes.extend(fetch_fedi_follower_inboxes(db, actor_id).await?);
+    }
+
+    let child_rows = sqlx::query(
+        "SELECT a.id AS actor_id, a.actor_type::text AS actor_type, a.ap_inbox_url
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.deleted_at IS NULL
+           AND (p.repost_of_post_id = $1 OR p.reply_to_post_id = $1 OR p.quote_of_post_id = $1)",
+    )
+    .bind(target_post_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| ApError::Other(format!("子ポスト取得エラー: {}", e)))?;
+
+    for row in &child_rows {
+        let actor_id: i64 = row.try_get("actor_id").unwrap_or_default();
+        let actor_type: String = row.try_get("actor_type").unwrap_or_default();
+        if actor_type == "fedi" {
+            if let Ok(Some(inbox)) = row.try_get::<Option<String>, _>("ap_inbox_url") {
+                inboxes.insert(inbox);
+            }
+        }
+        inboxes.extend(fetch_fedi_follower_inboxes(db, actor_id).await?);
+    }
+
+    let reactor_rows = sqlx::query(
+        "SELECT DISTINCT a.ap_inbox_url
+         FROM reactions r JOIN actors a ON a.id = r.actor_id
+         WHERE r.post_id = $1 AND a.actor_type = 'fedi' AND a.ap_inbox_url IS NOT NULL",
+    )
+    .bind(target_post_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| ApError::Other(format!("既存リアクション取得エラー: {}", e)))?;
+    for row in &reactor_rows {
+        if let Ok(inbox) = row.try_get::<String, _>("ap_inbox_url") {
+            inboxes.insert(inbox);
+        }
+    }
+
+    Ok(inboxes)
+}
+
+/// 指定ポストの `reply_to_post_id` / `quote_of_post_id` / `repost_of_post_id`
+/// （いずれもローカル `posts.id` 参照、リモートポストはキャッシュ行のidになる）を取得する。
+pub(super) struct PostReferenceIds {
+    pub(super) reply_to_post_id: Option<i64>,
+    pub(super) quote_of_post_id: Option<i64>,
+    pub(super) repost_of_post_id: Option<i64>,
+}
+
+pub(super) async fn fetch_post_reference_ids(
+    db: &PgPool,
+    post_id: i64,
+) -> Result<PostReferenceIds, ApError> {
+    let row = sqlx::query(
+        "SELECT reply_to_post_id, quote_of_post_id, repost_of_post_id
+         FROM posts WHERE id = $1 LIMIT 1",
+    )
+    .bind(post_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| ApError::Other(format!("ポスト参照取得エラー: {}", e)))?;
+
+    Ok(match row {
+        Some(row) => PostReferenceIds {
+            reply_to_post_id: row.try_get("reply_to_post_id").unwrap_or(None),
+            quote_of_post_id: row.try_get("quote_of_post_id").unwrap_or(None),
+            repost_of_post_id: row.try_get("repost_of_post_id").unwrap_or(None),
+        },
+        None => PostReferenceIds {
+            reply_to_post_id: None,
+            quote_of_post_id: None,
+            repost_of_post_id: None,
+        },
+    })
+}
+
 /// 参加中（status='accepted'）のFediverseリレー（#140）のinbox URL一覧を取得する。
 pub(super) async fn fetch_accepted_relay_inboxes(db: &PgPool) -> Result<Vec<String>, ApError> {
     let rows = sqlx::query("SELECT inbox_url FROM fediverse_relays WHERE status = 'accepted'")

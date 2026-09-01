@@ -158,7 +158,14 @@ MastodonのAuthorized Fetch（`AUTHORIZED_FETCH=true`）等secure modeを有効�
   `seiran-federation-inbox::AppState::system_signing_key()`から渡す）
 
 ### 配送
-`Job::ApDelivery{actor_id, kind}`（優先度高、最大10回リトライの指数バックオフ）。宛先は `follows` の `status='accepted' AND actor_type='fedi'` の `ap_inbox_url` 一覧（リアクションは対象ポスト著者のinboxも追加）。全inboxへ署名付きPOSTをファンアウトし、**1件でも成功すればOk**（全滅時のみリトライ対象）。秘密鍵未設定時はリトライしても直らないため即座に破棄。
+`Job::ApDelivery{actor_id, kind}`（優先度高、最大10回リトライの指数バックオフ）。宛先は `follows` の `status='accepted' AND actor_type='fedi'` の `ap_inbox_url` 一覧が基本。全inboxへ署名付きPOSTをファンアウトし、**1件でも成功すればOk**（全滅時のみリトライ対象）。秘密鍵未設定時はリトライしても直らないため即座に破棄。
+
+**反応アクティビティ（絵文字リアクション・返信・引用・リポスト。Undoを含む）の配送先拡張（#235）**: 上記の宛先に加え、対象ポスト（絵文字リアクションはリアクション対象そのもの、返信/引用は`reply_to_post_id`/`quote_of_post_id`、リポストは`repost_of_post_id`の参照先）を巡る「会話の参加者」全体へも配送する（`crates/seiran-common/src/ap/deliver/infra.rs::resolve_conversation_broadcast_inboxes`）。具体的には次の inbox の和集合:
+1. 対象ポストの受信者 = 投稿者自身（Fedi remoteの場合のみ）とそのフォロワー
+2. 対象ポストへの子ポスト（リポストラッパー・返信・引用）がある場合、その投稿者自身（Fedi remoteの場合のみ）とそのフォロワー
+3. 対象ポストに付いている絵文字リアクションの reactor（Fedi remoteのみ）
+
+自分のフォロワーにしか見えない反応が、対象ポストの投稿者・その会話に既に参加している人々には一切届かない（ブースト数・リアクション数がリモート側で更新されない）問題への対応。DM（`visibility='direct'`、`deliver_direct_message_to_ap`）はこの拡張の対象外（宛先は`post_recipients`のみ）。
 
 通常投稿（`PostToFollowers`、DM以外）は、上記フォロワーに加え**本文中でメンションした相手のinbox**もフォロー関係と無関係に配送先へ加える（`crates/seiran-common/src/ap/deliver/infra.rs::fetch_inboxes_by_ap_uris`）。メンション先が既知（DB上に`actor_type='fedi'`の行がある）ならDBから、未知ならその場でアクタードキュメントを取得してinboxを解決する（DBへの保存は伴わない）。`to`にもメンション先のactor URIを含める（Mastodon等と同様の作法）。メンション先の取得に失敗した場合はそのメンション先だけをスキップし、他の配送は妨げない。
 

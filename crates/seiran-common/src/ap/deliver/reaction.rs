@@ -5,44 +5,30 @@ use super::activity::*;
 
 /// リアクション配送先を解決する。
 ///
-/// 配送先は (1) 対象ポストの著者（Fedi リモートの場合のみ）と (2) `reactor_actor_id`
-/// の Fedi フォロワー全員、の inbox の和集合（重複排除）。対象ポストが AP 上の実体
-/// （`ap_object_id`）を持たない場合（Bsky 由来など）は `None` を返し、配送不要とする。
+/// 配送先は `reactor_actor_id` の Fedi フォロワー全員に加え、対象ポストを巡る会話の
+/// 参加者（対象ポストの著者とそのフォロワー、対象ポストへの子ポスト＝リポスト/返信/引用の
+/// 投稿者とそのフォロワー、対象ポストに付いている絵文字リアクションの reactor）の inbox の
+/// 和集合（重複排除、#235。詳細は `resolve_conversation_broadcast_inboxes` 参照）。
+/// 対象ポストが AP 上の実体（`ap_object_id`）を持たない場合（Bsky 由来など）は `None` を
+/// 返し、配送不要とする。
 async fn resolve_reaction_targets(
     db: &PgPool,
     post_id: i64,
     reactor_actor_id: i64,
 ) -> Result<Option<(String, Vec<String>)>, ApError> {
-    let post_row = sqlx::query(
-        "SELECT p.ap_object_id, a.actor_type::text AS actor_type, a.ap_inbox_url
-         FROM posts p JOIN actors a ON a.id = p.actor_id
-         WHERE p.id = $1 LIMIT 1",
-    )
-    .bind(post_id)
-    .fetch_optional(db)
-    .await
-    .map_err(|e| ApError::Other(format!("対象ポスト取得エラー: {}", e)))?;
+    let object_ap_id: Option<String> = sqlx::query("SELECT ap_object_id FROM posts WHERE id = $1 LIMIT 1")
+        .bind(post_id)
+        .fetch_optional(db)
+        .await
+        .map_err(|e| ApError::Other(format!("対象ポスト取得エラー: {}", e)))?
+        .and_then(|r| r.try_get("ap_object_id").unwrap_or(None));
 
-    let post_row = match post_row {
-        Some(r) => r,
-        None => return Ok(None),
-    };
-
-    let object_ap_id: Option<String> = post_row.try_get("ap_object_id").unwrap_or(None);
     let object_ap_id = match object_ap_id {
         Some(id) => id,
         None => return Ok(None),
     };
-    let author_actor_type: String = post_row.try_get("actor_type").unwrap_or_default();
-    let author_inbox: Option<String> = post_row.try_get("ap_inbox_url").unwrap_or(None);
 
-    let mut inboxes: std::collections::HashSet<String> = std::collections::HashSet::new();
-    if author_actor_type == "fedi" {
-        if let Some(inbox) = author_inbox {
-            inboxes.insert(inbox);
-        }
-    }
-
+    let mut inboxes = resolve_conversation_broadcast_inboxes(db, post_id).await?;
     inboxes.extend(fetch_fedi_follower_inboxes(db, reactor_actor_id).await?);
 
     Ok(Some((object_ap_id, inboxes.into_iter().collect())))

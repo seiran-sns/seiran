@@ -28,6 +28,34 @@ async fn resolve_announce_object_actor(
     Ok(inbox.zip(actor_uri))
 }
 
+/// Announce/Undo(Announce) 共通の配送先解決。`actor_id` の Fedi フォロワー全員 + 元ポストの
+/// 投稿者（Fedi remoteの場合のみ）に加え、`post_id`（リポスト投稿自身）の
+/// `repost_of_post_id` が解決できる場合はその対象ポストを巡る会話の参加者
+/// （`resolve_conversation_broadcast_inboxes` 参照、#235）も配送先に加える。
+async fn resolve_announce_targets(
+    db: &PgPool,
+    post_id: i64,
+    actor_id: i64,
+    original_ap_object_id: &str,
+) -> Result<(Option<(String, String)>, Vec<String>), ApError> {
+    let object_actor = resolve_announce_object_actor(db, original_ap_object_id).await?;
+
+    let mut inboxes: std::collections::HashSet<String> = fetch_fedi_follower_inboxes(db, actor_id)
+        .await?
+        .into_iter()
+        .collect();
+    if let Some((inbox, _)) = &object_actor {
+        inboxes.insert(inbox.clone());
+    }
+
+    let refs = fetch_post_reference_ids(db, post_id).await?;
+    if let Some(target_post_id) = refs.repost_of_post_id {
+        inboxes.extend(resolve_conversation_broadcast_inboxes(db, target_post_id).await?);
+    }
+
+    Ok((object_actor, inboxes.into_iter().collect()))
+}
+
 /// ローカルアクターの AP Announce アクティビティを Fedi フォロワー全員 + 元ポストの投稿者へ配送する
 ///
 /// `original_ap_object_id` は Announce の対象（元ポストの AP URI）。
@@ -47,16 +75,8 @@ pub async fn deliver_ap_announce(
         .await
         .map_err(|e| ApError::Other(e.to_string()))?
         .unwrap_or_else(|| "public".to_string());
-    let object_actor = resolve_announce_object_actor(db, original_ap_object_id).await?;
-
-    let mut inboxes: std::collections::HashSet<String> = fetch_fedi_follower_inboxes(db, actor_id)
-        .await?
-        .into_iter()
-        .collect();
-    if let Some((inbox, _)) = &object_actor {
-        inboxes.insert(inbox.clone());
-    }
-    let inboxes: Vec<String> = inboxes.into_iter().collect();
+    let (object_actor, inboxes) =
+        resolve_announce_targets(db, post_id, actor_id, original_ap_object_id).await?;
 
     let addr = local_actor_address(local_domain, &username);
     let announce_id = format!("https://{}/announces/{}", local_domain, post_id);
@@ -100,15 +120,8 @@ pub async fn deliver_undo_announce(
     original_ap_object_id: &str,
 ) -> Result<(), ApError> {
     let username = fetch_username(db, actor_id).await?;
-    let object_actor = resolve_announce_object_actor(db, original_ap_object_id).await?;
-    let mut inboxes: std::collections::HashSet<String> = fetch_fedi_follower_inboxes(db, actor_id)
-        .await?
-        .into_iter()
-        .collect();
-    if let Some((inbox, _)) = &object_actor {
-        inboxes.insert(inbox.clone());
-    }
-    let inboxes: Vec<String> = inboxes.into_iter().collect();
+    let (_object_actor, inboxes) =
+        resolve_announce_targets(db, announce_post_id, actor_id, original_ap_object_id).await?;
 
     let addr = local_actor_address(local_domain, &username);
     let announce_id = format!("https://{}/announces/{}", local_domain, announce_post_id);
