@@ -1,6 +1,6 @@
 import { RefObject, useMemo, useRef, useState } from "react";
 import { blurhashToDataUrl } from "../../lib/blurhashPreview";
-import { EmojiSpan } from "../../lib/emojiAspect";
+import { emojiSpanWidthEm, EmojiSpan } from "../../lib/emojiAspect";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
 import styles from "./EmojiImage.module.css";
 
@@ -29,7 +29,7 @@ export default function EmojiImage({ src, alt, blurhash, span = 1, rootRef }: Em
   const placeholderUrl = useMemo(() => (blurhash ? blurhashToDataUrl(blurhash) : null), [blurhash]);
 
   return (
-    <span ref={wrapRef} className={styles.wrap} style={{ width: `${span * 1.5}em` }}>
+    <span ref={wrapRef} className={styles.wrap} style={{ width: `${emojiSpanWidthEm(span)}em` }}>
       {visible && !loaded && placeholderUrl && (
         <img className={styles.layer} src={placeholderUrl} alt="" aria-hidden="true" />
       )}
