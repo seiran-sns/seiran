@@ -35,6 +35,8 @@
     "actionsMenuTitle": "アカウント操作",
     "muteButton": "ミュート",
     "unmuteButton": "ミュート解除",
+    "repostMuteButton": "リポストをミュート",
+    "unrepostMuteButton": "リポストのミュート解除",
     "blockButton": "ブロック",
     "unblockButton": "ブロック解除",
     "blockedByNotice": "このユーザーからブロックされています",

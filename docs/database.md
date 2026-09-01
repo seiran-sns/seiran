@@ -27,6 +27,7 @@ ID 採番は2系統ある。
 | `follow_import_requests` / `follow_import_items` | フォローインポート（設定画面から改行区切りのID一覧を貼り付けて一括フォロー）の実行1回分と、対象識別子ごとの処理状態 |
 | `blocks` | ブロック関係（Bsky準拠：フォロー強制解除＋相互完全非表示） |
 | `mutes` | ミュート関係（ローカル効果のみ、AP/ATP配送なし） |
+| `repost_mutes` | リポストミュート関係（対象ユーザーの通常投稿は表示したままリポストのみ非表示にする独立フラグ、ローカル効果のみ） |
 | `notifications` | 永続化された通知 |
 | `media_files` | アップロード/受信済みメディア実体 |
 | `post_attachments` | 投稿とメディアの中間テーブル |
@@ -184,10 +185,14 @@ AP受信（投稿本文・表示名・絵文字リアクションのいずれか
 
 進捗集計カラム（`processed`/`succeeded`/`already_following`/`failed`）は`follow_import_requests`側に持たず、`follow_import_items`への`COUNT(*) FILTER (WHERE status=...)`で都度算出する（2テーブル間のカウンタ不整合を構造的に排除するため）。キャンセル時は`follow_import_requests.status`を`cancelled`にするのみで、残りの`pending`な`follow_import_items`はそのまま放置する（`failed`扱いにはしない）。ジョブ（`Job::FollowImportProcess`）は実行のたびにリクエストの`status`を確認し、`running`でなくなっていれば処理を打ち切る。ジョブの`request_id`単位排他制御（`pg_try_advisory_lock`）と起動時リカバリについては`docs/architecture.md` 5節参照。
 
-### `blocks` / `mutes`
-`follows` と同型（`blocker_actor_id`/`blocked_actor_id`、`muter_actor_id`/`muted_actor_id` の有向関係 + `UNIQUE`制約）。ブロックはBsky準拠の定義（フォロー関係の強制解除＋相互完全非表示）を採用しており、相手がBskyなら `app.bsky.graph.block` コミット後の `atp_rkey` を保存、相手がFediならAP `Block` を配送する（`docs/protocols.md` 参照）。ミュートはFedi/Bsky共通でローカル効果のみ（AP/ATP配送なし）のため `atp_rkey` 相当のカラムを持たない。
+### `blocks` / `mutes` / `repost_mutes`
+`follows` と同型（`blocker_actor_id`/`blocked_actor_id`、`muter_actor_id`/`muted_actor_id` の有向関係 + `UNIQUE`制約）。ブロックはBsky準拠の定義（フォロー関係の強制解除＋相互完全非表示）を採用しており、相手がBskyなら `app.bsky.graph.block` コミット後の `atp_rkey` を保存、相手がFediならAP `Block` を配送する（`docs/protocols.md` 参照）。ミュート・リポストミュートはFedi/Bsky共通でローカル効果のみ（AP/ATP配送なし）のため `atp_rkey` 相当のカラムを持たない。
 
-タイムライン・通知の相互非表示は、両テーブルを1箇所でOR判定する SQL 関数 `actor_is_hidden_for_viewer(viewer_id, other_id)` に集約している。ブロックは `blocks` テーブルの存在だけでミュート相当のローカル非表示も兼ねる設計（ブロック専用の `mutes` 行を別途作らない）。
+タイムライン・通知の相互非表示は、`blocks`/`mutes`を1箇所でOR判定する SQL 関数 `actor_is_hidden_for_viewer(viewer_id, other_id)` に集約している。ブロックは `blocks` テーブルの存在だけでミュート相当のローカル非表示も兼ねる設計（ブロック専用の `mutes` 行を別途作らない）。
+
+`repost_mutes` はこれらとは独立したフラグで、対象ユーザーの通常投稿は表示したまま、リポスト（`p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL`。参照未解決の`pending`/`gone`状態は`repost_of_post_id`が`NULL`のまま`repost_of_ap_uri`にURIが入るため、`repost_of_post_id`だけで判定するとすり抜ける）のみを非表示にする。判定用SQL関数 `repost_is_muted_for_viewer(viewer_id, reposter_id)` は `home_timeline`/`local_timeline`/`social_timeline`/`global_timeline` の4関数にのみ適用し、プロフィールページの投稿一覧（`timeline_by_actor`）や個別投稿・スレッド表示（`find_by_id_for_viewer`/`context_before`/`context_after`）には適用しない（プロフィールページではそのユーザー自身のリポストも通常通り見える設計のため）。
+
+`follows`/`mutes`/`blocks`/`repost_mutes`の各リポジトリは、タイムラインのper-note関係付与（後述、`attach_relationship_flags`）向けに1閲覧者×複数候補IDの一括判定バルクメソッド（`find_statuses_among`/`list_muted_among`/`find_relationships_among`）を持つ。
 
 投稿の`visibility`（`followers_only`/`direct`）判定も同様にSQL関数 `post_is_visible_to(viewer_id, post_actor_id, post_visibility, post_id, exclude_direct)` に集約している（`docs/code_audit_2026-08-05.md` R-2）。`home_timeline`/`local_timeline`/`social_timeline`/`global_timeline`/`timeline_by_actor`/`find_by_id_for_viewer`/`context_before`/`context_after`の9箇所に同一のOR判定が一字一句コピペされていたのを1関数へ集約した。呼び出し側が既にJOIN済みの`p.actor_id`/`p.visibility`/`p.id`をそのまま渡す設計（関数内で`posts`を再取得しない）で、`actor_is_hidden_for_viewer`と同じ`LANGUAGE sql STABLE`方式によりプランナのインライン展開・既存インデックス（`idx_posts_actor_id`等）でのフィルタ適用を妨げない（EXPLAIN ANALYZEで確認済み）。`local_timeline`/`global_timeline`は関数呼び出しの手前で`p.visibility NOT IN ('unlisted', 'followers_only')`を別途課しており、これらの経路では関数内の`followers_only`分岐は常に到達しない（ローカル/グローバルタイムラインは公開投稿のみを表示する設計のため意図的）。
 

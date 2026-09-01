@@ -20,15 +20,17 @@ export default function MutesBlocksSettingsPage() {
   const [tab, setTab] = useState(0);
   const [mutes, setMutes] = useState<MutedOrBlockedActor[] | null>(null);
   const [blocks, setBlocks] = useState<MutedOrBlockedActor[] | null>(null);
+  const [repostMutes, setRepostMutes] = useState<MutedOrBlockedActor[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   const loadAll = useCallback(() => {
     setLoading(true);
-    Promise.all([api.mutes.list(), api.blocks.list()])
-      .then(([m, b]) => {
+    Promise.all([api.mutes.list(), api.blocks.list(), api.repostMutes.list()])
+      .then(([m, b, r]) => {
         setMutes(m);
         setBlocks(b);
+        setRepostMutes(r);
       })
       .catch((e) => showError(getErrorMessage(e)))
       .finally(() => setLoading(false));
@@ -62,8 +64,37 @@ export default function MutesBlocksSettingsPage() {
     }
   }
 
-  const items = tab === 0 ? mutes : blocks;
-  const emptyMessage = tab === 0 ? t("account:mutesBlocks.noMutes") : t("account:mutesBlocks.noBlocks");
+  async function unrepostMute(actor: MutedOrBlockedActor) {
+    setActionLoadingId(actor.actor_id);
+    try {
+      await api.repostMutes.delete(profileQuery(actor.username, actor.domain));
+      setRepostMutes((prev) => prev?.filter((a) => a.actor_id !== actor.actor_id) ?? null);
+    } catch (e) {
+      showError(getErrorMessage(e));
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  const items = tab === 0 ? mutes : tab === 1 ? blocks : repostMutes;
+  const emptyMessage =
+    tab === 0
+      ? t("account:mutesBlocks.noMutes")
+      : tab === 1
+        ? t("account:mutesBlocks.noBlocks")
+        : t("account:mutesBlocks.noRepostMutes");
+  const releaseLabel =
+    tab === 0
+      ? t("account:mutesBlocks.unmuteButton")
+      : tab === 1
+        ? t("account:mutesBlocks.unblockButton")
+        : t("account:mutesBlocks.unrepostMuteButton");
+
+  function release(actor: MutedOrBlockedActor) {
+    if (tab === 0) return unmute(actor);
+    if (tab === 1) return unblock(actor);
+    return unrepostMute(actor);
+  }
 
   const center = (
     <>
@@ -75,7 +106,11 @@ export default function MutesBlocksSettingsPage() {
       </header>
 
       <Tabs
-        tabs={[t("account:mutesBlocks.mutesTab"), t("account:mutesBlocks.blocksTab")]}
+        tabs={[
+          t("account:mutesBlocks.mutesTab"),
+          t("account:mutesBlocks.blocksTab"),
+          t("account:mutesBlocks.repostMutesTab"),
+        ]}
         active={tab}
         onChange={setTab}
       />
@@ -101,9 +136,9 @@ export default function MutesBlocksSettingsPage() {
                 type="button"
                 className={styles.releaseBtn}
                 disabled={actionLoadingId === actor.actor_id}
-                onClick={() => (tab === 0 ? unmute(actor) : unblock(actor))}
+                onClick={() => release(actor)}
               >
-                {tab === 0 ? t("account:mutesBlocks.unmuteButton") : t("account:mutesBlocks.unblockButton")}
+                {releaseLabel}
               </button>
             </li>
           ))}

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use sqlx::PgPool;
 
@@ -59,6 +61,14 @@ pub trait FollowRepository: Send + Sync {
         follower_actor_id: i64,
         target_actor_id: i64,
     ) -> Result<Option<String>, sqlx::Error>;
+
+    /// `candidate_ids` の各アクターへの follow status を一括取得する（未フォローのIDは
+    /// 結果に含まれない）。タイムラインのper-note relationship付与でのN+1回避用。
+    async fn find_statuses_among(
+        &self,
+        follower_actor_id: i64,
+        candidate_ids: &[i64],
+    ) -> Result<HashMap<i64, String>, sqlx::Error>;
 
     /// ATP フォロー完了後に accepted で挿入する（rkey を保存）。
     /// 新規に挿入した場合は true、既にフォロー済みだった場合は false を返す。
@@ -178,6 +188,22 @@ impl FollowRepository for PgFollowRepository {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|r| r.0))
+    }
+
+    async fn find_statuses_among(
+        &self,
+        follower_actor_id: i64,
+        candidate_ids: &[i64],
+    ) -> Result<HashMap<i64, String>, sqlx::Error> {
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT target_actor_id, status FROM follows
+             WHERE follower_actor_id = $1 AND target_actor_id = ANY($2)",
+        )
+        .bind(follower_actor_id)
+        .bind(candidate_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().collect())
     }
 
     async fn insert_accepted(

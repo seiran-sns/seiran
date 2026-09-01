@@ -143,6 +143,7 @@
   - [x] リポストタブ（`RepostListPanel`、取り消し済みも履歴として表示）
 - [x] **ポスト詳細画面のログイン不要化** — `/notes/:id`から`RequireAuth`ガードを撤去。閲覧系API（`GET /api/notes/:id`・`/context`・`/replies`・`/reposts`・`/reactions/:content/actors`・`/api/users/profile`）は元々`MaybeAuthedUser`で未ログイン対応済みだったため、フロント側のルーティング変更のみで対応。未ログイン時は左メニュー最下部のユーザーチップが現在画面への`redirect`付き`/login`誘導ボタンに差し替わる。詳細: `docs/ui_spec.md` 2.3節
 - [x] **ユーザープロフィール画面のログイン不要化** — `/:acct`（`/@handle`）・旧`/profile?q=`から`RequireAuth`ガードを撤去。未ログイン時は対ユーザー操作メニュー（フォロー/ミュート/ブロック/通報）の代わりにログイン誘導ガイダンス文を表示。詳細: `docs/ui_spec.md` 2.2節
+- [x] **リポストミュート機能＋対ユーザー操作メニューの統合** — 対象ユーザーの通常投稿は表示したまま、リポストのみをホーム/ローカル/グローバルタイムラインから隠す独立フラグ（新規`repost_mutes`テーブル、AP/ATP配送なしのローカル効果）を追加。プロフィール画面のケバブメニューに加え、NoteCardのユーザー名・アイコンを右クリックしても同じ「対ユーザー操作メニュー」（フォロー・ミュート・リポストミュート・ブロック・通報）を出せるようにし（`UserContextMenu`、`useUserRelationshipMenu`フックに統合ロジックを集約）、これらの状態はホーム/ローカル/グローバルタイムラインAPIレスポンスへ`attach_relationship_flags`で事前付与する。フォロー状態専用だった共有ストアを`stores/userRelationshipStore`（5値統合）へ拡張し、`followStatusStore`はそのファサードとして残す。詳細: `docs/database.md`、`docs/ui_spec.md` 2.2節
 - [ ] **ユーザー製翻訳ファイルの適用・配布機能** — ユーザーが独自の言語ファイル（`i18n/locales/{lng}/*.json` と同形式）を作成し、アプリに読み込ませて適用・配布できるようにする構想。現状の名前空間分割構成は `i18n.addResourceBundle()` によるこの拡張を見据えたもの
 - [x] **PWA対応（ホーム画面への追加）** — `manifest.webmanifest`を管理画面のサイト設定（サイト名・テーマカラー・サイトアイコン）から動的生成し、ホーム画面/デスクトップへのインストールに対応。サイトアイコンは`/api/site-icon/:sha256/:size`でfavicon/PWAアイコン共通のリサイズ配信（アニメーション画像はリサイズせずそのまま配信）。詳細: `docs/architecture.md`
 - [ ] **プッシュ通知対応** — Service Worker経由のプッシュ通知（購読管理API・VAPID鍵・通知許諾UI）は未着手

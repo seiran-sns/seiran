@@ -21,6 +21,32 @@ interface ActionsMenuProps {
   triggerClassName?: string;
 }
 
+/** items一覧のボタン描画部分（ケバブメニューの`ActionsMenu`・NoteCardの右クリック
+ * メニュー`UserContextMenu`の両方から使う共通プレゼンテーション部品）。 */
+export function ActionsMenuPopoverList({
+  items,
+  onPick,
+}: {
+  items: ActionsMenuItem[];
+  onPick: (item: ActionsMenuItem) => void;
+}) {
+  return (
+    <>
+      {items.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          className={`${styles.item} ${item.danger ? styles.itemDanger : ""}`}
+          disabled={item.disabled}
+          onClick={() => onPick(item)}
+        >
+          <TwemojiText text={item.label} />
+        </button>
+      ))}
+    </>
+  );
+}
+
 /** トリガーボタン＋ポップオーバー形式の汎用アクションメニュー（`ReactionPicker` のパターンを踏襲）。 */
 export default function ActionsMenu({
   items,
@@ -63,17 +89,7 @@ export default function ActionsMenu({
       </button>
       {open && (
         <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
-          {items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`${styles.item} ${item.danger ? styles.itemDanger : ""}`}
-              disabled={item.disabled}
-              onClick={() => pick(item)}
-            >
-              <TwemojiText text={item.label} />
-            </button>
-          ))}
+          <ActionsMenuPopoverList items={items} onPick={pick} />
         </div>
       )}
     </div>

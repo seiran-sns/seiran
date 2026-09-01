@@ -48,6 +48,7 @@ pub async fn home_timeline(
     attach_poll_votes(&state.db, &mut notes, Some(actor_id)).await;
     attach_reply_quote_gates(&state, &mut notes, Some(actor_id)).await;
     attach_remote_instance_info(&state, &mut notes).await;
+    attach_relationship_flags(&state, &mut notes, Some(actor_id)).await;
     enqueue_stale_poll_fetches(&state, &notes).await;
     Json(notes).into_response()
 }
@@ -105,6 +106,7 @@ pub async fn local_timeline(
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
     attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
     attach_remote_instance_info(&state, &mut notes).await;
+    attach_relationship_flags(&state, &mut notes, my_actor_id).await;
     enqueue_stale_poll_fetches(&state, &notes).await;
     Json(notes).into_response()
 }
@@ -157,6 +159,7 @@ pub async fn social_timeline(
     attach_poll_votes(&state.db, &mut notes, Some(actor_id)).await;
     attach_reply_quote_gates(&state, &mut notes, Some(actor_id)).await;
     attach_remote_instance_info(&state, &mut notes).await;
+    attach_relationship_flags(&state, &mut notes, Some(actor_id)).await;
     enqueue_stale_poll_fetches(&state, &notes).await;
     Json(notes).into_response()
 }
@@ -215,6 +218,7 @@ pub async fn global_timeline(
     attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
     attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
     attach_remote_instance_info(&state, &mut notes).await;
+    attach_relationship_flags(&state, &mut notes, my_actor_id).await;
     enqueue_stale_poll_fetches(&state, &notes).await;
     Json(notes).into_response()
 }

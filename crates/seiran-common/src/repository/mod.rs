@@ -30,6 +30,7 @@ pub mod reaction;
 pub mod relay;
 pub mod remote_emoji;
 pub mod remote_instance_meta;
+pub mod repost_mute;
 pub mod site_settings;
 pub mod storage_provider;
 pub mod totp;
@@ -77,6 +78,7 @@ pub use remote_emoji::{PgRemoteEmojiRepository, RemoteEmojiRepository, RemoteEmo
 pub use remote_instance_meta::{
     PgRemoteInstanceMetaRepository, RemoteInstanceMeta, RemoteInstanceMetaRepository,
 };
+pub use repost_mute::{PgRepostMuteRepository, RepostMuteRepository, RepostMutedActorRow};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage_provider::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider, StorageProviderError,

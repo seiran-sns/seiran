@@ -85,9 +85,12 @@
     "title": "Mutes & Blocks",
     "mutesTab": "Muted",
     "blocksTab": "Blocked",
+    "repostMutesTab": "Repost-muted",
     "noMutes": "You haven't muted anyone.",
     "noBlocks": "You haven't blocked anyone.",
+    "noRepostMutes": "You haven't repost-muted anyone.",
     "unmuteButton": "Unmute",
+    "unrepostMuteButton": "Unmute Reposts",
     "unblockButton": "Unblock"
   },
   "appTokensSettings": {

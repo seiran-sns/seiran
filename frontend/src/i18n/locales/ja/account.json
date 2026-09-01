@@ -85,9 +85,12 @@
     "title": "ミュート・ブロック",
     "mutesTab": "ミュート中",
     "blocksTab": "ブロック中",
+    "repostMutesTab": "リポストミュート中",
     "noMutes": "ミュート中のユーザーはいません。",
     "noBlocks": "ブロック中のユーザーはいません。",
+    "noRepostMutes": "リポストミュート中のユーザーはいません。",
     "unmuteButton": "ミュート解除",
+    "unrepostMuteButton": "リポストミュート解除",
     "unblockButton": "ブロック解除"
   },
   "appTokensSettings": {

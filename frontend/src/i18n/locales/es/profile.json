@@ -35,6 +35,8 @@
     "actionsMenuTitle": "Acciones de cuenta",
     "muteButton": "Silenciar",
     "unmuteButton": "Dejar de silenciar",
+    "repostMuteButton": "Silenciar republicaciones",
+    "unrepostMuteButton": "Dejar de silenciar republicaciones",
     "blockButton": "Bloquear",
     "unblockButton": "Desatascar",
     "blockedByNotice": "Este usuario te ha bloqueado",

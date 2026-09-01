@@ -6,7 +6,7 @@ import {
 } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, ProfileFeedItem, UserProfile, getErrorMessage } from "../api/client";
-import ActionsMenu, { ActionsMenuItem } from "../components/common/ActionsMenu";
+import ActionsMenu from "../components/common/ActionsMenu";
 import Modal from "../components/common/Modal";
 import RemoteBanner from "../components/common/RemoteBanner";
 import ReportModal from "../components/report/ReportModal";
@@ -21,12 +21,10 @@ import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
+import { useUserRelationshipMenu } from "../hooks/useUserRelationshipMenu";
 import { profilePath, profileQuery, remoteProfileUrl, remoteServerBadgeInfo } from "../lib/format";
 import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
-import {
-  setFollowStatus as setFollowStatusStore,
-  useFollowStatus,
-} from "../stores/followStatusStore";
+import { setRelationship } from "../stores/userRelationshipStore";
 import panel from "../components/common/Panel.module.css";
 import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import TwemojiText from "../components/common/TwemojiText";
@@ -48,16 +46,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [following, setFollowing] = useState(false);
-  const [unfollowing, setUnfollowing] = useState(false);
   const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
-  const [isBlocking, setIsBlocking] = useState(false);
-  const [isBlockedBy, setIsBlockedBy] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [blockActionLoading, setBlockActionLoading] = useState(false);
-  const [muteActionLoading, setMuteActionLoading] = useState(false);
-  const [blockConfirmModalOpen, setBlockConfirmModalOpen] = useState(false);
-  const [reportModalOpen, setReportModalOpen] = useState(false);
   // 狭幅では右ペインが無いため、ピン留め・最新ポストの両方を中央ペインへ連続表示する（#61）。
   const isNarrow = useIsNarrowViewport();
   // 右ペイン（狭幅では中央ペイン）のタブ状態: 0=投稿, 1=フォロー中, 2=フォロワー（#56）。
@@ -143,13 +132,13 @@ export default function ProfilePage() {
       .then((p) => {
         if (cancelled) return;
         setProfile(p);
-        setFollowStatusStore(
-          profileQuery(p.username, p.domain),
-          p.follow_status,
-        );
-        setIsBlocking(p.is_blocking);
-        setIsBlockedBy(p.is_blocked_by);
-        setIsMuted(p.is_muted);
+        setRelationship(profileQuery(p.username, p.domain), {
+          followStatus: p.follow_status,
+          isMuted: p.is_muted,
+          isBlocking: p.is_blocking,
+          isBlockedBy: p.is_blocked_by,
+          isRepostMuted: p.is_repost_muted,
+        });
         actorIdRef.current = p.actor_id;
         setPostsLoading(true);
         fetchInitialFeed(p.actor_id)
@@ -190,15 +179,6 @@ export default function ProfilePage() {
 
   const { user } = useAuth();
 
-  // フォロー状態は共有ストア（stores/followStatusStore）から取得する。プロフィール本体・
-  // 右ペインのポストリスト・タイムライン上の同一ユーザーのフォロースイッチが全て同じキーを
-  // 参照するため、いずれかで操作するか WebSocket の `followAccepted`（StreamingContext）を
-  // 受けるだけで、表示中の全コンポーネントに同時反映される。
-  const followKey = profile
-    ? profileQuery(profile.username, profile.domain)
-    : "";
-  const followStatus = useFollowStatus(followKey) ?? "not_following";
-
   const isLocal = profile?.actor_type === "local";
   const isBridge = !!profile?.bridge_real_handle;
   const isSelf = isLocal && !!user && user.username === profile?.username;
@@ -222,48 +202,23 @@ export default function ProfilePage() {
     );
   }
 
-  async function doFollow() {
-    if (!profile) return;
-    setFollowing(true);
-    try {
-      const result = await api.follows.create(followTarget());
-      // ローカルフォローは即 accepted
-      setFollowStatusStore(
-        followKey,
-        result.status === "accepted" ? "accepted" : "pending",
-      );
-    } catch (e) {
-      showError(getErrorMessage(e));
-    } finally {
-      setFollowing(false);
-    }
-  }
-
-  async function doUnfollow() {
-    if (!profile) return;
-    setUnfollowing(true);
-    try {
-      await api.follows.delete(followTarget());
-      setFollowStatusStore(followKey, "not_following");
-    } catch (e) {
-      showError(getErrorMessage(e));
-    } finally {
-      setUnfollowing(false);
-    }
-  }
-
   // ブロック・ミュートは相手のプロフィールに表示中の投稿一覧（recent_posts）自体の
   // 表示可否も変える（actor_is_hidden_for_viewer によるタイムラインフィルタ）ため、
-  // ローカルの状態フラグ更新だけでなくプロフィール全体を取り直して反映する。
+  // 操作成功時（menuのonChanged）にプロフィール全体を取り直して反映する。
   async function refreshProfile() {
     if (!q) return;
     try {
       const p = await api.users.profile(q);
       setProfile(p);
-      setFollowStatusStore(profileQuery(p.username, p.domain), p.follow_status);
-      setIsBlocking(p.is_blocking);
-      setIsBlockedBy(p.is_blocked_by);
-      setIsMuted(p.is_muted);
+      // ブロックはフォロー関係の強制解除を伴う副作用があるため、menuのpatch（操作対象の
+      // フィールドのみの更新）では追従できない。サーバーの最新値で関係全体を上書きする。
+      setRelationship(profileQuery(p.username, p.domain), {
+        followStatus: p.follow_status,
+        isMuted: p.is_muted,
+        isBlocking: p.is_blocking,
+        isBlockedBy: p.is_blocked_by,
+        isRepostMuted: p.is_repost_muted,
+      });
       const items = await fetchInitialFeed(p.actor_id);
       setPosts(items);
       setHasMore(!!p.actor_id && items.length >= PAGE_SIZE);
@@ -272,66 +227,27 @@ export default function ProfilePage() {
     }
   }
 
-  async function doMute() {
-    if (!profile) return;
-    setMuteActionLoading(true);
-    try {
-      await api.mutes.create(followTarget());
-      await refreshProfile();
-    } catch (e) {
-      showError(getErrorMessage(e));
-    } finally {
-      setMuteActionLoading(false);
-    }
-  }
-
-  async function doUnmute() {
-    if (!profile) return;
-    setMuteActionLoading(true);
-    try {
-      await api.mutes.delete(followTarget());
-      await refreshProfile();
-    } catch (e) {
-      showError(getErrorMessage(e));
-    } finally {
-      setMuteActionLoading(false);
-    }
-  }
-
-  // ブロックは破壊的操作（双方向フォロー強制解除を伴う）のため、確認モーダルを経由してから実行する。
-  async function doBlock() {
-    if (!profile) return;
-    setBlockActionLoading(true);
-    try {
-      await api.blocks.create(followTarget());
-      await refreshProfile();
-    } catch (e) {
-      showError(getErrorMessage(e));
-    } finally {
-      setBlockActionLoading(false);
-      setBlockConfirmModalOpen(false);
-    }
-  }
-
-  async function doUnblock() {
-    if (!profile) return;
-    setBlockActionLoading(true);
-    try {
-      await api.blocks.delete(followTarget());
-      await refreshProfile();
-    } catch (e) {
-      showError(getErrorMessage(e));
-    } finally {
-      setBlockActionLoading(false);
-    }
-  }
+  const menu = useUserRelationshipMenu(
+    {
+      username: profile?.username ?? "",
+      domain: profile?.domain,
+      target: followTarget(),
+      actorId: profile?.actor_id,
+      isBridge,
+      reportLabel: profile
+        ? `@${profile.username}${profile.domain ? `@${profile.domain}` : ""}`
+        : "",
+    },
+    { onChanged: () => refreshProfile() },
+  );
+  const followStatus = menu.followStatus;
 
   // フォロー時のインターセプト（Doc5 §3.2）: 影武者なら確認モーダルを割り込ませる。
   function handleFollowClick() {
     if (isBridge) {
       setBridgeModalOpen(true);
     } else {
-      doFollow();
+      menu.doFollow();
     }
   }
 
@@ -611,10 +527,10 @@ export default function ProfilePage() {
                   </span>
                   <button
                     className={styles.unfollowBtn}
-                    onClick={doUnfollow}
-                    disabled={unfollowing}
+                    onClick={menu.doUnfollow}
+                    disabled={menu.followActionPending}
                   >
-                    {unfollowing
+                    {menu.followActionPending
                       ? t("profile:profilePage.unfollowingButton")
                       : t("profile:profilePage.unfollowButton")}
                   </button>
@@ -627,10 +543,10 @@ export default function ProfilePage() {
                   </span>
                   <button
                     className={styles.unfollowBtn}
-                    onClick={doUnfollow}
-                    disabled={unfollowing}
+                    onClick={menu.doUnfollow}
+                    disabled={menu.followActionPending}
                   >
-                    {unfollowing
+                    {menu.followActionPending
                       ? t("profile:profilePage.unfollowingButton")
                       : t("profile:profilePage.unfollowButton")}
                   </button>
@@ -640,91 +556,36 @@ export default function ProfilePage() {
                 <button
                   className={styles.followBtn}
                   onClick={handleFollowClick}
-                  disabled={following || isBlockedBy || isBlocking}
+                  disabled={
+                    menu.followActionPending ||
+                    !!menu.relationship?.isBlockedBy ||
+                    !!menu.relationship?.isBlocking
+                  }
                 >
-                  {following
+                  {menu.followActionPending
                     ? t("profile:profilePage.followingSubmitButton")
                     : t("profile:profilePage.followButton")}
                 </button>
               )}
-              {isBlockedBy && (
+              {menu.relationship?.isBlockedBy && (
                 <span className={styles.pendingBadge}>
                   {t("profile:profilePage.blockedByNotice")}
                 </span>
               )}
               <ActionsMenu
                 triggerTitle={t("profile:profilePage.actionsMenuTitle")}
-                items={(() => {
-                  const items: ActionsMenuItem[] = [];
-                  if (followStatus === "accepted") {
-                    items.push({
-                      key: "unfollow",
-                      label: unfollowing
-                        ? t("profile:profilePage.unfollowingButton")
-                        : t("profile:profilePage.unfollowButton"),
-                      onClick: doUnfollow,
-                      disabled: unfollowing,
-                    });
-                  } else if (followStatus === "pending") {
-                    items.push({
-                      key: "cancel-pending-follow",
-                      label: unfollowing
-                        ? t("profile:profilePage.unfollowingButton")
-                        : t("profile:profilePage.unfollowButton"),
-                      onClick: doUnfollow,
-                      disabled: unfollowing,
-                    });
-                  } else {
-                    items.push({
-                      key: "follow",
-                      label: following
-                        ? t("profile:profilePage.followingSubmitButton")
-                        : t("profile:profilePage.followButton"),
-                      onClick: handleFollowClick,
-                      disabled: following || isBlockedBy || isBlocking,
-                    });
-                  }
-                  items.push(
-                    isMuted
-                      ? {
-                          key: "unmute",
-                          label: t("profile:profilePage.unmuteButton"),
-                          onClick: doUnmute,
-                          disabled: muteActionLoading,
-                        }
-                      : {
-                          key: "mute",
-                          label: t("profile:profilePage.muteButton"),
-                          onClick: doMute,
-                          disabled: muteActionLoading,
-                        },
-                  );
-                  items.push(
-                    isBlocking
-                      ? {
-                          key: "unblock",
-                          label: t("profile:profilePage.unblockButton"),
-                          onClick: doUnblock,
-                          danger: true,
-                          disabled: blockActionLoading,
-                        }
-                      : {
-                          key: "block",
-                          label: t("profile:profilePage.blockButton"),
-                          onClick: () => setBlockConfirmModalOpen(true),
-                          danger: true,
-                          disabled: blockActionLoading,
-                        },
-                  );
-                  items.push({
-                    key: "report",
-                    label: `⚠️ ${t("home:noteCard.reportButton")}`,
-                    onClick: () => setReportModalOpen(true),
-                    danger: true,
-                    disabled: !profile.actor_id,
-                  });
-                  return items;
-                })()}
+                items={menu.items.map((item) =>
+                  item.key === "follow"
+                    ? {
+                        ...item,
+                        onClick: handleFollowClick,
+                        disabled:
+                          menu.followActionPending ||
+                          !!menu.relationship?.isBlockedBy ||
+                          !!menu.relationship?.isBlocking,
+                      }
+                    : item,
+                )}
               />
             </div>
           )}
@@ -940,7 +801,7 @@ export default function ProfilePage() {
             className={styles.modalSecondary}
             onClick={() => {
               setBridgeModalOpen(false);
-              doFollow();
+              menu.doFollow();
             }}
           >
             {t("profile:profilePage.bridgeModal.followAnywayButton")}
@@ -949,8 +810,8 @@ export default function ProfilePage() {
       </Modal>
       {profile?.actor_id && (
         <ReportModal
-          open={reportModalOpen}
-          onClose={() => setReportModalOpen(false)}
+          open={menu.reportModalOpen}
+          onClose={menu.closeReportModal}
           subjectType="actor"
           subjectActorId={profile.actor_id}
           subjectLabel={`@${profile.username}${profile.domain ? `@${profile.domain}` : ""}`}
@@ -958,8 +819,8 @@ export default function ProfilePage() {
       )}
 
       <Modal
-        open={blockConfirmModalOpen}
-        onClose={() => setBlockConfirmModalOpen(false)}
+        open={menu.blockConfirmOpen}
+        onClose={menu.closeBlockConfirm}
         title={t("profile:profilePage.blockConfirmModal.title")}
       >
         <p className={styles.modalText}>
@@ -968,14 +829,14 @@ export default function ProfilePage() {
         <div className={styles.modalActions}>
           <button
             className={styles.modalPrimary}
-            onClick={doBlock}
-            disabled={blockActionLoading}
+            onClick={menu.confirmBlock}
+            disabled={menu.blockActionLoading}
           >
             {t("profile:profilePage.blockConfirmModal.confirmButton")}
           </button>
           <button
             className={styles.modalSecondary}
-            onClick={() => setBlockConfirmModalOpen(false)}
+            onClick={menu.closeBlockConfirm}
           >
             {t("profile:profilePage.blockConfirmModal.cancelButton")}
           </button>

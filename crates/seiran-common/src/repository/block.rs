@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use sqlx::PgPool;
 
@@ -52,6 +54,14 @@ pub trait BlockRepository: Send + Sync {
         actor_a: i64,
         actor_b: i64,
     ) -> Result<(bool, bool), sqlx::Error>;
+
+    /// `candidate_ids` の各アクターについて viewer_id との (is_blocking, is_blocked_by) を
+    /// 一括で返す（タイムラインのper-note relationship付与でのN+1回避用）。
+    async fn find_relationships_among(
+        &self,
+        viewer_id: i64,
+        candidate_ids: &[i64],
+    ) -> Result<HashMap<i64, (bool, bool)>, sqlx::Error>;
 
     /// ブロック中のアクター一覧を新しい順に返す（設定画面、#55）。件数は少数想定のため
     /// カーソルページネーションはせず先頭200件を返す。
@@ -150,6 +160,36 @@ impl BlockRepository for PgBlockRepository {
         .fetch_one(&self.pool)
         .await?;
         Ok(row)
+    }
+
+    async fn find_relationships_among(
+        &self,
+        viewer_id: i64,
+        candidate_ids: &[i64],
+    ) -> Result<HashMap<i64, (bool, bool)>, sqlx::Error> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            actor_id: i64,
+            is_blocking: bool,
+            is_blocked_by: bool,
+        }
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT actor_id, bool_or(is_blocking) AS is_blocking, bool_or(is_blocked_by) AS is_blocked_by FROM (
+               SELECT blocked_actor_id AS actor_id, true AS is_blocking, false AS is_blocked_by
+                 FROM blocks WHERE blocker_actor_id = $1 AND blocked_actor_id = ANY($2)
+               UNION ALL
+               SELECT blocker_actor_id AS actor_id, false AS is_blocking, true AS is_blocked_by
+                 FROM blocks WHERE blocked_actor_id = $1 AND blocker_actor_id = ANY($2)
+             ) t GROUP BY actor_id",
+        )
+        .bind(viewer_id)
+        .bind(candidate_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.actor_id, (r.is_blocking, r.is_blocked_by)))
+            .collect())
     }
 
     async fn list_blocked(

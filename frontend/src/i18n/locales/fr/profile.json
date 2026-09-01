@@ -35,6 +35,8 @@
     "actionsMenuTitle": "Actions du compte",
     "muteButton": "Muet",
     "unmuteButton": "Activer le son",
+    "repostMuteButton": "Masquer les reposts",
+    "unrepostMuteButton": "Réafficher les reposts",
     "blockButton": "Bloc",
     "unblockButton": "Débloquer",
     "blockedByNotice": "Cet utilisateur vous a bloqué",

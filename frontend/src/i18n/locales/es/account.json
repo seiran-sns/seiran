@@ -85,9 +85,12 @@
     "title": "Silencios y bloques",
     "mutesTab": "Apagado",
     "blocksTab": "Obstruido",
+    "repostMutesTab": "Republicaciones silenciadas",
     "noMutes": "No has silenciado a nadie.",
     "noBlocks": "No has bloqueado a nadie.",
+    "noRepostMutes": "No has silenciado las republicaciones de nadie.",
     "unmuteButton": "Dejar de silenciar",
+    "unrepostMuteButton": "Dejar de silenciar republicaciones",
     "unblockButton": "Desatascar"
   },
   "appTokensSettings": {

@@ -858,6 +858,96 @@ pub async fn attach_remote_instance_info(state: &AppState, notes: &mut [NoteResp
     }
 }
 
+/// note/renote/quote の `user` に、閲覧者から見たフォロー状態・ミュート・ブロック・
+/// リポストミュートを一括付与する（N+1回避）。閲覧者自身が著者のnoteには付与しない
+/// （常に`None`のまま）。未認証時（`viewer_id`が`None`）は何もしない。
+pub async fn attach_relationship_flags(
+    state: &AppState,
+    notes: &mut [NoteResponse],
+    viewer_id: Option<i64>,
+) {
+    let Some(viewer_id) = viewer_id else {
+        return;
+    };
+
+    fn collect_ids(n: &NoteResponse, viewer_id: i64, ids: &mut HashSet<i64>) {
+        if let Ok(uid) = n.user.id.parse::<i64>() {
+            if uid != viewer_id {
+                ids.insert(uid);
+            }
+        }
+        if let Some(r) = n.renote.as_deref() {
+            collect_ids(r, viewer_id, ids);
+        }
+        if let Some(q) = n.quote.as_deref() {
+            collect_ids(q, viewer_id, ids);
+        }
+    }
+    let mut id_set = HashSet::new();
+    for n in notes.iter() {
+        collect_ids(n, viewer_id, &mut id_set);
+    }
+    if id_set.is_empty() {
+        return;
+    }
+    let ids: Vec<i64> = id_set.into_iter().collect();
+
+    let follow_map = state
+        .follows
+        .find_statuses_among(viewer_id, &ids)
+        .await
+        .unwrap_or_default();
+    let muted_set = state
+        .mutes
+        .list_muted_among(viewer_id, &ids)
+        .await
+        .unwrap_or_default();
+    let block_map = state
+        .blocks
+        .find_relationships_among(viewer_id, &ids)
+        .await
+        .unwrap_or_default();
+    let repost_muted_set = state
+        .repost_mutes
+        .list_muted_among(viewer_id, &ids)
+        .await
+        .unwrap_or_default();
+
+    fn apply(
+        n: &mut NoteResponse,
+        viewer_id: i64,
+        follow_map: &HashMap<i64, String>,
+        muted_set: &HashSet<i64>,
+        block_map: &HashMap<i64, (bool, bool)>,
+        repost_muted_set: &HashSet<i64>,
+    ) {
+        if let Ok(uid) = n.user.id.parse::<i64>() {
+            if uid != viewer_id {
+                n.user.follow_status = Some(
+                    follow_map
+                        .get(&uid)
+                        .cloned()
+                        .unwrap_or_else(|| "not_following".to_string()),
+                );
+                n.user.is_muted = Some(muted_set.contains(&uid));
+                let (is_blocking, is_blocked_by) = block_map.get(&uid).copied().unwrap_or((false, false));
+                n.user.is_blocking = Some(is_blocking);
+                n.user.is_blocked_by = Some(is_blocked_by);
+                n.user.is_repost_muted = Some(repost_muted_set.contains(&uid));
+            }
+        }
+        if let Some(r) = n.renote.as_deref_mut() {
+            apply(r, viewer_id, follow_map, muted_set, block_map, repost_muted_set);
+        }
+        if let Some(q) = n.quote.as_deref_mut() {
+            apply(q, viewer_id, follow_map, muted_set, block_map, repost_muted_set);
+        }
+    }
+    for n in notes.iter_mut() {
+        apply(n, viewer_id, &follow_map, &muted_set, &block_map, &repost_muted_set);
+    }
+}
+
 /// リポスト取り消し（Undo）で必要な情報が見つからなかった場合に返すエラー。
 pub async fn find_repost_for_undo(
     state: &AppState,

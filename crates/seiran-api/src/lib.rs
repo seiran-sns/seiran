@@ -39,9 +39,10 @@ use seiran_common::repository::{
     PgFollowImportRepository, PgFollowRepository, PgHashtagRepository, PgInstanceDomainRepository,
     PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository,
     PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgRelayRepository,
-    PgRemoteEmojiRepository, PgRemoteInstanceMetaRepository, PgTotpRepository, PgUserRepository,
-    PinnedPostsRepository, PostRepository, ReactionRepository, RelayRepository,
-    RemoteEmojiRepository, RemoteInstanceMetaRepository, TotpRepository, UserRepository,
+    PgRemoteEmojiRepository, PgRemoteInstanceMetaRepository, PgRepostMuteRepository,
+    PgTotpRepository, PgUserRepository, PinnedPostsRepository, PostRepository, ReactionRepository,
+    RelayRepository, RemoteEmojiRepository, RemoteInstanceMetaRepository, RepostMuteRepository,
+    TotpRepository, UserRepository,
 };
 use seiran_common::{
     job_priority, ApClient, ApDeliveryKind, AtpCommitEvent, AtpCommitService, Job, JobQueue,
@@ -75,6 +76,9 @@ pub struct AppState {
     pub blocks: Arc<dyn BlockRepository>,
     /// ミュート関係（ローカル効果のみ、AP/ATP配送なし）。
     pub mutes: Arc<dyn MuteRepository>,
+    /// リポストミュート関係（対象ユーザーのリポストのみをタイムラインから隠す独立フラグ、
+    /// ローカル効果のみ、AP/ATP配送なし）。
+    pub repost_mutes: Arc<dyn RepostMuteRepository>,
     /// 発行済みアプリトークン（MiAuth 経由、#60）の一覧・無効化リポジトリ。
     pub app_tokens: Arc<dyn AppTokenRepository>,
     pub atp_repo: Arc<dyn AtpReadRepository>,
@@ -572,6 +576,8 @@ pub async fn init_state(
         Arc::new(PgFollowImportRepository::new(pool.clone()));
     let blocks: Arc<dyn BlockRepository> = Arc::new(PgBlockRepository::new(pool.clone()));
     let mutes: Arc<dyn MuteRepository> = Arc::new(PgMuteRepository::new(pool.clone()));
+    let repost_mutes: Arc<dyn RepostMuteRepository> =
+        Arc::new(PgRepostMuteRepository::new(pool.clone()));
     let app_tokens: Arc<dyn AppTokenRepository> = Arc::new(PgAppTokenRepository::new(pool.clone()));
     let atp_repo: Arc<dyn AtpReadRepository> = Arc::new(PgAtpReadRepository::new(pool.clone()));
     let atp_sessions: Arc<dyn AtpSessionRepository> =
@@ -641,6 +647,7 @@ pub async fn init_state(
         follow_imports,
         blocks,
         mutes,
+        repost_mutes,
         app_tokens,
         atp_repo,
         atp_sessions,
@@ -1102,6 +1109,18 @@ pub fn router(state: AppState) -> Router {
         .route("/api/mutes/create", post(handlers::mutes::create_mute))
         .route("/api/mutes/delete", post(handlers::mutes::delete_mute))
         .route("/api/mutes", get(handlers::mutes::list_mutes))
+        .route(
+            "/api/repost-mutes/create",
+            post(handlers::repost_mutes::create_repost_mute),
+        )
+        .route(
+            "/api/repost-mutes/delete",
+            post(handlers::repost_mutes::delete_repost_mute),
+        )
+        .route(
+            "/api/repost-mutes",
+            get(handlers::repost_mutes::list_repost_mutes),
+        )
         // リスト（#63）
         .route(
             "/api/lists",

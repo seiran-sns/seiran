@@ -336,6 +336,9 @@ pub struct ProfileResponse {
     pub is_blocked_by: bool,
     /// 閲覧者がこのアクターをミュート中か。
     pub is_muted: bool,
+    /// 閲覧者がこのアクターをリポストミュート中か（通常投稿は表示、リポストのみ非表示にする
+    /// 独立フラグ）。
+    pub is_repost_muted: bool,
     /// アカウントが凍結中か。ローカルユーザーのみ判定対象（リモートアクターは常に false）。
     pub is_suspended: bool,
     /// 最近の投稿。タイムラインと同じ NoteCard で描画するため NoteResponse で返す（#43）。
@@ -470,6 +473,7 @@ async fn fetch_bsky_profile_from_appview(
         is_blocking: false,
         is_blocked_by: false,
         is_muted: false,
+        is_repost_muted: false,
         is_suspended: false,
         recent_posts: vec![],
         pinned_posts: vec![],
@@ -753,6 +757,14 @@ async fn build_profile_response_inner(
     };
     let is_muted = match my_actor_id {
         Some(mid) => state.mutes.is_muted(mid, actor_id).await.unwrap_or(false),
+        None => false,
+    };
+    let is_repost_muted = match my_actor_id {
+        Some(mid) => state
+            .repost_mutes
+            .is_muted(mid, actor_id)
+            .await
+            .unwrap_or(false),
         None => false,
     };
 
@@ -1049,6 +1061,7 @@ async fn build_profile_response_inner(
         is_blocking,
         is_blocked_by,
         is_muted,
+        is_repost_muted,
         is_suspended,
         recent_posts,
         pinned_posts,
@@ -1179,6 +1192,7 @@ async fn fetch_remote_profile(
         is_blocking: false,
         is_blocked_by: false,
         is_muted: false,
+        is_repost_muted: false,
         is_suspended: false,
         recent_posts: vec![],
         pinned_posts: vec![],

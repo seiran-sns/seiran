@@ -35,6 +35,8 @@
     "actionsMenuTitle": "계정 작업",
     "muteButton": "무음",
     "unmuteButton": "음소거 해제",
+    "repostMuteButton": "리포스트 음소거",
+    "unrepostMuteButton": "리포스트 음소거 해제",
     "blockButton": "차단하다",
     "unblockButton": "차단 해제",
     "blockedByNotice": "이 사용자가 당신을 차단했습니다",

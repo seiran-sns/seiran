@@ -291,6 +291,19 @@ pub struct NoteUserInfo {
     /// （`to_note_response` 単体では常に `None`）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<RemoteInstanceInfo>,
+    /// 閲覧者から見たこのユーザーとの関係（フォロー状態・ミュート・ブロック・
+    /// リポストミュート）。`queries::attach_relationship_flags` が事後に埋める
+    /// （`to_note_response` 単体・自分自身が対象の場合は常に `None`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follow_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_muted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_blocking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_blocked_by: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_repost_muted: Option<bool>,
 }
 
 /// Misskey本家 `UserLite.instance` に合わせたリモートインスタンス情報。フィールド名・形は
@@ -455,6 +468,11 @@ pub fn to_note_response(
             actor_type,
             avatar_url,
             instance: None,
+            follow_status: None,
+            is_muted: None,
+            is_blocking: None,
+            is_blocked_by: None,
+            is_repost_muted: None,
         },
         attachments,
         renote_id: p.repost_of_post_id.map(|i| i.to_string()),
@@ -554,6 +572,11 @@ pub fn to_reaction_event_response(r: ReactionFeedRow) -> ReactionEventResponse {
             actor_type: target_actor_type,
             avatar_url: target_avatar_url,
             instance: None,
+            follow_status: None,
+            is_muted: None,
+            is_blocking: None,
+            is_blocked_by: None,
+            is_repost_muted: None,
         },
         target_user_emojis: json_map_to_string_map(r.target_actor_emoji_map),
     }

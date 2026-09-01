@@ -85,9 +85,12 @@
     "title": "음소거 및 차단",
     "mutesTab": "음소거됨",
     "blocksTab": "막힌",
+    "repostMutesTab": "리포스트 음소거됨",
     "noMutes": "음소거한 사람이 없습니다.",
     "noBlocks": "차단한 사람이 없습니다.",
+    "noRepostMutes": "리포스트를 음소거한 사람이 없습니다.",
     "unmuteButton": "음소거 해제",
+    "unrepostMuteButton": "리포스트 음소거 해제",
     "unblockButton": "차단 해제"
   },
   "appTokensSettings": {

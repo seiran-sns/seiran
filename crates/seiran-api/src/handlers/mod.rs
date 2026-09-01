@@ -28,6 +28,7 @@ pub mod open_target;
 pub mod passkeys;
 pub mod plc_genesis;
 pub mod reports;
+pub mod repost_mutes;
 pub mod search;
 pub mod setup;
 pub mod site_icon;

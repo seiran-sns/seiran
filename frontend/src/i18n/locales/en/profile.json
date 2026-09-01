@@ -35,6 +35,8 @@
     "actionsMenuTitle": "Account actions",
     "muteButton": "Mute",
     "unmuteButton": "Unmute",
+    "repostMuteButton": "Mute Reposts",
+    "unrepostMuteButton": "Unmute Reposts",
     "blockButton": "Block",
     "unblockButton": "Unblock",
     "blockedByNotice": "This user has blocked you",

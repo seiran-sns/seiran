@@ -1,46 +1,38 @@
-import { useCallback, useSyncExternalStore } from "react";
+import {
+  getRelationship,
+  RelationshipSnapshot,
+  setRelationship,
+  useRelationship,
+} from "./userRelationshipStore";
 
-export type FollowStatus = "not_following" | "pending" | "accepted";
+export type { FollowStatus } from "./userRelationshipStore";
+import type { FollowStatus } from "./userRelationshipStore";
 
 /**
- * フォロー状態の外部ストア（プロフィール画面・NoteCardのフォロースイッチが共通で参照する）。
- * 同一アクターへのフォロー状態表示は画面内に複数存在しうる（プロフィール本体＋右ペインの
- * ポストリスト、タイムライン上の同一ユーザーの複数ポスト等）。各コンポーネントが自分の
- * ローカル state だけで持つと、一方を操作しても他方に伝播せず「もう一度開くと古い状態に
- * 戻る」ような食い違いが起きる。ここに一本化し、更新は必ず `setFollowStatus` を経由させることで、
- * 表示中の全コンポーネントが同時に同期される。
- *
- * キーは `lib/format.ts` の `profileQuery(username, domain)`（ローカルは domain 省略）で統一する。
+ * フォロー状態専用の薄いファサード（`stores/userRelationshipStore.ts`への委譲）。
+ * 元々はフォロー状態単体の外部ストアだったが、ミュート・ブロック・リポストミュートを
+ * 含む「対ユーザー関係」全体を1つのストアに統合したため、既存の狭いAPI
+ * （`getFollowStatus`/`setFollowStatus`/`useFollowStatus`）はここに残し、
+ * 呼び出し元（`StreamingContext.tsx`・`ProfilePage.tsx`・`NoteCard.tsx`）を無改修にする。
  */
-const statusMap = new Map<string, FollowStatus>();
-const listeners = new Map<string, Set<() => void>>();
+const DEFAULT_OTHERS: Omit<RelationshipSnapshot, "followStatus"> = {
+  isMuted: false,
+  isBlocking: false,
+  isBlockedBy: false,
+  isRepostMuted: false,
+};
 
 export function getFollowStatus(key: string): FollowStatus | undefined {
-  return statusMap.get(key);
+  return getRelationship(key)?.followStatus;
 }
 
 /** フォロー操作の成功時・WebSocket `followAccepted` 受信時に呼び、購読中の全コンポーネントへ伝播させる。 */
 export function setFollowStatus(key: string, status: FollowStatus): void {
-  statusMap.set(key, status);
-  listeners.get(key)?.forEach((cb) => cb());
-}
-
-function subscribe(key: string, cb: () => void): () => void {
-  let set = listeners.get(key);
-  if (!set) {
-    set = new Set();
-    listeners.set(key, set);
-  }
-  set.add(cb);
-  return () => {
-    set!.delete(cb);
-    if (set!.size === 0) listeners.delete(key);
-  };
+  const prev = getRelationship(key);
+  setRelationship(key, prev ? { ...prev, followStatus: status } : { followStatus: status, ...DEFAULT_OTHERS });
 }
 
 /** 指定キーの現在のフォロー状態を購読する。ストアに未登録なら undefined（未取得を意味する）。 */
 export function useFollowStatus(key: string): FollowStatus | undefined {
-  const subscribeKey = useCallback((cb: () => void) => subscribe(key, cb), [key]);
-  const getSnapshot = useCallback(() => getFollowStatus(key), [key]);
-  return useSyncExternalStore(subscribeKey, getSnapshot);
+  return useRelationship(key)?.followStatus;
 }

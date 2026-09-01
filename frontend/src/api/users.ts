@@ -139,6 +139,21 @@ export const mutes = {
   },
 };
 
+/** リポストミュート: 対象ユーザーの通常投稿は表示したまま、リポストのみを
+ * ホーム・ローカル・グローバルタイムラインから隠す独立フラグ。ミュート・ブロックとは別物。 */
+export const repostMutes = {
+  create(target: string) {
+    return request<{ status: string }>("POST", "/repost-mutes/create", { target });
+  },
+  delete(target: string) {
+    return request<{ status: string }>("POST", "/repost-mutes/delete", { target });
+  },
+  /** 設定画面のミュート・ブロック管理「リポストミュート」タブ一覧。 */
+  list() {
+    return request<MutedOrBlockedActor[]>("GET", "/repost-mutes");
+  },
+};
+
 export const actors = {
   /** DB上のアクターを表示名・ハンドルの部分一致で検索する（リスト・DM用）。 */
   search(q: string, limit = 10, signal?: AbortSignal) {

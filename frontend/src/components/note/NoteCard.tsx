@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, Note } from "../../api/client";
@@ -20,6 +20,10 @@ import {
   setFollowStatus as setFollowStatusStore,
   useFollowStatus,
 } from "../../stores/followStatusStore";
+import {
+  seedRelationshipIfAbsent,
+  setRelationship,
+} from "../../stores/userRelationshipStore";
 import { setPollState, usePollState } from "../../stores/pollVoteStore";
 import ReplyIndicator from "./ReplyIndicator";
 import PendingReferenceIndicator from "./PendingReferenceIndicator";
@@ -33,6 +37,8 @@ import LinkCard from "./LinkCard";
 import PollCountdown from "./PollCountdown";
 import NoteCardActions from "./NoteCardActions";
 import ReactionChips from "./ReactionChips";
+import UserContextMenu from "./UserContextMenu";
+import { UserRelationshipTarget } from "../../hooks/useUserRelationshipMenu";
 import { useComposer } from "../../contexts/ComposerContext";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
@@ -192,6 +198,13 @@ function PostContent({
       currentUser.username === note.user.username &&
       (!note.user.domain || note.user.domain === window.location.hostname));
 
+  const authorTarget: UserRelationshipTarget = {
+    username: note.user.username,
+    domain: note.user.domain,
+    actorId: String(note.user.id),
+    reportLabel: `@${note.user.username}${note.user.domain ? `@${note.user.domain}` : ""}`,
+  };
+
   const [isHovered, setIsHovered] = useState(false);
   const [showContent, setShowContent] = useState(!note.contentWarning || forceOpenCw);
   // pending参照が「取り込む」で解決された場合のローカル反映（#234）。
@@ -220,6 +233,29 @@ function PostContent({
   // WebSocket の `followAccepted`（StreamingContext）を受けるだけで全ての表示に伝播する。
   // ストアに未登録（undefined）なら「まだ取得していない」ことを意味する。
   const followStatus = useFollowStatus(targetKey) ?? null;
+
+  // タイムラインAPIレスポンス（home/local/social/global）は note.user に閲覧者との
+  // 関係（フォロー状態・ミュート・ブロック・リポストミュート）を事前付与済みのため、
+  // ストア未登録ならそれを初期値としてシードする（既存の値があれば上書きしない、
+  // stores/userRelationshipStore.ts の seedRelationshipIfAbsent 参照）。
+  useEffect(() => {
+    if (isAuthorSelf || note.user.followStatus === undefined) return;
+    seedRelationshipIfAbsent(targetKey, {
+      followStatus: note.user.followStatus,
+      isMuted: note.user.isMuted ?? false,
+      isBlocking: note.user.isBlocking ?? false,
+      isBlockedBy: note.user.isBlockedBy ?? false,
+      isRepostMuted: note.user.isRepostMuted ?? false,
+    });
+  }, [
+    targetKey,
+    isAuthorSelf,
+    note.user.followStatus,
+    note.user.isMuted,
+    note.user.isBlocking,
+    note.user.isBlockedBy,
+    note.user.isRepostMuted,
+  ]);
 
   const pollClosed =
     !!poll &&
@@ -250,7 +286,15 @@ function PostContent({
       setLoadingStatus(true);
       api.users
         .profile(targetKey)
-        .then((p) => setFollowStatusStore(targetKey, p.follow_status))
+        .then((p) =>
+          setRelationship(targetKey, {
+            followStatus: p.follow_status,
+            isMuted: p.is_muted,
+            isBlocking: p.is_blocking,
+            isBlockedBy: p.is_blocked_by,
+            isRepostMuted: p.is_repost_muted,
+          }),
+        )
         .catch(() => setFollowStatusStore(targetKey, "not_following"))
         .finally(() => setLoadingStatus(false));
     }
@@ -354,28 +398,32 @@ function PostContent({
             </div>
           )}
 
-          <Link
-            to={profilePath(note.user.username, note.user.domain)}
-            className={styles.avatarLink}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Avatar
-              url={note.user.avatarUrl}
-              name={note.user.displayName || note.user.username}
-              size={large ? 48 : 40}
-            />
-          </Link>
+          <UserContextMenu target={authorTarget}>
+            <Link
+              to={profilePath(note.user.username, note.user.domain)}
+              className={styles.avatarLink}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Avatar
+                url={note.user.avatarUrl}
+                name={note.user.displayName || note.user.username}
+                size={large ? 48 : 40}
+              />
+            </Link>
+          </UserContextMenu>
           <span className={styles.names}>
             <span className={styles.nameRow}>
-              <Link
-                to={profilePath(note.user.username, note.user.domain)}
-                className={styles.displayNameLink}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <span className={styles.displayName}>
-                  <EmojiText text={displayName(note)} emojis={note.emojis} />
-                </span>
-              </Link>
+              <UserContextMenu target={authorTarget}>
+                <Link
+                  to={profilePath(note.user.username, note.user.domain)}
+                  className={styles.displayNameLink}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className={styles.displayName}>
+                    <EmojiText text={displayName(note)} emojis={note.emojis} />
+                  </span>
+                </Link>
+              </UserContextMenu>
               {linkToDetail ? (
                 <Link
                   to={`/notes/${note.id}`}
@@ -389,38 +437,40 @@ function PostContent({
               )}
             </span>
             <span className={styles.acctRow}>
-              <Link
-                to={profilePath(note.user.username, note.user.domain)}
-                className={styles.acctLink}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <span className={styles.acct}>
-                  {acct(note)}
-                  {badge && note.user.actorType === "remote_seiran" && (
-                    <span className={styles.protoBadge} title={badge.label}>
-                      <TwemojiEmoji emoji={badge.icon} />
-                    </span>
-                  )}
-                  {delBadges.map((b) => (
-                    <span
-                      key={b.protocol}
-                      className={styles.protoBadge}
-                      title={b.label}
-                    >
-                      {b.protocol === "bsky" ? (
-                        <img src={blueskyLogo} alt="" className={styles.deliveryBskyIcon} />
-                      ) : (
-                        <img src={fediverseLogo} alt="" className={styles.deliveryFediIcon} />
-                      )}
-                    </span>
-                  ))}
-                  {visBadge && (
-                    <span className={styles.protoBadge} title={visBadge.label}>
-                      <TwemojiEmoji emoji={visBadge.icon} />
-                    </span>
-                  )}
-                </span>
-              </Link>
+              <UserContextMenu target={authorTarget}>
+                <Link
+                  to={profilePath(note.user.username, note.user.domain)}
+                  className={styles.acctLink}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className={styles.acct}>
+                    {acct(note)}
+                    {badge && note.user.actorType === "remote_seiran" && (
+                      <span className={styles.protoBadge} title={badge.label}>
+                        <TwemojiEmoji emoji={badge.icon} />
+                      </span>
+                    )}
+                    {delBadges.map((b) => (
+                      <span
+                        key={b.protocol}
+                        className={styles.protoBadge}
+                        title={b.label}
+                      >
+                        {b.protocol === "bsky" ? (
+                          <img src={blueskyLogo} alt="" className={styles.deliveryBskyIcon} />
+                        ) : (
+                          <img src={fediverseLogo} alt="" className={styles.deliveryFediIcon} />
+                        )}
+                      </span>
+                    ))}
+                    {visBadge && (
+                      <span className={styles.protoBadge} title={visBadge.label}>
+                        <TwemojiEmoji emoji={visBadge.icon} />
+                      </span>
+                    )}
+                  </span>
+                </Link>
+              </UserContextMenu>
               {remoteInfo && (
                 <span
                   className={styles.remoteServerBadge}
@@ -655,13 +705,51 @@ function PostContent({
  */
 function RepostRail({ note }: { note: Note }) {
   const { t } = useTranslation();
+  const { user: currentUser } = useAuth();
   const suffix = t("home:noteCard.repostedSuffix");
+  const targetKey = profileQuery(note.user.username, note.user.domain);
+  const isSelf =
+    !!currentUser &&
+    currentUser.username === note.user.username &&
+    (!note.user.domain || note.user.domain === window.location.hostname);
+
+  // note.user はリポストした人（PostContent側の著者とは別人）。タイムラインAPI
+  // レスポンスに事前付与された関係情報をストア未登録時のみシードする（NoteCard本体の
+  // シード処理と同じ理由、stores/userRelationshipStore.ts の seedRelationshipIfAbsent 参照）。
+  useEffect(() => {
+    if (isSelf || note.user.followStatus === undefined) return;
+    seedRelationshipIfAbsent(targetKey, {
+      followStatus: note.user.followStatus,
+      isMuted: note.user.isMuted ?? false,
+      isBlocking: note.user.isBlocking ?? false,
+      isBlockedBy: note.user.isBlockedBy ?? false,
+      isRepostMuted: note.user.isRepostMuted ?? false,
+    });
+  }, [
+    targetKey,
+    isSelf,
+    note.user.followStatus,
+    note.user.isMuted,
+    note.user.isBlocking,
+    note.user.isBlockedBy,
+    note.user.isRepostMuted,
+  ]);
+
+  const repostTarget: UserRelationshipTarget = {
+    username: note.user.username,
+    domain: note.user.domain,
+    actorId: String(note.user.id),
+    reportLabel: `@${note.user.username}${note.user.domain ? `@${note.user.domain}` : ""}`,
+  };
+
   return (
     <div className={styles.rail}>
       <TwemojiEmoji emoji="🔁" />{" "}
-      <strong>
-        <EmojiText text={displayName(note)} emojis={note.emojis} />
-      </strong>{" "}
+      <UserContextMenu target={repostTarget}>
+        <strong>
+          <EmojiText text={displayName(note)} emojis={note.emojis} />
+        </strong>
+      </UserContextMenu>{" "}
       {t("home:noteCard.repostedConnector")}{" "}
       <Link
         to={`/notes/${note.id}`}

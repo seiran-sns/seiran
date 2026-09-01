@@ -35,6 +35,8 @@
     "actionsMenuTitle": "Kontoaktionen",
     "muteButton": "Stumm",
     "unmuteButton": "Stummschaltung aufheben",
+    "repostMuteButton": "Reposts stummschalten",
+    "unrepostMuteButton": "Repost-Stummschaltung aufheben",
     "blockButton": "Block",
     "unblockButton": "Entsperren",
     "blockedByNotice": "Dieser Benutzer hat Sie blockiert",

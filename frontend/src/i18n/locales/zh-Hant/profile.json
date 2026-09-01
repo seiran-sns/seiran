@@ -35,6 +35,8 @@
     "actionsMenuTitle": "帳戶操作",
     "muteButton": "靜音",
     "unmuteButton": "取消靜音",
+    "repostMuteButton": "封鎖轉發",
+    "unrepostMuteButton": "取消封鎖轉發",
     "blockButton": "封鎖",
     "unblockButton": "取消封鎖",
     "blockedByNotice": "此使用者已封鎖您",

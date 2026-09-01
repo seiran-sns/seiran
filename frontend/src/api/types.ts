@@ -247,6 +247,14 @@ export interface Note {
        * バックエンドが取得できなかった場合は省略（フロントは🌐絵文字にフォールバック）。 */
       iconUrl?: string;
     };
+    /** 閲覧者から見たこのユーザーとの関係（フォロー状態・ミュート・ブロック・
+     * リポストミュート）。home/local/social/globalタイムラインのみ付与される
+     * （それ以外のエンドポイント経由・自分自身が対象の場合は省略）。 */
+    followStatus?: "not_following" | "pending" | "accepted";
+    isMuted?: boolean;
+    isBlocking?: boolean;
+    isBlockedBy?: boolean;
+    isRepostMuted?: boolean;
   };
   attachments: NoteAttachment[];
   // 7.2 拡張メタデータ（存在する場合のみ）
@@ -401,6 +409,9 @@ export interface UserProfile {
   is_blocked_by: boolean;
   /** 閲覧者がこのアクターをミュート中か。 */
   is_muted: boolean;
+  /** 閲覧者がこのアクターをリポストミュート中か（通常投稿は表示、リポストのみ非表示にする
+   * 独立フラグ）。 */
+  is_repost_muted: boolean;
   /** アカウントが凍結中か。ローカルユーザーのみ判定対象（リモートアクターは常に false）。 */
   is_suspended: boolean;
   /** 最近の投稿。タイムラインと同じ NoteCard で描画する（#43）。 */
@@ -496,6 +507,16 @@ export interface RawNote {
       themeColor?: string;
       iconUrl?: string;
     };
+    followStatus?: "not_following" | "pending" | "accepted";
+    follow_status?: "not_following" | "pending" | "accepted";
+    isMuted?: boolean;
+    is_muted?: boolean;
+    isBlocking?: boolean;
+    is_blocking?: boolean;
+    isBlockedBy?: boolean;
+    is_blocked_by?: boolean;
+    isRepostMuted?: boolean;
+    is_repost_muted?: boolean;
   };
   attachments?: NoteAttachment[];
   renoteId?: string;
@@ -557,6 +578,11 @@ export function normalizeNote(r: RawNote): Note {
       actorType: r.user?.actorType ?? r.user?.actor_type ?? "local",
       avatarUrl: r.user?.avatarUrl ?? r.user?.avatar_url,
       instance: r.user?.instance,
+      followStatus: r.user?.followStatus ?? r.user?.follow_status,
+      isMuted: r.user?.isMuted ?? r.user?.is_muted,
+      isBlocking: r.user?.isBlocking ?? r.user?.is_blocking,
+      isBlockedBy: r.user?.isBlockedBy ?? r.user?.is_blocked_by,
+      isRepostMuted: r.user?.isRepostMuted ?? r.user?.is_repost_muted,
     },
     attachments: r.attachments ?? [],
     renoteId: r.renoteId ?? r.renote_id,

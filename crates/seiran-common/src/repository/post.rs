@@ -728,6 +728,7 @@ impl PostRepository for PgPostRepository {
                        AND ($3::bigint IS NULL OR p.id > $3)
                        AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
                        AND post_reply_target_followed($1, p.reply_to_post_id)
+                       AND NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id))
                      ORDER BY p.id DESC LIMIT $4
                  ) p
                  ORDER BY p.id DESC LIMIT $4
@@ -781,6 +782,7 @@ impl PostRepository for PgPostRepository {
                AND ($3::bigint IS NULL OR p.id > $3)
                AND p.visibility NOT IN ('unlisted', 'followers_only')
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
+               AND ($1::bigint IS NULL OR NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id)))
                AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
              ORDER BY p.id DESC LIMIT $4",
         )
@@ -823,6 +825,7 @@ impl PostRepository for PgPostRepository {
                            AND ($3::bigint IS NULL OR p.id > $3)
                            AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
                            AND post_reply_target_followed($1, p.reply_to_post_id)
+                           AND NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id))
                          ORDER BY p.id DESC LIMIT $4
                      ) p
                  )
@@ -837,6 +840,7 @@ impl PostRepository for PgPostRepository {
                        AND ($3::bigint IS NULL OR p.id > $3)
                        AND (p.visibility != 'unlisted' OR p.actor_id = $1)
                        AND (p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
+                       AND NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id))
                        AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
                      ORDER BY p.id DESC LIMIT $4
                  )
@@ -891,6 +895,7 @@ impl PostRepository for PgPostRepository {
                AND ($3::bigint IS NULL OR p.id > $3)
                AND p.visibility NOT IN ('unlisted', 'followers_only')
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
+               AND ($1::bigint IS NULL OR NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id)))
                AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
              ORDER BY p.id DESC LIMIT $4",
         )

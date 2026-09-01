@@ -85,9 +85,12 @@
     "title": "Stummschalten und Blockieren",
     "mutesTab": "Stummgeschaltet",
     "blocksTab": "Blockiert",
+    "repostMutesTab": "Reposts stumm",
     "noMutes": "Du hast niemanden stummgeschaltet.",
     "noBlocks": "Du hast niemanden blockiert.",
+    "noRepostMutes": "Du hast bei niemandem Reposts stummgeschaltet.",
     "unmuteButton": "Stummschaltung aufheben",
+    "unrepostMuteButton": "Repost-Stummschaltung aufheben",
     "unblockButton": "Entsperren"
   },
   "appTokensSettings": {

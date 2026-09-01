@@ -85,9 +85,12 @@
     "title": "Sourdines et blocages",
     "mutesTab": "En sourdine",
     "blocksTab": "Bloqué",
+    "repostMutesTab": "Reposts en sourdine",
     "noMutes": "Vous n'avez coupé le son de personne.",
     "noBlocks": "Vous n'avez bloqué personne.",
+    "noRepostMutes": "Vous n'avez mis en sourdine les reposts de personne.",
     "unmuteButton": "Activer le son",
+    "unrepostMuteButton": "Réafficher les reposts",
     "unblockButton": "Débloquer"
   },
   "appTokensSettings": {

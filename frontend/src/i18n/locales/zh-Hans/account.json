@@ -85,9 +85,12 @@
     "title": "静音和阻止",
     "mutesTab": "静音",
     "blocksTab": "被阻止",
+    "repostMutesTab": "已屏蔽转发",
     "noMutes": "你没有让任何人静音。",
     "noBlocks": "你没有屏蔽任何人。",
+    "noRepostMutes": "你没有屏蔽任何人的转发。",
     "unmuteButton": "取消静音",
+    "unrepostMuteButton": "取消屏蔽转发",
     "unblockButton": "解锁"
   },
   "appTokensSettings": {

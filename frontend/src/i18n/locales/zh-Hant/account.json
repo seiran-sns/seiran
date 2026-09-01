@@ -85,9 +85,12 @@
     "title": "靜音與封鎖",
     "mutesTab": "靜音",
     "blocksTab": "已封鎖",
+    "repostMutesTab": "已封鎖轉發",
     "noMutes": "您尚未將任何人設為靜音。",
     "noBlocks": "您尚未封鎖任何人。",
+    "noRepostMutes": "您尚未封鎖任何人的轉發。",
     "unmuteButton": "取消靜音",
+    "unrepostMuteButton": "取消封鎖轉發",
     "unblockButton": "取消封鎖"
   },
   "appTokensSettings": {
