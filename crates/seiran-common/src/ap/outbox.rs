@@ -193,13 +193,15 @@ pub async fn fetch_ap_featured(
         Some(key) => ap_client.fetch_actor_signed(actor_uri, key).await?,
         None => ap_client.fetch_actor(actor_uri).await?,
     };
-    let featured_url = match actor.featured {
-        Some(url) => url,
+    let featured = match actor.featured {
+        Some(v) => v,
         None => return Ok(vec![]),
     };
 
-    let collection: serde_json::Value =
-        match ap_client.get_maybe_signed(&featured_url, signing_key).await {
+    // bridgy-fed 等は featured に OrderedCollection をインライン埋め込みで返すため、
+    // その場合は再取得せずそのまま使う。Mastodon 等の URL 文字列の場合のみ別途 GET する。
+    let collection: serde_json::Value = if let Some(featured_url) = featured.as_str() {
+        match ap_client.get_maybe_signed(featured_url, signing_key).await {
             Ok(r) if r.status().is_success() => match r.json().await {
                 Ok(v) => v,
                 Err(e) => {
@@ -215,7 +217,10 @@ pub async fn fetch_ap_featured(
                 tracing::error!("[ApFeatured] 取得失敗（スキップ）: {}", e);
                 return Ok(vec![]);
             }
-        };
+        }
+    } else {
+        featured
+    };
 
     let items = collection
         .get("orderedItems")

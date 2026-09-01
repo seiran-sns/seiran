@@ -85,10 +85,12 @@ pub struct ApActor {
     pub icon: Option<serde_json::Value>,
     pub inbox: Option<String>,
     pub outbox: Option<String>,
-    /// ピン留め投稿の OrderedCollection URL（#61）。無い実装（Mastodon 以前や一部の
-    /// 軽量実装）もあるため `Option`。
+    /// ピン留め投稿の OrderedCollection。実装により URL 文字列（Mastodon 等）と
+    /// OrderedCollection オブジェクトのインライン埋め込み（bridgy-fed 等）の両方が
+    /// あり得るため `Value` で受ける（`fetch_ap_featured` で吸収する）。無い実装
+    /// （Mastodon 以前や一部の軽量実装）もあるため `Option`。
     #[serde(default)]
-    pub featured: Option<String>,
+    pub featured: Option<serde_json::Value>,
     /// フォロー中一覧の OrderedCollection URL（#68）。非公開設定にしている実装や
     /// 未対応実装もあるため `Option`。
     #[serde(default)]
@@ -921,5 +923,37 @@ mod tests {
         }))
         .unwrap();
         assert!(!actor.claims_also_known_as("https://oldhost.example/users/alice"));
+    }
+
+    /// bridgy-fed は `featured` を URL 文字列ではなく OrderedCollection オブジェクトの
+    /// インライン埋め込みで返す。この形が来ても Actor 全体のデシリアライズが失敗しないこと
+    /// （旧来 `Option<String>` だった頃は "invalid type: map, expected a string" で失敗していた）。
+    #[test]
+    fn featured_accepts_inline_ordered_collection_object() {
+        let actor: ApActor = serde_json::from_value(serde_json::json!({
+            "id": "https://bsky.brid.gy/ap/did:plc:example",
+            "type": "Person",
+            "featured": {
+                "id": "https://bsky.brid.gy/ap/did:plc:example/featured",
+                "type": "OrderedCollection",
+                "orderedItems": [],
+            },
+        }))
+        .unwrap();
+        assert!(actor.featured.unwrap().is_object());
+    }
+
+    #[test]
+    fn featured_accepts_url_string_form() {
+        let actor: ApActor = serde_json::from_value(serde_json::json!({
+            "id": "https://mastodon.example/users/alice",
+            "type": "Person",
+            "featured": "https://mastodon.example/users/alice/collections/featured",
+        }))
+        .unwrap();
+        assert_eq!(
+            actor.featured.unwrap().as_str(),
+            Some("https://mastodon.example/users/alice/collections/featured")
+        );
     }
 }

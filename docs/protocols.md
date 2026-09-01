@@ -157,6 +157,11 @@ MastodonのAuthorized Fetch（`AUTHORIZED_FETCH=true`）等secure modeを有効�
 - **受信側のHTTP Signature検証**（`ApClient::verify_signature`→`get_public_key_pem`。
   `seiran-federation-inbox::AppState::system_signing_key()`から渡す）
 
+`ApActor.featured`は実装によりURL文字列（Mastodon等）とOrderedCollectionオブジェクトのインライン埋め込み
+（bridgy-fed等）の両方があり得るため`serde_json::Value`で受ける。`fetch_ap_featured`は前者ならURL先を
+別途GET、後者ならそのまま使う（他の`ApActor`フィールドと異なり型を緩めているのはbridgy-fedの実例に
+合わせたもの）。
+
 ### 配送
 `Job::ApDelivery{actor_id, kind}`（優先度高、最大10回リトライの指数バックオフ）。宛先は `follows` の `status='accepted' AND actor_type='fedi'` の `ap_inbox_url` 一覧が基本。全inboxへ署名付きPOSTをファンアウトし、**1件でも成功すればOk**（全滅時のみリトライ対象）。秘密鍵未設定時はリトライしても直らないため即座に破棄。
 
