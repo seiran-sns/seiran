@@ -76,6 +76,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
               >
                 <TwemojiEmoji emoji={item.icon} className={styles.navIcon} />
                 <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
+                <span className={styles.navTooltip}>{t(`nav:${item.labelKey}`)}</span>
                 {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
               </NavLink>
             </li>
@@ -91,6 +92,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
                 >
                   <TwemojiEmoji emoji="🔗" className={styles.navIcon} />
                   <span className={styles.navLabel}>{t("nav:leftNav.openTarget")}</span>
+                  <span className={styles.navTooltip}>{t("nav:leftNav.openTarget")}</span>
                 </button>
               </li>
             )}
@@ -107,6 +109,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
       >
         <TwemojiEmoji emoji="✏️" className={styles.navIcon} />
         <span className={styles.navLabel}>{t("nav:leftNav.composeLabel")}</span>
+        <span className={styles.navTooltip}>{t("nav:leftNav.composeLabel")}</span>
       </button>
 
       <div className={styles.navFooter}>

@@ -235,7 +235,7 @@ export default function NotificationsPanel() {
             onClick={noteId ? () => navigate(`/notes/${noteId}`) : undefined}
           >
             {noteId ? (
-              <NoteHoverPreview noteId={noteId} className={styles.previewWrap}>
+              <NoteHoverPreview noteId={noteId} className={styles.previewWrap} side="left">
                 {content}
               </NoteHoverPreview>
             ) : (

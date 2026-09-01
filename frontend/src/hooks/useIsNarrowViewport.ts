@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 
-/** AppShell.module.css の右ペイン非表示ブレークポイントと合わせた幅判定。 */
-const NARROW_BREAKPOINT_PX = 1400;
+/** AppShell.module.css の右ペイン非表示ブレークポイント（`.right`が2ペイン側へ
+ * 折り返される`max-width: 1220px`）と合わせた幅判定。値がずれると、CSS側はまだ
+ * 3ペインを維持しているのにここだけ先に右ペインの中身を空にしてしまい、
+ * 中身のない`.right`の空箱だけが表示される（実機確認済みの回帰）。 */
+const NARROW_BREAKPOINT_PX = 1220;
 
 /**
  * 右ペインが非表示になる狭幅ビューポートかどうかを返す（`ProfilePage`/`ListsSettingsPage`

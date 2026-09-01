@@ -12,6 +12,60 @@
   max-width: 80vw;
 }
 
+/* 真下ではなく子要素の左側に出す（通知アイテム用）。マウスが下方向へ動いても
+   ポップアップに乗らないため、ポップアップが消えたままにならず下のアイテムを
+   操作できる。 */
+.popupLeft {
+  top: 50%;
+  left: auto;
+  right: calc(100% + 10px);
+  transform: translateY(-50%);
+}
+
+.popupLeft .card,
+.popupLeft .dim {
+  position: relative;
+}
+
+/* 三角を二重に重ねる（枠線色の一回り大きい三角 + 1px内側にcard/dimと同じ
+   塗り色の三角）。塗り色をcard/dimの背景（var(--bg-elev)）そのままにしないと
+   本体とのつなぎ目で色が変わって見える。塗りのみだとページ背景（白系）との
+   コントラストがほぼ無く視認できないため、枠線色（var(--border)、card/dim
+   自体の1px枠と同じ色）で縁取りして視認性を確保する。 */
+.popupLeft .card::before,
+.popupLeft .dim::before,
+.popupLeft .card::after,
+.popupLeft .dim::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border-style: solid;
+  border-color: transparent;
+}
+
+.popupLeft .card::before,
+.popupLeft .dim::before {
+  /* 1枚目：枠線色の三角（card/dim本体と同じ枠線色）。card/dimの右端ちょうどに
+     並べる。これだけだと、card/dim自身の1px枠線と三角の斜辺との継ぎ目に
+     段差が見えてしまう。 */
+  left: 100%;
+  border-width: 8px;
+  border-left-color: var(--border);
+}
+
+.popupLeft .card::after,
+.popupLeft .dim::after {
+  /* 2枚目：枠線を持たない塗り色（card/dimと同じ背景色）の三角。1枚目より
+     根元側に3px長く伸ばして重ねることで、card/dim自身の枠線と1枚目の三角の
+     継ぎ目を塗りつぶして消す。生成コンテンツは要素本体より手前に描画される
+     ため、この重なりで継ぎ目が隠れる（実機指摘済みの回帰）。先端側は1枚目より
+     短いままにして、輪郭（枠線色のリング）を先端付近にだけ残す。 */
+  left: calc(100% - 3px);
+  border-width: 8px;
+  border-left-color: var(--bg-elev);
+}
+
 .dim {
   display: block;
   background: var(--bg-elev);

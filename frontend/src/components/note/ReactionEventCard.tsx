@@ -38,7 +38,7 @@ export default function ReactionEventCard({ event }: ReactionEventCardProps) {
 
   return (
     <div className={styles.item} onClick={() => navigate(`/notes/${event.targetNoteId}`)}>
-      <NoteHoverPreview noteId={event.targetNoteId} className={styles.previewWrap}>
+      <NoteHoverPreview noteId={event.targetNoteId} className={styles.previewWrap} side="left">
         {event.reactionEmojiUrl ? (
           <img
             className={styles.iconImg}

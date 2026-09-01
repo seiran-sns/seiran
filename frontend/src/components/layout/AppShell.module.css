@@ -20,6 +20,12 @@
   flex-direction: column;
   padding: 16px 12px;
   gap: 6px;
+  /* position: sticky は独自のスタッキングコンテキストを作るが、z-index:auto のままだと
+     中央ペイン側の position: relative 要素（NoteCard内部など、z-index未指定でも
+     positionを持つだけでスタッキング対象になる）がDOM順で後にあるため、こちらの
+     上に描画されてしまう（アイコンホバーの吹き出しツールチップが隠れる実機確認済みの
+     回帰）。明示的にz-indexを与えて常に手前に出す。 */
+  z-index: 10;
 }
 
 .logo {
@@ -60,6 +66,7 @@
 .composeBtn,
 .userChip,
 .loginBtn {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -98,6 +105,15 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 左メニューがアイコンのみ（769〜1380px）の間だけ、ホバー/フォーカスで
+   アイコンの右側にキャプションを吹き出し表示する。それ以外の幅では
+   .navLabel が見えているため常に非表示（display:none、下のメディアクエリ
+   内でのみ有効化する）。真下ではなく真右に出すのは、ポップアップへ
+   マウスが乗って消えなくなり下のアイコンが押せなくなる事故を避けるため。 */
+.navTooltip {
+  display: none;
 }
 
 .navBadge {
@@ -202,8 +218,27 @@
   height: 100vh;
   position: sticky;
   top: 0;
-  overflow-y: auto;
   padding: 0;
+  /* NoteCardの追従ウィジェット（followWidgetPopover、z-index:100）等、中央ペイン側に
+     明示的なz-indexを持つ要素があると、.right自身がz-index:auto（DOM順比較の
+     stack-level 0）のままでは、そうした要素の方が値の上で優先されてしまう場合がある
+     （DOM順で.rightの方が後でも、明示z-indexは無条件でauto要素に勝つため）。通知
+     アイテムの左側ポップアップがそれで隠れないよう、同じ100を指定する。Modal（同じく
+     z-index:100）とは.rightより後にレンダリングされるためDOM順のタイブレークで
+     正しくModalが手前になる。 */
+  z-index: 100;
+}
+
+/* スクロールは.right自身ではなくこの内側ラッパーで行う。overflow-y: autoを
+   .right自身に持たせると、overflow指定が片軸のみの場合の仕様（overflow-xが
+   visibleのままだとoverflow-yも含めvisibleに揃えられてしまうため、両方autoに
+   計算される）によりoverflow-xも暗黙にautoへ変換され、.right自身が独立した
+   横方向のクリップ境界になってしまう。通知アイテムの左側に出すポップアップ
+   （`NoteHoverPreview`の`side="left"`）はこの境界を超えるため、それだと
+   スクロールしても絶対に見えない完全不可視になる（実機確認済みの回帰）。 */
+.rightScroll {
+  height: 100%;
+  overflow-y: auto;
 }
 
 /* ── スマホ用フローティングボタン群（PCでは非表示） ────────────── */
@@ -306,29 +341,18 @@
 }
 
 /* ── レスポンシブ ────────────────────────────────────────────── */
-/* 3ペイン合計の必要幅は 240(左) + 600(中央) + 500(右) = 1340px（gapなし）。
-   以前は1200pxで折り返していたため、1201〜1339px幅では3ペインのまま
-   コンテンツが画面をはみ出していた（スクロールバー分の余裕込みで1360pxに調整）。 */
-@media (max-width: 1360px) {
-  .shell {
-    flex-wrap: wrap;
-  }
-
-  .right {
-    flex: 0 0 100%;
-    width: 100%;
-    max-width: 600px;
-    height: auto;
-    position: static;
-    /* 幅広時の overflow-y: auto をリセットする。position: static; height: auto の状態でも
-       overflow-y が auto のまま残ると、実際にはスクロールしない（内容が伸びるだけの）
-       .right 自身が子孫のスクロールコンテナとみなされてしまい、子の position: sticky が
-       ウィンドウスクロールに追従しなくなる（実機・Playwright実測で確認、#241）。 */
-    overflow-y: visible;
-  }
-}
-
-@media (max-width: 900px) and (min-width: 769px) {
+/* 3ペイン表示をできるだけ広い画面幅で維持するため、幅が狭まると
+   まずメインメニューを縮小し（240px→72px）、それでも収まらなくなって
+   初めて右ペインを2ペインへ折り返す、という順で段階的に縮退させる。
+   フル3ペイン必要幅: 240+600+500=1340px
+   メニュー縮小後の3ペイン必要幅: 72+600+500=1172px
+   `width`メディア特性は縦スクロールバーを含んだビューポート幅で評価されるが、
+   実際にコンテンツが使える幅はスクロールバー分（環境により15〜20px程度）狭い。
+   これを見込まずに必要幅ぎりぎりでブレークポイントを決めると、切り替わる
+   直前の狭い帯域で3ペイン/2ペインどちらとも判定されないままオーバーフローし、
+   justify-content: centerの上でbodyのoverflow-x: hiddenにより右側がクリップされて
+   見た目上だけ右ペインが消える（実機確認済みの回帰）。40px程度の余裕を持たせる。 */
+@media (max-width: 1380px) and (min-width: 769px) {
   .desktopLeftNav {
     flex-basis: 72px;
   }
@@ -346,9 +370,78 @@
   .loginIcon {
     display: block;
   }
+  .navLink,
   .composeBtn,
+  .userChip,
   .loginBtn {
+    /* 左右均等のpaddingにするだけでは揃わない。.composeBtn/.loginBtnは
+       justify-content: centerを持つため、ラベルが隠れてアイコン単体になった際に
+       ボタン幅の中央に来るが、.navLink/.userChipはflex-start（既定）のままだと
+       padding-left直後（centerより十数px左）に来てしまい、投稿ボタン（✏️）と
+       横位置がずれる（実機指摘済みの回帰）。全ボタンをcenter揃えに統一する。 */
     padding: 10px;
+    justify-content: center;
+  }
+
+  .navLink:hover .navTooltip,
+  .navLink:focus-visible .navTooltip,
+  .composeBtn:hover .navTooltip,
+  .composeBtn:focus-visible .navTooltip {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+
+  .navTooltip {
+    display: block;
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%) translateX(-4px);
+    white-space: nowrap;
+    background: var(--text);
+    color: var(--bg);
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.22);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease, transform 0.12s ease;
+    z-index: 40;
+  }
+
+  .navTooltip::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 6px solid transparent;
+    border-right-color: var(--text);
+  }
+}
+
+@media (max-width: 1220px) {
+  .shell {
+    flex-wrap: wrap;
+  }
+
+  .right {
+    flex: 0 0 100%;
+    width: 100%;
+    max-width: 600px;
+    height: auto;
+    position: static;
+  }
+
+  /* 幅広時の overflow-y: auto をリセットする。height: auto の状態でも overflow-y が
+     auto のまま残ると、実際にはスクロールしない（内容が伸びるだけの）.rightScroll
+     自身が子孫のスクロールコンテナとみなされてしまい、子の position: sticky が
+     ウィンドウスクロールに追従しなくなる（実機・Playwright実測で確認、#241）。 */
+  .rightScroll {
+    height: auto;
+    overflow-y: visible;
   }
 }
 

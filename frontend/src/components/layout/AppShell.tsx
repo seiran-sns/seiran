@@ -66,7 +66,9 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
 
       <main className={styles.center}>{center}</main>
 
-      <aside className={styles.right}>{right}</aside>
+      <aside className={styles.right}>
+        <div className={styles.rightScroll}>{right}</div>
+      </aside>
 
       {/* スマホ表示用フローティングボタン群（5個をflexで均等配置し、狭い画面幅でも
           重なりやはみ出しが起きないようにする） */}
