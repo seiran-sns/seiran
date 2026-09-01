@@ -319,13 +319,19 @@ pub async fn xrpc_get_record(
 
 /// `com.atproto.repo.getRecord`（`collection=app.bsky.feed.postgate`）専用パス。
 ///
-/// seiranはpostgate（引用可否の制限）作成機能を持たないため実レコードは基本存在せず、
-/// AT Protocol の規約では「レコード不在 = 制限なし（誰でも引用可）」と解釈すべきだが、
-/// bsky.app 側クライアントは 404 を保守的に「引用不可」として扱ってしまうことがある
+/// seiranはpostgate（引用可否の制限）作成機能を持たないため、ローカルユーザーの実レコードは
+/// 基本存在せず、AT Protocol の規約では「レコード不在 = 制限なし（誰でも引用可）」と解釈すべき
+/// だが、bsky.app 側クライアントは 404 を保守的に「引用不可」として扱ってしまうことがある
 /// （2026-08-31 マイケル報告・実機確認: `getRecord?...&collection=app.bsky.feed.postgate`
 /// が 404 を返し、bsky.app上での引用可否判定に影響していた）。そのため、実レコードが
-/// 無い場合は「制限なし」を明示するスタブレコードを合成して返す。
-/// 実レコードが存在する場合（将来postgate作成機能を実装した場合）はそちらを優先する。
+/// 無い場合は合成レコードを返す。実レコードが存在する場合（将来postgate作成機能を実装した場合）
+/// はそちらを優先する。
+///
+/// `repo`がリモートBskyユーザー（`actor_type != "local"`）の場合、seiranは実際のpostgateレコード
+/// を保持しないが、`fetch_bsky_gates`が投稿取り込み時に取得・キャッシュした`posts.bsky_quote_disabled`
+/// を使って正しい値を合成する（2026-09-01 マイケル指摘: リモート投稿について常に「制限なし」を
+/// 返していたため、実際に引用不可な投稿でも嘘の応答になっていた）。該当ポストを未取得の場合は
+/// 判断材料が無いため「制限なし」のままにする（フェイルオープン）。
 async fn get_record_postgate(
     params: &GetRecordParams,
     state: &AppState,
@@ -353,12 +359,30 @@ async fn get_record_postgate(
     }
 
     let post_uri = format!("at://{}/app.bsky.feed.post/{}", did, params.rkey);
+
+    let quote_disabled = if actor.actor_type == "local" {
+        false
+    } else {
+        sqlx::query_scalar::<_, bool>("SELECT bsky_quote_disabled FROM posts WHERE at_uri = $1")
+            .bind(&post_uri)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false)
+    };
+    let embedding_rules = if quote_disabled {
+        serde_json::json!([{ "$type": "app.bsky.feed.postgate#disableRule" }])
+    } else {
+        serde_json::json!([])
+    };
+
     let value = serde_json::json!({
         "$type": "app.bsky.feed.postgate",
         "post": post_uri,
         "createdAt": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         "detachedEmbeddingUris": [],
-        "embeddingRules": [],
+        "embeddingRules": embedding_rules,
     });
     let cid = match encode_generic_record(&value) {
         Ok((_, cid)) => cid,

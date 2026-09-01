@@ -263,7 +263,7 @@ Clearsky等のサードパーティツールは firehose を購読し続ける�
 ### postgateスタブ応答・getTrendsスタブ
 seiranはpostgate（引用可否の制限）・トレンド機能の作成/実装を持たないが、bsky.appクライアントがこれらのエンドポイントを叩いた際に保守的にエラー扱いされるのを防ぐため、無害なスタブ応答を返す。
 
-- `GET /xrpc/com.atproto.repo.getRecord?collection=app.bsky.feed.postgate`（`crates/seiran-api/src/handlers/xrpc/repo.rs`の`get_record_postgate`）— `atp_records`に実レコードが無い場合、`embeddingRules: []`（誰でも引用可）の合成レコードを返す。AT Protocol仕様では「レコード不在=制限なし」のはずだが、404のままだとbsky.app側が引用不可として扱うことがあった（2026-08-31 マイケル報告）。CIDは`encode_generic_record`で実際にDAG-CBORエンコードした値から計算する（ダミー値ではない）。実レコードが存在する場合（将来postgate作成機能を実装した場合）はそちらを優先する。
+- `GET /xrpc/com.atproto.repo.getRecord?collection=app.bsky.feed.postgate`（`crates/seiran-api/src/handlers/xrpc/repo.rs`の`get_record_postgate`）— `atp_records`に実レコードが無い場合は合成レコードを返す。AT Protocol仕様では「レコード不在=制限なし」のはずだが、404のままだとbsky.app側が引用不可として扱うことがあった（2026-08-31 マイケル報告）。CIDは`encode_generic_record`で実際にDAG-CBORエンコードした値から計算する（ダミー値ではない）。実レコードが存在する場合（将来postgate作成機能を実装した場合）はそちらを優先する。`repo`がローカルユーザーなら常に`embeddingRules: []`（postgate作成機能自体が無いため）。`repo`がリモートBskyユーザーの場合は`posts.bsky_quote_disabled`（`fetch_bsky_gates`が投稿取り込み時に取得済み）を見て正しい値を合成する（2026-09-01 マイケル指摘: 以前はリモート投稿についても無条件で「制限なし」を返しており、実際に引用不可な投稿でも嘘の応答になっていた）。該当ポストを未取得の場合は判断材料が無いため「制限なし」のまま（フェイルオープン）。
 - `GET /xrpc/app.bsky.unspecced.getTrends`（`xrpc_get_trends`）— 常に`{"trends": []}`を返す。未実装だと`atproto-proxy`ヘッダー無しの直接呼び出しが`xrpc_proxy_fallback`の`MethodNotImplemented`（404）になる。
 
 ### セッション認証（外部ATプロトコルクライアント対応）
