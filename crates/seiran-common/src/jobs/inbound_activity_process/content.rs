@@ -566,8 +566,12 @@ fn is_allowed_style_value(value: &str) -> bool {
 
 /// Misskey/Fedibirdが引用時に自動付加する`RE:`/`QT:`フォールバック行を、HTML本文
 /// （`content_html`）の末尾から取り除く。`strip_quote_fallback_line`のHTML版
-/// （プレーンテキストの`\n`区切りの代わりに`<br>`をおおよその行区切りとして使う）。
-/// `<br>`が無い（フォールバック行しかない）場合は空文字列を返す。
+/// （プレーンテキストの`\n`区切りの代わりに、直近の`<br>`または`<p>`開始タグを
+/// 行区切りの近似として使う）。`<br>`優先ではなく両方の候補のうち末尾に近い方を採る
+/// のは、本文が段落（`<p>`）単位で区切られ`<br>`を一度も含まない場合に、`<br>`のみを
+/// 見ると本文全体を「最後の行」と誤認し丸ごと消してしまうため（実例:
+/// フォールバック行が先頭の段落にあり、以降複数の`<p>`段落が続く投稿）。
+/// 区切りが1つも見つからない（フォールバック行しかない）場合は空文字列を返す。
 pub(super) fn strip_quote_fallback_line_html(html: &str, quote_uri: &str) -> String {
     fn strip_tags(s: &str) -> String {
         let mut out = String::with_capacity(s.len());
@@ -584,13 +588,16 @@ pub(super) fn strip_quote_fallback_line_html(html: &str, quote_uri: &str) -> Str
     }
 
     let trimmed = html.trim_end();
-    let last_br = {
+    let last_marker = {
         let lower = trimmed.to_ascii_lowercase();
-        lower.rfind("<br")
+        [lower.rfind("<br"), lower.rfind("<p")]
+            .into_iter()
+            .flatten()
+            .max()
     };
-    let (before, after) = match last_br {
+    let (before, after) = match last_marker {
         Some(idx) => {
-            // `<br>`/`<br/>`/`<br />` いずれの終端 `>` も飛ばす。
+            // `<br>`/`<br/>`/`<br />`/`<p>`/`<p class="...">` いずれの終端 `>` も飛ばす。
             let close = trimmed[idx..].find('>').map(|o| idx + o + 1).unwrap_or(idx);
             (&trimmed[..idx], &trimmed[close..])
         }
@@ -599,7 +606,7 @@ pub(super) fn strip_quote_fallback_line_html(html: &str, quote_uri: &str) -> Str
 
     let last_line = strip_tags(after);
     let is_fallback = (last_line.starts_with("RE:") || last_line.starts_with("QT:"))
-        && last_line.contains(quote_uri);
+        && super::note_input::quote_uri_matches(&last_line, quote_uri);
 
     if is_fallback {
         before.trim_end().to_string()
@@ -936,6 +943,27 @@ mod tests {
         let html = "<p>本文<br>RE: not a match</p>";
         let out = strip_quote_fallback_line_html(html, "https://q.example/1");
         assert_eq!(out, html);
+    }
+
+    #[test]
+    fn strip_quote_fallback_line_html_does_not_wipe_body_when_re_line_is_leading_paragraph_without_br() {
+        // <br>を一切使わず<p>だけで段落が区切られ、フォールバック行が先頭の段落にある投稿
+        // （実例: #117134492434435469）。<br>のみで最後の行を判定すると本文全体を
+        // 「最後の行」と誤認し、丸ごと消してしまっていた。
+        let quote_uri = "https://fairy.id/@Linux/117134468004074248";
+        let html = "<p>RE: <a href=\"https://fairy.id/@Linux/117134468004074248\">https://fairy.id/@Linux/117134468004074248</a></p><p>Wait! How did I know about your comment?</p><p>Your kung fu is not strong!</p>";
+        let out = strip_quote_fallback_line_html(html, quote_uri);
+        assert_eq!(out, html);
+    }
+
+    #[test]
+    fn strip_quote_fallback_line_html_matches_fedibird_permalink_url_form() {
+        // quote_uriはAP object id形式だが、本文中のQTフォールバックリンクは
+        // 人間可読URL形式（実例: #117195910938631045）。
+        let quote_uri = "https://fedibird.com/users/asata/statuses/117195892358865036";
+        let html = "<p>本文<br>QT: <a href=\"https://fedibird.com/@asata/117195892358865036\">https://fedibird.com/@asata/117195892358865036</a></p>";
+        let out = strip_quote_fallback_line_html(html, quote_uri);
+        assert_eq!(out, "<p>本文");
     }
 
     #[test]

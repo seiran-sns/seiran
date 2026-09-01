@@ -452,7 +452,7 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
 
 - **リプライ**: 配信先制御（`resolve_reply_context`内`reply_delivery_allowed`）は`classify_post`の分類を使わず、元ポストの`ap_object_id`/`at_uri`の実体の有無を直接見る。`ap_object_id`が無ければ Fedi 配信しない、`at_uri`が無ければ Bsky 配信しない（ローカル投稿でも`deliver_to_bsky=false`等で`at_uri`を持たない場合を含む。実体を持たないプロトコルへ配信すると親と無関係な独立ポストとして誤配信されるため）。親の可視性が `followers_only` ならリプライも継承する。
 - **引用**: 元ポストの `at_uri`/`at_cid` が揃っていれば、Bsky側は `app.bsky.embed.record` でネイティブ引用する（引用元投稿自身に静止画添付があれば `app.bsky.embed.recordWithMedia` として画像も一緒に配送する、「Bsky embed選択」節「引用投稿と静止画添付の共存」参照）。Fediリモートのみの場合や、AP/ATPの両IDを持っていても `at_cid` が未取得の場合は、投稿者名・本文・先頭画像（なければアバター）を持つ `app.bsky.embed.external` URLカードへフォールバックする。AP側は `ap_object_id` があればMisskey互換の `quoteUrl` / `_misskey_quote` として配送し、Bskyにしか実体がない投稿は受信サーバーがAPオブジェクトとして解決できないため、bsky.app URLを本文末尾へ追記する。配送する Create の埋め込み Note と `/notes/:id` の公開 AP Note は同じ本文・引用フィールドを返し、受信側による再取得でも不整合を起こさない。ローカル・Fedi・Bskyのどの投稿も、Fedi/Bskyの両配送先を個別選択して引用できる。
-- **引用受信（#116）**: APは `quoteUrl`、`_misskey_quote`、`tag[].rel=https://misskey-hub.net/ns#_misskey_quote` の順に引用URIを抽出し、Misskey/Fedibirdが本文末尾へ付ける同一URIの `RE:` / `QT:` フォールバック行を除去する。Bsky Jetstreamは `app.bsky.embed.record.record.uri` と `recordWithMedia.record.record.uri` を抽出する。引用先がローカルDBに存在すれば `quote_of_post_id` を設定し、無ければ`resolve_reference`が1段階だけフェッチを試みる（#230/#231）。それでも解決できなければ`quote_of_ap_uri`/`quote_of_ref_status`（`pending`/`gone`）に未解決状態を記録した上で通常投稿として保存する（フォールバック行は引用URI抽出さえできていれば解決可否に関わらず除去する）。リプライ（`inReplyTo`）の解決も同じ`resolve_reference`を使い、同様に`reply_to_ap_uri`/`reply_to_ref_status`へ未解決状態を記録する。1段階フェッチで新たに取得したノート自身が持つリプライ/引用/リポスト参照はさらに辿らず、DB照合のみで`pending`/`gone`を記録する（無限再帰防止）。
+- **引用受信（#116）**: APは `quoteUrl`、`_misskey_quote`、`tag[].rel=https://misskey-hub.net/ns#_misskey_quote` の順に引用URIを抽出し、Misskey/Fedibirdが本文末尾へ付ける同一投稿を指す `RE:` / `QT:` フォールバック行を除去する。判定は完全一致に加え、ホストと末尾のstatus ID（英数字6文字以上）が両方含まれていれば同一とみなす（`quote_uri_matches`）。Fedibirdは`quoteUrl`にAPオブジェクトID形式（`/users/{user}/statuses/{id}`）を使う一方、本文中のフォールバックリンクには表示用URL形式（`/@{user}/{id}`）を使うことがあり、完全一致だけでは検出漏れするため（実例: #117195910938631045。ActivityPub仕様には別表記URLを同一オブジェクトと判定する正規化手続きが無く、WebFingerもアクター発見用でありNote単位のURL正規化には使えないため、Mastodon/Fedibird系実装の命名規則に頼ったヒューリスティック）。Bsky Jetstreamは `app.bsky.embed.record.record.uri` と `recordWithMedia.record.record.uri` を抽出する。引用先がローカルDBに存在すれば `quote_of_post_id` を設定し、無ければ`resolve_reference`が1段階だけフェッチを試みる（#230/#231）。それでも解決できなければ`quote_of_ap_uri`/`quote_of_ref_status`（`pending`/`gone`）に未解決状態を記録した上で通常投稿として保存する（フォールバック行は引用URI抽出さえできていれば解決可否に関わらず除去する）。リプライ（`inReplyTo`）の解決も同じ`resolve_reference`を使い、同様に`reply_to_ap_uri`/`reply_to_ref_status`へ未解決状態を記録する。1段階フェッチで新たに取得したノート自身が持つリプライ/引用/リポスト参照はさらに辿らず、DB照合のみで`pending`/`gone`を記録する（無限再帰防止）。
 - **リポスト**: 元ポストが `ap_object_id` を持つなら Fedi へは `Announce`。持たず `at_uri` のみ(Bskyリモート)ならテキスト投稿（「🔁 author: bsky.app URL」）にフォールバック。Fediリモート投稿をBskyへ配送する場合は、本文を「🔁」のみとし、元の`ap_object_id`を`app.bsky.embed.external`（URLカード）で添付する。カードのtitleは元投稿者の表示名とID、descriptionは元投稿本文、thumbは先頭の添付画像（画像がなければ投稿者アイコン）をPDS配信可能なblobとして設定する。`visibility` が `followers_only`/`direct` の場合、フォロワー限定配信を持たない Bsky へのリポストはスキップする。`Announce`/`Undo(Announce)`はフォロワーのinboxに加え、元ポストがFediリモートなら元投稿者のinboxにも配送し（`cc`にも元投稿者のactor URIを含める）、相手サーバーでのブースト数反映・通知を成立させる（リアクション配送と同じ方針）。`Announce`のAP `id`は`/notes/:id`ではなく`/announces/:id`（`docs/architecture.md` 8.1節参照、リモートユーザーがブラウザで踏んだ場合は`/notes/:id`へリダイレクトする）。
 - **投稿削除**（`DELETE /api/notes/:id`、本人のみ）: DB上は論理削除（`posts.deleted_at`）のみで、リアクション・他ユーザーによるリポスト・通知等の関連行はカスケード削除しない（読み取り側が一貫して`deleted_at IS NULL`を見る設計）。配送は「実際に配送済みだった経路」にのみ行う: `deliver_fedi`が真かつ`visibility != 'direct'`なら`ApDeliveryKind::DeleteNote`（フォロワー全員へ`Delete(Note)`）をenqueue、`at_rkey`が保存済みならBsky側レコードを`delete_atp_post`で削除。`direct`（DM）投稿は`DeleteNote`がフォロワー配送しか持たないため配送対象外（本来の宛先には届かない、既知の制約）。
 
@@ -562,7 +562,12 @@ HTML変換時点でこれらは全て`<i>`（イタリック）に縮退して�
 ルビ]` → `<ruby><rt>...</rt></ruby>`）だけは意味のある変換が得られるため許可タグに含めている。
 
 **引用フォールバック行の除去**: Misskey/Fedibirdが引用時に自動付加する`RE:`/`QT:`行は、`body`と
-同様`content_html`側でも`strip_quote_fallback_line_html`が末尾の`<br>`以降を対象に除去する。
+同様`content_html`側でも`strip_quote_fallback_line_html`が除去する。行区切りの近似には、直近の
+`<br>`と`<p>`開始タグのうち末尾に近い方を使う（`<br>`のみを見ると、本文が段落単位で区切られ
+`<br>`を一度も含まない投稿で本文全体を「最後の行」と誤認し丸ごと消してしまうため）。一致判定は
+「6 プロトコル仕様」節「引用受信」の`quote_uri_matches`と共通。リンクカード化対象URLの抽出
+（`extract_link_card_urls`）はこの除去後の`body`を対象にするため、除去に失敗するとフォールバック
+行のURLがそのままリンクカード化され、引用ボックスとURLカードが二重表示される。
 
 **既知の制約**: 元の生HTMLはDBに永続化しないため、既存投稿（この機能実装前に受信した行）の
 `content_html`は`NULL`のまま（バックフィル不可）。ローカル投稿・Bsky投稿も常に`NULL`

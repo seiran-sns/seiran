@@ -83,12 +83,37 @@ pub(super) fn strip_quote_fallback_line(body: &str, quote_uri: &str) -> String {
     let trimmed = body.trim_end();
     let last_line_start = trimmed.rfind('\n').map(|i| i + 1).unwrap_or(0);
     let last_line = trimmed[last_line_start..].trim();
-    let is_fallback = (last_line.starts_with("RE:") || last_line.starts_with("QT:"))
-        && last_line.contains(quote_uri);
+    let is_fallback =
+        (last_line.starts_with("RE:") || last_line.starts_with("QT:")) && quote_uri_matches(last_line, quote_uri);
     if is_fallback {
         trimmed[..last_line_start].trim_end().to_string()
     } else {
         body.to_string()
+    }
+}
+
+/// `text` 内のURLが `quote_uri` と同一投稿を指すか判定する。完全一致に加え、Fedibirdは
+/// `quoteUrl`（`https://host/users/{user}/statuses/{id}` という内部URL形式）と、本文末尾の
+/// QTフォールバックリンク（`https://host/@{user}/{id}` という表示用URL形式）とで
+/// URLの形が異なることがある（実例: #117195910938631045）。ActivityPub仕様には別表記URLを
+/// 同一オブジェクトと判定する正規化手続きが無い（WebFingerはアクター発見用でありNote単位の
+/// URL正規化には使えない）ため、Mastodon/Fedibird系実装の命名規則（末尾セグメントがstatus ID
+/// で共通）に頼ったヒューリスティックとして、ホストと末尾ID（英数字6文字以上）が両方
+/// `text` に含まれる場合も同一投稿とみなす。
+pub(super) fn quote_uri_matches(text: &str, quote_uri: &str) -> bool {
+    if text.contains(quote_uri) {
+        return true;
+    }
+    let host = quote_uri
+        .split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .filter(|h| !h.is_empty());
+    let id = quote_uri.rsplit('/').next().unwrap_or("");
+    let id_ok = id.len() >= 6 && id.chars().all(|c| c.is_ascii_alphanumeric());
+    match host {
+        Some(host) => id_ok && text.contains(host) && text.contains(id),
+        None => false,
     }
 }
 
@@ -226,6 +251,29 @@ mod tests {
             ),
             "引用ポストのテスト"
         );
+    }
+
+    #[test]
+    fn strips_fedibird_qt_fallback_when_body_url_is_permalink_form() {
+        // Fedibirdのquote_uri（quoteUrl拡張フィールド）はAP object id形式
+        // (`/users/{user}/statuses/{id}`)だが、本文末尾のQTフォールバックリンクは
+        // 人間可読URL形式(`/@{user}/{id}`)であることがある（実例: #117195910938631045）。
+        let quote_uri = "https://fedibird.com/users/asata/statuses/117195892358865036";
+        assert_eq!(
+            strip_quote_fallback_line(
+                "本文\nQT: [https://fedibird.com/@asata/117195892358865036](https://fedibird.com/@asata/117195892358865036) [[参照]](https://fedibird.com/@asata/117195910938900437/references)",
+                quote_uri,
+            ),
+            "本文"
+        );
+    }
+
+    #[test]
+    fn does_not_strip_when_host_differs_even_if_id_matches() {
+        // 末尾IDだけが偶然一致してもホストが違えば別投稿とみなし、誤って除去しない。
+        let quote_uri = "https://fedibird.com/users/asata/statuses/117195892358865036";
+        let body = "本文\nRE: [https://other.example/notes/117195892358865036](https://other.example/notes/117195892358865036)";
+        assert_eq!(strip_quote_fallback_line(body, quote_uri), body);
     }
 
     #[test]
