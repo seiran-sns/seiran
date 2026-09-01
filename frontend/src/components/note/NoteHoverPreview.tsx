@@ -30,7 +30,7 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
   const [open, setOpen] = useState(false);
   const [showContent, setShowContent] = useState(false);
   const [fixedStyle, setFixedStyle] = useState<CSSProperties | null>(null);
-  const [effectiveSide, setEffectiveSide] = useState<"bottom" | "left">(side);
+  const [effectiveSide, setEffectiveSide] = useState<"bottom" | "left" | "right">(side);
   const fetchedRef = useRef(false);
   const timerRef = useRef<number | null>(null);
   const wrapRef = useRef<HTMLSpanElement>(null);
@@ -60,17 +60,30 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
       const POPUP_WIDTH = 320;
       const GAP = 10;
       const VIEWPORT_MARGIN = 8;
-      // スマホ幅では通知アイテムが画面幅いっぱいに近く、左側にpopup分の余白が
-      // 無い。その状態でもleft側の計算式のまま出すと、popupの大部分が画面外
-      // （負のX座標）に飛び出して見えなくなる（実機確認済みの回帰）。左に
-      // 十分な余白がない場合はアイテム下へフォールバックする。
-      if (rect.left - GAP - POPUP_WIDTH >= VIEWPORT_MARGIN) {
+      const REQUIRED = GAP + POPUP_WIDTH + VIEWPORT_MARGIN;
+      // 通知アイテムの一覧は右ペイン（home画面の【クイック通知】。左側に大きく
+      // 余白がある）だけでなく中央ペイン（/notifications画面。アイテム自体が
+      // 画面左寄りにあり、左側の余白はナビ分程度しかない）でも使われる。左右
+      // どちらに実際の余白があるかを実測し、余白のある側へ出す。スマホ幅など
+      // どちらにも余白が無い場合のみアイテム下へフォールバックする（実機
+      // 確認済みの回帰：左固定だと中央ペイン側で画面外へはみ出し、逆に常に
+      // 余白判定なしで下に出すとスマホ以外でも他アイテムに重なってしまう）。
+      if (rect.left >= REQUIRED) {
         setEffectiveSide("left");
         setFixedStyle({
           position: "fixed",
           top: rect.top + rect.height / 2,
           right: window.innerWidth - rect.left + GAP,
           left: "auto",
+          transform: "translateY(-50%)",
+        });
+      } else if (window.innerWidth - rect.right >= REQUIRED) {
+        setEffectiveSide("right");
+        setFixedStyle({
+          position: "fixed",
+          top: rect.top + rect.height / 2,
+          left: rect.right + GAP,
+          right: "auto",
           transform: "translateY(-50%)",
         });
       } else {
@@ -96,8 +109,14 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
       {children}
       {open && (
         <span
-          className={effectiveSide === "left" ? `${styles.popup} ${styles.popupLeft}` : styles.popup}
-          style={effectiveSide === "left" && fixedStyle ? fixedStyle : undefined}
+          className={
+            effectiveSide === "left"
+              ? `${styles.popup} ${styles.popupLeft}`
+              : effectiveSide === "right"
+                ? `${styles.popup} ${styles.popupRight}`
+                : styles.popup
+          }
+          style={effectiveSide !== "bottom" && fixedStyle ? fixedStyle : undefined}
         >
           {loading && <span className={styles.dim}>{t("common:loading")}</span>}
           {failed && <span className={styles.dim}>{t("home:replyIndicator.fetchFailed")}</span>}

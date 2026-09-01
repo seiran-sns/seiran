@@ -66,6 +66,49 @@
   border-left-color: var(--bg-elev);
 }
 
+/* 子要素の右側に出す（.popupLeftの左右反転版）。通知アイテムの一覧は右ペイン
+   （home画面の【クイック通知】）だけでなく中央ペイン（/notifications画面）でも
+   使われ、後者ではアイテム自体が画面左寄りに位置するため「左側に出す」だと
+   余白が足りず画面外へはみ出す（実機指摘済みの回帰）。左右どちらに実際の余白が
+   あるかをJS側で実測し、無い方ではこちらを使う。 */
+.popupRight {
+  top: 50%;
+  left: auto;
+  right: auto;
+  transform: translateY(-50%);
+}
+
+.popupRight .card,
+.popupRight .dim {
+  position: relative;
+}
+
+.popupRight .card::before,
+.popupRight .dim::before,
+.popupRight .card::after,
+.popupRight .dim::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border-style: solid;
+  border-color: transparent;
+}
+
+.popupRight .card::before,
+.popupRight .dim::before {
+  right: 100%;
+  border-width: 8px;
+  border-right-color: var(--border);
+}
+
+.popupRight .card::after,
+.popupRight .dim::after {
+  right: calc(100% - 3px);
+  border-width: 8px;
+  border-right-color: var(--bg-elev);
+}
+
 .dim {
   display: block;
   background: var(--bg-elev);
