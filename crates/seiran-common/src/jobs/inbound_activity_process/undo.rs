@@ -1,8 +1,10 @@
 use super::*;
 
-
 // Undo(Follow) アクティビティを処理してフォロー解除する
-pub(super) async fn handle_undo(activity: serde_json::Value, inbox: &InboxContext) -> Result<(), String> {
+pub(super) async fn handle_undo(
+    activity: serde_json::Value,
+    inbox: &InboxContext,
+) -> Result<(), String> {
     let obj = &activity["object"];
 
     // Undo(Like) / Undo(EmojiReact): reactions から対象を削除する (#22)

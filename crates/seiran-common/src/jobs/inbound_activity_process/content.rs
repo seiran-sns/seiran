@@ -1,6 +1,5 @@
 use super::*;
 
-
 /// HTML エンティティのデコード（`strip_html` と `ap_content_to_markdown_body` で共有）。
 fn decode_html_entities(s: &str) -> String {
     html_escape::decode_html_entities(s).into_owned()

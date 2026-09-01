@@ -139,7 +139,10 @@ fn blob_cids_for_embed(embed: &Option<BskyEmbed>) -> Vec<Cid> {
         Some(BskyEmbed::Video { cid, .. }) => cid_from_str(cid).ok().into_iter().collect(),
         Some(BskyEmbed::External {
             thumb: Some(thumb), ..
-        }) => cid_from_sha256_hex(&thumb.sha256_hex).ok().into_iter().collect(),
+        }) => cid_from_sha256_hex(&thumb.sha256_hex)
+            .ok()
+            .into_iter()
+            .collect(),
         Some(BskyEmbed::External { thumb: None, .. }) | Some(BskyEmbed::Record { .. }) | None => {
             Vec::new()
         }

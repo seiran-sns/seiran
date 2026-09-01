@@ -203,7 +203,10 @@ pub async fn fetch_json_validated(raw_url: &str) -> Result<serde_json::Value, Fe
             .map_err(|_| FetchError::FetchFailed)?;
         let upstream = client
             .get(url.clone())
-            .header(reqwest::header::ACCEPT, "application/json, application/did+json")
+            .header(
+                reqwest::header::ACCEPT,
+                "application/json, application/did+json",
+            )
             .send()
             .await
             .map_err(|_| FetchError::FetchFailed)?;
@@ -377,7 +380,9 @@ pub async fn fetch_ogp(
     let description = extract_og_content(&html, "og:description").unwrap_or_default();
     let thumbnail_url = extract_og_content(&html, "og:image").and_then(|raw| {
         // 相対URLで書かれているサイトもあるため、対象ページのURLを基点に絶対URL化する。
-        base.as_ref().and_then(|b| b.join(&raw).ok()).map(|u| u.to_string())
+        base.as_ref()
+            .and_then(|b| b.join(&raw).ok())
+            .map(|u| u.to_string())
     });
 
     let oembed_url = match fixed_oembed_endpoint {
@@ -385,7 +390,9 @@ pub async fn fetch_ogp(
         None => extract_oembed_link(&html, base.as_ref()),
     };
     let (embed_src, embed_type) = match oembed_url {
-        Some(oembed_url) => fetch_oembed_embed(&oembed_url).await.unwrap_or((None, None)),
+        Some(oembed_url) => fetch_oembed_embed(&oembed_url)
+            .await
+            .unwrap_or((None, None)),
         None => (None, None),
     };
 
@@ -449,12 +456,18 @@ fn extract_oembed_link(html: &str, base: Option<&Url>) -> Option<Url> {
 async fn fetch_oembed_embed(
     oembed_url: &Url,
 ) -> Result<(Option<String>, Option<String>), FetchError> {
-    let (bytes, _) =
-        fetch_validated_with_accept(oembed_url.as_str(), &["application/json", "text/json"], "application/json")
-            .await?;
+    let (bytes, _) = fetch_validated_with_accept(
+        oembed_url.as_str(),
+        &["application/json", "text/json"],
+        "application/json",
+    )
+    .await?;
     let json: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| FetchError::UpstreamError)?;
-    let embed_type = json.get("type").and_then(|v| v.as_str()).map(str::to_string);
+    let embed_type = json
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let embed_src = json
         .get("html")
         .and_then(|v| v.as_str())
@@ -468,7 +481,8 @@ async fn fetch_oembed_embed(
 /// レスポンスが返ってきても最初の要素だけを信頼し、誤ったiframe srcの採用を防ぐ。
 fn extract_iframe_src(html_fragment: &str) -> Option<String> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| regex::Regex::new(r#"<iframe\b[^>]*\bsrc=["']([^"']+)["']"#).unwrap());
+    let re =
+        RE.get_or_init(|| regex::Regex::new(r#"<iframe\b[^>]*\bsrc=["']([^"']+)["']"#).unwrap());
     re.captures(html_fragment)
         .and_then(|c| c.get(1))
         .map(|m| html_escape::decode_html_entities(m.as_str()).into_owned())
@@ -480,7 +494,8 @@ mod tests {
 
     #[test]
     fn extract_body_urls_dedupes_and_preserves_order() {
-        let text = "見て https://a.example/x これも https://b.example/y そしてまた https://a.example/x";
+        let text =
+            "見て https://a.example/x これも https://b.example/y そしてまた https://a.example/x";
         assert_eq!(
             extract_body_urls(text),
             vec!["https://a.example/x", "https://b.example/y"]

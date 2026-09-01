@@ -59,14 +59,12 @@ pub async fn fetch_raw_did_document(did: &str) -> Result<serde_json::Value, DidR
         return Err(DidResolveError::UnsupportedMethod(did.to_string()));
     };
 
-    fetch_json_validated(&doc_url)
-        .await
-        .map_err(|e| match e {
-            FetchError::PrivateAddress | FetchError::InvalidUrl | FetchError::InvalidRedirect => {
-                DidResolveError::Fetch(format!("SSRF対策により拒否: {}", e))
-            }
-            other => DidResolveError::Fetch(other.to_string()),
-        })
+    fetch_json_validated(&doc_url).await.map_err(|e| match e {
+        FetchError::PrivateAddress | FetchError::InvalidUrl | FetchError::InvalidRedirect => {
+            DidResolveError::Fetch(format!("SSRF対策により拒否: {}", e))
+        }
+        other => DidResolveError::Fetch(other.to_string()),
+    })
 }
 
 /// DIDドキュメントの `service` 配列から `#<service_id>` に対応する `serviceEndpoint` を取得する
@@ -127,8 +125,8 @@ pub async fn resolve_atproto_verification_key(
     did: &str,
 ) -> Result<p256::ecdsa::VerifyingKey, DidResolveError> {
     let doc_value = fetch_raw_did_document(did).await?;
-    let doc: DidDocument = serde_json::from_value(doc_value)
-        .map_err(|e| DidResolveError::Parse(e.to_string()))?;
+    let doc: DidDocument =
+        serde_json::from_value(doc_value).map_err(|e| DidResolveError::Parse(e.to_string()))?;
 
     let vm = doc
         .verification_method

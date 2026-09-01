@@ -1,6 +1,5 @@
 use super::*;
 
-
 /// Block アクティビティを処理する。相手発のブロックを `blocks` テーブルへ記録する
 /// （`blocker_actor_id=相手, blocked_actor_id=ローカル`。方向性を持つ関係として素直に
 /// 記録するだけであり視点混在にはならない）。これにより `actor_is_hidden_for_viewer`

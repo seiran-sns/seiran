@@ -90,7 +90,12 @@ pub async fn handle(request_id: i64, ctx: Arc<JobContext>) -> Result<(), String>
             .map_err(|e| format!("[FollowImportProcess] 次回enqueue失敗: {}", e)),
         NextAction::RetryAfter(delay) => ctx
             .queue
-            .enqueue_retry(Job::FollowImportProcess { request_id }, priority::LOW, 0, delay)
+            .enqueue_retry(
+                Job::FollowImportProcess { request_id },
+                priority::LOW,
+                0,
+                delay,
+            )
             .await
             .map_err(|e| format!("[FollowImportProcess] レート制限リトライ再投入失敗: {}", e)),
         NextAction::Stop => Ok(()),
@@ -158,7 +163,10 @@ async fn process_locked(
             )));
         }
         Err(CheckFollowRateLimitError::Db(e)) => {
-            return Err(format!("[FollowImportProcess] レート制限チェック失敗: {}", e));
+            return Err(format!(
+                "[FollowImportProcess] レート制限チェック失敗: {}",
+                e
+            ));
         }
     }
 

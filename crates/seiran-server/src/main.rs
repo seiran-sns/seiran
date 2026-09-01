@@ -287,8 +287,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Role::Firehose => {
             // スタンドアロン firehose は WebSocket 配信先がないため空の StreamHub を使用
             let hub = Arc::new(StreamHub::new());
-            seiran_atp_repo::run(pool, http_client, hub, jetstream_redis_url, false, job_queue)
-                .await;
+            seiran_atp_repo::run(
+                pool,
+                http_client,
+                hub,
+                jetstream_redis_url,
+                false,
+                job_queue,
+            )
+            .await;
         }
 
         Role::Api => {

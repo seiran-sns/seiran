@@ -1,6 +1,5 @@
 use super::*;
 
-
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PollVoteRequest {
@@ -107,7 +106,14 @@ pub async fn vote_poll(
 
     // タイムライン/ノート詳細のアンケート結果をリアルタイム更新する（`broadcast_reaction_update`
     // と同じ考え方。自作自演でも送出し、他タブ・他端末の即時反映も担う）。
-    broadcast_poll_update(&state.stream_hub, state.follows.as_ref(), note_id, post_author_id, &poll).await;
+    broadcast_poll_update(
+        &state.stream_hub,
+        state.follows.as_ref(),
+        note_id,
+        post_author_id,
+        &poll,
+    )
+    .await;
 
     let option_names = indexes
         .iter()

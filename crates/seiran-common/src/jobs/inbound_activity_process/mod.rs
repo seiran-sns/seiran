@@ -38,15 +38,16 @@ mod undo;
 mod update;
 
 pub use content::{ap_content_to_markdown_body, sanitize_ap_content_html, strip_html};
-pub use reference::{resolve_pending_reference_with_timeout, RefStatus, ReferenceOutcome};
 /// `jobs::poll_fetch`（リモートアンケート生存監視フォールバック）が、Update(Question)受理と
 /// 同じAP Question正規化ロジックを再利用するための再エクスポート。
 pub(crate) use note_input::normalize_ap_poll;
+pub use reference::{resolve_pending_reference_with_timeout, RefStatus, ReferenceOutcome};
 
 use announce::handle_announce;
 use block::handle_block;
 use create::handle_create_note;
 use delete::handle_delete;
+use emoji::record_remote_emojis;
 use flag::handle_flag;
 use follow::{handle_accept, handle_follow};
 use move_actor::handle_move;
@@ -55,8 +56,6 @@ use reaction::handle_reaction;
 use relay::{handle_relay_accept, handle_relay_reject, relay_id_for_follow_object};
 use undo::handle_undo;
 use update::handle_update;
-use emoji::record_remote_emojis;
-
 
 pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), String> {
     let Some(inbox) = ctx.inbox.clone() else {

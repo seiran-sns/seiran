@@ -66,17 +66,15 @@ async fn is_visible(
     post_id: i64,
     exclude_direct: bool,
 ) -> bool {
-    sqlx::query_scalar::<_, bool>(
-        "SELECT post_is_visible_to($1, $2, $3, $4, $5)",
-    )
-    .bind(viewer_id)
-    .bind(post_actor_id)
-    .bind(post_visibility)
-    .bind(post_id)
-    .bind(exclude_direct)
-    .fetch_one(tx)
-    .await
-    .expect("post_is_visible_to 呼び出し失敗")
+    sqlx::query_scalar::<_, bool>("SELECT post_is_visible_to($1, $2, $3, $4, $5)")
+        .bind(viewer_id)
+        .bind(post_actor_id)
+        .bind(post_visibility)
+        .bind(post_id)
+        .bind(exclude_direct)
+        .fetch_one(tx)
+        .await
+        .expect("post_is_visible_to 呼び出し失敗")
 }
 
 #[tokio::test]

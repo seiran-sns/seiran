@@ -1,7 +1,6 @@
-use super::*;
-use super::infra::*;
 use super::activity::*;
-
+use super::infra::*;
+use super::*;
 
 /// Announce 対象の元ポストが Fedi リモートである場合、その投稿者の inbox URL と actor URI を返す。
 /// リアクション配送（`resolve_reaction_targets`）と同様、フォロワー配送だけでは元投稿者の

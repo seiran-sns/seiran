@@ -170,7 +170,10 @@ async fn process_locked(
             if !matches!(status.as_deref(), Some("ready") | Some("failed")) {
                 let elapsed_secs = (Utc::now() - created_at).num_seconds();
                 if elapsed_secs < SETTLE_TIMEOUT_SECS {
-                    return Err(format!("動画パイプライン結合待ち（経過{}秒）", elapsed_secs));
+                    return Err(format!(
+                        "動画パイプライン結合待ち（経過{}秒）",
+                        elapsed_secs
+                    ));
                 }
                 tracing::warn!(
                     "[BskyPostCommitDeferred] {}秒経過してもbsky_video_statusが確定しないためフォールバックコミット post_id={}",
@@ -186,8 +189,7 @@ async fn process_locked(
                         let width: Option<i32> = row.try_get("width").unwrap_or(None);
                         let height: Option<i32> = row.try_get("height").unwrap_or(None);
                         let size: i64 = row.try_get("size").unwrap_or(0);
-                        let bsky_size: Option<i64> =
-                            row.try_get("bsky_video_size").unwrap_or(None);
+                        let bsky_size: Option<i64> = row.try_get("bsky_video_size").unwrap_or(None);
                         // 音声を変換したグレー背景動画の解像度は
                         // crate::storage::media_probe::AUDIO_VIDEO_WIDTH/HEIGHT
                         // （convert_audio_to_gray_video が実際に生成する解像度）と必ず一致させる。

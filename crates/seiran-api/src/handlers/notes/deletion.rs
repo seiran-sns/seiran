@@ -1,7 +1,6 @@
 use super::*;
 use queries::find_repost_for_undo;
 
-
 /// DELETE /api/notes/:note_id/repost
 /// 自分がしたリポストを取り消す（論理削除 + AP Undo/Announce 配送）。
 pub async fn delete_repost(

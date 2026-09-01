@@ -1,11 +1,13 @@
 use super::*;
 
-
 /// Delete アクティビティを処理し、対象投稿（Note）を論理削除する。
 /// `object` は Note の URI（文字列）または `{"type":"Tombstone","id":"..."}` の両形式に対応する。
 /// リモートアクター自身の `Delete(Actor)`（退会等）はこの経路では未対応（`object` がどの投稿の
 /// `ap_object_id` とも一致しないため、対象なしとして黙って無視される）。
-pub(super) async fn handle_delete(activity: serde_json::Value, inbox: &InboxContext) -> Result<(), String> {
+pub(super) async fn handle_delete(
+    activity: serde_json::Value,
+    inbox: &InboxContext,
+) -> Result<(), String> {
     let object = &activity["object"];
     let object_id = match object {
         serde_json::Value::String(s) => Some(s.as_str()),

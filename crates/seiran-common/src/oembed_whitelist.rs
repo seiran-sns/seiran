@@ -184,7 +184,10 @@ mod tests {
     #[tokio::test]
     async fn fixed_endpoint_parses_domain_and_endpoint() {
         let wl = whitelist("youtube.com\nvimeo.com,https://vimeo.com/api/oembed.json");
-        assert_eq!(wl.fixed_endpoint_for("https://youtube.com/watch?v=x").await, None);
+        assert_eq!(
+            wl.fixed_endpoint_for("https://youtube.com/watch?v=x").await,
+            None
+        );
         assert_eq!(
             wl.fixed_endpoint_for("https://vimeo.com/12345").await,
             Some("https://vimeo.com/api/oembed.json".to_string())

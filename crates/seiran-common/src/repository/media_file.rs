@@ -146,13 +146,13 @@ impl MediaFileRepository for PgMediaFileRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|(public_url, storage_key, mime_type, is_animated_image)| {
-            ResolvedMediaFile {
+        Ok(row.map(
+            |(public_url, storage_key, mime_type, is_animated_image)| ResolvedMediaFile {
                 url: format!("{}/{}", public_url.trim_end_matches('/'), storage_key),
                 mime_type,
                 is_animated_image,
-            }
-        }))
+            },
+        ))
     }
 
     async fn insert(&self, req: CreateMediaFile) -> Result<MediaFile, MediaFileError> {

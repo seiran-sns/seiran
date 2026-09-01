@@ -784,7 +784,11 @@ pub async fn enqueue_stale_poll_fetches(state: &AppState, notes: &[NoteResponse]
         return;
     }
 
-    let Ok(stale_ids) = state.posts.find_stale_remote_poll_post_ids(&candidates).await else {
+    let Ok(stale_ids) = state
+        .posts
+        .find_stale_remote_poll_post_ids(&candidates)
+        .await
+    else {
         return;
     };
     for post_id in stale_ids {

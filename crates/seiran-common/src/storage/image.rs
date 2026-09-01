@@ -270,7 +270,8 @@ mod tests {
         // blurhash::encode は内部でRGBA前提（bytes_per_row = width * 4）のインデックス計算をするため、
         // RGB（3byte/px）バッファを渡すと境界外アクセスでpanicし、catch_unwindで握りつぶされて
         // 空文字列になっていた（回帰防止）。
-        let img = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(8, 6, Rgba([200, 100, 50, 255])));
+        let img =
+            DynamicImage::ImageRgba8(ImageBuffer::from_pixel(8, 6, Rgba([200, 100, 50, 255])));
         let hash = compute_blurhash(&img, 8, 6);
         assert!(!hash.is_empty(), "blurhashが空文字列（RGBA前提バグの回帰）");
     }

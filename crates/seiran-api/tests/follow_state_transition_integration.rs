@@ -66,19 +66,28 @@ async fn pending_to_accepted_to_removed() {
     let inserted = repo.upsert_pending(follower_id, target_id).await.unwrap();
     assert!(inserted, "新規フォローは true (新規挿入) を返すはず");
     assert_eq!(
-        repo.find_status(follower_id, target_id).await.unwrap().as_deref(),
+        repo.find_status(follower_id, target_id)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("pending")
     );
 
     // 同じ組で再度 upsert_pending すると「既存の更新」扱いで false
     let inserted_again = repo.upsert_pending(follower_id, target_id).await.unwrap();
-    assert!(!inserted_again, "既存フォローの再送信は false (更新) を返すはず");
+    assert!(
+        !inserted_again,
+        "既存フォローの再送信は false (更新) を返すはず"
+    );
 
     // accept: pending → accepted。影響行数は1
     let affected = repo.accept(follower_id, target_id).await.unwrap();
     assert_eq!(affected, 1);
     assert_eq!(
-        repo.find_status(follower_id, target_id).await.unwrap().as_deref(),
+        repo.find_status(follower_id, target_id)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("accepted")
     );
 
@@ -110,14 +119,20 @@ async fn insert_accepted_is_idempotent_for_remote_follow_receipt() {
     // insert_accepted: リモートからの Follow 受信を模す（最初から accepted で入る）
     repo.insert_accepted(follower_id, target_id).await.unwrap();
     assert_eq!(
-        repo.find_status(follower_id, target_id).await.unwrap().as_deref(),
+        repo.find_status(follower_id, target_id)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("accepted")
     );
 
     // 重複受信（リトライ等）しても何も起きない（エラーにならず、状態も変わらない）
     repo.insert_accepted(follower_id, target_id).await.unwrap();
     assert_eq!(
-        repo.find_status(follower_id, target_id).await.unwrap().as_deref(),
+        repo.find_status(follower_id, target_id)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("accepted")
     );
 

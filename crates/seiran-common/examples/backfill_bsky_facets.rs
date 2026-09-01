@@ -72,7 +72,10 @@ async fn main() {
             }
         };
         if !resp.status().is_success() {
-            eprintln!("getPosts 非成功ステータス {}（チャンクskip）", resp.status());
+            eprintln!(
+                "getPosts 非成功ステータス {}（チャンクskip）",
+                resp.status()
+            );
             continue;
         }
         let json: serde_json::Value = match resp.json().await {
@@ -114,21 +117,18 @@ async fn main() {
             // byteStart/byteEnd を機械的に適用するとズレる恐れがあるため触らずスキップする。
             if row.body != record_text {
                 skipped_mismatch += 1;
-                eprintln!(
-                    "本文不一致でskip id={} uri={}",
-                    row.id, row.at_uri
-                );
+                eprintln!("本文不一致でskip id={} uri={}", row.id, row.at_uri);
                 continue;
             }
 
-            let parsed_facets: Vec<ParsedFacet> =
-                match serde_json::from_value(facets_value.clone()) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        eprintln!("facetsパース失敗 id={}: {}", row.id, e);
-                        continue;
-                    }
-                };
+            let parsed_facets: Vec<ParsedFacet> = match serde_json::from_value(facets_value.clone())
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("facetsパース失敗 id={}: {}", row.id, e);
+                    continue;
+                }
+            };
 
             let (new_body, mention_facets) = apply_bsky_facets(record_text, parsed_facets);
 

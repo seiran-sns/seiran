@@ -12,7 +12,11 @@ use sqlx::PgPool;
 
 use crate::repository::SiteSettingsRepository;
 
-pub async fn setting_i64(site_settings: &dyn SiteSettingsRepository, key: &str, default: i64) -> i64 {
+pub async fn setting_i64(
+    site_settings: &dyn SiteSettingsRepository,
+    key: &str,
+    default: i64,
+) -> i64 {
     site_settings
         .get(key)
         .await
@@ -58,7 +62,9 @@ pub async fn role_limit(
 #[derive(Debug)]
 pub enum CheckFollowRateLimitError {
     /// レート制限超過。`retry_after_secs` 経過後に再試行可能。
-    Exceeded { retry_after_secs: u64 },
+    Exceeded {
+        retry_after_secs: u64,
+    },
     Db(sqlx::Error),
 }
 

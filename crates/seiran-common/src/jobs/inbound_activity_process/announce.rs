@@ -1,5 +1,5 @@
-use super::*;
 use super::reference::{resolve_reference, RefStatus};
+use super::*;
 
 // Announce(Note) を受け取り posts テーブルに保存する
 pub(super) async fn handle_announce(

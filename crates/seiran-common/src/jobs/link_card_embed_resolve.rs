@@ -38,7 +38,11 @@ pub async fn handle(
             return Err(format!("embed解決失敗（リトライ対象）: url={url}"));
         }
         Err(e) => {
-            tracing::info!("[LinkCardEmbedResolve] 取得を諦めます url={} reason={}", url, e);
+            tracing::info!(
+                "[LinkCardEmbedResolve] 取得を諦めます url={} reason={}",
+                url,
+                e
+            );
             return Ok(());
         }
     };

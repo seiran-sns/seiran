@@ -50,8 +50,8 @@ pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
 pub use follow_import::{
-    FollowImportItemOutcome, FollowImportProgress, FollowImportRepository,
-    FollowImportRequestRow, PgFollowImportRepository,
+    FollowImportItemOutcome, FollowImportProgress, FollowImportRepository, FollowImportRequestRow,
+    PgFollowImportRepository,
 };
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
 pub use instance_domain::{ConfirmOutcome, InstanceDomainRepository, PgInstanceDomainRepository};
@@ -68,8 +68,8 @@ pub use password_reset::{PasswordResetRepository, PgPasswordResetRepository};
 pub use pinned_post::{PgPinnedPostsRepository, PinnedPostsRepository, MAX_PINNED_POSTS};
 pub use post::{
     DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, InsertRepostParams,
-    PgPostRepository, PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository,
-    PostSummary, ReferenceKind, RepostEntry, RepostUndoInfo, TimelinePost,
+    PgPostRepository, PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository, PostSummary,
+    ReferenceKind, RepostEntry, RepostUndoInfo, TimelinePost,
 };
 pub use reaction::{PgReactionRepository, ReactionFeedRow, ReactionRepository, ReactorInfo};
 pub use relay::{PgRelayRepository, Relay, RelayError, RelayRepository, RelayStatus};

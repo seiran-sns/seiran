@@ -278,7 +278,9 @@ impl ApClient {
         actor_uri: &str,
         signing_key: (&str, &str),
     ) -> Result<ApActor, ApError> {
-        let res = self.signed_get(actor_uri, signing_key.0, signing_key.1).await?;
+        let res = self
+            .signed_get(actor_uri, signing_key.0, signing_key.1)
+            .await?;
 
         if !res.status().is_success() {
             return Err(ApError::FetchActor(format!("ステータス {}", res.status())));
@@ -306,7 +308,8 @@ impl ApClient {
             }
         }
 
-        self.fetch_and_cache_public_key_pem(key_id, signing_key).await
+        self.fetch_and_cache_public_key_pem(key_id, signing_key)
+            .await
     }
 
     /// キャッシュの有無・TTLを無視して公開鍵を再フェッチし、結果でキャッシュを上書きする。
@@ -391,7 +394,9 @@ impl ApClient {
         // 5. キャッシュ済みの鍵での検証に失敗した場合、リモートが鍵をローテーションした
         // 可能性があるため、キャッシュを無視して1回だけ再フェッチし再検証する。
         // 同じ鍵しか得られなかった場合は無駄な再検証をせず最初の失敗をそのまま返す。
-        let fresh_pem = self.fetch_and_cache_public_key_pem(key_id, signing_key).await?;
+        let fresh_pem = self
+            .fetch_and_cache_public_key_pem(key_id, signing_key)
+            .await?;
         if fresh_pem == pem {
             return Err(ApError::Signature("署名検証失敗".to_string()));
         }
@@ -434,8 +439,10 @@ impl ApClient {
         let now = chrono::Utc::now();
         let date_str = now.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
-        let signing_string =
-            format!("(request-target): get {}\nhost: {}\ndate: {}", path, host, date_str);
+        let signing_string = format!(
+            "(request-target): get {}\nhost: {}\ndate: {}",
+            path, host, date_str
+        );
 
         // RSA鍵パース・署名計算はCPUバウンドの同期処理（実測 約50ms/回）。コレクション
         // ページネーション（`fetch_ap_collection_uris`等）はページごとにこれを呼ぶため、
@@ -568,9 +575,14 @@ impl ApClient {
         object_uri: &str,
         signing_key: (&str, &str),
     ) -> Result<serde_json::Value, ApError> {
-        let res = self.signed_get(object_uri, signing_key.0, signing_key.1).await?;
+        let res = self
+            .signed_get(object_uri, signing_key.0, signing_key.1)
+            .await?;
 
-        if matches!(res.status(), reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE) {
+        if matches!(
+            res.status(),
+            reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE
+        ) {
             return Err(ApError::Gone(format!(
                 "ステータス {} ({})",
                 res.status(),

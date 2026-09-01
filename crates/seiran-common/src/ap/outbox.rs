@@ -57,27 +57,28 @@ pub async fn fetch_ap_history(
     let mut notes: Vec<ApNote> = Vec::new();
 
     // Outbox コレクション取得
-    let collection: serde_json::Value = match ap_client.get_maybe_signed(&outbox_url, signing_key).await {
-        Ok(r) if r.status().is_success() => match r.json().await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("[ApOutbox] Outbox JSONパース失敗: {}", e);
+    let collection: serde_json::Value =
+        match ap_client.get_maybe_signed(&outbox_url, signing_key).await {
+            Ok(r) if r.status().is_success() => match r.json().await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!("[ApOutbox] Outbox JSONパース失敗: {}", e);
+                    return Ok(vec![]);
+                }
+            },
+            Ok(r) => {
+                tracing::warn!(
+                    "[ApOutbox] Outbox HTTP {} (非公開とみなしスキップ): {}",
+                    r.status(),
+                    outbox_url
+                );
                 return Ok(vec![]);
             }
-        },
-        Ok(r) => {
-            tracing::warn!(
-                "[ApOutbox] Outbox HTTP {} (非公開とみなしスキップ): {}",
-                r.status(),
-                outbox_url
-            );
-            return Ok(vec![]);
-        }
-        Err(e) => {
-            tracing::error!("[ApOutbox] Outbox 取得失敗 (スキップ): {}", e);
-            return Ok(vec![]);
-        }
-    };
+            Err(e) => {
+                tracing::error!("[ApOutbox] Outbox 取得失敗 (スキップ): {}", e);
+                return Ok(vec![]);
+            }
+        };
 
     // orderedItems がコレクション直下にある（ページネーションなし）パターン
     if let Some(items) = collection.get("orderedItems").and_then(|v| v.as_array()) {
@@ -197,23 +198,24 @@ pub async fn fetch_ap_featured(
         None => return Ok(vec![]),
     };
 
-    let collection: serde_json::Value = match ap_client.get_maybe_signed(&featured_url, signing_key).await {
-        Ok(r) if r.status().is_success() => match r.json().await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("[ApFeatured] JSONパース失敗: {}", e);
+    let collection: serde_json::Value =
+        match ap_client.get_maybe_signed(&featured_url, signing_key).await {
+            Ok(r) if r.status().is_success() => match r.json().await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!("[ApFeatured] JSONパース失敗: {}", e);
+                    return Ok(vec![]);
+                }
+            },
+            Ok(r) => {
+                tracing::info!("[ApFeatured] HTTP {} ({})", r.status(), featured_url);
                 return Ok(vec![]);
             }
-        },
-        Ok(r) => {
-            tracing::info!("[ApFeatured] HTTP {} ({})", r.status(), featured_url);
-            return Ok(vec![]);
-        }
-        Err(e) => {
-            tracing::error!("[ApFeatured] 取得失敗（スキップ）: {}", e);
-            return Ok(vec![]);
-        }
-    };
+            Err(e) => {
+                tracing::error!("[ApFeatured] 取得失敗（スキップ）: {}", e);
+                return Ok(vec![]);
+            }
+        };
 
     let items = collection
         .get("orderedItems")

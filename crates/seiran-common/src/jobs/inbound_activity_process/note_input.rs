@@ -1,6 +1,5 @@
 use super::*;
 
-
 /// `https://bsky.app/profile/{did}/post/{rkey}` → `at://{did}/app.bsky.feed.post/{rkey}`
 pub(super) fn bsky_app_url_to_at_uri(url: &str) -> Option<String> {
     let without_prefix = url.strip_prefix("https://bsky.app/profile/")?;
@@ -20,7 +19,11 @@ pub(super) fn bsky_app_url_to_at_uri(url: &str) -> Option<String> {
 /// INSERTせず、返ってきた既存 post_id をそのまま使うか活動自体を無視しなければならない
 /// （#117022998620934901 で発覚: このガードが無かったため domain はローカルだが id が
 /// 一致しない重複行が生成された）。
-pub(super) fn detect_loopback_post_id(inbox: &InboxContext, note_id: &str, note_url: &str) -> Option<i64> {
+pub(super) fn detect_loopback_post_id(
+    inbox: &InboxContext,
+    note_id: &str,
+    note_url: &str,
+) -> Option<i64> {
     let loopback_prefix = format!("https://{}/notes/", inbox.local_domain);
     [note_url, note_id].iter().find_map(|url| {
         url.strip_prefix(&loopback_prefix)
@@ -31,7 +34,10 @@ pub(super) fn detect_loopback_post_id(inbox: &InboxContext, note_id: &str, note_
 /// 受信した Note の重複排除（フェーズ5）判定: ブリッジ重複（シナリオ3、note.url が bsky.app
 /// の場合に at_uri で既存ポストを探す）を検知し、既存のオリジナル投稿 ID があれば返す。
 /// ループバック（シナリオ1）は [`detect_loopback_post_id`] で別途・事前に弾くこと。
-pub(super) async fn resolve_bridge_duplicate_post_id(inbox: &InboxContext, note_url: &str) -> Option<i64> {
+pub(super) async fn resolve_bridge_duplicate_post_id(
+    inbox: &InboxContext,
+    note_url: &str,
+) -> Option<i64> {
     let at_uri = bsky_app_url_to_at_uri(note_url)?;
     inbox
         .post_repo
@@ -47,7 +53,10 @@ pub(super) async fn resolve_bridge_duplicate_post_id(inbox: &InboxContext, note_
 /// `tag[].rel == "https://misskey-hub.net/ns#_misskey_quote"` にも同じURIを持つ場合があるため、
 /// 両フィールドが無ければ最後に `tag` を走査する（`quoteUrl` → `_misskey_quote` → `tag` の順）。
 /// 送信側は `ap/deliver.rs` の `build_create_note_activity` が同じ2フィールドを付与している。
-pub(super) fn extract_ap_quote_uri(note: &serde_json::Value, tags: &[serde_json::Value]) -> Option<String> {
+pub(super) fn extract_ap_quote_uri(
+    note: &serde_json::Value,
+    tags: &[serde_json::Value],
+) -> Option<String> {
     note["quoteUrl"]
         .as_str()
         .or_else(|| note["_misskey_quote"].as_str())

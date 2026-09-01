@@ -74,10 +74,10 @@ fn follow_error_response(e: FollowError) -> Response {
         FollowError::NoAtDid => {
             ApiError::BadRequest("ターゲットに ATP DID がありません".to_owned()).into_response()
         }
-        FollowError::LocalViaFediGuard => ApiError::BadRequest(
-            "ローカルユーザーはFediフォロー経路で指定できません".to_owned(),
-        )
-        .into_response(),
+        FollowError::LocalViaFediGuard => {
+            ApiError::BadRequest("ローカルユーザーはFediフォロー経路で指定できません".to_owned())
+                .into_response()
+        }
         FollowError::BadGateway(msg) => ApiError::BadGateway(msg.clone()).into_response(),
         FollowError::Internal(msg) => {
             tracing::error!("[follow] {}", msg);

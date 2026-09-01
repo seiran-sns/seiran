@@ -1246,21 +1246,39 @@ mod tests {
 
     #[test]
     fn test_encode_bsky_feed_post_deterministic() {
-        let (cbor1, cid1) =
-            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None, None)
-                .unwrap();
-        let (cbor2, cid2) =
-            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None, None)
-                .unwrap();
+        let (cbor1, cid1) = encode_bsky_feed_post(
+            "hello",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (cbor2, cid2) = encode_bsky_feed_post(
+            "hello",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(cbor1, cbor2);
         assert_eq!(cid1, cid2);
     }
 
     #[test]
     fn test_encode_bsky_feed_post_lang_none_omits_langs_field() {
-        let (cbor, _) =
-            encode_bsky_feed_post("hello", "2024-01-01T00:00:00.000Z", vec![], None, None, None)
-                .unwrap();
+        let (cbor, _) = encode_bsky_feed_post(
+            "hello",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
         let Ipld::Map(record) = value else {
             panic!("record must be map")

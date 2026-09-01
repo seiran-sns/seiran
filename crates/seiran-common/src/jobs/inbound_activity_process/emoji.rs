@@ -1,6 +1,5 @@
 use super::*;
 
-
 /// value（activity/note）の `tag` 配列から、指定した shortcode（`:name:` 形式）に対応する
 /// カスタム絵文字タグの画像 URL を取り出す（`build_emoji_map` を利用）。
 pub(super) fn extract_emoji_tag_url(value: &serde_json::Value, shortcode: &str) -> Option<String> {
@@ -117,7 +116,11 @@ mod emoji_tag_fallback_tests {
 /// APのEmoji tagを `remote_emojis` へ記録する（#73）。
 /// 投稿本文・表示名・絵文字リアクションのいずれの受信経路からも同じ形で呼ばれる。
 /// カタログ記録の失敗は本処理（投稿保存等）を止めるべきではないため、ログのみに留める。
-pub(super) async fn record_remote_emojis(inbox: &InboxContext, domain: &str, tags: &[serde_json::Value]) {
+pub(super) async fn record_remote_emojis(
+    inbox: &InboxContext,
+    domain: &str,
+    tags: &[serde_json::Value],
+) {
     for tag in tags {
         if tag["type"].as_str() != Some("Emoji") {
             continue;

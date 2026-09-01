@@ -1,6 +1,5 @@
-use super::*;
 use super::emoji::{extract_emoji_tag_url, record_remote_emojis};
-
+use super::*;
 
 /// いいね（Like）・絵文字リアクション（EmojiReact）を受信し reactions テーブルへ保存する (#22)。
 ///

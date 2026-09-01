@@ -16,16 +16,8 @@ impl ReferenceKind {
     /// バリアントは3値のみでユーザー入力を含まないため、SQL文字列への直接埋め込みでも安全。
     fn columns(self) -> (&'static str, &'static str, &'static str) {
         match self {
-            ReferenceKind::Reply => (
-                "reply_to_post_id",
-                "reply_to_ap_uri",
-                "reply_to_ref_status",
-            ),
-            ReferenceKind::Quote => (
-                "quote_of_post_id",
-                "quote_of_ap_uri",
-                "quote_of_ref_status",
-            ),
+            ReferenceKind::Reply => ("reply_to_post_id", "reply_to_ap_uri", "reply_to_ref_status"),
+            ReferenceKind::Quote => ("quote_of_post_id", "quote_of_ap_uri", "quote_of_ref_status"),
             ReferenceKind::Repost => (
                 "repost_of_post_id",
                 "repost_of_ap_uri",
@@ -1379,7 +1371,8 @@ impl PostRepository for PgPostRepository {
                 .execute(&self.pool)
                 .await?;
         } else if let Some(status) = ref_status {
-            let sql = format!("UPDATE posts SET {status_col} = $1::post_reference_status WHERE id = $2");
+            let sql =
+                format!("UPDATE posts SET {status_col} = $1::post_reference_status WHERE id = $2");
             sqlx::query(&sql)
                 .bind(status)
                 .bind(post_id)

@@ -1,6 +1,5 @@
 use super::*;
 
-
 // Follow アクティビティを処理し Accept を送信する
 pub(super) async fn handle_follow(
     activity: serde_json::Value,
@@ -131,7 +130,10 @@ pub(super) async fn handle_follow(
 }
 
 // Accept(Follow) を受け取り follows.status を accepted に更新する
-pub(super) async fn handle_accept(activity: serde_json::Value, inbox: &InboxContext) -> Result<(), String> {
+pub(super) async fn handle_accept(
+    activity: serde_json::Value,
+    inbox: &InboxContext,
+) -> Result<(), String> {
     let obj = &activity["object"];
     let remote_actor_uri = activity["actor"]
         .as_str()

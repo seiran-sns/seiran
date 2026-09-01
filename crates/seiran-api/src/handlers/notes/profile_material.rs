@@ -1,6 +1,5 @@
 use super::*;
 
-
 /// 現在のピン留め状態から、Bsky プロフィールへ反映すべき最新1件の strongRef（uri, cid）を解決する。
 /// ピン留めが無い、または最新のピン留め投稿が Bsky に存在しない（`at_uri` が無い）場合は `None`。
 pub async fn resolve_bsky_pinned_post(state: &AppState, actor_id: i64) -> Option<(String, String)> {

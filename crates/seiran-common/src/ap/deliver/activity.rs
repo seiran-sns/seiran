@@ -1,7 +1,6 @@
-use super::*;
 use super::infra::LocalActorAddress;
 use super::note::fetch_attachment_documents;
-
+use super::*;
 
 // =====================================================================
 // アクティビティ構築（what: 純関数・テスト対象）
@@ -295,7 +294,10 @@ pub(super) struct PersonObjectParams<'a> {
 
 /// Person ドキュメントを組み立てる。
 /// `actor_handler`（federation-inbox の `GET /users/:username`）が返すものと同一構造にする。
-pub(super) fn build_person_object(addr: &LocalActorAddress, p: &PersonObjectParams) -> serde_json::Value {
+pub(super) fn build_person_object(
+    addr: &LocalActorAddress,
+    p: &PersonObjectParams,
+) -> serde_json::Value {
     let base = format!("https://{}", p.local_domain);
     let mut context = vec![
         serde_json::json!("https://www.w3.org/ns/activitystreams"),
@@ -555,8 +557,8 @@ pub(super) async fn html_and_tags_for_body(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::infra::local_actor_address;
+    use super::*;
 
     fn addr() -> LocalActorAddress {
         local_actor_address("seiran.example", "alice")

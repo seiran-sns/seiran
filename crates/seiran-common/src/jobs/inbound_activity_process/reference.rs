@@ -1,7 +1,13 @@
-use super::*;
 use super::content::strip_quote_fallback_line_html;
-use super::emoji::{has_same_origin, has_unresolved_emoji_shortcodes, record_remote_emojis, resolve_emoji_map_with_fallback};
-use super::note_input::{detect_loopback_post_id, extract_ap_quote_uri, guess_attachment_mime_type, normalize_ap_poll, resolve_bridge_duplicate_post_id, strip_quote_fallback_line};
+use super::emoji::{
+    has_same_origin, has_unresolved_emoji_shortcodes, record_remote_emojis,
+    resolve_emoji_map_with_fallback,
+};
+use super::note_input::{
+    detect_loopback_post_id, extract_ap_quote_uri, guess_attachment_mime_type, normalize_ap_poll,
+    resolve_bridge_duplicate_post_id, strip_quote_fallback_line,
+};
+use super::*;
 
 /// リプライ/引用/リポストの参照先が未解決（`pending`）か消失確認済み（`gone`）かを表す（#230）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,7 +103,11 @@ pub async fn resolve_reference(
             }
         },
         Err(crate::ap::ApError::Gone(detail)) => {
-            tracing::info!("[RefResolve] 参照先が消失（404/410） uri={}: {}", uri, detail);
+            tracing::info!(
+                "[RefResolve] 参照先が消失（404/410） uri={}: {}",
+                uri,
+                detail
+            );
             ReferenceOutcome::Unresolved {
                 ap_uri: uri.to_string(),
                 status: RefStatus::Gone,

@@ -9,7 +9,9 @@ use seiran_common::atp::{cid_from_sha256_hex, BskyEmbed, BskyImage, BskyPostRepl
 use seiran_common::mention::convert_mentions_for_bsky;
 use seiran_common::net::{extract_body_urls, fetch_ogp};
 use seiran_common::repository::PostDeliveryMeta;
-use seiran_common::{prepare_image, ApDeliveryKind, MediaKind, AUDIO_VIDEO_HEIGHT, AUDIO_VIDEO_WIDTH};
+use seiran_common::{
+    prepare_image, ApDeliveryKind, MediaKind, AUDIO_VIDEO_HEIGHT, AUDIO_VIDEO_WIDTH,
+};
 
 use crate::error::ApiError;
 use crate::AppState;
@@ -152,7 +154,9 @@ fn to_bsky_image(row: &EmbedCandidateRow) -> Option<BskyImage> {
 /// もしくは未確定として`Pending`を返す。
 fn resolve_attachment_embed(state: &AppState, row: &EmbedCandidateRow) -> BskyEmbedResolution {
     if row.mime_type.starts_with("image/") {
-        return BskyEmbedResolution::Ready(to_bsky_image(row).map(|img| BskyEmbed::Images(vec![img])));
+        return BskyEmbedResolution::Ready(
+            to_bsky_image(row).map(|img| BskyEmbed::Images(vec![img])),
+        );
     }
     match row.bsky_video_status.as_deref() {
         Some("ready") => match &row.bsky_video_cid {
@@ -173,7 +177,9 @@ fn resolve_attachment_embed(state: &AppState, row: &EmbedCandidateRow) -> BskyEm
             }
             None => BskyEmbedResolution::Ready(Some(watch_page_fallback_embed(state, row.id))),
         },
-        Some("failed") => BskyEmbedResolution::Ready(Some(watch_page_fallback_embed(state, row.id))),
+        Some("failed") => {
+            BskyEmbedResolution::Ready(Some(watch_page_fallback_embed(state, row.id)))
+        }
         _ => BskyEmbedResolution::Pending(row.id),
     }
 }
@@ -183,9 +189,17 @@ fn resolve_attachment_embed(state: &AppState, row: &EmbedCandidateRow) -> BskyEm
 /// 尊重する（取得失敗時は素の `External`）。あわせて、seiranローカルでも同じURLをカード表示
 /// できるよう `post_link_cards`（position=0）へ保存する（マイケル指摘。選択が無ければ
 /// ローカル表示にカードが出ないのは「選んで初めてカード化する」という仕様のため）。
-async fn resolve_url_embed(state: &AppState, actor_id: i64, post_id: i64, url: String) -> BskyEmbed {
+async fn resolve_url_embed(
+    state: &AppState,
+    actor_id: i64,
+    post_id: i64,
+    url: String,
+) -> BskyEmbed {
     let fixed_endpoint = state.oembed_whitelist.fixed_endpoint_for(&url).await;
-    let ogp = fetch_ogp(&url, fixed_endpoint.as_deref()).await.ok().flatten();
+    let ogp = fetch_ogp(&url, fixed_endpoint.as_deref())
+        .await
+        .ok()
+        .flatten();
     let title = ogp.as_ref().map(|o| o.title.clone()).unwrap_or_default();
     let description = ogp
         .as_ref()
@@ -238,7 +252,10 @@ async fn resolve_url_embed(state: &AppState, actor_id: i64, post_id: i64, url: S
 pub async fn attach_link_cards_from_urls(state: &AppState, post_id: i64, urls: &[String]) {
     for (position, url) in urls.iter().enumerate() {
         let fixed_endpoint = state.oembed_whitelist.fixed_endpoint_for(url).await;
-        let ogp = fetch_ogp(url, fixed_endpoint.as_deref()).await.ok().flatten();
+        let ogp = fetch_ogp(url, fixed_endpoint.as_deref())
+            .await
+            .ok()
+            .flatten();
         let title = ogp.as_ref().map(|o| o.title.clone()).unwrap_or_default();
         let description = ogp
             .as_ref()
@@ -611,7 +628,16 @@ pub async fn deliver_repost(
                     thumb,
                 };
                 if let Err(e) = atp
-                    .commit_quote(actor_id, post_id, "🔁", vec![], Some(embed), now, None, None)
+                    .commit_quote(
+                        actor_id,
+                        post_id,
+                        "🔁",
+                        vec![],
+                        Some(embed),
+                        now,
+                        None,
+                        None,
+                    )
                     .await
                 {
                     tracing::error!("[create_note] Fedi→Bsky フォールバック投稿失敗: {}", e);
@@ -950,7 +976,11 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
     // （マイケル指摘）。引用投稿（`bsky_quote_embed`がSome）は`bsky_embed_choice`自体が
     // 無視されるため対象外。CW（#229）中も`bsky_embed_choice`自体を無視するため対象外。
     let fedi_append_url: Option<String> = if bsky_target && d.content_warning.is_none() {
-        fedi_url_append_needed(&d.text, d.bsky_quote_embed.is_some(), d.bsky_embed_choice.as_ref())
+        fedi_url_append_needed(
+            &d.text,
+            d.bsky_quote_embed.is_some(),
+            d.bsky_embed_choice.as_ref(),
+        )
     } else {
         None
     };
@@ -1327,11 +1357,7 @@ mod tests {
             url: "https://example.com/article".to_owned(),
         };
         assert_eq!(
-            fedi_url_append_needed(
-                "見て https://example.com/article",
-                false,
-                Some(&choice)
-            ),
+            fedi_url_append_needed("見て https://example.com/article", false, Some(&choice)),
             None
         );
     }
@@ -1359,10 +1385,7 @@ mod tests {
             "https://example.com/c".to_owned(),
         ];
         assert_eq!(
-            fedi_link_card_urls_append_needed(
-                "本文中に https://example.com/b があります",
-                &urls,
-            ),
+            fedi_link_card_urls_append_needed("本文中に https://example.com/b があります", &urls,),
             vec![
                 "https://example.com/a".to_owned(),
                 "https://example.com/c".to_owned(),

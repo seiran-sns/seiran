@@ -22,13 +22,19 @@ const SITE_SETTINGS_KEY: &str = "system_proxy_actor_id";
 /// `local_domain` は `&str` を受け取る（`LocalDomain` は `Deref<Target = str>` のため
 /// `&LocalDomain` もそのまま渡せる）。
 pub fn system_proxy_actor_key_id(local_domain: &str) -> String {
-    format!("https://{}/users/{}#main-key", local_domain, PROXY_ACTOR_USERNAME)
+    format!(
+        "https://{}/users/{}#main-key",
+        local_domain, PROXY_ACTOR_USERNAME
+    )
 }
 
 /// `ApClient::fetch_object`/`fetch_actor_signed`にそのまま渡せる署名鍵（キーID, 秘密鍵PEM）を
 /// list-relayプロキシアクターとして組み立てる。
 pub fn system_signing_key(local_domain: &str, ap_private_key_pem: &str) -> (String, String) {
-    (system_proxy_actor_key_id(local_domain), ap_private_key_pem.to_string())
+    (
+        system_proxy_actor_key_id(local_domain),
+        ap_private_key_pem.to_string(),
+    )
 }
 
 /// relay-agent の actor_id を `site_settings` に記録するキー。

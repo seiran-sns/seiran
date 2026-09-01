@@ -1,7 +1,6 @@
-use super::*;
-use super::infra::*;
 use super::activity::*;
-
+use super::infra::*;
+use super::*;
 
 /// ローカルアクターの AP Delete(Actor) アクティビティを Fedi フォロワー全員の inbox へ配送する。
 /// アカウント退会時（#29）に呼び出し、リモートサーバーにフォロー解除とキャッシュ削除を促す。

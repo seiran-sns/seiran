@@ -1,6 +1,5 @@
 use super::*;
 
-
 pub(super) async fn handle_poll_vote(
     activity: serde_json::Value,
     inbox: &InboxContext,

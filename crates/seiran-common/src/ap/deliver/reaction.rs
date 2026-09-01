@@ -1,7 +1,6 @@
-use super::*;
-use super::infra::*;
 use super::activity::*;
-
+use super::infra::*;
+use super::*;
 
 /// リアクション配送先を解決する。
 ///
@@ -16,12 +15,13 @@ async fn resolve_reaction_targets(
     post_id: i64,
     reactor_actor_id: i64,
 ) -> Result<Option<(String, Vec<String>)>, ApError> {
-    let object_ap_id: Option<String> = sqlx::query("SELECT ap_object_id FROM posts WHERE id = $1 LIMIT 1")
-        .bind(post_id)
-        .fetch_optional(db)
-        .await
-        .map_err(|e| ApError::Other(format!("対象ポスト取得エラー: {}", e)))?
-        .and_then(|r| r.try_get("ap_object_id").unwrap_or(None));
+    let object_ap_id: Option<String> =
+        sqlx::query("SELECT ap_object_id FROM posts WHERE id = $1 LIMIT 1")
+            .bind(post_id)
+            .fetch_optional(db)
+            .await
+            .map_err(|e| ApError::Other(format!("対象ポスト取得エラー: {}", e)))?
+            .and_then(|r| r.try_get("ap_object_id").unwrap_or(None));
 
     let object_ap_id = match object_ap_id {
         Some(id) => id,

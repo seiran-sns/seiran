@@ -85,7 +85,15 @@ pub async fn execute_follow(
             follow_local(&username, local_actor_id, local_username, config).await
         }
         FollowTargetKind::Bsky(actor_id_or_handle) => {
-            follow_bsky(&actor_id_or_handle, local_actor_id, pool, ap_client, queue, config).await
+            follow_bsky(
+                &actor_id_or_handle,
+                local_actor_id,
+                pool,
+                ap_client,
+                queue,
+                config,
+            )
+            .await
         }
         FollowTargetKind::Fedi(t) => {
             follow_fedi(&t, local_actor_id, local_username, ap_client, config).await
@@ -282,12 +290,10 @@ async fn follow_fedi(
     ap_client: &Arc<ApClient>,
     config: &FollowExecConfig,
 ) -> Result<FollowOutcome, FollowError> {
-    let target_uri = resolve_target_uri(ap_client, target)
-        .await
-        .map_err(|e| {
-            tracing::error!("[follow/fedi] ターゲット解決失敗: {}", e);
-            FollowError::Internal(format!("ターゲット解決失敗: {}", e))
-        })?;
+    let target_uri = resolve_target_uri(ap_client, target).await.map_err(|e| {
+        tracing::error!("[follow/fedi] ターゲット解決失敗: {}", e);
+        FollowError::Internal(format!("ターゲット解決失敗: {}", e))
+    })?;
 
     // target_uri が自ドメインを指す場合、fetch_actor/upsert_remote_fedi へ進まず拒否する
     // （ローカルユーザーを fedi フォロー経路で解決させると影の重複 fedi 行が生成される、#110）。
@@ -302,10 +308,9 @@ async fn follow_fedi(
         .await
         .map_err(|e| FollowError::BadGateway(format!("リモートアクター取得失敗: {}", e)))?;
 
-    let remote_inbox = remote_ap
-        .inbox
-        .clone()
-        .ok_or_else(|| FollowError::BadGateway("リモートアクターに inbox がありません".to_owned()))?;
+    let remote_inbox = remote_ap.inbox.clone().ok_or_else(|| {
+        FollowError::BadGateway("リモートアクターに inbox がありません".to_owned())
+    })?;
 
     let remote_avatar_url = remote_ap.avatar_url();
     let remote_username = remote_ap.preferred_username.clone().unwrap_or_else(|| {
@@ -369,11 +374,17 @@ async fn follow_fedi(
         "object": target_uri
     });
 
-    let body = serde_json::to_string(&follow_activity)
-        .map_err(|e| FollowError::Internal(format!("[follow/fedi] JSON シリアライズ失敗: {}", e)))?;
+    let body = serde_json::to_string(&follow_activity).map_err(|e| {
+        FollowError::Internal(format!("[follow/fedi] JSON シリアライズ失敗: {}", e))
+    })?;
 
     ap_client
-        .sign_and_post(&remote_inbox, &body, &actor_key_id, &config.ap_private_key_pem)
+        .sign_and_post(
+            &remote_inbox,
+            &body,
+            &actor_key_id,
+            &config.ap_private_key_pem,
+        )
         .await
         .map_err(|e| {
             tracing::error!("[follow/fedi] Follow 送信失敗: {}", e);
@@ -393,7 +404,10 @@ async fn follow_fedi(
 }
 
 /// `@alice@mastodon.social` または `https://...` 形式のターゲットを Actor URI に解決する
-async fn resolve_target_uri(ap_client: &Arc<ApClient>, target: &str) -> Result<String, crate::ApError> {
+async fn resolve_target_uri(
+    ap_client: &Arc<ApClient>,
+    target: &str,
+) -> Result<String, crate::ApError> {
     let t = target.trim().trim_start_matches('@');
 
     if t.starts_with("https://") || t.starts_with("http://") {

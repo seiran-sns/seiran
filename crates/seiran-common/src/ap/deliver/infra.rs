@@ -1,6 +1,5 @@
 use super::*;
 
-
 // =====================================================================
 // 共通ヘルパー（how: データ取得・署名 POST ファンアウト）
 // =====================================================================
@@ -34,7 +33,10 @@ pub(super) async fn fetch_username(db: &PgPool, actor_id: i64) -> Result<String,
 }
 
 /// 指定アクターの AP フォロワー（actor_type='fedi'）の inbox URL 一覧を取得する。
-pub(super) async fn fetch_fedi_follower_inboxes(db: &PgPool, actor_id: i64) -> Result<Vec<String>, ApError> {
+pub(super) async fn fetch_fedi_follower_inboxes(
+    db: &PgPool,
+    actor_id: i64,
+) -> Result<Vec<String>, ApError> {
     let rows = sqlx::query(
         "SELECT a.ap_inbox_url
          FROM follows f

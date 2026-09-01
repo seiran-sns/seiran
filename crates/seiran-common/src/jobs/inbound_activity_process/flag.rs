@@ -1,6 +1,5 @@
 use super::*;
 
-
 /// リモートFediサーバーからローカルActor/投稿宛てに届いたActivityPub Flagを
 /// 統一通報台帳へ取り込む。
 pub(super) async fn handle_flag(

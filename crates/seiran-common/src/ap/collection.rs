@@ -26,7 +26,10 @@ async fn fetch_ap_collection_uris_inner(
 ) -> (Vec<String>, bool) {
     let mut uris = Vec::new();
 
-    let collection: serde_json::Value = match ap_client.get_maybe_signed(collection_url, signing_key).await {
+    let collection: serde_json::Value = match ap_client
+        .get_maybe_signed(collection_url, signing_key)
+        .await
+    {
         Ok(r) if r.status().is_success() => match r.json().await {
             Ok(v) => v,
             Err(e) => {

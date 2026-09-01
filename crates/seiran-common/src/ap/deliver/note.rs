@@ -1,7 +1,6 @@
-use super::*;
-use super::infra::*;
 use super::activity::*;
-
+use super::infra::*;
+use super::*;
 
 // =====================================================================
 // 配送オーケストレーション（公開 API）
@@ -49,9 +48,14 @@ pub async fn deliver_post_to_ap_followers(
 
     // 配送先はフォロワー + 本文中でメンションした相手（フォロワーでなくても通知を届ける）の和集合。
     let mut inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
-    for inbox in
-        fetch_inboxes_by_ap_uris(ap_client, db, local_domain, ap_private_key_pem, &mention_uris)
-            .await
+    for inbox in fetch_inboxes_by_ap_uris(
+        ap_client,
+        db,
+        local_domain,
+        ap_private_key_pem,
+        &mention_uris,
+    )
+    .await
     {
         if !inboxes.contains(&inbox) {
             inboxes.push(inbox);

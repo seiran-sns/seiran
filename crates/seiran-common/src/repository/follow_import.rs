@@ -60,7 +60,10 @@ pub trait FollowImportRepository: Send + Sync {
     async fn find_active_for_actor(&self, actor_id: i64) -> Result<Option<i64>, sqlx::Error>;
 
     /// ジョブハンドラがリクエストの現在状態を取得するために使う。
-    async fn get_request(&self, request_id: i64) -> Result<Option<FollowImportRequestRow>, sqlx::Error>;
+    async fn get_request(
+        &self,
+        request_id: i64,
+    ) -> Result<Option<FollowImportRequestRow>, sqlx::Error>;
 
     /// 次に処理する `pending` の1件を排他的に取得する（`FOR UPDATE SKIP LOCKED` 相当）。
     /// UPDATE文で行ロックとRETURNINGを組み合わせて実現するため、呼び出し側でのトランザクション
@@ -81,7 +84,12 @@ pub trait FollowImportRepository: Send + Sync {
 
     /// 所有者チェック込みでリクエストをキャンセルする。実行中のリクエストが見つからなければ
     /// `false` を返す（既に完了/キャンセル済み、または他人のリクエスト）。
-    async fn cancel(&self, request_id: i64, actor_id: i64, now: DateTime<Utc>) -> Result<bool, sqlx::Error>;
+    async fn cancel(
+        &self,
+        request_id: i64,
+        actor_id: i64,
+        now: DateTime<Utc>,
+    ) -> Result<bool, sqlx::Error>;
 }
 
 pub struct PgFollowImportRepository {
@@ -149,13 +157,15 @@ impl FollowImportRepository for PgFollowImportRepository {
         .await?;
 
         Ok(row.map(
-            |(request_id, status, total, succeeded, already_following, failed)| FollowImportProgress {
-                request_id,
-                status,
-                total,
-                succeeded,
-                already_following,
-                failed,
+            |(request_id, status, total, succeeded, already_following, failed)| {
+                FollowImportProgress {
+                    request_id,
+                    status,
+                    total,
+                    succeeded,
+                    already_following,
+                    failed,
+                }
             },
         ))
     }
@@ -170,14 +180,21 @@ impl FollowImportRepository for PgFollowImportRepository {
         Ok(row.map(|r| r.0))
     }
 
-    async fn get_request(&self, request_id: i64) -> Result<Option<FollowImportRequestRow>, sqlx::Error> {
+    async fn get_request(
+        &self,
+        request_id: i64,
+    ) -> Result<Option<FollowImportRequestRow>, sqlx::Error> {
         let row: Option<(i64, i64, String)> = sqlx::query_as(
             "SELECT id, actor_id, status::text FROM follow_import_requests WHERE id = $1",
         )
         .bind(request_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(id, actor_id, status)| FollowImportRequestRow { id, actor_id, status }))
+        Ok(row.map(|(id, actor_id, status)| FollowImportRequestRow {
+            id,
+            actor_id,
+            status,
+        }))
     }
 
     async fn claim_next_item(&self, request_id: i64) -> Result<Option<(i64, String)>, sqlx::Error> {
@@ -231,7 +248,12 @@ impl FollowImportRepository for PgFollowImportRepository {
         .map(|_| ())
     }
 
-    async fn cancel(&self, request_id: i64, actor_id: i64, now: DateTime<Utc>) -> Result<bool, sqlx::Error> {
+    async fn cancel(
+        &self,
+        request_id: i64,
+        actor_id: i64,
+        now: DateTime<Utc>,
+    ) -> Result<bool, sqlx::Error> {
         let result = sqlx::query(
             "UPDATE follow_import_requests SET status = 'cancelled', cancelled_at = $1
              WHERE id = $2 AND actor_id = $3 AND status = 'running'",

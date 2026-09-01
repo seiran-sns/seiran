@@ -1,6 +1,5 @@
 use super::*;
 
-
 /// Accept/Reject/Undo の `object`（Follow activity。文字列URIまたは`{"id": ...}`形式の
 /// どちらでも来うる）から Follow activity の id を取り出し、`fediverse_relays` に一致する
 /// レコードがあれば `relay_id` を返す。一致しなければ通常のローカルフォロー応答とみなす。

@@ -1,7 +1,6 @@
 use super::*;
 use profile_material::sync_bsky_pinned_post;
 
-
 /// POST /api/notes/:id/pin
 /// 自分の投稿をピン留めする（#61）。5件を超えると最古のピン留めが自動的に外れる。
 /// Fedi 向けは featured collection（都度動的生成、`seiran-federation-inbox`）で、

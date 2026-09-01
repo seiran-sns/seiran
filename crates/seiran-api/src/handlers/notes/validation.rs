@@ -87,9 +87,10 @@ pub fn validate_poll_choices(choices: &[String]) -> Result<Vec<String>, ApiError
             "アンケートの選択肢は2〜10件です".to_owned(),
         ));
     }
-    if trimmed.iter().any(|c| {
-        c.is_empty() || c.graphemes(true).count() > MAX_POLL_CHOICE_LEN
-    }) {
+    if trimmed
+        .iter()
+        .any(|c| c.is_empty() || c.graphemes(true).count() > MAX_POLL_CHOICE_LEN)
+    {
         return Err(ApiError::BadRequest("INVALID_POLL_CHOICE".to_owned()));
     }
     Ok(trimmed)

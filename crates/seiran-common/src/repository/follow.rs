@@ -326,12 +326,11 @@ impl FollowRepository for PgFollowRepository {
         // 書き込みはtrg_follows_sync_countsトリガー（followsへのINSERT/UPDATE/DELETE時に
         // 実測COUNT(*)で再計算）が一元的に行う。アプリ側はfollowsテーブルへの素朴な
         // INSERT/UPDATE/DELETEを発行するだけでよい（docs/database.md「非正規化カウンタ」参照）。
-        let row: (i64, i64) = sqlx::query_as(
-            "SELECT following_count, followers_count FROM actors WHERE id = $1",
-        )
-        .bind(actor_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let row: (i64, i64) =
+            sqlx::query_as("SELECT following_count, followers_count FROM actors WHERE id = $1")
+                .bind(actor_id)
+                .fetch_one(&self.pool)
+                .await?;
         Ok(row)
     }
 

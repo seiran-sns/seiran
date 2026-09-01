@@ -53,7 +53,10 @@ pub async fn handle(actor_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
     for note in &notes {
         match crate::ap::upsert_ap_note(pool, actor_id, note).await {
             Ok(id) => post_ids.push(id),
-            Err(e) => tracing::warn!("[RemoteFeaturedSync] featured Note 保存失敗（スキップ）: {}", e),
+            Err(e) => tracing::warn!(
+                "[RemoteFeaturedSync] featured Note 保存失敗（スキップ）: {}",
+                e
+            ),
         }
     }
 

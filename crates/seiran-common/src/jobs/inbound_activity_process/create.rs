@@ -1,9 +1,15 @@
-use super::*;
 use super::content::strip_quote_fallback_line_html;
-use super::emoji::{has_same_origin, has_unresolved_emoji_shortcodes, record_remote_emojis, resolve_emoji_map_with_fallback};
-use super::note_input::{detect_loopback_post_id, extract_ap_quote_uri, extract_mentioned_local_usernames, guess_attachment_mime_type, normalize_ap_poll, resolve_bridge_duplicate_post_id, strip_quote_fallback_line};
+use super::emoji::{
+    has_same_origin, has_unresolved_emoji_shortcodes, record_remote_emojis,
+    resolve_emoji_map_with_fallback,
+};
+use super::note_input::{
+    detect_loopback_post_id, extract_ap_quote_uri, extract_mentioned_local_usernames,
+    guess_attachment_mime_type, normalize_ap_poll, resolve_bridge_duplicate_post_id,
+    strip_quote_fallback_line,
+};
 use super::reference::{resolve_reference, RefStatus};
-
+use super::*;
 
 /// 1投稿から抽出するURLカード候補の上限。大量リンクを含む投稿でのOGPフェッチ暴走を防ぐ。
 const MAX_LINK_CARDS_PER_POST: usize = 5;
@@ -100,7 +106,11 @@ pub(super) async fn notify_local_actor(
         )
         .await
     {
-        tracing::error!("[Create/Note] {} notification INSERT 失敗: {}", event_name, e);
+        tracing::error!(
+            "[Create/Note] {} notification INSERT 失敗: {}",
+            event_name,
+            e
+        );
     }
 }
 

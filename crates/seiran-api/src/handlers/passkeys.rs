@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
 use webauthn_rs::prelude::{
-    DiscoverableAuthentication, DiscoverableKey, Passkey, PasskeyRegistration,
-    PublicKeyCredential, RegisterPublicKeyCredential,
+    DiscoverableAuthentication, DiscoverableKey, Passkey, PasskeyRegistration, PublicKeyCredential,
+    RegisterPublicKeyCredential,
 };
 
 use crate::handlers::auth::{finish_login, AuthResponse};
@@ -110,7 +110,14 @@ pub async fn registration_start(
         "name": name,
         "registration": reg_state,
     });
-    save_challenge(&state, token, Some(user.user_id), "registration", state_json).await?;
+    save_challenge(
+        &state,
+        token,
+        Some(user.user_id),
+        "registration",
+        state_json,
+    )
+    .await?;
     Ok(Json(ChallengeResponse { token, public_key }))
 }
 

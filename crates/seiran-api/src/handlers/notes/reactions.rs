@@ -1,7 +1,6 @@
 use super::*;
 use validation::{validate_reaction_content, ReactionContent};
 
-
 /// よく使う絵文字ピッカーで表示する候補数の上限。
 const FREQUENT_REACTIONS_LIMIT: i64 = 24;
 

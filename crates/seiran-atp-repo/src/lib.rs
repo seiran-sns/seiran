@@ -7,8 +7,8 @@
 
 use std::sync::Arc;
 
-use seiran_common::traits::JobQueue;
 use seiran_common::StreamHub;
+use seiran_common::traits::JobQueue;
 use sqlx::PgPool;
 
 pub mod bsky_block_watch;

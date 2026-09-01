@@ -16,7 +16,10 @@ use crate::AppState;
 /// どちらも未設定時は 404（ブラウザは既定アイコンにフォールバックする）。
 pub async fn favicon(State(state): State<AppState>) -> Response {
     let settings = state.site_settings.get_all().await.unwrap_or_default();
-    let sha256 = settings.get("site_icon_sha256").cloned().unwrap_or_default();
+    let sha256 = settings
+        .get("site_icon_sha256")
+        .cloned()
+        .unwrap_or_default();
     if !sha256.is_empty() {
         return Redirect::temporary(&format!("/api/site-icon/{sha256}/32")).into_response();
     }
