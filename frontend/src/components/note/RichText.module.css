@@ -10,6 +10,13 @@
   text-decoration: underline;
 }
 
+.pre {
+  /* ブラウザ既定のpre要素は white-space: pre のため、長い一行がラップされず右端を
+   * 突き抜けてしまう（マイケル指摘）。親.bodyと同じpre-wrap+break-wordに揃える。 */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .blockquote {
   /* ブラウザ既定のインデント（margin: 1em 40px）だと引用に見えづらいため、
    * 左ボーダーで引用であることを示す方式に変える（マイケル指摘）。 */

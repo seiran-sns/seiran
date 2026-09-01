@@ -115,7 +115,7 @@ function renderNode(node: ChildNode, keyPrefix: string, emojis?: Record<string, 
 
   if (STYLE_ATTR_TAGS.has(tag)) {
     const style = textAlignFromStyleAttr(el.getAttribute("style"));
-    const className = tag === "blockquote" ? styles.blockquote : undefined;
+    const className = tag === "blockquote" ? styles.blockquote : tag === "pre" ? styles.pre : undefined;
     return createElement(tag, { key: keyPrefix, style, className }, ...children);
   }
 
