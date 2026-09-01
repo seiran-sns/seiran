@@ -30,6 +30,7 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
   const [open, setOpen] = useState(false);
   const [showContent, setShowContent] = useState(false);
   const [fixedStyle, setFixedStyle] = useState<CSSProperties | null>(null);
+  const [effectiveSide, setEffectiveSide] = useState<"bottom" | "left">(side);
   const fetchedRef = useRef(false);
   const timerRef = useRef<number | null>(null);
   const wrapRef = useRef<HTMLSpanElement>(null);
@@ -56,13 +57,26 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
     // トリガー要素の実測座標を使って画面基準で配置することでこれを回避する。
     if (side === "left" && wrapRef.current) {
       const rect = wrapRef.current.getBoundingClientRect();
-      setFixedStyle({
-        position: "fixed",
-        top: rect.top + rect.height / 2,
-        right: window.innerWidth - rect.left + 10,
-        left: "auto",
-        transform: "translateY(-50%)",
-      });
+      const POPUP_WIDTH = 320;
+      const GAP = 10;
+      const VIEWPORT_MARGIN = 8;
+      // スマホ幅では通知アイテムが画面幅いっぱいに近く、左側にpopup分の余白が
+      // 無い。その状態でもleft側の計算式のまま出すと、popupの大部分が画面外
+      // （負のX座標）に飛び出して見えなくなる（実機確認済みの回帰）。左に
+      // 十分な余白がない場合はアイテム下へフォールバックする。
+      if (rect.left - GAP - POPUP_WIDTH >= VIEWPORT_MARGIN) {
+        setEffectiveSide("left");
+        setFixedStyle({
+          position: "fixed",
+          top: rect.top + rect.height / 2,
+          right: window.innerWidth - rect.left + GAP,
+          left: "auto",
+          transform: "translateY(-50%)",
+        });
+      } else {
+        setEffectiveSide("bottom");
+        setFixedStyle(null);
+      }
     }
     setOpen(true);
   }
@@ -82,8 +96,8 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
       {children}
       {open && (
         <span
-          className={side === "left" ? `${styles.popup} ${styles.popupLeft}` : styles.popup}
-          style={side === "left" && fixedStyle ? fixedStyle : undefined}
+          className={effectiveSide === "left" ? `${styles.popup} ${styles.popupLeft}` : styles.popup}
+          style={effectiveSide === "left" && fixedStyle ? fixedStyle : undefined}
         >
           {loading && <span className={styles.dim}>{t("common:loading")}</span>}
           {failed && <span className={styles.dim}>{t("home:replyIndicator.fetchFailed")}</span>}
