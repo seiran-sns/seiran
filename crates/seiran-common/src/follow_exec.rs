@@ -353,11 +353,31 @@ async fn follow_fedi(
 
     check_not_blocked(config, local_actor_id, remote_actor_id).await?;
 
-    let inserted = config
-        .follows
-        .upsert_pending(local_actor_id, remote_actor_id)
-        .await
-        .map_err(|e| FollowError::Internal(format!("[follow/fedi] follows INSERT 失敗: {}", e)))?;
+    // 本家Misskey準拠: 相手が鍵アカウント（manuallyApprovesFollowers）でなければ、
+    // Follow送信と同時にDB上は即座にacceptedとして確定する（相手サーバーのAccept返信を
+    // 待たない楽観的確定）。実機確認済みのAria不具合対策: pendingのまま留まると、Aria側は
+    // フォロー操作後に一度だけ（1秒後）再取得してボタン状態を更新する設計のため、Accept受信
+    // まで「処理中」表示に固まって見える（実際のフォロー成立自体は待たずに反映すべき）。
+    // 鍵アカウント宛は従来通りpendingのままAccept受信を待つ。
+    let is_locked = remote_ap.manually_approves_followers;
+    let inserted = if is_locked {
+        config
+            .follows
+            .upsert_pending(local_actor_id, remote_actor_id)
+            .await
+            .map_err(|e| {
+                FollowError::Internal(format!("[follow/fedi] follows INSERT 失敗: {}", e))
+            })?
+    } else {
+        config
+            .follows
+            .insert_accepted(local_actor_id, remote_actor_id)
+            .await
+            .map_err(|e| {
+                FollowError::Internal(format!("[follow/fedi] follows INSERT 失敗: {}", e))
+            })?;
+        true
+    };
 
     let local_actor_uri = format!("https://{}/users/{}", config.local_domain, local_username);
     let actor_key_id = format!("{}#main-key", local_actor_uri);
@@ -391,16 +411,27 @@ async fn follow_fedi(
             FollowError::BadGateway(format!("Follow 送信失敗: {}", e))
         })?;
 
-    tracing::info!(
-        "[follow/fedi] {} → {} Follow 送信完了 (pending)",
-        local_actor_uri,
-        target_uri
-    );
-
-    Ok(FollowOutcome::Pending {
-        target_uri,
-        already_following: !inserted,
-    })
+    if is_locked {
+        tracing::info!(
+            "[follow/fedi] {} → {} Follow 送信完了 (pending, 鍵アカウント)",
+            local_actor_uri,
+            target_uri
+        );
+        Ok(FollowOutcome::Pending {
+            target_uri,
+            already_following: !inserted,
+        })
+    } else {
+        tracing::info!(
+            "[follow/fedi] {} → {} Follow 送信完了 (accepted, 楽観的確定)",
+            local_actor_uri,
+            target_uri
+        );
+        Ok(FollowOutcome::Accepted {
+            target_uri,
+            already_following: !inserted,
+        })
+    }
 }
 
 /// `@alice@mastodon.social` または `https://...` 形式のターゲットを Actor URI に解決する

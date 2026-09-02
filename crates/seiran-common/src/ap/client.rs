@@ -116,6 +116,10 @@ pub struct ApActor {
         deserialize_with = "deserialize_string_or_vec"
     )]
     pub also_known_as: Vec<String>,
+    /// 鍵アカウント（フォロー承認制）かどうか。フィールド自体が省略された場合は
+    /// `false`（非鍵アカウント）として扱う（AS2の一般的な省略時解釈）。
+    #[serde(rename = "manuallyApprovesFollowers", default)]
+    pub manually_approves_followers: bool,
 }
 
 /// AS2の`alsoKnownAs`等、実装により単一文字列/配列のどちらでも来うるフィールド用の
@@ -812,6 +816,27 @@ mod tests {
             actor.emoji_map()[":blobcat:"],
             "https://example.com/blobcat.png"
         );
+    }
+
+    #[test]
+    fn ap_actor_manually_approves_followers_defaults_to_false_when_absent() {
+        let actor: ApActor = serde_json::from_value(serde_json::json!({
+            "id": "https://example.com/users/alice",
+            "type": "Person"
+        }))
+        .unwrap();
+        assert!(!actor.manually_approves_followers);
+    }
+
+    #[test]
+    fn ap_actor_manually_approves_followers_reflects_true() {
+        let actor: ApActor = serde_json::from_value(serde_json::json!({
+            "id": "https://example.com/users/alice",
+            "type": "Person",
+            "manuallyApprovesFollowers": true
+        }))
+        .unwrap();
+        assert!(actor.manually_approves_followers);
     }
 
     // ─── classify_ap_visibility ────────────────────────────────────────────

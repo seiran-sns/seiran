@@ -877,8 +877,13 @@ pub fn router(state: AppState) -> Router {
             "/api/avatars/:actor_id",
             get(handlers::avatar::fallback_avatar),
         )
-        // Misskey互換メディアプロキシ（リモート画像のCORS回避、SSRF防止付き）
+        // Misskey互換メディアプロキシ（リモート画像のCORS回避、SSRF防止付き）。
+        // 本家Misskeyの `/proxy/:url*` は末尾に出力フォーマットのヒント（例: `image.webp`）を
+        // パスセグメントとして付与できる仕様で、Aria等はこれを使い `{mediaProxyUrl}/image.webp?url=...`
+        // という形式でリクエストする（実機で確認済み）。seiranは`url`クエリパラメータのみで画像を
+        // 解決するため、末尾のパスセグメントは無視してよい（フォーマット変換自体は行わない）。
         .route("/proxy", get(handlers::media_proxy::proxy))
+        .route("/proxy/*rest", get(handlers::media_proxy::proxy))
         // セットアップ（初回管理者作成）
         .route("/api/setup/status", get(handlers::setup::setup_status))
         .route("/api/setup", post(handlers::setup::setup))

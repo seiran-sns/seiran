@@ -124,6 +124,11 @@ export function startStubFediServer(port = 0): Promise<StubFediServer> {
         name: "E2E Fedi Bot",
         inbox: stub.inboxUrl,
         publicKey: { id: `${stub.actorUri}#main-key`, owner: stub.actorUri, publicKeyPem: publicKey },
+        // 鍵アカウントとして振る舞わせる。非鍵アカウントは本家Misskey準拠でFollow送信と
+        // 同時に即座にacceptedへ確定するようになったため（follow_exec.rsのfollow_fedi）、
+        // このスタブが検証したい「pending→Accept受信でacceptedへ切り替わる」フローを
+        // 再現するには相手が鍵アカウントである必要がある。
+        manuallyApprovesFollowers: true,
       };
       res.writeHead(200, { "content-type": "application/activity+json" }).end(JSON.stringify(doc));
       return;

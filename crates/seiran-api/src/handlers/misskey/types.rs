@@ -55,6 +55,33 @@ pub struct MisskeyUserDetailed {
     /// （実機で確認済み。値自体は正しく集計されているのに表示されない不具合の原因）。
     pub followers_visibility: String,
     pub following_visibility: String,
+    /// 閲覧者との関係情報。`viewer_actor_id` が解決できる場合（ログイン済み）のみ `Some`。
+    /// `None` の場合 `#[serde(flatten)]` によりJSON上 `isFollowing` 等のキー自体が現れず、
+    /// misskey_dart の `UserDetailed.fromJson` はこれを見て `UserDetailedNotMe`
+    /// （関係情報なし）としてパースする（`isFollowing` キーの有無で分岐、値のnull/非nullでは
+    /// ない）。詳細は `MisskeyUserRelations` のコメント参照。
+    #[serde(flatten)]
+    pub relations: Option<MisskeyUserRelations>,
+}
+
+/// `UserDetailedNotMeWithRelations`（本家Misskey）の関係情報部分。misskey_dart側は
+/// これらを `required bool` として直接キャストするため、`isFollowing` キーが存在する
+/// 場合は値が `null` であってはならない（`MisskeyDriveFile` 等と同種の non-nullable
+/// 直接キャスト問題）。`hasPendingFollowRequestToYou` は常に `false`（seiranはローカル
+/// アカウントの鍵アカウント機能自体を持たず、ローカルviewerへの受信フォローは常に
+/// 即accepted。「pending」が発生しうるのは自分からリモート鍵アカウントへ申請中の
+/// ケースのみ＝`hasPendingFollowRequestFromYou`側）。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyUserRelations {
+    pub is_following: bool,
+    pub is_followed: bool,
+    pub has_pending_follow_request_from_you: bool,
+    pub has_pending_follow_request_to_you: bool,
+    pub is_blocking: bool,
+    pub is_blocked: bool,
+    pub is_muted: bool,
+    pub is_renote_muted: bool,
 }
 
 /// `/api/i`（自分自身）専用のレスポンス型。`UserDetailedNotMe` を返す `/api/users/show` とは
@@ -112,7 +139,8 @@ pub struct MisskeyNote {
     pub id: String,
     pub created_at: String,
     pub text: Option<String>,
-    /// Content Warning。seiran は CW 未対応のため常に `null`。
+    /// Content Warning。`posts.content_warning` をそのまま返す（プレーンリポストは通常CWを
+    /// 持たないため `None` のまま）。
     pub cw: Option<String>,
     pub user_id: String,
     pub user: MisskeyUserLite,
@@ -139,9 +167,14 @@ pub struct MisskeyNote {
     /// リノート元/引用元ノートの本体。`renoteId` はあるがこれが `null` のままだと、
     /// `misskey_dart` 等のクライアントは元ノートを解決できず「削除されたノート」の
     /// プレースホルダーを描画する（実機で確認済み）。孫リノート（リノートのリノート）は
-    /// 埋め込まない（`embed_renotes` 参照、無限再帰・多段フェッチを避けるため）。
+    /// 埋め込まない（`embed_referenced_notes` 参照、無限再帰・多段フェッチを避けるため）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub renote: Option<Box<MisskeyNote>>,
+    /// 返信先ノートの本体。`replyId` はあるがこれが `null` のままだと、`renote` と同様に
+    /// クライアントが「削除されたノート」のプレースホルダーを描画する（実機で確認済み）。
+    /// 孫リプライ（返信先の、さらにその返信先）は埋め込まない。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply: Option<Box<MisskeyNote>>,
     pub renote_count: i64,
     pub replies_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -243,6 +276,7 @@ mod tests {
                 following_count: 0,
                 followers_visibility: "public".to_owned(),
                 following_visibility: "public".to_owned(),
+                relations: None,
             },
             is_moderator: false,
             is_admin: false,
@@ -272,6 +306,91 @@ mod tests {
                 "必須フィールド `{key}` が欠けているか null です（misskey_dart 側で TypeError の原因になる）"
             );
         }
+    }
+
+    fn base_user_detailed(relations: Option<MisskeyUserRelations>) -> MisskeyUserDetailed {
+        MisskeyUserDetailed {
+            lite: MisskeyUserLite {
+                id: "1".to_owned(),
+                username: "alice".to_owned(),
+                host: None,
+                name: None,
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                emojis: BTreeMap::new(),
+                instance: None,
+            },
+            created_at: "2026-01-01T00:00:00+00:00".to_owned(),
+            description: None,
+            banner_url: None,
+            is_locked: false,
+            is_silenced: false,
+            is_suspended: false,
+            notes_count: 0,
+            followers_count: 0,
+            following_count: 0,
+            followers_visibility: "public".to_owned(),
+            following_visibility: "public".to_owned(),
+            relations,
+        }
+    }
+
+    /// `relations: None`（未ログイン等でviewerが解決できない場合）は、`isFollowing` 等の
+    /// キー自体がJSON上に一切現れないこと（misskey_dart はキーの有無で
+    /// `UserDetailedNotMe`/`UserDetailedNotMeWithRelations` を分岐するため）。
+    #[test]
+    fn user_detailed_omits_relation_keys_when_relations_is_none() {
+        let value = serde_json::to_value(base_user_detailed(None)).unwrap();
+        for key in [
+            "isFollowing",
+            "isFollowed",
+            "hasPendingFollowRequestFromYou",
+            "hasPendingFollowRequestToYou",
+            "isBlocking",
+            "isBlocked",
+            "isMuted",
+            "isRenoteMuted",
+        ] {
+            assert!(
+                value.get(key).is_none(),
+                "relations が None の時は `{key}` キー自体が存在してはならない"
+            );
+        }
+    }
+
+    /// `relations: Some(...)` の時は `isFollowing` 等がフラットに展開され、かつ
+    /// non-nullable bool として（null にならず）出力されること。
+    #[test]
+    fn user_detailed_flattens_relation_keys_when_relations_is_some() {
+        let relations = MisskeyUserRelations {
+            is_following: true,
+            is_followed: false,
+            has_pending_follow_request_from_you: false,
+            has_pending_follow_request_to_you: false,
+            is_blocking: false,
+            is_blocked: false,
+            is_muted: false,
+            is_renote_muted: false,
+        };
+        let value = serde_json::to_value(base_user_detailed(Some(relations))).unwrap();
+        assert_eq!(value.get("isFollowing"), Some(&serde_json::json!(true)));
+        for key in [
+            "isFollowed",
+            "hasPendingFollowRequestFromYou",
+            "hasPendingFollowRequestToYou",
+            "isBlocking",
+            "isBlocked",
+            "isMuted",
+            "isRenoteMuted",
+        ] {
+            assert!(
+                value.get(key).is_some_and(|v| v.is_boolean()),
+                "relations が Some の時は `{key}` が non-null な bool でなければならない"
+            );
+        }
+        // ネストしたオブジェクトとしてではなく、親レベルにフラットに展開されていること。
+        assert!(value.get("relations").is_none());
     }
 
     /// Aria が固定している `misskey_dart` の `Following.fromJson` は、関連先の詳細が

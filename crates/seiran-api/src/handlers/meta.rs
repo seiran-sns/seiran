@@ -39,6 +39,19 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
     // 値は `/api/emojis` および `notes/create` の実際のバリデーションと同じソースを使う。
     let emojis = fetch_public_emojis(&state.db).await;
 
+    // 外部プロキシ未設定時は自インスタンスの `/proxy`（SSRF対策済み、`GET /proxy?url=...`）に
+    // フォールバックする（本家Misskeyの慣行）。空文字列のまま返すと、Aria等のクライアントが
+    // `{mediaProxyUrl}/image.webp?url=...` という形式でURLを組み立てる際に不正なURLになり、
+    // リモートインスタンスアイコン等の画像取得が軒並み失敗する（実機で確認済み）。
+    let media_proxy_url = {
+        let v = get("media_proxy_url");
+        if v.is_empty() {
+            format!("https://{}/proxy", state.local_domain)
+        } else {
+            v
+        }
+    };
+
     Json(json!({
         "uri": format!("https://{}", state.local_domain),
         "name": site_name,
@@ -51,7 +64,7 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
         "turnstileSiteKey": get("turnstile_site_key"),
         "siteColor": get("site_color"),
         "siteIconUrl": get("site_icon_url"),
-        "mediaProxyUrl": get("media_proxy_url"),
+        "mediaProxyUrl": media_proxy_url,
         "internalMediaOrigins": internal_media_origins,
         "emojis": emojis,
         // Bsky 配信時の書記素クラスタ上限（validate_text_length と同じ値）。

@@ -70,6 +70,16 @@ pub trait FollowRepository: Send + Sync {
         candidate_ids: &[i64],
     ) -> Result<HashMap<i64, String>, sqlx::Error>;
 
+    /// `target_actor_id` へフォロー中/フォロー申請中の `candidate_follower_ids` の
+    /// follow status を一括取得する（未フォローのIDは結果に含まれない）。`isFollowed`
+    /// （相手が自分をフォローしているか）をMisskey互換APIでN+1なしに算出するために使う。
+    /// `find_statuses_among` と逆方向。
+    async fn find_statuses_by_followers_among(
+        &self,
+        target_actor_id: i64,
+        candidate_follower_ids: &[i64],
+    ) -> Result<HashMap<i64, String>, sqlx::Error>;
+
     /// ATP フォロー完了後に accepted で挿入する（rkey を保存）。
     /// 新規に挿入した場合は true、既にフォロー済みだった場合は false を返す。
     async fn insert_accepted_bsky(
@@ -201,6 +211,22 @@ impl FollowRepository for PgFollowRepository {
         )
         .bind(follower_actor_id)
         .bind(candidate_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
+    async fn find_statuses_by_followers_among(
+        &self,
+        target_actor_id: i64,
+        candidate_follower_ids: &[i64],
+    ) -> Result<HashMap<i64, String>, sqlx::Error> {
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT follower_actor_id, status FROM follows
+             WHERE target_actor_id = $1 AND follower_actor_id = ANY($2)",
+        )
+        .bind(target_actor_id)
+        .bind(candidate_follower_ids)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().collect())

@@ -62,7 +62,7 @@ use super::convert::{
 };
 use super::types::{
     MisskeyFollowRelation, MisskeyMeDetailed, MisskeyNote, MisskeyNoteReaction,
-    MisskeyNotification, MisskeyUserDetailed,
+    MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite,
 };
 
 // ─── リクエストDTO（Misskey 本家の camelCase フィールド名に合わせる） ──────────
@@ -343,9 +343,11 @@ pub async fn api_i(
 
 /// POST /api/users/show
 pub async fn users_show(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(body): Json<UserShowBody>,
 ) -> Result<Json<MisskeyUserDetailed>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
     let actor = if let Some(uid) = body.user_id {
         let id: i64 = uid
             .parse()
@@ -365,7 +367,7 @@ pub async fn users_show(
     .map_err(|e| ApiError::Internal(e.to_string()))?
     .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
 
-    Ok(Json(build_user_detailed(&state, &actor).await))
+    Ok(Json(build_user_detailed(&state, &actor, my_actor_id).await))
 }
 
 /// POST /api/users/notes — プロフィール画面のノートタブ（Aria等）。
@@ -675,12 +677,15 @@ pub async fn following_create(
     };
     let resp = crate::handlers::follows::create_follow(
         user,
-        State(state),
+        State(state.clone()),
         Json(CreateFollowRequest { target }),
     )
     .await
     .into_response();
-    as_no_content(resp)
+    if !resp.status().is_success() {
+        return resp;
+    }
+    misskey_user_lite_response(&state, actor_id).await
 }
 
 /// POST /api/following/delete
@@ -703,12 +708,31 @@ pub async fn following_delete(
     };
     let resp = crate::handlers::follows::delete_follow(
         user,
-        State(state),
+        State(state.clone()),
         Json(DeleteFollowRequest { target }),
     )
     .await
     .into_response();
-    as_no_content(resp)
+    if !resp.status().is_success() {
+        return resp;
+    }
+    misskey_user_lite_response(&state, actor_id).await
+}
+
+/// `following/create`・`following/delete`成功時に返す`UserLite`。本家Misskeyはこれらを
+/// 204ではなく対象ユーザーの`UserLite`で応答する仕様で、misskey_dartの
+/// `MisskeyFollowing.create`/`delete`は`post<Map<String, dynamic>>`で直接キャストする
+/// （204 No Contentのまま返すと、空ボディがJSONデコードで文字列扱いになり
+/// `type 'String' is not a subtype of type 'FutureOr<Map<String, dynamic>>'`で
+/// クライアント側が例外落ちする。実機確認済み）。
+async fn misskey_user_lite_response(state: &AppState, actor_id: i64) -> Response {
+    match state.actors.find_by_id(actor_id).await {
+        Ok(Some(actor)) => {
+            let lite: MisskeyUserLite = build_user_detailed(state, &actor, None).await.lite;
+            Json(lite).into_response()
+        }
+        _ => StatusCode::NO_CONTENT.into_response(),
+    }
 }
 
 /// POST /api/users/following — 指定ユーザーのフォロー中一覧（Misskey互換、#81）。
@@ -743,8 +767,12 @@ pub async fn users_following(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let actor_by_id: HashMap<i64, Actor> = actors.into_iter().map(|a| (a.id, a)).collect();
-    let mut detailed_by_id =
-        build_users_detailed(&state, &actor_by_id.values().cloned().collect::<Vec<_>>()).await;
+    let mut detailed_by_id = build_users_detailed(
+        &state,
+        &actor_by_id.values().cloned().collect::<Vec<_>>(),
+        my_actor_id,
+    )
+    .await;
 
     let mut relations = Vec::with_capacity(rows.len());
     for r in rows {
@@ -793,8 +821,12 @@ pub async fn users_followers(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let actor_by_id: HashMap<i64, Actor> = actors.into_iter().map(|a| (a.id, a)).collect();
-    let mut detailed_by_id =
-        build_users_detailed(&state, &actor_by_id.values().cloned().collect::<Vec<_>>()).await;
+    let mut detailed_by_id = build_users_detailed(
+        &state,
+        &actor_by_id.values().cloned().collect::<Vec<_>>(),
+        my_actor_id,
+    )
+    .await;
 
     let mut relations = Vec::with_capacity(rows.len());
     for r in rows {

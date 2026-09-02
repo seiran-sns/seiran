@@ -155,3 +155,43 @@ async fn delete_by_actors_on_nonexistent_relation_is_a_no_op() {
 
     cleanup_test_actors(&pool, follower_id, target_id).await;
 }
+
+/// `find_statuses_by_followers_among`（`find_statuses_among`の逆方向、Misskey互換API
+/// `isFollowed`算出用）の往復動作を検証する。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn find_statuses_by_followers_among_returns_reverse_direction_statuses() {
+    let pool = test_db_pool().await;
+    let (follower_id, target_id) = create_test_actor_pair(&pool, "reverse_statuses").await;
+    let repo = PgFollowRepository::new(pool.clone());
+
+    // フォロー関係が無ければ結果に含まれない。
+    let statuses = repo
+        .find_statuses_by_followers_among(target_id, &[follower_id])
+        .await
+        .unwrap();
+    assert!(statuses.is_empty());
+
+    repo.upsert_pending(follower_id, target_id).await.unwrap();
+    let statuses = repo
+        .find_statuses_by_followers_among(target_id, &[follower_id])
+        .await
+        .unwrap();
+    assert_eq!(statuses.get(&follower_id).map(String::as_str), Some("pending"));
+
+    repo.accept(follower_id, target_id).await.unwrap();
+    let statuses = repo
+        .find_statuses_by_followers_among(target_id, &[follower_id])
+        .await
+        .unwrap();
+    assert_eq!(statuses.get(&follower_id).map(String::as_str), Some("accepted"));
+
+    // 方向を間違えると（target視点ではなくfollower視点）ヒットしないことも確認する。
+    let wrong_direction = repo
+        .find_statuses_by_followers_among(follower_id, &[target_id])
+        .await
+        .unwrap();
+    assert!(wrong_direction.is_empty());
+
+    cleanup_test_actors(&pool, follower_id, target_id).await;
+}

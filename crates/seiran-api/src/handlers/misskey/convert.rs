@@ -18,7 +18,7 @@ use crate::AppState;
 
 use super::types::{
     MisskeyDriveFile, MisskeyDriveFileProperties, MisskeyMeDetailed, MisskeyNote,
-    MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite,
+    MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite, MisskeyUserRelations,
 };
 
 /// `is_local`は`actors.actor_type == "local"`（呼び出し元が`Actor`/`TimelinePost`等の
@@ -55,9 +55,14 @@ pub fn user_lite(
 /// 自分自身 (`/api/i`) または他者 (`/api/users/show`) の `UserDetailed` を組み立てる。
 /// 単一アクター用。一覧（`users/following`・`users/followers`等）で複数アクター分を
 /// 組み立てる場合は、アクターごとに4クエリ発行するN+1を避けるため`build_users_detailed`
-/// を使うこと。
-pub async fn build_user_detailed(state: &AppState, actor: &Actor) -> MisskeyUserDetailed {
-    let mut map = build_users_detailed(state, std::slice::from_ref(actor)).await;
+/// を使うこと。`viewer_actor_id` はログイン中の閲覧者（`None`なら未ログインまたは
+/// 自分自身専用エンドポイント`/api/i`用途、この場合`isFollowing`等のキー自体を省略する）。
+pub async fn build_user_detailed(
+    state: &AppState,
+    actor: &Actor,
+    viewer_actor_id: Option<i64>,
+) -> MisskeyUserDetailed {
+    let mut map = build_users_detailed(state, std::slice::from_ref(actor), viewer_actor_id).await;
     map.remove(&actor.id).unwrap_or_else(|| {
         // 通常到達しない（アクター自身の行を渡しているため）。バッチクエリが
         // 何らかの理由で行を返さなかった場合のフォールバック。
@@ -84,6 +89,7 @@ pub async fn build_user_detailed(state: &AppState, actor: &Actor) -> MisskeyUser
             following_count: 0,
             followers_visibility: "public".to_string(),
             following_visibility: "public".to_string(),
+            relations: None,
         }
     })
 }
@@ -92,15 +98,57 @@ pub async fn build_user_detailed(state: &AppState, actor: &Actor) -> MisskeyUser
 /// 投稿数・フォロワー数・フォロー数をそれぞれ1クエリ（計4クエリ）で取得する。
 /// `users/following`・`users/followers`のような一覧系エンドポイントで、アクター件数分
 /// クエリが増えるN+1を避けるために使う。戻り値は`actor.id`をキーとするマップ
-/// （入力の順序は保持しない。呼び出し側で元の順序に並べ直すこと）。
+/// （入力の順序は保持しない。呼び出し側で元の順序に並べ直すこと）。`viewer_actor_id`は
+/// `build_user_detailed`と同じ意味（`Some`の場合のみ`relations`一括計算を行う）。
 pub async fn build_users_detailed(
     state: &AppState,
     actors: &[Actor],
+    viewer_actor_id: Option<i64>,
 ) -> HashMap<i64, MisskeyUserDetailed> {
     if actors.is_empty() {
         return HashMap::new();
     }
     let ids: Vec<i64> = actors.iter().map(|a| a.id).collect();
+
+    // 閲覧者との関係情報（isFollowing/isFollowed/isBlocking/isBlocked/isMuted/
+    // isRenoteMuted）。viewer_actor_id が無ければ一切計算せず relations は常に None。
+    let relations_by_id: HashMap<i64, MisskeyUserRelations> = match viewer_actor_id {
+        Some(vid) => {
+            let (fwd, rev, blocks, muted, renote_muted) = tokio::join!(
+                state.follows.find_statuses_among(vid, &ids),
+                state.follows.find_statuses_by_followers_among(vid, &ids),
+                state.blocks.find_relationships_among(vid, &ids),
+                state.mutes.list_muted_among(vid, &ids),
+                state.repost_mutes.list_muted_among(vid, &ids),
+            );
+            let fwd = fwd.unwrap_or_default();
+            let rev = rev.unwrap_or_default();
+            let blocks = blocks.unwrap_or_default();
+            let muted = muted.unwrap_or_default();
+            let renote_muted = renote_muted.unwrap_or_default();
+            ids.iter()
+                .map(|&id| {
+                    let fwd_status = fwd.get(&id).map(String::as_str);
+                    let (is_blocking, is_blocked) =
+                        blocks.get(&id).copied().unwrap_or((false, false));
+                    (
+                        id,
+                        MisskeyUserRelations {
+                            is_following: fwd_status == Some("accepted"),
+                            is_followed: rev.get(&id).map(String::as_str) == Some("accepted"),
+                            has_pending_follow_request_from_you: fwd_status == Some("pending"),
+                            has_pending_follow_request_to_you: false,
+                            is_blocking,
+                            is_blocked,
+                            is_muted: muted.contains(&id),
+                            is_renote_muted: renote_muted.contains(&id),
+                        },
+                    )
+                })
+                .collect()
+        }
+        None => HashMap::new(),
+    };
 
     // notes_count/followers_count/following_countはactorsの非正規化カラムを読む
     // （書き込みはrepository/post.rs・repository/follow.rsでのみ行う、唯一の真実の情報源。
@@ -159,6 +207,7 @@ pub async fn build_users_detailed(
                 following_count,
                 followers_visibility: "public".to_string(),
                 following_visibility: "public".to_string(),
+                relations: relations_by_id.get(&actor.id).cloned(),
             };
             (actor.id, detailed)
         })
@@ -166,8 +215,10 @@ pub async fn build_users_detailed(
 }
 
 /// `/api/i` 用（`MisskeyMeDetailed`）。`build_user_detailed` に自分専用フィールドを足す。
+/// 本家Misskeyの`MeDetailed`に`isFollowing`等の関係フィールドは存在しないため、常に
+/// `viewer_actor_id: None`で呼び`relations`をJSON上省略させる。
 pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDetailed {
-    let detailed = build_user_detailed(state, actor).await;
+    let detailed = build_user_detailed(state, actor, None).await;
 
     let role = match actor.user_id {
         Some(uid) => state
@@ -259,7 +310,7 @@ fn to_misskey_note(
             file_type: a.mime_type.clone(),
             md5: a.sha256.clone().unwrap_or_default(),
             size: a.size.unwrap_or(0),
-            is_sensitive: false,
+            is_sensitive: a.is_sensitive,
             properties: MisskeyDriveFileProperties {
                 width: (a.width > 0).then_some(a.width),
                 height: (a.height > 0).then_some(a.height),
@@ -331,7 +382,7 @@ fn to_misskey_note(
         } else {
             Some(p.body.clone())
         },
-        cw: None,
+        cw: p.content_warning.clone(),
         user_id: user.id.clone(),
         user,
         reply_id: p.reply_to_post_id.map(|i| i.to_string()),
@@ -347,6 +398,7 @@ fn to_misskey_note(
         reactions: reactions_map,
         reaction_emojis,
         renote: None,
+        reply: None,
         renote_count,
         replies_count,
         uri,
@@ -355,17 +407,18 @@ fn to_misskey_note(
     }
 }
 
-/// `renoteId` を持つノートへ、リノート元/引用元ノート本体を埋め込む（型定義の
-/// `MisskeyNote::renote` コメント参照）。`handlers::notes::queries::embed_renotes`
-/// （カスタムAPI側、#45で対応済み）と同じ可視性フィルタ・一括フェッチ方針を踏襲する。
-/// 埋め込むノート自身の `renote` は常に `None`（孫リノートは埋め込まない）。
-async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id: Option<i64>) {
-    let orig_ids: Vec<i64> = notes
-        .iter()
-        .filter_map(|n| n.renote_id.as_deref().and_then(|s| s.parse::<i64>().ok()))
-        .collect();
-    if orig_ids.is_empty() {
-        return;
+/// `renoteId`/`replyId` が指す先のノート本体をまとめて取得し、id → `MisskeyNote` のマップを
+/// 返す。`embed_referenced_notes` から、renote対象・reply対象の両方から集めたID集合を渡して
+/// 呼ぶことで、同じノートが両方の対象になるケースでもDB往復・変換を1回に抑える。
+/// `handlers::notes::queries::embed_renotes`（カスタムAPI側、#45で対応済み）と同じ可視性
+/// フィルタ・一括フェッチ方針を踏襲する。
+async fn fetch_referenced_notes(
+    state: &AppState,
+    ids: &[i64],
+    my_actor_id: Option<i64>,
+) -> HashMap<i64, MisskeyNote> {
+    if ids.is_empty() {
+        return HashMap::new();
     }
 
     let mut rows = sqlx::query_as::<_, TimelinePost>(
@@ -373,6 +426,7 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
                 a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                 COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                 p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
+                p.content_warning,
                 p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
                 p.reply_count, p.repost_count
          FROM posts p JOIN actors a ON a.id = p.actor_id
@@ -388,28 +442,26 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
                )
            )",
     )
-    .bind(&orig_ids)
+    .bind(ids)
     .bind(my_actor_id)
     .fetch_all(&state.db)
     .await
     .unwrap_or_default();
     resolve_mention_facets_in_place(&state.db, &mut rows).await;
 
-    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
-    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
-    let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
+    let row_ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+    let mut att_map = fetch_attachments_map(&state.db, &row_ids).await;
+    let rmap = fetch_reactions_map(&state.db, &row_ids, my_actor_id).await;
     let instance_cache = build_instance_cache(state, &rows).await;
 
-    let mut by_id: HashMap<i64, MisskeyNote> = HashMap::new();
-    for r in rows {
-        let id = r.id;
-        let atts = att_map.remove(&id).unwrap_or_default();
-        let reactions = rmap.get(&id).cloned().unwrap_or_default();
-        let rc = r.repost_count;
-        let pc = r.reply_count;
-        by_id.insert(
-            id,
-            to_misskey_note(
+    rows.into_iter()
+        .map(|r| {
+            let id = r.id;
+            let atts = att_map.remove(&id).unwrap_or_default();
+            let reactions = rmap.get(&id).cloned().unwrap_or_default();
+            let rc = r.repost_count;
+            let pc = r.reply_count;
+            let note = to_misskey_note(
                 &r,
                 &state.local_domain,
                 &atts,
@@ -417,9 +469,29 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
                 rc,
                 pc,
                 &instance_cache,
-            ),
-        );
+            );
+            (id, note)
+        })
+        .collect()
+}
+
+/// `renoteId`/`replyId` を持つノートへ、参照先ノート本体を埋め込む（型定義の
+/// `MisskeyNote::renote`/`MisskeyNote::reply` コメント参照）。埋め込むノート自身の
+/// `renote`/`reply` は常に `None`（孫リノート・孫リプライは埋め込まない）。
+async fn embed_referenced_notes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id: Option<i64>) {
+    let mut ids: Vec<i64> = notes
+        .iter()
+        .flat_map(|n| [n.renote_id.as_deref(), n.reply_id.as_deref()])
+        .flatten()
+        .filter_map(|s| s.parse::<i64>().ok())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.is_empty() {
+        return;
     }
+
+    let by_id = fetch_referenced_notes(state, &ids, my_actor_id).await;
 
     for note in notes.iter_mut() {
         if let Some(rid) = note
@@ -428,6 +500,13 @@ async fn embed_renotes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id:
             .and_then(|s| s.parse::<i64>().ok())
         {
             note.renote = by_id.get(&rid).cloned().map(Box::new);
+        }
+        if let Some(rid) = note
+            .reply_id
+            .as_deref()
+            .and_then(|s| s.parse::<i64>().ok())
+        {
+            note.reply = by_id.get(&rid).cloned().map(Box::new);
         }
     }
 }
@@ -464,7 +543,7 @@ pub async fn build_notes(
         })
         .collect();
 
-    embed_renotes(state, &mut notes, my_actor_id).await;
+    embed_referenced_notes(state, &mut notes, my_actor_id).await;
     notes
 }
 
@@ -560,7 +639,7 @@ pub async fn build_notifications(
     // "repost"（Misskey API では "renote"）通知の note_id は、本文を持たないリポストラッパー
     // 投稿自体を指す。Misskey本家（`NotificationEntityService#packInternal`）はこのラッパーを
     // 素朴に note pack するだけで、リポスト元の埋め込み（`note.renote`）は通常のノートpack処理
-    // （このファイル内 `embed_renotes`、SQLで可視性チェック済み）に任せている。ここでも同様に
+    // （このファイル内 `embed_referenced_notes`、SQLで可視性チェック済み）に任せている。ここでも同様に
     // ラッパー投稿自体には独自の可視性チェックをかけない（Fedi受信時はFollowers限定になりうるが、
     // 通知は既に受信者向けに絞られたエントリであり、ラッパーの可視性で note 全体を握りつぶすと
     // リポスト元が public でも `note`/`note.renote` の入れ子構造ごと壊れ、Misskey互換クライアント
@@ -674,6 +753,47 @@ mod tests {
             repost_of_ap_uri: None,
             repost_of_ref_status: None,
         }
+    }
+
+    #[test]
+    fn note_cw_reflects_content_warning() {
+        let mut p = base_post();
+        p.content_warning = Some("注意".to_string());
+
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
+
+        assert_eq!(note.cw.as_deref(), Some("注意"));
+    }
+
+    #[test]
+    fn note_cw_is_none_without_content_warning() {
+        let note = to_misskey_note(&base_post(), LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
+
+        assert_eq!(note.cw, None);
+    }
+
+    #[test]
+    fn note_files_reflect_is_sensitive() {
+        let p = base_post();
+        let attachment = crate::handlers::notes::dto::AttachmentResponse {
+            url: "https://example.com/a.png".to_string(),
+            mime_type: "image/png".to_string(),
+            width: 100,
+            height: 100,
+            thumbnail_url: None,
+            duration_ms: None,
+            sha256: None,
+            size: None,
+            media_created_at: None,
+            is_sensitive: true,
+            is_gif: false,
+            is_animated_image: false,
+        };
+
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[attachment], &[], 0, 0, &HashMap::new());
+
+        assert_eq!(note.files.len(), 1);
+        assert!(note.files[0].is_sensitive);
     }
 
     #[test]

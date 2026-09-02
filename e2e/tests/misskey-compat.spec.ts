@@ -141,6 +141,71 @@ test("Misskey互換API: リポストのnotes/showでrenoteに元ノート本体�
   expect(shown.renote.user.username).toBe(alice.username);
 });
 
+test("Misskey互換API: notes/showでreplyに返信先ノート本体が埋め込まれる（Aria非互換修正）", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2emkreplya");
+  const bob = await registerUserViaApi(request, "e2emkreplyb");
+
+  const originalText = `返信先ポスト ${Date.now()}`;
+  const createRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: originalText },
+  });
+  expect(createRes.ok(), `元投稿作成失敗: ${createRes.status()} ${await createRes.text()}`).toBeTruthy();
+  const original = await createRes.json();
+
+  const replyRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${bob.token}` },
+    data: { text: "返信本文", reply_to_id: original.id },
+  });
+  expect(replyRes.ok(), `返信作成失敗: ${replyRes.status()} ${await replyRes.text()}`).toBeTruthy();
+  const reply = await replyRes.json();
+
+  const showRes = await request.post("/api/notes/show", {
+    headers: { Authorization: `Bearer ${bob.token}` },
+    data: { noteId: reply.id },
+  });
+  expect(showRes.ok(), `notes/show失敗: ${showRes.status()} ${await showRes.text()}`).toBeTruthy();
+  const shown = await showRes.json();
+
+  expect(shown.replyId).toBe(String(original.id));
+  expect(shown.reply, "reply本体がnullのまま（削除されたノート表示の原因）").not.toBeNull();
+  expect(shown.reply.id).toBe(String(original.id));
+  expect(shown.reply.text).toBe(originalText);
+  expect(shown.reply.user.username).toBe(alice.username);
+});
+
+test("Misskey互換API: notes/showでCW付き投稿のcwが反映される（Aria非互換修正）", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2emkcwa");
+  const cwText = `閲覧注意 ${Date.now()}`;
+
+  const createRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: "本文", content_warning: cwText },
+  });
+  expect(createRes.ok(), `投稿作成失敗: ${createRes.status()} ${await createRes.text()}`).toBeTruthy();
+  const created = await createRes.json();
+
+  const showRes = await request.post("/api/notes/show", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { noteId: created.id },
+  });
+  expect(showRes.ok(), `notes/show失敗: ${showRes.status()} ${await showRes.text()}`).toBeTruthy();
+  const shown = await showRes.json();
+
+  expect(shown.cw).toBe(cwText);
+});
+
+test("Misskey互換API: metaのmediaProxyUrlが未設定時に自インスタンスの/proxyへフォールバックする（Aria非互換修正）", async ({
+  request,
+}) => {
+  const metaRes = await request.post("/api/meta", { data: {} });
+  expect(metaRes.ok(), await metaRes.text()).toBeTruthy();
+  const meta = await metaRes.json();
+
+  expect(meta.mediaProxyUrl, "mediaProxyUrlが空だとAriaのURL組み立てが壊れる").toBeTruthy();
+  expect(meta.mediaProxyUrl).toMatch(/\/proxy$/);
+});
+
 test("Misskey互換API: users/showのfollowersVisibility/followingVisibilityが常にpublic（#74）", async ({ request }) => {
   const alice = await registerUserViaApi(request, "e2emkvisa");
   const bob = await registerUserViaApi(request, "e2emkvisb");
