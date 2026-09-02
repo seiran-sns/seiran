@@ -2,7 +2,7 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use seiran_common::repository::parse_custom_emoji_shortcode;
+use seiran_common::repository::{format_local_reaction_content, parse_reaction_shortcode_and_host};
 
 use crate::error::ApiError;
 
@@ -131,10 +131,11 @@ pub enum ReactionContent {
 
 impl ReactionContent {
     /// DB (`reactions.content`) や AP activity の `content`/`_misskey_reaction` に保存する形式。
+    /// カスタム絵文字は本家Misskey準拠でローカル分は常に `:shortcode@.:`（ホスト `.`）を付与する。
     pub fn as_db_content(&self) -> String {
         match self {
             ReactionContent::Unicode(s) => s.clone(),
-            ReactionContent::Custom(shortcode) => format!(":{}:", shortcode),
+            ReactionContent::Custom(shortcode) => format_local_reaction_content(shortcode),
         }
     }
 }
@@ -151,7 +152,13 @@ pub fn validate_reaction_content(raw: &str) -> Result<ReactionContent, ApiError>
     if content.is_empty() {
         return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
     }
-    if let Some(shortcode) = parse_custom_emoji_shortcode(&content) {
+    if let Some((shortcode, host)) = parse_reaction_shortcode_and_host(&content) {
+        // ローカル入力（生の `:shortcode:`）と、既存チップの追いリアクション等でDBの正規形
+        // `:shortcode@.:` がそのまま渡ってくる経路の両方を受理する。リモートホスト付き
+        // （`:shortcode@remote.example:`）はローカル絵文字ピッカーからは選べないため拒否する。
+        if matches!(host, Some(h) if h != ".") {
+            return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
+        }
         if shortcode.graphemes(true).count() > MAX_CUSTOM_EMOJI_SHORTCODE_LEN {
             return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
         }
@@ -359,10 +366,27 @@ mod tests {
             validate_reaction_content(":smile:").unwrap(),
             ReactionContent::Custom("smile".to_string())
         );
+        // DB保存形式は本家Misskey準拠でローカルホスト `@.` を付与する。
         assert_eq!(
             ReactionContent::Custom("smile".to_string()).as_db_content(),
-            ":smile:"
+            ":smile@.:"
         );
+    }
+
+    #[test]
+    fn validate_reaction_content_accepts_local_host_suffix() {
+        // 既存チップの追いリアクション等でDBの正規形 `:shortcode@.:` がそのまま渡ってくる
+        // 経路にも対応する。
+        assert_eq!(
+            validate_reaction_content(":smile@.:").unwrap(),
+            ReactionContent::Custom("smile".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_reaction_content_rejects_remote_host_suffix() {
+        // ローカル絵文字ピッカーからはリモートホスト付きショートコードを選べないため拒否する。
+        assert!(validate_reaction_content(":smile@remote.example:").is_err());
     }
 
     #[test]

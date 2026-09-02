@@ -15,6 +15,45 @@ pub fn parse_custom_emoji_shortcode(s: &str) -> Option<&str> {
     Some(inner)
 }
 
+/// `:shortcode:` または `:shortcode@host:`（本家Misskey準拠、ローカルは `@.`）を分解する。
+/// shortcode部分の文字種は `parse_custom_emoji_shortcode` と揃える。host部分はドメイン名字句
+/// （英数字・`.`・`-`、ローカルを表す単独の `.` を含む）のみ許可する。
+/// `@` が無ければ `(shortcode, None)`（ホスト情報なし＝レガシーデータ or Unicode文脈外）を返す。
+pub fn parse_reaction_shortcode_and_host(s: &str) -> Option<(&str, Option<&str>)> {
+    let inner = s.strip_prefix(':')?.strip_suffix(':')?;
+    if inner.is_empty() {
+        return None;
+    }
+    match inner.split_once('@') {
+        Some((shortcode, host)) => {
+            let shortcode_ok =
+                !shortcode.is_empty() && shortcode.chars().all(|c| c.is_alphanumeric() || c == '_');
+            let host_ok =
+                !host.is_empty() && host.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-');
+            if !shortcode_ok || !host_ok {
+                return None;
+            }
+            Some((shortcode, Some(host)))
+        }
+        None => {
+            if !inner.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                return None;
+            }
+            Some((inner, None))
+        }
+    }
+}
+
+/// DB保存用のローカルリアクション正規形（`:shortcode@.:`）を組み立てる。
+pub fn format_local_reaction_content(shortcode: &str) -> String {
+    format!(":{shortcode}@.:")
+}
+
+/// DB保存用のリモートリアクション正規形（`:shortcode@{host}:`）を組み立てる。
+pub fn format_remote_reaction_content(shortcode: &str, host: &str) -> String {
+    format!(":{shortcode}@{host}:")
+}
+
 /// 本文中に現れる `:shortcode:` 構文の候補を、出現順・重複なしで抽出する（コロンを除いた形）。
 /// 実在確認は行わない（呼び出し元が `EmojiRepository::find_urls_by_shortcodes` 等で解決する）。
 /// 文字種は `parse_custom_emoji_shortcode` と揃える（英数字・アンダースコアのみ）。
@@ -309,5 +348,47 @@ mod tests {
     #[test]
     fn extract_shortcode_candidates_empty_text() {
         assert_eq!(extract_shortcode_candidates(""), Vec::<String>::new());
+    }
+
+    #[test]
+    fn parse_reaction_shortcode_and_host_bare_shortcode() {
+        assert_eq!(
+            parse_reaction_shortcode_and_host(":blob_cat:"),
+            Some(("blob_cat", None))
+        );
+    }
+
+    #[test]
+    fn parse_reaction_shortcode_and_host_local() {
+        assert_eq!(
+            parse_reaction_shortcode_and_host(":blob_cat@.:"),
+            Some(("blob_cat", Some(".")))
+        );
+    }
+
+    #[test]
+    fn parse_reaction_shortcode_and_host_remote() {
+        assert_eq!(
+            parse_reaction_shortcode_and_host(":blob_cat@misskey.io:"),
+            Some(("blob_cat", Some("misskey.io")))
+        );
+    }
+
+    #[test]
+    fn parse_reaction_shortcode_and_host_rejects_malformed() {
+        assert_eq!(parse_reaction_shortcode_and_host(":blob_cat@:"), None);
+        assert_eq!(parse_reaction_shortcode_and_host(":@host:"), None);
+        assert_eq!(parse_reaction_shortcode_and_host(":not valid:"), None);
+        assert_eq!(parse_reaction_shortcode_and_host("::"), None);
+        assert_eq!(parse_reaction_shortcode_and_host("👍"), None);
+    }
+
+    #[test]
+    fn format_reaction_content_roundtrips() {
+        assert_eq!(format_local_reaction_content("blob_cat"), ":blob_cat@.:");
+        assert_eq!(
+            format_remote_reaction_content("blob_cat", "misskey.io"),
+            ":blob_cat@misskey.io:"
+        );
     }
 }

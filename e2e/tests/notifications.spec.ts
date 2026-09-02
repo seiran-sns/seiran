@@ -185,8 +185,9 @@ test("カスタム絵文字でリアクションされた通知にカスタム�
     // アイコンがフォールバックの絵文字テキストではなく、カスタム絵文字画像として描画されていること
     // （バックエンドの`reactionEmojis`キー形式とフロントの参照キーがずれると画像が出ずフォールバックになる）。
     // `li`単位で絞り込み、絵文字ピッカー等の同じaltを持つ他要素との衝突を避ける。
+    // アイコンのalt文字列（`n.reaction`由来）は本家Misskey準拠でローカルは `@.` サフィックス付き。
     const notifItem = page.locator("li", { has: notifText });
-    await expect(notifItem.locator(`img[alt="\\:${shortcode}\\:"]`)).toBeVisible({ timeout: 5_000 });
+    await expect(notifItem.locator(`img[alt="\\:${shortcode}@.\\:"]`)).toBeVisible({ timeout: 5_000 });
   } finally {
     if (providerId && adminToken) {
       await request.patch(`/api/admin/storage-providers/${providerId}`, {

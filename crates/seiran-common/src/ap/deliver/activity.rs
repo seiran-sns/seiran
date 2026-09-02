@@ -1,6 +1,7 @@
 use super::infra::LocalActorAddress;
 use super::note::fetch_attachment_documents;
 use super::*;
+use crate::repository::parse_reaction_shortcode_and_host;
 
 // =====================================================================
 // アクティビティ構築（what: 純関数・テスト対象）
@@ -403,11 +404,15 @@ pub(crate) fn build_reaction_object(
         // Misskey 系フォークとの互換のため非標準フィールドも併記する。
         obj["_misskey_reaction"] = serde_json::Value::String(content.to_string());
         if let Some(url) = emoji_url {
-            let shortcode = content.trim_matches(':');
+            // `content`/`_misskey_reaction` はホスト付き（`:shortcode@.:` 等）だが、
+            // `tag[].id`/`tag[].name` は本家Misskey準拠で常にホストなしの素の shortcode を使う。
+            let shortcode = parse_reaction_shortcode_and_host(content)
+                .map(|(shortcode, _)| shortcode)
+                .unwrap_or_else(|| content.trim_matches(':'));
             obj["tag"] = serde_json::json!([{
                 "id": format!("https://{}/emojis/{}", local_domain, shortcode),
                 "type": "Emoji",
-                "name": content,
+                "name": format!(":{shortcode}:"),
                 "icon": { "type": "Image", "url": url },
             }]);
         }
@@ -1109,16 +1114,18 @@ mod tests {
 
     #[test]
     fn reaction_object_custom_emoji_includes_tag() {
+        // content（DB正規形）はホスト付き（`:shortcode@.:`）だが、tag.id/tag.name は
+        // 本家Misskey準拠で常にホストなしの素の shortcode を使う。
         let react = build_reaction_object(
             "EmojiReact",
             "id1",
             "actor1",
             "obj1",
-            ":blobcat:",
+            ":blobcat@.:",
             Some("https://example.com/blobcat.png"),
             "seiran.example",
         );
-        assert_eq!(react["content"], ":blobcat:");
+        assert_eq!(react["content"], ":blobcat@.:");
         assert_eq!(react["tag"][0]["type"], "Emoji");
         assert_eq!(react["tag"][0]["name"], ":blobcat:");
         // kmyblue（Mastodon系フォーク）の CustomEmojiParser#uri（= tag.id）が
@@ -1130,6 +1137,25 @@ mod tests {
         assert_eq!(
             react["tag"][0]["icon"]["url"],
             "https://example.com/blobcat.png"
+        );
+    }
+
+    #[test]
+    fn reaction_object_custom_emoji_handles_legacy_hostless_content() {
+        // レガシーデータ（ホスト情報なし `:shortcode:`）でも tag.name は同じ shortcode になる。
+        let react = build_reaction_object(
+            "EmojiReact",
+            "id1",
+            "actor1",
+            "obj1",
+            ":blobcat:",
+            Some("https://example.com/blobcat.png"),
+            "seiran.example",
+        );
+        assert_eq!(react["tag"][0]["name"], ":blobcat:");
+        assert_eq!(
+            react["tag"][0]["id"],
+            "https://seiran.example/emojis/blobcat"
         );
     }
 }

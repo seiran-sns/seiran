@@ -19,10 +19,34 @@ export function fetchCustomEmojiShortcodes(): Promise<Set<string>> {
   return fetchCustomEmojis().then((emojis) => new Set(emojis.map((e) => e.name)));
 }
 
-/** `:shortcode:` 形式ならコロンを除いた shortcode を、そうでなければ null を返す。 */
-export function parseCustomEmojiShortcode(content: string): string | null {
-  if (content.length > 2 && content.startsWith(":") && content.endsWith(":")) {
-    return content.slice(1, -1);
+/**
+ * `:shortcode:` または `:shortcode@host:`（本家Misskey準拠、ローカルは `@.`）を分解する。
+ * `@` が無ければ `host: null`（ホスト情報なし＝レガシーデータ）を返す。
+ */
+export function parseReactionContent(
+  content: string
+): { shortcode: string; host: string | null } | null {
+  if (content.length <= 2 || !content.startsWith(":") || !content.endsWith(":")) {
+    return null;
   }
-  return null;
+  const inner = content.slice(1, -1);
+  if (inner.length === 0) return null;
+  const atIndex = inner.indexOf("@");
+  if (atIndex === -1) {
+    return { shortcode: inner, host: null };
+  }
+  const shortcode = inner.slice(0, atIndex);
+  const host = inner.slice(atIndex + 1);
+  if (shortcode.length === 0 || host.length === 0) return null;
+  return { shortcode, host };
+}
+
+/** ローカル絵文字判定。ホスト情報なし（レガシーデータ）または `.` はローカル相当として扱う。 */
+export function isLocalCustomEmoji(parsed: { host: string | null }): boolean {
+  return parsed.host === null || parsed.host === ".";
+}
+
+/** `:shortcode:` / `:shortcode@host:` 形式なら shortcode 部分のみを、そうでなければ null を返す。 */
+export function parseCustomEmojiShortcode(content: string): string | null {
+  return parseReactionContent(content)?.shortcode ?? null;
 }

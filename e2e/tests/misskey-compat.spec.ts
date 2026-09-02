@@ -93,8 +93,10 @@ test("Misskey互換API: Aria形式のローカルカスタム絵文字でリア�
     });
     expect(showRes.ok(), await showRes.text()).toBeTruthy();
     const shown = await showRes.json();
-    expect(shown.reactions[`:${shortcode}:`]).toBe(1);
-    expect(shown.myReaction).toBe(`:${shortcode}:`);
+    // 本家Misskey準拠でローカルカスタム絵文字は `@.` サフィックス付きで保存・返却される。
+    expect(shown.reactions[`:${shortcode}@.:`]).toBe(1);
+    expect(shown.myReaction).toBe(`:${shortcode}@.:`);
+    expect(shown.reactionEmojis[`${shortcode}@.`]).toBeTruthy();
   } finally {
     if (providerId && adminToken) {
       await request.patch(`/api/admin/storage-providers/${providerId}`, {

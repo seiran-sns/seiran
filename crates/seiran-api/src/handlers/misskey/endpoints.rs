@@ -202,15 +202,6 @@ pub struct ReactionCreateBody {
     pub reaction: String,
 }
 
-/// Misskey はローカルのカスタム絵文字を `:shortcode@.:` 形式で送る。
-/// seiran の内部表現は `:shortcode:` なので、Misskey 互換 API の境界で変換する。
-fn normalize_local_reaction(reaction: &str) -> String {
-    reaction
-        .strip_prefix(':')
-        .and_then(|value| value.strip_suffix("@.:"))
-        .map_or_else(|| reaction.to_owned(), |shortcode| format!(":{shortcode}:"))
-}
-
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UserShowBody {
@@ -546,7 +537,7 @@ pub async fn reactions_create(
         user,
         State(state),
         Json(ReactRequest {
-            content: normalize_local_reaction(&body.reaction),
+            content: body.reaction,
         }),
     )
     .await
@@ -877,22 +868,3 @@ pub async fn notes_reactions(
     ))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::normalize_local_reaction;
-
-    #[test]
-    fn normalizes_misskey_local_custom_emoji_reaction() {
-        assert_eq!(normalize_local_reaction(":blob_cat@.:"), ":blob_cat:");
-    }
-
-    #[test]
-    fn leaves_unicode_and_canonical_reactions_unchanged() {
-        assert_eq!(normalize_local_reaction("🎉"), "🎉");
-        assert_eq!(normalize_local_reaction(":blob_cat:"), ":blob_cat:");
-        assert_eq!(
-            normalize_local_reaction(":blob_cat@example.com:"),
-            ":blob_cat@example.com:"
-        );
-    }
-}

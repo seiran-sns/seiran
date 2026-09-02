@@ -8,6 +8,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
 import { profilePath } from "../../lib/format";
+import { parseReactionContent } from "../../lib/customEmojis";
 import { mediaUrl } from "../../utils/mediaProxy";
 import panel from "../common/Panel.module.css";
 import Avatar from "../note/Avatar";
@@ -69,12 +70,15 @@ export function describeNotification(n: NotificationItem): {
   switch (n.type) {
     case "reaction": {
       // `reactionEmojis` のキーは Misskey 本家仕様に合わせコロンなし shortcode
-      // （バックエンド側 `convert.rs`）。`reaction` は `:shortcode:` 形式なので
-      // 先頭末尾の ':' を除いてから引く。
-      const shortcode = n.reaction?.replace(/^:(.*):$/, "$1");
+      // （ローカルは `shortcode@.`、リモートは `shortcode@host`。バックエンド側 `convert.rs`）。
+      // `reaction` は `:shortcode:`/`:shortcode@host:` 形式なので分解してから引く。
+      const parsedReaction = n.reaction ? parseReactionContent(n.reaction) : null;
+      const emojiKey = parsedReaction
+        ? parsedReaction.shortcode + (parsedReaction.host ? `@${parsedReaction.host}` : "")
+        : undefined;
       return {
         icon: n.reaction || "⭐",
-        iconUrl: shortcode ? n.note?.reactionEmojis?.[shortcode] : undefined,
+        iconUrl: emojiKey ? n.note?.reactionEmojis?.[emojiKey] : undefined,
         i18nKey: "notifications:notificationsPanel.reactionText",
         who,
         whoEmojis,

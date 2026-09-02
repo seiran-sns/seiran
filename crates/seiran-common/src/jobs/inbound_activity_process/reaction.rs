@@ -29,9 +29,15 @@ pub(super) async fn handle_reaction(
         .unwrap_or("❤️")
         .to_string();
     let reaction_type = if content == "❤️" { "like" } else { "emoji" };
-    // content が `:shortcode:` 形式（カスタム絵文字）の場合、tag 配列から画像 URL を解決する。
-    // Unicode 絵文字や素の Like（❤️ 固定）では通常 tag に一致が無いため自然に None になる。
-    let emoji_url = extract_emoji_tag_url(&activity, &content);
+    // content が `:shortcode:`/`:shortcode@host:` 形式（カスタム絵文字）の場合、ホスト部分を
+    // 除いた素の shortcode で tag 配列から画像 URL を解決する（tag.name は本家Misskey準拠で
+    // 常にホストなし。送信元が本家Misskeyなら content は既に `:shortcode@host:` 形式で届く）。
+    // Unicode 絵文字や素の Like（❤️ 固定）では構文的にマッチせず自然に None になる。
+    let bare_shortcode =
+        parse_reaction_shortcode_and_host(&content).map(|(shortcode, _)| shortcode.to_string());
+    let emoji_url = bare_shortcode
+        .as_deref()
+        .and_then(|shortcode| extract_emoji_tag_url(&activity, &format!(":{shortcode}:")));
 
     // 対象ローカルポストを ap_object_id で検索（未知のポストなら無視）
     let (post_id, post_author_id) = match inbox
@@ -48,15 +54,24 @@ pub(super) async fn handle_reaction(
     let remote = upsert_remote_fedi_actor(inbox, ap_client, actor_uri).await?;
     let actor_id = remote.actor_id;
 
-    // カスタム絵文字リアクションなら remote_emojis にも記録する（#73）。
-    if let Some(url) = emoji_url.as_deref() {
+    // カスタム絵文字リアクションなら remote_emojis にも記録する（#73）。tag.name は
+    // 本家Misskey準拠で常にホストなしの素の shortcode を使う。
+    if let (Some(url), Some(shortcode)) = (emoji_url.as_deref(), bare_shortcode.as_deref()) {
         let tag = serde_json::json!({
             "type": "Emoji",
-            "name": content,
+            "name": format!(":{shortcode}:"),
             "icon": { "url": url },
         });
         record_remote_emojis(inbox, &remote.domain, &[tag]).await;
     }
+
+    // DB保存・通知・ブロードキャストに使う正規形。カスタム絵文字はワイヤ上のホスト値を信用せず、
+    // ここで解決したリアクション実行者のドメインを使って `:shortcode@{domain}:` を組み立てる
+    // （本家Misskey準拠）。Unicode絵文字・素のLikeはワイヤの content をそのまま使う。
+    let db_content = match bare_shortcode.as_deref() {
+        Some(shortcode) => format_remote_reaction_content(shortcode, &remote.domain),
+        None => content.clone(),
+    };
 
     // reactions へ INSERT（同一ユーザー・同一内容の重複、activity_id 重複はスキップ）
     let new_reaction_id = generate_snowflake_id(chrono::Utc::now());
@@ -67,7 +82,7 @@ pub(super) async fn handle_reaction(
             post_id,
             actor_id,
             reaction_type,
-            &content,
+            &db_content,
             activity_id,
             None,
             emoji_url.as_deref(),
@@ -75,7 +90,7 @@ pub(super) async fn handle_reaction(
         .await
         .map_err(|e| format!("reactions INSERT エラー: {}", e))?;
 
-    tracing::info!("[Reaction] post {} に {} を記録", post_id, content);
+    tracing::info!("[Reaction] post {} に {} を記録", post_id, db_content);
 
     // 通知ベル用（#37）: リアクションされたポストの著者へ
     inbox.stream_hub.publish_event(
@@ -83,7 +98,7 @@ pub(super) async fn handle_reaction(
         "reaction",
         serde_json::json!({
             "postId": post_id.to_string(),
-            "emoji": content,
+            "emoji": db_content,
             "emojiUrl": emoji_url,
             "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
         }),
@@ -97,7 +112,7 @@ pub(super) async fn handle_reaction(
             NotificationKind::Reaction,
             Some(actor_id),
             Some(post_id),
-            Some(&content),
+            Some(&db_content),
             emoji_url.as_deref(),
             activity_id,
             None,
@@ -117,7 +132,7 @@ pub(super) async fn handle_reaction(
         post_id,
         post_author_id,
         actor_id,
-        Some(&content),
+        Some(&db_content),
     )
     .await;
 

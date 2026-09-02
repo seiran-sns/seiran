@@ -47,7 +47,10 @@ pub use block::{BlockRepository, BlockedActorRow, PgBlockRepository};
 pub use dm::{DmPeerSummary, DmRepository, PgDmRepository};
 pub use email_change::{EmailChangeRepository, PgEmailChangeRepository};
 pub use email_verification::{EmailVerificationRepository, PgEmailVerificationRepository};
-pub use emoji::{extract_shortcode_candidates, parse_custom_emoji_shortcode};
+pub use emoji::{
+    extract_shortcode_candidates, format_local_reaction_content, format_remote_reaction_content,
+    parse_custom_emoji_shortcode, parse_reaction_shortcode_and_host,
+};
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
 pub use follow_import::{

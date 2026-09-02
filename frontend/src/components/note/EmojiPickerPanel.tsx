@@ -3,7 +3,12 @@ import { useTranslation } from "react-i18next";
 import { api, FrequentReaction, PublicEmoji } from "../../api/client";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
 import { postLanguageBase } from "../../i18n";
-import { fetchCustomEmojis } from "../../lib/customEmojis";
+import {
+  fetchCustomEmojis,
+  isLocalCustomEmoji,
+  parseCustomEmojiShortcode,
+  parseReactionContent,
+} from "../../lib/customEmojis";
 import { EmojiAnnotationIndex, loadEmojiAnnotationIndex } from "../../lib/emojiAnnotations";
 import { allUnicodeEmojis, unicodeEmojiGroups } from "../../lib/emojiData";
 import { emojiAspectSpan } from "../../lib/emojiAspect";
@@ -142,9 +147,15 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
   );
 
   const frequentItems: PickerItem[] = useMemo(() => {
-    const customByContent = new Map(customItems.map((i) => [i.content, i]));
+    // `f.content` はDBの生content（`:shortcode@.:` 等ホスト付きになりうる）なので、shortcode
+    // 部分だけを取り出してローカルカスタム絵文字一覧（host無し `:shortcode:` キー）と照合する。
+    const customByShortcode = new Map(
+      customItems.map((i) => [parseCustomEmojiShortcode(i.content), i])
+    );
     return frequent.map((f) => {
-      const custom = customByContent.get(f.content);
+      const parsed = parseReactionContent(f.content);
+      const custom =
+        parsed && isLocalCustomEmoji(parsed) ? customByShortcode.get(parsed.shortcode) : undefined;
       if (custom) return custom;
       return { key: `frequent:${f.content}`, content: f.content, label: f.content, imageUrl: f.emojiUrl ?? undefined };
     });
