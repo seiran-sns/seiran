@@ -564,6 +564,98 @@ fn is_allowed_style_value(value: &str) -> bool {
     matches!(rest.trim(), "left" | "right" | "center" | "justify")
 }
 
+/// タグを除去してプレーンテキスト化する（`strip_html`と違い単語間にスペースを補わない。
+/// タグ直後で単語が連結してよい構造的なHTML断片、`RE:`/`QT:`フォールバック判定や
+/// `quote-inline`段落の中身抽出専用）。
+fn strip_tags_verbatim(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    decode_html_entities(out.trim())
+}
+
+/// Mastodon/kmyblue系が「引用の可視インライン表現」として本文に自動挿入する
+/// `<p class="...quote-inline...">RE: <a>URL</a></p>`段落を、位置（先頭・末尾・中間）に
+/// 関わらず検出して除去する。Fedibird/Misskeyの`RE:`/`QT:`は本文**末尾**に付くのに対し、
+/// kmyblueはこれを本文の**先頭**に置く（実例: kblue.10rino.net等）ため、末尾だけを見る
+/// `strip_quote_fallback_line_html`では検出できない。`class`属性は`sanitize_ap_content_html`が
+/// 全タグから剥がすため、この関数は**サニタイズ前の生HTML**に対して呼ぶこと。
+/// `quote-inline`段落が無い、または中のURLが`quote_uri`と一致しない場合は`None`を返す
+/// （呼び出し側は`strip_quote_fallback_line_html`による末尾行除去にフォールバックできる）。
+pub(super) fn strip_quote_inline_paragraph_html(html: &str, quote_uri: &str) -> Option<String> {
+    let lower = html.to_ascii_lowercase();
+    let mut search_from = 0;
+    while let Some(rel_open) = lower[search_from..].find("<p") {
+        let open = search_from + rel_open;
+        let Some(rel_tag_end) = html[open..].find('>') else {
+            break;
+        };
+        let tag_end = open + rel_tag_end + 1;
+        let tag = &lower[open..tag_end];
+        let is_quote_inline = tag.starts_with("<p ") && tag.contains("quote-inline");
+        if !is_quote_inline {
+            search_from = tag_end;
+            continue;
+        }
+        let Some(rel_close) = lower[tag_end..].find("</p>") else {
+            search_from = tag_end;
+            continue;
+        };
+        let close_end = tag_end + rel_close + "</p>".len();
+        let inner_text = strip_tags_verbatim(&html[tag_end..tag_end + rel_close]);
+        if super::note_input::quote_uri_matches(&inner_text, quote_uri) {
+            let mut result = String::with_capacity(html.len());
+            result.push_str(&html[..open]);
+            result.push_str(&html[close_end..]);
+            return Some(result);
+        }
+        search_from = close_end;
+    }
+    None
+}
+
+/// kmyblueが本文**先頭**に付ける`RE:`/`QT:`フォールバック段落を、`class`属性に依存せず
+/// テキストベースで検出・除去する。`strip_quote_inline_paragraph_html`は`class="quote-inline"`
+/// が無いと検出できず、かつサニタイズ後は`class`自体が失われるため、既存投稿の
+/// バックフィル（サニタイズ済み`content_html`が入力）にはこちらを使う。`strip_quote_fallback_line_html`
+/// の先頭版（`<br>`または`</p>`のうち最初に現れる方をブロック境界とする）。
+pub(super) fn strip_quote_fallback_line_html_leading(html: &str, quote_uri: &str) -> String {
+    let trimmed = html.trim_start();
+    let first_marker = {
+        let lower = trimmed.to_ascii_lowercase();
+        [lower.find("<br"), lower.find("</p>")]
+            .into_iter()
+            .flatten()
+            .min()
+    };
+    let Some(idx) = first_marker else {
+        return html.to_string();
+    };
+    // `<br>`ならタグ終端`>`の直後まで、`</p>`なら`</p>`自体の直後までを先頭ブロックとする。
+    let lower = trimmed.to_ascii_lowercase();
+    let block_end = if lower[idx..].starts_with("</p>") {
+        idx + "</p>".len()
+    } else {
+        trimmed[idx..].find('>').map(|o| idx + o + 1).unwrap_or(idx)
+    };
+    let first_block = strip_tags_verbatim(&trimmed[..idx]);
+    let is_fallback = super::note_input::starts_with_quote_marker(&first_block)
+        && super::note_input::quote_uri_matches(&first_block, quote_uri);
+
+    if is_fallback {
+        trimmed[block_end..].trim_start().to_string()
+    } else {
+        html.to_string()
+    }
+}
+
 /// Misskey/Fedibirdが引用時に自動付加する`RE:`/`QT:`フォールバック行を、HTML本文
 /// （`content_html`）の末尾から取り除く。`strip_quote_fallback_line`のHTML版
 /// （プレーンテキストの`\n`区切りの代わりに、直近の`<br>`または`<p>`開始タグを
@@ -572,21 +664,9 @@ fn is_allowed_style_value(value: &str) -> bool {
 /// 見ると本文全体を「最後の行」と誤認し丸ごと消してしまうため（実例:
 /// フォールバック行が先頭の段落にあり、以降複数の`<p>`段落が続く投稿）。
 /// 区切りが1つも見つからない（フォールバック行しかない）場合は空文字列を返す。
+/// kmyblueの`<p class="quote-inline">`（先頭に付く）はこの関数では検出できないため、
+/// 呼び出し側は先に`strip_quote_inline_paragraph_html`を試すこと。
 pub(super) fn strip_quote_fallback_line_html(html: &str, quote_uri: &str) -> String {
-    fn strip_tags(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
-        let mut in_tag = false;
-        for c in s.chars() {
-            match c {
-                '<' => in_tag = true,
-                '>' => in_tag = false,
-                _ if !in_tag => out.push(c),
-                _ => {}
-            }
-        }
-        decode_html_entities(out.trim())
-    }
-
     let trimmed = html.trim_end();
     let last_marker = {
         let lower = trimmed.to_ascii_lowercase();
@@ -604,8 +684,8 @@ pub(super) fn strip_quote_fallback_line_html(html: &str, quote_uri: &str) -> Str
         None => ("", trimmed),
     };
 
-    let last_line = strip_tags(after);
-    let is_fallback = (last_line.starts_with("RE:") || last_line.starts_with("QT:"))
+    let last_line = strip_tags_verbatim(after);
+    let is_fallback = super::note_input::starts_with_quote_marker(&last_line)
         && super::note_input::quote_uri_matches(&last_line, quote_uri);
 
     if is_fallback {
@@ -964,6 +1044,34 @@ mod tests {
         let html = "<p>本文<br>QT: <a href=\"https://fedibird.com/@asata/117195892358865036\">https://fedibird.com/@asata/117195892358865036</a></p>";
         let out = strip_quote_fallback_line_html(html, quote_uri);
         assert_eq!(out, "<p>本文");
+    }
+
+    #[test]
+    fn strip_quote_inline_paragraph_html_removes_leading_kmyblue_quote_paragraph() {
+        // kmyblue（kblue.10rino.net等）は`<p class="quote-inline">RE: <a>URL</a></p>`を
+        // 本文の**先頭**に自動挿入する。quote_uriはAPオブジェクトID形式だが本文中のリンクは
+        // 表示用URL形式（実例: kblue.10rino.net、quote_uri_matchesで吸収）。
+        let quote_uri = "https://kblue.10rino.net/users/mz/statuses/117200184727293348";
+        let html = "<p class=\"quote-inline\">RE: <a href=\"https://kblue.10rino.net/@mz/117200184727293348\" target=\"_blank\" rel=\"nofollow noopener\">https://kblue.10rino.net/@mz/117200184727293348</a></p><p>すみません永久不滅ポイントは永久不滅のままで</p>";
+        let out = strip_quote_inline_paragraph_html(html, quote_uri);
+        assert_eq!(
+            out,
+            Some("<p>すみません永久不滅ポイントは永久不滅のままで</p>".to_string())
+        );
+    }
+
+    #[test]
+    fn strip_quote_inline_paragraph_html_none_when_no_quote_inline_class() {
+        let quote_uri = "https://fedibird.com/users/asata/statuses/117195892358865036";
+        let html = "<p>本文<br>QT: <a href=\"https://fedibird.com/@asata/117195892358865036\">https://fedibird.com/@asata/117195892358865036</a></p>";
+        assert_eq!(strip_quote_inline_paragraph_html(html, quote_uri), None);
+    }
+
+    #[test]
+    fn strip_quote_inline_paragraph_html_none_when_url_does_not_match() {
+        let quote_uri = "https://kblue.10rino.net/users/mz/statuses/117200184727293348";
+        let html = "<p class=\"quote-inline\">RE: <a href=\"https://other.example/notes/1\">https://other.example/notes/1</a></p><p>本文</p>";
+        assert_eq!(strip_quote_inline_paragraph_html(html, quote_uri), None);
     }
 
     #[test]

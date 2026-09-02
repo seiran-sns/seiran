@@ -84,9 +84,32 @@ pub(super) fn strip_quote_fallback_line(body: &str, quote_uri: &str) -> String {
     let last_line_start = trimmed.rfind('\n').map(|i| i + 1).unwrap_or(0);
     let last_line = trimmed[last_line_start..].trim();
     let is_fallback =
-        (last_line.starts_with("RE:") || last_line.starts_with("QT:")) && quote_uri_matches(last_line, quote_uri);
+        starts_with_quote_marker(last_line) && quote_uri_matches(last_line, quote_uri);
     if is_fallback {
         trimmed[..last_line_start].trim_end().to_string()
+    } else {
+        body.to_string()
+    }
+}
+
+/// Misskey/Fedibird/kmyblueが引用時に本文へ自動付加する`RE:`/`QT:`（kmyblueは`RE `/`QT `という
+/// コロン無し表記のこともある、実例: kb.mu7ou.com）フォールバック行かどうかを行頭マーカーで
+/// 判定する。
+pub(super) fn starts_with_quote_marker(line: &str) -> bool {
+    ["RE:", "QT:", "RE ", "QT "]
+        .iter()
+        .any(|marker| line.starts_with(marker))
+}
+
+/// kmyblueは`RE:`/`QT:`フォールバック行を本文の**先頭**に付ける（Fedibird/Misskeyは末尾、
+/// 実例: kblue.10rino.net）。`strip_quote_fallback_line`の先頭版。
+pub(super) fn strip_quote_fallback_line_leading(body: &str, quote_uri: &str) -> String {
+    let trimmed = body.trim_start();
+    let first_line_end = trimmed.find('\n').unwrap_or(trimmed.len());
+    let first_line = trimmed[..first_line_end].trim();
+    let is_fallback = starts_with_quote_marker(first_line) && quote_uri_matches(first_line, quote_uri);
+    if is_fallback {
+        trimmed[first_line_end..].trim_start().to_string()
     } else {
         body.to_string()
     }
@@ -274,6 +297,31 @@ mod tests {
         let quote_uri = "https://fedibird.com/users/asata/statuses/117195892358865036";
         let body = "本文\nRE: [https://other.example/notes/117195892358865036](https://other.example/notes/117195892358865036)";
         assert_eq!(strip_quote_fallback_line(body, quote_uri), body);
+    }
+
+    #[test]
+    fn strips_kmyblue_re_fallback_at_leading_line() {
+        // kmyblue（kblue.10rino.net等）はMarkdown化後のbodyでも`RE:`/`QT:`行を
+        // 本文の**先頭**に残す（実例: #117200189063174718）。
+        let quote_uri = "https://kblue.10rino.net/users/mz/statuses/117200184727293348";
+        let body = "RE: [https://kblue.10rino.net/@mz/117200184727293348](https://kblue.10rino.net/@mz/117200184727293348)\n\nすみません永久不滅ポイントは永久不滅のままで";
+        assert_eq!(
+            strip_quote_fallback_line_leading(body, quote_uri),
+            "すみません永久不滅ポイントは永久不滅のままで"
+        );
+    }
+
+    #[test]
+    fn strips_kmyblue_colonless_re_fallback_at_tail() {
+        // kmyblue（kb.mu7ou.com）の一部投稿は`RE:`ではなくコロン無し`RE `を末尾に使う
+        // （実例: #117018482769922445）。quote_uriはAPオブジェクトID形式、本文中は
+        // 表示用URL形式。
+        let quote_uri = "https://kb.mu7ou.com/ap/users/116805310384210610/statuses/117017885539545746";
+        let body = "一時的に見えるようにした :bunhdlurk:\n\nRE [https://kb.mu7ou.com/@m/117017885539545746](https://kb.mu7ou.com/@m/117017885539545746)";
+        assert_eq!(
+            strip_quote_fallback_line(body, quote_uri),
+            "一時的に見えるようにした :bunhdlurk:"
+        );
     }
 
     #[test]

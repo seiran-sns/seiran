@@ -1,11 +1,14 @@
-use super::content::strip_quote_fallback_line_html;
+use super::content::{
+    strip_quote_fallback_line_html, strip_quote_fallback_line_html_leading,
+    strip_quote_inline_paragraph_html,
+};
 use super::emoji::{
     has_same_origin, has_unresolved_emoji_shortcodes, record_remote_emojis,
     resolve_emoji_map_with_fallback,
 };
 use super::note_input::{
     detect_loopback_post_id, extract_ap_quote_uri, guess_attachment_mime_type, normalize_ap_poll,
-    resolve_bridge_duplicate_post_id, strip_quote_fallback_line,
+    resolve_bridge_duplicate_post_id, strip_quote_fallback_line, strip_quote_fallback_line_leading,
 };
 use super::reference::{resolve_ref, system_signing_key, ReferenceResolutionMode};
 use super::*;
@@ -84,13 +87,33 @@ pub(super) async fn save_ap_note_core(
     let remote = upsert_remote_fedi_actor(inbox, ap_client, actor_uri).await?;
     let actor_id = remote.actor_id;
 
+    let mut tags = note["tag"].as_array().cloned().unwrap_or_default();
+
+    // kmyblue系は`<p class="quote-inline">RE: <a>URL</a></p>`を本文の**先頭**（Fedibird/
+    // Misskeyが本文末尾に付ける`RE:`/`QT:`行とは逆の位置）に自動挿入する（実例:
+    // kblue.10rino.net等）。`class`属性は`sanitize_ap_content_html`が全タグから剥がすため、
+    // Markdown化・サニタイズより前の生HTMLの段階で検出・除去する。tag補完前の`tags`で
+    // 十分（`quote`/`_misskey_quote`/`quoteUri`はNote直下フィールドでtag補完の対象外）。
+    let early_quote_uri = extract_ap_quote_uri(note, &tags);
+    let content_html_pre = early_quote_uri
+        .as_deref()
+        .and_then(|uri| {
+            // 第一候補: `class="quote-inline"`（Mastodon/kmyblue系の標準的なマーカー）。
+            // 第二候補: classが無い場合でも、先頭ブロックがテキストベースで
+            // `RE:`/`QT:`フォールバックと判定できれば除去する。
+            strip_quote_inline_paragraph_html(&content_html, uri).or_else(|| {
+                let leading = strip_quote_fallback_line_html_leading(&content_html, uri);
+                (leading != content_html).then_some(leading)
+            })
+        })
+        .unwrap_or_else(|| content_html.clone());
+
     // HTML タグを除去して本文を得る（<a href> はリンクとして保持し、Markdownリンク記法
     // `[text](url)` に変換する。メンションは `@user@host` のプレーンテキストに正規化）。
-    let mut tags = note["tag"].as_array().cloned().unwrap_or_default();
-    let mut body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+    let mut body = ap_content_to_markdown_body(&content_html_pre, &tags, &remote.domain);
     // seiran Web UI でのリッチ表示用（`<blockquote>`/`<ruby>`等の構造保持、#233）。
     // `body`とは別に、意味的構造をクレンジングして保持したHTMLを`content_html`列に持つ。
-    let mut content_html_sanitized = sanitize_ap_content_html(&content_html, &tags, &remote.domain);
+    let mut content_html_sanitized = sanitize_ap_content_html(&content_html_pre, &tags, &remote.domain);
     // リレー実装によっては、配送する Create の埋め込み Note から Emoji tag を
     // 省略する一方、object.id の正規 Note には完全な tag を載せる。本文に未解決の
     // shortcode がある場合だけ正規 Note を取得し、欠落した tag を補完する。
@@ -108,9 +131,9 @@ pub(super) async fn save_ap_note_core(
                             tags.push(tag.clone());
                         }
                     }
-                    body = ap_content_to_markdown_body(&content_html, &tags, &remote.domain);
+                    body = ap_content_to_markdown_body(&content_html_pre, &tags, &remote.domain);
                     content_html_sanitized =
-                        sanitize_ap_content_html(&content_html, &tags, &remote.domain);
+                        sanitize_ap_content_html(&content_html_pre, &tags, &remote.domain);
                 }
             }
             Err(error) => {
@@ -127,16 +150,24 @@ pub(super) async fn save_ap_note_core(
     let emoji_map = resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &body).await;
 
     // 引用URI抽出・解決（#116）。`OneHopFetch`ならDBに無ければ1段階だけフェッチを試みる
-    // （#231）。取得できた場合、Misskey/Fedibirdが本文末尾に自動付加する
-    // `RE:`/`QT:` フォールバック行（引用URIと同じURLを指す）を本文から取り除く。
+    // （#231）。取得できた場合、Misskey/Fedibirdが本文末尾に自動付加する`RE:`/`QT:`
+    // フォールバック行（引用URIと同じURLを指す）を本文から取り除く。kmyblueの先頭
+    // `quote-inline`段落は上の`content_html_pre`計算時に既に除去済みのため、ここでは
+    // 除去し損ねた場合（`class`が付かない・末尾に来るkmyblueの別表記等）のフォールバック
+    // として働く。tag補完後の最終`tags`で`quote_uri`を再計算する（`early_quote_uri`は
+    // 補完前の値のため、tag[].relフォールバックの結果がtag補完で変わる場合がある）。
     let quote_uri = extract_ap_quote_uri(note, &tags);
     let (quote_of_post_id, quote_of_ap_uri, quote_of_ref_status) =
         resolve_ref(ref_mode, quote_uri.as_deref(), inbox, ap_client)
             .await
             .into_parts();
     if let Some(uri) = quote_uri.as_deref() {
+        // 末尾（Fedibird/Misskey）と先頭（kmyblue）の両方を確認する。上の`content_html_pre`
+        // 計算で先頭段落を除去できていれば、ここでの先頭側呼び出しは通常no-opになる保険。
         body = strip_quote_fallback_line(&body, uri);
+        body = strip_quote_fallback_line_leading(&body, uri);
         content_html_sanitized = strip_quote_fallback_line_html(&content_html_sanitized, uri);
+        content_html_sanitized = strip_quote_fallback_line_html_leading(&content_html_sanitized, uri);
     }
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
     let to_list = as_string_list(&note["to"]);
