@@ -42,6 +42,31 @@
   margin-left: 0;
 }
 
+/* 返信先ポスト（ポスト詳細画面のスレッド遡り表示）用の小型表示。本体（主役ポスト）ではない
+ * ことが一目でわかるよう、横幅も表示幅の80%に縮める（左端は本体と揃え、右側を空ける）。 */
+.small {
+  width: 80%;
+  padding: 8px 12px;
+}
+
+.small .displayName {
+  font-size: 0.85rem;
+}
+
+.small .acct {
+  font-size: 0.72rem;
+}
+
+.small .time {
+  font-size: 0.72rem;
+}
+
+.small .body {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
 .rail {
   font-size: 0.78rem;
   color: var(--text-dim);

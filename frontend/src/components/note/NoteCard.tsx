@@ -57,8 +57,14 @@ interface NoteCardProps {
   linkToDetail?: boolean;
   /** 主役ポスト（ポスト詳細画面）用の大型表示（#43）。文字・アバターを拡大する。 */
   large?: boolean;
+  /** 返信先ポスト（ポスト詳細画面のスレッド遡り表示）用の小型表示。文字・アバターを縮小する。
+   * largeと同時指定はしない想定。 */
+  small?: boolean;
   /** `#open_cw` 付きURLでの遷移時、CWを開いた状態で初期表示する（#229）。 */
   forceOpenCw?: boolean;
+  /** 指定時、返信インジケータ（↩️ 返信）クリック時に詳細ページへ遷移する代わりにこれを呼ぶ
+   * （スレッド遡り表示で、その場に返信先ポストをさらに積み上げるために使う）。 */
+  onReplyIndicatorClick?: (replyId: string) => void;
 }
 
 /** 引用元を1段だけ表示する共通カード。引用元の `quoteId` はバッジだけ表示し、
@@ -151,16 +157,20 @@ function PostContent({
   note,
   linkToDetail,
   large = false,
+  small = false,
   onUnreposted,
   onDeleted,
   forceOpenCw = false,
+  onReplyIndicatorClick,
 }: {
   note: Note;
   linkToDetail: boolean;
   large?: boolean;
+  small?: boolean;
   onUnreposted?: () => void;
   onDeleted?: () => void;
   forceOpenCw?: boolean;
+  onReplyIndicatorClick?: (replyId: string) => void;
 }) {
   const { t } = useTranslation();
   const { user: currentUser } = useAuth();
@@ -407,7 +417,7 @@ function PostContent({
               <Avatar
                 url={note.user.avatarUrl}
                 name={note.user.displayName || note.user.username}
-                size={large ? 48 : 40}
+                size={large ? 48 : small ? 32 : 40}
               />
             </Link>
           </UserContextMenu>
@@ -495,7 +505,7 @@ function PostContent({
       {(effectiveReplyId || note.replyStatus || note.quoteId) && (
         <div className={styles.relations}>
           {effectiveReplyId ? (
-            <ReplyIndicator replyId={effectiveReplyId} />
+            <ReplyIndicator replyId={effectiveReplyId} onClimb={onReplyIndicatorClick} />
           ) : (
             note.replyStatus && (
               <PendingReferenceIndicator
@@ -767,12 +777,15 @@ export default function NoteCard({
   note,
   linkToDetail = true,
   large = false,
+  small = false,
   forceOpenCw = false,
+  onReplyIndicatorClick,
 }: NoteCardProps) {
   const { t } = useTranslation();
   const [hidden, setHidden] = useState(false);
   // pendingなリポスト対象が「取り込む」で解決された場合のローカル反映（#234）。
   const [resolvedRenote, setResolvedRenote] = useState<Note | null>(null);
+  const sizeClass = large ? styles.large : small ? styles.small : "";
 
   if (hidden) return null;
 
@@ -787,7 +800,7 @@ export default function NoteCard({
   const effectiveRenote = note.renote ?? resolvedRenote;
   if (effectiveRenote) {
     return (
-      <article className={`${styles.card} ${large ? styles.large : ""}`}>
+      <article className={`${styles.card} ${sizeClass}`}>
         <RepostRail note={note} />
         <PostContent
           note={effectiveRenote}
@@ -796,9 +809,11 @@ export default function NoteCard({
           // を伝播させず、常にリンクを有効にする（元投稿の日付が無反応だった不具合の修正）。
           linkToDetail
           large={large}
+          small={small}
           onUnreposted={() => setHidden(true)}
           onDeleted={() => setHidden(true)}
           forceOpenCw={forceOpenCw}
+          onReplyIndicatorClick={onReplyIndicatorClick}
         />
       </article>
     );
@@ -808,7 +823,7 @@ export default function NoteCard({
   // 閲覧者から見えないケース（embed_renotes の可視性ガードによるもの）。
   if (note.renoteId) {
     return (
-      <article className={`${styles.card} ${large ? styles.large : ""}`}>
+      <article className={`${styles.card} ${sizeClass}`}>
         <RepostRail note={note} />
         <p className={styles.unavailableNote}>
           {t("home:noteCard.unavailableRepost")}
@@ -821,7 +836,7 @@ export default function NoteCard({
   // （取り込み時にリポスト対象のフェッチに失敗した、#230〜#232）。
   if (note.renoteStatus) {
     return (
-      <article className={`${styles.card} ${large ? styles.large : ""}`}>
+      <article className={`${styles.card} ${sizeClass}`}>
         <RepostRail note={note} />
         <div className={styles.pendingQuoteWrap}>
           <PendingReferenceIndicator
@@ -836,13 +851,15 @@ export default function NoteCard({
   }
 
   return (
-    <article className={`${styles.card} ${large ? styles.large : ""}`}>
+    <article className={`${styles.card} ${sizeClass}`}>
       <PostContent
         note={note}
         linkToDetail={linkToDetail}
         large={large}
+        small={small}
         onDeleted={() => setHidden(true)}
         forceOpenCw={forceOpenCw}
+        onReplyIndicatorClick={onReplyIndicatorClick}
       />
     </article>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note, getErrorMessage } from "../api/client";
@@ -12,6 +12,7 @@ import ReplyThreadPanel from "../components/right/ReplyThreadPanel";
 import RepostListPanel from "../components/right/RepostListPanel";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useRightPane } from "../contexts/RightPaneContext";
+import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import panel from "../components/common/Panel.module.css";
 import styles from "./NoteDetailPage.module.css";
 
@@ -21,16 +22,33 @@ export default function NoteDetailPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const goBack = useGoBack();
-  const { noteDetailTab, setNoteDetailTab, noteContextScroll, setNoteContextScroll } = useRightPane();
+  const {
+    noteDetailTab,
+    setNoteDetailTab,
+    noteContextScroll,
+    setNoteContextScroll,
+    noteAncestorIds,
+    setNoteAncestorIds,
+    noteDetailScrollY,
+    setNoteDetailScrollY,
+  } = useRightPane();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
+  // 右ペインが無い狭幅表示かどうか（#56/#61と同じ判定）。返信タブは3ペイン表示のときだけ
+  // 中央ペイン下部の常設セクションへ移し、狭幅ではこれまで通り右ペインのタブの1つとする。
+  const isNarrow = useIsNarrowViewport();
+  const repliesInCenter = !isNarrow;
 
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   // `#open_cw` 付きURLでの遷移時、CWを開いた状態で表示する（#229）。
   const [forceOpenCw, setForceOpenCw] = useState(false);
+
+  // 対象ポストが返信だった場合に上へ積み上げていく返信先チェーン（古い順、末尾が直近の親）。
+  const [ancestors, setAncestors] = useState<Note[]>([]);
+  const [ancestorsReady, setAncestorsReady] = useState(false);
 
   // 前後の投稿は対象ポストの取得と同時に自動で読み込む（#226、ボタン操作不要）。
   // 最大5件ずつ、続きは読み込みボタンで継続取得する。
@@ -49,6 +67,18 @@ export default function NoteDetailPage() {
   const targetCardRef = useRef<HTMLDivElement>(null);
   // 右ペイン全体（AppShellの独立スクロール領域である<aside>）を closest() で辿るための参照。
   const rightPaneRef = useRef<HTMLDivElement>(null);
+  // 本体（主役ポスト）のNoteCardへの参照。初回訪問時、積み上げた返信先チェーンが長く
+  // 本体が画面外に押し出されている場合に限り、本体が見える位置までスクロールするために使う。
+  const mainCardRef = useRef<HTMLDivElement>(null);
+  // 中央ペインのスクロール位置（window.scrollY）を、どのノートIDについて最後に復元したかを
+  // 記録する（同じノートに対して二重に復元し直さないため）。
+  const scrollRestoredForRef = useRef<string | null>(null);
+  // 他画面へ遷移中かどうか。React 18のuseEffect cleanupはunmount時も非同期（paint後）に
+  // 実行されるため、遷移でDOMの高さが変わりブラウザが自動でscrollYを0へ補正した際、
+  // まだ解除されていない旧scrollリスナーがその0を保存してしまう競合がある（HomePageの
+  // navigatingAway/onBeforeNavigateと同じ問題・同じ対策）。リンククリック時点で同期的に
+  // trueにして以降の自動保存を止める。
+  const navigatingAway = useRef(false);
 
   useEffect(() => {
     if (!id) return;
@@ -95,6 +125,14 @@ export default function NoteDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteDetailTab]);
 
+  // 返信タブは3ペイン表示（repliesInCenter）では中央ペインの常設セクションへ移るため
+  // 右ペインのタブ選択肢から消える。セッション内で記憶されたタブ選択が返信のままだと
+  // 右ペインが空になってしまうため、その場合は投稿者タブへ戻す。
+  useEffect(() => {
+    if (repliesInCenter && noteDetailTab === 1) setNoteDetailTab(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repliesInCenter]);
+
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -120,6 +158,56 @@ export default function NoteDetailPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // 対象ポストが返信だった場合、返信先ポストのNoteCard（small表示）を本体の上に積み上げる。
+  // ブラウザバックで戻った際は、セッション内に記憶済みの遡り済みチェーン（noteAncestorIds）
+  // があればそれをそのまま再取得して再現し、無ければ直近の親1件だけを自動で読み込む。
+  useEffect(() => {
+    if (!note || !id) return;
+    let cancelled = false;
+    setAncestorsReady(false);
+    const base = note.renote ?? note;
+    const cachedIds = noteAncestorIds[id];
+    if (cachedIds && cachedIds.length > 0) {
+      Promise.all(cachedIds.map((aid) => api.notes.get(aid)))
+        .then((notes) => !cancelled && setAncestors(notes))
+        .catch(() => !cancelled && setAncestors([]))
+        .finally(() => !cancelled && setAncestorsReady(true));
+    } else if (base.replyId) {
+      api.notes
+        .get(base.replyId)
+        .then((parent) => {
+          if (cancelled) return;
+          setAncestors([parent]);
+          setNoteAncestorIds(id, [parent.id]);
+        })
+        .catch(() => !cancelled && setAncestors([]))
+        .finally(() => !cancelled && setAncestorsReady(true));
+    } else {
+      setAncestors([]);
+      setAncestorsReady(true);
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note?.id]);
+
+  // 積み上げ済みチェーンの一番上（最も古い）ポストがさらに返信だった場合、その「↩️ 返信」を
+  // クリックしてもう1段上の返信先ポストを取得し、先頭に積み足す（#スレッドをどんどん遡る）。
+  function climbAncestor(replyId: string) {
+    api.notes
+      .get(replyId)
+      .then((parent) => {
+        setAncestors((prev) => {
+          if (prev.some((a) => a.id === parent.id)) return prev;
+          const next = [parent, ...prev];
+          if (id) setNoteAncestorIds(id, next.map((a) => a.id));
+          return next;
+        });
+      })
+      .catch((e) => setError(getErrorMessage(e)));
+  }
 
   // 「前後のポスト」タブ（noteDetailTab === 2）を開いていて読み込みが完了したら、
   // このポストについて記憶済みのスクロール位置があればそれを復元し（ブラウザバックで
@@ -147,6 +235,48 @@ export default function NoteDetailPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteDetailTab, id]);
+
+  // 中央ペイン（window）のスクロール位置は継続的に保存する。HomePageと同じ理由（React 18
+  // StrictModeの疑似アンマウントでcleanupが前倒しに発火する）で、離脱時に一度だけではなく
+  // scrollイベントごとに即時保存する。
+  useEffect(() => {
+    if (!id) return;
+    const onScroll = () => {
+      if (navigatingAway.current) return;
+      setNoteDetailScrollY(id, window.scrollY);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [id, setNoteDetailScrollY]);
+
+  // AppShell側でリンククリックの捕捉フェーズ（RouterによるDOM差し替え前）に同期的に呼ばれる
+  // （AppShell.tsx参照）。ここで確定した位置を保存し、以降の自動保存（上記onScroll）を止める。
+  const saveScrollBeforeNavigate = useCallback(() => {
+    if (!id) return;
+    navigatingAway.current = true;
+    setNoteDetailScrollY(id, window.scrollY);
+  }, [id, setNoteDetailScrollY]);
+
+  // 積み上げ済みの返信先チェーンが確定（ancestorsReady）してから一度だけ、記憶済みの
+  // スクロール位置を復元する。チェーンの高さが確定する前に復元すると位置がズレるため待つ。
+  useEffect(() => {
+    if (!id || loading || !ancestorsReady) return;
+    if (scrollRestoredForRef.current === id) return;
+    scrollRestoredForRef.current = id;
+    const saved = noteDetailScrollY[id];
+    if (saved) {
+      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, saved)));
+    } else {
+      // 初回訪問（記憶が無い）: 積み上げた返信先チェーンが長く本体ポストが画面外に
+      // 押し出されている場合だけ、ちょうど本体が見える位置までスクロールする。
+      // block: "nearest" は既に画面内に収まっていれば何もしないため、短い場合は
+      // これまで通り先頭（ヘッダー含む）が見えたままになる。
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => mainCardRef.current?.scrollIntoView({ block: "nearest" })),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, loading, ancestorsReady]);
 
   function loadMoreOlder() {
     if (!id || loadingMoreOlder) return;
@@ -183,6 +313,24 @@ export default function NoteDetailPage() {
   // リポストという行為自体はリポストした人(note自身)の自己表現であるため、投稿者欄・
   // リモート判定・「元投稿者」タブの出し分けはnote自身（B）を基準にする（display=Aとは区別）。
   const hasRenote = Boolean(note?.renote);
+
+  // 右ペインのタブ一覧（意味の固定されたID付き）。返信タブは3ペイン表示では中央ペインの
+  // 常設セクションへ移るため、repliesInCenter時はここから除く。既存タブのIDは note を跨いで
+  // セッション内保持される noteDetailTab の値と一致させる必要があるため、配列内位置ではなく
+  // 固定IDで管理する。
+  const allTabs: { id: number; label: string }[] = [
+    { id: 0, label: t("home:noteDetailPage.authorTab") },
+    { id: 1, label: t("home:noteDetailPage.repliesTab") },
+    { id: 2, label: t("home:noteDetailPage.contextTab") },
+    { id: 3, label: t("home:noteDetailPage.reactionsTab") },
+    { id: 4, label: t("home:noteDetailPage.repostsTab") },
+    ...(hasRenote ? [{ id: 5, label: t("home:noteDetailPage.originalAuthorTab") }] : []),
+  ];
+  const visibleTabs = repliesInCenter ? allTabs.filter((tab) => tab.id !== 1) : allTabs;
+  const activeTabIndex = Math.max(
+    0,
+    visibleTabs.findIndex((tab) => tab.id === noteDetailTab),
+  );
 
   // 「前後のポスト」ブロック（自動読み込み → 一覧、右ペインの「前後のポスト」タブでのみ使う）。
   // 表示順は上から: [もっと新しいポストを読み込む] 新しいポスト(最大5件、対象に近い順で下寄り)
@@ -252,9 +400,31 @@ export default function NoteDetailPage() {
         />
       )}
 
+      {/* 対象ポストが返信だった場合の返信先チェーン（古い順、直近の親が本体の直上）。
+          一番上のカードだけ「↩️ 返信」クリックでさらに1段遡れる（#climbAncestor）。 */}
+      {ancestors.map((a, i) => (
+        <NoteCard
+          key={a.id}
+          note={a}
+          small
+          onReplyIndicatorClick={i === 0 ? climbAncestor : undefined}
+        />
+      ))}
+
       {note && (
         // 主役ポストはタイムラインと同じ NoteCard を大型表示で共用する（#43）。リポスト表示は NoteCard 内部で処理（#45）。
-        <NoteCard note={note} large linkToDetail={false} forceOpenCw={forceOpenCw} />
+        <div ref={mainCardRef}>
+          <NoteCard note={note} large linkToDetail={false} forceOpenCw={forceOpenCw} />
+        </div>
+      )}
+
+      {/* 返信タブ（3ペイン表示時のみ）: プロフィール画面のピン留めと同様、右ペインのタブから
+          外し中央ペイン下部の常設セクションとして表示する。 */}
+      {repliesInCenter && display && (
+        <>
+          <div className={panel.rightHeader}>{t("home:noteDetailPage.repliesTab")}</div>
+          <ReplyThreadPanel note={display} />
+        </>
       )}
     </>
   );
@@ -268,23 +438,14 @@ export default function NoteDetailPage() {
     // （修正はAppShell.module.css側、#241）。
     <div ref={rightPaneRef}>
       <Tabs
-        tabs={[
-          t("home:noteDetailPage.authorTab"),
-          t("home:noteDetailPage.repliesTab"),
-          t("home:noteDetailPage.contextTab"),
-          t("home:noteDetailPage.reactionsTab"),
-          t("home:noteDetailPage.repostsTab"),
-          // 既存タブのインデックス(0〜4)を保ったまま末尾に追加する（noteDetailTabは
-          // ノートを跨いで保持されるため、間に挿入すると他ノートとインデックスの意味がズレる）。
-          ...(hasRenote ? [t("home:noteDetailPage.originalAuthorTab")] : []),
-        ]}
-        active={noteDetailTab}
-        onChange={setNoteDetailTab}
+        tabs={visibleTabs.map((tab) => tab.label)}
+        active={activeTabIndex}
+        onChange={(i) => setNoteDetailTab(visibleTabs[i].id)}
         sticky
         top={0}
       />
       {noteDetailTab === 0 && note && <AuthorPanel note={note} />}
-      {noteDetailTab === 1 && display && <ReplyThreadPanel note={display} />}
+      {noteDetailTab === 1 && display && !repliesInCenter && <ReplyThreadPanel note={display} />}
       {noteDetailTab === 2 && renderContext()}
       {noteDetailTab === 3 && display && <ReactionListPanel note={display} />}
       {noteDetailTab === 4 && display && <RepostListPanel note={display} />}
@@ -292,5 +453,5 @@ export default function NoteDetailPage() {
     </div>
   );
 
-  return <AppShell center={center} right={right} />;
+  return <AppShell center={center} right={right} onBeforeNavigate={saveScrollBeforeNavigate} />;
 }

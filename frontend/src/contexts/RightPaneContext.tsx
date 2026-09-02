@@ -18,6 +18,15 @@ interface RightPaneState {
    * 詳細画面に戻った際に再現するため、セッション内（インメモリ）で保持する（#226）。 */
   noteContextScroll: Record<string, number>;
   setNoteContextScroll: (noteId: string, scrollTop: number) => void;
+  /** ポスト詳細画面でスレッドを遡って読み込んだ返信先ポストのID列（対象ポストID→古い順、
+   * 直近の親が末尾）。ブラウザバックで同じポストへ戻った際に遡り状態を再現するため、
+   * セッション内（インメモリ）で保持する。 */
+  noteAncestorIds: Record<string, string[]>;
+  setNoteAncestorIds: (noteId: string, ids: string[]) => void;
+  /** ポスト詳細画面（中央ペイン）のスクロール位置（ノートID→window.scrollY）。上記と同じ理由で
+   * ブラウザバック時に再現するためセッション内（インメモリ）で保持する。 */
+  noteDetailScrollY: Record<string, number>;
+  setNoteDetailScrollY: (noteId: string, y: number) => void;
 }
 
 const RightPaneContext = createContext<RightPaneState>({
@@ -27,6 +36,10 @@ const RightPaneContext = createContext<RightPaneState>({
   setNoteDetailTab: () => {},
   noteContextScroll: {},
   setNoteContextScroll: () => {},
+  noteAncestorIds: {},
+  setNoteAncestorIds: () => {},
+  noteDetailScrollY: {},
+  setNoteDetailScrollY: () => {},
 });
 
 export function RightPaneProvider({ children }: { children: React.ReactNode }) {
@@ -35,6 +48,14 @@ export function RightPaneProvider({ children }: { children: React.ReactNode }) {
   const [noteContextScroll, setNoteContextScrollState] = useState<Record<string, number>>({});
   const setNoteContextScroll = (noteId: string, scrollTop: number) => {
     setNoteContextScrollState((prev) => ({ ...prev, [noteId]: scrollTop }));
+  };
+  const [noteAncestorIds, setNoteAncestorIdsState] = useState<Record<string, string[]>>({});
+  const setNoteAncestorIds = (noteId: string, ids: string[]) => {
+    setNoteAncestorIdsState((prev) => ({ ...prev, [noteId]: ids }));
+  };
+  const [noteDetailScrollY, setNoteDetailScrollYState] = useState<Record<string, number>>({});
+  const setNoteDetailScrollY = (noteId: string, y: number) => {
+    setNoteDetailScrollYState((prev) => ({ ...prev, [noteId]: y }));
   };
   return (
     <RightPaneContext.Provider
@@ -45,6 +66,10 @@ export function RightPaneProvider({ children }: { children: React.ReactNode }) {
         setNoteDetailTab,
         noteContextScroll,
         setNoteContextScroll,
+        noteAncestorIds,
+        setNoteAncestorIds,
+        noteDetailScrollY,
+        setNoteDetailScrollY,
       }}
     >
       {children}
