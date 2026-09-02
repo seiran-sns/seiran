@@ -509,6 +509,17 @@
   font-size: 0.82rem;
 }
 
+/* 縦積みflexの直下要素はネストしたflexアイテムとしてmin-width:autoになるため、
+ * 表示名/IDが長いとボックスごと右へ突き抜けてしまう。ヘッダー側の.displayName/.acctと
+ * 同じ省略表示（ellipsis）で揃える。 */
+.quoteNames > strong,
+.quoteNames > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .quoteNames > span {
   color: var(--text-faint);
   font-size: 0.72rem;
