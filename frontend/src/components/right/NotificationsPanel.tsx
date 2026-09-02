@@ -38,6 +38,15 @@ export function resolveTargetNoteId(n: NotificationItem): string | undefined {
   return targetNote?.id;
 }
 
+/** 通知クリック時の遷移先とすべきポストID。
+ * ダイジェスト表示・ホバープレビュー（`resolveTargetNoteId`）は "renote" 通知でも
+ * リポスト元の実体投稿を優先するが、クリック遷移はリポストラッパー投稿自身
+ * （`note.id`）へ飛ばす（リポストという行為そのものの投稿ページを開くため）。 */
+export function resolveClickTargetNoteId(n: NotificationItem): string | undefined {
+  if (!NOTE_LINKED_TYPES.has(n.type)) return undefined;
+  return n.note?.id;
+}
+
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。
  * `who`（表示名部分）は呼び出し側で `EmojiText` を通す前提でプレーンテキストのまま返す。 */
 export function describeNotification(n: NotificationItem): {
@@ -191,6 +200,7 @@ export default function NotificationsPanel() {
       {items.map((n) => {
         const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix, newHandle } = describeNotification(n);
         const noteId = resolveTargetNoteId(n);
+        const clickNoteId = resolveClickTargetNoteId(n);
         const userLink = n.user?.username ? (
           <Link
             to={profilePath(n.user.username, n.user.host ?? undefined)}
@@ -231,8 +241,8 @@ export default function NotificationsPanel() {
         return (
           <li
             key={n.id}
-            className={noteId ? `${styles.item} ${styles.clickable}` : styles.item}
-            onClick={noteId ? () => navigate(`/notes/${noteId}`) : undefined}
+            className={clickNoteId ? `${styles.item} ${styles.clickable}` : styles.item}
+            onClick={clickNoteId ? () => navigate(`/notes/${clickNoteId}`) : undefined}
           >
             {noteId ? (
               <NoteHoverPreview noteId={noteId} className={styles.previewWrap} side="left">

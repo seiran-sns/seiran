@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NotificationItem } from "../../api/client";
-import { describeNotification, resolveTargetNoteId } from "./NotificationsPanel";
+import { describeNotification, resolveClickTargetNoteId, resolveTargetNoteId } from "./NotificationsPanel";
 
 function makeReactionNotification(overrides: Partial<NotificationItem> = {}): NotificationItem {
   return {
@@ -93,5 +93,28 @@ describe("resolveTargetNoteId（リポスト通知のダイジェスト対象は
   it("followのようにポストへのリンクを持たない通知種別は undefined を返す", () => {
     const n = makeReactionNotification({ type: "follow", note: { id: "999" } });
     expect(resolveTargetNoteId(n)).toBeUndefined();
+  });
+});
+
+describe("resolveClickTargetNoteId（クリック遷移先はリポストラッパー投稿自身にする）", () => {
+  it("renote通知はリポスト元ではなくラッパー投稿自身（note.id）を返す", () => {
+    const n = makeReactionNotification({
+      type: "renote",
+      note: { id: "999", renote: { id: "42" } },
+    });
+    expect(resolveClickTargetNoteId(n)).toBe("999");
+  });
+
+  it("quote通知は引用投稿自体（note.id）を対象にする", () => {
+    const n = makeReactionNotification({
+      type: "quote",
+      note: { id: "999", renote: { id: "42" } },
+    });
+    expect(resolveClickTargetNoteId(n)).toBe("999");
+  });
+
+  it("followのようにポストへのリンクを持たない通知種別は undefined を返す", () => {
+    const n = makeReactionNotification({ type: "follow", note: { id: "999" } });
+    expect(resolveClickTargetNoteId(n)).toBeUndefined();
   });
 });
