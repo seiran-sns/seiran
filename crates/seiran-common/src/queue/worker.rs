@@ -106,6 +106,10 @@ pub struct InboxContext {
     /// リアルタイム更新（#37）の共有ストリーミングハブ。standalone Worker では
     /// 接続クライアントの居ない空ハブになる（`Role::Firehose` と同じ扱い）。
     pub stream_hub: Arc<StreamHub>,
+    /// `note_save::save_ap_note_core`からのOGPリンクカード等enqueue用。`JobContext.queue`と
+    /// 必ず同一インスタンスを渡すこと（`InMemoryJobQueue`はプロセス内メモリのみで完結するため、
+    /// 別インスタンスだとenqueueした側とdequeueする側が食い違い、ジョブがサイレントに失われる）。
+    pub queue: Arc<dyn JobQueue>,
 }
 
 /// ジョブ実行コンテキスト（ハンドラに渡す）

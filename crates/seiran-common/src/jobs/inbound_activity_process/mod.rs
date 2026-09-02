@@ -30,6 +30,7 @@ mod flag;
 mod follow;
 mod move_actor;
 mod note_input;
+mod note_save;
 mod poll_vote;
 mod reaction;
 mod reference;
@@ -83,7 +84,7 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
                 activity["object"]["type"].as_str(),
                 Some("Note") | Some("Question")
             ) {
-                handle_create_note(activity, &inbox, ap_client, &ctx.queue).await
+                handle_create_note(activity, &inbox, ap_client).await
             } else {
                 Ok(())
             }

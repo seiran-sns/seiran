@@ -195,6 +195,7 @@ impl AppState {
             local_domain: self.local_domain.clone(),
             ap_private_key_pem: self.secrets.ap_private_key_pem.clone().unwrap_or_default(),
             stream_hub: Arc::clone(&self.stream_hub),
+            queue: Arc::clone(&self.job_queue),
         }
     }
 

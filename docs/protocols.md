@@ -48,12 +48,15 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 閲覧注意としてAPIへ返す。アンケートは外部サーバー上の集計結果を表示し、seiranからの投票配送は
 現時点では行わない。
 
-### Fedi投稿のURLカード（`jobs::inbound_activity_process::handle_create_note`）
+### Fedi投稿のURLカード（`jobs::inbound_activity_process::note_save::save_ap_note_core`）
 
 APには`app.bsky.embed.external`のような明示的なembed概念が無いため、`posts` INSERT後に
 本文（`ap_content_to_markdown_body`が生成したMarkdown `[text](url)`）中のリンクURLから
 `extract_link_card_urls`で最大5件（`MAX_LINK_CARDS_PER_POST`、重複排除・画像記法`![...]()`と
-表示テキストが`#`始まりのハッシュタグリンクは除外）を抽出する。Bskyは1投稿につき最大1件だが、
+表示テキストが`#`始まりのハッシュタグリンクは除外）を抽出する。この抽出とOGP取得ジョブの
+enqueueは`save_ap_note_core`に一本化されており、Create直接受信・参照解決経由（リプライ/
+引用/リポスト対象の1段階フェッチ、上記「Inbox で処理する Activity 種別」表の`Announce`欄
+参照）のどちらで保存された投稿でも必ず実行される。Bskyは1投稿につき最大1件だが、
 Fediは本文中の複数リンクぶん**複数件のURLカードが並ぶことがある**のが特徴。
 
 抽出した各URLは一律`Job::OgpFetch`をpriority::LOWで積み、非同期で
@@ -105,13 +108,13 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 | type | 処理概要 |
 |---|---|
 | `Follow` | ローカルアクター実在確認 → **ブロック済みチェック**（こちらが送信者をブロック中ならAcceptを送らずサイレントに無視）→ リモートアクターupsert → `follows` に accepted 状態でINSERT（即時承認）→ 通知 → `Accept` を返送 |
-| `Create`(Note) | リモートアクターupsert → HTML→内部リンクマーカー付きプレーンテキスト変換（6節参照）→ 絵文字tag解析（tag欠落時は同一ドメインの`remote_emojis`から本文shortcodeを補完）→ 可視性判定 → **重複排除**（3節参照）→ `posts` にINSERT → 添付URL保存 → フォロワーへWS配信 |
+| `Create`(Note) | リモートアクターupsert → HTML→内部リンクマーカー付きプレーンテキスト変換（6節参照）→ 絵文字tag解析（tag欠落時は同一ドメインの`remote_emojis`から本文shortcodeを補完）→ 可視性判定 → **重複排除**（3節参照）→ `posts` にINSERT → URLカード抽出（後述）・添付URL保存 → フォロワーへWS配信 |
 | `Accept`(Follow) | `follows.status` を `accepted` に更新、通知。`object` は埋め込み Follow と URI 文字列の両形式を受理する。送信する Follow ID は `activities/follow/{local_actor_id}-{remote_actor_id}` とし、URI形式の応答でも関係を一意に復元した上で `Accept.actor` と送信先リモートactorの一致を検証する（Mitra互換、#200） |
 | `Block` | リモートアクターupsert → ブロックされた側がブロックした側をフォローしていた関係があれば解消（`blocks` テーブルには書き込まない、通知も生成しない。11節参照） |
 | `Undo` | `object.type` で分岐: `Like`/`EmojiReact`→リアクション削除、`Announce`→リポスト論理削除、`Follow`→フォロー解除、`Block`→ログのみ（DB上の巻き戻し対象なし） |
 | `Delete` | `object`（文字列URIまたは`{"type":"Tombstone","id":...}`）の`ap_object_id`に一致する投稿を論理削除。**送信元アクター（`activity.actor`、HTTP Signature検証済み）が投稿者本人と一致する場合のみ**削除する（なりすまし対策）。一致する投稿が無い場合（アクター自身のDelete等）は無視。リモートアクター自体の退会（`Delete(Actor)`）は未対応 |
 | `Update` | `object.type == "Question"`（アンケート票数更新）のみ受理する。`Delete`と同じなりすまし対策の上で`posts.poll`を更新し、`poll_update_received=true`・`poll_fetched_at=now()`をセットして`pollUpdated` WebSocketイベントを配信する。本文再編集の`Update`（`object.type == "Note"`等）は未対応で無視する。詳細は「アンケート」節「リモートアンケートの生存監視」参照 |
-| `Announce` | リポスト保存。元ポストが未登録なら `resolve_reference`（`jobs::inbound_activity_process::reference`）で1段階だけリモート取得を試みてから紐付け。取得失敗（404/410は`gone`、それ以外は`pending`。#230/#231）でもリポストの箱（wrapper post行）自体は必ず保存する。取得できた場合の元ポスト保存処理（絵文字tag解析・引用/リプライ解決・可視性判定・CW/投票・ハッシュタグ・添付URL保存）は`Create`(Note)と同じ処理を適用するが、DMスレッド解決・通知・WS配信は行わない。元ポストが未解決（pending/gone）の間はリポスト通知も行わない |
+| `Announce` | リポスト保存。元ポストが未登録なら `resolve_reference`（`jobs::inbound_activity_process::reference`）で1段階だけリモート取得を試みてから紐付け。取得失敗（404/410は`gone`、それ以外は`pending`。#230/#231）でもリポストの箱（wrapper post行）自体は必ず保存する。取得できた場合の元ポスト保存処理（絵文字tag解析・引用/リプライ解決・可視性判定・CW/投票・ハッシュタグ・URLカード抽出・添付URL保存）は`save_ap_note_core`（`jobs::inbound_activity_process::note_save`、`Create`(Note)と共通の保存経路）で行うが、DMスレッド解決・通知・WS配信は行わない。元ポストが未解決（pending/gone）の間はリポスト通知も行わない |
 | `Like` \| `EmojiReact` | Misskey は絵文字リアクションも `type:"Like"` 固定で送るため、**wire type ではなく `content`/`_misskey_reaction` の有無**で判定する |
 | `Move` | アカウント引っ越しの受信処理（第1段階、送信側=引っ越し実行UIは未実装）。詳細は下記「アカウント引っ越し（Move）の受信」節参照 |
 
@@ -670,8 +673,10 @@ Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri`
 - 各タイムライン系クエリ（`home_timeline`/`local_timeline`/`timeline_by_actor`等）の`direct`閲覧制御は「投稿者本人 or `post_recipients`の宛先」のみ（`followers_only`とは異なりフォロワーには見せない）。`exclude_direct`クエリパラメータ（Misskey互換のためデフォルト`false`）を付けると宛先者でも一切表示しない。seiranフロントエンドは常にこれを付与する。`followers_only`/`direct`両方の判定はSQL関数`post_is_visible_to`に集約されている（`docs/database.md`参照）。
 - リスト・ピン留めタイムラインは閲覧者情報を持たない/宛先チェックの構造上の理由から、`direct`を無条件で除外する（`repository::list::timeline`、`repository::pinned_post::list_timeline_by_actor`）。
 
-### Fedi受信（`jobs::inbound_activity_process::handle_create_note`）
+### Fedi受信（`jobs::inbound_activity_process::note_save::save_ap_note_core`、Create直接受信時のみ）
 `to`/`cc`から`classify_ap_visibility`が`direct`と判定した場合、通常投稿受信経路とは別に以下を行う。
+参照解決経由（リプライ/引用/リポスト対象の1段階フェッチ）で保存された投稿は、実際にはinboxへ
+配送されていないためDM宛先情報を信頼できず、以下は常にスキップされる。
 - `note["inReplyTo"]`から`reply_to_post_id`を解決する（`find_id_by_ap_or_at_uri`。DM以外の通常投稿にも設定するようになった。以前はFedi受信投稿は`reply_to_post_id`を一切保存しない実装だった）。
 - `to`に含まれるローカルアクターURIから宛先を解決し`post_recipients`へ保存する。ローカルユーザーの`actors.ap_uri`は登録時に設定されない（都度`https://{local_domain}/users/{username}`として動的組み立てされる）ため`find_by_ap_uri`では引っかからない。`seiran_common::ap::extract_local_username`でホスト名まで含めて自ドメインのURIかを検証してからusernameを取り出し`find_by_username_domain`で解決する（末尾セグメントだけでは同名リモートユーザーと取り違える）。
 - `reply_to_post_id`の親が`direct`ならその`thread_root_post_id`を継承、そうでなければ自分自身のIDをスレッド起点とする（伝播コピー方式はローカル投稿と共通）。
