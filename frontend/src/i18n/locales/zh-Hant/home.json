@@ -157,6 +157,15 @@
       "toggleTitle": "新增內容警告",
       "guidePlaceholder": "內容警告說明",
       "guideRemainingCount": "剩餘{{count}}"
+    },
+    "insertEmoji": {
+      "buttonTitle": "插入表情符號短代碼",
+      "modalTitle": "插入表情符號"
+    },
+    "insertUserId": {
+      "buttonTitle": "插入使用者ID",
+      "modalTitle": "插入使用者ID",
+      "noResults": "找不到符合的使用者"
     }
   },
   "reactionChips": {

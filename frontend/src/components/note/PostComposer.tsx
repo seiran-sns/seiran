@@ -2,6 +2,8 @@ import {
   ChangeEvent,
   FormEvent,
   KeyboardEvent,
+  Suspense,
+  lazy,
   useEffect,
   useMemo,
   useRef,
@@ -9,6 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  ActorSuggestion,
   api,
   BskyEmbedChoice,
   DriveFile,
@@ -40,10 +43,16 @@ import i18n, {
   type PostLanguage,
 } from "../../i18n";
 import styles from "./PostComposer.module.css";
-import ComposerEditor from "./ComposerEditor";
+import ComposerEditor, { ComposerEditorHandle } from "./ComposerEditor";
+import Modal from "../common/Modal";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
+
+// 絵文字データセット・ユーザー検索UIは、実際にボタンを押してピッカーを開くまでロードしない
+// （バンドルサイズ対策、`ReactionPicker`と同じ方針）。
+const EmojiPickerPanel = lazy(() => import("./EmojiPickerPanel"));
+const UserIdPickerPanel = lazy(() => import("./UserIdPickerPanel"));
 
 /** ポスト言語選択リスト（`i18n.postLanguages`、表示言語と異なり中国語はバリエーションを
  * 持たない7言語）の表示名キー。値は`AppearanceSettingsPage`の言語ラベルと同じ翻訳キーを
@@ -297,16 +306,31 @@ export default function PostComposer({
   const [showPrivateTooltip, setShowPrivateTooltip] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const privateTooltipTimerRef = useRef<number | null>(null);
-  const editorRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<ComposerEditorHandle>(null);
   // 矢印キーナビゲーション（操作ボタン列⇄投稿ボタン列⇄本文）用のボタンref。
   const fediBtnRef = useRef<HTMLButtonElement>(null);
   const bskyBtnRef = useRef<HTMLButtonElement>(null);
   const attachBtnRef = useRef<HTMLButtonElement>(null);
   const pollBtnRef = useRef<HTMLButtonElement>(null);
   const cwBtnRef = useRef<HTMLButtonElement>(null);
+  const emojiBtnRef = useRef<HTMLButtonElement>(null);
+  const userIdBtnRef = useRef<HTMLButtonElement>(null);
   const unlistedBtnRef = useRef<HTMLButtonElement>(null);
   const privateBtnRef = useRef<HTMLButtonElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  // 絵文字ショートコード・ユーザーID挿入ピッカー（本文カーソル位置へ挿入、マイケル指示）。
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [userIdPickerOpen, setUserIdPickerOpen] = useState(false);
+
+  function insertEmojiAtCursor(content: string) {
+    setEmojiPickerOpen(false);
+    editorRef.current?.insertAtCursor(content);
+  }
+
+  function insertUserIdAtCursor(actor: ActorSuggestion) {
+    setUserIdPickerOpen(false);
+    editorRef.current?.insertAtCursor(`@${actor.target}`);
+  }
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -771,7 +795,16 @@ export default function PostComposer({
     }
   }
 
-  const controlBtnKeys = ["lang", "fedi", "bsky", "attach", "poll", "cw"] as const;
+  const controlBtnKeys = [
+    "lang",
+    "fedi",
+    "bsky",
+    "attach",
+    "poll",
+    "cw",
+    "emoji",
+    "userId",
+  ] as const;
   type ControlBtnKey = (typeof controlBtnKeys)[number];
   const controlBtnRefs: Record<ControlBtnKey, typeof fediBtnRef> = {
     lang: langBtnRef,
@@ -780,6 +813,8 @@ export default function PostComposer({
     attach: attachBtnRef,
     poll: pollBtnRef,
     cw: cwBtnRef,
+    emoji: emojiBtnRef,
+    userId: userIdBtnRef,
   };
   const controlBtnOrder: ControlBtnKey[] = controlBtnKeys.filter((key) => {
     // 言語選択はBsky配送の`langs`にのみ意味を持つため、Bskyボタン自体が出せない
@@ -999,12 +1034,58 @@ export default function PostComposer({
         >
           <TwemojiEmoji emoji="⚠️" />
         </button>
+        <button
+          ref={emojiBtnRef}
+          type="button"
+          className={styles.iconBtn}
+          onClick={() => setEmojiPickerOpen(true)}
+          onKeyDown={(e) => handleControlBtnKeyDown(e, "emoji")}
+          title={t("home:postComposer.insertEmoji.buttonTitle")}
+          aria-label={t("home:postComposer.insertEmoji.buttonTitle")}
+        >
+          <TwemojiEmoji emoji="😀" />
+        </button>
+        <button
+          ref={userIdBtnRef}
+          type="button"
+          className={styles.iconBtn}
+          onClick={() => setUserIdPickerOpen(true)}
+          onKeyDown={(e) => handleControlBtnKeyDown(e, "userId")}
+          title={t("home:postComposer.insertUserId.buttonTitle")}
+          aria-label={t("home:postComposer.insertUserId.buttonTitle")}
+        >
+          @
+        </button>
         <span
           className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}
         >
           {t("home:postComposer.remainingCount", { count: remaining })}
         </span>
       </div>
+
+      <Modal
+        open={emojiPickerOpen}
+        onClose={() => setEmojiPickerOpen(false)}
+        title={t("home:postComposer.insertEmoji.modalTitle")}
+      >
+        {emojiPickerOpen && (
+          <Suspense fallback={<p>{t("common:loading")}</p>}>
+            <EmojiPickerPanel onPick={insertEmojiAtCursor} />
+          </Suspense>
+        )}
+      </Modal>
+
+      <Modal
+        open={userIdPickerOpen}
+        onClose={() => setUserIdPickerOpen(false)}
+        title={t("home:postComposer.insertUserId.modalTitle")}
+      >
+        {userIdPickerOpen && (
+          <Suspense fallback={<p>{t("common:loading")}</p>}>
+            <UserIdPickerPanel onPick={insertUserIdAtCursor} />
+          </Suspense>
+        )}
+      </Modal>
 
       <div className={styles.bottomRow}>
         {cwEnabled && (

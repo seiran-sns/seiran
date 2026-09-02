@@ -12,9 +12,16 @@ import {
 import { useTranslation } from "react-i18next";
 import { ActorSuggestion, PublicEmoji, api } from "../../api/client";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
-import { SHORTCODE_SOURCE } from "../../lib/richTextPatterns";
+import { SHORTCODE_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
 import { findTwemojiMatches } from "../../lib/twemoji";
+import { mediaUrl } from "../../utils/mediaProxy";
 import styles from "./ComposerEditor.module.css";
+
+/** `PostComposer` から絵文字ショートコード・ユーザーIDピッカーで選んだ値をカーソル位置へ
+ * 挿入するために、本文DOM要素へ`insertAtCursor`を生やして公開する。 */
+export interface ComposerEditorHandle extends HTMLDivElement {
+  insertAtCursor: (text: string) => void;
+}
 
 type Candidate =
   | { kind: "actor"; key: string; value: string; actor: ActorSuggestion }
@@ -36,6 +43,31 @@ const DECORATION_RE = new RegExp(
   `(${SHORTCODE_SOURCE}(?![A-Za-z0-9_])|(?<![\\w])@[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?)`,
   "g",
 );
+
+/**
+ * 絵文字・ユーザーIDピッカー（`PostComposer`）から本文へ`text`を挿入する際の、挿入後の
+ * 本文全体とキャレット位置を計算する（DOM操作を含まない純粋関数、テスト用にexport）。
+ * `caret`が既存のショートコード/メンションの内側にある場合は、その直後へ挿入する
+ * （マイケル指示）。挿入直後に半角英数字が続くとショートコード/メンションとして認識
+ * されなくなる（`DECORATION_RE`の右端境界と同じ規則）ため、その場合は半角スペースを
+ * 1つ追加で挿入する。
+ */
+export function resolveInsertion(
+  value: string,
+  caret: number,
+  text: string,
+): { next: string; caret: number } {
+  const enclosing = Array.from(value.matchAll(DECORATION_RE)).find(
+    (m) => m.index! < caret && caret < m.index! + m[0].length,
+  );
+  const start = enclosing ? enclosing.index! + enclosing[0].length : caret;
+  const needsSpace = WORD_CHAR_RE.test(value.charAt(start));
+  const inserted = needsSpace ? `${text} ` : text;
+  return {
+    next: `${value.slice(0, start)}${inserted}${value.slice(start)}`,
+    caret: start + inserted.length,
+  };
+}
 
 function nodeValue(node: Node): string {
   if (node instanceof HTMLElement && node.dataset.value)
@@ -166,15 +198,12 @@ function twemojiHtml(text: string, emojiClassName: string): string {
   return html;
 }
 
-const ComposerEditor = forwardRef<HTMLDivElement, ComposerEditorProps>(function ComposerEditor(
+const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(function ComposerEditor(
   { value, onChange, onSubmitShortcut, onImagePaste, placeholder, autoFocus },
   forwardedRef,
 ) {
   const { t } = useTranslation();
   const editorRef = useRef<HTMLDivElement>(null);
-  // 投稿ボタン群からの矢印キーナビゲーション（上矢印で本文へフォーカスを戻す）用に、
-  // 本文のcontentEditable DOM要素を親（PostComposer）へ公開する。
-  useImperativeHandle(forwardedRef, () => editorRef.current as HTMLDivElement);
   const pendingCaret = useRef<number | null>(null);
   const composing = useRef(false);
   const initialCaret = useRef(value.length);
@@ -325,6 +354,24 @@ const ComposerEditor = forwardRef<HTMLDivElement, ComposerEditorProps>(function 
     onChange(next);
     editorRef.current?.focus();
   }
+
+  /** 絵文字・ユーザーIDピッカー（`PostComposer`）から、現在のキャレット位置へ`text`を挿入する。 */
+  function insertAtCursor(text: string) {
+    const { next, caret: nextCaret } = resolveInsertion(value, caret, text);
+    pendingCaret.current = nextCaret;
+    setCaret(nextCaret);
+    onChange(next);
+    editorRef.current?.focus();
+  }
+
+  // 投稿ボタン群からの矢印キーナビゲーション（上矢印で本文へフォーカスを戻す）、および
+  // 絵文字・ユーザーIDピッカーからの挿入用に、本文のcontentEditable DOM要素へ
+  // `insertAtCursor`を生やして親（PostComposer）へ公開する。
+  useImperativeHandle(forwardedRef, () => {
+    const el = editorRef.current as ComposerEditorHandle;
+    if (el) el.insertAtCursor = insertAtCursor;
+    return el;
+  });
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     // Safariでは変換確定のEnterでcompositionendがkeydownより先に発火し、
@@ -494,7 +541,7 @@ const ComposerEditor = forwardRef<HTMLDivElement, ComposerEditorProps>(function 
                 ) : (
                   <>
                     {candidate.actor.avatar_url && (
-                      <img src={candidate.actor.avatar_url} alt="" />
+                      <img src={mediaUrl(candidate.actor.avatar_url)} alt="" />
                     )}
                     <span>
                       {candidate.actor.display_name || candidate.actor.username}

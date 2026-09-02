@@ -157,6 +157,15 @@
       "toggleTitle": "열람 주의 추가",
       "guidePlaceholder": "열람 주의 안내문",
       "guideRemainingCount": "{{count}} 남음"
+    },
+    "insertEmoji": {
+      "buttonTitle": "이모티콘 단축코드 삽입",
+      "modalTitle": "이모티콘 삽입"
+    },
+    "insertUserId": {
+      "buttonTitle": "사용자 ID 삽입",
+      "modalTitle": "사용자 ID 삽입",
+      "noResults": "일치하는 사용자를 찾을 수 없습니다"
     }
   },
   "reactionChips": {

@@ -157,6 +157,15 @@
       "toggleTitle": "Add a content warning",
       "guidePlaceholder": "Content warning text",
       "guideRemainingCount": "{{count}} left"
+    },
+    "insertEmoji": {
+      "buttonTitle": "Insert an emoji shortcode",
+      "modalTitle": "Insert emoji"
+    },
+    "insertUserId": {
+      "buttonTitle": "Insert a user ID",
+      "modalTitle": "Insert user ID",
+      "noResults": "No matching users found"
     }
   },
   "reactionChips": {

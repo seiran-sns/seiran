@@ -157,6 +157,15 @@
       "toggleTitle": "Ajouter un avertissement de contenu",
       "guidePlaceholder": "Texte de l'avertissement",
       "guideRemainingCount": "{{count}} restants"
+    },
+    "insertEmoji": {
+      "buttonTitle": "Insérer un raccourci d'emoji",
+      "modalTitle": "Insérer un emoji"
+    },
+    "insertUserId": {
+      "buttonTitle": "Insérer un identifiant utilisateur",
+      "modalTitle": "Insérer un identifiant utilisateur",
+      "noResults": "Aucun utilisateur correspondant trouvé"
     }
   },
   "reactionChips": {

@@ -157,6 +157,15 @@
       "toggleTitle": "CW（閲覧注意）を追加",
       "guidePlaceholder": "閲覧注意の案内文",
       "guideRemainingCount": "残り{{count}}"
+    },
+    "insertEmoji": {
+      "buttonTitle": "絵文字ショートコードを挿入",
+      "modalTitle": "絵文字を挿入"
+    },
+    "insertUserId": {
+      "buttonTitle": "ユーザーIDを挿入",
+      "modalTitle": "ユーザーIDを挿入",
+      "noResults": "該当するユーザーが見つかりません"
     }
   },
   "reactionChips": {

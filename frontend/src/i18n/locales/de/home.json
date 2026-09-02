@@ -157,6 +157,15 @@
       "toggleTitle": "Inhaltswarnung hinzufügen",
       "guidePlaceholder": "Text der Inhaltswarnung",
       "guideRemainingCount": "noch {{count}}"
+    },
+    "insertEmoji": {
+      "buttonTitle": "Emoji-Kurzcode einfügen",
+      "modalTitle": "Emoji einfügen"
+    },
+    "insertUserId": {
+      "buttonTitle": "Benutzer-ID einfügen",
+      "modalTitle": "Benutzer-ID einfügen",
+      "noResults": "Keine passenden Benutzer gefunden"
     }
   },
   "reactionChips": {

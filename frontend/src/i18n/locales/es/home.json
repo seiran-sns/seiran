@@ -157,6 +157,15 @@
       "toggleTitle": "Añadir aviso de contenido",
       "guidePlaceholder": "Texto del aviso de contenido",
       "guideRemainingCount": "quedan {{count}}"
+    },
+    "insertEmoji": {
+      "buttonTitle": "Insertar un código abreviado de emoji",
+      "modalTitle": "Insertar emoji"
+    },
+    "insertUserId": {
+      "buttonTitle": "Insertar un ID de usuario",
+      "modalTitle": "Insertar ID de usuario",
+      "noResults": "No se encontraron usuarios coincidentes"
     }
   },
   "reactionChips": {
