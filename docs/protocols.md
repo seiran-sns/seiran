@@ -107,7 +107,7 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 
 | type | 処理概要 |
 |---|---|
-| `Follow` | ローカルアクター実在確認 → **ブロック済みチェック**（こちらが送信者をブロック中ならAcceptを送らずサイレントに無視）→ リモートアクターupsert → `follows` に accepted 状態でINSERT（即時承認）→ 通知 → `Accept` を返送 |
+| `Follow` | ローカルアクター実在確認 → **ブロック済みチェック**（こちらが送信者をブロック中ならAcceptを送らずサイレントに無視）→ リモートアクターupsert → ターゲットが`actors.is_locked=true`（フォロー承認制、下記「フォロー承認制」節参照）なら生アクティビティごと`follows`にpending状態で保存し`Accept`は送らず承認待ち通知のみ、そうでなければ`follows`に accepted 状態でINSERT（即時承認）→ 通知 → `Accept` を返送 |
 | `Create`(Note) | リモートアクターupsert → HTML→内部リンクマーカー付きプレーンテキスト変換（6節参照）→ 絵文字tag解析（tag欠落時は同一ドメインの`remote_emojis`から本文shortcodeを補完）→ 可視性判定 → **重複排除**（3節参照）→ `posts` にINSERT → URLカード抽出（後述）・添付URL保存 → フォロワーへWS配信 |
 | `Accept`(Follow) | `follows.status` を `accepted` に更新、通知。`object` は埋め込み Follow と URI 文字列の両形式を受理する。送信する Follow ID は `activities/follow/{local_actor_id}-{remote_actor_id}` とし、URI形式の応答でも関係を一意に復元した上で `Accept.actor` と送信先リモートactorの一致を検証する（Mitra互換、#200） |
 | `Block` | リモートアクターupsert → ブロックされた側がブロックした側をフォローしていた関係があれば解消（`blocks` テーブルには書き込まない、通知も生成しない。11節参照） |
@@ -117,6 +117,19 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 | `Announce` | リポスト保存。元ポストが未登録なら `resolve_reference`（`jobs::inbound_activity_process::reference`）で1段階だけリモート取得を試みてから紐付け。取得失敗（404/410は`gone`、それ以外は`pending`。#230/#231）でもリポストの箱（wrapper post行）自体は必ず保存する。取得できた場合の元ポスト保存処理（絵文字tag解析・引用/リプライ解決・可視性判定・CW/投票・ハッシュタグ・URLカード抽出・添付URL保存）は`save_ap_note_core`（`jobs::inbound_activity_process::note_save`、`Create`(Note)と共通の保存経路）で行うが、DMスレッド解決・通知・WS配信は行わない。元ポストが未解決（pending/gone）の間はリポスト通知も行わない |
 | `Like` \| `EmojiReact` | Misskey は絵文字リアクションも `type:"Like"` 固定で送るため、**wire type ではなく `content`/`_misskey_reaction` の有無**で判定する |
 | `Move` | アカウント引っ越しの受信処理（第1段階、送信側=引っ越し実行UIは未実装）。詳細は下記「アカウント引っ越し（Move）の受信」節参照 |
+
+### フォロー承認制（`actors.is_locked`）
+設定画面「プライバシー」から切り替えられる、Mastodon/Misskey準拠の`manuallyApprovesFollowers`。Actor文書（`GET /users/:username`）に同名フィールドとして常に反映する。投稿の公開範囲には一切影響せず、フォローの成立にのみ本人の承認を要求する（Twitterの「鍵アカウント」とは異なる）。
+
+フォローリクエストが`follows.status='pending'`のまま留まる経路は2つ:
+- ローカル↔ローカル（`follow_exec::follow_local`）: ターゲットがロック中なら、ATPフォローコミット自体を承認まで実行しない（未承認の間は本当にフォローが成立していない状態を保つ）。
+- Fediverseからの受信`Follow`（上表参照）: `Accept`を即送信せず、受信した生アクティビティを`follows.pending_follow_activity`に保存する。
+
+いずれの経路でも承認待ちの通知（`NotificationKind::FollowRequest`、WSイベント`followRequest`）を本人へ送る。
+
+承認/拒否は`seiran_common::follow_approval::{approve_pending_follow, reject_pending_follow}`に共通実装している（設定画面「承認待ちフォロー」からの単発操作用API `POST /api/follow-requests/:follower_actor_id/{accept,reject}`、および承認制OFF切替時の一括承認ジョブ`Job::FollowRequestsBulkAccept`の両方から呼ぶ）。承認時、フォロワーがローカルならここで初めてATPフォローコミットを行い（`accept_and_set_rkey`でrkeyを保存）、フォロワーがFediリモートなら保存済みの`pending_follow_activity`を`object`として`Accept`を送る（保存が無い場合は`{"type":"Follow","actor":...,"object":...}`を最小限組み立てる）。拒否時、フォロワーがFediリモートなら同様に`Reject`を送り、いずれも`follows`行を削除する。
+
+Bskyネットワーク側（AT Protocol）には非公開アカウントという概念自体が無いため、seiranのAPIを経由しない直接フォロー（Bluesky公式アプリ等から直接DIDをフォロー）はこの設定でも防げず、常に即座に成立する（承認制の対象外）。
 
 ### 公開エンドポイント
 `GET /users/:username`（Actor文書）、`GET /users/:username/outbox`（`?page=true`でOrderedCollectionPage）、`GET /.well-known/webfinger`、`GET /.well-known/nodeinfo` + `GET /nodeinfo/2.1`、featured（ピン留め）・lists（公開リスト）の各コレクション。
@@ -639,7 +652,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
   - **既知の制限**: ブロック/ミュート（`actor_is_hidden_for_viewer`）はチャンネル配信では考慮しない（コネクション数に比例するDBコストになるため。通知系は`notifications`テーブルINSERT時にのみチェックされる）。リストタイムラインは10節の通り「viewer概念が無い」設計のため、`userList`チャンネルもメンバーシップのみで判定し（`visibility != 'direct'`のみ除外）、フォロー関係やブロックは考慮しない。
   - DM（`visibility="direct"`）は引き続き`recipients`方式の`publish_note`のまま配信される（チャンネル購読は不要）。
 
-`notifications` テーブルへの書き込みは、ローカルユーザー間のフォロー成立・ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。ローカルフォローは `follows` への新規挿入時だけ `Follow` 通知を生成し、既存関係への再リクエストでは重複させない。種別は `Follow`/`Reaction`/`FollowRequestAccepted`/`Mention`/`Reply`/`Repost`/`Quote`/`MoveRefollowed`/`MoveAlreadyFollowing` の9種（最後の2つはMisskey APIに無いMove受信専用のseiran独自拡張、2節「アカウント引っ越し（Move）の受信」参照）。WebSocketは基本的に「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
+`notifications` テーブルへの書き込みは、ローカルユーザー間のフォロー成立・ローカルリアクション作成・AP/ATP inbound（Follow/Accept/Reaction）の各経路から行われる。ローカルフォローは `follows` への新規挿入時だけ `Follow` 通知を生成し、既存関係への再リクエストでは重複させない。種別は `Follow`/`Reaction`/`FollowRequest`/`FollowRequestAccepted`/`Mention`/`Reply`/`Repost`/`Quote`/`MoveRefollowed`/`MoveAlreadyFollowing` の10種（`FollowRequest`はフォロー承認制中の本人宛て承認待ち通知、Misskey互換API上は`receiveFollowRequest`に変換される。`MoveRefollowed`/`MoveAlreadyFollowing`はMisskey APIに無いMove受信専用のseiran独自拡張、2節「アカウント引っ越し（Move）の受信」参照）。WebSocketは基本的に「新着があった」というシグナル配信のみに用い、実データは常に `POST /api/i/notifications`（REST、`sinceId`付き）から再取得する（一覧表示とスキーマを統一するため）。
 
 ### リアクション通知の重複排除（`reaction_id`）
 ローカルユーザーが ATP 実体（`at_uri`/`at_cid`）を持つ投稿へリアクションすると、(1) `notes::create_reaction` がその場でローカル通知を即時INSERTし、(2) 同じリアクションを非同期で `AtpCommitService::commit_like` が `app.bsky.feed.like` としてコミットし、それが自分自身の firehose 受信（`seiran-atp-repo::firehose::handle_inbound_like_create`）で戻ってきて再度通知INSERTを試みる、という2経路が走る。この2つは「経路が違うだけの同一操作」であり、素朴に両方INSERTすると通知が重複表示される。

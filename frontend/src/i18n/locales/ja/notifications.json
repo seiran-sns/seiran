@@ -6,6 +6,7 @@
     "unknownUser": "だれか",
     "reactionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> がリアクションしました",
     "followText": "<userLink><emojiName/>{{handleSuffix}}</userLink> にフォローされました",
+    "followRequestText": "<userLink><emojiName/>{{handleSuffix}}</userLink> からフォローリクエストが届きました",
     "followAcceptedText": "<userLink><emojiName/>{{handleSuffix}}</userLink> がフォローを承認しました",
     "mentionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> からメンションされました",
     "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink> から返信がありました",

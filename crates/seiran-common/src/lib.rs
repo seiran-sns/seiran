@@ -5,6 +5,7 @@ pub mod auth;
 pub mod avatar;
 pub mod crypto;
 pub mod db;
+pub mod follow_approval;
 pub mod follow_exec;
 pub mod follow_target;
 pub mod hashtag;

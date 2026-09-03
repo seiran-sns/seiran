@@ -215,6 +215,18 @@ export const account = {
       { hide_from_algorithmic_recommendations: hideFromAlgorithmicRecommendations },
     );
   },
+  /** 設定画面「プライバシー」の承認制フォロー（鍵アカウント）の現在値を取得する。
+   * Mastodon/Misskey準拠の`manuallyApprovesFollowers`で、投稿の公開範囲には影響しない。 */
+  getLock() {
+    return request<{ is_locked: boolean }>("GET", "/account/lock");
+  },
+  /** 設定画面「プライバシー」から承認制フォローのON/OFFを切り替える。OFFにした場合、
+   * その時点で存在した承認待ちフォローリクエストはサーバー側で一括承認される。 */
+  updateLock(isLocked: boolean) {
+    return request<{ is_locked: boolean }>("POST", "/account/lock", {
+      is_locked: isLocked,
+    });
+  },
   /** 設定画面のアカウント設定からメールアドレス変更をリクエストする（#59、新アドレス宛に確認メール送信）。 */
   requestEmailChange(newEmail: string) {
     return request<void>("POST", "/account/email/request-change", {

@@ -137,6 +137,64 @@ async fn follow_local(
 
     check_not_blocked(config, local_actor_id, target_actor.id).await?;
 
+    // 承認制（鍵アカウント）のローカルターゲット宛てはpendingのまま留め、ATPコミット自体を
+    // 承認されるまで実行しない（`follow_approval::approve_pending_follow`が承認時に行う）。
+    // ロック中は「フォローが本当に成立していない」状態を保つのが目的（承認前に相手が
+    // フォロワーとしてATP上に見えてしまうのを避ける）。
+    if target_actor.is_locked {
+        let inserted = config
+            .follows
+            .upsert_pending(local_actor_id, target_actor.id)
+            .await
+            .map_err(|e| {
+                FollowError::Internal(format!("[follow/local] follows INSERT 失敗: {}", e))
+            })?;
+
+        if inserted {
+            let notif_id = generate_snowflake_id(chrono::Utc::now());
+            if let Err(e) = config
+                .notifications
+                .insert(
+                    notif_id,
+                    target_actor.id,
+                    NotificationKind::FollowRequest,
+                    Some(local_actor_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+            {
+                tracing::error!("[follow/local] notifications INSERT 失敗: {}", e);
+            }
+
+            config.stream_hub.publish_event(
+                HashSet::from([target_actor.id]),
+                "followRequest",
+                json!({
+                    "actor": {
+                        "username": local_username,
+                        "domain": config.local_domain.as_str(),
+                    }
+                }),
+            );
+        }
+
+        tracing::info!(
+            "[follow/local] {} → {} フォローリクエスト送信 (pending, 鍵アカウント)",
+            local_actor_id,
+            target_actor.id
+        );
+
+        return Ok(FollowOutcome::Pending {
+            target_uri: format!("https://{}/users/{}", config.local_domain, username),
+            already_following: !inserted,
+        });
+    }
+
     let target_did = target_actor.at_did.clone().ok_or(FollowError::NoAtDid)?;
 
     let now = chrono::Utc::now();

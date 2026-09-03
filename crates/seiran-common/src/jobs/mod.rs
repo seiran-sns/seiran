@@ -16,6 +16,7 @@ pub mod bsky_list_membership_resolve;
 pub mod bsky_post_commit_deferred;
 pub mod bsky_video_poll;
 pub mod follow_import;
+pub mod follow_requests_bulk_accept;
 pub mod inbound_activity_process;
 pub mod link_card_embed_resolve;
 pub mod ogp_fetch;

@@ -1,7 +1,10 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { api } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useGoBack } from "../contexts/NavigationHistoryContext";
+import { useStreamingContext } from "../contexts/StreamingContext";
 import panel from "../components/common/Panel.module.css";
 import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import styles from "./SettingsMenu.module.css";
@@ -11,9 +14,10 @@ interface SettingsMenuItem {
   icon: string;
   labelKey: string;
   disabled?: boolean;
+  badge?: number;
 }
 
-const ITEMS: SettingsMenuItem[] = [
+const BASE_ITEMS: SettingsMenuItem[] = [
   { to: "/settings/account", icon: "🔐", labelKey: "menu.account" },
   { to: "/settings/profile", icon: "🪪", labelKey: "menu.profile" },
   { to: "/settings/mutes-blocks", icon: "🚫", labelKey: "menu.mutesBlocks" },
@@ -29,6 +33,25 @@ export default function SettingsMenuPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const goBack = useGoBack();
+  const { followRequestCount } = useStreamingContext();
+  const [isLocked, setIsLocked] = useState(false);
+
+  useEffect(() => {
+    api.account.getLock().then((r) => setIsLocked(r.is_locked)).catch(() => {});
+  }, []);
+
+  // 承認制フォロー（鍵アカウント）中のみ「承認待ちフォロー」項目を表示する。
+  const items: SettingsMenuItem[] = isLocked
+    ? [
+        ...BASE_ITEMS,
+        {
+          to: "/settings/follow-requests",
+          icon: "👥",
+          labelKey: "menu.followRequests",
+          badge: followRequestCount,
+        },
+      ]
+    : BASE_ITEMS;
 
   const center = (
     <>
@@ -39,7 +62,7 @@ export default function SettingsMenuPage() {
         <span className={panel.title}>{t("account:menu.title")}</span>
       </header>
       <ul className={styles.list}>
-        {ITEMS.map((item) => (
+        {items.map((item) => (
           <li key={item.labelKey}>
             <button
               type="button"
@@ -49,6 +72,7 @@ export default function SettingsMenuPage() {
             >
               <TwemojiEmoji emoji={item.icon} className={styles.icon} />
               <span className={styles.label}>{t(`account:${item.labelKey}`)}</span>
+              {!!item.badge && <span className={styles.badge}>{item.badge > 99 ? "99+" : item.badge}</span>}
               {item.disabled ? (
                 <span className={styles.comingSoon}>{t("account:menu.comingSoon")}</span>
               ) : (

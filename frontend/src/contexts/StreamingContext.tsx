@@ -62,6 +62,11 @@ interface StreamingValue {
   dmUnreadCount: number;
   /** サーバーから未読数を再取得する（既読操作後・ページロード時に呼ぶ）。 */
   refreshDmUnreadCount: () => void;
+  /** 承認待ちフォローリクエスト件数（承認制フォロー中のみ非0、設定アイコン・
+   * 「承認待ちフォロー」メニュー項目のバッジ用）。 */
+  followRequestCount: number;
+  /** サーバーから承認待ち件数を再取得する（承認/拒否操作後・ページロード時に呼ぶ）。 */
+  refreshFollowRequestCount: () => void;
 }
 
 const StreamingContext = createContext<StreamingValue>({
@@ -73,12 +78,15 @@ const StreamingContext = createContext<StreamingValue>({
   registerDirectMessage: () => () => {},
   dmUnreadCount: 0,
   refreshDmUnreadCount: () => {},
+  followRequestCount: 0,
+  refreshFollowRequestCount: () => {},
 });
 
 const NOTIF_KINDS = new Set([
   "reaction",
   "follow",
   "followAccepted",
+  "followRequest",
   "mention",
   "reply",
   "repost",
@@ -91,6 +99,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [unread, setUnread] = useState(0);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
+  const [followRequestCount, setFollowRequestCount] = useState(0);
   const reactionListeners = useRef<Map<string, Set<ReactionListener>>>(new Map());
   const notifListeners = useRef<Set<NotifListener>>(new Set());
   const dmListeners = useRef<Set<NoteListener>>(new Set());
@@ -109,8 +118,14 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     api.dm.unreadCount().then((r) => setDmUnreadCount(r.count)).catch(() => {});
   }, [user]);
 
+  const refreshFollowRequestCount = useCallback(() => {
+    if (!user) return;
+    api.followRequests.count().then((r) => setFollowRequestCount(r.count)).catch(() => {});
+  }, [user]);
+
   useEffect(() => {
     refreshDmUnreadCount();
+    refreshFollowRequestCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -146,6 +161,9 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
       } else if (NOTIF_KINDS.has(type)) {
         setUnread((u) => u + 1);
         notifListeners.current.forEach((cb) => cb());
+        if (type === "followRequest") {
+          refreshFollowRequestCount();
+        }
         if (type === "followAccepted") {
           // フォロー状態は共有ストア（stores/followStatusStore）に一本化しているため、ここで直接
           // 更新するだけで、プロフィール画面・タイムライン上のフォロースイッチなど表示中の
@@ -228,6 +246,8 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         registerDirectMessage,
         dmUnreadCount,
         refreshDmUnreadCount,
+        followRequestCount,
+        refreshFollowRequestCount,
       }}
     >
       {children}

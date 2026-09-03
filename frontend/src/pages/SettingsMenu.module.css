@@ -42,6 +42,17 @@
   font-size: 1.1rem;
 }
 
+.badge {
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
 .comingSoon {
   font-size: 0.76rem;
   color: var(--text-faint);

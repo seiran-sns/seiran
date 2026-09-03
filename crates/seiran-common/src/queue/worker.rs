@@ -421,6 +421,11 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
                 .await
                 .map_err(JobError::from)
         }
+        Job::FollowRequestsBulkAccept { actor_id } => {
+            jobs::follow_requests_bulk_accept::handle(actor_id, ctx)
+                .await
+                .map_err(JobError::from)
+        }
         Job::BskyPostCommitDeferred {
             actor_id,
             post_id,
@@ -504,6 +509,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::BskyVideoPoll { .. } => "BskyVideoPoll",
         Job::ProxyFollowSync { .. } => "ProxyFollowSync",
         Job::AccountWithdrawUnfollowAll { .. } => "AccountWithdrawUnfollowAll",
+        Job::FollowRequestsBulkAccept { .. } => "FollowRequestsBulkAccept",
         Job::BskyPostCommitDeferred { .. } => "BskyPostCommitDeferred",
         Job::BskyDmSend { .. } => "BskyDmSend",
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
@@ -564,6 +570,11 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         Job::AccountWithdrawUnfollowAll { .. } => RetryConfig {
             max_attempts: 10,
             base_delay_ms: 5000, // ApDelivery/ProxyFollowSyncと同様、リモート配送を含むため長めに構える
+            max_delay_ms: 3_600_000,
+        },
+        Job::FollowRequestsBulkAccept { .. } => RetryConfig {
+            max_attempts: 10,
+            base_delay_ms: 5000, // AccountWithdrawUnfollowAllと同様、AP Accept送信を含むため長めに構える
             max_delay_ms: 3_600_000,
         },
         Job::BskyPostCommitDeferred { .. } => RetryConfig {

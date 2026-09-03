@@ -15,6 +15,7 @@ import HomePage from "./pages/HomePage";
 const AccountSettingsPage = lazy(() => import("./pages/AccountSettingsPage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
 const FollowImportSettingsPage = lazy(() => import("./pages/FollowImportSettingsPage"));
+const FollowRequestsSettingsPage = lazy(() => import("./pages/FollowRequestsSettingsPage"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const HashtagPage = lazy(() => import("./pages/HashtagPage"));
 const ListDetailPage = lazy(() => import("./pages/ListDetailPage"));
@@ -198,6 +199,14 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <FollowImportSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/follow-requests"
+          element={
+            <RequireAuth>
+              <FollowRequestsSettingsPage />
             </RequireAuth>
           }
         />

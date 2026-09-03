@@ -1,5 +1,5 @@
 import { cursorParams, request } from "./core";
-import type { DmSession, FollowImportStartResponse, FollowImportStatusResponse, FollowResponse, RawNote } from "./types";
+import type { DmSession, FollowImportStartResponse, FollowImportStatusResponse, FollowListItem, FollowResponse, RawNote } from "./types";
 import { normalizeNote } from "./types";
 
 export const follows = {
@@ -8,6 +8,23 @@ export const follows = {
   },
   delete(target: string) {
     return request<void>("POST", "/follows/delete", { target });
+  },
+};
+
+/** 承認制フォロー（鍵アカウント）の「承認待ちフォロー」画面（設定画面から遷移）用。 */
+export const followRequests = {
+  list() {
+    return request<FollowListItem[]>("GET", "/follow-requests");
+  },
+  /** 設定アイコン・メニュー項目のバッジ表示用件数。 */
+  count() {
+    return request<{ count: number }>("GET", "/follow-requests/count");
+  },
+  accept(followerActorId: string) {
+    return request<void>("POST", `/follow-requests/${followerActorId}/accept`);
+  },
+  reject(followerActorId: string) {
+    return request<void>("POST", `/follow-requests/${followerActorId}/reject`);
   },
 };
 

@@ -11,6 +11,7 @@ pub mod email_verify;
 pub mod emojis;
 pub mod favicon;
 pub mod follow_import;
+pub mod follow_requests;
 pub mod follows;
 pub mod hashtags;
 pub mod health;

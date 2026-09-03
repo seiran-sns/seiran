@@ -36,13 +36,16 @@ pub struct Actor {
     /// `true`ならFediverseへ`vcard:bday`として公開する（デフォルト`false`、Misskey本家には
     /// この可視性切り替え自体が無くseiran独自の拡張）。
     pub birth_date_public: bool,
+    /// フォロー承認制（鍵アカウント）。`true`なら新規フォローリクエストは`follows.status`が
+    /// `pending`のまま留まり、本人の承認/拒否を待つ（ローカルユーザーのみ意味を持つ）。
+    pub is_locked: bool,
 }
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
     display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem, \
     bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields, \
-    birth_date, birth_date_public";
+    birth_date, birth_date_public, is_locked";
 
 /// プロフィール編集画面（`PATCH /api/users/me/profile`）が読み書きする行の部分集合。
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -206,6 +209,12 @@ pub trait ActorRepository: Send + Sync {
         &self,
         actor_id: i64,
     ) -> Result<bool, sqlx::Error>;
+
+    /// フォロー承認制（鍵アカウント）を設定する。
+    async fn update_is_locked(&self, actor_id: i64, is_locked: bool) -> Result<(), sqlx::Error>;
+
+    /// 現在の承認制設定を取得する。行が無ければ`false`（デフォルト）。
+    async fn find_is_locked(&self, actor_id: i64) -> Result<bool, sqlx::Error>;
 }
 
 pub struct PgActorRepository {
@@ -537,5 +546,22 @@ impl ActorRepository for PgActorRepository {
         .fetch_optional(&self.pool)
         .await
         .map(|r| r.unwrap_or(false))
+    }
+
+    async fn update_is_locked(&self, actor_id: i64, is_locked: bool) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE actors SET is_locked = $1, updated_at = NOW() WHERE id = $2")
+            .bind(is_locked)
+            .bind(actor_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn find_is_locked(&self, actor_id: i64) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar::<_, bool>("SELECT is_locked FROM actors WHERE id = $1")
+            .bind(actor_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|r| r.unwrap_or(false))
     }
 }

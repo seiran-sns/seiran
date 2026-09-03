@@ -97,6 +97,9 @@ ID 採番は2系統ある。
 ### `actors.hide_from_algorithmic_recommendations`
 Bskyの`app.bsky.actor.contentVisibilityDeclaration`（rkey固定`self`、`hideFromAlgorithmicRecommendations`）に対応するローカルキャッシュ（デフォルト`false`）。設定画面「プライバシー」から切り替え、`true`にするとDiscoverフィード等のBsky側アルゴリズムレコメンドから除外するよう要求するアカウントレベルの宣言をPDSへコミットする。詳細は`docs/protocols.md` 3節「アルゴリズムレコメンドからの除外」参照。
 
+### `actors.is_locked`
+フォロー承認制（Mastodon/Misskey準拠の`manuallyApprovesFollowers`、デフォルト`false`）。設定画面「プライバシー」から切り替える。`true`の間、新規フォローリクエスト（ローカル間フォロー・Fediverseからの受信Follow）は`follows.status`が`pending`のまま留まり、本人が「承認待ちフォロー」画面から承認/拒否するまで成立しない。**投稿の公開範囲には一切影響しない**（Twitterの「鍵アカウント」と異なり、公開投稿はロック中でも誰でも閲覧できる）点に注意。Bskyネットワーク側から直接（seiranのAPIを経由せず）フォローされるケースはAT Protocolに非公開アカウントという概念自体が無いためこの設定でも防げず、常に即座に成立する。詳細は`docs/protocols.md`「フォロー承認制」節参照。
+
 ### Bsky流入アクターの保存方針（`bsky_actor_is_engaged`）
 JetStreamは「ローカルユーザーのフォロー中/リストメンバーのBsky DID」だけを`wantedDids`として購読する（`crates/seiran-atp-repo/src/firehose.rs`）が、それらの投稿本文中のメンションfacetに現れる無関係な第三者まで`actors`へ永続化してしまうと、自インスタンスと一切関わりのない行が際限なく増える（issue #216、実測で全477,511行中467,603行がbsky型、うち467,008行が投稿0件）。
 
@@ -173,6 +176,8 @@ AP受信（投稿本文・表示名・絵文字リアクションのいずれか
 
 ### `follows`
 `status`（`pending`/`accepted`）を持つ。パフォーマンス上重要な2つの部分インデックスがある: フォロワー取得・AP配送方向の `(target_actor_id, follower_actor_id) WHERE status='accepted'` と、自分のフォロー先取得用のカバリングインデックス `(follower_actor_id) INCLUDE (target_actor_id) WHERE status='accepted'`。
+
+`pending_follow_activity`（JSONB、nullable）: ロック中（`actors.is_locked=true`）のローカルアクター宛てにFediverseから届いた生のFollowアクティビティ全体を保存する。承認は即時のAccept送信を伴わず本人操作まで非同期に遅延するため、承認/拒否のタイミングでAccept/Rejectを送り返すにはFollowアクティビティの`id`等を後から参照できる必要があり、受信時点でそのまま保存しておく（ローカル↔ローカルのpendingでは常に`NULL`、AP側とやり取りが不要なため）。`seiran_common::follow_approval::{approve_pending_follow, reject_pending_follow}`が読む。
 
 ### `bsky_remote_list_membership_cache`
 `list_uri`をPKに持つ、リモート（seiranユーザー所有でない）Bskyリストの全メンバーDID一覧の共有キャッシュ（`member_dids` JSONB配列、`checked_at`から24時間TTL）。threadgateの`#listRule`評価（`queries::is_list_member`）専用で、ローカルseiranユーザー所有のリストは`lists`/`list_members`に既に答えがあるため対象にならない。未登録・期限切れの参照は`Job::BskyListMembershipResolve`（`app.bsky.graph.getList`をページングして取得、`ON CONFLICT (list_uri) DO UPDATE`で全体を丸ごと置き換え）を積んでバックグラウンド更新し、その場ではフェイルオープン（制限なし扱い）で応答する。`docs/protocols.md` 3節参照。

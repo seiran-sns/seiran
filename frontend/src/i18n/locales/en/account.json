@@ -9,6 +9,7 @@
     "appearance": "Appearance",
     "appTokens": "App tokens",
     "followImport": "Import & Export",
+    "followRequests": "Follow requests",
     "comingSoon": "Coming soon"
   },
   "appearanceSettings": {
@@ -35,7 +36,10 @@
     "discoverabilityTitle": "Discoverability",
     "hideFromAlgorithmicRecommendationsLabel": "Hide my posts from algorithmic recommendations (e.g. Bsky Discover feed)",
     "hideFromAlgorithmicRecommendationsDescription": "When enabled, your posts will only appear in the Bluesky Discover feed to people who follow you. This preference is recorded at the account level in your PDS, so other AT Protocol apps can also read it, but whether they honor it is up to each app. It may take up to an hour to fully take effect.",
-    "saved": "Setting saved."
+    "saved": "Setting saved.",
+    "followApprovalTitle": "Follow requests",
+    "lockedAccountLabel": "Require approval for new followers",
+    "lockedAccountDescription": "When enabled, new follow requests won't be accepted automatically — you'll need to approve or reject them from \"Follow requests\" in Settings. This only affects who can follow you; it doesn't change who can see your public posts. Turning this off automatically approves any pending follow requests."
   },
   "accountSettings": {
     "title": "Account settings",
@@ -121,5 +125,11 @@
     "statusRunning": "Importing",
     "statusCompleted": "Import complete",
     "statusCancelled": "Cancelled"
+  },
+  "followRequestsSettings": {
+    "title": "Follow requests",
+    "empty": "No pending follow requests.",
+    "acceptButton": "Accept",
+    "rejectButton": "Reject"
   }
 }

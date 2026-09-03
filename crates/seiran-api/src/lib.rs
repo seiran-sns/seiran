@@ -294,6 +294,23 @@ impl AppState {
         }
     }
 
+    /// フォロー承認制（鍵アカウント）をOFFに切り替えた際、その時点で存在した承認待ち
+    /// フォローリクエスト全件の一括承認ジョブを積む。実行は
+    /// Worker（`jobs::follow_requests_bulk_accept`）が担う。
+    pub async fn enqueue_follow_requests_bulk_accept(&self, actor_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::FollowRequestsBulkAccept { actor_id }, job_priority::HIGH)
+            .await
+        {
+            tracing::error!(
+                "[job] FollowRequestsBulkAccept enqueue 失敗 (actor_id={}): {}",
+                actor_id,
+                e
+            );
+        }
+    }
+
     /// Bsky embedとして選択された動画/音声添付のパイプライン結合完了待ちで、投稿のBsky
     /// コミットをWorker（`jobs::bsky_post_commit_deferred`）へ委譲する。`pending_media_file_id`
     /// は選択が解決した先の`media_files.id`1件のみ（#227、`resolve_bsky_embed`参照）。
@@ -964,6 +981,10 @@ pub fn router(state: AppState) -> Router {
                 .post(handlers::account::update_content_visibility),
         )
         .route(
+            "/api/account/lock",
+            get(handlers::account::get_lock).post(handlers::account::update_lock),
+        )
+        .route(
             "/api/account/email/request-change",
             post(handlers::account::request_email_change),
         )
@@ -1097,6 +1118,23 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/follows/delete",
             post(handlers::follows::delete_follow),
+        )
+        // 承認待ちフォロー（フォロー承認制、設定画面「承認待ちフォロー」）
+        .route(
+            "/api/follow-requests",
+            get(handlers::follow_requests::list_follow_requests),
+        )
+        .route(
+            "/api/follow-requests/count",
+            get(handlers::follow_requests::count_follow_requests),
+        )
+        .route(
+            "/api/follow-requests/:follower_actor_id/accept",
+            post(handlers::follow_requests::accept_follow_request),
+        )
+        .route(
+            "/api/follow-requests/:follower_actor_id/reject",
+            post(handlers::follow_requests::reject_follow_request),
         )
         // フォローインポート（設定画面から改行区切りのID一覧を貼り付けて一括フォロー）
         .route(

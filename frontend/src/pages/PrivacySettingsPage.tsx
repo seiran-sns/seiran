@@ -14,18 +14,21 @@ export default function PrivacySettingsPage() {
 
   const [hideFromAlgorithmicRecommendations, setHideFromAlgorithmicRecommendations] =
     useState(false);
+  const [isLocked, setIsLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [lockSaving, setLockSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [lockSaved, setLockSaved] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    api.account
-      .getContentVisibility()
-      .then((res) => {
+    Promise.all([api.account.getContentVisibility(), api.account.getLock()])
+      .then(([contentVisibility, lock]) => {
         if (!cancelled) {
-          setHideFromAlgorithmicRecommendations(res.hide_from_algorithmic_recommendations);
+          setHideFromAlgorithmicRecommendations(contentVisibility.hide_from_algorithmic_recommendations);
+          setIsLocked(lock.is_locked);
         }
       })
       .catch((err) => {
@@ -56,6 +59,23 @@ export default function PrivacySettingsPage() {
     }
   }
 
+  async function onToggleLock(checked: boolean) {
+    const previous = isLocked;
+    setIsLocked(checked);
+    setLockSaving(true);
+    setError("");
+    setLockSaved(false);
+    try {
+      await api.account.updateLock(checked);
+      setLockSaved(true);
+    } catch (err) {
+      setIsLocked(previous);
+      setError(getErrorMessage(err));
+    } finally {
+      setLockSaving(false);
+    }
+  }
+
   const center = (
     <>
       <header className={panel.header}>
@@ -83,6 +103,23 @@ export default function PrivacySettingsPage() {
           {t("account:privacySettings.hideFromAlgorithmicRecommendationsDescription")}
         </p>
         {saved && (
+          <p className={styles.success}>{t("account:privacySettings.saved")}</p>
+        )}
+      </div>
+
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>{t("account:privacySettings.followApprovalTitle")}</h3>
+        <label className={styles.checkboxLabel}>
+          <input
+            type="checkbox"
+            checked={isLocked}
+            disabled={loading || lockSaving}
+            onChange={(e) => onToggleLock(e.target.checked)}
+          />
+          {t("account:privacySettings.lockedAccountLabel")}
+        </label>
+        <p className={styles.description}>{t("account:privacySettings.lockedAccountDescription")}</p>
+        {lockSaved && (
           <p className={styles.success}>{t("account:privacySettings.saved")}</p>
         )}
       </div>

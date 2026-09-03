@@ -24,6 +24,11 @@ struct ApActorDocument {
     summary: Option<String>,
     inbox: String,
     outbox: String,
+    /// フォロー承認制（鍵アカウント、#依頼「プライバシー設定」）。`manuallyApprovesFollowers`
+    /// はAP標準語彙（Mastodon/Misskey準拠）で、投稿の公開範囲には影響せずフォローの成立にのみ
+    /// 本人の承認を要求する。
+    #[serde(rename = "manuallyApprovesFollowers")]
+    manually_approves_followers: bool,
     followers: String,
     following: String,
     /// ピン留め投稿（#61）。Mastodon 等はプロフィール表示時にこの URL を都度フェッチする。
@@ -104,7 +109,7 @@ pub async fn actor_handler(
         "SELECT a.id, a.display_name, a.bio, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
                 mf.mime_type AS avatar_mime_type, a.profile_fields, a.emoji_map, \
-                a.birth_date, a.birth_date_public \
+                a.birth_date, a.birth_date_public, a.is_locked \
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
@@ -123,6 +128,7 @@ pub async fn actor_handler(
         profile_fields,
         emoji_map,
         birth_date,
+        is_locked,
     ) = match row {
         Ok(Some(r)) => {
             let actor_id = r.try_get::<i64, _>("id").unwrap_or_default();
@@ -159,6 +165,7 @@ pub async fn actor_handler(
             } else {
                 None
             };
+            let is_locked: bool = r.try_get("is_locked").unwrap_or(false);
             (
                 actor_id,
                 display_name,
@@ -168,6 +175,7 @@ pub async fn actor_handler(
                 profile_fields,
                 emoji_map,
                 birth_date,
+                is_locked,
             )
         }
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
@@ -253,6 +261,7 @@ pub async fn actor_handler(
         summary: bio,
         inbox: format!("{}/inbox", base),
         outbox: format!("{}/users/{}/outbox", base, username),
+        manually_approves_followers: is_locked,
         followers: format!("{}/users/{}/followers", base, username),
         following: format!("{}/users/{}/following", base, username),
         featured: format!("{}/users/{}/collections/featured", base, username),

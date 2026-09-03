@@ -34,12 +34,14 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const site = useSiteMeta();
-  const { dmUnreadCount } = useStreamingContext();
+  const { dmUnreadCount, followRequestCount } = useStreamingContext();
   const location = useLocation();
 
-  const baseItems = NAV_ITEMS.map((item) =>
-    item.to === "/messages" ? { ...item, badge: dmUnreadCount } : item
-  );
+  const baseItems = NAV_ITEMS.map((item) => {
+    if (item.to === "/messages") return { ...item, badge: dmUnreadCount };
+    if (item.to === "/settings") return { ...item, badge: followRequestCount };
+    return item;
+  });
   const navItems = canAccessAdminPage(user?.role)
     ? [...baseItems, { to: "/admin", icon: "🛡️", labelKey: "leftNav.admin" }]
     : baseItems;

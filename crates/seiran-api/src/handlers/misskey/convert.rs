@@ -81,7 +81,7 @@ pub async fn build_user_detailed(
             created_at: chrono::Utc::now().to_rfc3339(),
             description: actor.bio.clone(),
             banner_url: None,
-            is_locked: false,
+            is_locked: actor.is_locked,
             is_silenced: false,
             is_suspended: false,
             notes_count: 0,
@@ -137,7 +137,8 @@ pub async fn build_users_detailed(
                             is_following: fwd_status == Some("accepted"),
                             is_followed: rev.get(&id).map(String::as_str) == Some("accepted"),
                             has_pending_follow_request_from_you: fwd_status == Some("pending"),
-                            has_pending_follow_request_to_you: false,
+                            has_pending_follow_request_to_you: rev.get(&id).map(String::as_str)
+                                == Some("pending"),
                             is_blocking,
                             is_blocked,
                             is_muted: muted.contains(&id),
@@ -199,7 +200,7 @@ pub async fn build_users_detailed(
                 created_at: created_at.to_rfc3339(),
                 description: actor.bio.clone(),
                 banner_url: None,
-                is_locked: false,
+                is_locked: actor.is_locked,
                 is_silenced: false,
                 is_suspended: false,
                 notes_count,
@@ -568,6 +569,7 @@ pub async fn build_note(
 fn to_misskey_notification_type(kind: &str) -> String {
     match kind {
         "repost" => "renote".to_string(),
+        "followRequest" => "receiveFollowRequest".to_string(),
         other => other.to_string(),
     }
 }

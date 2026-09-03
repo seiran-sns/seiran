@@ -765,7 +765,7 @@ export interface NotificationItem {
   // seiran内部では「リポスト」と呼ぶ種別もAPI上は "renote" で返す（バックエンド convert.rs で変換）。
   // "moveRefollowed" | "moveAlreadyFollowing" は Misskey本家に無いseiran独自拡張
   // （ActivityPub Move＝アカウント引っ越し受信時の再フォロー通知、`docs/protocols.md`参照）。
-  type: string; // "reaction" | "follow" | "followRequestAccepted" | "mention" | "reply" | "renote" | "quote" | "moveRefollowed" | "moveAlreadyFollowing"
+  type: string; // "reaction" | "follow" | "receiveFollowRequest" | "followRequestAccepted" | "mention" | "reply" | "renote" | "quote" | "moveRefollowed" | "moveAlreadyFollowing"
   userId?: string;
   user?: NotificationUser;
   /** `type === "reaction"` の場合のみ。カスタム絵文字は `:shortcode:` 形式。 */

@@ -149,6 +149,53 @@ pub trait FollowRepository: Send + Sync {
         until_id: Option<i64>,
         since_id: Option<i64>,
     ) -> Result<Vec<FollowListRow>, sqlx::Error>;
+
+    /// フォローを pending で挿入し、Fediverse から届いた生の Follow アクティビティ（JSON）を
+    /// `pending_follow_activity` へ保存する（既存なら status/activity を上書き）。ロック中の
+    /// ローカルアクター宛てに AP Follow を受信した際に使う。承認/拒否時、保存した活動を
+    /// そのまま Accept/Reject の `object` として送り返せるようにするため。
+    async fn upsert_pending_with_activity(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        activity: &serde_json::Value,
+    ) -> Result<bool, sqlx::Error>;
+
+    /// `upsert_pending_with_activity` で保存した Follow アクティビティを取得する。
+    async fn find_pending_follow_activity(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<Option<serde_json::Value>, sqlx::Error>;
+
+    /// pending のフォローを accepted に昇格させる（承認制フォローの承認時）。`atp_rkey` が
+    /// `Some` ならローカルフォロワーのATPコミット後のrkeyとして併せて保存する（fediフォロワーは
+    /// `None`）。`accept`（Accept受信）と異なりAPIハンドラ/ジョブから明示的に呼ばれる。
+    async fn accept_and_set_rkey(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        atp_rkey: Option<&str>,
+    ) -> Result<u64, sqlx::Error>;
+
+    /// `target_actor_id` 宛ての承認待ち（status='pending'）フォローリクエスト件数
+    /// （設定アイコン・「承認待ちフォロー」メニュー項目のバッジ表示用）。
+    async fn count_pending(&self, target_actor_id: i64) -> Result<i64, sqlx::Error>;
+
+    /// `target_actor_id` 宛ての承認待ち（status='pending'）フォローリクエスト一覧を新しい順に返す
+    /// （設定画面「承認待ちフォロー」、簡易一覧のためカーソルページネーションは持たない）。
+    async fn list_pending_followers(
+        &self,
+        target_actor_id: i64,
+        limit: i64,
+    ) -> Result<Vec<FollowListRow>, sqlx::Error>;
+
+    /// `target_actor_id` 宛ての承認待ちフォロー全件を `(follower_actor_id,
+    /// pending_follow_activity)` で取得する（承認制OFF切替時の一括承認ジョブ用）。
+    async fn find_pending_followers_raw(
+        &self,
+        target_actor_id: i64,
+    ) -> Result<Vec<(i64, Option<serde_json::Value>)>, sqlx::Error>;
 }
 
 pub struct PgFollowRepository {
@@ -446,6 +493,106 @@ impl FollowRepository for PgFollowRepository {
         .bind(until_id)
         .bind(since_id)
         .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn upsert_pending_with_activity(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        activity: &serde_json::Value,
+    ) -> Result<bool, sqlx::Error> {
+        let row: (bool,) = sqlx::query_as(
+            "INSERT INTO follows (follower_actor_id, target_actor_id, status, pending_follow_activity)
+             VALUES ($1, $2, 'pending', $3)
+             ON CONFLICT (follower_actor_id, target_actor_id) DO UPDATE
+               SET status = 'pending', pending_follow_activity = $3
+             RETURNING (xmax = 0)",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .bind(activity)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
+    }
+
+    async fn find_pending_follow_activity(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+    ) -> Result<Option<serde_json::Value>, sqlx::Error> {
+        let row: Option<(Option<serde_json::Value>,)> = sqlx::query_as(
+            "SELECT pending_follow_activity FROM follows
+             WHERE follower_actor_id = $1 AND target_actor_id = $2 LIMIT 1",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|r| r.0))
+    }
+
+    async fn accept_and_set_rkey(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        atp_rkey: Option<&str>,
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE follows SET status = 'accepted', atp_rkey = COALESCE($3, atp_rkey)
+             WHERE follower_actor_id = $1 AND target_actor_id = $2 AND status = 'pending'",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .bind(atp_rkey)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    async fn count_pending(&self, target_actor_id: i64) -> Result<i64, sqlx::Error> {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM follows WHERE target_actor_id = $1 AND status = 'pending'",
+        )
+        .bind(target_actor_id)
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    async fn list_pending_followers(
+        &self,
+        target_actor_id: i64,
+        limit: i64,
+    ) -> Result<Vec<FollowListRow>, sqlx::Error> {
+        sqlx::query_as::<_, FollowListRow>(
+            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
+                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
+                    f.created_at
+             FROM follows f
+             JOIN actors a ON a.id = f.follower_actor_id
+             LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+             LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+             WHERE f.target_actor_id = $1 AND f.status = 'pending'
+             ORDER BY f.id DESC
+             LIMIT $2",
+        )
+        .bind(target_actor_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn find_pending_followers_raw(
+        &self,
+        target_actor_id: i64,
+    ) -> Result<Vec<(i64, Option<serde_json::Value>)>, sqlx::Error> {
+        sqlx::query_as::<_, (i64, Option<serde_json::Value>)>(
+            "SELECT follower_actor_id, pending_follow_activity FROM follows
+             WHERE target_actor_id = $1 AND status = 'pending'",
+        )
+        .bind(target_actor_id)
         .fetch_all(&self.pool)
         .await
     }

@@ -58,6 +58,51 @@ pub(super) async fn handle_follow(
         return Ok(());
     }
 
+    // ロック中（承認制）のローカルターゲット宛ては pending のまま留め、Accept を即送信
+    // しない。生の Follow アクティビティを保存しておき、本人が承認/拒否した時点で
+    // `follow_approval::approve_pending_follow`/`reject_pending_follow` が Accept/Reject を送る。
+    if local_actor.is_locked {
+        inbox
+            .follow_repo
+            .upsert_pending_with_activity(follower_actor_id, local_actor_id, &activity)
+            .await
+            .map_err(|e| format!("follows INSERT エラー: {}", e))?;
+
+        inbox.stream_hub.publish_event(
+            HashSet::from([local_actor_id]),
+            "followRequest",
+            serde_json::json!({
+                "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
+            }),
+        );
+        let notif_id = generate_snowflake_id(chrono::Utc::now());
+        if let Err(e) = inbox
+            .notification_repo
+            .insert(
+                notif_id,
+                local_actor_id,
+                NotificationKind::FollowRequest,
+                Some(follower_actor_id),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+        {
+            tracing::error!("[Follow] notifications INSERT 失敗: {}", e);
+        }
+
+        tracing::info!(
+            "[Follow] {} → {} フォローリクエスト受信 (pending, 鍵アカウント)",
+            follower_uri,
+            local_username
+        );
+        return Ok(());
+    }
+
     // follows テーブルに挿入（重複時はスキップ、リモートからのフォローは自動 accepted）
     inbox
         .follow_repo

@@ -16,6 +16,8 @@ use sqlx::PgPool;
 pub enum NotificationKind {
     Follow,
     Reaction,
+    /// フォロー承認制（鍵アカウント）宛てに届いた、承認待ちのフォローリクエスト。
+    FollowRequest,
     FollowRequestAccepted,
     Mention,
     Reply,
@@ -30,6 +32,7 @@ impl NotificationKind {
         match self {
             NotificationKind::Follow => "follow",
             NotificationKind::Reaction => "reaction",
+            NotificationKind::FollowRequest => "followRequest",
             NotificationKind::FollowRequestAccepted => "followRequestAccepted",
             NotificationKind::Mention => "mention",
             NotificationKind::Reply => "reply",

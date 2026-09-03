@@ -17,7 +17,7 @@ import { setup, auth, miauth } from "./auth";
 import { notes, notifications, reactions } from "./notes";
 import { users, alsoKnownAs, blocks, mutes, repostMutes, actors, account } from "./users";
 import { admin } from "./admin";
-import { follows, followImport, dm } from "./follows";
+import { follows, followImport, followRequests, dm } from "./follows";
 import { lists, hashtags } from "./lists";
 
 export const api = {
@@ -33,6 +33,7 @@ export const api = {
   admin,
   follows,
   followImport,
+  followRequests,
   blocks,
   mutes,
   repostMutes,

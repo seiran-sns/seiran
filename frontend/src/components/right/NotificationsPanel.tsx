@@ -108,6 +108,10 @@ export function describeNotification(n: NotificationItem): {
     }
     case "follow":
       return { icon: "➕", i18nKey: "notifications:notificationsPanel.followText", who, whoEmojis, handleSuffix };
+    // バックエンド`to_misskey_notification_type`が内部種別`followRequest`をMisskey本家の
+    // `receiveFollowRequest`へ変換して返すため、ここでもその値を見る（`repost`→`renote`と同様）。
+    case "receiveFollowRequest":
+      return { icon: "🙋", i18nKey: "notifications:notificationsPanel.followRequestText", who, whoEmojis, handleSuffix };
     case "followRequestAccepted":
       return { icon: "🤝", i18nKey: "notifications:notificationsPanel.followAcceptedText", who, whoEmojis, handleSuffix };
     case "mention":

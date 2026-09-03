@@ -145,6 +145,58 @@ pub async fn update_content_visibility(
     }))
 }
 
+#[derive(serde::Serialize)]
+pub struct LockResponse {
+    pub is_locked: bool,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateLockRequest {
+    pub is_locked: bool,
+}
+
+/// `GET /api/account/lock`（設定画面「プライバシー」）
+/// フォロー承認制（Mastodon/Misskey準拠の`manuallyApprovesFollowers`。投稿の公開範囲は
+/// 変わらず、フォローの成立にのみ本人の承認を要求する）の現在値を返す。
+pub async fn get_lock(
+    user: crate::middleware::AuthedUser,
+    State(state): State<AppState>,
+) -> Result<Json<LockResponse>, ApiError> {
+    let is_locked = state
+        .actors
+        .find_is_locked(user.actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[lock] SELECT 失敗: {}", e)))?;
+    Ok(Json(LockResponse { is_locked }))
+}
+
+/// `POST /api/account/lock`（設定画面「プライバシー」）
+/// ONにした場合は以降の新規フォローがpending（承認待ち）になるだけで、既存フォロワーには
+/// 影響しない。OFFにした場合は、その時点で存在した承認待ちフォローリクエストを全件
+/// 自動承認するジョブ（`FollowRequestsBulkAccept`）を積む（依頼文「フォロー承認制にする設定を
+/// OFFにした場合、その時点で存在したフォローリクエストはすべて承認される」通り）。
+pub async fn update_lock(
+    user: crate::middleware::AuthedUser,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateLockRequest>,
+) -> Result<Json<LockResponse>, ApiError> {
+    state
+        .actors
+        .update_is_locked(user.actor_id, req.is_locked)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[lock] UPDATE 失敗: {}", e)))?;
+
+    if !req.is_locked {
+        state
+            .enqueue_follow_requests_bulk_accept(user.actor_id)
+            .await;
+    }
+
+    Ok(Json(LockResponse {
+        is_locked: req.is_locked,
+    }))
+}
+
 #[derive(Deserialize)]
 pub struct ChangePasswordRequest {
     pub current_password: String,

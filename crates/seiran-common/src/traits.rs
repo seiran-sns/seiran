@@ -190,6 +190,13 @@ pub enum Job {
     /// 比例して時間がかかるため、Delete(Actor)配送（`ApDelivery`）と同様にジョブ化する。
     AccountWithdrawUnfollowAll { actor_id: i64, username: String },
 
+    /// フォロー承認制（鍵アカウント）をOFFに切り替えた際、その時点で存在した承認待ち
+    /// （`follows.status = 'pending'`）フォローリクエスト全件を一括承認する
+    /// （`follow_approval::approve_pending_follow`）。フォロワー数に比例して時間がかかりうる
+    /// （ローカルフォロワーはATPコミットを、Fediフォロワーは AP Accept 送信を伴うため）
+    /// ため、`AccountWithdrawUnfollowAll` と同様にジョブ化する。
+    FollowRequestsBulkAccept { actor_id: i64 },
+
     /// Bsky embedとして選択された（#227、明示選択または省略時の固定優先順位）動画/音声添付の
     /// Bsky ATP コミットを、動画パイプライン結合（`media_files.bsky_video_status`）が確定状態
     /// （`ready`/`failed`）になるまで遅延する。投稿作成時点でまだトランスコード中の動画に
