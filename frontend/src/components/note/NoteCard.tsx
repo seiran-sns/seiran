@@ -14,16 +14,10 @@ import {
   visibilityBadge,
 } from "../../lib/format";
 import { useNoteCardActions } from "../../hooks/useNoteCardActions";
+import { useFollowHoverSwitch } from "../../hooks/useFollowHoverSwitch";
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../contexts/ToastContext";
-import {
-  setFollowStatus as setFollowStatusStore,
-  useFollowStatus,
-} from "../../stores/followStatusStore";
-import {
-  seedRelationshipIfAbsent,
-  setRelationship,
-} from "../../stores/userRelationshipStore";
+import { seedRelationshipIfAbsent } from "../../stores/userRelationshipStore";
 import { setPollState, usePollState } from "../../stores/pollVoteStore";
 import ReplyIndicator from "./ReplyIndicator";
 import PendingReferenceIndicator from "./PendingReferenceIndicator";
@@ -38,18 +32,13 @@ import PollCountdown from "./PollCountdown";
 import NoteCardActions from "./NoteCardActions";
 import ReactionChips from "./ReactionChips";
 import UserContextMenu from "./UserContextMenu";
+import UserHoverPopover from "./UserHoverPopover";
 import { UserRelationshipTarget } from "../../hooks/useUserRelationshipMenu";
 import { useComposer } from "../../contexts/ComposerContext";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
 import { mediaUrl } from "../../utils/mediaProxy";
 import styles from "./NoteCard.module.css";
-
-export function followToggleAction(
-  status: "not_following" | "pending" | "accepted" | null,
-): "create" | "delete" {
-  return status === null || status === "not_following" ? "create" : "delete";
-}
 
 interface NoteCardProps {
   note: Note;
@@ -215,7 +204,6 @@ function PostContent({
     reportLabel: `@${note.user.username}${note.user.domain ? `@${note.user.domain}` : ""}`,
   };
 
-  const [isHovered, setIsHovered] = useState(false);
   const [showContent, setShowContent] = useState(!note.contentWarning || forceOpenCw);
   // pending参照が「取り込む」で解決された場合のローカル反映（#234）。
   const [resolvedReplyId, setResolvedReplyId] = useState<string | null>(null);
@@ -229,8 +217,6 @@ function PostContent({
       // 取得に失敗しても致命的ではない（引用元IDは解決済みのため次回リロードでは表示される）
     }
   }
-  const [loadingStatus, setLoadingStatus] = useState(false);
-  const [followActionPending, setFollowActionPending] = useState(false);
   const sharedPollState = usePollState(note.id, note.poll);
   const poll = sharedPollState?.poll;
   const pollVoted = (sharedPollState?.votedByMe.length ?? 0) > 0;
@@ -242,7 +228,15 @@ function PostContent({
   // 同一ユーザーの他ポストのフォロースイッチと状態が一本化されるため、一方で操作するか
   // WebSocket の `followAccepted`（StreamingContext）を受けるだけで全ての表示に伝播する。
   // ストアに未登録（undefined）なら「まだ取得していない」ことを意味する。
-  const followStatus = useFollowStatus(targetKey) ?? null;
+  const {
+    followStatus,
+    isHovered,
+    loadingStatus,
+    followActionPending,
+    handleMouseEnter,
+    handleMouseLeave,
+    handleToggleFollow,
+  } = useFollowHoverSwitch(authorTarget, isAuthorSelf);
 
   // タイムラインAPIレスポンス（home/local/social/global）は note.user に閲覧者との
   // 関係（フォロー状態・ミュート・ブロック・リポストミュート）を事前付与済みのため、
@@ -290,63 +284,6 @@ function PostContent({
     }
   }
 
-  function handleMouseEnter() {
-    setIsHovered(true);
-    if (!isAuthorSelf && followStatus === null && !loadingStatus) {
-      setLoadingStatus(true);
-      api.users
-        .profile(targetKey)
-        .then((p) =>
-          setRelationship(targetKey, {
-            followStatus: p.follow_status,
-            isMuted: p.is_muted,
-            isBlocking: p.is_blocking,
-            isBlockedBy: p.is_blocked_by,
-            isRepostMuted: p.is_repost_muted,
-          }),
-        )
-        .catch(() => setFollowStatusStore(targetKey, "not_following"))
-        .finally(() => setLoadingStatus(false));
-    }
-  }
-
-  function handleMouseLeave() {
-    setIsHovered(false);
-  }
-
-  async function handleToggleFollow(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (followActionPending || isAuthorSelf) return;
-
-    setFollowActionPending(true);
-    const current = followStatus ?? "not_following";
-
-    try {
-      if (followToggleAction(current) === "create") {
-        const res = await api.follows.create(targetKey);
-        setFollowStatusStore(
-          targetKey,
-          res.status === "accepted" ? "accepted" : "pending",
-        );
-      } else {
-        await api.follows.delete(targetKey);
-        setFollowStatusStore(targetKey, "not_following");
-      }
-    } catch (err) {
-      showError(getErrorMessage(err));
-    } finally {
-      setFollowActionPending(false);
-    }
-  }
-
-  function getFollowLabel(
-    status: "not_following" | "pending" | "accepted" | null,
-  ): string {
-    if (status === "accepted") return t("home:noteCard.following");
-    if (status === "pending") return t("home:noteCard.followPending");
-    return t("home:noteCard.notFollowing");
-  }
-
   function handleReply(e?: React.MouseEvent) {
     e?.stopPropagation();
     if (isGateReplyBlocked) {
@@ -384,28 +321,12 @@ function PostContent({
           onMouseLeave={handleMouseLeave}
         >
           {isHovered && !isAuthorSelf && (
-            <div
-              className={styles.followWidgetPopover}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <span
-                className={`${styles.followWidgetLabel} ${styles[`status_${followStatus ?? "not_following"}`]}`}
-              >
-                {loadingStatus
-                  ? t("common:loading")
-                  : getFollowLabel(followStatus)}
-              </span>
-              <button
-                type="button"
-                className={`${styles.followSwitch} ${styles[`switch_${followStatus ?? "not_following"}`]}`}
-                onClick={handleToggleFollow}
-                disabled={followActionPending || loadingStatus}
-                title={getFollowLabel(followStatus)}
-                aria-label={getFollowLabel(followStatus)}
-              >
-                <span className={styles.followSwitchKnob} />
-              </button>
-            </div>
+            <UserHoverPopover
+              followStatus={followStatus}
+              loadingStatus={loadingStatus}
+              followActionPending={followActionPending}
+              onToggle={handleToggleFollow}
+            />
           )}
 
           <UserContextMenu target={authorTarget}>

@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import i18n from "../../i18n";
 import { api, getErrorMessage, NotificationItem } from "../../api/client";
+import type { NotificationUser } from "../../api/types";
+import { useAuth } from "../../contexts/AuthContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
+import { UserRelationshipTarget } from "../../hooks/useUserRelationshipMenu";
 import { profilePath } from "../../lib/format";
 import { parseReactionContent } from "../../lib/customEmojis";
 import { mediaUrl } from "../../utils/mediaProxy";
@@ -14,8 +17,26 @@ import panel from "../common/Panel.module.css";
 import Avatar from "../note/Avatar";
 import EmojiText from "../note/EmojiText";
 import NoteHoverPreview from "../note/NoteHoverPreview";
+import UserContextMenu from "../note/UserContextMenu";
+import UserHoverArea from "../note/UserHoverArea";
+import UserLinkTag from "../note/UserLinkTag";
 import styles from "./NotificationsPanel.module.css";
 import TwemojiEmoji from "../common/TwemojiEmoji";
+
+/** 通知ユーザーを対ユーザー操作メニュー用の`UserRelationshipTarget`に変換する。 */
+function toRelationshipTarget(u: NotificationUser): UserRelationshipTarget {
+  return {
+    username: u.username,
+    domain: u.host ?? undefined,
+    actorId: u.id,
+    reportLabel: `@${u.username}${u.host ? `@${u.host}` : ""}`,
+  };
+}
+
+/** 通知に出てくるユーザーが閲覧者自身かどうか。 */
+function isSelfUser(currentUser: { username: string } | null, u?: NotificationUser): boolean {
+  return !!currentUser && !!u && currentUser.username === u.username && (!u.host || u.host === window.location.hostname);
+}
 
 /** Misskey本家仕様のコロンなしshortcodeキー（`user.emojis`）を、`EmojiText` が期待する
  * `:shortcode:` 形式のキーへ変換する（#186）。 */
@@ -130,6 +151,7 @@ export function describeNotification(n: NotificationItem): {
 export default function NotificationsPanel() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
   const { registerNotifArrived, markRead } = useStreamingContext();
   const { showError } = useToast();
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -206,24 +228,25 @@ export default function NotificationsPanel() {
         const noteId = resolveTargetNoteId(n);
         const clickNoteId = resolveClickTargetNoteId(n);
         const userLink = n.user?.username ? (
-          <Link
+          <UserLinkTag
+            target={toRelationshipTarget(n.user)}
             to={profilePath(n.user.username, n.user.host ?? undefined)}
             className={styles.userLink}
-            onClick={(e) => e.stopPropagation()}
           />
         ) : (
           <span />
         );
         const newUserLink = n.relatedUser?.username ? (
-          <Link
+          <UserLinkTag
+            target={toRelationshipTarget(n.relatedUser)}
             to={profilePath(n.relatedUser.username, n.relatedUser.host ?? undefined)}
             className={styles.userLink}
-            onClick={(e) => e.stopPropagation()}
           />
         ) : (
           <span />
         );
         const emojiName = <EmojiText text={who} emojis={colonizeEmojiKeys(whoEmojis)} />;
+        const avatar = <Avatar url={n.user?.avatarUrl} name={who} size={20} />;
         const content = (
           <>
             {iconUrl ? (
@@ -231,7 +254,18 @@ export default function NotificationsPanel() {
             ) : (
               <TwemojiEmoji emoji={icon} className={styles.icon} />
             )}
-            <Avatar url={n.user?.avatarUrl} name={who} size={20} />
+            {n.user?.username ? (
+              <UserHoverArea
+                target={{ username: n.user.username, domain: n.user.host ?? undefined }}
+                isSelf={isSelfUser(currentUser, n.user)}
+              >
+                <UserContextMenu target={toRelationshipTarget(n.user)}>
+                  <span className={styles.avatarLink}>{avatar}</span>
+                </UserContextMenu>
+              </UserHoverArea>
+            ) : (
+              avatar
+            )}
             <span className={styles.text}>
               <Trans
                 i18n={i18n}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ReactionSummary } from "../../api/client";
 import type { ReactionUpdate } from "../../contexts/StreamingContext";
 import { applyReactionUpdate, optimisticSetReaction } from "../../hooks/useNoteCardActions";
-import { followToggleAction } from "./NoteCard";
+import { followToggleAction } from "../../hooks/useFollowHoverSwitch";
 
 describe("followToggleAction", () => {
   it("フォロー承認待ち状態では解除する", () => {
