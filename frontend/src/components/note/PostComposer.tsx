@@ -329,7 +329,10 @@ export default function PostComposer({
 
   function insertUserIdAtCursor(actor: ActorSuggestion) {
     setUserIdPickerOpen(false);
-    editorRef.current?.insertAtCursor(`@${actor.target}`);
+    // `UserIdPickerPanel`は`api.actors.search`を使い、そちらの`target`は
+    // （`api.actors.suggest`と異なり）先頭に`@`を含んだ形で返る（`search_actors`
+    // ハンドラ参照）ため、ここで重ねて付けると`@@user`になってしまう。
+    editorRef.current?.insertAtCursor(actor.target);
   }
 
   useEffect(() => {
