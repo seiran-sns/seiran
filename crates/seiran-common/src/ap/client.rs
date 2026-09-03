@@ -410,12 +410,17 @@ impl ApClient {
     }
 
     /// 与えられた公開鍵 PEM で signing string の署名を検証する（純粋な検証処理部分）
+    ///
+    /// Pleroma はアクタードキュメントの `publicKeyPem` の末尾に余分な空行を付けて返す
+    /// ことがあり、`rsa` クレートの PEM パーサはこれを `PreEncapsulationBoundary`
+    /// エラーとして拒否する（実例: post.syobon.net、2026-09-03確認）。`trim()` して
+    /// から渡すことで、Mastodon/Misskey 等の余分な空白がないPEMと同様に扱う。
     fn verify_with_pem(
         pem: &str,
         signing_string: &str,
         signature_bytes: &[u8],
     ) -> Result<(), ApError> {
-        let public_key = RsaPublicKey::from_public_key_pem(pem)
+        let public_key = RsaPublicKey::from_public_key_pem(pem.trim())
             .map_err(|e| ApError::Signature(format!("RSA公開鍵のパース失敗: {}", e)))?;
 
         let mut hasher = Sha256::new();
@@ -980,5 +985,28 @@ mod tests {
             actor.featured.unwrap().as_str(),
             Some("https://mastodon.example/users/alice/collections/featured")
         );
+    }
+
+    // ─── verify_with_pem ────────────────────────────────────────────────
+
+    /// Pleroma (post.syobon.net) が実際に返す publicKeyPem。末尾に空行が付く。
+    const PLEROMA_STYLE_PEM_TRAILING_BLANK_LINE: &str = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsmQHhGDc7Yjutl+Grb7M\nHhW2dcGIA7uBjoYMJaH6B8CcgSz6+N+JmE+GvRrjugL4PGDdN6K6LMRiB7ih+1XB\nwYE1JUlTH+itsRfgwEvnfL9CM9Yfxabfc66QxiiJ7Kgenkh1I8j6gICulnwkZ89T\ncQHeM2va8qKw07yNz9tExPmjQFanPfYfUoeBnZwXVnTRiILLOu/vjqAq4avzGpG6\nSOXPAZMuWtIjMeqUWNivloo27voF3ZyzFFnXk1XMQJqXRv9Iik00pcBk7rZxMzrZ\nASsdOumltrygVjfx/LYh9vHosZRRcJUXT6N9NVudYshNWh1h469mCOTCfDe/2HO+\nFQIDAQAB\n-----END PUBLIC KEY-----\n\n";
+
+    #[test]
+    fn verify_with_pem_accepts_pleroma_trailing_blank_line() {
+        // 末尾の空行があっても `RsaPublicKey::from_public_key_pem` がエラーにならない
+        // ことだけを確認する（署名検証自体は失敗して構わない）。
+        let result =
+            ApClient::verify_with_pem(PLEROMA_STYLE_PEM_TRAILING_BLANK_LINE, "dummy", &[0u8; 32]);
+        match result {
+            Err(ApError::Signature(msg)) => {
+                assert!(
+                    !msg.contains("パース失敗"),
+                    "PEMパース自体で失敗してはならない: {}",
+                    msg
+                );
+            }
+            other => panic!("unexpected result: {:?}", other),
+        }
     }
 }

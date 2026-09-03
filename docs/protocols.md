@@ -131,7 +131,7 @@ HTTPフェッチはSSRF対策込みの`seiran_common::net::fetch_validated_with_
 1. `Digest` ヘッダー必須（SHA-256ボディハッシュと一致確認）
 2. `Signature` の `headers=` に `digest` が含まれることを確認
 3. `keyId` のアクターURIと `activity.actor` の一致確認
-4. `keyId` から公開鍵PEM取得（TTL付きキャッシュ、既定1時間）してRSA-SHA256検証。キャッシュ済み鍵での検証に失敗した場合はキャッシュを無視して1回だけ再フェッチし再検証する（リモートの鍵ローテーション対応）
+4. `keyId` から公開鍵PEM取得（TTL付きキャッシュ、既定1時間）してRSA-SHA256検証。キャッシュ済み鍵での検証に失敗した場合はキャッシュを無視して1回だけ再フェッチし再検証する（リモートの鍵ローテーション対応）。PEMは`trim()`してからパースする（Pleromaは`publicKeyPem`の末尾に空行を付けて返すことがあり、trimしないと`rsa`クレートのPEMパーサが`PreEncapsulationBoundary`エラーで拒否する）
 5. 検証OK後、実処理はジョブキューへ委譲するのみ
 
 ### 署名付きGET（Authorized Fetch対応）
