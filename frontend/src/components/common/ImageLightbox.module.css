@@ -9,6 +9,8 @@
   z-index: 200;
   cursor: zoom-out;
   animation: fade 0.12s ease-out;
+  touch-action: none; /* ピンチ/ホイールでの背面スクロール・ブラウザ標準ジェスチャを止める */
+  overflow: hidden; /* ズームでimageWrapが画面端からはみ出た分をクリップする */
 }
 
 .imageWrap {
@@ -16,7 +18,24 @@
   display: inline-flex;
   max-width: min(1024px, calc(100vw - 48px));
   max-height: min(1024px, calc(100vh - 48px));
-  overflow: hidden; /* NSFWぼかし(filter:blur)のにじみが画像の外にはみ出るのを防ぐ */
+  overflow: hidden; /* NSFWぼかし(filter:blur)のにじみ・ズーム時の画像はみ出しを防ぐ */
+  touch-action: none;
+}
+
+.zoomed {
+  cursor: grab;
+}
+
+.dragging {
+  cursor: grabbing;
+}
+
+.zoomed .image {
+  cursor: grab;
+}
+
+.dragging .image {
+  cursor: grabbing;
 }
 
 .pageButton {
