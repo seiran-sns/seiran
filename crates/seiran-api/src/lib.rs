@@ -1182,6 +1182,10 @@ pub fn router(state: AppState) -> Router {
             delete(handlers::lists::remove_member),
         )
         .route(
+            "/api/lists/membership/:actor_id",
+            get(handlers::lists::list_membership),
+        )
+        .route(
             "/api/lists/:id/timeline",
             get(handlers::lists::list_timeline),
         )

@@ -829,6 +829,14 @@ export interface ListDetail extends ListSummary {
   is_owner: boolean;
 }
 
+/** 対ユーザー操作メニューの「リストに追加/から外す」項目用（`GET /lists/membership/:actorId`）。 */
+export interface ListMembership {
+  id: string;
+  name: string;
+  is_public: boolean;
+  contains: boolean;
+}
+
 /** アクター検索候補（リストのメンバー追加サジェスト用）。 */
 export interface ActorSuggestion {
   actor_id: string;

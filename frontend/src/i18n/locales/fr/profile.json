@@ -37,6 +37,8 @@
     "unmuteButton": "Activer le son",
     "repostMuteButton": "Masquer les reposts",
     "unrepostMuteButton": "Réafficher les reposts",
+    "addToListButton": "Ajouter à la liste « {{name}} »",
+    "removeFromListButton": "Retirer de la liste « {{name}} »",
     "blockButton": "Bloc",
     "unblockButton": "Débloquer",
     "blockedByNotice": "Cet utilisateur vous a bloqué",

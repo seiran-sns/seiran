@@ -38,14 +38,8 @@ export default function UserLinkTag({ target, to, className, children }: UserLin
   return (
     <span
       className={hoverStyles.wrap}
-      onMouseEnter={(e) => {
-        e.stopPropagation();
-        hover.handleMouseEnter();
-      }}
-      onMouseLeave={(e) => {
-        e.stopPropagation();
-        hover.handleMouseLeave();
-      }}
+      onMouseEnter={hover.handleMouseEnter}
+      onMouseLeave={hover.handleMouseLeave}
     >
       {hover.isHovered && (
         <UserHoverPopover

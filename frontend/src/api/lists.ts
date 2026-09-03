@@ -1,10 +1,18 @@
 import { cursorParams, request } from "./core";
-import type { ListDetail, ListMember, ListSummary, RawNote } from "./types";
+import type { ListDetail, ListMember, ListMembership, ListSummary, RawNote } from "./types";
 import { normalizeNote } from "./types";
 
 export const lists = {
   list() {
     return request<ListSummary[]>("GET", "/lists");
+  },
+  /** 対ユーザー操作メニュー用。閲覧者の全リストと、`actorId`がそれぞれに
+   * 既に入っているかを1回で返す。 */
+  membership(actorId: string) {
+    return request<ListMembership[]>(
+      "GET",
+      `/lists/membership/${encodeURIComponent(actorId)}`,
+    );
   },
   create(name: string, isPublic: boolean) {
     return request<ListSummary>("POST", "/lists", {

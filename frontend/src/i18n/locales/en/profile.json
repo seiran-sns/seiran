@@ -37,6 +37,8 @@
     "unmuteButton": "Unmute",
     "repostMuteButton": "Mute Reposts",
     "unrepostMuteButton": "Unmute Reposts",
+    "addToListButton": "Add to list \"{{name}}\"",
+    "removeFromListButton": "Remove from list \"{{name}}\"",
     "blockButton": "Block",
     "unblockButton": "Unblock",
     "blockedByNotice": "This user has blocked you",

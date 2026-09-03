@@ -37,6 +37,8 @@
     "unmuteButton": "음소거 해제",
     "repostMuteButton": "리포스트 음소거",
     "unrepostMuteButton": "리포스트 음소거 해제",
+    "addToListButton": "리스트 \"{{name}}\"에 추가",
+    "removeFromListButton": "리스트 \"{{name}}\"에서 제거",
     "blockButton": "차단하다",
     "unblockButton": "차단 해제",
     "blockedByNotice": "이 사용자가 당신을 차단했습니다",

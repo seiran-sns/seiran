@@ -37,6 +37,8 @@
     "unmuteButton": "Stummschaltung aufheben",
     "repostMuteButton": "Reposts stummschalten",
     "unrepostMuteButton": "Repost-Stummschaltung aufheben",
+    "addToListButton": "Zur Liste „{{name}}“ hinzufügen",
+    "removeFromListButton": "Aus Liste „{{name}}“ entfernen",
     "blockButton": "Block",
     "unblockButton": "Entsperren",
     "blockedByNotice": "Dieser Benutzer hat Sie blockiert",

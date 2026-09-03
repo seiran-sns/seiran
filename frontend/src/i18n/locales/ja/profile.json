@@ -37,6 +37,8 @@
     "unmuteButton": "ミュート解除",
     "repostMuteButton": "リポストをミュート",
     "unrepostMuteButton": "リポストのミュート解除",
+    "addToListButton": "リスト「{{name}}」に追加",
+    "removeFromListButton": "リスト「{{name}}」から外す",
     "blockButton": "ブロック",
     "unblockButton": "ブロック解除",
     "blockedByNotice": "このユーザーからブロックされています",

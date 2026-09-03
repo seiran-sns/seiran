@@ -37,6 +37,8 @@
     "unmuteButton": "取消靜音",
     "repostMuteButton": "封鎖轉發",
     "unrepostMuteButton": "取消封鎖轉發",
+    "addToListButton": "加入清單「{{name}}」",
+    "removeFromListButton": "從清單「{{name}}」移除",
     "blockButton": "封鎖",
     "unblockButton": "取消封鎖",
     "blockedByNotice": "此使用者已封鎖您",

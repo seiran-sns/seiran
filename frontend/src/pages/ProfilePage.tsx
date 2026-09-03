@@ -574,6 +574,7 @@ export default function ProfilePage() {
               )}
               <ActionsMenu
                 triggerTitle={t("profile:profilePage.actionsMenuTitle")}
+                onOpen={menu.loadListMemberships}
                 items={menu.items.map((item) =>
                   item.key === "follow"
                     ? {

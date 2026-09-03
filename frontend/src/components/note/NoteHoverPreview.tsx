@@ -99,12 +99,25 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
     timerRef.current = window.setTimeout(() => setOpen(false), 120);
   }
 
+  // 子要素内の対ユーザー操作メニュー（`UserContextMenu`/`UserLinkTag`）は
+  // `document.body`直下へポータルされ、この`wrap`要素の真上に重なって表示される。
+  // メニュー項目クリックでそのポータルがDOMから消えると、同じ座標に残っていた
+  // この`wrap`要素へ「新規にマウスが入った」というmouseenterがブラウザから
+  // 発火してしまい、`onEnter`が閉じかけのタイマーを止めてポップアップが残り続ける
+  // （実機で確認された回帰）。クリック自体はReactツリーに沿ってこの要素まで
+  // バブルするため、ここで即座に閉じてその再オープンを打ち消す。
+  function onClickCapture() {
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    setOpen(false);
+  }
+
   return (
     <span
       ref={wrapRef}
       className={className ? `${styles.wrap} ${className}` : styles.wrap}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
+      onClickCapture={onClickCapture}
     >
       {children}
       {open && (

@@ -9,6 +9,9 @@ export interface ActionsMenuItem {
   /** 破壊的操作（ブロック等）は赤字表示にする。 */
   danger?: boolean;
   disabled?: boolean;
+  /** ボタン(title属性)でのホバー表示。labelを`overflow:hidden`で省略表示する項目
+   * （リスト名など）で、省略前の全文を見せるために使う。 */
+  title?: string;
 }
 
 interface ActionsMenuProps {
@@ -19,6 +22,9 @@ interface ActionsMenuProps {
   /** 指定時、トリガーボタンのデフォルトの見た目（`styles.trigger`）の代わりに使う
    * （呼び出し元の他のボタンと体裁を揃えたい場合）。 */
   triggerClassName?: string;
+  /** メニューを開いた瞬間（トリガーボタン押下でpopoverが開く時）に呼ぶ。
+   * リスト所属状態のような、開くたびに取り直したい遅延データの取得に使う。 */
+  onOpen?: () => void;
 }
 
 /** items一覧のボタン描画部分（ケバブメニューの`ActionsMenu`・NoteCardの右クリック
@@ -38,6 +44,7 @@ export function ActionsMenuPopoverList({
           type="button"
           className={`${styles.item} ${item.danger ? styles.itemDanger : ""}`}
           disabled={item.disabled}
+          title={item.title}
           onClick={() => onPick(item)}
         >
           <TwemojiText text={item.label} />
@@ -53,6 +60,7 @@ export default function ActionsMenu({
   triggerLabel = "⋯",
   triggerTitle,
   triggerClassName,
+  onOpen,
 }: ActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -82,7 +90,11 @@ export default function ActionsMenu({
         title={triggerTitle}
         onClick={(e) => {
           e.stopPropagation();
-          setOpen((v) => !v);
+          setOpen((v) => {
+            const next = !v;
+            if (next) onOpen?.();
+            return next;
+          });
         }}
       >
         {triggerLabel}

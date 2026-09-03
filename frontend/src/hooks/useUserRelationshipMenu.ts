@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, getErrorMessage } from "../api/client";
+import { api, getErrorMessage, ListMembership } from "../api/client";
 import { useToast } from "../contexts/ToastContext";
 import { profileQuery } from "../lib/format";
 import { ActionsMenuItem } from "../components/common/ActionsMenu";
@@ -10,6 +10,11 @@ import {
   setRelationship,
   useRelationship,
 } from "../stores/userRelationshipStore";
+
+/** メニューに出す「リストに追加/から外す」項目の最大数。作ったリストが多い
+ * ユーザーでもメニューが画面をはみ出さないよう、先頭（作成順）から5件までに絞る。
+ * 6件目以降はプロフィール画面かリスト設定画面から操作する。 */
+const MAX_LIST_MENU_ITEMS = 5;
 
 const DEFAULT_RELATIONSHIP: RelationshipSnapshot = {
   followStatus: "not_following",
@@ -55,6 +60,9 @@ export function useUserRelationshipMenu(
   const [blockActionLoading, setBlockActionLoading] = useState(false);
   const [blockConfirmOpen, setBlockConfirmOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
+
+  const [listMemberships, setListMemberships] = useState<ListMembership[] | null>(null);
+  const [listActionPendingId, setListActionPendingId] = useState<string | null>(null);
 
   function patch(p: Partial<RelationshipSnapshot>) {
     const prev = relationship ?? DEFAULT_RELATIONSHIP;
@@ -166,6 +174,37 @@ export function useUserRelationshipMenu(
     }
   }
 
+  // 右クリック/ケバブメニューを開いた時点で呼ぶ想定（`actorId`が無いリモート未登録
+  // アクター等はリスト項目自体を出さない）。メニューを開くたびに毎回取得し直すため、
+  // NoteCard等の一覧画面でマウント時に全件分のリクエストが飛ぶことはない。
+  async function loadListMemberships() {
+    if (!target.actorId) return;
+    try {
+      setListMemberships(await api.lists.membership(target.actorId));
+    } catch {
+      // 失敗してもメニュー自体は成立させる（リスト項目だけ出さない）。
+    }
+  }
+
+  async function toggleListMembership(list: ListMembership) {
+    if (!target.actorId || listActionPendingId) return;
+    setListActionPendingId(list.id);
+    try {
+      if (list.contains) {
+        await api.lists.removeMember(list.id, target.actorId);
+      } else {
+        await api.lists.addMember(list.id, apiTarget);
+      }
+      setListMemberships(
+        (prev) => prev?.map((l) => (l.id === list.id ? { ...l, contains: !l.contains } : l)) ?? null,
+      );
+    } catch (e) {
+      showError(getErrorMessage(e));
+    } finally {
+      setListActionPendingId(null);
+    }
+  }
+
   const items: ActionsMenuItem[] = [];
 
   if (followStatus === "accepted" || followStatus === "pending") {
@@ -220,6 +259,18 @@ export function useUserRelationshipMenu(
         },
   );
 
+  for (const list of (listMemberships ?? []).slice(0, MAX_LIST_MENU_ITEMS)) {
+    items.push({
+      key: `list-${list.id}`,
+      label: list.contains
+        ? t("profile:profilePage.removeFromListButton", { name: list.name })
+        : t("profile:profilePage.addToListButton", { name: list.name }),
+      title: list.name,
+      onClick: () => toggleListMembership(list),
+      disabled: listActionPendingId === list.id,
+    });
+  }
+
   items.push(
     relationship?.isBlocking
       ? {
@@ -259,5 +310,7 @@ export function useUserRelationshipMenu(
     blockActionLoading,
     reportModalOpen,
     closeReportModal: () => setReportModalOpen(false),
+
+    loadListMemberships,
   };
 }

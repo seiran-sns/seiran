@@ -37,6 +37,8 @@
     "unmuteButton": "Dejar de silenciar",
     "repostMuteButton": "Silenciar republicaciones",
     "unrepostMuteButton": "Dejar de silenciar republicaciones",
+    "addToListButton": "Añadir a la lista «{{name}}»",
+    "removeFromListButton": "Quitar de la lista «{{name}}»",
     "blockButton": "Bloquear",
     "unblockButton": "Desatascar",
     "blockedByNotice": "Este usuario te ha bloqueado",

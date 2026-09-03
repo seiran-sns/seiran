@@ -259,6 +259,52 @@ pub async fn my_lists(user: AuthedUser, State(state): State<AppState>) -> impl I
     }
 }
 
+#[derive(Serialize)]
+pub struct ListMembershipResponse {
+    pub id: String,
+    pub name: String,
+    pub is_public: bool,
+    /// 閲覧者のリストに`actor_id`が既にメンバーとして入っているか。
+    pub contains: bool,
+}
+
+/// 対ユーザー操作メニューの「リストに追加/から外す」項目用。閲覧者が持つ全リストと、
+/// 指定アクターがそれぞれに既に入っているかを1回で返す。
+pub async fn list_membership(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Path(actor_id): Path<String>,
+) -> impl IntoResponse {
+    let actor_id = match parse_id(&actor_id) {
+        Ok(v) => v,
+        Err(e) => return e.into_response(),
+    };
+
+    let lists = match state.lists.list_by_owner(user.actor_id).await {
+        Ok(v) => v,
+        Err(e) => return ApiError::Internal(format!("リスト一覧取得失敗: {}", e)).into_response(),
+    };
+    let containing = match state.lists.list_ids_containing_actor(actor_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            return ApiError::Internal(format!("リストメンバーシップ取得失敗: {}", e))
+                .into_response()
+        }
+    };
+    let containing: std::collections::HashSet<i64> = containing.into_iter().collect();
+
+    let out: Vec<ListMembershipResponse> = lists
+        .into_iter()
+        .map(|row| ListMembershipResponse {
+            contains: containing.contains(&row.id),
+            id: row.id.to_string(),
+            name: row.name,
+            is_public: row.is_public,
+        })
+        .collect();
+    Json(out).into_response()
+}
+
 pub async fn update_list(
     user: AuthedUser,
     State(state): State<AppState>,
