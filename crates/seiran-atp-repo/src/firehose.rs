@@ -390,6 +390,11 @@ async fn process_message(
             let Some(body_text) = record.get("text").and_then(|v| v.as_str()) else {
                 return Ok(());
             };
+            // `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、#237）。
+            // 検出できた場合、本文・絵文字マップの標準変換をこちらの値で上書きし、
+            // `counterpartPostId`（AP object id申告）を使ってAP側先着行との相互一致
+            // マージを試みる（`docs/protocols.md` 5節）。
+            let seiran_post_ext = seiran_common::seiran_post::SeiranPost::extract(&record);
             // リンク・メンションの facet（byteStart/byteEnd で示される範囲）。
             // 未指定・パース失敗時は空のまま（投稿保存自体はブロックしない）。
             let parsed_facets: Vec<ParsedFacet> = record
@@ -521,6 +526,18 @@ async fn process_message(
                 };
                 let (body_text, mention_facets) = apply_bsky_facets(&body_text, parsed_facets);
                 let emoji_map = resolve_local_emoji_map(&pool2, &body_text).await;
+                // seiranPostがあれば本文・絵文字マップを上書きする（Single Source of Truth）。
+                let body_text = seiran_post_ext
+                    .as_ref()
+                    .map(|sp| sp.body.clone())
+                    .unwrap_or(body_text);
+                let emoji_map = seiran_post_ext
+                    .as_ref()
+                    .map(|sp| sp.emoji_map.clone())
+                    .unwrap_or(emoji_map);
+                let claimed_ap_object_id = seiran_post_ext
+                    .as_ref()
+                    .and_then(|sp| sp.counterpart_post_id.clone());
                 save_bsky_post(
                     &pool2,
                     &queue2,
@@ -541,6 +558,7 @@ async fn process_message(
                     quote_of_post_id,
                     attachments,
                     link_card,
+                    claimed_ap_object_id,
                 )
                 .await;
             });
@@ -681,13 +699,78 @@ async fn save_bsky_post(
     quote_of_post_id: Option<i64>,
     attachments: Vec<ParsedAttachment>,
     link_card: Option<ParsedLinkCard>,
+    claimed_ap_object_id: Option<String>,
 ) {
     let reply_id_str = reply_to_post_id.map(|id| id.to_string());
     let post_id = generate_snowflake_id(created_at);
 
+    // #237 相互一致マージ判定。seiranPost.counterpartPostId（AP側の真正なap_object_id申告）
+    // がある場合のみ、advisory lock（`insert_remote_with_dedup`と同じkey1=2名前空間、
+    // key2はap_object_idのhash）でDB反映を直列化してから既存のAP先着行を探す。
+    // 既存行自身のclaimed_at_uriがこの投稿のat_uriを指し返し、かつ投稿者
+    // （actor_id）が一致する場合のみ、新規INSERTせず既存行を更新する
+    // （投稿者一貫性チェックの簡略版、`docs/protocols.md` 5節参照）。
+    let merged_into: Option<i64> = 'merge: {
+        let Some(ap_object_id) = claimed_ap_object_id.as_deref() else {
+            break 'merge None;
+        };
+        let Ok(mut tx) = pool.begin().await else {
+            break 'merge None;
+        };
+        if sqlx::query("SELECT pg_advisory_xact_lock(2, hashtext($1))")
+            .bind(ap_object_id)
+            .execute(&mut *tx)
+            .await
+            .is_err()
+        {
+            break 'merge None;
+        }
+        let existing: Option<(i64, i64, Option<String>)> = sqlx::query_as(
+            "SELECT id, actor_id, claimed_at_uri FROM posts WHERE ap_object_id = $1",
+        )
+        .bind(ap_object_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .unwrap_or(None);
+        let Some((existing_id, existing_actor_id, existing_claim)) = existing else {
+            let _ = tx.commit().await;
+            break 'merge None;
+        };
+        let mutual_match = existing_claim.as_deref() == Some(at_uri);
+        if mutual_match && existing_actor_id == actor_id {
+            let updated = sqlx::query(
+                "UPDATE posts SET at_uri = $1, at_cid = $2, claimed_at_uri = NULL WHERE id = $3",
+            )
+            .bind(at_uri)
+            .bind(at_cid)
+            .bind(existing_id)
+            .execute(&mut *tx)
+            .await;
+            if updated.is_ok() && tx.commit().await.is_ok() {
+                tracing::info!(
+                    "[Jetstream] seiranPostマージ成立（ATP側更新）: post_id={} at_uri={}",
+                    existing_id,
+                    at_uri
+                );
+                break 'merge Some(existing_id);
+            }
+            break 'merge None;
+        }
+        let _ = tx.commit().await;
+        None
+    };
+    if let Some(merged_post_id) = merged_into {
+        tracing::info!(
+            "[Jetstream] マージ済みのためINSERTスキップ: at_uri={} → post_id={}",
+            at_uri,
+            merged_post_id
+        );
+        return;
+    }
+
     let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id, claimed_ap_object_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (at_uri) DO NOTHING",
     )
     .bind(post_id)
@@ -700,6 +783,7 @@ async fn save_bsky_post(
     .bind(mention_facets)
     .bind(emoji_map)
     .bind(quote_of_post_id)
+    .bind(claimed_ap_object_id.as_deref())
     .execute(pool)
     .await;
 

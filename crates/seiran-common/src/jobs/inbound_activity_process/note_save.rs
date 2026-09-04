@@ -90,6 +90,12 @@ pub(super) async fn save_ap_note_core(
     let remote = upsert_remote_fedi_actor(inbox, ap_client, actor_uri).await?;
     let actor_id = remote.actor_id;
 
+    // `seiranPost`拡張オブジェクト（#237）。検出できた場合、標準フィールドのベストエフォート
+    // 変換（このすぐ下から続く既存パイプライン）は変わらず計算されるが、下記の各所で
+    // その結果を上書きする（無ければ標準変換のフォールバックのまま使う設計、
+    // `docs/protocols.md` 5節）。
+    let seiran_post_ext = crate::seiran_post::SeiranPost::extract(note);
+
     let mut tags = note["tag"].as_array().cloned().unwrap_or_default();
 
     // kmyblue系は`<p class="quote-inline">RE: <a>URL</a></p>`を本文の**先頭**（Fedibird/
@@ -177,6 +183,17 @@ pub(super) async fn save_ap_note_core(
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
     let to_list = as_string_list(&note["to"]);
     let visibility = classify_ap_visibility(&to_list, &as_string_list(&note["cc"]));
+    // seiranPostがあれば申告された可視性で上書きする（不明な値ならAP標準の判定を使う）。
+    let visibility = seiran_post_ext
+        .as_ref()
+        .and_then(|sp| match sp.visibility.as_str() {
+            "public" => Some("public"),
+            "unlisted" => Some("unlisted"),
+            "followers_only" => Some("followers_only"),
+            "direct" => Some("direct"),
+            _ => None,
+        })
+        .unwrap_or(visibility);
 
     // AP inReplyTo からローカルの reply_to_post_id を解決する（DM機能実装以前はこの解決自体が
     // 存在しなかった。通常投稿にも有用だが、direct（DM）のスレッド起点伝播に必須のため追加）。
@@ -236,33 +253,17 @@ pub(super) async fn save_ap_note_core(
             (None, Vec::new())
         };
 
-    // シナリオ2: seiran_post_uuid による seiran 間マージ
-    let seiran_uuid = note["seiranUuid"].as_str();
-    if let Some(uuid) = seiran_uuid {
-        if let Some((existing_id, existing_ap_id)) = inbox
-            .post_repo
-            .find_by_seiran_uuid(uuid)
-            .await
-            .map_err(|e| format!("seiran_post_uuid 検索失敗: {}", e))?
-        {
-            if existing_ap_id.is_none() {
-                // ap_object_id 未設定なら UPDATE
-                inbox
-                    .post_repo
-                    .update_ap_object_id(existing_id, &note_id)
-                    .await
-                    .map_err(|e| format!("ap_object_id 更新失敗: {}", e))?;
-                tracing::info!(
-                    "[NoteSave] seiran_uuid マージ（AP 側更新）: id={}",
-                    existing_id
-                );
-            }
-            // 重複インサートはしない
-            return Ok(SaveApNoteOutcome::AlreadyExists {
-                post_id: existing_id,
-            });
-        }
-    }
+    // シナリオ2: 他seiranサーバー間マージ（#237、相互一致方式）。
+    // `seiranPost.counterpartPostId`（ATP側の真正なat_uri申告）がある場合のみ、
+    // `insert_remote_with_dedup`へ`claimed_at_uri`として渡す。実際の相互一致判定
+    // （advisory lock・既存行の逆申告確認・投稿者一貫性チェック）はそちら側
+    // （`repository::post::insert_remote_with_dedup`）が担う。旧`seiran_post_uuid`方式
+    // （内部限定UUIDの単純一致のみで投稿者確認が無く、他人の投稿を乗っ取れる欠陥があった）
+    // はこの方式に置き換えられ廃止した。
+    let claimed_at_uri = seiran_post_ext
+        .as_ref()
+        .and_then(|sp| sp.counterpart_post_id.as_deref());
+    let seiran_uuid: Option<&str> = None;
 
     let note_url = note["url"].as_str().unwrap_or("");
 
@@ -280,14 +281,33 @@ pub(super) async fn save_ap_note_core(
 
     let parent_original_post_id = resolve_bridge_duplicate_post_id(inbox, note_url).await;
 
-    // posts テーブルに挿入（ap_object_id 重複はスキップ、seiran_post_uuid も保存）
+    // seiranPostがあれば本文・絵文字マップを標準変換の代わりに使う（Single Source of
+    // Truth、`docs/protocols.md` 5節）。添付・URLカードの完全再現（isSensitive/isGif等）は
+    // 本パスでは未対応で、標準AP添付フィールド（`note["attachment"]`）のベストエフォート
+    // フォールバックのまま（追って対応予定）。
+    let body = seiran_post_ext
+        .as_ref()
+        .map(|sp| sp.body.clone())
+        .unwrap_or(body);
+    let emoji_map = seiran_post_ext
+        .as_ref()
+        .map(|sp| sp.emoji_map.clone())
+        .unwrap_or(emoji_map);
+    let content_html_for_insert: Option<&str> = if seiran_post_ext.is_some() {
+        None
+    } else {
+        Some(&content_html_sanitized)
+    };
+
+    // posts テーブルに挿入（ap_object_id 重複はスキップ、claimed_at_uriがあれば
+    // #237相互一致マージを試みる。旧seiran_uuidは常にNone、詳細は上記コメント参照）。
     inbox
         .post_repo
         .insert_remote_with_dedup(InsertRemoteWithDedupParams {
             id: post_id,
             actor_id,
             body: &body,
-            content_html: Some(&content_html_sanitized),
+            content_html: content_html_for_insert,
             ap_object_id: &note_id,
             seiran_uuid,
             parent_original_post_id,
@@ -302,6 +322,7 @@ pub(super) async fn save_ap_note_core(
             quote_of_post_id,
             quote_of_ap_uri: quote_of_ap_uri.as_deref(),
             quote_of_ref_status: quote_of_ref_status.map(RefStatus::as_db_str),
+            claimed_at_uri,
         })
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
@@ -315,8 +336,13 @@ pub(super) async fn save_ap_note_core(
         .map_err(|e| format!("posts id 取得エラー: {}", e))?
         .ok_or_else(|| format!("posts id 取得エラー: {} が見つかりません", note_id))?;
 
-    let content_warning = note["summary"].as_str().filter(|s| !s.is_empty());
-    let poll = normalize_ap_poll(note);
+    let (content_warning, poll) = match &seiran_post_ext {
+        Some(sp) => (sp.content_warning.as_deref(), sp.poll.clone()),
+        None => (
+            note["summary"].as_str().filter(|s| !s.is_empty()),
+            normalize_ap_poll(note),
+        ),
+    };
     inbox
         .post_repo
         .set_fedi_content_metadata(post_id, content_warning, poll.as_ref())

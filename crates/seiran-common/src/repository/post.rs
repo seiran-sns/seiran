@@ -303,6 +303,14 @@ pub struct InsertRemoteWithDedupParams<'a> {
     pub thread_root_post_id: Option<i64>,
     /// `visibility='direct'`（DM）専用。direct以外は空スライスを渡すこと。
     pub recipient_actor_ids: &'a [i64],
+    /// `seiranPost.counterpartPostId`（他seiranサーバー間の投稿マージ、#237）。
+    /// `Some`の場合、`insert_remote_with_dedup`は挿入前にこの値を`at_uri`に持つ既存行を
+    /// 検索し、その既存行自身の`claimed_ap_object_id`が`ap_object_id`を指し返し、かつ
+    /// 投稿者（`actor_id`）が一致する場合のみ新規INSERTせず既存行を更新する
+    /// （`docs/protocols.md` 5節の相互一致アルゴリズム）。マージ不成立ならこの値を
+    /// `claimed_at_uri`として新規行に保存する。`None`なら従来通りの単純INSERT
+    /// （seiranPost非対応の一般的なリモート投稿）。
+    pub claimed_at_uri: Option<&'a str>,
 }
 
 /// `PostRepository::insert_repost` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
@@ -1636,9 +1644,48 @@ impl PostRepository for PgPostRepository {
         params: InsertRemoteWithDedupParams<'_>,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
+
+        // #237 相互一致マージ判定。seiranPostの申告（claimed_at_uri）を持つ投稿のみ、
+        // ap_object_idをキーにした advisory lock でDB反映を直列化してから既存行を探す
+        // （`docs/protocols.md` 5節）。申告の無い一般的なリモート投稿はこの分岐を通らず
+        // 従来通り無条件・ノーロックでINSERTする（cross-column突合が不要なため）。
+        if let Some(claimed_at_uri) = params.claimed_at_uri {
+            sqlx::query("SELECT pg_advisory_xact_lock(2, hashtext($1))")
+                .bind(params.ap_object_id)
+                .execute(&mut *tx)
+                .await?;
+
+            let existing: Option<(i64, i64, Option<String>)> = sqlx::query_as(
+                "SELECT id, actor_id, claimed_ap_object_id FROM posts WHERE at_uri = $1",
+            )
+            .bind(claimed_at_uri)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+            if let Some((existing_id, existing_actor_id, claimed_ap_object_id)) = existing {
+                let mutual_match = claimed_ap_object_id.as_deref() == Some(params.ap_object_id);
+                // 投稿者の一貫性チェック（簡略版）: 現時点ではオンメモリなアクター結婚
+                // （#236アルゴリズムの投稿受信時適用）は未実装のため、両投稿の投稿者が
+                // 既に同一actor行に解決されている場合のみマージする。不一致の場合は
+                // マージせず孤立行のまま残す（#236側のアクター統合が別途成立すれば、
+                // 将来の再突合で解消できる余地を残す設計、`docs/protocols.md` 5節）。
+                if mutual_match && existing_actor_id == params.actor_id {
+                    sqlx::query(
+                        "UPDATE posts SET ap_object_id = $1, claimed_ap_object_id = NULL WHERE id = $2",
+                    )
+                    .bind(params.ap_object_id)
+                    .bind(existing_id)
+                    .execute(&mut *tx)
+                    .await?;
+                    tx.commit().await?;
+                    return Ok(());
+                }
+            }
+        }
+
         let result = sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, content_html, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id, reply_to_ap_uri, reply_to_ref_status, quote_of_ap_uri, quote_of_ref_status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::post_visibility_enum, $13, $14, $15::post_reference_status, $16, $17::post_reference_status)
+            "INSERT INTO posts (id, actor_id, body, content_html, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id, reply_to_ap_uri, reply_to_ref_status, quote_of_ap_uri, quote_of_ref_status, claimed_at_uri)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::post_visibility_enum, $13, $14, $15::post_reference_status, $16, $17::post_reference_status, $18)
              ON CONFLICT (ap_object_id) DO NOTHING",
         )
         .bind(params.id)
@@ -1658,6 +1705,7 @@ impl PostRepository for PgPostRepository {
         .bind(params.reply_to_ref_status)
         .bind(params.quote_of_ap_uri)
         .bind(params.quote_of_ref_status)
+        .bind(params.claimed_at_uri)
         .execute(&mut *tx)
         .await?;
 

@@ -161,12 +161,13 @@
   - [x] 相互一致チェック（結婚判定）の実装（`seiran_common::seiran_actor_merge`）
   - [x] fedi IDキーの`pg_advisory_xact_lock`ヘルパー追加とDB反映の直列化（`advisory_lock::acquire_xact_lock_for_key`）
 - [ ] **投稿の完全表現力をAP/ATP双方でロスレス往復（#237）** — 設計確定（`docs/protocols.md` 5節参照）。`seiranPost`拡張オブジェクトをAP Note・ATP post本体の両方に同一構造で埋め込み、CW・投票・カスタム絵文字マップ・添付のNSFW/GIF/寸法・複数URLカード等、標準フィールドでは表現しきれないseiran独自の表現力をリモートseiran間で完全再現する。投稿ID・投稿者IDの相互申告一致によるマージ判定（#236と同型のアルゴリズム）を採用し、`seiran_post_uuid`のような内部限定トークンは使わない。副次効果として、下記「他seiranサーバー間マージのATP経路対応」の既知の制約もこのissueで解消される。
-  - [ ] `posts.claimed_ap_object_id`/`claimed_at_uri`カラム追加（`seiran_post_uuid`は将来的に削除検討）
-  - [ ] 相互一致チェック（投稿マージ判定）と投稿者一貫性チェックの実装
-  - [ ] 投稿マージ時のオンメモリなアクター結婚（#236アルゴリズムの共有）の実装
-  - [ ] `ap_object_id`キーの`pg_advisory_xact_lock(2, ...)`によるDB反映の直列化（#236の`key1=1`と名前空間分離）
-  - [ ] AP配送を非対称化: ATP URI確定済みなら`counterpartPostId`同梱、未確定なら`counterpartPostId`だけ欠いた`seiranPost`で通常優先度のまま即時配送（ATPコミット完了待ちで配送自体を遅延させない）
-  - [ ] ATP URI確定時に`counterpartPostId`入り`seiranPost`を持つ`Update(Note)`をAPフォロワーへ送信（ATP側コミット・伝播より先に）
+  - [x] `posts.claimed_ap_object_id`/`claimed_at_uri`カラム追加（`seiran_post_uuid`は将来的に削除検討）
+  - [x] AP/ATP双方の受信経路（`note_save::save_ap_note_core`・Jetstream `save_bsky_post`）で`seiranPost`検出時に標準フィールド（body/emojiMap/visibility/contentWarning/poll）を上書きする「posts行の再構築」を実装（添付・URLカードの完全再現は未対応、標準AP/ATPフィールドのベストエフォート変換のまま）
+  - [x] 相互一致チェック（投稿マージ判定）の実装。`ap_object_id`キーの`pg_advisory_xact_lock(2, ...)`によるDB反映の直列化込み（#236の`key1=1`と名前空間分離）
+  - [x] 投稿者一貫性チェック（簡略版）: 両投稿の投稿者が**既に同一actor行**に解決されている場合のみマージする
+  - [ ] 投稿マージ時のオンメモリなアクター結婚（#236アルゴリズムの共有）は未実装。上記簡略版チェックにより、投稿者がまだ結婚していない場合はマージ不成立のまま孤立行として残る（`claimed_*`は保持されるため、#236側のアクター結婚が別途成立すれば将来の再突合で解消できる余地は残る設計のまま）
+  - [x] AP配送を非対称化: ATP URI確定済みなら`counterpartPostId`同梱、未確定なら`counterpartPostId`だけ欠いた`seiranPost`で通常優先度のまま即時配送（ATPコミット完了待ちで配送自体を遅延させない）
+  - [x] ATP URI確定時に`counterpartPostId`入り`seiranPost`を持つ`Update(Note)`をAPフォロワーへ送信（`Job::BskyPostCommitDeferred`完了時のみ。同期コミットはCreate自体が既にcounterpartPostIdを持てるため対象外）
   - [ ] `Update(Note)`受理ハンドラの追加（`seiranPost.counterpartPostId`のみ反映・本文等は無視、なりすまし対策込み、マージ再判定トリガー）
   - [ ] マージ成立時のクリーンアップ2段階方式（同期: URI付け替え+`parent_original_post_id`+`deleted_at`／非同期ジョブ: FK付け替え+手動カウンタ調整+削除予定行の物理削除）
 - [ ] **リモートseiranユーザーへのフォローはAP経由開始・承認状況に応じてATP側も同期（#238）** — フォロー承認制はAPにしかない概念のため、リモートseiranへのフォローは常にAP経由で送る。相手が非承認制なら（既存の`follow_fedi`がAccept受信を待たず内部的に成立させる動作に乗せて）その時点でATP側`commit_follow`も実行、承認制ならAcceptを受けてから実行する。#236完了後に着手。
