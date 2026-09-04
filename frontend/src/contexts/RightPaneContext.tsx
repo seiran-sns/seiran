@@ -1,4 +1,10 @@
 import { createContext, useContext, useState } from "react";
+import type { NotificationItem } from "../api/client";
+
+interface NotificationsPanelCache {
+  items: NotificationItem[];
+  hasMore: boolean;
+}
 
 /**
  * 右ペインのサブタブ選択状態を「セッション内で維持」するためのストア（Doc5 §2.4）。
@@ -27,6 +33,22 @@ interface RightPaneState {
    * ブラウザバック時に再現するためセッション内（インメモリ）で保持する。 */
   noteDetailScrollY: Record<string, number>;
   setNoteDetailScrollY: (noteId: string, y: number) => void;
+  /** 右ペイン「クイック通知」タブ（Home/Search画面）のスクロール位置（`.rightScroll`の
+   * scrollTop）。他画面へ遷移して戻ってきた際・タブを行き来した際に再現するため、
+   * セッション内（インメモリ）で保持する。 */
+  notifPanelScrollY: number;
+  setNotifPanelScrollY: (y: number) => void;
+  /** 上記と同じ【クイック通知】タブの一覧本体（追加読み込み分含む）。スクロール位置だけでなく
+   * これも記憶しないと、復帰時の再フェッチで先頭ページ分だけになり一覧の実高さが足りず
+   * スクロール位置の復元が壊れる（無限スクロールで深く読み込んでいた場合）。 */
+  notifPanelCache: NotificationsPanelCache | undefined;
+  setNotifPanelCache: (cache: NotificationsPanelCache) => void;
+  /** 通知一覧画面（中央ペインでwindowスクロールする独立ページ）のスクロール位置。 */
+  notificationsPageScrollY: number;
+  setNotificationsPageScrollY: (y: number) => void;
+  /** 通知一覧画面の一覧本体。上記`notifPanelCache`と同じ理由で必要。 */
+  notificationsPageCache: NotificationsPanelCache | undefined;
+  setNotificationsPageCache: (cache: NotificationsPanelCache) => void;
 }
 
 const RightPaneContext = createContext<RightPaneState>({
@@ -40,6 +62,14 @@ const RightPaneContext = createContext<RightPaneState>({
   setNoteAncestorIds: () => {},
   noteDetailScrollY: {},
   setNoteDetailScrollY: () => {},
+  notifPanelScrollY: 0,
+  setNotifPanelScrollY: () => {},
+  notifPanelCache: undefined,
+  setNotifPanelCache: () => {},
+  notificationsPageScrollY: 0,
+  setNotificationsPageScrollY: () => {},
+  notificationsPageCache: undefined,
+  setNotificationsPageCache: () => {},
 });
 
 export function RightPaneProvider({ children }: { children: React.ReactNode }) {
@@ -57,6 +87,12 @@ export function RightPaneProvider({ children }: { children: React.ReactNode }) {
   const setNoteDetailScrollY = (noteId: string, y: number) => {
     setNoteDetailScrollYState((prev) => ({ ...prev, [noteId]: y }));
   };
+  const [notifPanelScrollY, setNotifPanelScrollY] = useState(0);
+  const [notifPanelCache, setNotifPanelCache] = useState<NotificationsPanelCache | undefined>(undefined);
+  const [notificationsPageScrollY, setNotificationsPageScrollY] = useState(0);
+  const [notificationsPageCache, setNotificationsPageCache] = useState<NotificationsPanelCache | undefined>(
+    undefined
+  );
   return (
     <RightPaneContext.Provider
       value={{
@@ -70,6 +106,14 @@ export function RightPaneProvider({ children }: { children: React.ReactNode }) {
         setNoteAncestorIds,
         noteDetailScrollY,
         setNoteDetailScrollY,
+        notifPanelScrollY,
+        setNotifPanelScrollY,
+        notifPanelCache,
+        setNotifPanelCache,
+        notificationsPageScrollY,
+        setNotificationsPageScrollY,
+        notificationsPageCache,
+        setNotificationsPageCache,
       }}
     >
       {children}

@@ -83,8 +83,16 @@ export default function HomePage() {
   const [composerCollapsed, setComposerCollapsed] = useState(
     () => localStorage.getItem(COMPOSER_COLLAPSED_KEY) === "1"
   );
-  const { timelineTab, setTimelineTab } = useRightPane();
+  const { timelineTab, setTimelineTab, notifPanelScrollY, setNotifPanelScrollY, notifPanelCache, setNotifPanelCache } =
+    useRightPane();
   const rightPaneRef = useRef<HTMLDivElement>(null);
+  // クイック通知欄の実際のスクロールコンテナは`.rightScroll`（AppShell側、この直下div=
+  // rightPaneRefの親要素）。overflow-y: autoで独立スクロールするため、windowではなく
+  // このコンテナのscrollTopを保存・復元する。
+  const getNotifScrollContainer = useCallback(
+    () => (rightPaneRef.current?.parentElement as HTMLElement | null) ?? null,
+    []
+  );
   const isNarrow = useIsNarrowViewport();
   const { subscribeChannel, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
@@ -511,7 +519,17 @@ export default function HomePage() {
         sticky
         top={0}
       />
-      {timelineTab === 0 ? <NotificationsPanel /> : <TrendsSearchPanel />}
+      {timelineTab === 0 ? (
+        <NotificationsPanel
+          scrollY={notifPanelScrollY}
+          onScrollYChange={setNotifPanelScrollY}
+          getScrollContainer={getNotifScrollContainer}
+          cache={notifPanelCache}
+          onCacheChange={setNotifPanelCache}
+        />
+      ) : (
+        <TrendsSearchPanel />
+      )}
     </div>
   );
 

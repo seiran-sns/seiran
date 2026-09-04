@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, Note, getErrorMessage } from "../api/client";
@@ -16,7 +16,14 @@ export default function SearchPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQ = searchParams.get("q") ?? "";
-  const { timelineTab, setTimelineTab } = useRightPane();
+  const { timelineTab, setTimelineTab, notifPanelScrollY, setNotifPanelScrollY, notifPanelCache, setNotifPanelCache } =
+    useRightPane();
+  const rightPaneRef = useRef<HTMLDivElement>(null);
+  // Home画面と同じ`.rightScroll`独立スクロールコンテナのscrollTopを保存・復元する。
+  const getNotifScrollContainer = useCallback(
+    () => (rightPaneRef.current?.parentElement as HTMLElement | null) ?? null,
+    []
+  );
 
   const [input, setInput] = useState(initialQ);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -115,21 +122,27 @@ export default function SearchPage() {
   );
 
   const right = (
-    <>
+    <div ref={rightPaneRef}>
       <Tabs
         tabs={[t("search:searchPage.tabs.quickNotifications"), t("search:searchPage.tabs.trendsSearch")]}
         active={timelineTab}
         onChange={setTimelineTab}
       />
       {timelineTab === 0 ? (
-        <NotificationsPanel />
+        <NotificationsPanel
+          scrollY={notifPanelScrollY}
+          onScrollYChange={setNotifPanelScrollY}
+          getScrollContainer={getNotifScrollContainer}
+          cache={notifPanelCache}
+          onCacheChange={setNotifPanelCache}
+        />
       ) : (
         <div className={panel.placeholder}>
           <TwemojiEmoji emoji="📈" className={panel.placeholderIcon} />
           {t("search:searchPage.trendsComingSoon")}
         </div>
       )}
-    </>
+    </div>
   );
 
   return <AppShell center={center} right={right} />;

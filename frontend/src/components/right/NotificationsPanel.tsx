@@ -145,6 +145,30 @@ export function describeNotification(n: NotificationItem): {
   }
 }
 
+interface NotificationsPanelCache {
+  items: NotificationItem[];
+  hasMore: boolean;
+}
+
+interface NotificationsPanelProps {
+  /** 復元すべきスクロール位置。省略時はスクロール位置の保存・復元を行わない。 */
+  scrollY?: number;
+  /** スクロールのたびに現在位置を書き戻すコールバック。 */
+  onScrollYChange?: (y: number) => void;
+  /** スクロールを監視・復元する要素を返す関数。省略時は`window`
+   *（通知一覧画面のように中央ペインでwindowスクロールする場合）。
+   * Home/Search画面の右ペインのようにコンテナ自身が`overflow-y: auto`で
+   * 独立スクロールする場合はそのコンテナを返す関数を渡す。 */
+  getScrollContainer?: () => HTMLElement | null;
+  /** 前回表示時の一覧（追加読み込み分含む）。渡された場合は再フェッチせずこれを初期表示に使い、
+   * 離脱中に届いた新着だけを補って差し込む。これが無いと`scrollY`だけ復元しても、
+   * 再フェッチで先頭ページ分（`PAGE_SIZE`件）しか一覧が無い状態になり、無限スクロールで
+   * それより深く読み込んでいた場合に一覧の実高さが足りずスクロール位置が正しく再現できない。 */
+  cache?: NotificationsPanelCache;
+  /** 一覧・hasMoreが変わるたびに呼び出し元へ書き戻すコールバック（上記`cache`の保存用）。 */
+  onCacheChange?: (cache: NotificationsPanelCache) => void;
+}
+
 /**
  * ホーム右ペイン タブ2: クイック通知（Doc5 §2.1）。
  * `POST /api/i/notifications`（Misskey API 互換, Doc3 §5.5）で永続化された通知履歴を
@@ -152,13 +176,23 @@ export function describeNotification(n: NotificationItem): {
  * WS 経由のライブ通知（`registerNotifArrived`）は「新着があった」というシグナルにのみ使い、
  * 実データは常に REST から取得することで、一覧表示と整合したID体系を保つ。
  */
-export default function NotificationsPanel() {
+export default function NotificationsPanel({
+  scrollY,
+  onScrollYChange,
+  getScrollContainer,
+  cache,
+  onCacheChange,
+}: NotificationsPanelProps = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const { registerNotifArrived, markRead } = useStreamingContext();
   const { showError } = useToast();
-  const [loadingInitial, setLoadingInitial] = useState(true);
+  // キャッシュがあれば初回レンダーの時点から復元済みの内容を表示する（`useEffect`経由で
+  // `setItems`すると、そのeffectが走るまでの最初の1回のレンダーが空一覧になり、その一瞬だけ
+  // 実高さが縮んでwindow.scrollY（またはコンテナのscrollTop）がブラウザに強制的にクランプされ、
+  // それが継続保存リスナーに拾われて正しいスクロール位置の記憶を0で上書きしてしまう不具合があった）。
+  const [loadingInitial, setLoadingInitial] = useState(() => cache === undefined);
   const itemsRef = useRef<NotificationItem[]>([]);
 
   const onError = useCallback((e: unknown) => showError(getErrorMessage(e)), [showError]);
@@ -170,13 +204,55 @@ export default function NotificationsPanel() {
     fetchPage,
     (n) => n.id,
     PAGE_SIZE,
-    onError
+    onError,
+    cache
   );
   itemsRef.current = items;
   const sentinelRef = useInfiniteScrollSentinel<HTMLLIElement>(loadMore, hasMore);
 
+  // 遷移（ノート詳細・プロフィールへのnavigate）でこのコンポーネントがアンマウントされる際、
+  // DOMが取り除かれている最中（cleanupでイベントリスナーが外れきるまでの一瞬）に実高さが
+  // 大きく縮み、window.scrollY（またはコンテナのscrollTop）がブラウザに強制的に0へ
+  // クランプされることがある。一覧が短い間は縮む処理が一瞬で終わり気づかないが、無限スクロールで
+  // 深く読み込むほど（実高さが大きいほど）縮小に時間がかかり、その間に発生した'scroll'イベントを
+  // 下記の継続保存リスナーが拾って正しい記憶を0で上書きしてしまう不具合があった（実機で確認）。
+  // クリックした瞬間に同期的に現在値を確定・凍結し、以降の（クランプ由来の）上書きを止める
+  // （HomePageの`navigatingAway`/`onBeforeNavigate`と同じ対策）。
+  const navigatingAwayRef = useRef(false);
+  const freezeScroll = useCallback(() => {
+    navigatingAwayRef.current = true;
+    if (!onScrollYChange) return;
+    const el = getScrollContainer?.() ?? null;
+    onScrollYChange(el ? el.scrollTop : window.scrollY);
+  }, [onScrollYChange, getScrollContainer]);
+
+  // 指定ID（無ければ先頭ページ相当）より新しい通知を取得して先頭へ差し込み、既読マークする。
+  // 初回マウント時（キャッシュ復元時の補完）とWS新着シグナル受信時の両方で共有する。
+  const mergeSince = useCallback(
+    (sinceId: string | undefined) =>
+      api.notifications.list({ limit: PAGE_SIZE, sinceId, markAsRead: true }).then((rows) => {
+        if (rows.length === 0) return;
+        setItems((prev) => {
+          const seen = new Set(prev.map((p) => p.id));
+          const fresh = rows.filter((r) => !seen.has(r.id));
+          return fresh.length > 0 ? [...fresh, ...prev] : prev;
+        });
+        markRead();
+      }),
+    [setItems, markRead]
+  );
+
   useEffect(() => {
     let cancelled = false;
+    // items/hasMore/loadingInitialは既に初期値としてcacheから復元済み（上記）なので、ここでは
+    // 離脱中に届いた新着だけをsinceIdで補って先頭へ差し込み、既読マークする
+    // （HomePageの`mergeHeadIntoTimeline`と同じ、真のfire-and-forget）。
+    if (cache) {
+      mergeSince(cache.items[0]?.id).catch((e) => !cancelled && onError(e));
+      return () => {
+        cancelled = true;
+      };
+    }
     api
       .notifications.list({ limit: PAGE_SIZE, markAsRead: true })
       .then((rows) => {
@@ -194,21 +270,47 @@ export default function NotificationsPanel() {
   }, []);
 
   useEffect(
-    () =>
-      registerNotifArrived(() => {
-        const newestId = itemsRef.current[0]?.id;
-        api.notifications.list({ limit: PAGE_SIZE, sinceId: newestId, markAsRead: true }).then((rows) => {
-          if (rows.length === 0) return;
-          setItems((prev) => {
-            const seen = new Set(prev.map((p) => p.id));
-            const fresh = rows.filter((r) => !seen.has(r.id));
-            return fresh.length > 0 ? [...fresh, ...prev] : prev;
-          });
-          markRead();
-        }).catch(onError);
-      }),
-    [registerNotifArrived, markRead, onError, setItems]
+    () => registerNotifArrived(() => mergeSince(itemsRef.current[0]?.id).catch(onError)),
+    [registerNotifArrived, mergeSince, onError]
   );
+
+  // 一覧・hasMoreが変わるたびに呼び出し元のキャッシュへ書き戻す（HomePageのタイムラインと同じ方式）。
+  // 初回読み込み中は書き込まない: React 18 StrictMode（開発時）はmount直後に同一レンダーの
+  // effectを2回連続実行するため、まだ反映されていない「更新前の古いitems（空配列）」を
+  // このeffectが読んでしまい、直前に復元/フェッチ中の正しいキャッシュを空データで
+  // 上書きしてしまう不具合を避ける（HomePage側の同種コメント参照）。
+  useEffect(() => {
+    if (loadingInitial || !onCacheChange) return;
+    onCacheChange({ items, hasMore });
+  }, [items, hasMore, loadingInitial, onCacheChange]);
+
+  // スクロール位置は継続的に（都度）呼び出し元へ書き戻す（HomePageのタイムラインと同じ方式）。
+  // navigatingAwayRefが立った後（上記freezeScroll参照）は、DOM除去中のクランプ由来の
+  // 'scroll'イベントを拾って正しい記憶を上書きしないよう保存を止める。
+  useEffect(() => {
+    if (!onScrollYChange) return;
+    const el = getScrollContainer?.() ?? null;
+    const onScroll = () => {
+      if (navigatingAwayRef.current) return;
+      onScrollYChange(el ? el.scrollTop : window.scrollY);
+    };
+    const target = el ?? window;
+    target.addEventListener("scroll", onScroll, { passive: true });
+    return () => target.removeEventListener("scroll", onScroll);
+  }, [onScrollYChange, getScrollContainer]);
+
+  // 初回読み込みが終わり一覧がDOMへ反映された後に、一度だけスクロール位置を復元する。
+  useEffect(() => {
+    if (loadingInitial || scrollY === undefined) return;
+    const el = getScrollContainer?.() ?? null;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop = scrollY;
+        else window.scrollTo(0, scrollY);
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingInitial]);
 
   if (loadingInitial) {
     return <div className={panel.placeholder}>{t("common:loading")}</div>;
@@ -226,7 +328,15 @@ export default function NotificationsPanel() {
   }
 
   return (
-    <ul className={styles.list}>
+    <ul
+      className={styles.list}
+      onClickCapture={(event) => {
+        // AppShellのonBeforeNavigateと同じ判定（`a[href]`クリック）。上記`<li>`のonClick
+        // （ノート詳細へのnavigate、`a`タグではない）は個別にfreezeScrollを呼んでいるため、
+        // ここでは二重発火してもnavigatingAwayRef.currentがtrueになるだけで無害。
+        if ((event.target as Element).closest("a[href]")) freezeScroll();
+      }}
+    >
       {items.map((n) => {
         const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix, newHandle } = describeNotification(n);
         const noteId = resolveTargetNoteId(n);
@@ -284,7 +394,14 @@ export default function NotificationsPanel() {
           <li
             key={n.id}
             className={clickNoteId ? `${styles.item} ${styles.clickable}` : styles.item}
-            onClick={clickNoteId ? () => navigate(`/notes/${clickNoteId}`) : undefined}
+            onClick={
+              clickNoteId
+                ? () => {
+                    freezeScroll();
+                    navigate(`/notes/${clickNoteId}`);
+                  }
+                : undefined
+            }
           >
             {noteId ? (
               <NoteHoverPreview noteId={noteId} className={styles.previewWrap} side="left">

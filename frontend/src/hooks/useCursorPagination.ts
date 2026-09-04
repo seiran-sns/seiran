@@ -11,15 +11,22 @@ import { useCallback, useRef, useState } from "react";
  *
  * 初回ロードは呼び出し元の既存 `useEffect`（Promise.all との組み合わせ・notFound 判定等が
  * ページごとに異なるため）に任せ、この hook が返す `setItems`/`setHasMore` で結果を渡す。
+ *
+ * `initial`（省略可）を渡すと`items`/`hasMore`をその値で初期化する。呼び出し元が
+ * セッション内キャッシュを持っている場合、初回レンダーの時点から復元済みの内容を
+ * 表示するために使う。`useEffect`経由で`setItems`するのでは、そのeffectが走るまでの
+ * 最初の1回のレンダーが空一覧になってしまい、その一瞬だけ実高さが縮んでスクロール位置の
+ * 復元が壊れる（`window.scrollY`がブラウザに強制的にクランプされる）不具合があった。
  */
 export function useCursorPagination<T>(
   fetchPage: (untilId: string) => Promise<T[]>,
   getId: (item: T) => string,
   pageSize: number,
-  onError: (err: unknown) => void
+  onError: (err: unknown) => void,
+  initial?: { items: T[]; hasMore: boolean }
 ) {
-  const [items, setItems] = useState<T[]>([]);
-  const [hasMore, setHasMore] = useState(true);
+  const [items, setItems] = useState<T[]>(initial?.items ?? []);
+  const [hasMore, setHasMore] = useState(initial?.hasMore ?? true);
   const [loadingMore, setLoadingMore] = useState(false);
   const itemsRef = useRef<T[]>([]);
   const loadingMoreRef = useRef(false);
