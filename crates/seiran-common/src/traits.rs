@@ -308,6 +308,17 @@ pub enum Job {
     /// enqueue_stale_poll_fetches`）。既にUpdate(Question)を受理済み（`posts.
     /// poll_update_received`）のNoteは対象外。
     PollFetch { post_id: i64 },
+
+    /// `seiranPost`相互一致マージ（#237）成立後、`finalize_post_merge`が同期的に
+    /// 論理削除・`ap_object_id`/`at_uri`付け替え済みの削除予定行（`doomed_post_id`）から
+    /// 生き残り行（`survivor_post_id`）へ、関連テーブルのFK付け替え・reply/quote/repost_count
+    /// の手動調整・削除予定行の物理削除を行う（`docs/protocols.md` 5節「マージ成立時の
+    /// クリーンアップ」参照）。同期部分で既に`deleted_at`済みのため新規参照は増えず、
+    /// 付け替え対象は成立時点で存在した分だけに限定される。
+    PostMergeCleanup {
+        survivor_post_id: i64,
+        doomed_post_id: i64,
+    },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

@@ -21,6 +21,7 @@ pub mod inbound_activity_process;
 pub mod link_card_embed_resolve;
 pub mod ogp_fetch;
 pub mod poll_fetch;
+pub mod post_merge_cleanup;
 pub mod proxy_follow_sync;
 pub mod relay_follow_sync;
 pub mod remote_actor_resolve;

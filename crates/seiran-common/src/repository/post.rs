@@ -643,6 +643,23 @@ pub trait PostRepository: Send + Sync {
         &self,
         params: InsertRemoteWithDedupParams<'_>,
     ) -> Result<(), sqlx::Error>;
+
+    /// `seiranPost`相互一致マージ（#237）で、既に別々の行として存在していた
+    /// AP起源行とATP起源行を1行へ統合する同期部分（`docs/protocols.md` 5節
+    /// 「マージ成立時のクリーンアップ」参照）。呼び出し元がadvisory lock保持中に呼ぶこと。
+    ///
+    /// `survivor_id`（生き残る行）へ`ap_object_id`/`at_uri`の両方を確定させ、
+    /// `doomed_id`（削除予定行）は当該列をNULL化した上で`parent_original_post_id`を
+    /// survivorへ張り替え・論理削除する。実際の関連テーブルのFK付け替え・カウンタ調整・
+    /// 物理削除は非同期ジョブ（`Job::PostMergeCleanup`）に委譲する。
+    async fn finalize_post_merge(
+        &self,
+        survivor_id: i64,
+        doomed_id: i64,
+        ap_object_id: &str,
+        at_uri: &str,
+    ) -> Result<(), sqlx::Error>;
+
     async fn set_fedi_content_metadata(
         &self,
         post_id: i64,
@@ -1726,6 +1743,43 @@ impl PostRepository for PgPostRepository {
                 .await?;
         }
 
+        tx.commit().await
+    }
+
+    async fn finalize_post_merge(
+        &self,
+        survivor_id: i64,
+        doomed_id: i64,
+        ap_object_id: &str,
+        at_uri: &str,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        // UNIQUE(ap_object_id)/UNIQUE(at_uri)はNULL同士を衝突と見なさないため、
+        // 先にdoomed側をNULL化してからsurvivor側へ確定値をセットする（順序が逆だと
+        // 制約違反になる）。doomedは通常どちらか一方しか持たないが、両方NULL化しても
+        // 安全（既にNULLな列への再代入は無害）。
+        sqlx::query("UPDATE posts SET ap_object_id = NULL, at_uri = NULL WHERE id = $1")
+            .bind(doomed_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "UPDATE posts SET ap_object_id = $1, at_uri = $2, claimed_ap_object_id = NULL, claimed_at_uri = NULL WHERE id = $3",
+        )
+        .bind(ap_object_id)
+        .bind(at_uri)
+        .bind(survivor_id)
+        .execute(&mut *tx)
+        .await?;
+        // deleted_atのNULL→非NULL遷移でtrg_posts_relation_counts_deleteが発火し、
+        // 結婚前に2行がそれぞれ二重加算していた親側カウンタ（reply/quote/repost_count）を
+        // 自動的に1つ分補正する（`docs/protocols.md` 5節参照）。
+        sqlx::query(
+            "UPDATE posts SET parent_original_post_id = $1, deleted_at = now() WHERE id = $2",
+        )
+        .bind(survivor_id)
+        .bind(doomed_id)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await
     }
 
