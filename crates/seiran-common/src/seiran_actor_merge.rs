@@ -73,12 +73,11 @@ pub async fn discover_fedi_actor(
     } else {
         let married_id = match claimed_at_did {
             Some(did) => {
-                let counterpart: Option<(i64, Option<String>)> = sqlx::query_as(
-                    "SELECT id, claimed_ap_uri FROM actors WHERE at_did = $1",
-                )
-                .bind(did)
-                .fetch_optional(&mut *tx)
-                .await?;
+                let counterpart: Option<(i64, Option<String>)> =
+                    sqlx::query_as("SELECT id, claimed_ap_uri FROM actors WHERE at_did = $1")
+                        .bind(did)
+                        .fetch_optional(&mut *tx)
+                        .await?;
                 match counterpart {
                     Some((counterpart_id, Some(claimed))) if claimed == ap_uri => {
                         sqlx::query(
@@ -195,12 +194,11 @@ pub async fn discover_bsky_actor(
     } else {
         let married_id = match claimed_ap_uri {
             Some(uri) => {
-                let counterpart: Option<(i64, Option<String>)> = sqlx::query_as(
-                    "SELECT id, claimed_at_did FROM actors WHERE ap_uri = $1",
-                )
-                .bind(uri)
-                .fetch_optional(&mut *tx)
-                .await?;
+                let counterpart: Option<(i64, Option<String>)> =
+                    sqlx::query_as("SELECT id, claimed_at_did FROM actors WHERE ap_uri = $1")
+                        .bind(uri)
+                        .fetch_optional(&mut *tx)
+                        .await?;
                 match counterpart {
                     Some((counterpart_id, Some(claimed))) if claimed == at_did => {
                         sqlx::query(

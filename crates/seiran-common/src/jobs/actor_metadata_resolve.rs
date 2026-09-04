@@ -94,10 +94,12 @@ async fn resolve_counterpart_via_ap(
     let Some(ap_inbox) = remote_ap.inbox.clone() else {
         return Ok(());
     };
-    let username = remote_ap
-        .preferred_username
-        .clone()
-        .ok_or_else(|| format!("リモートアクター '{}' に preferredUsername がありません", ap_uri))?;
+    let username = remote_ap.preferred_username.clone().ok_or_else(|| {
+        format!(
+            "リモートアクター '{}' に preferredUsername がありません",
+            ap_uri
+        )
+    })?;
     let display_name = remote_ap.name.clone().unwrap_or_else(|| username.clone());
     let domain = ap_uri.split('/').nth(2).unwrap_or("").to_string();
     let avatar_url = remote_ap.avatar_url();
@@ -128,4 +130,3 @@ async fn resolve_counterpart_via_ap(
     .map_err(|e| format!("discover_fedi_actor 失敗: {}", e))?;
     Ok(())
 }
-

@@ -336,10 +336,7 @@ fn rkey_from_at_uri(at_uri: &str) -> Option<&str> {
 /// `apActorUri`を取得する（#236、リモートseiranアクターの相互申告マージ用）。
 /// レコード不在・取得失敗時は`None`（このDIDはseiranアクターではない、またはまだ
 /// 宣言していない、として扱う）。
-pub async fn fetch_seiran_actor_declaration(
-    client: &reqwest::Client,
-    did: &str,
-) -> Option<String> {
+pub async fn fetch_seiran_actor_declaration(client: &reqwest::Client, did: &str) -> Option<String> {
     let value = get_record_value(client, did, "org.seiran.actor.declaration", "self").await?;
     value
         .get("apActorUri")

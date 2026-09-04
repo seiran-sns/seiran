@@ -830,12 +830,10 @@ pub fn encode_bsky_feed_post(
                     width,
                     height,
                 } => build_embed_video_ipld(&cid, &mime_type, size, width, height)?,
-                _ => {
-                    return Err(RepoError::Cbor(
-                        "recordWithMedia: media は Images/Video/External のいずれかである必要がある"
-                            .to_string(),
-                    ))
-                }
+                _ => return Err(RepoError::Cbor(
+                    "recordWithMedia: media は Images/Video/External のいずれかである必要がある"
+                        .to_string(),
+                )),
             };
             Some(build_embed_record_with_media_ipld(&uri, &cid, media_ipld))
         }
