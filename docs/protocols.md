@@ -477,13 +477,47 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
 同じ内容の投稿が複数ルートで自サーバーに届くケースへの対処。3シナリオ:
 
 1. **ループバック**（自サーバー投稿の逆輸入）: 受信Noteの `id`/`url` が `https://{local_domain}/notes/{id}` パターンに一致すれば `parent_original_post_id` にセットしてINSERT（重複許容 + リンク）。
-2. **他seiranサーバー間マージ**: 送信側は投稿作成時に `seiran_post_uuid`（UUID v4）を生成しAP Noteに `seiranUuid` として埋め込む。受信側は `find_by_seiran_uuid` で既存行を検索し、あれば新規INSERTせず `ap_object_id` をUPDATEするのみ。
-   - **既知の制約**: `seiran_post_uuid` は ATP 側（Bskyレコード本体）には埋め込まれていない。そのため Jetstream 経由で先に取り込まれた投稿に後から AP の `Create` が届いても `find_by_seiran_uuid` は一致せず、**別行として新規INSERTされる**（マージされない）。現状「AP側が先」の場合のみ機能する。この制約は、投稿の完全な表現力をAP/ATP双方で再現する拡張オブジェクト`seiranPost`（設計確定済み、#237）に`seiranUuid`を含めることで解消される予定——`app.bsky.feed.post`本体は一度コミットされたら他クライアントに書き換えられないため独自フィールドの追加は安全（Jetstream・AppViewとも未知フィールドを保持したまま透過することを確認済み）。
+2. **他seiranサーバー間マージ**（未実装、設計確定済み。#237）: `seiranUuid`のような内部限定の不透明なトークンは使わない。代わりに、AP Note・ATP post本体の両方に埋め込む拡張オブジェクト`seiranPost`（後述）に、その投稿自身が持つ**相手プロトコルでの真正なID**（AP object id または AT URI）を相互に自己申告させ（`counterpartPostId`）、両者の申告が一致した場合にのみ1行へマージする。
+   - **相互一致アルゴリズム**（11節のアクター統合と同型）: 新着の実ID（例: AT URI=Y）を受信し、その`seiranPost.counterpartPostId`がAP object id=Xだと申告しているとする。既存行にap_object_id=Xの行があり、**かつその行自身の申告（`claimed_at_uri`）がYを指し返している**場合にのみマージ成立（at_uriにYを確定させ、`claimed_at_uri`をクリア）。申告が無い・一致しない場合はマージせず、新規行として`ap_object_id=NULL, at_uri=Y, claimed_ap_object_id=X`でINSERTする（`posts`に新設予定の`claimed_ap_object_id`/`claimed_at_uri`列を使う）。一方的な申告だけでマージしないのは、攻撃者が他人の投稿の実IDを盗み見て自分の投稿にその相手として申告させるだけで他人の投稿を乗っ取れてしまう（`ap_object_id`の書き換えによる連合先の差し替え等）ことを防ぐため。
+   - **投稿者の一貫性チェック**: 上記が一致してもなお、2つの投稿の投稿者（HTTP Signature/DIDコミットで検証済みの実アクター）が同一の結婚済みペアであることを要求する。片方が既に**別の**相手と結婚済みなら、投稿ID同士がどれだけ一致してもマージは失敗させる。どちらも未結婚なら、各投稿が持つ投稿者の相互申告（`counterpartAuthorId`）を使い、11節のアクター統合アルゴリズムをこの場でオンメモリに適用し結婚させてからマージする（追加のフェッチ不要）。
+   - **配送側の制約**: 自サーバーが送信元になる場合、`counterpartPostId`は常にその投稿の確定済みの真正なIDでなければならない（未確定のプレースホルダを載せて後から`Update`で訂正する方式は取らない）。そのため、AP配送とATPコミットの両方のIDが確定するまで、どちらの配送も行わずに待つ。
+   - この制約と設計により、旧来の既知の制約（ATP側が先に取り込まれると`seiran_post_uuid`が一致せず別行になる）は構造的に解消される——マージ判定がどちらが先でも対称に機能するため。`app.bsky.feed.post`本体への独自フィールド追加自体は、一度コミットされたら他クライアントに書き換えられないため安全（Jetstream・AppViewとも未知フィールドを保持したまま透過することを確認済み）。
 3. **一般ブリッジ重複**: Noteの `url` が `https://bsky.app/profile/{did}/post/{rkey}` 形式なら `at://` URIへ変換し既存ポストを検索、あれば `parent_original_post_id` にリンク（重複許容 + リンク）。
 
 **Actor解決の自ドメインガード**: リモートActor URI解決処理（`upsert_remote_fedi_actor`/`resolve_fedi`）は、URIが `https://{local_domain}/users/{username}` 形式で自ドメインを指す場合、`seiran_common::ap::extract_local_username` で判定してローカル行をそのまま返す（新規 `fedi` 行は作らない）。ローカル行は `insert_local` が設定する `ap_uri`（`https://{domain}/users/{username}`）を持つため、万一このガードを経由しなくても `find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により重複INSERTは自然に防がれる（二重防御）。
 
 **Bsky側Actor解決の自DIDガード**: Bskyリモートアクター解決処理（`follow_bsky`/`resolve_bsky`/`fetch_bsky_profile_from_appview`/`persist_appview_posts`等）は、`fetch_bsky_profile`等で得たDIDが `find_by_did` でローカル行にヒットした場合、そのローカル行をそのまま返し `upsert_remote_bsky` を呼ばない。ローカルユーザーの完全なBskyハンドル表記（`{username}.{local_domain}`、`.`を含み`@`を含まないため `create_follow`/`resolve_and_upsert_target` のターゲット判別ロジック上はBsky ATPハンドルと区別できない）を宛先文字列としてこの経路に入ることがあり、ガードを欠くと `upsert_remote_bsky` の `ON CONFLICT (at_did) DO UPDATE` でローカル行の `username` 列がAppView側のハンドル表記（ドット付き）で上書きされてしまう（実際に発生した事故: `actors.username` がDNSラベルとして不正な形になり `seiran_common::username::is_valid_local_username` の前提が壊れる）。フォロワー検知ポーリング（`bsky_follower_poll`）・Jetstream受信（`firehose::resolve_or_upsert_bsky_actor`）・検索結果取り込み（`search::persist_appview_posts`）は元々 `find_by_did` 経由のローカル判定を先に行う実装だったため影響を受けない。
+
+### `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、未実装・設計確定済み。#237）
+
+seiranの投稿はAP標準のNoteよりもATP標準のpostよりも表現力が高い（CW・投票・画像単位のNSFW属性・画像と動画の混在添付・複数URLカード等）。標準フィールドは非対応の他実装（Mastodon/Misskey/Bluesky公式等）向けの互換表現として維持しつつ、`seiranPost`という1つの拡張オブジェクトをAP Note・ATP post本体の両方に同一構造で埋め込み、受信側seiranはこれを検出したら標準フィールドを無視してこちらから`posts`行を再構築する（無ければ標準フィールドのベストエフォート変換にフォールバック）。
+
+```jsonc
+{
+  "body": "変形前の生プレーンテキスト（Single Source of Truth）",
+  "language": "ja" | null,
+  "visibility": "public" | "unlisted" | "followers_only" | "direct",
+  "contentWarning": "CW原文" | null,
+  "emojiMap": { ":shortcode:": "画像URL", "...": "..." },
+  "poll": { "...": "posts.poll のJSONBをそのまま" } | null,
+
+  "counterpartPostId": "この投稿自身が持つ、相手プロトコルでの真正なID（AP object id または AT URI）",
+  "counterpartAuthorId": "この投稿の投稿者が持つ、相手プロトコルでの真正なID（AP actor URI または AT DID）",
+
+  "attachments": [
+    { "url": "メディアファイルURL", "kind": "image | video | audio", "isSensitive": "bool", "isGif": "bool", "mimeType": "...", "width": "int | null", "height": "int | null", "blurhash": "... | null" }
+  ],
+  "linkCards": [
+    { "url": "...", "title": "...", "description": "...", "thumbnailUrl": "... | null" }
+  ]
+}
+```
+
+- **reply/quote/repost先の参照は含めない**: 標準のAP/ATP参照機構（`inReplyTo`/`quoteUrl`、`reply.parent`/`embed.record`）にそのまま委ねる。受信側にとって送信側内部のIDは解決しようがないため。
+- **DMのスレッド起点情報・返信/引用制限（threadgate/postgate相当）は含めない**: 前者は相手側で再現可能、後者は現状ローカル投稿に設定機能自体が無い（将来実装する場合はAP向けにも同時対応する）。
+- **`linkCards[].embedSrc`/`embedType`は含めない**: 送信元の自己申告をそのまま信頼してiframe srcを埋め込むとXSSの温床になる（受信側の`oembed_allowed_domains`ホワイトリストをバイパスできてしまう）。受信側は必ず自分自身のホワイトリスト設定に基づき`url`から`Job::OgpFetch`相当の処理で再解決する。
+- **`attachments[].altText`は含めない**: ローカル投稿にalt設定機能自体が無い（`post_attachments.alt_text`は常にNULLの未使用カラム）。
+- **バージョニングは行わない**: seiran同士の通信のみを想定し、改修時は上位互換になるよう注意する運用でカバーする。
 
 ## 6. 本文中のリンク・メンション表現
 
@@ -765,12 +799,14 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 
 ## 11. 未実装・スコープ外の機能
 
-- **ゼロトラストハンドシェイク**（他seiranサーバー間の `/verify-actor` 検証、`remote_seiran` への昇格）: 未実装（設計確定済み、#236）。`actors.seiran_pair_actor_id` はスキーマ上・読み取りコードは存在するが書き込みロジックが無い（常にNULL）。
-  - **発見**: AP側はActor文書の拡張フィールドで自ATP DIDを自己申告、ATP側は`app.bsky.actor.profile`本体を汚さず独自コレクション`org.seiran.actor.declaration`（rkey固定`self`、`chat.bsky.actor.declaration`と同型）に自AP Actor URIを自己申告するレコードをコミットする（profileは他クライアントによる丸ごと上書きで独自フィールドが消えるリスクがあるため本体には乗せない）。
-  - **相互参照チェック**: AP申告のDIDが持つATP宣言が、そのAP Actor URI自身を指し返しているか確認してから先へ進む。
-  - **チャレンジ検証**: AP Actor URIのドメインの`/.well-known/seiran/verify-actor?username=&did=&challenge=<nonce>`へ問い合わせる。相手サーバーは自分のローカルDB（`local`アクターはap_uri/at_did両方を保持）を根拠に、既存の自己署名JWT基盤（`atp::service_auth`のES256自己署名JWT、`atp::did_resolve`のDID解決検証）でnonceをエコーした署名付き応答を返す。新規の暗号処理は追加せず、既存インフラの組み合わせで実現する予定。
-  - **DB反映**: AP経由発見とATP経由発見がほぼ同時に走ってもレースコンディションで2行に分裂しないよう、検証（ネットワークI/O）はロック外で行い、確定した相手のfedi ID（AP Actor URI）をキーにした`pg_advisory_xact_lock`（新規追加予定、既存`advisory_lock.rs`の`pg_try_advisory_lock`非ブロッキング版とは別物）でDB反映のみを直列化する。ロックキーにDIDではなくfedi IDを使うのは、ローカルユーザーもドメイン未確定期間（シングルホストモード）はDIDを持たず確定後に任意操作でしか発行されない（`docs/database.md`参照）ため、fedi IDの方が常に先に確定し不変だから。
-  - **旧構想からの変更**: まだ複数のseiranサーバーが実運用されていないため、既存2行を後からマージする処理は不要と判断し、「保存前にカウンターパートを探す」分岐のみで完結させる設計に変更した。`seiran_pair_actor_id`による2行リンク方式は不採用（実装完了後にカラム削除を検討）。
+- **リモートseiranアクターの相互申告マージ**（他seiranサーバー間で、AP経由発見とATP経由発見のどちらが先でも同時でも、必ず1つの`actors`行（`actor_type='remote_seiran'`）に収束させる）: 未実装（設計確定済み、#236）。チャレンジ検証エンドポイント（`/.well-known/seiran/verify-actor`）や自己署名JWTのようなハンドシェイク専用の仕組みは持たない。`actors.seiran_pair_actor_id` はスキーマ上・読み取りコードは存在するが書き込みロジックが無い（常にNULL、本設計では使わない）。
+  - **自己申告**: AP側はActor文書の拡張フィールドで自ATP DIDを自己申告（例: `seiranAtDid`）、ATP側は`app.bsky.actor.profile`本体を汚さず独自コレクション`org.seiran.actor.declaration`（rkey固定`self`、`chat.bsky.actor.declaration`と同型）に自AP Actor URIを自己申告するレコード（`apActorUri`）をコミットする（profileは他クライアントによる丸ごと上書きで独自フィールドが消えるリスクがあるため本体には乗せない）。
+  - **発見時は即INSERT、検証は後回し**: AP側でu（ATP相手vを自己申告）を発見したら、検証をその場で試みず即座に`fedi`型として`ap_uri=u`・新設`claimed_at_did=v`でINSERTし、vを能動的に取りに行くジョブ（既存`RemoteActorResolve`系の延長、ATP宣言レコードを取得するだけの新種）をenqueueする（結婚を早めるための能動的先行フェッチであり、成立の必須条件ではない）。ATP側でも対称に、`bsky`型として`at_did=v`・新設`claimed_ap_uri=u`でINSERTし、uを取りに行くジョブをenqueueする。
+  - **相互一致による結婚（マージ）**: 相手側の実体（真正なap_uri、またはDID解決/リポジトリコミットで裏付けられた真正なat_did）が既にDBに存在し、かつ**その既存行自身が持つ自己申告が、今回発見した実体を指し返している**場合にのみ結婚成立とする。一方的な自己申告だけでは不十分（既存行の申告との一致を必ず確認する）。この対称性が、他人の実在URIを騙って自分の申告に結び付けようとする偽装（申告される側が何も申告していない、または別の相手を申告している場合は不一致で弾かれる）を防ぐ。成立時はそのActor行を`actor_type='remote_seiran'`へ昇格させ、`claimed_*`をクリアする。不一致または申告が無ければ、単独の`fedi`/`bsky`行のまま孤立させておく（削除も何もしない）。
+  - **チャレンジ検証を採用しない理由**: AP Actor文書はドメインのTLSにより、ATP宣言レコードはDIDの署名済みリポジトリコミットにより、どちらも自己申告の時点で既にその発行者自身の真正性が担保されている。相互申告の一致確認だけで、攻撃者は相手の鍵やドメインを持たない限り「相手に自分を名指しさせる」ことができないため、追加のチャレンジ往復無しで同等以上の偽装耐性が成立する。
+  - **DB反映のレースコンディション対策**: AP経由発見とATP経由発見がほぼ同時に走ってもレースコンディションで2行に分裂しないよう、相手側の実体解決（ネットワークI/O）はロック外で行い、確定した相手のfedi ID（AP Actor URI）をキーにした`pg_advisory_xact_lock`（新規追加予定、既存`advisory_lock.rs`の`pg_try_advisory_lock`非ブロッキング版とは別物）でDB反映のみを直列化する。ロックキーにDIDではなくfedi IDを使うのは、ローカルユーザーもドメイン未確定期間（シングルホストモード）はDIDを持たず確定後に任意操作でしか発行されない（`docs/database.md`参照）ため、fedi IDの方が常に先に確定し不変だから。
+  - **投稿マージからの派生成立（#237）**: `seiranPost`拡張オブジェクト同士の相互一致で投稿マージが成立した場合（5節参照）、その2投稿の投稿者アクターが未結婚であれば、投稿に埋め込まれた投稿者の相互申告（`counterpartAuthorId`）を使い、ここに書いた相互一致アルゴリズムと同じ判定を投稿受信の場でオンメモリに適用してその場で結婚を成立させる（追加のネットワークフェッチ不要）。既にどちらかのアクターが**別の**相手と結婚済みの場合は不整合として投稿マージ自体を失敗させる（結婚関係を上書きしない）。
+  - **旧構想からの変更**: まだ複数のseiranサーバーが実運用されていないため、既存2行を後からマージする処理は不要と判断し、「保存前にカウンターパートを探す」分岐のみで完結させる設計にした。`seiran_pair_actor_id`による2行リンク方式は不採用（実装完了後にカラム削除を検討）。当初検討していたBioの`seiran_signature`パターン検出やチャレンジ検証エンドポイントも、この相互申告方式に置き換えたため採用しない。
 - **`actor_metadata_resolve` ジョブ**: ハンドラはdispatchに登録されているが中身はスタブ（即座に `Ok(())`）。enqueueする呼び出し箇所がプロダクションコードに存在しない。
 - **トレンド集計**: 完全に未着手（テーブル・エンドポイントとも存在しない）。
 - **ドメイン単位のレート制限**（`inbound_activity_process` 向け）: 未実装。現状 `actor_history_sync` キューのみドメイン単位の同時実行制限を持つ。
