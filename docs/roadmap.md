@@ -153,15 +153,17 @@
 
 ### プロトコル
 
-- [ ] **ゼロトラストハンドシェイク（リモートseiranアクター専用検証）**
-  - [ ] Bioの `seiran_signature: [ATP_DID]` パターン検出ロジック
-  - [ ] 相手ドメインの `/.well-known/seiran/verify-actor` への検証リクエスト
-  - [ ] 検証成功時の `actor_type = 'remote_seiran'` 昇格と `seiran_pair_actor_id` の相互紐付け
+- [ ] **ゼロトラストハンドシェイク（リモートseiranアクター専用検証、#236）** — 設計確定（`docs/protocols.md` 11節参照）。AP拡張フィールド＋ATP独自宣言レコード（`org.seiran.actor.declaration`）による相互自己申告 → 相互参照一致チェック → `/.well-known/seiran/verify-actor`チャレンジ検証（既存の自己署名JWT基盤を流用）→ fedi ID起点の`pg_advisory_xact_lock`でDB反映を直列化し、AP/ATPどちらが先に発見されても必ず1つの`actors`行（`actor_type='remote_seiran'`）に収束させる。旧構想（`seiran_pair_actor_id`で2行をリンク）は不採用、同カラムは実装完了後に削除を検討する。
+  - [ ] AP Actor文書への自ATP DID拡張フィールド追加
+  - [ ] ATP独自コレクション `org.seiran.actor.declaration`（rkey=`self`）の実装
+  - [ ] 相互参照一致チェック
+  - [ ] `/.well-known/seiran/verify-actor` チャレンジ検証
+  - [ ] fedi IDキーの`pg_advisory_xact_lock`ヘルパー追加とDB反映の直列化
+- [ ] **投稿の完全表現力をAP/ATP双方でロスレス往復（#237）** — 設計確定（`docs/protocols.md` 5節参照）。`seiranPost`拡張オブジェクトをAP Note・ATP post本体の両方に同一構造で埋め込み、CW・投票・カスタム絵文字マップ・添付のNSFW/GIF/寸法・複数URLカード等、標準フィールドでは表現しきれないseiran独自の表現力をリモートseiran間で完全再現する。副次効果として、下記「他seiranサーバー間マージのATP経路対応」の既知の制約もこのissueで解消される。
 - [ ] **リモートseiran特権初期同期**
   - [ ] `/api/seiran/v1/posts/export` エンドポイント
   - [ ] 相手サーバーからの生データ一括インポート（最大300件）
-- [ ] **他seiranサーバー間マージの ATP 経路対応** — `seiran_post_uuid` を Bsky レコード本体にも埋め込み、Jetstream経由で先に取り込まれた投稿ともマージできるようにする（`docs/protocols.md` 5節の既知の制約）
-- [ ] **`actor_metadata_resolve` ジョブの実装** — 現状ハンドラはスタブ、enqueueする箇所も無い。`/verify-actor` ハンドシェイク検証・Webfinger解決・アバター等のキャッシュを実処理として実装する
+- [ ] **`actor_metadata_resolve` ジョブの実装** — 現状ハンドラはスタブ、enqueueする箇所も無い。Webfinger解決・アバター等のキャッシュを実処理として実装する（`/verify-actor`ハンドシェイク検証自体は#236で別途実装）
 - [ ] **`inbound_activity_process` のドメイン単位レート制限**
 - [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ表示）
 - [ ] **ユーザー設定に「Bsky DM受信許可」項目を追加** — 現状 `chat.bsky.actor.declaration` の `allowIncoming` は登録時・バックフィルとも `"all"` 固定でコミットする（`docs/protocols.md` 9節）。ユーザーが `"all"`/`"following"`/`"none"` を選べる設定画面UIとAPIを追加する
