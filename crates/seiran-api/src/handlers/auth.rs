@@ -293,6 +293,19 @@ pub async fn register(
             );
         }
 
+        // リモートseiranアクターの相互申告マージ用の自己申告（#236）。
+        let ap_actor_uri = format!("https://{}/users/{}", state.local_domain, req.username);
+        if let Err(e) = state
+            .atp_service
+            .commit_seiran_actor_declaration(actor_id, &ap_actor_uri, now)
+            .await
+        {
+            tracing::error!(
+                "[register] seiran actor declaration コミット失敗（登録は完了済み）: {}",
+                e
+            );
+        }
+
         // #identity フレームを Relay に送信して AppView の handle キャッシュを更新させる。
         // commit_profile より後に送信することで seq 順序が保たれる。
         let handle = format!(

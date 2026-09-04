@@ -14,7 +14,8 @@ use crate::atp::repo::{
     encode_bsky_feed_like, encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_block,
     encode_bsky_graph_follow, encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car,
     encode_chat_actor_declaration, encode_content_visibility_declaration, encode_generic_record,
-    generate_tid, BskyEmbed, BskyFacet, BskyPostReply, Cid, CommitEvtOp, RepoError,
+    encode_seiran_actor_declaration, generate_tid, BskyEmbed, BskyFacet, BskyPostReply, Cid,
+    CommitEvtOp, RepoError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -1657,6 +1658,48 @@ impl AtpCommitService {
 
         tracing::info!(
             "[atp] chat declaration commit 完了（{}）: did={}",
+            action,
+            result.at_did
+        );
+        self.spawn_request_crawl();
+        Ok(())
+    }
+
+    /// `org.seiran.actor.declaration`（リモートseiranアクターの相互申告マージ用、
+    /// rkey固定`self`、#236）をコミットする。ローカルユーザー登録時（DID発行と同時）、
+    /// および起動時のバックフィル（`commit_chat_declaration`と同様のパターン）から呼ぶ。
+    pub async fn commit_seiran_actor_declaration(
+        &self,
+        actor_id: i64,
+        ap_actor_uri: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let existing: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM atp_records \
+             WHERE actor_id = $1 AND collection = 'org.seiran.actor.declaration' AND rkey = 'self')",
+        )
+        .bind(actor_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let action: &'static str = if existing { "update" } else { "create" };
+
+        let (record_cbor, record_cid) = encode_seiran_actor_declaration(ap_actor_uri)?;
+
+        let record = CommitRecord {
+            collection: "org.seiran.actor.declaration".to_string(),
+            rkey: "self".to_string(),
+            cbor: record_cbor,
+            cid: record_cid,
+            action,
+            blob_cids: vec![],
+        };
+
+        let result = self
+            .commit_record_inner(actor_id, record, now, None)
+            .await?;
+
+        tracing::info!(
+            "[atp] seiran actor declaration commit 完了（{}）: did={}",
             action,
             result.at_did
         );

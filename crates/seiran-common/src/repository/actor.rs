@@ -39,13 +39,19 @@ pub struct Actor {
     /// フォロー承認制（鍵アカウント）。`true`なら新規フォローリクエストは`follows.status`が
     /// `pending`のまま留まり、本人の承認/拒否を待つ（ローカルユーザーのみ意味を持つ）。
     pub is_locked: bool,
+    /// リモートseiranアクターの相互申告マージ用（#236）。`bsky`型の行が自己申告する
+    /// 「自分のAP Actor URIはこれだ」という未確認の値。相互一致が確認できたら`ap_uri`
+    /// 本体に確定させ、こちらはNULLに戻す。
+    pub claimed_ap_uri: Option<String>,
+    /// 同上。`fedi`型の行が自己申告する「自分のAT DIDはこれだ」という未確認の値。
+    pub claimed_at_did: Option<String>,
 }
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
     display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem, \
     bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields, \
-    birth_date, birth_date_public, is_locked";
+    birth_date, birth_date_public, is_locked, claimed_ap_uri, claimed_at_did";
 
 /// プロフィール編集画面（`PATCH /api/users/me/profile`）が読み書きする行の部分集合。
 #[derive(Debug, Clone, sqlx::FromRow)]

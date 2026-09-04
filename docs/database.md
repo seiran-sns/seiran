@@ -110,7 +110,8 @@ JetStreamは「ローカルユーザーのフォロー中/リストメンバー�
 `actors.actor_type`（ENUM `actor_type_enum`）は6種:
 `local` / `remote_seiran` / `fedi` / `bsky` / `fedi_bridge_to_bsky` / `bsky_bridge_to_fedi`
 
-- `seiran_pair_actor_id`: 他 seiran サーバーユーザーの「同じ魂を持つ AP/ATP 両アクター」を相互リンクするための自己参照。**現状、これを書き込む処理は実装されていない**（ゼロトラストハンドシェイクが未実装のため常に NULL。`docs/roadmap.md` 参照）。
+- `seiran_pair_actor_id`: 旧構想（2行リンク方式）用の自己参照。**現状これを書き込む処理は実装されておらず常にNULL**。#236の相互申告マージ方式（1行に統合、下記`claimed_ap_uri`/`claimed_at_did`参照）では使わないため、実装完了後にカラム削除を検討している（`docs/roadmap.md`参照）。
+- `claimed_ap_uri` / `claimed_at_did`: リモートseiranアクターの相互申告マージ（#236）用。`bsky`型の行が自己申告する「自分のAP Actor URIはこれだ」（`claimed_ap_uri`）、`fedi`型の行が自己申告する「自分のAT DIDはこれだ」（`claimed_at_did`）という、まだ相互一致で確認できていない未確認の値を保持する。AP側の自己申告はActor文書の拡張フィールド`seiranAtDid`、ATP側は独自コレクション`org.seiran.actor.declaration`（rkey固定`self`、`chat.bsky.actor.declaration`と同型）の`apActorUri`フィールドで表明する。相手側の実体（真正なap_uri/at_did）が既存行の自己申告と相互に一致した場合にのみ結婚（`actor_type='remote_seiran'`へ昇格、両カラムに実IDをセット）が成立し、成立した側の`claimed_*`はNULLに戻る。新規発見時のみ結婚ロジックを起動する（既存行の場合は情報更新のみ）ため、2行が既に存在する状態からの統合は扱わない。詳細は`docs/protocols.md` 11節、実装は`seiran_common::seiran_actor_merge`参照。
 - `bridge_real_actor_id`: ブリッジ経由の影武者アクターから本尊アクターへのリンク。
 
 ローカルアクターは `avatar_media_id`/`banner_media_id`（自前 `media_files` 参照）、リモートアクターは `avatar_url`/`banner_url`（URL直持ち）という排他的な使い分けをしている。

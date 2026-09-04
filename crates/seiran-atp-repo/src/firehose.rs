@@ -1350,18 +1350,28 @@ pub(crate) async fn resolve_or_upsert_bsky_actor(
     }
 
     let profile = fetch_bsky_profile(http, did).await?;
+    // リモートseiranアクターの相互申告マージ（#236）。`org.seiran.actor.declaration`が
+    // 無いDID（大多数のBskyユーザー）は`claimed_ap_uri=None`のまま通常のupsertと同義になる。
+    // ここでは相手を能動的に取りに行く`Job::ActorMetadataResolve`のenqueueは行わない
+    // （この関数はJobQueueを持たない複数箇所から呼ばれており、成立の必須条件でもない。
+    // AP側発見経路（`seiran-common::jobs::inbound_activity_process`）が同じ相手を能動的に
+    // 解決しに行くか、この後の受動的な再訪問で結婚が成立する）。
+    let claimed_ap_uri =
+        seiran_common::atp::client::fetch_seiran_actor_declaration(http, did).await;
     let new_id = generate_snowflake_id(chrono::Utc::now());
-    actor_repo
-        .upsert_remote_bsky(
-            new_id,
-            did,
-            &profile.handle,
-            profile.display_name.as_deref(),
-            profile.avatar.as_deref(),
-            chrono::Utc::now(),
-        )
-        .await
-        .map_err(|e| format!("upsert_remote_bsky 失敗: {}", e))
+    let outcome = seiran_common::seiran_actor_merge::discover_bsky_actor(
+        pool,
+        new_id,
+        did,
+        &profile.handle,
+        profile.display_name.as_deref(),
+        profile.avatar.as_deref(),
+        claimed_ap_uri.as_deref(),
+        chrono::Utc::now(),
+    )
+    .await
+    .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
+    Ok(outcome.actor_id)
 }
 
 #[cfg(test)]

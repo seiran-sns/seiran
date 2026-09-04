@@ -120,6 +120,12 @@ pub struct ApActor {
     /// `false`（非鍵アカウント）として扱う（AS2の一般的な省略時解釈）。
     #[serde(rename = "manuallyApprovesFollowers", default)]
     pub manually_approves_followers: bool,
+    /// リモートseiranアクターの相互申告マージ用（seiran独自拡張、#236）。このアクター自身が
+    /// 「自分のAT ProtocolでのDIDはこれだ」と自己申告する値。一方的な自己申告に過ぎず、
+    /// ATP側の`org.seiran.actor.declaration`宣言レコードがこのAP Actor URIを指し返して
+    /// いる場合にのみ相互一致とみなす（`docs/protocols.md` 11節参照）。
+    #[serde(rename = "seiranAtDid", default)]
+    pub seiran_at_did: Option<String>,
 }
 
 /// AS2の`alsoKnownAs`等、実装により単一文字列/配列のどちらでも来うるフィールド用の
