@@ -165,7 +165,10 @@
   - [ ] 相互一致チェック（投稿マージ判定）と投稿者一貫性チェックの実装
   - [ ] 投稿マージ時のオンメモリなアクター結婚（#236アルゴリズムの共有）の実装
   - [ ] `ap_object_id`キーの`pg_advisory_xact_lock(2, ...)`によるDB反映の直列化（#236の`key1=1`と名前空間分離）
-  - [ ] AP配送を非対称化: ATP URI確定済みなら`counterpartPostId`同梱、未確定なら`seiranPost`無しで通常優先度のまま即時配送（ATPコミット完了待ちで配送自体を遅延させない）
+  - [ ] AP配送を非対称化: ATP URI確定済みなら`counterpartPostId`同梱、未確定なら`counterpartPostId`だけ欠いた`seiranPost`で通常優先度のまま即時配送（ATPコミット完了待ちで配送自体を遅延させない）
+  - [ ] ATP URI確定時に`counterpartPostId`入り`seiranPost`を持つ`Update(Note)`をAPフォロワーへ送信（ATP側コミット・伝播より先に）
+  - [ ] `Update(Note)`受理ハンドラの追加（`seiranPost.counterpartPostId`のみ反映・本文等は無視、なりすまし対策込み、マージ再判定トリガー）
+  - [ ] マージ成立時のクリーンアップ2段階方式（同期: URI付け替え+`parent_original_post_id`+`deleted_at`／非同期ジョブ: FK付け替え+手動カウンタ調整+削除予定行の物理削除）
 - [ ] **リモートseiran特権初期同期**
   - [ ] `/api/seiran/v1/posts/export` エンドポイント
   - [ ] 相手サーバーからの生データ一括インポート（最大300件）
