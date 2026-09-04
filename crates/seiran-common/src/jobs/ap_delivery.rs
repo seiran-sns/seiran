@@ -9,7 +9,8 @@ use std::sync::Arc;
 use crate::ap::{
     deliver_ap_announce, deliver_ap_poll_vote, deliver_ap_reaction, deliver_ap_undo_reaction,
     deliver_delete_actor, deliver_delete_note, deliver_direct_message_to_ap,
-    deliver_post_to_ap_followers, deliver_undo_announce, deliver_update_actor,
+    deliver_post_to_ap_followers, deliver_seiranpost_update, deliver_undo_announce,
+    deliver_update_actor,
 };
 use crate::queue::worker::JobContext;
 use crate::traits::{ApDeliveryKind, JobError};
@@ -189,6 +190,11 @@ pub async fn handle(
         }
         ApDeliveryKind::DeleteActor => {
             deliver_delete_actor(ap_client, pool, actor_id, domain, private_pem)
+                .await
+                .map_err(JobError::from)
+        }
+        ApDeliveryKind::SeiranPostUpdate { post_id } => {
+            deliver_seiranpost_update(ap_client, pool, post_id, actor_id, domain, private_pem)
                 .await
                 .map_err(JobError::from)
         }

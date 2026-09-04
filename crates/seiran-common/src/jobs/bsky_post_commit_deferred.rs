@@ -259,6 +259,39 @@ async fn process_locked(
         );
     }
 
+    // ATPコミットが今まさに確定した（at_uri確定）。Fedi側に既にCreate(Note)を送信済み
+    // （`ap_object_id`あり）かつ`deliver_fedi`なら、`seiranPost.counterpartPostId`を
+    // 補完するUpdate(Note)を送る（#237、配送側の制約「非対称・後からUpdateで補完」）。
+    // 同期コミット（このジョブを経由しない通常経路）はCreate(Note)自体が既に
+    // counterpartPostIdを持てているため、この後追いUpdateは不要（ここでのみ必要）。
+    let fedi_needs_update: Option<i64> = sqlx::query_scalar(
+        "SELECT actor_id FROM posts
+         WHERE id = $1 AND deliver_fedi = true AND ap_object_id IS NOT NULL",
+    )
+    .bind(post_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+    if let Some(post_actor_id) = fedi_needs_update {
+        if let Err(e) = ctx
+            .queue
+            .enqueue(
+                crate::traits::Job::ApDelivery {
+                    actor_id: post_actor_id,
+                    kind: crate::traits::ApDeliveryKind::SeiranPostUpdate { post_id },
+                },
+                crate::queue::worker::priority::HIGH,
+            )
+            .await
+        {
+            tracing::error!(
+                "[BskyPostCommitDeferred] SeiranPostUpdate enqueue失敗 post_id={}: {}",
+                post_id,
+                e
+            );
+        }
+    }
+
     tracing::info!("[BskyPostCommitDeferred] コミット完了 post_id={}", post_id);
     Ok(())
 }

@@ -518,7 +518,8 @@ pub struct BskyPostReply {
 // app.bsky.feed.post レコード構造体
 // ─────────────────────────────────────────────────────────────────────────────
 
-// canonical 順: text(4) < $type(5) < embed(5) < langs(5) < reply(5) < facets(6) < createdAt(9)
+// canonical 順: text(4) < $type(5) < embed(5) < langs(5) < reply(5) < facets(6) <
+//               createdAt(9) < seiranPost(10)
 // 5文字のキー同士: "$type"($ = 0x24) < "embed"(e = 0x65) < "langs"(l = 0x6C) < "reply"(r = 0x72)
 #[derive(Serialize)]
 struct BskyFeedPost {
@@ -537,6 +538,12 @@ struct BskyFeedPost {
     facets: Vec<BskyFacet>,
     #[serde(rename = "createdAt")]
     created_at: String,
+    /// `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、#237）。
+    /// `SeiranPost`自体は`crate::seiran_post`側でDAG-CBOR canonical順に宣言済みのため
+    /// ここでは素の`#[derive(Serialize)]`でネストできる（blob CID参照を持たないため
+    /// `embed`と異なり手組みの`Ipld`変換は不要）。
+    #[serde(rename = "seiranPost", skip_serializing_if = "Option::is_none")]
+    seiran_post: Option<crate::seiran_post::SeiranPost>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -781,6 +788,7 @@ pub fn encode_bsky_feed_post(
     embed: Option<BskyEmbed>,
     reply: Option<BskyPostReply>,
     lang: Option<String>,
+    seiran_post: Option<crate::seiran_post::SeiranPost>,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
     let embed = match embed {
         None => None,
@@ -846,6 +854,7 @@ pub fn encode_bsky_feed_post(
         reply,
         facets,
         created_at: created_at_rfc3339.to_string(),
+        seiran_post,
     };
     let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
     let cid = cid_from_dagcbor(&cbor);
@@ -1328,12 +1337,14 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
         let (cbor2, cid2) = encode_bsky_feed_post(
             "hello",
             "2024-01-01T00:00:00.000Z",
             vec![],
+            None,
             None,
             None,
             None,
@@ -1349,6 +1360,7 @@ mod tests {
             "hello",
             "2024-01-01T00:00:00.000Z",
             vec![],
+            None,
             None,
             None,
             None,
@@ -1370,6 +1382,7 @@ mod tests {
             None,
             None,
             Some("ja".to_string()),
+            None,
         )
         .unwrap();
         let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
@@ -1380,6 +1393,68 @@ mod tests {
             record.get("langs"),
             Some(&Ipld::List(vec![Ipld::String("ja".to_string())]))
         );
+    }
+
+    #[test]
+    fn test_encode_bsky_feed_post_embeds_seiran_post() {
+        let seiran_post = crate::seiran_post::SeiranPost {
+            body: "hello".to_string(),
+            poll: None,
+            emoji_map: serde_json::json!({}),
+            language: Some("ja".to_string()),
+            link_cards: vec![],
+            visibility: "public".to_string(),
+            attachments: vec![],
+            content_warning: None,
+            counterpart_post_id: Some("https://seiran.example/notes/42".to_string()),
+            counterpart_author_id: "https://seiran.example/users/alice".to_string(),
+        };
+        let (cbor, _) = encode_bsky_feed_post(
+            "hello",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            None,
+            None,
+            None,
+            Some(seiran_post),
+        )
+        .unwrap();
+        let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
+        let Ipld::Map(record) = value else {
+            panic!("record must be map")
+        };
+        let Some(Ipld::Map(sp)) = record.get("seiranPost") else {
+            panic!("seiranPost must be map")
+        };
+        assert_eq!(
+            sp.get("counterpartAuthorId"),
+            Some(&Ipld::String(
+                "https://seiran.example/users/alice".to_string()
+            ))
+        );
+        assert_eq!(
+            sp.get("counterpartPostId"),
+            Some(&Ipld::String("https://seiran.example/notes/42".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_encode_bsky_feed_post_omits_seiran_post_when_none() {
+        let (cbor, _) = encode_bsky_feed_post(
+            "hello",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
+        let Ipld::Map(record) = value else {
+            panic!("record must be map")
+        };
+        assert!(!record.contains_key("seiranPost"));
     }
 
     #[test]
@@ -1402,6 +1477,7 @@ mod tests {
                 description: "元投稿本文".to_string(),
                 thumb: Some(thumb),
             }),
+            None,
             None,
             None,
         )
@@ -1446,6 +1522,7 @@ mod tests {
                 cid: "bafyreidummycid".to_string(),
                 media: Box::new(BskyEmbed::Images(vec![image])),
             }),
+            None,
             None,
             None,
         )
@@ -1503,6 +1580,7 @@ mod tests {
             }),
             None,
             None,
+            None,
         );
         assert!(result.is_err());
     }
@@ -1517,8 +1595,16 @@ mod tests {
     #[test]
     fn test_build_mst_single_entry() {
         let (_, cid) =
-            encode_bsky_feed_post("hi", "2024-01-01T00:00:00.000Z", vec![], None, None, None)
-                .unwrap();
+            encode_bsky_feed_post(
+                "hi",
+                "2024-01-01T00:00:00.000Z",
+                vec![],
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
         let entries = vec![("app.bsky.feed.post/test123".to_string(), cid)];
         let result = build_mst(&entries);
         assert!(result.is_ok());

@@ -20,7 +20,10 @@ mod text;
 pub use activity::{append_emoji_tags, apply_poll_to_note_object};
 pub use actor::{deliver_delete_actor, deliver_update_actor};
 pub use announce::{deliver_ap_announce, deliver_undo_announce};
-pub use note::{deliver_delete_note, deliver_direct_message_to_ap, deliver_post_to_ap_followers};
+pub use note::{
+    deliver_delete_note, deliver_direct_message_to_ap, deliver_post_to_ap_followers,
+    deliver_seiranpost_update,
+};
 pub use reaction::{deliver_ap_poll_vote, deliver_ap_reaction, deliver_ap_undo_reaction};
 pub use text::{at_uri_to_bsky_app_url, plain_to_html, plain_to_html_with_mentions};
 

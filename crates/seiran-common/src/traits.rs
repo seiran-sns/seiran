@@ -140,6 +140,11 @@ pub enum ApDeliveryKind {
     },
     /// Update(Person)（プロフィール更新）を配送する。
     UpdateActor,
+    /// `seiranPost.counterpartPostId`（ATPコミット確定後の`posts.at_uri`）を補完した
+    /// `Update(Note)`を配送する（#237、配送側の制約「非対称・後からUpdateで補完」）。
+    /// ATPコミットが`Job::BskyPostCommitDeferred`で非同期に確定した場合のみenqueueされる
+    /// （同期コミットの場合はCreate(Note)自体が既に`counterpartPostId`を持てているため不要）。
+    SeiranPostUpdate { post_id: i64 },
     /// Delete(Actor)（退会）を配送する。
     DeleteActor,
 }

@@ -171,6 +171,59 @@ fn blob_cids_for_media(media: &BskyEmbed) -> Vec<Cid> {
     }
 }
 
+/// ATPコミット（`commit_post`/`commit_quote`）用の`seiranPost`拡張オブジェクトを組み立てる（#237）。
+/// `counterpartPostId`（AP object id）は投稿作成時点でローカル生成済み・常に確定しているため、
+/// AP側（`counterpartPostId`が未確定ならUpdate(Note)で後から補完）と異なり毎回必ず同梱できる。
+/// 投稿者がまだAP側の識別子（`ap_uri`）を持たない異常系は実運用上あり得ない
+/// （ローカルアクターは登録時に`insert_local`が`ap_uri`を必ず設定する）ため、
+/// 取得できなければログのみでseiranPost自体を諦める（コミット自体は失敗させない）。
+async fn build_seiran_post_for_atp_commit(
+    pool: &PgPool,
+    post_id: i64,
+) -> Option<crate::seiran_post::SeiranPost> {
+    let row = sqlx::query(
+        "SELECT p.body, p.language, p.visibility::text AS visibility, p.content_warning,
+                p.emoji_map, p.poll, p.ap_object_id, a.ap_uri
+         FROM posts p
+         JOIN actors a ON a.id = p.actor_id
+         WHERE p.id = $1",
+    )
+    .bind(post_id)
+    .fetch_optional(pool)
+    .await
+    .ok()??;
+
+    let ap_uri: Option<String> = row.try_get("ap_uri").ok().flatten();
+    let Some(counterpart_author_id) = ap_uri else {
+        tracing::warn!(
+            "[build_seiran_post_for_atp_commit] actorがap_uri未設定のためseiranPostを省略 post_id={}",
+            post_id
+        );
+        return None;
+    };
+
+    let (attachments, link_cards) = crate::seiran_post::fetch_attachments_and_link_cards(pool, post_id)
+        .await
+        .unwrap_or_default();
+
+    Some(crate::seiran_post::SeiranPost {
+        body: row.try_get("body").unwrap_or_default(),
+        language: row.try_get("language").ok().flatten(),
+        visibility: row
+            .try_get("visibility")
+            .unwrap_or_else(|_| "public".to_string()),
+        content_warning: row.try_get("content_warning").ok().flatten(),
+        emoji_map: row
+            .try_get("emoji_map")
+            .unwrap_or_else(|_| serde_json::json!({})),
+        poll: row.try_get("poll").ok().flatten(),
+        counterpart_post_id: row.try_get("ap_object_id").ok().flatten(),
+        counterpart_author_id,
+        attachments,
+        link_cards,
+    })
+}
+
 pub struct AtpCommitService {
     pool: PgPool,
     event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
@@ -592,9 +645,17 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
+        let seiran_post = build_seiran_post_for_atp_commit(&self.pool, post_id).await;
         let blob_cids = blob_cids_for_embed(&embed);
-        let (record_cbor, record_cid) =
-            encode_bsky_feed_post(text, &created_at_str, facets, embed, reply, lang)?;
+        let (record_cbor, record_cid) = encode_bsky_feed_post(
+            text,
+            &created_at_str,
+            facets,
+            embed,
+            reply,
+            lang,
+            seiran_post,
+        )?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {
@@ -1534,9 +1595,17 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
+        let seiran_post = build_seiran_post_for_atp_commit(&self.pool, post_id).await;
         let blob_cids = blob_cids_for_embed(&embed);
-        let (record_cbor, record_cid) =
-            encode_bsky_feed_post(text, &created_at_str, facets, embed, reply, lang)?;
+        let (record_cbor, record_cid) = encode_bsky_feed_post(
+            text,
+            &created_at_str,
+            facets,
+            embed,
+            reply,
+            lang,
+            seiran_post,
+        )?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {

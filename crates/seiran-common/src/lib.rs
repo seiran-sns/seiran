@@ -23,6 +23,7 @@ pub mod rate_limit;
 pub mod repository;
 pub mod secrets;
 pub mod seiran_actor_merge;
+pub mod seiran_post;
 pub mod storage;
 pub mod streaming;
 pub mod system_actor;
