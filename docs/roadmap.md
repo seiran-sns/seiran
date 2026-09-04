@@ -168,8 +168,8 @@
   - [ ] 投稿マージ時のオンメモリなアクター結婚（#236アルゴリズムの共有）は未実装。上記簡略版チェックにより、投稿者がまだ結婚していない場合はマージ不成立のまま孤立行として残る（`claimed_*`は保持されるため、#236側のアクター結婚が別途成立すれば将来の再突合で解消できる余地は残る設計のまま）
   - [x] AP配送を非対称化: ATP URI確定済みなら`counterpartPostId`同梱、未確定なら`counterpartPostId`だけ欠いた`seiranPost`で通常優先度のまま即時配送（ATPコミット完了待ちで配送自体を遅延させない）
   - [x] ATP URI確定時に`counterpartPostId`入り`seiranPost`を持つ`Update(Note)`をAPフォロワーへ送信（`Job::BskyPostCommitDeferred`完了時のみ。同期コミットはCreate自体が既にcounterpartPostIdを持てるため対象外）
-  - [ ] `Update(Note)`受理ハンドラの追加（`seiranPost.counterpartPostId`のみ反映・本文等は無視、なりすまし対策込み、マージ再判定トリガー）
-  - [ ] マージ成立時のクリーンアップ2段階方式（同期: URI付け替え+`parent_original_post_id`+`deleted_at`／非同期ジョブ: FK付け替え+手動カウンタ調整+削除予定行の物理削除）
+  - [x] `Update(Note)`受理ハンドラの追加（`seiranPost.counterpartPostId`のみ反映・本文等は無視、なりすまし対策込み、マージ再判定トリガー）
+  - [x] マージ成立時のクリーンアップ2段階方式（同期: `PostRepository::finalize_post_merge`によるURI付け替え+`parent_original_post_id`+`deleted_at`／非同期`Job::PostMergeCleanup`: FK付け替え+手動カウンタ調整+削除予定行の物理削除。`post_attachments`/`post_link_cards`は複合PRIMARY KEYのため付け替えず物理削除に委ねる）
 - [ ] **リモートseiranユーザーへのフォローはAP経由開始・承認状況に応じてATP側も同期（#238）** — フォロー承認制はAPにしかない概念のため、リモートseiranへのフォローは常にAP経由で送る。相手が非承認制なら（既存の`follow_fedi`がAccept受信を待たず内部的に成立させる動作に乗せて）その時点でATP側`commit_follow`も実行、承認制ならAcceptを受けてから実行する。#236完了後に着手。
 - [ ] **リモートseiran特権初期同期**
   - [ ] `/api/seiran/v1/posts/export` エンドポイント

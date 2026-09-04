@@ -203,7 +203,10 @@ mod tests {
     fn roundtrips_through_json() {
         let post = sample();
         let value = post.to_value();
-        assert_eq!(value["counterpartPostId"], "did:plc:abc/app.bsky.feed.post/xyz");
+        assert_eq!(
+            value["counterpartPostId"],
+            "did:plc:abc/app.bsky.feed.post/xyz"
+        );
         assert_eq!(value["counterpartAuthorId"], "did:plc:abc");
         let parsed = SeiranPost::extract(&serde_json::json!({ "seiranPost": value })).unwrap();
         assert_eq!(parsed, post);
