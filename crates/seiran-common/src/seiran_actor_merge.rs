@@ -51,11 +51,20 @@ pub async fn discover_fedi_actor(
 
     let mut married = false;
     let actor_id = if let Some(existing_id) = existing_id {
+        // 既に`remote_seiran`へ昇格済み（結婚成立済み）の行に対しては、`claimed_at_did`を
+        // 復活させない。レースコンディション実地検証で発覚: このUPDATEはINSERT直後に
+        // 結婚成立した行へ、ほぼ同時に走っていた別経路の再発見（同じ相手を独立にAP/ATP
+        // 両方からほぼ同時に発見した場合の「2番目」の到達）が無条件にCOALESCEで
+        // `claimed_at_did`を書き戻してしまい、結婚済みなのに未確認の申告が残留する
+        // 状態を作っていた（advisory lockはトランザクションを直列化するだけで、
+        // 「既に結婚済みだから何もしない」という判断はしていないため、この保護がないと
+        // 起きる）。
         sqlx::query(
             "UPDATE actors SET ap_inbox_url = $2, display_name = $3, \
              avatar_url = COALESCE($4, avatar_url), bio = COALESCE($5, bio), \
              emoji_map = $6, profile_fields = $7, updated_at = $8, \
-             claimed_at_did = COALESCE(claimed_at_did, $9) \
+             claimed_at_did = CASE WHEN actor_type = 'remote_seiran' THEN claimed_at_did \
+                                    ELSE COALESCE(claimed_at_did, $9) END \
              WHERE id = $1",
         )
         .bind(existing_id)
@@ -175,11 +184,17 @@ pub async fn discover_bsky_actor(
 
     let mut married = false;
     let actor_id = if let Some(existing_id) = existing_id {
+        // 既に`remote_seiran`へ昇格済み（結婚成立済み）の行に対しては、`username`を
+        // ATPハンドル形式で上書きせず（結婚後の正式なusernameはFedi側由来のまま保つ）、
+        // `claimed_ap_uri`も復活させない。理由は`discover_fedi_actor`の対称コメント参照
+        // （レースコンディション実地検証で発覚）。
         sqlx::query(
-            "UPDATE actors SET username = $2, \
+            "UPDATE actors SET username = CASE WHEN actor_type = 'remote_seiran' THEN username \
+                                                ELSE $2 END, \
              display_name = COALESCE($3, display_name), \
              avatar_url = COALESCE($4, avatar_url), updated_at = $5, \
-             claimed_ap_uri = COALESCE(claimed_ap_uri, $6) \
+             claimed_ap_uri = CASE WHEN actor_type = 'remote_seiran' THEN claimed_ap_uri \
+                                    ELSE COALESCE(claimed_ap_uri, $6) END \
              WHERE id = $1",
         )
         .bind(existing_id)
