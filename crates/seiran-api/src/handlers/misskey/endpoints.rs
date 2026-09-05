@@ -899,4 +899,3 @@ pub async fn notes_reactions(
             .collect(),
     ))
 }
-

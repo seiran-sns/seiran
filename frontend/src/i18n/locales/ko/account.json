@@ -9,6 +9,7 @@
     "appearance": "모습",
     "appTokens": "앱 토큰",
     "followImport": "가져오기·내보내기",
+    "followRequests": "팔로우 요청",
     "comingSoon": "곧 출시 예정"
   },
   "appearanceSettings": {
@@ -35,7 +36,10 @@
     "discoverabilityTitle": "노출 설정",
     "hideFromAlgorithmicRecommendationsLabel": "내 게시물을 알고리즘 추천(Bsky Discover 피드 등)에 표시하지 않기",
     "hideFromAlgorithmicRecommendationsDescription": "이 설정을 켜면 Bluesky에서 나를 팔로우하지 않는 사람에게는 Discover 피드에 게시물이 표시되지 않습니다. 이 설정은 계정 단위로 PDS에 기록되어 다른 AT Protocol 앱에서도 참조할 수 있지만, 실제로 이를 존중할지는 각 앱의 구현에 따라 다릅니다. 완전히 반영되기까지 최대 1시간 정도 걸릴 수 있습니다.",
-    "saved": "설정이 저장되었습니다."
+    "saved": "설정이 저장되었습니다.",
+    "followApprovalTitle": "팔로우 요청",
+    "lockedAccountLabel": "새 팔로우 승인 필요",
+    "lockedAccountDescription": "활성화하면 새로운 팔로우 요청이 자동으로 성립되지 않으며, 설정의 「팔로우 요청」에서 승인 또는 거부해야 합니다. 이 설정은 나를 팔로우할 수 있는지에만 영향을 미치며, 공개 게시물을 볼 수 있는 사람은 바뀌지 않습니다. 이 설정을 끄면 그 시점에 남아있던 모든 대기 중인 팔로우 요청이 자동으로 승인됩니다."
   },
   "accountSettings": {
     "title": "계정 설정",
@@ -121,5 +125,11 @@
     "statusRunning": "가져오는 중",
     "statusCompleted": "가져오기 완료",
     "statusCancelled": "취소됨"
+  },
+  "followRequestsSettings": {
+    "title": "팔로우 요청",
+    "empty": "대기 중인 팔로우 요청이 없습니다.",
+    "acceptButton": "승인",
+    "rejectButton": "거부"
   }
 }

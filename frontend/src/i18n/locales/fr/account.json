@@ -9,6 +9,7 @@
     "appearance": "Apparence",
     "appTokens": "Jetons d'application",
     "followImport": "Import & export",
+    "followRequests": "Demandes d'abonnement",
     "comingSoon": "À venir"
   },
   "appearanceSettings": {
@@ -35,7 +36,10 @@
     "discoverabilityTitle": "Découvrabilité",
     "hideFromAlgorithmicRecommendationsLabel": "Masquer mes publications des recommandations algorithmiques (ex. le fil Discover de Bsky)",
     "hideFromAlgorithmicRecommendationsDescription": "Une fois activé, sur Bluesky vos publications n'apparaîtront dans le fil Discover que pour les personnes qui vous suivent déjà. Cette préférence est enregistrée au niveau du compte dans votre PDS ; d'autres applications AT Protocol peuvent donc aussi la lire, mais c'est à chaque application de décider si elle la respecte. La prise en compte complète peut prendre jusqu'à une heure.",
-    "saved": "Paramètre enregistré."
+    "saved": "Paramètre enregistré.",
+    "followApprovalTitle": "Demandes d'abonnement",
+    "lockedAccountLabel": "Exiger une approbation pour les nouveaux abonnés",
+    "lockedAccountDescription": "Lorsque cette option est activée, les nouvelles demandes d'abonnement ne sont pas acceptées automatiquement — vous devrez les approuver ou les rejeter depuis « Demandes d'abonnement » dans les Paramètres. Cela n'affecte que qui peut vous suivre ; cela ne change pas qui peut voir vos publications publiques. En désactivant cette option, toutes les demandes d'abonnement en attente seront automatiquement approuvées."
   },
   "accountSettings": {
     "title": "Paramètres du compte",
@@ -121,5 +125,11 @@
     "statusRunning": "Import en cours",
     "statusCompleted": "Import terminé",
     "statusCancelled": "Annulé"
+  },
+  "followRequestsSettings": {
+    "title": "Demandes d'abonnement",
+    "empty": "Aucune demande d'abonnement en attente.",
+    "acceptButton": "Accepter",
+    "rejectButton": "Refuser"
   }
 }

@@ -177,14 +177,20 @@ async fn find_statuses_by_followers_among_returns_reverse_direction_statuses() {
         .find_statuses_by_followers_among(target_id, &[follower_id])
         .await
         .unwrap();
-    assert_eq!(statuses.get(&follower_id).map(String::as_str), Some("pending"));
+    assert_eq!(
+        statuses.get(&follower_id).map(String::as_str),
+        Some("pending")
+    );
 
     repo.accept(follower_id, target_id).await.unwrap();
     let statuses = repo
         .find_statuses_by_followers_among(target_id, &[follower_id])
         .await
         .unwrap();
-    assert_eq!(statuses.get(&follower_id).map(String::as_str), Some("accepted"));
+    assert_eq!(
+        statuses.get(&follower_id).map(String::as_str),
+        Some("accepted")
+    );
 
     // 方向を間違えると（target視点ではなくfollower視点）ヒットしないことも確認する。
     let wrong_direction = repo

@@ -28,8 +28,10 @@ pub fn parse_reaction_shortcode_and_host(s: &str) -> Option<(&str, Option<&str>)
         Some((shortcode, host)) => {
             let shortcode_ok =
                 !shortcode.is_empty() && shortcode.chars().all(|c| c.is_alphanumeric() || c == '_');
-            let host_ok =
-                !host.is_empty() && host.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-');
+            let host_ok = !host.is_empty()
+                && host
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '.' || c == '-');
             if !shortcode_ok || !host_ok {
                 return None;
             }

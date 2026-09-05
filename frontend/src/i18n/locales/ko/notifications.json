@@ -6,6 +6,7 @@
     "unknownUser": "누구",
     "reactionText": "<userLink><emojiName/>{{handleSuffix}}</userLink>이(가) 반응했습니다.",
     "followText": "<userLink><emojiName/>{{handleSuffix}}</userLink>님이 나를 팔로우했습니다.",
+    "followRequestText": "<userLink><emojiName/>{{handleSuffix}}</userLink>님이 팔로우를 요청했습니다.",
     "followAcceptedText": "<userLink><emojiName/>{{handleSuffix}}</userLink>님이 팔로우 요청을 수락했습니다.",
     "mentionText": "<userLink><emojiName/>{{handleSuffix}}</userLink>이(가) 귀하를 멘션했습니다.",
     "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink>이(가) 귀하에게 답변했습니다.",

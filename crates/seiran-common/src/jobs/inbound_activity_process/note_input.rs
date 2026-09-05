@@ -107,7 +107,8 @@ pub(super) fn strip_quote_fallback_line_leading(body: &str, quote_uri: &str) -> 
     let trimmed = body.trim_start();
     let first_line_end = trimmed.find('\n').unwrap_or(trimmed.len());
     let first_line = trimmed[..first_line_end].trim();
-    let is_fallback = starts_with_quote_marker(first_line) && quote_uri_matches(first_line, quote_uri);
+    let is_fallback =
+        starts_with_quote_marker(first_line) && quote_uri_matches(first_line, quote_uri);
     if is_fallback {
         trimmed[first_line_end..].trim_start().to_string()
     } else {
@@ -316,7 +317,8 @@ mod tests {
         // kmyblue（kb.mu7ou.com）の一部投稿は`RE:`ではなくコロン無し`RE `を末尾に使う
         // （実例: #117018482769922445）。quote_uriはAPオブジェクトID形式、本文中は
         // 表示用URL形式。
-        let quote_uri = "https://kb.mu7ou.com/ap/users/116805310384210610/statuses/117017885539545746";
+        let quote_uri =
+            "https://kb.mu7ou.com/ap/users/116805310384210610/statuses/117017885539545746";
         let body = "一時的に見えるようにした :bunhdlurk:\n\nRE [https://kb.mu7ou.com/@m/117017885539545746](https://kb.mu7ou.com/@m/117017885539545746)";
         assert_eq!(
             strip_quote_fallback_line(body, quote_uri),

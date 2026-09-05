@@ -930,21 +930,43 @@ pub async fn attach_relationship_flags(
                         .unwrap_or_else(|| "not_following".to_string()),
                 );
                 n.user.is_muted = Some(muted_set.contains(&uid));
-                let (is_blocking, is_blocked_by) = block_map.get(&uid).copied().unwrap_or((false, false));
+                let (is_blocking, is_blocked_by) =
+                    block_map.get(&uid).copied().unwrap_or((false, false));
                 n.user.is_blocking = Some(is_blocking);
                 n.user.is_blocked_by = Some(is_blocked_by);
                 n.user.is_repost_muted = Some(repost_muted_set.contains(&uid));
             }
         }
         if let Some(r) = n.renote.as_deref_mut() {
-            apply(r, viewer_id, follow_map, muted_set, block_map, repost_muted_set);
+            apply(
+                r,
+                viewer_id,
+                follow_map,
+                muted_set,
+                block_map,
+                repost_muted_set,
+            );
         }
         if let Some(q) = n.quote.as_deref_mut() {
-            apply(q, viewer_id, follow_map, muted_set, block_map, repost_muted_set);
+            apply(
+                q,
+                viewer_id,
+                follow_map,
+                muted_set,
+                block_map,
+                repost_muted_set,
+            );
         }
     }
     for n in notes.iter_mut() {
-        apply(n, viewer_id, &follow_map, &muted_set, &block_map, &repost_muted_set);
+        apply(
+            n,
+            viewer_id,
+            &follow_map,
+            &muted_set,
+            &block_map,
+            &repost_muted_set,
+        );
     }
 }
 

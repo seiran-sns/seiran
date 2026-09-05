@@ -29,8 +29,10 @@ pub trait RepostMuteRepository: Send + Sync {
 
     /// リポストミュート中のアクター一覧を新しい順に返す（設定画面）。件数は少数想定のため
     /// カーソルページネーションはせず先頭200件を返す。
-    async fn list_muted(&self, muter_actor_id: i64)
-        -> Result<Vec<RepostMutedActorRow>, sqlx::Error>;
+    async fn list_muted(
+        &self,
+        muter_actor_id: i64,
+    ) -> Result<Vec<RepostMutedActorRow>, sqlx::Error>;
 
     /// `candidate_ids` のうち muter_actor_id がリポストミュート中のものだけを返す
     /// （タイムラインのper-note relationship付与でのN+1回避用）。

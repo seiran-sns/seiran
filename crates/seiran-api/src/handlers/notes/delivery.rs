@@ -324,7 +324,10 @@ fn resolve_poll_embed(local_domain: &str, post_id: i64, poll: &serde_json::Value
 /// `attachment_ids`から添付候補行（`media_files`の関連列）をまとめて取得する。
 /// `resolve_bsky_embed`と`collect_bsky_quote_images`（引用＋静止画のrecordWithMedia化）
 /// で共有するクエリ。
-async fn fetch_embed_candidate_rows(state: &AppState, attachment_ids: &[i64]) -> Vec<EmbedCandidateRow> {
+async fn fetch_embed_candidate_rows(
+    state: &AppState,
+    attachment_ids: &[i64],
+) -> Vec<EmbedCandidateRow> {
     if attachment_ids.is_empty() {
         return Vec::new();
     }
