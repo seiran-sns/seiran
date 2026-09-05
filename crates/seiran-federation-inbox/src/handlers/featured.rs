@@ -19,7 +19,9 @@ pub async fn featured_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let actor_row =
-        sqlx::query("SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' LIMIT 1")
+        sqlx::query(
+            "SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' AND withdrawn_at IS NULL LIMIT 1",
+        )
             .bind(&username)
             .fetch_optional(&state.db)
             .await;

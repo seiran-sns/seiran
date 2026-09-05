@@ -45,13 +45,17 @@ pub struct Actor {
     pub claimed_ap_uri: Option<String>,
     /// 同上。`fedi`型の行が自己申告する「自分のAT DIDはこれだ」という未確認の値。
     pub claimed_at_did: Option<String>,
+    /// 退会済み日時（#242）。`Some` なら以降このアクターはユーザー向けの表示・検索・
+    /// フォロー一覧等から除外すべき（内部処理・連合への削除通知はこの値を前提に動くため、
+    /// この関数自体ではフィルタしない。呼び出し元で判定すること）。
+    pub withdrawn_at: Option<DateTime<Utc>>,
 }
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
     display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem, \
     bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields, \
-    birth_date, birth_date_public, is_locked, claimed_ap_uri, claimed_at_did";
+    birth_date, birth_date_public, is_locked, claimed_ap_uri, claimed_at_did, withdrawn_at";
 
 /// プロフィール編集画面（`PATCH /api/users/me/profile`）が読み書きする行の部分集合。
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -78,8 +82,19 @@ pub trait ActorRepository: Send + Sync {
     /// ローカルユーザー（`actor_type = 'local'`）のアクターを user_id で取得する。
     async fn find_local_by_user_id(&self, user_id: i64) -> Result<Option<Actor>, sqlx::Error>;
 
-    /// ユーザー名 + ドメインでアクターを取得する。
+    /// ユーザー名 + ドメインでアクターを取得する（退会済み〔`withdrawn_at`設定済み〕アクターは
+    /// 除外する。ユーザー向けの表示・検索・新規フォロー解決等はこちらを使うこと。内部処理
+    /// （AP受信ジョブ・連合への削除通知等、退会済みアクターも扱う必要がある処理）は
+    /// `find_including_withdrawn_by_username_domain` を使うこと、#242）。
     async fn find_by_username_domain(
+        &self,
+        username: &str,
+        domain: &str,
+    ) -> Result<Option<Actor>, sqlx::Error>;
+
+    /// `find_by_username_domain` の退会済みアクターを除外しない版。関数名をあえて不自然に
+    /// することで、呼び出し側に「本当にこれでよいか」を意識させる（#242）。
+    async fn find_including_withdrawn_by_username_domain(
         &self,
         username: &str,
         domain: &str,
@@ -245,6 +260,22 @@ impl ActorRepository for PgActorRepository {
     }
 
     async fn find_by_username_domain(
+        &self,
+        username: &str,
+        domain: &str,
+    ) -> Result<Option<Actor>, sqlx::Error> {
+        // username は DNS ラベルとして扱う（大文字小文字を区別しない）。
+        // `crates/seiran-common/src/username.rs` のモジュールドキュメント参照。
+        sqlx::query_as::<_, Actor>(&format!(
+            "SELECT {ACTOR_COLS} FROM actors WHERE LOWER(username) = LOWER($1) AND domain = $2 AND withdrawn_at IS NULL LIMIT 1"
+        ))
+        .bind(username)
+        .bind(domain)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn find_including_withdrawn_by_username_domain(
         &self,
         username: &str,
         domain: &str,

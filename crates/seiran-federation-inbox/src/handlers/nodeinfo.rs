@@ -21,7 +21,9 @@ pub async fn nodeinfo_discovery_handler(State(state): State<Arc<AppState>>) -> i
 
 pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let user_count: i64 =
-        sqlx::query("SELECT COUNT(*) AS cnt FROM actors WHERE actor_type = 'local'")
+        sqlx::query(
+            "SELECT COUNT(*) AS cnt FROM actors WHERE actor_type = 'local' AND withdrawn_at IS NULL",
+        )
             .fetch_one(&state.db)
             .await
             .and_then(|r| r.try_get("cnt"))

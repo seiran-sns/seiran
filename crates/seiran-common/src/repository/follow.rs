@@ -480,6 +480,7 @@ impl FollowRepository for PgFollowRepository {
              LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
              LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
              WHERE f.follower_actor_id = $1 AND f.status = 'accepted'
+               AND a.withdrawn_at IS NULL
                AND ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, a.id))
                AND ($3::bigint IS NULL OR f.id < $3)
                AND ($4::bigint IS NULL OR f.id > $4)
@@ -512,6 +513,7 @@ impl FollowRepository for PgFollowRepository {
              LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
              LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
              WHERE f.target_actor_id = $1 AND f.status = 'accepted'
+               AND a.withdrawn_at IS NULL
                AND ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, a.id))
                AND ($3::bigint IS NULL OR f.id < $3)
                AND ($4::bigint IS NULL OR f.id > $4)

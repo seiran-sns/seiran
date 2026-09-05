@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM blocks WHERE blocker_actor_id = $1 OR blocked_actor_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fb61b60f24a3c3a8a9f133b84cd45fc1492ecad75c9ced1bbd2c46f6a1eb465d"
+}

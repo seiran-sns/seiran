@@ -26,6 +26,8 @@ pub struct AdminUserResponse {
     pub passkey_count: i64,
     /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。
     pub emojis: std::collections::HashMap<String, String>,
+    /// 退会済み日時（#242）。管理画面での「退会済み」バッジ表示用。
+    pub withdrawn_at: Option<DateTime<Utc>>,
 }
 
 impl From<AdminUserRow> for AdminUserResponse {
@@ -45,6 +47,7 @@ impl From<AdminUserRow> for AdminUserResponse {
                 .as_ref()
                 .map(crate::handlers::users::json_map_to_string_map)
                 .unwrap_or_default(),
+            withdrawn_at: r.withdrawn_at,
         }
     }
 }

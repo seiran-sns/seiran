@@ -64,6 +64,15 @@ pub async fn extract_auth(
         }
     }
 
+    // 退会済みアカウントは、退会前に発行済みのトークンであっても以降の認証を拒否する（#242）。
+    if users
+        .is_withdrawn_by_user_id(verified.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+    {
+        return Err(ApiError::Unauthorized("退会済みのアカウントです"));
+    }
+
     Ok(AuthUser {
         user_id: verified.user_id,
         email: verified.email,

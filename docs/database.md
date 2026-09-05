@@ -116,7 +116,9 @@ JetStreamは「ローカルユーザーのフォロー中/リストメンバー�
 
 ローカルアクターは `avatar_media_id`/`banner_media_id`（自前 `media_files` 参照）、リモートアクターは `avatar_url`/`banner_url`（URL直持ち）という排他的な使い分けをしている。
 
-`actors.ap_uri`（UNIQUE）は `local` 行も含め全アクター種別が保持する。ローカル行は `https://{local_domain}/users/{username}` を持つ（自ドメインを名乗る Actor URI を誤ってリモートアクター解決経路に渡しても、`find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により `actor_type='fedi'` の影の重複行が生成されない）。リモートActor URI解決処理（`resolve_fedi`/`upsert_remote_fedi_actor`/`RemoteActorResolve`/`follow_fedi`）はこれとは別に、URIが自ドメイン形式に一致する場合は `find_by_username_domain` でローカル行へ解決する明示的なガードも入口に持つ（`docs/protocols.md` 参照）。
+`actors.ap_uri`（UNIQUE）は `local` 行も含め全アクター種別が保持する。ローカル行は `https://{local_domain}/users/{username}` を持つ（自ドメインを名乗る Actor URI を誤ってリモートアクター解決経路に渡しても、`find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により `actor_type='fedi'` の影の重複行が生成されない）。リモートActor URI解決処理（`resolve_fedi`/`upsert_remote_fedi_actor`/`follow_fedi`）はこれとは別に、URIが自ドメイン形式に一致する場合はローカル行へ解決する明示的なガードも入口に持つ（`docs/protocols.md` 参照）。
+
+`ActorRepository::find_by_username_domain` は退会済み（`withdrawn_at`設定済み）アクターを結果から除外する（#242）。プロフィール表示・新規フォロー解決・ユーザー検索等、ユーザー向けの経路はこちらを使う。AP受信ジョブの内部処理（配信元/宛先の同一性検証、ブロック・フォロー解除の記録等）のように、退会済みアクターも解決できないと処理自体が失敗する経路では、あえて不自然な名前にした`find_including_withdrawn_by_username_domain`（退会済みを除外しない版）を明示的に使う。呼び出し側にどちらを使うべきか一目で意識させるための命名。
 
 自ホストドメイン未確定（シングルホストモード、`instance_domain`参照）の間に作成されたローカルユーザーは `domain='localhost'` で、`at_did`/`at_signing_key_pem` は両方 `NULL`（PLC genesisを行わないため、AT Protocol非対応のローカルユーザーとして存在する）。両カラムは元々 `UNIQUE` かつ `NOT NULL` 制約が無いためスキーマ変更なしでこの状態を表現できる。
 
@@ -195,7 +197,9 @@ AP受信（投稿本文・表示名・絵文字リアクションのいずれか
 ### `blocks` / `mutes` / `repost_mutes`
 `follows` と同型（`blocker_actor_id`/`blocked_actor_id`、`muter_actor_id`/`muted_actor_id` の有向関係 + `UNIQUE`制約）。ブロックはBsky準拠の定義（フォロー関係の強制解除＋相互完全非表示）を採用しており、相手がBskyなら `app.bsky.graph.block` コミット後の `atp_rkey` を保存、相手がFediならAP `Block` を配送する（`docs/protocols.md` 参照）。ミュート・リポストミュートはFedi/Bsky共通でローカル効果のみ（AP/ATP配送なし）のため `atp_rkey` 相当のカラムを持たない。
 
-タイムライン・通知の相互非表示は、`blocks`/`mutes`を1箇所でOR判定する SQL 関数 `actor_is_hidden_for_viewer(viewer_id, other_id)` に集約している。ブロックは `blocks` テーブルの存在だけでミュート相当のローカル非表示も兼ねる設計（ブロック専用の `mutes` 行を別途作らない）。
+退会（`POST /api/account/withdraw`）時は、この3テーブルとも当該アクターが関わる行（自分発・自分宛の両方向）を物理削除する（#242）。「退会済みアクターは他者から見て存在しない」という原則のため。加えて`list_blocked`/`list_muted`（`BlockRepository`/`MuteRepository`/`RepostMuteRepository`）の一覧クエリ自体にも`a.withdrawn_at IS NULL`を課しており、本来この2つは退会時の物理削除により通常運用では重複しない条件だが、本issueの発端になった既存データ（修正前に退会し関係行がまだ残っているケース）に対するフェイルセーフとして両方を課している。
+
+タイムライン・通知の相互非表示は、`blocks`/`mutes`/退会済みアクター（`actors.withdrawn_at IS NOT NULL`）を1箇所でOR判定する SQL 関数 `actor_is_hidden_for_viewer(viewer_id, other_id)` に集約している（#242）。ブロックは `blocks` テーブルの存在だけでミュート相当のローカル非表示も兼ねる設計（ブロック専用の `mutes` 行を別途作らない）。`viewer_id`（第1引数）が`NULL`の呼び出し元（未ログイン等）ではこの関数自体がスキップされる箇所があるため、`withdrawn_at`単体のフィルタが必要な経路（`list_following`/`list_followers`等）では、この関数のOR判定とは別に`a.withdrawn_at IS NULL`を独立条件としても課している。
 
 `repost_mutes` はこれらとは独立したフラグで、対象ユーザーの通常投稿は表示したまま、リポスト（`p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL`。参照未解決の`pending`/`gone`状態は`repost_of_post_id`が`NULL`のまま`repost_of_ap_uri`にURIが入るため、`repost_of_post_id`だけで判定するとすり抜ける）のみを非表示にする。判定用SQL関数 `repost_is_muted_for_viewer(viewer_id, reposter_id)` は `home_timeline`/`local_timeline`/`social_timeline`/`global_timeline` の4関数にのみ適用し、プロフィールページの投稿一覧（`timeline_by_actor`）や個別投稿・スレッド表示（`find_by_id_for_viewer`/`context_before`/`context_after`）には適用しない（プロフィールページではそのユーザー自身のリポストも通常通り見える設計のため）。
 

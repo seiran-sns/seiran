@@ -37,7 +37,7 @@ pub(super) async fn handle_flag(
         if let Some(username) = crate::ap::extract_local_username(object, &inbox.local_domain) {
             if let Some(actor) = inbox
                 .actor_repo
-                .find_by_username_domain(username, &inbox.local_domain)
+                .find_including_withdrawn_by_username_domain(username, &inbox.local_domain)
                 .await
                 .map_err(|e| format!("Flag: Actor検索失敗: {}", e))?
                 .filter(|a| a.actor_type == "local")

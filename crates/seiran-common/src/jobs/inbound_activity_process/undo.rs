@@ -56,7 +56,7 @@ pub(super) async fn handle_undo(
                 .flatten(),
             inbox
                 .actor_repo
-                .find_by_username_domain(local_username, &inbox.local_domain)
+                .find_including_withdrawn_by_username_domain(local_username, &inbox.local_domain)
                 .await
                 .ok()
                 .flatten(),
@@ -123,7 +123,7 @@ pub(super) async fn handle_undo(
 
     let target = match inbox
         .actor_repo
-        .find_by_username_domain(local_username, &inbox.local_domain)
+        .find_including_withdrawn_by_username_domain(local_username, &inbox.local_domain)
         .await
         .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
     {

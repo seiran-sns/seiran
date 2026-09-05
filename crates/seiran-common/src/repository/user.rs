@@ -25,6 +25,9 @@ pub struct AdminUserRow {
     pub passkey_count: i64,
     /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。
     pub emoji_map: Option<serde_json::Value>,
+    /// 退会済み日時（#242）。管理画面は一般ユーザー向け可視性ルールの対象外のため
+    /// 退会済みユーザーも一覧に表示し続けるが、判別できるようこの値を返す。
+    pub withdrawn_at: Option<DateTime<Utc>>,
 }
 
 #[async_trait]
@@ -121,6 +124,10 @@ pub trait UserRepository: Send + Sync {
 
     /// アカウントが凍結中かを返す（プロフィールページの【凍結中】インジケーター用）。
     async fn is_suspended_by_user_id(&self, user_id: i64) -> Result<bool, sqlx::Error>;
+
+    /// ローカルアクターが退会済み（`actors.withdrawn_at` 設定済み）かを返す
+    /// （退会後のログイン・トークン拒否用、#242）。ローカルアクターが存在しない場合は `false`。
+    async fn is_withdrawn_by_user_id(&self, user_id: i64) -> Result<bool, sqlx::Error>;
 }
 
 pub struct PgUserRepository {
@@ -182,7 +189,7 @@ impl UserRepository for PgUserRepository {
             "SELECT u.id, u.email, u.password_hash, a.username
              FROM users u
              JOIN actors a ON a.user_id = u.id AND a.actor_type = 'local'
-             WHERE u.email = $1
+             WHERE u.email = $1 AND a.withdrawn_at IS NULL
              LIMIT 1",
         )
         .bind(email)
@@ -198,7 +205,7 @@ impl UserRepository for PgUserRepository {
             "SELECT u.id, u.email, u.password_hash, a.username
              FROM users u
              JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
-             WHERE a.username = $1",
+             WHERE a.username = $1 AND a.withdrawn_at IS NULL",
         )
         .bind(username)
         .fetch_optional(&self.pool)
@@ -284,7 +291,7 @@ impl UserRepository for PgUserRepository {
                         SELECT COUNT(*) FROM user_passkeys p
                         WHERE p.user_id = u.id
                     ) AS passkey_count,
-                    a.emoji_map
+                    a.emoji_map, a.withdrawn_at
              FROM users u
              LEFT JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
              LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
@@ -378,6 +385,17 @@ impl UserRepository for PgUserRepository {
                 .bind(user_id)
                 .fetch_optional(&self.pool)
                 .await?;
+        Ok(row.map(|(v,)| v).unwrap_or(false))
+    }
+
+    async fn is_withdrawn_by_user_id(&self, user_id: i64) -> Result<bool, sqlx::Error> {
+        let row: Option<(bool,)> = sqlx::query_as(
+            "SELECT withdrawn_at IS NOT NULL FROM actors
+             WHERE user_id = $1 AND actor_type::text = 'local'",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(|(v,)| v).unwrap_or(false))
     }
 }

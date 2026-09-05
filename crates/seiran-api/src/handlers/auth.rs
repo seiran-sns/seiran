@@ -199,7 +199,7 @@ pub async fn register(
 
     let username_exists = state
         .actors
-        .find_by_username_domain(&req.username, &state.local_domain)
+        .find_including_withdrawn_by_username_domain(&req.username, &state.local_domain)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     if username_exists.is_some() {

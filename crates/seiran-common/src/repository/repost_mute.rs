@@ -107,7 +107,7 @@ impl RepostMuteRepository for PgRepostMuteRepository {
              JOIN actors a ON a.id = m.muted_actor_id
              LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
              LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-             WHERE m.muter_actor_id = $1
+             WHERE m.muter_actor_id = $1 AND a.withdrawn_at IS NULL
              ORDER BY m.id DESC
              LIMIT 200",
         )

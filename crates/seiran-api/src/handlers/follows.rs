@@ -107,7 +107,10 @@ pub async fn delete_follow(
         } else {
             (parts[0], state.local_domain.as_str())
         };
-        state.actors.find_by_username_domain(username, domain).await
+        state
+            .actors
+            .find_including_withdrawn_by_username_domain(username, domain)
+            .await
     };
 
     let target_actor = match target_actor {

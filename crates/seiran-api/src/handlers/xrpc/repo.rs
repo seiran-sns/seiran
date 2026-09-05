@@ -419,7 +419,7 @@ async fn get_record_post(params: &GetRecordParams, state: &AppState) -> axum::re
         Some(a) => Some(a),
         None => state
             .actors
-            .find_by_username_domain(&params.repo, &state.local_domain)
+            .find_including_withdrawn_by_username_domain(&params.repo, &state.local_domain)
             .await
             .ok()
             .flatten(),
@@ -483,7 +483,7 @@ async fn get_record_from_atp_records(
             // did: でなければ username として検索（ローカルアクター）
             match state
                 .actors
-                .find_by_username_domain(&params.repo, &state.local_domain)
+                .find_including_withdrawn_by_username_domain(&params.repo, &state.local_domain)
                 .await
             {
                 Ok(Some(a)) => a,
@@ -568,7 +568,7 @@ pub(crate) async fn resolve_repo_actor(
         Ok(Some(a)) => Ok(a),
         Ok(None) => match state
             .actors
-            .find_by_username_domain(repo, &state.local_domain)
+            .find_including_withdrawn_by_username_domain(repo, &state.local_domain)
             .await
         {
             Ok(Some(a)) => Ok(a),

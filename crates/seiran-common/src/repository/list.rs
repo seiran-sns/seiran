@@ -288,7 +288,7 @@ impl ListRepository for PgListRepository {
              JOIN actors a ON a.id = lm.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-             WHERE lm.list_id = $1
+             WHERE lm.list_id = $1 AND a.withdrawn_at IS NULL
              ORDER BY lm.added_at DESC",
         )
         .bind(list_id)

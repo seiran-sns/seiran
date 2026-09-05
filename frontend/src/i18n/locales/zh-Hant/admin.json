@@ -260,6 +260,7 @@
     "emptyMessage": "沒有使用者。",
     "noActorLabel": "（尚未建立使用者身分）",
     "suspendedBadge": "已停權",
+    "withdrawnBadge": "已停用",
     "suspendButton": "停權",
     "unsuspendButton": "解除停權",
     "totpEnabled": "TOTP：已啟用",

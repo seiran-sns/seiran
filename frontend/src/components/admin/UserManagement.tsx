@@ -155,6 +155,9 @@ export default function UserManagement() {
                   <span>{t("admin:userManagement.passkeyCount", { count: u.passkey_count })}</span>
                 </div>
               </div>
+              {u.withdrawn_at && (
+                <span className={`${styles.badge} ${styles.badgeWithdrawn}`}>{t("admin:userManagement.withdrawnBadge")}</span>
+              )}
               {u.suspended_at && (
                 <span className={`${styles.badge} ${styles.badgeSuspended}`}>{t("admin:userManagement.suspendedBadge")}</span>
               )}

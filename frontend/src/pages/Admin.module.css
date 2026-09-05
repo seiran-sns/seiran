@@ -81,6 +81,12 @@
   border-color: var(--danger);
 }
 
+.badgeWithdrawn {
+  color: var(--text-dim);
+  border-color: var(--border);
+  background: var(--bg-elev);
+}
+
 .label {
   display: flex;
   flex-direction: column;

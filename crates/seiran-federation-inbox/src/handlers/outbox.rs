@@ -28,7 +28,7 @@ pub async fn outbox_handler(
         "SELECT a.id, COUNT(p.id) AS total
          FROM actors a
          LEFT JOIN posts p ON p.actor_id = a.id AND p.deleted_at IS NULL
-         WHERE a.username = $1 AND a.actor_type = 'local'
+         WHERE a.username = $1 AND a.actor_type = 'local' AND a.withdrawn_at IS NULL
          GROUP BY a.id
          LIMIT 1",
     )

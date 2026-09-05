@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM mutes WHERE muter_actor_id = $1 OR muted_actor_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c358a1a23ede0a0f31c1248a2458514febc0a6d7d1d824a7e3b396889531554b"
+}

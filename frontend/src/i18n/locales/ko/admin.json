@@ -260,6 +260,7 @@
     "emptyMessage": "사용자가 없습니다.",
     "noActorLabel": "(배우가 생성되지 않음)",
     "suspendedBadge": "정지된",
+    "withdrawnBadge": "비활성화됨",
     "suspendButton": "유예하다",
     "unsuspendButton": "정지 해제",
     "totpEnabled": "TOTP: 활성화됨",

@@ -28,6 +28,8 @@ export interface AdminUser {
   passkey_count: number;
   /** 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。 */
   emojis?: Record<string, string>;
+  /** 退会済み日時（#242）。 */
+  withdrawn_at: string | null;
 }
 
 export interface AdminReport {

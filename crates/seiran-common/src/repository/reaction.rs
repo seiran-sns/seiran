@@ -304,7 +304,7 @@ impl ReactionRepository for PgReactionRepository {
              JOIN actors a ON a.id = r.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-             WHERE r.post_id = $1 AND r.content = $2
+             WHERE r.post_id = $1 AND r.content = $2 AND a.withdrawn_at IS NULL
              ORDER BY r.created_at DESC
              LIMIT $3",
         )

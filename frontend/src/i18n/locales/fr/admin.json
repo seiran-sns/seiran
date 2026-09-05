@@ -260,6 +260,7 @@
     "emptyMessage": "Aucun utilisateur.",
     "noActorLabel": "(acteur non créé)",
     "suspendedBadge": "Suspendu",
+    "withdrawnBadge": "Désactivé",
     "suspendButton": "Suspendre",
     "unsuspendButton": "Annuler la suspension",
     "totpEnabled": "TOTP : activé",

@@ -411,7 +411,8 @@ pub struct WithdrawRequest {
 /// 2. ATP #account（active=false, status=deleted）を Relay に送信
 /// 3. 全投稿を論理削除（deleted_at = NOW()）
 /// 4. actors.withdrawn_at を設定して以降のログインを無効化
-/// 5. 自分がフォローしていた相手（フォロイー）全員へのアンフォロー（AP Undo Follow配送 +
+/// 5. ブロック・ミュート・リポストミュート関係を解除する（自分発・自分宛の両方、#242）
+/// 6. 自分がフォローしていた相手（フォロイー）全員へのアンフォロー（AP Undo Follow配送 +
 ///    ATPフォロー解除コミット）。従来は1〜4のみで、自分のフォロー先へは何も通知していな
 ///    かったため、リモート側にフォロー関係が残り続ける不整合があった（2026-07-16
 ///    マイケル指摘・承認）。
@@ -504,7 +505,36 @@ pub async fn withdraw(
     // Jetstream の wantedDids 絞り込みリストから外すため再構築を促す。
     touch_jetstream_wanted_dids(&state.db).await;
 
-    // 5. フォロー先全員へのアンフォローをWorkerのジョブとして積む（Worker の
+    // 5. ブロック・ミュート・リポストミュート関係を解除する（#242、2026-09-05
+    //    マイケル指摘）。「退会済みアクターは他者から見て存在しない」という原則に
+    //    揃えるため、一覧表示側でフィルタするのではなく関係自体を削除する。
+    //    自分発（自分が相手を対象にしていた分）・自分宛（相手が自分を対象にしていた分）
+    //    の両方を消す（相手側のブロック/ミュート一覧からも退会者が消えるように）。
+    sqlx::query!(
+        "DELETE FROM blocks WHERE blocker_actor_id = $1 OR blocked_actor_id = $1",
+        actor_id
+    )
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    sqlx::query!(
+        "DELETE FROM mutes WHERE muter_actor_id = $1 OR muted_actor_id = $1",
+        actor_id
+    )
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    sqlx::query!(
+        "DELETE FROM repost_mutes WHERE muter_actor_id = $1 OR muted_actor_id = $1",
+        actor_id
+    )
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // 6. フォロー先全員へのアンフォローをWorkerのジョブとして積む（Worker の
     //    AccountWithdrawUnfollowAll ジョブ。ApDelivery/ProxyFollowSyncと同じジョブ
     //    キュー経由にすることで、プロセスクラッシュ時もリトライ機構の恩恵を受けられる
     //    （tokio::spawnだとプロセス終了と共に失われてしまうため。2026-07-16 マイケル指摘）。

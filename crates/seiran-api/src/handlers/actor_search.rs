@@ -45,6 +45,7 @@ pub async fn search_actors(
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
          WHERE (a.actor_type != 'local' OR a.user_id IS NOT NULL)
+           AND a.withdrawn_at IS NULL
            AND LOWER(
              COALESCE(a.display_name, '')
              || E'\\n@' || a.username
@@ -130,6 +131,7 @@ pub async fn suggest_actors(
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
          WHERE (a.actor_type != 'local' OR a.user_id IS NOT NULL)
+           AND a.withdrawn_at IS NULL
          ORDER BY a.username
          LIMIT $3",
     )

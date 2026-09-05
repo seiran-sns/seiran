@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM repost_mutes WHERE muter_actor_id = $1 OR muted_actor_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "73ca4c260be2d6d51200bf96e57173834779d205988e07d3307f32b3304cafca"
+}

@@ -229,7 +229,7 @@ pub(super) async fn handle_accept(
             .ok_or("Accept: object.actor がローカルアクターではありません")?;
         inbox
             .actor_repo
-            .find_by_username_domain(local_username, &inbox.local_domain)
+            .find_including_withdrawn_by_username_domain(local_username, &inbox.local_domain)
             .await
             .map_err(|e| format!("ローカルアクター検索エラー: {}", e))?
             .ok_or_else(|| format!("ローカルアクター '{}' が見つかりません", local_username))?
