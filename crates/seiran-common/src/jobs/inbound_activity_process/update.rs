@@ -134,11 +134,13 @@ async fn handle_update_seiranpost(
         .begin()
         .await
         .map_err(|e| format!("トランザクション開始失敗: {}", e))?;
-    sqlx::query("SELECT pg_advisory_xact_lock(2, hashtext($1))")
-        .bind(ap_object_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("advisory lock取得失敗: {}", e))?;
+    crate::advisory_lock::acquire_xact_lock_for_key(
+        &mut tx,
+        crate::advisory_lock::lock_class::POST_MERGE,
+        ap_object_id,
+    )
+    .await
+    .map_err(|e| format!("advisory lock取得失敗: {}", e))?;
 
     // まず自分自身の申告を記録する（この場でマッチする相手が見つからなくても、
     // 将来ATP側が到着した際に見つけられるようにするため）。

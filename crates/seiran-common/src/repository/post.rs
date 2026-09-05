@@ -1667,10 +1667,12 @@ impl PostRepository for PgPostRepository {
         // （`docs/protocols.md` 5節）。申告の無い一般的なリモート投稿はこの分岐を通らず
         // 従来通り無条件・ノーロックでINSERTする（cross-column突合が不要なため）。
         if let Some(claimed_at_uri) = params.claimed_at_uri {
-            sqlx::query("SELECT pg_advisory_xact_lock(2, hashtext($1))")
-                .bind(params.ap_object_id)
-                .execute(&mut *tx)
-                .await?;
+            crate::advisory_lock::acquire_xact_lock_for_key(
+                &mut tx,
+                crate::advisory_lock::lock_class::POST_MERGE,
+                params.ap_object_id,
+            )
+            .await?;
 
             let existing: Option<(i64, i64, Option<String>)> = sqlx::query_as(
                 "SELECT id, actor_id, claimed_ap_object_id FROM posts WHERE at_uri = $1",
