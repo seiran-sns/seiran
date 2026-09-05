@@ -54,3 +54,35 @@ pub async fn release(mut conn: PoolConnection<Postgres>, key: i64) {
         tracing::error!("[advisory_lock] key={} unlock 失敗: {}", key, e);
     }
 }
+
+/// リモートseiran連合（#236アクター統合・#237投稿マージ）のDB反映を直列化するための
+/// 名前空間付きロッククラス。`pg_advisory_xact_lock(key1, key2)` の `key1` に使う。
+/// 2つの機能が同じ名前空間でロックキーを衝突させないよう、機能ごとに固定値を割り当てる。
+pub mod lock_class {
+    /// #236: リモートseiranアクターの相互申告マージ。`key2` は `hashtext(fedi ID)`。
+    pub const ACTOR_MERGE: i32 = 1;
+    /// #237: 投稿の相互申告マージ。`key2` は `hashtext(ap_object_id)`。
+    pub const POST_MERGE: i32 = 2;
+}
+
+/// `pg_advisory_xact_lock(key1, hashtext(key))` を取得する**ブロッキング**版。トランザクション
+/// スコープのため明示的な unlock は不要で、`tx` の commit/rollback で自動的に解放される。
+/// `try_acquire`/`release`（`pg_try_advisory_lock`、セッションスコープ・非ブロッキング、
+/// ジョブの二重起動防止専用）とは用途・性質が異なる別物。
+///
+/// リモートseiran連合のマージ判定はネットワークI/O（相手側の実体解決）を伴うため、
+/// このロックは**その結果を反映するDB書き込みトランザクションの中でのみ**取得すること。
+/// ネットワークI/Oをロック保持中に行うと、同じキーへの後続処理が不必要に長時間ブロック
+/// される（`docs/protocols.md` 11節・5節参照）。
+pub async fn acquire_xact_lock_for_key(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    key1: i32,
+    key: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1, hashtext($2))")
+        .bind(key1)
+        .bind(key)
+        .execute(&mut **tx)
+        .await
+        .map(|_| ())
+}

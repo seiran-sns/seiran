@@ -204,23 +204,39 @@ async fn upsert_remote_fedi_actor(
 
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
-    let actor_id = inbox
-        .actor_repo
-        .upsert_remote_fedi(
-            new_actor_id,
-            actor_uri,
-            &ap_inbox,
-            &username,
-            &domain,
-            &display_name,
-            avatar_url.as_deref(),
-            bio.as_deref(),
-            now,
-            &emoji_map,
-            &profile_fields,
-        )
-        .await
-        .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+    // リモートseiranアクターの相互申告マージ（#236）。`seiranAtDid`拡張フィールドの
+    // 有無に関わらず同じ経路を通す（無ければ`claimed_at_did=None`で単純upsertと同義）。
+    let outcome = crate::seiran_actor_merge::discover_fedi_actor(
+        &inbox.db_pool,
+        new_actor_id,
+        actor_uri,
+        &ap_inbox,
+        &username,
+        &domain,
+        &display_name,
+        avatar_url.as_deref(),
+        bio.as_deref(),
+        &emoji_map,
+        &profile_fields,
+        remote_ap.seiran_at_did.as_deref(),
+        now,
+    )
+    .await
+    .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+    // 結婚が成立しなかった場合、相手（自己申告されたATP DID）を能動的に取りに行く
+    // ジョブを積んで結婚成立を早める（必須ではない、通常の受動的発見でも成立しうる）。
+    if !outcome.married && remote_ap.seiran_at_did.is_some() {
+        let _ = inbox
+            .queue
+            .enqueue(
+                Job::ActorMetadataResolve {
+                    actor_id: outcome.actor_id,
+                },
+                priority::LOW,
+            )
+            .await;
+    }
+    let actor_id = outcome.actor_id;
 
     Ok(RemoteActorInfo {
         actor_id,

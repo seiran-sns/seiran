@@ -53,6 +53,10 @@ struct ApActorDocument {
     /// そのまま公開する（検証は読み手側の責務、Mastodon等と同じ「自己申告を公開する」流儀）。
     #[serde(rename = "alsoKnownAs", skip_serializing_if = "Vec::is_empty")]
     also_known_as: Vec<String>,
+    /// リモートseiranアクターの相互申告マージ用の自己申告（seiran独自拡張、#236）。
+    /// `actors.at_did`が未設定（ドメイン未確定期間等でDID未発行）の間は省略する。
+    #[serde(rename = "seiranAtDid", skip_serializing_if = "Option::is_none")]
+    seiran_at_did: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -109,7 +113,7 @@ pub async fn actor_handler(
         "SELECT a.id, a.display_name, a.bio, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
                 mf.mime_type AS avatar_mime_type, a.profile_fields, a.emoji_map, \
-                a.birth_date, a.birth_date_public, a.is_locked \
+                a.birth_date, a.birth_date_public, a.is_locked, a.at_did \
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
@@ -129,6 +133,7 @@ pub async fn actor_handler(
         emoji_map,
         birth_date,
         is_locked,
+        seiran_at_did,
     ) = match row {
         Ok(Some(r)) => {
             let actor_id = r.try_get::<i64, _>("id").unwrap_or_default();
@@ -166,6 +171,7 @@ pub async fn actor_handler(
                 None
             };
             let is_locked: bool = r.try_get("is_locked").unwrap_or(false);
+            let seiran_at_did: Option<String> = r.try_get("at_did").ok().flatten();
             (
                 actor_id,
                 display_name,
@@ -176,6 +182,7 @@ pub async fn actor_handler(
                 emoji_map,
                 birth_date,
                 is_locked,
+                seiran_at_did,
             )
         }
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
@@ -277,6 +284,7 @@ pub async fn actor_handler(
         tag,
         vcard_bday: birth_date.map(|d| d.format("%Y-%m-%d").to_string()),
         also_known_as,
+        seiran_at_did,
     };
 
     (

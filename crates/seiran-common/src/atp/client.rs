@@ -306,7 +306,7 @@ pub async fn fetch_single_bsky_post(
 /// `com.atproto.repo.getRecord` で任意コレクションのレコード`value`だけを取得する
 /// （AppView経由、`api.bsky.app`は主要`com.atproto.*`読み取りメソッドの透過プロキシとして
 /// 動作する）。レコード不在（404）・取得失敗時は`None`（呼び出し側は「制限なし」として扱う）。
-async fn get_record_value(
+pub async fn get_record_value(
     client: &reqwest::Client,
     repo: &str,
     collection: &str,
@@ -330,6 +330,18 @@ async fn get_record_value(
 /// Bsky投稿の `at://` URI から末尾の rkey を取り出す。
 fn rkey_from_at_uri(at_uri: &str) -> Option<&str> {
     at_uri.rsplit('/').next().filter(|s| !s.is_empty())
+}
+
+/// リモートDIDが自己申告する`org.seiran.actor.declaration`（rkey固定`self`）の
+/// `apActorUri`を取得する（#236、リモートseiranアクターの相互申告マージ用）。
+/// レコード不在・取得失敗時は`None`（このDIDはseiranアクターではない、またはまだ
+/// 宣言していない、として扱う）。
+pub async fn fetch_seiran_actor_declaration(client: &reqwest::Client, did: &str) -> Option<String> {
+    let value = get_record_value(client, did, "org.seiran.actor.declaration", "self").await?;
+    value
+        .get("apActorUri")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
 }
 
 /// Bsky投稿のthreadgate（返信許可ルール）・postgate（引用可否）を取得する。

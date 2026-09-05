@@ -1466,6 +1466,7 @@ pub fn spawn_startup_tasks(state: &AppState) {
         backfill_identity_events(&state).await;
         backfill_unset_avatar_profiles(&state).await;
         backfill_chat_declarations(&state).await;
+        backfill_seiran_actor_declarations(&state).await;
         backfill_remote_instance_meta(&state).await;
     });
 }
@@ -1837,6 +1838,49 @@ async fn backfill_chat_declarations(state: &AppState) {
             Ok(_) => tracing::info!("[startup] chat declaration commit: actor_id={}", actor_id),
             Err(e) => tracing::error!(
                 "[startup] chat declaration 失敗 actor_id={}: {}",
+                actor_id,
+                e
+            ),
+        }
+    }
+}
+
+/// リモートseiranアクターの相互申告マージ（#236）用の自己申告を、まだ未コミットの
+/// ローカルユーザーへ一括バックフィルする（`backfill_chat_declarations`と同じパターン）。
+async fn backfill_seiran_actor_declarations(state: &AppState) {
+    let now = chrono::Utc::now();
+    let missing: Vec<(i64, String)> = match sqlx::query_as::<_, (i64, String)>(
+        "SELECT a.id, a.username
+         FROM actors a
+         WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM atp_records r
+             WHERE r.actor_id = a.id AND r.collection = 'org.seiran.actor.declaration' AND r.rkey = 'self'
+           )",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("[startup] seiran actor declaration 対象取得失敗: {}", e);
+            return;
+        }
+    };
+
+    for (actor_id, username) in missing {
+        let ap_actor_uri = format!("https://{}/users/{}", state.local_domain, username);
+        match state
+            .atp_service
+            .commit_seiran_actor_declaration(actor_id, &ap_actor_uri, now)
+            .await
+        {
+            Ok(_) => tracing::info!(
+                "[startup] seiran actor declaration commit: actor_id={}",
+                actor_id
+            ),
+            Err(e) => tracing::error!(
+                "[startup] seiran actor declaration 失敗 actor_id={}: {}",
                 actor_id,
                 e
             ),

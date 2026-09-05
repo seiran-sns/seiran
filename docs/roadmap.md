@@ -153,13 +153,13 @@
 
 ### プロトコル
 
-- [ ] **リモートseiranアクターの相互申告マージ（#236）** — 設計確定（`docs/protocols.md` 11節参照）。チャレンジ検証エンドポイントは持たない。AP拡張フィールド＋ATP独自宣言レコード（`org.seiran.actor.declaration`）による相互自己申告 → 発見時は検証を待たず即INSERT（同時に相手を能動的に取りに行くジョブをenqueue）→ 相手側の実体が既存行の自己申告と相互に一致した場合にのみ結婚（マージ）→ fedi ID起点の`pg_advisory_xact_lock`でDB反映を直列化し、AP/ATPどちらが先に発見されても必ず1つの`actors`行（`actor_type='remote_seiran'`）に収束させる。旧構想（`seiran_pair_actor_id`で2行をリンク、チャレンジ検証エンドポイント）は不採用、`seiran_pair_actor_id`は実装完了後に削除を検討する。
-  - [ ] AP Actor文書への自ATP DID拡張フィールド追加
-  - [ ] ATP独自コレクション `org.seiran.actor.declaration`（rkey=`self`）の実装
-  - [ ] `actors.claimed_ap_uri`/`claimed_at_did`カラム追加
-  - [ ] 相手を能動的に取りに行くジョブ（`RemoteActorResolve`系の延長）
-  - [ ] 相互一致チェック（結婚判定）の実装
-  - [ ] fedi IDキーの`pg_advisory_xact_lock`ヘルパー追加とDB反映の直列化
+- [x] **リモートseiranアクターの相互申告マージ（#236）** — 設計確定（`docs/protocols.md` 11節参照）。チャレンジ検証エンドポイントは持たない。AP拡張フィールド＋ATP独自宣言レコード（`org.seiran.actor.declaration`）による相互自己申告 → 発見時は検証を待たず即INSERT（同時に相手を能動的に取りに行くジョブをenqueue）→ 相手側の実体が既存行の自己申告と相互に一致した場合にのみ結婚（マージ）→ fedi ID起点の`pg_advisory_xact_lock`でDB反映を直列化し、AP/ATPどちらが先に発見されても必ず1つの`actors`行（`actor_type='remote_seiran'`）に収束させる。旧構想（`seiran_pair_actor_id`で2行をリンク、チャレンジ検証エンドポイント）は不採用、`seiran_pair_actor_id`は実装完了後に削除を検討する。
+  - [x] AP Actor文書への自ATP DID拡張フィールド追加
+  - [x] ATP独自コレクション `org.seiran.actor.declaration`（rkey=`self`）の実装
+  - [x] `actors.claimed_ap_uri`/`claimed_at_did`カラム追加
+  - [x] 相手を能動的に取りに行くジョブ（`ActorMetadataResolve`ジョブを実装。AP側発見経路からのenqueueのみ対応。Bsky側発見は`firehose.rs`の`resolve_or_upsert_bsky_actor`のみ相互一致判定に対応済みで、他の`upsert_remote_bsky`呼び出し元（`follow_exec`/`also_known_as_sync`/`search`/`target_resolve`/`bsky_follower_poll`/`users`）は未対応のまま — 結婚成立の必須条件ではないため許容、フォローアップ課題として残す）
+  - [x] 相互一致チェック（結婚判定）の実装（`seiran_common::seiran_actor_merge`）
+  - [x] fedi IDキーの`pg_advisory_xact_lock`ヘルパー追加とDB反映の直列化（`advisory_lock::acquire_xact_lock_for_key`）
 - [ ] **投稿の完全表現力をAP/ATP双方でロスレス往復（#237）** — 設計確定（`docs/protocols.md` 5節参照）。`seiranPost`拡張オブジェクトをAP Note・ATP post本体の両方に同一構造で埋め込み、CW・投票・カスタム絵文字マップ・添付のNSFW/GIF/寸法・複数URLカード等、標準フィールドでは表現しきれないseiran独自の表現力をリモートseiran間で完全再現する。投稿ID・投稿者IDの相互申告一致によるマージ判定（#236と同型のアルゴリズム）を採用し、`seiran_post_uuid`のような内部限定トークンは使わない。副次効果として、下記「他seiranサーバー間マージのATP経路対応」の既知の制約もこのissueで解消される。
   - [ ] `posts.claimed_ap_object_id`/`claimed_at_uri`カラム追加（`seiran_post_uuid`は将来的に削除検討）
   - [ ] 相互一致チェック（投稿マージ判定）と投稿者一貫性チェックの実装
@@ -169,6 +169,7 @@
   - [ ] ATP URI確定時に`counterpartPostId`入り`seiranPost`を持つ`Update(Note)`をAPフォロワーへ送信（ATP側コミット・伝播より先に）
   - [ ] `Update(Note)`受理ハンドラの追加（`seiranPost.counterpartPostId`のみ反映・本文等は無視、なりすまし対策込み、マージ再判定トリガー）
   - [ ] マージ成立時のクリーンアップ2段階方式（同期: URI付け替え+`parent_original_post_id`+`deleted_at`／非同期ジョブ: FK付け替え+手動カウンタ調整+削除予定行の物理削除）
+- [ ] **リモートseiranユーザーへのフォローはAP経由開始・承認状況に応じてATP側も同期（#238）** — フォロー承認制はAPにしかない概念のため、リモートseiranへのフォローは常にAP経由で送る。相手が非承認制なら（既存の`follow_fedi`がAccept受信を待たず内部的に成立させる動作に乗せて）その時点でATP側`commit_follow`も実行、承認制ならAcceptを受けてから実行する。#236完了後に着手。
 - [ ] **リモートseiran特権初期同期**
   - [ ] `/api/seiran/v1/posts/export` エンドポイント
   - [ ] 相手サーバーからの生データ一括インポート（最大300件）

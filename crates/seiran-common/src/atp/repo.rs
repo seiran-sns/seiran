@@ -969,6 +969,30 @@ pub fn encode_chat_actor_declaration(allow_incoming: &str) -> Result<(Vec<u8>, C
     Ok((cbor, cid))
 }
 
+/// `org.seiran.actor.declaration` レコード（リモートseiranアクターの相互申告マージ用、
+/// rkey固定`self`、seiran独自拡張）の DAG-CBOR バイト列と CID を生成する。
+/// `chat.bsky.actor.declaration`と同型のパターンで、`app.bsky.actor.profile`本体は
+/// 汚さない（他クライアントによるプロフィール丸ごと上書きで消えるリスクがあるため）。
+/// `ap_actor_uri`は自分自身のAP Actor URI（`https://{domain}/users/{username}`）の自己申告。
+/// 詳細は`docs/protocols.md` 11節参照。
+pub fn encode_seiran_actor_declaration(ap_actor_uri: &str) -> Result<(Vec<u8>, Cid), RepoError> {
+    // canonical順: $type(5) < apActorUri(10)
+    #[derive(Serialize)]
+    struct SeiranActorDeclaration {
+        #[serde(rename = "$type")]
+        kind: String,
+        #[serde(rename = "apActorUri")]
+        ap_actor_uri: String,
+    }
+    let record = SeiranActorDeclaration {
+        kind: "org.seiran.actor.declaration".to_string(),
+        ap_actor_uri: ap_actor_uri.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
 /// `app.bsky.actor.contentVisibilityDeclaration` レコード（アルゴリズムレコメンド
 /// （Discoverフィード等）からの除外要求、rkey固定`self`）の DAG-CBOR バイト列と CID を生成する。
 /// レコードが存在しない場合は `false`（除外しない）とみなされる。
