@@ -316,6 +316,25 @@ pub async fn get_note_ap(
     if let Some(poll) = post.poll.as_ref() {
         seiran_common::ap::apply_poll_to_note_object(&mut ap_note, poll);
     }
+    // 配送時（`deliver_post_to_ap_followers`）と同じ`summary`（CW）・`seiranPost`拡張
+    // オブジェクトをここにも埋め込む。フォロー関係が無いリモートはCreateを受け取らず
+    // このエンドポイントの直接GETのみでオブジェクトを取得するため、ここが欠けていると
+    // CW・#237のロスレス往復（添付NSFW/GIF/寸法・複数URLカード等）がPush配送時にしか
+    // 機能しない片手落ちになる（実地検証で発覚）。
+    if let Ok(basis) =
+        seiran_common::ap::deliver::fetch_post_activity_basis(&state.db, post_id, post.actor_id)
+            .await
+    {
+        if let Some(cw) = basis.content_warning.as_deref() {
+            ap_note["summary"] = serde_json::Value::String(cw.to_string());
+        }
+        if let Ok(Some(seiran_post)) =
+            seiran_common::ap::deliver::build_seiran_post_for_basis(&state.db, post_id, &basis)
+                .await
+        {
+            ap_note["seiranPost"] = seiran_post.to_value();
+        }
+    }
 
     (
         [(

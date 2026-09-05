@@ -495,30 +495,30 @@ pub(super) fn build_undo_reaction_activity(
 /// 投稿1件の配送に必要な共通データ（本文・作成日時・投稿者名・添付・付随メタ情報）。
 /// `deliver_post_to_ap_followers` と `deliver_direct_message_to_ap` の両方で使う
 /// 「投稿情報取得＋添付取得」のhowを1箇所にまとめたもの。
-pub(super) struct PostActivityBasis {
-    pub(super) body: String,
-    pub(super) created_at: chrono::DateTime<chrono::Utc>,
-    pub(super) username: String,
-    pub(super) seiran_uuid: Option<String>,
-    pub(super) visibility: String,
-    pub(super) emoji_map: serde_json::Value,
-    pub(super) attachments: Vec<serde_json::Value>,
+pub struct PostActivityBasis {
+    pub body: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub username: String,
+    pub seiran_uuid: Option<String>,
+    pub visibility: String,
+    pub emoji_map: serde_json::Value,
+    pub attachments: Vec<serde_json::Value>,
     /// アンケート（#228）。`{multiple, options:[{name,votes}], endTime}`。無ければ`None`。
-    pub(super) poll: Option<serde_json::Value>,
+    pub poll: Option<serde_json::Value>,
     /// CW（閲覧注意）ガイド文（#229）。無ければ`None`。
-    pub(super) content_warning: Option<String>,
+    pub content_warning: Option<String>,
     /// ポストの言語（ISO 639-1）。`seiranPost.language`用。
-    pub(super) language: Option<String>,
+    pub language: Option<String>,
     /// この投稿のATP側実体（`posts.at_uri`）。ATPコミットが未確定なら`None`
     /// （`seiranPost.counterpartPostId`は配送時点でこれが`Some`の時のみ埋め込む）。
-    pub(super) at_uri: Option<String>,
+    pub at_uri: Option<String>,
     /// 投稿者（ローカルアクター）のATP DID。ローカルアクターは登録時点で両プロトコルの
     /// IDを持つのが通常だが、ドメイン未確定のシングルホストモード期間中は`None`
     /// （`seiranPost.counterpartAuthorId`に必須のため、`None`ならseiranPost自体を省略する）。
-    pub(super) at_did: Option<String>,
+    pub at_did: Option<String>,
 }
 
-pub(super) async fn fetch_post_activity_basis(
+pub async fn fetch_post_activity_basis(
     db: &PgPool,
     post_id: i64,
     actor_id: i64,
@@ -580,7 +580,7 @@ pub(super) async fn fetch_post_activity_basis(
 /// `PostActivityBasis`から`seiranPost`拡張オブジェクトを組み立てる（#237）。
 /// 投稿者がまだATP DIDを持たない（ドメイン未確定のシングルホストモード）場合は
 /// `counterpartAuthorId`を埋められないため`None`（seiranPost自体を省略）を返す。
-pub(super) async fn build_seiran_post_for_basis(
+pub async fn build_seiran_post_for_basis(
     db: &PgPool,
     post_id: i64,
     basis: &PostActivityBasis,

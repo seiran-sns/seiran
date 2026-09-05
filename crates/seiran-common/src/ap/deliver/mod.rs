@@ -17,7 +17,10 @@ mod note;
 mod reaction;
 mod text;
 
-pub use activity::{append_emoji_tags, apply_poll_to_note_object};
+pub use activity::{
+    append_emoji_tags, apply_poll_to_note_object, build_seiran_post_for_basis,
+    fetch_post_activity_basis, PostActivityBasis,
+};
 pub use actor::{deliver_delete_actor, deliver_update_actor};
 pub use announce::{deliver_ap_announce, deliver_undo_announce};
 pub use note::{
