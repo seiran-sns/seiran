@@ -538,6 +538,10 @@ async fn process_message(
                 let claimed_ap_object_id = seiran_post_ext
                     .as_ref()
                     .and_then(|sp| sp.counterpart_post_id.clone());
+                let content_warning = seiran_post_ext
+                    .as_ref()
+                    .and_then(|sp| sp.content_warning.clone());
+                let poll = seiran_post_ext.as_ref().and_then(|sp| sp.poll.clone());
                 save_bsky_post(
                     &pool2,
                     &queue2,
@@ -559,6 +563,8 @@ async fn process_message(
                     attachments,
                     link_card,
                     claimed_ap_object_id,
+                    content_warning,
+                    poll,
                 )
                 .await;
             });
@@ -710,6 +716,8 @@ async fn save_bsky_post(
     attachments: Vec<ParsedAttachment>,
     link_card: Option<ParsedLinkCard>,
     claimed_ap_object_id: Option<String>,
+    content_warning: Option<String>,
+    poll: Option<JsonValue>,
 ) {
     let reply_id_str = reply_to_post_id.map(|id| id.to_string());
     let post_id = generate_snowflake_id(created_at);
@@ -830,6 +838,23 @@ async fn save_bsky_post(
         }
         Ok(InsertOrMergeOutcome::Inserted) => {
             tracing::info!("[Jetstream] 保存完了: {}", at_uri);
+
+            // seiranPost拡張オブジェクト（#237）のCW・投票をposts.content_warning/pollへ
+            // 反映する。AP受信側（note_save.rs）は既に対応済みだが、ATP受信側で
+            // これを欠いていると、ATP経由でしか受信できていない間はCW/投票が
+            // 一切表示されない非対称が生じる（実地検証で発覚）。
+            if content_warning.is_some() || poll.is_some() {
+                let posts_repo = PgPostRepository::new(pool.clone());
+                if let Err(e) = posts_repo
+                    .set_fedi_content_metadata(post_id, content_warning.as_deref(), poll.as_ref())
+                    .await
+                {
+                    tracing::error!(
+                        "[Jetstream] seiranPost CW/投票の保存失敗（投稿自体は成功済み）: {}",
+                        e
+                    );
+                }
+            }
 
             // 返信許可（threadgate）・引用可否（postgate）を取得して保存する
             // （#返信/引用グレーアウト、`docs/protocols.md`参照）。取得失敗時は両方とも
