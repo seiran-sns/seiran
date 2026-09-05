@@ -35,7 +35,13 @@ export function mediaUrl(raw?: string | null): string | undefined {
       internalMediaOrigins.has(target.origin)
     )
       return raw;
-    const proxy = externalProxyBase ? `${externalProxyBase}/proxy` : "/proxy";
+    // `externalProxyBase`はMisskeyの`instance.mediaProxy`互換で、`/proxy`まで含む
+    // 完全なエンドポイントURL（例: `https://example.com/proxy`）としてそのまま使う。
+    // ここでさらに`/proxy`を付け足すと、`/api/meta`の`mediaProxyUrl`未設定時デフォルト
+    // （`https://{local_domain}/proxy`）と組み合わさって`/proxy/proxy?url=...`という
+    // 二重パスになり、nginx側にそのパス用のルーティングがなくフロントへ誤フォールバック
+    // して502になる不具合があった。
+    const proxy = externalProxyBase || "/proxy";
     return `${proxy}?url=${encodeURIComponent(target.href)}`;
   } catch {
     return raw;

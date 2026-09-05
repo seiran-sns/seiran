@@ -84,7 +84,7 @@
     "selectIconButton": "选择图标",
     "mediaProxyTitle": "媒体代理",
     "mediaProxyUrlLabel": "外部媒体代理 URL",
-    "mediaProxyHint": "留空以使用此服务器的 /proxy 端点。输入与 Misskey 兼容的基本 URL。",
+    "mediaProxyHint": "留空以使用此服务器的 /proxy 端点。请输入完整的 Misskey 兼容端点 URL（需包含末尾的 /proxy 路径）。",
     "smtpSectionTitle": "SMTP 和注册",
     "smtpHostLabel": "SMTP主机",
     "smtpPortLabel": "SMTP端口",

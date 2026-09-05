@@ -92,7 +92,7 @@
     "selectIconButton": "Select icon",
     "mediaProxyTitle": "Media proxy",
     "mediaProxyUrlLabel": "External media proxy URL",
-    "mediaProxyHint": "Leave blank to use this server's /proxy endpoint. Enter a Misskey-compatible base URL.",
+    "mediaProxyHint": "Leave blank to use this server's /proxy endpoint. Enter the full Misskey-compatible endpoint URL, including the trailing /proxy path.",
     "smtpSectionTitle": "SMTP & registration",
     "smtpHostLabel": "SMTP host",
     "smtpPortLabel": "SMTP port",

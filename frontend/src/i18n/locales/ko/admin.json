@@ -84,7 +84,7 @@
     "selectIconButton": "아이콘 선택",
     "mediaProxyTitle": "미디어 프록시",
     "mediaProxyUrlLabel": "외부 미디어 프록시 URL",
-    "mediaProxyHint": "이 서버의 /proxy 엔드포인트를 사용하려면 공백으로 남겨두세요. Misskey 호환 기본 URL을 입력하세요.",
+    "mediaProxyHint": "이 서버의 /proxy 엔드포인트를 사용하려면 공백으로 남겨두세요. 마지막 /proxy 경로까지 포함한 전체 Misskey 호환 엔드포인트 URL을 입력하세요.",
     "smtpSectionTitle": "SMTP 및 등록",
     "smtpHostLabel": "SMTP 호스트",
     "smtpPortLabel": "SMTP 포트",

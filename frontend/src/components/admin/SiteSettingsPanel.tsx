@@ -222,7 +222,7 @@ export default function SiteSettingsPanel() {
         <div className={styles.card}>
           <label className={styles.label}>
             {t("admin:siteSettingsPanel.mediaProxyUrlLabel")}
-            <input className={styles.input} value={mediaProxyUrl} onChange={(e) => setMediaProxyUrl(e.target.value)} placeholder="https://media-proxy.example" />
+            <input className={styles.input} value={mediaProxyUrl} onChange={(e) => setMediaProxyUrl(e.target.value)} placeholder="https://media-proxy.example/proxy" />
           </label>
           <p className={styles.hint}>{t("admin:siteSettingsPanel.mediaProxyHint")}</p>
         </div>

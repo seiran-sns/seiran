@@ -84,7 +84,7 @@
     "selectIconButton": "Seleccionar icono",
     "mediaProxyTitle": "proxy de medios",
     "mediaProxyUrlLabel": "URL de proxy de medios externos",
-    "mediaProxyHint": "Déjelo en blanco para utilizar el punto final /proxy de este servidor. Ingrese una URL base compatible con Misskey.",
+    "mediaProxyHint": "Déjelo en blanco para utilizar el punto final /proxy de este servidor. Ingrese la URL completa del endpoint compatible con Misskey, incluyendo la ruta /proxy final.",
     "smtpSectionTitle": "SMTP y registro",
     "smtpHostLabel": "servidor SMTP",
     "smtpPortLabel": "Puerto SMTP",

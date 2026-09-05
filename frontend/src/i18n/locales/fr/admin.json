@@ -84,7 +84,7 @@
     "selectIconButton": "Sélectionner l'icône",
     "mediaProxyTitle": "Mandataire média",
     "mediaProxyUrlLabel": "URL du proxy multimédia externe",
-    "mediaProxyHint": "Laissez vide pour utiliser le point de terminaison /proxy de ce serveur. Saisissez une URL de base compatible avec Misskey.",
+    "mediaProxyHint": "Laissez vide pour utiliser le point de terminaison /proxy de ce serveur. Saisissez l'URL complète du point de terminaison compatible Misskey, y compris le chemin /proxy final.",
     "smtpSectionTitle": "SMTP et inscription",
     "smtpHostLabel": "Hôte SMTP",
     "smtpPortLabel": "Port SMTP",

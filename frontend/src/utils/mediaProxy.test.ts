@@ -22,8 +22,8 @@ describe("mediaUrl", () => {
     );
   });
 
-  it("uses a configured Misskey-compatible external proxy", () => {
-    configureMediaProxy("https://proxy.example/");
+  it("uses a configured Misskey-compatible external proxy endpoint as-is", () => {
+    configureMediaProxy("https://proxy.example/proxy");
     expect(mediaUrl("https://remote.example/a.png")).toBe(
       "https://proxy.example/proxy?url=https%3A%2F%2Fremote.example%2Fa.png",
     );
