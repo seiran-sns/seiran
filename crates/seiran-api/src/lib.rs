@@ -300,7 +300,10 @@ impl AppState {
     pub async fn enqueue_follow_requests_bulk_accept(&self, actor_id: i64) {
         if let Err(e) = self
             .job_queue
-            .enqueue(Job::FollowRequestsBulkAccept { actor_id }, job_priority::HIGH)
+            .enqueue(
+                Job::FollowRequestsBulkAccept { actor_id },
+                job_priority::HIGH,
+            )
             .await
         {
             tracing::error!(

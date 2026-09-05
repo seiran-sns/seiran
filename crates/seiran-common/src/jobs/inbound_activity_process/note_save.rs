@@ -61,7 +61,10 @@ pub(super) async fn save_ap_note_core(
             note["type"]
         ));
     }
-    let note_id = note["id"].as_str().ok_or("Note に id がありません")?.to_string();
+    let note_id = note["id"]
+        .as_str()
+        .ok_or("Note に id がありません")?
+        .to_string();
 
     // 同一Noteの再処理では投稿本体だけでなく引用・返信・メンション通知も二重生成しない。
     // insert_remote_with_dedupのON CONFLICTより前に終了する。
@@ -113,7 +116,8 @@ pub(super) async fn save_ap_note_core(
     let mut body = ap_content_to_markdown_body(&content_html_pre, &tags, &remote.domain);
     // seiran Web UI でのリッチ表示用（`<blockquote>`/`<ruby>`等の構造保持、#233）。
     // `body`とは別に、意味的構造をクレンジングして保持したHTMLを`content_html`列に持つ。
-    let mut content_html_sanitized = sanitize_ap_content_html(&content_html_pre, &tags, &remote.domain);
+    let mut content_html_sanitized =
+        sanitize_ap_content_html(&content_html_pre, &tags, &remote.domain);
     // リレー実装によっては、配送する Create の埋め込み Note から Emoji tag を
     // 省略する一方、object.id の正規 Note には完全な tag を載せる。本文に未解決の
     // shortcode がある場合だけ正規 Note を取得し、欠落した tag を補完する。
@@ -167,7 +171,8 @@ pub(super) async fn save_ap_note_core(
         body = strip_quote_fallback_line(&body, uri);
         body = strip_quote_fallback_line_leading(&body, uri);
         content_html_sanitized = strip_quote_fallback_line_html(&content_html_sanitized, uri);
-        content_html_sanitized = strip_quote_fallback_line_html_leading(&content_html_sanitized, uri);
+        content_html_sanitized =
+            strip_quote_fallback_line_html_leading(&content_html_sanitized, uri);
     }
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
     let to_list = as_string_list(&note["to"]);

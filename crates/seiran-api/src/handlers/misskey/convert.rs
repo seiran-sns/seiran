@@ -479,7 +479,11 @@ async fn fetch_referenced_notes(
 /// `renoteId`/`replyId` を持つノートへ、参照先ノート本体を埋め込む（型定義の
 /// `MisskeyNote::renote`/`MisskeyNote::reply` コメント参照）。埋め込むノート自身の
 /// `renote`/`reply` は常に `None`（孫リノート・孫リプライは埋め込まない）。
-async fn embed_referenced_notes(state: &AppState, notes: &mut [MisskeyNote], my_actor_id: Option<i64>) {
+async fn embed_referenced_notes(
+    state: &AppState,
+    notes: &mut [MisskeyNote],
+    my_actor_id: Option<i64>,
+) {
     let mut ids: Vec<i64> = notes
         .iter()
         .flat_map(|n| [n.renote_id.as_deref(), n.reply_id.as_deref()])
@@ -502,11 +506,7 @@ async fn embed_referenced_notes(state: &AppState, notes: &mut [MisskeyNote], my_
         {
             note.renote = by_id.get(&rid).cloned().map(Box::new);
         }
-        if let Some(rid) = note
-            .reply_id
-            .as_deref()
-            .and_then(|s| s.parse::<i64>().ok())
-        {
+        if let Some(rid) = note.reply_id.as_deref().and_then(|s| s.parse::<i64>().ok()) {
             note.reply = by_id.get(&rid).cloned().map(Box::new);
         }
     }

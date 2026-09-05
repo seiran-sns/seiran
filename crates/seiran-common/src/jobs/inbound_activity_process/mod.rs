@@ -14,9 +14,9 @@ use crate::ap::{build_emoji_map, classify_ap_visibility, ApClient};
 use crate::generate_snowflake_id;
 use crate::queue::worker::{priority, InboxContext, JobContext};
 use crate::repository::{
-    extract_shortcode_candidates, format_remote_reaction_content, parse_reaction_shortcode_and_host,
-    Actor, InsertRemoteWithDedupParams, InsertRepostParams, NotificationKind, PgRelayRepository,
-    RelayRepository, RelayStatus,
+    extract_shortcode_candidates, format_remote_reaction_content,
+    parse_reaction_shortcode_and_host, Actor, InsertRemoteWithDedupParams, InsertRepostParams,
+    NotificationKind, PgRelayRepository, RelayRepository, RelayStatus,
 };
 use crate::streaming::{broadcast_poll_update, broadcast_reaction_update, ChannelScope};
 use crate::traits::{Job, JobQueue};

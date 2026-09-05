@@ -6,6 +6,7 @@
     "unknownUser": "有人",
     "reactionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 做出了反應",
     "followText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 追蹤了您",
+    "followRequestText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 請求追蹤您",
     "followAcceptedText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 已接受您的追蹤請求",
     "mentionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 提到了您",
     "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink> 回覆了您",

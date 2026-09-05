@@ -9,6 +9,7 @@
     "appearance": "Apariencia",
     "appTokens": "Fichas de aplicación",
     "followImport": "Importar y exportar",
+    "followRequests": "Solicitudes de seguimiento",
     "comingSoon": "Muy pronto"
   },
   "appearanceSettings": {
@@ -35,7 +36,10 @@
     "discoverabilityTitle": "Visibilidad en recomendaciones",
     "hideFromAlgorithmicRecommendationsLabel": "Ocultar mis publicaciones de las recomendaciones algorítmicas (p. ej., el feed Discover de Bsky)",
     "hideFromAlgorithmicRecommendationsDescription": "Al activarlo, en Bluesky tus publicaciones solo aparecerán en el feed Discover para las personas que ya te siguen. Esta preferencia se registra a nivel de cuenta en tu PDS, por lo que otras apps de AT Protocol también pueden leerla, aunque respetarla o no depende de cada app. Puede tardar hasta una hora en aplicarse por completo.",
-    "saved": "Configuración guardada."
+    "saved": "Configuración guardada.",
+    "followApprovalTitle": "Solicitudes de seguimiento",
+    "lockedAccountLabel": "Requerir aprobación para nuevos seguidores",
+    "lockedAccountDescription": "Cuando está activado, las nuevas solicitudes de seguimiento no se aceptarán automáticamente; deberás aprobarlas o rechazarlas desde «Solicitudes de seguimiento» en Ajustes. Esto solo afecta a quién puede seguirte; no cambia quién puede ver tus publicaciones públicas. Al desactivarlo, se aprobarán automáticamente todas las solicitudes de seguimiento pendientes."
   },
   "accountSettings": {
     "title": "Configuraciones de la cuenta",
@@ -121,5 +125,11 @@
     "statusRunning": "Importando",
     "statusCompleted": "Importación completa",
     "statusCancelled": "Cancelada"
+  },
+  "followRequestsSettings": {
+    "title": "Solicitudes de seguimiento",
+    "empty": "No hay solicitudes de seguimiento pendientes.",
+    "acceptButton": "Aceptar",
+    "rejectButton": "Rechazar"
   }
 }

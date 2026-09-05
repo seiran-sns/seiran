@@ -155,9 +155,9 @@ pub async fn reject_pending_follow(
                 .await
                 .ok()
                 .flatten()
-                .unwrap_or_else(|| {
-                    json!({ "type": "Follow", "actor": follower_ap_uri, "object": target_uri })
-                });
+                .unwrap_or_else(
+                    || json!({ "type": "Follow", "actor": follower_ap_uri, "object": target_uri }),
+                );
             let reject_id = format!(
                 "https://{}/rejects/{}",
                 cfg.local_domain,

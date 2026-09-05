@@ -35,7 +35,11 @@ pub async fn handle(actor_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
     result
 }
 
-async fn process_locked(actor_id: i64, pool: &sqlx::PgPool, ctx: &JobContext) -> Result<(), String> {
+async fn process_locked(
+    actor_id: i64,
+    pool: &sqlx::PgPool,
+    ctx: &JobContext,
+) -> Result<(), String> {
     let Some(follow_exec) = ctx.follow_exec.as_ref() else {
         tracing::warn!(
             "[FollowRequestsBulkAccept] follow_exec 設定未注入のためスキップ (actor_id={})",

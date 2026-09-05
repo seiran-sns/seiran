@@ -9,6 +9,7 @@
     "appearance": "外观",
     "appTokens": "应用令牌",
     "followImport": "导入与导出",
+    "followRequests": "关注请求",
     "comingSoon": "即将推出"
   },
   "appearanceSettings": {
@@ -35,7 +36,10 @@
     "discoverabilityTitle": "可发现性",
     "hideFromAlgorithmicRecommendationsLabel": "不在算法推荐（如Bsky的Discover信息流）中显示我的帖子",
     "hideFromAlgorithmicRecommendationsDescription": "启用后，在Bluesky上你的帖子只会在Discover信息流中向关注你的人显示。此偏好设置会记录在你的PDS账户级别，其他AT Protocol应用也能读取，但是否遵循由各应用自行决定。完全生效最多可能需要一小时。",
-    "saved": "设置已保存。"
+    "saved": "设置已保存。",
+    "followApprovalTitle": "关注审核制",
+    "lockedAccountLabel": "新关注需要审核",
+    "lockedAccountDescription": "启用后，新的关注请求不会自动成立，需要在设置的「关注请求」中批准或拒绝后才会生效。此设置仅影响关注关系的成立，不会改变谁可以查看你的公开帖子。关闭此设置后，当前所有待处理的关注请求将自动获得批准。"
   },
   "accountSettings": {
     "title": "账户设置",
@@ -121,5 +125,11 @@
     "statusRunning": "导入中",
     "statusCompleted": "导入完成",
     "statusCancelled": "已取消"
+  },
+  "followRequestsSettings": {
+    "title": "关注请求",
+    "empty": "没有待处理的关注请求。",
+    "acceptButton": "批准",
+    "rejectButton": "拒绝"
   }
 }

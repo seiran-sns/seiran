@@ -4,7 +4,9 @@
 
 use axum::{extract::Path, extract::State, Json};
 
-use seiran_common::follow_approval::{approve_pending_follow, reject_pending_follow, ApprovalConfig};
+use seiran_common::follow_approval::{
+    approve_pending_follow, reject_pending_follow, ApprovalConfig,
+};
 use seiran_common::repository::FollowListRow;
 
 use crate::error::ApiError;
@@ -45,7 +47,9 @@ pub async fn list_follow_requests(
         .list_pending_followers(user.actor_id, 200)
         .await
         .map_err(|e| ApiError::Internal(format!("[follow-requests] SELECT 失敗: {}", e)))?;
-    Ok(Json(rows.into_iter().map(FollowRequestItem::from).collect()))
+    Ok(Json(
+        rows.into_iter().map(FollowRequestItem::from).collect(),
+    ))
 }
 
 #[derive(serde::Serialize)]
@@ -70,7 +74,13 @@ async fn load_pending_pair(
     state: &AppState,
     user: &AuthedUser,
     follower_actor_id: i64,
-) -> Result<(seiran_common::repository::Actor, seiran_common::repository::Actor), ApiError> {
+) -> Result<
+    (
+        seiran_common::repository::Actor,
+        seiran_common::repository::Actor,
+    ),
+    ApiError,
+> {
     let status = state
         .follows
         .find_status(follower_actor_id, user.actor_id)
@@ -91,7 +101,9 @@ async fn load_pending_pair(
         .find_by_id(user.actor_id)
         .await
         .map_err(|e| ApiError::Internal(format!("[follow-requests] SELECT 失敗: {}", e)))?
-        .ok_or(ApiError::Internal("[follow-requests] 自身のアクターが見つかりません".to_owned()))?;
+        .ok_or(ApiError::Internal(
+            "[follow-requests] 自身のアクターが見つかりません".to_owned(),
+        ))?;
     Ok((follower, target))
 }
 

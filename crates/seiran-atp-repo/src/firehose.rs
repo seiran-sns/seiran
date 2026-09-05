@@ -1192,7 +1192,8 @@ async fn handle_inbound_like_create(
     // ATP へ commit_like された後、自分自身の firehose 受信でここに戻ってくるケースに対応するため
     // （`ON CONFLICT (post_id, actor_id) DO UPDATE` で emoji_url も上書きされるため、ここで
     // `None` を渡すと `create_reaction` が設定した正しい URL を消してしまう回帰があった）。
-    let emoji_url = match parse_reaction_shortcode_and_host(content).map(|(shortcode, _)| shortcode) {
+    let emoji_url = match parse_reaction_shortcode_and_host(content).map(|(shortcode, _)| shortcode)
+    {
         Some(shortcode) => {
             let emojis_repo = PgEmojiRepository::new(pool.clone());
             emojis_repo

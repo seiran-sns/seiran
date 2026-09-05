@@ -1026,7 +1026,8 @@ mod tests {
     }
 
     #[test]
-    fn strip_quote_fallback_line_html_does_not_wipe_body_when_re_line_is_leading_paragraph_without_br() {
+    fn strip_quote_fallback_line_html_does_not_wipe_body_when_re_line_is_leading_paragraph_without_br(
+    ) {
         // <br>を一切使わず<p>だけで段落が区切られ、フォールバック行が先頭の段落にある投稿
         // （実例: #117134492434435469）。<br>のみで最後の行を判定すると本文全体を
         // 「最後の行」と誤認し、丸ごと消してしまっていた。

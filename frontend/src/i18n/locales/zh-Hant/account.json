@@ -9,6 +9,7 @@
     "appearance": "外觀",
     "appTokens": "應用程式權杖",
     "followImport": "匯入與匯出",
+    "followRequests": "追蹤請求",
     "comingSoon": "即將推出"
   },
   "appearanceSettings": {
@@ -35,7 +36,10 @@
     "discoverabilityTitle": "可被發現性",
     "hideFromAlgorithmicRecommendationsLabel": "不要在演算法推薦（如Bsky的Discover動態消息）中顯示我的貼文",
     "hideFromAlgorithmicRecommendationsDescription": "啟用後，在Bluesky上你的貼文只會在Discover動態消息中向追蹤你的人顯示。此偏好設定會記錄在你的PDS帳戶層級，其他AT Protocol應用程式也能讀取，但是否遵循由各應用程式自行決定。完全生效最多可能需要一小時。",
-    "saved": "設定已儲存。"
+    "saved": "設定已儲存。",
+    "followApprovalTitle": "追蹤審核制",
+    "lockedAccountLabel": "新追蹤需要審核",
+    "lockedAccountDescription": "啟用後，新的追蹤請求不會自動成立，需要在設定的「追蹤請求」中批准或拒絕後才會生效。此設定僅影響追蹤關係的成立，不會改變誰可以查看你的公開貼文。關閉此設定後，目前所有待處理的追蹤請求將自動獲得批准。"
   },
   "accountSettings": {
     "title": "帳戶設定",
@@ -121,5 +125,11 @@
     "statusRunning": "匯入中",
     "statusCompleted": "匯入完成",
     "statusCancelled": "已取消"
+  },
+  "followRequestsSettings": {
+    "title": "追蹤請求",
+    "empty": "沒有待處理的追蹤請求。",
+    "acceptButton": "批准",
+    "rejectButton": "拒絕"
   }
 }

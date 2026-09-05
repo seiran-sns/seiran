@@ -6,6 +6,7 @@
     "unknownUser": "Alguien",
     "reactionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> reaccionó",
     "followText": "<userLink><emojiName/>{{handleSuffix}}</userLink> te siguió",
+    "followRequestText": "<userLink><emojiName/>{{handleSuffix}}</userLink> solicitó seguirte",
     "followAcceptedText": "<userLink><emojiName/>{{handleSuffix}}</userLink> aceptó su solicitud de seguimiento",
     "mentionText": "<userLink><emojiName/>{{handleSuffix}}</userLink> te mencionó",
     "replyText": "<userLink><emojiName/>{{handleSuffix}}</userLink> te respondió",
