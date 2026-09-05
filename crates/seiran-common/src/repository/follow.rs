@@ -48,6 +48,17 @@ pub trait FollowRepository: Send + Sync {
         target_actor_id: i64,
     ) -> Result<u64, sqlx::Error>;
 
+    /// `insert_accepted`のリモートseiranアクター版（#238）。フォロー送信と同時に
+    /// 楽観的確定する非鍵アカウント宛てで、ターゲットが既に結婚成立済み
+    /// （真正なat_didを持つ）の場合、`atp_rkey`にATP側`commit_follow`の結果を
+    /// 同時に記録する（`atp_rkey`が`None`なら`insert_accepted`と同じ）。
+    async fn insert_accepted_with_rkey(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        atp_rkey: Option<&str>,
+    ) -> Result<bool, sqlx::Error>;
+
     /// フォロー関係を削除する（Undo/Follow 受信時）。
     async fn delete_by_actors(
         &self,
@@ -296,6 +307,25 @@ impl FollowRepository for PgFollowRepository {
         .execute(&self.pool)
         .await
         .map(|_| ())
+    }
+
+    async fn insert_accepted_with_rkey(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        atp_rkey: Option<&str>,
+    ) -> Result<bool, sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO follows (follower_actor_id, target_actor_id, status, atp_rkey)
+             VALUES ($1, $2, 'accepted', $3)
+             ON CONFLICT (follower_actor_id, target_actor_id) DO NOTHING",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .bind(atp_rkey)
+        .execute(&self.pool)
+        .await
+        .map(|result| result.rows_affected() > 0)
     }
 
     async fn accept(

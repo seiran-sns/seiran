@@ -60,6 +60,7 @@ fn build_inbox_context(
     ap_private_key_pem: Option<String>,
     stream_hub: Arc<StreamHub>,
     queue: Arc<dyn JobQueue>,
+    atp_service: Arc<AtpCommitService>,
 ) -> InboxContext {
     InboxContext {
         db_pool: pool.clone(),
@@ -76,6 +77,7 @@ fn build_inbox_context(
         ap_private_key_pem: ap_private_key_pem.unwrap_or_default(),
         stream_hub,
         queue,
+        atp_service,
     }
 }
 
@@ -207,15 +209,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // split-role（standalone worker）: REDIS_URL があれば api/federation プロセスと
         // キューを共有できる。未設定なら自分専用の InMemory になる既知の制約（create_job_queue 参照）。
         let queue = create_job_queue(false).await;
-        // standalone worker には WS 接続クライアントが居ないため空の StreamHub を使う
-        // （InboundActivityProcess の realtime 配信は no-op になる。Role::Firehose と同じ扱い）。
-        let inbox = build_inbox_context(
-            &pool,
-            &worker_local_domain,
-            secrets.ap_private_key_pem.clone(),
-            Arc::new(StreamHub::new()),
-            Arc::clone(&queue),
-        );
         // standalone worker には WS 購読者もATPコミットイベントの他プロセス購読者も
         // 居ないため、ここ専用の使い捨て event チャンネルで良い（`AtpCommitService`
         // 自体はDBへのコミット・`atp_repo_events`記録は行う。リアルタイム配信不要な
@@ -226,6 +219,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arc::new(follow_exec_atp_tx),
             Arc::clone(&http_client),
         ));
+        // standalone worker には WS 接続クライアントが居ないため空の StreamHub を使う
+        // （InboundActivityProcess の realtime 配信は no-op になる。Role::Firehose と同じ扱い）。
+        let inbox = build_inbox_context(
+            &pool,
+            &worker_local_domain,
+            secrets.ap_private_key_pem.clone(),
+            Arc::new(StreamHub::new()),
+            Arc::clone(&queue),
+            Arc::clone(&worker_atp_service),
+        );
         let follow_exec = build_follow_exec_config(
             &pool,
             &worker_local_domain,
@@ -389,6 +392,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 secrets.ap_private_key_pem.clone(),
                 Arc::clone(&api_state.stream_hub),
                 Arc::clone(&job_queue),
+                Arc::clone(&api_state.atp_service),
             );
             // api ロールと同じリポジトリ・AtpCommitService・StreamHub を共有するため、
             // フォローインポートで成立したフォローの通知もリアルタイムに配信される。

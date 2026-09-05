@@ -475,13 +475,47 @@ async fn follow_fedi(
                 FollowError::Internal(format!("[follow/fedi] follows INSERT 失敗: {}", e))
             })?
     } else {
+        // リモートseiranアクター（#236で結婚成立済み、真正なat_did）宛てで、かつ相手が
+        // 非承認制なら、Follow送信と同時にATP側`commit_follow`も実行する（#238）。
+        // 承認制の場合は`jobs::inbound_activity_process::follow::handle_accept`が
+        // Accept受信時に同じことを行う（フォロー承認制はAPにしかない概念のため、
+        // ATPコミット自体を「本当に成立」するまで遅らせる設計）。`outcome.married`は
+        // 今回の呼び出しで新たに結婚した場合のみ真になるため、既に結婚済みの相手への
+        // 再フォローも含めて拾えるよう、行の現在の`actor_type`を確認し直す。
+        let married_actor = config
+            .actors
+            .find_by_id(remote_actor_id)
+            .await
+            .ok()
+            .flatten()
+            .filter(|a| a.actor_type == "remote_seiran");
+        let atp_rkey = match married_actor.and_then(|a| a.at_did) {
+            Some(did) => match config
+                .atp_service
+                .commit_follow(local_actor_id, &did, now)
+                .await
+            {
+                Ok(rkey) => Some(rkey),
+                Err(e) => {
+                    tracing::error!(
+                        "[follow/fedi] ATP follow commit失敗（AP側のフォローは継続）: {}",
+                        e
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
         config
             .follows
-            .insert_accepted(local_actor_id, remote_actor_id)
+            .insert_accepted_with_rkey(local_actor_id, remote_actor_id, atp_rkey.as_deref())
             .await
             .map_err(|e| {
                 FollowError::Internal(format!("[follow/fedi] follows INSERT 失敗: {}", e))
             })?;
+        if atp_rkey.is_some() {
+            touch_jetstream_wanted_dids(pool).await;
+        }
         true
     };
 

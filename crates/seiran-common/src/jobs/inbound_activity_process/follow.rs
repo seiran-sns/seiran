@@ -260,12 +260,43 @@ pub(super) async fn handle_accept(
         })?;
     let remote_actor_id = remote_actor.id;
 
+    // リモートseiranアクター（#236で結婚成立済み、真正なat_didを持つ）宛てのFollowが
+    // 承認された場合のみ、ここでATP側`commit_follow`も実行する（#238）。フォロー承認制は
+    // APにしかない概念のため、リモートseiranへのフォローは常にAP経由で送り、承認まで
+    // ATPコミット自体を遅らせる（`follow_local`が鍵アカウント宛てに取る扱いと同じ設計）。
+    // 結婚がまだ成立していない場合はat_didを信用できないため何もしない（成立後の
+    // 再フォロー等、通常の受動的発見に任せる）。
+    let atp_rkey = if remote_actor.actor_type == "remote_seiran" {
+        match remote_actor.at_did.as_deref() {
+            Some(did) => match inbox
+                .atp_service
+                .commit_follow(local_actor_id, did, chrono::Utc::now())
+                .await
+            {
+                Ok(rkey) => Some(rkey),
+                Err(e) => {
+                    tracing::error!(
+                        "[Accept] ATP follow commit失敗（AP側のフォロー成立自体は継続）: {}",
+                        e
+                    );
+                    None
+                }
+            },
+            None => None,
+        }
+    } else {
+        None
+    };
+
     // follows.status を accepted に更新
     let rows = inbox
         .follow_repo
-        .accept(local_actor_id, remote_actor_id)
+        .accept_and_set_rkey(local_actor_id, remote_actor_id, atp_rkey.as_deref())
         .await
         .map_err(|e| format!("follows UPDATE エラー: {}", e))?;
+    if atp_rkey.is_some() {
+        crate::jetstream_control::touch_jetstream_wanted_dids(&inbox.db_pool).await;
+    }
 
     tracing::info!(
         "[Accept] {} → {} フォロー確定 (rows={})",

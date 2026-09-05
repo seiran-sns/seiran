@@ -110,6 +110,9 @@ pub struct InboxContext {
     /// 必ず同一インスタンスを渡すこと（`InMemoryJobQueue`はプロセス内メモリのみで完結するため、
     /// 別インスタンスだとenqueueした側とdequeueする側が食い違い、ジョブがサイレントに失われる）。
     pub queue: Arc<dyn JobQueue>,
+    /// リモートseiranアクターへの能動フォローがAcceptされた時点でのATP側`commit_follow`
+    /// （#238）に使う。
+    pub atp_service: Arc<crate::atp::service::AtpCommitService>,
 }
 
 /// ジョブ実行コンテキスト（ハンドラに渡す）
