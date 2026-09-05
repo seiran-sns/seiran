@@ -109,8 +109,10 @@ describe("protocolBadge", () => {
     expect(protocolBadge("fedi")).toEqual({ icon: "🌐", label: "Fediverse" });
   });
 
-  it("remote_seiran はバッジを返す", () => {
-    expect(protocolBadge("remote_seiran")).toEqual({ icon: "🀄", label: "seiran" });
+  it("remote_seiran はバッジを返す（自前合成アイコン付き）", () => {
+    const badge = protocolBadge("remote_seiran");
+    expect(badge?.label).toBe("seiran");
+    expect(badge?.iconUrl).toBeTruthy();
   });
 
   it("local はバッジ無し", () => {

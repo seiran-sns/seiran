@@ -64,7 +64,10 @@ test("ポスト詳細の返信タブに返信・引用・孫リプライが再�
 
   await seedAuth(page, author.token);
   await page.goto(`/notes/${root.id}`);
-  await expect(page.getByText(rootText)).toBeVisible({ timeout: 15_000 });
+  // 返信タブが中央ペインへ自動展開されるため、引用ポスト（quoteText）内の引用元カードにも
+  // rootTextが埋め込まれ表示されうる。ここでは「ページが読み込めたか」の確認が目的なので
+  // 最初の1件で十分（strict modeの複数一致エラー回避）。
+  await expect(page.getByText(rootText).first()).toBeVisible({ timeout: 15_000 });
 
   // 返信タブは3ペイン表示（既定のe2eビューポート幅）では右ペインのタブから外れ、
   // 中央ペイン（<main>）下部の常設セクションへ自動表示される（クリック操作不要、#241）。

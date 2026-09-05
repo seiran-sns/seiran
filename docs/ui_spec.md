@@ -53,7 +53,7 @@ followers-only/directを含む非公開投稿も閲覧できる。
 
 * 1行目: 表示名（あふれる分は`hidden`+ellipsis）と、右寄せの投稿日付。日付は常に全文表示を優先し、表示名側だけを縮める。
 * 2行目: アカウントID（`@user@domain`、配送先/公開範囲の小バッジ込み、あふれる分は`hidden`+ellipsis）と、その右に続く「リモートサーバー表示」。
-  * ローカル投稿者・seiran間連合（`remote_seiran`）では表示しない（`remote_seiran`は従来通りアカウントID直後の小バッジ🀄のみ）。
+  * ローカル投稿者・seiran間連合（`remote_seiran`）では表示しない（`remote_seiran`は従来通りアカウントID直後の小バッジのみ。アイコンはUnicode絵文字ではなく、Twemojiの🌃（夜景）左半分と🏙️（都市）右半分をクリップして1枚に合成した自前SVG `frontend/src/assets/seiran-skyline.svg`。同種のseiranサーバー同士を、既存のBluesky/Fediverseのような外部プロトコル記号ではなく「同じ都市の景色」で表現する狙い）。
   * Fedi/Bskyのリモート投稿者にのみ表示する。Fediはサーバーアイコン（`note.user.instance.iconUrl`、バックエンドが`<link rel="icon">`/`/favicon.ico`から解決・未取得時は🌐絵文字にフォールバック）＋サーバー名称（`note.user.instance.name`、nodeinfo未取得時はドメイン名で暫定表示）、Bskyは投稿フォームと同じBlueskyロゴSVG＋「Bluesky」固定表示。
   * ローカル投稿の配送先バッジ（アカウントID直後の小バッジ）も、Bsky配送分は🦋絵文字ではなく同じBlueskyロゴSVGを使う。
   * 背景色はバックエンドが解決済みの最終値（`note.user.instance.themeColor`）をそのまま使う。フロントエンド側にsoftware別の色分けロジックは持たない（`docs/database.md`の`remote_instance_meta`参照）。リモートが宣言する`themeColor`は暗色もありうるため、文字色は常時濃色固定（サイトのダーク/ライトテーマに関わらず読める必要があるため）に加えて白いドロップシャドウで縁取り、暗い背景色でも文字が沈まないようにする。

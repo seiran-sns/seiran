@@ -194,6 +194,15 @@
   object-fit: contain;
 }
 
+/* remote_seiranバッジのアイコン（🌃の左半分+🏙️の右半分を合成したseiran-skyline.svg）。
+ * TwemojiEmoji（1.2em角）と見た目の大きさを揃える。 */
+.protoSeiranIcon {
+  height: 1.2em;
+  width: 1.2em;
+  vertical-align: -0.2em;
+  object-fit: contain;
+}
+
 /* ── リモートサーバー表示（Fedi/Bsky）。アカウント行の残り幅いっぱいに広がり、
  * あふれる分はhiddenで切る（ニックネームと同じ方針）。 */
 .remoteServerBadge {

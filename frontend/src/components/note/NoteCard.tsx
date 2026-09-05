@@ -378,7 +378,15 @@ function PostContent({
                     {acct(note)}
                     {badge && note.user.actorType === "remote_seiran" && (
                       <span className={styles.protoBadge} title={badge.label}>
-                        <TwemojiEmoji emoji={badge.icon} />
+                        {badge.iconUrl ? (
+                          <img
+                            src={badge.iconUrl}
+                            alt={badge.icon}
+                            className={styles.protoSeiranIcon}
+                          />
+                        ) : (
+                          <TwemojiEmoji emoji={badge.icon} />
+                        )}
                       </span>
                     )}
                     {delBadges.map((b) => (

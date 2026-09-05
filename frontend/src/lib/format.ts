@@ -1,5 +1,6 @@
 import { Note, UserProfile } from "../api/client";
 import i18n from "../i18n";
+import seiranSkyline from "../assets/seiran-skyline.svg";
 
 /** ISO 文字列を現在の表示言語の短い日時表記に変換する。 */
 export function formatDate(iso: string): string {
@@ -96,15 +97,18 @@ export function remoteServerBadgeInfo(
   return null;
 }
 
-/** アクター種別に対応するプロトコルバッジ（絵文字 + ラベル）。 */
-export function protocolBadge(actorType: string): { icon: string; label: string } | null {
+/** アクター種別に対応するプロトコルバッジ（絵文字 + ラベル）。`remote_seiran`はUnicode絵文字ではなく
+ * 自前合成のアイコン（`iconUrl`、🌃の左半分+🏙️の右半分）を使うため、その場合`icon`はalt文字列に過ぎない。 */
+export function protocolBadge(
+  actorType: string,
+): { icon: string; label: string; iconUrl?: string } | null {
   switch (actorType) {
     case "bsky":
       return { icon: "🦋", label: "Bluesky" };
     case "fedi":
       return { icon: "🌐", label: "Fediverse" };
     case "remote_seiran":
-      return { icon: "🀄", label: "seiran" };
+      return { icon: "seiran", label: "seiran", iconUrl: seiranSkyline };
     case "local":
       return null; // ローカルはバッジ不要
     default:
