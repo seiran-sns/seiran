@@ -175,11 +175,10 @@
   - [x] ATP URI確定時に`counterpartPostId`入り`seiranPost`を持つ`Update(Note)`をAPフォロワーへ送信（`Job::BskyPostCommitDeferred`完了時のみ。同期コミットはCreate自体が既にcounterpartPostIdを持てるため対象外）
   - [x] `Update(Note)`受理ハンドラの追加（`seiranPost.counterpartPostId`のみ反映・本文等は無視、なりすまし対策込み、マージ再判定トリガー）
   - [x] マージ成立時のクリーンアップ2段階方式（同期: `PostRepository::finalize_post_merge`によるURI付け替え+`parent_original_post_id`+`deleted_at`／非同期`Job::PostMergeCleanup`: FK付け替え+手動カウンタ調整+削除予定行の物理削除。`post_attachments`/`post_link_cards`は複合PRIMARY KEYのため付け替えず物理削除に委ねる）
-- [ ] **リモートseiranユーザーへのフォローはAP経由開始・承認状況に応じてATP側も同期（#238）** — フォロー承認制はAPにしかない概念のため、リモートseiranへのフォローは常にAP経由で送る。相手が非承認制なら（既存の`follow_fedi`がAccept受信を待たず内部的に成立させる動作に乗せて）その時点でATP側`commit_follow`も実行、承認制ならAcceptを受けてから実行する。#236完了後に着手。
+- [ ] **リモートseiranユーザーへのフォローはAP経由開始・承認状況に応じてATP側も同期（#238）** — フォロー承認制はAPにしかない概念のため、リモートseiranへのフォローは常にAP経由で送る。相手が非承認制なら（既存の`follow_fedi`がAccept受信を待たず内部的に成立させる動作に乗せて）その時点でATP側`commit_follow`も実行、承認制ならAcceptを受けてから実行する。#236完了後に着手。**本体（真のATP follow record commit・承認状況同期）は未着手のまま**だが、#237実地検証を進める過程で見つかった、これをブロックしていた副作用は個別に修正済み: `discover_fedi_actor`/`discover_bsky_actor`が結婚を成立させても（＝行が初めて`at_did`を獲得しても）、Jetstreamの`wantedDids`絞り込みリストは`touch_jetstream_wanted_dids`を呼ばない限り再構築されない。`follow_exec::follow_fedi`・`jobs/actor_metadata_resolve.rs`の両関数・`jobs/inbound_activity_process`・`firehose.rs::resolve_or_upsert_bsky_actor`のいずれも結婚成立時にこれを呼んでいなかったため、AP経由でリモートseiranユーザーをフォローしても、そのユーザーのATP投稿がJetstream経由で届かない（＝ポストマージの片側が永久に来ない）状態になり得た。結婚成立（`DiscoveryOutcome.married == true`）の全箇所で`touch_jetstream_wanted_dids`を呼ぶよう修正し解消。真のATP follow record commitは別途このissue本体として残す（wantedDidsの可視性そのものはATP follow recordの実在を要求しないため、この修正だけでもJetstream経由の投稿受信は成立する）
 - [ ] **リモートseiran特権初期同期**
   - [ ] `/api/seiran/v1/posts/export` エンドポイント
   - [ ] 相手サーバーからの生データ一括インポート（最大300件）
-- [ ] **`actor_metadata_resolve` ジョブの実装** — 現状ハンドラはスタブ、enqueueする箇所も無い。Webfinger解決・アバター等のキャッシュを実処理として実装する
 - [ ] **`inbound_activity_process` のドメイン単位レート制限**
 - [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ表示）
 - [ ] **ユーザー設定に「Bsky DM受信許可」項目を追加** — 現状 `chat.bsky.actor.declaration` の `allowIncoming` は登録時・バックフィルとも `"all"` 固定でコミットする（`docs/protocols.md` 9節）。ユーザーが `"all"`/`"following"`/`"none"` を選べる設定画面UIとAPIを追加する

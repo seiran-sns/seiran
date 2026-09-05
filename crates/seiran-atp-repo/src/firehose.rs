@@ -26,7 +26,7 @@ use seiran_common::atp::{
     ParsedAttachment, ParsedFacet, ParsedLinkCard, apply_bsky_facets, fetch_bsky_profile,
     parse_bsky_embed_attachments, parse_bsky_embed_link_card, parse_bsky_embed_quote_uri,
 };
-use seiran_common::jetstream_control::fetch_wanted_dids_touch;
+use seiran_common::jetstream_control::{fetch_wanted_dids_touch, touch_jetstream_wanted_dids};
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
 use seiran_common::queue::worker::priority;
 use seiran_common::repository::{
@@ -1491,6 +1491,13 @@ pub(crate) async fn resolve_or_upsert_bsky_actor(
     )
     .await
     .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
+    if outcome.married {
+        // 結婚成立でこの行に初めてat_didが載る。既にこの行（Fedi側）をフォロー中の
+        // ローカルユーザーがいてもJetstreamのwanted_didsは自動で追随しないため、ここで
+        // 明示的に再構築を促す（実地検証で発覚。`follow_exec::follow_fedi`の
+        // 同種コメント参照）。
+        touch_jetstream_wanted_dids(pool).await;
+    }
     Ok(outcome.actor_id)
 }
 

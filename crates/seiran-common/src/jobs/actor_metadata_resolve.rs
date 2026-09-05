@@ -56,7 +56,7 @@ async fn resolve_counterpart_via_atp(
     // （実地検証で発覚。firehose.rsのATP先着経路と同じ取得元に揃える）。
     let claimed_ap_uri = crate::atp::client::fetch_seiran_actor_declaration(did).await;
     let new_id = generate_snowflake_id(chrono::Utc::now());
-    crate::seiran_actor_merge::discover_bsky_actor(
+    let outcome = crate::seiran_actor_merge::discover_bsky_actor(
         pool,
         new_id,
         did,
@@ -68,6 +68,13 @@ async fn resolve_counterpart_via_atp(
     )
     .await
     .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
+    if outcome.married {
+        // 結婚成立でこの行に初めてat_didが載る。既にこの行をフォロー中のローカル
+        // ユーザーがいてもJetstreamのwanted_didsは自動で追随しないため、ここで
+        // 明示的に再構築を促す（実地検証で発覚。`follow_exec::follow_fedi`の
+        // 同種コメント参照）。
+        crate::jetstream_control::touch_jetstream_wanted_dids(pool).await;
+    }
     // 結婚不成立でもここでは再enqueueしない（相手側が能動的に取りに来る、または
     // 通常の受動的発見に任せる。無限ジョブ再投入を避けるため）。
     Ok(())
@@ -120,7 +127,7 @@ async fn resolve_counterpart_via_ap(
     // 取得したAP Actor文書が実際に何を自己申告しているか（そもそも`seiranAtDid`を
     // 持たない場合すら）を一切確認せず結婚が成立してしまう（実地検証で発覚）。
     let new_id = generate_snowflake_id(chrono::Utc::now());
-    crate::seiran_actor_merge::discover_fedi_actor(
+    let outcome = crate::seiran_actor_merge::discover_fedi_actor(
         pool,
         new_id,
         ap_uri,
@@ -137,5 +144,8 @@ async fn resolve_counterpart_via_ap(
     )
     .await
     .map_err(|e| format!("discover_fedi_actor 失敗: {}", e))?;
+    if outcome.married {
+        crate::jetstream_control::touch_jetstream_wanted_dids(pool).await;
+    }
     Ok(())
 }

@@ -439,7 +439,13 @@ async fn follow_fedi(
     .map_err(|e| {
         FollowError::Internal(format!("[follow/fedi] リモートアクター upsert 失敗: {}", e))
     })?;
-    if !outcome.married && remote_ap.seiran_at_did.is_some() {
+    if outcome.married {
+        // 結婚成立でこの行に初めてat_didが載る。Jetstreamのwanted_dids絞り込みは
+        // 起動時/再接続時に`follows`から再構築されるだけで、行が後から`at_did`を
+        // 獲得しても自動では反映されない（実地検証で発覚）。フォロー成立時点で
+        // 既に結婚済みだった場合はここで確実に反映する。
+        touch_jetstream_wanted_dids(pool).await;
+    } else if remote_ap.seiran_at_did.is_some() {
         let _ = queue
             .enqueue(
                 Job::ActorMetadataResolve {
