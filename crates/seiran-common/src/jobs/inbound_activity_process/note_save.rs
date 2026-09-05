@@ -364,7 +364,7 @@ pub(super) async fn save_ap_note_core(
     // 解決も行う）へ委ねる。
     match seiran_post_ext.as_ref().map(|sp| &sp.link_cards) {
         Some(cards) if !cards.is_empty() => {
-            insert_seiran_post_link_cards(&inbox.db_pool, post_id, cards).await;
+            crate::seiran_post::insert_seiran_post_link_cards(&inbox.db_pool, post_id, cards).await;
         }
         _ => queue_link_cards_for_post(&inbox.queue, post_id, &body).await,
     }
@@ -445,37 +445,6 @@ pub(super) async fn queue_link_cards_for_post(queue: &Arc<dyn JobQueue>, post_id
             .await
         {
             tracing::error!("[Create/Note] OgpFetch enqueue失敗: {}", e);
-        }
-    }
-}
-
-/// `seiranPost.linkCards[]`（送信側が自己申告したtitle/description/thumbnailUrl）を
-/// そのまま`post_link_cards`へ保存する（#237）。`embed_src`/`embed_type`は設計上、
-/// 送信側の申告を信用せず常にNULL（受信側が独自にホワイトリスト判定して埋め込むか
-/// 決めるべきという方針、`docs/protocols.md` 5節「意図的に含めないもの」参照）。
-async fn insert_seiran_post_link_cards(
-    pool: &sqlx::PgPool,
-    post_id: i64,
-    cards: &[crate::seiran_post::SeiranPostLinkCard],
-) {
-    for (position, card) in cards.iter().take(MAX_LINK_CARDS_PER_POST).enumerate() {
-        if let Err(e) = sqlx::query(
-            "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
-             VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind(post_id)
-        .bind(position as i16)
-        .bind(&card.url)
-        .bind(&card.title)
-        .bind(&card.description)
-        .bind(&card.thumbnail_url)
-        .execute(pool)
-        .await
-        {
-            tracing::error!(
-                "[NoteSave] seiranPost.linkCards INSERT失敗（スキップ） post_id={} url={}: {}",
-                post_id, card.url, e
-            );
         }
     }
 }

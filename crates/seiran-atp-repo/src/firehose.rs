@@ -542,6 +542,10 @@ async fn process_message(
                     .as_ref()
                     .and_then(|sp| sp.content_warning.clone());
                 let poll = seiran_post_ext.as_ref().and_then(|sp| sp.poll.clone());
+                let seiran_link_cards = seiran_post_ext
+                    .as_ref()
+                    .map(|sp| sp.link_cards.clone())
+                    .unwrap_or_default();
                 save_bsky_post(
                     &pool2,
                     &queue2,
@@ -565,6 +569,7 @@ async fn process_message(
                     claimed_ap_object_id,
                     content_warning,
                     poll,
+                    seiran_link_cards,
                 )
                 .await;
             });
@@ -718,6 +723,7 @@ async fn save_bsky_post(
     claimed_ap_object_id: Option<String>,
     content_warning: Option<String>,
     poll: Option<JsonValue>,
+    seiran_link_cards: Vec<seiran_common::seiran_post::SeiranPostLinkCard>,
 ) {
     let reply_id_str = reply_to_post_id.map(|id| id.to_string());
     let post_id = generate_snowflake_id(created_at);
@@ -873,10 +879,21 @@ async fn save_bsky_post(
                 tracing::error!("[Jetstream] gate情報保存失敗（スキップ）: {}", e);
             }
 
-            // URLカード（Bskyは常に最大1件、position=0固定）。埋め込みプレーヤーのiframe src
-            // （oEmbed discovery）はここでは未解決のため、後追いでJob::LinkCardEmbedResolveへ
-            // 委ねる（Bskyのexternal embedにはiframe情報が無いため）。
-            if let Some(card) = &link_card {
+            if !seiran_link_cards.is_empty() {
+                // `seiranPost.linkCards[]`があれば送信側が既に申告したtitle/description/
+                // thumbnailUrlをそのまま反映する（AP受信側と共通のロジック、#237）。
+                // `embed_src`は設計上NULLのまま（送信側の申告を信用しない方針）のため
+                // Job::LinkCardEmbedResolveは積まない。
+                seiran_common::seiran_post::insert_seiran_post_link_cards(
+                    pool,
+                    post_id,
+                    &seiran_link_cards,
+                )
+                .await;
+            } else if let Some(card) = &link_card {
+                // URLカード（Bskyは常に最大1件、position=0固定）。埋め込みプレーヤーのiframe src
+                // （oEmbed discovery）はここでは未解決のため、後追いでJob::LinkCardEmbedResolveへ
+                // 委ねる（Bskyのexternal embedにはiframe情報が無いため）。
                 let result = sqlx::query(
                     "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
                      VALUES ($1, 0, $2, $3, $4, $5)",
