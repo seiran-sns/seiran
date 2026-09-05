@@ -1,8 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 
-// ポスト詳細画面の右ペイン「返信」タブ（#226）: 対象ポストへの直系リプライ・引用を
-// 再帰的にツリー表示する。
+// ポスト詳細画面の返信セクション（#226）: 対象ポストへの直系リプライ・引用を
+// 再帰的にツリー表示する。3ペイン表示（既定のe2eビューポート幅）では中央ペイン
+// 下部の常設セクションとして表示される（#241）。
 test("ポスト詳細の返信タブに返信・引用・孫リプライが再帰的に表示される", async ({
   page,
   request,
@@ -65,13 +66,11 @@ test("ポスト詳細の返信タブに返信・引用・孫リプライが再�
   await page.goto(`/notes/${root.id}`);
   await expect(page.getByText(rootText)).toBeVisible({ timeout: 15_000 });
 
-  // NoteCard自体にも同名（title="返信"）の返信アクションボタンがあるため、
-  // タブ切り替え時点ではまだそれらが描画されていない右ペイン（aside）内に絞って特定する。
-  // 「前後のポスト」も自動読み込みされ中央ペインの狭幅表示に同じ本文が出うるため、
-  // 以降のアサーションも右ペインに絞る。
-  const rightPane = page.getByRole("complementary");
-  await rightPane.getByRole("button", { name: "返信", exact: true }).click();
-  await expect(rightPane.getByText(replyText)).toBeVisible({ timeout: 15_000 });
-  await expect(rightPane.getByText(quoteText)).toBeVisible({ timeout: 15_000 });
-  await expect(rightPane.getByText(grandchildText)).toBeVisible({ timeout: 15_000 });
+  // 返信タブは3ペイン表示（既定のe2eビューポート幅）では右ペインのタブから外れ、
+  // 中央ペイン（<main>）下部の常設セクションへ自動表示される（クリック操作不要、#241）。
+  // 中央ペインに絞ることで、右ペイン側の他タブの内容と混同しないようにする。
+  const centerPane = page.getByRole("main");
+  await expect(centerPane.getByText(replyText)).toBeVisible({ timeout: 15_000 });
+  await expect(centerPane.getByText(quoteText)).toBeVisible({ timeout: 15_000 });
+  await expect(centerPane.getByText(grandchildText)).toBeVisible({ timeout: 15_000 });
 });
