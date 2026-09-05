@@ -495,6 +495,12 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::PollFetch { post_id } => jobs::poll_fetch::handle(post_id, ctx)
             .await
             .map_err(JobError::from),
+        Job::PostMergeCleanup {
+            survivor_post_id,
+            doomed_post_id,
+        } => jobs::post_merge_cleanup::handle(survivor_post_id, doomed_post_id, ctx)
+            .await
+            .map_err(JobError::from),
     }
 }
 
@@ -524,6 +530,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::FollowImportProcess { .. } => "FollowImportProcess",
         Job::BskyListMembershipResolve { .. } => "BskyListMembershipResolve",
         Job::PollFetch { .. } => "PollFetch",
+        Job::PostMergeCleanup { .. } => "PostMergeCleanup",
     }
 }
 
@@ -671,6 +678,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 3,
             base_delay_ms: 2000,
             max_delay_ms: 30_000,
+        },
+        Job::PostMergeCleanup { .. } => RetryConfig {
+            // 削除予定行は既にdeleted_at済み（表示には影響しない）ため急がなくてよい。
+            // DB一時障害を見越して緩めに複数回リトライする。
+            max_attempts: 5,
+            base_delay_ms: 5000,
+            max_delay_ms: 120_000,
         },
     }
 }

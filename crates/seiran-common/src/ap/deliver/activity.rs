@@ -20,6 +20,9 @@ pub(super) struct NoteActivityParams<'a> {
     pub(super) quote_url: Option<&'a str>,
     pub(super) in_reply_to: Option<&'a str>,
     pub(super) seiran_uuid: Option<&'a str>,
+    /// `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、#237）。
+    /// `Some`の場合、Note object に `seiranPost` フィールドとして丸ごと埋め込む。
+    pub(super) seiran_post: Option<crate::seiran_post::SeiranPost>,
     /// "public" | "unlisted" | "followers_only" | "direct"。to/cc の組み立てに使う
     /// （受信側の `classify_ap_visibility` と対称なマッピング）。
     pub(super) visibility: &'a str,
@@ -107,13 +110,9 @@ pub fn apply_poll_to_note_object(note_obj: &mut serde_json::Value, poll: &serde_
     }
 }
 
-/// Create(Note) アクティビティを組み立てる。
-pub(super) fn build_create_note_activity(
-    addr: &LocalActorAddress,
-    p: &NoteActivityParams,
-) -> serde_json::Value {
+/// Create(Note)/Update(Note) 共通の Note オブジェクトを組み立てる（what: 純関数）。
+fn build_note_object(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_json::Value {
     let note_id = format!("https://{}/notes/{}", p.local_domain, p.post_id);
-    let activity_id = format!("https://{}/activities/{}", p.local_domain, p.post_id);
     let (to, cc) = visibility_to_to_cc(
         addr,
         p.visibility,
@@ -148,12 +147,31 @@ pub(super) fn build_create_note_activity(
     if let Some(uuid) = p.seiran_uuid {
         note_obj["seiranUuid"] = serde_json::Value::String(uuid.to_string());
     }
+    if let Some(sp) = &p.seiran_post {
+        note_obj["seiranPost"] = sp.to_value();
+    }
     if let Some(poll) = p.poll {
         apply_poll_to_note_object(&mut note_obj, poll);
     }
     if let Some(cw) = p.content_warning {
         note_obj["summary"] = serde_json::Value::String(cw.to_string());
     }
+    note_obj
+}
+
+/// Create(Note) アクティビティを組み立てる。
+pub(super) fn build_create_note_activity(
+    addr: &LocalActorAddress,
+    p: &NoteActivityParams,
+) -> serde_json::Value {
+    let activity_id = format!("https://{}/activities/{}", p.local_domain, p.post_id);
+    let (to, cc) = visibility_to_to_cc(
+        addr,
+        p.visibility,
+        p.direct_recipients,
+        p.mention_recipients,
+    );
+    let note_obj = build_note_object(addr, p);
 
     serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
@@ -161,6 +179,41 @@ pub(super) fn build_create_note_activity(
         "id": activity_id,
         "actor": addr.actor_uri,
         "published": p.published,
+        "to": to,
+        "cc": cc,
+        "object": note_obj
+    })
+}
+
+/// Update(Note) アクティビティを組み立てる（#237、狭いスコープの`seiranPost.counterpartPostId`
+/// 補完専用）。Note オブジェクト自体は`build_create_note_activity`と同一の組み立てを使うため、
+/// `p.seiran_post`に確定済みの`counterpartPostId`を積んで渡すこと。
+/// アクティビティIDはCreateのもの（`/activities/{post_id}`）とは別の値にする
+/// （同一IDのUpdateはMastodon等の実装で「本文編集」の再取得トリガーと解釈されうるため、
+/// 意図的に区別する）。
+pub(super) fn build_update_note_activity(
+    addr: &LocalActorAddress,
+    p: &NoteActivityParams,
+    published: &str,
+) -> serde_json::Value {
+    let activity_id = format!(
+        "https://{}/activities/seiranpost-update-{}",
+        p.local_domain, p.post_id
+    );
+    let (to, cc) = visibility_to_to_cc(
+        addr,
+        p.visibility,
+        p.direct_recipients,
+        p.mention_recipients,
+    );
+    let note_obj = build_note_object(addr, p);
+
+    serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Update",
+        "id": activity_id,
+        "actor": addr.actor_uri,
+        "published": published,
         "to": to,
         "cc": cc,
         "object": note_obj
@@ -454,6 +507,15 @@ pub(super) struct PostActivityBasis {
     pub(super) poll: Option<serde_json::Value>,
     /// CW（閲覧注意）ガイド文（#229）。無ければ`None`。
     pub(super) content_warning: Option<String>,
+    /// ポストの言語（ISO 639-1）。`seiranPost.language`用。
+    pub(super) language: Option<String>,
+    /// この投稿のATP側実体（`posts.at_uri`）。ATPコミットが未確定なら`None`
+    /// （`seiranPost.counterpartPostId`は配送時点でこれが`Some`の時のみ埋め込む）。
+    pub(super) at_uri: Option<String>,
+    /// 投稿者（ローカルアクター）のATP DID。ローカルアクターは登録時点で両プロトコルの
+    /// IDを持つのが通常だが、ドメイン未確定のシングルホストモード期間中は`None`
+    /// （`seiranPost.counterpartAuthorId`に必須のため、`None`ならseiranPost自体を省略する）。
+    pub(super) at_did: Option<String>,
 }
 
 pub(super) async fn fetch_post_activity_basis(
@@ -463,7 +525,8 @@ pub(super) async fn fetch_post_activity_basis(
 ) -> Result<PostActivityBasis, ApError> {
     let row = sqlx::query(
         "SELECT p.body, p.created_at, p.seiran_post_uuid, a.username,
-                p.visibility::text AS visibility, p.emoji_map, p.poll, p.content_warning
+                p.visibility::text AS visibility, p.emoji_map, p.poll, p.content_warning,
+                p.language, p.at_uri, a.at_did
          FROM posts p
          JOIN actors a ON a.id = p.actor_id
          WHERE p.id = $1 AND p.actor_id = $2 LIMIT 1",
@@ -494,6 +557,9 @@ pub(super) async fn fetch_post_activity_basis(
     let attachments = fetch_attachment_documents(db, post_id).await?;
     let poll: Option<serde_json::Value> = row.try_get("poll").unwrap_or(None);
     let content_warning: Option<String> = row.try_get("content_warning").unwrap_or(None);
+    let language: Option<String> = row.try_get("language").unwrap_or(None);
+    let at_uri: Option<String> = row.try_get("at_uri").unwrap_or(None);
+    let at_did: Option<String> = row.try_get("at_did").unwrap_or(None);
 
     Ok(PostActivityBasis {
         body,
@@ -505,7 +571,39 @@ pub(super) async fn fetch_post_activity_basis(
         attachments,
         poll,
         content_warning,
+        language,
+        at_uri,
+        at_did,
     })
+}
+
+/// `PostActivityBasis`から`seiranPost`拡張オブジェクトを組み立てる（#237）。
+/// 投稿者がまだATP DIDを持たない（ドメイン未確定のシングルホストモード）場合は
+/// `counterpartAuthorId`を埋められないため`None`（seiranPost自体を省略）を返す。
+pub(super) async fn build_seiran_post_for_basis(
+    db: &PgPool,
+    post_id: i64,
+    basis: &PostActivityBasis,
+) -> Result<Option<crate::seiran_post::SeiranPost>, ApError> {
+    let Some(at_did) = basis.at_did.clone() else {
+        return Ok(None);
+    };
+    let (attachments, link_cards) =
+        crate::seiran_post::fetch_attachments_and_link_cards(db, post_id)
+            .await
+            .map_err(|e| ApError::Other(format!("seiranPost添付/リンクカード取得エラー: {}", e)))?;
+    Ok(Some(crate::seiran_post::SeiranPost {
+        body: basis.body.clone(),
+        language: basis.language.clone(),
+        visibility: basis.visibility.clone(),
+        content_warning: basis.content_warning.clone(),
+        emoji_map: basis.emoji_map.clone(),
+        poll: basis.poll.clone(),
+        counterpart_post_id: basis.at_uri.clone(),
+        counterpart_author_id: at_did,
+        attachments,
+        link_cards,
+    }))
 }
 
 /// 保存済み `posts.emoji_map`/`actors.emoji_map` のうち、今回配送する本文（投稿本文や
@@ -582,6 +680,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                seiran_post: None,
                 visibility: "public",
                 tag: vec![],
                 direct_recipients: &[],
@@ -616,6 +715,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                seiran_post: None,
                 visibility: "public",
                 tag: vec![],
                 direct_recipients: &[],
@@ -643,6 +743,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                seiran_post: None,
                 visibility: "public",
                 tag: vec![],
                 direct_recipients: &[],
@@ -675,6 +776,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                seiran_post: None,
                 visibility: "public",
                 tag: vec![],
                 direct_recipients: &[],
@@ -713,6 +815,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                seiran_post: None,
                 visibility: "public",
                 tag: vec![],
                 direct_recipients: &[],
@@ -727,6 +830,77 @@ mod tests {
         let any_of = note["anyOf"].as_array().unwrap();
         assert_eq!(any_of[0]["replies"]["totalItems"], 3);
         assert!(note.get("endTime").is_none());
+    }
+
+    #[test]
+    fn create_note_activity_embeds_seiran_post_when_present() {
+        let seiran_post = crate::seiran_post::SeiranPost {
+            body: "hello".to_string(),
+            language: Some("ja".to_string()),
+            visibility: "public".to_string(),
+            content_warning: None,
+            emoji_map: serde_json::json!({}),
+            poll: None,
+            counterpart_post_id: None,
+            counterpart_author_id: "did:plc:alice".to_string(),
+            attachments: vec![],
+            link_cards: vec![],
+        };
+        let activity = build_create_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                seiran_post: Some(seiran_post),
+                visibility: "public",
+                tag: vec![],
+                direct_recipients: &[],
+                mention_recipients: &[],
+                poll: None,
+                content_warning: None,
+            },
+        );
+        let sp = &activity["object"]["seiranPost"];
+        assert_eq!(sp["counterpartAuthorId"], "did:plc:alice");
+        // ATP URI未確定時はcounterpartPostId自体を省略する。
+        assert!(sp.get("counterpartPostId").is_none());
+    }
+
+    #[test]
+    fn update_note_activity_has_distinct_id_and_type() {
+        let activity = build_update_note_activity(
+            &addr(),
+            &NoteActivityParams {
+                local_domain: "seiran.example",
+                post_id: 42,
+                content_html: "<p>hello</p>",
+                published: "2026-07-15T00:00:00+00:00",
+                attachments: vec![],
+                quote_url: None,
+                in_reply_to: None,
+                seiran_uuid: None,
+                seiran_post: None,
+                visibility: "public",
+                tag: vec![],
+                direct_recipients: &[],
+                mention_recipients: &[],
+                poll: None,
+                content_warning: None,
+            },
+            "2026-07-15T00:01:00+00:00",
+        );
+        assert_eq!(activity["type"], "Update");
+        assert_eq!(
+            activity["id"],
+            "https://seiran.example/activities/seiranpost-update-42"
+        );
+        assert_eq!(activity["object"]["id"], "https://seiran.example/notes/42");
     }
 
     #[test]
@@ -769,6 +943,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                seiran_post: None,
                 visibility: "unlisted",
                 tag: vec![],
                 direct_recipients: &[],
@@ -802,6 +977,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                seiran_post: None,
                 visibility: "followers_only",
                 tag: vec![],
                 direct_recipients: &[],
@@ -830,6 +1006,7 @@ mod tests {
                 quote_url: Some("https://other.example/notes/1"),
                 in_reply_to: Some("https://other.example/notes/2"),
                 seiran_uuid: Some("uuid-1234"),
+                seiran_post: None,
                 visibility: "public",
                 tag: vec![],
                 direct_recipients: &[],
@@ -859,6 +1036,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                seiran_post: None,
                 visibility: "public",
                 tag: vec![],
                 direct_recipients: &[],
@@ -894,6 +1072,7 @@ mod tests {
                 quote_url: None,
                 in_reply_to: None,
                 seiran_uuid: None,
+                seiran_post: None,
                 visibility: "followers_only",
                 tag: vec![],
                 direct_recipients: &[],

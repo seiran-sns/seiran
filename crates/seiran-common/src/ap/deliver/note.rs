@@ -33,6 +33,15 @@ pub async fn deliver_post_to_ap_followers(
         return Ok(());
     }
 
+    // override_bodyがある場合（リポストのフォールバックテキスト等、投稿者本人が書いた
+    // 本文ではない合成テキスト）はそもそも「投稿の完全再現」対象ではないため、
+    // seiranPost自体を埋め込まない。
+    let seiran_post = if override_body.is_none() {
+        build_seiran_post_for_basis(db, post_id, &basis).await?
+    } else {
+        None
+    };
+
     let body: String = override_body.map(str::to_owned).unwrap_or(basis.body);
 
     // override_body（リポストのフォールバックテキスト等、投稿者本人が書いた本文ではない合成テキスト）
@@ -99,6 +108,7 @@ pub async fn deliver_post_to_ap_followers(
             quote_url,
             in_reply_to,
             seiran_uuid: basis.seiran_uuid.as_deref(),
+            seiran_post,
             visibility: &basis.visibility,
             tag,
             direct_recipients: &[],
@@ -120,6 +130,152 @@ pub async fn deliver_post_to_ap_followers(
         ),
     )
     .await
+}
+
+/// ATPコミット完了（`posts.at_uri`確定）後に、`seiranPost.counterpartPostId`を
+/// 補完した`Update(Note)`をAPフォロワーへ送る（#237、配送側の制約「非対称・後からUpdateで補完」）。
+/// Create(Note)を送っていない投稿（`deliver_fedi=false`等）や、ATP DIDを持たない投稿者
+/// （シングルホストモード）の場合は送るものが無いため何もしない。
+pub async fn deliver_seiranpost_update(
+    ap_client: &ApClient,
+    db: &PgPool,
+    post_id: i64,
+    actor_id: i64,
+    local_domain: &str,
+    ap_private_key_pem: &str,
+) -> Result<(), ApError> {
+    let basis = fetch_post_activity_basis(db, post_id, actor_id).await?;
+    if basis.visibility == "direct" {
+        return Ok(());
+    }
+    let Some(seiran_post) = build_seiran_post_for_basis(db, post_id, &basis).await? else {
+        return Ok(());
+    };
+    if seiran_post.counterpart_post_id.is_none() {
+        // ATPコミットがまだ確定していない（呼び出し元のタイミングミス）。送るものが無い。
+        tracing::warn!(
+            "[deliver_seiranpost_update] at_uri未確定のままUpdate(Note)呼び出し post_id={}",
+            post_id
+        );
+        return Ok(());
+    }
+
+    // Create時点と同じ in_reply_to / quote_url / 実効本文を再構築する（このUpdateジョブは
+    // Createとは独立に後から起動されるため、元ジョブの計算済みoverride_bodyを再利用できない）。
+    let (in_reply_to, quote_url, effective_body) =
+        resolve_reply_and_quote_for_update(db, post_id, &basis.body).await;
+
+    let (content_html, mut tag, mention_uris) =
+        html_and_tags_for_body(&effective_body, local_domain, db, ap_client).await;
+    append_emoji_tags(&effective_body, &basis.emoji_map, &mut tag, local_domain);
+
+    let mut inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
+    for inbox in fetch_inboxes_by_ap_uris(
+        ap_client,
+        db,
+        local_domain,
+        ap_private_key_pem,
+        &mention_uris,
+    )
+    .await
+    {
+        if !inboxes.contains(&inbox) {
+            inboxes.push(inbox);
+        }
+    }
+    if inboxes.is_empty() {
+        return Ok(());
+    }
+
+    let addr = local_actor_address(local_domain, &basis.username);
+    let now = chrono::Utc::now().to_rfc3339();
+    let activity = build_update_note_activity(
+        &addr,
+        &NoteActivityParams {
+            local_domain,
+            post_id,
+            content_html: &content_html,
+            published: &basis.created_at.to_rfc3339(),
+            attachments: basis.attachments,
+            quote_url: quote_url.as_deref(),
+            in_reply_to: in_reply_to.as_deref(),
+            seiran_uuid: basis.seiran_uuid.as_deref(),
+            seiran_post: Some(seiran_post),
+            visibility: &basis.visibility,
+            tag,
+            direct_recipients: &[],
+            mention_recipients: &mention_uris,
+            poll: basis.poll.as_ref(),
+            content_warning: basis.content_warning.as_deref(),
+        },
+        &now,
+    );
+
+    fan_out_activity(
+        ap_client,
+        &inboxes,
+        &activity,
+        &addr.key_id,
+        ap_private_key_pem,
+        &format!(
+            "Update(Note seiranPost) post_id={} username={}",
+            post_id, basis.username
+        ),
+    )
+    .await
+}
+
+/// `deliver_seiranpost_update`専用: `posts.reply_to_post_id`/`quote_of_post_id`から、
+/// Create時点と同じ`in_reply_to`（Misskey互換`quoteUrl`）・実効本文を再構築する。
+/// このUpdateジョブはCreateとは独立に後から起動されるため、元のCreateジョブが計算した
+/// override_body（`seiran-api::handlers::notes::delivery::ap_delivery_quote_fields`と同型の
+/// ロジック）を再利用できず、DBの`quote_of_post_id`/`reply_to_post_id`から都度再計算する。
+/// 引用先がBsky限定（`at_uri`のみで`ap_object_id`が無い）の場合は`quoteUrl`を使わず
+/// 本文末尾へbsky.app URLを追記する（`docs/protocols.md` 2節「引用」参照）。
+async fn resolve_reply_and_quote_for_update(
+    db: &PgPool,
+    post_id: i64,
+    raw_body: &str,
+) -> (Option<String>, Option<String>, String) {
+    let refs = fetch_post_reference_ids(db, post_id)
+        .await
+        .unwrap_or(PostReferenceIds {
+            reply_to_post_id: None,
+            quote_of_post_id: None,
+            repost_of_post_id: None,
+        });
+    let repo = crate::repository::PgPostRepository::new(db.clone());
+
+    let in_reply_to = if let Some(reply_to_id) = refs.reply_to_post_id {
+        use crate::repository::PostRepository;
+        repo.find_delivery_meta(reply_to_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|m| m.ap_object_id)
+    } else {
+        None
+    };
+
+    let (effective_body, quote_url) = if let Some(quote_id) = refs.quote_of_post_id {
+        use crate::repository::PostRepository;
+        match repo.find_delivery_meta(quote_id).await {
+            Ok(Some(meta)) if meta.at_uri.is_some() && meta.ap_object_id.is_none() => {
+                let url = meta
+                    .at_uri
+                    .as_deref()
+                    .map(super::text::at_uri_to_bsky_app_url)
+                    .unwrap_or_default();
+                (format!("{}\n\n{}", raw_body, url), None)
+            }
+            Ok(Some(meta)) => (raw_body.to_string(), meta.ap_object_id),
+            _ => (raw_body.to_string(), None),
+        }
+    } else {
+        (raw_body.to_string(), None)
+    };
+
+    (in_reply_to, quote_url, effective_body)
 }
 
 /// DM（`visibility='direct'`）投稿を、宛先（`post_recipients`）の中のFediアクターへのみ
@@ -174,6 +330,9 @@ pub async fn deliver_direct_message_to_ap(
             quote_url: None,
             in_reply_to: None,
             seiran_uuid: None,
+            // DM（`chat.bsky.convo`経由、`commit_post`を通らない）は`posts.at_uri`が
+            // 設定されないためcounterpartPostIdを埋める見込みが無く、対象外とする。
+            seiran_post: None,
             visibility: "direct",
             tag,
             direct_recipients: &direct_recipients,
