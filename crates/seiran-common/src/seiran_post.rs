@@ -176,7 +176,11 @@ pub const MAX_LINK_CARDS_PER_POST: usize = 5;
 /// `embed_src`/`embed_type`は設計上、送信側の申告を信用せず常にNULL（受信側が独自に
 /// ホワイトリスト判定して埋め込むか決めるべきという方針、`docs/protocols.md` 5節
 /// 「意図的に含めないもの」参照）。
-pub async fn insert_seiran_post_link_cards(pool: &PgPool, post_id: i64, cards: &[SeiranPostLinkCard]) {
+pub async fn insert_seiran_post_link_cards(
+    pool: &PgPool,
+    post_id: i64,
+    cards: &[SeiranPostLinkCard],
+) {
     for (position, card) in cards.iter().take(MAX_LINK_CARDS_PER_POST).enumerate() {
         if let Err(e) = sqlx::query(
             "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
