@@ -50,6 +50,12 @@ async fn resolve_counterpart_via_atp(
     let profile = crate::atp::client::fetch_bsky_profile(&ctx.ap_client.http, did)
         .await
         .map_err(|e| format!("Bskyプロフィール取得失敗: {}", e))?;
+    // DID側が`org.seiran.actor.declaration`で自己申告する相手（AP Actor URI）を取りに行く。
+    // 呼び出し元自身の`actor.ap_uri`を渡すと、`discover_bsky_actor`が自己参照で常に真の
+    // 一致判定をしてしまい、DID側の独立した自己申告を一切確認せず結婚が成立してしまう
+    // （実地検証で発覚。firehose.rsのATP先着経路と同じ取得元に揃える）。
+    let claimed_ap_uri =
+        crate::atp::client::fetch_seiran_actor_declaration(&ctx.ap_client.http, did).await;
     let new_id = generate_snowflake_id(chrono::Utc::now());
     crate::seiran_actor_merge::discover_bsky_actor(
         pool,
@@ -58,7 +64,7 @@ async fn resolve_counterpart_via_atp(
         &profile.handle,
         profile.display_name.as_deref(),
         profile.avatar.as_deref(),
-        Some(&actor.ap_uri.clone().unwrap_or_default()),
+        claimed_ap_uri.as_deref(),
         chrono::Utc::now(),
     )
     .await
@@ -110,6 +116,10 @@ async fn resolve_counterpart_via_ap(
     let emoji_map = remote_ap.emoji_map();
     let profile_fields = remote_ap.profile_fields_json();
 
+    // AP Actor文書自身が`seiranAtDid`拡張で自己申告する相手を使う。呼び出し元自身の
+    // `actor.at_did`を渡すと、`discover_fedi_actor`が自己参照で常に真の一致判定をしてしまい、
+    // 取得したAP Actor文書が実際に何を自己申告しているか（そもそも`seiranAtDid`を
+    // 持たない場合すら）を一切確認せず結婚が成立してしまう（実地検証で発覚）。
     let new_id = generate_snowflake_id(chrono::Utc::now());
     crate::seiran_actor_merge::discover_fedi_actor(
         pool,
@@ -123,7 +133,7 @@ async fn resolve_counterpart_via_ap(
         bio.as_deref(),
         &emoji_map,
         &profile_fields,
-        Some(&actor.at_did.clone().unwrap_or_default()),
+        remote_ap.seiran_at_did.as_deref(),
         chrono::Utc::now(),
     )
     .await
