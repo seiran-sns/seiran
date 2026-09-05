@@ -290,20 +290,38 @@ async fn follow_bsky(
         Ok(Some(existing)) if existing.actor_type == "local" => existing.id,
         _ => {
             let new_actor_id = generate_snowflake_id(now);
-            config
-                .actors
-                .upsert_remote_bsky(
-                    new_actor_id,
-                    &did,
-                    &bsky_resp.handle,
-                    bsky_resp.display_name.as_deref(),
-                    bsky_resp.avatar.as_deref(),
-                    now,
-                )
-                .await
-                .map_err(|e| {
-                    FollowError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e))
-                })?
+            // リモートseiranアクターの相互申告マージ（#236）。DID側が
+            // `org.seiran.actor.declaration`で自己申告するAP側の相手を取りに行き、
+            // `discover_bsky_actor`経由でupsertする（`follow_fedi`と同じ扱いに揃える。
+            // 旧`upsert_remote_bsky`直呼びのままだと、claimed_ap_uriを取りこぼして
+            // 恒久的に結婚不成立となる実装漏れが`follow_fedi`同様に存在した）。
+            let claimed_ap_uri =
+                crate::atp::client::fetch_seiran_actor_declaration(&ap_client.http, &did).await;
+            let outcome = crate::seiran_actor_merge::discover_bsky_actor(
+                pool,
+                new_actor_id,
+                &did,
+                &bsky_resp.handle,
+                bsky_resp.display_name.as_deref(),
+                bsky_resp.avatar.as_deref(),
+                claimed_ap_uri.as_deref(),
+                now,
+            )
+            .await
+            .map_err(|e| {
+                FollowError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e))
+            })?;
+            if !outcome.married && claimed_ap_uri.is_some() {
+                let _ = queue
+                    .enqueue(
+                        Job::ActorMetadataResolve {
+                            actor_id: outcome.actor_id,
+                        },
+                        priority::LOW,
+                    )
+                    .await;
+            }
+            outcome.actor_id
         }
     };
 
