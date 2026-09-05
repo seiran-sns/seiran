@@ -295,8 +295,7 @@ async fn follow_bsky(
             // `discover_bsky_actor`経由でupsertする（`follow_fedi`と同じ扱いに揃える。
             // 旧`upsert_remote_bsky`直呼びのままだと、claimed_ap_uriを取りこぼして
             // 恒久的に結婚不成立となる実装漏れが`follow_fedi`同様に存在した）。
-            let claimed_ap_uri =
-                crate::atp::client::fetch_seiran_actor_declaration(&ap_client.http, &did).await;
+            let claimed_ap_uri = crate::atp::client::fetch_seiran_actor_declaration(&did).await;
             let outcome = crate::seiran_actor_merge::discover_bsky_actor(
                 pool,
                 new_actor_id,

@@ -336,10 +336,41 @@ fn rkey_from_at_uri(at_uri: &str) -> Option<&str> {
 /// `apActorUri`を取得する（#236、リモートseiranアクターの相互申告マージ用）。
 /// レコード不在・取得失敗時は`None`（このDIDはseiranアクターではない、またはまだ
 /// 宣言していない、として扱う）。
-pub async fn fetch_seiran_actor_declaration(client: &reqwest::Client, did: &str) -> Option<String> {
-    let value = get_record_value(client, did, "org.seiran.actor.declaration", "self").await?;
-    value
-        .get("apActorUri")
+///
+/// **`get_record_value`（公開AppView経由）は使わない。** 公開AppView
+/// （`api.bsky.app`）の`com.atproto.repo.getRecord`は`app.bsky.*`等の既知lexiconしか
+/// 中継せず、`org.seiran.actor.declaration`のような独自NSIDは実在するレコードでも
+/// 常に`RecordNotFound`を返す（実機検証で確認済み）。DIDを`atproto_pds`サービスへ
+/// 解決し、そのPDSへ直接`getRecord`する必要がある。
+pub async fn fetch_seiran_actor_declaration(did: &str) -> Option<String> {
+    let resolved = super::did_resolve::resolve_service_endpoint(did, "atproto_pds")
+        .await
+        .ok()?;
+    let target_url = format!(
+        "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection=org.seiran.actor.declaration&rkey=self",
+        resolved.url,
+        urlencoding::encode(did),
+    );
+    // [SEC-3] `resolve_service_endpoint`が検証したIPへ接続を固定する
+    // （`handlers/xrpc/proxy.rs`と同じ理由。再解決するとDNS rebindingの余地が残る）。
+    let target_host = reqwest::Url::parse(&target_url)
+        .ok()?
+        .host_str()
+        .map(str::to_string)?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(10))
+        .resolve_to_addrs(&target_host, &resolved.addresses)
+        .build()
+        .ok()?;
+    let resp = client.get(&target_url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = resp.json().await.ok()?;
+    json.get("value")
+        .and_then(|v| v.get("apActorUri"))
         .and_then(|v| v.as_str())
         .map(str::to_string)
 }

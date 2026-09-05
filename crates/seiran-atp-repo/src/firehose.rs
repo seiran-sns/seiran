@@ -1477,8 +1477,7 @@ pub(crate) async fn resolve_or_upsert_bsky_actor(
     // （この関数はJobQueueを持たない複数箇所から呼ばれており、成立の必須条件でもない。
     // AP側発見経路（`seiran-common::jobs::inbound_activity_process`）が同じ相手を能動的に
     // 解決しに行くか、この後の受動的な再訪問で結婚が成立する）。
-    let claimed_ap_uri =
-        seiran_common::atp::client::fetch_seiran_actor_declaration(http, did).await;
+    let claimed_ap_uri = seiran_common::atp::client::fetch_seiran_actor_declaration(did).await;
     let new_id = generate_snowflake_id(chrono::Utc::now());
     let outcome = seiran_common::seiran_actor_merge::discover_bsky_actor(
         pool,

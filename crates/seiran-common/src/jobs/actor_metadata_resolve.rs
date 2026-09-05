@@ -54,8 +54,7 @@ async fn resolve_counterpart_via_atp(
     // 呼び出し元自身の`actor.ap_uri`を渡すと、`discover_bsky_actor`が自己参照で常に真の
     // 一致判定をしてしまい、DID側の独立した自己申告を一切確認せず結婚が成立してしまう
     // （実地検証で発覚。firehose.rsのATP先着経路と同じ取得元に揃える）。
-    let claimed_ap_uri =
-        crate::atp::client::fetch_seiran_actor_declaration(&ctx.ap_client.http, did).await;
+    let claimed_ap_uri = crate::atp::client::fetch_seiran_actor_declaration(did).await;
     let new_id = generate_snowflake_id(chrono::Utc::now());
     crate::seiran_actor_merge::discover_bsky_actor(
         pool,
