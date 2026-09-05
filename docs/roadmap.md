@@ -167,7 +167,9 @@
   - [x] **実地検証完了**（beta.seiran.org⇔seiran-beta.org間、2台の実サーバーで相互に検証）: ケース1（AP先着）・ケース2（ATP先着）・ケース3（AP/ATPほぼ同時発見のレースコンディション、行分裂しないことを確認）いずれもgenuineな結婚成立を確認。上記5件の実装漏れ・バグは全てこの過程で発見・修正したもの。#237（投稿マージ）の同様の実地検証は今回は見送り（別途着手時に同種の問題がないか要注意）
 - [ ] **投稿の完全表現力をAP/ATP双方でロスレス往復（#237）** — 設計確定（`docs/protocols.md` 5節参照）。`seiranPost`拡張オブジェクトをAP Note・ATP post本体の両方に同一構造で埋め込み、CW・投票・カスタム絵文字マップ・添付のNSFW/GIF/寸法・複数URLカード等、標準フィールドでは表現しきれないseiran独自の表現力をリモートseiran間で完全再現する。投稿ID・投稿者IDの相互申告一致によるマージ判定（#236と同型のアルゴリズム）を採用し、`seiran_post_uuid`のような内部限定トークンは使わない。副次効果として、下記「他seiranサーバー間マージのATP経路対応」の既知の制約もこのissueで解消される。
   - [x] `posts.claimed_ap_object_id`/`claimed_at_uri`カラム追加（`seiran_post_uuid`は将来的に削除検討）
-  - [x] AP/ATP双方の受信経路（`note_save::save_ap_note_core`・Jetstream `save_bsky_post`）で`seiranPost`検出時に標準フィールド（body/emojiMap/visibility/contentWarning/poll）を上書きする「posts行の再構築」を実装（添付・URLカードの完全再現は未対応、標準AP/ATPフィールドのベストエフォート変換のまま）
+  - [x] AP/ATP双方の受信経路（`note_save::save_ap_note_core`・Jetstream `save_bsky_post`）で`seiranPost`検出時に標準フィールド（body/emojiMap/visibility/contentWarning/poll）を上書きする「posts行の再構築」を実装
+  - [x] **【実地検証で発覚】URLカードが本文にURLの無い投稿（`linkCards`のみ構造化データとして持つケース）で完全に空振りする**: AP受信側（`note_save.rs`）は`seiranPost.linkCards[]`を一切使わず標準の本文中URL抽出（`extract_link_card_urls`）へのベストエフォートフォールバックのみだったため、本文にURLが無い投稿（意図通りlinkCardsを別途構造化データとして持つ設計）ではURLカードが1件も反映されなかった（CW付きなら代わりに"Open"カードのみ）。`seiranPost.linkCards[]`があれば送信側申告のtitle/description/thumbnailUrlを`post_link_cards`へ直接反映するよう修正（`embed_src`/`embed_type`は設計方針通り常にNULLのまま、受信側が独自にホワイトリスト判定すべきものは復元しない）。ATP受信側（`firehose.rs::save_bsky_post`）の同型対応は別セッション（seiran-beta.org側）が担当
+  - [x] 添付の寸法・blurhashの完全再現は`post_attachments`に該当カラムが無いため未対応のまま（スキーマ変更を伴うため今回は見送り、`is_sensitive`/`is_gif`は標準AP/ATPフィールドから反映済み）
   - [x] 相互一致チェック（投稿マージ判定）の実装。`ap_object_id`キーの`pg_advisory_xact_lock(2, ...)`によるDB反映の直列化込み（#236の`key1=1`と名前空間分離）
   - [x] 投稿者一貫性チェック（簡略版）: 両投稿の投稿者が**既に同一actor行**に解決されている場合のみマージする
   - [ ] 投稿マージ時のオンメモリなアクター結婚（#236アルゴリズムの共有）は未実装。上記簡略版チェックにより、投稿者がまだ結婚していない場合はマージ不成立のまま孤立行として残る（`claimed_*`は保持されるため、#236側のアクター結婚が別途成立すれば将来の再突合で解消できる余地は残る設計のまま）

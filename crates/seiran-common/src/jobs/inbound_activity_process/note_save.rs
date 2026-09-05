@@ -282,9 +282,10 @@ pub(super) async fn save_ap_note_core(
     let parent_original_post_id = resolve_bridge_duplicate_post_id(inbox, note_url).await;
 
     // seiranPostがあれば本文・絵文字マップを標準変換の代わりに使う（Single Source of
-    // Truth、`docs/protocols.md` 5節）。添付・URLカードの完全再現（isSensitive/isGif等）は
-    // 本パスでは未対応で、標準AP添付フィールド（`note["attachment"]`）のベストエフォート
-    // フォールバックのまま（追って対応予定）。
+    // Truth、`docs/protocols.md` 5節）。添付の寸法・blurhash（`post_attachments`に該当
+    // カラムが無いため）は本パスでは未対応のまま（標準AP添付フィールドのベストエフォート
+    // フォールバック、is_sensitive/is_gifのみ反映）。URLカードは下記`seiran_post_ext`
+    // 分岐で`linkCards[]`を直接反映する。
     let body = seiran_post_ext
         .as_ref()
         .map(|sp| sp.body.clone())
@@ -356,8 +357,17 @@ pub(super) async fn save_ap_note_core(
         );
     }
 
-    // URLカード（OGP取得ジョブがoEmbed discoveryによる埋め込みプレーヤー解決も行う）。
-    queue_link_cards_for_post(&inbox.queue, post_id, &body).await;
+    // URLカード。`seiranPost.linkCards[]`があれば送信側が既に申告したtitle/description/
+    // thumbnailUrlをそのまま反映する（受信側で改めてOGP取得し直す必要がない。#237、
+    // 実地検証で「本文にURLが無くlinkCardsのみのケースが空振りする」欠落を発見して対応）。
+    // 無ければ従来通り本文中URLをOGP取得ジョブ（oEmbed discoveryによる埋め込みプレーヤー
+    // 解決も行う）へ委ねる。
+    match seiran_post_ext.as_ref().map(|sp| &sp.link_cards) {
+        Some(cards) if !cards.is_empty() => {
+            insert_seiran_post_link_cards(&inbox.db_pool, post_id, cards).await;
+        }
+        _ => queue_link_cards_for_post(&inbox.queue, post_id, &body).await,
+    }
 
     // 添付画像・動画・音声の URL を保存（S3 には保存せず URL のみ記録）
     save_remote_attachments(inbox, post_id, note).await;
@@ -435,6 +445,37 @@ pub(super) async fn queue_link_cards_for_post(queue: &Arc<dyn JobQueue>, post_id
             .await
         {
             tracing::error!("[Create/Note] OgpFetch enqueue失敗: {}", e);
+        }
+    }
+}
+
+/// `seiranPost.linkCards[]`（送信側が自己申告したtitle/description/thumbnailUrl）を
+/// そのまま`post_link_cards`へ保存する（#237）。`embed_src`/`embed_type`は設計上、
+/// 送信側の申告を信用せず常にNULL（受信側が独自にホワイトリスト判定して埋め込むか
+/// 決めるべきという方針、`docs/protocols.md` 5節「意図的に含めないもの」参照）。
+async fn insert_seiran_post_link_cards(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+    cards: &[crate::seiran_post::SeiranPostLinkCard],
+) {
+    for (position, card) in cards.iter().take(MAX_LINK_CARDS_PER_POST).enumerate() {
+        if let Err(e) = sqlx::query(
+            "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(post_id)
+        .bind(position as i16)
+        .bind(&card.url)
+        .bind(&card.title)
+        .bind(&card.description)
+        .bind(&card.thumbnail_url)
+        .execute(pool)
+        .await
+        {
+            tracing::error!(
+                "[NoteSave] seiranPost.linkCards INSERT失敗（スキップ） post_id={} url={}: {}",
+                post_id, card.url, e
+            );
         }
     }
 }
