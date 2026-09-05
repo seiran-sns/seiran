@@ -588,9 +588,10 @@ pub(super) async fn build_seiran_post_for_basis(
     let Some(at_did) = basis.at_did.clone() else {
         return Ok(None);
     };
-    let (attachments, link_cards) = crate::seiran_post::fetch_attachments_and_link_cards(db, post_id)
-        .await
-        .map_err(|e| ApError::Other(format!("seiranPost添付/リンクカード取得エラー: {}", e)))?;
+    let (attachments, link_cards) =
+        crate::seiran_post::fetch_attachments_and_link_cards(db, post_id)
+            .await
+            .map_err(|e| ApError::Other(format!("seiranPost添付/リンクカード取得エラー: {}", e)))?;
     Ok(Some(crate::seiran_post::SeiranPost {
         body: basis.body.clone(),
         language: basis.language.clone(),

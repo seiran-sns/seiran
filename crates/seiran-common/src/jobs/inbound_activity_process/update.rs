@@ -92,13 +92,14 @@ async fn handle_update_seiranpost(
         return Ok(());
     };
 
-    let Some((post_id, post_author_id, current_at_uri)) = sqlx::query_as::<_, (i64, i64, Option<String>)>(
-        "SELECT id, actor_id, at_uri FROM posts WHERE ap_object_id = $1",
-    )
-    .bind(ap_object_id)
-    .fetch_optional(&inbox.db_pool)
-    .await
-    .map_err(|e| format!("Update(Note): posts検索失敗: {}", e))?
+    let Some((post_id, post_author_id, current_at_uri)) =
+        sqlx::query_as::<_, (i64, i64, Option<String>)>(
+            "SELECT id, actor_id, at_uri FROM posts WHERE ap_object_id = $1",
+        )
+        .bind(ap_object_id)
+        .fetch_optional(&inbox.db_pool)
+        .await
+        .map_err(|e| format!("Update(Note): posts検索失敗: {}", e))?
     else {
         // 対応するCreateがまだ無い（届いていない・処理中）。この場合は無視する
         // （`Delete`ハンドラと同様、対象が無ければ何もしない）。
@@ -151,13 +152,12 @@ async fn handle_update_seiranpost(
         .await
         .map_err(|e| format!("claimed_at_uri更新失敗: {}", e))?;
 
-    let candidate: Option<(i64, i64, Option<String>)> = sqlx::query_as(
-        "SELECT id, actor_id, claimed_ap_object_id FROM posts WHERE at_uri = $1",
-    )
-    .bind(at_uri)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| format!("マージ候補検索失敗: {}", e))?;
+    let candidate: Option<(i64, i64, Option<String>)> =
+        sqlx::query_as("SELECT id, actor_id, claimed_ap_object_id FROM posts WHERE at_uri = $1")
+            .bind(at_uri)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| format!("マージ候補検索失敗: {}", e))?;
 
     let merge_target = candidate.and_then(|(doomed_id, doomed_actor_id, claimed_ap_object_id)| {
         let mutual_match = claimed_ap_object_id.as_deref() == Some(ap_object_id);

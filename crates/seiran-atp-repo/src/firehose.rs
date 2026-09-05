@@ -813,7 +813,9 @@ async fn save_bsky_post(
     };
 
     match insert_outcome {
-        Ok(InsertOrMergeOutcome::Merged { post_id: merged_post_id }) => {
+        Ok(InsertOrMergeOutcome::Merged {
+            post_id: merged_post_id,
+        }) => {
             tracing::info!(
                 "[Jetstream] seiranPostマージ成立（ATP側更新）、INSERTはスキップ: at_uri={} → post_id={}",
                 at_uri,

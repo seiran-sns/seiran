@@ -1594,17 +1594,16 @@ mod tests {
 
     #[test]
     fn test_build_mst_single_entry() {
-        let (_, cid) =
-            encode_bsky_feed_post(
-                "hi",
-                "2024-01-01T00:00:00.000Z",
-                vec![],
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
+        let (_, cid) = encode_bsky_feed_post(
+            "hi",
+            "2024-01-01T00:00:00.000Z",
+            vec![],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let entries = vec![("app.bsky.feed.post/test123".to_string(), cid)];
         let result = build_mst(&entries);
         assert!(result.is_ok());

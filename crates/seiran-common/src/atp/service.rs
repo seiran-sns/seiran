@@ -202,9 +202,10 @@ async fn build_seiran_post_for_atp_commit(
         return None;
     };
 
-    let (attachments, link_cards) = crate::seiran_post::fetch_attachments_and_link_cards(pool, post_id)
-        .await
-        .unwrap_or_default();
+    let (attachments, link_cards) =
+        crate::seiran_post::fetch_attachments_and_link_cards(pool, post_id)
+            .await
+            .unwrap_or_default();
 
     Some(crate::seiran_post::SeiranPost {
         body: row.try_get("body").unwrap_or_default(),
