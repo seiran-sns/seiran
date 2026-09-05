@@ -96,7 +96,16 @@ pub async fn execute_follow(
             .await
         }
         FollowTargetKind::Fedi(t) => {
-            follow_fedi(&t, local_actor_id, local_username, ap_client, config).await
+            follow_fedi(
+                &t,
+                local_actor_id,
+                local_username,
+                pool,
+                ap_client,
+                queue,
+                config,
+            )
+            .await
         }
     }
 }
@@ -345,7 +354,9 @@ async fn follow_fedi(
     target: &str,
     local_actor_id: i64,
     local_username: &str,
+    pool: &PgPool,
     ap_client: &Arc<ApClient>,
+    queue: &Arc<dyn JobQueue>,
     config: &FollowExecConfig,
 ) -> Result<FollowOutcome, FollowError> {
     let target_uri = resolve_target_uri(ap_client, target).await.map_err(|e| {
@@ -389,25 +400,39 @@ async fn follow_fedi(
 
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
-    let remote_actor_id = config
-        .actors
-        .upsert_remote_fedi(
-            new_actor_id,
-            &target_uri,
-            &remote_inbox,
-            &remote_username,
-            &remote_domain,
-            &remote_display_name,
-            remote_avatar_url.as_deref(),
-            remote_bio.as_deref(),
-            now,
-            &remote_emoji_map,
-            &remote_profile_fields,
-        )
-        .await
-        .map_err(|e| {
-            FollowError::Internal(format!("[follow/fedi] リモートアクター upsert 失敗: {}", e))
-        })?;
+    // リモートseiranアクターの相互申告マージ（#236）。能動的フォロー実行時（この経路）も
+    // インバウンド発見時（`inbound_activity_process`）と同じ`discover_fedi_actor`を通す
+    // ことで、`seiranAtDid`拡張フィールドを取りこぼさず結婚成立に反映する。
+    let outcome = crate::seiran_actor_merge::discover_fedi_actor(
+        pool,
+        new_actor_id,
+        &target_uri,
+        &remote_inbox,
+        &remote_username,
+        &remote_domain,
+        &remote_display_name,
+        remote_avatar_url.as_deref(),
+        remote_bio.as_deref(),
+        &remote_emoji_map,
+        &remote_profile_fields,
+        remote_ap.seiran_at_did.as_deref(),
+        now,
+    )
+    .await
+    .map_err(|e| {
+        FollowError::Internal(format!("[follow/fedi] リモートアクター upsert 失敗: {}", e))
+    })?;
+    if !outcome.married && remote_ap.seiran_at_did.is_some() {
+        let _ = queue
+            .enqueue(
+                Job::ActorMetadataResolve {
+                    actor_id: outcome.actor_id,
+                },
+                priority::LOW,
+            )
+            .await;
+    }
+    let remote_actor_id = outcome.actor_id;
 
     check_not_blocked(config, local_actor_id, remote_actor_id).await?;
 

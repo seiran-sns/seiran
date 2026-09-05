@@ -158,6 +158,7 @@
   - [x] ATP独自コレクション `org.seiran.actor.declaration`（rkey=`self`）の実装
   - [x] `actors.claimed_ap_uri`/`claimed_at_did`カラム追加
   - [x] 相手を能動的に取りに行くジョブ（`ActorMetadataResolve`ジョブを実装。AP側発見経路からのenqueueのみ対応。Bsky側発見は`firehose.rs`の`resolve_or_upsert_bsky_actor`のみ相互一致判定に対応済みで、他の`upsert_remote_bsky`呼び出し元（`follow_exec`/`also_known_as_sync`/`search`/`target_resolve`/`bsky_follower_poll`/`users`）は未対応のまま — 結婚成立の必須条件ではないため許容、フォローアップ課題として残す）
+  - [x] 実地検証（beta.seiran.org⇔seiran-beta.org間）中に判明した漏れを修正: `follow_exec::follow_fedi`（能動的フォロー実行時の経路、`POST /api/follows/create`が使う）が旧`ActorRepository::upsert_remote_fedi`（単純UPSERT、`claimed_at_did`を取らず`actor_type`昇格もしない）を直接呼んでおり、`discover_fedi_actor`を経由していなかった。この経路で先にリモートseiranアクター行が作られると`claimed_at_did`が永久にNULLのままとなり、後続の`discover_fedi_actor`呼び出しも「既存行が見つかった場合は結婚ロジックを起動しない」設計のため未来永劫結婚が成立しない実装漏れだった（`follow_exec::follow_bsky`側の`upsert_remote_bsky`呼び出しも同型の未対応が残っており、そちらは上記の通り許容範囲のまま）。`follow_fedi`を`discover_fedi_actor`経由に修正し、`married=false`かつ`seiranAtDid`ありなら`ActorMetadataResolve`をenqueueするよう統一した
   - [x] 相互一致チェック（結婚判定）の実装（`seiran_common::seiran_actor_merge`）
   - [x] fedi IDキーの`pg_advisory_xact_lock`ヘルパー追加とDB反映の直列化（`advisory_lock::acquire_xact_lock_for_key`）
 - [ ] **投稿の完全表現力をAP/ATP双方でロスレス往復（#237）** — 設計確定（`docs/protocols.md` 5節参照）。`seiranPost`拡張オブジェクトをAP Note・ATP post本体の両方に同一構造で埋め込み、CW・投票・カスタム絵文字マップ・添付のNSFW/GIF/寸法・複数URLカード等、標準フィールドでは表現しきれないseiran独自の表現力をリモートseiran間で完全再現する。投稿ID・投稿者IDの相互申告一致によるマージ判定（#236と同型のアルゴリズム）を採用し、`seiran_post_uuid`のような内部限定トークンは使わない。副次効果として、下記「他seiranサーバー間マージのATP経路対応」の既知の制約もこのissueで解消される。
