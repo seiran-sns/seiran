@@ -18,7 +18,13 @@ export default defineConfig(({ mode }) => {
   // 常時ビルド済み・本番相当のコードを配信するpreviewサーバーを標準にする
   // （`npm run build:watch` + `npm run preview` の2プロセス常駐運用）。
   const previewPort = Number(env.PREVIEW_PORT ?? "4174");
-  const allowedHosts = [env.LOCAL_DOMAIN ?? "localhost"];
+  // "frontend" は Docker Compose 上のコンテナ名。backend の OGP ハンドラ
+  // （`crates/seiran-api/src/handlers/ogp.rs`）が `frontend_origin`
+  // （既定 `http://frontend:5173`）へ index.html を取りに来る際、そのリクエストの
+  // Host ヘッダーがコンテナ名 "frontend" になる。これを allowedHosts に含めないと
+  // Vite が「Blocked request. This host ("frontend") is not allowed」を返し、
+  // /notes/:id・/@:handle への直接アクセス（OGP注入経路）がすべて壊れる（実機確認）。
+  const allowedHosts = [env.LOCAL_DOMAIN ?? "localhost", "frontend"];
 
   return {
     plugins: [react()],

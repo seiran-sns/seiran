@@ -268,6 +268,15 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
   （AP クライアント向け Accept の場合は Announce オブジェクト応答が未実装のため 404）。
   nginx・Vite proxy とも `/notes` と同様に `/announces` を api（バックエンド）へ転送する
   設定が必要。
+- `fetch_spa_html`（`ogp.rs`）が `frontend_origin` へ index.html を取りに行く際の
+  Host ヘッダーは、Docker 構成では接続先コンテナ名そのもの（既定 `http://frontend:5173`
+  なら `frontend`）になる。Vite の `server`/`preview` の `allowedHosts`
+  （`frontend/vite.config.ts`）に本番ドメイン（`LOCAL_DOMAIN`）しか入っていないと、この
+  内部フェッチが Vite 自身に「Blocked request. This host ("frontend") is not allowed」
+  として弾かれ、`/notes/:id`・`/@:handle` への直接アクセス（ブラウザの直打ち・リロード。
+  bot 判定も同経路）がすべて壊れる（nginx のルーティングが正しくても発生する。実機確認、
+  2026-09-06）。そのため `allowedHosts` には `LOCAL_DOMAIN` に加えて Docker のコンテナ名
+  `"frontend"` を常に含める。
 
 ## 9. E2Eテスト
 
