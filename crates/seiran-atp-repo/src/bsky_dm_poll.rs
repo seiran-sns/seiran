@@ -12,6 +12,7 @@ use std::time::Duration;
 use seiran_common::atp::sign_service_auth_jwt;
 use seiran_common::generate_snowflake_id;
 use seiran_common::streaming::StreamHub;
+use seiran_common::traits::JobQueue;
 use sqlx::{PgPool, Row};
 
 use crate::firehose::resolve_or_upsert_bsky_actor;
@@ -21,11 +22,16 @@ const CHAT_SERVICE_AUD: &str = "did:web:api.bsky.chat";
 const POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 /// DM受信ポーリングを常駐実行する。
-pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<StreamHub>) {
+pub async fn run(
+    pool: PgPool,
+    job_queue: Arc<dyn JobQueue>,
+    http: Arc<reqwest::Client>,
+    stream_hub: Arc<StreamHub>,
+) {
     let mut interval = tokio::time::interval(POLL_INTERVAL);
     loop {
         interval.tick().await;
-        if let Err(e) = poll_once(&pool, &http, &stream_hub).await {
+        if let Err(e) = poll_once(&pool, &job_queue, &http, &stream_hub).await {
             tracing::error!("[BskyDmPoll] ポーリング失敗: {}", e);
         }
     }
@@ -33,6 +39,7 @@ pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<Strea
 
 async fn poll_once(
     pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
 ) -> Result<(), String> {
@@ -50,7 +57,7 @@ async fn poll_once(
         let pem: String = row
             .try_get("at_signing_key_pem")
             .map_err(|e| e.to_string())?;
-        if let Err(e) = poll_user(pool, http, stream_hub, actor_id, &did, &pem).await {
+        if let Err(e) = poll_user(pool, job_queue, http, stream_hub, actor_id, &did, &pem).await {
             // 401は主にDIDがPLCディレクトリ上で無効（テスト用アカウント等）な場合に発生する
             // 想定内のケースのため warn 止まりとし、エラー監視のノイズにしない。
             tracing::warn!("[BskyDmPoll] actor_id={} のポーリング失敗: {}", actor_id, e);
@@ -59,8 +66,10 @@ async fn poll_once(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn poll_user(
     pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
     actor_id: i64,
@@ -89,15 +98,19 @@ async fn poll_user(
         .unwrap_or_default();
 
     for convo in &convos {
-        if let Err(e) = sync_convo(pool, http, stream_hub, actor_id, did, pem, convo).await {
+        if let Err(e) = sync_convo(pool, job_queue, http, stream_hub, actor_id, did, pem, convo)
+            .await
+        {
             tracing::error!("[BskyDmPoll] convo同期失敗 actor_id={}: {}", actor_id, e);
         }
     }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sync_convo(
     pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
     local_actor_id: i64,
@@ -190,7 +203,7 @@ async fn sync_convo(
     }
     new_messages.reverse(); // 古い順に処理する
 
-    let peer_actor_id = resolve_or_upsert_bsky_actor(pool, http, &peer_did).await?;
+    let peer_actor_id = resolve_or_upsert_bsky_actor(pool, job_queue, http, &peer_did).await?;
 
     let mut current_thread_root = thread_root_post_id;
 

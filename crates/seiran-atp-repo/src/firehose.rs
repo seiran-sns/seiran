@@ -652,11 +652,13 @@ async fn process_message(
                     let at_uri = format!("at://{}/app.bsky.feed.like/{}", did, commit.rkey);
                     let subject_uri = subject_uri.to_string();
                     let pool2 = pool.clone();
+                    let queue2 = Arc::clone(job_queue);
                     let http2 = Arc::clone(http);
                     let hub2 = Arc::clone(stream_hub);
                     tokio::spawn(async move {
                         handle_inbound_like_create(
                             &pool2,
+                            &queue2,
                             &http2,
                             &hub2,
                             &did,
@@ -1203,7 +1205,7 @@ async fn handle_inbound_repost_create(
 ) {
     let post_repo = PgPostRepository::new(pool.clone());
 
-    let actor_id = match resolve_or_upsert_bsky_actor(pool, http, did).await {
+    let actor_id = match resolve_or_upsert_bsky_actor(pool, job_queue, http, did).await {
         Ok(id) => id,
         Err(e) => {
             tracing::error!("[Jetstream/Repost] reposter アクター解決失敗: {}", e);
@@ -1221,7 +1223,9 @@ async fn handle_inbound_repost_create(
             match seiran_common::atp::fetch_single_bsky_post(http, subject_uri).await {
                 Ok(Some(post)) => {
                     let author_id =
-                        match resolve_or_upsert_bsky_actor(pool, http, &post.author_did).await {
+                        match resolve_or_upsert_bsky_actor(pool, job_queue, http, &post.author_did)
+                            .await
+                        {
                             Ok(id) => id,
                             Err(e) => {
                                 tracing::error!("[Jetstream/Repost] 対象ポスト著者解決失敗: {}", e);
@@ -1335,6 +1339,7 @@ async fn handle_inbound_repost_create(
 #[allow(clippy::too_many_arguments)]
 async fn handle_inbound_like_create(
     pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
     did: &str,
@@ -1354,7 +1359,7 @@ async fn handle_inbound_like_create(
         }
     };
 
-    let actor_id = match resolve_or_upsert_bsky_actor(pool, http, did).await {
+    let actor_id = match resolve_or_upsert_bsky_actor(pool, job_queue, http, did).await {
         Ok(id) => id,
         Err(e) => {
             tracing::error!("[Jetstream/Like] liker アクター解決失敗: {}", e);
@@ -1521,6 +1526,7 @@ async fn handle_inbound_post_delete(pool: &PgPool, at_uri: &str) {
 /// （AP 側 `upsert_remote_fedi_actor` の ATP 版）。
 pub(crate) async fn resolve_or_upsert_bsky_actor(
     pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     did: &str,
 ) -> Result<i64, String> {
@@ -1532,10 +1538,6 @@ pub(crate) async fn resolve_or_upsert_bsky_actor(
     let profile = fetch_bsky_profile(http, did).await?;
     // リモートseiranアクターの相互申告マージ（#236）。`org.seiran.actor.declaration`が
     // 無いDID（大多数のBskyユーザー）は`claimed_ap_uri=None`のまま通常のupsertと同義になる。
-    // ここでは相手を能動的に取りに行く`Job::ActorMetadataResolve`のenqueueは行わない
-    // （この関数はJobQueueを持たない複数箇所から呼ばれており、成立の必須条件でもない。
-    // AP側発見経路（`seiran-common::jobs::inbound_activity_process`）が同じ相手を能動的に
-    // 解決しに行くか、この後の受動的な再訪問で結婚が成立する）。
     let claimed_ap_uri = seiran_common::atp::client::fetch_seiran_actor_declaration(did).await;
     let new_id = generate_snowflake_id(chrono::Utc::now());
     let outcome = seiran_common::seiran_actor_merge::discover_bsky_actor(
@@ -1556,6 +1558,18 @@ pub(crate) async fn resolve_or_upsert_bsky_actor(
         // 明示的に再構築を促す（実地検証で発覚。`follow_exec::follow_fedi`の
         // 同種コメント参照）。
         touch_jetstream_wanted_dids(pool).await;
+    } else if claimed_ap_uri.is_some() {
+        // 結婚が成立しなかった場合、相手（自己申告されたAP Actor URI）を能動的に取りに行く
+        // ジョブを積んで結婚成立を早める（`follow_exec`・`inbound_activity_process`の
+        // 発見経路と揃える。従来この経路だけenqueueが漏れていた）。
+        let _ = job_queue
+            .enqueue(
+                Job::ActorMetadataResolve {
+                    actor_id: outcome.actor_id,
+                },
+                priority::LOW,
+            )
+            .await;
     }
     Ok(outcome.actor_id)
 }

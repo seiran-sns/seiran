@@ -32,6 +32,7 @@ pub async fn run(
     tracing::info!("[seiran-atp-repo] Firehose リスナーを起動します。");
     tokio::spawn(bsky_dm_poll::run(
         pool.clone(),
+        Arc::clone(&job_queue),
         Arc::clone(&http),
         Arc::clone(&stream_hub),
     ));
@@ -42,6 +43,7 @@ pub async fn run(
     ));
     tokio::spawn(bsky_block_watch::run(
         pool.clone(),
+        Arc::clone(&job_queue),
         Arc::clone(&http),
         redis_url.clone(),
         is_monolith,

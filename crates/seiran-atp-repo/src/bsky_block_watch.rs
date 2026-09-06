@@ -25,6 +25,7 @@ use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
 use seiran_common::repository::{
     ActorRepository, BlockRepository, PgActorRepository, PgBlockRepository,
 };
+use seiran_common::traits::JobQueue;
 
 use crate::firehose::resolve_or_upsert_bsky_actor;
 
@@ -45,6 +46,7 @@ const CURSOR_SAVE_INTERVAL: Duration = Duration::from_secs(5);
 /// `firehose.rs::run`と同じ制御パターン（`docs/protocols.md` 10節）。
 pub async fn run(
     pool: PgPool,
+    job_queue: Arc<dyn JobQueue>,
     http: Arc<reqwest::Client>,
     redis_url: Option<String>,
     is_monolith: bool,
@@ -88,8 +90,9 @@ pub async fn run(
                     "[Jetstream/BlockWatch] リーダーに昇格（またはRedis未使用の単独運用）。接続開始。"
                 );
                 let pool = pool.clone();
+                let queue = Arc::clone(&job_queue);
                 let http = Arc::clone(&http);
-                current_task = Some(tokio::spawn(run_loop(pool, http)));
+                current_task = Some(tokio::spawn(run_loop(pool, queue, http)));
             }
             (false, true) => {
                 tracing::info!("[Jetstream/BlockWatch] リーダーでなくなったため切断。");
@@ -102,10 +105,10 @@ pub async fn run(
     }
 }
 
-async fn run_loop(pool: PgPool, http: Arc<reqwest::Client>) {
+async fn run_loop(pool: PgPool, job_queue: Arc<dyn JobQueue>, http: Arc<reqwest::Client>) {
     let mut backoff_secs = 2u64;
     loop {
-        match connect_and_process(&pool, &http).await {
+        match connect_and_process(&pool, &job_queue, &http).await {
             Ok(()) => {
                 tracing::info!("[Jetstream/BlockWatch] 接続終了（正常）。再接続します。");
                 backoff_secs = 2;
@@ -168,7 +171,11 @@ struct JetstreamCommit {
     record: Option<JsonValue>,
 }
 
-async fn connect_and_process(pool: &PgPool, http: &Arc<reqwest::Client>) -> Result<(), String> {
+async fn connect_and_process(
+    pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
+    http: &Arc<reqwest::Client>,
+) -> Result<(), String> {
     let cursor = load_cursor(pool).await;
     let mut url = JETSTREAM_BLOCK_URL.to_string();
     if let Some(c) = cursor {
@@ -195,7 +202,7 @@ async fn connect_and_process(pool: &PgPool, http: &Arc<reqwest::Client>) -> Resu
             last_saved_at = tokio::time::Instant::now();
         }
 
-        if let Err(e) = process_message(&text, pool, http).await {
+        if let Err(e) = process_message(&text, pool, job_queue, http).await {
             tracing::error!(
                 "[Jetstream/BlockWatch] メッセージ処理エラー（スキップ）: {}",
                 e
@@ -209,6 +216,7 @@ async fn connect_and_process(pool: &PgPool, http: &Arc<reqwest::Client>) -> Resu
 async fn process_message(
     text: &str,
     pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
     http: &Arc<reqwest::Client>,
 ) -> Result<(), String> {
     let event: JetstreamEvent =
@@ -249,7 +257,7 @@ async fn process_message(
                 return Ok(());
             }
 
-            let blocker_actor_id = resolve_or_upsert_bsky_actor(pool, http, &event.did)
+            let blocker_actor_id = resolve_or_upsert_bsky_actor(pool, job_queue, http, &event.did)
                 .await
                 .map_err(|e| format!("blocker アクター解決失敗: {}", e))?;
 
