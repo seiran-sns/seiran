@@ -775,9 +775,10 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 
 ### 定義
 - **ミュート**: Fedi/Bsky共通で「自分のタイムライン・通知から相手を隠すだけのローカル効果」。相手には一切通知されず、AP/ATP配送は発生しない（`mutes`テーブルへのINSERT/DELETEのみ）。
-- **ブロック**: seiranではBsky準拠の定義（フォロー関係の強制解除＋相互完全非表示）を採用する。Fediの「片方向拒否ブロック」とMisskey的「ミュート」を合わせた効果になるため、ブロック実行時は相手のプロトコルに応じて以下を行う。
-  - 相手がBsky: `app.bsky.graph.block`をコミット（`AtpCommitService::commit_block`）。
-  - 相手がFedi: AP `Block`アクティビティを配送する。
+- **ブロック**: seiranではBsky準拠の定義（フォロー関係の強制解除＋相互完全非表示）を採用する。Fediの「片方向拒否ブロック」とMisskey的「ミュート」を合わせた効果になるため、ブロック実行時は相手の実体（プロトコル別、独立判定）に応じて以下を行う。
+  - `at_did`を持てば: `app.bsky.graph.block`をコミット（`AtpCommitService::commit_block`）。
+  - `ap_uri`を持てば: AP `Block`アクティビティを配送する。
+  - 結婚済み（`actor_type='remote_seiran'`）の相手は両方の実体を持つため両チャネルへ独立に送る（フォロー/アンフォローと同じ方針、`docs/protocols.md` 11節参照）。
   - いずれの場合もローカルの`blocks`テーブルへの1行挿入により、タイムライン・通知の相互非表示（`actor_is_hidden_for_viewer`、`docs/database.md`参照）と書き込みガード（下記）の両方が有効になる。
 
 ### 書き込みガード

@@ -56,8 +56,11 @@ pub async fn handle(
         .ok_or_else(|| format!("ターゲットアクター(id={})が見つかりません", target_actor_id))?;
 
     if target.actor_type != "fedi" {
-        // Fedi以外（bsky/local）はプロキシフォロー対象外。呼び出し側の判定ミスでも
-        // ここで弾いておけば follows テーブルを汚さない。
+        // Fedi以外（bsky/local/remote_seiran）はプロキシフォロー対象外。
+        // remote_seiranは列挙漏れではなく意図的な除外: at_didを持つためJetstreamの
+        // wantedDids（`firehose.rs::load_wanted_dids`のリストメンバーUNION節、フォロー
+        // 不要）経由で既に投稿を受信できる。呼び出し側の判定ミスでもここで弾いておけば
+        // follows テーブルを汚さない。
         return Ok(());
     }
 

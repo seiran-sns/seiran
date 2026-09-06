@@ -388,6 +388,8 @@ pub async fn delete_list(
     // CASCADE削除でlist_membersごと消える前に、Fediメンバー・公開状態・既存ATPレコードを
     // 控えておく（削除後では list_members 行自体が無くなり取得できないため）。
     let before = state.lists.find_by_id(id).await.ok().flatten();
+    // "fedi"限定は列挙漏れではなく意図的（remote_seiranはプロキシフォロー対象外、
+    // `add_member`のコメント参照）。プロキシフォロー解除が必要なのはfediのみ。
     let fedi_member_ids: Vec<i64> = match state.lists.members(id).await {
         Ok(members) => members
             .into_iter()
@@ -541,12 +543,18 @@ pub async fn add_member(
         target_actor.actor_type
     );
 
+    // `actor_type == "fedi"`固定は列挙漏れではなく意図的（remote_seiranはATP経由で
+    // 届くためプロキシフォロー不要、下のbsky/remote_seiran分岐参照）。
     if target_actor.actor_type == "fedi" && !was_referenced {
         state.enqueue_proxy_follow_sync(target_actor.id, true).await;
     }
 
-    if target_actor.actor_type == "bsky" {
+    if matches!(target_actor.actor_type.as_str(), "bsky" | "remote_seiran") {
         // Jetstream の wantedDids 絞り込みリストにこの DID を加えるため再構築を促す。
+        // remote_seiranもat_didを持つため`load_wanted_dids`のリストメンバーUNION節に
+        // 元々含まれる（フォロー不要でATP経由の配送だけで届く、マイケルの指摘通り）。
+        // このtouch自体は無くても次回ポーリング（30秒）で反映されるが、追加直後の
+        // 反映を早めるための最適化。
         touch_jetstream_wanted_dids(&state.db).await;
     }
 
@@ -633,6 +641,7 @@ async fn maybe_unfollow_if_unreferenced(state: &AppState, actor_id: i64) {
         Ok(Some(a)) => a.actor_type,
         _ => return,
     };
+    // remote_seiranもプロキシフォロー対象外（追加時と対称、`add_member`のコメント参照）。
     if actor_type != "fedi" {
         return;
     }

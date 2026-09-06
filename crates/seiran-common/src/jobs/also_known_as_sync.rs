@@ -31,9 +31,9 @@ pub async fn handle(owner_actor_id: i64, ctx: Arc<JobContext>) -> Result<(), Str
     else {
         return Ok(());
     };
-    if owner.actor_type != "fedi" {
-        // ローカル/Bskyアクターはここへ来ない（呼び出し元でfediのみに絞っている）が、
-        // 念のための防御。
+    if !matches!(owner.actor_type.as_str(), "fedi" | "remote_seiran") {
+        // ローカル/Bskyアクターはここへ来ない（呼び出し元でfedi/remote_seiranのみに
+        // 絞っている）が、念のための防御。
         return Ok(());
     }
     let Some(owner_ap_uri) = owner.ap_uri.clone() else {

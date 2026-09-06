@@ -784,7 +784,7 @@ async fn build_profile_response_inner(
     // `RemoteFeaturedSync`ジョブを積むだけにし、表示は既存の`pinned_posts`をそのまま返す
     // （Authorized Fetch対応でリモートフェッチが数秒かかることがあり、毎回同期で待つのは
     // 体感速度を損なうため）。
-    if actor.actor_type == "fedi" {
+    if matches!(actor.actor_type.as_str(), "fedi" | "remote_seiran") {
         if is_first_fetch {
             sync_remote_fedi_pinned(state, &actor).await;
         } else {
@@ -1008,10 +1008,10 @@ async fn build_profile_response_inner(
     // （「表示時再検証」パターン）。ユーザーが情報が古いと感じたらリロードすれば、次に開く
     // 頃には反映されている想定（`docs/architecture.md`参照）。
     let also_known_as: Vec<crate::handlers::also_known_as::AlsoKnownAsItem> =
-        if actor.actor_type == "local" || actor.actor_type == "fedi" {
+        if matches!(actor.actor_type.as_str(), "local" | "fedi" | "remote_seiran") {
             match state.also_known_as.list_with_actor_info(actor_id).await {
                 Ok(rows) => {
-                    if actor.actor_type == "fedi" {
+                    if matches!(actor.actor_type.as_str(), "fedi" | "remote_seiran") {
                         state.enqueue_remote_also_known_as_sync(actor_id).await;
                     } else {
                         for row in &rows {

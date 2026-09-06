@@ -24,10 +24,12 @@ pub struct BlockResponse {
 }
 
 /// ブロックを実行する。seiranでは Bsky 準拠の「フォロー関係の強制解除＋相互完全非表示」を
-/// ブロックの定義とする。相手が Fedi なら AP `Block` 配送（受信側は以後のフォローを拒否する
-/// ことが期待される）、相手が Bsky なら `app.bsky.graph.block` をコミットする。いずれの場合も
-/// ローカルでは `blocks` テーブルへの1行挿入により、タイムライン・通知の相互非表示
-/// （`actor_is_hidden_for_viewer`）と書き込みガードの両方が有効になる。
+/// ブロックの定義とする。相手が Fedi 実体（`ap_uri`）を持てば AP `Block` 配送（受信側は
+/// 以後のフォローを拒否することが期待される）、Bsky 実体（`at_did`）を持てば
+/// `app.bsky.graph.block` をコミットする。結婚済み（`actor_type='remote_seiran'`）の相手は
+/// 両方の実体を持つため両チャネルへ独立に送る（フォロー/アンフォローと同じ方針）。
+/// いずれの場合もローカルでは `blocks` テーブルへの1行挿入により、タイムライン・通知の
+/// 相互非表示（`actor_is_hidden_for_viewer`）と書き込みガードの両方が有効になる。
 pub async fn create_block(
     user: AuthedUser,
     State(state): State<AppState>,
@@ -60,8 +62,8 @@ pub async fn create_block(
 
     let now = chrono::Utc::now();
 
-    // プロトコル別配送: Bsky なら app.bsky.graph.block をコミットしてrkeyを保存、
-    // Fedi なら AP Block アクティビティを配送する。
+    // プロトコル別配送: at_didを持てば app.bsky.graph.block をコミットしてrkeyを保存、
+    // ap_uriを持てば AP Block アクティビティを配送する（両方独立、remote_seiranは両方持つ）。
     let mut atp_rkey: Option<String> = None;
     if let Some(did) = target_actor.at_did.as_deref() {
         match state
@@ -72,7 +74,8 @@ pub async fn create_block(
             Ok(rkey) => atp_rkey = Some(rkey),
             Err(e) => tracing::error!("[block] ATP block コミット失敗: {}", e),
         }
-    } else if target_actor.actor_type != "local" {
+    }
+    if target_actor.actor_type != "local" {
         if let (Some(ap_inbox_url), Some(ap_uri)) = (
             target_actor.ap_inbox_url.as_deref(),
             target_actor.ap_uri.as_deref(),
@@ -179,7 +182,8 @@ pub async fn delete_block(
         {
             tracing::error!("[unblock] ATP block 削除コミット失敗: {}", e);
         }
-    } else if target_actor.actor_type != "local" {
+    }
+    if target_actor.actor_type != "local" {
         if let (Some(ap_inbox_url), Some(ap_uri)) = (
             target_actor.ap_inbox_url.as_deref(),
             target_actor.ap_uri.as_deref(),
