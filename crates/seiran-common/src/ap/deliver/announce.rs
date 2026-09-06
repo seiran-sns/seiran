@@ -12,7 +12,7 @@ async fn resolve_announce_object_actor(
     let row = sqlx::query(
         "SELECT a.ap_inbox_url, a.ap_uri
          FROM posts p JOIN actors a ON a.id = p.actor_id
-         WHERE p.ap_object_id = $1 AND a.actor_type = 'fedi' LIMIT 1",
+         WHERE p.ap_object_id = $1 AND a.actor_type IN ('fedi', 'remote_seiran') LIMIT 1",
     )
     .bind(original_ap_object_id)
     .fetch_optional(db)

@@ -294,7 +294,7 @@ pub async fn deliver_direct_message_to_ap(
     let recipient_rows = sqlx::query(
         "SELECT a.ap_uri, a.ap_inbox_url
          FROM post_recipients pr JOIN actors a ON a.id = pr.actor_id
-         WHERE pr.post_id = $1 AND a.actor_type = 'fedi' AND a.ap_uri IS NOT NULL AND a.ap_inbox_url IS NOT NULL",
+         WHERE pr.post_id = $1 AND a.actor_type IN ('fedi', 'remote_seiran') AND a.ap_uri IS NOT NULL AND a.ap_inbox_url IS NOT NULL",
     )
     .bind(post_id)
     .fetch_all(db)

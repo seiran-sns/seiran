@@ -32,7 +32,10 @@ pub(super) async fn fetch_username(db: &PgPool, actor_id: i64) -> Result<String,
         .map_err(|e| ApError::Other(e.to_string()))
 }
 
-/// 指定アクターの AP フォロワー（actor_type='fedi'）の inbox URL 一覧を取得する。
+/// 指定アクターの AP フォロワー（actor_type IN ('fedi', 'remote_seiran')）の inbox URL 一覧を取得する。
+/// `remote_seiran`（#236で相互申告マージが成立した他seiranサーバーのアクター）も AP 経由で
+/// Inbox を持つため、`fedi` と同様に配送対象へ含める（漏らすと AP Create が届かず、ATP側
+/// （Jetstream）経由でのみ投稿が伝わる非対称な状態になる）。
 pub(super) async fn fetch_fedi_follower_inboxes(
     db: &PgPool,
     actor_id: i64,
@@ -43,7 +46,7 @@ pub(super) async fn fetch_fedi_follower_inboxes(
          JOIN actors a ON a.id = f.follower_actor_id
          WHERE f.target_actor_id = $1
            AND f.status = 'accepted'
-           AND a.actor_type = 'fedi'
+           AND a.actor_type IN ('fedi', 'remote_seiran')
            AND a.ap_inbox_url IS NOT NULL",
     )
     .bind(actor_id)
@@ -87,7 +90,7 @@ pub(super) async fn resolve_conversation_broadcast_inboxes(
     if let Some(row) = author_row {
         let actor_id: i64 = row.try_get("actor_id").unwrap_or_default();
         let actor_type: String = row.try_get("actor_type").unwrap_or_default();
-        if actor_type == "fedi" {
+        if actor_type == "fedi" || actor_type == "remote_seiran" {
             if let Ok(Some(inbox)) = row.try_get::<Option<String>, _>("ap_inbox_url") {
                 inboxes.insert(inbox);
             }
@@ -109,7 +112,7 @@ pub(super) async fn resolve_conversation_broadcast_inboxes(
     for row in &child_rows {
         let actor_id: i64 = row.try_get("actor_id").unwrap_or_default();
         let actor_type: String = row.try_get("actor_type").unwrap_or_default();
-        if actor_type == "fedi" {
+        if actor_type == "fedi" || actor_type == "remote_seiran" {
             if let Ok(Some(inbox)) = row.try_get::<Option<String>, _>("ap_inbox_url") {
                 inboxes.insert(inbox);
             }
@@ -120,7 +123,7 @@ pub(super) async fn resolve_conversation_broadcast_inboxes(
     let reactor_rows = sqlx::query(
         "SELECT DISTINCT a.ap_inbox_url
          FROM reactions r JOIN actors a ON a.id = r.actor_id
-         WHERE r.post_id = $1 AND a.actor_type = 'fedi' AND a.ap_inbox_url IS NOT NULL",
+         WHERE r.post_id = $1 AND a.actor_type IN ('fedi', 'remote_seiran') AND a.ap_inbox_url IS NOT NULL",
     )
     .bind(target_post_id)
     .fetch_all(db)
@@ -208,7 +211,7 @@ pub(super) async fn fetch_inboxes_by_ap_uris(
     }
 
     let known_rows = sqlx::query(
-        "SELECT ap_uri, ap_inbox_url FROM actors WHERE ap_uri = ANY($1) AND actor_type = 'fedi'",
+        "SELECT ap_uri, ap_inbox_url FROM actors WHERE ap_uri = ANY($1) AND actor_type IN ('fedi', 'remote_seiran')",
     )
     .bind(&remote_uris)
     .fetch_all(db)

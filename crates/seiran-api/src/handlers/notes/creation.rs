@@ -382,7 +382,12 @@ async fn validate_create_regular_post_input<'a>(
     }
 
     let (deliver_fedi, mut deliver_bsky) = if visibility == "direct" {
-        let has_fedi_recipient = recipient_actors.iter().any(|a| a.actor_type == "fedi");
+        // remote_seiran（#236で相互申告マージが成立した他seiranサーバーのアクター）はAP経由でも
+        // 受信できるため、fediと同様にAP DM配送のトリガーに含める（漏らすとDM自体が
+        // どちらの配送ジョブもenqueueされず届かなくなる）。
+        let has_fedi_recipient = recipient_actors
+            .iter()
+            .any(|a| a.actor_type == "fedi" || a.actor_type == "remote_seiran");
         (has_fedi_recipient, has_bsky_recipient)
     } else {
         (
