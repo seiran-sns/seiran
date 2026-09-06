@@ -128,48 +128,21 @@ async fn handle_update_seiranpost(
         return Ok(());
     }
 
-    // #237 相互一致マージ判定。`insert_remote_with_dedup`/Jetstream `save_bsky_post`と同じ
-    // advisory lock名前空間（key1=2、key2=hashtext(ap_object_id)）でDB反映を直列化する。
-    let mut tx = inbox
-        .db_pool
-        .begin()
-        .await
-        .map_err(|e| format!("トランザクション開始失敗: {}", e))?;
-    crate::advisory_lock::acquire_xact_lock_for_key(
-        &mut tx,
-        crate::advisory_lock::lock_class::POST_MERGE,
-        ap_object_id,
-    )
+    // #237 相互一致マージ判定。直列化はadvisory lockではなく`posts`の複合UNIQUE制約
+    // （`posts_mutual_claim_key`）に委ね、違反時は`retry_on_unique_violation`が
+    // トランザクションの頭からやり直す（`insert_remote_with_dedup`/Jetstream
+    // `save_bsky_post`と同型、`docs/protocols.md` 5節参照）。
+    let merge_target = crate::unique_retry::retry_on_unique_violation(|| {
+        claim_or_find_seiranpost_merge_target(
+            &inbox.db_pool,
+            post_id,
+            post_author_id,
+            ap_object_id,
+            at_uri,
+        )
+    })
     .await
-    .map_err(|e| format!("advisory lock取得失敗: {}", e))?;
-
-    // まず自分自身の申告を記録する（この場でマッチする相手が見つからなくても、
-    // 将来ATP側が到着した際に見つけられるようにするため）。
-    sqlx::query("UPDATE posts SET claimed_at_uri = $1 WHERE id = $2")
-        .bind(at_uri)
-        .bind(post_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("claimed_at_uri更新失敗: {}", e))?;
-
-    let candidate: Option<(i64, i64, Option<String>)> =
-        sqlx::query_as("SELECT id, actor_id, claimed_ap_object_id FROM posts WHERE at_uri = $1")
-            .bind(at_uri)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| format!("マージ候補検索失敗: {}", e))?;
-
-    let merge_target = candidate.and_then(|(doomed_id, doomed_actor_id, claimed_ap_object_id)| {
-        let mutual_match = claimed_ap_object_id.as_deref() == Some(ap_object_id);
-        // 投稿者一貫性チェック（簡略版、5節参照）: 両投稿の投稿者が既に同一actor行に
-        // 解決されている場合のみマージする。オンメモリなアクター結婚は未実装のため、
-        // 不一致ならマージせず孤立行のまま残す。
-        (mutual_match && doomed_actor_id == post_author_id).then_some(doomed_id)
-    });
-
-    tx.commit()
-        .await
-        .map_err(|e| format!("トランザクションコミット失敗: {}", e))?;
+    .map_err(|e| format!("相互一致マージ判定失敗: {}", e))?;
 
     let Some(doomed_id) = merge_target else {
         return Ok(());
@@ -201,4 +174,48 @@ async fn handle_update_seiranpost(
         doomed_id
     );
     Ok(())
+}
+
+/// `handle_update_seiranpost`の相互一致マージ判定の1回分の試行。UNIQUE制約違反時の
+/// リトライは呼び出し元（`retry_on_unique_violation`）が行う。
+///
+/// 先に相手（ATP側で既に到着している行）を探し、相互一致（既存行自身の
+/// `claimed_ap_object_id`が`ap_object_id`を指し返し、かつ投稿者が一致）が確認できれば
+/// マージ対象の`doomed_id`を返す。見つからなければ、将来ATP側が到着した際に見つけて
+/// もらえるよう自分自身の申告（`claimed_at_uri`）だけ記録する。マッチ確認より前に
+/// 自己申告を書いてしまうと、その書き込み自体が同時に届いた相手のINSERTと
+/// `posts_mutual_claim_key`で衝突しうるため、必ず先にSELECTしてから分岐する。
+async fn claim_or_find_seiranpost_merge_target(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+    post_author_id: i64,
+    ap_object_id: &str,
+    at_uri: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let candidate: Option<(i64, i64, Option<String>)> =
+        sqlx::query_as("SELECT id, actor_id, claimed_ap_object_id FROM posts WHERE at_uri = $1")
+            .bind(at_uri)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    let merge_target = candidate.and_then(|(doomed_id, doomed_actor_id, claimed_ap_object_id)| {
+        let mutual_match = claimed_ap_object_id.as_deref() == Some(ap_object_id);
+        // 投稿者一貫性チェック（簡略版、5節参照）: 両投稿の投稿者が既に同一actor行に
+        // 解決されている場合のみマージする。オンメモリなアクター結婚は未実装のため、
+        // 不一致ならマージせず孤立行のまま残す。
+        (mutual_match && doomed_actor_id == post_author_id).then_some(doomed_id)
+    });
+
+    if merge_target.is_none() {
+        sqlx::query("UPDATE posts SET claimed_at_uri = $1 WHERE id = $2")
+            .bind(at_uri)
+            .bind(post_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    tx.commit().await?;
+    Ok(merge_target)
 }

@@ -272,6 +272,9 @@ pub struct InsertFullParams<'a> {
 }
 
 /// `PostRepository::insert_remote_with_dedup` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
+/// 全フィールドがCopy可能な値のみなので`Copy`を導出し、UNIQUE制約違反時のリトライ
+/// （`crate::unique_retry`）で複数回渡せるようにしている。
+#[derive(Clone, Copy)]
 pub struct InsertRemoteWithDedupParams<'a> {
     pub id: i64,
     pub actor_id: i64,
@@ -1660,92 +1663,8 @@ impl PostRepository for PgPostRepository {
         &self,
         params: InsertRemoteWithDedupParams<'_>,
     ) -> Result<(), sqlx::Error> {
-        let mut tx = self.pool.begin().await?;
-
-        // #237 相互一致マージ判定。seiranPostの申告（claimed_at_uri）を持つ投稿のみ、
-        // ap_object_idをキーにした advisory lock でDB反映を直列化してから既存行を探す
-        // （`docs/protocols.md` 5節）。申告の無い一般的なリモート投稿はこの分岐を通らず
-        // 従来通り無条件・ノーロックでINSERTする（cross-column突合が不要なため）。
-        if let Some(claimed_at_uri) = params.claimed_at_uri {
-            crate::advisory_lock::acquire_xact_lock_for_key(
-                &mut tx,
-                crate::advisory_lock::lock_class::POST_MERGE,
-                params.ap_object_id,
-            )
-            .await?;
-
-            let existing: Option<(i64, i64, Option<String>)> = sqlx::query_as(
-                "SELECT id, actor_id, claimed_ap_object_id FROM posts WHERE at_uri = $1",
-            )
-            .bind(claimed_at_uri)
-            .fetch_optional(&mut *tx)
-            .await?;
-
-            if let Some((existing_id, existing_actor_id, claimed_ap_object_id)) = existing {
-                let mutual_match = claimed_ap_object_id.as_deref() == Some(params.ap_object_id);
-                // 投稿者の一貫性チェック（簡略版）: 現時点ではオンメモリなアクター結婚
-                // （#236アルゴリズムの投稿受信時適用）は未実装のため、両投稿の投稿者が
-                // 既に同一actor行に解決されている場合のみマージする。不一致の場合は
-                // マージせず孤立行のまま残す（#236側のアクター統合が別途成立すれば、
-                // 将来の再突合で解消できる余地を残す設計、`docs/protocols.md` 5節）。
-                if mutual_match && existing_actor_id == params.actor_id {
-                    sqlx::query(
-                        "UPDATE posts SET ap_object_id = $1, claimed_ap_object_id = NULL WHERE id = $2",
-                    )
-                    .bind(params.ap_object_id)
-                    .bind(existing_id)
-                    .execute(&mut *tx)
-                    .await?;
-                    tx.commit().await?;
-                    return Ok(());
-                }
-            }
-        }
-
-        let result = sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, content_html, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id, reply_to_ap_uri, reply_to_ref_status, quote_of_ap_uri, quote_of_ref_status, claimed_at_uri)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::post_visibility_enum, $13, $14, $15::post_reference_status, $16, $17::post_reference_status, $18)
-             ON CONFLICT (ap_object_id) DO NOTHING",
-        )
-        .bind(params.id)
-        .bind(params.actor_id)
-        .bind(params.body)
-        .bind(params.content_html)
-        .bind(params.ap_object_id)
-        .bind(params.seiran_uuid)
-        .bind(params.parent_original_post_id)
-        .bind(params.reply_to_post_id)
-        .bind(params.thread_root_post_id)
-        .bind(params.created_at)
-        .bind(params.emoji_map)
-        .bind(params.visibility)
-        .bind(params.quote_of_post_id)
-        .bind(params.reply_to_ap_uri)
-        .bind(params.reply_to_ref_status)
-        .bind(params.quote_of_ap_uri)
-        .bind(params.quote_of_ref_status)
-        .bind(params.claimed_at_uri)
-        .execute(&mut *tx)
-        .await?;
-
-        // ON CONFLICT DO NOTHINGで重複スキップされた場合はpost_recipientsもnotes_countも更新しない。
-        if result.rows_affected() > 0 {
-            if !params.recipient_actor_ids.is_empty() {
-                sqlx::query(
-                    "INSERT INTO post_recipients (post_id, actor_id) SELECT $1, unnest($2::bigint[])",
-                )
-                .bind(params.id)
-                .bind(params.recipient_actor_ids)
-                .execute(&mut *tx)
-                .await?;
-            }
-            sqlx::query("UPDATE actors SET notes_count = notes_count + 1 WHERE id = $1")
-                .bind(params.actor_id)
-                .execute(&mut *tx)
-                .await?;
-        }
-
-        tx.commit().await
+        crate::unique_retry::retry_on_unique_violation(|| self.insert_remote_with_dedup_once(params))
+            .await
     }
 
     async fn finalize_post_merge(
@@ -1823,5 +1742,95 @@ impl PostRepository for PgPostRepository {
         .bind(&thresholds)
         .fetch_all(&self.pool)
         .await
+    }
+}
+
+impl PgPostRepository {
+    /// `insert_remote_with_dedup`の1回分の試行。UNIQUE制約違反時のリトライは
+    /// 呼び出し元（`retry_on_unique_violation`）が行う。
+    async fn insert_remote_with_dedup_once(
+        &self,
+        params: InsertRemoteWithDedupParams<'_>,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
+        // #237 相互一致マージ判定。seiranPostの申告（claimed_at_uri）を持つ投稿のみ、
+        // 既存行を探して相互一致を確認する。申告の無い一般的なリモート投稿はこの分岐を
+        // 通らず従来通り無条件でINSERTする（cross-column突合が不要なため）。直列化は
+        // `posts`の複合UNIQUE制約（`posts_mutual_claim_key`）とここでの呼び出し元の
+        // リトライに委ねる（advisory lockから移行、`docs/protocols.md` 5節参照）。
+        if let Some(claimed_at_uri) = params.claimed_at_uri {
+            let existing: Option<(i64, i64, Option<String>)> = sqlx::query_as(
+                "SELECT id, actor_id, claimed_ap_object_id FROM posts WHERE at_uri = $1",
+            )
+            .bind(claimed_at_uri)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+            if let Some((existing_id, existing_actor_id, claimed_ap_object_id)) = existing {
+                let mutual_match = claimed_ap_object_id.as_deref() == Some(params.ap_object_id);
+                // 投稿者の一貫性チェック（簡略版）: 現時点ではオンメモリなアクター結婚
+                // （#236アルゴリズムの投稿受信時適用）は未実装のため、両投稿の投稿者が
+                // 既に同一actor行に解決されている場合のみマージする。不一致の場合は
+                // マージせず孤立行のまま残す（#236側のアクター統合が別途成立すれば、
+                // 将来の再突合で解消できる余地を残す設計、`docs/protocols.md` 5節）。
+                if mutual_match && existing_actor_id == params.actor_id {
+                    sqlx::query(
+                        "UPDATE posts SET ap_object_id = $1, claimed_ap_object_id = NULL WHERE id = $2",
+                    )
+                    .bind(params.ap_object_id)
+                    .bind(existing_id)
+                    .execute(&mut *tx)
+                    .await?;
+                    tx.commit().await?;
+                    return Ok(());
+                }
+            }
+        }
+
+        let result = sqlx::query(
+            "INSERT INTO posts (id, actor_id, body, content_html, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id, reply_to_ap_uri, reply_to_ref_status, quote_of_ap_uri, quote_of_ref_status, claimed_at_uri)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::post_visibility_enum, $13, $14, $15::post_reference_status, $16, $17::post_reference_status, $18)
+             ON CONFLICT (ap_object_id) DO NOTHING",
+        )
+        .bind(params.id)
+        .bind(params.actor_id)
+        .bind(params.body)
+        .bind(params.content_html)
+        .bind(params.ap_object_id)
+        .bind(params.seiran_uuid)
+        .bind(params.parent_original_post_id)
+        .bind(params.reply_to_post_id)
+        .bind(params.thread_root_post_id)
+        .bind(params.created_at)
+        .bind(params.emoji_map)
+        .bind(params.visibility)
+        .bind(params.quote_of_post_id)
+        .bind(params.reply_to_ap_uri)
+        .bind(params.reply_to_ref_status)
+        .bind(params.quote_of_ap_uri)
+        .bind(params.quote_of_ref_status)
+        .bind(params.claimed_at_uri)
+        .execute(&mut *tx)
+        .await?;
+
+        // ON CONFLICT DO NOTHINGで重複スキップされた場合はpost_recipientsもnotes_countも更新しない。
+        if result.rows_affected() > 0 {
+            if !params.recipient_actor_ids.is_empty() {
+                sqlx::query(
+                    "INSERT INTO post_recipients (post_id, actor_id) SELECT $1, unnest($2::bigint[])",
+                )
+                .bind(params.id)
+                .bind(params.recipient_actor_ids)
+                .execute(&mut *tx)
+                .await?;
+            }
+            sqlx::query("UPDATE actors SET notes_count = notes_count + 1 WHERE id = $1")
+                .bind(params.actor_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        tx.commit().await
     }
 }

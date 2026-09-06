@@ -402,11 +402,18 @@ impl ActorRepository for PgActorRepository {
         avatar_url: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<i64, sqlx::Error> {
+        // 既に`remote_seiran`へ昇格済み（結婚成立済み、#236）の行に対しては`username`を
+        // ATPハンドル形式（`user.pds-domain`）で上書きしない。結婚後の正式なusernameは
+        // Fedi側由来のまま保つ（`seiran_actor_merge::discover_bsky_actor`の対称ロジック）。
+        // このガードが無いと、フォロワーポーリング等マージロジックを経由しない呼び出し元
+        // （`bsky_follower_poll`・`search`等）が定期的に上書きしてしまう（実例:
+        // `@yubao@beta.seiran.org`のusernameが`yubao.beta.seiran.org`に化けた事故）。
         let row: (i64,) = sqlx::query_as(
             "INSERT INTO actors (id, actor_type, at_did, username, domain, display_name, avatar_url, created_at, updated_at)
              VALUES ($1, 'bsky', $2, $3, '', $4, $5, $6, $6)
              ON CONFLICT (at_did) DO UPDATE
-               SET username     = EXCLUDED.username,
+               SET username     = CASE WHEN actors.actor_type = 'remote_seiran' THEN actors.username
+                                        ELSE EXCLUDED.username END,
                    display_name = COALESCE(EXCLUDED.display_name, actors.display_name),
                    avatar_url   = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
                    updated_at   = EXCLUDED.updated_at

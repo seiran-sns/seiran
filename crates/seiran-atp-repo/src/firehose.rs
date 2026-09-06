@@ -729,102 +729,30 @@ async fn save_bsky_post(
     let post_id = generate_snowflake_id(created_at);
 
     // #237 相互一致マージ判定〜INSERTまでを単一トランザクションで行う
-    // （`insert_remote_with_dedup`, AP側と同じ形。advisory lockはトランザクション
-    // スコープのため、ロック取得からコミットまでを1つのtxで一気通貫にしないと
-    // 直列化の意味が無い。ロック解放後に別トランザクション/pool直接呼び出しで
-    // INSERTすると、AP側と ATP側がほぼ同時に到着した際、双方が「まだ相手はいない」と
-    // 判定してから別々にINSERTし2行に分裂しうる）。
-    let insert_outcome: Result<InsertOrMergeOutcome, sqlx::Error> = 'tx: {
-        let mut tx = match pool.begin().await {
-            Ok(tx) => tx,
-            Err(e) => break 'tx Err(e),
-        };
-
-        // seiranPost.counterpartPostId（AP側の真正なap_object_id申告）がある場合のみ、
-        // advisory lock（`insert_remote_with_dedup`と同じkey1=2名前空間、key2は
-        // ap_object_idのhash）でDB反映を直列化してから既存のAP先着行を探す。
-        // 既存行自身のclaimed_at_uriがこの投稿のat_uriを指し返し、かつ投稿者
-        // （actor_id）が一致する場合のみ、新規INSERTせず既存行を更新する
-        // （投稿者一貫性チェックの簡略版、`docs/protocols.md` 5節参照）。
-        if let Some(ap_object_id) = claimed_ap_object_id.as_deref() {
-            if let Err(e) = seiran_common::advisory_lock::acquire_xact_lock_for_key(
-                &mut tx,
-                seiran_common::advisory_lock::lock_class::POST_MERGE,
-                ap_object_id,
+    // （`insert_remote_with_dedup`, AP側と同じ形）。直列化はadvisory lockではなく
+    // `posts`の複合UNIQUE制約（`posts_mutual_claim_key`）に委ね、違反時は
+    // `retry_on_unique_violation`がトランザクションの頭からやり直す。AP側とATP側が
+    // ほぼ同時に到着し双方が「まだ相手はいない」と判定してもINSERT時点で
+    // 制約違反として検知でき、再試行時のSELECTは正しい最新状態を見る
+    // （`docs/protocols.md` 5節参照）。
+    let insert_outcome: Result<InsertOrMergeOutcome, sqlx::Error> =
+        seiran_common::unique_retry::retry_on_unique_violation(|| {
+            insert_or_merge_bsky_post_once(
+                pool,
+                post_id,
+                actor_id,
+                text,
+                at_uri,
+                at_cid,
+                created_at,
+                reply_to_post_id,
+                mention_facets,
+                emoji_map,
+                quote_of_post_id,
+                claimed_ap_object_id.as_deref(),
             )
-            .await
-            {
-                break 'tx Err(e);
-            }
-
-            let existing: Option<(i64, i64, Option<String>)> = match sqlx::query_as(
-                "SELECT id, actor_id, claimed_at_uri FROM posts WHERE ap_object_id = $1",
-            )
-            .bind(ap_object_id)
-            .fetch_optional(&mut *tx)
-            .await
-            {
-                Ok(v) => v,
-                Err(e) => break 'tx Err(e),
-            };
-
-            if let Some((existing_id, existing_actor_id, existing_claim)) = existing {
-                let mutual_match = existing_claim.as_deref() == Some(at_uri);
-                if mutual_match && existing_actor_id == actor_id {
-                    if let Err(e) = sqlx::query(
-                        "UPDATE posts SET at_uri = $1, at_cid = $2, claimed_at_uri = NULL WHERE id = $3",
-                    )
-                    .bind(at_uri)
-                    .bind(at_cid)
-                    .bind(existing_id)
-                    .execute(&mut *tx)
-                    .await
-                    {
-                        break 'tx Err(e);
-                    }
-                    if let Err(e) = tx.commit().await {
-                        break 'tx Err(e);
-                    }
-                    break 'tx Ok(InsertOrMergeOutcome::Merged {
-                        post_id: existing_id,
-                    });
-                }
-            }
-        }
-
-        let result = match sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id, claimed_ap_object_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-             ON CONFLICT (at_uri) DO NOTHING",
-        )
-        .bind(post_id)
-        .bind(actor_id)
-        .bind(text)
-        .bind(at_uri)
-        .bind(at_cid)
-        .bind(created_at)
-        .bind(reply_to_post_id)
-        .bind(mention_facets)
-        .bind(emoji_map)
-        .bind(quote_of_post_id)
-        .bind(claimed_ap_object_id.as_deref())
-        .execute(&mut *tx)
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => break 'tx Err(e),
-        };
-
-        if let Err(e) = tx.commit().await {
-            break 'tx Err(e);
-        }
-
-        Ok(if result.rows_affected() == 0 {
-            InsertOrMergeOutcome::DuplicateSkipped
-        } else {
-            InsertOrMergeOutcome::Inserted
         })
-    };
+        .await;
 
     match insert_outcome {
         Ok(InsertOrMergeOutcome::Merged {
@@ -1165,6 +1093,86 @@ async fn save_bsky_post(
             stream_hub.publish_channel_note(scope, note_json);
         }
     }
+}
+
+/// `save_bsky_post`の相互一致マージ判定〜INSERTの1回分の試行。UNIQUE制約違反時の
+/// リトライは呼び出し元（`retry_on_unique_violation`）が行う。
+#[allow(clippy::too_many_arguments)]
+async fn insert_or_merge_bsky_post_once(
+    pool: &PgPool,
+    post_id: i64,
+    actor_id: i64,
+    text: &str,
+    at_uri: &str,
+    at_cid: &str,
+    created_at: chrono::DateTime<chrono::Utc>,
+    reply_to_post_id: Option<i64>,
+    mention_facets: &JsonValue,
+    emoji_map: &JsonValue,
+    quote_of_post_id: Option<i64>,
+    claimed_ap_object_id: Option<&str>,
+) -> Result<InsertOrMergeOutcome, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // seiranPost.counterpartPostId（AP側の真正なap_object_id申告）がある場合のみ、
+    // 既存のAP先着行を探す。既存行自身のclaimed_at_uriがこの投稿のat_uriを指し返し、
+    // かつ投稿者（actor_id）が一致する場合のみ、新規INSERTせず既存行を更新する
+    // （投稿者一貫性チェックの簡略版、`docs/protocols.md` 5節参照）。直列化は
+    // `posts`の複合UNIQUE制約（`posts_mutual_claim_key`）と呼び出し元のリトライに
+    // 委ねる（advisory lockから移行）。
+    if let Some(ap_object_id) = claimed_ap_object_id {
+        let existing: Option<(i64, i64, Option<String>)> = sqlx::query_as(
+            "SELECT id, actor_id, claimed_at_uri FROM posts WHERE ap_object_id = $1",
+        )
+        .bind(ap_object_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if let Some((existing_id, existing_actor_id, existing_claim)) = existing {
+            let mutual_match = existing_claim.as_deref() == Some(at_uri);
+            if mutual_match && existing_actor_id == actor_id {
+                sqlx::query(
+                    "UPDATE posts SET at_uri = $1, at_cid = $2, claimed_at_uri = NULL WHERE id = $3",
+                )
+                .bind(at_uri)
+                .bind(at_cid)
+                .bind(existing_id)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
+                return Ok(InsertOrMergeOutcome::Merged {
+                    post_id: existing_id,
+                });
+            }
+        }
+    }
+
+    let result = sqlx::query(
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id, claimed_ap_object_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (at_uri) DO NOTHING",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .bind(text)
+    .bind(at_uri)
+    .bind(at_cid)
+    .bind(created_at)
+    .bind(reply_to_post_id)
+    .bind(mention_facets)
+    .bind(emoji_map)
+    .bind(quote_of_post_id)
+    .bind(claimed_ap_object_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(if result.rows_affected() == 0 {
+        InsertOrMergeOutcome::DuplicateSkipped
+    } else {
+        InsertOrMergeOutcome::Inserted
+    })
 }
 
 // ─── リポスト取り込み（app.bsky.feed.repost）───────────────────────────────

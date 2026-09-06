@@ -8,8 +8,15 @@
 //! **既存行が見つかった場合は結婚ロジックを起動しない**（新規作成時のみ試みる）。
 //! まだ複数のseiranサーバーが実運用されていないため、既に両側の行が別々に存在して
 //! しまっている状態からの2行統合は扱わない、という方針による（同節参照）。
+//!
+//! AP経由発見とATP経由発見がほぼ同時に走った場合の直列化は、`pg_advisory_xact_lock`
+//! ではなく`actors`の複合UNIQUE制約（`actors_mutual_claim_key`、マイグレーション
+//! `20260906000000_actor_post_mutual_claim_unique.sql`参照）に委ねる。相互に申告し
+//! 合っている2行は`(COALESCE(ap_uri, claimed_ap_uri), COALESCE(at_did, claimed_at_did))`
+//! が同じ値に収束するため、片方をINSERT/UPDATEしようとした時点でUNIQUE制約違反になる。
+//! `crate::unique_retry`でこれを検知しトランザクションの頭からやり直す（advisory lockの
+//! キー不一致によるデッドロック・レース漏れのリスクを避けるためのマイケルの提案）。
 
-use crate::advisory_lock::{acquire_xact_lock_for_key, lock_class};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
@@ -41,8 +48,44 @@ pub async fn discover_fedi_actor(
     claimed_at_did: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<DiscoveryOutcome, sqlx::Error> {
+    crate::unique_retry::retry_on_unique_violation(|| async {
+        discover_fedi_actor_once(
+            pool,
+            id,
+            ap_uri,
+            ap_inbox_url,
+            username,
+            domain,
+            display_name,
+            avatar_url,
+            bio,
+            emoji_map,
+            profile_fields,
+            claimed_at_did,
+            now,
+        )
+        .await
+    })
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn discover_fedi_actor_once(
+    pool: &PgPool,
+    id: i64,
+    ap_uri: &str,
+    ap_inbox_url: &str,
+    username: &str,
+    domain: &str,
+    display_name: &str,
+    avatar_url: Option<&str>,
+    bio: Option<&str>,
+    emoji_map: &serde_json::Value,
+    profile_fields: &serde_json::Value,
+    claimed_at_did: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<DiscoveryOutcome, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    acquire_xact_lock_for_key(&mut tx, lock_class::ACTOR_MERGE, ap_uri).await?;
 
     let existing_id: Option<i64> = sqlx::query_scalar("SELECT id FROM actors WHERE ap_uri = $1")
         .bind(ap_uri)
@@ -169,13 +212,34 @@ pub async fn discover_bsky_actor(
     claimed_ap_uri: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<DiscoveryOutcome, sqlx::Error> {
-    // fedi IDをロックキーに使う（DIDはローカルユーザーもドメイン未確定期間は
-    // 持たず後から任意発行されうるため、常に先に確定するfedi IDの方を使う。
-    // `docs/protocols.md` 11節参照）。自身の申告が無ければDID自体をキーにする
-    // （相手を騙る余地は無い自分自身のDIDなので安全）。
+    crate::unique_retry::retry_on_unique_violation(|| async {
+        discover_bsky_actor_once(
+            pool,
+            id,
+            at_did,
+            handle,
+            display_name,
+            avatar_url,
+            claimed_ap_uri,
+            now,
+        )
+        .await
+    })
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn discover_bsky_actor_once(
+    pool: &PgPool,
+    id: i64,
+    at_did: &str,
+    handle: &str,
+    display_name: Option<&str>,
+    avatar_url: Option<&str>,
+    claimed_ap_uri: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<DiscoveryOutcome, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    let lock_key = claimed_ap_uri.unwrap_or(at_did);
-    acquire_xact_lock_for_key(&mut tx, lock_class::ACTOR_MERGE, lock_key).await?;
 
     let existing_id: Option<i64> = sqlx::query_scalar("SELECT id FROM actors WHERE at_did = $1")
         .bind(at_did)
