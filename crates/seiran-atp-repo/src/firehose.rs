@@ -818,10 +818,19 @@ async fn save_bsky_post(
                     &seiran_link_cards,
                 )
                 .await;
-            } else if let Some(card) = &link_card {
+            } else if let Some(card) = link_card.as_ref().filter(|_| poll.is_none()) {
                 // URLカード（Bskyは常に最大1件、position=0固定）。埋め込みプレーヤーのiframe src
                 // （oEmbed discovery）はここでは未解決のため、後追いでJob::LinkCardEmbedResolveへ
                 // 委ねる（Bskyのexternal embedにはiframe情報が無いため）。
+                //
+                // `poll.is_none()`ガード: Bskyの埋め込み枠は1投稿につき1つしか無く、投票
+                // （`poll`）付き投稿をBskyへ配信する際は`resolve_poll_embed`が「自分自身の
+                // URL＋選択肢の箇条書きdescription」という投票の代替表現を`external` embed
+                // として自動生成する（Bskyに投票型が無いため）。このガードが無いと、
+                // ATP経由でのみ受信した投票付き投稿（`seiranPost.linkCards[]`は当然空）で、
+                // この投票の代替表現を本物のリンクカードと誤認して保存してしまい、本来の
+                // 投票ウィジェットとは別に同じ選択肢を並べただけの余計なカードが表示される
+                // （実機確認、AP受信側`note_save.rs`は本文URL抽出方式のためこの問題が無い）。
                 let result = sqlx::query(
                     "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
                      VALUES ($1, 0, $2, $3, $4, $5)",
