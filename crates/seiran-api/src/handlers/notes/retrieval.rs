@@ -328,9 +328,13 @@ pub async fn get_note_ap(
         if let Some(cw) = basis.content_warning.as_deref() {
             ap_note["summary"] = serde_json::Value::String(cw.to_string());
         }
-        if let Ok(Some(seiran_post)) =
-            seiran_common::ap::deliver::build_seiran_post_for_basis(&state.db, post_id, &basis)
-                .await
+        if let Ok(Some(seiran_post)) = seiran_common::ap::deliver::build_seiran_post_for_basis(
+            &state.db,
+            post_id,
+            &basis,
+            &converted_body,
+        )
+        .await
         {
             ap_note["seiranPost"] = seiran_post.to_value();
         }

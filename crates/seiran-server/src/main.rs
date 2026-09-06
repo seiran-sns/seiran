@@ -218,6 +218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pool.clone(),
             Arc::new(follow_exec_atp_tx),
             Arc::clone(&http_client),
+            worker_local_domain.clone(),
         ));
         // standalone worker には WS 接続クライアントが居ないため空の StreamHub を使う
         // （InboundActivityProcess の realtime 配信は no-op になる。Role::Firehose と同じ扱い）。

@@ -502,7 +502,7 @@ seiranの投稿はAP標準のNoteよりもATP標準のpostよりも表現力が�
 
 ```jsonc
 {
-  "body": "変形前の生プレーンテキスト（Single Source of Truth）",
+  "body": "変形前の生プレーンテキスト（Single Source of Truth）。ただしローカルメンションのみ`@user@local_domain`（Fediverse形式）へ完全修飾済みの値を使う——生の`posts.body`（ドメイン省略の`@user`）をそのまま使うと、受信側の他seiranサーバーでは別ユーザーへのメンションと誤認される（実地検証で発覚、2026-09-06。`ap::deliver::activity::build_seiran_post_for_basis`・`atp::service::build_seiran_post_for_atp_commit`が共に`convert_mentions_for_ap`で変換する）",
   "language": "ja" | null,
   "visibility": "public" | "unlisted" | "followers_only" | "direct",
   "contentWarning": "CW原文" | null,

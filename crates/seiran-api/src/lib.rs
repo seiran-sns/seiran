@@ -546,6 +546,7 @@ pub async fn init_state(
         pool.clone(),
         Arc::clone(&atp_event_tx),
         Arc::clone(&http_client),
+        local_domain.clone(),
     );
     if let Some(redis_url) = atp_event_redis_url {
         match atp_service.with_redis_bridge(&redis_url).await {

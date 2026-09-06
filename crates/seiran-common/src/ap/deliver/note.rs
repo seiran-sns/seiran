@@ -33,27 +33,34 @@ pub async fn deliver_post_to_ap_followers(
         return Ok(());
     }
 
-    // override_bodyがある場合（リポストのフォールバックテキスト等、投稿者本人が書いた
-    // 本文ではない合成テキスト）はそもそも「投稿の完全再現」対象ではないため、
-    // seiranPost自体を埋め込まない。
-    let seiran_post = if override_body.is_none() {
-        build_seiran_post_for_basis(db, post_id, &basis).await?
-    } else {
-        None
-    };
-
-    let body: String = override_body.map(str::to_owned).unwrap_or(basis.body);
+    let body: String = override_body
+        .map(str::to_owned)
+        .unwrap_or_else(|| basis.body.clone());
 
     // override_body（リポストのフォールバックテキスト等、投稿者本人が書いた本文ではない合成テキスト）
     // の場合はメンション変換をせずそのまま HTML 化する。通常投稿（override_body なし）はここで
     // 本文中のメンションを解決し、`<a>` アンカーと `tag[]`（AP Mention）を組み立てる。
-    let (content_html, mut tag, mention_uris): (String, Vec<serde_json::Value>, Vec<String>) =
-        if override_body.is_some() {
-            (plain_to_html(&body), Vec::new(), Vec::new())
-        } else {
-            html_and_tags_for_body(&body, local_domain, db, ap_client).await
-        };
+    let (content_html, mut tag, mention_uris, converted_body): (
+        String,
+        Vec<serde_json::Value>,
+        Vec<String>,
+        String,
+    ) = if override_body.is_some() {
+        (plain_to_html(&body), Vec::new(), Vec::new(), body.clone())
+    } else {
+        html_and_tags_for_body(&body, local_domain, db, ap_client).await
+    };
     append_emoji_tags(&body, &basis.emoji_map, &mut tag, local_domain);
+
+    // override_bodyがある場合（リポストのフォールバックテキスト等、投稿者本人が書いた
+    // 本文ではない合成テキスト）はそもそも「投稿の完全再現」対象ではないため、
+    // seiranPost自体を埋め込まない。`qualified_body`には`converted_body`
+    // （ローカルメンション完全修飾済み）を渡す（`build_seiran_post_for_basis`のドキュメント参照）。
+    let seiran_post = if override_body.is_none() {
+        build_seiran_post_for_basis(db, post_id, &basis, &converted_body).await?
+    } else {
+        None
+    };
 
     // 配送先はフォロワー + 本文中でメンションした相手（フォロワーでなくても通知を届ける）の和集合。
     let mut inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
@@ -148,7 +155,18 @@ pub async fn deliver_seiranpost_update(
     if basis.visibility == "direct" {
         return Ok(());
     }
-    let Some(seiran_post) = build_seiran_post_for_basis(db, post_id, &basis).await? else {
+    // Create時点と同じ in_reply_to / quote_url / 実効本文を再構築する（このUpdateジョブは
+    // Createとは独立に後から起動されるため、元ジョブの計算済みoverride_bodyを再利用できない）。
+    let (in_reply_to, quote_url, effective_body) =
+        resolve_reply_and_quote_for_update(db, post_id, &basis.body).await;
+
+    let (content_html, mut tag, mention_uris, converted_body) =
+        html_and_tags_for_body(&effective_body, local_domain, db, ap_client).await;
+    append_emoji_tags(&effective_body, &basis.emoji_map, &mut tag, local_domain);
+
+    let Some(seiran_post) =
+        build_seiran_post_for_basis(db, post_id, &basis, &converted_body).await?
+    else {
         return Ok(());
     };
     if seiran_post.counterpart_post_id.is_none() {
@@ -159,15 +177,6 @@ pub async fn deliver_seiranpost_update(
         );
         return Ok(());
     }
-
-    // Create時点と同じ in_reply_to / quote_url / 実効本文を再構築する（このUpdateジョブは
-    // Createとは独立に後から起動されるため、元ジョブの計算済みoverride_bodyを再利用できない）。
-    let (in_reply_to, quote_url, effective_body) =
-        resolve_reply_and_quote_for_update(db, post_id, &basis.body).await;
-
-    let (content_html, mut tag, mention_uris) =
-        html_and_tags_for_body(&effective_body, local_domain, db, ap_client).await;
-    append_emoji_tags(&effective_body, &basis.emoji_map, &mut tag, local_domain);
 
     let mut inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
     for inbox in fetch_inboxes_by_ap_uris(
@@ -314,7 +323,7 @@ pub async fn deliver_direct_message_to_ap(
         .filter_map(|r| r.try_get::<String, _>("ap_inbox_url").ok())
         .collect();
 
-    let (content_html, mut tag, _mention_uris) =
+    let (content_html, mut tag, _mention_uris, _converted_body) =
         html_and_tags_for_body(&basis.body, local_domain, db, ap_client).await;
     append_emoji_tags(&basis.body, &basis.emoji_map, &mut tag, local_domain);
 

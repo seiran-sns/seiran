@@ -177,9 +177,18 @@ fn blob_cids_for_media(media: &BskyEmbed) -> Vec<Cid> {
 /// 投稿者がまだAP側の識別子（`ap_uri`）を持たない異常系は実運用上あり得ない
 /// （ローカルアクターは登録時に`insert_local`が`ap_uri`を必ず設定する）ため、
 /// 取得できなければログのみでseiranPost自体を諦める（コミット自体は失敗させない）。
+///
+/// `posts.body`（DBの生プレーンテキスト）はドメイン省略のローカル短縮メンション（`@user`）を
+/// そのまま含みうる。これを`seiranPost.body`へ生のまま埋め込むと、受信側の他seiranサーバーでは
+/// 別ユーザーへのメンションと誤認されるバグになる（AP側`build_seiran_post_for_basis`と同種、
+/// 実地検証で発覚、2026-09-06）。このため`commit_post`/`commit_quote`が渡す`text`
+/// （`convert_mentions_for_bsky`変換済み、ATPハンドル形式`@user.domain`）は使わず、AP側と表記を
+/// 揃えるためここで改めて`convert_mentions_for_ap`（Fediverse形式`@user@domain`）を掛け直す。
 async fn build_seiran_post_for_atp_commit(
     pool: &PgPool,
     post_id: i64,
+    local_domain: &str,
+    http_client: &reqwest::Client,
 ) -> Option<crate::seiran_post::SeiranPost> {
     let row = sqlx::query(
         "SELECT p.body, p.language, p.visibility::text AS visibility, p.content_warning,
@@ -202,13 +211,17 @@ async fn build_seiran_post_for_atp_commit(
         return None;
     };
 
+    let raw_body: String = row.try_get("body").unwrap_or_default();
+    let (qualified_body, _mentions) =
+        crate::mention::convert_mentions_for_ap(&raw_body, local_domain, pool, http_client).await;
+
     let (attachments, link_cards) =
         crate::seiran_post::fetch_attachments_and_link_cards(pool, post_id)
             .await
             .unwrap_or_default();
 
     Some(crate::seiran_post::SeiranPost {
-        body: row.try_get("body").unwrap_or_default(),
+        body: qualified_body,
         language: row.try_get("language").ok().flatten(),
         visibility: row
             .try_get("visibility")
@@ -229,6 +242,10 @@ pub struct AtpCommitService {
     pool: PgPool,
     event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
     http_client: Arc<reqwest::Client>,
+    /// `seiranPost.body`（#237）のローカルメンション完全修飾（`build_seiran_post_for_atp_commit`
+    /// 参照）に使う。AP側と表記を揃えるため`convert_mentions_for_bsky`ではなく
+    /// `convert_mentions_for_ap`（Fediverse形式 `@user@domain`）を使う。
+    local_domain: crate::LocalDomain,
     /// `Some` の場合、コミットイベントはローカルの `event_tx` へ直接送らず Redis 経由で
     /// 配信する（プロセス間配信ブリッジが有効。`with_redis_bridge` 参照）。
     redis_pub: Option<redis::aio::ConnectionManager>,
@@ -239,11 +256,13 @@ impl AtpCommitService {
         pool: PgPool,
         event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
         http_client: Arc<reqwest::Client>,
+        local_domain: crate::LocalDomain,
     ) -> Self {
         Self {
             pool,
             event_tx,
             http_client,
+            local_domain,
             redis_pub: None,
         }
     }
@@ -646,7 +665,13 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        let seiran_post = build_seiran_post_for_atp_commit(&self.pool, post_id).await;
+        let seiran_post = build_seiran_post_for_atp_commit(
+            &self.pool,
+            post_id,
+            self.local_domain.as_str(),
+            &self.http_client,
+        )
+        .await;
         let blob_cids = blob_cids_for_embed(&embed);
         let (record_cbor, record_cid) = encode_bsky_feed_post(
             text,
@@ -1596,7 +1621,13 @@ impl AtpCommitService {
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
-        let seiran_post = build_seiran_post_for_atp_commit(&self.pool, post_id).await;
+        let seiran_post = build_seiran_post_for_atp_commit(
+            &self.pool,
+            post_id,
+            self.local_domain.as_str(),
+            &self.http_client,
+        )
+        .await;
         let blob_cids = blob_cids_for_embed(&embed);
         let (record_cbor, record_cid) = encode_bsky_feed_post(
             text,

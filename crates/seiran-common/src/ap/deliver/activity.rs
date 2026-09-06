@@ -580,10 +580,17 @@ pub async fn fetch_post_activity_basis(
 /// `PostActivityBasis`から`seiranPost`拡張オブジェクトを組み立てる（#237）。
 /// 投稿者がまだATP DIDを持たない（ドメイン未確定のシングルホストモード）場合は
 /// `counterpartAuthorId`を埋められないため`None`（seiranPost自体を省略）を返す。
+///
+/// `qualified_body`は`basis.body`（DBの生プレーンテキスト）ではなく、`html_and_tags_for_body`
+/// が返す変換済み平文（ローカルメンションが`@user@local_domain`へ完全修飾済み）を渡すこと。
+/// 生の`basis.body`をそのまま使うと、ドメイン省略の短縮メンション（`@user`）が受信側の他
+/// seiranサーバーへそのまま持ち込まれ、別ユーザーへのメンションと誤認されるバグになる
+/// （実地検証で発覚、2026-09-06。呼び出し元は必ず`convert_mentions_for_ap`済みのテキストを渡す）。
 pub async fn build_seiran_post_for_basis(
     db: &PgPool,
     post_id: i64,
     basis: &PostActivityBasis,
+    qualified_body: &str,
 ) -> Result<Option<crate::seiran_post::SeiranPost>, ApError> {
     let Some(at_did) = basis.at_did.clone() else {
         return Ok(None);
@@ -593,7 +600,7 @@ pub async fn build_seiran_post_for_basis(
             .await
             .map_err(|e| ApError::Other(format!("seiranPost添付/リンクカード取得エラー: {}", e)))?;
     Ok(Some(crate::seiran_post::SeiranPost {
-        body: basis.body.clone(),
+        body: qualified_body.to_string(),
         language: basis.language.clone(),
         visibility: basis.visibility.clone(),
         content_warning: basis.content_warning.clone(),
@@ -638,12 +645,16 @@ pub fn append_emoji_tags(
 /// メンション先アクターURI一覧（`kind==Mention`のみ、重複排除）を組み立てる。
 /// 3つ目の戻り値は、フォロー関係に関係なくメンション先へ通知（配送）を届けるために使う
 /// （`deliver_post_to_ap_followers` 参照）。
+/// 戻り値の4つ目（`converted`）は、ローカルメンションを完全修飾形（`@user@local_domain`）へ
+/// 変換済みの平文。`seiranPost.body`（#237）にはこちらを使うこと——DBの生`posts.body`を
+/// そのまま使うと、ドメイン省略の短縮メンション（`@user`）が受信側seiranにそのまま持ち込まれ、
+/// 受信側では別ユーザーへのメンションと誤認されうる（実地検証で発覚、2026-09-06）。
 pub(super) async fn html_and_tags_for_body(
     body: &str,
     local_domain: &str,
     db: &PgPool,
     ap_client: &ApClient,
-) -> (String, Vec<serde_json::Value>, Vec<String>) {
+) -> (String, Vec<serde_json::Value>, Vec<String>, String) {
     let (converted, mentions) =
         crate::mention::convert_mentions_for_ap(body, local_domain, db, &ap_client.http).await;
     let html = plain_to_html_with_mentions(&converted, &mentions);
@@ -655,7 +666,7 @@ pub(super) async fn html_and_tags_for_body(
         .collect();
     mention_uris.sort();
     mention_uris.dedup();
-    (html, tag, mention_uris)
+    (html, tag, mention_uris, converted)
 }
 
 #[cfg(test)]

@@ -77,6 +77,7 @@ async fn process_locked(
         pool.clone(),
         Arc::new(event_tx),
         Arc::clone(&ctx.ap_client.http),
+        cfg.local_domain.clone(),
     );
 
     let target_ids = follows
