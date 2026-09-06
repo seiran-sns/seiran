@@ -3,15 +3,14 @@ import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import i18n from "../../i18n";
 import { api, getErrorMessage, NotificationItem } from "../../api/client";
-import type { NotificationUser } from "../../api/types";
 import { useAuth } from "../../contexts/AuthContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
-import { UserRelationshipTarget } from "../../hooks/useUserRelationshipMenu";
 import { profilePath } from "../../lib/format";
 import { parseReactionContent } from "../../lib/customEmojis";
+import { isSelfUser, toRelationshipTarget } from "../../lib/userRelationship";
 import { mediaUrl } from "../../utils/mediaProxy";
 import panel from "../common/Panel.module.css";
 import Avatar from "../note/Avatar";
@@ -22,21 +21,6 @@ import UserHoverArea from "../note/UserHoverArea";
 import UserLinkTag from "../note/UserLinkTag";
 import styles from "./NotificationsPanel.module.css";
 import TwemojiEmoji from "../common/TwemojiEmoji";
-
-/** 通知ユーザーを対ユーザー操作メニュー用の`UserRelationshipTarget`に変換する。 */
-function toRelationshipTarget(u: NotificationUser): UserRelationshipTarget {
-  return {
-    username: u.username,
-    domain: u.host ?? undefined,
-    actorId: u.id,
-    reportLabel: `@${u.username}${u.host ? `@${u.host}` : ""}`,
-  };
-}
-
-/** 通知に出てくるユーザーが閲覧者自身かどうか。 */
-function isSelfUser(currentUser: { username: string } | null, u?: NotificationUser): boolean {
-  return !!currentUser && !!u && currentUser.username === u.username && (!u.host || u.host === window.location.hostname);
-}
 
 /** Misskey本家仕様のコロンなしshortcodeキー（`user.emojis`）を、`EmojiText` が期待する
  * `:shortcode:` 形式のキーへ変換する（#186）。 */

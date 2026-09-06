@@ -43,6 +43,11 @@
   vertical-align: middle;
 }
 
+.avatarLink {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
 .text {
   font-size: 14px;
   color: var(--text, #1b2333);

@@ -1,12 +1,17 @@
 import { Trans } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import i18n from "../../i18n";
 import { ReactionEvent } from "../../api/client";
+import { useAuth } from "../../contexts/AuthContext";
 import { profilePath } from "../../lib/format";
+import { isSelfUser, toRelationshipTarget } from "../../lib/userRelationship";
 import { mediaUrl } from "../../utils/mediaProxy";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
 import NoteHoverPreview from "./NoteHoverPreview";
+import UserContextMenu from "./UserContextMenu";
+import UserHoverArea from "./UserHoverArea";
+import UserLinkTag from "./UserLinkTag";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./ReactionEventCard.module.css";
 
@@ -25,13 +30,19 @@ interface ReactionEventCardProps {
  */
 export default function ReactionEventCard({ event }: ReactionEventCardProps) {
   const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
 
   const who = event.targetUser.displayName || event.targetUser.username;
+  const relationshipTarget = toRelationshipTarget({
+    id: event.targetUser.id,
+    username: event.targetUser.username,
+    host: event.targetUser.domain,
+  });
   const userLink = (
-    <Link
+    <UserLinkTag
+      target={relationshipTarget}
       to={profilePath(event.targetUser.username, event.targetUser.domain)}
       className={styles.userLink}
-      onClick={(e) => e.stopPropagation()}
     />
   );
   const emojiName = <EmojiText text={who} emojis={event.targetUserEmojis} />;
@@ -51,7 +62,16 @@ export default function ReactionEventCard({ event }: ReactionEventCardProps) {
           <TwemojiEmoji emoji={event.reaction} className={styles.icon} />
         )}{" "}
         <span className={styles.avatarWrap}>
-          <Avatar url={event.targetUser.avatarUrl} name={who} size={20} />
+          <UserHoverArea
+            target={{ username: event.targetUser.username, domain: event.targetUser.domain }}
+            isSelf={isSelfUser(currentUser, { username: event.targetUser.username, host: event.targetUser.domain })}
+          >
+            <UserContextMenu target={relationshipTarget}>
+              <span className={styles.avatarLink}>
+                <Avatar url={event.targetUser.avatarUrl} name={who} size={20} />
+              </span>
+            </UserContextMenu>
+          </UserHoverArea>
         </span>{" "}
         <span className={styles.text}>
           <Trans
