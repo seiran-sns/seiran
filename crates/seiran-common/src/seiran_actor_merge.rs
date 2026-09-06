@@ -251,10 +251,13 @@ async fn discover_bsky_actor_once(
         // 既に`remote_seiran`へ昇格済み（結婚成立済み）の行に対しては、`username`を
         // ATPハンドル形式で上書きせず（結婚後の正式なusernameはFedi側由来のまま保つ）、
         // `claimed_ap_uri`も復活させない。理由は`discover_fedi_actor`の対称コメント参照
-        // （レースコンディション実地検証で発覚）。
+        // （レースコンディション実地検証で発覚）。`at_handle`はプロフィール画面のBsky ID
+        // 表示専用の別列のため、`username`とは独立に`remote_seiran`でも常に最新値へ更新する
+        // （マイケル指示、2026-09-06）。
         sqlx::query(
             "UPDATE actors SET username = CASE WHEN actor_type = 'remote_seiran' THEN username \
                                                 ELSE $2 END, \
+             at_handle = $2, \
              display_name = COALESCE($3, display_name), \
              avatar_url = COALESCE($4, avatar_url), updated_at = $5, \
              claimed_ap_uri = CASE WHEN actor_type = 'remote_seiran' THEN claimed_ap_uri \
@@ -281,7 +284,7 @@ async fn discover_bsky_actor_once(
                 match counterpart {
                     Some((counterpart_id, Some(claimed))) if claimed == at_did => {
                         sqlx::query(
-                            "UPDATE actors SET at_did = $2, actor_type = 'remote_seiran', \
+                            "UPDATE actors SET at_did = $2, at_handle = $6, actor_type = 'remote_seiran', \
                              claimed_at_did = NULL, \
                              display_name = COALESCE($3, display_name), \
                              avatar_url = COALESCE($4, avatar_url), updated_at = $5 \
@@ -292,6 +295,7 @@ async fn discover_bsky_actor_once(
                         .bind(display_name)
                         .bind(avatar_url)
                         .bind(now)
+                        .bind(handle)
                         .execute(&mut *tx)
                         .await?;
                         tracing::info!(
@@ -314,8 +318,8 @@ async fn discover_bsky_actor_once(
             None => {
                 sqlx::query(
                     "INSERT INTO actors (id, actor_type, at_did, username, domain, display_name, \
-                     avatar_url, created_at, updated_at, claimed_ap_uri) \
-                     VALUES ($1, 'bsky', $2, $3, '', $4, $5, $6, $6, $7)",
+                     avatar_url, at_handle, created_at, updated_at, claimed_ap_uri) \
+                     VALUES ($1, 'bsky', $2, $3, '', $4, $5, $3, $6, $6, $7)",
                 )
                 .bind(id)
                 .bind(at_did)

@@ -336,6 +336,21 @@ export default function ProfilePage() {
                   @{profile.username}.{profile.domain}
                 </span>
               </>
+            ) : profile.actor_type === "remote_seiran" ? (
+              <>
+                {/* remote_seiran（他seiranサーバーとの結婚成立済みアクター）はローカル
+                    ユーザーと同じくFedi・Bsky両方の実体を持つため、2行で書き並べる。 */}
+                <span className={styles.acct}>
+                  <img src={fediverseLogo} alt="" className={styles.acctProtoIcon} />
+                  @{profile.username}@{profile.domain}
+                </span>
+                {profile.at_handle && (
+                  <span className={styles.acct}>
+                    <img src={blueskyLogo} alt="" className={styles.acctProtoIcon} />
+                    @{profile.at_handle}
+                  </span>
+                )}
+              </>
             ) : (
               <span className={styles.acct}>
                 {profile.actor_type === "bsky" && (
@@ -473,29 +488,6 @@ export default function ProfilePage() {
               ))}
             </div>
           )}
-
-          {/* プロトコルアイデンティティ */}
-          <div className={styles.identity}>
-            {profile.at_did && (
-              <div className={styles.idRow}>
-                <span className={styles.idLabel}>DID</span>
-                <span className={styles.idValue}>{profile.at_did}</span>
-              </div>
-            )}
-            {profile.ap_uri && (
-              <div className={styles.idRow}>
-                <span className={styles.idLabel}>URI</span>
-                <a
-                  className={styles.idValue}
-                  href={profile.ap_uri}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {profile.ap_uri}
-                </a>
-              </div>
-            )}
-          </div>
 
           {isSelf && (
             <div className={styles.followArea}>

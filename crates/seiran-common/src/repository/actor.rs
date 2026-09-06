@@ -17,6 +17,9 @@ pub struct Actor {
     pub ap_uri: Option<String>,
     pub ap_inbox_url: Option<String>,
     pub at_did: Option<String>,
+    /// AT Protocolハンドル（`user.pds-domain`形式）。`bsky`型は常に最新値、`remote_seiran`型は
+    /// マージ後も（`username`と異なり）Bsky側発見のたびに更新され続ける（#236拡張）。
+    pub at_handle: Option<String>,
     pub at_repo_cid: Option<String>,
     pub at_repo_rev: Option<String>,
     pub at_signing_key_pem: Option<String>,
@@ -53,7 +56,7 @@ pub struct Actor {
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
-    display_name, ap_uri, ap_inbox_url, at_did, at_repo_cid, at_repo_rev, at_signing_key_pem, \
+    display_name, ap_uri, ap_inbox_url, at_did, at_handle, at_repo_cid, at_repo_rev, at_signing_key_pem, \
     bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields, \
     birth_date, birth_date_public, is_locked, claimed_ap_uri, claimed_at_did, withdrawn_at";
 
@@ -408,14 +411,17 @@ impl ActorRepository for PgActorRepository {
         // このガードが無いと、フォロワーポーリング等マージロジックを経由しない呼び出し元
         // （`bsky_follower_poll`・`search`等）が定期的に上書きしてしまう（実例:
         // `@yubao@beta.seiran.org`のusernameが`yubao.beta.seiran.org`に化けた事故）。
+        // 一方`at_handle`はプロフィール画面のBsky ID表示専用の別列のため、`username`とは
+        // 独立に`remote_seiran`でも常に最新値へ更新する（マイケル指示、2026-09-06）。
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO actors (id, actor_type, at_did, username, domain, display_name, avatar_url, created_at, updated_at)
-             VALUES ($1, 'bsky', $2, $3, '', $4, $5, $6, $6)
+            "INSERT INTO actors (id, actor_type, at_did, username, domain, display_name, avatar_url, at_handle, created_at, updated_at)
+             VALUES ($1, 'bsky', $2, $3, '', $4, $5, $3, $6, $6)
              ON CONFLICT (at_did) DO UPDATE
                SET username     = CASE WHEN actors.actor_type = 'remote_seiran' THEN actors.username
                                         ELSE EXCLUDED.username END,
                    display_name = COALESCE(EXCLUDED.display_name, actors.display_name),
                    avatar_url   = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
+                   at_handle    = EXCLUDED.at_handle,
                    updated_at   = EXCLUDED.updated_at
              RETURNING id",
         )

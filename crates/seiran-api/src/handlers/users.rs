@@ -320,6 +320,10 @@ pub struct ProfileResponse {
     pub instance: Option<RemoteInstanceInfo>,
     pub ap_uri: Option<String>,
     pub at_did: Option<String>,
+    /// AT Protocolハンドル（`user.pds-domain`形式）。`remote_seiran`のプロフィール画面で
+    /// Bsky ID行の表示に使う（`fedi`単独/`local`は無関係、`bsky`単独は`username`と同値）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at_handle: Option<String>,
     pub bio: Option<String>,
     /// 自己紹介文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#169）。フロントは
     /// `bio` 描画時にこのマップで `:shortcode:` を画像に置換する。空なら省略。
@@ -465,6 +469,7 @@ async fn fetch_bsky_profile_from_appview(
         instance: resolve_profile_instance_info(state, "bsky", "").await,
         ap_uri: None,
         at_did: Some(bsky.did),
+        at_handle: None,
         bio: bsky.description,
         emojis: std::collections::HashMap::new(),
         avatar_url: bsky.avatar,
@@ -1053,6 +1058,7 @@ async fn build_profile_response_inner(
         instance,
         ap_uri: actor.ap_uri,
         at_did: actor.at_did,
+        at_handle: actor.at_handle,
         bio,
         emojis,
         avatar_url,
@@ -1184,6 +1190,7 @@ async fn fetch_remote_profile(
         instance: resolve_profile_instance_info(state, "fedi", domain).await,
         ap_uri: Some(actor_uri),
         at_did: None,
+        at_handle: None,
         bio,
         emojis: json_map_to_string_map(&emoji_map),
         avatar_url,
