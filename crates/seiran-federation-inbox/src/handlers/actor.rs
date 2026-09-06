@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Redirect},
     Json,
 };
 use serde::Serialize;
@@ -9,6 +9,16 @@ use sqlx::Row;
 use std::sync::Arc;
 
 use crate::AppState;
+
+/// AP クライアント（Accept: activity+json 等）以外、つまりブラウザからのアクセスかどうか。
+/// `crates/seiran-api/src/handlers/ogp.rs::wants_html` と同じ判定基準（別クレートのため複製）。
+fn wants_html(headers: &HeaderMap) -> bool {
+    let accept = headers
+        .get(axum::http::header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    !accept.contains("application/activity+json") && !accept.contains("application/ld+json")
+}
 
 #[derive(Serialize)]
 struct ApActorDocument {
@@ -105,10 +115,20 @@ fn property_value_html(value: &str) -> String {
     }
 }
 
+/// GET /users/:username
+/// AP actor ID として恒久的に維持するエンドポイント（`docs/architecture.md` 8.2節）。
+/// `/@handle` 表記へ移行する前はこれがブラウザ向けプロフィールURLとしても
+/// リモートサーバーに記録されているため、ブラウザからの直接アクセス（Accept に
+/// `activity+json`/`ld+json` を含まない）は `/@:username` へ 302 リダイレクトする。
 pub async fn actor_handler(
     Path(username): Path<String>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
+    if wants_html(&headers) {
+        return Redirect::to(&format!("/@{}", username)).into_response();
+    }
+
     let row = sqlx::query(
         "SELECT a.id, a.display_name, a.bio, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \

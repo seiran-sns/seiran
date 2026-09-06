@@ -134,6 +134,8 @@ Bskyネットワーク側（AT Protocol）には非公開アカウントとい�
 ### 公開エンドポイント
 `GET /users/:username`（Actor文書）、`GET /users/:username/outbox`（`?page=true`でOrderedCollectionPage）、`GET /.well-known/webfinger`、`GET /.well-known/nodeinfo` + `GET /nodeinfo/2.1`、featured（ピン留め）・lists（公開リスト）の各コレクション。
 
+`GET /users/:username`はブラウザ（Accept に`activity+json`/`ld+json`を含まないリクエスト）には`/@:username`へ302リダイレクトする。`/@handle`形式のプロフィールURL導入（#36）以前はこれが唯一のブラウザ向けプロフィールURLで、当時リモートに捕捉されたプロフィール記録が今も`/users/:username`をactor URLとして保持しているための互換対応（`docs/architecture.md` 8.2節）。`GET /.well-known/webfinger`も同じ理由で、`resource`が`acct:user@domain`形式に加えて`https://{domain}/users/{username}`形式でも同一のレスポンスを返す。
+
 `outbox`の各投稿は`posts.ap_object_id`が実際にpush配送された種別と一致するよう組み立てる: `repost_of_post_id`がある行は、元ポストが`ap_object_id`を持てば`Announce`（`id`=自身の`ap_object_id`、`object`=元ポストの`ap_object_id`、`cc`に元投稿者のactor URIも含める）、元ポストが`at_uri`のみ(Bskyネイティブ)ならFediフォールバックと同じ本文（「🔁 author: bsky.app URL」）を持つ`Create(Note)`として表現する。リポスト行の`body`列は常に空文字列のため、これを無視して素通しで`Create(Note)`化すると、push配送済みの`Announce`とは別のAP object idを持つ空の`Note`がリモートに重複出現する。
 
 `GET /nodeinfo/2.1`の`metadata.features`には`"emoji_reaction"`を含める。kmyblue（Mastodonフォーク）はカスタム絵文字リアクション対応の可否を、既知softwareリスト（Misskey系等）に載っていないインスタンスに対してはこのフィールドで判定するため（#167）。

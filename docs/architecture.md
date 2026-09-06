@@ -278,6 +278,27 @@ index.html）、クローラーは JS を実行しないため `<meta>` だけ�
   2026-09-06）。そのため `allowedHosts` には `LOCAL_DOMAIN` に加えて Docker のコンテナ名
   `"frontend"` を常に含める。
 
+## 8.2 `/users/:username`（AP actor ID）の旧形式プロフィールURL互換
+
+`/users/:username` は AP actor の `id` として恒久的に維持するエンドポイントであり、
+`/@handle` 形式のプロフィール permalink（#36、2026-07-05）導入より前はブラウザ向け
+プロフィールURLとしても使われていた。この時期にリモートサーバーへ捕捉・キャッシュされた
+seiranユーザーのプロフィール記録は、`/users/:username` を actor URL として保持し続けている
+はずのため、恒久的に応答できる必要がある。
+
+- `crates/seiran-federation-inbox/src/handlers/actor.rs::actor_handler` — Accept ヘッダーに
+  `activity+json`/`ld+json` を含まないリクエスト（＝ブラウザからの直接アクセス）は
+  `/@:username` へ 302 リダイレクトする。AP クライアント向けは従来どおり Actor JSON-LD を返す
+  （`id`/`publicKey.owner` は今後も `/users/:username` のまま変更しない。`url` フィールドは
+  最初から `/@:username` を指しており、こちらは互換対応不要）。
+- `crates/seiran-federation-inbox/src/handlers/webfinger.rs::webfinger_handler` — `resource`
+  パラメータが `acct:user@domain` 形式に加えて、`https://{domain}/users/{username}`
+  （actor URL そのもの）でも同じレスポンスを返す。リモートが `acct:` を経由せず、
+  キャッシュ済みの旧 actor URL を直接 `resource` に渡して再検証してくる場合があるため。
+- nginx（`docker/nginx.conf`/`docker/nginx.mono.conf`）は `location ~ ^/users/` で
+  `/users/` 配下を常に api（バックエンド）へ転送済みであり、この互換対応のための追加変更は
+  不要（サブパス込みで既存の正規表現が拾う）。
+
 ## 9. E2Eテスト
 
 - PRおよび`main`へのpushではGitHub Actionsの`E2E` jobが、Node.js 20・Chromium・

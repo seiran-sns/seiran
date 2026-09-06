@@ -39,16 +39,28 @@ pub async fn webfinger_handler(
         None => return (StatusCode::BAD_REQUEST, "resource パラメータが必要です").into_response(),
     };
 
-    let acct = resource.trim_start_matches("acct:");
-    let parts: Vec<&str> = acct.splitn(2, '@').collect();
-    if parts.len() != 2 {
-        return (StatusCode::BAD_REQUEST, "resource フォーマット不正").into_response();
-    }
-    let (username, domain) = (parts[0], parts[1]);
-
-    if domain != state.local_domain {
-        return (StatusCode::NOT_FOUND, "このドメインは管理対象外です").into_response();
-    }
+    let username = if let Some(acct) = resource.strip_prefix("acct:") {
+        let parts: Vec<&str> = acct.splitn(2, '@').collect();
+        if parts.len() != 2 {
+            return (StatusCode::BAD_REQUEST, "resource フォーマット不正").into_response();
+        }
+        let (username, domain) = (parts[0], parts[1]);
+        if domain != state.local_domain {
+            return (StatusCode::NOT_FOUND, "このドメインは管理対象外です").into_response();
+        }
+        username.to_string()
+    } else {
+        // 旧形式プロフィールURL（AP actor ID、`/@handle`表記へ移行する前は
+        // これが唯一の外部公開URLだった）を resource に直接渡す再検証リクエストに対応する
+        // （リモートが acct: を経ずキャッシュ済み actor URL で WebFinger する場合がある）。
+        // `docs/architecture.md` 8.2節参照。
+        let prefix = format!("https://{}/users/", state.local_domain);
+        match resource.strip_prefix(&prefix) {
+            Some(rest) if !rest.is_empty() && !rest.contains('/') => rest.to_string(),
+            _ => return (StatusCode::BAD_REQUEST, "resource フォーマット不正").into_response(),
+        }
+    };
+    let username = username.as_str();
 
     let exists = sqlx::query(
         "SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' AND withdrawn_at IS NULL LIMIT 1",
