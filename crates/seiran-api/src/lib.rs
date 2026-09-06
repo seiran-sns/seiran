@@ -431,6 +431,14 @@ impl AppState {
 
     /// リモートフォロー一覧中の未知アクター（ローカルDB未登録）を解決するジョブを積む（#68）。
     pub async fn enqueue_remote_actor_resolve(&self, uri: String) {
+        if !seiran_common::jobs::remote_actor_resolve::should_enqueue(&uri) {
+            tracing::debug!(
+                "[job] RemoteActorResolve enqueue 抑制（クールダウン中）: uri={}",
+                uri
+            );
+            return;
+        }
+
         if let Err(e) = self
             .job_queue
             .enqueue(

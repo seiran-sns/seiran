@@ -145,7 +145,9 @@ advisory lockはセッションスコープのため、`PgPool`から都度借�
 
 **「表示時再検証」パターン**: 外部（他インスタンス等）の状態に依存する値をリアルタイムで検証すると表示のたびに外部フェッチが走り遅延・相手サーバーへの負荷が生じる。かといって一度きりの検証では相手側の状態変化に追随できない。そこで、表示は常にDBキャッシュ済みの値を即座に返しつつ、表示のたびに低優先度の再検証ジョブを積んで非同期でキャッシュを更新する（「今見ている値は少し古いかもしれないが、リロードすればその頃には最新化されている」という体験を許容する設計）。`AlsoKnownAsVerify`が最初の実例で、同様の「外部状態のキャッシュ+閲覧トリガーの非同期再検証」が必要になった箇所では踏襲する想定。
 
-このパターンを採用するジョブが、1回の実行で他の低優先度ジョブを大量にファンアウトする重い処理（例: `RemoteFollowListSync`が未知アクターごとに`RemoteActorResolve`を積む）の場合、表示のたびに無条件でenqueueすると、同じ内容の重いジョブが何度もリロードされるだけで積み重なり、同一優先度を共有する他のジョブを飢餓状態にしうる（#229）。この種のジョブは`AppState`側にプロセス内メモリのクールダウン（`(キー) → 直近enqueue時刻`の`DashMap`、一定時間内の再投入を無視する）を設け、根本的な重複投入を抑える。`enqueue_remote_follow_list_sync`（`remote_follow_sync_recent`、10分）が実例。
+このパターンを採用するジョブが、1回の実行で他の低優先度ジョブを大量にファンアウトする重い処理（例: `RemoteFollowListSync`が未知アクターごとに`RemoteActorResolve`を積む）の場合、表示のたびに無条件でenqueueすると、同じ内容の重いジョブが何度もリロードされるだけで積み重なり、同一優先度を共有する他のジョブを飢餓状態にしうる（#229）。この種のジョブは、enqueue元が単一（APIハンドラのみ等）ならその層（`AppState`）にプロセス内メモリのクールダウン（`(キー) → 直近enqueue時刻`の`DashMap`、一定時間内の再投入を無視する）を設ける。`enqueue_remote_follow_list_sync`（`remote_follow_sync_recent`、10分）が実例。
+
+enqueue元がAPIハンドラ層（`AppState`）とWorker層（`JobContext`）の両方にまたがる場合（`RemoteActorResolve`がこれに該当: `remote_follow_summary`ハンドラのライブ取得成功時と、`RemoteFollowListSync`ジョブ自身の両方が積む）、上記の`AppState`フィールド方式では層をまたいだ重複を防げない。この場合はジョブ実装モジュール自体（`seiran-common::jobs::remote_actor_resolve::should_enqueue`）にプロセス内グローバルな`static`（`OnceLock<Mutex<HashMap<uri, 直近時刻>>>`）としてクールダウンを持たせ、両方のenqueue元がこれを経由する。`RemoteActorResolve`は1時間（`REMOTE_ACTOR_RESOLVE_COOLDOWN`）。404/410等で恒久的に解決できないURIはDBにupsertされず「未知」のままになるため、このクールダウンは実質的にネガティブキャッシュとしても働く。
 
 **並列・排他制御**: グローバル同時実行数上限（`Semaphore`、既定32、ジョブ単位）、ドメイン単位の同時接続数制限（最大2並列、`RemoteActorResolve`/`RemoteFollowListSync`/`ActorHistorySync`などリモートから取得する系のジョブ用。`JobContext::get_domain_semaphore`）、アクターID単位の直列化（ATPコミットの順序保証）、指数バックオフ+ジッターでのリトライ。AP配送（`ApDelivery`）のinboxファンアウト自体は`fan_out_activity`内で`buffer_unordered`により最大8並列（`crates/seiran-common/src/ap/deliver/infra.rs`）。追加の`tokio::spawn`は行わず、Workerジョブ実行のタスク内でポーリングを並列化するのみ（docs/code_audit_2026-08-05.md P-3）。
 

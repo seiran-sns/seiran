@@ -6,11 +6,47 @@
 //! フォロー関係は作らず、`actors` テーブルへの upsert のみ行う（表示のリッチ化が目的で、
 //! この時点でフォロー関係は発生していないため）。
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::generate_snowflake_id;
 use crate::queue::worker::JobContext;
 use crate::repository::{ActorRepository, PgActorRepository};
+
+/// enqueue元（APIハンドラの`remote_follow_summary`・Worker側の`RemoteFollowListSync`の
+/// 双方）で共有する重複投入防止クールダウン兼ネガティブキャッシュ。`REMOTE_FOLLOW_SYNC_COOLDOWN`
+/// （#229、フォロー一覧同期ジョブ自体の重複防止）とは別に、こちらは個々のactor URIの
+/// 解決そのものが無条件・無制限に再投入されていた（2026-09-06実機確認: フォロー数の多い
+/// リモートアクターのフォロー中/フォロワータブを開くたびに、404/410等で恒久的に解決できず
+/// DBに登録されないままの数百〜数千URIが際限なく再enqueueされ、CPU・DBコネクションを
+/// 食い尽くしてAPIが無応答になった）。
+///
+/// APIハンドラ層（`seiran-api`のAppState）とWorker層（`JobContext`）は別インスタンスで
+/// 状態を共有しないため、プロセス内グローバルな`static`として持つ（`remote_follow_sync_recent`
+/// のような各層のフィールドに分散させると、enqueue元ごとにクールダウンが独立してしまい
+/// 効果が薄れる）。
+const REMOTE_ACTOR_RESOLVE_COOLDOWN: Duration = Duration::from_secs(3600);
+
+fn recent_map() -> &'static Mutex<HashMap<String, Instant>> {
+    static MAP: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// `Job::RemoteActorResolve`をenqueueしてよいか判定する。trueを返した場合のみ実際に
+/// enqueueすること（呼び出しに成功した扱いで内部の直近時刻を更新するため、falseの場合に
+/// 重ねて呼んでも次のクールダウン判定はリセットされない）。
+pub fn should_enqueue(uri: &str) -> bool {
+    let now = Instant::now();
+    let mut map = recent_map().lock().expect("recent_map mutex poisoned");
+    if let Some(last) = map.get(uri) {
+        if now.duration_since(*last) < REMOTE_ACTOR_RESOLVE_COOLDOWN {
+            return false;
+        }
+    }
+    map.insert(uri.to_string(), now);
+    true
+}
 
 fn extract_domain(uri: &str) -> String {
     if let Some(s) = uri.strip_prefix("https://") {

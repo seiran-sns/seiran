@@ -158,6 +158,12 @@ async fn enqueue_unknown_actor_resolves(
         if known.contains(uri) {
             continue;
         }
+        // クールダウン中（直近解決を試みたが未解決のまま等）ならスキップする。
+        // フォロー数の多いアクター1件でも数百〜数千URIの束になるため、ここに歯止めが
+        // 無いと#68の趣旨（表示のリッチ化）に見合わない負荷になる（2026-09-06実機確認）。
+        if !crate::jobs::remote_actor_resolve::should_enqueue(uri) {
+            continue;
+        }
         if let Err(e) = queue
             .enqueue(
                 crate::traits::Job::RemoteActorResolve { uri: uri.clone() },
