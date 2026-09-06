@@ -20,13 +20,46 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
-/// `discover_fedi_actor`/`discover_bsky_actor`の結果。呼び出し側は`married`が`false`かつ
-/// 申告（`claimed_at_did`/`claimed_ap_uri`）がある場合、相手を能動的に取りに行く
-/// `Job::ActorMetadataResolve`をenqueueして結婚成立を早めるとよい（必須ではない）。
+use crate::queue::worker::priority;
+use crate::traits::{Job, JobQueue};
+
+/// `discover_fedi_actor`/`discover_bsky_actor`の結果。
 pub struct DiscoveryOutcome {
     pub actor_id: i64,
     /// 今回の呼び出しで新たに結婚（マージ）が成立したかどうか。
     pub married: bool,
+}
+
+/// `discover_fedi_actor`/`discover_bsky_actor`呼び出し後に必ず通す共通後処理。
+/// 結婚成立時はJetstreamのwanted_dids再構築を促し（この行が初めて`at_did`を獲得した
+/// 場合、Jetstream購読フィルタは自動追随しないため、実地検証で発覚）、未成立でも
+/// 自己申告（呼び出し元が`discover_*`へ渡したのと同じ`claimed_at_did`/`claimed_ap_uri`）が
+/// あれば相手を能動的に取りに行く`Job::ActorMetadataResolve`をenqueueして結婚成立を
+/// 早める（必須ではない、通常の受動的発見でも成立しうる）。
+///
+/// この後処理を呼び出し元ごとに個別に書いていたところ、1箇所だけenqueueが漏れる
+/// 実装ミスが実際に発生した（`seiran-atp-repo::firehose::resolve_or_upsert_bsky_actor`、
+/// 2026-09-06実地検証。DM受信・ブロック検知・リポスト/いいねの受動的発見が能動フェッチ
+/// されないまま孤立し続けていた）。`discover_fedi_actor`/`discover_bsky_actor`の
+/// 呼び出し元は必ずこれを経由し、個別に書き直さないこと。
+pub async fn promote_after_discovery(
+    pool: &PgPool,
+    queue: &dyn JobQueue,
+    outcome: &DiscoveryOutcome,
+    claimed: Option<&str>,
+) {
+    if outcome.married {
+        crate::jetstream_control::touch_jetstream_wanted_dids(pool).await;
+    } else if claimed.is_some() {
+        let _ = queue
+            .enqueue(
+                Job::ActorMetadataResolve {
+                    actor_id: outcome.actor_id,
+                },
+                priority::LOW,
+            )
+            .await;
+    }
 }
 
 /// AP経由でアクター`ap_uri`を発見した際の upsert + 相互一致マージ判定。

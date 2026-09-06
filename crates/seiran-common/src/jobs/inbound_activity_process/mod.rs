@@ -223,25 +223,13 @@ async fn upsert_remote_fedi_actor(
     )
     .await
     .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
-    if outcome.married {
-        // 結婚成立でこの行に初めてat_didが載る。既にこの行をフォロー中のローカル
-        // ユーザーがいてもJetstreamのwanted_didsは自動で追随しないため、ここで
-        // 明示的に再構築を促す（実地検証で発覚。`follow_exec::follow_fedi`の
-        // 同種コメント参照）。
-        crate::jetstream_control::touch_jetstream_wanted_dids(&inbox.db_pool).await;
-    } else if remote_ap.seiran_at_did.is_some() {
-        // 結婚が成立しなかった場合、相手（自己申告されたATP DID）を能動的に取りに行く
-        // ジョブを積んで結婚成立を早める（必須ではない、通常の受動的発見でも成立しうる）。
-        let _ = inbox
-            .queue
-            .enqueue(
-                Job::ActorMetadataResolve {
-                    actor_id: outcome.actor_id,
-                },
-                priority::LOW,
-            )
-            .await;
-    }
+    crate::seiran_actor_merge::promote_after_discovery(
+        &inbox.db_pool,
+        inbox.queue.as_ref(),
+        &outcome,
+        remote_ap.seiran_at_did.as_deref(),
+    )
+    .await;
     let actor_id = outcome.actor_id;
 
     Ok(RemoteActorInfo {

@@ -26,7 +26,7 @@ use seiran_common::atp::{
     ParsedAttachment, ParsedFacet, ParsedLinkCard, apply_bsky_facets, fetch_bsky_profile,
     parse_bsky_embed_attachments, parse_bsky_embed_link_card, parse_bsky_embed_quote_uri,
 };
-use seiran_common::jetstream_control::{fetch_wanted_dids_touch, touch_jetstream_wanted_dids};
+use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
 use seiran_common::queue::worker::priority;
 use seiran_common::repository::{
@@ -1552,25 +1552,13 @@ pub(crate) async fn resolve_or_upsert_bsky_actor(
     )
     .await
     .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
-    if outcome.married {
-        // 結婚成立でこの行に初めてat_didが載る。既にこの行（Fedi側）をフォロー中の
-        // ローカルユーザーがいてもJetstreamのwanted_didsは自動で追随しないため、ここで
-        // 明示的に再構築を促す（実地検証で発覚。`follow_exec::follow_fedi`の
-        // 同種コメント参照）。
-        touch_jetstream_wanted_dids(pool).await;
-    } else if claimed_ap_uri.is_some() {
-        // 結婚が成立しなかった場合、相手（自己申告されたAP Actor URI）を能動的に取りに行く
-        // ジョブを積んで結婚成立を早める（`follow_exec`・`inbound_activity_process`の
-        // 発見経路と揃える。従来この経路だけenqueueが漏れていた）。
-        let _ = job_queue
-            .enqueue(
-                Job::ActorMetadataResolve {
-                    actor_id: outcome.actor_id,
-                },
-                priority::LOW,
-            )
-            .await;
-    }
+    seiran_common::seiran_actor_merge::promote_after_discovery(
+        pool,
+        job_queue.as_ref(),
+        &outcome,
+        claimed_ap_uri.as_deref(),
+    )
+    .await;
     Ok(outcome.actor_id)
 }
 

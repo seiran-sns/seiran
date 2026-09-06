@@ -68,15 +68,11 @@ async fn resolve_counterpart_via_atp(
     )
     .await
     .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
-    if outcome.married {
-        // 結婚成立でこの行に初めてat_didが載る。既にこの行をフォロー中のローカル
-        // ユーザーがいてもJetstreamのwanted_didsは自動で追随しないため、ここで
-        // 明示的に再構築を促す（実地検証で発覚。`follow_exec::follow_fedi`の
-        // 同種コメント参照）。
-        crate::jetstream_control::touch_jetstream_wanted_dids(pool).await;
-    }
-    // 結婚不成立でもここでは再enqueueしない（相手側が能動的に取りに来る、または
-    // 通常の受動的発見に任せる。無限ジョブ再投入を避けるため）。
+    // `claimed`にNoneを渡し、再enqueueは明示的に抑止する（相手側が能動的に取りに来る、
+    // または通常の受動的発見に任せる。無限ジョブ再投入を避けるため）。結婚成立時の
+    // Jetstream wanted_dids再構築だけは他の発見経路と共通のこの関数に委ねる。
+    crate::seiran_actor_merge::promote_after_discovery(pool, ctx.queue.as_ref(), &outcome, None)
+        .await;
     Ok(())
 }
 
@@ -144,8 +140,9 @@ async fn resolve_counterpart_via_ap(
     )
     .await
     .map_err(|e| format!("discover_fedi_actor 失敗: {}", e))?;
-    if outcome.married {
-        crate::jetstream_control::touch_jetstream_wanted_dids(pool).await;
-    }
+    // `claimed`にNoneを渡し、再enqueueは抑止する（`resolve_counterpart_via_atp`と同じ
+    // 無限ジョブ再投入対策）。
+    crate::seiran_actor_merge::promote_after_discovery(pool, ctx.queue.as_ref(), &outcome, None)
+        .await;
     Ok(())
 }
