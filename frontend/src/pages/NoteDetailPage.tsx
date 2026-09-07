@@ -340,7 +340,7 @@ export default function NoteDetailPage() {
     if (ctxLoading) return <p className={panel.message}>{t("common:loading")}</p>;
     const targetCard = note ? (
       <div ref={targetCardRef}>
-        <NoteCard note={note} large linkToDetail={false} forceOpenCw={forceOpenCw} />
+        <NoteCard note={note} large linkToDetail={false} forceOpenCw={forceOpenCw} isMainSubject />
       </div>
     ) : null;
     if (ctxLoaded && before.length === 0 && after.length === 0) {
@@ -414,7 +414,7 @@ export default function NoteDetailPage() {
       {note && (
         // 主役ポストはタイムラインと同じ NoteCard を大型表示で共用する（#43）。リポスト表示は NoteCard 内部で処理（#45）。
         <div ref={mainCardRef}>
-          <NoteCard note={note} large linkToDetail={false} forceOpenCw={forceOpenCw} />
+          <NoteCard note={note} large linkToDetail={false} forceOpenCw={forceOpenCw} isMainSubject />
         </div>
       )}
 

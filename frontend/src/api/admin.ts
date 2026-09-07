@@ -1,5 +1,5 @@
 import { request, uploadFormData } from "./core";
-import type { AdminReport, AdminUser, AuthIpBlock, CustomEmoji, EmojiImportJob, FediverseRelay, RemoteEmoji, ReportComment, SiteSettings, StorageProvider } from "./types";
+import type { AdminReport, AdminUser, AuthIpBlock, CustomEmoji, EmojiImportJob, FediverseRelay, RemoteEmoji, ReportComment, SiteSettings, StorageProvider, SuspendedActor } from "./types";
 
 export const admin = {
   listReports() {
@@ -74,6 +74,24 @@ export const admin = {
       "POST",
       `/admin/users/${encodeURIComponent(id)}/totp/disable`,
     );
+  },
+
+  /** 凍結済みアクター一覧（ローカル・リモート混在、無限スクロール用カーソル対応）。 */
+  listSuspendedActors(opts?: { afterId?: string; limit?: number }) {
+    const params = new URLSearchParams();
+    if (opts?.afterId) params.set("after_id", opts.afterId);
+    params.set("limit", String(opts?.limit ?? 30));
+    return request<SuspendedActor[]>(
+      "GET",
+      `/admin/suspended-actors?${params.toString()}`,
+    );
+  },
+  /** actor_id起点の凍結・凍結解除（ローカル・リモート共通）。 */
+  suspendActor(id: string) {
+    return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/suspend`);
+  },
+  unsuspendActor(id: string) {
+    return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/unsuspend`);
   },
 
   getSiteSettings() {

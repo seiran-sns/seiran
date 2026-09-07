@@ -74,6 +74,7 @@
     "repostedConnector": "volvió a publicar esto en",
     "repostedSuffix": "",
     "unavailableRepost": "Esta publicación no se puede mostrar (es privada).",
+    "suspendedAuthorReference": "Esta es una publicación de un usuario suspendido.",
     "notFollowing": "No seguir",
     "following": "Siguiente",
     "followPending": "Seguir Pendiente",

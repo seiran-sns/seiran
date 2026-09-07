@@ -8,6 +8,7 @@ import SiteSettingsPanel from "../components/admin/SiteSettingsPanel";
 import StorageProvidersPanel from "../components/admin/StorageProvidersPanel";
 import EmojisPanel from "../components/admin/EmojisPanel";
 import ReportsPanel from "../components/admin/ReportsPanel";
+import SuspendedActorsPanel from "../components/admin/SuspendedActorsPanel";
 import RelaysPanel from "../components/admin/RelaysPanel";
 import AuthIpBlocksPanel from "../components/admin/AuthIpBlocksPanel";
 import { useAuth } from "../contexts/AuthContext";
@@ -25,6 +26,7 @@ const TAB_DEFS: { topic: AdminTopic; labelKey: string; Panel: () => JSX.Element 
   { topic: "storage", labelKey: "admin:adminPage.tabs.storage", Panel: StorageProvidersPanel },
   { topic: "emojis", labelKey: "admin:adminPage.tabs.emojis", Panel: EmojisPanel },
   { topic: "reports", labelKey: "admin:adminPage.tabs.reports", Panel: ReportsPanel },
+  { topic: "suspendedActors", labelKey: "admin:adminPage.tabs.suspendedActors", Panel: SuspendedActorsPanel },
   { topic: "relays", labelKey: "admin:adminPage.tabs.relays", Panel: RelaysPanel },
   { topic: "authIpBlocks", labelKey: "admin:adminPage.tabs.authIpBlocks", Panel: AuthIpBlocksPanel },
 ];

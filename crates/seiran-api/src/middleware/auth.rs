@@ -10,7 +10,34 @@ pub struct AuthUser {
     pub email: String,
 }
 
+/// JWT 検証 + suspended（凍結）チェック。認証必須エンドポイントのほぼ全てがこれを通る
+/// （`AuthedUser` extractor 経由・直接呼び出し双方）ため、ここ1箇所で「凍結中は全API拒否」を
+/// 実現する。`GET /api/auth/me` だけは凍結中でも自分の状態を確認できる必要があるため、
+/// suspendedチェックを行わない `extract_auth_allow_suspended` を直接使う（ユーザー凍結
+/// リモート対応、#凍結統一）。
 pub async fn extract_auth(
+    headers: &HeaderMap,
+    auth: &LocalAuthProvider,
+    app_tokens: &dyn AppTokenRepository,
+    users: &dyn UserRepository,
+) -> Result<AuthUser, ApiError> {
+    let user = extract_auth_allow_suspended(headers, auth, app_tokens, users).await?;
+
+    if users
+        .is_suspended_by_user_id(user.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+    {
+        return Err(ApiError::Forbidden("ACCOUNT_SUSPENDED"));
+    }
+
+    Ok(user)
+}
+
+/// `extract_auth` からsuspendedチェックだけを除いたもの。`GET /api/auth/me`
+/// （凍結中でも自分のユーザー名を表示してログアウトボタンだけの専用画面を出すために
+/// 呼べる必要がある）専用。他のハンドラから呼ばないこと。
+pub async fn extract_auth_allow_suspended(
     headers: &HeaderMap,
     auth: &LocalAuthProvider,
     app_tokens: &dyn AppTokenRepository,

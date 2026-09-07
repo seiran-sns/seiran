@@ -8,7 +8,8 @@
       "storage": "存储",
       "emojis": "表情符号",
       "relays": "Relays",
-      "authIpBlocks": "已封锁IP"
+      "authIpBlocks": "已封锁IP",
+      "suspendedActors": "已冻结用户"
     },
     "rightPanelDescription": "从此屏幕管理实例。每个操作都会经过服务器管理员权限的验证。"
   },
@@ -166,6 +167,7 @@
     "forwardButton": "转发",
     "deletePostButton": "删除帖子",
     "suspendUserButton": "暂停用户",
+    "suspendedBadge": "已冻结",
     "commentsButton": "内部备注",
     "addCommentButton": "添加备注",
     "modalTitle": "⚠️举报",
@@ -253,6 +255,13 @@
       "reasonRuleOther": "其他违规行为",
       "reasonOther": "其他"
     }
+  },
+  "suspendedActors": {
+    "title": "已冻结用户",
+    "emptyMessage": "没有已冻结的用户。",
+    "localBadge": "本地",
+    "remoteBadge": "远程",
+    "unsuspendButton": "解除冻结"
   },
   "userManagement": {
     "title": "用户管理",

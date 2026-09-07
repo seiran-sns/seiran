@@ -8,7 +8,8 @@
       "storage": "저장",
       "emojis": "이모티콘",
       "relays": "Relays",
-      "authIpBlocks": "차단된 IP"
+      "authIpBlocks": "차단된 IP",
+      "suspendedActors": "정지된 사용자"
     },
     "rightPanelDescription": "이 화면에서 인스턴스를 관리하세요. 모든 작업은 서버의 관리자 권한에 대해서도 확인됩니다."
   },
@@ -166,6 +167,7 @@
     "forwardButton": "앞으로",
     "deletePostButton": "게시물 삭제",
     "suspendUserButton": "사용자 정지",
+    "suspendedBadge": "정지됨",
     "commentsButton": "내부 의견",
     "addCommentButton": "댓글 추가",
     "modalTitle": "⚠️ 신고",
@@ -253,6 +255,13 @@
       "reasonRuleOther": "기타 규칙 위반",
       "reasonOther": "다른"
     }
+  },
+  "suspendedActors": {
+    "title": "정지된 사용자",
+    "emptyMessage": "정지된 사용자가 없습니다.",
+    "localBadge": "로컬",
+    "remoteBadge": "원격",
+    "unsuspendButton": "정지 해제"
   },
   "userManagement": {
     "title": "사용자 관리",

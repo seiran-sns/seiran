@@ -123,6 +123,16 @@ JetStreamは「ローカルユーザーのフォロー中/リストメンバー�
 
 自ホストドメイン未確定（シングルホストモード、`instance_domain`参照）の間に作成されたローカルユーザーは `domain='localhost'` で、`at_did`/`at_signing_key_pem` は両方 `NULL`（PLC genesisを行わないため、AT Protocol非対応のローカルユーザーとして存在する）。両カラムは元々 `UNIQUE` かつ `NOT NULL` 制約が無いためスキーマ変更なしでこの状態を表現できる。
 
+### `actors.suspended_at`（ユーザー凍結）
+管理者・モデレーターによるユーザー凍結の状態を持つ。ローカル・リモート（AP/ATP問わず）共通で、`actor_type`を問わず全アクターが対象になりうる。`withdrawn_at`と同じ「肉体（actors）」側の状態として持たせることで、ローカル・リモートの enforcement を1本の列・1本のクエリ経路に統一している。
+
+- **APIアクセス拒否**: `middleware::auth::extract_auth`（`crates/seiran-api/src/middleware/auth.rs`）が`is_withdrawn_by_user_id`と同じ並びで凍結チェックを行い、凍結中のローカルユーザーの全API呼び出しを`ACCOUNT_SUSPENDED`で拒否する。唯一の例外は`GET /api/auth/me`（凍結チェックを行わない`extract_auth_allow_suspended`を使う）で、フロントが自分のユーザー名を表示してログアウトボタンだけを出す専用画面へ切り替えるための入口になっている。ログイン自体（`POST /api/auth/login`）は凍結中でも成功する。
+- **表示からの除外**: `actor_is_hidden_for_viewer`（SQL関数）が`withdrawn_at`と同様に`suspended_at IS NOT NULL`を無条件（viewerとの関係を問わない）で判定するため、この関数を経由する全箇所（タイムライン・通知・リアクション一覧・ハッシュタグ検索・フォロー一覧・ピン留め投稿）から横断的に除外される。単体ポスト取得（`find_by_id`/`find_by_id_for_viewer`）はこの関数を経由しないため、パーマリンク直アクセス・スレッド遡りでは凍結ユーザーの投稿でも実データを返す。
+- **引用・リポスト・返信先の参照埋め込み**: `embed_renotes`/`embed_quotes`（`handlers/notes/queries.rs`）が埋め込む参照先の`actors.suspended_at`を`NoteResponse.author_suspended`へ渡す。実際のredaction判定（本文を「凍結されたユーザーのポストです」に差し替えるかどうか）はフロント側で、そのノートが「参照として埋め込まれた表示か、メイン主体としての表示か」（`NoteCard`の`isMainSubject`）に応じて行う。
+- **AP受信**: `seiran-federation-inbox`の`inbox_handler`が署名者（keyId）の凍結状態を見て署名付きアクセス自体を403で拒否し、`inbound_activity_process::handle`が`activity.actor`（リレー転送時は署名者と異なりうる）の凍結状態を見てFollow/Create/Like/EmojiReact/Announceの新規アクティビティを非格納で破棄する。Undo/Delete/Update等の後始末は対象外。
+- **ATP/Bsky受信**: `seiran-atp-repo`のfirehose処理が、新規ポスト取り込みのフォロー/リスト所属判定クエリに`suspended_at IS NULL`を含め、リポスト・いいねの取り込み前にも凍結状態を確認する。AT Protocolには署名アクセス拒否に相当する仕組みが無い（PDSは相手管理下）ため、新規取り込みの抑止と表示除外が実質的なenforcementになる。
+- **管理API**: `POST /api/admin/actors/:id/suspend`・`/unsuspend`（actor_id起点、ローカル・リモート共通）、`GET /api/admin/suspended-actors`（凍結済みアクター一覧）。既存の`POST /api/admin/users/:id/suspend`（ローカルユーザー管理画面向け、user_id起点）・通報画面の`suspend-user`もいずれも最終的にこの列を更新する。
+
 `20260728020000_repair_duplicate_fedi_actors.sql` は、物理的に破損した
 `actors.ap_uri` / `posts.ap_object_id` UNIQUE index が既存行を見落としていた環境を
 修復するデータマイグレーションである。同じAP URIのリモートFedi actorを最小IDへ

@@ -17,6 +17,7 @@ pub struct AdminUserRow {
     pub id: i64,
     pub email: String,
     pub role: String,
+    /// 凍結日時（実体は対応するローカル `actors.suspended_at`）。
     pub suspended_at: Option<DateTime<Utc>>,
     pub username: Option<String>,
     pub display_name: Option<String>,
@@ -93,7 +94,7 @@ pub trait UserRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<AdminUserRow>, sqlx::Error>;
 
-    /// アカウントの凍結状態を更新する。
+    /// アカウントの凍結状態を更新する（実体は対応するローカル `actors.suspended_at`）。
     async fn set_suspended(&self, user_id: i64, suspended: bool) -> Result<(), sqlx::Error>;
 
     /// ロール（`user` / `emoji-editor` / `moderator` / `admin`）を更新する。
@@ -122,7 +123,8 @@ pub trait UserRepository: Send + Sync {
     /// 種類数カウントをリセットするため、パスワード認証成功時・TOTP検証成功時の両方で呼ぶ。
     async fn touch_last_login_success(&self, user_id: i64) -> Result<(), sqlx::Error>;
 
-    /// アカウントが凍結中かを返す（プロフィールページの【凍結中】インジケーター用）。
+    /// アカウントが凍結中かを返す（`extract_auth` の全API拒否判定、プロフィールページの
+    /// 【凍結中】インジケーター用。実体は対応するローカル `actors.suspended_at`）。
     async fn is_suspended_by_user_id(&self, user_id: i64) -> Result<bool, sqlx::Error>;
 
     /// ローカルアクターが退会済み（`actors.withdrawn_at` 設定済み）かを返す
@@ -279,7 +281,7 @@ impl UserRepository for PgUserRepository {
             .map(|s| format!("%{}%", escape_like(s)));
 
         sqlx::query_as::<_, AdminUserRow>(
-            "SELECT u.id, u.email, u.role::text AS role, u.suspended_at, a.username,
+            "SELECT u.id, u.email, u.role::text AS role, a.suspended_at, a.username,
                     a.display_name,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url)
                         AS avatar_url,
@@ -316,7 +318,8 @@ impl UserRepository for PgUserRepository {
 
     async fn set_suspended(&self, user_id: i64, suspended: bool) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "UPDATE users SET suspended_at = CASE WHEN $1 THEN NOW() ELSE NULL END WHERE id = $2",
+            "UPDATE actors SET suspended_at = CASE WHEN $1 THEN NOW() ELSE NULL END, updated_at = NOW()
+             WHERE user_id = $2 AND actor_type::text = 'local'",
         )
         .bind(suspended)
         .bind(user_id)
@@ -380,11 +383,13 @@ impl UserRepository for PgUserRepository {
     }
 
     async fn is_suspended_by_user_id(&self, user_id: i64) -> Result<bool, sqlx::Error> {
-        let row: Option<(bool,)> =
-            sqlx::query_as("SELECT suspended_at IS NOT NULL FROM users WHERE id = $1")
-                .bind(user_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row: Option<(bool,)> = sqlx::query_as(
+            "SELECT suspended_at IS NOT NULL FROM actors
+             WHERE user_id = $1 AND actor_type::text = 'local'",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(|(v,)| v).unwrap_or(false))
     }
 

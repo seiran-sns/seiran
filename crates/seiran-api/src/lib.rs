@@ -883,6 +883,18 @@ pub fn router(state: AppState) -> Router {
             "/api/admin/reports/:id/forward",
             post(handlers::admin::reports::forward_report),
         )
+        .route(
+            "/api/admin/suspended-actors",
+            get(handlers::admin::actors::list_suspended),
+        )
+        .route(
+            "/api/admin/actors/:id/suspend",
+            post(handlers::admin::actors::suspend_actor),
+        )
+        .route(
+            "/api/admin/actors/:id/unsuspend",
+            post(handlers::admin::actors::unsuspend_actor),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::report_moderator_only,

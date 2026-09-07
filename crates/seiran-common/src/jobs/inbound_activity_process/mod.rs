@@ -72,6 +72,31 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
         serde_json::from_str(&raw_activity).map_err(|e| format!("JSON パースエラー: {}", e))?;
     let ap_client = &ctx.ap_client;
 
+    // 新規アクティビティ（投稿・リアクション・フォロー・リポスト）は、送信元（activity.actor、
+    // リレー転送時は署名者ではなく元投稿者のURI）が凍結済みなら格納せず破棄する
+    // （#凍結リモート対応）。`inbox_handler`側の署名者チェックは非リレーの直接送信しか
+    // 捕捉できないため、ここで activity.actor 基準に再チェックする。Undo/Delete/Update等
+    // 自分の過去活動の後始末は対象外のままにする。
+    if matches!(
+        activity["type"].as_str(),
+        Some("Follow") | Some("Create") | Some("Like") | Some("EmojiReact") | Some("Announce")
+    ) {
+        if let Some(actor_uri) = activity["actor"].as_str() {
+            match inbox.actor_repo.find_by_ap_uri(actor_uri).await {
+                Ok(Some(actor)) if actor.suspended_at.is_some() => {
+                    tracing::info!(
+                        "[Job::InboundActivityProcess] 凍結済みアクター ({}) の新規アクティビティ (type={}) を破棄",
+                        actor_uri,
+                        activity["type"].as_str().unwrap_or("")
+                    );
+                    return Ok(());
+                }
+                Ok(_) => {}
+                Err(e) => return Err(format!("凍結状態確認エラー: {}", e)),
+            }
+        }
+    }
+
     match activity["type"].as_str().unwrap_or("") {
         "Follow" => handle_follow(activity, &inbox, ap_client).await,
         "Block" => handle_block(activity, &inbox, ap_client).await,

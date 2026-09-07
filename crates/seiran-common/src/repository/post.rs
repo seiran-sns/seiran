@@ -129,6 +129,13 @@ pub struct TimelinePost {
     pub repost_of_ap_uri: Option<String>,
     #[sqlx(default)]
     pub repost_of_ref_status: Option<String>,
+    /// 投稿者アクターの凍結日時。`embed_renotes`/`embed_quotes` が埋め込む参照先の
+    /// `NoteResponse.author_suspended` 判定用（#凍結リモート対応、フロントが引用・リポスト・
+    /// 返信先プレビューの本文を「凍結されたユーザーのポストです」に置き換える）。
+    /// 単体ノート取得（`find_by_id`/`find_by_id_for_viewer`）ではこの値をredaction判定に
+    /// 使わない（パーマリンク・スレッド遡りは常に実データを見せるため）。
+    #[sqlx(default)]
+    pub actor_suspended_at: Option<DateTime<Utc>>,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -1055,7 +1062,8 @@ impl PostRepository for PgPostRepository {
                     p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
                     p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
                     p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status,
+                    a.suspended_at AS actor_suspended_at
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -1125,7 +1133,8 @@ impl PostRepository for PgPostRepository {
                     p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
                     p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
                     p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status,
+                    a.suspended_at AS actor_suspended_at
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id

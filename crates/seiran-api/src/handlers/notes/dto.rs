@@ -203,6 +203,13 @@ pub struct NoteResponse {
     /// `queries::embed_quotes` 参照）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quote: Option<Box<NoteResponse>>,
+    /// 投稿者が凍結済みかどうか（`true`のみ送出、`false`/未凍結は省略）。フロントは、この
+    /// ノートを引用・リポスト・返信先プレビューとして「参照埋め込み」表示する場合に限り、
+    /// `true`なら本文・添付を「凍結されたユーザーのポストです」のプレースホルダに置き換える。
+    /// メイン主体（パーマリンク・詳細画面のフォーカス対象）として表示する場合は
+    /// この値に関わらず常に実データを表示する（#凍結リモート対応）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_suspended: Option<bool>,
     /// 認証ユーザーがこのノートをリポスト済みかどうか。未認証時は省略。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reposted_by_me: Option<bool>,
@@ -497,6 +504,7 @@ pub fn to_note_response(
         reactions: Vec::new(),
         renote: None,
         quote: None,
+        author_suspended: p.actor_suspended_at.is_some().then_some(true),
         reposted_by_me: None,
         emojis,
         pinned_by_me: None,

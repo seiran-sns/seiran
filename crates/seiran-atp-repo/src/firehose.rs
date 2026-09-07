@@ -443,6 +443,7 @@ async fn process_message(
                 "SELECT a.id, a.username, a.display_name, a.avatar_url
                  FROM actors a
                  WHERE a.at_did = $1
+                   AND a.suspended_at IS NULL
                    AND (
                      EXISTS (
                        SELECT 1 FROM follows f
@@ -1212,6 +1213,10 @@ async fn handle_inbound_repost_create(
             return;
         }
     };
+    if is_actor_suspended(pool, actor_id).await {
+        tracing::info!("[Jetstream/Repost] 凍結済みアクター (did={}) のリポストを破棄", did);
+        return;
+    }
 
     let repost_of_post_id = match post_repo.find_id_by_at_uri(subject_uri).await {
         Ok(Some(id)) => id,
@@ -1366,6 +1371,10 @@ async fn handle_inbound_like_create(
             return;
         }
     };
+    if is_actor_suspended(pool, actor_id).await {
+        tracing::info!("[Jetstream/Like] 凍結済みアクター (did={}) のいいねを破棄", did);
+        return;
+    }
 
     // ATP は「1投稿1いいね」が前提（Like レコード自体が unique）なので content は
     // 常に絵文字1個。emoji フィールドが無ければ ❤️（絵文字ピッカーと同じ、VS16付きハート）として扱う。
@@ -1520,6 +1529,19 @@ async fn handle_inbound_post_delete(pool: &PgPool, at_uri: &str) {
             tracing::error!("[Jetstream] posts (delete) UPDATE 失敗: {}", e);
         }
     }
+}
+
+/// 指定アクターが凍結済みかを返す。リポスト・いいねの新規取り込みを拒否する判定に使う
+/// （#凍結リモート対応）。投稿の新規取り込みは呼び出し元の`actor_row`クエリに
+/// `suspended_at IS NULL`を直接含めているため、こちらは経由しない。
+async fn is_actor_suspended(pool: &PgPool, actor_id: i64) -> bool {
+    sqlx::query_scalar::<_, bool>("SELECT suspended_at IS NOT NULL FROM actors WHERE id = $1")
+        .bind(actor_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false)
 }
 
 /// DID からローカル `actors` 行を解決する。無ければ AppView からプロフィールを取得して upsert する

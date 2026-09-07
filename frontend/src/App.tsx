@@ -34,6 +34,7 @@ const Register = lazy(() => import("./pages/Register"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const SearchPage = lazy(() => import("./pages/SearchPage"));
 const SettingsMenuPage = lazy(() => import("./pages/SettingsMenuPage"));
+const SuspendedAccountPage = lazy(() => import("./pages/SuspendedAccountPage"));
 const AppTokensSettingsPage = lazy(() => import("./pages/AppTokensSettingsPage"));
 const Setup = lazy(() => import("./pages/Setup"));
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
@@ -72,6 +73,7 @@ function ProfileByAcct() {
 
 function AppRoutes() {
   const [initialized, setInitialized] = useState<boolean | null>(null);
+  const { user } = useAuth();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -87,6 +89,16 @@ function AppRoutes() {
     return (
       <Suspense fallback={null}>
         <Setup onComplete={() => setInitialized(true)} />
+      </Suspense>
+    );
+  }
+
+  // 凍結中は、どのURLへアクセスしていても他の全画面をバイパスして専用画面のみを表示する
+  // （`GET /api/auth/me`以外の全APIは`extract_auth`が`ACCOUNT_SUSPENDED`で拒否するため）。
+  if (user?.is_suspended) {
+    return (
+      <Suspense fallback={null}>
+        <SuspendedAccountPage />
       </Suspense>
     );
   }

@@ -158,12 +158,18 @@ export default function ReportsPanel() {
                 {t("admin:reports.deletePostButton")}
               </button>
             )}
-            <button
-              className={styles.btnDanger}
-              onClick={() => act(() => api.admin.suspendReportedUser(r.id))}
-            >
-              {t("admin:reports.suspendUserButton")}
-            </button>
+            {r.subject_suspended ? (
+              <span className={`${styles.badge} ${styles.badgeSuspended}`}>
+                {t("admin:reports.suspendedBadge")}
+              </span>
+            ) : (
+              <button
+                className={styles.btnDanger}
+                onClick={() => act(() => api.admin.suspendReportedUser(r.id))}
+              >
+                {t("admin:reports.suspendUserButton")}
+              </button>
+            )}
             <button
               className={styles.btnGhost}
               onClick={() => loadComments(r.id)}

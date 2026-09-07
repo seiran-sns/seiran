@@ -754,6 +754,7 @@ mod tests {
             quote_of_ref_status: None,
             repost_of_ap_uri: None,
             repost_of_ref_status: None,
+            actor_suspended_at: None,
         }
     }
 

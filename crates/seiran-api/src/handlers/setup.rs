@@ -204,6 +204,7 @@ pub async fn setup(
             avatar_url: None,          // セットアップ直後はアバター未設定
             language_preference: None, // セットアップ直後は「自動」
             token,
+            is_suspended: false, // セットアップ直後は凍結され得ない
         },
     }))
 }

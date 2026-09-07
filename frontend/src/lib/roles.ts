@@ -5,6 +5,7 @@ export type AdminTopic =
   | "storage"
   | "emojis"
   | "reports"
+  | "suspendedActors"
   | "relays"
   | "authIpBlocks";
 
@@ -14,6 +15,7 @@ const ALL_ADMIN_TOPICS: AdminTopic[] = [
   "storage",
   "emojis",
   "reports",
+  "suspendedActors",
   "relays",
   "authIpBlocks",
 ];
@@ -21,12 +23,13 @@ const ALL_ADMIN_TOPICS: AdminTopic[] = [
 /**
  * ロールごとにアクセス可能な管理画面トピック（#179）。
  * 権限の強さ: admin > moderator > emoji-editor > user。
- * moderator は調停者として「通報」対応（凍結・投稿削除・連合転送を含む）と
+ * moderator は調停者として「通報」対応（凍結・投稿削除・連合転送を含む）・
+ * 「凍結済みユーザー」一覧（バックエンドの`report_moderator_only`と対応、#凍結リモート対応）・
  * 「絵文字」管理にアクセス可能。emoji-editor は「絵文字」トピックのみ。
  */
 const ROLE_ADMIN_TOPICS: Record<string, AdminTopic[]> = {
   admin: ALL_ADMIN_TOPICS,
-  moderator: ["reports", "emojis"],
+  moderator: ["reports", "suspendedActors", "emojis"],
   "emoji-editor": ["emojis"],
 };
 

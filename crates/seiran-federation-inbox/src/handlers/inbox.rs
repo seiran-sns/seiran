@@ -152,6 +152,25 @@ pub async fn inbox_handler(
         }
     }
 
+    // 署名者（keyId のアクター）が凍結済みなら、type を問わず署名付きアクセスそのものを
+    // 拒否する（#凍結リモート対応）。リレー転送（署名者≠activity.actor）で凍結された
+    // 元投稿者が紛れ込むケースは、ここでは捕捉できないため
+    // `inbound_activity_process::handle` 側の activity.actor ベースのチェックで拾う。
+    match state.actor_repo.find_by_ap_uri(key_actor_base).await {
+        Ok(Some(actor)) if actor.suspended_at.is_some() => {
+            tracing::info!(
+                "[Inbox] 凍結済みアクター ({}) からの署名付きアクセスを拒否",
+                key_actor_base
+            );
+            return (StatusCode::FORBIDDEN, "アカウントが凍結されています").into_response();
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("[Inbox] 署名者の凍結状態確認エラー: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "署名者確認エラー").into_response();
+        }
+    }
+
     let activity_type = activity["type"].as_str().unwrap_or("(不明)").to_string();
     if let Err(e) = state
         .job_queue

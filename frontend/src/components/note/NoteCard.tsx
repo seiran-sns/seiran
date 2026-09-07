@@ -54,6 +54,13 @@ interface NoteCardProps {
   /** 指定時、返信インジケータ（↩️ 返信）クリック時に詳細ページへ遷移する代わりにこれを呼ぶ
    * （スレッド遡り表示で、その場に返信先ポストをさらに積み上げるために使う）。 */
   onReplyIndicatorClick?: (replyId: string) => void;
+  /** このノート自身がフォーカス対象（ポスト詳細画面で直接開いているポスト）であることを示す。
+   * `true`の間は`note.authorSuspended`でもredactionしない（パーマリンク直アクセスは常に
+   * 実データを見せる）。リポスト埋め込み（`effectiveRenote`）の内側では常にfalse扱いのまま
+   * 伝播させない（リポストラッパー自身がフォーカス対象でも、埋め込まれた元ポストは
+   * あくまで参照であるため）。タイムライン項目・引用元カード・返信先の積み上げ小カードでは
+   * 常に省略（`false`）でよい。 */
+  isMainSubject?: boolean;
 }
 
 /** 引用元を1段だけ表示する共通カード。引用元の `quoteId` はバッジだけ表示し、
@@ -95,49 +102,55 @@ function QuoteCard({ note }: { note: Note }) {
         )}
       </div>
 
-      {note.contentWarning && (
-        <div className={styles.quoteContentWarning}>
-          <span>
-            <TwemojiEmoji emoji="⚠️" /> <EmojiText text={note.contentWarning} emojis={note.emojis} />
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowContent((shown) => !shown)}
-          >
-            {showContent
-              ? t("home:noteCard.hideContent")
-              : t("home:noteCard.showContent")}
-          </button>
-        </div>
-      )}
-      {showContent && (
+      {note.authorSuspended ? (
+        <p className={styles.quoteBody}>{t("home:noteCard.suspendedAuthorReference")}</p>
+      ) : (
         <>
-          <p className={styles.quoteBody}>
-            {note.contentHtml ? (
-              <RichHtml html={note.contentHtml} emojis={note.emojis} />
-            ) : (
-              <RichText text={note.text} emojis={note.emojis} />
-            )}
-          </p>
-          <NoteAttachments attachments={note.attachments} />
-          {note.linkCards.map((card) => (
-            <LinkCard key={card.url} card={card} indent={false} />
-          ))}
-          {note.poll && (
-            <div className={styles.quotePoll}>
-              {note.poll.options.map((option) => (
-                <div className={styles.pollOption} key={option.name}>
-                  <span>{option.name}</span>
-                  <span>{t("home:noteCard.votes", { count: option.votes })}</span>
-                </div>
-              ))}
+          {note.contentWarning && (
+            <div className={styles.quoteContentWarning}>
+              <span>
+                <TwemojiEmoji emoji="⚠️" /> <EmojiText text={note.contentWarning} emojis={note.emojis} />
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowContent((shown) => !shown)}
+              >
+                {showContent
+                  ? t("home:noteCard.hideContent")
+                  : t("home:noteCard.showContent")}
+              </button>
             </div>
           )}
+          {showContent && (
+            <>
+              <p className={styles.quoteBody}>
+                {note.contentHtml ? (
+                  <RichHtml html={note.contentHtml} emojis={note.emojis} />
+                ) : (
+                  <RichText text={note.text} emojis={note.emojis} />
+                )}
+              </p>
+              <NoteAttachments attachments={note.attachments} />
+              {note.linkCards.map((card) => (
+                <LinkCard key={card.url} card={card} indent={false} />
+              ))}
+              {note.poll && (
+                <div className={styles.quotePoll}>
+                  {note.poll.options.map((option) => (
+                    <div className={styles.pollOption} key={option.name}>
+                      <span>{option.name}</span>
+                      <span>{t("home:noteCard.votes", { count: option.votes })}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          <div className={styles.quoteReactions}>
+            <ReactionChips noteId={note.id} reactions={note.reactions} indent={false} />
+          </div>
         </>
       )}
-      <div className={styles.quoteReactions}>
-        <ReactionChips noteId={note.id} reactions={note.reactions} indent={false} />
-      </div>
     </section>
   );
 }
@@ -151,6 +164,7 @@ function PostContent({
   onDeleted,
   forceOpenCw = false,
   onReplyIndicatorClick,
+  isMainSubject = false,
 }: {
   note: Note;
   linkToDetail: boolean;
@@ -160,8 +174,10 @@ function PostContent({
   onDeleted?: () => void;
   forceOpenCw?: boolean;
   onReplyIndicatorClick?: (replyId: string) => void;
+  isMainSubject?: boolean;
 }) {
   const { t } = useTranslation();
+  const redactSuspendedAuthor = Boolean(note.authorSuspended) && !isMainSubject;
   const { user: currentUser } = useAuth();
   const { showError } = useToast();
   const { openReply, openQuote } = useComposer();
@@ -457,41 +473,47 @@ function PostContent({
         </div>
       )}
 
-      {note.contentWarning && (
-        <div className={styles.contentWarningWrap}>
-          <p className={styles.contentWarningText}>
-            <TwemojiEmoji emoji="⚠️" /> <EmojiText text={note.contentWarning} emojis={note.emojis} />
-          </p>
-          <button
-            className={styles.contentWarningToggle}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowContent((shown) => !shown);
-            }}
-          >
-            {showContent
-              ? t("home:noteCard.hideContent")
-              : t("home:noteCard.showContent")}
-          </button>
-        </div>
-      )}
-      {showContent && (
+      {redactSuspendedAuthor ? (
+        <p className={styles.body}>{t("home:noteCard.suspendedAuthorReference")}</p>
+      ) : (
         <>
-          <p className={styles.body}>
-            {note.contentHtml ? (
-              <RichHtml html={note.contentHtml} emojis={note.emojis} />
-            ) : (
-              <RichText text={note.text} emojis={note.emojis} />
-            )}
-          </p>
-          <NoteAttachments attachments={note.attachments} />
-          {note.linkCards.map((card) => (
-            <LinkCard key={card.url} card={card} />
-          ))}
+          {note.contentWarning && (
+            <div className={styles.contentWarningWrap}>
+              <p className={styles.contentWarningText}>
+                <TwemojiEmoji emoji="⚠️" /> <EmojiText text={note.contentWarning} emojis={note.emojis} />
+              </p>
+              <button
+                className={styles.contentWarningToggle}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowContent((shown) => !shown);
+                }}
+              >
+                {showContent
+                  ? t("home:noteCard.hideContent")
+                  : t("home:noteCard.showContent")}
+              </button>
+            </div>
+          )}
+          {showContent && (
+            <>
+              <p className={styles.body}>
+                {note.contentHtml ? (
+                  <RichHtml html={note.contentHtml} emojis={note.emojis} />
+                ) : (
+                  <RichText text={note.text} emojis={note.emojis} />
+                )}
+              </p>
+              <NoteAttachments attachments={note.attachments} />
+              {note.linkCards.map((card) => (
+                <LinkCard key={card.url} card={card} />
+              ))}
+            </>
+          )}
         </>
       )}
 
-      {showContent && poll && (
+      {!redactSuspendedAuthor && showContent && poll && (
         <div className={styles.poll}>
           {pollResults || pollVoted || pollClosed
             ? poll.options.map((option, index) => (
@@ -577,10 +599,10 @@ function PostContent({
         </div>
       )}
 
-      {showContent && (note.quote || resolvedQuote) && (
+      {!redactSuspendedAuthor && showContent && (note.quote || resolvedQuote) && (
         <QuoteCard note={resolvedQuote ?? note.quote!} />
       )}
-      {showContent && !note.quote && !resolvedQuote && note.quoteStatus && (
+      {!redactSuspendedAuthor && showContent && !note.quote && !resolvedQuote && note.quoteStatus && (
         <div className={styles.pendingQuoteWrap}>
           <PendingReferenceIndicator
             noteId={note.id}
@@ -709,6 +731,7 @@ export default function NoteCard({
   small = false,
   forceOpenCw = false,
   onReplyIndicatorClick,
+  isMainSubject = false,
 }: NoteCardProps) {
   const { t } = useTranslation();
   const [hidden, setHidden] = useState(false);
@@ -789,6 +812,7 @@ export default function NoteCard({
         onDeleted={() => setHidden(true)}
         forceOpenCw={forceOpenCw}
         onReplyIndicatorClick={onReplyIndicatorClick}
+        isMainSubject={isMainSubject}
       />
     </article>
   );

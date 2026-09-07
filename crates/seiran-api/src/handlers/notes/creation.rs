@@ -200,6 +200,7 @@ async fn create_repost(
         reactions: vec![],
         renote: None,
         quote: None,
+        author_suspended: None, // 投稿作成主体は凍結中に投稿できないため常に非凍結
         reposted_by_me: None,
         emojis: HashMap::new(),
         pinned_by_me: None,
@@ -916,6 +917,7 @@ async fn persist_regular_post(
         reactions: vec![],
         renote: None,
         quote: None,
+        author_suspended: None, // 投稿作成主体は凍結中に投稿できないため常に非凍結
         reposted_by_me: None,
         emojis: response_emojis,
         pinned_by_me: None,

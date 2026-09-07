@@ -8,7 +8,8 @@
       "storage": "Storage",
       "emojis": "Emojis",
       "relays": "Relays",
-      "authIpBlocks": "Blocked IPs"
+      "authIpBlocks": "Blocked IPs",
+      "suspendedActors": "Suspended Users"
     },
     "rightPanelDescription": "Manage the instance from this screen. Every action is also verified for admin permission on the server."
   },
@@ -174,6 +175,7 @@
     "forwardButton": "Forward",
     "deletePostButton": "Delete post",
     "suspendUserButton": "Suspend user",
+    "suspendedBadge": "Suspended",
     "commentsButton": "Internal comments",
     "addCommentButton": "Add comment",
     "modalTitle": "⚠️ Report",
@@ -261,6 +263,13 @@
       "reasonRuleOther": "Other rule violation",
       "reasonOther": "Other"
     }
+  },
+  "suspendedActors": {
+    "title": "Suspended Users",
+    "emptyMessage": "No suspended users.",
+    "localBadge": "Local",
+    "remoteBadge": "Remote",
+    "unsuspendButton": "Unsuspend"
   },
   "userManagement": {
     "title": "User management",

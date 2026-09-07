@@ -206,3 +206,27 @@ async fn mute_hides_only_from_muters_own_view() {
     // ミュートはローカル効果のみ。相手側からの視点には影響しない。
     assert!(!is_hidden(&mut tx, AUTHOR, VIEWER).await);
 }
+
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn suspended_actor_is_hidden_from_every_viewer() {
+    let pool = test_db_pool().await;
+    setup_fixtures(&pool).await;
+    let mut tx = pool.begin().await.unwrap();
+
+    assert!(!is_hidden(&mut tx, VIEWER, AUTHOR).await);
+    assert!(!is_hidden(&mut tx, OTHER, AUTHOR).await);
+
+    // withdrawn_at と同様、viewer との関係を問わず無条件に非表示になる
+    // （#凍結リモート対応、ブロック・ミュートと異なり相互関係に依存しない）。
+    sqlx::query("UPDATE actors SET suspended_at = NOW() WHERE id = $1")
+        .bind(AUTHOR)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert!(is_hidden(&mut tx, VIEWER, AUTHOR).await);
+    assert!(is_hidden(&mut tx, OTHER, AUTHOR).await);
+
+    // 無関係な第三者（AUTHOR自身は凍結していない）同士は非表示にならない
+    assert!(!is_hidden(&mut tx, VIEWER, OTHER).await);
+}

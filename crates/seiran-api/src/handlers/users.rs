@@ -773,15 +773,9 @@ async fn build_profile_response_inner(
         None => false,
     };
 
-    // アカウント凍結状態（ローカルユーザーのみ判定対象、リモートアクターは常に false）。
-    let is_suspended = match actor.user_id {
-        Some(uid) => state
-            .users
-            .is_suspended_by_user_id(uid)
-            .await
-            .unwrap_or(false),
-        None => false,
-    };
+    // アカウント凍結状態（ローカル・リモート共通、actors.suspended_at を直接見る。
+    // #凍結リモート対応）。
+    let is_suspended = actor.suspended_at.is_some();
 
     // リモート Fedi アクターの場合、featured collection（ピン留め投稿, #61）を同期する。
     // 初回表示（`fetch_remote_profile`がDB未登録アクターを新規upsertした直後）だけは

@@ -12,6 +12,9 @@ export interface User {
   /** `GET /api/auth/me`のたびに再発行される新しいJWT（スライディング延命）。
    * 呼び出し側でlocalStorageへ保存し直すこと。 */
   token: string;
+  /** 凍結中かどうか。`true` の間、他APIはすべて`ACCOUNT_SUSPENDED`で拒否されるため、
+   * アプリ側は他の全画面をバイパスして凍結専用画面のみを表示する。 */
+  is_suspended: boolean;
 }
 
 // ── 管理画面用の型（レスポンスは snake_case） ──────────────────────────────
@@ -32,6 +35,20 @@ export interface AdminUser {
   withdrawn_at: string | null;
 }
 
+/** `GET /api/admin/suspended-actors`の1件。ローカル・リモート混在（#凍結リモート対応）。 */
+export interface SuspendedActor {
+  id: string;
+  username: string;
+  domain: string;
+  actor_type: string; // "local" | "fedi" | "bsky" | "remote_seiran" | ...
+  display_name: string | null;
+  avatar_url: string | null;
+  suspended_at: string;
+  /** ローカルアクターの場合のみ設定。 */
+  user_id: string | null;
+  email: string | null;
+}
+
 export interface AdminReport {
   id: string;
   reporter_actor_id: string;
@@ -48,6 +65,8 @@ export interface AdminReport {
   forwarded_at: string | null;
   closed_at: string | null;
   created_at: string;
+  /** 通報対象アクターが凍結済みか（#凍結リモート対応）。 */
+  subject_suspended: boolean;
 }
 export interface ReportComment {
   id: string;
@@ -275,6 +294,11 @@ export interface Note {
   renote?: Note;
   /** 引用の場合の引用元ポスト実体（#116）。引用の引用は埋め込まない。 */
   quote?: Note;
+  /** 投稿者が凍結済みかどうか。`renote`/`quote`として埋め込まれた参照や、返信先として
+   * 積み上げた小カードとして表示する場合に限り、`true`なら本文・添付を
+   * 「凍結されたユーザーのポストです」のプレースホルダに置き換える（メイン主体として
+   * 表示する場合は常に実データを見せる）。 */
+  authorSuspended?: boolean;
   /** 認証ユーザーがこのノートをリポスト済みかどうか（未認証時は undefined）。 */
   repostedByMe?: boolean;
   /** 本文・投稿者表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信のみ）。
@@ -540,6 +564,8 @@ export interface RawNote {
   reactions?: ReactionSummary[];
   renote?: RawNote;
   quote?: RawNote;
+  authorSuspended?: boolean;
+  author_suspended?: boolean;
   repostedByMe?: boolean;
   reposted_by_me?: boolean;
   emojis?: Record<string, string>;
@@ -599,6 +625,7 @@ export function normalizeNote(r: RawNote): Note {
     reactions: r.reactions ?? [],
     renote: r.renote ? normalizeNote(r.renote) : undefined,
     quote: r.quote ? normalizeNote(r.quote) : undefined,
+    authorSuspended: r.authorSuspended ?? r.author_suspended,
     repostedByMe: r.repostedByMe ?? r.reposted_by_me,
     emojis: r.emojis,
     pinnedByMe: r.pinnedByMe ?? r.pinned_by_me,

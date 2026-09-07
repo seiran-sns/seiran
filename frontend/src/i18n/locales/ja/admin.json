@@ -8,7 +8,8 @@
       "storage": "ストレージ",
       "emojis": "絵文字",
       "relays": "リレー",
-      "authIpBlocks": "認証ブロック"
+      "authIpBlocks": "認証ブロック",
+      "suspendedActors": "凍結済みユーザー"
     },
     "rightPanelDescription": "管理操作はこの画面から行えます。各操作はサーバー側でも管理者権限を検証します。"
   },
@@ -174,6 +175,7 @@
     "forwardButton": "転送",
     "deletePostButton": "投稿削除",
     "suspendUserButton": "ユーザー凍結",
+    "suspendedBadge": "凍結済み",
     "commentsButton": "内部コメント",
     "addCommentButton": "コメント追加",
     "modalTitle": "⚠️ 通報",
@@ -261,6 +263,13 @@
       "reasonRuleOther": "その他のルール違反",
       "reasonOther": "その他"
     }
+  },
+  "suspendedActors": {
+    "title": "凍結済みユーザー",
+    "emptyMessage": "凍結済みのユーザーはいません。",
+    "localBadge": "ローカル",
+    "remoteBadge": "リモート",
+    "unsuspendButton": "凍結解除"
   },
   "userManagement": {
     "title": "ユーザー管理",

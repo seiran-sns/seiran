@@ -8,7 +8,8 @@
       "storage": "Lagerung",
       "emojis": "Emojis",
       "relays": "Relays",
-      "authIpBlocks": "Gesperrte IPs"
+      "authIpBlocks": "Gesperrte IPs",
+      "suspendedActors": "Gesperrte Nutzer"
     },
     "rightPanelDescription": "Verwalten Sie die Instanz über diesen Bildschirm. Für jede Aktion wird auch die Administratorberechtigung auf dem Server überprüft."
   },
@@ -166,6 +167,7 @@
     "forwardButton": "Nach vorne",
     "deletePostButton": "Beitrag löschen",
     "suspendUserButton": "Benutzer sperren",
+    "suspendedBadge": "Gesperrt",
     "commentsButton": "Interne Kommentare",
     "addCommentButton": "Kommentar hinzufügen",
     "modalTitle": "⚠️ Bericht",
@@ -253,6 +255,13 @@
       "reasonRuleOther": "Sonstiger Regelverstoß",
       "reasonOther": "Andere"
     }
+  },
+  "suspendedActors": {
+    "title": "Gesperrte Nutzer",
+    "emptyMessage": "Keine gesperrten Nutzer.",
+    "localBadge": "Lokal",
+    "remoteBadge": "Extern",
+    "unsuspendButton": "Sperrung aufheben"
   },
   "userManagement": {
     "title": "Benutzerverwaltung",

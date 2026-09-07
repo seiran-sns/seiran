@@ -31,13 +31,14 @@ describe("getAdminTopics", () => {
       "storage",
       "emojis",
       "reports",
+      "suspendedActors",
       "relays",
       "authIpBlocks",
     ]);
   });
 
-  it("moderator は通報・絵文字トピックにアクセスできる（#179）", () => {
-    expect(getAdminTopics("moderator")).toEqual(["reports", "emojis"]);
+  it("moderator は通報・凍結済みユーザー・絵文字トピックにアクセスできる（#179、#凍結リモート対応）", () => {
+    expect(getAdminTopics("moderator")).toEqual(["reports", "suspendedActors", "emojis"]);
   });
 
   it("emoji-editor は絵文字トピックのみアクセスできる（#179）", () => {

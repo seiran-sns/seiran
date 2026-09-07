@@ -173,7 +173,8 @@ Bskyネットワーク側（AT Protocol）には非公開アカウントとい�
 2. `Signature` の `headers=` に `digest` が含まれることを確認
 3. `keyId` のアクターURIと `activity.actor` の一致確認
 4. `keyId` から公開鍵PEM取得（TTL付きキャッシュ、既定1時間）してRSA-SHA256検証。キャッシュ済み鍵での検証に失敗した場合はキャッシュを無視して1回だけ再フェッチし再検証する（リモートの鍵ローテーション対応）。PEMは`trim()`してからパースする（Pleromaは`publicKeyPem`の末尾に空行を付けて返すことがあり、trimしないと`rsa`クレートのPEMパーサが`PreEncapsulationBoundary`エラーで拒否する）
-5. 検証OK後、実処理はジョブキューへ委譲するのみ
+5. 署名者（`keyId`のアクターURI）が凍結済み（`actors.suspended_at`）なら、enqueueせず403で即座に拒否する（ユーザー凍結、`docs/database.md`「`actors.suspended_at`」参照）
+6. 検証OK後、実処理はジョブキューへ委譲するのみ。ジョブ側（`inbound_activity_process::handle`）でも、`activity.actor`（リレー転送時は署名者と異なりうる）が凍結済みならFollow/Create/Like/EmojiReact/Announceを非格納で破棄する
 
 ### 署名付きGET（Authorized Fetch対応）
 MastodonのAuthorized Fetch（`AUTHORIZED_FETCH=true`）等secure modeを有効にしたインスタンス
@@ -372,6 +373,7 @@ Bsky公式Relay（`bsky.network`）は新規（未検証）PDSに対してホス
 `wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like` に接続。
 
 - **wantedDids絞り込み**: ローカルユーザーがフォロー中、またはいずれかのリストのメンバーであるBsky DIDの集合を30秒間隔でポーリングし変化があれば再接続。無関係な投稿・Likeの際限ない取り込みを防ぐための必須の絞り込み。
+- **凍結アクターの新規取り込み拒否**: 投稿の新規保存対象判定クエリ（`actor_row`）に`suspended_at IS NULL`を含めるほか、リポスト・いいねの取り込み前にも凍結状態を確認し、凍結済みなら破棄する（ユーザー凍結、`docs/database.md`「`actors.suspended_at`」参照）。AT Protocolには署名アクセス拒否に相当する仕組みが無い（PDSは相手管理下）ため、新規取り込みの抑止が実質的なenforcementになる。
 - **リーダー選出**: 複数プロセス起動時の重複接続を避けるため、Redisベースの `JetstreamLeaderElector` でリース制御。モノリスモードはRedis無しでも常時接続、split-role構成はRedis障害時にフェイルクローズ。
 - **cursor永続化**: 直近処理イベントの `time_us` を `site_settings`（汎用KV）に5秒間隔で保存し、再接続時に引き継ぐ（プロセス停止中のイベント取りこぼし防止）。
 - 保存対象は wantedDids に含まれるDIDのみ。投稿は同梱の `record.text`/`record.createdAt` をそのまま使う（AppView再取得不要）。`app.bsky.embed.images`/`video`/`recordWithMedia` を解析しCDN URLを組み立てて添付保存。`app.bsky.embed.external` のうち、Bluesky GIFピッカーが生成するTenor/Klipy URLは、クエリに埋め込まれた動画識別子から `t.gifs.bsky.app` / `k.gifs.bsky.app` のMP4（MP4がないKlipyはWebM）URLへ変換して添付保存する。GIF判定に失敗した`external`（YouTube/Spotify/x.com/一般URL等）は、`url`/`title`/`description`/`thumb`を`post_link_cards`（`docs/database.md`参照、`position=0`固定）にそのまま保存する。`app.bsky.embed.external`にはiframe情報が無いため、INSERT成功後に非同期の`Job::LinkCardEmbedResolve{post_id, position: 0, url}`（`priority::LOW`）をenqueueし、oEmbed discoveryで見つかったembed srcをホワイトリスト判定した上で`embed_src`/`embed_type`だけをUPDATEする（`crates/seiran-common/src/jobs/link_card_embed_resolve.rs`）。フロントは`embedSrc`の有無で埋め込みプレーヤー表示/x.com/一般URLの3種に振り分ける（`frontend/src/components/note/LinkCard.tsx`）。`record.facets`（`#link`/`#mention`/`#tag`）は6節の方式で処理する。

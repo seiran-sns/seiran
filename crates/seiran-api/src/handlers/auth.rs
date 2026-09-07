@@ -10,7 +10,7 @@ use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 
 use crate::error::ApiError;
 use crate::mailer::send_password_reset_email;
-use crate::middleware::{extract_auth, ClientIp};
+use crate::middleware::{extract_auth_allow_suspended, ClientIp};
 use crate::rate_limit::{self, AttemptKind};
 use crate::AppState;
 
@@ -102,6 +102,11 @@ pub struct UserInfo {
     /// 有効期限7日のトークンを発行し直す。フロントは定期ポーリングでこれを受け取り
     /// 保存し直すことで、使い続けている限りログアウトされないようにする。
     pub token: String,
+    /// 凍結中かどうか。`true` の間、フロントは他の全画面をバイパスして本人ユーザー名＋
+    /// 「あなたは凍結されています」＋ログアウトボタンのみの専用画面を表示する
+    /// （他のAPIは `extract_auth` が `ACCOUNT_SUSPENDED` で拒否するため、この `me` だけが
+    /// 凍結中でも呼べる例外）。
+    pub is_suspended: bool,
 }
 
 /// actors.avatar_media_id がある場合は storage_providers から公開 URL を解決し、
@@ -352,6 +357,7 @@ pub async fn register(
             )),
             language_preference: None, // 登録直後は「自動」
             token,
+            is_suspended: false, // 登録直後は凍結され得ない
         },
     }))
 }
@@ -386,7 +392,7 @@ pub(crate) async fn finish_login(
         .flatten()
         .unwrap_or_else(|| "user".to_string());
 
-    let actor_id = state
+    let actor = state
         .actors
         .find_local_by_user_id(user_id)
         .await
@@ -394,8 +400,9 @@ pub(crate) async fn finish_login(
             tracing::error!("[login] アクター取得失敗: {}", e);
             ApiError::Internal(e.to_string())
         })?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?
-        .id;
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+    let actor_id = actor.id;
+    let is_suspended = actor.suspended_at.is_some();
 
     let avatar_url = fetch_avatar_url(state, actor_id).await;
 
@@ -417,6 +424,7 @@ pub(crate) async fn finish_login(
             avatar_url,
             language_preference,
             token,
+            is_suspended,
         },
     })
 }
@@ -527,7 +535,9 @@ pub async fn me(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<UserInfo>, ApiError> {
-    let auth_user = extract_auth(
+    // 凍結中でも自分のユーザー名を見てログアウトできる必要があるため、`extract_auth` の
+    // suspendedチェックは経由しない（`middleware::auth` のコメント参照）。
+    let auth_user = extract_auth_allow_suspended(
         &headers,
         &state.local_auth,
         state.app_tokens.as_ref(),
@@ -578,6 +588,7 @@ pub async fn me(
         avatar_url,
         language_preference,
         token,
+        is_suspended: actor.suspended_at.is_some(),
     }))
 }
 

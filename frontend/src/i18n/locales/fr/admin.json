@@ -8,7 +8,8 @@
       "storage": "Stockage",
       "emojis": "Émojis",
       "relays": "Relays",
-      "authIpBlocks": "IP bloquées"
+      "authIpBlocks": "IP bloquées",
+      "suspendedActors": "Utilisateurs suspendus"
     },
     "rightPanelDescription": "Gérez l'instance à partir de cet écran. Chaque action est également vérifiée pour l'autorisation d'administrateur sur le serveur."
   },
@@ -166,6 +167,7 @@
     "forwardButton": "Avant",
     "deletePostButton": "Supprimer le message",
     "suspendUserButton": "Suspendre l'utilisateur",
+    "suspendedBadge": "Suspendu",
     "commentsButton": "Commentaires internes",
     "addCommentButton": "Ajouter un commentaire",
     "modalTitle": "⚠️ Rapport",
@@ -253,6 +255,13 @@
       "reasonRuleOther": "Autre violation des règles",
       "reasonOther": "Autre"
     }
+  },
+  "suspendedActors": {
+    "title": "Utilisateurs suspendus",
+    "emptyMessage": "Aucun utilisateur suspendu.",
+    "localBadge": "Local",
+    "remoteBadge": "Distant",
+    "unsuspendButton": "Lever la suspension"
   },
   "userManagement": {
     "title": "Gestion des utilisateurs",

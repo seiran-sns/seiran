@@ -11,6 +11,7 @@ function makeUser(): User {
     actor_id: 1,
     language_preference: null,
     token: "test-token",
+    is_suspended: false,
   };
 }
 

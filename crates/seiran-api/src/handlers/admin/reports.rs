@@ -27,6 +27,9 @@ struct ReportRow {
     forwarded_at: Option<DateTime<Utc>>,
     closed_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
+    /// 通報対象アクターが凍結済みか（#凍結リモート対応）。フロントは`true`の間、
+    /// 「ユーザー凍結」ボタンの代わりに「凍結済み」表示にする。
+    subject_suspended: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -46,6 +49,7 @@ pub struct ReportResponse {
     pub forwarded_at: Option<DateTime<Utc>>,
     pub closed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    pub subject_suspended: bool,
 }
 
 impl From<ReportRow> for ReportResponse {
@@ -66,6 +70,7 @@ impl From<ReportRow> for ReportResponse {
             forwarded_at: r.forwarded_at,
             closed_at: r.closed_at,
             created_at: r.created_at,
+            subject_suspended: r.subject_suspended,
         }
     }
 }
@@ -93,7 +98,8 @@ pub async fn list_reports(
         "SELECT r.id,r.reporter_actor_id,concat(ra.username,'@',ra.domain) reporter,\
          r.subject_type::text subject_type,r.subject_actor_id,concat(sa.username,'@',sa.domain) subject,\
          r.subject_post_id,r.reason_type,r.reason_text,r.destination::text destination,r.remote_host,\
-         r.status::text status,r.forwarded_at,r.closed_at,r.created_at FROM reports r \
+         r.status::text status,r.forwarded_at,r.closed_at,r.created_at,\
+         (sa.suspended_at IS NOT NULL) AS subject_suspended FROM reports r \
          JOIN actors ra ON ra.id=r.reporter_actor_id JOIN actors sa ON sa.id=r.subject_actor_id \
          ORDER BY (r.status='open') DESC,r.created_at DESC"
     ).fetch_all(&state.db).await.map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -178,22 +184,19 @@ pub async fn suspend_subject(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let user_id: Option<i64> = sqlx::query_scalar(
-        "SELECT a.user_id FROM reports r JOIN actors a ON a.id=r.subject_actor_id WHERE r.id=$1",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?
-    .flatten();
-    let Some(user_id) = user_id else {
-        return Err(ApiError::BadRequest(
-            "REMOTE_USER_CANNOT_BE_SUSPENDED".into(),
-        ));
-    };
+    // ローカル・リモートを問わず、通報対象アクターをそのまま凍結する（#凍結リモート対応で
+    // REMOTE_USER_CANNOT_BE_SUSPENDED を撤去、actors.suspended_at がローカル・リモート共通の
+    // enforcement を担うため actors.user_id の解決は不要になった）。
+    let subject_actor_id: Option<i64> =
+        sqlx::query_scalar("SELECT subject_actor_id FROM reports WHERE id=$1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let subject_actor_id = subject_actor_id.ok_or(ApiError::NotFound("REPORT_NOT_FOUND"))?;
     state
-        .users
-        .set_suspended(user_id, true)
+        .actors
+        .set_suspended(subject_actor_id, true)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)

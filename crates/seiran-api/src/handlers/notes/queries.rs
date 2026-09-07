@@ -276,7 +276,8 @@ pub async fn embed_renotes(
                 p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
                 p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
                 p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                a.suspended_at AS actor_suspended_at
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
          LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -358,7 +359,8 @@ pub async fn embed_quotes(db: &sqlx::PgPool, notes: &mut [NoteResponse], my_acto
                 p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
                 p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
                 p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html
+                p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                a.suspended_at AS actor_suspended_at
          FROM posts p JOIN actors a ON a.id = p.actor_id
          LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
          LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id

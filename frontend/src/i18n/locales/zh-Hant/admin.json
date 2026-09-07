@@ -8,7 +8,8 @@
       "storage": "儲存空間",
       "emojis": "表情符號",
       "relays": "Relays",
-      "authIpBlocks": "已封鎖IP"
+      "authIpBlocks": "已封鎖IP",
+      "suspendedActors": "已凍結使用者"
     },
     "rightPanelDescription": "從此畫面管理此實例。每項操作都會驗證伺服器管理員權限。"
   },
@@ -166,6 +167,7 @@
     "forwardButton": "轉發",
     "deletePostButton": "刪除貼文",
     "suspendUserButton": "停權使用者",
+    "suspendedBadge": "已凍結",
     "commentsButton": "內部備註",
     "addCommentButton": "新增備註",
     "modalTitle": "⚠️檢舉",
@@ -253,6 +255,13 @@
       "reasonRuleOther": "其他違規行為",
       "reasonOther": "其他"
     }
+  },
+  "suspendedActors": {
+    "title": "已凍結使用者",
+    "emptyMessage": "沒有已凍結的使用者。",
+    "localBadge": "本地",
+    "remoteBadge": "遠端",
+    "unsuspendButton": "解除凍結"
   },
   "userManagement": {
     "title": "使用者管理",

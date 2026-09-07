@@ -74,6 +74,7 @@
     "repostedConnector": "转发于",
     "repostedSuffix": "",
     "unavailableRepost": "该帖子无法显示（它是私密的）。",
+    "suspendedAuthorReference": "这是已被冻结用户的帖子。",
     "notFollowing": "未关注",
     "following": "关注中",
     "followPending": "待审核",

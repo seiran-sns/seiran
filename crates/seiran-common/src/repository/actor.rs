@@ -52,13 +52,17 @@ pub struct Actor {
     /// フォロー一覧等から除外すべき（内部処理・連合への削除通知はこの値を前提に動くため、
     /// この関数自体ではフィルタしない。呼び出し元で判定すること）。
     pub withdrawn_at: Option<DateTime<Utc>>,
+    /// 凍結日時（管理者・モデレーターによるユーザー凍結）。`Some` なら以降このアクターの
+    /// 新規アクティビティ（AP/ATP双方）は拒絶・非保存となり、`actor_is_hidden_for_viewer`
+    /// 経由でタイムライン・通知・検索等の表示からも除外される。ローカル・リモート共通。
+    pub suspended_at: Option<DateTime<Utc>>,
 }
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
     display_name, ap_uri, ap_inbox_url, at_did, at_handle, at_repo_cid, at_repo_rev, at_signing_key_pem, \
     bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields, \
-    birth_date, birth_date_public, is_locked, claimed_ap_uri, claimed_at_did, withdrawn_at";
+    birth_date, birth_date_public, is_locked, claimed_ap_uri, claimed_at_did, withdrawn_at, suspended_at";
 
 /// プロフィール編集画面（`PATCH /api/users/me/profile`）が読み書きする行の部分集合。
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -239,6 +243,10 @@ pub trait ActorRepository: Send + Sync {
 
     /// 現在の承認制設定を取得する。行が無ければ`false`（デフォルト）。
     async fn find_is_locked(&self, actor_id: i64) -> Result<bool, sqlx::Error>;
+
+    /// ユーザー凍結。`actor_id` はローカル・リモートを問わない（ローカル・リモート共通
+    /// enforcementの一本化、通報画面からの凍結・凍結解除、管理画面「凍結済みユーザー」タブが使う）。
+    async fn set_suspended(&self, actor_id: i64, suspended: bool) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgActorRepository {
@@ -613,5 +621,16 @@ impl ActorRepository for PgActorRepository {
             .fetch_optional(&self.pool)
             .await
             .map(|r| r.unwrap_or(false))
+    }
+
+    async fn set_suspended(&self, actor_id: i64, suspended: bool) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE actors SET suspended_at = CASE WHEN $1 THEN NOW() ELSE NULL END, updated_at = NOW() WHERE id = $2",
+        )
+        .bind(suspended)
+        .bind(actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
     }
 }

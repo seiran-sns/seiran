@@ -74,6 +74,7 @@
     "repostedConnector": "が",
     "repostedSuffix": "にリポスト",
     "unavailableRepost": "この投稿は表示できません（非公開投稿のため）。",
+    "suspendedAuthorReference": "凍結されたユーザーのポストです",
     "notFollowing": "未フォロー",
     "following": "フォロー済み",
     "followPending": "フォロー承認待ち",
