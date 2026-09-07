@@ -1,5 +1,5 @@
 use super::content::{
-    strip_quote_fallback_line_html, strip_quote_fallback_line_html_leading,
+    escape_html_text, strip_quote_fallback_line_html, strip_quote_fallback_line_html_leading,
     strip_quote_inline_paragraph_html,
 };
 use super::emoji::{
@@ -32,6 +32,46 @@ pub(super) struct SavedApNote {
     pub parent_original_post_id: Option<i64>,
 }
 
+/// `save_ap_note_core`が投稿として受け入れる AP オブジェクト型か判定する。
+/// `Article`はMastodon系ブログプラグイン（WriteFreely/Plume/Ghost等）やbridgy-fedの
+/// Webブリッジ（非フェディバース由来サイトのAP化）が使う型。既にfeatured collection側
+/// （`ap::outbox::extract_note_flexible`）ではNoteと同列に扱っているため、ここでも
+/// 同じ扱いにする。`Article`の`name`（タイトル）は`prepend_article_title`が本文の先頭へ
+/// 見出しとして反映する。
+fn is_supported_note_type(note_type: Option<&str>) -> bool {
+    matches!(note_type, Some("Note") | Some("Question") | Some("Article"))
+}
+
+/// `Article`（bridgy-fed Webブリッジ等）の`name`（タイトル）を、本文の先頭に見出しとして
+/// 追加する。`Note`/`Question`など`name`を意味のあるタイトルとして使わない型、および
+/// `name`が無い/空文字の場合は何もしない。
+///
+/// `content_html_sanitized`は`sanitize_ap_content_html`で既にサニタイズ済みの値を渡すこと
+/// （ここでのタイトル埋め込みはそれより後段のため、`escape_html_text`で自前エスケープする。
+/// `sanitize_ap_content_html`の許可タグに`h3`を追加済み——このタイトルをHTMLとして
+/// 再度その関数に通すことはしないため、ここで安全な形にしておく必要がある）。
+fn prepend_article_title(
+    note: &serde_json::Value,
+    content_html_sanitized: String,
+    body: String,
+) -> (String, String) {
+    let title = (note["type"].as_str() == Some("Article"))
+        .then(|| note["name"].as_str())
+        .flatten()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let Some(title) = title else {
+        return (content_html_sanitized, body);
+    };
+    let html = format!(
+        "<h3>{}</h3>{}",
+        escape_html_text(title),
+        content_html_sanitized
+    );
+    let text = format!("{}\n\n{}", title, body);
+    (html, text)
+}
+
 /// `save_ap_note_core`の結果。
 pub(super) enum SaveApNoteOutcome {
     /// 新規にINSERTした。
@@ -55,7 +95,7 @@ pub(super) async fn save_ap_note_core(
     ap_client: &ApClient,
     ref_mode: ReferenceResolutionMode,
 ) -> Result<SaveApNoteOutcome, String> {
-    if !matches!(note["type"].as_str(), Some("Note") | Some("Question")) {
+    if !is_supported_note_type(note["type"].as_str()) {
         return Err(format!(
             "フェッチしたオブジェクトが Note ではありません: type={:?}",
             note["type"]
@@ -180,6 +220,7 @@ pub(super) async fn save_ap_note_core(
         content_html_sanitized =
             strip_quote_fallback_line_html_leading(&content_html_sanitized, uri);
     }
+    let (content_html_sanitized, body) = prepend_article_title(note, content_html_sanitized, body);
     // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
     let to_list = as_string_list(&note["to"]);
     let visibility = classify_ap_visibility(&to_list, &as_string_list(&note["cc"]));
@@ -361,12 +402,15 @@ pub(super) async fn save_ap_note_core(
     // thumbnailUrlをそのまま反映する（受信側で改めてOGP取得し直す必要がない。#237、
     // 実地検証で「本文にURLが無くlinkCardsのみのケースが空振りする」欠落を発見して対応）。
     // 無ければ従来通り本文中URLをOGP取得ジョブ（oEmbed discoveryによる埋め込みプレーヤー
-    // 解決も行う）へ委ねる。
+    // 解決も行う）へ委ねる。`Article`（bridgy-fed Webブリッジ等、#242）はNoteと異なり
+    // 元記事そのものに価値があるため、本文中リンクの有無に関わらず自身の`id`（ap_object_id）
+    // も常にカード化候補へ加える（タイムライン上からでも元記事へジャンプできるように）。
+    let article_url = (note["type"].as_str() == Some("Article")).then_some(note_id.as_str());
     match seiran_post_ext.as_ref().map(|sp| &sp.link_cards) {
         Some(cards) if !cards.is_empty() => {
             crate::seiran_post::insert_seiran_post_link_cards(&inbox.db_pool, post_id, cards).await;
         }
-        _ => queue_link_cards_for_post(&inbox.queue, post_id, &body).await,
+        _ => queue_link_cards_for_post(&inbox.queue, post_id, &body, article_url).await,
     }
 
     // 添付画像・動画・音声の URL を保存（S3 には保存せず URL のみ記録）
@@ -424,13 +468,43 @@ fn extract_link_card_urls(body: &str, max: usize) -> Vec<String> {
     urls
 }
 
+/// `primary_url`（あれば）を先頭に置いた上で、本文中リンクを重複排除しつつ
+/// `max`件まで組み合わせる。`primary_url`は`Article`（#242）の`id`専用。
+fn build_link_card_urls(body: &str, primary_url: Option<&str>, max: usize) -> Vec<String> {
+    use std::collections::HashSet as Set;
+    let mut seen: Set<String> = Set::new();
+    let mut urls = Vec::new();
+    if let Some(url) = primary_url {
+        if seen.insert(url.to_string()) {
+            urls.push(url.to_string());
+        }
+    }
+    for url in extract_link_card_urls(body, max) {
+        if urls.len() >= max {
+            break;
+        }
+        if seen.insert(url.clone()) {
+            urls.push(url);
+        }
+    }
+    urls
+}
+
 /// 投稿本文中のURLカード化対象URLを、一律OGP取得ジョブ（`Job::OgpFetch`、OGPタグに加えて
 /// oEmbed discoveryによる埋め込みプレーヤー解決も行う）へ積む。投稿保存自体は既に完了して
 /// いるため、ここでの失敗はログのみでハンドラ全体を失敗させない。
 /// Create直接受信・参照解決経由（リプライ先/引用元/リポスト対象の1段階フェッチ）の
 /// どちらから保存された投稿でも`save_ap_note_core`から必ず呼ばれる。
-pub(super) async fn queue_link_cards_for_post(queue: &Arc<dyn JobQueue>, post_id: i64, body: &str) {
-    let urls = extract_link_card_urls(body, MAX_LINK_CARDS_PER_POST);
+/// `primary_url`は`Article`（#242）の`id`をカード先頭へ強制的に加えるためのもの
+/// （brid.gyのWebブリッジ等、`id`自体が人間のブラウザには元記事へ301リダイレクトするURLで
+/// あるため、`fetch_ogp`が実記事のOGPタグをそのまま取得できる）。それ以外の型では常に`None`。
+pub(super) async fn queue_link_cards_for_post(
+    queue: &Arc<dyn JobQueue>,
+    post_id: i64,
+    body: &str,
+    primary_url: Option<&str>,
+) {
+    let urls = build_link_card_urls(body, primary_url, MAX_LINK_CARDS_PER_POST);
     for (position, url) in urls.into_iter().enumerate() {
         let position = position as i16;
         if let Err(e) = queue
@@ -525,5 +599,115 @@ mod tests {
             "[a](https://example.com/1) [b](https://example.com/2) [c](https://example.com/3)";
         let urls = extract_link_card_urls(body, 2);
         assert_eq!(urls.len(), 2);
+    }
+
+    #[test]
+    fn build_link_card_urls_puts_primary_first_and_dedups() {
+        let body = "見て [記事](https://example.com/a)";
+        let urls = build_link_card_urls(body, Some("https://web.brid.gy/r/https://a.example/x"), 5);
+        assert_eq!(
+            urls,
+            vec![
+                "https://web.brid.gy/r/https://a.example/x".to_string(),
+                "https://example.com/a".to_string()
+            ]
+        );
+
+        // 本文中の同一URLが既にprimaryと重複する場合は1件にまとめる。
+        let body_dup = "見て [記事](https://web.brid.gy/r/https://a.example/x)";
+        let urls_dup =
+            build_link_card_urls(body_dup, Some("https://web.brid.gy/r/https://a.example/x"), 5);
+        assert_eq!(urls_dup, vec!["https://web.brid.gy/r/https://a.example/x".to_string()]);
+    }
+
+    #[test]
+    fn build_link_card_urls_respects_max_including_primary() {
+        let body = "[a](https://example.com/1) [b](https://example.com/2)";
+        let urls = build_link_card_urls(body, Some("https://example.com/primary"), 2);
+        assert_eq!(
+            urls,
+            vec![
+                "https://example.com/primary".to_string(),
+                "https://example.com/1".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn build_link_card_urls_without_primary_falls_back_to_body_only() {
+        let body = "[a](https://example.com/1)";
+        let urls = build_link_card_urls(body, None, 5);
+        assert_eq!(urls, vec!["https://example.com/1".to_string()]);
+    }
+
+    /// bridgy-fedのWebブリッジ（非フェディバース由来サイトのAP化）はNoteの代わりに
+    /// `type: "Article"`を返す。これを拒否すると、そのようなページへのリポスト・引用・
+    /// リプライの参照解決が常に失敗する（実例: https://gourmet.watch.impress.co.jp への
+    /// リポストが `web.brid.gy` 経由でArticleとして返り、取り込みに失敗していた）。
+    #[test]
+    fn is_supported_note_type_accepts_article() {
+        assert!(is_supported_note_type(Some("Article")));
+    }
+
+    #[test]
+    fn is_supported_note_type_accepts_note_and_question() {
+        assert!(is_supported_note_type(Some("Note")));
+        assert!(is_supported_note_type(Some("Question")));
+    }
+
+    #[test]
+    fn is_supported_note_type_rejects_other_types() {
+        assert!(!is_supported_note_type(Some("Person")));
+        assert!(!is_supported_note_type(Some("Image")));
+        assert!(!is_supported_note_type(None));
+    }
+
+    #[test]
+    fn prepend_article_title_adds_h3_and_text_heading() {
+        let note = serde_json::json!({"type": "Article", "name": "記事タイトル"});
+        let (html, body) = prepend_article_title(
+            &note,
+            "<p>本文</p>".to_string(),
+            "本文".to_string(),
+        );
+        assert_eq!(html, "<h3>記事タイトル</h3><p>本文</p>");
+        assert_eq!(body, "記事タイトル\n\n本文");
+    }
+
+    #[test]
+    fn prepend_article_title_escapes_html_special_chars() {
+        let note = serde_json::json!({"type": "Article", "name": "<script>alert(1)</script>"});
+        let (html, _) = prepend_article_title(&note, "<p>本文</p>".to_string(), "本文".to_string());
+        assert_eq!(
+            html,
+            "<h3>&lt;script&gt;alert(1)&lt;/script&gt;</h3><p>本文</p>"
+        );
+    }
+
+    #[test]
+    fn prepend_article_title_ignores_non_article_types() {
+        let note = serde_json::json!({"type": "Note", "name": "無視されるはずのタイトル"});
+        let (html, body) = prepend_article_title(
+            &note,
+            "<p>本文</p>".to_string(),
+            "本文".to_string(),
+        );
+        assert_eq!(html, "<p>本文</p>");
+        assert_eq!(body, "本文");
+    }
+
+    #[test]
+    fn prepend_article_title_ignores_missing_or_blank_name() {
+        let no_name = serde_json::json!({"type": "Article"});
+        assert_eq!(
+            prepend_article_title(&no_name, "<p>本文</p>".to_string(), "本文".to_string()),
+            ("<p>本文</p>".to_string(), "本文".to_string())
+        );
+
+        let blank_name = serde_json::json!({"type": "Article", "name": "   "});
+        assert_eq!(
+            prepend_article_title(&blank_name, "<p>本文</p>".to_string(), "本文".to_string()),
+            ("<p>本文</p>".to_string(), "本文".to_string())
+        );
     }
 }

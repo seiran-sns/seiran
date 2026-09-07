@@ -549,6 +549,13 @@ fn escape_html_attr(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// テキストノードとしてHTML片へ埋め込む際に安全な形にエスケープする（`&`/`<`/`>`）。
+/// `Article`の`name`（タイトル）等、外部から来た信頼できないプレーンテキストを`sanitize_ap_content_html`
+/// を経由しない箇所（`note_save::prepend_article_title`）でHTMLへ組み込む前に使う。
+pub(crate) fn escape_html_text(s: &str) -> String {
+    escape_html_attr(s)
+}
+
 /// `style` 属性値が `text-align: left|right|center|justify` という1プロパティのみで
 /// 構成されているか判定する。それ以外のCSSプロパティ・`!important`・複数プロパティの
 /// 混入は許可しない（CSSインジェクション面を最小化する）。
@@ -727,6 +734,7 @@ pub fn sanitize_ap_content_html(
         "rp",
         "h1",
         "h2",
+        "h3",
         "figure",
         "img",
         "ul",
@@ -939,6 +947,13 @@ mod tests {
     #[test]
     fn sanitize_ap_content_html_preserves_ruby() {
         let html = "<ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby>";
+        let out = sanitize_ap_content_html(html, &[], "example.social");
+        assert_eq!(out, html);
+    }
+
+    #[test]
+    fn sanitize_ap_content_html_preserves_h3() {
+        let html = "<h3>タイトル</h3><p>本文</p>";
         let out = sanitize_ap_content_html(html, &[], "example.social");
         assert_eq!(out, html);
     }

@@ -41,6 +41,32 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 
 ## 2. ActivityPub (Fedi) 統合
 
+### 受理するオブジェクト型（`note_save::is_supported_note_type`）
+
+`save_ap_note_core`（Create直接受信・参照解決経由の両方が通る唯一の保存経路）は
+`Note`/`Question`に加え`Article`も同列に受理する。`Article`はMastodon系ブログプラグイン
+（WriteFreely/Plume/Ghost等）やbridgy-fedのWebブリッジ（フェディバース非対応サイトを
+AP化するもの。実例: `web.brid.gy/r/<元URL>`）が使う型で、これを拒否するとそうしたURLへの
+リポスト・引用・リプライの参照解決が常にpending/失敗のままになる。featured collection側
+（`ap::outbox::extract_note_flexible`）は元々NoteとArticleを同列に扱っており、それと揃える形。
+
+`Article`が持つ`name`（タイトル）は`note_save::prepend_article_title`が本文の先頭へ見出しとして
+反映する（`Note`/`Question`など他の型では`name`を使わずそのまま無視）。`content_html`には
+`<h3>タイトル</h3>`（許可タグに`h3`を追加済み、上記「seiran Web UIでのリッチ表示」節参照）、
+`body`にはプレーンテキストの見出し行（タイトル + 空行）として、それぞれ`sanitize_ap_content_html`/
+`ap_content_to_markdown_body`適用後・引用フォールバック除去後の最終値に前置する。
+
+`Article`は`Note`と異なり元記事そのものにアクセスできて初めて価値を持つため、`Note`本文中の
+リンクと同じ扱い（本文にURLが無ければ埋め込まれない）にはせず、自身の`id`（`posts.ap_object_id`）を
+`build_link_card_urls`が常にURLカード候補の先頭へ加える（`queue_link_cards_for_post`の
+`primary_url`引数）。web.brid.gy等の`id`は人間のブラウザでは実記事へ301リダイレクトするURLの
+ため（「リモートで表示」バナーが使う`remote_url`と同じ仕組み、`dto.rs`の`strip_ap_activity_suffix`
+参照）、`Job::OgpFetch`（`Accept: text/html`でリダイレクトを辿る`net::fetch_ogp`）がリダイレクト先
+＝実記事のOGPタグをそのまま取得でき、カードの`url`はbrid.gyの`id`のままでも実記事のtitle/
+description/thumbnailが表示される。これによりタイムライン上（詳細ページのバナーを開かずとも）
+から元記事へジャンプできる。`seiranPost.linkCards[]`がある場合（seiran間連合）はこの仕組み自体を
+使わないため対象外。
+
 ### Fedi投稿のCW・アンケート・閲覧注意画像
 
 受信した`Note`/`Question`の`summary`をCW、`Question.oneOf`/`anyOf`をアンケートとして
@@ -601,7 +627,7 @@ AP `Note.content`（HTML）から意味的構造を保持したままクレン�
 UIの表示専用の追加チャンネルで、フロントは値があれば`RichHtml`コンポーネントで描画し、無ければ
 `body`の`RichText`描画にフォールバックする。
 
-**許可タグ**: `br p div a b i s code pre blockquote ruby rt rp h1 h2 figure img ul ol li small center`。
+**許可タグ**: `br p div a b i s code pre blockquote ruby rt rp h1 h2 h3 figure img ul ol li small center`。
 **許可属性**: `a`→`href`のみ、`img`→`src alt width height`のみ、全タグ共通で`style`（`text-align:
 left|right|center|justify` の1プロパティのみ許可、それ以外のCSSプロパティは属性ごと除去）。
 `class`はどのタグからも除去する。`href`/`src`は`http`/`https`スキームのみ許可（`ammonia`クレート）。

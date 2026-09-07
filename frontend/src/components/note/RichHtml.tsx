@@ -23,7 +23,7 @@ function isInternalPath(href: string): boolean {
 
 const STYLE_ATTR_TAGS = new Set([
   "p", "div", "b", "i", "s", "code", "pre", "blockquote", "ruby", "rt", "rp",
-  "h1", "h2", "figure", "ul", "ol", "li", "small", "center",
+  "h1", "h2", "h3", "figure", "ul", "ol", "li", "small", "center",
 ]);
 
 function textAlignFromStyleAttr(style: string | null): React.CSSProperties | undefined {
