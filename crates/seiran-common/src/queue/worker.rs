@@ -45,7 +45,8 @@ pub mod priority {
 /// WorkerEngine が同時実行するジョブ数のデフォルト上限。
 /// キューに大量のジョブが溜まっていた状態から復帰した際、一斉に spawn して
 /// リソースを食い潰す（サンダリングハード）のを防ぐ。
-const DEFAULT_MAX_CONCURRENT_JOBS: usize = 32;
+/// `db::recommended_max_connections` がDBプールサイズの見積もりにも使うため`pub`。
+pub const DEFAULT_MAX_CONCURRENT_JOBS: usize = 32;
 
 /// リトライ設定
 struct RetryConfig {

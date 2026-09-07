@@ -60,6 +60,8 @@ seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サ�
 - **`Role::Worker`**: HTTPサーバーは立てず、ジョブキューを消費するのみ。
 - **`Role::Firehose`**: 購読者がいないため空の `StreamHub` を使う。
 
+DBプール上限（`DB_MAX_CONNECTIONS`未設定時）は`seiran_common::db::recommended_max_connections(extra_concurrent_tasks)`がロールごとに動的算出する。内訳は`available_parallelism()`（HTTPハンドラの同時処理見積もり。axum/tokioはHTTPリクエスト処理自体に同時実行数の上限を設けていないため、tokioの既定ワーカースレッド数＝CPUコア数で近似する）＋`extra_concurrent_tasks`＋固定バッファ5、これをPostgreSQL既定の`max_connections`（100）を単一ロールで圧迫しない上限50でクランプする。`Role::All`/`Role::Worker`は埋め込み・単独どちらもジョブワーカー（`WorkerEngine::max_concurrent`、既定`DEFAULT_MAX_CONCURRENT_JOBS`＝32並列）を抱えるため`extra_concurrent_tasks`にこの値を渡し、`Role::Api`/`Role::Federation`/`Role::Firehose`はワーカーを持たないため0を渡す（`main.rs`）。
+
 同じ Docker イメージを `command`（`--role`）違いで複数コンテナに分けるか、単一コンテナで `all` 起動するかは**運用モードの選択**であり、コード上の分岐は `main.rs` の `Role` 列挙とその配線だけ。
 
 - `docker-compose.yml`（split-role）: `db` / `redis`（ジョブキュー共有に必須）/ `api` / `federation-inbox` / `worker` / `atp-repo` / `frontend` / `nginx`（`docker/nginx.conf`）/ `tunnel`。`config-data` ボリュームで `secrets.toml` を全バックエンド間で共有永続化する。サービス間通信はコンテナ内部DNS（`db:5432`等）を使うため`db`のホスト公開は本来不要だが、運用機へのSSHトンネル経由psqlアクセス（DBeaver等）のため`127.0.0.1:5432`（ループバックのみ）でホストへ公開する（`0.0.0.0`にはしない、#220）。
@@ -340,7 +342,7 @@ seiranユーザーのプロフィール記録は、`/users/:username` を actor 
 |---|---|
 | ドメイン | 自ホストドメインは`instance_domain`テーブル（一度確定したら不変、`seiran_common::LocalDomain`/`repository::InstanceDomainRepository`）から起動時に一度だけ読み込む。未確定の場合のみ`LOCAL_DOMAIN`環境変数の値をそのままDBへ書き込んで確定させる後方互換パスがある（確定済み環境では無視される）。`.env`にも`LOCAL_DOMAIN`もDB確定値も無い新規インストールでは、初回セットアップ（`POST /api/setup`）時にリクエストの`Host`ヘッダー（`X-Forwarded-Host`等は見ない生の`Host`のみ、`handlers::setup::host_domain_candidate`）から自動確定する。`GET /api/setup/status`が事前にHostヘッダー由来の候補を`domain_candidate`として返し、フロントが確認表示後にそのまま`POST /api/setup`のリクエストボディへ送り返す。サーバー側は送信時点の実際の`Host`ヘッダーとリクエストボディの値が完全一致することを検証してから確定する（`handlers::setup::try_confirm_domain`、不一致は`DOMAIN_MISMATCH`で拒否）。Hostヘッダーが無い・`localhost`・IPアドレス直打ちの場合は「シングルホストモード」（連合なし、PLC genesisを行わずAT Protocol DIDを持たないローカルユーザーとして開始、`actors.domain='localhost'`）で起動する。`ATP_PDS_ORIGIN`は廃止済み（未使用だったため） |
 | 起動ポート | `PORT`(既定3000), `FEDERATION_INBOX_PORT`(既定3001) |
-| データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`、`DB_HOST`/`DB_PORT`（既定`localhost`/5432。Docker運用では`docker-compose.yml`が`DB_HOST=db`を注入）、`DB_MAX_CONNECTIONS`（プール最大接続数、既定10。split-roleではプロセスごとに持つ）。接続先はこれらから組み立てる（`DATABASE_URL`という完成済みURL変数は持たない、`seiran_common::db::get_db_pool`） |
+| データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`、`DB_HOST`/`DB_PORT`（既定`localhost`/5432。Docker運用では`docker-compose.yml`が`DB_HOST=db`を注入）、`DB_MAX_CONNECTIONS`（プール最大接続数を明示指定。未設定時は`seiran_common::db::recommended_max_connections`がロールごとに動的算出する。split-roleではプロセスごとに持つ）。接続先はこれらから組み立てる（`DATABASE_URL`という完成済みURL変数は持たない、`seiran_common::db::get_db_pool`） |
 | ジョブキュー | `REDIS_URL`（split-role構成専用。`--role all` では不要） |
 | シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWTシークレット等は環境変数ではなく `secrets.toml` で自動生成・管理する |
 | 外部サービス連携 | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ATPハンドル検証のDNS TXT自動作成。未設定時はHTTP `.well-known` 方式のみにフォールバック）、`ATP_RELAY_URL`（Relayへの`requestCrawl`先。カンマ区切りで複数指定可、既定は`https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（`did:plc:`の登録・解決先。既定は`https://plc.directory`。E2Eテストではローカルのスタブサーバーに向ける）、`ATP_APPVIEW_URL`（Bsky AppViewのベースURL。既定は`https://api.bsky.app`。E2Eテストではローカルのスタブサーバーに向ける） |

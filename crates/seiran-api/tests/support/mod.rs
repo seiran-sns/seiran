@@ -69,7 +69,7 @@ fn ensure_test_database() {
 pub async fn test_db_pool() -> sqlx::PgPool {
     load_workspace_env();
     ensure_test_database();
-    get_db_pool()
+    get_db_pool(10)
         .await
         .expect("DB接続に失敗（POSTGRES_* 環境変数 / docker compose の起動を確認してください）")
 }
@@ -86,7 +86,7 @@ pub async fn test_router() -> Router {
             .load_or_create()
             .expect("secrets.toml の読み込みに失敗（config/ ディレクトリを確認してください）"),
     );
-    let pool = get_db_pool()
+    let pool = get_db_pool(10)
         .await
         .expect("DB接続に失敗（POSTGRES_* 環境変数 / docker compose の起動を確認してください）");
     let http_client = Arc::new(

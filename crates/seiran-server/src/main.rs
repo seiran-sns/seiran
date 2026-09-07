@@ -25,8 +25,9 @@ use seiran_common::repository::{
     PgPostRepository, PgReactionRepository, PgRemoteEmojiRepository,
 };
 use seiran_common::{
-    ap::ApClient, create_job_queue, get_db_pool, resolve_local_domain, run_migrations,
-    DeliveryConfig, FollowExecConfig, InboxContext, JobQueue, LocalDomain, SecretsFile, StreamHub,
+    ap::ApClient, create_job_queue, db::recommended_max_connections, get_db_pool,
+    resolve_local_domain, run_migrations, DeliveryConfig, FollowExecConfig, InboxContext,
+    JobQueue, LocalDomain, SecretsFile, StreamHub, DEFAULT_MAX_CONCURRENT_JOBS,
 };
 use sqlx::PgPool;
 use tokio::sync::broadcast;
@@ -186,7 +187,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if role == Role::Worker {
         let secrets = SecretsFile::from_env().load_or_create()?;
         tracing::info!("[seiran-server] シークレット読み込み完了");
-        let pool = get_db_pool().await?;
+        // standalone worker はHTTPを持たず、WorkerEngineの同時実行数分だけDBを使う。
+        let pool = get_db_pool(recommended_max_connections(
+            DEFAULT_MAX_CONCURRENT_JOBS as u32,
+        ))
+        .await?;
         tracing::info!("[seiran-server] DB 接続完了");
         // instance_domain含む全テーブルがこの時点で必要（resolve_local_domain_from_env
         // より前に完了させる。未適用のままだと instance_domain 読み取りが失敗し、
@@ -253,7 +258,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let secrets = Arc::new(SecretsFile::from_env().load_or_create()?);
     tracing::info!("[seiran-server] シークレット読み込み完了");
 
-    let pool = get_db_pool().await?;
+    // Role::All は埋め込みworkerもこのプールを共有するため、その同時実行数分を上乗せする。
+    // Api/Federation/Firehoseはworkerを持たないためHTTP見積もり＋バッファのみで足りる。
+    let worker_extra = if role == Role::All {
+        DEFAULT_MAX_CONCURRENT_JOBS as u32
+    } else {
+        0
+    };
+    let pool = get_db_pool(recommended_max_connections(worker_extra)).await?;
     tracing::info!("[seiran-server] DB 接続完了");
     // instance_domain含む全テーブルがこの時点で必要（resolve_local_domain_from_env
     // より前に完了させる。未適用のままだと instance_domain 読み取りが失敗し、

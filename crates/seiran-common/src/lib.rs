@@ -61,6 +61,7 @@ pub use auth::{AuthError, LocalAuthProvider, VerifiedAtpAccess, VerifiedAtpRefre
 pub use crypto::{decrypt as crypto_decrypt, encrypt as crypto_encrypt, CryptoError};
 pub use queue::worker::{
     priority as job_priority, DeliveryConfig, FollowExecConfig, InboxContext, JobContext,
+    DEFAULT_MAX_CONCURRENT_JOBS,
 };
 pub use queue::{create_job_queue, InMemoryJobQueue, RedisJobQueue, WorkerEngine};
 pub use repository::{

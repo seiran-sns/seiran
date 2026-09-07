@@ -142,7 +142,7 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
     let original_id: i64 = original["id"].as_str().unwrap().parse().unwrap();
 
     // Fedi受信時にのみ書き込まれる`emoji_map`（本テストでは受信フローを再現せず直接設定する）。
-    let pool = get_db_pool().await.expect("DB接続に失敗");
+    let pool = get_db_pool(10).await.expect("DB接続に失敗");
     let poll = serde_json::json!({
         "multiple": false,
         "options": [{"name": "選択肢A", "votes": 2}, {"name": "選択肢B", "votes": 1}]
@@ -214,7 +214,7 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
 #[tokio::test]
 #[ignore = "実DB（DATABASE_URL）と既存の seiran1 ユーザーが必要"]
 async fn create_note_resolves_local_custom_emoji_shortcode_in_body() {
-    let pool = get_db_pool().await.expect("DB接続に失敗");
+    let pool = get_db_pool(10).await.expect("DB接続に失敗");
 
     let shortcode = format!(
         "test_emoji_{}",

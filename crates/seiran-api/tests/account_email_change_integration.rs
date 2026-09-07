@@ -95,7 +95,7 @@ async fn insert_email_change(pool: &sqlx::PgPool, user_id: i64, new_email: &str)
 #[ignore = "実DB（DATABASE_URL）が必要"]
 async fn confirm_email_change_updates_email_and_consumes_token() {
     let app = test_router().await;
-    let pool = get_db_pool().await.expect("DB接続に失敗");
+    let pool = get_db_pool(10).await.expect("DB接続に失敗");
     let (user_id, token) = register_test_user(&app, &pool, "e2eemailchg").await;
 
     let new_email = format!(
@@ -136,7 +136,7 @@ async fn confirm_email_change_updates_email_and_consumes_token() {
 #[ignore = "実DB（DATABASE_URL）が必要"]
 async fn confirm_email_change_rejects_invalid_token() {
     let app = test_router().await;
-    let pool = get_db_pool().await.expect("DB接続に失敗");
+    let pool = get_db_pool(10).await.expect("DB接続に失敗");
     let (_user_id, token) = register_test_user(&app, &pool, "e2eemailchg").await;
 
     let confirm_req = authed_json_request(
