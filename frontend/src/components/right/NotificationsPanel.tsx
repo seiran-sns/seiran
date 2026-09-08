@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import i18n from "../../i18n";
 import { api, getErrorMessage, NotificationItem } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
@@ -358,7 +358,13 @@ export default function NotificationsPanel({
                 isSelf={isSelfUser(currentUser, n.user)}
               >
                 <UserContextMenu target={toRelationshipTarget(n.user)}>
-                  <span className={styles.avatarLink}>{avatar}</span>
+                  <Link
+                    to={profilePath(n.user.username, n.user.host ?? undefined)}
+                    className={styles.avatarLink}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {avatar}
+                  </Link>
                 </UserContextMenu>
               </UserHoverArea>
             ) : (

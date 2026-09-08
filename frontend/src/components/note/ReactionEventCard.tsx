@@ -1,5 +1,5 @@
 import { Trans } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import i18n from "../../i18n";
 import { ReactionEvent } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
@@ -67,9 +67,13 @@ export default function ReactionEventCard({ event }: ReactionEventCardProps) {
             isSelf={isSelfUser(currentUser, { username: event.targetUser.username, host: event.targetUser.domain })}
           >
             <UserContextMenu target={relationshipTarget}>
-              <span className={styles.avatarLink}>
+              <Link
+                to={profilePath(event.targetUser.username, event.targetUser.domain)}
+                className={styles.avatarLink}
+                onClick={(e) => e.stopPropagation()}
+              >
                 <Avatar url={event.targetUser.avatarUrl} name={who} size={20} />
-              </span>
+              </Link>
             </UserContextMenu>
           </UserHoverArea>
         </span>{" "}
