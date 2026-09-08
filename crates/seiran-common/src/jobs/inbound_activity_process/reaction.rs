@@ -1,4 +1,4 @@
-use super::emoji::{extract_emoji_tag_url, record_remote_emojis};
+use super::emoji::{record_remote_emojis, resolve_single_emoji_url_with_fallback};
 use super::*;
 
 /// いいね（Like）・絵文字リアクション（EmojiReact）を受信し reactions テーブルへ保存する (#22)。
@@ -30,14 +30,10 @@ pub(super) async fn handle_reaction(
         .to_string();
     let reaction_type = if content == "❤️" { "like" } else { "emoji" };
     // content が `:shortcode:`/`:shortcode@host:` 形式（カスタム絵文字）の場合、ホスト部分を
-    // 除いた素の shortcode で tag 配列から画像 URL を解決する（tag.name は本家Misskey準拠で
-    // 常にホストなし。送信元が本家Misskeyなら content は既に `:shortcode@host:` 形式で届く）。
+    // 除いた素の shortcode で tag 配列または remote_emojis カタログから画像 URL を解決する。
     // Unicode 絵文字や素の Like（❤️ 固定）では構文的にマッチせず自然に None になる。
     let bare_shortcode =
         parse_reaction_shortcode_and_host(&content).map(|(shortcode, _)| shortcode.to_string());
-    let emoji_url = bare_shortcode
-        .as_deref()
-        .and_then(|shortcode| extract_emoji_tag_url(&activity, &format!(":{shortcode}:")));
 
     // 対象ローカルポストを ap_object_id で検索（未知のポストなら無視）
     let (post_id, post_author_id) = match inbox
@@ -53,6 +49,15 @@ pub(super) async fn handle_reaction(
     // リアクションを打ったアクターを解決・upsert
     let remote = upsert_remote_fedi_actor(inbox, ap_client, actor_uri).await?;
     let actor_id = remote.actor_id;
+
+    // tag 配列から画像 URL を取り出す。tag に欠落している場合は remote_emojis カタログからフォールバック検索する（#126）。
+    let tags = activity["tag"].as_array().cloned().unwrap_or_default();
+    let emoji_url = match bare_shortcode.as_deref() {
+        Some(shortcode) => {
+            resolve_single_emoji_url_with_fallback(inbox, &remote.domain, &tags, shortcode).await
+        }
+        None => None,
+    };
 
     // カスタム絵文字リアクションなら remote_emojis にも記録する（#73）。tag.name は
     // 本家Misskey準拠で常にホストなしの素の shortcode を使う。

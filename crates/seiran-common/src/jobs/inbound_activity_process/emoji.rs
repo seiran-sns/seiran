@@ -1,13 +1,72 @@
 use super::*;
 
-/// value（activity/note）の `tag` 配列から、指定した shortcode（`:name:` 形式）に対応する
-/// カスタム絵文字タグの画像 URL を取り出す（`build_emoji_map` を利用）。
+/// value（activity/note）の `tag` 配列から、指定した shortcode（`:name:`, `:name@domain:`, `name` 形式）に対応する
+/// カスタム絵文字タグの画像 URL を取り出す（`extract_emoji_tag_url_from_tags` を利用）。
 pub(super) fn extract_emoji_tag_url(value: &serde_json::Value, shortcode: &str) -> Option<String> {
-    let tags = value["tag"].as_array().cloned().unwrap_or_default();
-    build_emoji_map(&tags)
-        .get(shortcode)?
-        .as_str()
-        .map(|s| s.to_string())
+    let tags = value["tag"].as_array()?;
+    extract_emoji_tag_url_from_tags(tags, shortcode)
+}
+
+/// `tag` 配列から指定した shortcode に対応するカスタム絵文字タグの画像 URL を取り出す。
+/// `name` が `:shortcode:`, `:shortcode@domain:`, `shortcode` のいずれの表記であっても柔軟にパース比較する。
+pub(super) fn extract_emoji_tag_url_from_tags(
+    tags: &[serde_json::Value],
+    target_shortcode: &str,
+) -> Option<String> {
+    let target_bare = parse_reaction_shortcode_and_host(target_shortcode)
+        .map(|(sc, _)| sc)
+        .unwrap_or_else(|| target_shortcode.trim_matches(':'));
+
+    for tag in tags {
+        if tag["type"].as_str() != Some("Emoji") {
+            continue;
+        }
+        let Some(name) = tag["name"].as_str() else {
+            continue;
+        };
+        let Some(url) = tag["icon"]["url"].as_str() else {
+            continue;
+        };
+        let tag_bare = parse_reaction_shortcode_and_host(name)
+            .map(|(sc, _)| sc)
+            .unwrap_or_else(|| name.trim_matches(':'));
+        if tag_bare == target_bare {
+            return Some(url.to_string());
+        }
+    }
+    None
+}
+
+/// 単一の shortcode（例: `"otu2"` や `:otu2:`）について、まず `tags` 配列から画像 URL を抽出し、
+/// 存在しなければ同一ドメインの `remote_emojis` カタログから補完検索する（#126 / 絵文字リアクション共通化）。
+pub(super) async fn resolve_single_emoji_url_with_fallback(
+    inbox: &InboxContext,
+    domain: &str,
+    tags: &[serde_json::Value],
+    shortcode: &str,
+) -> Option<String> {
+    if let Some(url) = extract_emoji_tag_url_from_tags(tags, shortcode) {
+        return Some(url);
+    }
+    let bare_shortcode = parse_reaction_shortcode_and_host(shortcode)
+        .map(|(sc, _)| sc)
+        .unwrap_or_else(|| shortcode.trim_matches(':'));
+    match inbox
+        .remote_emoji_repo
+        .find_urls_by_shortcodes(domain, &[bare_shortcode.to_string()])
+        .await
+    {
+        Ok(pairs) => pairs.into_iter().next().map(|(_, url)| url),
+        Err(e) => {
+            tracing::warn!(
+                "[RemoteEmoji] 単一絵文字フォールバック解決失敗 domain={} shortcode={}: {}",
+                domain,
+                bare_shortcode,
+                e
+            );
+            None
+        }
+    }
 }
 
 /// AP Note の `tag` 配列由来の emoji_map を構築したうえで、本文中に現れる
@@ -214,14 +273,19 @@ mod tests {
     }
 
     #[test]
-    fn extract_emoji_tag_url_unicode_emoji_content_has_no_tag_match() {
-        // Unicode 絵文字は通常 tag 配列に一致が無いため None のままになる
+    fn extract_emoji_tag_url_handles_hosted_name() {
         let activity = serde_json::json!({
-            "content": "🎉",
             "tag": [
-                { "type": "Emoji", "name": ":blobcat:", "icon": { "url": "https://example.com/blobcat.png" } }
+                {
+                    "type": "Emoji",
+                    "name": ":otu2@seiran-beta.org:",
+                    "icon": { "url": "https://seiran-beta.org/files/otu2.png" }
+                }
             ]
         });
-        assert_eq!(extract_emoji_tag_url(&activity, "🎉"), None);
+        assert_eq!(
+            extract_emoji_tag_url(&activity, "otu2"),
+            Some("https://seiran-beta.org/files/otu2.png".to_string())
+        );
     }
 }

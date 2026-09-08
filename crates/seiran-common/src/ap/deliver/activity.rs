@@ -453,9 +453,14 @@ pub(crate) fn build_reaction_object(
         "object": object_ap_id,
     });
     if activity_type == "EmojiReact" {
-        obj["content"] = serde_json::Value::String(content.to_string());
+        // ワイヤ上の content / _misskey_reaction はホスト部分を含まない素の `:shortcode:` 形式で送出する。
+        let wire_content = match parse_reaction_shortcode_and_host(content) {
+            Some((shortcode, _)) => format!(":{shortcode}:"),
+            None => content.to_string(),
+        };
+        obj["content"] = serde_json::Value::String(wire_content.clone());
         // Misskey 系フォークとの互換のため非標準フィールドも併記する。
-        obj["_misskey_reaction"] = serde_json::Value::String(content.to_string());
+        obj["_misskey_reaction"] = serde_json::Value::String(wire_content);
         if let Some(url) = emoji_url {
             // `content`/`_misskey_reaction` はホスト付き（`:shortcode@.:` 等）だが、
             // `tag[].id`/`tag[].name` は本家Misskey準拠で常にホストなしの素の shortcode を使う。
@@ -1304,8 +1309,8 @@ mod tests {
 
     #[test]
     fn reaction_object_custom_emoji_includes_tag() {
-        // content（DB正規形）はホスト付き（`:shortcode@.:`）だが、tag.id/tag.name は
-        // 本家Misskey準拠で常にホストなしの素の shortcode を使う。
+        // content（DB正規形）はホスト付き（`:shortcode@.:`）だが、ワイヤ上は素の `:shortcode:` に変換し、
+        // tag.id/tag.name も本家Misskey準拠で常にホストなしの素の shortcode を使う。
         let react = build_reaction_object(
             "EmojiReact",
             "id1",
@@ -1315,7 +1320,8 @@ mod tests {
             Some("https://example.com/blobcat.png"),
             "seiran.example",
         );
-        assert_eq!(react["content"], ":blobcat@.:");
+        assert_eq!(react["content"], ":blobcat:");
+        assert_eq!(react["_misskey_reaction"], ":blobcat:");
         assert_eq!(react["tag"][0]["type"], "Emoji");
         assert_eq!(react["tag"][0]["name"], ":blobcat:");
         // kmyblue（Mastodon系フォーク）の CustomEmojiParser#uri（= tag.id）が
