@@ -75,15 +75,15 @@ export interface RemoteServerSubject {
 /** リモートサーバー表示のバッジ情報（アイコン種別・ラベル・背景色）を計算する。
  * 実際のアイコン描画（Blueskyロゴ/instanceアイコン画像）は呼び出し側に委ねる
  * （NoteCardは横並びの小バッジ、プロフィール画面はIDの下のブロックと見た目が異なるため）。
- * Bskyは固定表示、Fediはバックエンドが解決したインスタンス情報（`instance`）を使う。
- * ローカル・seiran間連合（remote_seiran）では表示しない。 */
+ * Bskyは固定表示、Fediおよびremote_seiranはバックエンドが解決したインスタンス情報（`instance`）を使う。
+ * ローカル（local）では表示しない。 */
 export function remoteServerBadgeInfo(
   subject: RemoteServerSubject,
 ): { useBlueskyLogo: boolean; iconUrl?: string; label: string; bg: string } | null {
   if (subject.actorType === "bsky") {
     return { useBlueskyLogo: true, label: "Bluesky", bg: REMOTE_SERVER_BADGE_FALLBACK_COLOR };
   }
-  if (subject.actorType === "fedi") {
+  if (subject.actorType === "fedi" || subject.actorType === "remote_seiran") {
     // バックエンドはfaviconの実在確認まで済ませてからiconUrlを返すため、ここでは
     // 有無だけで判定すればよい。取得できなかった場合はアイコン無し（🌐等への
     // フォールバックはしない）。

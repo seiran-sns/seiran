@@ -11,6 +11,8 @@ import {
   pollRemainingTime,
   profilePath,
   profileQuery,
+  REMOTE_SERVER_BADGE_FALLBACK_COLOR,
+  remoteServerBadgeInfo,
   protocolBadge,
   visibilityBadge,
 } from "./format";
@@ -121,6 +123,50 @@ describe("protocolBadge", () => {
 
   it("未知の actorType はバッジ無し", () => {
     expect(protocolBadge("unknown")).toBeNull();
+  });
+});
+
+describe("remoteServerBadgeInfo", () => {
+  it("bsky は Bluesky ロゴの固定バッジを返す", () => {
+    expect(remoteServerBadgeInfo({ actorType: "bsky" })).toEqual({
+      useBlueskyLogo: true,
+      label: "Bluesky",
+      bg: REMOTE_SERVER_BADGE_FALLBACK_COLOR,
+    });
+  });
+
+  it("fedi はインスタンス情報を反映する", () => {
+    expect(
+      remoteServerBadgeInfo({
+        actorType: "fedi",
+        domain: "example.com",
+        instance: { name: "Example Instance", iconUrl: "https://example.com/icon.png", themeColor: "#ff0000" },
+      })
+    ).toEqual({
+      useBlueskyLogo: false,
+      iconUrl: "https://example.com/icon.png",
+      label: "Example Instance",
+      bg: "#ff0000",
+    });
+  });
+
+  it("remote_seiran もインスタンス情報を反映する", () => {
+    expect(
+      remoteServerBadgeInfo({
+        actorType: "remote_seiran",
+        domain: "seiran.example.com",
+        instance: { name: "Seiran Instance", iconUrl: "https://seiran.example.com/icon.png", themeColor: "#00ff00" },
+      })
+    ).toEqual({
+      useBlueskyLogo: false,
+      iconUrl: "https://seiran.example.com/icon.png",
+      label: "Seiran Instance",
+      bg: "#00ff00",
+    });
+  });
+
+  it("local は null を返す", () => {
+    expect(remoteServerBadgeInfo({ actorType: "local" })).toBeNull();
   });
 });
 

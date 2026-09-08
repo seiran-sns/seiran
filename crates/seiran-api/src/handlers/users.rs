@@ -390,9 +390,9 @@ pub struct PublicListSummary {
 }
 
 /// プロフィールカードのサーバー名表示エリア用インスタンス情報を解決する
-/// （`queries::attach_remote_instance_info` のプロフィール単体版）。fediはキャッシュ済み
-/// nodeinfoを引き、無ければ解決ジョブを積んでドメイン名を暫定表示する。bskyは固定値、
-/// local/remote_seiranはNone。
+/// （`queries::attach_remote_instance_info` のプロフィール単体版）。fediおよびremote_seiranは
+/// キャッシュ済みnodeinfoを引き、無ければ解決ジョブを積んでドメイン名を暫定表示する。
+/// bskyは固定値、localはNone。
 async fn resolve_profile_instance_info(
     state: &AppState,
     actor_type: &str,
@@ -400,7 +400,7 @@ async fn resolve_profile_instance_info(
 ) -> Option<RemoteInstanceInfo> {
     match actor_type {
         "bsky" => build_instance_info("bsky", None, &std::collections::HashMap::new()),
-        "fedi" if !domain.is_empty() => {
+        "fedi" | "remote_seiran" if !domain.is_empty() => {
             let cached = state
                 .remote_instance_meta
                 .get_many(&[domain.to_string()])
@@ -411,7 +411,7 @@ async fn resolve_profile_instance_info(
                     .enqueue_remote_instance_info_resolve(domain.to_string())
                     .await;
             }
-            build_instance_info("fedi", Some(domain), &cached)
+            build_instance_info(actor_type, Some(domain), &cached)
         }
         _ => None,
     }
