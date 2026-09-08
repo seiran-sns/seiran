@@ -104,7 +104,7 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 **主要ジョブ**:
 | Job | 用途 | 優先度 |
 |---|---|---|
-| `ActorHistorySync` | 新規フォロー時の過去ログ取得（最大300件） | 低 |
+| `ActorHistorySync` | 新規フォロー時の過去ログ取得（Bsky: 最大300件、AP: 最大30件） | 低 |
 | `ApDelivery{actor_id, kind}` | AP配送。`kind` は `PostToFollowers`/`DirectMessage`/`Announce`/`UndoAnnounce`/`DeleteNote`/`Reaction`/`UndoReaction`/`UpdateActor`/`DeleteActor`（`DirectMessage`はDM宛先個人のみへの配送、`docs/protocols.md` 9節） | 高 |
 | `InboundActivityProcess` | 受信AP活動の非同期解析・DB保存（inboxハンドラは署名検証のみ同期実行し即202を返す） | 中 |
 | `ActorMetadataResolve` | リモートアクター検証・メタデータ取得 | — （**スタブのみ、enqueueする箇所が実装されていない**） |

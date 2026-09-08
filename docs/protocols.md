@@ -32,10 +32,10 @@ HTTP Signature付きで送る。ActivityPubのFlagはアカウント単位の通
 
 ## 1. フォロー時の初期同期
 
-新規フォローが成立すると `Job::ActorHistorySync` が積まれ、相手の過去ログを非同期でバックフィルする（過去30日間 / 最大300件、ベストエフォート）。フォロー後のタイムライン表示は常にローカルDBからの読み取りのみで完結し、外部APIを都度叩かない（`docs/database.md` 4節、`docs/concept.md` 参照）。
+新規フォローが成立すると `Job::ActorHistorySync` が積まれ、相手の過去ログを非同期でバックフィルする（過去30日間、Bsky: 最大300件・AP: 最大30件、ベストエフォート）。取得した投稿は通常の受信経路と同じ保存処理（Bsky: `upsert_bsky_post`、AP: `save_ap_note_core`）を通すため、添付・URLカード・引用/返信解決も同様に復元される。フォロー後のタイムライン表示は常にローカルDBからの読み取りのみで完結し、外部APIを都度叩かない（`docs/database.md` 4節、`docs/concept.md` 参照）。
 
 - AT Protocol: 相手の DID から AppView の `getAuthorFeed` を叩いて取得。
-- ActivityPub: 相手の Outbox（`GET /users/:username/outbox`）をページングして取得。
+- ActivityPub: 相手の Outbox（`GET /users/:username/outbox`）をページングして取得。AP側はアクター解決・絵文字解決等のフェッチが1件ずつ発生するため、Bsky側より件数を絞っている。
 
 ノート詳細画面から前後投稿を見に行くオンデマンド同期も同じ仕組みを利用する。
 

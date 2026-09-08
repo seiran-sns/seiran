@@ -16,7 +16,9 @@ pub use deliver::{
     deliver_direct_message_to_ap, deliver_post_to_ap_followers, deliver_seiranpost_update,
     deliver_undo_announce, deliver_update_actor, plain_to_html, plain_to_html_with_mentions,
 };
-pub use outbox::{fetch_ap_featured, fetch_ap_history, upsert_ap_note, ApNote};
+pub use outbox::{
+    fetch_ap_featured, fetch_ap_history, fetch_ap_history_raw, upsert_ap_note, ApNote,
+};
 pub use webfinger::{WebFingerLink, WebFingerResponse};
 
 /// `https://{local_domain}/users/{username}` 形式の Actor URI からユーザー名部分を抽出する。

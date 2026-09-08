@@ -43,6 +43,10 @@ pub use content::{ap_content_to_markdown_body, sanitize_ap_content_html, strip_h
 /// `jobs::poll_fetch`（リモートアンケート生存監視フォールバック）が、Update(Question)受理と
 /// 同じAP Question正規化ロジックを再利用するための再エクスポート。
 pub(crate) use note_input::normalize_ap_poll;
+/// `jobs::actor_history_sync`（フォロー時の過去ログ同期）が、Create(Note)直接受信と
+/// 同じ投稿保存処理（添付・URLカード・引用/返信解決を含む）を再利用するための再エクスポート。
+pub(crate) use note_save::save_ap_note_core;
+pub(crate) use reference::ReferenceResolutionMode;
 pub use reference::{resolve_pending_reference_with_timeout, RefStatus, ReferenceOutcome};
 
 use announce::handle_announce;
@@ -155,7 +159,7 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
 }
 
 /// AP アクタードキュメントを取得し、`actors` テーブルへ upsert した結果。
-struct RemoteActorInfo {
+pub(crate) struct RemoteActorInfo {
     actor_id: i64,
     username: String,
     display_name: String,

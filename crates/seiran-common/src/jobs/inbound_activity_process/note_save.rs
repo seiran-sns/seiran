@@ -15,7 +15,7 @@ use super::*;
 
 /// `save_ap_note_core`が新規INSERTした場合の結果。呼び出し側固有の後処理
 /// （通知生成はCreate直接受信のみ）に必要な値だけを束ねる。
-pub(super) struct SavedApNote {
+pub(crate) struct SavedApNote {
     pub post_id: i64,
     pub note_id: String,
     pub actor_id: i64,
@@ -73,7 +73,7 @@ fn prepend_article_title(
 }
 
 /// `save_ap_note_core`の結果。
-pub(super) enum SaveApNoteOutcome {
+pub(crate) enum SaveApNoteOutcome {
     /// 新規にINSERTした。
     Inserted(Box<SavedApNote>),
     /// 既にDBに存在した（ap_object_id重複／seiran_uuidマージ／ループバック検知のいずれか）ため
@@ -88,7 +88,7 @@ pub(super) enum SaveApNoteOutcome {
 /// seiran_uuidマージ／ループバック・ブリッジ重複検知／DB挿入／メタデータ更新／
 /// ハッシュタグリンク／OGPリンクカードのenqueue／添付メディア保存を必ず同じ手順で実行する。
 /// 通知生成・WebSocket配信は呼び出し側の責務（Create直接受信でのみ行う）。
-pub(super) async fn save_ap_note_core(
+pub(crate) async fn save_ap_note_core(
     note: &serde_json::Value,
     actor_uri: &str,
     inbox: &InboxContext,
@@ -615,9 +615,15 @@ mod tests {
 
         // 本文中の同一URLが既にprimaryと重複する場合は1件にまとめる。
         let body_dup = "見て [記事](https://web.brid.gy/r/https://a.example/x)";
-        let urls_dup =
-            build_link_card_urls(body_dup, Some("https://web.brid.gy/r/https://a.example/x"), 5);
-        assert_eq!(urls_dup, vec!["https://web.brid.gy/r/https://a.example/x".to_string()]);
+        let urls_dup = build_link_card_urls(
+            body_dup,
+            Some("https://web.brid.gy/r/https://a.example/x"),
+            5,
+        );
+        assert_eq!(
+            urls_dup,
+            vec!["https://web.brid.gy/r/https://a.example/x".to_string()]
+        );
     }
 
     #[test]
@@ -665,11 +671,8 @@ mod tests {
     #[test]
     fn prepend_article_title_adds_h3_and_text_heading() {
         let note = serde_json::json!({"type": "Article", "name": "記事タイトル"});
-        let (html, body) = prepend_article_title(
-            &note,
-            "<p>本文</p>".to_string(),
-            "本文".to_string(),
-        );
+        let (html, body) =
+            prepend_article_title(&note, "<p>本文</p>".to_string(), "本文".to_string());
         assert_eq!(html, "<h3>記事タイトル</h3><p>本文</p>");
         assert_eq!(body, "記事タイトル\n\n本文");
     }
@@ -687,11 +690,8 @@ mod tests {
     #[test]
     fn prepend_article_title_ignores_non_article_types() {
         let note = serde_json::json!({"type": "Note", "name": "無視されるはずのタイトル"});
-        let (html, body) = prepend_article_title(
-            &note,
-            "<p>本文</p>".to_string(),
-            "本文".to_string(),
-        );
+        let (html, body) =
+            prepend_article_title(&note, "<p>本文</p>".to_string(), "本文".to_string());
         assert_eq!(html, "<p>本文</p>");
         assert_eq!(body, "本文");
     }

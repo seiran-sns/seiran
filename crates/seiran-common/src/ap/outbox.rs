@@ -38,6 +38,35 @@ pub async fn fetch_ap_history(
     max_days: i64,
     signing_key: Option<(&str, &str)>,
 ) -> Result<Vec<ApNote>, ApError> {
+    let objects =
+        fetch_ap_outbox_objects(ap_client, actor_uri, max_posts, max_days, signing_key).await?;
+    Ok(objects.iter().filter_map(ap_note_from_object).collect())
+}
+
+/// 指定アクターの AP Outbox から過去ログを取得する（生 JSON 版）。
+///
+/// `fetch_ap_history` が `ApNote`（content/published 等の主要フィールドのみ）に
+/// 変換してしまい `attachment` 等を失うのに対し、こちらは Note オブジェクトの
+/// JSON をそのまま返す。通常の Create(Note) 受信経路（`save_ap_note_core`）へ
+/// そのまま渡し、添付・URLカード・引用/返信解決を共通処理させる用途向け
+/// （`jobs::actor_history_sync`、過去ログ添付欠落修正）。
+pub async fn fetch_ap_history_raw(
+    ap_client: &ApClient,
+    actor_uri: &str,
+    max_posts: usize,
+    max_days: i64,
+    signing_key: Option<(&str, &str)>,
+) -> Result<Vec<serde_json::Value>, ApError> {
+    fetch_ap_outbox_objects(ap_client, actor_uri, max_posts, max_days, signing_key).await
+}
+
+async fn fetch_ap_outbox_objects(
+    ap_client: &ApClient,
+    actor_uri: &str,
+    max_posts: usize,
+    max_days: i64,
+    signing_key: Option<(&str, &str)>,
+) -> Result<Vec<serde_json::Value>, ApError> {
     let actor = match signing_key {
         Some(key) => ap_client.fetch_actor_signed(actor_uri, key).await?,
         None => ap_client.fetch_actor(actor_uri).await?,
@@ -54,7 +83,7 @@ pub async fn fetch_ap_history(
     };
 
     let since = Utc::now() - Duration::days(max_days);
-    let mut notes: Vec<ApNote> = Vec::new();
+    let mut notes: Vec<serde_json::Value> = Vec::new();
 
     // Outbox コレクション取得
     let collection: serde_json::Value =
@@ -145,7 +174,7 @@ fn process_page(
     page: &serde_json::Value,
     since: &DateTime<Utc>,
     max_posts: usize,
-    notes: &mut Vec<ApNote>,
+    notes: &mut Vec<serde_json::Value>,
 ) -> bool {
     match page.get("orderedItems").and_then(|v| v.as_array()) {
         Some(items) => collect_notes(items, since, max_posts, notes),
@@ -153,13 +182,13 @@ fn process_page(
     }
 }
 
-/// items スライスからノートを収集する
+/// items スライスからノート（生JSON）を収集する
 /// 終了条件に達した場合 true を返す
 fn collect_notes(
     items: &[serde_json::Value],
     since: &DateTime<Utc>,
     max_posts: usize,
-    notes: &mut Vec<ApNote>,
+    notes: &mut Vec<serde_json::Value>,
 ) -> bool {
     for item in items {
         if notes.len() >= max_posts {
@@ -167,8 +196,8 @@ fn collect_notes(
         }
         if let Some(note) = extract_create_note(item) {
             if note
-                .published
-                .as_deref()
+                .get("published")
+                .and_then(|v| v.as_str())
                 .and_then(|s| s.parse::<DateTime<Utc>>().ok())
                 .map(|t| t < *since)
                 .unwrap_or(false)
@@ -324,8 +353,8 @@ pub async fn upsert_ap_note(
         .await
 }
 
-/// Create アクティビティ Value から Note を抽出する
-fn extract_create_note(value: &serde_json::Value) -> Option<ApNote> {
+/// Create アクティビティ Value から Note/Article オブジェクト本体（生JSON）を抽出する
+fn extract_create_note(value: &serde_json::Value) -> Option<serde_json::Value> {
     let activity_type = value.get("type")?.as_str()?;
     if activity_type != "Create" {
         return None;
@@ -342,9 +371,16 @@ fn extract_create_note(value: &serde_json::Value) -> Option<ApNote> {
         return None;
     }
 
+    Some(obj.clone())
+}
+
+/// Note/Article オブジェクト（生JSON）から `ApNote`（主要フィールドのみ）を組み立てる。
+/// `attachment` 等、`ApNote` が持たないフィールドは失われる（`fetch_ap_history_raw` は
+/// これを経由せず生JSONのまま返す）。
+fn ap_note_from_object(obj: &serde_json::Value) -> Option<ApNote> {
     Some(ApNote {
         id: obj.get("id")?.as_str()?.to_string(),
-        note_type: obj_type.to_string(),
+        note_type: obj.get("type")?.as_str()?.to_string(),
         content: obj
             .get("content")
             .and_then(|v| v.as_str())

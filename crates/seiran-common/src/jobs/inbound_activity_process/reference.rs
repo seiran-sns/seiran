@@ -43,7 +43,7 @@ impl ReferenceOutcome {
 /// `DbOnly`時はDM宛先・スレッド起点解決も常にスキップする（参照解決経由でフェッチした
 /// Noteは実際にはinboxへ配送されていないため、DM宛先情報を信頼してはならない）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ReferenceResolutionMode {
+pub(crate) enum ReferenceResolutionMode {
     /// Create直接受信（トップレベル）専用。未解決ならap_clientで1段階だけフェッチする。
     OneHopFetch,
     /// フェッチ済みノート保存専用。フェッチせずDB照合のみ。

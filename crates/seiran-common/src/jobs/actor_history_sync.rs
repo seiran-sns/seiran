@@ -1,17 +1,18 @@
 //! ① 過去ログ同期キュー (`actor_history_sync`)
 //!
-//! 新規フォローされたアクターの過去ログ（最大300件 / 30日）を取得・保存する。
+//! 新規フォローされたアクターの過去ログを取得・保存する
+//! （Bsky: 最大300件 / 30日、AP: 最大30件 / 30日）。
 //! ドメイン単位の同時実行制限（Concurrency Limit = 2）を適用する。
 
 use std::sync::Arc;
 
 use sqlx::Row;
 
-use crate::ap::outbox::{fetch_ap_history, ApNote};
-use crate::atp::client::{apply_bsky_post_facets, fetch_atp_history, BskyPost};
-use crate::generate_snowflake_id;
-use crate::jobs::inbound_activity_process::strip_html;
+use crate::ap::outbox::fetch_ap_history_raw;
+use crate::atp::client::{fetch_atp_history, upsert_bsky_post, BskyPost};
+use crate::jobs::inbound_activity_process::{save_ap_note_core, ReferenceResolutionMode};
 use crate::queue::worker::JobContext;
+use crate::traits::JobQueue;
 
 pub async fn handle(
     ap_uri: Option<String>,
@@ -47,10 +48,12 @@ async fn handle_ap(ap_uri: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
     tracing::info!("[ActorHistorySync] AP過去ログ同期開始: {}", ap_uri);
 
     let signing_key = ctx.system_signing_key();
-    let notes = fetch_ap_history(
+    // AP側は通常受信経路(save_ap_note_core)を1件ずつ通すため、Bsky側(300件)より
+    // 件数を絞る（絵文字解決・アクター解決等のフェッチが過去ログ分だけ積み上がるのを防ぐ）。
+    let notes = fetch_ap_history_raw(
         &ctx.ap_client,
         ap_uri,
-        300,
+        30,
         30,
         signing_key.as_ref().map(|(k, p)| (k.as_str(), p.as_str())),
     )
@@ -61,91 +64,34 @@ async fn handle_ap(ap_uri: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
         ap_uri
     );
 
-    match &ctx.db_pool {
-        Some(pool) => save_ap_notes(pool, ap_uri, &notes).await?,
-        None => tracing::warn!(
-            "[ActorHistorySync] DB pool 未設定のため保存をスキップ ({}件)",
+    let Some(inbox) = ctx.inbox.as_ref() else {
+        tracing::warn!(
+            "[ActorHistorySync] InboxContext 未設定のため保存をスキップ ({}件)",
             notes.len()
-        ),
-    }
-
-    tracing::info!("[ActorHistorySync] AP完了: {}", ap_uri);
-    Ok(())
-}
-
-async fn save_ap_notes(pool: &sqlx::PgPool, ap_uri: &str, notes: &[ApNote]) -> Result<(), String> {
-    let actor_row = sqlx::query("SELECT id FROM actors WHERE ap_uri = $1 LIMIT 1")
-        .bind(ap_uri)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| format!("アクターDB検索失敗: {}", e))?;
-
-    let actor_id: i64 = match actor_row {
-        Some(row) => row
-            .try_get("id")
-            .map_err(|e| format!("id 取得失敗: {}", e))?,
-        None => {
-            tracing::warn!(
-                "[ActorHistorySync] アクターが DB に存在しません（スキップ）: {}",
-                ap_uri
-            );
-            return Ok(());
-        }
+        );
+        return Ok(());
     };
 
-    // 過去ログは最大300件のため、1件ずつ重複チェックSELECTを発行せず、
-    // 対象の ap_object_id 全件を1クエリでまとめて引いてから判定する。
-    let note_ids: Vec<&str> = notes.iter().map(|n| n.id.as_str()).collect();
-    let existing_ids: std::collections::HashSet<String> =
-        sqlx::query_scalar("SELECT ap_object_id FROM posts WHERE ap_object_id = ANY($1)")
-            .bind(&note_ids)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| format!("投稿重複チェック失敗: {}", e))?
-            .into_iter()
-            .collect();
-
-    let mut inserted = 0usize;
-    for note in notes {
-        if existing_ids.contains(&note.id) {
-            continue;
-        }
-
-        let created_at = note
-            .published
-            .as_deref()
-            .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
-            .unwrap_or_else(chrono::Utc::now);
-
-        let post_id = generate_snowflake_id(created_at);
-        // AP Note の content は HTML（Mastodon 等は <p>/<a> 等でラップして送る）のため、
-        // 他の受信経路（handle_create_note）と同じく strip_html でプレーンテキスト化する
-        // （#61 のピン留め取り込み実装時に、この過去ログ同期経路が未対応だったことに気づいた既存不具合の修正）。
-        let body = strip_html(&note.content.clone().unwrap_or_default());
-
-        sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (ap_object_id) DO NOTHING",
+    // 通常のCreate(Note)受信と同じ保存経路（アクター解決・絵文字解決・引用/返信解決・
+    // 添付/URLカード保存を含む）を通す。DbOnlyはフェッチ済みノート専用モードで、
+    // OneHopFetch（Create直接受信専用）のような追加フェッチは行わない。
+    let mut saved = 0usize;
+    for note in &notes {
+        match save_ap_note_core(
+            note,
+            ap_uri,
+            inbox,
+            &ctx.ap_client,
+            ReferenceResolutionMode::DbOnly,
         )
-        .bind(post_id)
-        .bind(actor_id)
-        .bind(&body)
-        .bind(&note.id)
-        .bind(note.seiran_post_uuid.as_deref())
-        .bind(created_at)
-        .execute(pool)
         .await
-        .map_err(|e| format!("投稿インサート失敗: {}", e))?;
-
-        inserted += 1;
+        {
+            Ok(_) => saved += 1,
+            Err(e) => tracing::error!("[ActorHistorySync] AP Note保存失敗（スキップ）: {}", e),
+        }
     }
 
-    tracing::info!(
-        "[ActorHistorySync] AP {}件インサート完了 (ap_uri={})",
-        inserted,
-        ap_uri
-    );
+    tracing::info!("[ActorHistorySync] AP完了: {}件処理 ({})", saved, ap_uri);
     Ok(())
 }
 
@@ -179,7 +125,7 @@ async fn handle_atp(at_did: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
     );
 
     match &ctx.db_pool {
-        Some(pool) => save_atp_posts(pool, at_did, &posts).await?,
+        Some(pool) => save_atp_posts(pool, &ctx.queue, &ctx.ap_client.http, at_did, &posts).await?,
         None => tracing::warn!(
             "[ActorHistorySync] DB pool 未設定のため保存をスキップ ({}件)",
             posts.len()
@@ -192,6 +138,8 @@ async fn handle_atp(at_did: &str, ctx: &Arc<JobContext>) -> Result<(), String> {
 
 async fn save_atp_posts(
     pool: &sqlx::PgPool,
+    queue: &Arc<dyn JobQueue>,
+    http: &reqwest::Client,
     at_did: &str,
     posts: &[BskyPost],
 ) -> Result<(), String> {
@@ -214,50 +162,17 @@ async fn save_atp_posts(
         }
     };
 
-    // AP側と同様、at_uri全件を1クエリでまとめて引いてから判定する。
-    let post_uris: Vec<&str> = posts.iter().map(|p| p.uri.as_str()).collect();
-    let existing_uris: std::collections::HashSet<String> =
-        sqlx::query_scalar("SELECT at_uri FROM posts WHERE at_uri = ANY($1)")
-            .bind(&post_uris)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| format!("投稿重複チェック失敗: {}", e))?
-            .into_iter()
-            .collect();
-
-    let mut inserted = 0usize;
+    // 通常のBsky受信経路（firehose等）と同じ保存処理を通す。添付・URLカード・
+    // 返信/引用ゲート情報の復元も含む（#過去ログ添付欠落修正）。
+    let mut saved = 0usize;
     for post in posts {
-        if existing_uris.contains(&post.uri) {
-            continue;
+        match upsert_bsky_post(pool, queue, http, actor_id, post).await {
+            Ok(_) => saved += 1,
+            Err(e) => tracing::error!("[ActorHistorySync] ATP投稿保存失敗（スキップ）: {}", e),
         }
-
-        let post_id = generate_snowflake_id(post.created_at);
-        let (body, mention_facets) = apply_bsky_post_facets(&post.text, post.facets.as_ref());
-
-        sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, mention_facets)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (at_uri) DO NOTHING",
-        )
-        .bind(post_id)
-        .bind(actor_id)
-        .bind(&body)
-        .bind(&post.uri)
-        .bind(&post.cid)
-        .bind(post.created_at)
-        .bind(&mention_facets)
-        .execute(pool)
-        .await
-        .map_err(|e| format!("投稿インサート失敗: {}", e))?;
-
-        inserted += 1;
     }
 
-    tracing::info!(
-        "[ActorHistorySync] ATP {}件インサート完了 (at_did={})",
-        inserted,
-        at_did
-    );
+    tracing::info!("[ActorHistorySync] ATP {}件処理 (at_did={})", saved, at_did);
     Ok(())
 }
 
