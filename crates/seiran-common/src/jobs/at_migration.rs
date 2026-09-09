@@ -426,6 +426,31 @@ async fn process_import(
                     ))
                 })?;
 
+            // 画像/動画添付の復元。移行元DID（=移行後もDIDは不変）とblob CIDのみから
+            // Bluesky CDN/動画パイプラインのURLを決定的に組み立てる既存ロジックを再利用する
+            // （`atp_migration_blobs`側のblob取り込み順に依存しない）。
+            if let Some(embed) = value.get("embed") {
+                let attachments = crate::atp::parse_bsky_embed_attachments(embed, &req.source_did);
+                for (position, att) in attachments.into_iter().enumerate() {
+                    if let Err(e) = posts_repo
+                        .attach_remote_media_url(
+                            post_id,
+                            &att.url,
+                            Some(&att.mime_type),
+                            att.thumbnail_url.as_deref(),
+                            false,
+                            att.is_gif,
+                            position as i16,
+                        )
+                        .await
+                    {
+                        tracing::error!(
+                            "[MigrationImportProcess] 添付URL保存失敗 (rkey={rkey}): {e}"
+                        );
+                    }
+                }
+            }
+
             atp_service
                 .commit_post_record(actor_id, post_id, rkey.clone(), &value, "create", now)
                 .await
