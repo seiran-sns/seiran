@@ -50,6 +50,8 @@ ID 採番は2系統ある。
 | `atp_app_passwords` | ATP `createAppPassword` で発行したアプリパスワードのハッシュ・無効化管理 |
 | `atp_refresh_tokens` | ATP `refreshSession` が発行するrefreshJwtの `jti` 管理（失効・ローテーション） |
 | `atp_preferences` | ATP `app.bsky.actor.getPreferences`/`putPreferences` の不透明なJSON配列（年齢確認等） |
+| `at_migration_requests` | 既存Bluesky DID転入フロー（`docs/account_migration.md`）の実行1回=1行。状態機械の中心テーブル |
+| `at_migration_records` / `at_migration_blobs` | 転入元PDSから取得したリポジトリレコード・blobのステージング（`posts`/`atp_records`/`atp_blobs`/`follows`への実体化待ち行列） |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP 設定、Jetstream カーソル等の汎用格納庫） |
 | `instance_domain` | 自ホストドメインの確定値（単一行のみ、一度確定したら不変） |
 | `remote_instance_meta` | リモートインスタンス（`actors.domain`単位）のnodeinfoキャッシュ（NoteCardリモートサーバー表示用） |
@@ -288,6 +290,15 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 
 ### `atp_preferences`
 `app.bsky.actor.getPreferences`/`putPreferences`（`docs/protocols.md` 3節）が読み書きするテーブル。`preferences` カラム（JSONB）はAT Protocolクライアント設定の不透明な配列で、`$type`ごとの意味は解釈せずそのまま保存・返却する。`actor_id` 単位で最大1行（`putPreferences` は全置換）。年齢確認（`#personalDetailsPref` の `birthDate`）を含むが、seiranの `users` テーブルとは同期しない（別データソース）。
+
+### 既存DID転入（`at_migration_requests` / `at_migration_records` / `at_migration_blobs`）
+`follow_import_requests`/`follow_import_items`（親テーブル＋子テーブル、進捗はCOUNTで都度算出）と同じ設計方針。詳細な状態遷移・設計判断は`docs/account_migration.md`参照。
+
+`at_migration_requests`は転入実行1回=1行。`status`（ENUM `at_migration_status`）が状態機械そのもので、`awaiting_source_2fa`→`fetching_repo`→（`require_email_verification=ON`時のみ`awaiting_seiran_email`）→`requesting_plc_signature`→`awaiting_plc_token`→`submitting_plc`→`importing_data`→`deactivating_source`→`completed`の正常系列に加え、`submitPlcOperation`成功前のみ遷移可能な`failed`（リトライ/別DID/新規DID切替いずれも可）、成功後専用の`failed_post_submit`（リトライのみ）、`abandoned`（`plc_submitted_at IS NULL`の間のみ選べる打ち切り）を持つ。`request_token_hash`は匿名段階（`users`/`actors`未確定）の認可トークンをSHA-256ハッシュ化した値で、生値はレスポンス一回きり（`password_resets`等と同型）。`plc_submitted_at`が`submitPlcOperation`成功＝不可逆境界のマーカーで、`new_signing_key_pem`（転入後に使う新規P-256鍵）はこの成功と同時に確定保存する（後続のローカルアカウント作成が失敗しても鍵を失わないよう、`actor_id`/`user_id`確定とは別ステップ）。
+
+`at_migration_records`は転入元リポジトリから取得した生レコード1件=1行（`request_id, collection, rkey`でUNIQUE）。`bytes`はCARから取り出したDAG-CBORバイト列を無加工で保持し、`imported_at`が`posts`/`atp_records`への実体化完了マーカー。`app.bsky.graph.follow`コレクションのみ追加で`follow_materialized_at`列を持ち、`follows`テーブルへの反映（リモートアクター解決込み）が完了したかを`imported_at`とは独立に追跡する（ATPリポジトリへの複製と、seiran自身の社会グラフへの反映は別の実体化ステップのため）。
+
+`at_migration_blobs`は転入元PDSの`listBlobs`で取得したblob CID一覧（`request_id, cid`でUNIQUE）。`imported_at`が`atp_blobs`への保存完了マーカー。
 
 ## 4. 典型的なクエリパターン
 

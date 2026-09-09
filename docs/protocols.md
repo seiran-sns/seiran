@@ -494,6 +494,25 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
 ### アルゴリズムレコメンドからの除外（`app.bsky.actor.contentVisibilityDeclaration`）
 設定画面「プライバシー」のチェックボックス1件から、Bsky Discoverフィード等のアルゴリズムレコメンドから自分の投稿を除外するよう要求する。`GET`/`POST /api/account/content-visibility`（`crates/seiran-api/src/handlers/account.rs`）がローカルキャッシュ`actors.hide_from_algorithmic_recommendations`（`docs/database.md`参照）を読み書きし、更新時に`AtpCommitService::commit_content_visibility`（`crates/seiran-common/src/atp/service.rs`）が`app.bsky.actor.contentVisibilityDeclaration/self`（rkey固定`self`、フィールドは`hideFromAlgorithmicRecommendations`のみ）をPDSへコミットする。既に`chat.bsky.actor.declaration`（DM受信可否設定）と同じ「単一boolean値のself-keyレコード」パターンで、`atp_records`の既存有無でcreate/updateを判定する。レコードが存在しない場合は`false`として扱われる（Bluesky公式仕様）。ActivityPub側に対応する概念が無いため、この設定はBsky限定。
 
+### 既存DID転入（移行元PDSとの通信）
+既存のBluesky/AT Protocolアカウント（DID・投稿・フォロー関係・blob）をそのままseiranへ転入させる登録経路。ユーザーフロー・状態遷移・設計判断の全体は`docs/account_migration.md`参照。ここでは移行元PDS（以下PDS A）向けのXRPC呼び出し一覧とSSRF対策方針のみを記す。
+
+`seiran-common::atp::migration_client`（AppView閲覧・自PDSへのpost系コミット用途の既存`atp::client`とは分離）が以下を呼ぶ。認証はPDS Aが発行するaccessJwt/refreshJwtで、`create_session_with_2fa`が`authFactorToken`（メール2FA）対応の`com.atproto.server.createSession`拡張版。
+
+| XRPCメソッド | 用途 |
+|---|---|
+| `com.atproto.server.createSession` | ID/PW認証。`AuthFactorTokenRequired`エラーはメール2FA要求として`awaiting_source_2fa`へ遷移させる |
+| `com.atproto.sync.getRepo` | リポジトリ全体をCARv1として取得（`seiran-common::atp::car`/`mst_walk`で自前デコード） |
+| `com.atproto.sync.listBlobs` / `com.atproto.sync.getBlob` | blob CID一覧の取得と個別ダウンロード |
+| `com.atproto.identity.requestPlcOperationSignature` | PDS A登録メール宛に確認コード送付を要求する |
+| `com.atproto.identity.signPlcOperation` | 確認コード（ユーザーがメールから拾って入力した`plc_token`）を添えてPLCオペレーションの署名をPDS Aへ依頼する。`rotationKeys`/`alsoKnownAs`/`verificationMethods`/`services`は省略に頼らず、事前に取得した現在のDIDドキュメントの値を明示的にフルセットで渡す（省略時の挙動がAT Protocol仕様上不定なため） |
+| `com.atproto.identity.submitPlcOperation` | 署名済みPLCオペレーションをplc.directoryへ提出する。**この呼び出しの成功が転入フローの不可逆境界**（DIDのservice endpointがseiranへ切り替わる） |
+| `com.atproto.server.deactivateAccount` | 転入完了後、PDS A側の旧アカウントを無効化する（ベストエフォート、失敗しても転入自体は完了扱い） |
+
+**SSRF対策の使い分け（`seiran-common::atp::did_resolve`）**:
+- `resolve_service_endpoint`（DID起点）: まだ検証していないDIDから初めてPDS Aへ接続する場合に使う。DIDドキュメントの`service`配列を解決し、得られたエンドポイントに対して通常のSSRF検証（private/loopback/link-local拒否、`resolve_to_addrs`で検証済みIPへ接続）を行う。
+- `resolve_stored_endpoint`（既知URL検証）: 転入フロー開始時に一度解決・DB保存した`source_pds_endpoint`を使う以降の全呼び出しで使う。**`submitPlcOperation`成功後はDIDドキュメントが既にseiranを指すため、`resolve_service_endpoint`で毎回再解決するとPDS A自身ではなくseiranへ誤って到達してしまう**（実機で発生: `404 MethodNotImplemented`）。`resolve_stored_endpoint`はDIDを再解決せず、保存済みのURL文字列そのものに対してSSRF検証（フォーマット・スキーム・private/loopback拒否）のみを行う。
+
 ## 4. クロスプロトコル配送ルール
 
 中核ロジックは `seiran-api::handlers::notes::delivery`。`classify_post` が元ポストの出自を判定する: `actors.domain == local_domain` ならローカル、それ以外は `(ap_object_id有無, at_uri有無)` から `FediRemote`/`BskyRemote`/`LocalOrSeiran`（両方あり＝他seiranサーバー）に分類する。
@@ -789,7 +808,9 @@ Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri`
 - WS配信: `direct`投稿は`delivery::broadcast_direct_message`で投稿者本人+宛先のみに配信する（通常投稿の`broadcast_new_note`はフォロワー全体に配信するため、DMには使わないこと。本文漏洩防止）。
 
 ### Bsky受信ポーリング（`seiran-atp-repo::bsky_dm_poll`）
-`chat.bsky.convo`はJetstreamに乗らない（私信のため公開ファイヤホースに含まれない）ため、ローカルBskyリンク済みユーザーごとに60秒間隔で`listConvos`→新着があれば`getMessages`をポーリングして取り込む常駐タスク（`seiran-atp-repo::run`内で`tokio::spawn`）。`bsky_convo_links.last_synced_message_id`を重複取り込み防止カーソルに使う。取り込んだメッセージは`posts`（visibility=direct、thread_root_post_id・post_recipients設定）へ保存しWS配信する（送信者が自分自身のメッセージは`BskyDmSend`側で既に保存済みのためスキップ）。グループ会話（`kind=groupConvo`）は対象外。
+`chat.bsky.convo`はJetstreamに乗らない（私信のため公開ファイヤホースに含まれない）ため、`actor_type='local'`かつ`at_did`/`at_signing_key_pem`設定済みの全アクターを対象に60秒間隔で`listConvos`→会話ごとに`getMessages`をポーリングして取り込む常駐タスク（`seiran-atp-repo::run`内で`tokio::spawn`）。この対象条件は既存DID転入で作成されたアカウントも自動的に含む（転入固有の追加実装は無い。`docs/account_migration.md`参照）。`bsky_convo_links.last_synced_message_id`を重複取り込み防止カーソルに使う。取り込んだメッセージは`posts`（visibility=direct、thread_root_post_id・post_recipients設定）へ保存しWS配信する（送信者が自分自身のメッセージは`BskyDmSend`側で既に保存済みのためスキップ）。グループ会話（`kind=groupConvo`）は対象外。
+
+**会話ごとの初回同期はcursorページングで遡る**: `bsky_convo_links`に未登録（＝この会話をseiranが一度も同期したことが無い）の場合に限り、`getMessages`のレスポンスが返す`cursor`を使って過去へページングし、転入で持ち込んだような「seiranにとって初見だが実際は長い履歴を持つ」会話も遡って取り込む（既存DID転入という状況が生まれたことで初めて顕在化した要件）。安全弁として1会話あたり最大20ページ・2000件（`MAX_INITIAL_SYNC_PAGES`/`MAX_INITIAL_SYNC_MESSAGES`）で打ち切る。既に同期済みの会話（`last_synced_message_id`設定済み）は従来通り最新1ページのみを見て新着を拾えば十分なため、ページングしない。
 
 2026-07-20実機確認: `@ethilen.bsky.social`との送受信を実地テスト済み（送信・受信ポーリングとも正常動作）。
 
