@@ -10,6 +10,7 @@ pub mod actor_metadata_resolve;
 pub mod also_known_as_sync;
 pub mod also_known_as_verify;
 pub mod ap_delivery;
+pub mod at_migration;
 pub mod atp_repository_publish;
 pub mod bsky_dm_send;
 pub mod bsky_list_membership_resolve;

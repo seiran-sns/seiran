@@ -33,6 +33,18 @@ pub fn signing_key_from_pem(pem: &str) -> Result<SigningKey, PlcError> {
     SigningKey::from_pkcs8_pem(pem).map_err(|e| PlcError::KeyGen(e.to_string()))
 }
 
+/// リポジトリ署名用の新規P-256鍵ペアを生成する（PEM化込み）。
+/// `prepare_plc_genesis`のuser_signing_key生成と同じロジックだが、既存DIDの
+/// `verificationMethod`差し替え（アカウント転入フロー）でも使うため単体関数として切り出す。
+pub fn generate_new_signing_key() -> Result<(SigningKey, String), PlcError> {
+    let key = SigningKey::random(&mut OsRng);
+    let pem = key
+        .to_pkcs8_pem(LineEnding::LF)
+        .map_err(|e| PlcError::KeyGen(e.to_string()))?
+        .to_string();
+    Ok((key, pem))
+}
+
 // ─── DAG-CBOR 用データ構造 ────────────────────────────────────────────────────
 // serde_ipld_dagcbor はフィールド名を canonical 順（バイト長→辞書順）にソートする。
 // struct の宣言順に関係なく CBOR 出力は仕様通りになる。
@@ -188,6 +200,32 @@ pub async fn submit_plc_genesis(
     let res = client
         .post(&url)
         .json(&genesis.signed_op)
+        .send()
+        .await
+        .map_err(|e| PlcError::Http(e.to_string()))?;
+
+    let status = res.status().as_u16();
+    if status != 200 && status != 201 {
+        let body = res.text().await.unwrap_or_default();
+        return Err(PlcError::PlcDirectory { status, body });
+    }
+
+    Ok(())
+}
+
+/// 既に署名済みの任意のPLCオペレーション（`serde_json::Value`）をplc.directoryへ提出する。
+/// `submit_plc_genesis`と同じエンドポイント（`{plc_directory_base_url()}/{did}`）を使う、
+/// より汎用な版。転入フローの`com.atproto.identity.submitPlcOperation`で、PDS Aの
+/// `signPlcOperation`が返した署名済みオペレーションをそのまま提出するために使う。
+pub async fn submit_plc_operation_raw(
+    did: &str,
+    operation: &serde_json::Value,
+    client: &reqwest::Client,
+) -> Result<(), PlcError> {
+    let url = format!("{}/{}", plc_directory_base_url(), did);
+    let res = client
+        .post(&url)
+        .json(operation)
         .send()
         .await
         .map_err(|e| PlcError::Http(e.to_string()))?;

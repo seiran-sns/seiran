@@ -249,6 +249,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             delivery,
             Some(inbox),
             Some(follow_exec),
+            secrets.encryption_key_bytes(),
         )
         .await;
         return Ok(());
@@ -410,6 +411,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // api ロールと同じリポジトリ・AtpCommitService・StreamHub を共有するため、
             // フォローインポートで成立したフォローの通知もリアルタイムに配信される。
             let worker_follow_exec = api_state.follow_exec_config();
+            let worker_encryption_key = secrets.encryption_key_bytes();
             tokio::spawn(async move {
                 seiran_federation_worker::run(
                     worker_queue,
@@ -418,6 +420,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     worker_delivery,
                     Some(worker_inbox),
                     Some(worker_follow_exec),
+                    worker_encryption_key,
                 )
                 .await
             });

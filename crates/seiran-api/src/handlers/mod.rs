@@ -21,6 +21,7 @@ pub mod media_proxy;
 pub mod media_store;
 pub mod meta;
 pub mod miauth;
+pub mod migration;
 pub mod misskey;
 pub mod mutes;
 pub mod notes;

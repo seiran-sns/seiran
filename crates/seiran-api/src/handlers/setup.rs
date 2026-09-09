@@ -205,6 +205,7 @@ pub async fn setup(
             language_preference: None, // セットアップ直後は「自動」
             token,
             is_suspended: false, // セットアップ直後は凍結され得ない
+            migration_status: None, // セットアップ（初期管理者作成）は転入経由ではない
         },
     }))
 }

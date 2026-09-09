@@ -90,6 +90,36 @@ pub fn json_to_ipld(value: &serde_json::Value) -> Result<Ipld, RepoError> {
     }
 }
 
+/// `json_to_ipld` の逆変換。`Ipld` を AT Protocol の JSON表現
+/// （CIDリンク→`{"$link": "..."}`、バイト列→`{"$bytes": "..."}`）に変換する。
+/// `seiran-api::handlers::xrpc::repo` の `getRecord`/`listRecords` と、既存DID転入フロー
+/// （CARから取り出した生DAG-CBORバイト列を`commit_generic_record`/`commit_post_record`へ渡す前の
+/// JSON化）の両方で使う。
+pub fn ipld_to_json(ipld: &Ipld) -> serde_json::Value {
+    match ipld {
+        Ipld::Null => serde_json::Value::Null,
+        Ipld::Bool(b) => serde_json::Value::Bool(*b),
+        Ipld::Integer(i) => serde_json::json!(i),
+        Ipld::Float(f) => serde_json::json!(f),
+        Ipld::String(s) => serde_json::Value::String(s.clone()),
+        Ipld::Bytes(b) => serde_json::json!({ "$bytes": URL_SAFE_NO_PAD.encode(b) }),
+        Ipld::List(l) => serde_json::Value::Array(l.iter().map(ipld_to_json).collect()),
+        Ipld::Map(m) => serde_json::Value::Object(
+            m.iter()
+                .map(|(k, v)| (k.clone(), ipld_to_json(v)))
+                .collect(),
+        ),
+        Ipld::Link(cid) => serde_json::json!({ "$link": cid.to_string() }),
+    }
+}
+
+/// DAG-CBORバイト列をJSON値へデコードする（`ipld_to_json`の合成）。
+/// CARからデコードした生レコードバイト列を扱う既存DID転入フローで使う。
+pub fn decode_dagcbor_to_json(cbor: &[u8]) -> Result<serde_json::Value, RepoError> {
+    let ipld: Ipld = serde_ipld_dagcbor::from_slice(cbor).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    Ok(ipld_to_json(&ipld))
+}
+
 /// レコードのJSON値をDAG-CBORへエンコードし、CIDを計算する
 /// （`com.atproto.repo.createRecord`/`putRecord` 用）。
 pub fn encode_generic_record(value: &serde_json::Value) -> Result<(Vec<u8>, Cid), RepoError> {

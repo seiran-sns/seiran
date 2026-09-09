@@ -254,6 +254,78 @@ impl AppState {
         }
     }
 
+    /// 既存DID転入フロー（`docs/account_migration.md`）: PDS Aからの`getRepo`/`listBlobs`取得を積む。
+    pub async fn enqueue_migration_fetch_repo(&self, request_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::MigrationFetchRepo { request_id }, job_priority::NORMAL)
+            .await
+        {
+            tracing::error!(
+                "[job] MigrationFetchRepo enqueue 失敗 (request_id={}): {}",
+                request_id,
+                e
+            );
+        }
+    }
+
+    /// 既存DID転入フロー: PDS Aへの`requestPlcOperationSignature`呼び出しを積む。
+    /// `require_email_verification=false`なら`enqueue_migration_fetch_repo`完了直後に
+    /// ジョブ自身が積む。`true`の場合は`confirm_seiran_email`エンドポイントから呼ばれる。
+    pub async fn enqueue_migration_request_plc_signature(&self, request_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::MigrationRequestPlcSignature { request_id },
+                job_priority::NORMAL,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] MigrationRequestPlcSignature enqueue 失敗 (request_id={}): {}",
+                request_id,
+                e
+            );
+        }
+    }
+
+    /// 既存DID転入フロー: データ取り込み（`posts`/`atp_records`/`atp_blocks`/`atp_blobs`への
+    /// 実体化、自己再enqueue型）を積む。
+    pub async fn enqueue_migration_import_process(&self, request_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::MigrationImportProcess { request_id },
+                job_priority::LOW,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] MigrationImportProcess enqueue 失敗 (request_id={}): {}",
+                request_id,
+                e
+            );
+        }
+    }
+
+    /// 既存DID転入フロー: 移行元PDS Aアカウントの無効化（ベストエフォート）を積む。
+    pub async fn enqueue_migration_deactivate_source(&self, request_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::MigrationDeactivateSource { request_id },
+                job_priority::LOW,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] MigrationDeactivateSource enqueue 失敗 (request_id={}): {}",
+                request_id,
+                e
+            );
+        }
+    }
+
     /// リスト機能（#63）: list-relay 仮想アクターの代理フォロー/アンフォローを積む。
     /// 呼び出し元（`handlers::lists`）が参照カウントの0↔1遷移を判定した上で呼ぶ。
     pub async fn enqueue_proxy_follow_sync(&self, target_actor_id: i64, want_follow: bool) {
@@ -954,6 +1026,24 @@ pub fn router(state: AppState) -> Router {
             get(handlers::email_verify::verify_email_token),
         )
         .route("/api/auth/register", post(handlers::auth::register))
+        .route("/api/migration/start", post(handlers::migration::start))
+        .route(
+            "/api/migration/:id/confirm-seiran-email",
+            post(handlers::migration::confirm_seiran_email),
+        )
+        .route(
+            "/api/migration/:id/submit-plc-token",
+            post(handlers::migration::submit_plc_token),
+        )
+        .route(
+            "/api/migration/:id/status",
+            get(handlers::migration::get_status),
+        )
+        .route("/api/migration/:id/retry", post(handlers::migration::retry))
+        .route(
+            "/api/migration/:id/abandon",
+            post(handlers::migration::abandon),
+        )
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/me", get(handlers::auth::me))
         .route(
@@ -1477,6 +1567,7 @@ pub fn spawn_startup_tasks(state: &AppState) {
     let state = state.clone();
     tokio::spawn(async move {
         resume_running_follow_imports(&state).await;
+        resume_running_migrations(&state).await;
         resume_account_withdraw_unfollow_all(&state).await;
         resume_bsky_video_poll(&state).await;
         resume_bsky_post_commit_deferred(&state).await;
@@ -1522,6 +1613,62 @@ async fn resume_running_follow_imports(state: &AppState) {
     );
     for request_id in request_ids {
         state.enqueue_follow_import_process(request_id).await;
+    }
+}
+
+/// 起動時リカバリ: プロセス再起動で停止した既存DID転入フロー（`docs/account_migration.md`）の
+/// ジョブチェーンを再開する。`resume_running_follow_imports`と同じ理由（InMemoryJobQueueの
+/// 遅延リトライがプロセス内メモリのみで消失しうる）で、対象ステータスの行を無条件に
+/// 再enqueueする。重複投入は各ジョブの`request_id`単位advisory lockが解消する。
+///
+/// ステータスごとに対応するジョブが異なるため、状態→enqueue関数の対応表として管理する。
+/// Phase 5でインポート系ジョブが増えたらここに追加する。`awaiting_*`（ユーザー入力待ち）と
+/// `submitting_plc`（HTTPハンドラの再入で完結、ジョブ化していない）は対象外。
+async fn resume_running_migrations(state: &AppState) {
+    use seiran_common::repository::{AtMigrationRepository, PgAtMigrationRepository};
+
+    let repo = PgAtMigrationRepository::new(state.db.clone());
+
+    for (status, label) in [
+        ("fetching_repo", "getRepo取得"),
+        ("requesting_plc_signature", "PLC署名リクエスト"),
+        ("importing_data", "データ取り込み"),
+        ("deactivating_source", "移行元アカウント無効化"),
+    ] {
+        let request_ids = match repo.list_by_statuses(&[status]).await {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!(
+                    "[startup] 実行中の既存DID転入リクエスト取得失敗 (status={}): {}",
+                    status,
+                    e
+                );
+                continue;
+            }
+        };
+        if request_ids.is_empty() {
+            continue;
+        }
+        tracing::info!(
+            "[startup] 実行中の既存DID転入リクエスト（{}）{} 件を再開します",
+            label,
+            request_ids.len()
+        );
+        for request_id in request_ids {
+            match status {
+                "fetching_repo" => state.enqueue_migration_fetch_repo(request_id).await,
+                "requesting_plc_signature" => {
+                    state
+                        .enqueue_migration_request_plc_signature(request_id)
+                        .await
+                }
+                "importing_data" => state.enqueue_migration_import_process(request_id).await,
+                "deactivating_source" => {
+                    state.enqueue_migration_deactivate_source(request_id).await
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 }
 

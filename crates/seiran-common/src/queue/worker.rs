@@ -135,6 +135,10 @@ pub struct JobContext {
     pub oembed_whitelist: Option<Arc<crate::oembed_whitelist::OembedWhitelist>>,
     /// フォロー実行ジョブ（`Job::FollowImportProcess`）が使用
     pub follow_exec: Option<FollowExecConfig>,
+    /// DB内機密フィールド（`storage_providers.secret_key`等）のAES-256-GCM復号鍵。
+    /// 既存DID転入フロー（`Job::MigrationImportProcess`）がblob保存先ストレージ
+    /// プロバイダーを選択する際に使用（`Secrets::encryption_key_bytes`と同じ値）。
+    pub encryption_key: Option<Vec<u8>>,
 }
 
 impl JobContext {
@@ -152,6 +156,7 @@ impl JobContext {
             inbox: None,
             oembed_whitelist: None,
             follow_exec: None,
+            encryption_key: None,
         }
     }
 
@@ -180,6 +185,11 @@ impl JobContext {
 
     pub fn with_follow_exec_config(mut self, follow_exec: FollowExecConfig) -> Self {
         self.follow_exec = Some(follow_exec);
+        self
+    }
+
+    pub fn with_encryption_key(mut self, encryption_key: Vec<u8>) -> Self {
+        self.encryption_key = Some(encryption_key);
         self
     }
 
@@ -250,6 +260,7 @@ impl WorkerEngine {
         delivery: DeliveryConfig,
         inbox: Option<InboxContext>,
         follow_exec: Option<FollowExecConfig>,
+        encryption_key: Vec<u8>,
     ) -> Self {
         let oembed_whitelist = Arc::new(OembedWhitelist::new(Arc::new(
             PgSiteSettingsRepository::new(pool.clone()),
@@ -257,7 +268,8 @@ impl WorkerEngine {
         let mut ctx_builder = JobContext::new(queue.clone(), ap_client)
             .with_db_pool(pool)
             .with_delivery_config(delivery)
-            .with_oembed_whitelist(oembed_whitelist);
+            .with_oembed_whitelist(oembed_whitelist)
+            .with_encryption_key(encryption_key);
         if let Some(inbox) = inbox {
             ctx_builder = ctx_builder.with_inbox_context(inbox);
         }
@@ -505,6 +517,19 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         } => jobs::post_merge_cleanup::handle(survivor_post_id, doomed_post_id, ctx)
             .await
             .map_err(JobError::from),
+        // 失敗の一時/恒久区別をジョブ自身が判断する（ApDeliveryと同様、JobErrorをネイティブに返す）。
+        Job::MigrationFetchRepo { request_id } => {
+            jobs::at_migration::handle_fetch_repo(request_id, ctx).await
+        }
+        Job::MigrationRequestPlcSignature { request_id } => {
+            jobs::at_migration::handle_request_plc_signature(request_id, ctx).await
+        }
+        Job::MigrationImportProcess { request_id } => {
+            jobs::at_migration::handle_import_process(request_id, ctx).await
+        }
+        Job::MigrationDeactivateSource { request_id } => {
+            jobs::at_migration::handle_deactivate_source(request_id, ctx).await
+        }
     }
 }
 
@@ -535,6 +560,10 @@ fn job_name(job: &Job) -> &'static str {
         Job::BskyListMembershipResolve { .. } => "BskyListMembershipResolve",
         Job::PollFetch { .. } => "PollFetch",
         Job::PostMergeCleanup { .. } => "PostMergeCleanup",
+        Job::MigrationFetchRepo { .. } => "MigrationFetchRepo",
+        Job::MigrationRequestPlcSignature { .. } => "MigrationRequestPlcSignature",
+        Job::MigrationImportProcess { .. } => "MigrationImportProcess",
+        Job::MigrationDeactivateSource { .. } => "MigrationDeactivateSource",
     }
 }
 
@@ -689,6 +718,34 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 5,
             base_delay_ms: 5000,
             max_delay_ms: 120_000,
+        },
+        Job::MigrationFetchRepo { .. } => RetryConfig {
+            // 外部PDSからの大きめのデータ転送（AtpRepositoryPublishと同程度）。
+            // 恒久的失敗（CARデコード不能等）はJobError::Permanentで即座に諦めるため、
+            // ここは真の一時的障害（ネットワーク断等）のみを想定した設定でよい。
+            max_attempts: 5,
+            base_delay_ms: 2000,
+            max_delay_ms: 60_000,
+        },
+        Job::MigrationRequestPlcSignature { .. } => RetryConfig {
+            // 単発の軽量API呼び出し。ユーザーもUIの「リトライ」ボタンで再投入できるため
+            // 控えめな設定でよい。
+            max_attempts: 3,
+            base_delay_ms: 2000,
+            max_delay_ms: 30_000,
+        },
+        Job::MigrationImportProcess { .. } => RetryConfig {
+            // MigrationFetchRepoと同程度。1件ごとの単発失敗はここでリトライし、
+            // 恒久的失敗（CBORデコード不能等）はJobError::Permanentで即座に諦める。
+            max_attempts: 5,
+            base_delay_ms: 2000,
+            max_delay_ms: 60_000,
+        },
+        Job::MigrationDeactivateSource { .. } => RetryConfig {
+            // ベストエフォート。失敗してもcompletedへ進むため軽量設定で十分。
+            max_attempts: 3,
+            base_delay_ms: 2000,
+            max_delay_ms: 30_000,
         },
     }
 }

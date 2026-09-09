@@ -107,6 +107,27 @@ pub struct UserInfo {
     /// （他のAPIは `extract_auth` が `ACCOUNT_SUSPENDED` で拒否するため、この `me` だけが
     /// 凍結中でも呼べる例外）。
     pub is_suspended: bool,
+    /// 既存DID転入フロー（`docs/account_migration.md`）由来のアカウントで、かつ
+    /// データ取り込みが未完了（`completed`以外）の場合のみ`Some`。通常アカウントは`None`。
+    /// フロントは`is_suspended`と同型のゲートで、`completed`以外なら他画面をバイパスして
+    /// 「データ取り込み中」専用画面を表示する。
+    pub migration_status: Option<String>,
+}
+
+/// `at_migration_requests`に本ユーザーの行があり、かつ`completed`未満なら
+/// そのステータス文字列を返す（`UserInfo.migration_status`用）。
+/// 通常アカウント（転入経由でない）では常に`None`。
+async fn fetch_incomplete_migration_status(state: &AppState, user_id: i64) -> Option<String> {
+    let status: Option<String> = sqlx::query_scalar(
+        "SELECT status::text FROM at_migration_requests
+         WHERE user_id = $1 AND status NOT IN ('completed', 'abandoned')",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+    status
 }
 
 /// actors.avatar_media_id がある場合は storage_providers から公開 URL を解決し、
@@ -358,6 +379,7 @@ pub async fn register(
             language_preference: None, // 登録直後は「自動」
             token,
             is_suspended: false, // 登録直後は凍結され得ない
+            migration_status: None, // 通常登録（転入経由ではない）
         },
     }))
 }
@@ -413,6 +435,8 @@ pub(crate) async fn finish_login(
         .ok()
         .flatten();
 
+    let migration_status = fetch_incomplete_migration_status(state, user_id).await;
+
     Ok(AuthResponse {
         token: token.clone(),
         user: UserInfo {
@@ -425,6 +449,7 @@ pub(crate) async fn finish_login(
             language_preference,
             token,
             is_suspended,
+            migration_status,
         },
     })
 }
@@ -589,6 +614,7 @@ pub async fn me(
         language_preference,
         token,
         is_suspended: actor.suspended_at.is_some(),
+        migration_status: fetch_incomplete_migration_status(&state, auth_user.user_id).await,
     }))
 }
 

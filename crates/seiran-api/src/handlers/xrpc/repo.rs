@@ -15,7 +15,7 @@ use sqlx::Row;
 
 use seiran_common::atp::{
     cid_from_sha256_hex, cid_from_str, cid_to_string, encode_generic_record,
-    fetch_raw_did_document, generate_tid, resolve_atproto_verification_key,
+    fetch_raw_did_document, generate_tid, ipld_to_json, resolve_atproto_verification_key,
 };
 use seiran_common::repository::Actor;
 use seiran_common::{
@@ -1218,26 +1218,6 @@ pub async fn xrpc_apply_writes(
     Json(serde_json::json!({ "results": results })).into_response()
 }
 
-/// DAG-CBOR デコード結果（`Ipld`）を AT Protocol の JSON 表現に変換する。
-/// `serde_json::Value` へ直接デシリアライズすると、CID リンク（tag 42）を含む
-/// レコード（embed の blob ref 等）で `invalid type: newtype struct` エラーになるため、
-/// 一度 `Ipld` にデコードしてから AT Protocol の規約（CIDリンク→`{"$link": "<cid>"}`、
-/// バイト列→`{"$bytes": "<base64>"}`）に沿って手動変換する。
-fn ipld_to_json(ipld: &ipld_core::ipld::Ipld) -> serde_json::Value {
-    use ipld_core::ipld::Ipld;
-    match ipld {
-        Ipld::Null => serde_json::Value::Null,
-        Ipld::Bool(b) => serde_json::Value::Bool(*b),
-        Ipld::Integer(i) => serde_json::json!(i),
-        Ipld::Float(f) => serde_json::json!(f),
-        Ipld::String(s) => serde_json::Value::String(s.clone()),
-        Ipld::Bytes(b) => serde_json::json!({ "$bytes": URL_SAFE_NO_PAD.encode(b) }),
-        Ipld::List(l) => serde_json::Value::Array(l.iter().map(ipld_to_json).collect()),
-        Ipld::Map(m) => serde_json::Value::Object(
-            m.iter()
-                .map(|(k, v)| (k.clone(), ipld_to_json(v)))
-                .collect(),
-        ),
-        Ipld::Link(cid) => serde_json::json!({ "$link": cid.to_string() }),
-    }
-}
+// `ipld_to_json`は`seiran_common::atp::ipld_to_json`へ移動済み（既存DID転入フローの
+// CARレコードJSON化と共用するため）。DAG-CBORデコード結果（`Ipld`）をAT ProtocolのJSON表現
+// （CIDリンク→`{"$link": "<cid>"}`、バイト列→`{"$bytes": "<base64>"}`）に変換する。

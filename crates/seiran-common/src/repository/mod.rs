@@ -6,6 +6,7 @@
 pub mod actor;
 pub mod also_known_as;
 pub mod app_token;
+pub mod at_migration;
 pub mod atp;
 pub mod atp_preferences;
 pub mod atp_session;
@@ -39,6 +40,9 @@ pub mod user;
 pub use actor::{Actor, ActorProfileRow, ActorRepository, PgActorRepository};
 pub use also_known_as::{AlsoKnownAsRepository, AlsoKnownAsRow, PgAlsoKnownAsRepository};
 pub use app_token::{AppTokenRepository, AppTokenRow, PgAppTokenRepository};
+pub use at_migration::{
+    AtMigrationRepository, AtMigrationRequestRow, PgAtMigrationRepository, StagedRecord,
+};
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
 pub use atp_preferences::{AtpPreferencesRepository, PgAtpPreferencesRepository};
 pub use atp_session::{AppPasswordRow, AtpSessionRepository, PgAtpSessionRepository};

@@ -106,6 +106,9 @@ export default function Register() {
           <p className={styles.link}>
             {t("auth:register.alreadyHaveAccountPrefix")} <Link to="/login">{t("auth:register.loginLink")}</Link>
           </p>
+          <p className={styles.link}>
+            <Link to="/register/migrate">{t("auth:register.migrateInstead")}</Link>
+          </p>
         </div>
       </div>
     );
@@ -187,6 +190,9 @@ export default function Register() {
         </form>
         <p className={styles.link}>
           {t("auth:register.alreadyHaveAccountPrefix")} <Link to="/login">{t("auth:register.loginLink")}</Link>
+        </p>
+        <p className={styles.link}>
+          <Link to="/register/migrate">{t("auth:register.migrateInstead")}</Link>
         </p>
       </div>
     </div>

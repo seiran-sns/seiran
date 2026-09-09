@@ -319,6 +319,23 @@ pub enum Job {
         survivor_post_id: i64,
         doomed_post_id: i64,
     },
+
+    /// 既存DID転入フロー（`docs/account_migration.md`）: PDS Aから`getRepo`(CAR)+
+    /// `listBlobs`を取得し、`at_migration_records`/`at_migration_blobs`へステージングする
+    /// 単発ジョブ。自己再enqueue型ではない（`follow_import`と異なる）。
+    MigrationFetchRepo { request_id: i64 },
+
+    /// 既存DID転入フロー: PDS Aへ`com.atproto.identity.requestPlcOperationSignature`を呼び、
+    /// PDS A登録メール宛に確認コードを送付させる単発ジョブ。
+    MigrationRequestPlcSignature { request_id: i64 },
+
+    /// 既存DID転入フロー: ステージング済みレコード/blobを`posts`/`atp_records`/`atp_blocks`/
+    /// `atp_blobs`へ実体化する自己再enqueue型ジョブ（`follow_import`と同型）。
+    MigrationImportProcess { request_id: i64 },
+
+    /// 既存DID転入フロー: データ取り込み完了後、移行元PDS Aアカウントの無効化
+    /// （ベストエフォート）を試みる単発ジョブ。
+    MigrationDeactivateSource { request_id: i64 },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

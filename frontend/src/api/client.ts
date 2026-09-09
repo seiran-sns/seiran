@@ -19,6 +19,7 @@ import { users, alsoKnownAs, blocks, mutes, repostMutes, actors, account } from 
 import { admin } from "./admin";
 import { follows, followImport, followRequests, dm } from "./follows";
 import { lists, hashtags } from "./lists";
+import { migration } from "./migration";
 
 export const api = {
   openTarget,
@@ -47,4 +48,5 @@ export const api = {
   media,
   emojis,
   reactions,
+  migration,
 };

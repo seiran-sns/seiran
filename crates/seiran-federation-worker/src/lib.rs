@@ -29,10 +29,19 @@ pub async fn run(
     delivery: DeliveryConfig,
     inbox: Option<InboxContext>,
     follow_exec: Option<FollowExecConfig>,
+    encryption_key: Vec<u8>,
 ) {
     tracing::info!("[federation-worker] 起動中...");
 
-    let engine = WorkerEngine::new_with_db(queue, pool, ap_client, delivery, inbox, follow_exec);
+    let engine = WorkerEngine::new_with_db(
+        queue,
+        pool,
+        ap_client,
+        delivery,
+        inbox,
+        follow_exec,
+        encryption_key,
+    );
 
     // デキュー・実行・リトライを永続的に回す
     engine.run().await;

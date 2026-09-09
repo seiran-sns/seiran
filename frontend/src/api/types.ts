@@ -15,6 +15,11 @@ export interface User {
   /** 凍結中かどうか。`true` の間、他APIはすべて`ACCOUNT_SUSPENDED`で拒否されるため、
    * アプリ側は他の全画面をバイパスして凍結専用画面のみを表示する。 */
   is_suspended: boolean;
+  /** 既存DID転入フロー（アカウント移行）由来のアカウントで、データ取り込みが
+   * 未完了の場合のみ値が入る（`"importing_data"` 等）。通常アカウントは `null`/`undefined`。
+   * `is_suspended` と同型のゲートで、アプリ側は他の全画面をバイパスして
+   * 「データ取り込み中」専用画面を表示する。 */
+  migration_status?: string | null;
 }
 
 // ── 管理画面用の型（レスポンスは snake_case） ──────────────────────────────
