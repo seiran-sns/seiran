@@ -195,6 +195,42 @@ test("Misskey互換API: notes/showでCW付き投稿のcwが反映される（Ari
   expect(shown.cw).toBe(cwText);
 });
 
+test("Misskey互換API: notes/showでアンケート付き投稿のpollが反映される（Aria非互換修正）", async ({
+  request,
+}) => {
+  const alice = await registerUserViaApi(request, "e2emkpolla");
+
+  const createRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: {
+      text: "好きな色は？",
+      poll: { choices: ["赤", "青"], expiresInSeconds: 3600 },
+    },
+  });
+  expect(createRes.ok(), `投稿作成失敗: ${createRes.status()} ${await createRes.text()}`).toBeTruthy();
+  const created = await createRes.json();
+
+  const voteRes = await request.post(`/api/notes/${created.id}/poll-vote`, {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { optionIndexes: [0] },
+  });
+  expect(voteRes.ok(), `投票失敗: ${voteRes.status()} ${await voteRes.text()}`).toBeTruthy();
+
+  const showRes = await request.post("/api/notes/show", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { noteId: created.id },
+  });
+  expect(showRes.ok(), `notes/show失敗: ${showRes.status()} ${await showRes.text()}`).toBeTruthy();
+  const shown = await showRes.json();
+
+  expect(shown.poll).toBeTruthy();
+  expect(shown.poll.multiple).toBe(false);
+  expect(shown.poll.choices).toEqual([
+    expect.objectContaining({ text: "赤", votes: 1, isVoted: true }),
+    expect.objectContaining({ text: "青", votes: 0, isVoted: false }),
+  ]);
+});
+
 test("Misskey互換API: metaのmediaProxyUrlが未設定時に自インスタンスの/proxyへフォールバックする（Aria非互換修正）", async ({
   request,
 }) => {

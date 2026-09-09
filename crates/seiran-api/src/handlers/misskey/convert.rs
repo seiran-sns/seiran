@@ -6,6 +6,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use sqlx::Row;
+
 use seiran_common::repository::{Actor, NotificationRow, RemoteInstanceMeta, TimelinePost};
 
 use crate::handlers::notes::delivery::at_uri_to_bsky_app_url;
@@ -18,8 +20,63 @@ use crate::AppState;
 
 use super::types::{
     MisskeyDriveFile, MisskeyDriveFileProperties, MisskeyMeDetailed, MisskeyNote,
-    MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite, MisskeyUserRelations,
+    MisskeyNotification, MisskeyPoll, MisskeyPollChoice, MisskeyUserDetailed, MisskeyUserLite,
+    MisskeyUserRelations,
 };
+
+/// 認証中アクターの回答選択肢を post_id → 選択肢indexes の形で一括取得する。
+/// `handlers::notes::queries::attach_poll_votes` の Misskey 版（`MisskeyNote` はレスポンス
+/// 組み立て後に `serde_json::Value` を書き換えられる構造ではないため、`to_misskey_note` へ
+/// 渡す前段でまとめて引く）。
+async fn fetch_poll_votes_map(
+    db: &sqlx::PgPool,
+    post_ids: &[i64],
+    my_actor_id: Option<i64>,
+) -> HashMap<i64, Vec<i32>> {
+    let (Some(actor_id), false) = (my_actor_id, post_ids.is_empty()) else {
+        return HashMap::new();
+    };
+    let rows = sqlx::query(
+        "SELECT post_id, option_index FROM poll_votes
+         WHERE actor_id = $1 AND post_id = ANY($2)
+         ORDER BY post_id, option_index",
+    )
+    .bind(actor_id)
+    .bind(post_ids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+    let mut votes: HashMap<i64, Vec<i32>> = HashMap::new();
+    for row in rows {
+        votes
+            .entry(row.try_get("post_id").unwrap_or_default())
+            .or_default()
+            .push(row.try_get("option_index").unwrap_or_default());
+    }
+    votes
+}
+
+/// `posts.poll`（`normalize_ap_poll`/ローカル投稿作成時（`creation.rs`）と同じ形、
+/// `{"multiple": bool, "options": [{"name", "votes"}], "endTime": str|null, ...}`）を
+/// Misskey 本家の `Poll` エンティティへ変換する。`voted_indexes` は認証中アクターが
+/// 投票済みの選択肢index一覧（未認証・未投票なら空スライス）。
+fn to_misskey_poll(poll: &serde_json::Value, voted_indexes: &[i32]) -> Option<MisskeyPoll> {
+    let options = poll["options"].as_array()?;
+    let choices = options
+        .iter()
+        .enumerate()
+        .map(|(i, o)| MisskeyPollChoice {
+            is_voted: voted_indexes.contains(&(i as i32)),
+            text: o["name"].as_str().unwrap_or_default().to_owned(),
+            votes: o["votes"].as_i64().unwrap_or(0),
+        })
+        .collect();
+    Some(MisskeyPoll {
+        expires_at: poll["endTime"].as_str().map(str::to_owned),
+        multiple: poll["multiple"].as_bool().unwrap_or(false),
+        choices,
+    })
+}
 
 /// `is_local`は`actors.actor_type == "local"`（呼び出し元が`Actor`/`TimelinePost`等の
 /// `actor_type`から渡す）。`local_domain`はアバターURLのフォールバック組み立てにのみ使う。
@@ -284,6 +341,7 @@ fn to_misskey_note(
     renote_count: i64,
     replies_count: i64,
     instance_cache: &HashMap<String, RemoteInstanceMeta>,
+    voted_indexes: &[i32],
 ) -> MisskeyNote {
     let mut user = user_lite(
         p.actor_id,
@@ -405,6 +463,7 @@ fn to_misskey_note(
         uri,
         url,
         my_reaction,
+        poll: p.poll.as_ref().and_then(|poll| to_misskey_poll(poll, voted_indexes)),
     }
 }
 
@@ -427,7 +486,7 @@ async fn fetch_referenced_notes(
                 a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
                 COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                 p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
-                p.content_warning,
+                p.content_warning, p.poll,
                 p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
                 p.reply_count, p.repost_count
          FROM posts p JOIN actors a ON a.id = p.actor_id
@@ -454,6 +513,7 @@ async fn fetch_referenced_notes(
     let mut att_map = fetch_attachments_map(&state.db, &row_ids).await;
     let rmap = fetch_reactions_map(&state.db, &row_ids, my_actor_id).await;
     let instance_cache = build_instance_cache(state, &rows).await;
+    let poll_votes = fetch_poll_votes_map(&state.db, &row_ids, my_actor_id).await;
 
     rows.into_iter()
         .map(|r| {
@@ -462,6 +522,7 @@ async fn fetch_referenced_notes(
             let reactions = rmap.get(&id).cloned().unwrap_or_default();
             let rc = r.repost_count;
             let pc = r.reply_count;
+            let voted = poll_votes.get(&id).map(Vec::as_slice).unwrap_or(&[]);
             let note = to_misskey_note(
                 &r,
                 &state.local_domain,
@@ -470,6 +531,7 @@ async fn fetch_referenced_notes(
                 rc,
                 pc,
                 &instance_cache,
+                voted,
             );
             (id, note)
         })
@@ -523,6 +585,7 @@ pub async fn build_notes(
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
     let instance_cache = build_instance_cache(state, &rows).await;
+    let poll_votes = fetch_poll_votes_map(&state.db, &ids, my_actor_id).await;
 
     let mut notes: Vec<MisskeyNote> = rows
         .into_iter()
@@ -532,6 +595,7 @@ pub async fn build_notes(
             let reactions = rmap.get(&id).cloned().unwrap_or_default();
             let rc = p.repost_count;
             let pc = p.reply_count;
+            let voted = poll_votes.get(&id).map(Vec::as_slice).unwrap_or(&[]);
             to_misskey_note(
                 &p,
                 &state.local_domain,
@@ -540,6 +604,7 @@ pub async fn build_notes(
                 rc,
                 pc,
                 &instance_cache,
+                voted,
             )
         })
         .collect();
@@ -763,14 +828,14 @@ mod tests {
         let mut p = base_post();
         p.content_warning = Some("注意".to_string());
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
 
         assert_eq!(note.cw.as_deref(), Some("注意"));
     }
 
     #[test]
     fn note_cw_is_none_without_content_warning() {
-        let note = to_misskey_note(&base_post(), LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
+        let note = to_misskey_note(&base_post(), LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
 
         assert_eq!(note.cw, None);
     }
@@ -793,7 +858,7 @@ mod tests {
             is_animated_image: false,
         };
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[attachment], &[], 0, 0, &HashMap::new());
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[attachment], &[], 0, 0, &HashMap::new(), &[]);
 
         assert_eq!(note.files.len(), 1);
         assert!(note.files[0].is_sensitive);
@@ -807,7 +872,7 @@ mod tests {
             ":blob_cat:": "https://example.com/blob-cat.png"
         }));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
 
         assert_eq!(
             note.emojis.get("blob_cat").map(String::as_str),
@@ -824,7 +889,7 @@ mod tests {
             ":mozu_police:": "https://remote.example/mozu-police.png"
         }));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
 
         assert_eq!(
             note.emojis.get("mozu_police").map(String::as_str),
@@ -841,7 +906,7 @@ mod tests {
         let mut p = base_post();
         p.post_ap_object_id = Some(format!("https://{}/notes/{}", LOCAL_DOMAIN, p.id));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
 
         assert_eq!(note.uri, None);
         assert_eq!(note.url, None);
@@ -855,7 +920,7 @@ mod tests {
         p.actor_type = "fedi".to_string();
         p.post_ap_object_id = Some("https://remote.example/notes/xyz".to_string());
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
 
         assert_eq!(
             note.uri.as_deref(),
@@ -875,13 +940,48 @@ mod tests {
         p.actor_type = "bsky".to_string();
         p.post_at_uri = Some("at://did:plc:abc123/app.bsky.feed.post/xyz".to_string());
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new());
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
 
         assert_eq!(note.uri, None);
         assert_eq!(
             note.url.as_deref(),
             Some("https://bsky.app/profile/did:plc:abc123/post/xyz")
         );
+    }
+
+    // Misskey本家クライアント（Aria等）は `note.poll` の値でアンケート有無を判定する。
+    // このフィールドがMisskeyNoteに存在しないと、Fedi（Misskey）から受信したアンケート付き
+    // 投稿が `/api/notes/*` 経由のタイムラインでは常にアンケート無し扱いになってしまう
+    // 不具合の回帰テスト。
+    #[test]
+    fn note_poll_converts_options_and_marks_voted_choice() {
+        let mut p = base_post();
+        p.poll = Some(serde_json::json!({
+            "multiple": false,
+            "options": [
+                {"name": "赤", "votes": 3},
+                {"name": "青", "votes": 1}
+            ],
+            "endTime": "2026-09-10T00:00:00+00:00",
+        }));
+
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[0]);
+
+        let poll = note.poll.expect("poll must be Some when posts.poll is set");
+        assert!(!poll.multiple);
+        assert_eq!(poll.expires_at.as_deref(), Some("2026-09-10T00:00:00+00:00"));
+        assert_eq!(poll.choices.len(), 2);
+        assert_eq!(poll.choices[0].text, "赤");
+        assert_eq!(poll.choices[0].votes, 3);
+        assert!(poll.choices[0].is_voted);
+        assert_eq!(poll.choices[1].text, "青");
+        assert!(!poll.choices[1].is_voted);
+    }
+
+    #[test]
+    fn note_poll_is_none_without_posts_poll() {
+        let note = to_misskey_note(&base_post(), LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
+        assert!(note.poll.is_none());
     }
 
     #[test]

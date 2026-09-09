@@ -183,6 +183,29 @@ pub struct MisskeyNote {
     pub url: Option<String>,
     /// 認証ユーザーが付けたリアクション（絵文字）。未認証・未リアクション時は `null`。
     pub my_reaction: Option<String>,
+    /// アンケート（#228）。`posts.poll`（`normalize_ap_poll`と同じ形）を Misskey 本家の
+    /// `Poll` エンティティへ変換したもの。アンケートを持たない投稿では `null`
+    /// （キー自体は省略しない。misskey_dart 等はキーの有無でなく値の null/非null で
+    /// アンケート有無を判定するため、`skip_serializing_if` は付けない）。
+    pub poll: Option<MisskeyPoll>,
+}
+
+/// Misskey 本家の `Poll` エンティティ。`to_misskey_poll`（`convert.rs`）参照。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyPoll {
+    /// ISO8601。期限なしアンケートでは `null`。
+    pub expires_at: Option<String>,
+    pub multiple: bool,
+    pub choices: Vec<MisskeyPollChoice>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyPollChoice {
+    pub is_voted: bool,
+    pub text: String,
+    pub votes: i64,
 }
 
 /// `POST /api/i/notifications` のレスポンス要素。Misskey 本家の `Notification` エンティティ

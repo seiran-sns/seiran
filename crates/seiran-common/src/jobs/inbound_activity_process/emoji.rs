@@ -1,12 +1,5 @@
 use super::*;
 
-/// value（activity/note）の `tag` 配列から、指定した shortcode（`:name:`, `:name@domain:`, `name` 形式）に対応する
-/// カスタム絵文字タグの画像 URL を取り出す（`extract_emoji_tag_url_from_tags` を利用）。
-pub(super) fn extract_emoji_tag_url(value: &serde_json::Value, shortcode: &str) -> Option<String> {
-    let tags = value["tag"].as_array()?;
-    extract_emoji_tag_url_from_tags(tags, shortcode)
-}
-
 /// `tag` 配列から指定した shortcode に対応するカスタム絵文字タグの画像 URL を取り出す。
 /// `name` が `:shortcode:`, `:shortcode@domain:`, `shortcode` のいずれの表記であっても柔軟にパース比較する。
 pub(super) fn extract_emoji_tag_url_from_tags(
@@ -222,69 +215,53 @@ pub(super) async fn record_remote_emojis(
 }
 
 #[cfg(test)]
-mod tests {
+mod extract_emoji_tag_url_from_tags_tests {
     use super::*;
 
     #[test]
-    fn extract_emoji_tag_url_finds_matching_custom_emoji() {
-        let activity = serde_json::json!({
-            "type": "Like",
-            "content": ":blobcat:",
-            "_misskey_reaction": ":blobcat:",
-            "tag": [
-                {
-                    "id": "https://misskey.example/emojis/blobcat",
-                    "type": "Emoji",
-                    "name": ":blobcat:",
-                    "icon": { "type": "Image", "mediaType": "image/png", "url": "https://misskey.example/files/blobcat.png" }
-                }
-            ]
-        });
+    fn finds_matching_custom_emoji() {
+        let tags = vec![serde_json::json!({
+            "id": "https://misskey.example/emojis/blobcat",
+            "type": "Emoji",
+            "name": ":blobcat:",
+            "icon": { "type": "Image", "mediaType": "image/png", "url": "https://misskey.example/files/blobcat.png" }
+        })];
         assert_eq!(
-            extract_emoji_tag_url(&activity, ":blobcat:"),
+            extract_emoji_tag_url_from_tags(&tags, ":blobcat:"),
             Some("https://misskey.example/files/blobcat.png".to_string())
         );
     }
 
     #[test]
-    fn extract_emoji_tag_url_ignores_non_matching_name() {
-        let activity = serde_json::json!({
-            "tag": [
-                { "type": "Emoji", "name": ":other:", "icon": { "url": "https://example.com/other.png" } }
-            ]
-        });
-        assert_eq!(extract_emoji_tag_url(&activity, ":blobcat:"), None);
+    fn ignores_non_matching_name() {
+        let tags = vec![serde_json::json!({
+            "type": "Emoji", "name": ":other:", "icon": { "url": "https://example.com/other.png" }
+        })];
+        assert_eq!(extract_emoji_tag_url_from_tags(&tags, ":blobcat:"), None);
     }
 
     #[test]
-    fn extract_emoji_tag_url_ignores_non_emoji_tag_type() {
-        let activity = serde_json::json!({
-            "tag": [
-                { "type": "Mention", "name": ":blobcat:", "icon": { "url": "https://example.com/x.png" } }
-            ]
-        });
-        assert_eq!(extract_emoji_tag_url(&activity, ":blobcat:"), None);
+    fn ignores_non_emoji_tag_type() {
+        let tags = vec![serde_json::json!({
+            "type": "Mention", "name": ":blobcat:", "icon": { "url": "https://example.com/x.png" }
+        })];
+        assert_eq!(extract_emoji_tag_url_from_tags(&tags, ":blobcat:"), None);
     }
 
     #[test]
-    fn extract_emoji_tag_url_no_tag_field() {
-        let activity = serde_json::json!({ "content": "👍" });
-        assert_eq!(extract_emoji_tag_url(&activity, "👍"), None);
+    fn empty_tags() {
+        assert_eq!(extract_emoji_tag_url_from_tags(&[], "👍"), None);
     }
 
     #[test]
-    fn extract_emoji_tag_url_handles_hosted_name() {
-        let activity = serde_json::json!({
-            "tag": [
-                {
-                    "type": "Emoji",
-                    "name": ":otu2@seiran-beta.org:",
-                    "icon": { "url": "https://seiran-beta.org/files/otu2.png" }
-                }
-            ]
-        });
+    fn handles_hosted_name() {
+        let tags = vec![serde_json::json!({
+            "type": "Emoji",
+            "name": ":otu2@seiran-beta.org:",
+            "icon": { "url": "https://seiran-beta.org/files/otu2.png" }
+        })];
         assert_eq!(
-            extract_emoji_tag_url(&activity, "otu2"),
+            extract_emoji_tag_url_from_tags(&tags, "otu2"),
             Some("https://seiran-beta.org/files/otu2.png".to_string())
         );
     }
