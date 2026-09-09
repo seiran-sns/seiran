@@ -148,6 +148,23 @@ pub trait AtMigrationRepository: Send + Sync {
     async fn claim_next_blob(&self, request_id: i64) -> Result<Option<(i64, String)>, sqlx::Error>;
 
     async fn mark_blob_imported(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
+
+    /// フォロー関係復元待ち（`app.bsky.graph.follow`として取り込み済み＝`imported_at`は
+    /// 設定済みだが、`follows`テーブルへの反映＝`follow_materialized_at`が未設定）の
+    /// レコードを1件排他取得する。戻り値: (id, rkey, bytes)。
+    async fn claim_next_follow_record(
+        &self,
+        request_id: i64,
+    ) -> Result<Option<(i64, String, Vec<u8>)>, sqlx::Error>;
+
+    async fn mark_follow_materialized(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
+
+    /// 起動時リカバリ用: フォロー関係復元待ちが1件でも残っているリクエストIDを列挙する。
+    /// `at_migration_requests.status`とは独立した結果整合処理のため、`list_by_statuses`
+    /// （ステータス起点のリカバリ）とは別系統で判定する。
+    async fn list_request_ids_with_pending_follow_materialization(
+        &self,
+    ) -> Result<Vec<i64>, sqlx::Error>;
 }
 
 pub struct PgAtMigrationRepository {
@@ -472,5 +489,47 @@ impl AtMigrationRepository for PgAtMigrationRepository {
             .execute(&self.pool)
             .await
             .map(|_| ())
+    }
+
+    async fn claim_next_follow_record(
+        &self,
+        request_id: i64,
+    ) -> Result<Option<(i64, String, Vec<u8>)>, sqlx::Error> {
+        sqlx::query_as(
+            "UPDATE at_migration_records SET follow_materialized_at = follow_materialized_at
+             WHERE id = (
+                 SELECT id FROM at_migration_records
+                 WHERE request_id = $1 AND collection = 'app.bsky.graph.follow'
+                   AND imported_at IS NOT NULL AND follow_materialized_at IS NULL
+                 ORDER BY id LIMIT 1
+                 FOR UPDATE SKIP LOCKED
+             )
+             RETURNING id, rkey, bytes",
+        )
+        .bind(request_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn mark_follow_materialized(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE at_migration_records SET follow_materialized_at = $1 WHERE id = $2")
+            .bind(now)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn list_request_ids_with_pending_follow_materialization(
+        &self,
+    ) -> Result<Vec<i64>, sqlx::Error> {
+        let rows: Vec<(i64,)> = sqlx::query_as(
+            "SELECT DISTINCT request_id FROM at_migration_records
+             WHERE collection = 'app.bsky.graph.follow'
+               AND imported_at IS NOT NULL AND follow_materialized_at IS NULL",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 }

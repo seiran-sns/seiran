@@ -530,6 +530,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::MigrationDeactivateSource { request_id } => {
             jobs::at_migration::handle_deactivate_source(request_id, ctx).await
         }
+        Job::MigrationImportFollows { request_id } => {
+            jobs::at_migration::handle_import_follows(request_id, ctx).await
+        }
     }
 }
 
@@ -564,6 +567,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::MigrationRequestPlcSignature { .. } => "MigrationRequestPlcSignature",
         Job::MigrationImportProcess { .. } => "MigrationImportProcess",
         Job::MigrationDeactivateSource { .. } => "MigrationDeactivateSource",
+        Job::MigrationImportFollows { .. } => "MigrationImportFollows",
     }
 }
 
@@ -746,6 +750,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 3,
             base_delay_ms: 2000,
             max_delay_ms: 30_000,
+        },
+        Job::MigrationImportFollows { .. } => RetryConfig {
+            // AppView取得・リモートアクター解決を1件ずつ行う（RemoteActorResolveと同程度）。
+            // status確定を待たない結果整合処理のため、一時的障害は気長にリトライしてよい。
+            max_attempts: 5,
+            base_delay_ms: 3000,
+            max_delay_ms: 60_000,
         },
     }
 }

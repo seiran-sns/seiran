@@ -336,6 +336,12 @@ pub enum Job {
     /// 既存DID転入フロー: データ取り込み完了後、移行元PDS Aアカウントの無効化
     /// （ベストエフォート）を試みる単発ジョブ。
     MigrationDeactivateSource { request_id: i64 },
+
+    /// 既存DID転入フロー: 取り込み済み`app.bsky.graph.follow`レコードから`follows`
+    /// テーブルへの反映（リモートアクター解決込み）を行う自己再enqueue型ジョブ
+    /// （`follow_import`と同型）。`at_migration_requests.status`とは独立して、
+    /// データ取り込み完了後に結果整合で進める（レート制限は適用しない）。
+    MigrationImportFollows { request_id: i64 },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

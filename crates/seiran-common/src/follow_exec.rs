@@ -265,15 +265,17 @@ async fn follow_local(
     })
 }
 
-/// Bsky リモートユーザーへの ATP フォロー（DID またはハンドル）
-async fn follow_bsky(
+/// `actor_id_or_handle`（DIDまたはハンドル）をAppViewの`getProfile`で解決し、既存の
+/// ローカル/リモートアクター行を探すか、無ければ結婚判定込みで新規upsertする。
+/// `follow_bsky`と`link_bsky_follow_with_existing_rkey`（既存DID転入のフォロー復元）の
+/// 両方から使う共通ロジック。戻り値: (解決済みactor_id, 解決に使ったDID)。
+async fn resolve_bsky_target_actor(
     actor_id_or_handle: &str,
-    local_actor_id: i64,
-    pool: &PgPool,
     ap_client: &Arc<ApClient>,
+    pool: &PgPool,
     queue: &Arc<dyn JobQueue>,
     config: &FollowExecConfig,
-) -> Result<FollowOutcome, FollowError> {
+) -> Result<(i64, String), FollowError> {
     let bsky_resp = fetch_bsky_profile(&ap_client.http, actor_id_or_handle)
         .await
         .map_err(|e| {
@@ -321,6 +323,22 @@ async fn follow_bsky(
         }
     };
 
+    Ok((remote_actor_id, did))
+}
+
+/// Bsky リモートユーザーへの ATP フォロー（DID またはハンドル）
+async fn follow_bsky(
+    actor_id_or_handle: &str,
+    local_actor_id: i64,
+    pool: &PgPool,
+    ap_client: &Arc<ApClient>,
+    queue: &Arc<dyn JobQueue>,
+    config: &FollowExecConfig,
+) -> Result<FollowOutcome, FollowError> {
+    let (remote_actor_id, did) =
+        resolve_bsky_target_actor(actor_id_or_handle, ap_client, pool, queue, config).await?;
+    let now = chrono::Utc::now();
+
     check_not_blocked(config, local_actor_id, remote_actor_id).await?;
 
     let rkey = config
@@ -355,6 +373,64 @@ async fn follow_bsky(
         .await
     {
         tracing::error!("[follow/bsky] ActorHistorySync enqueue 失敗: {}", e);
+    }
+
+    Ok(FollowOutcome::Accepted {
+        target_uri: format!("at://{}", did),
+        already_following: !inserted,
+    })
+}
+
+/// 既存DID転入フロー（`docs/account_migration.md`）専用: 転入取り込みで既に
+/// `commit_generic_record`によりATPリポジトリへ複製済みの`app.bsky.graph.follow`
+/// レコード（`existing_rkey`）について、`follows`テーブルへの反映のみを行う。
+/// `follow_bsky`と異なりATPへの新規コミットは**行わない**（同じフォロー関係を
+/// 元のrkeyと新しいrkeyで二重にリポジトリへ書き込んでしまうのを避けるため）。
+pub async fn link_bsky_follow_with_existing_rkey(
+    target_did: &str,
+    local_actor_id: i64,
+    existing_rkey: &str,
+    pool: &PgPool,
+    ap_client: &Arc<ApClient>,
+    queue: &Arc<dyn JobQueue>,
+    config: &FollowExecConfig,
+) -> Result<FollowOutcome, FollowError> {
+    let (remote_actor_id, did) =
+        resolve_bsky_target_actor(target_did, ap_client, pool, queue, config).await?;
+
+    check_not_blocked(config, local_actor_id, remote_actor_id).await?;
+
+    let inserted = config
+        .follows
+        .insert_accepted_bsky(local_actor_id, remote_actor_id, existing_rkey)
+        .await
+        .map_err(|e| {
+            FollowError::Internal(format!(
+                "[migration/follow] follows INSERT 失敗: {}",
+                e
+            ))
+        })?;
+
+    tracing::info!(
+        "[migration/follow] {} → {} フォロー復元完了 (rkey={})",
+        local_actor_id,
+        did,
+        existing_rkey
+    );
+
+    touch_jetstream_wanted_dids(pool).await;
+
+    if let Err(e) = queue
+        .enqueue(
+            Job::ActorHistorySync {
+                ap_uri: None,
+                at_did: Some(did.clone()),
+            },
+            priority::LOW,
+        )
+        .await
+    {
+        tracing::error!("[migration/follow] ActorHistorySync enqueue 失敗: {}", e);
     }
 
     Ok(FollowOutcome::Accepted {

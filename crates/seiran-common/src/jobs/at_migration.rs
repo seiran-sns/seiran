@@ -530,6 +530,23 @@ async fn process_import(
             e
         );
     }
+    // フォロー関係の復元（`follows`テーブルへの反映）は`at_migration_requests.status`とは
+    // 独立した結果整合処理として並行して進める。deactivating_source/completedへの遷移を
+    // 待たない（リモートアクター解決に時間がかかっても転入完了自体をブロックしないため）。
+    if let Err(e) = ctx
+        .queue
+        .enqueue(
+            crate::traits::Job::MigrationImportFollows { request_id },
+            crate::queue::worker::priority::LOW,
+        )
+        .await
+    {
+        tracing::error!(
+            "[MigrationImportProcess] MigrationImportFollows enqueue失敗 (request_id={}): {}",
+            request_id,
+            e
+        );
+    }
     tracing::info!(
         "[MigrationImportProcess] request_id={} データ取り込み完了",
         request_id
@@ -651,4 +668,143 @@ pub async fn handle_deactivate_source(request_id: i64, ctx: Arc<JobContext>) -> 
         request_id
     );
     Ok(())
+}
+
+/// `Job::MigrationImportFollows` — 自己再enqueue型。取り込み済み`app.bsky.graph.follow`
+/// レコード（`at_migration_records`、`imported_at`設定済み）を1件ずつ`follows`テーブルへ
+/// 反映する（リモートアクター解決込み）。`at_migration_requests.status`とは独立して動作し、
+/// `deactivating_source`/`completed`への遷移を待たない結果整合処理（マイケルの方針）。
+/// レート制限は適用しない（新規フォローではなく既存関係の復元のため）。
+///
+/// advisory lockのキーは`-request_id`（負数）を使う。`handle_import_process`等の
+/// 他の転入ジョブ群は同一`request_id`（正数）をキーに使っており、このジョブは
+/// `MigrationImportProcess`のstep③からそれらと同時に起動されるため、同じキーだと
+/// 片方が`try_acquire`に失敗して黙って終了してしまう（advisory lockはジョブ種別を
+/// 区別しないグローバルなキー空間のため）。
+pub async fn handle_import_follows(request_id: i64, ctx: Arc<JobContext>) -> Result<(), JobError> {
+    let Some(pool) = ctx.db_pool.as_ref() else {
+        return Err(JobError::Permanent(
+            "[MigrationImportFollows] DB pool 未設定".to_string(),
+        ));
+    };
+
+    let Some(lock_conn) = crate::advisory_lock::try_acquire(pool, -request_id)
+        .await
+        .map_err(JobError::Transient)?
+    else {
+        tracing::info!(
+            "[MigrationImportFollows] request_id={} は既に別のジョブが処理中のためスキップ",
+            request_id
+        );
+        return Ok(());
+    };
+
+    let result = process_import_follows(request_id, pool, &ctx).await;
+
+    crate::advisory_lock::release(lock_conn, -request_id).await;
+
+    match result? {
+        ImportNextAction::Continue => {
+            if let Err(e) = ctx
+                .queue
+                .enqueue(
+                    crate::traits::Job::MigrationImportFollows { request_id },
+                    crate::queue::worker::priority::LOW,
+                )
+                .await
+            {
+                return Err(JobError::Transient(format!(
+                    "[MigrationImportFollows] 次回enqueue失敗: {e}"
+                )));
+            }
+            Ok(())
+        }
+        ImportNextAction::Stop => Ok(()),
+    }
+}
+
+async fn process_import_follows(
+    request_id: i64,
+    pool: &PgPool,
+    ctx: &JobContext,
+) -> Result<ImportNextAction, JobError> {
+    let repo = PgAtMigrationRepository::new(pool.clone());
+    let Some(req) = repo
+        .get(request_id)
+        .await
+        .map_err(|e| JobError::Transient(format!("[MigrationImportFollows] リクエスト取得失敗: {e}")))?
+    else {
+        tracing::warn!(
+            "[MigrationImportFollows] request_id={} が見つかりません（終了）",
+            request_id
+        );
+        return Ok(ImportNextAction::Stop);
+    };
+    let Some(actor_id) = req.actor_id else {
+        // まだactor_id未確定（submitting_plc未到達）ならこのジョブが起動されることは
+        // 無いはずだが、念のため。
+        return Ok(ImportNextAction::Stop);
+    };
+
+    let follow_exec = ctx.follow_exec.as_ref().ok_or_else(|| {
+        JobError::Transient("[MigrationImportFollows] FollowExecConfig 未設定".to_string())
+    })?;
+
+    let Some((id, rkey, bytes)) = repo
+        .claim_next_follow_record(request_id)
+        .await
+        .map_err(|e| JobError::Transient(format!("[MigrationImportFollows] レコード取得失敗: {e}")))?
+    else {
+        tracing::info!(
+            "[MigrationImportFollows] request_id={} フォロー関係復元完了",
+            request_id
+        );
+        return Ok(ImportNextAction::Stop);
+    };
+
+    let now = chrono::Utc::now();
+    let value = crate::atp::decode_dagcbor_to_json(&bytes).map_err(|e| {
+        JobError::Permanent(format!(
+            "[MigrationImportFollows] レコードのCBORデコード失敗 (id={id}): {e}"
+        ))
+    })?;
+    let Some(subject_did) = value.get("subject").and_then(|v| v.as_str()) else {
+        tracing::warn!(
+            "[MigrationImportFollows] subjectが無いためスキップ (rkey={})",
+            rkey
+        );
+        repo.mark_follow_materialized(id, now).await.map_err(|e| {
+            JobError::Transient(format!("[MigrationImportFollows] 復元済みマーク失敗: {e}"))
+        })?;
+        return Ok(ImportNextAction::Continue);
+    };
+
+    match crate::follow_exec::link_bsky_follow_with_existing_rkey(
+        subject_did,
+        actor_id,
+        &rkey,
+        pool,
+        &ctx.ap_client,
+        &ctx.queue,
+        follow_exec,
+    )
+    .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // 個々のフォロー対象の解決失敗（相手アカウント削除済み・ブロック関係等）は
+            // 全体を止めず、このレコードだけスキップして続行する。
+            tracing::warn!(
+                "[MigrationImportFollows] フォロー復元失敗 (rkey={}, subject={}): {}",
+                rkey,
+                subject_did,
+                e
+            );
+        }
+    }
+
+    repo.mark_follow_materialized(id, now).await.map_err(|e| {
+        JobError::Transient(format!("[MigrationImportFollows] 復元済みマーク失敗: {e}"))
+    })?;
+    Ok(ImportNextAction::Continue)
 }

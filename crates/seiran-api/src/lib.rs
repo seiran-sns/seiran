@@ -326,6 +326,26 @@ impl AppState {
         }
     }
 
+    /// 既存DID転入フロー: フォロー関係の復元（`follows`テーブルへの反映、自己再enqueue型）を積む。
+    /// `at_migration_requests.status`とは独立した結果整合処理のため、起動時リカバリも
+    /// ステータス起点ではなく`list_request_ids_with_pending_follow_materialization`で判定する。
+    pub async fn enqueue_migration_import_follows(&self, request_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::MigrationImportFollows { request_id },
+                job_priority::LOW,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] MigrationImportFollows enqueue 失敗 (request_id={}): {}",
+                request_id,
+                e
+            );
+        }
+    }
+
     /// リスト機能（#63）: list-relay 仮想アクターの代理フォロー/アンフォローを積む。
     /// 呼び出し元（`handlers::lists`）が参照カウントの0↔1遷移を判定した上で呼ぶ。
     pub async fn enqueue_proxy_follow_sync(&self, target_actor_id: i64, want_follow: bool) {
@@ -1668,6 +1688,24 @@ async fn resume_running_migrations(state: &AppState) {
                 }
                 _ => unreachable!(),
             }
+        }
+    }
+
+    // フォロー関係の復元（`Job::MigrationImportFollows`）は`status`とは独立した
+    // 結果整合処理のため、上のstatus起点ループとは別に判定する。
+    match repo.list_request_ids_with_pending_follow_materialization().await {
+        Ok(request_ids) if !request_ids.is_empty() => {
+            tracing::info!(
+                "[startup] フォロー関係復元待ちの既存DID転入リクエスト {} 件を再開します",
+                request_ids.len()
+            );
+            for request_id in request_ids {
+                state.enqueue_migration_import_follows(request_id).await;
+            }
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("[startup] フォロー関係復元待ちリクエスト取得失敗: {}", e);
         }
     }
 }
