@@ -4,6 +4,11 @@
 //! ローカルBskyリンク済みユーザーごとに `listConvos`/`getMessages` を定期ポーリングして
 //! 新着メッセージを `posts`（visibility=direct）として取り込む。
 //! 認証方式は `docs/skill_atp_rust_programming.md` §17 参照（自己署名サービス認証JWT）。
+//!
+//! 会話ごとの初回同期（`bsky_convo_links`未登録＝`last_synced_message_id`未設定）は
+//! `getMessages`をcursorページングして遡れるだけ遡る（既存DID転入で持ち込んだ会話のように、
+//! seiranにとって初見だが実際は長い履歴を持つケースに対応するため）。通常のポーリングは
+//! 最新1ページのみで新着を拾えば十分なためページングしない。
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -20,6 +25,11 @@ use crate::firehose::resolve_or_upsert_bsky_actor;
 const CHAT_SERVICE_HOST: &str = "https://api.bsky.chat";
 const CHAT_SERVICE_AUD: &str = "did:web:api.bsky.chat";
 const POLL_INTERVAL: Duration = Duration::from_secs(60);
+/// 初回同期（ページング遡及）1会話あたりの最大取得ページ数。`limit=100`と合わせて
+/// 最大2000件相当。異常に長い会話やAPI応答の不具合で無限ループしないための安全弁。
+const MAX_INITIAL_SYNC_PAGES: u32 = 20;
+/// 初回同期1会話あたりの最大取得メッセージ件数（安全弁、`MAX_INITIAL_SYNC_PAGES`と併用）。
+const MAX_INITIAL_SYNC_MESSAGES: usize = 2000;
 
 /// DM受信ポーリングを常駐実行する。
 pub async fn run(
@@ -163,40 +173,74 @@ async fn sync_convo(
             .flatten();
     }
 
-    let jwt = sign_service_auth_jwt(
-        local_pem,
-        local_did,
-        CHAT_SERVICE_AUD,
-        "chat.bsky.convo.getMessages",
-    )
-    .map_err(|e| e.to_string())?;
-    let resp = http
-        .get(format!(
-            "{}/xrpc/chat.bsky.convo.getMessages?convoId={}",
-            CHAT_SERVICE_HOST, convo_id
-        ))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("getMessages失敗 status={}", resp.status()));
-    }
-    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    let messages = body
-        .get("messages")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    // getMessagesは新しい順で返る。前回同期済みのメッセージIDに到達するまでを「新着」として集める。
+    // この会話を一度も同期したことが無い（last_synced_message_id未設定）場合のみ、
+    // 転入で持ち込んだ会話のような「seiranにとって初見だが実際は長い履歴を持つ」
+    // ケースに対応するため、cursorページングで遡れるだけ遡る（既存DID転入#account_migration
+    // で新たに顕在化した要件）。通常のポーリング（既に同期済みの会話）は従来通り
+    // 最新1ページのみを見れば新着が拾えるため、ページングしない。
+    let is_initial_sync = last_synced.is_none();
     let mut new_messages: Vec<serde_json::Value> = Vec::new();
-    for m in &messages {
-        let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        if Some(id.to_string()) == last_synced {
+    let mut cursor: Option<String> = None;
+    let mut fetched_pages = 0u32;
+    loop {
+        let jwt = sign_service_auth_jwt(
+            local_pem,
+            local_did,
+            CHAT_SERVICE_AUD,
+            "chat.bsky.convo.getMessages",
+        )
+        .map_err(|e| e.to_string())?;
+        let mut url = format!(
+            "{}/xrpc/chat.bsky.convo.getMessages?convoId={}&limit=100",
+            CHAT_SERVICE_HOST, convo_id
+        );
+        if let Some(c) = &cursor {
+            url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
+        }
+        let resp = http
+            .get(&url)
+            .bearer_auth(&jwt)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("getMessages失敗 status={}", resp.status()));
+        }
+        let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        let messages = body
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        fetched_pages += 1;
+
+        // getMessagesは新しい順で返る。前回同期済みのメッセージIDに到達したら
+        // （＝そこから先は既に取り込み済み）そこで打ち切る。
+        let mut reached_last_synced = false;
+        for m in &messages {
+            let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if Some(id.to_string()) == last_synced {
+                reached_last_synced = true;
+                break;
+            }
+            new_messages.push(m.clone());
+        }
+
+        let next_cursor = body
+            .get("cursor")
+            .and_then(|v| v.as_str())
+            .filter(|c| !c.is_empty())
+            .map(|s| s.to_string());
+        let should_continue = is_initial_sync
+            && !reached_last_synced
+            && next_cursor.is_some()
+            && !messages.is_empty()
+            && fetched_pages < MAX_INITIAL_SYNC_PAGES
+            && new_messages.len() < MAX_INITIAL_SYNC_MESSAGES;
+        if !should_continue {
             break;
         }
-        new_messages.push(m.clone());
+        cursor = next_cursor;
     }
     if new_messages.is_empty() {
         return Ok(());
