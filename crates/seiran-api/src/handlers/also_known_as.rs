@@ -42,13 +42,19 @@ pub struct AlsoKnownAsItem {
 
 impl From<AlsoKnownAsRow> for AlsoKnownAsItem {
     fn from(r: AlsoKnownAsRow) -> Self {
+        let avatar_url = seiran_common::avatar::resolve_avatar_url(
+            r.avatar_url,
+            &r.actor_type,
+            &r.domain,
+            r.target_actor_id,
+        );
         Self {
             actor_id: r.target_actor_id.to_string(),
             username: r.username,
             domain: r.domain,
             display_name: r.display_name,
             actor_type: r.actor_type,
-            avatar_url: r.avatar_url,
+            avatar_url,
             verified: r.verified,
             last_checked_at: r.last_checked_at.map(|d| d.to_rfc3339()),
         }

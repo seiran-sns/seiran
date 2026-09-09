@@ -83,13 +83,19 @@ pub struct ListMemberResponse {
 
 impl From<ListMemberRow> for ListMemberResponse {
     fn from(row: ListMemberRow) -> Self {
+        let avatar_url = seiran_common::avatar::resolve_avatar_url(
+            row.avatar_url,
+            &row.actor_type,
+            &row.domain,
+            row.actor_id,
+        );
         ListMemberResponse {
             actor_id: row.actor_id.to_string(),
             username: row.username,
             domain: row.domain,
             display_name: row.display_name,
             actor_type: row.actor_type,
-            avatar_url: row.avatar_url,
+            avatar_url,
             added_at: row.added_at,
         }
     }

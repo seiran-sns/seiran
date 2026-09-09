@@ -62,13 +62,21 @@ pub async fn reaction_actors(
         .unwrap_or_default();
 
     Json(serde_json::json!({
-        "actors": actors.into_iter().map(|a| serde_json::json!({
-            "id": a.id.to_string(),
-            "username": a.username,
-            "domain": a.domain,
-            "displayName": a.display_name,
-            "avatarUrl": a.avatar_url,
-        })).collect::<Vec<_>>(),
+        "actors": actors.into_iter().map(|a| {
+            let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                a.avatar_url,
+                &a.actor_type,
+                &a.domain,
+                a.id,
+            );
+            serde_json::json!({
+                "id": a.id.to_string(),
+                "username": a.username,
+                "domain": a.domain,
+                "displayName": a.display_name,
+                "avatarUrl": avatar_url,
+            })
+        }).collect::<Vec<_>>(),
     }))
     .into_response()
 }
@@ -98,24 +106,32 @@ pub async fn note_reposts(
 
     let reposts = entries
         .into_iter()
-        .map(|e| dto::RepostEntryResponse {
-            id: e.id.to_string(),
-            user: dto::NoteUserInfo {
-                id: e.actor_id.to_string(),
-                username: e.username,
-                domain: Some(e.domain),
-                display_name: e.display_name,
-                actor_type: e.actor_type,
-                avatar_url: e.avatar_url,
-                instance: None,
-                follow_status: None,
-                is_muted: None,
-                is_blocking: None,
-                is_blocked_by: None,
-                is_repost_muted: None,
-            },
-            created_at: e.created_at.to_rfc3339(),
-            deleted: e.deleted_at.is_some(),
+        .map(|e| {
+            let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                e.avatar_url,
+                &e.actor_type,
+                &e.domain,
+                e.actor_id,
+            );
+            dto::RepostEntryResponse {
+                id: e.id.to_string(),
+                user: dto::NoteUserInfo {
+                    id: e.actor_id.to_string(),
+                    username: e.username,
+                    domain: Some(e.domain),
+                    display_name: e.display_name,
+                    actor_type: e.actor_type,
+                    avatar_url,
+                    instance: None,
+                    follow_status: None,
+                    is_muted: None,
+                    is_blocking: None,
+                    is_blocked_by: None,
+                    is_repost_muted: None,
+                },
+                created_at: e.created_at.to_rfc3339(),
+                deleted: e.deleted_at.is_some(),
+            }
         })
         .collect();
 

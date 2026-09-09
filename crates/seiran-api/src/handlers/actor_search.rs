@@ -81,6 +81,12 @@ pub async fn search_actors(
                     "bsky" => format!("@{}", username), // ハンドル（domainは空文字のため username がハンドル本体）
                     _ => format!("@{}@{}", username, domain),
                 };
+                let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                    avatar_url,
+                    &actor_type,
+                    &domain,
+                    id,
+                );
                 serde_json::json!({
                     "actor_id": id.to_string(),
                     "username": username,
@@ -155,6 +161,12 @@ pub async fn suggest_actors(
         .map(
             |(id, username, domain, display_name, actor_type, avatar_url)| {
                 let target = suggestion_target(&actor_type, &username, &domain, &query_lower);
+                let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                    avatar_url,
+                    &actor_type,
+                    &domain,
+                    id,
+                );
                 serde_json::json!({
                     "actor_id": id.to_string(),
                     "username": username,

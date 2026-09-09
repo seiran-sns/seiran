@@ -118,13 +118,6 @@
   gap: 6px;
 }
 
-.actorName {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.78rem;
-}
-
 .hint {
   margin: 6px 0 0;
   padding-top: 6px;

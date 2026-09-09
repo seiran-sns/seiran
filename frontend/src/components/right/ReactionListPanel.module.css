@@ -36,11 +36,3 @@
   align-items: center;
   gap: 8px;
 }
-
-.actorName {
-  font-size: 0.85rem;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}

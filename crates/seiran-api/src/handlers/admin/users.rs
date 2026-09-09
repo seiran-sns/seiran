@@ -32,6 +32,13 @@ pub struct AdminUserResponse {
 
 impl From<AdminUserRow> for AdminUserResponse {
     fn from(r: AdminUserRow) -> Self {
+        // JOIN元の `actors` は常に actor_type = 'local' のみ（クエリ側で絞り込み済み）。
+        let avatar_url = match (r.actor_id, r.domain.as_deref()) {
+            (Some(actor_id), Some(domain)) => {
+                seiran_common::avatar::resolve_avatar_url(r.avatar_url, "local", domain, actor_id)
+            }
+            _ => r.avatar_url,
+        };
         Self {
             id: r.id.to_string(),
             email: r.email,
@@ -39,7 +46,7 @@ impl From<AdminUserRow> for AdminUserResponse {
             suspended_at: r.suspended_at,
             username: r.username,
             display_name: r.display_name,
-            avatar_url: r.avatar_url,
+            avatar_url,
             totp_enabled: r.totp_enabled,
             passkey_count: r.passkey_count,
             emojis: r

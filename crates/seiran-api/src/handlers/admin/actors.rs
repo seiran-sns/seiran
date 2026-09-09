@@ -45,13 +45,15 @@ pub struct SuspendedActorResponse {
 
 impl From<SuspendedActorRow> for SuspendedActorResponse {
     fn from(r: SuspendedActorRow) -> Self {
+        let avatar_url =
+            seiran_common::avatar::resolve_avatar_url(r.avatar_url, &r.actor_type, &r.domain, r.id);
         Self {
             id: r.id.to_string(),
             username: r.username,
             domain: r.domain,
             actor_type: r.actor_type,
             display_name: r.display_name,
-            avatar_url: r.avatar_url,
+            avatar_url,
             suspended_at: r.suspended_at,
             user_id: r.user_id.map(|v| v.to_string()),
             email: r.email,

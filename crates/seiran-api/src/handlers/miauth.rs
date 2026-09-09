@@ -292,6 +292,9 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
     .flatten();
     let (created_at, display_name, avatar_url) =
         row.unwrap_or_else(|| (chrono::Utc::now(), None, None));
+    // miauth は常にローカルユーザーの認証情報を返す（session.user_id はローカル actor.id）。
+    let avatar_url =
+        seiran_common::avatar::resolve_avatar_url(avatar_url, "local", &state.local_domain, actor_id);
 
     let res = CheckResponse {
         ok: true,

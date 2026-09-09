@@ -12,6 +12,7 @@ pub struct FollowListRow {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    pub actor_type: String,
     pub avatar_url: Option<String>,
     /// Misskey互換API（`POST /api/users/following`・`followers`）の`createdAt`用。
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -473,6 +474,7 @@ impl FollowRepository for PgFollowRepository {
     ) -> Result<Vec<FollowListRow>, sqlx::Error> {
         sqlx::query_as::<_, FollowListRow>(
             "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
                     f.created_at
              FROM follows f
@@ -506,6 +508,7 @@ impl FollowRepository for PgFollowRepository {
     ) -> Result<Vec<FollowListRow>, sqlx::Error> {
         sqlx::query_as::<_, FollowListRow>(
             "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
                     f.created_at
              FROM follows f
@@ -600,6 +603,7 @@ impl FollowRepository for PgFollowRepository {
     ) -> Result<Vec<FollowListRow>, sqlx::Error> {
         sqlx::query_as::<_, FollowListRow>(
             "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
                     f.created_at
              FROM follows f

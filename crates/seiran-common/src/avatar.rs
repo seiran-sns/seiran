@@ -21,6 +21,22 @@ pub fn fallback_avatar_url(local_domain: &str, actor_id: i64) -> String {
     format!("https://{local_domain}/api/avatars/{actor_id}?v=5")
 }
 
+/// アクター一覧系APIでの avatar_url 解決の共通ロジック。
+///
+/// `avatar_url` が未設定のローカルアクター（`actor_type == "local"`）には決定論的な
+/// 自動生成アイコンURLを補う。リモートアクターは相手側にアバターが無いことをそのまま
+/// 伝える（補わない）。フロントの `Avatar` コンポーネントは `avatarUrl` が無い場合に
+/// 頭文字プレースホルダへフォールバックするため、ここでの補完漏れは「本来自動生成アイコンが
+/// 出るべきところが頭文字表示になる」不具合として現れる。
+pub fn resolve_avatar_url(
+    avatar_url: Option<String>,
+    actor_type: &str,
+    domain: &str,
+    actor_id: i64,
+) -> Option<String> {
+    avatar_url.or_else(|| (actor_type == "local").then(|| fallback_avatar_url(domain, actor_id)))
+}
+
 fn hsl_to_rgb(hue: u64, saturation: f32, lightness: f32) -> Rgb<u8> {
     let h = hue as f32 / 360.0;
     let a = saturation * lightness.min(1.0 - lightness);
@@ -297,6 +313,27 @@ mod tests {
             fallback_avatar_url("example.com", 42),
             "https://example.com/api/avatars/42?v=5"
         );
+    }
+
+    #[test]
+    fn resolve_keeps_existing_url() {
+        assert_eq!(
+            resolve_avatar_url(Some("https://cdn.example/a.png".to_string()), "local", "example.com", 42),
+            Some("https://cdn.example/a.png".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_fills_in_local_fallback() {
+        assert_eq!(
+            resolve_avatar_url(None, "local", "example.com", 42),
+            Some(fallback_avatar_url("example.com", 42))
+        );
+    }
+
+    #[test]
+    fn resolve_leaves_remote_missing_avatar_as_none() {
+        assert_eq!(resolve_avatar_url(None, "fedi", "remote.example", 42), None);
     }
 
     #[test]

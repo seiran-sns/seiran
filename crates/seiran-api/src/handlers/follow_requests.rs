@@ -26,13 +26,19 @@ pub struct FollowRequestItem {
 
 impl From<FollowListRow> for FollowRequestItem {
     fn from(r: FollowListRow) -> Self {
+        let avatar_url = seiran_common::avatar::resolve_avatar_url(
+            r.avatar_url,
+            &r.actor_type,
+            &r.domain,
+            r.actor_id,
+        );
         Self {
             follow_id: r.follow_id.to_string(),
             actor_id: r.actor_id.to_string(),
             username: r.username,
             domain: r.domain,
             display_name: r.display_name,
-            avatar_url: r.avatar_url,
+            avatar_url,
         }
     }
 }

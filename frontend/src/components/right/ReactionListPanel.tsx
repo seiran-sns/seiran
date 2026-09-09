@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, Note, ReactionActor } from "../../api/client";
 import { mediaUrl } from "../../utils/mediaProxy";
-import Avatar from "../note/Avatar";
+import UserItem from "../common/UserItem";
 import EmojiContextMenu from "../note/EmojiContextMenu";
 import { parseCustomEmojiShortcode } from "../../lib/customEmojis";
 import TwemojiEmoji from "../common/TwemojiEmoji";
@@ -81,8 +81,7 @@ export default function ReactionListPanel({ note }: ReactionListPanelProps) {
               <ul className={styles.actorList}>
                 {actors.map((a) => (
                   <li key={a.id} className={styles.actorRow}>
-                    <Avatar url={a.avatarUrl} name={a.displayName || a.username} size={24} />
-                    <span className={styles.actorName}>{a.displayName || a.username}</span>
+                    <UserItem avatarUrl={a.avatarUrl} username={a.username} displayName={a.displayName} avatarSize={24} />
                   </li>
                 ))}
               </ul>

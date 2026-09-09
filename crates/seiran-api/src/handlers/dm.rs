@@ -88,6 +88,12 @@ pub async fn sessions(
     let peer_map: HashMap<i64, DmPeerResponse> = peer_summaries
         .into_iter()
         .map(|p| {
+            let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                p.avatar_url,
+                &p.actor_type,
+                &p.domain,
+                p.id,
+            );
             (
                 p.id,
                 DmPeerResponse {
@@ -96,7 +102,7 @@ pub async fn sessions(
                     domain: p.domain,
                     display_name: p.display_name,
                     actor_type: p.actor_type,
-                    avatar_url: p.avatar_url,
+                    avatar_url,
                 },
             )
         })

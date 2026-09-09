@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import { api, ReactionActor, ReactionSummary } from "../../api/client";
 import { fetchCustomEmojiShortcodes, parseCustomEmojiShortcode } from "../../lib/customEmojis";
 import { mediaUrl } from "../../utils/mediaProxy";
-import Avatar from "./Avatar";
+
+import UserItem from "../common/UserItem";
 import EmojiContextMenu from "./EmojiContextMenu";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./ReactionChips.module.css";
@@ -158,8 +159,7 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
             <ul className={styles.actorList}>
               {actors.map((a) => (
                 <li key={a.id} className={styles.actorRow}>
-                  <Avatar url={a.avatarUrl} name={a.displayName || a.username} size={22} />
-                  <span className={styles.actorName}>{a.displayName || a.username}</span>
+                  <UserItem avatarUrl={a.avatarUrl} username={a.username} displayName={a.displayName} avatarSize={22} />
                 </li>
               ))}
             </ul>

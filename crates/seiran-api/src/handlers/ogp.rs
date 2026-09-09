@@ -235,7 +235,7 @@ pub async fn profile_ogp(Path(handle): Path<String>, State(state): State<AppStat
     };
 
     let row = sqlx::query(
-        "SELECT a.actor_type::text AS actor_type, a.display_name, a.bio, \
+        "SELECT a.id AS actor_id, a.actor_type::text AS actor_type, a.display_name, a.bio, \
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url \
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
@@ -249,10 +249,17 @@ pub async fn profile_ogp(Path(handle): Path<String>, State(state): State<AppStat
 
     let (is_local, display_name, bio, avatar_url) = match row {
         Ok(Some(r)) => {
+            let actor_id: i64 = r.try_get("actor_id").unwrap_or_default();
             let actor_type: String = r.try_get("actor_type").unwrap_or_default();
             let display_name: Option<String> = r.try_get("display_name").ok().flatten();
             let bio: Option<String> = r.try_get("bio").ok().flatten();
             let avatar_url: Option<String> = r.try_get("avatar_url").ok().flatten();
+            let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                avatar_url,
+                &actor_type,
+                &domain,
+                actor_id,
+            );
             (
                 actor_type == "local",
                 display_name.unwrap_or_else(|| username.clone()),

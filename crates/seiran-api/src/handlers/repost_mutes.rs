@@ -80,12 +80,20 @@ pub async fn list_repost_mutes(
     match state.repost_mutes.list_muted(user.actor_id).await {
         Ok(rows) => Json(
             rows.into_iter()
-                .map(|r| RepostMutedActorItem {
-                    actor_id: r.id.to_string(),
-                    username: r.username,
-                    domain: r.domain,
-                    display_name: r.display_name,
-                    avatar_url: r.avatar_url,
+                .map(|r| {
+                    let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                        r.avatar_url,
+                        &r.actor_type,
+                        &r.domain,
+                        r.id,
+                    );
+                    RepostMutedActorItem {
+                        actor_id: r.id.to_string(),
+                        username: r.username,
+                        domain: r.domain,
+                        display_name: r.display_name,
+                        avatar_url,
+                    }
                 })
                 .collect::<Vec<_>>(),
         )

@@ -436,9 +436,8 @@ pub fn to_note_response(
         p.actor_type
     };
     let is_local = actor_type == "local";
-    let avatar_url = p.avatar_url.or_else(|| {
-        is_local.then(|| seiran_common::avatar::fallback_avatar_url(&p.domain, p.actor_id))
-    });
+    let avatar_url =
+        seiran_common::avatar::resolve_avatar_url(p.avatar_url, &actor_type, &p.domain, p.actor_id);
 
     // ローカル投稿は deliver_fedi/deliver_bsky カラム（実際に配送対象とした値）を直接見る。
     // ap_object_id はローカルなら deliver_fedi に関わらず常に生成されるため、実体の有無を
@@ -559,12 +558,12 @@ pub fn to_reaction_event_response(r: ReactionFeedRow) -> ReactionEventResponse {
     } else {
         r.target_actor_type
     };
-    let is_local = target_actor_type == "local";
-    let target_avatar_url = r.target_avatar_url.or_else(|| {
-        is_local.then(|| {
-            seiran_common::avatar::fallback_avatar_url(&r.target_domain, r.target_actor_id)
-        })
-    });
+    let target_avatar_url = seiran_common::avatar::resolve_avatar_url(
+        r.target_avatar_url,
+        &target_actor_type,
+        &r.target_domain,
+        r.target_actor_id,
+    );
 
     ReactionEventResponse {
         id: r.id.to_string(),

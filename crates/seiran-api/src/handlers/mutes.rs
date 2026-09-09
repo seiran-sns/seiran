@@ -69,12 +69,20 @@ pub async fn list_mutes(user: AuthedUser, State(state): State<AppState>) -> impl
     match state.mutes.list_muted(user.actor_id).await {
         Ok(rows) => Json(
             rows.into_iter()
-                .map(|r| MutedActorItem {
-                    actor_id: r.id.to_string(),
-                    username: r.username,
-                    domain: r.domain,
-                    display_name: r.display_name,
-                    avatar_url: r.avatar_url,
+                .map(|r| {
+                    let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                        r.avatar_url,
+                        &r.actor_type,
+                        &r.domain,
+                        r.id,
+                    );
+                    MutedActorItem {
+                        actor_id: r.id.to_string(),
+                        username: r.username,
+                        domain: r.domain,
+                        display_name: r.display_name,
+                        avatar_url,
+                    }
                 })
                 .collect::<Vec<_>>(),
         )

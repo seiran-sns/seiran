@@ -19,6 +19,10 @@ pub struct AdminUserRow {
     pub role: String,
     /// 凍結日時（実体は対応するローカル `actors.suspended_at`）。
     pub suspended_at: Option<DateTime<Utc>>,
+    /// `actors.id`。`actors` へのLEFT JOINが不一致の場合のみ`None`（アバター未設定時の
+    /// フォールバックURL組み立てに使う）。
+    pub actor_id: Option<i64>,
+    pub domain: Option<String>,
     pub username: Option<String>,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
@@ -281,8 +285,8 @@ impl UserRepository for PgUserRepository {
             .map(|s| format!("%{}%", escape_like(s)));
 
         sqlx::query_as::<_, AdminUserRow>(
-            "SELECT u.id, u.email, u.role::text AS role, a.suspended_at, a.username,
-                    a.display_name,
+            "SELECT u.id, u.email, u.role::text AS role, a.suspended_at, a.id AS actor_id, a.domain,
+                    a.username, a.display_name,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url)
                         AS avatar_url,
                     EXISTS (

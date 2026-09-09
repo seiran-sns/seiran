@@ -188,13 +188,19 @@ pub struct FollowListItem {
 
 impl From<seiran_common::repository::FollowListRow> for FollowListItem {
     fn from(r: seiran_common::repository::FollowListRow) -> Self {
+        let avatar_url = seiran_common::avatar::resolve_avatar_url(
+            r.avatar_url,
+            &r.actor_type,
+            &r.domain,
+            r.actor_id,
+        );
         Self {
             follow_id: r.follow_id.to_string(),
             actor_id: r.actor_id.to_string(),
             username: r.username,
             domain: r.domain,
             display_name: r.display_name,
-            avatar_url: r.avatar_url,
+            avatar_url,
         }
     }
 }
@@ -885,16 +891,12 @@ async fn build_profile_response_inner(
     enqueue_stale_poll_fetches(state, &pinned_posts).await;
 
     // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
-    let avatar_url: Option<String> = state
-        .actors
-        .find_avatar_url(actor_id)
-        .await
-        .ok()
-        .flatten()
-        .or_else(|| {
-            (actor.actor_type == "local")
-                .then(|| seiran_common::avatar::fallback_avatar_url(&state.local_domain, actor_id))
-        });
+    let avatar_url: Option<String> = seiran_common::avatar::resolve_avatar_url(
+        state.actors.find_avatar_url(actor_id).await.ok().flatten(),
+        &actor.actor_type,
+        &actor.domain,
+        actor_id,
+    );
 
     // 本尊（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
     // その本尊アクターのハンドルとプロトコルをフロントの「本尊ワープ」導線に渡す。
