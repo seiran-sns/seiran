@@ -215,6 +215,7 @@
 /* ── 右ペイン（幅固定：中〜大 / 500px）───────────────────────── */
 .right {
   flex: 0 0 500px;
+  min-width: 0;
   height: 100vh;
   position: sticky;
   top: 0;

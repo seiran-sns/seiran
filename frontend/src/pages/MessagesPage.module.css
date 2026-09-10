@@ -66,6 +66,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .unreadDot {
@@ -91,6 +92,7 @@
   align-items: flex-end;
   gap: 8px;
   max-width: 80%;
+  min-width: 0;
 }
 
 .messageRowMine {
@@ -105,6 +107,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .messageBubbleMine {
@@ -115,6 +118,7 @@
 .messageText {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   font-size: 0.92rem;
 }
