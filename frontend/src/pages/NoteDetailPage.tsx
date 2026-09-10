@@ -406,6 +406,10 @@ export default function NoteDetailPage() {
           message={t("common:remoteBanner.bridgePost")}
           url={`/notes/${note.bridgeOriginalPostId}`}
           linkLabel={t("common:remoteBanner.viewOriginal")}
+          // 元ポストのプロトコルは、このブリッジポスト自身の著者（brid.gyの仮想アクター、
+          // 常にfedi/bskyのいずれか）の逆側になる（bsky.brid.gy=fedi型アクターなら元はbsky、
+          // *.ap.brid.gy=bsky型アクターなら元はfedi）。
+          protocol={note.user.actorType === "bsky" ? "fedi" : "bsky"}
           internal
         />
       )}

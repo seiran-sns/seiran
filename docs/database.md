@@ -115,7 +115,7 @@ JetStreamは「ローカルユーザーのフォロー中/リストメンバー�
 - `seiran_pair_actor_id`: 旧構想（2行リンク方式）用の自己参照。**現状これを書き込む処理は実装されておらず常にNULL**。#236の相互申告マージ方式（1行に統合、下記`claimed_ap_uri`/`claimed_at_did`参照）では使わないため、実装完了後にカラム削除を検討している（`docs/roadmap.md`参照）。
 - `claimed_ap_uri` / `claimed_at_did`: リモートseiranアクターの相互申告マージ（#236）用。`bsky`型の行が自己申告する「自分のAP Actor URIはこれだ」（`claimed_ap_uri`）、`fedi`型の行が自己申告する「自分のAT DIDはこれだ」（`claimed_at_did`）という、まだ相互一致で確認できていない未確認の値を保持する。AP側の自己申告はActor文書の拡張フィールド`seiranAtDid`、ATP側は独自コレクション`org.seiran.actor.declaration`（rkey固定`self`、`chat.bsky.actor.declaration`と同型）の`apActorUri`フィールドで表明する。相手側の実体（真正なap_uri/at_did）が既存行の自己申告と相互に一致した場合にのみ結婚（`actor_type='remote_seiran'`へ昇格、両カラムに実IDをセット）が成立し、成立した側の`claimed_*`はNULLに戻る。新規発見時のみ結婚ロジックを起動する（既存行の場合は情報更新のみ）ため、2行が既に存在する状態からの統合は扱わない。相互に申告し合っている2行の共存は、複合UNIQUE制約`actors_mutual_claim_key`（`(COALESCE(ap_uri, claimed_ap_uri), COALESCE(at_did, claimed_at_did))`、`actor_type IN ('fedi','bsky','remote_seiran')`の部分インデックス）でDB側にも構造的に禁止させている。詳細は`docs/protocols.md` 11節、実装は`seiran_common::seiran_actor_merge`・`seiran_common::unique_retry`参照。
 - `at_handle`: AT Protocolハンドル（`user.pds-domain`形式）。`username`（`remote_seiran`ではFedi側由来のまま固定される、上記参照）とは独立に、Bsky側の発見・再訪問のたびに常に最新値へ上書きする（`bsky`単独行は`username`列自体がハンドルと同値のためほぼ冗長だが、`remote_seiran`ではプロフィール画面のBsky ID表示に使う唯一の情報源）。書き込みは`ActorRepository::upsert_remote_bsky`・`seiran_common::seiran_actor_merge::discover_bsky_actor`に集約。
-- `bridge_real_actor_id`: ブリッジ経由の影武者アクターから本尊アクターへのリンク。
+- `bridge_real_actor_id`: ブリッジユーザーから実ユーザーへのリンク。
 
 ローカルアクターは `avatar_media_id`/`banner_media_id`（自前 `media_files` 参照）、リモートアクターは `avatar_url`/`banner_url`（URL直持ち）という排他的な使い分けをしている。
 

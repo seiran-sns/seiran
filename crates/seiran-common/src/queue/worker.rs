@@ -540,6 +540,11 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         } => jobs::fetch_bridge_original::handle(bridge_post_id, target_uri, protocol, ctx)
             .await
             .map_err(JobError::from),
+        Job::BridgeUserLinkResolve { actor_id } => {
+            jobs::bridge_user_link_resolve::handle(actor_id, ctx)
+                .await
+                .map_err(JobError::from)
+        }
     }
 }
 
@@ -576,6 +581,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::MigrationDeactivateSource { .. } => "MigrationDeactivateSource",
         Job::MigrationImportFollows { .. } => "MigrationImportFollows",
         Job::FetchBridgeOriginal { .. } => "FetchBridgeOriginal",
+        Job::BridgeUserLinkResolve { .. } => "BridgeUserLinkResolve",
     }
 }
 
@@ -770,6 +776,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             // OgpFetchと同様の軽量ベストエフォート取得。失敗しても、元ポストが後で通常の
             // 受信経路で届けば`bridge_post::link_pending_bridges_for_new_original`が
             // 受動的にリンクするため実害は小さい。
+            max_attempts: 3,
+            base_delay_ms: 2000,
+            max_delay_ms: 30_000,
+        },
+        Job::BridgeUserLinkResolve { .. } => RetryConfig {
+            // ActorMetadataResolveと同様の軽量ベストエフォート取得。失敗してもプロフィール
+            // 表示のたびに再enqueueされる（クールダウン付き）ため、恒久的に取りこぼすことはない。
             max_attempts: 3,
             base_delay_ms: 2000,
             max_delay_ms: 30_000,

@@ -1,11 +1,6 @@
 {
   "profilePage": {
     "title": "Profile",
-    "warpBanner": {
-      "prefix": "This account is a ",
-      "shadowLabel": "proxy",
-      "suffix": " account. The real account ({{handle}}) is here →"
-    },
     "pairedBadge": "Soul-bound",
     "pairedBadgeTitle": "Linked with a remote seiran user via soul-binding",
     "suspendedBadge": "Suspended",

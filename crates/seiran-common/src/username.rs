@@ -60,6 +60,21 @@ pub fn is_reserved_username(s: &str) -> bool {
 /// AppViewへ問い合わせる前にここでローカル判定できる。判定を怠ると、AppView解決結果を
 /// `at_did` の `ON CONFLICT` でupsertする際にローカルアクターの `username` 列を
 /// このハンドル表記自体で上書きしてしまう事故につながる（過去に実際発生）。
+/// アクター行の表示・ルーティング用ハンドル文字列（`@user`/`@user@domain`）を組み立てる。
+/// ローカルアクター、またはBskyアクター（`actors.domain`が常に空文字の慣習）は`@user`のみ、
+/// それ以外（Fedi/リモートseiran）は`@user@domain`。この判定を各所で個別に再実装すると
+/// domain空文字ケースの見落とし（`@user@`という壊れたハンドルの生成）が再発しやすいため
+/// 共通化した（実例: `open_target`/`ogp`/`users`の3箇所で同じ見落としが起きていた）。
+/// `actor_type`は`"local"`かどうかだけを見る（`Actor::actor_type`/`TimelinePost::actor_type`と
+/// 同じ、enumをテキストキャストした値をそのまま渡せる）。
+pub fn actor_handle(username: &str, domain: &str, actor_type: &str) -> String {
+    if actor_type == "local" || domain.is_empty() {
+        format!("@{}", username)
+    } else {
+        format!("@{}@{}", username, domain)
+    }
+}
+
 pub fn strip_local_domain_suffix<'a>(s: &'a str, local_domain: &str) -> Option<&'a str> {
     let suffix_len = local_domain.len();
     if s.len() <= suffix_len + 1 || !s.is_char_boundary(s.len() - suffix_len) {
@@ -75,6 +90,25 @@ pub fn strip_local_domain_suffix<'a>(s: &'a str, local_domain: &str) -> Option<&
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actor_handle_local_omits_domain() {
+        assert_eq!(actor_handle("alice", "seiran-beta.org", "local"), "@alice");
+    }
+
+    #[test]
+    fn actor_handle_bsky_empty_domain_omits_domain() {
+        // Bskyアクターは`domain`列が常に空文字（実データで確認済み）。
+        assert_eq!(actor_handle("yuba.bsky.social", "", "bsky"), "@yuba.bsky.social");
+    }
+
+    #[test]
+    fn actor_handle_fedi_includes_domain() {
+        assert_eq!(
+            actor_handle("alice", "mastodon.example", "fedi"),
+            "@alice@mastodon.example"
+        );
+    }
 
     #[test]
     fn accepts_alnum_and_hyphen() {

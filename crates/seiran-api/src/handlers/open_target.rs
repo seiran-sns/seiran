@@ -88,11 +88,11 @@ async fn open_actor(state: &AppState, target: &str) -> Result<OpenTargetResponse
     let actor = resolve_and_upsert_target(state, target)
         .await
         .map_err(|_| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let acct = if actor.actor_type == "local" {
-        format!("@{}", actor.username)
-    } else {
-        format!("@{}@{}", actor.username, actor.domain)
-    };
+    let acct = seiran_common::username::actor_handle(
+        &actor.username,
+        &actor.domain,
+        &actor.actor_type,
+    );
     Ok(OpenTargetResponse {
         path: format!("/{}", acct),
         kind: "actor",

@@ -9,12 +9,12 @@ interface RemoteBannerProps {
   message: string;
   /** 元サーバー（Fedi）/ bsky.app（Bsky）上の URL。`internal`指定時はseiran内部の相対パス。 */
   url: string;
-  /** アイコンの出し分け（bsky以外はFediverseロゴ）。デフォルトはfedi。`internal`指定時は無視。 */
+  /** アイコンの出し分け（bsky以外はFediverseロゴ）。デフォルトはfedi。 */
   protocol?: "fedi" | "bsky";
   /** リンクのラベル文言。省略時は「リモートで表示」。 */
   linkLabel?: string;
-  /** `true`ならseiran内部の投稿詳細ページへのSPA内遷移として扱う（新規タブを開く外部リンク
-   * 用の「↗」サフィックス・アイコンを出さない、ブリッジポストの「元ポストを表示」用）。 */
+  /** `true`ならseiran内部のページへのSPA内遷移として扱う（新規タブを開く外部リンク用の
+   * 「↗」サフィックスを出さない、ブリッジポストの「元ポストを表示」等）。 */
   internal?: boolean;
 }
 
@@ -30,13 +30,11 @@ export default function RemoteBanner({
   const label = linkLabel ?? t("common:remoteBanner.viewRemote");
   return (
     <div className={styles.remoteBanner}>
-      {!internal && (
-        <img
-          src={protocol === "bsky" ? blueskyLogo : fediverseLogo}
-          alt=""
-          className={styles.icon}
-        />
-      )}
+      <img
+        src={protocol === "bsky" ? blueskyLogo : fediverseLogo}
+        alt=""
+        className={styles.icon}
+      />
       <span className={styles.message}>{message}</span>
       {internal ? (
         <Link className={styles.link} to={url}>

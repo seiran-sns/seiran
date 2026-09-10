@@ -30,6 +30,8 @@
     "user": "This is a remote user",
     "viewRemote": "View on remote server",
     "bridgePost": "This is a bridged post",
-    "viewOriginal": "View original post"
+    "viewOriginal": "View original post",
+    "bridgeUser": "This is a bridge user",
+    "viewRealUser": "View real account"
   }
 }

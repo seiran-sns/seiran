@@ -27,7 +27,6 @@ import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
 import { setRelationship } from "../stores/userRelationshipStore";
 import { mediaUrl } from "../utils/mediaProxy";
 import panel from "../components/common/Panel.module.css";
-import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import TwemojiText from "../components/common/TwemojiText";
 import blueskyLogo from "../assets/bluesky-logo.svg";
 import fediverseLogo from "../assets/fediverse-logo.svg";
@@ -243,7 +242,7 @@ export default function ProfilePage() {
   );
   const followStatus = menu.followStatus;
 
-  // フォロー時のインターセプト（Doc5 §3.2）: 影武者なら確認モーダルを割り込ませる。
+  // フォロー時のインターセプト（Doc5 §3.2）: ブリッジユーザーなら確認モーダルを割り込ませる。
   function handleFollowClick() {
     if (isBridge) {
       setBridgeModalOpen(true);
@@ -272,35 +271,23 @@ export default function ProfilePage() {
           protocol={profile.actor_type === "bsky" ? "bsky" : "fedi"}
         />
       )}
+      {/* 実ユーザーワープ（Doc5 §3.1）: ブリッジユーザーなら並べて表示する
+          （ブリッジポストの「元ポストを表示」ヘッダと同じ形式）。 */}
+      {profile && isBridge && (
+        <RemoteBanner
+          message={t("common:remoteBanner.bridgeUser")}
+          url={`/${profile.bridge_real_handle}`}
+          linkLabel={t("common:remoteBanner.viewRealUser")}
+          protocol={profile.bridge_protocol === "bsky" ? "bsky" : "fedi"}
+          internal
+        />
+      )}
 
       {loading && <p className={panel.message}>{t("common:loading")}</p>}
       {error && <p className={panel.message}>{error}</p>}
 
       {profile && (
         <div className={styles.card}>
-          {/* 本尊ワープ（Doc5 §3.1）: 影武者なら最も目立つ位置に強制表示 */}
-          {isBridge && (
-            <Link
-              to={`/${profile.bridge_real_handle}`}
-              className={styles.warpBanner}
-              onClick={closeBridgeModal}
-            >
-              {profile.bridge_protocol === "bsky" ? (
-                <TwemojiEmoji emoji="🦋" className={styles.warpIcon} />
-              ) : (
-                <img src={fediverseLogo} alt="" className={styles.warpIcon} />
-              )}
-              <span>
-                {t("profile:profilePage.warpBanner.prefix")}
-                <strong>
-                  {t("profile:profilePage.warpBanner.shadowLabel")}
-                </strong>
-                {t("profile:profilePage.warpBanner.suffix", {
-                  handle: profile.bridge_real_handle,
-                })}
-              </span>
-            </Link>
-          )}
 
           <div className={styles.avatarLarge}>
             {profile.avatar_url ? (

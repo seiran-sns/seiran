@@ -26,7 +26,7 @@ pub struct Actor {
     pub bio: Option<String>,
     /// リモート seiran の対の行（魂の結合済み判定に使用）。
     pub seiran_pair_actor_id: Option<i64>,
-    /// ブリッジ（影武者）時の「本尊」の行 ID。
+    /// ブリッジユーザーの実ユーザーの行 ID。
     pub bridge_real_actor_id: Option<i64>,
     /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信、AP `tag` 配列由来）。
     pub emoji_map: Option<serde_json::Value>,

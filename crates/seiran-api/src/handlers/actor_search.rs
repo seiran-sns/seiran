@@ -76,11 +76,7 @@ pub async fn search_actors(
                 // add_member/also-known-as にそのまま渡せるターゲット文字列を計算する。
                 // `resolve_and_upsert_target` は先頭の`@`を無条件で除去するため無くても
                 // 動作はするが、ハンドルの慣習的な表記（`@user`/`@user@domain`）に揃える。
-                let target = match actor_type.as_str() {
-                    "local" => format!("@{}", username),
-                    "bsky" => format!("@{}", username), // ハンドル（domainは空文字のため username がハンドル本体）
-                    _ => format!("@{}@{}", username, domain),
-                };
+                let target = seiran_common::username::actor_handle(&username, &domain, &actor_type);
                 let avatar_url = seiran_common::avatar::resolve_avatar_url(
                     avatar_url,
                     &actor_type,

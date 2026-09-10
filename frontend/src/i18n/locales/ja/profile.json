@@ -1,11 +1,6 @@
 {
   "profilePage": {
     "title": "プロフィール",
-    "warpBanner": {
-      "prefix": "このアカウントは",
-      "shadowLabel": "影武者",
-      "suffix": "です。本尊（{{handle}}）はこちら→"
-    },
     "pairedBadge": "魂の結合済み",
     "pairedBadgeTitle": "リモート seiran ユーザーと魂の結合済み",
     "suspendedBadge": "凍結中",
@@ -50,12 +45,12 @@
     },
     "alsoKnownAsVerifiedTitle": "相手側も相互に「別のアカウント」として指定しています（検証済み）",
     "bridgeModal": {
-      "title": "影武者アカウントのフォロー",
+      "title": "ブリッジユーザーのフォロー",
       "prefix": "このアカウントは、{{protocol}}のユーザーがブリッジ経由で投影されている",
-      "shadowLabel": "影武者",
-      "suffix": "です。seiran の機能をフルに活用するため、本尊（オリジナルアカウント）を直接フォローすることをおすすめします。",
-      "goToRealButton": "本尊のプロフィールへ移動",
-      "followAnywayButton": "そのまま影武者をフォロー"
+      "shadowLabel": "ブリッジユーザー",
+      "suffix": "です。seiran の機能をフルに活用するため、実ユーザー（オリジナルアカウント）を直接フォローすることをおすすめします。",
+      "goToRealButton": "実ユーザーのプロフィールへ移動",
+      "followAnywayButton": "そのままブリッジユーザーをフォロー"
     }
   },
   "profileEditPage": {

@@ -120,6 +120,7 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 | `RemoteActorResolve{uri}` | リモートfollowers/following一覧中、ローカルDB未登録のactor URIのプロフィールを解決し`actors`へupsert（フォロー関係は作らない、`docs/protocols.md` 2節） | 低 |
 | `RemoteInstanceInfoResolve{domain}` | リモートインスタンスのnodeinfoを取得し`remote_instance_meta`へキャッシュ（NoteCardリモートサーバー表示、`docs/database.md`参照）。notes API/Misskey互換APIが未キャッシュのドメインを見つけた際に積む | 低 |
 | `AlsoKnownAsVerify{owner_actor_id, target_actor_id}` | プロフィールの「別のアカウント」（alsoKnownAs、`docs/protocols.md` 2節）の相互検証結果を`actor_also_known_as`テーブルへキャッシュ更新する。「表示時再検証」パターン（下記）の実例 | 低 |
+| `BridgeUserLinkResolve{actor_id}` | brid.gyブリッジユーザー対応（`docs/protocols.md`参照）: プロフィール表示のたびに、`actors.bridge_real_actor_id`が未解決なブリッジユーザーに対して実ユーザーへのリンクを解決する。「表示時再検証」パターンだが、ブリッジ関係自体は不変のため一度解決すれば以後は再検証しない | 低 |
 | `RemoteAlsoKnownAsSync{owner_actor_id}` | リモートFediアクター自身のAP actor文書が公開する`alsoKnownAs`を`actor_also_known_as`へ同期し、取り込んだ各エントリに`AlsoKnownAsVerify`を積む（`docs/protocols.md` 2節） | 低 |
 | `BskyListMembershipResolve{list_uri}` | リモート（seiranユーザー所有でない）Bskyリストの全メンバーDIDを`app.bsky.graph.getList`から取得し`bsky_remote_list_membership_cache`へ24時間TTLで保存（threadgateの`#listRule`評価、`docs/protocols.md` 3節） | 低 |
 | `MigrationFetchRepo{request_id}` | 既存DID転入: PDS Aから`getRepo`(CAR)+`listBlobs`を取得し`at_migration_records`/`at_migration_blobs`へステージングする単発ジョブ（`docs/account_migration.md`） | 中 |

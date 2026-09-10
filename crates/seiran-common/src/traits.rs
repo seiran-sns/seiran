@@ -356,6 +356,15 @@ pub enum Job {
         target_uri: String,
         protocol: String,
     },
+
+    /// brid.gy(Bridgy Fed)ブリッジユーザー対応（`docs/protocols.md`参照）: プロフィール表示の
+    /// たびに、`actors.bridge_real_actor_id`が未解決なブリッジユーザーに対して積まれる
+    /// （「表示時再検証」パターン、ただし一度解決すれば恒久的なため以後は再検証しない）。
+    /// AP側ブリッジユーザー（`bsky.brid.gy`ドメイン）は`ap_uri`自体に実ユーザーのDIDが
+    /// 埋め込まれているためネットワーク取得不要、ATP側ブリッジユーザー（`*.ap.brid.gy`
+    /// ハンドル）はハンドルから復元したusername/domainをwebfingerで解決する。実ユーザーが
+    /// ローカルDB未登録の場合は能動的に取得・upsertする。
+    BridgeUserLinkResolve { actor_id: i64 },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。
@@ -497,6 +506,12 @@ mod tests {
                 url: "https://youtube.com/watch?v=x".into(),
             },
             Job::FollowImportProcess { request_id: 1 },
+            Job::FetchBridgeOriginal {
+                bridge_post_id: 1,
+                target_uri: "at://did:plc:test/app.bsky.feed.post/abc".into(),
+                protocol: "atp".into(),
+            },
+            Job::BridgeUserLinkResolve { actor_id: 1 },
         ];
         for job in jobs {
             let json = serde_json::to_string(&job).expect("serialize");

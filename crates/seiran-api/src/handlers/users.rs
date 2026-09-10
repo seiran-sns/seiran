@@ -360,10 +360,10 @@ pub struct ProfileResponse {
     /// Fedi アクターの AP Actor `attachment`（`type: "PropertyValue"`）から取り込んだ値。
     pub profile_fields: Vec<ProfileField>,
     // 7.3 拡張メタデータ（ブリッジ介入・魂の結合判定）
-    /// このアクターがブリッジ（影武者）の場合、本尊アクターのハンドル（`user@domain`）。
+    /// このアクターがブリッジユーザーの場合、実ユーザーアクターのハンドル（`user@domain`）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bridge_real_handle: Option<String>,
-    /// 本尊が属するプロトコル（`fedi` / `bsky` など）。フロントの導線アイコンに使用。
+    /// 実ユーザーが属するプロトコル（`fedi` / `bsky` など）。フロントの導線アイコンに使用。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bridge_protocol: Option<String>,
     /// リモート seiran ユーザーと魂の結合（ペアリング）済みか。
@@ -797,6 +797,14 @@ async fn build_profile_response_inner(
         }
     }
 
+    // ブリッジユーザー検出（brid.gy等、`docs/protocols.md`参照）: 実ユーザーへの
+    // `bridge_real_actor_id`が未解決なら「表示時再検証」パターンでジョブを積む。
+    if actor.bridge_real_actor_id.is_none()
+        && (actor.domain == "bsky.brid.gy" || actor.username.ends_with(".ap.brid.gy"))
+    {
+        state.enqueue_bridge_user_link_resolve(actor.id).await;
+    }
+
     // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
     // アクター情報・添付・リアクションを含む NoteResponse で返す（#43）。
     let mut post_rows = match state
@@ -898,16 +906,16 @@ async fn build_profile_response_inner(
         actor_id,
     );
 
-    // 本尊（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
-    // その本尊アクターのハンドルとプロトコルをフロントの「本尊ワープ」導線に渡す。
+    // 実ユーザー（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
+    // その実ユーザーアクターのハンドルとプロトコルをフロントの「実ユーザーワープ」導線に渡す。
     let (bridge_real_handle, bridge_protocol) = match actor.bridge_real_actor_id {
         Some(real_id) => match state.actors.find_by_id(real_id).await {
             Ok(Some(real)) => {
-                let handle = if real.actor_type == "local" {
-                    format!("@{}", real.username)
-                } else {
-                    format!("@{}@{}", real.username, real.domain)
-                };
+                let handle = seiran_common::username::actor_handle(
+                    &real.username,
+                    &real.domain,
+                    &real.actor_type,
+                );
                 let proto = if real.at_did.is_some() {
                     "bsky"
                 } else {

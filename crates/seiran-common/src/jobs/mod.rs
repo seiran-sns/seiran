@@ -15,6 +15,7 @@ pub mod atp_repository_publish;
 pub mod bsky_dm_send;
 pub mod bsky_list_membership_resolve;
 pub mod bsky_post_commit_deferred;
+pub mod bridge_user_link_resolve;
 pub mod bsky_video_poll;
 pub mod fetch_bridge_original;
 pub mod follow_import;

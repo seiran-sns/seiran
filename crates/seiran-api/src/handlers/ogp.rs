@@ -202,10 +202,11 @@ pub async fn note_ogp_html(post_id: i64, state: &AppState) -> Response {
         .display_name
         .clone()
         .unwrap_or_else(|| note.user.username.clone());
-    let handle = match &note.user.domain {
-        Some(domain) if !domain.is_empty() => format!("@{}@{}", note.user.username, domain),
-        _ => format!("@{}", note.user.username),
-    };
+    let handle = seiran_common::username::actor_handle(
+        &note.user.username,
+        note.user.domain.as_deref().unwrap_or(""),
+        &note.user.actor_type,
+    );
     let title = format!("{}（{}）の投稿", display_name, handle);
     let flattened = strip_link_markers(&note.text).replace('\n', " ");
     let description = truncate_graphemes(&flattened, DESCRIPTION_MAX_GRAPHEMES);
@@ -247,7 +248,7 @@ pub async fn profile_ogp(Path(handle): Path<String>, State(state): State<AppStat
     .fetch_optional(&state.db)
     .await;
 
-    let (is_local, display_name, bio, avatar_url) = match row {
+    let (actor_type, display_name, bio, avatar_url) = match row {
         Ok(Some(r)) => {
             let actor_id: i64 = r.try_get("actor_id").unwrap_or_default();
             let actor_type: String = r.try_get("actor_type").unwrap_or_default();
@@ -261,7 +262,7 @@ pub async fn profile_ogp(Path(handle): Path<String>, State(state): State<AppStat
                 actor_id,
             );
             (
-                actor_type == "local",
+                actor_type,
                 display_name.unwrap_or_else(|| username.clone()),
                 bio.unwrap_or_default(),
                 avatar_url,
@@ -274,11 +275,7 @@ pub async fn profile_ogp(Path(handle): Path<String>, State(state): State<AppStat
         }
     };
 
-    let acct = if is_local {
-        format!("@{}", username)
-    } else {
-        format!("@{}@{}", username, domain)
-    };
+    let acct = seiran_common::username::actor_handle(&username, &domain, &actor_type);
     let title = format!("{}（{}）", display_name, acct);
     let description = truncate_graphemes(&bio, DESCRIPTION_MAX_GRAPHEMES);
     let page_url = format!(

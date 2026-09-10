@@ -216,7 +216,7 @@
 
 - [x] **Misskeyストリーミングのチャンネル購読対応**（homeTimeline/localTimeline/hybridTimeline/globalTimeline/userList/hashtag）
 - [ ] **フロントエンドのMisskeyスキーマへの追従改修**、検証済み旧カスタムエンドポイントの整理
-- [ ] APIレスポンスの `bio` 末尾に本尊URLを自動挿入するフォールバック（ZonePane/Miria/Aria等の非Misskey互換画面向け）
+- [ ] APIレスポンスの `bio` 末尾に実ユーザーURLを自動挿入するフォールバック（ZonePane/Miria/Aria等の非Misskey互換画面向け）
 - [x] **`visibility` の値語彙をMisskey本家（`public`/`home`/`followers`/`specified`）にマッピング**。詳細: `docs/protocols.md` 7節
 
 ### テスト・QA
@@ -256,3 +256,4 @@
 - [x] **退会済みアクター（`withdrawn_at`）のチェック漏れ修正（#242）** — 退会処理は`actors.withdrawn_at`を設定するのみで、これを参照すべき箇所（ログイン・プロフィール表示・検索・フォロー一覧・WebFinger/ActivityPub Actor文書/Outbox等の連合向け公開エンドポイント）が実際にはチェックしておらず、退会後も本人が普通にログインでき、他者・連合先からは退会前と変わらず見え続ける状態だった。ログイン系（`find_login_by_email`/`find_login_by_username`、`extract_auth`）に`withdrawn_at`フィルタを追加。`ActorRepository::find_by_username_domain`は退会済みアクターを除外する版に変更し、AP受信ジョブ等の内部処理（退会済みでも解決できないと処理自体が失敗する経路）はあえて不自然な名前の`find_including_withdrawn_by_username_domain`（除外しない版）を明示的に使うよう分離した。共通のブロック/ミュート判定関数`actor_is_hidden_for_viewer`にも退会済み判定を追加。加えて、ブロック・ミュート・リポストミュートは退会と同時に関係そのものを解除する物理削除に加え、一覧クエリ自体にも`withdrawn_at IS NULL`を課した（修正前に退会し関係行が残っている既存データへのフェイルセーフ、「退会済みアクターは他者から見て存在しない」原則に統一）。一方、管理画面（`/admin`ユーザー管理）は一般ユーザー向け可視性ルールの対象外とし、退会済みユーザーも引き続き一覧表示した上で`AdminUserRow`/`AdminUserResponse`に`withdrawn_at`を追加し「退会済み」バッジを表示する。詳細: `docs/database.md`
 - [x] **既存Bluesky DID転入によるアカウント作成** — 新規DID発行ではなく、既存のBluesky/AT Protocolアカウント（DID・投稿・フォロー関係・blob）をそのままseiranへ転入させる登録経路。CARv1/MSTデコード、移行元PDSクライアント（SSRF対策込み）、`submitPlcOperation`成功を不可逆境界とする状態機械、データ取り込み（投稿・画像/動画添付・フォロー関係の復元）、Bsky DM（1:1）の初回同期cursorページング対応まで含む。詳細: `docs/account_migration.md`、`docs/architecture.md`、`docs/database.md`、`docs/protocols.md`
 - [x] **brid.gyブリッジポスト対応** — brid.gy(Bridgy Fed)がプロトコル間で自動生成したコピー投稿（ブリッジポスト）を、元ポストと1レコードに統合せず別行のまま`bridge_of_post_id`/`ap_bridge_post_id`/`atp_bridge_post_id`で相互リンクする。取り込み時に元ポストが未登録なら`Job::FetchBridgeOriginal`で能動的に取得し、任意の新規投稿確定時にも待機中ブリッジポストを索引で探して受動的にリンクする安全網を持つ。検索は未解決ブリッジポストを除外し解決済みなら元ポストへ置換、投稿詳細は「ブリッジポストです【元ポストを表示】」バナー、ブリッジポストへの返信・リアクションは確認ダイアログを挟む。リポスト・引用は対象がブリッジポストなら内部的に元ポストへ、対象が元ポスト（対向プロトコル側にブリッジポストを持つ）なら配送先識別子をブリッジポスト側へ差し替える（元ポストがseiranネイティブで両プロトコル実体を持つ場合は例外）。詳細: `docs/protocols.md` 5節、`docs/database.md`、`docs/architecture.md` 5節
+- [x] **brid.gyブリッジユーザー対応** — brid.gy(Bridgy Fed)がプロトコル間で自動投影したアクター（ブリッジユーザー）から実ユーザーへのリンク（`actors.bridge_real_actor_id`）を自動検出・解決する（導線自体はスキーマ・フロント共にday1から存在していたが、検出・書き込み処理が未実装だった）。AP側ブリッジユーザーは`ap_uri`埋め込みのDIDから、ATP側ブリッジユーザーはハンドルから復元したusername/domainのwebfinger解決から、それぞれ実ユーザーを特定し、ローカル未登録なら能動的に取得・upsertする。プロフィール表示のたびに未解決なブリッジユーザーへ`Job::BridgeUserLinkResolve`を積む「表示時再検証」パターン（ブリッジ関係は不変のため一度解決すれば以後は再検証しない）。詳細: `docs/protocols.md` 5節、`docs/architecture.md` 5節、`docs/ui_spec.md` 3節

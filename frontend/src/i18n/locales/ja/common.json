@@ -30,6 +30,8 @@
     "user": "リモートのユーザーです",
     "viewRemote": "リモートで表示",
     "bridgePost": "ブリッジポストです",
-    "viewOriginal": "元ポストを表示"
+    "viewOriginal": "元ポストを表示",
+    "bridgeUser": "ブリッジユーザーです",
+    "viewRealUser": "実ユーザーを表示"
   }
 }

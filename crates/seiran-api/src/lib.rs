@@ -521,6 +521,26 @@ impl AppState {
         }
     }
 
+    /// brid.gyブリッジユーザーの実ユーザーへのリンク解決ジョブを積む。プロフィール表示の
+    /// たびに、`bridge_real_actor_id`が未解決なブリッジユーザーに対して呼ばれる
+    /// （「表示時再検証」パターン、`docs/protocols.md`参照）。
+    pub async fn enqueue_bridge_user_link_resolve(&self, actor_id: i64) {
+        if !seiran_common::jobs::bridge_user_link_resolve::should_enqueue(actor_id) {
+            return;
+        }
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::BridgeUserLinkResolve { actor_id }, job_priority::LOW)
+            .await
+        {
+            tracing::error!(
+                "[job] BridgeUserLinkResolve enqueue 失敗 (actor_id={}): {}",
+                actor_id,
+                e
+            );
+        }
+    }
+
     /// リモートフォロー一覧中の未知アクター（ローカルDB未登録）を解決するジョブを積む（#68）。
     pub async fn enqueue_remote_actor_resolve(&self, uri: String) {
         if !seiran_common::jobs::remote_actor_resolve::should_enqueue(&uri) {

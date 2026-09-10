@@ -597,6 +597,18 @@ brid.gy(Bridgy Fed)のようなプロトコル間ブリッジは、ある投稿�
 - 対象がブリッジポストの場合: 内部的には常に元ポストへのリポスト/引用として扱う（`repost_of_post_id`/`quote_of_post_id`は元ポストのidになる）。
 - 対象が元ポスト（対向プロトコル側に独立したブリッジポストを持つ）の場合: 配送先識別子（`ap_object_id`/`at_uri`/`at_cid`）をブリッジポストのものへ差し替える。ただし元ポストが`classify_post`で`LocalOrSeiran`（AP/ATP双方にネイティブ実体を持つ、seiran自身の投稿）と判定される場合は差し替えない——ネイティブ実体があるプロトコルへわざわざブリッジポスト経由で送る必要が無いため。
 
+### ブリッジユーザー（アクターの実ユーザーへのリンク）
+
+brid.gy(Bridgy Fed)は投稿だけでなくアクター（プロフィール）もプロトコル間で自動投影する。このブリッジユーザーから実ユーザーへのリンクは`actors.bridge_real_actor_id`（フロントの導線は`docs/ui_spec.md` 3節参照）が担う。ブリッジポストと異なり、逆参照カラム（実ユーザー側から見たブリッジユーザーへのリンク）は現状使う場面が無いため持たない——メンション・フォローは常に実ユーザーを直接の宛先にでき（`mention.rs`が`{username}.{domain}.ap.brid.gy`形式のハンドルをその場で組み立てる、ブリッジユーザー行の存在に依存しない）、ブリッジポストの配送先切り替えのような「対向プロトコルでは実ユーザーのIDが存在しないため代わりにブリッジ側へ送る」必要がアクターには無いため。
+
+**検出**（`crate::jobs::bridge_user_link_resolve`）:
+- AP側ブリッジユーザー（`bsky.brid.gy`ドメイン、Blueskyの実ユーザーをAPへ投影したもの）: `ap_uri`が`https://bsky.brid.gy/ap/{did}`の形で実ユーザーのDIDをそのまま持つため、ネットワーク取得無しで抽出できる（実データで確認済み。AP Person文書自体の`alsoKnownAs`にも同じDIDが入っているが、`ap_uri`から直接取れるため参照不要）。
+- ATP側ブリッジユーザー（`*.ap.brid.gy`ハンドル、Fediverseの実ユーザーをATPへ投影したもの）: ハンドル（`{username}.{domain}.ap.brid.gy`）から実ユーザーのusername/domainを復元し（`mention.rs`が逆方向にこの形を組み立てる際と同じ規約）、`ApClient::resolve_webfinger`で実ユーザーのAP actor URIを解決する。ATP側の`app.bsky.actor.profile`レコード自体にも`bridgyOriginalUrl`（実ユーザーの表示用プロフィールURL）と`bridged-from-bridgy-fed-activitypub`ラベルが付くが、表示用URLはDB照合に使える正規actor URIとは限らない（Misskey等はハンドル形式のURLと実際のactor URIパスが一致しない）ため使わない。
+
+**解決**: 実ユーザーが既にDBにあれば即座にリンクする。無ければ能動的に取得・upsertする——AP側は`atp::fetch_bsky_profile`でAppViewから取得し`upsert_remote_bsky`、ATP側は既存の`Job::RemoteActorResolve`（#68）の取得・upsertパイプラインをそのまま再利用する。
+
+**トリガー**: ブリッジポストの受信時検出とは異なり、プロフィール表示のたびに`bridge_real_actor_id`が未解決なブリッジユーザーへ`Job::BridgeUserLinkResolve`を積む「表示時再検証」パターン（`AlsoKnownAsVerify`等と同型）を採る。ただしブリッジ関係自体は不変のため、一度解決すれば以後は再検証しない（ジョブ冒頭で`bridge_real_actor_id.is_some()`なら即終了）。過剰なwebfinger/フェッチ呼び出しを避けるため、`RemoteActorResolve`と同じ1時間クールダウンを設ける。
+
 ## 6. 本文中のリンク・メンション表現
 
 Bluesky facet・ActivityPub `<a href>` が示すリンク情報を、Misskey API互換（`NoteResponse.text`はプレーンテキストのまま）を保ちつつ画面上でクリック可能にするため、Misskey本家のMFM同様「`text`フィールドの中に内部リンクマーカーを埋め込み、フロントがパースする」方式を採る。

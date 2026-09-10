@@ -90,11 +90,13 @@ pub async fn resolve_mention_facets_in_place(db: &sqlx::PgPool, posts: &mut [Tim
     }
     let dids: Vec<String> = dids.into_iter().collect();
 
-    let rows = sqlx::query("SELECT username, domain, at_did FROM actors WHERE at_did = ANY($1)")
-        .bind(&dids)
-        .fetch_all(db)
-        .await
-        .unwrap_or_default();
+    let rows = sqlx::query(
+        "SELECT username, domain, actor_type::text AS actor_type, at_did FROM actors WHERE at_did = ANY($1)",
+    )
+    .bind(&dids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
 
     let mention_paths: HashMap<String, String> = rows
         .iter()
@@ -102,11 +104,8 @@ pub async fn resolve_mention_facets_in_place(db: &sqlx::PgPool, posts: &mut [Tim
             let did: String = r.try_get("at_did").ok()?;
             let username: String = r.try_get("username").ok()?;
             let domain: String = r.try_get("domain").ok()?;
-            let handle = if domain.is_empty() {
-                format!("@{}", username)
-            } else {
-                format!("@{}@{}", username, domain)
-            };
+            let actor_type: String = r.try_get("actor_type").ok()?;
+            let handle = seiran_common::username::actor_handle(&username, &domain, &actor_type);
             Some((did, handle))
         })
         .collect();

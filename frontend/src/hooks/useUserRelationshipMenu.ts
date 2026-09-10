@@ -32,7 +32,7 @@ export interface UserRelationshipTarget {
   /** API呼び出し用target文字列。省略時は `profileQuery(username, domain)` を使う
    * （ProfilePageはap_uri/at_did優先の既存ロジックのため明示指定、NoteCard発は省略）。 */
   target?: string;
-  /** trueならフォロー時に本尊確認モーダルを挟む（ProfilePageのみ利用）。 */
+  /** trueならフォロー時にブリッジユーザー確認モーダルを挟む（ProfilePageのみ利用）。 */
   isBridge?: boolean;
   reportLabel: string;
 }
