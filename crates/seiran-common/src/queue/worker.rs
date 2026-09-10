@@ -533,6 +533,13 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::MigrationImportFollows { request_id } => {
             jobs::at_migration::handle_import_follows(request_id, ctx).await
         }
+        Job::FetchBridgeOriginal {
+            bridge_post_id,
+            target_uri,
+            protocol,
+        } => jobs::fetch_bridge_original::handle(bridge_post_id, target_uri, protocol, ctx)
+            .await
+            .map_err(JobError::from),
     }
 }
 
@@ -568,6 +575,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::MigrationImportProcess { .. } => "MigrationImportProcess",
         Job::MigrationDeactivateSource { .. } => "MigrationDeactivateSource",
         Job::MigrationImportFollows { .. } => "MigrationImportFollows",
+        Job::FetchBridgeOriginal { .. } => "FetchBridgeOriginal",
     }
 }
 
@@ -757,6 +765,14 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             max_attempts: 5,
             base_delay_ms: 3000,
             max_delay_ms: 60_000,
+        },
+        Job::FetchBridgeOriginal { .. } => RetryConfig {
+            // OgpFetchと同様の軽量ベストエフォート取得。失敗しても、元ポストが後で通常の
+            // 受信経路で届けば`bridge_post::link_pending_bridges_for_new_original`が
+            // 受動的にリンクするため実害は小さい。
+            max_attempts: 3,
+            base_delay_ms: 2000,
+            max_delay_ms: 30_000,
         },
     }
 }

@@ -7,7 +7,8 @@ use super::emoji::{
     resolve_emoji_map_with_fallback,
 };
 use super::note_input::{
-    detect_loopback_post_id, extract_ap_quote_uri, guess_attachment_mime_type, normalize_ap_poll,
+    detect_loopback_post_id, extract_ap_quote_uri, extract_bridge_target_at_uri,
+    guess_attachment_mime_type, normalize_ap_poll, primary_ap_note_url,
     resolve_bridge_duplicate_post_id, strip_quote_fallback_line, strip_quote_fallback_line_leading,
 };
 use super::reference::{resolve_ref, system_signing_key, ReferenceResolutionMode};
@@ -306,10 +307,10 @@ pub(crate) async fn save_ap_note_core(
         .and_then(|sp| sp.counterpart_post_id.as_deref());
     let seiran_uuid: Option<&str> = None;
 
-    let note_url = note["url"].as_str().unwrap_or("");
+    let note_url = primary_ap_note_url(note);
 
     // シナリオ1: ループバックは既存のローカル投稿の重複でしかないため、新規INSERTせず無視する。
-    if let Some(existing_id) = detect_loopback_post_id(inbox, &note_id, note_url) {
+    if let Some(existing_id) = detect_loopback_post_id(inbox, &note_id, &note_url) {
         tracing::warn!(
             "[NoteSave] ループバック検知、INSERTをスキップ: note_id={} → 既存post_id={}",
             note_id,
@@ -320,7 +321,22 @@ pub(crate) async fn save_ap_note_core(
         });
     }
 
-    let parent_original_post_id = resolve_bridge_duplicate_post_id(inbox, note_url).await;
+    let parent_original_post_id = resolve_bridge_duplicate_post_id(inbox, &note_url).await;
+
+    // ブリッジポスト検出（brid.gy等がATP原本をAPへ自動ブリッジしたコピー、`crate::bridge_post`
+    // 参照）。元ポストが既にDBにあれば`bridge_of_post_id`を即座に解決し、無ければ
+    // `bridged_original_uri`だけ保存してINSERT後に`Job::FetchBridgeOriginal`を積む。
+    let bridge_target_at_uri = extract_bridge_target_at_uri(note);
+    let bridge_of_post_id = match &bridge_target_at_uri {
+        Some(at_uri) => crate::bridge_post::resolve_bridge_target(
+            &inbox.db_pool,
+            at_uri,
+            crate::bridge_post::BridgeTargetProtocol::Atp,
+        )
+        .await
+        .unwrap_or(None),
+        None => None,
+    };
 
     // seiranPostがあれば本文・絵文字マップを標準変換の代わりに使う（Single Source of
     // Truth、`docs/protocols.md` 5節）。添付の寸法・blurhash（`post_attachments`に該当
@@ -365,6 +381,8 @@ pub(crate) async fn save_ap_note_core(
             quote_of_ap_uri: quote_of_ap_uri.as_deref(),
             quote_of_ref_status: quote_of_ref_status.map(RefStatus::as_db_str),
             claimed_at_uri,
+            bridge_of_post_id,
+            bridged_original_uri: bridge_target_at_uri.as_deref(),
         })
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
@@ -377,6 +395,56 @@ pub(crate) async fn save_ap_note_core(
         .await
         .map_err(|e| format!("posts id 取得エラー: {}", e))?
         .ok_or_else(|| format!("posts id 取得エラー: {} が見つかりません", note_id))?;
+
+    // ブリッジポスト処理（`crate::bridge_post`参照）。
+    if let Some(at_uri) = &bridge_target_at_uri {
+        match bridge_of_post_id {
+            // 元ポストが既に解決済み: 元ポスト側の逆参照(ap_bridge_post_id)を更新する。
+            Some(original_id) => {
+                if let Err(e) = crate::bridge_post::set_original_bridge_pointer(
+                    &inbox.db_pool,
+                    original_id,
+                    post_id,
+                    crate::bridge_post::BridgeTargetProtocol::Ap,
+                )
+                .await
+                {
+                    tracing::warn!("[NoteSave] 元ポストへのブリッジ逆参照更新に失敗: {}", e);
+                }
+            }
+            // 元ポスト未取り込み: 能動的に取得しに行くジョブを積む（見つからなくても
+            // 受動的リンクが安全網になるため、キュー投入失敗はログのみで無視してよい）。
+            None => {
+                if let Err(e) = inbox
+                    .queue
+                    .enqueue(
+                        Job::FetchBridgeOriginal {
+                            bridge_post_id: post_id,
+                            target_uri: at_uri.clone(),
+                            protocol: "atp".to_string(),
+                        },
+                        priority::NORMAL,
+                    )
+                    .await
+                {
+                    tracing::warn!("[NoteSave] FetchBridgeOriginalの積み込みに失敗: {}", e);
+                }
+            }
+        }
+    }
+
+    // 受動的リンク: このNote自身（ap_object_id = note_id）を待っている未解決ブリッジポストが
+    // 無いか確認し、あれば結合する（安全網）。
+    if let Err(e) = crate::bridge_post::link_pending_bridges_for_new_original(
+        &inbox.db_pool,
+        post_id,
+        Some(&note_id),
+        None,
+    )
+    .await
+    {
+        tracing::warn!("[NoteSave] 待機中ブリッジポストの結合チェックに失敗: {}", e);
+    }
 
     let (content_warning, poll) = match &seiran_post_ext {
         Some(sp) => (sp.content_warning.as_deref(), sp.poll.clone()),

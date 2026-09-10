@@ -136,6 +136,16 @@ pub struct TimelinePost {
     /// 使わない（パーマリンク・スレッド遡りは常に実データを見せるため）。
     #[sqlx(default)]
     pub actor_suspended_at: Option<DateTime<Utc>>,
+    /// brid.gyブリッジポスト対応（`crate::bridge_post`・`docs/protocols.md`参照）: この投稿
+    /// 自身がブリッジポストの場合の解決済み元ポストid（「元ポストを表示」リンク組み立て用）。
+    /// `find_by_id_for_viewer`のみ取得する。
+    #[sqlx(default)]
+    pub bridge_of_post_id: Option<i64>,
+    /// この投稿（元ポスト）に対応するAP側/ATP側の解決済みブリッジポストid。
+    #[sqlx(default)]
+    pub ap_bridge_post_id: Option<i64>,
+    #[sqlx(default)]
+    pub atp_bridge_post_id: Option<i64>,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -188,6 +198,17 @@ pub struct PostDeliveryMeta {
     /// 実体の有無ではなくこのフラグを直接見る必要がある（`notes::delivery::reply_delivery_allowed`）。
     pub deliver_fedi: bool,
     pub deliver_bsky: bool,
+    /// brid.gyブリッジポスト対応（`crate::bridge_post`参照）: この投稿自身がブリッジポストの
+    /// 場合の解決済み元ポストid。非ブリッジ/未解決なら`None`。
+    #[sqlx(default)]
+    pub bridge_of_post_id: Option<i64>,
+    /// この投稿（元ポスト）に対応するAP側/ATP側の解決済みブリッジポストid。
+    /// リポスト/引用時、対向プロトコルへの配送先をブリッジポスト側へ切り替えるために使う
+    /// （`classify_post`が`LocalOrSeiran`の場合はネイティブ実体があるため参照しない）。
+    #[sqlx(default)]
+    pub ap_bridge_post_id: Option<i64>,
+    #[sqlx(default)]
+    pub atp_bridge_post_id: Option<i64>,
 }
 
 /// DMメッセージセッション（スレッド起点を同じくするdirect投稿の集合）の要約。
@@ -321,6 +342,12 @@ pub struct InsertRemoteWithDedupParams<'a> {
     /// `claimed_at_uri`として新規行に保存する。`None`なら従来通りの単純INSERT
     /// （seiranPost非対応の一般的なリモート投稿）。
     pub claimed_at_uri: Option<&'a str>,
+    /// brid.gyブリッジポスト対応（`crate::bridge_post`）: この投稿自身がブリッジポストで、
+    /// 元ポストが既にDBに存在する場合の解決済み元ポストid。未解決/非ブリッジなら`None`。
+    pub bridge_of_post_id: Option<i64>,
+    /// この投稿自身がブリッジポストである場合、元ポストを指す識別子の生値
+    /// （ATP原本ブリッジなら`at://...`）。非ブリッジなら`None`。
+    pub bridged_original_uri: Option<&'a str>,
 }
 
 /// `PostRepository::insert_repost` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
@@ -1060,10 +1087,12 @@ impl PostRepository for PgPostRepository {
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
                     p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
                     p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
                     p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
                     p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status,
-                    a.suspended_at AS actor_suspended_at
+                    a.suspended_at AS actor_suspended_at,
+                    p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -1134,7 +1163,8 @@ impl PostRepository for PgPostRepository {
                     p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
                     p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
                     p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status,
-                    a.suspended_at AS actor_suspended_at
+                    a.suspended_at AS actor_suspended_at,
+                    p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -1328,7 +1358,8 @@ impl PostRepository for PgPostRepository {
                         LIMIT 1
                     ) AS first_image_url,
                     p.visibility::text AS visibility, p.thread_root_post_id,
-                    p.deliver_fedi, p.deliver_bsky
+                    p.deliver_fedi, p.deliver_bsky,
+                    p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id
              FROM posts p
              JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
@@ -1672,8 +1703,10 @@ impl PostRepository for PgPostRepository {
         &self,
         params: InsertRemoteWithDedupParams<'_>,
     ) -> Result<(), sqlx::Error> {
-        crate::unique_retry::retry_on_unique_violation(|| self.insert_remote_with_dedup_once(params))
-            .await
+        crate::unique_retry::retry_on_unique_violation(|| {
+            self.insert_remote_with_dedup_once(params)
+        })
+        .await
     }
 
     async fn finalize_post_merge(
@@ -1798,8 +1831,8 @@ impl PgPostRepository {
         }
 
         let result = sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, content_html, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id, reply_to_ap_uri, reply_to_ref_status, quote_of_ap_uri, quote_of_ref_status, claimed_at_uri)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::post_visibility_enum, $13, $14, $15::post_reference_status, $16, $17::post_reference_status, $18)
+            "INSERT INTO posts (id, actor_id, body, content_html, ap_object_id, seiran_post_uuid, parent_original_post_id, reply_to_post_id, thread_root_post_id, created_at, emoji_map, visibility, quote_of_post_id, reply_to_ap_uri, reply_to_ref_status, quote_of_ap_uri, quote_of_ref_status, claimed_at_uri, bridge_of_post_id, bridged_original_uri)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::post_visibility_enum, $13, $14, $15::post_reference_status, $16, $17::post_reference_status, $18, $19, $20)
              ON CONFLICT (ap_object_id) DO NOTHING",
         )
         .bind(params.id)
@@ -1820,6 +1853,8 @@ impl PgPostRepository {
         .bind(params.quote_of_ap_uri)
         .bind(params.quote_of_ref_status)
         .bind(params.claimed_at_uri)
+        .bind(params.bridge_of_post_id)
+        .bind(params.bridged_original_uri)
         .execute(&mut *tx)
         .await?;
 

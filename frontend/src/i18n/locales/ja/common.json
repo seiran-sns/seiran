@@ -28,6 +28,8 @@
   "remoteBanner": {
     "note": "リモートのポストです",
     "user": "リモートのユーザーです",
-    "viewRemote": "リモートで表示"
+    "viewRemote": "リモートで表示",
+    "bridgePost": "ブリッジポストです",
+    "viewOriginal": "元ポストを表示"
   }
 }

@@ -34,7 +34,7 @@ mod note_input;
 mod note_save;
 mod poll_vote;
 mod reaction;
-mod reference;
+pub(crate) mod reference;
 mod relay;
 mod undo;
 mod update;

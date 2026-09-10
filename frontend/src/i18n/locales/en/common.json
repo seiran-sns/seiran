@@ -28,6 +28,8 @@
   "remoteBanner": {
     "note": "This is a remote post",
     "user": "This is a remote user",
-    "viewRemote": "View on remote server"
+    "viewRemote": "View on remote server",
+    "bridgePost": "This is a bridged post",
+    "viewOriginal": "View original post"
   }
 }

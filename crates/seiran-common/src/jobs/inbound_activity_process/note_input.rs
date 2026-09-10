@@ -13,6 +13,50 @@ pub(super) fn bsky_app_url_to_at_uri(url: &str) -> Option<String> {
     Some(format!("at://{}/app.bsky.feed.post/{}", did, rkey))
 }
 
+/// note["url"]の形（単純文字列/配列/単一Linkオブジェクト）を吸収し、含まれる全URL文字列を返す。
+/// Bridgy Fed等は`[リダイレクタ文字列, {href:"at://...", rel:"canonical", type:"Link"}]`という
+/// 配列形を返すため、単純な`.as_str()`では常に取得漏れになる（実データで確認、既存のシナリオ1/3が
+/// bsky.brid.gy由来のNoteに対して機能していなかった原因）。
+pub(super) fn extract_ap_note_urls(note: &serde_json::Value) -> Vec<String> {
+    match &note["url"] {
+        serde_json::Value::String(s) => vec![s.clone()],
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .or_else(|| v["href"].as_str().map(str::to_string))
+            })
+            .collect(),
+        serde_json::Value::Object(_) => note["url"]["href"]
+            .as_str()
+            .map(|s| vec![s.to_string()])
+            .unwrap_or_default(),
+        _ => vec![],
+    }
+}
+
+/// `extract_ap_note_urls`の結果から、既存のループバック/一般ブリッジ重複判定
+/// （`https://`形式の表示用URL）に使う代表値を1つ選ぶ。見つからなければ空文字列
+/// （既存呼び出し元は空文字列を「該当なし」として扱う設計のため、`Option`にはしない）。
+pub(super) fn primary_ap_note_url(note: &serde_json::Value) -> String {
+    extract_ap_note_urls(note)
+        .into_iter()
+        .find(|u| u.starts_with("https://"))
+        .unwrap_or_default()
+}
+
+/// ブリッジポスト検出用: `extract_ap_note_urls`の結果から`at://`始まりの値（Bridgy Fedの
+/// canonical Linkのhref）を探す。無ければ`https://`側の値を`bsky_app_url_to_at_uri`で変換した
+/// ものにフォールバックする。`Some`ならこのNoteはATP原本を持つAP側ブリッジポスト。
+pub(super) fn extract_bridge_target_at_uri(note: &serde_json::Value) -> Option<String> {
+    let urls = extract_ap_note_urls(note);
+    urls.iter()
+        .find(|u| u.starts_with("at://"))
+        .cloned()
+        .or_else(|| urls.iter().find_map(|u| bsky_app_url_to_at_uri(u)))
+}
+
 /// 受信した Note のループバック（シナリオ1: note.id または note.url が自ドメインの notes URL
 /// を名乗る）を検知する。配送経路の異常（リレー等が Create の object.id/url を書き換えて送り
 /// 返してくる等）で発生し、該当ノートは既にローカルに存在するため、呼び出し元はこれを新規
@@ -357,6 +401,76 @@ mod tests {
     fn bsky_app_url_to_at_uri_not_bsky_app() {
         assert_eq!(bsky_app_url_to_at_uri("https://example.com/notes/1"), None);
         assert_eq!(bsky_app_url_to_at_uri(""), None);
+    }
+
+    #[test]
+    fn extract_ap_note_urls_handles_plain_string() {
+        let note = serde_json::json!({ "url": "https://mastodon.example/@user/1" });
+        assert_eq!(
+            extract_ap_note_urls(&note),
+            vec!["https://mastodon.example/@user/1".to_string()]
+        );
+    }
+
+    /// Bridgy Fedの実データ形（配列、リダイレクタ文字列 + canonical Linkオブジェクト）。
+    #[test]
+    fn extract_ap_note_urls_handles_bridgy_array_form() {
+        let note = serde_json::json!({
+            "url": [
+                "https://bsky.brid.gy/r/https://bsky.app/profile/did:plc:abc/post/xyz",
+                { "href": "at://did:plc:abc/app.bsky.feed.post/xyz", "rel": "canonical", "type": "Link" }
+            ]
+        });
+        assert_eq!(
+            extract_ap_note_urls(&note),
+            vec![
+                "https://bsky.brid.gy/r/https://bsky.app/profile/did:plc:abc/post/xyz".to_string(),
+                "at://did:plc:abc/app.bsky.feed.post/xyz".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn primary_ap_note_url_picks_https_from_array() {
+        let note = serde_json::json!({
+            "url": [
+                "https://bsky.brid.gy/r/https://bsky.app/profile/did:plc:abc/post/xyz",
+                { "href": "at://did:plc:abc/app.bsky.feed.post/xyz", "rel": "canonical", "type": "Link" }
+            ]
+        });
+        assert_eq!(
+            primary_ap_note_url(&note),
+            "https://bsky.brid.gy/r/https://bsky.app/profile/did:plc:abc/post/xyz"
+        );
+    }
+
+    #[test]
+    fn extract_bridge_target_at_uri_prefers_canonical_link() {
+        let note = serde_json::json!({
+            "url": [
+                "https://bsky.brid.gy/r/https://bsky.app/profile/did:plc:abc/post/xyz",
+                { "href": "at://did:plc:abc/app.bsky.feed.post/xyz", "rel": "canonical", "type": "Link" }
+            ]
+        });
+        assert_eq!(
+            extract_bridge_target_at_uri(&note).as_deref(),
+            Some("at://did:plc:abc/app.bsky.feed.post/xyz")
+        );
+    }
+
+    #[test]
+    fn extract_bridge_target_at_uri_falls_back_to_bsky_app_url() {
+        let note = serde_json::json!({ "url": "https://bsky.app/profile/did:plc:abc/post/xyz" });
+        assert_eq!(
+            extract_bridge_target_at_uri(&note).as_deref(),
+            Some("at://did:plc:abc/app.bsky.feed.post/xyz")
+        );
+    }
+
+    #[test]
+    fn extract_bridge_target_at_uri_none_for_ordinary_note() {
+        let note = serde_json::json!({ "url": "https://mastodon.example/@user/1" });
+        assert_eq!(extract_bridge_target_at_uri(&note), None);
     }
 
     #[test]

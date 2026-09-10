@@ -84,6 +84,13 @@
       "body": "この操作は取り消せません。削除すると連合先・Bluesky上の投稿も削除されます。",
       "confirmButton": "削除する"
     },
+    "bridgeConfirmModal": {
+      "title": "これはブリッジポストです",
+      "body": "brid.gyが別プロトコルへ自動生成したコピーです。このまま返信・リアクションするか、元ポストを表示できます。",
+      "confirmReplyButton": "このまま返信",
+      "confirmReactButton": "このままリアクション",
+      "viewOriginalButton": "元ポストを表示"
+    },
     "linkCardLoadEmbed": "埋め込みを読み込む",
     "referencePendingNotice": "まだ取り込まれていません",
     "referenceGoneNotice": "参照先が見つかりませんでした",

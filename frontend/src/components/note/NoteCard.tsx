@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, Note } from "../../api/client";
 import {
@@ -30,6 +30,7 @@ import NoteAttachments from "./NoteAttachments";
 import LinkCard from "./LinkCard";
 import PollCountdown from "./PollCountdown";
 import NoteCardActions from "./NoteCardActions";
+import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
 import UserContextMenu from "./UserContextMenu";
 import UserHoverPopover from "./UserHoverPopover";
@@ -181,6 +182,7 @@ function PostContent({
   const { user: currentUser } = useAuth();
   const { showError } = useToast();
   const { openReply, openQuote } = useComposer();
+  const navigate = useNavigate();
   const badge = protocolBadge(note.user.actorType);
   const delBadges = deliveryBadges(note);
   const visBadge = visibilityBadge(note);
@@ -300,13 +302,48 @@ function PostContent({
     }
   }
 
+  // ブリッジポスト対応: ブリッジポスト自体（brid.gyが別プロトコルへ自動生成したコピー）に
+  // 返信・リアクションしようとした場合、先に確認ダイアログを挟む
+  // （「このまま返信/リアクション」or「元ポストを表示」、`docs/protocols.md`参照）。
+  const [bridgeConfirm, setBridgeConfirm] = useState<
+    { kind: "reply" } | { kind: "react"; emoji: string } | null
+  >(null);
+
   function handleReply(e?: React.MouseEvent) {
     e?.stopPropagation();
     if (isGateReplyBlocked) {
       showError(t("home:noteCard.replyGateError"));
       return;
     }
+    if (note.bridgeOriginalPostId) {
+      setBridgeConfirm({ kind: "reply" });
+      return;
+    }
     openReply(note);
+  }
+
+  function handleToggleReaction(emoji: string) {
+    if (note.bridgeOriginalPostId) {
+      setBridgeConfirm({ kind: "react", emoji });
+      return;
+    }
+    toggleReaction(emoji);
+  }
+
+  function confirmBridgeAction() {
+    if (bridgeConfirm?.kind === "reply") {
+      openReply(note);
+    } else if (bridgeConfirm?.kind === "react") {
+      toggleReaction(bridgeConfirm.emoji);
+    }
+    setBridgeConfirm(null);
+  }
+
+  function viewBridgeOriginal() {
+    if (note.bridgeOriginalPostId) {
+      navigate(`/notes/${note.bridgeOriginalPostId}`);
+    }
+    setBridgeConfirm(null);
   }
 
   function handleQuote(e?: React.MouseEvent) {
@@ -635,7 +672,7 @@ function PostContent({
         repostCount={note.repostCount}
         reactions={reactions}
         reactionPending={reactionPending}
-        onToggleReaction={toggleReaction}
+        onToggleReaction={handleToggleReaction}
         onReply={handleReply}
         onQuote={handleQuote}
         isPrivateQuoteTarget={isPrivateQuoteTarget}
@@ -654,6 +691,24 @@ function PostContent({
         onDelete={handleDelete}
         indent={!large}
       />
+
+      <Modal
+        open={bridgeConfirm !== null}
+        onClose={() => setBridgeConfirm(null)}
+        title={t("home:noteCard.bridgeConfirmModal.title")}
+      >
+        <p className={styles.modalText}>{t("home:noteCard.bridgeConfirmModal.body")}</p>
+        <div className={styles.modalActions}>
+          <button className={styles.modalSecondary} onClick={confirmBridgeAction}>
+            {bridgeConfirm?.kind === "react"
+              ? t("home:noteCard.bridgeConfirmModal.confirmReactButton")
+              : t("home:noteCard.bridgeConfirmModal.confirmReplyButton")}
+          </button>
+          <button className={styles.modalPrimaryDanger} onClick={viewBridgeOriginal}>
+            {t("home:noteCard.bridgeConfirmModal.viewOriginalButton")}
+          </button>
+        </div>
+      </Modal>
     </>
   );
 }

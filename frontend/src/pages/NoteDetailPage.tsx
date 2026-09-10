@@ -399,6 +399,16 @@ export default function NoteDetailPage() {
           protocol={note.user.actorType === "bsky" ? "bsky" : "fedi"}
         />
       )}
+      {/* ブリッジポスト対応: brid.gyが別プロトコルへ自動生成したコピーの場合、元ポストへの
+          内部リンクを並べて表示する（`docs/protocols.md`参照）。 */}
+      {note && note.bridgeOriginalPostId && (
+        <RemoteBanner
+          message={t("common:remoteBanner.bridgePost")}
+          url={`/notes/${note.bridgeOriginalPostId}`}
+          linkLabel={t("common:remoteBanner.viewOriginal")}
+          internal
+        />
+      )}
 
       {/* 対象ポストが返信だった場合の返信先チェーン（古い順、直近の親が本体の直上）。
           一番上のカードだけ「↩️ 返信」クリックでさらに1段遡れる（#climbAncestor）。 */}

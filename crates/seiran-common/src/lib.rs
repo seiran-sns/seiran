@@ -3,6 +3,7 @@ pub mod ap;
 pub mod atp;
 pub mod auth;
 pub mod avatar;
+pub mod bridge_post;
 pub mod crypto;
 pub mod db;
 pub mod follow_approval;

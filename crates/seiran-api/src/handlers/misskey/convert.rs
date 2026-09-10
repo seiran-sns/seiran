@@ -463,7 +463,10 @@ fn to_misskey_note(
         uri,
         url,
         my_reaction,
-        poll: p.poll.as_ref().and_then(|poll| to_misskey_poll(poll, voted_indexes)),
+        poll: p
+            .poll
+            .as_ref()
+            .and_then(|poll| to_misskey_poll(poll, voted_indexes)),
     }
 }
 
@@ -820,6 +823,9 @@ mod tests {
             repost_of_ap_uri: None,
             repost_of_ref_status: None,
             actor_suspended_at: None,
+            bridge_of_post_id: None,
+            ap_bridge_post_id: None,
+            atp_bridge_post_id: None,
         }
     }
 
@@ -835,7 +841,16 @@ mod tests {
 
     #[test]
     fn note_cw_is_none_without_content_warning() {
-        let note = to_misskey_note(&base_post(), LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
+        let note = to_misskey_note(
+            &base_post(),
+            LOCAL_DOMAIN,
+            &[],
+            &[],
+            0,
+            0,
+            &HashMap::new(),
+            &[],
+        );
 
         assert_eq!(note.cw, None);
     }
@@ -858,7 +873,16 @@ mod tests {
             is_animated_image: false,
         };
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[attachment], &[], 0, 0, &HashMap::new(), &[]);
+        let note = to_misskey_note(
+            &p,
+            LOCAL_DOMAIN,
+            &[attachment],
+            &[],
+            0,
+            0,
+            &HashMap::new(),
+            &[],
+        );
 
         assert_eq!(note.files.len(), 1);
         assert!(note.files[0].is_sensitive);
@@ -969,7 +993,10 @@ mod tests {
 
         let poll = note.poll.expect("poll must be Some when posts.poll is set");
         assert!(!poll.multiple);
-        assert_eq!(poll.expires_at.as_deref(), Some("2026-09-10T00:00:00+00:00"));
+        assert_eq!(
+            poll.expires_at.as_deref(),
+            Some("2026-09-10T00:00:00+00:00")
+        );
         assert_eq!(poll.choices.len(), 2);
         assert_eq!(poll.choices[0].text, "赤");
         assert_eq!(poll.choices[0].votes, 3);
@@ -980,7 +1007,16 @@ mod tests {
 
     #[test]
     fn note_poll_is_none_without_posts_poll() {
-        let note = to_misskey_note(&base_post(), LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
+        let note = to_misskey_note(
+            &base_post(),
+            LOCAL_DOMAIN,
+            &[],
+            &[],
+            0,
+            0,
+            &HashMap::new(),
+            &[],
+        );
         assert!(note.poll.is_none());
     }
 

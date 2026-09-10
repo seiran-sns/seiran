@@ -395,6 +395,12 @@ async fn process_message(
             // `counterpartPostId`（AP object id申告）を使ってAP側先着行との相互一致
             // マージを試みる（`docs/protocols.md` 5節）。
             let seiran_post_ext = seiran_common::seiran_post::SeiranPost::extract(&record);
+            // brid.gy(Bridgy Fed)ブリッジポスト対応（`seiran_common::bridge_post`参照）:
+            // レキシコン外の非標準フィールド`bridgyOriginalUrl`（元AP投稿のURL）。
+            let bridged_original_url = record
+                .get("bridgyOriginalUrl")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             // リンク・メンションの facet（byteStart/byteEnd で示される範囲）。
             // 未指定・パース失敗時は空のまま（投稿保存自体はブロックしない）。
             let parsed_facets: Vec<ParsedFacet> = record
@@ -571,6 +577,7 @@ async fn process_message(
                     content_warning,
                     poll,
                     seiran_link_cards,
+                    bridged_original_url,
                 )
                 .await;
             });
@@ -727,9 +734,24 @@ async fn save_bsky_post(
     content_warning: Option<String>,
     poll: Option<JsonValue>,
     seiran_link_cards: Vec<seiran_common::seiran_post::SeiranPostLinkCard>,
+    bridged_original_url: Option<String>,
 ) {
     let reply_id_str = reply_to_post_id.map(|id| id.to_string());
     let post_id = generate_snowflake_id(created_at);
+
+    // brid.gy(Bridgy Fed)ブリッジポスト対応（`seiran_common::bridge_post`参照）: 元AP投稿の
+    // `ap_object_id`と一致する既存行を探す。見つかれば`bridge_of_post_id`を即座に解決し、
+    // 無ければ`bridged_original_uri`だけ保存する（INSERT後に`Job::FetchBridgeOriginal`を積む）。
+    let bridge_of_post_id = match &bridged_original_url {
+        Some(url) => seiran_common::bridge_post::resolve_bridge_target(
+            pool,
+            url,
+            seiran_common::bridge_post::BridgeTargetProtocol::Ap,
+        )
+        .await
+        .unwrap_or(None),
+        None => None,
+    };
 
     // #237 相互一致マージ判定〜INSERTまでを単一トランザクションで行う
     // （`insert_remote_with_dedup`, AP側と同じ形）。直列化はadvisory lockではなく
@@ -753,6 +775,8 @@ async fn save_bsky_post(
                 emoji_map,
                 quote_of_post_id,
                 claimed_ap_object_id.as_deref(),
+                bridge_of_post_id,
+                bridged_original_url.as_deref(),
             )
         })
         .await;
@@ -876,6 +900,60 @@ async fn save_bsky_post(
             {
                 tracing::error!(
                     "[Jetstream] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
+                    e
+                );
+            }
+
+            // ブリッジポスト処理（`seiran_common::bridge_post`参照）。
+            if let Some(url) = &bridged_original_url {
+                match bridge_of_post_id {
+                    Some(original_id) => {
+                        if let Err(e) = seiran_common::bridge_post::set_original_bridge_pointer(
+                            pool,
+                            original_id,
+                            post_id,
+                            seiran_common::bridge_post::BridgeTargetProtocol::Atp,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                "[Jetstream] 元ポストへのブリッジ逆参照更新に失敗: {}",
+                                e
+                            );
+                        }
+                    }
+                    None => {
+                        if let Err(e) = job_queue
+                            .enqueue(
+                                Job::FetchBridgeOriginal {
+                                    bridge_post_id: post_id,
+                                    target_uri: url.clone(),
+                                    protocol: "ap".to_string(),
+                                },
+                                priority::NORMAL,
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                "[Jetstream] FetchBridgeOriginalの積み込みに失敗: {}",
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+            // 受動的リンク: このATP投稿自身（at_uri）を待っている未解決ブリッジポストが
+            // 無いか確認し、あれば結合する（安全網）。
+            if let Err(e) = seiran_common::bridge_post::link_pending_bridges_for_new_original(
+                pool,
+                post_id,
+                None,
+                Some(at_uri),
+            )
+            .await
+            {
+                tracing::warn!(
+                    "[Jetstream] 待機中ブリッジポストの結合チェックに失敗: {}",
                     e
                 );
             }
@@ -1123,6 +1201,8 @@ async fn insert_or_merge_bsky_post_once(
     emoji_map: &JsonValue,
     quote_of_post_id: Option<i64>,
     claimed_ap_object_id: Option<&str>,
+    bridge_of_post_id: Option<i64>,
+    bridged_original_uri: Option<&str>,
 ) -> Result<InsertOrMergeOutcome, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
@@ -1160,8 +1240,8 @@ async fn insert_or_merge_bsky_post_once(
     }
 
     let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id, claimed_ap_object_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id, claimed_ap_object_id, bridge_of_post_id, bridged_original_uri)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (at_uri) DO NOTHING",
     )
     .bind(post_id)
@@ -1175,6 +1255,8 @@ async fn insert_or_merge_bsky_post_once(
     .bind(emoji_map)
     .bind(quote_of_post_id)
     .bind(claimed_ap_object_id)
+    .bind(bridge_of_post_id)
+    .bind(bridged_original_uri)
     .execute(&mut *tx)
     .await?;
 
@@ -1214,7 +1296,10 @@ async fn handle_inbound_repost_create(
         }
     };
     if is_actor_suspended(pool, actor_id).await {
-        tracing::info!("[Jetstream/Repost] 凍結済みアクター (did={}) のリポストを破棄", did);
+        tracing::info!(
+            "[Jetstream/Repost] 凍結済みアクター (did={}) のリポストを破棄",
+            did
+        );
         return;
     }
 
@@ -1372,7 +1457,10 @@ async fn handle_inbound_like_create(
         }
     };
     if is_actor_suspended(pool, actor_id).await {
-        tracing::info!("[Jetstream/Like] 凍結済みアクター (did={}) のいいねを破棄", did);
+        tracing::info!(
+            "[Jetstream/Like] 凍結済みアクター (did={}) のいいねを破棄",
+            did
+        );
         return;
     }
 

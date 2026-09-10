@@ -538,7 +538,7 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
    - 既存フォロワー（Mastodon/Misskey等、`seiranPost`を一切参照しない相手を含む）への配送速度を落とさずに、他seiranとのマージ機会も最終的に確保する設計。
    - **マージ成立時のクリーンアップ**（重いFK付け替えを避ける2段階方式）: 結婚成立の瞬間、生き残らせる行（正規行）と削除予定行の両方が同じ`ap_object_id`または`at_uri`を持とうとしてUNIQUE制約に触れるため、まず削除予定行の当該列をNULLへ更新し（`UNIQUE`制約はNULL同士を衝突と見なさないため問題なく通る）、続けて正規行に確定値をセットする。同じトランザクションで、削除予定行に正規行への参照（`parent_original_post_id`）と論理削除（`deleted_at = now()`）も設定してコミットする。ここまでが`finalize_post_merge`の1トランザクションの中で行う（マージ対象の特定自体は上記の複合UNIQUE制約＋リトライで直列化済みのため、この時点で追加のロックは不要）。`deleted_at`を立てることで、削除予定行は既存の「`deleted_at IS NULL`を前提とする」読み取り規約（`docs/database.md`）に乗って即座にタイムライン等から消え、かつ`trg_posts_relation_counts_delete`トリガーが発火して、結婚前に2行それぞれが二重加算していた返信/引用/リポスト数（親投稿側のカウンタ）を自動的に1つ分補正する。実際の関連テーブル（`reactions`・`post_attachments`・`notifications`等多数）のFK付け替えと削除予定行の物理削除は、優先度の低いバックグラウンドジョブが非同期に行う。削除予定行は`deleted_at`済みのためこの間新規参照が増えることはなく、付け替え対象は結婚成立時点で存在した分だけに限定される。**実装上の注意**: このジョブが`reply_to_post_id`/`quote_of_post_id`/`repost_of_post_id`を削除予定行から正規行へ張り替える操作は、上記トリガーの発火条件（INSERT時・`deleted_at`のNULL→非NULL遷移時）に該当しないため、`reply_count`等の増減はトリガー任せにできず、ジョブ側で張り替え元の親を-1・張り替え先の親を+1と手動調整する必要がある。
    - この制約と設計により、旧来の既知の制約（ATP側が先に取り込まれると`seiran_post_uuid`が一致せず別行になる）は構造的に解消される——マージ判定がどちらが先でも対称に機能するため。`app.bsky.feed.post`本体への独自フィールド追加自体は、一度コミットされたら他クライアントに書き換えられないため安全（Jetstream・AppViewとも未知フィールドを保持したまま透過することを確認済み）。
-3. **一般ブリッジ重複**: Noteの `url` が `https://bsky.app/profile/{did}/post/{rkey}` 形式なら `at://` URIへ変換し既存ポストを検索、あれば `parent_original_post_id` にリンク（重複許容 + リンク）。
+3. **一般ブリッジ重複**: Noteの `url`（単純文字列・配列のいずれの形も`extract_ap_note_urls`が吸収する。Bridgy Fed等は`[リダイレクタ文字列, {href:"at://...", rel:"canonical"}]`という配列形で返す）が `https://bsky.app/profile/{did}/post/{rkey}` 形式なら `at://` URIへ変換し既存ポストを検索、あれば `parent_original_post_id` にリンク（重複許容 + リンク）。
 
 **Actor解決の自ドメインガード**: リモートActor URI解決処理（`upsert_remote_fedi_actor`/`resolve_fedi`）は、URIが `https://{local_domain}/users/{username}` 形式で自ドメインを指す場合、`seiran_common::ap::extract_local_username` で判定してローカル行をそのまま返す（新規 `fedi` 行は作らない）。ローカル行は `insert_local` が設定する `ap_uri`（`https://{domain}/users/{username}`）を持つため、万一このガードを経由しなくても `find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により重複INSERTは自然に防がれる（二重防御）。
 
@@ -574,6 +574,28 @@ seiranの投稿はAP標準のNoteよりもATP標準のpostよりも表現力が�
 - **`linkCards[].embedSrc`/`embedType`は含めない**: 送信元の自己申告をそのまま信頼してiframe srcを埋め込むとXSSの温床になる（受信側の`oembed_allowed_domains`ホワイトリストをバイパスできてしまう）。受信側は必ず自分自身のホワイトリスト設定に基づき`url`から`Job::OgpFetch`相当の処理で再解決する。**受信側の実装**: `linkCards[]`があれば送信側申告の`title`/`description`/`thumbnailUrl`をそのまま`post_link_cards`へ直接反映する（`seiran_post::insert_seiran_post_link_cards`、AP/ATP受信共通）。`embedSrc`/`embedType`列は常にNULLのまま（この方針通り復元しない）。本文にURLが無くlinkCardsのみ構造化データとして持つ投稿では、標準の本文中URL抽出フォールバックが空振りしてURLカードが1件も付かない実害があったため、この直接反映で解消した（実地検証で発見）。
 - **`attachments[].altText`は含めない**: ローカル投稿にalt設定機能自体が無い（`post_attachments.alt_text`は常にNULLの未使用カラム）。**受信側の実装**: `is_sensitive`/`is_gif`は標準AP/ATP添付フィールドから反映済みだが、`width`/`height`/`blurhash`は`post_attachments`テーブルに該当カラムが無い（`media_files`経由のローカル添付のみ持つ）ため、スキーマ変更が必要な残課題として未対応のまま。
 - **バージョニングは行わない**: seiran同士の通信のみを想定し、改修時は上位互換になるよう注意する運用でカバーする。
+
+### ブリッジポスト（brid.gy等、別実体のまま保持）
+
+brid.gy(Bridgy Fed)のようなプロトコル間ブリッジは、ある投稿を別プロトコルへ自動変換したコピー投稿を生成する。このコピー（ブリッジポスト）は、上記の重複排除・マージ（`parent_original_post_id`）とは異なり**1レコードに統合しない**（別サーバーの別実体であり、片方向リンクのため統合が不確実、かつAP-ATP/ATP-APの組み合わせでロジックが複雑化しすぎるため）。代わりに`posts`テーブルへ以下の列を持たせ、別行のまま元ポストへの参照を持つ。
+
+- `bridge_of_post_id`: ブリッジポスト行自身が持つ、解決済み元ポストの`posts.id`（未解決なら`NULL`）。
+- `bridged_original_uri`: ブリッジポスト行が持つ、元ポストを指す識別子の生値。ATP原本ブリッジ（ATP→APへブリッジされたNote）なら元ATP投稿の`at://`URI、AP原本ブリッジ（AP→ATPへブリッジされたBskyポスト）なら元AP投稿のURL。行がブリッジポストかどうかの判定は`bridge_of_post_id`ではなく**このカラムがNOT NULLかどうか**で行う（解決前は`bridge_of_post_id`がNULLのため）。
+- `ap_bridge_post_id`/`atp_bridge_post_id`: 元ポスト行が持つ、それぞれAP側/ATP側の解決済みブリッジポストid。ローカル/リモートseiranポストはAP経由ブリッジ・ATP経由ブリッジを独立に持ちうるため2カラム必要。
+
+**検出**:
+- AP側（Bridgy Fedが生成したNote）: `url`フィールド中、`rel: "canonical"`を持つLinkエントリの`href`（`at://...`形式）を`extract_bridge_target_at_uri`が抽出する。無ければ`https://`形式の値を`bsky_app_url_to_at_uri`で変換したものにフォールバックする。
+- ATP側（Bridgy Fedが生成した`app.bsky.feed.post`）: レキシコン外の非標準フィールド`bridgyOriginalUrl`（元AP投稿のURL、seiran自身の投稿なら`ap_object_id`と完全一致する）。他インスタンス由来（`ap_object_id`と表示用URLが異なる実装）では一致しないことがある既知の制約。
+
+**解決**: 検出時、元ポストが既にDBにあれば`crate::bridge_post::resolve_bridge_target`が即座に`bridge_of_post_id`を解決し、元ポスト側の`ap_bridge_post_id`/`atp_bridge_post_id`も同時に更新する。無ければ`bridged_original_uri`だけ保存し、`Job::FetchBridgeOriginal`（元ポストを能動的に取得しに行く、対応する既存の保存パイプラインへ委譲）をキューに積む。さらに、任意の投稿が新規確定した際は必ず`crate::bridge_post::link_pending_bridges_for_new_original`を呼び、自分を待っている未解決ブリッジポストが無いか索引（`idx_posts_bridge_pending`）で確認して結合する（`Job::FetchBridgeOriginal`が失敗しても、元ポストが後で通常の受信経路で届けばこの受動的リンクで解決される安全網）。
+
+**検索**: ブリッジポストは元ポストが未解決の間は検索結果に出さない。解決済みなら元ポストのidへ置換してから重複排除する（`handlers::search::resolve_bridge_ids_for_search`）。
+
+**表示**: ブリッジポスト自身の投稿詳細には「ブリッジポストです【元ポストを表示】」バナーを、既存の「リモートで表示」バナーと並べて表示する。ブリッジポストへ返信・リアクションしようとすると確認ダイアログ（「このまま返信/リアクション」または「元ポストを表示」）を挟む。
+
+**リポスト・引用の配送先切り替え**: `delivery::redirect_bridge_post_meta`と`delivery::with_bridge_delivery_targets`が担う。
+- 対象がブリッジポストの場合: 内部的には常に元ポストへのリポスト/引用として扱う（`repost_of_post_id`/`quote_of_post_id`は元ポストのidになる）。
+- 対象が元ポスト（対向プロトコル側に独立したブリッジポストを持つ）の場合: 配送先識別子（`ap_object_id`/`at_uri`/`at_cid`）をブリッジポストのものへ差し替える。ただし元ポストが`classify_post`で`LocalOrSeiran`（AP/ATP双方にネイティブ実体を持つ、seiran自身の投稿）と判定される場合は差し替えない——ネイティブ実体があるプロトコルへわざわざブリッジポスト経由で送る必要が無いため。
 
 ## 6. 本文中のリンク・メンション表現
 

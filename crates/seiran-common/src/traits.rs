@@ -342,6 +342,20 @@ pub enum Job {
     /// （`follow_import`と同型）。`at_migration_requests.status`とは独立して、
     /// データ取り込み完了後に結果整合で進める（レート制限は適用しない）。
     MigrationImportFollows { request_id: i64 },
+
+    /// brid.gy(Bridgy Fed)ブリッジポスト対応（`crate::bridge_post`）: 取り込み時点で
+    /// 元ポストがDB未登録だったブリッジポストについて、元ポストを能動的に取得しに行く。
+    /// `target_uri`が`at://...`（`protocol == "atp"`）ならAppView `getPosts`、AP URLの
+    /// 生文字列（`protocol == "ap"`）なら署名付きGETで直接フェッチし、既存の保存パイプライン
+    /// （`atp::upsert_bsky_post`/`jobs::inbound_activity_process::save_ap_note_core`相当）に
+    /// 通す。保存後は`bridge_post::link_pending_bridges_for_new_original`が自動的に走り、
+    /// `bridge_post_id`側と結合される。失敗時は有限回リトライ後あきらめてよい
+    /// （元ポストが後で通常の受信経路で届けば、上記の受動的リンクが安全網になる）。
+    FetchBridgeOriginal {
+        bridge_post_id: i64,
+        target_uri: String,
+        protocol: String,
+    },
 }
 
 /// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。

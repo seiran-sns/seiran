@@ -77,6 +77,7 @@ pub async fn search_notes(
             viewer,
         )
         .await;
+        let ids = resolve_bridge_ids_for_search(&state.db, ids).await;
         return fetch_and_respond(&state, ids, None).await;
     }
 
@@ -109,6 +110,7 @@ pub async fn search_notes(
         );
         let mut all_ids = local_ids;
         all_ids.append(&mut persist_appview_posts(&state, appview_posts).await);
+        let all_ids = resolve_bridge_ids_for_search(&state.db, all_ids).await;
         let (ids, _) = merge_sort_dedup_and_split(all_ids, limit);
         return fetch_and_respond(&state, ids, None).await;
     }
@@ -157,6 +159,7 @@ pub async fn search_notes(
             };
 
             // ソート・重複除去・ページング分割
+            let buf = resolve_bridge_ids_for_search(&state.db, buf).await;
             let (ids, remaining) = merge_sort_dedup_and_split(buf, limit);
             state
                 .search_store
@@ -176,6 +179,7 @@ pub async fn search_notes(
     let mut av_local_ids = persist_appview_posts(&state, av_post_ids).await;
     let mut all_ids = local_ids;
     all_ids.append(&mut av_local_ids);
+    let all_ids = resolve_bridge_ids_for_search(&state.db, all_ids).await;
 
     let new_session_id = uuid::Uuid::new_v4().to_string();
     let (return_ids, remaining) = merge_sort_dedup_and_split(all_ids, limit);
@@ -196,6 +200,34 @@ pub async fn search_notes(
 ///
 /// ブレンドアルゴリズムの核心部分。`AppState`（DB・HTTPクライアント）に依存しない
 /// 純粋関数として切り出すことで、DB・外部HTTPのセットアップなしに単体テスト可能にしている。
+/// ブリッジポスト対応（`crate::bridge_post`・`docs/protocols.md`参照）: 検索結果の後処理として、
+/// 未解決（元ポスト未取り込み）のブリッジポストは除外し、解決済みなら元ポストのidへ置換する。
+/// 置換後に生じる重複は呼び出し元の`merge_sort_dedup_and_split`が吸収する。
+async fn resolve_bridge_ids_for_search(db: &sqlx::PgPool, ids: Vec<i64>) -> Vec<i64> {
+    if ids.is_empty() {
+        return ids;
+    }
+    let rows: Vec<(i64, Option<i64>, bool)> = sqlx::query_as(
+        "SELECT id, bridge_of_post_id, (bridged_original_uri IS NOT NULL) AS is_bridge
+         FROM posts WHERE id = ANY($1)",
+    )
+    .bind(&ids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+    let by_id: std::collections::HashMap<i64, (Option<i64>, bool)> = rows
+        .into_iter()
+        .map(|(id, bridge_of_post_id, is_bridge)| (id, (bridge_of_post_id, is_bridge)))
+        .collect();
+    ids.into_iter()
+        .filter_map(|id| match by_id.get(&id) {
+            Some((Some(original_id), _)) => Some(*original_id),
+            Some((None, true)) => None,
+            _ => Some(id),
+        })
+        .collect()
+}
+
 fn merge_sort_dedup_and_split(mut ids: Vec<i64>, limit: usize) -> (Vec<i64>, Vec<i64>) {
     ids.sort_by(|a, b| b.cmp(a));
     ids.dedup();

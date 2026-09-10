@@ -87,7 +87,7 @@ pub(super) async fn resolve_reference_db_only(
 /// `ap_client.fetch_object`に渡すシステムアクター（list-relay）の署名鍵（キーID, 秘密鍵PEM）
 /// を組み立てる。Authorized Fetch（secure mode）を要求するリモートでも参照解決できるよう、
 /// 1段階フェッチは常にこの鍵で署名する。
-pub(super) fn system_signing_key(inbox: &InboxContext) -> (String, String) {
+pub(crate) fn system_signing_key(inbox: &InboxContext) -> (String, String) {
     crate::system_actor::system_signing_key(&inbox.local_domain, &inbox.ap_private_key_pem)
 }
 
@@ -170,7 +170,7 @@ fn extract_attributed_to(note: &serde_json::Value) -> Result<String, String> {
 ///
 /// 実処理は`note_save::save_ap_note_core`（Create直接受信の`handle_create_note`と共通）に
 /// 委譲する。
-pub(super) async fn save_fetched_remote_note(
+pub(crate) async fn save_fetched_remote_note(
     note: serde_json::Value,
     inbox: &InboxContext,
     ap_client: &ApClient,

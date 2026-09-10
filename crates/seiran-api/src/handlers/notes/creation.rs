@@ -1,7 +1,8 @@
 use super::*;
 use delivery::{
-    broadcast_new_note, classify_post, deliver_regular_post, deliver_repost, resolve_quote_embed,
-    resolve_reply_context, DeliveryTargets, RegularPostDelivery, ReplyContext,
+    broadcast_new_note, classify_post, deliver_regular_post, deliver_repost,
+    redirect_bridge_post_meta, resolve_quote_embed, resolve_reply_context,
+    with_bridge_delivery_targets, DeliveryTargets, RegularPostDelivery, ReplyContext,
 };
 use validation::{
     validate_attachment_ids, validate_cw, validate_dm_text_length, validate_link_card_urls,
@@ -47,6 +48,9 @@ async fn create_repost(
             return ApiError::Internal(format!("repost 元ポスト取得失敗: {}", e)).into_response()
         }
     };
+    // ブリッジポスト対応: リポスト対象がブリッジポストなら、内部的には常に元ポストへの
+    // リポストとして扱う（`crate::bridge_post`・`docs/protocols.md`参照）。
+    let (renote_id, meta) = redirect_bridge_post_meta(state, renote_id, meta).await;
 
     // Misskey/Mastodon 互換: 非公開（followers_only）ポストはリポスト禁止。
     // `direct` も同様に厳格扱いする（閲覧制御が両者を同列に扱っているのに合わせる）。
@@ -75,6 +79,9 @@ async fn create_repost(
         meta.at_uri.as_deref(),
         meta.actor_type == "local",
     );
+    // ブリッジポスト対応: 元ポストが対向プロトコル側に独立したブリッジポストを持つ場合、
+    // 配送先識別子をそちらへ差し替える（`LocalOrSeiran`なら差し替えない）。
+    let meta = with_bridge_delivery_targets(state, meta, origin).await;
 
     let post_id = generate_snowflake_id(now);
     // リポスト行の ap_object_id は、deliver_repost が実際に配送するActivity種別に合わせて
@@ -214,6 +221,7 @@ async fn create_repost(
         reply_blocked: false,
         quote_blocked: false,
         remote_url: None,
+        bridge_original_post_id: None,
         content_warning: None,
         poll: None,
         reply_count: 0,
@@ -524,13 +532,18 @@ async fn validate_create_regular_post_input<'a>(
     }
 
     let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
-    let quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
+    let mut quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
     let mut quote_notif_recipient = None;
 
     // 引用先とブロック関係にある場合、および公開範囲制約違反の場合は引用を拒否する。
     if let Some(quote_id) = quote_of_id_i64 {
         match state.posts.find_delivery_meta(quote_id).await {
             Ok(Some(meta)) => {
+                // ブリッジポスト対応: 引用先がブリッジポストなら、内部的には常に元ポストへの
+                // 引用として扱う（`crate::bridge_post`・`docs/protocols.md`参照）。
+                let (redirected_id, meta) = redirect_bridge_post_meta(state, quote_id, meta).await;
+                quote_of_id_i64 = Some(redirected_id);
+
                 if let Err(e) = crate::handlers::target_resolve::check_not_blocked(
                     state,
                     actor_id,
@@ -935,6 +948,7 @@ async fn persist_regular_post(
         reply_blocked: false,
         quote_blocked: false,
         remote_url: None,
+        bridge_original_post_id: None,
         content_warning: content_warning.clone(),
         poll: poll_json.clone(),
         reply_count: 0,

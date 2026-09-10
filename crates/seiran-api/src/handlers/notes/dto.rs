@@ -250,6 +250,12 @@ pub struct NoteResponse {
     /// ローカル投稿、または元URIを未取得のリモート投稿では省略（#リモートで表示バナー）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_url: Option<String>,
+    /// brid.gyブリッジポスト対応（`crate::bridge_post`・`docs/protocols.md`参照）: この投稿
+    /// 自身がブリッジポストの場合の解決済み元ポストid（文字列化済み）。「ブリッジポストです
+    /// 【元ポストを表示】」ヘッダー・返信/リアクション確認ダイアログのトリガーに使う。
+    /// 非ブリッジ、または元ポスト未解決なら省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bridge_original_post_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_warning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -519,6 +525,7 @@ pub fn to_note_response(
         reply_blocked: false,
         quote_blocked: false,
         remote_url,
+        bridge_original_post_id: p.bridge_of_post_id.map(|i| i.to_string()),
         content_warning: p.content_warning,
         poll: p.poll,
         reply_count: p.reply_count,

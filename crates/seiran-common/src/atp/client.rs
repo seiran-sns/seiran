@@ -40,6 +40,11 @@ pub struct BskyPost {
     /// `record.facets`（リンク・メンション）。存在すればそのまま保持し、`apply_bsky_facets`
     /// で本文への焼き込みと mention_facets 抽出に使う。
     pub facets: Option<serde_json::Value>,
+    /// brid.gy(Bridgy Fed)ブリッジポスト対応（`crate::bridge_post`）: `record.bridgyOriginalUrl`
+    /// （レキシコン外の非標準フィールド、Bridgy Fedが元AP投稿のURLをそのまま埋め込む）。
+    /// 実データで元投稿の`ap_object_id`と完全一致することを確認済み。無ければ`None`
+    /// （通常のATPネイティブ投稿）。
+    pub bridged_original_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -213,6 +218,10 @@ pub async fn fetch_atp_history(
 
             let embed = record.get("embed").cloned();
             let facets = record.get("facets").cloned();
+            let bridged_original_url = record
+                .get("bridgyOriginalUrl")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
 
             posts.push(BskyPost {
                 uri: post.uri,
@@ -226,6 +235,7 @@ pub async fn fetch_atp_history(
                 indexed_at,
                 embed,
                 facets,
+                bridged_original_url,
             });
 
             if posts.len() >= max_posts {
@@ -287,6 +297,9 @@ pub async fn fetch_single_bsky_post(
     let facets = p["record"]["facets"]
         .as_array()
         .map(|_| p["record"]["facets"].clone());
+    let bridged_original_url = p["record"]["bridgyOriginalUrl"]
+        .as_str()
+        .map(str::to_string);
 
     Ok(Some(BskyPost {
         uri: p["uri"].as_str().unwrap_or("").to_string(),
@@ -300,6 +313,7 @@ pub async fn fetch_single_bsky_post(
         indexed_at: Utc::now(),
         embed,
         facets,
+        bridged_original_url,
     }))
 }
 
@@ -515,9 +529,25 @@ pub async fn upsert_bsky_post(
 
     let post_id = crate::generate_snowflake_id(post.created_at);
     let (body, mention_facets) = apply_bsky_post_facets(&post.text, post.facets.as_ref());
+
+    // brid.gy(Bridgy Fed)ブリッジポスト対応（`crate::bridge_post`参照）: `bridgyOriginalUrl`
+    // が元AP投稿の`ap_object_id`と一致する既存行を探す。見つかれば`bridge_of_post_id`を
+    // 即座に解決し、無ければ`bridged_original_uri`だけ保存する（呼び出し元がINSERT後に
+    // `Job::FetchBridgeOriginal`を積む）。
+    let bridge_of_post_id = match &post.bridged_original_url {
+        Some(url) => crate::bridge_post::resolve_bridge_target(
+            pool,
+            url,
+            crate::bridge_post::BridgeTargetProtocol::Ap,
+        )
+        .await
+        .unwrap_or(None),
+        None => None,
+    };
+
     let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, mention_facets)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, mention_facets, bridge_of_post_id, bridged_original_uri)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (at_uri) DO NOTHING",
     )
     .bind(post_id)
@@ -527,6 +557,8 @@ pub async fn upsert_bsky_post(
     .bind(&post.cid)
     .bind(post.created_at)
     .bind(&mention_facets)
+    .bind(bridge_of_post_id)
+    .bind(&post.bridged_original_url)
     .execute(pool)
     .await?;
 
@@ -535,6 +567,63 @@ pub async fn upsert_bsky_post(
         .bind(&post.uri)
         .fetch_one(pool)
         .await?;
+
+    // このリクエストで新規作成できた場合のみブリッジ処理を行う（並行競合時は先に作成した側で処理済み）。
+    if result.rows_affected() > 0 {
+        if let Some(url) = &post.bridged_original_url {
+            match bridge_of_post_id {
+                Some(original_id) => {
+                    if let Err(e) = crate::bridge_post::set_original_bridge_pointer(
+                        pool,
+                        original_id,
+                        final_id,
+                        crate::bridge_post::BridgeTargetProtocol::Atp,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            "[upsert_bsky_post] 元ポストへのブリッジ逆参照更新に失敗: {}",
+                            e
+                        );
+                    }
+                }
+                None => {
+                    if let Err(e) = queue
+                        .enqueue(
+                            Job::FetchBridgeOriginal {
+                                bridge_post_id: final_id,
+                                target_uri: url.clone(),
+                                protocol: "ap".to_string(),
+                            },
+                            priority::NORMAL,
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            "[upsert_bsky_post] FetchBridgeOriginalの積み込みに失敗: {}",
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
+        // 受動的リンク: このATP投稿自身（at_uri）を待っている未解決ブリッジポストが
+        // 無いか確認し、あれば結合する（安全網）。
+        if let Err(e) = crate::bridge_post::link_pending_bridges_for_new_original(
+            pool,
+            final_id,
+            None,
+            Some(&post.uri),
+        )
+        .await
+        {
+            tracing::warn!(
+                "[upsert_bsky_post] 待機中ブリッジポストの結合チェックに失敗: {}",
+                e
+            );
+        }
+    }
 
     // 実際にこのリクエストで新規作成できた場合のみ添付・URLカードを復元する。
     // ON CONFLICT でスキップされた場合（並行競合）は、先に作成した側で処理済みのはず。
@@ -799,6 +888,9 @@ pub async fn search_appview_posts(
                         indexed_at,
                         embed: p["record"].get("embed").cloned(),
                         facets: p["record"].get("facets").cloned(),
+                        bridged_original_url: p["record"]["bridgyOriginalUrl"]
+                            .as_str()
+                            .map(str::to_string),
                     })
                 })
                 .collect()

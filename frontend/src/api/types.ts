@@ -328,6 +328,11 @@ export interface Note {
   quoteBlocked: boolean;
   /** リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。ローカル投稿は省略。 */
   remoteUrl?: string;
+  /** brid.gyブリッジポスト対応: このノート自身がブリッジポスト（brid.gyが別プロトコルへ
+   * 自動生成したコピー）の場合の、解決済み元ポストのid。「ブリッジポストです【元ポストを
+   * 表示】」ヘッダー・返信/リアクション確認ダイアログのトリガーに使う。非ブリッジ、または
+   * 元ポスト未解決なら省略。 */
+  bridgeOriginalPostId?: string;
   contentWarning?: string;
   poll?: {
     multiple: boolean;
@@ -585,6 +590,8 @@ export interface RawNote {
   quoteBlocked?: boolean;
   remoteUrl?: string;
   remote_url?: string;
+  bridgeOriginalPostId?: string;
+  bridge_original_post_id?: string;
   contentWarning?: string;
   content_warning?: string;
   poll?: Note["poll"];
@@ -642,6 +649,7 @@ export function normalizeNote(r: RawNote): Note {
     replyBlocked: r.replyBlocked ?? false,
     quoteBlocked: r.quoteBlocked ?? false,
     remoteUrl: r.remoteUrl ?? r.remote_url,
+    bridgeOriginalPostId: r.bridgeOriginalPostId ?? r.bridge_original_post_id,
     contentWarning: r.contentWarning ?? r.content_warning,
     poll: r.poll,
     replyCount: r.replyCount ?? r.reply_count ?? 0,

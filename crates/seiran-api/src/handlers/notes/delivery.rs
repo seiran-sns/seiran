@@ -485,6 +485,53 @@ pub fn classify_post(
     }
 }
 
+/// brid.gyブリッジポスト対応（`seiran_common::bridge_post`・`docs/protocols.md`参照）:
+/// `id`が指すポストがブリッジポスト（`meta.bridge_of_post_id`が`Some`）の場合、元ポストの
+/// メタ情報を再取得して返す（内部的には常に元ポストへのリポスト/引用として扱うため、
+/// 呼び出し元は返り値の`i64`を`repost_of_post_id`/`quote_of_post_id`にそのまま使うこと）。
+/// 非ブリッジ、または元ポストの取得に失敗した場合は引数をそのまま返す。
+pub(crate) async fn redirect_bridge_post_meta(
+    state: &AppState,
+    id: i64,
+    meta: PostDeliveryMeta,
+) -> (i64, PostDeliveryMeta) {
+    match meta.bridge_of_post_id {
+        Some(original_id) => match state.posts.find_delivery_meta(original_id).await {
+            Ok(Some(original_meta)) => (original_id, original_meta),
+            _ => (id, meta),
+        },
+        None => (id, meta),
+    }
+}
+
+/// brid.gyブリッジポスト対応: `meta`（元ポスト、`redirect_bridge_post_meta`適用済みである
+/// こと）が対向プロトコル側に独立したブリッジポストを持つ場合、配送先識別子
+/// （ap_object_id/at_uri/at_cid）をそちらへ差し替える。`origin == LocalOrSeiran`
+/// （元ポストが両プロトコルにネイティブ実体を持つ、seiran自身の投稿）の場合は、わざわざ
+/// ブリッジポストへ送る必要が無いため差し替えない（ユーザー合意済み仕様）。
+pub(crate) async fn with_bridge_delivery_targets(
+    state: &AppState,
+    meta: PostDeliveryMeta,
+    origin: PostOrigin,
+) -> PostDeliveryMeta {
+    if origin == PostOrigin::LocalOrSeiran {
+        return meta;
+    }
+    let mut meta = meta;
+    if let Some(bridge_id) = meta.ap_bridge_post_id {
+        if let Ok(Some(bridge_meta)) = state.posts.find_delivery_meta(bridge_id).await {
+            meta.ap_object_id = bridge_meta.ap_object_id;
+        }
+    }
+    if let Some(bridge_id) = meta.atp_bridge_post_id {
+        if let Ok(Some(bridge_meta)) = state.posts.find_delivery_meta(bridge_id).await {
+            meta.at_uri = bridge_meta.at_uri;
+            meta.at_cid = bridge_meta.at_cid;
+        }
+    }
+    meta
+}
+
 /// 新規投稿を著者本人 + accepted なローカルフォロワーへ、購読中のタイムラインチャンネル
 /// （homeTimeline/localTimeline/hybridTimeline/globalTimeline/userList/hashtag）へ
 /// WebSocket でリアルタイム配信する（#37）。
@@ -891,23 +938,27 @@ pub async fn resolve_quote_embed(
         Ok(Some(m)) => m,
         _ => return (None, None),
     };
+    let (_, meta) = redirect_bridge_post_meta(state, quote_of_id, meta).await;
 
     let origin = classify_post(
         meta.ap_object_id.as_deref(),
         meta.at_uri.as_deref(),
         meta.actor_type == "local",
     );
+    let meta = with_bridge_delivery_targets(state, meta, origin).await;
 
-    let bsky_embed = if origin == PostOrigin::FediRemote {
-        build_external_post_embed(state, actor_id, &meta).await
-    } else if let (Some(uri), Some(cid)) = (&meta.at_uri, &meta.at_cid) {
+    // `at_uri`/`at_cid`の有無だけで判定する（`origin`では判定しない）。ブリッジポスト対応
+    // （`with_bridge_delivery_targets`）により、元がFediRemote（ATPネイティブ実体を持たない）
+    // でも対向プロトコル側にブリッジポストがあれば`meta.at_uri`/`at_cid`がそちらの値に
+    // 差し替わっており、その場合はネイティブ引用を構築できる。
+    let bsky_embed = if let (Some(uri), Some(cid)) = (&meta.at_uri, &meta.at_cid) {
         Some(BskyEmbed::Record {
             uri: uri.clone(),
             cid: cid.clone(),
         })
     } else {
-        // AP/ATP の両IDを持つ投稿でも、AT CID が未取得ならネイティブ引用を構築できない。
-        // このフォールバックでも空カードにせず、Fediリモートと同じメタデータを設定する。
+        // Fediリモートのみ、またはAP/ATP両IDを持つ投稿でもAT CIDが未取得の場合は
+        // ネイティブ引用を構築できないため、外部URLカードへフォールバックする。
         build_external_post_embed(state, actor_id, &meta).await
     };
 
@@ -1208,6 +1259,9 @@ mod tests {
             // リモート想定のヘルパーのため意味を持たない（DBデフォルトのtrue固定を模す）。
             deliver_fedi: true,
             deliver_bsky: true,
+            bridge_of_post_id: None,
+            ap_bridge_post_id: None,
+            atp_bridge_post_id: None,
         }
     }
 
