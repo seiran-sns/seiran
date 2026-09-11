@@ -25,6 +25,7 @@ export default function SearchPage() {
     []
   );
 
+  const inputRef = useRef<HTMLInputElement>(null);
   const [input, setInput] = useState(initialQ);
   const [notes, setNotes] = useState<Note[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
@@ -61,6 +62,10 @@ export default function SearchPage() {
     };
   }, [searchParams]);
 
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
   function submit(e: FormEvent) {
     e.preventDefault();
     const q = input.trim();
@@ -90,6 +95,7 @@ export default function SearchPage() {
 
       <form className={rp.searchForm} onSubmit={submit}>
         <input
+          ref={inputRef}
           className={rp.searchInput}
           value={input}
           onChange={(e) => setInput(e.target.value)}
