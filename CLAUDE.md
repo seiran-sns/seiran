@@ -59,6 +59,9 @@ frontend/backendで単一のシステムバージョン（`Cargo.toml`の`[works
 - 「対応する対向の最低バージョン」（`SERVER_MIN_PEER_VERSION`/`FRONTEND_MIN_PEER_VERSION`）を
   引き上げる必要が生じる非互換な変更をする場合は、実装前に必ずマイケルに相談すること
   （無断で引き上げない）。
+- バージョン番号（`version`本体・`version_suffix`/`versionSuffix`）だけを変更するコミットは、
+  コードの挙動に影響しないため、コミット前の確認フローのうち `cargo clippy` 等の静的チェックは
+  実施するが、`cd e2e && npm test` のようなテスト実行は省略してよい。
 
 ### マイグレーションの適用方法（必読）
 
