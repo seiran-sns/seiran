@@ -314,6 +314,34 @@ test("自分自身への@メンションは通知されない", async ({ request
   expect(notifs.some((n) => n.type === "mention")).toBeFalsy();
 });
 
+test("返信文中に返信先へ@メンションしても通知はreplyのみでmentionは重複作成されない", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2enotifreplymenta");
+  const bob = await registerUserViaApi(request, "e2enotifreplymentb");
+
+  const createRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: `返信+メンション重複テスト元投稿 ${Date.now()}` },
+  });
+  expect(createRes.ok(), `投稿作成失敗: ${createRes.status()} ${await createRes.text()}`).toBeTruthy();
+  const created = await createRes.json();
+
+  const replyRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${bob.token}` },
+    data: { text: `@${alice.username} 返信+メンション重複テスト ${Date.now()}`, reply_to_id: created.id },
+  });
+  expect(replyRes.ok(), `返信投稿失敗: ${replyRes.status()} ${await replyRes.text()}`).toBeTruthy();
+  const reply = await replyRes.json();
+
+  const notifRes = await request.post("/api/i/notifications", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { limit: 10 },
+  });
+  expect(notifRes.ok()).toBeTruthy();
+  const notifs = (await notifRes.json()) as { type: string; note?: { id: string } }[];
+  const forReply = notifs.filter((n) => n.note?.id === String(reply.id));
+  expect(forReply.map((n) => n.type)).toEqual(["reply"]);
+});
+
 test.describe("Fedi(AP)からのメンション通知", () => {
   let fedi: StubFediServer;
 

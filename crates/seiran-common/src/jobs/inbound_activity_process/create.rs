@@ -207,6 +207,12 @@ pub(super) async fn handle_create_note(
         }
     }
     for mentioned_actor_id in mentioned_local_actor_ids {
+        if mentioned_actor_id == saved.actor_id {
+            continue; // 自己メンションは通知しない
+        }
+        if reply_parent_local_actor_id == Some(mentioned_actor_id) {
+            continue; // reply通知と重複するため
+        }
         notify_local_actor(
             inbox,
             mentioned_actor_id,

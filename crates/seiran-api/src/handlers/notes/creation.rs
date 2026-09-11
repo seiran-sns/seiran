@@ -840,11 +840,15 @@ async fn persist_regular_post(
     // メンション通知: 本文中で `@username` 形式によりローカルユーザーが言及されていれば通知を
     // 作る。Bsky/AP配送設定の有無とは無関係に常に処理する（配信は宛先プロトコルの話、通知は
     // ローカル受信者の話で別軸のため）。
+    // リプライ先本人へのメンションは reply 通知と意味的に重複するため作らない。
     for mentioned_actor_id in
         extract_local_mention_actor_ids(&text, &state.local_domain, &state.db).await
     {
         if mentioned_actor_id == actor_id {
             continue; // 自己メンションは通知しない
+        }
+        if reply_ctx.parent_local_actor_id == Some(mentioned_actor_id) {
+            continue; // reply通知と重複するため
         }
         notify_local_actor(
             state,

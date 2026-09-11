@@ -959,6 +959,9 @@ async fn save_bsky_post(
             }
 
             // リプライ通知: リプライ先がローカルユーザーの投稿であれば通知を作る（自己リプライは除く）。
+            // リプライ先本人へのメンションは reply 通知と重複するため、mention 通知の対象から除く
+            // （下のメンション通知ブロックで `mention_skip_actor_ids` として参照する）。
+            let mut mention_skip_actor_ids: HashSet<i64> = HashSet::new();
             if let Some(parent_id) = reply_to_post_id {
                 let parent_local_actor_id: Option<i64> = sqlx::query(
                     "SELECT p.actor_id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE p.id = $1 AND a.actor_type = 'local'",
@@ -970,6 +973,7 @@ async fn save_bsky_post(
                 .flatten()
                 .and_then(|row| row.try_get::<i64, _>("actor_id").ok());
                 if let Some(parent_actor_id) = parent_local_actor_id.filter(|id| *id != actor_id) {
+                    mention_skip_actor_ids.insert(parent_actor_id);
                     stream_hub.publish_event(
                         HashSet::from([parent_actor_id]),
                         "reply",
@@ -1057,6 +1061,9 @@ async fn save_bsky_post(
                     if let Ok(Some(mentioned_actor)) = actor_repo.find_by_did(mentioned_did).await {
                         if mentioned_actor.actor_type != "local" || mentioned_actor.id == actor_id {
                             continue;
+                        }
+                        if mention_skip_actor_ids.contains(&mentioned_actor.id) {
+                            continue; // reply通知と重複するため
                         }
                         if !notified.insert(mentioned_actor.id) {
                             continue;

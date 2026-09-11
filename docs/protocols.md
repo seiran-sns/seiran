@@ -790,7 +790,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 例外として `followAccepted`（`jobs::inbound_activity_process::handle_accept`、Fediフォローリクエストが相手から承諾された）はペイロード（`actor.username`/`actor.domain`）自体をフロントエンドが利用する。Fediフォロー（`handlers::follows::follow_fedi`）は、相手のActorが鍵アカウント（AS2 `manuallyApprovesFollowers: true`）の場合のみ `pending` で開始し、相手の `Accept` が非同期で届くまで承認待ち状態が続く。非鍵アカウント（フィールド省略時も含む）が相手の場合は、本家Misskey準拠でFollow送信と同時にDB上を即座に `accepted` として確定する（相手サーバーのAccept返信を待たない楽観的確定。Ariaはフォロー操作後に一度だけ・1秒後に再取得してボタン状態を更新する設計のため、`pending`のまま留まると実際のAccept受信までボタンが「処理中」表示に固まって見える不具合があった、実機確認済み）。鍵アカウント宛の`pending`→`accepted`遷移では、`StreamingContext` が`followAccepted`受信時に `stores/followStatusStore`（`username`+`domain` を正規化したキー、`lib/format.ts` の `profileQuery` と同じロジック）を直接更新し、その場で切り替える。手動リロードや通知一覧の再取得を待たずに反映するための例外であり、通知の永続化・一覧表示自体は他の種別と同じ経路を通る。フォロー状態の表示側（`frontend/src/pages/ProfilePage.tsx` のフォローボタン、`frontend/src/components/note/NoteCard.tsx` のタイムライン上のフォロースイッチ）はいずれもこの共有ストアを `useSyncExternalStore` で参照する設計のため、自分の操作・WebSocket経由の承認のいずれでも、同一アクターを表示中の全コンポーネントが同時に反映される（詳細は `docs/architecture.md` のフロントエンド構成節）。
 
 ### メンション通知
-本文中で `@username` 形式によりローカルユーザーが言及された場合、`notifications`（`type="mention"`, `note_id`=言及元投稿）を作る。配信設定（Bsky/AP接続の有無）とは無関係に、投稿の出自（ローカル/Fedi受信/Bsky受信）ごとに以下で解決する。自己メンションは通知しない。
+本文中で `@username` 形式によりローカルユーザーが言及された場合、`notifications`（`type="mention"`, `note_id`=言及元投稿）を作る。配信設定（Bsky/AP接続の有無）とは無関係に、投稿の出自（ローカル/Fedi受信/Bsky受信）ごとに以下で解決する。自己メンションは通知しない。リプライ投稿の場合、リプライ先投稿者本人へのメンションは後述のリプライ通知と重複するため mention 通知を作らない（宛先アクターIDがリプライ通知の宛先と一致する場合のみ抑制、他の宛先へのメンションは通常通り通知する）。
 
 - **ローカル投稿**（`handlers::notes::create_regular_post`）: `mention::extract_local_mention_actor_ids` が本文を走査し、`@username`（ドメイン省略）・`@username.{local_domain}`（AT Protocol ハンドル表記）・`@username@{local_domain}`（Fediverse表記）のいずれかで書かれたローカルアクターの `actor_id` を重複除去して返す。6節の配信用メンション変換（`convert_mentions_for_bsky`/`convert_mentions_for_ap`）は配信対象プロトコルが有効な場合のみ呼ばれるため、これとは独立した専用スキャンとして常に実行する。
 - **Fedi受信**（`jobs::inbound_activity_process::handle_create_note`）: `tag[]` の `Mention` エントリのうち、`href` が `https://{local_domain}/users/{username}` を指すものを、DM宛先解決と同じ `seiran_common::ap::extract_local_username`（ホスト名まで含めて自ドメインのURIかを検証してからusernameを取り出す）で判定する。URI末尾のセグメントだけを見て判定すると、リモートの同名ユーザー（例: `https://fedibird.com/users/momozou`）宛のメンションをローカルの同名ユーザー宛と取り違えるため、必ずホスト名の一致確認を経由する。
@@ -799,7 +799,7 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 いずれの経路も `source_uri` は渡さない（1投稿に複数の宛先がありうるため、投稿の一意識別子を共有すると2人目以降が `notifications.source_uri` の部分UNIQUEインデックスで弾かれてしまう。posts 自体の重複排除は各経路で別途完結しているため、このブロックへの到達自体が新規保存時のみに限られ、重複INSERT対策は不要）。
 
 ### リプライ通知
-自分の投稿に返信が付いた場合、`notifications`（`type="reply"`, `note_id`=返信投稿自体）を作る。可視性・配信設定とは無関係に常に処理し、リプライ先投稿者がローカルユーザーの場合のみ通知する。自己リプライは通知しない。本文中に相手への `@username` を書いた場合はメンション通知とは別に両方生成されうる（Misskey/Mastodon等と同様の挙動）。
+自分の投稿に返信が付いた場合、`notifications`（`type="reply"`, `note_id`=返信投稿自体）を作る。可視性・配信設定とは無関係に常に処理し、リプライ先投稿者がローカルユーザーの場合のみ通知する。自己リプライは通知しない。本文中に相手への `@username` を書いた場合でも、mention 通知はリプライ通知と重複するため作らない（上記「メンション通知」節参照）。
 
 - **ローカル投稿**（`handlers::notes::create_regular_post`）: リプライ先解決（`resolve_reply_context`）が返す `ReplyContext::parent_local_actor_id`（リプライ先投稿の `PostDeliveryMeta::domain` が自ドメインの場合のみ `Some`）を宛先に使う。
 - **Fedi受信**（`jobs::inbound_activity_process::handle_create_note`）: `note["inReplyTo"]` から解決した `reply_to_post_id` の投稿者を `PostRepository::find_delivery_meta` で引き、`domain` が自ドメインなら通知する。
