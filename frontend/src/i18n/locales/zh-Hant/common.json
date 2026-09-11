@@ -25,6 +25,17 @@
   "settings": "設定",
   "error": "錯誤",
   "unknownError": "發生未知錯誤",
+  "serverInfoDialog": {
+    "title": "Seiran",
+    "githubLink": "GitHub 儲存庫",
+    "frontendVersion": "前端版本",
+    "serverVersion": "伺服器版本"
+  },
+  "reloadRequired": {
+    "title": "需要更新",
+    "body": "頁面需要更新，請重新整理頁面。",
+    "reload": "重新整理"
+  },
   "remoteBanner": {
     "note": "這是一則遠端貼文",
     "user": "這是遠端使用者",

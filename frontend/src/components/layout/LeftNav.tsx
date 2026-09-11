@@ -1,10 +1,11 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { canAccessAdminPage } from "../../lib/roles";
+import ServerInfoDialog from "../common/ServerInfoDialog";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./AppShell.module.css";
 
@@ -36,6 +37,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const site = useSiteMeta();
   const { dmUnreadCount, followRequestCount } = useStreamingContext();
   const location = useLocation();
+  const [serverInfoOpen, setServerInfoOpen] = useState(false);
 
   const baseItems = NAV_ITEMS.map((item) => {
     if (item.to === "/messages") return { ...item, badge: dmUnreadCount };
@@ -151,6 +153,15 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
           </Link>
         )}
       </div>
+
+      <button
+        type="button"
+        className={styles.poweredBy}
+        onClick={() => setServerInfoOpen(true)}
+      >
+        {t("nav:leftNav.poweredBy")}
+      </button>
+      <ServerInfoDialog open={serverInfoOpen} onClose={() => setServerInfoOpen(false)} />
     </nav>
   );
 }

@@ -205,6 +205,22 @@
   color: var(--text);
 }
 
+.poweredBy {
+  margin-top: 6px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.poweredBy:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 /* ── 中央ペイン（幅固定：中 / 600px）─────────────────────────── */
 .center {
   flex: 0 0 600px;
@@ -367,6 +383,10 @@
   .logo {
     justify-content: center;
     padding: 8px 0 16px;
+  }
+  /* アイコンのみに畳まれた幅（72px）ではテキストリンクが収まらないため隠す。 */
+  .poweredBy {
+    display: none;
   }
   .loginIcon {
     display: block;

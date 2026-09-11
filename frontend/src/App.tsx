@@ -10,6 +10,7 @@ import { SiteMetaProvider } from "./contexts/SiteMetaContext";
 import { StreamingProvider } from "./contexts/StreamingContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { ToastProvider } from "./contexts/ToastContext";
+import ReloadRequiredDialog from "./components/common/ReloadRequiredDialog";
 import HomePage from "./pages/HomePage";
 
 const AccountSettingsPage = lazy(() => import("./pages/AccountSettingsPage"));
@@ -331,6 +332,7 @@ export default function App() {
                 <HomeFeedProvider>
                   <ComposerProvider>
                     <AppRoutes />
+                    <ReloadRequiredDialog />
                   </ComposerProvider>
                 </HomeFeedProvider>
               </RightPaneProvider>

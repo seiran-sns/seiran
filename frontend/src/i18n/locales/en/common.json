@@ -25,6 +25,17 @@
   "settings": "Settings",
   "error": "Error",
   "unknownError": "An unknown error occurred",
+  "serverInfoDialog": {
+    "title": "Seiran",
+    "githubLink": "GitHub Repository",
+    "frontendVersion": "Frontend Version",
+    "serverVersion": "Server Version"
+  },
+  "reloadRequired": {
+    "title": "Update Required",
+    "body": "The app needs to be updated. Please reload the page.",
+    "reload": "Reload"
+  },
   "remoteBanner": {
     "note": "This is a remote post",
     "user": "This is a remote user",

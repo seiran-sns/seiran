@@ -3,6 +3,7 @@ pub mod auth;
 pub mod authed_user;
 pub mod client_ip;
 pub mod misskey_auth_bridge;
+pub mod version_headers;
 pub use admin_layer::{admin_only, emoji_admin_only, report_moderator_only};
 pub use auth::{
     extract_auth, extract_auth_allow_suspended, require_admin, require_emoji_admin,

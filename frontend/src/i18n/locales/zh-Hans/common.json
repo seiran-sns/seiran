@@ -25,6 +25,17 @@
   "settings": "设置",
   "error": "错误",
   "unknownError": "发生未知错误",
+  "serverInfoDialog": {
+    "title": "Seiran",
+    "githubLink": "GitHub 仓库",
+    "frontendVersion": "前端版本",
+    "serverVersion": "服务器版本"
+  },
+  "reloadRequired": {
+    "title": "需要更新",
+    "body": "页面需要更新，请刷新页面。",
+    "reload": "刷新"
+  },
   "remoteBanner": {
     "note": "这是一个远程帖子",
     "user": "这是远程用户",

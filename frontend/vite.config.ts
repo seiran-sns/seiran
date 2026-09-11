@@ -1,9 +1,15 @@
+import { readFileSync } from "node:fs";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
 // .env はリポジトリルート（frontend/ の一つ上）に置かれている。
 const repoRoot = path.resolve(import.meta.dirname, "..");
+
+// frontend/backend共通のシステムバージョン（docs/architecture.md 2.1節）。
+// `package.json`の`version`を唯一の情報源とし、ビルド時定数へ埋め込む
+// （`src/version.ts`の`__FRONTEND_VERSION__`）。
+const pkg = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "package.json"), "utf-8"));
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, repoRoot, "");
@@ -28,6 +34,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    define: {
+      __FRONTEND_VERSION__: JSON.stringify(pkg.version),
+    },
     server: {
       host: "0.0.0.0",
       port: frontendPort,

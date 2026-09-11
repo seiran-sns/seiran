@@ -25,6 +25,17 @@
   "settings": "Einstellungen",
   "error": "Fehler",
   "unknownError": "Es ist ein unbekannter Fehler aufgetreten",
+  "serverInfoDialog": {
+    "title": "Seiran",
+    "githubLink": "GitHub-Repository",
+    "frontendVersion": "Frontend-Version",
+    "serverVersion": "Server-Version"
+  },
+  "reloadRequired": {
+    "title": "Aktualisierung erforderlich",
+    "body": "Die Seite muss aktualisiert werden. Bitte neu laden.",
+    "reload": "Neu laden"
+  },
   "remoteBanner": {
     "note": "Dies ist ein Remote-Beitrag",
     "user": "Dies ist ein Remote-Benutzer",

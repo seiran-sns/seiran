@@ -40,6 +40,17 @@
 9. `docs/roadmap.md` の進捗チェックを更新
 10. マイケルに画面・動作確認を依頼してから `main` ブランチへコミット
 
+### バージョン運用
+
+frontend/backendで単一のシステムバージョン（`Cargo.toml`の`[workspace.package].version`と
+`frontend/package.json`の`version`）を共有する。詳細な仕組みは `docs/architecture.md` 2.1節参照。
+
+- `main`ブランチ上での開発では、開発機へデプロイし直してマイケルの画面・動作確認がOKになった
+  時点で、リビジョン桁（`x.y.z`の`z`）を1つ進めてデプロイし直した上でプッシュする。
+- 「対応する対向の最低バージョン」（`SERVER_MIN_PEER_VERSION`/`FRONTEND_MIN_PEER_VERSION`）を
+  引き上げる必要が生じる非互換な変更をする場合は、実装前に必ずマイケルに相談すること
+  （無断で引き上げない）。
+
 ### マイグレーションの適用方法（必読）
 
 **`psql -f migration.sql` で直接流してはならない。** これをやると `_sqlx_migrations` テーブルに記録が残らず、API コンテナ起動時に「未適用」と判断されて再実行しようとして失敗する。

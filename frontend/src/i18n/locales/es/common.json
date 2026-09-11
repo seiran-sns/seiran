@@ -25,6 +25,17 @@
   "settings": "Ajustes",
   "error": "Error",
   "unknownError": "Se produjo un error desconocido",
+  "serverInfoDialog": {
+    "title": "Seiran",
+    "githubLink": "Repositorio de GitHub",
+    "frontendVersion": "Versión del frontend",
+    "serverVersion": "Versión del servidor"
+  },
+  "reloadRequired": {
+    "title": "Actualización necesaria",
+    "body": "Es necesario actualizar la página. Por favor, recárgala.",
+    "reload": "Recargar"
+  },
   "remoteBanner": {
     "note": "Esta es una publicación remota.",
     "user": "Este es un usuario remoto",

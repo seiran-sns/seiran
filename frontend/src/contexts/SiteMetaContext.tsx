@@ -11,9 +11,11 @@ interface SiteMeta {
   name: string;
   iconUrl: string;
   color: string;
+  /** サーバーのバージョン（`GET /api/meta`の`version`、「このサーバーの詳細」ダイアログ表示用）。 */
+  serverVersion: string;
 }
 
-const SiteMetaContext = createContext<SiteMeta>({ name: "seiran", iconUrl: "", color: "" });
+const SiteMetaContext = createContext<SiteMeta>({ name: "seiran", iconUrl: "", color: "", serverVersion: "" });
 
 /** site_color から派生アクセント色を CSS 変数に適用する。インラインstyle（documentElement）は
  * `:root[data-theme="dark"]`より詳細度が高くダークモードの既定パレットを上書きしてしまうため、
@@ -58,7 +60,7 @@ function applyFavicon(iconUrl: string) {
 
 export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
   const { effectiveTheme } = useTheme();
-  const [meta, setMeta] = useState<SiteMeta>({ name: "seiran", iconUrl: "", color: "" });
+  const [meta, setMeta] = useState<SiteMeta>({ name: "seiran", iconUrl: "", color: "", serverVersion: "" });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,7 +69,12 @@ export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
       .then((m) => {
         configureMediaProxy(m.mediaProxyUrl ?? "");
         configureInternalMediaOrigins(m.internalMediaOrigins ?? []);
-        const next = { name: m.name || "seiran", iconUrl: m.siteIconUrl ?? "", color: m.siteColor ?? "" };
+        const next = {
+          name: m.name || "seiran",
+          iconUrl: m.siteIconUrl ?? "",
+          color: m.siteColor ?? "",
+          serverVersion: m.version,
+        };
         setMeta(next);
         applyFavicon(next.iconUrl);
         if (next.name) document.title = next.name;

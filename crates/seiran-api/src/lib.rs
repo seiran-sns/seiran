@@ -13,6 +13,7 @@ pub mod rate_limit;
 pub mod search;
 pub mod search_query;
 pub mod streaming;
+pub mod version;
 
 use axum::{
     extract::DefaultBodyLimit,
@@ -1598,6 +1599,9 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(
             middleware::misskey_auth_bridge::bridge,
         ))
+        // フロントエンドとの互換性チェック用に、サーバーのバージョン・最低対向バージョンを
+        // 全レスポンスへ付与する（docs/architecture.md 2.1節）。
+        .layer(axum::middleware::from_fn(middleware::version_headers::attach))
         .layer(cors)
 }
 

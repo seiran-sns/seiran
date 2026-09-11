@@ -1,0 +1,9 @@
+.body { display: grid; gap: 14px; }
+.header { display: flex; align-items: center; gap: 12px; }
+.logo { width: 48px; height: 48px; border-radius: 10px; flex-shrink: 0; }
+.name { font-weight: 700; font-size: 1.1rem; }
+.versions { display: grid; gap: 4px; font-size: 0.9rem; color: var(--text-dim); margin: 0; }
+.versionRow { display: flex; gap: 6px; }
+.versionLabel { font-weight: 600; }
+.githubLink { color: var(--accent-strong); font-weight: 600; text-decoration: none; }
+.githubLink:hover { text-decoration: underline; }

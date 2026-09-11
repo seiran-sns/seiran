@@ -1,4 +1,5 @@
 import i18n from "../i18n";
+import { checkVersionCompat } from "./versionCompat";
 
 const BASE = "/api";
 
@@ -119,6 +120,7 @@ export async function request<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal,
   });
+  checkVersionCompat(res);
   await throwIfError(res, notifyUnauthorized);
   return parseJsonBody<T>(res);
 }
@@ -130,6 +132,7 @@ export async function uploadFormData<T>(path: string, formData: FormData): Promi
     headers: { ...authHeaders() },
     body: formData,
   });
+  checkVersionCompat(res);
   await throwIfError(res);
   return parseJsonBody<T>(res);
 }

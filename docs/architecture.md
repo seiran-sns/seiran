@@ -43,6 +43,35 @@ seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サ�
 - `id.rs` — Snowflake ID 採番
 - `jetstream_control.rs` / `jetstream_leader.rs` — Jetstream 接続のプロセス間調整
 
+## 2.1 バージョン管理と互換性チェック
+
+frontend/backendで単一のシステムバージョンを共有する。`Cargo.toml`の`[workspace.package].version`と
+`frontend/package.json`の`version`が同じ値を持つ運用とし、各Rust crateは`version.workspace = true`で
+これを参照する（`seiran-server`の単一バイナリだけでなく全lib crateも同一バージョン）。フロントエンドは
+`vite.config.ts`の`define`で`package.json`の`version`をビルド時定数`__FRONTEND_VERSION__`として埋め込み、
+`src/version.ts`の`FRONTEND_VERSION`で参照する。
+
+フロントエンド・サーバーの両コンポーネントは、自身のバージョンに加えて「対応する対向の最低バージョン」を
+定数として持つ:
+- サーバー: `crates/seiran-api/src/version.rs`の`SERVER_MIN_PEER_VERSION`（要求するフロントエンドの最低バージョン）
+- フロントエンド: `frontend/src/version.ts`の`FRONTEND_MIN_PEER_VERSION`（要求するサーバーの最低バージョン）
+
+サーバーは`middleware::version_headers::attach`（axumミドルウェア、`crates/seiran-api/src/lib.rs`の
+`router()`へ`.layer()`で適用、全APIレスポンス共通）で自身のバージョンと最低対向バージョンを
+`x-seiran-server-version`/`x-seiran-server-min-peer-version`ヘッダーとして全レスポンスへ付与する。
+
+フロントエンドは`api/core.ts`の`request()`/`uploadFormData()`が全レスポンスに対して
+`api/versionCompat.ts`の`checkVersionCompat()`を呼び、
+【フロントエンドのバージョン ≥ サーバーの最低対向バージョン】
+【サーバーのバージョン ≥ フロントエンドの最低対向バージョン】
+のいずれかを満たさない場合、`ReloadRequiredDialog`（`App.tsx`にグローバルマウント）でリロードを促す。
+一度閉じるとモジュールスコープの`dismissed`フラグにより同一セッション中は再表示しない
+（ページをリロードすればモジュール状態ごとリセットされ、再度チェックが働く）。
+
+「このサーバーの詳細」はLeftNav左下の「Powered by Seiran」ボタンから開く`ServerInfoDialog`で、
+フロントエンドバージョン（`FRONTEND_VERSION`）とサーバーバージョン
+（`SiteMetaContext`が起動時に取得する`GET /api/meta`の`version`）を表示する。
+
 ## 3. 統合バイナリとロール分割
 
 `seiran-server/src/main.rs` の `Role::resolve()` が `--role=xxx` → `SEIRAN_ROLE` 環境変数 → 未指定なら `All` の順で解決する。

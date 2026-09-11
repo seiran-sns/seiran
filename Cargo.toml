@@ -9,6 +9,11 @@ members = [
     "crates/seiran-server",
 ]
 
+# frontend/backend共通のシステム全体バージョン。各crateは`version.workspace = true`で参照する
+# （docs/architecture.md 2.1節）。
+[workspace.package]
+version = "0.2.0"
+
 # デバッグビルドにデバッグシンボル（DWARF情報）を含めない。
 # gdb/lldb 等でのステップ実行はしない開発フローのため、バイナリサイズ・リンク時間・
 # target/ のディスク使用量を優先する。

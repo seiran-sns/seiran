@@ -25,6 +25,17 @@
   "settings": "設定",
   "error": "エラー",
   "unknownError": "不明なエラーが発生しました",
+  "serverInfoDialog": {
+    "title": "Seiran",
+    "githubLink": "GitHubリポジトリ",
+    "frontendVersion": "フロントエンドバージョン",
+    "serverVersion": "サーバーバージョン"
+  },
+  "reloadRequired": {
+    "title": "更新が必要です",
+    "body": "画面の更新が必要です。リロードしてください。",
+    "reload": "リロード"
+  },
   "remoteBanner": {
     "note": "リモートのポストです",
     "user": "リモートのユーザーです",
