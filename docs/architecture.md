@@ -51,14 +51,39 @@ frontend/backendで単一のシステムバージョンを共有する。`Cargo.
 `vite.config.ts`の`define`で`package.json`の`version`をビルド時定数`__FRONTEND_VERSION__`として埋め込み、
 `src/version.ts`の`FRONTEND_VERSION`で参照する。
 
+`version`本体とは別に、任意のサフィックス（`version_suffix`/`versionSuffix`）を1行分離して持てる:
+- Rust: `Cargo.toml`の`[workspace.package].version_suffix`（既定は空文字列）。Cargoが継承対象と
+  する既知フィールドではない独自キーで、`cargo build`は`unused manifest key`警告を出すが無害
+  （動作もCIの`clippy -- -D warnings`も妨げない、実機確認済み）。`crates/seiran-common/build.rs`が
+  ワークスペースルートの`Cargo.toml`を`toml`クレートで直接パースして読み取り、
+  `SEIRAN_VERSION_SUFFIX`というビルド時環境変数として払い出す（`version.workspace = true`の
+  ような自動継承はCargo標準の決め打ちフィールドにしか効かないため）。
+  `crates/seiran-common/src/version.rs`の`SERVER_VERSION`は
+  `concat!(env!("CARGO_PKG_VERSION"), env!("SEIRAN_VERSION_SUFFIX"))`でこれを結合する
+  （`version.rs`/`build.rs`は`seiran-api`ではなく`seiran-common`に置く。`nodeinfo`
+  ハンドラ（`seiran-federation-inbox`）など、`seiran-api`に依存しない他crateからも
+  同じ`SERVER_VERSION`を参照するため）。
+- フロントエンド: `frontend/package.json`の`versionSuffix`（既定は空文字列）。npmが関知しない
+  独自キーで、`vite.config.ts`が`pkg.version`と`pkg.versionSuffix`を結合してから
+  `__FRONTEND_VERSION__`へ埋め込む。
+
+バージョン本体とサフィックスを別行に分けているのは、フィーチャーブランチやフォークでの運用を
+git上のコンフリクトなく回せるようにするため。例えばmainでは`version_suffix = "-dev"`を持たせて
+おき、リリースブランチ側でその行だけを空文字列に変えるコミットを積んでおけば、リリース対象の
+mainをマージするだけでサフィックスが外れる。フォーク側で`version_suffix = "-some-fork"`のような
+固有サフィックスを持たせておけば、本流の`version`更新を取り込んでも別行のため衝突しない。
+
 フロントエンド・サーバーの両コンポーネントは、自身のバージョンに加えて「対応する対向の最低バージョン」を
 定数として持つ:
-- サーバー: `crates/seiran-api/src/version.rs`の`SERVER_MIN_PEER_VERSION`（要求するフロントエンドの最低バージョン）
+- サーバー: `crates/seiran-common/src/version.rs`の`SERVER_MIN_PEER_VERSION`（要求するフロントエンドの最低バージョン）
 - フロントエンド: `frontend/src/version.ts`の`FRONTEND_MIN_PEER_VERSION`（要求するサーバーの最低バージョン）
 
 サーバーは`middleware::version_headers::attach`（axumミドルウェア、`crates/seiran-api/src/lib.rs`の
 `router()`へ`.layer()`で適用、全APIレスポンス共通）で自身のバージョンと最低対向バージョンを
 `x-seiran-server-version`/`x-seiran-server-min-peer-version`ヘッダーとして全レスポンスへ付与する。
+
+`nodeinfo`（`GET /nodeinfo/2.1`、`seiran-federation-inbox::handlers::nodeinfo`）の
+`software.version`も同じ`SERVER_VERSION`を返す。
 
 フロントエンドは`api/core.ts`の`request()`/`uploadFormData()`が全レスポンスに対して
 `api/versionCompat.ts`の`checkVersionCompat()`を呼び、
@@ -70,7 +95,11 @@ frontend/backendで単一のシステムバージョンを共有する。`Cargo.
 
 「このサーバーの詳細」はLeftNav左下の「Powered by Seiran」ボタンから開く`ServerInfoDialog`で、
 フロントエンドバージョン（`FRONTEND_VERSION`）とサーバーバージョン
-（`SiteMetaContext`が起動時に取得する`GET /api/meta`の`version`）を表示する。
+（`SiteMetaContext`が保持する`serverVersion`）を表示する。`serverVersion`の初期値は起動時の
+`GET /api/meta`の`version`だが、その後は`checkVersionCompat()`が読む`x-seiran-server-version`
+ヘッダーを`api/versionCompat.ts::setServerVersionHandler()`経由で`SiteMetaContext`へも流し込み、
+以降の任意のAPIレスポンスを受けるたびに最新化する。ページをリロードしなくても、デプロイし直しで
+サーバーバージョンが変われば次のAPI呼び出し時点で表示に反映される。
 
 ## 3. 統合バイナリとロール分割
 

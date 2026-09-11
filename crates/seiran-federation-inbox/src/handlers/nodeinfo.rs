@@ -1,4 +1,5 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use seiran_common::version::SERVER_VERSION;
 use sqlx::Row;
 use std::sync::Arc;
 
@@ -86,7 +87,7 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
         "version": "2.1",
         "software": {
             "name": "seiran",
-            "version": "0.1.0"
+            "version": SERVER_VERSION
         },
         "protocols": ["activitypub"],
         "usage": {

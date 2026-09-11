@@ -1,6 +1,7 @@
 {
   "name": "seiran-frontend",
   "version": "0.2.1",
+  "versionSuffix": "",
   "private": true,
   "type": "module",
   "scripts": {

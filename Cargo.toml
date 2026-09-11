@@ -11,8 +11,17 @@ members = [
 
 # frontend/backend共通のシステム全体バージョン。各crateは`version.workspace = true`で参照する
 # （docs/architecture.md 2.1節）。
+# `version_suffix`はCargoが継承の対象とする既知フィールドではなく、Cargo自身は素通りする
+# だけの独自キー（`cargo metadata`/`cargo build`で実際に無害であることを確認済み）。
+# フィーチャーブランチ・フォークでの運用のため、バージョン本体と別行に分離している
+# （`version`本体だけを変えるコミットと`version_suffix`だけを変えるコミットが別行になり、
+# git flow的なマージ・rebase時に不要な衝突が起きない）。`crates/seiran-api/build.rs`が
+# このファイルを直接読み取り、`SEIRAN_VERSION_SUFFIX`ビルド時環境変数として払い出す
+# （`crates/seiran-api/src/version.rs`参照）。frontend側は`frontend/package.json`の
+# `versionSuffix`が同じ役割を持つ。
 [workspace.package]
 version = "0.2.1"
+version_suffix = ""
 
 # デバッグビルドにデバッグシンボル（DWARF情報）を含めない。
 # gdb/lldb 等でのステップ実行はしない開発フローのため、バイナリサイズ・リンク時間・

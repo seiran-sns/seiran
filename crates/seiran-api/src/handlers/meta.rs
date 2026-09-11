@@ -3,6 +3,7 @@ use serde_json::json;
 
 use crate::handlers::emojis::fetch_public_emojis;
 use crate::handlers::notes::BSKY_MAX_TEXT_GRAPHEMES;
+use seiran_common::version::SERVER_VERSION;
 use crate::AppState;
 
 /// Misskey 互換クライアントがサーバー種別判定に使用するエンドポイント。
@@ -55,7 +56,7 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
     Json(json!({
         "uri": format!("https://{}", state.local_domain),
         "name": site_name,
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": SERVER_VERSION,
         "features": {
             "registration": true,
             "miauth": true

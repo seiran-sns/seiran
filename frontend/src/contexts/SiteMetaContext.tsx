@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { api } from "../api/client";
+import { setServerVersionHandler } from "../api/versionCompat";
 import { configureInternalMediaOrigins, configureMediaProxy } from "../utils/mediaProxy";
 import { useTheme } from "./ThemeContext";
 
@@ -81,6 +82,17 @@ export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
       })
       .catch(() => {});
     return () => controller.abort();
+  }, []);
+
+  // 初回取得後は、全APIレスポンスへ付与される`x-seiran-server-version`ヘッダー
+  // （`api/versionCompat.ts`の互換性チェックと共有）経由でサーバーバージョン表示を
+  // 常時最新化する。デプロイし直しでサーバーが新バージョンになった場合、ページを
+  // リロードしなくても次のAPIレスポンスを受けた時点で表示が追随する。
+  useEffect(() => {
+    setServerVersionHandler((version) => {
+      setMeta((prev) => (prev.serverVersion === version ? prev : { ...prev, serverVersion: version }));
+    });
+    return () => setServerVersionHandler(null);
   }, []);
 
   // テーマ切替（ライト⇄ダーク）時にも、その時点の実効テーマで再計算して適用し直す。

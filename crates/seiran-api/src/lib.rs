@@ -13,7 +13,6 @@ pub mod rate_limit;
 pub mod search;
 pub mod search_query;
 pub mod streaming;
-pub mod version;
 
 use axum::{
     extract::DefaultBodyLimit,

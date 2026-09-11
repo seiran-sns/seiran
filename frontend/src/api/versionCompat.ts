@@ -17,6 +17,18 @@ export function setReloadRequiredHandler(handler: ReloadRequiredHandler | null) 
   reloadRequiredHandler = handler;
 }
 
+type ServerVersionHandler = (version: string) => void;
+let serverVersionHandler: ServerVersionHandler | null = null;
+
+/**
+ * `SiteMetaProvider`がマウント時に登録する。サーバーバージョン表示（「Powered by Seiran」
+ * ダイアログ）をAPIレスポンスのたびに最新化するためのフック。初回表示は`GET /api/meta`
+ * の`version`フィールドに拠るが、その後はこのヘッダー経由で常時追随する。
+ */
+export function setServerVersionHandler(handler: ServerVersionHandler | null) {
+  serverVersionHandler = handler;
+}
+
 /**
  * ダイアログを閉じた後、同じ非互換状態のままリロードせずに使い続けても
  * 再表示しないようにする（リロードすればモジュール状態ごとリセットされ、
@@ -33,8 +45,9 @@ export function dismissReloadRequired() {
  * のいずれかを満たさない場合、リロードを促すダイアログを一度だけ出す。
  */
 export function checkVersionCompat(res: Response) {
-  if (dismissed) return;
   const serverVersion = res.headers.get(SERVER_VERSION_HEADER);
+  if (serverVersion) serverVersionHandler?.(serverVersion);
+  if (dismissed) return;
   const serverMinPeerVersion = res.headers.get(SERVER_MIN_PEER_VERSION_HEADER);
   if (!serverVersion || !serverMinPeerVersion) return;
   const compatible =

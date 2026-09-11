@@ -7,9 +7,12 @@ import path from "node:path";
 const repoRoot = path.resolve(import.meta.dirname, "..");
 
 // frontend/backend共通のシステムバージョン（docs/architecture.md 2.1節）。
-// `package.json`の`version`を唯一の情報源とし、ビルド時定数へ埋め込む
-// （`src/version.ts`の`__FRONTEND_VERSION__`）。
+// `package.json`の`version`+`versionSuffix`を唯一の情報源とし、ビルド時定数へ埋め込む
+// （`src/version.ts`の`__FRONTEND_VERSION__`）。`versionSuffix`はnpmが関知しない
+// 独自キーで、フィーチャーブランチ・フォークでの運用のため`version`本体とは別行に
+// 分離している（Cargo側の`version_suffix`と同じ理由、`Cargo.toml`のコメント参照）。
 const pkg = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "package.json"), "utf-8"));
+const frontendVersion = `${pkg.version}${pkg.versionSuffix ?? ""}`;
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, repoRoot, "");
@@ -35,7 +38,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      __FRONTEND_VERSION__: JSON.stringify(pkg.version),
+      __FRONTEND_VERSION__: JSON.stringify(frontendVersion),
     },
     server: {
       host: "0.0.0.0",

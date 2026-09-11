@@ -3,7 +3,7 @@
 
 use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response};
 
-use crate::version::{SERVER_MIN_PEER_VERSION, SERVER_VERSION};
+use seiran_common::version::{SERVER_MIN_PEER_VERSION, SERVER_VERSION};
 
 pub const SERVER_VERSION_HEADER: &str = "x-seiran-server-version";
 pub const SERVER_MIN_PEER_VERSION_HEADER: &str = "x-seiran-server-min-peer-version";

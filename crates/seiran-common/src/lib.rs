@@ -32,6 +32,7 @@ pub mod totp;
 pub mod traits;
 pub mod unique_retry;
 pub mod username;
+pub mod version;
 
 pub use db::{get_db_pool, run_migrations};
 pub use id::generate_snowflake_id;
