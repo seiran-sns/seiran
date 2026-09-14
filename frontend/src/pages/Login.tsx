@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, isTotpRequired } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
+import ServerInfoDialog from "../components/common/ServerInfoDialog";
 import Turnstile from "../components/Turnstile";
 import styles from "./Auth.module.css";
 
@@ -17,6 +18,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [serverInfoOpen, setServerInfoOpen] = useState(false);
 
   useEffect(() => {
     api.meta().then((meta) => setTurnstileSiteKey(meta.turnstileSiteKey ?? "")).catch(() => {});
@@ -182,7 +184,11 @@ export default function Login() {
         <p className={styles.link}>
           {t("auth:login.noAccountPrefix")} <Link to="/register">{t("auth:login.registerLink")}</Link>
         </p>
+        <button type="button" className={styles.poweredBy} onClick={() => setServerInfoOpen(true)}>
+          {t("nav:leftNav.poweredBy")}
+        </button>
       </div>
+      <ServerInfoDialog open={serverInfoOpen} onClose={() => setServerInfoOpen(false)} />
     </div>
   );
 }

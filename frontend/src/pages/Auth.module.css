@@ -126,3 +126,21 @@
 .linkButton:hover {
   text-decoration: underline;
 }
+
+.poweredBy {
+  display: block;
+  width: 100%;
+  margin: 20px 0 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  text-align: center;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.poweredBy:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
