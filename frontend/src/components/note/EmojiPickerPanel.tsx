@@ -29,6 +29,13 @@ interface PickerItem {
   width?: number;
   height?: number;
   blurhash?: string;
+  /** カスタム絵文字のカテゴリ（タブ内でのセクション分け用）。未分類は `null`。 */
+  category?: string | null;
+}
+
+interface PickerGroup {
+  name: string;
+  items: PickerItem[];
 }
 
 interface EmojiPickerPanelProps {
@@ -88,6 +95,52 @@ function PagedGrid({ items, rootRef, renderItem }: PagedGridProps) {
   );
 }
 
+interface PagedGroupedGridProps {
+  groups: PickerGroup[];
+  rootRef: RefObject<Element | null>;
+  renderItem: (item: PickerItem) => JSX.Element;
+}
+
+/**
+ * `groups` をカテゴリごとのセクションに分けつつ、全体の表示件数は `GRID_PAGE_SIZE` 件ずつ
+ * 段階的に増やす（`PagedGrid` のグループ対応版）。件数の多いカスタム絵文字一覧を一度に
+ * 描画すると固まるため、グループ境界をまたいで同じページング予算を消費させる。
+ */
+function PagedGroupedGrid({ groups, rootRef, renderItem }: PagedGroupedGridProps) {
+  const totalItems = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
+  const [visibleCount, setVisibleCount] = useState(GRID_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(GRID_PAGE_SIZE);
+  }, [groups]);
+
+  let remaining = visibleCount;
+  const sections: JSX.Element[] = [];
+  for (const group of groups) {
+    if (remaining <= 0) break;
+    if (group.items.length === 0) continue;
+    const shown = group.items.slice(0, remaining);
+    remaining -= shown.length;
+    sections.push(
+      <div key={group.name} className={styles.group}>
+        <div className={styles.groupTitle}>{group.name}</div>
+        <div className={styles.grid}>{shown.map(renderItem)}</div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {sections}
+      {visibleCount < totalItems && (
+        <LoadMoreSentinel
+          rootRef={rootRef}
+          onVisible={() => setVisibleCount((c) => Math.min(c + GRID_PAGE_SIZE, totalItems))}
+        />
+      )}
+    </>
+  );
+}
+
 /** カスタム絵文字＋Unicode絵文字を検索・タブ切り替えで選べるピッカー本体（Modal 内に描画する）。 */
 export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
   const { t, i18n } = useTranslation();
@@ -142,9 +195,32 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
         width: e.width,
         height: e.height,
         blurhash: e.blurhash,
+        category: e.category,
       })),
     [customEmojis]
   );
+
+  const customGroups: PickerGroup[] = useMemo(() => {
+    const byCategory = new Map<string, PickerItem[]>();
+    const uncategorized: PickerItem[] = [];
+    for (const item of customItems) {
+      const category = item.category?.trim();
+      if (!category) {
+        uncategorized.push(item);
+        continue;
+      }
+      const bucket = byCategory.get(category);
+      if (bucket) bucket.push(item);
+      else byCategory.set(category, [item]);
+    }
+    const groups = [...byCategory.entries()]
+      .sort(([a], [b]) => a.localeCompare(b, i18n.language))
+      .map(([name, items]) => ({ name, items }));
+    if (uncategorized.length > 0) {
+      groups.push({ name: t("home:reactionPicker.uncategorized"), items: uncategorized });
+    }
+    return groups;
+  }, [customItems, i18n.language, t]);
 
   const frequentItems: PickerItem[] = useMemo(() => {
     // `f.content` はDBの生content（`:shortcode@.:` 等ホスト付きになりうる）なので、shortcode
@@ -253,7 +329,7 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
           )
         ) : tab === "custom" ? (
           customItems.length > 0 ? (
-            <PagedGrid items={customItems} rootRef={bodyRef} renderItem={renderItem} />
+            <PagedGroupedGrid groups={customGroups} rootRef={bodyRef} renderItem={renderItem} />
           ) : (
             <p className={styles.message}>{t("home:reactionPicker.noCustomEmojis")}</p>
           )

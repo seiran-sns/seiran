@@ -191,7 +191,8 @@
     "tabCustom": "カスタム",
     "noResults": "該当する絵文字がありません",
     "noFrequent": "まだよく使う絵文字がありません",
-    "noCustomEmojis": "カスタム絵文字が登録されていません"
+    "noCustomEmojis": "カスタム絵文字が登録されていません",
+    "uncategorized": "未分類"
   },
   "replyIndicator": {
     "goToOriginalTitle": "返信元のポストへ移動",

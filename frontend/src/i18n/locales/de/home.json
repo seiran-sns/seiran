@@ -184,7 +184,8 @@
     "tabCustom": "Brauch",
     "noResults": "Kein passendes Emoji",
     "noFrequent": "Noch kein häufig verwendetes Emoji",
-    "noCustomEmojis": "Kein benutzerdefiniertes Emoji registriert"
+    "noCustomEmojis": "Kein benutzerdefiniertes Emoji registriert",
+    "uncategorized": "Nicht kategorisiert"
   },
   "replyIndicator": {
     "goToOriginalTitle": "Gehen Sie zum ursprünglichen Beitrag",

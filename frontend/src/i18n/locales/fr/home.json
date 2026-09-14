@@ -184,7 +184,8 @@
     "tabCustom": "Coutume",
     "noResults": "Aucun emoji correspondant",
     "noFrequent": "Pas encore d'emoji fréquemment utilisé",
-    "noCustomEmojis": "Aucun emoji personnalisé enregistré"
+    "noCustomEmojis": "Aucun emoji personnalisé enregistré",
+    "uncategorized": "Non classé"
   },
   "replyIndicator": {
     "goToOriginalTitle": "Aller au message d'origine",

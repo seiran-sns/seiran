@@ -184,7 +184,8 @@
     "tabCustom": "自定义",
     "noResults": "没有匹配的表情符号",
     "noFrequent": "还没有常用的表情符号",
-    "noCustomEmojis": "没有注册自定义表情符号"
+    "noCustomEmojis": "没有注册自定义表情符号",
+    "uncategorized": "未分类"
   },
   "replyIndicator": {
     "goToOriginalTitle": "前往原帖",

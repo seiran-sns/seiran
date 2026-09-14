@@ -184,7 +184,8 @@
     "tabCustom": "관습",
     "noResults": "일치하는 이모티콘이 없습니다.",
     "noFrequent": "아직 자주 사용하는 이모티콘이 없습니다.",
-    "noCustomEmojis": "등록된 맞춤 이모티콘이 없습니다."
+    "noCustomEmojis": "등록된 맞춤 이모티콘이 없습니다.",
+    "uncategorized": "미분류"
   },
   "replyIndicator": {
     "goToOriginalTitle": "원본 게시물로 이동",

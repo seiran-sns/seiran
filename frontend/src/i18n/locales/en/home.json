@@ -191,7 +191,8 @@
     "tabCustom": "Custom",
     "noResults": "No matching emoji",
     "noFrequent": "No frequently used emoji yet",
-    "noCustomEmojis": "No custom emoji registered"
+    "noCustomEmojis": "No custom emoji registered",
+    "uncategorized": "Uncategorized"
   },
   "replyIndicator": {
     "goToOriginalTitle": "Go to the original post",

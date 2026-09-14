@@ -184,7 +184,8 @@
     "tabCustom": "Costumbre",
     "noResults": "No hay emojis que coincidan",
     "noFrequent": "Aún no hay emojis de uso frecuente",
-    "noCustomEmojis": "No hay emojis personalizados registrados"
+    "noCustomEmojis": "No hay emojis personalizados registrados",
+    "uncategorized": "Sin categoría"
   },
   "replyIndicator": {
     "goToOriginalTitle": "Ir a la publicación original",
