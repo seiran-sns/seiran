@@ -816,6 +816,19 @@ pub async fn resolve_reply_context(
         .parse()
         .map_err(|_| ApiError::BadRequest("INVALID_REPLY_TO_ID".to_owned()))?;
 
+    // `find_delivery_meta`は可視性を一切見ない内部メタ取得用のため、まず
+    // `find_by_id_for_viewer`（`post_is_visible_to`によるfollowers_only/direct判定込み）で
+    // このviewerが対象ポストを実際に閲覧できるかを確認する。リポスト・引用は
+    // followers_only/directを一律禁止しているが、リプライにはその制限が無いため、
+    // ここで確認しないと無関係な第三者が他人のDMへ「リプライ」してthread_root_post_idへ
+    // 紛れ込めてしまう。
+    state
+        .posts
+        .find_by_id_for_viewer(reply_to_id, Some(viewer_actor_id))
+        .await
+        .map_err(|e| ApiError::Internal(format!("reply 元ポスト可視性チェック失敗: {}", e)))?
+        .ok_or(ApiError::NotFound("REPLY_TARGET_NOT_FOUND"))?;
+
     let meta = state
         .posts
         .find_delivery_meta(reply_to_id)

@@ -249,6 +249,33 @@ pub(crate) async fn save_ap_note_core(
     // 配送されていないため、DM宛先情報を信頼してはならない（意図的に常にスキップ）。
     let (thread_root_post_id, recipient_actor_ids): (Option<i64>, Vec<i64>) =
         if ref_mode == ReferenceResolutionMode::OneHopFetch && visibility == "direct" {
+            // リプライ先が direct（DM）の場合、送信元アクターがその DM の当事者
+            // （投稿者本人 or post_recipients の宛先）でなければ拒否する。ここを
+            // 確認せずに受理すると、リモートの送信元がinReplyTo/toを自由に申告できる
+            // ことを悪用し、無関係な第三者が他人同士のDMスレッドへ thread_root_post_id
+            // 経由で紛れ込める（当事者側のDM画面にまで表示されてしまう）。
+            if let Some(parent_id) = reply_to_post_id {
+                if let Ok(Some(m)) = inbox.post_repo.find_delivery_meta(parent_id).await {
+                    if m.visibility == "direct" {
+                        let authorized: bool = sqlx::query_scalar(
+                            "SELECT post_is_visible_to($1, $2, 'direct', $3, false)",
+                        )
+                        .bind(actor_id)
+                        .bind(m.actor_id)
+                        .bind(parent_id)
+                        .fetch_one(&inbox.db_pool)
+                        .await
+                        .unwrap_or(false);
+                        if !authorized {
+                            return Err(format!(
+                                "direct投稿へのリプライ拒否: actor_id={} は親投稿{}の当事者ではありません",
+                                actor_id, parent_id
+                            ));
+                        }
+                    }
+                }
+            }
+
             let parent_thread_root = match reply_to_post_id {
                 Some(parent_id) => inbox
                     .post_repo

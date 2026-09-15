@@ -835,7 +835,7 @@ Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri`
 配送されていないためDM宛先情報を信頼できず、以下は常にスキップされる。
 - `note["inReplyTo"]`から`reply_to_post_id`を解決する（`find_id_by_ap_or_at_uri`。DM以外の通常投稿にも設定するようになった。以前はFedi受信投稿は`reply_to_post_id`を一切保存しない実装だった）。
 - `to`に含まれるローカルアクターURIから宛先を解決し`post_recipients`へ保存する。ローカルユーザーの`actors.ap_uri`は登録時に設定されない（都度`https://{local_domain}/users/{username}`として動的組み立てされる）ため`find_by_ap_uri`では引っかからない。`seiran_common::ap::extract_local_username`でホスト名まで含めて自ドメインのURIかを検証してからusernameを取り出し`find_by_username_domain`で解決する（末尾セグメントだけでは同名リモートユーザーと取り違える）。
-- `reply_to_post_id`の親が`direct`ならその`thread_root_post_id`を継承、そうでなければ自分自身のIDをスレッド起点とする（伝播コピー方式はローカル投稿と共通）。
+- `reply_to_post_id`の親が`direct`の場合、送信元アクターが親投稿の当事者（投稿者本人 or `post_recipients`の宛先）であることを`post_is_visible_to`で確認してから`thread_root_post_id`を継承する。当事者でなければ受信自体を拒否する（送信元は`to`/`inReplyTo`を自由に申告できるため、ここを確認しないと無関係な第三者が他人同士のDMスレッドへ紛れ込める）。親が`direct`でなければ自分自身のIDをスレッド起点とする（伝播コピー方式はローカル投稿と共通）。
 - WS配信は宛先のみ（フォロワーには配信しない）。
 
 ### 配送
@@ -872,7 +872,7 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 ### 書き込みガード
 ブロック関係にある場合、以下の書き込み操作をAPIレベルで拒否する（`handlers::target_resolve::check_not_blocked`）。
 - フォロー作成（`follows.rs::follow_local`/`follow_bsky`/`follow_fedi`）
-- リプライ作成（`notes::delivery::resolve_reply_context`）
+- リプライ作成（`notes::delivery::resolve_reply_context`。これとは別に、返信先ポストが閲覧者から見えるか（`post_is_visible_to`、`docs/database.md`参照）も`find_by_id_for_viewer`で確認し、`followers_only`/`direct`ポストへの無関係な閲覧者からのリプライを拒否する）
 - リアクション作成（`notes::create_reaction`）
 - 引用投稿・リポスト作成（`notes::mod::create_regular_post`/`create_repost`）
 - DM送信（`notes::mod::create_regular_post`、`visibility=="direct"`の宛先ループ）

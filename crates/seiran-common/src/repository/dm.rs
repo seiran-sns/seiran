@@ -33,11 +33,14 @@ pub trait DmRepository: Send + Sync {
     ) -> Result<Vec<DmSessionSummary>, sqlx::Error>;
 
     /// 指定スレッド起点のメッセージ履歴を時刻順（id昇順、最下部が最新）で取得する。
-    /// 呼び出し元が別途 `is_participant` で閲覧権限を確認すること（このメソッド自体は
-    /// 権限チェックを行わない）。
+    /// `viewer_actor_id`が著者または宛先であるメッセージのみを返す（`post_is_visible_to`で
+    /// メッセージ単位に判定）。スレッド起点が同じでも、途中から加わった第三者宛の
+    /// メッセージ等、viewerが関与しないメッセージは除外される（呼び出し元は別途
+    /// `is_participant` でスレッドへのアクセス自体を確認すること）。
     async fn thread_messages(
         &self,
         thread_root_post_id: i64,
+        viewer_actor_id: i64,
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
@@ -165,6 +168,7 @@ impl DmRepository for PgDmRepository {
     async fn thread_messages(
         &self,
         thread_root_post_id: i64,
+        viewer_actor_id: i64,
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
@@ -179,12 +183,14 @@ impl DmRepository for PgDmRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE p.thread_root_post_id = $1 AND p.deleted_at IS NULL
-               AND ($3::bigint IS NULL OR p.id < $3)
-               AND ($4::bigint IS NULL OR p.id > $4)
+               AND ($4::bigint IS NULL OR p.id < $4)
+               AND ($5::bigint IS NULL OR p.id > $5)
+               AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, false)
              ORDER BY p.id ASC
-             LIMIT $2",
+             LIMIT $3",
         )
         .bind(thread_root_post_id)
+        .bind(viewer_actor_id)
         .bind(limit)
         .bind(until_id)
         .bind(since_id)

@@ -185,7 +185,7 @@ pub async fn thread_messages(
 
     let mut rows = match state
         .dm
-        .thread_messages(thread_root_id, limit, until_id, since_id)
+        .thread_messages(thread_root_id, actor_id, limit, until_id, since_id)
         .await
     {
         Ok(r) => r,
