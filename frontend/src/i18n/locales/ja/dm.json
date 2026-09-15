@@ -5,6 +5,7 @@
     "emptySessions": "まだメッセージはありません",
     "composeHint": "宛先を選んでメッセージを送信してください",
     "unknownPeer": "不明な相手",
+    "toLabel": "宛先:",
     "textPlaceholder": "メッセージを入力…",
     "sendButton": "送信",
     "attachButtonTitle": "メディアを添付",

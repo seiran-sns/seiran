@@ -115,6 +115,26 @@
   color: var(--accent);
 }
 
+.messageRecipients {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.messageRecipientsLabel {
+  font-size: 0.68rem;
+  color: var(--text-faint);
+  margin-right: 1px;
+}
+
+.messageRecipientAvatar {
+  display: inline-flex;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
 .messageText {
   margin: 0;
   white-space: pre-wrap;

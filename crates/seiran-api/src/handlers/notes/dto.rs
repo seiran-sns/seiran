@@ -230,6 +230,12 @@ pub struct NoteResponse {
     /// リダイレクトする（#DM投稿ページ直リンク対応）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_root_post_id: Option<String>,
+    /// `visibility: "direct"`の場合のみ設定。このメッセージ個別の宛先一覧（そのメッセージの
+    /// `post_recipients`）。3人以上が参加するスレッドで「誰に届いているか」を表示するため
+    /// （#DM宛先表示）。`to_note_response`単体では常に`None`、`handlers::dm::thread_messages`
+    /// が事後に埋める。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipients: Option<Vec<NoteRecipientInfo>>,
     /// ローカル投稿がFedi/Bskyへ実際に配送されたか（投稿作成時の配送先選択の永続化）。
     /// ローカル投稿以外（リモート受信・リポストラッパー）では省略。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -322,6 +328,21 @@ pub struct NoteUserInfo {
     pub is_blocked_by: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_repost_muted: Option<bool>,
+}
+
+/// DMメッセージ個別の宛先表示用アクター要約（`handlers::dm::DmPeerResponse`と同形）。
+/// 3人以上が参加するスレッドで「このメッセージが誰に届いているか」を表示するために使う
+/// （#DM宛先表示、`docs/protocols.md` 9節）。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteRecipientInfo {
+    pub id: String,
+    pub username: String,
+    pub domain: Option<String>,
+    pub display_name: Option<String>,
+    pub actor_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 /// Misskey本家 `UserLite.instance` に合わせたリモートインスタンス情報。フィールド名・形は
@@ -524,6 +545,7 @@ pub fn to_note_response(
             Some(p.visibility)
         },
         thread_root_post_id: p.thread_root_post_id.map(|i| i.to_string()),
+        recipients: None,
         deliver_fedi: if is_local { Some(p.deliver_fedi) } else { None },
         deliver_bsky: if is_local { Some(p.deliver_bsky) } else { None },
         reply_fedi_allowed,

@@ -5,6 +5,7 @@
     "emptySessions": "Noch keine Nachrichten",
     "composeHint": "Wählen Sie einen Empfänger aus, dem Sie eine Nachricht senden möchten",
     "unknownPeer": "Unbekannter Peer",
+    "toLabel": "An:",
     "textPlaceholder": "Geben Sie eine Nachricht ein…",
     "sendButton": "Schicken",
     "attachButtonTitle": "Medien anhängen",

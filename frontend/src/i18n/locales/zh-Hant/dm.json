@@ -5,6 +5,7 @@
     "emptySessions": "尚無訊息",
     "composeHint": "請選擇要傳送訊息的收件者",
     "unknownPeer": "未知的對象",
+    "toLabel": "收件者:",
     "textPlaceholder": "輸入訊息...",
     "sendButton": "傳送",
     "attachButtonTitle": "附加媒體",

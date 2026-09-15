@@ -78,6 +78,10 @@ pub trait DmRepository: Send + Sync {
     /// 投稿の宛先アクターID一覧を取得する（AP配送のto/cc組み立て用）。
     async fn recipient_ids(&self, post_id: i64) -> Result<Vec<i64>, sqlx::Error>;
 
+    /// 複数投稿の宛先アクターIDを一括取得する（`(post_id, actor_id)`のペア列）。
+    /// スレッド内の各メッセージごとの宛先表示（#DM宛先表示）用、N+1を避けるため一括で引く。
+    async fn recipient_ids_for_posts(&self, post_ids: &[i64]) -> Result<Vec<(i64, i64)>, sqlx::Error>;
+
     /// セッション一覧の相手表示用に、複数アクターIDの要約情報を一括取得する。
     async fn peer_summaries(&self, actor_ids: &[i64]) -> Result<Vec<DmPeerSummary>, sqlx::Error>;
 }
@@ -306,6 +310,15 @@ impl DmRepository for PgDmRepository {
             .bind(post_id)
             .fetch_all(&self.pool)
             .await
+    }
+
+    async fn recipient_ids_for_posts(&self, post_ids: &[i64]) -> Result<Vec<(i64, i64)>, sqlx::Error> {
+        sqlx::query_as::<_, (i64, i64)>(
+            "SELECT post_id, actor_id FROM post_recipients WHERE post_id = ANY($1)",
+        )
+        .bind(post_ids)
+        .fetch_all(&self.pool)
+        .await
     }
 
     async fn read_states(

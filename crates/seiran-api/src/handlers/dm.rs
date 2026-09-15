@@ -16,7 +16,7 @@ use crate::error::ApiError;
 use crate::middleware::AuthedUser;
 use crate::AppState;
 
-use super::notes::dto::{to_note_response, NoteResponse, TimelineQuery};
+use super::notes::dto::{to_note_response, NoteRecipientInfo, NoteResponse, TimelineQuery};
 use super::notes::{
     attach_remote_instance_info, enqueue_stale_poll_fetches, fetch_attachments_map,
     fetch_link_cards_map, fetch_reactions_map, resolve_mention_facets_in_place,
@@ -165,6 +165,61 @@ pub async fn sessions(
     Json(result).into_response()
 }
 
+/// 複数メッセージそれぞれの宛先一覧を一括取得する（N+1回避）。存在しない・宛先無しの
+/// post_idはキーごと省略される。
+async fn fetch_message_recipients_map(
+    state: &AppState,
+    post_ids: &[i64],
+) -> HashMap<i64, Vec<NoteRecipientInfo>> {
+    let pairs = state
+        .dm
+        .recipient_ids_for_posts(post_ids)
+        .await
+        .unwrap_or_default();
+    if pairs.is_empty() {
+        return HashMap::new();
+    }
+    let actor_ids: Vec<i64> = pairs
+        .iter()
+        .map(|(_, actor_id)| *actor_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let actor_info: HashMap<i64, NoteRecipientInfo> = state
+        .dm
+        .peer_summaries(&actor_ids)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| {
+            let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                p.avatar_url,
+                &p.actor_type,
+                &p.domain,
+                p.id,
+            );
+            (
+                p.id,
+                NoteRecipientInfo {
+                    id: p.id.to_string(),
+                    username: p.username,
+                    domain: Some(p.domain),
+                    display_name: p.display_name,
+                    actor_type: p.actor_type,
+                    avatar_url,
+                },
+            )
+        })
+        .collect();
+    let mut result: HashMap<i64, Vec<NoteRecipientInfo>> = HashMap::new();
+    for (post_id, actor_id) in pairs {
+        if let Some(info) = actor_info.get(&actor_id) {
+            result.entry(post_id).or_default().push(info.clone());
+        }
+    }
+    result
+}
+
 /// `GET /api/dm/sessions/:thread_root_id/messages` — メッセージ履歴（時刻順、最下部が最新）。
 pub async fn thread_messages(
     Path(thread_root_id): Path<i64>,
@@ -198,6 +253,7 @@ pub async fn thread_messages(
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
+    let mut recipients_by_post = fetch_message_recipients_map(&state, &ids).await;
     let mut notes: Vec<NoteResponse> = rows
         .into_iter()
         .map(|p| {
@@ -208,6 +264,7 @@ pub async fn thread_messages(
                 lc_map.remove(&id).unwrap_or_default(),
             );
             nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            nr.recipients = recipients_by_post.remove(&id);
             nr
         })
         .collect();

@@ -97,6 +97,49 @@ test("DMのポストURLに直接アクセスすると、可視であればメッ
   await expect(page).toHaveURL(new RegExp(`/messages/${created.id}$`), { timeout: 10_000 });
 });
 
+test.describe("3人以上のスレッドでの宛先表示", () => {
+  test("3人以上の参加者がいるスレッドではメッセージごとに宛先アイコンが表示される", async ({ page, request }) => {
+    const alice = await registerUserViaApi(request, "e2dmtoA");
+    const bob = await registerUserViaApi(request, "e2dmtoB");
+    const charlie = await registerUserViaApi(request, "e2dmtoC");
+
+    const groupText = `グループDM宛先表示テスト ${Date.now()}`;
+    const createRes = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${alice.token}` },
+      data: { text: groupText, visibility: "direct", recipient_actor_ids: [bob.actorId, charlie.actorId] },
+    });
+    expect(createRes.ok(), `グループDM作成失敗: ${createRes.status()} ${await createRes.text()}`).toBeTruthy();
+    const created = await createRes.json();
+
+    await seedAuth(page, alice.token);
+    await page.goto(`/messages/${created.id}`);
+    await expect(page.getByText(groupText).first()).toBeVisible({ timeout: 15_000 });
+
+    // 「宛先:」ラベルと、宛先2人分（bob・charlie）のアバターが表示される。
+    await expect(page.getByText("宛先:").first()).toBeVisible();
+    const recipientAvatars = page.locator(`[title*="@${bob.username}"], [title*="@${charlie.username}"]`);
+    await expect(recipientAvatars).toHaveCount(2);
+  });
+
+  test("2人だけのスレッドでは宛先アイコンが表示されない", async ({ page, request }) => {
+    const alice = await registerUserViaApi(request, "e2dmto1A");
+    const bob = await registerUserViaApi(request, "e2dmto1B");
+
+    const dmText = `1対1DM宛先非表示テスト ${Date.now()}`;
+    const createRes = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${alice.token}` },
+      data: { text: dmText, visibility: "direct", recipient_actor_ids: [bob.actorId] },
+    });
+    expect(createRes.ok()).toBeTruthy();
+    const created = await createRes.json();
+
+    await seedAuth(page, alice.token);
+    await page.goto(`/messages/${created.id}`);
+    await expect(page.getByText(dmText).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("宛先:")).toHaveCount(0);
+  });
+});
+
 test("通常ポストへの返信としてDMを開始するとスレッド起点が最初のDM投稿になる", async ({ request }) => {
   const alice = await registerUserViaApi(request, "e2dmthreadA");
   const bob = await registerUserViaApi(request, "e2dmthreadB");

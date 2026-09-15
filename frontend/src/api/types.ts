@@ -318,6 +318,9 @@ export interface Note {
   /** `visibility === "direct"`の場合のみ設定。DMは投稿として表示しないポリシーのため、
    * これを受け取ったら`/messages/:threadRootPostId`へリダイレクトする（NoteDetailPage参照）。 */
   threadRootPostId?: string;
+  /** `visibility === "direct"`の場合のみ設定される、このメッセージ個別の宛先一覧
+   * （3人以上参加するスレッドで「誰に届いているか」を表示するため。MessagesPage参照）。 */
+  recipients?: DmPeer[];
   /** ローカル投稿がFedi/Bskyへ実際に配送されたか。ローカル投稿以外では省略。 */
   deliverFedi?: boolean;
   deliverBsky?: boolean;
@@ -588,6 +591,7 @@ export interface RawNote {
   visibility?: string;
   threadRootPostId?: string;
   thread_root_post_id?: string;
+  recipients?: DmPeer[];
   deliverFedi?: boolean;
   deliverBsky?: boolean;
   replyFediAllowed?: boolean;
@@ -649,6 +653,7 @@ export function normalizeNote(r: RawNote): Note {
     pinnedByMe: r.pinnedByMe ?? r.pinned_by_me,
     visibility: r.visibility,
     threadRootPostId: r.threadRootPostId ?? r.thread_root_post_id,
+    recipients: r.recipients,
     deliverFedi: r.deliverFedi,
     deliverBsky: r.deliverBsky,
     replyFediAllowed: r.replyFediAllowed ?? false,

@@ -5,6 +5,7 @@
     "emptySessions": "还没有消息",
     "composeHint": "选择发送消息的收件人",
     "unknownPeer": "未知对象",
+    "toLabel": "收件人:",
     "textPlaceholder": "输入消息...",
     "sendButton": "发送",
     "attachButtonTitle": "附加媒体",

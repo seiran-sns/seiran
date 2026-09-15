@@ -215,6 +215,7 @@ async fn create_repost(
         // ため、配送先・可視性は未設定のままでよい。
         visibility: None,
         thread_root_post_id: None,
+        recipients: None,
         deliver_fedi: None,
         deliver_bsky: None,
         reply_fedi_allowed: false,
@@ -945,6 +946,7 @@ async fn persist_regular_post(
             Some(visibility.to_string())
         },
         thread_root_post_id: thread_root_post_id.map(|i| i.to_string()),
+        recipients: None,
         deliver_fedi: Some(deliver_fedi),
         deliver_bsky: Some(deliver_bsky),
         // ローカル投稿なので実際に配送対象とした値そのものが返信可否になる

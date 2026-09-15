@@ -198,10 +198,27 @@ export default function MessagesPage() {
         {!messagesLoading &&
           messages.map((m) => {
             const isMine = m.user.id === user?.actor_id;
+            // 3人以上（自分+宛先2人以上）が参加するスレッドでのみ、メッセージごとの宛先を表示する
+            // （1対1では常に相手全員に届くため不要）。
+            const showRecipients = recipients.length >= 2 && !!m.recipients?.length;
             return (
               <div key={m.id} className={`${styles.messageRow} ${isMine ? styles.messageRowMine : ""}`}>
                 {!isMine && <Avatar url={m.user.avatarUrl} name={m.user.displayName || m.user.username} size={28} />}
                 <div className={`${styles.messageBubble} ${isMine ? styles.messageBubbleMine : ""}`}>
+                  {showRecipients && (
+                    <div className={styles.messageRecipients}>
+                      <span className={styles.messageRecipientsLabel}>{t("dm:messagesPage.toLabel")}</span>
+                      {m.recipients!.map((r) => (
+                        <span
+                          key={r.id}
+                          className={styles.messageRecipientAvatar}
+                          title={`@${r.username}${r.domain ? `@${r.domain}` : ""}\n${r.displayName || r.username}`}
+                        >
+                          <Avatar url={r.avatarUrl} name={r.displayName || r.username} size={16} />
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <p className={styles.messageText}>
                     <EmojiText text={m.text} emojis={m.emojis} />
                   </p>

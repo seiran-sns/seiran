@@ -5,6 +5,7 @@
     "emptySessions": "Aún no hay mensajes",
     "composeHint": "Elija un destinatario para enviar un mensaje",
     "unknownPeer": "Par desconocido",
+    "toLabel": "Para:",
     "textPlaceholder": "Escribe un mensaje…",
     "sendButton": "Enviar",
     "attachButtonTitle": "Adjuntar medios",
