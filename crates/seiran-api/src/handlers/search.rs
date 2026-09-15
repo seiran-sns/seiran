@@ -252,6 +252,13 @@ pub(crate) async fn search_local_db(
         QueryBuilder::new("SELECT p.id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE ");
     crate::search_query::append_sql(&condition, &mut sql, me);
     sql.push(" AND p.deleted_at IS NULL");
+    // followers_only/directは閲覧者が投稿者本人・accepted フォロワー・DM宛先のいずれかで
+    // なければ検索結果に出さない（他の全取得経路と同じ`post_is_visible_to`に統一）。
+    // これが無いと、検索は`me`（`from:`/`mentions:`フィルタ用）を可視性判定に一切使って
+    // おらず、誰でも他人宛のDM本文まで検索でヒットさせられてしまっていた。
+    sql.push(" AND post_is_visible_to(")
+        .push_bind(me.map(|(actor_id, _)| actor_id))
+        .push(", p.actor_id, p.visibility::text, p.id, false)");
     if let Some(uid) = until_id {
         sql.push(" AND p.id < ").push_bind(uid);
     }
