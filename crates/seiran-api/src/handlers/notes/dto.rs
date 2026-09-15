@@ -225,6 +225,11 @@ pub struct NoteResponse {
     /// Fedi受信ポストは`to`/`cc`から判定した値。`public`（デフォルト・大多数のケース）は省略する。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<String>,
+    /// `visibility: "direct"`の場合のみ設定。DMは投稿として表示しないポリシーのため、
+    /// フロントは`GET /api/notes/:id`でこれを受け取ったら`/messages/:threadRootPostId`へ
+    /// リダイレクトする（#DM投稿ページ直リンク対応）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_root_post_id: Option<String>,
     /// ローカル投稿がFedi/Bskyへ実際に配送されたか（投稿作成時の配送先選択の永続化）。
     /// ローカル投稿以外（リモート受信・リポストラッパー）では省略。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -518,6 +523,7 @@ pub fn to_note_response(
         } else {
             Some(p.visibility)
         },
+        thread_root_post_id: p.thread_root_post_id.map(|i| i.to_string()),
         deliver_fedi: if is_local { Some(p.deliver_fedi) } else { None },
         deliver_bsky: if is_local { Some(p.deliver_bsky) } else { None },
         reply_fedi_allowed,

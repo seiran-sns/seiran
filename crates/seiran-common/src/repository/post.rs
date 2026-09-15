@@ -146,6 +146,10 @@ pub struct TimelinePost {
     pub ap_bridge_post_id: Option<i64>,
     #[sqlx(default)]
     pub atp_bridge_post_id: Option<i64>,
+    /// `visibility='direct'`の場合のスレッド起点ポストID（DMメッセージスレッドURL組み立て用）。
+    /// `find_by_id_for_viewer`のみ取得する（他のクエリでは常に`None`）。
+    #[sqlx(default)]
+    pub thread_root_post_id: Option<i64>,
 }
 
 /// プロフィール表示用のポスト要約。
@@ -1092,7 +1096,8 @@ impl PostRepository for PgPostRepository {
                     p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
                     p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status,
                     a.suspended_at AS actor_suspended_at,
-                    p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id
+                    p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id,
+                    p.thread_root_post_id
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
@@ -1164,7 +1169,8 @@ impl PostRepository for PgPostRepository {
                     p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
                     p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status,
                     a.suspended_at AS actor_suspended_at,
-                    p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id
+                    p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id,
+                    p.thread_root_post_id
              FROM posts p JOIN actors a ON a.id = p.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id

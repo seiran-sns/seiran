@@ -78,6 +78,25 @@ test("返信送信後に自分のメッセージが重複表示されない", as
   await expect(page.getByText(replyText)).toHaveCount(1, { timeout: 10_000 });
 });
 
+test("DMのポストURLに直接アクセスすると、可視であればメッセージスレッドURLへリダイレクトされる", async ({ page, request }) => {
+  const alice = await registerUserViaApi(request, "e2dmredirA");
+  const bob = await registerUserViaApi(request, "e2dmredirB");
+
+  const createRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: `リダイレクトテスト ${Date.now()}`, visibility: "direct", recipient_actor_ids: [bob.actorId] },
+  });
+  expect(createRes.ok()).toBeTruthy();
+  const created = await createRes.json();
+
+  // DMは投稿として表示しないポリシー（seiranではdirectをタイムライン・パーマリンクに
+  // 出さない）。当事者（bob）が/notes/:idへ直接アクセスしても、投稿詳細としては
+  // 描画されず、対応するメッセージスレッドURLへ差し替わる。
+  await seedAuth(page, bob.token);
+  await page.goto(`/notes/${created.id}`);
+  await expect(page).toHaveURL(new RegExp(`/messages/${created.id}$`), { timeout: 10_000 });
+});
+
 test("通常ポストへの返信としてDMを開始するとスレッド起点が最初のDM投稿になる", async ({ request }) => {
   const alice = await registerUserViaApi(request, "e2dmthreadA");
   const bob = await registerUserViaApi(request, "e2dmthreadB");

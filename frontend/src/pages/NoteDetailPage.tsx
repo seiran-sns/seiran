@@ -87,12 +87,22 @@ export default function NoteDetailPage() {
     setError("");
     api.notes
       .get(id)
-      .then((n) => !cancelled && setNote(n))
+      .then((n) => {
+        if (cancelled) return;
+        // DMは投稿として表示しないポリシー（#DM投稿ページ直リンク対応）。可視でも
+        // メッセージスレッドURLへ差し替え、投稿詳細としては描画しない。
+        if (n.visibility === "direct" && n.threadRootPostId) {
+          navigate(`/messages/${n.threadRootPostId}`, { replace: true });
+          return;
+        }
+        setNote(n);
+      })
       .catch((e) => !cancelled && setError(getErrorMessage(e)))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // `#open_cw` ハッシュ付きでの遷移を検出する（#229）。タブ同期effect（下記）が

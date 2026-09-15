@@ -826,6 +826,7 @@ mod tests {
             bridge_of_post_id: None,
             ap_bridge_post_id: None,
             atp_bridge_post_id: None,
+            thread_root_post_id: None,
         }
     }
 

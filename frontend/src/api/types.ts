@@ -315,6 +315,9 @@ export interface Note {
   /** 可視性（`unlisted`/`followers_only`/`direct`）。Fedi受信ポストの`to`/`cc`から判定した値。
    * `public`（デフォルト）は省略される。 */
   visibility?: string;
+  /** `visibility === "direct"`の場合のみ設定。DMは投稿として表示しないポリシーのため、
+   * これを受け取ったら`/messages/:threadRootPostId`へリダイレクトする（NoteDetailPage参照）。 */
+  threadRootPostId?: string;
   /** ローカル投稿がFedi/Bskyへ実際に配送されたか。ローカル投稿以外では省略。 */
   deliverFedi?: boolean;
   deliverBsky?: boolean;
@@ -583,6 +586,8 @@ export interface RawNote {
   pinnedByMe?: boolean;
   pinned_by_me?: boolean;
   visibility?: string;
+  threadRootPostId?: string;
+  thread_root_post_id?: string;
   deliverFedi?: boolean;
   deliverBsky?: boolean;
   replyFediAllowed?: boolean;
@@ -643,6 +648,7 @@ export function normalizeNote(r: RawNote): Note {
     emojis: r.emojis,
     pinnedByMe: r.pinnedByMe ?? r.pinned_by_me,
     visibility: r.visibility,
+    threadRootPostId: r.threadRootPostId ?? r.thread_root_post_id,
     deliverFedi: r.deliverFedi,
     deliverBsky: r.deliverBsky,
     replyFediAllowed: r.replyFediAllowed ?? false,

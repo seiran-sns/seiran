@@ -854,7 +854,10 @@ Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri`
 `dm_read_states`（actor_id, thread_root_post_id, last_read_post_id）でスレッド別の既読カーソルを持つ。左ペインバッジは「未読のあるセッション数」（`DmRepository::unread_session_count`）。
 
 ### ミュート・ブロック相手のDMの扱い
-`DmRepository::sessions`（一覧）・`unread_session_count`（未読バッジ）は、スレッドの参加者（自分以外）が1人以上いて、かつ全員が次のいずれかに該当する場合そのスレッドを除外する: (1) 自分視点でミュート済み（`mutes.muter_actor_id`=自分）、(2) 自分との間にブロック関係がある（`blocks`、方向を問わない。10節のブロック方針「相互完全非表示」に合わせる）。参加者のうち1人でも対象外（未ミュート・未ブロック）がいれば表示する（グループDMは全員が対象の場合のみ非表示）。`thread_messages`（個別スレッドの閲覧・既読処理）自体は`is_participant`のみのチェックで変更しておらず、スレッドURLを直接踏めば引き続き閲覧できる（一覧・バッジからの発見を防ぐのみ）。
+`DmRepository::sessions`（一覧）・`unread_session_count`（未読バッジ）は、スレッドの参加者（自分以外）が1人以上いて、かつ全員が次のいずれかに該当する場合そのスレッドを除外する: (1) 自分視点でミュート済み（`mutes.muter_actor_id`=自分）、(2) 自分との間にブロック関係がある（`blocks`、方向を問わない。10節のブロック方針「相互完全非表示」に合わせる）。参加者のうち1人でも対象外（未ミュート・未ブロック）がいれば表示する（グループDMは全員が対象の場合のみ非表示）。`thread_messages`（個別スレッドの閲覧・既読処理）はスレッド単位の`is_participant`チェックに加え、メッセージ単位でも`post_is_visible_to`により著者・宛先を確認する（`docs/database.md`参照。スレッド起点を共有する別メッセージまで見えてしまう穴を塞ぐため）。
+
+### DM投稿URLへの直接アクセス
+DMは投稿として表示しないポリシーのため、`GET /api/notes/:id`（`handlers::notes::get_note`/`get_note_ap`）が`visibility: "direct"`の投稿を返す場合、`NoteResponse.thread_root_post_id`（DM以外は省略）を必ず付与する。フロントエンド（`NoteDetailPage.tsx`）はこれを受け取ったら投稿詳細としては描画せず、`/messages/:threadRootPostId`へ`replace`ナビゲーションで差し替える。閲覧不可（`post_is_visible_to`で拒否）な場合は従来通り`NOT_FOUND`。
 
 ### `chat.bsky.actor.declaration`（Bsky DM受信許可）
 Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration`（rkey固定`self`、`allowIncoming: "all"|"none"|"following"`）を取得してDM送信可否を判定する。このレコードが無いと保守的に送信をブロックする（実機確認: 未コミット状態のseiranユーザーへ公式クライアントからDMを送ろうとすると宛先候補がグレーアウトする）。`AtpCommitService::commit_chat_declaration`が`allowIncoming: "all"`固定でコミットする。新規ユーザー登録時（`handlers::auth::register`）と、起動時のバックフィル（`spawn_startup_tasks`→`backfill_chat_declarations`、未コミットのローカルユーザーを検出して一括実行）の両方から呼ばれる。ユーザーが値を選べる設定UIは未実装（`docs/roadmap.md`参照）。
