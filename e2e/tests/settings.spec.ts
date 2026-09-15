@@ -262,11 +262,7 @@ test("設定メニューから表示設定画面へ遷移でき、言語を切�
   await expect(page.getByText("Language preference saved.")).toBeVisible({
     timeout: 15_000,
   });
-  await expect(
-    page
-      .getByRole("heading", { name: "Appearance settings" })
-      .or(page.getByText("Appearance settings")),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Theme" })).toBeVisible();
 
   const meRes = await request.get("/api/auth/me", {
     headers: { Authorization: `Bearer ${user.token}` },
@@ -278,7 +274,7 @@ test("設定メニューから表示設定画面へ遷移でき、言語を切�
   await expect(page.getByText("Preferencia de idioma guardada.")).toBeVisible({
     timeout: 15_000,
   });
-  await expect(page.getByText("Configuración de apariencia")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tema" })).toBeVisible();
 
   const meEsRes = await request.get("/api/auth/me", {
     headers: { Authorization: `Bearer ${user.token}` },
