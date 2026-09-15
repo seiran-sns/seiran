@@ -4,7 +4,6 @@ import { QRCodeSVG } from "qrcode.react";
 import { api, getErrorMessage, type PasskeySummary } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./AccountSettings.module.css";
 
@@ -12,7 +11,6 @@ import styles from "./AccountSettings.module.css";
 export default function AccountSettingsPage() {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
-  const goBack = useGoBack();
 
   const [did, setDid] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
@@ -209,13 +207,6 @@ export default function AccountSettingsPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("account:accountSettings.title")}</span>
-      </header>
-
       {loading ? (
         <p className={panel.message}>{t("common:loading")}</p>
       ) : (

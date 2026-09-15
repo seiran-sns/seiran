@@ -4,8 +4,8 @@
 }
 
 .avatarLarge {
-  width: 84px;
-  height: 84px;
+  width: 120px;
+  height: 120px;
   border-radius: 50%;
   background: var(--accent-deep);
   color: var(--accent);
@@ -13,7 +13,7 @@
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 2.2rem;
+  font-size: 3.1rem;
   margin-bottom: 14px;
   overflow: hidden;
 }
@@ -23,6 +23,41 @@
   height: 100%;
   object-fit: cover;
   border-radius: 50%;
+}
+
+/* 背景画像（バナー）。.card の padding を打ち消して画面幅いっぱいに表示する。 */
+.bannerWrap {
+  position: relative;
+  margin: -20px -20px 14px;
+  aspect-ratio: 16 / 5;
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+
+.bannerImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 顔アイコンは背景画像領域内の左下寄りに重ねて配置する。 */
+.avatarOnBanner {
+  position: absolute;
+  left: 20px;
+  bottom: 12px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid var(--bg);
+  background: var(--accent-deep);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 3.1rem;
 }
 
 .names {

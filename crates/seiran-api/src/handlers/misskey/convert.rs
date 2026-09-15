@@ -212,14 +212,25 @@ pub async fn build_users_detailed(
     // （書き込みはrepository/post.rs・repository/follow.rsでのみ行う、唯一の真実の情報源。
     // docs/improvement_2026-08-29.md PERF-4）。以前はposts/followsへの3本のGROUP BY COUNTを
     // 毎回実行していた。
-    // (created_at, avatar_url, notes_count, followers_count, following_count)
-    type ProfileRow = (chrono::DateTime<chrono::Utc>, Option<String>, i64, i64, i64);
-    let profile_rows: Vec<(i64, ProfileRow)> = sqlx::query_as::<_, (i64, chrono::DateTime<chrono::Utc>, Option<String>, i64, i64, i64)>(
-        "SELECT a.id, a.created_at, COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url), \
+    // (created_at, avatar_url, banner_url, notes_count, followers_count, following_count)
+    type ProfileRow = (
+        chrono::DateTime<chrono::Utc>,
+        Option<String>,
+        Option<String>,
+        i64,
+        i64,
+        i64,
+    );
+    let profile_rows: Vec<(i64, ProfileRow)> = sqlx::query_as::<_, (i64, chrono::DateTime<chrono::Utc>, Option<String>, Option<String>, i64, i64, i64)>(
+        "SELECT a.id, a.created_at, \
+         COALESCE(rtrim(avatar_sp.public_url, '/') || '/' || avatar_mf.storage_key, a.avatar_url), \
+         COALESCE(rtrim(banner_sp.public_url, '/') || '/' || banner_mf.storage_key, a.banner_url), \
          a.notes_count, a.followers_count, a.following_count \
          FROM actors a \
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+         LEFT JOIN media_files avatar_mf ON avatar_mf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers avatar_sp ON avatar_sp.id = avatar_mf.storage_provider_id \
+         LEFT JOIN media_files banner_mf ON banner_mf.id = a.banner_media_id \
+         LEFT JOIN storage_providers banner_sp ON banner_sp.id = banner_mf.storage_provider_id \
          WHERE a.id = ANY($1)",
     )
     .bind(&ids)
@@ -227,8 +238,8 @@ pub async fn build_users_detailed(
     .await
     .unwrap_or_default()
     .into_iter()
-    .map(|(id, created_at, avatar_url, notes_count, followers_count, following_count)| {
-        (id, (created_at, avatar_url, notes_count, followers_count, following_count))
+    .map(|(id, created_at, avatar_url, banner_url, notes_count, followers_count, following_count)| {
+        (id, (created_at, avatar_url, banner_url, notes_count, followers_count, following_count))
     })
     .collect();
     let mut profile_by_id: HashMap<i64, ProfileRow> = profile_rows.into_iter().collect();
@@ -236,10 +247,10 @@ pub async fn build_users_detailed(
     actors
         .iter()
         .map(|actor| {
-            let (created_at, avatar_url, notes_count, followers_count, following_count) =
+            let (created_at, avatar_url, banner_url, notes_count, followers_count, following_count) =
                 profile_by_id
                     .remove(&actor.id)
-                    .unwrap_or_else(|| (chrono::Utc::now(), None, 0, 0, 0));
+                    .unwrap_or_else(|| (chrono::Utc::now(), None, None, 0, 0, 0));
 
             let mut lite = user_lite(
                 actor.id,
@@ -256,7 +267,7 @@ pub async fn build_users_detailed(
                 lite,
                 created_at: created_at.to_rfc3339(),
                 description: actor.bio.clone(),
-                banner_url: None,
+                banner_url,
                 is_locked: actor.is_locked,
                 is_silenced: false,
                 is_suspended: false,

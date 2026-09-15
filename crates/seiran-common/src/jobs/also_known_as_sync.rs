@@ -138,6 +138,7 @@ async fn resolve_also_known_as_uri(
                 &profile.handle,
                 profile.display_name.as_deref(),
                 profile.avatar.as_deref(),
+                profile.banner.as_deref(),
                 now,
             )
             .await
@@ -199,6 +200,7 @@ async fn resolve_also_known_as_uri(
                 &domain,
                 &display_name,
                 remote_ap.avatar_url().as_deref(),
+                remote_ap.banner_url().as_deref(),
                 bio.as_deref(),
                 now,
                 &emoji_map,

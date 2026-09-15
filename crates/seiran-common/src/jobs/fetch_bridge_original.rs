@@ -68,6 +68,7 @@ async fn fetch_atp_original(
                 &post.author_handle,
                 post.author_display_name.as_deref(),
                 post.author_avatar.as_deref(),
+                None,
                 chrono::Utc::now(),
             )
             .await

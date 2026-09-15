@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 import { api, FollowListItem, getErrorMessage } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import Avatar from "../components/note/Avatar";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
 import { useToast } from "../contexts/ToastContext";
 import { profilePath } from "../lib/format";
@@ -17,7 +16,6 @@ import styles from "./FollowRequestsSettings.module.css";
 export default function FollowRequestsSettingsPage() {
   const { t } = useTranslation();
   const { showError } = useToast();
-  const goBack = useGoBack();
   const { refreshFollowRequestCount } = useStreamingContext();
 
   const [items, setItems] = useState<FollowListItem[] | null>(null);
@@ -65,13 +63,6 @@ export default function FollowRequestsSettingsPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("account:followRequestsSettings.title")}</span>
-      </header>
-
       {loading && <p className={panel.message}>{t("common:loading")}</p>}
       {!loading && items && items.length === 0 && (
         <p className={panel.message}>{t("account:followRequestsSettings.empty")}</p>

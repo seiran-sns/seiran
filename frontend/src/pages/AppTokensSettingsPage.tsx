@@ -2,7 +2,6 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, AppTokenRow, CreateAppTokenResponse, getErrorMessage } from "../api/client";
 import AppShell from "../components/layout/AppShell";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
 import { formatDate } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
@@ -12,7 +11,6 @@ import styles from "./AppTokensSettings.module.css";
 export default function AppTokensSettingsPage() {
   const { t } = useTranslation();
   const { showError } = useToast();
-  const goBack = useGoBack();
 
   const [tokens, setTokens] = useState<AppTokenRow[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,13 +74,6 @@ export default function AppTokensSettingsPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("account:menu.appTokens")}</span>
-      </header>
-
       {issued && (
         <div className={styles.issuedBox}>
           <p className={styles.issuedWarning}>

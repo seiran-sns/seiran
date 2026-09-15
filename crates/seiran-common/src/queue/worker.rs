@@ -464,6 +464,11 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::RemoteFeaturedSync { actor_id } => jobs::remote_featured_sync::handle(actor_id, ctx)
             .await
             .map_err(JobError::from),
+        Job::RemoteProfileRefresh { actor_id } => {
+            jobs::remote_profile_refresh::handle(actor_id, ctx)
+                .await
+                .map_err(JobError::from)
+        }
         Job::AlsoKnownAsVerify {
             owner_actor_id,
             target_actor_id,
@@ -565,6 +570,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
         Job::RemoteFeaturedSync { .. } => "RemoteFeaturedSync",
+        Job::RemoteProfileRefresh { .. } => "RemoteProfileRefresh",
         Job::AlsoKnownAsVerify { .. } => "AlsoKnownAsVerify",
         Job::RemoteAlsoKnownAsSync { .. } => "RemoteAlsoKnownAsSync",
         Job::RelayFollowSync { .. } => "RelayFollowSync",
@@ -665,6 +671,12 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         },
         Job::RemoteFeaturedSync { .. } => RetryConfig {
             // AlsoKnownAsVerify と同様、表示のたびに再度積まれるため軽量リトライで十分。
+            max_attempts: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
+        },
+        Job::RemoteProfileRefresh { .. } => RetryConfig {
+            // RemoteFeaturedSync と同様、表示のたびに再度積まれるため軽量リトライで十分。
             max_attempts: 3,
             base_delay_ms: 1000,
             max_delay_ms: 30_000,

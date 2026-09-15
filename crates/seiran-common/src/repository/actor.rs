@@ -150,6 +150,7 @@ pub trait ActorRepository: Send + Sync {
 
     /// リモート（Bsky）アクターを upsert し、その actor_id を返す。
     /// `at_did` の一意制約で衝突した場合は handle と display_name を更新する。
+    #[allow(clippy::too_many_arguments)]
     async fn upsert_remote_bsky(
         &self,
         id: i64,
@@ -157,6 +158,7 @@ pub trait ActorRepository: Send + Sync {
         handle: &str,
         display_name: Option<&str>,
         avatar_url: Option<&str>,
+        banner_url: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<i64, sqlx::Error>;
 
@@ -177,6 +179,7 @@ pub trait ActorRepository: Send + Sync {
         domain: &str,
         display_name: &str,
         avatar_url: Option<&str>,
+        banner_url: Option<&str>,
         bio: Option<&str>,
         now: DateTime<Utc>,
         emoji_map: &serde_json::Value,
@@ -189,6 +192,11 @@ pub trait ActorRepository: Send + Sync {
     /// アバター URL を解決する。`avatar_media_id` があれば storage_providers から公開 URL を
     /// 組み立て、なければ `avatar_url`（リモート由来）をそのまま返す。
     async fn find_avatar_url(&self, actor_id: i64) -> Result<Option<String>, sqlx::Error>;
+
+    /// 背景画像（バナー）URL を解決する。`banner_media_id` があれば storage_providers から
+    /// 公開 URL を組み立て、なければ `banner_url`（リモート由来）をそのまま返す
+    /// （`find_avatar_url` と同じ COALESCE パターン）。
+    async fn find_banner_url(&self, actor_id: i64) -> Result<Option<String>, sqlx::Error>;
 
     /// プロフィール編集用にローカルアクターの現在値を取得する。
     async fn find_profile_by_user_id(
@@ -411,6 +419,7 @@ impl ActorRepository for PgActorRepository {
         handle: &str,
         display_name: Option<&str>,
         avatar_url: Option<&str>,
+        banner_url: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<i64, sqlx::Error> {
         // 既に`remote_seiran`へ昇格済み（結婚成立済み、#236）の行に対しては`username`を
@@ -422,13 +431,14 @@ impl ActorRepository for PgActorRepository {
         // 一方`at_handle`はプロフィール画面のBsky ID表示専用の別列のため、`username`とは
         // 独立に`remote_seiran`でも常に最新値へ更新する（マイケル指示、2026-09-06）。
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO actors (id, actor_type, at_did, username, domain, display_name, avatar_url, at_handle, created_at, updated_at)
-             VALUES ($1, 'bsky', $2, $3, '', $4, $5, $3, $6, $6)
+            "INSERT INTO actors (id, actor_type, at_did, username, domain, display_name, avatar_url, banner_url, at_handle, created_at, updated_at)
+             VALUES ($1, 'bsky', $2, $3, '', $4, $5, $6, $3, $7, $7)
              ON CONFLICT (at_did) DO UPDATE
                SET username     = CASE WHEN actors.actor_type = 'remote_seiran' THEN actors.username
                                         ELSE EXCLUDED.username END,
                    display_name = COALESCE(EXCLUDED.display_name, actors.display_name),
                    avatar_url   = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
+                   banner_url   = COALESCE(EXCLUDED.banner_url, actors.banner_url),
                    at_handle    = EXCLUDED.at_handle,
                    updated_at   = EXCLUDED.updated_at
              RETURNING id",
@@ -438,6 +448,7 @@ impl ActorRepository for PgActorRepository {
         .bind(handle)
         .bind(display_name)
         .bind(avatar_url)
+        .bind(banner_url)
         .bind(now)
         .fetch_one(&self.pool)
         .await?;
@@ -453,18 +464,20 @@ impl ActorRepository for PgActorRepository {
         domain: &str,
         display_name: &str,
         avatar_url: Option<&str>,
+        banner_url: Option<&str>,
         bio: Option<&str>,
         now: DateTime<Utc>,
         emoji_map: &serde_json::Value,
         profile_fields: &serde_json::Value,
     ) -> Result<i64, sqlx::Error> {
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, bio, created_at, updated_at, emoji_map, profile_fields)
-             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11)
+            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, banner_url, bio, created_at, updated_at, emoji_map, profile_fields)
+             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12)
              ON CONFLICT (ap_uri) DO UPDATE
                SET ap_inbox_url   = EXCLUDED.ap_inbox_url,
                    display_name   = EXCLUDED.display_name,
                    avatar_url     = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
+                   banner_url     = COALESCE(EXCLUDED.banner_url, actors.banner_url),
                    bio            = COALESCE(EXCLUDED.bio, actors.bio),
                    emoji_map      = EXCLUDED.emoji_map,
                    profile_fields = EXCLUDED.profile_fields,
@@ -478,6 +491,7 @@ impl ActorRepository for PgActorRepository {
         .bind(domain)
         .bind(display_name)
         .bind(avatar_url)
+        .bind(banner_url)
         .bind(bio)
         .bind(now)
         .bind(emoji_map)
@@ -501,6 +515,20 @@ impl ActorRepository for PgActorRepository {
             "SELECT COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
              FROM actors a \
              LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
+             LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+             WHERE a.id = $1",
+        )
+        .bind(actor_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|(url,)| url))
+    }
+
+    async fn find_banner_url(&self, actor_id: i64) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(Option<String>,)> = sqlx::query_as(
+            "SELECT COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.banner_url) \
+             FROM actors a \
+             LEFT JOIN media_files mf ON mf.id = a.banner_media_id \
              LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
              WHERE a.id = $1",
         )

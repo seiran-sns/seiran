@@ -8,7 +8,6 @@ import EmojiText from "../components/note/EmojiText";
 import RecipientPicker, { RecipientChip } from "../components/dm/RecipientPicker";
 import { useAuth } from "../contexts/AuthContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
-import panel from "../components/common/Panel.module.css";
 import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import styles from "./MessagesPage.module.css";
 
@@ -150,12 +149,9 @@ export default function MessagesPage() {
 
   const right = (
     <>
-      <header className={panel.header}>
-        <span className={panel.title}>{t("dm:messagesPage.title")}</span>
-        <Link className={styles.newButton} to="/messages">
-          {t("dm:messagesPage.newMessage")}
-        </Link>
-      </header>
+      <Link className={styles.newButton} to="/messages">
+        {t("dm:messagesPage.newMessage")}
+      </Link>
       <ul className={styles.sessionList}>
         {sessionsLoading && <li className={styles.loading}>{t("common:loading")}</li>}
         {!sessionsLoading && sessions.length === 0 && (
@@ -184,14 +180,6 @@ export default function MessagesPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <span className={panel.title}>
-          {threadRootId && recipients.length > 0
-            ? recipients.map((r) => r.displayName || r.username).join(", ")
-            : t("dm:messagesPage.newMessage")}
-        </span>
-      </header>
-
       <div className={styles.messageList} ref={scrollRef}>
         {messagesLoading && <p className={styles.loading}>{t("common:loading")}</p>}
         {!messagesLoading && !threadRootId && <p className={styles.empty}>{t("dm:messagesPage.composeHint")}</p>}

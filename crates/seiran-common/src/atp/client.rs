@@ -505,6 +505,10 @@ pub struct BskyProfile {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub avatar: Option<String>,
+    /// 背景画像（バナー）。`getProfile`（`ProfileViewDetailed`）のみが返すフィールドで、
+    /// フォロワー一覧等の`ProfileViewBasic`/`ProfileView`には含まれない。
+    #[serde(default)]
+    pub banner: Option<String>,
     /// ピン留め投稿（#61）。Bsky はピン留めを1件までしかサポートしない。
     #[serde(default)]
     pub pinned_post: Option<BskyPinnedPostRef>,

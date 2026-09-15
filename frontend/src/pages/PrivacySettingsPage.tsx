@@ -2,15 +2,12 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import AppShell from "../components/layout/AppShell";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
-import panel from "../components/common/Panel.module.css";
 import styles from "./PrivacySettings.module.css";
 
 /** 設定画面「プライバシー」。Bsky Discoverフィード等のアルゴリズムレコメンドからの
  * 除外要求（`app.bsky.actor.contentVisibilityDeclaration`）を切り替える。 */
 export default function PrivacySettingsPage() {
   const { t } = useTranslation();
-  const goBack = useGoBack();
 
   const [hideFromAlgorithmicRecommendations, setHideFromAlgorithmicRecommendations] =
     useState(false);
@@ -78,13 +75,6 @@ export default function PrivacySettingsPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("account:privacySettings.title")}</span>
-      </header>
-
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
           {t("account:privacySettings.discoverabilityTitle")}

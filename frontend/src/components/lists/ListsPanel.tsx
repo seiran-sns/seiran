@@ -5,7 +5,6 @@ import panel from "../common/Panel.module.css";
 import styles from "../../pages/ListsSettings.module.css";
 
 interface ListsPanelProps {
-  onBack: () => void;
   error: string;
   lists: ListSummary[];
   loading: boolean;
@@ -21,7 +20,6 @@ interface ListsPanelProps {
 
 /** ListsSettingsPage の中央ペイン：作成フォームとリスト一覧の表示。 */
 export default function ListsPanel({
-  onBack,
   error,
   lists,
   loading,
@@ -38,13 +36,6 @@ export default function ListsPanel({
 
   return (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={onBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("lists:listsSettingsPage.title")}</span>
-      </header>
-
       {error && <p className={styles.error}>{error}</p>}
 
       <form className={styles.createForm} onSubmit={onCreateSubmit}>

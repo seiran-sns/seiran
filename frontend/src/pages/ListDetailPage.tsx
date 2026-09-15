@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { api, ApiError, getErrorMessage, ListDetail, Note } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import NoteList from "../components/note/NoteList";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import panel from "../components/common/Panel.module.css";
@@ -15,7 +14,6 @@ const PAGE_SIZE = 30;
 export default function ListDetailPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
-  const goBack = useGoBack();
   const { showError } = useToast();
 
   const [detail, setDetail] = useState<ListDetail | null>(null);
@@ -66,13 +64,6 @@ export default function ListDetailPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{detail ? detail.name : t("lists:listDetailPage.title")}</span>
-      </header>
-
       {loading ? (
         <p className={panel.message}>{t("common:loading")}</p>
       ) : notFound ? (

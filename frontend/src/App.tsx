@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api } from "./api/client";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import { NavigationHistoryProvider } from "./contexts/NavigationHistoryContext";
 import { RightPaneProvider } from "./contexts/RightPaneContext";
 import { HomeFeedProvider } from "./contexts/HomeFeedContext";
 import { ComposerProvider } from "./contexts/ComposerContext";
@@ -118,9 +117,8 @@ function AppRoutes() {
   }
 
   return (
-    <NavigationHistoryProvider>
-      <Suspense fallback={null}>
-        <Routes>
+    <Suspense fallback={null}>
+      <Routes>
         <Route
           path="/"
           element={
@@ -315,9 +313,8 @@ function AppRoutes() {
         <Route path="/totp-disable" element={<TotpDisable />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
-        </Routes>
-      </Suspense>
-    </NavigationHistoryProvider>
+      </Routes>
+    </Suspense>
   );
 }
 

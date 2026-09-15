@@ -148,6 +148,7 @@ async fn poll_user(
                             &f.handle,
                             f.display_name.as_deref(),
                             f.avatar.as_deref(),
+                            None,
                             Utc::now(),
                         )
                         .await

@@ -17,7 +17,6 @@ import NoteCard from "../components/note/NoteCard";
 import ProfileFeedList from "../components/note/ProfileFeedList";
 import FollowListPanel from "../components/right/FollowListPanel";
 import { useAuth } from "../contexts/AuthContext";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
@@ -39,7 +38,6 @@ export default function ProfilePage() {
   const { showError } = useToast();
   const [searchParams] = useSearchParams();
   const { acct } = useParams<{ acct: string }>();
-  const goBack = useGoBack();
   // permalink `/@handle`（#36）を優先し、旧 `/profile?q=` も後方互換で受ける。
   const q = acct ? acct.replace(/^@/, "") : (searchParams.get("q") ?? "");
 
@@ -55,8 +53,6 @@ export default function ProfilePage() {
   // 狭幅専用タブシート（ピン留め統合、下記narrowTabbedSection）のタブ状態。ピン留めがあれば
   // 0=ピン留め・無ければ0=投稿から始まる。rightTabと同じくプロフィール切替時にリセットする。
   const [narrowTab, setNarrowTab] = useState(0);
-  const headerRef = useRef<HTMLElement>(null);
-  const [headerHeight, setHeaderHeight] = useState(0);
   // 狭幅タブシートにピン留めタブが挿入されるかどうか。挿入される場合、投稿/フォロー中/
   // フォロワーのインデックスは1つずつ後ろにずれる（下記narrowTabItems・followCountBtn参照）。
   const hasPinned = !!profile && profile.pinned_posts.length > 0;
@@ -105,19 +101,6 @@ export default function ProfilePage() {
     PAGE_SIZE,
     onError,
   );
-
-  // 狭幅専用タブシート（下記narrowTabbedSection）はheaderの直下にstickyで張り付ける。
-  // 両者ともposition: sticky; top: 0 だと重なってしまうため、headerの実高さ分だけオフセットする
-  // （HomePage/AdminPageの同様のフィードタブ・タブシート実装と同じ手法）。
-  useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-    const update = () => setHeaderHeight(el.offsetHeight);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   useEffect(() => {
     if (!q) return;
@@ -257,13 +240,6 @@ export default function ProfilePage() {
 
   const center = (
     <>
-      <header className={panel.header} ref={headerRef}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("profile:profilePage.title")}</span>
-      </header>
-
       {profile && remoteProfileUrl(profile) && (
         <RemoteBanner
           message={t("common:remoteBanner.user")}
@@ -288,19 +264,38 @@ export default function ProfilePage() {
 
       {profile && (
         <div className={styles.card}>
+          {profile.banner_url && (
+            <div className={styles.bannerWrap}>
+              <img src={profile.banner_url} alt="" className={styles.bannerImg} />
+              <div className={styles.avatarOnBanner}>
+                {profile.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt=""
+                    className={styles.avatarImg}
+                  />
+                ) : (
+                  ((profile.display_name || profile.username)[0]?.toUpperCase() ??
+                  "?")
+                )}
+              </div>
+            </div>
+          )}
 
-          <div className={styles.avatarLarge}>
-            {profile.avatar_url ? (
-              <img
-                src={profile.avatar_url}
-                alt=""
-                className={styles.avatarImg}
-              />
-            ) : (
-              ((profile.display_name || profile.username)[0]?.toUpperCase() ??
-              "?")
-            )}
-          </div>
+          {!profile.banner_url && (
+            <div className={styles.avatarLarge}>
+              {profile.avatar_url ? (
+                <img
+                  src={profile.avatar_url}
+                  alt=""
+                  className={styles.avatarImg}
+                />
+              ) : (
+                ((profile.display_name || profile.username)[0]?.toUpperCase() ??
+                "?")
+              )}
+            </div>
+          )}
 
           <div className={styles.names}>
             <span className={styles.displayName}>
@@ -733,7 +728,7 @@ export default function ProfilePage() {
         active={narrowTab}
         onChange={setNarrowTab}
         sticky
-        top={headerHeight}
+        top={0}
       />
       {(narrowTabItems[narrowTab] ?? narrowTabItems[0]).content}
     </>

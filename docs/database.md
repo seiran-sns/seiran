@@ -117,7 +117,7 @@ JetStreamは「ローカルユーザーのフォロー中/リストメンバー�
 - `at_handle`: AT Protocolハンドル（`user.pds-domain`形式）。`username`（`remote_seiran`ではFedi側由来のまま固定される、上記参照）とは独立に、Bsky側の発見・再訪問のたびに常に最新値へ上書きする（`bsky`単独行は`username`列自体がハンドルと同値のためほぼ冗長だが、`remote_seiran`ではプロフィール画面のBsky ID表示に使う唯一の情報源）。書き込みは`ActorRepository::upsert_remote_bsky`・`seiran_common::seiran_actor_merge::discover_bsky_actor`に集約。
 - `bridge_real_actor_id`: ブリッジユーザーから実ユーザーへのリンク。
 
-ローカルアクターは `avatar_media_id`/`banner_media_id`（自前 `media_files` 参照）、リモートアクターは `avatar_url`/`banner_url`（URL直持ち）という排他的な使い分けをしている。
+ローカルアクターは `avatar_media_id`/`banner_media_id`（自前 `media_files` 参照）、リモートアクターは `avatar_url`/`banner_url`（URL直持ち）という排他的な使い分けをしている。プロフィール表示時は`ActorRepository::find_avatar_url`/`find_banner_url`が`media_id`優先・無ければ`_url`列というCOALESCEで解決する（Misskey互換API`/api/users/show`の`build_users_detailed`も同じCOALESCEパターンを個別に持つ）。`banner_url`は`avatar_url`と同じ経路（`upsert_remote_fedi`/`upsert_remote_bsky`、AP Person `image`プロパティ/ATP `getProfile`の`banner`）で同期されるが、ローカルアクター未設定時の決定論的フォールバック生成（`seiran_common::avatar::fallback_avatar_url`相当）は無く、値が無ければ単に非表示になる。既存アクターの`avatar_url`/`banner_url`はプロフィール表示のたびに`Job::RemoteProfileRefresh`（「表示時再検証」パターン、`docs/architecture.md`参照）が再取得・更新する。
 
 `actors.ap_uri`（UNIQUE）は `local` 行も含め全アクター種別が保持する。ローカル行は `https://{local_domain}/users/{username}` を持つ（自ドメインを名乗る Actor URI を誤ってリモートアクター解決経路に渡しても、`find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により `actor_type='fedi'` の影の重複行が生成されない）。リモートActor URI解決処理（`resolve_fedi`/`upsert_remote_fedi_actor`/`follow_fedi`）はこれとは別に、URIが自ドメイン形式に一致する場合はローカル行へ解決する明示的なガードも入口に持つ（`docs/protocols.md` 参照）。
 

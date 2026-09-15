@@ -5,7 +5,6 @@ import { api, getErrorMessage, MutedOrBlockedActor } from "../api/client";
 import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import Avatar from "../components/note/Avatar";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
 import { profilePath, profileQuery } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
@@ -15,7 +14,6 @@ import styles from "./MutesBlocksSettings.module.css";
 export default function MutesBlocksSettingsPage() {
   const { t } = useTranslation();
   const { showError } = useToast();
-  const goBack = useGoBack();
 
   const [tab, setTab] = useState(0);
   const [mutes, setMutes] = useState<MutedOrBlockedActor[] | null>(null);
@@ -98,13 +96,6 @@ export default function MutesBlocksSettingsPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("account:mutesBlocks.title")}</span>
-      </header>
-
       <Tabs
         tabs={[
           t("account:mutesBlocks.mutesTab"),

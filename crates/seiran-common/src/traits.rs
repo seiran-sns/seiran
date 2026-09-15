@@ -243,6 +243,13 @@ pub enum Job {
     /// 直後）だけは`handlers::users::fetch_remote_profile`が同期で取得する。
     RemoteFeaturedSync { actor_id: i64 },
 
+    /// リモートアクター（fedi/bsky/remote_seiran）のプロフィール（avatar_url/banner_url/
+    /// display_name/bio等）を再取得してDBキャッシュを更新する。プロフィール表示のたびに
+    /// 積まれ、表示自体は常にDB上の既存値をそのまま返す（`RemoteFeaturedSync`と同じ
+    /// 「表示時再検証」パターン）。初回表示（DB未登録アクターの新規upsert直後）は
+    /// 既に最新値が入っているため積まない。
+    RemoteProfileRefresh { actor_id: i64 },
+
     /// プロフィールの「別のアカウント」（alsoKnownAs、AP Moveの語彙をプロフィール表示・
     /// 相互検証用途に転用したseiran独自拡張、`docs/protocols.md`参照）の相互検証。
     /// プロフィール表示のたびに積まれ、キャッシュ済みの検証結果を非同期で更新する。

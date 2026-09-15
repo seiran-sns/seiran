@@ -367,6 +367,12 @@ pub async fn users_show(
     .map_err(|e| ApiError::Internal(e.to_string()))?
     .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
 
+    // リモートアクターのプロフィール（avatar_url/banner_url等）再取得。カスタムAPI
+    // （handlers::users::user_profile）と同じ「表示時再検証」パターン。
+    if actor.actor_type != "local" {
+        state.enqueue_remote_profile_refresh(actor.id).await;
+    }
+
     Ok(Json(build_user_detailed(&state, &actor, my_actor_id).await))
 }
 

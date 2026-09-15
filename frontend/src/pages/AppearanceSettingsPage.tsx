@@ -3,14 +3,12 @@ import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useTheme, type ThemePreference } from "../contexts/ThemeContext";
 import i18n, {
   normalizeDetectedLanguage,
   isDisplayLanguage,
   type DisplayLanguage,
 } from "../i18n";
-import panel from "../components/common/Panel.module.css";
 import styles from "./AppearanceSettings.module.css";
 
 type LanguageOption = "auto" | DisplayLanguage;
@@ -52,7 +50,6 @@ function detectAutoLanguage(): string {
 export default function AppearanceSettingsPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const goBack = useGoBack();
   const { preference: themePreference, setPreference: setThemePreference } =
     useTheme();
 
@@ -88,15 +85,6 @@ export default function AppearanceSettingsPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>
-          {t("account:appearanceSettings.title")}
-        </span>
-      </header>
-
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
           {t("account:appearanceSettings.themeTitle")}

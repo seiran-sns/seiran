@@ -3,9 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import AppShell from "../components/layout/AppShell";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
-import panel from "../components/common/Panel.module.css";
 import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import styles from "./SettingsMenu.module.css";
 
@@ -32,7 +30,6 @@ const BASE_ITEMS: SettingsMenuItem[] = [
 export default function SettingsMenuPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const goBack = useGoBack();
   const { followRequestCount } = useStreamingContext();
   const [isLocked, setIsLocked] = useState(false);
 
@@ -55,12 +52,6 @@ export default function SettingsMenuPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("account:menu.title")}</span>
-      </header>
       <ul className={styles.list}>
         {items.map((item) => (
           <li key={item.labelKey}>

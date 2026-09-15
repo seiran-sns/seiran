@@ -75,6 +75,7 @@ async fn resolve_bsky(state: &AppState, actor_id_or_handle: &str) -> Result<Acto
             &bsky_resp.handle,
             bsky_resp.display_name.as_deref(),
             bsky_resp.avatar.as_deref(),
+            bsky_resp.banner.as_deref(),
             now,
         )
         .await
@@ -142,6 +143,7 @@ async fn resolve_fedi(state: &AppState, target: &str) -> Result<Actor, ApError> 
         .clone()
         .ok_or_else(|| ApError::Other("リモートアクターにinboxがありません".to_string()))?;
     let remote_avatar_url = remote_ap.avatar_url();
+    let remote_banner_url = remote_ap.banner_url();
     let remote_username = remote_ap.preferred_username.clone().unwrap_or_else(|| {
         target_uri
             .rsplit('/')
@@ -173,6 +175,7 @@ async fn resolve_fedi(state: &AppState, target: &str) -> Result<Actor, ApError> 
             &remote_domain,
             &remote_display_name,
             remote_avatar_url.as_deref(),
+            remote_banner_url.as_deref(),
             remote_bio.as_deref(),
             now,
             &remote_emoji_map,

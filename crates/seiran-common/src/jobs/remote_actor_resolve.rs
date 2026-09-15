@@ -121,6 +121,7 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
     };
 
     let avatar_url = actor.avatar_url();
+    let banner_url = actor.banner_url();
     let username = actor
         .preferred_username
         .clone()
@@ -143,6 +144,7 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
             &domain,
             &display_name,
             avatar_url.as_deref(),
+            banner_url.as_deref(),
             bio.as_deref(),
             chrono::Utc::now(),
             &emoji_map,

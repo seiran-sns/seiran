@@ -4,8 +4,6 @@ import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import type { FollowImportStatusResponse } from "../api/client";
 import AppShell from "../components/layout/AppShell";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
-import panel from "../components/common/Panel.module.css";
 import styles from "./FollowImportSettings.module.css";
 
 const POLL_INTERVAL_MS = 1500;
@@ -15,7 +13,6 @@ const POLL_INTERVAL_MS = 1500;
  * 貼り付け or .txt ドラッグ&ドロップで読み込み、非同期ジョブとして一括フォローする。 */
 export default function FollowImportSettingsPage() {
   const { t } = useTranslation();
-  const goBack = useGoBack();
 
   const [text, setText] = useState("");
   const [status, setStatus] = useState<FollowImportStatusResponse | null>(null);
@@ -129,13 +126,6 @@ export default function FollowImportSettingsPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("account:importExport.title")}</span>
-      </header>
-
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>{t("account:importExport.followImportTitle")}</h3>
         <p className={styles.description}>{t("account:importExport.description")}</p>

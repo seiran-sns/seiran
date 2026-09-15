@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import AppShell from "../components/layout/AppShell";
@@ -35,8 +35,6 @@ export default function AdminPage() {
   const { t } = useTranslation();
   const { user, loading } = useAuth();
   const [tab, setTab] = useState(0);
-  const headerRef = useRef<HTMLElement>(null);
-  const [headerHeight, setHeaderHeight] = useState(0);
 
   const allowedTopics = useMemo(() => new Set(getAdminTopics(user?.role)), [user?.role]);
   const visibleTabDefs = TAB_DEFS.filter((def) => allowedTopics.has(def.topic));
@@ -55,19 +53,6 @@ export default function AdminPage() {
     onSwipeRight: handleSwipeRight,
   });
 
-  // タブシート（Tabs）はheaderの直下にstickyで張り付ける。両者とも
-  // position: sticky; top: 0 だと重なってしまうため、headerの実高さ分だけオフセットする
-  // （HomePageのフィードタブと同じ手法）。
-  useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-    const update = () => setHeaderHeight(el.offsetHeight);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   if (loading) return null;
   // 管理系トピックを一つも持たない役割はホームへ戻す（API 側でもトピックごとの
   // require_admin / require_emoji_admin で保護済み、#179）。
@@ -77,10 +62,7 @@ export default function AdminPage() {
 
   const center = (
     <div className={styles.swipeContainer} {...swipeHandlers}>
-      <header className={panel.header} ref={headerRef}>
-        <span className={panel.title}>{t("admin:adminPage.title")}</span>
-      </header>
-      <Tabs tabs={tabs} active={tab} onChange={setTab} sticky top={headerHeight} />
+      <Tabs tabs={tabs} active={tab} onChange={setTab} sticky top={0} />
       {ActivePanel && <ActivePanel />}
     </div>
   );

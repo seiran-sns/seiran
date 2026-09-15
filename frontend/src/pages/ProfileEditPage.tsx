@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { ActorSuggestion, AlsoKnownAsItem, api, DriveFile, getErrorMessage, ProfileField } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfileEdit.module.css";
 
@@ -19,7 +18,6 @@ export default function ProfileEditPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const goBack = useGoBack();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -166,13 +164,6 @@ export default function ProfileEditPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("profile:profileEditPage.title")}</span>
-      </header>
-
       {loading ? (
         <p className={panel.message}>{t("common:loading")}</p>
       ) : (

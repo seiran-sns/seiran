@@ -336,6 +336,10 @@ pub struct ProfileResponse {
     #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub emojis: std::collections::HashMap<String, String>,
     pub avatar_url: Option<String>,
+    /// 背景画像（バナー）URL。まずは背景画像を持つ bsky/fedi ユーザーの表示のみ対応
+    /// （ローカルユーザーの未設定時フォールバック生成は avatar_url と異なり行わない）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner_url: Option<String>,
     pub follow_status: String, // "not_following" | "pending" | "accepted"
     /// このアクターが閲覧者をフォロー中か（Misskey互換API `UserDetailed.isFollowed` に準拠）。
     pub is_followed: bool,
@@ -455,6 +459,7 @@ async fn fetch_bsky_profile_from_appview(
                 &bsky.handle,
                 bsky.display_name.as_deref(),
                 bsky.avatar.as_deref(),
+                bsky.banner.as_deref(),
                 now,
             )
             .await;
@@ -479,6 +484,7 @@ async fn fetch_bsky_profile_from_appview(
         bio: bsky.description,
         emojis: std::collections::HashMap::new(),
         avatar_url: bsky.avatar,
+        banner_url: bsky.banner,
         follow_status: "not_following".to_string(),
         is_followed: false,
         is_blocking: false,
@@ -797,6 +803,13 @@ async fn build_profile_response_inner(
         }
     }
 
+    // リモートアクターのプロフィール（avatar_url/banner_url等）再取得。初回表示は
+    // fetch_remote_profile/fetch_bsky_profile_from_appviewが直前に最新値をupsert済み
+    // のため積まない（RemoteFeaturedSyncと同じ考え方）。
+    if actor.actor_type != "local" && !is_first_fetch {
+        state.enqueue_remote_profile_refresh(actor.id).await;
+    }
+
     // ブリッジユーザー検出（brid.gy等、`docs/protocols.md`参照）: 実ユーザーへの
     // `bridge_real_actor_id`が未解決なら「表示時再検証」パターンでジョブを積む。
     if actor.bridge_real_actor_id.is_none()
@@ -905,6 +918,10 @@ async fn build_profile_response_inner(
         &actor.domain,
         actor_id,
     );
+    // 背景画像（バナー）URL: banner_media_id があれば storage_providers から解決、
+    // なければ banner_url をそのまま使う。avatar_url と異なり未設定時のフォールバック
+    // 生成は行わない（背景画像を持つユーザーのみ表示する）。
+    let banner_url: Option<String> = state.actors.find_banner_url(actor_id).await.ok().flatten();
 
     // 実ユーザー（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
     // その実ユーザーアクターのハンドルとプロトコルをフロントの「実ユーザーワープ」導線に渡す。
@@ -1066,6 +1083,7 @@ async fn build_profile_response_inner(
         bio,
         emojis,
         avatar_url,
+        banner_url,
         follow_status,
         is_followed,
         is_blocking,
@@ -1137,6 +1155,7 @@ async fn fetch_remote_profile(
         .clone()
         .unwrap_or_else(|| resolved_username.clone());
     let avatar_url = ap_actor.avatar_url();
+    let banner_url = ap_actor.banner_url();
     // 自己紹介文（AP Person の summary は HTML のため strip_html でプレーンテキスト化する）。
     let bio = ap_actor
         .summary
@@ -1158,6 +1177,7 @@ async fn fetch_remote_profile(
             domain,
             &display_name,
             avatar_url.as_deref(),
+            banner_url.as_deref(),
             bio.as_deref(),
             now,
             &emoji_map,
@@ -1198,6 +1218,7 @@ async fn fetch_remote_profile(
         bio,
         emojis: json_map_to_string_map(&emoji_map),
         avatar_url,
+        banner_url,
         follow_status: "not_following".to_string(),
         is_followed: false,
         is_blocking: false,

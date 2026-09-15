@@ -5,10 +5,8 @@ import { api, getErrorMessage, Note } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import NoteList from "../components/note/NoteList";
 import { useComposer } from "../contexts/ComposerContext";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
-import panel from "../components/common/Panel.module.css";
 import styles from "./HashtagPage.module.css";
 
 const PAGE_SIZE = 30;
@@ -16,7 +14,6 @@ const PAGE_SIZE = 30;
 export default function HashtagPage() {
   const { t } = useTranslation();
   const { name } = useParams<{ name: string }>();
-  const goBack = useGoBack();
   const { openCompose } = useComposer();
   const { showError } = useToast();
 
@@ -85,13 +82,6 @@ export default function HashtagPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>#{tagName}</span>
-      </header>
-
       <div className={styles.actionsRow}>
         <button
           className={`${styles.actionBtn} ${pinned ? styles.actionBtnActive : ""}`}

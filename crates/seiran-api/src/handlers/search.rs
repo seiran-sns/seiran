@@ -294,6 +294,7 @@ pub(crate) async fn persist_appview_posts(
                         &post.author_handle,
                         post.author_display_name.as_deref(),
                         post.author_avatar.as_deref(),
+                        None,
                         now,
                     )
                     .await

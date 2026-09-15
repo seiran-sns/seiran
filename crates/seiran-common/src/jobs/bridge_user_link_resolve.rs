@@ -132,6 +132,7 @@ async fn resolve_ap_side_bridge(
             &profile.handle,
             profile.display_name.as_deref(),
             profile.avatar.as_deref(),
+            profile.banner.as_deref(),
             chrono::Utc::now(),
         )
         .await

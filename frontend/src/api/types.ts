@@ -445,6 +445,9 @@ export interface UserProfile {
   /** 自己紹介文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#169）。未指定/空なら絵文字化しない。 */
   emojis?: Record<string, string>;
   avatar_url?: string;
+  /** 背景画像（バナー）URL。まずは背景画像を持つbsky/fediユーザーの表示のみ対応
+   * （未設定時のフォールバック生成は avatar_url と異なり無い）。 */
+  banner_url?: string;
   follow_status: "not_following" | "pending" | "accepted";
   /** このアクターが閲覧者をフォロー中か（Misskey互換API `UserDetailed.isFollowed` に準拠）。 */
   is_followed: boolean;

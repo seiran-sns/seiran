@@ -89,10 +89,6 @@ export default function SearchPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <span className={panel.title}>{t("common:search")}</span>
-      </header>
-
       <form className={rp.searchForm} onSubmit={submit}>
         <input
           ref={inputRef}

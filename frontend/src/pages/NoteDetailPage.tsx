@@ -10,7 +10,6 @@ import AuthorPanel from "../components/right/AuthorPanel";
 import ReactionListPanel from "../components/right/ReactionListPanel";
 import ReplyThreadPanel from "../components/right/ReplyThreadPanel";
 import RepostListPanel from "../components/right/RepostListPanel";
-import { useGoBack } from "../contexts/NavigationHistoryContext";
 import { useRightPane } from "../contexts/RightPaneContext";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import panel from "../components/common/Panel.module.css";
@@ -21,7 +20,6 @@ const TAB_COUNT = 5;
 export default function NoteDetailPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
-  const goBack = useGoBack();
   const {
     noteDetailTab,
     setNoteDetailTab,
@@ -391,13 +389,6 @@ export default function NoteDetailPage() {
 
   const center = (
     <>
-      <header className={panel.header}>
-        <button className={panel.backBtn} onClick={goBack}>
-          ← {t("common:back")}
-        </button>
-        <span className={panel.title}>{t("home:noteDetailPage.title")}</span>
-      </header>
-
       {loading && <p className={panel.message}>{t("common:loading")}</p>}
       {error && <p className={panel.message}>{error}</p>}
 

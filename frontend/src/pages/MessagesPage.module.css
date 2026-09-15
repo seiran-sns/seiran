@@ -1,13 +1,15 @@
 .newButton {
-  margin-left: auto;
+  display: block;
+  margin: 12px 16px;
   background: var(--accent-strong);
   color: #fff;
   text-decoration: none;
   border: none;
   border-radius: 999px;
-  padding: 6px 14px;
+  padding: 8px 14px;
   font-size: 0.82rem;
   font-weight: 700;
+  text-align: center;
   cursor: pointer;
 }
 

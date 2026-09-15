@@ -16,7 +16,6 @@ import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { useSwipe } from "../hooks/useSwipe";
 import { filterTimelineNotes } from "../lib/timelineVisibility";
-import panel from "../components/common/Panel.module.css";
 import styles from "./HomePage.module.css";
 
 const PAGE_SIZE = 30;
@@ -97,9 +96,7 @@ export default function HomePage() {
   const { subscribeChannel, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
   const navigatingAway = useRef(false);
-  const headerRef = useRef<HTMLElement>(null);
   const feedTabsRef = useRef<HTMLDivElement>(null);
-  const [headerHeight, setHeaderHeight] = useState(0);
 
   // 利用可能なフィードタブの配列（順序定義）
   const availableFeeds = useMemo(
@@ -163,18 +160,6 @@ export default function HomePage() {
       tabs.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
     }
   }, [currentFeedKey]);
-
-  // フィードタブ（下記feedTabs）はheaderの直下にstickyで張り付ける。両者とも
-  // position: sticky; top: 0 だと重なってしまうため、headerの実高さ分だけオフセットする。
-  useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-    const update = () => setHeaderHeight(el.offsetHeight);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   const onError = useCallback((err: unknown) => showError(getErrorMessage(err)), [showError]);
   const fetchPage = useCallback(
@@ -398,10 +383,6 @@ export default function HomePage() {
 
   const center = (
     <div className={styles.swipeContainer} {...swipeHandlers}>
-      <header className={panel.header} ref={headerRef}>
-        <span className={panel.title}>{t("home:homePage.title")}</span>
-      </header>
-
       <div className={styles.composerWrap}>
         <button
           type="button"
@@ -415,7 +396,7 @@ export default function HomePage() {
         {!composerCollapsed && <PostComposer onPosted={prepend} />}
       </div>
 
-      <div className={styles.feedTabs} ref={feedTabsRef} style={{ top: headerHeight }}>
+      <div className={styles.feedTabs} ref={feedTabsRef}>
         <button
           className={`${styles.feedTab} ${feed.kind === "home" ? styles.feedTabActive : ""}`}
           onClick={() => handleFeedTabClick({ kind: "home" })}

@@ -83,6 +83,10 @@ pub struct ApActor {
     /// （`avatar_url()` で URL を抽出する）。
     #[serde(default)]
     pub icon: Option<serde_json::Value>,
+    /// 背景画像（バナー）。AS2 Person の `image` プロパティ。`icon` と同じく実装により
+    /// object / array / 欠落があり得るため Value で受ける（`banner_url()` で URL を抽出する）。
+    #[serde(default)]
+    pub image: Option<serde_json::Value>,
     pub inbox: Option<String>,
     pub outbox: Option<String>,
     /// ピン留め投稿の OrderedCollection。実装により URL 文字列（Mastodon 等）と
@@ -150,7 +154,16 @@ where
 impl ApActor {
     /// `icon`（object または array）から最初の画像 URL を抽出する。
     pub fn avatar_url(&self) -> Option<String> {
-        let v = self.icon.as_ref()?;
+        Self::first_image_url(self.icon.as_ref())
+    }
+
+    /// `image`（object または array）から最初の画像 URL を抽出する（背景画像/バナー）。
+    pub fn banner_url(&self) -> Option<String> {
+        Self::first_image_url(self.image.as_ref())
+    }
+
+    fn first_image_url(v: Option<&serde_json::Value>) -> Option<String> {
+        let v = v?;
         let obj = if v.is_array() {
             v.as_array()?.first()?
         } else {

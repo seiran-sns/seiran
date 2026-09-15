@@ -521,6 +521,23 @@ impl AppState {
         }
     }
 
+    /// リモートアクターのプロフィール（avatar_url/banner_url等）再取得ジョブを積む。
+    /// プロフィール表示のたびに呼ばれ、表示は常にDB上の既存値をそのまま返す
+    /// （「表示時再検証」パターン、`enqueue_remote_featured_sync`と同様）。
+    pub async fn enqueue_remote_profile_refresh(&self, actor_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::RemoteProfileRefresh { actor_id }, job_priority::LOW)
+            .await
+        {
+            tracing::error!(
+                "[job] RemoteProfileRefresh enqueue 失敗 (actor_id={}): {}",
+                actor_id,
+                e
+            );
+        }
+    }
+
     /// brid.gyブリッジユーザーの実ユーザーへのリンク解決ジョブを積む。プロフィール表示の
     /// たびに、`bridge_real_actor_id`が未解決なブリッジユーザーに対して呼ばれる
     /// （「表示時再検証」パターン、`docs/protocols.md`参照）。
