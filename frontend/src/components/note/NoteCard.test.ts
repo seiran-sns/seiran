@@ -52,24 +52,24 @@ describe("applyReactionUpdate", () => {
   const baseUpdate: ReactionUpdate = {
     postId: "1",
     reactions: [{ emoji: "🎉", count: 2 }],
-    reactorActorId: 99,
+    reactorActorId: "99",
     reactorEmoji: "🎉",
   };
 
   it("自分自身の操作の場合はreactorEmojiと一致する絵文字のreactedByMeをtrueにする", () => {
-    const result = applyReactionUpdate([], baseUpdate, 99);
+    const result = applyReactionUpdate([], baseUpdate, "99");
     expect(result).toEqual([{ emoji: "🎉", count: 2, emojiUrl: undefined, reactedByMe: true }]);
   });
 
   it("自分自身の取消操作（reactorEmoji=null）ではどの絵文字もreactedByMeにならない", () => {
     const update: ReactionUpdate = { ...baseUpdate, reactorEmoji: null };
-    const result = applyReactionUpdate([], update, 99);
+    const result = applyReactionUpdate([], update, "99");
     expect(result[0].reactedByMe).toBe(false);
   });
 
   it("他人の操作の場合は既知のreactedByMeをそのまま引き継ぐ", () => {
     const existing: ReactionSummary[] = [{ emoji: "🎉", count: 1, reactedByMe: true }];
-    const result = applyReactionUpdate(existing, baseUpdate, 1 /* 自分のactor_idはreactorと異なる */);
+    const result = applyReactionUpdate(existing, baseUpdate, "1" /* 自分のactor_idはreactorと異なる */);
     expect(result).toEqual([{ emoji: "🎉", count: 2, emojiUrl: undefined, reactedByMe: true }]);
   });
 

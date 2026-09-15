@@ -200,7 +200,7 @@ pub async fn setup(
             username: req.username,
             email: req.email,
             role: "admin".to_string(),
-            actor_id,
+            actor_id: actor_id.to_string(),
             avatar_url: None,          // セットアップ直後はアバター未設定
             language_preference: None, // セットアップ直後は「自動」
             token,

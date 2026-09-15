@@ -212,7 +212,7 @@ pub async fn broadcast_reaction_update(
         serde_json::json!({
             "postId": post_id.to_string(),
             "reactions": reactions_json,
-            "reactorActorId": reactor_actor_id,
+            "reactorActorId": reactor_actor_id.to_string(),
             "reactorEmoji": reactor_emoji,
         }),
     );

@@ -91,8 +91,9 @@ pub struct UserInfo {
     /// `user` / `emoji-editor` / `moderator` / `admin`。管理画面の表示制御にフロントが使用する（#179）。
     pub role: String,
     /// 対応するローカル actors.id。フロントがストリーミングイベントの `reactorActorId` 等と
-    /// 突き合わせて「自分自身の操作か」を判定するために使う。
-    pub actor_id: i64,
+    /// 突き合わせて「自分自身の操作か」を判定するために使う。Snowflake ID なので
+    /// JavaScript の53bit整数精度を超えるため文字列で返す（`NoteUserInfo.id` と同じ理由）。
+    pub actor_id: String,
     /// 左下ナビ等の自分のアイコン表示用。avatar_media_id 経由のアップロード画像を優先する
     /// （`handlers::users::build_profile_response` と同じクエリパターン）。
     pub avatar_url: Option<String>,
@@ -371,7 +372,7 @@ pub async fn register(
             username: req.username,
             email,
             role: "user".to_string(),
-            actor_id,
+            actor_id: actor_id.to_string(),
             avatar_url: Some(seiran_common::avatar::fallback_avatar_url(
                 &state.local_domain,
                 actor_id,
@@ -444,7 +445,7 @@ pub(crate) async fn finish_login(
             username,
             email,
             role,
-            actor_id,
+            actor_id: actor_id.to_string(),
             avatar_url,
             language_preference,
             token,
@@ -609,7 +610,7 @@ pub async fn me(
         username: actor.username,
         email: auth_user.email,
         role,
-        actor_id: actor.id,
+        actor_id: actor.id.to_string(),
         avatar_url,
         language_preference,
         token,

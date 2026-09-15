@@ -8,7 +8,7 @@ function makeUser(): User {
     username: "alice",
     email: "alice@example.com",
     role: "user",
-    actor_id: 1,
+    actor_id: "1",
     language_preference: null,
     token: "test-token",
     is_suspended: false,

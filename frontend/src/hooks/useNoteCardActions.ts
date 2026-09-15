@@ -45,7 +45,7 @@ export function optimisticSetReaction(
 export function applyReactionUpdate(
   reactions: ReactionSummary[],
   update: ReactionUpdate,
-  myActorId: number | undefined
+  myActorId: string | undefined
 ): ReactionSummary[] {
   const isMe = myActorId !== undefined && update.reactorActorId === myActorId;
   return update.reactions.map((r) => ({

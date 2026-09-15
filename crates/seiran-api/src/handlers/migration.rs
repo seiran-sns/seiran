@@ -572,7 +572,7 @@ pub async fn submit_plc_token(
             username: migration_req.new_username,
             email,
             role: "user".to_string(),
-            actor_id,
+            actor_id: actor_id.to_string(),
             avatar_url: Some(seiran_common::avatar::fallback_avatar_url(
                 &state.local_domain,
                 actor_id,

@@ -3,8 +3,9 @@ export interface User {
   username: string;
   email: string;
   role: string; // "user" | "moderator" | "admin"
-  /** ローカル actors.id。noteUpdated ストリームイベントの reactorActorId との突き合わせに使う。 */
-  actor_id: number;
+  /** ローカル actors.id（Snowflake ID）。noteUpdated ストリームイベントの reactorActorId
+   * との突き合わせに使う。JS の53bit整数精度を超えるため文字列で返る。 */
+  actor_id: string;
   /** 左下ナビ等の自分のアイコン表示用。未設定の場合は undefined。 */
   avatar_url?: string;
   /** 表示言語設定（`ja` / `en` / `zh` / `ko` / `es` / `de` / `fr`）。`null`/`undefined` は「自動」。 */
