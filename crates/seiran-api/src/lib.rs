@@ -1694,7 +1694,9 @@ pub fn router(state: AppState) -> Router {
         ))
         // フロントエンドとの互換性チェック用に、サーバーのバージョン・最低対向バージョンを
         // 全レスポンスへ付与する（docs/architecture.md 2.1節）。
-        .layer(axum::middleware::from_fn(middleware::version_headers::attach))
+        .layer(axum::middleware::from_fn(
+            middleware::version_headers::attach,
+        ))
         .layer(cors)
 }
 
@@ -1810,7 +1812,10 @@ async fn resume_running_migrations(state: &AppState) {
 
     // フォロー関係の復元（`Job::MigrationImportFollows`）は`status`とは独立した
     // 結果整合処理のため、上のstatus起点ループとは別に判定する。
-    match repo.list_request_ids_with_pending_follow_materialization().await {
+    match repo
+        .list_request_ids_with_pending_follow_materialization()
+        .await
+    {
         Ok(request_ids) if !request_ids.is_empty() => {
             tracing::info!(
                 "[startup] フォロー関係復元待ちの既存DID転入リクエスト {} 件を再開します",
@@ -2006,13 +2011,13 @@ async fn backfill_unset_avatar_profiles(state: &AppState) {
         let material = handlers::notes::fetch_atp_profile_material(state, actor_id).await;
         let pinned_post = handlers::notes::resolve_bsky_pinned_post(state, actor_id).await;
         match material {
-            Ok((display_name, description, _, banner_media)) => match state
+            Ok((display_name, description, avatar_media, banner_media)) => match state
                 .atp_service
                 .commit_profile(
                     actor_id,
                     &display_name,
                     description.as_deref(),
-                    None,
+                    avatar_media,
                     banner_media,
                     pinned_post,
                     chrono::Utc::now(),

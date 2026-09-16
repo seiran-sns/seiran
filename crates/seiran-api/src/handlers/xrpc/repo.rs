@@ -829,8 +829,15 @@ async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_j
 }
 
 /// blob参照（`{"$type":"blob","ref":{"$link":"<CID>"},...}`）のCIDから、対応する
-/// `media_files` 行（既にseiran経由でアップロード済みの画像）を検索する。CIDのmultihashは
-/// sha256そのものなので、逆算して一致検索する（`xrpc_get_blob`と同じ手法）。
+/// `media_files` 行（Seiran自前UIまたは本関数経由でアップロード済みの画像）を検索する。
+/// 見つからなければ `atp_blobs`（`com.atproto.repo.uploadBlob` でATPクライアント＝
+/// Bluesky公式アプリ等が直接アップロードしたバイト列。Seiran自前UIを経由していないため
+/// `media_files` には存在しない）も検索し、見つかればそのストレージオブジェクトをそのまま
+/// 指す `media_files` 行を新たに作って（S3への再アップロードは不要）そのIDを返す。
+/// これにより、ATP経由で直接プロフィール画像・背景画像を設定した場合でも `actors.avatar_media_id`
+/// / `banner_media_id`（＝Fediverse側にも公開されるアバター）に反映される
+/// （2026-09-16 マイケル指摘: ATP側で更新したのにSeiranのプロフィール画像が更新されない）。
+/// CIDのmultihashはsha256そのものなので、逆算して一致検索する（`xrpc_get_blob`と同じ手法）。
 pub(crate) async fn resolve_blob_media_id(
     state: &AppState,
     blob_value: Option<&serde_json::Value>,
@@ -843,11 +850,66 @@ pub(crate) async fn resolve_blob_media_id(
         return None;
     }
     let sha256_hex = hex::encode(mh.digest());
-    sqlx::query_scalar::<_, i64>(
+
+    if let Ok(Some(id)) = sqlx::query_scalar::<_, i64>(
         "SELECT id FROM media_files WHERE sha256 = $1 AND uploaded_by_actor_id = $2 LIMIT 1",
     )
     .bind(&sha256_hex)
     .bind(actor_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        return Some(id);
+    }
+
+    link_atp_blob_as_media_file(state, &sha256_hex, actor_id).await
+}
+
+/// `atp_blobs` にある（Seiran自前UI経由ではなくATPクライアントが直接アップロードした）
+/// バイト列を、既存のストレージオブジェクトを再利用したまま `media_files` 行として複製する。
+async fn link_atp_blob_as_media_file(
+    state: &AppState,
+    sha256_hex: &str,
+    actor_id: i64,
+) -> Option<i64> {
+    let row = sqlx::query(
+        "SELECT mime_type, size, storage_provider_id, storage_key
+         FROM atp_blobs WHERE sha256 = $1 AND actor_id = $2 LIMIT 1",
+    )
+    .bind(sha256_hex)
+    .bind(actor_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()??;
+
+    let mime_type: String = row.try_get("mime_type").ok()?;
+    let size: i64 = row.try_get("size").ok()?;
+    let storage_provider_id: i64 = row.try_get("storage_provider_id").ok()?;
+    let storage_key: String = row.try_get("storage_key").ok()?;
+
+    let id = generate_snowflake_id(chrono::Utc::now());
+    sqlx::query(
+        "INSERT INTO media_files
+             (id, storage_provider_id, sha256, size, mime_type, storage_key, uploaded_by_actor_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (storage_provider_id, storage_key) DO NOTHING",
+    )
+    .bind(id)
+    .bind(storage_provider_id)
+    .bind(sha256_hex)
+    .bind(size)
+    .bind(&mime_type)
+    .bind(&storage_key)
+    .bind(actor_id)
+    .execute(&state.db)
+    .await
+    .ok()?;
+
+    sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM media_files WHERE storage_provider_id = $1 AND storage_key = $2",
+    )
+    .bind(storage_provider_id)
+    .bind(&storage_key)
     .fetch_optional(&state.db)
     .await
     .ok()

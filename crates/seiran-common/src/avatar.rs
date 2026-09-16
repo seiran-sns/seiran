@@ -3,6 +3,7 @@
 use std::io::Cursor;
 
 use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
+use sha2::{Digest, Sha256};
 
 const FNV_OFFSET: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
@@ -35,6 +36,18 @@ pub fn resolve_avatar_url(
     actor_id: i64,
 ) -> Option<String> {
     avatar_url.or_else(|| (actor_type == "local").then(|| fallback_avatar_url(domain, actor_id)))
+}
+
+/// アバター未設定のローカル actor 向けに、ATP プロフィールの `avatar` blob 参照として使う
+/// (sha256, mimeType, size) を返す。PNG バイト列自体はストレージへ保存せず、
+/// `fallback_avatar_png` が常に同じ入力から同じ出力を返す決定論性に頼って毎回その場で
+/// 再生成する（`xrpc_get_blob` 側でも同じ関数を呼んで CID の一致を確認してから返す）。
+/// これにより S3 へのアップロードや DB 行の追加を一切行わずに、bsky.app からは実在する
+/// blob として安定して取得できる。
+pub fn fallback_avatar_atp_blob(actor_id: i64) -> (String, &'static str, i64) {
+    let bytes = fallback_avatar_png(actor_id);
+    let sha256_hex = hex::encode(Sha256::digest(&bytes));
+    (sha256_hex, "image/png", bytes.len() as i64)
 }
 
 fn hsl_to_rgb(hue: u64, saturation: f32, lightness: f32) -> Rgb<u8> {
@@ -318,7 +331,12 @@ mod tests {
     #[test]
     fn resolve_keeps_existing_url() {
         assert_eq!(
-            resolve_avatar_url(Some("https://cdn.example/a.png".to_string()), "local", "example.com", 42),
+            resolve_avatar_url(
+                Some("https://cdn.example/a.png".to_string()),
+                "local",
+                "example.com",
+                42
+            ),
             Some("https://cdn.example/a.png".to_string())
         );
     }

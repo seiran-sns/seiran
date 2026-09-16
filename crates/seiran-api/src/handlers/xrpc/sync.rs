@@ -3,7 +3,7 @@ use std::time::Duration;
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::{Query, State},
-    http::StatusCode,
+    http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect},
 };
 use serde::Deserialize;
@@ -73,9 +73,49 @@ pub async fn xrpc_get_blob(
             }
             Redirect::temporary(&url).into_response()
         }
-        Ok(None) => ApiError::NotFound("Blob not found").into_response(),
+        Ok(None) => {
+            match fallback_avatar_blob_response(&state, params.did.as_deref(), &sha256_hex).await {
+                Some(resp) => resp,
+                None => ApiError::NotFound("Blob not found").into_response(),
+            }
+        }
         Err(e) => ApiError::Internal(format!("[getBlob] DB エラー: {}", e)).into_response(),
     }
+}
+
+/// `did` が未設定アバターのローカル actor を指し、要求された CID が
+/// `fallback_avatar_atp_blob` の決定論的生成結果と一致する場合のみ、その場で PNG を
+/// 生成して返す。ストレージには一切保存しない（`avatar_media_id` が無いローカル actor は
+/// 常に同じ入力から同じ CID になるため、bsky.app からは実在する blob として安定して見える）。
+async fn fallback_avatar_blob_response(
+    state: &AppState,
+    did: Option<&str>,
+    requested_sha256_hex: &str,
+) -> Option<axum::response::Response> {
+    let did = did?;
+    let actor = state.actors.find_by_did(did).await.ok()??;
+    if actor.actor_type != "local" {
+        return None;
+    }
+    let (sha256_hex, mime, bytes_len) = seiran_common::avatar::fallback_avatar_atp_blob(actor.id);
+    if sha256_hex != requested_sha256_hex {
+        return None;
+    }
+    let bytes = seiran_common::avatar::fallback_avatar_png(actor.id);
+    debug_assert_eq!(bytes.len() as i64, bytes_len);
+    Some(
+        (
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static(mime)),
+                (
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("public, max-age=31536000, immutable"),
+                ),
+            ],
+            bytes,
+        )
+            .into_response(),
+    )
 }
 
 #[derive(Deserialize)]

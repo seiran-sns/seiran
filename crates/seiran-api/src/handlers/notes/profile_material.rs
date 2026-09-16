@@ -88,9 +88,17 @@ pub(crate) async fn fetch_atp_profile_material(
     let avatar_sha256: Option<String> = row.try_get("avatar_sha256")?;
     let avatar_mime_type: Option<String> = row.try_get("avatar_mime_type")?;
     let avatar_size: Option<i64> = row.try_get("avatar_size")?;
+    // 未設定なら決定論的な自動生成アイコンを ATP blob 参照として補う（AP 側の
+    // `resolve_avatar_url` に相当する ATP 版。ATP の `avatar` は URL ではなく実在する
+    // blob の CID 参照を要求するため、生成 PNG のハッシュをそのまま blob 参照として使う。
+    // `xrpc_get_blob` 側が同じ関数で再生成した PNG の CID と突き合わせて返す）。
     let avatar_media = match (avatar_sha256, avatar_mime_type, avatar_size) {
         (Some(s), Some(m), Some(sz)) => Some((s, m, sz)),
-        _ => None,
+        _ => {
+            let (sha256_hex, mime, size) =
+                seiran_common::avatar::fallback_avatar_atp_blob(actor_id);
+            Some((sha256_hex, mime.to_string(), size))
+        }
     };
     let banner_sha256: Option<String> = row.try_get("banner_sha256")?;
     let banner_mime_type: Option<String> = row.try_get("banner_mime_type")?;
