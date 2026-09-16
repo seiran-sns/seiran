@@ -464,6 +464,69 @@ impl AppState {
         }
     }
 
+    /// bsky宛DMメッセージへの絵文字リアクション付与を`chat.bsky.convo.addReaction`で
+    /// Bluesky公式チャットサービスへ配送するジョブを積む。ローカルDBへの保存は
+    /// 呼び出し元が既に完了済みであること。
+    pub async fn enqueue_bsky_dm_reaction_add(&self, post_id: i64, actor_id: i64, content: String) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::BskyDmReactionAdd {
+                    post_id,
+                    actor_id,
+                    content,
+                },
+                job_priority::HIGH,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] BskyDmReactionAdd enqueue 失敗 (post_id={}): {}",
+                post_id,
+                e
+            );
+        }
+    }
+
+    /// bsky宛DMメッセージへの絵文字リアクション取消を配送するジョブを積む。
+    pub async fn enqueue_bsky_dm_reaction_remove(
+        &self,
+        post_id: i64,
+        actor_id: i64,
+        content: String,
+    ) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(
+                Job::BskyDmReactionRemove {
+                    post_id,
+                    actor_id,
+                    content,
+                },
+                job_priority::HIGH,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] BskyDmReactionRemove enqueue 失敗 (post_id={}): {}",
+                post_id,
+                e
+            );
+        }
+    }
+
+    /// bsky宛DMメッセージの「隠す」（`chat.bsky.convo.deleteMessageForSelf`）を配送する
+    /// ジョブを積む。
+    pub async fn enqueue_bsky_dm_hide(&self, post_id: i64, actor_id: i64) {
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::BskyDmHide { post_id, actor_id }, job_priority::HIGH)
+            .await
+        {
+            tracing::error!("[job] BskyDmHide enqueue 失敗 (post_id={}): {}", post_id, e);
+        }
+    }
+
     /// リモート Fedi アクターの followers/following 全件同期ジョブを積む（#68）。
     /// プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック。
     ///
@@ -1238,6 +1301,20 @@ pub fn router(state: AppState) -> Router {
             post(handlers::dm::mark_read),
         )
         .route("/api/dm/unread-count", get(handlers::dm::unread_count))
+        // bsky宛DMメッセージの絵文字リアクション・「隠す」（fedi/localは既存の
+        // /api/notes/:id/reactions・/api/notes/:id をそのまま使う、docs/protocols.md 9節）。
+        .route(
+            "/api/dm/messages/:id/reactions",
+            post(handlers::dm_bsky_reactions::create_dm_bsky_reaction),
+        )
+        .route(
+            "/api/dm/messages/:id/reactions/:content",
+            delete(handlers::dm_bsky_reactions::delete_dm_bsky_reaction),
+        )
+        .route(
+            "/api/dm/messages/:id/hide",
+            post(handlers::dm_bsky_reactions::hide_dm_message),
+        )
         .route("/api/streaming", get(handlers::streaming::streaming))
         .route(
             "/api/notes/:id",

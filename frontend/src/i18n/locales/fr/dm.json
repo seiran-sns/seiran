@@ -13,13 +13,17 @@
     "contextMenu": {
       "react": "Réagir",
       "delete": "Supprimer",
-      "hide": "Masquer",
-      "bskyUnsupported": "La prise en charge des messages Bsky arrive bientôt"
+      "hide": "Masquer"
     },
     "deleteConfirmModal": {
       "title": "Supprimer ce message ?",
       "body": "Cette action est irréversible.",
       "confirmButton": "Supprimer"
+    },
+    "hideConfirmModal": {
+      "title": "Masquer ce message ?",
+      "body": "Il sera uniquement masqué de votre côté. L'autre personne le verra toujours.",
+      "confirmButton": "Masquer"
     }
   },
   "recipientPicker": {

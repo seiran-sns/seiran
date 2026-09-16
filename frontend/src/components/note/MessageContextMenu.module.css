@@ -26,11 +26,6 @@
   background: var(--bg-elev);
 }
 
-.item:disabled {
-  color: var(--text-faint);
-  cursor: not-allowed;
-}
-
 .itemDanger {
   color: var(--danger);
 }

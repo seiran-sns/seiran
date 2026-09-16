@@ -452,6 +452,25 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::BskyDmSend { post_id } => jobs::bsky_dm_send::handle(post_id, ctx)
             .await
             .map_err(JobError::from),
+        Job::BskyDmReactionAdd {
+            post_id,
+            actor_id,
+            content,
+        } => jobs::bsky_dm_reaction::handle_add(post_id, actor_id, content, ctx)
+            .await
+            .map_err(JobError::from),
+        Job::BskyDmReactionRemove {
+            post_id,
+            actor_id,
+            content,
+        } => jobs::bsky_dm_reaction::handle_remove(post_id, actor_id, content, ctx)
+            .await
+            .map_err(JobError::from),
+        Job::BskyDmHide { post_id, actor_id } => {
+            jobs::bsky_dm_reaction::handle_hide(post_id, actor_id, ctx)
+                .await
+                .map_err(JobError::from)
+        }
         Job::RemoteFollowListSync {
             actor_id,
             direction,
@@ -572,6 +591,9 @@ fn job_name(job: &Job) -> &'static str {
         Job::FollowRequestsBulkAccept { .. } => "FollowRequestsBulkAccept",
         Job::BskyPostCommitDeferred { .. } => "BskyPostCommitDeferred",
         Job::BskyDmSend { .. } => "BskyDmSend",
+        Job::BskyDmReactionAdd { .. } => "BskyDmReactionAdd",
+        Job::BskyDmReactionRemove { .. } => "BskyDmReactionRemove",
+        Job::BskyDmHide { .. } => "BskyDmHide",
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
         Job::DmRecipientResolve { .. } => "DmRecipientResolve",
@@ -659,6 +681,14 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         },
         Job::BskyDmSend { .. } => RetryConfig {
             // ApDelivery と同様、外部サービス（Bluesky公式chatサービス）への配送のため長めに構える。
+            max_attempts: 10,
+            base_delay_ms: 5000,
+            max_delay_ms: 3_600_000,
+        },
+        Job::BskyDmReactionAdd { .. }
+        | Job::BskyDmReactionRemove { .. }
+        | Job::BskyDmHide { .. } => RetryConfig {
+            // BskyDmSendと同様、外部サービスへの配送のため長めに構える。
             max_attempts: 10,
             base_delay_ms: 5000,
             max_delay_ms: 3_600_000,

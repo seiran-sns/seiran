@@ -174,6 +174,8 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 | `AccountWithdrawUnfollowAll{actor_id, username}` | 退会時の一括アンフォロー。起動時リカバリ対象（下記） | — |
 | `BskyPostCommitDeferred{actor_id, post_id, pending_media_file_id}` | 動画添付投稿のATPコミットを動画結合完了まで遅延。起動時リカバリ対象（下記） | — |
 | `BskyDmSend{post_id}` | DM宛先のBskyアクターへ`chat.bsky.convo.sendMessage`で送信（`docs/protocols.md` 9節） | 高 |
+| `BskyDmReactionAdd{post_id, actor_id, content}` / `BskyDmReactionRemove{...}` | Bsky宛DMメッセージへのローカル発リアクション付与/取消を`chat.bsky.convo.addReaction`/`removeReaction`へ配送（`docs/protocols.md` 9節） | 高 |
+| `BskyDmHide{post_id, actor_id}` | Bsky宛DMメッセージの「隠す」操作を`chat.bsky.convo.deleteMessageForSelf`へ配送（`docs/protocols.md` 9節） | 高 |
 | `RemoteFollowListSync{actor_id, direction}` | リモートFediアクターのfollowers/following全件取得（プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック、`docs/protocols.md` 2節） | 低 |
 | `RemoteActorResolve{uri}` | リモートfollowers/following一覧中、ローカルDB未登録のactor URIのプロフィールを解決し`actors`へupsert（フォロー関係は作らない、`docs/protocols.md` 2節） | 低 |
 | `DmRecipientResolve{post_id, uri}` | Fedi受信DMの`to`に含まれるリモートアクターURIを解決し`post_recipients`へ追加する（`RemoteActorResolve`と共有ロジックで未知アクターもupsert）。DM受信処理自体はローカル宛先のみ即座に解決するため、3人以上の会話に混じるリモートユーザーの宛先表示漏れを防ぐ（`docs/protocols.md` 9節） | 低 |

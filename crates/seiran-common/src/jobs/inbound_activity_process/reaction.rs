@@ -129,17 +129,32 @@ pub(super) async fn handle_reaction(
     }
 
     // タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の
-    // ストリーミング挙動に合わせる）。
-    broadcast_reaction_update(
-        &inbox.stream_hub,
-        inbox.follow_repo.as_ref(),
-        inbox.reaction_repo.as_ref(),
-        post_id,
-        post_author_id,
-        actor_id,
-        Some(&db_content),
-    )
-    .await;
+    // ストリーミング挙動に合わせる）。DM（`direct`）はフォロワーへ漏れないよう配信先を
+    // 参加者のみに絞った専用版を使う。
+    if is_direct_post(&inbox.db_pool, post_id).await {
+        let dm_repo = PgDmRepository::new(inbox.db_pool.clone());
+        broadcast_dm_reaction_update(
+            &inbox.stream_hub,
+            &dm_repo,
+            inbox.reaction_repo.as_ref(),
+            post_id,
+            post_author_id,
+            actor_id,
+            Some(&db_content),
+        )
+        .await;
+    } else {
+        broadcast_reaction_update(
+            &inbox.stream_hub,
+            inbox.follow_repo.as_ref(),
+            inbox.reaction_repo.as_ref(),
+            post_id,
+            post_author_id,
+            actor_id,
+            Some(&db_content),
+        )
+        .await;
+    }
 
     Ok(())
 }

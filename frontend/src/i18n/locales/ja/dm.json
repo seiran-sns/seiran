@@ -13,13 +13,17 @@
     "contextMenu": {
       "react": "リアクション",
       "delete": "削除",
-      "hide": "隠す",
-      "bskyUnsupported": "Bskyメッセージは今後対応予定です"
+      "hide": "隠す"
     },
     "deleteConfirmModal": {
       "title": "メッセージを削除しますか？",
       "body": "この操作は取り消せません。",
       "confirmButton": "削除する"
+    },
+    "hideConfirmModal": {
+      "title": "このメッセージを隠しますか？",
+      "body": "自分の画面からのみ非表示になります。相手には表示されたままです。",
+      "confirmButton": "隠す"
     }
   },
   "recipientPicker": {

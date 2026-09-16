@@ -13,13 +13,17 @@
     "contextMenu": {
       "react": "Reagieren",
       "delete": "Löschen",
-      "hide": "Ausblenden",
-      "bskyUnsupported": "Unterstützung für Bsky-Nachrichten folgt in Kürze"
+      "hide": "Ausblenden"
     },
     "deleteConfirmModal": {
       "title": "Diese Nachricht löschen?",
       "body": "Diese Aktion kann nicht rückgängig gemacht werden.",
       "confirmButton": "Löschen"
+    },
+    "hideConfirmModal": {
+      "title": "Diese Nachricht ausblenden?",
+      "body": "Sie wird nur in Ihrer Ansicht ausgeblendet. Die andere Person sieht sie weiterhin.",
+      "confirmButton": "Ausblenden"
     }
   },
   "recipientPicker": {

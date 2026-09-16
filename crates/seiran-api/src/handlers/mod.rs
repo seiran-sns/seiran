@@ -6,6 +6,7 @@ pub mod auth;
 pub mod avatar;
 pub mod blocks;
 pub mod dm;
+pub mod dm_bsky_reactions;
 pub mod drive;
 pub mod email_verify;
 pub mod emojis;

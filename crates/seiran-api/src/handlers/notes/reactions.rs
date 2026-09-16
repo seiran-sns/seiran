@@ -269,17 +269,31 @@ pub async fn create_reaction(
     }
 
     // タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の
-    // ストリーミング挙動に合わせる）。通知ベルと違い自作自演でも送出する。
-    broadcast_reaction_update(
-        &state.stream_hub,
-        state.follows.as_ref(),
-        state.reactions.as_ref(),
-        note_id,
-        post.actor_id,
-        me.actor_id,
-        Some(&content),
-    )
-    .await;
+    // ストリーミング挙動に合わせる）。通知ベルと違い自作自演でも送出する。DM
+    // （`direct`）はフォロワーへ漏れないよう配信先を参加者のみに絞った専用版を使う。
+    if post.visibility == "direct" {
+        broadcast_dm_reaction_update(
+            &state.stream_hub,
+            state.dm.as_ref(),
+            state.reactions.as_ref(),
+            note_id,
+            post.actor_id,
+            me.actor_id,
+            Some(&content),
+        )
+        .await;
+    } else {
+        broadcast_reaction_update(
+            &state.stream_hub,
+            state.follows.as_ref(),
+            state.reactions.as_ref(),
+            note_id,
+            post.actor_id,
+            me.actor_id,
+            Some(&content),
+        )
+        .await;
+    }
 
     // ATP 連携: 絵文字は送れないため Like として送る（`emoji` は非標準の拡張メタデータとして
     // ベストエフォートで載せる）。旧リアクションがあれば先に削除してから作り直す（切替）。
@@ -396,16 +410,29 @@ pub async fn delete_reaction(
         return ApiError::NotFound("REACTION_NOT_FOUND").into_response();
     }
 
-    broadcast_reaction_update(
-        &state.stream_hub,
-        state.follows.as_ref(),
-        state.reactions.as_ref(),
-        note_id,
-        post.actor_id,
-        actor_id,
-        None,
-    )
-    .await;
+    if post.visibility == "direct" {
+        broadcast_dm_reaction_update(
+            &state.stream_hub,
+            state.dm.as_ref(),
+            state.reactions.as_ref(),
+            note_id,
+            post.actor_id,
+            actor_id,
+            None,
+        )
+        .await;
+    } else {
+        broadcast_reaction_update(
+            &state.stream_hub,
+            state.follows.as_ref(),
+            state.reactions.as_ref(),
+            note_id,
+            post.actor_id,
+            actor_id,
+            None,
+        )
+        .await;
+    }
 
     if let Some(rkey) = prev
         .as_ref()

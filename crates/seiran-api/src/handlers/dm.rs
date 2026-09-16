@@ -19,7 +19,8 @@ use crate::AppState;
 use super::notes::dto::{to_note_response, NoteRecipientInfo, NoteResponse, TimelineQuery};
 use super::notes::{
     attach_remote_instance_info, enqueue_stale_poll_fetches, fetch_attachments_map,
-    fetch_link_cards_map, fetch_reactions_map, resolve_mention_facets_in_place,
+    fetch_dm_bsky_reactions_map, fetch_link_cards_map, fetch_reactions_map,
+    resolve_mention_facets_in_place,
 };
 
 #[derive(Serialize, Clone)]
@@ -253,6 +254,10 @@ pub async fn thread_messages(
     let mut att_map = fetch_attachments_map(&state.db, &ids).await;
     let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
     let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
+    // bsky宛DMメッセージのリアクションは通常の`reactions`テーブルとは別の
+    // `dm_bsky_reactions`に持つ（`docs/protocols.md` 9節）。1メッセージが両方に
+    // 同時にリアクションを持つことは通常無いが、念のため両方の結果を連結する。
+    let bsky_rmap = fetch_dm_bsky_reactions_map(&state.db, &ids, Some(actor_id)).await;
     let mut recipients_by_post = fetch_message_recipients_map(&state, &ids).await;
     let mut notes: Vec<NoteResponse> = rows
         .into_iter()
@@ -263,7 +268,9 @@ pub async fn thread_messages(
                 att_map.remove(&id).unwrap_or_default(),
                 lc_map.remove(&id).unwrap_or_default(),
             );
-            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
+            let mut reactions = rmap.get(&id).cloned().unwrap_or_default();
+            reactions.extend(bsky_rmap.get(&id).cloned().unwrap_or_default());
+            nr.reactions = reactions;
             nr.recipients = recipients_by_post.remove(&id);
             nr
         })

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::repository::{FollowRepository, ReactionRepository};
+use crate::repository::{DmRepository, FollowRepository, ReactionRepository};
 
 /// Misskey互換のタイムラインチャンネル種別。クライアントが`connect`で指定するチャンネル名
 /// （`"homeTimeline"`等）をパースした結果。
@@ -167,10 +167,42 @@ impl StreamHub {
     }
 }
 
+fn reaction_agg_to_json(agg: Vec<(String, i64, Option<String>)>) -> Vec<serde_json::Value> {
+    agg.into_iter()
+        .filter(|(emoji, _, _)| !emoji.is_empty())
+        .map(|(emoji, count, emoji_url)| {
+            serde_json::json!({ "emoji": emoji, "count": count, "emojiUrl": emoji_url })
+        })
+        .collect()
+}
+
+/// `broadcast_reaction_update`/`broadcast_dm_reaction_update`共通の送出部分。
+fn publish_reaction_update(
+    stream_hub: &StreamHub,
+    recipients: HashSet<i64>,
+    post_id: i64,
+    reactions_json: Vec<serde_json::Value>,
+    reactor_actor_id: i64,
+    reactor_emoji: Option<&str>,
+) {
+    stream_hub.publish_event(
+        recipients,
+        "noteUpdated",
+        serde_json::json!({
+            "postId": post_id.to_string(),
+            "reactions": reactions_json,
+            "reactorActorId": reactor_actor_id.to_string(),
+            "reactorEmoji": reactor_emoji,
+        }),
+    );
+}
+
 /// リアクション追加/切替/取消（ローカル・AP 受信のいずれも）を `noteUpdated` イベントとして
 /// 送出する。配信先は投稿の著者 + 著者をフォロー中（承認済み・ローカル）のアクター
 /// （`broadcast_new_note` と同じ考え方。「今この投稿を見ている全員」を追跡する仕組みは
-/// まだ無いため、既存のリアルタイム配信の範囲に合わせている）。
+/// まだ無いため、既存のリアルタイム配信の範囲に合わせている）。**`direct`可視性の投稿には
+/// 使わないこと**（フォロワーはDMの当事者ではなく、DMの存在・リアクション内容が無関係な
+/// 第三者のWS接続に漏れる。`direct`投稿には`broadcast_dm_reaction_update`を使う）。
 ///
 /// `reactor_emoji` は今回のイベント後の「reactor 自身がこの投稿に付けているリアクション」。
 /// 切替/追加なら `Some(新しい絵文字)`、取消（他に付け直さなかった場合）なら `None`。
@@ -189,13 +221,7 @@ pub async fn broadcast_reaction_update(
         .aggregate_for_post(post_id)
         .await
         .unwrap_or_default();
-    let reactions_json: Vec<serde_json::Value> = agg
-        .into_iter()
-        .filter(|(emoji, _, _)| !emoji.is_empty())
-        .map(|(emoji, count, emoji_url)| {
-            serde_json::json!({ "emoji": emoji, "count": count, "emojiUrl": emoji_url })
-        })
-        .collect();
+    let reactions_json = reaction_agg_to_json(agg);
 
     let mut recipients: HashSet<i64> = HashSet::new();
     recipients.insert(post_author_id);
@@ -206,15 +232,49 @@ pub async fn broadcast_reaction_update(
         recipients.extend(rows);
     }
 
-    stream_hub.publish_event(
+    publish_reaction_update(
+        stream_hub,
         recipients,
-        "noteUpdated",
-        serde_json::json!({
-            "postId": post_id.to_string(),
-            "reactions": reactions_json,
-            "reactorActorId": reactor_actor_id.to_string(),
-            "reactorEmoji": reactor_emoji,
-        }),
+        post_id,
+        reactions_json,
+        reactor_actor_id,
+        reactor_emoji,
+    );
+}
+
+/// `broadcast_reaction_update`のDM（`visibility='direct'`）専用版。配信先を
+/// DMの参加者（投稿者 + `post_recipients`の宛先）のみに絞る。通常投稿版のようにフォロワーを
+/// 含めると、DMメッセージへのリアクション内容が無関係な第三者に漏れてしまう
+/// （`ap::deliver::reaction::resolve_reaction_targets`のAP配送側で先に見つかった問題と同種、
+/// `docs/protocols.md` 9節参照）。
+pub async fn broadcast_dm_reaction_update(
+    stream_hub: &StreamHub,
+    dm: &dyn DmRepository,
+    reactions: &dyn ReactionRepository,
+    post_id: i64,
+    post_author_id: i64,
+    reactor_actor_id: i64,
+    reactor_emoji: Option<&str>,
+) {
+    let agg = reactions
+        .aggregate_for_post(post_id)
+        .await
+        .unwrap_or_default();
+    let reactions_json = reaction_agg_to_json(agg);
+
+    let mut recipients: HashSet<i64> = HashSet::new();
+    recipients.insert(post_author_id);
+    if let Ok(rows) = dm.recipient_ids(post_id).await {
+        recipients.extend(rows);
+    }
+
+    publish_reaction_update(
+        stream_hub,
+        recipients,
+        post_id,
+        reactions_json,
+        reactor_actor_id,
+        reactor_emoji,
     );
 }
 

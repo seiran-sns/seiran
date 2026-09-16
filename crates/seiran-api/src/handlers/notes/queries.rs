@@ -700,6 +700,68 @@ pub async fn fetch_reactions_map(
     map
 }
 
+/// bsky宛DMメッセージの絵文字リアクション集計（`dm_bsky_reactions`）。通常の`reactions`
+/// テーブル（1投稿1ユーザー1個まで）とは別テーブルのため、DM用の`thread_messages`
+/// ハンドラのみが`fetch_reactions_map`と合わせて呼ぶ（`docs/protocols.md` 9節参照）。
+pub async fn fetch_dm_bsky_reactions_map(
+    db: &sqlx::PgPool,
+    post_ids: &[i64],
+    my_actor_id: Option<i64>,
+) -> HashMap<i64, Vec<ReactionSummary>> {
+    if post_ids.is_empty() {
+        return HashMap::new();
+    }
+    let rows = sqlx::query(
+        "SELECT post_id, content, COUNT(*) AS cnt
+         FROM dm_bsky_reactions
+         WHERE post_id = ANY($1)
+         GROUP BY post_id, content
+         ORDER BY post_id, cnt DESC",
+    )
+    .bind(post_ids)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+
+    let mine: HashSet<(i64, String)> = if let Some(actor_id) = my_actor_id {
+        sqlx::query(
+            "SELECT post_id, content FROM dm_bsky_reactions WHERE actor_id = $1 AND post_id = ANY($2)",
+        )
+        .bind(actor_id)
+        .bind(post_ids)
+        .fetch_all(db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|row| {
+            let post_id: i64 = row.try_get("post_id").unwrap_or_default();
+            let content: String = row.try_get("content").unwrap_or_default();
+            (post_id, content)
+        })
+        .collect()
+    } else {
+        Default::default()
+    };
+
+    let mut map: HashMap<i64, Vec<ReactionSummary>> = HashMap::new();
+    for row in rows {
+        let post_id: i64 = row.try_get("post_id").unwrap_or_default();
+        let emoji: String = row.try_get("content").unwrap_or_default();
+        let count: i64 = row.try_get("cnt").unwrap_or_default();
+        if emoji.is_empty() {
+            continue;
+        }
+        let reacted_by_me = mine.contains(&(post_id, emoji.clone()));
+        map.entry(post_id).or_default().push(ReactionSummary {
+            emoji,
+            count,
+            reacted_by_me,
+            emoji_url: None,
+        });
+    }
+    map
+}
+
 /// `TimelinePost` 群からリモートドメインを収集し、`remote_instance_meta` キャッシュを
 /// まとめて引く（Misskey互換API側、`misskey::convert::to_misskey_note` 呼び出し前に使う）。
 /// 未キャッシュのドメインは `RemoteInstanceInfoResolve` ジョブを積む。

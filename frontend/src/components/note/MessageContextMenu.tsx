@@ -15,10 +15,10 @@ interface MessageContextMenuProps {
   children: ReactElement;
   onReact: () => void;
   onDelete: () => void;
-  /** 自分自身が送ったメッセージのみ削除（bsky宛は「隠す」）できる。 */
+  /** 「削除」（bsky宛は「隠す」）項目自体を出すかどうか。fedi/localは自分の送信分のみ、
+   * bsky宛は`deleteMessageForSelf`相当で相手のメッセージにも呼べるため常にtrue。 */
   canDelete: boolean;
-  /** bsky宛/bsky発のスレッドか。true の間はリアクション・削除/隠すともに無効化する
-   * （`chat.bsky.convo.addReaction`/`deleteMessageForSelf`未対応、後日対応予定）。 */
+  /** bsky宛/bsky発のスレッドか。「削除」の代わりに「隠す」ラベルを出す。 */
   isBsky: boolean;
 }
 
@@ -68,8 +68,6 @@ export default function MessageContextMenu({
             <button
               type="button"
               className={styles.item}
-              disabled={isBsky}
-              title={isBsky ? t("dm:messagesPage.contextMenu.bskyUnsupported") : undefined}
               onClick={(e) => {
                 e.stopPropagation();
                 setMenuPos(null);
@@ -82,8 +80,6 @@ export default function MessageContextMenu({
               <button
                 type="button"
                 className={`${styles.item} ${styles.itemDanger}`}
-                disabled={isBsky}
-                title={isBsky ? t("dm:messagesPage.contextMenu.bskyUnsupported") : undefined}
                 onClick={(e) => {
                   e.stopPropagation();
                   setMenuPos(null);

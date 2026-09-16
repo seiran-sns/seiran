@@ -22,6 +22,7 @@ ID 採番は2系統ある。
 | `actors` | ローカル/リモート(Fedi・Bsky・ブリッジ)を統一するアクター（公開プロフィール実体） |
 | `posts` | 投稿・リプライ・リポスト・引用を統一するポストテーブル |
 | `reactions` | 投稿への絵文字/いいねリアクション |
+| `dm_bsky_reactions` / `dm_hidden_messages` | Bsky宛DMメッセージ専用のリアクション・個人非表示フラグ |
 | `follows` | フォロー関係（リクエスト中/成立） |
 | `remote_follow_snapshots` | リモートFediアクターのfollowers/following全件スナップショット（AP経由の直接取得キャッシュ、`follows`とは独立） |
 | `follow_import_requests` / `follow_import_items` | フォローインポート（設定画面から改行区切りのID一覧を貼り付けて一括フォロー）の実行1回分と、対象識別子ごとの処理状態 |
@@ -184,7 +185,13 @@ DMは`visibility='direct'`の投稿をそのまま`posts`に格納する方式�
 - `thread_root_post_id`（`posts`本体のカラム）: 「スレッド起点ポストを同じくするdirect投稿の集合」をメッセージセッションの単位とするための識別子。通常ポストへの返信として最初のdirect投稿が付いた場合、その最初のdirect投稿自身が起点になる。新規insert時は都度再帰クエリで遡らず、親（`reply_to_post_id`）の`thread_root_post_id`をそのままコピーする伝播コピー方式（親がdirectでない/存在しなければ自分自身のIDを設定）。中央ペインのメッセージ履歴はこの値で束ねて`id`昇順（時刻順）に並べ、ツリー表示はしない。
 - `dm_read_states`: `(actor_id, thread_root_post_id)`をPKに持つスレッド別の最終既読ポストID。未読バッジは「未読のあるセッション数」で算出する。
 - `bsky_convo_links`: DMスレッド起点とBsky `chat.bsky.convo`のconvoIdの対応キャッシュ（`getConvoForMembers`呼び出し回数を減らすため）。Bsky宛先が絡むスレッドのみ行を持つ。`last_synced_message_id`はBsky DM受信ポーリング（`chat.bsky.convo.getMessages`）が直近まで取り込み済みのBsky側メッセージIDを保持するカーソル。
-- `posts.bsky_message_id`（`posts`本体のカラム、Bsky受信DMのみ設定）: Bsky側メッセージIDを保持し部分UNIQUEインデックスを張ることで、DM受信ポーリングの再実行（DB瞬断等での中断からの再開）によるメッセージの重複取り込みを防ぐ冪等キーとして使う。
+- `posts.bsky_message_id`（`posts`本体のカラム、Bsky受信DMのみ設定）: Bsky側メッセージIDを保持し部分UNIQUEインデックスを張ることで、DM受信ポーリングの再実行（DB瞬断等での中断からの再開）によるメッセージの重複取り込みを防ぐ冪等キーとして使う。ローカル発信メッセージについても`Job::BskyDmSend`の`sendMessage`成功レスポンスからIDを取得して同じ列に書き戻す（リアクション操作は`chat.bsky.convo.addReaction`に対象メッセージのBsky側IDが必須のため）。
+
+### `dm_bsky_reactions` / `dm_hidden_messages`
+DMメッセージ（`posts.visibility='direct'`）へのリアクション・削除は、Bsky宛が絡む場合に通常投稿とは異なる制約を持つため専用テーブルで扱う。fedi/localのみのDMは通常投稿と同じ`reactions`テーブル・`DELETE /api/notes/:id`をそのまま使う（`docs/protocols.md` 9節参照）。
+
+- `dm_bsky_reactions`: `UNIQUE (post_id, actor_id, content)` — Bluesky公式チャットAPI（`chat.bsky.convo.addReaction`）の「1ユーザーが複数の異なるUnicode絵文字を同一メッセージに付けられる（メッセージ全体で最大5件、同じ絵文字は1個まで）」という仕様に合わせ、`reactions`の`UNIQUE(post_id, actor_id)`（1人1個まで）とは別モデルにしている。`content`はUnicode絵文字文字列のみ（カスタム絵文字非対応、バリデーションはAPI層）。ローカル発信リアクションは`Job::BskyDmReactionAdd`/`BskyDmReactionRemove`でBsky Chat APIへ配送し、相手発リアクションは`bsky_dm_poll`（DM受信ポーリングと同じジョブ）がメッセージの`reactions`フィールドから`sync_bsky_reactions`で全体置換（追加・取消の両方をこの1テーブルへ反映）する。
+- `dm_hidden_messages`: `(actor_id, post_id)` をPKに持つ、閲覧者ごとのメッセージ非表示フラグ（`chat.bsky.convo.deleteMessageForSelf`相当）。Bsky DMは相手のメッセージを削除できず自分の画面からのみ消せる仕様のため、fedi/local向けの完全削除（`DELETE /api/notes/:id`、投稿自体を削除する）とは別に用意した。Bsky宛でないメッセージにも呼べる（画面整理用途を拒否しない）。`thread_messages`はこのテーブルとの`NOT EXISTS`で該当行を除外する。ローカル発の「隠す」操作はBsky宛メッセージに限り`Job::BskyDmHide`で`deleteMessageForSelf`を配送する（fedi/localのみのメッセージは配送不要、DB上のフラグのみ）。
 
 ### `reactions`
 `UNIQUE(post_id, actor_id)` — 1投稿につき1ユーザー1リアクション（Misskey 準拠）。切り替え時は `ON CONFLICT DO UPDATE`。`content` は Unicode 絵文字文字列、またはカスタム絵文字の場合 `:shortcode@host:` 形式（本家Misskey準拠）。ローカル絵文字は `:shortcode@.:`、Fedi 受信のリモート絵文字はリアクション実行者の解決済みドメインを使って `:shortcode@{domain}:`（ワイヤ上の `content` に含まれるホスト値は信用せず、こちら側で解決した値を使う）。過去に保存されたローカルアクターのレガシーデータ（ホスト情報を持たない `:shortcode:`）は `20260903010000_backfill_local_reaction_content_host.sql` で `:shortcode@.:` へ一括書き換え済み（`aggregate_for_post`/`aggregate_for_actor` の `GROUP BY content` が新旧表記を別行として二重集計しないよう、読み出し側で正規化するのではなく過去データ側を是正する方針）。リモートアクターが送ってきたレガシーデータ（ホスト無しのまま連合してきた古いFedi実装からの受信分）は対象外で、そのまま残っており読み出し側でローカル相当としてフォールバック解釈する。AP wireの `tag[].id`/`tag[].name` は常にホストなしの素の shortcode（本家Misskey準拠の非対称性、`build_reaction_object`/`extract_emoji_tag_url`参照）。`emoji_url` はカスタム絵文字の画像URL（ローカル送信は `custom_emojis` から解決、Fedi 受信は activity の `tag` から解決、ATP 自己firehose再受信も `custom_emojis` から再解決、Unicode 絵文字は NULL）。`ON CONFLICT DO UPDATE` は `emoji_url` も無条件で上書きするため、insert元となる3経路（`create_reaction`／AP受信の`handle_reaction`／ATP受信の`handle_inbound_like_create`）は全て、`content` がカスタム絵文字形式なら emoji_url を解決してから渡す必要がある（未解決のまま `None` を渡すと既存の正しい値を消してしまう）。`id` は `posts`/`notifications` と同じ snowflake ID 名前空間（呼び出し側が `generate_snowflake_id(Utc::now())` で事前採番して渡す）で、`notifications.reaction_id`（リアクション通知の重複排除トークン、下記参照）に加えて、プロフィール「投稿」タブの投稿＋リアクション混合フィード（`GET /api/users/posts?includeReactions=true`）の時系列マージ・カーソルページネーションにも使う。`ON CONFLICT DO UPDATE` では `id`/`created_at` も新しい値へ更新する（切り替え＝新しいイベントとして時系列の先頭に来るべきため）。

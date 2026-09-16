@@ -22,16 +22,30 @@ pub(super) async fn handle_undo(
                     post_id
                 );
                 if let Ok(Some(post)) = inbox.post_repo.find_by_id(post_id).await {
-                    broadcast_reaction_update(
-                        &inbox.stream_hub,
-                        inbox.follow_repo.as_ref(),
-                        inbox.reaction_repo.as_ref(),
-                        post_id,
-                        post.actor_id,
-                        actor_id,
-                        None,
-                    )
-                    .await;
+                    if post.visibility == "direct" {
+                        let dm_repo = PgDmRepository::new(inbox.db_pool.clone());
+                        broadcast_dm_reaction_update(
+                            &inbox.stream_hub,
+                            &dm_repo,
+                            inbox.reaction_repo.as_ref(),
+                            post_id,
+                            post.actor_id,
+                            actor_id,
+                            None,
+                        )
+                        .await;
+                    } else {
+                        broadcast_reaction_update(
+                            &inbox.stream_hub,
+                            inbox.follow_repo.as_ref(),
+                            inbox.reaction_repo.as_ref(),
+                            post_id,
+                            post.actor_id,
+                            actor_id,
+                            None,
+                        )
+                        .await;
+                    }
                 }
             }
         }

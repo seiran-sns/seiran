@@ -13,13 +13,17 @@
     "contextMenu": {
       "react": "回應",
       "delete": "刪除",
-      "hide": "隱藏",
-      "bskyUnsupported": "Bsky 訊息即將支援"
+      "hide": "隱藏"
     },
     "deleteConfirmModal": {
       "title": "要刪除這則訊息嗎？",
       "body": "此操作無法復原。",
       "confirmButton": "刪除"
+    },
+    "hideConfirmModal": {
+      "title": "要隱藏這則訊息嗎？",
+      "body": "僅會從你的畫面隱藏，對方仍可看到。",
+      "confirmButton": "隱藏"
     }
   },
   "recipientPicker": {

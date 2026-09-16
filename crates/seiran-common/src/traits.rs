@@ -223,6 +223,29 @@ pub enum Job {
     /// で送信する。convoIdが`bsky_convo_links`に未キャッシュなら`getConvoForMembers`で先に解決する。
     BskyDmSend { post_id: i64 },
 
+    /// bsky宛DMメッセージへの絵文字リアクション付与を`chat.bsky.convo.addReaction`で
+    /// Bluesky公式チャットサービスへ配送する。ローカルDB（`dm_bsky_reactions`）への保存は
+    /// APIハンドラ側で既に完了済み、ここではBsky側への反映のみ行う。
+    BskyDmReactionAdd {
+        post_id: i64,
+        actor_id: i64,
+        content: String,
+    },
+
+    /// bsky宛DMメッセージへの絵文字リアクション取消を`chat.bsky.convo.removeReaction`で
+    /// 配送する（`BskyDmReactionAdd`の逆）。
+    BskyDmReactionRemove {
+        post_id: i64,
+        actor_id: i64,
+        content: String,
+    },
+
+    /// bsky宛DMメッセージを自分の画面からだけ非表示にする操作を
+    /// `chat.bsky.convo.deleteMessageForSelf`でBluesky公式チャットサービスへ反映する
+    /// （相手側には残り続ける、Bsky DMは相手側からメッセージを削除できない仕様のため）。
+    /// ローカルDB（`dm_hidden_messages`）への保存はAPIハンドラ側で既に完了済み。
+    BskyDmHide { post_id: i64, actor_id: i64 },
+
     /// リモート Fedi アクターの followers/following OrderedCollection を全件取得し、
     /// `remote_follow_snapshots` へキャッシュする（#68）。プロフィール表示時の短タイムアウト
     /// 同期取得が失敗/タイムアウトした場合のフォールバックとして積まれる。

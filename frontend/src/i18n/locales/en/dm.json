@@ -13,13 +13,17 @@
     "contextMenu": {
       "react": "React",
       "delete": "Delete",
-      "hide": "Hide",
-      "bskyUnsupported": "Support for Bsky messages is coming soon"
+      "hide": "Hide"
     },
     "deleteConfirmModal": {
       "title": "Delete this message?",
       "body": "This action cannot be undone.",
       "confirmButton": "Delete"
+    },
+    "hideConfirmModal": {
+      "title": "Hide this message?",
+      "body": "It will only be hidden from your view. The other person will still see it.",
+      "confirmButton": "Hide"
     }
   },
   "recipientPicker": {

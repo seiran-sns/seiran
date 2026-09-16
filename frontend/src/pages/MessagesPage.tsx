@@ -12,6 +12,7 @@ import RecipientPicker, { RecipientChip } from "../components/dm/RecipientPicker
 import { useAuth } from "../contexts/AuthContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
 import { useToast } from "../contexts/ToastContext";
+import { applyReactionUpdate } from "../hooks/useNoteCardActions";
 import Modal from "../components/common/Modal";
 import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import styles from "./MessagesPage.module.css";
@@ -34,7 +35,7 @@ export default function MessagesPage() {
   const navigate = useNavigate();
   const { threadRootId } = useParams<{ threadRootId?: string }>();
   const { user } = useAuth();
-  const { registerDirectMessage, refreshDmUnreadCount } = useStreamingContext();
+  const { registerDirectMessage, registerReaction, refreshDmUnreadCount } = useStreamingContext();
   const { showError } = useToast();
 
   const [sessions, setSessions] = useState<DmSession[]>([]);
@@ -121,6 +122,28 @@ export default function MessagesPage() {
     [registerDirectMessage, threadRootId]
   );
 
+  // 表示中の各メッセージへの絵文字リアクション追加/切替/取消をリアルタイム反映する
+  // （通常投稿のNoteCardと同じ`noteUpdated`イベント・`applyReactionUpdate`を再利用。
+  // fedi/local宛は`broadcast_reaction_update`、bsky宛は`bsky_dm_poll`のポーリング検知が
+  // 送出元）。メッセージID一覧が変わったときのみ購読し直す（reactions自体の更新で
+  // 配列参照が変わっても再購読しないよう、依存はID列のみのプリミティブ文字列にする）。
+  const messageIds = messages.map((m) => m.id).join(",");
+  useEffect(() => {
+    if (!messageIds) return;
+    const unsubs = messageIds.split(",").map((id) =>
+      registerReaction(id, (update) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === update.postId
+              ? { ...m, reactions: applyReactionUpdate(m.reactions ?? [], update, user?.actor_id) }
+              : m
+          )
+        );
+      })
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [messageIds, registerReaction, user?.actor_id]);
+
   const hasBskyRecipient = recipients.some((r) => r.actorType === "bsky");
   const hasBskyIssue = hasBskyRecipient && recipients.length > 1;
   const maxLen = hasBskyRecipient ? BSKY_DM_MAX : FEDI_DM_MAX;
@@ -165,7 +188,9 @@ export default function MessagesPage() {
   async function addReaction(messageId: string, emoji: string) {
     setReactionPickerFor(null);
     try {
-      const result = await api.notes.react(messageId, emoji);
+      const result = hasBskyRecipient
+        ? await api.dm.reactBsky(messageId, emoji)
+        : await api.notes.react(messageId, emoji);
       setMessages((prev) =>
         prev.map((m) => (m.id === messageId ? { ...m, reactions: result.reactions } : m)),
       );
@@ -178,7 +203,11 @@ export default function MessagesPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await api.notes.delete(deleteTarget);
+      if (hasBskyRecipient) {
+        await api.dm.hideMessage(deleteTarget);
+      } else {
+        await api.notes.delete(deleteTarget);
+      }
       setMessages((prev) => prev.filter((m) => m.id !== deleteTarget));
       setDeleteTarget(null);
     } catch (err) {
@@ -235,7 +264,7 @@ export default function MessagesPage() {
                 {!isMine && <Avatar url={m.user.avatarUrl} name={m.user.displayName || m.user.username} size={28} />}
                 <div>
                   <MessageContextMenu
-                    canDelete={isMine}
+                    canDelete={isMine || hasBskyRecipient}
                     isBsky={hasBskyRecipient}
                     onReact={() => setReactionPickerFor(m.id)}
                     onDelete={() => setDeleteTarget(m.id)}
@@ -307,16 +336,21 @@ export default function MessagesPage() {
       >
         {reactionPickerFor !== null && (
           <Suspense fallback={<p>{t("common:loading")}</p>}>
-            <EmojiPickerPanel onPick={(emoji) => addReaction(reactionPickerFor, emoji)} />
+            <EmojiPickerPanel
+              onPick={(emoji) => addReaction(reactionPickerFor, emoji)}
+              unicodeOnly={hasBskyRecipient}
+            />
           </Suspense>
         )}
       </Modal>
       <Modal
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
-        title={t("dm:messagesPage.deleteConfirmModal.title")}
+        title={t(
+          hasBskyRecipient ? "dm:messagesPage.hideConfirmModal.title" : "dm:messagesPage.deleteConfirmModal.title"
+        )}
       >
-        <p>{t("dm:messagesPage.deleteConfirmModal.body")}</p>
+        <p>{t(hasBskyRecipient ? "dm:messagesPage.hideConfirmModal.body" : "dm:messagesPage.deleteConfirmModal.body")}</p>
         <div className={styles.modalActions}>
           <button
             type="button"
@@ -324,7 +358,11 @@ export default function MessagesPage() {
             onClick={confirmDeleteMessage}
             disabled={deleting}
           >
-            {t("dm:messagesPage.deleteConfirmModal.confirmButton")}
+            {t(
+              hasBskyRecipient
+                ? "dm:messagesPage.hideConfirmModal.confirmButton"
+                : "dm:messagesPage.deleteConfirmModal.confirmButton"
+            )}
           </button>
           <button type="button" className={styles.modalSecondary} onClick={() => setDeleteTarget(null)}>
             {t("common:cancel")}

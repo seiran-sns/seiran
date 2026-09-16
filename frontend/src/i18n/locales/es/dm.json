@@ -13,13 +13,17 @@
     "contextMenu": {
       "react": "Reaccionar",
       "delete": "Eliminar",
-      "hide": "Ocultar",
-      "bskyUnsupported": "La compatibilidad con mensajes de Bsky llegará próximamente"
+      "hide": "Ocultar"
     },
     "deleteConfirmModal": {
       "title": "¿Eliminar este mensaje?",
       "body": "Esta acción no se puede deshacer.",
       "confirmButton": "Eliminar"
+    },
+    "hideConfirmModal": {
+      "title": "¿Ocultar este mensaje?",
+      "body": "Solo se ocultará en tu vista. La otra persona seguirá viéndolo.",
+      "confirmButton": "Ocultar"
     }
   },
   "recipientPicker": {

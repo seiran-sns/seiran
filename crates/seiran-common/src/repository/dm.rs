@@ -5,7 +5,7 @@
 //! 扱うための一覧・履歴・既読状態のクエリのみを持つ。
 
 use async_trait::async_trait;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 
 pub use super::post::{DmSessionSummary, TimelinePost};
 
@@ -84,6 +84,68 @@ pub trait DmRepository: Send + Sync {
 
     /// セッション一覧の相手表示用に、複数アクターIDの要約情報を一括取得する。
     async fn peer_summaries(&self, actor_ids: &[i64]) -> Result<Vec<DmPeerSummary>, sqlx::Error>;
+
+    /// 指定ポストがbsky宛DMメッセージ（スレッドが`bsky_convo_links`に登録済み）の場合のみ
+    /// `Some`を返す。`chat.bsky.convo.addReaction`/`removeReaction`/`deleteMessageForSelf`の
+    /// 呼び出しに必要な情報（convoId・対象メッセージのBsky側ID・閲覧者のDID/署名鍵）を
+    /// まとめて取得する。
+    async fn bsky_dm_context(
+        &self,
+        post_id: i64,
+        viewer_actor_id: i64,
+    ) -> Result<Option<BskyDmContext>, sqlx::Error>;
+
+    /// bsky宛DMメッセージへの絵文字リアクションを追加する（`dm_bsky_reactions`）。
+    /// 既に同じ`(post_id, actor_id, content)`があれば何もしない。戻り値は実際に新規追加
+    /// されたか（`false`なら既存、Bsky側への`addReaction`送信もスキップしてよい）。
+    async fn add_bsky_reaction(
+        &self,
+        id: i64,
+        post_id: i64,
+        actor_id: i64,
+        content: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, sqlx::Error>;
+
+    /// bsky宛DMメッセージへの絵文字リアクションを取り消す。戻り値は削除件数。
+    async fn remove_bsky_reaction(
+        &self,
+        post_id: i64,
+        actor_id: i64,
+        content: &str,
+    ) -> Result<u64, sqlx::Error>;
+
+    /// 指定メッセージに付いているリアクションの総数（Bsky仕様上の1メッセージ最大5件制限
+    /// のチェック用、全ユーザー合計）。
+    async fn count_bsky_reactions(&self, post_id: i64) -> Result<i64, sqlx::Error>;
+
+    /// Bsky受信ポーリング（`getMessages`）で取得した最新のリアクション一覧
+    /// （`(actor_id, content)`のペア列）でDBの記録を完全同期する（既存のうち無くなった
+    /// ものを削除、新規のものを追加）。戻り値は実際に変化があったか（呼び出し側が
+    /// 無駄なWS配信をスキップするために使う）。
+    async fn sync_bsky_reactions(
+        &self,
+        post_id: i64,
+        reactions: &[(i64, String)],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, sqlx::Error>;
+
+    /// 指定メッセージを閲覧者自身の画面からだけ非表示にする
+    /// （`chat.bsky.convo.deleteMessageForSelf`相当、`dm_hidden_messages`）。
+    async fn hide_message(&self, actor_id: i64, post_id: i64) -> Result<(), sqlx::Error>;
+}
+
+/// `bsky_dm_context`の結果。`convo_id`がSomeであることは、対象ポストのスレッドが
+/// Bsky宛DMであることを意味する（呼び出し元の「bsky宛DMかどうか」の判定はこれで行う）。
+#[derive(Debug, Clone)]
+pub struct BskyDmContext {
+    pub convo_id: String,
+    /// 対象メッセージ自身のBsky側ID。送信直後で`bsky_dm_send`のUPDATEがまだ完了して
+    /// いない場合など、稀に`None`になりうる（呼び出し元はこの場合Bsky側操作を諦める）。
+    pub bsky_message_id: Option<String>,
+    /// 操作主体（閲覧者自身、常にローカルユーザー）のDID・署名鍵。
+    pub viewer_did: String,
+    pub viewer_pem: String,
 }
 
 pub struct PgDmRepository {
@@ -194,6 +256,9 @@ impl DmRepository for PgDmRepository {
                AND ($4::bigint IS NULL OR p.id < $4)
                AND ($5::bigint IS NULL OR p.id > $5)
                AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, false)
+               AND NOT EXISTS (
+                   SELECT 1 FROM dm_hidden_messages dh WHERE dh.actor_id = $2 AND dh.post_id = p.id
+               )
              ORDER BY p.id ASC
              LIMIT $3",
         )
@@ -352,5 +417,146 @@ impl DmRepository for PgDmRepository {
         .bind(actor_ids)
         .fetch_all(&self.pool)
         .await
+    }
+
+    async fn bsky_dm_context(
+        &self,
+        post_id: i64,
+        viewer_actor_id: i64,
+    ) -> Result<Option<BskyDmContext>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT bcl.convo_id, p.bsky_message_id, va.at_did AS viewer_did, va.at_signing_key_pem AS viewer_pem
+             FROM posts p
+             JOIN bsky_convo_links bcl ON bcl.thread_root_post_id = COALESCE(p.thread_root_post_id, p.id)
+             JOIN actors va ON va.id = $2
+             WHERE p.id = $1",
+        )
+        .bind(post_id)
+        .bind(viewer_actor_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.and_then(|r| {
+            let viewer_did: Option<String> = r.try_get("viewer_did").ok().flatten();
+            let viewer_pem: Option<String> = r.try_get("viewer_pem").ok().flatten();
+            match (viewer_did, viewer_pem) {
+                (Some(viewer_did), Some(viewer_pem)) => Some(BskyDmContext {
+                    convo_id: r.try_get("convo_id").unwrap_or_default(),
+                    bsky_message_id: r.try_get("bsky_message_id").unwrap_or(None),
+                    viewer_did,
+                    viewer_pem,
+                }),
+                // 閲覧者がAT Protocol未対応のローカルユーザー（DID未発行）。
+                _ => None,
+            }
+        }))
+    }
+
+    async fn add_bsky_reaction(
+        &self,
+        id: i64,
+        post_id: i64,
+        actor_id: i64,
+        content: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, sqlx::Error> {
+        let inserted: Option<(i64,)> = sqlx::query_as(
+            "INSERT INTO dm_bsky_reactions (id, post_id, actor_id, content, created_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (post_id, actor_id, content) DO NOTHING
+             RETURNING id",
+        )
+        .bind(id)
+        .bind(post_id)
+        .bind(actor_id)
+        .bind(content)
+        .bind(now)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(inserted.is_some())
+    }
+
+    async fn remove_bsky_reaction(
+        &self,
+        post_id: i64,
+        actor_id: i64,
+        content: &str,
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "DELETE FROM dm_bsky_reactions WHERE post_id = $1 AND actor_id = $2 AND content = $3",
+        )
+        .bind(post_id)
+        .bind(actor_id)
+        .bind(content)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    async fn count_bsky_reactions(&self, post_id: i64) -> Result<i64, sqlx::Error> {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM dm_bsky_reactions WHERE post_id = $1")
+            .bind(post_id)
+            .fetch_one(&self.pool)
+            .await
+    }
+
+    async fn sync_bsky_reactions(
+        &self,
+        post_id: i64,
+        reactions: &[(i64, String)],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let existing: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT actor_id, content FROM dm_bsky_reactions WHERE post_id = $1",
+        )
+        .bind(post_id)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        let existing_set: std::collections::HashSet<(i64, String)> =
+            existing.into_iter().collect();
+        let latest_set: std::collections::HashSet<(i64, String)> =
+            reactions.iter().cloned().collect();
+        let changed = existing_set != latest_set;
+
+        for (actor_id, content) in latest_set.difference(&existing_set) {
+            sqlx::query(
+                "INSERT INTO dm_bsky_reactions (id, post_id, actor_id, content, created_at)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (post_id, actor_id, content) DO NOTHING",
+            )
+            .bind(crate::generate_snowflake_id(now))
+            .bind(post_id)
+            .bind(actor_id)
+            .bind(content)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        for (actor_id, content) in existing_set.difference(&latest_set) {
+            sqlx::query(
+                "DELETE FROM dm_bsky_reactions WHERE post_id = $1 AND actor_id = $2 AND content = $3",
+            )
+            .bind(post_id)
+            .bind(actor_id)
+            .bind(content)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(changed)
+    }
+
+    async fn hide_message(&self, actor_id: i64, post_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO dm_hidden_messages (actor_id, post_id) VALUES ($1, $2)
+             ON CONFLICT (actor_id, post_id) DO NOTHING",
+        )
+        .bind(actor_id)
+        .bind(post_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }

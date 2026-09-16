@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use seiran_common::atp::sign_service_auth_jwt;
 use seiran_common::generate_snowflake_id;
+use seiran_common::repository::{DmRepository, PgDmRepository};
 use seiran_common::streaming::StreamHub;
 use seiran_common::traits::JobQueue;
 use sqlx::{PgPool, Row};
@@ -180,6 +181,10 @@ async fn sync_convo(
     // 最新1ページのみを見れば新着が拾えるため、ページングしない。
     let is_initial_sync = last_synced.is_none();
     let mut new_messages: Vec<serde_json::Value> = Vec::new();
+    // reactions同期（下記）のために、新着かどうかを問わず取得した全メッセージを蓄積する。
+    // 相手が既存メッセージへリアクションを付け外ししても新着メッセージは増えないため、
+    // 新着処理（`new_messages`）だけでは検知できない。
+    let mut all_fetched_messages: Vec<serde_json::Value> = Vec::new();
     let mut cursor: Option<String> = None;
     let mut fetched_pages = 0u32;
     loop {
@@ -213,6 +218,7 @@ async fn sync_convo(
             .cloned()
             .unwrap_or_default();
         fetched_pages += 1;
+        all_fetched_messages.extend(messages.iter().cloned());
 
         // getMessagesは新しい順で返る。前回同期済みのメッセージIDに到達したら
         // （＝そこから先は既に取り込み済み）そこで打ち切る。
@@ -242,12 +248,35 @@ async fn sync_convo(
         }
         cursor = next_cursor;
     }
+    // 相手が付け外ししたリアクションは、新着メッセージを増やさないため上記の新着検知
+    // だけでは拾えない。取得できた全メッセージ（ページング分すべて、新着かどうか問わず）
+    // について`reactions`フィールドをDBの記録（`dm_bsky_reactions`）と同期する。
+    // `peer_actor_id`はこの後の新規メッセージ取り込みでも使うため、新着有無によらず
+    // 一度だけ解決する（重複upsertを避ける）。
+    let peer_actor_id = resolve_or_upsert_bsky_actor(pool, job_queue, http, &peer_did).await?;
+    if !all_fetched_messages.is_empty()
+        && let Err(e) = sync_message_reactions(
+            pool,
+            stream_hub,
+            local_actor_id,
+            local_did,
+            peer_actor_id,
+            &peer_did,
+            &all_fetched_messages,
+        )
+        .await
+    {
+        tracing::warn!(
+            "[BskyDmPoll] リアクション同期失敗 convo_id={}: {}",
+            convo_id,
+            e
+        );
+    }
+
     if new_messages.is_empty() {
         return Ok(());
     }
     new_messages.reverse(); // 古い順に処理する
-
-    let peer_actor_id = resolve_or_upsert_bsky_actor(pool, job_queue, http, &peer_did).await?;
 
     let mut current_thread_root = thread_root_post_id;
 
@@ -396,6 +425,113 @@ async fn sync_convo(
         stream_hub.publish_note(recipients, &note_json);
     }
 
+    Ok(())
+}
+
+/// 取得済みメッセージ群の`reactions`フィールドを`dm_bsky_reactions`と同期する。
+/// メッセージ自身がまだDB未登録（`posts.bsky_message_id`に対応行が無い、通常は
+/// 起きないが安全側）の場合はそのメッセージだけスキップする。実際に変化があった
+/// メッセージは、ローカルユーザー（Bsky側の相手には配信不要、WS接続を持たないため）
+/// へ`noteUpdated`イベントで即時反映する（`docs/protocols.md` 9節）。
+async fn sync_message_reactions(
+    pool: &PgPool,
+    stream_hub: &StreamHub,
+    local_actor_id: i64,
+    local_did: &str,
+    peer_actor_id: i64,
+    peer_did: &str,
+    messages: &[serde_json::Value],
+) -> Result<(), String> {
+    let dm_repo = PgDmRepository::new(pool.clone());
+    for m in messages {
+        let msg_id = m.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        if msg_id.is_empty() {
+            continue;
+        }
+        let Some(reactions_json) = m.get("reactions").and_then(|v| v.as_array()) else {
+            continue;
+        };
+
+        let post_id: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM posts WHERE bsky_message_id = $1")
+                .bind(msg_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        let Some(post_id) = post_id else {
+            continue;
+        };
+
+        let reactions: Vec<(i64, String)> = reactions_json
+            .iter()
+            .filter_map(|r| {
+                let value = r.get("value").and_then(|v| v.as_str())?.to_string();
+                let sender_did = r.get("sender").and_then(|s| s.get("did")).and_then(|v| v.as_str())?;
+                let actor_id = if sender_did == local_did {
+                    local_actor_id
+                } else if sender_did == peer_did {
+                    peer_actor_id
+                } else {
+                    // 1:1会話の参加者以外（あり得ないはずだが安全側）は無視する。
+                    return None;
+                };
+                Some((actor_id, value))
+            })
+            .collect();
+
+        let changed = dm_repo
+            .sync_bsky_reactions(post_id, &reactions, chrono::Utc::now())
+            .await
+            .map_err(|e| format!("dm_bsky_reactions同期失敗 post_id={}: {}", post_id, e))?;
+        if changed {
+            notify_dm_bsky_reactions_changed(pool, stream_hub, post_id, local_actor_id, peer_actor_id)
+                .await
+                .map_err(|e| format!("リアクション変更通知失敗 post_id={}: {}", post_id, e))?;
+        }
+    }
+    Ok(())
+}
+
+/// `dm_bsky_reactions`の現在の集計を`local_actor_id`視点（`reactedByMe`はローカルユーザー
+/// 自身がそのcontentを含むかどうか）で組み立て、`noteUpdated`イベントとしてローカル
+/// ユーザーのみへ配信する（`MessagesPage`の`registerReaction`が拾う、`NoteCard`と同じ
+/// 汎用イベントを再利用）。`reactorActorId`は常に相手（`peer_actor_id`）扱いにする
+/// （ローカル自身の変更は`Job::BskyDmReactionAdd`/`Remove`のAPI応答で即時反映済みのため、
+/// ここで拾う変化は基本的に相手発。ローカルユーザーが公式Blueskyアプリ経由で操作した
+/// 場合のみ「相手発」と誤認するが、その場合も最終的な集計自体は正しく反映される）。
+async fn notify_dm_bsky_reactions_changed(
+    pool: &PgPool,
+    stream_hub: &StreamHub,
+    post_id: i64,
+    local_actor_id: i64,
+    peer_actor_id: i64,
+) -> Result<(), String> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT content, COUNT(*) AS cnt FROM dm_bsky_reactions
+         WHERE post_id = $1 GROUP BY content ORDER BY cnt DESC",
+    )
+    .bind(post_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let reactions_json: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(content, count)| {
+            serde_json::json!({ "emoji": content, "count": count, "emojiUrl": null })
+        })
+        .collect();
+
+    stream_hub.publish_event(
+        HashSet::from([local_actor_id]),
+        "noteUpdated",
+        serde_json::json!({
+            "postId": post_id.to_string(),
+            "reactions": reactions_json,
+            "reactorActorId": peer_actor_id.to_string(),
+            "reactorEmoji": serde_json::Value::Null,
+        }),
+    );
     Ok(())
 }
 

@@ -41,8 +41,8 @@ pub use profile_material::resolve_bsky_pinned_post;
 pub use queries::{
     attach_poll_votes, attach_relationship_flags, attach_remote_instance_info,
     attach_reply_quote_gates, build_instance_cache, embed_quotes, embed_renotes,
-    enqueue_stale_poll_fetches, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
-    resolve_mention_facets_in_place,
+    enqueue_stale_poll_fetches, fetch_attachments_map, fetch_dm_bsky_reactions_map,
+    fetch_link_cards_map, fetch_reactions_map, resolve_mention_facets_in_place,
 };
 pub use reactions::{
     create_reaction, delete_reaction, frequent_reactions, note_reposts, reaction_actors,
@@ -68,7 +68,7 @@ use seiran_common::repository::{
     extract_shortcode_candidates, Actor, InsertFullParams, InsertRepostParams, NotificationKind,
     TimelinePost,
 };
-use seiran_common::streaming::{broadcast_poll_update, broadcast_reaction_update};
+use seiran_common::streaming::{broadcast_dm_reaction_update, broadcast_poll_update, broadcast_reaction_update};
 use seiran_common::{
     ap::{fetch_ap_history, plain_to_html_with_mentions},
     generate_snowflake_id,

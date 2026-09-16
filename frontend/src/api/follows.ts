@@ -1,5 +1,5 @@
 import { cursorParams, request } from "./core";
-import type { DmSession, FollowImportStartResponse, FollowImportStatusResponse, FollowListItem, FollowResponse, RawNote } from "./types";
+import type { DmSession, FollowImportStartResponse, FollowImportStatusResponse, FollowListItem, FollowResponse, RawNote, ReactResult } from "./types";
 import { normalizeNote } from "./types";
 
 export const follows = {
@@ -71,5 +71,28 @@ export const dm = {
   },
   unreadCount() {
     return request<{ count: number }>("GET", "/dm/unread-count");
+  },
+  /** bsky宛DMメッセージへの絵文字リアクション付与（Unicode限定・1メッセージ最大5個・
+   * 同じ絵文字1個まで）。fedi/localのDMメッセージは`api.notes.react`をそのまま使う。 */
+  reactBsky(postId: string, content: string) {
+    return request<ReactResult>(
+      "POST",
+      `/dm/messages/${encodeURIComponent(postId)}/reactions`,
+      { content },
+    );
+  },
+  unreactBsky(postId: string, content: string) {
+    return request<ReactResult>(
+      "DELETE",
+      `/dm/messages/${encodeURIComponent(postId)}/reactions/${encodeURIComponent(content)}`,
+    );
+  },
+  /** 自分の画面からだけメッセージを非表示にする（`chat.bsky.convo.deleteMessageForSelf`
+   * 相当）。bsky宛でないメッセージにも呼べる（画面整理用途）。 */
+  hideMessage(postId: string) {
+    return request<{ ok: boolean }>(
+      "POST",
+      `/dm/messages/${encodeURIComponent(postId)}/hide`,
+    );
   },
 };

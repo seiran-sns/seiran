@@ -13,8 +13,8 @@ use sqlx::Row;
 use crate::atp::sign_service_auth_jwt;
 use crate::queue::worker::JobContext;
 
-const CHAT_SERVICE_HOST: &str = "https://api.bsky.chat";
-const CHAT_SERVICE_AUD: &str = "did:web:api.bsky.chat";
+pub(crate) const CHAT_SERVICE_HOST: &str = "https://api.bsky.chat";
+pub(crate) const CHAT_SERVICE_AUD: &str = "did:web:api.bsky.chat";
 
 pub async fn handle(post_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
     let Some(pool) = ctx.db_pool.as_ref() else {
@@ -107,6 +107,34 @@ pub async fn handle(post_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
     let body_text = resp.text().await.unwrap_or_default();
 
     if status.is_success() {
+        // レスポンス（`ChatBskyConvoDefs#messageView`）の`id`をBsky側メッセージIDとして
+        // `posts.bsky_message_id`へ保存する。これが無いと、自分が送信したメッセージへの
+        // リアクション付与・「隠す」（`chat.bsky.convo.addReaction`/`deleteMessageForSelf`）
+        // の際にBsky側のmessageIdを特定できない。
+        match serde_json::from_str::<serde_json::Value>(&body_text)
+            .ok()
+            .and_then(|v| v.get("id").and_then(|id| id.as_str()).map(str::to_string))
+        {
+            Some(message_id) => {
+                if let Err(e) = sqlx::query("UPDATE posts SET bsky_message_id = $1 WHERE id = $2")
+                    .bind(&message_id)
+                    .bind(post_id)
+                    .execute(pool)
+                    .await
+                {
+                    tracing::error!(
+                        "[BskyDmSend] bsky_message_id保存失敗 post_id={}: {}",
+                        post_id,
+                        e
+                    );
+                }
+            }
+            None => tracing::warn!(
+                "[BskyDmSend] sendMessage応答にidが無い post_id={} body={}",
+                post_id,
+                body_text
+            ),
+        }
         tracing::info!(
             "[BskyDmSend] 送信成功 post_id={} convo_id={}",
             post_id,

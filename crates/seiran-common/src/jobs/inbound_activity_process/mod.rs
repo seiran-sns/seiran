@@ -16,10 +16,24 @@ use crate::queue::worker::{priority, InboxContext, JobContext};
 use crate::repository::{
     extract_shortcode_candidates, format_remote_reaction_content,
     parse_reaction_shortcode_and_host, Actor, InsertRemoteWithDedupParams, InsertRepostParams,
-    NotificationKind, PgRelayRepository, RelayRepository, RelayStatus,
+    NotificationKind, PgDmRepository, PgRelayRepository, RelayRepository, RelayStatus,
 };
-use crate::streaming::{broadcast_poll_update, broadcast_reaction_update, ChannelScope};
+use crate::streaming::{
+    broadcast_dm_reaction_update, broadcast_poll_update, broadcast_reaction_update, ChannelScope,
+};
 use crate::traits::{Job, JobQueue};
+
+/// 対象ポストが`direct`（DM）かどうか。リアクション受信でリアルタイム配信の配信先を
+/// フォロワー込みにするか参加者のみに絞るかの分岐に使う（`docs/protocols.md` 9節）。
+async fn is_direct_post(db_pool: &sqlx::PgPool, post_id: i64) -> bool {
+    sqlx::query_scalar::<_, bool>("SELECT visibility = 'direct' FROM posts WHERE id = $1")
+        .bind(post_id)
+        .fetch_optional(db_pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false)
+}
 
 mod announce;
 mod block;

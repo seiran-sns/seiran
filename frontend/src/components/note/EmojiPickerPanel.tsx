@@ -40,6 +40,9 @@ interface PickerGroup {
 
 interface EmojiPickerPanelProps {
   onPick: (content: string) => void;
+  /** Bsky宛DMリアクション等、Unicode絵文字のみ選択可能にしたい場合に指定する。
+   * カスタム絵文字タブを隠し、よく使う絵文字タブからもカスタム絵文字を除外する。 */
+  unicodeOnly?: boolean;
 }
 
 const SEARCH_RESULT_LIMIT = 100;
@@ -142,7 +145,7 @@ function PagedGroupedGrid({ groups, rootRef, renderItem }: PagedGroupedGridProps
 }
 
 /** カスタム絵文字＋Unicode絵文字を検索・タブ切り替えで選べるピッカー本体（Modal 内に描画する）。 */
-export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
+export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiPickerPanelProps) {
   const { t, i18n } = useTranslation();
   const [customEmojis, setCustomEmojis] = useState<PublicEmoji[]>([]);
   const [frequent, setFrequent] = useState<FrequentReaction[]>([]);
@@ -167,6 +170,10 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
       cancelled = true;
     };
   }, [i18n.language, i18n.resolvedLanguage]);
+
+  useEffect(() => {
+    if (unicodeOnly && tab === "custom") setTab("unicode");
+  }, [unicodeOnly, tab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -228,19 +235,21 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
     const customByShortcode = new Map(
       customItems.map((i) => [parseCustomEmojiShortcode(i.content), i])
     );
-    return frequent.map((f) => {
-      const parsed = parseReactionContent(f.content);
-      const custom =
-        parsed && isLocalCustomEmoji(parsed) ? customByShortcode.get(parsed.shortcode) : undefined;
-      if (custom) return custom;
-      return { key: `frequent:${f.content}`, content: f.content, label: f.content, imageUrl: f.emojiUrl ?? undefined };
-    });
-  }, [frequent, customItems]);
+    return frequent
+      .filter((f) => !unicodeOnly || parseReactionContent(f.content) === null)
+      .map((f) => {
+        const parsed = parseReactionContent(f.content);
+        const custom =
+          parsed && isLocalCustomEmoji(parsed) ? customByShortcode.get(parsed.shortcode) : undefined;
+        if (custom) return custom;
+        return { key: `frequent:${f.content}`, content: f.content, label: f.content, imageUrl: f.emojiUrl ?? undefined };
+      });
+  }, [frequent, customItems, unicodeOnly]);
 
   const searchResults: PickerItem[] | null = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return null;
-    const customMatches = customItems.filter((i) => i.label.toLowerCase().includes(q));
+    const customMatches = unicodeOnly ? [] : customItems.filter((i) => i.label.toLowerCase().includes(q));
     const unicodeMatches: PickerItem[] = allUnicodeEmojis
       .filter((e) => {
         if (e.emoji.includes(q)) return true;
@@ -251,7 +260,7 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
       .slice(0, SEARCH_RESULT_LIMIT)
       .map((e) => ({ key: `u:${e.emoji}`, content: e.emoji, label: e.name }));
     return [...customMatches, ...unicodeMatches];
-  }, [query, customItems, annotations]);
+  }, [query, customItems, annotations, unicodeOnly]);
 
   function renderItem(item: PickerItem) {
     const span = item.imageUrl ? emojiAspectSpan(item.width, item.height) : 1;
@@ -302,13 +311,15 @@ export default function EmojiPickerPanel({ onPick }: EmojiPickerPanelProps) {
           >
             {t("home:reactionPicker.tabUnicode")}
           </button>
-          <button
-            type="button"
-            className={`${styles.tab} ${tab === "custom" ? styles.tabActive : ""}`}
-            onClick={() => setTab("custom")}
-          >
-            {t("home:reactionPicker.tabCustom")}
-          </button>
+          {!unicodeOnly && (
+            <button
+              type="button"
+              className={`${styles.tab} ${tab === "custom" ? styles.tabActive : ""}`}
+              onClick={() => setTab("custom")}
+            >
+              {t("home:reactionPicker.tabCustom")}
+            </button>
+          )}
         </div>
       )}
 
