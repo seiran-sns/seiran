@@ -63,6 +63,8 @@
     "savedMessage": "已儲存。",
     "uploadingAvatar": "正在上傳...",
     "changeAvatarButton": "更換頭像",
+    "uploadingBanner": "正在上傳...",
+    "changeBannerButton": "更換背景圖片",
     "displayNameLabel": "顯示名稱",
     "birthdayLabel": "生日",
     "birthdayPublicLabel": "在Fediverse上公開",

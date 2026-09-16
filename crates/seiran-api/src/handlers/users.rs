@@ -1488,7 +1488,7 @@ pub async fn update_profile(
     // 共通ヘルパー、pin/unpin 時の再コミットとも共用）。
     let pinned_post = crate::handlers::notes::resolve_bsky_pinned_post(&state, current.id).await;
     match crate::handlers::notes::fetch_atp_profile_material(&state, current.id).await {
-        Ok((atp_display_name, bio_with_fields, avatar_media)) => {
+        Ok((atp_display_name, bio_with_fields, avatar_media, banner_media)) => {
             if let Err(e) = state
                 .atp_service
                 .commit_profile(
@@ -1496,6 +1496,7 @@ pub async fn update_profile(
                     &atp_display_name,
                     bio_with_fields.as_deref(),
                     avatar_media,
+                    banner_media,
                     pinned_post,
                     chrono::Utc::now(),
                 )

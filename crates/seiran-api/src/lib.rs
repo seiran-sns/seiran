@@ -1929,13 +1929,14 @@ async fn backfill_unset_avatar_profiles(state: &AppState) {
         let material = handlers::notes::fetch_atp_profile_material(state, actor_id).await;
         let pinned_post = handlers::notes::resolve_bsky_pinned_post(state, actor_id).await;
         match material {
-            Ok((display_name, description, _)) => match state
+            Ok((display_name, description, _, banner_media)) => match state
                 .atp_service
                 .commit_profile(
                     actor_id,
                     &display_name,
                     description.as_deref(),
                     None,
+                    banner_media,
                     pinned_post,
                     chrono::Utc::now(),
                 )

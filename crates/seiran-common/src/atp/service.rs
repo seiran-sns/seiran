@@ -1668,12 +1668,14 @@ impl AtpCommitService {
     /// `pinned_post` はピン留め投稿への strongRef（uri, cid）。ピン留めが無い/ピン留め投稿が
     /// Bsky 側に存在しない場合は `None` を渡す（#61）。
     /// 既に `app.bsky.actor.profile/self` が存在するかで action(create/update)を自動判定する。
+    #[allow(clippy::too_many_arguments)]
     pub async fn commit_profile(
         &self,
         actor_id: i64,
         display_name: &str,
         description: Option<&str>,
         avatar_media: Option<(String, String, i64)>,
+        banner_media: Option<(String, String, i64)>,
         pinned_post: Option<(String, String)>,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
@@ -1690,6 +1692,9 @@ impl AtpCommitService {
         let avatar_ref = avatar_media
             .as_ref()
             .map(|(sha256, mime, size)| (sha256.as_str(), mime.as_str(), *size));
+        let banner_ref = banner_media
+            .as_ref()
+            .map(|(sha256, mime, size)| (sha256.as_str(), mime.as_str(), *size));
         let pinned_post_ref = pinned_post
             .as_ref()
             .map(|(uri, cid)| (uri.as_str(), cid.as_str()));
@@ -1697,6 +1702,7 @@ impl AtpCommitService {
             display_name,
             description,
             avatar_ref,
+            banner_ref,
             pinned_post_ref,
             &created_at_str,
         )?;

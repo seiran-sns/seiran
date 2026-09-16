@@ -173,7 +173,7 @@ pub async fn setup(
         let now = chrono::Utc::now();
         if let Err(e) = state
             .atp_service
-            .commit_profile(actor_id, &req.username, None, None, None, now)
+            .commit_profile(actor_id, &req.username, None, None, None, None, now)
             .await
         {
             tracing::error!(

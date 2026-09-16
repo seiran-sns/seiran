@@ -63,6 +63,8 @@
     "savedMessage": "Guardado.",
     "uploadingAvatar": "Subiendo...",
     "changeAvatarButton": "Cambiar avatar",
+    "uploadingBanner": "Subiendo...",
+    "changeBannerButton": "Cambiar imagen de fondo",
     "displayNameLabel": "Nombre para mostrar",
     "birthdayLabel": "Fecha de nacimiento",
     "birthdayPublicLabel": "Publicar en Fediverse",

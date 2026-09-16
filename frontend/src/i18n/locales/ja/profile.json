@@ -58,6 +58,8 @@
     "savedMessage": "保存しました。",
     "uploadingAvatar": "アップロード中...",
     "changeAvatarButton": "アイコンを変更",
+    "uploadingBanner": "アップロード中...",
+    "changeBannerButton": "背景画像を変更",
     "displayNameLabel": "表示名",
     "birthdayLabel": "生年月日",
     "birthdayPublicLabel": "Fediverseで公開する",

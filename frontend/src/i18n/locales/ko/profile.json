@@ -63,6 +63,8 @@
     "savedMessage": "저장되었습니다.",
     "uploadingAvatar": "업로드 중...",
     "changeAvatarButton": "아바타 변경",
+    "uploadingBanner": "업로드 중...",
+    "changeBannerButton": "배경 이미지 변경",
     "displayNameLabel": "표시 이름",
     "birthdayLabel": "생년월일",
     "birthdayPublicLabel": "Fediverse에 공개",

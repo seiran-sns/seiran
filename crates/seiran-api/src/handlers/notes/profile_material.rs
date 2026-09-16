@@ -30,14 +30,14 @@ pub async fn resolve_bsky_pinned_post(state: &AppState, actor_id: i64) -> Option
 /// 呼び出し元へは伝播しない）。
 pub(super) async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
     let pinned_post = resolve_bsky_pinned_post(state, actor_id).await;
-    let (display_name, bio, avatar_media) = match fetch_atp_profile_material(state, actor_id).await
-    {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::error!("[pinned] プロフィール材料取得失敗: {}", e);
-            return;
-        }
-    };
+    let (display_name, bio, avatar_media, banner_media) =
+        match fetch_atp_profile_material(state, actor_id).await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!("[pinned] プロフィール材料取得失敗: {}", e);
+                return;
+            }
+        };
     if let Err(e) = state
         .atp_service
         .commit_profile(
@@ -45,6 +45,7 @@ pub(super) async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
             &display_name,
             bio.as_deref(),
             avatar_media,
+            banner_media,
             pinned_post,
             chrono::Utc::now(),
         )
@@ -54,15 +55,27 @@ pub(super) async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
     }
 }
 
-/// ATP プロフィール再コミットに必要な現在の display_name/bio/avatar blob 情報を取得する。
+/// ATP プロフィール再コミットに必要な現在の display_name/bio/avatar・banner blob 情報を取得する。
+#[allow(clippy::type_complexity)]
 pub(crate) async fn fetch_atp_profile_material(
     state: &AppState,
     actor_id: i64,
-) -> Result<(String, Option<String>, Option<(String, String, i64)>), sqlx::Error> {
+) -> Result<
+    (
+        String,
+        Option<String>,
+        Option<(String, String, i64)>,
+        Option<(String, String, i64)>,
+    ),
+    sqlx::Error,
+> {
     let row = sqlx::query(
-        "SELECT a.username, a.display_name, a.bio, a.profile_fields, mf.sha256, mf.mime_type, mf.size
+        "SELECT a.username, a.display_name, a.bio, a.profile_fields, \
+                avatar_mf.sha256 AS avatar_sha256, avatar_mf.mime_type AS avatar_mime_type, avatar_mf.size AS avatar_size, \
+                banner_mf.sha256 AS banner_sha256, banner_mf.mime_type AS banner_mime_type, banner_mf.size AS banner_size \
          FROM actors a
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+         LEFT JOIN media_files avatar_mf ON avatar_mf.id = a.avatar_media_id
+         LEFT JOIN media_files banner_mf ON banner_mf.id = a.banner_media_id
          WHERE a.id = $1",
     )
     .bind(actor_id)
@@ -72,10 +85,17 @@ pub(crate) async fn fetch_atp_profile_material(
     let display_name: Option<String> = row.try_get("display_name")?;
     let bio: Option<String> = row.try_get("bio")?;
     let profile_fields: serde_json::Value = row.try_get("profile_fields")?;
-    let sha256: Option<String> = row.try_get("sha256")?;
-    let mime_type: Option<String> = row.try_get("mime_type")?;
-    let size: Option<i64> = row.try_get("size")?;
-    let avatar_media = match (sha256, mime_type, size) {
+    let avatar_sha256: Option<String> = row.try_get("avatar_sha256")?;
+    let avatar_mime_type: Option<String> = row.try_get("avatar_mime_type")?;
+    let avatar_size: Option<i64> = row.try_get("avatar_size")?;
+    let avatar_media = match (avatar_sha256, avatar_mime_type, avatar_size) {
+        (Some(s), Some(m), Some(sz)) => Some((s, m, sz)),
+        _ => None,
+    };
+    let banner_sha256: Option<String> = row.try_get("banner_sha256")?;
+    let banner_mime_type: Option<String> = row.try_get("banner_mime_type")?;
+    let banner_size: Option<i64> = row.try_get("banner_size")?;
+    let banner_media = match (banner_sha256, banner_mime_type, banner_size) {
         (Some(s), Some(m), Some(sz)) => Some((s, m, sz)),
         _ => None,
     };
@@ -84,6 +104,7 @@ pub(crate) async fn fetch_atp_profile_material(
         display_name.unwrap_or(username),
         bio_with_fields,
         avatar_media,
+        banner_media,
     ))
 }
 

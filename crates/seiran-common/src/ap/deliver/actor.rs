@@ -47,11 +47,16 @@ pub async fn deliver_update_actor(
 ) -> Result<(), ApError> {
     let row = sqlx::query(
         "SELECT a.username, a.display_name, a.bio, \
-                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
-                mf.mime_type AS avatar_mime_type, a.emoji_map, a.birth_date, a.birth_date_public \
+                COALESCE(rtrim(avatar_sp.public_url, '/') || '/' || avatar_mf.storage_key, a.avatar_url) AS avatar_url, \
+                avatar_mf.mime_type AS avatar_mime_type, \
+                COALESCE(rtrim(banner_sp.public_url, '/') || '/' || banner_mf.storage_key, a.banner_url) AS banner_url, \
+                banner_mf.mime_type AS banner_mime_type, \
+                a.emoji_map, a.birth_date, a.birth_date_public \
          FROM actors a \
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+         LEFT JOIN media_files avatar_mf ON avatar_mf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers avatar_sp ON avatar_sp.id = avatar_mf.storage_provider_id \
+         LEFT JOIN media_files banner_mf ON banner_mf.id = a.banner_media_id \
+         LEFT JOIN storage_providers banner_sp ON banner_sp.id = banner_mf.storage_provider_id \
          WHERE a.id = $1 LIMIT 1",
     )
     .bind(actor_id)
@@ -79,6 +84,12 @@ pub async fn deliver_update_actor(
     } else {
         Some("image/png".to_string())
     };
+    let banner_url: Option<String> = row.try_get("banner_url").unwrap_or(None);
+    let banner_mime_type: Option<String> = if banner_url.is_some() {
+        row.try_get("banner_mime_type").unwrap_or(None)
+    } else {
+        None
+    };
     let emoji_map: serde_json::Value = row
         .try_get("emoji_map")
         .unwrap_or_else(|_| serde_json::json!({}));
@@ -105,6 +116,8 @@ pub async fn deliver_update_actor(
             bio: bio.as_deref(),
             avatar_url: avatar_url.as_deref(),
             avatar_mime_type: avatar_mime_type.as_deref(),
+            banner_url: banner_url.as_deref(),
+            banner_mime_type: banner_mime_type.as_deref(),
             ap_public_key_pem,
             emoji_map: &emoji_map,
             birth_date,

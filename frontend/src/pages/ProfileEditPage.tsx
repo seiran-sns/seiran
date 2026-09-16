@@ -40,6 +40,11 @@ export default function ProfileEditPage() {
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [banner, setBanner] = useState<DriveFile | null>(null);
+  /** 既存の背景画像URL（未変更時のプレビュー用）。新規アップロード後は banner.url を優先する。 */
+  const [currentBannerUrl, setCurrentBannerUrl] = useState<string | null>(null);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
+  const bannerFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -53,6 +58,7 @@ export default function ProfileEditPage() {
         setBirthday(p.birthday ?? "");
         setBirthdayPublic(p.birthday_public ?? false);
         setCurrentAvatarUrl(p.avatar_url ?? null);
+        setCurrentBannerUrl(p.banner_url ?? null);
         const slots = emptyProfileFields();
         p.profile_fields.slice(0, PROFILE_FIELD_SLOTS).forEach((f, i) => { slots[i] = f; });
         setProfileFields(slots);
@@ -139,6 +145,21 @@ export default function ProfileEditPage() {
     }
   }
 
+  async function onBanner(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploadingBanner(true);
+    setError("");
+    try {
+      setBanner(await api.media.upload(file, "banner"));
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setUploadingBanner(false);
+    }
+  }
+
   async function save(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -149,6 +170,7 @@ export default function ProfileEditPage() {
         display_name: displayName,
         bio,
         ...(avatar ? { avatar_media_id: avatar.id } : {}),
+        ...(banner ? { banner_media_id: banner.id } : {}),
         profile_fields: profileFields.filter((f) => f.name.trim() && f.value.trim()),
         birthday: birthday || null,
         birthday_public: birthdayPublic,
@@ -170,6 +192,25 @@ export default function ProfileEditPage() {
         <form className={styles.form} onSubmit={save}>
           {error && <p className={styles.error}>{error}</p>}
           {saved && <p className={styles.success}>{t("profile:profileEditPage.savedMessage")}</p>}
+
+          <div className={styles.bannerRow}>
+            {(banner || currentBannerUrl) && (
+              <div className={styles.bannerPreview}>
+                <img src={banner ? banner.url : currentBannerUrl!} alt="" />
+              </div>
+            )}
+            <input ref={bannerFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onBanner} />
+            <button
+              type="button"
+              className={styles.ghost}
+              onClick={() => bannerFileRef.current?.click()}
+              disabled={uploadingBanner}
+            >
+              {uploadingBanner
+                ? t("profile:profileEditPage.uploadingBanner")
+                : t("profile:profileEditPage.changeBannerButton")}
+            </button>
+          </div>
 
           <div className={styles.avatarRow}>
             <div className={styles.avatarPreview}>

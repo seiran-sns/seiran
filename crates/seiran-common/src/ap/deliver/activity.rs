@@ -338,6 +338,9 @@ pub(super) struct PersonObjectParams<'a> {
     pub(super) bio: Option<&'a str>,
     pub(super) avatar_url: Option<&'a str>,
     pub(super) avatar_mime_type: Option<&'a str>,
+    /// 背景画像（バナー）。avatarと異なり未設定時のフォールバック生成は無い。
+    pub(super) banner_url: Option<&'a str>,
+    pub(super) banner_mime_type: Option<&'a str>,
     pub(super) ap_public_key_pem: &'a str,
     pub(super) emoji_map: &'a serde_json::Value,
     /// `birth_date_public=true`の場合のみ`Some`（呼び出し元が既にフィルタ済みの値を渡す）。
@@ -384,6 +387,13 @@ pub(super) fn build_person_object(
         person["icon"] = serde_json::json!({
             "type": "Image",
             "mediaType": p.avatar_mime_type.unwrap_or("image/jpeg"),
+            "url": url
+        });
+    }
+    if let Some(url) = p.banner_url {
+        person["image"] = serde_json::json!({
+            "type": "Image",
+            "mediaType": p.banner_mime_type.unwrap_or("image/jpeg"),
             "url": url
         });
     }
@@ -1220,6 +1230,8 @@ mod tests {
                 bio: None,
                 avatar_url: None,
                 avatar_mime_type: None,
+                banner_url: None,
+                banner_mime_type: None,
                 ap_public_key_pem: "PEM",
                 emoji_map: &serde_json::json!({}),
                 birth_date: None,
@@ -1239,6 +1251,8 @@ mod tests {
                 bio: Some("hi"),
                 avatar_url: Some("https://cdn.example/a.png"),
                 avatar_mime_type: Some("image/png"),
+                banner_url: Some("https://cdn.example/b.png"),
+                banner_mime_type: Some("image/png"),
                 ap_public_key_pem: "PEM",
                 emoji_map: &serde_json::json!({}),
                 birth_date: None,
@@ -1246,6 +1260,8 @@ mod tests {
         );
         assert_eq!(full["summary"], "hi");
         assert_eq!(full["icon"]["mediaType"], "image/png");
+        assert_eq!(full["image"]["url"], "https://cdn.example/b.png");
+        assert_eq!(full["image"]["mediaType"], "image/png");
     }
 
     #[test]
@@ -1260,6 +1276,8 @@ mod tests {
                 bio: None,
                 avatar_url: None,
                 avatar_mime_type: None,
+                banner_url: None,
+                banner_mime_type: None,
                 ap_public_key_pem: "PEM",
                 emoji_map: &serde_json::json!({":blobcat:": "https://cdn.example/blobcat.png"}),
                 birth_date: None,

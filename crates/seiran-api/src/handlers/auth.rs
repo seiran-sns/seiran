@@ -299,7 +299,7 @@ pub async fn register(
     if let Some(at_did) = at_did.as_deref() {
         if let Err(e) = state
             .atp_service
-            .commit_profile(actor_id, &req.username, None, None, None, now)
+            .commit_profile(actor_id, &req.username, None, None, None, None, now)
             .await
         {
             tracing::error!(

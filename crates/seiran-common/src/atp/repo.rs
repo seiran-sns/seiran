@@ -939,17 +939,22 @@ pub fn encode_bsky_feed_like(
 /// `app.bsky.actor.profile` レコードの DAG-CBOR バイト列と CID を生成する。
 ///
 /// `description` が Some の場合は bio を、`avatar` が Some の場合は
-/// アイコン画像の blob 参照（sha256_hex, mime_type, size）を、`pinned_post` が Some の場合は
+/// アイコン画像の blob 参照（sha256_hex, mime_type, size）を、`banner` が Some の場合は
+/// 背景画像の blob 参照（同形式）を、`pinned_post` が Some の場合は
 /// ピン留め投稿への strongRef（uri, cid）を含める（#61。Bsky はピン留め1件のみ対応のため、
 /// seiran 側で管理する最大5件のうち最新1件だけをここに渡す）。
+#[allow(clippy::too_many_arguments)]
 pub fn encode_bsky_actor_profile(
     display_name: &str,
     description: Option<&str>,
     avatar: Option<(&str, &str, i64)>,
+    banner: Option<(&str, &str, i64)>,
     pinned_post: Option<(&str, &str)>,
     created_at_rfc3339: &str,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
-    // canonical 順: $type(5) < avatar(6) < createdAt(9) < pinnedPost(10) < description(11) < displayName(11)
+    // canonical 順: $type(5) < avatar(6) < banner(6) < createdAt(9) < pinnedPost(10) <
+    // description(11) < displayName(11)
+    // 6文字キー同士: "avatar"(a=0x61) < "banner"(b=0x62)
     // 11文字キー同士: "description"(e=0x65) < "displayName"(i=0x69)
     #[derive(Serialize)]
     struct BskyActorProfile {
@@ -957,6 +962,8 @@ pub fn encode_bsky_actor_profile(
         kind: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         avatar: Option<Ipld>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        banner: Option<Ipld>,
         #[serde(rename = "createdAt")]
         created_at: String,
         #[serde(rename = "pinnedPost", skip_serializing_if = "Option::is_none")]
@@ -970,9 +977,14 @@ pub fn encode_bsky_actor_profile(
         Some((sha256_hex, mime_type, size)) => Some(build_blob_ipld(sha256_hex, mime_type, size)?),
         None => None,
     };
+    let banner_ipld = match banner {
+        Some((sha256_hex, mime_type, size)) => Some(build_blob_ipld(sha256_hex, mime_type, size)?),
+        None => None,
+    };
     let record = BskyActorProfile {
         kind: "app.bsky.actor.profile".to_string(),
         avatar: avatar_ipld,
+        banner: banner_ipld,
         created_at: created_at_rfc3339.to_string(),
         pinned_post: pinned_post.map(|(uri, cid)| BskyRefRecord {
             cid: cid.to_string(),

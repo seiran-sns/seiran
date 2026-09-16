@@ -58,6 +58,8 @@
     "savedMessage": "Saved.",
     "uploadingAvatar": "Uploading...",
     "changeAvatarButton": "Change avatar",
+    "uploadingBanner": "Uploading...",
+    "changeBannerButton": "Change banner",
     "displayNameLabel": "Display name",
     "birthdayLabel": "Birthday",
     "birthdayPublicLabel": "Publish to Fediverse",

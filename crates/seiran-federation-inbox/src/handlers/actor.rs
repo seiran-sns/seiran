@@ -48,6 +48,10 @@ struct ApActorDocument {
     url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     icon: Option<ApImage>,
+    /// 背景画像（バナー）。avatar_url未設定時のiconと異なり、フォールバック生成は無く
+    /// 未設定なら省略する（`docs/database.md`参照）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image: Option<ApImage>,
     #[serde(rename = "publicKey")]
     public_key: ApPublicKey,
     /// プロフィールのキーバリュー項目（#62、Mastodon 等の「プロフィールのメタデータ欄」）。
@@ -131,12 +135,17 @@ pub async fn actor_handler(
 
     let row = sqlx::query(
         "SELECT a.id, a.display_name, a.bio, \
-                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
-                mf.mime_type AS avatar_mime_type, a.profile_fields, a.emoji_map, \
+                COALESCE(rtrim(avatar_sp.public_url, '/') || '/' || avatar_mf.storage_key, a.avatar_url) AS avatar_url, \
+                avatar_mf.mime_type AS avatar_mime_type, \
+                COALESCE(rtrim(banner_sp.public_url, '/') || '/' || banner_mf.storage_key, a.banner_url) AS banner_url, \
+                banner_mf.mime_type AS banner_mime_type, \
+                a.profile_fields, a.emoji_map, \
                 a.birth_date, a.birth_date_public, a.is_locked, a.at_did \
          FROM actors a \
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+         LEFT JOIN media_files avatar_mf ON avatar_mf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers avatar_sp ON avatar_sp.id = avatar_mf.storage_provider_id \
+         LEFT JOIN media_files banner_mf ON banner_mf.id = a.banner_media_id \
+         LEFT JOIN storage_providers banner_sp ON banner_sp.id = banner_mf.storage_provider_id \
          WHERE a.username = $1 AND a.actor_type = 'local' AND a.withdrawn_at IS NULL LIMIT 1",
     )
     .bind(&username)
@@ -149,6 +158,8 @@ pub async fn actor_handler(
         bio,
         avatar_url,
         avatar_mime_type,
+        banner_url,
+        banner_mime_type,
         profile_fields,
         emoji_map,
         birth_date,
@@ -175,6 +186,15 @@ pub async fn actor_handler(
                         .flatten()
                 })
                 .or_else(|| Some("image/svg+xml".to_string()));
+            let banner_url = r.try_get::<Option<String>, _>("banner_url").ok().flatten();
+            let banner_mime_type = banner_url
+                .as_ref()
+                .and_then(|_| {
+                    r.try_get::<Option<String>, _>("banner_mime_type")
+                        .ok()
+                        .flatten()
+                })
+                .or_else(|| Some("image/jpeg".to_string()));
             let profile_fields = r
                 .try_get::<serde_json::Value, _>("profile_fields")
                 .ok()
@@ -198,6 +218,8 @@ pub async fn actor_handler(
                 bio,
                 avatar_url,
                 avatar_mime_type,
+                banner_url,
+                banner_mime_type,
                 profile_fields,
                 emoji_map,
                 birth_date,
@@ -270,6 +292,11 @@ pub async fn actor_handler(
         media_type: avatar_mime_type.unwrap_or_else(|| "image/jpeg".to_string()),
         url,
     });
+    let image = banner_url.map(|url| ApImage {
+        kind: "Image".to_string(),
+        media_type: banner_mime_type.unwrap_or_else(|| "image/jpeg".to_string()),
+        url,
+    });
 
     let mut context = vec![
         serde_json::json!("https://www.w3.org/ns/activitystreams"),
@@ -295,6 +322,7 @@ pub async fn actor_handler(
         lists: format!("{}/users/{}/lists", base, username),
         url: format!("{}/@{}", base, username),
         icon,
+        image,
         public_key: ApPublicKey {
             id: format!("{}#main-key", actor_uri),
             owner: actor_uri,
