@@ -2,36 +2,84 @@ use super::activity::*;
 use super::infra::*;
 use super::*;
 
+/// リアクション配送先。
+struct ReactionTargets {
+    object_ap_id: String,
+    inboxes: Vec<String>,
+    /// activityの`to`にそのまま入れる値。DM宛は宛先のap_uriのみ、通常投稿はPublicのURI。
+    to: Vec<String>,
+    /// `true`ならDM（`visibility='direct'`）宛。`cc`（フォロワー宛）を付けない。
+    is_dm: bool,
+}
+
 /// リアクション配送先を解決する。
 ///
-/// 配送先は `reactor_actor_id` の Fedi フォロワー全員に加え、対象ポストを巡る会話の
-/// 参加者（対象ポストの著者とそのフォロワー、対象ポストへの子ポスト＝リポスト/返信/引用の
-/// 投稿者とそのフォロワー、対象ポストに付いている絵文字リアクションの reactor）の inbox の
-/// 和集合（重複排除、#235。詳細は `resolve_conversation_broadcast_inboxes` 参照）。
+/// 対象ポストが`visibility='direct'`（DM）の場合、宛先（`post_recipients`）のFediアクター
+/// のinboxのみへ配送し、`to`もその宛先のap_uriのみに絞る（DMの存在自体が第三者へ漏れる
+/// ことを防ぐため、通常投稿と同じPublic+フォロワー全体配送は絶対に使わない）。
+///
+/// それ以外（通常投稿）の配送先は `reactor_actor_id` の Fedi フォロワー全員に加え、対象
+/// ポストを巡る会話の参加者（対象ポストの著者とそのフォロワー、対象ポストへの子ポスト＝
+/// リポスト/返信/引用の投稿者とそのフォロワー、対象ポストに付いている絵文字リアクションの
+/// reactor）の inbox の和集合（重複排除、#235。詳細は `resolve_conversation_broadcast_inboxes`
+/// 参照）。
 /// 対象ポストが AP 上の実体（`ap_object_id`）を持たない場合（Bsky 由来など）は `None` を
 /// 返し、配送不要とする。
 async fn resolve_reaction_targets(
     db: &PgPool,
     post_id: i64,
     reactor_actor_id: i64,
-) -> Result<Option<(String, Vec<String>)>, ApError> {
-    let object_ap_id: Option<String> =
-        sqlx::query("SELECT ap_object_id FROM posts WHERE id = $1 LIMIT 1")
-            .bind(post_id)
-            .fetch_optional(db)
-            .await
-            .map_err(|e| ApError::Other(format!("対象ポスト取得エラー: {}", e)))?
-            .and_then(|r| r.try_get("ap_object_id").unwrap_or(None));
-
-    let object_ap_id = match object_ap_id {
-        Some(id) => id,
-        None => return Ok(None),
+) -> Result<Option<ReactionTargets>, ApError> {
+    let row = sqlx::query("SELECT ap_object_id, visibility::text AS visibility FROM posts WHERE id = $1 LIMIT 1")
+        .bind(post_id)
+        .fetch_optional(db)
+        .await
+        .map_err(|e| ApError::Other(format!("対象ポスト取得エラー: {}", e)))?;
+    let Some(row) = row else { return Ok(None) };
+    let object_ap_id: Option<String> = row.try_get("ap_object_id").unwrap_or(None);
+    let Some(object_ap_id) = object_ap_id else {
+        return Ok(None);
     };
+    let visibility: String = row.try_get("visibility").unwrap_or_default();
+
+    if visibility == "direct" {
+        let recipient_rows = sqlx::query(
+            "SELECT a.ap_uri, a.ap_inbox_url
+             FROM post_recipients pr JOIN actors a ON a.id = pr.actor_id
+             WHERE pr.post_id = $1 AND a.actor_type IN ('fedi', 'remote_seiran') AND a.ap_uri IS NOT NULL AND a.ap_inbox_url IS NOT NULL",
+        )
+        .bind(post_id)
+        .fetch_all(db)
+        .await
+        .map_err(|e| ApError::Other(format!("DM宛先取得エラー: {}", e)))?;
+        if recipient_rows.is_empty() {
+            return Ok(None);
+        }
+        let to: Vec<String> = recipient_rows
+            .iter()
+            .filter_map(|r| r.try_get::<String, _>("ap_uri").ok())
+            .collect();
+        let inboxes: Vec<String> = recipient_rows
+            .iter()
+            .filter_map(|r| r.try_get::<String, _>("ap_inbox_url").ok())
+            .collect();
+        return Ok(Some(ReactionTargets {
+            object_ap_id,
+            inboxes,
+            to,
+            is_dm: true,
+        }));
+    }
 
     let mut inboxes = resolve_conversation_broadcast_inboxes(db, post_id).await?;
     inboxes.extend(fetch_fedi_follower_inboxes(db, reactor_actor_id).await?);
 
-    Ok(Some((object_ap_id, inboxes.into_iter().collect())))
+    Ok(Some(ReactionTargets {
+        object_ap_id,
+        inboxes: inboxes.into_iter().collect(),
+        to: vec!["https://www.w3.org/ns/activitystreams#Public".to_string()],
+        is_dm: false,
+    }))
 }
 
 /// ローカルアクターの絵文字リアクション（Like/EmojiReact）を、対象ポストの著者
@@ -51,7 +99,7 @@ pub async fn deliver_ap_reaction(
     content: &str,
     emoji_url: Option<&str>,
 ) -> Result<(), ApError> {
-    let (object_ap_id, inboxes) = match resolve_reaction_targets(db, post_id, actor_id).await? {
+    let targets = match resolve_reaction_targets(db, post_id, actor_id).await? {
         Some(v) => v,
         None => return Ok(()),
     };
@@ -64,7 +112,7 @@ pub async fn deliver_ap_reaction(
         activity_type,
         activity_id,
         &addr.actor_uri,
-        &object_ap_id,
+        &targets.object_ap_id,
         content,
         emoji_url,
         local_domain,
@@ -72,12 +120,14 @@ pub async fn deliver_ap_reaction(
     activity["@context"] =
         serde_json::Value::String("https://www.w3.org/ns/activitystreams".to_string());
     activity["published"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
-    activity["to"] = serde_json::json!(["https://www.w3.org/ns/activitystreams#Public"]);
-    activity["cc"] = serde_json::json!([addr.followers_uri]);
+    activity["to"] = serde_json::json!(targets.to);
+    if !targets.is_dm {
+        activity["cc"] = serde_json::json!([addr.followers_uri]);
+    }
 
     fan_out_activity(
         ap_client,
-        &inboxes,
+        &targets.inboxes,
         &activity,
         &addr.key_id,
         ap_private_key_pem,
@@ -173,7 +223,7 @@ pub async fn deliver_ap_undo_reaction(
     content: &str,
     emoji_url: Option<&str>,
 ) -> Result<(), ApError> {
-    let (object_ap_id, inboxes) = match resolve_reaction_targets(db, post_id, actor_id).await? {
+    let targets = match resolve_reaction_targets(db, post_id, actor_id).await? {
         Some(v) => v,
         None => return Ok(()),
     };
@@ -185,7 +235,7 @@ pub async fn deliver_ap_undo_reaction(
         activity_type,
         prev_activity_id,
         &addr.actor_uri,
-        &object_ap_id,
+        &targets.object_ap_id,
         content,
         emoji_url,
         local_domain,
@@ -198,12 +248,18 @@ pub async fn deliver_ap_undo_reaction(
         actor_id,
         chrono::Utc::now().timestamp_millis()
     );
-    let activity =
+    let mut activity =
         build_undo_reaction_activity(&addr, &undo_id, &chrono::Utc::now().to_rfc3339(), inner);
+    activity["to"] = serde_json::json!(targets.to);
+    // `build_undo_reaction_activity`はデフォルトで`cc: [followers_uri]`を持つため、
+    // DM宛の場合は明示的に消す（フォロワーへ漏らさないため、通常投稿宛はそのまま残す）。
+    if targets.is_dm {
+        activity.as_object_mut().unwrap().remove("cc");
+    }
 
     fan_out_activity(
         ap_client,
-        &inboxes,
+        &targets.inboxes,
         &activity,
         &addr.key_id,
         ap_private_key_pem,

@@ -9,7 +9,18 @@
     "textPlaceholder": "Escribe un mensaje…",
     "sendButton": "Enviar",
     "attachButtonTitle": "Adjuntar medios",
-    "bskySingleRecipientError": "Los mensajes a los usuarios de Bsky solo se pueden enviar 1 a 1"
+    "bskySingleRecipientError": "Los mensajes a los usuarios de Bsky solo se pueden enviar 1 a 1",
+    "contextMenu": {
+      "react": "Reaccionar",
+      "delete": "Eliminar",
+      "hide": "Ocultar",
+      "bskyUnsupported": "La compatibilidad con mensajes de Bsky llegará próximamente"
+    },
+    "deleteConfirmModal": {
+      "title": "¿Eliminar este mensaje?",
+      "body": "Esta acción no se puede deshacer.",
+      "confirmButton": "Eliminar"
+    }
   },
   "recipientPicker": {
     "placeholder": "Añadir un destinatario…",

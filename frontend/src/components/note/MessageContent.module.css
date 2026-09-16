@@ -1,0 +1,47 @@
+/* メッセージ画面（DM）のメッセージ本文表示。NoteCardのQuoteCard本体部分と同じ見た目だが、
+   アバター分の左マージンが無い分だけ調整してある。 */
+
+.body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 0.92rem;
+}
+
+.contentWarningWrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-deep);
+  font-size: 0.82rem;
+  border-radius: 4px;
+}
+
+.contentWarningWrap button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.poll {
+  display: grid;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 0.82rem;
+}
+
+.pollOption {
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 9px;
+}

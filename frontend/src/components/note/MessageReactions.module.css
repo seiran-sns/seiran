@@ -1,0 +1,27 @@
+/* メッセージ画面（DM）のリアクション表示。LINE風に、数の集計は行わず絵文字を
+   個別に並べる（同じ絵文字が複数回付いたらその数だけ並ぶ）。 */
+
+.wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.emojiImg {
+  width: 14px;
+  height: 14px;
+}

@@ -1,3 +1,35 @@
+.modalActions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modalPrimaryDanger {
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modalSecondary {
+  background: none;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.modalSecondary:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
 .newButton {
   display: block;
   margin: 12px 16px;
@@ -139,10 +171,6 @@
 
 .messageText {
   margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  font-size: 0.92rem;
 }
 
 .messageTime {

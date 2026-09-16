@@ -9,7 +9,18 @@
     "textPlaceholder": "Tapez un message…",
     "sendButton": "Envoyer",
     "attachButtonTitle": "Joindre un média",
-    "bskySingleRecipientError": "Les messages aux utilisateurs de Bsky ne peuvent être envoyés que 1 à 1"
+    "bskySingleRecipientError": "Les messages aux utilisateurs de Bsky ne peuvent être envoyés que 1 à 1",
+    "contextMenu": {
+      "react": "Réagir",
+      "delete": "Supprimer",
+      "hide": "Masquer",
+      "bskyUnsupported": "La prise en charge des messages Bsky arrive bientôt"
+    },
+    "deleteConfirmModal": {
+      "title": "Supprimer ce message ?",
+      "body": "Cette action est irréversible.",
+      "confirmButton": "Supprimer"
+    }
   },
   "recipientPicker": {
     "placeholder": "Ajouter un destinataire…",

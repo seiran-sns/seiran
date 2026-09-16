@@ -9,7 +9,18 @@
     "textPlaceholder": "Geben Sie eine Nachricht ein…",
     "sendButton": "Schicken",
     "attachButtonTitle": "Medien anhängen",
-    "bskySingleRecipientError": "Nachrichten an Bsky-Benutzer können nur 1-zu-1 gesendet werden"
+    "bskySingleRecipientError": "Nachrichten an Bsky-Benutzer können nur 1-zu-1 gesendet werden",
+    "contextMenu": {
+      "react": "Reagieren",
+      "delete": "Löschen",
+      "hide": "Ausblenden",
+      "bskyUnsupported": "Unterstützung für Bsky-Nachrichten folgt in Kürze"
+    },
+    "deleteConfirmModal": {
+      "title": "Diese Nachricht löschen?",
+      "body": "Diese Aktion kann nicht rückgängig gemacht werden.",
+      "confirmButton": "Löschen"
+    }
   },
   "recipientPicker": {
     "placeholder": "Einen Empfänger hinzufügen…",

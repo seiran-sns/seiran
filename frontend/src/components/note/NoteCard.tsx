@@ -65,8 +65,9 @@ interface NoteCardProps {
 }
 
 /** 引用元を1段だけ表示する共通カード。引用元の `quoteId` はバッジだけ表示し、
- * `quote.quote` を描画しないことで引用の引用を再帰させない。 */
-function QuoteCard({ note }: { note: Note }) {
+ * `quote.quote` を描画しないことで引用の引用を再帰させない。
+ * `MessageContent`（メッセージ画面のDM本文表示）からも引用先カードとして使う。 */
+export function QuoteCard({ note }: { note: Note }) {
   const { t } = useTranslation();
   const [showContent, setShowContent] = useState(!note.contentWarning);
 

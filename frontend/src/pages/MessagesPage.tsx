@@ -1,15 +1,24 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, DmSession, getErrorMessage, Note } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import Avatar from "../components/note/Avatar";
 import EmojiText from "../components/note/EmojiText";
+import MessageContent from "../components/note/MessageContent";
+import MessageContextMenu from "../components/note/MessageContextMenu";
+import MessageReactions from "../components/note/MessageReactions";
 import RecipientPicker, { RecipientChip } from "../components/dm/RecipientPicker";
 import { useAuth } from "../contexts/AuthContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
+import { useToast } from "../contexts/ToastContext";
+import Modal from "../components/common/Modal";
 import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import styles from "./MessagesPage.module.css";
+
+// Unicode 絵文字データセットを含むため、ピッカーを実際に開くまでロードしない
+// （`ReactionPicker`と同じバンドルサイズ対策）。
+const EmojiPickerPanel = lazy(() => import("../components/note/EmojiPickerPanel"));
 
 /** バックエンドの上限と対応（`validate_dm_text_length`）。 */
 const BSKY_DM_MAX = 1000;
@@ -26,6 +35,7 @@ export default function MessagesPage() {
   const { threadRootId } = useParams<{ threadRootId?: string }>();
   const { user } = useAuth();
   const { registerDirectMessage, refreshDmUnreadCount } = useStreamingContext();
+  const { showError } = useToast();
 
   const [sessions, setSessions] = useState<DmSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -36,6 +46,11 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  /** リアクションピッカーを開いているメッセージID。 */
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
+  /** 削除確認モーダルの対象メッセージID。 */
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   function reloadSessions() {
     return api.dm.sessions({ limit: 50 }).then(setSessions);
@@ -147,6 +162,32 @@ export default function MessagesPage() {
     }
   }
 
+  async function addReaction(messageId: string, emoji: string) {
+    setReactionPickerFor(null);
+    try {
+      const result = await api.notes.react(messageId, emoji);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, reactions: result.reactions } : m)),
+      );
+    } catch (err) {
+      showError(getErrorMessage(err));
+    }
+  }
+
+  async function confirmDeleteMessage() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.notes.delete(deleteTarget);
+      setMessages((prev) => prev.filter((m) => m.id !== deleteTarget));
+      setDeleteTarget(null);
+    } catch (err) {
+      showError(getErrorMessage(err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const right = (
     <>
       <Link className={styles.newButton} to="/messages">
@@ -192,25 +233,35 @@ export default function MessagesPage() {
             return (
               <div key={m.id} className={`${styles.messageRow} ${isMine ? styles.messageRowMine : ""}`}>
                 {!isMine && <Avatar url={m.user.avatarUrl} name={m.user.displayName || m.user.username} size={28} />}
-                <div className={`${styles.messageBubble} ${isMine ? styles.messageBubbleMine : ""}`}>
-                  {showRecipients && (
-                    <div className={styles.messageRecipients}>
-                      <span className={styles.messageRecipientsLabel}>{t("dm:messagesPage.toLabel")}</span>
-                      {m.recipients!.map((r) => (
-                        <span
-                          key={r.id}
-                          className={styles.messageRecipientAvatar}
-                          title={`@${r.username}${r.domain ? `@${r.domain}` : ""}\n${r.displayName || r.username}`}
-                        >
-                          <Avatar url={r.avatarUrl} name={r.displayName || r.username} size={16} />
-                        </span>
-                      ))}
+                <div>
+                  <MessageContextMenu
+                    canDelete={isMine}
+                    isBsky={hasBskyRecipient}
+                    onReact={() => setReactionPickerFor(m.id)}
+                    onDelete={() => setDeleteTarget(m.id)}
+                  >
+                    <div className={`${styles.messageBubble} ${isMine ? styles.messageBubbleMine : ""}`}>
+                      {showRecipients && (
+                        <div className={styles.messageRecipients}>
+                          <span className={styles.messageRecipientsLabel}>{t("dm:messagesPage.toLabel")}</span>
+                          {m.recipients!.map((r) => (
+                            <span
+                              key={r.id}
+                              className={styles.messageRecipientAvatar}
+                              title={`@${r.username}${r.domain ? `@${r.domain}` : ""}\n${r.displayName || r.username}`}
+                            >
+                              <Avatar url={r.avatarUrl} name={r.displayName || r.username} size={16} />
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className={styles.messageText}>
+                        <MessageContent note={m} />
+                      </div>
+                      <span className={styles.messageTime}>{new Date(m.createdAt).toLocaleString()}</span>
                     </div>
-                  )}
-                  <p className={styles.messageText}>
-                    <EmojiText text={m.text} emojis={m.emojis} />
-                  </p>
-                  <span className={styles.messageTime}>{new Date(m.createdAt).toLocaleString()}</span>
+                  </MessageContextMenu>
+                  <MessageReactions reactions={m.reactions} />
                 </div>
               </div>
             );
@@ -246,5 +297,40 @@ export default function MessagesPage() {
     </>
   );
 
-  return <AppShell center={center} right={right} />;
+  return (
+    <>
+      <AppShell center={center} right={right} />
+      <Modal
+        open={reactionPickerFor !== null}
+        onClose={() => setReactionPickerFor(null)}
+        title={t("home:reactionPicker.addReactionTitle")}
+      >
+        {reactionPickerFor !== null && (
+          <Suspense fallback={<p>{t("common:loading")}</p>}>
+            <EmojiPickerPanel onPick={(emoji) => addReaction(reactionPickerFor, emoji)} />
+          </Suspense>
+        )}
+      </Modal>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title={t("dm:messagesPage.deleteConfirmModal.title")}
+      >
+        <p>{t("dm:messagesPage.deleteConfirmModal.body")}</p>
+        <div className={styles.modalActions}>
+          <button
+            type="button"
+            className={styles.modalPrimaryDanger}
+            onClick={confirmDeleteMessage}
+            disabled={deleting}
+          >
+            {t("dm:messagesPage.deleteConfirmModal.confirmButton")}
+          </button>
+          <button type="button" className={styles.modalSecondary} onClick={() => setDeleteTarget(null)}>
+            {t("common:cancel")}
+          </button>
+        </div>
+      </Modal>
+    </>
+  );
 }

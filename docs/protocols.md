@@ -844,6 +844,13 @@ Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri`
 - Bsky宛先: `jobs::bsky_dm_send`が`chat.bsky.convo.sendMessage`で送信する（`Job::BskyDmSend`）。1スレッドにつき1回だけ`chat.bsky.convo.getConvoForMembers`でconvoIdを解決し`bsky_convo_links`にキャッシュする。認証は自己署名サービス認証JWT（`docs/skill_atp_rust_programming.md` §17、`aud`はfragment無しの`did:web:api.bsky.chat`）。Bsky宛先は1対1のみ（宛先にBskyアクターが1人でも含まれる場合、他の宛先との同居はAPIレベルで拒否）。
 - WS配信: `direct`投稿は`delivery::broadcast_direct_message`で投稿者本人+宛先のみに配信する（通常投稿の`broadcast_new_note`はフォロワー全体に配信するため、DMには使わないこと。本文漏洩防止）。
 
+### DMメッセージへの絵文字リアクション
+DMメッセージ（`visibility='direct'`）は通常投稿と同じ`reactions`テーブル（`UNIQUE(post_id, actor_id)`、1メッセージ1ユーザー1個まで）・`create_reaction`/`delete_reaction`ハンドラをそのまま使う（`docs/database.md`の`reactions`節参照）。可視性チェック（`post_is_visible_to`）が既に宛先者以外を弾くため、DM専用のAPIは不要。
+
+**Fedi配送のみ専用ロジックが必要**: 通常投稿へのリアクション配送（`ap::deliver::reaction::deliver_ap_reaction`/`deliver_ap_undo_reaction`）は`to: Public` + reactor本人のFediフォロワー全員へ配送する設計のため、そのままDMメッセージに使うとDMの存在自体が第三者（フォロワー）に漏洩する。`resolve_reaction_targets`が対象ポストの`visibility`を見て分岐する: `direct`なら`post_recipients`のFediアクターのinboxのみへ、`to`もその宛先のap_uriのみに絞り、`cc`（フォロワー宛）は付けない（`build_undo_reaction_activity`はデフォルトで`cc`にフォロワーURIを含むため、DM宛の場合は明示的に取り除く）。それ以外（通常投稿）は従来通り。
+
+**Bsky宛先はDBへの保存・表示のみ**（ATP配送は未実装）。DM受信メッセージ（`bsky_message_id`あり）・DM送信メッセージのいずれも`posts.at_uri`/`at_cid`を持たない（`chat.bsky.convo`経由で`commit_post`を通らないため）ため、`create_reaction`の`commit_like`分岐は自然にスキップされる。Bsky公式チャットAPIの`chat.bsky.convo.addReaction`/`removeReaction`/`deleteMessageForSelf`（自分側のみメッセージを消し、相手には残り続ける「隠す」相当）は未実装で、実装時はUnicode絵文字限定・1メッセージ最大5個・同一絵文字重複不可というBsky側制約への対応が別途必要になる。
+
 ### Bsky受信ポーリング（`seiran-atp-repo::bsky_dm_poll`）
 `chat.bsky.convo`はJetstreamに乗らない（私信のため公開ファイヤホースに含まれない）ため、`actor_type='local'`かつ`at_did`/`at_signing_key_pem`設定済みの全アクターを対象に60秒間隔で`listConvos`→会話ごとに`getMessages`をポーリングして取り込む常駐タスク（`seiran-atp-repo::run`内で`tokio::spawn`）。この対象条件は既存DID転入で作成されたアカウントも自動的に含む（転入固有の追加実装は無い。`docs/account_migration.md`参照）。`bsky_convo_links.last_synced_message_id`を重複取り込み防止カーソルに使う。取り込んだメッセージは`posts`（visibility=direct、thread_root_post_id・post_recipients設定）へ保存しWS配信する（送信者が自分自身のメッセージは`BskyDmSend`側で既に保存済みのためスキップ）。グループ会話（`kind=groupConvo`）は対象外。
 

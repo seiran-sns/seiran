@@ -9,7 +9,18 @@
     "textPlaceholder": "メッセージを入力…",
     "sendButton": "送信",
     "attachButtonTitle": "メディアを添付",
-    "bskySingleRecipientError": "Bskyユーザーへのメッセージは1対1のみ送信できます"
+    "bskySingleRecipientError": "Bskyユーザーへのメッセージは1対1のみ送信できます",
+    "contextMenu": {
+      "react": "リアクション",
+      "delete": "削除",
+      "hide": "隠す",
+      "bskyUnsupported": "Bskyメッセージは今後対応予定です"
+    },
+    "deleteConfirmModal": {
+      "title": "メッセージを削除しますか？",
+      "body": "この操作は取り消せません。",
+      "confirmButton": "削除する"
+    }
   },
   "recipientPicker": {
     "placeholder": "宛先を入力…",

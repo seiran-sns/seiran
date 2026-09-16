@@ -9,7 +9,18 @@
     "textPlaceholder": "Type a message…",
     "sendButton": "Send",
     "attachButtonTitle": "Attach media",
-    "bskySingleRecipientError": "Messages to Bsky users can only be sent 1-to-1"
+    "bskySingleRecipientError": "Messages to Bsky users can only be sent 1-to-1",
+    "contextMenu": {
+      "react": "React",
+      "delete": "Delete",
+      "hide": "Hide",
+      "bskyUnsupported": "Support for Bsky messages is coming soon"
+    },
+    "deleteConfirmModal": {
+      "title": "Delete this message?",
+      "body": "This action cannot be undone.",
+      "confirmButton": "Delete"
+    }
   },
   "recipientPicker": {
     "placeholder": "Add a recipient…",

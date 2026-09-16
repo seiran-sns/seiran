@@ -9,7 +9,18 @@
     "textPlaceholder": "輸入訊息...",
     "sendButton": "傳送",
     "attachButtonTitle": "附加媒體",
-    "bskySingleRecipientError": "傳送給 Bsky 使用者的訊息只能一對一傳送"
+    "bskySingleRecipientError": "傳送給 Bsky 使用者的訊息只能一對一傳送",
+    "contextMenu": {
+      "react": "回應",
+      "delete": "刪除",
+      "hide": "隱藏",
+      "bskyUnsupported": "Bsky 訊息即將支援"
+    },
+    "deleteConfirmModal": {
+      "title": "要刪除這則訊息嗎？",
+      "body": "此操作無法復原。",
+      "confirmButton": "刪除"
+    }
   },
   "recipientPicker": {
     "placeholder": "新增收件者...",

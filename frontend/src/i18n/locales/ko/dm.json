@@ -9,7 +9,18 @@
     "textPlaceholder": "메시지를 입력하세요…",
     "sendButton": "보내다",
     "attachButtonTitle": "미디어 첨부",
-    "bskySingleRecipientError": "Bsky 사용자에게 보내는 메시지는 1:1로만 보낼 수 있습니다."
+    "bskySingleRecipientError": "Bsky 사용자에게 보내는 메시지는 1:1로만 보낼 수 있습니다.",
+    "contextMenu": {
+      "react": "리액션",
+      "delete": "삭제",
+      "hide": "숨기기",
+      "bskyUnsupported": "Bsky 메시지는 곧 지원될 예정입니다"
+    },
+    "deleteConfirmModal": {
+      "title": "이 메시지를 삭제하시겠습니까?",
+      "body": "이 작업은 취소할 수 없습니다.",
+      "confirmButton": "삭제"
+    }
   },
   "recipientPicker": {
     "placeholder": "수신자 추가…",

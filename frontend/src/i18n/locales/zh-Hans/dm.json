@@ -9,7 +9,18 @@
     "textPlaceholder": "输入消息...",
     "sendButton": "发送",
     "attachButtonTitle": "附加媒体",
-    "bskySingleRecipientError": "给Bsky用户的消息只能一对一发送"
+    "bskySingleRecipientError": "给Bsky用户的消息只能一对一发送",
+    "contextMenu": {
+      "react": "回应",
+      "delete": "删除",
+      "hide": "隐藏",
+      "bskyUnsupported": "Bsky消息即将支持"
+    },
+    "deleteConfirmModal": {
+      "title": "要删除这条消息吗？",
+      "body": "此操作无法撤销。",
+      "confirmButton": "删除"
+    }
   },
   "recipientPicker": {
     "placeholder": "添加收件人...",
