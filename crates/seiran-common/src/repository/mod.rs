@@ -14,6 +14,7 @@ pub mod auth_rate_limit;
 pub mod block;
 pub mod dm;
 pub mod email_change;
+pub mod email_short_code;
 pub mod email_verification;
 pub mod emoji;
 pub mod follow;
@@ -32,6 +33,7 @@ pub mod relay;
 pub mod remote_emoji;
 pub mod remote_instance_meta;
 pub mod repost_mute;
+pub mod rotation_key_backfill;
 pub mod site_settings;
 pub mod storage_provider;
 pub mod totp;
@@ -50,6 +52,7 @@ pub use auth_rate_limit::{AuthRateLimitRepository, IpBlockRow, PgAuthRateLimitRe
 pub use block::{BlockRepository, BlockedActorRow, PgBlockRepository};
 pub use dm::{DmPeerSummary, DmRepository, PgDmRepository};
 pub use email_change::{EmailChangeRepository, PgEmailChangeRepository};
+pub use email_short_code::{EmailShortCodeRepository, PgEmailShortCodeRepository};
 pub use email_verification::{EmailVerificationRepository, PgEmailVerificationRepository};
 pub use emoji::{
     extract_shortcode_candidates, format_local_reaction_content, format_remote_reaction_content,
@@ -86,6 +89,7 @@ pub use remote_instance_meta::{
     PgRemoteInstanceMetaRepository, RemoteInstanceMeta, RemoteInstanceMetaRepository,
 };
 pub use repost_mute::{PgRepostMuteRepository, RepostMuteRepository, RepostMutedActorRow};
+pub use rotation_key_backfill::{PgRotationKeyBackfillRepository, RotationKeyBackfillRepository};
 pub use site_settings::{PgSiteSettingsRepository, SiteSettingsRepository};
 pub use storage_provider::{
     CreateStorageProvider, PgStorageProviderRepository, StorageProvider, StorageProviderError,

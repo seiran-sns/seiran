@@ -2,7 +2,7 @@
 
 対象読者: seiran のコード全体に手を入れる開発者。「今のシステムがどう動いているか」だけを書く。
 
-新規登録時に必ず新しいDIDを発行する通常のアカウント作成とは別に、既存のBluesky/AT Protocolアカウント（bsky.social等でホストされている）を、そのDID・投稿・フォロー関係・blobごとseiranへ「転入」させる登録経路。技術的な実体はPDS間移行（PDS A＝転入元、seiran＝転入先）。実装本体は`crates/seiran-api/src/handlers/migration.rs`・`crates/seiran-common/src/jobs/at_migration.rs`・`crates/seiran-common/src/atp/{car,mst_walk,migration_client}.rs`、フロントエンドは`frontend/src/pages/{MigrateRegister,MigrationStatusPage,MigrationImportingPage}.tsx`。関連ドキュメント: `docs/architecture.md`（ジョブ・匿名段階認可）、`docs/database.md`（テーブル定義）、`docs/protocols.md` 3節（PDS Aとの通信・SSRF対策）。
+新規登録時に必ず新しいDIDを発行する通常のアカウント作成とは別に、既存のBluesky/AT Protocolアカウント（bsky.social等でホストされている）を、そのDID・投稿・フォロー関係・blobごとseiranへ「転入」させる登録経路（1〜5節）、およびその逆方向——seiranから他PDSへ既存DIDを転出させる際、seiranが転出元として応答するサーバー側API（6節）。技術的な実体はPDS間移行。実装本体は`crates/seiran-api/src/handlers/migration.rs`・`crates/seiran-common/src/jobs/at_migration.rs`・`crates/seiran-common/src/atp/{car,mst_walk,migration_client,plc}.rs`・`crates/seiran-api/src/handlers/xrpc/identity.rs`、フロントエンドは`frontend/src/pages/{MigrateRegister,MigrationStatusPage,MigrationImportingPage}.tsx`。関連ドキュメント: `docs/architecture.md`（ジョブ・匿名段階認可）、`docs/database.md`（テーブル定義）、`docs/protocols.md` 3節（PDS Aとの通信・SSRF対策）。
 
 ## 1. 認証方式（ID/PW、OAuth不採用）
 
@@ -58,8 +58,41 @@ seiran自身の`require_email_verification`設定（seiranのメール確認、�
 
 `app.bsky.feed.post`コレクションのみ`posts`テーブルへ構造化パースする。それ以外のコレクションは`atp_records`への生バイト列複製が基本方針（`docs/database.md`「ATP リポジトリ関連」参照、既存の投稿コミットパイプラインと共通のテーブル設計）。
 
+- **`seiranPost`拡張オブジェクト（転入元もseiranの場合）**: 転入元PDSがseiranインスタンスであれば、取り込んだ`app.bsky.feed.post`レコードは`seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、`docs/protocols.md` 5節）を持つ。検出できた場合、本文（`body`）・絵文字マップ（`emojiMap`）・CW（`contentWarning`）・投票（`poll`）・公開範囲（`visibility`）・URLカードの申告値（`linkCards`）をATP標準フィールドの変換値より優先して`posts`へ反映する。リモートseiranポストのATP受信（`seiran-atp-repo::firehose::save_bsky_post`）と同じ優先順位。
+
 - **画像・動画添付**: `app.bsky.feed.post`の`embed`（画像・動画）は、DID＋blob CIDのみからBluesky CDN/動画パイプラインのURLを決定的に組み立てる既存ロジック（`seiran_common::atp::parse_bsky_embed_attachments`、他の受信Bsky投稿と共通）で復元する。転入元PDSから取得した実バイト列（`at_migration_blobs`→`atp_blobs`）を再ホストするのではなく、Bluesky公式のCDN/動画配信を指す点は他の受信Bsky投稿の添付表示と同じ扱い。
 - **フォロー関係**: `app.bsky.graph.follow`はATPリポジトリへの複製に加え、`Job::MigrationImportFollows`がseiran自身の`follows`テーブルへも反映する（3節参照）。フォロー先ごとにAppView `getProfile`でリモートアクターを解決するため、レート制限は適用しない（新規フォローではなく既存関係の復元のため）。
 - **リプライ・引用先の解決、facet解析**: スコープ外。`reply_to_post_id`/`quote_of_post_id`は設定しない。
 - **DM（1:1）**: 転入固有の実装は無い。Bsky DM（`chat.bsky.convo`）はAT Protocolリポジトリに含まれない別サービス（`api.bsky.chat`）のデータで、認証は現在のDIDドキュメントの署名鍵（自己署名service-auth JWT）に基づくため、転入後のアカウントも既存の`BskyDmPoll`（`docs/protocols.md` 9節）が`actor_type='local'`かつ`at_did`/`at_signing_key_pem`設定済みの全アクターを対象に自動的に対象へ含める。会話ごとの初回同期はcursorページングで遡って取り込む（同節参照）。
 - **グループチャット**: 非対応。seiran自体にグループチャット機能が無い。
+
+## 6. 転出元API対応（seiranが転出元として振る舞う経路）
+
+上記1〜5は常にseiranが転入先（destination）として動く経路。ここではその逆方向——他PDS（別のseiranインスタンス、bsky.social等）がseiranから既存DIDを引き出す際、seiranが転出元（source）として応答するサーバー側APIを扱う。実装本体は`crates/seiran-api/src/handlers/xrpc/identity.rs`（`com.atproto.identity.*`）と`crates/seiran-api/src/handlers/xrpc/server.rs`の`checkAccountStatus`/`deactivateAccount`/`createSession`。
+
+### アカウント単位PLCローテーションキー
+
+seiranが自前でジェネシスDIDを発行するローカルアカウントは、`actors.at_rotation_key_pem`にアカウント専用のローテーションキーを持つ。DIDの`rotationKeys`配列は`[アカウント専用鍵（主）, サーバー全体共有鍵（副＝recovery用）]`の2本構成（`crates/seiran-common/src/atp/plc.rs::prepare_plc_genesis`）。共有鍵（`secrets.toml`の`atproto_private_key_pem`）は全ローカルアカウント共通のrecovery用としてのみ残り、通常の署名操作（`signPlcOperation`等）ではアカウント専用鍵のみを使う。
+
+既存DID転入で作成されたアカウントは、転入完了時（`submit_plc_token`）にseiranが新規発行する専用ローテーションキーのみをDIDの鍵とする（転入元PDSの既存ローテーションキーは引き継がない。転入元PDS運営者に恒久的な支配権を残さないため）。
+
+### `com.atproto.identity.*`/`com.atproto.server.*`（転出元エンドポイント）
+
+| メソッド | 認可 | 用途 |
+|---|---|---|
+| `com.atproto.server.checkAccountStatus` | ATP accessJwt | 読み取りのみ。`activated`/`repoCommit`/`indexedRecords`等を返す |
+| `com.atproto.identity.getRecommendedDidCredentials` | ATP accessJwt | 読み取りのみ。現在の`rotationKeys`/`alsoKnownAs`/`verificationMethods`/`services`を返す |
+| `com.atproto.identity.requestPlcOperationSignature` | ATP accessJwt | 登録メールへ6桁確認コードを送信（`email_short_codes`、`purpose='plc_operation_signature'`） |
+| `com.atproto.identity.signPlcOperation` | ATP accessJwt + 確認コード | 要求された内容のPLC更新オペレーションをアカウント専用ローテーションキーで署名して返す（提出はしない） |
+| `com.atproto.identity.submitPlcOperation` | ATP accessJwt | ★不可逆境界。plc.directoryへ提出し、`#identity`/`#account`イベント発火・`did_moved_out_at`設定 |
+| `com.atproto.server.deactivateAccount` | ATP accessJwt | `submitPlcOperation`の有無にかかわらず`did_moved_out_at`を設定 |
+
+`com.atproto.server.createSession`のメール2FA（`authFactorToken`）も同じ`email_short_codes`機構（`purpose='atp_session_2fa'`）を使う。SMTP未設定インスタンスでは2FA自体を常にスキップする。
+
+### DID転出済み状態（`did_moved_out_at`）
+
+`is_suspended`（凍結）や本ドキュメント3節の`migration_status`ゲートとは異なる第三の状態。`submitPlcOperation`成功時、または`deactivateAccount`呼び出し時に`actors.did_moved_out_at`が設定される。この状態では:
+
+- タイムライン等の**読み取りは通常通り**表示する（専用画面へのバイパスはしない）
+- 投稿・リアクション・リポスト・フォロー・リスト操作・DM送信等の**書き込みは全て拒否**（`AuthedUser::require_not_did_moved_out()`、`crates/seiran-api/src/middleware/authed_user.rs`。フロントエンドは`user.did_moved_out`で主要な書き込みUIを無効化、`frontend/src/components/note/PostComposer.tsx`・`frontend/src/hooks/useNoteCardActions.ts`）
+- ActivityPub側の転出（AP自体の引っ越し）は未実装

@@ -513,6 +513,19 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
 - `resolve_service_endpoint`（DID起点）: まだ検証していないDIDから初めてPDS Aへ接続する場合に使う。DIDドキュメントの`service`配列を解決し、得られたエンドポイントに対して通常のSSRF検証（private/loopback/link-local拒否、`resolve_to_addrs`で検証済みIPへ接続）を行う。
 - `resolve_stored_endpoint`（既知URL検証）: 転入フロー開始時に一度解決・DB保存した`source_pds_endpoint`を使う以降の全呼び出しで使う。**`submitPlcOperation`成功後はDIDドキュメントが既にseiranを指すため、`resolve_service_endpoint`で毎回再解決するとPDS A自身ではなくseiranへ誤って到達してしまう**（実機で発生: `404 MethodNotImplemented`）。`resolve_stored_endpoint`はDIDを再解決せず、保存済みのURL文字列そのものに対してSSRF検証（フォーマット・スキーム・private/loopback拒否）のみを行う。
 
+### 転出元API対応（seiranが転出元として応答する側）
+上記とは逆方向。他PDSがseiranから既存DIDを引き出す際、seiranが転出元として応答するサーバー側実装（`crates/seiran-api/src/handlers/xrpc/identity.rs`・`server.rs`）。詳細な設計判断（アカウント単位ローテーションキー、`did_moved_out_at`）は`docs/account_migration.md` 6節参照。
+
+| XRPCメソッド | 用途 |
+|---|---|
+| `com.atproto.server.checkAccountStatus` | 読み取りのみ。`activated`/`repoCommit`/`indexedRecords`等を返す |
+| `com.atproto.identity.getRecommendedDidCredentials` | 読み取りのみ。現在の`rotationKeys`（アカウント専用鍵＋サーバー共有鍵）等を返す |
+| `com.atproto.identity.requestPlcOperationSignature` | 登録メールへ6桁確認コードを送信する |
+| `com.atproto.identity.signPlcOperation` | 確認コードを検証し、要求内容のPLC更新オペレーションをアカウント専用ローテーションキーで署名して返す（提出はしない） |
+| `com.atproto.identity.submitPlcOperation` | plc.directoryへ提出する。この呼び出しの成功が不可逆境界。`#identity`/`#account`イベント発火と`did_moved_out_at`設定を伴う |
+| `com.atproto.server.deactivateAccount` | `did_moved_out_at`を設定する |
+| `com.atproto.server.createSession`（`authFactorToken`） | メール2FA。SMTP未設定インスタンスでは常にスキップする |
+
 ## 4. クロスプロトコル配送ルール
 
 中核ロジックは `seiran-api::handlers::notes::delivery`。`classify_post` が元ポストの出自を判定する: `actors.domain == local_domain` ならローカル、それ以外は `(ap_object_id有無, at_uri有無)` から `FediRemote`/`BskyRemote`/`LocalOrSeiran`（両方あり＝他seiranサーバー）に分類する。

@@ -13,6 +13,7 @@
   "CONTACT_RATE_LIMITED": "You've reached the hourly limit for mentioning, replying to, or quoting new people.",
   "CURRENT_PASSWORD_INCORRECT": "Current password is incorrect",
   "DID_ALREADY_REGISTERED": "This DID is already registered as a local account on this server",
+  "DID_MOVED_OUT": "This account's DID has moved to another server, so write operations are unavailable",
   "EMAIL_ALREADY_REGISTERED": "This email address is already in use",
   "EMAIL_INVALID": "Please enter a valid email address",
   "EMOJI_NOT_FOUND": "Emoji not found",

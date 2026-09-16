@@ -298,7 +298,10 @@ pub async fn submit_plc_token(
         .clone()
         .ok_or_else(|| ApiError::Internal("メールアドレス未確定".to_string()))?;
 
-    let new_signing_key_pem = if let Some(existing_key) = migration_req.new_signing_key_pem.clone() {
+    let (new_signing_key_pem, new_rotation_key_pem) = if let (Some(existing_key), Some(existing_rotation_key)) = (
+        migration_req.new_signing_key_pem.clone(),
+        migration_req.new_rotation_key_pem.clone(),
+    ) {
         // 再入: PLCは既に提出済み。tokenは使わずアカウント作成のみやり直す。
         if migration_req.status != "submitting_plc" {
             return Err(ApiError::BadRequest("INVALID_STATE".into()));
@@ -307,7 +310,7 @@ pub async fn submit_plc_token(
             "[migration:submit-plc-token] request_id={} は再入（PLC提出済み、アカウント作成のみ再試行）",
             id
         );
-        existing_key
+        (existing_key, existing_rotation_key)
     } else {
         if migration_req.status != "awaiting_plc_token" {
             return Err(ApiError::BadRequest("INVALID_STATE".into()));
@@ -332,46 +335,8 @@ pub async fn submit_plc_token(
                 ApiError::BadGateway("SOURCE_PDS_UNREACHABLE".into())
             })?;
 
-        // 現在のDIDドキュメントからrotationKeysを取得し、変更せずそのまま引き継ぐ
-        // （seiranは鍵の管理権限を奪わない——実装方針の議論参照）。公開DIDドキュメント
-        // （plc.directory/{did}）にはrotationKeysが含まれないため`/data`エンドポイントを使う。
-        let plc_data_url = format!(
-            "{}/{}/data",
-            seiran_common::atp::plc::plc_directory_base_url(),
-            migration_req.source_did
-        );
-        let current_data: serde_json::Value = state
-            .http_client
-            .get(&plc_data_url)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::warn!("[migration:submit-plc-token] plc.directory取得失敗: {}", e);
-                ApiError::BadGateway("PLC_DIRECTORY_UNREACHABLE".into())
-            })?
-            .json()
-            .await
-            .map_err(|e| {
-                tracing::warn!("[migration:submit-plc-token] plc.directoryレスポンス解析失敗: {}", e);
-                ApiError::BadGateway("PLC_DIRECTORY_UNREACHABLE".into())
-            })?;
-        let rotation_keys: Vec<String> = current_data
-            .get("rotationKeys")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        if rotation_keys.is_empty() {
-            tracing::error!(
-                "[migration:submit-plc-token] rotationKeys取得失敗 (request_id={}, did={})",
-                id, migration_req.source_did
-            );
-            return Err(ApiError::Internal("ROTATION_KEYS_UNAVAILABLE".to_string()));
-        }
-
+        // 転入完了時、seiranが新規発行する専用のローテーションキーのみをDIDの鍵とする
+        // （転入元PDS運営者に恒久的な支配権を残さないため、転入元の鍵は引き継がない）。
         let (_new_signing_key, new_signing_key_pem) =
             seiran_common::atp::plc::generate_new_signing_key().map_err(|e| {
                 tracing::error!("[migration:submit-plc-token] 鍵生成失敗: {}", e);
@@ -379,6 +344,17 @@ pub async fn submit_plc_token(
             })?;
         let new_did_key = seiran_common::atp::plc::p256_to_did_key(
             seiran_common::atp::plc::signing_key_from_pem(&new_signing_key_pem)
+                .map_err(|e| ApiError::Internal(e.to_string()))?
+                .verifying_key(),
+        );
+
+        let (_new_rotation_key, new_rotation_key_pem) =
+            seiran_common::atp::plc::generate_new_signing_key().map_err(|e| {
+                tracing::error!("[migration:submit-plc-token] ローテーション鍵生成失敗: {}", e);
+                ApiError::Internal("鍵生成エラー".to_string())
+            })?;
+        let new_rotation_did_key = seiran_common::atp::plc::p256_to_did_key(
+            seiran_common::atp::plc::signing_key_from_pem(&new_rotation_key_pem)
                 .map_err(|e| ApiError::Internal(e.to_string()))?
                 .verifying_key(),
         );
@@ -413,7 +389,7 @@ pub async fn submit_plc_token(
         let _ = cf_record_id;
 
         let desired = seiran_common::atp::migration_client::DesiredDidCredentials {
-            rotation_keys,
+            rotation_keys: vec![new_rotation_did_key],
             also_known_as: vec![format!("at://{}", handle)],
             verification_methods: serde_json::json!({ "atproto": new_did_key }),
             services: serde_json::json!({
@@ -452,7 +428,7 @@ pub async fn submit_plc_token(
         // （このUPDATE自体が失敗した場合は仕方なくエラーを返すが、実際のPLC状態と
         // DBの食い違いが起きるのはこの一箇所だけに限定される）。
         let repo = PgAtMigrationRepository::new(state.db.clone());
-        repo.mark_plc_submitted(id, &new_signing_key_pem, chrono::Utc::now())
+        repo.mark_plc_submitted(id, &new_signing_key_pem, &new_rotation_key_pem, chrono::Utc::now())
             .await
             .map_err(|e| {
                 tracing::error!(
@@ -464,7 +440,7 @@ pub async fn submit_plc_token(
                 ))
             })?;
 
-        new_signing_key_pem
+        (new_signing_key_pem, new_rotation_key_pem)
     };
 
     // ここから先はresume経路と共通。副作用のある外部呼び出しは完了済みなので、
@@ -504,14 +480,15 @@ pub async fn submit_plc_token(
         let ap_uri = format!("https://{}/users/{}", state.local_domain, migration_req.new_username);
         sqlx::query(
             "UPDATE actors SET actor_type = 'local', user_id = $1, username = $2, domain = $3,
-                 ap_uri = $4, at_signing_key_pem = $5, updated_at = NOW()
-             WHERE id = $6",
+                 ap_uri = $4, at_signing_key_pem = $5, at_rotation_key_pem = $6, updated_at = NOW()
+             WHERE id = $7",
         )
         .bind(user_id)
         .bind(&migration_req.new_username)
         .bind(state.local_domain.as_str())
         .bind(&ap_uri)
         .bind(&new_signing_key_pem)
+        .bind(&new_rotation_key_pem)
         .bind(existing_id)
         .execute(&state.db)
         .await
@@ -534,6 +511,7 @@ pub async fn submit_plc_token(
                 &state.local_domain,
                 Some(&migration_req.source_did),
                 Some(&new_signing_key_pem),
+                Some(&new_rotation_key_pem),
                 None,
             )
             .await
@@ -583,6 +561,7 @@ pub async fn submit_plc_token(
             // このレスポンスを返す時点でステータスは必ず`importing_data`
             // （直前の`confirm_account_created`が確定させる値）。
             migration_status: Some("importing_data".to_string()),
+            did_moved_out: false, // 転入直後はDID転出済みであり得ない
         },
     }))
 }

@@ -30,12 +30,14 @@ use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 use seiran_common::repository::{
     ActorRepository, AlsoKnownAsRepository, AppTokenRepository, AtpPreferencesRepository,
     AtpReadRepository, AtpSessionRepository, AuthRateLimitRepository, BlockRepository,
-    DmRepository, EmailChangeRepository, EmailVerificationRepository, EmojiRepository,
+    DmRepository, EmailChangeRepository, EmailShortCodeRepository, EmailVerificationRepository,
+    EmojiRepository,
     FollowImportRepository, FollowRepository, HashtagRepository, InstanceDomainRepository,
     ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository,
     PgActorRepository, PgAlsoKnownAsRepository, PgAppTokenRepository, PgAtpPreferencesRepository,
     PgAtpReadRepository, PgAtpSessionRepository, PgAuthRateLimitRepository, PgBlockRepository,
-    PgDmRepository, PgEmailChangeRepository, PgEmailVerificationRepository, PgEmojiRepository,
+    PgDmRepository, PgEmailChangeRepository, PgEmailShortCodeRepository,
+    PgEmailVerificationRepository, PgEmojiRepository,
     PgFollowImportRepository, PgFollowRepository, PgHashtagRepository, PgInstanceDomainRepository,
     PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository,
     PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgRelayRepository,
@@ -145,6 +147,8 @@ pub struct AppState {
     pub email_verifications: Arc<dyn EmailVerificationRepository>,
     /// 設定画面からのメールアドレス変更フロー（`email_changes` テーブル、#59）。
     pub email_changes: Arc<dyn EmailChangeRepository>,
+    /// メール短命コード（ATPセッション2FA・PLCオペレーション署名確認、`email_short_codes`テーブル）。
+    pub email_short_codes: Arc<dyn EmailShortCodeRepository>,
     /// カスタム絵文字（`custom_emojis` テーブル）。
     pub emojis: Arc<dyn EmojiRepository>,
     /// リモートカスタム絵文字カタログ（`remote_emojis` テーブル、#73）。
@@ -825,6 +829,8 @@ pub async fn init_state(
         Arc::new(PgEmailVerificationRepository::new(pool.clone()));
     let email_changes: Arc<dyn EmailChangeRepository> =
         Arc::new(PgEmailChangeRepository::new(pool.clone()));
+    let email_short_codes: Arc<dyn EmailShortCodeRepository> =
+        Arc::new(PgEmailShortCodeRepository::new(pool.clone()));
     let emojis: Arc<dyn EmojiRepository> = Arc::new(PgEmojiRepository::new(pool.clone()));
     let remote_emojis: Arc<dyn RemoteEmojiRepository> =
         Arc::new(PgRemoteEmojiRepository::new(pool.clone()));
@@ -908,6 +914,7 @@ pub async fn init_state(
         auth_rate_limits,
         email_verifications,
         email_changes,
+        email_short_codes,
         emojis,
         remote_emojis,
         relays,
@@ -1009,6 +1016,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/admin/auth-ip-blocks/:ip",
             delete(handlers::admin::auth_ip_blocks::unblock_ip),
+        )
+        .route(
+            "/api/admin/rotation-key-backfill",
+            post(handlers::admin::rotation_key_backfill::run_rotation_key_backfill),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -1643,6 +1654,32 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.server.getSession",
             get(handlers::xrpc::server::xrpc_get_session),
+        )
+        // 既存DID転入フロー(docs/account_migration.md)の逆方向: seiranが転出元PDSとして
+        // 振る舞うためのエンドポイント群。
+        .route(
+            "/xrpc/com.atproto.server.checkAccountStatus",
+            get(handlers::xrpc::server::xrpc_check_account_status),
+        )
+        .route(
+            "/xrpc/com.atproto.server.deactivateAccount",
+            post(handlers::xrpc::server::xrpc_deactivate_account),
+        )
+        .route(
+            "/xrpc/com.atproto.identity.getRecommendedDidCredentials",
+            get(handlers::xrpc::identity::xrpc_get_recommended_did_credentials),
+        )
+        .route(
+            "/xrpc/com.atproto.identity.requestPlcOperationSignature",
+            post(handlers::xrpc::identity::xrpc_request_plc_operation_signature),
+        )
+        .route(
+            "/xrpc/com.atproto.identity.signPlcOperation",
+            post(handlers::xrpc::identity::xrpc_sign_plc_operation),
+        )
+        .route(
+            "/xrpc/com.atproto.identity.submitPlcOperation",
+            post(handlers::xrpc::identity::xrpc_submit_plc_operation),
         )
         .route(
             "/xrpc/app.bsky.actor.getPreferences",

@@ -113,6 +113,11 @@ pub struct UserInfo {
     /// フロントは`is_suspended`と同型のゲートで、`completed`以外なら他画面をバイパスして
     /// 「データ取り込み中」専用画面を表示する。
     pub migration_status: Option<String>,
+    /// DID転出済み（`docs/account_migration.md`「転出元API対応」参照）。`is_suspended`や
+    /// `migration_status`とは異なり、`true`の間もフロントは通常のタイムライン等の
+    /// 読み取り画面をそのまま表示する。投稿・リアクション・リポスト・フォロー・
+    /// リスト操作・DM送信等の書き込みUIのみを無効化する。
+    pub did_moved_out: bool,
 }
 
 /// `at_migration_requests`に本ユーザーの行があり、かつ`completed`未満なら
@@ -249,22 +254,25 @@ pub async fn register(
     // DID確定 → TXT セット → PLC送信（最大3回リトライ）。DB 書き込みはここより後
     // — 失敗時に孤立レコードが残らないようにするため。自ホストドメインが未確定
     // （シングルホストモード）の間はPLC genesisを行わない（`state.local_domain`参照）。
-    let (at_did, at_signing_key_pem, cf_record_id) = if state.local_domain.is_confirmed() {
+    let (at_did, at_signing_key_pem, at_rotation_key_pem, cf_record_id) = if state
+        .local_domain
+        .is_confirmed()
+    {
         let rotation_key =
             signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
                 tracing::error!("[register] 回転鍵ロード失敗: {}", e);
                 ApiError::Internal("ATP鍵ロードエラー".to_string())
             })?;
-        let (did, pem, cf_id) = crate::handlers::plc_genesis::register_plc_did(
+        let (did, pem, rotation_pem, cf_id) = crate::handlers::plc_genesis::register_plc_did(
             &state,
             &req.username,
             &rotation_key,
             "register",
         )
         .await?;
-        (Some(did), Some(pem), cf_id)
+        (Some(did), Some(pem), Some(rotation_pem), cf_id)
     } else {
-        (None, None, None)
+        (None, None, None, None)
     };
 
     // 4. DB 書き込み（PLC 送信成功後）
@@ -287,6 +295,7 @@ pub async fn register(
             &state.local_domain,
             at_did.as_deref(),
             at_signing_key_pem.as_deref(),
+            at_rotation_key_pem.as_deref(),
             birth_date,
         )
         .await
@@ -381,6 +390,7 @@ pub async fn register(
             token,
             is_suspended: false, // 登録直後は凍結され得ない
             migration_status: None, // 通常登録（転入経由ではない）
+            did_moved_out: false, // 登録直後はDID転出済みであり得ない
         },
     }))
 }
@@ -426,6 +436,7 @@ pub(crate) async fn finish_login(
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     let actor_id = actor.id;
     let is_suspended = actor.suspended_at.is_some();
+    let did_moved_out = actor.did_moved_out_at.is_some();
 
     let avatar_url = fetch_avatar_url(state, actor_id).await;
 
@@ -451,6 +462,7 @@ pub(crate) async fn finish_login(
             token,
             is_suspended,
             migration_status,
+            did_moved_out,
         },
     })
 }
@@ -616,6 +628,7 @@ pub async fn me(
         token,
         is_suspended: actor.suspended_at.is_some(),
         migration_status: fetch_incomplete_migration_status(&state, auth_user.user_id).await,
+        did_moved_out: actor.did_moved_out_at.is_some(),
     }))
 }
 

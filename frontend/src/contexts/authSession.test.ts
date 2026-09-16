@@ -12,6 +12,7 @@ function makeUser(): User {
     language_preference: null,
     token: "test-token",
     is_suspended: false,
+    did_moved_out: false,
   };
 }
 

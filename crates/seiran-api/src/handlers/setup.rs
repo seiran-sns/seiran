@@ -124,22 +124,22 @@ pub async fn setup(
     // DID確定 → TXT セット → PLC送信（最大3回リトライ）。成功後に DB 書き込み
     // （失敗時はロールバック不要、DB 未書き込みのため）。ドメイン未確定
     // （シングルホストモード）ではPLC genesisを行わない。
-    let (at_did, at_signing_key_pem, cf_record_id) = if domain_confirmed {
+    let (at_did, at_signing_key_pem, at_rotation_key_pem, cf_record_id) = if domain_confirmed {
         let rotation_key =
             signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
                 tracing::error!("[setup] 回転鍵ロード失敗: {}", e);
                 ApiError::Internal("ATP鍵ロードエラー".to_string())
             })?;
-        let (did, pem, cf_id) = crate::handlers::plc_genesis::register_plc_did(
+        let (did, pem, rotation_pem, cf_id) = crate::handlers::plc_genesis::register_plc_did(
             &state,
             &req.username,
             &rotation_key,
             "setup",
         )
         .await?;
-        (Some(did), Some(pem), cf_id)
+        (Some(did), Some(pem), Some(rotation_pem), cf_id)
     } else {
-        (None, None, None)
+        (None, None, None, None)
     };
 
     let user_id = state
@@ -161,6 +161,7 @@ pub async fn setup(
             &state.local_domain,
             at_did.as_deref(),
             at_signing_key_pem.as_deref(),
+            at_rotation_key_pem.as_deref(),
             None,
         )
         .await
@@ -206,6 +207,7 @@ pub async fn setup(
             token,
             is_suspended: false, // セットアップ直後は凍結され得ない
             migration_status: None, // セットアップ（初期管理者作成）は転入経由ではない
+            did_moved_out: false, // セットアップ直後はDID転出済みであり得ない
         },
     }))
 }

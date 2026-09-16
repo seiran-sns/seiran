@@ -12,8 +12,8 @@ use seiran_common::atp::{prepare_plc_genesis, submit_plc_genesis};
 use crate::error::ApiError;
 use crate::AppState;
 
-/// `did:plc` 発行の結果: `(at_did, at_signing_key_pem, cloudflare_txt_record_id)`。
-pub type PlcGenesisResult = (String, String, Option<String>);
+/// `did:plc` 発行の結果: `(at_did, at_signing_key_pem, at_rotation_key_pem, cloudflare_txt_record_id)`。
+pub type PlcGenesisResult = (String, String, String, Option<String>);
 
 /// `did:plc` を発行する（最大3回リトライ）。`log_prefix` はログの `[register]`/`[setup]` 等の
 /// タグに使う。
@@ -83,7 +83,14 @@ pub async fn register_plc_did(
 
         // 3. plc.directory へ送信
         match submit_plc_genesis(&genesis, &state.http_client).await {
-            Ok(()) => return Ok((genesis.did, genesis.signing_key_pem, new_cf_id)),
+            Ok(()) => {
+                return Ok((
+                    genesis.did,
+                    genesis.signing_key_pem,
+                    genesis.rotation_key_pem,
+                    new_cf_id,
+                ))
+            }
             Err(e) => {
                 tracing::error!(
                     "[{}] did:plc 送信失敗 (試行 {}/3): {}",

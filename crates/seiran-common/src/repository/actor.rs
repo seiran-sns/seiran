@@ -56,13 +56,22 @@ pub struct Actor {
     /// 新規アクティビティ（AP/ATP双方）は拒絶・非保存となり、`actor_is_hidden_for_viewer`
     /// 経由でタイムライン・通知・検索等の表示からも除外される。ローカル・リモート共通。
     pub suspended_at: Option<DateTime<Utc>>,
+    /// アカウント単位のPLCローテーションキー（転出元API対応の前提、Phase A）。`None`は
+    /// 未バックフィル（ジェネシス作成の旧アカウント）または既存DID転入済みアカウント
+    /// （転入元PDSの鍵をそのまま維持していた旧仕様の名残り）を意味する。
+    pub at_rotation_key_pem: Option<String>,
+    /// DID転出済み日時。`is_suspended`（凍結）や転入フローの`migration_status`ゲートとも
+    /// 異なる第三の状態で、以降はタイムライン等の読み取りのみ可能、書き込み系操作は
+    /// 全て不可（`submitPlcOperation`成功時、または`deactivateAccount`呼び出し時に設定）。
+    pub did_moved_out_at: Option<DateTime<Utc>>,
 }
 
 /// `Actor` の全フィールドに対応する SELECT カラム列。`actor_type` は enum のため text にキャストする。
 const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username, domain, \
     display_name, ap_uri, ap_inbox_url, at_did, at_handle, at_repo_cid, at_repo_rev, at_signing_key_pem, \
     bio, seiran_pair_actor_id, bridge_real_actor_id, emoji_map, profile_fields, \
-    birth_date, birth_date_public, is_locked, claimed_ap_uri, claimed_at_did, withdrawn_at, suspended_at";
+    birth_date, birth_date_public, is_locked, claimed_ap_uri, claimed_at_did, withdrawn_at, suspended_at, \
+    at_rotation_key_pem, did_moved_out_at";
 
 /// プロフィール編集画面（`PATCH /api/users/me/profile`）が読み書きする行の部分集合。
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -137,6 +146,7 @@ pub trait ActorRepository: Send + Sync {
     /// 新規ローカルアクターを挿入する。`at_did`/`at_signing_key_pem`は、自ホストドメインが
     /// 未確定（シングルホストモード）でPLC genesisを行っていない場合は`None`になる。
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     async fn insert_local(
         &self,
         id: i64,
@@ -145,6 +155,7 @@ pub trait ActorRepository: Send + Sync {
         domain: &str,
         at_did: Option<&str>,
         at_signing_key_pem: Option<&str>,
+        at_rotation_key_pem: Option<&str>,
         birth_date: Option<NaiveDate>,
     ) -> Result<(), sqlx::Error>;
 
@@ -389,6 +400,7 @@ impl ActorRepository for PgActorRepository {
         domain: &str,
         at_did: Option<&str>,
         at_signing_key_pem: Option<&str>,
+        at_rotation_key_pem: Option<&str>,
         birth_date: Option<NaiveDate>,
     ) -> Result<(), sqlx::Error> {
         // ap_uri を格納しておくことで、万一リモートActor解決処理が自ドメインURIを
@@ -396,8 +408,8 @@ impl ActorRepository for PgActorRepository {
         // による自然な重複排除が効く（#110 の防御的二重チェック）。
         let ap_uri = format!("https://{}/users/{}", domain, username);
         sqlx::query(
-            "INSERT INTO actors (id, user_id, actor_type, username, domain, ap_uri, at_did, at_signing_key_pem, birth_date, created_at, updated_at)
-             VALUES ($1, $2, 'local', $3, $4, $5, $6, $7, $8, NOW(), NOW())",
+            "INSERT INTO actors (id, user_id, actor_type, username, domain, ap_uri, at_did, at_signing_key_pem, at_rotation_key_pem, birth_date, created_at, updated_at)
+             VALUES ($1, $2, 'local', $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())",
         )
         .bind(id)
         .bind(user_id)
@@ -406,6 +418,7 @@ impl ActorRepository for PgActorRepository {
         .bind(&ap_uri)
         .bind(at_did)
         .bind(at_signing_key_pem)
+        .bind(at_rotation_key_pem)
         .bind(birth_date)
         .execute(&self.pool)
         .await

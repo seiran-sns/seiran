@@ -148,6 +148,8 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 
 **匿名段階の認可（既存DID転入フロー）**: 通常のJWT認証は`users`/`actors`が存在することが前提だが、既存Bluesky DID転入フロー（`docs/account_migration.md`）は`submitPlcOperation`成功までアカウント自体が存在しない。この間は`password_resets`等と同型の「ランダムトークンをハッシュ化してDB保存、レスポンス一回きりで生値を返す」方式（`at_migration_requests.request_token_hash`）を採用し、以降のリクエストは`X-Migration-Token`ヘッダで認可する。`submitPlcOperation`成功と同時に通常の`AuthResponse`（JWT含む）を発行し、以降は通常ログインと同じ認可へ切り替わる。
 
+**転出元API対応（ATP XRPCエンドポイント）の認可**: `com.atproto.identity.*`/`com.atproto.server.checkAccountStatus`/`deactivateAccount`（`docs/account_migration.md` 6節）は、いずれもATP accessJwt（`extract_bearer`→`verify_atp_access_token`）で認可し、トークンから解決したDIDのアカウントに対してのみ操作する（リクエスト本文中のDIDヒントは信用しない）。DID転出済み（`actors.did_moved_out_at`設定済み）のアカウントは、`AuthedUser`（seiran自身の`/api/*`向け認証、`crates/seiran-api/src/middleware/authed_user.rs`）経由の書き込み系ハンドラが`require_not_did_moved_out()`で個別に拒否する。`extract_auth`の`suspended`チェックとは異なり自動適用ではなく、投稿・リアクション・リポスト・フォロー・リスト操作・DM送信（`create_note`経由）の各ハンドラが明示的に呼ぶ——読み取り系は影響を受けない。
+
 **Misskey API 互換との共存**: `middleware::misskey_auth_bridge` が、Misskeyクライアントが送る JSON ボディの `i` フィールドまたはクエリの `i` を検出して `Authorization: Bearer` ヘッダーへ合成する（既存の `Authorization` ヘッダーがあればそちらを優先）。つまり JWT ベースのローカル認証が唯一の実体で、MiAuth と Misskey 互換はその上に被さる「トークンの発行・受け渡し窓口」に過ぎない。multipart/form-data のボディ（`drive/files/create` のファイルアップロード）はこのミドルウェアの対象外のため、`handlers::drive::create_drive_file` はハンドラ内で multipart の `i` フィールドを個別にフォールバックとして扱う。
 
 ### API エラーレスポンス方針

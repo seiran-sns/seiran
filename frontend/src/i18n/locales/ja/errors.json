@@ -13,6 +13,7 @@
   "CONTACT_RATE_LIMITED": "1時間あたりの新規メンション・返信・引用の相手数上限に達しました",
   "CURRENT_PASSWORD_INCORRECT": "現在のパスワードが正しくありません",
   "DID_ALREADY_REGISTERED": "このDIDは既にこのサーバーのローカルアカウントとして登録されています",
+  "DID_MOVED_OUT": "このアカウントのDIDは他サーバーへ転出済みのため、書き込み系の操作はできません",
   "EMAIL_ALREADY_REGISTERED": "このメールアドレスはすでに使用されています",
   "EMAIL_INVALID": "有効なメールアドレスを入力してください",
   "EMOJI_NOT_FOUND": "絵文字が見つかりません",

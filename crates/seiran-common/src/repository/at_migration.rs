@@ -21,6 +21,9 @@ pub struct AtMigrationRequestRow {
     pub new_username: String,
     pub password_hash: String,
     pub new_signing_key_pem: Option<String>,
+    /// 転入完了時にseiranが新規発行する専用ローテーションキー。転入元PDSの既存
+    /// ローテーションキーは維持しない（転入元運営者に恒久的な支配権を残さないため）。
+    pub new_rotation_key_pem: Option<String>,
     pub plc_submitted_at: Option<DateTime<Utc>>,
     pub actor_id: Option<i64>,
     pub user_id: Option<i64>,
@@ -105,6 +108,7 @@ pub trait AtMigrationRepository: Send + Sync {
         &self,
         id: i64,
         new_signing_key_pem: &str,
+        new_rotation_key_pem: &str,
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error>;
 
@@ -194,6 +198,7 @@ type RequestRowTuple = (
     Option<i64>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 fn row_to_request(row: RequestRowTuple) -> AtMigrationRequestRow {
@@ -213,12 +218,13 @@ fn row_to_request(row: RequestRowTuple) -> AtMigrationRequestRow {
         user_id: row.12,
         email: row.13,
         last_error: row.14,
+        new_rotation_key_pem: row.15,
     }
 }
 
 const SELECT_COLUMNS: &str = "id, status::text, source_handle, source_pds_endpoint, source_did,
      source_access_jwt, source_refresh_jwt, new_username, password_hash, new_signing_key_pem,
-     plc_submitted_at, actor_id, user_id, email, last_error";
+     plc_submitted_at, actor_id, user_id, email, last_error, new_rotation_key_pem";
 
 #[async_trait]
 impl AtMigrationRepository for PgAtMigrationRepository {
@@ -346,15 +352,17 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         &self,
         id: i64,
         new_signing_key_pem: &str,
+        new_rotation_key_pem: &str,
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE at_migration_requests
-             SET status = 'submitting_plc', new_signing_key_pem = $1,
-                 plc_submitted_at = $2, updated_at = $2
-             WHERE id = $3",
+             SET status = 'submitting_plc', new_signing_key_pem = $1, new_rotation_key_pem = $2,
+                 plc_submitted_at = $3, updated_at = $3
+             WHERE id = $4",
         )
         .bind(new_signing_key_pem)
+        .bind(new_rotation_key_pem)
         .bind(now)
         .bind(id)
         .execute(&self.pool)

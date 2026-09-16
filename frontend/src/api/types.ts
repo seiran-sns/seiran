@@ -21,6 +21,11 @@ export interface User {
    * `is_suspended` と同型のゲートで、アプリ側は他の全画面をバイパスして
    * 「データ取り込み中」専用画面を表示する。 */
   migration_status?: string | null;
+  /** DID転出済み（既存DID転入フローの逆方向、転出元API対応）。`is_suspended`や
+   * `migration_status`とは異なり、`true`の間もタイムライン等の読み取り画面はそのまま
+   * 表示する。投稿・リアクション・リポスト・フォロー・リスト操作・DM送信等の
+   * 書き込みUIのみを無効化する。 */
+  did_moved_out: boolean;
 }
 
 // ── 管理画面用の型（レスポンスは snake_case） ──────────────────────────────

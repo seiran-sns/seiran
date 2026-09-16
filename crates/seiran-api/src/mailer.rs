@@ -20,6 +20,16 @@ pub enum MailError {
     Address(#[from] lettre::address::AddressError),
 }
 
+/// SMTPが設定済みかどうかを判定する（`build_transport`と同じ判定基準）。
+/// ATPセッション2FA（`com.atproto.server.createSession`のauthFactorToken）は、
+/// SMTP未設定のインスタンスではコード送信自体が不可能なため、この判定で2FAを
+/// 常にスキップする。
+pub fn is_smtp_configured(settings: &HashMap<String, String>) -> bool {
+    settings
+        .get("smtp_host")
+        .is_some_and(|v| !v.is_empty())
+}
+
 /// DB から取得した site_settings のマップから SMTP トランスポートを構築する。
 /// `smtp_host` が存在しない場合は `MailError::Config` を返す。
 fn build_transport(
@@ -156,6 +166,54 @@ pub async fn send_password_reset_email(
         .from(from.parse()?)
         .to(to.parse()?)
         .subject("seiran — パスワードのリセット")
+        .header(ContentType::TEXT_PLAIN)
+        .body(body)?;
+
+    transport.send(email).await?;
+    Ok(())
+}
+
+/// `com.atproto.server.createSession`（ATPセッション作成）の`authFactorToken`確認コード。
+pub async fn send_atp_session_2fa_code(
+    settings: &HashMap<String, String>,
+    to: &str,
+    code: &str,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
+
+    let body = format!(
+        "seiran — ログイン確認コードです。\n\nAT Protocolクライアント（Bluesky公式アプリ等）でのログインを完了するには、\n以下のコードを入力してください:\n\n{}\n\nこのコードは15分間有効です。\n\n心当たりがない場合はこのメールを無視してください。",
+        code
+    );
+
+    let email = Message::builder()
+        .from(from.parse()?)
+        .to(to.parse()?)
+        .subject("seiran — ログイン確認コード")
+        .header(ContentType::TEXT_PLAIN)
+        .body(body)?;
+
+    transport.send(email).await?;
+    Ok(())
+}
+
+/// `com.atproto.identity.requestPlcOperationSignature`のPLCオペレーション署名確認コード。
+pub async fn send_plc_operation_signature_code(
+    settings: &HashMap<String, String>,
+    to: &str,
+    code: &str,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
+
+    let body = format!(
+        "seiran — DIDの管理情報（他サーバーへの引っ越し等）を変更するリクエストを受け付けました。\n\n以下のコードを、操作を行っているクライアントに入力してください:\n\n{}\n\nこのコードは15分間有効です。\n\n心当たりがない場合はこのメールを無視してください（コードを入力しない限りDIDの情報は変更されません）。",
+        code
+    );
+
+    let email = Message::builder()
+        .from(from.parse()?)
+        .to(to.parse()?)
+        .subject("seiran — DID管理情報の変更確認コード")
         .header(ContentType::TEXT_PLAIN)
         .body(body)?;
 

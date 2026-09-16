@@ -644,7 +644,8 @@ export default function PostComposer({
       posting ||
       embedChoiceMissing ||
       pollInvalid ||
-      cwInvalid
+      cwInvalid ||
+      user?.did_moved_out
     )
       return;
     setError("");
@@ -1329,7 +1330,7 @@ export default function PostComposer({
                   ref={publicBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "public" ? styles.postBtnDefault : ""}`}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || user?.did_moved_out}
                   onClick={() => submitWithVisibility("public")}
                   onFocus={() => handleSubmitBtnFocus("public")}
                   onBlur={handleSubmitBtnBlur}
@@ -1346,7 +1347,7 @@ export default function PostComposer({
                   ref={unlistedBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "unlisted" ? styles.postBtnDefault : ""}`}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || user?.did_moved_out}
                   onClick={() => submitWithVisibility("unlisted")}
                   onFocus={() => handleSubmitBtnFocus("unlisted")}
                   onBlur={handleSubmitBtnBlur}
@@ -1363,7 +1364,7 @@ export default function PostComposer({
                   ref={privateBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "followers_only" ? styles.postBtnDefault : ""}`}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || user?.did_moved_out}
                   onClick={() => submitWithVisibility("followers_only")}
                   onFocus={() => handleSubmitBtnFocus("followers_only")}
                   onBlur={handleSubmitBtnBlur}
@@ -1389,7 +1390,8 @@ export default function PostComposer({
                   embedChoiceMissing ||
                   pollInvalid ||
                   cwInvalid ||
-                  quoteTo?.visibility === "unlisted"
+                  quoteTo?.visibility === "unlisted" ||
+                  user?.did_moved_out
                 }
                 title={
                   quoteTo?.visibility === "unlisted"
@@ -1410,7 +1412,7 @@ export default function PostComposer({
                 ref={unlistedBtnRef}
                 type="button"
                 className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "unlisted" ? styles.postBtnDefault : ""}`}
-                disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid}
+                disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || user?.did_moved_out}
                 onClick={() => submitWithVisibility("unlisted")}
                 onFocus={() => handleSubmitBtnFocus("unlisted")}
                 onBlur={handleSubmitBtnBlur}
@@ -1431,7 +1433,7 @@ export default function PostComposer({
                   ref={privateBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "followers_only" ? styles.postBtnDefault : ""}`}
-                  disabled={posting || !text.trim() || overLimit || deliverBsky}
+                  disabled={posting || !text.trim() || overLimit || deliverBsky || user?.did_moved_out}
                   onClick={() => submitWithVisibility("followers_only")}
                   onFocus={() => handleSubmitBtnFocus("followers_only")}
                   onBlur={handleSubmitBtnBlur}

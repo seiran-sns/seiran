@@ -147,6 +147,9 @@ pub async fn create_reaction(
     State(state): State<AppState>,
     Json(req): Json<dto::ReactRequest>,
 ) -> impl IntoResponse {
+    if let Err(e) = me.require_not_did_moved_out() {
+        return e.into_response();
+    }
     let note_id: i64 = match note_id_str.parse() {
         Ok(id) => id,
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),

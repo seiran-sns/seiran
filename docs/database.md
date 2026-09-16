@@ -57,6 +57,7 @@ ID 採番は2系統ある。
 | `instance_domain` | 自ホストドメインの確定値（単一行のみ、一度確定したら不変） |
 | `remote_instance_meta` | リモートインスタンス（`actors.domain`単位）のnodeinfoキャッシュ（NoteCardリモートサーバー表示用） |
 | `email_verifications` / `email_changes` / `password_resets` | 認証系のワンタイムトークン |
+| `email_short_codes` | ATPセッション2FA・PLCオペレーション署名確認（`docs/account_migration.md` 6節）のメール6桁コード |
 | `user_totp` / `user_totp_recovery_codes` / `totp_disable_requests` | TOTP設定、使い切りリカバリーコード、メール経由の解除トークン |
 | `user_passkeys` / `passkey_challenges` | 複数WebAuthn credentialと短命な登録・認証チャレンジ |
 | `app_tokens` | MiAuth経由で発行されたアプリトークンの一覧・無効化管理 |
@@ -125,6 +126,11 @@ JetStreamは「ローカルユーザーのフォロー中/リストメンバー�
 `ActorRepository::find_by_username_domain` は退会済み（`withdrawn_at`設定済み）アクターを結果から除外する（#242）。プロフィール表示・新規フォロー解決・ユーザー検索等、ユーザー向けの経路はこちらを使う。AP受信ジョブの内部処理（配信元/宛先の同一性検証、ブロック・フォロー解除の記録等）のように、退会済みアクターも解決できないと処理自体が失敗する経路では、あえて不自然な名前にした`find_including_withdrawn_by_username_domain`（退会済みを除外しない版）を明示的に使う。呼び出し側にどちらを使うべきか一目で意識させるための命名。
 
 自ホストドメイン未確定（シングルホストモード、`instance_domain`参照）の間に作成されたローカルユーザーは `domain='localhost'` で、`at_did`/`at_signing_key_pem` は両方 `NULL`（PLC genesisを行わないため、AT Protocol非対応のローカルユーザーとして存在する）。両カラムは元々 `UNIQUE` かつ `NOT NULL` 制約が無いためスキーマ変更なしでこの状態を表現できる。
+
+### `actors.at_rotation_key_pem` / `actors.did_moved_out_at`（転出元API対応）
+`at_rotation_key_pem`はアカウント単位のPLCローテーションキー（`docs/account_migration.md` 6節）。ジェネシス作成のローカルアカウントはDIDの`rotationKeys`配列で主鍵として使い、既存DID転入済みアカウントは転入完了時に発行される専用鍵をそのまま持つ。`NULL`は未設定（両者とも本来は設定済みが正しい状態。未設定のまま残っているのは、この列の追加以前に作成／転入されたアカウントの取り残しのみ）。
+
+`did_moved_out_at`はDID転出済み日時。`submitPlcOperation`成功時、または`deactivateAccount`呼び出し時に設定される。`is_suspended`/`withdrawn_at`とは異なり、この状態でも読み取り系APIは通常通り応答する（書き込み系のみ`AuthedUser::require_not_did_moved_out()`で拒否）。
 
 ### `actors.suspended_at`（ユーザー凍結）
 管理者・モデレーターによるユーザー凍結の状態を持つ。ローカル・リモート（AP/ATP問わず）共通で、`actor_type`を問わず全アクターが対象になりうる。`withdrawn_at`と同じ「肉体（actors）」側の状態として持たせることで、ローカル・リモートの enforcement を1本の列・1本のクエリ経路に統一している。
@@ -304,11 +310,14 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 ### 既存DID転入（`at_migration_requests` / `at_migration_records` / `at_migration_blobs`）
 `follow_import_requests`/`follow_import_items`（親テーブル＋子テーブル、進捗はCOUNTで都度算出）と同じ設計方針。詳細な状態遷移・設計判断は`docs/account_migration.md`参照。
 
-`at_migration_requests`は転入実行1回=1行。`status`（ENUM `at_migration_status`）が状態機械そのもので、`awaiting_source_2fa`→`fetching_repo`→（`require_email_verification=ON`時のみ`awaiting_seiran_email`）→`requesting_plc_signature`→`awaiting_plc_token`→`submitting_plc`→`importing_data`→`deactivating_source`→`completed`の正常系列に加え、`submitPlcOperation`成功前のみ遷移可能な`failed`（リトライ/別DID/新規DID切替いずれも可）、成功後専用の`failed_post_submit`（リトライのみ）、`abandoned`（`plc_submitted_at IS NULL`の間のみ選べる打ち切り）を持つ。`request_token_hash`は匿名段階（`users`/`actors`未確定）の認可トークンをSHA-256ハッシュ化した値で、生値はレスポンス一回きり（`password_resets`等と同型）。`plc_submitted_at`が`submitPlcOperation`成功＝不可逆境界のマーカーで、`new_signing_key_pem`（転入後に使う新規P-256鍵）はこの成功と同時に確定保存する（後続のローカルアカウント作成が失敗しても鍵を失わないよう、`actor_id`/`user_id`確定とは別ステップ）。
+`at_migration_requests`は転入実行1回=1行。`status`（ENUM `at_migration_status`）が状態機械そのもので、`awaiting_source_2fa`→`fetching_repo`→（`require_email_verification=ON`時のみ`awaiting_seiran_email`）→`requesting_plc_signature`→`awaiting_plc_token`→`submitting_plc`→`importing_data`→`deactivating_source`→`completed`の正常系列に加え、`submitPlcOperation`成功前のみ遷移可能な`failed`（リトライ/別DID/新規DID切替いずれも可）、成功後専用の`failed_post_submit`（リトライのみ）、`abandoned`（`plc_submitted_at IS NULL`の間のみ選べる打ち切り）を持つ。`request_token_hash`は匿名段階（`users`/`actors`未確定）の認可トークンをSHA-256ハッシュ化した値で、生値はレスポンス一回きり（`password_resets`等と同型）。`plc_submitted_at`が`submitPlcOperation`成功＝不可逆境界のマーカーで、`new_signing_key_pem`（転入後に使う新規P-256鍵、repo commit署名用）と`new_rotation_key_pem`（転入後に使う専用ローテーションキー）はこの成功と同時に確定保存する（後続のローカルアカウント作成が失敗しても鍵を失わないよう、`actor_id`/`user_id`確定とは別ステップ）。
 
 `at_migration_records`は転入元リポジトリから取得した生レコード1件=1行（`request_id, collection, rkey`でUNIQUE）。`bytes`はCARから取り出したDAG-CBORバイト列を無加工で保持し、`imported_at`が`posts`/`atp_records`への実体化完了マーカー。`app.bsky.graph.follow`コレクションのみ追加で`follow_materialized_at`列を持ち、`follows`テーブルへの反映（リモートアクター解決込み）が完了したかを`imported_at`とは独立に追跡する（ATPリポジトリへの複製と、seiran自身の社会グラフへの反映は別の実体化ステップのため）。
 
 `at_migration_blobs`は転入元PDSの`listBlobs`で取得したblob CID一覧（`request_id, cid`でUNIQUE）。`imported_at`が`atp_blobs`への保存完了マーカー。
+
+### メール短命コード（`email_short_codes`）
+転出元API対応（`docs/account_migration.md` 6節）。`com.atproto.server.createSession`のメール2FA（`purpose='atp_session_2fa'`）と`com.atproto.identity.requestPlcOperationSignature`のPLCオペレーション署名確認（`purpose='plc_operation_signature'`）が共有する、6桁コード型のワンタイムトークン。`email_verifications`/`email_changes`（リンククリック型）とは異なり、ユーザーがATPクライアントへ手入力する値として使うためコード自体をハッシュ化して保存する。`actor_id`+`purpose`単位で管理し、消費時（一致・不一致問わず）は同じ`actor_id`+`purpose`の行を全て削除する（古いコードの再利用防止）。
 
 ## 4. 典型的なクエリパターン
 

@@ -32,6 +32,9 @@ pub async fn create_follow(
     State(state): State<AppState>,
     Json(req): Json<CreateFollowRequest>,
 ) -> impl IntoResponse {
+    if let Err(e) = user.require_not_did_moved_out() {
+        return e.into_response();
+    }
     if let Err(e) = crate::rate_limit::check_follow_rate_limit(&state, user.actor_id).await {
         return e.into_response();
     }

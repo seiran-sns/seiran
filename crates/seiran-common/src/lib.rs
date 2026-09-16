@@ -22,6 +22,7 @@ pub mod oembed_whitelist;
 pub mod queue;
 pub mod rate_limit;
 pub mod repository;
+pub mod rotation_key_backfill;
 pub mod secrets;
 pub mod seiran_actor_merge;
 pub mod seiran_post;

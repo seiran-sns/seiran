@@ -119,6 +119,9 @@ pub async fn create_list(
     State(state): State<AppState>,
     Json(req): Json<CreateListRequest>,
 ) -> impl IntoResponse {
+    if let Err(e) = user.require_not_did_moved_out() {
+        return e.into_response();
+    }
     let name = req.name.trim();
     if name.is_empty() || name.chars().count() > 100 {
         return ApiError::BadRequest("リスト名は1〜100文字で入力してください".to_string())
@@ -317,6 +320,9 @@ pub async fn update_list(
     Path(id): Path<String>,
     Json(req): Json<UpdateListRequest>,
 ) -> impl IntoResponse {
+    if let Err(e) = user.require_not_did_moved_out() {
+        return e.into_response();
+    }
     let id = match parse_id(&id) {
         Ok(v) => v,
         Err(e) => return e.into_response(),
@@ -386,6 +392,9 @@ pub async fn delete_list(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
+    if let Err(e) = user.require_not_did_moved_out() {
+        return e.into_response();
+    }
     let id = match parse_id(&id) {
         Ok(v) => v,
         Err(e) => return e.into_response(),
@@ -495,6 +504,9 @@ pub async fn add_member(
     Path(id): Path<String>,
     Json(req): Json<AddMemberRequest>,
 ) -> impl IntoResponse {
+    if let Err(e) = user.require_not_did_moved_out() {
+        return e.into_response();
+    }
     let id = match parse_id(&id) {
         Ok(v) => v,
         Err(e) => return e.into_response(),
@@ -591,6 +603,9 @@ pub async fn remove_member(
     State(state): State<AppState>,
     Path((id, actor_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    if let Err(e) = user.require_not_did_moved_out() {
+        return e.into_response();
+    }
     let id = match parse_id(&id) {
         Ok(v) => v,
         Err(e) => return e.into_response(),

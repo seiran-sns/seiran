@@ -392,6 +392,28 @@ async fn process_import(
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .unwrap_or(now);
 
+            // `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、#237）。転入元も
+            // seiranであれば、この投稿がATP標準フィールドだけでは再現できない情報（CW・投票・
+            // 絵文字マップ・URLカードの申告値・公開範囲）を持っている。リモートseiranポスト受信
+            // （`seiran-atp-repo::firehose`の`save_bsky_post`呼び出し前後）と同じ優先順位で
+            // 標準フィールドを上書きする。
+            let seiran_post_ext = crate::seiran_post::SeiranPost::extract(&value);
+            let body_text = seiran_post_ext
+                .as_ref()
+                .map(|sp| sp.body.clone())
+                .unwrap_or(text);
+            let emoji_map = seiran_post_ext
+                .as_ref()
+                .map(|sp| sp.emoji_map.clone())
+                .unwrap_or_else(|| serde_json::json!({}));
+            let content_warning = seiran_post_ext.as_ref().and_then(|sp| sp.content_warning.clone());
+            let poll = seiran_post_ext.as_ref().and_then(|sp| sp.poll.clone());
+            let visibility = seiran_post_ext
+                .as_ref()
+                .map(|sp| sp.visibility.clone())
+                .unwrap_or_else(|| "public".to_string());
+            let language = seiran_post_ext.as_ref().and_then(|sp| sp.language.clone());
+
             let post_id = crate::generate_snowflake_id(now);
             let ap_object_id = format!("https://{}/notes/{}", local_domain, post_id);
             let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
@@ -401,23 +423,23 @@ async fn process_import(
                 .insert_full(InsertFullParams {
                     id: post_id,
                     actor_id,
-                    body: &text,
+                    body: &body_text,
                     ap_object_id: &ap_object_id,
                     seiran_post_uuid: &seiran_post_uuid,
                     // リプライ/引用先の解決はスコープ外（既知の制限、docs/account_migration.md参照）。
                     reply_to_post_id: None,
                     quote_of_post_id: None,
                     created_at,
-                    visibility: "public",
+                    visibility: &visibility,
                     // 過去のBsky投稿の再取り込みであり新規投稿ではないため配送しない。
                     deliver_fedi: false,
                     deliver_bsky: false,
                     thread_root_post_id: None,
                     recipient_actor_ids: &[],
-                    emoji_map: &serde_json::json!({}),
-                    poll: None,
-                    content_warning: None,
-                    language: None,
+                    emoji_map: &emoji_map,
+                    poll: poll.as_ref(),
+                    content_warning: content_warning.as_deref(),
+                    language: language.as_deref(),
                 })
                 .await
                 .map_err(|e| {
@@ -425,6 +447,13 @@ async fn process_import(
                         "[MigrationImportProcess] posts INSERT失敗 (rkey={rkey}): {e}"
                     ))
                 })?;
+
+            if let Some(sp) = &seiran_post_ext {
+                if !sp.link_cards.is_empty() {
+                    crate::seiran_post::insert_seiran_post_link_cards(pool, post_id, &sp.link_cards)
+                        .await;
+                }
+            }
 
             // 画像/動画添付の復元。移行元DID（=移行後もDIDは不変）とblob CIDのみから
             // Bluesky CDN/動画パイプラインのURLを決定的に組み立てる既存ロジックを再利用する

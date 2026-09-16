@@ -118,7 +118,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
       return;
     }
 
-    if (isPrivateRepostTarget) return;
+    if (isPrivateRepostTarget || user?.did_moved_out) return;
 
     setReposting(true);
     try {
@@ -140,6 +140,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
   async function toggleReaction(emoji: string) {
     if (reactionPending) return;
     const reacting = !(reactions.find((r) => r.emoji === emoji)?.reactedByMe ?? false);
+    if (reacting && user?.did_moved_out) return;
     const prevReactions = reactions;
 
     setReactionPending(true);

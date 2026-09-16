@@ -989,6 +989,9 @@ pub async fn create_note(
     State(state): State<AppState>,
     Json(req): Json<CreateNoteRequest>,
 ) -> impl IntoResponse {
+    if let Err(e) = user.require_not_did_moved_out() {
+        return e.into_response();
+    }
     let now = chrono::Utc::now();
 
     match &req.renote_id {

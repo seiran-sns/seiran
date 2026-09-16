@@ -29,9 +29,25 @@ pub struct AuthedUser {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// DID転出済み日時（`did_moved_out_at`、転出元API対応）。`Some`の間は投稿・リアクション・
+    /// リポスト・フォロー・リスト操作・DM送信等の書き込み系操作を拒否する
+    /// （`require_not_did_moved_out`）。タイムライン等の読み取りはこのフラグに関わらず
+    /// 常に許可する——`extract_auth`のsuspendedチェックとは異なり、ここでは自動的には拒否
+    /// しない。書き込み系ハンドラが個別に呼ぶこと。
+    pub did_moved_out: bool,
 }
 
 impl AuthedUser {
+    /// 書き込み系操作（投稿・リアクション・リポスト・フォロー・リスト操作・DM送信等）の
+    /// 先頭で呼ぶ。DID転出済みの間はこれらを一切許可しない
+    /// （`docs/account_migration.md`の「DID転出済み」状態、読み取りのみ可）。
+    pub fn require_not_did_moved_out(&self) -> Result<(), ApiError> {
+        if self.did_moved_out {
+            return Err(ApiError::Forbidden("DID_MOVED_OUT"));
+        }
+        Ok(())
+    }
+
     /// `HeaderMap` から直接解決する（Misskey 互換ブリッジ等、既に `headers`/`state` を
     /// 手元に持っている非 extractor 経路から呼ぶための共通ロジック）。
     pub async fn from_headers(headers: &HeaderMap, state: &AppState) -> Result<Self, Response> {
@@ -57,6 +73,7 @@ impl AuthedUser {
             username: actor.username,
             domain: actor.domain,
             display_name: actor.display_name,
+            did_moved_out: actor.did_moved_out_at.is_some(),
         })
     }
 }

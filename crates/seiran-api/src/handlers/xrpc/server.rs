@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use sha2::Digest;
 
 use seiran_common::atp::resolve_external_handle;
 use seiran_common::{generate_snowflake_id, LocalAuthProvider};
@@ -132,6 +133,18 @@ pub async fn well_known_atproto_did(
 pub struct CreateSessionRequest {
     pub identifier: String,
     pub password: String,
+    /// メール2FA確認コード。SMTP設定済みインスタンスでは必須（`auth_factor_token_required_error`
+    /// を返しコード送信、2回目の呼び出しで検証）。SMTP未設定インスタンスでは常にスキップする。
+    #[serde(rename = "authFactorToken")]
+    pub auth_factor_token: Option<String>,
+}
+
+fn auth_factor_token_required_error() -> axum::response::Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(serde_json::json!({"error": "AuthFactorTokenRequired", "message": "メールで送信した確認コードを入力してください"})),
+    )
+        .into_response()
 }
 
 /// `com.atproto.server.createSession` — ハンドルまたはDID + パスワードでログインし、
@@ -221,10 +234,8 @@ pub async fn xrpc_create_session(
     // メインパスワードでcreateSessionを呼んでおり、PDS側はメインパスワードを拒否していない。
     // アプリパスワードはサードパーティに安全に権限を渡すための任意のオプションであって、
     // PDSが強制する必須要件ではない）。
-    let main_hash = match state.users.find_login_by_username(&actor.username).await {
-        Ok(Some(login)) => login.password_hash,
-        _ => None,
-    };
+    let login_row = state.users.find_login_by_username(&actor.username).await.ok().flatten();
+    let main_hash = login_row.as_ref().and_then(|l| l.password_hash.clone());
     password_ok = password_ok
         || match &main_hash {
             Some(h) => LocalAuthProvider::verify_password(&req.password, h).unwrap_or(false),
@@ -239,6 +250,43 @@ pub async fn xrpc_create_session(
 
     if !password_ok {
         return auth_required_error();
+    }
+
+    // メール2FA。SMTP設定済みインスタンスのみ有効（コード送信自体が不可能なインスタンスでは
+    // 常にスキップする）。標準ATPクライアント（Bluesky公式アプリ等）の`authFactorToken`UIは
+    // 「メールを確認してください」という文言のため、TOTPではなくメール送信コードで統一する。
+    let smtp_settings = state.site_settings.get_all().await.unwrap_or_default();
+    if crate::mailer::is_smtp_configured(&smtp_settings) {
+        const PURPOSE: &str = "atp_session_2fa";
+        match req.auth_factor_token.as_deref() {
+            None => {
+                let code = format!("{:06}", uuid::Uuid::new_v4().as_u128() % 1_000_000);
+                let code_hash = hex::encode(sha2::Sha256::digest(code.as_bytes()));
+                let now = chrono::Utc::now();
+                let id = seiran_common::generate_snowflake_id(now);
+                if let Err(e) = state
+                    .email_short_codes
+                    .issue(id, actor.id, PURPOSE, &code_hash, now + chrono::Duration::minutes(15), now)
+                    .await
+                {
+                    return ApiError::Internal(format!("[createSession] 確認コード発行失敗: {}", e)).into_response();
+                }
+                if let Some(login) = &login_row {
+                    if let Err(e) = crate::mailer::send_atp_session_2fa_code(&smtp_settings, &login.email, &code).await {
+                        tracing::error!("[createSession] 確認コード送信失敗: {}", e);
+                    }
+                }
+                return auth_factor_token_required_error();
+            }
+            Some(token) => {
+                let code_hash = hex::encode(sha2::Sha256::digest(token.trim().as_bytes()));
+                match state.email_short_codes.consume(actor.id, PURPOSE, &code_hash).await {
+                    Ok(true) => {}
+                    Ok(false) => return auth_required_error(),
+                    Err(e) => return ApiError::Internal(format!("[createSession] 確認コード検証失敗: {}", e)).into_response(),
+                }
+            }
+        }
     }
 
     let (access_jwt, refresh_jwt, jti, refresh_exp) = match state
@@ -391,6 +439,114 @@ pub async fn xrpc_get_session(
         "active": true,
     }))
     .into_response()
+}
+
+/// `com.atproto.server.checkAccountStatus` — 転出先PDSが移行準備状況を確認するために
+/// 呼ぶ、読み取りのみのステータス。認可パターンは`xrpc_get_session`と同じ
+/// （トークンから解決したDIDのアカウントについてのみ返す）。
+pub async fn xrpc_check_account_status(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let Some(token) = extract_bearer(&headers) else {
+        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
+    };
+    let verified = match state
+        .local_auth
+        .verify_atp_access_token(token, &service_did(&state))
+    {
+        Ok(v) => v,
+        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+    };
+    let actor = match state.actors.find_by_did(&verified.did).await {
+        Ok(Some(a)) => a,
+        _ => return ApiError::Unauthorized("アクターが見つかりません").into_response(),
+    };
+
+    let activated = actor.withdrawn_at.is_none()
+        && actor.suspended_at.is_none()
+        && actor.did_moved_out_at.is_none();
+
+    let indexed_records: i64 = match sqlx::query_scalar::<_, i64>(
+        "SELECT (SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND deleted_at IS NULL)
+              + (SELECT COUNT(*) FROM atp_records WHERE actor_id = $1)",
+    )
+    .bind(actor.id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(n) => n,
+        Err(e) => return ApiError::Internal(format!("[checkAccountStatus] indexedRecords集計失敗: {}", e)).into_response(),
+    };
+    let repo_blocks: i64 = match sqlx::query_scalar("SELECT COUNT(*) FROM atp_blocks WHERE actor_id = $1")
+        .bind(actor.id)
+        .fetch_one(&state.db)
+        .await
+    {
+        Ok(n) => n,
+        Err(e) => return ApiError::Internal(format!("[checkAccountStatus] repoBlocks集計失敗: {}", e)).into_response(),
+    };
+    let blobs: i64 = match sqlx::query_scalar("SELECT COUNT(*) FROM atp_blobs WHERE actor_id = $1")
+        .bind(actor.id)
+        .fetch_one(&state.db)
+        .await
+    {
+        Ok(n) => n,
+        Err(e) => return ApiError::Internal(format!("[checkAccountStatus] blobs集計失敗: {}", e)).into_response(),
+    };
+
+    Json(serde_json::json!({
+        "activated": activated,
+        "validDid": true,
+        "repoCommit": actor.at_repo_cid,
+        "repoRev": actor.at_repo_rev,
+        "repoBlocks": repo_blocks,
+        "indexedRecords": indexed_records,
+        "privateStateValues": 0,
+        "expectedBlobs": blobs,
+        "importedBlobs": blobs,
+    }))
+    .into_response()
+}
+
+/// `com.atproto.server.deactivateAccount` — 転出先PDSが転入完了後（またはユーザーが
+/// 転入を中断した際）のベストエフォート後始末として呼ぶ。`submitPlcOperation`の有無に
+/// かかわらず、呼ばれたら`did_moved_out_at`をセットする（DIDが実際に転出したかに関わらず
+/// 「seiran上でのこのアカウントの通常利用は終わり」という状態に統一する。4つ目の状態を
+/// 新設しない設計判断）。
+pub async fn xrpc_deactivate_account(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let Some(token) = extract_bearer(&headers) else {
+        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
+    };
+    let verified = match state
+        .local_auth
+        .verify_atp_access_token(token, &service_did(&state))
+    {
+        Ok(v) => v,
+        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+    };
+    let actor = match state.actors.find_by_did(&verified.did).await {
+        Ok(Some(a)) => a,
+        _ => return ApiError::Unauthorized("アクターが見つかりません").into_response(),
+    };
+
+    if let Err(e) = sqlx::query("UPDATE actors SET did_moved_out_at = COALESCE(did_moved_out_at, NOW()) WHERE id = $1")
+        .bind(actor.id)
+        .execute(&state.db)
+        .await
+    {
+        return ApiError::Internal(format!("[deactivateAccount] DB更新失敗: {}", e)).into_response();
+    }
+    tracing::warn!(
+        "[deactivateAccount] actor_id={} did={} did_moved_out_atを設定",
+        actor.id,
+        verified.did
+    );
+
+    Json(serde_json::json!({})).into_response()
 }
 
 #[derive(Deserialize)]
