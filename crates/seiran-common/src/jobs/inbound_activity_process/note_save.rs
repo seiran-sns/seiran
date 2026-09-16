@@ -247,8 +247,11 @@ pub(crate) async fn save_ap_note_core(
     // DM（visibility="direct"）の宛先・スレッド起点解決。`OneHopFetch`（＝トップレベル
     // 受信）の時だけ行う。参照解決経由（`DbOnly`）でフェッチしたNoteは実際にはinboxへ
     // 配送されていないため、DM宛先情報を信頼してはならない（意図的に常にスキップ）。
-    let (thread_root_post_id, recipient_actor_ids): (Option<i64>, Vec<i64>) =
-        if ref_mode == ReferenceResolutionMode::OneHopFetch && visibility == "direct" {
+    let (thread_root_post_id, recipient_actor_ids, remote_recipient_uris): (
+        Option<i64>,
+        Vec<i64>,
+        Vec<String>,
+    ) = if ref_mode == ReferenceResolutionMode::OneHopFetch && visibility == "direct" {
             // リプライ先が direct（DM）の場合、送信元アクターがその DM の当事者
             // （投稿者本人 or post_recipients の宛先）でなければ拒否する。ここを
             // 確認せずに受理すると、リモートの送信元がinReplyTo/toを自由に申告できる
@@ -301,10 +304,18 @@ pub(crate) async fn save_ap_note_core(
             // だけを見ると、リモートの同名ユーザー宛のDMをローカルの同名ユーザー宛だと
             // 誤認してしまう）。
             let mut recipients = Vec::new();
+            // ローカル宛先はここで即座に解決するが、リモート宛先（3人以上の会話に
+            // 混じるリモートユーザー等）は都度フェッチが必要になり受信処理をブロック
+            // したくないため、`DmRecipientResolve`ジョブへ回す（宛先表示、
+            // `docs/ui_spec.md` 2.5節）。送信者自身のURIは宛先ではないため除外。
+            let mut remote_uris = Vec::new();
             for uri in &to_list {
                 let Some(local_username) =
                     crate::ap::extract_local_username(uri, &inbox.local_domain)
                 else {
+                    if uri != actor_uri {
+                        remote_uris.push(uri.clone());
+                    }
                     continue;
                 };
                 if let Ok(Some(actor)) = inbox
@@ -317,9 +328,9 @@ pub(crate) async fn save_ap_note_core(
                     }
                 }
             }
-            (Some(thread_root), recipients)
+            (Some(thread_root), recipients, remote_uris)
         } else {
-            (None, Vec::new())
+            (None, Vec::new(), Vec::new())
         };
 
     // シナリオ2: 他seiranサーバー間マージ（#237、相互一致方式）。
@@ -422,6 +433,24 @@ pub(crate) async fn save_ap_note_core(
         .await
         .map_err(|e| format!("posts id 取得エラー: {}", e))?
         .ok_or_else(|| format!("posts id 取得エラー: {} が見つかりません", note_id))?;
+
+    // DM宛先のうちリモート分の解決（上記コメント参照）。posts行が確定した後でないと
+    // `post_recipients`のFK制約に違反するため、ここ（INSERT後）でenqueueする。
+    for uri in &remote_recipient_uris {
+        if let Err(e) = inbox
+            .queue
+            .enqueue(
+                Job::DmRecipientResolve {
+                    post_id,
+                    uri: uri.clone(),
+                },
+                priority::LOW,
+            )
+            .await
+        {
+            tracing::warn!("[NoteSave] DmRecipientResolveの積み込みに失敗: {}", e);
+        }
+    }
 
     // ブリッジポスト処理（`crate::bridge_post`参照）。
     if let Some(at_uri) = &bridge_target_at_uri {

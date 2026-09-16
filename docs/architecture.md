@@ -176,6 +176,7 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 | `BskyDmSend{post_id}` | DM宛先のBskyアクターへ`chat.bsky.convo.sendMessage`で送信（`docs/protocols.md` 9節） | 高 |
 | `RemoteFollowListSync{actor_id, direction}` | リモートFediアクターのfollowers/following全件取得（プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック、`docs/protocols.md` 2節） | 低 |
 | `RemoteActorResolve{uri}` | リモートfollowers/following一覧中、ローカルDB未登録のactor URIのプロフィールを解決し`actors`へupsert（フォロー関係は作らない、`docs/protocols.md` 2節） | 低 |
+| `DmRecipientResolve{post_id, uri}` | Fedi受信DMの`to`に含まれるリモートアクターURIを解決し`post_recipients`へ追加する（`RemoteActorResolve`と共有ロジックで未知アクターもupsert）。DM受信処理自体はローカル宛先のみ即座に解決するため、3人以上の会話に混じるリモートユーザーの宛先表示漏れを防ぐ（`docs/protocols.md` 9節） | 低 |
 | `RemoteInstanceInfoResolve{domain}` | リモートインスタンスのnodeinfoを取得し`remote_instance_meta`へキャッシュ（NoteCardリモートサーバー表示、`docs/database.md`参照）。notes API/Misskey互換APIが未キャッシュのドメインを見つけた際に積む | 低 |
 | `RemoteProfileRefresh{actor_id}` | リモートアクター（fedi/bsky/remote_seiran）のavatar_url/banner_url/display_name/bio等を再取得し`actors`を更新する。カスタムAPI（`handlers::users::user_profile`）・Misskey互換API（`/api/users/show`）双方のプロフィール表示のたびに積む。「表示時再検証」パターン（下記）の実例 | 低 |
 | `AlsoKnownAsVerify{owner_actor_id, target_actor_id}` | プロフィールの「別のアカウント」（alsoKnownAs、`docs/protocols.md` 2節）の相互検証結果を`actor_also_known_as`テーブルへキャッシュ更新する。「表示時再検証」パターン（下記）の実例 | 低 |

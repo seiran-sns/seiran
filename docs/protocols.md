@@ -835,7 +835,7 @@ Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri`
 参照解決経由（リプライ/引用/リポスト対象の1段階フェッチ）で保存された投稿は、実際にはinboxへ
 配送されていないためDM宛先情報を信頼できず、以下は常にスキップされる。
 - `note["inReplyTo"]`から`reply_to_post_id`を解決する（`find_id_by_ap_or_at_uri`。DM以外の通常投稿にも設定するようになった。以前はFedi受信投稿は`reply_to_post_id`を一切保存しない実装だった）。
-- `to`に含まれるローカルアクターURIから宛先を解決し`post_recipients`へ保存する。ローカルユーザーの`actors.ap_uri`は登録時に設定されない（都度`https://{local_domain}/users/{username}`として動的組み立てされる）ため`find_by_ap_uri`では引っかからない。`seiran_common::ap::extract_local_username`でホスト名まで含めて自ドメインのURIかを検証してからusernameを取り出し`find_by_username_domain`で解決する（末尾セグメントだけでは同名リモートユーザーと取り違える）。
+- `to`に含まれるローカルアクターURIから宛先を解決し`post_recipients`へ保存する。ローカルユーザーの`actors.ap_uri`は登録時に設定されない（都度`https://{local_domain}/users/{username}`として動的組み立てされる）ため`find_by_ap_uri`では引っかからない。`seiran_common::ap::extract_local_username`でホスト名まで含めて自ドメインのURIかを検証してからusernameを取り出し`find_by_username_domain`で解決する（末尾セグメントだけでは同名リモートユーザーと取り違える）。`to`に含まれるリモートアクターURI（自ドメインでない、送信者自身でもないもの）は受信処理をブロックしないよう即座には解決せず、`Job::DmRecipientResolve{post_id, uri}`へ回す（posts行のINSERT確定後にenqueue、`jobs::remote_actor_resolve::resolve_and_upsert`と共有ロジックで未知アクターもupsertしてから`post_recipients`へ追加）。3人以上の会話にリモートユーザーが混じる場合の宛先表示（`docs/ui_spec.md` 2.5節）漏れへの対応。
 - `reply_to_post_id`の親が`direct`の場合、送信元アクターが親投稿の当事者（投稿者本人 or `post_recipients`の宛先）であることを`post_is_visible_to`で確認してから`thread_root_post_id`を継承する。当事者でなければ受信自体を拒否する（送信元は`to`/`inReplyTo`を自由に申告できるため、ここを確認しないと無関係な第三者が他人同士のDMスレッドへ紛れ込める）。親が`direct`でなければ自分自身のIDをスレッド起点とする（伝播コピー方式はローカル投稿と共通）。
 - WS配信は宛先のみ（フォロワーには配信しない）。
 

@@ -234,6 +234,13 @@ pub enum Job {
     /// フォロー関係は作らず、表示のリッチ化（アバター・表示名等）のみが目的。
     RemoteActorResolve { uri: String },
 
+    /// Fedi受信DM（`visibility='direct'`）の`to`に含まれるリモートアクターURIを解決し
+    /// `post_recipients`へ追加する。DM受信処理自体は`to`のうちローカルアクターのみを
+    /// 即座に解決するため、リモート宛先（例: 3人以上の会話に混じるリモートユーザー）の
+    /// 宛先表示漏れへの対応として、未知アクターも`RemoteActorResolve`と同じ要領で
+    /// upsertしてから積む。
+    DmRecipientResolve { post_id: i64, uri: String },
+
     /// リモートFediアクターのfeatured collection（ピン留め投稿, #61）を同期する。
     /// DB登録済みアクターのプロフィール表示のたびに積まれ、表示自体は常にDB上の
     /// 既存`pinned_posts`をそのまま返す（「表示時再検証」パターン、`AlsoKnownAsVerify`と同様）。

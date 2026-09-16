@@ -461,6 +461,11 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::RemoteActorResolve { uri } => jobs::remote_actor_resolve::handle(uri, ctx)
             .await
             .map_err(JobError::from),
+        Job::DmRecipientResolve { post_id, uri } => {
+            jobs::dm_recipient_resolve::handle(post_id, uri, ctx)
+                .await
+                .map_err(JobError::from)
+        }
         Job::RemoteFeaturedSync { actor_id } => jobs::remote_featured_sync::handle(actor_id, ctx)
             .await
             .map_err(JobError::from),
@@ -569,6 +574,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::BskyDmSend { .. } => "BskyDmSend",
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
+        Job::DmRecipientResolve { .. } => "DmRecipientResolve",
         Job::RemoteFeaturedSync { .. } => "RemoteFeaturedSync",
         Job::RemoteProfileRefresh { .. } => "RemoteProfileRefresh",
         Job::AlsoKnownAsVerify { .. } => "AlsoKnownAsVerify",
@@ -665,6 +671,12 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         },
         Job::RemoteActorResolve { .. } => RetryConfig {
             // ActorMetadataResolve と同様の軽量ベストエフォート解決。
+            max_attempts: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
+        },
+        Job::DmRecipientResolve { .. } => RetryConfig {
+            // RemoteActorResolve と同様の軽量ベストエフォート解決。
             max_attempts: 3,
             base_delay_ms: 1000,
             max_delay_ms: 30_000,

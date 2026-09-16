@@ -14,9 +14,12 @@ struct ReactionTargets {
 
 /// リアクション配送先を解決する。
 ///
-/// 対象ポストが`visibility='direct'`（DM）の場合、宛先（`post_recipients`）のFediアクター
-/// のinboxのみへ配送し、`to`もその宛先のap_uriのみに絞る（DMの存在自体が第三者へ漏れる
-/// ことを防ぐため、通常投稿と同じPublic+フォロワー全体配送は絶対に使わない）。
+/// 対象ポストが`visibility='direct'`（DM）の場合、そのメッセージの「会話参加者」
+/// （投稿者本人 + そのメッセージの宛先`post_recipients`、reactor自身は除く）のうち
+/// Fediアクターのinboxのみへ配送し、`to`もその参加者のap_uriのみに絞る（DMの存在自体が
+/// 第三者へ漏れることを防ぐため、通常投稿と同じPublic+フォロワー全体配送は絶対に使わない）。
+/// 「宛先(`post_recipients`)」だけを見ると、自分宛に届いたメッセージへリアクションした際に
+/// 本来の配送先である投稿者（相手）が漏れてしまう（宛先には自分自身しか含まれないため）。
 ///
 /// それ以外（通常投稿）の配送先は `reactor_actor_id` の Fedi フォロワー全員に加え、対象
 /// ポストを巡る会話の参加者（対象ポストの著者とそのフォロワー、対象ポストへの子ポスト＝
@@ -43,23 +46,30 @@ async fn resolve_reaction_targets(
     let visibility: String = row.try_get("visibility").unwrap_or_default();
 
     if visibility == "direct" {
-        let recipient_rows = sqlx::query(
-            "SELECT a.ap_uri, a.ap_inbox_url
-             FROM post_recipients pr JOIN actors a ON a.id = pr.actor_id
-             WHERE pr.post_id = $1 AND a.actor_type IN ('fedi', 'remote_seiran') AND a.ap_uri IS NOT NULL AND a.ap_inbox_url IS NOT NULL",
+        let participant_rows = sqlx::query(
+            "SELECT DISTINCT a.ap_uri, a.ap_inbox_url
+             FROM (
+                 SELECT p.actor_id AS aid FROM posts p WHERE p.id = $1
+                 UNION
+                 SELECT pr.actor_id AS aid FROM post_recipients pr WHERE pr.post_id = $1
+             ) participants
+             JOIN actors a ON a.id = participants.aid
+             WHERE participants.aid != $2
+               AND a.actor_type IN ('fedi', 'remote_seiran') AND a.ap_uri IS NOT NULL AND a.ap_inbox_url IS NOT NULL",
         )
         .bind(post_id)
+        .bind(reactor_actor_id)
         .fetch_all(db)
         .await
-        .map_err(|e| ApError::Other(format!("DM宛先取得エラー: {}", e)))?;
-        if recipient_rows.is_empty() {
+        .map_err(|e| ApError::Other(format!("DM会話参加者取得エラー: {}", e)))?;
+        if participant_rows.is_empty() {
             return Ok(None);
         }
-        let to: Vec<String> = recipient_rows
+        let to: Vec<String> = participant_rows
             .iter()
             .filter_map(|r| r.try_get::<String, _>("ap_uri").ok())
             .collect();
-        let inboxes: Vec<String> = recipient_rows
+        let inboxes: Vec<String> = participant_rows
             .iter()
             .filter_map(|r| r.try_get::<String, _>("ap_inbox_url").ok())
             .collect();

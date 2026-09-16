@@ -59,23 +59,30 @@ fn extract_domain(uri: &str) -> String {
 }
 
 pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
+    resolve_and_upsert(&uri, &ctx).await?;
+    Ok(())
+}
+
+/// URIからアクターを解決する（DB既存ならそのactor_idを返す、無ければfetchして
+/// upsertした新しいactor_idを返す）。自ドメインURI・inbox欠落等、解決できない/
+/// すべきでない場合は`Ok(None)`。`jobs::dm_recipient_resolve`からも共有で使う。
+pub(crate) async fn resolve_and_upsert(uri: &str, ctx: &JobContext) -> Result<Option<i64>, String> {
     let Some(pool) = &ctx.db_pool else {
         tracing::warn!(
             "[RemoteActorResolve] DB pool 未設定のためスキップ (uri={})",
             uri
         );
-        return Ok(());
+        return Ok(None);
     };
 
     let actor_repo = PgActorRepository::new(pool.clone());
-    if actor_repo
-        .find_by_ap_uri(&uri)
+    if let Some(existing) = actor_repo
+        .find_by_ap_uri(uri)
         .await
         .map_err(|e| format!("DB検索失敗: {}", e))?
-        .is_some()
     {
         // 既に他経路（フォロー等）で解決済み。
-        return Ok(());
+        return Ok(Some(existing.id));
     }
 
     // uri が自ドメインを指す場合、リモート未知アクターではなくローカルユーザーの
@@ -87,13 +94,13 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
         .map(|i| i.local_domain.as_str())
         .or_else(|| ctx.delivery.as_ref().map(|d| d.local_domain.as_str()));
     if let Some(local_domain) = local_domain {
-        if crate::ap::extract_local_username(&uri, local_domain).is_some() {
+        if crate::ap::extract_local_username(uri, local_domain).is_some() {
             tracing::debug!("[RemoteActorResolve] 自ドメインURIのためスキップ: {}", uri);
-            return Ok(());
+            return Ok(None);
         }
     }
 
-    let domain = extract_domain(&uri);
+    let domain = extract_domain(uri);
     let sem = ctx.get_domain_semaphore(&domain).await;
     let _permit = sem
         .acquire_owned()
@@ -105,19 +112,19 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
     let actor = match ctx.system_signing_key() {
         Some((key_id, pem)) => ctx
             .ap_client
-            .fetch_actor_signed(&uri, (&key_id, &pem))
+            .fetch_actor_signed(uri, (&key_id, &pem))
             .await
             .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
         None => ctx
             .ap_client
-            .fetch_actor(&uri)
+            .fetch_actor(uri)
             .await
             .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
     };
 
     let Some(inbox) = actor.inbox.clone() else {
         tracing::info!("[RemoteActorResolve] inbox が無いためスキップ: {}", uri);
-        return Ok(());
+        return Ok(None);
     };
 
     let avatar_url = actor.avatar_url();
@@ -135,10 +142,10 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
     let profile_fields = actor.profile_fields_json();
 
     let new_id = generate_snowflake_id(chrono::Utc::now());
-    actor_repo
+    let actor_id = actor_repo
         .upsert_remote_fedi(
             new_id,
-            &uri,
+            uri,
             &inbox,
             &username,
             &domain,
@@ -158,5 +165,5 @@ pub async fn handle(uri: String, ctx: Arc<JobContext>) -> Result<(), String> {
         uri,
         username
     );
-    Ok(())
+    Ok(Some(actor_id))
 }

@@ -27,6 +27,7 @@ pub mod poll_fetch;
 pub mod post_merge_cleanup;
 pub mod proxy_follow_sync;
 pub mod relay_follow_sync;
+pub mod dm_recipient_resolve;
 pub mod remote_actor_resolve;
 pub mod remote_featured_sync;
 pub mod remote_profile_refresh;
