@@ -928,8 +928,14 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 - **Fedi側**: AP `Block`アクティビティを受信（`inbound_activity_process::handle_block`）した時点で`blocks`へ`(blocker_actor_id=相手, blocked_actor_id=ローカル)`をINSERTする。`Undo(Block)`受信時（`handle_undo`）にDELETEする。
 - **Bsky側**: Bluesky公式APIには「自分をブロックしている人一覧」を返すエンドポイントが無い（プライバシー保護のため意図的に非公開）ため、ポーリングでは検知できない。代わりに`seiran-atp-repo::bsky_block_watch`が、`app.bsky.graph.block`のみを対象とした**無絞り込み**Jetstream接続（`wantedDids`を使わない、実測で全世界約2件/秒程度）を張り、`record.subject`がローカルユーザーの`at_did`と一致するイベントだけを拾って`blocks`へ記録する。削除（Undo相当）はJetstreamの`delete`イベントに`subject`が同梱されない仕様のため、create時に`commit.rkey`を`blocks.atp_rkey`へ保存しておき、`(blocker_actor_id, atp_rkey)`の組で逆引きして削除する（`BlockRepository::delete_by_blocker_and_rkey`）。post/like用の既存Jetstream接続（`wantedDids`で絞り込み）とは独立したリーダー選出（`jetstream_leader::JetstreamLeaderElector`のリースキーをパラメータ化、`bsky_block_watch`専用キーを使用）で動く別接続。
 
+### リアクション表示でのブロック・ミュート除外
+自分がミュート・ブロックしている相手による絵文字リアクションは、`actor_is_hidden_for_viewer`（本節冒頭参照）を使い次の2箇所で除外する（AriaのようなMisskey互換クライアントも同じREST API経由で見るため、フロントエンドでのフィルタではなくAPIレスポンスの時点で除外する）。
+- ノート取得時のリアクション集計（`fetch_reactions_map`、絵文字ごとの件数）
+- 「誰が付けたか」一覧（カスタムAPI `GET /api/notes/:id/reactions/:content/actors`、Misskey互換 `POST /api/notes/reactions`）
+
+**WebSocketの`noteUpdated`（`streaming::broadcast_reaction_update`/`broadcast_dm_reaction_update`）のリアルタイム集計にはこのフィルタを適用しない**（配信先全員へ同一payloadを一斉配信する設計のため、閲覧者ごとに正確な件数を都度再計算すると負荷が増える。マイケルの判断で簡略化を許容、2026-09-17）。そのため、ミュート・ブロックした相手のリアクションがまだ画面上に残っている状態で新たなリアクションが付くと、REST APIで取得し直すまで件数が一時的にずれることがある。
+
 ### スコープ外
-- **リアクション一覧表示でのブロック/ミュート除外**: 未実装（`fetch_reactions_map`は対象外）。
 - **公開リストタイムライン（`list.rs::timeline`）でのフィルタリング**: 未実装。リストタイムラインは「閲覧者情報を持たない（誰が見ても同じ内容）」設計のため、viewer概念自体が無く、フィルタ追加には閲覧制御全体の見直しが必要。
 
 ## 11. 未実装・スコープ外の機能
@@ -948,7 +954,7 @@ Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration
 - **トレンド集計**: 完全に未着手（テーブル・エンドポイントとも存在しない）。
 - **ドメイン単位のレート制限**（`inbound_activity_process` 向け）: 未実装。現状 `actor_history_sync` キューのみドメイン単位の同時実行制限を持つ。
 - **リモートFedi/Bskyユーザー自身の公開リストのオンデマンド取得**: 未実装（`public_lists` はローカルユーザーのみ対象）。
-- **ブロック・ミュート関連の未実装項目**: 10節「スコープ外」参照（リアクション一覧でのブロック/ミュート除外、公開リストタイムラインでのフィルタリング）。
+- **ブロック・ミュート関連の未実装項目**: 10節「スコープ外」参照（公開リストタイムラインでのフィルタリング）。
 # ActivityPubアンケート回答
 
 リモートの `Question` へのローカル回答は、選択肢ごとに

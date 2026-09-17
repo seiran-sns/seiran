@@ -202,7 +202,7 @@
 - [ ] **`inbound_activity_process` のドメイン単位レート制限**
 - [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ表示）
 - [ ] **ユーザー設定に「Bsky DM受信許可」項目を追加** — 現状 `chat.bsky.actor.declaration` の `allowIncoming` は登録時・バックフィルとも `"all"` 固定でコミットする（`docs/protocols.md` 9節）。ユーザーが `"all"`/`"following"`/`"none"` を選べる設定画面UIとAPIを追加する
-- [ ] **リアクション一覧表示でのブロック/ミュート除外** — `fetch_reactions_map` は対象外（`docs/protocols.md` 10節）
+- [x] **リアクション表示でのブロック/ミュート除外** — ノート取得時のリアクション集計（`fetch_reactions_map`）と「誰が付けたか」一覧（カスタムAPI・Misskey互換`POST /api/notes/reactions`）から除外。WebSocketの`noteUpdated`リアルタイム更新は簡略化のため対象外（`docs/protocols.md` 10節）
 - [ ] **公開リストタイムラインのブロック/ミュートフィルタリング** — `list.rs::timeline` は「閲覧者情報を持たない」設計のため未対応。対応するには閲覧制御全体の見直しが必要（`docs/protocols.md` 10節）
 - [x] **AT Protocol PDS 読み取り・同期系エンドポイント拡充** — `com.atproto.repo.listRecords`/`describeRepo`、`com.atproto.sync.listRepos`/`getLatestCommit`/`listBlobs`。詳細: `docs/protocols.md` 3節
 - [x] **AT Protocol PDS 書き込み系エンドポイント** — `com.atproto.repo.createRecord`/`putRecord`/`deleteRecord`/`applyWrites`（`app.bsky.feed.post`以外の任意コレクション。`createSession`のaccessJwtで認証）。詳細: `docs/protocols.md` 3節

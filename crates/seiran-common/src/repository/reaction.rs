@@ -116,10 +116,13 @@ pub trait ReactionRepository: Send + Sync {
 
     /// 指定 (post_id, content) にリアクションを付けたアクターを新しい順に返す
     /// （リアクションチップのホバーポップオーバー「誰が付けたか」一覧用）。
+    /// `viewer_actor_id` がミュート・ブロックしているアクターは除外する
+    /// （`actor_is_hidden_for_viewer`）。
     async fn actors_for_reaction(
         &self,
         post_id: i64,
         content: &str,
+        viewer_actor_id: Option<i64>,
         limit: i64,
     ) -> Result<Vec<ReactorInfo>, sqlx::Error>;
 
@@ -294,6 +297,7 @@ impl ReactionRepository for PgReactionRepository {
         &self,
         post_id: i64,
         content: &str,
+        viewer_actor_id: Option<i64>,
         limit: i64,
     ) -> Result<Vec<ReactorInfo>, sqlx::Error> {
         sqlx::query_as::<_, ReactorInfo>(
@@ -305,12 +309,14 @@ impl ReactionRepository for PgReactionRepository {
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE r.post_id = $1 AND r.content = $2 AND a.withdrawn_at IS NULL AND a.suspended_at IS NULL
+               AND ($4::bigint IS NULL OR NOT actor_is_hidden_for_viewer($4, a.id))
              ORDER BY r.created_at DESC
              LIMIT $3",
         )
         .bind(post_id)
         .bind(content)
         .bind(limit)
+        .bind(viewer_actor_id)
         .fetch_all(&self.pool)
         .await
     }

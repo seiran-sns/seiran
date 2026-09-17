@@ -881,7 +881,7 @@ pub async fn notes_reactions(
 
     let actors = state
         .reactions
-        .actors_for_reaction(note_id, &reaction_type, limit)
+        .actors_for_reaction(note_id, &reaction_type, my_actor_id, limit)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 

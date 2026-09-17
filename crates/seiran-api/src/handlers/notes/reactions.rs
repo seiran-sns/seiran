@@ -33,6 +33,7 @@ const REACTION_ACTORS_LIMIT: i64 = 50;
 /// GET /api/notes/:id/reactions/:content/actors
 /// 指定リアクション（絵文字/`:shortcode:`）を付けたアクター一覧を返す（ホバーポップオーバー用）。
 /// 投稿の可視性チェックは `get_note` と同じ `find_by_id_for_viewer` を使う。
+/// 閲覧者がミュート・ブロックしているアクターは一覧から除外する。
 pub async fn reaction_actors(
     Path((note_id_str, content)): Path<(String, String)>,
     MaybeAuthedUser(user): MaybeAuthedUser,
@@ -57,7 +58,7 @@ pub async fn reaction_actors(
 
     let actors = state
         .reactions
-        .actors_for_reaction(note_id, &content, REACTION_ACTORS_LIMIT)
+        .actors_for_reaction(note_id, &content, my_actor_id, REACTION_ACTORS_LIMIT)
         .await
         .unwrap_or_default();
 

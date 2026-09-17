@@ -640,6 +640,10 @@ async fn is_list_member(state: &AppState, list_uri: &str, viewer_did: &str) -> b
 
 /// post_id リストに対するリアクション集計を一括取得する（絵文字ごとの件数、多い順）(#22)。
 /// `my_actor_id` を渡すと各エントリに `reacted_by_me`（自分がそのリアクションを付け済みか）を設定する。
+/// `my_actor_id` がミュート・ブロックしている相手のリアクションは集計（件数）に含めない
+/// （`actor_is_hidden_for_viewer`、AriaのようなMisskey互換クライアント含め表示されないようAPI
+/// レスポンス時点で除外する）。WebSocketの`noteUpdated`（`streaming::broadcast_reaction_update`）
+/// はリアルタイム更新のcountに同様のフィルタをかけない簡略仕様のため、ここでの件数とはずれ得る。
 pub async fn fetch_reactions_map(
     db: &sqlx::PgPool,
     post_ids: &[i64],
@@ -652,10 +656,12 @@ pub async fn fetch_reactions_map(
         "SELECT post_id, content, COUNT(*) AS cnt, MAX(emoji_url) AS emoji_url
          FROM reactions
          WHERE post_id = ANY($1)
+           AND ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, actor_id))
          GROUP BY post_id, content
          ORDER BY post_id, cnt DESC",
     )
     .bind(post_ids)
+    .bind(my_actor_id)
     .fetch_all(db)
     .await
     .unwrap_or_default();
