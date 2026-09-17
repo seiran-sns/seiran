@@ -57,6 +57,7 @@
     "hasQuote": "❝ 有引用內容",
     "showContent": "顯示",
     "hideContent": "隱藏",
+    "showAllContent": "顯示全部",
     "votes": "{{count}} 票",
     "pollRemainingMinutes": "剩餘{{count}}分鐘",
     "pollRemainingSeconds": "剩餘{{count}}秒",

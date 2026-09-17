@@ -21,6 +21,9 @@
   --shadow-card-hover: 0 2px 4px rgba(15, 23, 42, 0.07), 0 8px 20px rgba(15, 23, 42, 0.1);
   --card-bg: transparent;
   --card-bg-hover: var(--bg-elev);
+  /* card-bgがtransparentのため実際に透けて見える背景色（ページ背景と同じ）。
+   * card-bgをそのままグラデーション終端等に使うと透明同士になり効果が消えるため。 */
+  --card-bg-opaque: var(--bg);
   color-scheme: light;
 }
 
@@ -49,6 +52,7 @@
    * カード自体の背景を一段明るくして区別する（マイケル指摘）。 */
   --card-bg: var(--bg-elev);
   --card-bg-hover: var(--bg-elev-2);
+  --card-bg-opaque: var(--card-bg);
   color-scheme: dark;
 }
 

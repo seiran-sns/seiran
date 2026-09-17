@@ -57,6 +57,7 @@
     "hasQuote": "❝ 引用あり",
     "showContent": "表示",
     "hideContent": "隠す",
+    "showAllContent": "全部表示",
     "votes": "{{count}}票",
     "pollRemainingMinutes": "残り{{count}}分",
     "pollRemainingSeconds": "残り{{count}}秒",

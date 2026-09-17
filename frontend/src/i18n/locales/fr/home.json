@@ -57,6 +57,7 @@
     "hasQuote": "❝ A un devis",
     "showContent": "Montrer",
     "hideContent": "Cacher",
+    "showAllContent": "Tout afficher",
     "votes": "{{count}} votes",
     "pollRemainingMinutes": "{{count}} min restantes",
     "pollRemainingSeconds": "{{count}} s restantes",

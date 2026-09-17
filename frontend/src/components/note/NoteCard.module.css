@@ -447,6 +447,48 @@
 .contentWarningToggle:hover {
   background: var(--accent-deep-hover);
 }
+/* 縦に長すぎる本文の折りたたみ（本文・添付・リンクカード・投票・引用元をまとめて
+ * 1ブロックとしてクリップする）。基準の高さは固定pxではなく、このブロック自身の
+ * 実測幅（NoteCard.tsx側でResizeObserverが計測）と同じ、つまり正方形になるまで。 */
+.contentBodyOuter {
+  position: relative;
+}
+.contentBodyCollapsed {
+  /* 幅に対して縦62.5%までを許す。 */
+  aspect-ratio: 8 / 5;
+  overflow: hidden;
+}
+.contentBodyCollapsed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 72px;
+  /* .card自体の背景（--card-bg）はライトテーマではtransparentなので、
+   * グラデーション終端にそのまま使うと透明→透明になり効果が消える。
+   * 実際に描画される不透明な背景色（--card-bg-opaque）を使う。 */
+  background: linear-gradient(to bottom, transparent, var(--card-bg-opaque));
+  pointer-events: none;
+}
+.showAllButton {
+  display: block;
+  width: calc(100% - 100px);
+  margin: 8px 50px 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 8px 12px;
+  text-align: center;
+  cursor: pointer;
+}
+.showAllButton:hover {
+  background: var(--accent-hover);
+}
+
 .poll { margin: 8px 0 0 50px; display: grid; gap: 5px; }
 .pollOption {
   display: flex;

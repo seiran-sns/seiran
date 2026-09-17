@@ -57,6 +57,7 @@
     "hasQuote": "❝ Hat Zitat",
     "showContent": "Zeigen",
     "hideContent": "Verstecken",
+    "showAllContent": "Alles anzeigen",
     "votes": "{{count}} Stimmen",
     "pollRemainingMinutes": "noch {{count}} Min.",
     "pollRemainingSeconds": "noch {{count}} Sek.",

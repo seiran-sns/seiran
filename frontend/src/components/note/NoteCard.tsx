@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, Note } from "../../api/client";
@@ -224,6 +224,24 @@ function PostContent({
   };
 
   const [showContent, setShowContent] = useState(!note.contentWarning || forceOpenCw);
+  // 縦に長すぎる本文の折りたたみ（#未採番）。本文・添付・リンクカード・投票・引用元を
+  // まとめた1ブロックの実測サイズをResizeObserverで見て、「幅の62.5%を超える高さ」なら
+  // 折りたたみ、「全部表示」ボタンを出す（CSS側のaspect-ratio: 8/5と合わせる）。
+  // overflow:hiddenでクリップした状態のouter要素自身のサイズはクリップにより高さが
+  // 固定され変化を検知できないため、クリップされないinner要素側を監視する。
+  const contentBodyRef = useRef<HTMLDivElement>(null);
+  const [contentCollapsed, setContentCollapsed] = useState(true);
+  const [contentOverflowing, setContentOverflowing] = useState(false);
+  useEffect(() => {
+    const el = contentBodyRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0].contentRect;
+      setContentOverflowing(rect.height > rect.width * 0.625);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [showContent]);
   // pending参照が「取り込む」で解決された場合のローカル反映（#234）。
   const [resolvedReplyId, setResolvedReplyId] = useState<string | null>(null);
   const [resolvedQuote, setResolvedQuote] = useState<Note | null>(null);
@@ -534,121 +552,137 @@ function PostContent({
             </div>
           )}
           {showContent && (
-            <>
-              <p className={styles.body}>
-                {note.contentHtml ? (
-                  <RichHtml html={note.contentHtml} emojis={note.emojis} />
-                ) : (
-                  <RichText text={note.text} emojis={note.emojis} />
+            <div
+              className={`${styles.contentBodyOuter} ${
+                contentCollapsed && contentOverflowing ? styles.contentBodyCollapsed : ""
+              }`}
+            >
+              <div ref={contentBodyRef}>
+                <p className={styles.body}>
+                  {note.contentHtml ? (
+                    <RichHtml html={note.contentHtml} emojis={note.emojis} />
+                  ) : (
+                    <RichText text={note.text} emojis={note.emojis} />
+                  )}
+                </p>
+                <NoteAttachments attachments={note.attachments} />
+                {note.linkCards.map((card) => (
+                  <LinkCard key={card.url} card={card} />
+                ))}
+                {poll && (
+                  <div className={styles.poll}>
+                    {pollResults || pollVoted || pollClosed
+                      ? poll.options.map((option, index) => (
+                          <div
+                            className={`${styles.pollOption} ${sharedPollState?.votedByMe.includes(index) ? styles.pollOptionVoted : ""}`}
+                            key={option.name}
+                          >
+                            <span>
+                              {sharedPollState?.votedByMe.includes(index) && "✓ "}
+                              {option.name}
+                            </span>
+                            <span>
+                              {t("home:noteCard.votes", { count: option.votes })}
+                            </span>
+                          </div>
+                        ))
+                      : poll.options.map((option, index) =>
+                          poll.multiple ? (
+                            <label className={styles.pollChoice} key={option.name}>
+                              <input
+                                type="checkbox"
+                                checked={pollSelection.includes(index)}
+                                disabled={pollPending}
+                                onChange={(e) =>
+                                  setPollSelection((selected) =>
+                                    e.target.checked
+                                      ? [...selected, index]
+                                      : selected.filter((i) => i !== index),
+                                  )
+                                }
+                              />
+                              <span>{option.name}</span>
+                            </label>
+                          ) : (
+                            <button
+                              className={styles.pollChoice}
+                              key={option.name}
+                              disabled={pollPending}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void submitPollVote([index]);
+                              }}
+                            >
+                              {option.name}
+                            </button>
+                          ),
+                        )}
+                    {pollClosed && (
+                      <div className={styles.pollControls}>
+                        <span className={styles.pollClosedLabel}>
+                          {t("home:noteCard.pollClosed")}
+                        </span>
+                      </div>
+                    )}
+                    {!pollVoted && !pollClosed && (
+                      <div className={styles.pollControls}>
+                        {poll.multiple && !pollResults && (
+                          <button
+                            disabled={pollPending || pollSelection.length === 0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void submitPollVote(pollSelection);
+                            }}
+                          >
+                            {t("home:noteCard.pollVoteButton")}
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPollResults((shown) => !shown);
+                          }}
+                        >
+                          {pollResults
+                            ? t("home:noteCard.pollBackToOptions")
+                            : t("home:noteCard.pollShowResults")}
+                        </button>
+                        {poll.endTime && (
+                          <PollCountdown endTime={poll.endTime} className={styles.pollRemaining} />
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
-              </p>
-              <NoteAttachments attachments={note.attachments} />
-              {note.linkCards.map((card) => (
-                <LinkCard key={card.url} card={card} />
-              ))}
-            </>
+                {(note.quote || resolvedQuote) && (
+                  <QuoteCard note={resolvedQuote ?? note.quote!} />
+                )}
+                {!note.quote && !resolvedQuote && note.quoteStatus && (
+                  <div className={styles.pendingQuoteWrap}>
+                    <PendingReferenceIndicator
+                      noteId={note.id}
+                      kind="quote"
+                      status={note.quoteStatus}
+                      onResolved={handleQuoteResolved}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {showContent && contentCollapsed && contentOverflowing && (
+            <button
+              type="button"
+              className={styles.showAllButton}
+              onClick={(e) => {
+                e.stopPropagation();
+                setContentCollapsed(false);
+              }}
+            >
+              {t("home:noteCard.showAllContent")}
+            </button>
           )}
         </>
-      )}
-
-      {!redactSuspendedAuthor && showContent && poll && (
-        <div className={styles.poll}>
-          {pollResults || pollVoted || pollClosed
-            ? poll.options.map((option, index) => (
-                <div
-                  className={`${styles.pollOption} ${sharedPollState?.votedByMe.includes(index) ? styles.pollOptionVoted : ""}`}
-                  key={option.name}
-                >
-                  <span>
-                    {sharedPollState?.votedByMe.includes(index) && "✓ "}
-                    {option.name}
-                  </span>
-                  <span>
-                    {t("home:noteCard.votes", { count: option.votes })}
-                  </span>
-                </div>
-              ))
-            : poll.options.map((option, index) =>
-                poll.multiple ? (
-                  <label className={styles.pollChoice} key={option.name}>
-                    <input
-                      type="checkbox"
-                      checked={pollSelection.includes(index)}
-                      disabled={pollPending}
-                      onChange={(e) =>
-                        setPollSelection((selected) =>
-                          e.target.checked
-                            ? [...selected, index]
-                            : selected.filter((i) => i !== index),
-                        )
-                      }
-                    />
-                    <span>{option.name}</span>
-                  </label>
-                ) : (
-                  <button
-                    className={styles.pollChoice}
-                    key={option.name}
-                    disabled={pollPending}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void submitPollVote([index]);
-                    }}
-                  >
-                    {option.name}
-                  </button>
-                ),
-              )}
-          {pollClosed && (
-            <div className={styles.pollControls}>
-              <span className={styles.pollClosedLabel}>
-                {t("home:noteCard.pollClosed")}
-              </span>
-            </div>
-          )}
-          {!pollVoted && !pollClosed && (
-            <div className={styles.pollControls}>
-              {poll.multiple && !pollResults && (
-                <button
-                  disabled={pollPending || pollSelection.length === 0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void submitPollVote(pollSelection);
-                  }}
-                >
-                  {t("home:noteCard.pollVoteButton")}
-                </button>
-              )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPollResults((shown) => !shown);
-                }}
-              >
-                {pollResults
-                  ? t("home:noteCard.pollBackToOptions")
-                  : t("home:noteCard.pollShowResults")}
-              </button>
-              {poll.endTime && (
-                <PollCountdown endTime={poll.endTime} className={styles.pollRemaining} />
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {!redactSuspendedAuthor && showContent && (note.quote || resolvedQuote) && (
-        <QuoteCard note={resolvedQuote ?? note.quote!} />
-      )}
-      {!redactSuspendedAuthor && showContent && !note.quote && !resolvedQuote && note.quoteStatus && (
-        <div className={styles.pendingQuoteWrap}>
-          <PendingReferenceIndicator
-            noteId={note.id}
-            kind="quote"
-            status={note.quoteStatus}
-            onResolved={handleQuoteResolved}
-          />
-        </div>
       )}
 
       {note.parentOriginalId && (

@@ -57,6 +57,7 @@
     "hasQuote": "❝ 含有引用内容",
     "showContent": "显示",
     "hideContent": "隐藏",
+    "showAllContent": "显示全部",
     "votes": "{{count}} 票",
     "pollRemainingMinutes": "剩余{{count}}分钟",
     "pollRemainingSeconds": "剩余{{count}}秒",

@@ -57,6 +57,7 @@
     "hasQuote": "❝ 견적 있음",
     "showContent": "보여주다",
     "hideContent": "숨다",
+    "showAllContent": "전체 보기",
     "votes": "{{count}} 투표",
     "pollRemainingMinutes": "{{count}}분 남음",
     "pollRemainingSeconds": "{{count}}초 남음",

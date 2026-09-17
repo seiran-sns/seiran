@@ -57,6 +57,7 @@
     "hasQuote": "❝ Has quote",
     "showContent": "Show",
     "hideContent": "Hide",
+    "showAllContent": "Show all",
     "votes": "{{count}} votes",
     "pollRemainingMinutes": "{{count}} min left",
     "pollRemainingSeconds": "{{count}} sec left",

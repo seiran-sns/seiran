@@ -57,6 +57,7 @@
     "hasQuote": "❝ Tiene cotización",
     "showContent": "Espectáculo",
     "hideContent": "Esconder",
+    "showAllContent": "Mostrar todo",
     "votes": "{{count}} votos",
     "pollRemainingMinutes": "quedan {{count}} min",
     "pollRemainingSeconds": "quedan {{count}} s",
