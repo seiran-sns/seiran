@@ -146,9 +146,17 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
           body: unknown;
         };
         if (innerType !== "note") return;
-        const sub = channelSubs.current.get(id);
-        if (!sub) return;
-        void resolveStreamNote(innerBody).then((n) => sub.onNote(n));
+        if (!channelSubs.current.has(id)) return;
+        // resolveStreamNote は実際にAPIへ問い合わせる非同期処理のため、この待機中に
+        // タブ切替等で該当チャンネルが disconnect される可能性がある。ここで sub を
+        // 先に確定させてしまうと、await後に古い（すでに購読解除された）タブ用の
+        // onNote をそのまま呼んでしまい、切替先のタイムラインへ誤って挿入されてしまう
+        // （実機確認: Home→Local切替直後、Local先頭にHomeの投稿が挿入される不具合）。
+        // 必ず await の後に改めて channelSubs.current を引き直し、購読が生きている
+        // 場合だけ配る。
+        void resolveStreamNote(innerBody).then((n) => {
+          channelSubs.current.get(id)?.onNote(n);
+        });
       } else if (type === "noteUpdated") {
         const update = body as ReactionUpdate;
         reactionListeners.current.get(update.postId)?.forEach((cb) => cb(update));
