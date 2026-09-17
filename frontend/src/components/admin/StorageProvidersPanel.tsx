@@ -24,6 +24,9 @@ export default function StorageProvidersPanel() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ ...EMPTY });
   const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ ...EMPTY });
+  const [saving, setSaving] = useState(false);
 
   function load() {
     setLoading(true);
@@ -47,6 +50,52 @@ export default function StorageProvidersPanel() {
       setError(getErrorMessage(e));
     } finally {
       setBusyId(null);
+    }
+  }
+
+  function startEdit(p: StorageProvider) {
+    setError("");
+    setEditingId(p.id);
+    setEditForm({
+      name: p.name,
+      endpoint: p.endpoint,
+      bucket: p.bucket,
+      region: p.region,
+      access_key: p.access_key,
+      secret_key: "",
+      public_url: p.public_url,
+      capacity_mb: p.capacity_mb != null ? String(p.capacity_mb) : "",
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  async function saveEdit(e: FormEvent, p: StorageProvider) {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const patch: Record<string, unknown> = {
+        name: editForm.name,
+        endpoint: editForm.endpoint,
+        bucket: editForm.bucket,
+        region: editForm.region || "auto",
+        access_key: editForm.access_key,
+        public_url: editForm.public_url,
+        capacity_mb: editForm.capacity_mb ? Number(editForm.capacity_mb) : null,
+      };
+      if (editForm.secret_key) {
+        patch.secret_key = editForm.secret_key;
+      }
+      await api.admin.updateStorageProvider(p.id, patch);
+      setEditingId(null);
+      load();
+    } catch (e) {
+      setError(getErrorMessage(e));
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -92,6 +141,9 @@ export default function StorageProvidersPanel() {
   const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const setEdit = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setEditForm((f) => ({ ...f, [k]: e.target.value }));
+
   if (loading) return <p className={panel.message}>{t("common:loading")}</p>;
 
   return (
@@ -102,23 +154,83 @@ export default function StorageProvidersPanel() {
       <div className={styles.card}>
         {providers.length === 0 && <p className={panel.message}>{t("admin:storageProvidersPanel.emptyMessage")}</p>}
         {providers.map((p) => (
-          <div key={p.id} className={styles.row}>
-            <div className={styles.grow}>
-              <div className={styles.primaryText}>{p.name}</div>
-              <div className={styles.subText}>
-                {p.endpoint} / {p.bucket}
-                {p.capacity_mb != null && t("admin:storageProvidersPanel.capacitySuffix", { capacity: p.capacity_mb })}
+          <div key={p.id}>
+            <div className={styles.row}>
+              <div className={styles.grow}>
+                <div className={styles.primaryText}>{p.name}</div>
+                <div className={styles.subText}>
+                  {p.endpoint} / {p.bucket}
+                  {p.capacity_mb != null && t("admin:storageProvidersPanel.capacitySuffix", { capacity: p.capacity_mb })}
+                </div>
               </div>
+              <span className={`${styles.badge} ${p.is_active ? styles.badgeAdmin : ""}`}>
+                {p.is_active ? t("admin:storageProvidersPanel.active") : t("admin:storageProvidersPanel.inactive")}
+              </span>
+              <button
+                className={styles.btnGhost}
+                disabled={busyId === p.id}
+                onClick={() => (editingId === p.id ? cancelEdit() : startEdit(p))}
+              >
+                {editingId === p.id ? t("common:cancel") : t("admin:storageProvidersPanel.editButton")}
+              </button>
+              <button className={styles.btnGhost} disabled={busyId === p.id} onClick={() => toggleActive(p)}>
+                {p.is_active ? t("admin:storageProvidersPanel.deactivateButton") : t("admin:storageProvidersPanel.activateButton")}
+              </button>
+              <button className={styles.btnDanger} disabled={busyId === p.id} onClick={() => remove(p)}>
+                {t("common:delete")}
+              </button>
             </div>
-            <span className={`${styles.badge} ${p.is_active ? styles.badgeAdmin : ""}`}>
-              {p.is_active ? t("admin:storageProvidersPanel.active") : t("admin:storageProvidersPanel.inactive")}
-            </span>
-            <button className={styles.btnGhost} disabled={busyId === p.id} onClick={() => toggleActive(p)}>
-              {p.is_active ? t("admin:storageProvidersPanel.deactivateButton") : t("admin:storageProvidersPanel.activateButton")}
-            </button>
-            <button className={styles.btnDanger} disabled={busyId === p.id} onClick={() => remove(p)}>
-              {t("common:delete")}
-            </button>
+
+            {editingId === p.id && (
+              <form className={styles.card} onSubmit={(e) => saveEdit(e, p)}>
+                <label className={styles.label}>
+                  {t("admin:storageProvidersPanel.nameLabel")}
+                  <input className={styles.input} value={editForm.name} onChange={setEdit("name")} required />
+                </label>
+                <label className={styles.label}>
+                  {t("admin:storageProvidersPanel.endpointLabel")}
+                  <input className={styles.input} value={editForm.endpoint} onChange={setEdit("endpoint")} required />
+                </label>
+                <label className={styles.label}>
+                  {t("admin:storageProvidersPanel.bucketLabel")}
+                  <input className={styles.input} value={editForm.bucket} onChange={setEdit("bucket")} required />
+                </label>
+                <label className={styles.label}>
+                  {t("admin:storageProvidersPanel.regionLabel")}
+                  <input className={styles.input} value={editForm.region} onChange={setEdit("region")} placeholder="auto" />
+                </label>
+                <label className={styles.label}>
+                  {t("admin:storageProvidersPanel.accessKeyLabel")}
+                  <input className={styles.input} value={editForm.access_key} onChange={setEdit("access_key")} required />
+                </label>
+                <label className={styles.label}>
+                  {t("admin:storageProvidersPanel.secretKeyLabel")}
+                  <input
+                    className={styles.input}
+                    type="password"
+                    value={editForm.secret_key}
+                    onChange={setEdit("secret_key")}
+                    placeholder={t("admin:storageProvidersPanel.secretKeyKeepPlaceholder")}
+                  />
+                </label>
+                <label className={styles.label}>
+                  {t("admin:storageProvidersPanel.publicUrlLabel")}
+                  <input className={styles.input} value={editForm.public_url} onChange={setEdit("public_url")} required />
+                </label>
+                <label className={styles.label}>
+                  {t("admin:storageProvidersPanel.capacityLabel")}
+                  <input className={styles.input} type="number" value={editForm.capacity_mb} onChange={setEdit("capacity_mb")} />
+                </label>
+                <div className={styles.actions}>
+                  <button className={styles.btn} type="submit" disabled={saving}>
+                    {saving ? t("admin:storageProvidersPanel.saving") : t("common:save")}
+                  </button>
+                  <button className={styles.btnGhost} type="button" onClick={cancelEdit}>
+                    {t("common:cancel")}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         ))}
       </div>

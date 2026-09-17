@@ -147,6 +147,7 @@
     "inactive": "無効",
     "activateButton": "有効化",
     "deactivateButton": "無効化",
+    "editButton": "編集",
     "deleteConfirm": "ストレージ「{{name}}」を削除しますか？",
     "nameLabel": "名前",
     "endpointLabel": "エンドポイント",
@@ -154,9 +155,11 @@
     "regionLabel": "リージョン",
     "accessKeyLabel": "アクセスキー",
     "secretKeyLabel": "シークレットキー",
+    "secretKeyKeepPlaceholder": "変更しない場合は空欄のまま",
     "publicUrlLabel": "公開 URL（CDN）",
     "capacityLabel": "容量上限（MB・任意）",
     "creating": "作成中...",
+    "saving": "保存中...",
     "addButton": "+ ストレージを追加"
   },
   "reports": {

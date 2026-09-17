@@ -139,6 +139,7 @@
     "inactive": "未启用",
     "activateButton": "启用",
     "deactivateButton": "停用",
+    "editButton": "编辑",
     "deleteConfirm": "删除存储“{{name}}”？",
     "nameLabel": "名称",
     "endpointLabel": "端点",
@@ -146,9 +147,11 @@
     "regionLabel": "地区",
     "accessKeyLabel": "访问密钥",
     "secretKeyLabel": "密钥",
+    "secretKeyKeepPlaceholder": "留空以保持不变",
     "publicUrlLabel": "公共 URL (CDN)",
     "capacityLabel": "容量限制（MB，可选）",
     "creating": "创建中...",
+    "saving": "保存中...",
     "addButton": "+ 添加存储空间"
   },
   "reports": {

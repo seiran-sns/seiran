@@ -139,6 +139,7 @@
     "inactive": "비활성",
     "activateButton": "활성화",
     "deactivateButton": "비활성화",
+    "editButton": "편집",
     "deleteConfirm": "'{{name}}' 저장소를 삭제하시겠습니까?",
     "nameLabel": "이름",
     "endpointLabel": "엔드포인트",
@@ -146,9 +147,11 @@
     "regionLabel": "지역",
     "accessKeyLabel": "액세스 키",
     "secretKeyLabel": "비밀키",
+    "secretKeyKeepPlaceholder": "변경하지 않으려면 비워두세요",
     "publicUrlLabel": "공개 URL(CDN)",
     "capacityLabel": "용량 제한(MB, 선택 사항)",
     "creating": "만드는 중...",
+    "saving": "저장 중...",
     "addButton": "+ 저장공간 추가"
   },
   "reports": {

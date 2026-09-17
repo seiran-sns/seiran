@@ -147,6 +147,7 @@
     "inactive": "Inactive",
     "activateButton": "Activate",
     "deactivateButton": "Deactivate",
+    "editButton": "Edit",
     "deleteConfirm": "Delete storage \"{{name}}\"?",
     "nameLabel": "Name",
     "endpointLabel": "Endpoint",
@@ -154,9 +155,11 @@
     "regionLabel": "Region",
     "accessKeyLabel": "Access key",
     "secretKeyLabel": "Secret key",
+    "secretKeyKeepPlaceholder": "Leave blank to keep current",
     "publicUrlLabel": "Public URL (CDN)",
     "capacityLabel": "Capacity limit (MB, optional)",
     "creating": "Creating...",
+    "saving": "Saving...",
     "addButton": "+ Add storage"
   },
   "reports": {

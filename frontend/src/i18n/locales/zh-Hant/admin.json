@@ -139,6 +139,7 @@
     "inactive": "未啟用",
     "activateButton": "啟用",
     "deactivateButton": "停用",
+    "editButton": "編輯",
     "deleteConfirm": "要刪除儲存供應商「{{name}}」嗎？",
     "nameLabel": "名稱",
     "endpointLabel": "端點",
@@ -146,9 +147,11 @@
     "regionLabel": "地區",
     "accessKeyLabel": "存取金鑰",
     "secretKeyLabel": "密鑰",
+    "secretKeyKeepPlaceholder": "留空以保持不變",
     "publicUrlLabel": "公開 URL（CDN）",
     "capacityLabel": "容量限制（MB，選填）",
     "creating": "建立中...",
+    "saving": "儲存中...",
     "addButton": "＋ 新增儲存空間"
   },
   "reports": {

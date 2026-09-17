@@ -139,6 +139,7 @@
     "inactive": "Inactif",
     "activateButton": "Activer",
     "deactivateButton": "Désactiver",
+    "editButton": "Modifier",
     "deleteConfirm": "Supprimer l'espace de stockage \"{{name}}\" ?",
     "nameLabel": "Nom",
     "endpointLabel": "Point de terminaison",
@@ -146,9 +147,11 @@
     "regionLabel": "Région",
     "accessKeyLabel": "Clé d'accès",
     "secretKeyLabel": "Clé secrète",
+    "secretKeyKeepPlaceholder": "Laisser vide pour conserver la valeur actuelle",
     "publicUrlLabel": "URL publique (CDN)",
     "capacityLabel": "Limite de capacité (Mo, facultatif)",
     "creating": "Création...",
+    "saving": "Enregistrement...",
     "addButton": "+ Ajouter du stockage"
   },
   "reports": {
