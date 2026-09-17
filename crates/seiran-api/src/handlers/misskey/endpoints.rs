@@ -30,6 +30,7 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "notes/global-timeline",
         "notes/hybrid-timeline",
         "notes/local-timeline",
+        "notes/mentions",
         "notes/reactions",
         "notes/reactions/create",
         "notes/reactions/delete",
@@ -70,6 +71,15 @@ use super::types::{
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TimelineBody {
+    pub limit: Option<i64>,
+    pub since_id: Option<String>,
+    pub until_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotesMentionsBody {
+    pub visibility: Option<String>,
     pub limit: Option<i64>,
     pub since_id: Option<String>,
     pub until_id: Option<String>,
@@ -473,6 +483,43 @@ pub async fn notes_home_timeline(
     let rows = state
         .posts
         .home_timeline(actor_id, limit, until_id, since_id, false)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(build_notes(&state, rows, Some(actor_id)).await))
+}
+
+/// POST /api/notes/mentions（Aria等の通知画面「メンション」「指名」タブ用。要ログイン）。
+/// `visibility`未指定＝メンション全般（本文中の`@username`メンション・自分への返信・自分宛
+/// directのいずれか）、`visibility: "specified"`（Misskey本家の`direct`表記）指定時は自分宛
+/// direct投稿のみに絞る。詳細: `docs/protocols.md` 7節。
+pub async fn notes_mentions(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<NotesMentionsBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+    let actor_id = state
+        .actors
+        .find_local_by_user_id(auth_user.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?
+        .id;
+
+    let specified_only = body.visibility.as_deref() == Some("specified");
+    let limit = body.limit.unwrap_or(10).clamp(1, 100);
+    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = state
+        .posts
+        .mentions_timeline(actor_id, specified_only, limit, until_id, since_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(build_notes(&state, rows, Some(actor_id)).await))

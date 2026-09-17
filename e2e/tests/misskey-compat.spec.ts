@@ -331,3 +331,67 @@ test("Misskey互換API: i/notificationsのリアクション通知でローカ�
     await s3.close();
   }
 });
+
+test("Misskey互換API: notes/mentionsでAriaの「メンション」「指名」タブに該当する投稿を返す", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2emkmenta");
+  const bob = await registerUserViaApi(request, "e2emkmentb");
+
+  // bobへの通常メンション（本文中の@username）。
+  const mentionRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: `@${bob.username} メンションテスト ${Date.now()}`, visibility: "public" },
+  });
+  expect(mentionRes.ok(), `メンション投稿失敗: ${mentionRes.status()} ${await mentionRes.text()}`).toBeTruthy();
+  const mentionNote = await mentionRes.json();
+
+  // bobの投稿へのリプライ（本文中に@mention表記は無い）。
+  const bobPostRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${bob.token}` },
+    data: { text: `bobの投稿 ${Date.now()}`, visibility: "public" },
+  });
+  expect(bobPostRes.ok()).toBeTruthy();
+  const bobPost = await bobPostRes.json();
+
+  const replyRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: `返信テスト ${Date.now()}`, visibility: "public", reply_to_id: bobPost.id },
+  });
+  expect(replyRes.ok(), `リプライ投稿失敗: ${replyRes.status()} ${await replyRes.text()}`).toBeTruthy();
+  const replyNote = await replyRes.json();
+
+  // bob宛のDM（recipient_actor_idsで宛先指定、本文に@mention表記は無い。新規スレッドの
+  // 最初の1通のためreply通知も発生しない、post_recipients側でのみ拾えるケース）。
+  const dmRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: `DMテスト ${Date.now()}`, visibility: "direct", recipient_actor_ids: [bob.actorId] },
+  });
+  expect(dmRes.ok(), `DM作成失敗: ${dmRes.status()} ${await dmRes.text()}`).toBeTruthy();
+  const dmNote = await dmRes.json();
+
+  // bobと無関係な投稿（どちらのタブにも出てはならない）。
+  const unrelatedRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: `無関係な投稿 ${Date.now()}`, visibility: "public" },
+  });
+  expect(unrelatedRes.ok()).toBeTruthy();
+  const unrelatedNote = await unrelatedRes.json();
+
+  // 「メンション」タブ（visibility省略）: メンション・リプライ・DMの3件。
+  const mentionsTabRes = await request.post("/api/notes/mentions", {
+    headers: { Authorization: `Bearer ${bob.token}` },
+    data: {},
+  });
+  expect(mentionsTabRes.ok(), `notes/mentions失敗: ${mentionsTabRes.status()} ${await mentionsTabRes.text()}`).toBeTruthy();
+  const mentionsTabIds = (await mentionsTabRes.json()).map((n: { id: string }) => n.id);
+  expect(mentionsTabIds).toEqual(expect.arrayContaining([mentionNote.id, replyNote.id, dmNote.id]));
+  expect(mentionsTabIds).not.toContain(unrelatedNote.id);
+
+  // 「指名」タブ（visibility: "specified"）: DMのみ。
+  const specifiedTabRes = await request.post("/api/notes/mentions", {
+    headers: { Authorization: `Bearer ${bob.token}` },
+    data: { visibility: "specified" },
+  });
+  expect(specifiedTabRes.ok()).toBeTruthy();
+  const specifiedTabIds = (await specifiedTabRes.json()).map((n: { id: string }) => n.id);
+  expect(specifiedTabIds).toEqual([dmNote.id]);
+});

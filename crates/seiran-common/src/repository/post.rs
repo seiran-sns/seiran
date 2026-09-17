@@ -457,6 +457,21 @@ pub trait PostRepository: Send + Sync {
         exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
+    /// Misskey互換API `POST /api/notes/mentions`用。自分宛のメンションを取得する
+    /// （本家の「`note.mentions`に自分が含まれる投稿」に相当する語彙が無いため、
+    /// `notifications`テーブルの`type IN ('mention', 'reply')`と`post_recipients`
+    /// （direct投稿の宛先、テキスト中の`@username`表記の有無を問わない）の
+    /// 和集合で代用する。詳細: `docs/protocols.md` 7節）。
+    /// `specified_only=true`で`visibility='direct'`の投稿のみに絞る（Aria等の「指名」タブ用）。
+    async fn mentions_timeline(
+        &self,
+        actor_id: i64,
+        specified_only: bool,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
+
     /// DID + rkey で app.bsky.feed.post レコードを取得する。
     async fn find_record(&self, did: &str, rkey: &str) -> Result<Option<PostRecord>, sqlx::Error>;
 
@@ -1026,6 +1041,52 @@ impl PostRepository for PgPostRepository {
         .bind(since_id)
         .bind(limit)
         .bind(exclude_direct)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn mentions_timeline(
+        &self,
+        actor_id: i64,
+        specified_only: bool,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        sqlx::query_as::<_, TimelinePost>(
+            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
+                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
+                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
+                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
+                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
+                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
+                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+             FROM posts p
+             JOIN actors a ON a.id = p.actor_id
+             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
+             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             WHERE p.deleted_at IS NULL
+               AND p.actor_id != $1
+               AND ($3::bigint IS NULL OR p.id < $3)
+               AND ($4::bigint IS NULL OR p.id > $4)
+               AND (
+                 (p.visibility = 'direct' AND EXISTS (
+                     SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1
+                 ))
+                 OR (NOT $2 AND EXISTS (
+                     SELECT 1 FROM notifications n
+                     WHERE n.note_id = p.id AND n.recipient_actor_id = $1 AND n.type IN ('mention', 'reply')
+                 ))
+               )
+             ORDER BY p.id DESC
+             LIMIT $5",
+        )
+        .bind(actor_id)
+        .bind(specified_only)
+        .bind(until_id)
+        .bind(since_id)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
     }

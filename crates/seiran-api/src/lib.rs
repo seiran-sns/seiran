@@ -1536,6 +1536,10 @@ pub fn router(state: AppState) -> Router {
             post(handlers::misskey::endpoints::notes_home_timeline),
         )
         .route(
+            "/api/notes/mentions",
+            post(handlers::misskey::endpoints::notes_mentions),
+        )
+        .route(
             "/api/notes/reactions",
             post(handlers::misskey::endpoints::notes_reactions),
         )
