@@ -668,19 +668,19 @@ function PostContent({
                   </div>
                 )}
               </div>
+              {contentCollapsed && contentOverflowing && (
+                <button
+                  type="button"
+                  className={styles.showAllButton}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setContentCollapsed(false);
+                  }}
+                >
+                  {t("home:noteCard.showAllContent")}
+                </button>
+              )}
             </div>
-          )}
-          {showContent && contentCollapsed && contentOverflowing && (
-            <button
-              type="button"
-              className={styles.showAllButton}
-              onClick={(e) => {
-                e.stopPropagation();
-                setContentCollapsed(false);
-              }}
-            >
-              {t("home:noteCard.showAllContent")}
-            </button>
           )}
         </>
       )}

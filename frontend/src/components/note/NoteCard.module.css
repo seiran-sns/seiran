@@ -472,9 +472,13 @@
   pointer-events: none;
 }
 .showAllButton {
-  display: block;
-  width: calc(100% - 100px);
-  margin: 8px 50px 0;
+  /* 下に積み増すと「折りたたんだのに元より長くなる」間抜けな結果になりうるため、
+   * コンテンツ領域の外へ場所を取らず、最下部に重ねて表示する。 */
+  position: absolute;
+  left: 50px;
+  right: 0;
+  bottom: 8px;
+  z-index: 1;
   border: none;
   border-radius: 6px;
   background: var(--accent);
