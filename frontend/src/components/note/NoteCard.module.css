@@ -33,6 +33,7 @@
   line-height: 1.7;
   margin-left: 0;
   margin-top: 10px;
+  --note-emoji-line-height: 1.7;
 }
 
 .large .relations,
@@ -65,6 +66,7 @@
   font-size: 0.85rem;
   line-height: 1.5;
   margin-top: 6px;
+  --note-emoji-line-height: 1.5;
 }
 
 .rail {
@@ -288,6 +290,10 @@
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+  /* 本文中の絵文字（RichText/RichHtmlの.emojiImg）を行の高さいっぱいまで拡大する
+   * ためのフック（NoteCard.module.css側から文字サイズごとのline-height値を渡す）。
+   * .large/.small はそれぞれの`.body`ルールで上書きする。 */
+  --note-emoji-line-height: 1.6;
 }
 
 /* 添付メディア一覧。動画/音声（幅いっぱい、タイリング対象外）を境目に、連続する画像を
@@ -552,6 +558,7 @@
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+  --note-emoji-line-height: 1.55;
 }
 
 .quoteContentWarning {

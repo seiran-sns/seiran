@@ -47,14 +47,14 @@
 .emoji {
   display: inline-block;
   max-width: 100%;
-  vertical-align: -0.25em;
+  vertical-align: top;
   user-select: all;
 }
 
 .emoji img {
   display: block;
   width: auto;
-  height: 1.5em;
+  height: 1.6em;
   max-width: 100%;
   object-fit: contain;
 }
