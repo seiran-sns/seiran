@@ -1986,6 +1986,14 @@ async fn resume_bsky_post_commit_deferred(state: &AppState) {
 /// 永久に再取得されず放置される事故があったため（2026-08-19実機確認、misskey.dev等の
 /// 主要インスタンスがこれで固定的に🌐表示・ドメイン名表示のままになった）。
 /// 非対応サーバーは毎回再チャレンジすることになるが、起動時のみの発生でありコストは小さい。
+///
+/// `theme_color`が汎用デフォルト（`DEFAULT_THEME_COLOR`）のまま止まっている行のうち、
+/// `fallback_color_for_software`（既知フォーク固有色表）に現在その`software_name`が
+/// 載っているものも対象に含める: `themeColor`未宣言サーバー向けの固有色を後から追加した
+/// 際、それ以前に解決済みだった行が汎用グレーのまま固定され、再解決の手段が
+/// `NOT EXISTS`判定に無いため永久に放置される事故を防ぐ（2026-09-17、littlefedi追加時に
+/// 実機確認）。固有色未登録のsoftware（意図的に汎用グレーへフォールバックした行）は
+/// 対象外なので、毎起動で無限に再チャレンジすることはない。
 async fn backfill_remote_instance_meta(state: &AppState) {
     let domains = match sqlx::query_scalar::<_, String>(
         "SELECT DISTINCT a.domain FROM actors a
@@ -2007,8 +2015,39 @@ async fn backfill_remote_instance_meta(state: &AppState) {
         }
     };
 
-    let total = domains.len();
-    for domain in domains {
+    let stale_color_rows = match sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT domain, software_name FROM remote_instance_meta
+         WHERE theme_color = $1",
+    )
+    .bind(seiran_common::jobs::remote_instance_info_resolve::DEFAULT_THEME_COLOR)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(
+                "[startup] remote_instance_meta 固有色backfill対象取得失敗: {}",
+                e
+            );
+            Vec::new()
+        }
+    };
+
+    let mut targets: Vec<String> = domains;
+    for (domain, software_name) in stale_color_rows {
+        let has_fallback = software_name
+            .as_deref()
+            .and_then(seiran_common::jobs::remote_instance_info_resolve::fallback_color_for_software)
+            .is_some();
+        if has_fallback {
+            targets.push(domain);
+        }
+    }
+    targets.sort();
+    targets.dedup();
+
+    let total = targets.len();
+    for domain in targets {
         state.enqueue_remote_instance_info_resolve(domain).await;
     }
     tracing::info!(

@@ -61,12 +61,14 @@ struct NodeinfoMetadata {
 
 /// 既知の後発フォーク: nodeinfo で `themeColor` を宣言しない実装でも、ブランドカラーが
 /// 広く知られているものだけ代替色を当てる。
-fn fallback_color_for_software(software_name: &str) -> Option<&'static str> {
+pub fn fallback_color_for_software(software_name: &str) -> Option<&'static str> {
     match software_name.to_ascii_lowercase().as_str() {
         "fedibird" => Some("#f4dced"), // 薄い赤紫
         "kmyblue" => Some("#d9ecfa"),  // 薄いブルー
         "mitra" => Some("#e8d9a6"),    // 濃いめのクリーム色
         "akkoma" => Some("#ddd9f5"),   // 薄い青紫
+        "littlefedi" => Some("#d4f5e4"), // ミントグリーン
+        "concrnt-ap-bridge" => Some("#1d9bf0"), // rgb(29, 155, 240)
         _ => None,
     }
 }

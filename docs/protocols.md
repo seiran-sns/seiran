@@ -166,7 +166,9 @@ Bskyネットワーク側（AT Protocol）には非公開アカウントとい�
 
 `GET /nodeinfo/2.1`の`metadata.features`には`"emoji_reaction"`を含める。kmyblue（Mastodonフォーク）はカスタム絵文字リアクション対応の可否を、既知softwareリスト（Misskey系等）に載っていないインスタンスに対してはこのフィールドで判定するため（#167）。
 
-**リモートnodeinfoの取得（受信側）**: 自分の`GET /nodeinfo/2.1`とは逆に、リモートFedi/seiran間連合の相手サーバーの`/.well-known/nodeinfo` → 実体ドキュメントを`jobs::remote_instance_info_resolve`が取得し、`software.name`/`metadata.nodeName`/`metadata.themeColor`を`remote_instance_meta`へキャッシュする（NoteCardリモートサーバー表示、`docs/database.md`参照）。`themeColor`未宣言時のfedibird/kmyblue/mitra/akkoma向け代替色もこのジョブ内で解決する。Bskyはこの経路を使わない（`docs/database.md`参照）。
+**リモートnodeinfoの取得（受信側）**: 自分の`GET /nodeinfo/2.1`とは逆に、リモートFedi/seiran間連合の相手サーバーの`/.well-known/nodeinfo` → 実体ドキュメントを`jobs::remote_instance_info_resolve`が取得し、`software.name`/`metadata.nodeName`/`metadata.themeColor`を`remote_instance_meta`へキャッシュする（NoteCardリモートサーバー表示、`docs/database.md`参照）。`themeColor`未宣言時のfedibird/kmyblue/mitra/akkoma/littlefedi/concrnt-ap-bridge向け代替色もこのジョブ内で解決する。Bskyはこの経路を使わない（`docs/database.md`参照）。
+
+固有色表に新しいsoftwareを追加しても、それ以前に汎用デフォルト（`#e4e4e7`）で解決済みだった既存キャッシュ行は自動では更新されない（このジョブは未キャッシュドメインに対してのみenqueueされるため）。これを防ぐため、起動時タスク`seiran-api::backfill_remote_instance_meta`は`remote_instance_meta.theme_color`が汎用デフォルトのままの行も走査し、`software_name`が現在の固有色表に載っているものだけ再解決ジョブへ積み直す（固有色未登録のsoftwareは対象外なので、意図的に汎用グレーへ解決された行を毎起動で再チャレンジすることはない）。
 
 ### HTTP Signatures 検証
 1. `Digest` ヘッダー必須（SHA-256ボディハッシュと一致確認）
