@@ -168,7 +168,9 @@ Bskyネットワーク側（AT Protocol）には非公開アカウントとい�
 
 **リモートnodeinfoの取得（受信側）**: 自分の`GET /nodeinfo/2.1`とは逆に、リモートFedi/seiran間連合の相手サーバーの`/.well-known/nodeinfo` → 実体ドキュメントを`jobs::remote_instance_info_resolve`が取得し、`software.name`/`metadata.nodeName`/`metadata.themeColor`を`remote_instance_meta`へキャッシュする（NoteCardリモートサーバー表示、`docs/database.md`参照）。`themeColor`未宣言時のfedibird/kmyblue/mitra/akkoma/littlefedi/concrnt-ap-bridge向け代替色もこのジョブ内で解決する。Bskyはこの経路を使わない（`docs/database.md`参照）。
 
-固有色表に新しいsoftwareを追加しても、それ以前に汎用デフォルト（`#e4e4e7`）で解決済みだった既存キャッシュ行は自動では更新されない（このジョブは未キャッシュドメインに対してのみenqueueされるため）。これを防ぐため、起動時タスク`seiran-api::backfill_remote_instance_meta`は`remote_instance_meta.theme_color`が汎用デフォルトのままの行も走査し、`software_name`が現在の固有色表に載っているものだけ再解決ジョブへ積み直す（固有色未登録のsoftwareは対象外なので、意図的に汎用グレーへ解決された行を毎起動で再チャレンジすることはない）。
+固有色表に新しいsoftwareを追加しても、それ以前に汎用デフォルト（`#e4e4e7`）で解決済みだった既存キャッシュ行は自動では更新されない（このジョブは未キャッシュドメインに対してのみenqueueされるため）。これを防ぐため、起動時タスク`seiran-api::backfill_remote_instance_meta`は`remote_instance_meta.theme_color`が汎用デフォルトのままの行も走査し、`software_name`が現在の固有色表に載っているものだけ再解決ジョブへ積み直す（固有色未登録のsoftwareは対象外なので、意図的に汎用グレーへ解決された行を毎起動で再チャレンジすることはない）。同じ起動時タスクは`software_name`がNULLの行（discovery取得の一時的失敗等で「諦め」判定になった行）も無条件に再解決対象へ含める。
+
+discoveryドキュメント（`/.well-known/nodeinfo`）のContent-Typeは`application/json`とは限らず、concrnt-ap-bridge等は`application/jrd+json`（webfingerのJRD形式と同じ）で返す。`fetch_validated_with_accept`のホワイトリスト（`ACCEPT_JSON`）に`application/jrd+json`を含めていないと、discovery自体は200で成功するのに`UnsupportedType`として「非対応サーバー」扱いで恒久キャッシュされ、`software_name`が二度と埋まらなくなる（2026-09-17、concrnt-ap-bridge実機確認）。
 
 ### HTTP Signatures 検証
 1. `Digest` ヘッダー必須（SHA-256ボディハッシュと一致確認）

@@ -23,7 +23,9 @@ use crate::repository::{PgRemoteInstanceMetaRepository, RemoteInstanceMetaReposi
 /// 未宣言・非対応サーバー共通の汎用デフォルト（薄いグレー）。
 pub const DEFAULT_THEME_COLOR: &str = "#e4e4e7";
 
-const ACCEPT_JSON: &[&str] = &["application/json", "application/ld+json"];
+// `application/jrd+json`はconcrnt-ap-bridge等が`.well-known/nodeinfo`のdiscovery文書に
+// 使う（webfingerのJRD形式と同じ扱い、`ap::webfinger`も同様に許容している）。
+const ACCEPT_JSON: &[&str] = &["application/json", "application/ld+json", "application/jrd+json"];
 const ACCEPT_HTML: &[&str] = &["text/html", "application/xhtml+xml"];
 const ACCEPT_IMAGE: &[&str] = &["image/", "application/octet-stream"];
 

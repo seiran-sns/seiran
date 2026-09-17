@@ -1980,11 +1980,16 @@ async fn resume_bsky_post_commit_deferred(state: &AppState) {
 /// 通常はnotes API呼び出し時の遅延解決（`queries::attach_remote_instance_info`）で
 /// 徐々に埋まっていくが、起動時にこれを走らせることで新規デプロイ直後の
 /// 大量未解決状態（既存ドメイン全件が対象）を素早く解消する。
-/// `icon_url`/`node_name`がNULLの行も対象に含める: サーバーアイコン取得・
+/// `icon_url`/`node_name`/`software_name`がNULLの行も対象に含める: サーバーアイコン取得・
 /// `<title>`タグフォールバック機能をそれぞれ後から追加した際、それ以前に解決済み
 /// だった行（列自体は追加されているが値は未取得）が`NOT EXISTS`だけの判定だと
 /// 永久に再取得されず放置される事故があったため（2026-08-19実機確認、misskey.dev等の
 /// 主要インスタンスがこれで固定的に🌐表示・ドメイン名表示のままになった）。
+/// `software_name IS NULL`も同じ扱いにしているのは、nodeinfoドキュメントの一時的な
+/// パース失敗・discovery失敗（`jobs::remote_instance_info_resolve`の「諦め」分岐）で
+/// 一度NULLキャッシュされると、当時は本当に非対応だったとしても後日そのソフトウェア側で
+/// nodeinfo対応が追加・修正される場合があり、`software_name`が埋まらない限り固有色
+/// フォールバックも一生適用されないため（2026-09-17、concrnt-ap-bridge実機確認）。
 /// 非対応サーバーは毎回再チャレンジすることになるが、起動時のみの発生でありコストは小さい。
 ///
 /// `theme_color`が汎用デフォルト（`DEFAULT_THEME_COLOR`）のまま止まっている行のうち、
@@ -2003,6 +2008,7 @@ async fn backfill_remote_instance_meta(state: &AppState) {
                WHERE rim.domain = a.domain
                  AND rim.icon_url IS NOT NULL
                  AND rim.node_name IS NOT NULL
+                 AND rim.software_name IS NOT NULL
            )",
     )
     .fetch_all(&state.db)
