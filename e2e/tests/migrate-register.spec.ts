@@ -5,9 +5,9 @@ import { test, expect } from "@playwright/test";
 // RFC 2606で名前解決されないことが保証された .invalid ドメインを使い、実在のBluesky
 // サービスには一切到達させない（DNS解決自体が失敗するため）。
 
-test("通常登録画面から移行導線で遷移でき、移行フォームが表示される", async ({ page }) => {
+test("通常登録画面からカルーセルのタブ切替で移行フォームが表示される", async ({ page }) => {
   await page.goto("/register");
-  await page.getByRole("link", { name: /移行/ }).click();
+  await page.getByRole("link", { name: "Blueskyから転入" }).click();
 
   await expect(page).toHaveURL(/\/register\/migrate$/);
   await expect(page.getByLabel("移行元のハンドル")).toBeVisible();
@@ -16,9 +16,9 @@ test("通常登録画面から移行導線で遷移でき、移行フォーム�
   await expect(page.getByLabel("seiranでの新しいパスワード（移行元とは別に設定してください）")).toBeVisible();
 });
 
-test("通常の新規登録に戻るリンクで/registerへ戻れる", async ({ page }) => {
+test("カルーセルのサインアップタブ切替で/registerへ戻れる", async ({ page }) => {
   await page.goto("/register/migrate");
-  await page.getByRole("link", { name: "通常の新規登録に戻る" }).click();
+  await page.getByRole("link", { name: "サインアップ" }).click();
   await expect(page).toHaveURL(/\/register$/);
 });
 

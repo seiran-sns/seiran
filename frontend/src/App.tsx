@@ -17,7 +17,6 @@ const AccountSettingsPage = lazy(() => import("./pages/AccountSettingsPage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
 const FollowImportSettingsPage = lazy(() => import("./pages/FollowImportSettingsPage"));
 const FollowRequestsSettingsPage = lazy(() => import("./pages/FollowRequestsSettingsPage"));
-const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const HashtagPage = lazy(() => import("./pages/HashtagPage"));
 const ListDetailPage = lazy(() => import("./pages/ListDetailPage"));
 const ListsSettingsPage = lazy(() => import("./pages/ListsSettingsPage"));
@@ -309,10 +308,17 @@ function AppRoutes() {
             </RedirectIfAuthed>
           }
         />
+        <Route
+          path="/forgot-password"
+          element={
+            <RedirectIfAuthed>
+              <AuthCarouselPage />
+            </RedirectIfAuthed>
+          }
+        />
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/verify-email-change" element={<VerifyEmailChange />} />
         <Route path="/totp-disable" element={<TotpDisable />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
       </Routes>
     </Suspense>

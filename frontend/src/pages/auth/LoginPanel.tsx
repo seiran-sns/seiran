@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, isTotpRequired } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
@@ -9,10 +9,16 @@ import styles from "../Auth.module.css";
 /**
  * ログインカルーセル（issue #243）の「ログイン」パネル本体。外枠（見出し・カード）は
  * 親の`AuthCarouselPage`が持つため、フォームのみを描画する。
+ *
+ * `/forgot-password`も`panelFromPath`上は「ログイン」パネルとして扱われる（専用タブを
+ * 持たず、ログインパネルの中身がパスワードリセット申請フォームに差し替わる形。マイケルの
+ * 指示）。ログインパネルはこの2ルート間で常にマウントされたままなので、パスワード
+ * リセット申請の入力途中状態もこのコンポーネント自身のstateで問題ない。
  */
 export default function LoginPanel() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { login } = useAuth();
   const [identifier, setIdentifier] = useState("");
@@ -33,6 +39,12 @@ export default function LoginPanel() {
   const [totpError, setTotpError] = useState("");
   const [totpLoading, setTotpLoading] = useState(false);
   const [disableEmailSent, setDisableEmailSent] = useState(false);
+
+  // パスワードリセット申請（旧`/forgot-password`ページ）
+  const [fpEmail, setFpEmail] = useState("");
+  const [fpSent, setFpSent] = useState(false);
+  const [fpError, setFpError] = useState("");
+  const [fpLoading, setFpLoading] = useState(false);
 
   function finishLogin(res: { token: string; user: Parameters<typeof login>[1] }) {
     login(res.token, res.user);
@@ -93,6 +105,60 @@ export default function LoginPanel() {
     } catch (err) {
       setTotpError(getErrorMessage(err) || t("auth:login.genericError"));
     }
+  }
+
+  async function handleForgotSubmit(e: FormEvent) {
+    e.preventDefault();
+    setFpError("");
+    setFpLoading(true);
+    try {
+      await api.auth.requestPasswordReset(fpEmail);
+      setFpSent(true);
+    } catch (err) {
+      setFpError(getErrorMessage(err));
+    } finally {
+      setFpLoading(false);
+    }
+  }
+
+  if (location.pathname.startsWith("/forgot-password")) {
+    if (fpSent) {
+      return (
+        <>
+          <p style={{ textAlign: "center", color: "#a0aec0", fontSize: "0.9rem", margin: "0 0 24px" }}>
+            {t("auth:forgotPassword.sentDescription")}
+          </p>
+          <p className={styles.link}>
+            <Link to="/login">{t("auth:forgotPassword.backToLoginLink")}</Link>
+          </p>
+        </>
+      );
+    }
+    return (
+      <>
+        <p className={styles.description}>{t("auth:forgotPassword.description")}</p>
+        <form onSubmit={handleForgotSubmit} className={styles.form}>
+          <label className={styles.label}>
+            {t("auth:forgotPassword.emailLabel")}
+            <input
+              type="email"
+              value={fpEmail}
+              onChange={(e) => setFpEmail(e.target.value)}
+              className={styles.input}
+              required
+              autoFocus
+            />
+          </label>
+          {fpError && <p className={styles.error}>{fpError}</p>}
+          <button type="submit" className={styles.button} disabled={fpLoading}>
+            {fpLoading ? t("auth:forgotPassword.sending") : t("auth:forgotPassword.submit")}
+          </button>
+        </form>
+        <p className={styles.link}>
+          <Link to="/login">{t("auth:forgotPassword.backToLoginLink")}</Link>
+        </p>
+      </>
+    );
   }
 
   if (pendingToken) {
@@ -176,9 +242,6 @@ export default function LoginPanel() {
       </form>
       <p className={styles.link}>
         {t("auth:login.forgotPasswordPrefix")} <Link to="/forgot-password">{t("auth:login.forgotPasswordLink")}</Link>
-      </p>
-      <p className={styles.link}>
-        {t("auth:login.noAccountPrefix")} <Link to="/register">{t("auth:login.registerLink")}</Link>
       </p>
     </>
   );

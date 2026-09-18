@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ApiError } from "../../api/client";
 import { storeMigrationRequest } from "../migrationStorage";
@@ -167,9 +167,6 @@ export default function MigratePanel({ state, onChange }: MigratePanelProps) {
           {loading ? t("auth:migrateRegister.submitting") : t("auth:migrateRegister.submit")}
         </button>
       </form>
-      <p className={styles.link}>
-        <Link to="/register">{t("auth:migrateRegister.backToNormalRegisterLink")}</Link>
-      </p>
     </>
   );
 }

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
@@ -85,9 +85,6 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
         <p style={{ textAlign: "center", color: "#a0aec0", lineHeight: 1.6 }}>
           {t("auth:register.emailSentDescription", { email: state.email })}
         </p>
-        <p className={styles.link} style={{ marginTop: "1.5rem" }}>
-          <Link to="/login">{t("auth:register.goToLoginLink")}</Link>
-        </p>
       </>
     );
   }
@@ -120,12 +117,6 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
             {loading ? t("auth:register.sending") : t("auth:register.sendVerificationEmail")}
           </button>
         </form>
-        <p className={styles.link}>
-          {t("auth:register.alreadyHaveAccountPrefix")} <Link to="/login">{t("auth:register.loginLink")}</Link>
-        </p>
-        <p className={styles.link}>
-          <Link to="/register/migrate">{t("auth:register.migrateInstead")}</Link>
-        </p>
       </>
     );
   }
@@ -207,12 +198,6 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
           {loading ? t("auth:register.submitting") : t("auth:register.submit")}
         </button>
       </form>
-      <p className={styles.link}>
-        {t("auth:register.alreadyHaveAccountPrefix")} <Link to="/login">{t("auth:register.loginLink")}</Link>
-      </p>
-      <p className={styles.link}>
-        <Link to="/register/migrate">{t("auth:register.migrateInstead")}</Link>
-      </p>
     </>
   );
 }
