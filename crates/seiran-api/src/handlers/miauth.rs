@@ -175,12 +175,10 @@ pub async fn miauth_authorize(
     };
 
     // third-party クライアントへ渡すアクセストークンは、既存の `Authorization: Bearer`
-    // 認証（`extract_auth`/`LocalAuthProvider::verify_token`）がそのまま検証できるよう、
-    // 自社ログインと同じ JWT 検証経路を使う（トークン検証の経路をもう一本増やさない）。
-    // ただし有効期限は自社ログイン（7日）とは分け、`exp` クレームを持たない
-    // 無期限トークンを発行する（`generate_app_token`）。Misskey 互換クライアント
-    // （Aria 等）は「連携したら明示的に取り消すまで有効」という前提で作られており、
-    // 自社ログインと同じ 7 日失効にすると再連携なしに突然 401 になる不具合があった。
+    // 認証（`extract_auth`/`LocalAuthProvider::verify_token_ignoring_exp`）がそのまま
+    // 検証できるよう、自社ログインと同じ JWT 検証経路を使う（トークン検証の経路を
+    // もう一本増やさない）。`generate_app_token`は`exp`クレームを持たない無期限
+    // トークンを発行する（自社ログインの`generate_token`も現在は同じく無期限）。
     // 失効は `app_tokens.revoked_at`（本関数末尾で記録）でのみ行う。
     // 以前は無意味なダミー文字列（`miauth-token-<uuid>`）を発行していたため、JWT として
     // 検証できず、タイムライン閲覧（未認証で見られる）は動いても投稿等の要認証操作が

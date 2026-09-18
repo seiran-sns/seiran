@@ -162,7 +162,7 @@ pub async fn create_drive_file(
             let token = token_field.ok_or(err)?;
             let verified = state
                 .local_auth
-                .verify_token(&token)
+                .verify_token_ignoring_exp(&token)
                 .map_err(|_| ApiError::Unauthorized("トークンが無効です"))?;
             AuthUser {
                 user_id: verified.user_id,

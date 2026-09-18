@@ -22,11 +22,12 @@ pub enum AuthError {
 struct LocalClaims {
     sub: String,
     email: String,
-    /// 自社ログイン発行分は 7 日で失効させるため Some。MiAuth（#60 アプリトークン）
-    /// 発行分は明示的な無効化（`app_tokens.revoked_at`）まで有効であるべきトークンなので
-    /// None（`exp` クレーム自体を持たせない）。Misskey 互換クライアント（Aria 等）は
-    /// 「連携したら明示的に取り消すまで有効」という前提で作られており、両者を同じ
-    /// 7日失効にすると再連携なしに突然 401 になる（実機で確認済みの不具合）。
+    /// 現在発行するトークンは自社ログイン・MiAuth（#60 アプリトークン）とも `exp` クレーム
+    /// 自体を持たせず無期限にする（失効は明示的な無効化 `app_tokens.revoked_at`／
+    /// パスワード変更等による一括失効 `token_valid_after` のみで管理）。
+    /// この仕組み導入前に発行された既存トークンには `exp`（7日）が署名済みで埋め込まれた
+    /// ままのため書き換えられないが、検証時（`verify_token_ignoring_exp`）は一律で
+    /// `exp` を無視するため、古いトークンも失効せず有効なまま扱われる。
     #[serde(skip_serializing_if = "Option::is_none", default)]
     exp: Option<usize>,
     /// 発行時刻（UNIX秒）。パスワード変更等による一括失効（`token_valid_after`）の
@@ -89,9 +90,9 @@ pub struct VerifiedUser {
     pub jti: uuid::Uuid,
     /// トークン発行時刻（UNIX秒）。
     pub iat: usize,
-    /// トークンの `exp` クレーム（UNIX秒）。MiAuth 発行分は `None`。
-    /// `verify_token_ignoring_exp` で検証した場合、値が過去でも呼び出し元が
-    /// 別途 `app_tokens` を見て失効判定する前提でここに残す。
+    /// トークンの `exp` クレーム（UNIX秒）。現在発行するトークンは持たないため`None`。
+    /// この仕組み導入前に発行済みのトークンには埋め込まれたままの場合があるが、
+    /// `verify_token_ignoring_exp` は検証に使わないため、呼び出し元も判定に使わない。
     pub exp: Option<usize>,
 }
 
@@ -146,22 +147,18 @@ impl LocalAuthProvider {
     }
 
     /// 発行した JWT と、その `jti`（#60: アプリトークン管理での識別用）を返す。
-    /// 自社ログイン用に 7 日で失効するトークンを発行する。
+    /// 自社ログイン用トークンを発行する。`exp` クレームは持たせず無期限とし、
+    /// 明示的な無効化（設定画面の「全セッションからログアウト」等）まで有効とする。
     pub fn generate_token(
         &self,
         user_id: i64,
         email: &str,
     ) -> Result<(String, uuid::Uuid), AuthError> {
-        let now = chrono::Utc::now();
-        let exp = now
-            .checked_add_signed(chrono::Duration::days(7))
-            .unwrap()
-            .timestamp() as usize;
-        self.generate_token_with_exp(user_id, email, Some(exp))
+        self.generate_token_with_exp(user_id, email, None)
     }
 
-    /// MiAuth（#60: アプリトークン管理）発行用。`exp` クレームを持たせず、
-    /// `app_tokens.revoked_at` による明示的な無効化まで有効なトークンを発行する。
+    /// MiAuth（#60: アプリトークン管理）発行用。`app_tokens.revoked_at` による
+    /// 明示的な無効化まで有効なトークンを発行する（`generate_token`と実質同じ挙動）。
     pub fn generate_app_token(
         &self,
         user_id: i64,
@@ -196,34 +193,16 @@ impl LocalAuthProvider {
         Ok((token, jti))
     }
 
-    pub fn verify_token(&self, token: &str) -> Result<VerifiedUser, AuthError> {
-        self.verify_token_internal(token, true)
-    }
-
-    /// `exp` クレームを検証しない（署名検証・`sub`/`jti` 等の他クレームはそのまま検証する）
-    /// バージョン。MiAuth（#60）発行トークンは無期限だが、この仕組み導入前に発行済みの
-    /// 個体は `exp`（自社ログインと同じ7日）が埋め込まれたまま署名済みで、値を書き換える
-    /// ことはできない。`extract_auth` 側でこの関数を使ってデコードした上で、`jti` が
-    /// `app_tokens` に登録された有効な管理対象トークンであれば `exp` 切れを許容する
-    /// （登録が無い＝自社ログイン等の管理対象外トークンは、呼び出し元が `exp` を
-    /// 別途チェックして拒否する）。
+    /// ログイントークンは無期限（`exp` クレーム自体を持たない、または検証時に無視する）
+    /// ため、`exp` を検証しない。この仕組み導入前に発行済みのトークンには `exp`（旧仕様の
+    /// 7日失効）が署名済みで埋め込まれたままだが、値を書き換えることはできないため、
+    /// 検証時に無視することで無期限化を後方互換に成立させる。失効は明示的な無効化
+    /// （`app_tokens.revoked_at`）・一括失効（`users.token_valid_after`）でのみ行う。
     pub fn verify_token_ignoring_exp(&self, token: &str) -> Result<VerifiedUser, AuthError> {
-        self.verify_token_internal(token, false)
-    }
-
-    fn verify_token_internal(
-        &self,
-        token: &str,
-        validate_exp: bool,
-    ) -> Result<VerifiedUser, AuthError> {
         let key = DecodingKey::from_secret(&self.secret);
-        // MiAuth（#60）発行分は `exp` クレーム自体を持たない（無期限、`app_tokens.revoked_at`
-        // で管理）ため、`exp` を必須クレームから外す。`exp` が存在するトークン
-        // （自社ログイン発行分）については、jsonwebtoken が claims 中の `exp` を
-        // 検出して自動的に期限切れを検証する（`validate_exp` のデフォルトは true）。
         let mut validation = Validation::default();
         validation.required_spec_claims.clear();
-        validation.validate_exp = validate_exp;
+        validation.validate_exp = false;
 
         let token_data =
             decode::<LocalClaims>(token, &key, &validation).map_err(|_| AuthError::InvalidToken)?;
@@ -375,50 +354,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generate_token_has_exp_and_verifies() {
+    fn generate_token_has_no_exp_and_verifies() {
         let auth = LocalAuthProvider::new(b"test-secret".to_vec());
         let (token, jti) = auth.generate_token(1, "a@example.com").unwrap();
-        let verified = auth.verify_token(&token).unwrap();
+        let verified = auth.verify_token_ignoring_exp(&token).unwrap();
         assert_eq!(verified.user_id, 1);
         assert_eq!(verified.jti, jti);
+        assert_eq!(verified.exp, None);
     }
 
-    /// MiAuth（#60）発行分は `exp` を持たないため、7日を過ぎても検証が通り続ける
-    /// （再連携なしに突然 401 になる不具合の修正対象）。
     #[test]
     fn generate_app_token_has_no_exp_and_verifies() {
         let auth = LocalAuthProvider::new(b"test-secret".to_vec());
         let (token, jti) = auth.generate_app_token(1, "a@example.com").unwrap();
-        let verified = auth.verify_token(&token).unwrap();
+        let verified = auth.verify_token_ignoring_exp(&token).unwrap();
         assert_eq!(verified.user_id, 1);
         assert_eq!(verified.jti, jti);
     }
 
-    #[test]
-    fn expired_token_is_rejected() {
-        let secret = b"test-secret".to_vec();
-        let auth = LocalAuthProvider::new(secret.clone());
-        let past_exp = (chrono::Utc::now() - chrono::Duration::days(1)).timestamp() as usize;
-        let claims = LocalClaims {
-            sub: "local|1".to_string(),
-            email: "a@example.com".to_string(),
-            exp: Some(past_exp),
-            iat: chrono::Utc::now().timestamp() as usize,
-            jti: uuid::Uuid::new_v4(),
-        };
-        let token = encode(
-            &Header::default(),
-            &claims,
-            &EncodingKey::from_secret(&secret),
-        )
-        .unwrap();
-        assert!(auth.verify_token(&token).is_err());
-    }
-
-    /// この仕組み導入前に発行された MiAuth トークンは `exp`（自社ログインと同じ7日）が
-    /// 埋め込まれたまま署名済みのため書き換えられない。`extract_auth` 側は
-    /// `verify_token_ignoring_exp` でデコードした上で `app_tokens` の登録状況を見て
-    /// 救済する（このテストは exp 無視デコード自体が過去の exp でも成功することを保証する）。
+    /// 無期限化（この変更）より前に発行されたトークンは `exp`（旧仕様の7日失効）が
+    /// 埋め込まれたまま署名済みのため書き換えられない。`verify_token_ignoring_exp` は
+    /// 過去の `exp` でも検証を通すことで、既存発行済みトークンを無期限として扱う。
     #[test]
     fn verify_token_ignoring_exp_accepts_expired_token() {
         let secret = b"test-secret".to_vec();
@@ -439,7 +395,6 @@ mod tests {
         )
         .unwrap();
 
-        assert!(auth.verify_token(&token).is_err());
         let verified = auth.verify_token_ignoring_exp(&token).unwrap();
         assert_eq!(verified.jti, jti);
         assert_eq!(verified.exp, Some(past_exp));

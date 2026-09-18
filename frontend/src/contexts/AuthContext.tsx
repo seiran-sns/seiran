@@ -4,14 +4,6 @@ import i18n from "../i18n";
 import { api, User, getToken, setUnauthorizedHandler } from "../api/client";
 import { resolveSession } from "./authSession";
 
-/**
- * JWTのスライディング延命（有効期限7日）ポーリング間隔。使い続けている限り
- * ログアウトされないよう、期限より十分短い間隔で`/auth/me`を呼び新しいトークンへ
- * 差し替える（タブを開いたままにしている間だけ効く。閉じて7日超放置すれば
- * 再ログインが必要になるのは意図どおり）。
- */
-const TOKEN_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
-
 /** サーバーに保存された言語設定（#55）があれば、ブラウザ判定・localStorage より優先して適用する。 */
 function applyLanguagePreference(user: User) {
   if (user.language_preference) {
@@ -27,8 +19,8 @@ interface AuthContextValue {
    * `preserveRedirect: false`（既定は`true`）を指定すると、ログアウトを検知した
    * `RequireAuth`が`/login`へリダイレクトする際に`?redirect=`を付与しない
    * （ホームへ戻したい設定画面の「ログアウト」ボタン等の明示的操作向け）。
-   * トークン失効（401）・スライディング延命失敗による自動ログアウトは
-   * 既定どおり`?redirect=`を残し、再ログイン後に元の画面へ戻れるようにする。
+   * トークン失効（401）検知による自動ログアウトは既定どおり`?redirect=`を残し、
+   * 再ログイン後に元の画面へ戻れるようにする。
    */
   logout: (opts?: { preserveRedirect?: boolean }) => void;
   /** `logout({ preserveRedirect: false })`直後の1回だけ`true`。`RequireAuth`が参照する。 */
@@ -163,30 +155,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, 5000);
     return () => clearInterval(interval);
   }, [sessionUnresolved, navigate]);
-
-  // JWTのスライディング延命: タブを開いたまま使い続けている限り、7日の有効期限が
-  // 切れる前に定期的に新しいトークンへ差し替える。ログインしていない間は
-  // `/auth/me`を呼ばない（getTokenで都度確認する。userステートを依存配列に
-  // 入れるとリフレッシュのたびにuserオブジェクトが新しくなりintervalが
-  // 張り直されてしまうため、mount時に一度だけ張る）。
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!getToken()) return;
-      void resolveSession(() => api.auth.me()).then((result) => {
-        if (result.kind === "authenticated") {
-          localStorage.setItem("seiran_token", result.user.token);
-          setSessionUnresolved(false);
-        } else if (result.kind === "expired") {
-          logout();
-          navigate("/login", { replace: true });
-        } else {
-          setSessionUnresolved(true);
-        }
-      });
-    }, TOKEN_REFRESH_INTERVAL_MS);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
     <AuthContext.Provider

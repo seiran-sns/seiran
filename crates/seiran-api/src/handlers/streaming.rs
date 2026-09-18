@@ -52,7 +52,7 @@ pub async fn streaming(
     Query(q): Query<StreamQuery>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let verified = match state.local_auth.verify_token(&q.token) {
+    let verified = match state.local_auth.verify_token_ignoring_exp(&q.token) {
         Ok(v) => v,
         Err(_) => return ApiError::Unauthorized("invalid token").into_response(),
     };
