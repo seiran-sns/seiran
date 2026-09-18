@@ -1,0 +1,219 @@
+/* ログイン画面デザイン（issue #243）。3段階の離散的なブレークポイント（フルードな伸縮はしない）:
+   - ≥1340px（=900+440）: サイトタイトルエリア900px＋フォームエリア440px の横並び。全体は
+     1340px幅でビューポート内センタリング。
+   - 880px〜1339px: サイトタイトルエリアが440pxへ即座に縮む（900pxからの緩やかな縮小はしない）。
+     フォームエリア440pxと合わせて880px幅でセンタリング。
+   - <880px: 縦積み（サイトタイトルエリアが上、フォームエリアが下）に切り替わる。サイトタイトルの
+     文字サイズは880px〜1339pxモードと同じ「440pxモード」（上限72px）を使う。 */
+
+/* 背景（色/画像/動画）はビューポートに対して固定し、カルーセルのパネル開閉中に一時的に
+   コンテンツの高さが変動しても、背景がそれに合わせて伸縮して見えないようにする
+   （`background-attachment: fixed`・動画は`position: fixed`。マイケル指摘）。 */
+.page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent-strong) 12%, white);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+.backgroundVideo {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -1;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+@media (min-width: 880px) {
+  .content {
+    flex-direction: row;
+    width: 880px;
+    height: 100vh;
+    margin: 0 auto;
+  }
+}
+
+@media (min-width: 1340px) {
+  .content {
+    width: 1340px;
+  }
+}
+
+/* ─── サイトタイトルエリア ─────────────────────────────────────────── */
+
+.titleArea {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 32px 0px;
+}
+
+@media (min-width: 880px) {
+  .titleArea {
+    flex: 1 1 440px;
+    height: 100vh;
+    overflow: hidden;
+    padding: 0 48px;
+  }
+}
+
+@media (min-width: 1340px) {
+  .titleArea {
+    flex-basis: 900px;
+  }
+}
+
+.titleHalf {
+  flex: 1 1 50%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+/* サイトタイトルエリアが0px（縦積み、<880px）になるモードでのみサイト説明テキストを
+   表示しない。880px〜1339px（サイトタイトル440px＋フォーム440pxの横並び）では引き続き
+   表示する（マイケル指摘）。 */
+.descHalf {
+  display: none;
+}
+
+@media (min-width: 880px) {
+  .descHalf {
+    flex: 1 1 50%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    /* タイトルとの間に隙間を作る（中央線から少し下へ離す）。 */
+    padding-top: 16px;
+  }
+}
+
+.siteTitle {
+  color: #fff;
+  font-weight: 700;
+  text-align: center;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.siteDescription {
+  color: #fff;
+  text-align: right;
+  white-space: pre-wrap;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.6);
+  max-width: 100%;
+}
+
+/* ─── フォームエリア ────────────────────────────────────────────────── */
+
+.formArea {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 32px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 880px) {
+  .formArea {
+    flex: 0 0 440px;
+    max-width: 440px;
+    height: 100vh;
+    margin: 0;
+    padding: 48px 32px;
+    justify-content: center;
+    /* `.content`をheight:100vhに固定したため、パネル開閉中に開くパネルと閉じるパネルが
+       同時に高さを持つ瞬間があっても、この内側だけでスクロールさせて閉じ込める（外側の
+       `.titleArea`・背景まで一緒に伸縮するのを防ぐ。マイケル指摘）。 */
+    overflow-y: auto;
+  }
+}
+
+.panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.panelHeaderButton {
+  display: block;
+  width: 100%;
+  text-align: center;
+  padding: 16px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.panelHeaderButton:hover {
+  background: var(--bg-elev);
+}
+
+.panelHeading {
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+}
+
+/* 3パネルとも同じ高さ（カルーセルとして揃って見えるように、コンテンツ量に関わらず固定）。
+   `max-height`だけではコンテンツが短いパネル（ログイン・サインアップ）がそこまで伸びず
+   高さが揃わなかったため（マイケル指摘）、`min-height`も同じ値にして強制的に揃える。
+   最も項目数が多い「Blueskyから転入」パネルが収まる高さを基準にしており、収まらない場合は
+   内部スクロールする。以前はmax-height:0→2400pxのような実コンテンツと大きく乖離した値を
+   トランジションさせており、実際の見た目の変化が終端の一瞬に集中して鈍く見える問題が
+   あったため、固定値のみを使う。 */
+.panelBody {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+
+.panelActive .panelBody {
+  max-height: 680px;
+  min-height: 680px;
+  overflow-y: auto;
+}
+
+.panelBodyInner {
+  padding: 20px;
+}
+
+.poweredBy {
+  display: block;
+  width: 100%;
+  margin: 4px 0 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  text-align: center;
+  cursor: pointer;
+  padding: 4px 8px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.poweredBy:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
