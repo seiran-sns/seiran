@@ -36,6 +36,10 @@
     "body": "The app needs to be updated. Please reload the page.",
     "reload": "Reload"
   },
+  "serverUnavailable": {
+    "title": "Can't Connect to Server",
+    "body": "The server is not responding. Please wait a moment and try again."
+  },
   "remoteBanner": {
     "note": "This is a remote post",
     "user": "This is a remote user",

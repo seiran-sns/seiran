@@ -36,6 +36,10 @@
     "body": "La page doit être actualisée. Veuillez la recharger.",
     "reload": "Recharger"
   },
+  "serverUnavailable": {
+    "title": "Connexion au serveur impossible",
+    "body": "Le serveur ne répond pas. Veuillez patienter un instant puis réessayer."
+  },
   "remoteBanner": {
     "note": "Ceci est un message distant",
     "user": "Ceci est un utilisateur distant",

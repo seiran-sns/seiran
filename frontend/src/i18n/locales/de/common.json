@@ -36,6 +36,10 @@
     "body": "Die Seite muss aktualisiert werden. Bitte neu laden.",
     "reload": "Neu laden"
   },
+  "serverUnavailable": {
+    "title": "Keine Verbindung zum Server",
+    "body": "Der Server antwortet nicht. Bitte warten Sie einen Moment und versuchen Sie es erneut."
+  },
   "remoteBanner": {
     "note": "Dies ist ein Remote-Beitrag",
     "user": "Dies ist ein Remote-Benutzer",

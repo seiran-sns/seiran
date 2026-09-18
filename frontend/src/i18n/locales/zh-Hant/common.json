@@ -36,6 +36,10 @@
     "body": "頁面需要更新，請重新整理頁面。",
     "reload": "重新整理"
   },
+  "serverUnavailable": {
+    "title": "無法連線到伺服器",
+    "body": "伺服器沒有回應。請稍候片刻後再試一次。"
+  },
   "remoteBanner": {
     "note": "這是一則遠端貼文",
     "user": "這是遠端使用者",

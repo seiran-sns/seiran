@@ -36,6 +36,10 @@
     "body": "Es necesario actualizar la página. Por favor, recárgala.",
     "reload": "Recargar"
   },
+  "serverUnavailable": {
+    "title": "No se puede conectar con el servidor",
+    "body": "El servidor no responde. Por favor, espera un momento e inténtalo de nuevo."
+  },
   "remoteBanner": {
     "note": "Esta es una publicación remota.",
     "user": "Este es un usuario remoto",

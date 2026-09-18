@@ -33,6 +33,12 @@ interface AuthContextValue {
   logout: (opts?: { preserveRedirect?: boolean }) => void;
   /** `logout({ preserveRedirect: false })`直後の1回だけ`true`。`RequireAuth`が参照する。 */
   suppressLoginRedirect: boolean;
+  /**
+   * `/auth/me`がリトライしても解決できない（バックエンド停止中の接続失敗・5xx等）状態。
+   * `true`の間は認証状態が未確定なだけで未ログインと確定したわけではないため、
+   * `RequireAuth`はログイン画面へ遷移させず`ServerUnavailableDialog`を表示する。
+   */
+  sessionUnresolved: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -41,12 +47,14 @@ const AuthContext = createContext<AuthContextValue>({
   login: () => {},
   logout: () => {},
   suppressLoginRedirect: false,
+  sessionUnresolved: false,
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [suppressLoginRedirect, setSuppressLoginRedirect] = useState(false);
+  const [sessionUnresolved, setSessionUnresolved] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -63,14 +71,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem("seiran_token", result.user.token);
         setUser(result.user);
         applyLanguagePreference(result.user);
+        setSessionUnresolved(false);
       } else if (result.kind === "expired") {
         // 明示的な認証失効（401）だけがログアウトすべき理由。
         // それ以外（バックエンド再起動中の接続失敗・5xx等）でトークンを消すと、
         // 再起動のたびにログイン状態が失われてしまう（#108）。
         localStorage.removeItem("seiran_token");
+        setSessionUnresolved(false);
+      } else {
+        // "unresolved": トークンを保持したまま諦める。バックエンドが落ちているだけで
+        // 未ログインと確定したわけではないため、ログイン画面へは遷移させない
+        // （`RequireAuth`が`sessionUnresolved`を見て判断する）。
+        setSessionUnresolved(true);
       }
-      // "unresolved" はトークンを保持したまま諦める。次回のマウント（再読み込み等）で
-      // バックエンドが復旧していればログイン状態が回復する。
       setLoading(false);
     });
 
@@ -114,6 +127,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             localStorage.setItem("seiran_token", result.user.token);
             setUser(result.user);
             applyLanguagePreference(result.user);
+            setSessionUnresolved(false);
+          } else {
+            setSessionUnresolved(true);
           }
         })
         .finally(() => {
@@ -126,6 +142,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [navigate]);
 
+  // sessionUnresolved（バックエンド停止中等で認証状態が未確定）の間、復旧を検知するため
+  // 短い間隔で`/auth/me`を再試行する。ここでのリトライは`resolveSession`自身の
+  // リトライ（1s/2s/4s）と二重にしないよう1回勝負にする。
+  useEffect(() => {
+    if (!sessionUnresolved) return;
+    const interval = setInterval(() => {
+      void resolveSession(() => api.auth.me(), []).then((result) => {
+        if (result.kind === "authenticated") {
+          localStorage.setItem("seiran_token", result.user.token);
+          setUser(result.user);
+          applyLanguagePreference(result.user);
+          setSessionUnresolved(false);
+        } else if (result.kind === "expired") {
+          logout();
+          navigate("/login", { replace: true });
+        }
+        // "unresolved" ならそのまま次回のポーリングまで待つ。
+      });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [sessionUnresolved, navigate]);
+
   // JWTのスライディング延命: タブを開いたまま使い続けている限り、7日の有効期限が
   // 切れる前に定期的に新しいトークンへ差し替える。ログインしていない間は
   // `/auth/me`を呼ばない（getTokenで都度確認する。userステートを依存配列に
@@ -137,9 +175,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       void resolveSession(() => api.auth.me()).then((result) => {
         if (result.kind === "authenticated") {
           localStorage.setItem("seiran_token", result.user.token);
+          setSessionUnresolved(false);
         } else if (result.kind === "expired") {
           logout();
           navigate("/login", { replace: true });
+        } else {
+          setSessionUnresolved(true);
         }
       });
     }, TOKEN_REFRESH_INTERVAL_MS);
@@ -148,7 +189,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, suppressLoginRedirect }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, logout, suppressLoginRedirect, sessionUnresolved }}
+    >
       {children}
     </AuthContext.Provider>
   );

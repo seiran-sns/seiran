@@ -36,6 +36,10 @@
     "body": "页面需要更新，请刷新页面。",
     "reload": "刷新"
   },
+  "serverUnavailable": {
+    "title": "无法连接到服务器",
+    "body": "服务器没有响应。请稍等片刻后重试。"
+  },
   "remoteBanner": {
     "note": "这是一个远程帖子",
     "user": "这是远程用户",

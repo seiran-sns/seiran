@@ -10,6 +10,7 @@ import { StreamingProvider } from "./contexts/StreamingContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import ReloadRequiredDialog from "./components/common/ReloadRequiredDialog";
+import ServerUnavailableDialog from "./components/common/ServerUnavailableDialog";
 import HomePage from "./pages/HomePage";
 
 const AccountSettingsPage = lazy(() => import("./pages/AccountSettingsPage"));
@@ -45,9 +46,11 @@ const VerifyEmailChange = lazy(() => import("./pages/VerifyEmailChange"));
 const TotpDisable = lazy(() => import("./pages/TotpDisable"));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user, loading, suppressLoginRedirect } = useAuth();
+  const { user, loading, suppressLoginRedirect, sessionUnresolved } = useAuth();
   const location = useLocation();
-  if (loading) return null;
+  // バックエンド停止中等で認証状態が未確定なだけの場合はログイン画面へ遷移させない
+  // （`ServerUnavailableDialog`がグローバルに通知する）。
+  if (loading || sessionUnresolved) return null;
   if (!user) {
     if (suppressLoginRedirect) return <Navigate to="/login" replace />;
     const redirect = encodeURIComponent(location.pathname + location.search);
@@ -330,6 +333,7 @@ export default function App() {
                   <ComposerProvider>
                     <AppRoutes />
                     <ReloadRequiredDialog />
+                    <ServerUnavailableDialog />
                   </ComposerProvider>
                 </HomeFeedProvider>
               </RightPaneProvider>
