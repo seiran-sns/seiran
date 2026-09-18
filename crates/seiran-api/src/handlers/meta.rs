@@ -2,6 +2,7 @@ use axum::{extract::State, response::IntoResponse, Json};
 use serde_json::json;
 
 use crate::handlers::emojis::fetch_public_emojis;
+use crate::handlers::notes::validation::strip_html_tags;
 use crate::handlers::notes::BSKY_MAX_TEXT_GRAPHEMES;
 use seiran_common::version::SERVER_VERSION;
 use crate::AppState;
@@ -27,7 +28,9 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
     let require_email_verification = get("require_email_verification") == "true";
 
     // サイト外観（#30）。未設定時はデフォルト（name=seiran）。
-    let site_name = {
+    // site_name はHTML可（#243、ログイン画面のサイトタイトル表示に使う）。Misskey互換の
+    // `name`やnodeinfo/PWAマニフェスト等、HTML想定でない場所へはタグ除去したプレーンテキストを渡す。
+    let site_title_html = {
         let n = get("site_name");
         if n.is_empty() {
             "seiran".to_string()
@@ -35,6 +38,7 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
             n
         }
     };
+    let site_name = strip_html_tags(&site_title_html);
 
     // Misskey クライアントの絵文字ピッカー・投稿フォームが参照する標準フィールド。
     // 値は `/api/emojis` および `notes/create` の実際のバリデーションと同じソースを使う。
@@ -66,6 +70,12 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
         "siteColor": get("site_color"),
         "siteIconUrl": get("site_icon_url"),
         "mediaProxyUrl": media_proxy_url,
+        // ログイン画面デザイン（#243）。siteTitleHtml/siteDescriptionHtmlは管理者のみが
+        // 書き込める設定値なのでサニタイズせず生HTMLのまま返す（フロント側もそのまま描画する）。
+        "siteTitleHtml": site_title_html,
+        "siteDescriptionHtml": get("site_description"),
+        "loginBackgroundUrl": get("login_bg_url"),
+        "loginBackgroundType": get("login_bg_type"),
         "internalMediaOrigins": internal_media_origins,
         "emojis": emojis,
         // Bsky 配信時の書記素クラスタ上限（validate_text_length と同じ値）。

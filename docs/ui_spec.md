@@ -397,6 +397,27 @@ LightBoxで開いた際の解除ボタンは、画面全体ではなくLightBox�
 
 引用カード（2.2f節）・リポストラッパーの元投稿・投稿詳細画面でのスレッド遡り（返信先として積み上げる小カード）は、いずれも参照先が`Note.authorSuspended`な場合、本文・添付・URLカード・アンケート・リアクションチップを「凍結されたユーザーのポストです」というプレースホルダ文言に差し替える（`NoteCard`の引用カード・`PostContent`の`isMainSubject`が`false`の場合の共通挙動）。カード自体はクリック可能なままで、その投稿の詳細画面（`/notes/:id`）へ遷移すれば実データを読める。投稿詳細画面で直接開いている主役ポスト自身（`isMainSubject`）は、凍結ユーザー本人の投稿であってもこのredactionを行わない（パーマリンク直アクセスは常に実データを見せる）。タイムライン・検索・ハッシュタグ等の一覧からは、凍結ユーザーの投稿自体がそもそも表示されない（`docs/database.md`「`actors.suspended_at`」参照）。
 
+# ログイン画面（issue #243）
+
+`/login`・`/register`・`/register/migrate` は共通の1画面（`pages/auth/AuthCarouselPage`）として描画され、URLの違いはアクティブなフォームパネルの違いにのみ反映される（`/register/migrate/status`は既存DID転入の進行状況表示専用ページのまま独立、対象外）。
+
+## レイアウト
+
+- ビューポート幅≥880pxは横並び：左〜中央がサイトタイトル表示エリア（440px〜900pxの間で流動的に伸縮）、右が幅440px固定のフォームエリア。
+- 880px未満は縦積み：サイトタイトル表示エリアが上、フォームエリア（最大440px、中央寄せ）が下。
+- サイトタイトル表示エリアは上下2分割し、上半分下端にサイトタイトル、下半分上端・右寄せにサイト説明文を配置する。
+- 背景は既定でサイトカラー（`site_color`）を白に混合した色（`color-mix(in srgb, var(--accent-strong) 12%, white)`）。管理画面で「ログイン画面背景」（`login_bg_url`/`login_bg_type`）に画像または動画を設定した場合はそれを全面に敷く。動画は`autoplay loop muted playsinline`で環境動画として再生する。
+
+## サイトタイトル・説明文
+
+- サイトタイトルは管理画面「サイト名」（`site_name`）の値をHTMLのまま描画する（管理者専用入力のためサニタイズしない）。他インスタンスへの通知（nodeinfoの`nodeName`）・PWAマニフェスト名・OGPの`og:site_name`・HTML`<title>`タグには、同じ値からHTMLタグを除去したプレーンテキスト版を使う。
+- サイトタイトルの文字サイズは、`frontend/src/hooks/useFitTextSize.ts`（ResizeObserver＋二分探索でfont-sizeを実測調整）により、改行させずコンテナ幅へ収まる最大サイズを都度計算する。上限は横並びモードで144px、縦積みモードで72px。
+- サイト説明文は管理画面「サイト説明テキスト」（`site_description`）の値をHTMLのまま右寄せ表示する。`white-space: pre-wrap`によりプレーンテキストの改行もそのまま機能する。
+
+## フォームエリア（縦カルーセル）
+
+ログイン・サインアップ・Blueskyから転入の3パネルを縦に並べる。非アクティブなパネルは見出しボタン（クリックで対応するルートへ遷移）だけの高さに縮み、アクティブなパネルは見出し＋フォーム全体を展開する（`max-height`トランジションによるアコーディオン）。3パネルは常に全てマウントされたままCSSで開閉するため、サインアップのメール確認送信済み状態や転入フォームの2FAコード入力状態など、フォーム内の途中状態は他パネルへ切り替えても保持され、再度そのパネルをアクティブにすると続きから再開できる。各パネル共通のフッターに「powered by Seiran」ボタン（クリックでサーバー詳細ダイアログを開く）を1つ配置する。
+
 # Unicode絵文字の表示（twemoji）
 
 Unicode絵文字（本文中・表示名中・絵文字リアクション・絵文字ピッカーのグリッド・アクションメニューやナビの装飾アイコン等）は、OS/ブラウザのネイティブグリフに任せず、jdecked/twemoji（`@twemoji/parser` + `@twemoji/svg`）のSVGをセルフホストして統一表示する。アセットは `frontend/scripts/copy-twemoji-assets.mjs` が `npm install` の `postinstall` で `node_modules/@twemoji/svg` から `frontend/public/twemoji/` へコピーする（git管理外、`.gitignore`）。

@@ -14,9 +14,27 @@ interface SiteMeta {
   color: string;
   /** サーバーのバージョン（`GET /api/meta`の`version`、「このサーバーの詳細」ダイアログ表示用）。 */
   serverVersion: string;
+  /** サイトタイトルの生HTML版（#243、ログイン画面のタイトル表示専用）。管理者専用入力のため
+   * サニタイズせずそのまま描画する想定。 */
+  titleHtml: string;
+  /** サイト説明テキストの生HTML版（#243、ログイン画面専用）。 */
+  descriptionHtml: string;
+  loginBackgroundUrl: string;
+  loginBackgroundType: "image" | "video" | "";
 }
 
-const SiteMetaContext = createContext<SiteMeta>({ name: "seiran", iconUrl: "", color: "", serverVersion: "" });
+const EMPTY_SITE_META: SiteMeta = {
+  name: "seiran",
+  iconUrl: "",
+  color: "",
+  serverVersion: "",
+  titleHtml: "",
+  descriptionHtml: "",
+  loginBackgroundUrl: "",
+  loginBackgroundType: "",
+};
+
+const SiteMetaContext = createContext<SiteMeta>(EMPTY_SITE_META);
 
 /** site_color から派生アクセント色を CSS 変数に適用する。インラインstyle（documentElement）は
  * `:root[data-theme="dark"]`より詳細度が高くダークモードの既定パレットを上書きしてしまうため、
@@ -61,7 +79,7 @@ function applyFavicon(iconUrl: string) {
 
 export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
   const { effectiveTheme } = useTheme();
-  const [meta, setMeta] = useState<SiteMeta>({ name: "seiran", iconUrl: "", color: "", serverVersion: "" });
+  const [meta, setMeta] = useState<SiteMeta>(EMPTY_SITE_META);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -70,11 +88,15 @@ export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
       .then((m) => {
         configureMediaProxy(m.mediaProxyUrl ?? "");
         configureInternalMediaOrigins(m.internalMediaOrigins ?? []);
-        const next = {
+        const next: SiteMeta = {
           name: m.name || "seiran",
           iconUrl: m.siteIconUrl ?? "",
           color: m.siteColor ?? "",
           serverVersion: m.version,
+          titleHtml: m.siteTitleHtml || m.name || "seiran",
+          descriptionHtml: m.siteDescriptionHtml ?? "",
+          loginBackgroundUrl: m.loginBackgroundUrl ?? "",
+          loginBackgroundType: m.loginBackgroundType ?? "",
         };
         setMeta(next);
         applyFavicon(next.iconUrl);

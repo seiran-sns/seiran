@@ -23,6 +23,13 @@ pub struct SiteSettingsResponse {
     /// アップロード経由で設定した場合の対応 `media_files.sha256`（PWAアイコン配信用）。
     pub site_icon_sha256: String,
     pub media_proxy_url: String,
+    // ログイン画面デザイン（#243）
+    /// サイト説明テキスト。HTML可・改行保持、サニタイズしない（管理者専用入力のため）。
+    pub site_description: String,
+    /// ログイン画面背景メディアのURL（画像/動画どちらも可）。
+    pub login_bg_url: String,
+    /// "image" | "video"。login_bg_url のメディア種別。
+    pub login_bg_type: String,
     // 認証ブルートフォース対策（#223）
     pub auth_bruteforce_window_minutes: String,
     pub auth_bruteforce_max_variants: String,
@@ -77,6 +84,12 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .cloned()
             .unwrap_or_default(),
         media_proxy_url: settings.get("media_proxy_url").cloned().unwrap_or_default(),
+        site_description: settings
+            .get("site_description")
+            .cloned()
+            .unwrap_or_default(),
+        login_bg_url: settings.get("login_bg_url").cloned().unwrap_or_default(),
+        login_bg_type: settings.get("login_bg_type").cloned().unwrap_or_default(),
         auth_bruteforce_window_minutes: settings
             .get("auth_bruteforce_window_minutes")
             .cloned()
@@ -191,6 +204,9 @@ pub struct UpdateSiteSettingsRequest {
     pub site_icon_url: Option<String>,
     pub site_icon_sha256: Option<String>,
     pub media_proxy_url: Option<String>,
+    pub site_description: Option<String>,
+    pub login_bg_url: Option<String>,
+    pub login_bg_type: Option<String>,
     pub auth_bruteforce_window_minutes: Option<String>,
     pub auth_bruteforce_max_variants: Option<String>,
     pub auth_ip_block_window_minutes: Option<String>,
@@ -355,6 +371,15 @@ pub async fn update_site_settings(
         req.media_proxy_url
             .as_deref()
             .map(|v| ("media_proxy_url", v.trim_end_matches('/').to_string())),
+        req.site_description
+            .as_deref()
+            .map(|v| ("site_description", v.to_string())),
+        req.login_bg_url
+            .as_deref()
+            .map(|v| ("login_bg_url", v.to_string())),
+        req.login_bg_type
+            .as_deref()
+            .map(|v| ("login_bg_type", v.to_string())),
         req.auth_bruteforce_window_minutes
             .as_deref()
             .map(|v| ("auth_bruteforce_window_minutes", v.to_string())),

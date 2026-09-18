@@ -5,6 +5,7 @@ use axum::{
 };
 use serde_json::json;
 
+use crate::handlers::notes::validation::strip_html_tags;
 use crate::AppState;
 
 /// `GET /manifest.webmanifest`
@@ -16,13 +17,12 @@ pub async fn manifest(State(state): State<AppState>) -> impl IntoResponse {
     let settings = state.site_settings.get_all().await.unwrap_or_default();
     let get = |k: &str| settings.get(k).cloned().unwrap_or_default();
 
+    // site_name はHTML可（#243）。PWAマニフェストの name/short_name はHTML想定ではないため、
+    // タグを除去したプレーンテキストを使う。
     let site_name = {
         let n = get("site_name");
-        if n.is_empty() {
-            "seiran".to_string()
-        } else {
-            n
-        }
+        let n = if n.is_empty() { "seiran".to_string() } else { n };
+        strip_html_tags(&n)
     };
     let theme_color = {
         let c = get("site_color");

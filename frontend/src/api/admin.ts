@@ -110,6 +110,9 @@ export const admin = {
       site_icon_url: string;
       site_icon_sha256: string;
       media_proxy_url: string;
+      site_description: string;
+      login_bg_url: string;
+      login_bg_type: string;
       auth_bruteforce_window_minutes: string;
       auth_bruteforce_max_variants: string;
       auth_ip_block_window_minutes: string;

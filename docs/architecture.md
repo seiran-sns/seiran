@@ -285,6 +285,8 @@ pub struct SearchSession {
 
 **PWA対応（ホーム画面追加）**: `GET /manifest.webmanifest` が `site_settings`（`site_name`/`site_color`/`site_icon_sha256`）から Web App Manifest を都度動的生成する（`display: standalone`）。アイコンは `GET /api/site-icon/:sha256/:size` が管理画面でアップロードしたサイトアイコン（`media_files`）を指定サイズのPNGへリサイズして返す。URLがsha256をパスに含むcontent-addressableな形式のため `Cache-Control: immutable` で長期キャッシュできる（同じ画像に戻せばCDN上の古いキャッシュがそのまま再利用される）。アニメーション画像（GIF/APNG/WebPアニメ）はリサイズせず元バイト列のまま返す（`image` crateがアニメーションPNG/WebPの書き出しに非対応なことに加え、管理者が意図した演出を静止画化しないため）。`/favicon.ico` は `site_icon_sha256` が設定されていれば `/api/site-icon/:sha256/32` へ、未設定なら従来通り `site_icon_url` へ直接リダイレクトする。`nginx.conf`/`nginx.mono.conf` は `/favicon.ico` 同様 `/manifest.webmanifest` をAPIロールへ振り分ける（`/api/site-icon/...` は既存の `/api/` プレフィックスでカバーされる）。オフライン動作・プッシュ通知は非対応（Service Workerを導入していない）。
 
+**サイト外観設定とHTMLタグ除去（#30/#243）**: `site_settings`の`site_name`（サイト名）・`site_description`（ログイン画面用サイト説明文）はいずれも管理者専用入力でHTMLタグを許容し（ログイン画面のサイトタイトル・説明文表示でHTMLのまま描画、フォント指定等に使える）、サニタイズしない。一方、Web App Manifestの`name`/`short_name`、nodeinfoの`nodeName`/`nodeDescription`、OGPの`og:site_name`、HTMLの`<title>`タグなど、HTML入力を想定しない箇所へ渡す際は、それぞれからHTMLタグを除去したプレーンテキスト版を使う（`crates/seiran-api/src/handlers/notes/validation.rs::strip_html_tags`。`seiran-federation-inbox`crateの`nodeinfo.rs`は別crateのため同等の軽量実装を独自に持つ）。`POST /api/meta`は`name`（タグ除去済み）と`siteTitleHtml`（生HTML版、ログイン画面が使う）の両方を返す。ログイン画面背景（`login_bg_url`/`login_bg_type`、画像/動画）を含むログイン画面デザイン全体の仕様は`docs/ui_spec.md`「ログイン画面」節を参照。
+
 ## 8. フロントエンド
 
 React 18 + Vite + TypeScript（react-router-dom v7、declarative mode。`<BrowserRouter>`＋`useNavigate`/`useParams`等のフック中心で、データルーター（`createBrowserRouter`等）は不使用）。`frontend/src/` 構成:

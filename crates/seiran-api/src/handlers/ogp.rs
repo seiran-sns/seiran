@@ -15,6 +15,7 @@ use axum::{
 };
 use sqlx::Row;
 
+use crate::handlers::notes::validation::strip_html_tags;
 use crate::handlers::notes::{fetch_attachments_map, to_note_response};
 use crate::AppState;
 
@@ -172,14 +173,17 @@ pub fn wants_html(headers: &HeaderMap) -> bool {
     !accept.contains("application/activity+json") && !accept.contains("application/ld+json")
 }
 
+/// site_name はHTML可（#243）。OGPの`og:site_name`はHTML想定でないため、タグを
+/// 除去したプレーンテキストを返す（呼び出し側で更に`escape_html`される）。
 async fn site_name(state: &AppState) -> String {
     let settings = state.site_settings.get_all().await.unwrap_or_default();
     let name = settings.get("site_name").cloned().unwrap_or_default();
-    if name.is_empty() {
+    let name = if name.is_empty() {
         "seiran".to_string()
     } else {
         name
-    }
+    };
+    strip_html_tags(&name)
 }
 
 /// ポスト詳細ページ用の OGP 付き SPA HTML を返す（`GET /notes/:id`、AP Accept 以外）。

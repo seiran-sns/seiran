@@ -22,9 +22,8 @@ const HashtagPage = lazy(() => import("./pages/HashtagPage"));
 const ListDetailPage = lazy(() => import("./pages/ListDetailPage"));
 const ListsSettingsPage = lazy(() => import("./pages/ListsSettingsPage"));
 const AppearanceSettingsPage = lazy(() => import("./pages/AppearanceSettingsPage"));
-const Login = lazy(() => import("./pages/Login"));
+const AuthCarouselPage = lazy(() => import("./pages/auth/AuthCarouselPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
-const MigrateRegister = lazy(() => import("./pages/MigrateRegister"));
 const MigrationStatusPage = lazy(() => import("./pages/MigrationStatusPage"));
 const MigrationImportingPage = lazy(() => import("./pages/MigrationImportingPage"));
 const MiAuthConnectPage = lazy(() => import("./pages/MiAuthConnectPage"));
@@ -34,7 +33,6 @@ const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
 const PrivacySettingsPage = lazy(() => import("./pages/PrivacySettingsPage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const ProfileEditPage = lazy(() => import("./pages/ProfileEditPage"));
-const Register = lazy(() => import("./pages/Register"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const SearchPage = lazy(() => import("./pages/SearchPage"));
 const SettingsMenuPage = lazy(() => import("./pages/SettingsMenuPage"));
@@ -283,7 +281,7 @@ function AppRoutes() {
           path="/login"
           element={
             <RedirectIfAuthed>
-              <Login />
+              <AuthCarouselPage />
             </RedirectIfAuthed>
           }
         />
@@ -291,7 +289,7 @@ function AppRoutes() {
           path="/register"
           element={
             <RedirectIfAuthed>
-              <Register />
+              <AuthCarouselPage />
             </RedirectIfAuthed>
           }
         />
@@ -299,7 +297,7 @@ function AppRoutes() {
           path="/register/migrate"
           element={
             <RedirectIfAuthed>
-              <MigrateRegister />
+              <AuthCarouselPage />
             </RedirectIfAuthed>
           }
         />

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import type { MigrationStatusResponse } from "../api/migration";
 import { useAuth } from "../contexts/AuthContext";
-import { clearStoredMigrationRequest, loadStoredMigrationRequest } from "./MigrateRegister";
+import { clearStoredMigrationRequest, loadStoredMigrationRequest } from "./migrationStorage";
 import styles from "./Auth.module.css";
 
 const POLL_INTERVAL_MS = 3000;

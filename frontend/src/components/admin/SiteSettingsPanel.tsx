@@ -28,6 +28,13 @@ export default function SiteSettingsPanel() {
   const [uploadingIcon, setUploadingIcon] = useState(false);
   const iconRef = useRef<HTMLInputElement>(null);
 
+  // ログイン画面デザイン（#243）
+  const [siteDescription, setSiteDescription] = useState("");
+  const [loginBgUrl, setLoginBgUrl] = useState("");
+  const [loginBgType, setLoginBgType] = useState("");
+  const [uploadingBg, setUploadingBg] = useState(false);
+  const bgRef = useRef<HTMLInputElement>(null);
+
   // 認証系レート制限（#223）
   const [bruteforceWindowMinutes, setBruteforceWindowMinutes] = useState("");
   const [bruteforceMaxVariants, setBruteforceMaxVariants] = useState("");
@@ -74,6 +81,9 @@ export default function SiteSettingsPanel() {
         setSiteIconUrl(s.site_icon_url);
         setSiteIconSha256(s.site_icon_sha256);
         setMediaProxyUrl(s.media_proxy_url);
+        setSiteDescription(s.site_description);
+        setLoginBgUrl(s.login_bg_url);
+        setLoginBgType(s.login_bg_type);
         setBruteforceWindowMinutes(s.auth_bruteforce_window_minutes);
         setBruteforceMaxVariants(s.auth_bruteforce_max_variants);
         setIpBlockWindowMinutes(s.auth_ip_block_window_minutes);
@@ -120,6 +130,23 @@ export default function SiteSettingsPanel() {
     }
   }
 
+  async function onBg(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploadingBg(true);
+    setError("");
+    try {
+      const f = await api.media.upload(file, "banner");
+      setLoginBgUrl(f.url);
+      setLoginBgType(f.mimeType.startsWith("video/") ? "video" : "image");
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setUploadingBg(false);
+    }
+  }
+
   async function save(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -137,6 +164,9 @@ export default function SiteSettingsPanel() {
         site_icon_url: siteIconUrl,
         site_icon_sha256: siteIconSha256,
         media_proxy_url: mediaProxyUrl,
+        site_description: siteDescription,
+        login_bg_url: loginBgUrl,
+        login_bg_type: loginBgType,
         auth_bruteforce_window_minutes: bruteforceWindowMinutes,
         auth_bruteforce_max_variants: bruteforceMaxVariants,
         auth_ip_block_window_minutes: ipBlockWindowMinutes,
@@ -192,6 +222,49 @@ export default function SiteSettingsPanel() {
             {t("admin:siteSettingsPanel.siteNameLabel")}
             <input className={styles.input} value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="seiran" />
           </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.siteNameHtmlHint")}</p>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.siteDescriptionLabel")}
+            <textarea
+              className={styles.input}
+              rows={4}
+              value={siteDescription}
+              onChange={(e) => setSiteDescription(e.target.value)}
+            />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.siteDescriptionHint")}</p>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.loginBackgroundLabel")}
+            <span className={styles.actions} style={{ marginTop: 4 }}>
+              <input ref={bgRef} type="file" accept="image/*,video/*" style={{ display: "none" }} onChange={onBg} />
+              {loginBgUrl && loginBgType === "video" && (
+                <video src={loginBgUrl} muted loop style={{ width: 80, height: 45, borderRadius: 8, objectFit: "cover" }} />
+              )}
+              {loginBgUrl && loginBgType !== "video" && (
+                <img src={loginBgUrl} alt="" style={{ width: 80, height: 45, borderRadius: 8, objectFit: "cover" }} />
+              )}
+              <button type="button" className={styles.btnGhost} onClick={() => bgRef.current?.click()} disabled={uploadingBg}>
+                {uploadingBg
+                  ? t("admin:siteSettingsPanel.uploading")
+                  : loginBgUrl
+                    ? t("admin:siteSettingsPanel.changeBackgroundButton")
+                    : t("admin:siteSettingsPanel.selectBackgroundButton")}
+              </button>
+              {loginBgUrl && (
+                <button
+                  type="button"
+                  className={styles.btnGhost}
+                  onClick={() => {
+                    setLoginBgUrl("");
+                    setLoginBgType("");
+                  }}
+                >
+                  {t("common:delete")}
+                </button>
+              )}
+            </span>
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.loginBackgroundHint")}</p>
           <label className={styles.label} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             {t("admin:siteSettingsPanel.siteColorLabel")}
             <input type="color" value={siteColor || "#2563eb"} onChange={(e) => setSiteColor(e.target.value)} style={{ width: 48, height: 32, padding: 0, border: "none", background: "none" }} />
