@@ -49,7 +49,7 @@ export const media = {
    */
   upload(
     file: File,
-    mediaType: "post" | "emoji" | "avatar" | "banner" = "post",
+    mediaType: "post" | "emoji" | "avatar" | "banner" | "login_background" = "post",
     deliverToBsky = true,
   ): Promise<DriveFile> {
     const formData = new FormData();

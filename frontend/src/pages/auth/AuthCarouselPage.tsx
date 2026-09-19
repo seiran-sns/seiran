@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { CSSProperties, ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
@@ -115,9 +115,19 @@ export default function AuthCarouselPage() {
     setMigrateState((prev) => ({ ...prev, ...patch }));
   }
 
-  const pageStyle =
+  // 静止画像モードでは`.page`のCSS既定背景（サイトカラーを混ぜた色）を画像で明示的に
+  // 上書きする。動画モードでは既定背景をそのまま残し、動画の実体フェッチが終わるまでの
+  // 「読み込み中フォールバック色」として使う（動画本体は`.backgroundVideo`のz-indexで
+  // この背景より確実に上に重なるようレイアウトしてある）。
+  const pageStyle: CSSProperties | undefined =
     loginBackgroundUrl && loginBackgroundType === "image"
-      ? { backgroundImage: `url(${loginBackgroundUrl})` }
+      ? {
+          backgroundImage: `url(${loginBackgroundUrl})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+          backgroundColor: "transparent",
+        }
       : undefined;
 
   return (

@@ -407,7 +407,7 @@ LightBoxで開いた際の解除ボタンは、画面全体ではなくLightBox�
 - ビューポート幅≥880pxは横並び：左〜中央がサイトタイトル表示エリア（440px〜900pxの間で流動的に伸縮）、右が幅440px固定のフォームエリア。
 - 880px未満は縦積み：サイトタイトル表示エリアが上、フォームエリア（最大440px、中央寄せ）が下。
 - サイトタイトル表示エリアは上下2分割し、上半分下端にサイトタイトル、下半分上端・右寄せにサイト説明文を配置する。
-- 背景は既定でサイトカラー（`site_color`）を白に混合した色（`color-mix(in srgb, var(--accent-strong) 12%, white)`）。管理画面で「ログイン画面背景」（`login_bg_url`/`login_bg_type`）に画像または動画を設定した場合はそれを全面に敷く。動画は`autoplay loop muted playsinline`で環境動画として再生する。
+- 背景は既定でサイトカラー（`site_color`）を白に混合した色（`color-mix(in srgb, var(--accent-strong) 12%, white)`）。管理画面で「ログイン画面背景」（`login_bg_url`/`login_bg_type`）に画像または動画を設定した場合はそれを全面に敷く。動画は`autoplay loop muted playsinline`で環境動画として再生する。アップロードは`POST /api/drive/files/create`の`media_type=login_background`を使う（プロフィールアバター・バナーと異なりこの種別のみ動画・音声も許可、`crates/seiran-api/src/handlers/drive.rs`）。投稿に紐づかないため`deliver_to_bsky=false`でBsky動画配信パイプラインへは提出しない。
 
 ## サイトタイトル・説明文
 

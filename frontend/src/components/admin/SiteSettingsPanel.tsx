@@ -137,7 +137,8 @@ export default function SiteSettingsPanel() {
     setUploadingBg(true);
     setError("");
     try {
-      const f = await api.media.upload(file, "banner");
+      // ログイン画面背景はどの投稿にも属さないので、Bsky動画配信パイプラインへは提出しない。
+      const f = await api.media.upload(file, "login_background", false);
       setLoginBgUrl(f.url);
       setLoginBgType(f.mimeType.startsWith("video/") ? "video" : "image");
     } catch (err) {

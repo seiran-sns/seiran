@@ -74,7 +74,9 @@ pub struct DriveFileProperties {
 ///
 /// multipart/form-data フィールド:
 ///   - `file`      : 画像バイナリ（必須）
-///   - `media_type`: "avatar" | "banner" | "emoji" | "post"（省略時は "post"）
+///   - `media_type`: "avatar" | "banner" | "emoji" | "post" | "login_background"（省略時は "post"）
+///     "login_background"（#243、管理画面のログイン画面背景設定）のみ動画・音声も許可する
+///     （画像扱いの他種別と異なり、`create_video_or_audio_file`へフォールバックできる）。
 ///
 /// アクティブなストレージプロバイダーが設定されていない場合は 503 を返す。
 /// ストレージプロバイダーの容量上限を超過する場合は 507 `STORAGE_QUOTA_EXCEEDED` を返す。
@@ -199,7 +201,7 @@ pub async fn create_drive_file(
 
     let kind = match media_type_str.as_str() {
         "avatar" => MediaKind::Avatar,
-        "banner" => MediaKind::Banner,
+        "banner" | "login_background" => MediaKind::Banner,
         "emoji" => MediaKind::Emoji,
         _ => MediaKind::Post,
     };
@@ -208,8 +210,9 @@ pub async fn create_drive_file(
     let sniffed_mime = sniff_mime_type(&raw_bytes, "application/octet-stream");
     let is_image = sniffed_mime.starts_with("image/");
 
-    // アバター・バナー・絵文字は画像限定（動画・音声は投稿添付のみ許可）
-    if !matches!(kind, MediaKind::Post) && !is_image {
+    // アバター・バナー・絵文字は画像限定（動画・音声は投稿添付とログイン画面背景のみ許可、#243）
+    let allows_video_or_audio = matches!(kind, MediaKind::Post) || media_type_str == "login_background";
+    if !allows_video_or_audio && !is_image {
         return Err(ApiError::BadRequest(
             "画像ファイルのみアップロードできます".to_owned(),
         ));
