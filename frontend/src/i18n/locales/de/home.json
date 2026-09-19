@@ -98,6 +98,7 @@
   "postComposer": {
     "deliverFediHint": "An das Fediverse senden",
     "deliverBskyHint": "An Bluesky senden",
+    "bskyEmojiWarningHint": "⚠️Benutzerdefinierte Emojis im Beitragstext können für Bluesky nicht eingebettet werden",
     "postLanguageHint": "Sprache des Beitrags (für die Zustellung an Bluesky)",
     "visibilityPublicHint": "Öffentlich: für alle sichtbar",
     "visibilityUnlistedHint": "Nicht gelistet: sichtbar, aber nicht in lokalen und globalen Timelines",

@@ -98,6 +98,7 @@
   "postComposer": {
     "deliverFediHint": "傳送到聯邦宇宙",
     "deliverBskyHint": "傳送到 Bluesky",
+    "bskyEmojiWarningHint": "⚠️內文中的自訂表情符號無法嵌入至 Bluesky",
     "postLanguageHint": "貼文語言（用於傳送到 Bluesky）",
     "visibilityPublicHint": "公開：所有人可見",
     "visibilityUnlistedHint": "不列出：所有人可見，但不會顯示在本地與全域時間軸",

@@ -34,6 +34,9 @@ interface ComposerEditorProps {
   onImagePaste: (file: File) => void;
   placeholder: string;
   autoFocus?: boolean;
+  /** Bsky配送オンの間はカスタム絵文字ショートコードを画像展開せず、警告色のテキストの
+   * ままにする（Bsky側では本文内カスタム絵文字を埋め込めないため、マイケル指示）。 */
+  federateToBsky?: boolean;
 }
 
 const MENTION_RE =
@@ -199,7 +202,7 @@ function twemojiHtml(text: string, emojiClassName: string): string {
 }
 
 const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(function ComposerEditor(
-  { value, onChange, onSubmitShortcut, onImagePaste, placeholder, autoFocus },
+  { value, onChange, onSubmitShortcut, onImagePaste, placeholder, autoFocus, federateToBsky },
   forwardedRef,
 ) {
   const { t } = useTranslation();
@@ -323,7 +326,14 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
     if (pendingCaret.current === null || !editorRef.current) return;
     restoreSelection(editorRef.current, pendingCaret.current);
     pendingCaret.current = null;
-  }, [value, knownMentions, emojis]);
+  }, [value, knownMentions, emojis, federateToBsky]);
+
+  // Bsky配送トグルの切り替えで絵文字展開の有無が変わりDOMが作り直されるため、
+  // 直前のcaret位置を保存して上のuseLayoutEffectで復元する。
+  useEffect(() => {
+    preserveCaretForRender();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [federateToBsky]);
 
   useEffect(() => {
     if (!autoFocus || !editorRef.current) return;
@@ -453,6 +463,12 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
       .map((part) => {
         const emoji = emojiByCode.get(part);
         if (emoji) {
+          if (federateToBsky) {
+            // Bskyはカスタム絵文字を画像展開できないため、画像化せずショートコードの
+            // まま警告色で表示する（マイケル指示）。編集可能なテキストとして扱うため
+            // mentionKnown/mentionUnknown同様contenteditable制御・data-valueは付けない。
+            return `<span class="${styles.emojiBskyWarn}" title="${escapeHtml(part)}">${escapeHtml(part)}</span>`;
+          }
           return `<span class="${styles.emoji}" contenteditable="false" data-value="${escapeHtml(part)}"><img src="${escapeHtml(emoji.url)}" alt="${escapeHtml(part)}" title="${escapeHtml(part)}"></span>`;
         }
         if (part.startsWith("@")) {

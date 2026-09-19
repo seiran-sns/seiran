@@ -17,6 +17,7 @@ import {
   DriveFile,
   Note,
   PollCreateInput,
+  PublicEmoji,
   getErrorMessage,
 } from "../../api/client";
 import {
@@ -26,6 +27,7 @@ import {
   displayName,
   extractBodyUrls,
 } from "../../lib/format";
+import { containsKnownCustomEmojiShortcode, fetchCustomEmojis } from "../../lib/customEmojis";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   clearComposerDraft,
@@ -321,6 +323,17 @@ export default function PostComposer({
   // 絵文字ショートコード・ユーザーID挿入ピッカー（本文カーソル位置へ挿入、マイケル指示）。
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [userIdPickerOpen, setUserIdPickerOpen] = useState(false);
+  // Bsky配送ボタンの警告バッジ判定用（Bskyは本文内カスタム絵文字を埋め込めない、
+  // マイケル指示）。`ComposerEditor`もこの一覧を独自にfetchしているが`fetchCustomEmojis`
+  // はプロセス内キャッシュ済みのため二重取得のコストはない。
+  const [customEmojis, setCustomEmojis] = useState<PublicEmoji[]>([]);
+  useEffect(() => {
+    fetchCustomEmojis()
+      .then(setCustomEmojis)
+      .catch(() => setCustomEmojis([]));
+  }, []);
+  const hasBskyIncompatibleEmoji =
+    deliverBsky && containsKnownCustomEmojiShortcode(text, customEmojis);
 
   function insertEmojiAtCursor(content: string) {
     setEmojiPickerOpen(false);
@@ -901,6 +914,7 @@ export default function PostComposer({
               : t("home:postComposer.placeholder")
         }
         autoFocus={autoFocus}
+        federateToBsky={deliverBsky}
       />
 
       <div className={styles.scopeRow}>
@@ -971,13 +985,22 @@ export default function PostComposer({
           <button
             ref={bskyBtnRef}
             type="button"
-            className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""}`}
+            className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""} ${hasBskyIncompatibleEmoji ? styles.iconBtnEmojiWarn : ""}`}
             onClick={() => setDeliverBsky((v) => !v)}
             onKeyDown={(e) => handleControlBtnKeyDown(e, "bsky")}
-            title={t("home:postComposer.deliverBskyHint")}
+            title={
+              hasBskyIncompatibleEmoji
+                ? `${t("home:postComposer.deliverBskyHint")}\n${t("home:postComposer.bskyEmojiWarningHint")}`
+                : t("home:postComposer.deliverBskyHint")
+            }
             aria-label={t("home:postComposer.deliverBskyHint")}
           >
             <img className={styles.blueskyIcon} src={blueskyLogo} alt="" />
+            {hasBskyIncompatibleEmoji && (
+              <span className={styles.bskyEmojiWarnBadge} aria-hidden="true">
+                <TwemojiEmoji emoji="⚠️" className={styles.bskyEmojiWarnBadgeIcon} />
+              </span>
+            )}
           </button>
         )}
         <button

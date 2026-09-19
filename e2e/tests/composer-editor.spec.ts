@@ -152,6 +152,10 @@ test("カスタム絵文字候補を画像へ置換し境界Backspaceで通常�
   await page.goto("/");
   await page.waitForTimeout(2_000);
 
+  // Bsky配送オン中はカスタム絵文字shortcodeを画像展開せず警告色のテキストのまま表示する
+  // 仕様のため、画像化そのものを検証するこのテストではBsky配送をオフにする。
+  await page.getByRole("button", { name: "Blueskyに配送" }).click();
+
   const editor = page.locator('[contenteditable="true"]').first();
   await expect(editor).toBeVisible();
   await editor.click();
@@ -193,12 +197,59 @@ test("連結したshortcodeは閉じコロン後が英数字でない最後の�
   await page.goto("/");
   await page.waitForTimeout(2_000);
 
+  // Bsky配送オン中はカスタム絵文字shortcodeを画像展開せず警告色のテキストのまま表示する
+  // 仕様のため、画像化そのものを検証するこのテストではBsky配送をオフにする。
+  await page.getByRole("button", { name: "Blueskyに配送" }).click();
+
   const editor = page.locator('[contenteditable="true"]').first();
   await editor.fill(":igyo:igyo:igyo:");
   await expect(editor.getByRole("img", { name: ":igyo:" })).toHaveCount(1);
   // 画像化した最後のshortcodeはtextContentに含まれないため、手前の2つが
   // 通常テキストのまま残ることを確認する。
   await expect(editor).toContainText(":igyo:igyo");
+});
+
+test("Bsky配送オン中はカスタム絵文字shortcodeを警告色のまま表示し、配送ボタンに警告が出る", async ({
+  page,
+  request,
+}) => {
+  const author = await registerUserViaApi(request, "e2ecomposerbskywarn");
+  await page.route("**/api/emojis", (route) =>
+    route.fulfill({
+      json: {
+        emojis: [{
+          id: "1",
+          aliases: [],
+          name: "warn_emoji",
+          category: null,
+          host: null,
+          url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E",
+          license: null,
+        }],
+      },
+    })
+  );
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  // 新規投稿フォームはデフォルトでBsky配送オン。
+  const bskyBtn = page.getByRole("button", { name: "Blueskyに配送" });
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.fill(":warn_emoji:");
+
+  // Bsky配送オン中は画像化されず、警告色のテキストのまま残る。
+  await expect(editor.getByRole("img", { name: ":warn_emoji:" })).toHaveCount(0);
+  await expect(editor).toContainText(":warn_emoji:");
+  await expect(bskyBtn).toHaveAttribute(
+    "title",
+    "Blueskyに配送\n⚠️Bluesky向けには本文内カスタム絵文字が埋め込めません"
+  );
+
+  // Bsky配送をオフにすると画像展開に戻り、警告も消える。
+  await bskyBtn.click();
+  await expect(editor.getByRole("img", { name: ":warn_emoji:" })).toBeVisible();
+  await expect(bskyBtn).toHaveAttribute("title", "Blueskyに配送");
 });
 
 test("上下矢印で入力候補の選択を移動できる", async ({ page, request }) => {

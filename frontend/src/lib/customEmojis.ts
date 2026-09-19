@@ -1,4 +1,5 @@
 import { api, PublicEmoji } from "../api/client";
+import { SHORTCODE_SOURCE, WORD_CHAR_RE } from "./richTextPatterns";
 
 let cache: Promise<PublicEmoji[]> | null = null;
 
@@ -49,4 +50,26 @@ export function isLocalCustomEmoji(parsed: { host: string | null }): boolean {
 /** `:shortcode:` / `:shortcode@host:` 形式なら shortcode 部分のみを、そうでなければ null を返す。 */
 export function parseCustomEmojiShortcode(content: string): string | null {
   return parseReactionContent(content)?.shortcode ?? null;
+}
+
+/**
+ * `text` 中に、`emojis`（登録済みカスタム絵文字一覧）で解決できるショートコードが
+ * 1つでも含まれるかどうかを判定する（PostComposerのBsky配送ボタン警告バッジ用）。
+ * 境界条件は`EmojiText`と同じ（右端のみ英数字・アンダースコア非接触を要求、左端は無条件）。
+ */
+export function containsKnownCustomEmojiShortcode(
+  text: string,
+  emojis: PublicEmoji[],
+): boolean {
+  if (emojis.length === 0) return false;
+  const names = new Set(emojis.map((emoji) => `:${emoji.name}:`));
+  const re = new RegExp(SHORTCODE_SOURCE, "g");
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const shortcode = match[0];
+    const nextChar = text[match.index + shortcode.length];
+    if (nextChar && WORD_CHAR_RE.test(nextChar)) continue;
+    if (names.has(shortcode)) return true;
+  }
+  return false;
 }

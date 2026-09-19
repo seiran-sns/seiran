@@ -98,6 +98,7 @@
   "postComposer": {
     "deliverFediHint": "Publier sur le Fédiverse",
     "deliverBskyHint": "Publier sur Bluesky",
+    "bskyEmojiWarningHint": "⚠️Les émojis personnalisés du texte ne peuvent pas être intégrés pour Bluesky",
     "postLanguageHint": "Langue du message (utilisée pour la publication sur Bluesky)",
     "visibilityPublicHint": "Public : visible par tout le monde",
     "visibilityUnlistedHint": "Non listé : visible, mais absent des fils local et global",

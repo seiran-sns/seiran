@@ -105,6 +105,7 @@
   "postComposer": {
     "deliverFediHint": "Fediverseに配送",
     "deliverBskyHint": "Blueskyに配送",
+    "bskyEmojiWarningHint": "⚠️Bluesky向けには本文内カスタム絵文字が埋め込めません",
     "postLanguageHint": "投稿の言語（Bluesky配送用）",
     "visibilityPublicHint": "パブリック: 誰でも閲覧可能",
     "visibilityUnlistedHint": "ひかえめ: 誰でも閲覧可能だがローカル・グローバルタイムラインには表示されない",

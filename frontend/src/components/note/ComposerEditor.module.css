@@ -51,6 +51,16 @@
   user-select: all;
 }
 
+/* Bsky配送オン中、カスタム絵文字ショートコードを画像展開せず警告表示するためのスタイル
+ * （Bsky側は本文内カスタム絵文字を埋め込めないため、マイケル指示）。 */
+.emojiBskyWarn {
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 700;
+  color: var(--warn);
+  background: rgba(251, 191, 36, 0.25);
+}
+
 .emoji img {
   display: block;
   width: auto;

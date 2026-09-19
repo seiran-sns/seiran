@@ -94,6 +94,7 @@
 }
 
 .iconBtn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -110,6 +111,28 @@
     border-color 0.15s,
     color 0.15s,
     background 0.15s;
+}
+
+/* Bsky配送ボタンの警告バッジ・枠線（本文内カスタム絵文字がBskyへ埋め込めない、マイケル指示）。
+ * 枠線は2クラス指定にして.scopeActiveのborder-colorをCSSソース順に関わらず確実に上書きする
+ * （.pollDurationPresetBtn.scopeActive等と同じパターン）。 */
+.iconBtn.iconBtnEmojiWarn {
+  border-color: #d9530f;
+  box-shadow: 0 0 7px 1px rgba(250, 204, 21, 0.75);
+}
+
+.bskyEmojiWarnBadge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: inline-flex;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.bskyEmojiWarnBadgeIcon {
+  width: 20px;
+  height: 20px;
 }
 
 .iconBtn:hover:not(:disabled) {
