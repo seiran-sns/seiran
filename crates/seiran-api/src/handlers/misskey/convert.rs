@@ -109,6 +109,25 @@ pub fn user_lite(
     }
 }
 
+/// `MisskeyUserDetailed.uri`/`.url`用に、リモートアクターのAP Actor ID／人間向け
+/// プロフィールURLを算出する（`handlers::notes::dto`の`remoteProfileUrl`算出と同じ方針、
+/// AP優先・無ければBsky `at_did`→bsky.app URLへフォールバック）。ローカルは両方`None`。
+/// 引数を`Actor`丸ごとではなく必要な3値だけにしているのは単体テストを書きやすくするため。
+fn remote_user_uri_url(
+    actor_type: &str,
+    ap_uri: Option<&str>,
+    at_did: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    if actor_type == "local" {
+        return (None, None);
+    }
+    let uri = ap_uri.map(str::to_owned);
+    let url = uri
+        .clone()
+        .or_else(|| at_did.map(|did| format!("https://bsky.app/profile/{did}")));
+    (uri, url)
+}
+
 /// 自分自身 (`/api/i`) または他者 (`/api/users/show`) の `UserDetailed` を組み立てる。
 /// 単一アクター用。一覧（`users/following`・`users/followers`等）で複数アクター分を
 /// 組み立てる場合は、アクターごとに4クエリ発行するN+1を避けるため`build_users_detailed`
@@ -133,11 +152,18 @@ pub async fn build_user_detailed(
             None,
         );
         lite.emojis = to_misskey_emojis(None, actor.emoji_map.as_ref());
+        let (uri, url) = remote_user_uri_url(
+            &actor.actor_type,
+            actor.ap_uri.as_deref(),
+            actor.at_did.as_deref(),
+        );
         MisskeyUserDetailed {
             lite,
             created_at: chrono::Utc::now().to_rfc3339(),
             description: actor.bio.clone(),
             banner_url: None,
+            uri,
+            url,
             is_locked: actor.is_locked,
             is_silenced: false,
             is_suspended: false,
@@ -221,7 +247,18 @@ pub async fn build_users_detailed(
         i64,
         i64,
     );
-    let profile_rows: Vec<(i64, ProfileRow)> = sqlx::query_as::<_, (i64, chrono::DateTime<chrono::Utc>, Option<String>, Option<String>, i64, i64, i64)>(
+    let profile_rows: Vec<(i64, ProfileRow)> = sqlx::query_as::<
+        _,
+        (
+            i64,
+            chrono::DateTime<chrono::Utc>,
+            Option<String>,
+            Option<String>,
+            i64,
+            i64,
+            i64,
+        ),
+    >(
         "SELECT a.id, a.created_at, \
          COALESCE(rtrim(avatar_sp.public_url, '/') || '/' || avatar_mf.storage_key, a.avatar_url), \
          COALESCE(rtrim(banner_sp.public_url, '/') || '/' || banner_mf.storage_key, a.banner_url), \
@@ -238,9 +275,29 @@ pub async fn build_users_detailed(
     .await
     .unwrap_or_default()
     .into_iter()
-    .map(|(id, created_at, avatar_url, banner_url, notes_count, followers_count, following_count)| {
-        (id, (created_at, avatar_url, banner_url, notes_count, followers_count, following_count))
-    })
+    .map(
+        |(
+            id,
+            created_at,
+            avatar_url,
+            banner_url,
+            notes_count,
+            followers_count,
+            following_count,
+        )| {
+            (
+                id,
+                (
+                    created_at,
+                    avatar_url,
+                    banner_url,
+                    notes_count,
+                    followers_count,
+                    following_count,
+                ),
+            )
+        },
+    )
     .collect();
     let mut profile_by_id: HashMap<i64, ProfileRow> = profile_rows.into_iter().collect();
 
@@ -262,12 +319,19 @@ pub async fn build_users_detailed(
                 avatar_url.as_deref(),
             );
             lite.emojis = to_misskey_emojis(None, actor.emoji_map.as_ref());
+            let (uri, url) = remote_user_uri_url(
+                &actor.actor_type,
+                actor.ap_uri.as_deref(),
+                actor.at_did.as_deref(),
+            );
 
             let detailed = MisskeyUserDetailed {
                 lite,
                 created_at: created_at.to_rfc3339(),
                 description: actor.bio.clone(),
                 banner_url,
+                uri,
+                url,
                 is_locked: actor.is_locked,
                 is_silenced: false,
                 is_suspended: false,
@@ -1013,6 +1077,30 @@ mod tests {
             note.url.as_deref(),
             Some("https://bsky.app/profile/did:plc:abc123/post/xyz")
         );
+    }
+
+    // `MisskeyUserDetailed.uri`/`.url`（`/api/users/show`）が常に欠けていたため、Ariaの
+    // 「リモートユーザーのため、情報が不完全です。リモートで表示」バナー（`user.uri ?? user.url`
+    // を見て表示要否を判定、misskey_dartソース確認済み）が一切表示されない不具合の回帰テスト（#252続き）。
+    #[test]
+    fn local_actor_has_null_uri_and_url() {
+        let (uri, url) = remote_user_uri_url("local", Some("https://ignored.example/x"), None);
+        assert_eq!(uri, None);
+        assert_eq!(url, None);
+    }
+
+    #[test]
+    fn remote_fedi_actor_uses_ap_uri_for_uri_and_url() {
+        let (uri, url) = remote_user_uri_url("fedi", Some("https://remote.example/users/x"), None);
+        assert_eq!(uri.as_deref(), Some("https://remote.example/users/x"));
+        assert_eq!(url.as_deref(), Some("https://remote.example/users/x"));
+    }
+
+    #[test]
+    fn remote_bsky_only_actor_has_null_uri_but_bsky_app_url() {
+        let (uri, url) = remote_user_uri_url("bsky", None, Some("did:plc:abc123"));
+        assert_eq!(uri, None);
+        assert_eq!(url.as_deref(), Some("https://bsky.app/profile/did:plc:abc123"));
     }
 
     // Misskey本家クライアント（Aria等）は `note.poll` の値でアンケート有無を判定する。

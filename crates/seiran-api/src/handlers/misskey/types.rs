@@ -42,6 +42,16 @@ pub struct MisskeyUserDetailed {
     pub created_at: String,
     pub description: Option<String>,
     pub banner_url: Option<String>,
+    /// ActivityPub Actor ID。ローカルユーザー、およびAP由来を持たないBskyのみのアクターは
+    /// `null`（本家Misskey準拠）。キー自体は省略しない（`misskey_dart`の`User.fromJson`は
+    /// `containsKey("url")`でUserDetailed/UserLiteを判別するため、`url`と対にして必ず
+    /// キーを出す。#252続き、Ariaの「リモートユーザーのため、情報が不完全です。
+    /// リモートで表示」バナーは`user.uri ?? user.url`を見るが、従来この2フィールドが
+    /// 存在せず常にnullになるため一切表示されなかった、実機確認）。
+    pub uri: Option<String>,
+    /// 人間向けプロフィールURL。AP優先、無ければBsky（`at_did`→bsky.app URL）に
+    /// フォールバック。ローカルユーザーは`null`。
+    pub url: Option<String>,
     pub is_locked: bool,
     pub is_silenced: bool,
     pub is_suspended: bool,
@@ -337,6 +347,8 @@ mod tests {
                 created_at: "2026-01-01T00:00:00+00:00".to_owned(),
                 description: None,
                 banner_url: None,
+                uri: None,
+                url: None,
                 is_locked: false,
                 is_silenced: false,
                 is_suspended: false,
@@ -393,6 +405,8 @@ mod tests {
             created_at: "2026-01-01T00:00:00+00:00".to_owned(),
             description: None,
             banner_url: None,
+            uri: None,
+            url: None,
             is_locked: false,
             is_silenced: false,
             is_suspended: false,

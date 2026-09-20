@@ -75,7 +75,7 @@ use super::convert::{
 };
 use super::types::{
     MisskeyFollowRelation, MisskeyMeDetailed, MisskeyNote, MisskeyNoteReaction,
-    MisskeyNotification, MisskeyStats, MisskeyUserDetailed, MisskeyUserLite, MisskeyUserList,
+    MisskeyNotification, MisskeyStats, MisskeyUserDetailed, MisskeyUserList, MisskeyUserLite,
     MisskeyUserReaction,
 };
 
@@ -1189,7 +1189,9 @@ pub async fn stats(State(state): State<AppState>) -> Result<Json<MisskeyStats>, 
 /// （#251、Aria非互換修正）。これらの機能自体が存在しない/エンドポイントが無いと
 /// `misskey_dart`が404として例外を投げ、プロフィール等の該当タブがエラー表示になる
 /// （実機確認、Aria）。「リスト」は`users_lists_list`が実データを返すため対象外。
-pub async fn empty_list_stub(body: Option<Json<serde_json::Value>>) -> Json<Vec<serde_json::Value>> {
+pub async fn empty_list_stub(
+    body: Option<Json<serde_json::Value>>,
+) -> Json<Vec<serde_json::Value>> {
     let _ = body;
     Json(Vec::new())
 }
@@ -1216,7 +1218,10 @@ async fn build_misskey_user_list(
         created_at: row.created_at.to_rfc3339(),
         name: row.name,
         is_public: row.is_public,
-        user_ids: members.into_iter().map(|m| m.actor_id.to_string()).collect(),
+        user_ids: members
+            .into_iter()
+            .map(|m| m.actor_id.to_string())
+            .collect(),
     })
 }
 

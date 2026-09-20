@@ -31,13 +31,12 @@ use seiran_common::repository::{
     ActorRepository, AlsoKnownAsRepository, AppTokenRepository, AtpPreferencesRepository,
     AtpReadRepository, AtpSessionRepository, AuthRateLimitRepository, BlockRepository,
     DmRepository, EmailChangeRepository, EmailShortCodeRepository, EmailVerificationRepository,
-    EmojiRepository,
-    FollowImportRepository, FollowRepository, HashtagRepository, InstanceDomainRepository,
-    ListRepository, MuteRepository, NotificationRepository, PasswordResetRepository,
-    PgActorRepository, PgAlsoKnownAsRepository, PgAppTokenRepository, PgAtpPreferencesRepository,
-    PgAtpReadRepository, PgAtpSessionRepository, PgAuthRateLimitRepository, PgBlockRepository,
-    PgDmRepository, PgEmailChangeRepository, PgEmailShortCodeRepository,
-    PgEmailVerificationRepository, PgEmojiRepository,
+    EmojiRepository, FollowImportRepository, FollowRepository, HashtagRepository,
+    InstanceDomainRepository, ListRepository, MuteRepository, NotificationRepository,
+    PasswordResetRepository, PgActorRepository, PgAlsoKnownAsRepository, PgAppTokenRepository,
+    PgAtpPreferencesRepository, PgAtpReadRepository, PgAtpSessionRepository,
+    PgAuthRateLimitRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository,
+    PgEmailShortCodeRepository, PgEmailVerificationRepository, PgEmojiRepository,
     PgFollowImportRepository, PgFollowRepository, PgHashtagRepository, PgInstanceDomainRepository,
     PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository,
     PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgRelayRepository,
@@ -2092,7 +2091,9 @@ async fn backfill_remote_instance_meta(state: &AppState) {
     for (domain, software_name) in stale_color_rows {
         let has_fallback = software_name
             .as_deref()
-            .and_then(seiran_common::jobs::remote_instance_info_resolve::fallback_color_for_software)
+            .and_then(
+                seiran_common::jobs::remote_instance_info_resolve::fallback_color_for_software,
+            )
             .is_some();
         if has_fallback {
             targets.push(domain);
