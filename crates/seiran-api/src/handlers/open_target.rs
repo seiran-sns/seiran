@@ -1,6 +1,13 @@
 //! URL・AT URI・ユーザーIDを取り込み、SPA内の遷移先へ変換する。
+//!
+//! 解決ロジック自体（`resolve_open_target`）は、Misskey互換API `POST /api/ap/show`
+//! （`handlers::misskey::endpoints::ap_show`、`misskey_dart`の`MisskeyAp.show`、Ariaの
+//! 「ほかのアカウントで開く」機能）とも共有する。SPA向け（このファイルの`open_target`）は
+//! 結果をフロントの遷移先パスへ、Misskey互換向けは`{type, object}`（本家Misskey準拠、
+//! `Note`/`User`のフルオブジェクト）へ、それぞれ別々に変換する。
 
 use axum::{extract::State, Json};
+use seiran_common::repository::Actor;
 use seiran_common::{job_priority, Job};
 use serde::{Deserialize, Serialize};
 
@@ -26,20 +33,53 @@ enum ParsedTarget {
     ActivityPubUrl(String),
 }
 
+/// `resolve_open_target`の解決結果。`open_target`（SPA向け、パスへ変換）と`ap_show`
+/// （Misskey互換向け、`Note`/`User`のフルオブジェクトへ変換）の両方から使う共通の形。
+pub enum ResolvedTarget {
+    Actor(Box<Actor>),
+    Post(i64),
+}
+
 pub async fn open_target(
     State(state): State<AppState>,
     _user: AuthedUser,
     Json(req): Json<OpenTargetRequest>,
 ) -> Result<Json<OpenTargetResponse>, ApiError> {
-    let parsed = parse_target(&req.target)
+    let resolved = resolve_open_target(&state, &req.target).await?;
+    Ok(Json(match resolved {
+        ResolvedTarget::Actor(actor) => {
+            let acct = seiran_common::username::actor_handle(
+                &actor.username,
+                &actor.domain,
+                &actor.actor_type,
+            );
+            OpenTargetResponse {
+                path: format!("/{}", acct),
+                kind: "actor",
+            }
+        }
+        ResolvedTarget::Post(post_id) => OpenTargetResponse {
+            path: format!("/notes/{post_id}"),
+            kind: "post",
+        },
+    }))
+}
+
+/// `target`（URL・AT URI・ユーザーID等）を解決する。ローカルDBに無ければ取り込み（フェッチ
+/// ＋保存）まで行う。呼び出し元（SPA向け`open_target`・Misskey互換`ap_show`）が結果を
+/// それぞれの応答形へ変換する。
+pub async fn resolve_open_target(
+    state: &AppState,
+    target: &str,
+) -> Result<ResolvedTarget, ApiError> {
+    let parsed = parse_target(target)
         .ok_or_else(|| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
 
-    let response = match parsed {
-        ParsedTarget::BskyPost(at_uri) => open_bsky_post(&state, &at_uri).await?,
-        ParsedTarget::Actor(target) => open_actor(&state, &target).await?,
-        ParsedTarget::ActivityPubUrl(url) => open_activitypub_url(&state, &url).await?,
-    };
-    Ok(Json(response))
+    match parsed {
+        ParsedTarget::BskyPost(at_uri) => open_bsky_post(state, &at_uri).await,
+        ParsedTarget::Actor(target) => open_actor(state, &target).await,
+        ParsedTarget::ActivityPubUrl(url) => open_activitypub_url(state, &url).await,
+    }
 }
 
 fn parse_target(raw: &str) -> Option<ParsedTarget> {
@@ -84,22 +124,14 @@ fn parse_at_post_uri(target: &str) -> bool {
     matches!(parts.as_slice(), [_, "app.bsky.feed.post", _])
 }
 
-async fn open_actor(state: &AppState, target: &str) -> Result<OpenTargetResponse, ApiError> {
+async fn open_actor(state: &AppState, target: &str) -> Result<ResolvedTarget, ApiError> {
     let actor = resolve_and_upsert_target(state, target)
         .await
         .map_err(|_| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let acct = seiran_common::username::actor_handle(
-        &actor.username,
-        &actor.domain,
-        &actor.actor_type,
-    );
-    Ok(OpenTargetResponse {
-        path: format!("/{}", acct),
-        kind: "actor",
-    })
+    Ok(ResolvedTarget::Actor(Box::new(actor)))
 }
 
-async fn open_bsky_post(state: &AppState, at_uri: &str) -> Result<OpenTargetResponse, ApiError> {
+async fn open_bsky_post(state: &AppState, at_uri: &str) -> Result<ResolvedTarget, ApiError> {
     // bsky.app URLではハンドルがauthorityになる場合があるため、プロフィール取得でDIDへ正規化する。
     let parts: Vec<_> = at_uri.trim_start_matches("at://").split('/').collect();
     let profile = seiran_common::atp::fetch_bsky_profile(&state.http_client, parts[0])
@@ -122,23 +154,17 @@ async fn open_bsky_post(state: &AppState, at_uri: &str) -> Result<OpenTargetResp
     )
     .await
     .map_err(|e| ApiError::Internal(format!("Bsky post保存失敗: {e}")))?;
-    Ok(OpenTargetResponse {
-        path: format!("/notes/{post_id}"),
-        kind: "post",
-    })
+    Ok(ResolvedTarget::Post(post_id))
 }
 
-async fn open_activitypub_url(state: &AppState, url: &str) -> Result<OpenTargetResponse, ApiError> {
+async fn open_activitypub_url(state: &AppState, url: &str) -> Result<ResolvedTarget, ApiError> {
     if let Some(post_id) = state
         .posts
         .find_id_by_ap_or_at_uri(url)
         .await
         .map_err(|e| ApiError::Internal(format!("投稿検索失敗: {e}")))?
     {
-        return Ok(OpenTargetResponse {
-            path: format!("/notes/{post_id}"),
-            kind: "post",
-        });
+        return Ok(ResolvedTarget::Post(post_id));
     }
 
     let (body, _) = crate::handlers::media_proxy::fetch_validated_with_accept(
@@ -196,7 +222,7 @@ async fn open_announce(
     state: &AppState,
     url: &str,
     announce: serde_json::Value,
-) -> Result<OpenTargetResponse, ApiError> {
+) -> Result<ResolvedTarget, ApiError> {
     let announce_id = announce["id"].as_str().unwrap_or(url).to_string();
     if announce["actor"].as_str().is_none() {
         return Err(ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()));
@@ -214,7 +240,7 @@ async fn enqueue_and_await_import(
     state: &AppState,
     activity: serde_json::Value,
     dedup_uri: &str,
-) -> Result<OpenTargetResponse, ApiError> {
+) -> Result<ResolvedTarget, ApiError> {
     state
         .job_queue
         .enqueue(
@@ -234,10 +260,7 @@ async fn enqueue_and_await_import(
             .await
             .map_err(|e| ApiError::Internal(format!("投稿検索失敗: {e}")))?
         {
-            return Ok(OpenTargetResponse {
-                path: format!("/notes/{post_id}"),
-                kind: "post",
-            });
+            return Ok(ResolvedTarget::Post(post_id));
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }

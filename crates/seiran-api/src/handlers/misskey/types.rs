@@ -166,13 +166,16 @@ pub struct MisskeyNote {
     pub reaction_emojis: BTreeMap<String, String>,
     /// リノート元/引用元ノートの本体。`renoteId` はあるがこれが `null` のままだと、
     /// `misskey_dart` 等のクライアントは元ノートを解決できず「削除されたノート」の
-    /// プレースホルダーを描画する（実機で確認済み）。孫リノート（リノートのリノート）は
-    /// 埋め込まない（`embed_referenced_notes` 参照、無限再帰・多段フェッチを避けるため）。
+    /// プレースホルダーを描画する（実機で確認済み）。孫階層（このノート自身が持つ
+    /// `renoteId`/`replyId`）までは`embed_referenced_notes`が1回だけ追加で埋め込むが、
+    /// ひ孫（3階層目）は無限再帰・多段フェッチを避けるため埋め込まない（`embed_referenced_notes`
+    /// 参照）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub renote: Option<Box<MisskeyNote>>,
     /// 返信先ノートの本体。`replyId` はあるがこれが `null` のままだと、`renote` と同様に
     /// クライアントが「削除されたノート」のプレースホルダーを描画する（実機で確認済み）。
-    /// 孫リプライ（返信先の、さらにその返信先）は埋め込まない。
+    /// 孫階層までは`renote`と同様に埋め込むが、ひ孫（返信先の、さらにその返信先）は
+    /// 埋め込まない。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply: Option<Box<MisskeyNote>>,
     pub renote_count: i64,
@@ -264,6 +267,49 @@ pub struct MisskeyNoteReaction {
     pub user: MisskeyUserLite,
     #[serde(rename = "type")]
     pub kind: String,
+}
+
+/// `POST /api/users/reactions`（プロフィール「リアクション」タブ）の要素。`MisskeyNoteReaction`
+/// と異なり、対象ノート自体を`note`として埋め込む（本家Misskeyの`NoteReaction`エンティティ準拠、
+/// こちらは呼び出し対象がノートではなくユーザーのため文脈上ノートが必須）。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyUserReaction {
+    pub id: String,
+    pub created_at: String,
+    pub user: MisskeyUserLite,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub note: MisskeyNote,
+}
+
+/// `POST /api/stats`。`notesCount`/`usersCount`（および同値の`originalNotesCount`/
+/// `originalUsersCount`）はローカルの実数、`instances`/`driveUsageLocal`/
+/// `driveUsageRemote`は未実装のため0固定（#251、Aria非互換修正）。
+/// 本家Misskeyのフィールド構成に合わせる（キー自体は省略しない）。
+#[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyStats {
+    pub notes_count: i64,
+    pub original_notes_count: i64,
+    pub users_count: i64,
+    pub original_users_count: i64,
+    pub instances: i64,
+    pub drive_usage_local: i64,
+    pub drive_usage_remote: i64,
+}
+
+/// `POST /api/users/lists/list`（プロフィール「リスト」タブ・自分のリスト管理画面）の要素。
+/// 本家Misskeyの`UserList`エンティティに合わせる（`userIds`は`misskey_dart`が
+/// non-nullable直接キャストするため、メンバー0件でも`[]`でキー自体は省略しない）。
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyUserList {
+    pub id: String,
+    pub created_at: String,
+    pub name: String,
+    pub is_public: bool,
+    pub user_ids: Vec<String>,
 }
 
 #[cfg(test)]

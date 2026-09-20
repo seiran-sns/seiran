@@ -1502,6 +1502,7 @@ pub fn router(state: AppState) -> Router {
         )
         // Misskey 互換レイヤー
         .route("/api/meta", post(handlers::meta::api_meta))
+        .route("/api/ap/show", post(handlers::misskey::endpoints::ap_show))
         .route(
             "/api/endpoints",
             post(handlers::misskey::endpoints::endpoints),
@@ -1560,6 +1561,10 @@ pub fn router(state: AppState) -> Router {
             post(handlers::misskey::endpoints::notes_unrenote),
         )
         .route(
+            "/api/notes/user-list-timeline",
+            post(handlers::misskey::endpoints::notes_user_list_timeline),
+        )
+        .route(
             "/api/following/create",
             post(handlers::misskey::endpoints::following_create),
         )
@@ -1570,6 +1575,46 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/i/notifications",
             post(handlers::misskey::endpoints::i_notifications),
+        )
+        .route(
+            "/api/users/reactions",
+            post(handlers::misskey::endpoints::users_reactions),
+        )
+        .route("/api/stats", post(handlers::misskey::endpoints::stats))
+        // リストは既存機能（`handlers::lists`と共通の`ListRepository`）を返す実データ。
+        // 他は未実装のMisskey機能（お知らせ・ハイライト・クリップ・ページ・Play・
+        // ギャラリー）で、常に空配列を返すスタブ（#251、Aria非互換修正）。
+        .route(
+            "/api/announcements",
+            post(handlers::misskey::endpoints::empty_list_stub),
+        )
+        .route(
+            "/api/users/featured-notes",
+            post(handlers::misskey::endpoints::empty_list_stub),
+        )
+        .route(
+            "/api/users/clips",
+            post(handlers::misskey::endpoints::empty_list_stub),
+        )
+        .route(
+            "/api/users/pages",
+            post(handlers::misskey::endpoints::empty_list_stub),
+        )
+        .route(
+            "/api/users/flashs",
+            post(handlers::misskey::endpoints::empty_list_stub),
+        )
+        .route(
+            "/api/users/gallery/posts",
+            post(handlers::misskey::endpoints::empty_list_stub),
+        )
+        .route(
+            "/api/users/lists/list",
+            post(handlers::misskey::endpoints::users_lists_list),
+        )
+        .route(
+            "/api/users/lists/show",
+            post(handlers::misskey::endpoints::users_lists_show),
         )
         // MiAuth（Misskey 互換クライアント用）
         .route("/miauth/:session_id", get(handlers::miauth::miauth_page))

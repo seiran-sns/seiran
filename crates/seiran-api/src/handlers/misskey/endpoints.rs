@@ -19,6 +19,8 @@ use axum::{
 /// Ariaはここに`emojis`がある場合だけ`POST /api/emojis`を呼ぶ。
 pub async fn endpoints() -> Json<Vec<&'static str>> {
     Json(vec![
+        "announcements",
+        "ap/show",
         "drive/files/create",
         "emojis",
         "following/create",
@@ -39,15 +41,25 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "notes/show",
         "notes/timeline",
         "notes/unrenote",
+        "notes/user-list-timeline",
+        "stats",
+        "users/clips",
+        "users/featured-notes",
+        "users/flashs",
         "users/followers",
         "users/following",
+        "users/gallery/posts",
+        "users/lists/list",
+        "users/lists/show",
         "users/notes",
+        "users/pages",
+        "users/reactions",
         "users/show",
     ])
 }
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use seiran_common::repository::Actor;
 
@@ -63,7 +75,8 @@ use super::convert::{
 };
 use super::types::{
     MisskeyFollowRelation, MisskeyMeDetailed, MisskeyNote, MisskeyNoteReaction,
-    MisskeyNotification, MisskeyUserDetailed, MisskeyUserLite,
+    MisskeyNotification, MisskeyStats, MisskeyUserDetailed, MisskeyUserLite, MisskeyUserList,
+    MisskeyUserReaction,
 };
 
 // ─── リクエストDTO（Misskey 本家の camelCase フィールド名に合わせる） ──────────
@@ -216,8 +229,22 @@ pub struct ReactionCreateBody {
 #[serde(rename_all = "camelCase")]
 pub struct UserShowBody {
     pub user_id: Option<String>,
+    /// 複数ID一括取得（`MisskeyUsers.showByIds`、リストメンバー一覧画面等）。指定時は
+    /// `user_id`/`username`より優先し、レスポンスも単一オブジェクトではなく配列になる
+    /// （本家Misskey準拠）。
+    pub user_ids: Option<Vec<String>>,
     pub username: Option<String>,
     pub host: Option<String>,
+}
+
+/// `POST /api/users/show`のレスポンス。`userIds`未指定時は単一オブジェクト、指定時は
+/// 配列（本家Misskey準拠）。`misskey_dart`側の`MisskeyUsers.show`/`showByIds`はそれぞれ
+/// 対応する形しかデコードしないため、`#[serde(untagged)]`で呼び出し方に応じた形を返す。
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum UsersShowResponse {
+    Single(Box<MisskeyUserDetailed>),
+    Many(Vec<MisskeyUserDetailed>),
 }
 
 #[derive(Deserialize)]
@@ -356,8 +383,28 @@ pub async fn users_show(
     headers: HeaderMap,
     State(state): State<AppState>,
     Json(body): Json<UserShowBody>,
-) -> Result<Json<MisskeyUserDetailed>, ApiError> {
+) -> Result<Json<UsersShowResponse>, ApiError> {
     let my_actor_id = optional_actor_id(&headers, &state).await;
+
+    if let Some(uids) = body.user_ids {
+        let ids: Vec<i64> = uids.iter().filter_map(|s| s.parse::<i64>().ok()).collect();
+        let actors = state
+            .actors
+            .find_by_ids(&ids)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        for actor in actors.iter().filter(|a| a.actor_type != "local") {
+            state.enqueue_remote_profile_refresh(actor.id).await;
+        }
+        let mut detailed_by_id = build_users_detailed(&state, &actors, my_actor_id).await;
+        // 呼び出し側が渡した順序を保つ（見つからなかったIDは結果から除外、本家Misskey準拠）。
+        let ordered: Vec<MisskeyUserDetailed> = ids
+            .into_iter()
+            .filter_map(|id| detailed_by_id.remove(&id))
+            .collect();
+        return Ok(Json(UsersShowResponse::Many(ordered)));
+    }
+
     let actor = if let Some(uid) = body.user_id {
         let id: i64 = uid
             .parse()
@@ -383,7 +430,9 @@ pub async fn users_show(
         state.enqueue_remote_profile_refresh(actor.id).await;
     }
 
-    Ok(Json(build_user_detailed(&state, &actor, my_actor_id).await))
+    Ok(Json(UsersShowResponse::Single(Box::new(
+        build_user_detailed(&state, &actor, my_actor_id).await,
+    ))))
 }
 
 /// POST /api/users/notes — プロフィール画面のノートタブ（Aria等）。
@@ -432,6 +481,55 @@ pub async fn notes_show(
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
     Ok(Json(build_note(&state, post, my_actor_id).await))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApShowBody {
+    pub uri: String,
+}
+
+/// `type`（`"Note"`/`"User"`）＋`object`（フルオブジェクト）を本家Misskey準拠の
+/// `{"type": "...", "object": {...}}`形へ組み立てる。
+#[derive(Serialize)]
+#[serde(tag = "type", content = "object")]
+pub enum ApShowResponse {
+    Note(Box<MisskeyNote>),
+    User(Box<MisskeyUserDetailed>),
+}
+
+/// POST /api/ap/show（`MisskeyAp.show`）— Ariaの「ほかのアカウントで開く」機能で、
+/// 他のMisskeyサーバー等で見ているノート/ユーザーを自分（seiran）のアカウントで開き直す
+/// 際に呼ばれる。`uri`（AP ID・URL・`@user@host`・AT URI等）を解決し、既存の「開く」機能
+/// （`handlers::open_target::resolve_open_target`、カスタムAPI`POST /api/open-target`と
+/// 共通、ローカルDBに無ければフェッチ・取り込みまで行う）でNote/Userのどちらかを特定し、
+/// 本家Misskey準拠の`{type, object}`で返す（#251続き）。
+pub async fn ap_show(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<ApShowBody>,
+) -> Result<Json<ApShowResponse>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let resolved = crate::handlers::open_target::resolve_open_target(&state, &body.uri).await?;
+
+    Ok(Json(match resolved {
+        crate::handlers::open_target::ResolvedTarget::Actor(actor) => {
+            if actor.actor_type != "local" {
+                state.enqueue_remote_profile_refresh(actor.id).await;
+            }
+            let detailed = build_user_detailed(&state, &actor, my_actor_id).await;
+            ApShowResponse::User(Box::new(detailed))
+        }
+        crate::handlers::open_target::ResolvedTarget::Post(post_id) => {
+            let post = state
+                .posts
+                .find_by_id_for_viewer(post_id, my_actor_id)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?
+                .ok_or(ApiError::NotFound("NO_SUCH_OBJECT"))?;
+            ApShowResponse::Note(Box::new(build_note(&state, post, my_actor_id).await))
+        }
+    }))
 }
 
 /// POST /api/notes/local-timeline
@@ -652,6 +750,54 @@ pub async fn notes_unrenote(
         .await
         .into_response();
     as_no_content(resp)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserListTimelineBody {
+    pub list_id: String,
+    pub limit: Option<i64>,
+    pub since_id: Option<String>,
+    pub until_id: Option<String>,
+}
+
+/// POST /api/notes/user-list-timeline — リストタイムライン画面（Aria等）。リスト一覧
+/// （`users/lists/list`）は実装済みだったが、個別のリストを開くこの取得系エンドポイントが
+/// 無く404になっていた。カスタムAPI `GET /api/lists/:id/timeline`
+/// （`handlers::lists::list_timeline`）と同じ`ListRepository::timeline`・公開範囲チェック
+/// （非公開リストは所有者本人のみ）を使う。WebSocketの`userList`チャンネル購読は既存実装
+/// （`docs/protocols.md`参照）でカバー済みで、こちらは画面を開いた際の初回一覧取得を担う。
+pub async fn notes_user_list_timeline(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<UserListTimelineBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let list_id: i64 = body
+        .list_id
+        .parse()
+        .map_err(|_| ApiError::NotFound("NO_SUCH_LIST"))?;
+
+    let row = state
+        .lists
+        .find_by_id(list_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NO_SUCH_LIST"))?;
+    if !row.is_public && my_actor_id != Some(row.owner_actor_id) {
+        return Err(ApiError::NotFound("NO_SUCH_LIST"));
+    }
+
+    let limit = body.limit.unwrap_or(20).min(100);
+    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = state
+        .lists
+        .timeline(list_id, limit, until_id, since_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(build_notes(&state, rows, my_actor_id).await))
 }
 
 // ─── 通知 ────────────────────────────────────────────────────────────
@@ -951,4 +1097,192 @@ pub async fn notes_reactions(
             })
             .collect(),
     ))
+}
+
+/// POST /api/users/reactions — プロフィール「リアクション」タブ（Aria等）。
+/// カスタムAPI側のプロフィール混合フィード（`handlers::users::user_posts`）と同じ
+/// `reactions_by_actor_for_feed` を使い、対象ノートは`fetch_referenced_notes`と同じ
+/// 一括取得・可視性フィルタで埋め込む。対象ノートが削除済み・非公開等で取得できない行は
+/// （本家Misskeyも閲覧不可なノートへのリアクションは返さないため）結果から除外する。
+pub async fn users_reactions(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<UsersNotesBody>,
+) -> Result<Json<Vec<MisskeyUserReaction>>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let actor_id: i64 = body
+        .user_id
+        .parse()
+        .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+    let actor = state
+        .actors
+        .find_by_id(actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
+    let limit = body.limit.unwrap_or(10).clamp(1, 100);
+    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
+    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+
+    let rows = state
+        .reactions
+        .reactions_by_actor_for_feed(actor_id, my_actor_id, until_id, since_id, true, limit)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let mut post_ids: Vec<i64> = rows.iter().map(|r| r.post_id).collect();
+    post_ids.sort_unstable();
+    post_ids.dedup();
+    let notes_by_id = super::convert::fetch_referenced_notes(&state, &post_ids, my_actor_id).await;
+    let user = build_user_detailed(&state, &actor, my_actor_id).await.lite;
+
+    Ok(Json(
+        rows.into_iter()
+            .filter_map(|r| {
+                let note = notes_by_id.get(&r.post_id)?.clone();
+                Some(MisskeyUserReaction {
+                    id: r.id.to_string(),
+                    created_at: r.created_at.to_rfc3339(),
+                    user: user.clone(),
+                    kind: r.content,
+                    note,
+                })
+            })
+            .collect(),
+    ))
+}
+
+/// POST /api/stats。ローカルの投稿数・ユーザー数のみ実数を返す（#251）。退会済みユーザー
+/// （`actors.withdrawn_at`）・削除済みポスト（`posts.deleted_at`）・リモートポストは集計
+/// 対象外。`instances`（既知フェディバースサーバー数）・`driveUsageLocal`/`driveUsageRemote`
+/// は未実装のため引き続き0を返す（キー自体を省略すると`misskey_dart`が必須フィールド
+/// 欠落として例外を投げるため、値が0でもキーは揃える）。リモートを一切集計しないため
+/// `notesCount`/`usersCount`と`originalNotesCount`/`originalUsersCount`は常に同値になる。
+pub async fn stats(State(state): State<AppState>) -> Result<Json<MisskeyStats>, ApiError> {
+    let notes_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM posts p
+         JOIN actors a ON a.id = p.actor_id
+         WHERE a.actor_type = 'local' AND p.deleted_at IS NULL",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let users_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM actors WHERE actor_type = 'local' AND withdrawn_at IS NULL",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(MisskeyStats {
+        notes_count,
+        original_notes_count: notes_count,
+        users_count,
+        original_users_count: users_count,
+        ..MisskeyStats::default()
+    }))
+}
+
+/// 未実装のMisskey機能（お知らせ・ハイライト`users/featured-notes`・クリップ・
+/// ページ・Play・ギャラリー）用の共通スタブ。本文は検証せず無視し、常に空配列を返す
+/// （#251、Aria非互換修正）。これらの機能自体が存在しない/エンドポイントが無いと
+/// `misskey_dart`が404として例外を投げ、プロフィール等の該当タブがエラー表示になる
+/// （実機確認、Aria）。「リスト」は`users_lists_list`が実データを返すため対象外。
+pub async fn empty_list_stub(body: Option<Json<serde_json::Value>>) -> Json<Vec<serde_json::Value>> {
+    let _ = body;
+    Json(Vec::new())
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UsersListsListBody {
+    pub user_id: Option<String>,
+}
+
+/// `ListRow`一件を、メンバー一覧付き`MisskeyUserList`へ組み立てる（`users_lists_list`・
+/// `users_lists_show`共通）。
+async fn build_misskey_user_list(
+    state: &AppState,
+    row: seiran_common::repository::ListRow,
+) -> Result<MisskeyUserList, ApiError> {
+    let members = state
+        .lists
+        .members(row.id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(MisskeyUserList {
+        id: row.id.to_string(),
+        created_at: row.created_at.to_rfc3339(),
+        name: row.name,
+        is_public: row.is_public,
+        user_ids: members.into_iter().map(|m| m.actor_id.to_string()).collect(),
+    })
+}
+
+/// POST /api/users/lists/list — プロフィール「リスト」タブ・自分のリスト管理画面（Aria等）。
+/// `userId`指定時はそのユーザーの公開リストのみ（本家Misskey準拠、プロフィール表示から
+/// 他人のリストを覗く用途）、省略時は認証ユーザー自身の全リスト（非公開含む、自分のリスト
+/// 管理画面用途）を返す。既存のカスタムAPI（`handlers::lists`）と同じ`ListRepository`を使う
+/// （#251続き）。
+pub async fn users_lists_list(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    body: Option<Json<UsersListsListBody>>,
+) -> Result<Json<Vec<MisskeyUserList>>, ApiError> {
+    let user_id = body.and_then(|Json(b)| b.user_id);
+
+    let rows = if let Some(uid) = user_id {
+        let actor_id: i64 = uid
+            .parse()
+            .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+        state.lists.list_public_by_owner(actor_id).await
+    } else {
+        let my_actor_id = optional_actor_id(&headers, &state)
+            .await
+            .ok_or(ApiError::Unauthorized("CREDENTIAL_REQUIRED"))?;
+        state.lists.list_by_owner(my_actor_id).await
+    }
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        out.push(build_misskey_user_list(&state, row).await?);
+    }
+    Ok(Json(out))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsersListsShowBody {
+    pub list_id: String,
+}
+
+/// POST /api/users/lists/show — リストを開いた詳細画面（Aria等、`MisskeyUsersLists.show`）。
+/// `users/lists/list`（一覧）は実装済みでも、個別のリストの名前・メンバー等を取得する
+/// このエンドポイントが無く404になっていた。カスタムAPI `GET /api/lists/:id`
+/// （`handlers::lists`）と同じ公開範囲チェック（非公開リストは所有者本人のみ、
+/// `NO_SUCH_LIST`）を使う（#251続き）。
+pub async fn users_lists_show(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<UsersListsShowBody>,
+) -> Result<Json<MisskeyUserList>, ApiError> {
+    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let list_id: i64 = body
+        .list_id
+        .parse()
+        .map_err(|_| ApiError::NotFound("NO_SUCH_LIST"))?;
+
+    let row = state
+        .lists
+        .find_by_id(list_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NO_SUCH_LIST"))?;
+    if !row.is_public && my_actor_id != Some(row.owner_actor_id) {
+        return Err(ApiError::NotFound("NO_SUCH_LIST"));
+    }
+
+    Ok(Json(build_misskey_user_list(&state, row).await?))
 }

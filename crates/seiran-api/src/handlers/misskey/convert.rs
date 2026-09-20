@@ -486,7 +486,7 @@ fn to_misskey_note(
 /// 呼ぶことで、同じノートが両方の対象になるケースでもDB往復・変換を1回に抑える。
 /// `handlers::notes::queries::embed_renotes`（カスタムAPI側、#45で対応済み）と同じ可視性
 /// フィルタ・一括フェッチ方針を踏襲する。
-async fn fetch_referenced_notes(
+pub(super) async fn fetch_referenced_notes(
     state: &AppState,
     ids: &[i64],
     my_actor_id: Option<i64>,
@@ -501,6 +501,7 @@ async fn fetch_referenced_notes(
                 COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                 p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
                 p.content_warning, p.poll,
+                p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
                 p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
                 p.reply_count, p.repost_count
          FROM posts p JOIN actors a ON a.id = p.actor_id
@@ -553,8 +554,13 @@ async fn fetch_referenced_notes(
 }
 
 /// `renoteId`/`replyId` を持つノートへ、参照先ノート本体を埋め込む（型定義の
-/// `MisskeyNote::renote`/`MisskeyNote::reply` コメント参照）。埋め込むノート自身の
-/// `renote`/`reply` は常に `None`（孫リノート・孫リプライは埋め込まない）。
+/// `MisskeyNote::renote`/`MisskeyNote::reply` コメント参照）。孫階層（埋め込んだ先が
+/// さらに持つ `renoteId`/`replyId`）まで1回だけ追加で埋め込む（#251）。「引用ポストへの
+/// 単純リポスト」のように、リポストがちょうど1階層を消費してしまい引用先が届かなくなる
+/// ケースがあり、孫を埋めないと `misskey_dart` 等のクライアントは `renoteId` はあるのに
+/// `renote` が `null` と解釈して「削除されたノート」のプレースホルダーを描画してしまう
+/// （実機確認、Aria）。ひ孫（3階層目）は無限再帰・多段フェッチを避けるため従来通り
+/// 埋め込まない（孫として埋め込むノート自身の `renote`/`reply` は常に `None`）。
 async fn embed_referenced_notes(
     state: &AppState,
     notes: &mut [MisskeyNote],
@@ -572,7 +578,31 @@ async fn embed_referenced_notes(
         return;
     }
 
-    let by_id = fetch_referenced_notes(state, &ids, my_actor_id).await;
+    let mut by_id = fetch_referenced_notes(state, &ids, my_actor_id).await;
+
+    let mut grandchild_ids: Vec<i64> = by_id
+        .values()
+        .flat_map(|n| [n.renote_id.as_deref(), n.reply_id.as_deref()])
+        .flatten()
+        .filter_map(|s| s.parse::<i64>().ok())
+        .collect();
+    grandchild_ids.sort_unstable();
+    grandchild_ids.dedup();
+    if !grandchild_ids.is_empty() {
+        let grandchildren = fetch_referenced_notes(state, &grandchild_ids, my_actor_id).await;
+        for note in by_id.values_mut() {
+            if let Some(rid) = note
+                .renote_id
+                .as_deref()
+                .and_then(|s| s.parse::<i64>().ok())
+            {
+                note.renote = grandchildren.get(&rid).cloned().map(Box::new);
+            }
+            if let Some(rid) = note.reply_id.as_deref().and_then(|s| s.parse::<i64>().ok()) {
+                note.reply = grandchildren.get(&rid).cloned().map(Box::new);
+            }
+        }
+    }
 
     for note in notes.iter_mut() {
         if let Some(rid) = note
