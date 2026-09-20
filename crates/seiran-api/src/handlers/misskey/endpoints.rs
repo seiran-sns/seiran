@@ -33,6 +33,7 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "notes/hybrid-timeline",
         "notes/local-timeline",
         "notes/mentions",
+        "notes/polls/vote",
         "notes/reactions",
         "notes/reactions/create",
         "notes/reactions/delete",
@@ -673,6 +674,40 @@ pub async fn notes_global_timeline(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(build_notes(&state, rows, my_actor_id).await))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotesPollsVoteBody {
+    pub note_id: String,
+    pub choice: usize,
+}
+
+/// POST /api/notes/polls/vote — アンケート投票（Aria等、`MisskeyNotesPolls.vote`）。
+/// 既存のカスタムAPI `POST /api/notes/:id/poll-vote`（`handlers::notes::poll::vote_poll`）を
+/// そのまま呼び出し、成功時のレスポンスだけMisskey流（204 No Content）に整形する
+/// （#252続き）。本家Misskeyは複数選択のアンケートでも1回の呼び出しにつき選択肢1つ
+/// （`choice`、単数形）のみを送るため、そのまま`option_indexes: vec![choice]`へ変換する。
+pub async fn notes_polls_vote(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<NotesPollsVoteBody>,
+) -> impl IntoResponse {
+    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
+        Ok(u) => u,
+        Err(e) => return as_no_content(e),
+    };
+    let resp = crate::handlers::notes::poll::vote_poll(
+        Path(body.note_id),
+        user,
+        State(state),
+        Json(crate::handlers::notes::poll::PollVoteRequest {
+            option_indexes: vec![body.choice],
+        }),
+    )
+    .await
+    .into_response();
+    as_no_content(resp)
 }
 
 /// POST /api/notes/reactions/create

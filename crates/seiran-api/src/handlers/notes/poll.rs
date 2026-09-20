@@ -3,7 +3,9 @@ use super::*;
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PollVoteRequest {
-    option_indexes: Vec<usize>,
+    /// Misskey互換API（`handlers::misskey::endpoints::notes_polls_vote`）が単一選択の
+    /// `choice`から`vec![choice]`を組み立てて再利用するため`pub(crate)`にしている。
+    pub(crate) option_indexes: Vec<usize>,
 }
 
 /// POST /api/notes/:id/poll-vote

@@ -282,6 +282,48 @@ test("Misskey互換API: notes/showでアンケート付き投稿のpollが反映
   ]);
 });
 
+test("Misskey互換API: notes/polls/voteでアンケートに投票できる（MisskeyNotesPolls.vote、#252続き）", async ({
+  request,
+}) => {
+  const alice = await registerUserViaApi(request, "e2emkpollvote");
+
+  const createRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: {
+      text: "好きな季節は？",
+      poll: { choices: ["夏", "冬"], expiresInSeconds: 3600 },
+    },
+  });
+  expect(createRes.ok(), `投稿作成失敗: ${createRes.status()} ${await createRes.text()}`).toBeTruthy();
+  const created = await createRes.json();
+
+  const voteRes = await request.post("/api/notes/polls/vote", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { noteId: created.id, choice: 1 },
+  });
+  expect(voteRes.ok(), `投票失敗: ${voteRes.status()} ${await voteRes.text()}`).toBeTruthy();
+  expect(voteRes.status()).toBe(204);
+
+  const showRes = await request.post("/api/notes/show", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { noteId: created.id },
+  });
+  expect(showRes.ok(), `notes/show失敗: ${showRes.status()} ${await showRes.text()}`).toBeTruthy();
+  const shown = await showRes.json();
+
+  expect(shown.poll.choices).toEqual([
+    expect.objectContaining({ text: "夏", votes: 0, isVoted: false }),
+    expect.objectContaining({ text: "冬", votes: 1, isVoted: true }),
+  ]);
+
+  // 二重投票は409（既存カスタムAPIのALREADY_VOTED判定をそのまま透過する）。
+  const secondVoteRes = await request.post("/api/notes/polls/vote", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { noteId: created.id, choice: 0 },
+  });
+  expect(secondVoteRes.status()).toBe(409);
+});
+
 test("Misskey互換API: metaのmediaProxyUrlが未設定時に自インスタンスの/proxyへフォールバックする（Aria非互換修正）", async ({
   request,
 }) => {

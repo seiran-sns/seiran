@@ -1544,6 +1544,10 @@ pub fn router(state: AppState) -> Router {
             post(handlers::misskey::endpoints::notes_reactions),
         )
         .route(
+            "/api/notes/polls/vote",
+            post(handlers::misskey::endpoints::notes_polls_vote),
+        )
+        .route(
             "/api/notes/hybrid-timeline",
             post(handlers::misskey::endpoints::notes_hybrid_timeline),
         )
