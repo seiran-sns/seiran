@@ -26,6 +26,15 @@ pub trait EmailShortCodeRepository: Send + Sync {
     /// 同一`actor_id`+`purpose`の残りのコード行も全て削除する（複数回リクエストした場合の
     /// 古いコードの再利用を防ぐ）。
     async fn consume(&self, actor_id: i64, purpose: &str, code_hash: &str) -> Result<bool, sqlx::Error>;
+
+    /// 有効期限内のコードが1件でも残っているか（`signPlcOperation`が検証必須かどうかの
+    /// 判定に使う。`issue`後にメール送信自体が失敗して`revoke`された場合や、SMTP未設定で
+    /// そもそも`issue`していない場合はここが`false`になり、検証をスキップしてよい）。
+    async fn has_pending(&self, actor_id: i64, purpose: &str) -> Result<bool, sqlx::Error>;
+
+    /// `issue`後にメール送信が失敗した場合、届くはずのないコードを要求し続けないよう
+    /// 発行済み分を取り消す。
+    async fn revoke(&self, actor_id: i64, purpose: &str) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgEmailShortCodeRepository {
@@ -86,5 +95,27 @@ impl EmailShortCodeRepository for PgEmailShortCodeRepository {
             .await?;
 
         Ok(found)
+    }
+
+    async fn has_pending(&self, actor_id: i64, purpose: &str) -> Result<bool, sqlx::Error> {
+        let row: Option<(i64,)> = sqlx::query_as(
+            "SELECT id FROM email_short_codes
+             WHERE actor_id = $1 AND purpose = $2 AND expires_at > now()
+             LIMIT 1",
+        )
+        .bind(actor_id)
+        .bind(purpose)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.is_some())
+    }
+
+    async fn revoke(&self, actor_id: i64, purpose: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM email_short_codes WHERE actor_id = $1 AND purpose = $2")
+            .bind(actor_id)
+            .bind(purpose)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 }

@@ -111,6 +111,14 @@ pub async fn xrpc_request_plc_operation_signature(
         return ApiError::BadRequest("ROTATION_KEY_NOT_MIGRATED".to_string()).into_response();
     }
 
+    // `createSession`のauthFactorTokenと同じ原則: SMTP未設定インスタンスはコード送信自体が
+    // 不可能なため、2FAごと丸々スキップする（`xrpc_sign_plc_operation`側もtoken検証を
+    // 省略する）。コードの発行・メール送信は一切行わず空応答のみ返す。
+    let smtp_settings = state.site_settings.get_all().await.unwrap_or_default();
+    if !crate::mailer::is_smtp_configured(&smtp_settings) {
+        return Json(serde_json::json!({})).into_response();
+    }
+
     // メール爆撃対策: 同一actor+purposeで直近60秒以内に発行済みなら再送しない。
     let recent: Option<(i64,)> = sqlx::query_as(
         "SELECT id FROM email_short_codes
@@ -156,9 +164,12 @@ pub async fn xrpc_request_plc_operation_signature(
             .into_response();
     }
 
-    let smtp_settings = state.site_settings.get_all().await.unwrap_or_default();
     if let Err(e) = crate::mailer::send_plc_operation_signature_code(&smtp_settings, &login.email, &code).await {
         tracing::error!("[requestPlcOperationSignature] コード送信失敗: {}", e);
+        // 送信自体に失敗した場合、ユーザーは届くはずのないコードの入力を永遠に求められる
+        // ことになる。発行済みコードを取り消し、`xrpc_sign_plc_operation`側で
+        // 「未発行＝検証不要」として扱わせる（SMTP未設定時と同じ扱いに帰着させる）。
+        let _ = state.email_short_codes.revoke(actor.id, PLC_SIGNATURE_PURPOSE).await;
     }
 
     Json(serde_json::json!({})).into_response()
@@ -202,16 +213,29 @@ pub async fn xrpc_sign_plc_operation(
         return ApiError::BadRequest("ROTATION_KEY_NOT_MIGRATED".to_string()).into_response();
     };
 
-    let code_hash = hex::encode(sha2::Sha256::digest(req.token.trim().as_bytes()));
-    match state
+    // `xrpc_request_plc_operation_signature`と対の判定: 有効なコードが1件も発行されて
+    // いなければ（SMTP未設定でそもそも発行していない、または発行後にメール送信自体が
+    // 失敗して`revoke`済み）検証をスキップする。「SMTP設定の有無」ではなく「実際に
+    // コードが存在するか」で判定することで、設定はあるのに送信が失敗した場合も
+    // 同じ扱いに帰着させる。
+    let has_pending = state
         .email_short_codes
-        .consume(actor.id, PLC_SIGNATURE_PURPOSE, &code_hash)
+        .has_pending(actor.id, PLC_SIGNATURE_PURPOSE)
         .await
-    {
-        Ok(true) => {}
-        Ok(false) => return ApiError::BadRequest("PLC_TOKEN_INVALID".to_string()).into_response(),
-        Err(e) => {
-            return ApiError::Internal(format!("[signPlcOperation] コード検証失敗: {}", e)).into_response()
+        .unwrap_or(false);
+    if has_pending {
+        let code_hash = hex::encode(sha2::Sha256::digest(req.token.trim().as_bytes()));
+        match state
+            .email_short_codes
+            .consume(actor.id, PLC_SIGNATURE_PURPOSE, &code_hash)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => return ApiError::BadRequest("PLC_TOKEN_INVALID".to_string()).into_response(),
+            Err(e) => {
+                return ApiError::Internal(format!("[signPlcOperation] コード検証失敗: {}", e))
+                    .into_response()
+            }
         }
     }
 

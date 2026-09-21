@@ -84,7 +84,7 @@ seiranが自前でジェネシスDIDを発行するローカルアカウント�
 | `com.atproto.identity.submitPlcOperation` | ATP accessJwt | ★不可逆境界。plc.directoryへ提出し、`#identity`/`#account`イベント発火・`did_moved_out_at`設定 |
 | `com.atproto.server.deactivateAccount` | ATP accessJwt | `submitPlcOperation`の有無にかかわらず`did_moved_out_at`を設定 |
 
-`com.atproto.server.createSession`のメール2FA（`authFactorToken`）も同じ`email_short_codes`機構（`purpose='atp_session_2fa'`）を使う。SMTP未設定インスタンスでは2FA自体を常にスキップする。
+`com.atproto.server.createSession`のメール2FA（`authFactorToken`）も同じ`email_short_codes`機構（`purpose='atp_session_2fa'`）を使う。SMTP未設定インスタンスでは2FA自体を常にスキップする。`requestPlcOperationSignature`/`signPlcOperation`も同じ原則: SMTP未設定なら`requestPlcOperationSignature`はコードを発行・送信せず空応答のみ返し、`signPlcOperation`も検証をスキップする。SMTP設定はあるが実際のメール送信自体が失敗した場合（実機で発見: 別インスタンスへの転入検証中に`smtp_host`未設定のまま気づかず遭遇）も、発行済みコードを`revoke`して同じ「未発行」扱いに帰着させる——「SMTP設定の有無」ではなく「有効なコードが実在するか」（`has_pending`）で検証要否を判定する。
 
 ### DID転出済み状態（`did_moved_out_at`）
 

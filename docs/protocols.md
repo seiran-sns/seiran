@@ -524,8 +524,8 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
 |---|---|
 | `com.atproto.server.checkAccountStatus` | 読み取りのみ。`activated`/`repoCommit`/`indexedRecords`等を返す |
 | `com.atproto.identity.getRecommendedDidCredentials` | 読み取りのみ。現在の`rotationKeys`（アカウント専用鍵＋サーバー共有鍵）等を返す |
-| `com.atproto.identity.requestPlcOperationSignature` | 登録メールへ6桁確認コードを送信する |
-| `com.atproto.identity.signPlcOperation` | 確認コードを検証し、要求内容のPLC更新オペレーションをアカウント専用ローテーションキーで署名して返す（提出はしない） |
+| `com.atproto.identity.requestPlcOperationSignature` | 登録メールへ6桁確認コードを送信する。SMTP未設定、またはメール送信自体が失敗した場合はコードを発行せず（発行済みなら`revoke`）空応答のみ返す |
+| `com.atproto.identity.signPlcOperation` | 確認コードを検証し、要求内容のPLC更新オペレーションをアカウント専用ローテーションキーで署名して返す（提出はしない）。有効なコードが1件も存在しない場合（未発行/`revoke`済み）は検証自体をスキップする |
 | `com.atproto.identity.submitPlcOperation` | plc.directoryへ提出する。この呼び出しの成功が不可逆境界。`#identity`/`#account`イベント発火と`did_moved_out_at`設定を伴う |
 | `com.atproto.server.deactivateAccount` | `did_moved_out_at`を設定する |
 | `com.atproto.server.createSession`（`authFactorToken`） | メール2FA。SMTP未設定インスタンスでは常にスキップする |
