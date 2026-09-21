@@ -21,7 +21,7 @@ PDS Aがメールを返さない場合（実機で判明: Bluesky公式アプリ
 3. PDS Aのリポジトリ取得（自動、待機表示のみ）
 4. PLCオペレーション署名要求→PDS A登録メール宛の確認コード入力
 5. `submitPlcOperation`実行（★不可逆境界、後述）。成功と同時にJWTが発行されログイン状態になる
-6. データ取り込み中（`MigrationImportingPage`、`is_suspended`と同型で他画面をバイパス）
+6. データ取り込み中（`MigrationImportingPage`、`is_suspended`と同型で他画面をバイパス。`submit-plc-token`成功時にlocalStorageのmigration_token/idをクリアせず残しておき、`/api/migration/:id/status`のポーリングを引き続き行うことで、`importing_data`中の取り込み件数/全体件数（`import_done`/`import_total`）を表示する。完了検知時にクリアする）
 7. 完了、通常のSNS画面へ
 
 ## 3. 状態遷移（`at_migration_status`）

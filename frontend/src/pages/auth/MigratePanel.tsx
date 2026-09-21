@@ -10,6 +10,7 @@ import {
   storeMigrationRequest,
   StoredMigrationRequest,
 } from "../migrationStorage";
+import { migrationStepLabel } from "../migrationStatusLabels";
 import styles from "../Auth.module.css";
 
 /** 他パネルへ切り替えて戻ってきても再開できるよう、親（`AuthCarouselPage`）に持たせる状態。 */
@@ -43,19 +44,6 @@ interface MigratePanelProps {
 }
 
 const POLL_INTERVAL_MS = 3000;
-
-const STATUS_LABEL_KEYS: Record<string, string> = {
-  fetching_repo: "auth:migrationStatus.step.fetchingRepo",
-  requesting_plc_signature: "auth:migrationStatus.step.requestingPlcSignature",
-  awaiting_plc_token: "auth:migrationStatus.step.awaitingPlcToken",
-  submitting_plc: "auth:migrationStatus.step.submittingPlc",
-  importing_data: "auth:migrationStatus.step.importingData",
-  deactivating_source: "auth:migrationStatus.step.deactivatingSource",
-  completed: "auth:migrationStatus.step.completed",
-  failed: "auth:migrationStatus.step.failed",
-  failed_post_submit: "auth:migrationStatus.step.failedPostSubmit",
-  abandoned: "auth:migrationStatus.step.abandoned",
-};
 
 /**
  * ログインカルーセル（issue #243）の「Blueskyから転入」パネル本体。既存DID転入フロー
@@ -308,7 +296,9 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     setSubmitting(true);
     try {
       const res = await api.migration.submitPlcToken(stored.id, stored.token, inputValue);
-      clearStoredMigrationRequest();
+      // localStorageのmigration_token/idはここではクリアしない——`importing_data`以降は
+      // `MigrationImportingPage`（ログイン後専用画面）が同じ`/api/migration/:id/status`を
+      // 引き続きポーリングして進捗表示に使うため、完了検知した時点でそちらがクリアする。
       login(res.token, res.user);
       navigate("/", { replace: true });
     } catch (err) {
@@ -318,18 +308,7 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     }
   }
 
-  const stepLabelKey = statusData ? STATUS_LABEL_KEYS[statusData.status] : undefined;
-  const stepLabel =
-    statusData?.status === "importing_data" &&
-    statusData.import_total != null &&
-    statusData.import_done != null
-      ? t("auth:migrationStatus.step.importingDataProgress", {
-          done: statusData.import_done,
-          total: statusData.import_total,
-        })
-      : stepLabelKey
-        ? t(stepLabelKey)
-        : statusData?.status ?? "";
+  const stepLabel = migrationStepLabel(t, statusData);
 
   return (
     <>
