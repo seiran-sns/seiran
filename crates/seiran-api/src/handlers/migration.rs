@@ -54,14 +54,15 @@ pub struct MigrationStartRequest {
     pub new_password: String,
     /// PDS Aがメール2FAを要求した場合の再試行時のみ指定する。
     pub auth_factor_token: Option<String>,
-    /// seiran独自のアカウントメール（PDS Aのメールとは無関係）。
-    /// `require_email_verification=false`のときのみ必須（`handlers::auth::register`と同じ形）。
+    /// PDS Aが`createSession`でメールアドレスを返さなかった場合のみのフォールバック
+    /// （通常はPDS A側の登録済みメールをそのまま使うため空でよい）。
     pub email: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct MigrationStartResponse {
-    pub request_id: i64,
+    /// snowflake IDはJSの53bit整数精度を超えるため文字列で返す（`NoteUserInfo.id`等と同じ理由）。
+    pub request_id: String,
     /// 以降の操作（`X-Migration-Token`ヘッダ）で使う生トークン。この応答一回きりでしか返らない。
     pub request_token: String,
     /// `awaiting_source_2fa` または `fetching_repo`。
@@ -106,38 +107,6 @@ pub async fn start(
         return Err(ApiError::Conflict("USERNAME_TAKEN"));
     }
 
-    // メールアドレス解決（`handlers::auth::register`と同じロジック）:
-    // - `require_email_verification=false`ならこの時点で`email`必須、そのまま確定
-    // - `true`なら`None`のままで進み、`awaiting_seiran_email`状態で
-    //   `confirm_seiran_email`エンドポイントが後から確定させる
-    let require_ev = state
-        .site_settings
-        .get("require_email_verification")
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .map(|v| v == "true")
-        .unwrap_or(false);
-    let resolved_email: Option<String> = if require_ev {
-        None
-    } else {
-        let email = req
-            .email
-            .as_deref()
-            .filter(|e| !e.is_empty() && e.contains('@'))
-            .ok_or_else(|| ApiError::BadRequest("INVALID_INPUT".into()))?
-            .trim()
-            .to_lowercase();
-        let exists = state
-            .users
-            .email_exists(&email)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-        if exists {
-            return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
-        }
-        Some(email)
-    };
-
     let (source_did, resolved) =
         seiran_common::atp::migration_client::resolve_source_pds(&req.source_handle, &state.ap_client.http)
             .await
@@ -181,6 +150,28 @@ pub async fn start(
         }
     };
 
+    // メールアドレス解決: 転入元PDSは`createSession`のパスワード認証を既に通っているため、
+    // 独自のメール実在確認は不要——PDS Aに登録済みのメールをそのまま信頼して使う。
+    // PDS Aがメールを返さない場合のみ`req.email`にフォールバックする（通常は起こらない）。
+    let email = match session.email.as_deref() {
+        Some(e) if !e.is_empty() => e.trim().to_lowercase(),
+        _ => req
+            .email
+            .as_deref()
+            .filter(|e| !e.is_empty() && e.contains('@'))
+            .ok_or_else(|| ApiError::BadRequest("INVALID_INPUT".into()))?
+            .trim()
+            .to_lowercase(),
+    };
+    let email_exists = state
+        .users
+        .email_exists(&email)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if email_exists {
+        return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
+    }
+
     let password_hash = LocalAuthProvider::hash_password(&req.new_password).map_err(|e| {
         tracing::error!("[migration:start] パスワードハッシュ失敗: {}", e);
         ApiError::Internal("パスワード処理エラー".to_string())
@@ -201,7 +192,7 @@ pub async fn start(
         &session.refresh_jwt,
         &req.new_username,
         &password_hash,
-        resolved_email.as_deref(),
+        Some(&email),
         now,
     )
     .await
@@ -210,59 +201,15 @@ pub async fn start(
     state.enqueue_migration_fetch_repo(request_id).await;
 
     Ok(Json(MigrationStartResponse {
-        request_id,
+        request_id: request_id.to_string(),
         request_token,
         status: "fetching_repo",
     }))
 }
 
-#[derive(Deserialize)]
-pub struct ConfirmSeiranEmailRequest {
-    /// `POST /api/auth/verify-token` で得た`registration_token`（`email_verifications.token`）。
-    pub registration_token: String,
-}
-
 #[derive(Serialize)]
 pub struct MigrationStatusStub {
     pub status: &'static str,
-}
-
-/// `require_email_verification=true`のときのみ通る経路。seiran独自の確認メールに
-/// 埋め込まれたリンクからユーザーが辿り着いた`registration_token`を消費し、
-/// メールアドレスを確定させて`requesting_plc_signature`へ進める。
-pub async fn confirm_seiran_email(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-    headers: HeaderMap,
-    Json(req): Json<ConfirmSeiranEmailRequest>,
-) -> Result<Json<MigrationStatusStub>, ApiError> {
-    let migration_req = authorize_migration_request(&state, id, &headers).await?;
-    if migration_req.status != "awaiting_seiran_email" {
-        return Err(ApiError::BadRequest("INVALID_STATE".into()));
-    }
-
-    let token: uuid::Uuid = req
-        .registration_token
-        .trim()
-        .parse()
-        .map_err(|_| ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
-    let email = state
-        .email_verifications
-        .consume(token)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
-
-    let repo = PgAtMigrationRepository::new(state.db.clone());
-    repo.set_email_and_status(id, &email, "requesting_plc_signature", chrono::Utc::now())
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    state.enqueue_migration_request_plc_signature(id).await;
-
-    Ok(Json(MigrationStatusStub {
-        status: "requesting_plc_signature",
-    }))
 }
 
 #[derive(Deserialize)]
@@ -321,6 +268,8 @@ pub async fn submit_plc_token(
             handle: migration_req.source_handle.clone(),
             access_jwt: migration_req.source_access_jwt.clone().unwrap_or_default(),
             refresh_jwt: migration_req.source_refresh_jwt.clone().unwrap_or_default(),
+        email: None,
+        email_confirmed: false,
         };
         // `start`時点で確定したPDS Aのエンドポイント文字列をそのまま使う（DID文書からの
         // 再導出ではない——`resolve_stored_endpoint`のドキュメントコメント参照。実機で発見:
@@ -568,7 +517,8 @@ pub async fn submit_plc_token(
 
 #[derive(Serialize)]
 pub struct MigrationStatusResponse {
-    pub request_id: i64,
+    /// snowflake IDはJSの53bit整数精度を超えるため文字列で返す（`NoteUserInfo.id`等と同じ理由）。
+    pub request_id: String,
     pub status: String,
     pub last_error: Option<String>,
     /// フロントが表示すべき入力欄の種類。`None`なら入力欄は不要。
@@ -578,11 +528,13 @@ pub struct MigrationStatusResponse {
     /// `plc_submitted_at`が未設定（不可逆境界の前）なら真。「別DIDで再開／新規DID切替」を
     /// 提示してよいかの判定に使う。
     pub can_abandon: bool,
+    /// `status == "importing_data"`のときのみ`Some`（取り込み済み件数/全体件数、レコード+blob合算）。
+    pub import_done: Option<i64>,
+    pub import_total: Option<i64>,
 }
 
 fn needs_input_for(status: &str) -> Option<&'static str> {
     match status {
-        "awaiting_seiran_email" => Some("seiran_email_token"),
         "awaiting_plc_token" => Some("plc_token"),
         _ => None,
     }
@@ -602,8 +554,20 @@ pub async fn get_status(
     headers: HeaderMap,
 ) -> Result<Json<MigrationStatusResponse>, ApiError> {
     let migration_req = authorize_migration_request(&state, id, &headers).await?;
+
+    let import_progress = if migration_req.status == "importing_data" {
+        let repo = PgAtMigrationRepository::new(state.db.clone());
+        let (done, total) = repo
+            .import_progress(id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Some((done, total))
+    } else {
+        None
+    };
+
     Ok(Json(MigrationStatusResponse {
-        request_id: id,
+        request_id: id.to_string(),
         status: migration_req.status.clone(),
         last_error: migration_req.last_error,
         needs_input: needs_input_for(&migration_req.status),
@@ -611,13 +575,14 @@ pub async fn get_status(
         can_abandon: migration_req.plc_submitted_at.is_none()
             && migration_req.status != "completed"
             && migration_req.status != "abandoned",
+        import_done: import_progress.map(|(done, _)| done),
+        import_total: import_progress.map(|(_, total)| total),
     }))
 }
 
 /// 現在のステータスに対応するジョブを再度積む。ジョブが存在しないステータス
 /// （`awaiting_*`・`submitting_plc`・`completed`・`abandoned`等）には使えない
-/// ——`awaiting_plc_token`は`submit-plc-token`を、`awaiting_seiran_email`は
-/// `confirm-seiran-email`を、`submitting_plc`（PLC提出済みの再入）は
+/// ——`awaiting_plc_token`は`submit-plc-token`を、`submitting_plc`（PLC提出済みの再入）は
 /// `submit-plc-token`（token省略可）をそれぞれ呼び直すこと。
 pub async fn retry(
     State(state): State<AppState>,

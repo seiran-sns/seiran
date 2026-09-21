@@ -23,7 +23,6 @@ const ListsSettingsPage = lazy(() => import("./pages/ListsSettingsPage"));
 const AppearanceSettingsPage = lazy(() => import("./pages/AppearanceSettingsPage"));
 const AuthCarouselPage = lazy(() => import("./pages/auth/AuthCarouselPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
-const MigrationStatusPage = lazy(() => import("./pages/MigrationStatusPage"));
 const MigrationImportingPage = lazy(() => import("./pages/MigrationImportingPage"));
 const MiAuthConnectPage = lazy(() => import("./pages/MiAuthConnectPage"));
 const MutesBlocksSettingsPage = lazy(() => import("./pages/MutesBlocksSettingsPage"));
@@ -297,14 +296,6 @@ function AppRoutes() {
           element={
             <RedirectIfAuthed>
               <AuthCarouselPage />
-            </RedirectIfAuthed>
-          }
-        />
-        <Route
-          path="/register/migrate/status"
-          element={
-            <RedirectIfAuthed>
-              <MigrationStatusPage />
             </RedirectIfAuthed>
           }
         />

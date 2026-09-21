@@ -273,8 +273,7 @@ impl AppState {
     }
 
     /// 既存DID転入フロー: PDS Aへの`requestPlcOperationSignature`呼び出しを積む。
-    /// `require_email_verification=false`なら`enqueue_migration_fetch_repo`完了直後に
-    /// ジョブ自身が積む。`true`の場合は`confirm_seiran_email`エンドポイントから呼ばれる。
+    /// `enqueue_migration_fetch_repo`完了直後にジョブ自身が積む。
     pub async fn enqueue_migration_request_plc_signature(&self, request_id: i64) {
         if let Err(e) = self
             .job_queue
@@ -1157,10 +1156,6 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/migration/start", post(handlers::migration::start))
-        .route(
-            "/api/migration/:id/confirm-seiran-email",
-            post(handlers::migration::confirm_seiran_email),
-        )
         .route(
             "/api/migration/:id/submit-plc-token",
             post(handlers::migration::submit_plc_token),

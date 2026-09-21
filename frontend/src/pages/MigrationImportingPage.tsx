@@ -36,8 +36,8 @@ export default function MigrationImportingPage() {
         <h1 className={styles.title}>{t("common:appName")}</h1>
         <h2 className={styles.subtitle}>{t("auth:migrationImporting.title")}</h2>
         {user?.username && <p>@{user.username}</p>}
-        <p style={{ textAlign: "center", color: "#a0aec0", lineHeight: 1.6 }}>
-          {t("auth:migrationImporting.description")}
+        <p className={styles.description}>
+          <span className={styles.pendingHighlight}>{t("auth:migrationImporting.description")}</span>
         </p>
         <button type="button" className={styles.button} onClick={() => logout({ preserveRedirect: false })}>
           {t("auth:migrationImporting.logout")}

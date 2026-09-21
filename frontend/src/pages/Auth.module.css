@@ -38,6 +38,32 @@
   margin: -16px 0 20px;
 }
 
+.pendingHighlight {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  animation: pendingBlink 1.4s ease-in-out infinite;
+}
+
+@keyframes pendingBlink {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: var(--accent-strong);
+    color: #fff;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pendingHighlight {
+    animation: none;
+    background-color: var(--accent-strong);
+    color: #fff;
+  }
+}
+
 .form {
   display: flex;
   flex-direction: column;

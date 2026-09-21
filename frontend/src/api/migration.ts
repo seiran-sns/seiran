@@ -15,23 +15,26 @@ export interface MigrationStartParams {
   new_username: string;
   new_password: string;
   auth_factor_token?: string;
-  email?: string;
 }
 
 export interface MigrationStartResponse {
-  request_id: number;
+  /** snowflake IDはJSの53bit整数精度を超えるため文字列で返る。数値化せず文字列のまま扱うこと。 */
+  request_id: string;
   request_token: string;
   status: string;
 }
 
 export interface MigrationStatusResponse {
-  request_id: number;
+  request_id: string;
   status: string;
   last_error?: string | null;
-  /** `"seiran_email_token"` | `"plc_token"` | null。フロントが表示すべき入力欄の種類。 */
+  /** `"plc_token"` | null。フロントが表示すべき入力欄の種類。 */
   needs_input?: string | null;
   retryable: boolean;
   can_abandon: boolean;
+  /** `status === "importing_data"`のときのみ非null（取り込み済み件数/全体件数）。 */
+  import_done?: number | null;
+  import_total?: number | null;
 }
 
 interface SimpleStatus {
@@ -62,26 +65,18 @@ export const migration = {
   start(params: MigrationStartParams) {
     return migrationRequest<MigrationStartResponse>("POST", "/migration/start", undefined, params);
   },
-  confirmSeiranEmail(id: number, requestToken: string, registrationToken: string) {
-    return migrationRequest<SimpleStatus>(
-      "POST",
-      `/migration/${id}/confirm-seiran-email`,
-      requestToken,
-      { registration_token: registrationToken },
-    );
-  },
-  submitPlcToken(id: number, requestToken: string, plcToken: string) {
+  submitPlcToken(id: string, requestToken: string, plcToken: string) {
     return migrationRequest<AuthResponse>("POST", `/migration/${id}/submit-plc-token`, requestToken, {
       token: plcToken,
     });
   },
-  status(id: number, requestToken: string) {
+  status(id: string, requestToken: string) {
     return migrationRequest<MigrationStatusResponse>("GET", `/migration/${id}/status`, requestToken);
   },
-  retry(id: number, requestToken: string) {
+  retry(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/retry`, requestToken);
   },
-  abandon(id: number, requestToken: string) {
+  abandon(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/abandon`, requestToken);
   },
 };

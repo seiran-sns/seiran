@@ -79,16 +79,6 @@ pub trait AtMigrationRepository: Send + Sync {
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error>;
 
-    /// `require_email_verification=ON`のとき、確認済みメールアドレスを記録しつつ
-    /// 次のステータス（`requesting_plc_signature`）へ遷移する。
-    async fn set_email_and_status(
-        &self,
-        id: i64,
-        email: &str,
-        status: &str,
-        now: DateTime<Utc>,
-    ) -> Result<(), sqlx::Error>;
-
     /// エラー内容を記録しつつステータス遷移する（`failed`/`failed_post_submit`への遷移）。
     async fn set_failed(
         &self,
@@ -152,6 +142,10 @@ pub trait AtMigrationRepository: Send + Sync {
     async fn claim_next_blob(&self, request_id: i64) -> Result<Option<(i64, String)>, sqlx::Error>;
 
     async fn mark_blob_imported(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
+
+    /// `importing_data`中の進捗表示用。戻り値: (取り込み済み件数, 全体件数)。
+    /// レコード（投稿等）とblobの両方を合算する。
+    async fn import_progress(&self, request_id: i64) -> Result<(i64, i64), sqlx::Error>;
 
     /// フォロー関係復元待ち（`app.bsky.graph.follow`として取り込み済み＝`imported_at`は
     /// 設定済みだが、`follows`テーブルへの反映＝`follow_materialized_at`が未設定）の
@@ -298,27 +292,6 @@ impl AtMigrationRepository for PgAtMigrationRepository {
             "UPDATE at_migration_requests SET status = $1::at_migration_status, updated_at = $2
              WHERE id = $3",
         )
-        .bind(status)
-        .bind(now)
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
-    }
-
-    async fn set_email_and_status(
-        &self,
-        id: i64,
-        email: &str,
-        status: &str,
-        now: DateTime<Utc>,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE at_migration_requests
-             SET email = $1, status = $2::at_migration_status, updated_at = $3
-             WHERE id = $4",
-        )
-        .bind(email)
         .bind(status)
         .bind(now)
         .bind(id)
@@ -497,6 +470,20 @@ impl AtMigrationRepository for PgAtMigrationRepository {
             .execute(&self.pool)
             .await
             .map(|_| ())
+    }
+
+    async fn import_progress(&self, request_id: i64) -> Result<(i64, i64), sqlx::Error> {
+        let row: (i64, i64) = sqlx::query_as(
+            "SELECT
+                 (SELECT count(*) FILTER (WHERE imported_at IS NOT NULL) FROM at_migration_records WHERE request_id = $1)
+                 + (SELECT count(*) FILTER (WHERE imported_at IS NOT NULL) FROM at_migration_blobs WHERE request_id = $1),
+                 (SELECT count(*) FROM at_migration_records WHERE request_id = $1)
+                 + (SELECT count(*) FROM at_migration_blobs WHERE request_id = $1)",
+        )
+        .bind(request_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row)
     }
 
     async fn claim_next_follow_record(

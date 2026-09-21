@@ -1,8 +1,15 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ApiError } from "../../api/client";
-import { storeMigrationRequest } from "../migrationStorage";
+import type { MigrationStatusResponse } from "../../api/migration";
+import { useAuth } from "../../contexts/AuthContext";
+import {
+  clearStoredMigrationRequest,
+  loadStoredMigrationRequest,
+  storeMigrationRequest,
+  StoredMigrationRequest,
+} from "../migrationStorage";
 import styles from "../Auth.module.css";
 
 /** 他パネルへ切り替えて戻ってきても再開できるよう、親（`AuthCarouselPage`）に持たせる状態。 */
@@ -11,7 +18,6 @@ export interface MigratePanelState {
   sourcePassword: string;
   newUsername: string;
   newPassword: string;
-  email: string;
   needsAuthFactorToken: boolean;
   authFactorToken: string;
 }
@@ -21,7 +27,6 @@ export const MIGRATE_PANEL_INITIAL_STATE: MigratePanelState = {
   sourcePassword: "",
   newUsername: "",
   newPassword: "",
-  email: "",
   needsAuthFactorToken: false,
   authFactorToken: "",
 };
@@ -31,31 +36,70 @@ interface MigratePanelProps {
   onChange: (patch: Partial<MigratePanelState>) => void;
 }
 
+const POLL_INTERVAL_MS = 3000;
+
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  fetching_repo: "auth:migrationStatus.step.fetchingRepo",
+  requesting_plc_signature: "auth:migrationStatus.step.requestingPlcSignature",
+  awaiting_plc_token: "auth:migrationStatus.step.awaitingPlcToken",
+  submitting_plc: "auth:migrationStatus.step.submittingPlc",
+  importing_data: "auth:migrationStatus.step.importingData",
+  deactivating_source: "auth:migrationStatus.step.deactivatingSource",
+  completed: "auth:migrationStatus.step.completed",
+  failed: "auth:migrationStatus.step.failed",
+  failed_post_submit: "auth:migrationStatus.step.failedPostSubmit",
+  abandoned: "auth:migrationStatus.step.abandoned",
+};
+
 /**
  * ログインカルーセル（issue #243）の「Blueskyから転入」パネル本体。既存DID転入フロー
- * （`docs/account_migration.md`）の入り口。外枠（見出し・カード）は親の`AuthCarouselPage`が
- * 持つため、フォームのみを描画する。`POST /api/migration/start`が
- * `AUTH_FACTOR_TOKEN_REQUIRED`を返した場合は、移行元PDSのメール2FAコード入力欄を追加表示して
- * 同フォームで再試行する。成功したら`request_id`/`request_token`を保存し、状態画面
- * （`MigrationStatusPage`）へ遷移する。
+ * （`docs/account_migration.md`）の入り口から完了までを、別画面へ遷移せずこのパネル1枚の
+ * 中で表示を切り替えながら進める。外枠（見出し・カード）は親の`AuthCarouselPage`が持つため、
+ * フォーム・状態表示のみを描画する。
  *
- * このパネルは非アクティブ時に実際にアンマウントされる（`RegisterPanel`と同じ理由、#243）。
- * 入力途中の値・2FAコード入力段階への遷移は`state`/`onChange`経由で親に持たせ、他パネルへ
- * 切り替えて戻ってきても続きから再開できるようにしている。
+ * 進行中のリクエストがあるかどうかは`migrationStorage`（localStorage）を見て判定する。
+ * `state`/`onChange`はこのパネルが非アクティブ時にアンマウントされても入力欄の値を
+ * 保持するためのもの（`RegisterPanel`と同じ理由、#243）で、開始前のフォーム入力のみが
+ * 対象——開始後の進行状況は`localStorage`＋サーバーへの都度問い合わせで復元できるため
+ * ここには含めない。
  */
 export default function MigratePanel({ state, onChange }: MigratePanelProps) {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
+  const [stored, setStored] = useState<StoredMigrationRequest | null>(() => loadStoredMigrationRequest());
 
-  const [requireEmailVerification, setRequireEmailVerification] = useState<boolean | null>(null);
+  if (stored) {
+    return (
+      <MigrateStatusView
+        stored={stored}
+        onReset={() => {
+          clearStoredMigrationRequest();
+          setStored(null);
+        }}
+      />
+    );
+  }
+
+  return (
+    <MigrateFormView
+      state={state}
+      onChange={onChange}
+      onStarted={(req) => {
+        storeMigrationRequest(req);
+        setStored(req);
+      }}
+    />
+  );
+}
+
+interface MigrateFormViewProps {
+  state: MigratePanelState;
+  onChange: (patch: Partial<MigratePanelState>) => void;
+  onStarted: (req: StoredMigrationRequest) => void;
+}
+
+function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
+  const { t } = useTranslation();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    api.meta().then((meta) => {
-      setRequireEmailVerification(meta.requireEmailVerification ?? false);
-    }).catch(() => setRequireEmailVerification(false));
-  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -68,10 +112,8 @@ export default function MigratePanel({ state, onChange }: MigratePanelProps) {
         new_username: state.newUsername,
         new_password: state.newPassword,
         auth_factor_token: state.needsAuthFactorToken ? state.authFactorToken : undefined,
-        email: requireEmailVerification === false ? state.email : undefined,
       });
-      storeMigrationRequest({ id: res.request_id, token: res.request_token });
-      navigate("/register/migrate/status");
+      onStarted({ id: res.request_id, token: res.request_token });
     } catch (err) {
       if (err instanceof ApiError && err.code === "AUTH_FACTOR_TOKEN_REQUIRED") {
         onChange({ needsAuthFactorToken: true });
@@ -83,8 +125,6 @@ export default function MigratePanel({ state, onChange }: MigratePanelProps) {
       setLoading(false);
     }
   }
-
-  if (requireEmailVerification === null) return null;
 
   return (
     <>
@@ -150,23 +190,185 @@ export default function MigratePanel({ state, onChange }: MigratePanelProps) {
             minLength={8}
           />
         </label>
-        {requireEmailVerification === false && (
-          <label className={styles.label}>
-            {t("auth:register.emailLabel")}
-            <input
-              type="email"
-              value={state.email}
-              onChange={(e) => onChange({ email: e.target.value })}
-              className={styles.input}
-              required
-            />
-          </label>
-        )}
         {error && <p className={styles.error}>{error}</p>}
         <button type="submit" className={styles.button} disabled={loading}>
           {loading ? t("auth:migrateRegister.submitting") : t("auth:migrateRegister.submit")}
         </button>
       </form>
+    </>
+  );
+}
+
+interface MigrateStatusViewProps {
+  stored: StoredMigrationRequest;
+  onReset: () => void;
+}
+
+function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { login } = useAuth();
+
+  const [statusData, setStatusData] = useState<MigrationStatusResponse | null>(null);
+  const [error, setError] = useState("");
+  const [inputValue, setInputValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await api.migration.status(stored.id, stored.token);
+      setStatusData(res);
+      setError("");
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }, [stored]);
+
+  useEffect(() => {
+    fetchStatus();
+    return () => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ジョブが裏で動くステータスの間だけポーリングする。入力待ち・終端状態では止める。
+  useEffect(() => {
+    if (!statusData) return;
+    const isPolling =
+      statusData.retryable &&
+      !statusData.needs_input &&
+      !["completed", "abandoned"].includes(statusData.status);
+    if (!isPolling) return;
+    pollTimer.current = setTimeout(fetchStatus, POLL_INTERVAL_MS);
+    return () => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    };
+  }, [statusData, fetchStatus]);
+
+  async function handleRetry() {
+    setError("");
+    setSubmitting(true);
+    try {
+      await api.migration.retry(stored.id, stored.token);
+      await fetchStatus();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleAbandon() {
+    setError("");
+    setSubmitting(true);
+    try {
+      await api.migration.abandon(stored.id, stored.token);
+      onReset();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleStartOver() {
+    onReset();
+    navigate("/register", { replace: true });
+  }
+
+  async function handleInputSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (statusData?.needs_input !== "plc_token") return;
+    setError("");
+    setSubmitting(true);
+    try {
+      const res = await api.migration.submitPlcToken(stored.id, stored.token, inputValue);
+      clearStoredMigrationRequest();
+      login(res.token, res.user);
+      navigate("/", { replace: true });
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const stepLabelKey = statusData ? STATUS_LABEL_KEYS[statusData.status] : undefined;
+  const stepLabel =
+    statusData?.status === "importing_data" &&
+    statusData.import_total != null &&
+    statusData.import_done != null
+      ? t("auth:migrationStatus.step.importingDataProgress", {
+          done: statusData.import_done,
+          total: statusData.import_total,
+        })
+      : stepLabelKey
+        ? t(stepLabelKey)
+        : statusData?.status ?? "";
+
+  return (
+    <>
+      <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem" }}>{stepLabel}</p>
+
+      {statusData?.last_error && <p className={styles.error}>{statusData.last_error}</p>}
+      {error && <p className={styles.error}>{error}</p>}
+
+      {statusData?.needs_input === "plc_token" && (
+        <form onSubmit={handleInputSubmit} className={styles.form}>
+          <label className={styles.label}>
+            {t("auth:migrationStatus.plcTokenLabel")}
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              className={styles.input}
+              required
+              autoFocus
+            />
+          </label>
+          <button type="submit" className={styles.button} disabled={submitting}>
+            {t("auth:migrationStatus.submitInput")}
+          </button>
+        </form>
+      )}
+
+      {!statusData?.needs_input && statusData?.retryable && (
+        <button type="button" className={styles.button} onClick={handleRetry} disabled={submitting}>
+          {t("auth:migrationStatus.retry")}
+        </button>
+      )}
+
+      {statusData?.can_abandon && (
+        <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
+          <p style={{ color: "#a0aec0", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+            {t("auth:migrationStatus.abandonDescription")}
+          </p>
+          <button
+            type="button"
+            className={styles.button}
+            onClick={handleAbandon}
+            disabled={submitting}
+            style={{ marginBottom: "0.5rem" }}
+          >
+            {t("auth:migrationStatus.retryWithDifferentAccount")}
+          </button>
+          <button type="button" className={styles.button} onClick={handleStartOver} disabled={submitting}>
+            {t("auth:migrationStatus.startFreshInstead")}
+          </button>
+        </div>
+      )}
+
+      {(statusData?.status === "abandoned" ||
+        statusData?.status === "failed" ||
+        statusData?.status === "failed_post_submit") && (
+        <p className={styles.link} style={{ marginTop: "1rem" }}>
+          <button type="button" className={styles.button} onClick={handleStartOver}>
+            {t("auth:migrationStatus.backToRegister")}
+          </button>
+        </p>
+      )}
     </>
   );
 }

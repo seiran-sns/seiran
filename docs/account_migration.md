@@ -2,29 +2,25 @@
 
 対象読者: seiran のコード全体に手を入れる開発者。「今のシステムがどう動いているか」だけを書く。
 
-新規登録時に必ず新しいDIDを発行する通常のアカウント作成とは別に、既存のBluesky/AT Protocolアカウント（bsky.social等でホストされている）を、そのDID・投稿・フォロー関係・blobごとseiranへ「転入」させる登録経路（1〜5節）、およびその逆方向——seiranから他PDSへ既存DIDを転出させる際、seiranが転出元として応答するサーバー側API（6節）。技術的な実体はPDS間移行。実装本体は`crates/seiran-api/src/handlers/migration.rs`・`crates/seiran-common/src/jobs/at_migration.rs`・`crates/seiran-common/src/atp/{car,mst_walk,migration_client,plc}.rs`・`crates/seiran-api/src/handlers/xrpc/identity.rs`、フロントエンドは`frontend/src/pages/{MigrateRegister,MigrationStatusPage,MigrationImportingPage}.tsx`。関連ドキュメント: `docs/architecture.md`（ジョブ・匿名段階認可）、`docs/database.md`（テーブル定義）、`docs/protocols.md` 3節（PDS Aとの通信・SSRF対策）。
+新規登録時に必ず新しいDIDを発行する通常のアカウント作成とは別に、既存のBluesky/AT Protocolアカウント（bsky.social等でホストされている）を、そのDID・投稿・フォロー関係・blobごとseiranへ「転入」させる登録経路（1〜5節）、およびその逆方向——seiranから他PDSへ既存DIDを転出させる際、seiranが転出元として応答するサーバー側API（6節）。技術的な実体はPDS間移行。実装本体は`crates/seiran-api/src/handlers/migration.rs`・`crates/seiran-common/src/jobs/at_migration.rs`・`crates/seiran-common/src/atp/{car,mst_walk,migration_client,plc}.rs`・`crates/seiran-api/src/handlers/xrpc/identity.rs`、フロントエンドは`frontend/src/pages/auth/MigratePanel.tsx`（ログインカルーセルの一部、`frontend/src/pages/auth/AuthCarouselPage.tsx`）と`frontend/src/pages/MigrationImportingPage.tsx`。関連ドキュメント: `docs/architecture.md`（ジョブ・匿名段階認可）、`docs/database.md`（テーブル定義）、`docs/protocols.md` 3節（PDS Aとの通信・SSRF対策）。
 
 ## 1. 認証方式（ID/PW、OAuth不採用）
 
 PDS Aへの認証は`com.atproto.server.createSession`（ID/PW直叩き）を使う。OAuth（AT Protocolのclient-id-as-URL方式）は採用していない。理由: bsky.socialのOAuth entrywayが公開するスコープ（`atproto`/`transition:email`/`transition:generic`/`transition:chat.bsky`）には、PLCオペレーション署名（`account`スコープ相当）やアカウント無効化に必要なスコープが含まれない。これは実機検証済みの制約であり、Bluesky公式クライアント自身もアカウント移行機能をID/PW認証で実装している。
 
-seiran自身の`require_email_verification`設定（seiranのメール確認、後述）とPDS Aのメール2FA（`authFactorToken`）は完全に別チャネル。
+メールアドレスはPDS Aの`createSession`応答（`email`/`emailConfirmed`）からそのまま取得して使う。PDS Aへのパスワード認証成功が既にアカウント所有の強い証跡であるため、seiran独自のメール実在確認（`require_email_verification`）は転入フローでは挟まない——通常registerのメール確認とは別チャネル。PDS Aのメール2FA（`authFactorToken`、ハンドル・パスワード入力直後の`createSession`に対するもの）とはさらに別物。
 
 ## 2. ユーザーフロー
 
-`/register/migrate`で移行元ハンドル・パスワードを入力すると開始する。以降は単一の汎用状態画面（`MigrationStatusPage`）に統一されており、画面遷移ではなく「いま何を待っているか」の表示切り替えで進行する。各ステップは入力欄0〜1個＋リトライボタンで構成される。
+`/register/migrate`（ログインカルーセルの「Blueskyから転入」パネル、`MigratePanel`）で移行元ハンドル・パスワードを入力すると開始する。以降は同じパネル内で「いま何を待っているか」の表示切り替えにより進行する（別画面への遷移はしない）。各ステップは入力欄0〜1個＋リトライボタンで構成される。
 
-### `require_email_verification = OFF`の場合
 1. `/register/migrate`でハンドル・パスワードを入力し送信
 2. （PDS Aがメール2FAを要求する場合のみ）確認コード入力
-3. PDS Aのリポジトリ取得（自動、待機画面のみ）
+3. PDS Aのリポジトリ取得（自動、待機表示のみ）
 4. PLCオペレーション署名要求→PDS A登録メール宛の確認コード入力
 5. `submitPlcOperation`実行（★不可逆境界、後述）。成功と同時にJWTが発行されログイン状態になる
 6. データ取り込み中（`MigrationImportingPage`、`is_suspended`と同型で他画面をバイパス）
 7. 完了、通常のSNS画面へ
-
-### `require_email_verification = ON`の場合
-上記3と4の間に、seiran自身のメール確認ステップが挿入される（`email_verifications`の`registration_token`を消費する通常の登録メール確認と同じ仕組み）。
 
 ## 3. 状態遷移（`at_migration_status`）
 
@@ -32,7 +28,6 @@ seiran自身の`require_email_verification`設定（seiranのメール確認、�
 |---|---|---|
 | `awaiting_source_2fa` | PDS Aがメール2FAを要求、`authFactorToken`待ち | ユーザー入力待ち |
 | `fetching_repo` | `getRepo`(CAR)+`listBlobs`取得中 | `Job::MigrationFetchRepo` |
-| `awaiting_seiran_email` | `require_email_verification=ON`時のみ、seiranのメール確認待ち | ユーザー入力待ち |
 | `requesting_plc_signature` | `requestPlcOperationSignature`呼び出し中 | `Job::MigrationRequestPlcSignature` |
 | `awaiting_plc_token` | PDS Aメールの確認コード入力待ち | ユーザー入力待ち |
 | `submitting_plc` | `signPlcOperation`→`submitPlcOperation`実行中。★成功時にDB確定（`users`/`actors`作成）も行う | 同期処理（APIハンドラ内） |

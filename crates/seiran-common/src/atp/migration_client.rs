@@ -96,6 +96,9 @@ pub struct AtpSession {
     pub handle: String,
     pub access_jwt: String,
     pub refresh_jwt: String,
+    /// PDS Aに登録済みのメールアドレス（`emailConfirmed=true`の場合のみ転入先で信頼して使う）。
+    pub email: Option<String>,
+    pub email_confirmed: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,6 +108,10 @@ struct CreateSessionResp {
     handle: String,
     access_jwt: String,
     refresh_jwt: String,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    email_confirmed: Option<bool>,
 }
 
 /// `com.atproto.server.createSession`。`auth_factor_token` はPDS Aがメール2FAを要求した
@@ -149,6 +156,8 @@ pub async fn create_session_with_2fa(
         handle: session.handle,
         access_jwt: session.access_jwt,
         refresh_jwt: session.refresh_jwt,
+        email: session.email,
+        email_confirmed: session.email_confirmed.unwrap_or(false),
     })
 }
 
@@ -420,6 +429,8 @@ mod tests {
             handle: "testimport.bsky.social".to_string(),
             access_jwt: String::new(),
             refresh_jwt: String::new(),
+            email: None,
+            email_confirmed: false,
         };
 
         let car = fetch_repo_car(&resolved, &dummy_session)

@@ -39,7 +39,9 @@ export default function VerifyEmail() {
     }
     const controller = new AbortController();
     api.auth.verifyEmailToken(token, controller.signal)
-      .then((res) => setState({ phase: "form", registrationToken: res.registration_token }))
+      .then((res) => {
+        setState({ phase: "form", registrationToken: res.registration_token });
+      })
       .catch((err) => {
         if (controller.signal.aborted) return;
         setState({ phase: "error", message: getErrorMessage(err) });
