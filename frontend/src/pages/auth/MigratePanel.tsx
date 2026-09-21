@@ -20,6 +20,10 @@ export interface MigratePanelState {
   newPassword: string;
   needsAuthFactorToken: boolean;
   authFactorToken: string;
+  /** 移行元PDSの`createSession`がメールアドレスを返さなかった場合のみ表示・使用する
+   * フォールバック欄（実機で判明: Blueskyのapp password認証では`email`が返らない）。 */
+  needsEmail: boolean;
+  email: string;
 }
 
 export const MIGRATE_PANEL_INITIAL_STATE: MigratePanelState = {
@@ -29,6 +33,8 @@ export const MIGRATE_PANEL_INITIAL_STATE: MigratePanelState = {
   newPassword: "",
   needsAuthFactorToken: false,
   authFactorToken: "",
+  needsEmail: false,
+  email: "",
 };
 
 interface MigratePanelProps {
@@ -112,12 +118,16 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
         new_username: state.newUsername,
         new_password: state.newPassword,
         auth_factor_token: state.needsAuthFactorToken ? state.authFactorToken : undefined,
+        email: state.needsEmail ? state.email : undefined,
       });
       onStarted({ id: res.request_id, token: res.request_token });
     } catch (err) {
       if (err instanceof ApiError && err.code === "AUTH_FACTOR_TOKEN_REQUIRED") {
         onChange({ needsAuthFactorToken: true });
         setError(t("auth:migrateRegister.authFactorTokenRequired"));
+      } else if (err instanceof ApiError && err.code === "SOURCE_EMAIL_REQUIRED") {
+        onChange({ needsEmail: true });
+        setError(getErrorMessage(err));
       } else {
         setError(getErrorMessage(err));
       }
@@ -190,6 +200,19 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
             minLength={8}
           />
         </label>
+        {state.needsEmail && (
+          <label className={styles.label}>
+            {t("auth:register.emailLabel")}
+            <input
+              type="email"
+              value={state.email}
+              onChange={(e) => onChange({ email: e.target.value })}
+              className={styles.input}
+              required
+              autoFocus
+            />
+          </label>
+        )}
         {error && <p className={styles.error}>{error}</p>}
         <button type="submit" className={styles.button} disabled={loading}>
           {loading ? t("auth:migrateRegister.submitting") : t("auth:migrateRegister.submit")}

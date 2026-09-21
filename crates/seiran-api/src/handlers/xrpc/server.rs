@@ -317,6 +317,12 @@ pub async fn xrpc_create_session(
         "accessJwt": access_jwt,
         "refreshJwt": refresh_jwt,
         "active": true,
+        // 標準ATPクライアント互換、および他PDSからの既存DID転入（`docs/account_migration.md`）が
+        // このメールをそのまま信頼して使う。seiranはアカウント単位の「確認済み」フラグを
+        // 別途持たないため（`email_verifications`は登録時点の一度きりのトークン消費であり
+        // 継続的な状態ではない）、メール登録済みのアカウントは常にconfirmed扱いとする。
+        "email": login_row.as_ref().map(|l| l.email.clone()),
+        "emailConfirmed": login_row.is_some(),
     }))
     .into_response()
 }

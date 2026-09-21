@@ -10,6 +10,8 @@ PDS Aへの認証は`com.atproto.server.createSession`（ID/PW直叩き）を使
 
 メールアドレスはPDS Aの`createSession`応答（`email`/`emailConfirmed`）からそのまま取得して使う。PDS Aへのパスワード認証成功が既にアカウント所有の強い証跡であるため、seiran独自のメール実在確認（`require_email_verification`）は転入フローでは挟まない——通常registerのメール確認とは別チャネル。PDS Aのメール2FA（`authFactorToken`、ハンドル・パスワード入力直後の`createSession`に対するもの）とはさらに別物。
 
+PDS Aがメールを返さない場合（実機で判明: Bluesky公式アプリ経由で発行したapp password認証では`createSession`応答に`email`/`emailConfirmed`が含まれない）は、`SOURCE_EMAIL_REQUIRED`エラーを返しフロントにメール入力欄を追加表示させて再試行させる（`AUTH_FACTOR_TOKEN_REQUIRED`と同じ「エラーで欄を追加して再送」パターン）。この場合のメールは検証なしでそのまま使う。
+
 ## 2. ユーザーフロー
 
 `/register/migrate`（ログインカルーセルの「Blueskyから転入」パネル、`MigratePanel`）で移行元ハンドル・パスワードを入力すると開始する。以降は同じパネル内で「いま何を待っているか」の表示切り替えにより進行する（別画面への遷移はしない）。各ステップは入力欄0〜1個＋リトライボタンで構成される。

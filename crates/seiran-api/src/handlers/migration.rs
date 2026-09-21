@@ -152,16 +152,26 @@ pub async fn start(
 
     // メールアドレス解決: 転入元PDSは`createSession`のパスワード認証を既に通っているため、
     // 独自のメール実在確認は不要——PDS Aに登録済みのメールをそのまま信頼して使う。
-    // PDS Aがメールを返さない場合のみ`req.email`にフォールバックする（通常は起こらない）。
+    // PDS Aがメールを返さない場合（実機で判明: Blueskyのapp password認証ではメイン
+    // パスワード認証と異なり`email`/`emailConfirmed`が返らない）は`req.email`に
+    // フォールバックする。それも無ければフロントに専用エラーを返し、メール入力欄付きで
+    // 再試行させる（`AUTH_FACTOR_TOKEN_REQUIRED`と同じ「エラーで欄を追加して再送」パターン）。
     let email = match session.email.as_deref() {
         Some(e) if !e.is_empty() => e.trim().to_lowercase(),
-        _ => req
+        _ => match req
             .email
             .as_deref()
             .filter(|e| !e.is_empty() && e.contains('@'))
-            .ok_or_else(|| ApiError::BadRequest("INVALID_INPUT".into()))?
-            .trim()
-            .to_lowercase(),
+        {
+            Some(e) => e.trim().to_lowercase(),
+            None => {
+                tracing::info!(
+                    "[migration:start] PDS Aがメールを返さずreq.emailも未指定のため中断（handle={}）",
+                    req.source_handle
+                );
+                return Err(ApiError::BadRequest("SOURCE_EMAIL_REQUIRED".into()));
+            }
+        },
     };
     let email_exists = state
         .users

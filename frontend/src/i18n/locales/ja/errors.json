@@ -71,6 +71,7 @@
   "SHORTCODE_TAKEN": "このショートコードはすでに使用されています",
   "SMTP_NOT_CONFIGURED": "メール送信機能が設定されていません。管理者にお問い合わせください",
   "SOURCE_AUTH_FAILED": "移行元アカウントへのログインに失敗しました。ハンドルとパスワードをご確認ください",
+  "SOURCE_EMAIL_REQUIRED": "移行元アカウントのメールアドレスを取得できませんでした。ご自身のメールアドレスを入力してください",
   "SOURCE_HANDLE_UNRESOLVABLE": "移行元のハンドルを解決できませんでした",
   "SOURCE_PDS_UNREACHABLE": "移行元サーバーに接続できませんでした",
   "STORAGE_PROVIDER_NOT_FOUND": "ストレージプロバイダーが見つかりません",

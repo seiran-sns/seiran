@@ -15,6 +15,8 @@ export interface MigrationStartParams {
   new_username: string;
   new_password: string;
   auth_factor_token?: string;
+  /** 移行元PDSがメールアドレスを返さなかった場合のみのフォールバック（`SOURCE_EMAIL_REQUIRED`）。 */
+  email?: string;
 }
 
 export interface MigrationStartResponse {
