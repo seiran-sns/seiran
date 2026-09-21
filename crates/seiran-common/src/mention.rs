@@ -322,6 +322,32 @@ fn make_link_facet(byte_start: usize, byte_end: usize, uri: String) -> BskyFacet
 /// `actors` テーブルから fedi アクター（`username`@`domain`）の本拠地 URL（`ap_uri`）を取得する。
 ///
 /// DB に行が無い、または `ap_uri` が未設定の場合は `None` を返す。
+/// `username@domain`が既知の`remote_seiran`アクター（`seiran_actor_merge`がAP側・ATP側の
+/// 身元を結婚させ済み）で、かつ本物の`at_did`を持つ場合にそれを返す。戻り値は
+/// `(at_did, at_handle)`——`at_handle`はプロフィール表示用の別列（`docs/database.md`参照）で
+/// 未設定なこともあるため呼び出し側でフォールバックする。
+async fn get_known_remote_seiran_did(
+    username: &str,
+    domain: &str,
+    pool: &PgPool,
+) -> Option<(String, Option<String>)> {
+    let row = sqlx::query(
+        "SELECT at_did, at_handle FROM actors
+         WHERE username = $1 AND domain = $2 AND at_did IS NOT NULL
+         LIMIT 1",
+    )
+    .bind(username)
+    .bind(domain)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()?;
+
+    let at_did: String = row.try_get("at_did").ok()?;
+    let at_handle: Option<String> = row.try_get("at_handle").ok().flatten();
+    Some((at_did, at_handle))
+}
+
 async fn get_fedi_actor_home_url(username: &str, domain: &str, pool: &PgPool) -> Option<String> {
     let row = sqlx::query("SELECT ap_uri FROM actors WHERE username = $1 AND domain = $2 LIMIT 1")
         .bind(username)
@@ -497,6 +523,15 @@ async fn resolve_fedi_for_bsky(
     pool: &PgPool,
     http_client: &reqwest::Client,
 ) -> Option<(String, Option<String>)> {
+    // 相手が`remote_seiran`（他seiranインスタンスのユーザー、`seiran_actor_merge`が
+    // AP側・ATP側の身元を「結婚」させ済み）なら、そもそもブリッジ不要で本物のDIDを
+    // 既に知っている。brid.gy解決を試みる前にこちらを優先する（実機で発見: DIDを
+    // 持つ相手なのにbrid.gy解決に失敗し単なるlink facetへ後退していた）。
+    if let Some((at_did, at_handle)) = get_known_remote_seiran_did(username, domain, pool).await {
+        let handle = at_handle.unwrap_or_else(|| format!("{}.{}", username, domain));
+        return Some((handle, Some(at_did)));
+    }
+
     // brid.gy ハンドル命名規則: {username}.{domain}.ap.brid.gy
     let bridgy_username = format!("{}.{}", username, domain);
     let bridgy_handle = format!("{}.ap.brid.gy", bridgy_username);

@@ -661,7 +661,7 @@ DID解決は常に公開AppView（`app.bsky.actor.getProfile` / `com.atproto.ide
   - `@username`（ローカル、ドメイン省略） → `@username.{local_domain}` に展開し、DIDが取れれば `app.bsky.richtext.facet#mention`。
   - `@username@{local_domain}`（ローカルユーザーのFedi表記） → ローカルユーザーだとわかっているので上と同じ `@username.{local_domain}` に変換する（Fedi表記のままBskyに出さない）。
   - `@handle.tld`（AT Protocolハンドル形式） → テキストは変更しない。`.{local_domain}` サフィックスならローカルユーザーとしてDID解決、そうでなければ公開AppViewでハンドル→DIDを解決しmention facetを付ける。
-  - `@user@domain`（他ドメインのFediverse形式） → brid.gyハンドル（`{user}.{domain}.ap.brid.gy`）を組み立て公開AppViewでDID解決できればmention facet。解決できない場合はテキストは `@user@domain` のまま変えず、代わりに `app.bsky.richtext.facet#link` を付ける（リンク先は既知のfediアクターなら本拠地URL=`actors.ap_uri`、未知なら自ドメインのリモートプロフィールページ `https://{local_domain}/@user@domain`）。
+  - `@user@domain`（他ドメインのFediverse形式） → まず`actors`テーブルを`username`+`domain`で直接引き、`at_did`を既に知っている相手（`remote_seiran`、`seiran_actor_merge`がAP/ATP双方の身元を結婚させ済み）ならブリッジ不要でその`at_did`をmention facetに使う（実機で発見: これをせずbrid.gy解決にのみ頼っていたため、本物のDIDを持つ相手なのに解決失敗しlink facetへ後退していた）。既知でなければbrid.gyハンドル（`{user}.{domain}.ap.brid.gy`）を組み立て公開AppViewでDID解決を試み、それでも解決できない場合のみテキストは `@user@domain` のまま変えず代わりに `app.bsky.richtext.facet#link` を付ける（リンク先は既知のfediアクターなら本拠地URL=`actors.ap_uri`、未知なら自ドメインのリモートプロフィールページ `https://{local_domain}/@user@domain`）。
 - **AP向け（`convert_mentions_for_ap`）**: 戻り値は `(変換後テキスト, Vec<ApInlineMention>)`。各スパンは `href`・表示名・`is_mention`（`tag[]` に載せるか）を持つ。
   - 生URL → テキストは変更せず、`is_mention: false` のリンクスパンとして追加する（`<a>` 化されるが `tag[]` には載らない）。
   - ローカル `@username`（ドメイン省略） → 外部から見て意味を持つよう `@username@{local_domain}` に qualify し、ローカルアクターURI（`https://{local_domain}/users/{username}`）への Mention にする。
