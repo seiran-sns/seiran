@@ -170,6 +170,11 @@ pub async fn xrpc_request_plc_operation_signature(
         // ことになる。発行済みコードを取り消し、`xrpc_sign_plc_operation`側で
         // 「未発行＝検証不要」として扱わせる（SMTP未設定時と同じ扱いに帰着させる）。
         let _ = state.email_short_codes.revoke(actor.id, PLC_SIGNATURE_PURPOSE).await;
+    } else {
+        tracing::info!(
+            "[requestPlcOperationSignature] actor_id={} 確認コード送信完了",
+            actor.id
+        );
     }
 
     Json(serde_json::json!({})).into_response()
