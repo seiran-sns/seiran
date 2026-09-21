@@ -148,6 +148,13 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
+  /* `.formArea`（flexコンテナ、`height:100vh`）の子として、ビューポートが低いと
+     flexboxの縮小アルゴリズムにこの`overflow:hidden`要素を自然な高さ未満へ
+     圧縮されてしまう（`overflow`が`visible`でない要素は自動最小サイズが0扱いになる
+     というflexbox仕様）。圧縮されると`.panelBody`の中身が`.panel`の外へクリップされ、
+     `.formArea`側は「はみ出していない」ことになってスクロールバーが動いても
+     ボタンまで到達できなくなる（実機で発見）。縮小を禁止し、常に自然な高さを保つ。 */
+  flex-shrink: 0;
 }
 
 .panelHeaderButton {
