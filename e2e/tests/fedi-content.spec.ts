@@ -68,16 +68,20 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
     await seedAuth(page, alice.token);
     await page.goto(`/notes/${postId}`);
 
-    await expect(page.getByText(/テスト注意書き/)).toBeVisible();
-    const cwButton = page.getByRole("button", { name: "表示", exact: true });
+    // DM扱いのため右ペインのセッション一覧にも同じCW注意書きがプレビュー表示される
+    // （こちらは本文の代わりにCWラベルのみ表示、#CW未対応修正）。主投稿の開閉挙動を
+    // 検証したいこのテストでは main 領域に絞ってロケーターの曖昧さを避ける。
+    const main = page.locator("main");
+    await expect(main.getByText(/テスト注意書き/)).toBeVisible();
+    const cwButton = main.getByRole("button", { name: "表示", exact: true });
     await expect(cwButton).toBeVisible();
-    await expect(page.getByText(text)).toHaveCount(0);
+    await expect(main.getByText(text)).toHaveCount(0);
 
     await cwButton.click();
-    await expect(page.getByText(text)).toBeVisible();
+    await expect(main.getByText(text)).toBeVisible();
 
-    await page.getByRole("button", { name: "隠す", exact: true }).click();
-    await expect(page.getByText(text)).toHaveCount(0);
+    await main.getByRole("button", { name: "隠す", exact: true }).click();
+    await expect(main.getByText(text)).toHaveCount(0);
   });
 
   test("アンケート付き投稿は選択肢と票数が表示される", async ({ page, request }) => {

@@ -237,7 +237,14 @@ export default function MessagesPage() {
               <span className={styles.sessionInfo}>
                 <span className={styles.sessionName}>{peerLabel(s, t)}</span>
                 <span className={styles.sessionPreview}>
-                  <EmojiText text={s.lastMessage.text} emojis={s.lastMessage.emojis} />
+                  {s.lastMessage.contentWarning ? (
+                    <>
+                      <TwemojiEmoji emoji="⚠️" />{" "}
+                      <EmojiText text={s.lastMessage.contentWarning} emojis={s.lastMessage.emojis} />
+                    </>
+                  ) : (
+                    <EmojiText text={s.lastMessage.text} emojis={s.lastMessage.emojis} />
+                  )}
                 </span>
               </span>
               {s.unread && <span className={styles.unreadDot} />}

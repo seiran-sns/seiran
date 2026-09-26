@@ -166,7 +166,11 @@ test("カスタム絵文字候補を画像へ置換し境界Backspaceで通常�
 
   const emoji = editor.getByRole("img", { name: ":wide_emoji:" });
   await expect(emoji).toBeVisible();
-  await expect(emoji).toHaveCSS("height", "24px");
+  // 絵文字画像の高さはCSS側で`1.6em`（行の高さいっぱい）指定のため、フォントサイズに
+  // 追従する相対値になる。ブラウザのサブピクセル丸めを吸収するため近似値で比較する。
+  const emojiHeight = await emoji.evaluate((el) => parseFloat(getComputedStyle(el).height));
+  expect(emojiHeight).toBeGreaterThan(20);
+  expect(emojiHeight).toBeLessThan(30);
   await expect(page.getByRole("listbox", { name: "入力候補" })).toHaveCount(0);
 
   await editor.press("Backspace");
