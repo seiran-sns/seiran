@@ -1,16 +1,18 @@
 use super::activity::*;
 use super::infra::*;
+use super::ApSender;
 use super::*;
 
 /// ローカルアクターの AP Delete(Actor) アクティビティを Fedi フォロワー全員の inbox へ配送する。
 /// アカウント退会時（#29）に呼び出し、リモートサーバーにフォロー解除とキャッシュ削除を促す。
-pub async fn deliver_delete_actor(
-    ap_client: &ApClient,
-    db: &PgPool,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
-) -> Result<(), ApError> {
+pub async fn deliver_delete_actor(sender: &ApSender<'_>) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let username = fetch_username(db, actor_id).await?;
     let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
 
@@ -38,13 +40,16 @@ pub async fn deliver_delete_actor(
 /// プロフィール編集（display_name/bio/avatar）後に呼び出し、リモートインスタンスが
 /// キャッシュ済みの Actor 情報をプルせずとも即時更新できるようにする。
 pub async fn deliver_update_actor(
-    ap_client: &ApClient,
-    db: &PgPool,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
+    sender: &ApSender<'_>,
     ap_public_key_pem: &str,
 ) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let row = sqlx::query(
         "SELECT a.username, a.display_name, a.bio, \
                 COALESCE(rtrim(avatar_sp.public_url, '/') || '/' || avatar_mf.storage_key, a.avatar_url) AS avatar_url, \

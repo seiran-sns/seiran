@@ -3,6 +3,15 @@
 //! ハンドラ・サービスは `Arc<dyn XxxRepository>` を受け取り、SQL に直接依存しない。
 //! テストでは Mock 実装を差し込める。SQL は各 `Pg*Repository` の `impl` 内にのみ記述する。
 
+/// ID カーソルによるページ指定（snowflake ID 降順の一覧に対する`until_id`/`since_id`規約。
+/// `until_id`より古い・`since_id`より新しいものを最大`limit`件）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Page {
+    pub limit: i64,
+    pub until_id: Option<i64>,
+    pub since_id: Option<i64>,
+}
+
 pub mod actor;
 pub mod also_known_as;
 pub mod app_token;
@@ -28,6 +37,7 @@ pub mod mute;
 pub mod notification;
 pub mod password_reset;
 pub mod pinned_post;
+pub mod poll;
 pub mod post;
 pub mod reaction;
 pub mod relay;
@@ -40,11 +50,15 @@ pub mod storage_provider;
 pub mod totp;
 pub mod user;
 
-pub use actor::{Actor, ActorProfileRow, ActorRepository, PgActorRepository};
+pub use actor::{
+    Actor, ActorProfileRow, ActorRepository, BskyActorProfile, FediActorProfile,
+    LocalProfileUpdate, NewLocalActor, PgActorRepository,
+};
 pub use also_known_as::{AlsoKnownAsRepository, AlsoKnownAsRow, PgAlsoKnownAsRepository};
 pub use app_token::{AppTokenRepository, AppTokenRow, PgAppTokenRepository};
 pub use at_migration::{
-    AtMigrationRepository, AtMigrationRequestRow, PgAtMigrationRepository, StagedRecord,
+    AtMigrationRepository, AtMigrationRequestRow, NewMigrationRequest, PgAtMigrationRepository,
+    StagedRecord,
 };
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
 pub use atp_preferences::{AtpPreferencesRepository, PgAtpPreferencesRepository};
@@ -77,16 +91,22 @@ pub use media_file::{
 };
 pub use mute::{MuteRepository, MutedActorRow, PgMuteRepository};
 pub use notification::{
-    NotificationKind, NotificationRepository, NotificationRow, PgNotificationRepository,
+    NewNotification, NotificationKind, NotificationRepository, NotificationRow,
+    PgNotificationRepository,
 };
 pub use password_reset::{PasswordResetRepository, PgPasswordResetRepository};
 pub use pinned_post::{PgPinnedPostsRepository, PinnedPostsRepository, MAX_PINNED_POSTS};
 pub use post::{
-    DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, InsertRepostParams,
-    PgPostRepository, PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository, PostSummary,
-    ReferenceKind, RepostEntry, RepostUndoInfo, TimelinePost,
+    find_by_ids_including_deleted as find_posts_by_ids_including_deleted,
+    find_visible_by_ids as find_visible_posts_by_ids, DmSessionSummary, InsertFullParams,
+    InsertRemoteWithDedupParams, InsertRepostParams, PgPostRepository, PostDeleteInfo,
+    PostDeliveryMeta, PostRecord, PostRepository, PostSummary, ReferenceKind, RemoteAttachment,
+    RepostEntry, RepostUndoInfo, TimelinePost,
 };
-pub use reaction::{PgReactionRepository, ReactionFeedRow, ReactionRepository, ReactorInfo};
+pub use reaction::{
+    NewReaction, PgReactionRepository, ReactionFeedRow, ReactionRepository, ReactionUpsert,
+    ReactorInfo, StoredReaction,
+};
 pub use relay::{PgRelayRepository, Relay, RelayError, RelayRepository, RelayStatus};
 pub use remote_emoji::{PgRemoteEmojiRepository, RemoteEmojiRepository, RemoteEmojiRow};
 pub use remote_instance_meta::{
@@ -100,4 +120,4 @@ pub use storage_provider::{
     StorageProviderRepository, UpdateStorageProvider,
 };
 pub use totp::{PgTotpRepository, TotpRepository};
-pub use user::{AdminUserRow, LoginRow, PgUserRepository, UserRepository};
+pub use user::{create_local_account, AdminUserRow, LoginRow, PgUserRepository, UserRepository};

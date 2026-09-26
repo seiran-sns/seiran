@@ -31,7 +31,6 @@ pub trait RemoteInstanceMetaRepository: Send + Sync {
     ) -> Result<HashMap<String, RemoteInstanceMeta>, sqlx::Error>;
 
     /// nodeinfo取得結果をキャッシュへ書き込む（初回取得・再取得のどちらも同じUPSERT）。
-    #[allow(clippy::too_many_arguments)]
     async fn upsert(
         &self,
         domain: &str,

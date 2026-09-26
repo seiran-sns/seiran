@@ -50,29 +50,10 @@ async fn resolve_counterpart_via_atp(
     let profile = crate::atp::client::fetch_bsky_profile(&ctx.ap_client.http, did)
         .await
         .map_err(|e| format!("Bskyプロフィール取得失敗: {}", e))?;
-    // DID側が`org.seiran.actor.declaration`で自己申告する相手（AP Actor URI）を取りに行く。
-    // 呼び出し元自身の`actor.ap_uri`を渡すと、`discover_bsky_actor`が自己参照で常に真の
-    // 一致判定をしてしまい、DID側の独立した自己申告を一切確認せず結婚が成立してしまう
-    // （実地検証で発覚。firehose.rsのATP先着経路と同じ取得元に揃える）。
-    let claimed_ap_uri = crate::atp::client::fetch_seiran_actor_declaration(did).await;
-    let new_id = generate_snowflake_id(chrono::Utc::now());
-    let outcome = crate::seiran_actor_merge::discover_bsky_actor(
-        pool,
-        new_id,
-        did,
-        &profile.handle,
-        profile.display_name.as_deref(),
-        profile.avatar.as_deref(),
-        claimed_ap_uri.as_deref(),
-        chrono::Utc::now(),
-    )
-    .await
-    .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
-    // `claimed`にNoneを渡し、再enqueueは明示的に抑止する（相手側が能動的に取りに来る、
-    // または通常の受動的発見に任せる。無限ジョブ再投入を避けるため）。結婚成立時の
-    // Jetstream wanted_dids再構築だけは他の発見経路と共通のこの関数に委ねる。
-    crate::seiran_actor_merge::promote_after_discovery(pool, ctx.queue.as_ref(), &outcome, None)
-        .await;
+    // 相手側解決ジョブ自身からの呼び出しのため、再投入は抑止する（無限ジョブ再投入対策）。
+    crate::seiran_actor_merge::discover_bsky_profile(pool, ctx.queue.as_ref(), &profile, false)
+        .await
+        .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
     Ok(())
 }
 
@@ -87,59 +68,29 @@ async fn resolve_counterpart_via_ap(
     };
     // Authorized Fetch（secure mode）対応。署名鍵が組み立てられない場合のみ未署名フェッチへ
     // フォールバックする（`RemoteActorResolve`と同じパターン）。
-    let remote_ap = match ctx.system_signing_key() {
-        Some((key_id, pem)) => ctx
-            .ap_client
-            .fetch_actor_signed(ap_uri, (&key_id, &pem))
-            .await
-            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
-        None => ctx
-            .ap_client
-            .fetch_actor(ap_uri)
-            .await
-            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
-    };
-    let Some(ap_inbox) = remote_ap.inbox.clone() else {
-        return Ok(());
-    };
-    let username = remote_ap.preferred_username.clone().ok_or_else(|| {
-        format!(
-            "リモートアクター '{}' に preferredUsername がありません",
-            ap_uri
+    let remote_ap = ctx
+        .ap_client
+        .fetch_actor_with_key(
+            ap_uri,
+            crate::ap::client::signing_key_refs(&ctx.system_signing_key()),
         )
-    })?;
-    let display_name = remote_ap.name.clone().unwrap_or_else(|| username.clone());
-    let domain = ap_uri.split('/').nth(2).unwrap_or("").to_string();
-    let avatar_url = remote_ap.avatar_url();
-    let bio = remote_ap
-        .summary
-        .as_deref()
-        .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist);
-    let emoji_map = remote_ap.emoji_map();
-    let profile_fields = remote_ap.profile_fields_json();
-
-    // AP Actor文書自身が`seiranAtDid`拡張で自己申告する相手を使う。呼び出し元自身の
-    // `actor.at_did`を渡すと、`discover_fedi_actor`が自己参照で常に真の一致判定をしてしまい、
-    // 取得したAP Actor文書が実際に何を自己申告しているか（そもそも`seiranAtDid`を
+        .await
+        .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?;
+    // AP Actor文書自身が`seiranAtDid`拡張で自己申告する相手（`profile.claimed_at_did`）を使う。
+    // 呼び出し元自身の`actor.at_did`を渡すと、`discover_fedi_actor`が自己参照で常に真の一致判定を
+    // してしまい、取得したAP Actor文書が実際に何を自己申告しているか（そもそも`seiranAtDid`を
     // 持たない場合すら）を一切確認せず結婚が成立してしまう（実地検証で発覚）。
+    let profile = match crate::repository::FediActorProfile::from_ap_actor(&remote_ap, ap_uri, None)
+    {
+        Ok(profile) => profile,
+        Err(crate::ap::client::FediProfileError::MissingInbox) => return Ok(()),
+        Err(e) => return Err(format!("{} ({})", e, ap_uri)),
+    };
     let new_id = generate_snowflake_id(chrono::Utc::now());
-    let outcome = crate::seiran_actor_merge::discover_fedi_actor(
-        pool,
-        new_id,
-        ap_uri,
-        &ap_inbox,
-        &username,
-        &domain,
-        &display_name,
-        avatar_url.as_deref(),
-        bio.as_deref(),
-        &emoji_map,
-        &profile_fields,
-        remote_ap.seiran_at_did.as_deref(),
-        chrono::Utc::now(),
-    )
-    .await
-    .map_err(|e| format!("discover_fedi_actor 失敗: {}", e))?;
+    let outcome =
+        crate::seiran_actor_merge::discover_fedi_actor(pool, new_id, &profile, chrono::Utc::now())
+            .await
+            .map_err(|e| format!("discover_fedi_actor 失敗: {}", e))?;
     // `claimed`にNoneを渡し、再enqueueは抑止する（`resolve_counterpart_via_atp`と同じ
     // 無限ジョブ再投入対策）。
     crate::seiran_actor_merge::promote_after_discovery(pool, ctx.queue.as_ref(), &outcome, None)

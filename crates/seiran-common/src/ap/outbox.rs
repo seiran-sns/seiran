@@ -67,10 +67,9 @@ async fn fetch_ap_outbox_objects(
     max_days: i64,
     signing_key: Option<(&str, &str)>,
 ) -> Result<Vec<serde_json::Value>, ApError> {
-    let actor = match signing_key {
-        Some(key) => ap_client.fetch_actor_signed(actor_uri, key).await?,
-        None => ap_client.fetch_actor(actor_uri).await?,
-    };
+    let actor = ap_client
+        .fetch_actor_with_key(actor_uri, signing_key)
+        .await?;
     let outbox_url = match actor.outbox {
         Some(url) => url,
         None => {
@@ -218,10 +217,9 @@ pub async fn fetch_ap_featured(
     actor_uri: &str,
     signing_key: Option<(&str, &str)>,
 ) -> Result<Vec<ApNote>, ApError> {
-    let actor = match signing_key {
-        Some(key) => ap_client.fetch_actor_signed(actor_uri, key).await?,
-        None => ap_client.fetch_actor(actor_uri).await?,
-    };
+    let actor = ap_client
+        .fetch_actor_with_key(actor_uri, signing_key)
+        .await?;
     let featured = match actor.featured {
         Some(v) => v,
         None => return Ok(vec![]),

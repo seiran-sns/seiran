@@ -64,11 +64,13 @@ async fn fetch_atp_original(
         Ok(None) => actors
             .upsert_remote_bsky(
                 crate::generate_snowflake_id(chrono::Utc::now()),
-                &post.author_did,
-                &post.author_handle,
-                post.author_display_name.as_deref(),
-                post.author_avatar.as_deref(),
-                None,
+                &crate::repository::BskyActorProfile {
+                    at_did: &post.author_did,
+                    handle: &post.author_handle,
+                    display_name: post.author_display_name.as_deref(),
+                    avatar_url: post.author_avatar.as_deref(),
+                    banner_url: None,
+                },
                 chrono::Utc::now(),
             )
             .await

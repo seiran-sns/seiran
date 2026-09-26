@@ -11,6 +11,7 @@
 //! （NULL=未シード）を見て、初回ポーリングは「フォロワー一覧を取り込むだけで通知は出さない」
 //! baseline seed として扱う。
 
+use seiran_common::repository::NewNotification;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -144,11 +145,13 @@ async fn poll_user(
                     actor_repo
                         .upsert_remote_bsky(
                             new_id,
-                            &f.did,
-                            &f.handle,
-                            f.display_name.as_deref(),
-                            f.avatar.as_deref(),
-                            None,
+                            &seiran_common::repository::BskyActorProfile {
+                                at_did: &f.did,
+                                handle: &f.handle,
+                                display_name: f.display_name.as_deref(),
+                                avatar_url: f.avatar.as_deref(),
+                                banner_url: None,
+                            },
                             Utc::now(),
                         )
                         .await
@@ -186,18 +189,11 @@ async fn poll_user(
                 let notif_id = generate_snowflake_id(Utc::now());
                 let source_uri = format!("bsky-follow:{}:{}", follower_actor_id, local_actor_id);
                 if let Err(e) = notification_repo
-                    .insert(
-                        notif_id,
-                        local_actor_id,
-                        NotificationKind::Follow,
-                        Some(follower_actor_id),
-                        None,
-                        None,
-                        None,
-                        Some(&source_uri),
-                        None,
-                        None,
-                    )
+                    .insert(&NewNotification {
+                        notifier_actor_id: Some(follower_actor_id),
+                        source_uri: Some(&source_uri),
+                        ..NewNotification::new(notif_id, local_actor_id, NotificationKind::Follow)
+                    })
                     .await
                 {
                     tracing::error!("[BskyFollowerPoll] notifications INSERT失敗: {}", e);

@@ -7,6 +7,7 @@
 //! どちらからも呼べるようにするため）で、必要な依存だけを [`ApprovalConfig`] として
 //! 明示的に受け取る形にしている。
 
+use crate::repository::NewNotification;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -71,18 +72,14 @@ pub async fn approve_pending_follow(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = cfg
             .notifications
-            .insert(
-                notif_id,
-                follower.id,
-                NotificationKind::FollowRequestAccepted,
-                Some(target.id),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
+            .insert(&NewNotification {
+                notifier_actor_id: Some(target.id),
+                ..NewNotification::new(
+                    notif_id,
+                    follower.id,
+                    NotificationKind::FollowRequestAccepted,
+                )
+            })
             .await
         {
             tracing::error!("[follow_approval] notifications INSERT 失敗: {}", e);

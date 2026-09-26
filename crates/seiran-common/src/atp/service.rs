@@ -251,6 +251,56 @@ pub struct AtpCommitService {
     redis_pub: Option<redis::aio::ConnectionManager>,
 }
 
+/// `AtpCommitService::commit_like` でコミットする Like（`app.bsky.feed.like`）の内容。
+#[derive(Clone, Copy)]
+pub struct LikeCommit<'a> {
+    /// 対象の`posts.id`。
+    pub post_id: i64,
+    pub target_at_uri: &'a str,
+    pub target_at_cid: &'a str,
+    /// 非標準の拡張フィールドとして載せる絵文字。
+    pub emoji: Option<&'a str>,
+    /// `reactions.id`（firehose で戻ってきた際の通知重複排除トークン）。
+    pub reaction_id: i64,
+}
+
+/// `AtpCommitService::commit_profile` でコミットするプロフィール（`app.bsky.actor.profile`）。
+/// 画像は（sha256_hex, mime_type, size）、ピン留め投稿は strongRef（uri, cid）。
+pub struct ProfileCommit<'a> {
+    pub display_name: &'a str,
+    pub description: Option<&'a str>,
+    pub avatar_media: Option<(String, String, i64)>,
+    pub banner_media: Option<(String, String, i64)>,
+    pub pinned_post: Option<(String, String)>,
+}
+
+impl<'a> ProfileCommit<'a> {
+    /// 表示名のみのプロフィール（新規登録時）。
+    pub fn new(display_name: &'a str) -> Self {
+        Self {
+            display_name,
+            description: None,
+            avatar_media: None,
+            banner_media: None,
+            pinned_post: None,
+        }
+    }
+}
+
+/// `AtpCommitService::commit_post` でコミットする投稿（`app.bsky.feed.post`）の内容。
+pub struct PostCommit<'a> {
+    /// 対応する`posts.id`（コミット後に`posts`の ATP 列を更新する）。
+    pub post_id: i64,
+    pub text: &'a str,
+    pub facets: Vec<BskyFacet>,
+    /// 画像・引用（`BskyEmbed::Record`でBskyネイティブ引用、`External`でURLカード）等。
+    pub embed: Option<BskyEmbed>,
+    /// リプライ投稿の`reply`フィールド。
+    pub reply: Option<BskyPostReply>,
+    /// 投稿の言語（`langs`フィールドに1件の配列として設定、`None`なら省略。Bskyのみの概念）。
+    pub lang: Option<String>,
+}
+
 impl AtpCommitService {
     pub fn new(
         pool: PgPool,
@@ -538,19 +588,19 @@ impl AtpCommitService {
             path: entry_key,
             cid: Some(record.cid),
         }];
-        let frame_opt = build_commit_frame(
+        let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
             seq,
-            &at_did,
-            &commit_cid,
-            prev_cid_parsed.as_ref(),
-            &new_rev,
-            prev_rev.as_deref(),
-            &diff_car,
-            &ws_ops,
-            &record.blob_cids,
-            &time_str,
-            prev_data_cid_parsed.as_ref(),
-        )
+            did: &at_did,
+            commit_cid: &commit_cid,
+            prev_cid: prev_cid_parsed.as_ref(),
+            rev: &new_rev,
+            since: prev_rev.as_deref(),
+            car_bytes: &diff_car,
+            ops: &ws_ops,
+            blob_cids: &record.blob_cids,
+            time: &time_str,
+            prev_data: prev_data_cid_parsed.as_ref(),
+        })
         .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
@@ -645,23 +695,23 @@ impl AtpCommitService {
         Ok((result, cid))
     }
 
-    /// ポスト作成コミット（posts テーブル更新を追加）
-    ///
-    /// `reply` が Some の場合は ATP `app.bsky.feed.post` の `reply` フィールドを設定する（リプライ投稿）。
-    /// `lang` が Some の場合は `langs` フィールドを1件の配列として設定する（投稿の言語プロパティ、
-    /// `None`なら省略。AP配送には影響しない、Bskyのみの概念）。
-    #[allow(clippy::too_many_arguments)]
+    /// ポスト作成コミット（posts テーブル更新を追加）。通常投稿・引用投稿（`embed` に
+    /// `BskyEmbed::Record`/`External`）・CW 投稿など、`app.bsky.feed.post` を作る全経路で使う
+    /// （以前は引用用に同一内容の`commit_quote`が別にあった）。
     pub async fn commit_post(
         &self,
         actor_id: i64,
-        post_id: i64,
-        text: &str,
-        facets: Vec<BskyFacet>,
-        embed: Option<BskyEmbed>,
+        post: PostCommit<'_>,
         now: DateTime<Utc>,
-        reply: Option<BskyPostReply>,
-        lang: Option<String>,
     ) -> Result<(), AtpCommitError> {
+        let PostCommit {
+            post_id,
+            text,
+            facets,
+            embed,
+            reply,
+            lang,
+        } = post;
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
@@ -762,17 +812,19 @@ impl AtpCommitService {
     /// `reactions.at_uri` に自己保存する（`commit_repost` が `posts.atp_repost_rkey` を
     /// 自己保存するのと同じ流儀）。切替（別の絵文字への変更）の場合、旧 Like の削除は
     /// 呼び出し側が事前に `delete_atp_like` で行う（このメソッドは新規作成のみを担う）。
-    #[allow(clippy::too_many_arguments)]
     pub async fn commit_like(
         &self,
         actor_id: i64,
-        post_id: i64,
-        target_at_uri: &str,
-        target_at_cid: &str,
-        emoji: Option<&str>,
-        reaction_id: i64,
+        like: &LikeCommit<'_>,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
+        let LikeCommit {
+            post_id,
+            target_at_uri,
+            target_at_cid,
+            emoji,
+            reaction_id,
+        } = *like;
         let rkey = generate_tid();
         let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
@@ -1084,19 +1136,19 @@ impl AtpCommitService {
             path: entry_key,
             cid: None,
         }];
-        let frame_opt = build_commit_frame(
+        let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
             seq,
-            &at_did,
-            &commit_cid,
-            prev_cid_parsed.as_ref(),
-            &new_rev,
-            prev_rev.as_deref(),
-            &diff_car,
-            &ws_ops,
-            &[],
-            &time_str,
-            prev_data_cid_parsed.as_ref(),
-        )
+            did: &at_did,
+            commit_cid: &commit_cid,
+            prev_cid: prev_cid_parsed.as_ref(),
+            rev: &new_rev,
+            since: prev_rev.as_deref(),
+            car_bytes: &diff_car,
+            ops: &ws_ops,
+            blob_cids: &[],
+            time: &time_str,
+            prev_data: prev_data_cid_parsed.as_ref(),
+        })
         .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
@@ -1253,19 +1305,19 @@ impl AtpCommitService {
             path: entry_key,
             cid: None,
         }];
-        let frame_opt = build_commit_frame(
+        let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
             seq,
-            &at_did,
-            &commit_cid,
-            prev_cid_parsed.as_ref(),
-            &new_rev,
-            prev_rev.as_deref(),
-            &diff_car,
-            &ws_ops,
-            &[],
-            &time_str,
-            prev_data_cid_parsed.as_ref(),
-        )
+            did: &at_did,
+            commit_cid: &commit_cid,
+            prev_cid: prev_cid_parsed.as_ref(),
+            rev: &new_rev,
+            since: prev_rev.as_deref(),
+            car_bytes: &diff_car,
+            ops: &ws_ops,
+            blob_cids: &[],
+            time: &time_str,
+            prev_data: prev_data_cid_parsed.as_ref(),
+        })
         .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
@@ -1392,19 +1444,19 @@ impl AtpCommitService {
             path: entry_key,
             cid: None,
         }];
-        let frame_opt = build_commit_frame(
+        let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
             seq,
-            &at_did,
-            &commit_cid,
-            prev_cid_parsed.as_ref(),
-            &new_rev,
-            prev_rev.as_deref(),
-            &diff_car,
-            &ws_ops,
-            &[],
-            &time_str,
-            prev_data_cid_parsed.as_ref(),
-        )
+            did: &at_did,
+            commit_cid: &commit_cid,
+            prev_cid: prev_cid_parsed.as_ref(),
+            rev: &new_rev,
+            since: prev_rev.as_deref(),
+            car_bytes: &diff_car,
+            ops: &ws_ops,
+            blob_cids: &[],
+            time: &time_str,
+            prev_data: prev_data_cid_parsed.as_ref(),
+        })
         .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
@@ -1535,19 +1587,19 @@ impl AtpCommitService {
             path: entry_key,
             cid: None,
         }];
-        let frame_opt = build_commit_frame(
+        let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
             seq,
-            &at_did,
-            &commit_cid,
-            prev_cid_parsed.as_ref(),
-            &new_rev,
-            prev_rev.as_deref(),
-            &diff_car,
-            &ws_ops,
-            &[],
-            &time_str,
-            prev_data_cid_parsed.as_ref(),
-        )
+            did: &at_did,
+            commit_cid: &commit_cid,
+            prev_cid: prev_cid_parsed.as_ref(),
+            rev: &new_rev,
+            since: prev_rev.as_deref(),
+            car_bytes: &diff_car,
+            ops: &ws_ops,
+            blob_cids: &[],
+            time: &time_str,
+            prev_data: prev_data_cid_parsed.as_ref(),
+        })
         .ok();
         if let Some(ref frame) = frame_opt {
             if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
@@ -1600,85 +1652,24 @@ impl AtpCommitService {
             .await
     }
 
-    /// 引用投稿コミット（`app.bsky.embed.record` または `app.bsky.embed.external` 付き）。
-    ///
-    /// `embed` に `BskyEmbed::Record` を渡すと Bsky ネイティブ引用、
-    /// `BskyEmbed::External` を渡すと URL カードとして送信する。
-    /// DB の posts レコードは呼び出し元で更新済みである前提。
-    /// `lang` は `commit_post` と同じ（投稿の言語プロパティ、`None`なら`langs`フィールド省略）。
-    #[allow(clippy::too_many_arguments)]
-    pub async fn commit_quote(
-        &self,
-        actor_id: i64,
-        post_id: i64,
-        text: &str,
-        facets: Vec<BskyFacet>,
-        embed: Option<BskyEmbed>,
-        now: DateTime<Utc>,
-        reply: Option<BskyPostReply>,
-        lang: Option<String>,
-    ) -> Result<(), AtpCommitError> {
-        let rkey = generate_tid();
-        let created_at_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-
-        let seiran_post = build_seiran_post_for_atp_commit(
-            &self.pool,
-            post_id,
-            self.local_domain.as_str(),
-            &self.http_client,
-        )
-        .await;
-        let blob_cids = blob_cids_for_embed(&embed);
-        let (record_cbor, record_cid) = encode_bsky_feed_post(
-            text,
-            &created_at_str,
-            facets,
-            embed,
-            reply,
-            lang,
-            seiran_post,
-        )?;
-        let record_cid_str = cid_to_string(&record_cid);
-
-        let record = CommitRecord {
-            collection: "app.bsky.feed.post".to_string(),
-            rkey: rkey.clone(),
-            cbor: record_cbor,
-            cid: record_cid,
-            action: "create",
-            blob_cids,
-        };
-
-        let result = self
-            .commit_record_inner(actor_id, record, now, Some(post_id))
-            .await?;
-
-        let at_uri = format!("at://{}/app.bsky.feed.post/{}", result.at_did, rkey);
-        tracing::info!(
-            "[atp] quote commit 完了: at_uri={}, cid={}",
-            at_uri,
-            record_cid_str
-        );
-        self.spawn_request_crawl();
-        Ok(())
-    }
-
     /// プロフィール（再）コミット。新規登録時は avatar/description/pinned_post なしで呼ばれ、
     /// プロフィール編集時は bio・アバター blob 情報を渡して再コミットする。
     /// `pinned_post` はピン留め投稿への strongRef（uri, cid）。ピン留めが無い/ピン留め投稿が
     /// Bsky 側に存在しない場合は `None` を渡す（#61）。
     /// 既に `app.bsky.actor.profile/self` が存在するかで action(create/update)を自動判定する。
-    #[allow(clippy::too_many_arguments)]
     pub async fn commit_profile(
         &self,
         actor_id: i64,
-        display_name: &str,
-        description: Option<&str>,
-        avatar_media: Option<(String, String, i64)>,
-        banner_media: Option<(String, String, i64)>,
-        pinned_post: Option<(String, String)>,
+        profile: &ProfileCommit<'_>,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
+        let ProfileCommit {
+            display_name,
+            description,
+            avatar_media,
+            banner_media,
+            pinned_post,
+        } = profile;
         let existing: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM atp_records \
              WHERE actor_id = $1 AND collection = 'app.bsky.actor.profile' AND rkey = 'self')",
@@ -1700,7 +1691,7 @@ impl AtpCommitService {
             .map(|(uri, cid)| (uri.as_str(), cid.as_str()));
         let (record_cbor, record_cid) = encode_bsky_actor_profile(
             display_name,
-            description,
+            *description,
             avatar_ref,
             banner_ref,
             pinned_post_ref,

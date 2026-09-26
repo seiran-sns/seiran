@@ -697,15 +697,17 @@ pub async fn deliver_repost(
                     thumb,
                 };
                 if let Err(e) = atp
-                    .commit_quote(
+                    .commit_post(
                         actor_id,
-                        post_id,
-                        "🔁",
-                        vec![],
-                        Some(embed),
+                        seiran_common::atp::service::PostCommit {
+                            post_id,
+                            text: "🔁",
+                            facets: vec![],
+                            embed: Some(embed),
+                            reply: None,
+                            lang: None,
+                        },
                         now,
-                        None,
-                        None,
                     )
                     .await
                 {
@@ -1031,21 +1033,9 @@ fn build_cw_bsky_embed(local_domain: &str, post_id: i64) -> BskyEmbed {
 
 /// 通常投稿 / リプライ / 引用投稿を Fedi・Bsky へ配送する。
 /// Bsky は ATP コミット（firehose 結合のため in-process）、Fedi は ApDelivery ジョブ。
-pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
+pub async fn deliver_regular_post(state: &AppState, mut d: RegularPostDelivery) {
     if d.visibility == "direct" {
-        // DM: Fedi宛先へは`DirectMessage`ジョブ（post_recipientsからFediアクターを解決）、
-        // Bsky宛先へは`BskyDmSend`ジョブ（chat.bsky.convo.sendMessage）でそれぞれ配送する。
-        if d.targets.fedi {
-            state
-                .enqueue_ap_delivery(
-                    d.actor_id,
-                    ApDeliveryKind::DirectMessage { post_id: d.post_id },
-                )
-                .await;
-        }
-        if d.targets.bsky {
-            state.enqueue_bsky_dm_send(d.post_id).await;
-        }
+        enqueue_direct_message_delivery(state, &d).await;
         return;
     }
 
@@ -1074,159 +1064,160 @@ pub async fn deliver_regular_post(state: &AppState, d: RegularPostDelivery) {
     };
 
     if bsky_target {
-        // CW（#229）が設定されている場合、Bsky配送は画像/動画/URL/アンケート・引用embedの
-        // 選択を一切行わず（隠された本文・添付物すべてを見るにはURLリンクカードから
-        // seiranの記事詳細ページへ飛ぶ設計のため）、常にCWガイド文を本文として
-        // build_cw_bsky_embedのリンクカード1件だけをコミットする。
-        let bsky_source_text: &str = d.content_warning.as_deref().unwrap_or(&d.text);
-        // メンション変換（変換失敗時は元テキストをそのまま使用する）
-        // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
-        let (bsky_text, bsky_facets) = convert_mentions_for_bsky(
-            bsky_source_text,
-            &state.local_domain,
-            &state.db,
-            state.ap_client.http.as_ref(),
-        )
-        .await;
-
-        if d.content_warning.is_some() {
-            let embed = build_cw_bsky_embed(&state.local_domain, d.post_id);
-            if let Err(e) = state
-                .atp_service
-                .commit_post(
-                    d.actor_id,
-                    d.post_id,
-                    &bsky_text,
-                    bsky_facets,
-                    Some(embed),
-                    d.now,
-                    d.bsky_reply,
-                    d.language.clone(),
-                )
-                .await
-            {
-                tracing::error!("[create_note] ATP CW commit 失敗（投稿は保存済み）: {}", e);
-            }
-        } else if let Some(quote_embed) = d.bsky_quote_embed {
-            // 引用投稿: embed を付けて commit_quote を使う。静止画添付があれば
-            // app.bsky.embed.recordWithMedia として引用と画像を両方配送する（マイケル指摘、
-            // 添付物が画像だけなら選択の余地なく画像も送られるべき）。動画/GIF/URL embed選択
-            // （`bsky_embed_choice`）は引き続き無視する（引用と共存しない）。
-            let embed = match quote_embed {
-                BskyEmbed::Record { uri, cid } => {
-                    let images = collect_bsky_quote_images(state, &d.attachment_ids).await;
-                    if images.is_empty() {
-                        BskyEmbed::Record { uri, cid }
-                    } else {
-                        BskyEmbed::RecordWithMedia {
-                            uri,
-                            cid,
-                            media: Box::new(BskyEmbed::Images(images)),
-                        }
-                    }
-                }
-                other => other,
-            };
-            if let Err(e) = state
-                .atp_service
-                .commit_quote(
-                    d.actor_id,
-                    d.post_id,
-                    &bsky_text,
-                    bsky_facets,
-                    Some(embed),
-                    d.now,
-                    d.bsky_reply,
-                    d.language.clone(),
-                )
-                .await
-            {
-                tracing::error!(
-                    "[create_note] ATP quote commit 失敗（投稿は保存済み）: {}",
-                    e
-                );
-            }
-        } else {
-            // 選択（またはその省略時の固定優先順位）からBsky embedを解決する（#227）。
-            // 選択された添付がBsky動画パイプライン結合未確定の場合のみ、ここで即座に
-            // commit_postすると常にapp.bsky.embed.externalへフォールバックしてしまう
-            // （一度externalでコミットされた投稿は再コミットされないため、以後video embed化
-            // されることもない）。投稿ボタンを押すタイミングが早すぎるだけで起きる問題なので、
-            // その添付1件についてだけBskyコミット自体をWorker（Job::BskyPostCommitDeferred）
-            // に委譲し、結合完了を待ってからコミットする（2026-07-17 マイケル指摘・実機再現確認）。
-            match resolve_bsky_embed(
-                state,
-                d.actor_id,
-                d.post_id,
-                &d.attachment_ids,
-                &d.text,
-                d.poll.as_ref(),
-                d.bsky_embed_choice,
-            )
-            .await
-            {
-                BskyEmbedResolution::Pending(media_file_id) => {
-                    state
-                        .enqueue_bsky_post_commit_deferred(d.actor_id, d.post_id, media_file_id)
-                        .await;
-                }
-                BskyEmbedResolution::Ready(embed) => {
-                    if let Err(e) = state
-                        .atp_service
-                        .commit_post(
-                            d.actor_id,
-                            d.post_id,
-                            &bsky_text,
-                            bsky_facets,
-                            embed,
-                            d.now,
-                            d.bsky_reply,
-                            d.language.clone(),
-                        )
-                        .await
-                    {
-                        tracing::error!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
-                    }
-                }
-            }
-        }
+        commit_regular_post_to_bsky(state, &mut d).await;
     }
-
     if d.targets.fedi {
-        // body は渡さない。deliver_post_to_ap_followers 側で DB の投稿本文を取得し、
-        // メンション解決（tag[]・<a> アンカー付与）まで一貫して行う（ただし上のURL追記が
-        // 必要な場合、または引用URL追記が必要な場合はここで上書き本文を渡す）。
-        let (quote_body, quote_url) = ap_delivery_quote_fields(&d.text, d.ap_quote);
-        // 本文に含まれないURLを末尾へ追記する対象を集める: (1) Bsky embed選択のURL
-        // （fedi_append_url、bsky_target && CW無しの場合のみ計算済み）、(2) URLリンクカード
-        // のチェックボックス選択（link_card_urls、Bsky配送オフ or CW中でも本文追記自体は
-        // 常に必要）。判定は最終的なFedi本文（引用ならquote_body、無ければd.text）に対して行う。
-        let base_text_for_append_check: &str = quote_body.as_deref().unwrap_or(&d.text);
-        let mut append_lines: Vec<String> = Vec::new();
-        append_lines.extend(fedi_append_url);
-        append_lines.extend(fedi_link_card_urls_append_needed(
-            base_text_for_append_check,
-            &d.link_card_urls,
-        ));
-        let append_block = (!append_lines.is_empty()).then(|| append_lines.join("\n"));
-        let body = match (quote_body, append_block) {
-            (Some(b), Some(block)) => Some(format!("{}\n\n{}", b, block)),
-            (Some(b), None) => Some(b),
-            (None, Some(block)) => Some(format!("{}\n\n{}", d.text, block)),
-            (None, None) => None,
-        };
+        enqueue_regular_post_fedi_delivery(state, d, fedi_append_url).await;
+    }
+}
+
+/// DM: Fedi宛先へは`DirectMessage`ジョブ（post_recipientsからFediアクターを解決）、
+/// Bsky宛先へは`BskyDmSend`ジョブ（chat.bsky.convo.sendMessage）でそれぞれ配送する。
+async fn enqueue_direct_message_delivery(state: &AppState, d: &RegularPostDelivery) {
+    if d.targets.fedi {
         state
             .enqueue_ap_delivery(
                 d.actor_id,
-                ApDeliveryKind::PostToFollowers {
-                    post_id: d.post_id,
-                    body,
-                    quote_url,
-                    in_reply_to: d.ap_in_reply_to,
-                },
+                ApDeliveryKind::DirectMessage { post_id: d.post_id },
             )
             .await;
     }
+    if d.targets.bsky {
+        state.enqueue_bsky_dm_send(d.post_id).await;
+    }
+}
+
+/// Bsky 配送で添付する embed を決める。
+/// - CW（#229）: 画像/動画/URL/アンケート・引用embedの選択を一切行わず（隠された本文・
+///   添付物すべてを見るにはURLリンクカードからseiranの記事詳細ページへ飛ぶ設計のため）、
+///   常に`build_cw_bsky_embed`のリンクカード1件だけ。
+/// - 引用投稿: 引用 embed。静止画添付があれば`app.bsky.embed.recordWithMedia`として引用と
+///   画像を両方配送する（添付物が画像だけなら選択の余地なく画像も送られるべき、マイケル指摘）。
+///   動画/GIF/URL embed選択（`bsky_embed_choice`）は引用と共存しないため無視する。
+/// - それ以外: 選択（またはその省略時の固定優先順位）から解決する（#227）。選択された添付が
+///   Bsky動画パイプライン結合未確定なら`Pending`（即座にコミットすると常に
+///   `app.bsky.embed.external`へフォールバックし、以後video embed化されないため、
+///   2026-07-17 マイケル指摘・実機再現確認）。
+async fn resolve_delivery_bsky_embed(
+    state: &AppState,
+    d: &mut RegularPostDelivery,
+) -> BskyEmbedResolution {
+    if d.content_warning.is_some() {
+        return BskyEmbedResolution::Ready(Some(build_cw_bsky_embed(
+            &state.local_domain,
+            d.post_id,
+        )));
+    }
+    if let Some(quote_embed) = d.bsky_quote_embed.take() {
+        let embed = match quote_embed {
+            BskyEmbed::Record { uri, cid } => {
+                let images = collect_bsky_quote_images(state, &d.attachment_ids).await;
+                if images.is_empty() {
+                    BskyEmbed::Record { uri, cid }
+                } else {
+                    BskyEmbed::RecordWithMedia {
+                        uri,
+                        cid,
+                        media: Box::new(BskyEmbed::Images(images)),
+                    }
+                }
+            }
+            other => other,
+        };
+        return BskyEmbedResolution::Ready(Some(embed));
+    }
+    resolve_bsky_embed(
+        state,
+        d.actor_id,
+        d.post_id,
+        &d.attachment_ids,
+        &d.text,
+        d.poll.as_ref(),
+        d.bsky_embed_choice.take(),
+    )
+    .await
+}
+
+/// 通常投稿を ATP リポジトリへコミットする（embed が結合待ちなら Worker へ委譲する）。
+/// CW 投稿は本文をCWガイド文に差し替える。失敗しても投稿自体は保存済みのためログのみ。
+async fn commit_regular_post_to_bsky(state: &AppState, d: &mut RegularPostDelivery) {
+    let embed = match resolve_delivery_bsky_embed(state, d).await {
+        BskyEmbedResolution::Pending(media_file_id) => {
+            state
+                .enqueue_bsky_post_commit_deferred(d.actor_id, d.post_id, media_file_id)
+                .await;
+            return;
+        }
+        BskyEmbedResolution::Ready(embed) => embed,
+    };
+    // メンション変換（変換失敗時は元テキストをそのまま使用する）
+    // Bsky 配信用: `@username` → `@username.{local_domain}`、`@user@domain` → brid.gy ハンドル
+    let bsky_source_text: &str = d.content_warning.as_deref().unwrap_or(&d.text);
+    let (bsky_text, bsky_facets) = convert_mentions_for_bsky(
+        bsky_source_text,
+        &state.local_domain,
+        &state.db,
+        state.ap_client.http.as_ref(),
+    )
+    .await;
+    if let Err(e) = state
+        .atp_service
+        .commit_post(
+            d.actor_id,
+            seiran_common::atp::service::PostCommit {
+                post_id: d.post_id,
+                text: &bsky_text,
+                facets: bsky_facets,
+                embed,
+                reply: d.bsky_reply.take(),
+                lang: d.language.clone(),
+            },
+            d.now,
+        )
+        .await
+    {
+        tracing::error!("[create_note] ATP コミット失敗（投稿は保存済み）: {}", e);
+    }
+}
+
+/// Fedi フォロワーへの配送ジョブを積む。body は通常渡さず、`deliver_post_to_ap_followers` 側で
+/// DB の投稿本文を取得してメンション解決（tag[]・<a> アンカー付与）まで一貫して行う。
+/// 引用URLの追記、または本文に含まれないURLの末尾追記が必要な場合だけ上書き本文を渡す。
+async fn enqueue_regular_post_fedi_delivery(
+    state: &AppState,
+    d: RegularPostDelivery,
+    fedi_append_url: Option<String>,
+) {
+    let (quote_body, quote_url) = ap_delivery_quote_fields(&d.text, d.ap_quote);
+    // 本文に含まれないURLを末尾へ追記する対象を集める: (1) Bsky embed選択のURL
+    // （fedi_append_url、bsky配送あり && CW無しの場合のみ計算済み）、(2) URLリンクカード
+    // のチェックボックス選択（link_card_urls、Bsky配送オフ or CW中でも本文追記自体は
+    // 常に必要）。判定は最終的なFedi本文（引用ならquote_body、無ければd.text）に対して行う。
+    let base_text_for_append_check: &str = quote_body.as_deref().unwrap_or(&d.text);
+    let mut append_lines: Vec<String> = Vec::new();
+    append_lines.extend(fedi_append_url);
+    append_lines.extend(fedi_link_card_urls_append_needed(
+        base_text_for_append_check,
+        &d.link_card_urls,
+    ));
+    let append_block = (!append_lines.is_empty()).then(|| append_lines.join("\n"));
+    let body = match (quote_body, append_block) {
+        (Some(b), Some(block)) => Some(format!("{}\n\n{}", b, block)),
+        (Some(b), None) => Some(b),
+        (None, Some(block)) => Some(format!("{}\n\n{}", d.text, block)),
+        (None, None) => None,
+    };
+    state
+        .enqueue_ap_delivery(
+            d.actor_id,
+            ApDeliveryKind::PostToFollowers {
+                post_id: d.post_id,
+                body,
+                quote_url,
+                in_reply_to: d.ap_in_reply_to,
+            },
+        )
+        .await;
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@
 //! `posts.at_uri` として既知（＝こちらの投稿への返信）かを調べ、既知なら
 //! `posts.reply_to_post_id` を設定してリプライとして保存する。
 
+use seiran_common::repository::NewNotification;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -558,26 +559,28 @@ async fn process_message(
                     &queue2,
                     &http2,
                     &hub2,
-                    &at_uri2,
-                    &author_did,
-                    &cid,
-                    &body_text,
-                    &mention_facets,
-                    &emoji_map,
-                    created_at,
-                    actor_id,
-                    &username,
-                    display_name.as_deref(),
-                    avatar_url.as_deref(),
-                    reply_to_post_id,
-                    quote_of_post_id,
-                    attachments,
-                    link_card,
-                    claimed_ap_object_id,
-                    content_warning,
-                    poll,
-                    seiran_link_cards,
-                    bridged_original_url,
+                    IncomingBskyPost {
+                        at_uri: &at_uri2,
+                        author_did: &author_did,
+                        at_cid: &cid,
+                        text: &body_text,
+                        mention_facets: &mention_facets,
+                        emoji_map: &emoji_map,
+                        created_at,
+                        actor_id,
+                        username: &username,
+                        display_name: display_name.as_deref(),
+                        avatar_url: avatar_url.as_deref(),
+                        reply_to_post_id,
+                        quote_of_post_id,
+                        attachments,
+                        link_card,
+                        claimed_ap_object_id,
+                        content_warning,
+                        poll,
+                        seiran_link_cards,
+                        bridged_original_url,
+                    },
                 )
                 .await;
             });
@@ -624,9 +627,11 @@ async fn process_message(
                     &queue2,
                     &http2,
                     &hub2,
-                    &did,
-                    &at_uri,
-                    &subject_uri,
+                    &InboundSubjectRecord {
+                        did: &did,
+                        at_uri: &at_uri,
+                        subject_uri: &subject_uri,
+                    },
                     created_at,
                 )
                 .await;
@@ -669,9 +674,11 @@ async fn process_message(
                             &queue2,
                             &http2,
                             &hub2,
-                            &did,
-                            &at_uri,
-                            &subject_uri,
+                            &InboundSubjectRecord {
+                                did: &did,
+                                at_uri: &at_uri,
+                                subject_uri: &subject_uri,
+                            },
                             emoji.as_deref(),
                             seiran_reaction_id,
                         )
@@ -706,36 +713,65 @@ enum InsertOrMergeOutcome {
     DuplicateSkipped,
 }
 
+/// Jetstream イベントから得た Bsky 投稿（`save_bsky_post`の入力）。投稿者はDB上で解決済み。
+struct IncomingBskyPost<'a> {
+    at_uri: &'a str,
+    author_did: &'a str,
+    at_cid: &'a str,
+    text: &'a str,
+    mention_facets: &'a JsonValue,
+    emoji_map: &'a JsonValue,
+    created_at: chrono::DateTime<chrono::Utc>,
+    /// 投稿者の`actors.id`・表示用情報。
+    actor_id: i64,
+    username: &'a str,
+    display_name: Option<&'a str>,
+    avatar_url: Option<&'a str>,
+    reply_to_post_id: Option<i64>,
+    quote_of_post_id: Option<i64>,
+    attachments: Vec<ParsedAttachment>,
+    link_card: Option<ParsedLinkCard>,
+    /// `seiranPost.counterpartPostId`（AP側の ap_object_id の自己申告、#237）。
+    claimed_ap_object_id: Option<String>,
+    content_warning: Option<String>,
+    poll: Option<JsonValue>,
+    seiran_link_cards: Vec<seiran_common::seiran_post::SeiranPostLinkCard>,
+    /// brid.gy ブリッジポストの元 AP 投稿 URL。
+    bridged_original_url: Option<String>,
+}
+
 /// Jetstream イベントから得た投稿本体を DB に保存し、ローカルフォロワーへ配信する。
 /// Jetstream はほぼリアルタイムでレコード本体を同梱してくるため、AppView への
 /// 再取得・インデックス遅延リトライは不要（旧 Relay Firehose 直結実装にはあった）。
-#[allow(clippy::too_many_arguments)]
 async fn save_bsky_post(
     pool: &PgPool,
     job_queue: &Arc<dyn JobQueue>,
     http: &Arc<reqwest::Client>,
     stream_hub: &StreamHub,
-    at_uri: &str,
-    author_did: &str,
-    at_cid: &str,
-    text: &str,
-    mention_facets: &JsonValue,
-    emoji_map: &JsonValue,
-    created_at: chrono::DateTime<chrono::Utc>,
-    actor_id: i64,
-    username: &str,
-    display_name: Option<&str>,
-    avatar_url: Option<&str>,
-    reply_to_post_id: Option<i64>,
-    quote_of_post_id: Option<i64>,
-    attachments: Vec<ParsedAttachment>,
-    link_card: Option<ParsedLinkCard>,
-    claimed_ap_object_id: Option<String>,
-    content_warning: Option<String>,
-    poll: Option<JsonValue>,
-    seiran_link_cards: Vec<seiran_common::seiran_post::SeiranPostLinkCard>,
-    bridged_original_url: Option<String>,
+    post: IncomingBskyPost<'_>,
 ) {
+    let IncomingBskyPost {
+        at_uri,
+        author_did,
+        at_cid,
+        text,
+        mention_facets,
+        emoji_map,
+        created_at,
+        actor_id,
+        username,
+        display_name,
+        avatar_url,
+        reply_to_post_id,
+        quote_of_post_id,
+        attachments,
+        link_card,
+        claimed_ap_object_id,
+        content_warning,
+        poll,
+        seiran_link_cards,
+        bridged_original_url,
+    } = post;
     let reply_id_str = reply_to_post_id.map(|id| id.to_string());
     let post_id = generate_snowflake_id(created_at);
 
@@ -760,24 +796,24 @@ async fn save_bsky_post(
     // ほぼ同時に到着し双方が「まだ相手はいない」と判定してもINSERT時点で
     // 制約違反として検知でき、再試行時のSELECTは正しい最新状態を見る
     // （`docs/protocols.md` 5節参照）。
+    let row = BskyPostRow {
+        post_id,
+        actor_id,
+        text,
+        at_uri,
+        at_cid,
+        created_at,
+        reply_to_post_id,
+        mention_facets,
+        emoji_map,
+        quote_of_post_id,
+        claimed_ap_object_id: claimed_ap_object_id.as_deref(),
+        bridge_of_post_id,
+        bridged_original_uri: bridged_original_url.as_deref(),
+    };
     let insert_outcome: Result<InsertOrMergeOutcome, sqlx::Error> =
         seiran_common::unique_retry::retry_on_unique_violation(|| {
-            insert_or_merge_bsky_post_once(
-                pool,
-                post_id,
-                actor_id,
-                text,
-                at_uri,
-                at_cid,
-                created_at,
-                reply_to_post_id,
-                mention_facets,
-                emoji_map,
-                quote_of_post_id,
-                claimed_ap_object_id.as_deref(),
-                bridge_of_post_id,
-                bridged_original_url.as_deref(),
-            )
+            insert_or_merge_bsky_post_once(pool, &row)
         })
         .await;
 
@@ -984,18 +1020,15 @@ async fn save_bsky_post(
                     );
                     let notif_id = generate_snowflake_id(chrono::Utc::now());
                     if let Err(e) = PgNotificationRepository::new(pool.clone())
-                        .insert(
-                            notif_id,
-                            parent_actor_id,
-                            NotificationKind::Reply,
-                            Some(actor_id),
-                            Some(post_id),
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                        )
+                        .insert(&NewNotification {
+                            notifier_actor_id: Some(actor_id),
+                            note_id: Some(post_id),
+                            ..NewNotification::new(
+                                notif_id,
+                                parent_actor_id,
+                                NotificationKind::Reply,
+                            )
+                        })
                         .await
                     {
                         tracing::error!("[Jetstream] reply notifications INSERT 失敗: {}", e);
@@ -1026,18 +1059,16 @@ async fn save_bsky_post(
                     );
                     let notif_id = generate_snowflake_id(chrono::Utc::now());
                     if let Err(e) = PgNotificationRepository::new(pool.clone())
-                        .insert(
-                            notif_id,
-                            quoted_actor_id,
-                            NotificationKind::Quote,
-                            Some(actor_id),
-                            Some(post_id),
-                            None,
-                            None,
-                            Some(at_uri),
-                            None,
-                            None,
-                        )
+                        .insert(&NewNotification {
+                            notifier_actor_id: Some(actor_id),
+                            note_id: Some(post_id),
+                            source_uri: Some(at_uri),
+                            ..NewNotification::new(
+                                notif_id,
+                                quoted_actor_id,
+                                NotificationKind::Quote,
+                            )
+                        })
                         .await
                     {
                         tracing::error!("[Jetstream] quote notifications INSERT 失敗: {}", e);
@@ -1078,18 +1109,15 @@ async fn save_bsky_post(
                         );
                         let notif_id = generate_snowflake_id(chrono::Utc::now());
                         if let Err(e) = notifications_repo
-                            .insert(
-                                notif_id,
-                                mentioned_actor.id,
-                                NotificationKind::Mention,
-                                Some(actor_id),
-                                Some(post_id),
-                                None,
-                                None,
-                                None,
-                                None,
-                                None,
-                            )
+                            .insert(&NewNotification {
+                                notifier_actor_id: Some(actor_id),
+                                note_id: Some(post_id),
+                                ..NewNotification::new(
+                                    notif_id,
+                                    mentioned_actor.id,
+                                    NotificationKind::Mention,
+                                )
+                            })
                             .await
                         {
                             tracing::error!("[Jetstream] mention notifications INSERT 失敗: {}", e);
@@ -1105,12 +1133,14 @@ async fn save_bsky_post(
                     if let Err(e) = posts_repo
                         .attach_remote_media_url(
                             post_id,
-                            &att.url,
-                            Some(&att.mime_type),
-                            att.thumbnail_url.as_deref(),
-                            false,
-                            att.is_gif,
-                            position as i16,
+                            &seiran_common::repository::RemoteAttachment {
+                                url: &att.url,
+                                mime_type: Some(&att.mime_type),
+                                thumbnail_url: att.thumbnail_url.as_deref(),
+                                is_sensitive: false,
+                                is_gif: att.is_gif,
+                                position: position as i16,
+                            },
                         )
                         .await
                     {
@@ -1192,25 +1222,56 @@ async fn save_bsky_post(
     }
 }
 
-/// `save_bsky_post`の相互一致マージ判定〜INSERTの1回分の試行。UNIQUE制約違反時の
-/// リトライは呼び出し元（`retry_on_unique_violation`）が行う。
-#[allow(clippy::too_many_arguments)]
-async fn insert_or_merge_bsky_post_once(
-    pool: &PgPool,
+/// 他の投稿を対象（`subject`）とする受信レコード（`app.bsky.feed.repost`・`like`）。
+#[derive(Clone, Copy)]
+struct InboundSubjectRecord<'a> {
+    /// レコードの作成者（リポスト・いいねした側）の DID。
+    did: &'a str,
+    /// このレコード自身の AT URI。
+    at_uri: &'a str,
+    /// 対象投稿の AT URI。
+    subject_uri: &'a str,
+}
+
+/// `posts`へ保存する Bsky 投稿の列値（`insert_or_merge_bsky_post_once`の入力）。
+#[derive(Clone, Copy)]
+struct BskyPostRow<'a> {
     post_id: i64,
     actor_id: i64,
-    text: &str,
-    at_uri: &str,
-    at_cid: &str,
+    text: &'a str,
+    at_uri: &'a str,
+    at_cid: &'a str,
     created_at: chrono::DateTime<chrono::Utc>,
     reply_to_post_id: Option<i64>,
-    mention_facets: &JsonValue,
-    emoji_map: &JsonValue,
+    mention_facets: &'a JsonValue,
+    emoji_map: &'a JsonValue,
     quote_of_post_id: Option<i64>,
-    claimed_ap_object_id: Option<&str>,
+    claimed_ap_object_id: Option<&'a str>,
     bridge_of_post_id: Option<i64>,
-    bridged_original_uri: Option<&str>,
+    bridged_original_uri: Option<&'a str>,
+}
+
+/// `save_bsky_post`の相互一致マージ判定〜INSERTの1回分の試行。UNIQUE制約違反時の
+/// リトライは呼び出し元（`retry_on_unique_violation`）が行う。
+async fn insert_or_merge_bsky_post_once(
+    pool: &PgPool,
+    row: &BskyPostRow<'_>,
 ) -> Result<InsertOrMergeOutcome, sqlx::Error> {
+    let BskyPostRow {
+        post_id,
+        actor_id,
+        text,
+        at_uri,
+        at_cid,
+        created_at,
+        reply_to_post_id,
+        mention_facets,
+        emoji_map,
+        quote_of_post_id,
+        claimed_ap_object_id,
+        bridge_of_post_id,
+        bridged_original_uri,
+    } = *row;
     let mut tx = pool.begin().await?;
 
     // seiranPost.counterpartPostId（AP側の真正なap_object_id申告）がある場合のみ、
@@ -1282,17 +1343,19 @@ async fn insert_or_merge_bsky_post_once(
 /// （`handle_announce`、`crates/seiran-common/src/jobs/inbound_activity_process.rs`）と対称の処理）。
 /// リポスト対象がDBに未存在（Jetstreamの`wantedDids`絞り込みで取り込んでいなかった投稿等）
 /// なら AppView から直接フェッチして保存する。対象がローカル投稿の場合は通知も作る。
-#[allow(clippy::too_many_arguments)]
 async fn handle_inbound_repost_create(
     pool: &PgPool,
     job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
-    did: &str,
-    at_uri: &str,
-    subject_uri: &str,
+    record: &InboundSubjectRecord<'_>,
     created_at: chrono::DateTime<chrono::Utc>,
 ) {
+    let InboundSubjectRecord {
+        did,
+        at_uri,
+        subject_uri,
+    } = *record;
     let post_repo = PgPostRepository::new(pool.clone());
 
     let actor_id = match resolve_or_upsert_bsky_actor(pool, job_queue, http, did).await {
@@ -1395,18 +1458,12 @@ async fn handle_inbound_repost_create(
             }
             let notif_id = generate_snowflake_id(chrono::Utc::now());
             if let Err(e) = PgNotificationRepository::new(pool.clone())
-                .insert(
-                    notif_id,
-                    meta.actor_id,
-                    NotificationKind::Repost,
-                    Some(actor_id),
-                    Some(post_id),
-                    None,
-                    None,
-                    Some(at_uri),
-                    None,
-                    None,
-                )
+                .insert(&NewNotification {
+                    notifier_actor_id: Some(actor_id),
+                    note_id: Some(post_id),
+                    source_uri: Some(at_uri),
+                    ..NewNotification::new(notif_id, meta.actor_id, NotificationKind::Repost)
+                })
                 .await
             {
                 tracing::error!("[Jetstream/Repost] notifications INSERT 失敗: {}", e);
@@ -1433,18 +1490,20 @@ async fn handle_inbound_repost_create(
 /// 抽出した値。自分自身がローカルAPI経由でコミットしたLikeが自分のfirehose受信で戻ってきた
 /// ケースでは、ローカル即時通知insertと同じ `reactions.id` が入っており、
 /// `notifications.reaction_id` の UNIQUE 制約で二重通知を防げる（`docs/protocols.md` 8節）。
-#[allow(clippy::too_many_arguments)]
 async fn handle_inbound_like_create(
     pool: &PgPool,
     job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
-    did: &str,
-    at_uri: &str,
-    subject_uri: &str,
+    record: &InboundSubjectRecord<'_>,
     emoji: Option<&str>,
     seiran_reaction_id: Option<i64>,
 ) {
+    let InboundSubjectRecord {
+        did,
+        at_uri,
+        subject_uri,
+    } = *record;
     let posts_repo = PgPostRepository::new(pool.clone());
     let (post_id, post_author_id) = match posts_repo.find_id_and_actor_by_at_uri(subject_uri).await
     {
@@ -1498,16 +1557,16 @@ async fn handle_inbound_like_create(
     let reactions_repo = PgReactionRepository::new(pool.clone());
     let new_reaction_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = reactions_repo
-        .insert(
-            new_reaction_id,
+        .upsert(&seiran_common::repository::NewReaction {
+            id: new_reaction_id,
             post_id,
             actor_id,
-            "like",
+            reaction_type: "like",
             content,
-            None,
-            Some(at_uri),
-            emoji_url.as_deref(),
-        )
+            ap_activity_id: None,
+            at_uri: Some(at_uri),
+            emoji_url: emoji_url.as_deref(),
+        })
         .await
     {
         tracing::error!("[Jetstream/Like] reactions INSERT 失敗: {}", e);
@@ -1538,18 +1597,14 @@ async fn handle_inbound_like_create(
         let notifications_repo = PgNotificationRepository::new(pool.clone());
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = notifications_repo
-            .insert(
-                notif_id,
-                post_author_id,
-                NotificationKind::Reaction,
-                Some(actor_id),
-                Some(post_id),
-                Some(content),
-                None,
-                Some(at_uri),
-                seiran_reaction_id,
-                None,
-            )
+            .insert(&NewNotification {
+                notifier_actor_id: Some(actor_id),
+                note_id: Some(post_id),
+                reaction: Some(content),
+                source_uri: Some(at_uri),
+                reaction_id: seiran_reaction_id,
+                ..NewNotification::new(notif_id, post_author_id, NotificationKind::Reaction)
+            })
             .await
         {
             tracing::error!("[Jetstream/Like] notifications INSERT 失敗: {}", e);
@@ -1654,28 +1709,15 @@ pub(crate) async fn resolve_or_upsert_bsky_actor(
 
     let profile = fetch_bsky_profile(http, did).await?;
     // リモートseiranアクターの相互申告マージ（#236）。`org.seiran.actor.declaration`が
-    // 無いDID（大多数のBskyユーザー）は`claimed_ap_uri=None`のまま通常のupsertと同義になる。
-    let claimed_ap_uri = seiran_common::atp::client::fetch_seiran_actor_declaration(did).await;
-    let new_id = generate_snowflake_id(chrono::Utc::now());
-    let outcome = seiran_common::seiran_actor_merge::discover_bsky_actor(
+    // 無いDID（大多数のBskyユーザー）は通常のupsertと同義になる。
+    let outcome = seiran_common::seiran_actor_merge::discover_bsky_profile(
         pool,
-        new_id,
-        did,
-        &profile.handle,
-        profile.display_name.as_deref(),
-        profile.avatar.as_deref(),
-        claimed_ap_uri.as_deref(),
-        chrono::Utc::now(),
+        job_queue.as_ref(),
+        &profile,
+        true,
     )
     .await
     .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
-    seiran_common::seiran_actor_merge::promote_after_discovery(
-        pool,
-        job_queue.as_ref(),
-        &outcome,
-        claimed_ap_uri.as_deref(),
-    )
-    .await;
     Ok(outcome.actor_id)
 }
 

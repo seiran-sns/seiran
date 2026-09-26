@@ -252,7 +252,6 @@ impl WorkerEngine {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn new_with_db(
         queue: Arc<dyn JobQueue>,
         pool: sqlx::PgPool,

@@ -27,7 +27,7 @@ use seiran_common::get_db_pool;
 /// `deliver_to_fedi`/`deliver_to_bsky` を `false` にして実際の連合配送・ATP コミットを
 /// 起こさない（enqueue はされるがテストプロセスに Worker はいないため実害はない）。
 #[tokio::test]
-#[ignore = "実DB（DATABASE_URL）と既存の seiran1 ユーザーが必要"]
+#[ignore = "実DBが必要"]
 async fn create_note_and_fetch_round_trip() {
     let app = test_router().await;
     let token = login_test_user(&app, "seiran1").await;
@@ -121,7 +121,7 @@ async fn get_note_not_found_returns_json_404() {
 /// `embed_renotes`（`queries.rs`）は通常の投稿取得とは別のSELECTを使うため、元投稿の
 /// 表示用カラムを追加した際に取得漏れが起きないことを確認する。
 #[tokio::test]
-#[ignore = "実DB（DATABASE_URL）と既存の seiran1 ユーザーが必要"]
+#[ignore = "実DBが必要"]
 async fn embed_renotes_preserves_original_post_display_metadata() {
     let app = test_router().await;
     let token = login_test_user(&app, "seiran1").await;
@@ -212,7 +212,7 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
 /// INSERT していたため、Fedi経由の受信投稿と異なりローカル投稿では絵文字ショートコードが
 /// リポスト有無に関わらず一切画像化されないバグがあった。
 #[tokio::test]
-#[ignore = "実DB（DATABASE_URL）と既存の seiran1 ユーザーが必要"]
+#[ignore = "実DBが必要"]
 async fn create_note_resolves_local_custom_emoji_shortcode_in_body() {
     let pool = get_db_pool(10).await.expect("DB接続に失敗");
 
@@ -223,13 +223,30 @@ async fn create_note_resolves_local_custom_emoji_shortcode_in_body() {
     let media_file_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
     let emoji_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
 
+    // テスト専用のストレージプロバイダ（無効状態で作るため、アップロード先の選択には使われない）。
+    let provider_id: i64 = sqlx::query_scalar(
+        "WITH existing AS (SELECT id FROM storage_providers WHERE name = 'integration-test'),
+              inserted AS (
+                  INSERT INTO storage_providers (name, endpoint, bucket, access_key, secret_key, public_url, is_active)
+                  SELECT 'integration-test', 'https://s3.integration-test.invalid', 'test', 'test', 'test',
+                         'https://media.integration-test.invalid', false
+                  WHERE NOT EXISTS (SELECT 1 FROM existing)
+                  RETURNING id
+              )
+         SELECT id FROM inserted UNION ALL SELECT id FROM existing",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("storage_providers 準備失敗");
+
     sqlx::query(
         "INSERT INTO media_files (id, storage_provider_id, sha256, size, storage_key)
-         VALUES ($1, 1, $2, 1, $3)",
+         VALUES ($1, $4, $2, 1, $3)",
     )
     .bind(media_file_id)
     .bind(format!("{:0>64}", media_file_id)) // sha256 は char(64) 制約のためダミー値を桁埋め
     .bind(format!("test/{}.png", shortcode))
+    .bind(provider_id)
     .execute(&pool)
     .await
     .expect("media_files INSERT失敗");

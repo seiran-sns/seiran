@@ -1,4 +1,5 @@
 use super::*;
+use crate::repository::NewNotification;
 
 // Follow アクティビティを処理し Accept を送信する
 pub(super) async fn handle_follow(
@@ -78,18 +79,10 @@ pub(super) async fn handle_follow(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = inbox
             .notification_repo
-            .insert(
-                notif_id,
-                local_actor_id,
-                NotificationKind::FollowRequest,
-                Some(follower_actor_id),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
+            .insert(&NewNotification {
+                notifier_actor_id: Some(follower_actor_id),
+                ..NewNotification::new(notif_id, local_actor_id, NotificationKind::FollowRequest)
+            })
             .await
         {
             tracing::error!("[Follow] notifications INSERT 失敗: {}", e);
@@ -121,18 +114,10 @@ pub(super) async fn handle_follow(
     let notif_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = inbox
         .notification_repo
-        .insert(
-            notif_id,
-            local_actor_id,
-            NotificationKind::Follow,
-            Some(follower_actor_id),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        .insert(&NewNotification {
+            notifier_actor_id: Some(follower_actor_id),
+            ..NewNotification::new(notif_id, local_actor_id, NotificationKind::Follow)
+        })
         .await
     {
         tracing::error!("[Follow] notifications INSERT 失敗: {}", e);
@@ -321,18 +306,14 @@ pub(super) async fn handle_accept(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = inbox
             .notification_repo
-            .insert(
-                notif_id,
-                local_actor_id,
-                NotificationKind::FollowRequestAccepted,
-                Some(remote_actor.id),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
+            .insert(&NewNotification {
+                notifier_actor_id: Some(remote_actor.id),
+                ..NewNotification::new(
+                    notif_id,
+                    local_actor_id,
+                    NotificationKind::FollowRequestAccepted,
+                )
+            })
             .await
         {
             tracing::error!("[Accept] notifications INSERT 失敗: {}", e);

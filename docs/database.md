@@ -67,9 +67,10 @@ ID 採番は2系統ある。
 
 - `auth_attempt_log`: ログイン/TOTPの識別子・資格情報をkeyed hashで記録する。平文資格情報は保持しない。制限超過行は`rejected`でIPブロック集計対象になる。
 - `auth_ip_blocks`: `INET`主キーごとの認証ブロック期限・理由。期限内の行を管理画面に表示し、個別削除で解除する。
-- `account_creation_log`: 同一IPからのアカウント作成成功時刻。
+- `account_creation_log`: 同一IPからのアカウント作成成功時刻。登録処理の冒頭で`reserve_account_creation`がIP単位のアドバイザリロック下で「窓内件数が上限未満なら1行予約」し、登録が失敗したら`cancel_account_creation`で予約行を削除する（成功した登録だけが残る）。以前は「数える→（PLC登録など数秒）→記録する」の順で、同一IPからの並列登録が全て上限判定をすり抜けていた。
 - `user_contact_log`: DM以外のメンション・返信・引用について、送信actorと宛先actorを記録し、1時間内のユニーク宛先数を算出する。
 - `search_log`: 検索実行時刻を`actor_id`単位で記録する（初回検索のみ、スクロールによるページング取得は記録しない）。1時間あたりの検索回数レート制限に使う。
+  `search_log`・`user_contact_log`の「窓内の件数を数えて上限未満なら記録する」処理は、トランザクション内で対象actor単位のアドバイザリロック（`pg_advisory_xact_lock(hashtextextended(<テーブル名>, actor_id))`、`rate_limit::lock_actor_rate_limit`）を取って直列化する（数える文と記録する文の間に同じactorの別リクエストが割り込むと、並列リクエストが全て上限判定をすり抜けるため）。
 - `users.last_login_success_at`: 直近ログイン成功時刻。ブルートフォース判定ウィンドウの起点（パスワードリセット時刻と合わせ、より新しい方を採用）に使う。投稿数・フォロー数・リスト数/人数の各制限は専用ログテーブルを持たず、既存の`posts`（`actor_id`+`created_at`）・`follows`（`follower_actor_id`+`created_at`）・`lists`（`owner_actor_id`）・`list_members`（`list_id`）を直接COUNTして判定する。
 
 ### `users.role`（ENUM `user_role`）
@@ -86,6 +87,8 @@ ID 採番は2系統ある。
 
 ### `users` / `actors` の分離
 「魂（`users`、当サーバーの住民としての認証アカウント）」と「肉体（`actors`、各プロトコル宇宙での登場人物）」を分離している（`docs/concept.md` 参照）。1つの `users` 行に対し、ローカルユーザーなら基本的に1つの `actors` 行（AP/ATP 両方の識別子を1行に持つ）が対応する。`actors.user_id` は `users` への参照で、ローカルユーザー以外は NULL。
+
+ローカルアカウントの`users`行と`actors`行は`repository::create_local_account`で1トランザクションに作る（通常登録・初期セットアップ）。別々に挿入していた頃は、同名ユーザーの同時登録で`actors`側だけが一意制約（`actors_ap_uri_key`、ローカル行の`ap_uri`は`https://{domain}/users/{username}`）に違反すると`actor`の無い`users`行が残り、そのメールアドレスは以後登録もログインもできなくなっていた。一意制約違反は`409`（`EMAIL_ALREADY_REGISTERED`/`USERNAME_TAKEN`）として返す。
 
 ### `actors.birth_date` / `birth_date_public`
 生年月日はプロフィール項目として`actors`に持たせる（Misskey互換の`birthday`）。`birth_date_public`（デフォルト`false`）は`vcard:bday`としてFediverseへ連合するかどうかのseiran独自拡張フラグ（Misskey本家にはこの可視性切り替え自体が無い）。Bsky向けの`app.bsky.actor.defs#personalDetailsPref`（`docs/protocols.md` 3節）は可視性設定と無関係に常に非公開（本人のみ`getPreferences`で取得可）で、`actors.birth_date`と直接同期する。詳細な連合仕様は`docs/protocols.md` 4節参照。
@@ -199,13 +202,13 @@ DMメッセージ（`posts.visibility='direct'`）へのリアクション・削
 - `dm_hidden_messages`: `(actor_id, post_id)` をPKに持つ、閲覧者ごとのメッセージ非表示フラグ（`chat.bsky.convo.deleteMessageForSelf`相当）。Bsky DMは相手のメッセージを削除できず自分の画面からのみ消せる仕様のため、fedi/local向けの完全削除（`DELETE /api/notes/:id`、投稿自体を削除する）とは別に用意した。Bsky宛でないメッセージにも呼べる（画面整理用途を拒否しない）。`thread_messages`はこのテーブルとの`NOT EXISTS`で該当行を除外する。ローカル発の「隠す」操作はBsky宛メッセージに限り`Job::BskyDmHide`で`deleteMessageForSelf`を配送する（fedi/localのみのメッセージは配送不要、DB上のフラグのみ）。
 
 ### `reactions`
-`UNIQUE(post_id, actor_id)` — 1投稿につき1ユーザー1リアクション（Misskey 準拠）。切り替え時は `ON CONFLICT DO UPDATE`。`content` は Unicode 絵文字文字列、またはカスタム絵文字の場合 `:shortcode@host:` 形式（本家Misskey準拠）。ローカル絵文字は `:shortcode@.:`、Fedi 受信のリモート絵文字はリアクション実行者の解決済みドメインを使って `:shortcode@{domain}:`（ワイヤ上の `content` に含まれるホスト値は信用せず、こちら側で解決した値を使う）。過去に保存されたローカルアクターのレガシーデータ（ホスト情報を持たない `:shortcode:`）は `20260903010000_backfill_local_reaction_content_host.sql` で `:shortcode@.:` へ一括書き換え済み（`aggregate_for_post`/`aggregate_for_actor` の `GROUP BY content` が新旧表記を別行として二重集計しないよう、読み出し側で正規化するのではなく過去データ側を是正する方針）。リモートアクターが送ってきたレガシーデータ（ホスト無しのまま連合してきた古いFedi実装からの受信分）は対象外で、そのまま残っており読み出し側でローカル相当としてフォールバック解釈する。AP wireの `tag[].id`/`tag[].name` は常にホストなしの素の shortcode（本家Misskey準拠の非対称性、`build_reaction_object`/`extract_emoji_tag_url`参照）。`emoji_url` はカスタム絵文字の画像URL（ローカル送信は `custom_emojis` から解決、Fedi 受信は activity の `tag` から解決、ATP 自己firehose再受信も `custom_emojis` から再解決、Unicode 絵文字は NULL）。`ON CONFLICT DO UPDATE` は `emoji_url` も無条件で上書きするため、insert元となる3経路（`create_reaction`／AP受信の`handle_reaction`／ATP受信の`handle_inbound_like_create`）は全て、`content` がカスタム絵文字形式なら emoji_url を解決してから渡す必要がある（未解決のまま `None` を渡すと既存の正しい値を消してしまう）。`id` は `posts`/`notifications` と同じ snowflake ID 名前空間（呼び出し側が `generate_snowflake_id(Utc::now())` で事前採番して渡す）で、`notifications.reaction_id`（リアクション通知の重複排除トークン、下記参照）に加えて、プロフィール「投稿」タブの投稿＋リアクション混合フィード（`GET /api/users/posts?includeReactions=true`）の時系列マージ・カーソルページネーションにも使う。`ON CONFLICT DO UPDATE` では `id`/`created_at` も新しい値へ更新する（切り替え＝新しいイベントとして時系列の先頭に来るべきため）。
+`UNIQUE(post_id, actor_id)` — 1投稿につき1ユーザー1リアクション（Misskey 準拠）。記録・切り替えは`ReactionRepository::upsert`が1トランザクションで行う（`INSERT ... ON CONFLICT (post_id, actor_id) DO NOTHING`で新規作成を試み、既存行があれば`SELECT ... FOR UPDATE`で旧値を読んでから`UPDATE`し、旧値を返す）。取り消し（`delete_local`）は`DELETE ... RETURNING`で削除した行の`ap_activity_id`/`at_uri`/`emoji_url`を返す。旧値（AP Undo・ATP Like削除の対象）の読み出しを上書き・削除と別の文で行うと、連打や同時操作で実際に上書き・削除した行とずれ、リモートに取り消されないLikeが残るため。`content` は Unicode 絵文字文字列、またはカスタム絵文字の場合 `:shortcode@host:` 形式（本家Misskey準拠）。ローカル絵文字は `:shortcode@.:`、Fedi 受信のリモート絵文字はリアクション実行者の解決済みドメインを使って `:shortcode@{domain}:`（ワイヤ上の `content` に含まれるホスト値は信用せず、こちら側で解決した値を使う）。過去に保存されたローカルアクターのレガシーデータ（ホスト情報を持たない `:shortcode:`）は `20260903010000_backfill_local_reaction_content_host.sql` で `:shortcode@.:` へ一括書き換え済み（`aggregate_for_post`/`aggregate_for_actor` の `GROUP BY content` が新旧表記を別行として二重集計しないよう、読み出し側で正規化するのではなく過去データ側を是正する方針）。リモートアクターが送ってきたレガシーデータ（ホスト無しのまま連合してきた古いFedi実装からの受信分）は対象外で、そのまま残っており読み出し側でローカル相当としてフォールバック解釈する。AP wireの `tag[].id`/`tag[].name` は常にホストなしの素の shortcode（本家Misskey準拠の非対称性、`build_reaction_object`/`extract_emoji_tag_url`参照）。`emoji_url` はカスタム絵文字の画像URL（ローカル送信は `custom_emojis` から解決、Fedi 受信は activity の `tag` から解決、ATP 自己firehose再受信も `custom_emojis` から再解決、Unicode 絵文字は NULL）。`ON CONFLICT DO UPDATE` は `emoji_url` も無条件で上書きするため、insert元となる3経路（`create_reaction`／AP受信の`handle_reaction`／ATP受信の`handle_inbound_like_create`）は全て、`content` がカスタム絵文字形式なら emoji_url を解決してから渡す必要がある（未解決のまま `None` を渡すと既存の正しい値を消してしまう）。`id` は `posts`/`notifications` と同じ snowflake ID 名前空間（呼び出し側が `generate_snowflake_id(Utc::now())` で事前採番して渡す）で、`notifications.reaction_id`（リアクション通知の重複排除トークン、下記参照）に加えて、プロフィール「投稿」タブの投稿＋リアクション混合フィード（`GET /api/users/posts?includeReactions=true`）の時系列マージ・カーソルページネーションにも使う。`ON CONFLICT DO UPDATE` では `id`/`created_at` も新しい値へ更新する（切り替え＝新しいイベントとして時系列の先頭に来るべきため）。
 
 ### `remote_emojis`
 AP受信（投稿本文・表示名・絵文字リアクションのいずれか）で見つけたカスタム絵文字を`(shortcode, domain)`単位で`upsert_seen`し、`first_seen_at`/`last_seen_at`を更新するカタログテーブル。`tags`にはAP Emoji tagの`aliases`/`tags`/`keywords`、`license`にはMisskey拡張`_misskey_license.freeText`を保存し、再受信時に空の値で既知メタデータを消さない。画像は`media_files`へ取り込まない（表示は既存のメディアプロキシ経由でリモートURLを直接参照する）。管理画面「リモート」タブおよびNoteCard右クリックのインポート導線がここを起点に、選ばれた1件だけを`fetch_validated`でダウンロードし`custom_emojis`へ登録する。
 
 ### `follows`
-`status`（`pending`/`accepted`）を持つ。パフォーマンス上重要な2つの部分インデックスがある: フォロワー取得・AP配送方向の `(target_actor_id, follower_actor_id) WHERE status='accepted'` と、自分のフォロー先取得用のカバリングインデックス `(follower_actor_id) INCLUDE (target_actor_id) WHERE status='accepted'`。
+`status`（`pending`/`accepted`）を持つ。`FollowRepository::upsert_pending`は既存行の状態を変えない（`ON CONFLICT DO UPDATE SET status = follows.status`で行ロックを取りつつ現在の状態を返し、`Inserted`/`AlreadyPending`/`AlreadyAccepted`を返す。以前は既存行を無条件に`pending`へ戻しており、承認制アカウントを再度フォロー操作すると成立済みのフォローが`pending`に降格していた）。ATP follow レコードを伴うフォロー（ローカル・Bsky宛て）は、先に`atp_rkey`が`NULL`のaccepted行を確保し（`insert_accepted_with_rkey(.., None)`、`ON CONFLICT DO NOTHING`）、確保できたリクエストだけがATPへコミットして`set_atp_rkey`でrkeyを記録する（`follow_exec::establish_atp_follow`。コミット失敗時は確保した行を削除する）。「ATPコミット→INSERT」の順だと、フォロー操作の連打でATP follow レコードが2件作られ片方のrkeyが失われていた。パフォーマンス上重要な2つの部分インデックスがある: フォロワー取得・AP配送方向の `(target_actor_id, follower_actor_id) WHERE status='accepted'` と、自分のフォロー先取得用のカバリングインデックス `(follower_actor_id) INCLUDE (target_actor_id) WHERE status='accepted'`。
 
 `pending_follow_activity`（JSONB、nullable）: ロック中（`actors.is_locked=true`）のローカルアクター宛てにFediverseから届いた生のFollowアクティビティ全体を保存する。承認は即時のAccept送信を伴わず本人操作まで非同期に遅延するため、承認/拒否のタイミングでAccept/Rejectを送り返すにはFollowアクティビティの`id`等を後から参照できる必要があり、受信時点でそのまま保存しておく（ローカル↔ローカルのpendingでは常に`NULL`、AP側とやり取りが不要なため）。`seiran_common::follow_approval::{approve_pending_follow, reject_pending_follow}`が読む。
 
@@ -323,6 +326,9 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 
 ## 4. 典型的なクエリパターン
 
+- **`TimelinePost`を返すクエリの共通部品**: SELECT列は`timeline_post_columns!()`、actors・アバター解決の結合は`timeline_post_joins!()`（`repository/post.rs`）を`concat!`で埋め込む。以前は同じ列リストが20箇所超に手書きされ、`#[sqlx(default)]`が列の書き漏れを空値で黙認していたため、リストTL・ピン留め・検索結果で`content_warning`（CW）や`visibility`が欠落し、各TLで`ap_object_id`/`at_uri`が欠落してリモート投稿の「リモートで表示」リンク・返信先プロトコル判定が誤っていた。現在は`#[sqlx(default)]`を`actor_suspended_at`（参照埋め込み・単体取得でのみ後置する列）以外に付けないため、書き漏れは実行時エラーとして顕在化する。
+- **可視性判定**: 閲覧者ごとの可視性は必ずSQL関数`post_is_visible_to`で判定する。引用・リポスト・返信先の参照埋め込み（frontend APIの`embed_renotes`/`embed_quotes`、Misskey互換APIの`fetch_referenced_notes`）は`find_visible_posts_by_ids`に一本化している（以前は各所が手書きの条件で`direct`を`followers_only`と同じ扱いにしており、宛先外のフォロワーへDM本文が漏れていた）。
+- **サブクエリの書き方**: `IN (SELECT ...)`/`NOT IN (SELECT ...)`は使わず`EXISTS`/`NOT EXISTS`で書く（`docs/coding_rules.md` 2節 #15、`crates/seiran-common/tests/sql_style.rs`で機械的に検出）。
 - **ホーム/ローカルタイムライン**: `posts` を `id`（降順）でページネーションするだけの単純な SQL。フォロー時点で相手の過去ログを丸ごと自サーバー DB に取り込んでいるため、外部 API 呼び出しを伴わない（`docs/concept.md` 「タイムラインは自前の池」参照）。
 - **ソーシャル/グローバルタイムライン（#78）**: `PostRepository::social_timeline`（自分+フォロー中+ローカル全体、home_timelineのLATERAL方式候補とlocal_timelineの`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（local_timelineから`is_local`条件のみ外したもの）。新規テーブルは無く、`home_timeline`/`local_timeline`と同じインデックス（`idx_posts_actor_id`・`is_local`列）で完結する。ひかえめ（`unlisted`）・プライベート（`followers_only`）投稿は、投稿者本人やフォロワーが閲覧してもローカル/グローバルには出さず、ホームとソーシャルにだけ表示する（#91, #105）。フォロー中経由の候補（LATERAL側）には`post_reply_target_followed`によるリプライ先フォロー条件（前節参照）を課すが、ローカル全体候補（`is_local`側）には課さない。ローカル全体はフォロー関係と無関係にローカルの全投稿（リプライ含む）を表示する設計のため。
 - **引用関係（#116）**: `posts.quote_of_post_id` はローカル作成だけでなく、APの `quoteUrl` / `_misskey_quote` / Misskey Hub互換Link tag、およびBskyの `app.bsky.embed.record` / `recordWithMedia` 受信時にも、保存済み投稿の `ap_object_id` / `at_uri` を引いて設定する。`20260728000000_backfill_quote_of_post_id.sql` は旧AP投稿本文末尾の `RE:` / `QT:` フォールバックURLから既存関係を復元し、復元できた重複行を本文から除去する。
@@ -332,7 +338,7 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 
 `poll_votes` はActivityPub `Question`への回答を、投稿・回答Actor・選択肢番号単位で保持する。
 複数回答では同一Actorが複数行を持ち、`ap_activity_id` の一意制約でリモートからの再配送を
-冪等化する。集計表示用の票数は `posts.poll` にも反映する。認証付きの投稿読取APIは
+冪等化する。集計表示用の票数は `posts.poll` にも反映する。票数の加算はローカル投票・リモート投票受信とも`repository::poll::increment_poll_votes`（`jsonb_set`による単一UPDATE文、`poll_votes`への記録と同一トランザクション）で行う。以前は両経路とも「JSONを読む→アプリで+1→丸ごと書き戻す」形で、同時投票時に一方の加算が失われていた。ローカル投票（`notes::poll::vote_poll`）は対象投稿行を`FOR UPDATE`でロックしてから投票済み判定・記録・加算を行う。認証付きの投稿読取APIは
 `poll_votes` から回答者自身の選択肢番号を `poll.votedByMe` として付与し、クライアントが
 リロード後も回答済み状態と選択内容を復元できるようにする。ローカルユーザー自身の投票は
 `ap_activity_id`が`NULL`の行として同じテーブルに記録される（#228でローカル作成した

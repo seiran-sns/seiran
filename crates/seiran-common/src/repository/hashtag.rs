@@ -101,25 +101,17 @@ impl HashtagRepository for PgHashtagRepository {
         viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
-                    p.content_warning,
-                    p.reply_count, p.quote_count, p.repost_count, p.content_html
+            concat!("SELECT ", crate::timeline_post_columns!(), "
              FROM post_hashtags ph
              JOIN hashtags h ON h.id = ph.hashtag_id
              JOIN posts p ON p.id = ph.post_id
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             ", crate::timeline_post_joins!(), "
              WHERE h.name = $1 AND p.deleted_at IS NULL
                AND p.visibility IN ('public', 'unlisted')
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
                AND ($5::bigint IS NULL OR p.actor_id = $5 OR NOT actor_is_hidden_for_viewer($5, p.actor_id))
-             ORDER BY p.id DESC LIMIT $4",
+             ORDER BY p.id DESC LIMIT $4"),
         )
         .bind(tag_name)
         .bind(until_id)

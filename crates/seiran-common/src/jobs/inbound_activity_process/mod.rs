@@ -224,67 +224,35 @@ async fn upsert_remote_fedi_actor(
     let remote_ap = ap_client
         .fetch_actor_signed(actor_uri, (&signing_key.0, &signing_key.1))
         .await?;
-    let ap_inbox = remote_ap.inbox.clone().unwrap_or_default();
-    // `preferredUsername`（AS2語彙のプロパティ、必須ではないがWebFinger解決の前提として
-    // fediverse全体で事実上必須）が無い場合、URI末尾のパスセグメントをusername代わりに
-    // 使うフォールバックは行わない。ActivityPub仕様はActor URIのパス構造を一切規定して
-    // おらず（例: Misskeyは末尾が内部の不透明なIDでusernameではない）、それを推測に使うと
-    // 誤ったusernameで upsert してしまう。取得失敗として扱い呼び出し元へエラーを返す。
-    let username = remote_ap.preferred_username.clone().ok_or_else(|| {
-        format!(
-            "リモートアクター '{}' に preferredUsername がありません",
-            actor_uri
-        )
-    })?;
-    let display_name = remote_ap.name.clone().unwrap_or_else(|| username.clone());
-    let domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
-    let avatar_url = remote_ap.avatar_url();
-    // 自己紹介文（AP Person の summary は HTML のため、投稿本文と同じallowlistでサニタイズし
-    // HTMLのまま保持する。プレーンテキスト化はフロント側の表示分岐で行わない）。
-    let bio = remote_ap.summary.as_deref().map(sanitize_html_allowlist);
-    // 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Person の tag 配列由来）。
-    let emoji_map = remote_ap.emoji_map();
-    record_remote_emojis(inbox, &domain, &remote_ap.tag).await;
-    // プロフィールのキーバリュー項目（#62）。
-    let profile_fields = remote_ap.profile_fields_json();
+    // `preferredUsername`が無い場合の扱い（URI末尾での代用はしない）は
+    // `FediActorProfile::from_ap_actor`を参照。
+    let profile = crate::repository::FediActorProfile::from_ap_actor(&remote_ap, actor_uri, None)
+        .map_err(|e| format!("{} ({})", e, actor_uri))?;
+    record_remote_emojis(inbox, &profile.domain, &remote_ap.tag).await;
 
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
     // リモートseiranアクターの相互申告マージ（#236）。`seiranAtDid`拡張フィールドの
     // 有無に関わらず同じ経路を通す（無ければ`claimed_at_did=None`で単純upsertと同義）。
-    let outcome = crate::seiran_actor_merge::discover_fedi_actor(
-        &inbox.db_pool,
-        new_actor_id,
-        actor_uri,
-        &ap_inbox,
-        &username,
-        &domain,
-        &display_name,
-        avatar_url.as_deref(),
-        bio.as_deref(),
-        &emoji_map,
-        &profile_fields,
-        remote_ap.seiran_at_did.as_deref(),
-        now,
-    )
-    .await
-    .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
+    let outcome =
+        crate::seiran_actor_merge::discover_fedi_actor(&inbox.db_pool, new_actor_id, &profile, now)
+            .await
+            .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
     crate::seiran_actor_merge::promote_after_discovery(
         &inbox.db_pool,
         inbox.queue.as_ref(),
         &outcome,
-        remote_ap.seiran_at_did.as_deref(),
+        profile.claimed_at_did.as_deref(),
     )
     .await;
-    let actor_id = outcome.actor_id;
 
     Ok(RemoteActorInfo {
-        actor_id,
-        username,
-        display_name,
-        domain,
-        avatar_url,
-        inbox: ap_inbox,
+        actor_id: outcome.actor_id,
+        username: profile.username,
+        display_name: profile.display_name,
+        domain: profile.domain,
+        avatar_url: profile.avatar_url,
+        inbox: profile.ap_inbox_url,
     })
 }
 

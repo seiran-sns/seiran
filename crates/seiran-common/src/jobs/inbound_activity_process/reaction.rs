@@ -1,5 +1,6 @@
 use super::emoji::{record_remote_emojis, resolve_single_emoji_url_with_fallback};
 use super::*;
+use crate::repository::NewNotification;
 
 /// いいね（Like）・絵文字リアクション（EmojiReact）を受信し reactions テーブルへ保存する (#22)。
 ///
@@ -82,16 +83,16 @@ pub(super) async fn handle_reaction(
     let new_reaction_id = generate_snowflake_id(chrono::Utc::now());
     inbox
         .reaction_repo
-        .insert(
-            new_reaction_id,
+        .upsert(&crate::repository::NewReaction {
+            id: new_reaction_id,
             post_id,
             actor_id,
             reaction_type,
-            &db_content,
-            activity_id,
-            None,
-            emoji_url.as_deref(),
-        )
+            content: &db_content,
+            ap_activity_id: activity_id,
+            at_uri: None,
+            emoji_url: emoji_url.as_deref(),
+        })
         .await
         .map_err(|e| format!("reactions INSERT エラー: {}", e))?;
 
@@ -111,18 +112,14 @@ pub(super) async fn handle_reaction(
     let notif_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = inbox
         .notification_repo
-        .insert(
-            notif_id,
-            post_author_id,
-            NotificationKind::Reaction,
-            Some(actor_id),
-            Some(post_id),
-            Some(&db_content),
-            emoji_url.as_deref(),
-            activity_id,
-            None,
-            None,
-        )
+        .insert(&NewNotification {
+            notifier_actor_id: Some(actor_id),
+            note_id: Some(post_id),
+            reaction: Some(&db_content),
+            reaction_emoji_url: emoji_url.as_deref(),
+            source_uri: activity_id,
+            ..NewNotification::new(notif_id, post_author_id, NotificationKind::Reaction)
+        })
         .await
     {
         tracing::error!("[Reaction] notifications INSERT 失敗: {}", e);

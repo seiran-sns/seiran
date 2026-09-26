@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use crate::ap::deliver::ApSender;
 use crate::ap::{
     deliver_ap_announce, deliver_ap_poll_vote, deliver_ap_reaction, deliver_ap_undo_reaction,
     deliver_delete_actor, deliver_delete_note, deliver_direct_message_to_ap,
@@ -45,6 +46,13 @@ pub async fn handle(
 
     let ap_client = &ctx.ap_client;
     let domain = cfg.local_domain.as_str();
+    let sender = ApSender {
+        ap_client,
+        db: pool,
+        actor_id,
+        local_domain: domain,
+        private_key_pem: private_pem,
+    };
 
     match kind {
         ApDeliveryKind::PostToFollowers {
@@ -53,56 +61,32 @@ pub async fn handle(
             quote_url,
             in_reply_to,
         } => deliver_post_to_ap_followers(
-            ap_client,
-            pool,
+            &sender,
             post_id,
-            actor_id,
-            domain,
-            private_pem,
             body.as_deref(),
             quote_url.as_deref(),
             in_reply_to.as_deref(),
         )
         .await
         .map_err(JobError::from),
-        ApDeliveryKind::DirectMessage { post_id } => {
-            deliver_direct_message_to_ap(ap_client, pool, post_id, actor_id, domain, private_pem)
-                .await
-                .map_err(JobError::from)
-        }
+        ApDeliveryKind::DirectMessage { post_id } => deliver_direct_message_to_ap(&sender, post_id)
+            .await
+            .map_err(JobError::from),
         ApDeliveryKind::Announce {
             post_id,
             original_ap_object_id,
-        } => deliver_ap_announce(
-            ap_client,
-            pool,
-            post_id,
-            actor_id,
-            domain,
-            private_pem,
-            &original_ap_object_id,
-        )
-        .await
-        .map_err(JobError::from),
+        } => deliver_ap_announce(&sender, post_id, &original_ap_object_id)
+            .await
+            .map_err(JobError::from),
         ApDeliveryKind::UndoAnnounce {
             announce_post_id,
             original_ap_object_id,
-        } => deliver_undo_announce(
-            ap_client,
-            pool,
-            announce_post_id,
-            actor_id,
-            domain,
-            private_pem,
-            &original_ap_object_id,
-        )
-        .await
-        .map_err(JobError::from),
-        ApDeliveryKind::DeleteNote { post_id } => {
-            deliver_delete_note(ap_client, pool, post_id, actor_id, domain, private_pem)
-                .await
-                .map_err(JobError::from)
-        }
+        } => deliver_undo_announce(&sender, announce_post_id, &original_ap_object_id)
+            .await
+            .map_err(JobError::from),
+        ApDeliveryKind::DeleteNote { post_id } => deliver_delete_note(&sender, post_id)
+            .await
+            .map_err(JobError::from),
         ApDeliveryKind::Reaction {
             post_id,
             activity_id,
@@ -114,12 +98,8 @@ pub async fn handle(
             // 配送は続行する（Undo だけリトライで再送すると新リアクションが二重になるため）。
             if let Some(prev) = undo_prev {
                 if let Err(e) = deliver_ap_undo_reaction(
-                    ap_client,
-                    pool,
+                    &sender,
                     post_id,
-                    actor_id,
-                    domain,
-                    private_pem,
                     &prev.activity_id,
                     &prev.content,
                     prev.emoji_url.as_deref(),
@@ -130,12 +110,8 @@ pub async fn handle(
                 }
             }
             deliver_ap_reaction(
-                ap_client,
-                pool,
+                &sender,
                 post_id,
-                actor_id,
-                domain,
-                private_pem,
                 &activity_id,
                 &content,
                 emoji_url.as_deref(),
@@ -146,29 +122,17 @@ pub async fn handle(
         ApDeliveryKind::PollVote {
             post_id,
             option_names,
-        } => deliver_ap_poll_vote(
-            ap_client,
-            pool,
-            post_id,
-            actor_id,
-            domain,
-            private_pem,
-            &option_names,
-        )
-        .await
-        .map_err(JobError::from),
+        } => deliver_ap_poll_vote(&sender, post_id, &option_names)
+            .await
+            .map_err(JobError::from),
         ApDeliveryKind::UndoReaction {
             post_id,
             prev_activity_id,
             content,
             emoji_url,
         } => deliver_ap_undo_reaction(
-            ap_client,
-            pool,
+            &sender,
             post_id,
-            actor_id,
-            domain,
-            private_pem,
             &prev_activity_id,
             &content,
             emoji_url.as_deref(),
@@ -184,19 +148,13 @@ pub async fn handle(
                 );
                 return Ok(());
             };
-            deliver_update_actor(ap_client, pool, actor_id, domain, private_pem, public_pem)
+            deliver_update_actor(&sender, public_pem)
                 .await
                 .map_err(JobError::from)
         }
-        ApDeliveryKind::DeleteActor => {
-            deliver_delete_actor(ap_client, pool, actor_id, domain, private_pem)
-                .await
-                .map_err(JobError::from)
-        }
-        ApDeliveryKind::SeiranPostUpdate { post_id } => {
-            deliver_seiranpost_update(ap_client, pool, post_id, actor_id, domain, private_pem)
-                .await
-                .map_err(JobError::from)
-        }
+        ApDeliveryKind::DeleteActor => deliver_delete_actor(&sender).await.map_err(JobError::from),
+        ApDeliveryKind::SeiranPostUpdate { post_id } => deliver_seiranpost_update(&sender, post_id)
+            .await
+            .map_err(JobError::from),
     }
 }

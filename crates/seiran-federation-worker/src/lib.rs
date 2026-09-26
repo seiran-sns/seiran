@@ -21,7 +21,6 @@ use seiran_common::{DeliveryConfig, FollowExecConfig, InboxContext, JobQueue};
 /// 再利用する）。`delivery` は AP 配送ジョブ用の設定（ドメイン・AP 鍵）。
 /// `inbox` は `Job::InboundActivityProcess`（AP Inbox 受信処理）に必要な設定。
 /// `follow_exec` は `Job::FollowImportProcess`（フォローインポート）に必要な設定。
-#[allow(clippy::too_many_arguments)]
 pub async fn run(
     queue: Arc<dyn JobQueue>,
     pool: PgPool,

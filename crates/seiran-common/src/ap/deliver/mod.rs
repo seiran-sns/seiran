@@ -30,6 +30,19 @@ pub use note::{
 pub use reaction::{deliver_ap_poll_vote, deliver_ap_reaction, deliver_ap_undo_reaction};
 pub use text::{at_uri_to_bsky_app_url, plain_to_html, plain_to_html_with_mentions};
 
+/// AP 配送の送信者（ローカルアクター）と、配送に使う共有資源。全配送関数に共通して渡す
+/// 引数の束（以前は各関数が同じ5引数を個別に受け取っていた）。
+#[derive(Clone, Copy)]
+pub struct ApSender<'a> {
+    pub ap_client: &'a ApClient,
+    pub db: &'a PgPool,
+    /// 送信者（ローカルアクター）の`actors.id`。
+    pub actor_id: i64,
+    pub local_domain: &'a str,
+    /// HTTP Signatures の署名に使う秘密鍵（PEM）。
+    pub private_key_pem: &'a str,
+}
+
 use futures_util::stream::{self, StreamExt};
 use sqlx::{PgPool, Row};
 

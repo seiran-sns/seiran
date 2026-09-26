@@ -273,7 +273,7 @@ seiran は**自前 PDS を実装**しており、外部PDS（bsky.social等）�
 ### 構成
 - `seiran-common::atp`
   - `repo.rs` — MST構築、TID生成(rkey)、P-256署名によるcommit生成、CARv1エンコード、各種レコード型のDAG-CBORエンコード、`subscribeRepos`フレーム構築(`#commit`/`#identity`/`#account`/`#error`)
-  - `service.rs` — `AtpCommitService`。共通コミットパイプライン `commit_record_inner` + `commit_post`/`commit_repost`/`commit_like`/`commit_follow`/`commit_graph_list(item)`/各種delete/`commit_quote`/`commit_profile`
+  - `service.rs` — `AtpCommitService`。共通コミットパイプライン `commit_record_inner` + `commit_post`（通常・引用・CW投稿共通、投稿内容は`PostCommit`）/`commit_repost`/`commit_like`/`commit_follow`/`commit_graph_list(item)`/各種delete/`commit_profile`
   - `plc.rs` — `did:plc` genesis operation生成・plc.directory登録
   - `did_resolve.rs` — サービス間認証JWT検証用のDID解決
   - `service_auth.rs` — 外部サービス呼び出し用の自己署名JWT(ES256、low-S正規化必須)
@@ -492,7 +492,7 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
 ポストは言語プロパティ（ISO 639-1、2文字コード）を持てる。Bsky配送（`app.bsky.feed.post`の`langs`フィールド、1言語のみ）にのみ意味を持ち、AP配送では使わない。
 
 - **選択肢（`CreateNoteRequest.language`）**: `seiran_common::SUPPORTED_LANGUAGES`（ja/en/zh/ko/es/de/frの7言語）。表示言語設定（`users.language_preference`、`seiran_common::SUPPORTED_DISPLAY_LANGUAGES`）とは異なり中国語のバリエーション（`zh-Hant`/`zh-Hans`）を持たず`zh`単一。`crates/seiran-api/src/handlers/notes/creation.rs::create_regular_post`が`seiran_common::is_supported_language`で検証し、未対応言語は`UNSUPPORTED_LANGUAGE`で拒否する。省略可能で、その場合は`posts.language`が`NULL`のまま、Bskyコミット時に`langs`フィールド自体を省略する（Misskey互換APIクライアント等、本フィールドを送らないクライアントとの後方互換）。
-- **保存とBskyコミットへの反映**: `posts.language`に保存し、`AtpCommitService::commit_post`/`commit_quote`の`lang`引数として`encode_bsky_feed_post`（`crates/seiran-common/src/atp/repo.rs`）へ渡す。`Some`なら`langs`を1件の配列として設定し、`None`ならフィールド自体を省略する。動画パイプライン結合待ち（`Job::BskyPostCommitDeferred`）でコミットが遅延する場合も、ジョブが`posts.language`を都度読み直して同じ`lang`を渡す。
+- **保存とBskyコミットへの反映**: `posts.language`に保存し、`AtpCommitService::commit_post`の`PostCommit.lang`として`encode_bsky_feed_post`（`crates/seiran-common/src/atp/repo.rs`）へ渡す。`Some`なら`langs`を1件の配列として設定し、`None`ならフィールド自体を省略する。動画パイプライン結合待ち（`Job::BskyPostCommitDeferred`）でコミットが遅延する場合も、ジョブが`posts.language`を都度読み直して同じ`lang`を渡す。
 - **フロントエンドのデフォルト**: 投稿フォームの言語選択ボタン（`docs/ui_spec.md` 2.4b節）の初期値は現在の表示言語（`i18n.language`）を`i18n.postLanguageBase()`でポスト言語（7言語）へ丸めた値で、送信のたびに変わる「最後に送信した値」方式（Fedi/Bsky配送先トグル等の`composerDefaults`）とは異なる。表示言語が`zh-Hant`（繁體中文）/`zh-Hans`（简体中文）のどちらでも、丸め後の値は`zh`になる。
 
 ### アルゴリズムレコメンドからの除外（`app.bsky.actor.contentVisibilityDeclaration`）
@@ -556,6 +556,12 @@ Fediverse（AP）とBluesky（ATP）では生年月日の可視性の位置づ�
    - **マージ成立時のクリーンアップ**（重いFK付け替えを避ける2段階方式）: 結婚成立の瞬間、生き残らせる行（正規行）と削除予定行の両方が同じ`ap_object_id`または`at_uri`を持とうとしてUNIQUE制約に触れるため、まず削除予定行の当該列をNULLへ更新し（`UNIQUE`制約はNULL同士を衝突と見なさないため問題なく通る）、続けて正規行に確定値をセットする。同じトランザクションで、削除予定行に正規行への参照（`parent_original_post_id`）と論理削除（`deleted_at = now()`）も設定してコミットする。ここまでが`finalize_post_merge`の1トランザクションの中で行う（マージ対象の特定自体は上記の複合UNIQUE制約＋リトライで直列化済みのため、この時点で追加のロックは不要）。`deleted_at`を立てることで、削除予定行は既存の「`deleted_at IS NULL`を前提とする」読み取り規約（`docs/database.md`）に乗って即座にタイムライン等から消え、かつ`trg_posts_relation_counts_delete`トリガーが発火して、結婚前に2行それぞれが二重加算していた返信/引用/リポスト数（親投稿側のカウンタ）を自動的に1つ分補正する。実際の関連テーブル（`reactions`・`post_attachments`・`notifications`等多数）のFK付け替えと削除予定行の物理削除は、優先度の低いバックグラウンドジョブが非同期に行う。削除予定行は`deleted_at`済みのためこの間新規参照が増えることはなく、付け替え対象は結婚成立時点で存在した分だけに限定される。**実装上の注意**: このジョブが`reply_to_post_id`/`quote_of_post_id`/`repost_of_post_id`を削除予定行から正規行へ張り替える操作は、上記トリガーの発火条件（INSERT時・`deleted_at`のNULL→非NULL遷移時）に該当しないため、`reply_count`等の増減はトリガー任せにできず、ジョブ側で張り替え元の親を-1・張り替え先の親を+1と手動調整する必要がある。
    - この制約と設計により、旧来の既知の制約（ATP側が先に取り込まれると`seiran_post_uuid`が一致せず別行になる）は構造的に解消される——マージ判定がどちらが先でも対称に機能するため。`app.bsky.feed.post`本体への独自フィールド追加自体は、一度コミットされたら他クライアントに書き換えられないため安全（Jetstream・AppViewとも未知フィールドを保持したまま透過することを確認済み）。
 3. **一般ブリッジ重複**: Noteの `url`（単純文字列・配列のいずれの形も`extract_ap_note_urls`が吸収する。Bridgy Fed等は`[リダイレクタ文字列, {href:"at://...", rel:"canonical"}]`という配列形で返す）が `https://bsky.app/profile/{did}/post/{rkey}` 形式なら `at://` URIへ変換し既存ポストを検索、あれば `parent_original_post_id` にリンク（重複許容 + リンク）。
+
+**リモートBskyアクターの発見**: AppView `getProfile`で取得したプロフィールの保存は、firehoseの未知DID解決・Bskyフォロー・相互申告の相手解決ジョブの全経路で`seiran_actor_merge::discover_bsky_profile`（DID側の`org.seiran.actor.declaration`取得→相互申告マージ込みの保存→昇格処理）に一本化している。バナー画像もこの時点で保存する。
+
+**リモートFediアクターのプロフィール組み立て**: AP Actor文書から保存用の値（username・表示名・アバター・バナー・自己紹介・絵文字・プロフィール項目・`seiranAtDid`）を組み立てる処理は、受信Activity・フォロー・プロフィール表示・各種ジョブの全経路で`FediActorProfile::from_ap_actor`（`seiran_common::ap::client`）に一本化している。`preferredUsername`が無い場合はActor URI末尾のパスセグメントで代用せずエラーにする（ActivityPub仕様はActor URIのパス構造を規定しておらず、例えばMisskeyは末尾が内部の不透明なIDのため、誤ったusernameで保存してしまう）。WebFinger（`user@domain`）経由で解決したActorに限り、その名前とドメインを使う。`inbox`の無いActorは保存しない。以前は経路ごとに手書きしており、username欠落時の扱い（エラー／URI末尾で代用）とバナー保存の有無（受信Activity・フォロー経路の`discover_fedi_actor`はバナーを保存していなかった）が食い違っていた。
+
+**外部から指定されたURLへの接続（SSRF対策）**: 連合用の共有HTTPクライアント（`seiran-server`が`seiran_common::net::federation_client_builder`で構築）は、ホスト名の解決結果に非公開IP（loopback・private・link-local・CGNAT・IPv6 ULA/link-local、IPv4-mapped/NAT64/6to4/IPv4互換アドレスに埋め込まれた非公開IPv4を含む）が1つでも含まれる場合に接続を拒否するDNSリゾルバと、リダイレクト先の同様の検査を組み込む。reqwestはIPリテラルのホストをリゾルバに渡さないため、`ApClient`の外部URL取得・配送（`fetch_actor`・署名付きGET・`sign_and_post`・WebFinger）は送信前に`net::ensure_public_url`でIPリテラルも検査する。受信Activityの署名`keyId`・フォロー対象URL・`ap/show`の`uri`など、第三者が指定できるURLへサーバーが接続する経路がこれに当たる。E2Eのスタブサーバー（127.0.0.1）向けに限り`SEIRAN_ALLOW_PRIVATE_NETWORK=true`で無効化できる。運用者が設定する内部ホスト（OGP生成用の`FRONTEND_ORIGIN`等）への接続は、この共有クライアントではなく専用の内部通信クライアントを使う。
 
 **Actor解決の自ドメインガード**: リモートActor URI解決処理（`upsert_remote_fedi_actor`/`resolve_fedi`）は、URIが `https://{local_domain}/users/{username}` 形式で自ドメインを指す場合、`seiran_common::ap::extract_local_username` で判定してローカル行をそのまま返す（新規 `fedi` 行は作らない）。ローカル行は `insert_local` が設定する `ap_uri`（`https://{domain}/users/{username}`）を持つため、万一このガードを経由しなくても `find_by_ap_uri`/`upsert_remote_fedi` の `ON CONFLICT (ap_uri)` により重複INSERTは自然に防がれる（二重防御）。
 
@@ -745,7 +751,7 @@ HTML変換時点でこれらは全て`<i>`（イタリック）に縮退して�
 
 `GET /api/notes/search`は、初回検索でローカルDBと`api.bsky.app`の`app.bsky.feed.searchPosts`の双方から`limit`件ずつ取得する。AppView結果はURI照合だけで捨てず、authorを`actors`、post viewを`posts`へupsertしたうえで、ローカル結果とsnowflake ID降順にマージ・重複排除して`limit`件を返す。AppView障害時はHTTPステータスをログへ記録し、ローカルDB結果だけへ縮退する。検索結果には保存したactorアバターも含める。
 
-Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView検索を行い、Misskey形式のノート配列を返す。JSONの`query`、`limit`、`untilId`を受け付ける。Aria等のハッシュタグ画面向けには`POST /api/notes/search-by-tag`を提供し、JSONの`tag`、`limit`、`sinceId`、`untilId`を受け付け、専用ハッシュタイムラインをMisskey形式で返す。
+Misskeyクライアント向けの`POST /api/notes/search`は、カスタムAPIのカーソル指定検索と同じ共通関数`handlers::search::search_post_ids_by_cursor`（ローカルDB＋AppViewのブレンド・ブリッジポスト解決）と同じ検索回数制限（`rate_limit::check_search_rate_limit`、初回検索のみ）を使い、Misskey形式のノート配列を返す。JSONの`query`、`limit`、`sinceId`、`untilId`を受け付ける（以前は独自実装で、ブリッジポストの解決と検索回数制限が漏れていた）。Aria等のハッシュタグ画面向けには`POST /api/notes/search-by-tag`を提供し、JSONの`tag`、`limit`、`sinceId`、`untilId`を受け付け、専用ハッシュタイムラインをMisskey形式で返す。
 
 `until_id`指定時は対象postの`created_at`をRFC 3339の`until`としてAppViewへ渡し、DBにも`p.id < until_id`を適用して同様にブレンドする。`since_id`指定はMisskey互換の逆方向ページングであり、AppViewへ問い合わせずDBの`p.id > since_id`だけを返す。既存frontendの過去掘りは互換維持のため`session_id`バッファも引き続き利用できる（#146）。
 
@@ -768,6 +774,8 @@ Misskeyクライアント向けの`POST /api/notes/search`も同じDB・AppView�
 **`misskey_dart`（Aria等）の non-nullable 直接キャスト対策**: `misskey_dart` の生成コード（`*.g.dart`）は本家スキーマの必須フィールドを `as String`/`as num` 等で直接キャストするため、JSONでキーが欠けたり `null` だと Dart 側で未処理の `TypeError` となりクライアントが落ちる（サーバー側のバリデーションエラーとは別の失敗モード）。`MisskeyMeDetailed`（`notesCount` 等）に続き `MisskeyDriveFile`（`createdAt`/`md5`/`size`/`isSensitive`/`properties`）、`MisskeyUserDetailed`（`/api/users/show`・`/api/i` 共通、`notesCount`/`followersCount`/`followingCount`）でも踏んだため、Misskey互換型を追加・変更する際は本家スキーマの必須/任意を都度 `misskey_dart` のソースで確認すること。`md5` は seiran 内部で持つ `sha256` を代用し、リモート添付など元データが無い場合は空文字列/0を返す（クライアントは値を検証せず保持するだけのため実害はない）。
 
 **`MisskeyUserDetailed`の関係フィールド（`isFollowing`等）**: `misskey_dart`の`UserDetailed.fromJson`はレスポンスJSONに`isFollowing`キーが存在するかどうかで`UserDetailedNotMe`（関係情報なし）/`UserDetailedNotMeWithRelations`（関係情報あり）のどちらにパースするかを判定する（キー自体の有無で分岐、値のnull/非nullではない）。seiranは閲覧者の`viewer_actor_id`が解決できる場合（ログイン済み、`/api/users/show`・`/api/users/following`・`/api/users/followers`）のみ`MisskeyUserRelations`（`types.rs`）を`Some`にし`#[serde(flatten)]`でJSON上にフラット展開する。`isFollowing`等8フィールドは`UserDetailedNotMeWithRelations`側で`required bool`のため、`Some`の場合は値がnullであってはならない（他のnon-nullable直接キャスト問題と同種）。`hasPendingFollowRequestToYou`は常に`false`（seiranはローカルアカウントの鍵アカウント機能自体を持たず、ローカルviewerへの受信フォローは常に即accepted）。`/api/i`用の`build_me_detailed`は本家`MeDetailed`に関係フィールドが存在しないため常に`viewer_actor_id: None`固定で呼ぶ。
+
+**`POST /api/following/create`・`delete`の委譲**: カスタムAPI（`handlers::follows::create_follow`/`delete_follow`）へ`userId`をそのまま`actorId`として委譲する（カスタムAPIは`target`文字列と`actorId`のどちらでも対象を指定できる）。以前はMisskey側で actorId → 人間可読な文字列へ逆算してから渡していた。
 
 **`POST /api/following/create`・`delete`のレスポンス形状**: 本家Misskeyはこれらを`204 No Content`ではなく対象ユーザーの`UserLite`で応答する仕様（`misskey_dart`の`MisskeyFollowing.create`/`delete`は`post<Map<String, dynamic>>`で戻り値を直接キャストする）。`204`のまま返すと空ボディがJSONデコードで文字列扱いになり、クライアント側で`type 'String' is not a subtype of type 'FutureOr<Map<String, dynamic>>'`という未処理例外になる（実機確認済み、Aria）。`following_create`/`following_delete`（`handlers::misskey::endpoints`）は成功時、共通ヘルパー`misskey_user_lite_response`で`build_user_detailed(state, actor, None).lite`を`Json`で返す（`viewer_actor_id: None`固定＝`isFollowing`等の関係フィールドは含めない、本家`UserLite`にも存在しないため）。`following/invalidate`・`update`は未実装。
 
@@ -920,6 +928,9 @@ DMは投稿として表示しないポリシーのため、`GET /api/notes/:id`�
 
 ### `chat.bsky.actor.declaration`（Bsky DM受信許可）
 Bluesky公式クライアントは相手のPDSから`chat.bsky.actor.declaration`（rkey固定`self`、`allowIncoming: "all"|"none"|"following"`）を取得してDM送信可否を判定する。このレコードが無いと保守的に送信をブロックする（実機確認: 未コミット状態のseiranユーザーへ公式クライアントからDMを送ろうとすると宛先候補がグレーアウトする）。`AtpCommitService::commit_chat_declaration`が`allowIncoming: "all"`固定でコミットする。新規ユーザー登録時（`handlers::auth::register`）と、起動時のバックフィル（`spawn_startup_tasks`→`backfill_chat_declarations`、未コミットのローカルユーザーを検出して一括実行）の両方から呼ばれる。ユーザーが値を選べる設定UIは未実装（`docs/roadmap.md`参照）。
+
+
+新規ローカルアカウントの ATP リポジトリへは、通常登録（`register`）・初期管理者作成（`setup`）とも共通関数`handlers::auth::publish_initial_atp_records`で、プロフィール・`chat.bsky.actor.declaration`・`org.seiran.actor.declaration`（相互申告マージ用の自己申告）をコミットし`#identity`を送る。以前は`setup`がプロフィールしかコミットしておらず、初期管理者だけ作成直後にこれらが欠落していた（2つの宣言レコードは起動時のバックフィルで後から補われるが、`#identity`送信はされていなかった）。
 
 ## 10. ブロック・ミュート
 

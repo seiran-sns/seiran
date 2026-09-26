@@ -7,6 +7,7 @@
 //! （必要なリポジトリ・サービスの束）を明示的に受け取る形に切り出した。
 //! API側は `AppState` から都度 `FollowExecConfig` を組み立てて渡す（`AppState::follow_exec_config`）。
 
+use crate::repository::NewNotification;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -19,6 +20,8 @@ use crate::follow_target::{classify_follow_target, FollowTargetKind};
 use crate::generate_snowflake_id;
 use crate::jetstream_control::touch_jetstream_wanted_dids;
 use crate::queue::worker::{priority, FollowExecConfig};
+use crate::repository::follow::PendingFollowUpsert;
+use crate::repository::FediActorProfile;
 use crate::repository::NotificationKind;
 use crate::traits::{Job, JobQueue};
 
@@ -125,6 +128,75 @@ async fn check_not_blocked(
     Ok(())
 }
 
+/// ATP follow レコードを伴う accepted フォローを成立させ、新規に成立させた場合は true を返す
+/// （既にフォロー関係があれば何もせず false）。
+///
+/// 先に follows 行を確保（`INSERT ... ON CONFLICT DO NOTHING`）し、確保できたリクエストだけが
+/// ATP へコミットする。以前は「ATP コミット → follows INSERT」の順で、フォロー操作の連打・
+/// 同時実行時に ATP follow レコードが2件作られ、片方の rkey がどこにも記録されず
+/// アンフォローしても残り続けていた。外部呼び出し（ATP コミット）はトランザクションに
+/// 含めず、失敗時は確保した行を削除して元に戻す。
+async fn establish_atp_follow(
+    config: &FollowExecConfig,
+    follower_actor_id: i64,
+    target_actor_id: i64,
+    target_did: &str,
+    log_tag: &str,
+) -> Result<bool, FollowError> {
+    let claimed = config
+        .follows
+        .insert_accepted_with_rkey(follower_actor_id, target_actor_id, None)
+        .await
+        .map_err(|e| FollowError::Internal(format!("[{log_tag}] follows INSERT 失敗: {e}")))?;
+    if !claimed {
+        return Ok(false);
+    }
+
+    let now = chrono::Utc::now();
+    let rkey = match config
+        .atp_service
+        .commit_follow(follower_actor_id, target_did, now)
+        .await
+    {
+        Ok(rkey) => rkey,
+        Err(e) => {
+            if let Err(del) = config
+                .follows
+                .delete_by_actors(follower_actor_id, target_actor_id)
+                .await
+            {
+                tracing::error!("[{log_tag}] ATP失敗後の follows 巻き戻し失敗: {del}");
+            }
+            return Err(FollowError::Internal(format!(
+                "[{log_tag}] ATP コミット失敗: {e}"
+            )));
+        }
+    };
+
+    let recorded = config
+        .follows
+        .set_atp_rkey(follower_actor_id, target_actor_id, &rkey)
+        .await
+        .map_err(|e| FollowError::Internal(format!("[{log_tag}] atp_rkey 記録失敗: {e}")))?;
+    if !recorded {
+        // 確保からコミットまでの間にアンフォローされた。ATP 側に残ったレコードを取り消す。
+        if let Err(e) = config
+            .atp_service
+            .commit_delete_follow(follower_actor_id, &rkey, chrono::Utc::now())
+            .await
+        {
+            tracing::error!("[{log_tag}] 取り残された ATP follow の削除失敗: {e}");
+        }
+    }
+    tracing::info!(
+        "[{log_tag}] {} → {} フォロー完了 (rkey={})",
+        follower_actor_id,
+        target_did,
+        rkey
+    );
+    Ok(true)
+}
+
 /// ローカルユーザーへのフォロー（ATP コミット + follows テーブル accepted）
 async fn follow_local(
     username: &str,
@@ -150,7 +222,7 @@ async fn follow_local(
     // ロック中は「フォローが本当に成立していない」状態を保つのが目的（承認前に相手が
     // フォロワーとしてATP上に見えてしまうのを避ける）。
     if target_actor.is_locked {
-        let inserted = config
+        let upsert = config
             .follows
             .upsert_pending(local_actor_id, target_actor.id)
             .await
@@ -158,22 +230,18 @@ async fn follow_local(
                 FollowError::Internal(format!("[follow/local] follows INSERT 失敗: {}", e))
             })?;
 
-        if inserted {
+        if upsert == PendingFollowUpsert::Inserted {
             let notif_id = generate_snowflake_id(chrono::Utc::now());
             if let Err(e) = config
                 .notifications
-                .insert(
-                    notif_id,
-                    target_actor.id,
-                    NotificationKind::FollowRequest,
-                    Some(local_actor_id),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                )
+                .insert(&NewNotification {
+                    notifier_actor_id: Some(local_actor_id),
+                    ..NewNotification::new(
+                        notif_id,
+                        target_actor.id,
+                        NotificationKind::FollowRequest,
+                    )
+                })
                 .await
             {
                 tracing::error!("[follow/local] notifications INSERT 失敗: {}", e);
@@ -197,43 +265,37 @@ async fn follow_local(
             target_actor.id
         );
 
-        return Ok(FollowOutcome::Pending {
-            target_uri: format!("https://{}/users/{}", config.local_domain, username),
-            already_following: !inserted,
+        let target_uri = format!("https://{}/users/{}", config.local_domain, username);
+        return Ok(match upsert {
+            PendingFollowUpsert::AlreadyAccepted => FollowOutcome::Accepted {
+                target_uri,
+                already_following: true,
+            },
+            upsert => FollowOutcome::Pending {
+                target_uri,
+                already_following: upsert == PendingFollowUpsert::AlreadyPending,
+            },
         });
     }
 
     let target_did = target_actor.at_did.clone().ok_or(FollowError::NoAtDid)?;
-
-    let now = chrono::Utc::now();
-    let rkey = config
-        .atp_service
-        .commit_follow(local_actor_id, &target_did, now)
-        .await
-        .map_err(|e| FollowError::Internal(format!("[follow/local] ATP コミット失敗: {}", e)))?;
-
-    let inserted = config
-        .follows
-        .insert_accepted_bsky(local_actor_id, target_actor.id, &rkey)
-        .await
-        .map_err(|e| FollowError::Internal(format!("[follow/local] follows INSERT 失敗: {}", e)))?;
+    let inserted = establish_atp_follow(
+        config,
+        local_actor_id,
+        target_actor.id,
+        &target_did,
+        "follow/local",
+    )
+    .await?;
 
     if inserted {
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = config
             .notifications
-            .insert(
-                notif_id,
-                target_actor.id,
-                NotificationKind::Follow,
-                Some(local_actor_id),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
+            .insert(&NewNotification {
+                notifier_actor_id: Some(local_actor_id),
+                ..NewNotification::new(notif_id, target_actor.id, NotificationKind::Follow)
+            })
             .await
         {
             tracing::error!("[follow/local] notifications INSERT 失敗: {}", e);
@@ -250,13 +312,6 @@ async fn follow_local(
             }),
         );
     }
-
-    tracing::info!(
-        "[follow/local] {} → {} ローカルフォロー完了 (rkey={})",
-        local_actor_id,
-        target_actor.id,
-        rkey
-    );
 
     Ok(FollowOutcome::Accepted {
         target_uri: format!("https://{}/users/{}", config.local_domain, username),
@@ -282,7 +337,6 @@ async fn resolve_bsky_target_actor(
             FollowError::BadGateway("Bsky ユーザーが見つかりません".to_owned())
         })?;
     let did = bsky_resp.did.clone();
-    let now = chrono::Utc::now();
 
     // 自インスタンスのローカルアクター本人が DID 経由で見つかった場合は、AppView 側の
     // ハンドル表記（`user.domain` 形式）で username 列を上書きしてしまわないよう upsert を
@@ -290,35 +344,15 @@ async fn resolve_bsky_target_actor(
     let remote_actor_id = match config.actors.find_by_did(&did).await {
         Ok(Some(existing)) if existing.actor_type == "local" => existing.id,
         _ => {
-            let new_actor_id = generate_snowflake_id(now);
-            // リモートseiranアクターの相互申告マージ（#236）。DID側が
-            // `org.seiran.actor.declaration`で自己申告するAP側の相手を取りに行き、
-            // `discover_bsky_actor`経由でupsertする（`follow_fedi`と同じ扱いに揃える。
-            // 旧`upsert_remote_bsky`直呼びのままだと、claimed_ap_uriを取りこぼして
-            // 恒久的に結婚不成立となる実装漏れが`follow_fedi`同様に存在した）。
-            let claimed_ap_uri = crate::atp::client::fetch_seiran_actor_declaration(&did).await;
-            let outcome = crate::seiran_actor_merge::discover_bsky_actor(
-                pool,
-                new_actor_id,
-                &did,
-                &bsky_resp.handle,
-                bsky_resp.display_name.as_deref(),
-                bsky_resp.avatar.as_deref(),
-                claimed_ap_uri.as_deref(),
-                now,
-            )
-            .await
-            .map_err(|e| {
-                FollowError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e))
-            })?;
-            crate::seiran_actor_merge::promote_after_discovery(
-                pool,
-                queue.as_ref(),
-                &outcome,
-                claimed_ap_uri.as_deref(),
-            )
-            .await;
-            outcome.actor_id
+            // リモートseiranアクターの相互申告マージ（#236）。`follow_fedi`と同じ扱いに揃える
+            // （旧`upsert_remote_bsky`直呼びのままだと、claimed_ap_uriを取りこぼして恒久的に
+            // 結婚不成立となる実装漏れがあった）。
+            crate::seiran_actor_merge::discover_bsky_profile(pool, queue.as_ref(), &bsky_resp, true)
+                .await
+                .map_err(|e| {
+                    FollowError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e))
+                })?
+                .actor_id
         }
     };
 
@@ -336,28 +370,11 @@ async fn follow_bsky(
 ) -> Result<FollowOutcome, FollowError> {
     let (remote_actor_id, did) =
         resolve_bsky_target_actor(actor_id_or_handle, ap_client, pool, queue, config).await?;
-    let now = chrono::Utc::now();
 
     check_not_blocked(config, local_actor_id, remote_actor_id).await?;
 
-    let rkey = config
-        .atp_service
-        .commit_follow(local_actor_id, &did, now)
-        .await
-        .map_err(|e| FollowError::Internal(format!("[follow/bsky] ATP コミット失敗: {}", e)))?;
-
-    let inserted = config
-        .follows
-        .insert_accepted_bsky(local_actor_id, remote_actor_id, &rkey)
-        .await
-        .map_err(|e| FollowError::Internal(format!("[follow/bsky] follows INSERT 失敗: {}", e)))?;
-
-    tracing::info!(
-        "[follow/bsky] {} → {} フォロー完了 (rkey={})",
-        local_actor_id,
-        did,
-        rkey
-    );
+    let inserted =
+        establish_atp_follow(config, local_actor_id, remote_actor_id, &did, "follow/bsky").await?;
 
     touch_jetstream_wanted_dids(pool).await;
 
@@ -463,59 +480,25 @@ async fn follow_fedi(
         .await
         .map_err(|e| FollowError::BadGateway(format!("リモートアクター取得失敗: {}", e)))?;
 
-    let remote_inbox = remote_ap.inbox.clone().ok_or_else(|| {
-        FollowError::BadGateway("リモートアクターに inbox がありません".to_owned())
-    })?;
-
-    let remote_avatar_url = remote_ap.avatar_url();
-    let remote_username = remote_ap.preferred_username.clone().unwrap_or_else(|| {
-        target_uri
-            .rsplit('/')
-            .next()
-            .unwrap_or("unknown")
-            .to_string()
-    });
-    let remote_display_name = remote_ap
-        .name
-        .clone()
-        .unwrap_or_else(|| remote_username.clone());
-    let remote_domain = target_uri.split('/').nth(2).unwrap_or("").to_string();
-    let remote_bio = remote_ap
-        .summary
-        .as_deref()
-        .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist);
-    let remote_emoji_map = remote_ap.emoji_map();
-    let remote_profile_fields = remote_ap.profile_fields_json();
+    let profile = FediActorProfile::from_ap_actor(&remote_ap, &target_uri, None)
+        .map_err(|e| FollowError::BadGateway(e.to_string()))?;
+    let remote_inbox = profile.ap_inbox_url.clone();
 
     let now = chrono::Utc::now();
     let new_actor_id = generate_snowflake_id(now);
     // リモートseiranアクターの相互申告マージ（#236）。能動的フォロー実行時（この経路）も
     // インバウンド発見時（`inbound_activity_process`）と同じ`discover_fedi_actor`を通す
     // ことで、`seiranAtDid`拡張フィールドを取りこぼさず結婚成立に反映する。
-    let outcome = crate::seiran_actor_merge::discover_fedi_actor(
-        pool,
-        new_actor_id,
-        &target_uri,
-        &remote_inbox,
-        &remote_username,
-        &remote_domain,
-        &remote_display_name,
-        remote_avatar_url.as_deref(),
-        remote_bio.as_deref(),
-        &remote_emoji_map,
-        &remote_profile_fields,
-        remote_ap.seiran_at_did.as_deref(),
-        now,
-    )
-    .await
-    .map_err(|e| {
-        FollowError::Internal(format!("[follow/fedi] リモートアクター upsert 失敗: {}", e))
-    })?;
+    let outcome = crate::seiran_actor_merge::discover_fedi_actor(pool, new_actor_id, &profile, now)
+        .await
+        .map_err(|e| {
+            FollowError::Internal(format!("[follow/fedi] リモートアクター upsert 失敗: {}", e))
+        })?;
     crate::seiran_actor_merge::promote_after_discovery(
         pool,
         queue.as_ref(),
         &outcome,
-        remote_ap.seiran_at_did.as_deref(),
+        profile.claimed_at_did.as_deref(),
     )
     .await;
     let remote_actor_id = outcome.actor_id;
@@ -529,14 +512,19 @@ async fn follow_fedi(
     // まで「処理中」表示に固まって見える（実際のフォロー成立自体は待たずに反映すべき）。
     // 鍵アカウント宛は従来通りpendingのままAccept受信を待つ。
     let is_locked = remote_ap.manually_approves_followers;
-    let inserted = if is_locked {
-        config
+    // (新規に関係を作ったか, Accept待ち(pending)のままか)
+    let (inserted, is_pending) = if is_locked {
+        let upsert = config
             .follows
             .upsert_pending(local_actor_id, remote_actor_id)
             .await
             .map_err(|e| {
                 FollowError::Internal(format!("[follow/fedi] follows INSERT 失敗: {}", e))
-            })?
+            })?;
+        (
+            upsert == PendingFollowUpsert::Inserted,
+            upsert != PendingFollowUpsert::AlreadyAccepted,
+        )
     } else {
         // リモートseiranアクター（#236で結婚成立済み、真正なat_did）宛てで、かつ相手が
         // 非承認制なら、Follow送信と同時にATP側`commit_follow`も実行する（#238）。
@@ -579,7 +567,7 @@ async fn follow_fedi(
         if atp_rkey.is_some() {
             touch_jetstream_wanted_dids(pool).await;
         }
-        true
+        (true, false)
     };
 
     let local_actor_uri = format!("https://{}/users/{}", config.local_domain, local_username);
@@ -614,7 +602,7 @@ async fn follow_fedi(
             FollowError::BadGateway(format!("Follow 送信失敗: {}", e))
         })?;
 
-    if is_locked {
+    if is_pending {
         tracing::info!(
             "[follow/fedi] {} → {} Follow 送信完了 (pending, 鍵アカウント)",
             local_actor_uri,

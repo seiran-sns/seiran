@@ -42,6 +42,9 @@ const backendEnv: Record<string, string> = {
   CLOUDFLARE_API_TOKEN: "",
   CLOUDFLARE_ZONE_ID: "",
   REDIS_URL: "",
+  // 連合用HTTPクライアントのSSRF防御（内部IP拒否、`seiran_common::net::federation_client_builder`）
+  // を無効化する。E2Eのスタブ Fedi サーバー等は 127.0.0.1 で待ち受けるため。
+  SEIRAN_ALLOW_PRIVATE_NETWORK: "true",
   // Bsky側フォロワー検知ポーリング（`bsky_follower_poll`）の間隔。デフォルト60秒だと
   // E2Eのタイムアウト（15秒）内に検知されないため短縮する。
   BSKY_FOLLOWER_POLL_INTERVAL_SECS: "2",

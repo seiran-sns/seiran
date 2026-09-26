@@ -28,6 +28,14 @@
 
 > **ルール**: 設計文書の更新とコードの変更は **同じコミット** に含めること。設計文書を後回しにしない。
 
+### コーディングルール（抜粋、全文は `docs/coding_rules.md` 2節）
+- SQL で `IN (SELECT ...)` / `NOT IN (SELECT ...)` を使わない。`EXISTS` / `NOT EXISTS` で書く（NULL を含むサブクエリで `NOT IN` が常に偽になる事故の再発防止。`crates/seiran-common/tests/sql_style.rs` が機械的に検出する）。NULL 許容列の比較では NULL 行の扱いを明示する。
+- 「読んでから書く」「書いてから読む」を別々の文で行わない。`RETURNING`・`ON CONFLICT`・`SET col = f(col)` で1文にするか、トランザクション内で `FOR UPDATE` / アドバイザリロックで直列化する。外部 API 呼び出しはトランザクションに含めない。
+- `TimelinePost` を返すクエリは `timeline_post_columns!()` / `timeline_post_joins!()` を使い、可視性は `post_is_visible_to` で判定する（手書きしない）。
+- `TimelinePost` からレスポンスへの組み立ては、frontend API は `handlers::notes::build_note_responses`、Misskey 互換 API は `misskey::convert::build_notes` を使う（添付・リアクション・埋め込み・投票状態等の付与手順を個別に書かない）。
+- `#[allow(clippy::too_many_arguments)]` を新たに書かない。引数の束は構造体にし、長い関数は手順ごとの関数に分ける。
+- Misskey 互換 API とカスタム API で同じ処理を別々に書かない。データ取得・検証・副作用は共通関数にし、差分はレスポンス整形だけに閉じ込める。
+
 ### コミット前の確認フロー
 1. コード実装・修正
 2. 新しいマイグレーションファイルを追加した場合は `cargo sqlx migrate run` でローカル DB に適用する（後述）

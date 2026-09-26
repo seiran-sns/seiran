@@ -73,51 +73,22 @@ async fn refresh_fedi(
         .await
         .map_err(|e| format!("セマフォ取得失敗: {}", e))?;
 
-    let ap_actor = match ctx.system_signing_key() {
-        Some((key_id, pem)) => ctx
-            .ap_client
-            .fetch_actor_signed(ap_uri, (&key_id, &pem))
-            .await
-            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
-        None => ctx
-            .ap_client
-            .fetch_actor(ap_uri)
-            .await
-            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
-    };
+    let ap_actor = ctx
+        .ap_client
+        .fetch_actor_with_key(
+            ap_uri,
+            crate::ap::client::signing_key_refs(&ctx.system_signing_key()),
+        )
+        .await
+        .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?;
 
-    let Some(inbox) = ap_actor.inbox.clone() else {
-        return Err("inboxがありません".to_string());
-    };
-    let username = ap_actor
-        .preferred_username
-        .clone()
-        .unwrap_or_else(|| ap_uri.rsplit('/').next().unwrap_or("unknown").to_string());
-    let display_name = ap_actor.name.clone().unwrap_or_else(|| username.clone());
-    let avatar_url = ap_actor.avatar_url();
-    let banner_url = ap_actor.banner_url();
-    let bio = ap_actor
-        .summary
-        .as_deref()
-        .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist);
-    let emoji_map = ap_actor.emoji_map();
-    let profile_fields = ap_actor.profile_fields_json();
-
-    let new_id = crate::generate_snowflake_id(chrono::Utc::now());
+    let profile = crate::repository::FediActorProfile::from_ap_actor(&ap_actor, ap_uri, None)
+        .map_err(|e| e.to_string())?;
     actors
         .upsert_remote_fedi(
-            new_id,
-            ap_uri,
-            &inbox,
-            &username,
-            &domain,
-            &display_name,
-            avatar_url.as_deref(),
-            banner_url.as_deref(),
-            bio.as_deref(),
+            crate::generate_snowflake_id(chrono::Utc::now()),
+            &profile,
             chrono::Utc::now(),
-            &emoji_map,
-            &profile_fields,
         )
         .await
         .map(|_| ())
@@ -134,11 +105,13 @@ async fn refresh_bsky(
     actors
         .upsert_remote_bsky(
             new_id,
-            &profile.did,
-            &profile.handle,
-            profile.display_name.as_deref(),
-            profile.avatar.as_deref(),
-            profile.banner.as_deref(),
+            &crate::repository::BskyActorProfile {
+                at_did: &profile.did,
+                handle: &profile.handle,
+                display_name: profile.display_name.as_deref(),
+                avatar_url: profile.avatar.as_deref(),
+                banner_url: profile.banner.as_deref(),
+            },
             chrono::Utc::now(),
         )
         .await

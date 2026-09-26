@@ -183,11 +183,11 @@ impl DmRepository for PgDmRepository {
              peers AS (
                  SELECT p.thread_root_post_id, p.actor_id AS peer_id
                  FROM posts p
-                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM my_threads) AND p.deleted_at IS NULL
+                 WHERE EXISTS (SELECT 1 FROM my_threads mt WHERE mt.thread_root_post_id = p.thread_root_post_id) AND p.deleted_at IS NULL
                  UNION
                  SELECT p.thread_root_post_id, pr.actor_id AS peer_id
                  FROM posts p JOIN post_recipients pr ON pr.post_id = p.id
-                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM my_threads) AND p.deleted_at IS NULL
+                 WHERE EXISTS (SELECT 1 FROM my_threads mt WHERE mt.thread_root_post_id = p.thread_root_post_id) AND p.deleted_at IS NULL
              ),
              -- 参加者（自分以外）が1人もいない、または全員がミュート/ブロック対象のスレッドは
              -- 一覧から除外する（ミュートは自分視点、ブロックは双方向＝seiranのブロック方針
@@ -242,19 +242,13 @@ impl DmRepository for PgDmRepository {
         until_id: Option<i64>,
         since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
-        sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_html,
-                    p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+        sqlx::query_as::<_, TimelinePost>(concat!(
+            "SELECT ",
+            crate::timeline_post_columns!(),
+            "
+             FROM posts p ",
+            crate::timeline_post_joins!(),
+            "
              WHERE p.thread_root_post_id = $1 AND p.deleted_at IS NULL
                AND ($4::bigint IS NULL OR p.id < $4)
                AND ($5::bigint IS NULL OR p.id > $5)
@@ -263,8 +257,8 @@ impl DmRepository for PgDmRepository {
                    SELECT 1 FROM dm_hidden_messages dh WHERE dh.actor_id = $2 AND dh.post_id = p.id
                )
              ORDER BY p.id ASC
-             LIMIT $3",
-        )
+             LIMIT $3"
+        ))
         .bind(thread_root_post_id)
         .bind(viewer_actor_id)
         .bind(limit)
@@ -337,11 +331,11 @@ impl DmRepository for PgDmRepository {
              peers AS (
                  SELECT p.thread_root_post_id, p.actor_id AS peer_id
                  FROM posts p
-                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM my_threads) AND p.deleted_at IS NULL
+                 WHERE EXISTS (SELECT 1 FROM my_threads mt WHERE mt.thread_root_post_id = p.thread_root_post_id) AND p.deleted_at IS NULL
                  UNION
                  SELECT p.thread_root_post_id, pr.actor_id AS peer_id
                  FROM posts p JOIN post_recipients pr ON pr.post_id = p.id
-                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM my_threads) AND p.deleted_at IS NULL
+                 WHERE EXISTS (SELECT 1 FROM my_threads mt WHERE mt.thread_root_post_id = p.thread_root_post_id) AND p.deleted_at IS NULL
              ),
              -- sessions() と同じ「全参加者がミュート/ブロック対象のスレッドは除外」ロジック
              -- （新着バッジにミュート/ブロック済み相手からのDMを反映させないため）。
@@ -363,7 +357,7 @@ impl DmRepository for PgDmRepository {
              SELECT COUNT(*) FROM (
                  SELECT DISTINCT p.thread_root_post_id
                  FROM posts p
-                 WHERE p.thread_root_post_id IN (SELECT thread_root_post_id FROM visible_threads)
+                 WHERE EXISTS (SELECT 1 FROM visible_threads vt WHERE vt.thread_root_post_id = p.thread_root_post_id)
                    AND p.deleted_at IS NULL
                    AND EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1)
                    AND p.id > COALESCE(

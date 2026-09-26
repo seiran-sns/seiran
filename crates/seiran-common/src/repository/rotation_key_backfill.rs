@@ -55,7 +55,7 @@ const CANDIDATE_WHERE: &str = "actor_type = 'local'
      AND at_did IS NOT NULL
      AND at_rotation_key_pem IS NULL
      AND withdrawn_at IS NULL
-     AND id NOT IN (SELECT actor_id FROM at_migration_requests WHERE actor_id IS NOT NULL)";
+     AND NOT EXISTS (SELECT 1 FROM at_migration_requests amr WHERE amr.actor_id = actors.id)";
 
 #[async_trait]
 impl RotationKeyBackfillRepository for PgRotationKeyBackfillRepository {

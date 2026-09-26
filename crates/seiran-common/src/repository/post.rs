@@ -44,7 +44,110 @@ impl ReferenceKind {
     }
 }
 
-/// タイムライン表示用のポスト + アクター結合行。
+/// `TimelinePost`の全列（`actor_suspended_at`を除く）を返すSELECT列リスト。posts を`p`、
+/// actors を`a`、アバター解決用の結合を`timeline_post_joins!()`の別名で参照する前提。
+/// `concat!`でSQLリテラルへ埋め込んで使う（`TimelinePost`を返す全クエリが必ずこれを使う）。
+///
+/// 以前は同じ列リストが20箇所超に手書きされ、`#[sqlx(default)]`が列の書き漏れを黙って
+/// 空値にしていたため、リストTL・ピン留め・検索結果でCW（`content_warning`）や可視性が
+/// 欠落する不具合が起きていた。列を追加するときはここだけを変更する。
+/// `actor_suspended_at`は参照埋め込み・単体取得でのみ必要なため（タイムライン項目で
+/// 返すとフロントが凍結ユーザーの投稿を伏せ字表示に切り替えてしまう）、必要なクエリが
+/// `, a.suspended_at AS actor_suspended_at`を個別に後置する。
+#[macro_export]
+macro_rules! timeline_post_columns {
+    () => {
+        "p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name, \
+         a.actor_type::text AS actor_type, \
+         p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id, \
+         COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url, \
+         p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map, \
+         p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, \
+         p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html, \
+         p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri, \
+         p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status, \
+         p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status, \
+         p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status, \
+         p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id, p.thread_root_post_id"
+    };
+}
+
+/// `timeline_post_columns!()`が参照する actors（`a`）とアバター解決用テーブル
+/// （`amf`/`asp`）の結合句。posts が`p`として既にFROM/JOINされている位置に置く。
+#[macro_export]
+macro_rules! timeline_post_joins {
+    () => {
+        "JOIN actors a ON a.id = p.actor_id \
+         LEFT JOIN media_files amf ON amf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id"
+    };
+}
+
+/// 引用・リポスト・返信先などの「参照埋め込み」用に、`ids`のうち`viewer_actor_id`から
+/// 可視なポストを一括取得する（`actor_suspended_at`込み、並び順は不定）。
+/// frontend API（`embed_renotes`/`embed_quotes`）とMisskey互換API（`fetch_referenced_notes`）の
+/// 共通実装。可視性判定は必ず`post_is_visible_to`を使う（以前は各呼び出し元が手書きの条件で
+/// `direct`を`followers_only`と同じ扱いにしており、宛先外のフォロワーへDM本文が漏れていた）。
+pub async fn find_visible_by_ids(
+    pool: &PgPool,
+    ids: &[i64],
+    viewer_actor_id: Option<i64>,
+) -> Result<Vec<TimelinePost>, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_as::<_, TimelinePost>(concat!(
+        "SELECT ",
+        crate::timeline_post_columns!(),
+        ", a.suspended_at AS actor_suspended_at
+         FROM posts p ",
+        crate::timeline_post_joins!(),
+        " WHERE p.id = ANY($1) AND p.deleted_at IS NULL
+           AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, false)"
+    ))
+    .bind(ids)
+    .bind(viewer_actor_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// リモート投稿の添付（実体を取り込まずURLだけ保持する）。`attach_remote_media_url`の入力。
+#[derive(Debug, Clone, Copy)]
+pub struct RemoteAttachment<'a> {
+    pub url: &'a str,
+    pub mime_type: Option<&'a str>,
+    pub thumbnail_url: Option<&'a str>,
+    pub is_sensitive: bool,
+    pub is_gif: bool,
+    /// 投稿内の並び順（`post_attachments.position`）。
+    pub position: i16,
+}
+
+/// `ids`のポストを論理削除済みも含めて一括取得する（可視性チェック無し）。取り消し済み
+/// リポストのラッパー投稿を指す通知の表示など、呼び出し元が別途アクセス制御を済ませている
+/// 場合のみ使うこと。
+pub async fn find_by_ids_including_deleted(
+    pool: &PgPool,
+    ids: &[i64],
+) -> Result<Vec<TimelinePost>, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_as::<_, TimelinePost>(concat!(
+        "SELECT ",
+        crate::timeline_post_columns!(),
+        " FROM posts p ",
+        crate::timeline_post_joins!(),
+        " WHERE p.id = ANY($1)"
+    ))
+    .bind(ids)
+    .fetch_all(pool)
+    .await
+}
+
+/// タイムライン表示用のポスト + アクター結合行。取得クエリは必ず`timeline_post_columns!()`を
+/// 使う（`#[sqlx(default)]`は`actor_suspended_at`以外に付けない。列の書き漏れを実行時エラーとして
+/// 検出するため）。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct TimelinePost {
     pub id: i64,
@@ -54,101 +157,69 @@ pub struct TimelinePost {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
-    // 7.2 拡張フィールド（古いクエリとの互換のため #[sqlx(default)] を付与）
-    #[sqlx(default)]
     pub actor_type: String,
-    #[sqlx(default)]
     pub repost_of_post_id: Option<i64>,
-    #[sqlx(default)]
     pub quote_of_post_id: Option<i64>,
-    #[sqlx(default)]
     pub reply_to_post_id: Option<i64>,
-    #[sqlx(default)]
     pub parent_original_post_id: Option<i64>,
     /// 投稿者アバター URL（local は avatar_media_id 解決、remote は actors.avatar_url）。
-    #[sqlx(default)]
     pub avatar_url: Option<String>,
     /// 投稿本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（Fedi受信、AP `tag` 配列由来）。
-    #[sqlx(default)]
     pub post_emoji_map: Option<serde_json::Value>,
     /// 投稿者アクターの表示名中のカスタム絵文字→画像URLマップ。
-    #[sqlx(default)]
     pub actor_emoji_map: Option<serde_json::Value>,
     /// 可視性（`public`/`unlisted`/`followers_only`/`direct`）。Fedi受信ポストは`to`/`cc`から
     /// 判定した値、ローカル投稿は常に`public`（可視性選択は将来課題）。
-    #[sqlx(default)]
     pub visibility: String,
     /// ローカル投稿が実際にFedi/Bskyへ配送されたか（投稿作成時の`deliver_to_fedi`/`deliver_to_bsky`
     /// を永続化したもの）。ローカル投稿以外では意味を持たない。
-    #[sqlx(default)]
     pub deliver_fedi: bool,
-    #[sqlx(default)]
     pub deliver_bsky: bool,
     /// Bsky メンションfacetの位置情報（`[{"byteStart":N,"byteEnd":M,"did":"did:plc:..."}]`）。
     /// `body` 自体は書き換えず、表示時（`to_note_response`）に都度 DID を解決して
     /// `@handle.domain` へ置換する（ハンドルは可変なため）。ローカル投稿・Fedi受信は常に空配列。
-    #[sqlx(default)]
     pub mention_facets: Option<serde_json::Value>,
     /// リモート投稿の AP Note ID（`posts.ap_object_id`）。「リモートで表示」リンク組み立て用
-    /// （ローカル投稿・Bsky受信投稿では `None`）。全クエリで取得しているわけではない。
-    #[sqlx(default)]
+    /// （ローカル投稿・Bsky受信投稿では `None`）。
     pub post_ap_object_id: Option<String>,
     /// リモート投稿の AT URI（`posts.at_uri`、`at://did/collection/rkey` 形式）。
     /// 「リモートで表示」リンク組み立て用（ローカル投稿・Fedi受信投稿では `None`）。
-    #[sqlx(default)]
     pub post_at_uri: Option<String>,
-    #[sqlx(default)]
     pub content_warning: Option<String>,
-    #[sqlx(default)]
     pub poll: Option<serde_json::Value>,
     /// このポストへの返信・引用・リポストの件数（`posts.reply_count`/`quote_count`/`repost_count`、
     /// トリガー `posts_apply_relation_counts` により INSERT/論理削除時に自動増減する非正規化カウンタ）。
-    #[sqlx(default)]
     pub reply_count: i64,
-    #[sqlx(default)]
     pub quote_count: i64,
-    #[sqlx(default)]
     pub repost_count: i64,
     /// サニタイズ済みHTML（seiran Web UIでのリッチ表示用、#233）。リモートFedi投稿のみ
     /// 設定。ローカル投稿・Bsky投稿・移行前の既存行は`None`（フロントは`body`の
     /// プレーンテキスト描画にフォールバックする）。
-    #[sqlx(default)]
     pub content_html: Option<String>,
     /// 参照が未解決の場合の生AP URIと状態（`"pending"`/`"gone"`、#230）。
-    /// 対応する`*_post_id`がSomeなら意味を持たない。現状は投稿詳細取得（`find_by_id`/
-    /// `find_by_id_for_viewer`）のみ取得する（他のタイムラインクエリでは常に`None`）。
-    #[sqlx(default)]
+    /// 対応する`*_post_id`がSomeなら意味を持たない。
     pub reply_to_ap_uri: Option<String>,
-    #[sqlx(default)]
     pub reply_to_ref_status: Option<String>,
-    #[sqlx(default)]
     pub quote_of_ap_uri: Option<String>,
-    #[sqlx(default)]
     pub quote_of_ref_status: Option<String>,
-    #[sqlx(default)]
     pub repost_of_ap_uri: Option<String>,
-    #[sqlx(default)]
     pub repost_of_ref_status: Option<String>,
-    /// 投稿者アクターの凍結日時。`embed_renotes`/`embed_quotes` が埋め込む参照先の
-    /// `NoteResponse.author_suspended` 判定用（#凍結リモート対応、フロントが引用・リポスト・
-    /// 返信先プレビューの本文を「凍結されたユーザーのポストです」に置き換える）。
-    /// 単体ノート取得（`find_by_id`/`find_by_id_for_viewer`）ではこの値をredaction判定に
-    /// 使わない（パーマリンク・スレッド遡りは常に実データを見せるため）。
+    /// 投稿者アクターの凍結日時。`timeline_post_columns!()`には含めず、必要なクエリ
+    /// （`find_visible_by_ids`・単体取得）だけが後置する。`NoteResponse.author_suspended`
+    /// の判定元（#凍結リモート対応）。伏せ字化（本文を「凍結されたユーザーのポストです」に
+    /// 置き換える）はフロントが「参照として表示する場合」にだけ行う: 引用カード・リポストに
+    /// 埋め込まれた元投稿・ポスト詳細画面で積み上げる返信先。ポスト詳細画面で直接開いた投稿
+    /// そのもの（`isMainSubject`）は伏せ字にしない。タイムライン項目はこの列を取得しないため
+    /// 伏せ字にならない。
     #[sqlx(default)]
     pub actor_suspended_at: Option<DateTime<Utc>>,
     /// brid.gyブリッジポスト対応（`crate::bridge_post`・`docs/protocols.md`参照）: この投稿
     /// 自身がブリッジポストの場合の解決済み元ポストid（「元ポストを表示」リンク組み立て用）。
-    /// `find_by_id_for_viewer`のみ取得する。
-    #[sqlx(default)]
     pub bridge_of_post_id: Option<i64>,
     /// この投稿（元ポスト）に対応するAP側/ATP側の解決済みブリッジポストid。
-    #[sqlx(default)]
     pub ap_bridge_post_id: Option<i64>,
-    #[sqlx(default)]
     pub atp_bridge_post_id: Option<i64>,
     /// `visibility='direct'`の場合のスレッド起点ポストID（DMメッセージスレッドURL組み立て用）。
-    /// `find_by_id_for_viewer`のみ取得する（他のクエリでは常に`None`）。
-    #[sqlx(default)]
     pub thread_root_post_id: Option<i64>,
 }
 
@@ -629,16 +700,10 @@ pub trait PostRepository: Send + Sync {
     /// サムネイル URL を持つケース向け（無ければ `None`）。
     /// `is_gif` は GIF アニメ由来（Tenor/Klipy、または `presentation:"gif"`）で、
     /// フロントが自動再生・ミュート・ループ・コントロール無し表示に切り替える。
-    #[allow(clippy::too_many_arguments)]
     async fn attach_remote_media_url(
         &self,
         post_id: i64,
-        url: &str,
-        mime_type: Option<&str>,
-        thumbnail_url: Option<&str>,
-        is_sensitive: bool,
-        is_gif: bool,
-        position: i16,
+        media: &RemoteAttachment<'_>,
     ) -> Result<(), sqlx::Error>;
 
     /// 指定アクターが `note_id` に対して行ったリポストの取り消しに必要な情報を取得する。
@@ -792,7 +857,7 @@ impl PostRepository for PgPostRepository {
         // 各アクター最大 limit 件だけ取ってからマージソートする形に書き換えると、
         // 既存インデックスのみで実測 1〜4ms まで改善する。
         sqlx::query_as::<_, TimelinePost>(
-            "WITH targets AS (
+            concat!("WITH targets AS (
                  SELECT $1::bigint AS actor_id
                  UNION
                  SELECT target_actor_id FROM follows
@@ -814,20 +879,11 @@ impl PostRepository for PgPostRepository {
                  ) p
                  ORDER BY p.id DESC LIMIT $4
              )
-             SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+             SELECT ", crate::timeline_post_columns!(), "
              FROM candidate_ids ci
              JOIN posts p ON p.id = ci.id
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-             ORDER BY p.id DESC",
+             ", crate::timeline_post_joins!(), "
+             ORDER BY p.id DESC"),
         )
         .bind(actor_id)
         .bind(until_id)
@@ -847,17 +903,8 @@ impl PostRepository for PgPostRepository {
         exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+            concat!("SELECT ", crate::timeline_post_columns!(), "
+             FROM posts p ", crate::timeline_post_joins!(), "
              WHERE p.is_local = true AND p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
@@ -865,7 +912,7 @@ impl PostRepository for PgPostRepository {
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND ($1::bigint IS NULL OR NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id)))
                AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
-             ORDER BY p.id DESC LIMIT $4",
+             ORDER BY p.id DESC LIMIT $4"),
         )
         .bind(viewer_actor_id)
         .bind(until_id)
@@ -888,7 +935,7 @@ impl PostRepository for PgPostRepository {
         // is_localインデックス使用）の候補IDをUNIONしてから外側で再度LIMITする。
         // 片方のみのLATERAL/インデックス最適化をそのまま活かせる（#78）。
         sqlx::query_as::<_, TimelinePost>(
-            "WITH targets AS (
+            concat!("WITH targets AS (
                  SELECT $1::bigint AS actor_id
                  UNION
                  SELECT target_actor_id FROM follows
@@ -926,20 +973,11 @@ impl PostRepository for PgPostRepository {
                      ORDER BY p.id DESC LIMIT $4
                  )
              )
-             SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+             SELECT ", crate::timeline_post_columns!(), "
              FROM candidate_ids ci
              JOIN posts p ON p.id = ci.id
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-             ORDER BY p.id DESC LIMIT $4",
+             ", crate::timeline_post_joins!(), "
+             ORDER BY p.id DESC LIMIT $4"),
         )
         .bind(actor_id)
         .bind(until_id)
@@ -960,17 +998,8 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         // local_timeline から `is_local = true` 条件のみを外したもの（#78）。
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+            concat!("SELECT ", crate::timeline_post_columns!(), "
+             FROM posts p ", crate::timeline_post_joins!(), "
              WHERE p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.id < $2)
                AND ($3::bigint IS NULL OR p.id > $3)
@@ -978,7 +1007,7 @@ impl PostRepository for PgPostRepository {
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND ($1::bigint IS NULL OR NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id)))
                AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
-             ORDER BY p.id DESC LIMIT $4",
+             ORDER BY p.id DESC LIMIT $4"),
         )
         .bind(viewer_actor_id)
         .bind(until_id)
@@ -1014,27 +1043,22 @@ impl PostRepository for PgPostRepository {
         since_id: Option<i64>,
         exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
-        sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+        sqlx::query_as::<_, TimelinePost>(concat!(
+            "SELECT ",
+            crate::timeline_post_columns!(),
+            "
              FROM posts p
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             ",
+            crate::timeline_post_joins!(),
+            "
              WHERE p.actor_id = $1 AND p.deleted_at IS NULL
                AND ($3::bigint IS NULL OR p.id < $3)
                AND ($4::bigint IS NULL OR p.id > $4)
                AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_is_hidden_for_viewer($2, $1))
                AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, $6)
              ORDER BY p.id DESC
-             LIMIT $5",
-        )
+             LIMIT $5"
+        ))
         .bind(actor_id)
         .bind(viewer_actor_id)
         .bind(until_id)
@@ -1054,18 +1078,9 @@ impl PostRepository for PgPostRepository {
         since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+            concat!("SELECT ", crate::timeline_post_columns!(), "
              FROM posts p
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             ", crate::timeline_post_joins!(), "
              WHERE p.deleted_at IS NULL
                AND p.actor_id != $1
                AND ($3::bigint IS NULL OR p.id < $3)
@@ -1080,7 +1095,7 @@ impl PostRepository for PgPostRepository {
                  ))
                )
              ORDER BY p.id DESC
-             LIMIT $5",
+             LIMIT $5"),
         )
         .bind(actor_id)
         .bind(specified_only)
@@ -1146,25 +1161,16 @@ impl PostRepository for PgPostRepository {
     }
 
     async fn find_by_id(&self, id: i64) -> Result<Option<TimelinePost>, sqlx::Error> {
-        sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status,
-                    a.suspended_at AS actor_suspended_at,
-                    p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id,
-                    p.thread_root_post_id
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+        sqlx::query_as::<_, TimelinePost>(concat!(
+            "SELECT ",
+            crate::timeline_post_columns!(),
+            ", a.suspended_at AS actor_suspended_at
+             FROM posts p ",
+            crate::timeline_post_joins!(),
+            "
              WHERE p.id = $1 AND p.deleted_at IS NULL
-             LIMIT 1",
-        )
+             LIMIT 1"
+        ))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
@@ -1174,41 +1180,31 @@ impl PostRepository for PgPostRepository {
         &self,
         id: i64,
     ) -> Result<Option<TimelinePost>, sqlx::Error> {
-        sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+        sqlx::query_as::<_, TimelinePost>(concat!(
+            "SELECT ",
+            crate::timeline_post_columns!(),
+            "
+             FROM posts p ",
+            crate::timeline_post_joins!(),
+            "
              WHERE p.id = $1
-             LIMIT 1",
-        )
+             LIMIT 1"
+        ))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
     }
 
     async fn find_by_ids(&self, ids: &[i64]) -> Result<Vec<TimelinePost>, sqlx::Error> {
-        sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-             WHERE p.id = ANY($1) AND p.deleted_at IS NULL",
-        )
+        sqlx::query_as::<_, TimelinePost>(concat!(
+            "SELECT ",
+            crate::timeline_post_columns!(),
+            "
+             FROM posts p ",
+            crate::timeline_post_joins!(),
+            "
+             WHERE p.id = ANY($1) AND p.deleted_at IS NULL"
+        ))
         .bind(ids)
         .fetch_all(&self.pool)
         .await
@@ -1219,26 +1215,17 @@ impl PostRepository for PgPostRepository {
         id: i64,
         viewer_actor_id: Option<i64>,
     ) -> Result<Option<TimelinePost>, sqlx::Error> {
-        sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status,
-                    a.suspended_at AS actor_suspended_at,
-                    p.bridge_of_post_id, p.ap_bridge_post_id, p.atp_bridge_post_id,
-                    p.thread_root_post_id
-             FROM posts p JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+        sqlx::query_as::<_, TimelinePost>(concat!(
+            "SELECT ",
+            crate::timeline_post_columns!(),
+            ", a.suspended_at AS actor_suspended_at
+             FROM posts p ",
+            crate::timeline_post_joins!(),
+            "
              WHERE p.id = $1 AND p.deleted_at IS NULL
                AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, false)
-             LIMIT 1",
-        )
+             LIMIT 1"
+        ))
         .bind(id)
         .bind(viewer_actor_id)
         .fetch_optional(&self.pool)
@@ -1281,23 +1268,14 @@ impl PostRepository for PgPostRepository {
         viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+            concat!("SELECT ", crate::timeline_post_columns!(), "
              FROM posts p
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             ", crate::timeline_post_joins!(), "
              WHERE p.actor_id = $1 AND p.id < $2 AND p.deleted_at IS NULL
                AND ($4::bigint IS NULL OR p.actor_id = $4 OR NOT actor_is_hidden_for_viewer($4, p.actor_id))
                AND post_is_visible_to($4, p.actor_id, p.visibility::text, p.id, false)
              ORDER BY p.id DESC
-             LIMIT $3",
+             LIMIT $3"),
         )
         .bind(actor_id)
         .bind(note_id)
@@ -1315,23 +1293,14 @@ impl PostRepository for PgPostRepository {
         viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+            concat!("SELECT ", crate::timeline_post_columns!(), "
              FROM posts p
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             ", crate::timeline_post_joins!(), "
              WHERE p.actor_id = $1 AND p.id > $2 AND p.deleted_at IS NULL
                AND ($4::bigint IS NULL OR p.actor_id = $4 OR NOT actor_is_hidden_for_viewer($4, p.actor_id))
                AND post_is_visible_to($4, p.actor_id, p.visibility::text, p.id, false)
              ORDER BY p.id ASC
-             LIMIT $3",
+             LIMIT $3"),
         )
         .bind(actor_id)
         .bind(note_id)
@@ -1348,7 +1317,7 @@ impl PostRepository for PgPostRepository {
         viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "WITH RECURSIVE descendants AS (
+            concat!("WITH RECURSIVE descendants AS (
                  SELECT p.id, 1 AS depth
                  FROM posts p
                  WHERE (p.reply_to_post_id = $1 OR p.quote_of_post_id = $1)
@@ -1363,21 +1332,12 @@ impl PostRepository for PgPostRepository {
                    AND ($3::bigint IS NULL OR p.actor_id = $3 OR NOT actor_is_hidden_for_viewer($3, p.actor_id))
                    AND post_is_visible_to($3, p.actor_id, p.visibility::text, p.id, false)
              )
-             SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets, p.content_warning, p.poll, p.reply_count, p.quote_count, p.repost_count, p.content_html,
-                    p.reply_to_ap_uri, p.reply_to_ref_status::text AS reply_to_ref_status,
-                    p.quote_of_ap_uri, p.quote_of_ref_status::text AS quote_of_ref_status,
-                    p.repost_of_ap_uri, p.repost_of_ref_status::text AS repost_of_ref_status
+             SELECT ", crate::timeline_post_columns!(), "
              FROM descendants d
              JOIN posts p ON p.id = d.id
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             ", crate::timeline_post_joins!(), "
              ORDER BY d.depth, p.id
-             LIMIT $2",
+             LIMIT $2"),
         )
         .bind(note_id)
         .bind(limit)
@@ -1593,13 +1553,16 @@ impl PostRepository for PgPostRepository {
     async fn attach_remote_media_url(
         &self,
         post_id: i64,
-        url: &str,
-        mime_type: Option<&str>,
-        thumbnail_url: Option<&str>,
-        is_sensitive: bool,
-        is_gif: bool,
-        position: i16,
+        media: &RemoteAttachment<'_>,
     ) -> Result<(), sqlx::Error> {
+        let RemoteAttachment {
+            url,
+            mime_type,
+            thumbnail_url,
+            is_sensitive,
+            is_gif,
+            position,
+        } = *media;
         sqlx::query(
             "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, remote_thumbnail_url, is_sensitive, is_gif, position)
              VALUES ($1, NULL, $2, $3, $4, $5, $6, $7)

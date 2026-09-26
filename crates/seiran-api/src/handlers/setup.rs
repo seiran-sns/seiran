@@ -5,7 +5,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use seiran_common::atp::signing_key_from_pem;
 use seiran_common::repository::ConfirmOutcome;
 use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 
@@ -118,73 +117,40 @@ pub async fn setup(
         ApiError::Internal("パスワード処理エラー".to_string())
     })?;
 
-    let domain_confirmed =
-        try_confirm_domain(&state, &headers, req.domain_candidate.as_deref()).await?;
-
-    // DID確定 → TXT セット → PLC送信（最大3回リトライ）。成功後に DB 書き込み
-    // （失敗時はロールバック不要、DB 未書き込みのため）。ドメイン未確定
-    // （シングルホストモード）ではPLC genesisを行わない。
-    let (at_did, at_signing_key_pem, at_rotation_key_pem, cf_record_id) = if domain_confirmed {
-        let rotation_key =
-            signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
-                tracing::error!("[setup] 回転鍵ロード失敗: {}", e);
-                ApiError::Internal("ATP鍵ロードエラー".to_string())
-            })?;
-        let (did, pem, rotation_pem, cf_id) = crate::handlers::plc_genesis::register_plc_did(
-            &state,
-            &req.username,
-            &rotation_key,
-            "setup",
-        )
-        .await?;
-        (Some(did), Some(pem), Some(rotation_pem), cf_id)
-    } else {
-        (None, None, None, None)
-    };
-
-    let user_id = state
-        .users
-        .insert(&req.email, &password_hash, "admin")
-        .await
-        .map_err(|e| {
-            tracing::error!("[setup] users INSERT 失敗: {}", e);
-            ApiError::Internal("ユーザー作成エラー".to_string())
-        })?;
+    // ドメインを確定できた場合のみ PLC genesis を行う（`provision_plc_did`は確定済みの
+    // `state.local_domain`を見る。`try_confirm_domain`は確定時にそれを更新する）。
+    try_confirm_domain(&state, &headers, req.domain_candidate.as_deref()).await?;
+    let did = crate::handlers::auth::provision_plc_did(&state, &req.username, "setup").await?;
 
     let actor_id = generate_snowflake_id(chrono::Utc::now());
-    state
-        .actors
-        .insert_local(
+    let user_id = seiran_common::repository::create_local_account(
+        &state.db,
+        &req.email,
+        &password_hash,
+        "admin",
+        &seiran_common::repository::NewLocalActor {
+            id: actor_id,
+            username: &req.username,
+            domain: &state.local_domain,
+            at_did: did.at_did.as_deref(),
+            at_signing_key_pem: did.at_signing_key_pem.as_deref(),
+            at_rotation_key_pem: did.at_rotation_key_pem.as_deref(),
+            birth_date: None,
+        },
+    )
+    .await
+    .map_err(|e| crate::handlers::auth::account_creation_error(e, "setup"))?;
+
+    if let Some(at_did) = did.at_did.as_deref() {
+        crate::handlers::auth::publish_initial_atp_records(
+            &state,
             actor_id,
-            user_id,
             &req.username,
-            &state.local_domain,
-            at_did.as_deref(),
-            at_signing_key_pem.as_deref(),
-            at_rotation_key_pem.as_deref(),
-            None,
+            at_did,
+            "setup",
         )
-        .await
-        .map_err(|e| {
-            tracing::error!("[setup] actors INSERT 失敗: {}", e);
-            ApiError::Internal("アクター作成エラー".to_string())
-        })?;
-
-    if at_did.is_some() {
-        let now = chrono::Utc::now();
-        if let Err(e) = state
-            .atp_service
-            .commit_profile(actor_id, &req.username, None, None, None, None, now)
-            .await
-        {
-            tracing::error!(
-                "[setup] ATP プロフィールコミット失敗（登録は完了済み）: {}",
-                e
-            );
-        }
+        .await;
     }
-
-    let _ = cf_record_id;
 
     let (token, _jti) = state
         .local_auth

@@ -121,9 +121,23 @@ fn replace_title(html: &str, title: &str) -> String {
 /// `state.frontend_origin` から SPA の index.html を取得する。フロントエンドがどのパスに
 /// 対しても同じ index.html を返す（SPA fallback）前提のため、常にルート `/` を取得する
 /// （`/notes`・`/@` に対する Vite の proxy 設定と衝突させないため）。
+/// `frontend_origin`は運用者が設定する内部ホスト（Docker の`frontend`等、private IP）のため、
+/// 内部IPを拒否する連合用の`state.http_client`（`seiran_common::net::federation_client_builder`）
+/// ではなく、この専用クライアントで取得する。
+fn internal_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("内部通信用HTTPクライアントの構築に失敗")
+    })
+}
+
 async fn fetch_spa_html(state: &AppState) -> Result<String, Response> {
-    let resp = state
-        .http_client
+    let resp = internal_http_client()
         .get(format!("{}/", state.frontend_origin))
         .send()
         .await

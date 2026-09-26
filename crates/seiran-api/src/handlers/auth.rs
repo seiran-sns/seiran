@@ -3,6 +3,7 @@ use axum::{
     http::HeaderMap,
     Json,
 };
+use seiran_common::repository::NewLocalActor;
 use serde::{Deserialize, Serialize};
 
 use seiran_common::atp::signing_key_from_pem;
@@ -62,7 +63,10 @@ pub(crate) async fn verify_turnstile(
     if let Some(remote_ip) = ip.0.as_deref() {
         form.push(("remoteip", remote_ip));
     }
-    let response = reqwest::Client::new()
+    // 公開エンドポイント固定のため連合用の共有クライアント（タイムアウト設定済み）を使う
+    // （`reqwest::Client::new()`はタイムアウト無しで、Cloudflare側の遅延で登録リクエストが滞留する）。
+    let response = state
+        .http_client
         .post("https://challenges.cloudflare.com/turnstile/v0/siteverify")
         .form(&form)
         .send()
@@ -162,14 +166,8 @@ pub struct LoginRequest {
     pub turnstile_token: Option<String>,
 }
 
-pub async fn register(
-    State(state): State<AppState>,
-    ip: ClientIp,
-    Json(req): Json<RegisterRequest>,
-) -> Result<Json<AuthResponse>, ApiError> {
-    rate_limit::check_ip_not_blocked(&state, &ip).await?;
-    rate_limit::check_account_creation_limit(&state, &ip).await?;
-    verify_turnstile(&state, req.turnstile_token.as_deref(), &ip).await?;
+/// 登録リクエストの形式検証（パスワード長・ユーザー名の書式・予約語）。
+fn validate_registration_input(req: &RegisterRequest) -> Result<(), ApiError> {
     if req.username.is_empty() || req.password.len() < 8 {
         return Err(ApiError::BadRequest("INVALID_INPUT".into()));
     }
@@ -182,186 +180,235 @@ pub async fn register(
     if seiran_common::is_reserved_username(&req.username) {
         return Err(ApiError::BadRequest("USERNAME_RESERVED".into()));
     }
+    Ok(())
+}
 
-    // メールアドレスを解決する:
-    // - registration_token が指定されている場合は email_verifications から取得
-    // - 省略されている場合は require_email_verification=false を確認して email フィールドを使用
-    let email: String = if let Some(token_str) = &req.registration_token {
-        let token_str = token_str.trim();
-        if token_str.is_empty() {
-            return Err(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()));
-        }
+/// 登録に使うメールアドレスを解決する:
+/// - registration_token が指定されている場合は email_verifications から取得（消費する）
+/// - 省略されている場合は require_email_verification=false を確認して email フィールドを使用
+async fn resolve_registration_email(
+    state: &AppState,
+    req: &RegisterRequest,
+) -> Result<String, ApiError> {
+    if let Some(token_str) = &req.registration_token {
         let token: uuid::Uuid = token_str
+            .trim()
             .parse()
             .map_err(|_| ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?;
-
-        state
+        return state
             .email_verifications
             .consume(token)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?
-            .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()))?
-    } else {
-        // トークンなし登録: require_email_verification が false であることを確認
-        let require_ev = state
-            .site_settings
-            .get("require_email_verification")
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?
-            .map(|v| v == "true")
-            .unwrap_or(false);
-        if require_ev {
-            return Err(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()));
-        }
-        req.email
-            .as_deref()
-            .filter(|e| !e.is_empty() && e.contains('@'))
-            .ok_or_else(|| ApiError::BadRequest("INVALID_INPUT".into()))?
-            .trim()
-            .to_lowercase()
-    };
-
-    let exists = state
-        .users
-        .email_exists(&email)
+            .ok_or(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()));
+    }
+    let require_ev = state
+        .site_settings
+        .get("require_email_verification")
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    if exists {
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .is_some_and(|v| v == "true");
+    if require_ev {
+        return Err(ApiError::BadRequest("REGISTRATION_TOKEN_INVALID".into()));
+    }
+    Ok(req
+        .email
+        .as_deref()
+        .filter(|e| !e.is_empty() && e.contains('@'))
+        .ok_or_else(|| ApiError::BadRequest("INVALID_INPUT".into()))?
+        .trim()
+        .to_lowercase())
+}
+
+/// メールアドレス・ユーザー名が未使用であることを確認する（利用者向けの早期エラー用。
+/// 同時登録の最終的な排他は`create_local_account`の一意制約が担う）。
+async fn ensure_account_available(
+    state: &AppState,
+    email: &str,
+    username: &str,
+) -> Result<(), ApiError> {
+    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
+    if state.users.email_exists(email).await.map_err(internal)? {
         return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
     }
-
-    let username_exists = state
+    if state
         .actors
-        .find_including_withdrawn_by_username_domain(&req.username, &state.local_domain)
+        .find_including_withdrawn_by_username_domain(username, &state.local_domain)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    if username_exists.is_some() {
+        .map_err(internal)?
+        .is_some()
+    {
         return Err(ApiError::Conflict("USERNAME_TAKEN"));
     }
+    Ok(())
+}
 
+fn parse_birthday(birthday: Option<&str>) -> Result<Option<chrono::NaiveDate>, ApiError> {
+    birthday
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map_err(|_| ApiError::BadRequest("BIRTHDAY_INVALID_FORMAT".into()))
+        })
+        .transpose()
+}
+
+/// 新規ローカルアカウントの ATP 識別情報（PLC genesis で確定した DID と鍵）。自ホスト
+/// ドメインが未確定（シングルホストモード）の間は PLC genesis を行わず全て`None`。
+#[derive(Default)]
+pub(crate) struct ProvisionedDid {
+    pub at_did: Option<String>,
+    pub at_signing_key_pem: Option<String>,
+    pub at_rotation_key_pem: Option<String>,
+}
+
+/// DID確定 → TXT セット → PLC送信（最大3回リトライ）。DB 書き込みはこれより後に行う
+/// （失敗時に孤立レコードが残らないようにするため）。TXT レコードは bsky.app がハンドル解決に
+/// 常時使用するため作成後もそのまま残す。`register`・`setup`共通。
+pub(crate) async fn provision_plc_did(
+    state: &AppState,
+    username: &str,
+    log_tag: &str,
+) -> Result<ProvisionedDid, ApiError> {
+    if !state.local_domain.is_confirmed() {
+        return Ok(ProvisionedDid::default());
+    }
+    let rotation_key =
+        signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
+            tracing::error!("[{}] 回転鍵ロード失敗: {}", log_tag, e);
+            ApiError::Internal("ATP鍵ロードエラー".to_string())
+        })?;
+    let (did, pem, rotation_pem, _cf_record_id) =
+        crate::handlers::plc_genesis::register_plc_did(state, username, &rotation_key, log_tag)
+            .await?;
+    Ok(ProvisionedDid {
+        at_did: Some(did),
+        at_signing_key_pem: Some(pem),
+        at_rotation_key_pem: Some(rotation_pem),
+    })
+}
+
+/// 新規ローカルアカウントの ATP リポジトリへ初期レコードをコミットし、`#identity` を送る。
+/// 失敗しても登録自体は完了済みのためログのみ（`register`・`setup`共通。以前は`setup`が
+/// プロフィールしかコミットしておらず、初期管理者だけ chat declaration・相互申告用の自己申告・
+/// `#identity` 送信が抜けていた）。
+pub(crate) async fn publish_initial_atp_records(
+    state: &AppState,
+    actor_id: i64,
+    username: &str,
+    at_did: &str,
+    log_tag: &str,
+) {
+    let now = chrono::Utc::now();
+    let atp = &state.atp_service;
+    if let Err(e) = atp
+        .commit_profile(
+            actor_id,
+            &seiran_common::atp::service::ProfileCommit::new(username),
+            now,
+        )
+        .await
+    {
+        tracing::error!(
+            "[{}] ATP プロフィールコミット失敗（登録は完了済み）: {}",
+            log_tag,
+            e
+        );
+    }
+    // Bsky公式クライアントからのDM受信を許可する設定（`docs/protocols.md` 9節）。
+    // 無いとBluesky公式クライアントが相手（このユーザー）へのDM送信を保守的にブロックする。
+    if let Err(e) = atp.commit_chat_declaration(actor_id, now).await {
+        tracing::error!(
+            "[{}] chat declaration コミット失敗（登録は完了済み）: {}",
+            log_tag,
+            e
+        );
+    }
+    // リモートseiranアクターの相互申告マージ用の自己申告（#236）。
+    let ap_actor_uri = format!("https://{}/users/{}", state.local_domain, username);
+    if let Err(e) = atp
+        .commit_seiran_actor_declaration(actor_id, &ap_actor_uri, now)
+        .await
+    {
+        tracing::error!(
+            "[{}] seiran actor declaration コミット失敗（登録は完了済み）: {}",
+            log_tag,
+            e
+        );
+    }
+    // #identity フレームを Relay に送信して AppView の handle キャッシュを更新させる。
+    // commit_profile より後に送信することで seq 順序が保たれる。
+    let handle = format!(
+        "{}.{}",
+        seiran_common::username::to_atp_username(username),
+        state.local_domain
+    );
+    if let Err(e) = atp
+        .broadcast_identity_event(actor_id, at_did, &handle, now)
+        .await
+    {
+        tracing::error!(
+            "[{}] #identity broadcast 失敗（登録は完了済み）: {}",
+            log_tag,
+            e
+        );
+    }
+}
+
+pub async fn register(
+    State(state): State<AppState>,
+    ip: ClientIp,
+    Json(req): Json<RegisterRequest>,
+) -> Result<Json<AuthResponse>, ApiError> {
+    rate_limit::check_ip_not_blocked(&state, &ip).await?;
+    // 作成数制限の枠は冒頭で予約し、登録が失敗したら取り消す（成功した登録だけを数える）。
+    let reservation = rate_limit::reserve_account_creation(&state, &ip).await?;
+    let result = register_account(&state, &ip, req).await;
+    if result.is_err() {
+        rate_limit::cancel_account_creation(&state, reservation).await;
+    }
+    result.map(Json)
+}
+
+async fn register_account(
+    state: &AppState,
+    ip: &ClientIp,
+    req: RegisterRequest,
+) -> Result<AuthResponse, ApiError> {
+    verify_turnstile(state, req.turnstile_token.as_deref(), ip).await?;
+    validate_registration_input(&req)?;
+    let email = resolve_registration_email(state, &req).await?;
+    ensure_account_available(state, &email, &req.username).await?;
     let password_hash = LocalAuthProvider::hash_password(&req.password).map_err(|e| {
         tracing::error!("[register] ハッシュ失敗: {}", e);
         ApiError::Internal("パスワード処理エラー".to_string())
     })?;
+    let birth_date = parse_birthday(req.birthday.as_deref())?;
+    let did = provision_plc_did(state, &req.username, "register").await?;
 
-    let birth_date = match req.birthday.as_deref().filter(|s| !s.is_empty()) {
-        Some(s) => Some(
-            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                .map_err(|_| ApiError::BadRequest("BIRTHDAY_INVALID_FORMAT".into()))?,
-        ),
-        None => None,
-    };
-
-    // DID確定 → TXT セット → PLC送信（最大3回リトライ）。DB 書き込みはここより後
-    // — 失敗時に孤立レコードが残らないようにするため。自ホストドメインが未確定
-    // （シングルホストモード）の間はPLC genesisを行わない（`state.local_domain`参照）。
-    let (at_did, at_signing_key_pem, at_rotation_key_pem, cf_record_id) =
-        if state.local_domain.is_confirmed() {
-            let rotation_key = signing_key_from_pem(&state.secrets.atproto_private_key_pem)
-                .map_err(|e| {
-                    tracing::error!("[register] 回転鍵ロード失敗: {}", e);
-                    ApiError::Internal("ATP鍵ロードエラー".to_string())
-                })?;
-            let (did, pem, rotation_pem, cf_id) = crate::handlers::plc_genesis::register_plc_did(
-                &state,
-                &req.username,
-                &rotation_key,
-                "register",
-            )
-            .await?;
-            (Some(did), Some(pem), Some(rotation_pem), cf_id)
-        } else {
-            (None, None, None, None)
-        };
-
-    // 4. DB 書き込み（PLC 送信成功後）
-    let user_id = state
-        .users
-        .insert(&email, &password_hash, "user")
-        .await
-        .map_err(|e| {
-            tracing::error!("[register] users INSERT 失敗: {}", e);
-            ApiError::Internal("ユーザー作成エラー".to_string())
-        })?;
-
+    // DB 書き込み（PLC 送信成功後）。users と actors は1トランザクションで作る。
     let actor_id = generate_snowflake_id(chrono::Utc::now());
-    state
-        .actors
-        .insert_local(
-            actor_id,
-            user_id,
-            &req.username,
-            &state.local_domain,
-            at_did.as_deref(),
-            at_signing_key_pem.as_deref(),
-            at_rotation_key_pem.as_deref(),
+    let user_id = seiran_common::repository::create_local_account(
+        &state.db,
+        &email,
+        &password_hash,
+        "user",
+        &NewLocalActor {
+            id: actor_id,
+            username: &req.username,
+            domain: &state.local_domain,
+            at_did: did.at_did.as_deref(),
+            at_signing_key_pem: did.at_signing_key_pem.as_deref(),
+            at_rotation_key_pem: did.at_rotation_key_pem.as_deref(),
             birth_date,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("[register] actors INSERT 失敗: {}", e);
-            ApiError::Internal("アクター作成エラー".to_string())
-        })?;
+        },
+    )
+    .await
+    .map_err(|e| account_creation_error(e, "register"))?;
 
-    let now = chrono::Utc::now();
-    if let Some(at_did) = at_did.as_deref() {
-        if let Err(e) = state
-            .atp_service
-            .commit_profile(actor_id, &req.username, None, None, None, None, now)
-            .await
-        {
-            tracing::error!(
-                "[register] ATP プロフィールコミット失敗（登録は完了済み）: {}",
-                e
-            );
-        }
-        // Bsky公式クライアントからのDM受信を許可する設定（`docs/protocols.md` 9節）。
-        // 無いとBluesky公式クライアントが相手（このユーザー）へのDM送信を保守的にブロックする。
-        if let Err(e) = state
-            .atp_service
-            .commit_chat_declaration(actor_id, now)
-            .await
-        {
-            tracing::error!(
-                "[register] chat declaration コミット失敗（登録は完了済み）: {}",
-                e
-            );
-        }
-
-        // リモートseiranアクターの相互申告マージ用の自己申告（#236）。
-        let ap_actor_uri = format!("https://{}/users/{}", state.local_domain, req.username);
-        if let Err(e) = state
-            .atp_service
-            .commit_seiran_actor_declaration(actor_id, &ap_actor_uri, now)
-            .await
-        {
-            tracing::error!(
-                "[register] seiran actor declaration コミット失敗（登録は完了済み）: {}",
-                e
-            );
-        }
-
-        // #identity フレームを Relay に送信して AppView の handle キャッシュを更新させる。
-        // commit_profile より後に送信することで seq 順序が保たれる。
-        let handle = format!(
-            "{}.{}",
-            seiran_common::username::to_atp_username(&req.username),
-            state.local_domain
-        );
-        if let Err(e) = state
-            .atp_service
-            .broadcast_identity_event(actor_id, at_did, &handle, now)
-            .await
-        {
-            tracing::error!(
-                "[register] #identity broadcast 失敗（登録は完了済み）: {}",
-                e
-            );
-        }
+    if let Some(at_did) = did.at_did.as_deref() {
+        publish_initial_atp_records(state, actor_id, &req.username, at_did, "register").await;
     }
-
-    // TXT レコードはそのまま残す（bsky.app はハンドル解決に常時使用するため）
-    let _ = cf_record_id;
 
     let (token, _jti) = state
         .local_auth
@@ -371,9 +418,7 @@ pub async fn register(
             ApiError::Internal("トークン生成エラー".to_string())
         })?;
 
-    rate_limit::record_account_creation(&state, &ip).await?;
-
-    Ok(Json(AuthResponse {
+    Ok(AuthResponse {
         token: token.clone(),
         user: UserInfo {
             id: user_id,
@@ -391,7 +436,21 @@ pub async fn register(
             migration_status: None, // 通常登録（転入経由ではない）
             did_moved_out: false,   // 登録直後はDID転出済みであり得ない
         },
-    }))
+    })
+}
+
+/// `create_local_account`の失敗を API エラーへ変換する（`register`・`setup`共通）。事前の
+/// 重複チェックをすり抜けた同時登録は一意制約違反として届くため、409 に変換する。
+pub(crate) fn account_creation_error(e: sqlx::Error, tag: &str) -> ApiError {
+    if let sqlx::Error::Database(db) = &e {
+        match db.constraint() {
+            Some("users_email_key") => return ApiError::Conflict("EMAIL_ALREADY_REGISTERED"),
+            Some("actors_ap_uri_key") => return ApiError::Conflict("USERNAME_TAKEN"),
+            _ => {}
+        }
+    }
+    tracing::error!("[{}] アカウント作成失敗: {}", tag, e);
+    ApiError::Internal("アカウント作成エラー".to_string())
 }
 
 /// ログイン成功後（パスワード検証・TOTP検証いずれも完了済み）の共通処理:

@@ -78,29 +78,32 @@ fn to_misskey_poll(poll: &serde_json::Value, voted_indexes: &[i32]) -> Option<Mi
     })
 }
 
-/// `is_local`は`actors.actor_type == "local"`（呼び出し元が`Actor`/`TimelinePost`等の
-/// `actor_type`から渡す）。`local_domain`はアバターURLのフォールバック組み立てにのみ使う。
-#[allow(clippy::too_many_arguments)]
-pub fn user_lite(
-    actor_id: i64,
-    username: &str,
-    domain: &str,
-    is_local: bool,
-    local_domain: &str,
-    display_name: Option<&str>,
-    avatar_url: Option<&str>,
-) -> MisskeyUserLite {
+/// `UserLite`の組み立てに使う、表示用アクター要約（`Actor`・`TimelinePost`・`ReactorInfo`等の
+/// 各行から必要な値だけを借りる）。
+pub struct ActorSummary<'a> {
+    pub id: i64,
+    pub username: &'a str,
+    pub domain: &'a str,
+    /// `actors.actor_type`（`"local"`ならローカル扱い）。
+    pub actor_type: &'a str,
+    pub display_name: Option<&'a str>,
+    pub avatar_url: Option<&'a str>,
+}
+
+/// `local_domain`はアバターURLのフォールバック組み立てにのみ使う。
+pub fn user_lite(actor: ActorSummary<'_>, local_domain: &str) -> MisskeyUserLite {
+    let is_local = actor.actor_type == "local";
     MisskeyUserLite {
-        id: actor_id.to_string(),
-        username: username.to_string(),
+        id: actor.id.to_string(),
+        username: actor.username.to_string(),
         host: if is_local {
             None
         } else {
-            Some(domain.to_string())
+            Some(actor.domain.to_string())
         },
-        name: display_name.map(|s| s.to_string()),
-        avatar_url: avatar_url.map(str::to_string).or_else(|| {
-            is_local.then(|| seiran_common::avatar::fallback_avatar_url(local_domain, actor_id))
+        name: actor.display_name.map(|s| s.to_string()),
+        avatar_url: actor.avatar_url.map(str::to_string).or_else(|| {
+            is_local.then(|| seiran_common::avatar::fallback_avatar_url(local_domain, actor.id))
         }),
         is_bot: false,
         is_cat: false,
@@ -143,13 +146,15 @@ pub async fn build_user_detailed(
         // 通常到達しない（アクター自身の行を渡しているため）。バッチクエリが
         // 何らかの理由で行を返さなかった場合のフォールバック。
         let mut lite = user_lite(
-            actor.id,
-            &actor.username,
-            &actor.domain,
-            actor.actor_type == "local",
+            ActorSummary {
+                id: actor.id,
+                username: &actor.username,
+                domain: &actor.domain,
+                actor_type: &actor.actor_type,
+                display_name: actor.display_name.as_deref(),
+                avatar_url: None,
+            },
             &state.local_domain,
-            actor.display_name.as_deref(),
-            None,
         );
         lite.emojis = to_misskey_emojis(None, actor.emoji_map.as_ref());
         let (uri, url) = remote_user_uri_url(
@@ -310,13 +315,15 @@ pub async fn build_users_detailed(
                     .unwrap_or_else(|| (chrono::Utc::now(), None, None, 0, 0, 0));
 
             let mut lite = user_lite(
-                actor.id,
-                &actor.username,
-                &actor.domain,
-                actor.actor_type == "local",
+                ActorSummary {
+                    id: actor.id,
+                    username: &actor.username,
+                    domain: &actor.domain,
+                    actor_type: &actor.actor_type,
+                    display_name: actor.display_name.as_deref(),
+                    avatar_url: avatar_url.as_deref(),
+                },
                 &state.local_domain,
-                actor.display_name.as_deref(),
-                avatar_url.as_deref(),
             );
             lite.emojis = to_misskey_emojis(None, actor.emoji_map.as_ref());
             let (uri, url) = remote_user_uri_url(
@@ -407,28 +414,77 @@ fn to_misskey_emojis(
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn to_misskey_note(
-    p: &TimelinePost,
-    local_domain: &str,
-    attachments: &[AttachmentResponse],
-    reactions: &[ReactionSummary],
-    renote_count: i64,
-    replies_count: i64,
-    instance_cache: &HashMap<String, RemoteInstanceMeta>,
-    voted_indexes: &[i32],
-) -> MisskeyNote {
+/// 複数ノートを Misskey 形式へ変換するのに必要な付帯情報（ノートID単位の一括取得結果）。
+#[derive(Default)]
+struct NoteMaterials {
+    attachments: HashMap<i64, Vec<AttachmentResponse>>,
+    reactions: HashMap<i64, Vec<ReactionSummary>>,
+    instance_cache: HashMap<String, RemoteInstanceMeta>,
+    /// 閲覧者が投票済みの選択肢index（post_id → indexes）。
+    poll_votes: HashMap<i64, Vec<i32>>,
+}
+
+impl NoteMaterials {
+    async fn fetch(state: &AppState, rows: &[TimelinePost], my_actor_id: Option<i64>) -> Self {
+        let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+        let (attachments, reactions, instance_cache, poll_votes) = tokio::join!(
+            fetch_attachments_map(&state.db, &ids),
+            fetch_reactions_map(&state.db, &ids, my_actor_id),
+            build_instance_cache(state, rows),
+            fetch_poll_votes_map(&state.db, &ids, my_actor_id),
+        );
+        Self {
+            attachments,
+            reactions,
+            instance_cache,
+            poll_votes,
+        }
+    }
+}
+
+/// `TimelinePost`群を Misskey 形式へ変換する（参照先の埋め込みは行わない）。
+/// `build_notes`・`fetch_referenced_notes`共通。
+async fn convert_rows(
+    state: &AppState,
+    mut rows: Vec<TimelinePost>,
+    my_actor_id: Option<i64>,
+) -> Vec<MisskeyNote> {
+    resolve_mention_facets_in_place(&state.db, &mut rows).await;
+    let materials = NoteMaterials::fetch(state, &rows, my_actor_id).await;
+    rows.iter()
+        .map(|p| to_misskey_note(p, &state.local_domain, &materials))
+        .collect()
+}
+
+fn to_misskey_note(p: &TimelinePost, local_domain: &str, materials: &NoteMaterials) -> MisskeyNote {
+    let attachments = materials
+        .attachments
+        .get(&p.id)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let reactions = materials
+        .reactions
+        .get(&p.id)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let voted_indexes = materials
+        .poll_votes
+        .get(&p.id)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
     let mut user = user_lite(
-        p.actor_id,
-        &p.username,
-        &p.domain,
-        p.actor_type == "local",
+        ActorSummary {
+            id: p.actor_id,
+            username: &p.username,
+            domain: &p.domain,
+            actor_type: &p.actor_type,
+            display_name: p.display_name.as_deref(),
+            avatar_url: p.avatar_url.as_deref(),
+        },
         local_domain,
-        p.display_name.as_deref(),
-        p.avatar_url.as_deref(),
     );
     user.emojis = to_misskey_emojis(None, p.actor_emoji_map.as_ref());
-    user.instance = build_instance_info(&p.actor_type, Some(&p.domain), instance_cache);
+    user.instance = build_instance_info(&p.actor_type, Some(&p.domain), &materials.instance_cache);
 
     let files: Vec<MisskeyDriveFile> = attachments
         .iter()
@@ -533,8 +589,8 @@ fn to_misskey_note(
         reaction_emojis,
         renote: None,
         reply: None,
-        renote_count,
-        replies_count,
+        renote_count: p.repost_count,
+        replies_count: p.reply_count,
         uri,
         url,
         my_reaction,
@@ -548,72 +604,20 @@ fn to_misskey_note(
 /// `renoteId`/`replyId` が指す先のノート本体をまとめて取得し、id → `MisskeyNote` のマップを
 /// 返す。`embed_referenced_notes` から、renote対象・reply対象の両方から集めたID集合を渡して
 /// 呼ぶことで、同じノートが両方の対象になるケースでもDB往復・変換を1回に抑える。
-/// `handlers::notes::queries::embed_renotes`（カスタムAPI側、#45で対応済み）と同じ可視性
-/// フィルタ・一括フェッチ方針を踏襲する。
+/// 可視性判定はカスタムAPI側（`handlers::notes::queries::embed_renotes`）と同じ
+/// `find_visible_posts_by_ids`（`post_is_visible_to`）を使う。
 pub(super) async fn fetch_referenced_notes(
     state: &AppState,
     ids: &[i64],
     my_actor_id: Option<i64>,
 ) -> HashMap<i64, MisskeyNote> {
-    if ids.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut rows = sqlx::query_as::<_, TimelinePost>(
-        "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
-                p.content_warning, p.poll,
-                p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                p.ap_object_id AS post_ap_object_id, p.at_uri AS post_at_uri,
-                p.reply_count, p.repost_count
-         FROM posts p JOIN actors a ON a.id = p.actor_id
-         LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-         LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-         WHERE p.id = ANY($1) AND p.deleted_at IS NULL
-           AND (
-               p.visibility NOT IN ('followers_only', 'direct')
-               OR p.actor_id = $2
-               OR EXISTS (
-                   SELECT 1 FROM follows f
-                   WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-               )
-           )",
-    )
-    .bind(ids)
-    .bind(my_actor_id)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-    resolve_mention_facets_in_place(&state.db, &mut rows).await;
-
-    let row_ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
-    let mut att_map = fetch_attachments_map(&state.db, &row_ids).await;
-    let rmap = fetch_reactions_map(&state.db, &row_ids, my_actor_id).await;
-    let instance_cache = build_instance_cache(state, &rows).await;
-    let poll_votes = fetch_poll_votes_map(&state.db, &row_ids, my_actor_id).await;
-
-    rows.into_iter()
-        .map(|r| {
-            let id = r.id;
-            let atts = att_map.remove(&id).unwrap_or_default();
-            let reactions = rmap.get(&id).cloned().unwrap_or_default();
-            let rc = r.repost_count;
-            let pc = r.reply_count;
-            let voted = poll_votes.get(&id).map(Vec::as_slice).unwrap_or(&[]);
-            let note = to_misskey_note(
-                &r,
-                &state.local_domain,
-                &atts,
-                &reactions,
-                rc,
-                pc,
-                &instance_cache,
-                voted,
-            );
-            (id, note)
-        })
+    let rows = seiran_common::repository::find_visible_posts_by_ids(&state.db, ids, my_actor_id)
+        .await
+        .unwrap_or_default();
+    convert_rows(state, rows, my_actor_id)
+        .await
+        .into_iter()
+        .filter_map(|n| n.id.parse::<i64>().ok().map(|id| (id, n)))
         .collect()
 }
 
@@ -685,38 +689,10 @@ async fn embed_referenced_notes(
 /// タイムライン等、複数ノートをまとめて Misskey 形式へ変換する。
 pub async fn build_notes(
     state: &AppState,
-    mut rows: Vec<TimelinePost>,
+    rows: Vec<TimelinePost>,
     my_actor_id: Option<i64>,
 ) -> Vec<MisskeyNote> {
-    resolve_mention_facets_in_place(&state.db, &mut rows).await;
-    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
-    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
-    let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
-    let instance_cache = build_instance_cache(state, &rows).await;
-    let poll_votes = fetch_poll_votes_map(&state.db, &ids, my_actor_id).await;
-
-    let mut notes: Vec<MisskeyNote> = rows
-        .into_iter()
-        .map(|p| {
-            let id = p.id;
-            let atts = att_map.remove(&id).unwrap_or_default();
-            let reactions = rmap.get(&id).cloned().unwrap_or_default();
-            let rc = p.repost_count;
-            let pc = p.reply_count;
-            let voted = poll_votes.get(&id).map(Vec::as_slice).unwrap_or(&[]);
-            to_misskey_note(
-                &p,
-                &state.local_domain,
-                &atts,
-                &reactions,
-                rc,
-                pc,
-                &instance_cache,
-                voted,
-            )
-        })
-        .collect();
-
+    let mut notes = convert_rows(state, rows, my_actor_id).await;
     embed_referenced_notes(state, &mut notes, my_actor_id).await;
     notes
 }
@@ -796,13 +772,15 @@ pub async fn build_notifications(
         .map(
             |(id, username, domain, actor_type, display_name, avatar_url, emoji_map)| {
                 let mut lite = user_lite(
-                    id,
-                    &username,
-                    &domain,
-                    actor_type == "local",
+                    ActorSummary {
+                        id,
+                        username: &username,
+                        domain: &domain,
+                        actor_type: &actor_type,
+                        display_name: display_name.as_deref(),
+                        avatar_url: avatar_url.as_deref(),
+                    },
                     &state.local_domain,
-                    display_name.as_deref(),
-                    avatar_url.as_deref(),
                 );
                 lite.emojis = to_misskey_emojis(None, emoji_map.as_ref());
                 (id, lite)
@@ -825,27 +803,31 @@ pub async fn build_notifications(
         .filter_map(|r| r.note_id)
         .collect();
 
-    // note_id は重複がありうる（同じ投稿への複数リアクション等）ため、一意な ID ごとに1回だけ取得する。
-    let note_ids: HashSet<i64> = rows.iter().filter_map(|r| r.note_id).collect();
-    let mut notes: HashMap<i64, MisskeyNote> = HashMap::new();
-    for note_id in note_ids {
-        let post = if repost_wrapper_ids.contains(&note_id) {
-            // リポストが取り消し済み（ラッパー投稿が論理削除済み）でも、その通知自体は
-            // 残り続けるため、`find_by_id`（削除済み除外）ではなくこちらを使う。
-            state.posts.find_by_id_including_deleted(note_id).await
-        } else {
-            state
-                .posts
-                .find_by_id_for_viewer(note_id, Some(recipient_actor_id))
-                .await
-        };
-        if let Ok(Some(post)) = post {
-            notes.insert(
-                note_id,
-                build_note(state, post, Some(recipient_actor_id)).await,
-            );
-        }
-    }
+    // note_id は重複がありうる（同じ投稿への複数リアクション等）ため、一意な ID ごとに1回だけ、
+    // 全件まとめて取得・変換する（以前はノート1件ごとに取得・変換しており、limit=100 で
+    // 最大約1,000クエリになっていた）。リポストが取り消し済み（ラッパー投稿が論理削除済み）
+    // でもその通知自体は残り続けるため、ラッパーは削除済みも含めて取得する。
+    let (wrapper_ids, regular_ids): (Vec<i64>, Vec<i64>) = rows
+        .iter()
+        .filter_map(|r| r.note_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .partition(|id| repost_wrapper_ids.contains(id));
+    let (wrappers, regular) = tokio::join!(
+        seiran_common::repository::find_posts_by_ids_including_deleted(&state.db, &wrapper_ids),
+        seiran_common::repository::find_visible_posts_by_ids(
+            &state.db,
+            &regular_ids,
+            Some(recipient_actor_id)
+        ),
+    );
+    let mut posts = wrappers.unwrap_or_default();
+    posts.extend(regular.unwrap_or_default());
+    let notes: HashMap<i64, MisskeyNote> = build_notes(state, posts, Some(recipient_actor_id))
+        .await
+        .into_iter()
+        .filter_map(|n| n.id.parse::<i64>().ok().map(|id| (id, n)))
+        .collect();
 
     rows.into_iter()
         .map(|r| {
@@ -940,23 +922,14 @@ mod tests {
         let mut p = base_post();
         p.content_warning = Some("注意".to_string());
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &NoteMaterials::default());
 
         assert_eq!(note.cw.as_deref(), Some("注意"));
     }
 
     #[test]
     fn note_cw_is_none_without_content_warning() {
-        let note = to_misskey_note(
-            &base_post(),
-            LOCAL_DOMAIN,
-            &[],
-            &[],
-            0,
-            0,
-            &HashMap::new(),
-            &[],
-        );
+        let note = to_misskey_note(&base_post(), LOCAL_DOMAIN, &NoteMaterials::default());
 
         assert_eq!(note.cw, None);
     }
@@ -982,12 +955,10 @@ mod tests {
         let note = to_misskey_note(
             &p,
             LOCAL_DOMAIN,
-            &[attachment],
-            &[],
-            0,
-            0,
-            &HashMap::new(),
-            &[],
+            &NoteMaterials {
+                attachments: HashMap::from([(p.id, vec![attachment])]),
+                ..NoteMaterials::default()
+            },
         );
 
         assert_eq!(note.files.len(), 1);
@@ -1002,7 +973,7 @@ mod tests {
             ":blob_cat:": "https://example.com/blob-cat.png"
         }));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &NoteMaterials::default());
 
         assert_eq!(
             note.emojis.get("blob_cat").map(String::as_str),
@@ -1019,7 +990,7 @@ mod tests {
             ":mozu_police:": "https://remote.example/mozu-police.png"
         }));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &NoteMaterials::default());
 
         assert_eq!(
             note.emojis.get("mozu_police").map(String::as_str),
@@ -1036,7 +1007,7 @@ mod tests {
         let mut p = base_post();
         p.post_ap_object_id = Some(format!("https://{}/notes/{}", LOCAL_DOMAIN, p.id));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &NoteMaterials::default());
 
         assert_eq!(note.uri, None);
         assert_eq!(note.url, None);
@@ -1050,7 +1021,7 @@ mod tests {
         p.actor_type = "fedi".to_string();
         p.post_ap_object_id = Some("https://remote.example/notes/xyz".to_string());
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &NoteMaterials::default());
 
         assert_eq!(
             note.uri.as_deref(),
@@ -1070,7 +1041,7 @@ mod tests {
         p.actor_type = "bsky".to_string();
         p.post_at_uri = Some("at://did:plc:abc123/app.bsky.feed.post/xyz".to_string());
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[]);
+        let note = to_misskey_note(&p, LOCAL_DOMAIN, &NoteMaterials::default());
 
         assert_eq!(note.uri, None);
         assert_eq!(
@@ -1122,7 +1093,14 @@ mod tests {
             "endTime": "2026-09-10T00:00:00+00:00",
         }));
 
-        let note = to_misskey_note(&p, LOCAL_DOMAIN, &[], &[], 0, 0, &HashMap::new(), &[0]);
+        let note = to_misskey_note(
+            &p,
+            LOCAL_DOMAIN,
+            &NoteMaterials {
+                poll_votes: HashMap::from([(p.id, vec![0])]),
+                ..NoteMaterials::default()
+            },
+        );
 
         let poll = note.poll.expect("poll must be Some when posts.poll is set");
         assert!(!poll.multiple);
@@ -1140,16 +1118,7 @@ mod tests {
 
     #[test]
     fn note_poll_is_none_without_posts_poll() {
-        let note = to_misskey_note(
-            &base_post(),
-            LOCAL_DOMAIN,
-            &[],
-            &[],
-            0,
-            0,
-            &HashMap::new(),
-            &[],
-        );
+        let note = to_misskey_note(&base_post(), LOCAL_DOMAIN, &NoteMaterials::default());
         assert!(note.poll.is_none());
     }
 

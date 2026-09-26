@@ -9,7 +9,6 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 use url::Url;
 
 use seiran_common::repository::{Relay, RelayError};
@@ -60,33 +59,6 @@ fn relay_err(e: RelayError) -> ApiError {
     }
 }
 
-/// `inbox_url` が HTTPS かつ userinfo（`user:pass@host`）を含まないことを検証する。
-fn is_public_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => {
-            !(ip.is_private()
-                || ip.is_loopback()
-                || ip.is_link_local()
-                || ip.is_multicast()
-                || ip.is_broadcast()
-                || ip.is_unspecified()
-                || ip.octets()[0] == 0
-                || ip.octets()[0] >= 240
-                || (ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1])))
-        }
-        IpAddr::V6(ip) => {
-            if let Some(mapped) = ip.to_ipv4_mapped() {
-                return is_public_ip(IpAddr::V4(mapped));
-            }
-            !(ip.is_loopback()
-                || ip.is_unspecified()
-                || ip.is_multicast()
-                || (ip.segments()[0] & 0xfe00) == 0xfc00
-                || (ip.segments()[0] & 0xffc0) == 0xfe80)
-        }
-    }
-}
-
 /// HTTPS・userinfo無しに加え、登録時のDNS解決結果が公開IPだけであることを検証する。
 async fn validate_inbox_url(raw: &str) -> Result<(), ApiError> {
     let url = Url::parse(raw).map_err(|_| ApiError::BadRequest("INVALID_INBOX_URL".into()))?;
@@ -107,7 +79,10 @@ async fn validate_inbox_url(raw: &str) -> Result<(), ApiError> {
     if addresses.is_empty() {
         return Err(ApiError::BadRequest("INBOX_DNS_FAILED".into()));
     }
-    if addresses.iter().any(|address| !is_public_ip(address.ip())) {
+    if addresses
+        .iter()
+        .any(|address| !seiran_common::net::is_public_ip(address.ip()))
+    {
         return Err(ApiError::BadRequest("INBOX_PRIVATE_ADDRESS".into()));
     }
     Ok(())

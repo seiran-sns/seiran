@@ -42,11 +42,13 @@ pub(super) async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
         .atp_service
         .commit_profile(
             actor_id,
-            &display_name,
-            bio.as_deref(),
-            avatar_media,
-            banner_media,
-            pinned_post,
+            &seiran_common::atp::service::ProfileCommit {
+                display_name: &display_name,
+                description: bio.as_deref(),
+                avatar_media,
+                banner_media,
+                pinned_post,
+            },
             chrono::Utc::now(),
         )
         .await

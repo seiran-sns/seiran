@@ -234,13 +234,15 @@ async fn process_locked(
     atp_service
         .commit_post(
             actor_id,
-            post_id,
-            &bsky_text,
-            bsky_facets,
-            Some(embed),
+            crate::atp::service::PostCommit {
+                post_id,
+                text: &bsky_text,
+                facets: bsky_facets,
+                embed: Some(embed),
+                reply: bsky_reply,
+                lang: language,
+            },
             now,
-            bsky_reply,
-            language,
         )
         .await
         .map_err(|e| format!("ATP コミット失敗: {}", e))?;

@@ -8,7 +8,7 @@
 
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
@@ -62,17 +62,17 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use seiran_common::repository::Actor;
+use seiran_common::repository::{Actor, FollowListRow, Page};
 
 use crate::error::ApiError;
-use crate::handlers::follows::{CreateFollowRequest, DeleteFollowRequest};
+use crate::handlers::follows::FollowTargetRequest;
 use crate::handlers::notes::ReactRequest;
-use crate::middleware::{extract_auth, AuthedUser};
+use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
 
 use super::convert::{
     build_me_detailed, build_note, build_notes, build_notifications, build_user_detailed,
-    build_users_detailed, user_lite,
+    build_users_detailed, user_lite, ActorSummary,
 };
 use super::types::{
     MisskeyFollowRelation, MisskeyMeDetailed, MisskeyNote, MisskeyNoteReaction,
@@ -82,135 +82,54 @@ use super::types::{
 
 // ─── リクエストDTO（Misskey 本家の camelCase フィールド名に合わせる） ──────────
 
+/// Misskey 共通のカーソル指定（`limit`/`sinceId`/`untilId`）。各リクエストボディに
+/// `#[serde(flatten)]`で埋め込み、`page`で`Page`へ正規化する（以前はハンドラごとに
+/// 同じ解析を手書きしており、`limit`の下限処理が`min(100)`と`clamp(1, 100)`で不揃いだった）。
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineBody {
+pub struct CursorParams {
     pub limit: Option<i64>,
     pub since_id: Option<String>,
     pub until_id: Option<String>,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotesMentionsBody {
-    pub visibility: Option<String>,
-    pub limit: Option<i64>,
-    pub since_id: Option<String>,
-    pub until_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotesSearchBody {
-    pub query: String,
-    pub limit: Option<i64>,
-    pub until_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotesSearchByTagBody {
-    pub tag: String,
-    pub limit: Option<i64>,
-    pub since_id: Option<String>,
-    pub until_id: Option<String>,
-}
-
-/// POST /api/notes/search-by-tag（Misskey互換、Ariaのハッシュタグ画面）。
-pub async fn notes_search_by_tag(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-    Json(body): Json<NotesSearchByTagBody>,
-) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let tag = body.tag.trim().trim_start_matches('#').to_lowercase();
-    if tag.is_empty() {
-        return Ok(Json(Vec::new()));
-    }
-
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let limit = body.limit.unwrap_or(30).clamp(1, 100);
-    let until_id = body.until_id.as_deref().and_then(|id| id.parse().ok());
-    let since_id = body.since_id.as_deref().and_then(|id| id.parse().ok());
-    let rows = state
-        .hashtags
-        .timeline(&tag, limit, until_id, since_id, my_actor_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    Ok(Json(build_notes(&state, rows, my_actor_id).await))
-}
-
-/// POST /api/notes/search（Misskey互換、Aria等）
-pub async fn notes_search(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-    Json(body): Json<NotesSearchBody>,
-) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let query = body.query.trim();
-    if query.is_empty() {
-        return Ok(Json(Vec::new()));
-    }
-    let limit = body.limit.unwrap_or(30).clamp(1, 100);
-    let until_id = body.until_id.as_deref().and_then(|id| id.parse().ok());
-    let viewer_name = if let Some(actor_id) = my_actor_id {
-        state
-            .actors
-            .find_by_id(actor_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|actor| actor.username)
-    } else {
-        None
-    };
-    let until = if let Some(id) = until_id {
-        sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
-            "SELECT created_at FROM posts WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-    } else {
-        None
-    };
-    let (local_ids, (appview_posts, _)) = tokio::join!(
-        crate::handlers::search::search_local_db(
-            &state.db,
-            query,
-            limit,
-            until_id,
-            None,
-            my_actor_id.zip(viewer_name.as_deref()),
-        ),
-        seiran_common::atp::search_appview_posts(
-            &state.http_client,
-            query,
-            None,
-            limit as usize,
-            until,
-        ),
-    );
-    let mut ids = local_ids;
-    ids.append(&mut crate::handlers::search::persist_appview_posts(&state, appview_posts).await);
-    ids.sort_unstable_by(|a, b| b.cmp(a));
-    ids.dedup();
-    ids.truncate(limit as usize);
-
-    let mut rows = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(post) = state
-            .posts
-            .find_by_id_for_viewer(id, my_actor_id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?
-        {
-            rows.push(post);
+impl CursorParams {
+    /// `limit`は1〜100に丸め、未指定なら`default_limit`。数値として解釈できないIDは無視する。
+    fn page(&self, default_limit: i64) -> Page {
+        let parse = |id: &Option<String>| id.as_deref().and_then(|s| s.parse::<i64>().ok());
+        Page {
+            limit: self.limit.unwrap_or(default_limit).clamp(1, 100),
+            until_id: parse(&self.until_id),
+            since_id: parse(&self.since_id),
         }
     }
-    Ok(Json(build_notes(&state, rows, my_actor_id).await))
+}
+
+#[derive(Deserialize, Default)]
+pub struct TimelineBody {
+    #[serde(flatten)]
+    pub cursor: CursorParams,
+}
+
+#[derive(Deserialize)]
+pub struct NotesMentionsBody {
+    pub visibility: Option<String>,
+    #[serde(flatten)]
+    pub cursor: CursorParams,
+}
+
+#[derive(Deserialize)]
+pub struct NotesSearchBody {
+    pub query: String,
+    #[serde(flatten)]
+    pub cursor: CursorParams,
+}
+
+#[derive(Deserialize)]
+pub struct NotesSearchByTagBody {
+    pub tag: String,
+    #[serde(flatten)]
+    pub cursor: CursorParams,
 }
 
 #[derive(Deserialize)]
@@ -248,29 +167,20 @@ pub enum UsersShowResponse {
     Many(Vec<MisskeyUserDetailed>),
 }
 
+/// `POST /api/users/notes`・`users/reactions`・`users/following`・`users/followers` 共通の
+/// リクエストボディ（#81）。
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UsersNotesBody {
+pub struct UserCursorBody {
     pub user_id: String,
-    pub limit: Option<i64>,
-    pub since_id: Option<String>,
-    pub until_id: Option<String>,
+    #[serde(flatten)]
+    pub cursor: CursorParams,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FollowingBody {
     pub user_id: String,
-}
-
-/// `POST /api/users/following`・`POST /api/users/followers` 共通のリクエストボディ（#81）。
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UserRelationBody {
-    pub user_id: String,
-    pub limit: Option<i64>,
-    pub since_id: Option<String>,
-    pub until_id: Option<String>,
 }
 
 /// `POST /api/notes/reactions` のリクエストボディ（#81）。
@@ -294,9 +204,8 @@ fn default_true() -> bool {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationsBody {
-    pub limit: Option<i64>,
-    pub since_id: Option<String>,
-    pub until_id: Option<String>,
+    #[serde(flatten)]
+    pub cursor: CursorParams,
     #[serde(default = "default_true")]
     pub mark_as_read: bool,
     pub include_types: Option<Vec<String>>,
@@ -305,45 +214,14 @@ pub struct NotificationsBody {
 
 // ─── 共通ヘルパー ───────────────────────────────────────────────────────
 
-/// ログイン済みなら actor_id を返し、未ログインなら `None`（読み取り系は匿名許可のため）。
-async fn optional_actor_id(headers: &HeaderMap, state: &AppState) -> Option<i64> {
-    let auth_user = extract_auth(
-        headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await
-    .ok()?;
-    state
-        .actors
-        .find_local_by_user_id(auth_user.user_id)
-        .await
-        .ok()
-        .flatten()
-        .map(|a| a.id)
+fn internal(e: impl std::fmt::Display) -> ApiError {
+    ApiError::Internal(e.to_string())
 }
 
-/// Misskey の `userId`（=seiran の actors.id）から、既存の follows.rs が期待する
-/// 人間可読ターゲット文字列（ローカルusername / DID / AP URI）を逆算する。
-async fn actor_id_to_target(state: &AppState, actor_id: i64) -> Result<String, ApiError> {
-    let actor = state
-        .actors
-        .find_by_id(actor_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
-
-    let target = if actor.actor_type == "local" {
-        actor.username.clone()
-    } else if let Some(did) = &actor.at_did {
-        did.clone()
-    } else if let Some(uri) = &actor.ap_uri {
-        uri.clone()
-    } else {
-        format!("{}@{}", actor.username, actor.domain)
-    };
-    Ok(target)
+/// Misskey の `userId`/`noteId`/`listId`（文字列）を数値IDへ変換する。解釈できなければ
+/// `not_found`（本家Misskeyは存在しないIDと同じエラーを返す）。
+fn parse_id(id: &str, not_found: &'static str) -> Result<i64, ApiError> {
+    id.parse().map_err(|_| ApiError::NotFound(not_found))
 }
 
 /// 既存ハンドラの成功レスポンスを Misskey 流の `204 No Content` に整形する。
@@ -356,46 +234,43 @@ fn as_no_content(resp: Response) -> Response {
     }
 }
 
+/// リモートアクターのプロフィール（avatar_url/banner_url等）再取得。カスタムAPI
+/// （handlers::users::user_profile）と同じ「表示時再検証」パターン。
+async fn refresh_if_remote(state: &AppState, actor: &Actor) {
+    if actor.actor_type != "local" {
+        state.enqueue_remote_profile_refresh(actor.id).await;
+    }
+}
+
 // ─── 自分自身・ユーザー ─────────────────────────────────────────────────
 
 /// POST /api/i
 pub async fn api_i(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
 ) -> Result<Json<MisskeyMeDetailed>, ApiError> {
-    let auth_user = extract_auth(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
     let actor = state
         .actors
-        .find_local_by_user_id(auth_user.user_id)
+        .find_by_id(user.actor_id)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map_err(internal)?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     Ok(Json(build_me_detailed(&state, &actor).await))
 }
 
 /// POST /api/users/show
 pub async fn users_show(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
     Json(body): Json<UserShowBody>,
 ) -> Result<Json<UsersShowResponse>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
+    let my_actor_id = me.map(|u| u.actor_id);
 
     if let Some(uids) = body.user_ids {
         let ids: Vec<i64> = uids.iter().filter_map(|s| s.parse::<i64>().ok()).collect();
-        let actors = state
-            .actors
-            .find_by_ids(&ids)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-        for actor in actors.iter().filter(|a| a.actor_type != "local") {
-            state.enqueue_remote_profile_refresh(actor.id).await;
+        let actors = state.actors.find_by_ids(&ids).await.map_err(internal)?;
+        for actor in &actors {
+            refresh_if_remote(&state, actor).await;
         }
         let mut detailed_by_id = build_users_detailed(&state, &actors, my_actor_id).await;
         // 呼び出し側が渡した順序を保つ（見つからなかったIDは結果から除外、本家Misskey準拠）。
@@ -407,9 +282,7 @@ pub async fn users_show(
     }
 
     let actor = if let Some(uid) = body.user_id {
-        let id: i64 = uid
-            .parse()
-            .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+        let id = parse_id(&uid, "USER_NOT_FOUND")?;
         state.actors.find_by_id(id).await
     } else if let Some(username) = body.username {
         let domain = body.host.unwrap_or_else(|| state.local_domain.to_string());
@@ -422,15 +295,10 @@ pub async fn users_show(
             "USER_ID_OR_USERNAME_REQUIRED".to_owned(),
         ));
     }
-    .map_err(|e| ApiError::Internal(e.to_string()))?
+    .map_err(internal)?
     .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
 
-    // リモートアクターのプロフィール（avatar_url/banner_url等）再取得。カスタムAPI
-    // （handlers::users::user_profile）と同じ「表示時再検証」パターン。
-    if actor.actor_type != "local" {
-        state.enqueue_remote_profile_refresh(actor.id).await;
-    }
-
+    refresh_if_remote(&state, &actor).await;
     Ok(Json(UsersShowResponse::Single(Box::new(
         build_user_detailed(&state, &actor, my_actor_id).await,
     ))))
@@ -441,24 +309,25 @@ pub async fn users_show(
 /// `timeline_by_actor` を使うが、`exclude_direct=true` はカスタムAPI側の
 /// `build_profile_response` 初回取得と同じ扱い（DMをプロフィール投稿一覧に含めない）。
 pub async fn users_notes(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
-    Json(body): Json<UsersNotesBody>,
+    Json(body): Json<UserCursorBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let actor_id: i64 = body
-        .user_id
-        .parse()
-        .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
-    let limit = body.limit.unwrap_or(10).clamp(1, 100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
-
+    let my_actor_id = me.map(|u| u.actor_id);
+    let actor_id = parse_id(&body.user_id, "USER_NOT_FOUND")?;
+    let page = body.cursor.page(10);
     let rows = state
         .posts
-        .timeline_by_actor(actor_id, my_actor_id, limit, until_id, since_id, true)
+        .timeline_by_actor(
+            actor_id,
+            my_actor_id,
+            page.limit,
+            page.until_id,
+            page.since_id,
+            true,
+        )
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(internal)?;
     Ok(Json(build_notes(&state, rows, my_actor_id).await))
 }
 
@@ -466,26 +335,22 @@ pub async fn users_notes(
 
 /// POST /api/notes/show
 pub async fn notes_show(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
     Json(body): Json<NoteIdBody>,
 ) -> Result<Json<MisskeyNote>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let post_id: i64 = body
-        .note_id
-        .parse()
-        .map_err(|_| ApiError::NotFound("NOTE_NOT_FOUND"))?;
+    let my_actor_id = me.map(|u| u.actor_id);
+    let post_id = parse_id(&body.note_id, "NOTE_NOT_FOUND")?;
     let post = state
         .posts
         .find_by_id_for_viewer(post_id, my_actor_id)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map_err(internal)?
         .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
     Ok(Json(build_note(&state, post, my_actor_id).await))
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ApShowBody {
     pub uri: String,
 }
@@ -506,85 +371,69 @@ pub enum ApShowResponse {
 /// 共通、ローカルDBに無ければフェッチ・取り込みまで行う）でNote/Userのどちらかを特定し、
 /// 本家Misskey準拠の`{type, object}`で返す（#251続き）。
 pub async fn ap_show(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
     Json(body): Json<ApShowBody>,
 ) -> Result<Json<ApShowResponse>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let resolved = crate::handlers::open_target::resolve_open_target(&state, &body.uri).await?;
+    use crate::handlers::open_target::{resolve_open_target, ResolvedTarget};
 
-    Ok(Json(match resolved {
-        crate::handlers::open_target::ResolvedTarget::Actor(actor) => {
-            if actor.actor_type != "local" {
-                state.enqueue_remote_profile_refresh(actor.id).await;
-            }
+    let my_actor_id = me.map(|u| u.actor_id);
+    Ok(Json(match resolve_open_target(&state, &body.uri).await? {
+        ResolvedTarget::Actor(actor) => {
+            refresh_if_remote(&state, &actor).await;
             let detailed = build_user_detailed(&state, &actor, my_actor_id).await;
             ApShowResponse::User(Box::new(detailed))
         }
-        crate::handlers::open_target::ResolvedTarget::Post(post_id) => {
+        ResolvedTarget::Post(post_id) => {
             let post = state
                 .posts
                 .find_by_id_for_viewer(post_id, my_actor_id)
                 .await
-                .map_err(|e| ApiError::Internal(e.to_string()))?
+                .map_err(internal)?
                 .ok_or(ApiError::NotFound("NO_SUCH_OBJECT"))?;
             ApShowResponse::Note(Box::new(build_note(&state, post, my_actor_id).await))
         }
     }))
 }
 
+// Misskey互換APIのタイムラインはMisskey本家の`specified`同様のデフォルト挙動を保つため、
+// `exclude_direct`は常に`false`（自分宛のdirectは含まれる）。
+
 /// POST /api/notes/local-timeline
 pub async fn notes_local_timeline(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
     Json(body): Json<TimelineBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let limit = body.limit.unwrap_or(20).min(100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
-
-    // Misskey互換APIはMisskey本家の`specified`同様のデフォルト挙動を保つため、
-    // `exclude_direct`は常に`false`（自分宛のdirectは含まれる）。
+    let my_actor_id = me.map(|u| u.actor_id);
+    let page = body.cursor.page(20);
     let rows = state
         .posts
-        .local_timeline(my_actor_id, limit, until_id, since_id, false)
+        .local_timeline(my_actor_id, page.limit, page.until_id, page.since_id, false)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(internal)?;
     Ok(Json(build_notes(&state, rows, my_actor_id).await))
 }
 
 /// POST /api/notes/timeline（ホームタイムライン。要ログイン）
 pub async fn notes_home_timeline(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<TimelineBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let auth_user = extract_auth(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-    let actor_id = state
-        .actors
-        .find_local_by_user_id(auth_user.user_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?
-        .id;
-
-    let limit = body.limit.unwrap_or(30).min(100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
-
+    let page = body.cursor.page(30);
     let rows = state
         .posts
-        .home_timeline(actor_id, limit, until_id, since_id, false)
+        .home_timeline(
+            user.actor_id,
+            page.limit,
+            page.until_id,
+            page.since_id,
+            false,
+        )
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(build_notes(&state, rows, Some(actor_id)).await))
+        .map_err(internal)?;
+    Ok(Json(build_notes(&state, rows, Some(user.actor_id)).await))
 }
 
 /// POST /api/notes/mentions（Aria等の通知画面「メンション」「指名」タブ用。要ログイン）。
@@ -592,87 +441,117 @@ pub async fn notes_home_timeline(
 /// directのいずれか）、`visibility: "specified"`（Misskey本家の`direct`表記）指定時は自分宛
 /// direct投稿のみに絞る。詳細: `docs/protocols.md` 7節。
 pub async fn notes_mentions(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<NotesMentionsBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let auth_user = extract_auth(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-    let actor_id = state
-        .actors
-        .find_local_by_user_id(auth_user.user_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?
-        .id;
-
     let specified_only = body.visibility.as_deref() == Some("specified");
-    let limit = body.limit.unwrap_or(10).clamp(1, 100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
-
+    let page = body.cursor.page(10);
     let rows = state
         .posts
-        .mentions_timeline(actor_id, specified_only, limit, until_id, since_id)
+        .mentions_timeline(
+            user.actor_id,
+            specified_only,
+            page.limit,
+            page.until_id,
+            page.since_id,
+        )
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(build_notes(&state, rows, Some(actor_id)).await))
+        .map_err(internal)?;
+    Ok(Json(build_notes(&state, rows, Some(user.actor_id)).await))
 }
 
 /// POST /api/notes/hybrid-timeline（ソーシャルタイムライン。要ログイン、#78）
 pub async fn notes_hybrid_timeline(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<TimelineBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let auth_user = extract_auth(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await?;
-    let actor_id = state
-        .actors
-        .find_local_by_user_id(auth_user.user_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?
-        .id;
-
-    let limit = body.limit.unwrap_or(30).min(100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
-
+    let page = body.cursor.page(30);
     let rows = state
         .posts
-        .social_timeline(actor_id, limit, until_id, since_id, false)
+        .social_timeline(
+            user.actor_id,
+            page.limit,
+            page.until_id,
+            page.since_id,
+            false,
+        )
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(build_notes(&state, rows, Some(actor_id)).await))
+        .map_err(internal)?;
+    Ok(Json(build_notes(&state, rows, Some(user.actor_id)).await))
 }
 
 /// POST /api/notes/global-timeline（グローバルタイムライン、#78）
 pub async fn notes_global_timeline(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
     Json(body): Json<TimelineBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let limit = body.limit.unwrap_or(20).min(100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
-
+    let my_actor_id = me.map(|u| u.actor_id);
+    let page = body.cursor.page(20);
     let rows = state
         .posts
-        .global_timeline(my_actor_id, limit, until_id, since_id, false)
+        .global_timeline(my_actor_id, page.limit, page.until_id, page.since_id, false)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(internal)?;
+    Ok(Json(build_notes(&state, rows, my_actor_id).await))
+}
+
+/// POST /api/notes/search-by-tag（Misskey互換、Ariaのハッシュタグ画面）。
+pub async fn notes_search_by_tag(
+    MaybeAuthedUser(me): MaybeAuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<NotesSearchByTagBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let tag = body.tag.trim().trim_start_matches('#').to_lowercase();
+    if tag.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let my_actor_id = me.map(|u| u.actor_id);
+    let page = body.cursor.page(30);
+    let rows = state
+        .hashtags
+        .timeline(&tag, page.limit, page.until_id, page.since_id, my_actor_id)
+        .await
+        .map_err(internal)?;
+    Ok(Json(build_notes(&state, rows, my_actor_id).await))
+}
+
+/// POST /api/notes/search（Misskey互換、Aria等）。検索対象の決定はカスタムAPI
+/// （`GET /api/notes/search`）と同じ`search_post_ids_by_cursor`・検索回数制限を使う
+/// （以前は独自実装で、ブリッジポストの解決と検索回数制限が漏れていた）。
+pub async fn notes_search(
+    MaybeAuthedUser(me): MaybeAuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<NotesSearchBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let query = body.query.trim();
+    if query.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let page = body.cursor.page(30);
+    if let Some(user) = &me {
+        let is_initial_search = page.until_id.is_none() && page.since_id.is_none();
+        crate::rate_limit::check_search_rate_limit(&state, user.actor_id, is_initial_search)
+            .await?;
+    }
+    let my_actor_id = me.as_ref().map(|u| u.actor_id);
+    let viewer = me.as_ref().map(|u| (u.actor_id, u.username.as_str()));
+    let ids = crate::handlers::search::search_post_ids_by_cursor(
+        &state,
+        query,
+        page.limit as usize,
+        page.until_id,
+        page.since_id,
+        viewer,
+    )
+    .await;
+    let mut rows =
+        seiran_common::repository::find_visible_posts_by_ids(&state.db, &ids, my_actor_id)
+            .await
+            .map_err(internal)?;
+    rows.sort_unstable_by_key(|p| std::cmp::Reverse(p.id));
     Ok(Json(build_notes(&state, rows, my_actor_id).await))
 }
 
@@ -689,14 +568,10 @@ pub struct NotesPollsVoteBody {
 /// （#252続き）。本家Misskeyは複数選択のアンケートでも1回の呼び出しにつき選択肢1つ
 /// （`choice`、単数形）のみを送るため、そのまま`option_indexes: vec![choice]`へ変換する。
 pub async fn notes_polls_vote(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<NotesPollsVoteBody>,
-) -> impl IntoResponse {
-    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
-        Ok(u) => u,
-        Err(e) => return as_no_content(e),
-    };
+) -> Response {
     let resp = crate::handlers::notes::poll::vote_poll(
         Path(body.note_id),
         user,
@@ -712,14 +587,10 @@ pub async fn notes_polls_vote(
 
 /// POST /api/notes/reactions/create
 pub async fn reactions_create(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<ReactionCreateBody>,
-) -> impl IntoResponse {
-    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
-        Ok(u) => u,
-        Err(e) => return as_no_content(e),
-    };
+) -> Response {
     let resp = crate::handlers::notes::create_reaction(
         Path(body.note_id),
         user,
@@ -728,59 +599,32 @@ pub async fn reactions_create(
             content: body.reaction,
         }),
     )
-    .await
-    .into_response();
+    .await;
     as_no_content(resp)
 }
 
 /// POST /api/notes/reactions/delete
 /// Misskey は `noteId` のみを受け取る（1投稿1ユーザー1リアクションが前提のため対象の絵文字を
-/// 指定する必要がない）。既存の `delete_reaction` は絵文字をパスパラメータに取るため、
-/// ここで現在のリアクション内容を引いてから委譲する。
+/// 指定する必要がない）。カスタムAPIと同じ取り消し処理（`remove_reaction`）を、内容を問わない
+/// 指定（`None`）で呼ぶ（以前はここで現在のリアクション内容を別途SELECTしてから委譲しており、
+/// 切り替えと競合すると取り消しに失敗していた）。
 pub async fn reactions_delete(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<NoteIdBody>,
 ) -> Response {
-    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
-        Ok(u) => u,
-        Err(e) => return e,
-    };
-    let actor_id = user.actor_id;
-    let note_id: i64 = match body.note_id.parse() {
-        Ok(id) => id,
-        Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
-    };
-
-    let content: Option<String> =
-        sqlx::query_scalar("SELECT content FROM reactions WHERE post_id = $1 AND actor_id = $2")
-            .bind(note_id)
-            .bind(actor_id)
-            .fetch_optional(&state.db)
-            .await
-            .unwrap_or(None);
-    let content = match content {
-        Some(c) => c,
-        None => return ApiError::NotFound("NOT_REACTED").into_response(),
-    };
-
     let resp =
-        crate::handlers::notes::delete_reaction(Path((body.note_id, content)), user, State(state))
-            .await
-            .into_response();
+        crate::handlers::notes::reactions::remove_reaction(&state, &user, &body.note_id, None)
+            .await;
     as_no_content(resp)
 }
 
 /// POST /api/notes/unrenote
 pub async fn notes_unrenote(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<NoteIdBody>,
-) -> impl IntoResponse {
-    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
-        Ok(u) => u,
-        Err(e) => return as_no_content(e),
-    };
+) -> Response {
     let resp = crate::handlers::notes::delete_repost(Path(body.note_id), user, State(state))
         .await
         .into_response();
@@ -791,9 +635,28 @@ pub async fn notes_unrenote(
 #[serde(rename_all = "camelCase")]
 pub struct UserListTimelineBody {
     pub list_id: String,
-    pub limit: Option<i64>,
-    pub since_id: Option<String>,
-    pub until_id: Option<String>,
+    #[serde(flatten)]
+    pub cursor: CursorParams,
+}
+
+/// 閲覧可能なリストを取得する（非公開リストは所有者本人のみ、カスタムAPI
+/// `handlers::lists`と同じ公開範囲チェック、`NO_SUCH_LIST`）。
+async fn find_viewable_list(
+    state: &AppState,
+    list_id: &str,
+    my_actor_id: Option<i64>,
+) -> Result<seiran_common::repository::ListRow, ApiError> {
+    let list_id = parse_id(list_id, "NO_SUCH_LIST")?;
+    let row = state
+        .lists
+        .find_by_id(list_id)
+        .await
+        .map_err(internal)?
+        .ok_or(ApiError::NotFound("NO_SUCH_LIST"))?;
+    if !row.is_public && my_actor_id != Some(row.owner_actor_id) {
+        return Err(ApiError::NotFound("NO_SUCH_LIST"));
+    }
+    Ok(row)
 }
 
 /// POST /api/notes/user-list-timeline — リストタイムライン画面（Aria等）。リスト一覧
@@ -803,35 +666,18 @@ pub struct UserListTimelineBody {
 /// （非公開リストは所有者本人のみ）を使う。WebSocketの`userList`チャンネル購読は既存実装
 /// （`docs/protocols.md`参照）でカバー済みで、こちらは画面を開いた際の初回一覧取得を担う。
 pub async fn notes_user_list_timeline(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
     Json(body): Json<UserListTimelineBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let list_id: i64 = body
-        .list_id
-        .parse()
-        .map_err(|_| ApiError::NotFound("NO_SUCH_LIST"))?;
-
-    let row = state
-        .lists
-        .find_by_id(list_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NO_SUCH_LIST"))?;
-    if !row.is_public && my_actor_id != Some(row.owner_actor_id) {
-        return Err(ApiError::NotFound("NO_SUCH_LIST"));
-    }
-
-    let limit = body.limit.unwrap_or(20).min(100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
-
+    let my_actor_id = me.map(|u| u.actor_id);
+    let list = find_viewable_list(&state, &body.list_id, my_actor_id).await?;
+    let page = body.cursor.page(20);
     let rows = state
         .lists
-        .timeline(list_id, limit, until_id, since_id)
+        .timeline(list.id, page.limit, page.until_id, page.since_id)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(internal)?;
     Ok(Json(build_notes(&state, rows, my_actor_id).await))
 }
 
@@ -851,30 +697,23 @@ pub async fn i_notifications(
         return Ok(Json(vec![]));
     }
 
-    let limit = body.limit.unwrap_or(10).clamp(1, 100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
-
+    let page = body.cursor.page(10);
     let rows = state
         .notifications
-        .list(user.actor_id, limit, until_id, since_id)
+        .list(user.actor_id, page.limit, page.until_id, page.since_id)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(internal)?;
 
     let rows: Vec<_> = rows
         .into_iter()
         .filter(|r| {
-            if let Some(include) = &body.include_types {
-                if !include.iter().any(|t| t == &r.kind) {
-                    return false;
-                }
-            }
-            if let Some(exclude) = &body.exclude_types {
-                if exclude.iter().any(|t| t == &r.kind) {
-                    return false;
-                }
-            }
-            true
+            body.include_types
+                .as_ref()
+                .is_none_or(|include| include.iter().any(|t| t == &r.kind))
+                && !body
+                    .exclude_types
+                    .as_ref()
+                    .is_some_and(|exclude| exclude.iter().any(|t| t == &r.kind))
         })
         .collect();
 
@@ -890,67 +729,57 @@ pub async fn i_notifications(
 // ─── フォロー ────────────────────────────────────────────────────────
 
 /// POST /api/following/create
+/// 認証（`AuthedUser`抽出子）はターゲット解決（DB問い合わせ）より先に行われる。未認証のまま
+/// 先に解決すると「このIDのユーザーは存在するか」を匿名で探索できてしまう（列挙攻撃対策）。
 pub async fn following_create(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<FollowingBody>,
-) -> Response {
-    // ターゲット解決（DB問い合わせ）より先に認証を確認する。未認証のまま先に解決すると
-    // 「このIDのユーザーは存在するか」を匿名で探索できてしまう（列挙攻撃対策）。
-    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
-        Ok(u) => u,
-        Err(e) => return e,
-    };
-    let actor_id: i64 = match body.user_id.parse() {
-        Ok(id) => id,
-        Err(_) => return ApiError::BadRequest("INVALID_USER_ID".to_owned()).into_response(),
-    };
-    let target = match actor_id_to_target(&state, actor_id).await {
-        Ok(t) => t,
-        Err(e) => return e.into_response(),
-    };
+) -> Result<Response, ApiError> {
+    let actor_id: i64 = body
+        .user_id
+        .parse()
+        .map_err(|_| ApiError::BadRequest("INVALID_USER_ID".to_owned()))?;
     let resp = crate::handlers::follows::create_follow(
         user,
         State(state.clone()),
-        Json(CreateFollowRequest { target }),
+        Json(FollowTargetRequest {
+            actor_id: Some(body.user_id),
+            ..FollowTargetRequest::default()
+        }),
     )
     .await
     .into_response();
     if !resp.status().is_success() {
-        return resp;
+        return Ok(resp);
     }
-    misskey_user_lite_response(&state, actor_id).await
+    Ok(misskey_user_lite_response(&state, actor_id).await)
 }
 
 /// POST /api/following/delete
 pub async fn following_delete(
-    headers: HeaderMap,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<FollowingBody>,
-) -> Response {
-    let user = match crate::middleware::AuthedUser::from_headers(&headers, &state).await {
-        Ok(u) => u,
-        Err(e) => return e,
-    };
-    let actor_id: i64 = match body.user_id.parse() {
-        Ok(id) => id,
-        Err(_) => return ApiError::BadRequest("INVALID_USER_ID".to_owned()).into_response(),
-    };
-    let target = match actor_id_to_target(&state, actor_id).await {
-        Ok(t) => t,
-        Err(e) => return e.into_response(),
-    };
+) -> Result<Response, ApiError> {
+    let actor_id: i64 = body
+        .user_id
+        .parse()
+        .map_err(|_| ApiError::BadRequest("INVALID_USER_ID".to_owned()))?;
     let resp = crate::handlers::follows::delete_follow(
         user,
         State(state.clone()),
-        Json(DeleteFollowRequest { target }),
+        Json(FollowTargetRequest {
+            actor_id: Some(body.user_id),
+            ..FollowTargetRequest::default()
+        }),
     )
     .await
     .into_response();
     if !resp.status().is_success() {
-        return resp;
+        return Ok(resp);
     }
-    misskey_user_lite_response(&state, actor_id).await
+    Ok(misskey_user_lite_response(&state, actor_id).await)
 }
 
 /// `following/create`・`following/delete`成功時に返す`UserLite`。本家Misskeyはこれらを
@@ -969,115 +798,102 @@ async fn misskey_user_lite_response(state: &AppState, actor_id: i64) -> Response
     }
 }
 
-/// POST /api/users/following — 指定ユーザーのフォロー中一覧（Misskey互換、#81）。
-/// カスタムAPI `GET /api/users/following`（`handlers::users::user_following`）と同じ
-/// `list_following` を使い、Misskey本家の `Following` エンティティ形状に変換する。
-pub async fn users_following(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-    Json(body): Json<UserRelationBody>,
-) -> Result<Json<Vec<MisskeyFollowRelation>>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let actor_id: i64 = body
-        .user_id
-        .parse()
-        .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
-    let limit = body.limit.unwrap_or(10).clamp(1, 100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
-
-    let rows = state
-        .follows
-        .list_following(actor_id, my_actor_id, limit, until_id, since_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // アクターごとに`find_by_id`+`build_user_detailed`（計4クエリ）を呼ぶと
-    // limit=100件で最大400クエリになるN+1だったため、一括取得する（#81改善）。
-    let actor_ids: Vec<i64> = rows.iter().map(|r| r.actor_id).collect();
-    let actors = state
-        .actors
-        .find_by_ids(&actor_ids)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let actor_by_id: HashMap<i64, Actor> = actors.into_iter().map(|a| (a.id, a)).collect();
-    let mut detailed_by_id = build_users_detailed(
-        &state,
-        &actor_by_id.values().cloned().collect::<Vec<_>>(),
-        my_actor_id,
-    )
-    .await;
-
-    let mut relations = Vec::with_capacity(rows.len());
-    for r in rows {
-        if !actor_by_id.contains_key(&r.actor_id) {
-            return Err(ApiError::NotFound("USER_NOT_FOUND"));
-        }
-        relations.push(MisskeyFollowRelation {
-            id: r.follow_id.to_string(),
-            created_at: r.created_at.to_rfc3339(),
-            followee_id: r.actor_id.to_string(),
-            follower_id: actor_id.to_string(),
-            followee: detailed_by_id.remove(&r.actor_id),
-            follower: None,
-        });
-    }
-
-    Ok(Json(relations))
+/// フォロー一覧の向き（`users/following`・`users/followers`）。
+#[derive(Clone, Copy)]
+enum FollowDirection {
+    /// 指定ユーザーがフォローしている相手の一覧。
+    Following,
+    /// 指定ユーザーをフォローしている相手の一覧。
+    Followers,
 }
 
-/// POST /api/users/followers — 指定ユーザーのフォロワー一覧（Misskey互換、#81）。`users_following` と対。
-pub async fn users_followers(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-    Json(body): Json<UserRelationBody>,
+/// `users/following`・`users/followers` 共通。カスタムAPI（`handlers::users::user_following`/
+/// `user_followers`）と同じ `list_following`/`list_followers` を使い、Misskey本家の
+/// `Following` エンティティ形状に変換する。アクターごとに`find_by_id`+`build_user_detailed`
+/// （計4クエリ）を呼ぶと limit=100件で最大400クエリになるN+1だったため、一括取得する（#81改善）。
+async fn follow_relations(
+    state: &AppState,
+    me: Option<AuthedUser>,
+    body: UserCursorBody,
+    direction: FollowDirection,
 ) -> Result<Json<Vec<MisskeyFollowRelation>>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let actor_id: i64 = body
-        .user_id
-        .parse()
-        .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
-    let limit = body.limit.unwrap_or(10).clamp(1, 100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
+    let my_actor_id = me.map(|u| u.actor_id);
+    let actor_id = parse_id(&body.user_id, "USER_NOT_FOUND")?;
+    let page = body.cursor.page(10);
+    let rows: Vec<FollowListRow> = match direction {
+        FollowDirection::Following => {
+            state
+                .follows
+                .list_following(
+                    actor_id,
+                    my_actor_id,
+                    page.limit,
+                    page.until_id,
+                    page.since_id,
+                )
+                .await
+        }
+        FollowDirection::Followers => {
+            state
+                .follows
+                .list_followers(
+                    actor_id,
+                    my_actor_id,
+                    page.limit,
+                    page.until_id,
+                    page.since_id,
+                )
+                .await
+        }
+    }
+    .map_err(internal)?;
 
-    let rows = state
-        .follows
-        .list_followers(actor_id, my_actor_id, limit, until_id, since_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // users_following と同様、アクター件数分のN+1を避けて一括取得する（#81改善）。
     let actor_ids: Vec<i64> = rows.iter().map(|r| r.actor_id).collect();
     let actors = state
         .actors
         .find_by_ids(&actor_ids)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let actor_by_id: HashMap<i64, Actor> = actors.into_iter().map(|a| (a.id, a)).collect();
-    let mut detailed_by_id = build_users_detailed(
-        &state,
-        &actor_by_id.values().cloned().collect::<Vec<_>>(),
-        my_actor_id,
-    )
-    .await;
+        .map_err(internal)?;
+    let mut detailed_by_id = build_users_detailed(state, &actors, my_actor_id).await;
 
-    let mut relations = Vec::with_capacity(rows.len());
-    for r in rows {
-        if !actor_by_id.contains_key(&r.actor_id) {
-            return Err(ApiError::NotFound("USER_NOT_FOUND"));
-        }
-        relations.push(MisskeyFollowRelation {
-            id: r.follow_id.to_string(),
-            created_at: r.created_at.to_rfc3339(),
-            followee_id: actor_id.to_string(),
-            follower_id: r.actor_id.to_string(),
-            followee: None,
-            follower: detailed_by_id.remove(&r.actor_id),
-        });
-    }
+    rows.into_iter()
+        .map(|r| {
+            let other = detailed_by_id
+                .remove(&r.actor_id)
+                .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
+            let (followee_id, follower_id, followee, follower) = match direction {
+                FollowDirection::Following => (r.actor_id, actor_id, Some(other), None),
+                FollowDirection::Followers => (actor_id, r.actor_id, None, Some(other)),
+            };
+            Ok(MisskeyFollowRelation {
+                id: r.follow_id.to_string(),
+                created_at: r.created_at.to_rfc3339(),
+                followee_id: followee_id.to_string(),
+                follower_id: follower_id.to_string(),
+                followee,
+                follower,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()
+        .map(Json)
+}
 
-    Ok(Json(relations))
+/// POST /api/users/following — 指定ユーザーのフォロー中一覧（Misskey互換、#81）。
+pub async fn users_following(
+    MaybeAuthedUser(me): MaybeAuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<UserCursorBody>,
+) -> Result<Json<Vec<MisskeyFollowRelation>>, ApiError> {
+    follow_relations(&state, me, body, FollowDirection::Following).await
+}
+
+/// POST /api/users/followers — 指定ユーザーのフォロワー一覧（Misskey互換、#81）。
+pub async fn users_followers(
+    MaybeAuthedUser(me): MaybeAuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<UserCursorBody>,
+) -> Result<Json<Vec<MisskeyFollowRelation>>, ApiError> {
+    follow_relations(&state, me, body, FollowDirection::Followers).await
 }
 
 /// POST /api/notes/reactions — 指定リアクション種別を付けたユーザー一覧（Misskey互換、#81）。
@@ -1085,21 +901,18 @@ pub async fn users_followers(
 /// `GET /api/notes/:id/reactions/:content/actors`（`handlers::notes::reaction_actors`）と
 /// 同じ `actors_for_reaction` を使う。投稿の可視性チェックも同様。
 pub async fn notes_reactions(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
     Json(body): Json<NotesReactionsBody>,
 ) -> Result<Json<Vec<MisskeyNoteReaction>>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let note_id: i64 = body
-        .note_id
-        .parse()
-        .map_err(|_| ApiError::NotFound("NOTE_NOT_FOUND"))?;
+    let my_actor_id = me.map(|u| u.actor_id);
+    let note_id = parse_id(&body.note_id, "NOTE_NOT_FOUND")?;
 
     state
         .posts
         .find_by_id_for_viewer(note_id, my_actor_id)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map_err(internal)?
         .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
 
     let Some(reaction_type) = body.reaction_type else {
@@ -1111,7 +924,7 @@ pub async fn notes_reactions(
         .reactions
         .actors_for_reaction(note_id, &reaction_type, my_actor_id, limit)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(internal)?;
 
     Ok(Json(
         actors
@@ -1120,13 +933,15 @@ pub async fn notes_reactions(
                 id: a.reaction_id.to_string(),
                 created_at: a.reaction_created_at.to_rfc3339(),
                 user: user_lite(
-                    a.id,
-                    &a.username,
-                    &a.domain,
-                    a.actor_type == "local",
+                    ActorSummary {
+                        id: a.id,
+                        username: &a.username,
+                        domain: &a.domain,
+                        actor_type: &a.actor_type,
+                        display_name: a.display_name.as_deref(),
+                        avatar_url: a.avatar_url.as_deref(),
+                    },
                     &state.local_domain,
-                    a.display_name.as_deref(),
-                    a.avatar_url.as_deref(),
                 ),
                 kind: reaction_type.clone(),
             })
@@ -1140,30 +955,24 @@ pub async fn notes_reactions(
 /// 一括取得・可視性フィルタで埋め込む。対象ノートが削除済み・非公開等で取得できない行は
 /// （本家Misskeyも閲覧不可なノートへのリアクションは返さないため）結果から除外する。
 pub async fn users_reactions(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
-    Json(body): Json<UsersNotesBody>,
+    Json(body): Json<UserCursorBody>,
 ) -> Result<Json<Vec<MisskeyUserReaction>>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let actor_id: i64 = body
-        .user_id
-        .parse()
-        .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
+    let my_actor_id = me.map(|u| u.actor_id);
+    let actor_id = parse_id(&body.user_id, "USER_NOT_FOUND")?;
     let actor = state
         .actors
         .find_by_id(actor_id)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map_err(internal)?
         .ok_or(ApiError::NotFound("USER_NOT_FOUND"))?;
-    let limit = body.limit.unwrap_or(10).clamp(1, 100);
-    let until_id: Option<i64> = body.until_id.as_deref().and_then(|s| s.parse().ok());
-    let since_id: Option<i64> = body.since_id.as_deref().and_then(|s| s.parse().ok());
 
     let rows = state
         .reactions
-        .reactions_by_actor_for_feed(actor_id, my_actor_id, until_id, since_id, true, limit)
+        .reactions_by_actor_for_feed(actor_id, my_actor_id, body.cursor.page(10), true)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(internal)?;
 
     let mut post_ids: Vec<i64> = rows.iter().map(|r| r.post_id).collect();
     post_ids.sort_unstable();
@@ -1194,21 +1003,16 @@ pub async fn users_reactions(
 /// 欠落として例外を投げるため、値が0でもキーは揃える）。リモートを一切集計しないため
 /// `notesCount`/`usersCount`と`originalNotesCount`/`originalUsersCount`は常に同値になる。
 pub async fn stats(State(state): State<AppState>) -> Result<Json<MisskeyStats>, ApiError> {
-    let notes_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM posts p
-         JOIN actors a ON a.id = p.actor_id
-         WHERE a.actor_type = 'local' AND p.deleted_at IS NULL",
+    let (notes_count, users_count): (i64, i64) = sqlx::query_as(
+        "SELECT
+             (SELECT count(*) FROM posts p
+              JOIN actors a ON a.id = p.actor_id
+              WHERE a.actor_type = 'local' AND p.deleted_at IS NULL),
+             (SELECT count(*) FROM actors WHERE actor_type = 'local' AND withdrawn_at IS NULL)",
     )
     .fetch_one(&state.db)
     .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let users_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM actors WHERE actor_type = 'local' AND withdrawn_at IS NULL",
-    )
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    .map_err(internal)?;
 
     Ok(Json(MisskeyStats {
         notes_count,
@@ -1237,27 +1041,36 @@ pub struct UsersListsListBody {
     pub user_id: Option<String>,
 }
 
-/// `ListRow`一件を、メンバー一覧付き`MisskeyUserList`へ組み立てる（`users_lists_list`・
-/// `users_lists_show`共通）。
-async fn build_misskey_user_list(
+/// `ListRow`群を、メンバー一覧付き`MisskeyUserList`へ組み立てる（`users_lists_list`・
+/// `users_lists_show`共通）。メンバーは全リスト分を1クエリで取得する（以前はリストごとに
+/// 取得するN+1だった）。
+async fn build_misskey_user_lists(
     state: &AppState,
-    row: seiran_common::repository::ListRow,
-) -> Result<MisskeyUserList, ApiError> {
-    let members = state
+    rows: Vec<seiran_common::repository::ListRow>,
+) -> Result<Vec<MisskeyUserList>, ApiError> {
+    let list_ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+    let mut members: HashMap<i64, Vec<String>> = HashMap::new();
+    for (list_id, actor_id) in state
         .lists
-        .members(row.id)
+        .member_ids_of_lists(&list_ids)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(MisskeyUserList {
-        id: row.id.to_string(),
-        created_at: row.created_at.to_rfc3339(),
-        name: row.name,
-        is_public: row.is_public,
-        user_ids: members
-            .into_iter()
-            .map(|m| m.actor_id.to_string())
-            .collect(),
-    })
+        .map_err(internal)?
+    {
+        members
+            .entry(list_id)
+            .or_default()
+            .push(actor_id.to_string());
+    }
+    Ok(rows
+        .into_iter()
+        .map(|row| MisskeyUserList {
+            id: row.id.to_string(),
+            created_at: row.created_at.to_rfc3339(),
+            user_ids: members.remove(&row.id).unwrap_or_default(),
+            name: row.name,
+            is_public: row.is_public,
+        })
+        .collect())
 }
 
 /// POST /api/users/lists/list — プロフィール「リスト」タブ・自分のリスト管理画面（Aria等）。
@@ -1266,30 +1079,22 @@ async fn build_misskey_user_list(
 /// 管理画面用途）を返す。既存のカスタムAPI（`handlers::lists`）と同じ`ListRepository`を使う
 /// （#251続き）。
 pub async fn users_lists_list(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
     body: Option<Json<UsersListsListBody>>,
 ) -> Result<Json<Vec<MisskeyUserList>>, ApiError> {
-    let user_id = body.and_then(|Json(b)| b.user_id);
-
-    let rows = if let Some(uid) = user_id {
-        let actor_id: i64 = uid
-            .parse()
-            .map_err(|_| ApiError::NotFound("USER_NOT_FOUND"))?;
-        state.lists.list_public_by_owner(actor_id).await
-    } else {
-        let my_actor_id = optional_actor_id(&headers, &state)
-            .await
-            .ok_or(ApiError::Unauthorized("CREDENTIAL_REQUIRED"))?;
-        state.lists.list_by_owner(my_actor_id).await
+    let rows = match body.and_then(|Json(b)| b.user_id) {
+        Some(uid) => {
+            let actor_id = parse_id(&uid, "USER_NOT_FOUND")?;
+            state.lists.list_public_by_owner(actor_id).await
+        }
+        None => {
+            let me = me.ok_or(ApiError::Unauthorized("CREDENTIAL_REQUIRED"))?;
+            state.lists.list_by_owner(me.actor_id).await
+        }
     }
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        out.push(build_misskey_user_list(&state, row).await?);
-    }
-    Ok(Json(out))
+    .map_err(internal)?;
+    Ok(Json(build_misskey_user_lists(&state, rows).await?))
 }
 
 #[derive(Deserialize)]
@@ -1304,25 +1109,15 @@ pub struct UsersListsShowBody {
 /// （`handlers::lists`）と同じ公開範囲チェック（非公開リストは所有者本人のみ、
 /// `NO_SUCH_LIST`）を使う（#251続き）。
 pub async fn users_lists_show(
-    headers: HeaderMap,
+    MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
     Json(body): Json<UsersListsShowBody>,
 ) -> Result<Json<MisskeyUserList>, ApiError> {
-    let my_actor_id = optional_actor_id(&headers, &state).await;
-    let list_id: i64 = body
-        .list_id
-        .parse()
-        .map_err(|_| ApiError::NotFound("NO_SUCH_LIST"))?;
-
-    let row = state
-        .lists
-        .find_by_id(list_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NO_SUCH_LIST"))?;
-    if !row.is_public && my_actor_id != Some(row.owner_actor_id) {
-        return Err(ApiError::NotFound("NO_SUCH_LIST"));
-    }
-
-    Ok(Json(build_misskey_user_list(&state, row).await?))
+    let my_actor_id = me.map(|u| u.actor_id);
+    let list = find_viewable_list(&state, &body.list_id, my_actor_id).await?;
+    build_misskey_user_lists(&state, vec![list])
+        .await?
+        .pop()
+        .map(Json)
+        .ok_or(ApiError::NotFound("NO_SUCH_LIST"))
 }

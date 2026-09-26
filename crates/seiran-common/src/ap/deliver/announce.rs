@@ -1,5 +1,6 @@
 use super::activity::*;
 use super::infra::*;
+use super::ApSender;
 use super::*;
 
 /// Announce 対象の元ポストが Fedi リモートである場合、その投稿者の inbox URL と actor URI を返す。
@@ -59,14 +60,17 @@ async fn resolve_announce_targets(
 ///
 /// `original_ap_object_id` は Announce の対象（元ポストの AP URI）。
 pub async fn deliver_ap_announce(
-    ap_client: &ApClient,
-    db: &PgPool,
+    sender: &ApSender<'_>,
     post_id: i64,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
     original_ap_object_id: &str,
 ) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let username = fetch_username(db, actor_id).await?;
     let visibility: String = sqlx::query_scalar("SELECT visibility::text FROM posts WHERE id = $1")
         .bind(post_id)
@@ -110,14 +114,17 @@ pub async fn deliver_ap_announce(
 /// ローカルアクターの AP Undo(Announce) を Fedi フォロワー全員 + 元ポストの投稿者へ配送する。
 /// `announce_post_id` はリポスト投稿の posts.id、`original_ap_object_id` は元ポストの AP URI。
 pub async fn deliver_undo_announce(
-    ap_client: &ApClient,
-    db: &PgPool,
+    sender: &ApSender<'_>,
     announce_post_id: i64,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
     original_ap_object_id: &str,
 ) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let username = fetch_username(db, actor_id).await?;
     let (_object_actor, inboxes) =
         resolve_announce_targets(db, announce_post_id, actor_id, original_ap_object_id).await?;

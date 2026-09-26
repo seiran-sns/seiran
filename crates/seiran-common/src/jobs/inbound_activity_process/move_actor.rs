@@ -305,18 +305,11 @@ async fn notify_move(
     let notif_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = inbox
         .notification_repo
-        .insert(
-            notif_id,
-            recipient.id,
-            kind,
-            Some(old_actor.id),
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(new_actor_id),
-        )
+        .insert(&crate::repository::NewNotification {
+            notifier_actor_id: Some(old_actor.id),
+            related_actor_id: Some(new_actor_id),
+            ..crate::repository::NewNotification::new(notif_id, recipient.id, kind)
+        })
         .await
     {
         tracing::error!("[Move] notifications INSERT 失敗: {}", e);

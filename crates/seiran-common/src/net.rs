@@ -1,17 +1,25 @@
 //! SSRF対策込みの外部URLフェッチ（`/proxy`・リモート絵文字インポート・URLカードOGP取得で共有）。
 //! private/loopback/link-local等のIPへの接続を拒否し、リダイレクト先も毎回同じ検証を通す。
+//!
+//! 連合（AP/ATP）用の共有`reqwest::Client`向けには、同じ公開IP判定を使うDNSリゾルバと
+//! リダイレクトポリシー（`federation_client_builder`）、およびIPリテラルURLの事前検査
+//! （`ensure_public_url`）を提供する。受信Activityの署名`keyId`・フォロー対象URL・
+//! `ap/show`の`uri`など、外部から指定されたURLへサーバーが接続する経路はすべてこれを通す。
 
 use std::{
     fmt,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::OnceLock,
     time::Duration,
 };
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use reqwest::{redirect::Policy, Url};
 
 const MAX_FETCH_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
+/// 連合用クライアントのリダイレクト上限（reqwestの既定値10に合わせる）。
+const MAX_FEDERATION_REDIRECTS: usize = 10;
 
 #[derive(Debug)]
 pub enum FetchError {
@@ -43,32 +51,146 @@ impl fmt::Display for FetchError {
     }
 }
 
-fn is_public_ip(ip: IpAddr) -> bool {
+impl std::error::Error for FetchError {}
+
+/// 内部ネットワーク宛の外向き通信を許可するか（`SEIRAN_ALLOW_PRIVATE_NETWORK=true`）。
+/// E2Eのスタブサーバー（127.0.0.1）への連合など、ローカル検証専用のエスケープハッチ。
+/// 本番・開発機では設定しないこと。プロセス起動時に一度だけ読む。
+pub fn private_network_allowed() -> bool {
+    static ALLOWED: OnceLock<bool> = OnceLock::new();
+    *ALLOWED.get_or_init(|| {
+        std::env::var("SEIRAN_ALLOW_PRIVATE_NETWORK").is_ok_and(|v| v == "true" || v == "1")
+    })
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    !(ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+        || ip.is_unspecified()
+        || ip.is_documentation()
+        || a == 0
+        || a >= 240
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 192 && b == 0 && c == 0)
+        || (a == 198 && (b == 18 || b == 19)))
+}
+
+/// IPv6アドレスに埋め込まれたIPv4（IPv4-mapped `::ffff:0:0/96`・IPv4互換 `::/96`・
+/// NAT64 `64:ff9b::/96`・6to4 `2002::/16`）を取り出す。これらを素通しすると
+/// `::ffff:127.0.0.1`や`64:ff9b::a9fe:a9fe`（169.254.169.254）経由で内部IPv4へ到達できる。
+fn embedded_ipv4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
+    if let Some(v4) = ip.to_ipv4_mapped() {
+        return Some(v4);
+    }
+    let seg = ip.segments();
+    let tail = Ipv4Addr::new(
+        (seg[6] >> 8) as u8,
+        seg[6] as u8,
+        (seg[7] >> 8) as u8,
+        seg[7] as u8,
+    );
+    if seg[..6] == [0, 0, 0, 0, 0, 0] && !ip.is_loopback() && !ip.is_unspecified() {
+        return Some(tail);
+    }
+    if seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+        return Some(tail);
+    }
+    if seg[0] == 0x2002 {
+        return Some(Ipv4Addr::new(
+            (seg[1] >> 8) as u8,
+            seg[1] as u8,
+            (seg[2] >> 8) as u8,
+            seg[2] as u8,
+        ));
+    }
+    None
+}
+
+/// 外部から指定されたURLの接続先として許可できる公開IPか。`admin/relays`の登録時検証とも共有する。
+pub fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(ip) => {
-            !(ip.is_private()
-                || ip.is_loopback()
-                || ip.is_link_local()
-                || ip.is_multicast()
-                || ip.is_broadcast()
-                || ip.is_unspecified()
-                || ip.octets()[0] == 0
-                || ip.octets()[0] >= 240
-                || (ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1]))
-                || (ip.octets()[0] == 192 && ip.octets()[1] == 0 && ip.octets()[2] == 0)
-                || (ip.octets()[0] == 198 && (ip.octets()[1] == 18 || ip.octets()[1] == 19)))
-        }
+        IpAddr::V4(ip) => is_public_ipv4(ip),
         IpAddr::V6(ip) => {
-            if let Some(mapped) = ip.to_ipv4_mapped() {
-                return is_public_ip(IpAddr::V4(mapped));
+            if let Some(v4) = embedded_ipv4(ip) {
+                return is_public_ipv4(v4);
             }
             !(ip.is_loopback()
                 || ip.is_unspecified()
                 || ip.is_multicast()
                 || (ip.segments()[0] & 0xfe00) == 0xfc00
-                || (ip.segments()[0] & 0xffc0) == 0xfe80)
+                || (ip.segments()[0] & 0xffc0) == 0xfe80
+                || (ip.segments()[0] == 0x2001 && ip.segments()[1] == 0x0db8))
         }
     }
+}
+
+/// URLのホストがIPリテラルなら公開IPか検査する（ドメイン名は`PublicOnlyResolver`が解決時に検査する）。
+fn url_host_is_allowed(url: &Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => is_public_ipv4(ip),
+        Some(url::Host::Ipv6(ip)) => is_public_ip(IpAddr::V6(ip)),
+        Some(url::Host::Domain(_)) => true,
+        None => false,
+    }
+}
+
+/// 連合用クライアントで送る前に、外部から指定されたURLを検査する。reqwestはIPリテラルの
+/// ホストをDNSリゾルバに渡さないため、`PublicOnlyResolver`だけでは`http://127.0.0.1/`等を
+/// 止められない。スキームはhttp/httpsのみ許可する。
+pub fn ensure_public_url(raw: &str) -> Result<(), FetchError> {
+    let url = Url::parse(raw).map_err(|_| FetchError::InvalidUrl)?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(FetchError::InvalidUrl);
+    }
+    if private_network_allowed() || url_host_is_allowed(&url) {
+        Ok(())
+    } else {
+        Err(FetchError::PrivateAddress)
+    }
+}
+
+/// 解決結果に非公開IPが1つでも含まれるホスト名を拒否するDNSリゾルバ（`validate_url`と同じ基準）。
+struct PublicOnlyResolver;
+
+impl reqwest::dns::Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let addresses: Vec<SocketAddr> =
+                tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
+            if addresses.is_empty() || addresses.iter().any(|a| !is_public_ip(a.ip())) {
+                return Err(Box::new(FetchError::PrivateAddress)
+                    as Box<dyn std::error::Error + Send + Sync>);
+            }
+            Ok(Box::new(addresses.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// 連合（AP/ATP）用の共有クライアントのビルダー。`PublicOnlyResolver`とリダイレクト先の
+/// IPリテラル検査を組み込む（`private_network_allowed()`のときは素のビルダー）。
+pub fn federation_client_builder() -> reqwest::ClientBuilder {
+    let builder = reqwest::Client::builder();
+    if private_network_allowed() {
+        return builder;
+    }
+    builder
+        .dns_resolver(std::sync::Arc::new(PublicOnlyResolver))
+        .redirect(Policy::custom(|attempt| {
+            if attempt.previous().len() >= MAX_FEDERATION_REDIRECTS {
+                attempt.error(FetchError::TooManyRedirects)
+            } else if !matches!(attempt.url().scheme(), "http" | "https")
+                || !url_host_is_allowed(attempt.url())
+            {
+                attempt.error(FetchError::PrivateAddress)
+            } else {
+                attempt.follow()
+            }
+        }))
 }
 
 pub(crate) async fn validate_url(raw: &str) -> Result<(Url, Vec<SocketAddr>), FetchError> {
@@ -97,12 +219,36 @@ pub(crate) async fn validate_url(raw: &str) -> Result<(Url, Vec<SocketAddr>), Fe
     Ok((url, addresses))
 }
 
-/// 検証済みURLから本文を取得する（SSRF対策込み）。`accept_prefixes`に前方一致しない
-/// `Content-Type`は`UnsupportedType`として拒否する。
-pub async fn fetch_validated_with_accept(
+/// 本文を`MAX_FETCH_BYTES`まで読み込む。`Content-Length`が無い（chunked）応答でも、
+/// 上限を超えた時点で打ち切る（全量をメモリに読み込んでから判定するとメモリ枯渇攻撃を許す）。
+async fn read_body_limited(mut upstream: reqwest::Response) -> Result<Bytes, FetchError> {
+    if upstream
+        .content_length()
+        .is_some_and(|size| size > MAX_FETCH_BYTES)
+    {
+        return Err(FetchError::TooLarge);
+    }
+    let mut buf = BytesMut::new();
+    while let Some(chunk) = upstream
+        .chunk()
+        .await
+        .map_err(|_| FetchError::FetchFailed)?
+    {
+        if (buf.len() + chunk.len()) as u64 > MAX_FETCH_BYTES {
+            return Err(FetchError::TooLarge);
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf.freeze())
+}
+
+/// 検証済みURLへ、リダイレクト先も毎回`validate_url`で検証し直しながらGETする。
+/// 戻り値は（本文, ヘッダーのContent-Type）。`fetch_validated_with_accept`・
+/// `fetch_json_validated`共通の取得ループ。
+async fn fetch_following_validated_redirects(
     raw_url: &str,
-    accept_prefixes: &[&str],
     accept_header: &str,
+    timeout: Duration,
 ) -> Result<(Bytes, String), FetchError> {
     let (mut url, mut addresses) = validate_url(raw_url).await?;
 
@@ -112,7 +258,7 @@ pub async fn fetch_validated_with_accept(
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(20))
+            .timeout(timeout)
             .user_agent("seiran-fetch/1.0")
             .resolve_to_addrs(host, &addresses)
             .build()
@@ -143,41 +289,42 @@ pub async fn fetch_validated_with_accept(
         if !upstream.status().is_success() {
             return Err(FetchError::UpstreamError);
         }
-        if upstream
-            .content_length()
-            .is_some_and(|size| size > MAX_FETCH_BYTES)
-        {
-            return Err(FetchError::TooLarge);
-        }
         let header_content_type = upstream
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("application/octet-stream")
             .to_owned();
-        let bytes = upstream
-            .bytes()
-            .await
-            .map_err(|_| FetchError::FetchFailed)?;
-        if bytes.len() as u64 > MAX_FETCH_BYTES {
-            return Err(FetchError::TooLarge);
-        }
-        // ヘッダーのContent-Typeがホワイトリストに一致しない場合（media.misskeyusercontent.com等が
-        // application/octet-streamを返すケースがある）、アップロード機能と同じマジックバイト判定で救済を試みる。
-        let content_type = if accept_prefixes
-            .iter()
-            .any(|p| header_content_type.starts_with(p))
-        {
-            header_content_type
-        } else {
-            crate::storage::media_probe::sniff_mime_type(&bytes, &header_content_type)
-        };
-        if !accept_prefixes.iter().any(|p| content_type.starts_with(p)) {
-            return Err(FetchError::UnsupportedType);
-        }
-        return Ok((bytes, content_type));
+        let bytes = read_body_limited(upstream).await?;
+        return Ok((bytes, header_content_type));
     }
     unreachable!()
+}
+
+/// 検証済みURLから本文を取得する（SSRF対策込み）。`accept_prefixes`に前方一致しない
+/// `Content-Type`は`UnsupportedType`として拒否する。
+pub async fn fetch_validated_with_accept(
+    raw_url: &str,
+    accept_prefixes: &[&str],
+    accept_header: &str,
+) -> Result<(Bytes, String), FetchError> {
+    let (bytes, header_content_type) =
+        fetch_following_validated_redirects(raw_url, accept_header, Duration::from_secs(20))
+            .await?;
+    // ヘッダーのContent-Typeがホワイトリストに一致しない場合（media.misskeyusercontent.com等が
+    // application/octet-streamを返すケースがある）、アップロード機能と同じマジックバイト判定で救済を試みる。
+    let content_type = if accept_prefixes
+        .iter()
+        .any(|p| header_content_type.starts_with(p))
+    {
+        header_content_type
+    } else {
+        crate::storage::media_probe::sniff_mime_type(&bytes, &header_content_type)
+    };
+    if !accept_prefixes.iter().any(|p| content_type.starts_with(p)) {
+        return Err(FetchError::UnsupportedType);
+    }
+    Ok((bytes, content_type))
 }
 
 /// SSRF対策込みでJSON文書を取得する（DIDドキュメント解決専用、[SEC-3]）。
@@ -189,63 +336,13 @@ pub async fn fetch_validated_with_accept(
 /// メディア取得と異なりContent-Typeホワイトリストは適用しない（DID文書はJSONそのものを
 /// パースできるかで妥当性を判断すれば十分なため）。
 pub async fn fetch_json_validated(raw_url: &str) -> Result<serde_json::Value, FetchError> {
-    let (mut url, mut addresses) = validate_url(raw_url).await?;
-
-    for redirect_count in 0..=MAX_REDIRECTS {
-        let host = url.host_str().ok_or(FetchError::InvalidUrl)?;
-        let client = reqwest::Client::builder()
-            .redirect(Policy::none())
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(10))
-            .user_agent("seiran-fetch/1.0")
-            .resolve_to_addrs(host, &addresses)
-            .build()
-            .map_err(|_| FetchError::FetchFailed)?;
-        let upstream = client
-            .get(url.clone())
-            .header(
-                reqwest::header::ACCEPT,
-                "application/json, application/did+json",
-            )
-            .send()
-            .await
-            .map_err(|_| FetchError::FetchFailed)?;
-
-        if upstream.status().is_redirection() {
-            if redirect_count == MAX_REDIRECTS {
-                return Err(FetchError::TooManyRedirects);
-            }
-            let location = upstream
-                .headers()
-                .get(reqwest::header::LOCATION)
-                .and_then(|v| v.to_str().ok())
-                .ok_or(FetchError::InvalidRedirect)?;
-            let next = url
-                .join(location)
-                .map_err(|_| FetchError::InvalidRedirect)?;
-            (url, addresses) = validate_url(next.as_str()).await?;
-            continue;
-        }
-
-        if !upstream.status().is_success() {
-            return Err(FetchError::UpstreamError);
-        }
-        if upstream
-            .content_length()
-            .is_some_and(|size| size > MAX_FETCH_BYTES)
-        {
-            return Err(FetchError::TooLarge);
-        }
-        let bytes = upstream
-            .bytes()
-            .await
-            .map_err(|_| FetchError::FetchFailed)?;
-        if bytes.len() as u64 > MAX_FETCH_BYTES {
-            return Err(FetchError::TooLarge);
-        }
-        return serde_json::from_slice(&bytes).map_err(|_| FetchError::UpstreamError);
-    }
-    unreachable!()
+    let (bytes, _) = fetch_following_validated_redirects(
+        raw_url,
+        "application/json, application/did+json",
+        Duration::from_secs(10),
+    )
+    .await?;
+    serde_json::from_slice(&bytes).map_err(|_| FetchError::UpstreamError)
 }
 
 /// 本文中の生URL（`https?://\S+`、末尾の `)`/`]`/`.`/`,` 等の区切り記号は含めない）を
@@ -490,7 +587,7 @@ fn extract_iframe_src(html_fragment: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_html_body, extract_body_urls, is_public_ip};
+    use super::{decode_html_body, ensure_public_url, extract_body_urls, is_public_ip};
 
     #[test]
     fn extract_body_urls_dedupes_and_preserves_order() {
@@ -557,10 +654,33 @@ mod tests {
             "fc00::1",
             "fe80::1",
             "::ffff:127.0.0.1",
+            "::127.0.0.1",
+            "64:ff9b::a9fe:a9fe",
+            "2002:7f00:1::",
+            "2001:db8::1",
+            "192.0.2.1",
         ] {
             assert!(!is_public_ip(ip.parse().unwrap()), "{ip}");
         }
         assert!(is_public_ip("8.8.8.8".parse().unwrap()));
         assert!(is_public_ip("2606:4700:4700::1111".parse().unwrap()));
+        assert!(is_public_ip("64:ff9b::808:808".parse().unwrap()));
+        assert!(is_public_ip("2002:808:808::".parse().unwrap()));
+    }
+
+    #[test]
+    fn ensure_public_url_rejects_private_ip_literals() {
+        for url in [
+            "http://127.0.0.1/users/a",
+            "http://[::1]:3000/",
+            "https://169.254.169.254/latest/meta-data",
+            "http://10.1.2.3/inbox",
+            "http://[::ffff:192.168.0.1]/",
+        ] {
+            assert!(ensure_public_url(url).is_err(), "{url}");
+        }
+        assert!(ensure_public_url("file:///etc/passwd").is_err());
+        assert!(ensure_public_url("https://mastodon.social/users/a").is_ok());
+        assert!(ensure_public_url("https://8.8.8.8/").is_ok());
     }
 }

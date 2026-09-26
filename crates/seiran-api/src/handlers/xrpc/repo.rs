@@ -806,14 +806,16 @@ async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_j
         .actors
         .update_profile(
             user_id,
-            display_name,
-            bio,
-            avatar_media_id,
-            banner_media_id,
-            &current.profile_fields,
-            &emoji_map,
-            current.birth_date,
-            current.birth_date_public,
+            &seiran_common::repository::LocalProfileUpdate {
+                display_name,
+                bio,
+                avatar_media_id,
+                banner_media_id,
+                profile_fields: &current.profile_fields,
+                emoji_map: &emoji_map,
+                birth_date: current.birth_date,
+                birth_date_public: current.birth_date_public,
+            },
         )
         .await
     {

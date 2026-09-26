@@ -67,13 +67,20 @@ pub trait AuthRateLimitRepository: Send + Sync {
 
     async fn unblock_ip(&self, ip_address: &str) -> Result<bool, sqlx::Error>;
 
-    async fn count_account_creations(
+    /// 同一IPからの`since`以降のアカウント作成が`max`件未満なら、作成枠を1件予約して
+    /// 予約IDを返す（上限到達なら`None`）。数える文と記録する文の間に同じIPの別リクエストが
+    /// 割り込むと並列登録が全て上限判定をすり抜けるため、IP単位のアドバイザリロックで直列化する。
+    /// 予約は登録処理の冒頭で取り、登録が失敗したら`cancel_account_creation`で取り消す
+    /// （成功した登録だけを数える仕様は変えない）。
+    async fn reserve_account_creation(
         &self,
         ip_address: &str,
         since: DateTime<Utc>,
-    ) -> Result<i64, sqlx::Error>;
+        max: i64,
+    ) -> Result<Option<i64>, sqlx::Error>;
 
-    async fn record_account_creation(&self, ip_address: &str) -> Result<(), sqlx::Error>;
+    /// `reserve_account_creation`の予約を取り消す（登録失敗時）。
+    async fn cancel_account_creation(&self, reservation_id: i64) -> Result<(), sqlx::Error>;
 }
 
 pub struct PgAuthRateLimitRepository {
@@ -233,27 +240,45 @@ impl AuthRateLimitRepository for PgAuthRateLimitRepository {
         Ok(result.rows_affected() > 0)
     }
 
-    async fn count_account_creations(
+    async fn reserve_account_creation(
         &self,
         ip_address: &str,
         since: DateTime<Utc>,
-    ) -> Result<i64, sqlx::Error> {
-        let row: (i64,) = sqlx::query_as(
+        max: i64,
+    ) -> Result<Option<i64>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(hashtextextended('account_creation_log:' || $1, 0))",
+        )
+        .bind(ip_address)
+        .execute(&mut *tx)
+        .await?;
+        let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM account_creation_log
              WHERE ip_address = $1::inet AND created_at >= $2",
         )
         .bind(ip_address)
         .bind(since)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
-        Ok(row.0)
+        if count >= max {
+            return Ok(None);
+        }
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO account_creation_log (ip_address) VALUES ($1::inet) RETURNING id",
+        )
+        .bind(ip_address)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(Some(id))
     }
 
-    async fn record_account_creation(&self, ip_address: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("INSERT INTO account_creation_log (ip_address) VALUES ($1::inet)")
-            .bind(ip_address)
+    async fn cancel_account_creation(&self, reservation_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM account_creation_log WHERE id = $1")
+            .bind(reservation_id)
             .execute(&self.pool)
-            .await?;
-        Ok(())
+            .await
+            .map(|_| ())
     }
 }

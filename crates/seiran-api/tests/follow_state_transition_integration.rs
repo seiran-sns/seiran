@@ -15,14 +15,21 @@
 
 mod support;
 
+use seiran_common::repository::follow::PendingFollowUpsert;
 use seiran_common::repository::{FollowRepository, PgFollowRepository};
 use support::test_db_pool;
 
 /// テスト用の使い捨て actor 2 件（follower/target）を作り、
 /// テスト終了時に呼ぶべき削除クロージャ用の ID を返す。
 async fn create_test_actor_pair(pool: &sqlx::PgPool, test_name: &str) -> (i64, i64) {
-    // Snowflake の値域と衝突しないよう、テスト専用の大きな固定帯 + タイムスタンプで一意化する。
-    let base = 950_000_000_000_i64 + (chrono::Utc::now().timestamp_millis() % 1_000_000);
+    // Snowflake の値域と衝突しないよう、テスト専用の大きな固定帯 + タイムスタンプ + テスト名で
+    // 一意化する（タイムスタンプだけだと、並列実行された別テストが同じミリ秒に作成して衝突する）。
+    let name_hash = test_name
+        .bytes()
+        .fold(0_i64, |h, b| (h * 31 + i64::from(b)) % 1_000);
+    let base = 950_000_000_000_i64
+        + (chrono::Utc::now().timestamp_millis() % 1_000_000) * 1_000
+        + name_hash;
     let follower_id = base * 10;
     let target_id = base * 10 + 1;
 
@@ -62,9 +69,9 @@ async fn pending_to_accepted_to_removed() {
         None
     );
 
-    // upsert_pending: 新規挿入は true を返し、status は pending になる
+    // upsert_pending: 新規挿入は Inserted を返し、status は pending になる
     let inserted = repo.upsert_pending(follower_id, target_id).await.unwrap();
-    assert!(inserted, "新規フォローは true (新規挿入) を返すはず");
+    assert_eq!(inserted, PendingFollowUpsert::Inserted);
     assert_eq!(
         repo.find_status(follower_id, target_id)
             .await
@@ -73,12 +80,9 @@ async fn pending_to_accepted_to_removed() {
         Some("pending")
     );
 
-    // 同じ組で再度 upsert_pending すると「既存の更新」扱いで false
+    // 同じ組で再度 upsert_pending すると「既存」扱いで AlreadyPending
     let inserted_again = repo.upsert_pending(follower_id, target_id).await.unwrap();
-    assert!(
-        !inserted_again,
-        "既存フォローの再送信は false (更新) を返すはず"
-    );
+    assert_eq!(inserted_again, PendingFollowUpsert::AlreadyPending);
 
     // accept: pending → accepted。影響行数は1
     let affected = repo.accept(follower_id, target_id).await.unwrap();
@@ -97,6 +101,17 @@ async fn pending_to_accepted_to_removed() {
     assert_eq!(
         affected_again, 0,
         "既に accepted な関係への再 accept は0件更新のはず（pending 限定の UPDATE）"
+    );
+
+    // 承認制アカウントを再度フォロー操作しても、成立済みのフォローは pending に降格しない。
+    let upsert_after_accept = repo.upsert_pending(follower_id, target_id).await.unwrap();
+    assert_eq!(upsert_after_accept, PendingFollowUpsert::AlreadyAccepted);
+    assert_eq!(
+        repo.find_status(follower_id, target_id)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("accepted")
     );
 
     // delete_by_actors: フォロー取り消し

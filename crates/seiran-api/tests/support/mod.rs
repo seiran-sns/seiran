@@ -69,13 +69,63 @@ fn ensure_test_database() {
 pub async fn test_db_pool() -> sqlx::PgPool {
     load_workspace_env();
     ensure_test_database();
-    get_db_pool(10)
+    let pool = get_db_pool(10)
         .await
-        .expect("DB接続に失敗（POSTGRES_* 環境変数 / docker compose の起動を確認してください）")
+        .expect("DB接続に失敗（POSTGRES_* 環境変数 / docker compose の起動を確認してください）");
+    apply_migrations(&pool).await;
+    pool
+}
+
+/// マイグレーションを適用する（冪等・アドバイザリロック付きのため、並列実行される各テストから
+/// 呼んでよい）。以前は事前に`seiran-server`を一度起動して適用する手順が必要だった。
+async fn apply_migrations(pool: &sqlx::PgPool) {
+    seiran_common::run_migrations(pool)
+        .await
+        .expect("結合テスト用DBへのマイグレーション適用に失敗");
+}
+
+/// CLAUDE.md の規約に従うテストユーザー（パスワード `seiranda`）が無ければ作成する
+/// （PLC genesis は行わない。`at_did` 無しのローカルアカウント）。
+async fn ensure_test_user(pool: &sqlx::PgPool, username: &str) {
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM actors WHERE actor_type = 'local' AND username = $1)",
+    )
+    .bind(username)
+    .fetch_one(pool)
+    .await
+    .expect("テストユーザー存在確認に失敗");
+    if exists {
+        return;
+    }
+    let password_hash = seiran_common::auth::local::LocalAuthProvider::hash_password("seiranda")
+        .expect("パスワードハッシュ失敗");
+    let domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
+    let result = seiran_common::repository::create_local_account(
+        pool,
+        &format!("{username}@integration-test.invalid"),
+        &password_hash,
+        "user",
+        &seiran_common::repository::NewLocalActor {
+            id: seiran_common::generate_snowflake_id(chrono::Utc::now()),
+            username,
+            domain: &domain,
+            at_did: None,
+            at_signing_key_pem: None,
+            at_rotation_key_pem: None,
+            birth_date: None,
+        },
+    )
+    .await;
+    // 並列実行された別テストが同時に作成した場合の一意制約違反は無視する。
+    if let Err(e) = result {
+        let is_unique_violation =
+            matches!(&e, sqlx::Error::Database(db) if db.is_unique_violation());
+        assert!(is_unique_violation, "テストユーザー作成に失敗: {e}");
+    }
 }
 
 /// 本物の DB・secrets を使って `seiran_api::router` を構築する。
-/// マイグレーションは既に適用済みである前提（`seiran-server` 起動時に自動実行される）。
+/// マイグレーションは構築時に適用する。
 #[allow(dead_code)]
 pub async fn test_router() -> Router {
     load_workspace_env();
@@ -89,6 +139,7 @@ pub async fn test_router() -> Router {
     let pool = get_db_pool(10)
         .await
         .expect("DB接続に失敗（POSTGRES_* 環境変数 / docker compose の起動を確認してください）");
+    apply_migrations(&pool).await;
     let http_client = Arc::new(
         reqwest::Client::builder()
             .user_agent("seiran-integration-test/0.1.0")
@@ -111,11 +162,12 @@ pub async fn test_router() -> Router {
 }
 
 /// CLAUDE.md の規約に従うテストユーザー（`seiran1` / パスワード `seiranda`）でログインし、
-/// JWT を返す。ユーザーが存在しない場合はパニックする（事前に作成しておくこと）。
+/// JWT を返す。ユーザーが存在しなければ作成する。
 // 統合テストはファイル単位で別クレートになるため、一部のテストからのみ使う共通ヘルパーは
 // 他のテストクレートでは未使用になる。
 #[allow(dead_code)]
 pub async fn login_test_user(app: &Router, username: &str) -> String {
+    ensure_test_user(&test_db_pool().await, username).await;
     let body = serde_json::json!({ "identifier": username, "password": "seiranda" }).to_string();
     let req = Request::builder()
         .method("POST")

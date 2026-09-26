@@ -128,11 +128,13 @@ async fn resolve_ap_side_bridge(
     let real_id = actor_repo
         .upsert_remote_bsky(
             new_id,
-            did,
-            &profile.handle,
-            profile.display_name.as_deref(),
-            profile.avatar.as_deref(),
-            profile.banner.as_deref(),
+            &crate::repository::BskyActorProfile {
+                at_did: did,
+                handle: &profile.handle,
+                display_name: profile.display_name.as_deref(),
+                avatar_url: profile.avatar.as_deref(),
+                banner_url: profile.banner.as_deref(),
+            },
             chrono::Utc::now(),
         )
         .await

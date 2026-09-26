@@ -68,7 +68,12 @@ async fn poll_once(
         let pem: String = row
             .try_get("at_signing_key_pem")
             .map_err(|e| e.to_string())?;
-        if let Err(e) = poll_user(pool, job_queue, http, stream_hub, actor_id, &did, &pem).await {
+        let account = LocalChatAccount {
+            actor_id,
+            did: &did,
+            pem: &pem,
+        };
+        if let Err(e) = poll_user(pool, job_queue, http, stream_hub, &account).await {
             // 401は主にDIDがPLCディレクトリ上で無効（テスト用アカウント等）な場合に発生する
             // 想定内のケースのため warn 止まりとし、エラー監視のノイズにしない。
             tracing::warn!("[BskyDmPoll] actor_id={} のポーリング失敗: {}", actor_id, e);
@@ -77,16 +82,22 @@ async fn poll_once(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+/// DMポーリング対象のローカルアカウント（chat サービスへの認証に使う DID と署名鍵）。
+struct LocalChatAccount<'a> {
+    actor_id: i64,
+    did: &'a str,
+    /// サービス間認証JWTの署名鍵（PEM）。
+    pem: &'a str,
+}
+
 async fn poll_user(
     pool: &PgPool,
     job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
-    actor_id: i64,
-    did: &str,
-    pem: &str,
+    account: &LocalChatAccount<'_>,
 ) -> Result<(), String> {
+    let LocalChatAccount { actor_id, did, pem } = *account;
     let jwt = sign_service_auth_jwt(pem, did, CHAT_SERVICE_AUD, "chat.bsky.convo.listConvos")
         .map_err(|e| e.to_string())?;
     let resp = http
@@ -109,26 +120,26 @@ async fn poll_user(
         .unwrap_or_default();
 
     for convo in &convos {
-        if let Err(e) =
-            sync_convo(pool, job_queue, http, stream_hub, actor_id, did, pem, convo).await
-        {
+        if let Err(e) = sync_convo(pool, job_queue, http, stream_hub, account, convo).await {
             tracing::error!("[BskyDmPoll] convo同期失敗 actor_id={}: {}", actor_id, e);
         }
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn sync_convo(
     pool: &PgPool,
     job_queue: &Arc<dyn JobQueue>,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
-    local_actor_id: i64,
-    local_did: &str,
-    local_pem: &str,
+    account: &LocalChatAccount<'_>,
     convo: &serde_json::Value,
 ) -> Result<(), String> {
+    let LocalChatAccount {
+        actor_id: local_actor_id,
+        did: local_did,
+        pem: local_pem,
+    } = *account;
     let convo_id = convo
         .get("id")
         .and_then(|v| v.as_str())

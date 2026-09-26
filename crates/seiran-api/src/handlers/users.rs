@@ -15,10 +15,7 @@ use seiran_common::ApDeliveryKind;
 use crate::error::ApiError;
 use crate::handlers::notes::dto::{build_instance_info, RemoteInstanceInfo};
 use crate::handlers::notes::{
-    attach_poll_votes, attach_remote_instance_info, attach_reply_quote_gates, embed_quotes,
-    embed_renotes, enqueue_stale_poll_fetches, fetch_attachments_map, fetch_link_cards_map,
-    fetch_reactions_map, resolve_mention_facets_in_place, to_note_response,
-    to_reaction_event_response, NoteResponse, ProfileFeedItem,
+    build_note_responses, to_reaction_event_response, NoteResponse, ProfileFeedItem,
 };
 use crate::middleware::{extract_auth, MaybeAuthedUser};
 use crate::AppState;
@@ -85,7 +82,7 @@ pub async fn user_posts(
         None => None,
     };
 
-    let mut post_rows = match state
+    let post_rows = match state
         .posts
         .timeline_by_actor(
             actor_id,
@@ -103,30 +100,7 @@ pub async fn user_posts(
             return ApiError::Internal(e.to_string()).into_response();
         }
     };
-    resolve_mention_facets_in_place(&state.db, &mut post_rows).await;
-    let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
-    let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
-    let mut lc_map = fetch_link_cards_map(&state.db, &post_ids).await;
-    let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
-    let mut notes: Vec<NoteResponse> = post_rows
-        .into_iter()
-        .map(|p| {
-            let id = p.id;
-            let mut nr = to_note_response(
-                p,
-                att_map.remove(&id).unwrap_or_default(),
-                lc_map.remove(&id).unwrap_or_default(),
-            );
-            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
-            nr
-        })
-        .collect();
-    embed_renotes(&state.db, &mut notes, my_actor_id).await;
-    embed_quotes(&state.db, &mut notes, my_actor_id).await;
-    attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
-    attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
-    attach_remote_instance_info(&state, &mut notes).await;
-    enqueue_stale_poll_fetches(&state, &notes).await;
+    let notes = build_note_responses(&state, post_rows, my_actor_id).await;
 
     if !params.include_reactions {
         return Json(notes).into_response();
@@ -140,10 +114,12 @@ pub async fn user_posts(
         .reactions_by_actor_for_feed(
             actor_id,
             my_actor_id,
-            until_id,
-            since_id,
+            seiran_common::repository::Page {
+                limit,
+                until_id,
+                since_id,
+            },
             params.exclude_direct,
-            limit,
         )
         .await
     {
@@ -481,11 +457,13 @@ async fn fetch_bsky_profile_from_appview(
             .actors
             .upsert_remote_bsky(
                 db_actor.id,
-                &bsky.did,
-                &bsky.handle,
-                bsky.display_name.as_deref(),
-                bsky.avatar.as_deref(),
-                bsky.banner.as_deref(),
+                &seiran_common::repository::BskyActorProfile {
+                    at_did: &bsky.did,
+                    handle: &bsky.handle,
+                    display_name: bsky.display_name.as_deref(),
+                    avatar_url: bsky.avatar.as_deref(),
+                    banner_url: bsky.banner.as_deref(),
+                },
                 now,
             )
             .await;
@@ -715,22 +693,17 @@ async fn build_profile_response(
     my_user_id: Option<i64>,
     state: &AppState,
 ) -> Response {
-    build_profile_response_inner(actor, my_user_id, state, false).await
+    build_profile_response_inner(actor, my_user_id, state, false)
+        .await
+        .into_response()
 }
 
-/// `is_first_fetch`: 直前に`fetch_remote_profile`がDB未登録アクターを新規upsertした直後の
-/// 初回表示なら`true`（featured collectionを同期で取得し、初回表示から見せる）。それ以外
-/// （DB既存アクターの通常表示）は`false`（`RemoteFeaturedSync`ジョブを積むだけで、表示は
-/// 既存の`pinned_posts`をそのまま返す。「表示時再検証」パターン、2026-08-31マイケル指摘：
-/// Authorized Fetch対応でリモートフェッチが遅くなり、毎回の同期待ちが体感速度を損なうため）。
-async fn build_profile_response_inner(
-    actor: Actor,
-    my_user_id: Option<i64>,
+/// 閲覧者の actor_id と、投稿一覧の可視性判定に使う閲覧者（管理者は対象本人と同じ可視範囲）を返す。
+async fn resolve_profile_viewer(
     state: &AppState,
-    is_first_fetch: bool,
-) -> Response {
-    let actor_id = actor.id;
-
+    my_user_id: Option<i64>,
+    actor_id: i64,
+) -> Result<(Option<i64>, Option<i64>), ApiError> {
     // 自分の actor_id を取得
     let my_actor_id: Option<i64> = if let Some(uid) = my_user_id {
         match state.actors.find_local_by_user_id(uid).await {
@@ -738,7 +711,7 @@ async fn build_profile_response_inner(
             Ok(None) => None,
             Err(e) => {
                 tracing::error!("[profile] 自分の actor_id 取得失敗: {}", e);
-                return ApiError::Internal(e.to_string()).into_response();
+                return Err(ApiError::Internal(e.to_string()));
             }
         }
     } else {
@@ -763,7 +736,24 @@ async fn build_profile_response_inner(
     } else {
         my_actor_id
     };
+    Ok((my_actor_id, profile_viewer_actor_id))
+}
 
+/// 閲覧者から見たプロフィール対象との関係。
+struct ViewerRelationship {
+    follow_status: String,
+    is_followed: bool,
+    is_blocking: bool,
+    is_blocked_by: bool,
+    is_muted: bool,
+    is_repost_muted: bool,
+}
+
+async fn load_viewer_relationship(
+    state: &AppState,
+    my_actor_id: Option<i64>,
+    actor_id: i64,
+) -> Result<ViewerRelationship, ApiError> {
     // フォロー状態
     let follow_status = match my_actor_id {
         Some(mid) => match state.follows.find_status(mid, actor_id).await {
@@ -771,7 +761,7 @@ async fn build_profile_response_inner(
             Ok(None) => "not_following".to_string(),
             Err(e) => {
                 tracing::error!("[profile] フォロー状態取得失敗: {}", e);
-                return ApiError::Internal(e.to_string()).into_response();
+                return Err(ApiError::Internal(e.to_string()));
             }
         },
         None => "not_following".to_string(),
@@ -811,11 +801,18 @@ async fn build_profile_response_inner(
             .unwrap_or(false),
         None => false,
     };
+    Ok(ViewerRelationship {
+        follow_status,
+        is_followed,
+        is_blocking,
+        is_blocked_by,
+        is_muted,
+        is_repost_muted,
+    })
+}
 
-    // アカウント凍結状態（ローカル・リモート共通、actors.suspended_at を直接見る。
-    // #凍結リモート対応）。
-    let is_suspended = actor.suspended_at.is_some();
-
+/// プロフィール表示を契機に、リモートアクターの各種再同期ジョブを積む（初回表示のピン留めのみ同期取得）。
+async fn schedule_remote_actor_sync(state: &AppState, actor: &Actor, is_first_fetch: bool) {
     // リモート Fedi アクターの場合、featured collection（ピン留め投稿, #61）を同期する。
     // 初回表示（`fetch_remote_profile`がDB未登録アクターを新規upsertした直後）だけは
     // その場で同期取得し、初回表示から見せる。それ以外（DB既存アクターの通常表示）は
@@ -824,7 +821,7 @@ async fn build_profile_response_inner(
     // 体感速度を損なうため）。
     if matches!(actor.actor_type.as_str(), "fedi" | "remote_seiran") {
         if is_first_fetch {
-            sync_remote_fedi_pinned(state, &actor).await;
+            sync_remote_fedi_pinned(state, actor).await;
         } else {
             state.enqueue_remote_featured_sync(actor.id).await;
         }
@@ -844,10 +841,18 @@ async fn build_profile_response_inner(
     {
         state.enqueue_bridge_user_link_resolve(actor.id).await;
     }
+}
 
+/// 最近の投稿とピン留め投稿を組み立てる。
+async fn load_profile_posts(
+    state: &AppState,
+    actor_id: i64,
+    my_actor_id: Option<i64>,
+    profile_viewer_actor_id: Option<i64>,
+) -> Result<(Vec<NoteResponse>, Vec<NoteResponse>), ApiError> {
     // 最近の投稿（最大20件）。タイムラインと同じ NoteCard で描画するため、
     // アクター情報・添付・リアクションを含む NoteResponse で返す（#43）。
-    let mut post_rows = match state
+    let post_rows = match state
         .posts
         .timeline_by_actor(actor_id, profile_viewer_actor_id, 20, None, None, true)
         .await
@@ -855,33 +860,14 @@ async fn build_profile_response_inner(
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] 最近の投稿取得失敗: {}", e);
-            return ApiError::Internal(e.to_string()).into_response();
+            return Err(ApiError::Internal(e.to_string()));
         }
     };
-    resolve_mention_facets_in_place(&state.db, &mut post_rows).await;
-    let post_ids: Vec<i64> = post_rows.iter().map(|p| p.id).collect();
-    let mut att_map = fetch_attachments_map(&state.db, &post_ids).await;
-    let mut lc_map = fetch_link_cards_map(&state.db, &post_ids).await;
-    let rmap = fetch_reactions_map(&state.db, &post_ids, my_actor_id).await;
-    let mut recent_posts: Vec<NoteResponse> = post_rows
-        .into_iter()
-        .map(|p| {
-            let id = p.id;
-            let mut nr = to_note_response(
-                p,
-                att_map.remove(&id).unwrap_or_default(),
-                lc_map.remove(&id).unwrap_or_default(),
-            );
-            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
-            nr
-        })
-        .collect();
-    embed_renotes(&state.db, &mut recent_posts, my_actor_id).await;
-    embed_quotes(&state.db, &mut recent_posts, my_actor_id).await;
+    let mut recent_posts = build_note_responses(state, post_rows, my_actor_id).await;
 
     // ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
     // Fedi featured collection / Bsky pinnedPost 同期結果（`sync_remote_pinned_posts` 参照）。
-    let mut pinned_rows = match state
+    let pinned_rows = match state
         .pinned_posts
         .list_timeline_by_actor(actor_id, my_actor_id)
         .await
@@ -889,29 +875,11 @@ async fn build_profile_response_inner(
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[profile] ピン留め投稿取得失敗: {}", e);
-            return ApiError::Internal(e.to_string()).into_response();
+            return Err(ApiError::Internal(e.to_string()));
         }
     };
-    resolve_mention_facets_in_place(&state.db, &mut pinned_rows).await;
     let pinned_ids: Vec<i64> = pinned_rows.iter().map(|p| p.id).collect();
-    let mut pinned_att_map = fetch_attachments_map(&state.db, &pinned_ids).await;
-    let mut pinned_lc_map = fetch_link_cards_map(&state.db, &pinned_ids).await;
-    let pinned_rmap = fetch_reactions_map(&state.db, &pinned_ids, my_actor_id).await;
-    let mut pinned_posts: Vec<NoteResponse> = pinned_rows
-        .into_iter()
-        .map(|p| {
-            let id = p.id;
-            let mut nr = to_note_response(
-                p,
-                pinned_att_map.remove(&id).unwrap_or_default(),
-                pinned_lc_map.remove(&id).unwrap_or_default(),
-            );
-            nr.reactions = pinned_rmap.get(&id).cloned().unwrap_or_default();
-            nr
-        })
-        .collect();
-    embed_renotes(&state.db, &mut pinned_posts, my_actor_id).await;
-    embed_quotes(&state.db, &mut pinned_posts, my_actor_id).await;
+    let mut pinned_posts = build_note_responses(state, pinned_rows, my_actor_id).await;
 
     // 自分自身のプロフィールを見ている場合、各投稿の pinned_by_me を設定する
     // （ピン留めボタンの現在状態表示に使う）。
@@ -929,30 +897,16 @@ async fn build_profile_response_inner(
             nr.pinned_by_me = Some(true);
         }
     }
-    attach_poll_votes(&state.db, &mut recent_posts, my_actor_id).await;
-    attach_poll_votes(&state.db, &mut pinned_posts, my_actor_id).await;
-    attach_reply_quote_gates(state, &mut recent_posts, my_actor_id).await;
-    attach_reply_quote_gates(state, &mut pinned_posts, my_actor_id).await;
-    attach_remote_instance_info(state, &mut recent_posts).await;
-    attach_remote_instance_info(state, &mut pinned_posts).await;
-    enqueue_stale_poll_fetches(state, &recent_posts).await;
-    enqueue_stale_poll_fetches(state, &pinned_posts).await;
+    Ok((recent_posts, pinned_posts))
+}
 
-    // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
-    let avatar_url: Option<String> = seiran_common::avatar::resolve_avatar_url(
-        state.actors.find_avatar_url(actor_id).await.ok().flatten(),
-        &actor.actor_type,
-        &actor.domain,
-        actor_id,
-    );
-    // 背景画像（バナー）URL: banner_media_id があれば storage_providers から解決、
-    // なければ banner_url をそのまま使う。avatar_url と異なり未設定時のフォールバック
-    // 生成は行わない（背景画像を持つユーザーのみ表示する）。
-    let banner_url: Option<String> = state.actors.find_banner_url(actor_id).await.ok().flatten();
-
-    // 実ユーザー（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
-    // その実ユーザーアクターのハンドルとプロトコルをフロントの「実ユーザーワープ」導線に渡す。
-    let (bridge_real_handle, bridge_protocol) = match actor.bridge_real_actor_id {
+/// 実ユーザー（ブリッジの実体）解決: bridge_real_actor_id が埋まっていれば、
+/// その実ユーザーアクターのハンドルとプロトコルをフロントの「実ユーザーワープ」導線に渡す。
+async fn resolve_bridge_real_user(
+    state: &AppState,
+    actor: &Actor,
+) -> (Option<String>, Option<String>) {
+    match actor.bridge_real_actor_id {
         Some(real_id) => match state.actors.find_by_id(real_id).await {
             Ok(Some(real)) => {
                 let handle = seiran_common::username::actor_handle(
@@ -970,19 +924,15 @@ async fn build_profile_response_inner(
             _ => (None, None),
         },
         None => (None, None),
-    };
+    }
+}
 
-    let profile_fields = actor
-        .profile_fields
-        .as_ref()
-        .map(profile_fields_from_json)
-        .unwrap_or_default();
-
-    // 公開リスト一覧（#63）。現状ローカルユーザーのみ対応（リモートは将来課題）。
-    let public_lists = if actor.actor_type == "local" {
+/// 公開リスト一覧（#63）。現状ローカルユーザーのみ対応（リモートは将来課題）。
+async fn load_public_lists(state: &AppState, actor: &Actor) -> Vec<PublicListSummary> {
+    if actor.actor_type == "local" {
         state
             .lists
-            .list_public_by_owner(actor_id)
+            .list_public_by_owner(actor.id)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -996,26 +946,22 @@ async fn build_profile_response_inner(
             .unwrap_or_default()
     } else {
         vec![]
-    };
+    }
+}
 
-    // 相手からブロックされている場合、Bsky準拠の相互完全非表示の一環として
-    // 自己紹介文・プロフィールのキーバリュー項目も見せない
-    // （recent_posts/pinned_postsは既にタイムラインクエリのフィルタで空になる）。
-    let (bio, profile_fields) = if is_blocked_by {
-        (None, vec![])
-    } else {
-        (actor.bio, profile_fields)
-    };
-
-    // bio/profile_fields中のURL・メンション記法（`@user@host`/`@handle.bsky.social`）の
-    // 解決結果（#リンク解決）。陽性/陰性ともキャッシュ済みのDB行を引き、未キャッシュ・TTL
-    // 経過済み陰性は非同期ジョブをenqueueする。WebFinger自体は`acct:`形式にしか使えないため、
-    // 実際の判定はActivityPubのContent-Negotiation直接フェッチ／Bsky AppView経由で行う
-    // （`seiran_common::jobs::link_resolve`参照）。
-    let link_resolutions: std::collections::HashMap<String, ResolvedLinkInfo> = {
-        let mut urls =
-            seiran_common::link_target::extract_link_targets(bio.as_deref().unwrap_or(""));
-        for field in &profile_fields {
+/// bio/profile_fields中のURL・メンション記法（`@user@host`/`@handle.bsky.social`）の
+/// 解決結果（#リンク解決）。陽性/陰性ともキャッシュ済みのDB行を引き、未キャッシュ・TTL
+/// 経過済み陰性は非同期ジョブをenqueueする。WebFinger自体は`acct:`形式にしか使えないため、
+/// 実際の判定はActivityPubのContent-Negotiation直接フェッチ／Bsky AppView経由で行う
+/// （`seiran_common::jobs::link_resolve`参照）。
+async fn resolve_profile_link_targets(
+    state: &AppState,
+    bio: Option<&str>,
+    profile_fields: &[ProfileField],
+) -> std::collections::HashMap<String, ResolvedLinkInfo> {
+    {
+        let mut urls = seiran_common::link_target::extract_link_targets(bio.unwrap_or(""));
+        for field in profile_fields {
             urls.extend(seiran_common::link_target::extract_link_targets(
                 &field.value,
             ));
@@ -1098,22 +1044,26 @@ async fn build_profile_response_inner(
             }
         }
         resolved
-    };
+    }
+}
 
-    // 自己紹介文・表示名中のカスタム絵文字（#169, #186）。ローカルアクターは自己紹介文を
-    // custom_emojis と都度照合して解決し（ノート本文の解決と同じ経路）、表示名の分は
-    // `update_profile` が display_name 変更のたびに事前計算・保存した `actor.emoji_map`
-    // をマージする。リモート Fedi アクターは AP Actor の tag 由来 `emoji_map`（表示名・
-    // 自己紹介の両方のショートコードを含む）をそのまま使う。Bsky にはカスタム絵文字の
-    // 概念が無いため常に空。
-    let emojis: std::collections::HashMap<String, String> = if actor.actor_type == "local" {
-        let mut candidates = bio
-            .as_deref()
-            .map(extract_shortcode_candidates)
-            .unwrap_or_default();
+/// 自己紹介文・表示名中のカスタム絵文字（#169, #186）。ローカルアクターは自己紹介文を
+/// custom_emojis と都度照合して解決し（ノート本文の解決と同じ経路）、表示名の分は
+/// `update_profile` が display_name 変更のたびに事前計算・保存した `actor.emoji_map`
+/// をマージする。リモート Fedi アクターは AP Actor の tag 由来 `emoji_map`（表示名・
+/// 自己紹介の両方のショートコードを含む）をそのまま使う。Bsky にはカスタム絵文字の
+/// 概念が無いため常に空。
+async fn resolve_profile_emojis(
+    state: &AppState,
+    actor: &Actor,
+    bio: Option<&str>,
+    profile_fields: &[ProfileField],
+) -> std::collections::HashMap<String, String> {
+    if actor.actor_type == "local" {
+        let mut candidates = bio.map(extract_shortcode_candidates).unwrap_or_default();
         // プロフィールのキーバリュー項目（key/valueとも、#62）中のショートコードも対象に含める
         // （#リンク解決の副次対応。bioにしか無いショートコードしか解決していなかった）。
-        for field in &profile_fields {
+        for field in profile_fields {
             candidates.extend(extract_shortcode_candidates(&field.name));
             candidates.extend(extract_shortcode_candidates(&field.value));
         }
@@ -1141,37 +1091,33 @@ async fn build_profile_response_inner(
             .as_ref()
             .map(json_map_to_string_map)
             .unwrap_or_default()
-    };
+    }
+}
 
-    // フォロー中/フォロワー人数（#56）。プロフィールカードの表示・右ペインタブ切替に使う。
-    let (following_count, follower_count) = state
-        .follows
-        .count_relations(actor_id)
-        .await
-        .unwrap_or((0, 0));
-
-    let instance = resolve_profile_instance_info(state, &actor.actor_type, &actor.domain).await;
-
-    // プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。ローカルユーザー
-    // （プロフィール編集画面での自己登録）とリモートFediアクター（本人のAP actor文書の
-    // alsoKnownAs自己申告を`jobs::also_known_as_sync`が取り込む）の両方に対応する。bsky
-    // アクターは対象外（public_listsと同じくbskyアクターは非対応）。表示は常にキャッシュ
-    // 済みの検証結果（`verified`）を返しつつ、表示のたびに非同期の再検証/同期ジョブを積む
-    // （「表示時再検証」パターン）。ユーザーが情報が古いと感じたらリロードすれば、次に開く
-    // 頃には反映されている想定（`docs/architecture.md`参照）。
-    let also_known_as: Vec<crate::handlers::also_known_as::AlsoKnownAsItem> = if matches!(
+/// プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。ローカルユーザー
+/// （プロフィール編集画面での自己登録）とリモートFediアクター（本人のAP actor文書の
+/// alsoKnownAs自己申告を`jobs::also_known_as_sync`が取り込む）の両方に対応する。bsky
+/// アクターは対象外（public_listsと同じくbskyアクターは非対応）。表示は常にキャッシュ
+/// 済みの検証結果（`verified`）を返しつつ、表示のたびに非同期の再検証/同期ジョブを積む
+/// （「表示時再検証」パターン）。ユーザーが情報が古いと感じたらリロードすれば、次に開く
+/// 頃には反映されている想定（`docs/architecture.md`参照）。
+async fn load_also_known_as(
+    state: &AppState,
+    actor: &Actor,
+) -> Vec<crate::handlers::also_known_as::AlsoKnownAsItem> {
+    if matches!(
         actor.actor_type.as_str(),
         "local" | "fedi" | "remote_seiran"
     ) {
-        match state.also_known_as.list_with_actor_info(actor_id).await {
+        match state.also_known_as.list_with_actor_info(actor.id).await {
             Ok(rows) => {
                 if matches!(actor.actor_type.as_str(), "fedi" | "remote_seiran") {
-                    state.enqueue_remote_also_known_as_sync(actor_id).await;
+                    state.enqueue_remote_also_known_as_sync(actor.id).await;
                 } else {
                     for row in &rows {
                         if row.actor_type != "bsky" {
                             state
-                                .enqueue_also_known_as_verify(actor_id, row.target_actor_id)
+                                .enqueue_also_known_as_verify(actor.id, row.target_actor_id)
                                 .await;
                         }
                     }
@@ -1185,20 +1131,87 @@ async fn build_profile_response_inner(
         }
     } else {
         vec![]
-    };
+    }
+}
 
-    // 本人が閲覧している場合は編集フォームの初期値として常に返す。他人には
-    // birth_date_public=trueの場合のみ（Fediverse連合と同じ可視性ルール）。
-    let is_self = my_actor_id == Some(actor_id);
-    let (birthday, birthday_public) = if is_self {
+/// 生年月日と公開設定（本人には編集フォームの初期値として常に返し、他人には公開設定時のみ）。
+fn visible_birthday(actor: &Actor, is_self: bool) -> (Option<chrono::NaiveDate>, Option<bool>) {
+    if is_self {
         (actor.birth_date, Some(actor.birth_date_public))
     } else if actor.birth_date_public {
         (actor.birth_date, None)
     } else {
         (None, None)
-    };
+    }
+}
 
-    Json(ProfileResponse {
+/// `is_first_fetch`: 直前に`fetch_remote_profile`がDB未登録アクターを新規upsertした直後の
+/// 初回表示なら`true`（featured collectionを同期で取得し、初回表示から見せる）。それ以外
+/// （DB既存アクターの通常表示）は`false`（`RemoteFeaturedSync`ジョブを積むだけで、表示は
+/// 既存の`pinned_posts`をそのまま返す。「表示時再検証」パターン、2026-08-31マイケル指摘：
+/// Authorized Fetch対応でリモートフェッチが遅くなり、毎回の同期待ちが体感速度を損なうため）。
+async fn build_profile_response_inner(
+    actor: Actor,
+    my_user_id: Option<i64>,
+    state: &AppState,
+    is_first_fetch: bool,
+) -> Result<Json<ProfileResponse>, ApiError> {
+    let actor_id = actor.id;
+    let (my_actor_id, profile_viewer_actor_id) =
+        resolve_profile_viewer(state, my_user_id, actor_id).await?;
+    let ViewerRelationship {
+        follow_status,
+        is_followed,
+        is_blocking,
+        is_blocked_by,
+        is_muted,
+        is_repost_muted,
+    } = load_viewer_relationship(state, my_actor_id, actor_id).await?;
+    // アカウント凍結状態（ローカル・リモート共通、#凍結リモート対応）。
+    let is_suspended = actor.suspended_at.is_some();
+    schedule_remote_actor_sync(state, &actor, is_first_fetch).await;
+    let (recent_posts, pinned_posts) =
+        load_profile_posts(state, actor_id, my_actor_id, profile_viewer_actor_id).await?;
+
+    // アバター URL: avatar_media_id がある場合は storage_providers から解決、なければ avatar_url を使用
+    let avatar_url: Option<String> = seiran_common::avatar::resolve_avatar_url(
+        state.actors.find_avatar_url(actor_id).await.ok().flatten(),
+        &actor.actor_type,
+        &actor.domain,
+        actor_id,
+    );
+    // 背景画像（バナー）URL: 未設定時のフォールバック生成は行わない（背景画像を持つユーザーのみ表示する）。
+    let banner_url: Option<String> = state.actors.find_banner_url(actor_id).await.ok().flatten();
+    let (bridge_real_handle, bridge_protocol) = resolve_bridge_real_user(state, &actor).await;
+    let public_lists = load_public_lists(state, &actor).await;
+
+    // 相手からブロックされている場合、Bsky準拠の相互完全非表示の一環として
+    // 自己紹介文・プロフィールのキーバリュー項目も見せない
+    // （recent_posts/pinned_postsは既にタイムラインクエリのフィルタで空になる）。
+    let (bio, profile_fields) = if is_blocked_by {
+        (None, vec![])
+    } else {
+        let fields = actor
+            .profile_fields
+            .as_ref()
+            .map(profile_fields_from_json)
+            .unwrap_or_default();
+        (actor.bio.clone(), fields)
+    };
+    let link_resolutions =
+        resolve_profile_link_targets(state, bio.as_deref(), &profile_fields).await;
+    let emojis = resolve_profile_emojis(state, &actor, bio.as_deref(), &profile_fields).await;
+    // フォロー中/フォロワー人数（#56）。プロフィールカードの表示・右ペインタブ切替に使う。
+    let (following_count, follower_count) = state
+        .follows
+        .count_relations(actor_id)
+        .await
+        .unwrap_or((0, 0));
+    let instance = resolve_profile_instance_info(state, &actor.actor_type, &actor.domain).await;
+    let also_known_as = load_also_known_as(state, &actor).await;
+    let (birthday, birthday_public) = visible_birthday(&actor, my_actor_id == Some(actor_id));
+
+    Ok(Json(ProfileResponse {
         actor_id: Some(actor_id.to_string()),
         username: actor.username,
         domain: actor.domain,
@@ -1232,10 +1245,8 @@ async fn build_profile_response_inner(
         birthday_public,
         also_known_as,
         link_resolutions,
-    })
-    .into_response()
+    }))
 }
-
 async fn fetch_remote_profile(
     username: &str,
     domain: &str,
@@ -1251,15 +1262,13 @@ async fn fetch_remote_profile(
         }
     };
 
-    let fetch_result = match state.system_signing_key() {
-        Some((key_id, pem)) => {
-            state
-                .ap_client
-                .fetch_actor_signed(&actor_uri, (&key_id, &pem))
-                .await
-        }
-        None => state.ap_client.fetch_actor(&actor_uri).await,
-    };
+    let fetch_result = state
+        .ap_client
+        .fetch_actor_with_key(
+            &actor_uri,
+            seiran_common::ap::client::signing_key_refs(&state.system_signing_key()),
+        )
+        .await;
     let ap_actor = match fetch_result {
         Ok(a) => a,
         Err(e) => {
@@ -1274,45 +1283,28 @@ async fn fetch_remote_profile(
     // ピン留め（featured collection, #61）を初回アクセス時から表示するため、
     // 未認知アクターでもこの時点で DB へ upsert してから build_profile_response に委譲する
     // （マイケルの要望・2026-07-15: 「初回アクセス時も同期するよう拡張する」）。
-    let ap_inbox = ap_actor.inbox.clone().unwrap_or_default();
-    let resolved_username = ap_actor
-        .preferred_username
-        .clone()
-        .unwrap_or_else(|| username.to_string());
-    let display_name = ap_actor
-        .name
-        .clone()
-        .unwrap_or_else(|| resolved_username.clone());
-    let avatar_url = ap_actor.avatar_url();
-    let banner_url = ap_actor.banner_url();
-    // 自己紹介文（AP Person の summary は HTML のため、投稿本文と同じallowlistでサニタイズし
-    // HTMLのまま保持する）。
-    let bio = ap_actor
-        .summary
-        .as_deref()
-        .map(seiran_common::jobs::inbound_activity_process::sanitize_html_allowlist);
-    let emoji_map = ap_actor.emoji_map();
-    // プロフィールのキーバリュー項目（#62）。
-    let profile_fields = ap_actor.profile_fields_json();
+    // `preferredUsername`が無ければWebFinger解決に使った名前で代用する（`from_ap_actor`参照）。
+    let profile = match seiran_common::repository::FediActorProfile::from_ap_actor(
+        &ap_actor,
+        &actor_uri,
+        Some((username, domain)),
+    ) {
+        Ok(profile) => profile,
+        Err(e) => {
+            tracing::warn!(
+                "[profile] リモートアクターを保存できない: {} ({})",
+                e,
+                actor_uri
+            );
+            return ApiError::NotFound("USER_NOT_FOUND").into_response();
+        }
+    };
     let now = chrono::Utc::now();
     let new_actor_id = seiran_common::generate_snowflake_id(now);
 
     match state
         .actors
-        .upsert_remote_fedi(
-            new_actor_id,
-            &actor_uri,
-            &ap_inbox,
-            &resolved_username,
-            domain,
-            &display_name,
-            avatar_url.as_deref(),
-            banner_url.as_deref(),
-            bio.as_deref(),
-            now,
-            &emoji_map,
-            &profile_fields,
-        )
+        .upsert_remote_fedi(new_actor_id, &profile, now)
         .await
     {
         Ok(actor_id) => match state.actors.find_by_id(actor_id).await {
@@ -1335,6 +1327,15 @@ async fn fetch_remote_profile(
 
     // upsert に失敗した場合のフォールバック（従来通りの非永続表示、ピン留めは出せない）。
     let _ = my_user_id;
+    let seiran_common::repository::FediActorProfile {
+        username: resolved_username,
+        display_name,
+        avatar_url,
+        banner_url,
+        bio,
+        emoji_map,
+        ..
+    } = profile;
     Json(ProfileResponse {
         actor_id: None,
         username: resolved_username,
@@ -1598,14 +1599,16 @@ pub async fn update_profile(
         .actors
         .update_profile(
             auth_user.user_id,
-            new_display_name.as_deref(),
-            new_bio.as_deref(),
-            new_avatar_media_id,
-            new_banner_media_id,
-            &new_profile_fields,
-            &new_emoji_map,
-            new_birth_date,
-            new_birth_date_public,
+            &seiran_common::repository::LocalProfileUpdate {
+                display_name: new_display_name.as_deref(),
+                bio: new_bio.as_deref(),
+                avatar_media_id: new_avatar_media_id,
+                banner_media_id: new_banner_media_id,
+                profile_fields: &new_profile_fields,
+                emoji_map: &new_emoji_map,
+                birth_date: new_birth_date,
+                birth_date_public: new_birth_date_public,
+            },
         )
         .await
     {
@@ -1624,11 +1627,13 @@ pub async fn update_profile(
                 .atp_service
                 .commit_profile(
                     current.id,
-                    &atp_display_name,
-                    bio_with_fields.as_deref(),
-                    avatar_media,
-                    banner_media,
-                    pinned_post,
+                    &seiran_common::atp::service::ProfileCommit {
+                        display_name: &atp_display_name,
+                        description: bio_with_fields.as_deref(),
+                        avatar_media,
+                        banner_media,
+                        pinned_post,
+                    },
                     chrono::Utc::now(),
                 )
                 .await
@@ -1864,14 +1869,14 @@ async fn fetch_remote_follow_live(
     // Authorized Fetch（secure mode）を要求するインスタンスでも取得できるよう、
     // list-relayプロキシアクターの鍵で署名する。
     let signing_key = state.system_signing_key();
-    let actor = match &signing_key {
-        Some((key_id, pem)) => state
-            .ap_client
-            .fetch_actor_signed(ap_uri, (key_id, pem))
-            .await
-            .ok()?,
-        None => state.ap_client.fetch_actor(ap_uri).await.ok()?,
-    };
+    let actor = state
+        .ap_client
+        .fetch_actor_with_key(
+            ap_uri,
+            seiran_common::ap::client::signing_key_refs(&signing_key),
+        )
+        .await
+        .ok()?;
     let collection_url = match direction {
         "following" => actor.following,
         _ => actor.followers,

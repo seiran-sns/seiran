@@ -944,7 +944,6 @@ pub fn encode_bsky_feed_like(
 /// 背景画像の blob 参照（同形式）を、`pinned_post` が Some の場合は
 /// ピン留め投稿への strongRef（uri, cid）を含める（#61。Bsky はピン留め1件のみ対応のため、
 /// seiran 側で管理する最大5件のうち最新1件だけをここに渡す）。
-#[allow(clippy::too_many_arguments)]
 pub fn encode_bsky_actor_profile(
     display_name: &str,
     description: Option<&str>,
@@ -1188,20 +1187,35 @@ pub struct CommitEvtOp {
     pub cid: Option<Cid>, // delete の場合は None
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn build_commit_frame(
-    seq: i64,
-    did: &str,
-    commit_cid: &Cid,
-    prev_cid: Option<&Cid>,
-    rev: &str,
-    since: Option<&str>,
-    car_bytes: &[u8],
-    ops: &[CommitEvtOp],
-    blob_cids: &[Cid],
-    time: &str,
-    prev_data: Option<&Cid>,
-) -> Result<Vec<u8>, RepoError> {
+/// `#commit`フレーム（`build_commit_frame`）の内容。フィールドは atproto の`CommitEvt`に対応する。
+pub struct CommitFrame<'a> {
+    pub seq: i64,
+    pub did: &'a str,
+    pub commit_cid: &'a Cid,
+    pub prev_cid: Option<&'a Cid>,
+    pub rev: &'a str,
+    pub since: Option<&'a str>,
+    pub car_bytes: &'a [u8],
+    pub ops: &'a [CommitEvtOp],
+    pub blob_cids: &'a [Cid],
+    pub time: &'a str,
+    pub prev_data: Option<&'a Cid>,
+}
+
+pub fn build_commit_frame(frame: &CommitFrame<'_>) -> Result<Vec<u8>, RepoError> {
+    let CommitFrame {
+        seq,
+        did,
+        commit_cid,
+        prev_cid,
+        rev,
+        since,
+        car_bytes,
+        ops,
+        blob_cids,
+        time,
+        prev_data,
+    } = *frame;
     // ヘッダー CBOR
     // canonical 順: op(2) < t(1)... wait: "op"(2) vs "t"(1)
     // length 1: "t" → comes first

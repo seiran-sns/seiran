@@ -26,18 +26,11 @@ pub(super) async fn notify_local_actor(
     let notif_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = inbox
         .notification_repo
-        .insert(
-            notif_id,
-            target_actor_id,
-            kind,
-            Some(from_actor_id),
-            Some(post_id),
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        .insert(&crate::repository::NewNotification {
+            notifier_actor_id: Some(from_actor_id),
+            note_id: Some(post_id),
+            ..crate::repository::NewNotification::new(notif_id, target_actor_id, kind)
+        })
         .await
     {
         tracing::error!(

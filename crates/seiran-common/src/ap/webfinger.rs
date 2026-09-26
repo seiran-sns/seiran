@@ -57,6 +57,7 @@ pub(super) async fn resolve_webfinger_impl(
     );
 
     tracing::info!("[Webfinger] 解決を試行中: {}", url);
+    super::client::guard_remote_url(&url)?;
 
     let res = client
         .get(&url)

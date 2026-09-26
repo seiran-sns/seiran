@@ -4,6 +4,7 @@ use delivery::{
     redirect_bridge_post_meta, resolve_quote_embed, resolve_reply_context,
     with_bridge_delivery_targets, DeliveryTargets, RegularPostDelivery, ReplyContext,
 };
+use seiran_common::repository::NewNotification;
 use validation::{
     validate_attachment_ids, validate_cw, validate_dm_text_length, validate_link_card_urls,
     validate_poll_choices, validate_text_length,
@@ -148,18 +149,11 @@ async fn create_repost(
         let notif_id = generate_snowflake_id(chrono::Utc::now());
         if let Err(e) = state
             .notifications
-            .insert(
-                notif_id,
-                meta.actor_id,
-                NotificationKind::Repost,
-                Some(actor_id),
-                Some(post_id),
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
+            .insert(&NewNotification {
+                notifier_actor_id: Some(actor_id),
+                note_id: Some(post_id),
+                ..NewNotification::new(notif_id, meta.actor_id, NotificationKind::Repost)
+            })
             .await
         {
             tracing::error!("[create_repost] notifications INSERT 失敗: {}", e);
@@ -661,18 +655,11 @@ async fn notify_local_actor(
     let notif_id = generate_snowflake_id(chrono::Utc::now());
     if let Err(e) = state
         .notifications
-        .insert(
-            notif_id,
-            target_actor_id,
-            kind,
-            Some(actor_id),
-            Some(post_id),
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        .insert(&NewNotification {
+            notifier_actor_id: Some(actor_id),
+            note_id: Some(post_id),
+            ..NewNotification::new(notif_id, target_actor_id, kind)
+        })
         .await
     {
         tracing::error!(

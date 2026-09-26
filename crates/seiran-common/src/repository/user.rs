@@ -2,6 +2,34 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
+/// 新規ローカルアカウント（users 行＋ローカル actors 行）を1トランザクションで作成し、
+/// users.id を返す。別々に挿入すると、同名ユーザーの同時登録で actors 側だけが一意制約違反に
+/// なった際に actor の無い users 行が残り、そのメールアドレスは以後登録もログインもできなく
+/// なっていた。ユーザー名の一意制約違反はそのまま`sqlx::Error::Database`として返す
+/// （呼び出し側で`USERNAME_TAKEN`等へ変換する）。
+pub async fn create_local_account(
+    pool: &PgPool,
+    email: &str,
+    password_hash: &str,
+    role: &str,
+    actor: &crate::repository::actor::NewLocalActor<'_>,
+) -> Result<i64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let user_id: i64 = sqlx::query_scalar(
+        "INSERT INTO users (email, password_hash, role, created_at, updated_at)
+         VALUES ($1, $2, $3::user_role, NOW(), NOW())
+         RETURNING id",
+    )
+    .bind(email)
+    .bind(password_hash)
+    .bind(role)
+    .fetch_one(&mut *tx)
+    .await?;
+    crate::repository::actor::insert_local_actor_row(&mut tx, user_id, actor).await?;
+    tx.commit().await?;
+    Ok(user_id)
+}
+
 /// ログイン処理用の users + actors 結合行。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct LoginRow {

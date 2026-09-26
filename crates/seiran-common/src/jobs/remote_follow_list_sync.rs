@@ -62,18 +62,11 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
     // Authorized Fetch（secure mode）対応。
     let signing_key = ctx.system_signing_key();
 
-    let actor = match &signing_key {
-        Some((key_id, pem)) => ctx
-            .ap_client
-            .fetch_actor_signed(&ap_uri, (key_id, pem))
-            .await
-            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
-        None => ctx
-            .ap_client
-            .fetch_actor(&ap_uri)
-            .await
-            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
-    };
+    let actor = ctx
+        .ap_client
+        .fetch_actor_with_key(&ap_uri, crate::ap::client::signing_key_refs(&signing_key))
+        .await
+        .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?;
 
     let collection_url = match direction.as_str() {
         "following" => actor.following,

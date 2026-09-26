@@ -40,8 +40,8 @@ pub(crate) use profile_material::fetch_atp_profile_material;
 pub use profile_material::resolve_bsky_pinned_post;
 pub use queries::{
     attach_poll_votes, attach_relationship_flags, attach_remote_instance_info,
-    attach_reply_quote_gates, build_instance_cache, embed_quotes, embed_renotes,
-    enqueue_stale_poll_fetches, fetch_attachments_map, fetch_dm_bsky_reactions_map,
+    attach_reply_quote_gates, build_instance_cache, build_note_responses, embed_quotes,
+    embed_renotes, enqueue_stale_poll_fetches, fetch_attachments_map, fetch_dm_bsky_reactions_map,
     fetch_link_cards_map, fetch_reactions_map, resolve_mention_facets_in_place,
 };
 pub use reactions::{

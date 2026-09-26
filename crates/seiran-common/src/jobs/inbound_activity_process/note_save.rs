@@ -671,12 +671,14 @@ pub(super) async fn save_remote_attachments(
             .post_repo
             .attach_remote_media_url(
                 post_id,
-                url,
-                mime_type.as_deref(),
-                None,
-                is_sensitive,
-                false,
-                position as i16,
+                &crate::repository::RemoteAttachment {
+                    url,
+                    mime_type: mime_type.as_deref(),
+                    thumbnail_url: None,
+                    is_sensitive,
+                    is_gif: false,
+                    position: position as i16,
+                },
             )
             .await
         {

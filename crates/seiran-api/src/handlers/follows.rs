@@ -10,15 +10,60 @@ use crate::error::ApiError;
 use crate::middleware::AuthedUser;
 use crate::AppState;
 
-#[derive(Deserialize)]
-pub struct CreateFollowRequest {
+/// フォロー・アンフォローの対象指定。`target`（人間可読な指定）か`actorId`（`actors.id`）の
+/// どちらかを指定する（両方あれば`actorId`優先）。`actorId`は Misskey 互換 API
+/// （`following/create`・`delete`の`userId`）がこのハンドラへそのまま委譲するために使う。
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowTargetRequest {
     /// ローカルユーザー名 / `@alice@mastodon.social` / `https://...` / `did:plc:...`
-    pub target: String,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default, alias = "actor_id")]
+    pub actor_id: Option<String>,
 }
 
-#[derive(Deserialize)]
-pub struct DeleteFollowRequest {
-    pub target: String,
+pub type CreateFollowRequest = FollowTargetRequest;
+pub type DeleteFollowRequest = FollowTargetRequest;
+
+/// 既存のアクター行から、`execute_follow`が受け付ける人間可読なターゲット文字列
+/// （ローカルusername / DID / AP URI）を組み立てる。
+fn target_for_actor(actor: &Actor) -> String {
+    if actor.actor_type == "local" {
+        actor.username.clone()
+    } else if let Some(did) = &actor.at_did {
+        did.clone()
+    } else if let Some(uri) = &actor.ap_uri {
+        uri.clone()
+    } else {
+        format!("{}@{}", actor.username, actor.domain)
+    }
+}
+
+async fn find_actor_by_id_param(state: &AppState, actor_id: &str) -> Result<Actor, ApiError> {
+    let id: i64 = actor_id
+        .parse()
+        .map_err(|_| ApiError::BadRequest("INVALID_USER_ID".to_owned()))?;
+    state
+        .actors
+        .find_by_id(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("USER_NOT_FOUND"))
+}
+
+/// フォロー対象の指定を`execute_follow`用のターゲット文字列へ解決する。
+async fn resolve_follow_target(
+    state: &AppState,
+    req: &FollowTargetRequest,
+) -> Result<String, ApiError> {
+    match (&req.actor_id, &req.target) {
+        (Some(actor_id), _) => Ok(target_for_actor(
+            &find_actor_by_id_param(state, actor_id).await?,
+        )),
+        (None, Some(target)) => Ok(target.clone()),
+        (None, None) => Err(ApiError::BadRequest("TARGET_REQUIRED".to_owned())),
+    }
 }
 
 #[derive(Serialize)]
@@ -39,9 +84,13 @@ pub async fn create_follow(
         return e.into_response();
     }
 
+    let target = match resolve_follow_target(&state, &req).await {
+        Ok(target) => target,
+        Err(e) => return e.into_response(),
+    };
     let config = state.follow_exec_config();
     let result = execute_follow(
-        &req.target,
+        &target,
         user.actor_id,
         &user.username,
         &state.db,
@@ -89,6 +138,37 @@ fn follow_error_response(e: FollowError) -> Response {
     }
 }
 
+/// アンフォロー対象のアクター行を取得する（退会済みアクターも対象）。
+async fn find_unfollow_target(
+    state: &AppState,
+    req: &FollowTargetRequest,
+) -> Result<Actor, ApiError> {
+    if let Some(actor_id) = &req.actor_id {
+        return find_actor_by_id_param(state, actor_id).await;
+    }
+    let target = req
+        .target
+        .as_deref()
+        .ok_or_else(|| ApiError::BadRequest("TARGET_REQUIRED".to_owned()))?;
+    let t = target.trim().trim_start_matches('@');
+    let found = if t.starts_with("did:") {
+        state.actors.find_by_did(t).await
+    } else if t.starts_with("https://") || t.starts_with("http://") {
+        state.actors.find_by_ap_uri(t).await
+    } else {
+        let (username, domain) = t
+            .split_once('@')
+            .unwrap_or((t, state.local_domain.as_str()));
+        state
+            .actors
+            .find_including_withdrawn_by_username_domain(username, domain)
+            .await
+    };
+    found
+        .map_err(|e| ApiError::Internal(format!("[unfollow] ターゲット取得失敗: {}", e)))?
+        .ok_or(ApiError::NotFound("ターゲットが見つかりません"))
+}
+
 pub async fn delete_follow(
     user: AuthedUser,
     State(state): State<AppState>,
@@ -96,33 +176,9 @@ pub async fn delete_follow(
 ) -> impl IntoResponse {
     let local_actor_id = user.actor_id;
 
-    let t = req.target.trim().trim_start_matches('@');
-
-    // ターゲットアクターを DB から取得
-    let target_actor = if t.starts_with("did:") {
-        state.actors.find_by_did(t).await
-    } else if t.starts_with("https://") || t.starts_with("http://") {
-        state.actors.find_by_ap_uri(t).await
-    } else {
-        let parts: Vec<&str> = t.splitn(2, '@').collect();
-        let (username, domain) = if parts.len() == 2 {
-            (parts[0], parts[1])
-        } else {
-            (parts[0], state.local_domain.as_str())
-        };
-        state
-            .actors
-            .find_including_withdrawn_by_username_domain(username, domain)
-            .await
-    };
-
-    let target_actor = match target_actor {
-        Ok(Some(a)) => a,
-        Ok(None) => return ApiError::NotFound("ターゲットが見つかりません").into_response(),
-        Err(e) => {
-            return ApiError::Internal(format!("[unfollow] ターゲット取得失敗: {}", e))
-                .into_response();
-        }
+    let target_actor = match find_unfollow_target(&state, &req).await {
+        Ok(actor) => actor,
+        Err(e) => return e.into_response(),
     };
 
     match unfollow_target(&state, local_actor_id, &user.username, &target_actor).await {

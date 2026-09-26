@@ -40,9 +40,16 @@ async fn setting_i64(state: &AppState, key: &str, default: i64) -> i64 {
     seiran_common::rate_limit::setting_i64(state.site_settings.as_ref(), key, default).await
 }
 
-pub async fn check_account_creation_limit(state: &AppState, ip: &ClientIp) -> Result<(), ApiError> {
+/// 同一IPからのアカウント作成数制限の枠を予約する（上限到達なら`429`）。戻り値の予約IDは、
+/// 登録が失敗した場合に`cancel_account_creation`で取り消す。IPが特定できない場合は制限対象外
+/// （`None`）。以前は「数える→（PLC登録など数秒）→記録する」の順で、並列登録が全て上限判定を
+/// すり抜けていた。
+pub async fn reserve_account_creation(
+    state: &AppState,
+    ip: &ClientIp,
+) -> Result<Option<i64>, ApiError> {
     let Some(ip_str) = ip.0.as_deref() else {
-        return Ok(());
+        return Ok(None);
     };
     let window_minutes = setting_i64(state, "account_creation_ip_window_minutes", 60)
         .await
@@ -51,29 +58,26 @@ pub async fn check_account_creation_limit(state: &AppState, ip: &ClientIp) -> Re
         .await
         .max(1);
     let since = Utc::now() - Duration::minutes(window_minutes);
-    let count = state
+    state
         .auth_rate_limits
-        .count_account_creations(ip_str, since)
+        .reserve_account_creation(ip_str, since, max_accounts)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    if count >= max_accounts {
-        return Err(ApiError::TooManyRequests(
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map(Some)
+        .ok_or(ApiError::TooManyRequests(
             "ACCOUNT_CREATION_RATE_LIMITED",
             Some((window_minutes * 60) as u64),
-        ));
-    }
-    Ok(())
+        ))
 }
 
-pub async fn record_account_creation(state: &AppState, ip: &ClientIp) -> Result<(), ApiError> {
-    if let Some(ip_str) = ip.0.as_deref() {
-        state
-            .auth_rate_limits
-            .record_account_creation(ip_str)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+/// `reserve_account_creation`の予約を取り消す（登録失敗時）。失敗してもログのみ。
+pub async fn cancel_account_creation(state: &AppState, reservation: Option<i64>) {
+    let Some(id) = reservation else {
+        return;
+    };
+    if let Err(e) = state.auth_rate_limits.cancel_account_creation(id).await {
+        tracing::error!("[register] アカウント作成枠の取り消し失敗: {}", e);
     }
-    Ok(())
 }
 
 /// actor_id からロール文字列（"user" / "emoji-editor" / "moderator" / "admin"）を取得する。
@@ -212,14 +216,19 @@ pub async fn check_search_rate_limit(
         .await
         .max(1);
     let since = Utc::now() - Duration::minutes(window_minutes);
+    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    lock_actor_rate_limit(&mut tx, "search_log", actor_id)
+        .await
+        .map_err(internal)?;
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM search_log WHERE actor_id = $1 AND created_at >= $2",
     )
     .bind(actor_id)
     .bind(since)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    .map_err(internal)?;
     if count >= max {
         return Err(ApiError::TooManyRequests(
             "SEARCH_RATE_LIMITED",
@@ -228,10 +237,28 @@ pub async fn check_search_rate_limit(
     }
     sqlx::query("INSERT INTO search_log (actor_id) VALUES ($1)")
         .bind(actor_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     Ok(())
+}
+
+/// 「窓内の件数を数えて上限未満なら記録する」レート制限を、同じアクターの同時リクエスト間で
+/// 直列化するためのトランザクションスコープのアドバイザリロック。数える文と記録する文の間に
+/// 他のリクエストが割り込むと、並列に送ったリクエストが全て上限判定をすり抜けてしまう。
+/// ロックはトランザクション終了時に自動で解放される。
+async fn lock_actor_rate_limit(
+    tx: &mut sqlx::PgConnection,
+    namespace: &str,
+    actor_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
+        .bind(namespace)
+        .bind(actor_id)
+        .execute(tx)
+        .await
+        .map(|_| ())
 }
 
 /// user / emoji-editor が、DM以外のメンション・返信・引用で1時間に話しかけられる
@@ -250,30 +277,38 @@ pub async fn check_and_record_contacts(
         return Ok(());
     }
     let since = Utc::now() - Duration::hours(1);
-    let existing: Vec<(i64,)> = sqlx::query_as(
+    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    lock_actor_rate_limit(&mut tx, "user_contact_log", actor_id)
+        .await
+        .map_err(internal)?;
+    let existing: Vec<i64> = sqlx::query_scalar(
         "SELECT DISTINCT target_actor_id FROM user_contact_log
          WHERE actor_id = $1 AND created_at >= $2",
     )
     .bind(actor_id)
     .bind(since)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let existing: HashSet<i64> = existing.into_iter().map(|row| row.0).collect();
-    if existing.len() + targets.difference(&existing).count() > 30 {
+    .map_err(internal)?;
+    let existing: HashSet<i64> = existing.into_iter().collect();
+    let new_targets: Vec<i64> = targets.difference(&existing).copied().collect();
+    if existing.len() + new_targets.len() > 30 {
         return Err(ApiError::TooManyRequests(
             "CONTACT_RATE_LIMITED",
             Some(3600),
         ));
     }
-    for target in targets.difference(&existing) {
-        sqlx::query("INSERT INTO user_contact_log (actor_id, target_actor_id) VALUES ($1, $2)")
-            .bind(actor_id)
-            .bind(target)
-            .execute(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-    }
+    sqlx::query(
+        "INSERT INTO user_contact_log (actor_id, target_actor_id)
+         SELECT $1, unnest($2::bigint[])",
+    )
+    .bind(actor_id)
+    .bind(&new_targets)
+    .execute(&mut *tx)
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     Ok(())
 }
 

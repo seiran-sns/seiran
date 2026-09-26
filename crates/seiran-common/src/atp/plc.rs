@@ -306,7 +306,6 @@ pub async fn fetch_current_plc_doc_and_prev(
 /// で呼び、既存値を丸ごと維持する）。`rotationKeys`は呼び出し元が確定済みの最終形を渡す
 /// （フォールバックなし、常に明示指定）。署名鍵は呼び出し元が渡す（バックフィルは現在
 /// 有効な共有鍵、`signPlcOperation`はアカウント単位鍵）。
-#[allow(clippy::too_many_arguments)]
 pub fn prepare_plc_rotation_update(
     current_data: &serde_json::Value,
     prev: &str,

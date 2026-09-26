@@ -17,6 +17,7 @@
 //! `crate::unique_retry`でこれを検知しトランザクションの頭からやり直す（advisory lockの
 //! キー不一致によるデッドロック・レース漏れのリスクを避けるためのマイケルの提案）。
 
+use crate::repository::{BskyActorProfile, FediActorProfile};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
@@ -62,62 +63,30 @@ pub async fn promote_after_discovery(
     }
 }
 
-/// AP経由でアクター`ap_uri`を発見した際の upsert + 相互一致マージ判定。
-/// `claimed_at_did`はこのアクター自身がAP拡張フィールド（`seiranAtDid`）で自己申告した
-/// ATP側の相手（未確認）。
-#[allow(clippy::too_many_arguments)]
+/// AP経由でアクター`profile.ap_uri`を発見した際の upsert + 相互一致マージ判定。
+/// `profile.claimed_at_did`はこのアクター自身がAP拡張フィールド（`seiranAtDid`）で自己申告した
+/// ATP側の相手（未確認）。呼び出し元が別途知っている相手（自分自身の`at_did`等）を
+/// 入れてはならない（自己参照で常に結婚が成立してしまう、`project_actor_merge_selfref_lessons`）。
 pub async fn discover_fedi_actor(
     pool: &PgPool,
     id: i64,
-    ap_uri: &str,
-    ap_inbox_url: &str,
-    username: &str,
-    domain: &str,
-    display_name: &str,
-    avatar_url: Option<&str>,
-    bio: Option<&str>,
-    emoji_map: &serde_json::Value,
-    profile_fields: &serde_json::Value,
-    claimed_at_did: Option<&str>,
+    profile: &FediActorProfile,
     now: DateTime<Utc>,
 ) -> Result<DiscoveryOutcome, sqlx::Error> {
     crate::unique_retry::retry_on_unique_violation(|| async {
-        discover_fedi_actor_once(
-            pool,
-            id,
-            ap_uri,
-            ap_inbox_url,
-            username,
-            domain,
-            display_name,
-            avatar_url,
-            bio,
-            emoji_map,
-            profile_fields,
-            claimed_at_did,
-            now,
-        )
-        .await
+        discover_fedi_actor_once(pool, id, profile, now).await
     })
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn discover_fedi_actor_once(
     pool: &PgPool,
     id: i64,
-    ap_uri: &str,
-    ap_inbox_url: &str,
-    username: &str,
-    domain: &str,
-    display_name: &str,
-    avatar_url: Option<&str>,
-    bio: Option<&str>,
-    emoji_map: &serde_json::Value,
-    profile_fields: &serde_json::Value,
-    claimed_at_did: Option<&str>,
+    profile: &FediActorProfile,
     now: DateTime<Utc>,
 ) -> Result<DiscoveryOutcome, sqlx::Error> {
+    let ap_uri = profile.ap_uri.as_str();
+    let claimed_at_did = profile.claimed_at_did.as_deref();
     let mut tx = pool.begin().await?;
 
     let existing_id: Option<i64> = sqlx::query_scalar("SELECT id FROM actors WHERE ap_uri = $1")
@@ -140,18 +109,20 @@ async fn discover_fedi_actor_once(
              avatar_url = COALESCE($4, avatar_url), bio = COALESCE($5, bio), \
              emoji_map = $6, profile_fields = $7, updated_at = $8, \
              claimed_at_did = CASE WHEN actor_type = 'remote_seiran' THEN claimed_at_did \
-                                    ELSE COALESCE(claimed_at_did, $9) END \
+                                    ELSE COALESCE(claimed_at_did, $9) END, \
+             banner_url = COALESCE($10, banner_url) \
              WHERE id = $1",
         )
         .bind(existing_id)
-        .bind(ap_inbox_url)
-        .bind(display_name)
-        .bind(avatar_url)
-        .bind(bio)
-        .bind(emoji_map)
-        .bind(profile_fields)
+        .bind(&profile.ap_inbox_url)
+        .bind(&profile.display_name)
+        .bind(&profile.avatar_url)
+        .bind(&profile.bio)
+        .bind(&profile.emoji_map)
+        .bind(&profile.profile_fields)
         .bind(now)
         .bind(claimed_at_did)
+        .bind(&profile.banner_url)
         .execute(&mut *tx)
         .await?;
         existing_id
@@ -170,18 +141,19 @@ async fn discover_fedi_actor_once(
                              actor_type = 'remote_seiran', claimed_ap_uri = NULL, \
                              display_name = $4, avatar_url = COALESCE($5, avatar_url), \
                              bio = COALESCE($6, bio), emoji_map = $7, profile_fields = $8, \
-                             updated_at = $9 \
+                             updated_at = $9, banner_url = COALESCE($10, banner_url) \
                              WHERE id = $1",
                         )
                         .bind(counterpart_id)
                         .bind(ap_uri)
-                        .bind(ap_inbox_url)
-                        .bind(display_name)
-                        .bind(avatar_url)
-                        .bind(bio)
-                        .bind(emoji_map)
-                        .bind(profile_fields)
+                        .bind(&profile.ap_inbox_url)
+                        .bind(&profile.display_name)
+                        .bind(&profile.avatar_url)
+                        .bind(&profile.bio)
+                        .bind(&profile.emoji_map)
+                        .bind(&profile.profile_fields)
                         .bind(now)
+                        .bind(&profile.banner_url)
                         .execute(&mut *tx)
                         .await?;
                         tracing::info!(
@@ -205,21 +177,22 @@ async fn discover_fedi_actor_once(
                 sqlx::query(
                     "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, \
                      display_name, avatar_url, bio, created_at, updated_at, emoji_map, \
-                     profile_fields, claimed_at_did) \
-                     VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12)",
+                     profile_fields, claimed_at_did, banner_url) \
+                     VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13)",
                 )
                 .bind(id)
                 .bind(ap_uri)
-                .bind(ap_inbox_url)
-                .bind(username)
-                .bind(domain)
-                .bind(display_name)
-                .bind(avatar_url)
-                .bind(bio)
+                .bind(&profile.ap_inbox_url)
+                .bind(&profile.username)
+                .bind(&profile.domain)
+                .bind(&profile.display_name)
+                .bind(&profile.avatar_url)
+                .bind(&profile.bio)
                 .bind(now)
-                .bind(emoji_map)
-                .bind(profile_fields)
+                .bind(&profile.emoji_map)
+                .bind(&profile.profile_fields)
                 .bind(claimed_at_did)
+                .bind(&profile.banner_url)
                 .execute(&mut *tx)
                 .await?;
                 id
@@ -231,47 +204,72 @@ async fn discover_fedi_actor_once(
     Ok(DiscoveryOutcome { actor_id, married })
 }
 
+/// AppView `getProfile` で取得済みの Bsky アクターを保存する共通手順（firehose の未知DID解決・
+/// Bskyフォロー・相互申告の相手解決ジョブで共有）: DID 側の`org.seiran.actor.declaration`
+/// （AP 側の相手の自己申告）を取得し、相互申告マージ込みで保存し（`discover_bsky_actor`）、
+/// 昇格処理（`promote_after_discovery`）まで行う。
+///
+/// `reenqueue_counterpart`が偽なら、未成立の自己申告を受けた相手側解決ジョブの再投入を抑止する
+/// （相手側解決ジョブ自身から呼ぶ場合。無限ジョブ再投入を避けるため）。
+/// 取得元は必ず DID 側の宣言レコードとする。呼び出し元が知っている相手（自分自身の
+/// `ap_uri`等）を渡すと自己参照で常に結婚が成立してしまう（`project_actor_merge_selfref_lessons`）。
+pub async fn discover_bsky_profile(
+    pool: &PgPool,
+    queue: &dyn JobQueue,
+    profile: &crate::atp::client::BskyProfile,
+    reenqueue_counterpart: bool,
+) -> Result<DiscoveryOutcome, sqlx::Error> {
+    let claimed_ap_uri = crate::atp::client::fetch_seiran_actor_declaration(&profile.did).await;
+    let now = Utc::now();
+    let outcome = discover_bsky_actor(
+        pool,
+        crate::generate_snowflake_id(now),
+        &BskyActorProfile {
+            at_did: &profile.did,
+            handle: &profile.handle,
+            display_name: profile.display_name.as_deref(),
+            avatar_url: profile.avatar.as_deref(),
+            banner_url: profile.banner.as_deref(),
+        },
+        claimed_ap_uri.as_deref(),
+        now,
+    )
+    .await?;
+    let claimed = claimed_ap_uri.as_deref().filter(|_| reenqueue_counterpart);
+    promote_after_discovery(pool, queue, &outcome, claimed).await;
+    Ok(outcome)
+}
+
 /// ATP経由でアクター`at_did`を発見した際の upsert + 相互一致マージ判定。
 /// `claimed_ap_uri`はこのアクター自身がATP宣言レコード（`org.seiran.actor.declaration`）で
 /// 自己申告したAP側の相手（未確認）。
-#[allow(clippy::too_many_arguments)]
 pub async fn discover_bsky_actor(
     pool: &PgPool,
     id: i64,
-    at_did: &str,
-    handle: &str,
-    display_name: Option<&str>,
-    avatar_url: Option<&str>,
+    profile: &BskyActorProfile<'_>,
     claimed_ap_uri: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<DiscoveryOutcome, sqlx::Error> {
     crate::unique_retry::retry_on_unique_violation(|| async {
-        discover_bsky_actor_once(
-            pool,
-            id,
-            at_did,
-            handle,
-            display_name,
-            avatar_url,
-            claimed_ap_uri,
-            now,
-        )
-        .await
+        discover_bsky_actor_once(pool, id, profile, claimed_ap_uri, now).await
     })
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn discover_bsky_actor_once(
     pool: &PgPool,
     id: i64,
-    at_did: &str,
-    handle: &str,
-    display_name: Option<&str>,
-    avatar_url: Option<&str>,
+    profile: &BskyActorProfile<'_>,
     claimed_ap_uri: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<DiscoveryOutcome, sqlx::Error> {
+    let BskyActorProfile {
+        at_did,
+        handle,
+        display_name,
+        avatar_url,
+        ..
+    } = *profile;
     let mut tx = pool.begin().await?;
 
     let existing_id: Option<i64> = sqlx::query_scalar("SELECT id FROM actors WHERE at_did = $1")

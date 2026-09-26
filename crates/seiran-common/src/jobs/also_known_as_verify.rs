@@ -78,14 +78,13 @@ pub async fn handle(
                 .acquire_owned()
                 .await
                 .map_err(|e| format!("セマフォ取得失敗: {}", e))?;
-            let fetch_result = match ctx.system_signing_key() {
-                Some((key_id, pem)) => {
-                    ctx.ap_client
-                        .fetch_actor_signed(&target_ap_uri, (&key_id, &pem))
-                        .await
-                }
-                None => ctx.ap_client.fetch_actor(&target_ap_uri).await,
-            };
+            let fetch_result = ctx
+                .ap_client
+                .fetch_actor_with_key(
+                    &target_ap_uri,
+                    crate::ap::client::signing_key_refs(&ctx.system_signing_key()),
+                )
+                .await;
             match fetch_result {
                 Ok(target_ap) => target_ap.claims_also_known_as(&owner_ap_uri),
                 Err(e) => {

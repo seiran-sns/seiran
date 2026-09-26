@@ -42,23 +42,29 @@ pub struct StagedRecord {
     pub bytes: Vec<u8>,
 }
 
+/// 新規の既存DID転入リクエスト（`AtMigrationRepository::create_request`の入力）。
+#[derive(Clone, Copy)]
+pub struct NewMigrationRequest<'a> {
+    pub request_token_hash: &'a str,
+    pub source_handle: &'a str,
+    pub source_pds_endpoint: &'a str,
+    pub source_did: &'a str,
+    pub source_access_jwt: &'a str,
+    pub source_refresh_jwt: &'a str,
+    pub new_username: &'a str,
+    pub password_hash: &'a str,
+    /// `require_email_verification=OFF`の場合のみ`Some`（`register`のemail解決と同じ形）。
+    pub email: Option<&'a str>,
+}
+
 #[async_trait]
 pub trait AtMigrationRepository: Send + Sync {
     /// 新規リクエストを作成する（`fetching_repo`から開始）。
     /// `email`は`require_email_verification=OFF`の場合のみ`Some`（`register`のemail解決と同じ形）。
-    #[allow(clippy::too_many_arguments)]
     async fn create_request(
         &self,
         id: i64,
-        request_token_hash: &str,
-        source_handle: &str,
-        source_pds_endpoint: &str,
-        source_did: &str,
-        source_access_jwt: &str,
-        source_refresh_jwt: &str,
-        new_username: &str,
-        password_hash: &str,
-        email: Option<&str>,
+        req: &NewMigrationRequest<'_>,
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error>;
 
@@ -229,17 +235,20 @@ impl AtMigrationRepository for PgAtMigrationRepository {
     async fn create_request(
         &self,
         id: i64,
-        request_token_hash: &str,
-        source_handle: &str,
-        source_pds_endpoint: &str,
-        source_did: &str,
-        source_access_jwt: &str,
-        source_refresh_jwt: &str,
-        new_username: &str,
-        password_hash: &str,
-        email: Option<&str>,
+        req: &NewMigrationRequest<'_>,
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
+        let NewMigrationRequest {
+            request_token_hash,
+            source_handle,
+            source_pds_endpoint,
+            source_did,
+            source_access_jwt,
+            source_refresh_jwt,
+            new_username,
+            password_hash,
+            email,
+        } = *req;
         sqlx::query(
             "INSERT INTO at_migration_requests
                 (id, status, request_token_hash, source_handle, source_pds_endpoint, source_did,

@@ -199,7 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_migrations(&pool).await?;
         tracing::info!("[seiran-server] マイグレーション適用完了");
         let http_client = Arc::new(
-            reqwest::Client::builder()
+            seiran_common::net::federation_client_builder()
                 .user_agent("seiran-federation/0.1.0")
                 .connect_timeout(Duration::from_secs(5))
                 .timeout(Duration::from_secs(30))
@@ -278,7 +278,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("[seiran-server] マイグレーション適用完了");
 
     let http_client = Arc::new(
-        reqwest::Client::builder()
+        seiran_common::net::federation_client_builder()
             .user_agent("seiran-federation/0.1.0")
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))

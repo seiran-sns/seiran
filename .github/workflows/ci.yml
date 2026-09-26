@@ -165,6 +165,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           load: true # buildxのコンテナドライバはデフォルトでdockerデーモンに載せないため必須
+      - name: DB integration tests
+        # `crates/seiran-api/tests/*_integration.rs`（`#[ignore]`付き、実DBが必要）を、E2Eと同じ
+        # 専用DBで実行する。ハーネスがマイグレーション適用・テストユーザー作成まで行う。
+        env:
+          POSTGRES_USER: seiran_e2e
+          POSTGRES_PASSWORD: seiran_e2e
+          POSTGRES_DB: seiran_e2e
+          DB_HOST: localhost
+          DB_PORT: "5433"
+          LOCAL_DOMAIN: localhost
+        run: |
+          docker compose -f e2e/docker-compose.yml up -d --wait
+          cargo test -p seiran-api --tests -- --ignored
+      - name: Reset E2E database
+        # E2E は空のDBから始める前提のため、結合テストで使ったDBを破棄する。
+        if: always()
+        run: docker compose -f e2e/docker-compose.yml down -v
       - name: Build backend binary
         run: cargo build -p seiran-server
         # webServerのtimeout(600s)内でビルドが走る現状だと、ビルド失敗とサーバー起動

@@ -1,5 +1,6 @@
 use super::activity::*;
 use super::infra::*;
+use super::ApSender;
 use super::*;
 
 /// リアクション配送先。
@@ -99,18 +100,20 @@ async fn resolve_reaction_targets(
 ///
 /// `activity_id` は呼び出し元があらかじめ発行し `reactions.ap_activity_id` に保存した値と
 /// 同一のものを渡すこと（後の Undo で参照するため）。
-#[allow(clippy::too_many_arguments)]
 pub async fn deliver_ap_reaction(
-    ap_client: &ApClient,
-    db: &PgPool,
+    sender: &ApSender<'_>,
     post_id: i64,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
     activity_id: &str,
     content: &str,
     emoji_url: Option<&str>,
 ) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let targets = match resolve_reaction_targets(db, post_id, actor_id).await? {
         Some(v) => v,
         None => return Ok(()),
@@ -154,14 +157,17 @@ pub async fn deliver_ap_reaction(
 /// リモートQuestionへの回答を、Mastodon互換の
 /// `Create { object: Note { name, inReplyTo } }` として投稿者inboxへ送る。
 pub async fn deliver_ap_poll_vote(
-    ap_client: &ApClient,
-    db: &PgPool,
+    sender: &ApSender<'_>,
     post_id: i64,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
     option_names: &[String],
 ) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let row = sqlx::query(
         "SELECT p.ap_object_id, a.ap_inbox_url, a.ap_uri
          FROM posts p JOIN actors a ON a.id = p.actor_id
@@ -223,18 +229,20 @@ pub async fn deliver_ap_poll_vote(
 ///
 /// `prev_activity_id` / `content` は取り消し対象の元リアクションのもの
 /// （`reactions.ap_activity_id` に保存されていた値とその時点の `content`）を渡すこと。
-#[allow(clippy::too_many_arguments)]
 pub async fn deliver_ap_undo_reaction(
-    ap_client: &ApClient,
-    db: &PgPool,
+    sender: &ApSender<'_>,
     post_id: i64,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
     prev_activity_id: &str,
     content: &str,
     emoji_url: Option<&str>,
 ) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let targets = match resolve_reaction_targets(db, post_id, actor_id).await? {
         Some(v) => v,
         None => return Ok(()),

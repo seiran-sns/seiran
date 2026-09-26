@@ -19,13 +19,8 @@ use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
 use seiran_common::repository::{Actor, ListMemberRow, ListRow};
 
 use crate::error::ApiError;
+use crate::handlers::notes::build_note_responses;
 use crate::handlers::notes::dto::TimelineQuery;
-use crate::handlers::notes::queries::{fetch_reposted_ids, resolve_mention_facets_in_place};
-use crate::handlers::notes::{
-    attach_remote_instance_info, attach_reply_quote_gates, embed_quotes, embed_renotes,
-    enqueue_stale_poll_fetches, fetch_attachments_map, fetch_link_cards_map, fetch_reactions_map,
-    to_note_response,
-};
 use crate::handlers::target_resolve::resolve_and_upsert_target;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
@@ -697,44 +692,13 @@ pub async fn list_timeline(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state.lists.timeline(id, limit, until_id, since_id).await {
+    let rows = match state.lists.timeline(id, limit, until_id, since_id).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[list_timeline] クエリ失敗: {}", e);
             return ApiError::Internal("TL取得に失敗しました".to_string()).into_response();
         }
     };
-    resolve_mention_facets_in_place(&state.db, &mut rows).await;
-
-    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
-    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
-    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
-    let rmap = fetch_reactions_map(&state.db, &ids, viewer_actor_id).await;
-    let reposted_set = if let Some(actor_id) = viewer_actor_id {
-        fetch_reposted_ids(&state.db, actor_id, &ids).await
-    } else {
-        Default::default()
-    };
-    let mut notes: Vec<_> = rows
-        .into_iter()
-        .map(|p| {
-            let pid = p.id;
-            let mut nr = to_note_response(
-                p,
-                att_map.remove(&pid).unwrap_or_default(),
-                lc_map.remove(&pid).unwrap_or_default(),
-            );
-            nr.reactions = rmap.get(&pid).cloned().unwrap_or_default();
-            if viewer_actor_id.is_some() {
-                nr.reposted_by_me = Some(reposted_set.contains(&pid));
-            }
-            nr
-        })
-        .collect();
-    embed_renotes(&state.db, &mut notes, viewer_actor_id).await;
-    embed_quotes(&state.db, &mut notes, viewer_actor_id).await;
-    attach_reply_quote_gates(&state, &mut notes, viewer_actor_id).await;
-    attach_remote_instance_info(&state, &mut notes).await;
-    enqueue_stale_poll_fetches(&state, &notes).await;
+    let notes = build_note_responses(&state, rows, viewer_actor_id).await;
     Json(notes).into_response()
 }

@@ -61,6 +61,42 @@ pub struct NotificationRow {
     pub created_at: DateTime<Utc>,
 }
 
+/// 作成する通知1件（`NotificationRepository::insert`の入力）。種別ごとに使う項目が異なるため、
+/// `NewNotification::new`で必須項目（id・宛先・種別）だけを埋め、残りは構造体更新記法で指定する。
+#[derive(Debug, Clone, Copy)]
+pub struct NewNotification<'a> {
+    pub id: i64,
+    pub recipient_actor_id: i64,
+    pub kind: NotificationKind,
+    pub notifier_actor_id: Option<i64>,
+    pub note_id: Option<i64>,
+    pub reaction: Option<&'a str>,
+    pub reaction_emoji_url: Option<&'a str>,
+    /// イベントの発生源を特定する一意識別子（重複INSERT防止、`insert`のコメント参照）。
+    pub source_uri: Option<&'a str>,
+    /// リアクション通知専用の重複排除トークン（`reactions.id`）。
+    pub reaction_id: Option<i64>,
+    /// `MoveRefollowed`/`MoveAlreadyFollowing`（引っ越し先アクター）専用の2つ目のアクター参照。
+    pub related_actor_id: Option<i64>,
+}
+
+impl NewNotification<'_> {
+    pub fn new(id: i64, recipient_actor_id: i64, kind: NotificationKind) -> Self {
+        Self {
+            id,
+            recipient_actor_id,
+            kind,
+            notifier_actor_id: None,
+            note_id: None,
+            reaction: None,
+            reaction_emoji_url: None,
+            source_uri: None,
+            reaction_id: None,
+            related_actor_id: None,
+        }
+    }
+}
+
 #[async_trait]
 pub trait NotificationRepository: Send + Sync {
     /// 通知を1件記録する。`id` は呼び出し側で採番済みの snowflake ID
@@ -81,20 +117,7 @@ pub trait NotificationRepository: Send + Sync {
     /// リアクション（自分がATPへコミットしていないもの）は`None`のままでよい。
     /// `related_actor_id` は `MoveRefollowed`/`MoveAlreadyFollowing`（引っ越し先アクター）
     /// 専用の2つ目のアクター参照。他の種別では `None` のままでよい。
-    #[allow(clippy::too_many_arguments)]
-    async fn insert(
-        &self,
-        id: i64,
-        recipient_actor_id: i64,
-        kind: NotificationKind,
-        notifier_actor_id: Option<i64>,
-        note_id: Option<i64>,
-        reaction: Option<&str>,
-        reaction_emoji_url: Option<&str>,
-        source_uri: Option<&str>,
-        reaction_id: Option<i64>,
-        related_actor_id: Option<i64>,
-    ) -> Result<(), sqlx::Error>;
+    async fn insert(&self, n: &NewNotification<'_>) -> Result<(), sqlx::Error>;
 
     /// 自分宛ての通知を新しい順に取得する（カーソルページネーション、`posts` の
     /// タイムライン系クエリと同じ `until_id`/`since_id` 規約）。
@@ -122,19 +145,7 @@ impl PgNotificationRepository {
 
 #[async_trait]
 impl NotificationRepository for PgNotificationRepository {
-    async fn insert(
-        &self,
-        id: i64,
-        recipient_actor_id: i64,
-        kind: NotificationKind,
-        notifier_actor_id: Option<i64>,
-        note_id: Option<i64>,
-        reaction: Option<&str>,
-        reaction_emoji_url: Option<&str>,
-        source_uri: Option<&str>,
-        reaction_id: Option<i64>,
-        related_actor_id: Option<i64>,
-    ) -> Result<(), sqlx::Error> {
+    async fn insert(&self, n: &NewNotification<'_>) -> Result<(), sqlx::Error> {
         // ブロック・ミュート関係にある相手からの通知は生成しない（$4=notifier_actor_idが
         // NULL のシステム通知は素通り）。呼び出し元（リアクション作成・inbound Follow/Accept/
         // Reaction・firehose・bsky_follower_poll）はこの1箇所の変更だけで自動的に対象になる。
@@ -146,16 +157,16 @@ impl NotificationRepository for PgNotificationRepository {
              WHERE $4::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, $4)
              ON CONFLICT DO NOTHING",
         )
-        .bind(id)
-        .bind(recipient_actor_id)
-        .bind(kind.as_str())
-        .bind(notifier_actor_id)
-        .bind(note_id)
-        .bind(reaction)
-        .bind(reaction_emoji_url)
-        .bind(source_uri)
-        .bind(reaction_id)
-        .bind(related_actor_id)
+        .bind(n.id)
+        .bind(n.recipient_actor_id)
+        .bind(n.kind.as_str())
+        .bind(n.notifier_actor_id)
+        .bind(n.note_id)
+        .bind(n.reaction)
+        .bind(n.reaction_emoji_url)
+        .bind(n.source_uri)
+        .bind(n.reaction_id)
+        .bind(n.related_actor_id)
         .execute(&self.pool)
         .await
         .map(|_| ())

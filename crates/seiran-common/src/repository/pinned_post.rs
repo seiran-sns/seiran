@@ -21,8 +21,8 @@ pub trait PinnedPostsRepository: Send + Sync {
     async fn list_by_actor(&self, actor_id: i64) -> Result<Vec<i64>, sqlx::Error>;
 
     /// actor のピン留め投稿を、タイムラインと同じ結合行（アクター情報込み）で取得する（`pinned_at` 降順）。
-    /// `viewer_actor_id` は閲覧者の actor_id（匿名なら `None`）。`followers_only`/`direct` は
-    /// 投稿者本人または accepted フォロワーの閲覧者にのみ返す（可視性による閲覧制御）。
+    /// `viewer_actor_id` は閲覧者の actor_id（匿名なら `None`）。可視性は他の取得経路と同じ
+    /// `post_is_visible_to` で判定する。
     async fn list_timeline_by_actor(
         &self,
         actor_id: i64,
@@ -54,25 +54,37 @@ impl PgPinnedPostsRepository {
 #[async_trait]
 impl PinnedPostsRepository for PgPinnedPostsRepository {
     async fn pin(&self, actor_id: i64, post_id: i64) -> Result<Vec<i64>, sqlx::Error> {
+        // 追加と上限超過分の削除を1トランザクションにし、同じアクターの同時ピン留めは
+        // アクター行のロックで直列化する（別々の文だと同時実行で上限を超えて残りうる）。
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT 1 FROM actors WHERE id = $1 FOR UPDATE")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await?;
         sqlx::query(
             "INSERT INTO pinned_posts (actor_id, post_id) VALUES ($1, $2)
              ON CONFLICT (actor_id, post_id) DO NOTHING",
         )
         .bind(actor_id)
         .bind(post_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        sqlx::query_scalar::<_, i64>(
-            "DELETE FROM pinned_posts WHERE id IN (
-                SELECT id FROM pinned_posts WHERE actor_id = $1
-                ORDER BY pinned_at DESC OFFSET $2
-             ) RETURNING post_id",
+        let removed = sqlx::query_scalar::<_, i64>(
+            "DELETE FROM pinned_posts pp
+             USING (
+                 SELECT id FROM pinned_posts WHERE actor_id = $1
+                 ORDER BY pinned_at DESC OFFSET $2
+             ) overflow
+             WHERE pp.id = overflow.id
+             RETURNING pp.post_id",
         )
         .bind(actor_id)
         .bind(MAX_PINNED_POSTS)
-        .fetch_all(&self.pool)
-        .await
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(removed)
     }
 
     async fn unpin(&self, actor_id: i64, post_id: i64) -> Result<bool, sqlx::Error> {
@@ -99,34 +111,14 @@ impl PinnedPostsRepository for PgPinnedPostsRepository {
         viewer_actor_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(
-            "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map,
-                    p.visibility::text AS visibility, p.deliver_fedi, p.deliver_bsky, p.mention_facets,
-                    p.reply_count, p.quote_count, p.repost_count, p.content_html
+            concat!("SELECT ", crate::timeline_post_columns!(), "
              FROM pinned_posts pp
              JOIN posts p ON p.id = pp.post_id
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
+             ", crate::timeline_post_joins!(), "
              WHERE pp.actor_id = $1 AND p.deleted_at IS NULL
                AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_is_hidden_for_viewer($2, p.actor_id))
-               AND (
-                   p.visibility NOT IN ('followers_only', 'direct')
-                   OR (p.visibility = 'followers_only' AND (
-                       p.actor_id = $2
-                       OR EXISTS (
-                           SELECT 1 FROM follows f
-                           WHERE f.follower_actor_id = $2 AND f.target_actor_id = p.actor_id AND f.status = 'accepted'
-                       )
-                   ))
-                   OR (p.visibility = 'direct' AND (
-                       p.actor_id = $2
-                       OR EXISTS (SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $2)
-                   ))
-               )
-             ORDER BY pp.pinned_at DESC",
+               AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, false)
+             ORDER BY pp.pinned_at DESC"),
         )
         .bind(actor_id)
         .bind(viewer_actor_id)

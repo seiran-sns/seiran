@@ -18,15 +18,27 @@ pub struct FollowListRow {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// `FollowRepository::upsert_pending`の結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingFollowUpsert {
+    /// 新規に pending で挿入した。
+    Inserted,
+    /// 既に pending の関係があった（状態は変えていない）。
+    AlreadyPending,
+    /// 既に成立済み（accepted）の関係があった（状態は変えていない）。
+    AlreadyAccepted,
+}
+
 #[async_trait]
 pub trait FollowRepository: Send + Sync {
-    /// フォローを pending で挿入する（既存なら status を pending に戻す）。
-    /// 新規に挿入した場合は true、既存の関係を更新した場合は false を返す。
+    /// フォローを pending で挿入する。既存の関係があれば状態を変えずにそのまま返す
+    /// （以前は既存行を無条件に pending へ戻しており、承認制アカウントを再度フォロー操作
+    /// すると成立済み（accepted）のフォローが pending に降格していた）。
     async fn upsert_pending(
         &self,
         follower_actor_id: i64,
         target_actor_id: i64,
-    ) -> Result<bool, sqlx::Error>;
+    ) -> Result<PendingFollowUpsert, sqlx::Error>;
 
     /// フォロー関係の status を取得する（未フォローなら None）。
     async fn find_status(
@@ -91,6 +103,15 @@ pub trait FollowRepository: Send + Sync {
         target_actor_id: i64,
         candidate_follower_ids: &[i64],
     ) -> Result<HashMap<i64, String>, sqlx::Error>;
+
+    /// 先取りした accepted フォロー行（`insert_accepted_with_rkey(.., None)`）へ、ATP コミット後の
+    /// rkey を記録する。行が既に無い（先取りから記録までの間にアンフォローされた）場合は false。
+    async fn set_atp_rkey(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        atp_rkey: &str,
+    ) -> Result<bool, sqlx::Error>;
 
     /// ATP フォロー完了後に accepted で挿入する（rkey を保存）。
     /// 新規に挿入した場合は true、既にフォロー済みだった場合は false を返す。
@@ -226,21 +247,29 @@ impl FollowRepository for PgFollowRepository {
         &self,
         follower_actor_id: i64,
         target_actor_id: i64,
-    ) -> Result<bool, sqlx::Error> {
-        // `xmax = 0` は「このコマンドで新規挿入された行か」の判定に使うPostgresの定石
-        // （UPDATEされた既存行はxmaxに現在のトランザクションIDが入る）。
-        let row: (bool,) = sqlx::query_as(
+    ) -> Result<PendingFollowUpsert, sqlx::Error> {
+        // 既存行には状態を変えない空更新（`status = follows.status`）を当てて行ロックを取り、
+        // 現在の状態を1文で返させる（`DO NOTHING`だと既存行の状態を返せず、別文で読み直すと
+        // 同時実行時に状態を取り違える）。`xmax = 0` は「このコマンドで新規挿入された行か」の
+        // 判定に使うPostgresの定石。
+        let (inserted, status): (bool, String) = sqlx::query_as(
             "INSERT INTO follows (follower_actor_id, target_actor_id, status)
              VALUES ($1, $2, 'pending')
              ON CONFLICT (follower_actor_id, target_actor_id) DO UPDATE
-               SET status = 'pending'
-             RETURNING (xmax = 0)",
+               SET status = follows.status
+             RETURNING (xmax = 0), status::text",
         )
         .bind(follower_actor_id)
         .bind(target_actor_id)
         .fetch_one(&self.pool)
         .await?;
-        Ok(row.0)
+        Ok(if inserted {
+            PendingFollowUpsert::Inserted
+        } else if status == "accepted" {
+            PendingFollowUpsert::AlreadyAccepted
+        } else {
+            PendingFollowUpsert::AlreadyPending
+        })
     }
 
     async fn find_status(
@@ -384,6 +413,24 @@ impl FollowRepository for PgFollowRepository {
             "INSERT INTO follows (follower_actor_id, target_actor_id, status, atp_rkey)
              VALUES ($1, $2, 'accepted', $3)
              ON CONFLICT (follower_actor_id, target_actor_id) DO NOTHING",
+        )
+        .bind(follower_actor_id)
+        .bind(target_actor_id)
+        .bind(atp_rkey)
+        .execute(&self.pool)
+        .await
+        .map(|result| result.rows_affected() > 0)
+    }
+
+    async fn set_atp_rkey(
+        &self,
+        follower_actor_id: i64,
+        target_actor_id: i64,
+        atp_rkey: &str,
+    ) -> Result<bool, sqlx::Error> {
+        sqlx::query(
+            "UPDATE follows SET atp_rkey = $3
+             WHERE follower_actor_id = $1 AND target_actor_id = $2",
         )
         .bind(follower_actor_id)
         .bind(target_actor_id)

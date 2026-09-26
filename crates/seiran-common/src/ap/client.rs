@@ -151,6 +151,78 @@ where
     })
 }
 
+/// `(key_id, 秘密鍵PEM)`の所有版（`system_signing_key()`の戻り値）を、`fetch_actor_with_key`等が
+/// 受け取る借用版へ変換する。
+pub fn signing_key_refs(key: &Option<(String, String)>) -> Option<(&str, &str)> {
+    key.as_ref()
+        .map(|(key_id, pem)| (key_id.as_str(), pem.as_str()))
+}
+
+/// `FediActorProfile::from_ap_actor`の失敗理由。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FediProfileError {
+    /// `inbox`が無い（配送先が無いアクターは保存しない）。
+    MissingInbox,
+    /// `preferredUsername`が無く、WebFinger解決時の名前も無い。
+    MissingUsername,
+}
+
+impl std::fmt::Display for FediProfileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FediProfileError::MissingInbox => f.write_str("リモートアクターに inbox がありません"),
+            FediProfileError::MissingUsername => {
+                f.write_str("リモートアクターに preferredUsername がありません")
+            }
+        }
+    }
+}
+
+impl crate::repository::FediActorProfile {
+    /// AP Actor 文書から保存用プロフィールを組み立てる。リモートアクターを保存する全経路
+    /// （受信Activity・フォロー・プロフィール表示・各種ジョブ）の共通実装。以前は経路ごとに
+    /// 手書きしており、`preferredUsername`欠落時の扱い（エラー／URI末尾で代用）やバナーの
+    /// 保存有無が経路によって食い違っていた。
+    ///
+    /// - `preferredUsername`が無い場合、URI末尾のパスセグメントでの代用はしない。ActivityPub
+    ///   仕様はActor URIのパス構造を規定しておらず（例: Misskeyは末尾が内部の不透明なID）、
+    ///   誤ったusernameで保存してしまうため。`webfinger_handle`（`user@domain`でWebFinger
+    ///   解決した結果の Actor の場合のその名前とドメイン）があればそれを使う。
+    /// - `domain`は`webfinger_handle`のドメイン、無ければActor URIのauthority。
+    pub fn from_ap_actor(
+        actor: &ApActor,
+        ap_uri: &str,
+        webfinger_handle: Option<(&str, &str)>,
+    ) -> Result<Self, FediProfileError> {
+        let ap_inbox_url = actor.inbox.clone().ok_or(FediProfileError::MissingInbox)?;
+        let username = actor
+            .preferred_username
+            .clone()
+            .or_else(|| webfinger_handle.map(|(username, _)| username.to_owned()))
+            .ok_or(FediProfileError::MissingUsername)?;
+        let domain = match webfinger_handle {
+            Some((_, domain)) => domain.to_owned(),
+            None => ap_uri.split('/').nth(2).unwrap_or("").to_owned(),
+        };
+        Ok(Self {
+            ap_uri: ap_uri.to_owned(),
+            ap_inbox_url,
+            display_name: actor.name.clone().unwrap_or_else(|| username.clone()),
+            username,
+            domain,
+            avatar_url: actor.avatar_url(),
+            banner_url: actor.banner_url(),
+            bio: actor
+                .summary
+                .as_deref()
+                .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist),
+            emoji_map: actor.emoji_map(),
+            profile_fields: actor.profile_fields_json(),
+            claimed_at_did: actor.seiran_at_did.clone(),
+        })
+    }
+}
+
 impl ApActor {
     /// `icon`（object または array）から最初の画像 URL を抽出する。
     pub fn avatar_url(&self) -> Option<String> {
@@ -269,6 +341,14 @@ pub struct ApClient {
     pub key_cache: Arc<RwLock<HashMap<String, (String, Instant)>>>,
 }
 
+/// 外部から指定されたURL（受信署名の`keyId`・フォロー対象・Activityの参照先等）へ接続する前の
+/// SSRF検査（`crate::net::ensure_public_url`）。ホスト名の解決結果は連合用クライアントの
+/// `PublicOnlyResolver`が検査するため、ここではIPリテラルとスキームを見る。
+pub(crate) fn guard_remote_url(url: &str) -> Result<(), ApError> {
+    crate::net::ensure_public_url(url)
+        .map_err(|e| ApError::Other(format!("接続先URLを拒否しました ({e}): {url}")))
+}
+
 impl ApClient {
     pub fn new(http: Arc<reqwest::Client>) -> Self {
         Self {
@@ -279,6 +359,7 @@ impl ApClient {
 
     /// リモートアクター情報を取得する
     pub async fn fetch_actor(&self, actor_uri: &str) -> Result<ApActor, ApError> {
+        guard_remote_url(actor_uri)?;
         let res = self
             .http
             .get(actor_uri)
@@ -292,6 +373,21 @@ impl ApClient {
 
         let actor = res.json::<ApActor>().await?;
         Ok(actor)
+    }
+
+    /// 署名鍵があれば署名付きGET（`fetch_actor_signed`）、無ければ未署名GET（`fetch_actor`）で
+    /// アクターを取得する。Authorized Fetch 対応のため、システムアクターの署名鍵が組み立て
+    /// られる限り署名付きで取得し、組み立てられない場合のみ未署名へフォールバックする
+    /// 全経路の共通実装（以前は各所で同じ`match`を手書きしていた）。
+    pub async fn fetch_actor_with_key(
+        &self,
+        actor_uri: &str,
+        signing_key: Option<(&str, &str)>,
+    ) -> Result<ApActor, ApError> {
+        match signing_key {
+            Some(key) => self.fetch_actor_signed(actor_uri, key).await,
+            None => self.fetch_actor(actor_uri).await,
+        }
     }
 
     /// リモートアクター情報を HTTP Signatures 付き GET で取得する。`fetch_actor`と同じだが、
@@ -352,10 +448,7 @@ impl ApClient {
         // アクター情報そのもの、あるいは鍵オブジェクト単体が返る。
         // フラグメント部分 (#main-key) を除外したベースURIを叩くのが安全。
         let base_uri = key_id.split('#').next().unwrap_or(key_id);
-        let actor = match signing_key {
-            Some(key) => self.fetch_actor_signed(base_uri, key).await?,
-            None => self.fetch_actor(base_uri).await?,
-        };
+        let actor = self.fetch_actor_with_key(base_uri, signing_key).await?;
 
         if let Some(pubkey_info) = actor.public_key {
             if pubkey_info.id == key_id || base_uri == pubkey_info.owner {
@@ -462,6 +555,7 @@ impl ApClient {
         actor_key_id: &str,
         private_key_pem: &str,
     ) -> Result<reqwest::Response, ApError> {
+        guard_remote_url(url)?;
         let parsed_url =
             url::Url::parse(url).map_err(|e| ApError::Other(format!("URL パースエラー: {}", e)))?;
         let host = parsed_url.host_str().unwrap_or("").to_string();
@@ -532,6 +626,7 @@ impl ApClient {
         actor_key_id: &str,
         private_key_pem: &str,
     ) -> Result<(), ApError> {
+        guard_remote_url(url)?;
         let now = chrono::Utc::now();
         let date_str = now.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
@@ -644,7 +739,10 @@ impl ApClient {
             Some((key_id, pem)) => self.signed_get(url, key_id, pem).await,
             None => Ok(self
                 .http
-                .get(url)
+                .get({
+                    guard_remote_url(url)?;
+                    url
+                })
                 .header("Accept", "application/activity+json, application/ld+json")
                 .send()
                 .await?),

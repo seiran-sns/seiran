@@ -85,6 +85,10 @@ pub trait ListRepository: Send + Sync {
     /// リストのメンバー一覧（アクター情報込み、追加日時降順）。
     async fn members(&self, list_id: i64) -> Result<Vec<ListMemberRow>, sqlx::Error>;
 
+    /// 複数リストのメンバー actor_id を一括取得する（`(list_id, actor_id)`、リストごとに
+    /// `members`と同じ並び順・退会者除外）。リスト一覧をメンバー付きで返す際のN+1回避用。
+    async fn member_ids_of_lists(&self, list_ids: &[i64]) -> Result<Vec<(i64, i64)>, sqlx::Error>;
+
     /// リストのメンバー数（上限チェック用）。
     async fn member_count(&self, list_id: i64) -> Result<i64, sqlx::Error>;
 
@@ -296,6 +300,19 @@ impl ListRepository for PgListRepository {
         .await
     }
 
+    async fn member_ids_of_lists(&self, list_ids: &[i64]) -> Result<Vec<(i64, i64)>, sqlx::Error> {
+        sqlx::query_as(
+            "SELECT lm.list_id, lm.actor_id
+             FROM list_members lm
+             JOIN actors a ON a.id = lm.actor_id
+             WHERE lm.list_id = ANY($1) AND a.withdrawn_at IS NULL
+             ORDER BY lm.list_id, lm.added_at DESC",
+        )
+        .bind(list_ids)
+        .fetch_all(&self.pool)
+        .await
+    }
+
     async fn member_count(&self, list_id: i64) -> Result<i64, sqlx::Error> {
         sqlx::query_scalar("SELECT COUNT(*) FROM list_members WHERE list_id = $1")
             .bind(list_id)
@@ -326,7 +343,7 @@ impl ListRepository for PgListRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         // home_timeline（post.rs）と同じ LATERAL 集約パターン。targets の元が
         // 「自分+follows」ではなく「list_members」になるだけ。
-        sqlx::query_as::<_, TimelinePost>(
+        sqlx::query_as::<_, TimelinePost>(concat!(
             "WITH targets AS (
                  SELECT actor_id FROM list_members WHERE list_id = $1
              ),
@@ -346,18 +363,16 @@ impl ListRepository for PgListRepository {
                  ) p
                  ORDER BY p.id DESC LIMIT $4
              )
-             SELECT p.id, p.body, p.created_at, a.id as actor_id, a.username, a.domain, a.display_name,
-                    a.actor_type::text AS actor_type, p.repost_of_post_id, p.quote_of_post_id, p.reply_to_post_id, p.parent_original_post_id,
-                    COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
-                    p.emoji_map AS post_emoji_map, a.emoji_map AS actor_emoji_map, p.mention_facets,
-                    p.reply_count, p.quote_count, p.repost_count, p.content_html
+             SELECT ",
+            crate::timeline_post_columns!(),
+            "
              FROM candidate_ids ci
              JOIN posts p ON p.id = ci.id
-             JOIN actors a ON a.id = p.actor_id
-             LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
-             LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-             ORDER BY p.id DESC",
-        )
+             ",
+            crate::timeline_post_joins!(),
+            "
+             ORDER BY p.id DESC"
+        ))
         .bind(list_id)
         .bind(until_id)
         .bind(since_id)

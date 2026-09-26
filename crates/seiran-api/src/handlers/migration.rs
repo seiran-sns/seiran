@@ -200,15 +200,17 @@ pub async fn start(
     let repo = PgAtMigrationRepository::new(state.db.clone());
     repo.create_request(
         request_id,
-        &request_token_hash,
-        &req.source_handle,
-        &resolved.url,
-        &source_did,
-        &session.access_jwt,
-        &session.refresh_jwt,
-        &req.new_username,
-        &password_hash,
-        Some(&email),
+        &seiran_common::repository::NewMigrationRequest {
+            request_token_hash: &request_token_hash,
+            source_handle: &req.source_handle,
+            source_pds_endpoint: &resolved.url,
+            source_did: &source_did,
+            source_access_jwt: &session.access_jwt,
+            source_refresh_jwt: &session.refresh_jwt,
+            new_username: &req.new_username,
+            password_hash: &password_hash,
+            email: Some(&email),
+        },
         now,
     )
     .await
@@ -486,14 +488,16 @@ pub async fn submit_plc_token(
         state
             .actors
             .insert_local(
-                new_id,
                 user_id,
-                &migration_req.new_username,
-                &state.local_domain,
-                Some(&migration_req.source_did),
-                Some(&new_signing_key_pem),
-                Some(&new_rotation_key_pem),
-                None,
+                &seiran_common::repository::NewLocalActor {
+                    id: new_id,
+                    username: &migration_req.new_username,
+                    domain: &state.local_domain,
+                    at_did: Some(&migration_req.source_did),
+                    at_signing_key_pem: Some(&new_signing_key_pem),
+                    at_rotation_key_pem: Some(&new_rotation_key_pem),
+                    birth_date: None,
+                },
             )
             .await
             .map_err(|e| {

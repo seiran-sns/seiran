@@ -230,3 +230,87 @@ async fn suspended_actor_is_hidden_from_every_viewer() {
     // 無関係な第三者（AUTHOR自身は凍結していない）同士は非表示にならない
     assert!(!is_hidden(&mut tx, VIEWER, OTHER).await);
 }
+
+// 参照埋め込み（引用・リポスト・返信先）用の一括取得の固定用。他テストのフォロー関係と
+// 干渉しないよう、専用のアクター・投稿を使う（fixture行自体は他と同様に残す）。
+const DM_AUTHOR: i64 = 900_000_004;
+const DM_RECIPIENT: i64 = 900_000_005;
+const DM_AUTHOR_FOLLOWER: i64 = 900_000_006;
+const DM_POST_ID: i64 = 900_000_102;
+
+async fn setup_direct_post_fixture(pool: &sqlx::PgPool) {
+    for (id, name) in [
+        (DM_AUTHOR, "dm-author"),
+        (DM_RECIPIENT, "dm-recipient"),
+        (DM_AUTHOR_FOLLOWER, "dm-follower"),
+    ] {
+        sqlx::query(
+            "INSERT INTO actors (id, actor_type, username, domain, created_at, updated_at)
+             VALUES ($1, 'fedi', $2, 'post-visibility-test.invalid', NOW(), NOW())
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(format!("test-{}-{}", name, id))
+        .execute(pool)
+        .await
+        .expect("テスト用 actor 作成に失敗");
+    }
+    sqlx::query(
+        "INSERT INTO posts (id, actor_id, body, visibility, created_at)
+         VALUES ($1, $2, 'post-visibility-test direct', 'direct', NOW())
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(DM_POST_ID)
+    .bind(DM_AUTHOR)
+    .execute(pool)
+    .await
+    .expect("テスト用 direct post 作成に失敗");
+    sqlx::query(
+        "INSERT INTO post_recipients (post_id, actor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(DM_POST_ID)
+    .bind(DM_RECIPIENT)
+    .execute(pool)
+    .await
+    .expect("テスト用 post_recipients 作成に失敗");
+    sqlx::query(
+        "INSERT INTO follows (follower_actor_id, target_actor_id, status) VALUES ($1, $2, 'accepted')
+         ON CONFLICT (follower_actor_id, target_actor_id) DO NOTHING",
+    )
+    .bind(DM_AUTHOR_FOLLOWER)
+    .bind(DM_AUTHOR)
+    .execute(pool)
+    .await
+    .expect("テスト用 follows 作成に失敗");
+}
+
+/// 以前は参照埋め込み（`embed_renotes`/`embed_quotes`/Misskey`fetch_referenced_notes`）が
+/// 手書きの可視性条件で`direct`を`followers_only`と同じ扱いにしており、宛先ではない
+/// フォロワーにもDM本文が見えていた。一括取得が`post_is_visible_to`に従うことを固定する。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn embedded_reference_fetch_does_not_leak_direct_post_to_followers() {
+    use seiran_common::repository::find_visible_posts_by_ids;
+
+    let pool = test_db_pool().await;
+    setup_direct_post_fixture(&pool).await;
+    let ids = [DM_POST_ID];
+    let visible_to = |viewer: Option<i64>| {
+        let pool = pool.clone();
+        async move {
+            find_visible_posts_by_ids(&pool, &ids, viewer)
+                .await
+                .expect("find_visible_posts_by_ids 失敗")
+                .len()
+        }
+    };
+
+    assert_eq!(
+        visible_to(Some(DM_AUTHOR_FOLLOWER)).await,
+        0,
+        "宛先外のフォロワー"
+    );
+    assert_eq!(visible_to(None).await, 0, "未ログイン");
+    assert_eq!(visible_to(Some(DM_RECIPIENT)).await, 1, "宛先");
+    assert_eq!(visible_to(Some(DM_AUTHOR)).await, 1, "投稿者本人");
+}

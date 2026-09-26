@@ -66,11 +66,13 @@ async fn resolve_bsky(
         .actors
         .upsert_remote_bsky(
             new_actor_id,
-            &did,
-            &bsky_resp.handle,
-            bsky_resp.display_name.as_deref(),
-            bsky_resp.avatar.as_deref(),
-            bsky_resp.banner.as_deref(),
+            &crate::repository::BskyActorProfile {
+                at_did: &did,
+                handle: &bsky_resp.handle,
+                display_name: bsky_resp.display_name.as_deref(),
+                avatar_url: bsky_resp.avatar.as_deref(),
+                banner_url: bsky_resp.banner.as_deref(),
+            },
             now,
         )
         .await
@@ -118,57 +120,19 @@ async fn resolve_fedi(ctx: &TargetResolveContext<'_>, target: &str) -> Result<Ac
         return Ok(existing);
     }
 
-    let remote_ap = match &ctx.system_signing_key {
-        Some((key_id, pem)) => {
-            ctx.ap_client
-                .fetch_actor_signed(&target_uri, (key_id, pem))
-                .await?
-        }
-        None => ctx.ap_client.fetch_actor(&target_uri).await?,
-    };
-    let remote_inbox = remote_ap
-        .inbox
-        .clone()
-        .ok_or_else(|| ApError::Other("リモートアクターにinboxがありません".to_string()))?;
-    let remote_avatar_url = remote_ap.avatar_url();
-    let remote_banner_url = remote_ap.banner_url();
-    let remote_username = remote_ap.preferred_username.clone().unwrap_or_else(|| {
-        target_uri
-            .rsplit('/')
-            .next()
-            .unwrap_or("unknown")
-            .to_string()
-    });
-    let remote_display_name = remote_ap
-        .name
-        .clone()
-        .unwrap_or_else(|| remote_username.clone());
-    let remote_domain = target_uri.split('/').nth(2).unwrap_or("").to_string();
-    let remote_bio = remote_ap
-        .summary
-        .as_deref()
-        .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist);
-    let remote_emoji_map = remote_ap.emoji_map();
-    let remote_profile_fields = remote_ap.profile_fields_json();
-
+    let remote_ap = ctx
+        .ap_client
+        .fetch_actor_with_key(
+            &target_uri,
+            crate::ap::client::signing_key_refs(&ctx.system_signing_key),
+        )
+        .await?;
+    let profile = crate::repository::FediActorProfile::from_ap_actor(&remote_ap, &target_uri, None)
+        .map_err(|e| ApError::Other(e.to_string()))?;
     let now = chrono::Utc::now();
-    let new_actor_id = generate_snowflake_id(now);
     let remote_actor_id = ctx
         .actors
-        .upsert_remote_fedi(
-            new_actor_id,
-            &target_uri,
-            &remote_inbox,
-            &remote_username,
-            &remote_domain,
-            &remote_display_name,
-            remote_avatar_url.as_deref(),
-            remote_banner_url.as_deref(),
-            remote_bio.as_deref(),
-            now,
-            &remote_emoji_map,
-            &remote_profile_fields,
-        )
+        .upsert_remote_fedi(generate_snowflake_id(now), &profile, now)
         .await
         .map_err(|e| ApError::Other(format!("DBエラー: {}", e)))?;
 

@@ -485,12 +485,14 @@ async fn process_import(
                         if let Err(e) = posts_repo
                             .attach_remote_media_url(
                                 post_id,
-                                &att.url,
-                                Some(&att.mime_type),
-                                att.thumbnail_url.as_deref(),
-                                false,
-                                att.is_gif,
-                                position as i16,
+                                &crate::repository::RemoteAttachment {
+                                    url: &att.url,
+                                    mime_type: Some(&att.mime_type),
+                                    thumbnail_url: att.thumbnail_url.as_deref(),
+                                    is_sensitive: false,
+                                    is_gif: att.is_gif,
+                                    position: position as i16,
+                                },
                             )
                             .await
                         {

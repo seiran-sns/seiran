@@ -1,5 +1,6 @@
 use super::reference::{resolve_reference, RefStatus};
 use super::*;
+use crate::repository::NewNotification;
 
 // Announce(Note) を受け取り posts テーブルに保存する
 pub(super) async fn handle_announce(
@@ -105,18 +106,11 @@ pub(super) async fn handle_announce(
                 let notif_id = generate_snowflake_id(chrono::Utc::now());
                 if let Err(e) = inbox
                     .notification_repo
-                    .insert(
-                        notif_id,
-                        meta.actor_id,
-                        NotificationKind::Repost,
-                        Some(actor_id),
-                        Some(post_id),
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
+                    .insert(&NewNotification {
+                        notifier_actor_id: Some(actor_id),
+                        note_id: Some(post_id),
+                        ..NewNotification::new(notif_id, meta.actor_id, NotificationKind::Repost)
+                    })
                     .await
                 {
                     tracing::error!("[Inbox/Announce] repost notifications INSERT 失敗: {}", e);

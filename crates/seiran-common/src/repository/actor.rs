@@ -2,6 +2,96 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::PgPool;
 
+/// 新規ローカルアクター（`ActorRepository::insert_local`・`create_local_account`の入力）。
+/// `at_did`/`at_signing_key_pem`/`at_rotation_key_pem`は、自ホストドメインが未確定
+/// （シングルホストモード）でPLC genesisを行っていない場合は`None`になる。
+#[derive(Debug, Clone, Copy)]
+pub struct NewLocalActor<'a> {
+    pub id: i64,
+    pub username: &'a str,
+    pub domain: &'a str,
+    pub at_did: Option<&'a str>,
+    pub at_signing_key_pem: Option<&'a str>,
+    pub at_rotation_key_pem: Option<&'a str>,
+    pub birth_date: Option<NaiveDate>,
+}
+
+/// ローカルアクター行を挿入する（`insert_local`・`create_local_account`共通のSQL）。
+pub(crate) async fn insert_local_actor_row(
+    conn: &mut sqlx::PgConnection,
+    user_id: i64,
+    a: &NewLocalActor<'_>,
+) -> Result<(), sqlx::Error> {
+    // ap_uri を格納しておくことで、万一リモートActor解決処理が自ドメインURIを
+    // 誤って渡してきても find_by_ap_uri / upsert_remote_fedi の ON CONFLICT (ap_uri)
+    // による自然な重複排除が効く（#110 の防御的二重チェック）。
+    let ap_uri = format!("https://{}/users/{}", a.domain, a.username);
+    sqlx::query(
+        "INSERT INTO actors (id, user_id, actor_type, username, domain, ap_uri, at_did, at_signing_key_pem, at_rotation_key_pem, birth_date, created_at, updated_at)
+         VALUES ($1, $2, 'local', $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())",
+    )
+    .bind(a.id)
+    .bind(user_id)
+    .bind(a.username)
+    .bind(a.domain)
+    .bind(&ap_uri)
+    .bind(a.at_did)
+    .bind(a.at_signing_key_pem)
+    .bind(a.at_rotation_key_pem)
+    .bind(a.birth_date)
+    .execute(conn)
+    .await
+    .map(|_| ())
+}
+
+/// リモートFediアクターのプロフィール（AP Actor 文書から
+/// `FediActorProfile::from_ap_actor`（`crate::ap::client`）で組み立てる）。
+/// `upsert_remote_fedi`・`seiran_actor_merge::discover_fedi_actor`の入力。
+#[derive(Debug, Clone)]
+pub struct FediActorProfile {
+    pub ap_uri: String,
+    pub ap_inbox_url: String,
+    pub username: String,
+    pub domain: String,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
+    /// 自己紹介文（AP Person の summary を投稿本文と同じallowlistでサニタイズしたHTML）。
+    /// `None` の場合は既存値を保持する。
+    pub bio: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLのマップ（AP Person の tag 配列由来）。
+    pub emoji_map: serde_json::Value,
+    /// プロフィールのキーバリュー項目（#62、AP Actor の `attachment` `PropertyValue` 由来）。
+    pub profile_fields: serde_json::Value,
+    /// AP拡張フィールド`seiranAtDid`での ATP 側の相手の自己申告（未確認、#236）。
+    pub claimed_at_did: Option<String>,
+}
+
+/// リモートBskyアクターのプロフィール（AppView `getProfile` 等の取得結果）。
+/// `upsert_remote_bsky`の入力。
+#[derive(Debug, Clone, Copy)]
+pub struct BskyActorProfile<'a> {
+    pub at_did: &'a str,
+    pub handle: &'a str,
+    pub display_name: Option<&'a str>,
+    pub avatar_url: Option<&'a str>,
+    pub banner_url: Option<&'a str>,
+}
+
+/// ローカルアクターのプロフィール更新内容（`ActorRepository::update_profile`の入力、全項目を上書きする）。
+#[derive(Debug, Clone, Copy)]
+pub struct LocalProfileUpdate<'a> {
+    pub display_name: Option<&'a str>,
+    pub bio: Option<&'a str>,
+    pub avatar_media_id: Option<i64>,
+    pub banner_media_id: Option<i64>,
+    pub profile_fields: &'a serde_json::Value,
+    /// `display_name`から解決済みのショートコード→URLマップ（#186）。
+    pub emoji_map: &'a serde_json::Value,
+    pub birth_date: Option<NaiveDate>,
+    pub birth_date_public: bool,
+}
+
 /// `actors` テーブルの 1 行（アプリで使用するカラムのみ）。
 ///
 /// PostgreSQL の `actor_type_enum` は SELECT 時に `::text` キャストして `String` に
@@ -143,58 +233,31 @@ pub trait ActorRepository: Send + Sync {
         domain: &str,
     ) -> Result<Option<String>, sqlx::Error>;
 
-    /// 新規ローカルアクターを挿入する。`at_did`/`at_signing_key_pem`は、自ホストドメインが
-    /// 未確定（シングルホストモード）でPLC genesisを行っていない場合は`None`になる。
-    #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
+    /// 既存ユーザー（`user_id`）に紐づく新規ローカルアクターを挿入する。ユーザーと同時に
+    /// 作る場合は、両者を1トランザクションで作る`create_local_account`を使う。
     async fn insert_local(
         &self,
-        id: i64,
         user_id: i64,
-        username: &str,
-        domain: &str,
-        at_did: Option<&str>,
-        at_signing_key_pem: Option<&str>,
-        at_rotation_key_pem: Option<&str>,
-        birth_date: Option<NaiveDate>,
+        actor: &NewLocalActor<'_>,
     ) -> Result<(), sqlx::Error>;
 
     /// リモート（Bsky）アクターを upsert し、その actor_id を返す。
     /// `at_did` の一意制約で衝突した場合は handle と display_name を更新する。
-    #[allow(clippy::too_many_arguments)]
     async fn upsert_remote_bsky(
         &self,
         id: i64,
-        at_did: &str,
-        handle: &str,
-        display_name: Option<&str>,
-        avatar_url: Option<&str>,
-        banner_url: Option<&str>,
+        profile: &BskyActorProfile<'_>,
         now: DateTime<Utc>,
     ) -> Result<i64, sqlx::Error>;
 
     /// リモート（Fediverse）アクターを upsert し、その actor_id を返す。
-    /// `bio` は自己紹介文（AP Person の `summary` 由来、HTML はプレーンテキスト化して渡す
-    /// こと）。`None` の場合は既存値を保持する（`avatar_url` と同じ COALESCE パターン）。
-    /// `emoji_map` は表示名（`name`）中のカスタム絵文字（`:shortcode:`）→画像URLのマップ
-    /// （AP Person の `tag` 配列由来、無ければ空オブジェクト）。
-    /// `profile_fields` はプロフィールのキーバリュー項目（#62、AP Actor の `attachment`
-    /// `type: "PropertyValue"` 由来、無ければ空配列）。
-    #[allow(clippy::too_many_arguments)]
+    /// `bio`・`avatar_url`・`banner_url` が `None` の場合は既存値を保持する（COALESCE）。
+    /// `profile.claimed_at_did` は使わない（相互申告マージは`discover_fedi_actor`の責務）。
     async fn upsert_remote_fedi(
         &self,
         id: i64,
-        ap_uri: &str,
-        ap_inbox_url: &str,
-        username: &str,
-        domain: &str,
-        display_name: &str,
-        avatar_url: Option<&str>,
-        banner_url: Option<&str>,
-        bio: Option<&str>,
+        profile: &FediActorProfile,
         now: DateTime<Utc>,
-        emoji_map: &serde_json::Value,
-        profile_fields: &serde_json::Value,
     ) -> Result<i64, sqlx::Error>;
 
     /// DID を持つ全ローカルアクターの (username, did) を取得する（起動時 TXT 再登録用）。
@@ -217,18 +280,10 @@ pub trait ActorRepository: Send + Sync {
 
     /// プロフィールを更新する（`update_profile` ハンドラの UPDATE 文）。`emoji_map` は
     /// 呼び出し側が `display_name` から解決済みのショートコード→URLマップ（#186）。
-    #[allow(clippy::too_many_arguments)]
     async fn update_profile(
         &self,
         user_id: i64,
-        display_name: Option<&str>,
-        bio: Option<&str>,
-        avatar_media_id: Option<i64>,
-        banner_media_id: Option<i64>,
-        profile_fields: &serde_json::Value,
-        emoji_map: &serde_json::Value,
-        birth_date: Option<NaiveDate>,
-        birth_date_public: bool,
+        update: &LocalProfileUpdate<'_>,
     ) -> Result<(), sqlx::Error>;
 
     /// `actor_id` から生年月日を直接更新する（ATP `putPreferences`
@@ -394,45 +449,17 @@ impl ActorRepository for PgActorRepository {
 
     async fn insert_local(
         &self,
-        id: i64,
         user_id: i64,
-        username: &str,
-        domain: &str,
-        at_did: Option<&str>,
-        at_signing_key_pem: Option<&str>,
-        at_rotation_key_pem: Option<&str>,
-        birth_date: Option<NaiveDate>,
+        actor: &NewLocalActor<'_>,
     ) -> Result<(), sqlx::Error> {
-        // ap_uri を格納しておくことで、万一リモートActor解決処理が自ドメインURIを
-        // 誤って渡してきても find_by_ap_uri / upsert_remote_fedi の ON CONFLICT (ap_uri)
-        // による自然な重複排除が効く（#110 の防御的二重チェック）。
-        let ap_uri = format!("https://{}/users/{}", domain, username);
-        sqlx::query(
-            "INSERT INTO actors (id, user_id, actor_type, username, domain, ap_uri, at_did, at_signing_key_pem, at_rotation_key_pem, birth_date, created_at, updated_at)
-             VALUES ($1, $2, 'local', $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())",
-        )
-        .bind(id)
-        .bind(user_id)
-        .bind(username)
-        .bind(domain)
-        .bind(&ap_uri)
-        .bind(at_did)
-        .bind(at_signing_key_pem)
-        .bind(at_rotation_key_pem)
-        .bind(birth_date)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        let mut conn = self.pool.acquire().await?;
+        insert_local_actor_row(&mut conn, user_id, actor).await
     }
 
     async fn upsert_remote_bsky(
         &self,
         id: i64,
-        at_did: &str,
-        handle: &str,
-        display_name: Option<&str>,
-        avatar_url: Option<&str>,
-        banner_url: Option<&str>,
+        profile: &BskyActorProfile<'_>,
         now: DateTime<Utc>,
     ) -> Result<i64, sqlx::Error> {
         // 既に`remote_seiran`へ昇格済み（結婚成立済み、#236）の行に対しては`username`を
@@ -457,11 +484,11 @@ impl ActorRepository for PgActorRepository {
              RETURNING id",
         )
         .bind(id)
-        .bind(at_did)
-        .bind(handle)
-        .bind(display_name)
-        .bind(avatar_url)
-        .bind(banner_url)
+        .bind(profile.at_did)
+        .bind(profile.handle)
+        .bind(profile.display_name)
+        .bind(profile.avatar_url)
+        .bind(profile.banner_url)
         .bind(now)
         .fetch_one(&self.pool)
         .await?;
@@ -471,17 +498,8 @@ impl ActorRepository for PgActorRepository {
     async fn upsert_remote_fedi(
         &self,
         id: i64,
-        ap_uri: &str,
-        ap_inbox_url: &str,
-        username: &str,
-        domain: &str,
-        display_name: &str,
-        avatar_url: Option<&str>,
-        banner_url: Option<&str>,
-        bio: Option<&str>,
+        profile: &FediActorProfile,
         now: DateTime<Utc>,
-        emoji_map: &serde_json::Value,
-        profile_fields: &serde_json::Value,
     ) -> Result<i64, sqlx::Error> {
         let row: (i64,) = sqlx::query_as(
             "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, banner_url, bio, created_at, updated_at, emoji_map, profile_fields)
@@ -498,17 +516,17 @@ impl ActorRepository for PgActorRepository {
              RETURNING id",
         )
         .bind(id)
-        .bind(ap_uri)
-        .bind(ap_inbox_url)
-        .bind(username)
-        .bind(domain)
-        .bind(display_name)
-        .bind(avatar_url)
-        .bind(banner_url)
-        .bind(bio)
+        .bind(&profile.ap_uri)
+        .bind(&profile.ap_inbox_url)
+        .bind(&profile.username)
+        .bind(&profile.domain)
+        .bind(&profile.display_name)
+        .bind(&profile.avatar_url)
+        .bind(&profile.banner_url)
+        .bind(&profile.bio)
         .bind(now)
-        .bind(emoji_map)
-        .bind(profile_fields)
+        .bind(&profile.emoji_map)
+        .bind(&profile.profile_fields)
         .fetch_one(&self.pool)
         .await?;
         Ok(row.0)
@@ -568,14 +586,7 @@ impl ActorRepository for PgActorRepository {
     async fn update_profile(
         &self,
         user_id: i64,
-        display_name: Option<&str>,
-        bio: Option<&str>,
-        avatar_media_id: Option<i64>,
-        banner_media_id: Option<i64>,
-        profile_fields: &serde_json::Value,
-        emoji_map: &serde_json::Value,
-        birth_date: Option<NaiveDate>,
-        birth_date_public: bool,
+        update: &LocalProfileUpdate<'_>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE actors \
@@ -584,14 +595,14 @@ impl ActorRepository for PgActorRepository {
                  updated_at = NOW() \
              WHERE user_id = $9 AND actor_type = 'local'",
         )
-        .bind(display_name)
-        .bind(bio)
-        .bind(avatar_media_id)
-        .bind(banner_media_id)
-        .bind(profile_fields)
-        .bind(emoji_map)
-        .bind(birth_date)
-        .bind(birth_date_public)
+        .bind(update.display_name)
+        .bind(update.bio)
+        .bind(update.avatar_media_id)
+        .bind(update.banner_media_id)
+        .bind(update.profile_fields)
+        .bind(update.emoji_map)
+        .bind(update.birth_date)
+        .bind(update.birth_date_public)
         .bind(user_id)
         .execute(&self.pool)
         .await

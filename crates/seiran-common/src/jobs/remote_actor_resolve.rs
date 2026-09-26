@@ -109,53 +109,30 @@ pub(crate) async fn resolve_and_upsert(uri: &str, ctx: &JobContext) -> Result<Op
 
     // Authorized Fetch（secure mode）対応。署名鍵が組み立てられない場合のみ未署名フェッチへ
     // フォールバックする。
-    let actor = match ctx.system_signing_key() {
-        Some((key_id, pem)) => ctx
-            .ap_client
-            .fetch_actor_signed(uri, (&key_id, &pem))
-            .await
-            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
-        None => ctx
-            .ap_client
-            .fetch_actor(uri)
-            .await
-            .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?,
+    let actor = ctx
+        .ap_client
+        .fetch_actor_with_key(
+            uri,
+            crate::ap::client::signing_key_refs(&ctx.system_signing_key()),
+        )
+        .await
+        .map_err(|e| format!("アクタードキュメント取得失敗: {}", e))?;
+
+    let profile = match crate::repository::FediActorProfile::from_ap_actor(&actor, uri, None) {
+        Ok(profile) => profile,
+        Err(crate::ap::client::FediProfileError::MissingInbox) => {
+            tracing::info!("[RemoteActorResolve] inbox が無いためスキップ: {}", uri);
+            return Ok(None);
+        }
+        Err(e) => return Err(format!("{} ({})", e, uri)),
     };
+    let username = profile.username.clone();
 
-    let Some(inbox) = actor.inbox.clone() else {
-        tracing::info!("[RemoteActorResolve] inbox が無いためスキップ: {}", uri);
-        return Ok(None);
-    };
-
-    let avatar_url = actor.avatar_url();
-    let banner_url = actor.banner_url();
-    let username = actor
-        .preferred_username
-        .clone()
-        .unwrap_or_else(|| uri.rsplit('/').next().unwrap_or("unknown").to_string());
-    let display_name = actor.name.clone().unwrap_or_else(|| username.clone());
-    let bio = actor
-        .summary
-        .as_deref()
-        .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist);
-    let emoji_map = actor.emoji_map();
-    let profile_fields = actor.profile_fields_json();
-
-    let new_id = generate_snowflake_id(chrono::Utc::now());
     let actor_id = actor_repo
         .upsert_remote_fedi(
-            new_id,
-            uri,
-            &inbox,
-            &username,
-            &domain,
-            &display_name,
-            avatar_url.as_deref(),
-            banner_url.as_deref(),
-            bio.as_deref(),
+            generate_snowflake_id(chrono::Utc::now()),
+            &profile,
             chrono::Utc::now(),
-            &emoji_map,
-            &profile_fields,
         )
         .await
         .map_err(|e| format!("upsert_remote_fedi 失敗: {}", e))?;

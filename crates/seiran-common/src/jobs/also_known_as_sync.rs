@@ -53,18 +53,13 @@ pub async fn handle(owner_actor_id: i64, ctx: Arc<JobContext>) -> Result<(), Str
             .acquire_owned()
             .await
             .map_err(|e| format!("セマフォ取得失敗: {}", e))?;
-        match ctx.system_signing_key() {
-            Some((key_id, pem)) => ctx
-                .ap_client
-                .fetch_actor_signed(&owner_ap_uri, (&key_id, &pem))
-                .await
-                .map_err(|e| format!("移転元アクター取得失敗: {}", e))?,
-            None => ctx
-                .ap_client
-                .fetch_actor(&owner_ap_uri)
-                .await
-                .map_err(|e| format!("移転元アクター取得失敗: {}", e))?,
-        }
+        ctx.ap_client
+            .fetch_actor_with_key(
+                &owner_ap_uri,
+                crate::ap::client::signing_key_refs(&ctx.system_signing_key()),
+            )
+            .await
+            .map_err(|e| format!("移転元アクター取得失敗: {}", e))?
     };
 
     let mut target_ids: Vec<i64> = Vec::new();
@@ -134,11 +129,13 @@ async fn resolve_also_known_as_uri(
         let id = actors
             .upsert_remote_bsky(
                 new_id,
-                &profile.did,
-                &profile.handle,
-                profile.display_name.as_deref(),
-                profile.avatar.as_deref(),
-                profile.banner.as_deref(),
+                &crate::repository::BskyActorProfile {
+                    at_did: &profile.did,
+                    handle: &profile.handle,
+                    display_name: profile.display_name.as_deref(),
+                    avatar_url: profile.avatar.as_deref(),
+                    banner_url: profile.banner.as_deref(),
+                },
                 now,
             )
             .await
@@ -162,49 +159,25 @@ async fn resolve_also_known_as_uri(
                 .acquire_owned()
                 .await
                 .map_err(|e| format!("セマフォ取得失敗: {}", e))?;
-            match ctx.system_signing_key() {
-                Some((key_id, pem)) => ctx
-                    .ap_client
-                    .fetch_actor_signed(uri, (&key_id, &pem))
-                    .await
-                    .map_err(|e| format!("アクター取得失敗: {}", e))?,
-                None => ctx
-                    .ap_client
-                    .fetch_actor(uri)
-                    .await
-                    .map_err(|e| format!("アクター取得失敗: {}", e))?,
-            }
+            ctx.ap_client
+                .fetch_actor_with_key(
+                    uri,
+                    crate::ap::client::signing_key_refs(&ctx.system_signing_key()),
+                )
+                .await
+                .map_err(|e| format!("アクター取得失敗: {}", e))?
         };
-        let Some(inbox) = remote_ap.inbox.clone() else {
-            return Ok(None);
-        };
-        let username = remote_ap
-            .preferred_username
-            .clone()
-            .ok_or_else(|| "preferredUsernameがありません".to_string())?;
-        let display_name = remote_ap.name.clone().unwrap_or_else(|| username.clone());
-        let bio = remote_ap
-            .summary
-            .as_deref()
-            .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist);
-        let emoji_map = remote_ap.emoji_map();
-        let profile_fields = remote_ap.profile_fields_json();
-        let now = chrono::Utc::now();
-        let new_id = generate_snowflake_id(now);
+        let profile =
+            match crate::repository::FediActorProfile::from_ap_actor(&remote_ap, uri, None) {
+                Ok(profile) => profile,
+                Err(crate::ap::client::FediProfileError::MissingInbox) => return Ok(None),
+                Err(e) => return Err(e.to_string()),
+            };
         let id = actors
             .upsert_remote_fedi(
-                new_id,
-                uri,
-                &inbox,
-                &username,
-                &domain,
-                &display_name,
-                remote_ap.avatar_url().as_deref(),
-                remote_ap.banner_url().as_deref(),
-                bio.as_deref(),
-                now,
-                &emoji_map,
-                &profile_fields,
+                generate_snowflake_id(chrono::Utc::now()),
+                &profile,
+                chrono::Utc::now(),
             )
             .await
             .map_err(|e| format!("upsert失敗: {}", e))?;

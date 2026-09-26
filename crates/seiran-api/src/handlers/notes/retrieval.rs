@@ -1,5 +1,4 @@
 use super::*;
-use queries::fetch_reposted_ids;
 use seiran_common::jobs::inbound_activity_process::{
     resolve_pending_reference_with_timeout, RefStatus, ReferenceOutcome,
 };
@@ -38,26 +37,10 @@ pub async fn get_note(
     .map_err(|e| ApiError::Internal(e.to_string()))?
     .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     resolve_pending_post_references(&state, &mut post).await;
-    resolve_mention_facets_in_place(&state.db, std::slice::from_mut(&mut post)).await;
-    let mut att_map = fetch_attachments_map(&state.db, &[post_id]).await;
-    let mut lc_map = fetch_link_cards_map(&state.db, &[post_id]).await;
-    let rmap = fetch_reactions_map(&state.db, &[post_id], my_actor_id).await;
-    let mut nr = to_note_response(
-        post,
-        att_map.remove(&post_id).unwrap_or_default(),
-        lc_map.remove(&post_id).unwrap_or_default(),
-    );
-    nr.reactions = rmap.get(&post_id).cloned().unwrap_or_default();
-    if let Some(actor_id) = my_actor_id {
-        let reposted_set = fetch_reposted_ids(&state.db, actor_id, &[post_id]).await;
-        nr.reposted_by_me = Some(reposted_set.contains(&post_id));
-    }
-    embed_renotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
-    embed_quotes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
-    attach_poll_votes(&state.db, std::slice::from_mut(&mut nr), my_actor_id).await;
-    attach_reply_quote_gates(&state, std::slice::from_mut(&mut nr), my_actor_id).await;
-    attach_remote_instance_info(&state, std::slice::from_mut(&mut nr)).await;
-    enqueue_stale_poll_fetches(&state, std::slice::from_ref(&nr)).await;
+    let nr = build_note_responses(&state, vec![post], my_actor_id)
+        .await
+        .pop()
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     Ok(Json(nr))
 }
 
@@ -442,7 +425,7 @@ pub async fn note_context(
 
     // 3. DB からコンテキストを取得（最大5件ずつ、読み込みボタンによる継続取得は
     // before_id/after_id を起点IDとして渡す。該当方向のlimitが0ならクエリを省略する）。
-    let mut before_posts = if before_limit > 0 {
+    let before_posts = if before_limit > 0 {
         state
             .posts
             .context_before(actor_id, before_anchor, before_limit, my_actor_id)
@@ -451,7 +434,7 @@ pub async fn note_context(
     } else {
         Vec::new()
     };
-    let mut after_posts = if after_limit > 0 {
+    let after_posts = if after_limit > 0 {
         state
             .posts
             .context_after(actor_id, after_anchor, after_limit, my_actor_id)
@@ -460,58 +443,10 @@ pub async fn note_context(
     } else {
         Vec::new()
     };
-    resolve_mention_facets_in_place(&state.db, &mut before_posts).await;
-    resolve_mention_facets_in_place(&state.db, &mut after_posts).await;
-
-    let all_ids: Vec<i64> = before_posts
-        .iter()
-        .chain(after_posts.iter())
-        .map(|p| p.id)
-        .collect();
-    let mut att_map = fetch_attachments_map(&state.db, &all_ids).await;
-    let mut lc_map = fetch_link_cards_map(&state.db, &all_ids).await;
-    let rmap = fetch_reactions_map(&state.db, &all_ids, my_actor_id).await;
-    let reposted_set = if let Some(aid) = my_actor_id {
-        fetch_reposted_ids(&state.db, aid, &all_ids).await
-    } else {
-        Default::default()
-    };
-    let build = |p: TimelinePost,
-                 att_map: &mut HashMap<i64, Vec<dto::AttachmentResponse>>,
-                 lc_map: &mut HashMap<i64, Vec<dto::LinkCardResponse>>| {
-        let id = p.id;
-        let mut nr = to_note_response(
-            p,
-            att_map.remove(&id).unwrap_or_default(),
-            lc_map.remove(&id).unwrap_or_default(),
-        );
-        nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
-        if my_actor_id.is_some() {
-            nr.reposted_by_me = Some(reposted_set.contains(&id));
-        }
-        nr
-    };
-
-    let mut before: Vec<NoteResponse> = before_posts
-        .into_iter()
-        .map(|p| build(p, &mut att_map, &mut lc_map))
-        .collect();
-    let mut after: Vec<NoteResponse> = after_posts
-        .into_iter()
-        .map(|p| build(p, &mut att_map, &mut lc_map))
-        .collect();
-    embed_renotes(&state.db, &mut before, my_actor_id).await;
-    embed_quotes(&state.db, &mut before, my_actor_id).await;
-    embed_renotes(&state.db, &mut after, my_actor_id).await;
-    embed_quotes(&state.db, &mut after, my_actor_id).await;
-    attach_poll_votes(&state.db, &mut before, my_actor_id).await;
-    attach_reply_quote_gates(&state, &mut before, my_actor_id).await;
-    attach_remote_instance_info(&state, &mut before).await;
-    attach_poll_votes(&state.db, &mut after, my_actor_id).await;
-    attach_reply_quote_gates(&state, &mut after, my_actor_id).await;
-    attach_remote_instance_info(&state, &mut after).await;
-    enqueue_stale_poll_fetches(&state, &before).await;
-    enqueue_stale_poll_fetches(&state, &after).await;
+    let (before, after) = tokio::join!(
+        build_note_responses(&state, before_posts, my_actor_id),
+        build_note_responses(&state, after_posts, my_actor_id),
+    );
 
     Ok(Json(NoteContextResponse { before, after }))
 }
@@ -535,45 +470,12 @@ pub async fn note_replies(
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
 
-    let mut posts = state
+    let posts = state
         .posts
         .thread_descendants(post_id, 200, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    resolve_mention_facets_in_place(&state.db, &mut posts).await;
-
-    let ids: Vec<i64> = posts.iter().map(|p| p.id).collect();
-    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
-    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
-    let rmap = fetch_reactions_map(&state.db, &ids, my_actor_id).await;
-    let reposted_set = if let Some(aid) = my_actor_id {
-        fetch_reposted_ids(&state.db, aid, &ids).await
-    } else {
-        Default::default()
-    };
-
-    let mut notes: Vec<NoteResponse> = posts
-        .into_iter()
-        .map(|p| {
-            let id = p.id;
-            let mut nr = to_note_response(
-                p,
-                att_map.remove(&id).unwrap_or_default(),
-                lc_map.remove(&id).unwrap_or_default(),
-            );
-            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
-            if my_actor_id.is_some() {
-                nr.reposted_by_me = Some(reposted_set.contains(&id));
-            }
-            nr
-        })
-        .collect();
-    embed_renotes(&state.db, &mut notes, my_actor_id).await;
-    embed_quotes(&state.db, &mut notes, my_actor_id).await;
-    attach_poll_votes(&state.db, &mut notes, my_actor_id).await;
-    attach_reply_quote_gates(&state, &mut notes, my_actor_id).await;
-    attach_remote_instance_info(&state, &mut notes).await;
-    enqueue_stale_poll_fetches(&state, &notes).await;
+    let notes = build_note_responses(&state, posts, my_actor_id).await;
 
     Ok(Json(NoteRepliesResponse { notes }))
 }

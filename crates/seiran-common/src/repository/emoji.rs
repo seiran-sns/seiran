@@ -107,7 +107,6 @@ pub trait EmojiRepository: Send + Sync {
 
     /// 新規絵文字を登録する。shortcode の一意制約違反はそのまま `sqlx::Error` を返す
     /// （呼び出し側で `23505` を判定して `ApiError::Conflict` に変換する）。
-    #[allow(clippy::too_many_arguments)]
     async fn insert(
         &self,
         id: i64,
@@ -134,7 +133,6 @@ pub trait EmojiRepository: Send + Sync {
     async fn exists_by_shortcode(&self, shortcode: &str) -> Result<bool, sqlx::Error>;
 
     /// shortcode が未登録の場合のみ挿入する（`ON CONFLICT DO NOTHING`）。挿入できたら true。
-    #[allow(clippy::too_many_arguments)]
     async fn insert_if_absent(
         &self,
         id: i64,

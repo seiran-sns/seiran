@@ -9,6 +9,7 @@
 //! この経路を通すが、既存の `at_uri` と衝突する rkey を指定した場合はエラーになる）。
 
 use chrono::{DateTime, Utc};
+use seiran_common::repository::NewNotification;
 use serde_json::Value as JsonValue;
 
 use seiran_common::atp::{apply_bsky_facets, parse_bsky_embed_quote_uri, ParsedFacet};
@@ -262,18 +263,11 @@ pub async fn create_post_from_record(
         let notif_id = generate_snowflake_id(now);
         if let Err(e) = state
             .notifications
-            .insert(
-                notif_id,
-                parent_actor_id,
-                NotificationKind::Reply,
-                Some(actor.id),
-                Some(post_id),
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
+            .insert(&NewNotification {
+                notifier_actor_id: Some(actor.id),
+                note_id: Some(post_id),
+                ..NewNotification::new(notif_id, parent_actor_id, NotificationKind::Reply)
+            })
             .await
         {
             tracing::error!("[post_from_record] reply notifications INSERT 失敗: {}", e);
@@ -292,18 +286,11 @@ pub async fn create_post_from_record(
         let notif_id = generate_snowflake_id(now);
         if let Err(e) = state
             .notifications
-            .insert(
-                notif_id,
-                quoted_actor_id,
-                NotificationKind::Quote,
-                Some(actor.id),
-                Some(post_id),
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
+            .insert(&NewNotification {
+                notifier_actor_id: Some(actor.id),
+                note_id: Some(post_id),
+                ..NewNotification::new(notif_id, quoted_actor_id, NotificationKind::Quote)
+            })
             .await
         {
             tracing::error!("[post_from_record] quote notifications INSERT 失敗: {}", e);
@@ -327,18 +314,11 @@ pub async fn create_post_from_record(
         let notif_id = generate_snowflake_id(now);
         if let Err(e) = state
             .notifications
-            .insert(
-                notif_id,
-                mentioned_actor_id,
-                NotificationKind::Mention,
-                Some(actor.id),
-                Some(post_id),
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
+            .insert(&NewNotification {
+                notifier_actor_id: Some(actor.id),
+                note_id: Some(post_id),
+                ..NewNotification::new(notif_id, mentioned_actor_id, NotificationKind::Mention)
+            })
             .await
         {
             tracing::error!(

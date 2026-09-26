@@ -391,6 +391,11 @@ seiranユーザーのプロフィール記録は、`/users/:username` を actor 
   `save-if: false`の読み取り専用）、pg_bigm入りPostgresイメージ（`docker/Dockerfile.postgres`）
   はDocker BuildxのGHAキャッシュでビルド、Playwrightブラウザ本体も`actions/cache`で
   キャッシュする。
+- 同じ`E2E` jobの中で、E2E実行の前にDB結合テスト（`crates/seiran-api/tests/*_integration.rs`、
+  `#[ignore]`付き）を同じ専用DBで実行し（`cargo test -p seiran-api --tests -- --ignored`）、
+  終了後に`docker compose down -v`でDBを破棄してからE2Eを始める（E2Eは空のDBから始める前提）。
+  結合テストのハーネス（`tests/support/mod.rs`）はマイグレーション適用とテストユーザー
+  （`seiran1`等、パスワード`seiranda`）の作成を自動で行う。
 - frontendのVitestユニットテストもCIの`Frontend` jobで型チェック・lintと併せて
   必ず実行する。
 - Rustの`Rust` jobは`cargo fmt --all -- --check`と警告をエラー扱いするClippyを実行する。
@@ -402,7 +407,7 @@ seiranユーザーのプロフィール記録は、`/users/:username` を actor 
 
 `e2e/`ディレクトリにPlaywrightプロジェクトを置く。外部の実サービス（fedi/Bskyインスタンス、PLCディレクトリ、Bsky Relay等）とは通信せず、seiranが話す相手をすべてローカルのスタブ/専用インスタンスに置き換えた上で実行する。実行は `cd e2e && npm test`。
 
-- `e2e/playwright.config.ts`: `webServer`にスタブPLCサーバー・スタブAppViewサーバー・スタブFediサーバー（`stub-fedi-server.ts`、後述）・backend（`cargo run -p seiran-server`）・frontend（`npm run dev`）をまとめて起動する。backendには`PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL`をそれぞれのスタブサーバーへ、`ATP_RELAY_URL`を存在しないローカルポートへ向け、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`を空文字にして、外部への実通信を確実に遮断している。`SQLX_OFFLINE=true`も設定し、マイグレーション未適用の空DBに対してsqlxのコンパイル時クエリ検証が失敗しないようコミット済み`.sqlx/`キャッシュを使わせる。
+- `e2e/playwright.config.ts`: `webServer`にスタブPLCサーバー・スタブAppViewサーバー・スタブFediサーバー（`stub-fedi-server.ts`、後述）・backend（`cargo run -p seiran-server`）・frontend（`npm run dev`）をまとめて起動する。backendには`PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL`をそれぞれのスタブサーバーへ、スタブが127.0.0.1で待ち受けるため`SEIRAN_ALLOW_PRIVATE_NETWORK=true`（連合用HTTPクライアントの非公開IP拒否を無効化）を、`ATP_RELAY_URL`を存在しないローカルポートへ向け、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`を空文字にして、外部への実通信を確実に遮断している。`SQLX_OFFLINE=true`も設定し、マイグレーション未適用の空DBに対してsqlxのコンパイル時クエリ検証が失敗しないようコミット済み`.sqlx/`キャッシュを使わせる。
   - 【重要】全`webServer`エントリの`reuseExistingServer`は`false`固定（変更禁止）。backendPort(3000)/frontendPort(5173)は`scripts/dev-up.sh`のネイティブ開発サーバーとも共有しており、`true`だと起動中の実開発サーバーへ無条件に相乗りしてしまう。2026-07-20に実際に発生し、実開発DBへのテストデータ混入・本物のplc.directoryへの誤登録という事故になった（後者は`did:plc:`のtombstoneオペレーションで収束済み）。`false`ならポート競合時に明確なエラーで停止する。
   - 【重要】Playwrightの実行順序は直感に反して「webServer起動 → globalSetup」（`globalSetup`ではwebServerの起動には間に合わない）。そのためE2E専用Postgres（`e2e/docker-compose.yml`、ポート5433）の起動待ちは`globalSetup`ではなく`e2e/scripts/wait-for-db.ts`としてbackendの`command`自体の前段に組み込んでいる。逆に`e2e/global-setup.ts`は「backendが起動済み」を前提にできるので、初期管理者アカウントのbootstrapに使っている（`GET /api/setup/status`は`users`テーブルが1件でもあれば`initialized:true`を返し、未初期化だとフロントは`App.tsx`のルーティングを無視して常に`<Setup>`画面を表示するため、E2E専用DBは空の状態からテストを始める都合上これが必要）。`globalTeardown`はE2E専用Postgresを`down -v`で破棄する。
   - テストは3つのPlaywright projectに分けて並列実行する（`workers: 3`(CI)/`4`(ローカル)）。大半のspecは`main`で並列実行し、`storage_providers`（`is_active`先頭優先のためstub S3登録が競合する）に触れる`notifications`/`misskey-compat`/`federation-delivery`は`storage-serial`（project内`workers: 1`で直列、`main`とはインターリーブ）、`site_settings`のグローバル変更や外部サービススタブのプロセスグローバル状態に触れる`admin`/`rate-limit`/`search`は`globals-serial`（`dependencies`で`main`・`storage-serial`完了後の排他テール）に隔離する。
@@ -424,5 +429,5 @@ seiranユーザーのプロフィール記録は、`/users/:username` を actor 
 | データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`、`DB_HOST`/`DB_PORT`（既定`localhost`/5432。Docker運用では`docker-compose.yml`が`DB_HOST=db`を注入）、`DB_MAX_CONNECTIONS`（プール最大接続数を明示指定。未設定時は`seiran_common::db::recommended_max_connections`がロールごとに動的算出する。split-roleではプロセスごとに持つ）。接続先はこれらから組み立てる（`DATABASE_URL`という完成済みURL変数は持たない、`seiran_common::db::get_db_pool`） |
 | ジョブキュー | `REDIS_URL`（split-role構成専用。`--role all` では不要） |
 | シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWTシークレット等は環境変数ではなく `secrets.toml` で自動生成・管理する |
-| 外部サービス連携 | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ATPハンドル検証のDNS TXT自動作成。未設定時はHTTP `.well-known` 方式のみにフォールバック）、`ATP_RELAY_URL`（Relayへの`requestCrawl`先。カンマ区切りで複数指定可、既定は`https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（`did:plc:`の登録・解決先。既定は`https://plc.directory`。E2Eテストではローカルのスタブサーバーに向ける）、`ATP_APPVIEW_URL`（Bsky AppViewのベースURL。既定は`https://api.bsky.app`。E2Eテストではローカルのスタブサーバーに向ける） |
+| 外部サービス連携 | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ATPハンドル検証のDNS TXT自動作成。未設定時はHTTP `.well-known` 方式のみにフォールバック）、`ATP_RELAY_URL`（Relayへの`requestCrawl`先。カンマ区切りで複数指定可、既定は`https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（`did:plc:`の登録・解決先。既定は`https://plc.directory`。E2Eテストではローカルのスタブサーバーに向ける）、`ATP_APPVIEW_URL`（Bsky AppViewのベースURL。既定は`https://api.bsky.app`。E2Eテストではローカルのスタブサーバーに向ける）、`SEIRAN_ALLOW_PRIVATE_NETWORK`（`true`で連合用HTTPクライアントの非公開IP拒否を無効化する。E2Eのスタブサーバー向け専用で、本番・開発機では設定しない。`docs/protocols.md`「外部から指定されたURLへの接続」参照） |
 | SMTP | 環境変数では設定しない。`site_settings` テーブルで管理し管理者API経由で設定する |

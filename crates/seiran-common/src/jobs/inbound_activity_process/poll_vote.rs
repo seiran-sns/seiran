@@ -42,6 +42,13 @@ pub(super) async fn handle_poll_vote(
         return Ok(());
     };
 
+    // 投票の記録と票数加算を同一トランザクションで行う（加算自体は`increment_poll_votes`が
+    // 単一UPDATE内で行うため、ローカル投票・他のリモート投票と同時でも加算は失われない）。
+    let mut tx = inbox
+        .db_pool
+        .begin()
+        .await
+        .map_err(|e| format!("PollVote: トランザクション開始失敗: {}", e))?;
     let inserted = sqlx::query(
         "INSERT INTO poll_votes (post_id, actor_id, option_index, ap_activity_id)
          VALUES ($1, $2, $3, $4)
@@ -51,23 +58,20 @@ pub(super) async fn handle_poll_vote(
     .bind(remote.actor_id)
     .bind(index as i32)
     .bind(activity_id)
-    .execute(&inbox.db_pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| format!("PollVote: 保存失敗: {}", e))?;
-    if inserted.rows_affected() > 0 {
-        let mut updated = poll;
-        if let Some(option) = updated["options"]
-            .as_array_mut()
-            .and_then(|options| options.get_mut(index))
-        {
-            option["votes"] = serde_json::json!(option["votes"].as_i64().unwrap_or(0) + 1);
-        }
-        sqlx::query("UPDATE posts SET poll = $2 WHERE id = $1")
-            .bind(post_id)
-            .bind(&updated)
-            .execute(&inbox.db_pool)
+    let updated = if inserted.rows_affected() > 0 {
+        crate::repository::poll::increment_poll_votes(&mut tx, post_id, &[index as i32])
             .await
-            .map_err(|e| format!("PollVote: 集計更新失敗: {}", e))?;
+            .map_err(|e| format!("PollVote: 集計更新失敗: {}", e))?
+    } else {
+        None
+    };
+    tx.commit()
+        .await
+        .map_err(|e| format!("PollVote: コミット失敗: {}", e))?;
+    if let Some(updated) = updated {
         // タイムライン/ノート詳細のアンケート結果をリアルタイム更新する
         // （`broadcast_reaction_update` と同じ考え方）。
         broadcast_poll_update(

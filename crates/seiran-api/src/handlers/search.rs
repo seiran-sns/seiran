@@ -66,53 +66,12 @@ pub async fn search_notes(
         .as_ref()
         .map(|user| (user.actor_id, user.username.as_str()));
 
-    // since指定はMisskey互換の逆方向ページング。要件どおりAppViewには問い合わせない。
-    if let Some(since_id) = q.since_id {
-        let ids = search_local_db(
-            &state.db,
-            &raw_query,
-            limit as i64,
-            None,
-            Some(since_id),
-            viewer,
-        )
-        .await;
-        let ids = resolve_bridge_ids_for_search(&state.db, ids).await;
-        return fetch_and_respond(&state, ids, None).await;
-    }
-
-    // until指定はローカルIDを時刻へ変換し、DBとAppViewの双方から同数を取得する。
-    if let Some(until_id) = q.until_id {
-        let until = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
-            "SELECT created_at FROM posts WHERE id = $1",
-        )
-        .bind(until_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten();
-        let (local_ids, (appview_posts, _)) = tokio::join!(
-            search_local_db(
-                &state.db,
-                &raw_query,
-                limit as i64,
-                Some(until_id),
-                None,
-                viewer,
-            ),
-            seiran_common::atp::search_appview_posts(
-                &state.http_client,
-                &raw_query,
-                None,
-                limit,
-                until,
-            ),
-        );
-        let mut all_ids = local_ids;
-        all_ids.append(&mut persist_appview_posts(&state, appview_posts).await);
-        let all_ids = resolve_bridge_ids_for_search(&state.db, all_ids).await;
-        let (ids, _) = merge_sort_dedup_and_split(all_ids, limit);
-        return fetch_and_respond(&state, ids, None).await;
+    // since/until指定（Misskey互換のカーソルページング）はセッションを使わない。
+    if q.since_id.is_some() || q.until_id.is_some() {
+        let ids =
+            search_post_ids_by_cursor(&state, &raw_query, limit, q.until_id, q.since_id, viewer)
+                .await;
+        return fetch_and_respond(&state, ids, None, viewer.map(|(id, _)| id)).await;
     }
 
     // ── セッション継続（過去掘り） ────────────────────────────────────────────
@@ -125,7 +84,8 @@ pub async fn search_notes(
                 state
                     .search_store
                     .put_buffer(sid, buf, local_until_id, appview_cursor);
-                return fetch_and_respond(&state, ids, Some(sid.clone())).await;
+                return fetch_and_respond(&state, ids, Some(sid.clone()), viewer.map(|(id, _)| id))
+                    .await;
             }
 
             // バッファ不足: ローカル DB を追加フェッチ
@@ -164,7 +124,8 @@ pub async fn search_notes(
             state
                 .search_store
                 .put_buffer(sid, remaining, new_local_until, new_appview_cursor);
-            return fetch_and_respond(&state, ids, Some(sid.clone())).await;
+            return fetch_and_respond(&state, ids, Some(sid.clone()), viewer.map(|(id, _)| id))
+                .await;
         }
         // セッション消滅 → ローカル DB のみフォールバック
     }
@@ -192,7 +153,52 @@ pub async fn search_notes(
         appview_cursor,
     );
 
-    fetch_and_respond(&state, return_ids, Some(new_session_id)).await
+    fetch_and_respond(
+        &state,
+        return_ids,
+        Some(new_session_id),
+        viewer.map(|(id, _)| id),
+    )
+    .await
+}
+
+/// カーソル（`until_id`/`since_id`）指定の検索で、表示すべき post_id を新しい順に最大
+/// `limit` 件返す。frontend API（`search_notes`）と Misskey 互換 API（`notes/search`）の共通実装
+/// （以前は Misskey 側が独自に同じ処理を書いており、ブリッジポストの解決が漏れていた）。
+/// - `since_id` 指定: ローカル DB のみ（逆方向ページング。要件どおりAppViewには問い合わせない）。
+/// - それ以外: ローカル DB と AppView の双方から同数を取得してブレンドする。`until_id` 指定時は
+///   その投稿の作成時刻を AppView 側の上限にする。
+pub(crate) async fn search_post_ids_by_cursor(
+    state: &AppState,
+    query: &str,
+    limit: usize,
+    until_id: Option<i64>,
+    since_id: Option<i64>,
+    viewer: Option<(i64, &str)>,
+) -> Vec<i64> {
+    if since_id.is_some() {
+        let ids = search_local_db(&state.db, query, limit as i64, None, since_id, viewer).await;
+        return resolve_bridge_ids_for_search(&state.db, ids).await;
+    }
+    let until = match until_id {
+        Some(id) => sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+            "SELECT created_at FROM posts WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten(),
+        None => None,
+    };
+    let (local_ids, (appview_posts, _)) = tokio::join!(
+        search_local_db(&state.db, query, limit as i64, until_id, None, viewer),
+        seiran_common::atp::search_appview_posts(&state.http_client, query, None, limit, until),
+    );
+    let mut all_ids = local_ids;
+    all_ids.append(&mut persist_appview_posts(state, appview_posts).await);
+    let all_ids = resolve_bridge_ids_for_search(&state.db, all_ids).await;
+    merge_sort_dedup_and_split(all_ids, limit).0
 }
 
 /// ローカル DB・AppView 由来の post_id 列をマージして降順ソート・重複排除した上で、
@@ -290,11 +296,13 @@ pub(crate) async fn persist_appview_posts(
                     .actors
                     .upsert_remote_bsky(
                         seiran_common::generate_snowflake_id(now),
-                        &post.author_did,
-                        &post.author_handle,
-                        post.author_display_name.as_deref(),
-                        post.author_avatar.as_deref(),
-                        None,
+                        &seiran_common::repository::BskyActorProfile {
+                            at_did: &post.author_did,
+                            handle: &post.author_handle,
+                            display_name: post.author_display_name.as_deref(),
+                            avatar_url: post.author_avatar.as_deref(),
+                            banner_url: None,
+                        },
                         now,
                     )
                     .await
@@ -337,61 +345,20 @@ pub(crate) async fn persist_appview_posts(
     ids
 }
 
-/// post_id リストからノートレスポンスを構築して返す。
+/// post_id リストからノートレスポンスを構築して返す。検索時点で可視性を判定済みの ID でも、
+/// セッションにバッファした後で返す場合があるため、取得時に改めて閲覧者の可視性で絞る。
 async fn fetch_and_respond(
     state: &AppState,
     ids: Vec<i64>,
     session_id: Option<String>,
+    viewer_actor_id: Option<i64>,
 ) -> axum::response::Response {
-    use super::notes::{
-        attach_remote_instance_info, enqueue_stale_poll_fetches, fetch_attachments_map,
-        fetch_link_cards_map, resolve_mention_facets_in_place, to_note_response,
-    };
-    use seiran_common::repository::TimelinePost;
-
-    if ids.is_empty() {
-        return Json(SearchResponse {
-            notes: vec![],
-            session_id,
-        })
-        .into_response();
-    }
-
-    let mut rows = sqlx::query_as::<_, TimelinePost>(
-        "SELECT p.id, p.body, p.created_at, p.actor_id, a.username, a.domain, a.display_name,
-                a.actor_type::text AS actor_type, p.mention_facets, p.at_uri AS post_at_uri,
-                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
-                p.reply_count, p.quote_count, p.repost_count, p.content_html
-         FROM posts p JOIN actors a ON a.id = p.actor_id
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         WHERE p.id = ANY($1) AND p.deleted_at IS NULL
-         ORDER BY p.id DESC",
-    )
-    .bind(&ids)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-    resolve_mention_facets_in_place(&state.db, &mut rows).await;
-
-    let row_ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
-    let mut att_map = fetch_attachments_map(&state.db, &row_ids).await;
-    let mut lc_map = fetch_link_cards_map(&state.db, &row_ids).await;
-
-    let mut notes: Vec<NoteResponse> = rows
-        .into_iter()
-        .map(|p| {
-            let id = p.id;
-            to_note_response(
-                p,
-                att_map.remove(&id).unwrap_or_default(),
-                lc_map.remove(&id).unwrap_or_default(),
-            )
-        })
-        .collect();
-    attach_remote_instance_info(state, &mut notes).await;
-    enqueue_stale_poll_fetches(state, &notes).await;
-
+    let mut rows =
+        seiran_common::repository::find_visible_posts_by_ids(&state.db, &ids, viewer_actor_id)
+            .await
+            .unwrap_or_default();
+    rows.sort_unstable_by_key(|p| std::cmp::Reverse(p.id));
+    let notes = super::notes::build_note_responses(state, rows, viewer_actor_id).await;
     Json(SearchResponse { notes, session_id }).into_response()
 }
 

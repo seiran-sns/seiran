@@ -1,5 +1,6 @@
 use super::activity::*;
 use super::infra::*;
+use super::ApSender;
 use super::*;
 
 // =====================================================================
@@ -12,18 +13,20 @@ use super::*;
 /// `None` の場合は DB の `posts.body` をそのまま使用する。
 /// `quote_url` が `Some` の場合は Note に `quoteUrl` / `_misskey_quote` を付与する（引用投稿）。
 /// seiran_post_uuid は DB の posts.seiran_post_uuid から自動取得して Note に付与する。
-#[allow(clippy::too_many_arguments)]
 pub async fn deliver_post_to_ap_followers(
-    ap_client: &ApClient,
-    db: &PgPool,
+    sender: &ApSender<'_>,
     post_id: i64,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
     override_body: Option<&str>,
     quote_url: Option<&str>,
     in_reply_to: Option<&str>,
 ) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let basis = fetch_post_activity_basis(db, post_id, actor_id).await?;
 
     // DM（direct）はこの関数（フォロワー全体へのファンアウト）では扱わない。
@@ -143,14 +146,14 @@ pub async fn deliver_post_to_ap_followers(
 /// 補完した`Update(Note)`をAPフォロワーへ送る（#237、配送側の制約「非対称・後からUpdateで補完」）。
 /// Create(Note)を送っていない投稿（`deliver_fedi=false`等）や、ATP DIDを持たない投稿者
 /// （シングルホストモード）の場合は送るものが無いため何もしない。
-pub async fn deliver_seiranpost_update(
-    ap_client: &ApClient,
-    db: &PgPool,
-    post_id: i64,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
-) -> Result<(), ApError> {
+pub async fn deliver_seiranpost_update(sender: &ApSender<'_>, post_id: i64) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let basis = fetch_post_activity_basis(db, post_id, actor_id).await?;
     if basis.visibility == "direct" {
         return Ok(());
@@ -291,13 +294,16 @@ async fn resolve_reply_and_quote_for_update(
 /// 配送する。`deliver_post_to_ap_followers`（フォロワー全体へのファンアウト）とは異なり、
 /// フォロワーコレクションではなく実際の宛先個人のinboxのみへCreate(Note)を送る。
 pub async fn deliver_direct_message_to_ap(
-    ap_client: &ApClient,
-    db: &PgPool,
+    sender: &ApSender<'_>,
     post_id: i64,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
 ) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let basis = fetch_post_activity_basis(db, post_id, actor_id).await?;
 
     let recipient_rows = sqlx::query(
@@ -411,14 +417,14 @@ pub(super) async fn fetch_attachment_documents(
 /// ローカルアクターの AP Delete(Note) アクティビティを Fedi フォロワー全員の inbox へ配送する。
 /// `post_id` はリポスト投稿の posts.id（`PostToFollowers` で送った Note の id
 /// `https://{domain}/notes/{post_id}` と一致する）。
-pub async fn deliver_delete_note(
-    ap_client: &ApClient,
-    db: &PgPool,
-    post_id: i64,
-    actor_id: i64,
-    local_domain: &str,
-    ap_private_key_pem: &str,
-) -> Result<(), ApError> {
+pub async fn deliver_delete_note(sender: &ApSender<'_>, post_id: i64) -> Result<(), ApError> {
+    let ApSender {
+        ap_client,
+        db,
+        actor_id,
+        local_domain,
+        private_key_pem: ap_private_key_pem,
+    } = *sender;
     let username = fetch_username(db, actor_id).await?;
     let inboxes = fetch_fedi_follower_inboxes(db, actor_id).await?;
 
