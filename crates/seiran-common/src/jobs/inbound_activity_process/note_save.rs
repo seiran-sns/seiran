@@ -118,7 +118,6 @@ pub(crate) async fn save_ap_note_core(
         return Ok(SaveApNoteOutcome::AlreadyExists { post_id: existing });
     }
 
-    let content_html = note["content"].as_str().unwrap_or("").to_string();
     let published = note["published"].as_str().unwrap_or("");
 
     // 公開日時を parse して snowflake ID を生成
@@ -137,105 +136,20 @@ pub(crate) async fn save_ap_note_core(
     // `docs/protocols.md` 5節）。
     let seiran_post_ext = crate::seiran_post::SeiranPost::extract(note);
 
-    let mut tags = note["tag"].as_array().cloned().unwrap_or_default();
-
-    // kmyblue系は`<p class="quote-inline">RE: <a>URL</a></p>`を本文の**先頭**（Fedibird/
-    // Misskeyが本文末尾に付ける`RE:`/`QT:`行とは逆の位置）に自動挿入する（実例:
-    // kblue.10rino.net等）。`class`属性は`sanitize_ap_content_html`が全タグから剥がすため、
-    // Markdown化・サニタイズより前の生HTMLの段階で検出・除去する。tag補完前の`tags`で
-    // 十分（`quote`/`_misskey_quote`/`quoteUri`はNote直下フィールドでtag補完の対象外）。
-    let early_quote_uri = extract_ap_quote_uri(note, &tags);
-    let content_html_pre = early_quote_uri
-        .as_deref()
-        .and_then(|uri| {
-            // 第一候補: `class="quote-inline"`（Mastodon/kmyblue系の標準的なマーカー）。
-            // 第二候補: classが無い場合でも、先頭ブロックがテキストベースで
-            // `RE:`/`QT:`フォールバックと判定できれば除去する。
-            strip_quote_inline_paragraph_html(&content_html, uri).or_else(|| {
-                let leading = strip_quote_fallback_line_html_leading(&content_html, uri);
-                (leading != content_html).then_some(leading)
-            })
-        })
-        .unwrap_or_else(|| content_html.clone());
-
-    // HTML タグを除去して本文を得る（<a href> はリンクとして保持し、Markdownリンク記法
-    // `[text](url)` に変換する。メンションは `@user@host` のプレーンテキストに正規化）。
-    let mut body = ap_content_to_markdown_body(&content_html_pre, &tags, &remote.domain);
-    // seiran Web UI でのリッチ表示用（`<blockquote>`/`<ruby>`等の構造保持、#233）。
-    // `body`とは別に、意味的構造をクレンジングして保持したHTMLを`content_html`列に持つ。
-    let mut content_html_sanitized =
-        sanitize_ap_content_html(&content_html_pre, &tags, &remote.domain);
-    // リレー実装によっては、配送する Create の埋め込み Note から Emoji tag を
-    // 省略する一方、object.id の正規 Note には完全な tag を載せる。本文に未解決の
-    // shortcode がある場合だけ正規 Note を取得し、欠落した tag を補完する。
-    // object.id は外部入力なので、解決済み投稿者actorと同一originの場合だけ取得する。
-    if has_unresolved_emoji_shortcodes(&tags, &body) && has_same_origin(&note_id, actor_uri) {
-        let signing_key = system_signing_key(inbox);
-        match ap_client
-            .fetch_object(&note_id, (&signing_key.0, &signing_key.1))
-            .await
-        {
-            Ok(canonical_note) => {
-                if let Some(canonical_tags) = canonical_note["tag"].as_array() {
-                    for tag in canonical_tags {
-                        if !tags.contains(tag) {
-                            tags.push(tag.clone());
-                        }
-                    }
-                    body = ap_content_to_markdown_body(&content_html_pre, &tags, &remote.domain);
-                    content_html_sanitized =
-                        sanitize_ap_content_html(&content_html_pre, &tags, &remote.domain);
-                }
-            }
-            Err(error) => {
-                tracing::warn!(
-                    "[NoteSave] 正規Noteからの絵文字tag補完失敗 note_id={}: {}",
-                    note_id,
-                    error
-                );
-            }
-        }
-    }
-    // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
-    record_remote_emojis(inbox, &remote.domain, &tags).await;
-    let emoji_map = resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &body).await;
-
-    // 引用URI抽出・解決（#116）。`OneHopFetch`ならDBに無ければ1段階だけフェッチを試みる
-    // （#231）。取得できた場合、Misskey/Fedibirdが本文末尾に自動付加する`RE:`/`QT:`
-    // フォールバック行（引用URIと同じURLを指す）を本文から取り除く。kmyblueの先頭
-    // `quote-inline`段落は上の`content_html_pre`計算時に既に除去済みのため、ここでは
-    // 除去し損ねた場合（`class`が付かない・末尾に来るkmyblueの別表記等）のフォールバック
-    // として働く。tag補完後の最終`tags`で`quote_uri`を再計算する（`early_quote_uri`は
-    // 補完前の値のため、tag[].relフォールバックの結果がtag補完で変わる場合がある）。
-    let quote_uri = extract_ap_quote_uri(note, &tags);
-    let (quote_of_post_id, quote_of_ap_uri, quote_of_ref_status) =
-        resolve_ref(ref_mode, quote_uri.as_deref(), inbox, ap_client)
-            .await
-            .into_parts();
-    if let Some(uri) = quote_uri.as_deref() {
-        // 末尾（Fedibird/Misskey）と先頭（kmyblue）の両方を確認する。上の`content_html_pre`
-        // 計算で先頭段落を除去できていれば、ここでの先頭側呼び出しは通常no-opになる保険。
-        body = strip_quote_fallback_line(&body, uri);
-        body = strip_quote_fallback_line_leading(&body, uri);
-        content_html_sanitized = strip_quote_fallback_line_html(&content_html_sanitized, uri);
-        content_html_sanitized =
-            strip_quote_fallback_line_html_leading(&content_html_sanitized, uri);
-    }
+    let content = convert_note_content(note, &note_id, actor_uri, &remote, inbox, ap_client).await;
+    let (quote_of_post_id, quote_of_ap_uri, quote_of_ref_status, content) =
+        resolve_quote_and_strip_fallback(note, content, ref_mode, inbox, ap_client).await;
+    let ConvertedNoteContent {
+        tags,
+        body,
+        content_html_sanitized,
+        emoji_map,
+    } = content;
     let (content_html_sanitized, body) = prepend_article_title(note, content_html_sanitized, body);
-    // to/cc から可視性を判定（#配送先・可視性アイコン追加）。
+    // to/cc から可視性を判定（#配送先・可視性アイコン追加）。seiranPostがあれば申告された
+    // 可視性で上書きする（不明な値ならAP標準の判定を使う）。
     let to_list = as_string_list(&note["to"]);
-    let visibility = classify_ap_visibility(&to_list, &as_string_list(&note["cc"]));
-    // seiranPostがあれば申告された可視性で上書きする（不明な値ならAP標準の判定を使う）。
-    let visibility = seiran_post_ext
-        .as_ref()
-        .and_then(|sp| match sp.visibility.as_str() {
-            "public" => Some("public"),
-            "unlisted" => Some("unlisted"),
-            "followers_only" => Some("followers_only"),
-            "direct" => Some("direct"),
-            _ => None,
-        })
-        .unwrap_or(visibility);
+    let visibility = resolve_note_visibility(note, &to_list, seiran_post_ext.as_ref());
 
     // AP inReplyTo からローカルの reply_to_post_id を解決する（DM機能実装以前はこの解決自体が
     // 存在しなかった。通常投稿にも有用だが、direct（DM）のスレッド起点伝播に必須のため追加）。
@@ -247,90 +161,24 @@ pub(crate) async fn save_ap_note_core(
     // DM（visibility="direct"）の宛先・スレッド起点解決。`OneHopFetch`（＝トップレベル
     // 受信）の時だけ行う。参照解決経由（`DbOnly`）でフェッチしたNoteは実際にはinboxへ
     // 配送されていないため、DM宛先情報を信頼してはならない（意図的に常にスキップ）。
-    let (thread_root_post_id, recipient_actor_ids, remote_recipient_uris): (
-        Option<i64>,
-        Vec<i64>,
-        Vec<String>,
-    ) = if ref_mode == ReferenceResolutionMode::OneHopFetch && visibility == "direct" {
-        // リプライ先が direct（DM）の場合、送信元アクターがその DM の当事者
-        // （投稿者本人 or post_recipients の宛先）でなければ拒否する。ここを
-        // 確認せずに受理すると、リモートの送信元がinReplyTo/toを自由に申告できる
-        // ことを悪用し、無関係な第三者が他人同士のDMスレッドへ thread_root_post_id
-        // 経由で紛れ込める（当事者側のDM画面にまで表示されてしまう）。
-        if let Some(parent_id) = reply_to_post_id {
-            if let Ok(Some(m)) = inbox.post_repo.find_delivery_meta(parent_id).await {
-                if m.visibility == "direct" {
-                    let authorized: bool = sqlx::query_scalar(
-                        "SELECT post_is_visible_to($1, $2, 'direct', $3, false)",
-                    )
-                    .bind(actor_id)
-                    .bind(m.actor_id)
-                    .bind(parent_id)
-                    .fetch_one(&inbox.db_pool)
-                    .await
-                    .unwrap_or(false);
-                    if !authorized {
-                        return Err(format!(
-                                "direct投稿へのリプライ拒否: actor_id={} は親投稿{}の当事者ではありません",
-                                actor_id, parent_id
-                            ));
-                    }
-                }
-            }
-        }
-
-        let parent_thread_root = match reply_to_post_id {
-            Some(parent_id) => inbox
-                .post_repo
-                .find_delivery_meta(parent_id)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|m| {
-                    if m.visibility == "direct" {
-                        m.thread_root_post_id
-                    } else {
-                        None
-                    }
-                }),
-            None => None,
-        };
-        let thread_root = parent_thread_root.unwrap_or(post_id);
-
-        // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
-        // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
-        // `find_by_ap_uri` では引っかからない。`extract_local_username` で
-        // ホスト名まで含めて自ドメインのURIか検証してから解決する（末尾セグメント
-        // だけを見ると、リモートの同名ユーザー宛のDMをローカルの同名ユーザー宛だと
-        // 誤認してしまう）。
-        let mut recipients = Vec::new();
-        // ローカル宛先はここで即座に解決するが、リモート宛先（3人以上の会話に
-        // 混じるリモートユーザー等）は都度フェッチが必要になり受信処理をブロック
-        // したくないため、`DmRecipientResolve`ジョブへ回す（宛先表示、
-        // `docs/ui_spec.md` 2.5節）。送信者自身のURIは宛先ではないため除外。
-        let mut remote_uris = Vec::new();
-        for uri in &to_list {
-            let Some(local_username) = crate::ap::extract_local_username(uri, &inbox.local_domain)
-            else {
-                if uri != actor_uri {
-                    remote_uris.push(uri.clone());
-                }
-                continue;
-            };
-            if let Ok(Some(actor)) = inbox
-                .actor_repo
-                .find_by_username_domain(local_username, &inbox.local_domain)
-                .await
-            {
-                if actor.actor_type == "local" {
-                    recipients.push(actor.id);
-                }
-            }
-        }
-        (Some(thread_root), recipients, remote_uris)
+    let dm = if ref_mode == ReferenceResolutionMode::OneHopFetch && visibility == "direct" {
+        resolve_dm_addressing(
+            inbox,
+            actor_uri,
+            actor_id,
+            post_id,
+            reply_to_post_id,
+            &to_list,
+        )
+        .await?
     } else {
-        (None, Vec::new(), Vec::new())
+        DmAddressing::default()
     };
+    let DmAddressing {
+        thread_root_post_id,
+        recipient_actor_ids,
+        remote_recipient_uris,
+    } = dm;
 
     // シナリオ2: 他seiranサーバー間マージ（#237、相互一致方式）。
     // `seiranPost.counterpartPostId`（ATP側の真正なat_uri申告）がある場合のみ、
@@ -360,20 +208,7 @@ pub(crate) async fn save_ap_note_core(
 
     let parent_original_post_id = resolve_bridge_duplicate_post_id(inbox, &note_url).await;
 
-    // ブリッジポスト検出（brid.gy等がATP原本をAPへ自動ブリッジしたコピー、`crate::bridge_post`
-    // 参照）。元ポストが既にDBにあれば`bridge_of_post_id`を即座に解決し、無ければ
-    // `bridged_original_uri`だけ保存してINSERT後に`Job::FetchBridgeOriginal`を積む。
-    let bridge_target_at_uri = extract_bridge_target_at_uri(note);
-    let bridge_of_post_id = match &bridge_target_at_uri {
-        Some(at_uri) => crate::bridge_post::resolve_bridge_target(
-            &inbox.db_pool,
-            at_uri,
-            crate::bridge_post::BridgeTargetProtocol::Atp,
-        )
-        .await
-        .unwrap_or(None),
-        None => None,
-    };
+    let (bridge_target_at_uri, bridge_of_post_id) = resolve_bridge_original(inbox, note).await;
 
     // seiranPostがあれば本文・絵文字マップを標準変換の代わりに使う（Single Source of
     // Truth、`docs/protocols.md` 5節）。添付の寸法・blurhash（`post_attachments`に該当
@@ -433,9 +268,319 @@ pub(crate) async fn save_ap_note_core(
         .map_err(|e| format!("posts id 取得エラー: {}", e))?
         .ok_or_else(|| format!("posts id 取得エラー: {} が見つかりません", note_id))?;
 
-    // DM宛先のうちリモート分の解決（上記コメント参照）。posts行が確定した後でないと
-    // `post_recipients`のFK制約に違反するため、ここ（INSERT後）でenqueueする。
-    for uri in &remote_recipient_uris {
+    enqueue_remote_dm_recipients(inbox, post_id, &remote_recipient_uris).await;
+    link_bridge_posts(
+        inbox,
+        post_id,
+        &note_id,
+        bridge_target_at_uri.as_deref(),
+        bridge_of_post_id,
+    )
+    .await;
+    store_note_extras(
+        inbox,
+        post_id,
+        note,
+        &note_id,
+        &body,
+        seiran_post_ext.as_ref(),
+    )
+    .await?;
+
+    Ok(SaveApNoteOutcome::Inserted(Box::new(SavedApNote {
+        post_id,
+        note_id,
+        actor_id,
+        remote,
+        body,
+        created_at,
+        emoji_map,
+        visibility,
+        reply_to_post_id,
+        quote_of_post_id,
+        recipient_actor_ids,
+        tags,
+        parent_original_post_id,
+    })))
+}
+
+/// AP Note の本文を変換した結果（`convert_note_content`）。
+struct ConvertedNoteContent {
+    /// 絵文字tag補完後の最終tag配列。
+    tags: Vec<serde_json::Value>,
+    /// Markdownリンク記法を含むプレーンテキスト本文。
+    body: String,
+    /// seiran Web UI でのリッチ表示用にサニタイズしたHTML。
+    content_html_sanitized: String,
+    emoji_map: serde_json::Value,
+}
+
+/// AP Note の`content`を本文（Markdown）とサニタイズ済みHTMLへ変換し、カスタム絵文字を解決する。
+async fn convert_note_content(
+    note: &serde_json::Value,
+    note_id: &str,
+    actor_uri: &str,
+    remote: &RemoteActorInfo,
+    inbox: &InboxContext,
+    ap_client: &ApClient,
+) -> ConvertedNoteContent {
+    let content_html = note["content"].as_str().unwrap_or("").to_string();
+    let mut tags = note["tag"].as_array().cloned().unwrap_or_default();
+
+    // kmyblue系は`<p class="quote-inline">RE: <a>URL</a></p>`を本文の**先頭**（Fedibird/
+    // Misskeyが本文末尾に付ける`RE:`/`QT:`行とは逆の位置）に自動挿入する（実例:
+    // kblue.10rino.net等）。`class`属性は`sanitize_ap_content_html`が全タグから剥がすため、
+    // Markdown化・サニタイズより前の生HTMLの段階で検出・除去する。tag補完前の`tags`で
+    // 十分（`quote`/`_misskey_quote`/`quoteUri`はNote直下フィールドでtag補完の対象外）。
+    let early_quote_uri = extract_ap_quote_uri(note, &tags);
+    let content_html_pre = early_quote_uri
+        .as_deref()
+        .and_then(|uri| {
+            // 第一候補: `class="quote-inline"`（Mastodon/kmyblue系の標準的なマーカー）。
+            // 第二候補: classが無い場合でも、先頭ブロックがテキストベースで
+            // `RE:`/`QT:`フォールバックと判定できれば除去する。
+            strip_quote_inline_paragraph_html(&content_html, uri).or_else(|| {
+                let leading = strip_quote_fallback_line_html_leading(&content_html, uri);
+                (leading != content_html).then_some(leading)
+            })
+        })
+        .unwrap_or_else(|| content_html.clone());
+
+    // HTML タグを除去して本文を得る（<a href> はリンクとして保持し、Markdownリンク記法
+    // `[text](url)` に変換する。メンションは `@user@host` のプレーンテキストに正規化）。
+    let mut body = ap_content_to_markdown_body(&content_html_pre, &tags, &remote.domain);
+    // seiran Web UI でのリッチ表示用（`<blockquote>`/`<ruby>`等の構造保持、#233）。
+    // `body`とは別に、意味的構造をクレンジングして保持したHTMLを`content_html`列に持つ。
+    let mut content_html_sanitized =
+        sanitize_ap_content_html(&content_html_pre, &tags, &remote.domain);
+    // リレー実装によっては、配送する Create の埋め込み Note から Emoji tag を
+    // 省略する一方、object.id の正規 Note には完全な tag を載せる。本文に未解決の
+    // shortcode がある場合だけ正規 Note を取得し、欠落した tag を補完する。
+    // object.id は外部入力なので、解決済み投稿者actorと同一originの場合だけ取得する。
+    if has_unresolved_emoji_shortcodes(&tags, &body) && has_same_origin(note_id, actor_uri) {
+        let signing_key = system_signing_key(inbox);
+        match ap_client
+            .fetch_object(note_id, (&signing_key.0, &signing_key.1))
+            .await
+        {
+            Ok(canonical_note) => {
+                if let Some(canonical_tags) = canonical_note["tag"].as_array() {
+                    for tag in canonical_tags {
+                        if !tags.contains(tag) {
+                            tags.push(tag.clone());
+                        }
+                    }
+                    body = ap_content_to_markdown_body(&content_html_pre, &tags, &remote.domain);
+                    content_html_sanitized =
+                        sanitize_ap_content_html(&content_html_pre, &tags, &remote.domain);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "[NoteSave] 正規Noteからの絵文字tag補完失敗 note_id={}: {}",
+                    note_id,
+                    error
+                );
+            }
+        }
+    }
+    // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
+    record_remote_emojis(inbox, &remote.domain, &tags).await;
+    let emoji_map = resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &body).await;
+    ConvertedNoteContent {
+        tags,
+        body,
+        content_html_sanitized,
+        emoji_map,
+    }
+}
+
+/// 引用URI抽出・解決（#116）と、本文からの`RE:`/`QT:`フォールバック行の除去。
+/// `OneHopFetch`ならDBに無ければ1段階だけフェッチを試みる（#231）。取得できた場合、
+/// Misskey/Fedibirdが本文末尾に自動付加する`RE:`/`QT:`フォールバック行（引用URIと同じURLを
+/// 指す）を本文から取り除く。kmyblueの先頭`quote-inline`段落は`convert_note_content`で既に
+/// 除去済みのため、ここでは除去し損ねた場合（`class`が付かない・末尾に来るkmyblueの別表記等）
+/// のフォールバックとして働く。tag補完後の最終`tags`で`quote_uri`を再計算する。
+async fn resolve_quote_and_strip_fallback(
+    note: &serde_json::Value,
+    mut content: ConvertedNoteContent,
+    ref_mode: ReferenceResolutionMode,
+    inbox: &InboxContext,
+    ap_client: &ApClient,
+) -> (
+    Option<i64>,
+    Option<String>,
+    Option<RefStatus>,
+    ConvertedNoteContent,
+) {
+    let quote_uri = extract_ap_quote_uri(note, &content.tags);
+    let (quote_of_post_id, quote_of_ap_uri, quote_of_ref_status) =
+        resolve_ref(ref_mode, quote_uri.as_deref(), inbox, ap_client)
+            .await
+            .into_parts();
+    if let Some(uri) = quote_uri.as_deref() {
+        // 末尾（Fedibird/Misskey）と先頭（kmyblue）の両方を確認する。先頭段落を除去できて
+        // いれば、ここでの先頭側呼び出しは通常no-opになる保険。
+        content.body = strip_quote_fallback_line(&content.body, uri);
+        content.body = strip_quote_fallback_line_leading(&content.body, uri);
+        content.content_html_sanitized =
+            strip_quote_fallback_line_html(&content.content_html_sanitized, uri);
+        content.content_html_sanitized =
+            strip_quote_fallback_line_html_leading(&content.content_html_sanitized, uri);
+    }
+    (
+        quote_of_post_id,
+        quote_of_ap_uri,
+        quote_of_ref_status,
+        content,
+    )
+}
+
+/// to/cc から可視性を判定し、seiranPostがあれば申告された可視性で上書きする
+/// （不明な値ならAP標準の判定を使う）。
+fn resolve_note_visibility(
+    note: &serde_json::Value,
+    to_list: &[String],
+    seiran_post_ext: Option<&crate::seiran_post::SeiranPost>,
+) -> &'static str {
+    let visibility = classify_ap_visibility(to_list, &as_string_list(&note["cc"]));
+    seiran_post_ext
+        .and_then(|sp| match sp.visibility.as_str() {
+            "public" => Some("public"),
+            "unlisted" => Some("unlisted"),
+            "followers_only" => Some("followers_only"),
+            "direct" => Some("direct"),
+            _ => None,
+        })
+        .unwrap_or(visibility)
+}
+
+/// DM（direct）の宛先・スレッド起点（`resolve_dm_addressing`）。DM以外は全て空。
+#[derive(Default)]
+struct DmAddressing {
+    thread_root_post_id: Option<i64>,
+    /// ローカルの宛先（即座に解決）。
+    recipient_actor_ids: Vec<i64>,
+    /// リモートの宛先URI（INSERT後に`DmRecipientResolve`ジョブで解決する）。
+    remote_recipient_uris: Vec<String>,
+}
+
+/// 受信した DM の宛先・スレッド起点を解決する。リプライ先が他人同士の DM なら拒否する。
+async fn resolve_dm_addressing(
+    inbox: &InboxContext,
+    actor_uri: &str,
+    actor_id: i64,
+    post_id: i64,
+    reply_to_post_id: Option<i64>,
+    to_list: &[String],
+) -> Result<DmAddressing, String> {
+    // リプライ先が direct（DM）の場合、送信元アクターがその DM の当事者
+    // （投稿者本人 or post_recipients の宛先）でなければ拒否する。ここを
+    // 確認せずに受理すると、リモートの送信元がinReplyTo/toを自由に申告できる
+    // ことを悪用し、無関係な第三者が他人同士のDMスレッドへ thread_root_post_id
+    // 経由で紛れ込める（当事者側のDM画面にまで表示されてしまう）。
+    if let Some(parent_id) = reply_to_post_id {
+        if let Ok(Some(m)) = inbox.post_repo.find_delivery_meta(parent_id).await {
+            if m.visibility == "direct" {
+                let authorized: bool =
+                    sqlx::query_scalar("SELECT post_is_visible_to($1, $2, 'direct', $3, false)")
+                        .bind(actor_id)
+                        .bind(m.actor_id)
+                        .bind(parent_id)
+                        .fetch_one(&inbox.db_pool)
+                        .await
+                        .unwrap_or(false);
+                if !authorized {
+                    return Err(format!(
+                        "direct投稿へのリプライ拒否: actor_id={} は親投稿{}の当事者ではありません",
+                        actor_id, parent_id
+                    ));
+                }
+            }
+        }
+    }
+
+    let parent_thread_root = match reply_to_post_id {
+        Some(parent_id) => inbox
+            .post_repo
+            .find_delivery_meta(parent_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|m| {
+                if m.visibility == "direct" {
+                    m.thread_root_post_id
+                } else {
+                    None
+                }
+            }),
+        None => None,
+    };
+    let thread_root = parent_thread_root.unwrap_or(post_id);
+
+    // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
+    // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
+    // `find_by_ap_uri` では引っかからない。`extract_local_username` で
+    // ホスト名まで含めて自ドメインのURIか検証してから解決する（末尾セグメント
+    // だけを見ると、リモートの同名ユーザー宛のDMをローカルの同名ユーザー宛だと
+    // 誤認してしまう）。
+    let mut recipients = Vec::new();
+    // ローカル宛先はここで即座に解決するが、リモート宛先（3人以上の会話に
+    // 混じるリモートユーザー等）は都度フェッチが必要になり受信処理をブロック
+    // したくないため、`DmRecipientResolve`ジョブへ回す（宛先表示、
+    // `docs/ui_spec.md` 2.5節）。送信者自身のURIは宛先ではないため除外。
+    let mut remote_uris = Vec::new();
+    for uri in to_list {
+        let Some(local_username) = crate::ap::extract_local_username(uri, &inbox.local_domain)
+        else {
+            if uri != actor_uri {
+                remote_uris.push(uri.clone());
+            }
+            continue;
+        };
+        if let Ok(Some(actor)) = inbox
+            .actor_repo
+            .find_by_username_domain(local_username, &inbox.local_domain)
+            .await
+        {
+            if actor.actor_type == "local" {
+                recipients.push(actor.id);
+            }
+        }
+    }
+    Ok(DmAddressing {
+        thread_root_post_id: Some(thread_root),
+        recipient_actor_ids: recipients,
+        remote_recipient_uris: remote_uris,
+    })
+}
+
+/// ブリッジポスト検出（brid.gy等がATP原本をAPへ自動ブリッジしたコピー、`crate::bridge_post`
+/// 参照）。元ポストが既にDBにあれば`bridge_of_post_id`を即座に解決し、無ければ
+/// `bridged_original_uri`だけ保存してINSERT後に`Job::FetchBridgeOriginal`を積む。
+/// 戻り値:（ブリッジ元のAT URI, 解決済みの元ポストid）。
+async fn resolve_bridge_original(
+    inbox: &InboxContext,
+    note: &serde_json::Value,
+) -> (Option<String>, Option<i64>) {
+    let bridge_target_at_uri = extract_bridge_target_at_uri(note);
+    let bridge_of_post_id = match &bridge_target_at_uri {
+        Some(at_uri) => crate::bridge_post::resolve_bridge_target(
+            &inbox.db_pool,
+            at_uri,
+            crate::bridge_post::BridgeTargetProtocol::Atp,
+        )
+        .await
+        .unwrap_or(None),
+        None => None,
+    };
+    (bridge_target_at_uri, bridge_of_post_id)
+}
+
+/// DM宛先のうちリモート分の解決ジョブを積む。posts行が確定した後でないと
+/// `post_recipients`のFK制約に違反するため、INSERT後に呼ぶ。
+async fn enqueue_remote_dm_recipients(inbox: &InboxContext, post_id: i64, uris: &[String]) {
+    for uri in uris {
         if let Err(e) = inbox
             .queue
             .enqueue(
@@ -450,9 +595,20 @@ pub(crate) async fn save_ap_note_core(
             tracing::warn!("[NoteSave] DmRecipientResolveの積み込みに失敗: {}", e);
         }
     }
+}
 
+/// ブリッジポスト関連の結合（`crate::bridge_post`参照）: このNoteがブリッジポストなら元ポスト
+/// との相互参照を張り（元ポスト未取り込みなら取得ジョブを積む）、このNote自身を待っている
+/// 未解決ブリッジポストがあれば結合する。
+async fn link_bridge_posts(
+    inbox: &InboxContext,
+    post_id: i64,
+    note_id: &str,
+    bridge_target_at_uri: Option<&str>,
+    bridge_of_post_id: Option<i64>,
+) {
     // ブリッジポスト処理（`crate::bridge_post`参照）。
-    if let Some(at_uri) = &bridge_target_at_uri {
+    if let Some(at_uri) = bridge_target_at_uri {
         match bridge_of_post_id {
             // 元ポストが既に解決済み: 元ポスト側の逆参照(ap_bridge_post_id)を更新する。
             Some(original_id) => {
@@ -475,7 +631,7 @@ pub(crate) async fn save_ap_note_core(
                     .enqueue(
                         Job::FetchBridgeOriginal {
                             bridge_post_id: post_id,
-                            target_uri: at_uri.clone(),
+                            target_uri: at_uri.to_string(),
                             protocol: "atp".to_string(),
                         },
                         priority::NORMAL,
@@ -493,15 +649,25 @@ pub(crate) async fn save_ap_note_core(
     if let Err(e) = crate::bridge_post::link_pending_bridges_for_new_original(
         &inbox.db_pool,
         post_id,
-        Some(&note_id),
+        Some(note_id),
         None,
     )
     .await
     {
         tracing::warn!("[NoteSave] 待機中ブリッジポストの結合チェックに失敗: {}", e);
     }
+}
 
-    let (content_warning, poll) = match &seiran_post_ext {
+/// 投稿本体以外の付帯情報を保存する: CW・アンケート、ハッシュタグ、URLカード、添付メディア。
+async fn store_note_extras(
+    inbox: &InboxContext,
+    post_id: i64,
+    note: &serde_json::Value,
+    note_id: &str,
+    body: &str,
+    seiran_post_ext: Option<&crate::seiran_post::SeiranPost>,
+) -> Result<(), String> {
+    let (content_warning, poll) = match seiran_post_ext {
         Some(sp) => (sp.content_warning.as_deref(), sp.poll.clone()),
         None => (
             note["summary"].as_str().filter(|s| !s.is_empty()),
@@ -514,7 +680,7 @@ pub(crate) async fn save_ap_note_core(
         .await
         .map_err(|e| format!("投稿メタデータ更新エラー: {}", e))?;
 
-    if let Err(e) = inbox.hashtag_repo.link_post(post_id, &body).await {
+    if let Err(e) = inbox.hashtag_repo.link_post(post_id, body).await {
         tracing::error!(
             "[NoteSave] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
             e
@@ -528,32 +694,17 @@ pub(crate) async fn save_ap_note_core(
     // 解決も行う）へ委ねる。`Article`（bridgy-fed Webブリッジ等、#242）はNoteと異なり
     // 元記事そのものに価値があるため、本文中リンクの有無に関わらず自身の`id`（ap_object_id）
     // も常にカード化候補へ加える（タイムライン上からでも元記事へジャンプできるように）。
-    let article_url = (note["type"].as_str() == Some("Article")).then_some(note_id.as_str());
-    match seiran_post_ext.as_ref().map(|sp| &sp.link_cards) {
+    let article_url = (note["type"].as_str() == Some("Article")).then_some(note_id);
+    match seiran_post_ext.map(|sp| &sp.link_cards) {
         Some(cards) if !cards.is_empty() => {
             crate::seiran_post::insert_seiran_post_link_cards(&inbox.db_pool, post_id, cards).await;
         }
-        _ => queue_link_cards_for_post(&inbox.queue, post_id, &body, article_url).await,
+        _ => queue_link_cards_for_post(&inbox.queue, post_id, body, article_url).await,
     }
 
     // 添付画像・動画・音声の URL を保存（S3 には保存せず URL のみ記録）
     save_remote_attachments(inbox, post_id, note).await;
-
-    Ok(SaveApNoteOutcome::Inserted(Box::new(SavedApNote {
-        post_id,
-        note_id,
-        actor_id,
-        remote,
-        body,
-        created_at,
-        emoji_map,
-        visibility,
-        reply_to_post_id,
-        quote_of_post_id,
-        recipient_actor_ids,
-        tags,
-        parent_original_post_id,
-    })))
+    Ok(())
 }
 
 /// 1投稿から抽出するURLカード候補の上限。大量リンクを含む投稿でのOGPフェッチ暴走を防ぐ。

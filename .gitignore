@@ -12,6 +12,7 @@ config/
 # フロントエンド依存パッケージ
 frontend/node_modules/
 frontend/dist/
+*.tsbuildinfo
 
 # node_modules由来の生成物（postinstallでコピーされるtwemoji SVGアセット）
 frontend/public/twemoji/

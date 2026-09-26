@@ -300,291 +300,64 @@ async fn validate_create_regular_post_input<'a>(
     actor_id: i64,
     req: &'a CreateNoteRequest,
     now: chrono::DateTime<chrono::Utc>,
-) -> Result<ValidatedCreatePost<'a>, Response> {
+) -> Result<ValidatedCreatePost<'a>, ApiError> {
     let text = req.text.as_deref().unwrap_or("").to_string();
     if text.trim().is_empty() {
-        return Err(ApiError::BadRequest("text は空にできません".to_owned()).into_response());
+        return Err(ApiError::BadRequest("text は空にできません".to_owned()));
     }
-
-    if let Err(e) = crate::rate_limit::check_post_rate_limit(state, actor_id).await {
-        return Err(e.into_response());
-    }
+    crate::rate_limit::check_post_rate_limit(state, actor_id).await?;
 
     let reply_ctx = match &req.reply_to_id {
-        Some(id) => match resolve_reply_context(state, id, actor_id).await {
-            Ok(ctx) => ctx,
-            Err(e) => return Err(e.into_response()),
-        },
-        None => ReplyContext {
-            deliver_fedi_allowed: true,
-            deliver_bsky_allowed: true,
-            bsky_reply: None,
-            ap_in_reply_to: None,
-            parent_visibility: None,
-            parent_thread_root_post_id: None,
-            parent_local_actor_id: None,
-        },
+        Some(id) => resolve_reply_context(state, id, actor_id).await?,
+        None => ReplyContext::top_level(),
     };
-
     // 可視性の決定(リプライ先の制約を含む)。新規パラメータのため後方互換は考慮不要
     // (不正値はエラーでよい)。
-    let visibility: &'static str = match reply_ctx.resolve_visibility(req.visibility.as_deref()) {
-        Ok(v) => v,
-        Err(e) => return Err(e.into_response()),
-    };
-
-    // DM(visibility=="direct")の宛先解決・バリデーション。
-    let recipient_actor_ids: Vec<i64> = if visibility == "direct" {
-        match req.recipient_actor_ids.as_deref() {
-            Some(ids) if !ids.is_empty() => {
-                match ids
-                    .iter()
-                    .map(|s| s.parse::<i64>())
-                    .collect::<Result<Vec<i64>, _>>()
-                {
-                    Ok(v) => v,
-                    Err(_) => {
-                        return Err(
-                            ApiError::BadRequest("INVALID_RECIPIENT_ACTOR_ID".to_owned())
-                                .into_response(),
-                        )
-                    }
-                }
-            }
-            _ => {
-                return Err(
-                    ApiError::BadRequest("RECIPIENT_ACTOR_IDS_REQUIRED".to_owned()).into_response(),
-                )
-            }
-        }
-    } else {
-        Vec::new()
-    };
-    let recipient_actors: Vec<Actor> = if recipient_actor_ids.is_empty() {
-        Vec::new()
-    } else {
-        match state.actors.find_by_ids(&recipient_actor_ids).await {
-            Ok(a) => a,
-            Err(e) => {
-                return Err(
-                    ApiError::Internal(format!("DM宛先アクター取得失敗: {}", e)).into_response()
-                )
-            }
-        }
-    };
+    let visibility: &'static str = reply_ctx.resolve_visibility(req.visibility.as_deref())?;
+    let recipient_actors = resolve_dm_recipients(state, req, visibility).await?;
+    let recipient_actor_ids: Vec<i64> = recipient_actors.iter().map(|a| a.id).collect();
     let has_bsky_recipient = recipient_actors.iter().any(|a| a.actor_type == "bsky");
-    if visibility == "direct" {
-        // Bsky の DM は1対1のみのため、Bsky宛先が1人でも含まれるなら他の宛先の同居を許さない。
-        let bsky_count = recipient_actors
-            .iter()
-            .filter(|a| a.actor_type == "bsky")
-            .count();
-        if bsky_count >= 1 && recipient_actors.len() > 1 {
-            return Err(
-                ApiError::BadRequest("BSKY_DM_SINGLE_RECIPIENT_ONLY".to_owned()).into_response(),
-            );
-        }
-    }
+    let (deliver_fedi, deliver_bsky) =
+        decide_delivery_targets(req, visibility, &reply_ctx, &recipient_actors, actor_id);
 
-    let (deliver_fedi, mut deliver_bsky) = if visibility == "direct" {
-        // remote_seiran（#236で相互申告マージが成立した他seiranサーバーのアクター）はAP経由でも
-        // 受信できるため、fediと同様にAP DM配送のトリガーに含める（漏らすとDM自体が
-        // どちらの配送ジョブもenqueueされず届かなくなる）。
-        let has_fedi_recipient = recipient_actors
-            .iter()
-            .any(|a| a.actor_type == "fedi" || a.actor_type == "remote_seiran");
-        (has_fedi_recipient, has_bsky_recipient)
-    } else {
-        (
-            req.deliver_to_fedi.unwrap_or(true) && reply_ctx.deliver_fedi_allowed,
-            req.deliver_to_bsky.unwrap_or(true) && reply_ctx.deliver_bsky_allowed,
-        )
-    };
-
-    // Misskey互換API保護: Bsky はプロトコル上 followers_only（フォロワー限定）投稿を配信できない。
-    // visibility が followers_only なのに Bsky 配送が要求された場合、エラーを返さず Fedi のみ
-    // 配送に読み替える（unlisted は Bsky 配送可能。フロントは PostComposer で事前にブロックするが、
-    // フロントを経由しない外部クライアントからの想定外リクエストにも安全に対応する）。
-    if visibility == "followers_only" && deliver_bsky {
-        tracing::info!(
-            "[create_regular_post] visibility={} で Bsky 配送が要求されたため Fedi のみに読み替え（actor_id={}）",
-            visibility, actor_id
-        );
-        deliver_bsky = false;
-    }
-
-    if visibility == "direct" {
-        // DMの文字数上限はBsky宛先の有無で切り替える(通常投稿の上限とは別体系)。
-        if let Err(e) = validate_dm_text_length(&text, has_bsky_recipient) {
-            return Err(e.into_response());
-        }
-    } else {
-        // Bsky 配信する場合、メンション変換（`@user` → `@user.example.com` 等）でバイト数・
-        // 書記素数が増えうるため、投稿を受理する前に変換後テキストを同期的に確定し、
-        // それに対して Bsky の厳密な上限（300 書記素・3000 バイト）を検証する。
-        // ここで弾けば DB への INSERT 自体が行われない（未確定状態を作らない）。
-        let bsky_text_for_validation: Option<String> = if deliver_bsky {
-            let (bsky_text, _facets) = convert_mentions_for_bsky(
-                &text,
-                &state.local_domain,
-                &state.db,
-                state.ap_client.http.as_ref(),
-            )
-            .await;
-            Some(bsky_text)
-        } else {
-            None
-        };
-        if let Err(e) = validate_text_length(&text, bsky_text_for_validation.as_deref()) {
-            return Err(e.into_response());
-        }
-    }
-    if let Some(ids) = &req.attachment_ids {
-        if let Err(e) = validate_attachment_ids(ids) {
-            return Err(e.into_response());
-        }
-        if visibility == "direct" && has_bsky_recipient && !ids.is_empty() {
-            return Err(ApiError::BadRequest("BSKY_DM_NO_ATTACHMENTS".to_owned()).into_response());
-        }
-    }
-    // Bsky embed選択（#227）: `Attachment{id}`を選んだ場合、そのidは今回の投稿の添付として
-    // 実際に指定されていなければならない（含まれないidの選択は不正リクエストとして拒否する）。
-    if let Some(dto::BskyEmbedChoice::Attachment { id }) = &req.bsky_embed_choice {
-        let attached = req
-            .attachment_ids
-            .as_ref()
-            .is_some_and(|ids| ids.iter().any(|i| i == id));
-        if !attached {
-            return Err(
-                ApiError::BadRequest("INVALID_BSKY_EMBED_CHOICE".to_owned()).into_response()
-            );
-        }
-    }
-    // Bsky embed選択（#228）: `Poll`を選んだ場合、このリクエストが実際にアンケートを
-    // 作成していなければならない。
-    if matches!(req.bsky_embed_choice, Some(dto::BskyEmbedChoice::Poll)) && req.poll.is_none() {
-        return Err(ApiError::BadRequest("INVALID_BSKY_EMBED_CHOICE".to_owned()).into_response());
-    }
-
-    // アンケート作成（#228）: DMには馴染まないため禁止する（BSKY_DM_NO_ATTACHMENTSと同じ理由）。
-    if visibility == "direct" && req.poll.is_some() {
-        return Err(ApiError::BadRequest("POLL_NOT_ALLOWED_FOR_DM".to_owned()).into_response());
-    }
-    let poll_json: Option<serde_json::Value> = match &req.poll {
-        Some(p) => {
-            let choices = match validate_poll_choices(&p.choices) {
-                Ok(c) => c,
-                Err(e) => return Err(e.into_response()),
-            };
-            // 期限: 絶対時刻（ISO8601） > Misskey互換epochミリ秒 > 相対秒数 の優先順で解決する。
-            // いずれも無ければ無期限（endTimeを省略）。
-            let end_time: Option<chrono::DateTime<chrono::Utc>> = p
-                .expires_at
-                .as_deref()
-                .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
-                .or_else(|| {
-                    p.expires_at_epoch_ms
-                        .and_then(chrono::DateTime::from_timestamp_millis)
-                })
-                .or_else(|| {
-                    p.expires_in_seconds
-                        .map(|secs| now + chrono::Duration::seconds(secs))
-                });
-            Some(serde_json::json!({
-                "multiple": p.multiple.unwrap_or(false),
-                "options": choices.into_iter().map(|name| serde_json::json!({"name": name, "votes": 0})).collect::<Vec<_>>(),
-                "endTime": end_time.map(|t| t.to_rfc3339()),
-            }))
-        }
-        None => None,
-    };
-
-    // CW（閲覧注意、#229）: DMには馴染まないため禁止する（POLL_NOT_ALLOWED_FOR_DMと同じ理由）。
-    if visibility == "direct" && req.content_warning.is_some() {
-        return Err(ApiError::BadRequest("CW_NOT_ALLOWED_FOR_DM".to_owned()).into_response());
-    }
-    let content_warning: Option<String> = match &req.content_warning {
-        Some(cw) => match validate_cw(cw) {
-            Ok(c) => Some(c),
-            Err(e) => return Err(e.into_response()),
-        },
-        None => None,
-    };
-
+    validate_post_text_length(state, &text, visibility, has_bsky_recipient, deliver_bsky).await?;
+    validate_attachments_and_embed_choice(req, visibility, has_bsky_recipient)?;
+    let poll_json = build_poll_json(req, visibility, now)?;
+    let content_warning = validate_content_warning(req, visibility)?;
     // ポスト言語（Bsky配送の`langs`にのみ意味を持つ、AP配送では使わない）。表示言語設定と
     // 同じ許可リストで検証する。Misskey互換APIクライアント等、本フィールドを送らない
     // クライアントとの後方互換のため`None`は許可し（従来通り言語情報なしで配送）、
     // `Some`だが未対応言語の場合のみ拒否する。
     if let Some(lang) = &req.language {
         if !seiran_common::is_supported_language(lang) {
-            return Err(ApiError::BadRequest("UNSUPPORTED_LANGUAGE".to_owned()).into_response());
+            return Err(ApiError::BadRequest("UNSUPPORTED_LANGUAGE".to_owned()));
         }
     }
-
     // URLリンクカードのチェックボックス選択（Bsky embed選択のラジオボタンリストを出せない
     // 場合の代替、Bsky配送オフ or CW中）。
-    if let Err(e) = validate_link_card_urls(&req.link_card_urls) {
-        return Err(e.into_response());
-    }
+    validate_link_card_urls(&req.link_card_urls)?;
 
     let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
-    let mut quote_of_id_i64: Option<i64> = req.quote_of_id.as_deref().and_then(|s| s.parse().ok());
-    let mut quote_notif_recipient = None;
-
-    // 引用先とブロック関係にある場合、および公開範囲制約違反の場合は引用を拒否する。
-    if let Some(quote_id) = quote_of_id_i64 {
-        match state.posts.find_delivery_meta(quote_id).await {
-            Ok(Some(meta)) => {
-                // ブリッジポスト対応: 引用先がブリッジポストなら、内部的には常に元ポストへの
-                // 引用として扱う（`crate::bridge_post`・`docs/protocols.md`参照）。
-                let (redirected_id, meta) = redirect_bridge_post_meta(state, quote_id, meta).await;
-                quote_of_id_i64 = Some(redirected_id);
-
-                if let Err(e) = crate::handlers::target_resolve::check_not_blocked(
-                    state,
-                    actor_id,
-                    meta.actor_id,
-                )
-                .await
-                {
-                    return Err(e.into_response());
-                }
-
-                if let Err(e) = validate_quote_visibility(&meta.visibility, visibility) {
-                    return Err(e.into_response());
-                }
-                if meta.actor_type == "local" && meta.actor_id != actor_id {
-                    quote_notif_recipient = Some(meta.actor_id);
-                }
+    let (quote_of_id_i64, quote_notif_recipient) =
+        match req.quote_of_id.as_deref().and_then(|s| s.parse().ok()) {
+            Some(quote_id) => {
+                let (id, recipient) =
+                    resolve_quote_target(state, actor_id, quote_id, visibility).await?;
+                (Some(id), recipient)
             }
-            Ok(None) => return Err(ApiError::NotFound("QUOTE_TARGET_NOT_FOUND").into_response()),
-            Err(e) => {
-                return Err(
-                    ApiError::Internal(format!("引用元ポスト取得失敗: {}", e)).into_response()
-                )
-            }
-        }
-    }
+            None => (None, None),
+        };
 
     if visibility != "direct" {
         let mut contact_targets =
             extract_local_mention_actor_ids(&text, &state.local_domain, &state.db).await;
         contact_targets.extend(reply_ctx.parent_local_actor_id);
         contact_targets.extend(quote_notif_recipient);
-        if let Err(error) =
-            crate::rate_limit::check_and_record_contacts(state, actor_id, contact_targets).await
-        {
-            return Err(error.into_response());
-        }
+        crate::rate_limit::check_and_record_contacts(state, actor_id, contact_targets).await?;
     }
-
     // DM(direct)宛先とブロック関係にある場合は送信を拒否する。
     for recipient in &recipient_actors {
-        if let Err(e) =
-            crate::handlers::target_resolve::check_not_blocked(state, actor_id, recipient.id).await
-        {
-            return Err(e.into_response());
-        }
+        crate::handlers::target_resolve::check_not_blocked(state, actor_id, recipient.id).await?;
     }
 
     // attachment_ids を i64 に変換（バリデーション済みなので unwrap 安全）
@@ -613,6 +386,220 @@ async fn validate_create_regular_post_input<'a>(
     })
 }
 
+/// DM(visibility=="direct")の宛先を解決・検証する（direct以外は空）。宛先IDは指定順を保つ。
+/// Bsky の DM は1対1のみのため、Bsky宛先が1人でも含まれるなら他の宛先の同居を許さない。
+async fn resolve_dm_recipients(
+    state: &AppState,
+    req: &CreateNoteRequest,
+    visibility: &str,
+) -> Result<Vec<Actor>, ApiError> {
+    if visibility != "direct" {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<i64> = match req.recipient_actor_ids.as_deref() {
+        Some(ids) if !ids.is_empty() => ids
+            .iter()
+            .map(|s| s.parse::<i64>())
+            .collect::<Result<_, _>>()
+            .map_err(|_| ApiError::BadRequest("INVALID_RECIPIENT_ACTOR_ID".to_owned()))?,
+        _ => {
+            return Err(ApiError::BadRequest(
+                "RECIPIENT_ACTOR_IDS_REQUIRED".to_owned(),
+            ))
+        }
+    };
+    let found = state
+        .actors
+        .find_by_ids(&ids)
+        .await
+        .map_err(|e| ApiError::Internal(format!("DM宛先アクター取得失敗: {}", e)))?;
+    // 指定順を保ったまま重複を除く。存在しないIDが含まれていれば拒否する（以前は未確認のまま
+    // `post_recipients`へ渡し、外部キー違反で500になっていた）。
+    let mut by_id: HashMap<i64, Actor> = found.into_iter().map(|a| (a.id, a)).collect();
+    let mut recipients: Vec<Actor> = Vec::with_capacity(ids.len());
+    for id in &ids {
+        if let Some(actor) = by_id.remove(id) {
+            recipients.push(actor);
+        } else if !recipients.iter().any(|a| a.id == *id) {
+            return Err(ApiError::BadRequest(
+                "INVALID_RECIPIENT_ACTOR_ID".to_owned(),
+            ));
+        }
+    }
+    let bsky_count = recipients.iter().filter(|a| a.actor_type == "bsky").count();
+    if bsky_count >= 1 && recipients.len() > 1 {
+        return Err(ApiError::BadRequest(
+            "BSKY_DM_SINGLE_RECIPIENT_ONLY".to_owned(),
+        ));
+    }
+    Ok(recipients)
+}
+
+/// 配送先プロトコル（Fedi, Bsky）を決める。
+fn decide_delivery_targets(
+    req: &CreateNoteRequest,
+    visibility: &str,
+    reply_ctx: &ReplyContext,
+    recipient_actors: &[Actor],
+    actor_id: i64,
+) -> (bool, bool) {
+    if visibility == "direct" {
+        // remote_seiran（#236で相互申告マージが成立した他seiranサーバーのアクター）はAP経由でも
+        // 受信できるため、fediと同様にAP DM配送のトリガーに含める（漏らすとDM自体が
+        // どちらの配送ジョブもenqueueされず届かなくなる）。
+        let has_fedi_recipient = recipient_actors
+            .iter()
+            .any(|a| a.actor_type == "fedi" || a.actor_type == "remote_seiran");
+        let has_bsky_recipient = recipient_actors.iter().any(|a| a.actor_type == "bsky");
+        return (has_fedi_recipient, has_bsky_recipient);
+    }
+    let deliver_fedi = req.deliver_to_fedi.unwrap_or(true) && reply_ctx.deliver_fedi_allowed;
+    let mut deliver_bsky = req.deliver_to_bsky.unwrap_or(true) && reply_ctx.deliver_bsky_allowed;
+    // Misskey互換API保護: Bsky はプロトコル上 followers_only（フォロワー限定）投稿を配信できない。
+    // visibility が followers_only なのに Bsky 配送が要求された場合、エラーを返さず Fedi のみ
+    // 配送に読み替える（unlisted は Bsky 配送可能。フロントは PostComposer で事前にブロックするが、
+    // フロントを経由しない外部クライアントからの想定外リクエストにも安全に対応する）。
+    if visibility == "followers_only" && deliver_bsky {
+        tracing::info!(
+            "[create_regular_post] visibility={} で Bsky 配送が要求されたため Fedi のみに読み替え（actor_id={}）",
+            visibility, actor_id
+        );
+        deliver_bsky = false;
+    }
+    (deliver_fedi, deliver_bsky)
+}
+
+/// 本文の長さを検証する。DMの文字数上限はBsky宛先の有無で切り替える（通常投稿の上限とは
+/// 別体系）。通常投稿で Bsky 配信する場合、メンション変換（`@user` → `@user.example.com` 等）で
+/// バイト数・書記素数が増えうるため、変換後テキストを同期的に確定し、それに対して Bsky の厳密な
+/// 上限（300 書記素・3000 バイト）を検証する（ここで弾けば DB への INSERT 自体が行われない）。
+async fn validate_post_text_length(
+    state: &AppState,
+    text: &str,
+    visibility: &str,
+    has_bsky_recipient: bool,
+    deliver_bsky: bool,
+) -> Result<(), ApiError> {
+    if visibility == "direct" {
+        return validate_dm_text_length(text, has_bsky_recipient);
+    }
+    let bsky_text_for_validation: Option<String> = if deliver_bsky {
+        let (bsky_text, _facets) = convert_mentions_for_bsky(
+            text,
+            &state.local_domain,
+            &state.db,
+            state.ap_client.http.as_ref(),
+        )
+        .await;
+        Some(bsky_text)
+    } else {
+        None
+    };
+    validate_text_length(text, bsky_text_for_validation.as_deref())
+}
+
+/// 添付IDと Bsky embed 選択を検証する。
+fn validate_attachments_and_embed_choice(
+    req: &CreateNoteRequest,
+    visibility: &str,
+    has_bsky_recipient: bool,
+) -> Result<(), ApiError> {
+    if let Some(ids) = &req.attachment_ids {
+        validate_attachment_ids(ids)?;
+        if visibility == "direct" && has_bsky_recipient && !ids.is_empty() {
+            return Err(ApiError::BadRequest("BSKY_DM_NO_ATTACHMENTS".to_owned()));
+        }
+    }
+    // Bsky embed選択（#227）: `Attachment{id}`を選んだ場合、そのidは今回の投稿の添付として
+    // 実際に指定されていなければならない（含まれないidの選択は不正リクエストとして拒否する）。
+    if let Some(dto::BskyEmbedChoice::Attachment { id }) = &req.bsky_embed_choice {
+        let attached = req
+            .attachment_ids
+            .as_ref()
+            .is_some_and(|ids| ids.iter().any(|i| i == id));
+        if !attached {
+            return Err(ApiError::BadRequest("INVALID_BSKY_EMBED_CHOICE".to_owned()));
+        }
+    }
+    // Bsky embed選択（#228）: `Poll`を選んだ場合、このリクエストが実際にアンケートを
+    // 作成していなければならない。
+    if matches!(req.bsky_embed_choice, Some(dto::BskyEmbedChoice::Poll)) && req.poll.is_none() {
+        return Err(ApiError::BadRequest("INVALID_BSKY_EMBED_CHOICE".to_owned()));
+    }
+    Ok(())
+}
+
+/// アンケート（#228）を`posts.poll`の形のJSONへ組み立てる。DMには馴染まないため禁止する
+/// （BSKY_DM_NO_ATTACHMENTSと同じ理由）。期限は 絶対時刻（ISO8601） > Misskey互換epochミリ秒 >
+/// 相対秒数 の優先順で解決し、いずれも無ければ無期限（endTimeを省略）。
+fn build_poll_json(
+    req: &CreateNoteRequest,
+    visibility: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Option<serde_json::Value>, ApiError> {
+    let Some(p) = &req.poll else {
+        return Ok(None);
+    };
+    if visibility == "direct" {
+        return Err(ApiError::BadRequest("POLL_NOT_ALLOWED_FOR_DM".to_owned()));
+    }
+    let choices = validate_poll_choices(&p.choices)?;
+    let end_time: Option<chrono::DateTime<chrono::Utc>> = p
+        .expires_at
+        .as_deref()
+        .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
+        .or_else(|| {
+            p.expires_at_epoch_ms
+                .and_then(chrono::DateTime::from_timestamp_millis)
+        })
+        .or_else(|| {
+            p.expires_in_seconds
+                .map(|secs| now + chrono::Duration::seconds(secs))
+        });
+    Ok(Some(serde_json::json!({
+        "multiple": p.multiple.unwrap_or(false),
+        "options": choices.into_iter().map(|name| serde_json::json!({"name": name, "votes": 0})).collect::<Vec<_>>(),
+        "endTime": end_time.map(|t| t.to_rfc3339()),
+    })))
+}
+
+/// CW（閲覧注意、#229）を検証する。DMには馴染まないため禁止する（POLL_NOT_ALLOWED_FOR_DMと同じ理由）。
+fn validate_content_warning(
+    req: &CreateNoteRequest,
+    visibility: &str,
+) -> Result<Option<String>, ApiError> {
+    let Some(cw) = &req.content_warning else {
+        return Ok(None);
+    };
+    if visibility == "direct" {
+        return Err(ApiError::BadRequest("CW_NOT_ALLOWED_FOR_DM".to_owned()));
+    }
+    validate_cw(cw).map(Some)
+}
+
+/// 引用先を検証し、（内部的な引用先ID, 引用通知の宛先）を返す。引用先とブロック関係にある場合、
+/// および公開範囲制約違反の場合は拒否する。引用先がブリッジポストなら、内部的には常に元ポストへの
+/// 引用として扱う（`crate::bridge_post`・`docs/protocols.md`参照）。
+async fn resolve_quote_target(
+    state: &AppState,
+    actor_id: i64,
+    quote_id: i64,
+    visibility: &str,
+) -> Result<(i64, Option<i64>), ApiError> {
+    let meta = state
+        .posts
+        .find_delivery_meta(quote_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("引用元ポスト取得失敗: {}", e)))?
+        .ok_or(ApiError::NotFound("QUOTE_TARGET_NOT_FOUND"))?;
+    let (redirected_id, meta) = redirect_bridge_post_meta(state, quote_id, meta).await;
+    crate::handlers::target_resolve::check_not_blocked(state, actor_id, meta.actor_id).await?;
+    validate_quote_visibility(&meta.visibility, visibility)?;
+    let notif_recipient =
+        (meta.actor_type == "local" && meta.actor_id != actor_id).then_some(meta.actor_id);
+    Ok((redirected_id, notif_recipient))
+}
+
 /// 通常投稿・リプライ・引用投稿を処理する（`renote_id` を持たないケース）。
 /// 検証（[`validate_create_regular_post_input`]）→ 永続化・配送（[`persist_regular_post`]）の
 /// 2段に委ねるだけの薄いオーケストレーション。
@@ -626,7 +613,7 @@ async fn create_regular_post(
 ) -> Response {
     let validated = match validate_create_regular_post_input(state, actor_id, req, now).await {
         Ok(v) => v,
-        Err(resp) => return resp,
+        Err(e) => return e.into_response(),
     };
     persist_regular_post(state, actor_id, username, display_name, now, validated).await
 }

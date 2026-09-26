@@ -62,8 +62,20 @@
 | 単体 | Misskey `CursorParams` | `limit`の丸め・不正IDの無視・camelCase ボディの解釈 |
 | E2E | `hashtag.spec.ts`・`search.spec.ts` | ハッシュタグTLの投票済み状態、検索結果のリアクション・引用元埋め込み |
 
-## 4. 残課題
+## 4. 第3弾（残課題の解消）
 
-1. **長大関数**（行数）: `firehose::save_bsky_post`（約480）・`process_message`（約350）、`inbound_activity_process::note_save::save_ap_note_core`（約470）、`notes::creation::validate_create_regular_post_input`（約320）、`bsky_dm_poll::sync_convo`（約310）、`federation-inbox` の `outbox_handler`（約300）、`migration::submit_plc_token`（約300）、`jobs::at_migration::process_import`（約300）、`seiran-server` の `main`（約280）。いずれも受信・転入の中核処理で、分割にはそれぞれの経路の E2E／結合テストの拡充が先に必要。
-2. **DM のノート組み立て**: `handlers::dm` は Bsky 側リアクション（`dm_bsky_reactions`）の合算など固有処理があるため `build_note_responses` に統合していない。引用の埋め込み（`embed_quotes`）を呼んでいないため、DM 内の引用カードの表示経路を確認する必要がある。
-3. **フロントエンドのフォロー API 呼び出し**: カスタム API が `actorId` を受け付けるようになったが、frontend は従来どおり `target` 文字列で呼んでいる。actor 行を持っている画面から `actorId` 指定に切り替えると、文字列の組み立て・解析の分岐が不要になる（フォロー成立時の相手プロフィール取得自体は最新化のため残る）。
+| # | 内容 |
+|---|------|
+| I | DM のノート組み立て（`handlers::dm::sessions`・`thread_messages`）を `build_note_responses` に統合し、Bsky 側リアクションの合算と宛先一覧だけを上乗せする形にした。DM 内の引用カードが表示されない不具合（`embed_quotes` 未呼び出し）を解消。E2E `dm.spec.ts` に引用埋め込みのテストを追加 |
+| J | frontend のフォロー API 呼び出しを、actor 行を持つ画面（対ユーザー操作メニュー・フォローボタンのホバー切替）から `actorId` 指定に切り替え（`followTargetOf`）。あわせてカスタム API の `actorId` 解決が `at_did` を `ap_uri` より優先しており、Misskey クライアントからリモート seiran アクターをフォローすると ATP のみで成立していた不具合を修正（プロフィール画面と同じ `ap_uri` 優先に統一） |
+| K | 長大関数を手順ごとの関数に分割: `firehose::save_bsky_post`・`process_message`、`note_save::save_ap_note_core`、`creation::validate_create_regular_post_input`、`bsky_dm_poll::sync_convo`、`outbox_handler`、`migration::submit_plc_token`、`at_migration::process_import`、`seiran-server` の `main`。分割は既存の処理ブロックをそのまま移す形で行い、挙動は変えていない（下記の不具合修正を除く） |
+
+分割の過程で見つけた不具合:
+
+- **outbox の可視性漏れ**: `GET /users/:username/outbox` が可視性を見ずに全投稿を `to: Public` の Create として並べており、フォロワー限定投稿・DM の本文を誰でも取得できた。featured と同じ条件で除外し、添付・Note 組み立てを `handlers::ap_collection` に共通化。E2E `dm-privacy.spec.ts` に固定テストを追加。
+- **DM 宛先に存在しない actorId を指定すると 500**: `resolve_dm_recipients` で事前に検証し 400 `INVALID_RECIPIENT_ACTOR_ID` を返す。
+- **Node 25 以降で frontend 単体テストが失敗**: Node 組み込みの `localStorage` が jsdom のものを覆い隠すため、vitest の setupFile で jsdom 側を割り当て直す（CI の Node 20 では発生しない）。
+
+## 5. 残課題
+
+- 長大関数の分割は、受信・転入経路の網羅的な E2E が無いまま「処理ブロックを移すだけ」に留めた。個々の手順関数（`resolve_dm_addressing`・`resolve_quote_and_strip_fallback` 等）の単体テストは今後の課題。

@@ -327,8 +327,6 @@ async fn process_import(
     pool: &PgPool,
     ctx: &JobContext,
 ) -> Result<ImportNextAction, JobError> {
-    use crate::repository::{InsertFullParams, PgPostRepository, PostRepository};
-
     let repo = PgAtMigrationRepository::new(pool.clone());
     let Some(req) = repo.get(request_id).await.map_err(|e| {
         JobError::Transient(format!("[MigrationImportProcess] リクエスト取得失敗: {e}"))
@@ -357,174 +355,24 @@ async fn process_import(
     let follow_exec = ctx.follow_exec.as_ref().ok_or_else(|| {
         JobError::Transient("[MigrationImportProcess] FollowExecConfig 未設定".to_string())
     })?;
-    let atp_service = &follow_exec.atp_service;
-    let local_domain = &follow_exec.local_domain;
 
     let now = chrono::Utc::now();
+    let ic = ImportContext {
+        pool,
+        req: &req,
+        actor_id,
+        follow_exec,
+        now,
+    };
 
     // ① atp_migration_records: 未取り込み分を1件ずつ実体化（posts or atp_records）
-    if let Some((id, collection, rkey, cid, bytes)) =
+    if let Some((id, collection, rkey, _cid, bytes)) =
         repo.claim_next_record(request_id).await.map_err(|e| {
             JobError::Transient(format!("[MigrationImportProcess] レコード取得失敗: {e}"))
         })?
     {
-        let _ = cid; // CIDは`commit_generic_record`/`commit_post_record`が再計算する（内容一致のはず）
-        let value = crate::atp::decode_dagcbor_to_json(&bytes).map_err(|e| {
-            JobError::Permanent(format!(
-                "[MigrationImportProcess] レコードのCBORデコード失敗 (id={id}): {e}"
-            ))
-        })?;
-
-        if collection == "app.bsky.feed.post" {
-            let text = value
-                .get("text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let created_at = value
-                .get("createdAt")
-                .and_then(|v| v.as_str())
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.with_timezone(&chrono::Utc))
-                .unwrap_or(now);
-
-            // `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、#237）。転入元も
-            // seiranであれば、この投稿がATP標準フィールドだけでは再現できない情報（CW・投票・
-            // 絵文字マップ・URLカードの申告値・公開範囲）を持っている。リモートseiranポスト受信
-            // （`seiran-atp-repo::firehose`の`save_bsky_post`呼び出し前後）と同じ優先順位で
-            // 標準フィールドを上書きする。
-            let seiran_post_ext = crate::seiran_post::SeiranPost::extract(&value);
-            let body_text = seiran_post_ext
-                .as_ref()
-                .map(|sp| sp.body.clone())
-                .unwrap_or(text);
-            let emoji_map = seiran_post_ext
-                .as_ref()
-                .map(|sp| sp.emoji_map.clone())
-                .unwrap_or_else(|| serde_json::json!({}));
-            let content_warning = seiran_post_ext
-                .as_ref()
-                .and_then(|sp| sp.content_warning.clone());
-            let poll = seiran_post_ext.as_ref().and_then(|sp| sp.poll.clone());
-            let visibility = seiran_post_ext
-                .as_ref()
-                .map(|sp| sp.visibility.clone())
-                .unwrap_or_else(|| "public".to_string());
-            let language = seiran_post_ext.as_ref().and_then(|sp| sp.language.clone());
-
-            let posts_repo = PgPostRepository::new(pool.clone());
-
-            // 移行元DID（=移行後もDIDは不変）は、転入前からseiranがリモートキャッシュとして
-            // 既に観測済み（firehose購読・プロフィール参照等）のことがある——`actors`行自体も
-            // その場合は新規作成せず変換（UPDATE）して再利用する設計（`migration.rs`の
-            // `submit_plc_token`参照）。同じ理由で`posts`側も`at_uri`（DIDが不変なので
-            // 転入前後で同一値になる）が既存キャッシュ行と衝突しうる。新規行を作らず
-            // 既存行を再利用しないと`posts_at_uri_key`の一意制約違反でリトライが延々続く
-            // （実機で発見）。
-            let at_uri = format!("at://{}/app.bsky.feed.post/{}", req.source_did, rkey);
-            let existing_post_id = posts_repo.find_id_by_at_uri(&at_uri).await.map_err(|e| {
-                JobError::Transient(format!(
-                    "[MigrationImportProcess] 既存post確認失敗 (rkey={rkey}): {e}"
-                ))
-            })?;
-
-            let post_id = if let Some(existing_id) = existing_post_id {
-                existing_id
-            } else {
-                let post_id = crate::generate_snowflake_id(now);
-                let ap_object_id = format!("https://{}/notes/{}", local_domain, post_id);
-                let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
-
-                posts_repo
-                    .insert_full(InsertFullParams {
-                        id: post_id,
-                        actor_id,
-                        body: &body_text,
-                        ap_object_id: &ap_object_id,
-                        seiran_post_uuid: &seiran_post_uuid,
-                        // リプライ/引用先の解決はスコープ外（既知の制限、docs/account_migration.md参照）。
-                        reply_to_post_id: None,
-                        quote_of_post_id: None,
-                        created_at,
-                        visibility: &visibility,
-                        // 過去のBsky投稿の再取り込みであり新規投稿ではないため配送しない。
-                        deliver_fedi: false,
-                        deliver_bsky: false,
-                        thread_root_post_id: None,
-                        recipient_actor_ids: &[],
-                        emoji_map: &emoji_map,
-                        poll: poll.as_ref(),
-                        content_warning: content_warning.as_deref(),
-                        language: language.as_deref(),
-                    })
-                    .await
-                    .map_err(|e| {
-                        JobError::Transient(format!(
-                            "[MigrationImportProcess] posts INSERT失敗 (rkey={rkey}): {e}"
-                        ))
-                    })?;
-
-                if let Some(sp) = &seiran_post_ext {
-                    if !sp.link_cards.is_empty() {
-                        crate::seiran_post::insert_seiran_post_link_cards(
-                            pool,
-                            post_id,
-                            &sp.link_cards,
-                        )
-                        .await;
-                    }
-                }
-
-                // 画像/動画添付の復元。移行元DIDとblob CIDのみからBluesky CDN/動画パイプラインの
-                // URLを決定的に組み立てる既存ロジックを再利用する（`atp_migration_blobs`側の
-                // blob取り込み順に依存しない）。
-                if let Some(embed) = value.get("embed") {
-                    let attachments =
-                        crate::atp::parse_bsky_embed_attachments(embed, &req.source_did);
-                    for (position, att) in attachments.into_iter().enumerate() {
-                        if let Err(e) = posts_repo
-                            .attach_remote_media_url(
-                                post_id,
-                                &crate::repository::RemoteAttachment {
-                                    url: &att.url,
-                                    mime_type: Some(&att.mime_type),
-                                    thumbnail_url: att.thumbnail_url.as_deref(),
-                                    is_sensitive: false,
-                                    is_gif: att.is_gif,
-                                    position: position as i16,
-                                },
-                            )
-                            .await
-                        {
-                            tracing::error!(
-                                "[MigrationImportProcess] 添付URL保存失敗 (rkey={rkey}): {e}"
-                            );
-                        }
-                    }
-                }
-
-                post_id
-            };
-
-            atp_service
-                .commit_post_record(actor_id, post_id, rkey.clone(), &value, "create", now)
-                .await
-                .map_err(|e| {
-                    JobError::Transient(format!(
-                        "[MigrationImportProcess] commit_post_record失敗 (rkey={rkey}): {e}"
-                    ))
-                })?;
-        } else {
-            atp_service
-                .commit_generic_record(actor_id, collection.clone(), rkey.clone(), &value, "create", now)
-                .await
-                .map_err(|e| {
-                    JobError::Transient(format!(
-                        "[MigrationImportProcess] commit_generic_record失敗 (collection={collection}, rkey={rkey}): {e}"
-                    ))
-                })?;
-        }
-
+        // CIDは`commit_generic_record`/`commit_post_record`が再計算する（内容一致のはず）
+        import_staged_record(&ic, id, collection, rkey, &bytes).await?;
         repo.mark_record_imported(id, now).await.map_err(|e| {
             JobError::Transient(format!(
                 "[MigrationImportProcess] レコード取込済みマーク失敗: {e}"
@@ -539,29 +387,7 @@ async fn process_import(
         .await
         .map_err(|e| JobError::Transient(format!("[MigrationImportProcess] blob取得失敗: {e}")))?
     {
-        let session = crate::atp::migration_client::AtpSession {
-            did: req.source_did.clone(),
-            handle: req.source_handle.clone(),
-            access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
-            refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
-            email: None,
-            email_confirmed: false,
-        };
-        let resolved = crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint)
-            .await
-            .map_err(|e| {
-                JobError::Transient(format!(
-                    "[MigrationImportProcess] PDSエンドポイント検証失敗: {e}"
-                ))
-            })?;
-        let bytes = crate::atp::migration_client::fetch_blob(&resolved, &session, &cid)
-            .await
-            .map_err(|e| {
-                JobError::Transient(format!(
-                    "[MigrationImportProcess] getBlob失敗 (cid={cid}): {e}"
-                ))
-            })?;
-
+        let bytes = fetch_source_blob(&req, &cid).await?;
         let encryption_key = ctx.encryption_key.clone().ok_or_else(|| {
             JobError::Transient("[MigrationImportProcess] encryption_key 未設定".to_string())
         })?;
@@ -579,7 +405,224 @@ async fn process_import(
         return Ok(ImportNextAction::Continue);
     }
 
-    // ③ 両方尽きた: 移行元アカウント無効化（ベストエフォート）へ進める
+    finish_import(request_id, &repo, ctx, now).await
+}
+
+/// レコード取り込み1件分の共通文脈。
+struct ImportContext<'a> {
+    pool: &'a PgPool,
+    req: &'a crate::repository::AtMigrationRequestRow,
+    actor_id: i64,
+    follow_exec: &'a crate::queue::worker::FollowExecConfig,
+    now: chrono::DateTime<chrono::Utc>,
+}
+
+/// ステージング済みレコード1件を実体化する。投稿は`posts`行を作ってからATPリポジトリへ、
+/// それ以外はATPリポジトリへそのままコミットする。
+async fn import_staged_record(
+    ic: &ImportContext<'_>,
+    id: i64,
+    collection: String,
+    rkey: String,
+    bytes: &[u8],
+) -> Result<(), JobError> {
+    let value = crate::atp::decode_dagcbor_to_json(bytes).map_err(|e| {
+        JobError::Permanent(format!(
+            "[MigrationImportProcess] レコードのCBORデコード失敗 (id={id}): {e}"
+        ))
+    })?;
+
+    if collection == "app.bsky.feed.post" {
+        let post_id = materialize_migrated_post(ic, &rkey, &value).await?;
+        ic.follow_exec
+            .atp_service
+            .commit_post_record(ic.actor_id, post_id, rkey.clone(), &value, "create", ic.now)
+            .await
+            .map_err(|e| {
+                JobError::Transient(format!(
+                    "[MigrationImportProcess] commit_post_record失敗 (rkey={rkey}): {e}"
+                ))
+            })?;
+    } else {
+        ic.follow_exec.atp_service
+            .commit_generic_record(ic.actor_id, collection.clone(), rkey.clone(), &value, "create", ic.now)
+            .await
+            .map_err(|e| {
+                JobError::Transient(format!(
+                    "[MigrationImportProcess] commit_generic_record失敗 (collection={collection}, rkey={rkey}): {e}"
+                ))
+            })?;
+    }
+    Ok(())
+}
+
+/// 転入した投稿レコードに対応する`posts`行を用意し、その id を返す。
+async fn materialize_migrated_post(
+    ic: &ImportContext<'_>,
+    rkey: &str,
+    value: &serde_json::Value,
+) -> Result<i64, JobError> {
+    use crate::repository::{InsertFullParams, PgPostRepository, PostRepository};
+
+    let text = value
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let created_at = value
+        .get("createdAt")
+        .and_then(|v| v.as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or(ic.now);
+
+    // `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、#237）。転入元も
+    // seiranであれば、この投稿がATP標準フィールドだけでは再現できない情報（CW・投票・
+    // 絵文字マップ・URLカードの申告値・公開範囲）を持っている。リモートseiranポスト受信
+    // （`seiran-atp-repo::firehose`の`save_bsky_post`呼び出し前後）と同じ優先順位で
+    // 標準フィールドを上書きする。
+    let seiran_post_ext = crate::seiran_post::SeiranPost::extract(value);
+    let body_text = seiran_post_ext
+        .as_ref()
+        .map(|sp| sp.body.clone())
+        .unwrap_or(text);
+    let emoji_map = seiran_post_ext
+        .as_ref()
+        .map(|sp| sp.emoji_map.clone())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let content_warning = seiran_post_ext
+        .as_ref()
+        .and_then(|sp| sp.content_warning.clone());
+    let poll = seiran_post_ext.as_ref().and_then(|sp| sp.poll.clone());
+    let visibility = seiran_post_ext
+        .as_ref()
+        .map(|sp| sp.visibility.clone())
+        .unwrap_or_else(|| "public".to_string());
+    let language = seiran_post_ext.as_ref().and_then(|sp| sp.language.clone());
+
+    let posts_repo = PgPostRepository::new(ic.pool.clone());
+
+    // 移行元DID（=移行後もDIDは不変）は、転入前からseiranがリモートキャッシュとして
+    // 既に観測済み（firehose購読・プロフィール参照等）のことがある——`actors`行自体も
+    // その場合は新規作成せず変換（UPDATE）して再利用する設計（`migration.rs`の
+    // `submit_plc_token`参照）。同じ理由で`posts`側も`at_uri`（DIDが不変なので
+    // 転入前後で同一値になる）が既存キャッシュ行と衝突しうる。新規行を作らず
+    // 既存行を再利用しないと`posts_at_uri_key`の一意制約違反でリトライが延々続く
+    // （実機で発見）。
+    let at_uri = format!("at://{}/app.bsky.feed.post/{}", ic.req.source_did, rkey);
+    let existing_post_id = posts_repo.find_id_by_at_uri(&at_uri).await.map_err(|e| {
+        JobError::Transient(format!(
+            "[MigrationImportProcess] 既存post確認失敗 (rkey={rkey}): {e}"
+        ))
+    })?;
+    if let Some(existing_id) = existing_post_id {
+        return Ok(existing_id);
+    }
+
+    let post_id = crate::generate_snowflake_id(ic.now);
+    let ap_object_id = format!("https://{}/notes/{}", ic.follow_exec.local_domain, post_id);
+    let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
+
+    posts_repo
+        .insert_full(InsertFullParams {
+            id: post_id,
+            actor_id: ic.actor_id,
+            body: &body_text,
+            ap_object_id: &ap_object_id,
+            seiran_post_uuid: &seiran_post_uuid,
+            // リプライ/引用先の解決はスコープ外（既知の制限、docs/account_migration.md参照）。
+            reply_to_post_id: None,
+            quote_of_post_id: None,
+            created_at,
+            visibility: &visibility,
+            // 過去のBsky投稿の再取り込みであり新規投稿ではないため配送しない。
+            deliver_fedi: false,
+            deliver_bsky: false,
+            thread_root_post_id: None,
+            recipient_actor_ids: &[],
+            emoji_map: &emoji_map,
+            poll: poll.as_ref(),
+            content_warning: content_warning.as_deref(),
+            language: language.as_deref(),
+        })
+        .await
+        .map_err(|e| {
+            JobError::Transient(format!(
+                "[MigrationImportProcess] posts INSERT失敗 (rkey={rkey}): {e}"
+            ))
+        })?;
+
+    if let Some(sp) = &seiran_post_ext {
+        if !sp.link_cards.is_empty() {
+            crate::seiran_post::insert_seiran_post_link_cards(ic.pool, post_id, &sp.link_cards)
+                .await;
+        }
+    }
+
+    // 画像/動画添付の復元。移行元DIDとblob CIDのみからBluesky CDN/動画パイプラインの
+    // URLを決定的に組み立てる既存ロジックを再利用する（`atp_migration_blobs`側の
+    // blob取り込み順に依存しない）。
+    if let Some(embed) = value.get("embed") {
+        let attachments = crate::atp::parse_bsky_embed_attachments(embed, &ic.req.source_did);
+        for (position, att) in attachments.into_iter().enumerate() {
+            if let Err(e) = posts_repo
+                .attach_remote_media_url(
+                    post_id,
+                    &crate::repository::RemoteAttachment {
+                        url: &att.url,
+                        mime_type: Some(&att.mime_type),
+                        thumbnail_url: att.thumbnail_url.as_deref(),
+                        is_sensitive: false,
+                        is_gif: att.is_gif,
+                        position: position as i16,
+                    },
+                )
+                .await
+            {
+                tracing::error!("[MigrationImportProcess] 添付URL保存失敗 (rkey={rkey}): {e}");
+            }
+        }
+    }
+
+    Ok(post_id)
+}
+
+/// 転入元PDSから blob を1件取得する。
+async fn fetch_source_blob(
+    req: &crate::repository::AtMigrationRequestRow,
+    cid: &str,
+) -> Result<Vec<u8>, JobError> {
+    let session = crate::atp::migration_client::AtpSession {
+        did: req.source_did.clone(),
+        handle: req.source_handle.clone(),
+        access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
+        refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
+        email: None,
+        email_confirmed: false,
+    };
+    let resolved = crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint)
+        .await
+        .map_err(|e| {
+            JobError::Transient(format!(
+                "[MigrationImportProcess] PDSエンドポイント検証失敗: {e}"
+            ))
+        })?;
+    crate::atp::migration_client::fetch_blob(&resolved, &session, cid)
+        .await
+        .map_err(|e| {
+            JobError::Transient(format!(
+                "[MigrationImportProcess] getBlob失敗 (cid={cid}): {e}"
+            ))
+        })
+}
+
+/// レコード・blob とも取り込み終えたら、移行元アカウント無効化とフォロー復元へ進める。
+async fn finish_import(
+    request_id: i64,
+    repo: &PgAtMigrationRepository,
+    ctx: &JobContext,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<ImportNextAction, JobError> {
     repo.set_status(request_id, "deactivating_source", now)
         .await
         .map_err(|e| {

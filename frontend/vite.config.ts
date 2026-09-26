@@ -83,6 +83,8 @@ export default defineConfig(({ mode }) => {
       environmentOptions: {
         jsdom: { url: "http://localhost/" },
       },
+      // Node 25+ の組み込み localStorage が jsdom の実装を覆い隠す問題の回避（src/test/setup.ts）。
+      setupFiles: ["./src/test/setup.ts"],
     },
   };
 });

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, getErrorMessage } from "../api/client";
+import { followTargetOf } from "../api/follows";
 import { useToast } from "../contexts/ToastContext";
 import { profileQuery } from "../lib/format";
 import {
@@ -15,6 +16,8 @@ export function followToggleAction(status: FollowStatus | null): "create" | "del
 export interface FollowHoverTarget {
   username: string;
   domain?: string;
+  /** あればフォロー操作の対象指定に使う（`username`/`domain`由来の文字列より優先）。 */
+  actorId?: string;
 }
 
 /**
@@ -63,10 +66,10 @@ export function useFollowHoverSwitch(target: FollowHoverTarget, isSelf: boolean)
 
     try {
       if (followToggleAction(current) === "create") {
-        const res = await api.follows.create(targetKey);
+        const res = await api.follows.create(followTargetOf(target.actorId, targetKey));
         setFollowStatusStore(targetKey, res.status === "accepted" ? "accepted" : "pending");
       } else {
-        await api.follows.delete(targetKey);
+        await api.follows.delete(followTargetOf(target.actorId, targetKey));
         setFollowStatusStore(targetKey, "not_following");
       }
     } catch (err) {

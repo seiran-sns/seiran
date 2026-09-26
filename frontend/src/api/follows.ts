@@ -2,14 +2,24 @@ import { cursorParams, request } from "./core";
 import type { DmSession, FollowImportStartResponse, FollowImportStatusResponse, FollowListItem, FollowResponse, RawNote, ReactResult } from "./types";
 import { normalizeNote } from "./types";
 
+/** フォロー対象の指定。`actorId`（actors.id）を持っていればそれを使い、無ければ人間可読な
+ * `target`（ローカルusername / `user@domain` / AP URI / DID）で指定する。`actorId`指定時は
+ * サーバーが対象を一意に特定でき、文字列の解析・再解決を経由しない。 */
+export type FollowTarget = { actorId: string } | { target: string };
+
 export const follows = {
-  create(target: string) {
-    return request<FollowResponse>("POST", "/follows/create", { target });
+  create(target: FollowTarget) {
+    return request<FollowResponse>("POST", "/follows/create", target);
   },
-  delete(target: string) {
-    return request<void>("POST", "/follows/delete", { target });
+  delete(target: FollowTarget) {
+    return request<void>("POST", "/follows/delete", target);
   },
 };
+
+/** `actorId`があればそれを、無ければ`target`文字列をフォロー対象の指定にする。 */
+export function followTargetOf(actorId: string | undefined, target: string): FollowTarget {
+  return actorId ? { actorId } : { target };
+}
 
 /** 承認制フォロー（鍵アカウント）の「承認待ちフォロー」画面（設定画面から遷移）用。 */
 export const followRequests = {

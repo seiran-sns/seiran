@@ -135,38 +135,121 @@ async fn sync_convo(
     account: &LocalChatAccount<'_>,
     convo: &serde_json::Value,
 ) -> Result<(), String> {
-    let LocalChatAccount {
-        actor_id: local_actor_id,
-        did: local_did,
-        pem: local_pem,
-    } = *account;
     let convo_id = convo
         .get("id")
         .and_then(|v| v.as_str())
         .ok_or("convo.idが無い")?;
-    // グループ会話（`groupConvo`）は対象外。1:1のみ取り込む。
+    let Some(peer_did) = direct_convo_peer_did(convo, account.did) else {
+        return Ok(());
+    };
+    let (mut current_thread_root, last_synced) = load_convo_link(pool, convo_id).await?;
+    let (mut new_messages, all_fetched_messages) =
+        fetch_convo_messages(http, account, convo_id, last_synced).await?;
+
+    // 相手が付け外ししたリアクションは、新着メッセージを増やさないため新着検知だけでは
+    // 拾えない。取得できた全メッセージ（ページング分すべて、新着かどうか問わず）について
+    // `reactions`フィールドをDBの記録（`dm_bsky_reactions`）と同期する。`peer_actor_id`は
+    // この後の新規メッセージ取り込みでも使うため、新着有無によらず一度だけ解決する
+    // （重複upsertを避ける）。
+    let peer_actor_id = resolve_or_upsert_bsky_actor(pool, job_queue, http, &peer_did).await?;
+    if !all_fetched_messages.is_empty()
+        && let Err(e) = sync_message_reactions(
+            pool,
+            stream_hub,
+            account.actor_id,
+            account.did,
+            peer_actor_id,
+            &peer_did,
+            &all_fetched_messages,
+        )
+        .await
+    {
+        tracing::warn!(
+            "[BskyDmPoll] リアクション同期失敗 convo_id={}: {}",
+            convo_id,
+            e
+        );
+    }
+
+    new_messages.reverse(); // 古い順に処理する
+    for m in &new_messages {
+        let msg_id = m
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let sender_did = m
+            .get("sender")
+            .and_then(|s| s.get("did"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if sender_did == account.did {
+            // 自分が送信したメッセージ（BskyDmSend経由で既にpostsに存在する）はスキップするが、
+            // カーソルは進める必要がある。スレッド起点が未確定（＝この会話で送受信いずれの
+            // メッセージもまだ一件もない）場合はbsky_convo_linksの行を作れないため据え置く。
+            // その場合は次のメッセージ処理時、または次回ポーリングでの再スキップにより
+            // いずれ解消される（実害のない読み飛ばし）。
+            if let Some(thread_root) = current_thread_root {
+                persist_cursor(pool, thread_root, convo_id, &msg_id).await?;
+            }
+            continue;
+        }
+        let received = ReceivedMessage {
+            msg_id: &msg_id,
+            text: m.get("text").and_then(|v| v.as_str()).unwrap_or_default(),
+            sent_at: m
+                .get("sentAt")
+                .and_then(|v| v.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or_else(chrono::Utc::now),
+        };
+        let (post_id, thread_root) = import_peer_message(
+            pool,
+            account.actor_id,
+            convo_id,
+            peer_actor_id,
+            &received,
+            current_thread_root,
+        )
+        .await?;
+        current_thread_root = Some(thread_root);
+        publish_received_dm(
+            pool,
+            stream_hub,
+            account.actor_id,
+            peer_actor_id,
+            post_id,
+            &received,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// 1:1 の会話（`directConvo`）なら相手の DID を返す（グループ会話は対象外）。
+fn direct_convo_peer_did(convo: &serde_json::Value, local_did: &str) -> Option<String> {
     let kind = convo
         .get("kind")
         .and_then(|v| v.as_str())
         .unwrap_or("directConvo");
     if kind != "directConvo" {
-        return Ok(());
+        return None;
     }
-
-    let members = convo
+    convo
         .get("members")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let peer_did = members
+        .and_then(|v| v.as_array())?
         .iter()
         .filter_map(|m| m.get("did").and_then(|v| v.as_str()))
         .find(|d| *d != local_did)
-        .map(|s| s.to_string());
-    let Some(peer_did) = peer_did else {
-        return Ok(());
-    };
+        .map(str::to_string)
+}
 
+/// 会話の同期状態（スレッド起点の post_id, 最後に同期したメッセージID）を読む。
+async fn load_convo_link(
+    pool: &PgPool,
+    convo_id: &str,
+) -> Result<(Option<i64>, Option<String>), String> {
     let existing = sqlx::query(
         "SELECT thread_root_post_id, last_synced_message_id FROM bsky_convo_links WHERE convo_id = $1",
     )
@@ -174,27 +257,37 @@ async fn sync_convo(
     .fetch_optional(pool)
     .await
     .map_err(|e| e.to_string())?;
+    Ok(match existing {
+        Some(row) => (
+            row.try_get("thread_root_post_id").ok(),
+            row.try_get::<Option<String>, _>("last_synced_message_id")
+                .ok()
+                .flatten(),
+        ),
+        None => (None, None),
+    })
+}
 
-    let mut thread_root_post_id: Option<i64> = None;
-    let mut last_synced: Option<String> = None;
-    if let Some(row) = existing {
-        thread_root_post_id = row.try_get("thread_root_post_id").ok();
-        last_synced = row
-            .try_get::<Option<String>, _>("last_synced_message_id")
-            .ok()
-            .flatten();
-    }
-
-    // この会話を一度も同期したことが無い（last_synced_message_id未設定）場合のみ、
-    // 転入で持ち込んだ会話のような「seiranにとって初見だが実際は長い履歴を持つ」
-    // ケースに対応するため、cursorページングで遡れるだけ遡る（既存DID転入#account_migration
-    // で新たに顕在化した要件）。通常のポーリング（既に同期済みの会話）は従来通り
-    // 最新1ページのみを見れば新着が拾えるため、ページングしない。
+/// 会話のメッセージを取得し、（前回同期以降の新着, 取得した全メッセージ）を返す（新しい順）。
+/// この会話を一度も同期したことが無い（last_synced_message_id未設定）場合のみ、転入で持ち込んだ
+/// 会話のような「seiranにとって初見だが実際は長い履歴を持つ」ケースに対応するため、cursor
+/// ページングで遡れるだけ遡る（既存DID転入#account_migrationで新たに顕在化した要件）。通常の
+/// ポーリング（既に同期済みの会話）は最新1ページのみを見れば新着が拾えるため、ページングしない。
+/// 全メッセージはリアクション同期に使う（相手が既存メッセージへリアクションを付け外ししても
+/// 新着メッセージは増えないため、新着だけでは検知できない）。
+async fn fetch_convo_messages(
+    http: &reqwest::Client,
+    account: &LocalChatAccount<'_>,
+    convo_id: &str,
+    last_synced: Option<String>,
+) -> Result<(Vec<serde_json::Value>, Vec<serde_json::Value>), String> {
+    let LocalChatAccount {
+        did: local_did,
+        pem: local_pem,
+        ..
+    } = *account;
     let is_initial_sync = last_synced.is_none();
     let mut new_messages: Vec<serde_json::Value> = Vec::new();
-    // reactions同期（下記）のために、新着かどうかを問わず取得した全メッセージを蓄積する。
-    // 相手が既存メッセージへリアクションを付け外ししても新着メッセージは増えないため、
-    // 新着処理（`new_messages`）だけでは検知できない。
     let mut all_fetched_messages: Vec<serde_json::Value> = Vec::new();
     let mut cursor: Option<String> = None;
     let mut fetched_pages = 0u32;
@@ -259,183 +352,145 @@ async fn sync_convo(
         }
         cursor = next_cursor;
     }
-    // 相手が付け外ししたリアクションは、新着メッセージを増やさないため上記の新着検知
-    // だけでは拾えない。取得できた全メッセージ（ページング分すべて、新着かどうか問わず）
-    // について`reactions`フィールドをDBの記録（`dm_bsky_reactions`）と同期する。
-    // `peer_actor_id`はこの後の新規メッセージ取り込みでも使うため、新着有無によらず
-    // 一度だけ解決する（重複upsertを避ける）。
-    let peer_actor_id = resolve_or_upsert_bsky_actor(pool, job_queue, http, &peer_did).await?;
-    if !all_fetched_messages.is_empty()
-        && let Err(e) = sync_message_reactions(
-            pool,
-            stream_hub,
-            local_actor_id,
-            local_did,
-            peer_actor_id,
-            &peer_did,
-            &all_fetched_messages,
-        )
-        .await
-    {
-        tracing::warn!(
-            "[BskyDmPoll] リアクション同期失敗 convo_id={}: {}",
-            convo_id,
-            e
-        );
-    }
+    Ok((new_messages, all_fetched_messages))
+}
 
-    if new_messages.is_empty() {
-        return Ok(());
-    }
-    new_messages.reverse(); // 古い順に処理する
+/// 相手から受信した DM メッセージ1件。
+struct ReceivedMessage<'a> {
+    msg_id: &'a str,
+    text: &'a str,
+    sent_at: chrono::DateTime<chrono::Utc>,
+}
 
-    let mut current_thread_root = thread_root_post_id;
+/// 受信メッセージ1件を取り込み、（post_id, スレッド起点）を返す。「posts INSERT + post_recipients
+/// INSERT + カーソル前進」を単一トランザクションでコミットする。複数メッセージの取り込み途中で
+/// エラーが起きても、既にコミット済みの分のカーソルは進んでいるため、次回ポーリングでの再取り込みは
+/// 未コミット分のみに限定される。bsky_message_id のUNIQUE制約（DO NOTHING）が、それでも起こりうる
+/// 二重取り込み（同時ポーリング等）に対する保険になる。
+async fn import_peer_message(
+    pool: &PgPool,
+    local_actor_id: i64,
+    convo_id: &str,
+    peer_actor_id: i64,
+    message: &ReceivedMessage<'_>,
+    current_thread_root: Option<i64>,
+) -> Result<(i64, i64), String> {
+    let ReceivedMessage {
+        msg_id,
+        text,
+        sent_at,
+    } = *message;
+    let candidate_post_id = generate_snowflake_id(sent_at);
+    let candidate_thread_root = current_thread_root.unwrap_or(candidate_post_id);
 
-    // メッセージ1件ごとに「posts INSERT + post_recipients INSERT + カーソル前進」を
-    // 単一トランザクションでコミットする。複数メッセージの取り込み途中でエラーが起きても、
-    // 既にコミット済みの分のカーソルは進んでいるため、次回ポーリングでの再取り込みは
-    // 未コミット分のみに限定される。bsky_message_id のUNIQUE制約（DO NOTHING）が
-    // それでも起こりうる二重取り込み（同時ポーリング等）に対する保険になる。
-    for m in &new_messages {
-        let msg_id = m
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let sender_did = m
-            .get("sender")
-            .and_then(|s| s.get("did"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
 
-        if sender_did == local_did {
-            // 自分が送信したメッセージ（BskyDmSend経由で既にpostsに存在する）はスキップするが、
-            // カーソルは進める必要がある。スレッド起点が未確定（＝この会話で送受信いずれの
-            // メッセージもまだ一件もない）場合はbsky_convo_linksの行を作れないため据え置く。
-            // その場合は次のメッセージ処理時、または次回ポーリングでの再スキップにより
-            // いずれ解消される（実害のない読み飛ばし）。
-            if let Some(thread_root) = current_thread_root {
-                persist_cursor(pool, thread_root, convo_id, &msg_id).await?;
-            }
-            continue;
+    let inserted_id: Option<i64> = sqlx::query_scalar(
+        "INSERT INTO posts (id, actor_id, body, visibility, thread_root_post_id, created_at, bsky_message_id)
+         VALUES ($1, $2, $3, 'direct', $4, $5, $6)
+         ON CONFLICT (bsky_message_id) WHERE bsky_message_id IS NOT NULL DO NOTHING
+         RETURNING id",
+    )
+    .bind(candidate_post_id)
+    .bind(peer_actor_id)
+    .bind(text)
+    .bind(candidate_thread_root)
+    .bind(sent_at)
+    .bind(msg_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| format!("DM受信INSERT失敗: {}", e))?;
+
+    // ON CONFLICT で行が挿入されなかった場合は、以前のポーリングで既に取り込み済み。
+    // その時に確定したpost_id/thread_rootを読み直し、今回生成した値は破棄する。
+    let (actual_post_id, actual_thread_root) = match inserted_id {
+        Some(id) => (id, candidate_thread_root),
+        None => {
+            let row =
+                sqlx::query("SELECT id, thread_root_post_id FROM posts WHERE bsky_message_id = $1")
+                    .bind(msg_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("既存DM取得失敗: {}", e))?;
+            let id: i64 = row.try_get("id").map_err(|e| e.to_string())?;
+            let root: Option<i64> = row.try_get("thread_root_post_id").ok().flatten();
+            (id, root.unwrap_or(id))
         }
+    };
 
-        let text = m
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let sent_at = m
-            .get("sentAt")
-            .and_then(|v| v.as_str())
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .unwrap_or_else(chrono::Utc::now);
+    sqlx::query(
+        "INSERT INTO post_recipients (post_id, actor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(actual_post_id)
+    .bind(local_actor_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("post_recipients INSERT失敗: {}", e))?;
 
-        let candidate_post_id = generate_snowflake_id(sent_at);
-        let candidate_thread_root = current_thread_root.unwrap_or(candidate_post_id);
+    sqlx::query(
+        "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id, last_synced_message_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (thread_root_post_id) DO UPDATE SET last_synced_message_id = EXCLUDED.last_synced_message_id",
+    )
+    .bind(actual_thread_root)
+    .bind(convo_id)
+    .bind(msg_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
 
-        let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok((actual_post_id, actual_thread_root))
+}
 
-        let inserted_id: Option<i64> = sqlx::query_scalar(
-            "INSERT INTO posts (id, actor_id, body, visibility, thread_root_post_id, created_at, bsky_message_id)
-             VALUES ($1, $2, $3, 'direct', $4, $5, $6)
-             ON CONFLICT (bsky_message_id) WHERE bsky_message_id IS NOT NULL DO NOTHING
-             RETURNING id",
-        )
-        .bind(candidate_post_id)
-        .bind(peer_actor_id)
-        .bind(&text)
-        .bind(candidate_thread_root)
-        .bind(sent_at)
-        .bind(&msg_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| format!("DM受信INSERT失敗: {}", e))?;
-
-        // ON CONFLICT で行が挿入されなかった場合は、以前のポーリングで既に取り込み済み。
-        // その時に確定したpost_id/thread_rootを読み直し、今回生成した値は破棄する。
-        let (actual_post_id, actual_thread_root) = match inserted_id {
-            Some(id) => (id, candidate_thread_root),
-            None => {
-                let row = sqlx::query(
-                    "SELECT id, thread_root_post_id FROM posts WHERE bsky_message_id = $1",
-                )
-                .bind(&msg_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| format!("既存DM取得失敗: {}", e))?;
-                let id: i64 = row.try_get("id").map_err(|e| e.to_string())?;
-                let root: Option<i64> = row.try_get("thread_root_post_id").ok().flatten();
-                (id, root.unwrap_or(id))
-            }
-        };
-
-        sqlx::query("INSERT INTO post_recipients (post_id, actor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-            .bind(actual_post_id)
-            .bind(local_actor_id)
-            .execute(&mut *tx)
+/// 受信した DM をローカルユーザーの画面へ WebSocket 配信する。
+async fn publish_received_dm(
+    pool: &PgPool,
+    stream_hub: &StreamHub,
+    local_actor_id: i64,
+    peer_actor_id: i64,
+    post_id: i64,
+    message: &ReceivedMessage<'_>,
+) -> Result<(), String> {
+    let peer_row =
+        sqlx::query("SELECT username, domain, display_name, avatar_url FROM actors WHERE id = $1")
+            .bind(peer_actor_id)
+            .fetch_optional(pool)
             .await
-            .map_err(|e| format!("post_recipients INSERT失敗: {}", e))?;
+            .map_err(|e| e.to_string())?;
+    let (peer_username, peer_domain, peer_display_name, peer_avatar_url): (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+    ) = match peer_row {
+        Some(r) => (
+            r.try_get("username").unwrap_or_default(),
+            r.try_get("domain").unwrap_or_default(),
+            r.try_get("display_name").unwrap_or(None),
+            r.try_get("avatar_url").unwrap_or(None),
+        ),
+        None => (String::new(), String::new(), None, None),
+    };
 
-        sqlx::query(
-            "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id, last_synced_message_id)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (thread_root_post_id) DO UPDATE SET last_synced_message_id = EXCLUDED.last_synced_message_id",
-        )
-        .bind(actual_thread_root)
-        .bind(convo_id)
-        .bind(&msg_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?;
-
-        tx.commit().await.map_err(|e| e.to_string())?;
-
-        current_thread_root = Some(actual_thread_root);
-
-        let peer_row = sqlx::query(
-            "SELECT username, domain, display_name, avatar_url FROM actors WHERE id = $1",
-        )
-        .bind(peer_actor_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-        let (peer_username, peer_domain, peer_display_name, peer_avatar_url): (
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-        ) = match peer_row {
-            Some(r) => (
-                r.try_get("username").unwrap_or_default(),
-                r.try_get("domain").unwrap_or_default(),
-                r.try_get("display_name").unwrap_or(None),
-                r.try_get("avatar_url").unwrap_or(None),
-            ),
-            None => (String::new(), String::new(), None, None),
-        };
-
-        let note_json = serde_json::json!({
-            "id": actual_post_id.to_string(),
-            "text": text,
-            "createdAt": sent_at.to_rfc3339(),
-            "user": {
-                "id": peer_actor_id,
-                "username": peer_username,
-                "domain": peer_domain,
-                "displayName": peer_display_name,
-                "actorType": "bsky",
-                "avatarUrl": peer_avatar_url,
-            },
-            "attachments": [],
-            "visibility": "direct",
-        });
-        let mut recipients: HashSet<i64> = HashSet::new();
-        recipients.insert(local_actor_id);
-        stream_hub.publish_note(recipients, &note_json);
-    }
-
+    let note_json = serde_json::json!({
+        "id": post_id.to_string(),
+        "text": message.text,
+        "createdAt": message.sent_at.to_rfc3339(),
+        "user": {
+            "id": peer_actor_id,
+            "username": peer_username,
+            "domain": peer_domain,
+            "displayName": peer_display_name,
+            "actorType": "bsky",
+            "avatarUrl": peer_avatar_url,
+        },
+        "attachments": [],
+        "visibility": "direct",
+    });
+    let mut recipients: HashSet<i64> = HashSet::new();
+    recipients.insert(local_actor_id);
+    stream_hub.publish_note(recipients, &note_json);
     Ok(())
 }
 

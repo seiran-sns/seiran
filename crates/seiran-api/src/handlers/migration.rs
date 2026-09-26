@@ -263,249 +263,36 @@ pub async fn submit_plc_token(
         .clone()
         .ok_or_else(|| ApiError::Internal("メールアドレス未確定".to_string()))?;
 
-    let (new_signing_key_pem, new_rotation_key_pem) = if let (
-        Some(existing_key),
-        Some(existing_rotation_key),
-    ) = (
+    let keys = match (
         migration_req.new_signing_key_pem.clone(),
         migration_req.new_rotation_key_pem.clone(),
     ) {
-        // 再入: PLCは既に提出済み。tokenは使わずアカウント作成のみやり直す。
-        if migration_req.status != "submitting_plc" {
-            return Err(ApiError::BadRequest("INVALID_STATE".into()));
-        }
-        tracing::info!(
-            "[migration:submit-plc-token] request_id={} は再入（PLC提出済み、アカウント作成のみ再試行）",
-            id
-        );
-        (existing_key, existing_rotation_key)
-    } else {
-        if migration_req.status != "awaiting_plc_token" {
-            return Err(ApiError::BadRequest("INVALID_STATE".into()));
-        }
-
-        let session = seiran_common::atp::migration_client::AtpSession {
-            did: migration_req.source_did.clone(),
-            handle: migration_req.source_handle.clone(),
-            access_jwt: migration_req.source_access_jwt.clone().unwrap_or_default(),
-            refresh_jwt: migration_req.source_refresh_jwt.clone().unwrap_or_default(),
-            email: None,
-            email_confirmed: false,
-        };
-        // `start`時点で確定したPDS Aのエンドポイント文字列をそのまま使う（DID文書からの
-        // 再導出ではない——`resolve_stored_endpoint`のドキュメントコメント参照。実機で発見:
-        // DID文書から再導出すると、PLC操作が既に成功した後の再試行時に移行先(seiran自身)を
-        // 指してしまう）。
-        let resolved = seiran_common::atp::did_resolve::resolve_stored_endpoint(
-            &migration_req.source_pds_endpoint,
-        )
-        .await
-        .map_err(|e| {
-            tracing::warn!(
-                "[migration:submit-plc-token] PDSエンドポイント検証失敗: {}",
-                e
-            );
-            ApiError::BadGateway("SOURCE_PDS_UNREACHABLE".into())
-        })?;
-
-        // 転入完了時、seiranが新規発行する専用のローテーションキーのみをDIDの鍵とする
-        // （転入元PDS運営者に恒久的な支配権を残さないため、転入元の鍵は引き継がない）。
-        let (_new_signing_key, new_signing_key_pem) =
-            seiran_common::atp::plc::generate_new_signing_key().map_err(|e| {
-                tracing::error!("[migration:submit-plc-token] 鍵生成失敗: {}", e);
-                ApiError::Internal("鍵生成エラー".to_string())
-            })?;
-        let new_did_key = seiran_common::atp::plc::p256_to_did_key(
-            seiran_common::atp::plc::signing_key_from_pem(&new_signing_key_pem)
-                .map_err(|e| ApiError::Internal(e.to_string()))?
-                .verifying_key(),
-        );
-
-        let (_new_rotation_key, new_rotation_key_pem) =
-            seiran_common::atp::plc::generate_new_signing_key().map_err(|e| {
-                tracing::error!(
-                    "[migration:submit-plc-token] ローテーション鍵生成失敗: {}",
-                    e
-                );
-                ApiError::Internal("鍵生成エラー".to_string())
-            })?;
-        let new_rotation_did_key = seiran_common::atp::plc::p256_to_did_key(
-            seiran_common::atp::plc::signing_key_from_pem(&new_rotation_key_pem)
-                .map_err(|e| ApiError::Internal(e.to_string()))?
-                .verifying_key(),
-        );
-
-        let atp_username = seiran_common::username::to_atp_username(&migration_req.new_username);
-        let handle = format!("{}.{}", atp_username, state.local_domain);
-        let pds_endpoint = format!("https://{}", state.local_domain);
-
-        // Cloudflare TXTセット（ベストエフォート、plc_genesis::register_plc_didと同じ扱い）。
-        // Cloudflare未設定の環境（このdev環境含む）では自然にNoneとなり、ハンドル検証は
-        // `/.well-known/atproto-did`（seiranが常時実装済み）に一本化される。
-        let cf_record_id = if let Some(cf) = &state.cloudflare {
-            match cf.set_atproto_txt(&handle, &migration_req.source_did).await {
-                Ok(record_id) => {
-                    tracing::info!(
-                        "[migration:submit-plc-token] Cloudflare TXT セット完了: _atproto.{}",
-                        handle
-                    );
-                    Some(record_id)
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "[migration:submit-plc-token] Cloudflare TXT セット失敗（続行）: {}",
-                        e
-                    );
-                    None
-                }
+        (Some(signing_key_pem), Some(rotation_key_pem)) => {
+            // 再入: PLCは既に提出済み。tokenは使わずアカウント作成のみやり直す。
+            if migration_req.status != "submitting_plc" {
+                return Err(ApiError::BadRequest("INVALID_STATE".into()));
             }
-        } else {
-            None
-        };
-        let _ = cf_record_id;
-
-        let desired = seiran_common::atp::migration_client::DesiredDidCredentials {
-            rotation_keys: vec![new_rotation_did_key],
-            also_known_as: vec![format!("at://{}", handle)],
-            verification_methods: serde_json::json!({ "atproto": new_did_key }),
-            services: serde_json::json!({
-                "atproto_pds": { "type": "AtprotoPersonalDataServer", "endpoint": pds_endpoint }
-            }),
-        };
-
-        let operation = seiran_common::atp::migration_client::sign_plc_operation(
-            &resolved, &session, &req.token, &desired,
-        )
-        .await
-        .map_err(|e| {
-            tracing::warn!(
-                "[migration:submit-plc-token] signPlcOperation失敗 (request_id={}): {}",
-                id,
-                e
+            tracing::info!(
+                "[migration:submit-plc-token] request_id={} は再入（PLC提出済み、アカウント作成のみ再試行）",
+                id
             );
-            ApiError::BadGateway("PLC_SIGN_FAILED".into())
-        })?;
-
-        // ─────────────────────────────────────────────────────────────
-        // ★不可逆境界: ここから先、DIDのservice endpointはseiranを指すようになる。
-        // ─────────────────────────────────────────────────────────────
-        seiran_common::atp::migration_client::submit_plc_operation(
-            &migration_req.source_did,
-            &operation,
-            &state.http_client,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                "[migration:submit-plc-token] submitPlcOperation失敗 (request_id={}): {}",
-                id,
-                e
-            );
-            ApiError::Internal("PLC_SUBMIT_FAILED".into())
-        })?;
-
-        // 不可逆操作は完了した。以降のアカウント作成が失敗してもこの事実を必ず残す
-        // （このUPDATE自体が失敗した場合は仕方なくエラーを返すが、実際のPLC状態と
-        // DBの食い違いが起きるのはこの一箇所だけに限定される）。
-        let repo = PgAtMigrationRepository::new(state.db.clone());
-        repo.mark_plc_submitted(id, &new_signing_key_pem, &new_rotation_key_pem, chrono::Utc::now())
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    "[migration:submit-plc-token] mark_plc_submitted失敗（PLCは提出済み！） (request_id={}): {}",
-                    id, e
-                );
-                ApiError::Internal(format!(
-                    "PLC提出は成功しましたが記録に失敗しました。手動確認が必要です: {e}"
-                ))
-            })?;
-
-        (new_signing_key_pem, new_rotation_key_pem)
+            MigrationKeys {
+                signing_key_pem,
+                rotation_key_pem,
+            }
+        }
+        _ => {
+            if migration_req.status != "awaiting_plc_token" {
+                return Err(ApiError::BadRequest("INVALID_STATE".into()));
+            }
+            submit_plc_operation_to_seiran(&state, &migration_req, &req.token).await?
+        }
     };
 
     // ここから先はresume経路と共通。副作用のある外部呼び出しは完了済みなので、
     // ロールバックせずログを残しつつ可能な限り完了させる（`plc_genesis`/`register`と同じ原則）。
-
-    // 転入元DIDが既にseiranの`actors`にリモートキャッシュ行として存在することがある
-    // （firehose購読やプロフィール参照で自然に発生、`start`時点の重複チェックは
-    // `actor_type='local'`のみ対象にしているため素通りする——実機で発見）。
-    // 存在すればローカル用に変換（UPDATE）、無ければ新規作成（INSERT）する。
-    let existing_actor_id: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM actors WHERE at_did = $1")
-            .bind(&migration_req.source_did)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let existing_user_id: Option<i64> = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind(&email)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let user_id = if let Some(uid) = existing_user_id {
-        uid
-    } else {
-        state
-            .users
-            .insert(&email, &migration_req.password_hash, "user")
-            .await
-            .map_err(|e| {
-                tracing::error!("[migration:submit-plc-token] users INSERT 失敗: {}", e);
-                ApiError::Internal("ユーザー作成エラー".to_string())
-            })?
-    };
-
-    let actor_id = if let Some(existing_id) = existing_actor_id {
-        let ap_uri = format!(
-            "https://{}/users/{}",
-            state.local_domain, migration_req.new_username
-        );
-        sqlx::query(
-            "UPDATE actors SET actor_type = 'local', user_id = $1, username = $2, domain = $3,
-                 ap_uri = $4, at_signing_key_pem = $5, at_rotation_key_pem = $6, updated_at = NOW()
-             WHERE id = $7",
-        )
-        .bind(user_id)
-        .bind(&migration_req.new_username)
-        .bind(state.local_domain.as_str())
-        .bind(&ap_uri)
-        .bind(&new_signing_key_pem)
-        .bind(&new_rotation_key_pem)
-        .bind(existing_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                "[migration:submit-plc-token] actors UPDATE（リモート→ローカル変換）失敗: {}",
-                e
-            );
-            ApiError::Internal("アクター変換エラー".to_string())
-        })?;
-        existing_id
-    } else {
-        let new_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
-        state
-            .actors
-            .insert_local(
-                user_id,
-                &seiran_common::repository::NewLocalActor {
-                    id: new_id,
-                    username: &migration_req.new_username,
-                    domain: &state.local_domain,
-                    at_did: Some(&migration_req.source_did),
-                    at_signing_key_pem: Some(&new_signing_key_pem),
-                    at_rotation_key_pem: Some(&new_rotation_key_pem),
-                    birth_date: None,
-                },
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!("[migration:submit-plc-token] actors INSERT 失敗: {}", e);
-                ApiError::Internal("アクター作成エラー".to_string())
-            })?;
-        new_id
-    };
+    let (user_id, actor_id) =
+        materialize_local_account(&state, &migration_req, &email, &keys).await?;
 
     let repo = PgAtMigrationRepository::new(state.db.clone());
     if let Err(e) = repo
@@ -552,6 +339,251 @@ pub async fn submit_plc_token(
             did_moved_out: false, // 転入直後はDID転出済みであり得ない
         },
     }))
+}
+
+/// 転入後にseiranが保持するDIDの鍵（PEM）。
+struct MigrationKeys {
+    signing_key_pem: String,
+    rotation_key_pem: String,
+}
+
+/// 新しい鍵ペア（PEM, did:key）を生成する。
+fn generate_did_key(label: &str) -> Result<(String, String), ApiError> {
+    let (_key, pem) = seiran_common::atp::plc::generate_new_signing_key().map_err(|e| {
+        tracing::error!("[migration:submit-plc-token] {}生成失敗: {}", label, e);
+        ApiError::Internal("鍵生成エラー".to_string())
+    })?;
+    let did_key = seiran_common::atp::plc::p256_to_did_key(
+        seiran_common::atp::plc::signing_key_from_pem(&pem)
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .verifying_key(),
+    );
+    Ok((pem, did_key))
+}
+
+/// PDS A に PLC 操作へ署名させ（`signPlcOperation`）、DID の鍵・ハンドル・PDS を seiran へ
+/// 向け替える操作を提出する（`submitPlcOperation`）。提出後ただちに鍵を DB へ記録する。
+async fn submit_plc_operation_to_seiran(
+    state: &AppState,
+    migration_req: &AtMigrationRequestRow,
+    plc_token: &str,
+) -> Result<MigrationKeys, ApiError> {
+    let id = migration_req.id;
+    let session = seiran_common::atp::migration_client::AtpSession {
+        did: migration_req.source_did.clone(),
+        handle: migration_req.source_handle.clone(),
+        access_jwt: migration_req.source_access_jwt.clone().unwrap_or_default(),
+        refresh_jwt: migration_req.source_refresh_jwt.clone().unwrap_or_default(),
+        email: None,
+        email_confirmed: false,
+    };
+    // `start`時点で確定したPDS Aのエンドポイント文字列をそのまま使う（DID文書からの
+    // 再導出ではない——`resolve_stored_endpoint`のドキュメントコメント参照。実機で発見:
+    // DID文書から再導出すると、PLC操作が既に成功した後の再試行時に移行先(seiran自身)を
+    // 指してしまう）。
+    let resolved = seiran_common::atp::did_resolve::resolve_stored_endpoint(
+        &migration_req.source_pds_endpoint,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!(
+            "[migration:submit-plc-token] PDSエンドポイント検証失敗: {}",
+            e
+        );
+        ApiError::BadGateway("SOURCE_PDS_UNREACHABLE".into())
+    })?;
+
+    // 転入完了時、seiranが新規発行する専用のローテーションキーのみをDIDの鍵とする
+    // （転入元PDS運営者に恒久的な支配権を残さないため、転入元の鍵は引き継がない）。
+    let (new_signing_key_pem, new_did_key) = generate_did_key("鍵")?;
+    let (new_rotation_key_pem, new_rotation_did_key) = generate_did_key("ローテーション鍵")?;
+
+    let atp_username = seiran_common::username::to_atp_username(&migration_req.new_username);
+    let handle = format!("{}.{}", atp_username, state.local_domain);
+    let pds_endpoint = format!("https://{}", state.local_domain);
+    set_handle_txt_best_effort(state, &handle, &migration_req.source_did).await;
+
+    let desired = seiran_common::atp::migration_client::DesiredDidCredentials {
+        rotation_keys: vec![new_rotation_did_key],
+        also_known_as: vec![format!("at://{}", handle)],
+        verification_methods: serde_json::json!({ "atproto": new_did_key }),
+        services: serde_json::json!({
+            "atproto_pds": { "type": "AtprotoPersonalDataServer", "endpoint": pds_endpoint }
+        }),
+    };
+
+    let operation = seiran_common::atp::migration_client::sign_plc_operation(
+        &resolved, &session, plc_token, &desired,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!(
+            "[migration:submit-plc-token] signPlcOperation失敗 (request_id={}): {}",
+            id,
+            e
+        );
+        ApiError::BadGateway("PLC_SIGN_FAILED".into())
+    })?;
+
+    // ─────────────────────────────────────────────────────────────
+    // ★不可逆境界: ここから先、DIDのservice endpointはseiranを指すようになる。
+    // ─────────────────────────────────────────────────────────────
+    seiran_common::atp::migration_client::submit_plc_operation(
+        &migration_req.source_did,
+        &operation,
+        &state.http_client,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            "[migration:submit-plc-token] submitPlcOperation失敗 (request_id={}): {}",
+            id,
+            e
+        );
+        ApiError::Internal("PLC_SUBMIT_FAILED".into())
+    })?;
+
+    // 不可逆操作は完了した。以降のアカウント作成が失敗してもこの事実を必ず残す
+    // （このUPDATE自体が失敗した場合は仕方なくエラーを返すが、実際のPLC状態と
+    // DBの食い違いが起きるのはこの一箇所だけに限定される）。
+    let repo = PgAtMigrationRepository::new(state.db.clone());
+    repo.mark_plc_submitted(id, &new_signing_key_pem, &new_rotation_key_pem, chrono::Utc::now())
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "[migration:submit-plc-token] mark_plc_submitted失敗（PLCは提出済み！） (request_id={}): {}",
+                id, e
+            );
+            ApiError::Internal(format!(
+                "PLC提出は成功しましたが記録に失敗しました。手動確認が必要です: {e}"
+            ))
+        })?;
+
+    Ok(MigrationKeys {
+        signing_key_pem: new_signing_key_pem,
+        rotation_key_pem: new_rotation_key_pem,
+    })
+}
+
+/// Cloudflare TXTセット（ベストエフォート、plc_genesis::register_plc_didと同じ扱い）。
+/// Cloudflare未設定の環境（このdev環境含む）では何もせず、ハンドル検証は
+/// `/.well-known/atproto-did`（seiranが常時実装済み）に一本化される。
+async fn set_handle_txt_best_effort(state: &AppState, handle: &str, did: &str) {
+    let Some(cf) = &state.cloudflare else {
+        return;
+    };
+    match cf.set_atproto_txt(handle, did).await {
+        Ok(_record_id) => tracing::info!(
+            "[migration:submit-plc-token] Cloudflare TXT セット完了: _atproto.{}",
+            handle
+        ),
+        Err(e) => tracing::error!(
+            "[migration:submit-plc-token] Cloudflare TXT セット失敗（続行）: {}",
+            e
+        ),
+    }
+}
+
+/// 転入したアカウントの `users`/`actors` 行を確定し、（user_id, actor_id）を返す。
+async fn materialize_local_account(
+    state: &AppState,
+    migration_req: &AtMigrationRequestRow,
+    email: &str,
+    keys: &MigrationKeys,
+) -> Result<(i64, i64), ApiError> {
+    // 転入元DIDが既にseiranの`actors`にリモートキャッシュ行として存在することがある
+    // （firehose購読やプロフィール参照で自然に発生、`start`時点の重複チェックは
+    // `actor_type='local'`のみ対象にしているため素通りする——実機で発見）。
+    // 存在すればローカル用に変換（UPDATE）、無ければ新規作成（INSERT）する。
+    let existing_actor_id: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM actors WHERE at_did = $1")
+            .bind(&migration_req.source_did)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let existing_user_id: Option<i64> = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
+        .bind(email)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let user_id = if let Some(uid) = existing_user_id {
+        uid
+    } else {
+        state
+            .users
+            .insert(email, &migration_req.password_hash, "user")
+            .await
+            .map_err(|e| {
+                tracing::error!("[migration:submit-plc-token] users INSERT 失敗: {}", e);
+                ApiError::Internal("ユーザー作成エラー".to_string())
+            })?
+    };
+
+    let actor_id = if let Some(existing_id) = existing_actor_id {
+        convert_remote_actor_to_local(state, existing_id, user_id, migration_req, keys).await?;
+        existing_id
+    } else {
+        let new_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
+        state
+            .actors
+            .insert_local(
+                user_id,
+                &seiran_common::repository::NewLocalActor {
+                    id: new_id,
+                    username: &migration_req.new_username,
+                    domain: &state.local_domain,
+                    at_did: Some(&migration_req.source_did),
+                    at_signing_key_pem: Some(&keys.signing_key_pem),
+                    at_rotation_key_pem: Some(&keys.rotation_key_pem),
+                    birth_date: None,
+                },
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("[migration:submit-plc-token] actors INSERT 失敗: {}", e);
+                ApiError::Internal("アクター作成エラー".to_string())
+            })?;
+        new_id
+    };
+    Ok((user_id, actor_id))
+}
+
+/// firehose 等で作られていた転入元DIDのリモートキャッシュ行をローカルアクターへ変換する。
+async fn convert_remote_actor_to_local(
+    state: &AppState,
+    existing_id: i64,
+    user_id: i64,
+    migration_req: &AtMigrationRequestRow,
+    keys: &MigrationKeys,
+) -> Result<(), ApiError> {
+    let ap_uri = format!(
+        "https://{}/users/{}",
+        state.local_domain, migration_req.new_username
+    );
+    sqlx::query(
+        "UPDATE actors SET actor_type = 'local', user_id = $1, username = $2, domain = $3,
+             ap_uri = $4, at_signing_key_pem = $5, at_rotation_key_pem = $6, updated_at = NOW()
+         WHERE id = $7",
+    )
+    .bind(user_id)
+    .bind(&migration_req.new_username)
+    .bind(state.local_domain.as_str())
+    .bind(&ap_uri)
+    .bind(&keys.signing_key_pem)
+    .bind(&keys.rotation_key_pem)
+    .bind(existing_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            "[migration:submit-plc-token] actors UPDATE（リモート→ローカル変換）失敗: {}",
+            e
+        );
+        ApiError::Internal("アクター変換エラー".to_string())
+    })?;
+    Ok(())
 }
 
 #[derive(Serialize)]

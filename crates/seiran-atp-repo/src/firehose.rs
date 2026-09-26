@@ -370,84 +370,116 @@ async fn process_message(
     let Some(commit) = event.commit else {
         return Ok(());
     };
-    let did = event.did;
-
+    let deps = FirehoseDeps {
+        pool: pool.clone(),
+        http: Arc::clone(http),
+        stream_hub: Arc::clone(stream_hub),
+        job_queue: Arc::clone(job_queue),
+    };
     match commit.collection.as_str() {
-        "app.bsky.feed.post" => {
-            if commit.operation == "delete" {
-                let at_uri = format!("at://{}/app.bsky.feed.post/{}", did, commit.rkey);
-                let pool2 = pool.clone();
-                tokio::spawn(async move {
-                    handle_inbound_post_delete(&pool2, &at_uri).await;
-                });
-                return Ok(());
-            }
-            if commit.operation != "create" {
-                return Ok(());
-            }
-            let (Some(record), Some(cid)) = (commit.record, commit.cid) else {
-                return Ok(());
-            };
-            let Some(body_text) = record.get("text").and_then(|v| v.as_str()) else {
-                return Ok(());
-            };
-            // `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、#237）。
-            // 検出できた場合、本文・絵文字マップの標準変換をこちらの値で上書きし、
-            // `counterpartPostId`（AP object id申告）を使ってAP側先着行との相互一致
-            // マージを試みる（`docs/protocols.md` 5節）。
-            let seiran_post_ext = seiran_common::seiran_post::SeiranPost::extract(&record);
-            // brid.gy(Bridgy Fed)ブリッジポスト対応（`seiran_common::bridge_post`参照）:
-            // レキシコン外の非標準フィールド`bridgyOriginalUrl`（元AP投稿のURL）。
-            let bridged_original_url = record
-                .get("bridgyOriginalUrl")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            // リンク・メンションの facet（byteStart/byteEnd で示される範囲）。
-            // 未指定・パース失敗時は空のまま（投稿保存自体はブロックしない）。
-            let parsed_facets: Vec<ParsedFacet> = record
-                .get("facets")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-            let Some(created_at) = record
-                .get("createdAt")
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
-            else {
-                return Ok(());
-            };
-            // リプライなら reply.parent.uri を見て、親がこちらの既知投稿（at_uri 保存済み）か
-            // どうかで reply_to_post_id を解決する（親が不明なら通常投稿として扱う）。
-            let reply_parent_uri = record
-                .get("reply")
-                .and_then(|r| r.get("parent"))
-                .and_then(|p| p.get("uri"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
+        "app.bsky.feed.post" => handle_post_commit(deps, event.did, commit).await,
+        "app.bsky.feed.repost" => {
+            handle_repost_commit(deps, event.did, commit);
+            Ok(())
+        }
+        "app.bsky.feed.like" => {
+            handle_like_commit(deps, event.did, commit);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
 
-            // 添付（画像・動画）。CDN URL は DID + blob CID から決定的に組み立てる。
-            let attachments: Vec<ParsedAttachment> = record
-                .get("embed")
-                .map(|embed| parse_bsky_embed_attachments(embed, &did))
-                .unwrap_or_default();
+/// Jetstream 受信処理が共通して使う共有資源（各処理を`tokio::spawn`へ渡すため所有版）。
+#[derive(Clone)]
+struct FirehoseDeps {
+    pool: PgPool,
+    http: Arc<reqwest::Client>,
+    stream_hub: Arc<StreamHub>,
+    job_queue: Arc<dyn JobQueue>,
+}
 
-            // 引用先の at:// URI（#116）。`app.bsky.embed.record`/`recordWithMedia` のみ対象。
-            let quote_uri: Option<String> =
-                record.get("embed").and_then(parse_bsky_embed_quote_uri);
+/// `app.bsky.feed.post` レコードから保存に必要な値を取り出したもの（`parse_post_record`）。
+struct ParsedPostRecord {
+    body_text: String,
+    cid: String,
+    /// `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、#237）。検出できた場合、
+    /// 本文・絵文字マップの標準変換をこちらの値で上書きし、`counterpartPostId`（AP object id
+    /// 申告）を使ってAP側先着行との相互一致マージを試みる（`docs/protocols.md` 5節）。
+    seiran_post_ext: Option<seiran_common::seiran_post::SeiranPost>,
+    /// brid.gy(Bridgy Fed)ブリッジポスト対応（`seiran_common::bridge_post`参照）:
+    /// レキシコン外の非標準フィールド`bridgyOriginalUrl`（元AP投稿のURL）。
+    bridged_original_url: Option<String>,
+    /// リンク・メンションの facet（byteStart/byteEnd で示される範囲）。未指定・パース失敗時は
+    /// 空のまま（投稿保存自体はブロックしない）。
+    parsed_facets: Vec<ParsedFacet>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    /// リプライなら reply.parent.uri（親がこちらの既知投稿かどうかで reply_to_post_id を解決する）。
+    reply_parent_uri: Option<String>,
+    /// 添付（画像・動画）。CDN URL は DID + blob CID から決定的に組み立てる。
+    attachments: Vec<ParsedAttachment>,
+    /// 引用先の at:// URI（#116）。`app.bsky.embed.record`/`recordWithMedia` のみ対象。
+    quote_uri: Option<String>,
+    /// URLカード（YouTube/Spotify/x.com/一般）。GIFピッカー由来の`external`は既に
+    /// `attachments`側で動画として扱われているためここには含まれない。
+    link_card: Option<ParsedLinkCard>,
+}
 
-            // URLカード（YouTube/Spotify/x.com/一般）。GIFピッカー由来の`external`は
-            // 既に`attachments`側で動画として扱われているためここには含まれない。
-            let link_card: Option<ParsedLinkCard> = record
-                .get("embed")
-                .and_then(|embed| parse_bsky_embed_link_card(embed, &did));
+/// 投稿レコードを解析する。本文・作成日時・CID が無いものは保存対象外（`None`）。
+fn parse_post_record(did: &str, record: &JsonValue, cid: String) -> Option<ParsedPostRecord> {
+    let body_text = record.get("text").and_then(|v| v.as_str())?.to_string();
+    let created_at = record
+        .get("createdAt")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())?;
+    let embed = record.get("embed");
+    Some(ParsedPostRecord {
+        body_text,
+        cid,
+        seiran_post_ext: seiran_common::seiran_post::SeiranPost::extract(record),
+        bridged_original_url: record
+            .get("bridgyOriginalUrl")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        parsed_facets: record
+            .get("facets")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        created_at,
+        reply_parent_uri: record
+            .get("reply")
+            .and_then(|r| r.get("parent"))
+            .and_then(|p| p.get("uri"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        attachments: embed
+            .map(|embed| parse_bsky_embed_attachments(embed, did))
+            .unwrap_or_default(),
+        quote_uri: embed.and_then(parse_bsky_embed_quote_uri),
+        link_card: embed.and_then(|embed| parse_bsky_embed_link_card(embed, did)),
+    })
+}
 
-            // この DID のアクターが「ローカルユーザーにフォローされている」、または
-            // 「いずれかのリストに含まれている」場合のみ保存対象とする（リスト機能 #63:
-            // 誰にもフォローされていないBskyユーザーでも、リストに入れれば投稿を受信できる）。
-            // 単に actors テーブルに存在するだけでは不十分（いいね等をきっかけに resolve_or_upsert_bsky_actor
-            // で無関係なアクターが actors へ upsert され、その投稿まで際限なく取り込まれてしまうため。
-            // 2026-07: 実際にこの経路で posts が104万行超まで膨張する不具合があった）。
-            let actor_row = sqlx::query(
-                "SELECT a.id, a.username, a.display_name, a.avatar_url
+/// 保存対象の投稿者（`find_saveable_bsky_author`）。
+struct BskyPostAuthor {
+    actor_id: i64,
+    username: String,
+    display_name: Option<String>,
+    avatar_url: Option<String>,
+}
+
+/// この DID のアクターが「ローカルユーザーにフォローされている」、または「いずれかのリストに
+/// 含まれている」場合のみ保存対象とする（リスト機能 #63: 誰にもフォローされていないBskyユーザー
+/// でも、リストに入れれば投稿を受信できる）。単に actors テーブルに存在するだけでは不十分
+/// （いいね等をきっかけに resolve_or_upsert_bsky_actor で無関係なアクターが actors へ upsert
+/// され、その投稿まで際限なく取り込まれてしまうため。2026-07: 実際にこの経路で posts が
+/// 104万行超まで膨張する不具合があった）。凍結中のアクターは対象外。
+async fn find_saveable_bsky_author(
+    pool: &PgPool,
+    did: &str,
+) -> Result<Option<BskyPostAuthor>, String> {
+    let row = sqlx::query(
+            "SELECT a.id, a.username, a.display_name, a.avatar_url
                  FROM actors a
                  WHERE a.at_did = $1
                    AND a.suspended_at IS NULL
@@ -460,247 +492,228 @@ async fn process_message(
                      OR EXISTS (SELECT 1 FROM list_members lm WHERE lm.actor_id = a.id)
                    )
                  LIMIT 1",
-            )
-            .bind(&did)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| format!("DB検索失敗: {}", e))?;
+    )
+    .bind(did)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("DB検索失敗: {}", e))?;
+    Ok(row.map(|row| BskyPostAuthor {
+        actor_id: row.try_get("id").unwrap_or(0),
+        username: row.try_get("username").unwrap_or_default(),
+        display_name: row.try_get("display_name").unwrap_or(None),
+        avatar_url: row.try_get("avatar_url").unwrap_or(None),
+    }))
+}
 
-            let Some(actor_row) = actor_row else {
-                return Ok(());
-            };
-            let actor_id: i64 = actor_row.try_get("id").unwrap_or(0);
-            let username: String = actor_row.try_get("username").unwrap_or_default();
-            let display_name: Option<String> = actor_row.try_get("display_name").unwrap_or(None);
-            let avatar_url: Option<String> = actor_row.try_get("avatar_url").unwrap_or(None);
+/// `app.bsky.feed.post` の create/delete を処理する。保存対象の新規投稿だけを、別タスクで保存する。
+async fn handle_post_commit(
+    deps: FirehoseDeps,
+    did: String,
+    commit: JetstreamCommit,
+) -> Result<(), String> {
+    let at_uri = format!("at://{}/app.bsky.feed.post/{}", did, commit.rkey);
+    if commit.operation == "delete" {
+        tokio::spawn(async move {
+            handle_inbound_post_delete(&deps.pool, &at_uri).await;
+        });
+        return Ok(());
+    }
+    if commit.operation != "create" {
+        return Ok(());
+    }
+    let (Some(record), Some(cid)) = (commit.record, commit.cid) else {
+        return Ok(());
+    };
+    let Some(parsed) = parse_post_record(&did, &record, cid) else {
+        return Ok(());
+    };
+    let Some(author) = find_saveable_bsky_author(&deps.pool, &did).await? else {
+        return Ok(());
+    };
 
-            let at_uri = format!("at://{}/app.bsky.feed.post/{}", did, commit.rkey);
+    let already_saved = sqlx::query("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
+        .bind(&at_uri)
+        .fetch_optional(&deps.pool)
+        .await
+        .map_err(|e| format!("重複チェック失敗: {}", e))?
+        .is_some();
+    if already_saved {
+        return Ok(());
+    }
 
-            // 重複チェック
-            let already_saved = sqlx::query("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
-                .bind(&at_uri)
-                .fetch_optional(pool)
-                .await
-                .map_err(|e| format!("重複チェック失敗: {}", e))?
-                .is_some();
+    tracing::info!("[Jetstream] 新規ポスト検出: {}", at_uri);
+    tokio::spawn(async move {
+        save_new_bsky_post(deps, did, at_uri, parsed, author).await;
+    });
+    Ok(())
+}
 
-            if already_saved {
-                return Ok(());
-            }
-
-            tracing::info!("[Jetstream] 新規ポスト検出: {}", at_uri);
-
-            let pool2 = pool.clone();
-            let hub2 = Arc::clone(stream_hub);
-            let queue2 = Arc::clone(job_queue);
-            let http2 = Arc::clone(http);
-            let at_uri2 = at_uri.clone();
-            let author_did = did.clone();
-            let body_text = body_text.to_string();
-
-            tokio::spawn(async move {
-                let posts_repo = PgPostRepository::new(pool2.clone());
-                let reply_to_post_id = match &reply_parent_uri {
-                    Some(parent_uri) => {
-                        match posts_repo.find_id_and_actor_by_at_uri(parent_uri).await {
-                            Ok(Some((parent_post_id, _))) => Some(parent_post_id),
-                            Ok(None) => None,
-                            Err(e) => {
-                                tracing::error!(
-                                    "[Jetstream] リプライ親投稿検索失敗（通常投稿として保存）: {}",
-                                    e
-                                );
-                                None
-                            }
-                        }
-                    }
-                    None => None,
-                };
-                // 引用先のローカル post_id 解決（#116）。引用先が未取得のリモート投稿等で
-                // ローカルDBに存在しない場合は通常投稿として保存する（quote_of_post_id=None）。
-                let quote_of_post_id = match &quote_uri {
-                    Some(uri) => match posts_repo.find_id_and_actor_by_at_uri(uri).await {
-                        Ok(Some((quote_post_id, _))) => Some(quote_post_id),
-                        Ok(None) => None,
-                        Err(e) => {
-                            tracing::error!(
-                                "[Jetstream] 引用元投稿検索失敗（通常投稿として保存）: {}",
-                                e
-                            );
-                            None
-                        }
-                    },
-                    None => None,
-                };
-                let (body_text, mention_facets) = apply_bsky_facets(&body_text, parsed_facets);
-                let emoji_map = resolve_local_emoji_map(&pool2, &body_text).await;
-                // seiranPostがあれば本文・絵文字マップを上書きする（Single Source of Truth）。
-                let body_text = seiran_post_ext
-                    .as_ref()
-                    .map(|sp| sp.body.clone())
-                    .unwrap_or(body_text);
-                let emoji_map = seiran_post_ext
-                    .as_ref()
-                    .map(|sp| sp.emoji_map.clone())
-                    .unwrap_or(emoji_map);
-                let claimed_ap_object_id = seiran_post_ext
-                    .as_ref()
-                    .and_then(|sp| sp.counterpart_post_id.clone());
-                let content_warning = seiran_post_ext
-                    .as_ref()
-                    .and_then(|sp| sp.content_warning.clone());
-                let poll = seiran_post_ext.as_ref().and_then(|sp| sp.poll.clone());
-                let seiran_link_cards = seiran_post_ext
-                    .as_ref()
-                    .map(|sp| sp.link_cards.clone())
-                    .unwrap_or_default();
-                save_bsky_post(
-                    &pool2,
-                    &queue2,
-                    &http2,
-                    &hub2,
-                    IncomingBskyPost {
-                        at_uri: &at_uri2,
-                        author_did: &author_did,
-                        at_cid: &cid,
-                        text: &body_text,
-                        mention_facets: &mention_facets,
-                        emoji_map: &emoji_map,
-                        created_at,
-                        actor_id,
-                        username: &username,
-                        display_name: display_name.as_deref(),
-                        avatar_url: avatar_url.as_deref(),
-                        reply_to_post_id,
-                        quote_of_post_id,
-                        attachments,
-                        link_card,
-                        claimed_ap_object_id,
-                        content_warning,
-                        poll,
-                        seiran_link_cards,
-                        bridged_original_url,
-                    },
-                )
-                .await;
-            });
+/// 投稿の at URI をローカルの post_id へ解決する（未取得なら`None`、検索失敗はログのみ）。
+async fn resolve_local_post_id(pool: &PgPool, at_uri: Option<&str>, what: &str) -> Option<i64> {
+    match PgPostRepository::new(pool.clone())
+        .find_id_and_actor_by_at_uri(at_uri?)
+        .await
+    {
+        Ok(found) => found.map(|(post_id, _)| post_id),
+        Err(e) => {
+            tracing::error!(
+                "[Jetstream] {}投稿検索失敗（通常投稿として保存）: {}",
+                what,
+                e
+            );
+            None
         }
+    }
+}
 
-        "app.bsky.feed.repost" => {
-            if commit.operation == "delete" {
-                // `at_uri`ベースの論理削除は投稿・リポストで共通（`handle_inbound_post_delete`、
-                // `soft_delete_by_at_uri`は対象コレクションを問わない）。
-                let at_uri = format!("at://{}/app.bsky.feed.repost/{}", did, commit.rkey);
-                let pool2 = pool.clone();
-                tokio::spawn(async move {
-                    handle_inbound_post_delete(&pool2, &at_uri).await;
-                });
-                return Ok(());
-            }
-            if commit.operation != "create" {
-                return Ok(());
-            }
+/// 解析済みの投稿を、リプライ先・引用先の解決、facet・絵文字の適用、seiranPost による上書きを
+/// 経て保存する。
+async fn save_new_bsky_post(
+    deps: FirehoseDeps,
+    did: String,
+    at_uri: String,
+    parsed: ParsedPostRecord,
+    author: BskyPostAuthor,
+) {
+    let pool = &deps.pool;
+    // 親・引用先が未取得のリモート投稿等でローカルDBに存在しない場合は通常投稿として保存する。
+    let reply_to_post_id =
+        resolve_local_post_id(pool, parsed.reply_parent_uri.as_deref(), "リプライ親").await;
+    let quote_of_post_id = resolve_local_post_id(pool, parsed.quote_uri.as_deref(), "引用元").await;
+    let (body_text, mention_facets) = apply_bsky_facets(&parsed.body_text, parsed.parsed_facets);
+    let emoji_map = resolve_local_emoji_map(pool, &body_text).await;
+    // seiranPostがあれば本文・絵文字マップ等を上書きする（Single Source of Truth）。
+    let sp = parsed.seiran_post_ext;
+    let (body_text, emoji_map) = match &sp {
+        Some(sp) => (sp.body.clone(), sp.emoji_map.clone()),
+        None => (body_text, emoji_map),
+    };
+    save_bsky_post(
+        pool,
+        &deps.job_queue,
+        &deps.http,
+        &deps.stream_hub,
+        IncomingBskyPost {
+            at_uri: &at_uri,
+            author_did: &did,
+            at_cid: &parsed.cid,
+            text: &body_text,
+            mention_facets: &mention_facets,
+            emoji_map: &emoji_map,
+            created_at: parsed.created_at,
+            actor_id: author.actor_id,
+            username: &author.username,
+            display_name: author.display_name.as_deref(),
+            avatar_url: author.avatar_url.as_deref(),
+            reply_to_post_id,
+            quote_of_post_id,
+            attachments: parsed.attachments,
+            link_card: parsed.link_card,
+            claimed_ap_object_id: sp.as_ref().and_then(|sp| sp.counterpart_post_id.clone()),
+            content_warning: sp.as_ref().and_then(|sp| sp.content_warning.clone()),
+            poll: sp.as_ref().and_then(|sp| sp.poll.clone()),
+            seiran_link_cards: sp.map(|sp| sp.link_cards).unwrap_or_default(),
+            bridged_original_url: parsed.bridged_original_url,
+        },
+    )
+    .await;
+}
+
+/// `subject.uri`（リポスト・いいねの対象投稿）を取り出す。
+fn subject_uri_of(record: &JsonValue) -> Option<String> {
+    record
+        .get("subject")
+        .and_then(|subject| subject.get("uri"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+/// `app.bsky.feed.repost` の create/delete を別タスクで処理する。
+fn handle_repost_commit(deps: FirehoseDeps, did: String, commit: JetstreamCommit) {
+    let at_uri = format!("at://{}/app.bsky.feed.repost/{}", did, commit.rkey);
+    if commit.operation == "delete" {
+        // `at_uri`ベースの論理削除は投稿・リポストで共通（`handle_inbound_post_delete`、
+        // `soft_delete_by_at_uri`は対象コレクションを問わない）。
+        tokio::spawn(async move {
+            handle_inbound_post_delete(&deps.pool, &at_uri).await;
+        });
+        return;
+    }
+    if commit.operation != "create" {
+        return;
+    }
+    let Some(record) = commit.record else {
+        return;
+    };
+    let Some(subject_uri) = subject_uri_of(&record) else {
+        return;
+    };
+    let created_at = record
+        .get("createdAt")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
+        .unwrap_or_else(chrono::Utc::now);
+    tokio::spawn(async move {
+        handle_inbound_repost_create(
+            &deps.pool,
+            &deps.job_queue,
+            &deps.http,
+            &deps.stream_hub,
+            &InboundSubjectRecord {
+                did: &did,
+                at_uri: &at_uri,
+                subject_uri: &subject_uri,
+            },
+            created_at,
+        )
+        .await;
+    });
+}
+
+/// `app.bsky.feed.like` の create/delete を別タスクで処理する。
+fn handle_like_commit(deps: FirehoseDeps, did: String, commit: JetstreamCommit) {
+    let at_uri = format!("at://{}/app.bsky.feed.like/{}", did, commit.rkey);
+    match commit.operation.as_str() {
+        "create" => {
             let Some(record) = commit.record else {
-                return Ok(());
+                return;
             };
-            let Some(subject_uri) = record
-                .get("subject")
-                .and_then(|subject| subject.get("uri"))
-                .and_then(|value| value.as_str())
-            else {
-                return Ok(());
+            let Some(subject_uri) = subject_uri_of(&record) else {
+                return;
             };
-            let at_uri = format!("at://{}/app.bsky.feed.repost/{}", did, commit.rkey);
-            let created_at = record
-                .get("createdAt")
+            let emoji = record
+                .get("emoji")
                 .and_then(|v| v.as_str())
-                .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok())
-                .unwrap_or_else(chrono::Utc::now);
-            let pool2 = pool.clone();
-            let http2 = Arc::clone(http);
-            let hub2 = Arc::clone(stream_hub);
-            let queue2 = Arc::clone(job_queue);
-            let subject_uri = subject_uri.to_string();
+                .map(|s| s.to_string());
+            // 自分自身がローカルAPI経由でコミットしたLikeなら、非標準拡張フィールドとして
+            // 元の reactions.id が載っている（`encode_bsky_feed_like`）。これが戻ってきた
+            // 場合、ローカル即時通知と同じ reaction_id を通知に持たせることで、
+            // `notifications.reaction_id` の UNIQUE 制約により二重通知を防げる。
+            let seiran_reaction_id = record.get("seiranReactionId").and_then(|v| v.as_i64());
             tokio::spawn(async move {
-                handle_inbound_repost_create(
-                    &pool2,
-                    &queue2,
-                    &http2,
-                    &hub2,
+                handle_inbound_like_create(
+                    &deps.pool,
+                    &deps.job_queue,
+                    &deps.http,
+                    &deps.stream_hub,
                     &InboundSubjectRecord {
                         did: &did,
                         at_uri: &at_uri,
                         subject_uri: &subject_uri,
                     },
-                    created_at,
+                    emoji.as_deref(),
+                    seiran_reaction_id,
                 )
                 .await;
             });
         }
-
-        "app.bsky.feed.like" => {
-            match commit.operation.as_str() {
-                "create" => {
-                    let Some(record) = commit.record else {
-                        return Ok(());
-                    };
-                    let Some(subject_uri) = record
-                        .get("subject")
-                        .and_then(|s| s.get("uri"))
-                        .and_then(|v| v.as_str())
-                    else {
-                        return Ok(());
-                    };
-                    let emoji = record
-                        .get("emoji")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    // 自分自身がローカルAPI経由でコミットしたLikeなら、非標準拡張フィールドとして
-                    // 元の reactions.id が載っている（`encode_bsky_feed_like`）。これが戻ってきた
-                    // 場合、ローカル即時通知と同じ reaction_id を通知に持たせることで、
-                    // `notifications.reaction_id` の UNIQUE 制約により二重通知を防げる。
-                    let seiran_reaction_id =
-                        record.get("seiranReactionId").and_then(|v| v.as_i64());
-
-                    let at_uri = format!("at://{}/app.bsky.feed.like/{}", did, commit.rkey);
-                    let subject_uri = subject_uri.to_string();
-                    let pool2 = pool.clone();
-                    let queue2 = Arc::clone(job_queue);
-                    let http2 = Arc::clone(http);
-                    let hub2 = Arc::clone(stream_hub);
-                    tokio::spawn(async move {
-                        handle_inbound_like_create(
-                            &pool2,
-                            &queue2,
-                            &http2,
-                            &hub2,
-                            &InboundSubjectRecord {
-                                did: &did,
-                                at_uri: &at_uri,
-                                subject_uri: &subject_uri,
-                            },
-                            emoji.as_deref(),
-                            seiran_reaction_id,
-                        )
-                        .await;
-                    });
-                }
-                "delete" => {
-                    let at_uri = format!("at://{}/app.bsky.feed.like/{}", did, commit.rkey);
-                    let pool2 = pool.clone();
-                    let hub2 = Arc::clone(stream_hub);
-                    tokio::spawn(async move {
-                        handle_inbound_like_delete(&pool2, &hub2, &at_uri).await;
-                    });
-                }
-                _ => {}
-            }
+        "delete" => {
+            tokio::spawn(async move {
+                handle_inbound_like_delete(&deps.pool, &deps.stream_hub, &at_uri).await;
+            });
         }
-
         _ => {}
     }
-
-    Ok(())
 }
 
 /// `save_bsky_post`のDB反映（マージ判定〜INSERT）の結果。
@@ -750,35 +763,12 @@ async fn save_bsky_post(
     stream_hub: &StreamHub,
     post: IncomingBskyPost<'_>,
 ) {
-    let IncomingBskyPost {
-        at_uri,
-        author_did,
-        at_cid,
-        text,
-        mention_facets,
-        emoji_map,
-        created_at,
-        actor_id,
-        username,
-        display_name,
-        avatar_url,
-        reply_to_post_id,
-        quote_of_post_id,
-        attachments,
-        link_card,
-        claimed_ap_object_id,
-        content_warning,
-        poll,
-        seiran_link_cards,
-        bridged_original_url,
-    } = post;
-    let reply_id_str = reply_to_post_id.map(|id| id.to_string());
-    let post_id = generate_snowflake_id(created_at);
+    let post_id = generate_snowflake_id(post.created_at);
 
     // brid.gy(Bridgy Fed)ブリッジポスト対応（`seiran_common::bridge_post`参照）: 元AP投稿の
     // `ap_object_id`と一致する既存行を探す。見つかれば`bridge_of_post_id`を即座に解決し、
     // 無ければ`bridged_original_uri`だけ保存する（INSERT後に`Job::FetchBridgeOriginal`を積む）。
-    let bridge_of_post_id = match &bridged_original_url {
+    let bridge_of_post_id = match &post.bridged_original_url {
         Some(url) => seiran_common::bridge_post::resolve_bridge_target(
             pool,
             url,
@@ -798,18 +788,18 @@ async fn save_bsky_post(
     // （`docs/protocols.md` 5節参照）。
     let row = BskyPostRow {
         post_id,
-        actor_id,
-        text,
-        at_uri,
-        at_cid,
-        created_at,
-        reply_to_post_id,
-        mention_facets,
-        emoji_map,
-        quote_of_post_id,
-        claimed_ap_object_id: claimed_ap_object_id.as_deref(),
+        actor_id: post.actor_id,
+        text: post.text,
+        at_uri: post.at_uri,
+        at_cid: post.at_cid,
+        created_at: post.created_at,
+        reply_to_post_id: post.reply_to_post_id,
+        mention_facets: post.mention_facets,
+        emoji_map: post.emoji_map,
+        quote_of_post_id: post.quote_of_post_id,
+        claimed_ap_object_id: post.claimed_ap_object_id.as_deref(),
         bridge_of_post_id,
-        bridged_original_uri: bridged_original_url.as_deref(),
+        bridged_original_uri: post.bridged_original_url.as_deref(),
     };
     let insert_outcome: Result<InsertOrMergeOutcome, sqlx::Error> =
         seiran_common::unique_retry::retry_on_unique_violation(|| {
@@ -823,403 +813,438 @@ async fn save_bsky_post(
         }) => {
             tracing::info!(
                 "[Jetstream] seiranPostマージ成立（ATP側更新）、INSERTはスキップ: at_uri={} → post_id={}",
-                at_uri,
+                post.at_uri,
                 merged_post_id
             );
         }
         Ok(InsertOrMergeOutcome::DuplicateSkipped) => {
-            tracing::warn!("[Jetstream] 重複スキップ: {}", at_uri);
+            tracing::warn!("[Jetstream] 重複スキップ: {}", post.at_uri);
         }
         Err(e) => {
-            tracing::error!("[Jetstream] 保存失敗: {}: {}", at_uri, e);
+            tracing::error!("[Jetstream] 保存失敗: {}: {}", post.at_uri, e);
         }
         Ok(InsertOrMergeOutcome::Inserted) => {
-            tracing::info!("[Jetstream] 保存完了: {}", at_uri);
-
-            // seiranPost拡張オブジェクト（#237）のCW・投票をposts.content_warning/pollへ
-            // 反映する。AP受信側（note_save.rs）は既に対応済みだが、ATP受信側で
-            // これを欠いていると、ATP経由でしか受信できていない間はCW/投票が
-            // 一切表示されない非対称が生じる（実地検証で発覚）。
-            if content_warning.is_some() || poll.is_some() {
-                let posts_repo = PgPostRepository::new(pool.clone());
-                if let Err(e) = posts_repo
-                    .set_fedi_content_metadata(post_id, content_warning.as_deref(), poll.as_ref())
-                    .await
-                {
-                    tracing::error!(
-                        "[Jetstream] seiranPost CW/投票の保存失敗（投稿自体は成功済み）: {}",
-                        e
-                    );
-                }
-            }
-
-            // 返信許可（threadgate）・引用可否（postgate）を取得して保存する
-            // （#返信/引用グレーアウト、`docs/protocols.md`参照）。取得失敗時は両方とも
-            // 「制限なし」のまま（誤ってボタンをグレーアウトしない）。
-            let (reply_allow, quote_disabled) =
-                seiran_common::atp::fetch_bsky_gates(http, author_did, at_uri).await;
-            if let Err(e) = sqlx::query(
-                "UPDATE posts SET bsky_reply_allow = $1, bsky_quote_disabled = $2 WHERE id = $3",
-            )
-            .bind(&reply_allow)
-            .bind(quote_disabled)
-            .bind(post_id)
-            .execute(pool)
-            .await
-            {
-                tracing::error!("[Jetstream] gate情報保存失敗（スキップ）: {}", e);
-            }
-
-            if !seiran_link_cards.is_empty() {
-                // `seiranPost.linkCards[]`があれば送信側が既に申告したtitle/description/
-                // thumbnailUrlをそのまま反映する（AP受信側と共通のロジック、#237）。
-                // `embed_src`は設計上NULLのまま（送信側の申告を信用しない方針）のため
-                // Job::LinkCardEmbedResolveは積まない。
-                seiran_common::seiran_post::insert_seiran_post_link_cards(
-                    pool,
-                    post_id,
-                    &seiran_link_cards,
-                )
-                .await;
-            } else if let Some(card) = link_card.as_ref().filter(|_| poll.is_none()) {
-                // URLカード（Bskyは常に最大1件、position=0固定）。埋め込みプレーヤーのiframe src
-                // （oEmbed discovery）はここでは未解決のため、後追いでJob::LinkCardEmbedResolveへ
-                // 委ねる（Bskyのexternal embedにはiframe情報が無いため）。
-                //
-                // `poll.is_none()`ガード: Bskyの埋め込み枠は1投稿につき1つしか無く、投票
-                // （`poll`）付き投稿をBskyへ配信する際は`resolve_poll_embed`が「自分自身の
-                // URL＋選択肢の箇条書きdescription」という投票の代替表現を`external` embed
-                // として自動生成する（Bskyに投票型が無いため）。このガードが無いと、
-                // ATP経由でのみ受信した投票付き投稿（`seiranPost.linkCards[]`は当然空）で、
-                // この投票の代替表現を本物のリンクカードと誤認して保存してしまい、本来の
-                // 投票ウィジェットとは別に同じ選択肢を並べただけの余計なカードが表示される
-                // （実機確認、AP受信側`note_save.rs`は本文URL抽出方式のためこの問題が無い）。
-                let result = sqlx::query(
-                    "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
-                     VALUES ($1, 0, $2, $3, $4, $5)",
-                )
-                .bind(post_id)
-                .bind(&card.url)
-                .bind(&card.title)
-                .bind(&card.description)
-                .bind(card.thumbnail_url.as_deref())
-                .execute(pool)
-                .await;
-                match result {
-                    Ok(_) => {
-                        if let Err(e) = job_queue
-                            .enqueue(
-                                Job::LinkCardEmbedResolve {
-                                    post_id,
-                                    position: 0,
-                                    url: card.url.clone(),
-                                },
-                                priority::LOW,
-                            )
-                            .await
-                        {
-                            tracing::error!("[Jetstream] LinkCardEmbedResolve enqueue失敗: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "[Jetstream] post_link_cards INSERT失敗（投稿自体は成功済み）: {}",
-                            e
-                        );
-                    }
-                }
-            }
-
-            if let Err(e) = PgHashtagRepository::new(pool.clone())
-                .link_post(post_id, text)
-                .await
-            {
-                tracing::error!(
-                    "[Jetstream] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
-                    e
-                );
-            }
-
-            // ブリッジポスト処理（`seiran_common::bridge_post`参照）。
-            if let Some(url) = &bridged_original_url {
-                match bridge_of_post_id {
-                    Some(original_id) => {
-                        if let Err(e) = seiran_common::bridge_post::set_original_bridge_pointer(
-                            pool,
-                            original_id,
-                            post_id,
-                            seiran_common::bridge_post::BridgeTargetProtocol::Atp,
-                        )
-                        .await
-                        {
-                            tracing::warn!(
-                                "[Jetstream] 元ポストへのブリッジ逆参照更新に失敗: {}",
-                                e
-                            );
-                        }
-                    }
-                    None => {
-                        if let Err(e) = job_queue
-                            .enqueue(
-                                Job::FetchBridgeOriginal {
-                                    bridge_post_id: post_id,
-                                    target_uri: url.clone(),
-                                    protocol: "ap".to_string(),
-                                },
-                                priority::NORMAL,
-                            )
-                            .await
-                        {
-                            tracing::warn!(
-                                "[Jetstream] FetchBridgeOriginalの積み込みに失敗: {}",
-                                e
-                            );
-                        }
-                    }
-                }
-            }
-            // 受動的リンク: このATP投稿自身（at_uri）を待っている未解決ブリッジポストが
-            // 無いか確認し、あれば結合する（安全網）。
-            if let Err(e) = seiran_common::bridge_post::link_pending_bridges_for_new_original(
-                pool,
-                post_id,
-                None,
-                Some(at_uri),
-            )
-            .await
-            {
-                tracing::warn!(
-                    "[Jetstream] 待機中ブリッジポストの結合チェックに失敗: {}",
-                    e
-                );
-            }
-
-            // リプライ通知: リプライ先がローカルユーザーの投稿であれば通知を作る（自己リプライは除く）。
-            // リプライ先本人へのメンションは reply 通知と重複するため、mention 通知の対象から除く
-            // （下のメンション通知ブロックで `mention_skip_actor_ids` として参照する）。
-            let mut mention_skip_actor_ids: HashSet<i64> = HashSet::new();
-            if let Some(parent_id) = reply_to_post_id {
-                let parent_local_actor_id: Option<i64> = sqlx::query(
-                    "SELECT p.actor_id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE p.id = $1 AND a.actor_type = 'local'",
-                )
-                .bind(parent_id)
-                .fetch_optional(pool)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|row| row.try_get::<i64, _>("actor_id").ok());
-                if let Some(parent_actor_id) = parent_local_actor_id.filter(|id| *id != actor_id) {
-                    mention_skip_actor_ids.insert(parent_actor_id);
-                    stream_hub.publish_event(
-                        HashSet::from([parent_actor_id]),
-                        "reply",
-                        serde_json::json!({
-                            "postId": post_id.to_string(),
-                            "actor": { "username": username, "domain": serde_json::Value::Null, "displayName": display_name },
-                        }),
-                    );
-                    let notif_id = generate_snowflake_id(chrono::Utc::now());
-                    if let Err(e) = PgNotificationRepository::new(pool.clone())
-                        .insert(&NewNotification {
-                            notifier_actor_id: Some(actor_id),
-                            note_id: Some(post_id),
-                            ..NewNotification::new(
-                                notif_id,
-                                parent_actor_id,
-                                NotificationKind::Reply,
-                            )
-                        })
-                        .await
-                    {
-                        tracing::error!("[Jetstream] reply notifications INSERT 失敗: {}", e);
-                    }
-                }
-            }
-
-            // 引用通知: 引用先がローカルユーザーの投稿なら、フォロー関係にかかわらず通知する。
-            if let Some(quoted_id) = quote_of_post_id {
-                let quoted_local_actor_id: Option<i64> = sqlx::query(
-                    "SELECT p.actor_id FROM posts p JOIN actors a ON a.id = p.actor_id
-                     WHERE p.id = $1 AND a.actor_type = 'local'",
-                )
-                .bind(quoted_id)
-                .fetch_optional(pool)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|row| row.try_get::<i64, _>("actor_id").ok());
-                if let Some(quoted_actor_id) = quoted_local_actor_id.filter(|id| *id != actor_id) {
-                    stream_hub.publish_event(
-                        HashSet::from([quoted_actor_id]),
-                        "quote",
-                        serde_json::json!({
-                            "postId": post_id.to_string(),
-                            "actor": { "username": username, "domain": serde_json::Value::Null, "displayName": display_name },
-                        }),
-                    );
-                    let notif_id = generate_snowflake_id(chrono::Utc::now());
-                    if let Err(e) = PgNotificationRepository::new(pool.clone())
-                        .insert(&NewNotification {
-                            notifier_actor_id: Some(actor_id),
-                            note_id: Some(post_id),
-                            source_uri: Some(at_uri),
-                            ..NewNotification::new(
-                                notif_id,
-                                quoted_actor_id,
-                                NotificationKind::Quote,
-                            )
-                        })
-                        .await
-                    {
-                        tracing::error!("[Jetstream] quote notifications INSERT 失敗: {}", e);
-                    }
-                }
-            }
-
-            // メンション通知: mention_facets の各 did がローカルアクターを指す場合、通知を作る。
-            // source_uri は渡さない（1投稿に複数の宛先がありうるため、投稿の at_uri を
-            // 共有すると2人目以降が部分UNIQUEインデックスで弾かれてしまう。posts 自体は
-            // at_uri の ON CONFLICT で既に重複排除済みのため、このブロックへの到達自体が
-            // 新規保存時のみに限られ、重複INSERT対策は不要）。
-            if let JsonValue::Array(spans) = mention_facets {
-                let actor_repo = PgActorRepository::new(pool.clone());
-                let notifications_repo = PgNotificationRepository::new(pool.clone());
-                let mut notified: HashSet<i64> = HashSet::new();
-                for span in spans {
-                    let Some(mentioned_did) = span.get("did").and_then(|v| v.as_str()) else {
-                        continue;
-                    };
-                    if let Ok(Some(mentioned_actor)) = actor_repo.find_by_did(mentioned_did).await {
-                        if mentioned_actor.actor_type != "local" || mentioned_actor.id == actor_id {
-                            continue;
-                        }
-                        if mention_skip_actor_ids.contains(&mentioned_actor.id) {
-                            continue; // reply通知と重複するため
-                        }
-                        if !notified.insert(mentioned_actor.id) {
-                            continue;
-                        }
-                        stream_hub.publish_event(
-                            HashSet::from([mentioned_actor.id]),
-                            "mention",
-                            serde_json::json!({
-                                "postId": post_id.to_string(),
-                                "actor": { "username": username, "domain": serde_json::Value::Null, "displayName": display_name },
-                            }),
-                        );
-                        let notif_id = generate_snowflake_id(chrono::Utc::now());
-                        if let Err(e) = notifications_repo
-                            .insert(&NewNotification {
-                                notifier_actor_id: Some(actor_id),
-                                note_id: Some(post_id),
-                                ..NewNotification::new(
-                                    notif_id,
-                                    mentioned_actor.id,
-                                    NotificationKind::Mention,
-                                )
-                            })
-                            .await
-                        {
-                            tracing::error!("[Jetstream] mention notifications INSERT 失敗: {}", e);
-                        }
-                    }
-                }
-            }
-
-            // 添付（画像・動画）を post_attachments に保存
-            if !attachments.is_empty() {
-                let posts_repo = PgPostRepository::new(pool.clone());
-                for (position, att) in attachments.iter().enumerate() {
-                    if let Err(e) = posts_repo
-                        .attach_remote_media_url(
-                            post_id,
-                            &seiran_common::repository::RemoteAttachment {
-                                url: &att.url,
-                                mime_type: Some(&att.mime_type),
-                                thumbnail_url: att.thumbnail_url.as_deref(),
-                                is_sensitive: false,
-                                is_gif: att.is_gif,
-                                position: position as i16,
-                            },
-                        )
-                        .await
-                    {
-                        tracing::error!("[Jetstream] 添付 URL 保存失敗（スキップ）: {}", e);
-                    }
-                }
-            }
-
-            // タイムラインチャンネル（homeTimeline/hybridTimeline/userList/hashtag。Bsky投稿は
-            // is_local=falseのためlocalTimeline/globalTimelineには載らない）へ WebSocket 配信。
-            // リプライの場合、リプライ先投稿者もフォロー中（または本人）のフォロワーのみに絞り込む
-            // （`post_reply_target_followed`、REST の home_timeline/social_timeline や
-            // `FollowRepository::find_home_recipient_ids` と同じ判定を共有するDB関数）。
-            let home_recipients: HashSet<i64> = sqlx::query_scalar::<_, i64>(
-                "SELECT f.follower_actor_id FROM follows f
-                 JOIN actors a ON a.id = f.follower_actor_id
-                 WHERE f.target_actor_id = $1 AND f.status = 'accepted'
-                   AND a.actor_type = 'local'
-                   AND post_reply_target_followed(f.follower_actor_id, $2)",
-            )
-            .bind(actor_id)
-            .bind(reply_to_post_id)
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-
-            let list_ids: HashSet<i64> = sqlx::query_scalar::<_, i64>(
-                "SELECT list_id FROM list_members WHERE actor_id = $1",
-            )
-            .bind(actor_id)
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-
-            let hashtags: HashSet<String> = seiran_common::hashtag::extract_hashtags(text)
-                .into_iter()
-                .collect();
-
-            let attachments_json: Vec<JsonValue> = attachments
-                .iter()
-                .map(|att| {
-                    serde_json::json!({
-                        "url": att.url,
-                        "mimeType": att.mime_type,
-                        "width": att.width,
-                        "height": att.height,
-                        "thumbnailUrl": att.thumbnail_url,
-                    })
-                })
-                .collect();
-            let note_json = serde_json::json!({
-                "id": post_id.to_string(),
-                "text": text,
-                "createdAt": created_at.to_rfc3339(),
-                "user": {
-                    "id": actor_id,
-                    "username": username,
-                    "domain": serde_json::Value::Null,
-                    "displayName": display_name,
-                    "actorType": "bsky",
-                    "avatarUrl": avatar_url,
-                },
-                "attachments": attachments_json,
-                "replyId": reply_id_str,
-            });
-            let scope = ChannelScope {
-                is_local: false,
-                visibility: "public".to_string(),
-                home_recipients: Arc::new(home_recipients),
-                list_ids: Arc::new(list_ids),
-                hashtags: Arc::new(hashtags),
-            };
-            stream_hub.publish_channel_note(scope, note_json);
+            tracing::info!("[Jetstream] 保存完了: {}", post.at_uri);
+            store_bsky_post_extras(pool, job_queue, http, &post, post_id).await;
+            link_bsky_bridge_posts(pool, job_queue, &post, post_id, bridge_of_post_id).await;
+            notify_local_actors_of_bsky_post(pool, stream_hub, &post, post_id).await;
+            publish_bsky_post_to_timelines(pool, stream_hub, &post, post_id).await;
         }
     }
+}
+
+/// 保存した Bsky 投稿の付帯情報（CW・投票、返信可否・引用可否、URLカード、ハッシュタグ、添付）を保存する。
+async fn store_bsky_post_extras(
+    pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
+    http: &reqwest::Client,
+    post: &IncomingBskyPost<'_>,
+    post_id: i64,
+) {
+    let text = post.text;
+    let at_uri = post.at_uri;
+    let author_did = post.author_did;
+    let attachments = &post.attachments;
+    let link_card = &post.link_card;
+    let content_warning = &post.content_warning;
+    let poll = &post.poll;
+    let seiran_link_cards = &post.seiran_link_cards;
+    // seiranPost拡張オブジェクト（#237）のCW・投票をposts.content_warning/pollへ
+    // 反映する。AP受信側（note_save.rs）は既に対応済みだが、ATP受信側で
+    // これを欠いていると、ATP経由でしか受信できていない間はCW/投票が
+    // 一切表示されない非対称が生じる（実地検証で発覚）。
+    if content_warning.is_some() || poll.is_some() {
+        let posts_repo = PgPostRepository::new(pool.clone());
+        if let Err(e) = posts_repo
+            .set_fedi_content_metadata(post_id, content_warning.as_deref(), poll.as_ref())
+            .await
+        {
+            tracing::error!(
+                "[Jetstream] seiranPost CW/投票の保存失敗（投稿自体は成功済み）: {}",
+                e
+            );
+        }
+    }
+
+    // 返信許可（threadgate）・引用可否（postgate）を取得して保存する
+    // （#返信/引用グレーアウト、`docs/protocols.md`参照）。取得失敗時は両方とも
+    // 「制限なし」のまま（誤ってボタンをグレーアウトしない）。
+    let (reply_allow, quote_disabled) =
+        seiran_common::atp::fetch_bsky_gates(http, author_did, at_uri).await;
+    if let Err(e) = sqlx::query(
+        "UPDATE posts SET bsky_reply_allow = $1, bsky_quote_disabled = $2 WHERE id = $3",
+    )
+    .bind(&reply_allow)
+    .bind(quote_disabled)
+    .bind(post_id)
+    .execute(pool)
+    .await
+    {
+        tracing::error!("[Jetstream] gate情報保存失敗（スキップ）: {}", e);
+    }
+
+    if !seiran_link_cards.is_empty() {
+        // `seiranPost.linkCards[]`があれば送信側が既に申告したtitle/description/
+        // thumbnailUrlをそのまま反映する（AP受信側と共通のロジック、#237）。
+        // `embed_src`は設計上NULLのまま（送信側の申告を信用しない方針）のため
+        // Job::LinkCardEmbedResolveは積まない。
+        seiran_common::seiran_post::insert_seiran_post_link_cards(
+            pool,
+            post_id,
+            seiran_link_cards,
+        )
+        .await;
+    } else if let Some(card) = link_card.as_ref().filter(|_| poll.is_none()) {
+        // URLカード（Bskyは常に最大1件、position=0固定）。埋め込みプレーヤーのiframe src
+        // （oEmbed discovery）はここでは未解決のため、後追いでJob::LinkCardEmbedResolveへ
+        // 委ねる（Bskyのexternal embedにはiframe情報が無いため）。
+        //
+        // `poll.is_none()`ガード: Bskyの埋め込み枠は1投稿につき1つしか無く、投票
+        // （`poll`）付き投稿をBskyへ配信する際は`resolve_poll_embed`が「自分自身の
+        // URL＋選択肢の箇条書きdescription」という投票の代替表現を`external` embed
+        // として自動生成する（Bskyに投票型が無いため）。このガードが無いと、
+        // ATP経由でのみ受信した投票付き投稿（`seiranPost.linkCards[]`は当然空）で、
+        // この投票の代替表現を本物のリンクカードと誤認して保存してしまい、本来の
+        // 投票ウィジェットとは別に同じ選択肢を並べただけの余計なカードが表示される
+        // （実機確認、AP受信側`note_save.rs`は本文URL抽出方式のためこの問題が無い）。
+        let result = sqlx::query(
+            "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
+             VALUES ($1, 0, $2, $3, $4, $5)",
+        )
+        .bind(post_id)
+        .bind(&card.url)
+        .bind(&card.title)
+        .bind(&card.description)
+        .bind(card.thumbnail_url.as_deref())
+        .execute(pool)
+        .await;
+        match result {
+            Ok(_) => {
+                if let Err(e) = job_queue
+                    .enqueue(
+                        Job::LinkCardEmbedResolve {
+                            post_id,
+                            position: 0,
+                            url: card.url.clone(),
+                        },
+                        priority::LOW,
+                    )
+                    .await
+                {
+                    tracing::error!("[Jetstream] LinkCardEmbedResolve enqueue失敗: {}", e);
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    "[Jetstream] post_link_cards INSERT失敗（投稿自体は成功済み）: {}",
+                    e
+                );
+            }
+        }
+    }
+
+    if let Err(e) = PgHashtagRepository::new(pool.clone())
+        .link_post(post_id, text)
+        .await
+    {
+        tracing::error!(
+            "[Jetstream] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
+            e
+        );
+    }
+
+    // 添付（画像・動画）を post_attachments に保存
+    if !attachments.is_empty() {
+        let posts_repo = PgPostRepository::new(pool.clone());
+        for (position, att) in attachments.iter().enumerate() {
+            if let Err(e) = posts_repo
+                .attach_remote_media_url(
+                    post_id,
+                    &seiran_common::repository::RemoteAttachment {
+                        url: &att.url,
+                        mime_type: Some(&att.mime_type),
+                        thumbnail_url: att.thumbnail_url.as_deref(),
+                        is_sensitive: false,
+                        is_gif: att.is_gif,
+                        position: position as i16,
+                    },
+                )
+                .await
+            {
+                tracing::error!("[Jetstream] 添付 URL 保存失敗（スキップ）: {}", e);
+            }
+        }
+    }
+}
+
+/// ブリッジポスト処理（`seiran_common::bridge_post`参照）: この投稿がブリッジポストなら元ポストとの
+/// 相互参照を張り（元ポスト未取り込みなら取得ジョブを積む）、この投稿を待っている未解決
+/// ブリッジポストがあれば結合する。
+async fn link_bsky_bridge_posts(
+    pool: &PgPool,
+    job_queue: &Arc<dyn JobQueue>,
+    post: &IncomingBskyPost<'_>,
+    post_id: i64,
+    bridge_of_post_id: Option<i64>,
+) {
+    let at_uri = post.at_uri;
+    let bridged_original_url = &post.bridged_original_url;
+    // ブリッジポスト処理（`seiran_common::bridge_post`参照）。
+    if let Some(url) = &bridged_original_url {
+        match bridge_of_post_id {
+            Some(original_id) => {
+                if let Err(e) = seiran_common::bridge_post::set_original_bridge_pointer(
+                    pool,
+                    original_id,
+                    post_id,
+                    seiran_common::bridge_post::BridgeTargetProtocol::Atp,
+                )
+                .await
+                {
+                    tracing::warn!("[Jetstream] 元ポストへのブリッジ逆参照更新に失敗: {}", e);
+                }
+            }
+            None => {
+                if let Err(e) = job_queue
+                    .enqueue(
+                        Job::FetchBridgeOriginal {
+                            bridge_post_id: post_id,
+                            target_uri: url.clone(),
+                            protocol: "ap".to_string(),
+                        },
+                        priority::NORMAL,
+                    )
+                    .await
+                {
+                    tracing::warn!("[Jetstream] FetchBridgeOriginalの積み込みに失敗: {}", e);
+                }
+            }
+        }
+    }
+    // 受動的リンク: このATP投稿自身（at_uri）を待っている未解決ブリッジポストが
+    // 無いか確認し、あれば結合する（安全網）。
+    if let Err(e) = seiran_common::bridge_post::link_pending_bridges_for_new_original(
+        pool,
+        post_id,
+        None,
+        Some(at_uri),
+    )
+    .await
+    {
+        tracing::warn!(
+            "[Jetstream] 待機中ブリッジポストの結合チェックに失敗: {}",
+            e
+        );
+    }
+}
+
+/// Bsky 受信投稿を契機にローカルユーザーへ送る通知の種別。
+struct BskyPostNotice<'a> {
+    recipient_actor_id: i64,
+    kind: NotificationKind,
+    /// ストリーミングのイベント名（`reply`/`quote`/`mention`）。
+    event: &'a str,
+    /// 通知の重複排除用の発生源URI（1投稿に宛先が1人の種別のみ渡す）。
+    source_uri: Option<&'a str>,
+}
+
+/// ローカルユーザー1人へ、ストリーミング配信と通知ベルの両方で通知する。
+async fn notify_local_actor_of_bsky_post(
+    pool: &PgPool,
+    stream_hub: &StreamHub,
+    post: &IncomingBskyPost<'_>,
+    post_id: i64,
+    notice: &BskyPostNotice<'_>,
+) {
+    stream_hub.publish_event(
+        HashSet::from([notice.recipient_actor_id]),
+        notice.event,
+        serde_json::json!({
+            "postId": post_id.to_string(),
+            "actor": { "username": post.username, "domain": serde_json::Value::Null, "displayName": post.display_name },
+        }),
+    );
+    let notif_id = generate_snowflake_id(chrono::Utc::now());
+    if let Err(e) = PgNotificationRepository::new(pool.clone())
+        .insert(&NewNotification {
+            notifier_actor_id: Some(post.actor_id),
+            note_id: Some(post_id),
+            source_uri: notice.source_uri,
+            ..NewNotification::new(notif_id, notice.recipient_actor_id, notice.kind)
+        })
+        .await
+    {
+        tracing::error!(
+            "[Jetstream] {} notifications INSERT 失敗: {}",
+            notice.event,
+            e
+        );
+    }
+}
+
+/// 投稿がローカルユーザーの投稿なら、その投稿者の actor_id を返す。
+async fn local_post_author(pool: &PgPool, post_id: Option<i64>) -> Option<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT p.actor_id FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.id = $1 AND a.actor_type = 'local'",
+    )
+    .bind(post_id?)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+}
+
+/// リプライ先・引用先・メンション先のローカルユーザーへ通知する（自分自身は除く）。
+/// リプライ先本人へのメンションは reply 通知と重複するため mention 通知から除く。
+/// 引用通知はフォロー関係にかかわらず送る。メンション通知には`source_uri`を渡さない
+/// （1投稿に複数の宛先がありうるため、投稿の at_uri を共有すると2人目以降が部分UNIQUE
+/// インデックスで弾かれてしまう。posts 自体は at_uri の ON CONFLICT で既に重複排除済みの
+/// ため、ここへの到達自体が新規保存時のみに限られ、重複INSERT対策は不要）。
+async fn notify_local_actors_of_bsky_post(
+    pool: &PgPool,
+    stream_hub: &StreamHub,
+    post: &IncomingBskyPost<'_>,
+    post_id: i64,
+) {
+    let not_self = |id: &i64| *id != post.actor_id;
+    let mut notified: HashSet<i64> = HashSet::new();
+    if let Some(parent_actor_id) = local_post_author(pool, post.reply_to_post_id)
+        .await
+        .filter(not_self)
+    {
+        notified.insert(parent_actor_id);
+        let notice = BskyPostNotice {
+            recipient_actor_id: parent_actor_id,
+            kind: NotificationKind::Reply,
+            event: "reply",
+            source_uri: None,
+        };
+        notify_local_actor_of_bsky_post(pool, stream_hub, post, post_id, &notice).await;
+    }
+    if let Some(quoted_actor_id) = local_post_author(pool, post.quote_of_post_id)
+        .await
+        .filter(not_self)
+    {
+        let notice = BskyPostNotice {
+            recipient_actor_id: quoted_actor_id,
+            kind: NotificationKind::Quote,
+            event: "quote",
+            source_uri: Some(post.at_uri),
+        };
+        notify_local_actor_of_bsky_post(pool, stream_hub, post, post_id, &notice).await;
+    }
+    let JsonValue::Array(spans) = post.mention_facets else {
+        return;
+    };
+    let actor_repo = PgActorRepository::new(pool.clone());
+    for mentioned_did in spans
+        .iter()
+        .filter_map(|span| span.get("did").and_then(|v| v.as_str()))
+    {
+        let Ok(Some(mentioned)) = actor_repo.find_by_did(mentioned_did).await else {
+            continue;
+        };
+        if mentioned.actor_type != "local"
+            || !not_self(&mentioned.id)
+            || !notified.insert(mentioned.id)
+        {
+            continue;
+        }
+        let notice = BskyPostNotice {
+            recipient_actor_id: mentioned.id,
+            kind: NotificationKind::Mention,
+            event: "mention",
+            source_uri: None,
+        };
+        notify_local_actor_of_bsky_post(pool, stream_hub, post, post_id, &notice).await;
+    }
+}
+
+/// タイムラインチャンネルへ WebSocket 配信する。
+async fn publish_bsky_post_to_timelines(
+    pool: &PgPool,
+    stream_hub: &StreamHub,
+    post: &IncomingBskyPost<'_>,
+    post_id: i64,
+) {
+    let reply_id_str = post.reply_to_post_id.map(|id| id.to_string());
+    let text = post.text;
+    let actor_id = post.actor_id;
+    let username = post.username;
+    let display_name = post.display_name;
+    let avatar_url = post.avatar_url;
+    let created_at = post.created_at;
+    let reply_to_post_id = post.reply_to_post_id;
+    let attachments = &post.attachments;
+    // タイムラインチャンネル（homeTimeline/hybridTimeline/userList/hashtag。Bsky投稿は
+    // is_local=falseのためlocalTimeline/globalTimelineには載らない）へ WebSocket 配信。
+    // リプライの場合、リプライ先投稿者もフォロー中（または本人）のフォロワーのみに絞り込む
+    // （`post_reply_target_followed`、REST の home_timeline/social_timeline や
+    // `FollowRepository::find_home_recipient_ids` と同じ判定を共有するDB関数）。
+    let home_recipients: HashSet<i64> = sqlx::query_scalar::<_, i64>(
+        "SELECT f.follower_actor_id FROM follows f
+         JOIN actors a ON a.id = f.follower_actor_id
+         WHERE f.target_actor_id = $1 AND f.status = 'accepted'
+           AND a.actor_type = 'local'
+           AND post_reply_target_followed(f.follower_actor_id, $2)",
+    )
+    .bind(actor_id)
+    .bind(reply_to_post_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .collect();
+
+    let list_ids: HashSet<i64> =
+        sqlx::query_scalar::<_, i64>("SELECT list_id FROM list_members WHERE actor_id = $1")
+            .bind(actor_id)
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+    let hashtags: HashSet<String> = seiran_common::hashtag::extract_hashtags(text)
+        .into_iter()
+        .collect();
+
+    let attachments_json: Vec<JsonValue> = attachments
+        .iter()
+        .map(|att| {
+            serde_json::json!({
+                "url": att.url,
+                "mimeType": att.mime_type,
+                "width": att.width,
+                "height": att.height,
+                "thumbnailUrl": att.thumbnail_url,
+            })
+        })
+        .collect();
+    let note_json = serde_json::json!({
+        "id": post_id.to_string(),
+        "text": text,
+        "createdAt": created_at.to_rfc3339(),
+        "user": {
+            "id": actor_id,
+            "username": username,
+            "domain": serde_json::Value::Null,
+            "displayName": display_name,
+            "actorType": "bsky",
+            "avatarUrl": avatar_url,
+        },
+        "attachments": attachments_json,
+        "replyId": reply_id_str,
+    });
+    let scope = ChannelScope {
+        is_local: false,
+        visibility: "public".to_string(),
+        home_recipients: Arc::new(home_recipients),
+        list_ids: Arc::new(list_ids),
+        hashtags: Arc::new(hashtags),
+    };
+    stream_hub.publish_channel_note(scope, note_json);
 }
 
 /// 他の投稿を対象（`subject`）とする受信レコード（`app.bsky.feed.repost`・`like`）。

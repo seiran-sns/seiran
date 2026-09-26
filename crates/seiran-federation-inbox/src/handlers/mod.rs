@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod ap_collection;
 pub mod featured;
 pub mod inbox;
 pub mod lists;

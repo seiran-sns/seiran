@@ -9,6 +9,7 @@
 
 import { test, expect } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
+import { BACKEND_URL } from "../ports.ts";
 
 test.describe("無関係な第三者は他人のDMへどの経路からも到達できない", () => {
   test("タイムライン・URL直指定・プロフィール・検索・リアクション・リプライ・DM APIすべてで漏洩しない", async ({
@@ -129,4 +130,38 @@ test.describe("無関係な第三者は他人のDMへどの経路からも到達
     // メッセージスレッドへ誤ってリダイレクトされてもいない（可視ではないため）。
     await expect(page).not.toHaveURL(new RegExp(`/messages/${dmId}$`));
   });
+});
+
+// AP の outbox は認証なしで誰でも取得できるため、フォロワー限定・DM を含めてはならない。
+// 以前は可視性を見ずに全投稿を `to: Public` の Create として並べていた（2026-09-26 改善大会）。
+test("AP outbox にはフォロワー限定・DM が出ず、総数にも数えない", async ({ request }) => {
+  const author = await registerUserViaApi(request, "e2eoutbox");
+  const recipient = await registerUserViaApi(request, "e2eoutboxdm");
+  const stamp = Date.now();
+  const posts = [
+    { text: `outbox public ${stamp}`, visibility: "public" },
+    { text: `outbox home ${stamp}`, visibility: "home" },
+    { text: `outbox followers ${stamp}`, visibility: "followers" },
+    { text: `outbox dm ${stamp}`, visibility: "direct", recipient_actor_ids: [recipient.actorId] },
+  ];
+  for (const data of posts) {
+    const res = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${author.token}` },
+      data,
+    });
+    expect(res.ok(), `投稿作成失敗: ${res.status()} ${await res.text()}`).toBeTruthy();
+  }
+
+  const index = await request.get(`${BACKEND_URL}/users/${author.username}/outbox`);
+  expect(index.ok()).toBeTruthy();
+  expect((await index.json()).totalItems).toBe(2);
+
+  const pageRes = await request.get(`${BACKEND_URL}/users/${author.username}/outbox?page=true`);
+  expect(pageRes.ok()).toBeTruthy();
+  const page = await pageRes.json();
+  const contents: string[] = page.orderedItems.map((item: { object: { content: string } }) => item.object.content);
+  expect(contents.some((c) => c.includes(`outbox public ${stamp}`))).toBe(true);
+  expect(contents.some((c) => c.includes(`outbox home ${stamp}`))).toBe(true);
+  expect(contents.some((c) => c.includes(`outbox followers ${stamp}`))).toBe(false);
+  expect(contents.some((c) => c.includes(`outbox dm ${stamp}`))).toBe(false);
 });

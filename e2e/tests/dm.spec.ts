@@ -344,3 +344,40 @@ test("ミュート・ブロックした相手からのDMは一覧にも未読バ
     .toEqual(expect.arrayContaining([textFromBob]));
   expect(await unreadCount(alice.token)).toBe(1);
 });
+
+// DMのメッセージ一覧は以前、引用元の埋め込み（`quote`）を付けておらず、DM内で公開投稿を
+// 引用しても引用カードが表示されなかった（ノート組み立ての共通化で解消）。
+test("DMで公開投稿を引用すると、メッセージ一覧に引用元が埋め込まれる", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2edmquotea");
+  const bob = await registerUserViaApi(request, "e2edmquoteb");
+  const aliceAuth = { Authorization: `Bearer ${alice.token}` };
+
+  const publicRes = await request.post("/api/notes/create", {
+    headers: aliceAuth,
+    data: { text: "DMで引用される公開投稿", deliver_to_fedi: false, deliver_to_bsky: false },
+  });
+  expect(publicRes.ok(), await publicRes.text()).toBeTruthy();
+  const publicNote = await publicRes.json();
+
+  const dmRes = await request.post("/api/notes/create", {
+    headers: aliceAuth,
+    data: {
+      text: "これ見て",
+      visibility: "direct",
+      recipient_actor_ids: [bob.actorId],
+      quote_of_id: publicNote.id,
+    },
+  });
+  expect(dmRes.ok(), await dmRes.text()).toBeTruthy();
+  const dm = await dmRes.json();
+
+  const messagesRes = await request.get(`/api/dm/sessions/${dm.id}/messages`, {
+    headers: { Authorization: `Bearer ${bob.token}` },
+  });
+  expect(messagesRes.ok(), await messagesRes.text()).toBeTruthy();
+  const messages = await messagesRes.json();
+  const message = messages.find((m: { id: string }) => m.id === dm.id);
+  expect(message, "DMがメッセージ一覧に出ない").toBeTruthy();
+  expect(message.quote?.id).toBe(publicNote.id);
+  expect(message.recipients?.length).toBeGreaterThan(0);
+});

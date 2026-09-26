@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ListMembership } from "../api/client";
+import { followTargetOf } from "../api/follows";
 import { useToast } from "../contexts/ToastContext";
 import { profileQuery } from "../lib/format";
 import { ActionsMenuItem } from "../components/common/ActionsMenu";
@@ -25,7 +26,7 @@ const DEFAULT_RELATIONSHIP: RelationshipSnapshot = {
 };
 
 export interface UserRelationshipTarget {
-  /** report用。無ければreport項目をdisabledにする。 */
+  /** フォロー操作の対象指定（あれば`target`より優先）とreport用。無ければreport項目をdisabledにする。 */
   actorId?: string;
   username: string;
   domain?: string;
@@ -76,7 +77,7 @@ export function useUserRelationshipMenu(
     if (followActionPending) return;
     setFollowActionPending(true);
     try {
-      const res = await api.follows.create(apiTarget);
+      const res = await api.follows.create(followTargetOf(target.actorId, apiTarget));
       patch({ followStatus: res.status === "accepted" ? "accepted" : "pending" });
     } catch (e) {
       showError(getErrorMessage(e));
@@ -89,7 +90,7 @@ export function useUserRelationshipMenu(
     if (followActionPending) return;
     setFollowActionPending(true);
     try {
-      await api.follows.delete(apiTarget);
+      await api.follows.delete(followTargetOf(target.actorId, apiTarget));
       patch({ followStatus: "not_following" });
     } catch (e) {
       showError(getErrorMessage(e));

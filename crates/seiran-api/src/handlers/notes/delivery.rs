@@ -735,6 +735,19 @@ pub struct ReplyContext {
 }
 
 impl ReplyContext {
+    /// リプライではない投稿（配送先の制約無し）。
+    pub fn top_level() -> Self {
+        Self {
+            deliver_fedi_allowed: true,
+            deliver_bsky_allowed: true,
+            bsky_reply: None,
+            ap_in_reply_to: None,
+            parent_visibility: None,
+            parent_thread_root_post_id: None,
+            parent_local_actor_id: None,
+        }
+    }
+
     /// リプライ先の可視性制約を踏まえて、リクエストされた visibility を確定する。
     /// - 親が`direct`（DMスレッド内の返信）: 常に`direct`を強制する（往復の途中で
     ///   他の可視性へ離脱させない）。

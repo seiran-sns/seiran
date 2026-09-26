@@ -162,7 +162,7 @@ Bskyネットワーク側（AT Protocol）には非公開アカウントとい�
 
 `GET /users/:username`はブラウザ（Accept に`activity+json`/`ld+json`を含まないリクエスト）には`/@:username`へ302リダイレクトする。`/@handle`形式のプロフィールURL導入（#36）以前はこれが唯一のブラウザ向けプロフィールURLで、当時リモートに捕捉されたプロフィール記録が今も`/users/:username`をactor URLとして保持しているための互換対応（`docs/architecture.md` 8.2節）。`GET /.well-known/webfinger`も同じ理由で、`resource`が`acct:user@domain`形式に加えて`https://{domain}/users/{username}`形式でも同一のレスポンスを返す。
 
-`outbox`の各投稿は`posts.ap_object_id`が実際にpush配送された種別と一致するよう組み立てる: `repost_of_post_id`がある行は、元ポストが`ap_object_id`を持てば`Announce`（`id`=自身の`ap_object_id`、`object`=元ポストの`ap_object_id`、`cc`に元投稿者のactor URIも含める）、元ポストが`at_uri`のみ(Bskyネイティブ)ならFediフォールバックと同じ本文（「🔁 author: bsky.app URL」）を持つ`Create(Note)`として表現する。リポスト行の`body`列は常に空文字列のため、これを無視して素通しで`Create(Note)`化すると、push配送済みの`Announce`とは別のAP object idを持つ空の`Note`がリモートに重複出現する。
+`outbox`（総数・ページとも）と featured は認証なしの匿名アクセスのため、`followers_only`/`direct` の投稿を含めない（2026-09-26 まで outbox は可視性を見ずに全投稿を `to: Public` で並べていた）。添付の `Document` 化と公開 Note/Create の組み立ては `handlers::ap_collection` で共有する。`outbox`の各投稿は`posts.ap_object_id`が実際にpush配送された種別と一致するよう組み立てる: `repost_of_post_id`がある行は、元ポストが`ap_object_id`を持てば`Announce`（`id`=自身の`ap_object_id`、`object`=元ポストの`ap_object_id`、`cc`に元投稿者のactor URIも含める）、元ポストが`at_uri`のみ(Bskyネイティブ)ならFediフォールバックと同じ本文（「🔁 author: bsky.app URL」）を持つ`Create(Note)`として表現する。リポスト行の`body`列は常に空文字列のため、これを無視して素通しで`Create(Note)`化すると、push配送済みの`Announce`とは別のAP object idを持つ空の`Note`がリモートに重複出現する。
 
 `GET /nodeinfo/2.1`の`metadata.features`には`"emoji_reaction"`を含める。kmyblue（Mastodonフォーク）はカスタム絵文字リアクション対応の可否を、既知softwareリスト（Misskey系等）に載っていないインスタンスに対してはこのフィールドで判定するため（#167）。
 
@@ -775,7 +775,7 @@ Misskeyクライアント向けの`POST /api/notes/search`は、カスタムAPI�
 
 **`MisskeyUserDetailed`の関係フィールド（`isFollowing`等）**: `misskey_dart`の`UserDetailed.fromJson`はレスポンスJSONに`isFollowing`キーが存在するかどうかで`UserDetailedNotMe`（関係情報なし）/`UserDetailedNotMeWithRelations`（関係情報あり）のどちらにパースするかを判定する（キー自体の有無で分岐、値のnull/非nullではない）。seiranは閲覧者の`viewer_actor_id`が解決できる場合（ログイン済み、`/api/users/show`・`/api/users/following`・`/api/users/followers`）のみ`MisskeyUserRelations`（`types.rs`）を`Some`にし`#[serde(flatten)]`でJSON上にフラット展開する。`isFollowing`等8フィールドは`UserDetailedNotMeWithRelations`側で`required bool`のため、`Some`の場合は値がnullであってはならない（他のnon-nullable直接キャスト問題と同種）。`hasPendingFollowRequestToYou`は常に`false`（seiranはローカルアカウントの鍵アカウント機能自体を持たず、ローカルviewerへの受信フォローは常に即accepted）。`/api/i`用の`build_me_detailed`は本家`MeDetailed`に関係フィールドが存在しないため常に`viewer_actor_id: None`固定で呼ぶ。
 
-**`POST /api/following/create`・`delete`の委譲**: カスタムAPI（`handlers::follows::create_follow`/`delete_follow`）へ`userId`をそのまま`actorId`として委譲する（カスタムAPIは`target`文字列と`actorId`のどちらでも対象を指定できる）。以前はMisskey側で actorId → 人間可読な文字列へ逆算してから渡していた。
+**`POST /api/following/create`・`delete`の委譲**: カスタムAPI（`handlers::follows::create_follow`/`delete_follow`）へ`userId`をそのまま`actorId`として委譲する（カスタムAPIは`target`文字列と`actorId`のどちらでも対象を指定できる）。`actorId` 指定時の宛先は `ap_uri` を `at_did` より優先する（両方を持つリモート seiran アクターではフロントエンドのプロフィール画面と同じく AP フォローで成立させ、ATP フォローは相手サーバー側の相互処理に任せる。以前は `at_did` を優先しており、Misskey クライアントからのフォローが ATP のみで成立していた）。フロントエンドも actor 行を持つ画面（対ユーザー操作メニュー・フォローボタンのホバー切替）からは `actorId` で呼ぶ（`api/follows.ts` の `followTargetOf`）。以前はMisskey側で actorId → 人間可読な文字列へ逆算してから渡していた。
 
 **`POST /api/following/create`・`delete`のレスポンス形状**: 本家Misskeyはこれらを`204 No Content`ではなく対象ユーザーの`UserLite`で応答する仕様（`misskey_dart`の`MisskeyFollowing.create`/`delete`は`post<Map<String, dynamic>>`で戻り値を直接キャストする）。`204`のまま返すと空ボディがJSONデコードで文字列扱いになり、クライアント側で`type 'String' is not a subtype of type 'FutureOr<Map<String, dynamic>>'`という未処理例外になる（実機確認済み、Aria）。`following_create`/`following_delete`（`handlers::misskey::endpoints`）は成功時、共通ヘルパー`misskey_user_lite_response`で`build_user_detailed(state, actor, None).lite`を`Json`で返す（`viewer_actor_id: None`固定＝`isFollowing`等の関係フィールドは含めない、本家`UserLite`にも存在しないため）。`following/invalidate`・`update`は未実装。
 
@@ -872,6 +872,7 @@ Bsky受信ではJetstreamの `app.bsky.feed.repost` を購読し、`subject.uri`
 
 ### 宛先・スレッド・タイムライン除外
 - 宛先は`post_recipients`（post_id/actor_id）に持つ。投稿作成API（`POST /api/notes/create`、Misskey互換では`visibleUserIds`も同じ意味で受け付ける）が`visibility=direct`のとき`recipient_actor_ids`必須。
+- `handlers::dm::sessions`・`thread_messages` のノート組み立ては通常投稿と同じ `notes::queries::build_note_responses`（リアクション・引用/リポスト埋め込み・投票状態・関係フラグ）を使い、`thread_messages` はその上に Bsky 側リアクション（`dm_bsky_reactions`）の合算と宛先一覧を載せる。以前は独自に組み立てており、引用の埋め込みが漏れて DM 内の引用カードが表示されなかった（2026-09-26 改善大会）。
 - `handlers::dm::thread_messages`（`GET /api/dm/sessions/:thread_root_id/messages`）は各メッセージの`NoteResponse.recipients`にそのメッセージ自身の宛先一覧（`NoteRecipientInfo`、`DmPeerResponse`と同形）を付与する。宛先はメッセージ単位で異なりうる（スレッド全体の参加者一覧ではない）ため、フロントの「宛先:」表示（3人以上参加のスレッドのみ、`docs/ui_spec.md` 2.5節）はこれを使う。
 - スレッド起点（`posts.thread_root_post_id`）は再帰クエリではなく伝播コピー方式。新規direct投稿作成時、親（`reply_to_post_id`）が`direct`ならその`thread_root_post_id`をそのままコピーし、親が`direct`でなければ自分自身のIDを設定する。
 - 各タイムライン系クエリ（`home_timeline`/`local_timeline`/`timeline_by_actor`等）の`direct`閲覧制御は「投稿者本人 or `post_recipients`の宛先」のみ（`followers_only`とは異なりフォロワーには見せない）。`exclude_direct`クエリパラメータ（Misskey互換のためデフォルト`false`）を付けると宛先者でも一切表示しない。seiranフロントエンドは常にこれを付与する。`followers_only`/`direct`両方の判定はSQL関数`post_is_visible_to`に集約されている（`docs/database.md`参照）。

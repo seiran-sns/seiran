@@ -27,14 +27,17 @@ pub type CreateFollowRequest = FollowTargetRequest;
 pub type DeleteFollowRequest = FollowTargetRequest;
 
 /// 既存のアクター行から、`execute_follow`が受け付ける人間可読なターゲット文字列
-/// （ローカルusername / DID / AP URI）を組み立てる。
+/// （ローカルusername / AP URI / DID）を組み立てる。AP URI を DID より優先する
+/// （frontend のプロフィール画面と同じ順）。相互申告済みの seiran アクター（`remote_seiran`）は
+/// AP 経由のフォローが ATP follow のコミットも兼ねるため（#238）、DID を優先すると ATP 側しか
+/// フォローが成立しない（以前の Misskey `following/create` の不具合）。
 fn target_for_actor(actor: &Actor) -> String {
     if actor.actor_type == "local" {
         actor.username.clone()
-    } else if let Some(did) = &actor.at_did {
-        did.clone()
     } else if let Some(uri) = &actor.ap_uri {
         uri.clone()
+    } else if let Some(did) = &actor.at_did {
+        did.clone()
     } else {
         format!("{}@{}", actor.username, actor.domain)
     }

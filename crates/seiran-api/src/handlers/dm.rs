@@ -16,12 +16,8 @@ use crate::error::ApiError;
 use crate::middleware::AuthedUser;
 use crate::AppState;
 
-use super::notes::dto::{to_note_response, NoteRecipientInfo, NoteResponse, TimelineQuery};
-use super::notes::{
-    attach_remote_instance_info, enqueue_stale_poll_fetches, fetch_attachments_map,
-    fetch_dm_bsky_reactions_map, fetch_link_cards_map, fetch_reactions_map,
-    resolve_mention_facets_in_place,
-};
+use super::notes::dto::{NoteRecipientInfo, NoteResponse, TimelineQuery};
+use super::notes::{build_note_responses, fetch_dm_bsky_reactions_map};
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -111,31 +107,13 @@ pub async fn sessions(
 
     // 最終メッセージ本体をNoteResponse形式で組み立てる（既存のタイムライン変換と共通の経路）。
     let last_post_ids: Vec<i64> = summaries.iter().map(|s| s.last_post_id).collect();
-    let mut last_posts = match state.posts.find_by_ids(&last_post_ids).await {
+    let last_posts = match state.posts.find_by_ids(&last_post_ids).await {
         Ok(rows) => rows,
         Err(e) => {
             return ApiError::Internal(format!("最終メッセージ取得失敗: {}", e)).into_response()
         }
     };
-    resolve_mention_facets_in_place(&state.db, &mut last_posts).await;
-    let mut att_map = fetch_attachments_map(&state.db, &last_post_ids).await;
-    let mut lc_map = fetch_link_cards_map(&state.db, &last_post_ids).await;
-    let rmap = fetch_reactions_map(&state.db, &last_post_ids, Some(actor_id)).await;
-    let mut last_post_list: Vec<NoteResponse> = last_posts
-        .into_iter()
-        .map(|p| {
-            let id = p.id;
-            let mut nr = to_note_response(
-                p,
-                att_map.remove(&id).unwrap_or_default(),
-                lc_map.remove(&id).unwrap_or_default(),
-            );
-            nr.reactions = rmap.get(&id).cloned().unwrap_or_default();
-            nr
-        })
-        .collect();
-    attach_remote_instance_info(&state, &mut last_post_list).await;
-    enqueue_stale_poll_fetches(&state, &last_post_list).await;
+    let last_post_list = build_note_responses(&state, last_posts, Some(actor_id)).await;
     let mut last_post_by_id: HashMap<i64, NoteResponse> = last_post_list
         .into_iter()
         .filter_map(|nr| nr.id.parse::<i64>().ok().map(|id| (id, nr)))
@@ -239,7 +217,7 @@ pub async fn thread_messages(
     let until_id: Option<i64> = q.until_id.as_deref().and_then(|s| s.parse().ok());
     let since_id: Option<i64> = q.since_id.as_deref().and_then(|s| s.parse().ok());
 
-    let mut rows = match state
+    let rows = match state
         .dm
         .thread_messages(thread_root_id, actor_id, limit, until_id, since_id)
         .await
@@ -249,34 +227,24 @@ pub async fn thread_messages(
             return ApiError::Internal(format!("メッセージ履歴取得失敗: {}", e)).into_response()
         }
     };
-    resolve_mention_facets_in_place(&state.db, &mut rows).await;
+    // 表示用の組み立ては他の画面と共通（`build_note_responses`、引用元の埋め込み・投票状態等）。
+    // DM固有の情報として、bsky宛DMメッセージのリアクション（通常の`reactions`テーブルとは
+    // 別の`dm_bsky_reactions`、`docs/protocols.md` 9節）と宛先一覧を上乗せする。1メッセージが
+    // 両方のテーブルに同時にリアクションを持つことは通常無いが、念のため両方を連結する。
     let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
-    let mut att_map = fetch_attachments_map(&state.db, &ids).await;
-    let mut lc_map = fetch_link_cards_map(&state.db, &ids).await;
-    let rmap = fetch_reactions_map(&state.db, &ids, Some(actor_id)).await;
-    // bsky宛DMメッセージのリアクションは通常の`reactions`テーブルとは別の
-    // `dm_bsky_reactions`に持つ（`docs/protocols.md` 9節）。1メッセージが両方に
-    // 同時にリアクションを持つことは通常無いが、念のため両方の結果を連結する。
-    let bsky_rmap = fetch_dm_bsky_reactions_map(&state.db, &ids, Some(actor_id)).await;
-    let mut recipients_by_post = fetch_message_recipients_map(&state, &ids).await;
-    let mut notes: Vec<NoteResponse> = rows
-        .into_iter()
-        .map(|p| {
-            let id = p.id;
-            let mut nr = to_note_response(
-                p,
-                att_map.remove(&id).unwrap_or_default(),
-                lc_map.remove(&id).unwrap_or_default(),
-            );
-            let mut reactions = rmap.get(&id).cloned().unwrap_or_default();
-            reactions.extend(bsky_rmap.get(&id).cloned().unwrap_or_default());
-            nr.reactions = reactions;
-            nr.recipients = recipients_by_post.remove(&id);
-            nr
-        })
-        .collect();
-    attach_remote_instance_info(&state, &mut notes).await;
-    enqueue_stale_poll_fetches(&state, &notes).await;
+    let (bsky_rmap, mut recipients_by_post) = tokio::join!(
+        fetch_dm_bsky_reactions_map(&state.db, &ids, Some(actor_id)),
+        fetch_message_recipients_map(&state, &ids),
+    );
+    let mut notes = build_note_responses(&state, rows, Some(actor_id)).await;
+    for nr in notes.iter_mut() {
+        let Ok(id) = nr.id.parse::<i64>() else {
+            continue;
+        };
+        nr.reactions
+            .extend(bsky_rmap.get(&id).cloned().unwrap_or_default());
+        nr.recipients = recipients_by_post.remove(&id);
+    }
     Json(notes).into_response()
 }
 
