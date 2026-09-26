@@ -22,6 +22,10 @@ frontend/src/generated/emoji-annotations/
 # この環境固有のローカル運用メモ（コミットしない）
 OPERATIONS.local.md
 
+# AIコーディングエージェントのローカル設定・状態（利用者ごとの環境に依存するためコミットしない）
+.claude/
+.tokensave
+
 # エディタ・OS メタデータ
 .DS_Store
 .idea/
