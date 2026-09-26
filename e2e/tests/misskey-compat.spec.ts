@@ -3,7 +3,7 @@ import { loginViaApi, registerUserViaApi } from "../fixtures/api-helpers";
 import { startStubS3Server } from "../fixtures/stub-s3-server";
 
 const ADMIN_USERNAME = "e2ebootstrap";
-const ADMIN_PASSWORD = "seiranda-e2e";
+const ADMIN_PASSWORD = "seiranda-e2e-admin-bootstrap";
 
 test("Misskey互換API: endpointsでemojisを検出して絵文字一覧を取得できる（#145）", async ({
   request,

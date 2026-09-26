@@ -5,7 +5,7 @@ import { startStubS3Server } from "../fixtures/stub-s3-server";
 import { BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 
 const ADMIN_USERNAME = "e2ebootstrap";
-const ADMIN_PASSWORD = "seiranda-e2e";
+const ADMIN_PASSWORD = "seiranda-e2e-admin-bootstrap";
 const MINIMAL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
   "base64",

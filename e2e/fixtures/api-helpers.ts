@@ -99,8 +99,10 @@ export async function seedAuth(page: Page, token: string): Promise<void> {
 }
 
 // global-setup.ts が作成する初期管理者アカウント（role=admin）。
+// パスワードは`registerUserViaApi`の全テスト共通パスワードとは別の値（global-setup.ts
+// 側のコメント参照、ログインブルートフォース判定カウンターの汚染を避けるため）。
 export const ADMIN_USERNAME = "e2ebootstrap";
-export const ADMIN_PASSWORD = "seiranda-e2e";
+export const ADMIN_PASSWORD = "seiranda-e2e-admin-bootstrap";
 
 /**
  * 管理画面のサイト設定をAPI経由で更新する（レート制限系E2Eで閾値を一時的に下げるため）。

@@ -21,7 +21,12 @@ export default async function globalSetup() {
     body: JSON.stringify({
       username: "e2ebootstrap",
       email: "e2ebootstrap@example.com",
-      password: "seiranda-e2e",
+      // `registerUserViaApi`の全テスト共通パスワード（"seiranda-e2e"）とは別の値にする。
+      // ログインブルートフォース判定の「同一パスワードへの異なるユーザー名試行数」
+      // カウンター（`variants_by_secret`、`crates/seiran-api/src/rate_limit.rs`）は
+      // ログイン成功時にもリセットされないため、共通パスワードを使う大量の一般ユーザー
+      // ログイン試行に紛れてadmin自身のログインまで拒否される事故があった（実機確認）。
+      password: "seiranda-e2e-admin-bootstrap",
     }),
   });
   if (!res.ok && res.status !== 409) {

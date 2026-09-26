@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { loginViaApi, registerUserViaApi } from "../fixtures/api-helpers";
 
 const ADMIN_USERNAME = "e2ebootstrap";
-const ADMIN_PASSWORD = "seiranda-e2e";
+const ADMIN_PASSWORD = "seiranda-e2e-admin-bootstrap";
 
 test("投稿通報を作成し、管理者が内部コメントとクローズを行える", async ({ request }) => {
   const reporter = await registerUserViaApi(request, "e2ereporter");

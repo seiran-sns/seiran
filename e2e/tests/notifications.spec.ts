@@ -11,7 +11,7 @@ test.use({ viewport: { width: 1600, height: 900 } });
 
 // global-setup.ts が作成する初期管理者アカウント（role=admin）。
 const ADMIN_USERNAME = "e2ebootstrap";
-const ADMIN_PASSWORD = "seiranda-e2e";
+const ADMIN_PASSWORD = "seiranda-e2e-admin-bootstrap";
 
 // 1x1の最小有効PNG（絵文字アップロードは`prepare_image`で実デコードするためダミーバイト列では通らない）。
 const MINIMAL_PNG = Buffer.from(

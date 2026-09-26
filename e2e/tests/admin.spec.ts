@@ -5,7 +5,7 @@ import { BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 
 // global-setup.ts が作成する初期管理者アカウント（role=admin）。
 const ADMIN_USERNAME = "e2ebootstrap";
-const ADMIN_PASSWORD = "seiranda-e2e";
+const ADMIN_PASSWORD = "seiranda-e2e-admin-bootstrap";
 
 test("管理者以外が/adminにアクセスするとホームへリダイレクトされる", async ({ page, request }) => {
   const user = await registerUserViaApi(request, "e2eadminguard");
