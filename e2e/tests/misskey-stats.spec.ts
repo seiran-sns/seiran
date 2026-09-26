@@ -1,10 +1,13 @@
 import { test, expect } from "@playwright/test";
-import { registerUserViaApi } from "../fixtures/api-helpers";
+import { registerUserWithPasswordViaApi } from "../fixtures/api-helpers";
 
 // stats（notesCount/usersCount等）はグローバル集計のため、他specと並行実行される
 // storage-serialプロジェクト内に置くとbefore/after差分に他specの登録・投稿が
 // 混入してflakyになる（実機確認）。全spec完了後の排他テール（globals-serial）
 // でのみ安全に検証できるため、misskey-compat.spec.tsから分離した。
+// globals-serialにはrate-limit.spec.tsも同居するため、`registerUserViaApi`の
+// 全テスト共通固定パスワードは使わずユニークパスワードでログイン試行カウンターの
+// 汚染を避ける（`registerUserWithPasswordViaApi`のドキュメントコメント参照）。
 
 test("Misskey互換API: statsのnotesCount/usersCountが退会済みユーザー・削除済みポスト・リモートポストを除外したローカル実数を返す（#251）", async ({
   request,
@@ -31,7 +34,7 @@ test("Misskey互換API: statsのnotesCount/usersCountが退会済みユーザー
   expect(before.driveUsageLocal).toBe(0);
   expect(before.driveUsageRemote).toBe(0);
 
-  const alice = await registerUserViaApi(request, "e2emkstatsa");
+  const alice = await registerUserWithPasswordViaApi(request, "e2emkstatsa", "e2emkstats-unique-pw");
   const createRes = await request.post("/api/notes/create", {
     headers: { Authorization: `Bearer ${alice.token}` },
     data: { text: `stats集計テスト ${Date.now()}` },
