@@ -33,6 +33,20 @@ export interface ReactionUpdate {
 
 type ReactionListener = (u: ReactionUpdate) => void;
 
+/** bio/profile_fields中のURL解決完了（`Job::LinkResolve`）1件（#リンク解決）。 */
+export interface LinkResolvedInfo {
+  url: string;
+  kind: "actor" | "post";
+  username?: string;
+  domain?: string;
+  actorType?: string;
+  actorId?: string;
+  avatarUrl?: string;
+  postId?: string;
+}
+
+type LinkResolvedListener = (info: LinkResolvedInfo) => void;
+
 /**
  * 通知系イベント（reaction/follow/followAccepted）が届いたことのみを知らせるリスナー。
  * ペイロードは使わない。通知の永続化（`POST /api/i/notifications`）に一本化したため、
@@ -56,6 +70,9 @@ interface StreamingValue {
   registerReaction: (noteId: string, cb: ReactionListener) => () => void;
   /** 通知の新着シグナルを購読する（NotificationsPanel が使用）。戻り値で解除。 */
   registerNotifArrived: (cb: NotifListener) => () => void;
+  /** bio/profile_fields内リンクの非同期解決完了を購読する（ProfilePageが使用）。戻り値で解除。
+   * ログイン中クライアント全員へ無条件配信されるため、呼び出し側で対象URLかを判定すること。 */
+  registerLinkResolved: (cb: LinkResolvedListener) => () => void;
   /** DM新着（visibility="direct"のnoteイベント）を購読する（MessagesPageが使用）。戻り値で解除。 */
   registerDirectMessage: (cb: NoteListener) => () => void;
   /** 未読のあるDMセッション数（左ペインバッジ用）。 */
@@ -75,6 +92,7 @@ const StreamingContext = createContext<StreamingValue>({
   subscribeChannel: () => () => {},
   registerReaction: () => () => {},
   registerNotifArrived: () => () => {},
+  registerLinkResolved: () => () => {},
   registerDirectMessage: () => () => {},
   dmUnreadCount: 0,
   refreshDmUnreadCount: () => {},
@@ -102,6 +120,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const [followRequestCount, setFollowRequestCount] = useState(0);
   const reactionListeners = useRef<Map<string, Set<ReactionListener>>>(new Map());
   const notifListeners = useRef<Set<NotifListener>>(new Set());
+  const linkResolvedListeners = useRef<Set<LinkResolvedListener>>(new Set());
   const dmListeners = useRef<Set<NoteListener>>(new Set());
   /** subscription id -> {spec, onNote, onResync}。再接続時の`connect`再送、`channel`イベントの配り先に使う。 */
   const channelSubs = useRef<Map<string, { spec: ChannelSpec; onNote: NoteListener; onResync?: ResyncListener }>>(
@@ -166,6 +185,9 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         // registerReaction と違い NoteCard 側の useState ではなくグローバルストアなため）。
         const update = body as { postId: string; poll: NonNullable<Note["poll"]> };
         updatePollResults(update.postId, update.poll);
+      } else if (type === "linkResolved") {
+        const info = body as LinkResolvedInfo;
+        linkResolvedListeners.current.forEach((cb) => cb(info));
       } else if (NOTIF_KINDS.has(type)) {
         setUnread((u) => u + 1);
         notifListeners.current.forEach((cb) => cb());
@@ -234,6 +256,13 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const registerLinkResolved = useCallback((cb: LinkResolvedListener) => {
+    linkResolvedListeners.current.add(cb);
+    return () => {
+      linkResolvedListeners.current.delete(cb);
+    };
+  }, []);
+
   const registerDirectMessage = useCallback((cb: NoteListener) => {
     dmListeners.current.add(cb);
     return () => {
@@ -251,6 +280,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         subscribeChannel,
         registerReaction,
         registerNotifArrived,
+        registerLinkResolved,
         registerDirectMessage,
         dmUnreadCount,
         refreshDmUnreadCount,

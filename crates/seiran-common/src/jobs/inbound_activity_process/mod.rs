@@ -53,7 +53,9 @@ mod relay;
 mod undo;
 mod update;
 
-pub use content::{ap_content_to_markdown_body, sanitize_ap_content_html, strip_html};
+pub use content::{
+    ap_content_to_markdown_body, sanitize_ap_content_html, sanitize_html_allowlist, strip_html,
+};
 /// `jobs::poll_fetch`（リモートアンケート生存監視フォールバック）が、Update(Question)受理と
 /// 同じAP Question正規化ロジックを再利用するための再エクスポート。
 pub(crate) use note_input::normalize_ap_poll;
@@ -237,8 +239,9 @@ async fn upsert_remote_fedi_actor(
     let display_name = remote_ap.name.clone().unwrap_or_else(|| username.clone());
     let domain = actor_uri.split('/').nth(2).unwrap_or("").to_string();
     let avatar_url = remote_ap.avatar_url();
-    // 自己紹介文（AP Person の summary は HTML のため strip_html でプレーンテキスト化する）。
-    let bio = remote_ap.summary.as_deref().map(strip_html);
+    // 自己紹介文（AP Person の summary は HTML のため、投稿本文と同じallowlistでサニタイズし
+    // HTMLのまま保持する。プレーンテキスト化はフロント側の表示分岐で行わない）。
+    let bio = remote_ap.summary.as_deref().map(sanitize_html_allowlist);
     // 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Person の tag 配列由来）。
     let emoji_map = remote_ap.emoji_map();
     record_remote_emojis(inbox, &domain, &remote_ap.tag).await;

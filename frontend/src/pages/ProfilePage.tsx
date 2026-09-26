@@ -14,6 +14,7 @@ import Tabs from "../components/common/Tabs";
 import AppShell from "../components/layout/AppShell";
 import EmojiText from "../components/note/EmojiText";
 import NoteCard from "../components/note/NoteCard";
+import RichHtml from "../components/note/RichHtml";
 import ProfileFeedList from "../components/note/ProfileFeedList";
 import FollowListPanel from "../components/right/FollowListPanel";
 import { useAuth } from "../contexts/AuthContext";
@@ -23,6 +24,9 @@ import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { useUserRelationshipMenu } from "../hooks/useUserRelationshipMenu";
 import { profilePath, profileQuery, remoteProfileUrl, remoteServerBadgeInfo } from "../lib/format";
 import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
+import { toProfileHtml } from "../lib/profileHtml";
+import { useStreamingContext } from "../contexts/StreamingContext";
+import { ResolvedLinkInfo } from "../api/types";
 import { setRelationship } from "../stores/userRelationshipStore";
 import { mediaUrl } from "../utils/mediaProxy";
 import panel from "../components/common/Panel.module.css";
@@ -42,6 +46,10 @@ export default function ProfilePage() {
   const q = acct ? acct.replace(/^@/, "") : (searchParams.get("q") ?? "");
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  // bio/profile_fields内リンクの解決結果（#リンク解決）。key=URL文字列。初期値はAPIレスポンス
+  // 同梱分、非同期解決の完了は`linkResolved`のWebSocket通知で追記される。
+  const [resolvedLinks, setResolvedLinks] = useState<Record<string, ResolvedLinkInfo>>({});
+  const { registerLinkResolved } = useStreamingContext();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
@@ -115,6 +123,7 @@ export default function ProfilePage() {
       .then((p) => {
         if (cancelled) return;
         setProfile(p);
+        setResolvedLinks(p.link_resolutions ?? {});
         setRelationship(profileQuery(p.username, p.domain), {
           followStatus: p.follow_status,
           isMuted: p.is_muted,
@@ -160,6 +169,26 @@ export default function ProfilePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
+  // bio/profile_fields内リンクの非同期解決完了通知（ログイン中クライアント全員へ配信される
+  // ブロードキャストのため、URLでのフィルタはせず単純にマージする。表示中のbio/profile_fields
+  // に含まれないURLの通知が来ても、該当する`href`が無いため`RichHtml`側で素通りするだけ）。
+  useEffect(() => {
+    return registerLinkResolved((info) => {
+      setResolvedLinks((prev) => ({
+        ...prev,
+        [info.url]: {
+          kind: info.kind,
+          username: info.username,
+          domain: info.domain,
+          actor_type: info.actorType,
+          actor_id: info.actorId,
+          avatar_url: info.avatarUrl,
+          post_id: info.postId,
+        },
+      }));
+    });
+  }, [registerLinkResolved]);
+
   const { user } = useAuth();
 
   const isLocal = profile?.actor_type === "local";
@@ -193,6 +222,7 @@ export default function ProfilePage() {
     try {
       const p = await api.users.profile(q);
       setProfile(p);
+      setResolvedLinks(p.link_resolutions ?? {});
       // ブロックはフォロー関係の強制解除を伴う副作用があるため、menuのpatch（操作対象の
       // フィールドのみの更新）では追従できない。サーバーの最新値で関係全体を上書きする。
       setRelationship(profileQuery(p.username, p.domain), {
@@ -413,7 +443,11 @@ export default function ProfilePage() {
 
           {profile.bio && (
             <p className={styles.bio}>
-              <EmojiText text={profile.bio} emojis={profile.emojis} />
+              <RichHtml
+                html={toProfileHtml(profile.bio, profile.actor_type)}
+                emojis={profile.emojis}
+                resolvedLinks={resolvedLinks}
+              />
             </p>
           )}
 
@@ -422,20 +456,16 @@ export default function ProfilePage() {
             <div className={styles.identity}>
               {profile.profile_fields.map((field, i) => (
                 <div className={styles.idRow} key={i}>
-                  <span className={styles.idLabel}>{field.name}</span>
-                  {field.value.startsWith("http://") ||
-                  field.value.startsWith("https://") ? (
-                    <a
-                      className={styles.idValue}
-                      href={field.value}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {field.value}
-                    </a>
-                  ) : (
-                    <span className={styles.idValue}>{field.value}</span>
-                  )}
+                  <span className={styles.idLabel}>
+                    <EmojiText text={field.name} emojis={profile.emojis} />
+                  </span>
+                  <span className={styles.idValue}>
+                    <RichHtml
+                      html={toProfileHtml(field.value, profile.actor_type)}
+                      emojis={profile.emojis}
+                      resolvedLinks={resolvedLinks}
+                    />
+                  </span>
                 </div>
               ))}
             </div>

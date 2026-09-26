@@ -23,6 +23,7 @@ pub mod follow_import;
 pub mod follow_requests_bulk_accept;
 pub mod inbound_activity_process;
 pub mod link_card_embed_resolve;
+pub mod link_resolve;
 pub mod ogp_fetch;
 pub mod poll_fetch;
 pub mod post_merge_cleanup;

@@ -18,7 +18,6 @@ use crate::atp::fetch_bsky_profile;
 use crate::follow_target::{classify_follow_target, FollowTargetKind};
 use crate::generate_snowflake_id;
 use crate::jetstream_control::touch_jetstream_wanted_dids;
-use crate::jobs::inbound_activity_process::strip_html;
 use crate::queue::worker::{priority, FollowExecConfig};
 use crate::repository::NotificationKind;
 use crate::traits::{Job, JobQueue};
@@ -484,7 +483,10 @@ async fn follow_fedi(
         .clone()
         .unwrap_or_else(|| remote_username.clone());
     let remote_domain = target_uri.split('/').nth(2).unwrap_or("").to_string();
-    let remote_bio = remote_ap.summary.as_deref().map(strip_html);
+    let remote_bio = remote_ap
+        .summary
+        .as_deref()
+        .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist);
     let remote_emoji_map = remote_ap.emoji_map();
     let remote_profile_fields = remote_ap.profile_fields_json();
 

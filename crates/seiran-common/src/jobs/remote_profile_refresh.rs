@@ -97,7 +97,7 @@ async fn refresh_fedi(
     let bio = ap_actor
         .summary
         .as_deref()
-        .map(crate::jobs::inbound_activity_process::strip_html);
+        .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist);
     let emoji_map = ap_actor.emoji_map();
     let profile_fields = ap_actor.profile_fields_json();
 

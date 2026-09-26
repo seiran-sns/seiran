@@ -101,12 +101,16 @@ pub struct ChannelBroadcast {
 /// ストリーミングイベント。`recipients` に含まれるローカルアクターのみが受信する
 /// （通知・DM・`noteUpdated`用、既存方式）。`channel` は公開系タイムラインチャンネル向け
 /// （新方式、`recipients`とは独立に各コネクションが購読チャンネルで自己判定する）。
+/// `broadcast_all` はどちらでもなく、ログイン中の全接続へ無条件配信する第三の方式
+/// （`recipients`のように宛先を事前に列挙できない・`channel`のように購読を要求するほどでは
+/// ない低頻度イベント向け、例: bio内リンクの非同期解決完了通知）。
 #[derive(Clone)]
 pub struct StreamEvent {
     pub recipients: Arc<HashSet<i64>>,
     /// クライアントへ送る JSON テキスト（例: `{"type":"note","body":{...}}`）。
     pub payload: Arc<String>,
     pub channel: Option<ChannelBroadcast>,
+    pub broadcast_all: bool,
 }
 
 /// プロセス内共有のブロードキャストハブ。
@@ -145,6 +149,20 @@ impl StreamHub {
             recipients: Arc::new(recipients),
             payload: Arc::new(payload),
             channel: None,
+            broadcast_all: false,
+        });
+    }
+
+    /// ログイン中の全接続へ無条件配信する（購読不要）。「誰が見ているか」を追跡するコストに
+    /// 見合わない低頻度イベント向け（bio/profile_fields中のURL解決完了通知等）。
+    /// `{"type":<kind>,"body":<body>}` として配信する。
+    pub fn publish_broadcast(&self, kind: &str, body: serde_json::Value) {
+        let payload = serde_json::json!({ "type": kind, "body": body }).to_string();
+        self.publish(StreamEvent {
+            recipients: Arc::new(HashSet::new()),
+            payload: Arc::new(payload),
+            channel: None,
+            broadcast_all: true,
         });
     }
 
@@ -163,6 +181,7 @@ impl StreamHub {
                 scope: Arc::new(scope),
                 note_json: Arc::new(note_json),
             }),
+            broadcast_all: false,
         });
     }
 }

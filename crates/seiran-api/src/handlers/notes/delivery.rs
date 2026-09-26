@@ -83,10 +83,7 @@ async fn build_external_post_embed(
         meta.username,
         meta.domain
     );
-    let thumb_url = meta
-        .first_image_url
-        .as_deref()
-        .or(meta.avatar_url.as_deref());
+    let thumb_url = meta.first_image_url.as_deref();
     let thumb = prepare_external_thumb(state, actor_id, thumb_url).await;
     Some(BskyEmbed::External {
         url: url.clone(),
@@ -688,7 +685,7 @@ pub async fn deliver_repost(
                 meta.domain
             );
             let description = meta.body.clone();
-            let thumb_url = meta.first_image_url.clone().or(meta.avatar_url.clone());
+            let thumb_url = meta.first_image_url.clone();
             let state = state.clone();
             let atp = Arc::clone(&state.atp_service);
             tokio::spawn(async move {

@@ -82,7 +82,7 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, state: AppState) {
         tokio::select! {
             recv = rx.recv() => match recv {
                 Ok(ev) => {
-                    if ev.recipients.contains(&actor_id)
+                    if (ev.broadcast_all || ev.recipients.contains(&actor_id))
                         && socket.send(Message::Text((*ev.payload).clone())).await.is_err()
                     {
                         break;

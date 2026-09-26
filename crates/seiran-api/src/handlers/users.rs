@@ -390,6 +390,32 @@ pub struct ProfileResponse {
     /// プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。現状ローカル
     /// ユーザーのみ対応（`public_lists`と同様、リモートは将来課題）。
     pub also_known_as: Vec<crate::handlers::also_known_as::AlsoKnownAsItem>,
+    /// bio/profile_fields中のURLの解決結果（#リンク解決）。key=URL文字列。未キャッシュの
+    /// URLはここに含まれず、フロントは通常の外部リンクとして表示した上でWebSocketの
+    /// `linkResolved`通知を待つ（`useStreaming`/`StreamingContext`経由）。
+    #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub link_resolutions: std::collections::HashMap<String, ResolvedLinkInfo>,
+}
+
+/// bio/profile_fields中のURLがFedi/Bskyの実在ユーザー・投稿だと判明した場合の解決結果
+/// （`link_resolutions`テーブルの陽性行、または`Job::LinkResolve`完了時のWS通知ペイロードと
+/// 同じ形）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedLinkInfo {
+    /// `"actor"` | `"post"`。
+    pub kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -504,6 +530,7 @@ async fn fetch_bsky_profile_from_appview(
         birthday: None,
         birthday_public: None,
         also_known_as: vec![],
+        link_resolutions: std::collections::HashMap::new(),
     })
     .into_response()
 }
@@ -980,6 +1007,97 @@ async fn build_profile_response_inner(
         (actor.bio, profile_fields)
     };
 
+    // bio/profile_fields中のURL・メンション記法（`@user@host`/`@handle.bsky.social`）の
+    // 解決結果（#リンク解決）。陽性/陰性ともキャッシュ済みのDB行を引き、未キャッシュ・TTL
+    // 経過済み陰性は非同期ジョブをenqueueする。WebFinger自体は`acct:`形式にしか使えないため、
+    // 実際の判定はActivityPubのContent-Negotiation直接フェッチ／Bsky AppView経由で行う
+    // （`seiran_common::jobs::link_resolve`参照）。
+    let link_resolutions: std::collections::HashMap<String, ResolvedLinkInfo> = {
+        let mut urls =
+            seiran_common::link_target::extract_link_targets(bio.as_deref().unwrap_or(""));
+        for field in &profile_fields {
+            urls.extend(seiran_common::link_target::extract_link_targets(&field.value));
+        }
+        urls.sort();
+        urls.dedup();
+
+        let mut resolved = std::collections::HashMap::new();
+        if !urls.is_empty() {
+            match state.link_resolutions.find_by_urls(&urls).await {
+                Ok(rows) => {
+                    let cached: std::collections::HashMap<_, _> =
+                        rows.into_iter().map(|r| (r.url.clone(), r)).collect();
+                    let negative_ttl = chrono::Duration::hours(48);
+                    let now = chrono::Utc::now();
+                    for url in &urls {
+                        match cached.get(url) {
+                            Some(row) if row.kind == "actor" => {
+                                if let Some(actor_id) = row.resolved_actor_id {
+                                    if let Ok(Some(resolved_actor)) =
+                                        state.actors.find_by_id(actor_id).await
+                                    {
+                                        let avatar_url = state
+                                            .actors
+                                            .find_avatar_url(actor_id)
+                                            .await
+                                            .unwrap_or(None);
+                                        let avatar_url = seiran_common::avatar::resolve_avatar_url(
+                                            avatar_url,
+                                            &resolved_actor.actor_type,
+                                            &resolved_actor.domain,
+                                            actor_id,
+                                        );
+                                        resolved.insert(
+                                            url.clone(),
+                                            ResolvedLinkInfo {
+                                                kind: "actor",
+                                                username: Some(resolved_actor.username),
+                                                domain: Some(resolved_actor.domain),
+                                                actor_type: Some(resolved_actor.actor_type),
+                                                actor_id: Some(actor_id.to_string()),
+                                                avatar_url,
+                                                post_id: None,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                            Some(row) if row.kind == "post" => {
+                                if let Some(post_id) = row.resolved_post_id {
+                                    resolved.insert(
+                                        url.clone(),
+                                        ResolvedLinkInfo {
+                                            kind: "post",
+                                            username: None,
+                                            domain: None,
+                                            actor_type: None,
+                                            actor_id: None,
+                                            avatar_url: None,
+                                            post_id: Some(post_id.to_string()),
+                                        },
+                                    );
+                                }
+                            }
+                            Some(row) => {
+                                // 陰性（"none"）。TTL経過済みなら再調査。
+                                if now - row.checked_at > negative_ttl {
+                                    state.enqueue_link_resolve(url.clone()).await;
+                                }
+                            }
+                            None => {
+                                state.enqueue_link_resolve(url.clone()).await;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("[profile] link_resolutions取得失敗: {}", e);
+                }
+            }
+        }
+        resolved
+    };
+
     // 自己紹介文・表示名中のカスタム絵文字（#169, #186）。ローカルアクターは自己紹介文を
     // custom_emojis と都度照合して解決し（ノート本文の解決と同じ経路）、表示名の分は
     // `update_profile` が display_name 変更のたびに事前計算・保存した `actor.emoji_map`
@@ -987,10 +1105,16 @@ async fn build_profile_response_inner(
     // 自己紹介の両方のショートコードを含む）をそのまま使う。Bsky にはカスタム絵文字の
     // 概念が無いため常に空。
     let emojis: std::collections::HashMap<String, String> = if actor.actor_type == "local" {
-        let candidates = bio
+        let mut candidates = bio
             .as_deref()
             .map(extract_shortcode_candidates)
             .unwrap_or_default();
+        // プロフィールのキーバリュー項目（key/valueとも、#62）中のショートコードも対象に含める
+        // （#リンク解決の副次対応。bioにしか無いショートコードしか解決していなかった）。
+        for field in &profile_fields {
+            candidates.extend(extract_shortcode_candidates(&field.name));
+            candidates.extend(extract_shortcode_candidates(&field.value));
+        }
         let mut resolved: std::collections::HashMap<String, String> = if candidates.is_empty() {
             std::collections::HashMap::new()
         } else {
@@ -1103,6 +1227,7 @@ async fn build_profile_response_inner(
         birthday,
         birthday_public,
         also_known_as,
+        link_resolutions,
     })
     .into_response()
 }
@@ -1156,11 +1281,12 @@ async fn fetch_remote_profile(
         .unwrap_or_else(|| resolved_username.clone());
     let avatar_url = ap_actor.avatar_url();
     let banner_url = ap_actor.banner_url();
-    // 自己紹介文（AP Person の summary は HTML のため strip_html でプレーンテキスト化する）。
+    // 自己紹介文（AP Person の summary は HTML のため、投稿本文と同じallowlistでサニタイズし
+    // HTMLのまま保持する）。
     let bio = ap_actor
         .summary
         .as_deref()
-        .map(seiran_common::jobs::inbound_activity_process::strip_html);
+        .map(seiran_common::jobs::inbound_activity_process::sanitize_html_allowlist);
     let emoji_map = ap_actor.emoji_map();
     // プロフィールのキーバリュー項目（#62）。
     let profile_fields = ap_actor.profile_fields_json();
@@ -1238,6 +1364,7 @@ async fn fetch_remote_profile(
         birthday: None,
         birthday_public: None,
         also_known_as: vec![],
+        link_resolutions: std::collections::HashMap::new(),
     })
     .into_response()
 }

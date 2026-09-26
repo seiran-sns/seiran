@@ -717,7 +717,18 @@ pub fn sanitize_ap_content_html(
     sender_domain: &str,
 ) -> String {
     let rewritten = rewrite_mention_hashtag_hrefs(content_html, tags, sender_domain);
+    sanitize_html_allowlist(&rewritten)
+}
 
+/// allowlist（タグ・属性）でHTMLをサニタイズする（`ammonia`）。`sanitize_ap_content_html`から
+/// メンション/ハッシュタグの`<a href>`書き換え（`rewrite_mention_hashtag_hrefs`、Note特有の
+/// `tag`配列が前提）を除いた部分。Note以外（アクターのbio/profile_fields値等）で、メンション
+/// リンクの内部URL化を伴わずにHTML表示だけしたい場面で使う。
+///
+/// `class`はどのタグからも除去し、`style`は`text-align`のみ許可、`href`/`src`は`http`/`https`
+/// スキームのみ許可する。`rel`/`target`はここでは一切保持しない（信用できるのはこちらが強制
+/// する値だけであるべきなので、フロントのレンダラ側で固定値を付与する）。
+pub fn sanitize_html_allowlist(html: &str) -> String {
     let allowed_tags: HashSet<&str> = [
         "br",
         "p",
@@ -773,7 +784,7 @@ pub fn sanitize_ap_content_html(
                 Some(value.into())
             }
         })
-        .clean(&rewritten)
+        .clean(html)
         .to_string()
 }
 

@@ -197,16 +197,17 @@ impl ApActor {
         self.also_known_as.iter().any(|a| a == uri)
     }
 
-    /// `property_values()` を `MAX_PROFILE_FIELDS` 件までに切り詰め、`value` を `strip_html`
-    /// でプレーンテキスト化した上で `actors.profile_fields` へそのまま保存できる JSON 配列
-    /// （`[{"name": ..., "value": ...}, ...]`）を組み立てる（#62）。
+    /// `property_values()` を `MAX_PROFILE_FIELDS` 件までに切り詰め、`value` を投稿本文と同じ
+    /// allowlistでサニタイズ（HTMLのまま保持）した上で `actors.profile_fields` へそのまま
+    /// 保存できる JSON 配列（`[{"name": ..., "value": ...}, ...]`）を組み立てる（#62）。
     pub fn profile_fields_json(&self) -> serde_json::Value {
         serde_json::Value::Array(
             self.property_values()
                 .into_iter()
                 .filter_map(|(name, value)| {
-                    // strip_html 後に空になる値（アイコンのみのリンク等）は取り込まない。
-                    let value = crate::jobs::inbound_activity_process::strip_html(&value);
+                    // サニタイズ後に空文字列になる値は取り込まない。
+                    let value =
+                        crate::jobs::inbound_activity_process::sanitize_html_allowlist(&value);
                     if value.trim().is_empty() {
                         None
                     } else {

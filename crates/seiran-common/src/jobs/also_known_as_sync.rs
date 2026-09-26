@@ -186,7 +186,7 @@ async fn resolve_also_known_as_uri(
         let bio = remote_ap
             .summary
             .as_deref()
-            .map(crate::jobs::inbound_activity_process::strip_html);
+            .map(crate::jobs::inbound_activity_process::sanitize_html_allowlist);
         let emoji_map = remote_ap.emoji_map();
         let profile_fields = remote_ap.profile_fields_json();
         let now = chrono::Utc::now();

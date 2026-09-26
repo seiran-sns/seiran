@@ -496,6 +496,20 @@ export interface UserProfile {
   /** プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。現状ローカルユーザーのみ
    * （`public_lists`と同様、リモートは将来課題）。 */
   also_known_as: AlsoKnownAsItem[];
+  /** bio/profile_fields中のURLの解決結果（#リンク解決）。key=URL文字列。未キャッシュのURLは
+   * ここに含まれず、`linkResolved`のWebSocket通知を待つ（`StreamingContext`参照）。 */
+  link_resolutions?: Record<string, ResolvedLinkInfo>;
+}
+
+/** bio/profile_fields中のURLがFedi/Bskyの実在ユーザー・投稿だと判明した場合の解決結果。 */
+export interface ResolvedLinkInfo {
+  kind: "actor" | "post";
+  username?: string;
+  domain?: string;
+  actor_type?: string;
+  actor_id?: string;
+  avatar_url?: string;
+  post_id?: string;
 }
 
 /** フォロー中/フォロワー一覧の1件（#56、`GET /users/following` `/users/followers`）。 */

@@ -1,18 +1,19 @@
-//! URL・AT URI・ユーザーIDを取り込み、SPA内の遷移先へ変換する。
+//! URL・AT URI・ユーザーIDを取り込み、SPA内の遷移先へ変換する薄いラッパー。
 //!
-//! 解決ロジック自体（`resolve_open_target`）は、Misskey互換API `POST /api/ap/show`
+//! 解決ロジック本体（URL分類・アクター/投稿解決）は`seiran_common::link_target`へ移動済み
+//! （bio/profile_fields内リンクのバックグラウンド解決`jobs::link_resolve`とも共有するため。
+//! 挙動不変のリファクタ）。ここでは`AppState`から`ResolveContext`を組み立て、結果を
+//! フロントの遷移先パスへ変換するだけ。Misskey互換API `POST /api/ap/show`
 //! （`handlers::misskey::endpoints::ap_show`、`misskey_dart`の`MisskeyAp.show`、Ariaの
-//! 「ほかのアカウントで開く」機能）とも共有する。SPA向け（このファイルの`open_target`）は
-//! 結果をフロントの遷移先パスへ、Misskey互換向けは`{type, object}`（本家Misskey準拠、
-//! `Note`/`User`のフルオブジェクト）へ、それぞれ別々に変換する。
+//! 「ほかのアカウントで開く」機能）は`{type, object}`（本家Misskey準拠、`Note`/`User`の
+//! フルオブジェクト）へ別途変換する。
 
 use axum::{extract::State, Json};
-use seiran_common::repository::Actor;
-use seiran_common::{job_priority, Job};
+pub use seiran_common::link_target::ResolvedTarget;
+use seiran_common::link_target::{self, ResolveContext, ResolveError};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ApiError;
-use crate::handlers::target_resolve::resolve_and_upsert_target;
 use crate::middleware::AuthedUser;
 use crate::AppState;
 
@@ -25,19 +26,6 @@ pub struct OpenTargetRequest {
 pub struct OpenTargetResponse {
     pub path: String,
     pub kind: &'static str,
-}
-
-enum ParsedTarget {
-    BskyPost(String),
-    Actor(String),
-    ActivityPubUrl(String),
-}
-
-/// `resolve_open_target`の解決結果。`open_target`（SPA向け、パスへ変換）と`ap_show`
-/// （Misskey互換向け、`Note`/`User`のフルオブジェクトへ変換）の両方から使う共通の形。
-pub enum ResolvedTarget {
-    Actor(Box<Actor>),
-    Post(i64),
 }
 
 pub async fn open_target(
@@ -72,218 +60,28 @@ pub async fn resolve_open_target(
     state: &AppState,
     target: &str,
 ) -> Result<ResolvedTarget, ApiError> {
-    let parsed = parse_target(target)
-        .ok_or_else(|| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-
-    match parsed {
-        ParsedTarget::BskyPost(at_uri) => open_bsky_post(state, &at_uri).await,
-        ParsedTarget::Actor(target) => open_actor(state, &target).await,
-        ParsedTarget::ActivityPubUrl(url) => open_activitypub_url(state, &url).await,
-    }
-}
-
-fn parse_target(raw: &str) -> Option<ParsedTarget> {
-    let target = raw.trim();
-    if target.starts_with("at://") {
-        return parse_at_post_uri(target).then(|| ParsedTarget::BskyPost(target.to_string()));
-    }
-    if target.starts_with("did:plc:") {
-        return Some(ParsedTarget::Actor(target.to_string()));
-    }
-    if target.starts_with('@') {
-        let acct = target.trim_start_matches('@');
-        return (!acct.is_empty()).then(|| ParsedTarget::Actor(target.to_string()));
-    }
-
-    let url = url::Url::parse(target).ok()?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return None;
-    }
-    if url.host_str() == Some("bsky.app") {
-        let parts: Vec<_> = url
-            .path_segments()?
-            .filter(|part| !part.is_empty())
-            .collect();
-        return match parts.as_slice() {
-            ["profile", actor, "post", rkey] => Some(ParsedTarget::BskyPost(format!(
-                "at://{actor}/app.bsky.feed.post/{rkey}"
-            ))),
-            ["profile", actor] => Some(ParsedTarget::Actor((*actor).to_string())),
-            _ => None,
-        };
-    }
-    Some(ParsedTarget::ActivityPubUrl(target.to_string()))
-}
-
-fn parse_at_post_uri(target: &str) -> bool {
-    let parts: Vec<_> = target
-        .trim_start_matches("at://")
-        .split('/')
-        .filter(|part| !part.is_empty())
-        .collect();
-    matches!(parts.as_slice(), [_, "app.bsky.feed.post", _])
-}
-
-async fn open_actor(state: &AppState, target: &str) -> Result<ResolvedTarget, ApiError> {
-    let actor = resolve_and_upsert_target(state, target)
+    let parsed = link_target::parse_target(target).ok_or_else(invalid_open_target_error)?;
+    let ctx = ResolveContext {
+        actors: state.actors.as_ref(),
+        posts: state.posts.as_ref(),
+        ap_client: &state.ap_client,
+        job_queue: &state.job_queue,
+        db_pool: &state.db,
+        local_domain: state.local_domain.as_str(),
+        system_signing_key: state.system_signing_key(),
+    };
+    link_target::resolve_target(&ctx, parsed)
         .await
-        .map_err(|_| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    Ok(ResolvedTarget::Actor(Box::new(actor)))
+        .map_err(|e| match e {
+            ResolveError::ImportPending => {
+                ApiError::ServiceUnavailable("OPEN_TARGET_IMPORT_PENDING")
+            }
+            ResolveError::Upstream(msg) => ApiError::BadGateway(msg),
+            ResolveError::Internal(msg) => ApiError::Internal(msg),
+            ResolveError::Invalid => invalid_open_target_error(),
+        })
 }
 
-async fn open_bsky_post(state: &AppState, at_uri: &str) -> Result<ResolvedTarget, ApiError> {
-    // bsky.app URLではハンドルがauthorityになる場合があるため、プロフィール取得でDIDへ正規化する。
-    let parts: Vec<_> = at_uri.trim_start_matches("at://").split('/').collect();
-    let profile = seiran_common::atp::fetch_bsky_profile(&state.http_client, parts[0])
-        .await
-        .map_err(|_| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let canonical_uri = format!("at://{}/app.bsky.feed.post/{}", profile.did, parts[2]);
-    let post = seiran_common::atp::fetch_single_bsky_post(&state.http_client, &canonical_uri)
-        .await
-        .map_err(ApiError::BadGateway)?
-        .ok_or_else(|| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let actor = resolve_and_upsert_target(state, &post.author_did)
-        .await
-        .map_err(|_| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let post_id = seiran_common::atp::upsert_bsky_post(
-        &state.db,
-        &state.job_queue,
-        &state.http_client,
-        actor.id,
-        &post,
-    )
-    .await
-    .map_err(|e| ApiError::Internal(format!("Bsky post保存失敗: {e}")))?;
-    Ok(ResolvedTarget::Post(post_id))
-}
-
-async fn open_activitypub_url(state: &AppState, url: &str) -> Result<ResolvedTarget, ApiError> {
-    if let Some(post_id) = state
-        .posts
-        .find_id_by_ap_or_at_uri(url)
-        .await
-        .map_err(|e| ApiError::Internal(format!("投稿検索失敗: {e}")))?
-    {
-        return Ok(ResolvedTarget::Post(post_id));
-    }
-
-    let (body, _) = crate::handlers::media_proxy::fetch_validated_with_accept(
-        url,
-        &[
-            "application/activity+json",
-            "application/ld+json",
-            "application/json",
-        ],
-        "application/activity+json, application/ld+json",
-    )
-    .await
-    .map_err(|_| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let object: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|_| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let object_type = object["type"].as_str().unwrap_or("");
-    if matches!(
-        object_type,
-        "Person" | "Service" | "Application" | "Organization" | "Group"
-    ) {
-        return open_actor(state, object["id"].as_str().unwrap_or(url)).await;
-    }
-    // Misskeyの素リノート（コメント無しブースト）は、notes URLへの直接アクセスや他鯖ミラー
-    // URLからの302リダイレクトの結果として`Announce`（`object`は対象ノートのURI文字列）に
-    // 行き着く。通常投稿としてではなく正しくリポストラッパーとして取り込む（#232）。
-    if object_type == "Announce" {
-        return open_announce(state, url, object).await;
-    }
-    if !matches!(object_type, "Note" | "Article" | "Question" | "Page") {
-        return Err(ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()));
-    }
-
-    let note_id = object["id"].as_str().unwrap_or(url);
-    let actor = object["attributedTo"]
-        .as_str()
-        .or_else(|| object["attributedTo"].as_array()?.first()?.as_str())
-        .ok_or_else(|| ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()))?;
-    let activity = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "id": format!("{note_id}#seiran-open"),
-        "type": "Create",
-        "actor": actor,
-        "object": object,
-    });
-    enqueue_and_await_import(state, activity, note_id).await
-}
-
-/// フェッチしたAnnounce（Misskeyの素リノート・他鯖ミラー経由でのAnnounce解決を含む）を
-/// リポストラッパーとして取り込む。既存のCreate用合成ラップとは異なり、フェッチしたAnnounce
-/// オブジェクト自体が`handle_announce`の期待する形（`id`/`actor`/`object`/`to`/`cc`/`published`）
-/// を満たすため、そのまま`InboundActivityProcess`へ積む（#232）。対象ポスト（`object`）が
-/// 未取得なら`resolve_reference`が1段階だけフェッチする（#231）。対象の取得に失敗しても
-/// リポストの箱自体は保存されるため、ここでの完了待ちは箱の保存だけを待てば良い。
-async fn open_announce(
-    state: &AppState,
-    url: &str,
-    announce: serde_json::Value,
-) -> Result<ResolvedTarget, ApiError> {
-    let announce_id = announce["id"].as_str().unwrap_or(url).to_string();
-    if announce["actor"].as_str().is_none() {
-        return Err(ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()));
-    }
-    if announce["object"].as_str().is_none() {
-        return Err(ApiError::BadRequest("INVALID_OPEN_TARGET".to_string()));
-    }
-    enqueue_and_await_import(state, announce, &announce_id).await
-}
-
-/// `Job::InboundActivityProcess`へ積み、`dedup_uri`（`ap_object_id`として保存されるはずの
-/// URI）で該当投稿が保存されるまで短時間だけポーリングする。Note（Create経由）・
-/// Announce（リポスト経由）の両方の「開く」経路で共有する。
-async fn enqueue_and_await_import(
-    state: &AppState,
-    activity: serde_json::Value,
-    dedup_uri: &str,
-) -> Result<ResolvedTarget, ApiError> {
-    state
-        .job_queue
-        .enqueue(
-            Job::InboundActivityProcess {
-                raw_activity: activity.to_string(),
-            },
-            job_priority::HIGH,
-        )
-        .await
-        .map_err(|e| ApiError::Internal(format!("投稿取り込みキュー投入失敗: {e}")))?;
-
-    // インバウンド処理は既存のCreate/Announce経路を再利用する。短時間だけ完了を待ち、詳細画面へ確実に遷移する。
-    for _ in 0..40 {
-        if let Some(post_id) = state
-            .posts
-            .find_id_by_ap_or_at_uri(dedup_uri)
-            .await
-            .map_err(|e| ApiError::Internal(format!("投稿検索失敗: {e}")))?
-        {
-            return Ok(ResolvedTarget::Post(post_id));
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    Err(ApiError::ServiceUnavailable("OPEN_TARGET_IMPORT_PENDING"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{parse_target, ParsedTarget};
-
-    #[test]
-    fn parses_bsky_post_url() {
-        let ParsedTarget::BskyPost(uri) =
-            parse_target("https://bsky.app/profile/alice.test/post/3abc").unwrap()
-        else {
-            panic!("post expected");
-        };
-        assert_eq!(uri, "at://alice.test/app.bsky.feed.post/3abc");
-    }
-
-    #[test]
-    fn rejects_unrelated_bsky_url_and_non_post_at_uri() {
-        assert!(parse_target("https://bsky.app/settings").is_none());
-        assert!(parse_target("at://did:plc:x/app.bsky.actor.profile/self").is_none());
-    }
+fn invalid_open_target_error() -> ApiError {
+    ApiError::BadRequest("INVALID_OPEN_TARGET".to_string())
 }

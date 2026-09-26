@@ -480,6 +480,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::RemoteActorResolve { uri } => jobs::remote_actor_resolve::handle(uri, ctx)
             .await
             .map_err(JobError::from),
+        Job::LinkResolve { url } => jobs::link_resolve::handle(url, ctx)
+            .await
+            .map_err(JobError::from),
         Job::DmRecipientResolve { post_id, uri } => {
             jobs::dm_recipient_resolve::handle(post_id, uri, ctx)
                 .await
@@ -596,6 +599,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::BskyDmHide { .. } => "BskyDmHide",
         Job::RemoteFollowListSync { .. } => "RemoteFollowListSync",
         Job::RemoteActorResolve { .. } => "RemoteActorResolve",
+        Job::LinkResolve { .. } => "LinkResolve",
         Job::DmRecipientResolve { .. } => "DmRecipientResolve",
         Job::RemoteFeaturedSync { .. } => "RemoteFeaturedSync",
         Job::RemoteProfileRefresh { .. } => "RemoteProfileRefresh",
@@ -701,6 +705,12 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         },
         Job::RemoteActorResolve { .. } => RetryConfig {
             // ActorMetadataResolve と同様の軽量ベストエフォート解決。
+            max_attempts: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
+        },
+        Job::LinkResolve { .. } => RetryConfig {
+            // RemoteActorResolve と同様の軽量ベストエフォート解決。
             max_attempts: 3,
             base_delay_ms: 1000,
             max_delay_ms: 30_000,

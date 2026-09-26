@@ -22,7 +22,7 @@ const URL_SOURCE = String.raw`(?<url>https?://[^\s<>()\[\]]+)`;
  * `@user` / `@user@host`（Fediverse形式）/ `@handle.bsky.social`（Bskyハンドル形式）。
  * 直前が英数字・アンダースコアの場合はメールアドレスの一部とみなしマッチしない。
  */
-const MENTION_SOURCE = String.raw`(?<![\w])@(?<mention>[A-Za-z0-9_-]+(?:\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?)`;
+export const MENTION_SOURCE = String.raw`(?<![\w])@(?<mention>[A-Za-z0-9_-]+(?:\.[A-Za-z0-9-]+)*(?:@[A-Za-z0-9.-]+)?)`;
 
 /**
  * `#タグ`。直前が英数字・アンダースコア・`/` の場合はマッチしない（URLフラグメント
