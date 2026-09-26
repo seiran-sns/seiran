@@ -138,6 +138,11 @@ test.describe("ログイン/TOTPブルートフォース対策", () => {
 
 test.describe("IPブロック（管理画面の一覧・解除含む）", () => {
   test("拒否がしきい値に達したIPは自動ブロックされ、管理画面で一覧・解除できる", async ({ page, request }) => {
+    // ログイン試行4回・サイト設定PATCH2回・管理画面のUI操作（3箇所のtimeout:10_000待機含む）
+    // を直列に行うため、デフォルトの60秒（playwright.config.ts）だとCI環境の負荷次第で
+    // ギリギリ超過しうる（実機確認）。超過するとfinally節のpatchSiteSettingsも実行されず
+    // 設定が汚染されたまま残り、後続テストまで連鎖的に壊れるため明示的に延長する。
+    test.setTimeout(120_000);
     const admin = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
     await patchSiteSettings(request, admin, {
       auth_bruteforce_max_variants: "1",
