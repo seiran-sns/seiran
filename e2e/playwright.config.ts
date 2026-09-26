@@ -69,10 +69,13 @@ const STORAGE_SERIAL_SPECS = [
 ];
 // - site_settings（rate-limit/admin）・appviewスタブのグローバルsearchRequests
 //   （search）は他specを巻き込んで壊すため、全テスト完了後の排他テールで実行する。
+// - misskey-stats: notesCount/usersCount等のグローバル集計は他specが並行して
+//   登録するユーザー・投稿の影響を受けるため、全テスト完了後の排他テールで実行する。
 const GLOBALS_SERIAL_SPECS = [
   "**/admin.spec.ts",
   "**/rate-limit.spec.ts",
   "**/search.spec.ts",
+  "**/misskey-stats.spec.ts",
 ];
 
 export default defineConfig({
