@@ -252,86 +252,85 @@ pub(crate) async fn save_ap_note_core(
         Vec<i64>,
         Vec<String>,
     ) = if ref_mode == ReferenceResolutionMode::OneHopFetch && visibility == "direct" {
-            // リプライ先が direct（DM）の場合、送信元アクターがその DM の当事者
-            // （投稿者本人 or post_recipients の宛先）でなければ拒否する。ここを
-            // 確認せずに受理すると、リモートの送信元がinReplyTo/toを自由に申告できる
-            // ことを悪用し、無関係な第三者が他人同士のDMスレッドへ thread_root_post_id
-            // 経由で紛れ込める（当事者側のDM画面にまで表示されてしまう）。
-            if let Some(parent_id) = reply_to_post_id {
-                if let Ok(Some(m)) = inbox.post_repo.find_delivery_meta(parent_id).await {
-                    if m.visibility == "direct" {
-                        let authorized: bool = sqlx::query_scalar(
-                            "SELECT post_is_visible_to($1, $2, 'direct', $3, false)",
-                        )
-                        .bind(actor_id)
-                        .bind(m.actor_id)
-                        .bind(parent_id)
-                        .fetch_one(&inbox.db_pool)
-                        .await
-                        .unwrap_or(false);
-                        if !authorized {
-                            return Err(format!(
+        // リプライ先が direct（DM）の場合、送信元アクターがその DM の当事者
+        // （投稿者本人 or post_recipients の宛先）でなければ拒否する。ここを
+        // 確認せずに受理すると、リモートの送信元がinReplyTo/toを自由に申告できる
+        // ことを悪用し、無関係な第三者が他人同士のDMスレッドへ thread_root_post_id
+        // 経由で紛れ込める（当事者側のDM画面にまで表示されてしまう）。
+        if let Some(parent_id) = reply_to_post_id {
+            if let Ok(Some(m)) = inbox.post_repo.find_delivery_meta(parent_id).await {
+                if m.visibility == "direct" {
+                    let authorized: bool = sqlx::query_scalar(
+                        "SELECT post_is_visible_to($1, $2, 'direct', $3, false)",
+                    )
+                    .bind(actor_id)
+                    .bind(m.actor_id)
+                    .bind(parent_id)
+                    .fetch_one(&inbox.db_pool)
+                    .await
+                    .unwrap_or(false);
+                    if !authorized {
+                        return Err(format!(
                                 "direct投稿へのリプライ拒否: actor_id={} は親投稿{}の当事者ではありません",
                                 actor_id, parent_id
                             ));
-                        }
                     }
                 }
             }
+        }
 
-            let parent_thread_root = match reply_to_post_id {
-                Some(parent_id) => inbox
-                    .post_repo
-                    .find_delivery_meta(parent_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|m| {
-                        if m.visibility == "direct" {
-                            m.thread_root_post_id
-                        } else {
-                            None
-                        }
-                    }),
-                None => None,
-            };
-            let thread_root = parent_thread_root.unwrap_or(post_id);
-
-            // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
-            // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
-            // `find_by_ap_uri` では引っかからない。`extract_local_username` で
-            // ホスト名まで含めて自ドメインのURIか検証してから解決する（末尾セグメント
-            // だけを見ると、リモートの同名ユーザー宛のDMをローカルの同名ユーザー宛だと
-            // 誤認してしまう）。
-            let mut recipients = Vec::new();
-            // ローカル宛先はここで即座に解決するが、リモート宛先（3人以上の会話に
-            // 混じるリモートユーザー等）は都度フェッチが必要になり受信処理をブロック
-            // したくないため、`DmRecipientResolve`ジョブへ回す（宛先表示、
-            // `docs/ui_spec.md` 2.5節）。送信者自身のURIは宛先ではないため除外。
-            let mut remote_uris = Vec::new();
-            for uri in &to_list {
-                let Some(local_username) =
-                    crate::ap::extract_local_username(uri, &inbox.local_domain)
-                else {
-                    if uri != actor_uri {
-                        remote_uris.push(uri.clone());
+        let parent_thread_root = match reply_to_post_id {
+            Some(parent_id) => inbox
+                .post_repo
+                .find_delivery_meta(parent_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|m| {
+                    if m.visibility == "direct" {
+                        m.thread_root_post_id
+                    } else {
+                        None
                     }
-                    continue;
-                };
-                if let Ok(Some(actor)) = inbox
-                    .actor_repo
-                    .find_by_username_domain(local_username, &inbox.local_domain)
-                    .await
-                {
-                    if actor.actor_type == "local" {
-                        recipients.push(actor.id);
-                    }
-                }
-            }
-            (Some(thread_root), recipients, remote_uris)
-        } else {
-            (None, Vec::new(), Vec::new())
+                }),
+            None => None,
         };
+        let thread_root = parent_thread_root.unwrap_or(post_id);
+
+        // ローカルユーザーの `actors.ap_uri` は登録時に設定されない（都度
+        // `https://{local_domain}/users/{username}` として動的組み立てされる）ため
+        // `find_by_ap_uri` では引っかからない。`extract_local_username` で
+        // ホスト名まで含めて自ドメインのURIか検証してから解決する（末尾セグメント
+        // だけを見ると、リモートの同名ユーザー宛のDMをローカルの同名ユーザー宛だと
+        // 誤認してしまう）。
+        let mut recipients = Vec::new();
+        // ローカル宛先はここで即座に解決するが、リモート宛先（3人以上の会話に
+        // 混じるリモートユーザー等）は都度フェッチが必要になり受信処理をブロック
+        // したくないため、`DmRecipientResolve`ジョブへ回す（宛先表示、
+        // `docs/ui_spec.md` 2.5節）。送信者自身のURIは宛先ではないため除外。
+        let mut remote_uris = Vec::new();
+        for uri in &to_list {
+            let Some(local_username) = crate::ap::extract_local_username(uri, &inbox.local_domain)
+            else {
+                if uri != actor_uri {
+                    remote_uris.push(uri.clone());
+                }
+                continue;
+            };
+            if let Ok(Some(actor)) = inbox
+                .actor_repo
+                .find_by_username_domain(local_username, &inbox.local_domain)
+                .await
+            {
+                if actor.actor_type == "local" {
+                    recipients.push(actor.id);
+                }
+            }
+        }
+        (Some(thread_root), recipients, remote_uris)
+    } else {
+        (None, Vec::new(), Vec::new())
+    };
 
     // シナリオ2: 他seiranサーバー間マージ（#237、相互一致方式）。
     // `seiranPost.counterpartPostId`（ATP側の真正なat_uri申告）がある場合のみ、

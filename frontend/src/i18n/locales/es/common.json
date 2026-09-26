@@ -43,6 +43,10 @@
   "remoteBanner": {
     "note": "Esta es una publicación remota.",
     "user": "Este es un usuario remoto",
-    "viewRemote": "Ver en servidor remoto"
+    "viewRemote": "Ver en servidor remoto",
+    "bridgePost": "Esta es una publicación puenteada",
+    "viewOriginal": "Ver publicación original",
+    "bridgeUser": "Este es un usuario puente",
+    "viewRealUser": "Ver cuenta real"
   }
 }

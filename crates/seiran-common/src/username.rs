@@ -99,7 +99,10 @@ mod tests {
     #[test]
     fn actor_handle_bsky_empty_domain_omits_domain() {
         // Bskyアクターは`domain`列が常に空文字（実データで確認済み）。
-        assert_eq!(actor_handle("yuba.bsky.social", "", "bsky"), "@yuba.bsky.social");
+        assert_eq!(
+            actor_handle("yuba.bsky.social", "", "bsky"),
+            "@yuba.bsky.social"
+        );
     }
 
     #[test]

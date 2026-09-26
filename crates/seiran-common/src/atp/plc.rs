@@ -144,7 +144,8 @@ pub fn prepare_plc_genesis(
 ) -> Result<PlcGenesis, PlcError> {
     let account_rotation_key = SigningKey::random(&mut OsRng);
     let account_rotation_did_key = p256_to_did_key(account_rotation_key.verifying_key());
-    let server_shared_rotation_did_key = p256_to_did_key(server_shared_rotation_key.verifying_key());
+    let server_shared_rotation_did_key =
+        p256_to_did_key(server_shared_rotation_key.verifying_key());
     let rotation_keys = vec![account_rotation_did_key, server_shared_rotation_did_key];
 
     // ATPハンドルは常に小文字（`crate::username::to_atp_username` 参照。DNS/HTTPホスト名は
@@ -339,9 +340,8 @@ pub fn prepare_plc_rotation_update(
             .unwrap_or_default(),
     };
     let services: BTreeMap<String, PlcService> = match services_override {
-        Some(v) => {
-            serde_json::from_value(v).map_err(|e| PlcError::Cbor(format!("servicesパース失敗: {e}")))?
-        }
+        Some(v) => serde_json::from_value(v)
+            .map_err(|e| PlcError::Cbor(format!("servicesパース失敗: {e}")))?,
         None => current_data
             .get("services")
             .cloned()

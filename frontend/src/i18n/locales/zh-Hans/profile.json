@@ -1,11 +1,6 @@
 {
   "profilePage": {
     "title": "个人资料",
-    "warpBanner": {
-      "prefix": "该帐户是一个",
-      "shadowLabel": "代理账户",
-      "suffix": "帐户。真实账户 ({{handle}}) 在这里 →"
-    },
     "pairedBadge": "灵魂绑定",
     "pairedBadgeTitle": "通过灵魂绑定与远程青鸾用户连接",
     "suspendedBadge": "已冻结",

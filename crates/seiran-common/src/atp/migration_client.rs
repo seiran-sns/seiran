@@ -61,7 +61,9 @@ fn xrpc_error_from_body(status: u16, body: &serde_json::Value) -> MigrationClien
 /// `resolved.url` が指すホストへ接続を固定した `reqwest::Client` を構築する。
 /// [SEC-3] `resolve_service_endpoint` が検証済みのIPへ`resolve_to_addrs`で固定することで、
 /// 検証後の再解決によるDNS rebindingを防ぐ（`client.rs::fetch_seiran_actor_declaration`と同型）。
-fn build_pinned_client(resolved: &ResolvedServiceEndpoint) -> Result<reqwest::Client, MigrationClientError> {
+fn build_pinned_client(
+    resolved: &ResolvedServiceEndpoint,
+) -> Result<reqwest::Client, MigrationClientError> {
     let host = reqwest::Url::parse(&resolved.url)
         .map_err(|e| MigrationClientError::Resolve(e.to_string()))?
         .host_str()
@@ -83,9 +85,9 @@ pub async fn resolve_source_pds(
     handle: &str,
     http: &reqwest::Client,
 ) -> Result<(String, ResolvedServiceEndpoint), MigrationClientError> {
-    let did = resolve_external_handle(handle, http)
-        .await
-        .ok_or_else(|| MigrationClientError::HandleResolve(format!("ハンドル {handle} を解決できません")))?;
+    let did = resolve_external_handle(handle, http).await.ok_or_else(|| {
+        MigrationClientError::HandleResolve(format!("ハンドル {handle} を解決できません"))
+    })?;
     let resolved = resolve_service_endpoint(&did, "atproto_pds").await?;
     Ok((did, resolved))
 }

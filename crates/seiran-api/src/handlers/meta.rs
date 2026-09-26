@@ -4,8 +4,8 @@ use serde_json::json;
 use crate::handlers::emojis::fetch_public_emojis;
 use crate::handlers::notes::validation::strip_html_tags;
 use crate::handlers::notes::BSKY_MAX_TEXT_GRAPHEMES;
-use seiran_common::version::SERVER_VERSION;
 use crate::AppState;
+use seiran_common::version::SERVER_VERSION;
 
 /// Misskey 互換クライアントがサーバー種別判定に使用するエンドポイント。
 /// `features.miauth: true` がなければ Aria 等が MiAuth フローに進まない。

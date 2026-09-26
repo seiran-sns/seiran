@@ -43,14 +43,13 @@ pub async fn nodeinfo_discovery_handler(State(state): State<Arc<AppState>>) -> i
 }
 
 pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let user_count: i64 =
-        sqlx::query(
-            "SELECT COUNT(*) AS cnt FROM actors WHERE actor_type = 'local' AND withdrawn_at IS NULL",
-        )
-            .fetch_one(&state.db)
-            .await
-            .and_then(|r| r.try_get("cnt"))
-            .unwrap_or(0);
+    let user_count: i64 = sqlx::query(
+        "SELECT COUNT(*) AS cnt FROM actors WHERE actor_type = 'local' AND withdrawn_at IS NULL",
+    )
+    .fetch_one(&state.db)
+    .await
+    .and_then(|r| r.try_get("cnt"))
+    .unwrap_or(0);
 
     let post_count: i64 = sqlx::query(
         "SELECT COUNT(*) AS cnt FROM posts
@@ -86,7 +85,11 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
     // でないため、タグを除去したプレーンテキストを使う。
     let site_name = {
         let n = get("site_name");
-        let n = if n.is_empty() { "seiran".to_string() } else { n };
+        let n = if n.is_empty() {
+            "seiran".to_string()
+        } else {
+            n
+        };
         strip_html_tags(&n)
     };
     let site_color = get("site_color");
@@ -104,7 +107,10 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
         metadata.insert("iconUrl".into(), serde_json::json!(site_icon_url));
     }
     if !site_description.is_empty() {
-        metadata.insert("nodeDescription".into(), serde_json::json!(site_description));
+        metadata.insert(
+            "nodeDescription".into(),
+            serde_json::json!(site_description),
+        );
     }
     // kmyblue（Mastodonフォーク）は既知softwareリストに無いインスタンスに対し、
     // ここに "emoji_reaction" が含まれるかどうかでカスタム絵文字リアクション対応を判定する。

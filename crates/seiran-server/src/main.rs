@@ -26,8 +26,8 @@ use seiran_common::repository::{
 };
 use seiran_common::{
     ap::ApClient, create_job_queue, db::recommended_max_connections, get_db_pool,
-    resolve_local_domain, run_migrations, DeliveryConfig, FollowExecConfig, InboxContext,
-    JobQueue, LocalDomain, SecretsFile, StreamHub, DEFAULT_MAX_CONCURRENT_JOBS,
+    resolve_local_domain, run_migrations, DeliveryConfig, FollowExecConfig, InboxContext, JobQueue,
+    LocalDomain, SecretsFile, StreamHub, DEFAULT_MAX_CONCURRENT_JOBS,
 };
 use sqlx::PgPool;
 use tokio::sync::broadcast;

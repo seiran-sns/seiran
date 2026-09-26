@@ -1100,7 +1100,10 @@ mod tests {
     fn remote_bsky_only_actor_has_null_uri_but_bsky_app_url() {
         let (uri, url) = remote_user_uri_url("bsky", None, Some("did:plc:abc123"));
         assert_eq!(uri, None);
-        assert_eq!(url.as_deref(), Some("https://bsky.app/profile/did:plc:abc123"));
+        assert_eq!(
+            url.as_deref(),
+            Some("https://bsky.app/profile/did:plc:abc123")
+        );
     }
 
     // Misskey本家クライアント（Aria等）は `note.poll` の値でアンケート有無を判定する。

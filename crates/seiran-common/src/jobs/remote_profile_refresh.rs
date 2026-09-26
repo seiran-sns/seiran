@@ -34,7 +34,8 @@ pub async fn handle(actor_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
         if let Err(e) = refresh_fedi(&actors, &ap_uri, &ctx).await {
             tracing::info!(
                 "[RemoteProfileRefresh] fedi再取得失敗（スキップ）: actor_id={} {}",
-                actor_id, e
+                actor_id,
+                e
             );
         }
     }
@@ -43,7 +44,8 @@ pub async fn handle(actor_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
         if let Err(e) = refresh_bsky(&actors, &at_did, &ctx).await {
             tracing::info!(
                 "[RemoteProfileRefresh] bsky再取得失敗（スキップ）: actor_id={} {}",
-                actor_id, e
+                actor_id,
+                e
             );
         }
     }
@@ -122,7 +124,11 @@ async fn refresh_fedi(
         .map_err(|e| format!("upsert_remote_fedi失敗: {}", e))
 }
 
-async fn refresh_bsky(actors: &PgActorRepository, at_did: &str, ctx: &JobContext) -> Result<(), String> {
+async fn refresh_bsky(
+    actors: &PgActorRepository,
+    at_did: &str,
+    ctx: &JobContext,
+) -> Result<(), String> {
     let profile = crate::atp::fetch_bsky_profile(&ctx.ap_client.http, at_did).await?;
     let new_id = crate::generate_snowflake_id(chrono::Utc::now());
     actors
@@ -139,4 +145,3 @@ async fn refresh_bsky(actors: &PgActorRepository, at_did: &str, ctx: &JobContext
         .map(|_| ())
         .map_err(|e| format!("upsert_remote_bsky失敗: {}", e))
 }
-

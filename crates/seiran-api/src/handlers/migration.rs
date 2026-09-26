@@ -8,7 +8,9 @@
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
-use seiran_common::repository::{AtMigrationRepository, AtMigrationRequestRow, PgAtMigrationRepository};
+use seiran_common::repository::{
+    AtMigrationRepository, AtMigrationRequestRow, PgAtMigrationRepository,
+};
 use seiran_common::LocalAuthProvider;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -107,13 +109,15 @@ pub async fn start(
         return Err(ApiError::Conflict("USERNAME_TAKEN"));
     }
 
-    let (source_did, resolved) =
-        seiran_common::atp::migration_client::resolve_source_pds(&req.source_handle, &state.ap_client.http)
-            .await
-            .map_err(|e| {
-                tracing::info!("[migration:start] ハンドル解決失敗: {}", e);
-                ApiError::BadRequest("SOURCE_HANDLE_UNRESOLVABLE".into())
-            })?;
+    let (source_did, resolved) = seiran_common::atp::migration_client::resolve_source_pds(
+        &req.source_handle,
+        &state.ap_client.http,
+    )
+    .await
+    .map_err(|e| {
+        tracing::info!("[migration:start] ハンドル解決失敗: {}", e);
+        ApiError::BadRequest("SOURCE_HANDLE_UNRESOLVABLE".into())
+    })?;
 
     // 転入元DIDが既に「ローカルアカウント」として使われていないか早期に弾く
     // （`actors.at_did UNIQUE`制約が最終的な防波堤だが、外部呼び出し前に弾ける方が親切）。
@@ -139,7 +143,9 @@ pub async fn start(
     .await
     {
         Ok(session) => session,
-        Err(seiran_common::atp::migration_client::MigrationClientError::AuthFactorTokenRequired) => {
+        Err(
+            seiran_common::atp::migration_client::MigrationClientError::AuthFactorTokenRequired,
+        ) => {
             // まだアカウント（DB行）を作らず、フロントに「PDS A宛メールのコードを入力して
             // auth_factor_token付きで再試行してください」と伝える。request_idはまだ無い。
             return Err(ApiError::BadRequest("AUTH_FACTOR_TOKEN_REQUIRED".into()));
@@ -255,7 +261,10 @@ pub async fn submit_plc_token(
         .clone()
         .ok_or_else(|| ApiError::Internal("メールアドレス未確定".to_string()))?;
 
-    let (new_signing_key_pem, new_rotation_key_pem) = if let (Some(existing_key), Some(existing_rotation_key)) = (
+    let (new_signing_key_pem, new_rotation_key_pem) = if let (
+        Some(existing_key),
+        Some(existing_rotation_key),
+    ) = (
         migration_req.new_signing_key_pem.clone(),
         migration_req.new_rotation_key_pem.clone(),
     ) {
@@ -278,8 +287,8 @@ pub async fn submit_plc_token(
             handle: migration_req.source_handle.clone(),
             access_jwt: migration_req.source_access_jwt.clone().unwrap_or_default(),
             refresh_jwt: migration_req.source_refresh_jwt.clone().unwrap_or_default(),
-        email: None,
-        email_confirmed: false,
+            email: None,
+            email_confirmed: false,
         };
         // `start`時点で確定したPDS Aのエンドポイント文字列をそのまま使う（DID文書からの
         // 再導出ではない——`resolve_stored_endpoint`のドキュメントコメント参照。実機で発見:
@@ -290,9 +299,12 @@ pub async fn submit_plc_token(
         )
         .await
         .map_err(|e| {
-                tracing::warn!("[migration:submit-plc-token] PDSエンドポイント検証失敗: {}", e);
-                ApiError::BadGateway("SOURCE_PDS_UNREACHABLE".into())
-            })?;
+            tracing::warn!(
+                "[migration:submit-plc-token] PDSエンドポイント検証失敗: {}",
+                e
+            );
+            ApiError::BadGateway("SOURCE_PDS_UNREACHABLE".into())
+        })?;
 
         // 転入完了時、seiranが新規発行する専用のローテーションキーのみをDIDの鍵とする
         // （転入元PDS運営者に恒久的な支配権を残さないため、転入元の鍵は引き継がない）。
@@ -309,7 +321,10 @@ pub async fn submit_plc_token(
 
         let (_new_rotation_key, new_rotation_key_pem) =
             seiran_common::atp::plc::generate_new_signing_key().map_err(|e| {
-                tracing::error!("[migration:submit-plc-token] ローテーション鍵生成失敗: {}", e);
+                tracing::error!(
+                    "[migration:submit-plc-token] ローテーション鍵生成失敗: {}",
+                    e
+                );
                 ApiError::Internal("鍵生成エラー".to_string())
             })?;
         let new_rotation_did_key = seiran_common::atp::plc::p256_to_did_key(
@@ -361,7 +376,11 @@ pub async fn submit_plc_token(
         )
         .await
         .map_err(|e| {
-            tracing::warn!("[migration:submit-plc-token] signPlcOperation失敗 (request_id={}): {}", id, e);
+            tracing::warn!(
+                "[migration:submit-plc-token] signPlcOperation失敗 (request_id={}): {}",
+                id,
+                e
+            );
             ApiError::BadGateway("PLC_SIGN_FAILED".into())
         })?;
 
@@ -436,7 +455,10 @@ pub async fn submit_plc_token(
     };
 
     let actor_id = if let Some(existing_id) = existing_actor_id {
-        let ap_uri = format!("https://{}/users/{}", state.local_domain, migration_req.new_username);
+        let ap_uri = format!(
+            "https://{}/users/{}",
+            state.local_domain, migration_req.new_username
+        );
         sqlx::query(
             "UPDATE actors SET actor_type = 'local', user_id = $1, username = $2, domain = $3,
                  ap_uri = $4, at_signing_key_pem = $5, at_rotation_key_pem = $6, updated_at = NOW()
@@ -497,10 +519,13 @@ pub async fn submit_plc_token(
 
     state.enqueue_migration_import_process(id).await;
 
-    let (token, _jti) = state.local_auth.generate_token(user_id, &email).map_err(|e| {
-        tracing::error!("[migration:submit-plc-token] JWT 生成失敗: {}", e);
-        ApiError::Internal("トークン生成エラー".to_string())
-    })?;
+    let (token, _jti) = state
+        .local_auth
+        .generate_token(user_id, &email)
+        .map_err(|e| {
+            tracing::error!("[migration:submit-plc-token] JWT 生成失敗: {}", e);
+            ApiError::Internal("トークン生成エラー".to_string())
+        })?;
 
     Ok(Json(AuthResponse {
         token: token.clone(),
@@ -603,7 +628,9 @@ pub async fn retry(
     match migration_req.status.as_str() {
         "fetching_repo" => {
             state.enqueue_migration_fetch_repo(id).await;
-            Ok(Json(MigrationStatusStub { status: "fetching_repo" }))
+            Ok(Json(MigrationStatusStub {
+                status: "fetching_repo",
+            }))
         }
         "requesting_plc_signature" => {
             state.enqueue_migration_request_plc_signature(id).await;
@@ -613,7 +640,9 @@ pub async fn retry(
         }
         "importing_data" => {
             state.enqueue_migration_import_process(id).await;
-            Ok(Json(MigrationStatusStub { status: "importing_data" }))
+            Ok(Json(MigrationStatusStub {
+                status: "importing_data",
+            }))
         }
         "deactivating_source" => {
             state.enqueue_migration_deactivate_source(id).await;
@@ -635,11 +664,15 @@ pub async fn abandon(
 ) -> Result<Json<MigrationStatusStub>, ApiError> {
     let migration_req = authorize_migration_request(&state, id, &headers).await?;
     if migration_req.plc_submitted_at.is_some() {
-        return Err(ApiError::BadRequest("CANNOT_ABANDON_AFTER_PLC_SUBMIT".into()));
+        return Err(ApiError::BadRequest(
+            "CANNOT_ABANDON_AFTER_PLC_SUBMIT".into(),
+        ));
     }
     let repo = PgAtMigrationRepository::new(state.db.clone());
     repo.set_status(id, "abandoned", chrono::Utc::now())
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(MigrationStatusStub { status: "abandoned" }))
+    Ok(Json(MigrationStatusStub {
+        status: "abandoned",
+    }))
 }

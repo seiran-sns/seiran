@@ -652,7 +652,10 @@ impl AppState {
     /// 陰性URLに対して呼ばれる。
     pub async fn enqueue_link_resolve(&self, url: String) {
         if !seiran_common::jobs::link_resolve::should_enqueue(&url) {
-            tracing::debug!("[job] LinkResolve enqueue 抑制（クールダウン中）: url={}", url);
+            tracing::debug!(
+                "[job] LinkResolve enqueue 抑制（クールダウン中）: url={}",
+                url
+            );
             return;
         }
 

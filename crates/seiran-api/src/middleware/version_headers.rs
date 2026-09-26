@@ -11,7 +11,10 @@ pub const SERVER_MIN_PEER_VERSION_HEADER: &str = "x-seiran-server-min-peer-versi
 pub async fn attach(req: Request, next: Next) -> Response {
     let mut res = next.run(req).await;
     let headers = res.headers_mut();
-    headers.insert(SERVER_VERSION_HEADER, HeaderValue::from_static(SERVER_VERSION));
+    headers.insert(
+        SERVER_VERSION_HEADER,
+        HeaderValue::from_static(SERVER_VERSION),
+    );
     headers.insert(
         SERVER_MIN_PEER_VERSION_HEADER,
         HeaderValue::from_static(SERVER_MIN_PEER_VERSION),

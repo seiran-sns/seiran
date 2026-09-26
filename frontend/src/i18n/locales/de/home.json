@@ -89,7 +89,14 @@
     "referencePendingNotice": "Noch nicht importiert",
     "referenceGoneNotice": "Referenz nicht gefunden",
     "referenceImportButton": "Importieren",
-    "referenceImporting": "Importiere…"
+    "referenceImporting": "Importiere…",
+    "bridgeConfirmModal": {
+      "title": "Dies ist ein gebrückter Beitrag",
+      "body": "Dies ist eine von brid.gy für ein anderes Protokoll automatisch erzeugte Kopie. Sie können trotzdem antworten/reagieren oder stattdessen den Original-Beitrag ansehen.",
+      "confirmReplyButton": "Trotzdem antworten",
+      "confirmReactButton": "Trotzdem reagieren",
+      "viewOriginalButton": "Original-Beitrag ansehen"
+    }
   },
   "noteList": {
     "emptyDefault": "Keine Beiträge.",

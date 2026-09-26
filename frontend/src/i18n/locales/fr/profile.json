@@ -1,11 +1,6 @@
 {
   "profilePage": {
     "title": "Profil",
-    "warpBanner": {
-      "prefix": "Ce compte est un",
-      "shadowLabel": "procuration",
-      "suffix": "compte. Le compte réel ({{handle}}) est ici →"
-    },
     "pairedBadge": "Lié à l'âme",
     "pairedBadgeTitle": "Lié à un utilisateur de Seiran distant via un lien d'âme",
     "suspendedBadge": "Suspendu",

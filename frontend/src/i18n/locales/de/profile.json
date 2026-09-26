@@ -1,11 +1,6 @@
 {
   "profilePage": {
     "title": "Profil",
-    "warpBanner": {
-      "prefix": "Dieses Konto ist ein",
-      "shadowLabel": "Proxy",
-      "suffix": "Konto. Das echte Konto ({{handle}}) ist hier →"
-    },
     "pairedBadge": "Seelengebunden",
     "pairedBadgeTitle": "Über Seelenbindung mit einem entfernten Seiran-Benutzer verbunden",
     "suspendedBadge": "Gesperrt",

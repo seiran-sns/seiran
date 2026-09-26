@@ -22,14 +22,20 @@ pub struct MstLeaf {
     pub bytes: Vec<u8>,
 }
 
-fn ipld_map<'a>(ipld: &'a Ipld, what: &str) -> Result<&'a std::collections::BTreeMap<String, Ipld>, CarError> {
+fn ipld_map<'a>(
+    ipld: &'a Ipld,
+    what: &str,
+) -> Result<&'a std::collections::BTreeMap<String, Ipld>, CarError> {
     match ipld {
         Ipld::Map(m) => Ok(m),
         _ => Err(CarError::Node(format!("{what}がMap型ではありません"))),
     }
 }
 
-fn optional_link(map: &std::collections::BTreeMap<String, Ipld>, key: &str) -> Result<Option<Cid>, CarError> {
+fn optional_link(
+    map: &std::collections::BTreeMap<String, Ipld>,
+    key: &str,
+) -> Result<Option<Cid>, CarError> {
     match map.get(key) {
         None | Some(Ipld::Null) => Ok(None),
         Some(Ipld::Link(cid)) => Ok(Some(*cid)),
@@ -233,14 +239,25 @@ mod tests {
 
         let mut entries: Vec<(String, Cid)> = (0..12)
             .map(|i| (format!("app.bsky.feed.post/rk{i:03}"), record_cid(i)))
-            .chain((0..5).map(|i| (format!("app.bsky.actor.profile/rk{i:03}"), record_cid(100 + i))))
+            .chain((0..5).map(|i| {
+                (
+                    format!("app.bsky.actor.profile/rk{i:03}"),
+                    record_cid(100 + i),
+                )
+            }))
             .collect();
         entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         let (mst_root, mst_blocks) = build_mst(&entries).unwrap();
         let signing_key = SigningKey::random(&mut rand_core_shim());
-        let (commit_cid, commit_cbor) =
-            create_commit("did:plc:test1234", "3jxyz000000", mst_root, None, &signing_key).unwrap();
+        let (commit_cid, commit_cbor) = create_commit(
+            "did:plc:test1234",
+            "3jxyz000000",
+            mst_root,
+            None,
+            &signing_key,
+        )
+        .unwrap();
 
         let mut all_blocks = mst_blocks;
         all_blocks.push((commit_cid, commit_cbor));

@@ -1016,7 +1016,9 @@ async fn build_profile_response_inner(
         let mut urls =
             seiran_common::link_target::extract_link_targets(bio.as_deref().unwrap_or(""));
         for field in &profile_fields {
-            urls.extend(seiran_common::link_target::extract_link_targets(&field.value));
+            urls.extend(seiran_common::link_target::extract_link_targets(
+                &field.value,
+            ));
         }
         urls.sort();
         urls.dedup();
@@ -1157,31 +1159,33 @@ async fn build_profile_response_inner(
     // 済みの検証結果（`verified`）を返しつつ、表示のたびに非同期の再検証/同期ジョブを積む
     // （「表示時再検証」パターン）。ユーザーが情報が古いと感じたらリロードすれば、次に開く
     // 頃には反映されている想定（`docs/architecture.md`参照）。
-    let also_known_as: Vec<crate::handlers::also_known_as::AlsoKnownAsItem> =
-        if matches!(actor.actor_type.as_str(), "local" | "fedi" | "remote_seiran") {
-            match state.also_known_as.list_with_actor_info(actor_id).await {
-                Ok(rows) => {
-                    if matches!(actor.actor_type.as_str(), "fedi" | "remote_seiran") {
-                        state.enqueue_remote_also_known_as_sync(actor_id).await;
-                    } else {
-                        for row in &rows {
-                            if row.actor_type != "bsky" {
-                                state
-                                    .enqueue_also_known_as_verify(actor_id, row.target_actor_id)
-                                    .await;
-                            }
+    let also_known_as: Vec<crate::handlers::also_known_as::AlsoKnownAsItem> = if matches!(
+        actor.actor_type.as_str(),
+        "local" | "fedi" | "remote_seiran"
+    ) {
+        match state.also_known_as.list_with_actor_info(actor_id).await {
+            Ok(rows) => {
+                if matches!(actor.actor_type.as_str(), "fedi" | "remote_seiran") {
+                    state.enqueue_remote_also_known_as_sync(actor_id).await;
+                } else {
+                    for row in &rows {
+                        if row.actor_type != "bsky" {
+                            state
+                                .enqueue_also_known_as_verify(actor_id, row.target_actor_id)
+                                .await;
                         }
                     }
-                    rows.into_iter().map(Into::into).collect()
                 }
-                Err(e) => {
-                    tracing::error!("[profile] also_known_as 取得失敗: {}", e);
-                    vec![]
-                }
+                rows.into_iter().map(Into::into).collect()
             }
-        } else {
-            vec![]
-        };
+            Err(e) => {
+                tracing::error!("[profile] also_known_as 取得失敗: {}", e);
+                vec![]
+            }
+        }
+    } else {
+        vec![]
+    };
 
     // 本人が閲覧している場合は編集フォームの初期値として常に返す。他人には
     // birth_date_public=trueの場合のみ（Fediverse連合と同じ可視性ルール）。

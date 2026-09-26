@@ -57,10 +57,9 @@ async fn process_fetch_repo(
 ) -> Result<(), JobError> {
     let repo = PgAtMigrationRepository::new(pool.clone());
 
-    let Some(req) = repo
-        .get(request_id)
-        .await
-        .map_err(|e| JobError::Transient(format!("[MigrationFetchRepo] リクエスト取得失敗: {e}")))?
+    let Some(req) = repo.get(request_id).await.map_err(|e| {
+        JobError::Transient(format!("[MigrationFetchRepo] リクエスト取得失敗: {e}"))
+    })?
     else {
         tracing::warn!(
             "[MigrationFetchRepo] request_id={} が見つかりません（終了）",
@@ -84,8 +83,8 @@ async fn process_fetch_repo(
         handle: req.source_handle.clone(),
         access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
         refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
-    email: None,
-    email_confirmed: false,
+        email: None,
+        email_confirmed: false,
     };
 
     // `start`時点で確定したPDS Aのエンドポイント文字列をそのまま使う（DID文書から
@@ -94,20 +93,25 @@ async fn process_fetch_repo(
     let resolved = resolve_stored_endpoint(&req.source_pds_endpoint)
         .await
         .map_err(|e| {
-            JobError::Transient(format!("[MigrationFetchRepo] PDSエンドポイント検証失敗: {e}"))
+            JobError::Transient(format!(
+                "[MigrationFetchRepo] PDSエンドポイント検証失敗: {e}"
+            ))
         })?;
 
-    let car = fetch_repo_car(&resolved, &session).await.map_err(|e| {
-        JobError::Transient(format!("[MigrationFetchRepo] getRepo失敗: {e}"))
-    })?;
+    let car = fetch_repo_car(&resolved, &session)
+        .await
+        .map_err(|e| JobError::Transient(format!("[MigrationFetchRepo] getRepo失敗: {e}")))?;
 
     let records = match decode_repo_records(&car) {
         Ok(r) => r,
         Err(e) => {
-            let msg = format!("[MigrationFetchRepo] CARデコード失敗（不正なリポジトリデータ）: {e}");
+            let msg =
+                format!("[MigrationFetchRepo] CARデコード失敗（不正なリポジトリデータ）: {e}");
             repo.set_failed(request_id, "failed", &msg, now)
                 .await
-                .map_err(|e| JobError::Transient(format!("[MigrationFetchRepo] 失敗記録失敗: {e}")))?;
+                .map_err(|e| {
+                    JobError::Transient(format!("[MigrationFetchRepo] 失敗記録失敗: {e}"))
+                })?;
             return Err(JobError::Permanent(msg));
         }
     };
@@ -123,22 +127,28 @@ async fn process_fetch_repo(
         .collect();
     let staged_count = staged.len();
     repo.stage_records(request_id, &staged).await.map_err(|e| {
-        JobError::Transient(format!("[MigrationFetchRepo] レコードステージング失敗: {e}"))
+        JobError::Transient(format!(
+            "[MigrationFetchRepo] レコードステージング失敗: {e}"
+        ))
     })?;
 
-    let blob_cids = list_blobs(&resolved, &session).await.map_err(|e| {
-        JobError::Transient(format!("[MigrationFetchRepo] listBlobs失敗: {e}"))
-    })?;
+    let blob_cids = list_blobs(&resolved, &session)
+        .await
+        .map_err(|e| JobError::Transient(format!("[MigrationFetchRepo] listBlobs失敗: {e}")))?;
     let blob_count = blob_cids.len();
-    repo.stage_blobs(request_id, &blob_cids).await.map_err(|e| {
-        JobError::Transient(format!("[MigrationFetchRepo] blobステージング失敗: {e}"))
-    })?;
+    repo.stage_blobs(request_id, &blob_cids)
+        .await
+        .map_err(|e| {
+            JobError::Transient(format!("[MigrationFetchRepo] blobステージング失敗: {e}"))
+        })?;
 
     // メールは`start`時点でPDS A由来のものを既に確定済み（転入フローは独自のメール実在確認を
     // 行わない）のため、`awaiting_seiran_email`を経由せず直接次のステップへ進む。
     repo.set_status(request_id, "requesting_plc_signature", now)
         .await
-        .map_err(|e| JobError::Transient(format!("[MigrationFetchRepo] ステータス更新失敗: {e}")))?;
+        .map_err(|e| {
+            JobError::Transient(format!("[MigrationFetchRepo] ステータス更新失敗: {e}"))
+        })?;
 
     tracing::info!(
         "[MigrationFetchRepo] request_id={} 完了 (records={}, blobs={})",
@@ -199,7 +209,9 @@ async fn process_request_plc_signature(request_id: i64, pool: &PgPool) -> Result
     let repo = PgAtMigrationRepository::new(pool.clone());
 
     let Some(req) = repo.get(request_id).await.map_err(|e| {
-        JobError::Transient(format!("[MigrationRequestPlcSignature] リクエスト取得失敗: {e}"))
+        JobError::Transient(format!(
+            "[MigrationRequestPlcSignature] リクエスト取得失敗: {e}"
+        ))
     })?
     else {
         tracing::warn!(
@@ -223,8 +235,8 @@ async fn process_request_plc_signature(request_id: i64, pool: &PgPool) -> Result
         handle: req.source_handle.clone(),
         access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
         refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
-    email: None,
-    email_confirmed: false,
+        email: None,
+        email_confirmed: false,
     };
 
     let resolved = resolve_stored_endpoint(&req.source_pds_endpoint)
@@ -246,7 +258,9 @@ async fn process_request_plc_signature(request_id: i64, pool: &PgPool) -> Result
     repo.set_status(request_id, "awaiting_plc_token", chrono::Utc::now())
         .await
         .map_err(|e| {
-            JobError::Transient(format!("[MigrationRequestPlcSignature] ステータス更新失敗: {e}"))
+            JobError::Transient(format!(
+                "[MigrationRequestPlcSignature] ステータス更新失敗: {e}"
+            ))
         })?;
 
     tracing::info!(
@@ -316,10 +330,9 @@ async fn process_import(
     use crate::repository::{InsertFullParams, PgPostRepository, PostRepository};
 
     let repo = PgAtMigrationRepository::new(pool.clone());
-    let Some(req) = repo
-        .get(request_id)
-        .await
-        .map_err(|e| JobError::Transient(format!("[MigrationImportProcess] リクエスト取得失敗: {e}")))?
+    let Some(req) = repo.get(request_id).await.map_err(|e| {
+        JobError::Transient(format!("[MigrationImportProcess] リクエスト取得失敗: {e}"))
+    })?
     else {
         tracing::warn!(
             "[MigrationImportProcess] request_id={} が見つかりません（終了）",
@@ -350,10 +363,10 @@ async fn process_import(
     let now = chrono::Utc::now();
 
     // ① atp_migration_records: 未取り込み分を1件ずつ実体化（posts or atp_records）
-    if let Some((id, collection, rkey, cid, bytes)) = repo
-        .claim_next_record(request_id)
-        .await
-        .map_err(|e| JobError::Transient(format!("[MigrationImportProcess] レコード取得失敗: {e}")))?
+    if let Some((id, collection, rkey, cid, bytes)) =
+        repo.claim_next_record(request_id).await.map_err(|e| {
+            JobError::Transient(format!("[MigrationImportProcess] レコード取得失敗: {e}"))
+        })?
     {
         let _ = cid; // CIDは`commit_generic_record`/`commit_post_record`が再計算する（内容一致のはず）
         let value = crate::atp::decode_dagcbor_to_json(&bytes).map_err(|e| {
@@ -389,7 +402,9 @@ async fn process_import(
                 .as_ref()
                 .map(|sp| sp.emoji_map.clone())
                 .unwrap_or_else(|| serde_json::json!({}));
-            let content_warning = seiran_post_ext.as_ref().and_then(|sp| sp.content_warning.clone());
+            let content_warning = seiran_post_ext
+                .as_ref()
+                .and_then(|sp| sp.content_warning.clone());
             let poll = seiran_post_ext.as_ref().and_then(|sp| sp.poll.clone());
             let visibility = seiran_post_ext
                 .as_ref()
@@ -451,8 +466,12 @@ async fn process_import(
 
                 if let Some(sp) = &seiran_post_ext {
                     if !sp.link_cards.is_empty() {
-                        crate::seiran_post::insert_seiran_post_link_cards(pool, post_id, &sp.link_cards)
-                            .await;
+                        crate::seiran_post::insert_seiran_post_link_cards(
+                            pool,
+                            post_id,
+                            &sp.link_cards,
+                        )
+                        .await;
                     }
                 }
 
@@ -460,7 +479,8 @@ async fn process_import(
                 // URLを決定的に組み立てる既存ロジックを再利用する（`atp_migration_blobs`側の
                 // blob取り込み順に依存しない）。
                 if let Some(embed) = value.get("embed") {
-                    let attachments = crate::atp::parse_bsky_embed_attachments(embed, &req.source_did);
+                    let attachments =
+                        crate::atp::parse_bsky_embed_attachments(embed, &req.source_did);
                     for (position, att) in attachments.into_iter().enumerate() {
                         if let Err(e) = posts_repo
                             .attach_remote_media_url(
@@ -504,7 +524,9 @@ async fn process_import(
         }
 
         repo.mark_record_imported(id, now).await.map_err(|e| {
-            JobError::Transient(format!("[MigrationImportProcess] レコード取込済みマーク失敗: {e}"))
+            JobError::Transient(format!(
+                "[MigrationImportProcess] レコード取込済みマーク失敗: {e}"
+            ))
         })?;
         return Ok(ImportNextAction::Continue);
     }
@@ -520,18 +542,22 @@ async fn process_import(
             handle: req.source_handle.clone(),
             access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
             refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
-        email: None,
-        email_confirmed: false,
+            email: None,
+            email_confirmed: false,
         };
         let resolved = crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint)
             .await
             .map_err(|e| {
-                JobError::Transient(format!("[MigrationImportProcess] PDSエンドポイント検証失敗: {e}"))
+                JobError::Transient(format!(
+                    "[MigrationImportProcess] PDSエンドポイント検証失敗: {e}"
+                ))
             })?;
         let bytes = crate::atp::migration_client::fetch_blob(&resolved, &session, &cid)
             .await
             .map_err(|e| {
-                JobError::Transient(format!("[MigrationImportProcess] getBlob失敗 (cid={cid}): {e}"))
+                JobError::Transient(format!(
+                    "[MigrationImportProcess] getBlob失敗 (cid={cid}): {e}"
+                ))
             })?;
 
         let encryption_key = ctx.encryption_key.clone().ok_or_else(|| {
@@ -539,10 +565,14 @@ async fn process_import(
         })?;
         import_one_blob(pool, encryption_key, actor_id, &cid, &bytes)
             .await
-            .map_err(|e| JobError::Transient(format!("[MigrationImportProcess] blob保存失敗: {e}")))?;
+            .map_err(|e| {
+                JobError::Transient(format!("[MigrationImportProcess] blob保存失敗: {e}"))
+            })?;
 
         repo.mark_blob_imported(id, now).await.map_err(|e| {
-            JobError::Transient(format!("[MigrationImportProcess] blob取込済みマーク失敗: {e}"))
+            JobError::Transient(format!(
+                "[MigrationImportProcess] blob取込済みマーク失敗: {e}"
+            ))
         })?;
         return Ok(ImportNextAction::Continue);
     }
@@ -550,7 +580,9 @@ async fn process_import(
     // ③ 両方尽きた: 移行元アカウント無効化（ベストエフォート）へ進める
     repo.set_status(request_id, "deactivating_source", now)
         .await
-        .map_err(|e| JobError::Transient(format!("[MigrationImportProcess] ステータス更新失敗: {e}")))?;
+        .map_err(|e| {
+            JobError::Transient(format!("[MigrationImportProcess] ステータス更新失敗: {e}"))
+        })?;
     if let Err(e) = ctx
         .queue
         .enqueue(
@@ -662,7 +694,10 @@ async fn import_one_blob(
 
 /// `Job::MigrationDeactivateSource` — 単発・ベストエフォート。失敗してもログのみで
 /// `completed`へ進める（`auth.rs`の付随処理失敗時ログのみの原則と同じ）。
-pub async fn handle_deactivate_source(request_id: i64, ctx: Arc<JobContext>) -> Result<(), JobError> {
+pub async fn handle_deactivate_source(
+    request_id: i64,
+    ctx: Arc<JobContext>,
+) -> Result<(), JobError> {
     let Some(pool) = ctx.db_pool.as_ref() else {
         return Err(JobError::Permanent(
             "[MigrationDeactivateSource] DB pool 未設定".to_string(),
@@ -671,7 +706,9 @@ pub async fn handle_deactivate_source(request_id: i64, ctx: Arc<JobContext>) -> 
 
     let repo = PgAtMigrationRepository::new(pool.clone());
     let Some(req) = repo.get(request_id).await.map_err(|e| {
-        JobError::Transient(format!("[MigrationDeactivateSource] リクエスト取得失敗: {e}"))
+        JobError::Transient(format!(
+            "[MigrationDeactivateSource] リクエスト取得失敗: {e}"
+        ))
     })?
     else {
         return Ok(());
@@ -685,12 +722,13 @@ pub async fn handle_deactivate_source(request_id: i64, ctx: Arc<JobContext>) -> 
         handle: req.source_handle.clone(),
         access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
         refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
-    email: None,
-    email_confirmed: false,
+        email: None,
+        email_confirmed: false,
     };
     match crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint).await {
         Ok(resolved) => {
-            if let Err(e) = crate::atp::migration_client::deactivate_account(&resolved, &session).await
+            if let Err(e) =
+                crate::atp::migration_client::deactivate_account(&resolved, &session).await
             {
                 tracing::error!(
                     "[MigrationDeactivateSource] deactivateAccount失敗（続行、request_id={}）: {}",
@@ -711,7 +749,9 @@ pub async fn handle_deactivate_source(request_id: i64, ctx: Arc<JobContext>) -> 
     repo.set_status(request_id, "completed", chrono::Utc::now())
         .await
         .map_err(|e| {
-            JobError::Transient(format!("[MigrationDeactivateSource] ステータス更新失敗: {e}"))
+            JobError::Transient(format!(
+                "[MigrationDeactivateSource] ステータス更新失敗: {e}"
+            ))
         })?;
     tracing::info!(
         "[MigrationDeactivateSource] request_id={} 完了（転入フロー完了）",
@@ -779,10 +819,9 @@ async fn process_import_follows(
     ctx: &JobContext,
 ) -> Result<ImportNextAction, JobError> {
     let repo = PgAtMigrationRepository::new(pool.clone());
-    let Some(req) = repo
-        .get(request_id)
-        .await
-        .map_err(|e| JobError::Transient(format!("[MigrationImportFollows] リクエスト取得失敗: {e}")))?
+    let Some(req) = repo.get(request_id).await.map_err(|e| {
+        JobError::Transient(format!("[MigrationImportFollows] リクエスト取得失敗: {e}"))
+    })?
     else {
         tracing::warn!(
             "[MigrationImportFollows] request_id={} が見つかりません（終了）",
@@ -803,7 +842,9 @@ async fn process_import_follows(
     let Some((id, rkey, bytes)) = repo
         .claim_next_follow_record(request_id)
         .await
-        .map_err(|e| JobError::Transient(format!("[MigrationImportFollows] レコード取得失敗: {e}")))?
+        .map_err(|e| {
+            JobError::Transient(format!("[MigrationImportFollows] レコード取得失敗: {e}"))
+        })?
     else {
         tracing::info!(
             "[MigrationImportFollows] request_id={} フォロー関係復元完了",

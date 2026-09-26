@@ -38,7 +38,11 @@ pub async fn create_dm_bsky_reaction(
     };
 
     // 可視性チェック（DM参加者本人かどうか）。
-    match state.posts.find_by_id_for_viewer(post_id, Some(me.actor_id)).await {
+    match state
+        .posts
+        .find_by_id_for_viewer(post_id, Some(me.actor_id))
+        .await
+    {
         Ok(Some(_)) => {}
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
@@ -81,7 +85,9 @@ pub async fn create_dm_bsky_reaction(
         .await
     {
         Ok(v) => v,
-        Err(e) => return ApiError::Internal(format!("リアクション保存失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("リアクション保存失敗: {}", e)).into_response()
+        }
     };
     if !inserted {
         // 同じ絵文字は1個まで（Bsky仕様、UNIQUE(post_id, actor_id, content)）。
@@ -110,7 +116,11 @@ pub async fn delete_dm_bsky_reaction(
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
-    match state.posts.find_by_id_for_viewer(post_id, Some(me.actor_id)).await {
+    match state
+        .posts
+        .find_by_id_for_viewer(post_id, Some(me.actor_id))
+        .await
+    {
         Ok(Some(_)) => {}
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
@@ -146,13 +156,21 @@ pub async fn delete_dm_bsky_reaction(
 /// 相当）。Bsky DMは相手側からメッセージを削除できない仕様のため、fedi/local向けの
 /// 完全削除（`DELETE /api/notes/:id`）とは別に用意する。bsky宛でないメッセージにも
 /// 呼べる（自分の画面を整理したいだけの用途もありうるため拒否しない）。
-pub async fn hide_dm_message(Path(post_id_str): Path<String>, me: AuthedUser, State(state): State<AppState>) -> Response {
+pub async fn hide_dm_message(
+    Path(post_id_str): Path<String>,
+    me: AuthedUser,
+    State(state): State<AppState>,
+) -> Response {
     let post_id: i64 = match post_id_str.parse() {
         Ok(id) => id,
         Err(_) => return ApiError::BadRequest("INVALID_NOTE_ID".to_owned()).into_response(),
     };
 
-    match state.posts.find_by_id_for_viewer(post_id, Some(me.actor_id)).await {
+    match state
+        .posts
+        .find_by_id_for_viewer(post_id, Some(me.actor_id))
+        .await
+    {
         Ok(Some(_)) => {}
         Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),

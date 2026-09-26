@@ -25,9 +25,7 @@ pub enum MailError {
 /// SMTP未設定のインスタンスではコード送信自体が不可能なため、この判定で2FAを
 /// 常にスキップする。
 pub fn is_smtp_configured(settings: &HashMap<String, String>) -> bool {
-    settings
-        .get("smtp_host")
-        .is_some_and(|v| !v.is_empty())
+    settings.get("smtp_host").is_some_and(|v| !v.is_empty())
 }
 
 /// DB から取得した site_settings のマップから SMTP トランスポートを構築する。

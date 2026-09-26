@@ -68,7 +68,9 @@ use seiran_common::repository::{
     extract_shortcode_candidates, Actor, InsertFullParams, InsertRepostParams, NotificationKind,
     TimelinePost,
 };
-use seiran_common::streaming::{broadcast_dm_reaction_update, broadcast_poll_update, broadcast_reaction_update};
+use seiran_common::streaming::{
+    broadcast_dm_reaction_update, broadcast_poll_update, broadcast_reaction_update,
+};
 use seiran_common::{
     ap::{fetch_ap_history, plain_to_html_with_mentions},
     generate_snowflake_id,

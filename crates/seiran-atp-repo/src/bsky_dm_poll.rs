@@ -109,8 +109,8 @@ async fn poll_user(
         .unwrap_or_default();
 
     for convo in &convos {
-        if let Err(e) = sync_convo(pool, job_queue, http, stream_hub, actor_id, did, pem, convo)
-            .await
+        if let Err(e) =
+            sync_convo(pool, job_queue, http, stream_hub, actor_id, did, pem, convo).await
         {
             tracing::error!("[BskyDmPoll] convo同期失敗 actor_id={}: {}", actor_id, e);
         }
@@ -466,7 +466,10 @@ async fn sync_message_reactions(
             .iter()
             .filter_map(|r| {
                 let value = r.get("value").and_then(|v| v.as_str())?.to_string();
-                let sender_did = r.get("sender").and_then(|s| s.get("did")).and_then(|v| v.as_str())?;
+                let sender_did = r
+                    .get("sender")
+                    .and_then(|s| s.get("did"))
+                    .and_then(|v| v.as_str())?;
                 let actor_id = if sender_did == local_did {
                     local_actor_id
                 } else if sender_did == peer_did {
@@ -484,9 +487,15 @@ async fn sync_message_reactions(
             .await
             .map_err(|e| format!("dm_bsky_reactions同期失敗 post_id={}: {}", post_id, e))?;
         if changed {
-            notify_dm_bsky_reactions_changed(pool, stream_hub, post_id, local_actor_id, peer_actor_id)
-                .await
-                .map_err(|e| format!("リアクション変更通知失敗 post_id={}: {}", post_id, e))?;
+            notify_dm_bsky_reactions_changed(
+                pool,
+                stream_hub,
+                post_id,
+                local_actor_id,
+                peer_actor_id,
+            )
+            .await
+            .map_err(|e| format!("リアクション変更通知失敗 post_id={}: {}", post_id, e))?;
         }
     }
     Ok(())

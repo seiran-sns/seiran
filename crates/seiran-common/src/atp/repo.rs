@@ -116,7 +116,8 @@ pub fn ipld_to_json(ipld: &Ipld) -> serde_json::Value {
 /// DAG-CBORバイト列をJSON値へデコードする（`ipld_to_json`の合成）。
 /// CARからデコードした生レコードバイト列を扱う既存DID転入フローで使う。
 pub fn decode_dagcbor_to_json(cbor: &[u8]) -> Result<serde_json::Value, RepoError> {
-    let ipld: Ipld = serde_ipld_dagcbor::from_slice(cbor).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let ipld: Ipld =
+        serde_ipld_dagcbor::from_slice(cbor).map_err(|e| RepoError::Cbor(e.to_string()))?;
     Ok(ipld_to_json(&ipld))
 }
 

@@ -33,11 +33,13 @@ async fn resolve_reaction_targets(
     post_id: i64,
     reactor_actor_id: i64,
 ) -> Result<Option<ReactionTargets>, ApError> {
-    let row = sqlx::query("SELECT ap_object_id, visibility::text AS visibility FROM posts WHERE id = $1 LIMIT 1")
-        .bind(post_id)
-        .fetch_optional(db)
-        .await
-        .map_err(|e| ApError::Other(format!("対象ポスト取得エラー: {}", e)))?;
+    let row = sqlx::query(
+        "SELECT ap_object_id, visibility::text AS visibility FROM posts WHERE id = $1 LIMIT 1",
+    )
+    .bind(post_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| ApError::Other(format!("対象ポスト取得エラー: {}", e)))?;
     let Some(row) = row else { return Ok(None) };
     let object_ap_id: Option<String> = row.try_get("ap_object_id").unwrap_or(None);
     let Some(object_ap_id) = object_ap_id else {

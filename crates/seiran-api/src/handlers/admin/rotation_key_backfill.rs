@@ -39,8 +39,8 @@ pub async fn run_rotation_key_backfill(
         ));
     }
 
-    let server_shared_key = signing_key_from_pem(&state.secrets.atproto_private_key_pem)
-        .map_err(|e| {
+    let server_shared_key =
+        signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
             tracing::error!("[admin:rotation-key-backfill] 共有鍵ロード失敗: {}", e);
             ApiError::Internal("ATP鍵ロードエラー".to_string())
         })?;

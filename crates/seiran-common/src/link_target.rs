@@ -201,9 +201,10 @@ async fn resolve_bsky_post(
         .await
         .map_err(ResolveError::Upstream)?
         .ok_or(ResolveError::Invalid)?;
-    let actor = target_resolve::resolve_and_upsert_target(&ctx.target_resolve_ctx(), &post.author_did)
-        .await
-        .map_err(|_| ResolveError::Invalid)?;
+    let actor =
+        target_resolve::resolve_and_upsert_target(&ctx.target_resolve_ctx(), &post.author_did)
+            .await
+            .map_err(|_| ResolveError::Invalid)?;
     let post_id = crate::atp::upsert_bsky_post(
         ctx.db_pool,
         ctx.job_queue,

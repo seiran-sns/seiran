@@ -60,4 +60,3 @@ pub async fn release(mut conn: PoolConnection<Postgres>, key: i64) {
         tracing::error!("[advisory_lock] key={} unlock 失敗: {}", key, e);
     }
 }
-

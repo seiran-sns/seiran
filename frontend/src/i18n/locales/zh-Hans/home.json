@@ -89,7 +89,14 @@
     "referencePendingNotice": "尚未导入",
     "referenceGoneNotice": "找不到引用对象",
     "referenceImportButton": "导入",
-    "referenceImporting": "导入中…"
+    "referenceImporting": "导入中…",
+    "bridgeConfirmModal": {
+      "title": "这是一条桥接帖子",
+      "body": "这是 brid.gy 为其他协议自动生成的副本。您仍然可以直接回复/表态，或者查看原始帖子。",
+      "confirmReplyButton": "仍然回复",
+      "confirmReactButton": "仍然表态",
+      "viewOriginalButton": "查看原始帖子"
+    }
   },
   "noteList": {
     "emptyDefault": "没有帖子。",

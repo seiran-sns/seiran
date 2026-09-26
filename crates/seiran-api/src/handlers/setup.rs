@@ -205,9 +205,9 @@ pub async fn setup(
             avatar_url: None,          // セットアップ直後はアバター未設定
             language_preference: None, // セットアップ直後は「自動」
             token,
-            is_suspended: false, // セットアップ直後は凍結され得ない
+            is_suspended: false,    // セットアップ直後は凍結され得ない
             migration_status: None, // セットアップ（初期管理者作成）は転入経由ではない
-            did_moved_out: false, // セットアップ直後はDID転出済みであり得ない
+            did_moved_out: false,   // セットアップ直後はDID転出済みであり得ない
         },
     }))
 }

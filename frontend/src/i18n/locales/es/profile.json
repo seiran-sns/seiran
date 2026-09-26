@@ -1,11 +1,6 @@
 {
   "profilePage": {
     "title": "Perfil",
-    "warpBanner": {
-      "prefix": "Esta cuenta es una",
-      "shadowLabel": "apoderado",
-      "suffix": "cuenta. La cuenta real ({{handle}}) está aquí →"
-    },
     "pairedBadge": "Atado al alma",
     "pairedBadgeTitle": "Vinculado con un usuario remoto de Seiran mediante vinculación de almas.",
     "suspendedBadge": "Suspendida",

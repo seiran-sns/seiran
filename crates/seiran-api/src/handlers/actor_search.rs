@@ -77,12 +77,8 @@ pub async fn search_actors(
                 // `resolve_and_upsert_target` は先頭の`@`を無条件で除去するため無くても
                 // 動作はするが、ハンドルの慣習的な表記（`@user`/`@user@domain`）に揃える。
                 let target = seiran_common::username::actor_handle(&username, &domain, &actor_type);
-                let avatar_url = seiran_common::avatar::resolve_avatar_url(
-                    avatar_url,
-                    &actor_type,
-                    &domain,
-                    id,
-                );
+                let avatar_url =
+                    seiran_common::avatar::resolve_avatar_url(avatar_url, &actor_type, &domain, id);
                 serde_json::json!({
                     "actor_id": id.to_string(),
                     "username": username,
@@ -157,12 +153,8 @@ pub async fn suggest_actors(
         .map(
             |(id, username, domain, display_name, actor_type, avatar_url)| {
                 let target = suggestion_target(&actor_type, &username, &domain, &query_lower);
-                let avatar_url = seiran_common::avatar::resolve_avatar_url(
-                    avatar_url,
-                    &actor_type,
-                    &domain,
-                    id,
-                );
+                let avatar_url =
+                    seiran_common::avatar::resolve_avatar_url(avatar_url, &actor_type, &domain, id);
                 serde_json::json!({
                     "actor_id": id.to_string(),
                     "username": username,

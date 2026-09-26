@@ -255,26 +255,24 @@ pub async fn register(
     // DID確定 → TXT セット → PLC送信（最大3回リトライ）。DB 書き込みはここより後
     // — 失敗時に孤立レコードが残らないようにするため。自ホストドメインが未確定
     // （シングルホストモード）の間はPLC genesisを行わない（`state.local_domain`参照）。
-    let (at_did, at_signing_key_pem, at_rotation_key_pem, cf_record_id) = if state
-        .local_domain
-        .is_confirmed()
-    {
-        let rotation_key =
-            signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
-                tracing::error!("[register] 回転鍵ロード失敗: {}", e);
-                ApiError::Internal("ATP鍵ロードエラー".to_string())
-            })?;
-        let (did, pem, rotation_pem, cf_id) = crate::handlers::plc_genesis::register_plc_did(
-            &state,
-            &req.username,
-            &rotation_key,
-            "register",
-        )
-        .await?;
-        (Some(did), Some(pem), Some(rotation_pem), cf_id)
-    } else {
-        (None, None, None, None)
-    };
+    let (at_did, at_signing_key_pem, at_rotation_key_pem, cf_record_id) =
+        if state.local_domain.is_confirmed() {
+            let rotation_key = signing_key_from_pem(&state.secrets.atproto_private_key_pem)
+                .map_err(|e| {
+                    tracing::error!("[register] 回転鍵ロード失敗: {}", e);
+                    ApiError::Internal("ATP鍵ロードエラー".to_string())
+                })?;
+            let (did, pem, rotation_pem, cf_id) = crate::handlers::plc_genesis::register_plc_did(
+                &state,
+                &req.username,
+                &rotation_key,
+                "register",
+            )
+            .await?;
+            (Some(did), Some(pem), Some(rotation_pem), cf_id)
+        } else {
+            (None, None, None, None)
+        };
 
     // 4. DB 書き込み（PLC 送信成功後）
     let user_id = state
@@ -389,9 +387,9 @@ pub async fn register(
             )),
             language_preference: None, // 登録直後は「自動」
             token,
-            is_suspended: false, // 登録直後は凍結され得ない
+            is_suspended: false,    // 登録直後は凍結され得ない
             migration_status: None, // 通常登録（転入経由ではない）
-            did_moved_out: false, // 登録直後はDID転出済みであり得ない
+            did_moved_out: false,   // 登録直後はDID転出済みであり得ない
         },
     }))
 }

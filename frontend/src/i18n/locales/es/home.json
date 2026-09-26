@@ -89,7 +89,14 @@
     "referencePendingNotice": "Aún no importado",
     "referenceGoneNotice": "No se encontró la referencia",
     "referenceImportButton": "Importar",
-    "referenceImporting": "Importando…"
+    "referenceImporting": "Importando…",
+    "bridgeConfirmModal": {
+      "title": "Esta es una publicación puenteada",
+      "body": "Esta es una copia generada automáticamente por brid.gy para otro protocolo. Puede responder/reaccionar de todos modos, o ver la publicación original.",
+      "confirmReplyButton": "Responder de todos modos",
+      "confirmReactButton": "Reaccionar de todos modos",
+      "viewOriginalButton": "Ver publicación original"
+    }
   },
   "noteList": {
     "emptyDefault": "Sin publicaciones.",

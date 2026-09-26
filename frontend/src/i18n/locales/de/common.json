@@ -43,6 +43,10 @@
   "remoteBanner": {
     "note": "Dies ist ein Remote-Beitrag",
     "user": "Dies ist ein Remote-Benutzer",
-    "viewRemote": "Auf Remote-Server anzeigen"
+    "viewRemote": "Auf Remote-Server anzeigen",
+    "bridgePost": "Dies ist ein gebrückter Beitrag",
+    "viewOriginal": "Original-Beitrag anzeigen",
+    "bridgeUser": "Dies ist ein Brücken-Benutzer",
+    "viewRealUser": "Echtes Konto anzeigen"
   }
 }

@@ -89,7 +89,14 @@
     "referencePendingNotice": "아직 가져오지 않았습니다",
     "referenceGoneNotice": "참조를 찾을 수 없습니다",
     "referenceImportButton": "가져오기",
-    "referenceImporting": "가져오는 중…"
+    "referenceImporting": "가져오는 중…",
+    "bridgeConfirmModal": {
+      "title": "브릿지된 게시물입니다",
+      "body": "brid.gy가 다른 프로토콜용으로 자동 생성한 복사본입니다. 그대로 답글/리액션을 남기거나, 원본 게시물을 볼 수 있습니다.",
+      "confirmReplyButton": "그대로 답글 남기기",
+      "confirmReactButton": "그대로 리액션하기",
+      "viewOriginalButton": "원본 게시물 보기"
+    }
   },
   "noteList": {
     "emptyDefault": "게시물이 없습니다.",

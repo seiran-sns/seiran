@@ -21,10 +21,17 @@ pub trait RotationKeyBackfillRepository: Send + Sync {
     /// うち最小のものを返す（`None`なら先頭から）。dry-runでは`mark_backfilled`を呼ばず
     /// 状態を進めないため、呼び出し側がこのカーソルで進行を管理する（呼ばないと同じ
     /// 1件を無限に返し続けてしまう）。無ければ`None`。
-    async fn next_candidate(&self, after_id: Option<i64>) -> Result<Option<(i64, String)>, sqlx::Error>;
+    async fn next_candidate(
+        &self,
+        after_id: Option<i64>,
+    ) -> Result<Option<(i64, String)>, sqlx::Error>;
 
     /// バックフィル完了をマークする。
-    async fn mark_backfilled(&self, actor_id: i64, at_rotation_key_pem: &str) -> Result<(), sqlx::Error>;
+    async fn mark_backfilled(
+        &self,
+        actor_id: i64,
+        at_rotation_key_pem: &str,
+    ) -> Result<(), sqlx::Error>;
 
     /// 残り件数（dry-run表示・進捗確認用）。
     async fn count_pending(&self) -> Result<i64, sqlx::Error>;
@@ -52,7 +59,10 @@ const CANDIDATE_WHERE: &str = "actor_type = 'local'
 
 #[async_trait]
 impl RotationKeyBackfillRepository for PgRotationKeyBackfillRepository {
-    async fn next_candidate(&self, after_id: Option<i64>) -> Result<Option<(i64, String)>, sqlx::Error> {
+    async fn next_candidate(
+        &self,
+        after_id: Option<i64>,
+    ) -> Result<Option<(i64, String)>, sqlx::Error> {
         sqlx::query_as(&format!(
             "SELECT id, at_did FROM actors WHERE {CANDIDATE_WHERE} AND id > $1 ORDER BY id LIMIT 1"
         ))
@@ -61,7 +71,11 @@ impl RotationKeyBackfillRepository for PgRotationKeyBackfillRepository {
         .await
     }
 
-    async fn mark_backfilled(&self, actor_id: i64, at_rotation_key_pem: &str) -> Result<(), sqlx::Error> {
+    async fn mark_backfilled(
+        &self,
+        actor_id: i64,
+        at_rotation_key_pem: &str,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE actors SET at_rotation_key_pem = $1 WHERE id = $2")
             .bind(at_rotation_key_pem)
             .bind(actor_id)
@@ -71,8 +85,10 @@ impl RotationKeyBackfillRepository for PgRotationKeyBackfillRepository {
     }
 
     async fn count_pending(&self) -> Result<i64, sqlx::Error> {
-        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM actors WHERE {CANDIDATE_WHERE}"))
-            .fetch_one(&self.pool)
-            .await
+        sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) FROM actors WHERE {CANDIDATE_WHERE}"
+        ))
+        .fetch_one(&self.pool)
+        .await
     }
 }

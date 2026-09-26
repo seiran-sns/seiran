@@ -332,7 +332,6 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
   // 直前のcaret位置を保存して上のuseLayoutEffectで復元する。
   useEffect(() => {
     preserveCaretForRender();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [federateToBsky]);
 
   useEffect(() => {

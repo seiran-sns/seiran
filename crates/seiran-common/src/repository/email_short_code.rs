@@ -25,7 +25,12 @@ pub trait EmailShortCodeRepository: Send + Sync {
     /// 有効なコード（期限内・`actor_id`+`purpose`一致）を消費する。ワンタイムのため
     /// 同一`actor_id`+`purpose`の残りのコード行も全て削除する（複数回リクエストした場合の
     /// 古いコードの再利用を防ぐ）。
-    async fn consume(&self, actor_id: i64, purpose: &str, code_hash: &str) -> Result<bool, sqlx::Error>;
+    async fn consume(
+        &self,
+        actor_id: i64,
+        purpose: &str,
+        code_hash: &str,
+    ) -> Result<bool, sqlx::Error>;
 
     /// 有効期限内のコードが1件でも残っているか（`signPlcOperation`が検証必須かどうかの
     /// 判定に使う。`issue`後にメール送信自体が失敗して`revoke`された場合や、SMTP未設定で
@@ -73,7 +78,12 @@ impl EmailShortCodeRepository for PgEmailShortCodeRepository {
         .map(|_| ())
     }
 
-    async fn consume(&self, actor_id: i64, purpose: &str, code_hash: &str) -> Result<bool, sqlx::Error> {
+    async fn consume(
+        &self,
+        actor_id: i64,
+        purpose: &str,
+        code_hash: &str,
+    ) -> Result<bool, sqlx::Error> {
         let matched: Option<(i64,)> = sqlx::query_as(
             "SELECT id FROM email_short_codes
              WHERE actor_id = $1 AND purpose = $2 AND code_hash = $3 AND expires_at > now()

@@ -234,7 +234,12 @@ pub async fn xrpc_create_session(
     // メインパスワードでcreateSessionを呼んでおり、PDS側はメインパスワードを拒否していない。
     // アプリパスワードはサードパーティに安全に権限を渡すための任意のオプションであって、
     // PDSが強制する必須要件ではない）。
-    let login_row = state.users.find_login_by_username(&actor.username).await.ok().flatten();
+    let login_row = state
+        .users
+        .find_login_by_username(&actor.username)
+        .await
+        .ok()
+        .flatten();
     let main_hash = login_row.as_ref().and_then(|l| l.password_hash.clone());
     password_ok = password_ok
         || match &main_hash {
@@ -266,13 +271,30 @@ pub async fn xrpc_create_session(
                 let id = seiran_common::generate_snowflake_id(now);
                 if let Err(e) = state
                     .email_short_codes
-                    .issue(id, actor.id, PURPOSE, &code_hash, now + chrono::Duration::minutes(15), now)
+                    .issue(
+                        id,
+                        actor.id,
+                        PURPOSE,
+                        &code_hash,
+                        now + chrono::Duration::minutes(15),
+                        now,
+                    )
                     .await
                 {
-                    return ApiError::Internal(format!("[createSession] 確認コード発行失敗: {}", e)).into_response();
+                    return ApiError::Internal(format!(
+                        "[createSession] 確認コード発行失敗: {}",
+                        e
+                    ))
+                    .into_response();
                 }
                 if let Some(login) = &login_row {
-                    if let Err(e) = crate::mailer::send_atp_session_2fa_code(&smtp_settings, &login.email, &code).await {
+                    if let Err(e) = crate::mailer::send_atp_session_2fa_code(
+                        &smtp_settings,
+                        &login.email,
+                        &code,
+                    )
+                    .await
+                    {
                         tracing::error!("[createSession] 確認コード送信失敗: {}", e);
                     }
                 }
@@ -280,10 +302,20 @@ pub async fn xrpc_create_session(
             }
             Some(token) => {
                 let code_hash = hex::encode(sha2::Sha256::digest(token.trim().as_bytes()));
-                match state.email_short_codes.consume(actor.id, PURPOSE, &code_hash).await {
+                match state
+                    .email_short_codes
+                    .consume(actor.id, PURPOSE, &code_hash)
+                    .await
+                {
                     Ok(true) => {}
                     Ok(false) => return auth_required_error(),
-                    Err(e) => return ApiError::Internal(format!("[createSession] 確認コード検証失敗: {}", e)).into_response(),
+                    Err(e) => {
+                        return ApiError::Internal(format!(
+                            "[createSession] 確認コード検証失敗: {}",
+                            e
+                        ))
+                        .into_response()
+                    }
                 }
             }
         }
@@ -482,16 +514,29 @@ pub async fn xrpc_check_account_status(
     .await
     {
         Ok(n) => n,
-        Err(e) => return ApiError::Internal(format!("[checkAccountStatus] indexedRecords集計失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!(
+                "[checkAccountStatus] indexedRecords集計失敗: {}",
+                e
+            ))
+            .into_response()
+        }
     };
-    let repo_blocks: i64 = match sqlx::query_scalar("SELECT COUNT(*) FROM atp_blocks WHERE actor_id = $1")
-        .bind(actor.id)
-        .fetch_one(&state.db)
-        .await
-    {
-        Ok(n) => n,
-        Err(e) => return ApiError::Internal(format!("[checkAccountStatus] repoBlocks集計失敗: {}", e)).into_response(),
-    };
+    let repo_blocks: i64 =
+        match sqlx::query_scalar("SELECT COUNT(*) FROM atp_blocks WHERE actor_id = $1")
+            .bind(actor.id)
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(n) => n,
+            Err(e) => {
+                return ApiError::Internal(format!(
+                    "[checkAccountStatus] repoBlocks集計失敗: {}",
+                    e
+                ))
+                .into_response()
+            }
+        };
     let blobs: i64 = match sqlx::query_scalar(
         "SELECT COUNT(*) FROM media_files WHERE uploaded_by_actor_id = $1",
     )
@@ -500,7 +545,10 @@ pub async fn xrpc_check_account_status(
     .await
     {
         Ok(n) => n,
-        Err(e) => return ApiError::Internal(format!("[checkAccountStatus] blobs集計失敗: {}", e)).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("[checkAccountStatus] blobs集計失敗: {}", e))
+                .into_response()
+        }
     };
 
     Json(serde_json::json!({
@@ -541,12 +589,15 @@ pub async fn xrpc_deactivate_account(
         _ => return ApiError::Unauthorized("アクターが見つかりません").into_response(),
     };
 
-    if let Err(e) = sqlx::query("UPDATE actors SET did_moved_out_at = COALESCE(did_moved_out_at, NOW()) WHERE id = $1")
-        .bind(actor.id)
-        .execute(&state.db)
-        .await
+    if let Err(e) = sqlx::query(
+        "UPDATE actors SET did_moved_out_at = COALESCE(did_moved_out_at, NOW()) WHERE id = $1",
+    )
+    .bind(actor.id)
+    .execute(&state.db)
+    .await
     {
-        return ApiError::Internal(format!("[deactivateAccount] DB更新失敗: {}", e)).into_response();
+        return ApiError::Internal(format!("[deactivateAccount] DB更新失敗: {}", e))
+            .into_response();
     }
     tracing::warn!(
         "[deactivateAccount] actor_id={} did={} did_moved_out_atを設定",

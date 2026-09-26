@@ -43,6 +43,10 @@
   "remoteBanner": {
     "note": "這是一則遠端貼文",
     "user": "這是遠端使用者",
-    "viewRemote": "在遠端伺服器上檢視"
+    "viewRemote": "在遠端伺服器上檢視",
+    "bridgePost": "這是一則橋接貼文",
+    "viewOriginal": "查看原始貼文",
+    "bridgeUser": "這是一個橋接使用者",
+    "viewRealUser": "查看真實帳號"
   }
 }

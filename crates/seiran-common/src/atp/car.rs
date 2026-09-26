@@ -131,8 +131,7 @@ pub fn decode_car(data: &[u8]) -> Result<CarFile, CarError> {
         pos = entry_end;
 
         let mut cursor = Cursor::new(entry_bytes);
-        let cid =
-            Cid::read_bytes(&mut cursor).map_err(|e| CarError::Cid(e.to_string()))?;
+        let cid = Cid::read_bytes(&mut cursor).map_err(|e| CarError::Cid(e.to_string()))?;
         let cid_len = cursor.position() as usize;
         let block_bytes = entry_bytes
             .get(cid_len..)
@@ -168,7 +167,10 @@ mod tests {
         let entries: Vec<(String, Cid)> = (0..20)
             .map(|i| {
                 let cbor = format!("record-{i}").into_bytes();
-                (format!("app.bsky.feed.post/key{i:03}"), cid_from_dagcbor(&cbor))
+                (
+                    format!("app.bsky.feed.post/key{i:03}"),
+                    cid_from_dagcbor(&cbor),
+                )
             })
             .collect();
         let (root, blocks) = build_mst(&entries).unwrap();

@@ -404,10 +404,7 @@ pub async fn link_bsky_follow_with_existing_rkey(
         .insert_accepted_bsky(local_actor_id, remote_actor_id, existing_rkey)
         .await
         .map_err(|e| {
-            FollowError::Internal(format!(
-                "[migration/follow] follows INSERT 失敗: {}",
-                e
-            ))
+            FollowError::Internal(format!("[migration/follow] follows INSERT 失敗: {}", e))
         })?;
 
     tracing::info!(

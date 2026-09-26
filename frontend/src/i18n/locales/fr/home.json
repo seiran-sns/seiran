@@ -89,7 +89,14 @@
     "referencePendingNotice": "Pas encore importé",
     "referenceGoneNotice": "Référence introuvable",
     "referenceImportButton": "Importer",
-    "referenceImporting": "Importation…"
+    "referenceImporting": "Importation…",
+    "bridgeConfirmModal": {
+      "title": "Ceci est un post relayé (bridge)",
+      "body": "Il s'agit d'une copie générée automatiquement par brid.gy pour un autre protocole. Vous pouvez tout de même répondre/réagir, ou consulter le post original.",
+      "confirmReplyButton": "Répondre quand même",
+      "confirmReactButton": "Réagir quand même",
+      "viewOriginalButton": "Voir le post original"
+    }
   },
   "noteList": {
     "emptyDefault": "Aucun message.",

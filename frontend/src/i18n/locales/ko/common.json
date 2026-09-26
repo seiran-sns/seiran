@@ -43,6 +43,10 @@
   "remoteBanner": {
     "note": "원격 포스팅입니다",
     "user": "원격 사용자입니다",
-    "viewRemote": "원격 서버에서 보기"
+    "viewRemote": "원격 서버에서 보기",
+    "bridgePost": "브릿지된 게시물입니다",
+    "viewOriginal": "원본 게시물 보기",
+    "bridgeUser": "브릿지 사용자입니다",
+    "viewRealUser": "실제 계정 보기"
   }
 }

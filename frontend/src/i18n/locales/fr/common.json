@@ -43,6 +43,10 @@
   "remoteBanner": {
     "note": "Ceci est un message distant",
     "user": "Ceci est un utilisateur distant",
-    "viewRemote": "Afficher sur un serveur distant"
+    "viewRemote": "Afficher sur un serveur distant",
+    "bridgePost": "Ceci est un post relayé (bridge)",
+    "viewOriginal": "Voir le post original",
+    "bridgeUser": "Ceci est un utilisateur relais (bridge)",
+    "viewRealUser": "Voir le compte réel"
   }
 }

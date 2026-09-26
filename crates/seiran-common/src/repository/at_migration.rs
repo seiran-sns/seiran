@@ -155,7 +155,11 @@ pub trait AtMigrationRepository: Send + Sync {
         request_id: i64,
     ) -> Result<Option<(i64, String, Vec<u8>)>, sqlx::Error>;
 
-    async fn mark_follow_materialized(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
+    async fn mark_follow_materialized(
+        &self,
+        id: i64,
+        now: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error>;
 
     /// 起動時リカバリ用: フォロー関係復元待ちが1件でも残っているリクエストIDを列挙する。
     /// `at_migration_requests.status`とは独立した結果整合処理のため、`list_by_statuses`
@@ -506,7 +510,11 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         .await
     }
 
-    async fn mark_follow_materialized(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error> {
+    async fn mark_follow_materialized(
+        &self,
+        id: i64,
+        now: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE at_migration_records SET follow_materialized_at = $1 WHERE id = $2")
             .bind(now)
             .bind(id)

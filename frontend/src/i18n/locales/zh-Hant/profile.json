@@ -1,11 +1,6 @@
 {
   "profilePage": {
     "title": "個人檔案",
-    "warpBanner": {
-      "prefix": "此帳戶是一個",
-      "shadowLabel": "代理帳戶",
-      "suffix": "帳戶。真實帳戶（{{handle}}）在這裡 →"
-    },
     "pairedBadge": "靈魂繫結",
     "pairedBadgeTitle": "透過靈魂繫結與遠端青嵐使用者連接",
     "suspendedBadge": "已停權",

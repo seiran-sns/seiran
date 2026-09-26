@@ -66,7 +66,10 @@ pub async fn xrpc_get_recommended_did_credentials(
 /// `[アカウント鍵, サーバー共有鍵]`、無ければ`[サーバー共有鍵]`のみを返す
 /// （後者は理論上のフォールバックで、現状のアクティブなローカルアカウントには
 /// 発生しない——Phase Aバックフィル完了済み）。
-fn current_rotation_key_dids(state: &AppState, actor: &seiran_common::repository::Actor) -> Vec<String> {
+fn current_rotation_key_dids(
+    state: &AppState,
+    actor: &seiran_common::repository::Actor,
+) -> Vec<String> {
     let server_shared_did_key = signing_key_from_pem(&state.secrets.atproto_private_key_pem)
         .ok()
         .map(|k| p256_to_did_key(k.verifying_key()));
@@ -160,16 +163,24 @@ pub async fn xrpc_request_plc_operation_signature(
         )
         .await
     {
-        return ApiError::Internal(format!("[requestPlcOperationSignature] コード発行失敗: {}", e))
-            .into_response();
+        return ApiError::Internal(format!(
+            "[requestPlcOperationSignature] コード発行失敗: {}",
+            e
+        ))
+        .into_response();
     }
 
-    if let Err(e) = crate::mailer::send_plc_operation_signature_code(&smtp_settings, &login.email, &code).await {
+    if let Err(e) =
+        crate::mailer::send_plc_operation_signature_code(&smtp_settings, &login.email, &code).await
+    {
         tracing::error!("[requestPlcOperationSignature] コード送信失敗: {}", e);
         // 送信自体に失敗した場合、ユーザーは届くはずのないコードの入力を永遠に求められる
         // ことになる。発行済みコードを取り消し、`xrpc_sign_plc_operation`側で
         // 「未発行＝検証不要」として扱わせる（SMTP未設定時と同じ扱いに帰着させる）。
-        let _ = state.email_short_codes.revoke(actor.id, PLC_SIGNATURE_PURPOSE).await;
+        let _ = state
+            .email_short_codes
+            .revoke(actor.id, PLC_SIGNATURE_PURPOSE)
+            .await;
     } else {
         tracing::info!(
             "[requestPlcOperationSignature] actor_id={} 確認コード送信完了",
@@ -236,7 +247,9 @@ pub async fn xrpc_sign_plc_operation(
             .await
         {
             Ok(true) => {}
-            Ok(false) => return ApiError::BadRequest("PLC_TOKEN_INVALID".to_string()).into_response(),
+            Ok(false) => {
+                return ApiError::BadRequest("PLC_TOKEN_INVALID".to_string()).into_response()
+            }
             Err(e) => {
                 return ApiError::Internal(format!("[signPlcOperation] コード検証失敗: {}", e))
                     .into_response()
@@ -248,16 +261,21 @@ pub async fn xrpc_sign_plc_operation(
         match fetch_current_plc_doc_and_prev(&verified.did, &state.http_client).await {
             Ok(v) => v,
             Err(e) => {
-                return ApiError::BadGateway(format!("PLC_DIRECTORY_UNREACHABLE: {e}")).into_response()
+                return ApiError::BadGateway(format!("PLC_DIRECTORY_UNREACHABLE: {e}"))
+                    .into_response()
             }
         };
 
     let signing_key = match signing_key_from_pem(rotation_key_pem) {
         Ok(k) => k,
-        Err(e) => return ApiError::Internal(format!("ローテーション鍵パース失敗: {e}")).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("ローテーション鍵パース失敗: {e}")).into_response()
+        }
     };
 
-    let new_rotation_keys = req.rotation_keys.unwrap_or_else(|| current_rotation_key_dids(&state, &actor));
+    let new_rotation_keys = req
+        .rotation_keys
+        .unwrap_or_else(|| current_rotation_key_dids(&state, &actor));
 
     let operation = match prepare_plc_rotation_update(
         &current_data,
@@ -269,7 +287,10 @@ pub async fn xrpc_sign_plc_operation(
         &signing_key,
     ) {
         Ok(op) => op,
-        Err(e) => return ApiError::Internal(format!("[signPlcOperation] オペレーション生成失敗: {e}")).into_response(),
+        Err(e) => {
+            return ApiError::Internal(format!("[signPlcOperation] オペレーション生成失敗: {e}"))
+                .into_response()
+        }
     };
 
     Json(serde_json::json!({ "operation": operation })).into_response()
@@ -339,7 +360,14 @@ pub async fn xrpc_submit_plc_operation(
     }
     if let Err(e) = state
         .atp_service
-        .broadcast_account_event(actor.id, &verified.did, &handle, now, false, Some("deactivated"))
+        .broadcast_account_event(
+            actor.id,
+            &verified.did,
+            &handle,
+            now,
+            false,
+            Some("deactivated"),
+        )
         .await
     {
         tracing::error!(
@@ -348,11 +376,13 @@ pub async fn xrpc_submit_plc_operation(
             e
         );
     }
-    if let Err(e) = sqlx::query("UPDATE actors SET did_moved_out_at = COALESCE(did_moved_out_at, $1) WHERE id = $2")
-        .bind(now)
-        .bind(actor.id)
-        .execute(&state.db)
-        .await
+    if let Err(e) = sqlx::query(
+        "UPDATE actors SET did_moved_out_at = COALESCE(did_moved_out_at, $1) WHERE id = $2",
+    )
+    .bind(now)
+    .bind(actor.id)
+    .execute(&state.db)
+    .await
     {
         tracing::error!(
             "[submitPlcOperation] did_moved_out_at設定失敗（DIDは既にseiranを離れました！） actor_id={}: {}",

@@ -100,8 +100,7 @@ async fn resolve_fedi(ctx: &TargetResolveContext<'_>, target: &str) -> Result<Ac
     // target_uri が自ドメイン（`https://{local_domain}/users/{username}`）を指す場合、
     // 新規 fedi 行を作らずローカル行を返す（ローカル行は ap_uri で照合できないため、ここで
     // ガードしないとURL指定フォロー等で影の重複 fedi 行が生成される）。
-    if let Some(local_username) = crate::ap::extract_local_username(&target_uri, ctx.local_domain)
-    {
+    if let Some(local_username) = crate::ap::extract_local_username(&target_uri, ctx.local_domain) {
         return ctx
             .actors
             .find_by_username_domain(local_username, ctx.local_domain)

@@ -43,6 +43,10 @@
   "remoteBanner": {
     "note": "这是一个远程帖子",
     "user": "这是远程用户",
-    "viewRemote": "在远程服务器上查看"
+    "viewRemote": "在远程服务器上查看",
+    "bridgePost": "这是一条桥接帖子",
+    "viewOriginal": "查看原始帖子",
+    "bridgeUser": "这是一个桥接用户",
+    "viewRealUser": "查看真实账号"
   }
 }

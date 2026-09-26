@@ -21,7 +21,11 @@ pub async fn manifest(State(state): State<AppState>) -> impl IntoResponse {
     // タグを除去したプレーンテキストを使う。
     let site_name = {
         let n = get("site_name");
-        let n = if n.is_empty() { "seiran".to_string() } else { n };
+        let n = if n.is_empty() {
+            "seiran".to_string()
+        } else {
+            n
+        };
         strip_html_tags(&n)
     };
     let theme_color = {

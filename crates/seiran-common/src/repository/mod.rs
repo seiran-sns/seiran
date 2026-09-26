@@ -67,7 +67,9 @@ pub use follow_import::{
 };
 pub use hashtag::{HashtagRepository, PgHashtagRepository, PinnedHashtagRow};
 pub use instance_domain::{ConfirmOutcome, InstanceDomainRepository, PgInstanceDomainRepository};
-pub use link_resolution::{LinkResolutionRepository, LinkResolutionRow, PgLinkResolutionRepository};
+pub use link_resolution::{
+    LinkResolutionRepository, LinkResolutionRow, PgLinkResolutionRepository,
+};
 pub use list::{ListMemberRow, ListRepository, ListRow, PgListRepository};
 pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,

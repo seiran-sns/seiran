@@ -211,7 +211,8 @@ pub async fn create_drive_file(
     let is_image = sniffed_mime.starts_with("image/");
 
     // アバター・バナー・絵文字は画像限定（動画・音声は投稿添付とログイン画面背景のみ許可、#243）
-    let allows_video_or_audio = matches!(kind, MediaKind::Post) || media_type_str == "login_background";
+    let allows_video_or_audio =
+        matches!(kind, MediaKind::Post) || media_type_str == "login_background";
     if !allows_video_or_audio && !is_image {
         return Err(ApiError::BadRequest(
             "画像ファイルのみアップロードできます".to_owned(),
