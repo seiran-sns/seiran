@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct MediaFile {
@@ -22,6 +22,11 @@ pub struct MediaFile {
     /// フォーマットへ確定するため常に `false`）。Bsky embed選択（#227）で「静止画」と
     /// 「アニメGIF」を区別するために使う。
     pub is_animated_image: bool,
+    /// 最後に「アップロードされた」時刻（新規保存、または既存sha256一致による重複排除
+    /// ヒット時の両方で更新される）。`run_media_gc` の生存判定はこちらを見る。`created_at`
+    /// だけを見ていると、古い孤児ファイルが別ユーザーの再アップロードでID再利用された直後に
+    /// GCが誤って削除してしまうレースがあった。
+    pub last_uploaded_at: DateTime<Utc>,
 }
 
 /// `resolve_public_by_sha256` の戻り値。
@@ -54,7 +59,7 @@ pub enum MediaFileError {
 }
 
 const SELECT_COLS: &str =
-    "id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id, created_at, is_animated_image";
+    "id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id, created_at, is_animated_image, last_uploaded_at";
 
 #[async_trait]
 pub trait MediaFileRepository: Send + Sync {
@@ -79,9 +84,26 @@ pub trait MediaFileRepository: Send + Sync {
         sha256: &str,
     ) -> Result<Option<ResolvedMediaFile>, MediaFileError>;
 
-    async fn insert(&self, req: CreateMediaFile) -> Result<MediaFile, MediaFileError>;
+    /// `(sha256, blurhash)` が既存ならその行の `last_uploaded_at` を更新して返し
+    /// （戻り値の `bool` は `false`）、無ければ新規に挿入する（`bool` は `true`）。
+    /// 単一の `INSERT ... ON CONFLICT ... DO UPDATE` 文で完結するアトミックな
+    /// upsert（`media_files_sha256_blurhash_key` は `NULLS NOT DISTINCT` なので
+    /// `blurhash = NULL` の行同士も衝突として扱われる）。
+    ///
+    /// 呼び出し元がアップロード直前に重複排除の事前チェック（`find_by_sha256*`）を
+    /// 行っていても、その確認からこの呼び出しまでの間に別のリクエストが同じ内容を
+    /// 先に登録してしまう競合は起こりうる。このメソッドがその競合を安全に吸収する
+    /// 最終防衛線であり、「事前チェックで無かったのでアップロード直後に新規登録した
+    /// つもりが、実は既存行に統合された」場合でも `last_uploaded_at` の更新漏れが
+    /// 起きない（更新漏れがあると、登録した直後に孤立ファイルGCへ拾われて削除される
+    /// レースになる）。
+    async fn upsert(&self, req: CreateMediaFile) -> Result<(MediaFile, bool), MediaFileError>;
 
-    async fn delete_by_id(&self, id: i64) -> Result<(), MediaFileError>;
+    /// 重複排除で既存行を再利用した際に `last_uploaded_at` を現在時刻へ更新する
+    /// （`run_media_gc` の生存判定をこの再利用も「使われている」とみなせるようにする）。
+    /// `upsert` と異なり新規挿入は行わない軽量パス（アップロード事前チェックの
+    /// SELECTが既存行を見つけ、S3への保存自体をスキップできる場合に使う）。
+    async fn touch_last_uploaded_at(&self, id: i64) -> Result<(), MediaFileError>;
 }
 
 pub struct PgMediaFileRepository {
@@ -155,12 +177,13 @@ impl MediaFileRepository for PgMediaFileRepository {
         ))
     }
 
-    async fn insert(&self, req: CreateMediaFile) -> Result<MediaFile, MediaFileError> {
-        let row = sqlx::query_as::<_, MediaFile>(&format!(
+    async fn upsert(&self, req: CreateMediaFile) -> Result<(MediaFile, bool), MediaFileError> {
+        let row = sqlx::query(&format!(
             "INSERT INTO media_files \
              (id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id, is_animated_image) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) \
-             RETURNING {SELECT_COLS}"
+             ON CONFLICT (sha256, blurhash) DO UPDATE SET last_uploaded_at = now() \
+             RETURNING {SELECT_COLS}, (xmax = 0) AS inserted"
         ))
         .bind(req.id)
         .bind(req.storage_provider_id)
@@ -177,11 +200,30 @@ impl MediaFileRepository for PgMediaFileRepository {
         .bind(req.is_animated_image)
         .fetch_one(&self.pool)
         .await?;
-        Ok(row)
+
+        let inserted: bool = row.try_get("inserted")?;
+        let file = MediaFile {
+            id: row.try_get("id")?,
+            storage_provider_id: row.try_get("storage_provider_id")?,
+            sha256: row.try_get("sha256")?,
+            blurhash: row.try_get("blurhash")?,
+            size: row.try_get("size")?,
+            width: row.try_get("width")?,
+            height: row.try_get("height")?,
+            mime_type: row.try_get("mime_type")?,
+            storage_key: row.try_get("storage_key")?,
+            duration_ms: row.try_get("duration_ms")?,
+            thumbnail_key: row.try_get("thumbnail_key")?,
+            uploaded_by_actor_id: row.try_get("uploaded_by_actor_id")?,
+            created_at: row.try_get("created_at")?,
+            is_animated_image: row.try_get("is_animated_image")?,
+            last_uploaded_at: row.try_get("last_uploaded_at")?,
+        };
+        Ok((file, inserted))
     }
 
-    async fn delete_by_id(&self, id: i64) -> Result<(), MediaFileError> {
-        sqlx::query("DELETE FROM media_files WHERE id = $1")
+    async fn touch_last_uploaded_at(&self, id: i64) -> Result<(), MediaFileError> {
+        sqlx::query("UPDATE media_files SET last_uploaded_at = now() WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
             .await?;

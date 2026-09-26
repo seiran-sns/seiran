@@ -32,18 +32,18 @@ use seiran_common::repository::{
     AtpReadRepository, AtpSessionRepository, AuthRateLimitRepository, BlockRepository,
     DmRepository, EmailChangeRepository, EmailShortCodeRepository, EmailVerificationRepository,
     EmojiRepository, FollowImportRepository, FollowRepository, HashtagRepository,
-    InstanceDomainRepository, ListRepository, MuteRepository, NotificationRepository,
-    PasswordResetRepository, PgActorRepository, PgAlsoKnownAsRepository, PgAppTokenRepository,
-    PgAtpPreferencesRepository, PgAtpReadRepository, PgAtpSessionRepository,
+    InstanceDomainRepository, LinkResolutionRepository, ListRepository, MuteRepository,
+    NotificationRepository, PasswordResetRepository, PgActorRepository, PgAlsoKnownAsRepository,
+    PgAppTokenRepository, PgAtpPreferencesRepository, PgAtpReadRepository, PgAtpSessionRepository,
     PgAuthRateLimitRepository, PgBlockRepository, PgDmRepository, PgEmailChangeRepository,
     PgEmailShortCodeRepository, PgEmailVerificationRepository, PgEmojiRepository,
     PgFollowImportRepository, PgFollowRepository, PgHashtagRepository, PgInstanceDomainRepository,
-    PgListRepository, PgMuteRepository, PgNotificationRepository, PgPasswordResetRepository,
-    PgPinnedPostsRepository, PgPostRepository, PgReactionRepository, PgRelayRepository,
-    PgRemoteEmojiRepository, PgRemoteInstanceMetaRepository, PgRepostMuteRepository,
-    PgTotpRepository, PgUserRepository, PinnedPostsRepository, PostRepository, ReactionRepository,
-    RelayRepository, RemoteEmojiRepository, RemoteInstanceMetaRepository, RepostMuteRepository,
-    TotpRepository, UserRepository,
+    PgLinkResolutionRepository, PgListRepository, PgMuteRepository, PgNotificationRepository,
+    PgPasswordResetRepository, PgPinnedPostsRepository, PgPostRepository, PgReactionRepository,
+    PgRelayRepository, PgRemoteEmojiRepository, PgRemoteInstanceMetaRepository,
+    PgRepostMuteRepository, PgTotpRepository, PgUserRepository, PinnedPostsRepository,
+    PostRepository, ReactionRepository, RelayRepository, RemoteEmojiRepository,
+    RemoteInstanceMetaRepository, RepostMuteRepository, TotpRepository, UserRepository,
 };
 use seiran_common::{
     job_priority, ApClient, ApDeliveryKind, AtpCommitEvent, AtpCommitService, Job, JobQueue,
@@ -104,6 +104,8 @@ pub struct AppState {
     pub instance_domain: Arc<dyn InstanceDomainRepository>,
     /// リモートインスタンス（Fedi）のnodeinfoキャッシュ（#NoteCardリモートサーバー表示）。
     pub remote_instance_meta: Arc<dyn RemoteInstanceMetaRepository>,
+    /// bio/profile_fields中のURL解決結果のキャッシュ（#リンク解決）。
+    pub link_resolutions: Arc<dyn LinkResolutionRepository>,
     /// OGP対応（`handlers::ogp`）で SPA の index.html を取得する先。未設定時は Docker
     /// 構成のデフォルト（`http://frontend:5173`）を使う。
     pub frontend_origin: String,
@@ -291,7 +293,7 @@ impl AppState {
         }
     }
 
-    /// 既存DID転入フロー: データ取り込み（`posts`/`atp_records`/`atp_blocks`/`atp_blobs`への
+    /// 既存DID転入フロー: データ取り込み（`posts`/`atp_records`/`atp_blocks`/`media_files`への
     /// 実体化、自己再enqueue型）を積む。
     pub async fn enqueue_migration_import_process(&self, request_id: i64) {
         if let Err(e) = self
@@ -645,6 +647,24 @@ impl AppState {
         }
     }
 
+    /// bio/profile_fields中の未解決URLをFedi/Bskyのアクター・投稿として非同期解決する
+    /// ジョブを積む（#リンク解決）。プロフィール取得時、未キャッシュまたはTTL経過済み
+    /// 陰性URLに対して呼ばれる。
+    pub async fn enqueue_link_resolve(&self, url: String) {
+        if !seiran_common::jobs::link_resolve::should_enqueue(&url) {
+            tracing::debug!("[job] LinkResolve enqueue 抑制（クールダウン中）: url={}", url);
+            return;
+        }
+
+        if let Err(e) = self
+            .job_queue
+            .enqueue(Job::LinkResolve { url: url.clone() }, job_priority::LOW)
+            .await
+        {
+            tracing::error!("[job] LinkResolve enqueue 失敗 (url={}): {}", url, e);
+        }
+    }
+
     /// プロフィールの「別のアカウント」相互検証ジョブを積む。プロフィール表示のたびに
     /// 呼ばれ、表示は常にキャッシュ済みの検証結果を読むだけで、この結果は次回表示時に
     /// 反映される（「表示時再検証」パターン、`docs/architecture.md`参照）。
@@ -793,6 +813,8 @@ pub async fn init_state(
         Arc::new(PgInstanceDomainRepository::new(pool.clone()));
     let remote_instance_meta: Arc<dyn RemoteInstanceMetaRepository> =
         Arc::new(PgRemoteInstanceMetaRepository::new(pool.clone()));
+    let link_resolutions: Arc<dyn LinkResolutionRepository> =
+        Arc::new(PgLinkResolutionRepository::new(pool.clone()));
     let actors: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let users: Arc<dyn UserRepository> = Arc::new(PgUserRepository::new(pool.clone()));
     let posts: Arc<dyn PostRepository> = Arc::new(PgPostRepository::new(pool.clone()));
@@ -889,6 +911,7 @@ pub async fn init_state(
         local_domain,
         instance_domain,
         remote_instance_meta,
+        link_resolutions,
         frontend_origin: std::env::var("FRONTEND_ORIGIN")
             .unwrap_or_else(|_| "http://frontend:5173".to_string()),
         secrets,
@@ -2355,8 +2378,8 @@ async fn backfill_seiran_actor_declarations(state: &AppState) {
 
 /// アップロードされたが参照されていない media_files を定期的に削除するタスク。
 ///
-/// 1時間ごとに孤立ファイル（7日以上経過かつどのテーブルからも参照なし）を
-/// S3 → DB の順でベストエフォートで削除する。同じ周期で atp_blobs のGCと、
+/// 1時間ごとに孤立ファイル（最終アップロードから7日以上経過かつどのテーブルからも
+/// 参照なし）を S3 → DB の順でベストエフォートで削除する。同じ周期で
 /// atp_repo_events.car_bytes の定期NULL化（PERF-5）も行う。
 pub fn spawn_gc_tasks(state: &AppState) {
     // 検索セッション GC（1分ごとにタイムアウトしたセッションを削除）
@@ -2370,27 +2393,13 @@ pub fn spawn_gc_tasks(state: &AppState) {
     });
 
     let db = state.db.clone();
-    let media_files = Arc::clone(&state.media_files);
     let storage_providers = Arc::clone(&state.storage_providers);
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
         loop {
             interval.tick().await;
-            run_media_gc(&db, media_files.as_ref(), storage_providers.as_ref()).await;
-        }
-    });
-
-    // atp_blobs（uploadBlob 受信バイト列。Bsky動画パイプラインの代理POST等）のGC。
-    // media_files と同じ7日ルールで、どの media_files.bsky_video_cid からも
-    // 参照されなくなったものを削除する（2026-07-17 マイケル指摘: 無制限保存の防止）。
-    let db2 = state.db.clone();
-    let storage_providers2 = Arc::clone(&state.storage_providers);
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
-        loop {
-            interval.tick().await;
-            run_atp_blobs_gc(&db2, storage_providers2.as_ref()).await;
+            run_media_gc(&db, storage_providers.as_ref()).await;
         }
     });
 
@@ -2416,22 +2425,42 @@ struct OrphanedMediaFile {
     storage_key: String,
 }
 
-/// 孤立ファイルを最大 100 件取得し、S3 → DB の順で削除する（ベストエフォート）。
-async fn run_media_gc(
-    pool: &sqlx::PgPool,
-    media_files: &dyn MediaFileRepository,
-    storage_providers: &dyn StorageProviderRepository,
-) {
-    let rows: Vec<OrphanedMediaFile> = match sqlx::query_as::<_, OrphanedMediaFile>(
+/// 「孤立している」の定義。候補一覧の取得（SELECT）と、削除直前の再確認を兼ねた
+/// 削除文（DELETE）の両方で同じ条件文字列を使う（DRY、かつ両者の条件が将来ズレるのを防ぐ）。
+// NOT IN ではなく NOT EXISTS を使う。post_attachments.media_file_id はリモート添付
+// （remote_url側が埋まる行）でNULLになる列で、実データの99%以上がNULL。
+// `id NOT IN (SELECT media_file_id FROM post_attachments)` は、サブクエリの結果集合に
+// NULLが1件でも含まれると比較対象の値に関わらず条件全体がUNKNOWN（WHERE句ではfalse）
+// になるSQLの仕様があり、実際にこのテーブルでは常にfalseになって発動していなかった
+// （run_media_gcが一度も孤立ファイルを検出できていなかった、2026-09-26発覚）。
+// NOT EXISTS の相関condition（`= media_files.id`）はNULLを比較対象に含めないため、
+// avatar_media_id/banner_media_id側で行っていた `IS NOT NULL` の明示ガードも不要になる。
+const ORPHANED_MEDIA_FILE_CONDITION: &str = "
+    last_uploaded_at < NOW() - INTERVAL '7 days'
+    AND NOT EXISTS (SELECT 1 FROM post_attachments pa WHERE pa.media_file_id = media_files.id)
+    AND NOT EXISTS (SELECT 1 FROM actors a WHERE a.avatar_media_id = media_files.id)
+    AND NOT EXISTS (SELECT 1 FROM actors a WHERE a.banner_media_id = media_files.id)
+    AND NOT EXISTS (SELECT 1 FROM custom_emojis ce WHERE ce.media_file_id = media_files.id)
+";
+
+/// 孤立ファイルを最大 100 件取得し、DB → S3 の順で削除する（ベストエフォート）。
+///
+/// 候補取得（SELECT）から実際の削除までの間に別のリクエストがそのファイルを新たに
+/// 参照し始める競合を防ぐため、DB側の削除は「削除する瞬間に孤立条件を再評価する」
+/// 単一の `DELETE ... WHERE 孤立条件 RETURNING` 文で行う（PostgreSQLの単一ステートメント
+/// はアトミックなので、候補取得時点のスナップショットに基づくTOCTOUが起こらない）。
+///
+/// DB削除が確定してからS3の実体を消す（逆順ではない）。これにより「media_filesに行が
+/// あるなら対応するS3オブジェクトも必ずある」という逆方向の不変条件になり、S3削除が
+/// 失敗してもDB行が既に消えている分にはAPI利用者から見た整合性は壊れない（S3側にだけ
+/// ゴミが残るが、これは検出用の別パトロールで回収すればよく実害が小さい）。
+async fn run_media_gc(pool: &sqlx::PgPool, storage_providers: &dyn StorageProviderRepository) {
+    let rows: Vec<OrphanedMediaFile> = match sqlx::query_as::<_, OrphanedMediaFile>(&format!(
         "SELECT id, storage_provider_id, storage_key
          FROM media_files
-         WHERE created_at < NOW() - INTERVAL '7 days'
-           AND id NOT IN (SELECT media_file_id FROM post_attachments)
-           AND id NOT IN (SELECT avatar_media_id FROM actors WHERE avatar_media_id IS NOT NULL)
-           AND id NOT IN (SELECT banner_media_id FROM actors WHERE banner_media_id IS NOT NULL)
-           AND id NOT IN (SELECT media_file_id FROM custom_emojis)
-         LIMIT 100",
-    )
+         WHERE {ORPHANED_MEDIA_FILE_CONDITION}
+         LIMIT 100"
+    ))
     .fetch_all(pool)
     .await
     {
@@ -2448,86 +2477,52 @@ async fn run_media_gc(
     tracing::info!("[media-gc] 孤立ファイル {} 件を処理します", rows.len());
 
     for row in rows {
-        match storage_providers.find_by_id(row.storage_provider_id).await {
-            Ok(Some(provider)) => {
-                let s3 = S3StorageClient::new(&provider);
-                if let Err(e) = s3.delete(&row.storage_key).await {
-                    tracing::error!("[media-gc] S3 削除失敗 id={}: {}", row.id, e);
-                    continue; // S3 失敗時は DB も削除しない
-                }
-                if let Err(e) = media_files.delete_by_id(row.id).await {
-                    tracing::error!("[media-gc] DB 削除失敗 id={}: {}", row.id, e);
-                } else {
-                    tracing::info!("[media-gc] 削除完了 id={}", row.id);
-                }
-            }
+        let provider = match storage_providers.find_by_id(row.storage_provider_id).await {
+            Ok(Some(provider)) => provider,
             Ok(None) => {
                 tracing::warn!(
                     "[media-gc] プロバイダー不明 id={}, provider_id={}",
                     row.id,
                     row.storage_provider_id
                 );
+                continue;
             }
             Err(e) => {
                 tracing::error!("[media-gc] プロバイダー取得失敗: {}", e);
+                continue;
             }
-        }
-    }
-}
+        };
 
-/// 孤立 atp_blobs（7日以上経過し、どの `media_files.bsky_video_cid` からも
-/// 参照されていない）を最大100件取得し、S3 → DB の順で削除する（ベストエフォート）。
-async fn run_atp_blobs_gc(pool: &sqlx::PgPool, storage_providers: &dyn StorageProviderRepository) {
-    let rows: Vec<OrphanedMediaFile> = match sqlx::query_as::<_, OrphanedMediaFile>(
-        "SELECT id, storage_provider_id, storage_key
-         FROM atp_blobs
-         WHERE created_at < NOW() - INTERVAL '7 days'
-           AND cid NOT IN (SELECT bsky_video_cid FROM media_files WHERE bsky_video_cid IS NOT NULL)
-         LIMIT 100",
-    )
-    .fetch_all(pool)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::error!("[atp-blobs-gc] 孤立ブロブ取得失敗: {}", e);
-            return;
-        }
-    };
-
-    if rows.is_empty() {
-        return;
-    }
-    tracing::info!("[atp-blobs-gc] 孤立ブロブ {} 件を処理します", rows.len());
-
-    for row in rows {
-        match storage_providers.find_by_id(row.storage_provider_id).await {
-            Ok(Some(provider)) => {
-                let s3 = S3StorageClient::new(&provider);
-                if let Err(e) = s3.delete(&row.storage_key).await {
-                    tracing::error!("[atp-blobs-gc] S3 削除失敗 id={}: {}", row.id, e);
-                    continue;
-                }
-                if let Err(e) = sqlx::query("DELETE FROM atp_blobs WHERE id = $1")
-                    .bind(row.id)
-                    .execute(pool)
-                    .await
-                {
-                    tracing::error!("[atp-blobs-gc] DB 削除失敗 id={}: {}", row.id, e);
-                } else {
-                    tracing::info!("[atp-blobs-gc] 削除完了 id={}", row.id);
-                }
-            }
-            Ok(None) => {
-                tracing::warn!(
-                    "[atp-blobs-gc] プロバイダー不明 id={}, provider_id={}",
-                    row.id,
-                    row.storage_provider_id
-                );
-            }
+        let deleted_id: Option<i64> = match sqlx::query_scalar(&format!(
+            "DELETE FROM media_files WHERE id = $1 AND {ORPHANED_MEDIA_FILE_CONDITION} RETURNING id"
+        ))
+        .bind(row.id)
+        .fetch_optional(pool)
+        .await
+        {
+            Ok(v) => v,
             Err(e) => {
-                tracing::error!("[atp-blobs-gc] プロバイダー取得失敗: {}", e);
+                tracing::error!("[media-gc] DB 削除失敗 id={}: {}", row.id, e);
+                continue;
             }
+        };
+        if deleted_id.is_none() {
+            tracing::info!(
+                "[media-gc] id={} は削除直前に参照が追加されたためスキップ",
+                row.id
+            );
+            continue;
+        }
+
+        let s3 = S3StorageClient::new(&provider);
+        if let Err(e) = s3.delete(&row.storage_key).await {
+            tracing::error!(
+                "[media-gc] S3 削除失敗（DB行は削除済み）id={}: {}",
+                row.id,
+                e
+            );
+        } else {
+            tracing::info!("[media-gc] 削除完了 id={}", row.id);
         }
     }
 }

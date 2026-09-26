@@ -333,6 +333,11 @@ async fn create_video_or_audio_file(
     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     if let Some(existing) = existing {
+        state
+            .media_files
+            .touch_last_uploaded_at(existing.id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
         // 同一 sha256 の既存レコードを再利用する場合でも、過去の Bsky 動画パイプライン
         // 提出が 'failed'（またはそもそも未提出）のままだと、再アップロードしても
         // 永久に video embed 化されない（isReused の早期 return で submit が
@@ -464,9 +469,9 @@ async fn create_video_or_audio_file(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     let id = generate_snowflake_id(Utc::now());
-    let record = state
+    let (record, inserted) = state
         .media_files
-        .insert(CreateMediaFile {
+        .upsert(CreateMediaFile {
             id,
             storage_provider_id: provider.id,
             sha256: sha256.clone(),
@@ -509,7 +514,7 @@ async fn create_video_or_audio_file(
         height: probed.height,
         size,
         mime_type,
-        is_reused: false,
+        is_reused: !inserted,
         duration_ms: probed.duration_ms,
         thumbnail_url,
         created_at: record.created_at,

@@ -492,10 +492,12 @@ pub async fn xrpc_check_account_status(
         Ok(n) => n,
         Err(e) => return ApiError::Internal(format!("[checkAccountStatus] repoBlocks集計失敗: {}", e)).into_response(),
     };
-    let blobs: i64 = match sqlx::query_scalar("SELECT COUNT(*) FROM atp_blobs WHERE actor_id = $1")
-        .bind(actor.id)
-        .fetch_one(&state.db)
-        .await
+    let blobs: i64 = match sqlx::query_scalar(
+        "SELECT COUNT(*) FROM media_files WHERE uploaded_by_actor_id = $1",
+    )
+    .bind(actor.id)
+    .fetch_one(&state.db)
+    .await
     {
         Ok(n) => n,
         Err(e) => return ApiError::Internal(format!("[checkAccountStatus] blobs集計失敗: {}", e)).into_response(),

@@ -161,7 +161,6 @@ pub async fn xrpc_upload_blob(
         &state,
         actor_id,
         &sha256_hex,
-        &cid,
         &mime_type,
         body.len() as i64,
         &body,
@@ -194,21 +193,20 @@ pub async fn xrpc_upload_blob(
     .into_response()
 }
 
-/// `uploadBlob` で受信したバイト列を `atp_blobs` テーブル経由で S3 に保存する。
-/// 既に同じ SHA-256（= 同じ内容）が保存済みならスキップする（content-addressable な
-/// ので重複排除で十分。動画パイプラインが複数アカウント分の同一トランスコード結果を
-/// 提出してくるケースもこれで安全）。
+/// `uploadBlob` で受信したバイト列を `media_files` へ直接保存する（かつては一時置き場の
+/// `atp_blobs` テーブルを経由し、プロフィール等から参照される際に `media_files` へ複製する
+/// 2段構えだったが、一時置き場側の孤立GCが複製先からの参照〈avatar_media_id等〉を
+/// 考慮しておらず、アップロードから7日経ったアバター画像が実体ごと削除される事故になった
+/// ため廃止した。2026-09-25）。
 ///
 /// 呼び出し元は2種類（`xrpc_upload_blob`参照）だが、保存処理自体は共通でよい
 /// （悪用防止のレート制御は呼び出し元の認証方式で既に区別済み: 通常セッションJWTは
 /// ユーザー本人であることが検証済み、サービス間認証JWTは進行中の動画パイプライン
 /// ジョブの有無で絞り込む）。
-#[allow(clippy::too_many_arguments)]
 async fn store_uploaded_blob(
     state: &AppState,
     actor_id: i64,
     sha256_hex: &str,
-    cid: &str,
     mime_type: &str,
     size: i64,
     body: &[u8],
@@ -231,26 +229,23 @@ async fn store_uploaded_blob(
         }
     }
 
-    // 既に media_files 側に同じバイト列があれば S3 への重複保存を避ける
-    // （getBlob は media_files/atp_blobs 両方を検索するので、atp_blobs 側への
-    // 新規保存をスキップしても解決可能なまま。2026-07-17 マイケル指摘）。
-    let in_media_files: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_files WHERE sha256 = $1)")
+    // 既に media_files 側に同じバイト列があれば S3 への重複保存を避ける（content-addressable
+    // なので重複排除で十分。動画パイプラインが複数アカウント分の同一トランスコード結果を
+    // 提出してくるケースもこれで安全）。再利用時は last_uploaded_at を更新し、孤立ファイルGC
+    // （run_media_gc）が「参照はされていないが最近アップロードされ直した」ファイルを
+    // 誤って削除しないようにする。
+    let existing_id: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM media_files WHERE sha256 = $1 LIMIT 1")
             .bind(sha256_hex)
-            .fetch_one(&state.db)
+            .fetch_optional(&state.db)
             .await
             .map_err(|e| format!("media_files重複チェック失敗: {}", e))?;
-    if in_media_files {
-        return Ok(());
-    }
-
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM atp_blobs WHERE sha256 = $1)")
-            .bind(sha256_hex)
-            .fetch_one(&state.db)
+    if let Some(id) = existing_id {
+        state
+            .media_files
+            .touch_last_uploaded_at(id)
             .await
-            .map_err(|e| format!("既存チェック失敗: {}", e))?;
-    if exists {
+            .map_err(|e| format!("last_uploaded_at更新失敗: {}", e))?;
         return Ok(());
     }
 
@@ -265,24 +260,26 @@ async fn store_uploaded_blob(
         .map_err(|e| format!("S3アップロード失敗: {}", e))?;
 
     let id = generate_snowflake_id(chrono::Utc::now());
-    sqlx::query(
-        "INSERT INTO atp_blobs (id, actor_id, sha256, cid, mime_type, size, storage_provider_id, storage_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (sha256) DO NOTHING",
-    )
-    .bind(id)
-    .bind(actor_id)
-    .bind(sha256_hex)
-    .bind(cid)
-    .bind(mime_type)
-    .bind(size)
-    .bind(provider.id)
-    .bind(&storage_key)
-    .execute(&state.db)
-    .await
-    .map_err(|e| format!("atp_blobs INSERT失敗: {}", e))?;
-
-    Ok(())
+    state
+        .media_files
+        .upsert(seiran_common::repository::CreateMediaFile {
+            id,
+            storage_provider_id: provider.id,
+            sha256: sha256_hex.to_string(),
+            blurhash: None,
+            size,
+            width: None,
+            height: None,
+            mime_type: mime_type.to_string(),
+            storage_key,
+            duration_ms: None,
+            thumbnail_key: None,
+            uploaded_by_actor_id: Some(actor_id),
+            is_animated_image: false,
+        })
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("media_files INSERT失敗: {e}"))
 }
 
 #[derive(Deserialize)]
@@ -829,11 +826,8 @@ async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_j
 }
 
 /// blob参照（`{"$type":"blob","ref":{"$link":"<CID>"},...}`）のCIDから、対応する
-/// `media_files` 行（Seiran自前UIまたは本関数経由でアップロード済みの画像）を検索する。
-/// 見つからなければ `atp_blobs`（`com.atproto.repo.uploadBlob` でATPクライアント＝
-/// Bluesky公式アプリ等が直接アップロードしたバイト列。Seiran自前UIを経由していないため
-/// `media_files` には存在しない）も検索し、見つかればそのストレージオブジェクトをそのまま
-/// 指す `media_files` 行を新たに作って（S3への再アップロードは不要）そのIDを返す。
+/// `media_files` 行（Seiran自前UI経由、または `com.atproto.repo.uploadBlob` 経由の
+/// どちらでアップロードされたものも `media_files` に直接入っている）を検索する。
 /// これにより、ATP経由で直接プロフィール画像・背景画像を設定した場合でも `actors.avatar_media_id`
 /// / `banner_media_id`（＝Fediverse側にも公開されるアバター）に反映される
 /// （2026-09-16 マイケル指摘: ATP側で更新したのにSeiranのプロフィール画像が更新されない）。
@@ -851,65 +845,11 @@ pub(crate) async fn resolve_blob_media_id(
     }
     let sha256_hex = hex::encode(mh.digest());
 
-    if let Ok(Some(id)) = sqlx::query_scalar::<_, i64>(
+    sqlx::query_scalar::<_, i64>(
         "SELECT id FROM media_files WHERE sha256 = $1 AND uploaded_by_actor_id = $2 LIMIT 1",
     )
     .bind(&sha256_hex)
     .bind(actor_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        return Some(id);
-    }
-
-    link_atp_blob_as_media_file(state, &sha256_hex, actor_id).await
-}
-
-/// `atp_blobs` にある（Seiran自前UI経由ではなくATPクライアントが直接アップロードした）
-/// バイト列を、既存のストレージオブジェクトを再利用したまま `media_files` 行として複製する。
-async fn link_atp_blob_as_media_file(
-    state: &AppState,
-    sha256_hex: &str,
-    actor_id: i64,
-) -> Option<i64> {
-    let row = sqlx::query(
-        "SELECT mime_type, size, storage_provider_id, storage_key
-         FROM atp_blobs WHERE sha256 = $1 AND actor_id = $2 LIMIT 1",
-    )
-    .bind(sha256_hex)
-    .bind(actor_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()??;
-
-    let mime_type: String = row.try_get("mime_type").ok()?;
-    let size: i64 = row.try_get("size").ok()?;
-    let storage_provider_id: i64 = row.try_get("storage_provider_id").ok()?;
-    let storage_key: String = row.try_get("storage_key").ok()?;
-
-    let id = generate_snowflake_id(chrono::Utc::now());
-    sqlx::query(
-        "INSERT INTO media_files
-             (id, storage_provider_id, sha256, size, mime_type, storage_key, uploaded_by_actor_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (storage_provider_id, storage_key) DO NOTHING",
-    )
-    .bind(id)
-    .bind(storage_provider_id)
-    .bind(sha256_hex)
-    .bind(size)
-    .bind(&mime_type)
-    .bind(&storage_key)
-    .bind(actor_id)
-    .execute(&state.db)
-    .await
-    .ok()?;
-
-    sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM media_files WHERE storage_provider_id = $1 AND storage_key = $2",
-    )
-    .bind(storage_provider_id)
-    .bind(&storage_key)
     .fetch_optional(&state.db)
     .await
     .ok()

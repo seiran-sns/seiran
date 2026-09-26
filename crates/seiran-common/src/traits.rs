@@ -257,6 +257,13 @@ pub enum Job {
     /// フォロー関係は作らず、表示のリッチ化（アバター・表示名等）のみが目的。
     RemoteActorResolve { uri: String },
 
+    /// bio/profile_fields中の未解決URLを、ActivityPubのContent-Negotiation直接フェッチ
+    /// （`Accept: application/activity+json`、WebFingerは`acct:`形式にしか使えないため
+    /// 使わない）またはBsky AppView経由で判定し、`link_resolutions`へ結果（陽性/陰性）を
+    /// 保存する。プロフィール取得時、未キャッシュまたはTTL経過済み陰性URLに対して積まれる。
+    /// 陽性が得られればストリーミングで`linkResolved`をログイン中クライアントへ通知する。
+    LinkResolve { url: String },
+
     /// Fedi受信DM（`visibility='direct'`）の`to`に含まれるリモートアクターURIを解決し
     /// `post_recipients`へ追加する。DM受信処理自体は`to`のうちローカルアクターのみを
     /// 即座に解決するため、リモート宛先（例: 3人以上の会話に混じるリモートユーザー）の
@@ -367,7 +374,7 @@ pub enum Job {
     MigrationRequestPlcSignature { request_id: i64 },
 
     /// 既存DID転入フロー: ステージング済みレコード/blobを`posts`/`atp_records`/`atp_blocks`/
-    /// `atp_blobs`へ実体化する自己再enqueue型ジョブ（`follow_import`と同型）。
+    /// `media_files`へ実体化する自己再enqueue型ジョブ（`follow_import`と同型）。
     MigrationImportProcess { request_id: i64 },
 
     /// 既存DID転入フロー: データ取り込み完了後、移行元PDS Aアカウントの無効化

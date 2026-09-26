@@ -189,7 +189,7 @@ TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリ�
 | `BskyListMembershipResolve{list_uri}` | リモート（seiranユーザー所有でない）Bskyリストの全メンバーDIDを`app.bsky.graph.getList`から取得し`bsky_remote_list_membership_cache`へ24時間TTLで保存（threadgateの`#listRule`評価、`docs/protocols.md` 3節） | 低 |
 | `MigrationFetchRepo{request_id}` | 既存DID転入: PDS Aから`getRepo`(CAR)+`listBlobs`を取得し`at_migration_records`/`at_migration_blobs`へステージングする単発ジョブ（`docs/account_migration.md`） | 中 |
 | `MigrationRequestPlcSignature{request_id}` | 既存DID転入: PDS Aへ`requestPlcOperationSignature`を呼び確認コード送付を要求する単発ジョブ | 中 |
-| `MigrationImportProcess{request_id}` | 既存DID転入: ステージング済みレコード/blobを`posts`/`atp_records`/`atp_blocks`/`atp_blobs`へ実体化する自己再enqueue型ジョブ（下記） | 低 |
+| `MigrationImportProcess{request_id}` | 既存DID転入: ステージング済みレコード/blobを`posts`/`atp_records`/`atp_blocks`/`media_files`へ実体化する自己再enqueue型ジョブ（下記） | 低 |
 | `MigrationDeactivateSource{request_id}` | 既存DID転入: データ取り込み完了後、PDS A側の旧アカウント無効化を試みる単発ジョブ（ベストエフォート） | 低 |
 | `MigrationImportFollows{request_id}` | 既存DID転入: 取り込み済み`app.bsky.graph.follow`レコードから`follows`テーブルへの反映（リモートアクター解決込み）を行う自己再enqueue型ジョブ（下記）。`at_migration_requests.status`とは独立した結果整合処理で、`completed`遷移を待たない | 低 |
 | `FollowImportProcess{request_id}` | フォローインポート（設定画面「🚚 インポート・エクスポート」から改行区切りのID一覧を貼り付け or .txtドラッグ&ドロップで一括フォロー。隠し仕様として各行をカンマ区切りで分割し1列目のみを識別子として読む、Misskeyのフォローエクスポート形式`id,withRepliesフラグ`対応）。`follow_import_items`の`pending`を1件処理し、対象が尽きるか`follow_import_requests.status`が`running`でなくなる（完了/キャンセル）まで自分自身を再度積む「自己再enqueue型」ジョブ（下記） | 低 |

@@ -19,8 +19,6 @@ use seiran_common::{
     generate_snowflake_id, mention::extract_local_mention_actor_ids, ApDeliveryKind,
 };
 
-use sqlx::Row;
-
 use crate::error::ApiError;
 use crate::handlers::notes::delivery::{
     ap_delivery_quote_fields, ap_quote_from_meta, resolve_reply_context,
@@ -34,60 +32,15 @@ pub struct AtpPostRecordResult {
     pub cid: String,
 }
 
-/// `record.embed` の blob 参照の解決結果。`media_files`（seiranネイティブAPI経由で
-/// アップロード済み）にあれば `Local`、無ければ `atp_blobs`（`com.atproto.repo.uploadBlob`
-/// 経由でこの投稿のために直接アップロードされたもの）を探し `RemoteUrl` として返す
-/// （`atp_blobs` は `media_files` と別テーブルのため `post_attachments.media_file_id` を
-/// 直接参照できず、CDN直リンクURLを `remote_url` として保存する）。
-enum ResolvedBlob {
-    Local { media_file_id: i64 },
-    RemoteUrl { url: String, mime_type: String },
-}
-
-async fn resolve_blob(
-    state: &AppState,
-    blob_value: Option<&JsonValue>,
-    actor_id: i64,
-) -> Option<ResolvedBlob> {
-    if let Some(media_file_id) = resolve_blob_media_id(state, blob_value, actor_id).await {
-        return Some(ResolvedBlob::Local { media_file_id });
-    }
-
-    let cid_str = blob_value?.get("ref")?.get("$link")?.as_str()?;
-    let cid = seiran_common::atp::cid_from_str(cid_str).ok()?;
-    let mh = cid.hash();
-    if mh.code() != 0x12 {
-        return None;
-    }
-    let sha256_hex = hex::encode(mh.digest());
-    let row = sqlx::query(
-        "SELECT ab.mime_type AS mime_type,
-                rtrim(sp.public_url, '/') || '/' || ab.storage_key AS url
-         FROM atp_blobs ab
-         JOIN storage_providers sp ON sp.id = ab.storage_provider_id
-         WHERE ab.sha256 = $1 AND ab.actor_id = $2
-         LIMIT 1",
-    )
-    .bind(&sha256_hex)
-    .bind(actor_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()??;
-    Some(ResolvedBlob::RemoteUrl {
-        mime_type: row.try_get("mime_type").ok()?,
-        url: row.try_get("url").ok()?,
-    })
-}
-
-/// `record.embed` から画像・動画blobのCIDを取り出し、`resolve_blob` でこのアクターの
-/// アップロード済みファイルに解決する。`app.bsky.embed.images`/`video`/`recordWithMedia`
-/// （内側の`media`）に対応。見つからないblob（他PDS由来・未アップロード等）は無視する
-/// （投稿自体は継続し、その添付だけ欠落する）。
+/// `record.embed` から画像・動画blobのCIDを取り出し、`resolve_blob_media_id` でこのアクターの
+/// アップロード済み `media_files` 行に解決する。`app.bsky.embed.images`/`video`/
+/// `recordWithMedia`（内側の`media`）に対応。見つからないblob（他PDS由来・未アップロード等）
+/// は無視する（投稿自体は継続し、その添付だけ欠落する）。
 async fn resolve_embed_attachments(
     state: &AppState,
     embed: Option<&JsonValue>,
     actor_id: i64,
-) -> Vec<ResolvedBlob> {
+) -> Vec<i64> {
     let Some(embed) = embed else {
         return vec![];
     };
@@ -105,17 +58,21 @@ async fn resolve_embed_attachments(
             let mut resolved = Vec::new();
             if let Some(images) = media.get("images").and_then(|v| v.as_array()) {
                 for img in images {
-                    if let Some(blob) = resolve_blob(state, img.get("image"), actor_id).await {
-                        resolved.push(blob);
+                    if let Some(media_file_id) =
+                        resolve_blob_media_id(state, img.get("image"), actor_id).await
+                    {
+                        resolved.push(media_file_id);
                     }
                 }
             }
             resolved
         }
-        "app.bsky.embed.video" => match resolve_blob(state, media.get("video"), actor_id).await {
-            Some(blob) => vec![blob],
-            None => vec![],
-        },
+        "app.bsky.embed.video" => {
+            match resolve_blob_media_id(state, media.get("video"), actor_id).await {
+                Some(media_file_id) => vec![media_file_id],
+                None => vec![],
+            }
+        }
         _ => vec![],
     }
 }
@@ -261,35 +218,14 @@ pub async fn create_post_from_record(
         .await
         .map_err(|e| ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)))?;
 
-    for (position, blob) in resolved_attachments.into_iter().enumerate() {
+    for (position, media_file_id) in resolved_attachments.into_iter().enumerate() {
         let position = position as i16;
-        match blob {
-            ResolvedBlob::Local { media_file_id } => {
-                if let Err(e) = state
-                    .posts
-                    .attach_media(post_id, media_file_id, position)
-                    .await
-                {
-                    tracing::error!("[post_from_record] 添付 INSERT 失敗: {}", e);
-                }
-            }
-            ResolvedBlob::RemoteUrl { url, mime_type } => {
-                if let Err(e) = state
-                    .posts
-                    .attach_remote_media_url(
-                        post_id,
-                        &url,
-                        Some(&mime_type),
-                        None,
-                        false,
-                        false,
-                        position,
-                    )
-                    .await
-                {
-                    tracing::error!("[post_from_record] 添付 URL 保存失敗: {}", e);
-                }
-            }
+        if let Err(e) = state
+            .posts
+            .attach_media(post_id, media_file_id, position)
+            .await
+        {
+            tracing::error!("[post_from_record] 添付 INSERT 失敗: {}", e);
         }
     }
 

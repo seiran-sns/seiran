@@ -11,7 +11,7 @@
 seiran の DB は「ローカル・ActivityPub(Fedi)・AT Protocol(Bsky) という3つの宇宙のアクター・投稿・フォロー関係を1つのテーブルに統一して格納する」ことを核とする。`actors` / `posts` / `follows` / `lists` / `list_members` はいずれもこのパターンで、プロトコル固有の識別子（`ap_uri` / `ap_object_id` / `at_did` / `at_uri` / `at_rkey` 等）を NULL 許容カラムとして併存させている。「ローカル用テーブル」「Fedi用テーブル」のように分けていない。
 
 ID 採番は2系統ある。
-- **アプリ側 Snowflake 採番**（`generate_snowflake_id()`、タイムスタンプ内包の BIGINT）: `actors` / `posts` / `media_files` / `custom_emojis` / `notifications` / `reactions` / `lists` / `email_verifications` / `email_changes` / `password_resets` / `atp_blobs`。`posts.id` はタイムライン表示順のソート主軸そのものであり、これが `docs/concept.md` の「統一ポストID」にあたる。
+- **アプリ側 Snowflake 採番**（`generate_snowflake_id()`、タイムスタンプ内包の BIGINT）: `actors` / `posts` / `media_files` / `custom_emojis` / `notifications` / `reactions` / `lists` / `email_verifications` / `email_changes` / `password_resets`。`posts.id` はタイムライン表示順のソート主軸そのものであり、これが `docs/concept.md` の「統一ポストID」にあたる。
 - **DB 側 `GENERATED ALWAYS AS IDENTITY`**: `users` / `follows` / `storage_providers` / `list_members` / `pinned_posts`。順序に意味を持たせる必要がない補助テーブル。
 
 ## 2. テーブル一覧
@@ -47,12 +47,11 @@ ID 採番は2系統ある。
 | `atp_records` | ATP の非 post レコード（`app.bsky.actor.profile` 等）の管理 |
 | `atp_blocks` | ATP MST の CAR ブロックストア（CID → バイト列） |
 | `atp_repo_events` | ATP `subscribeRepos` 配信用のイベントログ（commit/identity） |
-| `atp_blobs` | ATP `uploadBlob` で受信したバイナリ |
 | `atp_app_passwords` | ATP `createAppPassword` で発行したアプリパスワードのハッシュ・無効化管理 |
 | `atp_refresh_tokens` | ATP `refreshSession` が発行するrefreshJwtの `jti` 管理（失効・ローテーション） |
 | `atp_preferences` | ATP `app.bsky.actor.getPreferences`/`putPreferences` の不透明なJSON配列（年齢確認等） |
 | `at_migration_requests` | 既存Bluesky DID転入フロー（`docs/account_migration.md`）の実行1回=1行。状態機械の中心テーブル |
-| `at_migration_records` / `at_migration_blobs` | 転入元PDSから取得したリポジトリレコード・blobのステージング（`posts`/`atp_records`/`atp_blobs`/`follows`への実体化待ち行列） |
+| `at_migration_records` / `at_migration_blobs` | 転入元PDSから取得したリポジトリレコード・blobのステージング（`posts`/`atp_records`/`media_files`/`follows`への実体化待ち行列） |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP 設定、Jetstream カーソル等の汎用格納庫） |
 | `instance_domain` | 自ホストドメインの確定値（単一行のみ、一度確定したら不変） |
 | `remote_instance_meta` | リモートインスタンス（`actors.domain`単位）のnodeinfoキャッシュ（NoteCardリモートサーバー表示用） |
@@ -275,8 +274,10 @@ MiAuth（`/api/miauth/:session_id/authorize`）認可成立時、または設定
 
 `pinned_hashtags` は「ホーム画面に追加」操作の永続化（`pinned_posts` と同じ設計思想）。ハッシュタイムライン自体は `post_hashtags` を介した検索であり、ピン留めの有無に関係なく誰でも `/tags/:name` で閲覧できる。ハッシュタイムラインは `visibility IN ('public', 'unlisted')` のみを対象にする（特定アクター向けの閲覧制御が要るフィードではなく発見用の公開フィードのため、`followers_only` の例外は設けない）。
 
-### メディア関連（`media_files` / `post_attachments` / `atp_blobs`)
-`media_files` は画像専用として始まったため `width`/`height`/`blurhash` は NULL 許容(動画・音声はこれらを持たない)。`bsky_video_*` 系カラムは Bluesky 公式動画パイプライン（`app.bsky.video.uploadVideo`）との連携状態を追跡する。`(sha256, blurhash)` の複合 UNIQUE でグローバル重複排除。
+### メディア関連（`media_files` / `post_attachments`)
+`media_files` は画像専用として始まったため `width`/`height`/`blurhash` は NULL 許容(動画・音声はこれらを持たない)。`bsky_video_*` 系カラムは Bluesky 公式動画パイプライン（`app.bsky.video.uploadVideo`）との連携状態を追跡する。`(sha256, blurhash)` の複合 UNIQUE でグローバル重複排除（`NULLS NOT DISTINCT`。`blurhash = NULL` の行同士も重複とみなす）。
+`com.atproto.repo.uploadBlob`（ATPクライアントによる直接アップロード。Bsky公式動画パイプラインの代理POSTを含む）で受信したバイト列も`blurhash = NULL`としてここへ直接保存し、専用の一時テーブルは持たない。登録は`MediaFileRepository::upsert`（`INSERT ... ON CONFLICT (sha256, blurhash) DO UPDATE SET last_uploaded_at = now() RETURNING ...`）で行い、確認から挿入までをアトミックにする。Seiran自前UI経由・uploadBlob経由・DID転入経由の4箇所すべてがこのメソッドを共有する。
+`last_uploaded_at`は「最後にアップロードされた（新規保存、またはsha256一致による重複排除ヒットの両方を含む）」時刻で、孤立ファイルGC（`run_media_gc`）の生存判定はこちらを見る。`created_at`だけを見ると、古い孤児ファイルが別ユーザーの再アップロードでID再利用された直後にGCが誤って削除してしまうレースが生じるため、これとは区別している。
 `is_animated_image`（デフォルト`FALSE`）はアニメーション画像（GIF/APNG/WebPアニメ）由来かどうかを示す。`storage::image::ImagePipeline::AnimatedPassthrough`を返した場合のみ`store_image`が`TRUE`で保存する（静止画は再エンコードでアニメでないフォーマットへ確定するため常に`FALSE`）。投稿作成時のBsky embed選択（#227、`docs/protocols.md`3節「Bsky embed選択」参照）で「静止画」と「アニメGIF」のラジオボタン項目を分けるために使う。
 
 `post_attachments` は `media_file_id`（ローカル添付）と `remote_url`/`remote_mime_type`/`remote_thumbnail_url`（リモート受信添付）が排他的に埋まる設計。
@@ -291,7 +292,8 @@ ActivityPub受信添付の`is_sensitive`は画像単位の`attachment[].sensitiv
 フロントは動画添付を自動再生・ミュート・ループ・コントロール無しで表示する（`HlsVideo`の
 `isGif` prop）。デフォルト`FALSE`、既存のTenor/Klipy由来行はURLパターン
 （`t.gifs.bsky.app`/`k.gifs.bsky.app`）でバックフィル済み。
-`atp_blobs` は `uploadBlob` で受信した任意バイナリ（Bsky動画パイプラインが提出してくるトランスコード済み動画等）を保存する。`sha256` に UNIQUE を張り、content-addressable な重複排除を行う。
+
+孤立ファイルGC（`run_media_gc`、`crates/seiran-api/src/lib.rs`）は`post_attachments`/`actors`/`custom_emojis`のいずれからも参照されていない行を7日周期で削除する。参照の有無は`NOT EXISTS`で判定する（`NOT IN (SELECT ...)`は不可。`post_attachments.media_file_id`はリモート添付でNULLになる行が大半を占め、`NOT IN`はサブクエリ結果にNULLが1件でも含まれると条件全体が恒久的にfalse相当〈UNKNOWN〉になるため、実際にこれで一度も孤立ファイルを検出できていなかった時期があった）。候補取得（SELECT）とは別に、削除の瞬間に同じ孤立条件を再評価する単一の`DELETE ... WHERE 孤立条件 RETURNING`文でDB側の削除を確定させてからS3の実体を消す（DB削除→S3削除の順）。これにより「media_filesに行があれば対応するS3オブジェクトも必ずある」という不変条件になり、候補取得から削除までの間に新たな参照が追加されるレースにも安全（削除0件になるだけ）。S3側の削除が失敗した場合はDB行が既に無いのでリトライされず、ゴミとして残るが実害は小さい。
 
 ### `post_link_cards`（URLカード）
 1投稿につき0件以上のURLカードを`post_id`/`position`で保持する（`id`はGENERATED ALWAYS AS IDENTITYの補助テーブル、順序は`position`が担う）。Bskyは`app.bsky.embed.external`（GIFピッカー由来のTenor/Klipyを除く。GIFは`post_attachments`側で動画添付として扱うため排他）由来で常に`position=0`の最大1件。ローカル作成投稿ではこれに加え、Bsky embed選択のラジオボタンリストを出せない場合（Bsky配送オフ or CW中）のチェックボックス選択（`link_card_urls`、`delivery::attach_link_cards_from_urls`）で複数件になりうる。Fediは本文中の複数リンクぶんも複数件になりうる（`docs/protocols.md`参照）。`title`/`description`は空文字列を許容し、`thumbnail_url`のみNULL許容。取得は`fetch_link_cards_map`（`post_id`一覧→`HashMap<i64, Vec<LinkCardResponse>>`、`crates/seiran-api/src/handlers/notes/queries.rs`）で一括解決し、`NoteResponse.link_cards`へ差し込む（`post_attachments`の`fetch_attachments_map`と同じ構造）。ローカル投稿作成時は`deliver_regular_post`完了後（ラジオ・チェックボックスいずれの保存も完了した後）にこの一括取得を行い、投稿直後のレスポンス・WebSocketブロードキャストへ即座に反映する。
@@ -314,7 +316,7 @@ seiran は自前 PDS としてローカルユーザーの ATP リポジトリ（
 
 `at_migration_records`は転入元リポジトリから取得した生レコード1件=1行（`request_id, collection, rkey`でUNIQUE）。`bytes`はCARから取り出したDAG-CBORバイト列を無加工で保持し、`imported_at`が`posts`/`atp_records`への実体化完了マーカー。`app.bsky.graph.follow`コレクションのみ追加で`follow_materialized_at`列を持ち、`follows`テーブルへの反映（リモートアクター解決込み）が完了したかを`imported_at`とは独立に追跡する（ATPリポジトリへの複製と、seiran自身の社会グラフへの反映は別の実体化ステップのため）。
 
-`at_migration_blobs`は転入元PDSの`listBlobs`で取得したblob CID一覧（`request_id, cid`でUNIQUE）。`imported_at`が`atp_blobs`への保存完了マーカー。
+`at_migration_blobs`は転入元PDSの`listBlobs`で取得したblob CID一覧（`request_id, cid`でUNIQUE）。`imported_at`が`media_files`への保存完了マーカー。
 
 ### メール短命コード（`email_short_codes`）
 転出元API対応（`docs/account_migration.md` 6節）。`com.atproto.server.createSession`のメール2FA（`purpose='atp_session_2fa'`）と`com.atproto.identity.requestPlcOperationSignature`のPLCオペレーション署名確認（`purpose='plc_operation_signature'`）が共有する、6桁コード型のワンタイムトークン。`email_verifications`/`email_changes`（リンククリック型）とは異なり、ユーザーがATPクライアントへ手入力する値として使うためコード自体をハッシュ化して保存する。`actor_id`+`purpose`単位で管理し、消費時（一致・不一致問わず）は同じ`actor_id`+`purpose`の行を全て削除する（古いコードの再利用防止）。

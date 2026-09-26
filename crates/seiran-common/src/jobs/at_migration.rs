@@ -590,27 +590,39 @@ async fn process_import(
 }
 
 /// `store_uploaded_blob`（`seiran-api::handlers::xrpc::repo`、uploadBlob受け口）と同じ
-/// 保存パイプライン（S3保存＋`atp_blobs` INSERT）の、転入フロー向け版。
-/// クレート境界の都合（`seiran-api`側の関数はここから呼べない）で複製している。
+/// 保存パイプライン（S3保存＋`MediaFileRepository::upsert`）の、転入フロー向け版。
+/// クレート境界の都合（`seiran-api`側のS3アップロード部分はここから呼べない）で
+/// アップロード処理自体は複製しているが、DB登録は共通の`upsert`を経由するため重複しない。
+/// `cid`は転入元PDSから取得済みの値だが保存には使わない（sha256から決定論的に
+/// 再構築できるため、`media_files`にcid専用カラムは持たない）。
 async fn import_one_blob(
     pool: &PgPool,
     encryption_key: Vec<u8>,
     actor_id: i64,
-    cid: &str,
+    _cid: &str,
     bytes: &[u8],
 ) -> Result<(), String> {
-    use crate::repository::PgStorageProviderRepository;
+    use crate::repository::{
+        CreateMediaFile, MediaFileRepository, PgMediaFileRepository, PgStorageProviderRepository,
+    };
     use crate::storage::{ext_for_mime_type, select_provider, sniff_mime_type, S3StorageClient};
     use sha2::{Digest, Sha256};
 
     let sha256_hex = hex::encode(Sha256::digest(bytes));
+    let media_files = PgMediaFileRepository::new(pool.clone());
 
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM atp_blobs WHERE sha256 = $1)")
-        .bind(&sha256_hex)
-        .fetch_one(pool)
+    // 既に media_files にあれば S3 への重複保存を避ける（事前チェック）。この確認から
+    // 下の upsert までの間に別のリクエストが同じ内容を先に登録していても、upsert が
+    // アトミックに吸収するため安全に収束する。
+    if let Some(existing) = media_files
+        .find_by_sha256(&sha256_hex)
         .await
-        .map_err(|e| format!("既存チェック失敗: {e}"))?;
-    if exists {
+        .map_err(|e| format!("既存チェック失敗: {e}"))?
+    {
+        media_files
+            .touch_last_uploaded_at(existing.id)
+            .await
+            .map_err(|e| format!("last_uploaded_at更新失敗: {e}"))?;
         return Ok(());
     }
 
@@ -627,24 +639,25 @@ async fn import_one_blob(
         .map_err(|e| format!("S3アップロード失敗: {e}"))?;
 
     let id = crate::generate_snowflake_id(chrono::Utc::now());
-    sqlx::query(
-        "INSERT INTO atp_blobs (id, actor_id, sha256, cid, mime_type, size, storage_provider_id, storage_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (sha256) DO NOTHING",
-    )
-    .bind(id)
-    .bind(actor_id)
-    .bind(&sha256_hex)
-    .bind(cid)
-    .bind(&mime_type)
-    .bind(bytes.len() as i64)
-    .bind(provider.id)
-    .bind(&storage_key)
-    .execute(pool)
-    .await
-    .map_err(|e| format!("atp_blobs INSERT失敗: {e}"))?;
-
-    Ok(())
+    media_files
+        .upsert(CreateMediaFile {
+            id,
+            storage_provider_id: provider.id,
+            sha256: sha256_hex,
+            blurhash: None,
+            size: bytes.len() as i64,
+            width: None,
+            height: None,
+            mime_type,
+            storage_key,
+            duration_ms: None,
+            thumbnail_key: None,
+            uploaded_by_actor_id: Some(actor_id),
+            is_animated_image: false,
+        })
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("media_files INSERT失敗: {e}"))
 }
 
 /// `Job::MigrationDeactivateSource` — 単発・ベストエフォート。失敗してもログのみで

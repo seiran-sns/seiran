@@ -67,18 +67,30 @@ async fn find_existing(
     sha256: &str,
     blurhash: &str,
 ) -> Result<Option<MediaFile>, ApiError> {
-    state
+    let existing = state
         .media_files
         .find_by_sha256_and_blurhash(sha256, blurhash)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if let Some(existing) = &existing {
+        state
+            .media_files
+            .touch_last_uploaded_at(existing.id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    }
+    Ok(existing)
 }
 
+/// アップロード事前チェック（`find_existing`）が「無い」と判定した場合の保存処理。
+/// 実際のDB登録は `upsert` に委ねるため、事前チェックからここに来るまでの間に
+/// 別のリクエストが同じ内容を先に登録していても（`is_reused` が `true` になるだけで）
+/// 安全に収束する。
 async fn persist_new(
     state: &AppState,
     new: NewMedia,
     actor_id: Option<i64>,
-) -> Result<MediaFile, ApiError> {
+) -> Result<UploadOutcome, ApiError> {
     let provider = select_provider(state.storage_providers.as_ref(), new.size)
         .await
         .map_err(map_selector_error)?;
@@ -98,9 +110,9 @@ async fn persist_new(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     let id = generate_snowflake_id(Utc::now());
-    state
+    let (record, inserted) = state
         .media_files
-        .insert(CreateMediaFile {
+        .upsert(CreateMediaFile {
             id,
             storage_provider_id: provider.id,
             sha256: new.sha256,
@@ -116,7 +128,11 @@ async fn persist_new(
             is_animated_image: new.is_animated_image,
         })
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(UploadOutcome {
+        record,
+        is_reused: !inserted,
+    })
 }
 
 /// `ImagePipeline` を重複排除チェックしつつ保存する。
@@ -135,11 +151,7 @@ pub(crate) async fn store_image(
             }
             let mut new_media: NewMedia = p.into();
             new_media.is_animated_image = true;
-            let record = persist_new(state, new_media, actor_id).await?;
-            Ok(UploadOutcome {
-                record,
-                is_reused: false,
-            })
+            persist_new(state, new_media, actor_id).await
         }
         ImagePipeline::Static { original, resized } => {
             if let Some(original) = &original {
@@ -171,11 +183,7 @@ pub(crate) async fn store_image(
             } else {
                 resized.into()
             };
-            let record = persist_new(state, new_media, actor_id).await?;
-            Ok(UploadOutcome {
-                record,
-                is_reused: false,
-            })
+            persist_new(state, new_media, actor_id).await
         }
     }
 }

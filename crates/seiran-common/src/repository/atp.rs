@@ -184,9 +184,9 @@ impl AtpReadRepository for PgAtpReadRepository {
         limit: i64,
         cursor_id: Option<i64>,
     ) -> Result<Vec<(i64, String)>, sqlx::Error> {
-        sqlx::query_as::<_, (i64, String)>(
-            "SELECT id, cid FROM atp_blobs
-             WHERE actor_id = $1 AND ($3::bigint IS NULL OR id > $3)
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT id, sha256 FROM media_files
+             WHERE uploaded_by_actor_id = $1 AND ($3::bigint IS NULL OR id > $3)
              ORDER BY id ASC
              LIMIT $2",
         )
@@ -194,6 +194,16 @@ impl AtpReadRepository for PgAtpReadRepository {
         .bind(limit)
         .bind(cursor_id)
         .fetch_all(&self.pool)
-        .await
+        .await?;
+
+        // cid は sha256 から決定論的に再構築できる（DBには保持しない）。
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, sha256_hex)| {
+                crate::atp::cid_from_sha256_hex(&sha256_hex)
+                    .ok()
+                    .map(|cid| (id, crate::atp::cid_to_string(&cid)))
+            })
+            .collect())
     }
 }
