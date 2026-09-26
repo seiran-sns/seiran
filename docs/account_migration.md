@@ -1,16 +1,16 @@
 # 既存Bluesky DID転入フロー
 
-対象読者: seiran のコード全体に手を入れる開発者。「今のシステムがどう動いているか」だけを書く。
+対象読者: seiran のコード全体に手を入れる開発者。現在の動作だけを書く。
 
 新規登録時に必ず新しいDIDを発行する通常のアカウント作成とは別に、既存のBluesky/AT Protocolアカウント（bsky.social等でホストされている）を、そのDID・投稿・フォロー関係・blobごとseiranへ「転入」させる登録経路（1〜5節）、およびその逆方向——seiranから他PDSへ既存DIDを転出させる際、seiranが転出元として応答するサーバー側API（6節）。技術的な実体はPDS間移行。実装本体は`crates/seiran-api/src/handlers/migration.rs`・`crates/seiran-common/src/jobs/at_migration.rs`・`crates/seiran-common/src/atp/{car,mst_walk,migration_client,plc}.rs`・`crates/seiran-api/src/handlers/xrpc/identity.rs`、フロントエンドは`frontend/src/pages/auth/MigratePanel.tsx`（ログインカルーセルの一部、`frontend/src/pages/auth/AuthCarouselPage.tsx`）と`frontend/src/pages/MigrationImportingPage.tsx`。関連ドキュメント: `docs/architecture.md`（ジョブ・匿名段階認可）、`docs/database.md`（テーブル定義）、`docs/protocols.md` 3節（PDS Aとの通信・SSRF対策）。
 
 ## 1. 認証方式（ID/PW、OAuth不採用）
 
-PDS Aへの認証は`com.atproto.server.createSession`（ID/PW直叩き）を使う。OAuth（AT Protocolのclient-id-as-URL方式）は採用していない。理由: bsky.socialのOAuth entrywayが公開するスコープ（`atproto`/`transition:email`/`transition:generic`/`transition:chat.bsky`）には、PLCオペレーション署名（`account`スコープ相当）やアカウント無効化に必要なスコープが含まれない。これは実機検証済みの制約であり、Bluesky公式クライアント自身もアカウント移行機能をID/PW認証で実装している。
+PDS Aへの認証は`com.atproto.server.createSession`（ID/PW直叩き）を使う。OAuth（AT Protocolのclient-id-as-URL方式）は採用していない。理由: bsky.socialのOAuth entrywayが公開するスコープ（`atproto`/`transition:email`/`transition:generic`/`transition:chat.bsky`）には、PLCオペレーション署名（`account`スコープ相当）やアカウント無効化に必要なスコープが含まれない。Bluesky公式クライアント自身もアカウント移行をID/PW認証で実装している。
 
 メールアドレスはPDS Aの`createSession`応答（`email`/`emailConfirmed`）からそのまま取得して使う。PDS Aへのパスワード認証成功が既にアカウント所有の強い証跡であるため、seiran独自のメール実在確認（`require_email_verification`）は転入フローでは挟まない——通常registerのメール確認とは別チャネル。PDS Aのメール2FA（`authFactorToken`、ハンドル・パスワード入力直後の`createSession`に対するもの）とはさらに別物。
 
-PDS Aがメールを返さない場合（実機で判明: Bluesky公式アプリ経由で発行したapp password認証では`createSession`応答に`email`/`emailConfirmed`が含まれない）は、`SOURCE_EMAIL_REQUIRED`エラーを返しフロントにメール入力欄を追加表示させて再試行させる（`AUTH_FACTOR_TOKEN_REQUIRED`と同じ「エラーで欄を追加して再送」パターン）。この場合のメールは検証なしでそのまま使う。
+PDS Aがメールを返さない場合（app password での`createSession`応答には`email`/`emailConfirmed`が含まれない）は、`SOURCE_EMAIL_REQUIRED`エラーを返しフロントにメール入力欄を追加表示させて再試行させる（`AUTH_FACTOR_TOKEN_REQUIRED`と同じ「エラーで欄を追加して再送」パターン）。この場合のメールは検証なしでそのまま使う。
 
 ## 2. ユーザーフロー
 
@@ -79,12 +79,14 @@ seiranが自前でジェネシスDIDを発行するローカルアカウント�
 |---|---|---|
 | `com.atproto.server.checkAccountStatus` | ATP accessJwt | 読み取りのみ。`activated`/`repoCommit`/`indexedRecords`等を返す |
 | `com.atproto.identity.getRecommendedDidCredentials` | ATP accessJwt | 読み取りのみ。現在の`rotationKeys`/`alsoKnownAs`/`verificationMethods`/`services`を返す |
-| `com.atproto.identity.requestPlcOperationSignature` | ATP accessJwt | 登録メールへ6桁確認コードを送信（`email_short_codes`、`purpose='plc_operation_signature'`） |
-| `com.atproto.identity.signPlcOperation` | ATP accessJwt + 確認コード | 要求された内容のPLC更新オペレーションをアカウント専用ローテーションキーで署名して返す（提出はしない） |
-| `com.atproto.identity.submitPlcOperation` | ATP accessJwt | ★不可逆境界。plc.directoryへ提出し、`#identity`/`#account`イベント発火・`did_moved_out_at`設定 |
-| `com.atproto.server.deactivateAccount` | ATP accessJwt | `submitPlcOperation`の有無にかかわらず`did_moved_out_at`を設定 |
+| `com.atproto.identity.requestPlcOperationSignature` | ATP accessJwt（メインパスワード） | 登録メールへ6桁確認コードを送信（`email_short_codes`、`purpose='plc_operation_signature'`） |
+| `com.atproto.identity.signPlcOperation` | ATP accessJwt（メインパスワード）+ 確認コード | 要求された内容のPLC更新オペレーションをアカウント専用ローテーションキーで署名して返す（提出はしない） |
+| `com.atproto.identity.submitPlcOperation` | ATP accessJwt（メインパスワード） | ★不可逆境界。plc.directoryへ提出し、`#identity`/`#account`イベント発火・`did_moved_out_at`設定 |
+| `com.atproto.server.deactivateAccount` | ATP accessJwt（メインパスワード） | `submitPlcOperation`の有無にかかわらず`did_moved_out_at`を設定 |
 
-`com.atproto.server.createSession`のメール2FA（`authFactorToken`）も同じ`email_short_codes`機構（`purpose='atp_session_2fa'`）を使う。SMTP未設定インスタンスでは2FA自体を常にスキップする。`requestPlcOperationSignature`/`signPlcOperation`も同じ原則: SMTP未設定なら`requestPlcOperationSignature`はコードを発行・送信せず空応答のみ返し、`signPlcOperation`も検証をスキップする。SMTP設定はあるが実際のメール送信自体が失敗した場合（実機で発見: 別インスタンスへの転入検証中に`smtp_host`未設定のまま気づかず遭遇）も、発行済みコードを`revoke`して同じ「未発行」扱いに帰着させる——「SMTP設定の有無」ではなく「有効なコードが実在するか」（`has_pending`）で検証要否を判定する。
+「メインパスワード」の操作は、メインパスワードでログインしたセッション（JWT の `privileged` クレーム）に限り、アプリパスワードのセッションには 403 `APP_PASSWORD_NOT_PERMITTED` を返す。アプリパスワードはサードパーティに渡すものなので、許すと渡した相手が DID を乗っ取れる。
+
+`com.atproto.server.createSession`のメール2FA（`authFactorToken`）も同じ`email_short_codes`機構（`purpose='atp_session_2fa'`）を使う。SMTP未設定インスタンスでは2FA自体を常にスキップする。`requestPlcOperationSignature`/`signPlcOperation`も同じ原則: SMTP未設定なら`requestPlcOperationSignature`はコードを発行・送信せず空応答のみ返し、`signPlcOperation`も検証をスキップする。SMTP設定はあるがメール送信自体が失敗した場合も、発行済みコードを`revoke`して「未発行」扱いにする（届かないコードの入力を求め続けないため）。検証要否は「SMTP設定の有無」ではなく「有効なコードが実在するか」（`has_pending`）で判定する。SMTP未設定のサーバーでは、メインパスワードだけがDID移行の防壁になることを運営者が受け入れている前提。
 
 ### DID転出済み状態（`did_moved_out_at`）
 

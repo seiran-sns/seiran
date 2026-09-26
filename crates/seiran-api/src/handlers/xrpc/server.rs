@@ -10,7 +10,7 @@ use sha2::Digest;
 use seiran_common::atp::resolve_external_handle;
 use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 
-use super::{extract_bearer, service_did};
+use super::{extract_bearer, require_privileged_session, service_did};
 use crate::error::ApiError;
 use crate::middleware::{extract_auth, ClientIp};
 use crate::rate_limit::{self, AttemptKind};
@@ -226,14 +226,13 @@ pub async fn xrpc_create_session(
             return ApiError::Internal(format!("[createSession] DB エラー: {}", e)).into_response()
         }
     };
-    let mut password_ok = hashes
+    let app_password_ok = hashes
         .iter()
         .any(|h| LocalAuthProvider::verify_password(&req.password, h).unwrap_or(false));
 
     // 本アカウントのメインパスワードでもログインできる（公式Bluesky PDS準拠。bsky.app自身も
-    // メインパスワードでcreateSessionを呼んでおり、PDS側はメインパスワードを拒否していない。
-    // アプリパスワードはサードパーティに安全に権限を渡すための任意のオプションであって、
-    // PDSが強制する必須要件ではない）。
+    // メインパスワードでcreateSessionを呼ぶ）。どちらで認証したかはセッションの`privileged`に
+    // 残し、アプリパスワードのセッションにはDID移行等の権限の強い操作をさせない。
     let login_row = state
         .users
         .find_login_by_username(&actor.username)
@@ -241,17 +240,15 @@ pub async fn xrpc_create_session(
         .ok()
         .flatten();
     let main_hash = login_row.as_ref().and_then(|l| l.password_hash.clone());
-    password_ok = password_ok
-        || match &main_hash {
-            Some(h) => LocalAuthProvider::verify_password(&req.password, h).unwrap_or(false),
-            None => {
-                let _ = LocalAuthProvider::verify_password(
-                    &req.password,
-                    LocalAuthProvider::dummy_hash(),
-                );
-                false
-            }
-        };
+    let main_password_ok = match &main_hash {
+        Some(h) => LocalAuthProvider::verify_password(&req.password, h).unwrap_or(false),
+        None => {
+            let _ =
+                LocalAuthProvider::verify_password(&req.password, LocalAuthProvider::dummy_hash());
+            false
+        }
+    };
+    let password_ok = main_password_ok || app_password_ok;
 
     if !password_ok {
         return auth_required_error();
@@ -321,16 +318,17 @@ pub async fn xrpc_create_session(
         }
     }
 
-    let (access_jwt, refresh_jwt, jti, refresh_exp) = match state
-        .local_auth
-        .generate_atp_session(&did, &service_did(&state))
-    {
-        Ok(t) => t,
-        Err(e) => {
-            return ApiError::Internal(format!("[createSession] トークン発行失敗: {}", e))
-                .into_response()
-        }
-    };
+    let (access_jwt, refresh_jwt, jti, refresh_exp) =
+        match state
+            .local_auth
+            .generate_atp_session(&did, &service_did(&state), main_password_ok)
+        {
+            Ok(t) => t,
+            Err(e) => {
+                return ApiError::Internal(format!("[createSession] トークン発行失敗: {}", e))
+                    .into_response()
+            }
+        };
     if let Err(e) = state
         .atp_sessions
         .insert_refresh_token(jti, actor.id, refresh_exp)
@@ -400,7 +398,7 @@ pub async fn xrpc_refresh_session(
 
     let (access_jwt, refresh_jwt, new_jti, refresh_exp) = match state
         .local_auth
-        .generate_atp_session(&did, &service_did(&state))
+        .generate_atp_session(&did, &service_did(&state), verified.privileged)
     {
         Ok(t) => t,
         Err(e) => {
@@ -584,6 +582,9 @@ pub async fn xrpc_deactivate_account(
         Ok(v) => v,
         Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
     };
+    if let Err(e) = require_privileged_session(&verified) {
+        return e.into_response();
+    }
     let actor = match state.actors.find_by_did(&verified.did).await {
         Ok(Some(a)) => a,
         _ => return ApiError::Unauthorized("アクターが見つかりません").into_response(),

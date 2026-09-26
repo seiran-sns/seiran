@@ -69,15 +69,23 @@ struct AtpSessionClaims {
     /// refreshJwt の失効・ローテーション管理用（`atp_refresh_tokens.jti`）。
     /// accessJwt にも便宜上同じ値を積むが、accessJwt側のjtiはDB管理しない。
     jti: uuid::Uuid,
+    /// メインパスワードでログインしたセッションなら真。アプリパスワードのセッションは偽で、
+    /// DID移行（PLC操作）・アカウント無効化のような権限の強い操作を拒否する（公式PDSと同じ）。
+    /// このクレームを持たない既存トークンは偽として扱う（安全側）。
+    #[serde(default)]
+    privileged: bool,
 }
 
 pub struct VerifiedAtpAccess {
     pub did: String,
+    /// メインパスワードでログインしたセッションか（`AtpSessionClaims::privileged`）。
+    pub privileged: bool,
 }
 
 pub struct VerifiedAtpRefresh {
     pub did: String,
     pub jti: uuid::Uuid,
+    pub privileged: bool,
 }
 
 const ATP_ACCESS_SCOPE: &str = "com.atproto.access";
@@ -266,10 +274,12 @@ impl LocalAuthProvider {
     /// `com.atproto.server.createSession`/`refreshSession` 用。accessJwt（2時間）と
     /// refreshJwt（90日）のペアを発行する。refreshJwt の `jti` は呼び出し側が
     /// `atp_refresh_tokens` に記録すること（失効・ローテーション管理用）。
+    /// `privileged` はメインパスワードでのログイン（またはそのセッションの更新）なら真。
     pub fn generate_atp_session(
         &self,
         did: &str,
         service_did: &str,
+        privileged: bool,
     ) -> Result<(String, String, uuid::Uuid, chrono::DateTime<chrono::Utc>), AuthError> {
         let now = chrono::Utc::now();
         let access_exp = now + chrono::Duration::hours(2);
@@ -283,6 +293,7 @@ impl LocalAuthProvider {
             iat: now.timestamp() as usize,
             exp: access_exp.timestamp() as usize,
             jti,
+            privileged,
         };
         let refresh_claims = AtpSessionClaims {
             scope: ATP_REFRESH_SCOPE.to_string(),
@@ -291,6 +302,7 @@ impl LocalAuthProvider {
             iat: now.timestamp() as usize,
             exp: refresh_exp.timestamp() as usize,
             jti,
+            privileged,
         };
 
         let key = EncodingKey::from_secret(&self.secret);
@@ -312,7 +324,10 @@ impl LocalAuthProvider {
         if claims.scope != ATP_ACCESS_SCOPE || claims.aud != service_did {
             return Err(AuthError::InvalidToken);
         }
-        Ok(VerifiedAtpAccess { did: claims.sub })
+        Ok(VerifiedAtpAccess {
+            did: claims.sub,
+            privileged: claims.privileged,
+        })
     }
 
     /// refreshJwt を検証する（`scope`/`aud` 不一致は拒否）。有効性（失効・ローテーション）の
@@ -329,6 +344,7 @@ impl LocalAuthProvider {
         Ok(VerifiedAtpRefresh {
             did: claims.sub,
             jti: claims.jti,
+            privileged: claims.privileged,
         })
     }
 
@@ -398,5 +414,48 @@ mod tests {
         let verified = auth.verify_token_ignoring_exp(&token).unwrap();
         assert_eq!(verified.jti, jti);
         assert_eq!(verified.exp, Some(past_exp));
+    }
+
+    const SERVICE_DID: &str = "did:web:example.com";
+
+    #[test]
+    fn atp_session_carries_privileged_flag_through_access_and_refresh() {
+        let auth = LocalAuthProvider::new(b"test-secret".to_vec());
+        for privileged in [true, false] {
+            let (access, refresh, _, _) = auth
+                .generate_atp_session("did:plc:abc", SERVICE_DID, privileged)
+                .unwrap();
+            let a = auth.verify_atp_access_token(&access, SERVICE_DID).unwrap();
+            assert_eq!(a.did, "did:plc:abc");
+            assert_eq!(a.privileged, privileged);
+            let r = auth.verify_atp_refresh_token(&refresh, SERVICE_DID).unwrap();
+            assert_eq!(r.privileged, privileged);
+        }
+    }
+
+    /// `privileged` クレームを持たない（導入前に発行された）セッションは、権限の強い操作を
+    /// 許さない側に倒す。
+    #[test]
+    fn atp_session_without_privileged_claim_is_not_privileged() {
+        let secret = b"test-secret".to_vec();
+        let auth = LocalAuthProvider::new(secret.clone());
+        let now = chrono::Utc::now();
+        let legacy = serde_json::json!({
+            "scope": ATP_ACCESS_SCOPE,
+            "sub": "did:plc:abc",
+            "aud": SERVICE_DID,
+            "iat": now.timestamp(),
+            "exp": (now + chrono::Duration::hours(1)).timestamp(),
+            "jti": uuid::Uuid::new_v4(),
+        });
+        let token = encode(
+            &Header::default(),
+            &legacy,
+            &EncodingKey::from_secret(&secret),
+        )
+        .unwrap();
+
+        let verified = auth.verify_atp_access_token(&token, SERVICE_DID).unwrap();
+        assert!(!verified.privileged);
     }
 }

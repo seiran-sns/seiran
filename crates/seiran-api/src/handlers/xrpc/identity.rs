@@ -11,7 +11,7 @@ use seiran_common::atp::plc::{
     signing_key_from_pem,
 };
 
-use super::{extract_bearer, service_did};
+use super::{extract_bearer, require_privileged_session, service_did};
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -106,6 +106,9 @@ pub async fn xrpc_request_plc_operation_signature(
         Ok(v) => v,
         Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
     };
+    if let Err(e) = require_privileged_session(&verified) {
+        return e.into_response();
+    }
     let actor = match state.actors.find_by_did(&verified.did).await {
         Ok(Some(a)) => a,
         _ => return ApiError::Unauthorized("アクターが見つかりません").into_response(),
@@ -221,6 +224,9 @@ pub async fn xrpc_sign_plc_operation(
         Ok(v) => v,
         Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
     };
+    if let Err(e) = require_privileged_session(&verified) {
+        return e.into_response();
+    }
     let actor = match state.actors.find_by_did(&verified.did).await {
         Ok(Some(a)) => a,
         _ => return ApiError::Unauthorized("アクターが見つかりません").into_response(),
@@ -320,6 +326,9 @@ pub async fn xrpc_submit_plc_operation(
         Ok(v) => v,
         Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
     };
+    if let Err(e) = require_privileged_session(&verified) {
+        return e.into_response();
+    }
     let actor = match state.actors.find_by_did(&verified.did).await {
         Ok(Some(a)) => a,
         _ => return ApiError::Unauthorized("アクターが見つかりません").into_response(),
