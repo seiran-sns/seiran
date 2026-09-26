@@ -89,3 +89,37 @@ test("ハッシュタグをホーム画面に追加・削除できる", async ({
     timeout: 15_000,
   });
 });
+
+// ノート組み立ての共通化（`build_note_responses`）以前は、ハッシュタグTLだけ投票済み状態
+// （`poll.votedByMe`）を付与しておらず、投票後もTL上では未投票に見えていた。
+test("ハッシュタグタイムラインでも自分の投票済み状態が返る", async ({ request }) => {
+  const user = await registerUserViaApi(request, "e2etagpoll");
+  const tag = `e2etagpoll${Date.now().toString(36)}`;
+  const createRes = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${user.token}` },
+    data: {
+      text: `投票 #${tag}`,
+      deliver_to_fedi: false,
+      deliver_to_bsky: false,
+      poll: { choices: ["A", "B"], expiresInSeconds: 3600 },
+    },
+  });
+  expect(createRes.ok(), await createRes.text()).toBeTruthy();
+  const created = await createRes.json();
+
+  const voteRes = await request.post(`/api/notes/${created.id}/poll-vote`, {
+    headers: { Authorization: `Bearer ${user.token}` },
+    data: { optionIndexes: [1] },
+  });
+  expect(voteRes.ok(), await voteRes.text()).toBeTruthy();
+
+  const tlRes = await request.get(`/api/hashtags/${tag}/timeline`, {
+    headers: { Authorization: `Bearer ${user.token}` },
+  });
+  expect(tlRes.ok(), await tlRes.text()).toBeTruthy();
+  const notes = await tlRes.json();
+  const note = notes.find((n: { id: string }) => n.id === created.id);
+  expect(note, "投稿がハッシュタグTLに出ない").toBeTruthy();
+  expect(note.poll.votedByMe).toEqual([1]);
+  expect(note.repostedByMe).toBe(false);
+});

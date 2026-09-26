@@ -162,3 +162,53 @@ test("Bluesky互換の検索式をローカル投稿にも適用する", async (
   const mention = await search(`mentions:${bob.username} ${unique}`);
   expect(mention.notes.map((note) => note.text)).toContain(matchingText);
 });
+
+// ノート組み立ての共通化（`build_note_responses`）以前は、検索結果にリアクション・引用元の
+// 埋め込みが付かず、タイムラインと同じカード表示にならなかった。
+test("検索結果にもリアクションと引用元の埋め込みが付く", async ({ request }) => {
+  const clear = await request.post(`${APPVIEW_CONTROL_URL}/__control__/search`, {
+    data: { posts: [] },
+  });
+  expect(clear.ok(), await clear.text()).toBeTruthy();
+
+  const user = await registerUserViaApi(request, "e2esearchembed");
+  const unique = `searchembed${Date.now().toString(36)}`;
+  const auth = { Authorization: `Bearer ${user.token}` };
+
+  const originalRes = await request.post("/api/notes/create", {
+    headers: auth,
+    data: { text: "引用元の投稿", deliver_to_fedi: false, deliver_to_bsky: false },
+  });
+  expect(originalRes.ok(), await originalRes.text()).toBeTruthy();
+  const original = await originalRes.json();
+
+  const quoteRes = await request.post("/api/notes/create", {
+    headers: auth,
+    data: {
+      text: `${unique} 引用投稿`,
+      quote_of_id: original.id,
+      deliver_to_fedi: false,
+      deliver_to_bsky: false,
+    },
+  });
+  expect(quoteRes.ok(), await quoteRes.text()).toBeTruthy();
+  const quote = await quoteRes.json();
+
+  const reactRes = await request.post(`/api/notes/${quote.id}/reactions`, {
+    headers: auth,
+    data: { content: "👍" },
+  });
+  expect(reactRes.ok(), await reactRes.text()).toBeTruthy();
+
+  const searchRes = await request.get(`/api/notes/search?q=${encodeURIComponent(unique)}`, {
+    headers: auth,
+  });
+  expect(searchRes.ok(), await searchRes.text()).toBeTruthy();
+  const { notes } = await searchRes.json();
+  const hit = notes.find((n: { id: string }) => n.id === quote.id);
+  expect(hit, "引用投稿が検索結果に出ない").toBeTruthy();
+  expect(hit.quote?.id).toBe(original.id);
+  expect(hit.reactions).toEqual(
+    expect.arrayContaining([expect.objectContaining({ emoji: "👍", count: 1, reactedByMe: true })]),
+  );
+});

@@ -51,7 +51,18 @@
 | G | `router`（861行）を領域別サブルーター（`routes.rs`）へ分割。frontend API のノート組み立て手順（約11箇所に手書き）を `notes::queries::build_note_responses` に統合し、ハッシュタグ・リスト TL の投票済み状態、検索結果のリアクション・引用/リポスト埋め込み・投票状態、プロフィールのリポスト済み状態、単体取得・スレッドの関係フラグの欠落を解消。`build_profile_response_inner`・`deliver_regular_post` を手順ごとの関数に分割 |
 | H | DB 結合テストを CI（E2E ジョブ）で実行。ハーネスがマイグレーション適用とテストユーザー作成を自動で行う。開発DBの `storage_providers(id=1)` に依存していたテストを修正。同時投票の E2E（`poll-concurrency.spec.ts`）を追加 |
 
-## 3. 残課題
+## 3. テスト整備（第2弾の後）
+
+| 種別 | 追加したテスト | 固定する内容 |
+|------|----------------|--------------|
+| 結合（`repository_integration.rs`） | `every_timeline_post_query_decodes_rows` | `TimelinePost`を返す全クエリ（TL4種・プロフィール・メンション・スレッド・単体取得・ピン留め・ハッシュタグ・リスト・DM）が実際に行を返しデコードできる（列の書き漏れの検出） |
+| 結合 | リアクション切替・取消 | 切替は旧値を返し、取消は削除した行を返す。同時切替で各呼び出しが報告する旧値が重複しない |
+| 結合 | 投票・作成枠・ピン留め・同名登録・フォロー | 同時投票で加算が失われない／作成枠は上限までしか予約できない／ピン留めは上限を超えない／同名同時登録で孤立した users 行が残らない／同時の再フォロー操作で accepted が降格しない |
+| 単体 | `net.rs` | 連合用リゾルバが内部アドレスに解決されるホストを拒否し、連合用クライアントが localhost へ接続しない |
+| 単体 | Misskey `CursorParams` | `limit`の丸め・不正IDの無視・camelCase ボディの解釈 |
+| E2E | `hashtag.spec.ts`・`search.spec.ts` | ハッシュタグTLの投票済み状態、検索結果のリアクション・引用元埋め込み |
+
+## 4. 残課題
 
 1. **長大関数**（行数）: `firehose::save_bsky_post`（約480）・`process_message`（約350）、`inbound_activity_process::note_save::save_ap_note_core`（約470）、`notes::creation::validate_create_regular_post_input`（約320）、`bsky_dm_poll::sync_convo`（約310）、`federation-inbox` の `outbox_handler`（約300）、`migration::submit_plc_token`（約300）、`jobs::at_migration::process_import`（約300）、`seiran-server` の `main`（約280）。いずれも受信・転入の中核処理で、分割にはそれぞれの経路の E2E／結合テストの拡充が先に必要。
 2. **DM のノート組み立て**: `handlers::dm` は Bsky 側リアクション（`dm_bsky_reactions`）の合算など固有処理があるため `build_note_responses` に統合していない。引用の埋め込み（`embed_quotes`）を呼んでいないため、DM 内の引用カードの表示経路を確認する必要がある。

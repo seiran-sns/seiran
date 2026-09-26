@@ -1121,3 +1121,42 @@ pub async fn users_lists_show(
         .map(Json)
         .ok_or(ApiError::NotFound("NO_SUCH_LIST"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CursorParams;
+
+    fn cursor(limit: Option<i64>, since: Option<&str>, until: Option<&str>) -> CursorParams {
+        CursorParams {
+            limit,
+            since_id: since.map(str::to_owned),
+            until_id: until.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn page_clamps_limit_and_uses_default() {
+        assert_eq!(cursor(None, None, None).page(20).limit, 20);
+        assert_eq!(cursor(Some(0), None, None).page(20).limit, 1);
+        assert_eq!(cursor(Some(-5), None, None).page(20).limit, 1);
+        assert_eq!(cursor(Some(1000), None, None).page(20).limit, 100);
+    }
+
+    #[test]
+    fn page_ignores_non_numeric_ids() {
+        let page = cursor(None, Some("abc"), Some("123")).page(10);
+        assert_eq!(page.since_id, None);
+        assert_eq!(page.until_id, Some(123));
+    }
+
+    #[test]
+    fn cursor_params_deserialize_from_misskey_camel_case_body() {
+        let body: super::TimelineBody =
+            serde_json::from_value(serde_json::json!({"limit": 5, "untilId": "42"})).unwrap();
+        let page = body.cursor.page(20);
+        assert_eq!(
+            (page.limit, page.until_id, page.since_id),
+            (5, Some(42), None)
+        );
+    }
+}

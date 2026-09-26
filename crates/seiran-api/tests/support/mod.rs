@@ -218,3 +218,86 @@ pub async fn body_json(res: axum::response::Response) -> serde_json::Value {
         .unwrap();
     serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
 }
+
+/// テスト間で衝突しない一意な接尾辞（ユーザー名等に使う。英小文字・数字のみ）。
+#[allow(dead_code)]
+pub fn unique_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let t = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    format!("{:x}{:x}", t, n)
+}
+
+/// fixture 用のローカルアカウントを作成し、その actors.id を返す（PLC genesis は行わない）。
+#[allow(dead_code)]
+pub async fn create_fixture_local_actor(pool: &sqlx::PgPool, prefix: &str) -> i64 {
+    let username = format!("{}{}", prefix, unique_suffix());
+    let actor_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
+    seiran_common::repository::create_local_account(
+        pool,
+        &format!("{username}@integration-test.invalid"),
+        "fixture-password-hash",
+        "user",
+        &seiran_common::repository::NewLocalActor {
+            id: actor_id,
+            username: &username,
+            domain: "localhost",
+            at_did: None,
+            at_signing_key_pem: None,
+            at_rotation_key_pem: None,
+            birth_date: None,
+        },
+    )
+    .await
+    .expect("fixture アカウント作成に失敗");
+    actor_id
+}
+
+/// fixture 用の投稿（`create_fixture_post`）の内容。
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct FixturePost<'a> {
+    pub body: &'a str,
+    /// 既定は`public`。
+    pub visibility: Option<&'a str>,
+    pub reply_to_post_id: Option<i64>,
+    pub thread_root_post_id: Option<i64>,
+    pub recipient_actor_ids: &'a [i64],
+    pub poll: Option<&'a serde_json::Value>,
+    pub content_warning: Option<&'a str>,
+}
+
+/// fixture 用の投稿を作成し、その posts.id を返す。
+#[allow(dead_code)]
+pub async fn create_fixture_post(pool: &sqlx::PgPool, actor_id: i64, post: FixturePost<'_>) -> i64 {
+    use seiran_common::repository::{InsertFullParams, PgPostRepository, PostRepository};
+    let now = chrono::Utc::now();
+    let id = seiran_common::generate_snowflake_id(now);
+    let ap_object_id = format!("https://localhost/notes/{id}");
+    let uuid = uuid::Uuid::new_v4().to_string();
+    let emoji_map = serde_json::json!({});
+    PgPostRepository::new(pool.clone())
+        .insert_full(InsertFullParams {
+            id,
+            actor_id,
+            body: post.body,
+            ap_object_id: &ap_object_id,
+            seiran_post_uuid: &uuid,
+            reply_to_post_id: post.reply_to_post_id,
+            quote_of_post_id: None,
+            created_at: now,
+            visibility: post.visibility.unwrap_or("public"),
+            deliver_fedi: false,
+            deliver_bsky: false,
+            thread_root_post_id: post.thread_root_post_id,
+            recipient_actor_ids: post.recipient_actor_ids,
+            emoji_map: &emoji_map,
+            poll: post.poll,
+            content_warning: post.content_warning,
+            language: None,
+        })
+        .await
+        .expect("fixture 投稿作成に失敗");
+    id
+}

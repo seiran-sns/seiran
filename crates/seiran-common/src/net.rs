@@ -587,7 +587,12 @@ fn extract_iframe_src(html_fragment: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_html_body, ensure_public_url, extract_body_urls, is_public_ip};
+    use super::{
+        decode_html_body, ensure_public_url, extract_body_urls, federation_client_builder,
+        is_public_ip, PublicOnlyResolver,
+    };
+    use reqwest::dns::Resolve;
+    use std::str::FromStr;
 
     #[test]
     fn extract_body_urls_dedupes_and_preserves_order() {
@@ -682,5 +687,27 @@ mod tests {
         assert!(ensure_public_url("file:///etc/passwd").is_err());
         assert!(ensure_public_url("https://mastodon.social/users/a").is_ok());
         assert!(ensure_public_url("https://8.8.8.8/").is_ok());
+    }
+
+    #[tokio::test]
+    async fn public_only_resolver_rejects_hosts_resolving_to_private_addresses() {
+        let result = PublicOnlyResolver
+            .resolve(reqwest::dns::Name::from_str("localhost").unwrap())
+            .await;
+        assert!(result.is_err());
+    }
+
+    /// 連合用クライアントは、内部アドレスへ解決されるホスト名へ接続しない（接続拒否ではなく、
+    /// 解決段階の拒否で失敗する）。
+    #[tokio::test]
+    async fn federation_client_refuses_to_connect_to_localhost() {
+        let client = federation_client_builder().build().unwrap();
+        let err = client
+            .get("http://localhost:9/")
+            .send()
+            .await
+            .expect_err("内部アドレスへの接続は失敗しなければならない");
+        let chain = format!("{:?}", err);
+        assert!(chain.contains("PrivateAddress"), "{chain}");
     }
 }
