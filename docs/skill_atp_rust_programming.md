@@ -1,7 +1,6 @@
 # SKILL: AT Protocol Rust プログラミング実装ガイド
 
-このドキュメントは seiran 開発中に得た AT Protocol の Rust 実装知識をまとめたものです。
-デバッグで苦労した落とし穴を中心に記録します。
+AT Protocol を Rust で実装するときの知識と落とし穴（そうしないと何が起きるか）をまとめる。
 
 ---
 
@@ -22,7 +21,8 @@
 
 | 鍵 | 目的 | 保管場所 |
 |---|---|---|
-| **ローテーション鍵（サーバー共通）** | genesis operation への署名、DID の制御権 | `secrets.toml` の `atproto_private_key_pem` |
+| **ローテーション鍵（アカウント専用）** | PLC 操作への署名、DID の制御権（`rotationKeys` の主） | `actors.at_rotation_key_pem` |
+| **ローテーション鍵（サーバー共通）** | recovery 用（`rotationKeys` の副） | `secrets.toml` の `atproto_private_key_pem` |
 | **署名鍵（ユーザー固有）** | MST コミットへの署名 | `actors.at_signing_key_pem` |
 
 ### 1-3. genesis operation の構造
@@ -47,7 +47,7 @@
 
 ---
 
-## 2. 落とし穴集（デバッグ済み）
+## 2. 落とし穴集
 
 ### 落とし穴①: 署名の base64 エンコーディング
 
@@ -244,17 +244,15 @@ GET https://username.domain/.well-known/atproto-did
 → レスポンス: did:plc:xxxx
 ```
 
-seiran では `*.beta.seiran.org` のワイルドカード DNS + HTTPS エンドポイントで対応予定。
+seiran は `/.well-known/atproto-did` を常に提供し、Cloudflare を設定していれば TXT も自動作成する（`docs/protocols.md` 3節）。
 
 ---
 
-## 8. AT Protocol とサブエージェント調査
+## 8. 参照実装
 
-複雑な仕様の調査には `Explore` サブエージェントが有効。以下の公式リポジトリを参照させる：
-
-- `https://github.com/did-method-plc/did-method-plc` — plc.directory 参照実装
+- `https://github.com/did-method-plc/did-method-plc` — plc.directory の参照実装
 - `https://github.com/bluesky-social/atproto/tree/main/packages/crypto` — `@atproto/crypto`
-- `https://github.com/sugyan/atrium` — Rust AT Protocol SDK（公式ではないが包括的）
+- `https://github.com/sugyan/atrium` — Rust の AT Protocol SDK（非公式だが包括的）
 - `@noble/curves` の p256 — AT Protocol が採用している P-256 実装
 
 ---
@@ -297,8 +295,7 @@ ATP_RELAY_URL=https://bsky.network,http://localhost:2470
 （`cmd/relay/relay/verify.go` の `VerifyCommitMessageStrict` 等）はエラーメッセージ付きで
 リジェクトするため、原因の当たりが劇的に付けやすくなる。
 
-**Why:** 「配送が全体的に不安定でその原因はわかっていない」という抽象的な報告から出発し、
-この手法で [[project_seiran_bsky_relay_delivery_instability]] の2大原因（後述）を特定できた。
+§10・§11 の問題はこの方法で見つけられる。
 
 ---
 
@@ -395,8 +392,7 @@ pub fn sign_service_auth_jwt(pem: &str, iss: &str, aud: &str, lxm: &str) -> Resu
 エンドポイント名ではない**ことに注意。`app.bsky.video.uploadVideo` を叩くために
 発行した JWT でも、動画サービスがトランスコード後に折り返して
 `com.atproto.repo.uploadBlob` を呼ぶ際は `lxm = "com.atproto.repo.uploadBlob"` の
-別 JWT を使う（≒公式 `social-app` クライアントの実装と同じ設計）。ここを取り違えて
-「lxm ミスマッチ」を疑ったが実際は無関係だった、という誤診断の経験あり。
+別 JWT を使う（公式 `social-app` クライアントと同じ設計）。
 
 ---
 
@@ -410,14 +406,9 @@ pub fn sign_service_auth_jwt(pem: &str, iss: &str, aud: &str, lxm: &str) -> Resu
 `com.atproto.sync.getBlob` で取得しにくる**。ここで読み捨てていると常に 404 になり、
 Bsky公式アプリ上で「ビデオが見つかりません」となって再生不能になる。
 
-対策として、`uploadBlob` で受けたバイト列は必ずどこかに保存し、`getBlob` で
-引けるようにする。seiran では `media_files`（ユーザー添付ファイル）とは別に
-`atp_blobs`（サーバー間中間生成物）テーブルを新設して保存している。
+対策として、`uploadBlob` で受けたバイト列は必ず保存し、`getBlob` で引けるようにする。seiran ではユーザー添付と同じ `media_files` に保存する（sha256 で重複排除され、孤立ファイル GC の対象にもなる）。
 
-**分離テーブルにする場合の安全対策（3点、無制限アップロード窓口になりがちなので必須）:**
-1. pending な動画ジョブに紐付いているリクエストのみ受理する（無関係な無制限アップロードのDoS経路にしない）
-2. `media_files` 側と sha256 でクロステーブル重複排除する（同一内容をS3に二重保存しない）
-3. 一定期間（seiranでは7日）で使われなくなった blob を GC する
+サービス間認証 JWT での呼び出しは、DID 本人なら誰でも自己署名できるので、pending な動画ジョブがある DID からだけ受け付ける（無関係な無制限アップロードの窓口にしない）。
 
 また、`video.bsky.app` からの代理 POST は実機で **`Content-Type: */*`** という
 無効なワイルドカード値を送ってくることがある。そのまま保存すると配信時の
@@ -500,7 +491,7 @@ Bsky側でトランスコードされたバイト列サイズを使う必要が�
 AT Protocol の `app.bsky.embed.*` には**音声専用の embed type が存在しない**。
 音声を「グレー背景の静止画＋音声トラック」の mp4 動画に `ffmpeg` で変換し、
 既存の動画パイプライン（§15）にそのまま載せることで `app.bsky.embed.video`
-として配信できる（seiran発案の実用ワークアラウンド）。
+として配信できる。
 
 ```rust
 // crates/seiran-common/src/storage/media_probe.rs
@@ -526,11 +517,11 @@ let mut child = Command::new("ffmpeg")
 
 ---
 
-## 17. `chat.bsky.convo`（Bluesky DM）への自己署名サービス認証【実機疎通確認済み】
+## 17. `chat.bsky.convo`（Bluesky DM）への自己署名サービス認証
 
 seiran は自前 PDS で外部 Bluesky 公式アカウント（bsky.social 等）を一切経由しないため、
 Bluesky 公式の DM 機能（`chat.bsky.convo.*`）を呼ぶにも OAuth ではなく §12 の
-自己署名 Service Auth JWT を使う。2026-07-20 に実機で疎通確認済み。
+自己署名 Service Auth JWT を使う。
 
 ### 17-1. `aud` は fragment 無しの素の DID（§12 の video pipeline とは異なるパターン）
 

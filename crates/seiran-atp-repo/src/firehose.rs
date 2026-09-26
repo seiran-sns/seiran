@@ -888,12 +888,8 @@ async fn store_bsky_post_extras(
         // thumbnailUrlをそのまま反映する（AP受信側と共通のロジック、#237）。
         // `embed_src`は設計上NULLのまま（送信側の申告を信用しない方針）のため
         // Job::LinkCardEmbedResolveは積まない。
-        seiran_common::seiran_post::insert_seiran_post_link_cards(
-            pool,
-            post_id,
-            seiran_link_cards,
-        )
-        .await;
+        seiran_common::seiran_post::insert_seiran_post_link_cards(pool, post_id, seiran_link_cards)
+            .await;
     } else if let Some(card) = link_card.as_ref().filter(|_| poll.is_none()) {
         // URLカード（Bskyは常に最大1件、position=0固定）。埋め込みプレーヤーのiframe src
         // （oEmbed discovery）はここでは未解決のため、後追いでJob::LinkCardEmbedResolveへ

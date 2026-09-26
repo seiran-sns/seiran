@@ -1,238 +1,188 @@
 # アーキテクチャ
 
-「開く」機能の`handlers/open_target.rs`は薄いオーケストレーション層とし、Bskyは`seiran-common::atp`、ActivityPub Actorは`target_resolve`、ActivityPub投稿はインバウンドCreateジョブを再利用する。外部ActivityStreams文書の取得はメディアプロキシと共通のDNS固定・private/loopback拒否・リダイレクト再検証を通す。フロントエンドの`OpenTargetDialog`はQRを同期認識し、重いOCR Workerは読取開始後に動的importする。
-
-対象読者: seiran のコード全体に手を入れる開発者。「今のシステムがどう動いているか」だけを書く。変更の経緯や過去の不具合修正は書かない（必要なら `git log` を見る）。
-
-通報は `ReportModal` と `POST /api/reports` でローカル・Fedi・Bskyを統一し、管理画面の
-「通報」タブから台帳閲覧、クローズ、内部コメント、凍結/投稿削除、リモート転送を行う。
-SnowflakeのActor IDはブラウザで精度を失わないよう文字列で受け渡す。
+対象読者: seiran のコード全体に手を入れる開発者。現在の動作だけを書く（経緯は `git log`）。
 
 ## 1. プロトコル上の位置づけ
 
-seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方に**サーバーとして参加する**。
+seiran は Fediverse (ActivityPub) と Bluesky (AT Protocol) の両方にサーバーとして参加する。
 
-- **AP側**: 一般的な Fedi インスタンスと同じく、Actor・Inbox・Outbox・WebFinger を自前で持つ。
-- **ATP側**: 外部 PDS（bsky.social 等）を使わず、**seiran 自身が各ローカルユーザーの PDS（Personal Data Server）を兼ねる**。ユーザーごとに `did:plc` を発行し、投稿のたびに自前で MST（Merkle Search Tree）をコミット・P-256 署名し、公式 Relay（`bsky.network`）へ配信する。AppView（bsky の検索・フィード生成)は Bluesky 公式のものをそのまま利用し、seiran はそこに投稿を流し込む立場。
+- **AP側**: 一般的な Fedi インスタンスと同じく Actor・Inbox・Outbox・WebFinger を持つ。
+- **ATP側**: 外部 PDS を使わず、seiran 自身が各ローカルユーザーの PDS を兼ねる。ユーザーごとに `did:plc` を発行し、投稿のたびに MST をコミット・P-256 署名して公式 Relay（`bsky.network`）へ配信する。AppView は Bluesky 公式のものを使う。
 
-この非対称性（AP はクライアント兼サーバー的にフラットだが、ATP は「PDSを自作している」）が実装の複雑さの主な発生源になっている。
+AP は普通のサーバー実装だが、ATP は PDS を自作している。この非対称性が実装の複雑さの主な発生源。
 
 ## 2. ワークスペース構成
 
-`Cargo.toml` の workspace members は6 crate。ビルド成果物は `seiran-server` の**単一バイナリのみ**で、他はすべて lib crate。
+workspace は6 crate。実行バイナリは `seiran-server` だけで、他は lib。
 
-| crate | 種別 | 役割 |
-|---|---|---|
-| `seiran-common` | lib | 全crate共通の基盤。DB・認証・シークレット管理・ジョブキュー/ジョブハンドラ・AP/ATPクライアント・Repository層・ストレージ・ストリーミングハブ |
-| `seiran-api` | lib | Web API 本体。Misskey互換API、MiAuth、XRPC(AT Protocol)、drive(メディア)、admin API。axum Router と `AppState` |
-| `seiran-federation-inbox` | lib | ActivityPub 受信ゲートウェイ。inbox・webfinger・actor・outbox・nodeinfo・featured/lists の公開エンドポイント |
-| `seiran-federation-worker` | lib | ジョブキューをデキューして実行するワーカーエンジンの起動処理のみ。ジョブの実処理は `seiran-common::jobs` にある |
-| `seiran-atp-repo` | lib | Bluesky Jetstream を購読し、フォロー済みDIDの新着投稿/Likeを取り込むリスナー |
-| `seiran-server` | bin | 唯一の実行バイナリ。`--role` で上記各lib crateを配線して起動する |
+| crate | 役割 |
+|---|---|
+| `seiran-common` | 共通基盤。DB・認証・シークレット・ジョブキューとジョブ実処理・AP/ATP クライアント・Repository 層・ストレージ・ストリーミング |
+| `seiran-api` | Web API。カスタム API・Misskey 互換 API・MiAuth・XRPC・drive・admin。axum Router と `AppState` |
+| `seiran-federation-inbox` | AP の受信と公開エンドポイント（inbox・webfinger・actor・outbox・nodeinfo・featured/lists） |
+| `seiran-federation-worker` | ワーカーエンジンの起動だけ。ジョブの実処理は `seiran-common::jobs` |
+| `seiran-atp-repo` | Jetstream 購読（投稿・Like・Repost）、Bsky DM・フォロワー・ブロックのポーリング/監視 |
+| `seiran-server` | `--role` に応じて上記を配線して起動する |
 
-`seiran-common` の主要モジュール:
+`seiran-common` の主なモジュール:
 - `auth/local.rs` — ローカル認証（Argon2 + JWT）
-- `secrets.rs` — `secrets.toml` 自動生成
+- `secrets.rs` — `secrets.toml` の自動生成
 - `queue/` — `JobQueue` の InMemory/Redis 実装とワーカーエンジン
-- `jobs/` — 各ジョブの実処理（`ap_delivery`, `atp_repository_publish`, `inbound_activity_process` 等）
-- `ap/` — ActivityPub クライアント・配送・webfinger・outbox
-- `atp/` — MST/リポジトリ、PLC、DID解決、service auth
-- `repository/` — Repository パターンの実装群（`actor.rs`/`post.rs`/`follow.rs` 等）
-- `storage/` — S3互換クライアント、ストレージ選択、画像処理
-- `streaming.rs` — `StreamHub`（WebSocket配信。`recipients`方式とMisskey互換チャンネル方式`ChannelKind`/`ChannelScope`の両方を扱う、`docs/protocols.md` 8節）
-- `id.rs` — Snowflake ID 採番
+- `jobs/` — 各ジョブの実処理
+- `ap/` — AP クライアント・配送・WebFinger・outbox
+- `atp/` — MST/リポジトリ、PLC、DID 解決、サービス間認証
+- `repository/` — Repository 層
+- `storage/` — S3 互換クライアント、ストレージ選択、画像処理
+- `streaming.rs` — `StreamHub`（`recipients` 方式とチャンネル方式、`docs/protocols.md` 8節）
+- `net.rs` — SSRF 対策込みの HTTP 取得・連合用クライアント
+- `id.rs` — Snowflake ID
 - `jetstream_control.rs` / `jetstream_leader.rs` — Jetstream 接続のプロセス間調整
 
 ## 2.1 バージョン管理と互換性チェック
 
-frontend/backendで単一のシステムバージョンを共有する。`Cargo.toml`の`[workspace.package].version`と
-`frontend/package.json`の`version`が同じ値を持つ運用とし、各Rust crateは`version.workspace = true`で
-これを参照する（`seiran-server`の単一バイナリだけでなく全lib crateも同一バージョン）。フロントエンドは
-`vite.config.ts`の`define`で`package.json`の`version`をビルド時定数`__FRONTEND_VERSION__`として埋め込み、
-`src/version.ts`の`FRONTEND_VERSION`で参照する。
+frontend と backend は1つのシステムバージョンを共有する。`Cargo.toml` の `[workspace.package].version` と `frontend/package.json` の `version` を同じ値にし、各 crate は `version.workspace = true` で参照する。フロントは `vite.config.ts` の `define` で `__FRONTEND_VERSION__` として埋め込み、`src/version.ts` の `FRONTEND_VERSION` で参照する。
 
-`version`本体とは別に、任意のサフィックス（`version_suffix`/`versionSuffix`）を1行分離して持てる:
-- Rust: `Cargo.toml`の`[workspace.package].version_suffix`（既定は空文字列）。Cargoが継承対象と
-  する既知フィールドではない独自キーで、`cargo build`は`unused manifest key`警告を出すが無害
-  （動作もCIの`clippy -- -D warnings`も妨げない、実機確認済み）。`crates/seiran-common/build.rs`が
-  ワークスペースルートの`Cargo.toml`を`toml`クレートで直接パースして読み取り、
-  `SEIRAN_VERSION_SUFFIX`というビルド時環境変数として払い出す（`version.workspace = true`の
-  ような自動継承はCargo標準の決め打ちフィールドにしか効かないため）。
-  `crates/seiran-common/src/version.rs`の`SERVER_VERSION`は
-  `concat!(env!("CARGO_PKG_VERSION"), env!("SEIRAN_VERSION_SUFFIX"))`でこれを結合する
-  （`version.rs`/`build.rs`は`seiran-api`ではなく`seiran-common`に置く。`nodeinfo`
-  ハンドラ（`seiran-federation-inbox`）など、`seiran-api`に依存しない他crateからも
-  同じ`SERVER_VERSION`を参照するため）。
-- フロントエンド: `frontend/package.json`の`versionSuffix`（既定は空文字列）。npmが関知しない
-  独自キーで、`vite.config.ts`が`pkg.version`と`pkg.versionSuffix`を結合してから
-  `__FRONTEND_VERSION__`へ埋め込む。
+`version` とは別の行に任意のサフィックスを持てる:
+- Rust: `[workspace.package].version_suffix`（既定は空）。Cargo の既知フィールドではないので `unused manifest key` 警告が出るが無害。`crates/seiran-common/build.rs` がルートの `Cargo.toml` を直接パースして `SEIRAN_VERSION_SUFFIX` として渡し、`version.rs` の `SERVER_VERSION` が `concat!(env!("CARGO_PKG_VERSION"), env!("SEIRAN_VERSION_SUFFIX"))` で結合する。`seiran-api` に依存しない crate（nodeinfo 等）からも参照するので `seiran-common` に置く。
+- フロント: `package.json` の `versionSuffix`。`vite.config.ts` が `version` と結合する。
 
-バージョン本体とサフィックスを別行に分けているのは、フィーチャーブランチやフォークでの運用を
-git上のコンフリクトなく回せるようにするため。例えばmainでは`version_suffix = "-dev"`を持たせて
-おき、リリースブランチ側でその行だけを空文字列に変えるコミットを積んでおけば、リリース対象の
-mainをマージするだけでサフィックスが外れる。フォーク側で`version_suffix = "-some-fork"`のような
-固有サフィックスを持たせておけば、本流の`version`更新を取り込んでも別行のため衝突しない。
+別行にしているのは、ブランチやフォークでサフィックスだけを変えてもコンフリクトしないようにするため（main で `-dev`、リリースブランチで空、フォークで `-some-fork` 等）。
 
-フロントエンド・サーバーの両コンポーネントは、自身のバージョンに加えて「対応する対向の最低バージョン」を
-定数として持つ:
-- サーバー: `crates/seiran-common/src/version.rs`の`SERVER_MIN_PEER_VERSION`（要求するフロントエンドの最低バージョン）
-- フロントエンド: `frontend/src/version.ts`の`FRONTEND_MIN_PEER_VERSION`（要求するサーバーの最低バージョン）
+両者は「対応する対向の最低バージョン」も持つ:
+- サーバー: `version.rs` の `SERVER_MIN_PEER_VERSION`（要求するフロントの最低バージョン）
+- フロント: `version.ts` の `FRONTEND_MIN_PEER_VERSION`（要求するサーバーの最低バージョン）
 
-サーバーは`middleware::version_headers::attach`（axumミドルウェア、`crates/seiran-api/src/lib.rs`の
-`router()`へ`.layer()`で適用、全APIレスポンス共通）で自身のバージョンと最低対向バージョンを
-`x-seiran-server-version`/`x-seiran-server-min-peer-version`ヘッダーとして全レスポンスへ付与する。
+サーバーは `middleware::version_headers::attach` で全レスポンスに `x-seiran-server-version`/`x-seiran-server-min-peer-version` を付ける。nodeinfo の `software.version` も `SERVER_VERSION`。
 
-`nodeinfo`（`GET /nodeinfo/2.1`、`seiran-federation-inbox::handlers::nodeinfo`）の
-`software.version`も同じ`SERVER_VERSION`を返す。
+フロントは `api/core.ts` の `request()`/`uploadFormData()` が全レスポンスで `api/versionCompat.ts::checkVersionCompat()` を呼び、「フロントのバージョン ≥ サーバーの最低対向バージョン」と「サーバーのバージョン ≥ フロントの最低対向バージョン」のどちらかが崩れたら `ReloadRequiredDialog` でリロードを促す。閉じると同じセッション中は再表示しない。
 
-フロントエンドは`api/core.ts`の`request()`/`uploadFormData()`が全レスポンスに対して
-`api/versionCompat.ts`の`checkVersionCompat()`を呼び、
-【フロントエンドのバージョン ≥ サーバーの最低対向バージョン】
-【サーバーのバージョン ≥ フロントエンドの最低対向バージョン】
-のいずれかを満たさない場合、`ReloadRequiredDialog`（`App.tsx`にグローバルマウント）でリロードを促す。
-一度閉じるとモジュールスコープの`dismissed`フラグにより同一セッション中は再表示しない
-（ページをリロードすればモジュール状態ごとリセットされ、再度チェックが働く）。
-
-「このサーバーの詳細」はLeftNav左下の「Powered by Seiran」ボタンから開く`ServerInfoDialog`で、
-フロントエンドバージョン（`FRONTEND_VERSION`）とサーバーバージョン
-（`SiteMetaContext`が保持する`serverVersion`）を表示する。`serverVersion`の初期値は起動時の
-`GET /api/meta`の`version`だが、その後は`checkVersionCompat()`が読む`x-seiran-server-version`
-ヘッダーを`api/versionCompat.ts::setServerVersionHandler()`経由で`SiteMetaContext`へも流し込み、
-以降の任意のAPIレスポンスを受けるたびに最新化する。ページをリロードしなくても、デプロイし直しで
-サーバーバージョンが変われば次のAPI呼び出し時点で表示に反映される。
+LeftNav 左下の「Powered by Seiran」から開く `ServerInfoDialog` は、フロントのバージョンと `SiteMetaContext` の `serverVersion` を表示する。`serverVersion` は起動時の `GET /api/meta` を初期値に、以後はレスポンスヘッダーを `setServerVersionHandler()` 経由で受けて更新するので、デプロイし直すと次の API 呼び出しで表示が変わる。
 
 ## 3. 統合バイナリとロール分割
 
-`seiran-server/src/main.rs` の `Role::resolve()` が `--role=xxx` → `SEIRAN_ROLE` 環境変数 → 未指定なら `All` の順で解決する。
+`seiran-server/src/main.rs` の `Role::resolve()` が `--role=xxx` → `SEIRAN_ROLE` → 既定 `All` の順で決める。
 
 | CLI値 | Role | 対応crate | ポート |
 |---|---|---|---|
-| `all`(既定) | All | 全部合流 | `PORT`(既定3000) |
+| `all`（既定） | All | 全部 | `PORT`（既定3000） |
 | `api` | Api | seiran-api | `PORT` |
-| `federation` / `inbox` | Federation | seiran-federation-inbox | `FEDERATION_INBOX_PORT`(既定3001) |
+| `federation` / `inbox` | Federation | seiran-federation-inbox | `FEDERATION_INBOX_PORT`（既定3001） |
 | `worker` | Worker | seiran-federation-worker | なし |
 | `firehose` / `atp-repo` | Firehose | seiran-atp-repo | なし |
 
-- **`Role::All`**: DB接続・シークレット・HTTPクライアント・`job_queue`（常に InMemory）を1回だけ生成し、`seiran_api::router().merge(seiran_federation_inbox::router())` で単一 axum Router として1ポートで待ち受ける。firehose と worker は同一プロセス内で `tokio::spawn` されるバックグラウンドタスク。
-- **`Role::Api` / `Role::Federation`**: 単独プロセスとして専用ポートで待受。`REDIS_URL` があれば `RedisJobQueue`、なければ `InMemoryJobQueue`（split-role構成でこれを選ぶと他プロセスにジョブが届かない）。
-- **`Role::Worker`**: HTTPサーバーは立てず、ジョブキューを消費するのみ。
-- **`Role::Firehose`**: 購読者がいないため空の `StreamHub` を使う。
+- **All**（`run_all`）: DB・シークレット・HTTP クライアント・`job_queue`（常に InMemory）を1回だけ作り、`seiran_api::router().merge(seiran_federation_inbox::router())` を1ポートで待ち受ける。firehose と worker は同じプロセスの `tokio::spawn`。
+- **Api / Federation**: 専用ポートで待ち受ける。`REDIS_URL` があれば `RedisJobQueue`、無ければ `InMemoryJobQueue`（split-role でこれだと他プロセスにジョブが届かない）。
+- **Worker**（`run_standalone_worker`）: HTTP を持たずジョブを消費する。
+- **Firehose**: 購読者がいないので空の `StreamHub` を使う。
 
-DBプール上限（`DB_MAX_CONNECTIONS`未設定時）は`seiran_common::db::recommended_max_connections(extra_concurrent_tasks)`がロールごとに動的算出する。内訳は`available_parallelism()`（HTTPハンドラの同時処理見積もり。axum/tokioはHTTPリクエスト処理自体に同時実行数の上限を設けていないため、tokioの既定ワーカースレッド数＝CPUコア数で近似する）＋`extra_concurrent_tasks`＋固定バッファ5、これをPostgreSQL既定の`max_connections`（100）を単一ロールで圧迫しない上限50でクランプする。`Role::All`/`Role::Worker`は埋め込み・単独どちらもジョブワーカー（`WorkerEngine::max_concurrent`、既定`DEFAULT_MAX_CONCURRENT_JOBS`＝32並列）を抱えるため`extra_concurrent_tasks`にこの値を渡し、`Role::Api`/`Role::Federation`/`Role::Firehose`はワーカーを持たないため0を渡す（`main.rs`）。
+DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended_max_connections(extra)` が「`available_parallelism()`（HTTP の同時処理の近似。axum/tokio は同時実行数を制限しないので CPU コア数で見積もる）＋ `extra` ＋ 5」を50でクランプして決める（PostgreSQL 既定の `max_connections` 100 を1ロールで圧迫しないため）。All と Worker はジョブワーカー（`DEFAULT_MAX_CONCURRENT_JOBS` = 32並列）を持つので `extra` に32を、他は0を渡す。
 
-同じ Docker イメージを `command`（`--role`）違いで複数コンテナに分けるか、単一コンテナで `all` 起動するかは**運用モードの選択**であり、コード上の分岐は `main.rs` の `Role` 列挙とその配線だけ。
+同じイメージを `--role` 違いで複数コンテナに分けるか、1コンテナで `all` にするかは運用の選択で、コード上の分岐は `main.rs` の配線だけ。
 
-- `docker-compose.yml`（split-role）: `db` / `redis`（ジョブキュー共有に必須）/ `api` / `federation-inbox` / `worker` / `atp-repo` / `frontend` / `nginx`（`docker/nginx.conf`）/ `tunnel`。`config-data` ボリュームで `secrets.toml` を全バックエンド間で共有永続化する。サービス間通信はコンテナ内部DNS（`db:5432`等）を使うため`db`のホスト公開は本来不要だが、運用機へのSSHトンネル経由psqlアクセス（DBeaver等）のため`127.0.0.1:5432`（ループバックのみ）でホストへ公開する（`0.0.0.0`にはしない、#220）。
-- `docker-compose.mono.yml`（単一コンテナ）: `db` / `seiran-server`（role=all）/ `frontend` / `nginx`（`docker/nginx.mono.conf`）/ `docker-gen`（`--scale seiran-server=N` によるスケールアウト時に nginx へ反映）/ `tunnel`。Redis サービス自体が存在しない（同一プロセス内で完結するため不要）。`scripts/dev-up.sh`は`db`だけをこのcomposeで起動し、backend（`seiran-server`）はネイティブ`cargo run`でホスト側から接続するため、`db`は同じく`127.0.0.1:5432`（ループバックのみ）でホストへ公開する。
-- `db` サービスは両 compose とも `docker/Dockerfile.postgres`（`postgres:16-bookworm` ベースに pg_bigm をソースビルドで組み込み）からビルドする（#97）。`shared_preload_libraries=pg_bigm,pg_stat_statements` を起動コマンドで渡す。`pg_stat_statements`は公式イメージ標準同梱の拡張で、クエリ別の実行時間・呼び出し回数を計測できる（パフォーマンス調査の計測基盤、docs/code_audit_2026-08-05.md P-9）。`shared_preload_libraries`の変更はpostmaster再起動が必要なため、コンテナ再作成前は`CREATE EXTENSION`済みでも`pg_stat_statements`ビューへのクエリは失敗する。
-- `GET /health`（`seiran-api`、認証不要）: DBへ`SELECT 1`を発行できるかで200/503を返す外形監視用エンドポイント。「プロセスは起動しているがDBプールが枯渇/切断している」状態を外部監視から検知できるようにする（docs/code_audit_2026-08-05.md R-9）。`Role::All`/`Role::Api`のみで提供され、federation/worker/firehoseロールには無い。
-- 自前で管理する2つのDockerイメージ（`docker/Dockerfile`＝seiran-server、`docker/Dockerfile.frontend`＝Vite dev server）はどちらも非rootユーザーで実プロセスを実行する（docs/code_audit_2026-08-05.md S-8）。seiran-serverは`uid:gid=10001:10001`の`seiran`ユーザーで動くが、イメージの`USER`はrootのままにしてある。理由は`config-data`ボリューム（`/app/config`、`secrets.toml`の永続化先）が「新規作成される空ボリューム」だけでなく「以前から中身が入っている既存ボリューム」としてもマウントされうるため（例: 非root化より前にrootで書き込まれた`secrets.toml`が既に入っているボリュームへ、非root化後の新イメージを再デプロイするケース）。Dockerfile側の`chown`はイメージ自身のレイヤーにしか効かず、Dockerが「空ボリュームへイメージの内容ごとコピーする」自動処理も中身が空でない限り発動しないため、既存ボリュームの所有権はrootのまま残り非rootユーザーは読み書きできず起動不能になる（実機の`seiran_config-data`ボリュームで再現・修正確認済み）。そのため`docker/entrypoint.sh`が`ENTRYPOINT`となり、コンテナ起動のたびに（1）rootのまま`/app/config`を`chown -R seiran:seiran`で揃え、（2）`gosu seiran`で非rootへ降格してから`seiran-server`をexecする。postgres公式イメージ等と同じ「起動時だけrootでボリューム所有権を修正し、実プロセスは非rootで動かす」構成。それ以外の書き込みは`/tmp`のみ（`media_probe.rs`のffmpeg一時ファイル）で、`/tmp`はどのユーザーでも書き込み可能なため追加対応不要。frontendは`node:22-alpine`同梱の`node`ユーザー（`uid:gid=1000:1000`）で、こちらはbind mountされるソースを読むだけで永続ボリュームへの書き込みが無いため`USER`を直接固定できる。`db`（`docker/Dockerfile.postgres`）・`redis`・`nginx`・`cloudflared`はいずれもサードパーティの公式/準公式イメージで、同種の権限降格を各イメージが自身のentrypoint内で既に行っているためDockerfileに`USER`を追加していない。
+- `docker-compose.yml`（split-role）: `db` / `redis`（ジョブキュー共有に必須）/ `api` / `federation-inbox` / `worker` / `atp-repo` / `frontend` / `nginx`（`docker/nginx.conf`）/ `tunnel`。`config-data` ボリュームで `secrets.toml` を共有する。`db` はコンテナ内DNSで足りるが、SSH トンネル経由の psql 用に `127.0.0.1:5432`（ループバックのみ）で公開する。
+- `docker-compose.mono.yml`（単一コンテナ）: `db` / `seiran-server`（role=all）/ `frontend` / `nginx`（`docker/nginx.mono.conf`）/ `docker-gen`（`--scale seiran-server=N` を nginx に反映）/ `tunnel`。Redis は無い。`scripts/dev-up.sh` は `db` だけをこれで起動し、backend はホストで `cargo run` して `127.0.0.1:5432` に繋ぐ。
+- `db` は両方とも `docker/Dockerfile.postgres`（`postgres:16-bookworm` に pg_bigm をソースビルド）で、`shared_preload_libraries=pg_bigm,pg_stat_statements` を渡す。`shared_preload_libraries` の変更は postmaster の再起動が要るので、コンテナ再作成までは `pg_stat_statements` ビューが使えない。
+- `GET /health`（Api/All のみ、認証不要）: DB に `SELECT 1` できるかで 200/503 を返す外形監視用。
+- `docker/Dockerfile`（seiran-server）は実プロセスを非 root（`seiran`、uid:gid 10001）で動かすが、イメージの `USER` は root のまま。`config-data`（`/app/config`）には root で書かれた既存ボリュームがマウントされうるが、Dockerfile の `chown` はイメージのレイヤーにしか効かず、空でないボリュームにはイメージの内容がコピーされないため。`docker/entrypoint.sh` が起動のたびに root で `/app/config` を `chown -R seiran:seiran` し、`gosu seiran` で降格して exec する（postgres 公式イメージと同じ構成）。他の書き込み先は `/tmp`（ffmpeg の一時ファイル）だけ。`docker/Dockerfile.frontend` は `node` ユーザーで、書き込みが無いので `USER` を固定している。`db`・`redis`・`nginx`・`cloudflared` は各イメージが自前で降格する。
 
 ## 4. 認証
 
-ログインとTOTP検証は、暗号鍵をpepperにしたkeyed hashだけを`auth_attempt_log`へ保存し、同一識別子に対する資格情報および同一資格情報に対する識別子を既定10分・5種類までに制限する。ウィンドウ起点は「既定10分前」「直近パスワードリセット完了時刻」「直近ログイン成功時刻（`users.last_login_success_at`）」のうち最も新しい時刻で、ログイン成功のたびに試行種類数カウントがリセットされる。制限拒否が同一IPで既定10分に5回発生すると24時間`auth_ip_blocks`で認証を遮断する。各値、Turnstile鍵、登録IP制限（既定60分・5件）は`site_settings`から管理する。ログイン・登録（メール確認送信・直接登録の両方）はTurnstile設定済みの場合にCloudflare Siteverifyを必須とする。クライアントIPは`ClientIp`（`cf-connecting-ip`/`x-real-ip`/`x-forwarded-for`の順で信頼済みヘッダーからのみ解決、無ければ`None`＝IP系制限は素通り）で解決する。
+認証の実体はローカル ID/PW（`auth::local::LocalAuthProvider`）の JWT だけで、MiAuth と Misskey 互換はその発行・受け渡しの窓口。外部認証プロバイダ連携は無い。
 
-`user`/`emoji-editor`はDMを除くメンション・返信・引用の宛先を1時間30ユニークユーザーまで、投稿を1時間30通（`moderator`は100通）まで、新規フォローを24時間100人（`moderator`は300人）まで、リスト作成数を5本（`moderator`は30本）まで、リスト最大人数を50人（`moderator`は300人）まで、検索を1時間10回（`moderator`は50回、スクロールによるページング取得は回数に含まない）まで、アップロードを1ファイル10MBまでに制限する。`moderator`のアップロード上限は50MB、`admin`はいずれの制限も対象外でAPI全体の既存アップロード上限100MBのみが適用される。閾値は全て`site_settings`から変更可能（`crates/seiran-api/src/rate_limit.rs`の`role_limit`ヘルパー）。
+- パスワード: Argon2（既定パラメータ、`OsRng` の salt）
+- トークン: HS256 の JWT。`sub` は `"local|{user_id}"`。自社ログイン（`generate_token`）・MiAuth（`generate_app_token`）とも `exp` を持たず無期限で、失効は個別の無効化（`app_tokens.revoked_at`）と一括失効（`users.token_valid_after`）で管理する。secret は `secrets.toml` の `jwt_secret`。クレームの `iat` が `token_valid_after` より前なら `extract_auth` が拒否する。パスワード変更・リセット・「全セッションからログアウト」で `token_valid_after` を現在時刻にする。`iat` の無い古いトークンは `token_valid_after` 未設定なら有効（導入時の強制全ログアウトを避けるため）。`extract_auth` は `exp` を無視してデコードする（`verify_token_ignoring_exp`）ので、以前の `exp` 付きトークンも有効。
 
-認証の起点はローカル ID/PW（`seiran-common::auth::local::LocalAuthProvider`）。TOTPを有効化したユーザーはパスワード検証後に5分間有効な用途限定JWTを受け取り、`POST /api/auth/totp/verify`でTOTPまたは使い切りリカバリーコードを検証して初めて通常のJWTを取得する。用途限定JWTは通常JWTとクレーム形状を分け、一般APIの認証には利用できない。管理者はユーザー管理APIでTOTP有効状態とパスキー登録数を確認でき、本人が認証手段を失った場合はTOTP設定を強制解除できる。外部認証プロバイダとの連携や、認証方式を切り替える抽象化レイヤーは存在しない。
+**レート制限**:
+- ログインと TOTP 検証は、暗号鍵を pepper にした keyed hash だけを `auth_attempt_log` に保存し、同一識別子に対する資格情報、同一資格情報に対する識別子を既定10分・5種類までに制限する。ウィンドウの起点は「10分前」「直近のパスワードリセット完了」「直近のログイン成功（`users.last_login_success_at`）」の最も新しい時刻で、ログイン成功で数え直しになる。拒否が同一IPで10分に5回起きると24時間 `auth_ip_blocks` で遮断する。
+- 各値・Turnstile 鍵・登録のIP制限（既定60分・5件）は `site_settings` で管理する。Turnstile を設定するとログイン・登録で Siteverify を必須にする。
+- クライアントIPは `ClientIp`（`cf-connecting-ip` → `x-real-ip` → `x-forwarded-for`、無ければ `None` で IP 系制限は素通り）。
+- ロール別の上限（`rate_limit.rs` の `role_limit`、値は `site_settings`）: `user`/`emoji-editor` はメンション・返信・引用の宛先（DM除く）1時間30人、投稿1時間30通、新規フォロー24時間100人、リスト5本・各50人、検索1時間10回（スクロールのページングは数えない）、アップロード1ファイル10MB。`moderator` は投稿100通・フォロー300人・リスト30本/300人・検索50回・50MB。`admin` は対象外で API 全体の上限100MBだけ。
 
-TOTPシークレットはAES-256-GCMで暗号化して保存し、リカバリーコードはArgon2ハッシュのみを保存する。認証アプリとリカバリーコードを両方失った場合は、パスワード検証済みの用途限定JWTから登録メールアドレスへ1時間有効な解除リンクを送り、リンクのワンタイムトークン消費時にTOTP設定を削除する。
+**TOTP**: 有効なユーザーはパスワード検証後に5分有効な用途限定 JWT を受け取り、`POST /api/auth/totp/verify` で TOTP かリカバリーコードを検証して通常 JWT を得る。用途限定 JWT はクレーム形状が違い、一般 API には使えない。シークレットは AES-256-GCM で暗号化、リカバリーコードは Argon2 ハッシュのみ保存する。両方失ったら、用途限定 JWT から登録メールへ1時間有効な解除リンクを送り、ワンタイムトークンの消費時に TOTP 設定を消す。管理者はユーザー管理で TOTP 状態とパスキー数を見て、TOTP を強制解除できる。
 
-パスキーはWebAuthn relying party（RP ID=`LOCAL_DOMAIN`、originは既定で`https://{LOCAL_DOMAIN}`、ローカル/E2Eのみ`WEBAUTHN_ORIGIN`で上書き）として実装する。ユーザーは設定画面から複数credentialを名前付きで登録・削除できる。登録はresident key必須・プラットフォーム認証器限定（`webauthn-rs`の`start_google_passkey_in_google_password_manager_only_registration`）で行い、discoverable credentialとして保存する。これによりUSB接続のセキュリティキーは登録できないが、ログイン画面ではメールアドレス/ユーザー名の入力なしに「パスキーを使う」から`start_discoverable_authentication`／`identify_discoverable_authentication`によるusernamelessログインができる。登録・認証チャレンジの状態は`passkey_challenges`へ保存し、5分で失効、完了APIで原子的に削除する（`user_id`は認証開始時点でユーザーが未確定なためNULL許容）。認証成功時は署名カウンター等を含むcredentialを更新して通常JWTを発行する。パスキー自体がフィッシング耐性を持つ強い認証方式のため、パスキーログインではパスワードおよびTOTP入力を要求しない。
+**パスキー**: WebAuthn の RP（RP ID は `LOCAL_DOMAIN`、origin は既定 `https://{LOCAL_DOMAIN}`、ローカル/E2E のみ `WEBAUTHN_ORIGIN` で上書き）。登録は resident key 必須・プラットフォーム認証器限定（`start_google_passkey_in_google_password_manager_only_registration`）で discoverable credential として保存するので、USB セキュリティキーは使えないが、ログイン画面で ID 入力なしにログインできる（`start_discoverable_authentication`/`identify_discoverable_authentication`）。チャレンジは `passkey_challenges` に保存し、5分で失効、完了時に原子的に削除する（認証開始時はユーザー未確定なので `user_id` は NULL 可）。成功時は署名カウンター等を更新して通常 JWT を発行する。パスキー自体がフィッシング耐性を持つので、パスワードと TOTP は求めない。
 
-- パスワード: Argon2（`argon2` クレート既定パラメータ、`OsRng` で salt生成）
-- トークン: `jsonwebtoken` による JWT（HS256相当）。`sub` は `"local|{user_id}"`。自社ログイン発行分（`generate_token`）・MiAuth発行分（`generate_app_token`）とも `exp` クレーム自体を持たず無期限（失効は明示的な無効化 `app_tokens.revoked_at`／一括失効 `users.token_valid_after` のみで管理、後述）。secret は `secrets.toml` の `jwt_secret`（256bit hex、起動時自動生成）。クレームに `iat`（発行時刻）を含み、`users.token_valid_after` より前に発行されたトークンは `extract_auth` で拒否する。パスワード変更（`change-password`・パスワードリセット）・設定画面の「全セッションからログアウト」時に `token_valid_after` を現在時刻へ更新することで、攻撃者が窃取した旧トークンを一括失効させられる。`iat` を持たない旧トークン（`iat`導入前に発行）は `token_valid_after` が未設定なら従来どおり有効（デプロイ時の強制全ログアウトを避けるための移行措置）。
-  当初は自社ログイン発行分のみ7日で失効させていたが、無期限化した（ログイン切れによる不便さの解消が目的）。`extract_auth` は検証時に `exp` を一律で無視してデコードする（`verify_token_ignoring_exp`）ため、無期限化以前に発行済みで `exp`（旧仕様の7日）が埋め込まれたままのトークンも、明示的に無効化されない限り引き続き有効に扱われる。
+**MiAuth**: `GET /miauth/:session_id`（認可ページ）→ `POST /api/miauth/:session_id/authorize`（要 Bearer、無期限 JWT を発行）→ `POST /api/miauth/:session_id/check`（クライアントがポーリング）。セッションはプロセス内メモリ（`AppState.miauth_sessions`）。発行したトークンは `app_tokens` に記録し、設定画面で無効化するまで有効（Misskey クライアントは「取り消すまで有効」を前提にしている）。
 
-**MiAuth 互換**（Misskeyクライアント向け）: `GET /miauth/:session_id`（認可ページ）→ `POST /api/miauth/:session_id/authorize`（要Bearer、認可するとそのユーザーの無期限JWTを発行、`generate_app_token`）→ `POST /api/miauth/:session_id/check`（クライアントがポーリングして受け取る）。セッション状態は `AppState.miauth_sessions`（プロセス内メモリ、DB永続化なし）。発行したトークンは `app_tokens` に記録され（#60）、設定画面から明示的に無効化するまで有効。Misskey互換クライアント（Aria等）は「連携したら明示的に取り消すまで有効」という前提で作られているため、無期限としている（現在は自社ログイン発行分も同じく無期限）。
+**Misskey 互換**: `middleware::misskey_auth_bridge` が JSON ボディかクエリの `i` から `Authorization: Bearer` を合成する（既存のヘッダーを優先）。multipart（`drive/files/create`）は対象外なので、ハンドラが multipart の `i` を読む。
 
-**匿名段階の認可（既存DID転入フロー）**: 通常のJWT認証は`users`/`actors`が存在することが前提だが、既存Bluesky DID転入フロー（`docs/account_migration.md`）は`submitPlcOperation`成功までアカウント自体が存在しない。この間は`password_resets`等と同型の「ランダムトークンをハッシュ化してDB保存、レスポンス一回きりで生値を返す」方式（`at_migration_requests.request_token_hash`）を採用し、以降のリクエストは`X-Migration-Token`ヘッダで認可する。`submitPlcOperation`成功と同時に通常の`AuthResponse`（JWT含む）を発行し、以降は通常ログインと同じ認可へ切り替わる。
+**DID 転入中の認可**: 転入フロー（`docs/account_migration.md`）は `submitPlcOperation` 成功までアカウントが無いので、ランダムトークンのハッシュを `at_migration_requests.request_token_hash` に保存し、生値を1回だけ返して、以降は `X-Migration-Token` で認可する。成功と同時に通常の `AuthResponse` を返す。
 
-**転出元API対応（ATP XRPCエンドポイント）の認可**: `com.atproto.identity.*`/`com.atproto.server.checkAccountStatus`/`deactivateAccount`（`docs/account_migration.md` 6節）は、いずれもATP accessJwt（`extract_bearer`→`verify_atp_access_token`）で認可し、トークンから解決したDIDのアカウントに対してのみ操作する（リクエスト本文中のDIDヒントは信用しない）。DID転出済み（`actors.did_moved_out_at`設定済み）のアカウントは、`AuthedUser`（seiran自身の`/api/*`向け認証、`crates/seiran-api/src/middleware/authed_user.rs`）経由の書き込み系ハンドラが`require_not_did_moved_out()`で個別に拒否する。`extract_auth`の`suspended`チェックとは異なり自動適用ではなく、投稿・リアクション・リポスト・フォロー・リスト操作・DM送信（`create_note`経由）の各ハンドラが明示的に呼ぶ——読み取り系は影響を受けない。
-
-**Misskey API 互換との共存**: `middleware::misskey_auth_bridge` が、Misskeyクライアントが送る JSON ボディの `i` フィールドまたはクエリの `i` を検出して `Authorization: Bearer` ヘッダーへ合成する（既存の `Authorization` ヘッダーがあればそちらを優先）。つまり JWT ベースのローカル認証が唯一の実体で、MiAuth と Misskey 互換はその上に被さる「トークンの発行・受け渡し窓口」に過ぎない。multipart/form-data のボディ（`drive/files/create` のファイルアップロード）はこのミドルウェアの対象外のため、`handlers::drive::create_drive_file` はハンドラ内で multipart の `i` フィールドを個別にフォールバックとして扱う。
+**転出元 API の認可**: `com.atproto.identity.*`/`server.checkAccountStatus`/`deactivateAccount` は ATP の accessJwt（`verify_atp_access_token`）で認可し、トークンの DID のアカウントだけを操作する（本文の DID は信用しない）。PLC 操作と `deactivateAccount` はメインパスワードでログインしたセッション（JWT の `privileged`）に限る（アプリパスワードを渡した第三者に DID を乗っ取らせないため）。DID 転出済み（`did_moved_out_at`）のアカウントは、書き込み系ハンドラ（投稿・リアクション・リポスト・フォロー・リスト・DM）が `require_not_did_moved_out()` を明示的に呼んで拒否する（凍結の判定と違い自動ではない）。読み取りは影響しない。
 
 ### API エラーレスポンス方針
-`ApiError` は `{"code": "ERROR_CODE"}` 形式の JSON を返す（平文テキストは返さない）。Misskey 互換エンドポイントでは追加で `error: {code, message}` も付与し後方互換を保つ（`message` は常に `code` と同一文字列で、人間可読なメッセージ生成はフロントエンドの責務）。エラーコードはフロントエンドの `client.ts` の `getErrorMessage()` が `i18n/locales/{lng}/errors.json` の翻訳へマップする（未知のコードは HTTP ステータスが5xxなら「サーバー応答なし」文言に、それ以外はコード付きの汎用文言にフォールバック）。トークン失効（401、かつローカルにトークン保持中）を検知すると `setUnauthorizedHandler()` 経由で `AuthProvider` へ通知し、自動ログアウト＋ログイン画面誘導を行う。
+`ApiError` は `{"code": "ERROR_CODE"}` を返す（平文は返さない）。Misskey 互換エンドポイントは `error: {code, message}` も付ける（`message` は `code` と同じ文字列。人間向けの文言はフロントの責務）。フロントの `getErrorMessage()` が `i18n/locales/{lng}/errors.json` で翻訳する（未知のコードは 5xx なら「サーバー応答なし」、それ以外はコード付きの汎用文言）。トークン失効（401 かつトークン保持中）なら `setUnauthorizedHandler()` 経由で自動ログアウトしてログイン画面へ誘導する。
 
 ## 5. ジョブキュー
 
-`seiran-common::traits` に `Job`（enum）、`JobQueue` trait（`enqueue`/`enqueue_retry`/`dequeue_blocking` の3メソッドのみ）を定義。`WorkerEngine` はこの trait のみに依存しバックエンド実装を意識しない。
+`seiran-common::traits` に `Job`（enum）と `JobQueue` trait（`enqueue`/`enqueue_retry`/`dequeue_blocking`）を定義する。`WorkerEngine` は trait だけに依存する。
 
-**バックエンド選択**（`create_job_queue(is_monolith: bool)`）:
-- `is_monolith == true`（`--role all`）: 常に `InMemoryJobQueue`（`REDIS_URL` の有無を見ない）
-- `is_monolith == false`（split-role）: `REDIS_URL` があれば `RedisJobQueue`（優先度付き Sorted Set + `BZPOPMIN` + Lua スクリプトによる遅延リトライ昇格）、なければ `InMemoryJobQueue` にフォールバック
+**バックエンド**（`create_job_queue(is_monolith)`）: `--role all` は常に `InMemoryJobQueue`。split-role は `REDIS_URL` があれば `RedisJobQueue`（優先度付き Sorted Set + `BZPOPMIN` + Lua による遅延リトライの昇格）、無ければ InMemory。
 
-**主要ジョブ**:
+**主なジョブ**:
 | Job | 用途 | 優先度 |
 |---|---|---|
-| `ActorHistorySync` | 新規フォロー時の過去ログ取得（Bsky: 最大300件、AP: 最大30件） | 低 |
-| `ApDelivery{actor_id, kind}` | AP配送。`kind` は `PostToFollowers`/`DirectMessage`/`Announce`/`UndoAnnounce`/`DeleteNote`/`Reaction`/`UndoReaction`/`UpdateActor`/`DeleteActor`（`DirectMessage`はDM宛先個人のみへの配送、`docs/protocols.md` 9節） | 高 |
-| `InboundActivityProcess` | 受信AP活動の非同期解析・DB保存（inboxハンドラは署名検証のみ同期実行し即202を返す） | 中 |
-| `ActorMetadataResolve` | リモートアクター検証・メタデータ取得 | — （**スタブのみ、enqueueする箇所が実装されていない**） |
-| `AtpRepositoryPublish` | 外部PDSへのミラーリング目的で定義されているが、**enqueueする呼び出し箇所が実質存在しない**（現在の投稿配送は `AtpCommitService` を直接 await する経路に一本化されている。デッドコード） | 最高 |
-| `BskyVideoPoll{media_file_id}` | Bsky公式動画パイプラインの完了ポーリング。起動時リカバリ対象（下記） | — |
-| `ProxyFollowSync` | list-relay仮想アクターの代理フォロー同期 | — |
-| `AccountWithdrawUnfollowAll{actor_id, username}` | 退会時の一括アンフォロー。起動時リカバリ対象（下記） | — |
-| `BskyPostCommitDeferred{actor_id, post_id, pending_media_file_id}` | 動画添付投稿のATPコミットを動画結合完了まで遅延。起動時リカバリ対象（下記） | — |
-| `BskyDmSend{post_id}` | DM宛先のBskyアクターへ`chat.bsky.convo.sendMessage`で送信（`docs/protocols.md` 9節） | 高 |
-| `BskyDmReactionAdd{post_id, actor_id, content}` / `BskyDmReactionRemove{...}` | Bsky宛DMメッセージへのローカル発リアクション付与/取消を`chat.bsky.convo.addReaction`/`removeReaction`へ配送（`docs/protocols.md` 9節） | 高 |
-| `BskyDmHide{post_id, actor_id}` | Bsky宛DMメッセージの「隠す」操作を`chat.bsky.convo.deleteMessageForSelf`へ配送（`docs/protocols.md` 9節） | 高 |
-| `RemoteFollowListSync{actor_id, direction}` | リモートFediアクターのfollowers/following全件取得（プロフィール表示時の短タイムアウト同期取得が失敗/タイムアウトした場合のフォールバック、`docs/protocols.md` 2節） | 低 |
-| `RemoteActorResolve{uri}` | リモートfollowers/following一覧中、ローカルDB未登録のactor URIのプロフィールを解決し`actors`へupsert（フォロー関係は作らない、`docs/protocols.md` 2節） | 低 |
-| `DmRecipientResolve{post_id, uri}` | Fedi受信DMの`to`に含まれるリモートアクターURIを解決し`post_recipients`へ追加する（`RemoteActorResolve`と共有ロジックで未知アクターもupsert）。DM受信処理自体はローカル宛先のみ即座に解決するため、3人以上の会話に混じるリモートユーザーの宛先表示漏れを防ぐ（`docs/protocols.md` 9節） | 低 |
-| `RemoteInstanceInfoResolve{domain}` | リモートインスタンスのnodeinfoを取得し`remote_instance_meta`へキャッシュ（NoteCardリモートサーバー表示、`docs/database.md`参照）。notes API/Misskey互換APIが未キャッシュのドメインを見つけた際に積む | 低 |
-| `RemoteProfileRefresh{actor_id}` | リモートアクター（fedi/bsky/remote_seiran）のavatar_url/banner_url/display_name/bio等を再取得し`actors`を更新する。カスタムAPI（`handlers::users::user_profile`）・Misskey互換API（`/api/users/show`）双方のプロフィール表示のたびに積む。「表示時再検証」パターン（下記）の実例 | 低 |
-| `AlsoKnownAsVerify{owner_actor_id, target_actor_id}` | プロフィールの「別のアカウント」（alsoKnownAs、`docs/protocols.md` 2節）の相互検証結果を`actor_also_known_as`テーブルへキャッシュ更新する。「表示時再検証」パターン（下記）の実例 | 低 |
-| `BridgeUserLinkResolve{actor_id}` | brid.gyブリッジユーザー対応（`docs/protocols.md`参照）: プロフィール表示のたびに、`actors.bridge_real_actor_id`が未解決なブリッジユーザーに対して実ユーザーへのリンクを解決する。「表示時再検証」パターンだが、ブリッジ関係自体は不変のため一度解決すれば以後は再検証しない | 低 |
-| `RemoteAlsoKnownAsSync{owner_actor_id}` | リモートFediアクター自身のAP actor文書が公開する`alsoKnownAs`を`actor_also_known_as`へ同期し、取り込んだ各エントリに`AlsoKnownAsVerify`を積む（`docs/protocols.md` 2節） | 低 |
-| `BskyListMembershipResolve{list_uri}` | リモート（seiranユーザー所有でない）Bskyリストの全メンバーDIDを`app.bsky.graph.getList`から取得し`bsky_remote_list_membership_cache`へ24時間TTLで保存（threadgateの`#listRule`評価、`docs/protocols.md` 3節） | 低 |
-| `MigrationFetchRepo{request_id}` | 既存DID転入: PDS Aから`getRepo`(CAR)+`listBlobs`を取得し`at_migration_records`/`at_migration_blobs`へステージングする単発ジョブ（`docs/account_migration.md`） | 中 |
-| `MigrationRequestPlcSignature{request_id}` | 既存DID転入: PDS Aへ`requestPlcOperationSignature`を呼び確認コード送付を要求する単発ジョブ | 中 |
-| `MigrationImportProcess{request_id}` | 既存DID転入: ステージング済みレコード/blobを`posts`/`atp_records`/`atp_blocks`/`media_files`へ実体化する自己再enqueue型ジョブ（下記） | 低 |
-| `MigrationDeactivateSource{request_id}` | 既存DID転入: データ取り込み完了後、PDS A側の旧アカウント無効化を試みる単発ジョブ（ベストエフォート） | 低 |
-| `MigrationImportFollows{request_id}` | 既存DID転入: 取り込み済み`app.bsky.graph.follow`レコードから`follows`テーブルへの反映（リモートアクター解決込み）を行う自己再enqueue型ジョブ（下記）。`at_migration_requests.status`とは独立した結果整合処理で、`completed`遷移を待たない | 低 |
-| `FollowImportProcess{request_id}` | フォローインポート（設定画面「🚚 インポート・エクスポート」から改行区切りのID一覧を貼り付け or .txtドラッグ&ドロップで一括フォロー。隠し仕様として各行をカンマ区切りで分割し1列目のみを識別子として読む、Misskeyのフォローエクスポート形式`id,withRepliesフラグ`対応）。`follow_import_items`の`pending`を1件処理し、対象が尽きるか`follow_import_requests.status`が`running`でなくなる（完了/キャンセル）まで自分自身を再度積む「自己再enqueue型」ジョブ（下記） | 低 |
-| `FetchBridgeOriginal{bridge_post_id, target_uri, protocol}` | brid.gyブリッジポスト対応（`seiran-common::bridge_post`、`docs/protocols.md`参照）: 取り込み時点で元ポストがDB未登録だったブリッジポストについて、元ポストを能動的に取得しに行く。`protocol`が`"atp"`ならAppView `getPosts`、`"ap"`なら署名付きGETで直接フェッチし、既存の保存パイプラインへ委譲する。失敗しても、元ポストが後で通常の受信経路で届けば受動的リンク（新規ポスト確定時の`link_pending_bridges_for_new_original`）で解決されるため実害は小さい | 中 |
+| `ActorHistorySync` | フォロー時の過去ログ取得（Bsky 300件、AP 30件） | 低 |
+| `ApDelivery{actor_id, kind}` | AP 配送。`kind` は `PostToFollowers`/`DirectMessage`/`Announce`/`UndoAnnounce`/`DeleteNote`/`Reaction`/`UndoReaction`/`UpdateActor`/`DeleteActor` | 高 |
+| `InboundActivityProcess` | 受信アクティビティの解析・保存（inbox は署名検証だけして 202 を返す） | 中 |
+| `ActorMetadataResolve` | 相互申告マージの相手を取りに行く（`docs/protocols.md` 11節） | 低 |
+| `AtpRepositoryPublish` | 使われていない（enqueue する箇所が無い） | — |
+| `BskyVideoPoll{media_file_id}` | Bsky 動画パイプラインの完了待ち | — |
+| `BskyPostCommitDeferred{actor_id, post_id, pending_media_file_id}` | 動画付き投稿の ATP コミットを動画の準備完了まで遅らせる | — |
+| `ProxyFollowSync` | list-relay 仮想アクターの代理フォロー同期 | — |
+| `AccountWithdrawUnfollowAll{actor_id, username}` | 退会時の一括アンフォロー | — |
+| `BskyDmSend` / `BskyDmReactionAdd` / `BskyDmReactionRemove` / `BskyDmHide` | Bsky DM の送信・リアクション・「隠す」（`docs/protocols.md` 9節） | 高 |
+| `RemoteFollowListSync{actor_id, direction}` | リモートの followers/following 全件取得（同期取得に失敗したときのフォールバック） | 低 |
+| `RemoteActorResolve{uri}` | 未登録の actor URI を解決して upsert（フォロー関係は作らない） | 低 |
+| `DmRecipientResolve{post_id, uri}` | Fedi 受信 DM の `to` にいるリモートアクターを `post_recipients` に加える | 低 |
+| `RemoteInstanceInfoResolve{domain}` | リモートインスタンスの nodeinfo を `remote_instance_meta` にキャッシュ | 低 |
+| `RemoteProfileRefresh{actor_id}` | リモートアクターのアバター・バナー・表示名等の再取得（表示時再検証） | 低 |
+| `AlsoKnownAsVerify` / `RemoteAlsoKnownAsSync` | 「別のアカウント」の相互検証・同期（表示時再検証） | 低 |
+| `BridgeUserLinkResolve{actor_id}` | ブリッジユーザーの実ユーザーへのリンク解決（解決済みなら何もしない） | 低 |
+| `BskyListMembershipResolve{list_uri}` | リモート Bsky リストのメンバーを24時間キャッシュ（threadgate `#listRule`） | 低 |
+| `FetchBridgeOriginal{bridge_post_id, target_uri, protocol}` | ブリッジポストの元ポストを取りに行く | 中 |
+| `FollowImportProcess{request_id}` | フォローインポート（自己再 enqueue 型） | 低 |
+| `MigrationFetchRepo` / `MigrationRequestPlcSignature` | DID 転入: リポジトリ取得・ステージング、確認コード送付の要求 | 中 |
+| `MigrationImportProcess` / `MigrationImportFollows` | DID 転入: ステージング済みデータの実体化、フォロー関係の反映（自己再 enqueue 型） | 低 |
+| `MigrationDeactivateSource` | DID 転入: 移行元アカウントの無効化（ベストエフォート） | 低 |
 
-**「自己再enqueue型」ジョブ**: 大量の対象（フォローインポートなら数千件のID）を1件ずつ非同期処理し、進捗を都度DBへ反映しつつキャンセル可能にしたい場合のパターン。対象一覧をDBテーブル（`pending`/`succeeded`/`failed`等のステータス列）に永続化し、ジョブは「未処理を1件取得して処理→成功失敗を問わず自分自身を再度enqueue」を繰り返す。対象が尽きた、またはリクエストの状態が`running`でなくなっていれば再enqueueせずチェーンを終了する。既存の「表示時再検証」パターンと異なり外部トリガー（表示）不要で自走する点、対象を使い切ったら自然に止まる点が特徴。`FollowImportProcess`が最初の実例。レート制限等で一時的に処理を継続できない場合は、`Err`を返してWorkerEngineの指数バックオフに委ねるのではなく、`JobQueue::enqueue_retry`を直接呼んで一定時間後に自分自身を再投入する（`retry_config_for`の指数バックオフはDB接続エラー等の真の失敗時のみ使う設計。`FollowImportProcess`はレート制限超過時に5分間隔でポーリングする）。
+**自己再 enqueue 型**: 大量の対象を1件ずつ処理し、進捗を DB に反映しつつキャンセル可能にするパターン。対象を DB テーブル（状態列つき）に置き、ジョブは「未処理を1件処理して自分を再度積む」を繰り返し、対象が尽きるかリクエストが `running` でなくなったら止まる。レート制限等で一時的に進めないときは、エラーで WorkerEngine のバックオフに任せず、`enqueue_retry` で一定時間後に自分を積み直す（バックオフは DB 接続エラー等の本当の失敗用。`FollowImportProcess` は5分間隔）。
+- `FollowImportProcess`: `follow_import_items` の `pending` を処理する。各行はカンマ区切りの1列目を識別子として読む（Misskey のフォローエクスポート `id,withReplies` 対応）。
+- `MigrationImportProcess`: 未取り込みのレコード → blob の順に実体化し、尽きたら `deactivating_source` に進めて `MigrationDeactivateSource` と `MigrationImportFollows` を積む。
+- `MigrationImportFollows`: `status` を見ず、未反映の `app.bsky.graph.follow` 行の有無だけで続けるか決める（転入完了を待たない結果整合処理。レート制限も適用しない）。
 
-既存DID転入フロー（`docs/account_migration.md`）の`MigrationImportProcess`/`MigrationImportFollows`も同型。前者は`at_migration_records`/`at_migration_blobs`の未取り込み分を1件ずつ実体化し（コレクション種別で`posts`/`atp_records`への投入先を分岐、`app.bsky.feed.post`のみ`posts`へパース）、両方尽きたら`deactivating_source`へ状態遷移すると同時に`MigrationDeactivateSource`と`MigrationImportFollows`の両方をenqueueする。後者（`MigrationImportFollows`）は`at_migration_requests.status`を見ず、`at_migration_records`の`app.bsky.graph.follow`かつ`follow_materialized_at IS NULL`な行の有無だけで動作を続けるかを判断する点が他と異なる（データ取り込み完了＝`completed`遷移を待たずに結果整合で並行して進める設計のため、レート制限も適用しない）。この2つのジョブを同時にenqueueする際は、`advisory_lock`のキー空間衝突（下記）を避けるため`MigrationImportFollows`だけ`-request_id`（負数）を使う。
+フォロー作成の実処理は `follow_exec::execute_follow`（`AppState` 非依存）で、API ハンドラ（`AppState::follow_exec_config()`）とジョブ（`JobContext::follow_exec`）が共有する。ターゲット文字列の種別判定は `follow_target::classify_follow_target`。既にフォロー済みでも成功を返し、`FollowOutcome.already_following` で区別する（インポートの進捗表示が「成功」と「既存」を分けて数える）。
 
-フォロー作成の実処理（ATPコミット・`follows` INSERT・AP Follow送信・通知等）は元々 `handlers::follows::create_follow` 内の `&AppState` 依存関数だったが、`FollowImportProcess` ジョブ（`JobContext`から実行される）からも同じ処理を呼ぶ必要が生じたため、`seiran-common::follow_exec::execute_follow` へ `AppState` 非依存の共通関数として切り出した（`FollowExecConfig`が必要なリポジトリ・`AtpCommitService`・`StreamHub`等を束ねる。APIハンドラは`AppState::follow_exec_config()`で組み立て、`JobContext::follow_exec`はWorker起動時に同内容を注入する）。ターゲット文字列（ローカルユーザー名/`user@domain`/`https://...`/`did:...`/ATPハンドル）の種別判定ロジックも`seiran-common::follow_target::classify_follow_target`へ同様に統合されており、`create_follow`・`resolve_and_upsert_target`（リスト機能のメンバー追加）・`FollowImportProcess`の3箇所から共有される。`execute_follow`は呼び出し前から既に対象をフォロー済みだった場合も（`follows`への新規INSERTが発生しないだけで）エラーにせず成功として返すため、`FollowOutcome`に`already_following`フラグを持たせて区別できるようにしている（`FollowRepository::upsert_pending`/`insert_accepted_bsky`の戻り値が新規挿入か既存更新かを返す設計を利用）。フォローインポートの進捗表示はこれを見て「成功」と「既存」を別枠に集計する（`follow_import_item_status`の`already_following`、`docs/database.md`参照）。
+**起動時リカバリ**: InMemory キューのリトライ待ちはプロセスの再起動で消えるので、DB に「未完了」の状態を持つジョブは、`spawn_startup_tasks` が起動のたびに無条件で積み直す。
 
-**起動時リカバリと`advisory_lock`共通ヘルパー**: `Job::FollowImportProcess`の遅延リトライ（レート制限超過時の`enqueue_retry`）に限らず、`InMemoryJobQueue`のリトライ待ち状態はプロセス内メモリのみで管理され、プロセス再起動で消失する。DB上に「未完了」を示す永続状態を持つ自己完結ジョブがこの影響を受けると、リトライ待ち中にプロセスが再起動しただけで処理が誰にも気づかれず永久に止まってしまう。対策として、`seiran-api::spawn_startup_tasks`が起動のたびに「未完了」を示すDB状態を検出して無条件で全件再enqueueする。現在4つのジョブがこのパターンを採用している:
-
-| ジョブ | 未完了の検出条件 | 起動時リカバリ関数 |
+| ジョブ | 未完了の条件 | 関数 |
 |---|---|---|
-| `FollowImportProcess{request_id}` | `follow_import_requests.status='running'` | `resume_running_follow_imports` |
-| `AccountWithdrawUnfollowAll{actor_id, username}` | `actors.withdrawn_at IS NOT NULL` かつ `follows`に残存行あり | `resume_account_withdraw_unfollow_all` |
-| `BskyVideoPoll{media_file_id}` | `media_files.bsky_video_status = 'pending'` | `resume_bsky_video_poll` |
-| `BskyPostCommitDeferred{actor_id, post_id, pending_media_file_id}` | `posts.pending_bsky_media_file_id IS NOT NULL AND at_uri IS NULL` | `resume_bsky_post_commit_deferred` |
+| `FollowImportProcess` | `follow_import_requests.status='running'` | `resume_running_follow_imports` |
+| `AccountWithdrawUnfollowAll` | `actors.withdrawn_at IS NOT NULL` かつ `follows` に残存行 | `resume_account_withdraw_unfollow_all` |
+| `BskyVideoPoll` | `media_files.bsky_video_status = 'pending'` | `resume_bsky_video_poll` |
+| `BskyPostCommitDeferred` | `posts.pending_bsky_media_file_id IS NOT NULL AND at_uri IS NULL` | `resume_bsky_post_commit_deferred` |
+| DID 転入の各ジョブ | `at_migration_requests.status` ごとに振り分け | `resume_running_migrations` |
+| `MigrationImportFollows` | 未反映の follow 行がある `request_id` | 同上（`list_request_ids_with_pending_follow_materialization`） |
 
-「最後に進捗があってから一定時間経過したものだけ」のように絞り込むと、絞り込み条件の見積もり次第で本当に停止している処理を再開し損なう投入漏れの方が実害として大きいため、いずれもあえて絞らない。
+「最後の進捗から一定時間経ったものだけ」等に絞ると、見積もり次第で本当に止まった処理を拾い損ねるので絞らない。
 
-既存DID転入フロー（`docs/account_migration.md`）の4ジョブ（`MigrationFetchRepo`/`MigrationRequestPlcSignature`/`MigrationImportProcess`/`MigrationDeactivateSource`）は、`resume_running_migrations`（`seiran-api::lib.rs`）が`at_migration_requests.status`の値ごとにまとめて判定・再enqueueする（上記表のような1ジョブ1関数ではなく、1関数が複数ジョブ種別をstatusでディスパッチする形）。`MigrationImportFollows`は`status`に依存しない結果整合処理のため別立てで、`AtMigrationRepository::list_request_ids_with_pending_follow_materialization`（未反映の`app.bsky.graph.follow`行が1件でも残っている`request_id`を列挙）で判定する。
+**重複実行の排除（`advisory_lock`）**: 無条件の積み直しは、動いている処理と重複しうる（split-role の複数レプリカや Redis に残ったジョブでも同様）。上記のジョブは開始時に `advisory_lock::try_acquire(pool, key)`（`pg_try_advisory_lock`）を試み、取れなければ何もせず終わる（積み直しもしない。動いている方が続ける）。
+- キーは `request_id`・`actor_id`・`media_file_id`・`post_id`。採番元が違うキー同士は 64bit で偶然衝突する確率を無視している。ただし転入の `MigrationImportProcess` と `MigrationImportFollows` は同じ `request_id` で同時に積まれ必ず衝突するので、後者は `-request_id` を使う。
+- advisory lock はセッションスコープなので、`try_acquire` は確保した1本の接続を返し、呼び出し側はそれを `release` に渡す。
+- 次のジョブを積むジョブは、必ず unlock の後に積む。先に積むと、別ワーカーがすぐ取り出してロック取得に失敗し、積み直さずにチェーンが途切れる。
+- 排他は同じリクエスト内の重複だけを防ぐ。インポート中の手動フォローとのレート制限の TOCTOU は実害が小さいので対象外。
 
-この無条件再enqueueは、正常に動いている既存の処理に対しても重複してジョブを積みうる（split-role構成で複数APIレプリカが同時に起動する場合や、Redisキューでプロセス再起動をまたいでジョブが残っていた場合も同様）。特に`FollowImportProcess`は複数チェーンが並行すると`check_follow_rate_limit`のTOCTOU（チェックと実際のフォロー成立の間に他のトランザクションを排除できない）で上限をわずかに超過しうる。これを防ぐため、上記4ジョブはいずれも処理開始時に`crate::advisory_lock::try_acquire(pool, key)`（`FollowImportProcess`は`request_id`、`AccountWithdrawUnfollowAll`は`actor_id`、`BskyVideoPoll`/`BskyPostCommitDeferred`は`media_file_id`/`post_id`をキーに使う）で`pg_try_advisory_lock`を取得できた場合だけ実処理を行い、取れなければ（既に別のジョブが処理中とみなし）何もせず終了する（re-enqueueもしない。動いている方のジョブが自分で処理を継続するため）。異なるジョブ種別のキー空間はそれぞれ別のsnowflake ID採番元（`follow_import_requests.id`/`actors.id`/`media_files.id`/`posts.id`）であり、advisory lockの単一引数版は名前空間を分けていないが、64bit空間での偶然の衝突確率は無視できるため許容している。**ただし既存DID転入フローの`MigrationFetchRepo`〜`MigrationDeactivateSource`と`MigrationImportFollows`は同じ`at_migration_requests.id`を採番元に使うため、これは「偶然の衝突」ではなく「同一`request_id`で必ず衝突する」ケースになる**（`MigrationImportProcess`が両ジョブを同時にenqueueするため）。この場合だけ確率任せにできないため、`MigrationImportFollows`は明示的に`-request_id`（負数）をロックキーに使ってキー空間を分離している。
+**`BskyPostCommitDeferred` のペイロード**: `actor_id`/`post_id`/`pending_media_file_id` だけを持ち、本文・作成時刻・返信先はハンドラが `posts` から読み直す（起動時リカバリで `post_id` だけから再現できるように）。返信先の root/parent は `reply_to_post_id` の投稿の `at_uri`/`at_cid` を両方に使う（`resolve_reply_context` と同じ規約）。`pending_media_file_id` は投稿作成時に `posts.pending_bsky_media_file_id` に保存し、コミット成功後に NULL に戻す。
 
-advisory lockはセッションスコープのため、`PgPool`から都度借りる接続では`lock`と`unlock`が別コネクションになりうることに注意し、`try_acquire`は`pool.acquire()`で明示的に確保した1本の接続を返し、呼び出し側はそれをそのまま`release`に渡す。**`FollowImportProcess`のように次のジョブをenqueueする設計のものは、そのenqueueを必ずunlock完了後に行う**（unlock前にenqueueすると、別ワーカーが即dequeueして`pg_try_advisory_lock`を試み、まだロックが残っていて失敗し、re-enqueueもされずチェーンが途切れてしまうため）。
+**表示時再検証**: 外部の状態に依存する値は、表示のたびに外部を取得すると遅く相手にも負荷がかかり、一度きりでは変化に追随できない。そこで表示は DB のキャッシュ値を即座に返し、表示のたびに低優先度の再検証ジョブを積んでキャッシュを更新する（リロードする頃には新しくなっている）。
+- 1回で他のジョブを大量に積む重いジョブ（`RemoteFollowListSync` → 多数の `RemoteActorResolve`）を表示のたびに積むと、同じ優先度の他のジョブが進まなくなる。積む場所が1つなら、その層にプロセス内のクールダウン（`DashMap`）を置く（`AppState::remote_follow_sync_recent`、10分）。
+- 積む場所が API 層とワーカー層にまたがるなら、ジョブモジュール自体にプロセス内 `static` のクールダウンを置き、両方がそれを経由する（`remote_actor_resolve::should_enqueue`、1時間）。解決できない URI はDBに入らないので、これがネガティブキャッシュも兼ねる。
 
-**`BskyPostCommitDeferred`のペイロード最小化**: このジョブは元々`text`（本文）・`reply_root`/`reply_parent`（リプライ先at_uri/at_cid）・`now`（投稿作成時刻）をジョブのペイロードとして直接保持していたが、これらはいずれも`posts`テーブルに既に永続化されている情報の写しであり、`InMemoryJobQueue`が消えるとこの写しごと失われ、起動時リカバリで`post_id`だけから元のジョブを再現できなかった。そこで`actor_id`/`post_id`/`pending_media_file_id`のみを持つ設計に変更し、ハンドラが`post_id`から`posts.body`/`created_at`/`reply_to_post_id`を都度取得する（リプライ先at_uri/at_cidは`reply_to_post_id`が指す投稿の`at_uri`/`at_cid`から再構築し、root/parentは常に同じ値を使う。`handlers::notes::delivery::resolve_reply_context`と同じ規約）。`pending_media_file_id`自体は`resolve_bsky_embed`（複数添付間の優先順位判定を含む）の結果を起動時リカバリで再現不要にするため、投稿作成時点で`posts.pending_bsky_media_file_id`へ永続化しておき（`enqueue_bsky_post_commit_deferred`）、コミット成功後にNULLへ戻す。
-
-なお、この排他ロックは同一`request_id`（同一インポート）内の重複実行のみを防ぐものであり、フォローインポート実行中に通常の`POST /api/follows/create`（手動フォロー）が同時に行われた場合の`check_follow_rate_limit`のTOCTOUまでは解消しない。この経路でのレート制限超過は実害が小さいと判断し、あえて対応範囲に含めていない。
-
-**「表示時再検証」パターン**: 外部（他インスタンス等）の状態に依存する値をリアルタイムで検証すると表示のたびに外部フェッチが走り遅延・相手サーバーへの負荷が生じる。かといって一度きりの検証では相手側の状態変化に追随できない。そこで、表示は常にDBキャッシュ済みの値を即座に返しつつ、表示のたびに低優先度の再検証ジョブを積んで非同期でキャッシュを更新する（「今見ている値は少し古いかもしれないが、リロードすればその頃には最新化されている」という体験を許容する設計）。`AlsoKnownAsVerify`が最初の実例で、同様の「外部状態のキャッシュ+閲覧トリガーの非同期再検証」が必要になった箇所では踏襲する想定。
-
-このパターンを採用するジョブが、1回の実行で他の低優先度ジョブを大量にファンアウトする重い処理（例: `RemoteFollowListSync`が未知アクターごとに`RemoteActorResolve`を積む）の場合、表示のたびに無条件でenqueueすると、同じ内容の重いジョブが何度もリロードされるだけで積み重なり、同一優先度を共有する他のジョブを飢餓状態にしうる（#229）。この種のジョブは、enqueue元が単一（APIハンドラのみ等）ならその層（`AppState`）にプロセス内メモリのクールダウン（`(キー) → 直近enqueue時刻`の`DashMap`、一定時間内の再投入を無視する）を設ける。`enqueue_remote_follow_list_sync`（`remote_follow_sync_recent`、10分）が実例。
-
-enqueue元がAPIハンドラ層（`AppState`）とWorker層（`JobContext`）の両方にまたがる場合（`RemoteActorResolve`がこれに該当: `remote_follow_summary`ハンドラのライブ取得成功時と、`RemoteFollowListSync`ジョブ自身の両方が積む）、上記の`AppState`フィールド方式では層をまたいだ重複を防げない。この場合はジョブ実装モジュール自体（`seiran-common::jobs::remote_actor_resolve::should_enqueue`）にプロセス内グローバルな`static`（`OnceLock<Mutex<HashMap<uri, 直近時刻>>>`）としてクールダウンを持たせ、両方のenqueue元がこれを経由する。`RemoteActorResolve`は1時間（`REMOTE_ACTOR_RESOLVE_COOLDOWN`）。404/410等で恒久的に解決できないURIはDBにupsertされず「未知」のままになるため、このクールダウンは実質的にネガティブキャッシュとしても働く。
-
-**並列・排他制御**: グローバル同時実行数上限（`Semaphore`、既定32、ジョブ単位）、ドメイン単位の同時接続数制限（最大2並列、`RemoteActorResolve`/`RemoteFollowListSync`/`ActorHistorySync`などリモートから取得する系のジョブ用。`JobContext::get_domain_semaphore`）、アクターID単位の直列化（ATPコミットの順序保証）、指数バックオフ+ジッターでのリトライ。AP配送（`ApDelivery`）のinboxファンアウト自体は`fan_out_activity`内で`buffer_unordered`により最大8並列（`crates/seiran-common/src/ap/deliver/infra.rs`）。追加の`tokio::spawn`は行わず、Workerジョブ実行のタスク内でポーリングを並列化するのみ（docs/code_audit_2026-08-05.md P-3）。
+**並列・排他制御**: ジョブ全体の同時実行数（`Semaphore`、既定32）、ドメイン単位の同時接続数（最大2、リモートから取得するジョブ用。`JobContext::get_domain_semaphore`）、アクター単位の直列化（ATP コミットの順序保証）、指数バックオフ＋ジッターのリトライ。AP 配送の inbox ファンアウトは `fan_out_activity` が `buffer_unordered` で最大8並列（追加の `tokio::spawn` はしない）。
 
 ## 6. 検索セッション管理
 
-HTTP はステートレスであり、フロントエンドが検索画面をいつ閉じたかバックエンドは検知できない。そこでメモリ（将来はRedis）上に「10分間の砂時計」としてセッションを持つ。
+HTTP はステートレスで、フロントが検索画面を閉じたことをバックエンドは知れない。そこでメモリ上に「10分の砂時計」としてセッションを持つ。
 
 ```rust
 pub struct SearchSession {
@@ -244,190 +194,140 @@ pub struct SearchSession {
 }
 ```
 
-- **寿命**: 10分のスライディングタイムアウト。アクセスのたびに延長。
-- **保存先の抽象化**: `SessionStore` trait。現状は `InMemorySessionStore`（`dashmap`）のみ実装。`RedisSessionStore` は未実装（`docs/roadmap.md` フェーズ8参照）。
+- 寿命はアクセスのたびに延びる10分。
+- `SessionStore` trait。実装は `InMemorySessionStore`（`dashmap`）のみ（Redis 版は未実装、`docs/roadmap.md`）。
 
-**ブレンドアルゴリズム**（Misskey API互換の ID ベース要求 ⇄ AppView のカーソルベース要求を翻訳する）:
-1. **初回検索**: ローカルDB検索とAppView検索(`app.bsky.feed.searchPosts`)を `tokio::join!` で同時フェッチ、それぞれ30件。AppView分はローカルDBにインサートし統一IDを付与してから、統一ポストIDの降順でマージし上位30件を返却。残りはバッファとしてセッションに保存。
+**ブレンド**（ID ベースの Misskey 互換要求と AppView のカーソルを翻訳する）:
+1. **初回**: ローカルDB と AppView（`searchPosts`）を `tokio::join!` で30件ずつ取得し、AppView 分をDBに入れて統一IDを付けてから ID 降順でマージして上位30件を返す。残りはセッションのバッファへ。
+2. **過去掘り**（`untilId`）: バッファが `limit` 未満なら AppView から追加取得し、ローカルからも取得して再ブレンドする。
+3. **未来掘り**（`sinceId`）: ローカルDBだけ（通過した AppView 投稿は保存済みなので取りこぼさない）。
+4. **セッション消滅時**: エラーにせず通常のローカル検索に落とす。
 
-検索文字列はBluesky AppViewへはそのまま渡し、ローカルDB向けには共通の検索式ASTへ変換する。空白/`+`はAND、`OR`はOR、先頭`-`はNOTとして扱い、引用句と括弧を使用できる。括弧が不足していても入力端に不足分があるものとして解釈する。`from:`・`mentions:`・`domain:`・`since:`・`until:`をローカル投稿にも適用し、`from:me`/`mentions:me`は認証中のローカルactorへ解決する。ローカル/Fedi投稿には言語宣言が保証されないため`lang:`は認識するが常にTRUEとする。SQLはASTからプレースホルダー付きで生成し、LIKEメタ文字をエスケープする。
-2. **過去掘り**（`untilId`）: バッファが `limit` 未満ならAppViewへ追加フェッチ。ローカルDBからも追加取得し再ブレンド。
-3. **未来掘り**（`sinceId`）: AppViewへは問い合わせず、**ローカルDB検索のみ**で完結（過去に通過したAppView投稿は既にローカルDBにインサート済みのため取りこぼしがない）。
-4. **セッション消滅時**: エラーを返さず、通常のローカルDB検索へ自動フォールバックしベストエフォートで結果を返す。
+検索式は AppView にはそのまま渡し、ローカルには共通の AST に変換する。空白/`+` は AND、`OR` は OR、先頭 `-` は NOT、引用句と括弧が使える（括弧の不足は入力端で補う）。`from:`・`mentions:`・`domain:`・`since:`・`until:` をローカルにも適用し、`from:me`/`mentions:me` は自分に解決する。ローカル/Fedi 投稿は言語宣言が保証されないので `lang:` は常に TRUE。SQL は AST からプレースホルダー付きで生成し、LIKE のメタ文字をエスケープする。
 
-ブレンド処理の中核（ID列のマージ・降順ソート・重複排除・`limit`件での返却分/バッファ分への分割）は `handlers/search.rs` の `merge_sort_dedup_and_split()` として `AppState`（DB・HTTPクライアント）に依存しない純粋関数に切り出されており、単体テストで複数ページ・重複IDのシナリオを検証している。`InMemorySearchStore`（`search.rs`）の `create`/`take_buffer`/`put_buffer`/`cleanup` も同様に単体テスト済み。
+マージ・降順ソート・重複排除・返却分とバッファへの分割は `search.rs::merge_sort_dedup_and_split()`（純粋関数）で、`InMemorySearchStore` とともに単体テストがある。
 
 ## 7. ストレージ・シークレット管理
 
-**secrets.toml 自動生成**（`seiran-common::secrets`）: `SEIRAN_CONFIG_DIR`（既定 `./config`）配下の `secrets.toml` を読み、無ければ生成してパーミッション0600で保存。含まれるもの:
-- `jwt_secret`（256bit hex）
-- AT Protocol 用 P-256 鍵ペア
-- AP HTTP Signatures 用 RSA-2048 鍵ペア
-- `encryption_key`（AES-256-GCM、DB内の機密フィールド暗号化用）
+**secrets.toml**（`seiran-common::secrets`）: `SEIRAN_CONFIG_DIR`（既定 `./config`）の `secrets.toml` を読み、無ければ生成して 0600 で保存する。中身は `jwt_secret`（256bit hex）、AT Protocol 用 P-256 鍵ペア、AP HTTP Signatures 用 RSA-2048 鍵ペア、`encryption_key`（AES-256-GCM）。`storage_providers.secret_key` 等は `encryption_key` で暗号化して保存する（`crypto.rs`）。
 
-`storage_providers.secret_key` 等は `encryption_key` で AES-256-GCM 暗号化して DB に格納する（`crypto.rs`）。
+**S3 互換ストレージ**: `storage/selector.rs::select_provider()` が有効なプロバイダーを id 順に見て `capacity_mb` に収まる最初の1件を選ぶ。`storage/s3.rs` が PUT/DELETE、`media_probe.rs` が動画・音声のプローブ。
 
-**S3互換オブジェクトストレージ**: `storage/selector.rs` の `select_provider()` が有効なプロバイダーを id 昇順でスキャンし、`capacity_mb` に収まる最初の1件を選択する（複数プロバイダーの容量切り替え）。`storage/s3.rs` が実際の PUT/DELETE、`media_probe.rs` が動画音声のプローブを担う。
+**動画の faststart 化**: `video/mp4`/`video/quicktime` は保存直前に `media_probe.rs::faststart_video()`（`ffmpeg -c copy -movflags +faststart`、再エンコードなし）を通す。`moov` アトムがファイル末尾にある mp4 は、ブラウザが `moov` を読むまで再生を始められない（Safari/iOS はほぼ再生不能）。sha256 の重複判定・ffprobe・Bsky 動画パイプラインへの提出は faststart 化前のバイト列で行う。失敗したら元のバイト列を保存する。
 
-**動画のfaststart化**: `mime_type` が `video/mp4`/`video/quicktime` の添付は、S3保存直前に `media_probe.rs::faststart_video()`（`ffmpeg -c copy -movflags +faststart`、再エンコードなしのコンテナ再mux）を通す。アップロード元ファイルの `moov` アトム（再生に必須のメタデータ・シークテーブル）が `mdat` の後（ファイル末尾）にある「非faststart」なmp4は、ブラウザの `<video>` によるプログレッシブ再生が `moov` を読み込むまで開始できず、ファイルが大きいほど再生開始の遅延・失敗が顕著になる（特にSafari/iOSはほぼ再生不能）。sha256による重複排除判定・ffprobeでのメタデータ抽出・Bsky動画パイプラインへの提出は、いずれもfaststart化前の生バイト列のまま扱う（Bsky側は独自にトランスコードするためfaststart化は不要、重複排除はアップロード元バイト列の同一性で判定するため）。失敗時は元のバイト列をそのまま保存する。
+**画像アップロード**（`storage/image.rs::prepare_image()`）: 不要に劣化させないため候補を2つ作る。(1) `storage/exif.rs`（`img-parts`）で JPEG/PNG の Exif を Orientation だけに絞った無劣化の候補（画素は再エンコードしない）、(2) Orientation を画素に適用し `MediaKind` ごとの最大サイズにリサイズして WebP ロスレスにした候補。`media_store::store_image()` が両方の sha256+blurhash で重複を確認し、未登録なら小さい方を保存する。img-parts 非対応（静止画 WebP・AVIF・単一フレーム GIF 等）は (2) だけ。アニメーション画像（GIF/APNG/WebP）は元のバイト列を保存する。
 
-**画像アップロードパイプライン**（`storage/image.rs::prepare_image()`）: ユーザーの画像を不要に劣化させないため、2つの候補を用意してから採用する。まず `storage/exif.rs`（`img-parts`クレート使用）でJPEG/PNGのExifをOrientationタグのみに絞り込んだ「無劣化オリジナル候補」を作る（画素は再エンコードしない）。続けてOrientationを画素に適用したうえで `MediaKind` ごとの最大サイズにリサイズしWebPロスレスエンコードした「リサイズ候補」を作る。呼び出し元（`handlers/media_store.rs::store_image()`）が両候補それぞれのsha256+blurhashで `media_files` の重複排除チェックを行い、どちらも未登録ならバイトサイズが小さい方を採用してS3へアップロードする。img-parts非対応フォーマット（静止画WebP・AVIF・単一フレームGIF等）はOrientation適用のみ行いWebP再エンコードする（オリジナル候補なし）。アニメーション画像（GIF/APNG/WebPアニメ）は元バイト列をそのまま保存する。
+**リモートメディアプロキシ（`GET /proxy?url=...`）**: フロントは別オリジンのアバター・添付・サムネイル・絵文字をこれに変換する。同一オリジンと、`/api/meta` の `internalMediaOrigins`（有効なストレージの公開URL。R2 等は別サブドメインのことが多い）は直接参照する（25MiB の上限にかからないように）。
+- HTTP(S) のみ、資格情報・fragment を拒否、DNS 解決した全IPについて非公開IPを拒否。リダイレクト先も毎回検証し、5回・25MiB・20秒まで。画像・動画・音声以外は中継しない。
+- 上流の `Content-Type` が許可リストに無い（`application/octet-stream` 等）ときは、アップロードと同じマジックバイト判定（`sniff_mime_type`）で判定し直し、それでも外れれば拒否する。
+- `site_settings.media_proxy_url` があれば、Misskey の `instance.mediaProxy` と同じく `/proxy` まで含む完全なエンドポイントとして `{mediaProxyUrl}?url=...` で使う。
+- 検証・取得は `handlers/media_proxy.rs::fetch_validated()` で、`/proxy` とリモート絵文字インポートが共有する。
 
-**リモートメディアプロキシ（#87）**: フロントエンドは別オリジンのアバター、添付、サムネイル、本文・リアクションのカスタム絵文字を `GET /proxy?url=...` に変換する。同一オリジンのストレージURLは直接参照する。自インスタンスのストレージ（R2等）は`window.location.origin`とは別サブドメインで運用されることが多いため、`/api/meta`が返す有効なstorage providerの公開URL一覧（`internalMediaOrigins`）もフロント（`utils/mediaProxy.ts::configureInternalMediaOrigins()`）に同一オリジン相当として登録し、SSRF対策・容量上限（25MiB）付きのプロキシを経由させず直接参照する（自分のインフラのためCORS/SSRFリスクがなく、動画等25MiBを超えるファイルもプロキシの容量上限に引っかからないようにするため）。内蔵プロキシはHTTP(S)のみを許可し、資格情報・fragmentを拒否、DNS解決した全IPについてloopback/private/link-local/CGNAT等を拒否する。リダイレクト先も都度同じ検証を行い、5回・25MiB・20秒を上限とし、画像・動画・音声以外は中継しない。上流の`Content-Type`がホワイトリストに一致しない場合（`application/octet-stream`を返す配信元がある）、アップロード機能と同じマジックバイト判定（`sniff_mime_type`、`infer`クレート）で実体を判定し直し、それでも一致しなければ中継を拒否する。`site_settings.media_proxy_url` が設定されている場合は、その値をMisskey本家の`instance.mediaProxy`互換で「`/proxy`まで含む完全なエンドポイントURL」として扱い、`{mediaProxyUrl}?url=...`をそのまま利用する（フロント側でさらに`/proxy`を付け足さない。かつて`utils/mediaProxy.ts`が誤ってベースURL扱いし`/proxy`を二重に付け足していたため、外部プロキシ未設定時の`/api/meta`デフォルト値`https://{local_domain}/proxy`と組み合わさって`/proxy/proxy?url=...`という不正パスになりnginxが502を返す不具合があった）。SSRF対策を含むこの検証・取得ロジックは `handlers/media_proxy.rs::fetch_validated()` として切り出されており、`/proxy` エンドポイント自体と、リモート絵文字インポート（`handlers/admin/remote_emojis.rs`、#73。取得後は `prepare_image` → `media_store::store_image` を通して通常のアップロードと同じ経路で `media_files`/`custom_emojis` に登録する）の両方から使う。
+**リモート絵文字カタログ（#73）**: AP 受信（本文・表示名・リアクション）で見つけたカスタム絵文字を `remote_emojis` に `upsert_seen` する（画像は取り込まない）。管理画面「絵文字」の「リモート」タブと、NoteCard の本文・リアクションの右クリックメニュー（管理者のみ、`EmojiContextMenu.tsx`）から、`EmojiImportDialog.tsx` → `POST /api/admin/emojis/remote/import` で `custom_emojis` に取り込む（`fetch_validated` → `prepare_image` → `store_image`）。
 
-**未設定アバター（#211）**: ローカル actor にアップロード済みアバターがない場合は、`actor_id` をシードに色相・口・目の配置を決めた SVG を API ロールの `GET /api/avatars/:actor_id` で返す。同じ ID の画像は不変なため `immutable` で長期キャッシュする。生成ロジックと URL 組み立ては `seiran-common::avatar` に集約する。公開 URL を `/api` 配下に置くことで Cloudflare Tunnel の既存 backend ルーティングを利用する。
+**未設定アバター（#211）**: アバターの無いローカル actor には、`actor_id` をシードに色相・目・口を決めた顔を `GET /api/avatars/:actor_id` で返す（生成と URL は `seiran-common::avatar`）。形式は SVG 非対応の Misskey クライアントのため PNG。内容は ID で決まるので `immutable` で長期キャッシュし、生成仕様を変えたら URL の `v` を上げる（現在 `v=5`）。フロント用 API・Misskey 互換 API とも同じ URL を返す。`/api` 配下に置くのは Cloudflare Tunnel の既存ルーティングを使うため。顔は目の間隔3段階（18/23/28）、口は原型の80%、笑顔の一種は上辺が直線のD型。ATP 側の扱いは `docs/protocols.md` 7節「代替アバターの ATP blob」。
 
-**リモート絵文字カタログ・インポート（#73）**: AP受信（投稿本文・表示名・絵文字リアクションのいずれか）で見つけたカスタム絵文字は `remote_emojis` テーブルへ都度 `upsert_seen` される（画像自体は取り込まない、カタログのみ）。管理画面「絵文字」パネルの「リモート」タブと、NoteCard本文・絵文字リアクションの右クリックメニュー（管理者にのみ表示、`components/note/EmojiContextMenu.tsx`）の双方が、この一覧からの1件選択→カテゴリ/タグ/ライセンス入力ダイアログ（`components/admin/EmojiImportDialog.tsx`）→`POST /api/admin/emojis/remote/import` という同じ導線でローカルの `custom_emojis` へ取り込む。
-
-未設定アバターの顔は、目の間隔を 18/23/28 の3段階、口を各原型の80%サイズとする。笑顔の一種は上辺が直線で下側が曲線のD型とし、上端をほかの口と同程度の高さに揃える。フロントエンド用API・Misskey互換APIとも、ローカルアクターの画像が未設定なら同じ代替URLを返す。生成仕様を変更した際は、immutableキャッシュを更新できるよう代替アバターURLの `v` クエリも更新する。
-
-代替アバターの配信形式は、SVG非対応のMisskeyクライアントでも表示できるようPNGとする。APIは `image/png` を返し、形式変更時のimmutableキャッシュを避けるためURL版数を `v=5` とする。`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE=1` でAPIロールを一度だけ起動すると、画像未設定の全ローカルactorについて現在のATPプロフィールを再コミットし、Relay/AppViewへ再取得を促せる。通常起動では実行しない。
-
-**PWA対応（ホーム画面追加）**: `GET /manifest.webmanifest` が `site_settings`（`site_name`/`site_color`/`site_icon_sha256`）から Web App Manifest を都度動的生成する（`display: standalone`）。アイコンは `GET /api/site-icon/:sha256/:size` が管理画面でアップロードしたサイトアイコン（`media_files`）を指定サイズのPNGへリサイズして返す。URLがsha256をパスに含むcontent-addressableな形式のため `Cache-Control: immutable` で長期キャッシュできる（同じ画像に戻せばCDN上の古いキャッシュがそのまま再利用される）。アニメーション画像（GIF/APNG/WebPアニメ）はリサイズせず元バイト列のまま返す（`image` crateがアニメーションPNG/WebPの書き出しに非対応なことに加え、管理者が意図した演出を静止画化しないため）。`/favicon.ico` は `site_icon_sha256` が設定されていれば `/api/site-icon/:sha256/32` へ、未設定なら従来通り `site_icon_url` へ直接リダイレクトする。`nginx.conf`/`nginx.mono.conf` は `/favicon.ico` 同様 `/manifest.webmanifest` をAPIロールへ振り分ける（`/api/site-icon/...` は既存の `/api/` プレフィックスでカバーされる）。オフライン動作・プッシュ通知は非対応（Service Workerを導入していない）。
-
-**サイト外観設定とHTMLタグ除去（#30/#243）**: `site_settings`の`site_name`（サイト名）・`site_description`（ログイン画面用サイト説明文）はいずれも管理者専用入力でHTMLタグを許容し（ログイン画面のサイトタイトル・説明文表示でHTMLのまま描画、フォント指定等に使える）、サニタイズしない。一方、Web App Manifestの`name`/`short_name`、nodeinfoの`nodeName`/`nodeDescription`、OGPの`og:site_name`、HTMLの`<title>`タグなど、HTML入力を想定しない箇所へ渡す際は、それぞれからHTMLタグを除去したプレーンテキスト版を使う（`crates/seiran-api/src/handlers/notes/validation.rs::strip_html_tags`。`seiran-federation-inbox`crateの`nodeinfo.rs`は別crateのため同等の軽量実装を独自に持つ）。`POST /api/meta`は`name`（タグ除去済み）と`siteTitleHtml`（生HTML版、ログイン画面が使う）の両方を返す。ログイン画面背景（`login_bg_url`/`login_bg_type`、画像/動画）を含むログイン画面デザイン全体の仕様は`docs/ui_spec.md`「ログイン画面」節を参照。
+**PWA**: `GET /manifest.webmanifest` が `site_settings`（`site_name`/`site_color`/`site_icon_sha256`）から Web App Manifest を毎回生成する（`display: standalone`）。アイコンは `GET /api/site-icon/:sha256/:size` がサイトアイコンを指定サイズの PNG にして返す。URL が sha256 を含むので `immutable` で長期キャッシュできる。アニメーション画像はリサイズせずそのまま返す（`image` crate がアニメーション PNG/WebP を書き出せず、演出を静止画にしないため）。`/favicon.ico` は `site_icon_sha256` があれば `/api/site-icon/:sha256/32`、無ければ `site_icon_url` へリダイレクトする。nginx は `/favicon.ico` と `/manifest.webmanifest` を API ロールへ振る。Service Worker は無い（オフライン動作・プッシュ通知は非対応）。
 
 ## 8. フロントエンド
 
-React 18 + Vite + TypeScript（react-router-dom v7、declarative mode。`<BrowserRouter>`＋`useNavigate`/`useParams`等のフック中心で、データルーター（`createBrowserRouter`等）は不使用）。`frontend/src/` 構成:
+React 18 + Vite + TypeScript。react-router-dom v7 を declarative mode（`<BrowserRouter>` とフック）で使い、データルーターは使わない。`frontend/src/`:
 
-- `api/` — バックエンドAPIクライアント。`core.ts`（`request`/`uploadFormData`/`ApiError`/`getErrorMessage()`等の共通処理）、`types.ts`（リクエスト/レスポンス型、`Note`正規化）、`webauthn.ts`（パスキーのchallenge変換）、ドメイン別モジュール（`auth`/`notes`/`users`/`admin`/`follows`/`lists`/`misc`）に分割。`client.ts`はこれらを集約し`export const api = {...}`を組み立てるだけの薄い集約ファイル（既存の`import { api, ... } from "../api/client"`はそのまま使える）
+- `api/` — API クライアント。`core.ts`（`request`/`uploadFormData`/`ApiError`/`getErrorMessage()`）、`types.ts`（型と `Note` の正規化）、`webauthn.ts`、領域別モジュール（`auth`/`notes`/`users`/`admin`/`follows`/`lists`/`misc`）。`client.ts` はそれらを `api` に集約するだけ。フォロー操作は actor 行を持つ画面では `actorId` で呼ぶ（`follows.ts` の `followTargetOf`）。
 - `components/layout/` — `AppShell`（3ペインの外枠）、`LeftNav`
-- `components/note/` — `NoteCard`（タイムライン・詳細・プロフィール共通の投稿カード）、`PostComposer`、`ReactionChips`（各チップのホバーでリアクター一覧をポップオーバー表示、`ReplyIndicator`と同じ遅延フェッチ・遅延クローズパターン）/`ReactionPicker`（トリガーボタン＋`Modal`内の`EmojiPickerPanel`。Unicode絵文字データセット（`unicode-emoji-json`）は`React.lazy`で遅延ロードし、カスタム絵文字とあわせて検索・タブ切り替えで選べる。カスタム絵文字は数千件規模になりうるため、`EmojiImage`は`hooks/useLazyVisible.ts`（root要素ごとに共有する`IntersectionObserver`）でスクロールコンテナ内の可視判定を行い、視界外では`img`要素自体をレンダーしない。加えて「カスタム」タブ・検索結果のグリッドは`PagedGrid`が200件ずつ段階的にbutton DOMを描画し、末尾のセンチネル要素が可視になるたびに追加分を描画する（初回描画で数千件のbutton DOMを一度に生成する固まりを避けるため）。CLDRアノテーション検索索引（`lib/emojiAnnotations.ts`）は`emojibase-data`の生JSON（1言語700〜800kB、hexcode/group/skins等未使用フィールド込み）を直接importせず、`scripts/build-emoji-annotations.mjs`がpostinstallで生成するemoji/label/tagsだけの軽量JSON（`src/generated/emoji-annotations/`、git管理外、1言語170〜220kB）を言語ごとに動的importする。docs/code_audit_2026-08-05.md P-7）、`HlsVideo`、`RichText`（本文中のMarkdownリンク`[text](url)`・生URL・`@mention`・`#ハッシュタグ`・絵文字ショートコードを1パスでクリック可能な要素へ変換。AP由来のハッシュタグアンカー`[#foo](リモートURL)`もリンクテキストの形状で検出し自インスタンスの`/tags/foo`へ読み替える。`EmojiText`は表示名等リンク化不要な箇所向けにショートコード置換のみ残す）等
-- `NoteCard` の引用表示（#116）は、APIの `quote` に引用元 `NoteResponse` を1段だけ埋め込み、本文直下の枠付きカードとして描画する。カードは返信マーカー、ユーザー、CW、本文、時刻、添付、アンケート、リアクションを再利用し、引用元自身の `quote_id` は「引用あり」表示だけに留めて再帰描画しない。
-- `components/right/` — 右ペインのタブ内容（`NotificationsPanel`、`TrendsSearchPanel`、`FollowListPanel`、`AuthorPanel`（ポスト詳細画面の「投稿者」タブ。投稿主のプロフィール概要と固定ポストを表示、`docs/ui_spec.md` 2.3参照）、`ReplyThreadPanel`（ポスト詳細画面の「返信」タブ。`GET /api/notes/:id/replies`のフラット配列から`replyId`/`quoteId`を辿ってツリーを再構築、`docs/ui_spec.md` 2.3参照）、`ReactionListPanel`（ポスト詳細画面の「リアクション」タブ。絵文字ごとにグループ化しアクター一覧を常時展開表示、`docs/ui_spec.md` 2.3参照）、`RepostListPanel`（ポスト詳細画面の「リポスト」タブ。`GET /api/notes/:id/reposts`で`posts.repost_of_post_id`を辿り、取り消し済みも含めた履歴を表示、`docs/ui_spec.md` 2.3参照））
-- `components/admin/` — 管理画面パネル群
-- `components/dm/` — `RecipientPicker`（DM宛先のchip入力。サジェスト選択/手打ち確定の両対応、Bskyアクターと他プロトコルの混在を警告表示）
-- アクター検索APIは用途別に分離する。`GET /api/actors/search`はリスト編集・DM向けの表示名/全ハンドル部分一致、`GET /api/actors/suggest`は`ComposerEditor`向けのハンドル前方一致である。後者のレスポンス`target`は入力形式に応じてローカル短縮/Fedi/Bsky表記を選び、フロントはその値をそのまま挿入する。
-- `contexts/` — `AuthContext`（起動時のセッション確認は`contexts/authSession.ts`の`resolveSession()`が担う。`GET /api/auth/me`が明示的な401（認証失効）を返した場合のみトークンを破棄してログアウトし、それ以外の失敗（バックエンド再起動中の接続断・5xx等）は`AUTH_ME_RETRY_DELAYS_MS`（1s/2s/4s）でリトライし、それでも解決しなければトークンを保持したまま`sessionUnresolved`状態をtrueにする。ログイン状態がバックエンド再起動のたびに失われるのを防ぐ設計。`sessionUnresolved`の間`RequireAuth`（`App.tsx`）はログイン画面へ誘導せず、`ServerUnavailableDialog`（`App.tsx`にグローバルマウント）がサーバー無応答を通知しつつ5秒間隔で`/auth/me`を再試行し、復旧を検知次第自動的に閉じる。初回セッション確認・401検知時の再確認の両方がこの状態を共有する。ログイントークンは無期限化済みのため、以前あった定期的なトークン再取得ポーリングは撤去済み）、`ComposerContext`（返信モーダルに加え、`openCompose(initialText)` で本文プリフィル済みの素の投稿モーダルもグローバルに開ける）、`RightPaneContext`（右ペインのサブタブ状態保持。ポスト詳細画面の「前後のポスト」タブのスクロール位置もポストIDごとにインメモリで保持する、`docs/ui_spec.md` 2.4参照）、`StreamingContext`（WebSocket集約。タイムライン新着ノートはMisskey互換のチャンネル購読方式（`subscribeChannel(spec, onNote)`、`docs/protocols.md` 8節）で配信される。`type:"channel"`イベントのうち`body.type==="note"`を、受信後に閲覧者権限付き`GET /api/notes/:id`で完全な`NoteResponse`へ補完し、受信経路ごとの簡易ペイロード差にかかわらず引用・アンケート・添付をリロードなしで表示する（`resolveStreamNote`、補完取得失敗時はストリームペイロードへフォールバック）。購読中チャンネル一覧は`useRef`で保持し、`useStreaming`の`onOpen`コールバック（WebSocket再接続を検知）で`connect`を全件再送する。`HomePage`は表示中タブ（`Feed`）が変わるたびに`subscribeChannel`し直し、旧チャンネルを`disconnect`する。DM新着（`visibility=direct`のnoteイベント、チャンネル購読不要の`recipients`方式のまま）は`registerDirectMessage`で別系統に振り分け、未読セッション数`dmUnreadCount`をLeftNavのバッジに供給する。Fediフォロー承認（`followAccepted`）受信時は`stores/followStatusStore`を直接更新する）、`ToastContext`（エラー/成功/情報トースト通知）
-- `stores/followStatusStore.ts` — フォロー状態（`not_following`/`pending`/`accepted`）の外部ストア（Reactコンテキストではなくモジュールスコープの`Map`+`useSyncExternalStore`）。キーは`lib/format.ts`の`profileQuery(username, domain)`で統一。同一アクターのフォロー状態表示は画面内に複数存在しうる（プロフィール本体、右ペインのポストリスト、タイムライン上の同一ユーザーの複数投稿）ため、各コンポーネントがローカルstateで抱えず全てこのストアを購読する設計にし、一箇所の操作（フォロー/フォロー解除ボタン）・WebSocket経由の`followAccepted`受信のいずれでも表示中の全コンポーネントへ同時反映する。`ProfilePage`のフォローボタン、`NoteCard`のタイムライン上のフォロースイッチが利用
-- `stores/reactionStore.ts` — 投稿の絵文字リアクション集計の外部ストア（同上、モジュールスコープの`Map`+`useSyncExternalStore`、キーはノートID）。同一ノートはタイムライン一覧・ポスト詳細・引用カード等、複数のコンポーネントインスタンスから同時に表示されうるため、`NoteCard`（`useNoteCardActions`）はリアクション集計をローカルstateで持たずこのストアを購読する。WebSocket経由のリアルタイム更新（他ユーザーのリアクション追加/切替/取消）もこのストアへ書き込むため、`HomeFeedContext`（`HomePage`が他画面へ遷移してブラウザバック等で戻ってきた際にタイムラインを再フェッチせず復元するための、Note配列そのものを保持するインメモリキャッシュ）内のリアクション集計が古くても、表示は常にこのストアの最新値を参照する
-- `pages/` — 画面単位のトップレベルコンポーネント（`MessagesPage`はDM専用画面、`docs/ui_spec.md`参照）
-- `i18n/` — 国際化。`react-i18next` + `i18next-browser-languagedetector`。表示言語（`i18n.displayLanguages`、8言語: `en`/`ja`/`zh-Hant`/`zh-Hans`/`ko`/`es`/`de`/`fr`）とポスト言語（`i18n.postLanguages`、7言語: `en`/`ja`/`zh`/`ko`/`es`/`de`/`fr`）を別リストとして持つ。表示言語のみ中国語が繁體（`zh-Hant`）/简体（`zh-Hans`）のバリエーションを持ち、ポスト言語側は`zh`単一のまま（`seiran_common::SUPPORTED_LANGUAGES`と一致）。`postLanguageBase()`が表示言語からポスト言語のデフォルト値を導出し、`zh-Hant`/`zh-Hans`のどちらでも`zh`に丸める（`PostComposer`のデフォルト言語、絵文字アノテーション読み込み言語の両方で使用）。「自動」時はブラウザの言語設定に従い判定し、`normalizeDetectedLanguage()`が地域コード（`zh-TW`/`zh-HK`/`zh-MO`→`zh-Hant`、それ以外の`zh`系→`zh-Hans`、他言語は言語部分のみ）へ正規化する（対応言語外は `en` にフォールバック）。この正規化は`i18n.init`の`detection.convertDetectedLanguage`とonload設定`load: "currentOnly"`（`zh-Hant`/`zh-Hans`が`languageOnly`設定で`zh`に丸められてしまうのを避けるため）にも使う。設定画面「表示」（`/settings/appearance`、#55・#138）でユーザーが明示的に言語を選択した場合は`localStorage`に記憶（`detection.caches`）し、ログイン中はさらに`users.language_preference`（サーバー保存値）が優先される（`AuthContext`がログイン/`GET /api/auth/me`取得時に`i18n.changeLanguage()`を適用）。翻訳リソースは `i18n/locales/{displayLanguage}/{namespace}.json` に画面・機能単位の名前空間で分割配置し、Viteの`import.meta.glob`で全対応表示言語・名前空間を集約してビルド時にバンドルする。`i18n/index.test.ts`が全表示言語の名前空間・キー・補間変数の一致を保証する。名前空間分割は、将来ユーザーが独自の言語ファイル（同形式のJSON）を作成・適用・配布できるようにする構想を見据えたもので、`i18n.addResourceBundle()` により実行時にリソースを追加・上書きできる
+- `components/note/` — `NoteCard`（タイムライン・詳細・プロフィール共通）、`PostComposer`、`ReactionChips`（チップのホバーでリアクター一覧をポップオーバー）、`ReactionPicker`、`HlsVideo`、`RichText` 等
+  - `ReactionPicker` は `Modal` 内の `EmojiPickerPanel`。Unicode 絵文字データ（`unicode-emoji-json`）は `React.lazy` で遅延ロードする。カスタム絵文字は数千件になりうるので、`EmojiImage` は `hooks/useLazyVisible.ts`（root ごとに共有する `IntersectionObserver`）で視界外の `img` を描かず、グリッドは `PagedGrid` が200件ずつ段階的に描く。
+  - 絵文字の検索索引（`lib/emojiAnnotations.ts`）は `emojibase-data` の生 JSON（1言語700〜800kB）を使わず、postinstall で `scripts/build-emoji-annotations.mjs` が生成する軽量 JSON（`src/generated/emoji-annotations/`、git 管理外、1言語170〜220kB）を言語ごとに動的 import する。
+  - `RichText` は Markdown リンク・生URL・`@mention`・`#ハッシュタグ`・絵文字ショートコードを1パスでリンク等に変換する（`[#foo](リモートURL)` も `/tags/foo` に読み替える）。`EmojiText` はショートコード置換だけ。
+  - 引用（`quote`）は1段だけ埋め込まれ、本文直下の枠付きカードで描く。カードは返信マーカー・ユーザー・CW・本文・時刻・添付・アンケート・リアクションを再利用し、引用元自身の引用は「引用あり」とだけ出す。
+- `components/right/` — 右ペインのタブ内容（`NotificationsPanel`、`TrendsSearchPanel`、`FollowListPanel`、ポスト詳細の `AuthorPanel`・`ReplyThreadPanel`（`GET /api/notes/:id/replies` のフラット配列を `replyId`/`quoteId` でツリーにする）・`ReactionListPanel`・`RepostListPanel`（取り消し済みも含む）。`docs/ui_spec.md` 2.3節）
+- `components/admin/` — 管理画面
+- `components/dm/` — `RecipientPicker`（DM 宛先の chip 入力。Bsky と他プロトコルの混在を警告）
+- アクター検索は用途別: `GET /api/actors/search` はリスト編集・DM 向けの表示名/全ハンドル部分一致、`GET /api/actors/suggest` は `ComposerEditor` 向けのハンドル前方一致で、応答の `target`（入力形式に応じたローカル短縮/Fedi/Bsky 表記）をそのまま挿入する。いずれも既知のアクターだけを探し、リモート取得はしない。
+- `contexts/`
+  - `AuthContext`: 起動時のセッション確認は `authSession.ts::resolveSession()`。`GET /api/auth/me` が明示的な 401 のときだけトークンを捨ててログアウトし、それ以外（再起動中の接続断・5xx）は 1s/2s/4s でリトライしても駄目ならトークンを保ったまま `sessionUnresolved` にする（バックエンドの再起動でログインが失われないように）。その間 `RequireAuth` はログイン画面へ誘導せず、`ServerUnavailableDialog` が5秒間隔で再試行して復旧したら閉じる。任意の API の 401 でも即ログアウトせず、同じ方針で `/auth/me` を1本にまとめて再確認する。
+  - `ComposerContext`: 返信モーダルと、`openCompose(initialText)` による本文プリフィル付き投稿モーダル。
+  - `RightPaneContext`: 右ペインのサブタブ状態と、ポスト詳細「前後のポスト」のスクロール位置（ポストIDごと）。
+  - `StreamingContext`: WebSocket の集約。タイムライン新着はチャンネル購読（`subscribeChannel(spec, onNote)`）で受け、閲覧者権限付きの `GET /api/notes/:id` で完全な `NoteResponse` に補完してから渡す（`resolveStreamNote`。失敗時はストリームのペイロードを使う）。購読中のチャンネルは再接続時（`onOpen`）に全部 `connect` し直す。`HomePage` は表示タブが変わるたびに購読を切り替える。DM 新着は `registerDirectMessage` で振り分け、未読数 `dmUnreadCount` を LeftNav のバッジに渡す。`followAccepted` で `followStatusStore` を更新する。
+  - `ToastContext`: トースト通知。
+- `stores/` — モジュールスコープの `Map` + `useSyncExternalStore` の外部ストア。同じ対象が画面内の複数コンポーネントに同時に出るので、ローカル state で持たずここを購読する。
+  - `followStatusStore.ts`（`userRelationshipStore` のファサード）: フォロー状態。キーは `lib/format.ts` の `profileQuery(username, domain)`。
+  - `reactionStore.ts`: リアクション集計（キーはノートID）。WS のリアルタイム更新もここに書くので、`HomeFeedContext`（ブラウザバック時にタイムラインを再取得せず復元するための Note 配列キャッシュ）の集計が古くても表示は最新になる。
+  - `pollVoteStore.ts`: アンケート票数（`pollUpdated`）。
+- `pages/` — 画面単位のコンポーネント
+- `i18n/` — `react-i18next` + `i18next-browser-languagedetector`。
+  - 表示言語（`displayLanguages`、8言語: `en`/`ja`/`zh-Hant`/`zh-Hans`/`ko`/`es`/`de`/`fr`）とポスト言語（`postLanguages`、7言語。中国語は `zh` のみで `SUPPORTED_LANGUAGES` と一致）を別に持つ。`postLanguageBase()` が表示言語をポスト言語に丸める（投稿フォームの既定値・絵文字アノテーションの言語）。
+  - 「自動」はブラウザ設定から判定し、`normalizeDetectedLanguage()` が `zh-TW`/`zh-HK`/`zh-MO` → `zh-Hant`、他の `zh` → `zh-Hans`、他言語は言語部分に正規化する（対応外は `en`）。`detection.convertDetectedLanguage` と `load: "currentOnly"`（`languageOnly` だと `zh-Hant` が `zh` に丸められる）にも使う。
+  - 設定画面で明示的に選ぶと `localStorage` に記憶し、ログイン中は `users.language_preference` を優先する（`AuthContext` が適用）。
+  - 翻訳は `i18n/locales/{言語}/{名前空間}.json` に分け、`import.meta.glob` でバンドルする。`i18n/index.test.ts` が全言語のキーと補間変数の一致を検査する。名前空間分割は、ユーザー製の言語ファイルを `i18n.addResourceBundle()` で追加する構想を見据えたもの。
 
-3ペインUIのレイアウト仕様は `docs/ui_spec.md` を参照。
+3ペインのレイアウト仕様は `docs/ui_spec.md`。
 
-**ローカル開発サーバーの標準運用**: seiranの開発はagentic codingが主体のため、HMR付きdevサーバー（`npm run dev`、5173番、React `<StrictMode>`のeffect二重実行など開発ビルド固有の挙動を持つ）ではなく、`npm run build:watch`（`vite build --watch`、ファイル変更のたびに本番相当のプロダクションビルドへ差分ビルド）と`npm run preview`（`vite preview`、`dist/`を配信する静的サーバー、既定4174番・`PREVIEW_PORT`で上書き可）の2プロセスを常駐させ、常にビルド済み・本番相当のコードで動作確認するのを標準とする。バックエンドの`FRONTEND_ORIGIN`（OGP注入・`/notes`等の転送先）も既定でこのpreviewサーバーを指す。開発ビルド固有の挙動は本番ビルドと異なりうるため、不具合調査は常にビルド済みの状態で行う。人力でUIを細かく調整する際は`FRONTEND_ORIGIN`を一時的に`http://localhost:5173`へ書き換えて`npm run dev`を使ってよい。
+**ローカル開発サーバーの標準運用**: agentic coding が主体なので、HMR 付きの dev サーバー（`npm run dev`、5173。StrictMode の effect 二重実行など開発ビルド固有の挙動がある）ではなく、`npm run build:watch`（変更のたびに本番相当のビルド）と `npm run preview`（`dist/` を配信、既定4174、`PREVIEW_PORT` で変更可）の2プロセスを常駐させ、常に本番相当のコードで確認する。バックエンドの `FRONTEND_ORIGIN`（OGP 注入・転送先）も既定でこの preview を指す。人手で UI を細かく調整するときは `FRONTEND_ORIGIN` を `http://localhost:5173` にして `npm run dev` を使ってよい。
 
-**ローカル開発サーバーの健全性確認・復旧**: `ps`でプロセスが生きていることは、正しく機能していることを保証しない。特に`vite build --watch`は、ネイティブのファイル監視（inotify）が本開発環境では信頼できず、**ファイル変更検知だけが静かに止まってもプロセス自体は生き続け、エラーも出さない**ことがある（実機確認: 再起動しても再発した）。この状態だと`dist/`は古いビルドのまま固定され、コードを変更したのに`vite preview`（4174番）で確認しても反映されないという分かりにくい不具合になる。そのため`scripts/dev-up.sh`は`vite build --watch`起動時に常に`CHOKIDAR_USEPOLLING=true`（ポーリング方式でのファイル監視）を付与し、この問題を回避している。それでも疑わしいときは:
+**開発サーバーの健全性確認**: プロセスが生きていても正しく動いているとは限らない。
+- `vite build --watch` は、この環境ではネイティブのファイル監視が信頼できず、変更検知だけが黙って止まることがある。`scripts/dev-up.sh` は `CHOKIDAR_USEPOLLING=true` を付けて起動する。疑わしければ `ls -la frontend/dist/assets/*.js` の更新時刻（ファイル名はコンテンツハッシュ入り）を編集時刻と比べ、古ければプロセスを止めて `CHOKIDAR_USEPOLLING=true npm run build:watch` を再実行する（preview は再起動不要）。
+- バックエンド（`cargo run -p seiran-server`、3000）も `ps` ではなく `curl localhost:3000/` 等の実応答で確認する。
+- 「生きているのに動きがおかしい」ときは `df -h` も見る。`target/` は肥大化しやすく、逼迫すると原因不明な壊れ方をする（`cargo clean` で回収できる）。
 
-- `ls -la frontend/dist/assets/*.js` の更新時刻が直近の編集より新しいか確認する（`vite build --watch`のログに`built in ...ms`が出ているだけでは、それが最新の編集を含むビルドとは限らない。ビルド後の成果物ファイル名にはコンテンツハッシュが含まれるため、編集前後でファイル名が変わっていなければ内容も変わっていない）。
-- 更新されていなければ、既存プロセスを`kill`してから`cd frontend && CHOKIDAR_USEPOLLING=true npm run build:watch`を再実行する（`vite preview`側は`dist/`を読み直すだけなので再起動不要）。
-- バックエンド（`cargo run -p seiran-server`、3000番）が応答しない場合も同様に、まず`ps`ではなく`curl localhost:3000/`等の実応答で確認し、落ちていれば`cargo run -p seiran-server`を再実行する。
-- 上記のような「プロセスは生きているのに動作がおかしい」系の不具合に遭遇したら、`df -h`でディスク容量も疑う。`target/`（Rustビルドキャッシュ）は肥大化しやすく、逼迫するとビルド・プロセスの挙動が原因不明な形で壊れる。空き容量が少なければ`cargo clean`で回収できる。
-
-**開発用プロキシとVite内部パスの衝突**: `frontend/vite.config.ts` の開発サーバー（ローカル `cargo run` 直接起動時のみ有効）は `GET /@:handle`（プロフィールページ）をバックエンドへ転送するが、単純なプレフィックスマッチだとVite自身の内部モジュール（`/@vite/client`・`/@react-refresh`・`/@fs/...`・`/@id/...`）まで巻き込んでバックエンドへ転送してしまい、Viteクライアントが読み込めず白画面になる（実機確認）。そのためこれらを除外する正規表現（`^`始まりはVite側でregex扱い）を使う。
-
-`AuthContext`のグローバル401処理は、任意APIの401で即時ログアウトせず、通知を抑止した`GET /api/auth/me`を上記と同じリトライ方針で再確認する。認証失効が確定した場合だけログアウトし、複数APIの同時401では再確認を一本化する（#108）。
+**開発用プロキシと Vite 内部パス**: `vite.config.ts` の dev サーバーは `/@:handle` をバックエンドへ転送するが、単純なプレフィックス一致だと `/@vite/client`・`/@react-refresh`・`/@fs/...`・`/@id/...` まで転送して白画面になるので、それらを除く正規表現にしている。
 
 ## 8.1 OGP (Open Graph) 対応
 
-フロントエンドは SPA のため、素の index.html には投稿・プロフィールごとの `<meta>` が無い。
-User-Agent で既知の bot だけを判定して出し分ける方式は、リストにない未知のクローラーを
-取りこぼすため採用していない。代わりに `/notes/:id`・`/@:handle`（AP クライアント向け
-`Accept` を除く）へのリクエストは常に、SPA の index.html の `<head>` に OGP `<meta>` を
-注入したものを返す。実ブラウザはそのまま SPA が起動し（`<meta>` 注入以外は普段と同じ
-index.html）、クローラーは JS を実行しないため `<meta>` だけを読んで終わる。
+SPA の index.html には投稿・プロフィールごとの `<meta>` が無い。User-Agent で既知の bot だけを出し分けると未知のクローラーを取りこぼすので、`/notes/:id`・`/@:handle`（AP の `Accept` を除く）は常に、index.html の `<head>` に OGP を注入したものを返す。ブラウザはそのまま SPA が起動し、クローラーは `<meta>` だけを読む。
 
-- `crates/seiran-api/src/handlers/ogp.rs` — DB から投稿/アクターの情報を取得し、
-  `state.frontend_origin`（Docker既定は`http://frontend:5173`、ローカルネイティブ開発の
-  標準は`vite preview`＝ビルド済み本番相当、環境変数`FRONTEND_ORIGIN`で上書き可）から
-  index.html を取得して `<title>`・OGP/Twitter Card の `<meta>` を注入する。`GET /notes/:id`
-  は既存の AP Note エンドポイント（`get_note_ap`）が `Accept` ヘッダーで分岐し、AP クライアント
-  向け JSON-LD とこの OGP 注入 HTML を出し分ける。`GET /@:handle` はプロフィール専用の
-  新規エンドポイント。
-- 投稿・アクターが見つからない/DBエラー時は `<meta>` を注入せず index.html をそのまま返す
-  （ここで 404 等を返すと SPA 自体が起動できず、フロント側の「見つかりません」表示や
-  リモートアクターの都度フェッチが機能しなくなるため）。
-- 可視性は投稿・プロフィールいずれも通常の閲覧経路と同じ判定を通す（`followers_only`/
-  `direct` は非表示、`PostRepository::find_by_id_for_viewer` を viewer なしで呼ぶ）。
-- nginx（`docker/nginx.conf`/`docker/nginx.mono.conf`）・ローカル開発（`frontend/vite.config.ts`
-  の proxy）とも、`/notes`・`/@` は bot 判定なしで常に api（バックエンド）へ転送する。
-- リポスト（Announce）の AP canonical URL は `/notes/:id` ではなく `/announces/:id`
-  （`create_repost`、`ap/deliver/announce.rs`）。フロントエンド上のリポストラッパー個別ページは
-  通常ポストと同じ `/notes/:id` で表示するため、リモートユーザーが `/announces/:id` へ
-  直接ブラウザでジャンプしてきた場合は `GET /announces/:id`
-  （`handlers::notes::get_announce_redirect`）が `/notes/:id` へリダイレクトする
-  （AP クライアント向け Accept の場合は Announce オブジェクト応答が未実装のため 404）。
-  nginx・Vite proxy とも `/notes` と同様に `/announces` を api（バックエンド）へ転送する
-  設定が必要。
-- `fetch_spa_html`（`ogp.rs`）が `frontend_origin` へ index.html を取りに行く際の
-  Host ヘッダーは、Docker 構成では接続先コンテナ名そのもの（既定 `http://frontend:5173`
-  なら `frontend`）になる。Vite の `server`/`preview` の `allowedHosts`
-  （`frontend/vite.config.ts`）に本番ドメイン（`LOCAL_DOMAIN`）しか入っていないと、この
-  内部フェッチが Vite 自身に「Blocked request. This host ("frontend") is not allowed」
-  として弾かれ、`/notes/:id`・`/@:handle` への直接アクセス（ブラウザの直打ち・リロード。
-  bot 判定も同経路）がすべて壊れる（nginx のルーティングが正しくても発生する。実機確認、
-  2026-09-06）。そのため `allowedHosts` には `LOCAL_DOMAIN` に加えて Docker のコンテナ名
-  `"frontend"` を常に含める。
+- `handlers/ogp.rs` が DB から投稿/アクターを取り、`state.frontend_origin`（Docker 既定 `http://frontend:5173`、ローカルは preview、`FRONTEND_ORIGIN` で変更可）から index.html を取って `<title>`・OGP・Twitter Card を注入する。`GET /notes/:id` は `get_note_ap` が `Accept` で AP の JSON-LD と出し分け、`GET /@:handle` はプロフィール専用。
+- 見つからない・DB エラー時は注入せず index.html をそのまま返す（404 を返すと SPA が起動できず、「見つかりません」表示やリモートアクターの取得が動かない）。
+- 可視性は通常の閲覧と同じ判定（`find_by_id_for_viewer` を viewer 無しで呼ぶ）。
+- nginx と Vite の proxy は `/notes`・`/@`・`/announces` を常にバックエンドへ転送する。
+- リポスト（Announce）の AP の URL は `/announces/:id`。ブラウザで開かれたら `get_announce_redirect` が `/notes/:id` へリダイレクトする（AP クライアント向けの Announce 応答は未実装で 404）。
+- Docker では `fetch_spa_html` の Host ヘッダーがコンテナ名（`frontend`）になるので、`vite.config.ts` の `server`/`preview` の `allowedHosts` に `LOCAL_DOMAIN` と `"frontend"` の両方を入れる。無いと Vite が内部取得を弾き、`/notes/:id`・`/@:handle` の直接アクセスがすべて壊れる。
 
 ## 8.2 `/users/:username`（AP actor ID）の旧形式プロフィールURL互換
 
-`/users/:username` は AP actor の `id` として恒久的に維持するエンドポイントであり、
-`/@handle` 形式のプロフィール permalink（#36、2026-07-05）導入より前はブラウザ向け
-プロフィールURLとしても使われていた。この時期にリモートサーバーへ捕捉・キャッシュされた
-seiranユーザーのプロフィール記録は、`/users/:username` を actor URL として保持し続けている
-はずのため、恒久的に応答できる必要がある。
+`/users/:username` は AP actor の `id` として恒久的に維持する。`/@handle` 形式の導入前はブラウザ向けのプロフィールURLでもあり、リモートに残るプロフィール記録がこれを actor URL として持っている。
 
-- `crates/seiran-federation-inbox/src/handlers/actor.rs::actor_handler` — Accept ヘッダーに
-  `activity+json`/`ld+json` を含まないリクエスト（＝ブラウザからの直接アクセス）は
-  `/@:username` へ 302 リダイレクトする。AP クライアント向けは従来どおり Actor JSON-LD を返す
-  （`id`/`publicKey.owner` は今後も `/users/:username` のまま変更しない。`url` フィールドは
-  最初から `/@:username` を指しており、こちらは互換対応不要）。
-- `crates/seiran-federation-inbox/src/handlers/webfinger.rs::webfinger_handler` — `resource`
-  パラメータが `acct:user@domain` 形式に加えて、`https://{domain}/users/{username}`
-  （actor URL そのもの）でも同じレスポンスを返す。リモートが `acct:` を経由せず、
-  キャッシュ済みの旧 actor URL を直接 `resource` に渡して再検証してくる場合があるため。
-- nginx（`docker/nginx.conf`/`docker/nginx.mono.conf`）は `location ~ ^/users/` で
-  `/users/` 配下を常に api（バックエンド）へ転送済みであり、この互換対応のための追加変更は
-  不要（サブパス込みで既存の正規表現が拾う）。
+- `actor.rs::actor_handler`: `Accept` に `activity+json`/`ld+json` を含まない（ブラウザ）なら `/@:username` へ 302。AP クライアントには Actor JSON-LD（`id`/`publicKey.owner` は `/users/:username` のまま、`url` は `/@:username`）。
+- `webfinger.rs`: `resource` が `acct:user@domain` でも `https://{domain}/users/{username}` でも同じ応答を返す（キャッシュ済みの actor URL で再検証してくる実装がある）。
+- nginx は `/users/` 配下を常にバックエンドへ転送する。
 
-## 9. E2Eテスト
+## 9. テストとCI
 
-- PRおよび`main`へのpushではGitHub Actionsの`E2E` jobが、Node.js 20・Chromium・
-  E2E専用PostgreSQLを用いて全Playwrightテストを実行する。失敗時はtrace等の
-  `playwright-report` / `test-results`を7日間artifactとして保存する。
-  セットアップ短縮のため、rust-cacheを`Rust` jobと`shared-key`で共有（`E2E`側は
-  `save-if: false`の読み取り専用）、pg_bigm入りPostgresイメージ（`docker/Dockerfile.postgres`）
-  はDocker BuildxのGHAキャッシュでビルド、Playwrightブラウザ本体も`actions/cache`で
-  キャッシュする。
-- 同じ`E2E` jobの中で、E2E実行の前にDB結合テスト（`crates/seiran-api/tests/*_integration.rs`、
-  `#[ignore]`付き）を同じ専用DBで実行し（`cargo test -p seiran-api --tests -- --ignored`）、
-  終了後に`docker compose down -v`でDBを破棄してからE2Eを始める（E2Eは空のDBから始める前提）。
-  結合テストのハーネス（`tests/support/mod.rs`）はマイグレーション適用とテストユーザー
-  （`seiran1`等、パスワード`seiranda`）の作成を自動で行う。
-- frontendのVitestユニットテストもCIの`Frontend` jobで型チェック・lintと併せて
-  必ず実行する。
-- Rustの`Rust` jobは`cargo fmt --all -- --check`と警告をエラー扱いするClippyを実行する。
-  frontendのlintもESLint警告を許容せず、エラー・警告のいずれでもCIを失敗させる。
-- `Rust`/`E2E`両jobの`dtolnay/rust-toolchain@stable`は`toolchain`をバージョン固定している
-  （実機確認: 固定していないとRustの新しいstableリリースのたびにClippyへ新規lintが追加され、
-  コード変更が無くてもCIが突然落ちることがある）。更新は意図したタイミングでのみ、両jobの
-  バージョン文字列を揃えて行う。
+**CI**（GitHub Actions）:
+- `Rust` job: `cargo fmt --all -- --check` と `clippy -- -D warnings`。
+- `Frontend` job: 型チェック・lint（警告も失敗）・Vitest。
+- `E2E` job（Node.js 20・Chromium・E2E 専用 PostgreSQL）: まず DB 結合テスト（`crates/seiran-api/tests/*_integration.rs`、`#[ignore]` 付き。`cargo test -p seiran-api --tests -- --ignored`）を同じ専用DBで実行し、`docker compose down -v` で DB を捨ててから全 Playwright テストを実行する（E2E は空のDBから始める前提）。結合テストのハーネス（`tests/support/mod.rs`）がマイグレーションとテストユーザー（`seiran1` 等、パスワード `seiranda`）を用意する。失敗時は `playwright-report`/`test-results` を7日間保存する。rust-cache は `Rust` job と `shared-key` で共有（E2E 側は読み取りのみ）、Postgres イメージは Buildx の GHA キャッシュ、Playwright のブラウザは `actions/cache`。
+- `dtolnay/rust-toolchain@stable` は両 job とも `toolchain` のバージョンを固定する。固定しないと新しい stable のたびに clippy に lint が増え、コード変更なしに CI が落ちる。更新するときは両 job を揃える。
 
-`e2e/`ディレクトリにPlaywrightプロジェクトを置く。外部の実サービス（fedi/Bskyインスタンス、PLCディレクトリ、Bsky Relay等）とは通信せず、seiranが話す相手をすべてローカルのスタブ/専用インスタンスに置き換えた上で実行する。実行は `cd e2e && npm test`。
+**E2E**（`e2e/`、`cd e2e && npm test`）: 外部の実サービス（Fedi/Bsky・PLC・Relay）とは通信せず、相手をすべてローカルのスタブに置き換える。ポートは開発サーバーと別（バックエンド3100・フロント5273、`e2e/ports.ts`）なので、開発サーバーを止めなくてよい。
 
-- `e2e/playwright.config.ts`: `webServer`にスタブPLCサーバー・スタブAppViewサーバー・スタブFediサーバー（`stub-fedi-server.ts`、後述）・backend（`cargo run -p seiran-server`）・frontend（`npm run dev`）をまとめて起動する。backendには`PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL`をそれぞれのスタブサーバーへ、スタブが127.0.0.1で待ち受けるため`SEIRAN_ALLOW_PRIVATE_NETWORK=true`（連合用HTTPクライアントの非公開IP拒否を無効化）を、`ATP_RELAY_URL`を存在しないローカルポートへ向け、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`を空文字にして、外部への実通信を確実に遮断している。`SQLX_OFFLINE=true`も設定し、マイグレーション未適用の空DBに対してsqlxのコンパイル時クエリ検証が失敗しないようコミット済み`.sqlx/`キャッシュを使わせる。
-  - 【重要】全`webServer`エントリの`reuseExistingServer`は`false`固定（変更禁止）。backendPort(3000)/frontendPort(5173)は`scripts/dev-up.sh`のネイティブ開発サーバーとも共有しており、`true`だと起動中の実開発サーバーへ無条件に相乗りしてしまう。2026-07-20に実際に発生し、実開発DBへのテストデータ混入・本物のplc.directoryへの誤登録という事故になった（後者は`did:plc:`のtombstoneオペレーションで収束済み）。`false`ならポート競合時に明確なエラーで停止する。
-  - 【重要】Playwrightの実行順序は直感に反して「webServer起動 → globalSetup」（`globalSetup`ではwebServerの起動には間に合わない）。そのためE2E専用Postgres（`e2e/docker-compose.yml`、ポート5433）の起動待ちは`globalSetup`ではなく`e2e/scripts/wait-for-db.ts`としてbackendの`command`自体の前段に組み込んでいる。逆に`e2e/global-setup.ts`は「backendが起動済み」を前提にできるので、初期管理者アカウントのbootstrapに使っている（`GET /api/setup/status`は`users`テーブルが1件でもあれば`initialized:true`を返し、未初期化だとフロントは`App.tsx`のルーティングを無視して常に`<Setup>`画面を表示するため、E2E専用DBは空の状態からテストを始める都合上これが必要）。`globalTeardown`はE2E専用Postgresを`down -v`で破棄する。
-  - テストは3つのPlaywright projectに分けて並列実行する（`workers: 3`(CI)/`4`(ローカル)）。大半のspecは`main`で並列実行し、`storage_providers`（`is_active`先頭優先のためstub S3登録が競合する）に触れる`notifications`/`misskey-compat`/`federation-delivery`は`storage-serial`（project内`workers: 1`で直列、`main`とはインターリーブ）、`site_settings`のグローバル変更や外部サービススタブのプロセスグローバル状態に触れる`admin`/`rate-limit`/`search`は`globals-serial`（`dependencies`で`main`・`storage-serial`完了後の排他テール）に隔離する。
-- `e2e/fixtures/stub-plc-server.ts`: `plc.directory`のスタブ実装。TypeScriptを`tsx`で直接実行するため、CIのNode.js 20を含め事前ビルドは不要。genesis opを受け取ってメモリに保持し、GET時にDIDドキュメント形式へ組み直して返す。
-- `e2e/fixtures/stub-appview-server.ts`: Bsky AppView（`public.api.bsky.app`）のスタブ実装。`app.bsky.feed.searchPosts`等の主要エンドポイントに対し常に空の結果を返す（seiranのローカルDB検索はこれと独立して機能するため、ローカル投稿の検索はAppViewが空でも成立する）。
-- `e2e/fixtures/stub-fedi-server.ts`: リモートのActivityPubアクター（Mastodon等）のスタブ実装。正規のHTTP Signatures（RSA-SHA256、Digestヘッダー必須。`crates/seiran-common/src/ap/client.rs`のcanonical signing string規約に準拠）で署名したFollowをseiranの`/inbox`へ送り、フォロー成立後の投稿・返信・リポスト配送（Fedi配送はローカルアクターのacceptedフォロワー全員へのファンアウトのみで、返信先個人への直接配送やsharedInboxは無い。`crates/seiran-common/src/ap/deliver/`）を自身のinboxで受信・記録できる。
-- `e2e/fixtures/api-helpers.ts`: テスト対象でないセットアップ（フォロー相手ユーザーの作成等）はUI操作ではなく`/api/auth/register`を直接叩いて済ませ、各テストは検証したいUI操作に集中させる。ログイン状態が前提のテストは`seedAuth()`でlocalStorageにtokenを仕込みUIログイン操作自体を省略できる（ログインフロー自体を検証する`login.spec.ts`だけは実際にフォームを操作する）。
-- テストファイルは`e2e/tests/`配下（`signup`・`login`・`post`・`follow`・`reply`・`reaction`・`search`・`profile-edit`・`hashtag`・`federation-delivery`）。DBはテスト実行全体で共有されるため、各テストはユーザー名が衝突しないよう一意なプレフィックス+タイムスタンプで登録する。
-- フロントは`i18next-browser-languagedetector`がブラウザロケールを見て言語を決めるため、Playwright側は`use.locale`を`ja-JP`に固定している（既定の`en-US`だとUIが英語化される）。
-- DBはE2E専用インスタンスを使い、テスト実行のたびに空の状態から始める（アカウントは各テストが必要に応じて新規作成する）。手動検証用の`seiran{n}`アカウント（本ファイル冒頭のCLAUDE.md参照）とは分離されている。
-- Cloudflare DNS（ATPハンドル検証のTXT自動登録）、通知UI（未実装）はE2Eのスコープ外。
+- `playwright.config.ts` の `webServer` がスタブ PLC・スタブ AppView・スタブ Fedi・バックエンド・フロントを起動する。バックエンドには `PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL` をスタブへ、`ATP_RELAY_URL` を存在しないポートへ、`CLOUDFLARE_*` を空に、`SEIRAN_ALLOW_PRIVATE_NETWORK=true`（スタブが 127.0.0.1 のため）、`SQLX_OFFLINE=true`（空の DB でコンパイル時検証が失敗しないよう `.sqlx/` を使う）を渡す。
+  - 全 `webServer` の `reuseExistingServer` は `false` 固定（変更禁止）。`true` だとポートが空いていない場合に既存のサーバーへ相乗りし、実開発DBへのテストデータ混入や本物の plc.directory への誤登録を起こす。
+  - Playwright は「webServer 起動 → globalSetup」の順なので、E2E 用 Postgres（`e2e/docker-compose.yml`、5433）の起動待ちはバックエンドの `command` の前段（`scripts/wait-for-db.ts`）に入れている。`global-setup.ts` は起動済みのバックエンドで初期管理者を作る（`users` が空だとフロントは常にセットアップ画面を出すため）。`globalTeardown` が DB を `down -v` で捨てる。
+  - project は3つ（`workers` は CI 3・ローカル4）。大半は `main`。`storage_providers` に触れる spec（スタブ S3 の登録が競合する）は `storage-serial`（project 内 `workers: 1`、`main` と並行）、`site_settings` やスタブのグローバル状態に触れる spec は `globals-serial`（`main`・`storage-serial` の後に排他で実行）。
+- `fixtures/stub-plc-server.ts`: plc.directory のスタブ（`tsx` で直接実行）。genesis op を保持し、DID 文書にして返す。
+- `fixtures/stub-appview-server.ts`: AppView のスタブ。主要エンドポイントに空の結果を返す。
+- `fixtures/stub-fedi-server.ts`: リモート AP アクターのスタブ。正規の HTTP Signatures で署名した Follow を送り、フォロー後に配送された投稿・返信・リポストを自分の inbox で記録する。
+- `fixtures/api-helpers.ts`: 前提データ（相手ユーザー等）は UI ではなく API で作り、`seedAuth()` で localStorage にトークンを仕込んでログイン操作を省く（`login.spec.ts` だけはフォームを操作する）。
+- DB はテスト実行全体で共有するので、各テストは一意なプレフィックス＋タイムスタンプでユーザーを作る。手動検証用の `seiran{n}` とは別DB。
+- フロントはブラウザのロケールで言語を決めるので `use.locale` を `ja-JP` に固定している。
+- Cloudflare DNS（TXT 自動登録）と、本物の Jetstream が要る Bsky 受信系は対象外。
 
 ## 10. 環境変数
 
 | カテゴリ | 変数 |
 |---|---|
-| ドメイン | 自ホストドメインは`instance_domain`テーブル（一度確定したら不変、`seiran_common::LocalDomain`/`repository::InstanceDomainRepository`）から起動時に一度だけ読み込む。未確定の場合のみ`LOCAL_DOMAIN`環境変数の値をそのままDBへ書き込んで確定させる後方互換パスがある（確定済み環境では無視される）。`.env`にも`LOCAL_DOMAIN`もDB確定値も無い新規インストールでは、初回セットアップ（`POST /api/setup`）時にリクエストの`Host`ヘッダー（`X-Forwarded-Host`等は見ない生の`Host`のみ、`handlers::setup::host_domain_candidate`）から自動確定する。`GET /api/setup/status`が事前にHostヘッダー由来の候補を`domain_candidate`として返し、フロントが確認表示後にそのまま`POST /api/setup`のリクエストボディへ送り返す。サーバー側は送信時点の実際の`Host`ヘッダーとリクエストボディの値が完全一致することを検証してから確定する（`handlers::setup::try_confirm_domain`、不一致は`DOMAIN_MISMATCH`で拒否）。Hostヘッダーが無い・`localhost`・IPアドレス直打ちの場合は「シングルホストモード」（連合なし、PLC genesisを行わずAT Protocol DIDを持たないローカルユーザーとして開始、`actors.domain='localhost'`）で起動する。`ATP_PDS_ORIGIN`は廃止済み（未使用だったため） |
-| 起動ポート | `PORT`(既定3000), `FEDERATION_INBOX_PORT`(既定3001) |
-| データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`、`DB_HOST`/`DB_PORT`（既定`localhost`/5432。Docker運用では`docker-compose.yml`が`DB_HOST=db`を注入）、`DB_MAX_CONNECTIONS`（プール最大接続数を明示指定。未設定時は`seiran_common::db::recommended_max_connections`がロールごとに動的算出する。split-roleではプロセスごとに持つ）。接続先はこれらから組み立てる（`DATABASE_URL`という完成済みURL変数は持たない、`seiran_common::db::get_db_pool`） |
-| ジョブキュー | `REDIS_URL`（split-role構成専用。`--role all` では不要） |
-| シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWTシークレット等は環境変数ではなく `secrets.toml` で自動生成・管理する |
-| 外部サービス連携 | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ATPハンドル検証のDNS TXT自動作成。未設定時はHTTP `.well-known` 方式のみにフォールバック）、`ATP_RELAY_URL`（Relayへの`requestCrawl`先。カンマ区切りで複数指定可、既定は`https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（`did:plc:`の登録・解決先。既定は`https://plc.directory`。E2Eテストではローカルのスタブサーバーに向ける）、`ATP_APPVIEW_URL`（Bsky AppViewのベースURL。既定は`https://api.bsky.app`。E2Eテストではローカルのスタブサーバーに向ける）、`SEIRAN_ALLOW_PRIVATE_NETWORK`（`true`で連合用HTTPクライアントの非公開IP拒否を無効化する。E2Eのスタブサーバー向け専用で、本番・開発機では設定しない。`docs/protocols.md`「外部から指定されたURLへの接続」参照） |
-| SMTP | 環境変数では設定しない。`site_settings` テーブルで管理し管理者API経由で設定する |
+| ドメイン | 自ホストドメインは `instance_domain` テーブル（一度確定したら不変、`LocalDomain`/`InstanceDomainRepository`）から起動時に読む。未確定なら `LOCAL_DOMAIN` の値で確定させる。どちらも無い新規インストールでは、初回セットアップ（`POST /api/setup`）でリクエストの生の `Host` ヘッダーから確定する（`GET /api/setup/status` が候補 `domain_candidate` を返し、フロントが確認後そのまま送り返し、サーバーは送信時の `Host` と一致するか検証する。不一致は `DOMAIN_MISMATCH`）。`Host` が無い・`localhost`・IP 直打ちなら「シングルホストモード」（連合なし、DID を持たないローカルユーザー、`actors.domain='localhost'`） |
+| 起動ポート | `PORT`（既定3000）、`FEDERATION_INBOX_PORT`（既定3001） |
+| データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`、`DB_HOST`/`DB_PORT`（既定 `localhost`/5432。Docker では `DB_HOST=db`）、`DB_MAX_CONNECTIONS`（未設定ならロールごとに算出、3節）。完成済みの `DATABASE_URL` は使わない（`db::get_db_pool`） |
+| ジョブキュー | `REDIS_URL`（split-role 用。`--role all` では不要） |
+| シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWT secret 等は `secrets.toml` で自動生成する |
+| 外部サービス | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ハンドル検証の TXT 自動作成。未設定なら `.well-known` 方式のみ）、`ATP_RELAY_URL`（`requestCrawl` 先、カンマ区切り、既定 `https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（既定 `https://plc.directory`）、`ATP_APPVIEW_URL`（既定 `https://api.bsky.app`）、`SEIRAN_ALLOW_PRIVATE_NETWORK`（`true` で連合用クライアントの非公開IP拒否を無効化。E2E 専用） |
+| 開発・一回限り | `WEBAUTHN_ORIGIN`（ローカル/E2E のパスキー origin）、`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE`、`BSKY_FOLLOWER_POLL_INTERVAL_SECS` |
+| SMTP | 環境変数ではなく `site_settings`（管理 API）で設定する |
+
+## 11. 横断機能の構成メモ
+
+- **「開く」**（`handlers/open_target.rs`）は薄いオーケストレーション層で、Bsky は `seiran-common::atp`、AP Actor は `target_resolve`、AP 投稿は受信 Create ジョブを再利用する。外部の ActivityStreams 文書の取得はメディアプロキシと同じ検証（DNS 固定・非公開IP拒否・リダイレクト再検証）を通す。フロントの `OpenTargetDialog` は QR を同期認識し、重い OCR Worker は読み取り開始後に動的 import する。
+- **通報**は `ReportModal` と `POST /api/reports` でローカル・Fedi・Bsky を統一し、管理画面の「通報」タブで台帳閲覧・クローズ・内部コメント・凍結/投稿削除・リモート転送を行う（転送の仕様は `docs/protocols.md`「通報配送」）。
+- **Snowflake ID** はブラウザで精度を失わないよう、API では文字列で受け渡す。

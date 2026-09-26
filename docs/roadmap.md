@@ -1,272 +1,139 @@
 # 開発ロードマップ
 
-- [x] **コード改善大会（2026-09-26）** — DRY違反・レースコンディション・NULL非考慮SQL・関数の責務過多を中心に全面見直し。参照埋め込みでのDM本文漏洩、連合用HTTPクライアントのSSRF、リストTL・ピン留め・検索結果でCWが効かない不具合、同時投票の票消失、承認制アカウント再フォローでのフォロー降格、登録の非原子性、フォロー連打でのATP二重コミット等を修正。`IN (SELECT`禁止ルールと機械的検査、`TimelinePost`列定義の集約、Misskey互換APIとカスタムAPIの共通化。詳細・残課題: `docs/improvement_2026-09-26.md`
-- [x] **プロフィール画面: key-value表示固定・bio HTML化・リンク先自動判定（#リンク解決）** — (1) プロフィールのキーバリュー項目（Website等）の表示崩れ（key/valueどちらかの列が縮みすぎる）を、key:value=4:6固定比率＋key列右寄せで解消。(2) リモートFedi/remote_seiranアクターのbio・profile_fields値は投稿本文と同じallowlist（`sanitize_html_allowlist`、`<p>`/`<a>`/`<br>`等）でサニタイズしたHTMLとして保存・表示するよう変更（従来は`strip_html`で強制プレーンテキスト化していた9箇所を置き換え）。ローカル/Bskyアクターの値は引き続きプレーンテキスト保存し、表示直前にエスケープ+裸URLリンク化+`<br>`化してから同じ`RichHtml`（ノート本文と共通、`dangerouslySetInnerHTML`不使用の多層防御パーサー）に通す。(3) bio/profile_fields内の裸URLに加え、`@user@host`（Fediverse形式）・`@handle.bsky.social`（Bskyハンドル形式）のメンション記法（ローカル/Bskyアクターのプレーンテキストbioのみ対象）もリンク解決の対象にし、リンク先がFediverse/Blueskyの実在ユーザー・投稿だと判明した場合、サイト内リンク（ユーザーはホバーでフォロースイッチ・右クリックで対ユーザー操作メニュー・先頭に顔アイコン、投稿は内部リンクのみ）に差し替える。判定はWebFinger（`acct:`形式にしか使えないため不適）ではなくActivityPubのContent-Negotiation直接フェッチ/Bsky AppView経由で非同期に行い（`Job::LinkResolve`）、結果を`link_resolutions`テーブルへ陽性/陰性ともキャッシュ（陰性は48時間で再調査）、解決完了はWebSocket`linkResolved`（ログイン中クライアントのみ、新設の`broadcast_all`配信方式）で通知する。URL分類・解決ロジック（`parse_target`/`resolve_target`/`resolve_and_upsert_target`）は元`seiran-api::handlers::open_target`/`target_resolve`から`seiran-common::link_target`/`target_resolve`へ移動し、SPA内リンク遷移（`open_target`）・Misskey互換`ap_show`・`LinkResolve`ジョブの3箇所で共有する（挙動不変のリファクタ）。(4) `RichHtml`は既存`<a>`タグ内のリンクだけでなく、地の文中の裸URL・メンション記法も検出してリンク化する（Misskey等がprofile_fields値のメンションを`<a>`化せず生テキストのまま送ってくるケースに対応。既存`<a>`の内側では二重リンクを避けるため裸URL/メンション検出を行わない）。`<a>`のリンクテキストが`@user@host`形状で`href`と食い違う場合（リモート側の実装がメンション表記を誤った形のURLへ組み立てて送ってくることがある）は、`href`よりリンクテキストの解決結果を優先する。(5) プロフィールのキーバリュー項目は、value側だけでなくkey（項目名）側もカスタム絵文字ショートコードを画像展開する。ローカルアクターの絵文字解決対象はbio文のみだったため、key/valueで使われているショートコードも対象に加えた。詳細: `docs/database.md`、`docs/architecture.md` 5節、`docs/protocols.md` 8節、`docs/ui_spec.md` 2.2節
-- [x] **Misskey互換API: アンケート投票が404になる不具合（#252続き）** — `MisskeyNotesPolls.vote`が呼ぶ`POST /api/notes/polls/vote`が未実装だった。既存のカスタムAPI`POST /api/notes/:id/poll-vote`をそのまま呼び出す形で新設し、成功時のレスポンスをMisskey流（204 No Content）に整形。詳細: `docs/protocols.md` 7節
-- [x] **Misskey互換API: プロフィール画面の「リモートユーザーのため、情報が不完全です」バナーが出ない不具合（#252続き）** — Ariaのこのバナー（`user_home.dart`）は`user.uri ?? user.url`で表示要否を判定するが（`github.com/poppingmoon/aria`・`misskey_dart`のソースを確認して特定）、`MisskeyUserDetailed`（`/api/users/show`）にこの2フィールド自体が存在せず常にnull扱いになっていた。`remote_user_uri_url`を追加し、AP優先・無ければBsky`at_did`→bsky.app URLへフォールバック（ローカルは両方null）で組み立てるよう修正。ノート詳細画面側（`note.uri ?? note.url`）の同種バナーは`MisskeyNote.uri`/`.url`が元々実装済みのため対象外（正常動作）。詳細: `docs/protocols.md` 7節
-- [x] **Misskey互換API: リポスト/リプライに埋め込まれた元ノートの本文カスタム絵文字が展開されない不具合（#252）** — `embed_referenced_notes`が使う`fetch_referenced_notes`のSQLに`p.emoji_map`/`a.emoji_map`が含まれておらず、`renote`/`reply`として埋め込まれる元ノートの`emojis`が常に空になっていた（カスタムAPI側の`handlers::notes::queries::embed_renotes`は元々この2列を選択済みで非対称だった）。SELECT列に追加して解消。トップレベルのノート自身（各タイムラインクエリ経由）は元々正しく`emoji_map`を持っていたため、症状はリポスト・返信で埋め込まれた元ノート側の本文絵文字に限定されていた。詳細: `docs/protocols.md` 7節
-- [x] **Misskey互換API: 引用の孫階層埋め込み・未実装機能スタブ・リアクション一覧・統計実数・リスト（#251）** — (1) 「引用ポストへの単純リポスト」でAria上、リポストの中の引用先が「削除されたノート」と誤表示される不具合を修正。`embed_referenced_notes`（`handlers::misskey::convert`）は`renoteId`/`replyId`の参照先を1階層しか埋め込んでおらず、プレーンリポストが1階層を消費してしまうため、リポストされた引用ポスト自身の引用先（孫階層）が`renoteId`あり`renote`なしの状態になり`misskey_dart`（Aria）が「削除されたノート」のプレースホルダーを描画していた。孫階層まで1回だけ追加で埋め込むよう修正（ひ孫は従来通り埋め込まない）。(2) サーバーからのお知らせ・プロフィール画面のハイライト/クリップ/ページ/Play/ギャラリー各タブなど、seiran未実装の機能でAria側がエラー表示になっていた問題に対応し、`POST /api/announcements`・`/api/users/featured-notes`・`/api/users/clips`・`/api/users/pages`・`/api/users/flashs`・`/api/users/gallery/posts`（常に空配列）を追加。(3) プロフィール「リアクション」タブ用に`POST /api/users/reactions`を新設し、対象ノート付きの実際のリアクション一覧を返す。(4) `POST /api/stats`の`notesCount`/`usersCount`（および同値の`originalNotesCount`/`originalUsersCount`）を、退会済みユーザー・削除済みポスト・リモートポストを除外したローカル実数で返すようにした（`instances`・`driveUsage*`は引き続き0固定）。(5) プロフィール「リスト」タブ用に`POST /api/users/lists/list`を実装済みのリスト機能（#63）へ接続し、`userId`指定時はそのユーザーの公開リストのみ、省略時は認証ユーザー自身の全リストを実データで返す（従来は空配列スタブだったが、リスト自体は実装済み機能のため空にしておく理由が無かった）。(6) 一覧から個別のリストを開く画面が404になっていた問題に対応し、投稿一覧用`POST /api/notes/user-list-timeline`（カスタムAPI`GET /api/lists/:id/timeline`と同じロジック）とリスト自体の詳細用`POST /api/users/lists/show`（`MisskeyUsersLists.show`、カスタムAPI`GET /api/lists/:id`と同じロジック）の両方を新設（片方だけでは404が残るため両方必要だった。WebSocketの`userList`チャンネル購読は元々実装済み）。(7) リスト詳細画面のメンバー一覧表示が`MisskeyUsers.showByIds`（`userIds`一括指定）で400になっていた問題に対応し、`POST /api/users/show`が`userIds`指定時は配列（`ActorRepository::find_by_ids`＋`build_users_detailed`で一括解決）、従来通り`userId`/`username`指定時は単一オブジェクトを返すよう拡張。(8) 他のMisskeyサーバーで見ているノート/ユーザーを「ほかのアカウントで開く」機能（`MisskeyAp.show`）が404だった問題に対応し、`POST /api/ap/show`を既存の「開く」機能（`handlers::open_target::resolve_open_target`）を再利用して新設、本家Misskey準拠の`{type, object}`で返す。詳細: `docs/protocols.md` 7節
-- [x] **投稿フォームのBluesky向けカスタム絵文字非対応警告** — Bskyは本文内カスタム絵文字を埋め込めないため、Bluesky配送オン中は本文中の`:shortcode:`を画像展開せず警告色のテキストのまま表示するよう`ComposerEditor`を変更（`federateToBsky`プロパティ）。本文にBluesky配送先の登録済みshortcodeが含まれる間、Bluesky配送ボタンへ⚠️バッジ・警告色の枠線を付け、ツールチップにも通常文言に加えて警告文を1行追加する（判定用に`lib/customEmojis.ts`へ`containsKnownCustomEmojiShortcode`を追加）。Bluesky配送をオフにすると通常どおり画像展開に戻る。詳細: `docs/ui_spec.md` 2.1節
-- [x] **Ariaの通知画面「メンション」「指名」タブAPI互換** — Ariaの通知画面「メンション」「指名」タブが`POST /api/notes/mentions`を呼ぶが未実装で、たまたま`/api/notes/:id`（GET/DELETEのみ）へ`id="mentions"`としてパスマッチし404ではなく405 Method Not Allowedになっていた不具合を修正。同APIを新設し、`PostRepository::mentions_timeline`が`notifications`テーブル（`type IN ('mention', 'reply')`）と`post_recipients`（direct投稿の宛先）の和集合で「メンション」タブを、`post_recipients`（`visibility='direct'`）のみで「指名」タブを構成する。詳細: `docs/protocols.md` 7節「`POST /api/notes/mentions`」
-- [x] **縦に長すぎる投稿の折りたたみ** — NoteCardの本文・添付メディア・URLカード・アンケート・引用ブロックをまとめた1ブロックの実測の縦幅が横幅の62.5%を超える場合、`ResizeObserver`で検知して自動的に折りたたみ、下端にグラデーションのフェードと横長の「全部表示」ボタンを表示する（クリック後は一方向に展開、再度畳むことはできない）。フェード用グラデーションの終端色にカード自身の背景色（`--card-bg`、ライトテーマではtransparent）をそのまま使うと透明同士になり効果が消えるため、実際に描画される不透明な背景色を表す`--card-bg-opaque`を新設した（`frontend/src/index.css`）。詳細: `docs/ui_spec.md`
-- [x] **メッセージ画面のリッチ表示・絵文字リアクション（fedi/local/bsky）** — DMメッセージ本文の表示に、通常投稿（NoteCard）と同じCW開閉・メディア添付・リンクカード・引用カード・アンケート結果を軽量な`MessageContent`で対応（DM作成フォーム自体はCW/アンケート/引用の作成に非対応のままだが、Fedi/Bskyから受信したDMにはこれらが含まれうるため表示のみ対応）。fedi/localのみのメッセージへの絵文字リアクションは通常投稿と同じ`reactions`テーブル（1メッセージ1ユーザー1個まで）をそのまま使い、`MessageReactions`でLINE風（数集計なし、同じ絵文字は個数分並べる）表示、`MessageContextMenu`（右クリック）から`ReactionPicker`と同じ絵文字ピッカーで付与、自分のメッセージのみ削除できる。Fedi配送はDMの存在が第三者に漏れないよう専用の非公開配送ロジック（投稿者+宛先の和集合へfan_out、Public化しない）を新設。Bsky宛メッセージは`chat.bsky.convo.addReaction`/`removeReaction`/`deleteMessageForSelf`仕様（Unicode絵文字限定・1メッセージ最大5個・同一絵文字1個まで、相手側からは削除できず自分の画面のみ非表示）に合わせ、専用テーブル（`dm_bsky_reactions`/`dm_hidden_messages`）・専用API（`POST`/`DELETE /api/dm/messages/:id/reactions[/:content]`、`POST /api/dm/messages/:id/hide`）・専用ジョブ（`Job::BskyDmReactionAdd`/`Remove`/`BskyDmHide`）で対応し、相手発の付与/取消は`bsky_dm_poll`のポーリングで検知する。「削除」ボタンはBsky宛スレッドでは「隠す」表記に切り替わる。詳細: `docs/database.md`、`docs/protocols.md` 9節、`docs/ui_spec.md` 2.5節
-- [x] **プロフィール画面の背景画像（バナー）表示** — `ProfileResponse.banner_url`（縦横比16:5）をアイコンより上に表示し、顔アイコンは背景画像領域内の左下寄りに重ねて配置する。Misskey互換API（`/api/users/show`の`bannerUrl`）でも同じ値を返す。`banner_url`は`avatar_url`と同じ経路（`ActorRepository::upsert_remote_fedi`/`upsert_remote_bsky`、AP Person `image`プロパティ・ATP `getProfile`の`banner`フィールド由来）で同期し、解決も`find_avatar_url`と対になる`find_banner_url`（`banner_media_id`優先、無ければ`banner_url`）で行う。既存アクターの`avatar_url`/`banner_url`はプロフィール表示時にしか更新されない設計だったため、カスタムAPI・Misskey互換API双方のプロフィール表示のたびに`Job::RemoteProfileRefresh`を積んで非同期に再取得する「表示時再検証」パターンを追加した。ローカルユーザーはプロフィール編集画面（`ProfileEditPage`）のアイコン変更ボタンと同じ操作感で背景画像もアップロードでき（`api.media.upload(file, "banner")` → `banner_media_id`）、AP Actor文書・Update(Person)配送の`image`プロパティ、ATP `app.bsky.actor.profile`レコードの`banner`blob参照の両方に反映される。未設定時のフォールバック生成（avatar同様の決定論的画像自動生成）のみ対象外。詳細: `docs/database.md`、`docs/architecture.md`、`docs/protocols.md`、`docs/ui_spec.md` 2.2節・2.7節
-- [x] **ユーザー凍結機能のリモート対応・実効化** — 管理者・モデレーターのユーザー凍結がローカルユーザーにしか使えず（通報画面の`suspend_subject`が`REMOTE_USER_CANNOT_BE_SUSPENDED`で拒否）、しかも実効性がほぼ無かった（ログイン・投稿・タイムライン表示のどこも`suspended_at`を参照せずプロフィールのバッジ表示のみ）問題に対応。凍結状態を`users.suspended_at`から`actors.suspended_at`へ一本化し、ローカル・リモート（AP/ATP問わず）共通のenforcementにした。ローカル: `extract_auth`がログイン以外の全APIを`ACCOUNT_SUSPENDED`で拒否し（`GET /api/auth/me`のみ例外）、フロントは凍結中なら他の全ルートをバイパスして「あなたは凍結されています」＋ユーザー名＋ログアウトボタンのみの専用画面（`SuspendedAccountPage`）を表示する。リモート: AP inboxが署名者の凍結状態を見て署名付きアクセス自体を403拒否し、`inbound_activity_process::handle`がFollow/Create/Like/EmojiReact/Announceの新規アクティビティを非格納で破棄、ATP firehoseも新規レコードの取り込みを抑止する。表示面は`actor_is_hidden_for_viewer`（SQL関数）に凍結判定を追加することでタイムライン・通知・リアクション一覧・ハッシュタグ検索・フォロー一覧から横断的に除外し、引用・リポスト・返信先の参照埋め込みは`NoteResponse.author_suspended`をもとにフロントが「凍結されたユーザーのポストです」へ本文を差し替える（パーマリンク直アクセスは常に実データを見せる）。管理画面に admin/moderator 共通の「凍結済みユーザー」タブを追加し、ローカル・リモート混在の一覧表示・凍結解除ができる。詳細: `docs/database.md`「`actors.suspended_at`」、`docs/protocols.md`「HTTP Signatures 検証」・「Jetstream 経由の取り込み」、`docs/ui_spec.md` 2.2h節・2.8節・2.9節
-- [x] **投稿フォームの絵文字ショートコード・ユーザーID挿入ボタン** — 投稿本文の操作ボタン列に、既存の絵文字ピッカー（`EmojiPickerPanel`）で選んだ絵文字（Unicode絵文字はそのまま、カスタム絵文字は`:shortcode:`）を本文のカーソル位置へ挿入する😀ボタンと、アクター検索（`api.actors.search`、リスト編集画面のメンバー追加ボックスと同じAPI・UI）で選んだユーザーIDを`@target`形式で挿入する@ボタンを追加した。カーソルが既存のショートコード/メンションの内側にある場合はその直後へ挿入し、挿入直後に半角英数字が続く場合はショートコード/メンションとして認識されなくなるのを避けるため半角スペースを1つ補う（`ComposerEditor.resolveInsertion`、`DECORATION_RE`の右端境界規則と同じ判定を再利用）。詳細: `docs/ui_spec.md` 2.4b節
-- [x] **反応アクティビティの配送先拡張（#235）** — 絵文字リアクション・返信・引用・リポスト（およびそれらのUndo）のFediverse配送先が、これまでreactor本人のFediフォロワーのみだった問題に対応。対象ポスト（絵文字リアクションはリアクション対象そのもの、返信/引用は`reply_to_post_id`/`quote_of_post_id`、リポストは`repost_of_post_id`の参照先）を巡る「会話の参加者」— 対象ポストの受信者（投稿者自身とそのフォロワー）、対象ポストへの子ポスト（リポストラッパー・返信・引用）がある場合はその投稿者自身とそのフォロワー、対象ポストに付いている絵文字リアクションのreactor — の inbox も配送先に加える共通関数`resolve_conversation_broadcast_inboxes`を新設し、リアクション・Announce・Create(Note)のリプライ/引用配送それぞれから利用する。DMは対象外。詳細: `docs/protocols.md` 2節「配送」
-- [x] **リモートアンケートの生存監視** — `posts.poll`が取り込み時点のスナップショットのまま以後の投票増加を反映していなかった問題に対応。`Update(Question)`アクティビティ（記事本文再編集のUpdateは別件のため非対応のまま）を受理する経路（`jobs::inbound_activity_process::update::handle_update`、`Delete`と同じなりすまし対策）を新設し、票数更新のpushに追従できるようにした。加えて`Update(Question)`を送ってこない実装への保険として、`posts.poll_update_received`/`poll_fetched_at`の2列を追加し、投稿を表示用に読み込む経路（`handlers::notes::queries::enqueue_stale_poll_fetches`、renote/quote越しも含む）が「pollを持つ・リモート投稿・未Update」な投稿ごとにしきい値（締切前は10分周期、締切後は締切後まだ一度も取得できていなければ1回だけ、締切済みでも一律除外はしない）を計算して`Job::PollFetch`を積む形でフォールバック再取得する。どちらの経路も既存の`pollUpdated` WebSocketイベント（`broadcast_poll_update`）で反映するため、フロントエンドは無改修。詳細: `docs/protocols.md` 3節「アンケート」内「リモートアンケートの生存監視」、`docs/database.md`
-- [x] **XRPCエンドポイントのCORS復旧** — 2026-08-29のCORS制限強化（SEC-2、`FRONTEND_ORIGIN`＋自ドメインのみ許可）が`/xrpc/*`・`/.well-known/*`にも一律適用され、bsky.app等の外部ATクライアントがブラウザから直接叩けなくなっていた（ログイン画面で「サービスに接続できません」）。CORSの`allow_origin`predicateにパス判定を追加し、`/xrpc/`・`/.well-known/`は無条件で許可、`/api/*`は引き続き制限する。詳細: `docs/protocols.md` 3節
-- [x] **リプライ/引用/リポスト参照の未取り込み表示・その場取り込み（#230-234）** — リモート投稿受信時、リプライ/引用/リポスト参照先がDBに無ければ1段階だけフェッチを試みる（`jobs::inbound_activity_process::reference::resolve_reference`）。404/410なら`gone`（リトライしない）、それ以外の失敗なら`pending`（再試行余地あり）として`posts`に記録し（`{reply_to,quote_of,repost_of}_ap_uri`/`_ref_status`、ENUM `post_reference_status`）、リポストは対象取得に失敗しても箱（wrapper post行）自体は必ず保存するようにした（従来はサイレントに無かったことにしていた）。「開く」機能はMisskeyの素リノート（他鯖ミラーURL・`/activity`直叩きで得られる`Announce`）を通常投稿でなく正しくリポストラッパーとして取り込む（`open_target::open_announce`）。`pending`な参照は投稿詳細取得時（`GET /api/notes/:id`、最大1秒×3種並行）に自動で再解決を試み、`POST /api/notes/:id/resolve-reference`（`kind: reply|quote|repost`、最大8秒）でも明示的に取り込める。NoteCard上には`PendingReferenceIndicator`が「未取り込み」＋取り込むボタン（`pending`）または案内のみ（`gone`）を表示する。詳細: `docs/protocols.md` 1節「pending参照の遅延解決」・4節「引用受信」、`docs/database.md`、`docs/ui_spec.md` 2.2g節
-- [x] **リポストラッパーの日時欠落・Authorized Fetch全面対応（#234続き）** — 2点のバグ修正。(1) リポストラッパーのNoteCardで、元投稿が非公開/pending/goneのいずれかで埋め込み表示できないケースだけrail（🔁+リポストした人+日時）から日時リンクが欠落し、リポストラッパー自身の詳細画面へ遷移できなくなっていた（`ui_spec.md`の仕様上は常に表示するはずだった）。3分岐（正常/非公開/pending・gone）で個別に組み立てていたrailを`RepostRail`コンポーネントへ共通化し解消。(2) `ApClient`の全GET系メソッド（`fetch_object`/`fetch_actor`/コレクション・outbox取得/受信のHTTP Signature検証における公開鍵取得）が常に未署名だったため、MastodonのAuthorized Fetch（`AUTHORIZED_FETCH=true`）を有効にしたインスタンス（例: songbird.cloud）との間で、参照解決・フォロー・プロフィール表示・**受信検証そのもの**まで軒並み401で失敗し続けていた。GET用HTTP Signatures（`ApClient::signed_get`、署名鍵はlist-relayプロキシアクターを流用）を実装し、参照解決・送信元アクター解決・フォロー実行・ターゲット解決・フォロー一覧同期・メンション先inbox解決・過去ログ/featured取得・Move/alsoKnownAs検証・受信署名検証の全経路に適用。実機（songbird.cloud）でフォロー実行→Accept受信までの往復を確認済み。詳細: `docs/protocols.md`「署名付きGET（Authorized Fetch対応）」節
-- [x] **表示言語のバリエーション（中国語の繁體/简体分割）** — 表示言語設定（`users.language_preference`）に、1言語内で複数のバリエーションを持てる仕組みを追加。第一弾として中国語を繁體中文（`zh-Hant`）/简体中文（`zh-Hans`）の2つに分割し、`seiran_common::SUPPORTED_DISPLAY_LANGUAGES`（8言語）で許可する。ポスト言語（`posts.language`、`seiran_common::SUPPORTED_LANGUAGES`）は7言語のまま据え置き、`zh-Hant`/`zh-Hans`のどちらを表示言語に選んでいても投稿フォームの言語選択デフォルトは`zh`になる（`i18n.postLanguageBase()`）。「自動」判定は`navigator.languages`の地域コード（`zh-TW`/`zh-HK`/`zh-MO`→繁體、それ以外の`zh`系→简体）で振り分ける（`i18n.normalizeDetectedLanguage()`）。詳細: `docs/architecture.md`（i18n節）、`docs/ui_spec.md`（表示設定節）、`docs/database.md`、`docs/protocols.md` 3節
-- [x] **ポストの言語プロパティ** — 投稿フォームのFedi/Bluesky配送トグルの左隣に、正方形の言語選択ボタン（`JA`のような2文字コード表示）を追加。クリックすると表示言語設定と同じ7言語（`JA 日本語`のように2文字コード＋ネイティブ表記併記）のポップアップリストから選べる。初期値は現在の表示言語で、Fedi/Bsky配送先トグルのような「最後に送信した値」記憶方式ではなく毎回現在の表示言語に戻る。バックエンドは`CreateNoteRequest.language`（表示言語設定と共通の`seiran_common::SUPPORTED_LANGUAGES`で検証）を`posts.language`に保存し、Bsky配送時のみ`app.bsky.feed.post`の`langs`フィールド（1言語）へ反映する（AP配送には影響しない）。省略時（Misskey互換APIクライアント等）は従来通り`langs`フィールド自体を省略する。詳細: `docs/protocols.md` 3節「ポストの言語」、`docs/ui_spec.md` 2.4b節、`docs/database.md`
-- [x] **フォローインポート機能** — 設定画面「🚚 インポート・エクスポート」から、改行区切りのID一覧を貼り付け（または`.txt`ファイルのドラッグ&ドロップ）で一括フォローできる。隠し仕様として各行をカンマ区切りで分割し1列目のみを識別子として読む（Misskeyのフォローエクスポート形式`id,withRepliesフラグ`のヘッダ無しCSVにそのまま対応）。処理は「未処理が1件あれば処理して自分自身を再度キューに積む」自己再enqueue型ジョブ（`Job::FollowImportProcess`）で非同期に行い、設定画面には残数・成功/失敗件数を表示、キャンセルボタンを設置。既存のフォローレート制限（24時間あたりの上限）は通常のフォローと合算でそのまま適用する。フォロー作成の実処理は`AppState`非依存の`seiran-common::follow_exec::execute_follow`へ切り出し、APIハンドラ（`create_follow`）とジョブの両方から共有する形にリファクタした。詳細: `docs/architecture.md` 5節、`docs/database.md`
-- [x] **プロフィールの「別のアカウント」機能（alsoKnownAs）** — AP Moveの`alsoKnownAs`の語彙を、引っ越し検証とは独立にプロフィール表示・相互検証用途へ転用。ローカルユーザーはプロフィール編集画面（リストのメンバー追加UIを流用）から複数のbsky/fedi/seiranアカウントを登録でき、プロフィール表示画面に「別のアカウント」としてアイコン付きで一覧表示する。リモートFediアクターのプロフィールでも、本人のAP actor文書が公開する`alsoKnownAs`自己申告を`Job::RemoteAlsoKnownAsSync`が取り込み同じ見た目で表示する。相手側（fedi/ローカルのみ、bskyは対象外）も逆向きにこちらを指定していれば✅バッジで相互検証済みと分かる。検証結果は表示のたびに積む非同期ジョブ（`Job::AlsoKnownAsVerify`）でキャッシュ更新する「表示時再検証」パターンの最初の実例（`docs/architecture.md`参照、今後の他機能でも再利用予定）。ローカルユーザー自身のAP actor文書（`GET /users/:username`）にも登録済みアカウントを自己申告として公開する。詳細: `docs/protocols.md` 2節「プロフィールの『別のアカウント』（alsoKnownAs）」、`docs/database.md`、`docs/ui_spec.md`
-- [x] **ActivityPub Move（アカウント引っ越し）受信対応・第1段階** — 他サーバーからの`Move`アクティビティ受信のみ対応（送信側=自分のアカウントを引っ越す操作は未実装）。移転先アクター文書の`alsoKnownAs`が移転元URIを含むことを確認できた場合のみ処理する（なりすまし対策）。移転元をフォロー中/フォロー申請中だったローカルアクター（実ユーザー・リスト機能の`list-relay`プロキシアクターの双方）を移転先へ付け替え、対象がリストのメンバーだった場合はリストメンバーシップも移転先へ差し替える。実ユーザーには結果に応じて`moveRefollowed`（フォローし直した）/`moveAlreadyFollowing`（既にフォロー済みだった）というMisskey APIに無い独自拡張の通知を送る。詳細: `docs/protocols.md` 2節「アカウント引っ越し（Move）の受信」・8節、`docs/database.md`
-- [x] **CW（閲覧注意）機能（#229）** — 投稿フォームにCWトグルを追加し、ONにするとCWガイド文
-  入力欄（100書記素まで）が現れる。バックエンドは`CreateNoteRequest.content_warning`
-  （Misskey本家`cw`パラメータもエイリアス）を受理し`posts.content_warning`（Fedi受信CW用の
-  既存カラムと同じ）を構築、AP配送では`Create(Note)`の`summary`フィールドとしてそのまま
-  送信する（本文・添付・アンケート・引用は通常通り配送、Fedi側クライアントが`summary`の
-  有無でCW UIを出し分ける）。BskyにはCW/隠しコンテンツの概念が無いため、CWが設定された
-  投稿はBsky embed選択（#227/#228）の候補選択・引用embedを一切行わず、常に「投稿詳細ページ
-  URL＋`#open_cw`ハッシュ」1件だけを、`title`固定文字列`"Open"`・description/thumb無しの
-  リンクカードとして添付する（本文＝投稿本文ではなくCWガイド文に差し替える）。そのため
-  フロントエンドはCWが有効な間、Bsky embed選択のラジオボタンリスト自体を表示しない
-  （画像/GIF/動画/URL/アンケートの添付・作成自体は妨げない）。DM（`visibility=="direct"`）
-  ではCW作成を禁止する。詳細: `docs/protocols.md` 3節「CW」、`docs/ui_spec.md` 2.4b節、
-  `docs/database.md`
+機能を完了したら該当項目に `[x]` を入れ、コード変更と同じコミットに含める。完了項目は1行の概要と参照先だけを書き、仕様の詳細は設計文書に置く。
 
-- [x] **アンケート機能（#228）** — Fediverse仕様のアンケート（選択肢2〜10件・単一/複数選択・期限なし/日時指定/経過時間）を投稿フォームに追加した。バックエンドは`CreateNoteRequest.poll`（選択肢・複数選択可否・期限）を受理し`posts.poll`（Fedi受信Question用の既存カラムと同じ形）を構築、AP配送では`build_create_note_activity`が`Question`型（`oneOf`/`anyOf`・`endTime`）として送信する（リモートからの投票受信は既存の`handle_poll_vote`がローカル/リモート問わず汎用的に処理するため追加実装不要）。Bskyには投票概念が無いため、アンケート付きポストはBsky embed選択（#227）の新候補`Poll`（常に最優先）として、投稿自身の詳細ページURLを選択肢名だけのプレーンテキスト箇条書き（HTMLタグ・得票バー無し、投稿の言語が決定できないため見出し文も無し）をdescriptionにしたリンクカードで添付する。投票UI・集計は既存の`poll_votes`・投票API・`NoteCard`表示がそのまま動く。`NoteCard`のアンケート表示には「結果を見る」ボタンの右隣に期限までの残り時間（1分未満は秒単位、1分以上1時間未満は分単位、1時間以上1日未満は「時間+分」、1日以上は「日+時間+分」、1秒ごとにカウントダウン）も追加し、購読者が1人以上いる間だけ`setInterval`を1本に集約する共有タイマーストア（`stores/secondTicker`、`useSyncExternalStore`）に`PollCountdown`コンポーネント単体が購読することで実現した（`NoteCard`全体は再描画されない）。詳細: `docs/protocols.md` 3節「アンケート」、`docs/ui_spec.md` 2.4b節・アンケート節、`docs/database.md`
-  - [x] **【実機で発覚】ATP経由でのみ受信したアンケート付き投稿に、アンケート自身のBsky代替表現を本物のリンクカードとして誤って重ね表示**: 他seiranサーバー間連合（#237）で、AP側の`Create`がまだ届かずATP（Jetstream）経由のみで届いたアンケート付き投稿（`seiranPost.linkCards[]`は空）で発生。`firehose.rs::insert_or_merge_bsky_post_once`の「`seiranPost.linkCards[]`が空ならATPレコード本体の`app.bsky.embed.external`をそのまま`post_link_cards`へ保存する」フォールバックが、アンケートのBsky向け自己URLリンクカード（`resolve_poll_embed`が生成する、選択肢名だけの箇条書きを持つ自分自身を指す`external` embed）まで本物のリンクカードとして拾ってしまい、アンケートウィジェットと同じ選択肢が書かれた冗長なカードが並んで表示されていた（AP受信側`note_save.rs`はこのフォールバックが本文中URL抽出方式のため元々発生しない）。`poll`が設定されている投稿ではこのフォールバックを行わないよう修正し、該当する既存データ（`posts.poll`とリンクカードのdescriptionが完全一致する1件）を削除して解消した
-  - [x] **【実機で発覚】Misskey互換API（Aria等）のタイムラインでアンケート付き投稿がアンケート無し扱いになる**: `MisskeyNote`（`handlers::misskey::types`）にそもそも`poll`フィールドが存在せず、Fedi（Misskey本家）から受信したアンケート付き投稿を含め、`/api/notes/*`系エンドポイント全てでアンケートが一切表示されなかった（seiran独自APIの`NoteResponse.poll`は元々対応済みで、Misskey互換レイヤーだけ未実装だった）。`posts.poll`を本家`Poll`エンティティ（`{expiresAt, multiple, choices:[{isVoted,text,votes}]}`）へ変換する`to_misskey_poll`を追加し配線した。詳細: `docs/protocols.md` 7節「`MisskeyNote.poll`」
-
-- [x] **ローカルポストへの添付物の体系整理（#227）** — 投稿フォームで複数ファイル添付（最大10件、画像/アニメGIF/動画/音声混在可）に対応し、Bluesky配送がONかつ添付候補（静止画グループ・アニメGIF・動画/音声・本文中URL）が2種類以上ある場合に、どれをBsky embedにするか選ぶラジオボタンリストを本文欄の下に表示する。バックエンドは`CreateNoteRequest.bsky_embed_choice`（`Images`/`Attachment{id}`/`Url{url}`）で選択を受け取り、`resolve_bsky_embed`（`crates/seiran-api/src/handlers/notes/delivery.rs`）が省略時は固定優先順位（静止画→アニメGIF→動画/音声→本文URL、いずれも先頭優先）で自動選択する。URL選択時は選択URLのOGPを同期取得してBsky embedを組み立てると同時に`post_link_cards`へ保存し、seiranローカルの表示にも同じURLカードを反映する。動画/音声添付を選択（または自動選択）した場合のBskyパイプライン結合待ちは、対象1件のみを追う`Job::BskyPostCommitDeferred`に簡素化。あわせて`media_files.is_animated_image`を新設し、ローカルアップロードの静止画とアニメGIFを判別できるようにした。ラジオボタンリストが表示されない場合（Bluesky配送オフ、またはCW有効中）でも本文中にURLがあれば、代わりにチェックボックスリスト（`CreateNoteRequest.link_card_urls`、複数選択可）でURLリンクカードを添付できる。チェックボックスリストからラジオボタンリストへ表示が切り替わった瞬間、チェック済みURLのうち最もインデックスの小さいものがラジオボタンリストの選択へ引き継がれる。詳細: `docs/protocols.md` 3節「Bsky embed選択」、`docs/ui_spec.md` 2.4b節、`docs/database.md`
-- [x] **ATP標準クライアントからの投稿作成・削除（`com.atproto.repo.createRecord`/`deleteRecord`等でのapp.bsky.feed.post対応）** — bsky.app等のATP標準クライアントから直接投稿・削除できるようにした（従来は専用エラーで一律拒否していた）。`createRecord`/`putRecord`/`applyWrites`が`app.bsky.feed.post`を受けた場合、`post_from_record::create_post_from_record`がレコード（text/facets/embed/reply）を`posts`テーブルへ変換し、Jetstream受信と共通化した`facets`/`embed`解析ロジックでリンク・メンション・画像・動画・引用・リプライを復元、ハッシュタグ抽出・通知・Fedi配送（`ApDeliveryKind::PostToFollowers`）まで行った上でクライアント提供のレコードをそのままATPリポジトリへコミットする。`deleteRecord`/`applyWrites#delete`は`post_from_record::delete_post_by_rkey`が`handlers::notes::delete_note`と同じ論理削除・Fedi Delete配送・ATPリポジトリ削除を行う。あわせて`uploadBlob`を拡張し、Bsky公式動画パイプラインのコールバック専用（サービス間認証JWT）だった認証を、通常のユーザーセッションJWTでも受け付けるようにした（従来は標準クライアントが画像・動画を添付しようとすると`uploadBlob`自体が失敗していた）。詳細: `docs/protocols.md` 8節
-- [x] **フォロー中Bskyユーザーによるリモート投稿へのリポストをタイムラインへ反映** — Jetstreamの`app.bsky.feed.repost`受信時、AP `Announce`受信と対称にリポストをタイムライン投稿として`posts`へ保存するようになった（従来はローカル投稿宛の通知作成のみで、フォロー中Bskyユーザーが他のリモート投稿をリポストしてもタイムラインに現れなかった）。リポスト対象が未取り込みなら`app.bsky.feed.getPosts`でAppViewから直接フェッチする。あわせて、この直接フェッチ経路（`fetch_single_bsky_post`/`upsert_bsky_post`、検索結果保存・ピン留め投稿同期・「開く」機能とも共用）でも`record.embed`から画像・動画・GIF・URLカードを復元するようにした（従来は本文のみでBsky側の添付が欠落していた）。embed解析ロジックはJetstream通常投稿取り込みと共通化し`seiran-common::atp::embed`に集約。詳細: `docs/protocols.md` 8節
-- [x] **NoteCardリモートサーバー表示・長いニックネームのはみ出し修正** — NoteCardヘッダーを表示名+日付／アカウントID+リモートサーバー表示の2行構成へ再編し、長いニックネームがカード右端・投稿日付にはみ出す不具合（`.userContainer`の`min-width:0`欠落が原因）を修正。あわせて`body`（`html`側は触らない）に`overflow-x: hidden`を設定し、はみ出しがモバイルのフローティングボタン位置をずらす連鎖を防止。Fedi/Bskyのリモート投稿には、アカウントID行の右にサーバーアイコン＋サーバー名称（Bskyは固定表示、Fediは`remote_instance_meta`のnodeinfoキャッシュ由来）を背景色付きで表示する新UIを追加し、ローカル投稿の配送先バッジもBsky分は🦋絵文字からBlueskyロゴSVGに変更。バックエンドはMisskey API `UserLite.instance`準拠の`instance`フィールド（`themeColor`/`iconUrl`含む）をnotes API・Misskey互換APIの両方に追加し、リモートインスタンスのnodeinfo・サーバーアイコン（`<link rel="icon">`/`/favicon.ico`）を`RemoteInstanceInfoResolve`ジョブでベストエフォート取得・キャッシュする。既存の全リモートドメインを起動時に一括バックフィルし、新規デプロイ直後の大量未解決状態を素早く解消する。詳細: `docs/database.md`、`docs/architecture.md`、`docs/protocols.md`、`docs/ui_spec.md`
-
-- [x] **Unicode絵文字のtwemoji統一表示** OS/ブラウザごとにグリフが異なるUnicode絵文字（本文・表示名・リアクション・絵文字ピッカー・装飾アイコン等）を、jdecked/twemojiのSVGをセルフホストして統一表示。詳細: `docs/ui_spec.md`「Unicode絵文字の表示（twemoji）」節
-
-- [x] **iPhoneのフォーム自動ズーム防止（#208）** `ComposerEditor`をはじめ、絵文字ピッカー検索欄・認証フォーム・DM・設定画面・管理画面など全ての`input`/`textarea`/`select`の実入力文字サイズを16pxに固定し、iOS Safariのフォーカス時自動拡大を防止。
-
-- [x] **Blueskyリポスト・引用通知（#206）** Jetstreamで `app.bsky.feed.repost` を購読し、ローカル投稿へのリポストを通知する。取り込み対象のBsky投稿がローカル投稿を引用した場合も引用通知を生成する。詳細: `docs/protocols.md` 8節
-
-- [x] **フォロー承認待ちの解除（#204）** プロフィールの承認待ち表示横とNoteCardのフォロー状態スイッチから、承認前のフォローリクエストを解除できる。
-
-- [x] **スマホ下部フローティングナビへ「ホーム」ボタン追加（#180）** — メニュー・検索・通知・ホーム・投稿の順（ホームは投稿の左隣）で並ぶよう、モバイル幅（`max-width: 768px`）でのフローティングボタン群に🏠ボタンを追加し、タップで`/`へ遷移する。
-- [x] **スマホ下部フローティングナビの狭幅崩れ修正** — 5個のボタンをそれぞれ独立した`position: fixed`（px絶対値＋%相対値混在）で配置していたため、画面幅が狭いと隣接ボタン同士が重なり、投稿ボタンが視覚的に隠れる不具合があった。5個を1つの`position: fixed`コンテナにまとめ、flexboxの`justify-content: space-between`で均等配置する方式に変更し、画面幅にかかわらず重なり・はみ出しが起きないようにした。
-- [x] **絵文字管理者ロール `emoji-editor` を追加（#179）** — `user_role` ENUM に `emoji-editor` を追加（権限の強さ: admin > moderator > emoji-editor > user）。絵文字管理権限を `moderator` にも付与し、管理画面のトピック別アクセス制御（`frontend/src/lib/roles.ts` の `getAdminTopics`）を導入して、権限のないトピックはタブごと非表示にする。`moderator` は調停者として「通報」（凍結・投稿削除・連合転送を含む）と「絵文字」タブに、`emoji-editor` は「絵文字」タブのみアクセス可能。バックエンドは `require_admin`（admin専用）・`require_emoji_admin`（admin/moderator/emoji-editor、絵文字系管理API全8箇所に適用）・`require_report_moderator`（admin/moderator、通報系管理APIに適用）を分離。詳細: `docs/database.md`
-- [x] **プロフィールBioのカスタム絵文字展開（#169）** — ノート本文・表示名と同様、プロフィールの自己紹介文（bio）中の`:shortcode:`を画像に展開する。ローカルアクターは`custom_emojis`照合、リモートFediアクターはAP `tag`由来の`actors.emoji_map`を使用し、Bskyアクターは展開しない。詳細: `docs/ui_spec.md` 2.2節
-- [x] **URL・ユーザーIDから「開く」（#165）** — bsky.app/ActivityPub URL、AT URI、`@`ユーザーID、`did:plc:` DIDを解決・必要時取り込みして詳細画面へ遷移する。QR連続認識と2秒間隔のOCRも提供する。
-
-- [x] **Ariaのハッシュタグ投稿一覧API互換（#158）** `POST /api/notes/search-by-tag`を追加し、既存の専用ハッシュタイムラインをMisskey形式で返す。
-- [x] **投稿検索へのBluesky AppView統合（#146）** AppViewの未知actor/postをDBへ保存してローカル検索結果とブレンドし、`until_id`の時刻指定とDB-onlyの`since_id`ページングに対応する。稼働AppViewホストへの接続、検索結果アバター、Misskey互換POST検索、モバイル検索ボタンも含む。
-- [x] **Ariaのカスタム絵文字API検出互換（#145）** `POST /api/endpoints`で`emojis`を含む実装済みMisskey API一覧を返し、既存の`POST /api/emojis`へ誘導する。
-- [x] **リレー経由Fedi投稿の本文カスタム絵文字補完（#148）** Create/Announce双方の埋め込みNoteで未知のEmoji tagが欠落していても、本文に未解決shortcodeがある場合だけcanonical Noteを取得し、`emoji_map`とリモート絵文字カタログを補完する。Announce経由で未登録の元ポストをフェッチする経路（`fetch_and_save_note`）も、絵文字・可視性・引用・リプライ・CW/投票・ハッシュタグ・添付ファイルをCreate受信と同じロジックで処理する。
-
-進捗管理用のチェックリスト。完了済みフェーズは概要のみ、未完了項目は詳細に残す。
-機能追加を完了したら該当箇所に `[x]` を入れ、コードの変更と同じコミットに含めること（`/home/yuba/seiran/CLAUDE.md` 参照）。
-
-- [x] **タイムライン可視性のおさらい（#105）** — HTL/STLでは自分・フォロー中のひかえめ/プライベート投稿を表示し、LTL/GTLでは投稿者本人のものも含めて両方を完全に除外。バックエンドSQL、フロントエンド最終防御、ユニット/E2Eで固定。
-
-## 完了済みフェーズ（概要）
-
-- [x] **CWガイド文のカスタム絵文字展開（#201）** — 通常投稿カード・引用カードのCW警告文中にある`:shortcode:`を、投稿の絵文字マップで画像へ展開する。
-- [x] **MitraのURI形式Follow承認に対応（#200）** — `Accept.object` が埋め込みオブジェクトではなくFollow ActivityのURI文字列でも、送信元・送信先actor ID入りのActivity IDから対象関係を復元し、承認actorを検証してフォロー待機状態を解消する。
-
-- [x] **統一通報機能（#107）** — ローカル・Fedi・Bskyの投稿/ユーザー通報、管理台帳・内部コメント・対処、ActivityPub Flag / Bluesky Moderation Service転送。
-- [x] **国際化の言語追加（#138）** — 日本語・英語に加えて中国語・韓国語・スペイン語・ドイツ語・フランス語へ対応。フロントエンドの日本語ハードコードを翻訳キーへ移し、全言語のキーと補間変数の一致を自動検証する。
-- [x] **リモートFedi actor・投稿の重複修復（#139）** — 破損したUNIQUE indexが同じAP URIのactor・投稿を複数行へ分裂させ、プロフィール/HTLから新着が欠落していたデータを、全外部キーと複合UNIQUEの意味を保ってcanonical IDへ統合し、indexを再構築するマイグレーションを追加。
-
-- [x] **フェーズ1: DBスキーマ ＆ 統一ID採番** — `posts`/`actors`/`follows` 等の統一エンティティ設計、Snowflake ID採番エンジン。詳細: `docs/database.md`
-- [x] **フェーズ2: ローカル認証 ＆ MiAuth互換** — Argon2+JWT、MiAuth、メール確認・パスワードリセット、`secrets.toml` 自動生成。詳細: `docs/architecture.md` 4節
-- [x] **フェーズ3: ジョブキュー ＆ 統合バイナリ化** — `JobQueue` trait、InMemory/Redis切替、`seiran-server` の `--role` 分割。詳細: `docs/architecture.md` 3・5節
-- [x] **フェーズ4: マルチプロトコル通信エンジン** — AP/ATP双方向フェデレーション、クロスプロトコル配送（リポスト・引用・リプライ）、リアクション相互配送。詳細: `docs/protocols.md`
-- [x] **フェーズ4.5: フロントエンドMVP** — React+Vite+TypeScript初期版、ローカル/ホームタイムライン、投稿・フォロー・プロフィールの基本画面
-- [x] **フェーズ4.6: メディア・管理機能** — S3互換オブジェクトストレージ統合、画像/動画/音声アップロード、管理画面（ユーザー・絵文字・ストレージ設定）
-- [x] **フェーズ5: 重複排除・マージエンジン** — ループバック/他seiran間/一般ブリッジの3シナリオ対応。詳細: `docs/protocols.md` 5節
-- [x] **フェーズ6: 検索セッション管理** — `SearchSession`、ブレンドアルゴリズム（InMemory実装のみ）。詳細: `docs/architecture.md` 6節
-- [x] **フェーズ7: 3ペインUI ＆ Misskey API互換** — 3ペインレイアウト、リアクション・通知・ピン留め・リスト機能、Misskey互換エンドポイント一式。詳細: `docs/ui_spec.md`, `docs/protocols.md` 6節
-- [x] **フェーズ7.5: フロントエンド国際化 ＆ エラーメッセージ改善** — react-i18next導入（英語/日本語、ブラウザ言語設定への自動追従）、バックエンドエラーコード全種の日英メッセージ化、トースト通知、401時の自動ログアウト＋ログイン画面誘導。詳細: `docs/architecture.md` 8節
-- [x] **フェーズ7.6: 本文中のリンク・メンションのクリック可能化** — Bsky facet（`#link`/`#mention`）・AP `<a href>` を内部リンクマーカー`[text](url)`としてMisskey API互換の`text`に埋め込み、フロント`RichText`コンポーネントでMarkdownリンク・生URL・`@mention`をクリック可能な要素へ変換。Bskyメンションはハンドル可変性に対応するため表示時に都度DID解決する。送信側（seiranユーザー投稿→Fedi/Bsky配送）もローカル/Bskyハンドル/Fediverse形式すべてのメンションでfacet・AP `tag[]`+アンカーを付与し、Bsky配信時は変換後テキストの文字数上限（300書記素/3000バイト）を投稿受理前に同期検証する。詳細: `docs/protocols.md` 6節
-- [x] **フェーズ7.7: 投稿詳細・プロフィールページのOGP対応** — SPAの素のindex.htmlには`<meta>`が無いため、`/notes/:id`・`/@:handle`（AP Accept除く）は常にバックエンド（`seiran-api`）がSPAのindex.htmlを取得してOGP `<meta>` + Twitter Cardを注入して返す（bot判定は行わず未知のクローラーにも対応、投稿/アクター未発見時は`<meta>`無しでSPAをそのまま返す）。詳細: `docs/architecture.md` 8.1節
-- [x] **フェーズ7.8: ハッシュタグ機能** — `hashtags`/`post_hashtags`/`pinned_hashtags` によるポスト⇔タグのm:n永続化。ローカル投稿・AP受信・Bsky受信いずれも最終的な `posts.body` から共通のスキャン（`seiran_common::hashtag::extract_hashtags`）で抽出するため、出自を問わず同じハッシュタイムライン（`/tags/:name`）に合流する。ハッシュタイムライン画面から「ホーム画面に追加」（`pinned_hashtags`、ホームのフィードタブ化）・「このハッシュタグでポスト」（`ComposerContext.openCompose` によるプリフィル投稿ダイアログ）。送信側（ローカル投稿→Bsky/AP配送）も `app.bsky.richtext.facet#tag`・AP `{"type":"Hashtag"}` タグ（自インスタンスの `/tags/:name` へのアンカー）を付与し、他クライアント上でも本物のハッシュタグとして認識される。受信側はMastodon等がハッシュタグアンカーにも`class="mention hashtag"`を付与する（メンションと`mention`トークンを共有する）ケースを`rel="tag"`で判別し誤ってメンション扱いしないようにする回帰修正込み。詳細: `docs/database.md`、`docs/protocols.md` 6節
-- [x] **フェーズ7.9: ダイレクトメッセージ機能** — `visibility='direct'`投稿を`posts`にそのまま格納し宛先（`post_recipients`）・スレッド起点伝播コピー（`thread_root_post_id`）・既読状態（`dm_read_states`）で管理。Fedi宛先は宛先個人のみへのAP配送、Bsky宛先は`chat.bsky.convo`（自己署名サービス認証JWT、送信は`Job::BskyDmSend`、受信は`seiran-atp-repo::bsky_dm_poll`の定期ポーリング）。Bsky宛先は1対1のみ・文字数上限1000書記素・メディア添付不可。フロントエンドは`MessagesPage`（右ペイン=セッション一覧、中央ペイン=時刻順メッセージ履歴+送信フォーム）、`RecipientPicker`（宛先chip入力）、左ペイン未読バッジ。詳細: `docs/database.md`、`docs/protocols.md` 9節、`docs/ui_spec.md` 2.5節
-- [x] **フェーズ7.10: ブロック・ミュート機能** — プロフィール画面に対ユーザー操作メニュー（`ActionsMenu`、フォロー中/フォロー・ミュート・ブロックを統合、フォローは独立ボタンも併設）を新設。ブロックはBsky準拠の定義（フォロー関係強制解除＋相互完全非表示）を採用し、相手がBskyなら`app.bsky.graph.block`コミット、相手がFediならAP `Block`配送。タイムライン・通知の相互非表示・プロフィール本文/key-valueの非表示はSQL関数`actor_is_hidden_for_viewer`と`is_blocked_by`判定に集約、フォロー・リプライ・リアクション・引用投稿・リポスト・DM送信の書き込みもAPIレベルで拒否する。相手発ブロック（Fedi/Bskyリモートユーザーが自分をブロックした場合）も検知して同じ制限を対称に働かせる：Fedi側はAP `Block`受信時に記録、Bsky側は`app.bsky.graph.block`の無絞り込みJetstream監視（`seiran-atp-repo::bsky_block_watch`）でリアルタイム検知する。ミュートはFedi/Bsky共通のローカル効果のみ（AP/ATP配送なし）。詳細: `docs/database.md`、`docs/protocols.md` 10節、`docs/ui_spec.md` 2.2節
-- [x] **フェーズ7.11: メンション通知** — 本文中で`@username`形式によりローカルユーザーが言及された場合に通知（`type="mention"`）を作る。投稿の出自（ローカル投稿・Fedi受信・Bsky受信）ごとに解決経路を持ち、いずれも自己メンションは通知しない。通知一覧・クイック通知パネルへのリアルタイム反映は既存のフォロー/リアクション通知と同じ仕組み（`NotificationRepository`・`StreamHub`）に統合。詳細: `docs/protocols.md` 8節
-- [x] **フェーズ7.12: リプライ通知 ＆ 通知パネルのリンク化** — 自分の投稿に返信が付いた場合に通知（`type="reply"`）を作る。投稿の出自（ローカル投稿・Fedi受信・Bsky受信）ごとに解決経路を持ち、リプライ先がローカルユーザーの投稿の場合のみ通知、自己リプライは通知しない。あわせてクイック通知パネル（`NotificationsPanel`）を全面的にリンク化: 通知者のユーザー名は種別によらず常にプロフィールページへのリンク、リプライ・リアクション・メンション通知は通知文全体が対象ポストへのリンクになる。詳細: `docs/protocols.md` 8節、`docs/ui_spec.md` 2.1節
-- [x] **フェーズ7.13: カスタム絵文字リアクション** — ローカルユーザーがカスタム絵文字（`:shortcode:`）でリアクションできるようにした。バックエンドは`validate_reaction_content`をUnicode/カスタムの判別のみ行う純関数に整理し、`create_reaction`が`EmojiRepository::find_url_by_shortcode`でURL解決・実在確認する。AP配送はMisskey/Fedibird互換の`EmojiReact`＋`tag: [{type: Emoji, ...}]`まで対応（受信側の`build_emoji_map`と対称）、ATPはLike＋`emoji`拡張フィールドのベストエフォートのまま。フロントは`ReactionPicker`を刷新し、`Modal`内の`EmojiPickerPanel`（検索欄＋よく使う/絵文字/カスタムのタブ＋グリッド）に統合。Unicode絵文字データセット（`unicode-emoji-json`）は`React.lazy`で遅延ロード。「よく使う」は自分の現在のリアクションを`GET /api/reactions/frequent`で頻度集計した近似値。あわせて`POST /api/admin/emojis`の500エラー（`media_file_id`をJS `Number()`変換すると53bit精度の壁でsnowflake IDが破損し外部キー違反になっていた）を、リクエストボディを文字列で受けてサーバー側でparseする方式に修正。管理画面の絵文字一覧に画像プレビューも追加。絵文字ZIPインポート（`/api/admin/emojis/import`）はボディサイズ上限未設定で大きいZIPが`multipart/form-data`解析エラーになる不具合、およびアニメーションGIF/WebP/APNGが`process_image`で静止画WebPへ変換されてしまう不具合（`image`クレート0.25はアニメーション書き出し未対応のため、アニメーション画像はリサイズ・再エンコードせず元バイト列のまま保存する方式に修正）も解消。加えて`ReactionChips`の各チップにホバーすると、そのリアクションを付けたアクター一覧（アイコン＋名前）をポップオーバー表示する機能（`GET /api/notes/:id/reactions/:content/actors`）を追加。kmyblue等が絵文字リアクション対応を検出できるよう、`GET /nodeinfo/2.1`の`metadata.features`に`"emoji_reaction"`を追加（#167）。詳細: `docs/protocols.md`、`docs/database.md`、`docs/ui_spec.md` 2.2b節
-- [x] **フェーズ7.13a: 通知対象ポストのホバープレビュー** — リアクション・メンション・返信通知へのマウスオーバーで対象ポストの投稿者と本文を表示する。返信先ポップアップを再利用可能な`NoteHoverPreview`へ共通化し、初回ホバー時のみ取得・120ms遅延クローズの操作感を統一。詳細: `docs/ui_spec.md` 2.1節
-- [x] **フェーズ7.14: 「リモートで表示」バナー** — ポスト詳細・プロフィール画面に、対象がローカルアクターでない場合の共通バナー（`RemoteBanner`）を追加。Fedi由来はAP URI（末尾`/activity`はMisskey・Mastodon等のActivity id慣習のため除去）、Bsky由来は`https://bsky.app/profile/{did}[/post/{rkey}]`へ別タブで遷移するリンクを表示する。`NoteResponse`に`remoteUrl`（`posts.ap_object_id`/`at_uri`から算出）を追加。リポストラッパーはリポストした人自身（`note`）でリモート判定・リンク先を決める。詳細: `docs/ui_spec.md` 3.3節
-- [x] **フェーズ7.15: プロフィール画面のフォロー中/フォロワー一覧（#56）** — プロフィール右ペインをタブシート化（【投稿】【フォロー中】【フォロワー】、`Tabs`コンポーネント）し、中央ペインのフォロー数・フォロワー数バッジをクリックすると対応タブへ切り替わる。バックエンドは`FollowRepository::list_following`/`list_followers`（`follows.id`によるカーソルページネーション、`actor_is_hidden_for_viewer`でブロック関係を除外）と`count_relations`を追加、`GET /api/users/following`・`/api/users/followers`・`ProfileResponse.following_count`/`follower_count`として公開。DB未登録のリモートアクター（`actor_id`を持たない）はフォロー一覧タブ自体を出さず従来通り投稿一覧のみ表示する。詳細: `docs/ui_spec.md` 2.2節
-- [x] **フェーズ7.16: 設定画面（#55）** — メインメニューに「設定」を新設し、`/settings`（メニュー）・`/settings/account`（アカウント設定）・`/settings/mutes-blocks`（ミュート・ブロック管理）・`/settings/appearance`（表示設定）を追加。アカウント設定はメール/DID表示、現在のパスワード確認付きパスワード変更（`POST /api/account/change-password`、`LocalAuthProvider::verify_password`/`hash_password`を再利用）、退会（旧プロフィール編集画面から移動）を集約する。ミュート・ブロック管理は`MuteRepository::list_muted`/`BlockRepository::list_blocked`（新規追加、最大200件・カーソルページネーションなし）による対象者一覧＋解除ボタンをタブ切り替えで表示する。表示設定は言語（自動/日本語/英語）を`POST /api/account/language`で`users.language_preference`に保存し、`i18n.changeLanguage()`で即時反映する。アプリトークン（発行済みトークンの一覧・無効化、およびMiAuth連携を介さない画面からの直接発行）は`app_tokens`テーブル（#60、詳細: `docs/database.md`）を新設して実装済み。`/settings/app-tokens`で一覧表示・直接発行・個別無効化ができる。詳細: `docs/ui_spec.md` 2.7節
-- [x] **メールアドレス変更（#59）** — アカウント設定（`/settings/account`）に新アドレス入力フォームを追加。`email_changes`テーブル（`password_resets`と同型のワンタイムトークン方式、`user_id`紐付き）に変更リクエストを保存し新アドレス宛に確認メールを送信、`POST /api/account/email/confirm-change`でリンク踏み時点のトークン消費と`users.email`更新を行う（`/verify-email-change?token=...`がフロントの着地先）。既存の新規登録用`email_verifications`はuser_idを持たないため使い回さず専用テーブルとした。詳細: `docs/database.md`、`docs/ui_spec.md` 2.7節
-- [x] **TOTP二段階認証（#65 前半）** — 認証アプリ設定、10件の使い切りリカバリーコード、ログイン時の二段階検証、登録メール経由の解除を実装。シークレットは暗号化、リカバリーコードはArgon2ハッシュのみを保存する。詳細: `docs/architecture.md` 4節、`docs/database.md`、`docs/ui_spec.md` 2.7節
-- [x] **複数パスキー（#65 後半）** — WebAuthnによるパスワードレスログイン、複数credentialの登録・名前付き一覧・削除に対応。チャレンジは5分で失効し、一度だけ消費する。ログインはメールアドレス/ユーザー名の入力不要なusernameless（discoverable credential）方式。
-- [x] **管理画面の二段階認証状況（#65）** — ユーザーごとのTOTP状態・パスキー登録数表示と、管理者によるTOTP強制解除に対応。
-- [x] **Fediverseリレー参加（#140）** — 複数リレー管理、専用actorのFollow/UndoとAccept/Reject状態管理、公開投稿のみの配送、管理画面UIに対応。
-- [x] **添付画像のライトボックス表示（#64）** — `NoteCard`の添付画像クリックを新規タブ遷移からページ内ライトボックス（`ImageLightbox`）表示に変更。バックエンドの変更なし（フロントエンドのみ）。詳細: `docs/ui_spec.md` 2.2b節
-- [x] **添付画像Lightboxのページング（#153）** — 複数画像を左右矢印キー・左右スワイプ・前後ボタンで移動し、端では移動不能なボタンを非表示にする。詳細: `docs/ui_spec.md` 2.2b節
-- [x] **Fedi投稿のCW・アンケート・画像NSFW（#102）** — ActivityPub受信時にCW、アンケート集計、画像単位の閲覧注意を保存し、NoteCard/LightBoxを安全側の解除状態遷移で表示。
-- [x] **リモートメディアプロキシ（#87）** — Misskey互換 `GET /proxy?url=...` をSSRF対策・リダイレクト再検証・サイズ/時間/Content-Type制限付きで追加。別オリジンの添付、アバター、本文・リアクション絵文字を中継し、管理画面から外部Misskey互換プロキシへ切替可能。詳細: `docs/architecture.md`、`docs/ui_spec.md`
-- [x] **未設定アバターの backend 生成（#211）** — actor ID から決定論的な顔 SVG を生成・配信し、Misskey互換 API と ActivityPub Actor/Update のアバターへ反映。詳細: `docs/architecture.md`、`docs/protocols.md`
-- [x] **管理画面タブシートの画面上部張り付き・左右スワイプ（#66）** — `/admin` のタブシート（`Tabs`）に、プロフィール画面のフィードタブと同じsticky手法をオプトインで適用（`sticky`/`top` props、直上の見出しの実高さぶんオフセット）し、下スクロール時に画面上部へ張り付くようにした。あわせてコンテンツ領域に既存の`useSwipe`フックを適用し、モバイルでの左右スワイプによるタブ切り替えに対応。バックエンドの変更なし。詳細: `docs/ui_spec.md` 2.8節
-- [x] **リモートFediユーザーのフォロー中/フォロワー全件取得・表示（#68）** — プロフィール画面で、`follows`テーブル（seiranが認知している関係のみ）とは独立に、相手のAPアクタードキュメントの`following`/`followers`OrderedCollectionへ直接問い合わせて全件取得する。短タイムアウト（200ms）の同期取得を試み、失敗/タイムアウト時は`Job::RemoteFollowListSync`をバックグラウンドで積み`remote_follow_snapshots`テーブルへキャッシュ、次回リロードで反映される。未登録アクターは`Job::RemoteActorResolve`でプロフィールを解決する。フロントは`ProfilePage`でプロフィール取得直後にタブが開かれる前から先読みを開始し（`remoteFollowSummaryCache`）、「フォロー中/フォロワー」タブにローカルDB未把握の項目を見出しで分けず同じ見た目の1つのリストとして混ぜて表示（既知アクターはアバター等付き、未知はハンドル文字列のみ）。プロフィールカードのフォロー中/フォロワー人数もローカル・リモートをブレンドした実数（`total_count`）を表示する。詳細: `docs/protocols.md` 2節、`docs/database.md`
-- [x] **カスタム絵文字のライセンス情報（#63）** — `custom_emojis.license`カラム（Misskey ZIPインポート #50 で追加済みだったが、インポート時にしか設定できなかった）を、手動での絵文字作成・編集からも設定できるようにした。`POST /api/admin/emojis`・`PATCH /api/admin/emojis/:id`のリクエストボディに`license`（1行テキスト・任意項目、改行を含む場合は`INVALID_LICENSE`で拒否）を追加。管理画面の絵文字追加フォームとインライン編集（タグ編集と統合）にライセンス入力欄を追加。zipインポートは既存実装のまま。
-- [x] **投稿本文のメンション・カスタム絵文字入力支援（#94）** — `PostComposer`の本文欄をプレーンテキストへ直列化可能な`ComposerEditor`へ置換し、`@`/`:`候補、キーボード選択、ローカル・完全修飾Fedi/Bsky IDの既知/未知色分け、入力中のcaret維持、NoteCardと同じ右境界ルールによるカスタム絵文字の不可分画像表示と境界Backspace操作に対応。詳細: `docs/ui_spec.md` 2.1節
-- [x] **投稿フォームの改行・IMEプレースホルダー修正（#124, #125）** — `ComposerEditor`のEnter改行を値とcaretの同期処理に統一し、1回のEnterで改行が1個だけ入るよう修正。プレースホルダーはcontenteditableの空状態に連動させ、IME未確定文字の入力開始時点で隠れるようにした。
-- [x] **Misskey互換API フォロイー/フォロワー一覧・リアクションユーザー一覧（#81）** — Ariaがプロフィール画面のフォロー数/フォロワー数バッジ、およびリアクション長押しから叩く`POST /api/users/following`・`/api/users/followers`・`POST /api/notes/reactions`が未実装で405 Method Not Allowedになっていた不具合を修正。カスタムAPIの同パス`GET`と共存させる形で`POST`ハンドラを追加し、既存の`FollowRepository::list_following`/`list_followers`・`ReactionRepository::actors_for_reaction`をMisskeyワイヤー形状（`MisskeyFollowRelation`・`MisskeyNoteReaction`）に変換して返す。詳細: `docs/protocols.md` 7節
-- [x] **ソーシャルタイムライン・グローバルタイムライン（#78）** — ホーム画面のフィードタブに「ソーシャル」（自分+フォロー中+ローカル全アクターの投稿、リプライ含む）・「グローバル」（`posts`テーブルの全投稿）を追加。バックエンドは`PostRepository::social_timeline`（`home_timeline`のLATERAL方式候補と`local_timeline`の`is_local`候補をUNIONしてから外側で再度LIMIT）・`global_timeline`（`local_timeline`から`is_local`条件のみ外したもの）を新設し、カスタムAPI（`GET /api/notes/social-timeline`・`/global-timeline`）とMisskey互換API（`POST /api/notes/hybrid-timeline`・`/global-timeline`、Ariaからの呼び出し用）の両方から利用できる。新規テーブル・マイグレーションなし。詳細: `docs/protocols.md` 7節、`docs/database.md`、`docs/ui_spec.md` 2.4b/2.4d/2.4e節
-- [x] **Misskey互換APIの本文内カスタム絵文字（#88, #156）** — Noteレスポンスの`emojis`へ本文shortcodeと画像URLの対応を返し、Aria等のMisskeyクライアントで画像表示できるようにする。ActivityPub投稿では絵文字情報がactor側mapに保持される場合があるため、投稿・actor両方のmapを統合する。
-- [x] **投稿本文カスタム絵文字の経路間整合（#126）** — ローカル・AP・Bluesky各受信経路で本文shortcodeの`emoji_map`を解決し、AP送信では保存済みmapから標準Emoji tagを付与する。欠落tagは同一リモートドメインの絵文字カタログで補完し、ZIPインポート時もshortcode文字種を検証する。
-- [x] **引用ポストの共通表示（#116）** — Fedibird/MisskeyのAP引用フィールドとBsky record embedを`quote_of_post_id`へ統合し、既存3形式をbackfill。APIは可視性を守って引用元を1段だけ埋め込み、NoteCardは返信・CW本文・時刻・添付・アンケート・リアクション・「引用あり」を枠付きカードに表示する。
-- [x] **引用投稿機能（#134）** — 投稿カードからローカル・Fedi・Bsky投稿を引用するコンポーザを開き、Fedi/Bskyへ配送できる。Fedi配送はMisskey互換引用（Bsky元はbsky.app URL）、Bsky配送はネイティブ引用（Fedi元はメタデータ付きURLカード）を使い分ける。
-- [x] **クロスプロトコル・リポストのURLカード化（#132）** — Fediリモート投稿をBskyへリポスト配送する際、代替本文を「🔁」のみにして元投稿URLをexternal embedカードとして添付する。カードには元投稿者名（ID）・投稿本文・先頭画像（画像なしなら投稿者アイコン）のサムネイルも設定する。
-- [x] **Bluesky GIF添付の受信（#160）** — `app.bsky.embed.external` のTenor/Klipy GIF URLをBluesky配信用MP4/WebM URLへ変換し、通常の動画添付として保存・表示する。
-- [x] **BskyのURLカード（external embed）表示** — GIFピッカー由来を除く`app.bsky.embed.external`の`url`/`title`/`description`/`thumb`を`post_link_cards`へ保存し、フロントで`embedSrc`の有無で埋め込みプレーヤー/x.com/一般URLの3種のカード表示（`LinkCard`）に振り分ける（対応サービスはoEmbed discovery＋管理者ホワイトリストで決まる）。x.comはクリック時に公式`widgets.js`でツイートをライブ埋め込みする。詳細: `docs/database.md`、`docs/protocols.md`、`docs/ui_spec.md`
-- [x] **FediのURLカード表示（複数枚対応）** — APにはembed概念が無いため、本文中のMarkdownリンクからURLを抽出（最大5件、画像記法・ハッシュタグリンクは除外）し、`Job::OgpFetch`でOGPを非同期取得する。SSRF対策の共通フェッチ関数を`seiran-api`から`seiran_common::net`へ移動し、`/proxy`・リモート絵文字インポートと共有。`posts.link_card_*`（単一カラム）は`post_link_cards`（`post_id`+`position`で複数保持）へ統合し、Bsky側もこちらへ移行。フロントは`Note.linkCards`配列を`LinkCard`でmapして複数枚を縦に並べる。詳細: `docs/database.md`、`docs/protocols.md`、`docs/ui_spec.md`
-- [x] **URLカード埋め込みプレーヤーのoEmbed discovery化** — 個別サイトのハードコード（YouTube動画ID抽出・Spotify/Apple Musicのembed URL組み立て）を廃止し、oEmbed discovery（`<link rel="alternate" type=".../json+oembed">`検出→JSON取得→`html`からiframe src抽出、`net::fetch_ogp`がOGPと同じページ取得で処理）＋管理者設定ホワイトリスト（`site_settings.oembed_allowed_domains`、改行区切り、各行「domain」または「domain,oembedエンドポイントURL」、後方一致、TTL 60秒キャッシュ）方式に統一。既定でYouTube/Spotify/Apple Music/SoundCloudはHTML discovery経由、Vimeoは discoveryタグが無いため固定エンドポイント指定で許可される。管理者はドメイン（＋必要なら固定エンドポイント）を1行追加するだけで新サービスに対応できる。Bsky受信投稿（`app.bsky.embed.external`にはiframe情報が無い）は非同期`Job::LinkCardEmbedResolve`が後追いで`embed_src`を解決する。x.comは対象外（`widgets.js`方式を維持）。詳細: `docs/database.md`、`docs/protocols.md`、`docs/ui_spec.md`
-- [x] **GIFアニメの自動再生統一** — Bskyのアニメーション付き動画添付には、Tenor/Klipy GIFピッカー由来（`app.bsky.embed.external`をCDN動画URLへ変換）と、GIFファイル直接アップロード由来（`app.bsky.embed.video`に`presentation:"gif"`が付与される新経路、従来は通常動画として保存され再生ボタンを押すまで静止画に見えていた）の2系統がある。両方を`post_attachments.is_gif`で統一的にフラグ立てし、フロント`HlsVideo`の`isGif` propで自動再生・ミュート・ループ・コントロール無し表示に揃えた。既存のTenor/Klipy由来行はURLパターンでバックフィル。詳細: `docs/database.md`、`docs/protocols.md`、`docs/ui_spec.md`
-- [x] **LTL/GTLの公開範囲修正（#91）** — フォロワーで閲覧権限があっても、フォロワー限定投稿はローカル/グローバルタイムラインへ表示せず、ホーム/ソーシャルタイムラインにだけ表示する。
-- [x] **タイムライン選択タブの永続化（#90）** — 最後に選択したホーム/ローカル/ソーシャル/グローバル/リスト/ハッシュタグをLocalStorageへ保存し、リロード後に復元する。
-- [x] **リモート絵文字インポート（#73）** — AP受信（投稿本文・表示名・絵文字リアクション）で見つけたカスタム絵文字を`remote_emojis`テーブルへカタログ化し、管理画面「カスタム絵文字」パネルの「リモート」タブ（検索・インポートボタン）、およびNoteCard本文・絵文字リアクションの右クリックメニュー（管理者のみ）の2経路から、カテゴリ・タグ・ライセンスを指定してローカルの`custom_emojis`へ取り込めるようにした。画像取得は既存のメディアプロキシのSSRF対策ロジック（`fetch_validated`として共通化）を再利用する。詳細: `docs/architecture.md`、`docs/database.md`、`docs/ui_spec.md` 2.8節
-- [x] **pg_bigmによる検索のパフォーマンス向上（#97）** — PostgreSQL 16へpg_bigmを組み込む専用Dockerイメージを追加し、投稿本文の部分一致検索を`LOWER(body) LIKE LOWER(...)`とbigm GINインデックスの組み合わせへ移行。アクターのサジェスト検索は対象外。詳細: `docs/architecture.md`、`docs/database.md`
-- [x] **用途別ユーザー検索の最適化** — リスト編集・DMの検索は表示名と全ID表記をまとめたpg_bigm部分一致、投稿欄のメンション候補は2本のB-tree式インデックスによるハンドル前方一致へ分離し、ローカル候補は入力中の短縮/Fedi/Bsky形式に合わせて返す。詳細: `docs/architecture.md`、`docs/database.md`、`docs/ui_spec.md` 2.1/2.7節
-- [x] **Bluesky AppView互換の検索式（#101）** — 引用句・AND/OR/NOT・括弧補正と`from:`・`mentions:`・`domain:`・`since:`・`until:`をローカルDB検索にも適用。`lang:`はローカル/Fedi投稿の言語未宣言を考慮して常にTRUEとして扱う。詳細: `docs/architecture.md`
-
-- [x] **投稿フォームのボタン再配置（#152）** — 配送先・公開範囲を従来の公開範囲バー位置へツールチップ付きアイコンボタンとして集約し、公開範囲を3連排他ボタン化。メディア添付をフォーム最下段の投稿ボタン左へ移し、Bluesky公式SVGを同梱。詳細: `docs/ui_spec.md` 2.4b節
-
-- [x] **投稿フォームの公開範囲を送信ボタン自体に統合** — 公開範囲の事前選択＋エラーポップアップ方式をやめ、🌐投稿/🌙ひかえめ/🔒️プライベートの3つの投稿ボタンへ統合。Bluesky配送オン時は🔒️プライベートをグレーアウトし、ホバー/クリックで理由を説明する吹き出しを表示する。Fediverse配送アイコンは絵文字からFediverseロゴSVGへ変更し、NoteCard・プロフィール画面のFediverseプロトコル表示も同ロゴへ統一。メディア添付ボタン・残り文字数をFediverse/Bluesky配送ボタンと同じ行へ移設し自作の図画アイコンに変更、投稿フォーム内の各行コンテナへNoteCard同様の`min-width: 0`を徹底してスマホ幅でのフローティングボタン位置崩れを防止。詳細: `docs/ui_spec.md` 2.4b節
-
-- [x] **投稿ボタンのCtrl+Enterデフォルトを明示化・矢印キーナビゲーション対応** — Ctrl+Enter等のショートカット送信先が打鍵するまで分からない問題に対応。送信先の投稿ボタンに5px幅の赤枠マーカーを表示し（ブラウザ既定の青いフォーカスアウトラインは`:focus-visible`で無効化して置き換え）、Tabフォーカス中はそのボタンへ追従する。通常投稿・引用は最後に送信した公開範囲・配送先トグルを`localStorage`（`seiran:composer-defaults`）へ記憶し次回のデフォルトにする（返信は親ポストから決まる専用のデフォルトのため対象外）。デフォルトボタンが公開範囲の相互排他でグレーアウトしている間にショートカット送信すると、意図しない公開範囲へ無言で送信せずパブリック投稿ボタンへフォーカスを移す。投稿ボタン列・操作ボタン列（Fedi/Bsky配送・添付・アンケート・CW）それぞれの中を左右矢印キーで巡回でき、投稿ボタン列からは上矢印でBsky配送ボタンへ、操作ボタン列からは上矢印で本文入力欄・下矢印でデフォルトの投稿ボタンへ移動する（`ComposerEditor`を`forwardRef`化して本文DOMを公開）。詳細: `docs/ui_spec.md` 2.4b節
-
-- [x] **NoteCardアクション列の整理と返信・引用・リポスト・リアクション件数の表示** — 返信・引用・リポスト・リアクション・ケバブメニューの5ボタンをキャプション文言なしの同一体裁に統一し、リポスト済み/リアクション済みは枠線、リポスト不可は薄字で表現。`posts`テーブルへ`reply_count`/`quote_count`/`repost_count`の非正規化カウンタ列とDBトリガーを追加し、各アイコン横に件数（0件は非表示、1000以上はK、100万以上はM表記）を表示する。詳細: `docs/database.md`、`docs/ui_spec.md` 2.2b節
-
-## 未完了・今後の課題
+## 未完了
 
 ### フロントエンド
 
-- [x] **言語切り替えUI** — 設定画面「表示」（`/settings/appearance`、#55）で自動/日本語/英語を選択可能。詳細は上記フェーズ7.16、`docs/ui_spec.md` 2.7節
-- [x] **ポスト詳細画面の充実（#226）** — 右ペインを5タブ構成（リポストラッパーは元投稿者タブが増え6タブ）へ拡張。詳細: `docs/ui_spec.md` 2.3節
-  - [x] 投稿者タブ（プロフィール概要＋固定ポスト、`AuthorPanel`。リポストラッパーはリポストした人自身が対象）
-  - [x] 元投稿者タブ（リポストラッパーのみ、元投稿の書き手のプロフィール概要＋固定ポスト、既存タブの末尾に追加）
-  - [x] 返信タブ（再帰的な返信・引用ツリー、`ReplyThreadPanel`。`GET /api/notes/:id/replies`は`WITH RECURSIVE`で`reply_to_post_id`/`quote_of_post_id`を辿る自前実装。真のMisskey APIワイヤー互換ではなく、再帰トラバーサルの考え方をMisskeyの`notes/children`に倣った内部API）
-  - [x] 前後のポストタブの仕様調整（最大5件、タブを開くと同時に自動読み込み、対象ポストへ自動スクロール）
-  - [x] タブシートを右ペイン上端にsticky固定、タブ選択状態のURL同期（リロード後も維持）、前後のポストのスクロール位置をポストIDごとに記憶しブラウザバックで復元
-  - [x] リアクションタブの一覧化（絵文字×ユーザー一覧、`ReactionListPanel`）
-  - [x] リポストタブ（`RepostListPanel`、取り消し済みも履歴として表示）
-  - [x] 返信タブは3ペイン表示時のみ右ペインから外し、中央ペイン下部の常設セクションへ移動（プロフィール画面のピン留めと同じパターン）。狭幅では従来通り右ペインのタブのまま
-  - [x] ターゲットポストが返信の場合、返信先ポストを小型（`small`、横幅も表示幅の80%に縮小）表示のNoteCardで直上に自動表示し、「↩️ 返信」クリックで1段ずつスレッドの根まで遡れるようにする（遡り済みチェーンと中央ペインのスクロール位置はポストIDごとにセッション内で記憶し、ブラウザバックで復元。初回訪問時は返信先ポストが縦に長く本体が画面外に押し出されている場合だけ本体が見える位置まで自動スクロール）
-- [x] **ポスト詳細画面のログイン不要化** — `/notes/:id`から`RequireAuth`ガードを撤去。閲覧系API（`GET /api/notes/:id`・`/context`・`/replies`・`/reposts`・`/reactions/:content/actors`・`/api/users/profile`）は元々`MaybeAuthedUser`で未ログイン対応済みだったため、フロント側のルーティング変更のみで対応。未ログイン時は左メニュー最下部のユーザーチップが現在画面への`redirect`付き`/login`誘導ボタンに差し替わる。詳細: `docs/ui_spec.md` 2.3節
-- [x] **ユーザープロフィール画面のログイン不要化** — `/:acct`（`/@handle`）・旧`/profile?q=`から`RequireAuth`ガードを撤去。未ログイン時は対ユーザー操作メニュー（フォロー/ミュート/ブロック/通報）の代わりにログイン誘導ガイダンス文を表示。詳細: `docs/ui_spec.md` 2.2節
-- [x] **リポストミュート機能＋対ユーザー操作メニューの統合** — 対象ユーザーの通常投稿は表示したまま、リポストのみをホーム/ローカル/グローバルタイムラインから隠す独立フラグ（新規`repost_mutes`テーブル、AP/ATP配送なしのローカル効果）を追加。プロフィール画面のケバブメニューに加え、NoteCardのユーザー名・アイコンを右クリックしても同じ「対ユーザー操作メニュー」（フォロー・ミュート・リポストミュート・ブロック・通報）を出せるようにし（`UserContextMenu`、`useUserRelationshipMenu`フックに統合ロジックを集約）、これらの状態はホーム/ローカル/グローバルタイムラインAPIレスポンスへ`attach_relationship_flags`で事前付与する。フォロー状態専用だった共有ストアを`stores/userRelationshipStore`（5値統合）へ拡張し、`followStatusStore`はそのファサードとして残す。詳細: `docs/database.md`、`docs/ui_spec.md` 2.2節
-- [ ] **ユーザー製翻訳ファイルの適用・配布機能** — ユーザーが独自の言語ファイル（`i18n/locales/{lng}/*.json` と同形式）を作成し、アプリに読み込ませて適用・配布できるようにする構想。現状の名前空間分割構成は `i18n.addResourceBundle()` によるこの拡張を見据えたもの
-- [x] **PWA対応（ホーム画面への追加）** — `manifest.webmanifest`を管理画面のサイト設定（サイト名・テーマカラー・サイトアイコン）から動的生成し、ホーム画面/デスクトップへのインストールに対応。サイトアイコンは`/api/site-icon/:sha256/:size`でfavicon/PWAアイコン共通のリサイズ配信（アニメーション画像はリサイズせずそのまま配信）。詳細: `docs/architecture.md`
-- [ ] **プッシュ通知対応** — Service Worker経由のプッシュ通知（購読管理API・VAPID鍵・通知許諾UI）は未着手
+- [ ] **ユーザー製翻訳ファイルの適用・配布** — `i18n/locales/{lng}/*.json` と同形式のファイルを `i18n.addResourceBundle()` で読み込ませる構想（名前空間分割はこの拡張を見据えたもの）
+- [ ] **プッシュ通知** — Service Worker・購読管理API・VAPID鍵・通知許諾UI
 
 ### プロトコル
 
-- [x] **リモートseiranアクターの相互申告マージ（#236）** — 設計確定（`docs/protocols.md` 11節参照）。チャレンジ検証エンドポイントは持たない。AP拡張フィールド＋ATP独自宣言レコード（`org.seiran.actor.declaration`）による相互自己申告 → 発見時は検証を待たず即INSERT（同時に相手を能動的に取りに行くジョブをenqueue）→ 相手側の実体が既存行の自己申告と相互に一致した場合にのみ結婚（マージ）→ `actors`の複合UNIQUE制約`actors_mutual_claim_key`＋UNIQUE制約違反時のリトライ（`crate::unique_retry`、旧`pg_advisory_xact_lock`方式から移行、下記参照）でDB反映を直列化し、AP/ATPどちらが先に発見されても必ず1つの`actors`行（`actor_type='remote_seiran'`）に収束させる。旧構想（`seiran_pair_actor_id`で2行をリンク、チャレンジ検証エンドポイント）は不採用、`seiran_pair_actor_id`は実装完了後に削除を検討する。
-  - [x] AP Actor文書への自ATP DID拡張フィールド追加
-  - [x] ATP独自コレクション `org.seiran.actor.declaration`（rkey=`self`）の実装
-  - [x] `actors.claimed_ap_uri`/`claimed_at_did`カラム追加
-  - [x] 相手を能動的に取りに行くジョブ（`ActorMetadataResolve`ジョブを実装。AP側発見経路からのenqueueのみ対応。Bsky側発見は`firehose.rs`の`resolve_or_upsert_bsky_actor`のみ相互一致判定に対応済みで、他の`upsert_remote_bsky`呼び出し元（`also_known_as_sync`/`search`/`target_resolve`/`bsky_follower_poll`/`users`）は未対応のまま — 結婚成立の必須条件ではないため許容するが、結婚済み行の`username`を無条件上書きしないガードだけは`ActorRepository::upsert_remote_bsky`本体に追加済み（下記【本番実データで発覚】参照）。`follow_exec`は下記の通り対応済みに変更）
-  - [x] 実地検証（beta.seiran.org⇔seiran-beta.org間）中に判明した漏れを修正: `follow_exec::follow_fedi`（能動的フォロー実行時の経路、`POST /api/follows/create`が使う）が旧`ActorRepository::upsert_remote_fedi`（単純UPSERT、`claimed_at_did`を取らず`actor_type`昇格もしない）を直接呼んでおり、`discover_fedi_actor`を経由していなかった。この経路で先にリモートseiranアクター行が作られると`claimed_at_did`が永久にNULLのままとなり、後続の`discover_fedi_actor`呼び出しも「既存行が見つかった場合は結婚ロジックを起動しない」設計のため未来永劫結婚が成立しない実装漏れだった。`follow_fedi`を`discover_fedi_actor`経由に修正し、`married=false`かつ`seiranAtDid`ありなら`ActorMetadataResolve`をenqueueするよう統一した。同型の`follow_exec::follow_bsky`側（旧`upsert_remote_bsky`直呼び）も同じ理由で恒久的な結婚不成立を招く実装漏れであり、上記「許容」判断を見直して`discover_bsky_actor`経由に統一した（ケース2＝ATP先着の実地検証で、Jetstream以外に相互申告マージ対応のATP先着経路が存在しないことが判明したため）
-  - [x] **【重大】実地検証中に発見・修正した認証バイパス**: `jobs/actor_metadata_resolve.rs`の`resolve_counterpart_via_atp`/`resolve_counterpart_via_ap`（能動的に相手を取りに行くジョブ本体）が、相手側の自己申告を確認せず**呼び出し元自身の値をそのまま相手の自己申告として`discover_bsky_actor`/`discover_fedi_actor`へ渡していた**ため、相互一致判定が常に自己参照で真になり、一方的な自己申告だけで結婚が成立してしまう認証バイパスだった。具体的には`resolve_counterpart_via_atp`は`fetch_seiran_actor_declaration`（DID側の`org.seiran.actor.declaration`）を呼ばず`actor.ap_uri`（自分自身）を`claimed_ap_uri`として渡しており、`resolve_counterpart_via_ap`は取得した`remote_ap.seiran_at_did`を見ず`actor.at_did`（自分自身）を`claimed_at_did`として渡していた。前者は攻撃者が管理する任意のFedi Actor文書に他人のDIDを`seiranAtDid`として書くだけで（対象DIDが`fetch_bsky_profile`に応答しさえすれば、seiranサーバーである必要すらなく）結婚を偽装でき、後者はさらに単純で対象AP Actorが`seiranAtDid`を宣言していなくても（普通のMastodonアカウント等でも）結婚が成立してしまう状態だった。両関数とも本来取得すべき自己申告（DID側は`fetch_seiran_actor_declaration`の`apActorUri`、AP側は`remote_ap.seiran_at_did`）を使うよう修正済み
-  - [x] **【重大・上記の副産物として発覚】`fetch_seiran_actor_declaration`が公開AppView経由では機能しない**: `get_record_value`（延いては`fetch_seiran_actor_declaration`）は`com.atproto.repo.getRecord`を公開AppView（`api.bsky.app`）へ投げていたが、公開AppViewはこの独自NSID（`org.seiran.actor.declaration`）を中継せず、レコードが実在していても常に`RecordNotFound`を返すことを実機検証で確認した（`app.bsky.actor.profile`等の標準lexiconは正常に中継される）。つまり上記の認証バイパス修正だけでは、`resolve_counterpart_via_atp`・`firehose.rs::resolve_or_upsert_bsky_actor`・`follow_exec::follow_bsky`のいずれも実際にはDID側の自己申告を一切取得できず、ATP側から発見した結婚は恒久的に成立しないという新たな機能不全に転化するところだった。`fetch_seiran_actor_declaration`を、DIDを`atproto_pds`サービスへ解決（`did_resolve::resolve_service_endpoint`、SSRF対策・DNS rebinding対策込み）した上でそのPDSへ直接`getRecord`する実装に変更し解消した（`handlers/xrpc/proxy.rs`のIP pinningパターンを踏襲）。`app.bsky.feed.threadgate`/`postgate`用の`get_record_value`（標準lexiconのみ）はそのまま公開AppView経由を維持
-  - [x] **【ケース3＝レースコンディションの実地検証で発覚】既存行UPDATE分岐が結婚済み行を無条件に上書きする不整合**: `discover_fedi_actor`/`discover_bsky_actor`の「既存行あり」分岐（`existing_id`がヒットした場合の通常UPDATE、結婚ロジックとは別経路）が、行の`actor_type`を確認せず無条件にUPDATEしていた。AP経由・ATP経由の発見をほぼ同時に発火させるレース実地検証（advisory lockそのものは正しく機能し行の分裂は起きないことを確認済み）で、「1番目の到達で結婚成立→`claimed_*`をNULLへクリア」の直後に「2番目の到達（既に`at_did`/`ap_uri`が埋まっているため`existing_id`分岐に入る）」が走り、`claimed_ap_uri = COALESCE(claimed_ap_uri, $6)`が結婚済みなのに`claimed_ap_uri`を復活させ、`discover_bsky_actor`側は`username`まで無条件にATPハンドル形式で上書きしてしまうことが判明。両関数の該当UPDATEに`CASE WHEN actor_type = 'remote_seiran' THEN ... ELSE ... END`ガードを追加し、結婚済み行では`claimed_at_did`/`claimed_ap_uri`を復活させず、`username`（Fedi側由来が正式）も上書きしないよう修正した
-  - [x] **【本番実データで発覚】結婚済み行を`ActorRepository::upsert_remote_bsky`が無条件上書き**: 上記ケース3の修正は`seiran_actor_merge::discover_bsky_actor`自身の`existing_id`分岐のみが対象で、結婚ロジックを経由しない別実装の`repository::actor::upsert_remote_bsky`（`ON CONFLICT (at_did) DO UPDATE`で`username`を無条件`EXCLUDED.username`に上書き）には同種のガードが無かった。フォロワーポーリング等がこの経路を定期的に叩くため、一度結婚成立して`username`が正しいFedi側の値になった後も、再訪問のたびにATPハンドル形式（`user.pds-domain`）で再び上書きされうる状態だった。実例: `@yubao@beta.seiran.org`（`actors.id=117214913098043045`）の`username`が`yubao.beta.seiran.org`に化け、NoteCard表示のacctが`@yubao.beta.seiran.org@beta.seiran.org`という二重表記になり、かつそのURLで存在しないはずのプロフィールが表示できてしまっていた。`upsert_remote_bsky`のUPDATE句に`CASE WHEN actor_type = 'remote_seiran' THEN username ELSE EXCLUDED.username END`ガードを追加し、該当行の`username`を`yubao`へバックフィルして解消
-  - [x] ~~fedi IDキーの`pg_advisory_xact_lock`ヘルパー追加とDB反映の直列化（`advisory_lock::acquire_xact_lock_for_key`）~~ → 下記【advisory lockから複合UNIQUE制約＋リトライ方式へ移行】の通り撤去・置き換え済み
-  - [x] **【advisory lockから複合UNIQUE制約＋リトライ方式へ移行】**: `discover_bsky_actor`のロックキーは`claimed_ap_uri.unwrap_or(at_did)`——自己申告の有無で毎回`claimed_ap_uri`（fedi ID、AP側`discover_fedi_actor`のロックキーと一致）と`at_did`のどちらかに揺れていた。`fetch_seiran_actor_declaration`（ATP宣言レコード取得）はDID解決失敗・接続エラー・タイムアウト・非2xxのいずれも区別せず`None`を返す実装のため、同一DIDに対する2件の呼び出しが一時的なネットワーク不調で片方だけ`claimed_ap_uri=None`になり、ロックキーが`at_did`と`claimed_ap_uri`（別の値）に分岐して直列化が効かなくなりうることが判明した（`actors.at_did`のUNIQUE制約により実害はサイレントな重複行ではなくINSERT時のUNIQUE違反＝ジョブ失敗だが、望ましくない）。マイケルの提案により、ロックキーを人間が選ぶ方式自体をやめ、「結婚が成立するべき2行の共存」を`actors`の複合UNIQUE制約`actors_mutual_claim_key`（`(COALESCE(ap_uri, claimed_ap_uri), COALESCE(at_did, claimed_at_did))`）でDB側に構造的に禁止させ、Rust側は制約違反（SQLSTATE 23505）を検知したらトランザクションの頭から最大5回までリトライするだけにする方式（`seiran_common::unique_retry::retry_on_unique_violation`）へ全面的に置き換えた。`discover_fedi_actor`/`discover_bsky_actor`（アクター）・`insert_remote_with_dedup`/Jetstream`save_bsky_post`（投稿、#237）・`Update(Note)`受理経路（`claim_or_find_seiranpost_merge_target`、SELECTで相手を確認してから自己申告を書く順序に変更）の計5箇所を移行し、`advisory_lock::acquire_xact_lock_for_key`と`lock_class`（`ACTOR_MERGE`/`POST_MERGE`）は削除した（ジョブ二重起動防止専用の`try_acquire`/`release`はセッションスコープの別物で影響なし）。マイグレーション`20260906000000_actor_post_mutual_claim_unique.sql`
-  - [x] **【複合UNIQUE制約移行の検証中に発覚】AP配送側の`actor_type='fedi'`固定判定によるremote_seiranフォロワーへの配送漏れ**: `ap/deliver/`配下の複数箇所（`fetch_fedi_follower_inboxes`＝通常投稿のフォロワー配送、`resolve_conversation_broadcast_inboxes`＝返信/引用/リポストの会話参加者解決とリアクション者取得、`fetch_inboxes_by_ap_uris`＝メンション解決、`resolve_announce_object_actor`＝Announce対象の元投稿者、`deliver_direct_message_to_ap`＝DM宛先解決）が`actor_type = 'fedi'`固定でフィルタしており、結婚成立済み（`actor_type='remote_seiran'`）のフォロワーへのAP Create/DM/Announceが宛先0件でサイレントスキップされていた（ATP=Jetstream経由でのみ投稿が届く非対称な状態）。加えて`notes/creation.rs`のDM配送要否判定`has_fedi_recipient`も同型で、remote_seiran宛DMが`deliver_fedi`/`deliver_bsky`両方falseとなりジョブ自体enqueueされない実害もあった。全7箇所を`actor_type IN ('fedi', 'remote_seiran')`へ修正し、beta.seiran.org⇔seiran-beta.org間で実際にCreate(Note)がInboxで受信・保存・タイムライン表示されることを実地検証済み。
-  - [x] **【全面監査で発覚・修正】残っていた同型の判定漏れ**: `actor_type`/`actorType`分岐をRust/TypeScript/SQL全体で洗い出したところ、`users.rs`のfeatured投稿同期（`actor.actor_type == "fedi"`）・alsoKnownAs同期（同）・`jobs/also_known_as_sync.rs`の同期ジョブ本体（`owner.actor_type != "fedi"`で早期return）の3箇所に同型の判定漏れが残っていたため`matches!(.., "fedi" | "remote_seiran")`へ修正。加えて`blocks.rs`のブロック/アンブロックが`if let Some(did) = at_did {..} else if actor_type != "local" {..}`という**相互排他**（else if）になっており、結婚済み（`remote_seiran`、`at_did`と`ap_uri`の両方を持つ）相手をブロックした際にATP側のみコミットされAP `Block`/`Undo Block`が一切送信されない不具合を発見（フォロー/アンフォローは元々両チャネル独立送信になっており、ブロックだけこの非対称が残っていた）。2つの独立した`if`に分離し両チャネルへ送るよう修正
-  - [x] **監査で「バグではない」と確認したもの**: `lists.rs`（プロキシフォロー同期・リスト削除時のアンフォロー後片付け）の`actor_type == "fedi"`判定は意図通り——`remote_seiran`は`at_did`を持ちJetstreamの`wantedDids`（`firehose.rs::load_wanted_dids`のリストメンバーUNION節、フォロー不要）経由で既に投稿を受信できるため、AP専用のプロキシフォロー機構が不要（マイケルの指摘で判明）。ただし`lists.rs::add_member`の`touch_jetstream_wanted_dids`即時反映トリガーが`actor_type == "bsky"`限定になっており`remote_seiran`が対象外だった点のみ実害ある漏れ（次回ポーリングまで最大30秒遅延）として`matches!(.., "bsky" | "remote_seiran")`へ修正
-  - [x] **実地検証完了**（beta.seiran.org⇔seiran-beta.org間、2台の実サーバーで相互に検証）: ケース1（AP先着）・ケース2（ATP先着）・ケース3（AP/ATPほぼ同時発見のレースコンディション、行分裂しないことを確認）いずれもgenuineな結婚成立を確認。上記5件の実装漏れ・バグは全てこの過程で発見・修正したもの。#237（投稿マージ）の同様の実地検証は今回は見送り（別途着手時に同種の問題がないか要注意）
-- [x] **投稿の完全表現力をAP/ATP双方でロスレス往復（#237）** — 設計確定（`docs/protocols.md` 5節参照）。`seiranPost`拡張オブジェクトをAP Note・ATP post本体の両方に同一構造で埋め込み、CW・投票・カスタム絵文字マップ・添付のNSFW/GIF/寸法・複数URLカード等、標準フィールドでは表現しきれないseiran独自の表現力をリモートseiran間で完全再現する。投稿ID・投稿者IDの相互申告一致によるマージ判定（#236と同型のアルゴリズム）を採用し、`seiran_post_uuid`のような内部限定トークンは使わない。副次効果として、下記「他seiranサーバー間マージのATP経路対応」の既知の制約もこのissueで解消される。
-  - [x] `posts.claimed_ap_object_id`/`claimed_at_uri`カラム追加（`seiran_post_uuid`は将来的に削除検討）
-  - [x] AP/ATP双方の受信経路（`note_save::save_ap_note_core`・Jetstream `save_bsky_post`）で`seiranPost`検出時に標準フィールド（body/emojiMap/visibility/contentWarning/poll）を上書きする「posts行の再構築」を実装
-  - [x] **【実地検証で発覚】URLカードが本文にURLの無い投稿（`linkCards`のみ構造化データとして持つケース）で完全に空振りする**: AP/ATP受信側（`note_save.rs`・`firehose.rs::save_bsky_post`）は`seiranPost.linkCards[]`を一切使わず標準の本文中URL抽出（AP: `extract_link_card_urls`、ATP: `app.bsky.embed.external`単一カード処理）へのベストエフォートフォールバックのみだったため、本文にURLが無い投稿（意図通りlinkCardsを別途構造化データとして持つ設計）ではURLカードが1件も反映されなかった（CW付きなら代わりに"Open"カードのみ）。`seiranPost.linkCards[]`があれば送信側申告のtitle/description/thumbnailUrlを`post_link_cards`へ直接反映するよう修正（`embed_src`/`embed_type`は設計方針通り常にNULLのまま、受信側が独自にホワイトリスト判定すべきものは復元しない）。共通実装（`seiran_post::insert_seiran_post_link_cards`）をAP受信・ATP受信の両方から呼ぶ形に統一（AP側はこちら、ATP側はseiran-beta.org側セッションが対応、実地確認済み）
-  - [x] 添付の寸法・blurhashの完全再現は`post_attachments`に該当カラムが無いため未対応のまま（スキーマ変更を伴うため今回は見送り、`is_sensitive`/`is_gif`は標準AP/ATPフィールドから反映済み）
-  - [x] 相互一致チェック（投稿マージ判定）の実装。DB反映の直列化は`posts`の複合UNIQUE制約`posts_mutual_claim_key`＋リトライ方式（上記#236側の【advisory lockから複合UNIQUE制約＋リトライ方式へ移行】参照、旧`pg_advisory_xact_lock(2, ...)`から移行）
-  - [x] 投稿者一貫性チェック（簡略版）: 両投稿の投稿者が**既に同一actor行**に解決されている場合のみマージする
-  - [ ] 投稿マージ時のオンメモリなアクター結婚（#236アルゴリズムの共有）は未実装。上記簡略版チェックにより、投稿者がまだ結婚していない場合はマージ不成立のまま孤立行として残る（`claimed_*`は保持されるため、#236側のアクター結婚が別途成立すれば将来の再突合で解消できる余地は残る設計のまま）
-  - [x] **実地検証完了**（beta.seiran.org⇔seiran-beta.org間、2台の実サーバーで相互に検証）: CW・投票3択・複数画像添付2枚・複数URLカード2件を含む投稿（post_id=117217262715535362）で、マージ成立・CW反映・投票反映・添付画像反映・URLカード反映のすべてを実地で確認。上記の欠落2件（`GET /notes/:id`のsummary/seiranPost欠落、linkCards未反映）はこの過程で発見・修正したもの
-  - [x] AP配送を非対称化: ATP URI確定済みなら`counterpartPostId`同梱、未確定なら`counterpartPostId`だけ欠いた`seiranPost`で通常優先度のまま即時配送（ATPコミット完了待ちで配送自体を遅延させない）
-  - [x] ATP URI確定時に`counterpartPostId`入り`seiranPost`を持つ`Update(Note)`をAPフォロワーへ送信（`Job::BskyPostCommitDeferred`完了時のみ。同期コミットはCreate自体が既にcounterpartPostIdを持てるため対象外）
-  - [x] `Update(Note)`受理ハンドラの追加（`seiranPost.counterpartPostId`のみ反映・本文等は無視、なりすまし対策込み、マージ再判定トリガー）
-  - [x] マージ成立時のクリーンアップ2段階方式（同期: `PostRepository::finalize_post_merge`によるURI付け替え+`parent_original_post_id`+`deleted_at`／非同期`Job::PostMergeCleanup`: FK付け替え+手動カウンタ調整+削除予定行の物理削除。`post_attachments`/`post_link_cards`は複合PRIMARY KEYのため付け替えず物理削除に委ねる）
-  - [x] **【実地検証で発覚】`GET /notes/:id`（AP直接dereference）が`summary`（CW）・`seiranPost`拡張オブジェクトを一切含んでいなかった**: 配送（`deliver_post_to_ap_followers`）はCW・`seiranPost`を正しく埋め込むが、フォロー関係の無いリモートがCreate配送を受け取らずこのエンドポイントを直接GETしてオブジェクトを取得する経路（Mastodon等の一般的な挙動、リプライ・引用解決時の再取得等）は、配送側と独立に一から組み立てられた別実装で、CW・`seiranPost`のどちらも欠落していた。Push配送時にしか#237のロスレス往復が機能しない片手落ちだったため、`ap::deliver::activity`の`fetch_post_activity_basis`/`build_seiran_post_for_basis`/`PostActivityBasis`を`pub`化して`get_note_ap`からも共用し、配送側と同じ`summary`/`seiranPost`を埋め込むよう修正した
-- [x] **リモートseiranユーザーへのフォローはAP経由開始・承認状況に応じてATP側も同期（#238）** — フォロー承認制はAPにしかない概念のため、リモートseiranへのフォローは常にAP経由で送る。相手が非承認制なら（既存の`follow_fedi`がAccept受信を待たず内部的に成立させる動作に乗せて）その時点でATP側`commit_follow`も実行、承認制ならAcceptを受けてから実行する。#236完了後に着手。
-  - [x] **事前対応（#237実地検証中に発覚したブロッカー）**: `discover_fedi_actor`/`discover_bsky_actor`が結婚を成立させても（＝行が初めて`at_did`を獲得しても）、Jetstreamの`wantedDids`絞り込みリストは`touch_jetstream_wanted_dids`を呼ばない限り再構築されない不整合を先に修正済み（`follow_exec::follow_fedi`・`jobs/actor_metadata_resolve.rs`の両関数・`jobs/inbound_activity_process`・`firehose.rs::resolve_or_upsert_bsky_actor`のいずれも未対応だった）
-  - [x] **非承認制の相手への即時ATPフォロー**: `follow_exec::follow_fedi`のFollow送信・楽観的accepted確定と同時に、ターゲットが既に結婚成立済み（`actor_type='remote_seiran'`、真正な`at_did`）であれば`AtpCommitService::commit_follow`を実行し、得られたrkeyを新設`FollowRepository::insert_accepted_with_rkey`で`follows.atp_rkey`に記録する（`outcome.married`だけでなく、既に結婚済みの相手への再フォローも拾えるよう行の現在の`actor_type`を都度確認）。ATPコミット成功時は`touch_jetstream_wanted_dids`も呼ぶ
-  - [x] **承認制の相手へのAccept受信時ATPフォロー**: `jobs::inbound_activity_process::follow::handle_accept`（受信したAP Acceptで`follows.status`を`accepted`に更新する処理）で、対象が結婚成立済みのリモートseiranアクターであれば同様に`commit_follow`を実行し、新設`FollowRepository::accept_and_set_rkey`（既存関数を流用）でrkeyを記録する
-  - [x] **アンフォロー・退会時の対称性はコード変更不要**: `handlers/follows.rs::unfollow_target`・`jobs/account_withdraw_unfollow_all.rs`は元々`follows.atp_rkey`の有無だけを見てATP側`commit_delete_follow`を送るかどうかを判定する設計だったため、上記でfedi起点フォローにも`atp_rkey`が記録されるようになったことで、コード変更なしにATP解除・AP Undo Followの両方が自動的に送られるようになった
-  - [ ] **既知の残課題**: フォロー時点でまだ結婚が成立していない（`ActorMetadataResolve`ジョブ等で後から非同期に成立する）非承認制の相手については、成立後に遡ってATPフォローを追いコミットする仕組みは実装していない。この場合、AP側のフォローは正常に機能する一方、ATP側（Jetstream可視性・相手PDS上のフォロワー表示）は`atp_rkey`が空のまま取り残される。次に同じ相手を再フォロー操作すれば`insert_accepted_with_rkey`の`ON CONFLICT DO NOTHING`により依然として記録されないため、手動での気付き・再作成が必要（成立の必須条件ではなく実害は限定的なため、フォローアップ課題として残す）
-  - [x] **実地検証完了**（beta.seiran.org⇔seiran-beta.org間）: 既に結婚成立済み・非承認制のseiran2へAP経由フォロー→即座に`follows.atp_rkey`が記録され、実際に`app.bsky.graph.follow`レコードがseiran8自身のPDSリポジトリへ正しくコミットされていること（`subject`=seiran2のDID）を確認。アンフォローも`unfollow_target`が既存ロジックのまま`atp_rkey`を検知し、AP Undo Follow配送とATP側レコード削除の両方を自動実行することを確認（コード変更不要）。承認制（`manuallyApprovesFollowers=true`）のseiran1についても、seiran-beta.org側セッションの協力でAccept受信経路（`handle_accept`）を追加検証: seiran1本人がAP設定画面から承認→AP Accept送信→こちら側で`follows.status=accepted`・`atp_rkey`設定→`app.bsky.graph.follow`（`subject`=seiran1のDID）が正しくコミットされることまで確認済み。#238の両経路（非承認制の即時コミット・承認制のAccept受信時コミット）とも実サーバー間でgenuineな成立を確認
-- [ ] **リモートseiran特権初期同期**
-  - [ ] `/api/seiran/v1/posts/export` エンドポイント
-  - [ ] 相手サーバーからの生データ一括インポート（最大300件）
+- [ ] **投稿マージ時のアクター結婚（#237）** — 投稿の相互申告マージは投稿者が既に同一actor行のときだけ成立する。投稿者が未結婚だと孤立行のまま残る（`claimed_*` は保持されるので、アクター結婚が後で成立すれば再突合できる）
+- [ ] **結婚成立後のATPフォロー追いコミット（#238）** — フォロー時点で未結婚だった非承認制のリモートseiranアクターは、後で結婚しても `follows.atp_rkey` が空のまま（AP側フォローは機能する）
+- [ ] **リモートseiran特権初期同期** — `/api/seiran/v1/posts/export` と相手サーバーからの一括インポート（最大300件）
 - [ ] **`inbound_activity_process` のドメイン単位レート制限**
-- [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ表示）
-- [ ] **ユーザー設定に「Bsky DM受信許可」項目を追加** — 現状 `chat.bsky.actor.declaration` の `allowIncoming` は登録時・バックフィルとも `"all"` 固定でコミットする（`docs/protocols.md` 9節）。ユーザーが `"all"`/`"following"`/`"none"` を選べる設定画面UIとAPIを追加する
-- [x] **リアクション表示でのブロック/ミュート除外** — ノート取得時のリアクション集計（`fetch_reactions_map`）と「誰が付けたか」一覧（カスタムAPI・Misskey互換`POST /api/notes/reactions`）から除外。WebSocketの`noteUpdated`リアルタイム更新は簡略化のため対象外（`docs/protocols.md` 10節）
-- [ ] **公開リストタイムラインのブロック/ミュートフィルタリング** — `list.rs::timeline` は「閲覧者情報を持たない」設計のため未対応。対応するには閲覧制御全体の見直しが必要（`docs/protocols.md` 10節）
-- [x] **AT Protocol PDS 読み取り・同期系エンドポイント拡充** — `com.atproto.repo.listRecords`/`describeRepo`、`com.atproto.sync.listRepos`/`getLatestCommit`/`listBlobs`。詳細: `docs/protocols.md` 3節
-- [x] **AT Protocol PDS 書き込み系エンドポイント** — `com.atproto.repo.createRecord`/`putRecord`/`deleteRecord`/`applyWrites`（`app.bsky.feed.post`以外の任意コレクション。`createSession`のaccessJwtで認証）。詳細: `docs/protocols.md` 3節
-- [x] **AT Protocol PDS セッション認証系エンドポイント** — `com.atproto.server.createSession`/`refreshSession`/`deleteSession`/`getSession`/`createAppPassword`/`listAppPasswords`/`revokeAppPassword`。詳細: `docs/protocols.md` 3節
-- [x] **AT Protocol PDS XRPCプロキシ（`atproto-proxy`ヘッダー）** — `app.bsky.feed.getTimeline`/`searchPosts`/`app.bsky.notification.listNotifications`等のAppView専用メソッドをAppViewへ透過転送する。詳細: `docs/protocols.md` 3節
-- [x] **生年月日プロフィール項目（Misskey互換`birthday`、AP `vcard:bday`連合、ATP `personalDetailsPref`同期）** — `actors.birth_date`/`birth_date_public`。詳細: `docs/protocols.md` 3節、`docs/database.md`
+- [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ）
+- [ ] **「Bsky DM受信許可」設定** — `chat.bsky.actor.declaration` の `allowIncoming` は現状 `"all"` 固定。`"all"`/`"following"`/`"none"` を選べるUIとAPI（`docs/protocols.md` 9節）
+- [ ] **公開リストタイムラインのブロック/ミュートフィルタ** — `list.rs::timeline` は閲覧者情報を持たない設計のため、閲覧制御全体の見直しが必要（`docs/protocols.md` 10節）
 
 ### インフラ・パフォーマンス
 
-- [ ] **`RedisSessionStore`** — 検索セッションのRedis保存（現状InMemoryのみ、スケールアウト時に必要）
-- [ ] **Turnstile 自然人判別**（優先度: 低） — `TURNSTILE_SECRET_KEY` 設定時のみ有効化、登録/ログイン/パスワードリセットでの検証
+- [ ] **`RedisSessionStore`** — 検索セッションのRedis保存（スケールアウト時に必要）
+- [ ] **Turnstile 自然人判別**（優先度: 低）
 
 ### サードパーティクライアント互換
 
-- [x] **Misskeyストリーミングのチャンネル購読対応**（homeTimeline/localTimeline/hybridTimeline/globalTimeline/userList/hashtag）
-- [ ] **フロントエンドのMisskeyスキーマへの追従改修**、検証済み旧カスタムエンドポイントの整理
-- [ ] APIレスポンスの `bio` 末尾に実ユーザーURLを自動挿入するフォールバック（ZonePane/Miria/Aria等の非Misskey互換画面向け）
-- [x] **`visibility` の値語彙をMisskey本家（`public`/`home`/`followers`/`specified`）にマッピング**。詳細: `docs/protocols.md` 7節
+- [ ] フロントエンドのMisskeyスキーマへの追従、旧カスタムエンドポイントの整理
+- [ ] `bio` 末尾への実ユーザーURL自動挿入（ZonePane/Miria/Aria等の非Misskey互換画面向けフォールバック）
 
 ### テスト・QA
 
 - [ ] 重複排除（シナリオ2マージ処理）のユニットテスト
 - [ ] 未来補正タイムスタンプ採番のテスト
-- [x] 検索ブレンドアルゴリズムの挙動テスト
-- [ ] 連合（Federation）統合テスト（モックAP/ATPサーバー、他seiranハンドシェイク・特権同期のテスト）
-- [x] **`e2e/tests/home-feed-state.spec.ts`「選択タブとスクロール位置が保持される」のflaky対策** — スクロール位置が200pxを超えた瞬間の値ではなく、値が安定してから比較するよう変更（ブラウザのscroll anchoring等で復元直後にわずかに動くケースを許容する）。
-- [ ] 高負荷・スケールアウト検証（`RedisJobQueue` + `RedisSessionStore` 環境での動作確認、プロダクションビルド・デプロイ手順の検証）
-- [x] Playwright E2E基盤の構築（`e2e/`、スタブPLCサーバー、E2E専用DB）と新規登録フローの疎通テスト
-- [x] PR CIでfrontendユニットテストとPlaywright E2E全件を実行し、E2E失敗時のtraceをartifactとして保存（#98）
-- [x] Rust全体へrustfmtを適用し、`cargo fmt --check`と警告ゼロのfrontend lintをCIで強制（#136）
-- [x] E2Eテストの拡充（ログイン、投稿、フォロー、返信、リアクション、検索、プロフィール編集、ハッシュタグ）
-- [x] Fedi配送のE2E化（投稿・返信・リポストがacceptedフォロワーのinboxへ正しいアクティビティで配送されることを、スタブFediアクター＋実HTTP Signaturesで検証）
-- [x] フロントエンドのユニットテスト基盤（vitest + jsdom）を導入し、`lib/format.ts`・`lib/reaction.ts`・`lib/richTextPatterns.ts`・`api/client.ts`（`getErrorMessage`/`cursorParams`/`throwIfError`/`parseJsonBody`）・`NoteCard`/`PostComposer`内の純関数にテストを追加（`npm test`）
-- [x] 管理画面（`/admin`）のE2E化（アクセス制御、サイト設定変更・永続化確認、ユーザー凍結/凍結解除）
-- [x] リスト機能（`/settings/lists`）のE2E化（作成・改名・メンバー追加/削除・削除）
-- [x] クイック通知（ホーム右ペイン`NotificationsPanel`）のE2E化（他ユーザーのリアクションがWS経由でリアルタイムに一覧へ反映されることを検証）。`NotificationsPage`（`/notifications`）は中央ペインに`NotificationsPanel`を表示する形で実装済み、専用ページへ直接遷移した場合の表示もE2Eで検証
-- [x] ピン留め・リポスト取消のUI側状態変化のE2E化（ボタン表示のトグル確認）
-- [x] Bsky側の配送E2E（リモートBskyアクターからのフォロー受理をポーリング方式（`getFollowers`、`seiran-atp-repo::bsky_follower_poll`）で検知し、投稿の`subscribeRepos`配送までを通しで検証）
-- [x] メンション通知のE2E化（ローカル投稿・Fedi受信）。ローカルは`@username`投稿で相手に通知が届くこと・自己メンションで通知されないことを検証、Fedi受信はスタブFediアクターから`tag[].type=="Mention"`付きCreateを送りメンション通知が届くことを検証（`e2e/tests/notifications.spec.ts`）
-- [ ] Bsky受信のメンション通知のE2E化 — `seiran-atp-repo::firehose`は本物のJetstreamサーバーへ接続する設計で、E2E側にイベント注入用のモックが無いため現状のE2E基盤では自動テストできない。実装（`save_bsky_post`内の通知処理）とcurlでの手動確認のみ
-- [x] プロフィール画面のフォロー中/フォロワータブのE2E化（#56、`e2e/tests/follow.spec.ts`）。ユーザー間フォロー後、双方のプロフィールでフォロー数/フォロワー数バッジから右ペインのタブが切り替わり相手アクターが一覧表示されることを検証
-- [x] 設定画面のE2E化（#55、`e2e/tests/settings.spec.ts`）。設定メニューからアカウント設定への遷移とDID表示、現在パスワード誤り時のエラー表示から正しいパスワードでの変更成功・新パスワードでのログインまでの一連、ミュート・ブロック一覧の表示とタブ切り替え・解除操作、表示設定での言語切り替え（英語選択→保存確認→自動に戻す→`/api/auth/me`の`language_preference`検証）を検証
+- [ ] 連合統合テスト（モックAP/ATPサーバー、他seiranハンドシェイク・特権同期）
+- [ ] 高負荷・スケールアウト検証（`RedisJobQueue` + `RedisSessionStore`、プロダクションビルド・デプロイ手順）
+- [ ] Bsky受信メンション通知のE2E — firehose は本物のJetstreamに接続する設計で、E2Eにイベント注入用モックが無い
 
-既存の結合テスト基盤: `crates/seiran-api/tests/`（実DB + 実 `seiran_api::router` を使用、`#[ignore]` で通常の `cargo test` から除外し `cargo test -p seiran-api --test <name> -- --ignored` で明示実行）。
+結合テスト: `crates/seiran-api/tests/*_integration.rs`（`#[ignore]`、実DBを使う。CI では E2E 用DBで実行）。
 
-- [x] **リポスト・引用通知 (#198)** ローカルユーザーの投稿を他ユーザーがリポスト／引用したとき、`type="repost"` / `type="quote"` の通知を永続化してリアルタイム反映する。自己操作とリモート投稿宛は除外し、通知から新しいリポスト／引用投稿へ遷移できる。詳細: `docs/protocols.md` 8節、`docs/ui_spec.md`
-- [x] **認証・ユーザー操作レート制限（#223）** ログイン/TOTPの資格情報種類数制限（ログイン成功でリセット）、IP自動ブロックと管理UI、ログイン・登録全フローへのTurnstile連携・IP別登録数制限、ロール別の投稿数・新規フォロー数・リスト作成数/最大人数・検索回数・メンション宛先数・メディア容量制限を追加。E2E: `e2e/tests/rate-limit.spec.ts`。詳細: `docs/architecture.md`、`docs/database.md`、`docs/ui_spec.md`
-- [x] **Fedi投稿のHTML構造を保持したリッチ表示（#233）** — 受信AP `Note.content`の`<blockquote>`/`<ruby>`/`<b>`/`<i>`/`<s>`/`<code>`/`<pre>`等がプレーンテキスト化（`ap_content_to_markdown_body`）で失われる不具合を修正。`body`はMisskey互換API・Bsky配送・検索・ハッシュタグ抽出が前提とする唯一のフォーマットとして無変更のまま維持し、allowlistでサニタイズしたHTMLを新規`posts.content_html`（リモートFedi投稿のみ）に持たせる方式で追加。メンション/ハッシュタグの`<a>`はseiran内部の遷移先へ書き換え、それ以外の意味的構造は保持する。MFMの装飾関数（`spin`/`jelly`/`blur`等）はMisskey側変換時点で全て`<i>`に縮退し相互に区別できないためそのまま表示。フロントは`RichHtml`コンポーネント（無ければ従来の`RichText`にフォールバック）で描画する。詳細: `docs/database.md`、`docs/protocols.md` 6節
-- [x] **ホームタイムラインのリプライ先フォロー条件** — フォロー中ユーザーの投稿は無条件で表示していたが、リプライ投稿についてはリプライ先投稿者もフォロー中（または自分自身）であることを追加条件にした。SQL関数`post_reply_target_followed(viewer_id, reply_to_post_id)`に判定を集約し、REST（`home_timeline`/`social_timeline`のフォロー中パート、ローカル全体パートは対象外）とWebSocket（`FollowRepository::find_home_recipient_ids`によるホームタイムライン新規投稿配信）の両方から共有する。E2E: `e2e/tests/timeline-visibility.spec.ts`、`e2e/tests/streaming-channels.spec.ts`。詳細: `docs/database.md`、`docs/protocols.md`
-- [x] **プライバシー設定「Bskyのおすすめ機能から除外」** — 設定画面に新設した`/settings/privacy`から、Bsky Discoverフィード等のアルゴリズムレコメンドから自分の投稿を除外するよう要求できる。`app.bsky.actor.contentVisibilityDeclaration/self`をPDSへコミットするアカウントレベルの宣言で、ActivityPub側には対応概念が無いためBsky限定。詳細: `docs/database.md`、`docs/protocols.md` 3節、`docs/ui_spec.md`
-- [x] **フォロー承認制（`actors.is_locked`）** — 設定画面「プライバシー」から、Mastodon/Misskey準拠の`manuallyApprovesFollowers`をON/OFFできる。投稿の公開範囲には影響せず、フォローの成立にのみ本人の承認を要求する。有効な間はローカル↔ローカルフォロー・Fediverseからの受信Followがpendingのまま留まり、設定画面「承認待ちフォロー」（有効時のみメニューに出現、件数バッジ付き）から承認/拒否できる。承認/拒否の実処理は`seiran_common::follow_approval`に共有ロジックとして切り出し、単発API（`POST /api/follow-requests/:follower_actor_id/{accept,reject}`）と、OFF切替時に既存の承認待ち全件を自動承認する一括ジョブ（`Job::FollowRequestsBulkAccept`）の両方から使う。Bskyネットワーク側から直接（seiranのAPIを経由せず）フォローされる経路は対象外（AT Protocolに非公開アカウントという概念自体が無いため）。詳細: `docs/database.md`、`docs/protocols.md`「フォロー承認制」節、`docs/ui_spec.md`
-- [x] **添付画像Lightboxのズーム・パン・ブラウザバック閉じる** — `ImageLightbox`にホイール／ピンチでの100%〜500%ズーム、ズーム中のドラッグ／指1本でのパン、ブラウザバックで閉じる操作を追加。ホイール操作は`preventDefault`で背面タイムラインへのスクロール伝播を止め、開いた際に積む`history.pushState`エントリをUI操作からの終了時も`history.back()`で消費させることで、履歴に残さず一貫して閉じる。詳細: `docs/ui_spec.md` 2.2b節
-- [x] **クイック通知欄・通知画面のスクロール位置記憶** — ホームタイムラインのスクロール記憶（`HomeFeedContext`）と同じ思想で、【クイック通知】タブ（Home/Search画面の右ペイン、`.rightScroll`独自スクロール）と通知画面（`/notifications`、中央ペインwindowスクロール）のスクロール位置もそれぞれ`RightPaneContext`（インメモリ）で記憶し、他画面へ遷移して戻ってきた際に復元する。`NotificationsPanel`に`scrollY`/`onScrollYChange`/`getScrollContainer`に加え`cache`/`onCacheChange`（一覧本体・追加読み込み分含む）のオプションpropsを追加し、呼び出し元がスクロールコンテナと記憶先contextを渡す方式で両方の用途を共通化。一覧本体も記憶しないと、復帰時の再フェッチが先頭ページ分（`PAGE_SIZE`件）だけになり実高さ不足でスクロール位置の復元が壊れる不具合があり、その修正として一覧キャッシュを追加。さらに、そのキャッシュを`useEffect`経由の`setItems`ではなく`useCursorPagination`（共通カーソルページネーションhook）の初期値として渡すよう変更し、初回レンダーの時点から復元済みの内容を表示するようにした。`useEffect`任せだと最初の1回だけ空一覧（実高さがほぼ0）になる瞬間があり、そこで`window.scrollY`がブラウザに強制クランプされ継続保存リスナーがそれを正しい記憶へ上書きしてしまう回帰（通知画面`/notifications`のみ発生）があったため。加えて、無限スクロールで深く読み込んだ状態（実機で120件超）から遷移すると**2回目以降の復帰でスクロール位置が先頭に戻る**別の回帰があった：アンマウント時にDOMが取り除かれている最中（実高さが縮む一瞬）にも同様のクランプが起き、一覧が長いほど縮小に時間がかかりクランプ由来の`scroll`イベントを拾いやすくなるため。遷移を起こすクリックの瞬間に同期的に現在値を確定・凍結し以降の上書きを止める対策（`freezeScroll`/`navigatingAwayRef`、ホームタイムラインの`navigatingAway`と同じ考え方）を追加して解消。詳細: `docs/ui_spec.md` 2.4節、2.6節
-- [x] **退会済みアクター（`withdrawn_at`）のチェック漏れ修正（#242）** — 退会処理は`actors.withdrawn_at`を設定するのみで、これを参照すべき箇所（ログイン・プロフィール表示・検索・フォロー一覧・WebFinger/ActivityPub Actor文書/Outbox等の連合向け公開エンドポイント）が実際にはチェックしておらず、退会後も本人が普通にログインでき、他者・連合先からは退会前と変わらず見え続ける状態だった。ログイン系（`find_login_by_email`/`find_login_by_username`、`extract_auth`）に`withdrawn_at`フィルタを追加。`ActorRepository::find_by_username_domain`は退会済みアクターを除外する版に変更し、AP受信ジョブ等の内部処理（退会済みでも解決できないと処理自体が失敗する経路）はあえて不自然な名前の`find_including_withdrawn_by_username_domain`（除外しない版）を明示的に使うよう分離した。共通のブロック/ミュート判定関数`actor_is_hidden_for_viewer`にも退会済み判定を追加。加えて、ブロック・ミュート・リポストミュートは退会と同時に関係そのものを解除する物理削除に加え、一覧クエリ自体にも`withdrawn_at IS NULL`を課した（修正前に退会し関係行が残っている既存データへのフェイルセーフ、「退会済みアクターは他者から見て存在しない」原則に統一）。一方、管理画面（`/admin`ユーザー管理）は一般ユーザー向け可視性ルールの対象外とし、退会済みユーザーも引き続き一覧表示した上で`AdminUserRow`/`AdminUserResponse`に`withdrawn_at`を追加し「退会済み」バッジを表示する。詳細: `docs/database.md`
-- [x] **既存Bluesky DID転入によるアカウント作成** — 新規DID発行ではなく、既存のBluesky/AT Protocolアカウント（DID・投稿・フォロー関係・blob）をそのままseiranへ転入させる登録経路。CARv1/MSTデコード、移行元PDSクライアント（SSRF対策込み）、`submitPlcOperation`成功を不可逆境界とする状態機械、データ取り込み（投稿・画像/動画添付・フォロー関係の復元・`seiranPost`拡張オブジェクトによる復元、転入元もseiranの場合）、Bsky DM（1:1）の初回同期cursorページング対応まで含む。詳細: `docs/account_migration.md`、`docs/architecture.md`、`docs/database.md`、`docs/protocols.md`
-- [x] **転出元API対応（seiranが転出元PDSとして応答する側）** — 既存DID転入の逆方向。他PDSがseiranから既存DIDを引き出す際に必要な`com.atproto.identity.{getRecommendedDidCredentials,requestPlcOperationSignature,signPlcOperation,submitPlcOperation}`/`com.atproto.server.{checkAccountStatus,deactivateAccount}`をサーバー側に実装し、`com.atproto.server.createSession`にメール2FA（`authFactorToken`）を追加。前提としてアカウント単位PLCローテーションキー（ジェネシス作成アカウントは`[アカウント専用鍵, サーバー共有鍵]`の2本構成へ移行、既存112件をバックフィル済み）を導入。DID転出済み状態（`did_moved_out_at`）は読み取りのみ可・書き込み系（投稿・リアクション・リポスト・フォロー・リスト操作・DM送信）を拒否する第三の状態として実装。詳細: `docs/account_migration.md` 6節、`docs/architecture.md`、`docs/database.md`、`docs/protocols.md`
-- [x] **brid.gyブリッジポスト対応** — brid.gy(Bridgy Fed)がプロトコル間で自動生成したコピー投稿（ブリッジポスト）を、元ポストと1レコードに統合せず別行のまま`bridge_of_post_id`/`ap_bridge_post_id`/`atp_bridge_post_id`で相互リンクする。取り込み時に元ポストが未登録なら`Job::FetchBridgeOriginal`で能動的に取得し、任意の新規投稿確定時にも待機中ブリッジポストを索引で探して受動的にリンクする安全網を持つ。検索は未解決ブリッジポストを除外し解決済みなら元ポストへ置換、投稿詳細は「ブリッジポストです【元ポストを表示】」バナー、ブリッジポストへの返信・リアクションは確認ダイアログを挟む。リポスト・引用は対象がブリッジポストなら内部的に元ポストへ、対象が元ポスト（対向プロトコル側にブリッジポストを持つ）なら配送先識別子をブリッジポスト側へ差し替える（元ポストがseiranネイティブで両プロトコル実体を持つ場合は例外）。詳細: `docs/protocols.md` 5節、`docs/database.md`、`docs/architecture.md` 5節
-- [x] **brid.gyブリッジユーザー対応** — brid.gy(Bridgy Fed)がプロトコル間で自動投影したアクター（ブリッジユーザー）から実ユーザーへのリンク（`actors.bridge_real_actor_id`）を自動検出・解決する（導線自体はスキーマ・フロント共にday1から存在していたが、検出・書き込み処理が未実装だった）。AP側ブリッジユーザーは`ap_uri`埋め込みのDIDから、ATP側ブリッジユーザーはハンドルから復元したusername/domainのwebfinger解決から、それぞれ実ユーザーを特定し、ローカル未登録なら能動的に取得・upsertする。プロフィール表示のたびに未解決なブリッジユーザーへ`Job::BridgeUserLinkResolve`を積む「表示時再検証」パターン（ブリッジ関係は不変のため一度解決すれば以後は再検証しない）。詳細: `docs/protocols.md` 5節、`docs/architecture.md` 5節、`docs/ui_spec.md` 3節
-- [x] **frontend/backend共通バージョン管理・互換性チェック** — `Cargo.toml`の`[workspace.package].version`と`frontend/package.json`の`version`を単一のシステムバージョン（0.2.0開始）として共有する。フロントエンド・サーバーそれぞれに「対応する対向の最低バージョン」定数を持たせ（現状いずれも0.1.0）、サーバーは全APIレスポンスへ自身のバージョン・最低対向バージョンをヘッダー付与、フロントエンドは全レスポンスでこれをチェックし非互換なら`ReloadRequiredDialog`でリロードを促す。LeftNav左下の「Powered by Seiran」から開く`ServerInfoDialog`でフロントエンド・サーバー双方のバージョンを表示する。詳細: `docs/architecture.md` 2.1節、`docs/ui_spec.md` 4.1節
+## 完了
+
+### 基盤フェーズ
+
+- [x] **フェーズ1: DBスキーマ・統一ID採番** — `docs/database.md`
+- [x] **フェーズ2: ローカル認証・MiAuth互換** — `docs/architecture.md` 4節
+- [x] **フェーズ3: ジョブキュー・統合バイナリ** — `docs/architecture.md` 3・5節
+- [x] **フェーズ4: マルチプロトコル通信エンジン** — AP/ATP双方向連合、クロスプロトコル配送。`docs/protocols.md`
+- [x] **フェーズ4.5: フロントエンドMVP**
+- [x] **フェーズ4.6: メディア・管理機能** — S3互換ストレージ、画像/動画/音声、管理画面
+- [x] **フェーズ5: 重複排除・マージエンジン** — `docs/protocols.md` 5節
+- [x] **フェーズ6: 検索セッション管理** — `docs/architecture.md` 6節
+- [x] **フェーズ7: 3ペインUI・Misskey API互換** — `docs/ui_spec.md`、`docs/protocols.md` 7節
+- [x] **frontend/backend共通バージョン管理・互換性チェック** — `docs/architecture.md` 2.1節
+- [x] **PWA対応** — サイト設定からmanifestを動的生成。`docs/architecture.md`
+- [x] **国際化** — 日英中（繁/簡）韓西独仏、エラーコードの多言語化。`docs/architecture.md` 8節
+- [x] **pg_bigm による本文検索** — `docs/database.md`
+- [x] **コード改善大会（2026-09-26）** — DRY・レースコンディション・SQL・責務分割・SSRF。規約は `docs/coding_rules.md` 2節
+
+### 認証・アカウント
+
+- [x] **TOTP二段階認証・複数パスキー（#65）** — `docs/architecture.md` 4節
+- [x] **メールアドレス変更（#59）** — `docs/database.md`
+- [x] **アプリトークン（#60）** — `docs/database.md`
+- [x] **認証・操作レート制限（#223）** — 資格情報種類数制限、IP自動ブロック、Turnstile、ロール別上限。`docs/architecture.md`
+- [x] **退会済みアクターの扱い（#242）** — ログイン・表示・連合エンドポイントから除外。`docs/database.md`
+- [x] **ユーザー凍結（ローカル・リモート共通）** — `docs/database.md`「`actors.suspended_at`」
+- [x] **既存Bluesky DIDの転入・seiranからの転出** — `docs/account_migration.md`
+- [x] **フォロー承認制（`actors.is_locked`）** — `docs/protocols.md`「フォロー承認制」
+- [x] **プライバシー設定「Bskyのおすすめから除外」** — `docs/protocols.md` 3節
+- [x] **ロール `emoji-editor`・管理画面のトピック別アクセス制御（#179）** — `docs/database.md`
+
+### 投稿・表示
+
+- [x] **本文のリンク・メンション・ハッシュタグ** — `docs/protocols.md` 6節
+- [x] **ハッシュタグタイムライン・ホームへのピン留め** — `docs/database.md`
+- [x] **Fedi投稿のHTML構造保持（#233）** — `posts.content_html`。`docs/protocols.md` 6節
+- [x] **カスタム絵文字（本文・表示名・bio・CW・リアクション・Misskey互換API）** — `docs/protocols.md`、`docs/ui_spec.md`
+- [x] **リモート絵文字のカタログ化・インポート（#73）** — `docs/ui_spec.md` 2.8節
+- [x] **Unicode絵文字の twemoji 統一表示** — `docs/ui_spec.md`
+- [x] **添付（複数ファイル・Bsky embed選択・ライトボックス）（#227, #64, #153）** — `docs/protocols.md` 3節、`docs/ui_spec.md` 2.2b節
+- [x] **URLカード（OGP・oEmbed・x.com）** — `docs/protocols.md`、`docs/ui_spec.md`
+- [x] **GIFアニメの自動再生統一** — `post_attachments.is_gif`
+- [x] **CW（#229）・アンケート（#228）・リモートアンケートの生存監視** — `docs/protocols.md` 3節
+- [x] **ポストの言語プロパティ** — `docs/protocols.md` 3節
+- [x] **引用（#116, #134）・リポストのURLカード化（#132）** — `docs/protocols.md` 4節
+- [x] **返信・引用・リポスト・リアクション件数表示** — `docs/database.md`
+- [x] **縦に長い投稿の折りたたみ** — `docs/ui_spec.md`
+- [x] **NoteCardのリモートサーバー表示** — `docs/ui_spec.md`
+- [x] **未取り込み参照の表示とその場取り込み（#230-234）** — `docs/protocols.md` 1節
+- [x] **brid.gy ブリッジポスト・ブリッジユーザー** — `docs/protocols.md` 5節
+- [x] **「開く」（URL・ID・QR・OCR）（#165）** — `docs/architecture.md`
+- [x] **プロフィール（bio HTML・key-value・バナー・別のアカウント・生年月日）** — `docs/ui_spec.md` 2.2節、`docs/protocols.md`
+- [x] **未設定アバターの生成（#211）** — `docs/architecture.md`
+- [x] **リモートメディアプロキシ（#87）** — `docs/architecture.md`
+- [x] **OGP（投稿詳細・プロフィール）** — `docs/architecture.md` 8.1節
+
+### タイムライン・検索
+
+- [x] **ホーム/ローカル/ソーシャル/グローバル（#78）と公開範囲（#91, #105）** — `docs/database.md`、`docs/ui_spec.md`
+- [x] **ホームTLのリプライ先フォロー条件** — `post_reply_target_followed`。`docs/database.md`
+- [x] **タブ選択・スクロール位置の保持（#90）** — `docs/ui_spec.md` 2.4節・2.6節
+- [x] **投稿検索（Bluesky AppView統合・検索式）（#146, #101）** — `docs/architecture.md` 6節
+- [x] **用途別ユーザー検索** — `docs/architecture.md`
+
+### ソーシャル機能
+
+- [x] **フォロー・フォロー中/フォロワー一覧（リモート全件取得含む）（#56, #68）** — `docs/protocols.md` 2節
+- [x] **フォローインポート** — `docs/architecture.md` 5節
+- [x] **リスト** — `docs/database.md`
+- [x] **ブロック・ミュート・リポストミュート** — `docs/protocols.md` 10節
+- [x] **通知（リアクション・メンション・返信・リポスト・引用）と通知プレビュー** — `docs/protocols.md` 8節、`docs/ui_spec.md` 2.1節
+- [x] **統一通報（#107）** — ActivityPub Flag / Bluesky Moderation Service転送
+- [x] **ダイレクトメッセージ（リッチ表示・絵文字リアクション・Bsky DM）** — `docs/protocols.md` 9節、`docs/ui_spec.md` 2.5節
+- [x] **ポスト詳細画面（タブ・返信ツリー・ログイン不要）（#226）** — `docs/ui_spec.md` 2.3節
+- [x] **設定画面（#55）** — `docs/ui_spec.md` 2.7節
+
+### 連合
+
+- [x] **Authorized Fetch（署名付きGET）** — `docs/protocols.md`「署名付きGET」
+- [x] **反応アクティビティの会話参加者への配送（#235）** — `docs/protocols.md` 2節
+- [x] **AP Move 受信・alsoKnownAs** — `docs/protocols.md` 2節
+- [x] **Fediverseリレー参加（#140）** — `docs/protocols.md`
+- [x] **リモートseiranアクターの相互申告マージ（#236）** — `docs/protocols.md` 11節
+- [x] **投稿のAP/ATPロスレス往復（`seiranPost`、#237）** — `docs/protocols.md` 5節
+- [x] **リモートseiranへのフォローのATP同期（#238）** — `docs/protocols.md`
+- [x] **Bskyリポストのタイムライン反映・リポスト/引用通知（#206）** — `docs/protocols.md` 8節
+- [x] **ATP標準クライアントからの投稿・PDS各種XRPC（repo/sync/server/identity・プロキシ）** — `docs/protocols.md` 3・8節
+
+### サードパーティクライアント互換
+
+- [x] **Misskey互換API（Aria 等）** — `visibility` 語彙のマッピング、ストリーミングのチャンネル購読を含む。`docs/protocols.md` 7節
+
+### テスト・QA
+
+- [x] Playwright E2E 基盤と主要画面・連合配送の E2E
+- [x] frontend ユニットテスト（vitest + jsdom）
+- [x] CI での rustfmt・clippy・lint・ユニット・結合・E2E（失敗時 trace 保存）

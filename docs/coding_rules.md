@@ -1,7 +1,6 @@
 # seiran コーディングルール
 
-> 作成日: 2026-06-30  
-> このドキュメントは seiran プロジェクトのすべての Rust コードに適用される（末尾のフロントエンド向けセクションを除く）。
+> seiran の Rust コードに適用する（12節はフロントエンド向け）。
 
 ---
 
@@ -91,15 +90,15 @@ async fn create_note(...) -> impl IntoResponse {
 | 8 | `reqwest::Client::new()` を関数内でローカルに生成する | `AppState` または引数から受け取る |
 | 9 | ビジネスロジック関数でファイルパスに `main.rs` を選ぶ | `handlers/` または `common/src/*/service.rs` に置く |
 | 10 | スタブ値（`user_id = 1`, `username = "test_user"`）を本番コードに残す | セッションまたはトークンから実際のユーザーを取得する |
-| 11 | 新規クエリを `sqlx::query`/`query_as`（実行時検証）で書く | `sqlx::query!`/`query_as!`/`query_scalar!`（コンパイル時検証）を使う。SELECT列と構造体のズレを実行時ではなくビルド時に検出できる（docs/code_audit_2026-08-05.md R-6）。`cargo sqlx prepare --workspace`の実行を忘れないこと |
+| 11 | 新規クエリを `sqlx::query`/`query_as`（実行時検証）で書く | `sqlx::query!`/`query_as!`/`query_scalar!`（コンパイル時検証）を使う。SELECT列と構造体のズレをビルド時に検出できる。`cargo sqlx prepare --workspace`の実行を忘れないこと |
 | 12 | DBから取得済みのActor/投稿レコードに対して `domain == local_domain`（または`state.local_domain`）でローカル/リモート判定する | `actor_type == "local"` を使う（`actors.actor_type`列、`insert_local`の不変条件によりlocal⇔domain=local_domainは常に一致）。Actor/TimelinePostは既にactor_typeを保持、他の型はSELECTに`a.actor_type::text AS actor_type`を1列足すだけで済むことが多い。Hostヘッダー・WebFingerクエリ・ユーザー入力文字列など、DBレコードではない外部入力のdomain比較は対象外（そちらは元々SQL化できない） |
 | 13 | `jobs::*::handle()` が既存の `Result<(), String>` のまま新規エラー分岐を追加する | 一時的障害（ネットワーク・タイムアウト等）と恒久的失敗（不正な入力・鍵未設定等）を区別できる場合は `Result<(), JobError>`（`traits::JobError`）を返す。`String`は`From`で自動的に`Transient`扱いになるため、触っていないジョブは変更不要。配送・外部API呼び出し系ジョブから優先的に移行する（`jobs::ap_delivery`が実例） |
 | 14 | `actors.notes_count`/`followers_count`/`following_count` を `repository/post.rs` 以外から直接 `UPDATE` する、または `posts`/`follows` への都度の `COUNT(*)` で代替する | `notes_count`の増減は`repository/post.rs`の既存の書き込みメソッド（`insert_full`等）内のCTEパターン（`docs/database.md`「非正規化カウンタ」参照）に倣うこと。`followers_count`/`following_count`は`trg_follows_sync_counts`トリガーが`follows`への書き込みから自動的に再計算するため、`repository/follow.rs`側でカウンタ更新を意識する必要はない（新しいフォロー状態遷移を追加する場合も、素朴な`follows`へのINSERT/UPDATE/DELETEを書くだけでよい） |
-| 15 | `x IN (SELECT ...)` / `x NOT IN (SELECT ...)` をSQLに書く | `EXISTS` / `NOT EXISTS` の相関サブクエリで書く。`NOT IN (SELECT ...)`はサブクエリ結果にNULLが1件でも含まれると条件全体がUNKNOWN（WHERE句ではfalse）になり、孤立メディアGCが一度も発動しない不具合を起こした（2026-09-26）。`IN (SELECT ...)`自体はNULLで壊れないが、`NOT`を足すだけで同じ罠に落ちるため形ごと禁止する。リテラル列挙（`IN ('a','b')`）と`= ANY($1)`は可。`crates/seiran-common/tests/sql_style.rs`が全`.rs`・全マイグレーションを走査して機械的に検出する（CIの`cargo test`で落ちる） |
+| 15 | `x IN (SELECT ...)` / `x NOT IN (SELECT ...)` をSQLに書く | `EXISTS` / `NOT EXISTS` の相関サブクエリで書く。`NOT IN (SELECT ...)`はサブクエリ結果にNULLが1件でも含まれると条件全体がUNKNOWN（WHERE句ではfalse）になる。`IN (SELECT ...)`自体はNULLで壊れないが、`NOT`を足すだけで同じ罠に落ちるため形ごと禁止する。リテラル列挙（`IN ('a','b')`）と`= ANY($1)`は可。`crates/seiran-common/tests/sql_style.rs`が全`.rs`・全マイグレーションを走査して機械的に検出する（CIの`cargo test`で落ちる） |
 | 16 | NULL許容列を`<>`・`NOT (...)`・`= ANY`で比較し、NULL行の扱いを考えずに済ませる | NULL時にその行を含めたいのか除外したいのかをコメントで明示し、含めたいなら`IS DISTINCT FROM`/`COALESCE`を使う。`NOT (x = ANY($1))`は配列がRustの`Vec<i64>`由来（NULLを含まない）である場合に限る |
 | 17 | 「SELECTで状態を読む → アプリで判断 → UPDATE/INSERTで書く」を別々の文・トランザクション外で行う（参照＋更新、更新＋参照） | (a) 1文にできるなら`INSERT ... ON CONFLICT ... RETURNING`・`UPDATE ... RETURNING`・`DELETE ... RETURNING`・`UPDATE ... SET col = f(col)`（例: `repository::poll::increment_poll_votes`）で1文にする。(b) 読んだ値で分岐する必要があるなら、トランザクション内で`SELECT ... FOR UPDATE`（行が無い場合に備えるなら先に`INSERT ... ON CONFLICT DO NOTHING`、例: `ReactionRepository::upsert`）か、キー単位の`pg_advisory_xact_lock`（例: `rate_limit::lock_actor_rate_limit`）で直列化する。(c) 外部API（ATPコミット・AP配送・PLC登録等）をトランザクション内に含めない。先にDBで状態を確保し（例: `follow_exec::establish_atp_follow`）、トランザクション外で外部呼び出しを行い、失敗時は確保した状態を取り消す |
-| 18 | `TimelinePost`を返すクエリのSELECT列・結合を手書きする、または`TimelinePost`に`#[sqlx(default)]`を足す | `concat!("SELECT ", timeline_post_columns!(), " FROM posts p ", timeline_post_joins!(), ...)`を使う（`repository/post.rs`）。列の書き漏れを`#[sqlx(default)]`が空値で黙認し、リストTL・ピン留め・検索結果でCWが効かない不具合を起こした。可視性は必ずSQL関数`post_is_visible_to`で判定し、`visibility NOT IN (...)`等を手書きしない（参照埋め込みで`direct`がフォロワーへ漏れた） |
-| 19 | `#[allow(clippy::too_many_arguments)]`で引数過多の指摘を黙らせる、または1つの関数に「A・B・Cの手順」を直書きする | 同時に渡される引数の束に名前を付けた構造体にする（例: `NewNotification`・`NewReaction`・`FediActorProfile`・`PostCommit`・`Page`）。長い関数は手順ごとの関数に分け、最上位には手順名の呼び出しだけを並べる（例: `handlers::notes::reactions::create_reaction_inner`）。2026-09-26時点で抑制は0件。長大関数の残存箇所は`docs/improvement_2026-09-26.md`参照 |
+| 18 | `TimelinePost`を返すクエリのSELECT列・結合を手書きする、または`TimelinePost`に`#[sqlx(default)]`を足す | `concat!("SELECT ", timeline_post_columns!(), " FROM posts p ", timeline_post_joins!(), ...)`を使う（`repository/post.rs`）。`#[sqlx(default)]`は列の書き漏れを空値で黙認してしまう。可視性は必ずSQL関数`post_is_visible_to`で判定し、`visibility NOT IN (...)`等を手書きしない（`direct`の宛先判定を書き漏らすとDMが漏れる） |
+| 19 | `#[allow(clippy::too_many_arguments)]`で引数過多の指摘を黙らせる、または1つの関数に「A・B・Cの手順」を直書きする | 同時に渡される引数の束に名前を付けた構造体にする（例: `NewNotification`・`NewReaction`・`FediActorProfile`・`PostCommit`・`Page`）。長い関数は手順ごとの関数に分け、最上位には手順名の呼び出しだけを並べる（例: `handlers::notes::reactions::create_reaction_inner`） |
 
 ---
 
@@ -431,19 +430,13 @@ seiran-api
 
 ## 9. ログ出力の方針
 
-現在 `eprintln!` を使っているが、以下のフォーマットを守る（将来 `tracing` クレートへの移行を想定）。
+`tracing` のマクロ（`error!`/`warn!`/`info!`/`debug!`）を使う。メッセージは `[モジュール名] 内容: 詳細` の形にし、失敗のログには必ずエラー内容を含める。
 
 ```rust
-// フォーマット: [モジュール名] メッセージ: 詳細
-eprintln!("[atp] commit 完了: at_uri={}, cid={}", at_uri, commit_cid_str);
-eprintln!("[register] ハッシュ失敗: {}", e);
-
-// エラーログは必ず e（エラー内容）を含める
-eprintln!("[create_note] INSERT 失敗: {}", e);  // Good
-eprintln!("[create_note] INSERT 失敗");          // Bad（原因不明）
+tracing::info!("[atp] commit 完了: at_uri={}, cid={}", at_uri, commit_cid_str);
+tracing::error!("[create_note] INSERT 失敗: {}", e);  // Good
+tracing::error!("[create_note] INSERT 失敗");          // Bad（原因が分からない）
 ```
-
-成功パスのログは `[モジュール名]`、失敗パスのログは `[ERROR][モジュール名]` プレフィクスを使うことを推奨する（将来の `tracing` 移行時に level に対応させやすくなる）。
 
 ---
 
@@ -492,15 +485,15 @@ Axum のハンドラ（`async fn inbox_handler(...) -> impl IntoResponse`）は 
 
 `main.rs` が 100 行を超えた時点でハンドラを `handlers/` に移動すること。1 ファイルの上限は 200 行。
 
-## 4. コメントの書き方
+## 11. コメントの書き方
 
-実装意図が自明でない箇所（隠れた制約・不変条件・特定バグの回避策・読み手が驚く挙動）には理由を
-1行で書く。`#NNN`（GitHub issue 番号）だけを書いて済ませない — issue 番号は「なぜそのコードが
-あるか」を説明しない（GitHub を開かないと分からない上、番号だけでは検索性も低い）。理由そのものを
-書いた上で、参照として issue 番号を併記するのはよい。既存コメントの一斉置換は不要、触った箇所から
-直す。
+コメントは、コードだけでは分からない「なぜ」を書く。一見奇異に見える実装で、そうしないと何が起きるか（隠れた制約・不変条件・外部実装の癖への対応・読み手が驚く挙動）を1〜2行で書く。
 
-## 5. フロントエンド: テキスト入力要素の `font-size`
+- 書かない: コードを読めば分かること、不具合の経緯（「〇〇というバグがあったので」「以前は〜していた」）、日付、実機確認の記録、誰の指摘か。経緯は `git log` に残る。
+- `#NNN`（issue 番号）だけで済ませない。理由そのものを書く（番号の併記はよい）。
+- 設計文書（`docs/`）も同じ方針で、現在の実装と動作だけを書く。
+
+## 12. フロントエンド: テキスト入力要素の `font-size`
 
 `input[type="text"|"search"|"email"|"url"|"tel"|"password"|"number"]` や `textarea` など、
 テキストカーソルが立つフォーカス可能な入力要素の `font-size` は必ず 16px 相当（ルート
