@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use sqlx::Row;
+use crate::repository::{ActorRepository, PgActorRepository};
 
 use crate::ap::outbox::fetch_ap_history_raw;
 use crate::atp::client::{fetch_atp_history, upsert_bsky_post, BskyPost};
@@ -143,27 +143,21 @@ async fn save_atp_posts(
     at_did: &str,
     posts: &[BskyPost],
 ) -> Result<(), String> {
-    let actor_row = sqlx::query("SELECT id FROM actors WHERE at_did = $1 LIMIT 1")
-        .bind(at_did)
-        .fetch_optional(pool)
+    let Some(actor) = PgActorRepository::new(pool.clone())
+        .find_by_did(at_did)
         .await
-        .map_err(|e| format!("アクターDB検索失敗: {}", e))?;
-
-    let actor_id: i64 = match actor_row {
-        Some(row) => row
-            .try_get("id")
-            .map_err(|e| format!("id 取得失敗: {}", e))?,
-        None => {
-            tracing::warn!(
-                "[ActorHistorySync] アクターが DB に存在しません（スキップ）: {}",
-                at_did
-            );
-            return Ok(());
-        }
+        .map_err(|e| format!("アクターDB検索失敗: {}", e))?
+    else {
+        tracing::warn!(
+            "[ActorHistorySync] アクターが DB に存在しません（スキップ）: {}",
+            at_did
+        );
+        return Ok(());
     };
+    let actor_id = actor.id;
 
     // 通常のBsky受信経路（firehose等）と同じ保存処理を通す。添付・URLカード・
-    // 返信/引用ゲート情報の復元も含む（#過去ログ添付欠落修正）。
+    // 返信/引用ゲート情報の復元も含む。
     let mut saved = 0usize;
     for post in posts {
         match upsert_bsky_post(pool, queue, http, actor_id, post).await {

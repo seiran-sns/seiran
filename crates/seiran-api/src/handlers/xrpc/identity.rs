@@ -126,17 +126,15 @@ pub async fn xrpc_request_plc_operation_signature(
     }
 
     // メール爆撃対策: 同一actor+purposeで直近60秒以内に発行済みなら再送しない。
-    let recent: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM email_short_codes
-         WHERE actor_id = $1 AND purpose = $2 AND created_at > now() - interval '60 seconds'
-         LIMIT 1",
+    let recent = seiran_common::repository::email_short_code::issued_recently(
+        &state.db,
+        actor.id,
+        PLC_SIGNATURE_PURPOSE,
+        60,
     )
-    .bind(actor.id)
-    .bind(PLC_SIGNATURE_PURPOSE)
-    .fetch_optional(&state.db)
     .await
-    .unwrap_or(None);
-    if recent.is_some() {
+    .unwrap_or(false);
+    if recent {
         return Json(serde_json::json!({})).into_response();
     }
 
@@ -385,13 +383,8 @@ pub async fn xrpc_submit_plc_operation(
             e
         );
     }
-    if let Err(e) = sqlx::query(
-        "UPDATE actors SET did_moved_out_at = COALESCE(did_moved_out_at, $1) WHERE id = $2",
-    )
-    .bind(now)
-    .bind(actor.id)
-    .execute(&state.db)
-    .await
+    if let Err(e) =
+        seiran_common::repository::actor::mark_did_moved_out(&state.db, actor.id, now).await
     {
         tracing::error!(
             "[submitPlcOperation] did_moved_out_at設定失敗（DIDは既にseiranを離れました！） actor_id={}: {}",

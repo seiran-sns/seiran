@@ -680,3 +680,10 @@ impl FollowRepository for PgFollowRepository {
         .await
     }
 }
+
+pub async fn follower_ids_of(pool: &PgPool, target_actor_id: i64) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT follower_actor_id FROM follows WHERE target_actor_id = $1")
+        .bind(target_actor_id)
+        .fetch_all(pool)
+        .await
+}

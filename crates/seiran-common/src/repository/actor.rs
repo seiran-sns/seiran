@@ -686,3 +686,268 @@ impl ActorRepository for PgActorRepository {
         .map(|_| ())
     }
 }
+
+/// アクターのアバター・バナーの解決済み URL と非正規化カウンタ（Misskey 互換 `UserDetailed`）。
+#[derive(Debug, sqlx::FromRow)]
+pub struct ActorMediaCountsRow {
+    pub id: i64,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
+    pub notes_count: i64,
+    pub followers_count: i64,
+    pub following_count: i64,
+}
+
+pub async fn media_and_counts_for_actors(
+    pool: &sqlx::PgPool,
+    ids: &[i64],
+) -> Result<Vec<ActorMediaCountsRow>, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_as(
+        "SELECT a.id, a.created_at, a.display_name, \
+         COALESCE(rtrim(avatar_sp.public_url, '/') || '/' || avatar_mf.storage_key, a.avatar_url) AS avatar_url, \
+         COALESCE(rtrim(banner_sp.public_url, '/') || '/' || banner_mf.storage_key, a.banner_url) AS banner_url, \
+         a.notes_count, a.followers_count, a.following_count \
+         FROM actors a \
+         LEFT JOIN media_files avatar_mf ON avatar_mf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers avatar_sp ON avatar_sp.id = avatar_mf.storage_provider_id \
+         LEFT JOIN media_files banner_mf ON banner_mf.id = a.banner_media_id \
+         LEFT JOIN storage_providers banner_sp ON banner_sp.id = banner_mf.storage_provider_id \
+         WHERE a.id = ANY($1)",
+    )
+    .bind(ids)
+    .fetch_all(pool)
+    .await
+}
+
+/// 一覧表示用のアクターの最小情報（解決済みアバター URL 付き）。
+#[derive(Debug, sqlx::FromRow)]
+pub struct ActorLiteRow {
+    pub id: i64,
+    pub username: String,
+    pub domain: String,
+    pub actor_type: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub emoji_map: Option<serde_json::Value>,
+}
+
+pub async fn lite_rows_for_actors(
+    pool: &sqlx::PgPool,
+    ids: &[i64],
+) -> Result<Vec<ActorLiteRow>, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_as(
+        "SELECT a.id, a.username, a.domain, a.actor_type::text AS actor_type, a.display_name, \
+                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
+                a.emoji_map \
+         FROM actors a \
+         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+         WHERE a.id = ANY($1)",
+    )
+    .bind(ids)
+    .fetch_all(pool)
+    .await
+}
+
+/// DID 転出済みにする（既に設定済みなら最初の時刻を保つ）。
+pub async fn mark_did_moved_out(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE actors SET did_moved_out_at = COALESCE(did_moved_out_at, $1) WHERE id = $2")
+        .bind(at)
+        .bind(actor_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+/// DID 転入で、転入元 DID のリモートキャッシュ行をローカルアクターに変換する。
+pub struct ConvertToLocal<'a> {
+    pub actor_id: i64,
+    pub user_id: i64,
+    pub username: &'a str,
+    pub domain: &'a str,
+    pub ap_uri: &'a str,
+    pub signing_key_pem: &'a str,
+    pub rotation_key_pem: &'a str,
+}
+
+pub async fn convert_remote_to_local(
+    pool: &sqlx::PgPool,
+    c: &ConvertToLocal<'_>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE actors SET actor_type = 'local', user_id = $1, username = $2, domain = $3,
+             ap_uri = $4, at_signing_key_pem = $5, at_rotation_key_pem = $6, updated_at = NOW()
+         WHERE id = $7",
+    )
+    .bind(c.user_id)
+    .bind(c.username)
+    .bind(c.domain)
+    .bind(c.ap_uri)
+    .bind(c.signing_key_pem)
+    .bind(c.rotation_key_pem)
+    .bind(c.actor_id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// OGP に使う、未退会アクターのプロフィール。
+#[derive(Debug, sqlx::FromRow)]
+pub struct OgpActorRow {
+    pub actor_id: i64,
+    pub actor_type: String,
+    pub display_name: Option<String>,
+    pub bio: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+pub async fn ogp_profile(
+    pool: &sqlx::PgPool,
+    username: &str,
+    domain: &str,
+) -> Result<Option<OgpActorRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT a.id AS actor_id, a.actor_type::text AS actor_type, a.display_name, a.bio, \
+                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url \
+         FROM actors a \
+         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+         WHERE a.username = $1 AND a.domain = $2 AND a.withdrawn_at IS NULL LIMIT 1",
+    )
+    .bind(username)
+    .bind(domain)
+    .fetch_optional(pool)
+    .await
+}
+
+/// ATP プロフィールの再コミットに必要な、表示名・自己紹介・プロフィール項目とアバター・
+/// バナーの blob 情報（`sha256`・`mime_type`・`size`）。
+#[derive(Debug, sqlx::FromRow)]
+pub struct AtpProfileMaterialRow {
+    pub username: String,
+    pub display_name: Option<String>,
+    pub bio: Option<String>,
+    pub profile_fields: serde_json::Value,
+    pub avatar_sha256: Option<String>,
+    pub avatar_mime_type: Option<String>,
+    pub avatar_size: Option<i64>,
+    pub banner_sha256: Option<String>,
+    pub banner_mime_type: Option<String>,
+    pub banner_size: Option<i64>,
+}
+
+pub async fn atp_profile_material(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+) -> Result<AtpProfileMaterialRow, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT a.username, a.display_name, a.bio, a.profile_fields, \
+                avatar_mf.sha256 AS avatar_sha256, avatar_mf.mime_type AS avatar_mime_type, avatar_mf.size AS avatar_size, \
+                banner_mf.sha256 AS banner_sha256, banner_mf.mime_type AS banner_mime_type, banner_mf.size AS banner_size \
+         FROM actors a
+         LEFT JOIN media_files avatar_mf ON avatar_mf.id = a.avatar_media_id
+         LEFT JOIN media_files banner_mf ON banner_mf.id = a.banner_media_id
+         WHERE a.id = $1",
+    )
+    .bind(actor_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// 凍結済みアクター（管理画面）。
+#[derive(Debug, sqlx::FromRow)]
+pub struct SuspendedActorRow {
+    pub id: i64,
+    pub username: String,
+    pub domain: String,
+    pub actor_type: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub suspended_at: chrono::DateTime<chrono::Utc>,
+    /// ローカルアクターの場合のみ `Some`。
+    pub user_id: Option<i64>,
+    pub email: Option<String>,
+}
+
+/// `after_id` より後を id 順に最大 `limit` 件。
+pub async fn list_suspended(
+    pool: &sqlx::PgPool,
+    after_id: Option<i64>,
+    limit: i64,
+) -> Result<Vec<SuspendedActorRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT a.id, a.username, a.domain, a.actor_type::text AS actor_type, a.display_name,
+                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
+                a.suspended_at, a.user_id, u.email
+         FROM actors a
+         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         LEFT JOIN users u ON u.id = a.user_id
+         WHERE a.suspended_at IS NOT NULL AND ($1::bigint IS NULL OR a.id > $1)
+         ORDER BY a.id
+         LIMIT $2",
+    )
+    .bind(after_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn set_bridge_real_actor(
+    pool: &PgPool,
+    actor_id: i64,
+    real_actor_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE actors SET bridge_real_actor_id = $1 WHERE id = $2")
+        .bind(real_actor_id)
+        .bind(actor_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+/// Bsky フォロワー検知の対象（ATP 署名鍵を持つ在籍ローカルユーザー）の `(id, at_did)`。
+pub async fn bsky_follower_poll_targets(pool: &PgPool) -> Result<Vec<(i64, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, at_did FROM actors
+         WHERE actor_type = 'local' AND at_did IS NOT NULL AND at_signing_key_pem IS NOT NULL
+           AND withdrawn_at IS NULL",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn bsky_followers_baseline_done(
+    pool: &PgPool,
+    actor_id: i64,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT bsky_followers_baseline_done_at IS NOT NULL FROM actors WHERE id = $1",
+    )
+    .bind(actor_id)
+    .fetch_one(pool)
+    .await
+}
+
+pub async fn mark_bsky_followers_baseline_done(
+    pool: &PgPool,
+    actor_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE actors SET bsky_followers_baseline_done_at = NOW() WHERE id = $1")
+        .bind(actor_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}

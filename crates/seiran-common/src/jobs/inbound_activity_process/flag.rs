@@ -23,9 +23,7 @@ pub(super) async fn handle_flag(
             .strip_prefix(&format!("https://{}/notes/", inbox.local_domain))
             .and_then(|v| v.parse::<i64>().ok())
         {
-            let owner: Option<i64> = sqlx::query_scalar("SELECT actor_id FROM posts WHERE id=$1")
-                .bind(id)
-                .fetch_optional(&inbox.db_pool)
+            let owner = crate::repository::post::author_of(&inbox.db_pool, id)
                 .await
                 .map_err(|e| format!("Flag: 投稿検索失敗: {}", e))?;
             if let Some(owner) = owner {
@@ -58,24 +56,23 @@ pub(super) async fn handle_flag(
         reason_text.push(ch);
     }
     let report_id = generate_snowflake_id(chrono::Utc::now());
-    sqlx::query(
-        "INSERT INTO reports(id,reporter_actor_id,subject_type,subject_actor_id,subject_post_id,\
-         reason_type,reason_text,destination,remote_host) \
-         VALUES($1,$2,$3::report_subject_type,$4,$5,'other',$6,'local',$7)",
-    )
-    .bind(report_id)
-    .bind(reporter.actor_id)
-    .bind(if subject_post_id.is_some() {
-        "post"
-    } else {
-        "actor"
-    })
-    .bind(subject_actor_id)
-    .bind(subject_post_id)
-    .bind(reason_text)
-    .bind(reporter.domain)
-    .execute(&inbox.db_pool)
-    .await
-    .map_err(|e| format!("Flag: 保存失敗: {}", e))?;
+    let report = crate::repository::report::NewReport {
+        id: report_id,
+        reporter_actor_id: reporter.actor_id,
+        subject_type: if subject_post_id.is_some() {
+            "post"
+        } else {
+            "actor"
+        },
+        subject_actor_id,
+        subject_post_id,
+        reason_type: "other",
+        reason_text: &reason_text,
+        destination: "local",
+        remote_host: Some(&reporter.domain),
+    };
+    crate::repository::report::insert(&inbox.db_pool, &report)
+        .await
+        .map_err(|e| format!("Flag: 保存失敗: {}", e))?;
     Ok(())
 }

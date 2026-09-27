@@ -428,7 +428,9 @@ mod tests {
             let a = auth.verify_atp_access_token(&access, SERVICE_DID).unwrap();
             assert_eq!(a.did, "did:plc:abc");
             assert_eq!(a.privileged, privileged);
-            let r = auth.verify_atp_refresh_token(&refresh, SERVICE_DID).unwrap();
+            let r = auth
+                .verify_atp_refresh_token(&refresh, SERVICE_DID)
+                .unwrap();
             assert_eq!(r.privileged, privileged);
         }
     }

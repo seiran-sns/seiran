@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use sqlx::Row;
+use crate::repository::ActorRepository;
 
 use crate::ap::fetch_ap_collection_uris;
 use crate::queue::worker::JobContext;
@@ -26,15 +26,11 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
         .as_ref()
         .ok_or_else(|| "DB pool 未設定".to_string())?;
 
-    let actor_row = sqlx::query("SELECT ap_uri FROM actors WHERE id = $1 LIMIT 1")
-        .bind(actor_id)
-        .fetch_optional(pool)
+    let actor = crate::repository::PgActorRepository::new(pool.clone())
+        .find_by_id(actor_id)
         .await
         .map_err(|e| format!("アクターDB検索失敗: {}", e))?;
-
-    let ap_uri: String = match actor_row
-        .and_then(|r| r.try_get::<Option<String>, _>("ap_uri").ok().flatten())
-    {
+    let ap_uri: String = match actor.and_then(|a| a.ap_uri) {
         Some(uri) => uri,
         None => {
             tracing::warn!(
@@ -99,28 +95,9 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
         direction
     );
 
-    let actor_uris_json =
-        serde_json::to_value(&uris).map_err(|e| format!("JSON変換失敗: {}", e))?;
-
-    sqlx::query(
-        // 非後退更新: `handlers::users::save_remote_follow_snapshot`（同期フェッチ側）と
-        // 同じ規約。件数が既存以上の場合のみ上書きする。
-        "INSERT INTO remote_follow_snapshots (actor_id, direction, actor_uris, complete, fetched_at)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-         ON CONFLICT (actor_id, direction) DO UPDATE SET
-             actor_uris = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
-                 THEN EXCLUDED.actor_uris ELSE remote_follow_snapshots.actor_uris END,
-             complete = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
-                 THEN EXCLUDED.complete ELSE remote_follow_snapshots.complete END,
-             fetched_at = CURRENT_TIMESTAMP",
-    )
-    .bind(actor_id)
-    .bind(&direction)
-    .bind(actor_uris_json)
-    .bind(complete)
-    .execute(pool)
-    .await
-    .map_err(|e| format!("スナップショット保存失敗: {}", e))?;
+    crate::repository::remote_follow_snapshot::save(pool, actor_id, &direction, &uris, complete)
+        .await
+        .map_err(|e| format!("スナップショット保存失敗: {}", e))?;
 
     enqueue_unknown_actor_resolves(pool, &ctx.queue, &uris).await;
 
@@ -140,11 +117,9 @@ async fn enqueue_unknown_actor_resolves(
     uris: &[String],
 ) {
     let known: std::collections::HashSet<String> =
-        sqlx::query_scalar::<_, String>("SELECT ap_uri FROM actors WHERE ap_uri = ANY($1)")
-            .bind(uris)
-            .fetch_all(pool)
+        crate::repository::remote_follow_snapshot::known_actors_by_ap_uris(pool, uris)
             .await
-            .map(|v| v.into_iter().collect())
+            .map(|rows| rows.into_iter().map(|r| r.ap_uri).collect())
             .unwrap_or_default();
 
     for uri in uris {

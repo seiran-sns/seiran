@@ -6,9 +6,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use sqlx::Row;
-
-use seiran_common::repository::{Actor, NotificationRow, RemoteInstanceMeta, TimelinePost};
+use seiran_common::repository::{
+    note_extras, Actor, NotificationRow, RemoteInstanceMeta, TimelinePost,
+};
 
 use crate::handlers::notes::delivery::at_uri_to_bsky_app_url;
 use crate::handlers::notes::dto::build_instance_info;
@@ -36,22 +36,12 @@ async fn fetch_poll_votes_map(
     let (Some(actor_id), false) = (my_actor_id, post_ids.is_empty()) else {
         return HashMap::new();
     };
-    let rows = sqlx::query(
-        "SELECT post_id, option_index FROM poll_votes
-         WHERE actor_id = $1 AND post_id = ANY($2)
-         ORDER BY post_id, option_index",
-    )
-    .bind(actor_id)
-    .bind(post_ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
+    let rows = note_extras::poll_votes_by_actor(db, actor_id, post_ids)
+        .await
+        .unwrap_or_default();
     let mut votes: HashMap<i64, Vec<i32>> = HashMap::new();
-    for row in rows {
-        votes
-            .entry(row.try_get("post_id").unwrap_or_default())
-            .or_default()
-            .push(row.try_get("option_index").unwrap_or_default());
+    for (post_id, option_index) in rows {
+        votes.entry(post_id).or_default().push(option_index);
     }
     votes
 }
@@ -239,80 +229,30 @@ pub async fn build_users_detailed(
         None => HashMap::new(),
     };
 
-    // notes_count/followers_count/following_countはactorsの非正規化カラムを読む
-    // （書き込みはrepository/post.rs・repository/follow.rsでのみ行う、唯一の真実の情報源。
-    // docs/improvement_2026-08-29.md PERF-4）。以前はposts/followsへの3本のGROUP BY COUNTを
-    // 毎回実行していた。
-    // (created_at, avatar_url, banner_url, notes_count, followers_count, following_count)
-    type ProfileRow = (
-        chrono::DateTime<chrono::Utc>,
-        Option<String>,
-        Option<String>,
-        i64,
-        i64,
-        i64,
-    );
-    let profile_rows: Vec<(i64, ProfileRow)> = sqlx::query_as::<
-        _,
-        (
-            i64,
-            chrono::DateTime<chrono::Utc>,
-            Option<String>,
-            Option<String>,
-            i64,
-            i64,
-            i64,
-        ),
-    >(
-        "SELECT a.id, a.created_at, \
-         COALESCE(rtrim(avatar_sp.public_url, '/') || '/' || avatar_mf.storage_key, a.avatar_url), \
-         COALESCE(rtrim(banner_sp.public_url, '/') || '/' || banner_mf.storage_key, a.banner_url), \
-         a.notes_count, a.followers_count, a.following_count \
-         FROM actors a \
-         LEFT JOIN media_files avatar_mf ON avatar_mf.id = a.avatar_media_id \
-         LEFT JOIN storage_providers avatar_sp ON avatar_sp.id = avatar_mf.storage_provider_id \
-         LEFT JOIN media_files banner_mf ON banner_mf.id = a.banner_media_id \
-         LEFT JOIN storage_providers banner_sp ON banner_sp.id = banner_mf.storage_provider_id \
-         WHERE a.id = ANY($1)",
-    )
-    .bind(&ids)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default()
-    .into_iter()
-    .map(
-        |(
-            id,
-            created_at,
-            avatar_url,
-            banner_url,
-            notes_count,
-            followers_count,
-            following_count,
-        )| {
-            (
-                id,
-                (
-                    created_at,
-                    avatar_url,
-                    banner_url,
-                    notes_count,
-                    followers_count,
-                    following_count,
-                ),
-            )
-        },
-    )
-    .collect();
-    let mut profile_by_id: HashMap<i64, ProfileRow> = profile_rows.into_iter().collect();
+    // 件数は actors の非正規化カラムを読む（`docs/database.md`「非正規化カウンタ」）。
+    let mut profile_by_id: HashMap<i64, seiran_common::repository::actor::ActorMediaCountsRow> =
+        seiran_common::repository::actor::media_and_counts_for_actors(&state.db, &ids)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| (r.id, r))
+            .collect();
 
     actors
         .iter()
         .map(|actor| {
             let (created_at, avatar_url, banner_url, notes_count, followers_count, following_count) =
-                profile_by_id
-                    .remove(&actor.id)
-                    .unwrap_or_else(|| (chrono::Utc::now(), None, None, 0, 0, 0));
+                match profile_by_id.remove(&actor.id) {
+                    Some(r) => (
+                        r.created_at,
+                        r.avatar_url,
+                        r.banner_url,
+                        r.notes_count,
+                        r.followers_count,
+                        r.following_count,
+                    ),
+                    None => (chrono::Utc::now(), None, None, 0, 0, 0),
+                };
 
             let mut lite = user_lite(
                 ActorSummary {
@@ -744,49 +684,26 @@ pub async fn build_notifications(
     let notifier_users: HashMap<i64, MisskeyUserLite> = if notifier_ids.is_empty() {
         HashMap::new()
     } else {
-        sqlx::query_as::<
-            _,
-            (
-                i64,
-                String,
-                String,
-                String,
-                Option<String>,
-                Option<String>,
-                Option<serde_json::Value>,
-            ),
-        >(
-            "SELECT a.id, a.username, a.domain, a.actor_type::text AS actor_type, a.display_name, \
-                    COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url), \
-                    a.emoji_map \
-             FROM actors a \
-             LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
-             LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
-             WHERE a.id = ANY($1)",
-        )
-        .bind(&notifier_ids)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(
-            |(id, username, domain, actor_type, display_name, avatar_url, emoji_map)| {
+        seiran_common::repository::actor::lite_rows_for_actors(&state.db, &notifier_ids)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| {
                 let mut lite = user_lite(
                     ActorSummary {
-                        id,
-                        username: &username,
-                        domain: &domain,
-                        actor_type: &actor_type,
-                        display_name: display_name.as_deref(),
-                        avatar_url: avatar_url.as_deref(),
+                        id: r.id,
+                        username: &r.username,
+                        domain: &r.domain,
+                        actor_type: &r.actor_type,
+                        display_name: r.display_name.as_deref(),
+                        avatar_url: r.avatar_url.as_deref(),
                     },
                     &state.local_domain,
                 );
-                lite.emojis = to_misskey_emojis(None, emoji_map.as_ref());
-                (id, lite)
-            },
-        )
-        .collect()
+                lite.emojis = to_misskey_emojis(None, r.emoji_map.as_ref());
+                (r.id, lite)
+            })
+            .collect()
     };
 
     // "repost"（Misskey API では "renote"）通知の note_id は、本文を持たないリポストラッパー

@@ -5,7 +5,6 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 
 use seiran_common::ap::fetch_ap_collection_uris;
 use seiran_common::atp::fetch_bsky_profile;
@@ -1899,31 +1898,9 @@ async fn save_remote_follow_snapshot(
     uris: &[String],
     complete: bool,
 ) {
-    let json = match serde_json::to_value(uris) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::error!("[remote_follow_summary] JSON変換失敗: {}", e);
-            return;
-        }
-    };
-    // 非後退更新: 新しい結果の件数が既存スナップショット以上の場合のみ actor_uris/complete を
-    // 上書きする。同期フェッチ（上限500件）はWorker（上限5000件）より少ない可能性が高く、
-    // 無条件上書きだとWorkerが積み上げた、より完全なスナップショットを毎回巻き戻してしまうため。
-    if let Err(e) = sqlx::query(
-        "INSERT INTO remote_follow_snapshots (actor_id, direction, actor_uris, complete, fetched_at)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-         ON CONFLICT (actor_id, direction) DO UPDATE SET
-             actor_uris = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
-                 THEN EXCLUDED.actor_uris ELSE remote_follow_snapshots.actor_uris END,
-             complete = CASE WHEN jsonb_array_length(EXCLUDED.actor_uris) >= jsonb_array_length(remote_follow_snapshots.actor_uris)
-                 THEN EXCLUDED.complete ELSE remote_follow_snapshots.complete END,
-             fetched_at = CURRENT_TIMESTAMP",
+    if let Err(e) = seiran_common::repository::remote_follow_snapshot::save(
+        pool, actor_id, direction, uris, complete,
     )
-    .bind(actor_id)
-    .bind(direction)
-    .bind(json)
-    .bind(complete)
-    .execute(pool)
     .await
     {
         tracing::error!("[remote_follow_summary] スナップショット保存失敗: {}", e);
@@ -1935,29 +1912,12 @@ async fn load_remote_follow_snapshot(
     actor_id: i64,
     direction: &str,
 ) -> (Vec<String>, bool, Option<chrono::DateTime<chrono::Utc>>) {
-    let row = sqlx::query(
-        "SELECT actor_uris, complete, fetched_at FROM remote_follow_snapshots WHERE actor_id = $1 AND direction = $2",
-    )
-    .bind(actor_id)
-    .bind(direction)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten();
-
-    match row {
-        Some(r) => {
-            let uris: Vec<String> = r
-                .try_get::<serde_json::Value, _>("actor_uris")
-                .ok()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default();
-            let complete: bool = r.try_get("complete").unwrap_or(false);
-            let fetched_at: chrono::DateTime<chrono::Utc> = r
-                .try_get("fetched_at")
-                .unwrap_or_else(|_| chrono::Utc::now());
-            (uris, complete, Some(fetched_at))
-        }
+    match seiran_common::repository::remote_follow_snapshot::get(pool, actor_id, direction)
+        .await
+        .ok()
+        .flatten()
+    {
+        Some(s) => (s.uris, s.complete, Some(s.fetched_at)),
         None => (vec![], false, None),
     }
 }
@@ -1976,34 +1936,23 @@ async fn resolve_remote_follow_items(
         return (vec![], vec![]);
     }
 
-    let rows = sqlx::query(
-        "SELECT id, ap_uri, username, domain, display_name, avatar_url FROM actors WHERE ap_uri = ANY($1)",
-    )
-    .bind(uris)
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
+    let rows =
+        seiran_common::repository::remote_follow_snapshot::known_actors_by_ap_uris(pool, uris)
+            .await
+            .unwrap_or_default();
 
     let mut known: std::collections::HashMap<String, RemoteFollowSummaryItem> =
         std::collections::HashMap::new();
     for row in rows {
-        let Ok(ap_uri) = row.try_get::<String, _>("ap_uri") else {
-            continue;
-        };
-        let id: i64 = row.try_get("id").unwrap_or_default();
-        let username: String = row.try_get("username").unwrap_or_default();
-        let domain: String = row.try_get("domain").unwrap_or_default();
-        let display_name: Option<String> = row.try_get("display_name").unwrap_or(None);
-        let avatar_url: Option<String> = row.try_get("avatar_url").unwrap_or(None);
         known.insert(
-            ap_uri.clone(),
+            row.ap_uri.clone(),
             RemoteFollowSummaryItem {
-                uri: ap_uri,
-                actor_id: Some(id.to_string()),
-                handle: username,
-                domain,
-                display_name,
-                avatar_url,
+                uri: row.ap_uri,
+                actor_id: Some(row.id.to_string()),
+                handle: row.username,
+                domain: row.domain,
+                display_name: row.display_name,
+                avatar_url: row.avatar_url,
             },
         );
     }

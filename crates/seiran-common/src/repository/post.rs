@@ -1908,3 +1908,221 @@ impl PgPostRepository {
         tx.commit().await
     }
 }
+
+/// `at_uri` の投稿の postgate（引用不可）の値。未取得なら `None`。
+pub async fn bsky_quote_disabled_by_at_uri(
+    pool: &sqlx::PgPool,
+    at_uri: &str,
+) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar("SELECT bsky_quote_disabled FROM posts WHERE at_uri = $1")
+        .bind(at_uri)
+        .fetch_optional(pool)
+        .await
+}
+
+/// 削除されていない投稿の投稿者。
+pub async fn live_post_author(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT actor_id FROM posts WHERE id=$1 AND deleted_at IS NULL")
+        .bind(post_id)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn created_at_of(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, sqlx::Error> {
+    sqlx::query_scalar("SELECT created_at FROM posts WHERE id = $1")
+        .bind(post_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// Misskey 互換 `stats` の `(ローカル投稿数, ローカルユーザー数)`（削除済み・退会済みを除く）。
+pub async fn local_stats(pool: &sqlx::PgPool) -> Result<(i64, i64), sqlx::Error> {
+    sqlx::query_as(
+        "SELECT
+             (SELECT count(*) FROM posts p
+              JOIN actors a ON a.id = p.actor_id
+              WHERE a.actor_type = 'local' AND p.deleted_at IS NULL),
+             (SELECT count(*) FROM actors WHERE actor_type = 'local' AND withdrawn_at IS NULL)",
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// 削除済みも含めた投稿者。
+pub async fn author_of(pool: &sqlx::PgPool, post_id: i64) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT actor_id FROM posts WHERE id = $1")
+        .bind(post_id)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn is_direct(pool: &sqlx::PgPool, post_id: i64) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>("SELECT visibility = 'direct' FROM posts WHERE id = $1")
+        .bind(post_id)
+        .fetch_optional(pool)
+        .await
+        .map(|v| v.unwrap_or(false))
+}
+
+/// `direct` 投稿 `post_id`（投稿者 `author_id`）を `viewer_id` が見られるか。
+pub async fn direct_post_visible_to(
+    pool: &sqlx::PgPool,
+    viewer_id: i64,
+    author_id: i64,
+    post_id: i64,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT post_is_visible_to($1, $2, 'direct', $3, false)")
+        .bind(viewer_id)
+        .bind(author_id)
+        .bind(post_id)
+        .fetch_one(pool)
+        .await
+}
+
+/// `(id, actor_id, at_uri)`
+pub async fn id_author_at_uri_by_ap_object_id(
+    pool: &sqlx::PgPool,
+    ap_object_id: &str,
+) -> Result<Option<(i64, i64, Option<String>)>, sqlx::Error> {
+    sqlx::query_as("SELECT id, actor_id, at_uri FROM posts WHERE ap_object_id = $1")
+        .bind(ap_object_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// AP 側で届いた seiran 投稿 `post_id` について、ATP 側の対になる行（`at_uri`）と
+/// 相互一致マージできるか判定する。相互一致（相手の `claimed_ap_object_id` が
+/// `ap_object_id` を指し返し、投稿者も一致）なら相手の id を返す。一致しなければ
+/// 後から到着する相手に見つけてもらうため自分の `claimed_at_uri` を記録する。
+///
+/// 自己申告を先に書くと、同時に届いた相手の INSERT と `posts_mutual_claim_key` で
+/// 衝突しうるため、必ず先に SELECT してから分岐する。UNIQUE 違反時のリトライは
+/// 呼び出し元が行う。
+pub async fn claim_or_find_seiranpost_merge_target(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+    post_author_id: i64,
+    ap_object_id: &str,
+    at_uri: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let candidate: Option<(i64, i64, Option<String>)> =
+        sqlx::query_as("SELECT id, actor_id, claimed_ap_object_id FROM posts WHERE at_uri = $1")
+            .bind(at_uri)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    let merge_target = candidate.and_then(|(doomed_id, doomed_actor_id, claimed_ap_object_id)| {
+        let mutual_match = claimed_ap_object_id.as_deref() == Some(ap_object_id);
+        // 投稿者が既に同一 actor 行に解決されている場合のみマージする。
+        (mutual_match && doomed_actor_id == post_author_id).then_some(doomed_id)
+    });
+
+    if merge_target.is_none() {
+        sqlx::query("UPDATE posts SET claimed_at_uri = $1 WHERE id = $2")
+            .bind(at_uri)
+            .bind(post_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    tx.commit().await?;
+    Ok(merge_target)
+}
+
+/// 外部 PDS へ未配信の最新投稿 `(id, body, created_at)`。
+pub async fn latest_unpublished_to_atp(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+) -> Result<Option<(i64, String, DateTime<Utc>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, body, created_at FROM posts
+         WHERE actor_id = $1 AND at_uri IS NULL AND deleted_at IS NULL
+         ORDER BY id DESC LIMIT 1",
+    )
+    .bind(actor_id)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn set_at_uri_and_cid(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+    at_uri: &str,
+    at_cid: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE posts SET at_uri = $1, at_cid = $2 WHERE id = $3")
+        .bind(at_uri)
+        .bind(at_cid)
+        .bind(post_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+pub async fn add_recipient(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+    actor_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO post_recipients (post_id, actor_id) VALUES ($1, $2)
+         ON CONFLICT (post_id, actor_id) DO NOTHING",
+    )
+    .bind(post_id)
+    .bind(actor_id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// `(at_uri, at_cid)`
+pub async fn at_ref_of(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+) -> Result<Option<(Option<String>, Option<String>)>, sqlx::Error> {
+    sqlx::query_as("SELECT at_uri, at_cid FROM posts WHERE id = $1")
+        .bind(post_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// ATP へ後からコミットする投稿の内容。
+#[derive(sqlx::FromRow)]
+pub struct DeferredCommitRow {
+    pub body: String,
+    pub created_at: DateTime<Utc>,
+    pub reply_to_post_id: Option<i64>,
+    pub language: Option<String>,
+}
+
+pub async fn deferred_commit_material(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+) -> Result<Option<DeferredCommitRow>, sqlx::Error> {
+    sqlx::query_as("SELECT body, created_at, reply_to_post_id, language FROM posts WHERE id = $1")
+        .bind(post_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// Fedi へ `Create(Note)` 済み（`deliver_fedi` かつ `ap_object_id` あり）なら投稿者。
+pub async fn author_if_sent_to_fedi(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT actor_id FROM posts
+         WHERE id = $1 AND deliver_fedi = true AND ap_object_id IS NOT NULL",
+    )
+    .bind(post_id)
+    .fetch_optional(pool)
+    .await
+}

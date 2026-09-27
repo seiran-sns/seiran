@@ -51,14 +51,13 @@ pub async fn handle(
         return Ok(()); // oEmbed非対応サイト、またはホワイトリスト外。GenericCardのまま。
     };
 
-    sqlx::query(
-        "UPDATE post_link_cards SET embed_src = $1, embed_type = $2 WHERE post_id = $3 AND position = $4",
+    crate::repository::note_extras::set_link_card_embed(
+        pool,
+        post_id,
+        position,
+        &embed_src,
+        ogp.embed_type.as_deref(),
     )
-    .bind(&embed_src)
-    .bind(&ogp.embed_type)
-    .bind(post_id)
-    .bind(position)
-    .execute(pool)
     .await
     .map_err(|e| format!("post_link_cards UPDATE失敗: {}", e))?;
 

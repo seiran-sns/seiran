@@ -225,37 +225,24 @@ pub async fn get_note_ap(
         }
     }
 
-    let attachment_rows = sqlx::query(
-        "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
-         FROM post_attachments pa
-         JOIN media_files mf ON mf.id = pa.media_file_id
-         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         WHERE pa.post_id = $1
-         ORDER BY pa.position",
-    )
-    .bind(post_id)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-
-    let attachments: Vec<serde_json::Value> = attachment_rows
-        .iter()
-        .filter_map(|r| {
-            let storage_key: String = r.try_get("storage_key").ok()?;
-            let mime_type: String = r.try_get("mime_type").ok()?;
-            let width: i32 = r.try_get("width").ok()?;
-            let height: i32 = r.try_get("height").ok()?;
-            let public_url: String = r.try_get("public_url").ok()?;
-            let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
-            Some(serde_json::json!({
-                "type": "Document",
-                "mediaType": mime_type,
-                "url": url,
-                "width": width,
-                "height": height
-            }))
-        })
-        .collect();
+    let attachments: Vec<serde_json::Value> =
+        seiran_common::repository::note_extras::local_attachments_for_posts(&state.db, &[post_id])
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| {
+                let mut doc = serde_json::json!({
+                    "type": "Document",
+                    "mediaType": a.mime_type,
+                    "url": a.url,
+                });
+                if let (Some(w), Some(h)) = (a.width, a.height) {
+                    doc["width"] = w.into();
+                    doc["height"] = h.into();
+                }
+                doc
+            })
+            .collect();
 
     // find_by_id_for_viewer(post_id, None) により followers_only/direct は既に404化されている
     // ため、ここに到達する時点で post.visibility は public/unlisted のいずれか。

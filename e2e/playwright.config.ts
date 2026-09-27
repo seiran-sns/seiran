@@ -49,11 +49,6 @@ const backendEnv: Record<string, string> = {
   // E2Eのタイムアウト（15秒）内に検知されないため短縮する。
   BSKY_FOLLOWER_POLL_INTERVAL_SECS: "2",
   SEIRAN_CONFIG_DIR: path.join(e2eDir, ".tmp-config"),
-  // sqlx::query! はコンパイル時にDBへ接続してスキーマ検証する。E2E専用DBはこの時点では
-  // マイグレーション未適用（マイグレーションはbackend起動時に自動実行される）なので、
-  // 生DBへ接続すると「relation "xxx" does not exist」でビルド自体が失敗する。
-  // Dockerfileと同様にコミット済みの .sqlx/ オフラインキャッシュを使わせる。
-  SQLX_OFFLINE: "true",
 };
 
 // 全specが同じE2E DBを共有するが、実際にグローバル状態（site_settings・

@@ -271,25 +271,13 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
     // isLocked/isSilenced/isSuspended/followersCount/followingCount/notesCount を
     // non-nullable 必須として要求する（欠けると Dart 側で TypeError → 未処理例外でフリーズ）。
     // フォロー数等は今回正確な集計をせず安全な既定値（0/false）で埋める。
-    let row: Option<(
-        chrono::DateTime<chrono::Utc>,
-        Option<String>,
-        Option<String>,
-    )> = sqlx::query_as(
-        "SELECT a.created_at, a.display_name, \
-                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) \
-         FROM actors a \
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
-         WHERE a.id = $1",
-    )
-    .bind(actor_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
     let (created_at, display_name, avatar_url) =
-        row.unwrap_or_else(|| (chrono::Utc::now(), None, None));
+        seiran_common::repository::actor::media_and_counts_for_actors(&state.db, &[actor_id])
+            .await
+            .ok()
+            .and_then(|rows| rows.into_iter().next())
+            .map(|r| (r.created_at, r.display_name, r.avatar_url))
+            .unwrap_or_else(|| (chrono::Utc::now(), None, None));
     // miauth は常にローカルユーザーの認証情報を返す（session.user_id はローカル actor.id）。
     let avatar_url = seiran_common::avatar::resolve_avatar_url(
         avatar_url,

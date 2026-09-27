@@ -6,31 +6,10 @@ use axum::{
 use chrono::{DateTime, Utc};
 use seiran_common::atp::sign_service_auth_jwt;
 use seiran_common::generate_snowflake_id;
+use seiran_common::repository::report::{self, ReportRow};
 use serde::{Deserialize, Serialize};
 
 use crate::{error::ApiError, middleware::AuthUser, AppState};
-
-#[derive(Debug, sqlx::FromRow)]
-struct ReportRow {
-    id: i64,
-    reporter_actor_id: i64,
-    reporter: String,
-    subject_type: String,
-    subject_actor_id: i64,
-    subject: String,
-    subject_post_id: Option<i64>,
-    reason_type: String,
-    reason_text: String,
-    destination: String,
-    remote_host: Option<String>,
-    status: String,
-    forwarded_at: Option<DateTime<Utc>>,
-    closed_at: Option<DateTime<Utc>>,
-    created_at: DateTime<Utc>,
-    /// 通報対象アクターが凍結済みか（#凍結リモート対応）。フロントは`true`の間、
-    /// 「ユーザー凍結」ボタンの代わりに「凍結済み」表示にする。
-    subject_suspended: bool,
-}
 
 #[derive(Debug, Serialize)]
 pub struct ReportResponse {
@@ -94,15 +73,9 @@ pub struct CommentRequest {
 pub async fn list_reports(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ReportResponse>>, ApiError> {
-    let rows = sqlx::query_as::<_, ReportRow>(
-        "SELECT r.id,r.reporter_actor_id,concat(ra.username,'@',ra.domain) reporter,\
-         r.subject_type::text subject_type,r.subject_actor_id,concat(sa.username,'@',sa.domain) subject,\
-         r.subject_post_id,r.reason_type,r.reason_text,r.destination::text destination,r.remote_host,\
-         r.status::text status,r.forwarded_at,r.closed_at,r.created_at,\
-         (sa.suspended_at IS NOT NULL) AS subject_suspended FROM reports r \
-         JOIN actors ra ON ra.id=r.reporter_actor_id JOIN actors sa ON sa.id=r.subject_actor_id \
-         ORDER BY (r.status='open') DESC,r.created_at DESC"
-    ).fetch_all(&state.db).await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    let rows = report::list(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
@@ -110,12 +83,10 @@ pub async fn close_report(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let done = sqlx::query("UPDATE reports SET status='closed',closed_at=NOW() WHERE id=$1")
-        .bind(id)
-        .execute(&state.db)
+    let done = report::close(&state.db, id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    if done.rows_affected() == 0 {
+    if !done {
         return Err(ApiError::NotFound("REPORT_NOT_FOUND"));
     }
     Ok(StatusCode::NO_CONTENT)
@@ -125,10 +96,9 @@ pub async fn list_comments(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<CommentResponse>>, ApiError> {
-    let rows = sqlx::query_as::<_, (i64,String,String,DateTime<Utc>)>(
-        "SELECT c.id,c.body,u.email,c.created_at FROM report_comments c JOIN users u ON u.id=c.author_user_id \
-         WHERE c.report_id=$1 ORDER BY c.created_at"
-    ).bind(id).fetch_all(&state.db).await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    let rows = report::list_comments(&state.db, id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(
         rows.into_iter()
             .map(|(id, body, author, created_at)| CommentResponse {
@@ -152,10 +122,9 @@ pub async fn add_comment(
         return Err(ApiError::BadRequest("INVALID_REPORT_COMMENT".into()));
     }
     let comment_id = generate_snowflake_id(Utc::now());
-    let created_at:DateTime<Utc>=sqlx::query_scalar(
-        "INSERT INTO report_comments(id,report_id,author_user_id,body) VALUES($1,$2,$3,$4) RETURNING created_at"
-    ).bind(comment_id).bind(id).bind(admin.user_id).bind(body).fetch_one(&state.db).await
-     .map_err(|e|ApiError::Internal(e.to_string()))?;
+    let created_at = report::add_comment(&state.db, comment_id, id, admin.user_id, body)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok((
         StatusCode::CREATED,
         Json(CommentResponse {
@@ -171,10 +140,10 @@ pub async fn delete_subject_post(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let done=sqlx::query(
-        "UPDATE posts SET deleted_at=NOW() WHERE id=(SELECT subject_post_id FROM reports WHERE id=$1) AND deleted_at IS NULL"
-    ).bind(id).execute(&state.db).await.map_err(|e|ApiError::Internal(e.to_string()))?;
-    if done.rows_affected() == 0 {
+    let done = report::delete_subject_post(&state.db, id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !done {
         return Err(ApiError::NotFound("SUBJECT_NOT_FOUND"));
     }
     Ok(StatusCode::NO_CONTENT)
@@ -187,12 +156,9 @@ pub async fn suspend_subject(
     // ローカル・リモートを問わず、通報対象アクターをそのまま凍結する（#凍結リモート対応で
     // REMOTE_USER_CANNOT_BE_SUSPENDED を撤去、actors.suspended_at がローカル・リモート共通の
     // enforcement を担うため actors.user_id の解決は不要になった）。
-    let subject_actor_id: Option<i64> =
-        sqlx::query_scalar("SELECT subject_actor_id FROM reports WHERE id=$1")
-            .bind(id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let subject_actor_id = report::subject_actor_id(&state.db, id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
     let subject_actor_id = subject_actor_id.ok_or(ApiError::NotFound("REPORT_NOT_FOUND"))?;
     state
         .actors
@@ -202,35 +168,14 @@ pub async fn suspend_subject(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(sqlx::FromRow)]
-struct ForwardRow {
-    reporter_ap_uri: Option<String>,
-    reporter_ap_key: Option<String>,
-    reporter_did: Option<String>,
-    subject_ap_uri: Option<String>,
-    subject_inbox: Option<String>,
-    subject_did: Option<String>,
-    subject_post_ap_uri: Option<String>,
-    subject_post_at_uri: Option<String>,
-    subject_post_at_cid: Option<String>,
-    reason_type: String,
-    reason_text: String,
-    destination: String,
-}
-
 pub async fn forward_report(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    let row=sqlx::query_as::<_,ForwardRow>(
-        "SELECT ra.ap_uri reporter_ap_uri,ra.at_signing_key_pem reporter_ap_key,ra.at_did reporter_did,\
-         sa.ap_uri subject_ap_uri,sa.ap_inbox_url subject_inbox,sa.at_did subject_did,\
-         p.ap_object_id subject_post_ap_uri,p.at_uri subject_post_at_uri,p.at_cid subject_post_at_cid,\
-         r.reason_type,r.reason_text,r.destination::text destination FROM reports r \
-         JOIN actors ra ON ra.id=r.reporter_actor_id JOIN actors sa ON sa.id=r.subject_actor_id \
-         LEFT JOIN posts p ON p.id=r.subject_post_id WHERE r.id=$1"
-    ).bind(id).fetch_optional(&state.db).await.map_err(|e|ApiError::Internal(e.to_string()))?
-     .ok_or(ApiError::NotFound("REPORT_NOT_FOUND"))?;
+    let row = report::forward_material(&state.db, id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("REPORT_NOT_FOUND"))?;
     if row.destination != "remote" {
         return Err(ApiError::BadRequest("REPORT_IS_LOCAL".into()));
     }
@@ -305,9 +250,7 @@ pub async fn forward_report(
     } else {
         return Err(ApiError::BadRequest("REMOTE_REPORT_UNAVAILABLE".into()));
     }
-    sqlx::query("UPDATE reports SET forwarded_at=NOW() WHERE id=$1")
-        .bind(id)
-        .execute(&state.db)
+    report::mark_forwarded(&state.db, id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)

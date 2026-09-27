@@ -129,16 +129,10 @@ pub struct UserInfo {
 /// そのステータス文字列を返す（`UserInfo.migration_status`用）。
 /// 通常アカウント（転入経由でない）では常に`None`。
 async fn fetch_incomplete_migration_status(state: &AppState, user_id: i64) -> Option<String> {
-    let status: Option<String> = sqlx::query_scalar(
-        "SELECT status::text FROM at_migration_requests
-         WHERE user_id = $1 AND status NOT IN ('completed', 'abandoned')",
-    )
-    .bind(user_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
-    status
+    seiran_common::repository::at_migration::incomplete_status_for_user(&state.db, user_id)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// actors.avatar_media_id がある場合は storage_providers から公開 URL を解決し、

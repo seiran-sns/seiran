@@ -11,13 +11,12 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use p256::pkcs8::{EncodePublicKey, LineEnding};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::Row;
 
 use seiran_common::atp::{
     cid_from_sha256_hex, cid_from_str, cid_to_string, encode_generic_record,
     fetch_raw_did_document, generate_tid, ipld_to_json, resolve_atproto_verification_key,
 };
-use seiran_common::repository::Actor;
+use seiran_common::repository::{atp, media_file, post, Actor};
 use seiran_common::{
     ext_for_mime_type, generate_snowflake_id, select_provider, sniff_mime_type, S3StorageClient,
 };
@@ -217,13 +216,9 @@ async fn store_uploaded_blob(
     // S3を消費できてしまう（2026-07-17 マイケル指摘）。通常セッションJWT経由（ユーザー
     // 本人であることを既に検証済み）はこのチェックをスキップする。
     if require_pending_video_job {
-        let has_pending_job: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM media_files WHERE uploaded_by_actor_id = $1 AND bsky_video_status = 'pending')",
-        )
-        .bind(actor_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| format!("pendingジョブ確認失敗: {}", e))?;
+        let has_pending_job = media_file::has_pending_bsky_video(&state.db, actor_id)
+            .await
+            .map_err(|e| format!("pendingジョブ確認失敗: {}", e))?;
         if !has_pending_job {
             return Err("進行中の動画パイプラインジョブが無いため保存を拒否".to_string());
         }
@@ -234,12 +229,12 @@ async fn store_uploaded_blob(
     // 提出してくるケースもこれで安全）。再利用時は last_uploaded_at を更新し、孤立ファイルGC
     // （run_media_gc）が「参照はされていないが最近アップロードされ直した」ファイルを
     // 誤って削除しないようにする。
-    let existing_id: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM media_files WHERE sha256 = $1 LIMIT 1")
-            .bind(sha256_hex)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| format!("media_files重複チェック失敗: {}", e))?;
+    let existing_id = state
+        .media_files
+        .find_by_sha256(sha256_hex)
+        .await
+        .map_err(|e| format!("media_files重複チェック失敗: {}", e))?
+        .map(|m| m.id);
     if let Some(id) = existing_id {
         state
             .media_files
@@ -341,15 +336,11 @@ async fn get_record_postgate(
         return ApiError::NotFound("このアクターはATPリポジトリを持ちません").into_response();
     };
 
-    let has_real_record: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM atp_records WHERE actor_id = $1 AND collection = $2 AND rkey = $3)",
-    )
-    .bind(actor.id)
-    .bind(&params.collection)
-    .bind(&params.rkey)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(false);
+    let has_real_record = atp::record_cid(&state.db, actor.id, &params.collection, &params.rkey)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
 
     if has_real_record {
         return get_record_from_atp_records(params, state).await;
@@ -360,9 +351,7 @@ async fn get_record_postgate(
     let quote_disabled = if actor.actor_type == "local" {
         false
     } else {
-        sqlx::query_scalar::<_, bool>("SELECT bsky_quote_disabled FROM posts WHERE at_uri = $1")
-            .bind(&post_uri)
-            .fetch_optional(&state.db)
+        post::bsky_quote_disabled_by_at_uri(&state.db, &post_uri)
             .await
             .ok()
             .flatten()
@@ -423,14 +412,8 @@ async fn get_record_post(params: &GetRecordParams, state: &AppState) -> axum::re
     };
 
     if let Some(actor) = actor {
-        let block_row =
-            sqlx::query("SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1")
-                .bind(&record.at_cid)
-                .bind(actor.id)
-                .fetch_optional(&state.db)
-                .await;
-        if let Ok(Some(row)) = block_row {
-            let cbor_bytes: Vec<u8> = row.try_get("bytes").unwrap_or_default();
+        let block_row = atp::block_bytes(&state.db, actor.id, &record.at_cid).await;
+        if let Ok(Some(cbor_bytes)) = block_row {
             match serde_ipld_dagcbor::from_slice::<ipld_core::ipld::Ipld>(&cbor_bytes) {
                 Ok(ipld) => {
                     let value = ipld_to_json(&ipld);
@@ -494,18 +477,10 @@ async fn get_record_from_atp_records(
     };
 
     // atp_records から CID を取得
-    let record_row = sqlx::query(
-        "SELECT cid FROM atp_records
-         WHERE actor_id = $1 AND collection = $2 AND rkey = $3 LIMIT 1",
-    )
-    .bind(actor.id)
-    .bind(&params.collection)
-    .bind(&params.rkey)
-    .fetch_optional(&state.db)
-    .await;
+    let record_row = atp::record_cid(&state.db, actor.id, &params.collection, &params.rkey).await;
 
     let cid_str = match record_row {
-        Ok(Some(row)) => row.try_get::<String, _>("cid").unwrap_or_default(),
+        Ok(Some(cid)) => cid,
         Ok(None) => return ApiError::NotFound("レコードが見つかりません").into_response(),
         Err(e) => {
             return ApiError::Internal(format!("[getRecord] atp_records 取得失敗: {}", e))
@@ -514,15 +489,10 @@ async fn get_record_from_atp_records(
     };
 
     // atp_blocks から CBOR バイト列を取得
-    let block_row =
-        sqlx::query("SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1")
-            .bind(&cid_str)
-            .bind(actor.id)
-            .fetch_optional(&state.db)
-            .await;
+    let block_row = atp::block_bytes(&state.db, actor.id, &cid_str).await;
 
     let cbor_bytes: Vec<u8> = match block_row {
-        Ok(Some(row)) => row.try_get::<Vec<u8>, _>("bytes").unwrap_or_default(),
+        Ok(Some(bytes)) => bytes,
         Ok(None) => return ApiError::NotFound("ブロックが見つかりません").into_response(),
         Err(e) => {
             return ApiError::Internal(format!("[getRecord] atp_blocks 取得失敗: {}", e))
@@ -587,13 +557,9 @@ async fn fetch_record_value(
     actor_id: i64,
     cid_str: &str,
 ) -> Option<serde_json::Value> {
-    let row = sqlx::query("SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1")
-        .bind(cid_str)
-        .bind(actor_id)
-        .fetch_optional(&state.db)
+    let cbor_bytes = atp::block_bytes(&state.db, actor_id, cid_str)
         .await
         .ok()??;
-    let cbor_bytes: Vec<u8> = row.try_get("bytes").ok()?;
     let ipld: ipld_core::ipld::Ipld = serde_ipld_dagcbor::from_slice(&cbor_bytes).ok()?;
     Some(ipld_to_json(&ipld))
 }
@@ -714,13 +680,9 @@ pub async fn xrpc_describe_repo(
                 .into_response()
         }
     };
-    let has_posts: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM posts WHERE actor_id = $1 AND deleted_at IS NULL AND at_rkey IS NOT NULL)",
-    )
-    .bind(actor.id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(false);
+    let has_posts = atp::has_post_records(&state.db, actor.id)
+        .await
+        .unwrap_or(false);
     if has_posts && !collections.iter().any(|c| c == "app.bsky.feed.post") {
         collections.push("app.bsky.feed.post".to_string());
     }
@@ -847,15 +809,10 @@ pub(crate) async fn resolve_blob_media_id(
     }
     let sha256_hex = hex::encode(mh.digest());
 
-    sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM media_files WHERE sha256 = $1 AND uploaded_by_actor_id = $2 LIMIT 1",
-    )
-    .bind(&sha256_hex)
-    .bind(actor_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten()
+    media_file::find_id_by_sha256_and_uploader(&state.db, &sha256_hex, actor_id)
+        .await
+        .ok()
+        .flatten()
 }
 
 #[derive(Deserialize)]

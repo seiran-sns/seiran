@@ -71,25 +71,13 @@ pub(crate) async fn fetch_atp_profile_material(
     ),
     sqlx::Error,
 > {
-    let row = sqlx::query(
-        "SELECT a.username, a.display_name, a.bio, a.profile_fields, \
-                avatar_mf.sha256 AS avatar_sha256, avatar_mf.mime_type AS avatar_mime_type, avatar_mf.size AS avatar_size, \
-                banner_mf.sha256 AS banner_sha256, banner_mf.mime_type AS banner_mime_type, banner_mf.size AS banner_size \
-         FROM actors a
-         LEFT JOIN media_files avatar_mf ON avatar_mf.id = a.avatar_media_id
-         LEFT JOIN media_files banner_mf ON banner_mf.id = a.banner_media_id
-         WHERE a.id = $1",
-    )
-    .bind(actor_id)
-    .fetch_one(&state.db)
-    .await?;
-    let username: String = row.try_get("username")?;
-    let display_name: Option<String> = row.try_get("display_name")?;
-    let bio: Option<String> = row.try_get("bio")?;
-    let profile_fields: serde_json::Value = row.try_get("profile_fields")?;
-    let avatar_sha256: Option<String> = row.try_get("avatar_sha256")?;
-    let avatar_mime_type: Option<String> = row.try_get("avatar_mime_type")?;
-    let avatar_size: Option<i64> = row.try_get("avatar_size")?;
+    let row = seiran_common::repository::actor::atp_profile_material(&state.db, actor_id).await?;
+    let username = row.username;
+    let display_name = row.display_name;
+    let bio = row.bio;
+    let profile_fields = row.profile_fields;
+    let (avatar_sha256, avatar_mime_type, avatar_size) =
+        (row.avatar_sha256, row.avatar_mime_type, row.avatar_size);
     // 未設定なら決定論的な自動生成アイコンを ATP blob 参照として補う（AP 側の
     // `resolve_avatar_url` に相当する ATP 版。ATP の `avatar` は URL ではなく実在する
     // blob の CID 参照を要求するため、生成 PNG のハッシュをそのまま blob 参照として使う。
@@ -102,9 +90,8 @@ pub(crate) async fn fetch_atp_profile_material(
             Some((sha256_hex, mime.to_string(), size))
         }
     };
-    let banner_sha256: Option<String> = row.try_get("banner_sha256")?;
-    let banner_mime_type: Option<String> = row.try_get("banner_mime_type")?;
-    let banner_size: Option<i64> = row.try_get("banner_size")?;
+    let (banner_sha256, banner_mime_type, banner_size) =
+        (row.banner_sha256, row.banner_mime_type, row.banner_size);
     let banner_media = match (banner_sha256, banner_mime_type, banner_size) {
         (Some(s), Some(m), Some(sz)) => Some((s, m, sz)),
         _ => None,

@@ -129,3 +129,21 @@ impl EmailShortCodeRepository for PgEmailShortCodeRepository {
             .map(|_| ())
     }
 }
+
+/// 直近 `seconds` 秒以内に同じ用途のコードを発行済みか（メール爆撃対策）。
+pub async fn issued_recently(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    purpose: &str,
+    seconds: i64,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM email_short_codes
+         WHERE actor_id = $1 AND purpose = $2 AND created_at > now() - make_interval(secs => $3))",
+    )
+    .bind(actor_id)
+    .bind(purpose)
+    .bind(seconds as f64)
+    .fetch_one(pool)
+    .await
+}

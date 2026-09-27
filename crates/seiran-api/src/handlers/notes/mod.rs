@@ -62,7 +62,6 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use sqlx::Row;
 
 use seiran_common::repository::{
     extract_shortcode_candidates, Actor, InsertFullParams, InsertRepostParams, NotificationKind,

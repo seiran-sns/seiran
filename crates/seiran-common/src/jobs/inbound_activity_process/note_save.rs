@@ -482,14 +482,14 @@ async fn resolve_dm_addressing(
     if let Some(parent_id) = reply_to_post_id {
         if let Ok(Some(m)) = inbox.post_repo.find_delivery_meta(parent_id).await {
             if m.visibility == "direct" {
-                let authorized: bool =
-                    sqlx::query_scalar("SELECT post_is_visible_to($1, $2, 'direct', $3, false)")
-                        .bind(actor_id)
-                        .bind(m.actor_id)
-                        .bind(parent_id)
-                        .fetch_one(&inbox.db_pool)
-                        .await
-                        .unwrap_or(false);
+                let authorized = crate::repository::post::direct_post_visible_to(
+                    &inbox.db_pool,
+                    actor_id,
+                    m.actor_id,
+                    parent_id,
+                )
+                .await
+                .unwrap_or(false);
                 if !authorized {
                     return Err(format!(
                         "direct投稿へのリプライ拒否: actor_id={} は親投稿{}の当事者ではありません",

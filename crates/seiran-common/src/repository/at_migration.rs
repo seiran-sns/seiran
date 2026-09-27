@@ -545,3 +545,17 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 }
+
+/// ユーザーの未完了（完了・打ち切り以外）の転入の状態。
+pub async fn incomplete_status_for_user(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT status::text FROM at_migration_requests
+         WHERE user_id = $1 AND status NOT IN ('completed', 'abandoned')",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+}

@@ -39,64 +39,34 @@ fn validate_vote(
     Ok(indexes)
 }
 
-/// 投票済み判定・`poll_votes`への記録・票数加算を1トランザクションで行う。対象ポスト行を
-/// `FOR UPDATE`でロックして同一アンケートへの投票を直列化するため、同じ人の同時投票が
-/// 二重に記録されることも、別の人の同時投票で票数が失われることもない。外部配送は
-/// トランザクションの外（呼び出し元）で行う。
+/// 投票を記録する（排他と加算は `repository::poll::record_local_vote`）。外部配送は呼び出し元が
+/// トランザクションの外で行う。
 async fn record_vote(
     state: &AppState,
     note_id: i64,
     actor_id: i64,
     option_indexes: Vec<usize>,
 ) -> Result<RecordedVote, ApiError> {
-    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
-    let mut tx = state.db.begin().await.map_err(internal)?;
-    let row: Option<(Option<serde_json::Value>, i64)> = sqlx::query_as(
-        "SELECT poll, actor_id FROM posts WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
-    )
-    .bind(note_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(internal)?;
-    let (poll, post_author_id) = row.ok_or(ApiError::NotFound("NOT_FOUND"))?;
-    let poll = poll.ok_or_else(|| ApiError::BadRequest("NOT_A_POLL".to_owned()))?;
-    let indexes = validate_vote(&poll, option_indexes)?;
-
-    let already_voted: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM poll_votes WHERE post_id = $1 AND actor_id = $2)",
-    )
-    .bind(note_id)
-    .bind(actor_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(internal)?;
-    if already_voted {
-        return Err(ApiError::Conflict("ALREADY_VOTED"));
-    }
-
-    let index_values: Vec<i32> = indexes.iter().map(|i| *i as i32).collect();
-    sqlx::query(
-        "INSERT INTO poll_votes (post_id, actor_id, option_index)
-         SELECT $1, $2, unnest($3::int[])",
-    )
-    .bind(note_id)
-    .bind(actor_id)
-    .bind(&index_values)
-    .execute(&mut *tx)
-    .await
-    .map_err(internal)?;
-    let poll =
-        seiran_common::repository::poll::increment_poll_votes(&mut tx, note_id, &index_values)
-            .await
-            .map_err(internal)?
-            .ok_or_else(|| ApiError::BadRequest("INVALID_POLL".to_owned()))?;
-    tx.commit().await.map_err(internal)?;
-
-    Ok(RecordedVote {
-        poll,
-        post_author_id,
-        indexes,
+    use seiran_common::repository::poll::{record_local_vote, LocalVoteRejected};
+    let recorded = record_local_vote(&state.db, note_id, actor_id, |poll| {
+        let indexes = validate_vote(poll, option_indexes)?;
+        let values = indexes.iter().map(|i| *i as i32).collect();
+        Ok::<_, ApiError>((values, indexes))
     })
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    match recorded {
+        Ok(v) => Ok(RecordedVote {
+            poll: v.poll,
+            post_author_id: v.post_author_id,
+            indexes: v.choice,
+        }),
+        Err(LocalVoteRejected::NotFound) => Err(ApiError::NotFound("NOT_FOUND")),
+        Err(LocalVoteRejected::NotAPoll) => Err(ApiError::BadRequest("NOT_A_POLL".to_owned())),
+        Err(LocalVoteRejected::Invalid(e)) => Err(e),
+        Err(LocalVoteRejected::AlreadyVoted) => Err(ApiError::Conflict("ALREADY_VOTED")),
+        Err(LocalVoteRejected::InvalidPoll) => Err(ApiError::BadRequest("INVALID_POLL".to_owned())),
+    }
 }
 
 /// POST /api/notes/:id/poll-vote

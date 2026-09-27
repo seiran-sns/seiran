@@ -14,8 +14,6 @@
 
 use std::sync::Arc;
 
-use sqlx::Row;
-
 use crate::atp::sign_service_auth_jwt;
 use crate::queue::worker::JobContext;
 
@@ -53,16 +51,9 @@ async fn process_locked(
     pool: &sqlx::PgPool,
     ctx: &JobContext,
 ) -> Result<(), String> {
-    let row = sqlx::query(
-        "SELECT mf.bsky_video_job_id, a.at_did, a.at_signing_key_pem
-         FROM media_files mf
-         JOIN actors a ON a.id = mf.uploaded_by_actor_id
-         WHERE mf.id = $1",
-    )
-    .bind(media_file_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("DB取得失敗: {}", e))?;
+    let row = crate::repository::media_file::bsky_video_poll_material(pool, media_file_id)
+        .await
+        .map_err(|e| format!("DB取得失敗: {}", e))?;
 
     let Some(row) = row else {
         tracing::warn!(
@@ -72,11 +63,9 @@ async fn process_locked(
         return Ok(());
     };
 
-    let job_id: Option<String> = row.try_get("bsky_video_job_id").unwrap_or(None);
-    let did: Option<String> = row.try_get("at_did").unwrap_or(None);
-    let pem: Option<String> = row.try_get("at_signing_key_pem").unwrap_or(None);
-
-    let (Some(job_id), Some(did), Some(pem)) = (job_id, did, pem) else {
+    let (Some(job_id), Some(did), Some(pem)) =
+        (row.bsky_video_job_id, row.at_did, row.at_signing_key_pem)
+    else {
         tracing::info!(
             "[BskyVideoPoll] media_file_id={} に必要な情報が無い（終了）",
             media_file_id
@@ -154,13 +143,12 @@ async fn process_locked(
             // オリジナルサイズ）とは異なるため別カラムに保持する（app.bsky.embed.video の
             // size フィールドに使う。実機確認: 2,867,780→287,123 バイトのように変わる）。
             let bsky_size = blob.get("size").and_then(|v| v.as_i64());
-            sqlx::query(
-                "UPDATE media_files SET bsky_video_cid = $1, bsky_video_status = 'ready', bsky_video_size = $2 WHERE id = $3",
+            crate::repository::media_file::mark_bsky_video_ready(
+                pool,
+                media_file_id,
+                cid,
+                bsky_size,
             )
-            .bind(cid)
-            .bind(bsky_size)
-            .bind(media_file_id)
-            .execute(pool)
             .await
             .map_err(|e| format!("DB更新失敗: {}", e))?;
             tracing::info!(
@@ -188,8 +176,5 @@ async fn process_locked(
 }
 
 async fn mark_failed(pool: &sqlx::PgPool, media_file_id: i64) {
-    let _ = sqlx::query("UPDATE media_files SET bsky_video_status = 'failed' WHERE id = $1")
-        .bind(media_file_id)
-        .execute(pool)
-        .await;
+    let _ = crate::repository::media_file::mark_bsky_video_failed(pool, media_file_id).await;
 }

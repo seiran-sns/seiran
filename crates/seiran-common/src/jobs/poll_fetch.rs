@@ -19,22 +19,18 @@ pub async fn handle(post_id: i64, ctx: std::sync::Arc<JobContext>) -> Result<(),
         return Ok(());
     };
 
-    let row: Option<(Option<String>, i64, bool)> = sqlx::query_as(
-        "SELECT ap_object_id, actor_id, poll_update_received FROM posts WHERE id = $1",
-    )
-    .bind(post_id)
-    .fetch_optional(&inbox.db_pool)
-    .await
-    .map_err(|e| format!("PollFetch: posts検索失敗 (post_id={}): {}", post_id, e))?;
-
-    let Some((ap_object_id, post_author_id, poll_update_received)) = row else {
+    let Some(target) = crate::repository::poll::poll_fetch_target(&inbox.db_pool, post_id)
+        .await
+        .map_err(|e| format!("PollFetch: posts検索失敗 (post_id={}): {}", post_id, e))?
+    else {
         return Ok(());
     };
-    if poll_update_received {
+    let post_author_id = target.actor_id;
+    if target.poll_update_received {
         // enqueue後にUpdate(Question)が届いていた場合はそちらが最新なので何もしない。
         return Ok(());
     }
-    let Some(ap_object_id) = ap_object_id else {
+    let Some(ap_object_id) = target.ap_object_id else {
         return Ok(());
     };
 
@@ -65,18 +61,13 @@ pub async fn handle(post_id: i64, ctx: std::sync::Arc<JobContext>) -> Result<(),
     let Some(poll) = normalize_ap_poll(&fetched) else {
         // Question でなくなっていた（削除・別種への変更等）／oneOf・anyOfが読めない。
         // 以後も叩き直し続けないよう poll_fetched_at だけ進めて諦める。
-        sqlx::query("UPDATE posts SET poll_fetched_at = now() WHERE id = $1")
-            .bind(post_id)
-            .execute(&inbox.db_pool)
+        crate::repository::poll::save_fetched_poll(&inbox.db_pool, post_id, None)
             .await
             .map_err(|e| format!("PollFetch: poll_fetched_at更新失敗: {}", e))?;
         return Ok(());
     };
 
-    sqlx::query("UPDATE posts SET poll = $2, poll_fetched_at = now() WHERE id = $1")
-        .bind(post_id)
-        .bind(&poll)
-        .execute(&inbox.db_pool)
+    crate::repository::poll::save_fetched_poll(&inbox.db_pool, post_id, Some(&poll))
         .await
         .map_err(|e| format!("PollFetch: poll更新失敗: {}", e))?;
 

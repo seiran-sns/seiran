@@ -29,6 +29,7 @@
 > **ルール**: 設計文書の更新とコードの変更は **同じコミット** に含めること。設計文書を後回しにしない。
 
 ### コーディングルール（抜粋、全文は `docs/coding_rules.md` 2節）
+- SQL はリポジトリ層（`crates/seiran-common/src/repository/`）にだけ書く。ハンドラ・ジョブ・firehose からは型付きのリポジトリ関数を呼ぶ（`sqlx::query*`・`QueryBuilder`・`sqlx::Row` の使用を `crates/seiran-common/tests/sql_style.rs` が検出する）。
 - SQL で `IN (SELECT ...)` / `NOT IN (SELECT ...)` を使わない。`EXISTS` / `NOT EXISTS` で書く（NULL を含むサブクエリで `NOT IN` が常に偽になる事故の再発防止。`crates/seiran-common/tests/sql_style.rs` が機械的に検出する）。NULL 許容列の比較では NULL 行の扱いを明示する。
 - 「読んでから書く」「書いてから読む」を別々の文で行わない。`RETURNING`・`ON CONFLICT`・`SET col = f(col)` で1文にするか、トランザクション内で `FOR UPDATE` / アドバイザリロックで直列化する。外部 API 呼び出しはトランザクションに含めない。
 - `TimelinePost` を返すクエリは `timeline_post_columns!()` / `timeline_post_joins!()` を使い、可視性は `post_is_visible_to` で判定する（手書きしない）。
@@ -42,13 +43,12 @@
 2. 新しいマイグレーションファイルを追加した場合は `cargo sqlx migrate run` でローカル DB に適用する（後述）
 3. `cargo build` でコンパイルエラーがないことを確認
 4. `cargo clippy --workspace --all-targets -- -D warnings` を実行し、指摘が無いことを確認（CI と同じコマンド）
-5. `sqlx::query!` を追加・変更した場合は `cargo sqlx prepare --workspace` を実行して `.sqlx/` キャッシュを更新する（忘れると Docker ビルドが失敗する）
-6. `frontend/package.json` を変更した場合（依存追加・更新・削除）は、CI と同じ Node バージョン（20系）で `frontend/` 内から `npm ci` を実行し、`package-lock.json` が package.json と整合していることを確認する（`npm install` は lockfile のずれを黙って許容してしまい検出できない。`npm ci` は CI が実際に叩くコマンドそのものなので、ローカルで通れば CI でも通る）
-7. フロントエンド・バックエンドの挙動に関わる変更をした場合は `cd e2e && npm test` を実行し、E2Eテストが全て成功することを確認する（E2E側はバックエンド3100・フロントエンド5273という専用ポート（`e2e/ports.ts`）で動くため、`scripts/dev-up.sh` 等のローカル確認用サーバー（バックエンド3000・フロントエンド`build:watch`+`preview`4174）を止める必要はない）
-8. 関連する設計文書を更新（上記の対応表に従う）
-9. `docs/roadmap.md` の進捗チェックを更新
-10. マイケルに画面・動作確認を依頼してから `main` ブランチへコミット
-11. バージョンのリビジョン桁を上げてプッシュしたら、開発機へのデプロイし直しを忘れないこと（後述「バージョン運用」節）
+5. `frontend/package.json` を変更した場合（依存追加・更新・削除）は、CI と同じ Node バージョン（20系）で `frontend/` 内から `npm ci` を実行し、`package-lock.json` が package.json と整合していることを確認する（`npm install` は lockfile のずれを黙って許容してしまい検出できない。`npm ci` は CI が実際に叩くコマンドそのものなので、ローカルで通れば CI でも通る）
+6. フロントエンド・バックエンドの挙動に関わる変更をした場合は `cd e2e && npm test` を実行し、E2Eテストが全て成功することを確認する（E2E側はバックエンド3100・フロントエンド5273という専用ポート（`e2e/ports.ts`）で動くため、`scripts/dev-up.sh` 等のローカル確認用サーバー（バックエンド3000・フロントエンド`build:watch`+`preview`4174）を止める必要はない）
+7. 関連する設計文書を更新（上記の対応表に従う）
+8. `docs/roadmap.md` の進捗チェックを更新
+9. マイケルに画面・動作確認を依頼してから `main` ブランチへコミット
+10. バージョンのリビジョン桁を上げてプッシュしたら、開発機へのデプロイし直しを忘れないこと（後述「バージョン運用」節）
 
 ### バージョン運用
 
@@ -86,13 +86,3 @@ cargo sqlx migrate run
 - スキーマを DB に適用する
 - `_sqlx_migrations` に記録を残す（API コンテナ起動時に「適用済み」と認識される）
 
-`cargo sqlx prepare --workspace` は `.sqlx/` キャッシュを更新するだけで、マイグレーションは実行しない。
-
-### sqlx オフラインキャッシュについて
-
-`sqlx::query!` マクロはコンパイル時に DB に接続して SQL の型チェックを行う。Docker ビルド環境には DB がないため、`.sqlx/` キャッシュ（オフラインモード）を使う。
-
-- **キャッシュ更新が必要なタイミング**: `sqlx::query!` / `sqlx::query_as!` / `sqlx::query_scalar!` 等を追加・変更したとき
-- **更新コマンド**: `cargo sqlx prepare --workspace`（ローカル DB が起動している状態で実行）
-- **`.sqlx/` ディレクトリは必ず git にコミットする**
-- Dockerfile には `SQLX_OFFLINE=true` が設定済み

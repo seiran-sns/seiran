@@ -13,7 +13,6 @@ use axum::{
     http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
 };
-use sqlx::Row;
 
 use crate::handlers::notes::validation::strip_html_tags;
 use crate::handlers::notes::{fetch_attachments_map, to_note_response};
@@ -253,26 +252,17 @@ pub async fn profile_ogp(Path(handle): Path<String>, State(state): State<AppStat
         None => (handle.clone(), state.local_domain.to_string()),
     };
 
-    let row = sqlx::query(
-        "SELECT a.id AS actor_id, a.actor_type::text AS actor_type, a.display_name, a.bio, \
-                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url \
-         FROM actors a \
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
-         WHERE a.username = $1 AND a.domain = $2 AND a.withdrawn_at IS NULL LIMIT 1",
-    )
-    .bind(&username)
-    .bind(&domain)
-    .fetch_optional(&state.db)
-    .await;
+    let row = seiran_common::repository::actor::ogp_profile(&state.db, &username, &domain).await;
 
     let (actor_type, display_name, bio, avatar_url) = match row {
         Ok(Some(r)) => {
-            let actor_id: i64 = r.try_get("actor_id").unwrap_or_default();
-            let actor_type: String = r.try_get("actor_type").unwrap_or_default();
-            let display_name: Option<String> = r.try_get("display_name").ok().flatten();
-            let bio: Option<String> = r.try_get("bio").ok().flatten();
-            let avatar_url: Option<String> = r.try_get("avatar_url").ok().flatten();
+            let seiran_common::repository::actor::OgpActorRow {
+                actor_id,
+                actor_type,
+                display_name,
+                bio,
+                avatar_url,
+            } = r;
             let avatar_url = seiran_common::avatar::resolve_avatar_url(
                 avatar_url,
                 &actor_type,

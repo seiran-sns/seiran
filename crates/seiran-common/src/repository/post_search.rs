@@ -1,7 +1,7 @@
-//! Bluesky-compatible post search query parsing and SQL generation.
+//! Bluesky 互換の投稿検索クエリ（`from:` `lang:` `OR` 等）の解析と、ローカル DB の検索。
 
 use chrono::{DateTime, NaiveDate, Utc};
-use sqlx::{Postgres, QueryBuilder};
+use sqlx::{PgPool, Postgres, QueryBuilder};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchCondition {
@@ -347,6 +347,36 @@ fn escape_like(value: &str) -> String {
         .replace('\\', "\\\\")
         .replace('%', "\\%")
         .replace('_', "\\_")
+}
+
+/// ローカル DB を検索し、閲覧者 `me`（`(actor_id, acct)`）に見える投稿の id を新しい順に返す。
+pub async fn search_local_post_ids(
+    pool: &PgPool,
+    query: &str,
+    fetch_limit: i64,
+    until_id: Option<i64>,
+    since_id: Option<i64>,
+    me: Option<(i64, &str)>,
+) -> Result<Vec<i64>, sqlx::Error> {
+    // pg_bigm は LIKE のみ最適化対象（ILIKE 非対応）で、索引は LOWER(body) に張っているため
+    // 大文字小文字を無視した部分一致は LOWER() LIKE LOWER() の形で書く（`append_sql`）。
+    let condition = parse(query);
+    let mut sql =
+        QueryBuilder::new("SELECT p.id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE ");
+    append_sql(&condition, &mut sql, me);
+    sql.push(" AND p.deleted_at IS NULL");
+    sql.push(" AND post_is_visible_to(")
+        .push_bind(me.map(|(actor_id, _)| actor_id))
+        .push(", p.actor_id, p.visibility::text, p.id, false)");
+    if let Some(uid) = until_id {
+        sql.push(" AND p.id < ").push_bind(uid);
+    }
+    if let Some(sid) = since_id {
+        sql.push(" AND p.id > ").push_bind(sid);
+    }
+    sql.push(" ORDER BY p.id DESC LIMIT ")
+        .push_bind(fetch_limit);
+    sql.build_query_scalar().fetch_all(pool).await
 }
 
 #[cfg(test)]

@@ -8,10 +8,9 @@
 
 use std::sync::Arc;
 
-use sqlx::Row;
-
 use crate::atp::sign_service_auth_jwt;
 use crate::queue::worker::JobContext;
+use crate::repository::dm;
 
 pub(crate) const CHAT_SERVICE_HOST: &str = "https://api.bsky.chat";
 pub(crate) const CHAT_SERVICE_AUD: &str = "did:web:api.bsky.chat";
@@ -25,28 +24,17 @@ pub async fn handle(post_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
         return Ok(());
     };
 
-    let row = sqlx::query(
-        "SELECT p.body, p.thread_root_post_id, a.at_did AS sender_did, a.at_signing_key_pem AS sender_pem
-         FROM posts p JOIN actors a ON a.id = p.actor_id
-         WHERE p.id = $1 AND p.visibility = 'direct' LIMIT 1",
-    )
-    .bind(post_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("投稿情報取得失敗: {}", e))?;
-
-    let Some(row) = row else {
+    let Some(row) = dm::bsky_dm_send_material(pool, post_id)
+        .await
+        .map_err(|e| format!("投稿情報取得失敗: {}", e))?
+    else {
         tracing::warn!("[BskyDmSend] post_id={} が見つかりません（終了）", post_id);
         return Ok(());
     };
-
-    let body: String = row.try_get("body").map_err(|e| e.to_string())?;
-    let thread_root_post_id: Option<i64> = row.try_get("thread_root_post_id").unwrap_or(None);
-    let sender_did: Option<String> = row.try_get("sender_did").unwrap_or(None);
-    let sender_pem: Option<String> = row.try_get("sender_pem").unwrap_or(None);
+    let body = row.body;
 
     let (Some(thread_root_post_id), Some(sender_did), Some(sender_pem)) =
-        (thread_root_post_id, sender_did, sender_pem)
+        (row.thread_root_post_id, row.sender_did, row.sender_pem)
     else {
         tracing::error!(
             "[BskyDmSend] post_id={} に必要な情報が無い（送信者のDID/署名鍵未設定、終了）",
@@ -55,16 +43,10 @@ pub async fn handle(post_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
         return Ok(());
     };
 
-    let peer_row = sqlx::query(
-        "SELECT a.at_did FROM post_recipients pr JOIN actors a ON a.id = pr.actor_id
-         WHERE pr.post_id = $1 AND a.actor_type = 'bsky' AND a.at_did IS NOT NULL LIMIT 1",
-    )
-    .bind(post_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("宛先取得失敗: {}", e))?;
-
-    let Some(peer_did) = peer_row.and_then(|r| r.try_get::<String, _>("at_did").ok()) else {
+    let Some(peer_did) = dm::bsky_peer_did(pool, post_id)
+        .await
+        .map_err(|e| format!("宛先取得失敗: {}", e))?
+    else {
         tracing::info!("[BskyDmSend] post_id={} にBsky宛先が無い（終了）", post_id);
         return Ok(());
     };
@@ -116,12 +98,7 @@ pub async fn handle(post_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
             .and_then(|v| v.get("id").and_then(|id| id.as_str()).map(str::to_string))
         {
             Some(message_id) => {
-                if let Err(e) = sqlx::query("UPDATE posts SET bsky_message_id = $1 WHERE id = $2")
-                    .bind(&message_id)
-                    .bind(post_id)
-                    .execute(pool)
-                    .await
-                {
+                if let Err(e) = dm::set_bsky_message_id(pool, post_id, &message_id).await {
                     tracing::error!(
                         "[BskyDmSend] bsky_message_id保存失敗 post_id={}: {}",
                         post_id,
@@ -169,13 +146,9 @@ async fn resolve_convo_id(
     sender_pem: &str,
     peer_did: &str,
 ) -> Result<String, String> {
-    if let Some(cached) = sqlx::query_scalar::<_, String>(
-        "SELECT convo_id FROM bsky_convo_links WHERE thread_root_post_id = $1",
-    )
-    .bind(thread_root_post_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("convoIdキャッシュ取得失敗: {}", e))?
+    if let Some(cached) = dm::convo_id_for_thread(pool, thread_root_post_id)
+        .await
+        .map_err(|e| format!("convoIdキャッシュ取得失敗: {}", e))?
     {
         return Ok(cached);
     }
@@ -217,15 +190,9 @@ async fn resolve_convo_id(
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("getConvoForMembers応答にconvo.idが無い: {}", body_text))?;
 
-    sqlx::query(
-        "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id) VALUES ($1, $2)
-         ON CONFLICT (thread_root_post_id) DO UPDATE SET convo_id = EXCLUDED.convo_id",
-    )
-    .bind(thread_root_post_id)
-    .bind(convo_id)
-    .execute(pool)
-    .await
-    .map_err(|e| format!("convoIdキャッシュ保存失敗: {}", e))?;
+    dm::save_convo_id(pool, thread_root_post_id, convo_id)
+        .await
+        .map_err(|e| format!("convoIdキャッシュ保存失敗: {}", e))?;
 
     Ok(convo_id.to_string())
 }

@@ -5,6 +5,7 @@
 //! 扱うための一覧・履歴・既読状態のクエリのみを持つ。
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 
 pub use super::post::{DmSessionSummary, TimelinePost};
@@ -557,4 +558,206 @@ impl DmRepository for PgDmRepository {
         .await?;
         Ok(())
     }
+}
+
+/// Bsky DM 送信に要る投稿本文と送信者の DID・署名鍵。
+#[derive(sqlx::FromRow)]
+pub struct BskyDmSendRow {
+    pub body: String,
+    pub thread_root_post_id: Option<i64>,
+    pub sender_did: Option<String>,
+    pub sender_pem: Option<String>,
+}
+
+pub async fn bsky_dm_send_material(
+    pool: &PgPool,
+    post_id: i64,
+) -> Result<Option<BskyDmSendRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT p.body, p.thread_root_post_id, a.at_did AS sender_did, a.at_signing_key_pem AS sender_pem
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.id = $1 AND p.visibility = 'direct' LIMIT 1",
+    )
+    .bind(post_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// DM 投稿の宛先のうち Bsky アクターの DID（1:1 会話なので高々1人）。
+pub async fn bsky_peer_did(pool: &PgPool, post_id: i64) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT a.at_did FROM post_recipients pr JOIN actors a ON a.id = pr.actor_id
+         WHERE pr.post_id = $1 AND a.actor_type = 'bsky' AND a.at_did IS NOT NULL LIMIT 1",
+    )
+    .bind(post_id)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn set_bsky_message_id(
+    pool: &PgPool,
+    post_id: i64,
+    message_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE posts SET bsky_message_id = $1 WHERE id = $2")
+        .bind(message_id)
+        .bind(post_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+pub async fn convo_id_for_thread(
+    pool: &PgPool,
+    thread_root_post_id: i64,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT convo_id FROM bsky_convo_links WHERE thread_root_post_id = $1")
+        .bind(thread_root_post_id)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn save_convo_id(
+    pool: &PgPool,
+    thread_root_post_id: i64,
+    convo_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id) VALUES ($1, $2)
+         ON CONFLICT (thread_root_post_id) DO UPDATE SET convo_id = EXCLUDED.convo_id",
+    )
+    .bind(thread_root_post_id)
+    .bind(convo_id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// Bsky DM ポーリングの対象（ATP 署名鍵を持つローカルユーザー）の `(id, at_did, 署名鍵PEM)`。
+pub async fn bsky_dm_poll_accounts(
+    pool: &PgPool,
+) -> Result<Vec<(i64, String, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, at_did, at_signing_key_pem FROM actors
+         WHERE actor_type = 'local' AND at_did IS NOT NULL AND at_signing_key_pem IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// 会話の同期状態 `(スレッド起点の post_id, 最後に同期したメッセージID)`。
+pub async fn convo_link(
+    pool: &PgPool,
+    convo_id: &str,
+) -> Result<Option<(i64, Option<String>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT thread_root_post_id, last_synced_message_id FROM bsky_convo_links WHERE convo_id = $1",
+    )
+    .bind(convo_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// 同期カーソル（最後に取り込んだメッセージ）を進める。
+pub async fn advance_convo_cursor(
+    pool: &PgPool,
+    thread_root_post_id: i64,
+    convo_id: &str,
+    message_id: &str,
+) -> Result<(), sqlx::Error> {
+    advance_convo_cursor_in(pool, thread_root_post_id, convo_id, message_id).await
+}
+
+async fn advance_convo_cursor_in<'e, E: sqlx::PgExecutor<'e>>(
+    executor: E,
+    thread_root_post_id: i64,
+    convo_id: &str,
+    message_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id, last_synced_message_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (thread_root_post_id) DO UPDATE SET last_synced_message_id = EXCLUDED.last_synced_message_id",
+    )
+    .bind(thread_root_post_id)
+    .bind(convo_id)
+    .bind(message_id)
+    .execute(executor)
+    .await
+    .map(|_| ())
+}
+
+/// Bsky から受信した DM メッセージ1件。
+pub struct IncomingBskyDm<'a> {
+    /// 新規行に使う post_id（既に取り込み済みなら使われない）。
+    pub candidate_post_id: i64,
+    /// 新規行のスレッド起点。
+    pub candidate_thread_root: i64,
+    pub sender_actor_id: i64,
+    pub recipient_actor_id: i64,
+    pub convo_id: &'a str,
+    pub message_id: &'a str,
+    pub text: &'a str,
+    pub sent_at: DateTime<Utc>,
+}
+
+/// 受信 DM を `posts`・`post_recipients` に取り込み、同期カーソルを進める（1トランザクション）。
+/// 既に取り込み済みのメッセージ（`bsky_message_id` 一致）はその行を使う。
+/// `(post_id, スレッド起点)` を返す。
+pub async fn import_bsky_dm(
+    pool: &PgPool,
+    msg: &IncomingBskyDm<'_>,
+) -> Result<(i64, i64), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let inserted_id: Option<i64> = sqlx::query_scalar(
+        "INSERT INTO posts (id, actor_id, body, visibility, thread_root_post_id, created_at, bsky_message_id)
+         VALUES ($1, $2, $3, 'direct', $4, $5, $6)
+         ON CONFLICT (bsky_message_id) WHERE bsky_message_id IS NOT NULL DO NOTHING
+         RETURNING id",
+    )
+    .bind(msg.candidate_post_id)
+    .bind(msg.sender_actor_id)
+    .bind(msg.text)
+    .bind(msg.candidate_thread_root)
+    .bind(msg.sent_at)
+    .bind(msg.message_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let (post_id, thread_root) = match inserted_id {
+        Some(id) => (id, msg.candidate_thread_root),
+        None => {
+            let (id, root): (i64, Option<i64>) = sqlx::query_as(
+                "SELECT id, thread_root_post_id FROM posts WHERE bsky_message_id = $1",
+            )
+            .bind(msg.message_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            (id, root.unwrap_or(id))
+        }
+    };
+
+    sqlx::query(
+        "INSERT INTO post_recipients (post_id, actor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(post_id)
+    .bind(msg.recipient_actor_id)
+    .execute(&mut *tx)
+    .await?;
+
+    advance_convo_cursor_in(&mut *tx, thread_root, msg.convo_id, msg.message_id).await?;
+
+    tx.commit().await?;
+    Ok((post_id, thread_root))
+}
+
+pub async fn post_id_by_bsky_message_id(
+    pool: &PgPool,
+    message_id: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT id FROM posts WHERE bsky_message_id = $1")
+        .bind(message_id)
+        .fetch_optional(pool)
+        .await
 }

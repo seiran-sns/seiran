@@ -10,7 +10,6 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{QueryBuilder, Row};
 
 use super::notes::NoteResponse;
 use crate::middleware::MaybeAuthedUser;
@@ -181,14 +180,10 @@ pub(crate) async fn search_post_ids_by_cursor(
         return resolve_bridge_ids_for_search(&state.db, ids).await;
     }
     let until = match until_id {
-        Some(id) => sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
-            "SELECT created_at FROM posts WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten(),
+        Some(id) => seiran_common::repository::post::created_at_of(&state.db, id)
+            .await
+            .ok()
+            .flatten(),
         None => None,
     };
     let (local_ids, (appview_posts, _)) = tokio::join!(
@@ -213,14 +208,9 @@ async fn resolve_bridge_ids_for_search(db: &sqlx::PgPool, ids: Vec<i64>) -> Vec<
     if ids.is_empty() {
         return ids;
     }
-    let rows: Vec<(i64, Option<i64>, bool)> = sqlx::query_as(
-        "SELECT id, bridge_of_post_id, (bridged_original_uri IS NOT NULL) AS is_bridge
-         FROM posts WHERE id = ANY($1)",
-    )
-    .bind(&ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
+    let rows = seiran_common::repository::note_extras::bridge_status_for_posts(db, &ids)
+        .await
+        .unwrap_or_default();
     let by_id: std::collections::HashMap<i64, (Option<i64>, bool)> = rows
         .into_iter()
         .map(|(id, bridge_of_post_id, is_bridge)| (id, (bridge_of_post_id, is_bridge)))
@@ -250,35 +240,16 @@ pub(crate) async fn search_local_db(
     since_id: Option<i64>,
     me: Option<(i64, &str)>,
 ) -> Vec<i64> {
-    // pg_bigmはLIKE演算子のみ最適化対象（ILIKE非対応）のため、大文字小文字を無視した
-    // 部分一致は LOWER() LIKE LOWER() の形で書く（idx_posts_body_bigm はLOWER(body)に
-    // 対して張っているため、この形でないとインデックスが使われない）。
-    let condition = crate::search_query::parse(query);
-    let mut sql =
-        QueryBuilder::new("SELECT p.id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE ");
-    crate::search_query::append_sql(&condition, &mut sql, me);
-    sql.push(" AND p.deleted_at IS NULL");
-    // followers_only/directは閲覧者が投稿者本人・accepted フォロワー・DM宛先のいずれかで
-    // なければ検索結果に出さない（他の全取得経路と同じ`post_is_visible_to`に統一）。
-    // これが無いと、検索は`me`（`from:`/`mentions:`フィルタ用）を可視性判定に一切使って
-    // おらず、誰でも他人宛のDM本文まで検索でヒットさせられてしまっていた。
-    sql.push(" AND post_is_visible_to(")
-        .push_bind(me.map(|(actor_id, _)| actor_id))
-        .push(", p.actor_id, p.visibility::text, p.id, false)");
-    if let Some(uid) = until_id {
-        sql.push(" AND p.id < ").push_bind(uid);
-    }
-    if let Some(sid) = since_id {
-        sql.push(" AND p.id > ").push_bind(sid);
-    }
-    sql.push(" ORDER BY p.id DESC LIMIT ")
-        .push_bind(fetch_limit);
-    let rows = sql.build().fetch_all(db).await;
-
-    rows.unwrap_or_default()
-        .iter()
-        .filter_map(|r| r.try_get::<i64, _>("id").ok())
-        .collect()
+    seiran_common::repository::post_search::search_local_post_ids(
+        db,
+        query,
+        fetch_limit,
+        until_id,
+        since_id,
+        me,
+    )
+    .await
+    .unwrap_or_default()
 }
 
 /// AppView検索結果のactor/postをローカルDBへupsertし、ローカルpost IDへ変換する。

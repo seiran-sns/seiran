@@ -24,7 +24,7 @@ use seiran_common::repository::{
     PgFollowRepository, PgNotificationRepository,
 };
 use seiran_common::streaming::StreamHub;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 
 /// 1ページあたりの取得件数（`getFollowers` の `limit`）。
 const PAGE_LIMIT: u32 = 100;
@@ -51,14 +51,7 @@ pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<Strea
 }
 
 async fn poll_once(pool: &PgPool, http: &reqwest::Client, stream_hub: &StreamHub) {
-    let users = match sqlx::query(
-        "SELECT id, at_did FROM actors
-         WHERE actor_type = 'local' AND at_did IS NOT NULL AND at_signing_key_pem IS NOT NULL
-           AND withdrawn_at IS NULL",
-    )
-    .fetch_all(pool)
-    .await
-    {
+    let users = match seiran_common::repository::actor::bsky_follower_poll_targets(pool).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[BskyFollowerPoll] 対象ユーザー取得失敗: {}", e);
@@ -66,25 +59,7 @@ async fn poll_once(pool: &PgPool, http: &reqwest::Client, stream_hub: &StreamHub
         }
     };
 
-    for row in users {
-        let actor_id: i64 = match row.try_get("id") {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!("[BskyFollowerPoll] id 取得失敗: {}", e);
-                continue;
-            }
-        };
-        let did: String = match row.try_get("at_did") {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(
-                    "[BskyFollowerPoll] at_did 取得失敗 actor_id={}: {}",
-                    actor_id,
-                    e
-                );
-                continue;
-            }
-        };
+    for (actor_id, did) in users {
         if let Err(e) = poll_user(pool, http, stream_hub, actor_id, &did).await {
             tracing::warn!(
                 "[BskyFollowerPoll] actor_id={} のポーリング失敗: {}",
@@ -102,18 +77,13 @@ async fn poll_user(
     local_actor_id: i64,
     did: &str,
 ) -> Result<(), String> {
-    let baseline_done: Option<chrono::DateTime<Utc>> =
-        sqlx::query_scalar("SELECT bsky_followers_baseline_done_at FROM actors WHERE id = $1")
-            .bind(local_actor_id)
-            .fetch_one(pool)
+    let is_baseline_done =
+        seiran_common::repository::actor::bsky_followers_baseline_done(pool, local_actor_id)
             .await
             .map_err(|e| format!("baseline取得失敗: {}", e))?;
-    let is_baseline_done = baseline_done.is_some();
 
     let known_follower_ids: HashSet<i64> =
-        sqlx::query_scalar("SELECT follower_actor_id FROM follows WHERE target_actor_id = $1")
-            .bind(local_actor_id)
-            .fetch_all(pool)
+        seiran_common::repository::follow::follower_ids_of(pool, local_actor_id)
             .await
             .map_err(|e| format!("既存フォロワー取得失敗: {}", e))?
             .into_iter()
@@ -208,9 +178,7 @@ async fn poll_user(
     }
 
     if !is_baseline_done {
-        sqlx::query("UPDATE actors SET bsky_followers_baseline_done_at = NOW() WHERE id = $1")
-            .bind(local_actor_id)
-            .execute(pool)
+        seiran_common::repository::actor::mark_bsky_followers_baseline_done(pool, local_actor_id)
             .await
             .map_err(|e| format!("baseline更新失敗: {}", e))?;
     }

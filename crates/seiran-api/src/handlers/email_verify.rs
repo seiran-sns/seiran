@@ -61,16 +61,9 @@ pub async fn request_email_verification(
     let pool = &state.db;
     let id = generate_snowflake_id(chrono::Utc::now());
 
-    let row = sqlx::query!(
-        "INSERT INTO email_verifications (id, email) VALUES ($1, $2) RETURNING token",
-        id,
-        email,
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| ApiError::Internal(format!("DB エラー: {}", e)))?;
-
-    let token = row.token;
+    let token = seiran_common::repository::email_verification::issue(pool, id, &email)
+        .await
+        .map_err(|e| ApiError::Internal(format!("DB エラー: {}", e)))?;
     let verify_url = format!(
         "https://{}/verify-email?token={}",
         state.local_domain, token
@@ -110,18 +103,14 @@ pub async fn verify_email_token(
         .parse()
         .map_err(|_| ApiError::BadRequest("INVALID_TOKEN".into()))?;
 
-    let row = sqlx::query!(
-        "SELECT token FROM email_verifications
-         WHERE token = $1
-           AND expires_at > now()",
-        token,
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::BadRequest("INVALID_TOKEN".into()))?;
+    let valid = seiran_common::repository::email_verification::is_valid(pool, token)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !valid {
+        return Err(ApiError::BadRequest("INVALID_TOKEN".into()));
+    }
 
     Ok(Json(VerifyTokenResponse {
-        registration_token: row.token.to_string(),
+        registration_token: token.to_string(),
     }))
 }

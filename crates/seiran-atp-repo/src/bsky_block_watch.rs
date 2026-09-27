@@ -24,6 +24,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
 use seiran_common::repository::{
     ActorRepository, BlockRepository, PgActorRepository, PgBlockRepository,
+    PgSiteSettingsRepository, SiteSettingsRepository,
 };
 use seiran_common::traits::JobQueue;
 
@@ -127,9 +128,8 @@ async fn run_loop(pool: PgPool, job_queue: Arc<dyn JobQueue>, http: Arc<reqwest:
 }
 
 async fn load_cursor(pool: &PgPool) -> Option<i64> {
-    sqlx::query_scalar::<_, String>("SELECT value FROM site_settings WHERE key = $1")
-        .bind(BLOCK_CURSOR_KEY)
-        .fetch_optional(pool)
+    PgSiteSettingsRepository::new(pool.clone())
+        .get(BLOCK_CURSOR_KEY)
         .await
         .ok()
         .flatten()
@@ -137,14 +137,9 @@ async fn load_cursor(pool: &PgPool) -> Option<i64> {
 }
 
 async fn save_cursor(pool: &PgPool, time_us: i64) {
-    if let Err(e) = sqlx::query(
-        "INSERT INTO site_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
-    )
-    .bind(BLOCK_CURSOR_KEY)
-    .bind(time_us.to_string())
-    .execute(pool)
-    .await
+    if let Err(e) = PgSiteSettingsRepository::new(pool.clone())
+        .set(BLOCK_CURSOR_KEY, &time_us.to_string())
+        .await
     {
         tracing::error!("[Jetstream/BlockWatch] cursor保存失敗: {}", e);
     }

@@ -93,20 +93,7 @@ async fn build_external_post_embed(
     })
 }
 
-/// Bsky embed候補の分類に使う `media_files` 行（#227 Bsky embed選択）。
-#[derive(sqlx::FromRow)]
-struct EmbedCandidateRow {
-    id: i64,
-    sha256: String,
-    size: i64,
-    mime_type: String,
-    width: Option<i32>,
-    height: Option<i32>,
-    is_animated_image: bool,
-    bsky_video_cid: Option<String>,
-    bsky_video_status: Option<String>,
-    bsky_video_size: Option<i64>,
-}
+use seiran_common::repository::media_file::EmbedCandidateRow;
 
 /// [`resolve_bsky_embed`] の結果。
 pub enum BskyEmbedResolution {
@@ -212,18 +199,19 @@ async fn resolve_url_embed(
         .as_ref()
         .and_then(|_| ogp.as_ref().and_then(|o| o.embed_type.clone()));
 
-    if let Err(e) = sqlx::query(
-        "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url, embed_src, embed_type)
-         VALUES ($1, 0, $2, $3, $4, $5, $6, $7)",
+    if let Err(e) = seiran_common::repository::note_extras::insert_link_card(
+        &state.db,
+        &seiran_common::repository::note_extras::NewLinkCard {
+            post_id,
+            position: 0,
+            url: &url,
+            title: &title,
+            description: &description,
+            thumbnail_url: thumbnail_url.as_deref(),
+            embed_src: embed_src.as_deref(),
+            embed_type: embed_type.as_deref(),
+        },
     )
-    .bind(post_id)
-    .bind(&url)
-    .bind(&title)
-    .bind(&description)
-    .bind(&thumbnail_url)
-    .bind(&embed_src)
-    .bind(&embed_type)
-    .execute(&state.db)
     .await
     {
         tracing::warn!(
@@ -267,24 +255,26 @@ pub async fn attach_link_cards_from_urls(state: &AppState, post_id: i64, urls: &
             .as_ref()
             .and_then(|_| ogp.as_ref().and_then(|o| o.embed_type.clone()));
 
-        if let Err(e) = sqlx::query(
-            "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url, embed_src, embed_type)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        if let Err(e) = seiran_common::repository::note_extras::insert_link_card(
+            &state.db,
+            &seiran_common::repository::note_extras::NewLinkCard {
+                post_id,
+                position: position as i16,
+                url,
+                title: &title,
+                description: &description,
+                thumbnail_url: thumbnail_url.as_deref(),
+                embed_src: embed_src.as_deref(),
+                embed_type: embed_type.as_deref(),
+            },
         )
-        .bind(post_id)
-        .bind(position as i32)
-        .bind(url)
-        .bind(&title)
-        .bind(&description)
-        .bind(&thumbnail_url)
-        .bind(&embed_src)
-        .bind(&embed_type)
-        .execute(&state.db)
         .await
         {
             tracing::warn!(
                 "[attach_link_cards_from_urls] post_link_cards INSERT失敗 post_id={} url={} err={}",
-                post_id, url, e
+                post_id,
+                url,
+                e
             );
         }
     }
@@ -325,18 +315,9 @@ async fn fetch_embed_candidate_rows(
     state: &AppState,
     attachment_ids: &[i64],
 ) -> Vec<EmbedCandidateRow> {
-    if attachment_ids.is_empty() {
-        return Vec::new();
-    }
-    sqlx::query_as::<_, EmbedCandidateRow>(
-        "SELECT id, sha256, size, mime_type, width, height, is_animated_image, \
-                bsky_video_cid, bsky_video_status, bsky_video_size \
-         FROM media_files WHERE id = ANY($1) ORDER BY array_position($1, id)",
-    )
-    .bind(attachment_ids)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default()
+    seiran_common::repository::media_file::embed_candidates(&state.db, attachment_ids)
+        .await
+        .unwrap_or_default()
 }
 
 /// 引用投稿（`app.bsky.embed.record`）に静止画添付があれば、`app.bsky.embed.recordWithMedia`

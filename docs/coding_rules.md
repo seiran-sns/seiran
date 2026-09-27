@@ -6,73 +6,31 @@
 
 ## 1. レイヤー設計
 
-seiran は **Handler → Service → Repository** の 3 層構造を採用する。
-
 ```
-HTTP リクエスト
+[Handler]     crates/seiran-api/src/handlers/, crates/seiran-federation-inbox/src/handlers/
+  リクエストの解釈・認証・入力検証・レスポンス組み立て
     │
-    ▼
-[Handler]        crates/seiran-api/src/handlers/
-  ・リクエストのデシリアライズ
-  ・入力バリデーション
-  ・認証チェック（middleware を呼ぶ）
-  ・Service を呼ぶ
-  ・レスポンスのシリアライズ
+[手順]        crates/seiran-common/ の各モジュール
+  複数テーブル・外部 API にまたがる処理（atp::service::AtpCommitService、follow_exec、jobs/* 等）
     │
-    ▼
-[Service]        crates/seiran-common/src/atp/service.rs, etc.
-  ・ビジネスルールの実装
-  ・複数の Repository を組み合わせるトランザクション制御
-  ・外部サービス（plc.directory 等）との連携
-    │
-    ▼
-[Repository]     crates/seiran-common/src/repository/
-  ・データベースへの CRUD 操作のみ
-  ・SQL はここにしか書かない
-  ・trait で抽象化しテストで差し替え可能にする
+[Repository]  crates/seiran-common/src/repository/
+  SQL はここにだけ書く
 ```
 
-### 各層の責務（詳細）
-
-#### Handler 層
-
-- **やること**: HTTP 入出力の変換・バリデーション・レスポンス組み立て
-- **やらないこと**: SQL、HTTP クライアント呼び出し、ビジネスロジック
-- ハンドラ関数の戻り値は `impl IntoResponse` とし、`ApiError` を使う
-- ハンドラ 1 関数の目安は 30 行以内。超える場合はビジネスロジックが混入している
-
-```rust
-// Good: Service を呼んでレスポンスを返すだけ
-async fn create_note(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-    Json(req): Json<CreateNoteRequest>,
-) -> Result<Json<NoteResponse>, ApiError> {
-    let auth_user = state.auth_middleware.extract(&headers).await?;
-    let note = state.note_service.create(&auth_user, &req.text).await?;
-    Ok(Json(NoteResponse::from(note)))
-}
-
-// Bad: ハンドラに SQL が直接ある
-async fn create_note(...) -> impl IntoResponse {
-    let row = sqlx::query("SELECT id FROM actors WHERE ...").fetch_one(&state.db).await;
-    // ...
-}
-```
-
-#### Service 層
-
-- **やること**: ビジネスロジック・複数 Repository の組み合わせ・外部 API 呼び出し
-- **やらないこと**: HTTP の概念（StatusCode・HeaderMap 等）に触れること
-- `struct XxxService { repo_a: Arc<dyn ARepo>, repo_b: Arc<dyn BRepo>, ... }` の形で依存を受け取る
-- テストでは `MockXxxRepository` を差し込めるようにする
-
-#### Repository 層
-
-- **やること**: `trait` を定義し、`PgXxx` 実装で PostgreSQL への CRUD を提供する
-- **やらないこと**: ビジネスロジック（WHERE 条件以上の判断をしない）
-- `async_trait` を使い、trait を `Send + Sync` にする
-- SQL はすべて Repository の `impl` ブロック内にのみ記述する
+- ハンドラ・ジョブ（`seiran-common/src/jobs/`）・firehose 等（`seiran-atp-repo`）は SQL を書かない。
+  `sqlx::query*`・`QueryBuilder`・`sqlx::Row` を使うと `crates/seiran-common/tests/sql_style.rs`
+  が落ちる。`PgPool` を受け取ってリポジトリ関数へ渡すのはよい。
+- リポジトリは2つの形を使い分ける。
+  - 多くの箇所から使うエンティティ: trait + `PgXxxRepository`（`ActorRepository`・`PostRepository`
+    等）。`AppState` に `Arc<dyn XxxRepository>` で持つ。
+  - 特定の画面・ジョブ専用の読み書き: モジュール関数 `pub async fn f(pool: &PgPool, ...)`
+    （`repository::note_extras`・`repository::maintenance` 等）。
+- 結果は `#[derive(sqlx::FromRow)]` の型付き行かタプルで返す。`try_get("列名")` で読まない
+  （列名の打ち間違いや型の不一致が `unwrap_or` の既定値に化けて黙って通る）。
+- 複数文を1トランザクションにまとめる処理（読んで判断して書く等）は、トランザクションごと
+  リポジトリ関数に入れる（例: `user::withdraw_local_actor`、`rate_limit_log::record_search_if_under_limit`）。
+  トランザクション内の判断を呼び出し側に任せたい場合はクロージャで受け取る（`poll::record_local_vote`）。
+- Misskey 互換 API とカスタム API は同じ手順・リポジトリ関数を共有し、差分はレスポンス整形に閉じ込める。
 
 ---
 
@@ -80,23 +38,21 @@ async fn create_note(...) -> impl IntoResponse {
 
 | # | 禁止 | 代替 |
 |---|------|------|
-| 1 | ハンドラ関数内で `sqlx::query` を呼ぶ | Repository trait のメソッドを呼ぶ |
-| 2 | ハンドラ関数内で `reqwest::Client` を使う | Service の依存として注入する |
+| 1 | ハンドラ・ジョブ・firehose で SQL を書く（`sqlx::query*`・`QueryBuilder`・`sqlx::Row`） | `seiran-common/src/repository/` に型付きの関数を足して呼ぶ（1節） |
+| 2 | ハンドラ関数内で `reqwest::Client` を生成する | `AppState` の共有クライアントを使う |
 | 3 | `Result<_, String>` を公開 API に使う | `thiserror` で定義した typed error を使う |
 | 4 | `unwrap()` / `expect("")` を本番コードに使う | `?` または適切なエラー型に変換する |
 | 5 | `unwrap_or(0)` / `unwrap_or_default()` で取得失敗を隠す | `?` で早期リターンするか `ok_or(Error::...)` で明示的にエラーにする |
 | 6 | `main.rs` に 100 行を超えるコードを書く | 対応するハンドラファイルに移動する |
-| 7 | `seiran-api` の Cargo.toml に `sqlx` を使う | Repository 呼び出しは `seiran-common` 経由にする（中長期目標） |
 | 8 | `reqwest::Client::new()` を関数内でローカルに生成する | `AppState` または引数から受け取る |
 | 9 | ビジネスロジック関数でファイルパスに `main.rs` を選ぶ | `handlers/` または `common/src/*/service.rs` に置く |
 | 10 | スタブ値（`user_id = 1`, `username = "test_user"`）を本番コードに残す | セッションまたはトークンから実際のユーザーを取得する |
-| 11 | 新規クエリを `sqlx::query`/`query_as`（実行時検証）で書く | `sqlx::query!`/`query_as!`/`query_scalar!`（コンパイル時検証）を使う。SELECT列と構造体のズレをビルド時に検出できる。`cargo sqlx prepare --workspace`の実行を忘れないこと |
 | 12 | DBから取得済みのActor/投稿レコードに対して `domain == local_domain`（または`state.local_domain`）でローカル/リモート判定する | `actor_type == "local"` を使う（`actors.actor_type`列、`insert_local`の不変条件によりlocal⇔domain=local_domainは常に一致）。Actor/TimelinePostは既にactor_typeを保持、他の型はSELECTに`a.actor_type::text AS actor_type`を1列足すだけで済むことが多い。Hostヘッダー・WebFingerクエリ・ユーザー入力文字列など、DBレコードではない外部入力のdomain比較は対象外（そちらは元々SQL化できない） |
 | 13 | `jobs::*::handle()` が既存の `Result<(), String>` のまま新規エラー分岐を追加する | 一時的障害（ネットワーク・タイムアウト等）と恒久的失敗（不正な入力・鍵未設定等）を区別できる場合は `Result<(), JobError>`（`traits::JobError`）を返す。`String`は`From`で自動的に`Transient`扱いになるため、触っていないジョブは変更不要。配送・外部API呼び出し系ジョブから優先的に移行する（`jobs::ap_delivery`が実例） |
 | 14 | `actors.notes_count`/`followers_count`/`following_count` を `repository/post.rs` 以外から直接 `UPDATE` する、または `posts`/`follows` への都度の `COUNT(*)` で代替する | `notes_count`の増減は`repository/post.rs`の既存の書き込みメソッド（`insert_full`等）内のCTEパターン（`docs/database.md`「非正規化カウンタ」参照）に倣うこと。`followers_count`/`following_count`は`trg_follows_sync_counts`トリガーが`follows`への書き込みから自動的に再計算するため、`repository/follow.rs`側でカウンタ更新を意識する必要はない（新しいフォロー状態遷移を追加する場合も、素朴な`follows`へのINSERT/UPDATE/DELETEを書くだけでよい） |
 | 15 | `x IN (SELECT ...)` / `x NOT IN (SELECT ...)` をSQLに書く | `EXISTS` / `NOT EXISTS` の相関サブクエリで書く。`NOT IN (SELECT ...)`はサブクエリ結果にNULLが1件でも含まれると条件全体がUNKNOWN（WHERE句ではfalse）になる。`IN (SELECT ...)`自体はNULLで壊れないが、`NOT`を足すだけで同じ罠に落ちるため形ごと禁止する。リテラル列挙（`IN ('a','b')`）と`= ANY($1)`は可。`crates/seiran-common/tests/sql_style.rs`が全`.rs`・全マイグレーションを走査して機械的に検出する（CIの`cargo test`で落ちる） |
 | 16 | NULL許容列を`<>`・`NOT (...)`・`= ANY`で比較し、NULL行の扱いを考えずに済ませる | NULL時にその行を含めたいのか除外したいのかをコメントで明示し、含めたいなら`IS DISTINCT FROM`/`COALESCE`を使う。`NOT (x = ANY($1))`は配列がRustの`Vec<i64>`由来（NULLを含まない）である場合に限る |
-| 17 | 「SELECTで状態を読む → アプリで判断 → UPDATE/INSERTで書く」を別々の文・トランザクション外で行う（参照＋更新、更新＋参照） | (a) 1文にできるなら`INSERT ... ON CONFLICT ... RETURNING`・`UPDATE ... RETURNING`・`DELETE ... RETURNING`・`UPDATE ... SET col = f(col)`（例: `repository::poll::increment_poll_votes`）で1文にする。(b) 読んだ値で分岐する必要があるなら、トランザクション内で`SELECT ... FOR UPDATE`（行が無い場合に備えるなら先に`INSERT ... ON CONFLICT DO NOTHING`、例: `ReactionRepository::upsert`）か、キー単位の`pg_advisory_xact_lock`（例: `rate_limit::lock_actor_rate_limit`）で直列化する。(c) 外部API（ATPコミット・AP配送・PLC登録等）をトランザクション内に含めない。先にDBで状態を確保し（例: `follow_exec::establish_atp_follow`）、トランザクション外で外部呼び出しを行い、失敗時は確保した状態を取り消す |
+| 17 | 「SELECTで状態を読む → アプリで判断 → UPDATE/INSERTで書く」を別々の文・トランザクション外で行う（参照＋更新、更新＋参照） | (a) 1文にできるなら`INSERT ... ON CONFLICT ... RETURNING`・`UPDATE ... RETURNING`・`DELETE ... RETURNING`・`UPDATE ... SET col = f(col)`（例: `repository::poll::increment_poll_votes`）で1文にする。(b) 読んだ値で分岐する必要があるなら、トランザクション内で`SELECT ... FOR UPDATE`（行が無い場合に備えるなら先に`INSERT ... ON CONFLICT DO NOTHING`、例: `ReactionRepository::upsert`）か、キー単位の`pg_advisory_xact_lock`（例: `repository::rate_limit_log::record_search_if_under_limit`）で直列化する。(c) 外部API（ATPコミット・AP配送・PLC登録等）をトランザクション内に含めない。先にDBで状態を確保し（例: `follow_exec::establish_atp_follow`）、トランザクション外で外部呼び出しを行い、失敗時は確保した状態を取り消す |
 | 18 | `TimelinePost`を返すクエリのSELECT列・結合を手書きする、または`TimelinePost`に`#[sqlx(default)]`を足す | `concat!("SELECT ", timeline_post_columns!(), " FROM posts p ", timeline_post_joins!(), ...)`を使う（`repository/post.rs`）。`#[sqlx(default)]`は列の書き漏れを空値で黙認してしまう。可視性は必ずSQL関数`post_is_visible_to`で判定し、`visibility NOT IN (...)`等を手書きしない（`direct`の宛先判定を書き漏らすとDMが漏れる） |
 | 19 | `#[allow(clippy::too_many_arguments)]`で引数過多の指摘を黙らせる、または1つの関数に「A・B・Cの手順」を直書きする | 同時に渡される引数の束に名前を付けた構造体にする（例: `NewNotification`・`NewReaction`・`FediActorProfile`・`PostCommit`・`Page`）。長い関数は手順ごとの関数に分け、最上位には手順名の呼び出しだけを並べる（例: `handlers::notes::reactions::create_reaction_inner`） |
 
@@ -116,10 +72,10 @@ async fn create_note(...) -> impl IntoResponse {
 |----|---------|---------|
 | Handler 層 | `ApiError` | `crates/seiran-api/src/error.rs` |
 | ATP コミット | `AtpCommitError` | `crates/seiran-common/src/atp/service.rs` |
-| ATP リポジトリ計算 | `RepoError` | `crates/seiran-common/src/atp/repo.rs`（既存） |
-| PLC 登録 | `PlcError` | `crates/seiran-common/src/atp/plc.rs`（既存） |
-| DB 操作 | `sqlx::Error` をそのまま `#[from]` で包む | 各 Repository の error モジュール |
-| ジョブハンドラ | 各ジョブ固有の Error 型 | `crates/seiran-common/src/jobs/{name}.rs` |
+| ATP リポジトリ計算 | `RepoError` | `crates/seiran-common/src/atp/repo.rs` |
+| PLC 登録 | `PlcError` | `crates/seiran-common/src/atp/plc.rs` |
+| DB 操作 | リポジトリは `sqlx::Error` をそのまま返し、上位のエラー型が `#[from]` で包む | — |
+| ジョブハンドラ | `JobError`（2節 #13） | `crates/seiran-common/src/traits.rs` |
 
 ### エラー伝播のパターン
 
@@ -141,24 +97,7 @@ pub async fn commit_post(...) -> Result<(), String> {
 
 ### `ApiError` の `IntoResponse` 実装
 
-`ApiError` は `axum::response::IntoResponse` を実装し、適切な HTTP ステータスコードにマップする:
-
-```rust
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let (status, message) = match &self {
-            ApiError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, *msg),
-            ApiError::NotFound => (StatusCode::NOT_FOUND, "リソースが見つかりません"),
-            ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, *msg),
-            ApiError::Internal(msg) => {
-                eprintln!("[ERROR] {}", msg);
-                (StatusCode::INTERNAL_SERVER_ERROR, "内部エラーが発生しました")
-            }
-        };
-        (status, message).into_response()
-    }
-}
-```
+`ApiError`（`crates/seiran-api/src/error.rs`）が `IntoResponse` を実装し、HTTP ステータスコードへ写す。
 
 ---
 
@@ -168,10 +107,10 @@ impl IntoResponse for ApiError {
 
 | 対象 | テスト配置場所 |
 |------|--------------|
-| 純粋計算関数（repo.rs 等） | 同ファイル末尾の `#[cfg(test)] mod tests { ... }` |
-| Repository 実装 | `tests/` ディレクトリ（`sqlx::test` を使った統合テスト） |
-| Service 層 | 同ファイル末尾の `#[cfg(test)]`（Mock Repository を使う） |
-| Handler 層 | `crates/seiran-api/tests/` ディレクトリ |
+| 純粋関数 | 同ファイル末尾の `#[cfg(test)] mod tests { ... }` |
+| Repository・ハンドラ（DB を使う） | `crates/seiran-api/tests/`（結合テスト専用 DB に接続し `#[ignore]` を付ける。手順は `tests/support/mod.rs`） |
+| 画面・連合を通した動作 | `e2e/`（Playwright。外部サービスはスタブ） |
+| SQL の書き方・層の規約 | `crates/seiran-common/tests/sql_style.rs` |
 
 ### ユニットテストの書き方（純粋計算）
 
@@ -203,64 +142,6 @@ mod tests {
         // root が blocks の中に存在する
         assert!(blocks.iter().any(|(cid, _)| *cid == root));
     }
-}
-```
-
-### Mock Repository の書き方
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-
-    pub struct MockActorRepository {
-        actors: Mutex<Vec<LocalActor>>,
-    }
-
-    impl MockActorRepository {
-        pub fn new(actors: Vec<LocalActor>) -> Self {
-            Self { actors: Mutex::new(actors) }
-        }
-    }
-
-    #[async_trait]
-    impl ActorRepository for MockActorRepository {
-        async fn find_by_user_id(&self, user_id: i64) -> Result<Option<LocalActor>, sqlx::Error> {
-            Ok(self.actors.lock().unwrap()
-                .iter()
-                .find(|a| a.user_id == user_id)
-                .cloned())
-        }
-        // ...
-    }
-
-    #[tokio::test]
-    async fn test_note_service_create_post() {
-        let actor = LocalActor { user_id: 1, id: 100, username: "alice".to_string(), ... };
-        let actor_repo = Arc::new(MockActorRepository::new(vec![actor]));
-        let service = NoteService::new(actor_repo, ...);
-        let result = service.create(1, "hello world").await;
-        assert!(result.is_ok());
-    }
-}
-```
-
-### 統合テスト（DB 接続あり）の書き方
-
-`sqlx::test` マクロを使う（`sqlx` の `features = ["runtime-tokio"]` が必要）。
-
-```rust
-// crates/seiran-common/tests/actor_repository_test.rs
-#[sqlx::test(migrations = "../../migrations")]
-async fn test_pg_actor_repository_find_by_user_id(pool: PgPool) {
-    // テスト用データを挿入
-    sqlx::query("INSERT INTO users (id, email, ...) VALUES (1, 'test@example.com', ...)")
-        .execute(&pool).await.unwrap();
-
-    let repo = PgActorRepository::new(pool);
-    let result = repo.find_by_user_id(1).await.unwrap();
-    assert!(result.is_some());
 }
 ```
 
@@ -296,44 +177,17 @@ async fn test_register_did_plc_with_mock() {
 
 ### ステップ 1: Repository を実装する
 
-`crates/seiran-common/src/repository/` に必要な trait メソッドを追加または新規 trait を作成する。まずインターフェースを決め、次に `Pg` 実装を書く。
+`crates/seiran-common/src/repository/` に trait メソッドかモジュール関数を足す（1節）。
 
-```
-crates/seiran-common/src/repository/
-└── {entity}.rs   ← trait 定義 + PgXxxRepository 実装
-```
+### ステップ 2: 手順を実装する
 
-### ステップ 2: Service を実装する
-
-ビジネスロジックを Service に書く。Repository を通じて DB にアクセスする。外部 HTTP 呼び出しがある場合は `reqwest::Client` を引数または `Arc<reqwest::Client>` として受け取る。
-
-```
-crates/seiran-common/src/
-└── {domain}/service.rs   ← XxxService 実装
-```
+複数テーブル・外部 API にまたがる処理は `seiran-common` 側の関数にし、Misskey 互換 API・
+ジョブからも呼べる形にする。
 
 ### ステップ 3: Handler を実装する
 
-`crates/seiran-api/src/handlers/` に対応するファイルを作成または既存ファイルに追加する。
-
-```rust
-// handlers/{domain}.rs
-async fn create_xxx(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-    Json(req): Json<CreateXxxRequest>,
-) -> Result<Json<XxxResponse>, ApiError> {
-    let auth_user = state.auth.extract(&headers).await?;
-    // バリデーション
-    if req.field.is_empty() {
-        return Err(ApiError::BadRequest("field は空にできません"));
-    }
-    // Service 呼び出し
-    let result = state.xxx_service.create(&auth_user, req).await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(XxxResponse::from(result)))
-}
-```
+`crates/seiran-api/src/handlers/` に追加する。認証・入力検証・レスポンス組み立てだけを書き、
+失敗は `ApiError` で返す。
 
 ### ステップ 4: ルートを登録する
 
@@ -341,17 +195,11 @@ async fn create_xxx(
 
 **`/xrpc/*`・`/.well-known/*`（AT Protocol XRPCエンドポイント）を追加する場合、CORS設定は不要**。`lib.rs`のCORS `AllowOrigin::predicate`が`path.starts_with("/xrpc/")`または`/.well-known/`で無条件にオリジンを許可する設計になっており、新規追加したXRPCルートも自動的にこの対象に含まれる（個別ルートごとのCORS設定・許可オリジン追加は不要かつ禁止。bsky.app等の外部ATクライアントがブラウザから直接叩く前提の公開APIのため、AT Protocol関連エンドポイントは常に全オリジン許可が正しい）。
 
-### ステップ 5: `AppState` を更新する
+### ステップ 5: テストを書く
 
-新しい Service が必要な場合は `AppState` に `Arc<XxxService>` を追加し、`main()` 内で初期化する。
+4節の配置に従う。
 
-### ステップ 6: テストを書く
-
-- Repository の mock テスト（`#[cfg(test)]` 内）
-- Service のユニットテスト（mock Repository を使用）
-- 統合テストが必要な場合は `tests/` ディレクトリに追加
-
-### ステップ 7: ビルドと設計文書の確認
+### ステップ 6: ビルドと設計文書の確認
 
 ```bash
 cargo build
@@ -366,7 +214,7 @@ cargo build
 | 種別 | 命名 | 例 |
 |------|------|----|
 | Handler ファイル | 機能ドメイン名 | `handlers/auth.rs`, `handlers/notes.rs` |
-| Service 構造体 | `{Domain}Service` | `AtpCommitService`, `NoteService` |
+| Service 構造体 | `{Domain}Service` | `AtpCommitService` |
 | Repository trait | `{Entity}Repository` | `ActorRepository`, `PostRepository` |
 | Repository 実装 | `Pg{Entity}Repository` | `PgActorRepository` |
 | エラー型 | `{Domain}Error` | `AtpCommitError`, `PlcError`, `ApiError` |
@@ -377,35 +225,12 @@ cargo build
 
 ## 7. `AppState` の設計ルール
 
-`AppState` は axum の `State` エクストラクタで各ハンドラに渡される。以下のルールを守る。
+`AppState`（`crates/seiran-api/src/lib.rs`）は axum の `State` で各ハンドラに渡る。
 
-```rust
-#[derive(Clone)]
-pub struct AppState {
-    // Repository 直参照は禁止。Service 経由でアクセスする。
-    // pub db: PgPool,  ← NG（外からは見えない）
-
-    // OK: Service を Arc で持つ
-    pub auth_service: Arc<AuthService>,
-    pub note_service: Arc<NoteService>,
-    pub atp_service: Arc<AtpCommitService>,
-
-    // OK: 認証プロバイダー（Service ではなくミドルウェア相当）
-    pub local_auth: Arc<LocalAuthProvider>,
-
-    // OK: WebSocket ブロードキャスト（インフラ層）
-    pub atp_event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
-
-    // OK: 設定値（変更されない）
-    pub local_domain: String,
-    pub secrets: Arc<Secrets>,
-
-    // OK: HTTP クライアント（外部 API 呼び出し用、再利用のため共有）
-    pub http_client: Arc<reqwest::Client>,
-}
-```
-
-`PgPool` は `AppState` の `pub` フィールドに置かない。Repository の `impl` 内にのみ閉じ込める。
+- リポジトリは `Arc<dyn XxxRepository>` で持つ。
+- `db: PgPool` はリポジトリのモジュール関数やジョブへ渡すためだけに使い、ハンドラで SQL を
+  実行しない（1節）。
+- HTTP クライアントは共有のものを使い、ハンドラ内で生成しない。
 
 ---
 
@@ -422,9 +247,7 @@ seiran-api
     └─ NEVER depends on ─→ seiran-api (循環禁止)
 ```
 
-`seiran-api` が `sqlx` を Cargo.toml に持つこと自体は現状許容するが、  
-**ハンドラ内での直接使用は禁止**（Handler → Repository を経由すること）。  
-中長期的には `seiran-api/Cargo.toml` から `sqlx` 依存を削除することを目標とする。
+`seiran-api` は `PgPool`・`sqlx::Error` の受け渡しのため `sqlx` に依存するが、SQL は書かない（1節）。
 
 ---
 
@@ -442,48 +265,8 @@ tracing::error!("[create_note] INSERT 失敗");          // Bad（原因が分�
 
 ## 10. `seiran-federation-inbox` 固有ルール
 
-`seiran-federation-inbox` は ActivityPub の受信エンドポイント専用クレートである。以下のルールを守る。
-
-### AppState
-
-```rust
-pub struct AppState {
-    pub db: PgPool,           // Repository 移行完了後は非公開にする
-    pub http_client: Arc<reqwest::Client>,   // AP 配送・fetch に使う
-    pub secrets: Arc<seiran_common::Secrets>, // AP 秘密鍵はここから取得
-    pub local_domain: String,
-}
-```
-
-`ap_private_key_pem: String` のような bare String フィールドは使わない。`Secrets` 経由で取得する。
-
-### エラー型
-
-ハンドラの内部関数は `Result<T, FederationError>` を返す。`FederationError` は `crates/seiran-federation-inbox/src/error.rs` に定義する。
-
-```rust
-#[derive(Debug, thiserror::Error)]
-pub enum FederationError {
-    #[error("DB エラー: {0}")]
-    Db(#[from] sqlx::Error),
-    #[error("AP エラー: {0}")]
-    Ap(String),
-    #[error("フィールド不足: {field}")]
-    MissingField { field: &'static str },
-    #[error("署名検証失敗")]
-    SignatureInvalid,
-}
-```
-
-Axum のハンドラ（`async fn inbox_handler(...) -> impl IntoResponse`）は `FederationError` を `StatusCode` にマップして返す。
-
-### HTTP 署名検証
-
-`verify_http_signature` は必ず inbox 受信時に呼ぶ。検証をスキップした場合は `[WARN]` ログを出力し、将来的には必須エラーにする。
-
-### ファイル分割規則
-
-`main.rs` が 100 行を超えた時点でハンドラを `handlers/` に移動すること。1 ファイルの上限は 200 行。
+- inbox 受信では必ず `ApClient::verify_signature` で HTTP 署名を検証してから処理する。
+- 1節の SQL の規約はこのクレートにも適用される。
 
 ## 11. コメントの書き方
 

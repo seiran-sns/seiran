@@ -12,7 +12,7 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    SQLX_OFFLINE=true cargo build --release -p seiran-server \
+    cargo build --release -p seiran-server \
     && cp target/release/seiran-server /seiran-server
 
 # ─── ランタイム ───────────────────────────────────────────────────────────────

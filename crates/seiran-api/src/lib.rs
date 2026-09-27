@@ -13,7 +13,6 @@ pub mod rate_limit;
 mod routes;
 pub use routes::router;
 pub mod search;
-pub mod search_query;
 pub mod streaming;
 
 use dashmap::DashMap;
@@ -419,12 +418,12 @@ impl AppState {
         post_id: i64,
         pending_media_file_id: i64,
     ) {
-        if let Err(e) =
-            sqlx::query("UPDATE posts SET pending_bsky_media_file_id = $1 WHERE id = $2")
-                .bind(pending_media_file_id)
-                .bind(post_id)
-                .execute(&self.db)
-                .await
+        if let Err(e) = seiran_common::repository::maintenance::set_pending_bsky_media_file(
+            &self.db,
+            post_id,
+            pending_media_file_id,
+        )
+        .await
         {
             tracing::error!(
                 "[job] pending_bsky_media_file_id 設定失敗 (post_id={}): {}",
@@ -976,10 +975,7 @@ pub fn spawn_startup_tasks(state: &AppState) {
 /// `jobs::follow_import` の `request_id` 単位 advisory lock が自然に解消する。
 async fn resume_running_follow_imports(state: &AppState) {
     let request_ids: Vec<i64> =
-        match sqlx::query_scalar("SELECT id FROM follow_import_requests WHERE status = 'running'")
-            .fetch_all(&state.db)
-            .await
-        {
+        match seiran_common::repository::maintenance::running_follow_import_ids(&state.db).await {
             Ok(ids) => ids,
             Err(e) => {
                 tracing::error!("[startup] 実行中フォローインポートの取得失敗: {}", e);
@@ -1081,12 +1077,9 @@ async fn resume_running_migrations(state: &AppState) {
 /// と同じ理由で絞り込まない）。重複投入は`jobs::account_withdraw_unfollow_all`の
 /// `actor_id` 単位 advisory lock が解消する。
 async fn resume_account_withdraw_unfollow_all(state: &AppState) {
-    let rows: Vec<(i64, String)> = match sqlx::query_as(
-        "SELECT a.id, a.username FROM actors a
-         WHERE a.withdrawn_at IS NOT NULL
-           AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_actor_id = a.id)",
+    let rows = match seiran_common::repository::maintenance::withdrawn_actors_with_follows(
+        &state.db,
     )
-    .fetch_all(&state.db)
     .await
     {
         Ok(rows) => rows,
@@ -1115,9 +1108,7 @@ async fn resume_account_withdraw_unfollow_all(state: &AppState) {
 /// `jobs::bsky_video_poll`の `media_file_id` 単位 advisory lock が解消する。
 async fn resume_bsky_video_poll(state: &AppState) {
     let media_file_ids: Vec<i64> =
-        match sqlx::query_scalar("SELECT id FROM media_files WHERE bsky_video_status = 'pending'")
-            .fetch_all(&state.db)
-            .await
+        match seiran_common::repository::maintenance::pending_bsky_video_media_ids(&state.db).await
         {
             Ok(ids) => ids,
             Err(e) => {
@@ -1154,19 +1145,14 @@ async fn resume_bsky_video_poll(state: &AppState) {
 /// （`resume_running_follow_imports`と同じ理由で絞り込まない）。重複投入は
 /// `jobs::bsky_post_commit_deferred`の`post_id`単位advisory lockが解消する。
 async fn resume_bsky_post_commit_deferred(state: &AppState) {
-    let rows: Vec<(i64, i64, i64)> = match sqlx::query_as(
-        "SELECT id, actor_id, pending_bsky_media_file_id FROM posts
-         WHERE pending_bsky_media_file_id IS NOT NULL AND at_uri IS NULL",
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::error!("[startup] Bskyコミット遅延未完了の確認失敗: {}", e);
-            return;
-        }
-    };
+    let rows =
+        match seiran_common::repository::maintenance::pending_bsky_post_commits(&state.db).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("[startup] Bskyコミット遅延未完了の確認失敗: {}", e);
+                return;
+            }
+        };
     if rows.is_empty() {
         return;
     }
@@ -1206,18 +1192,9 @@ async fn resume_bsky_post_commit_deferred(state: &AppState) {
 /// 実機確認）。固有色未登録のsoftware（意図的に汎用グレーへフォールバックした行）は
 /// 対象外なので、毎起動で無限に再チャレンジすることはない。
 async fn backfill_remote_instance_meta(state: &AppState) {
-    let domains = match sqlx::query_scalar::<_, String>(
-        "SELECT DISTINCT a.domain FROM actors a
-         WHERE a.actor_type IN ('fedi', 'remote_seiran') AND a.domain != ''
-           AND NOT EXISTS (
-               SELECT 1 FROM remote_instance_meta rim
-               WHERE rim.domain = a.domain
-                 AND rim.icon_url IS NOT NULL
-                 AND rim.node_name IS NOT NULL
-                 AND rim.software_name IS NOT NULL
-           )",
+    let domains = match seiran_common::repository::maintenance::domains_missing_instance_meta(
+        &state.db,
     )
-    .fetch_all(&state.db)
     .await
     {
         Ok(v) => v,
@@ -1227,23 +1204,22 @@ async fn backfill_remote_instance_meta(state: &AppState) {
         }
     };
 
-    let stale_color_rows = match sqlx::query_as::<_, (String, Option<String>)>(
-        "SELECT domain, software_name FROM remote_instance_meta
-         WHERE theme_color = $1",
-    )
-    .bind(seiran_common::jobs::remote_instance_info_resolve::DEFAULT_THEME_COLOR)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::error!(
-                "[startup] remote_instance_meta 固有色backfill対象取得失敗: {}",
-                e
-            );
-            Vec::new()
-        }
-    };
+    let stale_color_rows =
+        match seiran_common::repository::maintenance::instance_meta_with_theme_color(
+            &state.db,
+            seiran_common::jobs::remote_instance_info_resolve::DEFAULT_THEME_COLOR,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(
+                    "[startup] remote_instance_meta 固有色backfill対象取得失敗: {}",
+                    e
+                );
+                Vec::new()
+            }
+        };
 
     let mut targets: Vec<String> = domains;
     for (domain, software_name) in stale_color_rows {
@@ -1277,23 +1253,19 @@ async fn backfill_unset_avatar_profiles(state: &AppState) {
         return;
     }
 
-    let actor_ids = match sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM actors
-         WHERE actor_type = 'local' AND avatar_media_id IS NULL AND at_did IS NOT NULL
-         ORDER BY id",
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(ids) => ids,
-        Err(error) => {
-            tracing::error!(
-                "[startup] 未設定アバタープロフィール対象取得失敗: {}",
-                error
-            );
-            return;
-        }
-    };
+    let actor_ids =
+        match seiran_common::repository::maintenance::local_actor_ids_without_avatar(&state.db)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(error) => {
+                tracing::error!(
+                    "[startup] 未設定アバタープロフィール対象取得失敗: {}",
+                    error
+                );
+                return;
+            }
+        };
 
     let total = actor_ids.len();
     let mut succeeded = 0usize;
@@ -1391,16 +1363,9 @@ async fn request_relay_crawl(state: &AppState) {
 /// #identity イベントが未送出の既存ローカルユーザー分を DB 保存 + broadcast する。
 async fn backfill_identity_events(state: &AppState) {
     let now = chrono::Utc::now();
-    let missing: Vec<(i64, String, String)> = match sqlx::query_as::<_, (i64, String, String)>(
-        "SELECT a.id, a.username, a.at_did
-         FROM actors a
-         WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
-           AND NOT EXISTS (
-             SELECT 1 FROM atp_repo_events e
-             WHERE e.actor_id = a.id AND e.event_type = 'identity'
-           )",
+    let missing = match seiran_common::repository::maintenance::local_actors_without_identity_event(
+        &state.db,
     )
-    .fetch_all(&state.db)
     .await
     {
         Ok(r) => r,
@@ -1432,24 +1397,20 @@ async fn backfill_identity_events(state: &AppState) {
 /// へのDM送信を保守的にブロックする（`docs/protocols.md` 9節）。
 async fn backfill_chat_declarations(state: &AppState) {
     let now = chrono::Utc::now();
-    let missing: Vec<i64> = match sqlx::query_scalar::<_, i64>(
-        "SELECT a.id
-         FROM actors a
-         WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
-           AND NOT EXISTS (
-             SELECT 1 FROM atp_records r
-             WHERE r.actor_id = a.id AND r.collection = 'chat.bsky.actor.declaration' AND r.rkey = 'self'
-           )",
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("[startup] chat declaration 対象取得失敗: {}", e);
-            return;
-        }
-    };
+    let missing: Vec<i64> =
+        match seiran_common::repository::maintenance::local_actors_without_self_record(
+            &state.db,
+            "chat.bsky.actor.declaration",
+        )
+        .await
+        .map(|rows| rows.into_iter().map(|(id, _)| id).collect::<Vec<_>>())
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("[startup] chat declaration 対象取得失敗: {}", e);
+                return;
+            }
+        };
 
     for actor_id in missing {
         match state
@@ -1471,16 +1432,10 @@ async fn backfill_chat_declarations(state: &AppState) {
 /// ローカルユーザーへ一括バックフィルする（`backfill_chat_declarations`と同じパターン）。
 async fn backfill_seiran_actor_declarations(state: &AppState) {
     let now = chrono::Utc::now();
-    let missing: Vec<(i64, String)> = match sqlx::query_as::<_, (i64, String)>(
-        "SELECT a.id, a.username
-         FROM actors a
-         WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
-           AND NOT EXISTS (
-             SELECT 1 FROM atp_records r
-             WHERE r.actor_id = a.id AND r.collection = 'org.seiran.actor.declaration' AND r.rkey = 'self'
-           )",
+    let missing = match seiran_common::repository::maintenance::local_actors_without_self_record(
+        &state.db,
+        "org.seiran.actor.declaration",
     )
-    .fetch_all(&state.db)
     .await
     {
         Ok(r) => r,
@@ -1555,32 +1510,6 @@ pub fn spawn_gc_tasks(state: &AppState) {
     });
 }
 
-/// 孤立メディアファイルを保持する中間構造体。
-#[derive(sqlx::FromRow)]
-struct OrphanedMediaFile {
-    id: i64,
-    storage_provider_id: i64,
-    storage_key: String,
-}
-
-/// 「孤立している」の定義。候補一覧の取得（SELECT）と、削除直前の再確認を兼ねた
-/// 削除文（DELETE）の両方で同じ条件文字列を使う（DRY、かつ両者の条件が将来ズレるのを防ぐ）。
-// NOT IN ではなく NOT EXISTS を使う。post_attachments.media_file_id はリモート添付
-// （remote_url側が埋まる行）でNULLになる列で、実データの99%以上がNULL。
-// `id NOT IN (SELECT media_file_id FROM post_attachments)` は、サブクエリの結果集合に
-// NULLが1件でも含まれると比較対象の値に関わらず条件全体がUNKNOWN（WHERE句ではfalse）
-// になるSQLの仕様があり、実際にこのテーブルでは常にfalseになって発動していなかった
-// （run_media_gcが一度も孤立ファイルを検出できていなかった、2026-09-26発覚）。
-// NOT EXISTS の相関condition（`= media_files.id`）はNULLを比較対象に含めないため、
-// avatar_media_id/banner_media_id側で行っていた `IS NOT NULL` の明示ガードも不要になる。
-const ORPHANED_MEDIA_FILE_CONDITION: &str = "
-    last_uploaded_at < NOW() - INTERVAL '7 days'
-    AND NOT EXISTS (SELECT 1 FROM post_attachments pa WHERE pa.media_file_id = media_files.id)
-    AND NOT EXISTS (SELECT 1 FROM actors a WHERE a.avatar_media_id = media_files.id)
-    AND NOT EXISTS (SELECT 1 FROM actors a WHERE a.banner_media_id = media_files.id)
-    AND NOT EXISTS (SELECT 1 FROM custom_emojis ce WHERE ce.media_file_id = media_files.id)
-";
-
 /// 孤立ファイルを最大 100 件取得し、DB → S3 の順で削除する（ベストエフォート）。
 ///
 /// 候補取得（SELECT）から実際の削除までの間に別のリクエストがそのファイルを新たに
@@ -1593,15 +1522,7 @@ const ORPHANED_MEDIA_FILE_CONDITION: &str = "
 /// 失敗してもDB行が既に消えている分にはAPI利用者から見た整合性は壊れない（S3側にだけ
 /// ゴミが残るが、これは検出用の別パトロールで回収すればよく実害が小さい）。
 async fn run_media_gc(pool: &sqlx::PgPool, storage_providers: &dyn StorageProviderRepository) {
-    let rows: Vec<OrphanedMediaFile> = match sqlx::query_as::<_, OrphanedMediaFile>(&format!(
-        "SELECT id, storage_provider_id, storage_key
-         FROM media_files
-         WHERE {ORPHANED_MEDIA_FILE_CONDITION}
-         LIMIT 100"
-    ))
-    .fetch_all(pool)
-    .await
-    {
+    let rows = match seiran_common::repository::maintenance::orphaned_media_files(pool, 100).await {
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!("[media-gc] 孤立ファイル取得失敗: {}", e);
@@ -1631,11 +1552,9 @@ async fn run_media_gc(pool: &sqlx::PgPool, storage_providers: &dyn StorageProvid
             }
         };
 
-        let deleted_id: Option<i64> = match sqlx::query_scalar(&format!(
-            "DELETE FROM media_files WHERE id = $1 AND {ORPHANED_MEDIA_FILE_CONDITION} RETURNING id"
-        ))
-        .bind(row.id)
-        .fetch_optional(pool)
+        let deleted = match seiran_common::repository::maintenance::delete_media_file_if_orphaned(
+            pool, row.id,
+        )
         .await
         {
             Ok(v) => v,
@@ -1644,7 +1563,7 @@ async fn run_media_gc(pool: &sqlx::PgPool, storage_providers: &dyn StorageProvid
                 continue;
             }
         };
-        if deleted_id.is_none() {
+        if !deleted {
             tracing::info!(
                 "[media-gc] id={} は削除直前に参照が追加されたためスキップ",
                 row.id
@@ -1668,20 +1587,9 @@ async fn run_media_gc(pool: &sqlx::PgPool, storage_providers: &dyn StorageProvid
 /// [PERF-5] 72時間以上経過した `atp_repo_events.car_bytes` を NULL 化する
 /// （イベント行・`ops_json`は残し、容量の大半を占めるバイト列のみ落とす）。
 async fn run_atp_repo_events_car_bytes_gc(pool: &sqlx::PgPool) {
-    match sqlx::query(
-        "UPDATE atp_repo_events
-         SET car_bytes = NULL
-         WHERE car_bytes IS NOT NULL
-           AND created_at < NOW() - INTERVAL '72 hours'",
-    )
-    .execute(pool)
-    .await
-    {
-        Ok(result) if result.rows_affected() > 0 => {
-            tracing::info!(
-                "[atp-repo-events-gc] car_bytes を {} 件NULL化しました",
-                result.rows_affected()
-            );
+    match seiran_common::repository::maintenance::drop_old_repo_event_car_bytes(pool).await {
+        Ok(n) if n > 0 => {
+            tracing::info!("[atp-repo-events-gc] car_bytes を {} 件NULL化しました", n);
         }
         Ok(_) => {}
         Err(e) => {

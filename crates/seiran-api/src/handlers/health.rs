@@ -17,10 +17,7 @@ pub struct HealthResponse {
 /// DBへ`SELECT 1`を発行できるかで判定する。失敗時は503（起動直後の一時的な
 /// 未接続とプロセス生存の"200だが実は死んでいる"を区別するため、200固定にはしない）。
 pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
-    match sqlx::query_scalar::<_, i32>("SELECT 1")
-        .fetch_one(&state.db)
-        .await
-    {
+    match seiran_common::repository::maintenance::ping(&state.db).await {
         Ok(_) => (StatusCode::OK, Json(HealthResponse { status: "ok" })),
         Err(e) => {
             tracing::error!("[health] DB疎通確認失敗: {}", e);

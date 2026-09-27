@@ -444,3 +444,94 @@ fn escape_like(s: &str) -> String {
         .replace('%', "\\%")
         .replace('_', "\\_")
 }
+
+/// ユーザーのパスワードハッシュ。ユーザーが無ければ `None`、パスワード未設定なら `Some(None)`。
+pub async fn password_hash_of(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+) -> Result<Option<Option<String>>, sqlx::Error> {
+    sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// 退会手続きに使う、ユーザーのローカルアクター。
+#[derive(Debug, sqlx::FromRow)]
+pub struct LocalActorForWithdraw {
+    pub id: i64,
+    pub username: String,
+    pub at_did: Option<String>,
+    pub withdrawn_at: Option<DateTime<Utc>>,
+}
+
+pub async fn local_actor_for_withdraw(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+) -> Result<Option<LocalActorForWithdraw>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT a.id, a.username, a.at_did, a.withdrawn_at
+         FROM actors a
+         WHERE a.user_id = $1 AND a.actor_type = 'local'
+         LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// 退会を DB に確定する: 全投稿の論理削除、`withdrawn_at` の設定、ブロック・ミュート・
+/// リポストミュートの関係（自分発・自分宛の両方）の削除を1トランザクションで行う。
+/// 関係まで消すのは「退会済みアクターは他者から存在しない」ため（相手側の一覧からも消える）。
+pub async fn withdraw_local_actor(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    now: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE posts SET deleted_at = $1 WHERE actor_id = $2 AND deleted_at IS NULL")
+        .bind(now)
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE actors SET withdrawn_at = $1 WHERE id = $2")
+        .bind(now)
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM blocks WHERE blocker_actor_id = $1 OR blocked_actor_id = $1")
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM mutes WHERE muter_actor_id = $1 OR muted_actor_id = $1")
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM repost_mutes WHERE muter_actor_id = $1 OR muted_actor_id = $1")
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await
+}
+
+pub async fn email_of(pool: &sqlx::PgPool, user_id: i64) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// ユーザーのメールアドレスとローカルアクターのユーザー名。
+pub async fn email_and_local_username(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT u.email, a.username FROM users u
+         JOIN actors a ON a.user_id = u.id AND a.actor_type = 'local'
+         WHERE u.id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+}

@@ -1,6 +1,5 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use seiran_common::version::SERVER_VERSION;
-use sqlx::Row;
 use std::sync::Arc;
 
 use crate::AppState;
@@ -43,43 +42,25 @@ pub async fn nodeinfo_discovery_handler(State(state): State<Arc<AppState>>) -> i
 }
 
 pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let user_count: i64 = sqlx::query(
-        "SELECT COUNT(*) AS cnt FROM actors WHERE actor_type = 'local' AND withdrawn_at IS NULL",
-    )
-    .fetch_one(&state.db)
-    .await
-    .and_then(|r| r.try_get("cnt"))
-    .unwrap_or(0);
+    let (user_count, post_count) = seiran_common::repository::ap_public::nodeinfo_counts(&state.db)
+        .await
+        .unwrap_or((0, 0));
 
-    let post_count: i64 = sqlx::query(
-        "SELECT COUNT(*) AS cnt FROM posts
-         WHERE is_local = true AND deleted_at IS NULL",
-    )
-    .fetch_one(&state.db)
-    .await
-    .and_then(|r| r.try_get("cnt"))
-    .unwrap_or(0);
-
-    // サイト外観（#30/#42）を metadata として同梱する。
-    // Misskey 系 nodeinfo の慣習に合わせ nodeName / themeColor / iconUrl を返す。
-    let mut appearance: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    if let Ok(rows) = sqlx::query(
-        "SELECT key, value FROM site_settings
-         WHERE key IN ('site_name', 'site_color', 'site_icon_url', 'site_description')",
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        for row in rows {
-            if let (Ok(k), Ok(v)) = (
-                row.try_get::<String, _>("key"),
-                row.try_get::<String, _>("value"),
-            ) {
-                appearance.insert(k, v);
-            }
-        }
-    }
+    // サイト外観を Misskey 系 nodeinfo の慣習（nodeName / themeColor / iconUrl）で同梱する。
+    let appearance: std::collections::HashMap<String, String> =
+        seiran_common::repository::ap_public::site_settings_values(
+            &state.db,
+            &[
+                "site_name",
+                "site_color",
+                "site_icon_url",
+                "site_description",
+            ],
+        )
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let get = |k: &str| appearance.get(k).cloned().unwrap_or_default();
     // site_name はHTML可（#243、ログイン画面のサイトタイトル表示用）。nodeName はHTML想定
     // でないため、タグを除去したプレーンテキストを使う。

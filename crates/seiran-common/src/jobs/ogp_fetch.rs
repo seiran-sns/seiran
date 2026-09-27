@@ -55,19 +55,19 @@ pub async fn handle(
     };
     let embed_type = embed_src.as_ref().and_then(|_| ogp.embed_type.clone());
 
-    sqlx::query(
-        "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url, embed_src, embed_type)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    crate::repository::note_extras::insert_link_card(
+        pool,
+        &crate::repository::note_extras::NewLinkCard {
+            post_id,
+            position,
+            url: &url,
+            title: &ogp.title,
+            description: &ogp.description,
+            thumbnail_url: ogp.thumbnail_url.as_deref(),
+            embed_src: embed_src.as_deref(),
+            embed_type: embed_type.as_deref(),
+        },
     )
-    .bind(post_id)
-    .bind(position)
-    .bind(&url)
-    .bind(&ogp.title)
-    .bind(&ogp.description)
-    .bind(&ogp.thumbnail_url)
-    .bind(&embed_src)
-    .bind(&embed_type)
-    .execute(pool)
     .await
     .map_err(|e| format!("post_link_cards INSERT失敗: {}", e))?;
 

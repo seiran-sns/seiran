@@ -16,14 +16,11 @@ pub async fn handle(list_uri: String, ctx: Arc<JobContext>) -> Result<(), String
     let members = fetch_bsky_list_members(&ctx.ap_client.http, &list_uri).await;
     let member_dids = serde_json::json!(members);
 
-    sqlx::query(
-        "INSERT INTO bsky_remote_list_membership_cache (list_uri, member_dids, checked_at)
-         VALUES ($1, $2, now())
-         ON CONFLICT (list_uri) DO UPDATE SET member_dids = $2, checked_at = now()",
+    crate::repository::note_extras::save_remote_list_membership_cache(
+        pool,
+        &list_uri,
+        &member_dids,
     )
-    .bind(&list_uri)
-    .bind(&member_dids)
-    .execute(pool)
     .await
     .map_err(|e| format!("bsky_remote_list_membership_cache 保存失敗: {}", e))?;
 

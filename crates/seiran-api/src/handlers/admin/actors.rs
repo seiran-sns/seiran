@@ -16,19 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::ApiError;
 use crate::AppState;
 
-#[derive(Debug, sqlx::FromRow)]
-struct SuspendedActorRow {
-    id: i64,
-    username: String,
-    domain: String,
-    actor_type: String,
-    display_name: Option<String>,
-    avatar_url: Option<String>,
-    suspended_at: DateTime<Utc>,
-    /// ローカルアクターの場合のみ `Some`（管理画面からユーザー管理タブへ辿るため）。
-    user_id: Option<i64>,
-    email: Option<String>,
-}
+use seiran_common::repository::actor::SuspendedActorRow;
 
 #[derive(Debug, Serialize)]
 pub struct SuspendedActorResponse {
@@ -82,23 +70,9 @@ pub async fn list_suspended(
         .map_err(|_| ApiError::BadRequest("INVALID_AFTER_ID".to_owned()))?;
     let limit = query.limit.unwrap_or(30).clamp(1, 100);
 
-    let rows = sqlx::query_as::<_, SuspendedActorRow>(
-        "SELECT a.id, a.username, a.domain, a.actor_type::text AS actor_type, a.display_name,
-                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
-                a.suspended_at, a.user_id, u.email
-         FROM actors a
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         LEFT JOIN users u ON u.id = a.user_id
-         WHERE a.suspended_at IS NOT NULL AND ($1::bigint IS NULL OR a.id > $1)
-         ORDER BY a.id
-         LIMIT $2",
-    )
-    .bind(after_id)
-    .bind(limit)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let rows = seiran_common::repository::actor::list_suspended(&state.db, after_id, limit)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }

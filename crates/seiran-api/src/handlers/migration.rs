@@ -123,14 +123,13 @@ pub async fn start(
     // （`actors.at_did UNIQUE`制約が最終的な防波堤だが、外部呼び出し前に弾ける方が親切）。
     // `actor_type <> 'local'`（bsky/fedi等のリモートキャッシュ行）は対象外——firehose購読や
     // プロフィール参照で既にDBに存在しているのは正常な状態であり、転入をブロックすべきではない。
-    let did_in_use = sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM actors WHERE at_did = $1 AND actor_type = 'local'",
-    )
-    .bind(&source_did)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-    if did_in_use.is_some() {
+    let did_in_use = state
+        .actors
+        .find_by_did(&source_did)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .is_some_and(|a| a.actor_type == "local");
+    if did_in_use {
         return Err(ApiError::Conflict("DID_ALREADY_REGISTERED"));
     }
 
@@ -495,16 +494,16 @@ async fn materialize_local_account(
     // （firehose購読やプロフィール参照で自然に発生、`start`時点の重複チェックは
     // `actor_type='local'`のみ対象にしているため素通りする——実機で発見）。
     // 存在すればローカル用に変換（UPDATE）、無ければ新規作成（INSERT）する。
-    let existing_actor_id: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM actors WHERE at_did = $1")
-            .bind(&migration_req.source_did)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let existing_actor_id = state
+        .actors
+        .find_by_did(&migration_req.source_did)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map(|a| a.id);
 
-    let existing_user_id: Option<i64> = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind(email)
-        .fetch_optional(&state.db)
+    let existing_user_id = state
+        .users
+        .find_id_by_email(email)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -562,19 +561,18 @@ async fn convert_remote_actor_to_local(
         "https://{}/users/{}",
         state.local_domain, migration_req.new_username
     );
-    sqlx::query(
-        "UPDATE actors SET actor_type = 'local', user_id = $1, username = $2, domain = $3,
-             ap_uri = $4, at_signing_key_pem = $5, at_rotation_key_pem = $6, updated_at = NOW()
-         WHERE id = $7",
+    seiran_common::repository::actor::convert_remote_to_local(
+        &state.db,
+        &seiran_common::repository::actor::ConvertToLocal {
+            actor_id: existing_id,
+            user_id,
+            username: &migration_req.new_username,
+            domain: state.local_domain.as_str(),
+            ap_uri: &ap_uri,
+            signing_key_pem: &keys.signing_key_pem,
+            rotation_key_pem: &keys.rotation_key_pem,
+        },
     )
-    .bind(user_id)
-    .bind(&migration_req.new_username)
-    .bind(state.local_domain.as_str())
-    .bind(&ap_uri)
-    .bind(&keys.signing_key_pem)
-    .bind(&keys.rotation_key_pem)
-    .bind(existing_id)
-    .execute(&state.db)
     .await
     .map_err(|e| {
         tracing::error!(

@@ -182,17 +182,19 @@ pub async fn insert_seiran_post_link_cards(
     cards: &[SeiranPostLinkCard],
 ) {
     for (position, card) in cards.iter().take(MAX_LINK_CARDS_PER_POST).enumerate() {
-        if let Err(e) = sqlx::query(
-            "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+        if let Err(e) = crate::repository::note_extras::insert_link_card(
+            pool,
+            &crate::repository::note_extras::NewLinkCard {
+                post_id,
+                position: position as i16,
+                url: &card.url,
+                title: &card.title,
+                description: &card.description,
+                thumbnail_url: card.thumbnail_url.as_deref(),
+                embed_src: None,
+                embed_type: None,
+            },
         )
-        .bind(post_id)
-        .bind(position as i16)
-        .bind(&card.url)
-        .bind(&card.title)
-        .bind(&card.description)
-        .bind(&card.thumbnail_url)
-        .execute(pool)
         .await
         {
             tracing::error!(

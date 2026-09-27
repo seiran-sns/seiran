@@ -12,7 +12,10 @@ use std::time::{Duration, Instant};
 
 use crate::link_target::{self, ResolveContext, ResolveError, ResolvedTarget};
 use crate::queue::worker::JobContext;
-use crate::repository::{ActorRepository, PgActorRepository, PgPostRepository};
+use crate::repository::{
+    ActorRepository, LinkResolutionRepository, PgActorRepository, PgLinkResolutionRepository,
+    PgPostRepository,
+};
 
 /// `remote_actor_resolve`と同様、URL単位の重複投入防止クールダウン（プロセス内グローバル）。
 const LINK_RESOLVE_COOLDOWN: Duration = Duration::from_secs(600);
@@ -80,22 +83,10 @@ pub async fn handle(url: String, ctx: Arc<JobContext>) -> Result<(), String> {
         },
     };
 
-    sqlx::query(
-        "INSERT INTO link_resolutions (url, kind, resolved_actor_id, resolved_post_id, checked_at)
-         VALUES ($1, $2, $3, $4, now())
-         ON CONFLICT (url) DO UPDATE SET
-             kind = EXCLUDED.kind,
-             resolved_actor_id = EXCLUDED.resolved_actor_id,
-             resolved_post_id = EXCLUDED.resolved_post_id,
-             checked_at = EXCLUDED.checked_at",
-    )
-    .bind(&url)
-    .bind(kind)
-    .bind(resolved_actor_id)
-    .bind(resolved_post_id)
-    .execute(pool)
-    .await
-    .map_err(|e| format!("link_resolutions UPSERT失敗: {}", e))?;
+    PgLinkResolutionRepository::new(pool.clone())
+        .upsert(&url, kind, resolved_actor_id, resolved_post_id)
+        .await
+        .map_err(|e| format!("link_resolutions UPSERT失敗: {}", e))?;
 
     if kind == "none" {
         return Ok(());

@@ -74,10 +74,7 @@ pub async fn handle(actor_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
     };
 
     if let Some(real_id) = real_id {
-        sqlx::query("UPDATE actors SET bridge_real_actor_id = $1 WHERE id = $2")
-            .bind(real_id)
-            .bind(actor_id)
-            .execute(pool)
+        crate::repository::actor::set_bridge_real_actor(pool, actor_id, real_id)
             .await
             .map_err(|e| format!("bridge_real_actor_id 更新失敗: {}", e))?;
         tracing::info!(

@@ -123,12 +123,9 @@ pub async fn create_report(
         return Err(ApiError::BadRequest("CANNOT_REPORT_SELF".into()));
     }
     if let Some(post_id) = subject_post_id {
-        let owner: Option<i64> =
-            sqlx::query_scalar("SELECT actor_id FROM posts WHERE id=$1 AND deleted_at IS NULL")
-                .bind(post_id)
-                .fetch_optional(&state.db)
-                .await
-                .map_err(|e| ApiError::Internal(e.to_string()))?;
+        let owner = seiran_common::repository::post::live_post_author(&state.db, post_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
         if owner != Some(subject_actor_id) {
             return Err(ApiError::NotFound("SUBJECT_NOT_FOUND"));
         }
@@ -142,21 +139,20 @@ pub async fn create_report(
     };
     let remote_host = (destination == "remote").then(|| subject.domain.clone());
     let id = generate_snowflake_id(chrono::Utc::now());
-    sqlx::query(
-        "INSERT INTO reports(id,reporter_actor_id,subject_type,subject_actor_id,subject_post_id,\
-         reason_type,reason_text,destination,remote_host) \
-         VALUES($1,$2,$3::report_subject_type,$4,$5,$6,$7,$8::report_destination,$9)",
+    seiran_common::repository::report::insert(
+        &state.db,
+        &seiran_common::repository::report::NewReport {
+            id,
+            reporter_actor_id: reporter.id,
+            subject_type: &req.subject_type,
+            subject_actor_id,
+            subject_post_id,
+            reason_type: &req.reason_type,
+            reason_text: req.reason_text.trim(),
+            destination,
+            remote_host: remote_host.as_deref(),
+        },
     )
-    .bind(id)
-    .bind(reporter.id)
-    .bind(&req.subject_type)
-    .bind(subject_actor_id)
-    .bind(subject_post_id)
-    .bind(&req.reason_type)
-    .bind(req.reason_text.trim())
-    .bind(destination)
-    .bind(remote_host)
-    .execute(&state.db)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok((

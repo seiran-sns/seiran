@@ -503,51 +503,14 @@ pub async fn xrpc_check_account_status(
         && actor.suspended_at.is_none()
         && actor.did_moved_out_at.is_none();
 
-    let indexed_records: i64 = match sqlx::query_scalar::<_, i64>(
-        "SELECT (SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND deleted_at IS NULL)
-              + (SELECT COUNT(*) FROM atp_records WHERE actor_id = $1)",
-    )
-    .bind(actor.id)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(n) => n,
-        Err(e) => {
-            return ApiError::Internal(format!(
-                "[checkAccountStatus] indexedRecords集計失敗: {}",
-                e
-            ))
-            .into_response()
-        }
-    };
-    let repo_blocks: i64 =
-        match sqlx::query_scalar("SELECT COUNT(*) FROM atp_blocks WHERE actor_id = $1")
-            .bind(actor.id)
-            .fetch_one(&state.db)
-            .await
-        {
-            Ok(n) => n,
+    let (indexed_records, repo_blocks, blobs) =
+        match seiran_common::repository::atp::account_status_counts(&state.db, actor.id).await {
+            Ok(v) => v,
             Err(e) => {
-                return ApiError::Internal(format!(
-                    "[checkAccountStatus] repoBlocks集計失敗: {}",
-                    e
-                ))
-                .into_response()
+                return ApiError::Internal(format!("[checkAccountStatus] 件数の集計失敗: {}", e))
+                    .into_response()
             }
         };
-    let blobs: i64 = match sqlx::query_scalar(
-        "SELECT COUNT(*) FROM media_files WHERE uploaded_by_actor_id = $1",
-    )
-    .bind(actor.id)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(n) => n,
-        Err(e) => {
-            return ApiError::Internal(format!("[checkAccountStatus] blobs集計失敗: {}", e))
-                .into_response()
-        }
-    };
 
     Json(serde_json::json!({
         "activated": activated,
@@ -590,11 +553,11 @@ pub async fn xrpc_deactivate_account(
         _ => return ApiError::Unauthorized("アクターが見つかりません").into_response(),
     };
 
-    if let Err(e) = sqlx::query(
-        "UPDATE actors SET did_moved_out_at = COALESCE(did_moved_out_at, NOW()) WHERE id = $1",
+    if let Err(e) = seiran_common::repository::actor::mark_did_moved_out(
+        &state.db,
+        actor.id,
+        chrono::Utc::now(),
     )
-    .bind(actor.id)
-    .execute(&state.db)
     .await
     {
         return ApiError::Internal(format!("[deactivateAccount] DB更新失敗: {}", e))

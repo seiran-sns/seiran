@@ -26,12 +26,8 @@ use crate::traits::{Job, JobQueue};
 /// 対象ポストが`direct`（DM）かどうか。リアクション受信でリアルタイム配信の配信先を
 /// フォロワー込みにするか参加者のみに絞るかの分岐に使う（`docs/protocols.md` 9節）。
 async fn is_direct_post(db_pool: &sqlx::PgPool, post_id: i64) -> bool {
-    sqlx::query_scalar::<_, bool>("SELECT visibility = 'direct' FROM posts WHERE id = $1")
-        .bind(post_id)
-        .fetch_optional(db_pool)
+    crate::repository::post::is_direct(db_pool, post_id)
         .await
-        .ok()
-        .flatten()
         .unwrap_or(false)
 }
 

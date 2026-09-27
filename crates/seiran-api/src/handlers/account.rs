@@ -223,17 +223,12 @@ pub async fn change_password(
         return Err(ApiError::BadRequest("PASSWORD_TOO_SHORT".to_owned()));
     }
 
-    let row = sqlx::query!(
-        "SELECT password_hash FROM users WHERE id = $1",
-        auth_user.user_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
-    let current_hash = row
-        .password_hash
-        .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
+    let current_hash =
+        seiran_common::repository::user::password_hash_of(&state.db, auth_user.user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .flatten()
+            .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
 
     let current_ok = LocalAuthProvider::verify_password(&req.current_password, &current_hash)
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -430,18 +425,11 @@ pub async fn withdraw(
     .await?;
 
     // actor を取得してハンドル確認
-    let actor = sqlx::query!(
-        "SELECT a.id, a.username, a.at_did, a.withdrawn_at
-         FROM actors a
-         JOIN users u ON u.id = a.user_id
-         WHERE u.id = $1 AND a.actor_type = 'local'
-         LIMIT 1",
-        auth_user.user_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::BadRequest("ACTOR_NOT_FOUND".to_owned()))?;
+    let actor =
+        seiran_common::repository::user::local_actor_for_withdraw(&state.db, auth_user.user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::BadRequest("ACTOR_NOT_FOUND".to_owned()))?;
 
     if actor.withdrawn_at.is_some() {
         return Err(ApiError::BadRequest("ALREADY_WITHDRAWN".to_owned()));
@@ -481,60 +469,17 @@ pub async fn withdraw(
         }
     }
 
-    // 3. 全投稿を論理削除
-    sqlx::query!(
-        "UPDATE posts SET deleted_at = $1 WHERE actor_id = $2 AND deleted_at IS NULL",
-        now,
-        actor_id
-    )
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // 4. actor に withdrawn_at をセット（以降の認証で弾く）
-    sqlx::query!(
-        "UPDATE actors SET withdrawn_at = $1 WHERE id = $2",
-        now,
-        actor_id
-    )
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    // 3. 全投稿の論理削除・withdrawn_at の設定（以降の認証で弾く）・ブロック/ミュート/
+    //    リポストミュート関係の削除を1トランザクションで行う。
+    seiran_common::repository::user::withdraw_local_actor(&state.db, actor_id, now)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // 退会したユーザーのフォロー・所有リストが持っていたBsky DIDを
     // Jetstream の wantedDids 絞り込みリストから外すため再構築を促す。
     touch_jetstream_wanted_dids(&state.db).await;
 
-    // 5. ブロック・ミュート・リポストミュート関係を解除する（#242、2026-09-05
-    //    マイケル指摘）。「退会済みアクターは他者から見て存在しない」という原則に
-    //    揃えるため、一覧表示側でフィルタするのではなく関係自体を削除する。
-    //    自分発（自分が相手を対象にしていた分）・自分宛（相手が自分を対象にしていた分）
-    //    の両方を消す（相手側のブロック/ミュート一覧からも退会者が消えるように）。
-    sqlx::query!(
-        "DELETE FROM blocks WHERE blocker_actor_id = $1 OR blocked_actor_id = $1",
-        actor_id
-    )
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    sqlx::query!(
-        "DELETE FROM mutes WHERE muter_actor_id = $1 OR muted_actor_id = $1",
-        actor_id
-    )
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    sqlx::query!(
-        "DELETE FROM repost_mutes WHERE muter_actor_id = $1 OR muted_actor_id = $1",
-        actor_id
-    )
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // 6. フォロー先全員へのアンフォローをWorkerのジョブとして積む（Worker の
+    // 4. フォロー先全員へのアンフォローをWorkerのジョブとして積む（Worker の
     //    AccountWithdrawUnfollowAll ジョブ。ApDelivery/ProxyFollowSyncと同じジョブ
     //    キュー経由にすることで、プロセスクラッシュ時もリトライ機構の恩恵を受けられる
     //    （tokio::spawnだとプロセス終了と共に失われてしまうため。2026-07-16 マイケル指摘）。

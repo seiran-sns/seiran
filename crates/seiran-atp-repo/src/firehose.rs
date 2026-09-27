@@ -11,7 +11,10 @@
 //! `posts.at_uri` として既知（＝こちらの投稿への返信）かを調べ、既知なら
 //! `posts.reply_to_post_id` を設定してリプライとして保存する。
 
-use seiran_common::repository::NewNotification;
+use seiran_common::repository::bsky_ingest::{self, BskyPostRow, InsertOrMergeOutcome};
+use seiran_common::repository::{
+    NewNotification, PgSiteSettingsRepository, SiteSettingsRepository, note_extras,
+};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +22,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -159,25 +162,18 @@ async fn run_jetstream_loop(
 }
 
 async fn load_jetstream_cursor(pool: &PgPool) -> Option<i64> {
-    sqlx::query("SELECT value FROM site_settings WHERE key = $1")
-        .bind(JETSTREAM_CURSOR_KEY)
-        .fetch_optional(pool)
+    PgSiteSettingsRepository::new(pool.clone())
+        .get(JETSTREAM_CURSOR_KEY)
         .await
         .ok()
         .flatten()
-        .and_then(|row| row.try_get::<String, _>("value").ok())
         .and_then(|v| v.parse::<i64>().ok())
 }
 
 async fn save_jetstream_cursor(pool: &PgPool, time_us: i64) {
-    if let Err(e) = sqlx::query(
-        "INSERT INTO site_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
-    )
-    .bind(JETSTREAM_CURSOR_KEY)
-    .bind(time_us.to_string())
-    .execute(pool)
-    .await
+    if let Err(e) = PgSiteSettingsRepository::new(pool.clone())
+        .set(JETSTREAM_CURSOR_KEY, &time_us.to_string())
+        .await
     {
         tracing::error!("[Jetstream] cursor保存失敗: {}", e);
     }
@@ -195,32 +191,8 @@ struct JetstreamTimeUs {
 /// 無関係な投稿を除外してもらう。退会済み（`withdrawn_at`設定済み）ローカル
 /// ユーザーのフォロー・所有リストは対象から除外する。
 async fn load_wanted_dids(pool: &PgPool) -> Vec<String> {
-    // `follows`/`list_members`（少数行）を起点にJOINでDIDを引く。`actors`側（at_didを
-    // 持つ全件、Bsky経由でupsertされた既知アクター全体）から出発してEXISTSで判定すると
-    // フルスキャンになり本末転倒（実測、既知アクター数十万件規模で1秒近くかかった）。
-    let rows = sqlx::query(
-        "SELECT DISTINCT a.at_did AS did
-         FROM actors a
-         JOIN follows f ON f.target_actor_id = a.id
-         JOIN actors follower ON follower.id = f.follower_actor_id
-         WHERE a.at_did IS NOT NULL AND f.status = 'accepted'
-           AND follower.actor_type = 'local' AND follower.withdrawn_at IS NULL
-         UNION
-         SELECT DISTINCT a.at_did AS did
-         FROM actors a
-         JOIN list_members lm ON lm.actor_id = a.id
-         JOIN lists l ON l.id = lm.list_id
-         JOIN actors owner ON owner.id = l.owner_actor_id
-         WHERE a.at_did IS NOT NULL AND owner.withdrawn_at IS NULL",
-    )
-    .fetch_all(pool)
-    .await;
-
-    match rows {
-        Ok(rows) => rows
-            .iter()
-            .filter_map(|r| r.try_get::<String, _>("did").ok())
-            .collect(),
+    match bsky_ingest::wanted_dids(pool).await {
+        Ok(dids) => dids,
         Err(e) => {
             tracing::error!(
                 "[Jetstream] wantedDids取得失敗（無絞り込みで接続します）: {}",
@@ -472,36 +444,20 @@ struct BskyPostAuthor {
 /// 含まれている」場合のみ保存対象とする（リスト機能 #63: 誰にもフォローされていないBskyユーザー
 /// でも、リストに入れれば投稿を受信できる）。単に actors テーブルに存在するだけでは不十分
 /// （いいね等をきっかけに resolve_or_upsert_bsky_actor で無関係なアクターが actors へ upsert
-/// され、その投稿まで際限なく取り込まれてしまうため。2026-07: 実際にこの経路で posts が
-/// 104万行超まで膨張する不具合があった）。凍結中のアクターは対象外。
+/// され、その投稿まで際限なく取り込まれてしまうため）。
+/// 凍結中のアクターは対象外。
 async fn find_saveable_bsky_author(
     pool: &PgPool,
     did: &str,
 ) -> Result<Option<BskyPostAuthor>, String> {
-    let row = sqlx::query(
-            "SELECT a.id, a.username, a.display_name, a.avatar_url
-                 FROM actors a
-                 WHERE a.at_did = $1
-                   AND a.suspended_at IS NULL
-                   AND (
-                     EXISTS (
-                       SELECT 1 FROM follows f
-                       JOIN actors follower ON follower.id = f.follower_actor_id
-                       WHERE f.target_actor_id = a.id AND f.status = 'accepted' AND follower.actor_type = 'local'
-                     )
-                     OR EXISTS (SELECT 1 FROM list_members lm WHERE lm.actor_id = a.id)
-                   )
-                 LIMIT 1",
-    )
-    .bind(did)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("DB検索失敗: {}", e))?;
+    let row = bsky_ingest::saveable_author(pool, did)
+        .await
+        .map_err(|e| format!("DB検索失敗: {}", e))?;
     Ok(row.map(|row| BskyPostAuthor {
-        actor_id: row.try_get("id").unwrap_or(0),
-        username: row.try_get("username").unwrap_or_default(),
-        display_name: row.try_get("display_name").unwrap_or(None),
-        avatar_url: row.try_get("avatar_url").unwrap_or(None),
+        actor_id: row.id,
+        username: row.username,
+        display_name: row.display_name,
+        avatar_url: row.avatar_url,
     }))
 }
 
@@ -531,12 +487,9 @@ async fn handle_post_commit(
         return Ok(());
     };
 
-    let already_saved = sqlx::query("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
-        .bind(&at_uri)
-        .fetch_optional(&deps.pool)
+    let already_saved = bsky_ingest::post_exists_by_at_uri(&deps.pool, &at_uri)
         .await
-        .map_err(|e| format!("重複チェック失敗: {}", e))?
-        .is_some();
+        .map_err(|e| format!("重複チェック失敗: {}", e))?;
     if already_saved {
         return Ok(());
     }
@@ -716,16 +669,6 @@ fn handle_like_commit(deps: FirehoseDeps, did: String, commit: JetstreamCommit) 
     }
 }
 
-/// `save_bsky_post`のDB反映（マージ判定〜INSERT）の結果。
-enum InsertOrMergeOutcome {
-    /// #237相互一致マージが成立し、既存のAP先着行を更新した（新規INSERTは行っていない）。
-    Merged { post_id: i64 },
-    /// 通常のINSERTを行った。
-    Inserted,
-    /// `ON CONFLICT (at_uri) DO NOTHING`で重複スキップされた。
-    DuplicateSkipped,
-}
-
 /// Jetstream イベントから得た Bsky 投稿（`save_bsky_post`の入力）。投稿者はDB上で解決済み。
 struct IncomingBskyPost<'a> {
     at_uri: &'a str,
@@ -803,7 +746,7 @@ async fn save_bsky_post(
     };
     let insert_outcome: Result<InsertOrMergeOutcome, sqlx::Error> =
         seiran_common::unique_retry::retry_on_unique_violation(|| {
-            insert_or_merge_bsky_post_once(pool, &row)
+            bsky_ingest::insert_or_merge_bsky_post(pool, &row)
         })
         .await;
 
@@ -871,14 +814,8 @@ async fn store_bsky_post_extras(
     // 「制限なし」のまま（誤ってボタンをグレーアウトしない）。
     let (reply_allow, quote_disabled) =
         seiran_common::atp::fetch_bsky_gates(http, author_did, at_uri).await;
-    if let Err(e) = sqlx::query(
-        "UPDATE posts SET bsky_reply_allow = $1, bsky_quote_disabled = $2 WHERE id = $3",
-    )
-    .bind(&reply_allow)
-    .bind(quote_disabled)
-    .bind(post_id)
-    .execute(pool)
-    .await
+    if let Err(e) =
+        bsky_ingest::set_bsky_gates(pool, post_id, reply_allow.as_ref(), quote_disabled).await
     {
         tracing::error!("[Jetstream] gate情報保存失敗（スキップ）: {}", e);
     }
@@ -903,16 +840,19 @@ async fn store_bsky_post_extras(
         // この投票の代替表現を本物のリンクカードと誤認して保存してしまい、本来の
         // 投票ウィジェットとは別に同じ選択肢を並べただけの余計なカードが表示される
         // （実機確認、AP受信側`note_save.rs`は本文URL抽出方式のためこの問題が無い）。
-        let result = sqlx::query(
-            "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
-             VALUES ($1, 0, $2, $3, $4, $5)",
+        let result = note_extras::insert_link_card(
+            pool,
+            &note_extras::NewLinkCard {
+                post_id,
+                position: 0,
+                url: &card.url,
+                title: &card.title,
+                description: &card.description,
+                thumbnail_url: card.thumbnail_url.as_deref(),
+                embed_src: None,
+                embed_type: None,
+            },
         )
-        .bind(post_id)
-        .bind(&card.url)
-        .bind(&card.title)
-        .bind(&card.description)
-        .bind(card.thumbnail_url.as_deref())
-        .execute(pool)
         .await;
         match result {
             Ok(_) => {
@@ -1080,15 +1020,10 @@ async fn notify_local_actor_of_bsky_post(
 
 /// 投稿がローカルユーザーの投稿なら、その投稿者の actor_id を返す。
 async fn local_post_author(pool: &PgPool, post_id: Option<i64>) -> Option<i64> {
-    sqlx::query_scalar::<_, i64>(
-        "SELECT p.actor_id FROM posts p JOIN actors a ON a.id = p.actor_id
-         WHERE p.id = $1 AND a.actor_type = 'local'",
-    )
-    .bind(post_id?)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
+    bsky_ingest::local_post_author(pool, post_id?)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// リプライ先・引用先・メンション先のローカルユーザーへ通知する（自分自身は除く）。
@@ -1178,29 +1113,18 @@ async fn publish_bsky_post_to_timelines(
     // リプライの場合、リプライ先投稿者もフォロー中（または本人）のフォロワーのみに絞り込む
     // （`post_reply_target_followed`、REST の home_timeline/social_timeline や
     // `FollowRepository::find_home_recipient_ids` と同じ判定を共有するDB関数）。
-    let home_recipients: HashSet<i64> = sqlx::query_scalar::<_, i64>(
-        "SELECT f.follower_actor_id FROM follows f
-         JOIN actors a ON a.id = f.follower_actor_id
-         WHERE f.target_actor_id = $1 AND f.status = 'accepted'
-           AND a.actor_type = 'local'
-           AND post_reply_target_followed(f.follower_actor_id, $2)",
-    )
-    .bind(actor_id)
-    .bind(reply_to_post_id)
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default()
-    .into_iter()
-    .collect();
-
-    let list_ids: HashSet<i64> =
-        sqlx::query_scalar::<_, i64>("SELECT list_id FROM list_members WHERE actor_id = $1")
-            .bind(actor_id)
-            .fetch_all(pool)
+    let home_recipients: HashSet<i64> =
+        bsky_ingest::home_recipients(pool, actor_id, reply_to_post_id)
             .await
             .unwrap_or_default()
             .into_iter()
             .collect();
+
+    let list_ids: HashSet<i64> = bsky_ingest::list_ids_containing(pool, actor_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     let hashtags: HashSet<String> = seiran_common::hashtag::extract_hashtags(text)
         .into_iter()
@@ -1252,110 +1176,6 @@ struct InboundSubjectRecord<'a> {
     at_uri: &'a str,
     /// 対象投稿の AT URI。
     subject_uri: &'a str,
-}
-
-/// `posts`へ保存する Bsky 投稿の列値（`insert_or_merge_bsky_post_once`の入力）。
-#[derive(Clone, Copy)]
-struct BskyPostRow<'a> {
-    post_id: i64,
-    actor_id: i64,
-    text: &'a str,
-    at_uri: &'a str,
-    at_cid: &'a str,
-    created_at: chrono::DateTime<chrono::Utc>,
-    reply_to_post_id: Option<i64>,
-    mention_facets: &'a JsonValue,
-    emoji_map: &'a JsonValue,
-    quote_of_post_id: Option<i64>,
-    claimed_ap_object_id: Option<&'a str>,
-    bridge_of_post_id: Option<i64>,
-    bridged_original_uri: Option<&'a str>,
-}
-
-/// `save_bsky_post`の相互一致マージ判定〜INSERTの1回分の試行。UNIQUE制約違反時の
-/// リトライは呼び出し元（`retry_on_unique_violation`）が行う。
-async fn insert_or_merge_bsky_post_once(
-    pool: &PgPool,
-    row: &BskyPostRow<'_>,
-) -> Result<InsertOrMergeOutcome, sqlx::Error> {
-    let BskyPostRow {
-        post_id,
-        actor_id,
-        text,
-        at_uri,
-        at_cid,
-        created_at,
-        reply_to_post_id,
-        mention_facets,
-        emoji_map,
-        quote_of_post_id,
-        claimed_ap_object_id,
-        bridge_of_post_id,
-        bridged_original_uri,
-    } = *row;
-    let mut tx = pool.begin().await?;
-
-    // seiranPost.counterpartPostId（AP側の真正なap_object_id申告）がある場合のみ、
-    // 既存のAP先着行を探す。既存行自身のclaimed_at_uriがこの投稿のat_uriを指し返し、
-    // かつ投稿者（actor_id）が一致する場合のみ、新規INSERTせず既存行を更新する
-    // （投稿者一貫性チェックの簡略版、`docs/protocols.md` 5節参照）。直列化は
-    // `posts`の複合UNIQUE制約（`posts_mutual_claim_key`）と呼び出し元のリトライに
-    // 委ねる（advisory lockから移行）。
-    if let Some(ap_object_id) = claimed_ap_object_id {
-        let existing: Option<(i64, i64, Option<String>)> = sqlx::query_as(
-            "SELECT id, actor_id, claimed_at_uri FROM posts WHERE ap_object_id = $1",
-        )
-        .bind(ap_object_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-
-        if let Some((existing_id, existing_actor_id, existing_claim)) = existing {
-            let mutual_match = existing_claim.as_deref() == Some(at_uri);
-            if mutual_match && existing_actor_id == actor_id {
-                sqlx::query(
-                    "UPDATE posts SET at_uri = $1, at_cid = $2, claimed_at_uri = NULL WHERE id = $3",
-                )
-                .bind(at_uri)
-                .bind(at_cid)
-                .bind(existing_id)
-                .execute(&mut *tx)
-                .await?;
-                tx.commit().await?;
-                return Ok(InsertOrMergeOutcome::Merged {
-                    post_id: existing_id,
-                });
-            }
-        }
-    }
-
-    let result = sqlx::query(
-        "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, reply_to_post_id, mention_facets, emoji_map, quote_of_post_id, claimed_ap_object_id, bridge_of_post_id, bridged_original_uri)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-         ON CONFLICT (at_uri) DO NOTHING",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .bind(text)
-    .bind(at_uri)
-    .bind(at_cid)
-    .bind(created_at)
-    .bind(reply_to_post_id)
-    .bind(mention_facets)
-    .bind(emoji_map)
-    .bind(quote_of_post_id)
-    .bind(claimed_ap_object_id)
-    .bind(bridge_of_post_id)
-    .bind(bridged_original_uri)
-    .execute(&mut *tx)
-    .await?;
-
-    tx.commit().await?;
-
-    Ok(if result.rows_affected() == 0 {
-        InsertOrMergeOutcome::DuplicateSkipped
-    } else {
-        InsertOrMergeOutcome::Inserted
-    })
 }
 
 // ─── リポスト取り込み（app.bsky.feed.repost）───────────────────────────────
@@ -1706,12 +1526,8 @@ async fn handle_inbound_post_delete(pool: &PgPool, at_uri: &str) {
 /// （#凍結リモート対応）。投稿の新規取り込みは呼び出し元の`actor_row`クエリに
 /// `suspended_at IS NULL`を直接含めているため、こちらは経由しない。
 async fn is_actor_suspended(pool: &PgPool, actor_id: i64) -> bool {
-    sqlx::query_scalar::<_, bool>("SELECT suspended_at IS NOT NULL FROM actors WHERE id = $1")
-        .bind(actor_id)
-        .fetch_optional(pool)
+    bsky_ingest::is_actor_suspended(pool, actor_id)
         .await
-        .ok()
-        .flatten()
         .unwrap_or(false)
 }
 

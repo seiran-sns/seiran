@@ -654,16 +654,19 @@ pub async fn upsert_bsky_post(
             }
 
             if let Some(card) = crate::atp::parse_bsky_embed_link_card(embed, &post.author_did) {
-                let insert_result = sqlx::query(
-                    "INSERT INTO post_link_cards (post_id, position, url, title, description, thumbnail_url)
-                     VALUES ($1, 0, $2, $3, $4, $5)",
+                let insert_result = crate::repository::note_extras::insert_link_card(
+                    pool,
+                    &crate::repository::note_extras::NewLinkCard {
+                        post_id: final_id,
+                        position: 0,
+                        url: &card.url,
+                        title: &card.title,
+                        description: &card.description,
+                        thumbnail_url: card.thumbnail_url.as_deref(),
+                        embed_src: None,
+                        embed_type: None,
+                    },
                 )
-                .bind(final_id)
-                .bind(&card.url)
-                .bind(&card.title)
-                .bind(&card.description)
-                .bind(card.thumbnail_url.as_deref())
-                .execute(pool)
                 .await;
                 match insert_result {
                     Ok(_) => {

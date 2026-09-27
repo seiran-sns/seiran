@@ -32,3 +32,24 @@ impl EmailVerificationRepository for PgEmailVerificationRepository {
         Ok(row.map(|(email,)| email))
     }
 }
+
+/// メール確認のトークンを発行する。
+pub async fn issue(pool: &PgPool, id: i64, email: &str) -> Result<uuid::Uuid, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO email_verifications (id, email) VALUES ($1, $2) RETURNING token",
+    )
+    .bind(id)
+    .bind(email)
+    .fetch_one(pool)
+    .await
+}
+
+/// 期限内の有効なトークンか（消費はしない）。
+pub async fn is_valid(pool: &PgPool, token: uuid::Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM email_verifications WHERE token = $1 AND expires_at > now())",
+    )
+    .bind(token)
+    .fetch_one(pool)
+    .await
+}

@@ -5,8 +5,8 @@ use axum::{
     http::HeaderMap,
     Json,
 };
+use seiran_common::repository::passkey;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 use webauthn_rs::prelude::{
     DiscoverableAuthentication, DiscoverableKey, Passkey, PasskeyRegistration, PublicKeyCredential,
@@ -35,21 +35,16 @@ pub async fn list(
         state.users.as_ref(),
     )
     .await?;
-    let rows = sqlx::query(
-        "SELECT id, name, created_at, last_used_at
-         FROM user_passkeys WHERE user_id = $1 ORDER BY created_at",
-    )
-    .bind(user.user_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(internal)?;
+    let rows = passkey::list_for_user(&state.db, user.user_id)
+        .await
+        .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
             .map(|row| PasskeySummary {
-                id: row.get("id"),
-                name: row.get("name"),
-                created_at: row.get("created_at"),
-                last_used_at: row.get("last_used_at"),
+                id: row.id,
+                name: row.name,
+                created_at: row.created_at,
+                last_used_at: row.last_used_at,
             })
             .collect(),
     ))
@@ -82,13 +77,7 @@ pub async fn registration_start(
     if name.is_empty() || name.chars().count() > 100 {
         return Err(ApiError::BadRequest("PASSKEY_NAME_INVALID".into()));
     }
-    let username: String = sqlx::query_scalar(
-        "SELECT username FROM actors WHERE user_id = $1 AND actor_type::text = 'local'",
-    )
-    .bind(user.user_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(internal)?;
+    let username = local_username(&state, user.user_id).await?;
     let existing = load_passkeys(&state, user.user_id).await?;
     let exclude = existing
         .iter()
@@ -151,22 +140,13 @@ pub async fn registration_finish(
         .map_err(webauthn_error)?;
     let id = Uuid::new_v4();
     let credential = serde_json::to_value(passkey).map_err(internal)?;
-    let row = sqlx::query(
-        "INSERT INTO user_passkeys (id, user_id, name, credential)
-         VALUES ($1, $2, $3, $4)
-         RETURNING created_at",
-    )
-    .bind(id)
-    .bind(user.user_id)
-    .bind(name)
-    .bind(credential)
-    .fetch_one(&state.db)
-    .await
-    .map_err(internal)?;
+    let created_at = passkey::insert(&state.db, id, user.user_id, name, credential)
+        .await
+        .map_err(internal)?;
     Ok(Json(PasskeySummary {
         id,
         name: name.to_owned(),
-        created_at: row.get("created_at"),
+        created_at,
         last_used_at: None,
     }))
 }
@@ -183,13 +163,10 @@ pub async fn delete(
         state.users.as_ref(),
     )
     .await?;
-    let result = sqlx::query("DELETE FROM user_passkeys WHERE id = $1 AND user_id = $2")
-        .bind(id)
-        .bind(user.user_id)
-        .execute(&state.db)
+    let deleted = passkey::delete(&state.db, id, user.user_id)
         .await
         .map_err(internal)?;
-    if result.rows_affected() == 0 {
+    if !deleted {
         return Err(ApiError::NotFound("PASSKEY_NOT_FOUND"));
     }
     Ok(())
@@ -224,18 +201,12 @@ pub async fn authentication_finish(
     State(state): State<AppState>,
     Json(req): Json<AuthenticationFinishRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
-    let row = sqlx::query(
-        "DELETE FROM passkey_challenges
-         WHERE token = $1 AND kind = 'authentication' AND expires_at > now()
-         RETURNING state",
-    )
-    .bind(req.token)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?
-    .ok_or_else(|| ApiError::BadRequest("PASSKEY_CHALLENGE_INVALID".into()))?;
+    let state_value = passkey::consume_challenge(&state.db, req.token, None, "authentication")
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ApiError::BadRequest("PASSKEY_CHALLENGE_INVALID".into()))?;
     let auth_state: DiscoverableAuthentication =
-        serde_json::from_value(row.get("state")).map_err(internal)?;
+        serde_json::from_value(state_value).map_err(internal)?;
 
     let (user_unique_id, _) = state
         .webauthn
@@ -257,28 +228,14 @@ pub async fn authentication_finish(
         .find(|(_, passkey)| passkey.cred_id() == credential_id)
         .ok_or(ApiError::Unauthorized("PASSKEY_INVALID"))?;
     passkey.update_credential(&result);
-    sqlx::query(
-        "UPDATE user_passkeys SET credential = $1, last_used_at = now()
-         WHERE id = $2 AND user_id = $3",
-    )
-    .bind(serde_json::to_value(passkey).map_err(internal)?)
-    .bind(id)
-    .bind(user_id)
-    .execute(&state.db)
-    .await
-    .map_err(internal)?;
+    let credential = serde_json::to_value(passkey).map_err(internal)?;
+    passkey::record_use(&state.db, id, user_id, credential)
+        .await
+        .map_err(internal)?;
 
     let login = state
         .users
-        .find_login_by_username(
-            &sqlx::query_scalar::<_, String>(
-                "SELECT username FROM actors WHERE user_id = $1 AND actor_type::text = 'local'",
-            )
-            .bind(user_id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(internal)?,
-        )
+        .find_login_by_username(&local_username(&state, user_id).await?)
         .await
         .map_err(internal)?
         .ok_or(ApiError::Unauthorized("PASSKEY_INVALID"))?;
@@ -288,20 +245,22 @@ pub async fn authentication_finish(
 }
 
 async fn load_passkeys(state: &AppState, user_id: i64) -> Result<Vec<(Uuid, Passkey)>, ApiError> {
-    let rows = sqlx::query("SELECT id, credential FROM user_passkeys WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_all(&state.db)
+    passkey::credentials_for_user(&state.db, user_id)
         .await
-        .map_err(internal)?;
-    rows.into_iter()
-        .map(|row| {
-            let value: serde_json::Value = row.get("credential");
-            Ok((
-                row.get("id"),
-                serde_json::from_value(value).map_err(internal)?,
-            ))
-        })
+        .map_err(internal)?
+        .into_iter()
+        .map(|(id, value)| Ok((id, serde_json::from_value(value).map_err(internal)?)))
         .collect()
+}
+
+async fn local_username(state: &AppState, user_id: i64) -> Result<String, ApiError> {
+    state
+        .actors
+        .find_local_by_user_id(user_id)
+        .await
+        .map_err(internal)?
+        .map(|a| a.username)
+        .ok_or_else(|| ApiError::Internal("ローカルアクターが見つかりません".to_string()))
 }
 
 async fn save_challenge(
@@ -311,21 +270,9 @@ async fn save_challenge(
     kind: &str,
     value: serde_json::Value,
 ) -> Result<(), ApiError> {
-    sqlx::query("DELETE FROM passkey_challenges WHERE expires_at <= now()")
-        .execute(&state.db)
+    passkey::save_challenge(&state.db, token, user_id, kind, value)
         .await
-        .map_err(internal)?;
-    sqlx::query(
-        "INSERT INTO passkey_challenges (token, user_id, kind, state) VALUES ($1, $2, $3, $4)",
-    )
-    .bind(token)
-    .bind(user_id)
-    .bind(kind)
-    .bind(value)
-    .execute(&state.db)
-    .await
-    .map_err(internal)?;
-    Ok(())
+        .map_err(internal)
 }
 
 async fn consume_challenge(
@@ -334,18 +281,10 @@ async fn consume_challenge(
     user_id: i64,
     kind: &str,
 ) -> Result<serde_json::Value, ApiError> {
-    sqlx::query_scalar(
-        "DELETE FROM passkey_challenges
-         WHERE token = $1 AND user_id = $2 AND kind = $3 AND expires_at > now()
-         RETURNING state",
-    )
-    .bind(token)
-    .bind(user_id)
-    .bind(kind)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?
-    .ok_or_else(|| ApiError::BadRequest("PASSKEY_CHALLENGE_INVALID".into()))
+    passkey::consume_challenge(&state.db, token, Some(user_id), kind)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ApiError::BadRequest("PASSKEY_CHALLENGE_INVALID".into()))
 }
 
 fn webauthn_error(error: impl std::fmt::Display) -> ApiError {

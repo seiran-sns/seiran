@@ -7,7 +7,6 @@
 
 use axum::{extract::State, response::IntoResponse, Json};
 use serde::Serialize;
-use sqlx::Row;
 
 use crate::AppState;
 
@@ -39,35 +38,24 @@ pub struct EmojisResponse {
 /// カスタム絵文字一覧を Misskey 互換の形状で取得する。`/api/emojis` と `/api/meta` の
 /// `emojis` フィールドの両方から共有される。
 pub async fn fetch_public_emojis(db: &sqlx::PgPool) -> Vec<PublicEmoji> {
-    let rows = sqlx::query(
-        "SELECT ce.id, ce.shortcode, ce.category, ce.tags, ce.license,
-                rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url,
-                mf.width, mf.height, mf.blurhash
-         FROM custom_emojis ce
-         JOIN media_files mf ON mf.id = ce.media_file_id
-         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         ORDER BY ce.id",
-    )
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
-
-    rows.into_iter()
+    seiran_common::repository::emoji::list_public(db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
         .filter_map(|row| {
-            let id: i64 = row.try_get("id").ok()?;
-            let shortcode: String = row.try_get("shortcode").ok()?;
-            let url: String = row.try_get("url").ok()?;
-            let width: i32 = row.try_get("width").ok()?;
-            let height: i32 = row.try_get("height").ok()?;
-            let blurhash: String = row.try_get("blurhash").ok()?;
+            // 画像の寸法と blurhash が無い絵文字はクライアントが扱えないので出さない。
+            let (Some(width), Some(height), Some(blurhash)) = (row.width, row.height, row.blurhash)
+            else {
+                return None;
+            };
             Some(PublicEmoji {
-                id: id.to_string(),
-                aliases: row.try_get("tags").unwrap_or_default(),
-                name: shortcode,
-                category: row.try_get::<Option<String>, _>("category").unwrap_or(None),
+                id: row.id.to_string(),
+                aliases: row.tags,
+                name: row.shortcode,
+                category: row.category,
                 host: None,
-                url,
-                license: row.try_get::<Option<String>, _>("license").unwrap_or(None),
+                url: row.url,
+                license: row.license,
                 width,
                 height,
                 blurhash,

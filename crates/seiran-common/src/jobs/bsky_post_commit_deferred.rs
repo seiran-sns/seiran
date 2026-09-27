@@ -26,8 +26,8 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Row};
+use chrono::Utc;
+use sqlx::PgPool;
 use tokio::sync::broadcast;
 
 use crate::atp::repo::{BskyEmbed, BskyPostReply, BskyRefRecord};
@@ -92,12 +92,9 @@ async fn resolve_reply_uris(
     let Some(reply_to_post_id) = reply_to_post_id else {
         return Ok(None);
     };
-    let row: Option<(Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT at_uri, at_cid FROM posts WHERE id = $1")
-            .bind(reply_to_post_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| format!("親ポストのat_uri/at_cid取得失敗: {}", e))?;
+    let row = crate::repository::post::at_ref_of(pool, reply_to_post_id)
+        .await
+        .map_err(|e| format!("親ポストのat_uri/at_cid取得失敗: {}", e))?;
 
     Ok(match row {
         Some((Some(uri), Some(cid))) => Some(BskyPostReply {
@@ -111,9 +108,6 @@ async fn resolve_reply_uris(
     })
 }
 
-/// (body, created_at, reply_to_post_id, language)
-type PostRow = (String, DateTime<Utc>, Option<i64>, Option<String>);
-
 async fn process_locked(
     actor_id: i64,
     post_id: i64,
@@ -126,15 +120,15 @@ async fn process_locked(
         .as_ref()
         .ok_or_else(|| "配送設定未注入".to_string())?;
 
-    let post_row: Option<PostRow> = sqlx::query_as(
-        "SELECT body, created_at, reply_to_post_id, language FROM posts WHERE id = $1",
-    )
-    .bind(post_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("投稿取得失敗: {}", e))?;
-
-    let Some((text, now, reply_to_post_id, language)) = post_row else {
+    let Some(crate::repository::post::DeferredCommitRow {
+        body: text,
+        created_at: now,
+        reply_to_post_id,
+        language,
+    }) = crate::repository::post::deferred_commit_material(pool, post_id)
+        .await
+        .map_err(|e| format!("投稿取得失敗: {}", e))?
+    else {
         tracing::warn!(
             "[BskyPostCommitDeferred] post_id={} が見つからないため終了",
             post_id
@@ -144,14 +138,9 @@ async fn process_locked(
 
     let bsky_reply = resolve_reply_uris(pool, reply_to_post_id).await?;
 
-    let row = sqlx::query(
-        "SELECT mime_type, width, height, bsky_video_cid, bsky_video_status, bsky_video_size, size, created_at
-         FROM media_files WHERE id = $1",
-    )
-    .bind(pending_media_file_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("media_files取得失敗: {}", e))?;
+    let row = crate::repository::media_file::bsky_video_embed_material(pool, pending_media_file_id)
+        .await
+        .map_err(|e| format!("media_files取得失敗: {}", e))?;
 
     let embed = match row {
         None => {
@@ -162,10 +151,8 @@ async fn process_locked(
             watch_page_fallback_embed(&cfg.local_domain, pending_media_file_id)
         }
         Some(row) => {
-            let status: Option<String> = row.try_get("bsky_video_status").unwrap_or(None);
-            let created_at: DateTime<Utc> = row
-                .try_get("created_at")
-                .map_err(|e| format!("created_at取得失敗: {}", e))?;
+            let status = row.bsky_video_status;
+            let created_at = row.created_at;
 
             if !matches!(status.as_deref(), Some("ready") | Some("failed")) {
                 let elapsed_secs = (Utc::now() - created_at).num_seconds();
@@ -182,14 +169,15 @@ async fn process_locked(
             }
 
             if status.as_deref() == Some("ready") {
-                let video_cid: Option<String> = row.try_get("bsky_video_cid").unwrap_or(None);
-                match video_cid {
+                match row.bsky_video_cid {
                     Some(video_cid) => {
-                        let mime_type: String = row.try_get("mime_type").unwrap_or_default();
-                        let width: Option<i32> = row.try_get("width").unwrap_or(None);
-                        let height: Option<i32> = row.try_get("height").unwrap_or(None);
-                        let size: i64 = row.try_get("size").unwrap_or(0);
-                        let bsky_size: Option<i64> = row.try_get("bsky_video_size").unwrap_or(None);
+                        let (mime_type, width, height, size, bsky_size) = (
+                            row.mime_type,
+                            row.width,
+                            row.height,
+                            row.size,
+                            row.bsky_video_size,
+                        );
                         // 音声を変換したグレー背景動画の解像度は
                         // crate::storage::media_probe::AUDIO_VIDEO_WIDTH/HEIGHT
                         // （convert_audio_to_gray_video が実際に生成する解像度）と必ず一致させる。
@@ -250,10 +238,8 @@ async fn process_locked(
     // 結合待ちを解消（起動時リカバリの再検出対象から外す）。commit_post成功時点で
     // posts.at_uri が設定されているはずだが、pending_bsky_media_file_id自体も明示的に
     // クリアしておく（at_uri判定だけに頼らず、意図をカラムの値としても残すため）。
-    if let Err(e) = sqlx::query("UPDATE posts SET pending_bsky_media_file_id = NULL WHERE id = $1")
-        .bind(post_id)
-        .execute(pool)
-        .await
+    if let Err(e) =
+        crate::repository::maintenance::clear_pending_bsky_media_file(pool, post_id).await
     {
         tracing::error!(
             "[BskyPostCommitDeferred] pending_bsky_media_file_id クリア失敗 post_id={}: {}",
@@ -267,14 +253,9 @@ async fn process_locked(
     // 補完するUpdate(Note)を送る（#237、配送側の制約「非対称・後からUpdateで補完」）。
     // 同期コミット（このジョブを経由しない通常経路）はCreate(Note)自体が既に
     // counterpartPostIdを持てているため、この後追いUpdateは不要（ここでのみ必要）。
-    let fedi_needs_update: Option<i64> = sqlx::query_scalar(
-        "SELECT actor_id FROM posts
-         WHERE id = $1 AND deliver_fedi = true AND ap_object_id IS NOT NULL",
-    )
-    .bind(post_id)
-    .fetch_optional(pool)
-    .await
-    .unwrap_or(None);
+    let fedi_needs_update = crate::repository::post::author_if_sent_to_fedi(pool, post_id)
+        .await
+        .unwrap_or(None);
     if let Some(post_actor_id) = fedi_needs_update {
         if let Err(e) = ctx
             .queue

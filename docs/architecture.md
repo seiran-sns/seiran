@@ -31,7 +31,7 @@ workspace は6 crate。実行バイナリは `seiran-server` だけで、他は 
 - `jobs/` — 各ジョブの実処理
 - `ap/` — AP クライアント・配送・WebFinger・outbox
 - `atp/` — MST/リポジトリ、PLC、DID 解決、サービス間認証
-- `repository/` — Repository 層
+- `repository/` — Repository 層。SQL はここにだけ置く（ハンドラ・ジョブ・firehose は型付きのリポジトリ関数を呼ぶ。`tests/sql_style.rs` が検査）
 - `storage/` — S3 互換クライアント、ストレージ選択、画像処理
 - `streaming.rs` — `StreamHub`（`recipients` 方式とチャンネル方式、`docs/protocols.md` 8節）
 - `net.rs` — SSRF 対策込みの HTTP 取得・連合用クライアント
@@ -301,7 +301,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 
 **E2E**（`e2e/`、`cd e2e && npm test`）: 外部の実サービス（Fedi/Bsky・PLC・Relay）とは通信せず、相手をすべてローカルのスタブに置き換える。ポートは開発サーバーと別（バックエンド3100・フロント5273、`e2e/ports.ts`）なので、開発サーバーを止めなくてよい。
 
-- `playwright.config.ts` の `webServer` がスタブ PLC・スタブ AppView・スタブ Fedi・バックエンド・フロントを起動する。バックエンドには `PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL` をスタブへ、`ATP_RELAY_URL` を存在しないポートへ、`CLOUDFLARE_*` を空に、`SEIRAN_ALLOW_PRIVATE_NETWORK=true`（スタブが 127.0.0.1 のため）、`SQLX_OFFLINE=true`（空の DB でコンパイル時検証が失敗しないよう `.sqlx/` を使う）を渡す。
+- `playwright.config.ts` の `webServer` がスタブ PLC・スタブ AppView・スタブ Fedi・バックエンド・フロントを起動する。バックエンドには `PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL` をスタブへ、`ATP_RELAY_URL` を存在しないポートへ、`CLOUDFLARE_*` を空に、`SEIRAN_ALLOW_PRIVATE_NETWORK=true`（スタブが 127.0.0.1 のため）を渡す。
   - 全 `webServer` の `reuseExistingServer` は `false` 固定（変更禁止）。`true` だとポートが空いていない場合に既存のサーバーへ相乗りし、実開発DBへのテストデータ混入や本物の plc.directory への誤登録を起こす。
   - Playwright は「webServer 起動 → globalSetup」の順なので、E2E 用 Postgres（`e2e/docker-compose.yml`、5433）の起動待ちはバックエンドの `command` の前段（`scripts/wait-for-db.ts`）に入れている。`global-setup.ts` は起動済みのバックエンドで初期管理者を作る（`users` が空だとフロントは常にセットアップ画面を出すため）。`globalTeardown` が DB を `down -v` で捨てる。
   - project は3つ（`workers` は CI 3・ローカル4）。大半は `main`。`storage_providers` に触れる spec（スタブ S3 の登録が競合する）は `storage-serial`（project 内 `workers: 1`、`main` と並行）、`site_settings` やスタブのグローバル状態に触れる spec は `globals-serial`（`main`・`storage-serial` の後に排他で実行）。

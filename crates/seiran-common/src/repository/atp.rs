@@ -207,3 +207,60 @@ impl AtpReadRepository for PgAtpReadRepository {
             .collect())
     }
 }
+
+/// `actor_id` のリポジトリにある CID のブロック（DAG-CBOR バイト列）。
+pub async fn block_bytes(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    cid: &str,
+) -> Result<Option<Vec<u8>>, sqlx::Error> {
+    sqlx::query_scalar("SELECT bytes FROM atp_blocks WHERE cid = $1 AND actor_id = $2 LIMIT 1")
+        .bind(cid)
+        .bind(actor_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// `atp_records`（`app.bsky.feed.post` 以外）のレコードの CID。
+pub async fn record_cid(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    collection: &str,
+    rkey: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT cid FROM atp_records
+         WHERE actor_id = $1 AND collection = $2 AND rkey = $3 LIMIT 1",
+    )
+    .bind(actor_id)
+    .bind(collection)
+    .bind(rkey)
+    .fetch_optional(pool)
+    .await
+}
+
+/// ATP 上の実体（`at_rkey`）を持つ投稿があるか。
+pub async fn has_post_records(pool: &sqlx::PgPool, actor_id: i64) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM posts WHERE actor_id = $1 AND deleted_at IS NULL AND at_rkey IS NOT NULL)",
+    )
+    .bind(actor_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// `checkAccountStatus` 用の件数 `(indexedRecords, repoBlocks, blobs)`。
+pub async fn account_status_counts(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+) -> Result<(i64, i64, i64), sqlx::Error> {
+    sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND deleted_at IS NULL)
+              + (SELECT COUNT(*) FROM atp_records WHERE actor_id = $1),
+                (SELECT COUNT(*) FROM atp_blocks WHERE actor_id = $1),
+                (SELECT COUNT(*) FROM media_files WHERE uploaded_by_actor_id = $1)",
+    )
+    .bind(actor_id)
+    .fetch_one(pool)
+    .await
+}

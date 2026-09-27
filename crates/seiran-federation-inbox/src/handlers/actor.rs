@@ -5,7 +5,6 @@ use axum::{
     Json,
 };
 use serde::Serialize;
-use sqlx::Row;
 use std::sync::Arc;
 
 use crate::AppState;
@@ -133,24 +132,7 @@ pub async fn actor_handler(
         return Redirect::to(&format!("/@{}", username)).into_response();
     }
 
-    let row = sqlx::query(
-        "SELECT a.id, a.display_name, a.bio, \
-                COALESCE(rtrim(avatar_sp.public_url, '/') || '/' || avatar_mf.storage_key, a.avatar_url) AS avatar_url, \
-                avatar_mf.mime_type AS avatar_mime_type, \
-                COALESCE(rtrim(banner_sp.public_url, '/') || '/' || banner_mf.storage_key, a.banner_url) AS banner_url, \
-                banner_mf.mime_type AS banner_mime_type, \
-                a.profile_fields, a.emoji_map, \
-                a.birth_date, a.birth_date_public, a.is_locked, a.at_did \
-         FROM actors a \
-         LEFT JOIN media_files avatar_mf ON avatar_mf.id = a.avatar_media_id \
-         LEFT JOIN storage_providers avatar_sp ON avatar_sp.id = avatar_mf.storage_provider_id \
-         LEFT JOIN media_files banner_mf ON banner_mf.id = a.banner_media_id \
-         LEFT JOIN storage_providers banner_sp ON banner_sp.id = banner_mf.storage_provider_id \
-         WHERE a.username = $1 AND a.actor_type = 'local' AND a.withdrawn_at IS NULL LIMIT 1",
-    )
-    .bind(&username)
-    .fetch_optional(&state.db)
-    .await;
+    let row = seiran_common::repository::ap_public::actor_document(&state.db, &username).await;
 
     let (
         actor_id,
@@ -167,64 +149,44 @@ pub async fn actor_handler(
         seiran_at_did,
     ) = match row {
         Ok(Some(r)) => {
-            let actor_id = r.try_get::<i64, _>("id").unwrap_or_default();
-            let display_name = r
-                .try_get::<Option<String>, _>("display_name")
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| username.clone());
-            let bio = r.try_get::<Option<String>, _>("bio").ok().flatten();
-            let stored_avatar_url = r.try_get::<Option<String>, _>("avatar_url").ok().flatten();
-            let avatar_url = Some(stored_avatar_url.clone().unwrap_or_else(|| {
+            let actor_id = r.id;
+            let display_name = r.display_name.unwrap_or_else(|| username.clone());
+            // アバター未設定なら生成画像（SVG）を出す。
+            let avatar_mime_type = match &r.avatar_url {
+                Some(_) => r.avatar_mime_type,
+                None => Some("image/svg+xml".to_string()),
+            };
+            let avatar_url = Some(r.avatar_url.unwrap_or_else(|| {
                 seiran_common::avatar::fallback_avatar_url(&state.local_domain, actor_id)
             }));
-            let avatar_mime_type = stored_avatar_url
+            let banner_mime_type = r
+                .banner_url
                 .as_ref()
-                .and_then(|_| {
-                    r.try_get::<Option<String>, _>("avatar_mime_type")
-                        .ok()
-                        .flatten()
-                })
-                .or_else(|| Some("image/svg+xml".to_string()));
-            let banner_url = r.try_get::<Option<String>, _>("banner_url").ok().flatten();
-            let banner_mime_type = banner_url
-                .as_ref()
-                .and_then(|_| {
-                    r.try_get::<Option<String>, _>("banner_mime_type")
-                        .ok()
-                        .flatten()
-                })
+                .and(r.banner_mime_type)
                 .or_else(|| Some("image/jpeg".to_string()));
             let profile_fields = r
-                .try_get::<serde_json::Value, _>("profile_fields")
-                .ok()
+                .profile_fields
                 .and_then(|v| v.as_array().cloned())
                 .unwrap_or_default();
-            let emoji_map = r
-                .try_get::<serde_json::Value, _>("emoji_map")
-                .unwrap_or_else(|_| serde_json::json!({}));
-            let birth_date_public: bool = r.try_get("birth_date_public").unwrap_or(false);
-            let birth_date = if birth_date_public {
-                r.try_get::<Option<chrono::NaiveDate>, _>("birth_date")
-                    .unwrap_or(None)
+            let emoji_map = r.emoji_map.unwrap_or_else(|| serde_json::json!({}));
+            let birth_date = if r.birth_date_public {
+                r.birth_date
             } else {
                 None
             };
-            let is_locked: bool = r.try_get("is_locked").unwrap_or(false);
-            let seiran_at_did: Option<String> = r.try_get("at_did").ok().flatten();
             (
                 actor_id,
                 display_name,
-                bio,
+                r.bio,
                 avatar_url,
                 avatar_mime_type,
-                banner_url,
+                r.banner_url,
                 banner_mime_type,
                 profile_fields,
                 emoji_map,
                 birth_date,
-                is_locked,
-                seiran_at_did,
+                r.is_locked,
+                r.at_did,
             )
         }
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
@@ -262,30 +224,19 @@ pub async fn actor_handler(
     // 公開する（検証は読み手側の責務）。ターゲットの種別に応じてURI形式を作り分ける:
     // ローカルは自ドメインのactor URI、fediは保存済みのap_uri、bskyはdid:...形式
     // （Bridgy Fedと同じ流儀、`docs/protocols.md`参照）。
-    let also_known_as_rows = sqlx::query(
-        "SELECT a.actor_type::text AS actor_type, a.username, a.ap_uri, a.at_did
-         FROM actor_also_known_as aka
-         JOIN actors a ON a.id = aka.target_actor_id
-         WHERE aka.owner_actor_id = $1",
-    )
-    .bind(actor_id)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-    let also_known_as: Vec<String> = also_known_as_rows
-        .iter()
-        .filter_map(|r| {
-            let actor_type: String = r.try_get("actor_type").ok()?;
-            match actor_type.as_str() {
-                "local" => {
-                    let target_username: String = r.try_get("username").ok()?;
-                    Some(format!("{}/users/{}", base, target_username))
-                }
-                "bsky" => r.try_get::<Option<String>, _>("at_did").ok().flatten(),
-                _ => r.try_get::<Option<String>, _>("ap_uri").ok().flatten(),
-            }
-        })
-        .collect();
+    let also_known_as: Vec<String> =
+        seiran_common::repository::ap_public::also_known_as_targets(&state.db, actor_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(
+                |(actor_type, target_username, ap_uri, at_did)| match actor_type.as_str() {
+                    "local" => Some(format!("{}/users/{}", base, target_username)),
+                    "bsky" => at_did,
+                    _ => ap_uri,
+                },
+            )
+            .collect();
 
     let icon = avatar_url.map(|url| ApImage {
         kind: "Image".to_string(),

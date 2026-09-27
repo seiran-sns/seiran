@@ -126,11 +126,8 @@ pub async fn check_post_rate_limit(state: &AppState, actor_id: i64) -> Result<()
         .await
         .max(1);
     let since = Utc::now() - Duration::minutes(window_minutes);
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND created_at >= $2")
-            .bind(actor_id)
-            .bind(since)
-            .fetch_one(&state.db)
+    let count =
+        seiran_common::repository::rate_limit_log::count_posts_since(&state.db, actor_id, since)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
     if count >= max {
@@ -216,49 +213,18 @@ pub async fn check_search_rate_limit(
         .await
         .max(1);
     let since = Utc::now() - Duration::minutes(window_minutes);
-    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
-    let mut tx = state.db.begin().await.map_err(internal)?;
-    lock_actor_rate_limit(&mut tx, "search_log", actor_id)
-        .await
-        .map_err(internal)?;
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM search_log WHERE actor_id = $1 AND created_at >= $2",
+    let recorded = seiran_common::repository::rate_limit_log::record_search_if_under_limit(
+        &state.db, actor_id, since, max,
     )
-    .bind(actor_id)
-    .bind(since)
-    .fetch_one(&mut *tx)
     .await
-    .map_err(internal)?;
-    if count >= max {
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !recorded {
         return Err(ApiError::TooManyRequests(
             "SEARCH_RATE_LIMITED",
             Some((window_minutes * 60) as u64),
         ));
     }
-    sqlx::query("INSERT INTO search_log (actor_id) VALUES ($1)")
-        .bind(actor_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(internal)?;
-    tx.commit().await.map_err(internal)?;
     Ok(())
-}
-
-/// 「窓内の件数を数えて上限未満なら記録する」レート制限を、同じアクターの同時リクエスト間で
-/// 直列化するためのトランザクションスコープのアドバイザリロック。数える文と記録する文の間に
-/// 他のリクエストが割り込むと、並列に送ったリクエストが全て上限判定をすり抜けてしまう。
-/// ロックはトランザクション終了時に自動で解放される。
-async fn lock_actor_rate_limit(
-    tx: &mut sqlx::PgConnection,
-    namespace: &str,
-    actor_id: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
-        .bind(namespace)
-        .bind(actor_id)
-        .execute(tx)
-        .await
-        .map(|_| ())
 }
 
 /// user / emoji-editor が、DM以外のメンション・返信・引用で1時間に話しかけられる
@@ -277,38 +243,17 @@ pub async fn check_and_record_contacts(
         return Ok(());
     }
     let since = Utc::now() - Duration::hours(1);
-    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
-    let mut tx = state.db.begin().await.map_err(internal)?;
-    lock_actor_rate_limit(&mut tx, "user_contact_log", actor_id)
-        .await
-        .map_err(internal)?;
-    let existing: Vec<i64> = sqlx::query_scalar(
-        "SELECT DISTINCT target_actor_id FROM user_contact_log
-         WHERE actor_id = $1 AND created_at >= $2",
+    let recorded = seiran_common::repository::rate_limit_log::record_contacts_if_under_limit(
+        &state.db, actor_id, since, &targets, 30,
     )
-    .bind(actor_id)
-    .bind(since)
-    .fetch_all(&mut *tx)
     .await
-    .map_err(internal)?;
-    let existing: HashSet<i64> = existing.into_iter().collect();
-    let new_targets: Vec<i64> = targets.difference(&existing).copied().collect();
-    if existing.len() + new_targets.len() > 30 {
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !recorded {
         return Err(ApiError::TooManyRequests(
             "CONTACT_RATE_LIMITED",
             Some(3600),
         ));
     }
-    sqlx::query(
-        "INSERT INTO user_contact_log (actor_id, target_actor_id)
-         SELECT $1, unnest($2::bigint[])",
-    )
-    .bind(actor_id)
-    .bind(&new_targets)
-    .execute(&mut *tx)
-    .await
-    .map_err(internal)?;
-    tx.commit().await.map_err(internal)?;
     Ok(())
 }
 

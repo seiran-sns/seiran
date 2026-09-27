@@ -1003,16 +1003,9 @@ pub async fn users_reactions(
 /// 欠落として例外を投げるため、値が0でもキーは揃える）。リモートを一切集計しないため
 /// `notesCount`/`usersCount`と`originalNotesCount`/`originalUsersCount`は常に同値になる。
 pub async fn stats(State(state): State<AppState>) -> Result<Json<MisskeyStats>, ApiError> {
-    let (notes_count, users_count): (i64, i64) = sqlx::query_as(
-        "SELECT
-             (SELECT count(*) FROM posts p
-              JOIN actors a ON a.id = p.actor_id
-              WHERE a.actor_type = 'local' AND p.deleted_at IS NULL),
-             (SELECT count(*) FROM actors WHERE actor_type = 'local' AND withdrawn_at IS NULL)",
-    )
-    .fetch_one(&state.db)
-    .await
-    .map_err(internal)?;
+    let (notes_count, users_count) = seiran_common::repository::post::local_stats(&state.db)
+        .await
+        .map_err(internal)?;
 
     Ok(Json(MisskeyStats {
         notes_count,

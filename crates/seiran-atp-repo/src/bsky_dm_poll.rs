@@ -16,10 +16,10 @@ use std::time::Duration;
 
 use seiran_common::atp::sign_service_auth_jwt;
 use seiran_common::generate_snowflake_id;
-use seiran_common::repository::{DmRepository, PgDmRepository};
+use seiran_common::repository::{DmRepository, PgDmRepository, dm};
 use seiran_common::streaming::StreamHub;
 use seiran_common::traits::JobQueue;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 
 use crate::firehose::resolve_or_upsert_bsky_actor;
 
@@ -54,20 +54,11 @@ async fn poll_once(
     http: &reqwest::Client,
     stream_hub: &StreamHub,
 ) -> Result<(), String> {
-    let users = sqlx::query(
-        "SELECT id, at_did, at_signing_key_pem FROM actors
-         WHERE actor_type = 'local' AND at_did IS NOT NULL AND at_signing_key_pem IS NOT NULL",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    let users = dm::bsky_dm_poll_accounts(pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    for row in users {
-        let actor_id: i64 = row.try_get("id").map_err(|e| e.to_string())?;
-        let did: String = row.try_get("at_did").map_err(|e| e.to_string())?;
-        let pem: String = row
-            .try_get("at_signing_key_pem")
-            .map_err(|e| e.to_string())?;
+    for (actor_id, did, pem) in users {
         let account = LocalChatAccount {
             actor_id,
             did: &did,
@@ -250,20 +241,11 @@ async fn load_convo_link(
     pool: &PgPool,
     convo_id: &str,
 ) -> Result<(Option<i64>, Option<String>), String> {
-    let existing = sqlx::query(
-        "SELECT thread_root_post_id, last_synced_message_id FROM bsky_convo_links WHERE convo_id = $1",
-    )
-    .bind(convo_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    let existing = dm::convo_link(pool, convo_id)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(match existing {
-        Some(row) => (
-            row.try_get("thread_root_post_id").ok(),
-            row.try_get::<Option<String>, _>("last_synced_message_id")
-                .ok()
-                .flatten(),
-        ),
+        Some((root, last)) => (Some(root), last),
         None => (None, None),
     })
 }
@@ -383,64 +365,21 @@ async fn import_peer_message(
     let candidate_post_id = generate_snowflake_id(sent_at);
     let candidate_thread_root = current_thread_root.unwrap_or(candidate_post_id);
 
-    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-
-    let inserted_id: Option<i64> = sqlx::query_scalar(
-        "INSERT INTO posts (id, actor_id, body, visibility, thread_root_post_id, created_at, bsky_message_id)
-         VALUES ($1, $2, $3, 'direct', $4, $5, $6)
-         ON CONFLICT (bsky_message_id) WHERE bsky_message_id IS NOT NULL DO NOTHING
-         RETURNING id",
+    dm::import_bsky_dm(
+        pool,
+        &dm::IncomingBskyDm {
+            candidate_post_id,
+            candidate_thread_root,
+            sender_actor_id: peer_actor_id,
+            recipient_actor_id: local_actor_id,
+            convo_id,
+            message_id: msg_id,
+            text,
+            sent_at,
+        },
     )
-    .bind(candidate_post_id)
-    .bind(peer_actor_id)
-    .bind(text)
-    .bind(candidate_thread_root)
-    .bind(sent_at)
-    .bind(msg_id)
-    .fetch_optional(&mut *tx)
     .await
-    .map_err(|e| format!("DM受信INSERT失敗: {}", e))?;
-
-    // ON CONFLICT で行が挿入されなかった場合は、以前のポーリングで既に取り込み済み。
-    // その時に確定したpost_id/thread_rootを読み直し、今回生成した値は破棄する。
-    let (actual_post_id, actual_thread_root) = match inserted_id {
-        Some(id) => (id, candidate_thread_root),
-        None => {
-            let row =
-                sqlx::query("SELECT id, thread_root_post_id FROM posts WHERE bsky_message_id = $1")
-                    .bind(msg_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|e| format!("既存DM取得失敗: {}", e))?;
-            let id: i64 = row.try_get("id").map_err(|e| e.to_string())?;
-            let root: Option<i64> = row.try_get("thread_root_post_id").ok().flatten();
-            (id, root.unwrap_or(id))
-        }
-    };
-
-    sqlx::query(
-        "INSERT INTO post_recipients (post_id, actor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-    )
-    .bind(actual_post_id)
-    .bind(local_actor_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("post_recipients INSERT失敗: {}", e))?;
-
-    sqlx::query(
-        "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id, last_synced_message_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (thread_root_post_id) DO UPDATE SET last_synced_message_id = EXCLUDED.last_synced_message_id",
-    )
-    .bind(actual_thread_root)
-    .bind(convo_id)
-    .bind(msg_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    tx.commit().await.map_err(|e| e.to_string())?;
-    Ok((actual_post_id, actual_thread_root))
+    .map_err(|e| format!("DM受信取り込み失敗: {}", e))
 }
 
 /// 受信した DM をローカルユーザーの画面へ WebSocket 配信する。
@@ -452,24 +391,18 @@ async fn publish_received_dm(
     post_id: i64,
     message: &ReceivedMessage<'_>,
 ) -> Result<(), String> {
-    let peer_row =
-        sqlx::query("SELECT username, domain, display_name, avatar_url FROM actors WHERE id = $1")
-            .bind(peer_actor_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| e.to_string())?;
+    let peer_row = seiran_common::repository::actor::lite_rows_for_actors(pool, &[peer_actor_id])
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .next();
     let (peer_username, peer_domain, peer_display_name, peer_avatar_url): (
         String,
         String,
         Option<String>,
         Option<String>,
     ) = match peer_row {
-        Some(r) => (
-            r.try_get("username").unwrap_or_default(),
-            r.try_get("domain").unwrap_or_default(),
-            r.try_get("display_name").unwrap_or(None),
-            r.try_get("avatar_url").unwrap_or(None),
-        ),
+        Some(r) => (r.username, r.domain, r.display_name, r.avatar_url),
         None => (String::new(), String::new(), None, None),
     };
 
@@ -518,12 +451,9 @@ async fn sync_message_reactions(
             continue;
         };
 
-        let post_id: Option<i64> =
-            sqlx::query_scalar("SELECT id FROM posts WHERE bsky_message_id = $1")
-                .bind(msg_id)
-                .fetch_optional(pool)
-                .await
-                .map_err(|e| e.to_string())?;
+        let post_id = dm::post_id_by_bsky_message_id(pool, msg_id)
+            .await
+            .map_err(|e| e.to_string())?;
         let Some(post_id) = post_id else {
             continue;
         };
@@ -581,20 +511,14 @@ async fn notify_dm_bsky_reactions_changed(
     local_actor_id: i64,
     peer_actor_id: i64,
 ) -> Result<(), String> {
-    let rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT content, COUNT(*) AS cnt FROM dm_bsky_reactions
-         WHERE post_id = $1 GROUP BY content ORDER BY cnt DESC",
-    )
-    .bind(post_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    let rows =
+        seiran_common::repository::note_extras::dm_bsky_reaction_counts_for_posts(pool, &[post_id])
+            .await
+            .map_err(|e| e.to_string())?;
 
     let reactions_json: Vec<serde_json::Value> = rows
         .into_iter()
-        .map(|(content, count)| {
-            serde_json::json!({ "emoji": content, "count": count, "emojiUrl": null })
-        })
+        .map(|r| serde_json::json!({ "emoji": r.content, "count": r.cnt, "emojiUrl": null }))
         .collect();
 
     stream_hub.publish_event(
@@ -617,16 +541,7 @@ async fn persist_cursor(
     convo_id: &str,
     msg_id: &str,
 ) -> Result<(), String> {
-    sqlx::query(
-        "INSERT INTO bsky_convo_links (thread_root_post_id, convo_id, last_synced_message_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (thread_root_post_id) DO UPDATE SET last_synced_message_id = EXCLUDED.last_synced_message_id",
-    )
-    .bind(thread_root)
-    .bind(convo_id)
-    .bind(msg_id)
-    .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    dm::advance_convo_cursor(pool, thread_root, convo_id, msg_id)
+        .await
+        .map_err(|e| e.to_string())
 }

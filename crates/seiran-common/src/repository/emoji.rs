@@ -392,3 +392,31 @@ mod tests {
         );
     }
 }
+
+/// 公開するカスタム絵文字（`/api/emojis`・`/api/meta`）。
+#[derive(Debug, sqlx::FromRow)]
+pub struct PublicEmojiRow {
+    pub id: i64,
+    pub shortcode: String,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+    pub license: Option<String>,
+    pub url: String,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub blurhash: Option<String>,
+}
+
+pub async fn list_public(pool: &sqlx::PgPool) -> Result<Vec<PublicEmojiRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT ce.id, ce.shortcode, ce.category, ce.tags, ce.license,
+                rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url,
+                mf.width, mf.height, mf.blurhash
+         FROM custom_emojis ce
+         JOIN media_files mf ON mf.id = ce.media_file_id
+         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         ORDER BY ce.id",
+    )
+    .fetch_all(pool)
+    .await
+}

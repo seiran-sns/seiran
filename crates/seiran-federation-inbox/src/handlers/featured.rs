@@ -3,7 +3,6 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use sqlx::Row;
 use std::sync::Arc;
 
 use super::ap_collection::{
@@ -20,15 +19,10 @@ pub async fn featured_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let actor_row =
-        sqlx::query(
-            "SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' AND withdrawn_at IS NULL LIMIT 1",
-        )
-            .bind(&username)
-            .fetch_optional(&state.db)
-            .await;
+        seiran_common::repository::ap_public::live_local_actor_id(&state.db, &username).await;
 
     let actor_id: i64 = match actor_row {
-        Ok(Some(r)) => r.try_get("id").unwrap_or(0),
+        Ok(Some(id)) => id,
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
         Err(e) => {
             tracing::error!("[Featured] DB エラー: {}", e);
@@ -43,17 +37,7 @@ pub async fn featured_handler(
 
     // このエンドポイントは認証なしの完全匿名アクセスのため、followers_only/direct な
     // ピン留め投稿は常に除外する（可視性による閲覧制御）。
-    let rows = sqlx::query(
-        "SELECT p.id, p.body, p.created_at
-         FROM pinned_posts pp
-         JOIN posts p ON p.id = pp.post_id
-         WHERE pp.actor_id = $1 AND p.deleted_at IS NULL
-           AND p.visibility NOT IN ('followers_only', 'direct')
-         ORDER BY pp.pinned_at DESC",
-    )
-    .bind(actor_id)
-    .fetch_all(&state.db)
-    .await;
+    let rows = seiran_common::repository::ap_public::featured_posts(&state.db, actor_id).await;
 
     let rows = match rows {
         Ok(r) => r,
@@ -63,7 +47,7 @@ pub async fn featured_handler(
         }
     };
 
-    let post_ids: Vec<i64> = rows.iter().filter_map(|r| r.try_get("id").ok()).collect();
+    let post_ids: Vec<i64> = rows.iter().map(|(id, _, _)| *id).collect();
     let mut att_map = fetch_attachment_documents(&state.db, &post_ids).await;
     let owner = CollectionOwner {
         actor_uri: &actor_uri,
@@ -73,14 +57,7 @@ pub async fn featured_handler(
     // featured collection は Note オブジェクトを直接（Create でラップせずに）並べる
     // （Mastodon 等の実装と同じ慣習）。
     let mut ordered_items = Vec::new();
-    for row in &rows {
-        let (Ok(post_id), Ok(body), Ok(created_at)) = (
-            row.try_get::<i64, _>("id"),
-            row.try_get::<String, _>("body"),
-            row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
-        ) else {
-            continue;
-        };
+    for (post_id, body, created_at) in rows {
         let note_id = format!("{}/notes/{}", base, post_id);
         let attachments = att_map.remove(&post_id).unwrap_or_default();
         ordered_items.push(public_note(

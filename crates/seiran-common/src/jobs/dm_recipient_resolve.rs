@@ -24,15 +24,9 @@ pub async fn handle(post_id: i64, uri: String, ctx: Arc<JobContext>) -> Result<(
         return Ok(());
     };
 
-    sqlx::query(
-        "INSERT INTO post_recipients (post_id, actor_id) VALUES ($1, $2)
-         ON CONFLICT (post_id, actor_id) DO NOTHING",
-    )
-    .bind(post_id)
-    .bind(actor_id)
-    .execute(pool)
-    .await
-    .map_err(|e| format!("post_recipients INSERT失敗: {}", e))?;
+    crate::repository::post::add_recipient(pool, post_id, actor_id)
+        .await
+        .map_err(|e| format!("post_recipients INSERT失敗: {}", e))?;
 
     tracing::info!(
         "[DmRecipientResolve] 宛先解決完了: post_id={} uri={} actor_id={}",

@@ -7,7 +7,6 @@ use axum::{
     response::{IntoResponse, Redirect},
 };
 use serde::Deserialize;
-use sqlx::Row;
 use tokio::sync::broadcast;
 
 use seiran_common::atp::{
@@ -44,21 +43,12 @@ pub async fn xrpc_get_blob(
 
     // media_files（Seiran自前UI経由・com.atproto.repo.uploadBlob 経由〈Bsky公式動画
     // パイプラインの代理POSTを含む〉のどちらでアップロードされたものも入っている）を検索する。
-    let row = sqlx::query(
-        "SELECT mf.mime_type AS mime_type,
-                rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url
-         FROM media_files mf
-         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         WHERE mf.sha256 = $1
-         LIMIT 1",
-    )
-    .bind(&sha256_hex)
-    .fetch_optional(&state.db)
-    .await;
+    let row =
+        seiran_common::repository::media_file::public_location_by_sha256(&state.db, &sha256_hex)
+            .await;
 
     match row {
-        Ok(Some(r)) => {
-            let url: String = r.try_get("url").unwrap_or_default();
+        Ok(Some((_mime_type, url))) => {
             if url.is_empty() {
                 return ApiError::NotFound("Blob not found").into_response();
             }

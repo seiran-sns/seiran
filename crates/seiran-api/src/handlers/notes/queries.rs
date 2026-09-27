@@ -1,15 +1,10 @@
-//! notes ハンドラが使う読み取り集約クエリ（複数ポストへの添付・リアクション・リポスト状態の
-//! 一括解決）。個別ハンドラの都合に強く結びついた read-model 構築（`NoteResponse` 組み立て用の
-//! `HashMap<post_id, ...>` を複数ポスト分まとめて作る等）であり、単一エンティティの CRUD を
-//! 表す汎用リポジトリ層のインターフェースには馴染まないため、意図的にここへ置いている
-//! （将来的な形式化候補ではあるが、現時点で昇格すべき明確な必要性はない）。
+//! notes ハンドラが使う読み取りの集約（複数投稿分の添付・リアクション・リポスト状態等を
+//! `NoteResponse` に付ける）。SQL は `repository::note_extras` にある。
 
 use std::collections::{HashMap, HashSet};
 
 use axum::response::{IntoResponse, Response};
-use sqlx::Row;
-
-use seiran_common::repository::TimelinePost;
+use seiran_common::repository::{note_extras, TimelinePost};
 use seiran_common::{job_priority, Job};
 
 use crate::error::ApiError;
@@ -40,22 +35,12 @@ pub async fn attach_poll_votes(
         return;
     }
 
-    let rows = sqlx::query(
-        "SELECT post_id, option_index FROM poll_votes
-         WHERE actor_id = $1 AND post_id = ANY($2)
-         ORDER BY post_id, option_index",
-    )
-    .bind(actor_id)
-    .bind(&post_ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
+    let rows = note_extras::poll_votes_by_actor(db, actor_id, &post_ids)
+        .await
+        .unwrap_or_default();
     let mut votes: HashMap<i64, Vec<i32>> = HashMap::new();
-    for row in rows {
-        votes
-            .entry(row.try_get("post_id").unwrap_or_default())
-            .or_default()
-            .push(row.try_get("option_index").unwrap_or_default());
+    for (post_id, option_index) in rows {
+        votes.entry(post_id).or_default().push(option_index);
     }
 
     fn apply(note: &mut NoteResponse, votes: &HashMap<i64, Vec<i32>>) {
@@ -90,23 +75,14 @@ pub async fn resolve_mention_facets_in_place(db: &sqlx::PgPool, posts: &mut [Tim
     }
     let dids: Vec<String> = dids.into_iter().collect();
 
-    let rows = sqlx::query(
-        "SELECT username, domain, actor_type::text AS actor_type, at_did FROM actors WHERE at_did = ANY($1)",
-    )
-    .bind(&dids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
-
-    let mention_paths: HashMap<String, String> = rows
-        .iter()
-        .filter_map(|r| {
-            let did: String = r.try_get("at_did").ok()?;
-            let username: String = r.try_get("username").ok()?;
-            let domain: String = r.try_get("domain").ok()?;
-            let actor_type: String = r.try_get("actor_type").ok()?;
-            let handle = seiran_common::username::actor_handle(&username, &domain, &actor_type);
-            Some((did, handle))
+    let mention_paths: HashMap<String, String> = note_extras::handles_for_dids(db, &dids)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| {
+            let handle =
+                seiran_common::username::actor_handle(&r.username, &r.domain, &r.actor_type);
+            (r.at_did, handle)
         })
         .collect();
 
@@ -122,75 +98,39 @@ pub async fn fetch_attachments_map(
     db: &sqlx::PgPool,
     post_ids: &[i64],
 ) -> HashMap<i64, Vec<AttachmentResponse>> {
-    if post_ids.is_empty() {
-        return HashMap::new();
-    }
-    let rows = sqlx::query(
-        "SELECT pa.post_id,
-                COALESCE(
-                    rtrim(sp.public_url, '/') || '/' || mf.storage_key,
-                    pa.remote_url
-                ) AS url,
-                COALESCE(mf.mime_type, pa.remote_mime_type, 'image/jpeg') AS mime_type,
-                COALESCE(mf.width,  0) AS width,
-                COALESCE(mf.height, 0) AS height,
-                sp.public_url AS public_url,
-                mf.thumbnail_key AS thumbnail_key,
-                mf.duration_ms AS duration_ms,
-                pa.remote_thumbnail_url AS remote_thumbnail_url,
-                mf.sha256 AS sha256,
-                mf.size AS size,
-                mf.created_at AS media_created_at,
-                pa.is_sensitive,
-                pa.is_gif,
-                COALESCE(mf.is_animated_image, FALSE) AS is_animated_image
-         FROM post_attachments pa
-         LEFT JOIN media_files mf ON mf.id = pa.media_file_id
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         WHERE pa.post_id = ANY($1)
-         ORDER BY pa.post_id, pa.position",
-    )
-    .bind(post_ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
+    let rows = match note_extras::attachments_for_posts(db, post_ids).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[notes] 添付の取得に失敗: {}", e);
+            Vec::new()
+        }
+    };
 
     let mut map: HashMap<i64, Vec<AttachmentResponse>> = HashMap::new();
     for row in rows {
-        let post_id: i64 = row.try_get("post_id").unwrap_or_default();
-        let url: String = row
-            .try_get::<Option<String>, _>("url")
-            .unwrap_or(None)
-            .unwrap_or_default();
-        if url.is_empty() {
+        let Some(url) = row.url.filter(|u| !u.is_empty()) else {
             continue;
-        }
-        let public_url: Option<String> = row.try_get("public_url").unwrap_or(None);
-        let thumbnail_key: Option<String> = row.try_get("thumbnail_key").unwrap_or(None);
-        let remote_thumbnail_url: Option<String> =
-            row.try_get("remote_thumbnail_url").unwrap_or(None);
-        let thumbnail_url = match (&public_url, &thumbnail_key) {
-            (Some(pu), Some(tk)) => Some(format!("{}/{}", pu.trim_end_matches('/'), tk)),
-            _ => remote_thumbnail_url,
         };
-        let media_created_at: Option<chrono::DateTime<chrono::Utc>> =
-            row.try_get("media_created_at").unwrap_or(None);
-        map.entry(post_id).or_default().push(AttachmentResponse {
-            url,
-            mime_type: row
-                .try_get("mime_type")
-                .unwrap_or_else(|_| "image/jpeg".into()),
-            width: row.try_get("width").unwrap_or(0),
-            height: row.try_get("height").unwrap_or(0),
-            thumbnail_url,
-            duration_ms: row.try_get("duration_ms").unwrap_or(None),
-            sha256: row.try_get("sha256").unwrap_or(None),
-            size: row.try_get("size").unwrap_or(None),
-            media_created_at: media_created_at.map(|dt| dt.to_rfc3339()),
-            is_sensitive: row.try_get("is_sensitive").unwrap_or(false),
-            is_gif: row.try_get("is_gif").unwrap_or(false),
-            is_animated_image: row.try_get("is_animated_image").unwrap_or(false),
-        });
+        let thumbnail_url = match (&row.public_url, &row.thumbnail_key) {
+            (Some(pu), Some(tk)) => Some(format!("{}/{}", pu.trim_end_matches('/'), tk)),
+            _ => row.remote_thumbnail_url,
+        };
+        map.entry(row.post_id)
+            .or_default()
+            .push(AttachmentResponse {
+                url,
+                mime_type: row.mime_type,
+                width: row.width,
+                height: row.height,
+                thumbnail_url,
+                duration_ms: row.duration_ms.map(i64::from),
+                sha256: row.sha256,
+                size: row.size,
+                media_created_at: row.media_created_at.map(|dt| dt.to_rfc3339()),
+                is_sensitive: row.is_sensitive,
+                is_gif: row.is_gif,
+                is_animated_image: row.is_animated_image,
+            });
     }
     map
 }
@@ -201,30 +141,23 @@ pub async fn fetch_link_cards_map(
     db: &sqlx::PgPool,
     post_ids: &[i64],
 ) -> HashMap<i64, Vec<LinkCardResponse>> {
-    if post_ids.is_empty() {
-        return HashMap::new();
-    }
-    let rows = sqlx::query(
-        "SELECT post_id, url, title, description, thumbnail_url, embed_src, embed_type
-         FROM post_link_cards
-         WHERE post_id = ANY($1)
-         ORDER BY post_id, position",
-    )
-    .bind(post_ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
+    let rows = match note_extras::link_cards_for_posts(db, post_ids).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[notes] URLカードの取得に失敗: {}", e);
+            Vec::new()
+        }
+    };
 
     let mut map: HashMap<i64, Vec<LinkCardResponse>> = HashMap::new();
     for row in rows {
-        let post_id: i64 = row.try_get("post_id").unwrap_or_default();
-        map.entry(post_id).or_default().push(LinkCardResponse {
-            url: row.try_get("url").unwrap_or_default(),
-            title: row.try_get("title").unwrap_or_default(),
-            description: row.try_get("description").unwrap_or_default(),
-            thumbnail_url: row.try_get("thumbnail_url").unwrap_or(None),
-            embed_src: row.try_get("embed_src").unwrap_or(None),
-            embed_type: row.try_get("embed_type").unwrap_or(None),
+        map.entry(row.post_id).or_default().push(LinkCardResponse {
+            url: row.url,
+            title: row.title,
+            description: row.description,
+            thumbnail_url: row.thumbnail_url,
+            embed_src: row.embed_src,
+            embed_type: row.embed_type,
         });
     }
     map
@@ -236,20 +169,11 @@ pub async fn fetch_reposted_ids(
     actor_id: i64,
     post_ids: &[i64],
 ) -> HashSet<i64> {
-    if post_ids.is_empty() {
-        return Default::default();
-    }
-    sqlx::query_scalar::<_, i64>(
-        "SELECT repost_of_post_id FROM posts
-         WHERE actor_id = $1 AND repost_of_post_id = ANY($2) AND deleted_at IS NULL",
-    )
-    .bind(actor_id)
-    .bind(post_ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default()
-    .into_iter()
-    .collect()
+    note_extras::reposted_post_ids(db, actor_id, post_ids)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect()
 }
 
 /// `TimelinePost`群を、表示に必要な付帯情報をすべて埋めた`NoteResponse`へ組み立てる
@@ -441,33 +365,20 @@ pub async fn attach_reply_quote_gates(
         return;
     }
 
-    #[derive(sqlx::FromRow)]
-    struct GateRow {
-        id: i64,
-        actor_id: i64,
-        bsky_reply_allow: Option<serde_json::Value>,
-        bsky_quote_disabled: bool,
-        mention_facets: Option<serde_json::Value>,
-    }
-    let rows: Vec<GateRow> = sqlx::query_as(
-        "SELECT id, actor_id, bsky_reply_allow, bsky_quote_disabled, mention_facets
-         FROM posts
-         WHERE id = ANY($1) AND (bsky_reply_allow IS NOT NULL OR bsky_quote_disabled)",
-    )
-    .bind(&ids)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    let rows = note_extras::gated_posts(&state.db, &ids)
+        .await
+        .unwrap_or_default();
     if rows.is_empty() {
         return;
     }
 
-    let viewer_did: Option<String> = sqlx::query_scalar("SELECT at_did FROM actors WHERE id = $1")
-        .bind(viewer_id)
-        .fetch_optional(&state.db)
+    let viewer_did: Option<String> = state
+        .actors
+        .find_by_id(viewer_id)
         .await
         .ok()
-        .flatten();
+        .flatten()
+        .and_then(|a| a.at_did);
 
     let mut gates: HashMap<i64, (bool, bool)> = HashMap::new();
     for row in rows {
@@ -540,14 +451,13 @@ async fn evaluate_reply_allow(
                 }),
                 _ => false,
             },
-            "app.bsky.feed.threadgate#followingRule" => sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_actor_id = $1 AND target_actor_id = $2)",
-            )
-            .bind(author_actor_id)
-            .bind(viewer_actor_id)
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(false),
+            "app.bsky.feed.threadgate#followingRule" => state
+                .follows
+                .find_status(author_actor_id, viewer_actor_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some(),
             "app.bsky.feed.threadgate#listRule" => {
                 match (rule.get("list").and_then(|l| l.as_str()), viewer_did) {
                     (Some(list_uri), Some(did)) => is_list_member(state, list_uri, did).await,
@@ -569,38 +479,16 @@ async fn evaluate_reply_allow(
 /// バックグラウンド更新ジョブを積み、今回はフェイルオープン（誤って返信ボタンをグレーアウトしない、
 /// `docs/protocols.md`参照）。
 async fn is_list_member(state: &AppState, list_uri: &str, viewer_did: &str) -> bool {
-    if let Ok(Some(list_id)) =
-        sqlx::query_scalar::<_, i64>("SELECT id FROM lists WHERE at_uri = $1")
-            .bind(list_uri)
-            .fetch_optional(&state.db)
-            .await
+    if let Ok(Some(is_member)) =
+        note_extras::local_list_has_member_did(&state.db, list_uri, viewer_did).await
     {
-        return sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                 SELECT 1 FROM list_members lm JOIN actors a ON a.id = lm.actor_id
-                 WHERE lm.list_id = $1 AND a.at_did = $2
-             )",
-        )
-        .bind(list_id)
-        .bind(viewer_did)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false);
+        return is_member;
     }
 
-    #[derive(sqlx::FromRow)]
-    struct CacheRow {
-        member_dids: serde_json::Value,
-        checked_at: chrono::DateTime<chrono::Utc>,
-    }
-    let cached: Option<CacheRow> = sqlx::query_as(
-        "SELECT member_dids, checked_at FROM bsky_remote_list_membership_cache WHERE list_uri = $1",
-    )
-    .bind(list_uri)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
+    let cached = note_extras::remote_list_membership_cache(&state.db, list_uri)
+        .await
+        .ok()
+        .flatten();
 
     match cached {
         Some(row) if chrono::Utc::now() - row.checked_at < chrono::Duration::hours(24) => row
@@ -636,58 +524,18 @@ pub async fn fetch_reactions_map(
     if post_ids.is_empty() {
         return HashMap::new();
     }
-    let rows = sqlx::query(
-        "SELECT post_id, content, COUNT(*) AS cnt, MAX(emoji_url) AS emoji_url
-         FROM reactions
-         WHERE post_id = ANY($1)
-           AND ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, actor_id))
-         GROUP BY post_id, content
-         ORDER BY post_id, cnt DESC",
-    )
-    .bind(post_ids)
-    .bind(my_actor_id)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
-
-    let mine: HashSet<(i64, String)> = if let Some(actor_id) = my_actor_id {
-        sqlx::query(
-            "SELECT post_id, content FROM reactions WHERE actor_id = $1 AND post_id = ANY($2)",
-        )
-        .bind(actor_id)
-        .bind(post_ids)
-        .fetch_all(db)
+    let rows = note_extras::reaction_counts_for_posts(db, post_ids, my_actor_id)
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|row| {
-            let post_id: i64 = row.try_get("post_id").unwrap_or_default();
-            let content: String = row.try_get("content").unwrap_or_default();
-            (post_id, content)
-        })
-        .collect()
-    } else {
-        Default::default()
+        .unwrap_or_default();
+    let mine: HashSet<(i64, String)> = match my_actor_id {
+        Some(actor_id) => note_extras::own_reactions_for_posts(db, actor_id, post_ids)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+        None => HashSet::new(),
     };
-
-    let mut map: HashMap<i64, Vec<ReactionSummary>> = HashMap::new();
-    for row in rows {
-        let post_id: i64 = row.try_get("post_id").unwrap_or_default();
-        let emoji: String = row.try_get("content").unwrap_or_default();
-        let count: i64 = row.try_get("cnt").unwrap_or_default();
-        let emoji_url: Option<String> = row.try_get("emoji_url").unwrap_or(None);
-        if emoji.is_empty() {
-            continue;
-        }
-        let reacted_by_me = mine.contains(&(post_id, emoji.clone()));
-        map.entry(post_id).or_default().push(ReactionSummary {
-            emoji,
-            count,
-            reacted_by_me,
-            emoji_url,
-        });
-    }
-    map
+    reaction_summaries(rows, &mine)
 }
 
 /// bsky宛DMメッセージの絵文字リアクション集計（`dm_bsky_reactions`）。通常の`reactions`
@@ -701,52 +549,35 @@ pub async fn fetch_dm_bsky_reactions_map(
     if post_ids.is_empty() {
         return HashMap::new();
     }
-    let rows = sqlx::query(
-        "SELECT post_id, content, COUNT(*) AS cnt
-         FROM dm_bsky_reactions
-         WHERE post_id = ANY($1)
-         GROUP BY post_id, content
-         ORDER BY post_id, cnt DESC",
-    )
-    .bind(post_ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
-
-    let mine: HashSet<(i64, String)> = if let Some(actor_id) = my_actor_id {
-        sqlx::query(
-            "SELECT post_id, content FROM dm_bsky_reactions WHERE actor_id = $1 AND post_id = ANY($2)",
-        )
-        .bind(actor_id)
-        .bind(post_ids)
-        .fetch_all(db)
+    let rows = note_extras::dm_bsky_reaction_counts_for_posts(db, post_ids)
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|row| {
-            let post_id: i64 = row.try_get("post_id").unwrap_or_default();
-            let content: String = row.try_get("content").unwrap_or_default();
-            (post_id, content)
-        })
-        .collect()
-    } else {
-        Default::default()
+        .unwrap_or_default();
+    let mine: HashSet<(i64, String)> = match my_actor_id {
+        Some(actor_id) => note_extras::own_dm_bsky_reactions_for_posts(db, actor_id, post_ids)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+        None => HashSet::new(),
     };
+    reaction_summaries(rows, &mine)
+}
 
+fn reaction_summaries(
+    rows: Vec<note_extras::ReactionCountRow>,
+    mine: &HashSet<(i64, String)>,
+) -> HashMap<i64, Vec<ReactionSummary>> {
     let mut map: HashMap<i64, Vec<ReactionSummary>> = HashMap::new();
     for row in rows {
-        let post_id: i64 = row.try_get("post_id").unwrap_or_default();
-        let emoji: String = row.try_get("content").unwrap_or_default();
-        let count: i64 = row.try_get("cnt").unwrap_or_default();
-        if emoji.is_empty() {
+        if row.content.is_empty() {
             continue;
         }
-        let reacted_by_me = mine.contains(&(post_id, emoji.clone()));
-        map.entry(post_id).or_default().push(ReactionSummary {
-            emoji,
-            count,
+        let reacted_by_me = mine.contains(&(row.post_id, row.content.clone()));
+        map.entry(row.post_id).or_default().push(ReactionSummary {
+            emoji: row.content,
+            count: row.cnt,
             reacted_by_me,
-            emoji_url: None,
+            emoji_url: row.emoji_url,
         });
     }
     map

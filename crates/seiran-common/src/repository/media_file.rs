@@ -230,3 +230,185 @@ impl MediaFileRepository for PgMediaFileRepository {
         Ok(())
     }
 }
+
+/// Bsky embed 候補の分類に使う `media_files` の列（`resolve_bsky_embed`）。
+#[derive(Debug, sqlx::FromRow)]
+pub struct EmbedCandidateRow {
+    pub id: i64,
+    pub sha256: String,
+    pub size: i64,
+    pub mime_type: String,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub is_animated_image: bool,
+    pub bsky_video_cid: Option<String>,
+    pub bsky_video_status: Option<String>,
+    pub bsky_video_size: Option<i64>,
+}
+
+/// `ids` の順序を保って返す。
+pub async fn embed_candidates(
+    pool: &sqlx::PgPool,
+    ids: &[i64],
+) -> Result<Vec<EmbedCandidateRow>, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_as(
+        "SELECT id, sha256, size, mime_type, width, height, is_animated_image, \
+                bsky_video_cid, bsky_video_status, bsky_video_size \
+         FROM media_files WHERE id = ANY($1) ORDER BY array_position($1, id)",
+    )
+    .bind(ids)
+    .fetch_all(pool)
+    .await
+}
+
+/// `actor_id` が Bsky 動画パイプラインに提出して完了待ちのメディアを持つか。
+pub async fn has_pending_bsky_video(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM media_files WHERE uploaded_by_actor_id = $1 AND bsky_video_status = 'pending')",
+    )
+    .bind(actor_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// `actor_id` がアップロードした、`sha256` のメディアの id。
+pub async fn find_id_by_sha256_and_uploader(
+    pool: &sqlx::PgPool,
+    sha256: &str,
+    actor_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT id FROM media_files WHERE sha256 = $1 AND uploaded_by_actor_id = $2 LIMIT 1",
+    )
+    .bind(sha256)
+    .bind(actor_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// `sha256` のメディアの `(mime_type, 公開URL)`（`getBlob` のリダイレクト先）。
+pub async fn public_location_by_sha256(
+    pool: &sqlx::PgPool,
+    sha256: &str,
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT mf.mime_type, rtrim(sp.public_url, '/') || '/' || mf.storage_key
+         FROM media_files mf
+         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         WHERE mf.sha256 = $1
+         LIMIT 1",
+    )
+    .bind(sha256)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn bsky_video_status(
+    pool: &sqlx::PgPool,
+    id: i64,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<String>>(
+        "SELECT bsky_video_status FROM media_files WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map(Option::flatten)
+}
+
+/// Bsky 動画パイプラインへ提出したことを記録する。
+pub async fn mark_bsky_video_pending(
+    pool: &sqlx::PgPool,
+    id: i64,
+    job_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE media_files SET bsky_video_job_id = $1, bsky_video_status = 'pending' WHERE id = $2",
+    )
+    .bind(job_id)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+pub async fn mark_bsky_video_failed(pool: &sqlx::PgPool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE media_files SET bsky_video_status = 'failed' WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+/// Bluesky 動画処理ジョブのポーリングに要る情報（投稿者の DID・署名鍵）。
+#[derive(sqlx::FromRow)]
+pub struct BskyVideoPollRow {
+    pub bsky_video_job_id: Option<String>,
+    pub at_did: Option<String>,
+    pub at_signing_key_pem: Option<String>,
+}
+
+pub async fn bsky_video_poll_material(
+    pool: &sqlx::PgPool,
+    id: i64,
+) -> Result<Option<BskyVideoPollRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT mf.bsky_video_job_id, a.at_did, a.at_signing_key_pem
+         FROM media_files mf
+         JOIN actors a ON a.id = mf.uploaded_by_actor_id
+         WHERE mf.id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// `size` はトランスコード後のバイト数（`media_files.size` はアップロード時の原本）。
+pub async fn mark_bsky_video_ready(
+    pool: &sqlx::PgPool,
+    id: i64,
+    cid: &str,
+    size: Option<i64>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE media_files SET bsky_video_cid = $1, bsky_video_status = 'ready', bsky_video_size = $2 WHERE id = $3",
+    )
+    .bind(cid)
+    .bind(size)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// 動画の Bluesky 側処理状況と、`app.bsky.embed.video` の組み立てに要る値。
+#[derive(sqlx::FromRow)]
+pub struct BskyVideoEmbedRow {
+    pub mime_type: String,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub bsky_video_cid: Option<String>,
+    pub bsky_video_status: Option<String>,
+    pub bsky_video_size: Option<i64>,
+    pub size: i64,
+    pub created_at: DateTime<Utc>,
+}
+
+pub async fn bsky_video_embed_material(
+    pool: &sqlx::PgPool,
+    id: i64,
+) -> Result<Option<BskyVideoEmbedRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT mime_type, width, height, bsky_video_cid, bsky_video_status, bsky_video_size, size, created_at
+         FROM media_files WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+}

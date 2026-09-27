@@ -4,8 +4,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use seiran_common::ap::deliver::at_uri_to_bsky_app_url;
+use seiran_common::repository::ap_public::OutboxRow;
 use serde::Deserialize;
-use sqlx::PgPool;
 use std::sync::Arc;
 
 use super::ap_collection::{
@@ -23,24 +23,20 @@ pub struct OutboxQuery {
 /// 1ページ（`?page=true`）あたりの最大件数。
 const PAGE_SIZE: i64 = 20;
 
-/// outbox は認証なしの完全匿名アクセスのため、followers_only/direct な投稿は常に除外する
-/// （featured と同じ可視性条件）。
-const PUBLIC_POST_CONDITION: &str =
-    "p.deleted_at IS NULL AND p.visibility NOT IN ('followers_only', 'direct')";
-
 pub async fn outbox_handler(
     Path(username): Path<String>,
     Query(query): Query<OutboxQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let (actor_id, total_items) = match find_outbox_owner(&state.db, &username).await {
-        Ok(Some(v)) => v,
-        Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
-        Err(e) => {
-            tracing::error!("[Outbox] DB エラー: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
-        }
-    };
+    let (actor_id, total_items) =
+        match seiran_common::repository::ap_public::outbox_owner(&state.db, &username).await {
+            Ok(Some(v)) => v,
+            Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
+            Err(e) => {
+                tracing::error!("[Outbox] DB エラー: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
+            }
+        };
 
     let base = format!("https://{}", state.local_domain);
     let outbox_uri = format!("{}/users/{}/outbox", base, username);
@@ -59,7 +55,11 @@ pub async fn outbox_handler(
 
     // ?page=true → OrderedCollectionPage（最大 PAGE_SIZE 件）
     let max_id: Option<i64> = query.max_id.as_deref().and_then(|s| s.parse().ok());
-    let rows = match fetch_outbox_rows(&state.db, actor_id, max_id).await {
+    let rows = match seiran_common::repository::ap_public::outbox_page(
+        &state.db, actor_id, max_id, PAGE_SIZE,
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("[Outbox] 投稿取得エラー: {}", e);
@@ -98,63 +98,6 @@ pub async fn outbox_handler(
     }
 
     activity_json(page)
-}
-
-/// outbox の持ち主（ローカルの未退会アクター）の id と、公開投稿の総数。
-async fn find_outbox_owner(db: &PgPool, username: &str) -> Result<Option<(i64, i64)>, sqlx::Error> {
-    sqlx::query_as(&format!(
-        "SELECT a.id, COUNT(p.id) AS total
-         FROM actors a
-         LEFT JOIN posts p ON p.actor_id = a.id AND {PUBLIC_POST_CONDITION}
-         WHERE a.username = $1 AND a.actor_type = 'local' AND a.withdrawn_at IS NULL
-         GROUP BY a.id
-         LIMIT 1"
-    ))
-    .bind(username)
-    .fetch_optional(db)
-    .await
-}
-
-/// outbox に並べる投稿1件。リポスト行は本文（body）が常に空文字列で、単独では Create(Note) として
-/// 表現できない（元投稿を参照する Announce として表現する必要がある）ため、リポスト元（orig）の
-/// ap_object_id / at_uri / 投稿者情報も合わせて持つ。
-#[derive(sqlx::FromRow)]
-struct OutboxRow {
-    id: i64,
-    body: String,
-    created_at: chrono::DateTime<chrono::Utc>,
-    repost_of_post_id: Option<i64>,
-    ap_object_id: Option<String>,
-    orig_ap_object_id: Option<String>,
-    orig_at_uri: Option<String>,
-    orig_username: Option<String>,
-    orig_display_name: Option<String>,
-    orig_actor_uri: Option<String>,
-}
-
-/// `max_id` より古い公開投稿を新しい順に最大 `PAGE_SIZE` 件取得する。
-async fn fetch_outbox_rows(
-    db: &PgPool,
-    actor_id: i64,
-    max_id: Option<i64>,
-) -> Result<Vec<OutboxRow>, sqlx::Error> {
-    sqlx::query_as(&format!(
-        "SELECT p.id, p.body, p.created_at, p.repost_of_post_id, p.ap_object_id,
-                orig.ap_object_id AS orig_ap_object_id, orig.at_uri AS orig_at_uri,
-                oa.username AS orig_username, oa.display_name AS orig_display_name,
-                oa.ap_uri AS orig_actor_uri
-         FROM posts p
-         LEFT JOIN posts orig ON orig.id = p.repost_of_post_id
-         LEFT JOIN actors oa ON oa.id = orig.actor_id
-         WHERE p.actor_id = $1 AND {PUBLIC_POST_CONDITION}
-           AND ($2::BIGINT IS NULL OR p.id < $2)
-         ORDER BY p.id DESC LIMIT $3"
-    ))
-    .bind(actor_id)
-    .bind(max_id)
-    .bind(PAGE_SIZE)
-    .fetch_all(db)
-    .await
 }
 
 /// 投稿1件を outbox の項目（Create または Announce）に変換する。表現できない行は `None`。

@@ -45,14 +45,13 @@ pub async fn totp_status(
 }
 
 async fn find_username(state: &AppState, user_id: i64) -> Result<String, ApiError> {
-    sqlx::query_scalar!(
-        "SELECT a.username FROM actors a WHERE a.user_id = $1 AND a.actor_type::text = 'local'",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))
+    state
+        .actors
+        .find_local_by_user_id(user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map(|a| a.username)
+        .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))
 }
 
 fn decrypt_secret(state: &AppState, secret_encrypted: &str) -> Result<String, ApiError> {
@@ -203,15 +202,11 @@ pub async fn totp_disable(
     )
     .await?;
 
-    let hash = sqlx::query_scalar!(
-        "SELECT password_hash FROM users WHERE id = $1",
-        auth_user.user_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?
-    .flatten()
-    .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
+    let hash = seiran_common::repository::user::password_hash_of(&state.db, auth_user.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .flatten()
+        .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;
 
     let ok = LocalAuthProvider::verify_password(&req.current_password, &hash)
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -260,16 +255,11 @@ pub async fn totp_verify(
         return Err(ApiError::Unauthorized("TOTP_NOT_ENABLED"));
     }
 
-    let row = sqlx::query!(
-        "SELECT u.email, a.username FROM users u
-         JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
-         WHERE u.id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::Unauthorized("INVALID_CREDENTIALS"))?;
+    let (email, username) =
+        seiran_common::repository::user::email_and_local_username(&state.db, user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::Unauthorized("INVALID_CREDENTIALS"))?;
 
     // ログインと同じ「試行種類数」ベースのブルートフォース対策をTOTPコード/リカバリー
     // コードにも適用する（issue #223: パラメータ共用）。
@@ -278,7 +268,7 @@ pub async fn totp_verify(
         &state,
         AttemptKind::Totp,
         &ip,
-        &row.username,
+        &username,
         &req.code,
         window_reset_at,
     )
@@ -291,7 +281,7 @@ pub async fn totp_verify(
 
     let verified = if is_totp_format {
         let secret = decrypt_secret(&state, &secret_encrypted)?;
-        totp_util::verify_code(&secret, &row.username, code_trimmed)
+        totp_util::verify_code(&secret, &username, code_trimmed)
     } else {
         // リカバリーコード照合: Argon2ハッシュは非決定的なため、未使用コードを
         // 全件取得して1件ずつ照合する（1ユーザー最大10件なのでコスト上問題ない）。
@@ -323,7 +313,7 @@ pub async fn totp_verify(
         return Err(ApiError::Unauthorized("TOTP_CODE_INVALID"));
     }
 
-    let auth = finish_login(&state, user_id, row.email, row.username).await?;
+    let auth = finish_login(&state, user_id, email, username).await?;
     Ok(Json(auth))
 }
 
@@ -344,8 +334,7 @@ pub async fn totp_request_disable_email(
         .verify_pending_totp_token(&req.pending_token)
         .map_err(|_| ApiError::Unauthorized("INVALID_PENDING_TOKEN"))?;
 
-    let email = sqlx::query_scalar!("SELECT email FROM users WHERE id = $1", user_id)
-        .fetch_optional(&state.db)
+    let email = seiran_common::repository::user::email_of(&state.db, user_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::BadRequest("USER_NOT_FOUND".to_owned()))?;

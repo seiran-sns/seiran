@@ -62,12 +62,8 @@ pub async fn webfinger_handler(
     };
     let username = username.as_str();
 
-    let exists = sqlx::query(
-        "SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' AND withdrawn_at IS NULL LIMIT 1",
-    )
-    .bind(username)
-    .fetch_optional(&state.db)
-    .await;
+    let exists =
+        seiran_common::repository::ap_public::live_local_actor_id(&state.db, username).await;
 
     match exists {
         Ok(Some(_)) => {}

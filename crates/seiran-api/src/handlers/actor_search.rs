@@ -19,7 +19,7 @@ pub struct ActorSearchQuery {
     pub limit: Option<i64>,
 }
 
-type ActorSearchRow = (i64, String, String, Option<String>, String, Option<String>);
+use seiran_common::repository::actor_search;
 
 /// `GET /api/actors/search?q=...&limit=...`
 /// ユーザー名・表示名の部分一致でDB上のアクターを検索する（リスト機能のメンバー追加
@@ -38,28 +38,7 @@ pub async fn search_actors(
     let limit = q.limit.unwrap_or(10).clamp(1, 30);
     let contains_pattern = format!("%{}%", escape_like(query));
 
-    let rows = sqlx::query_as::<_, ActorSearchRow>(
-        "SELECT a.id, a.username, a.domain, a.display_name, a.actor_type::text AS actor_type,
-                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url
-         FROM actors a
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         WHERE (a.actor_type != 'local' OR a.user_id IS NOT NULL)
-           AND a.withdrawn_at IS NULL
-           AND LOWER(
-             COALESCE(a.display_name, '')
-             || E'\\n@' || a.username
-             || CASE WHEN a.domain <> '' THEN '@' || a.domain ELSE '' END
-             || CASE WHEN a.actor_type = 'local'
-                     THEN E'\\n@' || a.username || '.' || a.domain ELSE '' END
-           ) LIKE LOWER($1) ESCAPE '\\'
-         ORDER BY a.username
-         LIMIT $2",
-    )
-    .bind(&contains_pattern)
-    .bind(limit)
-    .fetch_all(&state.db)
-    .await;
+    let rows = actor_search::search_contains(&state.db, &contains_pattern, limit).await;
 
     let rows = match rows {
         Ok(r) => r,
@@ -72,7 +51,14 @@ pub async fn search_actors(
     let out: Vec<serde_json::Value> = rows
         .into_iter()
         .map(
-            |(id, username, domain, display_name, actor_type, avatar_url)| {
+            |actor_search::ActorSearchRow {
+                 id,
+                 username,
+                 domain,
+                 display_name,
+                 actor_type,
+                 avatar_url,
+             }| {
                 // add_member/also-known-as にそのまま渡せるターゲット文字列を計算する。
                 // `resolve_and_upsert_target` は先頭の`@`を無条件で除去するため無くても
                 // 動作はするが、ハンドルの慣習的な表記（`@user`/`@user@domain`）に揃える。
@@ -110,34 +96,9 @@ pub async fn suggest_actors(
     let pattern = format!("{}%", escape_like(query));
     let local_bsky_pattern = format!("\n@{}%", escape_like(query));
 
-    let rows = sqlx::query_as::<_, ActorSearchRow>(
-        "SELECT a.id, a.username, a.domain, a.display_name, a.actor_type::text AS actor_type,
-                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url
-         FROM actors a
-         JOIN (
-           (SELECT id FROM actors
-            WHERE LOWER(username || CASE WHEN domain <> '' THEN '@' || domain ELSE '' END)
-                    LIKE LOWER($1) ESCAPE '\\'
-            LIMIT $3)
-           UNION
-           (SELECT id FROM actors
-            WHERE LOWER(CASE WHEN actor_type = 'local'
-                             THEN E'\\n@' || username || '.' || domain END)
-                    LIKE LOWER($2) ESCAPE '\\'
-            LIMIT $3)
-         ) candidate ON candidate.id = a.id
-         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
-         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         WHERE (a.actor_type != 'local' OR a.user_id IS NOT NULL)
-           AND a.withdrawn_at IS NULL
-         ORDER BY a.username
-         LIMIT $3",
-    )
-    .bind(&pattern)
-    .bind(&local_bsky_pattern)
-    .bind(limit)
-    .fetch_all(&state.db)
-    .await;
+    let rows =
+        actor_search::suggest_by_handle_prefix(&state.db, &pattern, &local_bsky_pattern, limit)
+            .await;
 
     let rows = match rows {
         Ok(rows) => rows,
@@ -151,7 +112,14 @@ pub async fn suggest_actors(
     let out: Vec<serde_json::Value> = rows
         .into_iter()
         .map(
-            |(id, username, domain, display_name, actor_type, avatar_url)| {
+            |actor_search::ActorSearchRow {
+                 id,
+                 username,
+                 domain,
+                 display_name,
+                 actor_type,
+                 avatar_url,
+             }| {
                 let target = suggestion_target(&actor_type, &username, &domain, &query_lower);
                 let avatar_url =
                     seiran_common::avatar::resolve_avatar_url(avatar_url, &actor_type, &domain, id);

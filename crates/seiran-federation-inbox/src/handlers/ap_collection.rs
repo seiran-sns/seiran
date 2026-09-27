@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use seiran_common::ap::plain_to_html;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use std::collections::HashMap;
 
 pub const AS_PUBLIC: &str = "https://www.w3.org/ns/activitystreams#Public";
@@ -34,38 +34,21 @@ pub async fn fetch_attachment_documents(
     if post_ids.is_empty() {
         return att_map;
     }
-    let att_rows = sqlx::query(
-        "SELECT pa.post_id, mf.storage_key, mf.mime_type, mf.width, mf.height, sp.public_url
-         FROM post_attachments pa
-         JOIN media_files mf ON mf.id = pa.media_file_id
-         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         WHERE pa.post_id = ANY($1)
-         ORDER BY pa.post_id, pa.position",
-    )
-    .bind(post_ids)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
-
-    for r in &att_rows {
-        let (Ok(pid), Ok(storage_key), Ok(mime_type), Ok(width), Ok(height), Ok(public_url)) = (
-            r.try_get::<i64, _>("post_id"),
-            r.try_get::<String, _>("storage_key"),
-            r.try_get::<String, _>("mime_type"),
-            r.try_get::<i32, _>("width"),
-            r.try_get::<i32, _>("height"),
-            r.try_get::<String, _>("public_url"),
-        ) else {
-            continue;
-        };
-        let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
-        att_map.entry(pid).or_default().push(serde_json::json!({
+    let rows = seiran_common::repository::note_extras::local_attachments_for_posts(db, post_ids)
+        .await
+        .unwrap_or_default();
+    for r in rows {
+        let mut doc = serde_json::json!({
             "type": "Document",
-            "mediaType": mime_type,
-            "url": url,
-            "width": width,
-            "height": height
-        }));
+            "mediaType": r.mime_type,
+            "url": r.url,
+        });
+        // 動画・音声は寸法を持たないことがある。
+        if let (Some(w), Some(h)) = (r.width, r.height) {
+            doc["width"] = w.into();
+            doc["height"] = h.into();
+        }
+        att_map.entry(r.post_id).or_default().push(doc);
     }
     att_map
 }

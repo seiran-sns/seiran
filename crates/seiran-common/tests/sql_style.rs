@@ -1,11 +1,11 @@
-//! SQL記述ルールの機械的検査（`CLAUDE.md`「SQL記述ルール」・`docs/database.md` 4節）。
+//! SQL記述ルールの機械的検査（`docs/coding_rules.md` 2節）。
 //!
-//! `x IN (SELECT ...)` / `x NOT IN (SELECT ...)` は使わず、`EXISTS` / `NOT EXISTS` の
-//! 相関サブクエリで書く。`NOT IN (SELECT ...)` はサブクエリ結果にNULLが1件でも含まれると
-//! 条件全体がUNKNOWN（WHERE句ではfalse）になり、実際に孤立メディアGCが一度も発動しない
-//! 不具合を起こした（2026-09-26）。`IN (SELECT ...)` 自体はNULLで壊れないが、`NOT` を
-//! 付け足すだけで同じ罠に落ちるため、形ごと禁止する。リテラル列挙（`IN ('a', 'b')`）と
-//! `= ANY($1)` は対象外。
+//! 1. `x IN (SELECT ...)` / `x NOT IN (SELECT ...)` を使わず `EXISTS` / `NOT EXISTS` で書く。
+//!    `NOT IN (SELECT ...)` はサブクエリ結果に NULL が1件でもあると条件全体が UNKNOWN
+//!    （WHERE では偽）になる。`IN (SELECT ...)` は `NOT` を足すだけで同じ罠に落ちるので形ごと
+//!    禁止する。リテラル列挙（`IN ('a', 'b')`）と `= ANY($1)` は対象外。
+//! 2. SQL は Repository 層（`seiran-common/src/repository/`）に置き、ハンドラ・ジョブ・
+//!    firehose には書かない。
 //!
 //! ワークスペースの全 `.rs`（コメント行を除く）と全マイグレーション（`--` コメントを除く）を走査する。
 
@@ -117,4 +117,69 @@ fn detects_in_subquery_variants() {
     assert!(!contains_in_subquery("WHERE ID IN ('A', 'B')"));
     assert!(!contains_in_subquery("FROM A JOIN (SELECT 1) B"));
     assert!(!contains_in_subquery("WHERE ID = ANY($1)"));
+}
+
+/// SQL を書いてはいけない層（ワークスペースルートからの相対パス）。
+const NO_SQL_DIRS: &[&str] = &[
+    "crates/seiran-api/src",
+    "crates/seiran-federation-inbox/src",
+    "crates/seiran-common/src/jobs",
+    "crates/seiran-atp-repo/src",
+];
+
+/// `sqlx::query*` の呼び出しと、クエリを組み立て・読むための型（`QueryBuilder`・`Row`）の使用。
+/// `PgPool` を受け渡すだけなら違反にしない。
+fn contains_raw_sql(code: &str) -> bool {
+    let imports_query_items = code.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("use sqlx::")
+            && ["query", "QueryBuilder", "Row"]
+                .iter()
+                .any(|item| line.contains(item))
+    });
+    imports_query_items
+        || ["sqlx::query", "sqlx::QueryBuilder", "sqlx::Row"]
+            .iter()
+            .any(|p| code.contains(p))
+}
+
+#[test]
+fn no_sql_outside_repository() {
+    let root = workspace_root();
+    let mut violations = Vec::new();
+    for dir in NO_SQL_DIRS {
+        let mut files = Vec::new();
+        collect_files(&root.join(dir), &["rs"], &mut files);
+        assert!(!files.is_empty(), "{dir} に .rs が見つからない");
+        for path in files {
+            let content = std::fs::read_to_string(&path).unwrap();
+            let code: String = content
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if contains_raw_sql(&code) {
+                violations.push(path);
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "ハンドラ・ジョブ・firehose に SQL を書かず、seiran-common の repository/ へ移してください:\n{}",
+        violations
+            .iter()
+            .map(|p| format!("  {}", p.display()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn detects_raw_sql_usage() {
+    assert!(contains_raw_sql("sqlx::query(\"SELECT 1\")"));
+    assert!(contains_raw_sql("use sqlx::{QueryBuilder, Row};"));
+    assert!(contains_raw_sql("r.try_get::<i64, _>(\"id\") // sqlx::Row"));
+    assert!(!contains_raw_sql(
+        "use sqlx::PgPool;\nfn f(pool: &sqlx::PgPool) {}"
+    ));
 }

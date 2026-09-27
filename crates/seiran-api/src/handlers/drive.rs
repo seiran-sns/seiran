@@ -348,13 +348,13 @@ async fn create_video_or_audio_file(
         let existing_is_audio = existing.mime_type.starts_with("audio/");
         if (existing_is_video || existing_is_audio) && deliver_to_bsky {
             if let Some(actor) = actor {
-                let status: Option<String> =
-                    sqlx::query_scalar("SELECT bsky_video_status FROM media_files WHERE id = $1")
-                        .bind(existing.id)
-                        .fetch_optional(&state.db)
-                        .await
-                        .ok()
-                        .flatten();
+                let status = seiran_common::repository::media_file::bsky_video_status(
+                    &state.db,
+                    existing.id,
+                )
+                .await
+                .ok()
+                .flatten();
                 if !matches!(status.as_deref(), Some("pending") | Some("ready")) {
                     let bytes_for_pipeline = if existing_is_audio {
                         convert_audio_to_gray_video(
@@ -640,15 +640,18 @@ async fn submit_to_bsky_video_pipeline(
         );
     }
 
-    if let Err(e) = sqlx::query(
-        "UPDATE media_files SET bsky_video_job_id = $1, bsky_video_status = 'pending' WHERE id = $2",
+    if let Err(e) = seiran_common::repository::media_file::mark_bsky_video_pending(
+        &state.db,
+        media_file_id,
+        &job_id,
     )
-    .bind(&job_id)
-    .bind(media_file_id)
-    .execute(&state.db)
     .await
     {
-        tracing::error!("[BskyVideo] DB更新失敗 media_file_id={}: {}", media_file_id, e);
+        tracing::error!(
+            "[BskyVideo] DB更新失敗 media_file_id={}: {}",
+            media_file_id,
+            e
+        );
         return;
     }
 
@@ -666,9 +669,7 @@ async fn submit_to_bsky_video_pipeline(
 }
 
 async fn mark_bsky_video_failed(state: &AppState, media_file_id: i64) {
-    let _ = sqlx::query("UPDATE media_files SET bsky_video_status = 'failed' WHERE id = $1")
-        .bind(media_file_id)
-        .execute(&state.db)
+    let _ = seiran_common::repository::media_file::mark_bsky_video_failed(&state.db, media_file_id)
         .await;
 }
 

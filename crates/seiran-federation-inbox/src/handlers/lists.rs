@@ -4,7 +4,6 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use sqlx::Row;
 use std::sync::Arc;
 
 use crate::AppState;
@@ -18,15 +17,10 @@ pub async fn lists_collection_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let actor_row =
-        sqlx::query(
-            "SELECT id FROM actors WHERE username = $1 AND actor_type = 'local' AND withdrawn_at IS NULL LIMIT 1",
-        )
-            .bind(&username)
-            .fetch_optional(&state.db)
-            .await;
+        seiran_common::repository::ap_public::live_local_actor_id(&state.db, &username).await;
 
     let actor_id: i64 = match actor_row {
-        Ok(Some(r)) => r.try_get("id").unwrap_or(0),
+        Ok(Some(id)) => id,
         Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
         Err(e) => {
             tracing::error!("[Lists] DB エラー: {}", e);
@@ -34,10 +28,7 @@ pub async fn lists_collection_handler(
         }
     };
 
-    let rows = sqlx::query("SELECT id FROM lists WHERE owner_actor_id = $1 AND is_public = true ORDER BY created_at ASC")
-        .bind(actor_id)
-        .fetch_all(&state.db)
-        .await;
+    let rows = seiran_common::repository::ap_public::public_list_ids(&state.db, actor_id).await;
 
     let rows = match rows {
         Ok(r) => r,
@@ -51,7 +42,6 @@ pub async fn lists_collection_handler(
     let lists_uri = format!("{}/users/{}/lists", base, username);
     let ordered_items: Vec<String> = rows
         .iter()
-        .filter_map(|r| r.try_get::<i64, _>("id").ok())
         .map(|id| format!("{}/{}", lists_uri, id))
         .collect();
 
@@ -86,36 +76,21 @@ pub async fn list_detail_handler(
         return (StatusCode::NOT_FOUND, "").into_response();
     };
 
-    let row = sqlx::query(
-        "SELECT l.id FROM lists l
-         JOIN actors a ON a.id = l.owner_actor_id
-         WHERE l.id = $1 AND a.username = $2
-           AND a.actor_type = 'local' AND l.is_public = true",
-    )
-    .bind(list_id)
-    .bind(&username)
-    .fetch_optional(&state.db)
-    .await;
+    let row =
+        seiran_common::repository::ap_public::is_public_list_of(&state.db, list_id, &username)
+            .await;
 
     match row {
-        Ok(Some(_)) => {}
-        Ok(None) => return (StatusCode::NOT_FOUND, "").into_response(),
+        Ok(true) => {}
+        Ok(false) => return (StatusCode::NOT_FOUND, "").into_response(),
         Err(e) => {
             tracing::error!("[Lists] DB エラー: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "DB エラー").into_response();
         }
     }
 
-    let member_rows = sqlx::query(
-        "SELECT a.actor_type::text AS actor_type, a.username, a.domain, a.ap_uri
-         FROM list_members lm
-         JOIN actors a ON a.id = lm.actor_id
-         WHERE lm.list_id = $1 AND a.actor_type <> 'bsky'
-         ORDER BY lm.added_at DESC",
-    )
-    .bind(list_id)
-    .fetch_all(&state.db)
-    .await;
+    let member_rows =
+        seiran_common::repository::ap_public::public_list_members(&state.db, list_id).await;
 
     let member_rows = match member_rows {
         Ok(r) => r,
@@ -128,13 +103,11 @@ pub async fn list_detail_handler(
     let base = format!("https://{}", state.local_domain);
     let ordered_items: Vec<String> = member_rows
         .iter()
-        .filter_map(|r| {
-            let actor_type: String = r.try_get("actor_type").ok()?;
+        .filter_map(|(actor_type, username, ap_uri)| {
             if actor_type == "local" {
-                let username: String = r.try_get("username").ok()?;
                 Some(format!("{}/users/{}", base, username))
             } else {
-                r.try_get::<Option<String>, _>("ap_uri").ok().flatten()
+                ap_uri.clone()
             }
         })
         .collect();
