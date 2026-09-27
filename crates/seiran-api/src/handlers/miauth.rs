@@ -89,7 +89,7 @@ pub struct CheckResponse {
 /// Intent ディスパッチであってネットワーク到達性の懸念（SSRF・内部ネットワークへの誘導）が
 /// 無いため許可する。`https` はホスト検証（localhost・プライベート IP を拒否）した上で許可、
 /// `http`（平文でセッション ID が漏れる）とスクリプト実行系スキームは明示的に拒否する。
-fn is_valid_callback(url: &str) -> bool {
+pub(crate) fn is_valid_callback(url: &str) -> bool {
     let Ok(parsed) = url::Url::parse(url) else {
         return false;
     };
@@ -265,10 +265,25 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
     let actor_id = session.user_id.unwrap();
     let username = session.username.unwrap();
 
-    // `misskey_dart` の `UserDetailedNotMe.fromJson` は id/username/isBot/isCat/createdAt/
-    // isLocked/isSilenced/isSuspended/followersCount/followingCount/notesCount を
-    // non-nullable 必須として要求する（欠けると Dart 側で TypeError → 未処理例外でフリーズ）。
-    // フォロー数等は今回正確な集計をせず安全な既定値（0/false）で埋める。
+    let user = build_check_response_user(state, actor_id, username).await;
+    Json(CheckResponse {
+        ok: true,
+        token,
+        user,
+    })
+    .into_response()
+}
+
+/// `misskey_dart` の `UserDetailedNotMe.fromJson`（Aria 等が使用）は id/username/isBot/isCat/
+/// createdAt/isLocked/isSilenced/isSuspended/followersCount/followingCount/notesCount を
+/// non-nullable 必須として要求する（欠けると Dart 側で TypeError → 未処理例外でフリーズ）。
+/// フォロー数等は今回正確な集計をせず安全な既定値（0/false）で埋める。呼び出し元は常に
+/// ローカルユーザー（`actor_id` はローカル actor.id）の認証情報として使う。
+pub(crate) async fn build_check_response_user(
+    state: &AppState,
+    actor_id: i64,
+    username: String,
+) -> CheckResponseUser {
     let (created_at, display_name, avatar_url) =
         seiran_common::repository::actor::media_and_counts_for_actors(&state.db, &[actor_id])
             .await
@@ -276,7 +291,6 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
             .and_then(|rows| rows.into_iter().next())
             .map(|r| (r.created_at, r.display_name, r.avatar_url))
             .unwrap_or_else(|| (chrono::Utc::now(), None, None));
-    // miauth は常にローカルユーザーの認証情報を返す（session.user_id はローカル actor.id）。
     let avatar_url = seiran_common::avatar::resolve_avatar_url(
         avatar_url,
         "local",
@@ -284,27 +298,22 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
         actor_id,
     );
 
-    let res = CheckResponse {
-        ok: true,
-        token,
-        user: CheckResponseUser {
-            id: actor_id.to_string(),
-            name: display_name,
-            username,
-            host: None,
-            avatar_url,
-            is_bot: false,
-            is_cat: false,
-            is_locked: false,
-            is_silenced: false,
-            is_suspended: false,
-            created_at: created_at.to_rfc3339(),
-            followers_count: 0,
-            following_count: 0,
-            notes_count: 0,
-        },
-    };
-    Json(res).into_response()
+    CheckResponseUser {
+        id: actor_id.to_string(),
+        name: display_name,
+        username,
+        host: None,
+        avatar_url,
+        is_bot: false,
+        is_cat: false,
+        is_locked: false,
+        is_silenced: false,
+        is_suspended: false,
+        created_at: created_at.to_rfc3339(),
+        followers_count: 0,
+        following_count: 0,
+        notes_count: 0,
+    }
 }
 
 #[cfg(test)]

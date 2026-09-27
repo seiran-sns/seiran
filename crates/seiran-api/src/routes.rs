@@ -758,6 +758,29 @@ fn misskey_routes() -> Router<AppState> {
             post(handlers::miauth::miauth_check_by_path),
         )
         .route("/api/miauth/check", post(handlers::miauth::miauth_check))
+        // Misskey 旧来の app 認証フロー（app/create → auth/session/generate →
+        // auth/session/userkey）。SocialHub Web 等、MiAuth 非対応クライアント向け。
+        .route(
+            "/api/app/create",
+            post(handlers::misskey::app_auth::app_create),
+        )
+        .route(
+            "/api/auth/session/generate",
+            post(handlers::misskey::app_auth::session_generate),
+        )
+        .route(
+            "/api/auth/session/userkey",
+            post(handlers::misskey::app_auth::session_userkey),
+        )
+        .route("/auth/:token", get(handlers::misskey::app_auth::auth_page))
+        .route(
+            "/api/auth-sessions/:token",
+            get(handlers::misskey::app_auth::session_info),
+        )
+        .route(
+            "/api/auth-sessions/:token/authorize",
+            post(handlers::misskey::app_auth::session_authorize),
+        )
 }
 
 /// AT Protocol XRPC・DID 解決。

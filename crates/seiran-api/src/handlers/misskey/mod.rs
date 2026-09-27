@@ -11,6 +11,7 @@
 //! Content）に整形する。読み取り系（ノート・ユーザー）は Note/UserLite が別スキーマのため、
 //! リポジトリ層から直接組み立てる。
 
+pub mod app_auth;
 pub mod endpoints;
 pub mod types;
 

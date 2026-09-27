@@ -49,52 +49,64 @@ pub async fn extract_auth_allow_suspended(
         .and_then(|s| s.strip_prefix("Bearer "))
         .ok_or(ApiError::Unauthorized("Authorization ヘッダーが必要です"))?;
 
-    // ログイントークンは無期限のため `exp` はここでは検証しない。この仕組み導入前に
-    // 発行された個体で `exp`（旧仕様の7日）が埋め込まれていても無視する。
-    // 失効は明示的な無効化（MiAuth発行分の`app_tokens.revoked_at`）・一括失効
-    // （`users.token_valid_after`、下記）でのみ行う。
-    let verified = auth
-        .verify_token_ignoring_exp(bearer)
-        .map_err(|_| ApiError::Unauthorized("トークンが無効です"))?;
+    let user = match auth.verify_token_ignoring_exp(bearer) {
+        Ok(verified) => {
+            // #60: MiAuth 発行分は app_tokens に記録され、無効化されていれば拒否する。
+            // 記録が無ければ自社ログイン等の管理対象外トークンなのでそのまま先へ進める。
+            if app_tokens
+                .status(verified.jti)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?
+                == Some(true)
+            {
+                return Err(ApiError::Unauthorized("トークンが無効化されています"));
+            }
 
-    // #60: MiAuth 発行分は app_tokens に記録され、無効化されていれば拒否する。
-    // 記録が無ければ自社ログイン等の管理対象外トークンなのでそのまま先へ進める。
-    if app_tokens
-        .status(verified.jti)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        == Some(true)
-    {
-        return Err(ApiError::Unauthorized("トークンが無効化されています"));
-    }
+            // パスワード変更・リセットより前に発行されたトークンを一括拒否する
+            // （token_valid_after が未設定なら制約なし）。
+            if let Some(valid_after) = users
+                .find_token_valid_after(verified.user_id)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?
+            {
+                if (verified.iat as i64) < valid_after.timestamp() {
+                    return Err(ApiError::Unauthorized(
+                        "パスワード変更により無効化されたトークンです",
+                    ));
+                }
+            }
 
-    // パスワード変更・リセットより前に発行されたトークンを一括拒否する
-    // （token_valid_after が未設定なら制約なし）。
-    if let Some(valid_after) = users
-        .find_token_valid_after(verified.user_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-    {
-        if (verified.iat as i64) < valid_after.timestamp() {
-            return Err(ApiError::Unauthorized(
-                "パスワード変更により無効化されたトークンです",
-            ));
+            AuthUser {
+                user_id: verified.user_id,
+                email: verified.email,
+            }
         }
-    }
+        // Misskey 旧来 app 認証フロー（`handlers::misskey::app_auth`）で発行したトークン。
+        // このクライアントは生のアクセストークンではなく `sha256(accessToken + appSecret)`
+        // を送ってくる（本家 Misskey の `AuthenticateService` も同じ形式を `hash` 列との
+        // 照合で受け付ける）ため、JWT として検証できなかった値はこの形式として引き当てる。
+        // 発行時刻を持たないため token_valid_after（パスワード変更時の一括失効）は
+        // 適用できず、`app_tokens.revoked_at` による明示的な無効化のみが失効手段になる。
+        Err(_) => {
+            let (user_id, email) = app_tokens
+                .find_user_by_misskey_hash(bearer)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?
+                .ok_or(ApiError::Unauthorized("トークンが無効です"))?;
+            AuthUser { user_id, email }
+        }
+    };
 
     // 退会済みアカウントは、退会前に発行済みのトークンであっても以降の認証を拒否する（#242）。
     if users
-        .is_withdrawn_by_user_id(verified.user_id)
+        .is_withdrawn_by_user_id(user.user_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
     {
         return Err(ApiError::Unauthorized("退会済みのアカウントです"));
     }
 
-    Ok(AuthUser {
-        user_id: verified.user_id,
-        email: verified.email,
-    })
+    Ok(user)
 }
 
 /// JWT 検証 + role が `allowed` のいずれかであることをチェックする。

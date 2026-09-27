@@ -21,7 +21,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use seiran_common::repository::oauth::{self, NewAuthorizationCode, NewOAuthApp, OAuthAppRow};
+use seiran_common::repository::oauth::{
+    self, random_token, sha256_hex, NewAuthorizationCode, NewOAuthApp, OAuthAppRow,
+};
 
 use crate::error::ApiError;
 use crate::middleware::{extract_auth, AuthedUser};
@@ -38,19 +40,6 @@ const CODE_TTL_MINUTES: i64 = 10;
 
 fn internal(e: impl std::fmt::Display) -> ApiError {
     ApiError::Internal(e.to_string())
-}
-
-fn sha256_hex(s: &str) -> String {
-    hex::encode(Sha256::digest(s.as_bytes()))
-}
-
-/// 推測不能なランダム文字列（UUIDv4 2つ分、244ビット）。
-fn random_token() -> String {
-    format!(
-        "{}{}",
-        uuid::Uuid::new_v4().simple(),
-        uuid::Uuid::new_v4().simple()
-    )
 }
 
 /// OAuth のエラー応答（RFC 6749 5.2 の `{"error", "error_description"}`）。
@@ -150,6 +139,7 @@ pub async fn create_app(
             redirect_uris: &redirect_uris,
             scopes: &scopes,
             website: website.as_deref(),
+            description: None,
         },
     )
     .await
@@ -453,7 +443,7 @@ pub async fn token(
         Err(e) => return internal(e).into_response(),
     };
     if let Err(e) =
-        oauth::insert_app_token(&state.db, jti, consumed.user_id, &app.name, app.id).await
+        oauth::insert_app_token(&state.db, jti, consumed.user_id, &app.name, app.id, None).await
     {
         return internal(e).into_response();
     }

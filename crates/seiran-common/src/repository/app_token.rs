@@ -30,6 +30,14 @@ pub trait AppTokenRepository: Send + Sync {
     /// `exp` が過ぎていても無効化されていなければ有効として扱うため（`extract_auth`側で
     /// この結果を見て exp 検証をスキップするかどうかを分岐する）。
     async fn status(&self, id: Uuid) -> Result<Option<bool>, sqlx::Error>;
+
+    /// `misskey_hash`（`sha256(accessToken + appSecret)`、`repository::oauth::insert_app_token`
+    /// が保存する）から本人を引く。JWT として検証できなかった受信値のフォールバック。
+    /// 無効化済みの行は対象外（`None`）。
+    async fn find_user_by_misskey_hash(
+        &self,
+        misskey_hash: &str,
+    ) -> Result<Option<(i64, String)>, sqlx::Error>;
 }
 
 pub struct PgAppTokenRepository {
@@ -84,5 +92,19 @@ impl AppTokenRepository for PgAppTokenRepository {
                 .fetch_optional(&self.pool)
                 .await?;
         Ok(row.map(|(revoked,)| revoked))
+    }
+
+    async fn find_user_by_misskey_hash(
+        &self,
+        misskey_hash: &str,
+    ) -> Result<Option<(i64, String)>, sqlx::Error> {
+        let row: Option<(i64, String)> = sqlx::query_as(
+            "SELECT t.user_id, u.email FROM app_tokens t JOIN users u ON u.id = t.user_id
+             WHERE t.misskey_hash = $1 AND t.revoked_at IS NULL",
+        )
+        .bind(misskey_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
     }
 }

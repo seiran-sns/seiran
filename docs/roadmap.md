@@ -131,6 +131,7 @@
 ### サードパーティクライアント互換
 
 - [x] **Misskey互換API（Aria 等）** — `visibility` 語彙のマッピング、ストリーミングのチャンネル購読を含む。`docs/protocols.md` 7節
+- [x] **Misskey旧来 app 認証フロー（SocialHub Web 等）** — `app/create` → `auth/session/generate` → `auth/session/userkey`。`oauth_apps` を Mastodon 互換 OAuth と共用。`docs/protocols.md` 7節
 - [x] **Mastodon互換API（Tusky・Ice Cubes・Elk 等）** — OAuth（PKCE 対応）、タイムライン・ハッシュタグ・検索・投稿/アカウント詳細の閲覧、投稿・返信・引用・お気に入り・リポスト・フォロー・メディア添付、ブロック/ミュート・プロフィール編集・投票・ピン留め・ブックマーク、ストリーミング（投稿の編集は Bluesky ポストとの整合のため対応しない）。`docs/protocols.md` 7.1節
 
 ### テスト・QA

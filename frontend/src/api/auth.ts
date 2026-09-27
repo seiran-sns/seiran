@@ -182,3 +182,28 @@ export const miauth = {
     );
   },
 };
+
+/** Misskey 旧来の app 認証フロー（app/create 等）の承認確認画面が使う参照情報。 */
+export interface MisskeyAuthSessionInfo {
+  name: string;
+  description: string | null;
+  permission: string[];
+  callbackUrl: string | null;
+}
+
+export const misskeyAppAuth = {
+  /** 承認確認画面に出すアプリ名（URL のクエリではなく登録内容から引く）。 */
+  sessionInfo(token: string) {
+    return request<MisskeyAuthSessionInfo>(
+      "GET",
+      `/auth-sessions/${encodeURIComponent(token)}`,
+    );
+  },
+  /** 承認確認画面（`/misskey-connect/:token`）で「承認する」を押した時に呼ぶ。 */
+  authorize(token: string) {
+    return request<{ ok: boolean }>(
+      "POST",
+      `/auth-sessions/${encodeURIComponent(token)}/authorize`,
+    );
+  },
+};
