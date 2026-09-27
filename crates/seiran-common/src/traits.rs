@@ -206,7 +206,7 @@ pub enum Job {
     /// Bsky ATP コミットを、動画パイプライン結合（`media_files.bsky_video_status`）が確定状態
     /// （`ready`/`failed`）になるまで遅延する。投稿作成時点でまだトランスコード中の動画に
     /// 対して即座に `commit_post` すると、その時点の状態でしか判定できず常に `external`
-    /// フォールバックになってしまうため（2026-07-17 マイケル指摘・実機再現確認）。
+    /// フォールバックになってしまうため。
     /// `pending_media_file_id` は選択が解決した先の`media_files.id`1件（`resolve_bsky_embed`の
     /// 優先順位判定結果を `posts.pending_bsky_media_file_id` へ投稿作成時点で永続化した値を
     /// そのまま渡す）。本文・投稿時刻・リプライ先at_uri/at_cidはジョブのペイロードには
@@ -253,7 +253,7 @@ pub enum Job {
     RemoteFollowListSync { actor_id: i64, direction: String },
 
     /// リモート followers/following 一覧中、ローカル `actors` に未登録の actor URI を
-    /// 解決してプロフィールを upsert する（#68 マイケル指摘: 未知アクターもジョブ化）。
+    /// 解決してプロフィールを upsert する（#68）。
     /// フォロー関係は作らず、表示のリッチ化（アバター・表示名等）のみが目的。
     RemoteActorResolve { uri: String },
 
@@ -275,8 +275,7 @@ pub enum Job {
     /// DB登録済みアクターのプロフィール表示のたびに積まれ、表示自体は常にDB上の
     /// 既存`pinned_posts`をそのまま返す（「表示時再検証」パターン、`AlsoKnownAsVerify`と同様）。
     /// Authorized Fetch（secure mode）を要求するリモートだと同期フェッチが数秒かかることが
-    /// あり、プロフィール表示のたびにブロッキングで待つのは体感速度を損なうため（2026-08-31
-    /// マイケル指摘）、ジョブへ切り出した。初回アクセス時（DB未登録アクターの初回upsert
+    /// あり、プロフィール表示のたびにブロッキングで待つのは体感速度を損なうため、ジョブにしている。初回アクセス時（DB未登録アクターの初回upsert
     /// 直後）だけは`handlers::users::fetch_remote_profile`が同期で取得する。
     RemoteFeaturedSync { actor_id: i64 },
 

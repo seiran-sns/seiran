@@ -275,10 +275,10 @@ pub(super) async fn fan_out_activity(
 
     let body_str = serde_json::to_string(activity).map_err(ApError::Json)?;
 
-    // 1件のポストにフォロワーが多数（数十〜数百inbox）いる場合、逐次POSTだと1件ずつ
-    // 配送していた（応答の遅い相手が混ざると配送全体が線形に伸びる）。Workerジョブ実行の
+    // 1件のポストにフォロワーが多数（数十〜数百inbox）いる場合、逐次POSTだと応答の遅い
+    // 相手が混ざるだけで配送全体が線形に伸びる。Workerジョブ実行の
     // 枠内（追加のtokio::spawnはしない）で`buffer_unordered`により同時ポーリングし、
-    // 応答の遅い宛先が他の宛先をブロックしないようにする（docs/code_audit_2026-08-05.md P-3）。
+    // 応答の遅い宛先が他の宛先をブロックしないようにする。
     const MAX_CONCURRENT_DELIVERIES: usize = 8;
     let results: Vec<Result<(), ApError>> = stream::iter(inboxes.to_vec())
         .map(|inbox| {

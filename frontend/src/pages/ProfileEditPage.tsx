@@ -103,7 +103,7 @@ export default function ProfileEditPage() {
   // ボタン型は button（submit ではない）: この節はプロフィール編集の外側 <form> の内側に
   // あるため、ここに <form> を入れ子にすると（HTML仕様上不正）ブラウザのネイティブ送信
   // （ページリロード）が発火して外側の onSubmit を巻き込み、意図しない挙動になる
-  // （実際に発生した不具合: 「追加」を押しても何も起きずページがリロードされたように見える）。
+  // （「追加」を押してもページがリロードされたように見えるだけになる）。
   async function addAka() {
     const target = akaTarget.trim();
     if (!target) return;

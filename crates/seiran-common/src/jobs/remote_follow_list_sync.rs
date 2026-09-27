@@ -110,7 +110,7 @@ pub async fn handle(actor_id: i64, direction: String, ctx: Arc<JobContext>) -> R
 }
 
 /// 取得した actor URI のうち、ローカル `actors` に未登録のものについて `RemoteActorResolve`
-/// ジョブを積む（マイケル指摘 #68: 未知アクターの取得もWorkerジョブキューに積む）。
+/// ジョブを積む（#68）。
 async fn enqueue_unknown_actor_resolves(
     pool: &sqlx::PgPool,
     queue: &Arc<dyn crate::traits::JobQueue>,
@@ -128,7 +128,7 @@ async fn enqueue_unknown_actor_resolves(
         }
         // クールダウン中（直近解決を試みたが未解決のまま等）ならスキップする。
         // フォロー数の多いアクター1件でも数百〜数千URIの束になるため、ここに歯止めが
-        // 無いと#68の趣旨（表示のリッチ化）に見合わない負荷になる（2026-09-06実機確認）。
+        // 無いと#68の趣旨（表示のリッチ化）に見合わない負荷になる。
         if !crate::jobs::remote_actor_resolve::should_enqueue(uri) {
             continue;
         }

@@ -35,7 +35,7 @@ interface ComposerEditorProps {
   placeholder: string;
   autoFocus?: boolean;
   /** Bsky配送オンの間はカスタム絵文字ショートコードを画像展開せず、警告色のテキストの
-   * ままにする（Bsky側では本文内カスタム絵文字を埋め込めないため、マイケル指示）。 */
+   * ままにする（Bsky側では本文内カスタム絵文字を埋め込めないため）。 */
   federateToBsky?: boolean;
 }
 
@@ -50,8 +50,8 @@ const DECORATION_RE = new RegExp(
 /**
  * 絵文字・ユーザーIDピッカー（`PostComposer`）から本文へ`text`を挿入する際の、挿入後の
  * 本文全体とキャレット位置を計算する（DOM操作を含まない純粋関数、テスト用にexport）。
- * `caret`が既存のショートコード/メンションの内側にある場合は、その直後へ挿入する
- * （マイケル指示）。挿入直後に半角英数字が続くとショートコード/メンションとして認識
+ * `caret`が既存のショートコード/メンションの内側にある場合は、その直後へ挿入する。
+ * 挿入直後に半角英数字が続くとショートコード/メンションとして認識
  * されなくなる（`DECORATION_RE`の右端境界と同じ規則）ため、その場合は半角スペースを
  * 1つ追加で挿入する。
  */
@@ -464,7 +464,7 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
         if (emoji) {
           if (federateToBsky) {
             // Bskyはカスタム絵文字を画像展開できないため、画像化せずショートコードの
-            // まま警告色で表示する（マイケル指示）。編集可能なテキストとして扱うため
+            // まま警告色で表示する。編集可能なテキストとして扱うため
             // mentionKnown/mentionUnknown同様contenteditable制御・data-valueは付けない。
             return `<span class="${styles.emojiBskyWarn}" title="${escapeHtml(part)}">${escapeHtml(part)}</span>`;
           }

@@ -36,8 +36,7 @@ test("投稿ダイアログを閉じると書きかけがホーム上部フォ�
 });
 
 test("投稿直後、リロードなしでも投稿者情報（表示名）がタイムラインに反映される", async ({ page, request }) => {
-  // POST /api/notes/create のレスポンス組み立てが display_name/avatar_url を常にNoneで
-  // 固定していたため、投稿直後だけプロフィール情報が空になる不具合の回帰テスト
+  // POST /api/notes/create のレスポンスにも display_name/avatar_url が入ること
   // （crates/seiran-api/src/handlers/notes/mod.rs の create_regular_post/create_repost）。
   const user = await registerUserViaApi(request, "e2epostname");
   const displayName = `E2E投稿者名${Date.now()}`;
@@ -56,6 +55,6 @@ test("投稿直後、リロードなしでも投稿者情報（表示名）が�
 
   const note = page.locator("article", { hasText: text });
   await expect(note).toBeVisible({ timeout: 15_000 });
-  // リロードせずに表示名が出ていること（バグ時はusernameへフォールバックしてしまう）。
+  // リロードせずに表示名が出ていること（欠けるとusernameへフォールバックしてしまう）。
   await expect(note.getByText(displayName)).toBeVisible();
 });

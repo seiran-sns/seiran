@@ -122,8 +122,8 @@ pub async fn resolve_service_endpoint(
 /// は`start`時点でハンドル解決した「本人確認済みのPDS A」であり、後続のジョブ実行時に
 /// `resolve_service_endpoint(did, ...)`でDID文書から再導出すると、既に一部のPLC
 /// オペレーションが成功していた場合（`submitPlcOperation`は成功したが後続のDB確定が
-/// 失敗した等）に**別のサーバー（移行先のseiran自身等）を指してしまう**という実害が
-/// 発生する（実機で発見）。移行元セッション（`access_jwt`等）はPDS Aに対してのみ有効なため、
+/// 失敗した等）に**別のサーバー（移行先のseiran自身等）を指してしまう**。
+/// 移行元セッション（`access_jwt`等）はPDS Aに対してのみ有効なため、
 /// 常に`start`時点で確定した文字列をそのまま使い、IP検証のみ都度やり直すのが正しい。
 pub async fn resolve_stored_endpoint(
     endpoint_url: &str,
@@ -141,8 +141,7 @@ pub async fn resolve_stored_endpoint(
 ///
 /// [SEC-3] 未認証の受信リクエスト（AP/AT署名検証）からも呼ばれる経路のため、
 /// `fetch_raw_did_document`のSSRF対策（private/loopback/link-local拒否・
-/// DNS rebinding対策）を必ず経由する。以前は独自に`reqwest::Client`で直接
-/// フェッチしており、この経路だけガードが掛かっていなかった。
+/// DNS rebinding対策）を必ず経由する。
 pub async fn resolve_atproto_verification_key(
     did: &str,
 ) -> Result<p256::ecdsa::VerifyingKey, DidResolveError> {

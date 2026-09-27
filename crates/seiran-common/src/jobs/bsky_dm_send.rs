@@ -2,8 +2,7 @@
 //!
 //! DM（`visibility='direct'`）投稿の宛先にBskyアクターが含まれる場合、
 //! `chat.bsky.convo.sendMessage` で実際にBluesky公式chatサービスへメッセージを送る。
-//! 認証は自己署名サービス認証JWT（`docs/skill_atp_rust_programming.md` §17、
-//! 2026-07-20実機疎通確認済み）。`aud`はfragment無しの`did:web:api.bsky.chat`を使うこと
+//! 認証は自己署名サービス認証JWT（`docs/skill_atp_rust_programming.md` §17）。`aud`はfragment無しの`did:web:api.bsky.chat`を使うこと
 //! （fragment込みだと`BadJwtAudience`で拒否される）。
 
 use std::sync::Arc;

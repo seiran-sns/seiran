@@ -446,7 +446,7 @@ pub(super) fn reaction_activity_type(content: &str) -> &'static str {
 /// `tag[].id` には絵文字の canonical URI（`{local_domain}/emojis/{shortcode}`）を付与する。
 /// kmyblue（Mastodon系フォーク）は `ActivityPub::Parser::CustomEmojiParser#uri`（= `tag.id`）を
 /// `URI.split` に通してドメイン判定するため、`id` が無いと例外で絵文字リアクション処理全体が
-/// 失敗し、Unicode絵文字は届くのにカスタム絵文字だけ届かない不具合になる（#176）。
+/// 失敗し、Unicode絵文字は届くのにカスタム絵文字だけ届かなくなる（#176）。
 pub(crate) fn build_reaction_object(
     activity_type: &str,
     id: &str,
@@ -599,8 +599,7 @@ pub async fn fetch_post_activity_basis(
 /// `qualified_body`は`basis.body`（DBの生プレーンテキスト）ではなく、`html_and_tags_for_body`
 /// が返す変換済み平文（ローカルメンションが`@user@local_domain`へ完全修飾済み）を渡すこと。
 /// 生の`basis.body`をそのまま使うと、ドメイン省略の短縮メンション（`@user`）が受信側の他
-/// seiranサーバーへそのまま持ち込まれ、別ユーザーへのメンションと誤認されるバグになる
-/// （実地検証で発覚、2026-09-06。呼び出し元は必ず`convert_mentions_for_ap`済みのテキストを渡す）。
+/// seiranサーバーへそのまま持ち込まれ、別ユーザーへのメンションと誤認される。
 pub async fn build_seiran_post_for_basis(
     db: &PgPool,
     post_id: i64,
@@ -663,7 +662,7 @@ pub fn append_emoji_tags(
 /// 戻り値の4つ目（`converted`）は、ローカルメンションを完全修飾形（`@user@local_domain`）へ
 /// 変換済みの平文。`seiranPost.body`（#237）にはこちらを使うこと——DBの生`posts.body`を
 /// そのまま使うと、ドメイン省略の短縮メンション（`@user`）が受信側seiranにそのまま持ち込まれ、
-/// 受信側では別ユーザーへのメンションと誤認されうる（実地検証で発覚、2026-09-06）。
+/// 受信側では別ユーザーへのメンションと誤認されうる。
 pub(super) async fn html_and_tags_for_body(
     body: &str,
     local_domain: &str,

@@ -346,7 +346,7 @@ pub struct NoteRecipientInfo {
 }
 
 /// Misskey本家 `UserLite.instance` に合わせたリモートインスタンス情報。フィールド名・形は
-/// Misskeyクライアント（misskey_dart等）との上位互換のためこの形に揃える（マイケル指摘）。
+/// Misskeyクライアント（misskey_dart等）との上位互換のためこの形に揃える。
 /// `theme_color` は宣言値、または未宣言時に既知software代替色・汎用デフォルトへ
 /// フォールバック済みの「表示に使う最終値」（`jobs::remote_instance_info_resolve` 参照）。
 /// クライアント側はこの値をそのまま描画すればよく、software別の色分けロジックは持たない。

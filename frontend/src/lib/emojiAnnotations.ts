@@ -11,7 +11,7 @@ export type EmojiAnnotationIndex = Map<string, string[]>;
 
 // emojibase-dataの生JSON（hexcode/group/order/skins等を含み1言語700〜800kB）を直接
 // importせず、postinstall（scripts/build-emoji-annotations.mjs）が生成する
-// emoji/label/tagsだけの軽量版を読む（ダウンロードサイズ対策、docs/code_audit_2026-08-05.md P-7）。
+// emoji/label/tagsだけの軽量版を読む（ダウンロードサイズ対策）。
 const dataLoaders: Record<PostLanguage, () => Promise<EmojibaseEntry[]>> = {
   en: () => import("../generated/emoji-annotations/en.json").then((m) => m.default as EmojibaseEntry[]),
   ja: () => import("../generated/emoji-annotations/ja.json").then((m) => m.default as EmojibaseEntry[]),

@@ -567,7 +567,7 @@ pub(super) async fn fetch_referenced_notes(
 /// 単純リポスト」のように、リポストがちょうど1階層を消費してしまい引用先が届かなくなる
 /// ケースがあり、孫を埋めないと `misskey_dart` 等のクライアントは `renoteId` はあるのに
 /// `renote` が `null` と解釈して「削除されたノート」のプレースホルダーを描画してしまう
-/// （実機確認、Aria）。ひ孫（3階層目）は無限再帰・多段フェッチを避けるため従来通り
+/// （Aria）。ひ孫（3階層目）は無限再帰・多段フェッチを避けるため
 /// 埋め込まない（孫として埋め込むノート自身の `renote`/`reply` は常に `None`）。
 async fn embed_referenced_notes(
     state: &AppState,
@@ -721,8 +721,7 @@ pub async fn build_notifications(
         .collect();
 
     // note_id は重複がありうる（同じ投稿への複数リアクション等）ため、一意な ID ごとに1回だけ、
-    // 全件まとめて取得・変換する（以前はノート1件ごとに取得・変換しており、limit=100 で
-    // 最大約1,000クエリになっていた）。リポストが取り消し済み（ラッパー投稿が論理削除済み）
+    // 全件まとめて取得・変換する。リポストが取り消し済み（ラッパー投稿が論理削除済み）
     // でもその通知自体は残り続けるため、ラッパーは削除済みも含めて取得する。
     let (wrapper_ids, regular_ids): (Vec<i64>, Vec<i64>) = rows
         .iter()
@@ -916,9 +915,8 @@ mod tests {
     }
 
     // 実際の投稿作成処理（handlers::notes::mod.rs）は、Federation配送のIDとして使うため
-    // ローカル投稿にも常に自ドメインの `ap_object_id` を持たせる。この回帰テストは、
-    // それによって `uri`/`url` がローカルノートでも誤って非nullになる不具合
-    // （Ariaがローカルノートをリモート扱いする原因だった）が再発しないことを確認する。
+    // ローカル投稿にも常に自ドメインの `ap_object_id` を持たせる。それでも `uri`/`url` は
+    // ローカルノートでは null でなければならない（非nullだとAriaがリモート扱いする）。
     #[test]
     fn local_note_has_null_uri_and_url_even_with_self_referential_ap_object_id() {
         let mut p = base_post();
@@ -967,9 +965,9 @@ mod tests {
         );
     }
 
-    // `MisskeyUserDetailed.uri`/`.url`（`/api/users/show`）が常に欠けていたため、Ariaの
-    // 「リモートユーザーのため、情報が不完全です。リモートで表示」バナー（`user.uri ?? user.url`
-    // を見て表示要否を判定、misskey_dartソース確認済み）が一切表示されない不具合の回帰テスト（#252続き）。
+    // `MisskeyUserDetailed.uri`/`.url`（`/api/users/show`）はリモートユーザーでのみ埋める。
+    // Ariaは `user.uri ?? user.url` で「リモートユーザーのため、情報が不完全です」バナーの
+    // 表示要否を判定する。
     #[test]
     fn local_actor_has_null_uri_and_url() {
         let (uri, url) = remote_user_uri_url("local", Some("https://ignored.example/x"), None);
@@ -996,8 +994,7 @@ mod tests {
 
     // Misskey本家クライアント（Aria等）は `note.poll` の値でアンケート有無を判定する。
     // このフィールドがMisskeyNoteに存在しないと、Fedi（Misskey）から受信したアンケート付き
-    // 投稿が `/api/notes/*` 経由のタイムラインでは常にアンケート無し扱いになってしまう
-    // 不具合の回帰テスト。
+    // 投稿が `/api/notes/*` 経由のタイムラインでは常にアンケート無し扱いになってしまう。
     #[test]
     fn note_poll_converts_options_and_marks_voted_choice() {
         let mut p = base_post();
@@ -1043,7 +1040,7 @@ mod tests {
     fn notification_type_repost_maps_to_misskey_renote() {
         // Misskey本家の notificationTypes（packages/backend/src/types.ts）に "repost" は
         // 存在せず "renote" が正式名称。ここがズレるとMisskey互換クライアントが種別を
-        // 判別できず「不明」表示になる（実機で確認済みの回帰）。
+        // 判別できず「不明」表示になる。
         assert_eq!(to_misskey_notification_type("repost"), "renote");
     }
 

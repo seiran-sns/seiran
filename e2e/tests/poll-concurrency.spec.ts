@@ -1,6 +1,6 @@
 // アンケートへの同時投票で票数が失われないこと、同じユーザーの同時二重投票が1票だけ
-// 記録されることを固定する。以前は投票処理が「posts.poll（JSON）を読む→アプリで+1→
-// 丸ごと書き戻す」形で、同時に投票すると一方の加算が失われていた（2026-09-26 改善大会 R1）。
+// 記録されることを固定する（「posts.poll（JSON）を読む→アプリで+1→丸ごと書き戻す」形だと
+// 同時投票で一方の加算が失われる）。
 
 import { test, expect } from "@playwright/test";
 import { registerUserViaApi } from "../fixtures/api-helpers";

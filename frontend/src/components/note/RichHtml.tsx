@@ -210,7 +210,7 @@ function renderNode(
     }
     // リンクテキストが`@user@host`形状そのものの場合、hrefより優先して解決を試みる
     // （リモート実装がメンション表記を誤った形のURLへ組み立てて送ってくることがあり、
-    // その場合hrefは解決されずリンクテキストの方だけが解決されている、実機で確認済み）。
+    // その場合hrefは解決されずリンクテキストの方だけが解決されている）。
     const linkText = el.textContent?.trim() ?? "";
     const candidates = FULL_MENTION_RE.test(linkText) && linkText !== href ? [linkText, href] : [href];
     return renderLinkTarget(keyPrefix, candidates, children, resolvedLinks);

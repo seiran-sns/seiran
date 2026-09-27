@@ -157,7 +157,7 @@ pub async fn start(
 
     // メールアドレス解決: 転入元PDSは`createSession`のパスワード認証を既に通っているため、
     // 独自のメール実在確認は不要——PDS Aに登録済みのメールをそのまま信頼して使う。
-    // PDS Aがメールを返さない場合（実機で判明: Blueskyのapp password認証ではメイン
+    // PDS Aがメールを返さない場合（Blueskyのapp password認証ではメイン
     // パスワード認証と異なり`email`/`emailConfirmed`が返らない）は`req.email`に
     // フォールバックする。それも無ければフロントに専用エラーを返し、メール入力欄付きで
     // 再試行させる（`AUTH_FACTOR_TOKEN_REQUIRED`と同じ「エラーで欄を追加して再送」パターン）。
@@ -243,9 +243,8 @@ pub struct SubmitPlcTokenRequest {
 /// その後のアカウント作成（`users`/`actors`）が失敗しても、`plc_submitted_at`が
 /// 設定済み・`status='submitting_plc'`のリクエストに対して同エンドポイントを再度叩けば、
 /// PLC提出をやり直さず（＝使用済みtokenを再送しない）保存済みの署名鍵でアカウント作成
-/// だけをやり直す（実機で発見: `actors` INSERTがUNIQUE制約違反で失敗するケースがあり、
-/// この再入可能性が無いと`awaiting_plc_token`のまま停滞し、既に消費済みのtokenで
-/// ユーザーが再試行してしまっていた）。
+/// だけをやり直す（`actors` INSERTが失敗した場合にこれが無いと`awaiting_plc_token`の
+/// まま停滞し、ユーザーが消費済みのtokenで再試行することになる）。
 ///
 /// `signPlcOperation`のtokenはPDS A側で15分・ワンタイムのため、`awaiting_plc_token`
 /// からの一発勝負。失敗時はステータスを据え置き、ユーザーは`requesting_plc_signature`
@@ -377,7 +376,7 @@ async fn submit_plc_operation_to_seiran(
         email_confirmed: false,
     };
     // `start`時点で確定したPDS Aのエンドポイント文字列をそのまま使う（DID文書からの
-    // 再導出ではない——`resolve_stored_endpoint`のドキュメントコメント参照。実機で発見:
+    // 再導出ではない——`resolve_stored_endpoint`のドキュメントコメント参照。
     // DID文書から再導出すると、PLC操作が既に成功した後の再試行時に移行先(seiran自身)を
     // 指してしまう）。
     let resolved = seiran_common::atp::did_resolve::resolve_stored_endpoint(
@@ -492,7 +491,7 @@ async fn materialize_local_account(
 ) -> Result<(i64, i64), ApiError> {
     // 転入元DIDが既にseiranの`actors`にリモートキャッシュ行として存在することがある
     // （firehose購読やプロフィール参照で自然に発生、`start`時点の重複チェックは
-    // `actor_type='local'`のみ対象にしているため素通りする——実機で発見）。
+    // `actor_type='local'`のみ対象にしているため素通りする）。
     // 存在すればローカル用に変換（UPDATE）、無ければ新規作成（INSERT）する。
     let existing_actor_id = state
         .actors

@@ -31,7 +31,7 @@ pub use reaction::{deliver_ap_poll_vote, deliver_ap_reaction, deliver_ap_undo_re
 pub use text::{at_uri_to_bsky_app_url, plain_to_html, plain_to_html_with_mentions};
 
 /// AP 配送の送信者（ローカルアクター）と、配送に使う共有資源。全配送関数に共通して渡す
-/// 引数の束（以前は各関数が同じ5引数を個別に受け取っていた）。
+/// 引数の束。
 #[derive(Clone, Copy)]
 pub struct ApSender<'a> {
     pub ap_client: &'a ApClient,

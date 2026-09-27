@@ -79,7 +79,7 @@ async fn resolve_counterpart_via_ap(
     // AP Actor文書自身が`seiranAtDid`拡張で自己申告する相手（`profile.claimed_at_did`）を使う。
     // 呼び出し元自身の`actor.at_did`を渡すと、`discover_fedi_actor`が自己参照で常に真の一致判定を
     // してしまい、取得したAP Actor文書が実際に何を自己申告しているか（そもそも`seiranAtDid`を
-    // 持たない場合すら）を一切確認せず結婚が成立してしまう（実地検証で発覚）。
+    // 持たない場合すら）を一切確認せず結婚が成立してしまう。
     let profile = match crate::repository::FediActorProfile::from_ap_actor(&remote_ap, ap_uri, None)
     {
         Ok(profile) => profile,

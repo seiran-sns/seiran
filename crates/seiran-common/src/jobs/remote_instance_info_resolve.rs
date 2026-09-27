@@ -123,7 +123,7 @@ fn extract_title(html: &str) -> Option<String> {
 
 /// Mastodon系に多い`<title>`の「{ドメイン} - {サイト名}」（逆順の「{サイト名} - {ドメイン}」も
 /// 稀にある）という慣習に対応し、ドメイン部分だけ取り除く
-/// （例: "fedibird.com - Fedibird" → "Fedibird"、マイケル指摘）。
+/// （例: "fedibird.com - Fedibird" → "Fedibird"）。
 /// `to_ascii_lowercase()`はASCIIのみを変換しバイト長を変えないため、
 /// 比較用に小文字化した文字列上で見つけたバイト位置でそのまま元の`title`を安全にスライスできる。
 fn strip_domain_from_title(title: &str, domain: &str) -> String {
@@ -152,7 +152,7 @@ fn strip_domain_from_title(title: &str, domain: &str) -> String {
 /// アイコンはまず`<link rel="icon">`をHTMLから探し、無ければ`/favicon.ico`を実際に
 /// 取得できるか試す（存在しないURLをそのまま返すとフロントで壊れた画像になるため）。
 /// `title`はnodeinfoが`metadata.nodeName`を宣言しないサーバー向けのサーバー名フォールバック
-/// （`build_instance_info`のドメイン名フォールバックより優先、マイケル指摘）。
+/// （`build_instance_info`のドメイン名フォールバックより優先）。
 async fn fetch_homepage_meta(domain: &str) -> (Option<String>, Option<String>) {
     let home_url = format!("https://{domain}/");
     let mut icon_url = None;

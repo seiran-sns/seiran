@@ -4,9 +4,9 @@ use super::*;
 /// `Update`アクティビティのうち、アンケート（`object.type == "Question"`）と、
 /// `seiranPost.counterpartPostId`を持つ`Note`（#237、下記`handle_update_seiranpost`参照）
 /// のみを受理する。本文再編集全般のUpdate（それ以外の`object.type == "Note"`）は
-/// 別件のため今回は非対応、黙って無視する。Update(Question)を受理できたNoteは
+/// 非対応で、黙って無視する。Update(Question)を受理できたNoteは
 /// `posts.poll_update_received`をtrueにし、以後`Job::PollFetch`（生存監視フォールバック）の
-/// 対象から外す（送信元がpush型実装と判明したため）。
+/// 対象から外す（送信元がpush型実装と分かったため）。
 pub(super) async fn handle_update(
     activity: serde_json::Value,
     inbox: &InboxContext,

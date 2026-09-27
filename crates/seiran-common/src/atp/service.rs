@@ -171,7 +171,7 @@ fn blob_cids_for_media(media: &BskyEmbed) -> Vec<Cid> {
     }
 }
 
-/// ATPコミット（`commit_post`/`commit_quote`）用の`seiranPost`拡張オブジェクトを組み立てる（#237）。
+/// ATPコミット（`commit_post`）用の`seiranPost`拡張オブジェクトを組み立てる（#237）。
 /// `counterpartPostId`（AP object id）は投稿作成時点でローカル生成済み・常に確定しているため、
 /// AP側（`counterpartPostId`が未確定ならUpdate(Note)で後から補完）と異なり毎回必ず同梱できる。
 /// 投稿者がまだAP側の識別子（`ap_uri`）を持たない異常系は実運用上あり得ない
@@ -180,8 +180,7 @@ fn blob_cids_for_media(media: &BskyEmbed) -> Vec<Cid> {
 ///
 /// `posts.body`（DBの生プレーンテキスト）はドメイン省略のローカル短縮メンション（`@user`）を
 /// そのまま含みうる。これを`seiranPost.body`へ生のまま埋め込むと、受信側の他seiranサーバーでは
-/// 別ユーザーへのメンションと誤認されるバグになる（AP側`build_seiran_post_for_basis`と同種、
-/// 実地検証で発覚、2026-09-06）。このため`commit_post`/`commit_quote`が渡す`text`
+/// 別ユーザーへのメンションと誤認される（AP側`build_seiran_post_for_basis`と同種）。このため`commit_post`が渡す`text`
 /// （`convert_mentions_for_bsky`変換済み、ATPハンドル形式`@user.domain`）は使わず、AP側と表記を
 /// 揃えるためここで改めて`convert_mentions_for_ap`（Fediverse形式`@user@domain`）を掛け直す。
 async fn build_seiran_post_for_atp_commit(
@@ -697,7 +696,6 @@ impl AtpCommitService {
 
     /// ポスト作成コミット（posts テーブル更新を追加）。通常投稿・引用投稿（`embed` に
     /// `BskyEmbed::Record`/`External`）・CW 投稿など、`app.bsky.feed.post` を作る全経路で使う
-    /// （以前は引用用に同一内容の`commit_quote`が別にあった）。
     pub async fn commit_post(
         &self,
         actor_id: i64,
@@ -1179,7 +1177,7 @@ impl AtpCommitService {
     }
 
     /// `app.bsky.feed.post` レコードを削除する。
-    /// Fedi リモートポストのリポスト時に作るフォールバック投稿（`commit_quote` が
+    /// Fedi リモートポストのリポスト時に作るフォールバック投稿（`commit_post` が
     /// 本文「🔁」と元ポストURLのexternal embedをコミットし、
     /// `posts.at_rkey` に自己保存したもの）を、リポスト取り消し時に retract するために使う。
     pub async fn delete_atp_post(

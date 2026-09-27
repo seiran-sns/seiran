@@ -565,7 +565,7 @@ pub async fn add_member(
     if matches!(target_actor.actor_type.as_str(), "bsky" | "remote_seiran") {
         // Jetstream の wantedDids 絞り込みリストにこの DID を加えるため再構築を促す。
         // remote_seiranもat_didを持つため`load_wanted_dids`のリストメンバーUNION節に
-        // 元々含まれる（フォロー不要でATP経由の配送だけで届く、マイケルの指摘通り）。
+        // 元々含まれる（フォロー不要でATP経由の配送だけで届く）。
         // このtouch自体は無くても次回ポーリング（30秒）で反映されるが、追加直後の
         // 反映を早めるための最適化。
         touch_jetstream_wanted_dids(&state.db).await;

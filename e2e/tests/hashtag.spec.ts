@@ -90,8 +90,7 @@ test("ハッシュタグをホーム画面に追加・削除できる", async ({
   });
 });
 
-// ノート組み立ての共通化（`build_note_responses`）以前は、ハッシュタグTLだけ投票済み状態
-// （`poll.votedByMe`）を付与しておらず、投票後もTL上では未投票に見えていた。
+// ハッシュタグTLでも他のTLと同じく投票済み状態（`poll.votedByMe`）が付くこと。
 test("ハッシュタグタイムラインでも自分の投票済み状態が返る", async ({ request }) => {
   const user = await registerUserViaApi(request, "e2etagpoll");
   const tag = `e2etagpoll${Date.now().toString(36)}`;

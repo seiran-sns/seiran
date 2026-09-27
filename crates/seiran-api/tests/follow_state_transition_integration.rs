@@ -1,5 +1,4 @@
 //! `PgFollowRepository` の状態遷移（pending → accepted → 取り消し）の結合テスト。
-//! これまでユニットテストが 1 件も無かった（`docs/improvement_2026-08-29.md` REF-4 参照）。
 //!
 //! `follows.follower_actor_id`/`target_actor_id` は `actors(id)` への FK（`ON DELETE CASCADE`）
 //! を持つため、テスト専用の actor 行を作ってから検証し、最後に actor 行ごと削除して

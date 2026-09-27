@@ -84,7 +84,7 @@ export default function FollowListPanel({ actorId, kind, onError, isRemoteFedi }
   if (initialLoading) return <p className={panel.message}>{t("common:loading")}</p>;
 
   // リモートで取得できた項目のうち、ローカルDBが既に把握している（=上のリストに出ている）
-  // アクターは重複表示しない。マイケル指摘 #68: 見出しで分けず、既知/未知を問わず同じ
+  // アクターは重複表示しない。見出しで分けず、既知/未知を問わず同じ
   // 見た目の1つのリストとして混ぜて表示する。
   const knownActorIds = new Set(items.map((i) => i.actor_id));
   const extraItems = remoteExtra.filter((r) => !r.actor_id || !knownActorIds.has(r.actor_id));

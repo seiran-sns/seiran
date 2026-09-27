@@ -42,7 +42,7 @@ test("ローカルユーザー同士のDM送受信・タイムライン除外・
   await expect(bobPage.getByText(text2).first()).toBeVisible({ timeout: 15_000 });
 
   // 2件（最古・最新）とも受信済みの状態で既読処理すると、バッジが0になる
-  // （既読カーソルが最新メッセージIDを指していないと、ここが0にならない回帰バグがあった）。
+  // （既読カーソルが最新メッセージIDを指していないと、ここが0にならない）。
   await expect
     .poll(async () => {
       const res = await request.get("/api/dm/unread-count", { headers: { Authorization: `Bearer ${bob.token}` } });
@@ -73,8 +73,8 @@ test("返信送信後に自分のメッセージが重複表示されない", as
   await page.getByPlaceholder("メッセージを入力…").fill(replyText);
   await page.getByRole("button", { name: "送信" }).click();
 
-  // 送信直後の手動追加とWS再取得（registerDirectMessage）が競合し、同じメッセージが
-  // 2つ（右寄せ+左寄せ）描画される回帰バグがあった。
+  // 送信直後の手動追加とWS再取得（registerDirectMessage）が競合しても、同じメッセージが
+  // 2つ（右寄せ+左寄せ）描画されないこと。
   await expect(page.getByText(replyText)).toHaveCount(1, { timeout: 10_000 });
 });
 

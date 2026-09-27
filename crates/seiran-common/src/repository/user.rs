@@ -5,7 +5,7 @@ use sqlx::PgPool;
 /// 新規ローカルアカウント（users 行＋ローカル actors 行）を1トランザクションで作成し、
 /// users.id を返す。別々に挿入すると、同名ユーザーの同時登録で actors 側だけが一意制約違反に
 /// なった際に actor の無い users 行が残り、そのメールアドレスは以後登録もログインもできなく
-/// なっていた。ユーザー名の一意制約違反はそのまま`sqlx::Error::Database`として返す
+/// なる。ユーザー名の一意制約違反はそのまま`sqlx::Error::Database`として返す
 /// （呼び出し側で`USERNAME_TAKEN`等へ変換する）。
 pub async fn create_local_account(
     pool: &PgPool,

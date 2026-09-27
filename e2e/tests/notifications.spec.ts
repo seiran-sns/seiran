@@ -107,7 +107,7 @@ test("アンリポスト（取り消し）後もリポスト通知をホバー�
 
   // リポストを取り消す（リポストラッパー投稿が論理削除される）。通知自体は残るが、
   // 通知一覧APIが取り消し済みラッパー経由で元ポスト情報（note.renote）を正しく
-  // 復元できることを検証する回帰テスト。
+  // 復元できることを検証する。
   const undoRes = await request.delete(`/api/notes/${original.id}/repost`, {
     headers: { Authorization: `Bearer ${sharer.token}` },
   });

@@ -341,9 +341,8 @@ async fn create_video_or_audio_file(
             .map_err(|e| ApiError::Internal(e.to_string()))?;
         // 同一 sha256 の既存レコードを再利用する場合でも、過去の Bsky 動画パイプライン
         // 提出が 'failed'（またはそもそも未提出）のままだと、再アップロードしても
-        // 永久に video embed 化されない（isReused の早期 return で submit が
-        // スキップされていた既存バグ）。再送信を試みる。音声は Bsky には専用embedが
-        // 無いため、グレー背景動画に変換してから提出する（2026-07-17 マイケル発案）。
+        // 永久に video embed 化されないため、再送信を試みる。音声は Bsky には専用embedが
+        // 無いため、グレー背景動画に変換してから提出する。
         let existing_is_video = existing.mime_type.starts_with("video/");
         let existing_is_audio = existing.mime_type.starts_with("audio/");
         if (existing_is_video || existing_is_audio) && deliver_to_bsky {
@@ -443,8 +442,7 @@ async fn create_video_or_audio_file(
 
     // Bsky動画パイプラインへの提出用バイト列を用意する（deliver_to_bsky=falseでは不要）。
     // 動画はそのまま、音声は「グレー背景515x75の静止画 + 音声トラック」のmp4に変換して
-    // 提出する。Bskyには音声専用embedが無く動画embedしか無いため
-    // （2026-07-17 マイケル発案）。
+    // 提出する。Bskyには音声専用embedが無く動画embedしか無いため。
     let video_bytes_for_bsky = if !deliver_to_bsky {
         None
     } else if mime_type.starts_with("video/") {
@@ -602,10 +600,9 @@ async fn submit_to_bsky_video_pipeline(
     let body_text = resp.text().await.unwrap_or_default();
 
     // 同一内容の動画が既にBluesky側で処理済みの場合、409 Conflict + "already_exists"
-    // だが有効なjobIdは返ってくる（実機確認済み）。この場合も成功として扱う。
+    // だが有効なjobIdは返ってくる。この場合も成功として扱う。
     // jobIdが空文字列の場合は「失敗レスポンスにたまたまjobIdフィールドが存在した」
-    // だけなので無効扱いする（2026-07-17、これが原因でエラー詳細が握り潰されていた
-    // バグを修正）。
+    // だけなので無効扱いする（成功扱いするとエラー詳細が握り潰される）。
     let job_id = serde_json::from_str::<serde_json::Value>(&body_text)
         .ok()
         .and_then(|v| {
@@ -735,8 +732,7 @@ async fn build_public_url(
 /// embed typeを持たず、動画も `bsky_video_status='ready'` でなければ external
 /// フォールバックになる（`AtpCommitService::commit_post`）。そのリンク先が
 /// メディアファイルの直リンクだとブラウザがダウンロードしてしまい再生できない
-/// ため、`<audio>`/`<video>` タグ1個だけの簡素なHTMLを返す
-/// （2026-07-17 マイケル指摘）。
+/// ため、`<audio>`/`<video>` タグ1個だけの簡素なHTMLを返す。
 pub async fn watch_media(
     Path(media_file_id): Path<i64>,
     State(state): State<AppState>,

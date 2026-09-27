@@ -170,7 +170,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         // タブ切替等で該当チャンネルが disconnect される可能性がある。ここで sub を
         // 先に確定させてしまうと、await後に古い（すでに購読解除された）タブ用の
         // onNote をそのまま呼んでしまい、切替先のタイムラインへ誤って挿入されてしまう
-        // （実機確認: Home→Local切替直後、Local先頭にHomeの投稿が挿入される不具合）。
+        // （例: Home→Local切替直後、Local先頭にHomeの投稿が挿入される）。
         // 必ず await の後に改めて channelSubs.current を引き直し、購読が生きている
         // 場合だけ配る。
         void resolveStreamNote(innerBody).then((n) => {

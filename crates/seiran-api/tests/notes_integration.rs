@@ -69,9 +69,8 @@ async fn create_note_and_fetch_round_trip() {
 }
 
 /// 未認証で POST /api/notes/create を叩くと、401 + JSON ボディ（ApiError 形式）が返る。
-/// `AuthedUser` extractor が生タプルではなく必ず ApiError の JSON を返すことの回帰テスト
-/// （2026-07リファクタリング以前は一部ハンドラが素のテキストボディを返しており、
-/// フロントエンドの `res.json()` がパースに失敗する latent バグがあった）。
+/// `AuthedUser` extractor が素のテキストではなく必ず ApiError の JSON を返す
+/// （フロントエンドの `res.json()` がパースに失敗しないように）。
 #[tokio::test]
 #[ignore = "実DB（DATABASE_URL）が必要"]
 async fn create_note_without_auth_returns_json_401() {
@@ -207,10 +206,7 @@ async fn embed_renotes_preserves_original_post_display_metadata() {
 }
 
 /// ローカル投稿の本文中に含まれる `:shortcode:` が、既存の `custom_emojis` と照合されて
-/// `emojis` マップに自動で解決されることの回帰テスト（#77）。`create_regular_post` が
-/// ローカル投稿作成時に本文からショートコードを抽出せず、`emoji_map` を常に空のまま
-/// INSERT していたため、Fedi経由の受信投稿と異なりローカル投稿では絵文字ショートコードが
-/// リポスト有無に関わらず一切画像化されないバグがあった。
+/// `emojis` マップに自動で解決される（#77）。
 #[tokio::test]
 #[ignore = "実DBが必要"]
 async fn create_note_resolves_local_custom_emoji_shortcode_in_body() {

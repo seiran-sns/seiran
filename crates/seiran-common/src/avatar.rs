@@ -28,7 +28,7 @@ pub fn fallback_avatar_url(local_domain: &str, actor_id: i64) -> String {
 /// 自動生成アイコンURLを補う。リモートアクターは相手側にアバターが無いことをそのまま
 /// 伝える（補わない）。フロントの `Avatar` コンポーネントは `avatarUrl` が無い場合に
 /// 頭文字プレースホルダへフォールバックするため、ここでの補完漏れは「本来自動生成アイコンが
-/// 出るべきところが頭文字表示になる」不具合として現れる。
+/// 出るべきところが頭文字表示になる」形で現れる。
 pub fn resolve_avatar_url(
     avatar_url: Option<String>,
     actor_type: &str,

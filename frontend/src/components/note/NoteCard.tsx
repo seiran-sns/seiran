@@ -848,7 +848,7 @@ export default function NoteCard({
           note={effectiveRenote}
           // 元投稿は常にリポストラッパー自身(note)とは別ページのため、
           // 親から渡されたlinkToDetail（詳細ページ自身が自分自身へのリンクを消すためのフラグ）
-          // を伝播させず、常にリンクを有効にする（元投稿の日付が無反応だった不具合の修正）。
+          // を伝播させず、常にリンクを有効にする。
           linkToDetail
           large={large}
           small={small}

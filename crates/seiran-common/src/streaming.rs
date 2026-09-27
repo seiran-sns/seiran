@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn local_timeline_requires_local_origin_and_public_visibility() {
         // リモート投稿（is_local=false）は、フォロー中でも home_recipients に含まれる
-        // 閲覧者に対してすら localTimeline へは配信されない（今回の回帰対象そのもの）。
+        // 閲覧者に対してすら localTimeline へは配信されない。
         let remote_public = scope(false, "public", &[1], &[], &[]);
         assert!(!remote_public.matches(&ChannelKind::LocalTimeline, 1));
 

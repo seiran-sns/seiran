@@ -50,7 +50,7 @@ impl PgRotationKeyBackfillRepository {
 /// 対象を「ジェネシス作成の、現在も有効なローカルアカウントのみ」に絞るWHERE句。
 /// 退会済み（`withdrawn_at`設定済み）アカウントは対象外——`withdraw`はDIDを物理削除せず
 /// `actors`行を残すため対象クエリには含まれてしまうが、既に退会したDIDのPLC状態は
-/// 提出時点で想定と食い違いうる（実機で発見: "Operations not correctly ordered"）。
+/// 提出時点で想定と食い違いうる（"Operations not correctly ordered"）。
 const CANDIDATE_WHERE: &str = "actor_type = 'local'
      AND at_did IS NOT NULL
      AND at_rotation_key_pem IS NULL

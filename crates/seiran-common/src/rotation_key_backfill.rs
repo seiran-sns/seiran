@@ -34,7 +34,7 @@ pub struct BackfillReport {
 ///
 /// `mark_backfilled`を呼ばないdry-runでは`next_candidate`が状態で前進しないため、
 /// このループ自身が`after_id`カーソルで進行を管理する（呼ばないと同じ1件を無限に
-/// 返し続けてしまう——実機で発見）。失敗した行もこのカーソルで読み飛ばし、
+/// 返し続けてしまう）。失敗した行もこのカーソルで読み飛ばし、
 /// 1件の失敗が全体のスキャンを止めないようにする。
 pub async fn run(
     repo: Arc<dyn RotationKeyBackfillRepository>,

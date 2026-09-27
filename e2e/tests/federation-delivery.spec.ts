@@ -116,7 +116,7 @@ test.describe("Fedi配送", () => {
       expect(emojiTag?.icon?.url).toContain(`${s3.url}/e2e-test/`);
 
       // Misskey系などが Create の object.id を再取得する経路でも Emoji tag が
-      // 消えないことを確認する。配送JSONだけの検査では実機の不具合を検出できない。
+      // 消えないことを確認する（配送JSONだけの検査では検出できない）。
       const canonicalPath = new URL(activity.object.id).pathname;
       const canonicalRes = await request.get(`${SEIRAN_BASE_URL}${canonicalPath}`, {
         headers: { Accept: "application/activity+json" },
@@ -179,8 +179,8 @@ test.describe("Fedi配送", () => {
   });
 
   // 元ポストが deliver_to_bsky=false のFedi限定ローカル投稿（at_uri を持たない）の場合、
-  // 返信も Bsky に配送されてはならない（親と無関係な独立ポストとして誤配信される不具合の
-  // 回帰防止。crates/seiran-api/src/handlers/notes/delivery.rs の reply_delivery_allowed）。
+  // 返信も Bsky に配送されてはならない（親と無関係な独立ポストとして誤配信される。
+  // crates/seiran-api/src/handlers/notes/delivery.rs の reply_delivery_allowed）。
   test("Fedi限定投稿への返信はBsky配送されない", async ({ request }) => {
     const user = await registerUserViaApi(request, "e2afedionlyreply");
 

@@ -1147,8 +1147,8 @@ fn visible_birthday(actor: &Actor, is_self: bool) -> (Option<chrono::NaiveDate>,
 /// `is_first_fetch`: 直前に`fetch_remote_profile`がDB未登録アクターを新規upsertした直後の
 /// 初回表示なら`true`（featured collectionを同期で取得し、初回表示から見せる）。それ以外
 /// （DB既存アクターの通常表示）は`false`（`RemoteFeaturedSync`ジョブを積むだけで、表示は
-/// 既存の`pinned_posts`をそのまま返す。「表示時再検証」パターン、2026-08-31マイケル指摘：
-/// Authorized Fetch対応でリモートフェッチが遅くなり、毎回の同期待ちが体感速度を損なうため）。
+/// 既存の`pinned_posts`をそのまま返す。「表示時再検証」パターン。Authorized Fetchの
+/// リモートフェッチは遅く、毎回同期で待つと体感速度を損なうため）。
 async fn build_profile_response_inner(
     actor: Actor,
     my_user_id: Option<i64>,
@@ -1281,7 +1281,6 @@ async fn fetch_remote_profile(
 
     // ピン留め（featured collection, #61）を初回アクセス時から表示するため、
     // 未認知アクターでもこの時点で DB へ upsert してから build_profile_response に委譲する
-    // （マイケルの要望・2026-07-15: 「初回アクセス時も同期するよう拡張する」）。
     // `preferredUsername`が無ければWebFinger解決に使った名前で代用する（`from_ap_actor`参照）。
     let profile = match seiran_common::repository::FediActorProfile::from_ap_actor(
         &ap_actor,
@@ -1671,7 +1670,7 @@ pub async fn update_profile(
 // ─── リモートFediアクターのフォロー中/フォロワー全件取得（#68） ───────────────────
 
 /// 同期フェッチのタイムアウト。これを超えたら以降は Worker ジョブ（`RemoteFollowListSync`）
-/// に委ねる（マイケル指摘: 3秒は長すぎるため200msに短縮。プロフィール画面を待たせない）。
+/// に委ねる（3秒は長すぎるため200msに短縮。プロフィール画面を待たせない）。
 const REMOTE_FOLLOW_LIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
 /// 同期フェッチで取得する上限件数。バックグラウンドジョブ（`MAX_ITEMS` = 5000）より
 /// 大幅に控えめにし、リクエスト内で終わる規模に抑える。
@@ -1700,7 +1699,7 @@ pub struct RemoteFollowSummaryResponse {
     pub pending: bool,
     pub fetched_at: Option<chrono::DateTime<chrono::Utc>>,
     /// ローカルDB把握分（`follows`テーブル）とリモート直接取得分をブレンドした実際の
-    /// フォロー中/フォロワー数（マイケル指摘 #68: プロフィールカードの人数表示にも反映したい）。
+    /// フォロー中/フォロワー数（#68、プロフィールカードの人数表示に使う）。
     pub total_count: i64,
 }
 
@@ -1813,7 +1812,6 @@ pub async fn user_remote_follow_summary(
     let total_count = blended_follow_count(&state, actor_id, &params.direction, uris.len()).await;
     // 既存スナップショットが complete=true（全件取得済み）なら、上で積んだWorkerジョブは
     // 単なる裏側の再確認に過ぎず、フロントに「まだ取得中」と伝える必要はない。
-    // 以前は無条件で true を返しており、全件取得済みでも延々と pending 表示が続くバグがあった。
     Json(RemoteFollowSummaryResponse {
         items,
         complete,
@@ -1826,7 +1824,7 @@ pub async fn user_remote_follow_summary(
 
 /// ローカルDBが把握しているフォロー数（`follows`テーブル）と、リモートへ直接問い合わせて
 /// 取得できた件数（重複排除済みURI数）のうち、大きい方をブレンド後の実数として採用する
-/// （マイケル指摘 #68: プロフィールカードの人数表示にも反映してほしい）。
+/// （#68、プロフィールカードの人数表示に使う）。
 /// ローカルが把握しているフォロー関係は必ず相手のAPコレクションにも載っているはずなので、
 /// 通常はリモート側が superset になる。リモート取得が未完了で少なく出た場合に、既に分かって
 /// いるローカルの人数より後退して表示しないためのフォールバック。
@@ -1850,7 +1848,7 @@ async fn blended_follow_count(
 }
 
 /// 未知アクター（ローカルDB未登録）のURI一覧について、それぞれ `RemoteActorResolve`
-/// ジョブを積む（マイケル指摘 #68: 未知アクターの取得もWorkerジョブキューに積む）。
+/// ジョブを積む（#68）。
 async fn enqueue_unknown_actor_resolves(state: &AppState, unknown_uris: Vec<String>) {
     for uri in unknown_uris {
         state.enqueue_remote_actor_resolve(uri).await;
@@ -1927,7 +1925,7 @@ async fn load_remote_follow_snapshot(
 /// 簡易表示にする（全件のプロフィールを都度リモートへフェッチするとレイテンシ・
 /// 負荷が過大になるため、既知の範囲でのみリッチ表示する）。
 /// 戻り値の2つ目は未登録だった URI 一覧（呼び出し元が `RemoteActorResolve` ジョブを
-/// 積むのに使う、マイケル指摘 #68）。
+/// 積むのに使う）。
 async fn resolve_remote_follow_items(
     pool: &sqlx::PgPool,
     uris: &[String],

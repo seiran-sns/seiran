@@ -75,7 +75,7 @@ pub fn prepare_image(data: &[u8], kind: MediaKind) -> Result<ImagePipeline, Imag
 
     // アニメーション画像（GIF/WebP/APNG）はリサイズ・静止画再エンコードを行わず元のバイト列を
     // そのまま保存する。`image` 0.25 はアニメーションWebP/GIFの「書き出し」に対応していないため、
-    // ここで再エンコードすると全フレームが失われ静止画になってしまう（実機で確認された回帰）。
+    // ここで再エンコードすると全フレームが失われ静止画になってしまう。
     if let Some(mime) = animated_mime_type(data, original_format) {
         return Ok(ImagePipeline::AnimatedPassthrough(process_animated(
             data, mime,
@@ -269,7 +269,7 @@ mod tests {
     fn compute_blurhash_returns_non_empty_hash() {
         // blurhash::encode は内部でRGBA前提（bytes_per_row = width * 4）のインデックス計算をするため、
         // RGB（3byte/px）バッファを渡すと境界外アクセスでpanicし、catch_unwindで握りつぶされて
-        // 空文字列になっていた（回帰防止）。
+        // 空文字列になる。
         let img =
             DynamicImage::ImageRgba8(ImageBuffer::from_pixel(8, 6, Rgba([200, 100, 50, 255])));
         let hash = compute_blurhash(&img, 8, 6);

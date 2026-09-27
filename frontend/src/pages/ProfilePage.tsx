@@ -64,7 +64,7 @@ export default function ProfilePage() {
   // 狭幅タブシートにピン留めタブが挿入されるかどうか。挿入される場合、投稿/フォロー中/
   // フォロワーのインデックスは1つずつ後ろにずれる（下記narrowTabItems・followCountBtn参照）。
   const hasPinned = !!profile && profile.pinned_posts.length > 0;
-  // プロフィールカードのフォロー中/フォロワー人数表示（#68 マイケル指摘）。fediアクターの場合、
+  // プロフィールカードのフォロー中/フォロワー人数表示（#68）。fediアクターの場合、
   // ローカルDB把握分（`profile.following_count`等）ではなくリモート直接取得とブレンドした
   // 実数（`total_count`）で上書きする。取得できるまでは undefined のままローカル値を表示する。
   const [blendedCounts, setBlendedCounts] = useState<{
@@ -141,8 +141,8 @@ export default function ProfilePage() {
           })
           .catch((e) => !cancelled && onError(e))
           .finally(() => !cancelled && setPostsLoading(false));
-        // フォロー中/フォロワータブがまだ開かれていない段階から先読みを開始する（#68 マイケル指摘）。
-        // 結果はプロフィールカードの人数表示のブレンドにも使う（#68 マイケル指摘）。
+        // フォロー中/フォロワータブがまだ開かれていない段階から先読みを開始する（#68）。
+        // 結果はプロフィールカードの人数表示のブレンドにも使う。
         if (p.actor_id && p.actor_type === "fedi") {
           const actorId = p.actor_id;
           getRemoteFollowSummary(actorId, "following")

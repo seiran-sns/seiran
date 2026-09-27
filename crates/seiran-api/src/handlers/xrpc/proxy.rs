@@ -22,7 +22,7 @@ use crate::AppState;
 /// AT Protocolでは `app.bsky.feed.getTimeline`/`searchPosts`等のAppView専用メソッドは
 /// PDS自身が実装するのではなく、**PDSがAppViewへの透過プロキシとして振る舞う**ことで
 /// 実現される。未実装だとBluesky公式クライアントのタイムライン・検索・通知等が軒並み
-/// 「接続できません」になる（2026-08-20 マイケル実機確認）。
+/// 「接続できません」になる。
 ///
 /// クライアントのaccessJwtをそのまま転送するのではなく、ユーザーの署名鍵
 /// （`at_signing_key_pem`）で新たに短命サービス間認証JWTを発行して転送する
@@ -88,7 +88,7 @@ pub async fn xrpc_proxy_fallback(
 
     // `aud` クレームはサービスDIDのみ（フラグメント無し）。`atproto-proxy` ヘッダーの
     // `#service-id` 部分はサービスエンドポイント解決にのみ使い、JWTには含めない
-    // （フラグメント込みで署名すると対象サービス側で `BadJwtAudience` になる、実機確認）。
+    // （フラグメント込みで署名すると対象サービス側で `BadJwtAudience` になる）。
     let service_auth_jwt =
         match sign_service_auth_jwt(&signing_key_pem, &verified.did, target_did, xrpc_method) {
             Ok(jwt) => jwt,

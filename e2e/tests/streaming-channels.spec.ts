@@ -5,8 +5,8 @@ import { startStubFediServer, type StubFediServer } from "../fixtures/stub-fedi-
 import { BACKEND_PORT, BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 
 // Misskey互換のタイムラインチャンネル購読（connect/channel/disconnect）のE2E。
-// ローカルタイムライン表示中にリモートフォロー先の投稿が混入していたバグ（#通知調査時に発見）
-// の直接的な回帰テストと、リストチャンネル・disconnectの動作確認を行う。
+// ローカルタイムラインにリモートフォロー先の投稿が混入しないこと、リストチャンネル・
+// disconnectの動作を確認する。
 // CIはNode 20固定（グローバルWebSocket非搭載）のため、`ws`パッケージを使う
 // （`fixtures/subscribe-repos-client.ts`と同じ方式）。
 
@@ -77,8 +77,7 @@ test.describe("WebSocketタイムラインチャンネル購読", () => {
 
         // グローバルには届く（リモート投稿でも is_local=false 条件なしで一致する）。
         await expectChannelNoteArrives(received, "gtl", text);
-        // ローカルタイムラインには is_local=false のため一致しない
-        // （これが混入していたら今回のバグの回帰）。
+        // ローカルタイムラインには is_local=false のため一致しない。
         await expectChannelNoteAbsent(received, "ltl", text);
       } finally {
         ws.close();

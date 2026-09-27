@@ -283,9 +283,7 @@ pub(crate) async fn provision_plc_did(
 }
 
 /// 新規ローカルアカウントの ATP リポジトリへ初期レコードをコミットし、`#identity` を送る。
-/// 失敗しても登録自体は完了済みのためログのみ（`register`・`setup`共通。以前は`setup`が
-/// プロフィールしかコミットしておらず、初期管理者だけ chat declaration・相互申告用の自己申告・
-/// `#identity` 送信が抜けていた）。
+/// 失敗しても登録自体は完了済みのためログのみ（`register`・`setup`共通）。
 pub(crate) async fn publish_initial_atp_records(
     state: &AppState,
     actor_id: i64,

@@ -16,7 +16,7 @@ import { useCallback, useRef, useState } from "react";
  * セッション内キャッシュを持っている場合、初回レンダーの時点から復元済みの内容を
  * 表示するために使う。`useEffect`経由で`setItems`するのでは、そのeffectが走るまでの
  * 最初の1回のレンダーが空一覧になってしまい、その一瞬だけ実高さが縮んでスクロール位置の
- * 復元が壊れる（`window.scrollY`がブラウザに強制的にクランプされる）不具合があった。
+ * 復元が壊れる（`window.scrollY`がブラウザに強制的にクランプされる）。
  */
 export function useCursorPagination<T>(
   fetchPage: (untilId: string) => Promise<T[]>,
@@ -35,7 +35,7 @@ export function useCursorPagination<T>(
   // fetchPage/getId/onError は呼び出し側で feed 切替等のたびに新しい関数参照になりうる。
   // ref 経由で常に最新を参照することで、loadMore 自身の参照は安定させたまま
   // （sentinel の IntersectionObserver 再アタッチを増やさないまま）古いクロージャを
-  // 掴み続ける（＝切替後も切替前のフィードを取得し続ける）バグを避ける。
+  // 掴み続ける（＝切替後も切替前のフィードを取得し続ける）のを避ける。
   const fetchPageRef = useRef(fetchPage);
   fetchPageRef.current = fetchPage;
   const getIdRef = useRef(getId);

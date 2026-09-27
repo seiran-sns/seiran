@@ -40,7 +40,7 @@ export function mediaUrl(raw?: string | null): string | undefined {
     // ここでさらに`/proxy`を付け足すと、`/api/meta`の`mediaProxyUrl`未設定時デフォルト
     // （`https://{local_domain}/proxy`）と組み合わさって`/proxy/proxy?url=...`という
     // 二重パスになり、nginx側にそのパス用のルーティングがなくフロントへ誤フォールバック
-    // して502になる不具合があった。
+    // して502になる。
     const proxy = externalProxyBase || "/proxy";
     return `${proxy}?url=${encodeURIComponent(target.href)}`;
   } catch {

@@ -22,7 +22,7 @@ export interface MigratePanelState {
   needsAuthFactorToken: boolean;
   authFactorToken: string;
   /** 移行元PDSの`createSession`がメールアドレスを返さなかった場合のみ表示・使用する
-   * フォールバック欄（実機で判明: Blueskyのapp password認証では`email`が返らない）。 */
+   * フォールバック欄（Blueskyのapp password認証では`email`が返らない）。 */
   needsEmail: boolean;
   email: string;
 }

@@ -33,7 +33,7 @@ pub struct MisskeyUserLite {
 /// `misskey_dart` の `UserDetailedNotMe.fromJson`（`/api/users/show` が返す形）は
 /// `followersCount`/`followingCount`/`notesCount` を non-nullable `int` として直接
 /// キャストするため、欠けると Dart 側で `TypeError`（`type 'Null' is not a subtype of
-/// type 'num' in type cast`）となる（実機で確認済み。`MisskeyDriveFile` と同種の問題）。
+/// type 'num' in type cast`）となる（`MisskeyDriveFile` と同種の問題）。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MisskeyUserDetailed {
@@ -47,7 +47,7 @@ pub struct MisskeyUserDetailed {
     /// `containsKey("url")`でUserDetailed/UserLiteを判別するため、`url`と対にして必ず
     /// キーを出す。#252続き、Ariaの「リモートユーザーのため、情報が不完全です。
     /// リモートで表示」バナーは`user.uri ?? user.url`を見るが、従来この2フィールドが
-    /// 存在せず常にnullになるため一切表示されなかった、実機確認）。
+    /// 存在せず常にnullになるため一切表示されなかった）。
     pub uri: Option<String>,
     /// 人間向けプロフィールURL。AP優先、無ければBsky（`at_did`→bsky.app URL）に
     /// フォールバック。ローカルユーザーは`null`。
@@ -62,7 +62,7 @@ pub struct MisskeyUserDetailed {
     /// seiran はこの設定自体に未対応なため常に `"public"` を返す。クライアント
     /// （`misskey_dart` 等）はこの値が欠落していると非公開とみなし、
     /// `followersCount`/`followingCount` の数値表示を鍵アイコンに置き換える
-    /// （実機で確認済み。値自体は正しく集計されているのに表示されない不具合の原因）。
+    /// （値自体は正しく集計されていても表示されない）。
     pub followers_visibility: String,
     pub following_visibility: String,
     /// 閲覧者との関係情報。`viewer_actor_id` が解決できる場合（ログイン済み）のみ `Some`。
@@ -100,7 +100,7 @@ pub struct MisskeyUserRelations {
 /// `alwaysMarkNsfw`/`carefulBot`/`autoAcceptFollowed` を non-nullable 必須として直接
 /// キャストするため、欠けると Dart 側で `TypeError`（例:
 /// `type 'Null' is not a subtype of type 'num' in type cast`）となり未処理例外で
-/// クライアントがフリーズする（実機で確認済み）。
+/// クライアントがフリーズする。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MisskeyMeDetailed {
@@ -115,8 +115,8 @@ pub struct MisskeyMeDetailed {
 
 /// `misskey_dart` の `DriveFile.fromJson` は `id`/`createdAt`/`name`/`type`/`md5`/`size`/
 /// `isSensitive`/`properties`/`url` を non-nullable 必須としてキャストするため、欠けると
-/// `MisskeyMeDetailed` と同様に Dart 側で `TypeError` となりタイムライン取得が例外落ちする
-/// （実機で確認済み）。`md5` は seiran 内部で持つ `sha256` を代用する（クライアントは値の
+/// `MisskeyMeDetailed` と同様に Dart 側で `TypeError` となりタイムライン取得が例外落ちする。
+/// `md5` は seiran 内部で持つ `sha256` を代用する（クライアントは値の
 /// 妥当性を検証せず単に文字列として保持するだけのため実害はない）。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -176,14 +176,14 @@ pub struct MisskeyNote {
     pub reaction_emojis: BTreeMap<String, String>,
     /// リノート元/引用元ノートの本体。`renoteId` はあるがこれが `null` のままだと、
     /// `misskey_dart` 等のクライアントは元ノートを解決できず「削除されたノート」の
-    /// プレースホルダーを描画する（実機で確認済み）。孫階層（このノート自身が持つ
+    /// プレースホルダーを描画する。孫階層（このノート自身が持つ
     /// `renoteId`/`replyId`）までは`embed_referenced_notes`が1回だけ追加で埋め込むが、
     /// ひ孫（3階層目）は無限再帰・多段フェッチを避けるため埋め込まない（`embed_referenced_notes`
     /// 参照）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub renote: Option<Box<MisskeyNote>>,
     /// 返信先ノートの本体。`replyId` はあるがこれが `null` のままだと、`renote` と同様に
-    /// クライアントが「削除されたノート」のプレースホルダーを描画する（実機で確認済み）。
+    /// クライアントが「削除されたノート」のプレースホルダーを描画する。
     /// 孫階層までは`renote`と同様に埋め込むが、ひ孫（返信先の、さらにその返信先）は
     /// 埋め込まない。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -328,7 +328,7 @@ mod tests {
 
     /// `misskey_dart` の `MeDetailed.fromJson`（Aria 等が `/api/i` のレスポンスをパースする際に
     /// 使用）が non-nullable 必須として直接キャストするフィールド一覧。1つでも欠けると
-    /// Dart 側で未処理の `TypeError` となりアプリがフリーズする（実機で確認済みの回帰）。
+    /// Dart 側で未処理の `TypeError` となりアプリがフリーズする。
     #[test]
     fn me_detailed_includes_all_misskey_dart_required_fields() {
         let me = MisskeyMeDetailed {

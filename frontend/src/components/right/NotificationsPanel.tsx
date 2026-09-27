@@ -175,7 +175,7 @@ export default function NotificationsPanel({
   // キャッシュがあれば初回レンダーの時点から復元済みの内容を表示する（`useEffect`経由で
   // `setItems`すると、そのeffectが走るまでの最初の1回のレンダーが空一覧になり、その一瞬だけ
   // 実高さが縮んでwindow.scrollY（またはコンテナのscrollTop）がブラウザに強制的にクランプされ、
-  // それが継続保存リスナーに拾われて正しいスクロール位置の記憶を0で上書きしてしまう不具合があった）。
+  // それが継続保存リスナーに拾われて正しいスクロール位置の記憶を0で上書きしてしまう）。
   const [loadingInitial, setLoadingInitial] = useState(() => cache === undefined);
   const itemsRef = useRef<NotificationItem[]>([]);
 
@@ -199,7 +199,7 @@ export default function NotificationsPanel({
   // 大きく縮み、window.scrollY（またはコンテナのscrollTop）がブラウザに強制的に0へ
   // クランプされることがある。一覧が短い間は縮む処理が一瞬で終わり気づかないが、無限スクロールで
   // 深く読み込むほど（実高さが大きいほど）縮小に時間がかかり、その間に発生した'scroll'イベントを
-  // 下記の継続保存リスナーが拾って正しい記憶を0で上書きしてしまう不具合があった（実機で確認）。
+  // 下記の継続保存リスナーが拾って正しい記憶を0で上書きしてしまう。
   // クリックした瞬間に同期的に現在値を確定・凍結し、以降の（クランプ由来の）上書きを止める
   // （HomePageの`navigatingAway`/`onBeforeNavigate`と同じ対策）。
   const navigatingAwayRef = useRef(false);
@@ -262,7 +262,7 @@ export default function NotificationsPanel({
   // 初回読み込み中は書き込まない: React 18 StrictMode（開発時）はmount直後に同一レンダーの
   // effectを2回連続実行するため、まだ反映されていない「更新前の古いitems（空配列）」を
   // このeffectが読んでしまい、直前に復元/フェッチ中の正しいキャッシュを空データで
-  // 上書きしてしまう不具合を避ける（HomePage側の同種コメント参照）。
+  // 上書きしてしまうのを避ける（HomePage側の同種コメント参照）。
   useEffect(() => {
     if (loadingInitial || !onCacheChange) return;
     onCacheChange({ items, hasMore });

@@ -296,7 +296,7 @@ mod tests {
     }
 
     /// `@testimport.bsky.social`（did:plc:n3tpur22sxb57zgzwe3lkl5m、実PDS
-    /// `brittlegill.us-west.host.bsky.network`）から2026-09-08に実際に取得した
+    /// `brittlegill.us-west.host.bsky.network`）から実際に取得した
     /// `com.atproto.sync.getRepo`のレスポンス。転入フロー検証専用のテストアカウントで、
     /// 自由に使ってよいことを確認済み。実PDS実装との相互運用性を確認するための固定フィクスチャ。
     #[test]

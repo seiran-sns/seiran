@@ -97,7 +97,7 @@ pub trait AtMigrationRepository: Send + Sync {
     /// ★不可逆境界そのもの。`submitPlcOperation`成功「直後」、`users`/`actors`のDB確定を
     /// 試みる前に必ず呼ぶ。ここで`plc_submitted_at`を記録しておくことで、後続のローカル
     /// アカウント作成が失敗しても「PLCは既に提出済み」という事実が失われない
-    /// （実機で発生: `actors` INSERTがUNIQUE制約違反で失敗した際、この記録が無いと
+    /// （この記録が無いと、`actors` INSERTが失敗した際に
     /// `awaiting_plc_token`のまま停滞し、ユーザーが同じ——既に消費済みの——tokenで
     /// 再試行してしまう）。
     async fn mark_plc_submitted(

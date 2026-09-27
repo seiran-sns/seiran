@@ -507,8 +507,7 @@ async fn materialize_migrated_post(
     // その場合は新規作成せず変換（UPDATE）して再利用する設計（`migration.rs`の
     // `submit_plc_token`参照）。同じ理由で`posts`側も`at_uri`（DIDが不変なので
     // 転入前後で同一値になる）が既存キャッシュ行と衝突しうる。新規行を作らず
-    // 既存行を再利用しないと`posts_at_uri_key`の一意制約違反でリトライが延々続く
-    // （実機で発見）。
+    // 既存行を再利用しないと`posts_at_uri_key`の一意制約違反でリトライが延々続く。
     let at_uri = format!("at://{}/app.bsky.feed.post/{}", ic.req.source_did, rkey);
     let existing_post_id = posts_repo.find_id_by_at_uri(&at_uri).await.map_err(|e| {
         JobError::Transient(format!(
@@ -808,7 +807,7 @@ pub async fn handle_deactivate_source(
 /// `Job::MigrationImportFollows` — 自己再enqueue型。取り込み済み`app.bsky.graph.follow`
 /// レコード（`at_migration_records`、`imported_at`設定済み）を1件ずつ`follows`テーブルへ
 /// 反映する（リモートアクター解決込み）。`at_migration_requests.status`とは独立して動作し、
-/// `deactivating_source`/`completed`への遷移を待たない結果整合処理（マイケルの方針）。
+/// `deactivating_source`/`completed`への遷移を待たない結果整合処理。
 /// レート制限は適用しない（新規フォローではなく既存関係の復元のため）。
 ///
 /// advisory lockのキーは`-request_id`（負数）を使う。`handle_import_process`等の

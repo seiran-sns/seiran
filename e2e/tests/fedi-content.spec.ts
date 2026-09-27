@@ -3,10 +3,8 @@ import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 import { startStubFediServer, type StubFediServer } from "../fixtures/stub-fedi-server";
 import { BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 
-// PR #114（#102）で実装したはずのCW・アンケート表示が、実機確認で全く機能していなかった
-// 回帰（フロントのRawNote正規化でcontentWarning/pollが欠落・inbound側でCreate(Question)を
-// 無条件無視）を踏まえた再発防止テスト。DBに保存されるだけでなく、実際にNoteCardの
-// 表示・トグル挙動まで検証する。
+// Fediから受信したCW・アンケートを、DBへの保存だけでなくNoteCardの表示・トグル挙動まで検証する
+// （フロントの正規化や受信側の型判定で落ちても気づけるように）。
 
 async function findSessionByText(request: import("@playwright/test").APIRequestContext, token: string, text: string) {
   const res = await request.get("/api/dm/sessions", { headers: { Authorization: `Bearer ${token}` } });
@@ -69,7 +67,7 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
     await page.goto(`/notes/${postId}`);
 
     // DM扱いのため右ペインのセッション一覧にも同じCW注意書きがプレビュー表示される
-    // （こちらは本文の代わりにCWラベルのみ表示、#CW未対応修正）。主投稿の開閉挙動を
+    // （こちらは本文の代わりにCWラベルのみ表示）。主投稿の開閉挙動を
     // 検証したいこのテストでは main 領域に絞ってロケーターの曖昧さを避ける。
     const main = page.locator("main");
     await expect(main.getByText(/テスト注意書き/)).toBeVisible();

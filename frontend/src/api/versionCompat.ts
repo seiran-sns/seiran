@@ -55,7 +55,7 @@ export function checkVersionCompat(res: Response) {
     isVersionAtLeast(serverVersion, FRONTEND_MIN_PEER_VERSION);
   if (!compatible) {
     // 原因調査用。どちらの向きの不一致か（フロントが古い/サーバーが古い）を判別できるよう
-    // 4値すべてを出す（マイケル指示）。
+    // 4値すべてを出す。
     console.warn(
       "[seiran] version compat check failed",
       {

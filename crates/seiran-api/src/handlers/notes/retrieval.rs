@@ -290,7 +290,7 @@ pub async fn get_note_ap(
     // オブジェクトをここにも埋め込む。フォロー関係が無いリモートはCreateを受け取らず
     // このエンドポイントの直接GETのみでオブジェクトを取得するため、ここが欠けていると
     // CW・#237のロスレス往復（添付NSFW/GIF/寸法・複数URLカード等）がPush配送時にしか
-    // 機能しない片手落ちになる（実地検証で発覚）。
+    // 機能しない片手落ちになる。
     if let Ok(basis) =
         seiran_common::ap::deliver::fetch_post_activity_basis(&state.db, post_id, post.actor_id)
             .await

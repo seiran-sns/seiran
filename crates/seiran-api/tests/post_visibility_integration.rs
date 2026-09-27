@@ -1,7 +1,6 @@
 //! タイムライン可視性判定 SQL 関数（`post_is_visible_to`/`actor_is_hidden_for_viewer`）の
 //! 結合テスト。home_timeline/local_timeline 等 9 箇所から共通利用される可視性ルールの
-//! 中心ロジックだが、これまでユニットテストが 1 件も無かった（`docs/code_audit_2026-08-05.md`
-//! R-8 参照）。
+//! 中心ロジック。
 //!
 //! `follows`/`post_recipients`/`blocks`/`mutes` は `actors`/`posts` への FK を持つため、
 //! テスト専用の固定 ID を持つ fixture 行（`setup_fixtures`）を用意した上で、
@@ -284,9 +283,8 @@ async fn setup_direct_post_fixture(pool: &sqlx::PgPool) {
     .expect("テスト用 follows 作成に失敗");
 }
 
-/// 以前は参照埋め込み（`embed_renotes`/`embed_quotes`/Misskey`fetch_referenced_notes`）が
-/// 手書きの可視性条件で`direct`を`followers_only`と同じ扱いにしており、宛先ではない
-/// フォロワーにもDM本文が見えていた。一括取得が`post_is_visible_to`に従うことを固定する。
+/// 参照埋め込み（`embed_renotes`/`embed_quotes`/Misskey`fetch_referenced_notes`）の一括取得が
+/// `post_is_visible_to`に従い、宛先ではないフォロワーにDM本文を返さないことを固定する。
 #[tokio::test]
 #[ignore = "実DBが必要"]
 async fn embedded_reference_fetch_does_not_leak_direct_post_to_followers() {

@@ -1,9 +1,6 @@
-// DMの可視性漏洩防止を横断的に固定するテスト。2026-09-15、post_is_visible_to の
-// パラメータ/列名衝突バグ（direct可視性チェックが「このDMの宛先か」ではなく
-// 「過去に何かDMを受け取ったことがあるか」という無関係な判定に壊れていた）が原因で、
-// 無関係な第三者が他人同士のDMを閲覧・リアクションできてしまう実害が発生した
-// （docs/protocols.md 9節、docs/database.md 参照）。同種の回帰を検知できるよう、
-// 「DM受信経験のある第三者」と「DM経験の無い第三者」の両方が、タイムライン・URL直指定・
+// DMの可視性漏洩防止を横断的に固定するテスト（docs/protocols.md 9節）。
+// direct の判定が「このDMの宛先か」でなく「何かDMを受け取ったことがあるか」に化けても
+// 検知できるよう、「DM受信経験のある第三者」と「DM経験の無い第三者」の両方が、タイムライン・URL直指定・
 // プロフィールページ・検索・リアクション・リプライ・DM API のいずれからも他人のDMへ
 // 到達できないことを固定する。
 
@@ -18,7 +15,7 @@ test.describe("無関係な第三者は他人のDMへどの経路からも到達
   }) => {
     const alice = await registerUserViaApi(request, "e2dmprivA");
     const bob = await registerUserViaApi(request, "e2dmprivB");
-    // charlie: 「DM受信経験のある第三者」（過去バグの再現条件そのもの）。
+    // charlie: 「DM受信経験のある第三者」。
     // dave: charlieにDM履歴を持たせるためだけの相手。
     const charlie = await registerUserViaApi(request, "e2dmprivC");
     const dave = await registerUserViaApi(request, "e2dmprivD");
@@ -133,7 +130,6 @@ test.describe("無関係な第三者は他人のDMへどの経路からも到達
 });
 
 // AP の outbox は認証なしで誰でも取得できるため、フォロワー限定・DM を含めてはならない。
-// 以前は可視性を見ずに全投稿を `to: Public` の Create として並べていた（2026-09-26 改善大会）。
 test("AP outbox にはフォロワー限定・DM が出ず、総数にも数えない", async ({ request }) => {
   const author = await registerUserViaApi(request, "e2eoutbox");
   const recipient = await registerUserViaApi(request, "e2eoutboxdm");

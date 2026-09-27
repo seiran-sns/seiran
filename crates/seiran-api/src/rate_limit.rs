@@ -42,8 +42,8 @@ async fn setting_i64(state: &AppState, key: &str, default: i64) -> i64 {
 
 /// 同一IPからのアカウント作成数制限の枠を予約する（上限到達なら`429`）。戻り値の予約IDは、
 /// 登録が失敗した場合に`cancel_account_creation`で取り消す。IPが特定できない場合は制限対象外
-/// （`None`）。以前は「数える→（PLC登録など数秒）→記録する」の順で、並列登録が全て上限判定を
-/// すり抜けていた。
+/// （`None`）。「数える→（PLC登録など数秒）→記録する」の順だと、並列登録が全て上限判定を
+/// すり抜ける。
 pub async fn reserve_account_creation(
     state: &AppState,
     ip: &ClientIp,

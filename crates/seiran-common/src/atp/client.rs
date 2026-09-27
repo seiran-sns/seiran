@@ -354,7 +354,7 @@ fn rkey_from_at_uri(at_uri: &str) -> Option<&str> {
 /// **`get_record_value`（公開AppView経由）は使わない。** 公開AppView
 /// （`api.bsky.app`）の`com.atproto.repo.getRecord`は`app.bsky.*`等の既知lexiconしか
 /// 中継せず、`org.seiran.actor.declaration`のような独自NSIDは実在するレコードでも
-/// 常に`RecordNotFound`を返す（実機検証で確認済み）。DIDを`atproto_pds`サービスへ
+/// 常に`RecordNotFound`を返す。DIDを`atproto_pds`サービスへ
 /// 解決し、そのPDSへ直接`getRecord`する必要がある。
 pub async fn fetch_seiran_actor_declaration(did: &str) -> Option<String> {
     let resolved = super::did_resolve::resolve_service_endpoint(did, "atproto_pds")

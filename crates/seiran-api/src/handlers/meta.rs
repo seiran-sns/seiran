@@ -47,7 +47,7 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
     // 外部プロキシ未設定時は自インスタンスの `/proxy`（SSRF対策済み、`GET /proxy?url=...`）に
     // フォールバックする（本家Misskeyの慣行）。空文字列のまま返すと、Aria等のクライアントが
     // `{mediaProxyUrl}/image.webp?url=...` という形式でURLを組み立てる際に不正なURLになり、
-    // リモートインスタンスアイコン等の画像取得が軒並み失敗する（実機で確認済み）。
+    // リモートインスタンスアイコン等の画像取得が軒並み失敗する。
     let media_proxy_url = {
         let v = get("media_proxy_url");
         if v.is_empty() {

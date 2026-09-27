@@ -107,7 +107,7 @@ pub enum BskyEmbedResolution {
 fn watch_page_fallback_embed(state: &AppState, media_file_id: i64) -> BskyEmbed {
     // 音声（Bskyに専用embedが無い）・動画パイプライン未完了/失敗時のフォールバックリンク先は、
     // メディアファイルの直リンクではなく簡易視聴ページ（`handlers::drive::watch_media`）にする。
-    // 直リンクだとブラウザがダウンロードしてしまい再生できないため（2026-07-17 マイケル指摘）。
+    // 直リンクだとブラウザがダウンロードしてしまい再生できないため。
     BskyEmbed::External {
         url: format!(
             "https://{}/api/media/{}/watch",
@@ -171,7 +171,7 @@ fn resolve_attachment_embed(state: &AppState, row: &EmbedCandidateRow) -> BskyEm
 /// 本文中の特定URLをBsky embed選択した場合の `External` embed を組み立てる。OGP
 /// （title/description/thumbnail）を同期取得し、取得できてもできなくても選択自体は常に
 /// 尊重する（取得失敗時は素の `External`）。あわせて、seiranローカルでも同じURLをカード表示
-/// できるよう `post_link_cards`（position=0）へ保存する（マイケル指摘。選択が無ければ
+/// できるよう `post_link_cards`（position=0）へ保存する（選択が無ければ
 /// ローカル表示にカードが出ないのは「選んで初めてカード化する」という仕様のため）。
 async fn resolve_url_embed(
     state: &AppState,
@@ -284,7 +284,7 @@ pub async fn attach_link_cards_from_urls(state: &AppState, post_id: i64, urls: &
 /// 自身のURLを、選択肢名だけの箇条書きプレーンテキスト（`- 選択肢A\n- 選択肢B`）を
 /// descriptionにしてリンクカード化する。投稿の言語が決定できないため見出し文・案内文は
 /// 付けない。作成時点の得票は常に0で、Bsky embedは一度コミットすると再コミットされず
-/// 得票を反映できないため、得票バー・パーセンテージ表示も行わない（マイケル指摘）。
+/// 得票を反映できないため、得票バー・パーセンテージ表示も行わない。
 /// `post_link_cards`へのINSERTは行わない（このポスト自身が`NoteResponse.poll`経由で既に
 /// リッチなアンケートUIを表示するため、自分自身を指すリンクカードを重ねて表示するのは
 /// 冗長・表示上不自然なため）。
@@ -321,7 +321,7 @@ async fn fetch_embed_candidate_rows(
 }
 
 /// 引用投稿（`app.bsky.embed.record`）に静止画添付があれば、`app.bsky.embed.recordWithMedia`
-/// のmedia部分として使う`BskyImage`一覧を返す（マイケル指摘。#227の`bsky_embed_choice`は
+/// のmedia部分として使う`BskyImage`一覧を返す（#227の`bsky_embed_choice`は
 /// 引用投稿では無視されるため、常に「静止画があれば先頭4枚」の自動選択のみを行う）。
 /// アニメGIF・動画・URLカード・アンケートは対象外（動画はBskyPostCommitDeferredの結合待ち
 /// フローと絡み複雑なため、当面は静止画のみ対応）。添付が無い/静止画が無ければ空を返す。
@@ -654,7 +654,7 @@ pub async fn deliver_repost(
             // at_uri なし（Fedi リモートまたはローカル）→ Bsky フォールバック:
             // 本文はリポスト記号だけにし、元ポストURLを external embed で添付する。
             // リポストラッパー行（post_id）自体を PDS 上のテキストポストとしてコミットする。
-            // commit_quote に post_id を渡すことで posts.at_uri/at_cid/at_rkey がこの行に
+            // commit_post に post_id を渡すことで posts.at_uri/at_cid/at_rkey がこの行に
             // 書き込まれ、自前 Jetstream の自己エコー（save_bsky_post）が
             // `ON CONFLICT (at_uri) DO NOTHING` により重複ポストを作らなくなる
             // （このリポストと無関係な別ノートがタイムラインに現れなくなる）。
@@ -788,7 +788,7 @@ fn normalize_misskey_visibility(v: &str) -> &str {
 ///
 /// classify_post の `is_local` 早期判定（`LocalOrSeiran` = 両実体持ち扱い）に頼ると、
 /// ローカル投稿で片方のプロトコルにしか配送していない場合でも両方許可扱いになってしまい、
-/// 親と無関係な独立ポストとして誤配信される（当初発見した不具合の修正）。
+/// 親と無関係な独立ポストとして誤配信される。
 fn reply_delivery_allowed(meta: &PostDeliveryMeta) -> (bool, bool) {
     if meta.actor_type == "local" {
         (meta.deliver_fedi, meta.deliver_bsky)
@@ -894,7 +894,7 @@ pub(crate) fn ap_delivery_quote_fields(
 /// Bsky embed選択（#227）がURLで、かつ本文にそのURLが含まれない場合、ActivityPub配送用
 /// 本文への追記が必要かどうかを判定する。Fedi（AP）にはBskyのembed概念が無く、本文でしか
 /// URLを参照できないため、選択後に本文からそのURLを削除した「孤児」状態のままだとFedi側の
-/// 読者だけがそのURLを一切見られなくなってしまう（マイケル指摘）。本文に既に含まれている
+/// 読者だけがそのURLを一切見られなくなってしまう。本文に既に含まれている
 /// 場合、および引用投稿（`quote_embed_present`、`bsky_embed_choice`自体が無視される）は
 /// 何もしない。
 fn fedi_url_append_needed(
@@ -992,7 +992,7 @@ pub struct RegularPostDelivery {
     /// Bsky embedの明示選択（#227、`resolve_bsky_embed`参照）。引用投稿（`bsky_quote_embed`が
     /// `Some`）の場合は無視される（動画/GIF/URL embed選択は引用と共存しない）。ただし静止画
     /// 添付は明示選択に関わらず自動でrecordWithMediaとして引用と一緒に配送される
-    /// （`collect_bsky_quote_images`参照、マイケル指摘）。
+    /// （`collect_bsky_quote_images`参照）。
     pub bsky_embed_choice: Option<BskyEmbedChoice>,
     /// アンケート（#228、`posts.poll`と同じ形のJSON）。Bsky embed選択の`Poll`候補・
     /// AP `Question`配送の両方で使う。
@@ -1044,8 +1044,8 @@ pub async fn deliver_regular_post(state: &AppState, mut d: RegularPostDelivery) 
         );
     }
 
-    // Bsky embed選択がURL（#227）の場合、ActivityPub配信でも同じURLを参照できるようにする
-    // （マイケル指摘）。引用投稿（`bsky_quote_embed`がSome）は`bsky_embed_choice`自体が
+    // Bsky embed選択がURL（#227）の場合、ActivityPub配信でも同じURLを参照できるようにする。
+    // 引用投稿（`bsky_quote_embed`がSome）は`bsky_embed_choice`自体が
     // 無視されるため対象外。CW（#229）中も`bsky_embed_choice`自体を無視するため対象外。
     let fedi_append_url: Option<String> = if bsky_target && d.content_warning.is_none() {
         fedi_url_append_needed(
@@ -1086,12 +1086,11 @@ async fn enqueue_direct_message_delivery(state: &AppState, d: &RegularPostDelive
 ///   添付物すべてを見るにはURLリンクカードからseiranの記事詳細ページへ飛ぶ設計のため）、
 ///   常に`build_cw_bsky_embed`のリンクカード1件だけ。
 /// - 引用投稿: 引用 embed。静止画添付があれば`app.bsky.embed.recordWithMedia`として引用と
-///   画像を両方配送する（添付物が画像だけなら選択の余地なく画像も送られるべき、マイケル指摘）。
+///   画像を両方配送する（添付物が画像だけなら選択の余地なく画像も送られるべき）。
 ///   動画/GIF/URL embed選択（`bsky_embed_choice`）は引用と共存しないため無視する。
 /// - それ以外: 選択（またはその省略時の固定優先順位）から解決する（#227）。選択された添付が
 ///   Bsky動画パイプライン結合未確定なら`Pending`（即座にコミットすると常に
-///   `app.bsky.embed.external`へフォールバックし、以後video embed化されないため、
-///   2026-07-17 マイケル指摘・実機再現確認）。
+///   `app.bsky.embed.external`へフォールバックし、以後video embed化されないため）。
 async fn resolve_delivery_bsky_embed(
     state: &AppState,
     d: &mut RegularPostDelivery,
@@ -1603,7 +1602,7 @@ mod tests {
 
     // ─── reply_delivery_allowed ────────────────────────────────────────────
     // リプライの配信先制御（間違えると親と無関係な独立ポストとして誤配信され、
-    // スレッドが繋がらない不具合になるため、実体の有無の組み合わせを網羅する）。
+    // スレッドが繋がらなくなるため、実体の有無の組み合わせを網羅する）。
     // リモート投稿は実体（ap_object_id/at_uri）の有無、ローカル投稿は
     // deliver_fedi/deliver_bsky カラムの値で判定が分かれる点に注意
     // （ローカル投稿の ap_object_id は deliver_fedi に関わらず常に存在するため）。
@@ -1644,7 +1643,7 @@ mod tests {
     fn reply_delivery_allowed_local_fedi_only_disallows_bsky() {
         // fedi配送のみのローカル投稿（deliver_bsky=false）への返信は、ap_object_idが
         // 常に存在していても Bsky 実体を持たないため Bsky 配信してはならない
-        // （実体の有無だけで判定すると誤って許可されてしまう、当初発見した不具合）。
+        // （実体の有無だけで判定すると誤って許可されてしまう）。
         let meta = local_delivery_meta(true, false);
         assert_eq!(super::reply_delivery_allowed(&meta), (true, false));
     }

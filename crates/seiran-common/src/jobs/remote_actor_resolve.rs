@@ -1,5 +1,5 @@
 //! 未知のリモート Fedi アクター（ローカル `actors` 未登録）のプロフィールを解決してキャッシュ
-//! するジョブ (`RemoteActorResolve`, #68 マイケル指摘)。
+//! するジョブ (`RemoteActorResolve`, #68)。
 //!
 //! リモートの followers/following 一覧取得（同期取得・`RemoteFollowListSync` バックグラウンド
 //! 取得の双方）で、ローカル DB に存在しない actor URI が見つかった場合に積まれる。
@@ -16,11 +16,9 @@ use crate::repository::{ActorRepository, PgActorRepository};
 
 /// enqueue元（APIハンドラの`remote_follow_summary`・Worker側の`RemoteFollowListSync`の
 /// 双方）で共有する重複投入防止クールダウン兼ネガティブキャッシュ。`REMOTE_FOLLOW_SYNC_COOLDOWN`
-/// （#229、フォロー一覧同期ジョブ自体の重複防止）とは別に、こちらは個々のactor URIの
-/// 解決そのものが無条件・無制限に再投入されていた（2026-09-06実機確認: フォロー数の多い
-/// リモートアクターのフォロー中/フォロワータブを開くたびに、404/410等で恒久的に解決できず
-/// DBに登録されないままの数百〜数千URIが際限なく再enqueueされ、CPU・DBコネクションを
-/// 食い尽くしてAPIが無応答になった）。
+/// （#229、フォロー一覧同期ジョブ自体の重複防止）とは別に、個々のactor URIの解決を抑える。
+/// これが無いと、フォロー数の多いリモートアクターのタブを開くたびに、404/410等で恒久的に
+/// 解決できない数百〜数千URIが際限なく再enqueueされ、CPU・DBコネクションを食い尽くす。
 ///
 /// APIハンドラ層（`seiran-api`のAppState）とWorker層（`JobContext`）は別インスタンスで
 /// 状態を共有しないため、プロセス内グローバルな`static`として持つ（`remote_follow_sync_recent`

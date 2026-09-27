@@ -255,7 +255,7 @@ pub async fn change_password(
 /// `POST /api/account/revoke-all-sessions`
 /// 発行済みの全JWT（このリクエスト自身のトークンも含む）を一括失効させる。
 /// 端末紛失・不審なログインに気付いた際に、パスワードを変えずとも即座に
-/// 全セッションを切断できるようにする（docs/code_audit_2026-08-05.md S-2関連）。
+/// 全セッションを切断できるようにする。
 /// 実行後はこのリクエストのトークンも無効になるため、フロントは成功後に
 /// ログイン画面へ誘導すること。
 pub async fn revoke_all_sessions(
@@ -408,9 +408,7 @@ pub struct WithdrawRequest {
 /// 4. actors.withdrawn_at を設定して以降のログインを無効化
 /// 5. ブロック・ミュート・リポストミュート関係を解除する（自分発・自分宛の両方、#242）
 /// 6. 自分がフォローしていた相手（フォロイー）全員へのアンフォロー（AP Undo Follow配送 +
-///    ATPフォロー解除コミット）。従来は1〜4のみで、自分のフォロー先へは何も通知していな
-///    かったため、リモート側にフォロー関係が残り続ける不整合があった（2026-07-16
-///    マイケル指摘・承認）。
+///    ATPフォロー解除コミット）。これが無いとリモート側にフォロー関係が残り続ける。
 pub async fn withdraw(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -443,8 +441,7 @@ pub async fn withdraw(
     let now = chrono::Utc::now();
 
     // 1. AP Delete(Actor) を Fedi フォロワーに配送（Worker の ApDelivery ジョブ）。
-    //    以前は同期 await でフォロワー数に比例して退会レスポンスが遅延していた。
-    //    退会処理は actors 行を物理削除しないため、応答後のジョブ実行でも宛先解決できる。
+    //    同期で配ると応答がフォロワー数に比例して遅れる。退会処理は actors 行を物理削除しないため、応答後のジョブ実行でも宛先解決できる。
     state
         .enqueue_ap_delivery(actor_id, ApDeliveryKind::DeleteActor)
         .await;
@@ -482,7 +479,7 @@ pub async fn withdraw(
     // 4. フォロー先全員へのアンフォローをWorkerのジョブとして積む（Worker の
     //    AccountWithdrawUnfollowAll ジョブ。ApDelivery/ProxyFollowSyncと同じジョブ
     //    キュー経由にすることで、プロセスクラッシュ時もリトライ機構の恩恵を受けられる
-    //    （tokio::spawnだとプロセス終了と共に失われてしまうため。2026-07-16 マイケル指摘）。
+    //    （tokio::spawnだとプロセス終了と共に失われてしまうため）。
     state
         .enqueue_account_withdraw_unfollow_all(actor_id, actor.username.clone())
         .await;

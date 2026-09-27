@@ -78,7 +78,7 @@ pub async fn convert_mentions_for_bsky(
         // `@` の直前が半角英数字 / アンダースコアならメールアドレスの一部としてスキップ。
         // ASCII限定でチェックするのは、`is_alphanumeric()`（Unicode版）だと日本語等の文字も
         // 真になり、「文章@handle」のようにCJK文字に直接続くメンションを誤ってスキップして
-        // しまうため（実機確認: 全角括弧直後にスペース無しで `@ethilen.bsky.social` と続く投稿）。
+        // しまうため（例: 全角括弧直後にスペース無しで `@ethilen.bsky.social` と続く投稿）。
         if i > 0 {
             let prev = text_chars[i - 1];
             if prev.is_ascii_alphanumeric() || prev == '_' {
@@ -515,7 +515,7 @@ pub async fn extract_local_mention_actor_ids(
 ///
 /// ハンドルの存在確認・DID取得は常に公開 AppView（`resolve_bsky_handle_did`）で行う
 /// （`bsky.brid.gy` は `com.atproto.identity.resolveHandle` を実装していない
-/// ＝ `MethodNotImplemented` を返すため使えない。実機確認）。DB は「ローカルに
+/// ＝ `MethodNotImplemented` を返すため使えない）。DB は「ローカルに
 /// 既知の brid.gy アクターとして記録済みか」の事前チェックにのみ使う。
 async fn resolve_fedi_for_bsky(
     username: &str,
@@ -525,8 +525,8 @@ async fn resolve_fedi_for_bsky(
 ) -> Option<(String, Option<String>)> {
     // 相手が`remote_seiran`（他seiranインスタンスのユーザー、`seiran_actor_merge`が
     // AP側・ATP側の身元を「結婚」させ済み）なら、そもそもブリッジ不要で本物のDIDを
-    // 既に知っている。brid.gy解決を試みる前にこちらを優先する（実機で発見: DIDを
-    // 持つ相手なのにbrid.gy解決に失敗し単なるlink facetへ後退していた）。
+    // 既に知っている。brid.gy解決を試みる前にこちらを優先する（brid.gy解決に失敗すると、
+    // DIDを持つ相手なのに単なるlink facetへ後退してしまう）。
     if let Some((at_did, at_handle)) = get_known_remote_seiran_did(username, domain, pool).await {
         let handle = at_handle.unwrap_or_else(|| format!("{}.{}", username, domain));
         return Some((handle, Some(at_did)));
@@ -1012,8 +1012,8 @@ mod tests {
     }
 
     /// CJK文字（日本語等）に直接続く `@mention` は、メールアドレスの一部として誤スキップされない
-    /// ことを確認する（実機で「リモート@ethilen.bsky.social」のようにスペース無しで続く投稿が
-    /// 完全に無処理になっていたバグの再発防止）。`is_alphanumeric()`（Unicode版）だと
+    /// ことを確認する（「リモート@ethilen.bsky.social」のようにスペース無しで続く投稿）。
+    /// `is_alphanumeric()`（Unicode版）だと
     /// 日本語の文字も真になってしまうため、ガードは ASCII 限定でなければならない。
     #[test]
     fn mention_guard_does_not_skip_at_after_cjk_char() {

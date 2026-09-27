@@ -70,7 +70,7 @@ const POST_LANGUAGE_LABEL_KEYS: Record<PostLanguage, string> = {
   fr: "appearanceSettings.languageFr",
 };
 
-/** ポスト言語選択の初期値（デフォルトは現在の表示言語、マイケル指示）。表示言語が
+/** ポスト言語選択の初期値（デフォルトは現在の表示言語）。表示言語が
  * `zh-Hant`/`zh-Hans`のどちらでも、ポスト言語のデフォルトは`zh`に丸める。 */
 function defaultPostLanguage(): PostLanguage {
   return postLanguageBase(i18n.language);
@@ -143,7 +143,7 @@ interface EmbedCandidate {
   choice: BskyEmbedChoice;
   label: string;
   /** アニメGIF・動画/音声候補のみ。「動画1」等の表記だけではどれか分からないため
-   * 小さなサムネイルを添える（マイケル指摘）。動画/音声はサムネイル抽出に失敗している
+   * 小さなサムネイルを添える。動画/音声はサムネイル抽出に失敗している
    * 場合があり、その場合は無し。 */
   thumbnailUrl?: string;
 }
@@ -270,7 +270,7 @@ export default function PostComposer({
     composerDefaults?.visibility ?? "public",
   );
   // Tabキーで投稿ボタンにフォーカスが乗っている間は、そのボタンが赤枠マーカー対象になる
-  // （マイケル指摘: Ctrl+Enterの送信先が打鍵するまで分からないUXを避けるため）。
+  // （Ctrl+Enterの送信先が打鍵するまで分からないUXを避けるため）。
   const [focusedVisibility, setFocusedVisibility] = useState<Visibility | null>(null);
   const publicBtnRef = useRef<HTMLButtonElement>(null);
   const [posting, setPosting] = useState(false);
@@ -295,7 +295,7 @@ export default function PostComposer({
     initialDraft?.linkCardUrls ?? [],
   );
   // ポスト言語（Bsky配送の`langs`にのみ意味を持つ）。デフォルトは現在の表示言語
-  // （マイケル指示、`composerDefaults`の「最後に送信した値」方式とは異なる）。
+  // （`composerDefaults`の「最後に送信した値」方式とは異なる）。
   const [language, setLanguage] = useState<PostLanguage>(
     isPostLanguage(initialDraft?.language ?? "")
       ? (initialDraft?.language as PostLanguage)
@@ -320,11 +320,11 @@ export default function PostComposer({
   const unlistedBtnRef = useRef<HTMLButtonElement>(null);
   const privateBtnRef = useRef<HTMLButtonElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  // 絵文字ショートコード・ユーザーID挿入ピッカー（本文カーソル位置へ挿入、マイケル指示）。
+  // 絵文字ショートコード・ユーザーID挿入ピッカー（本文カーソル位置へ挿入）。
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [userIdPickerOpen, setUserIdPickerOpen] = useState(false);
-  // Bsky配送ボタンの警告バッジ判定用（Bskyは本文内カスタム絵文字を埋め込めない、
-  // マイケル指示）。`ComposerEditor`もこの一覧を独自にfetchしているが`fetchCustomEmojis`
+  // Bsky配送ボタンの警告バッジ判定用（Bskyは本文内カスタム絵文字を埋め込めない）。
+  // `ComposerEditor`もこの一覧を独自にfetchしているが`fetchCustomEmojis`
   // はプロセス内キャッシュ済みのため二重取得のコストはない。
   const [customEmojis, setCustomEmojis] = useState<PublicEmoji[]>([]);
   useEffect(() => {
@@ -354,7 +354,7 @@ export default function PostComposer({
   }, [autoFocus]);
 
   // 本文入力欄（ComposerEditorのcontentEditable要素）の高さ上限を、画面の残り
-  // スペースに応じて動的に計算する（マイケル指摘: 固定vh値だと画面が低い時に
+  // スペースに応じて動的に計算する（固定vh値だと画面が低い時に
   // 投稿ボタンが画面外へ押し出され、逆に画面が高い時は伸び足りず余白が余る）。
   // 「フォーム内の本文欄以外の部分の高さ」を実測し、モーダル内ならダイアログの
   // スクロール可能な祖先の下端、無ければビューポート下端までの残りをそこから
@@ -569,7 +569,7 @@ export default function PostComposer({
   // 書いてラジオボタンリストからそれを選び、その後本文からURLを削除する（孤児化）という
   // Blueskyの「URL貼り付け→プレビューカード→本文から消してもカードは残る」に近い操作。
   // これを可能にするため、候補が1件でも「URL関連（本文URLがある、または既にURL選択済み）」
-  // なら曖昧さの有無に関わらずリストを表示する（マイケル指摘）。
+  // なら曖昧さの有無に関わらずリストを表示する。
   const hasUrlCandidate = bodyUrls.length > 0 || bskyEmbedChoice?.kind === "url";
   // CW（#229）が有効な間は、Bsky embed選択自体を行わない（隠された本文・添付物を見るには
   // 常にURLリンクカードからseiranの記事詳細ページへ飛ぶ設計のため、選ぶ余地が無い）。
@@ -617,8 +617,8 @@ export default function PostComposer({
 
   // チェックボックスリスト表示中（Bsky配送オフ or CW中）からラジオボタンリストを表示する
   // 状態（Bsky配送オン かつ CWオフ）へ切り替わった瞬間、チェック済みURLのうち最もインデックス
-  // の小さいもの（urlCardCandidates内での出現順）をラジオボタンリストの選択へ引き継ぐ
-  // （マイケル指摘）。既に明示選択がある場合は上書きしない。
+  // の小さいもの（urlCardCandidates内での出現順）をラジオボタンリストの選択へ引き継ぐ。
+  // 既に明示選択がある場合は上書きしない。
   useEffect(() => {
     if (!showEmbedChoiceList || bskyEmbedChoice !== null || checkedLinkCardUrls.length === 0) {
       return;
@@ -731,8 +731,7 @@ export default function PostComposer({
     e.preventDefault();
     if (!replyTo && isVisibilityDisabled(effectiveDefaultVisibility)) {
       // デフォルトボタンが公開範囲の相互排他でグレーアウトしている間は、無言で意図しない
-      // 公開範囲へ送信してしまわないよう、送信の代わりにパブリック投稿へフォーカスを移す
-      // （マイケル指摘）。
+      // 公開範囲へ送信してしまわないよう、送信の代わりにパブリック投稿へフォーカスを移す。
       publicBtnRef.current?.focus();
       return;
     }
@@ -773,7 +772,7 @@ export default function PostComposer({
 
   const attachLimitReached = attachments.length >= MAX_ATTACHMENTS;
 
-  // 矢印キーナビゲーション（マイケル指摘: フォーカスが投稿ボタン上にある間は左右矢印で
+  // 矢印キーナビゲーション（フォーカスが投稿ボタン上にある間は左右矢印で
   // 3種の投稿ボタンを行き来でき、上矢印でBsky配送ボタンへ。Fedi配送・Bsky配送・添付・
   // アンケート・CWの操作ボタン列にフォーカスがある間は左右矢印でその5個を行き来でき、
   // 上矢印で本文へ、下矢印でデフォルトの投稿ボタン〔無効化中ならパブリック、それも

@@ -446,11 +446,7 @@ export default function NoteDetailPage() {
 
   const right = (
     // closest("aside")でAppShellの右ペイン本体を辿るための参照を提供する（#226）。
-    // 以前はdisplay:contentsでレイアウトへの影響を避けていたが、通常のdiv（block要素、
-    // 子はTabsと切り替え表示パネル1つずつなので縦積みの見た目は変わらない）に変更しても
-    // 支障が無いため単純化した。狭幅でposition:stickyが効かなくなる不具合の実体は
-    // display:contentsではなくAppShell.module.cssの.rightのoverflow-y残留だった
-    // （修正はAppShell.module.css側、#241）。
+    // 通常のdiv（子はTabsと切り替え表示パネル1つずつなので縦積みの見た目は変わらない）。
     <div ref={rightPaneRef}>
       <Tabs
         tabs={visibleTabs.map((tab) => tab.label)}

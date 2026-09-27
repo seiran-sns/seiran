@@ -411,7 +411,7 @@ pub async fn deactivate_account(
 mod tests {
     use super::*;
 
-    /// `@testimport.bsky.social`（did:plc:n3tpur22sxb57zgzwe3lkl5m）に対する実機疎通確認。
+    /// `@testimport.bsky.social`（did:plc:n3tpur22sxb57zgzwe3lkl5m）に対する疎通確認（実ネットワークを使う）。
     /// パスワードを要する`createSession`以降は含めず、認証不要な読み取り系のみを検証する
     /// （ハンドル解決→サービスエンドポイント解決→SSRF対策込みの実リクエスト、が
     /// 一連で動くことの確認が目的）。ネットワークアクセスを行うため通常のテスト実行では

@@ -1,7 +1,5 @@
 //! 通知（Misskey 本家の `Notification` エンティティに準拠）の永続化。
 //!
-//! 以前は WebSocket のプッシュ配信のみでオンメモリ保持（ページ再読み込みで消失、
-//! 直近100件までしか遡れない）だった「クイック通知」をDB永続化し、
 //! `POST /api/i/notifications`（Misskey 互換）でカーソルページネーション取得できるようにする。
 
 use async_trait::async_trait;

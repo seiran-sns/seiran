@@ -61,8 +61,7 @@ pub(super) fn extract_bridge_target_at_uri(note: &serde_json::Value) -> Option<S
 /// を名乗る）を検知する。配送経路の異常（リレー等が Create の object.id/url を書き換えて送り
 /// 返してくる等）で発生し、該当ノートは既にローカルに存在するため、呼び出し元はこれを新規
 /// INSERTせず、返ってきた既存 post_id をそのまま使うか活動自体を無視しなければならない
-/// （#117022998620934901 で発覚: このガードが無かったため domain はローカルだが id が
-/// 一致しない重複行が生成された）。
+/// （このガードが無いと domain はローカルだが id が一致しない重複行が生成される）。
 pub(super) fn detect_loopback_post_id(
     inbox: &InboxContext,
     note_id: &str,

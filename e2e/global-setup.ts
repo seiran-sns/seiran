@@ -25,7 +25,7 @@ export default async function globalSetup() {
       // ログインブルートフォース判定の「同一パスワードへの異なるユーザー名試行数」
       // カウンター（`variants_by_secret`、`crates/seiran-api/src/rate_limit.rs`）は
       // ログイン成功時にもリセットされないため、共通パスワードを使う大量の一般ユーザー
-      // ログイン試行に紛れてadmin自身のログインまで拒否される事故があった（実機確認）。
+      // ログイン試行に紛れてadmin自身のログインまで拒否されてしまう。
       password: "seiranda-e2e-admin-bootstrap",
     }),
   });

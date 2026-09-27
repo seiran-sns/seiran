@@ -45,8 +45,8 @@ pub struct AuthorizeRequest {
 /// `isLocked`/`isSilenced`/`isSuspended`/`followersCount`/`followingCount`/`notesCount`
 /// を non-nullable 必須フィールドとして要求し、欠けていると（キー不足 or null）
 /// 生の Dart `TypeError` を投げる。呼び出し元（Aria の go_router `/miauth` リダイレクト）に
-/// 例外処理が無いため、フィールド不足はアプリのフリーズ（画面が真っ黒になる）に直結する
-/// （実機で確認済み）。フォロー数等は今回は正確な集計をせず `0`/`false` の安全な既定値で埋める。
+/// 例外処理が無いため、フィールド不足はアプリのフリーズ（画面が真っ黒になる）に直結する。
+/// フォロー数等は今回は正確な集計をせず `0`/`false` の安全な既定値で埋める。
 #[derive(Serialize)]
 pub struct CheckResponseUser {
     pub id: String,
@@ -180,9 +180,7 @@ pub async fn miauth_authorize(
     // もう一本増やさない）。`generate_app_token`は`exp`クレームを持たない無期限
     // トークンを発行する（自社ログインの`generate_token`も現在は同じく無期限）。
     // 失効は `app_tokens.revoked_at`（本関数末尾で記録）でのみ行う。
-    // 以前は無意味なダミー文字列（`miauth-token-<uuid>`）を発行していたため、JWT として
-    // 検証できず、タイムライン閲覧（未認証で見られる）は動いても投稿等の要認証操作が
-    // 401 になっていた。既知の制約: アプリ単位の権限スコープは未対応
+    // 既知の制約: アプリ単位の権限スコープは未対応
     // （自社ログインのトークンと同じ扱いのため）。
     let (token, jti) = match state
         .local_auth
@@ -245,7 +243,7 @@ async fn miauth_check_inner(session_id: &str, state: &AppState) -> Response {
     // 成功しない（成立済みセッションは取り出すと同時に削除する）。未認可・不明セッションは
     // 常に 200 + {"ok": false} を返す（本家サーバーもここは非2xxを返さない。クライアント
     // （Aria 等）はこのチェックを1回きり・例外未捕捉で呼ぶ実装が多く、非2xxを返すとクライアント
-    // 側で未処理例外となり画面がフリーズする — 実機で確認済み）。
+    // 側で未処理例外となり画面がフリーズする）。
     let claimed = {
         let mut map = state.miauth_sessions.write().await;
         let is_ready = matches!(
@@ -360,8 +358,8 @@ mod tests {
     /// `misskey_dart` の `UserDetailedNotMe.fromJson`（Aria 等が使用）は
     /// id/username/isBot/isCat/createdAt/isLocked/isSilenced/isSuspended/
     /// followersCount/followingCount/notesCount を non-nullable 必須として要求する。
-    /// これらのキーが欠けると Dart 側で未処理の TypeError となりアプリがフリーズする
-    /// （実機で確認済みの回帰）。JSON 化した結果に全キーが含まれることを固定するテスト。
+    /// これらのキーが欠けると Dart 側で未処理の TypeError となりアプリがフリーズする。
+    /// JSON 化した結果に全キーが含まれることを固定するテスト。
     #[test]
     fn check_response_user_includes_all_misskey_dart_required_fields() {
         let user = CheckResponseUser {

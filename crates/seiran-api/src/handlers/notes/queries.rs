@@ -180,10 +180,7 @@ pub async fn fetch_reposted_ids(
 /// （frontend API のタイムライン・プロフィール・検索・単体取得・スレッドの共通手順。Misskey
 /// 互換 API の`misskey::convert::build_notes`に相当）。入力の並び順を保つ。
 ///
-/// 以前は各ハンドラが同じ手順を手書きしており、ハッシュタグ・リスト TL で投票済み状態、
-/// 検索結果でリアクション・引用/リポストの埋め込み・投票状態、プロフィールでリポスト済み状態、
-/// 単体取得・スレッドで投稿者との関係フラグが欠落していた。手順を追加するときはここだけを
-/// 変更する。
+/// 手順を追加するときはここだけを変更する（ハンドラごとに書くと付与漏れが起きる）。
 pub async fn build_note_responses(
     state: &AppState,
     mut rows: Vec<TimelinePost>,

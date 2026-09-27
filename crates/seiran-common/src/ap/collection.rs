@@ -16,8 +16,7 @@ use super::client::ApClient;
 ///
 /// `fetch_ap_collection_uris` の実処理。呼び出し元でまとめて結果をログするため、
 /// 早期returnはここに閉じ込め、外側の薄いラッパーで最終結果を1行にまとめてログする
-/// （マイケル指摘 #68: リモートのフォロー/フォロワーが表示されない不具合の調査のため、
-/// 呼び出しごとに実際どんなデータが返ってきたか追えるようにする）。
+/// （呼び出しごとに実際どんなデータが返ってきたか追えるようにする）。
 async fn fetch_ap_collection_uris_inner(
     ap_client: &ApClient,
     collection_url: &str,

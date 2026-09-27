@@ -3,7 +3,7 @@ import { registerUserWithPasswordViaApi } from "../fixtures/api-helpers";
 
 // stats（notesCount/usersCount等）はグローバル集計のため、他specと並行実行される
 // storage-serialプロジェクト内に置くとbefore/after差分に他specの登録・投稿が
-// 混入してflakyになる（実機確認）。全spec完了後の排他テール（globals-serial）
+// 混入してflakyになる。全spec完了後の排他テール（globals-serial）
 // でのみ安全に検証できるため、misskey-compat.spec.tsから分離した。
 // globals-serialにはrate-limit.spec.tsも同居するため、`registerUserViaApi`の
 // 全テスト共通固定パスワードは使わずユニークパスワードでログイン試行カウンターの

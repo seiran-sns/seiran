@@ -106,7 +106,7 @@ pub(crate) async fn fetch_atp_profile_material(
 }
 
 /// bio の末尾にプロフィールのキーバリュー項目を整形して追記する（#62）。Bsky は構造化された
-/// プロフィール欄を持たず自己紹介文（`description`）のみのため、マイケルの提案通り
+/// プロフィール欄を持たず自己紹介文（`description`）のみのため、
 /// `ラベル: 値` の行をリスト形式で bio の後ろに追記してフォールバック表示する。
 /// 項目が無ければ bio をそのまま返す。
 fn append_profile_fields_to_bio(

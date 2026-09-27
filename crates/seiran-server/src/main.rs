@@ -330,7 +330,7 @@ struct SharedResources {
 /// standalone worker ロール。
 ///
 /// worker も BskyVideoPoll 等 DB アクセスが必要なジョブを扱うため、単独起動時も
-/// DB に接続する（以前は「DB不要」だったが、ジョブハンドラの実装が進んだため変更）。
+/// DB に接続する。
 /// AP 配送ジョブ（ApDelivery）が署名に AP 鍵を使うため、シークレットも読み込む。
 async fn run_standalone_worker() -> Result<(), Box<dyn std::error::Error>> {
     let secrets = SecretsFile::from_env().load_or_create()?;

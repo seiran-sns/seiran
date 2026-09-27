@@ -163,8 +163,7 @@ test("Bluesky互換の検索式をローカル投稿にも適用する", async (
   expect(mention.notes.map((note) => note.text)).toContain(matchingText);
 });
 
-// ノート組み立ての共通化（`build_note_responses`）以前は、検索結果にリアクション・引用元の
-// 埋め込みが付かず、タイムラインと同じカード表示にならなかった。
+// 検索結果もタイムラインと同じくリアクション・引用元の埋め込みが付くこと。
 test("検索結果にもリアクションと引用元の埋め込みが付く", async ({ request }) => {
   const clear = await request.post(`${APPVIEW_CONTROL_URL}/__control__/search`, {
     data: { posts: [] },

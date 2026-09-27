@@ -1,5 +1,5 @@
-//! api ロールの axum ルーター定義。領域ごとのサブルーター（`*_routes`）を`router`で合成する
-//! （以前は lib.rs の1関数に約200本のルートが並んでいた）。同じパスを複数のサブルーターに
+//! api ロールの axum ルーター定義。領域ごとのサブルーター（`*_routes`）を`router`で合成する。
+//! 同じパスを複数のサブルーターに
 //! 分けて定義しないこと（axum の`merge`は同一パスの重複でパニックする）。
 
 use axum::{
@@ -18,13 +18,13 @@ fn cors_layer(state: &AppState) -> CorsLayer {
     // ではなくリクエストごとに評価する`predicate`を使う（起動時点の値を静的に焼き込むと、
     // セットアップ完了前後で判定がずれる）。認証は`Authorization`ヘッダー方式で
     // Cookieを使わない（`allow_credentials`は付与していない）ため古典的CSRFは成立しないが、
-    // `Any`のままだと任意サイトのJSが公開APIを無制限に叩ける（docs/code_audit_2026-08-05.md S-3）。
+    // `Any`のままだと任意サイトのJSが公開APIを無制限に叩ける。
     //
     // `/xrpc/*`・`/.well-known/*`はAT Protocol標準のXRPCエンドポイントで、bsky.app等の
     // 外部ATクライアントがブラウザから直接叩くことを前提とした公開APIのため、この
     // オリジン制限の対象外とする（公式Bluesky PDSも`Access-Control-Allow-Origin: *`を返す）。
     // これが無いとbsky.appのログイン画面で「サービスに接続できません」となり、ATクライアント
-    // からのアクセスが一切成立しない（2026-08-29 SEC-2導入時の巻き添え、2026-08-31実機確認）。
+    // からのアクセスが一切成立しない。
     let frontend_origin = state.frontend_origin.clone();
     let local_domain = state.local_domain.clone();
     CorsLayer::new()
@@ -46,8 +46,7 @@ fn cors_layer(state: &AppState) -> CorsLayer {
         .allow_methods(Any)
         // ヘッダーも `Any`（ワイルドカード）にする。bsky.app等の外部ATクライアントが送ってくる
         // カスタムヘッダー（`atproto-proxy`/`atproto-accept-labelers`/`x-bsky-topics`等）を
-        // 個別に列挙していたが、新しいヘッダーが増えるたびにプリフライトで弾かれる
-        // モグラ叩きになっていた（2026-08-31実機確認、`x-bsky-topics`未許可で`getTrends`失敗）。
+        // 個別に列挙すると、新しいヘッダーが増えるたびにプリフライトで弾かれる。
         // `allow_credentials`を付与していない（Cookie不使用）ため、ヘッダーを`Any`にしても
         // ブラウザのCORS仕様上安全（`Access-Control-Allow-Headers: *`は非credentialedリクエストで
         // のみ有効、credentialed併用時のみ禁止される組み合わせ）。
@@ -57,8 +56,7 @@ fn cors_layer(state: &AppState) -> CorsLayer {
 /// 管理系ルート。ロールごとに専用ルータへ分割し、`route_layer`で認可を強制する（#221）。
 fn admin_routes(state: &AppState) -> Router<AppState> {
     // 管理系ルートはロールごとに専用ルータへ分割し、`route_layer`で認可を強制する（#221）。
-    // ハンドラ側では認可チェックを一切行わない（呼び忘れによる無認可到達を構造的に防ぐ、
-    // docs/code_audit_2026-08-05.md R-1）。
+    // ハンドラ側では認可チェックを一切行わない（呼び忘れによる無認可到達を構造的に防ぐ）。
     let admin_router = Router::new()
         .route(
             "/api/admin/storage-providers",
@@ -203,7 +201,7 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
 /// ヘルスチェック・favicon・PWA manifest・画像配信・メディアプロキシ・初回セットアップ・通報・ドライブ。
 fn base_routes() -> Router<AppState> {
     Router::new()
-        // ヘルスチェック（外形監視用、認証不要、#221監査R-9）
+        // ヘルスチェック（外形監視用、認証不要）
         .route("/health", get(handlers::health::health))
         // サイトアイコンを favicon として返す（#42）
         .route("/favicon.ico", get(handlers::favicon::favicon))
@@ -221,7 +219,7 @@ fn base_routes() -> Router<AppState> {
         // Misskey互換メディアプロキシ（リモート画像のCORS回避、SSRF防止付き）。
         // 本家Misskeyの `/proxy/:url*` は末尾に出力フォーマットのヒント（例: `image.webp`）を
         // パスセグメントとして付与できる仕様で、Aria等はこれを使い `{mediaProxyUrl}/image.webp?url=...`
-        // という形式でリクエストする（実機で確認済み）。seiranは`url`クエリパラメータのみで画像を
+        // という形式でリクエストする。seiranは`url`クエリパラメータのみで画像を
         // 解決するため、末尾のパスセグメントは無視してよい（フォーマット変換自体は行わない）。
         .route("/proxy", get(handlers::media_proxy::proxy))
         .route("/proxy/*rest", get(handlers::media_proxy::proxy))

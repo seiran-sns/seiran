@@ -138,8 +138,8 @@ pub async fn xrpc_upload_blob(
         };
 
     // Content-Type ヘッダーをそのまま信用しない。Bsky公式動画パイプラインからの代理POSTは
-    // 実機確認で `Content-Type: */*` という無効なワイルドカード値を送ってくることがあり
-    // （2026-07-17 マイケル実機確認）、そのまま保存すると getBlob が返す動画の
+    // `Content-Type: */*` という無効なワイルドカード値を送ってくることがあり、そのまま
+    // 保存すると getBlob が返す動画の
     // Content-Type も `*/*` になって再生できなくなる。ヘッダーがワイルドカードや欠落の
     // 場合はマジックバイトから実際の MIME type を判定する。
     let header_mime = headers.get("content-type").and_then(|v| v.to_str().ok());
@@ -192,11 +192,8 @@ pub async fn xrpc_upload_blob(
     .into_response()
 }
 
-/// `uploadBlob` で受信したバイト列を `media_files` へ直接保存する（かつては一時置き場の
-/// `atp_blobs` テーブルを経由し、プロフィール等から参照される際に `media_files` へ複製する
-/// 2段構えだったが、一時置き場側の孤立GCが複製先からの参照〈avatar_media_id等〉を
-/// 考慮しておらず、アップロードから7日経ったアバター画像が実体ごと削除される事故になった
-/// ため廃止した。2026-09-25）。
+/// `uploadBlob` で受信したバイト列を `media_files` へ直接保存する。一時置き場を挟むと、
+/// 置き場側の孤立GCがプロフィール等からの参照を知らずに実体を消してしまう。
 ///
 /// 呼び出し元は2種類（`xrpc_upload_blob`参照）だが、保存処理自体は共通でよい
 /// （悪用防止のレート制御は呼び出し元の認証方式で既に区別済み: 通常セッションJWTは
@@ -213,7 +210,7 @@ async fn store_uploaded_blob(
 ) -> Result<(), String> {
     // 進行中の動画パイプラインジョブに対応するコールバックのみを受理する。これが無いと、
     // 正当な自己署名JWT（DID本人なら誰でも作れる）さえあれば無制限回数・任意サイズで
-    // S3を消費できてしまう（2026-07-17 マイケル指摘）。通常セッションJWT経由（ユーザー
+    // S3を消費できてしまう。通常セッションJWT経由（ユーザー
     // 本人であることを既に検証済み）はこのチェックをスキップする。
     if require_pending_video_job {
         let has_pending_job = media_file::has_pending_bsky_video(&state.db, actor_id)
@@ -313,16 +310,14 @@ pub async fn xrpc_get_record(
 ///
 /// seiranはpostgate（引用可否の制限）作成機能を持たないため、ローカルユーザーの実レコードは
 /// 基本存在せず、AT Protocol の規約では「レコード不在 = 制限なし（誰でも引用可）」と解釈すべき
-/// だが、bsky.app 側クライアントは 404 を保守的に「引用不可」として扱ってしまうことがある
-/// （2026-08-31 マイケル報告・実機確認: `getRecord?...&collection=app.bsky.feed.postgate`
-/// が 404 を返し、bsky.app上での引用可否判定に影響していた）。そのため、実レコードが
+/// だが、bsky.app 側クライアントは 404 を保守的に「引用不可」として扱ってしまうことがある。
+/// そのため、実レコードが
 /// 無い場合は合成レコードを返す。実レコードが存在する場合（将来postgate作成機能を実装した場合）
 /// はそちらを優先する。
 ///
 /// `repo`がリモートBskyユーザー（`actor_type != "local"`）の場合、seiranは実際のpostgateレコード
 /// を保持しないが、`fetch_bsky_gates`が投稿取り込み時に取得・キャッシュした`posts.bsky_quote_disabled`
-/// を使って正しい値を合成する（2026-09-01 マイケル指摘: リモート投稿について常に「制限なし」を
-/// 返していたため、実際に引用不可な投稿でも嘘の応答になっていた）。該当ポストを未取得の場合は
+/// を使って正しい値を合成する。該当ポストを未取得の場合は
 /// 判断材料が無いため「制限なし」のままにする（フェイルオープン）。
 async fn get_record_postgate(
     params: &GetRecordParams,
@@ -396,10 +391,7 @@ async fn get_record_post(params: &GetRecordParams, state: &AppState) -> axum::re
     };
 
     // 実際にコミット済みのレコード（embed 等を含む完全な内容）を atp_blocks から
-    // 取得してデコードする。以前は posts.body/created_at だけからその場で JSON を
-    // 再構築しており、embed（画像・動画・引用等）を一切返していなかった
-    // （2026-07-17 マイケル指摘で発覚。実際の firehose 配信・relay 検証には
-    // 影響しない表示専用のバグだった）。
+    // 取得してデコードする（posts の列から組み立て直すと embed 等が欠ける）。
     let actor = state.actors.find_by_did(&params.repo).await.ok().flatten();
     let actor = match actor {
         Some(a) => Some(a),
@@ -583,8 +575,7 @@ struct ListRecordsEntry {
 
 /// `com.atproto.repo.listRecords` — 指定コレクションのレコード一覧を rkey 順にページングして返す。
 /// サードパーティのインデクサー（Clearsky等）はこのエンドポイントで PDS から直接投稿履歴を
-/// 取得するため、未実装だと「投稿が1件も見えないユーザー」として扱われる
-/// （2026-08-20 マイケル報告で発覚。firehose 配信自体は正常だった）。
+/// 取得するため、未実装だと「投稿が1件も見えないユーザー」として扱われる。
 pub async fn xrpc_list_records(
     Query(params): Query<ListRecordsParams>,
     State(state): State<AppState>,
@@ -793,8 +784,7 @@ async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_j
 /// `media_files` 行（Seiran自前UI経由、または `com.atproto.repo.uploadBlob` 経由の
 /// どちらでアップロードされたものも `media_files` に直接入っている）を検索する。
 /// これにより、ATP経由で直接プロフィール画像・背景画像を設定した場合でも `actors.avatar_media_id`
-/// / `banner_media_id`（＝Fediverse側にも公開されるアバター）に反映される
-/// （2026-09-16 マイケル指摘: ATP側で更新したのにSeiranのプロフィール画像が更新されない）。
+/// / `banner_media_id`（＝Fediverse側にも公開されるアバター）に反映される。
 /// CIDのmultihashはsha256そのものなので、逆算して一致検索する（`xrpc_get_blob`と同じ手法）。
 pub(crate) async fn resolve_blob_media_id(
     state: &AppState,

@@ -107,7 +107,7 @@ async fn process_locked(
         return Ok(());
     }
 
-    // 成功時はフラット、失敗時は`jobStatus`にネストされる（実機検証で判明）。両対応。
+    // 成功時はフラット、失敗時は`jobStatus`にネストされる。両対応。
     let parsed: serde_json::Value = serde_json::from_str(&body_text)
         .map_err(|e| format!("getJobStatus応答パース失敗: {}", e))?;
     let job_status = parsed.get("jobStatus").unwrap_or(&parsed);
@@ -141,7 +141,7 @@ async fn process_locked(
             };
             // トランスコード後の実際のバイト列サイズ。media_files.size（アップロード時の
             // オリジナルサイズ）とは異なるため別カラムに保持する（app.bsky.embed.video の
-            // size フィールドに使う。実機確認: 2,867,780→287,123 バイトのように変わる）。
+            // size フィールドに使う。変換で大きく縮むことがある）。
             let bsky_size = blob.get("size").and_then(|v| v.as_i64());
             crate::repository::media_file::mark_bsky_video_ready(
                 pool,

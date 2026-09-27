@@ -83,8 +83,7 @@ use super::types::{
 // ─── リクエストDTO（Misskey 本家の camelCase フィールド名に合わせる） ──────────
 
 /// Misskey 共通のカーソル指定（`limit`/`sinceId`/`untilId`）。各リクエストボディに
-/// `#[serde(flatten)]`で埋め込み、`page`で`Page`へ正規化する（以前はハンドラごとに
-/// 同じ解析を手書きしており、`limit`の下限処理が`min(100)`と`clamp(1, 100)`で不揃いだった）。
+/// `#[serde(flatten)]`で埋め込み、`page`で`Page`へ正規化する。
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CursorParams {
@@ -519,8 +518,7 @@ pub async fn notes_search_by_tag(
 }
 
 /// POST /api/notes/search（Misskey互換、Aria等）。検索対象の決定はカスタムAPI
-/// （`GET /api/notes/search`）と同じ`search_post_ids_by_cursor`・検索回数制限を使う
-/// （以前は独自実装で、ブリッジポストの解決と検索回数制限が漏れていた）。
+/// （`GET /api/notes/search`）と同じ`search_post_ids_by_cursor`・検索回数制限を使う。
 pub async fn notes_search(
     MaybeAuthedUser(me): MaybeAuthedUser,
     State(state): State<AppState>,
@@ -606,8 +604,7 @@ pub async fn reactions_create(
 /// POST /api/notes/reactions/delete
 /// Misskey は `noteId` のみを受け取る（1投稿1ユーザー1リアクションが前提のため対象の絵文字を
 /// 指定する必要がない）。カスタムAPIと同じ取り消し処理（`remove_reaction`）を、内容を問わない
-/// 指定（`None`）で呼ぶ（以前はここで現在のリアクション内容を別途SELECTしてから委譲しており、
-/// 切り替えと競合すると取り消しに失敗していた）。
+/// 指定（`None`）で呼ぶ（内容を先に読んでから渡すと、同時の切り替えと競合して取り消せない）。
 pub async fn reactions_delete(
     user: AuthedUser,
     State(state): State<AppState>,
@@ -659,9 +656,7 @@ async fn find_viewable_list(
     Ok(row)
 }
 
-/// POST /api/notes/user-list-timeline — リストタイムライン画面（Aria等）。リスト一覧
-/// （`users/lists/list`）は実装済みだったが、個別のリストを開くこの取得系エンドポイントが
-/// 無く404になっていた。カスタムAPI `GET /api/lists/:id/timeline`
+/// POST /api/notes/user-list-timeline — リストタイムライン画面（Aria等）。カスタムAPI `GET /api/lists/:id/timeline`
 /// （`handlers::lists::list_timeline`）と同じ`ListRepository::timeline`・公開範囲チェック
 /// （非公開リストは所有者本人のみ）を使う。WebSocketの`userList`チャンネル購読は既存実装
 /// （`docs/protocols.md`参照）でカバー済みで、こちらは画面を開いた際の初回一覧取得を担う。
@@ -684,9 +679,7 @@ pub async fn notes_user_list_timeline(
 // ─── 通知 ────────────────────────────────────────────────────────────
 
 /// POST /api/i/notifications
-/// 自分宛ての通知を新しい順にカーソルページネーション取得する。以前はWebSocketの
-/// プッシュ配信のみでオンメモリ保持（ページ再読み込みで消失、直近100件までしか遡れない）
-/// だった「クイック通知」を永続化し、無限スクロールで過去分も遡れるようにする。
+/// 自分宛ての通知を新しい順にカーソルページネーション取得する。
 pub async fn i_notifications(
     user: AuthedUser,
     State(state): State<AppState>,
@@ -787,7 +780,7 @@ pub async fn following_delete(
 /// `MisskeyFollowing.create`/`delete`は`post<Map<String, dynamic>>`で直接キャストする
 /// （204 No Contentのまま返すと、空ボディがJSONデコードで文字列扱いになり
 /// `type 'String' is not a subtype of type 'FutureOr<Map<String, dynamic>>'`で
-/// クライアント側が例外落ちする。実機確認済み）。
+/// クライアント側が例外落ちする）。
 async fn misskey_user_lite_response(state: &AppState, actor_id: i64) -> Response {
     match state.actors.find_by_id(actor_id).await {
         Ok(Some(actor)) => {
@@ -1020,7 +1013,7 @@ pub async fn stats(State(state): State<AppState>) -> Result<Json<MisskeyStats>, 
 /// ページ・Play・ギャラリー）用の共通スタブ。本文は検証せず無視し、常に空配列を返す
 /// （#251、Aria非互換修正）。これらの機能自体が存在しない/エンドポイントが無いと
 /// `misskey_dart`が404として例外を投げ、プロフィール等の該当タブがエラー表示になる
-/// （実機確認、Aria）。「リスト」は`users_lists_list`が実データを返すため対象外。
+/// （Aria）。「リスト」は`users_lists_list`が実データを返すため対象外。
 pub async fn empty_list_stub(
     body: Option<Json<serde_json::Value>>,
 ) -> Json<Vec<serde_json::Value>> {
@@ -1035,8 +1028,7 @@ pub struct UsersListsListBody {
 }
 
 /// `ListRow`群を、メンバー一覧付き`MisskeyUserList`へ組み立てる（`users_lists_list`・
-/// `users_lists_show`共通）。メンバーは全リスト分を1クエリで取得する（以前はリストごとに
-/// 取得するN+1だった）。
+/// `users_lists_show`共通）。メンバーは全リスト分を1クエリで取得する。
 async fn build_misskey_user_lists(
     state: &AppState,
     rows: Vec<seiran_common::repository::ListRow>,
@@ -1097,8 +1089,7 @@ pub struct UsersListsShowBody {
 }
 
 /// POST /api/users/lists/show — リストを開いた詳細画面（Aria等、`MisskeyUsersLists.show`）。
-/// `users/lists/list`（一覧）は実装済みでも、個別のリストの名前・メンバー等を取得する
-/// このエンドポイントが無く404になっていた。カスタムAPI `GET /api/lists/:id`
+/// カスタムAPI `GET /api/lists/:id`
 /// （`handlers::lists`）と同じ公開範囲チェック（非公開リストは所有者本人のみ、
 /// `NO_SUCH_LIST`）を使う（#251続き）。
 pub async fn users_lists_show(

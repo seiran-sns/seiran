@@ -53,7 +53,7 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
     // コンテナ（AppShellの.rightScroll）であり、CSSの仕様上「縦だけauto、横はvisible」
     // という指定はできない（片方がvisibleでない場合は両方autoに揃えられる）ため、
     // CSSのみの絶対配置だとポップアップの左側がそのスクロール境界でクリップされて
-    // ほぼ見えなくなる（実機確認済みの回帰）。position: fixedへ切り替え、
+    // ほぼ見えなくなる。position: fixedへ切り替え、
     // トリガー要素の実測座標を使って画面基準で配置することでこれを回避する。
     if (side === "left" && wrapRef.current) {
       const rect = wrapRef.current.getBoundingClientRect();
@@ -65,9 +65,8 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
       // 余白がある）だけでなく中央ペイン（/notifications画面。アイテム自体が
       // 画面左寄りにあり、左側の余白はナビ分程度しかない）でも使われる。左右
       // どちらに実際の余白があるかを実測し、余白のある側へ出す。スマホ幅など
-      // どちらにも余白が無い場合のみアイテム下へフォールバックする（実機
-      // 確認済みの回帰：左固定だと中央ペイン側で画面外へはみ出し、逆に常に
-      // 余白判定なしで下に出すとスマホ以外でも他アイテムに重なってしまう）。
+      // どちらにも余白が無い場合のみアイテム下へフォールバックする（左固定だと
+      // 中央ペイン側で画面外へはみ出し、常に下に出すと他アイテムに重なる）。
       if (rect.left >= REQUIRED) {
         setEffectiveSide("left");
         setFixedStyle({
@@ -103,8 +102,8 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
   // `document.body`直下へポータルされ、この`wrap`要素の真上に重なって表示される。
   // メニュー項目クリックでそのポータルがDOMから消えると、同じ座標に残っていた
   // この`wrap`要素へ「新規にマウスが入った」というmouseenterがブラウザから
-  // 発火してしまい、`onEnter`が閉じかけのタイマーを止めてポップアップが残り続ける
-  // （実機で確認された回帰）。クリック自体はReactツリーに沿ってこの要素まで
+  // 発火してしまい、`onEnter`が閉じかけのタイマーを止めてポップアップが残り続ける。
+  // クリック自体はReactツリーに沿ってこの要素まで
   // バブルするため、ここで即座に閉じてその再オープンを打ち消す。
   function onClickCapture() {
     if (timerRef.current) window.clearTimeout(timerRef.current);

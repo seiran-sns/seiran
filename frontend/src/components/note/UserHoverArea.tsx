@@ -22,8 +22,8 @@ interface UserHoverAreaProps {
  * `stopPropagation()`を呼ぶと、Reactの合成イベント実装（内部的に`mouseover`/
  * `mouseout`ネイティブイベントの伝播を経由してenter/leaveを計算する）が祖先要素への
  * 合成イベントのディスパッチ自体を打ち切ってしまい、外側の`NoteHoverPreview`の
- * `onMouseLeave`が呼ばれずポップアップが開いたまま残る不具合を引き起こす
- * （実機確認済みの回帰）。そのため`stopPropagation`は呼ばない。
+ * `onMouseLeave`が呼ばれずポップアップが開いたまま残る不具合を引き起こす。
+ * そのため`stopPropagation`は呼ばない。
  */
 export default function UserHoverArea({ target, isSelf, children }: UserHoverAreaProps) {
   const hover = useFollowHoverSwitch(target, isSelf);

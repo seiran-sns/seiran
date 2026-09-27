@@ -33,7 +33,7 @@ export function isPostLanguage(lang: string): lang is PostLanguage {
 }
 
 /** ポスト言語選択フォームのデフォルト値（表示言語→ポスト言語への丸め）。`zh-Hant`/`zh-Hans`
- * のどちらを表示言語に選んでいても、ポスト言語のデフォルトは`zh`になる（マイケル指示）。 */
+ * のどちらを表示言語に選んでいても、ポスト言語のデフォルトは`zh`になる。 */
 export function postLanguageBase(displayLanguage: string): PostLanguage {
   const base = displayLanguage.startsWith("zh") ? "zh" : displayLanguage;
   return isPostLanguage(base) ? base : "en";

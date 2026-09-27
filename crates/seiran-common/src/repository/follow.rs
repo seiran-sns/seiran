@@ -32,8 +32,7 @@ pub enum PendingFollowUpsert {
 #[async_trait]
 pub trait FollowRepository: Send + Sync {
     /// フォローを pending で挿入する。既存の関係があれば状態を変えずにそのまま返す
-    /// （以前は既存行を無条件に pending へ戻しており、承認制アカウントを再度フォロー操作
-    /// すると成立済み（accepted）のフォローが pending に降格していた）。
+    /// （成立済みのフォローを再操作で pending に降格させない）。
     async fn upsert_pending(
         &self,
         follower_actor_id: i64,

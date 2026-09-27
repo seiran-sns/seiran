@@ -6,8 +6,7 @@
 //! 既にJSONへデコード済みのレコードを配信するため、CBOR/CAR/CIDの自前デコードは不要。
 //!
 //! 投稿はイベントに同梱されるレコード本体（text/createdAt）をそのまま保存する
-//! （Jetstream はほぼリアルタイムなので、旧実装にあった AppView 再取得＋インデックス
-//! 遅延リトライは不要）。`record.reply.parent.uri` が付いている場合は、その親投稿が
+//! （Jetstream はほぼリアルタイムなので、AppView からの再取得は不要）。`record.reply.parent.uri` が付いている場合は、その親投稿が
 //! `posts.at_uri` として既知（＝こちらの投稿への返信）かを調べ、既知なら
 //! `posts.reply_to_post_id` を設定してリプライとして保存する。
 
@@ -299,8 +298,7 @@ struct JetstreamCommit {
 
 /// Bsky投稿本文中のカスタム絵文字（`:shortcode:`）を、このサーバーの `custom_emojis` と
 /// 照合して emoji_map を構築する（#126）。ネイティブ投稿作成（`handlers/notes/mod.rs`の
-/// `create_regular_post`）と同じ解決ロジック。ATP Jetstream経由の投稿保存にはこの解決が
-/// 無く、常に空のemoji_mapで保存されていたため、`:shortcode:` が画像化されない不具合があった。
+/// `create_regular_post`）と同じ解決ロジック。
 /// 解決に失敗しても投稿自体は継続する（絵文字がテキストのまま出るだけ）。
 async fn resolve_local_emoji_map(pool: &PgPool, text: &str) -> JsonValue {
     let shortcode_candidates = extract_shortcode_candidates(text);
@@ -795,7 +793,7 @@ async fn store_bsky_post_extras(
     // seiranPost拡張オブジェクト（#237）のCW・投票をposts.content_warning/pollへ
     // 反映する。AP受信側（note_save.rs）は既に対応済みだが、ATP受信側で
     // これを欠いていると、ATP経由でしか受信できていない間はCW/投票が
-    // 一切表示されない非対称が生じる（実地検証で発覚）。
+    // 一切表示されない非対称が生じる。
     if content_warning.is_some() || poll.is_some() {
         let posts_repo = PgPostRepository::new(pool.clone());
         if let Err(e) = posts_repo
@@ -839,7 +837,7 @@ async fn store_bsky_post_extras(
         // ATP経由でのみ受信した投票付き投稿（`seiranPost.linkCards[]`は当然空）で、
         // この投票の代替表現を本物のリンクカードと誤認して保存してしまい、本来の
         // 投票ウィジェットとは別に同じ選択肢を並べただけの余計なカードが表示される
-        // （実機確認、AP受信側`note_save.rs`は本文URL抽出方式のためこの問題が無い）。
+        // （AP受信側`note_save.rs`は本文URL抽出方式のためこの問題が無い）。
         let result = note_extras::insert_link_card(
             pool,
             &note_extras::NewLinkCard {

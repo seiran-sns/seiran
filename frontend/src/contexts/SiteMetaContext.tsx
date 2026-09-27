@@ -40,13 +40,13 @@ const SiteMetaContext = createContext<SiteMeta>(EMPTY_SITE_META);
  * `:root[data-theme="dark"]`より詳細度が高くダークモードの既定パレットを上書きしてしまうため、
  * `--accent-deep`系は現在の実効テーマに応じて混合先を変える（ライトは白、ダークは
  * `--bg-elev-2`）。white固定のままだと、ダークモードでも常に明るい薄色になり、同じくダーク
- * モードの`--text`（明るい色）と輝度がほぼ同化して見えなくなる不具合があった（マイケル指摘）。
+ * モードの`--text`（明るい色）と輝度がほぼ同化して見えなくなる。
  * `--accent`自体もダークモードではsite_colorをそのまま使わず、白寄りに60%混合して明るくする
  * （この混合率は、既定ダークパレットの`--accent: #60a5fa`と輝度がほぼ一致するよう選んだもの。
  * ライトモード用に選ばれがちなsite_colorをそのまま使うと、ダークモードの暗い背景の上で
  * 文字色として沈んで見づらくなるため）。`--accent-strong`はプライマリボタン等の背景色として
  * 使われることが大半（文字色としての使用箇所は無い）のため、`--accent`と同じ値にしてしまうと
- * ダークモードでボタン背景まで一緒に明るくなってしまう（マイケル指摘）。`--accent-strong`は
+ * ダークモードでボタン背景まで一緒に明るくなってしまう。`--accent-strong`は
  * site_colorそのまま・テーマ非依存の値を保つ。 */
 function applyColor(color: string, isDark: boolean) {
   const root = document.documentElement.style;

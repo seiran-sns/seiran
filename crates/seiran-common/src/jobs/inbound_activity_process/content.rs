@@ -43,7 +43,7 @@ enum HtmlSegment {
         /// `<a>` の `rel` に `tag` トークン、または `class` に `hashtag` トークンが含まれるか。
         /// Mastodon等はハッシュタグアンカーにも `class="mention hashtag"` を付与する（`mention`
         /// トークンを共有する）ため、`is_mention_class` だけでは真のメンションと区別できない
-        /// （実機確認せずとも仕様上判明: Mastodonのハッシュタグリンクは常に `rel="tag"` を持つ）。
+        /// （Mastodonのハッシュタグリンクは常に `rel="tag"` を持つ）。
         /// メンション解決より先にこちらを判定し、ハッシュタグなら通常のURLリンクとして扱う。
         is_hashtag: bool,
     },
@@ -217,7 +217,7 @@ fn extract_host(url: &str) -> Option<&str> {
 
 /// `tag.name` が `@user` のようにドメイン省略の場合、`tag.href` のホスト名を補って
 /// `@user@host` の完全修飾形にする。**Misskeyは自己言及メンション（投稿者自身への `@user`）の
-/// `name` をローカルドメイン省略で送ってくることがある**（実機確認: `attributedTo` と同一の
+/// `name` をローカルドメイン省略で送ってくることがある**（`attributedTo` と同一の
 /// アクターへのメンションで `name: "@yuba"` のみ、`href` はアクターURIそのもの）。
 fn qualify_mention_name(name: &str, href: &str) -> String {
     let username = name.trim_start_matches('@');
@@ -241,7 +241,7 @@ fn find_mention_name_by_href(href: &str, tags: &[serde_json::Value]) -> Option<S
 /// `<a>` の内側テキスト（例: `@bob`）のユーザー名部分と `tag`配列内 Mention の `name` の
 /// ユーザー名部分が一致するものを探す（`<a href>` が `tag[].href` と完全一致しない実装への
 /// フォールバック）。**同名ユーザーが複数の Mention として存在する場合**（例: 投稿者自身への
-/// `@yuba` と別インスタンスの `@yuba@fedibird.com` が同一Note内に共存するケース、実機確認）に
+/// `@yuba` と別インスタンスの `@yuba@fedibird.com` が同一Note内に共存するケース）に
 /// 誤った方へマッチしないよう、まず `<a href>` と `tag.href` のホスト名が一致するものを優先し、
 /// 見つからなければユーザー名のみの一致にフォールバックする。
 fn find_mention_name_by_inner_text(
@@ -843,7 +843,7 @@ mod tests {
 
     #[test]
     fn ap_content_to_markdown_body_self_mention_with_domain_omitted_name_gets_qualified() {
-        // 実機確認（reax.work, Misskey系）: 投稿者自身への自己言及メンションは
+        // Misskey系: 投稿者自身への自己言及メンションは
         // tag.name がローカルドメイン省略の "@yuba" になることがある。href
         // （アクターURI）からホスト名を補って完全修飾形にする。
         let html = r#"<a href="https://reax.work/@yuba" class="u-url mention">@yuba</a>"#;
@@ -858,7 +858,7 @@ mod tests {
 
     #[test]
     fn ap_content_to_markdown_body_same_username_different_hosts_do_not_cross_match() {
-        // 実機確認: 同一Note内に同名ユーザー（投稿者自身 @yuba とは別インスタンスの
+        // 同一Note内に同名ユーザー（投稿者自身 @yuba とは別インスタンスの
         // @yuba@fedibird.com）への2つのメンションがあると、ユーザー名だけでの一致判定では
         // 常に最初に見つかった方に誤マッチしてしまう。<a href> と tag.href のホスト名を
         // 突き合わせることで、それぞれ正しい tag に解決されなければならない。
@@ -943,7 +943,7 @@ mod tests {
 
     #[test]
     fn sanitize_ap_content_html_preserves_blockquote() {
-        // 元不具合の直接的な回帰テスト（#233）: MFM引用構文由来の<blockquote>が
+        // MFM引用構文由来の<blockquote>が
         // ap_content_to_markdown_bodyでは失われるが、sanitize_ap_content_htmlでは保持される。
         // `<blockquote>`はブロック要素なので、HTML5パーサーが`<p>`を自動的に閉じる
         // （実際のMisskey content HTMLもこの入れ子で届く。空`<p></p>`は無害）。
@@ -1054,9 +1054,8 @@ mod tests {
     #[test]
     fn strip_quote_fallback_line_html_does_not_wipe_body_when_re_line_is_leading_paragraph_without_br(
     ) {
-        // <br>を一切使わず<p>だけで段落が区切られ、フォールバック行が先頭の段落にある投稿
-        // （実例: #117134492434435469）。<br>のみで最後の行を判定すると本文全体を
-        // 「最後の行」と誤認し、丸ごと消してしまっていた。
+        // <br>を一切使わず<p>だけで段落が区切られ、フォールバック行が先頭の段落にある投稿。
+        // <br>のみで最後の行を判定すると本文全体を「最後の行」と誤認し、丸ごと消してしまう。
         let quote_uri = "https://fairy.id/@Linux/117134468004074248";
         let html = "<p>RE: <a href=\"https://fairy.id/@Linux/117134468004074248\">https://fairy.id/@Linux/117134468004074248</a></p><p>Wait! How did I know about your comment?</p><p>Your kung fu is not strong!</p>";
         let out = strip_quote_fallback_line_html(html, quote_uri);

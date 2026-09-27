@@ -14,7 +14,7 @@ function makeReactionNotification(overrides: Partial<NotificationItem> = {}): No
 describe("describeNotification（#61: カスタム絵文字リアクション通知の画像解決）", () => {
   // バックエンド（`convert.rs`）の `reactionEmojis` キーは Misskey 本家仕様に合わせ
   // コロンなし shortcode。`reaction` はコロン付き `:shortcode:` 形式で届くため、
-  // このコロンを剥がしてから参照しないと画像が解決できず絵文字テキストにフォールバックしていた。
+  // このコロンを剥がしてから参照しないと画像が解決できず絵文字テキストにフォールバックする。
   it("reaction が :shortcode: 形式でも reactionEmojis のコロンなしキーで画像URLを解決できる", () => {
     const n = makeReactionNotification({
       reaction: ":blob_cat:",

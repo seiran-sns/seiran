@@ -10,16 +10,11 @@
 //! （dbname=`seiran_e2e`、ポート5433）のみを許可する**（`ensure_test_database` 参照）。
 //! `seiran_common::get_db_pool` は環境変数未設定時に開発DB（dbname=`seiran`、ポート5432、
 //! `docker-compose.yml`のdbサービス）と同一の値へフォールバックするため、これをそのまま
-//! 使うと結合テストが実データを書き換える事故になる（2026-07-20、E2E
-//! `reuseExistingServer:true` 経由で実際に発生。`docs/protocols.md` 等の再発防止と同種の対策）。
+//! 使うと結合テストが実データを書き換えてしまう。
 //!
-//! 実行手順:
+//! 実行手順（マイグレーション適用とテストユーザー作成はハーネスが行う）:
 //! 1. `docker compose -f e2e/docker-compose.yml up -d` で専用DBを起動
-//! 2. `POSTGRES_USER=seiran_e2e POSTGRES_PASSWORD=seiran_e2e POSTGRES_DB=seiran_e2e DB_PORT=5433 cargo run -p seiran-server`
-//!    を一度起動してマイグレーションを適用（起動時に自動実行される）
-//! 3. `notes_integration.rs` 等 `seiran1` ユーザー前提のテストを動かす場合は、専用DB上で
-//!    `/api/setup` または `/api/auth/register` により `seiran1`（パスワード `seiranda`）を作成
-//! 4. `POSTGRES_USER=seiran_e2e POSTGRES_PASSWORD=seiran_e2e POSTGRES_DB=seiran_e2e DB_PORT=5433 cargo test -p seiran-api --test <name> -- --ignored`
+//! 2. `POSTGRES_USER=seiran_e2e POSTGRES_PASSWORD=seiran_e2e POSTGRES_DB=seiran_e2e DB_PORT=5433 cargo test -p seiran-api --test <name> -- --ignored`
 
 use std::sync::Arc;
 
@@ -77,7 +72,7 @@ pub async fn test_db_pool() -> sqlx::PgPool {
 }
 
 /// マイグレーションを適用する（冪等・アドバイザリロック付きのため、並列実行される各テストから
-/// 呼んでよい）。以前は事前に`seiran-server`を一度起動して適用する手順が必要だった。
+/// 呼んでよい）。
 async fn apply_migrations(pool: &sqlx::PgPool) {
     seiran_common::run_migrations(pool)
         .await

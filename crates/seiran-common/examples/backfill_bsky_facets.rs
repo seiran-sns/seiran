@@ -1,9 +1,7 @@
 //! 一回限りのバックフィルスクリプト。
 //!
-//! `actor_history_sync`（新規フォロー時の過去ログ同期）・`upsert_bsky_post`（ピン留め同期）・
-//! `persist_appview_posts`（検索結果保存）の3経路は、修正前は AppView から取得した
-//! `record.facets` を無視して本文をそのまま保存していたため、URLファサード（linkファサード）が
-//! Markdownリンクに変換されず、seiran上でリンク表示されない投稿が残ってしまっていた。
+//! AppView から取得した `record.facets` を反映せずに保存された Bsky 由来投稿（URLファサードが
+//! Markdownリンクになっておらず、リンク表示されない）を直す。
 //!
 //! 対象の Bsky 由来投稿（at_uri あり・削除されていない）について、PDS の
 //! `com.atproto.repo.getRecord` から現在のレコードを再取得し、facets が本文と食い違いなく

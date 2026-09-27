@@ -12,7 +12,6 @@
 //! `bsky_video_status` が確定状態（`ready`/`failed`）になるのを待ってから `commit_post` を
 //! 呼ぶ。`media_files.created_at` からの経過時間が `SETTLE_TIMEOUT_SECS` を超えたら、
 //! 未確定のままでも諦めて視聴ページへのリンクカードでコミットする。
-//! 2026-07-17 マイケル指摘・実機再現確認。
 //!
 //! **ペイロード最小化と `post_id` 単位の排他ロック**: このジョブは `post_id`/
 //! `pending_media_file_id` のみを持ち、本文・投稿時刻・リプライ先at_uri/at_cidは
@@ -43,7 +42,7 @@ const SETTLE_TIMEOUT_SECS: i64 = 70;
 fn watch_page_fallback_embed(local_domain: &str, media_file_id: i64) -> BskyEmbed {
     // 音声（Bskyに専用embedが無い）・動画パイプライン未完了/失敗時のフォールバックリンク先は、
     // メディアファイルの直リンクではなく簡易視聴ページ（`handlers::drive::watch_media`）にする。
-    // 直リンクだとブラウザがダウンロードしてしまい再生できないため（2026-07-17 マイケル指摘）。
+    // 直リンクだとブラウザがダウンロードしてしまい再生できないため。
     BskyEmbed::External {
         url: format!("https://{}/api/media/{}/watch", local_domain, media_file_id),
         title: String::new(),

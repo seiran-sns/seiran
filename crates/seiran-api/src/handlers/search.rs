@@ -163,7 +163,6 @@ pub async fn search_notes(
 
 /// カーソル（`until_id`/`since_id`）指定の検索で、表示すべき post_id を新しい順に最大
 /// `limit` 件返す。frontend API（`search_notes`）と Misskey 互換 API（`notes/search`）の共通実装
-/// （以前は Misskey 側が独自に同じ処理を書いており、ブリッジポストの解決が漏れていた）。
 /// - `since_id` 指定: ローカル DB のみ（逆方向ページング。要件どおりAppViewには問い合わせない）。
 /// - それ以外: ローカル DB と AppView の双方から同数を取得してブレンドする。`until_id` 指定時は
 ///   その投稿の作成時刻を AppView 側の上限にする。

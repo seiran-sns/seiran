@@ -59,7 +59,7 @@ pub fn is_reserved_username(s: &str) -> bool {
 /// Bskyリモートアクター解決系（`resolve_bsky`/`follow_bsky` 等）は、この形式の文字列を
 /// AppViewへ問い合わせる前にここでローカル判定できる。判定を怠ると、AppView解決結果を
 /// `at_did` の `ON CONFLICT` でupsertする際にローカルアクターの `username` 列を
-/// このハンドル表記自体で上書きしてしまう事故につながる（過去に実際発生）。
+/// このハンドル表記自体で上書きしてしまう。
 /// アクター行の表示・ルーティング用ハンドル文字列（`@user`/`@user@domain`）を組み立てる。
 /// ローカルアクター、またはBskyアクター（`actors.domain`が常に空文字の慣習）は`@user`のみ、
 /// それ以外（Fedi/リモートseiran）は`@user@domain`。この判定を各所で個別に再実装すると

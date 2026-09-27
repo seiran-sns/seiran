@@ -152,9 +152,8 @@ async fn extract_thumbnail_frame(
 const CONVERT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// `convert_audio_to_gray_video` が生成するグレー背景動画の解像度（4:1、音楽プレーヤー
-/// らしい横長比率）。実機検証（2026-07-17）: 515x75（6.87:1）や 36x12（3:1・432px²）は
-/// Bsky側に拒否された（順に "video aspect ratio is too wide"／"video processing error"）が、
-/// 80x20（1600px²）は実機で再生確認済み。`AtpCommitService::commit_post` の embed
+/// らしい横長比率）。Bsky は横長すぎる比率（"video aspect ratio is too wide"）や小さすぎる
+/// 画素数（"video processing error"）を拒否する。80x20 は受理される。`AtpCommitService::commit_post` の embed
 /// aspectRatio 側もこの定数を使うこと（値がずれると実際の映像と embed 上の
 /// aspectRatio 表示が食い違う）。
 pub const AUDIO_VIDEO_WIDTH: u32 = 80;
@@ -162,9 +161,9 @@ pub const AUDIO_VIDEO_HEIGHT: u32 = 20;
 
 /// 音声バイト列を「グレー背景の静止画 + 音声トラック」の mp4 動画に変換する。
 /// AT Protocol の `app.bsky.embed.*` には音声専用の embed type が存在しないため、
-/// 動画に変換して `app.bsky.video.uploadVideo` パイプラインに載せられるようにする
-/// （2026-07-17 マイケル発案）。解像度は `AUDIO_VIDEO_WIDTH`/`AUDIO_VIDEO_HEIGHT`。
-/// `ffmpeg` 未インストール・変換失敗時は `None` を返す（呼び出し側は従来通り
+/// 動画に変換して `app.bsky.video.uploadVideo` パイプラインに載せられるようにする。
+/// 解像度は `AUDIO_VIDEO_WIDTH`/`AUDIO_VIDEO_HEIGHT`。
+/// `ffmpeg` 未インストール・変換失敗時は `None` を返す（呼び出し側は
 /// `app.bsky.embed.external` フォールバックする）。
 pub async fn convert_audio_to_gray_video(audio_data: &[u8], ext_hint: &str) -> Option<Vec<u8>> {
     let tmp_in =

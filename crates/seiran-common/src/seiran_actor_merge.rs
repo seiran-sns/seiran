@@ -14,8 +14,8 @@
 //! `20260906000000_actor_post_mutual_claim_unique.sql`参照）に委ねる。相互に申告し
 //! 合っている2行は`(COALESCE(ap_uri, claimed_ap_uri), COALESCE(at_did, claimed_at_did))`
 //! が同じ値に収束するため、片方をINSERT/UPDATEしようとした時点でUNIQUE制約違反になる。
-//! `crate::unique_retry`でこれを検知しトランザクションの頭からやり直す（advisory lockの
-//! キー不一致によるデッドロック・レース漏れのリスクを避けるためのマイケルの提案）。
+//! `crate::unique_retry`でこれを検知しトランザクションの頭からやり直す（advisory lockだと
+//! キーの不一致でデッドロックや直列化漏れが起きうる）。
 
 use crate::repository::{BskyActorProfile, FediActorProfile};
 use chrono::{DateTime, Utc};
@@ -33,15 +33,13 @@ pub struct DiscoveryOutcome {
 
 /// `discover_fedi_actor`/`discover_bsky_actor`呼び出し後に必ず通す共通後処理。
 /// 結婚成立時はJetstreamのwanted_dids再構築を促し（この行が初めて`at_did`を獲得した
-/// 場合、Jetstream購読フィルタは自動追随しないため、実地検証で発覚）、未成立でも
+/// 場合、Jetstream購読フィルタは自動追随しないため）、未成立でも
 /// 自己申告（呼び出し元が`discover_*`へ渡したのと同じ`claimed_at_did`/`claimed_ap_uri`）が
 /// あれば相手を能動的に取りに行く`Job::ActorMetadataResolve`をenqueueして結婚成立を
 /// 早める（必須ではない、通常の受動的発見でも成立しうる）。
 ///
-/// この後処理を呼び出し元ごとに個別に書いていたところ、1箇所だけenqueueが漏れる
-/// 実装ミスが実際に発生した（`seiran-atp-repo::firehose::resolve_or_upsert_bsky_actor`、
-/// 2026-09-06実地検証。DM受信・ブロック検知・リポスト/いいねの受動的発見が能動フェッチ
-/// されないまま孤立し続けていた）。`discover_fedi_actor`/`discover_bsky_actor`の
+/// 呼び出し元ごとに書くとenqueueが漏れやすく、漏れると受動的に発見したアクターが能動フェッチ
+/// されないまま孤立する。`discover_fedi_actor`/`discover_bsky_actor`の
 /// 呼び出し元は必ずこれを経由し、個別に書き直さないこと。
 pub async fn promote_after_discovery(
     pool: &PgPool,
@@ -97,11 +95,11 @@ async fn discover_fedi_actor_once(
     let mut married = false;
     let actor_id = if let Some(existing_id) = existing_id {
         // 既に`remote_seiran`へ昇格済み（結婚成立済み）の行に対しては、`claimed_at_did`を
-        // 復活させない。レースコンディション実地検証で発覚: このUPDATEはINSERT直後に
+        // 復活させない。このUPDATEはINSERT直後に
         // 結婚成立した行へ、ほぼ同時に走っていた別経路の再発見（同じ相手を独立にAP/ATP
         // 両方からほぼ同時に発見した場合の「2番目」の到達）が無条件にCOALESCEで
         // `claimed_at_did`を書き戻してしまい、結婚済みなのに未確認の申告が残留する
-        // 状態を作っていた（advisory lockはトランザクションを直列化するだけで、
+        // （advisory lockはトランザクションを直列化するだけで、
         // 「既に結婚済みだから何もしない」という判断はしていないため、この保護がないと
         // 起きる）。
         sqlx::query(
@@ -281,10 +279,9 @@ async fn discover_bsky_actor_once(
     let actor_id = if let Some(existing_id) = existing_id {
         // 既に`remote_seiran`へ昇格済み（結婚成立済み）の行に対しては、`username`を
         // ATPハンドル形式で上書きせず（結婚後の正式なusernameはFedi側由来のまま保つ）、
-        // `claimed_ap_uri`も復活させない。理由は`discover_fedi_actor`の対称コメント参照
-        // （レースコンディション実地検証で発覚）。`at_handle`はプロフィール画面のBsky ID
-        // 表示専用の別列のため、`username`とは独立に`remote_seiran`でも常に最新値へ更新する
-        // （マイケル指示、2026-09-06）。
+        // `claimed_ap_uri`も復活させない。理由は`discover_fedi_actor`の対称コメント参照。
+        // `at_handle`はプロフィール画面のBsky ID表示専用の別列のため、`username`とは
+        // 独立に`remote_seiran`でも常に最新値へ更新する。
         sqlx::query(
             "UPDATE actors SET username = CASE WHEN actor_type = 'remote_seiran' THEN username \
                                                 ELSE $2 END, \

@@ -132,9 +132,8 @@ async fn check_not_blocked(
 /// （既にフォロー関係があれば何もせず false）。
 ///
 /// 先に follows 行を確保（`INSERT ... ON CONFLICT DO NOTHING`）し、確保できたリクエストだけが
-/// ATP へコミットする。以前は「ATP コミット → follows INSERT」の順で、フォロー操作の連打・
-/// 同時実行時に ATP follow レコードが2件作られ、片方の rkey がどこにも記録されず
-/// アンフォローしても残り続けていた。外部呼び出し（ATP コミット）はトランザクションに
+/// ATP へコミットする（「ATP コミット → follows INSERT」の順だと、連打・同時実行で ATP follow
+/// レコードが2件作られ、片方の rkey がどこにも記録されずアンフォローしても残る）。外部呼び出し（ATP コミット）はトランザクションに
 /// 含めず、失敗時は確保した行を削除して元に戻す。
 async fn establish_atp_follow(
     config: &FollowExecConfig,
@@ -507,10 +506,10 @@ async fn follow_fedi(
 
     // 本家Misskey準拠: 相手が鍵アカウント（manuallyApprovesFollowers）でなければ、
     // Follow送信と同時にDB上は即座にacceptedとして確定する（相手サーバーのAccept返信を
-    // 待たない楽観的確定）。実機確認済みのAria不具合対策: pendingのまま留まると、Aria側は
+    // 待たない楽観的確定）。pendingのまま留まると、Aria側は
     // フォロー操作後に一度だけ（1秒後）再取得してボタン状態を更新する設計のため、Accept受信
     // まで「処理中」表示に固まって見える（実際のフォロー成立自体は待たずに反映すべき）。
-    // 鍵アカウント宛は従来通りpendingのままAccept受信を待つ。
+    // 鍵アカウント宛はpendingのままAccept受信を待つ。
     let is_locked = remote_ap.manually_approves_followers;
     // (新規に関係を作ったか, Accept待ち(pending)のままか)
     let (inserted, is_pending) = if is_locked {

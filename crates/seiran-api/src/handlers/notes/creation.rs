@@ -91,7 +91,7 @@ async fn create_repost(
     // のみ）の場合は PostToFollowers フォールバックとして通常の Create(Note) が配送される
     // ため /notes/ 形式にする。ここが常に /announces/ 形式だと、DBが自称する身元と実際に
     // 配送された身元が食い違い、外部からの参照（ブースト等）で同一投稿と認識できず重複行が
-    // 生成される（#117022998620934901 で発覚）。
+    // 生成される。
     let ap_object_id = if meta.ap_object_id.is_some() {
         format!("https://{}/announces/{}", state.local_domain, post_id)
     } else {
@@ -413,8 +413,8 @@ async fn resolve_dm_recipients(
         .find_by_ids(&ids)
         .await
         .map_err(|e| ApiError::Internal(format!("DM宛先アクター取得失敗: {}", e)))?;
-    // 指定順を保ったまま重複を除く。存在しないIDが含まれていれば拒否する（以前は未確認のまま
-    // `post_recipients`へ渡し、外部キー違反で500になっていた）。
+    // 指定順を保ったまま重複を除く。存在しないIDが含まれていれば拒否する（そのまま
+    // `post_recipients`へ渡すと外部キー違反で500になる）。
     let mut by_id: HashMap<i64, Actor> = found.into_iter().map(|a| (a.id, a)).collect();
     let mut recipients: Vec<Actor> = Vec::with_capacity(ids.len());
     for id in &ids {
@@ -735,8 +735,8 @@ async fn persist_regular_post(
     };
 
     // DMのスレッド起点ID。親（reply_to）がdirectならその値をそのまま伝播コピーし、
-    // 親がdirectでない/非リプライなら自分自身がスレッド起点になる（マイケルの指示通り、
-    // 再帰クエリではなく伝播コピー方式）。
+    // 親がdirectでない/非リプライなら自分自身がスレッド起点になる（再帰クエリで辿らずに
+    // 済むよう伝播コピーする）。
     let thread_root_post_id: Option<i64> = if visibility == "direct" {
         Some(reply_ctx.parent_thread_root_post_id.unwrap_or(post_id))
     } else {

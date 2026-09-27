@@ -466,10 +466,10 @@ impl ActorRepository for PgActorRepository {
         // ATPハンドル形式（`user.pds-domain`）で上書きしない。結婚後の正式なusernameは
         // Fedi側由来のまま保つ（`seiran_actor_merge::discover_bsky_actor`の対称ロジック）。
         // このガードが無いと、フォロワーポーリング等マージロジックを経由しない呼び出し元
-        // （`bsky_follower_poll`・`search`等）が定期的に上書きしてしまう（実例:
-        // `@yubao@beta.seiran.org`のusernameが`yubao.beta.seiran.org`に化けた事故）。
+        // （`bsky_follower_poll`・`search`等）が定期的に上書きしてしまう（例:
+        // `@yubao@beta.seiran.org`のusernameが`yubao.beta.seiran.org`に化ける）。
         // 一方`at_handle`はプロフィール画面のBsky ID表示専用の別列のため、`username`とは
-        // 独立に`remote_seiran`でも常に最新値へ更新する（マイケル指示、2026-09-06）。
+        // 独立に`remote_seiran`でも常に最新値へ更新する。
         let row: (i64,) = sqlx::query_as(
             "INSERT INTO actors (id, actor_type, at_did, username, domain, display_name, avatar_url, banner_url, at_handle, created_at, updated_at)
              VALUES ($1, 'bsky', $2, $3, '', $4, $5, $6, $3, $7, $7)

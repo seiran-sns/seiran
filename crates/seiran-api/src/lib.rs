@@ -532,7 +532,7 @@ impl AppState {
     /// #229: 同一 (actor_id, direction) を直近 [`REMOTE_FOLLOW_SYNC_COOLDOWN`] 以内に既に
     /// 積んでいれば再投入しない。フォロー数の多いアクターのプロフィールを何度もリロードする
     /// と、そのたびに最大5000件の`RemoteActorResolve`（優先度低）を積む重いジョブが重複投入
-    /// され、同じ優先度を共有する他のジョブ（`AlsoKnownAsVerify`等）が飢餓状態になっていた。
+    /// され、同じ優先度を共有する他のジョブ（`AlsoKnownAsVerify`等）が飢餓状態になる。
     pub async fn enqueue_remote_follow_list_sync(&self, actor_id: i64, direction: String) {
         let key = (actor_id, direction.clone());
         let now = std::time::Instant::now();
@@ -1172,24 +1172,20 @@ async fn resume_bsky_post_commit_deferred(state: &AppState) {
 /// 通常はnotes API呼び出し時の遅延解決（`queries::attach_remote_instance_info`）で
 /// 徐々に埋まっていくが、起動時にこれを走らせることで新規デプロイ直後の
 /// 大量未解決状態（既存ドメイン全件が対象）を素早く解消する。
-/// `icon_url`/`node_name`/`software_name`がNULLの行も対象に含める: サーバーアイコン取得・
-/// `<title>`タグフォールバック機能をそれぞれ後から追加した際、それ以前に解決済み
-/// だった行（列自体は追加されているが値は未取得）が`NOT EXISTS`だけの判定だと
-/// 永久に再取得されず放置される事故があったため（2026-08-19実機確認、misskey.dev等の
-/// 主要インスタンスがこれで固定的に🌐表示・ドメイン名表示のままになった）。
+/// `icon_url`/`node_name`/`software_name`がNULLの行も対象に含める: 取得項目を後から
+/// 足したとき、それ以前に解決済みの行が`NOT EXISTS`だけの判定だと永久に再取得されない。
 /// `software_name IS NULL`も同じ扱いにしているのは、nodeinfoドキュメントの一時的な
 /// パース失敗・discovery失敗（`jobs::remote_instance_info_resolve`の「諦め」分岐）で
 /// 一度NULLキャッシュされると、当時は本当に非対応だったとしても後日そのソフトウェア側で
 /// nodeinfo対応が追加・修正される場合があり、`software_name`が埋まらない限り固有色
-/// フォールバックも一生適用されないため（2026-09-17、concrnt-ap-bridge実機確認）。
+/// フォールバックも一生適用されないため。
 /// 非対応サーバーは毎回再チャレンジすることになるが、起動時のみの発生でありコストは小さい。
 ///
 /// `theme_color`が汎用デフォルト（`DEFAULT_THEME_COLOR`）のまま止まっている行のうち、
 /// `fallback_color_for_software`（既知フォーク固有色表）に現在その`software_name`が
 /// 載っているものも対象に含める: `themeColor`未宣言サーバー向けの固有色を後から追加した
 /// 際、それ以前に解決済みだった行が汎用グレーのまま固定され、再解決の手段が
-/// `NOT EXISTS`判定に無いため永久に放置される事故を防ぐ（2026-09-17、littlefedi追加時に
-/// 実機確認）。固有色未登録のsoftware（意図的に汎用グレーへフォールバックした行）は
+/// `NOT EXISTS`判定に無いため永久に放置されるのを防ぐ。固有色未登録のsoftware（意図的に汎用グレーへフォールバックした行）は
 /// 対象外なので、毎起動で無限に再チャレンジすることはない。
 async fn backfill_remote_instance_meta(state: &AppState) {
     let domains = match seiran_common::repository::maintenance::domains_missing_instance_meta(

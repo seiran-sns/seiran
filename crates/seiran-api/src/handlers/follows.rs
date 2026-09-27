@@ -30,7 +30,7 @@ pub type DeleteFollowRequest = FollowTargetRequest;
 /// （ローカルusername / AP URI / DID）を組み立てる。AP URI を DID より優先する
 /// （frontend のプロフィール画面と同じ順）。相互申告済みの seiran アクター（`remote_seiran`）は
 /// AP 経由のフォローが ATP follow のコミットも兼ねるため（#238）、DID を優先すると ATP 側しか
-/// フォローが成立しない（以前の Misskey `following/create` の不具合）。
+/// フォローが成立しない。
 fn target_for_actor(actor: &Actor) -> String {
     if actor.actor_type == "local" {
         actor.username.clone()

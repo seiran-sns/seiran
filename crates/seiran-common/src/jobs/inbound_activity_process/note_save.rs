@@ -151,8 +151,8 @@ pub(crate) async fn save_ap_note_core(
     let to_list = as_string_list(&note["to"]);
     let visibility = resolve_note_visibility(note, &to_list, seiran_post_ext.as_ref());
 
-    // AP inReplyTo からローカルの reply_to_post_id を解決する（DM機能実装以前はこの解決自体が
-    // 存在しなかった。通常投稿にも有用だが、direct（DM）のスレッド起点伝播に必須のため追加）。
+    // AP inReplyTo からローカルの reply_to_post_id を解決する（direct（DM）の
+    // スレッド起点伝播に必須）。
     let (reply_to_post_id, reply_to_ap_uri, reply_to_ref_status) =
         resolve_ref(ref_mode, note["inReplyTo"].as_str(), inbox, ap_client)
             .await

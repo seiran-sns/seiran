@@ -1,12 +1,7 @@
 //! 認証必須のユーザー・アクター情報を解決する axum extractor。
 //!
-//! 以前は全ハンドラが「`extract_auth` で JWT 検証 → `find_local_by_user_id` で
-//! アクター行を解決 → 見つからなければ 404」という同じ10行前後を毎回書いていた
-//! （一部は `(StatusCode::NOT_FOUND, "アクターが見つかりません")` という生タプルを返し、
-//! `ApiError` の JSON 形式と異なる素のテキストボディになっていたため、
-//! フロントエンドの `res.json()` がパースに失敗する latent バグでもあった）。
-//! この extractor はその定型処理を一本化し、失敗時は必ず `ApiError` の
-//! JSON レスポンスを返す。
+//! 「JWT 検証 → アクター行を解決 → 見つからなければ 404」を一本化し、失敗時は必ず
+//! `ApiError` の JSON レスポンスを返す（素のテキストだとフロントの `res.json()` が失敗する）。
 
 use axum::{
     extract::FromRequestParts,

@@ -48,9 +48,7 @@ impl ReferenceKind {
 /// actors を`a`、アバター解決用の結合を`timeline_post_joins!()`の別名で参照する前提。
 /// `concat!`でSQLリテラルへ埋め込んで使う（`TimelinePost`を返す全クエリが必ずこれを使う）。
 ///
-/// 以前は同じ列リストが20箇所超に手書きされ、`#[sqlx(default)]`が列の書き漏れを黙って
-/// 空値にしていたため、リストTL・ピン留め・検索結果でCW（`content_warning`）や可視性が
-/// 欠落する不具合が起きていた。列を追加するときはここだけを変更する。
+/// 列を追加するときはここだけを変更する（`#[sqlx(default)]`で書き漏れを空値にしない）。
 /// `actor_suspended_at`は参照埋め込み・単体取得でのみ必要なため（タイムライン項目で
 /// 返すとフロントが凍結ユーザーの投稿を伏せ字表示に切り替えてしまう）、必要なクエリが
 /// `, a.suspended_at AS actor_suspended_at`を個別に後置する。
@@ -86,8 +84,8 @@ macro_rules! timeline_post_joins {
 /// 引用・リポスト・返信先などの「参照埋め込み」用に、`ids`のうち`viewer_actor_id`から
 /// 可視なポストを一括取得する（`actor_suspended_at`込み、並び順は不定）。
 /// frontend API（`embed_renotes`/`embed_quotes`）とMisskey互換API（`fetch_referenced_notes`）の
-/// 共通実装。可視性判定は必ず`post_is_visible_to`を使う（以前は各呼び出し元が手書きの条件で
-/// `direct`を`followers_only`と同じ扱いにしており、宛先外のフォロワーへDM本文が漏れていた）。
+/// 共通実装。可視性判定は必ず`post_is_visible_to`を使う（手書きの条件で`direct`を
+/// `followers_only`と同じ扱いにすると、宛先外のフォロワーへDM本文が漏れる）。
 pub async fn find_visible_by_ids(
     pool: &PgPool,
     ids: &[i64],
@@ -852,10 +850,10 @@ impl PostRepository for PgPostRepository {
         // `actor_id = $1 OR actor_id IN (follows...)` を素朴に `ORDER BY id DESC LIMIT` すると、
         // posts 全体（Bsky Jetstream 経由で無関係なリモート投稿を含め100万行超）を id 降順に
         // スキャンしながら1行ずつフィルタする実行計画になり、フォロー数が少ないユーザーほど
-        // 大量の無関係行を読み飛ばすまで終わらない（実測 2.6秒、104万行スキャンして8行採用）。
+        // 大量の無関係行を読み飛ばすまで終わらない（100万行規模で秒単位）。
         // targets（自分+フォロー中）を LATERAL で actor_id ごとに `idx_posts_actor_id` を引かせ、
         // 各アクター最大 limit 件だけ取ってからマージソートする形に書き換えると、
-        // 既存インデックスのみで実測 1〜4ms まで改善する。
+        // 既存インデックスのみで数ms に収まる。
         sqlx::query_as::<_, TimelinePost>(
             concat!("WITH targets AS (
                  SELECT $1::bigint AS actor_id

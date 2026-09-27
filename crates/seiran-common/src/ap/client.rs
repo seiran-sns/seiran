@@ -180,9 +180,7 @@ impl std::fmt::Display for FediProfileError {
 
 impl crate::repository::FediActorProfile {
     /// AP Actor 文書から保存用プロフィールを組み立てる。リモートアクターを保存する全経路
-    /// （受信Activity・フォロー・プロフィール表示・各種ジョブ）の共通実装。以前は経路ごとに
-    /// 手書きしており、`preferredUsername`欠落時の扱い（エラー／URI末尾で代用）やバナーの
-    /// 保存有無が経路によって食い違っていた。
+    /// （受信Activity・フォロー・プロフィール表示・各種ジョブ）の共通実装。
     ///
     /// - `preferredUsername`が無い場合、URI末尾のパスセグメントでの代用はしない。ActivityPub
     ///   仕様はActor URIのパス構造を規定しておらず（例: Misskeyは末尾が内部の不透明なID）、
@@ -378,7 +376,7 @@ impl ApClient {
     /// 署名鍵があれば署名付きGET（`fetch_actor_signed`）、無ければ未署名GET（`fetch_actor`）で
     /// アクターを取得する。Authorized Fetch 対応のため、システムアクターの署名鍵が組み立て
     /// られる限り署名付きで取得し、組み立てられない場合のみ未署名へフォールバックする
-    /// 全経路の共通実装（以前は各所で同じ`match`を手書きしていた）。
+    /// 全経路の共通実装。
     pub async fn fetch_actor_with_key(
         &self,
         actor_uri: &str,
@@ -526,7 +524,7 @@ impl ApClient {
     ///
     /// Pleroma はアクタードキュメントの `publicKeyPem` の末尾に余分な空行を付けて返す
     /// ことがあり、`rsa` クレートの PEM パーサはこれを `PreEncapsulationBoundary`
-    /// エラーとして拒否する（実例: post.syobon.net、2026-09-03確認）。`trim()` して
+    /// エラーとして拒否する。`trim()` して
     /// から渡すことで、Mastodon/Misskey 等の余分な空白がないPEMと同様に扱う。
     fn verify_with_pem(
         pem: &str,
@@ -569,11 +567,10 @@ impl ApClient {
             path, host, date_str
         );
 
-        // RSA鍵パース・署名計算はCPUバウンドの同期処理（実測 約50ms/回）。コレクション
+        // RSA鍵パース・署名計算はCPUバウンドの同期処理（1回数十ms）。コレクション
         // ページネーション（`fetch_ap_collection_uris`等）はページごとにこれを呼ぶため、
         // async関数内で直接実行するとtokioワーカースレッドを長時間ブロックし、同時実行中の
-        // 他リクエスト（`tokio::time::timeout`のタイマー含む）まで巻き込んで遅延させる
-        // （2026-08-31実測、プロフィール表示が数秒〜10秒規模に劣化した不具合の原因）。
+        // 他リクエスト（`tokio::time::timeout`のタイマー含む）まで巻き込んで遅延させる。
         // spawn_blockingで専用スレッドプールへ逃がす。
         let actor_key_id_owned = actor_key_id.to_string();
         let private_key_pem_owned = private_key_pem.to_string();

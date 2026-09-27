@@ -34,7 +34,7 @@ pub fn classify_follow_target(target: &str, local_domain: &str) -> FollowTargetK
     // ローカルユーザーの完全な ATP ハンドル表記（`user.{local_domain}`）→ AppView へ問い合わせず
     // ローカルフォローとして処理する。判定せず Bsky 経路に流すと、AppView 解決結果（ハンドル
     // 表記そのもの）で `upsert_remote_bsky` の `ON CONFLICT (at_did)` が発火し、ローカル
-    // アクターの `username` 列を壊す（実際に発生した事故、`docs/protocols.md` 4節参照）。
+    // アクターの `username` 列を壊す（`docs/protocols.md` 4節参照）。
     if let Some(username) = strip_local_domain_suffix(t, local_domain) {
         return FollowTargetKind::Local(username.to_string());
     }

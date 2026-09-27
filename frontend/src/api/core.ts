@@ -93,8 +93,7 @@ export async function throwIfError(
  * 成功レスポンスのボディを JSON としてパースする（`request`/`uploadFormData` で共通）。
  * 204 No Content 等、ボディが無い成功レスポンスは `res.json()` が
  * "Unexpected end of JSON input" で例外を投げるため、パース前に弾く
- * （例: admin のロール変更/凍結・解除 API。処理自体は成功しているのに
- * 呼び出し側にエラーとして伝播していた不具合）。
+ * （例: admin のロール変更/凍結・解除 API。弾かないと成功がエラーとして伝播する）。
  */
 export async function parseJsonBody<T>(res: Response): Promise<T> {
   if (res.status === 204) {

@@ -25,8 +25,8 @@ interface HlsVideoProps {
  * 仕様上「型として認識できるかもしれない」程度の判定で、実際にデコードできるかは
  * 保証しない。一部のChrome環境で`"maybe"`を誤って返し、ネイティブHLS対応と誤判定
  * されてhls.jsが一切初期化されず、`video.src`をセットするだけで実際には全く
- * 再生できない（データはダウンロードされるが再生可能状態にならない）不具合が
- * 実機で確認された。`Hls.isSupported()`（Media Source Extensionsの実サポートを
+ * 再生できない（データはダウンロードされるが再生可能状態にならない）。
+ * `Hls.isSupported()`（Media Source Extensionsの実サポートを
  * 正確にチェックする）を優先し、それが使えない環境（iOS Safari等）でのみ
  * ネイティブHLSにフォールバックする。
  */
