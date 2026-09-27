@@ -6,5 +6,9 @@
     "description": "{{appName}} solicita acceso a su cuenta de seiran.",
     "authorizing": "Tratamiento...",
     "submit": "Autorizar"
+  },
+  "oauth": {
+    "oobDescription": "Introduzca el siguiente código de autorización en la aplicación.",
+    "invalidRequest": "La solicitud de autorización no es válida. Vuelva a empezar desde la aplicación."
   }
 }

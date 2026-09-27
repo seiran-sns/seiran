@@ -6,5 +6,9 @@
     "description": "{{appName}} is requesting access to your seiran account.",
     "authorizing": "Processing...",
     "submit": "Authorize"
+  },
+  "oauth": {
+    "oobDescription": "Enter the following authorization code in the app.",
+    "invalidRequest": "The authorization request is invalid. Please start over from the app."
   }
 }

@@ -7,6 +7,7 @@ use crate::handlers::follows::unfollow_target;
 use crate::handlers::target_resolve::resolve_and_upsert_target;
 use crate::middleware::AuthedUser;
 use crate::AppState;
+use seiran_common::repository::Actor;
 
 #[derive(Deserialize)]
 pub struct CreateBlockRequest {
@@ -41,14 +42,31 @@ pub async fn create_block(
             return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response()
         }
     };
+    if let Err(e) = block_actor(&state, &user, &target_actor).await {
+        return e.into_response();
+    }
+    Json(BlockResponse {
+        status: "blocked".to_string(),
+    })
+    .into_response()
+}
 
+/// 解決済みのアクターをブロックする（カスタム API と Mastodon 互換 API
+/// `POST /api/v1/accounts/:id/block` 共通）。
+pub(crate) async fn block_actor(
+    state: &AppState,
+    user: &AuthedUser,
+    target_actor: &Actor,
+) -> Result<(), ApiError> {
     if target_actor.id == user.actor_id {
-        return ApiError::BadRequest("自分自身はブロックできません".to_owned()).into_response();
+        return Err(ApiError::BadRequest(
+            "自分自身はブロックできません".to_owned(),
+        ));
     }
 
     // 双方向のフォロー関係を強制解除する。
     // 自分→相手: 既存の unfollow_target（ATP解除コミット＋fediならAP Undo Follow配送）をそのまま使う。
-    if let Err(e) = unfollow_target(&state, user.actor_id, &user.username, &target_actor).await {
+    if let Err(e) = unfollow_target(state, user.actor_id, &user.username, target_actor).await {
         tracing::warn!("[block] 自分→相手のフォロー解除に失敗（続行）: {}", e);
     }
     // 相手→自分: こちらから相手のリポジトリを操作する手段は無いため、ローカルの follows 行だけ削除する。
@@ -108,24 +126,18 @@ pub async fn create_block(
         }
     }
 
-    if let Err(e) = state
+    state
         .blocks
         .insert(user.actor_id, target_actor.id, atp_rkey.as_deref())
         .await
-    {
-        return ApiError::Internal(format!("[block] blocks INSERT 失敗: {}", e)).into_response();
-    }
+        .map_err(|e| ApiError::Internal(format!("[block] blocks INSERT 失敗: {}", e)))?;
 
     tracing::info!(
         "[block] {} → {} ブロック完了",
         user.actor_id,
         target_actor.id
     );
-
-    Json(BlockResponse {
-        status: "blocked".to_string(),
-    })
-    .into_response()
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -175,7 +187,21 @@ pub async fn delete_block(
             return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response()
         }
     };
+    if let Err(e) = unblock_actor(&state, &user, &target_actor).await {
+        return e.into_response();
+    }
+    Json(BlockResponse {
+        status: "not_blocked".to_string(),
+    })
+    .into_response()
+}
 
+/// 解決済みのアクターのブロックを解除する（カスタム API と Mastodon 互換 API 共通）。
+pub(crate) async fn unblock_actor(
+    state: &AppState,
+    user: &AuthedUser,
+    target_actor: &Actor,
+) -> Result<(), ApiError> {
     let now = chrono::Utc::now();
 
     if let Ok(Some(rkey)) = state
@@ -229,22 +255,16 @@ pub async fn delete_block(
         }
     }
 
-    if let Err(e) = state
+    state
         .blocks
         .delete_by_actors(user.actor_id, target_actor.id)
         .await
-    {
-        return ApiError::Internal(format!("[unblock] blocks DELETE 失敗: {}", e)).into_response();
-    }
+        .map_err(|e| ApiError::Internal(format!("[unblock] blocks DELETE 失敗: {}", e)))?;
 
     tracing::info!(
         "[unblock] {} → {} アンブロック完了",
         user.actor_id,
         target_actor.id
     );
-
-    Json(BlockResponse {
-        status: "not_blocked".to_string(),
-    })
-    .into_response()
+    Ok(())
 }

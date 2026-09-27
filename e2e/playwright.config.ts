@@ -61,6 +61,7 @@ const backendEnv: Record<string, string> = {
 const STORAGE_SERIAL_SPECS = [
   "**/notifications.spec.ts",
   "**/misskey-compat.spec.ts",
+  "**/mastodon-compat.spec.ts",
   "**/federation-delivery.spec.ts",
 ];
 // - site_settings（rate-limit/admin）・appviewスタブのグローバルsearchRequests

@@ -18,6 +18,7 @@ pub mod hashtags;
 pub mod health;
 pub mod lists;
 pub mod manifest;
+pub mod mastodon;
 pub mod media_proxy;
 pub mod media_store;
 pub mod meta;

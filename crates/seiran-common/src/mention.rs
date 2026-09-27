@@ -226,7 +226,7 @@ pub async fn convert_mentions_for_bsky(
 /// `text_chars[start..]` が `http://` または `https://` で始まる場合、URLの終端インデックス
 /// （exclusive）を返す。空白と `< > ( ) [ ]` を区切り文字として扱う
 /// （フロント `frontend/src/lib/richTextPatterns.ts` のURL正規表現と同じ区切り文字集合）。
-fn scan_url(text_chars: &[char], start: usize) -> Option<usize> {
+pub fn scan_url(text_chars: &[char], start: usize) -> Option<usize> {
     let prefix_len = if text_chars[start..].starts_with(&['h', 't', 't', 'p', 's', ':', '/', '/']) {
         8
     } else if text_chars[start..].starts_with(&['h', 't', 't', 'p', ':', '/', '/']) {
@@ -255,7 +255,7 @@ fn scan_url(text_chars: &[char], start: usize) -> Option<usize> {
 /// （直前が半角英数字/アンダースコア/`/` ならスキップ、本体にアルファベットを1文字も含まない
 /// 場合は無効＝URLフラグメントや `#2026` 等の純数字列を誤検出しない）。大文字小文字を保持する点が
 /// 抽出関数と異なる（グルーピング用の正規化は永続化層の責務であり、配信用テキストには影響しない）。
-fn scan_hashtag(text_chars: &[char], start: usize) -> Option<(String, usize)> {
+pub fn scan_hashtag(text_chars: &[char], start: usize) -> Option<(String, usize)> {
     if start > 0 {
         let prev = text_chars[start - 1];
         if prev.is_ascii_alphanumeric() || prev == '_' || prev == '/' {

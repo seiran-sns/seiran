@@ -25,6 +25,7 @@ const AuthCarouselPage = lazy(() => import("./pages/auth/AuthCarouselPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
 const MigrationImportingPage = lazy(() => import("./pages/MigrationImportingPage"));
 const MiAuthConnectPage = lazy(() => import("./pages/MiAuthConnectPage"));
+const OAuthConnectPage = lazy(() => import("./pages/OAuthConnectPage"));
 const MutesBlocksSettingsPage = lazy(() => import("./pages/MutesBlocksSettingsPage"));
 const NoteDetailPage = lazy(() => import("./pages/NoteDetailPage"));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
@@ -270,6 +271,14 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <MiAuthConnectPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/oauth-connect"
+          element={
+            <RequireAuth>
+              <OAuthConnectPage />
             </RequireAuth>
           }
         />

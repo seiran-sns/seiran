@@ -35,24 +35,33 @@ pub async fn create_mute(
         }
     };
 
-    if target_actor.id == user.actor_id {
-        return ApiError::BadRequest("自分自身はミュートできません".to_owned()).into_response();
+    if let Err(e) = mute_actor(&state, user.actor_id, target_actor.id).await {
+        return e.into_response();
     }
-
-    if let Err(e) = state.mutes.insert(user.actor_id, target_actor.id).await {
-        return ApiError::Internal(format!("[mute] mutes INSERT 失敗: {}", e)).into_response();
-    }
-
-    tracing::info!(
-        "[mute] {} → {} ミュート完了",
-        user.actor_id,
-        target_actor.id
-    );
-
     Json(MuteResponse {
         status: "muted".to_string(),
     })
     .into_response()
+}
+
+/// 解決済みのアクターをミュートする（カスタム API と Mastodon 互換 API 共通）。
+pub(crate) async fn mute_actor(
+    state: &AppState,
+    actor_id: i64,
+    target_actor_id: i64,
+) -> Result<(), ApiError> {
+    if target_actor_id == actor_id {
+        return Err(ApiError::BadRequest(
+            "自分自身はミュートできません".to_owned(),
+        ));
+    }
+    state
+        .mutes
+        .insert(actor_id, target_actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[mute] mutes INSERT 失敗: {}", e)))?;
+    tracing::info!("[mute] {} → {} ミュート完了", actor_id, target_actor_id);
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -103,22 +112,30 @@ pub async fn delete_mute(
         }
     };
 
-    if let Err(e) = state
-        .mutes
-        .delete_by_actors(user.actor_id, target_actor.id)
-        .await
-    {
-        return ApiError::Internal(format!("[unmute] mutes DELETE 失敗: {}", e)).into_response();
+    if let Err(e) = unmute_actor(&state, user.actor_id, target_actor.id).await {
+        return e.into_response();
     }
-
-    tracing::info!(
-        "[unmute] {} → {} ミュート解除完了",
-        user.actor_id,
-        target_actor.id
-    );
-
     Json(MuteResponse {
         status: "not_muted".to_string(),
     })
     .into_response()
+}
+
+/// 解決済みのアクターのミュートを解除する（カスタム API と Mastodon 互換 API 共通）。
+pub(crate) async fn unmute_actor(
+    state: &AppState,
+    actor_id: i64,
+    target_actor_id: i64,
+) -> Result<(), ApiError> {
+    state
+        .mutes
+        .delete_by_actors(actor_id, target_actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("[unmute] mutes DELETE 失敗: {}", e)))?;
+    tracing::info!(
+        "[unmute] {} → {} ミュート解除完了",
+        actor_id,
+        target_actor_id
+    );
+    Ok(())
 }

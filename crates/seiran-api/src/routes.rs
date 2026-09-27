@@ -11,6 +11,16 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::{handlers, middleware, AppState};
 
+/// Mastodon 互換 API のうち、ブラウザ上の Web クライアント（Elk・Phanpy 等、任意のオリジン）
+/// から直接叩かれるパス。認証は `Authorization: Bearer` だけで Cookie を使わないので、
+/// `/xrpc/*` と同じくオリジン制限の対象外にする。SPA 専用の `/api/oauth/*`（承認画面）は含めない。
+fn is_mastodon_public_path(path: &str) -> bool {
+    path.starts_with("/api/v1/")
+        || path.starts_with("/api/v2/")
+        || path == "/oauth/token"
+        || path == "/oauth/revoke"
+}
+
 /// CORS 設定。
 fn cors_layer(state: &AppState) -> CorsLayer {
     // [SEC-2] `frontend_origin`（`FRONTEND_ORIGIN`環境変数）と自ドメインのみ許可する。
@@ -30,7 +40,10 @@ fn cors_layer(state: &AppState) -> CorsLayer {
     CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(move |origin, req| {
             let path = req.uri.path();
-            if path.starts_with("/xrpc/") || path.starts_with("/.well-known/") {
+            if path.starts_with("/xrpc/")
+                || path.starts_with("/.well-known/")
+                || is_mastodon_public_path(path)
+            {
                 return true;
             }
             let Ok(origin_str) = origin.to_str() else {
@@ -748,6 +761,131 @@ fn misskey_routes() -> Router<AppState> {
 }
 
 /// AT Protocol XRPC・DID 解決。
+/// Mastodon 互換 API（`handlers::mastodon`）。エラー応答は `mastodon::error_shape` で
+/// Mastodon の `{"error": "..."}` 形に揃える（`route_layer` なのでこのルーター内のルートだけ）。
+fn mastodon_routes() -> Router<AppState> {
+    use handlers::mastodon::{
+        accounts, instance, media, notifications, oauth, search, statuses, streaming, timelines,
+    };
+    let stubs = [
+        "/api/v1/filters",
+        "/api/v2/filters",
+        "/api/v1/announcements",
+        "/api/v1/favourites",
+        "/api/v1/conversations",
+        "/api/v1/followed_tags",
+        "/api/v1/featured_tags",
+        "/api/v1/endorsements",
+        "/api/v1/scheduled_statuses",
+        "/api/v1/follow_requests",
+        "/api/v1/domain_blocks",
+        "/api/v1/trends",
+        "/api/v1/trends/tags",
+        "/api/v1/trends/statuses",
+        "/api/v1/trends/links",
+        "/api/v1/suggestions",
+        "/api/v2/suggestions",
+    ];
+    let router = stubs.into_iter().fold(Router::new(), |r, path| {
+        r.route(path, get(instance::empty_array))
+    });
+    router
+        .route("/api/v1/apps", post(oauth::create_app))
+        .route(
+            "/api/v1/apps/verify_credentials",
+            get(oauth::verify_app_credentials),
+        )
+        .route("/oauth/authorize", get(oauth::authorize_page))
+        .route("/oauth/token", post(oauth::token))
+        .route("/oauth/revoke", post(oauth::revoke))
+        .route("/api/oauth/apps/:client_id", get(oauth::app_info))
+        .route("/api/oauth/authorize", post(oauth::authorize))
+        .route("/api/v1/instance", get(instance::instance_v1))
+        .route("/api/v2/instance", get(instance::instance_v2))
+        .route("/api/v1/custom_emojis", get(instance::custom_emojis))
+        .route("/api/v1/preferences", get(instance::preferences))
+        .route("/api/v1/markers", get(instance::empty_object))
+        .route("/api/headers/missing.png", get(instance::missing_header))
+        .route(
+            "/api/v1/accounts/verify_credentials",
+            get(accounts::verify_credentials),
+        )
+        .route(
+            "/api/v1/accounts/relationships",
+            get(accounts::relationships),
+        )
+        .route("/api/v1/accounts/lookup", get(accounts::lookup))
+        .route("/api/v1/accounts/search", get(accounts::search))
+        .route("/api/v1/accounts/:id", get(accounts::show))
+        .route("/api/v1/accounts/:id/statuses", get(accounts::statuses))
+        .route("/api/v1/accounts/:id/followers", get(accounts::followers))
+        .route("/api/v1/accounts/:id/following", get(accounts::following))
+        .route("/api/v1/accounts/:id/follow", post(accounts::follow))
+        .route("/api/v1/accounts/:id/unfollow", post(accounts::unfollow))
+        .route("/api/v1/accounts/:id/block", post(accounts::block))
+        .route("/api/v1/accounts/:id/unblock", post(accounts::unblock))
+        .route("/api/v1/accounts/:id/mute", post(accounts::mute))
+        .route("/api/v1/accounts/:id/unmute", post(accounts::unmute))
+        .route(
+            "/api/v1/accounts/update_credentials",
+            patch(accounts::update_credentials).layer(DefaultBodyLimit::max(25 * 1024 * 1024)),
+        )
+        .route("/api/v1/blocks", get(accounts::blocks))
+        .route("/api/v1/mutes", get(accounts::mutes))
+        .route("/api/v1/bookmarks", get(statuses::bookmarks))
+        .route("/api/v1/statuses/:id/pin", post(statuses::pin))
+        .route("/api/v1/statuses/:id/unpin", post(statuses::unpin))
+        .route("/api/v1/statuses/:id/bookmark", post(statuses::bookmark))
+        .route(
+            "/api/v1/statuses/:id/unbookmark",
+            post(statuses::unbookmark),
+        )
+        .route("/api/v1/polls/:id", get(statuses::poll))
+        .route("/api/v1/polls/:id/votes", post(statuses::poll_vote))
+        .route("/api/v1/streaming", get(streaming::streaming))
+        .route("/api/v1/streaming/health", get(streaming::health))
+        .route("/api/v1/timelines/home", get(timelines::home))
+        .route("/api/v1/timelines/public", get(timelines::public))
+        .route("/api/v1/timelines/tag/:hashtag", get(timelines::tag))
+        .route("/api/v1/timelines/list/:id", get(timelines::list))
+        .route("/api/v1/tags/:name", get(timelines::tag_info))
+        .route("/api/v1/lists", get(timelines::lists))
+        .route("/api/v1/lists/:id", get(timelines::list_show))
+        .route("/api/v1/statuses", post(statuses::create))
+        .route(
+            "/api/v1/statuses/:id",
+            get(statuses::show).delete(statuses::delete),
+        )
+        .route("/api/v1/statuses/:id/context", get(statuses::context))
+        .route("/api/v1/statuses/:id/favourite", post(statuses::favourite))
+        .route(
+            "/api/v1/statuses/:id/unfavourite",
+            post(statuses::unfavourite),
+        )
+        .route("/api/v1/statuses/:id/reblog", post(statuses::reblog))
+        .route("/api/v1/statuses/:id/unreblog", post(statuses::unreblog))
+        .route(
+            "/api/v1/statuses/:id/reblogged_by",
+            get(statuses::reblogged_by),
+        )
+        .route(
+            "/api/v1/statuses/:id/favourited_by",
+            get(statuses::favourited_by),
+        )
+        .route("/api/v2/search", get(search::search))
+        .route(
+            "/api/v1/media",
+            post(media::upload).layer(DefaultBodyLimit::max(105 * 1024 * 1024)),
+        )
+        .route(
+            "/api/v2/media",
+            post(media::upload).layer(DefaultBodyLimit::max(105 * 1024 * 1024)),
+        )
+        .route("/api/v1/media/:id", get(media::show).put(media::show))
+        .route("/api/v1/notifications", get(notifications::list))
+        .route_layer(axum::middleware::from_fn(handlers::mastodon::error_shape))
+}
+
 fn xrpc_routes() -> Router<AppState> {
     Router::new()
         // AT Protocol XRPC エンドポイント
@@ -904,6 +1042,7 @@ pub fn router(state: AppState) -> Router {
         .merge(page_routes())
         .merge(social_routes())
         .merge(misskey_routes())
+        .merge(mastodon_routes())
         .merge(xrpc_routes())
         // 未実装のXRPCメソッドへの `atproto-proxy` ヘッダー付きリクエストをAppView等へ
         // 透過転送する（明示的な `.route()` の方が優先されるため、ここに置いても既存の

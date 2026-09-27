@@ -51,6 +51,9 @@ export default defineConfig(({ mode }) => {
         "/api": { target: backendTarget, ws: true },
         "/proxy": backendTarget,
         "/miauth": backendTarget,
+        // Mastodon 互換 OAuth（`/oauth/authorize`・`/oauth/token`・`/oauth/revoke`）。
+        // SPA の承認画面は `/oauth-connect` なので、`/oauth/` までを一致させる。
+        "/oauth/": backendTarget,
         // /notes/:id・/@handle は常にバックエンドへ転送する。バックエンドが Accept
         // ヘッダーで AP JSON-LD / OGP注入済み SPA HTML を出し分ける
         // （`crates/seiran-api/src/handlers/ogp.rs`）。OGP 注入時はバックエンドが
@@ -72,6 +75,7 @@ export default defineConfig(({ mode }) => {
         "/api": { target: backendTarget, ws: true },
         "/proxy": backendTarget,
         "/miauth": backendTarget,
+        "/oauth/": backendTarget,
         "/notes": backendTarget,
         "/announces": backendTarget,
       },

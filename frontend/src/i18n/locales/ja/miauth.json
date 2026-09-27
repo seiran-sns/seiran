@@ -6,5 +6,9 @@
     "description": "アプリ {{appName}} が seiran アカウントへのアクセスを求めています。",
     "authorizing": "処理中...",
     "submit": "連携を承認する"
+  },
+  "oauth": {
+    "oobDescription": "以下の認可コードをアプリに入力してください。",
+    "invalidRequest": "認可要求が不正です。アプリからやり直してください。"
   }
 }

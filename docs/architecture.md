@@ -87,7 +87,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 
 ## 4. 認証
 
-認証の実体はローカル ID/PW（`auth::local::LocalAuthProvider`）の JWT だけで、MiAuth と Misskey 互換はその発行・受け渡しの窓口。外部認証プロバイダ連携は無い。
+認証の実体はローカル ID/PW（`auth::local::LocalAuthProvider`）の JWT だけで、MiAuth・Misskey 互換・Mastodon 互換 OAuth はその発行・受け渡しの窓口。外部認証プロバイダ連携は無い。
 
 - パスワード: Argon2（既定パラメータ、`OsRng` の salt）
 - トークン: HS256 の JWT。`sub` は `"local|{user_id}"`。自社ログイン（`generate_token`）・MiAuth（`generate_app_token`）とも `exp` を持たず無期限で、失効は個別の無効化（`app_tokens.revoked_at`）と一括失効（`users.token_valid_after`）で管理する。secret は `secrets.toml` の `jwt_secret`。クレームの `iat` が `token_valid_after` より前なら `extract_auth` が拒否する。パスワード変更・リセット・「全セッションからログアウト」で `token_valid_after` を現在時刻にする。`iat` の無い古いトークンは `token_valid_after` 未設定なら有効（導入時の強制全ログアウトを避けるため）。`extract_auth` は `exp` を無視してデコードする（`verify_token_ignoring_exp`）ので、以前の `exp` 付きトークンも有効。
@@ -103,6 +103,8 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 **パスキー**: WebAuthn の RP（RP ID は `LOCAL_DOMAIN`、origin は既定 `https://{LOCAL_DOMAIN}`、ローカル/E2E のみ `WEBAUTHN_ORIGIN` で上書き）。登録は resident key 必須・プラットフォーム認証器限定（`start_google_passkey_in_google_password_manager_only_registration`）で discoverable credential として保存するので、USB セキュリティキーは使えないが、ログイン画面で ID 入力なしにログインできる（`start_discoverable_authentication`/`identify_discoverable_authentication`）。チャレンジは `passkey_challenges` に保存し、5分で失効、完了時に原子的に削除する（認証開始時はユーザー未確定なので `user_id` は NULL 可）。成功時は署名カウンター等を更新して通常 JWT を発行する。パスキー自体がフィッシング耐性を持つので、パスワードと TOTP は求めない。
 
 **MiAuth**: `GET /miauth/:session_id`（認可ページ）→ `POST /api/miauth/:session_id/authorize`（要 Bearer、無期限 JWT を発行）→ `POST /api/miauth/:session_id/check`（クライアントがポーリング）。セッションはプロセス内メモリ（`AppState.miauth_sessions`）。発行したトークンは `app_tokens` に記録し、設定画面で無効化するまで有効（Misskey クライアントは「取り消すまで有効」を前提にしている）。
+
+**Mastodon 互換 OAuth**: `POST /api/v1/apps`（クライアント登録、`oauth_apps` に永続化）→ `GET /oauth/authorize`（検証して SPA の `/oauth-connect` へ）→ `POST /api/oauth/authorize`（要 Bearer、認可コードを発行）→ `POST /oauth/token`（コードを MiAuth と同じ無期限 JWT に交換し `app_tokens` に記録）。詳細は `docs/protocols.md` 7.1節。リバースプロキシは `/oauth/` 配下を API へ、`/oauth-connect` をフロントへ送る（nginx・vite の設定）。
 
 **Misskey 互換**: `middleware::misskey_auth_bridge` が JSON ボディかクエリの `i` から `Authorization: Bearer` を合成する（既存のヘッダーを優先）。multipart（`drive/files/create`）は対象外なので、ハンドラが multipart の `i` を読む。
 

@@ -45,7 +45,9 @@ ID の採番は2系統:
 | `email_short_codes` | ATP セッション2FA・PLC 操作署名のメール6桁コード |
 | `user_totp` / `user_totp_recovery_codes` / `totp_disable_requests` | TOTP |
 | `user_passkeys` / `passkey_challenges` | パスキー |
-| `app_tokens` | MiAuth/設定画面で発行したアプリトークン |
+| `app_tokens` | MiAuth/Mastodon OAuth/設定画面で発行したアプリトークン |
+| `oauth_apps` / `oauth_authorization_codes` | Mastodon 互換 API の OAuth クライアント登録・認可コード |
+| `bookmarks` | Mastodon 互換 API のブックマーク |
 | `auth_attempt_log` / `auth_ip_blocks` / `account_creation_log` / `user_contact_log` / `search_log` | レート制限 |
 | `reports` / `report_comments` | 通報 |
 
@@ -218,7 +220,13 @@ AP 受信（本文・表示名・リアクション）で見つけたカスタ�
 - ノート一覧を組み立てるときに未キャッシュのドメインがあれば `RemoteInstanceInfoResolve` を積み、今回はドメイン名を仮の表示名にする。起動時の `spawn_startup_tasks` も、未登録や一部が未取得の行、汎用デフォルト色のまま固有色表に載った software の行をまとめて積む（`docs/protocols.md` 2節）。
 
 ### `app_tokens`
-MiAuth の認可、または設定画面からの直接発行（`POST /api/account/app-tokens`）で作る JWT はどちらも `generate_app_token` で、専用の形式は無い。このテーブルは JWT の `jti` をキーにクライアント名・発行日時・無効化日時を持つ台帳。`extract_auth` は検証後に `is_revoked(jti)` を照会する。行の無い `jti`（自社ログイン等）は常に有効（全トークンの台帳ではない）。操作は本人のみ。トークン本体は保存しないので、直接発行の応答で一度だけ返す。
+MiAuth の認可、または設定画面からの直接発行（`POST /api/account/app-tokens`）で作る JWT はどちらも `generate_app_token` で、専用の形式は無い。このテーブルは JWT の `jti` をキーにクライアント名・発行日時・無効化日時を持つ台帳。`extract_auth` は検証後に `is_revoked(jti)` を照会する。行の無い `jti`（自社ログイン等）は常に有効（全トークンの台帳ではない）。操作は本人のみ。トークン本体は保存しないので、直接発行の応答で一度だけ返す。Mastodon 互換の OAuth で発行した行は `oauth_app_id` に発行元アプリを持つ（`GET /api/v1/apps/verify_credentials`・`POST /oauth/revoke` が引く。MiAuth 等は NULL、アプリ行が消えると NULL にしてトークンの失効管理は残す）。
+
+### `oauth_apps` / `oauth_authorization_codes`
+Mastodon 互換 API の OAuth（`docs/protocols.md` 7.1節）。クライアントは `POST /api/v1/apps` で一度登録した client_id/secret を使い回すので、MiAuth のセッション（プロセス内メモリ）と違い永続化する。`client_secret` と認可コードは平文を持たず SHA-256（hex）だけを保存する。`redirect_uris` は登録時に申告された配列で、認可要求の `redirect_uri` は完全一致を要求する。認可コードは10分で失効し、トークン交換時に `DELETE ... RETURNING`（`users` と結合してメールアドレスも取る）の1文で消費するので二重交換できない。交換されなかった期限切れコードは新しいコードの保存時に掃除する。PKCE を使った認可は `code_challenge`（S256）を持つ。
+
+### `bookmarks`
+Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本人だけの保存で、相手への通知や AP/ATP 配送は無い。`(actor_id, post_id)` は一意で、登録は `ON CONFLICT DO NOTHING`。`id`（snowflake）は一覧のカーソル（ブックマークした順）。投稿は論理削除されても行は残り、一覧取得時に `find_visible_posts_by_ids` が除く（物理削除・アクター削除は CASCADE）。
 
 ### `notifications`
 `type`: フォロー・リアクション・メンション・返信・リポスト・引用・`moveRefollowed`/`moveAlreadyFollowing`（seiran 独自）等。リポスト・引用の `note_id` は新しいリポスト/引用投稿。

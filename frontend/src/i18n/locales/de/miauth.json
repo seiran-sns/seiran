@@ -6,5 +6,9 @@
     "description": "{{appName}} fordert Zugriff auf Ihr Seiran-Konto an.",
     "authorizing": "Verarbeitung...",
     "submit": "Autorisieren"
+  },
+  "oauth": {
+    "oobDescription": "Geben Sie den folgenden Autorisierungscode in der App ein.",
+    "invalidRequest": "Die Autorisierungsanfrage ist ungültig. Bitte beginnen Sie in der App erneut."
   }
 }

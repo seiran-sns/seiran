@@ -6,5 +6,9 @@
     "description": "{{appName}} 正在請求存取您的 Seiran 帳戶。",
     "authorizing": "處理中...",
     "submit": "授權"
+  },
+  "oauth": {
+    "oobDescription": "請在應用程式中輸入以下授權碼。",
+    "invalidRequest": "授權請求無效。請從應用程式重新開始。"
   }
 }

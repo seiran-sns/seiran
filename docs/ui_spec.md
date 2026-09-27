@@ -265,7 +265,8 @@
 * **`/settings/privacy`**: 「投稿を Bsky のおすすめ（Discover 等）に表示しない」（Bsky 限定）と「新規フォローを承認制にする」（`is_locked`。投稿の公開範囲には影響せず、Bsky 側からの直接フォローは防げないことを説明文に書く。オフにすると残っていた承認待ちは自動承認される）。どちらもトグルで即保存する。
 * **`/settings/follow-requests`**: 承認待ち（`is_locked` の間だけ）を1件ずつ【承認】【拒否】（最大200件一括）。処理した行はすぐ消え、バッジを取り直す。
 * **`/settings/lists`**（`ListsSettingsPage`）: メンバー検索は先頭 `@` を含む生の入力で、表示名・Fedi ID・Bsky ハンドル・ローカル短縮ID・ローカルの Fedi/Bsky ID を横断して大文字小文字を無視した部分一致。
-* **`/settings/app-tokens`**（#60）: 発行済みアプリトークン（MiAuth と画面から直接発行した分。自社ログインは対象外）の一覧と個別無効化。上部の「用途（任意）」と発行ボタンでその場で発行できる。トークン本体は発行直後の応答にしか無い（DB には `jti` だけ）ので、警告文とコピーできるコードブロックで一度だけ見せる。
+* **`/oauth-connect`**: Mastodon 互換 OAuth の承認画面（要ログイン、`GET /oauth/authorize` からリダイレクトされる）。アプリ名はクエリではなく `GET /api/oauth/apps/:client_id` の登録内容から出す。「承認する」で `POST /api/oauth/authorize` を呼び、登録済み `redirect_uri` へ遷移する。OOB（`urn:ietf:wg:oauth:2.0:oob`）なら認可コードを読み取り専用の入力欄に表示する。見た目・文言は MiAuth の `/connect/:sessionId` と共通（`miauth` 名前空間）。
+* **`/settings/app-tokens`**（#60）: 発行済みアプリトークン（MiAuth・Mastodon 互換 OAuth・画面から直接発行した分。自社ログインは対象外）の一覧と個別無効化。上部の「用途（任意）」と発行ボタンでその場で発行できる。トークン本体は発行直後の応答にしか無い（DB には `jti` だけ）ので、警告文とコピーできるコードブロックで一度だけ見せる。
 * **`/settings/appearance`**: 
   * テーマ（環境に従う/常にライト/常にダーク）は `localStorage`（`seiran_theme`）だけに保存する。`ThemeProvider` が `<html data-theme>` を切り替え、CSS 変数で全画面に反映する。「環境に従う」は `prefers-color-scheme` の変化をリアルタイムに反映する。ちらつきを防ぐため React のマウント前に `index.html` のインラインスクリプトで `data-theme` を決める。
   * 言語（自動/日本語/English/繁體中文/简体中文/한국어/Español/Deutsch/Français）は選んだ時点で `users.language_preference` に保存し、`i18n.changeLanguage()` で反映する（`docs/architecture.md` 8節の i18n）。

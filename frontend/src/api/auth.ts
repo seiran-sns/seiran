@@ -136,6 +136,39 @@ export const auth = {
   },
 };
 
+/** Mastodon 互換 OAuth の認可要求（`GET /oauth/authorize` のクエリをそのまま引き継いだもの）。 */
+export interface OAuthAuthorizeParams {
+  client_id: string;
+  redirect_uri: string;
+  response_type?: string;
+  scope?: string;
+  state?: string;
+  code_challenge?: string;
+  code_challenge_method?: string;
+}
+
+export const oauth = {
+  /** 承認画面に出すアプリ名（URL のクエリではなく登録内容から引く）。 */
+  appInfo(clientId: string) {
+    return request<{ name: string; website: string | null }>(
+      "GET",
+      `/oauth/apps/${encodeURIComponent(clientId)}`,
+    );
+  },
+  /**
+   * OAuth 承認画面（`/oauth-connect`）で「承認する」を押した時に呼ぶ。`redirectUrl` が
+   * `null` なのは OOB（コードを画面に表示してユーザーがアプリへ手入力する方式）。
+   */
+  async authorize(params: OAuthAuthorizeParams) {
+    const res = await request<{ redirect_url: string | null; code: string }>(
+      "POST",
+      "/oauth/authorize",
+      params,
+    );
+    return { redirectUrl: res.redirect_url, code: res.code };
+  },
+};
+
 export const miauth = {
   /**
    * MiAuth 認可確認画面（`/connect/:sessionId`）で「承認する」を押した時に呼ぶ。

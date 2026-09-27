@@ -650,6 +650,49 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 **既知の非互換**: 書き込み系のエラー形状は Misskey のエラーID体系を再現していない。
 
+## 7.1 Mastodon API 互換レイヤー
+
+`handlers::mastodon` が Mastodon REST API（`/api/v1/*`・`/api/v2/*`・`/oauth/*`）を提供し、Tusky・Ice Cubes・Elk・Phanpy 等のクライアントからタイムライン・ハッシュタグ・検索・投稿/アカウント詳細の閲覧と、投稿・返信・引用・お気に入り・リポスト・フォロー・ブロック/ミュート・プロフィール編集・投票・ピン留め・ブックマーク、ストリーミングでの新着受信をできるようにする。Misskey 互換と同じく、取得・検証・副作用はカスタム API と共通の関数（リポジトリ関数、`create_note`・`create_reaction`・`remove_reaction`・`delete_repost`・`delete_note`・`create_follow`・`delete_follow`・`create_drive_file`・`resolve_open_target`・`search_post_ids_by_cursor`）を使い、Mastodon 側は入力の解釈と応答整形だけを持つ。書き込み系は既存ハンドラを呼んだ後、対象を読み直して `Status`/`Relationship` を返す（投稿作成の応答からは `id` だけを取り出す）。
+
+**認証（OAuth 2.0 Authorization Code、PKCE 対応）**: `POST /api/v1/apps` で登録 → ブラウザで `GET /oauth/authorize`（クライアントと `redirect_uri` の完全一致を検証して SPA の `/oauth-connect` へ同じクエリで 303）→ SPA が `GET /api/oauth/apps/:client_id` で登録済みのアプリ名を表示し（クエリのアプリ名は信用しない）、承認で `POST /api/oauth/authorize`（通常の Bearer 認証）が認可コードを発行してリダイレクト先を返す → クライアントが `POST /oauth/token` で交換する。`urn:ietf:wg:oauth:2.0:oob` ならコードを画面に表示する。トークンは MiAuth と同じ無期限 JWT（`generate_app_token`）で `app_tokens` に記録するので、既存の `extract_auth` がそのまま検証し、設定画面の連携アプリ一覧から無効化できる。`POST /oauth/revoke` は発行元アプリ自身のトークンだけを失効させる。交換時はクライアントシークレットか PKCE ベリファイアのどちらかが必須（PKCE で認可したならベリファイアが必須）。登録できる `redirect_uri` は `https`・ループバックの `http`・ネイティブアプリのカスタムスキーム・OOB（外部ホストの平文 `http` とスクリプト実行系スキームは拒否）。`grant_type` は `authorization_code` のみ（`client_credentials`・`password` は未対応）。scope は記録するが強制しない（MiAuth と同じ）。
+
+**入力（`extract.rs`）**: Mastodon クライアントは同じパラメータを JSON・`x-www-form-urlencoded`・multipart・クエリ文字列のどれでも送り、配列を `media_ids[]=1`、入れ子を `poll[options][]=a` と書くので、`MastodonParams`/`MastodonQuery` がすべて `serde_json::Value` に正規化してからデシリアライズする。フォーム由来で文字列になった数値・真偽値・ID は `lenient::*` で受ける。
+
+**ページネーション**: `max_id` → `until_id`、`since_id`・`min_id` → `since_id`（`min_id` の「直後のページを古い側から」は再現せず、差分が `limit` を超えると間が抜けてクライアントの「さらに読み込む」で埋める）。一覧は `Link` ヘッダー（`rel="next"` に `max_id`、`rel="prev"` に `min_id`）を付ける。カーソルは変換・絞り込み前の行 ID で作る（リポスト元が見えないリポストの除外や `exclude_replies` で行が減っても次ページがずれない）。フォロー一覧はアカウント ID ではなく `follows.id` をカーソルにする。
+
+**エラー**: `mastodon::error_shape`（`route_layer`）が `ApiError` の応答を `{"error": "CODE"}` に書き換える（クライアントは `error` を文字列として読む）。既に `error` が文字列の OAuth エラー（`{"error", "error_description"}`）は通す。
+
+**CORS**: `/api/v1/*`・`/api/v2/*`・`/oauth/token`・`/oauth/revoke` はブラウザ上の Web クライアント（任意のオリジン）から直接叩かれるので、`/xrpc/*` と同じくオリジン制限の対象外（Bearer 認証だけで Cookie を使わない）。SPA 専用の `/api/oauth/*` は対象外にしない。
+
+**`Status`（`convert::to_status`）**:
+- `content` はリモート Fedi 投稿なら `content_html`（内部パスの `href="/..."` を `https://{local_domain}/...` に戻す）、それ以外は `body` を `text_to_html` で HTML にする（生 URL・内部リンクマーカー `[text](url)`・`@メンション`（`https://{local_domain}/@handle` へ）・`#タグ`（`/tags/{小文字}` へ、`class="mention hashtag"`）をリンクにし、空行で `<p>`、改行で `<br>`）。URL・ハッシュタグの走査は送信時と同じ `mention::scan_url`/`scan_hashtag`。
+- `uri` はローカルなら `https://{local_domain}/notes/{id}`、リモートは AP ID か AT URI。`url` はローカルは同じ URL、リモートは AP ID か bsky.app URL。
+- 可視性は `unlisted`→`unlisted`、`followers_only`→`private`、`direct`→`direct`（投稿時は逆変換）。タイムラインは DM を含めない（`exclude_direct = true`）。
+- **お気に入り（favourite）は `❤️` リアクション**（Bsky の like・AP の `Like` も受信時に `❤️` になる）。`favourited` は自分が `❤️` で反応済みか、`favourites_count` は絵文字を問わないリアクション総数（Mastodon クライアントには絵文字リアクション欄が無いため）。お気に入りは既存リアクションを `❤️` に置き換え、取り消しは `❤️` だけを外す。
+- リポストは `reblog` に元投稿、引用は Mastodon 4.5 の `quote: {state, quoted_status}`（見えない引用元は `state: "deleted"`）。引用ポストのリポストのために2階層目の引用まで埋める。リポスト元が見えないリポストは空の投稿になるので一覧から除く。`quote_approval.current_user` は公開・未収載なら `automatic`、それ以外は `denied`（未ログインは `unknown`）。
+- `in_reply_to_account_id` は返信先を可視性判定つきで一括取得して埋める。`mentions` は常に空（seiran は本文中のメンションを永続化していない）。`card` は最初の URL カード。添付の `description` は常に `null`（代替テキストを保存しない）。
+
+**`Account`**: `acct` はローカルが `username`、Bsky（`domain` 空）がハンドル、他は `username@domain`（`username::actor_handle` と同じ規則）。アバター未設定は `/api/avatars/:id`、ヘッダー未設定は `/api/headers/missing.png`（1x1 透明 PNG。空文字だと Swift 系クライアントの URL デコードが失敗する）。`note`・`fields[].value` も `text_to_html`。
+
+**投稿（`POST /api/v1/statuses`）**: `status`・`in_reply_to_id`・`quoted_status_id`（Fedibird 等の `quote_id` も可）・`media_ids[]`・`poll[options][]`/`poll[expires_in]`/`poll[multiple]`・`spoiler_text`（CW）・`visibility`・`language`（`SUPPORTED_LANGUAGES` 外は付けない）を `CreateNoteRequest` に変換する。`direct` の宛先は本文のメンションを既知のアクター（`@user`→ローカル、`@user@host`、`.` を含む単独ハンドル→Bsky）に引き当てる（引き当たらなければ `DIRECT_REQUIRES_KNOWN_MENTION`）。`sensitive`（ローカル投稿の添付に閲覧注意を付けられない）・`scheduled_at`・`Idempotency-Key` は無視する。削除（`DELETE /api/v1/statuses/:id`）は下書き復元用に元の本文を `text` に入れて返す。
+
+**その他のエンドポイント**:
+- インスタンス: `GET /api/v1/instance`・`/api/v2/instance`（`version` は `4.5.0 (compatible; seiran x.y.z)`、`api_versions.mastodon` は7。クライアントはこれで引用 UI 等の機能有無を決める）、`custom_emojis`、`preferences`。
+- タイムライン: `timelines/home`・`public`（`local=true` でローカル、それ以外はグローバル）・`tag/:hashtag`・`list/:id`、`tags/:name`、`lists`・`lists/:id`。
+- 閲覧: `statuses/:id`・`context`（祖先は返信先を最大40件たどる。子孫は `thread_descendants` のうち返信でつながるものを古い順）・`reblogged_by`・`favourited_by`、`accounts/:id`・`statuses`（`pinned`・`exclude_replies`・`exclude_reblogs`・`only_media`）・`followers`・`following`・`relationships`・`lookup`（未知の `acct` は `resolve_open_target` で取り込む）・`search`、`GET /api/v2/search`（URL は `resolve=true` のとき「開く」と同じ解決。投稿検索の回数制限はカスタム API と共通。`offset` によるページングは未対応で、`max_id` 無しの `offset` には空を返す）。
+- 操作: `accounts/:id/follow`・`unfollow`（既にフォロー済みでも関係を返す）、`statuses/:id/favourite`・`unfavourite`・`reblog`・`unreblog`、`POST /api/v1/media`・`/api/v2/media`（`create_drive_file` に委譲。同期処理なので常に 200）、`GET`/`PUT /api/v1/media/:id`（更新内容は保存しない）。
+- 通知: `GET /api/v1/notifications`。`follow`→`follow`、`followRequest`→`follow_request`、`mention`/`reply`→`mention`、`repost`→`reblog`（`status` はリポストされた自分の投稿）、`quote`→`quote`、`❤️` リアクション→`favourite`、他のリアクション→`pleroma:emoji_reaction`（`emoji`・`emoji_url` 付き）。引っ越し関連等は出さない。既読化しない。
+- ブロック・ミュート: `accounts/:id/block`・`unblock`・`mute`・`unmute` はカスタム API と共通の `blocks::block_actor`/`unblock_actor`・`mutes::mute_actor`/`unmute_actor`（対象文字列の解決と処理本体を分けたもの）を呼んで関係を返す。ミュートの `notifications`・`duration` は無視する（常に通知も含めて無期限）。`GET /api/v1/blocks`・`mutes` はページングせず全件。
+- プロフィール編集（`PATCH /api/v1/accounts/update_credentials`）: `display_name`・`note`（自己紹介）・`fields_attributes`（フォームの添字付きオブジェクトと JSON の配列の両方）・`locked`・`avatar`/`header`（multipart のファイル）を受ける。画像は `drive::store_uploaded_file`（カスタム API のアップロードと共通、`avatar`/`banner` として保存）、更新は `users::update_profile`・`account::update_lock` に委譲する（AP `Update`・ATP プロフィールコミット・承認制解除時の一括承認も同じ）。`bot`・`discoverable`・`source[...]` は無視する。
+- 投票: `GET /api/v1/polls/:id`・`POST /api/v1/polls/:id/votes`（`choices[]`）。投票 ID は投稿 ID と同じで、`vote_poll` に委譲する。
+- ピン留め: `statuses/:id/pin`・`unpin` は `pin_note`/`unpin_note`（Fedi featured・Bsky `pinnedPost` 反映込み）に委譲する。`Status.pinned` は閲覧者自身のピン留めかどうか。
+- ブックマーク: `statuses/:id/bookmark`・`unbookmark`、`GET /api/v1/bookmarks`（`bookmarks` テーブル。本人だけの保存で通知・配送は無い。一覧のカーソルはブックマーク ID、見えなくなった投稿は除く）。`Status.bookmarked` を返す。seiran の Web UI にはまだ出していない。
+- 未実装機能のスタブ（常に `[]`）: `filters`（v1/v2）・`announcements`・`favourites`・`conversations`・`followed_tags`・`featured_tags`・`endorsements`・`scheduled_statuses`・`follow_requests`・`domain_blocks`・`trends/*`・`suggestions`（v1/v2）。`markers` は `{}`。404 だと起動時やタブで画面ごとエラーにするクライアントがあるため。
+
+**ストリーミング（`GET /api/v1/streaming`、WebSocket）**: トークンはクエリ `access_token`・`Authorization`・`Sec-WebSocket-Protocol`（その場合は同じ値をプロトコルとして応答する）の順に探す。ストリームは `stream` クエリか `{"type":"subscribe"|"unsubscribe","stream":...,"tag":...,"list":...}` で指定し、`user`（ホーム＋通知）・`user:notification`・`public`/`public:remote`（グローバル）・`public:local`・`hashtag`（`tag`）・`list`（`list`、所有者か公開リストのみ）に対応する。配信元は SPA と同じ `StreamHub` で、タイムライン新着はチャンネル方式の `ChannelScope::matches` で当てはめ、投稿 ID から閲覧者視点の `Status` を組み直して `{"stream":[...],"event":"update","payload":"<Status の JSON 文字列>"}` で送る（見えない投稿は `find_status` が弾く）。通知は、`StreamHub` の配信が通知 ID を持たず通知の INSERT より先に届く経路もあるため、自分宛てのイベントを合図に0.8秒待ってから通知テーブルの新着を読み `notification` で送る（接続時点の最新を基準にし、合図を取りこぼした分は30秒ごとの確認で拾う）。インスタンス情報の `urls.streaming_api`（v1）・`configuration.urls.streaming`（v2）は `wss://{local_domain}`。nginx は `/api/v1/streaming` に Upgrade ヘッダーを通す。
+
+**既知の非互換**: 投稿の編集（`PUT /api/v1/statuses/:id`）は対応しない（seiran のポストは Bluesky のポストでもあり、再編集できないことが前提のため）。ストリーミングは削除（`delete`）・DM（`direct`）・編集のイベントを送らず、SSE 版（`/api/v1/streaming/user` 等）は無い。
+
 ## 8. 通知・リアルタイム配信
 
 `streaming::StreamHub`（プロセス内 `tokio::broadcast`、容量512）が `{"type":kind,"body":body}` を配信する。接続は `GET /api/streaming?token=<JWT>`。配信方式は2つ。

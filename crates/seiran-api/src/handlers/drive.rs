@@ -173,6 +173,43 @@ pub async fn create_drive_file(
         }
     };
 
+    let raw_bytes =
+        file_bytes.ok_or_else(|| ApiError::BadRequest("ファイルが含まれていません".to_owned()))?;
+    store_uploaded_file(
+        &state,
+        &auth,
+        UploadedFile {
+            bytes: raw_bytes,
+            media_type: &media_type_str,
+            deliver_to_bsky,
+            original_filename,
+        },
+    )
+    .await
+}
+
+/// アップロードされた1ファイル（multipart から取り出した内容）。
+pub(crate) struct UploadedFile<'a> {
+    pub bytes: Vec<u8>,
+    /// "avatar" | "banner" | "emoji" | "post" | "login_background"
+    pub media_type: &'a str,
+    pub deliver_to_bsky: bool,
+    pub original_filename: Option<String>,
+}
+
+/// 認証済みユーザーのアップロードを検証して保存する（`POST /api/drive/files/create` と、
+/// Mastodon 互換のメディアアップロード・プロフィール画像更新の共通手順）。
+pub(crate) async fn store_uploaded_file(
+    state: &AppState,
+    auth: &AuthUser,
+    file: UploadedFile<'_>,
+) -> Result<Json<DriveFileResponse>, ApiError> {
+    let UploadedFile {
+        bytes: raw_bytes,
+        media_type: media_type_str,
+        deliver_to_bsky,
+        original_filename,
+    } = file;
     let role = state
         .users
         .find_role_by_user_id(auth.user_id)
@@ -188,8 +225,6 @@ pub async fn create_drive_file(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let actor_id = actor.as_ref().map(|a| a.id);
 
-    let raw_bytes =
-        file_bytes.ok_or_else(|| ApiError::BadRequest("ファイルが含まれていません".to_owned()))?;
     let max_bytes = match role.as_str() {
         "admin" => 100 * 1024 * 1024,
         "moderator" => 50 * 1024 * 1024,
@@ -199,7 +234,7 @@ pub async fn create_drive_file(
         return Err(ApiError::BadRequest("MEDIA_FILE_TOO_LARGE".to_owned()));
     }
 
-    let kind = match media_type_str.as_str() {
+    let kind = match media_type_str {
         "avatar" => MediaKind::Avatar,
         "banner" | "login_background" => MediaKind::Banner,
         "emoji" => MediaKind::Emoji,
@@ -222,11 +257,11 @@ pub async fn create_drive_file(
     let md5 = format!("{:x}", md5::compute(&raw_bytes));
 
     if is_image {
-        return create_image_file(&state, actor_id, &raw_bytes, kind, md5, original_filename).await;
+        return create_image_file(state, actor_id, &raw_bytes, kind, md5, original_filename).await;
     }
 
     create_video_or_audio_file(
-        &state,
+        state,
         actor.as_ref(),
         raw_bytes,
         sniffed_mime,
@@ -715,7 +750,7 @@ pub(crate) async fn check_quota(
 
 /// 既存レコードの公開 URL を provider の public_url + storage_key で組み立てる。
 /// provider が取得できなかった場合は storage_key をそのまま返す（フォールバック）。
-async fn build_public_url(
+pub(crate) async fn build_public_url(
     providers: &dyn StorageProviderRepository,
     provider_id: i64,
     storage_key: &str,

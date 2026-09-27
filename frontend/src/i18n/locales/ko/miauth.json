@@ -6,5 +6,9 @@
     "description": "{{appName}}님이 귀하의 seiran 계정에 대한 액세스를 요청하고 있습니다.",
     "authorizing": "처리 중...",
     "submit": "승인하다"
+  },
+  "oauth": {
+    "oobDescription": "다음 인증 코드를 앱에 입력하세요.",
+    "invalidRequest": "인증 요청이 올바르지 않습니다. 앱에서 다시 시도하세요."
   }
 }

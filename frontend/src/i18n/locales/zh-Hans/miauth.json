@@ -6,5 +6,9 @@
     "description": "{{appName}} 正在请求访问您的 Seiran 帐户。",
     "authorizing": "处理中...",
     "submit": "授权"
+  },
+  "oauth": {
+    "oobDescription": "请在应用程序中输入以下授权码。",
+    "invalidRequest": "授权请求无效。请从应用程序重新开始。"
   }
 }
