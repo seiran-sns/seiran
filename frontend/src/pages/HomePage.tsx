@@ -76,6 +76,12 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
+  // 現在の`notes`がどのタブ（feedKey）の一覧か。タブ切替の直後は、新しいタブの一覧が
+  // 復元・取得されるまで`notes`に前のタブの一覧が残る。この間に一覧をキャッシュへ書いたり
+  // 補完フェッチの結果をマージしたりすると、別タブの投稿が混ざるため、これで判定する。
+  const [notesFeedKey, setNotesFeedKey] = useState<string | null>(null);
+  const notesFeedKeyRef = useRef(notesFeedKey);
+  notesFeedKeyRef.current = notesFeedKey;
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
   // このIDの直前に「取りこぼし区間」の区切り（二重波線）を表示する対象ノートID群。
   const [gapBeforeIds, setGapBeforeIds] = useState<Set<string>>(new Set());
@@ -111,6 +117,8 @@ export default function HomePage() {
     [lists, pinnedHashtags],
   );
   const currentFeedKey = feedKey(feed);
+  const currentFeedKeyRef = useRef(currentFeedKey);
+  currentFeedKeyRef.current = currentFeedKey;
 
   const currentFeedIndex = availableFeeds.findIndex((f) => {
     if (f.kind !== feed.kind) return false;
@@ -167,12 +175,20 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [feed, currentFeedKey]
   );
-  const { items: notes, setItems: setNotes, hasMore, setHasMore, loadingMore, loadMore } = useCursorPagination<Note>(
-    fetchPage,
-    (n) => n.id,
-    PAGE_SIZE,
-    onError
-  );
+  const {
+    items: notes,
+    setItems: setNotes,
+    hasMore,
+    setHasMore,
+    loadingMore,
+    loadMore: loadMoreAny,
+  } = useCursorPagination<Note>(fetchPage, (n) => n.id, PAGE_SIZE, onError, undefined, currentFeedKey);
+  // 前のタブの一覧が残っている間に次ページを取ると、前のタブの末尾IDをカーソルにして
+  // 新しいタブを取得し、そのまま前のタブの一覧へ追記してしまう。
+  const loadMore = useCallback(() => {
+    if (notesFeedKeyRef.current !== currentFeedKeyRef.current) return;
+    loadMoreAny();
+  }, [loadMoreAny]);
   const notesRef = useRef(notes);
   notesRef.current = notes;
 
@@ -211,6 +227,7 @@ export default function HomePage() {
     // 再フェッチしない（一覧が一瞬空になってスクロール位置がズレるのを防ぐ）。
     if (cached) {
       setNotes(cached.notes);
+      setNotesFeedKey(key);
       setHasMore(cached.hasMore);
       setGapBeforeIds(cached.gapBeforeIds);
       setLoading(false);
@@ -234,6 +251,7 @@ export default function HomePage() {
       .then((n) => {
         if (cancelled) return;
         setNotes(n);
+        setNotesFeedKey(key);
         setHasMore(n.length >= PAGE_SIZE);
       })
       .catch((e) => !cancelled && onError(e))
@@ -251,10 +269,13 @@ export default function HomePage() {
   // 直前に復元/フェッチ中の正しいキャッシュを空データで上書きしてしまう。
   // loadingがfalseになる本当のコミット後の再実行まで書き込みを待つことで、
   // 常に確定した値だけをキャッシュへ反映する。
+  // タブ切替直後のコミットでは、loadingはまだ前のタブのfalseのまま・notesも前のタブの
+  // 一覧のままこのeffectが走る。notesFeedKeyで照合しないと、前のタブの一覧が新しいタブの
+  // キャッシュとして保存され、取得完了前に別タブへ移って戻ると混ざった一覧が表示される。
   useEffect(() => {
-    if (loading) return;
+    if (loading || notesFeedKey !== currentFeedKey) return;
     setCache(currentFeedKey, { notes, hasMore, gapBeforeIds });
-  }, [notes, hasMore, gapBeforeIds, loading, feed, currentFeedKey, setCache]);
+  }, [notes, hasMore, gapBeforeIds, loading, notesFeedKey, currentFeedKey, setCache]);
 
   // キャッシュから復元した一覧がDOMへ反映された後に、一度だけスクロール位置を復元する。
   useEffect(() => {
@@ -314,9 +335,12 @@ export default function HomePage() {
   // 離脱中（他画面へ遷移・WebSocket切断）に取りこぼした新着・状態変化を補うため、
   // 先頭ページ相当を再取得して現在の一覧の先頭とマージする。復帰時（上記キャッシュ復元時）と
   // WS再接続時（下記subscribeChannelのonResync）の両方から共通で呼ばれる。
+  // 取得中にタブを切り替えた場合、結果は切替前のタブのものなので捨てる。
   const mergeHeadIntoTimeline = useCallback(() => {
+    const key = feedKey(feed);
     fetchFeed(feed, { limit: PAGE_SIZE })
       .then((fetched) => {
+        if (currentFeedKeyRef.current !== key || notesFeedKeyRef.current !== key) return;
         if (fetched.length === 0) return;
         const prev = notesRef.current;
         if (prev.length === 0) {
