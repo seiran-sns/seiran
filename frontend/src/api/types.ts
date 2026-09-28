@@ -114,6 +114,7 @@ export interface SiteSettings {
   site_icon_media_file_id: string;
   media_proxy_url: string;
   site_description: string;
+  terms_of_service_text: string;
   login_bg_url: string;
   login_bg_type: string;
   login_bg_media_file_id: string;
@@ -966,6 +967,8 @@ export interface MetaResponse {
   internalMediaOrigins?: string[];
   siteTitleHtml?: string;
   siteDescriptionHtml?: string;
+  /** 利用規約の生HTML版。空文字列なら登録画面は同意チェックボックス自体を表示しない。 */
+  termsOfServiceHtml?: string;
   loginBackgroundUrl?: string;
   loginBackgroundType?: "image" | "video" | "";
 }

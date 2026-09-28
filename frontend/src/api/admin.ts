@@ -112,6 +112,7 @@ export const admin = {
       site_icon_media_file_id: string;
       media_proxy_url: string;
       site_description: string;
+      terms_of_service_text: string;
       login_bg_url: string;
       login_bg_type: string;
       login_bg_media_file_id: string;

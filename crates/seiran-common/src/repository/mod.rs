@@ -60,6 +60,7 @@ pub mod repost_mute;
 pub mod rotation_key_backfill;
 pub mod site_settings;
 pub mod storage_provider;
+pub mod terms_of_service;
 pub mod totp;
 pub mod user;
 
@@ -133,4 +134,7 @@ pub use storage_provider::{
     StorageProviderRepository, UpdateStorageProvider,
 };
 pub use totp::{PgTotpRepository, TotpRepository};
-pub use user::{create_local_account, AdminUserRow, LoginRow, PgUserRepository, UserRepository};
+pub use user::{
+    create_local_account, insert_local_user, AdminUserRow, LoginRow, PgUserRepository,
+    UserRepository,
+};

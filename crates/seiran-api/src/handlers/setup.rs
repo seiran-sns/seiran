@@ -137,6 +137,7 @@ pub async fn setup(
             at_rotation_key_pem: did.at_rotation_key_pem.as_deref(),
             birth_date: None,
         },
+        None, // セットアップ画面の初回管理者作成に利用規約同意は不要
     )
     .await
     .map_err(|e| crate::handlers::auth::account_creation_error(e, "setup"))?;

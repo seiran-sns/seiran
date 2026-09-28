@@ -59,6 +59,9 @@ pub struct MigrationStartRequest {
     /// PDS Aが`createSession`でメールアドレスを返さなかった場合のみのフォールバック
     /// （通常はPDS A側の登録済みメールをそのまま使うため空でよい）。
     pub email: Option<String>,
+    /// 利用規約同意チェックボックス。`handlers::auth::resolve_tos_agreement`参照
+    /// （`register`と同じ検証・同じ`site_settings`キーを共有する）。
+    pub agree_tos: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -187,6 +190,10 @@ pub async fn start(
         return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
     }
 
+    let agreed_tos_text =
+        crate::handlers::auth::resolve_tos_agreement(&state, req.agree_tos.unwrap_or(false))
+            .await?;
+
     let password_hash = LocalAuthProvider::hash_password(&req.new_password).map_err(|e| {
         tracing::error!("[migration:start] パスワードハッシュ失敗: {}", e);
         ApiError::Internal("パスワード処理エラー".to_string())
@@ -209,6 +216,7 @@ pub async fn start(
             new_username: &req.new_username,
             password_hash: &password_hash,
             email: Some(&email),
+            agreed_tos_text: agreed_tos_text.as_deref(),
         },
         now,
     )
@@ -509,14 +517,18 @@ async fn materialize_local_account(
     let user_id = if let Some(uid) = existing_user_id {
         uid
     } else {
-        state
-            .users
-            .insert(email, &migration_req.password_hash, "user")
-            .await
-            .map_err(|e| {
-                tracing::error!("[migration:submit-plc-token] users INSERT 失敗: {}", e);
-                ApiError::Internal("ユーザー作成エラー".to_string())
-            })?
+        seiran_common::repository::insert_local_user(
+            &state.db,
+            email,
+            &migration_req.password_hash,
+            "user",
+            migration_req.agreed_tos_text.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("[migration:submit-plc-token] users INSERT 失敗: {}", e);
+            ApiError::Internal("ユーザー作成エラー".to_string())
+        })?
     };
 
     let actor_id = if let Some(existing_id) = existing_actor_id {

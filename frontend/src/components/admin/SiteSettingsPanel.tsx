@@ -31,6 +31,7 @@ export default function SiteSettingsPanel() {
 
   // ログイン画面デザイン（#243）
   const [siteDescription, setSiteDescription] = useState("");
+  const [termsOfServiceText, setTermsOfServiceText] = useState("");
   const [loginBgUrl, setLoginBgUrl] = useState("");
   const [loginBgType, setLoginBgType] = useState("");
   const [loginBgMediaFileId, setLoginBgMediaFileId] = useState("");
@@ -85,6 +86,7 @@ export default function SiteSettingsPanel() {
         setSiteIconMediaFileId(s.site_icon_media_file_id);
         setMediaProxyUrl(s.media_proxy_url);
         setSiteDescription(s.site_description);
+        setTermsOfServiceText(s.terms_of_service_text);
         setLoginBgUrl(s.login_bg_url);
         setLoginBgType(s.login_bg_type);
         setLoginBgMediaFileId(s.login_bg_media_file_id);
@@ -173,6 +175,7 @@ export default function SiteSettingsPanel() {
         site_icon_media_file_id: siteIconMediaFileId,
         media_proxy_url: mediaProxyUrl,
         site_description: siteDescription,
+        terms_of_service_text: termsOfServiceText,
         login_bg_url: loginBgUrl,
         login_bg_type: loginBgType,
         login_bg_media_file_id: loginBgMediaFileId,
@@ -242,6 +245,16 @@ export default function SiteSettingsPanel() {
             />
           </label>
           <p className={styles.hint}>{t("admin:siteSettingsPanel.siteDescriptionHint")}</p>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.termsOfServiceLabel")}
+            <textarea
+              className={styles.input}
+              rows={8}
+              value={termsOfServiceText}
+              onChange={(e) => setTermsOfServiceText(e.target.value)}
+            />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.termsOfServiceHint")}</p>
           <label className={styles.label}>
             {t("admin:siteSettingsPanel.loginBackgroundLabel")}
             <span className={styles.actions} style={{ marginTop: 4 }}>

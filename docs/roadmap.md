@@ -70,6 +70,7 @@
 - [x] **フォロー承認制（`actors.is_locked`）** — `docs/protocols.md`「フォロー承認制」
 - [x] **プライバシー設定「Bskyのおすすめから除外」** — `docs/protocols.md` 3節
 - [x] **ロール `emoji-editor`・管理画面のトピック別アクセス制御（#179）** — `docs/database.md`
+- [x] **利用規約同意（新規登録・Bluesky転入共通、管理画面で文面設定）** — `docs/database.md`「利用規約同意」、`docs/ui_spec.md` 7節
 
 ### 投稿・表示
 

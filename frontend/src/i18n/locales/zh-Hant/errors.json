@@ -78,6 +78,7 @@
   "STORAGE_QUOTA_EXCEEDED": "已超出儲存容量",
   "TEXT_TOO_LONG": "文字超出長度限制（展開@使用者名稱後可能會發生這種情況）",
   "TOO_MANY_LINK_CARD_URLS": "URL連結卡最多10個",
+  "TOS_AGREEMENT_REQUIRED": "必須同意服務條款",
   "TURNSTILE_FAILED": "驗證失敗，請重試。",
   "TURNSTILE_REQUIRED": "請完成驗證。",
   "UNAUTHORIZED": "請先登入",

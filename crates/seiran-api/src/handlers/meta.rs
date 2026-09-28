@@ -74,6 +74,9 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
         // 書き込める設定値なのでサニタイズせず生HTMLのまま返す（フロント側もそのまま描画する）。
         "siteTitleHtml": site_title_html,
         "siteDescriptionHtml": get("site_description"),
+        // 利用規約。空文字列なら登録画面は同意チェックボックス自体を表示しない。
+        // site_description等と同じくHTML可・サニタイズしない管理者専用入力。
+        "termsOfServiceHtml": get("terms_of_service_text"),
         "loginBackgroundUrl": get("login_bg_url"),
         "loginBackgroundType": get("login_bg_type"),
         "internalMediaOrigins": internal_media_origins,

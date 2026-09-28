@@ -80,6 +80,8 @@
     "siteNameHtmlHint": "可以使用HTML標籤（用於登入畫面的網站標題顯示）。在聯合通知、PWA名稱等其他地方，會使用去除標籤後的純文字版本。",
     "siteDescriptionLabel": "網站說明文字",
     "siteDescriptionHint": "顯示於登入畫面。可以使用HTML標籤，換行會原樣保留。由於這是僅限管理員的輸入項，不會進行任何淨化處理。",
+    "termsOfServiceLabel": "服務條款文字",
+    "termsOfServiceHint": "會以同意核取方塊的形式顯示在新註冊畫面（包含從Bluesky轉入）。可使用HTML標籤，換行會原樣保留（white-space: pre-wrap）。留空則完全不顯示核取方塊。此為管理員專用輸入，不會進行消毒處理。",
     "loginBackgroundLabel": "登入畫面背景",
     "loginBackgroundHint": "可以上傳圖片或影片。影片會在登入畫面自動循環播放（靜音）。未設定時，背景將根據網站顏色產生。",
     "selectBackgroundButton": "選擇背景",

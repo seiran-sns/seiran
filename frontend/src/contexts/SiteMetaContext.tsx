@@ -19,6 +19,9 @@ interface SiteMeta {
   titleHtml: string;
   /** サイト説明テキストの生HTML版（#243、ログイン画面専用）。 */
   descriptionHtml: string;
+  /** 利用規約の生HTML版。空文字列なら登録画面は同意チェックボックス自体を表示しない
+   * （`TermsOfServiceField`参照）。 */
+  termsOfServiceHtml: string;
   loginBackgroundUrl: string;
   loginBackgroundType: "image" | "video" | "";
 }
@@ -30,6 +33,7 @@ const EMPTY_SITE_META: SiteMeta = {
   serverVersion: "",
   titleHtml: "",
   descriptionHtml: "",
+  termsOfServiceHtml: "",
   loginBackgroundUrl: "",
   loginBackgroundType: "",
 };
@@ -95,6 +99,7 @@ export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
           serverVersion: m.version,
           titleHtml: m.siteTitleHtml || m.name || "seiran",
           descriptionHtml: m.siteDescriptionHtml ?? "",
+          termsOfServiceHtml: m.termsOfServiceHtml ?? "",
           loginBackgroundUrl: m.loginBackgroundUrl ?? "",
           loginBackgroundType: m.loginBackgroundType ?? "",
         };

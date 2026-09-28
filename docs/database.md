@@ -39,6 +39,7 @@ ID の採番は2系統:
 | `atp_app_passwords` / `atp_refresh_tokens` / `atp_preferences` | ATP のアプリパスワード、refreshJwt の `jti`、クライアント設定 |
 | `at_migration_requests` / `at_migration_records` / `at_migration_blobs` | DID 転入の状態機械とステージング |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP・Jetstream カーソル等） |
+| `terms_of_service_agreements` | 利用規約同意の証跡（登録時に同意した場合のみ1行） |
 | `instance_domain` | 自ホストドメインの確定値（1行、不変） |
 | `remote_instance_meta` | リモートインスタンスの nodeinfo キャッシュ |
 | `email_verifications` / `email_changes` / `password_resets` | 認証系のワンタイムトークン |
@@ -287,6 +288,14 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
   - `plc_submitted_at`: 不可逆境界のマーカー。`new_signing_key_pem`（転入後の repo 署名鍵）と `new_rotation_key_pem`（専用ローテーションキー）はこの成功と同時に保存する（後のアカウント作成が失敗しても鍵を失わないよう、`actor_id`/`user_id` の確定とは別ステップ）。
 - `at_migration_records`: 取得した生レコード1件＝1行（`request_id, collection, rkey` の UNIQUE）。`bytes` は DAG-CBOR のまま。`imported_at` は `posts`/`atp_records` への実体化の完了。`app.bsky.graph.follow` だけは `follow_materialized_at` で `follows` への反映を別に追跡する（ATP リポジトリへの複製と seiran の社会グラフへの反映は別の処理だから）。
 - `at_migration_blobs`: `listBlobs` の CID（`request_id, cid` の UNIQUE）。`imported_at` は `media_files` への保存の完了。
+- `at_migration_requests.agreed_tos_text`: `start` 時点で利用規約チェックボックスに同意していた場合のみ、その時点の `site_settings.terms_of_service_text` の文面を一時保持する。`users`/`actors` 行が確定するのは `submit_plc_token` まで待つため、`terms_of_service_agreements` へのコピーもそこまで遅延する。
+
+### 利用規約同意（`terms_of_service_agreements`）
+新規登録画面（Blueskyからの転入を含む）の同意チェックボックスをONにしてアカウントを作成した場合のみ1行作られる。`terms_of_service_text` が空、またはチェックを入れなかった場合は行自体を作らない。
+
+- `user_id`: 対象ユーザー。
+- `agreed_text`: 同意した瞬間の `site_settings.terms_of_service_text` の文面そのもの。後から管理者が文面を変更してもこの行の内容は変わらない（「何に同意したか」の証跡のため）。
+- 通常登録は `create_local_account` と同じトランザクションで作成し、既存DID転入フローは `materialize_local_account` がアカウント確定と同じトランザクションで作成する（`insert_local_user`）。
 
 ### メール短命コード（`email_short_codes`）
 ATP セッションのメール2FA（`purpose='atp_session_2fa'`）と PLC 操作署名の確認（`purpose='plc_operation_signature'`）が共有する6桁コード。リンク型（`email_verifications` 等）と違いユーザーが手入力する値なので、コードをハッシュ化して保存する。消費時は一致・不一致を問わず同じ `actor_id`+`purpose` の行を全部消す（古いコードの再利用防止）。

@@ -29,6 +29,10 @@ pub struct RegisterRequest {
     /// 生年月日（`YYYY-MM-DD`、任意入力）。Fediverseへの公開はデフォルトOFFで登録され、
     /// 設定画面から後で有効化できる。
     pub birthday: Option<String>,
+    /// 利用規約同意チェックボックス。`site_settings.terms_of_service_text`が空でない場合のみ
+    /// 画面上にチェックボックスが表示され、`true`でなければ登録できない
+    /// （`resolve_tos_agreement`参照）。
+    pub agree_tos: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -214,6 +218,29 @@ async fn resolve_registration_email(
         .to_lowercase())
 }
 
+/// 利用規約同意を検証し、同意した文面（`agreed_tos_text`としてDBへ保存する値）を返す。
+/// `terms_of_service_text`が空の場合はチェックボックス自体が画面に表示されないため、
+/// `agree_tos`の値に関わらず常に`Ok(None)`（同意記録なし）。テキストが空でないのに
+/// `agree_tos`が`true`でなければ登録を拒否する。`register`・既存DID転入フローの`start`共通。
+pub(crate) async fn resolve_tos_agreement(
+    state: &AppState,
+    agree_tos: bool,
+) -> Result<Option<String>, ApiError> {
+    let text = state
+        .site_settings
+        .get("terms_of_service_text")
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .unwrap_or_default();
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    if !agree_tos {
+        return Err(ApiError::BadRequest("TOS_AGREEMENT_REQUIRED".into()));
+    }
+    Ok(Some(text))
+}
+
 /// メールアドレス・ユーザー名が未使用であることを確認する（利用者向けの早期エラー用。
 /// 同時登録の最終的な排他は`create_local_account`の一意制約が担う）。
 async fn ensure_account_available(
@@ -371,6 +398,7 @@ async fn register_account(
     validate_registration_input(&req)?;
     let email = resolve_registration_email(state, &req).await?;
     ensure_account_available(state, &email, &req.username).await?;
+    let agreed_tos_text = resolve_tos_agreement(state, req.agree_tos.unwrap_or(false)).await?;
     let password_hash = LocalAuthProvider::hash_password(&req.password).map_err(|e| {
         tracing::error!("[register] ハッシュ失敗: {}", e);
         ApiError::Internal("パスワード処理エラー".to_string())
@@ -394,6 +422,7 @@ async fn register_account(
             at_rotation_key_pem: did.at_rotation_key_pem.as_deref(),
             birth_date,
         },
+        agreed_tos_text.as_deref(),
     )
     .await
     .map_err(|e| account_creation_error(e, "register"))?;

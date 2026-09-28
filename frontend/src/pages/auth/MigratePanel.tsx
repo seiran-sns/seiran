@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ApiError } from "../../api/client";
 import type { MigrationStatusResponse } from "../../api/migration";
 import { useAuth } from "../../contexts/AuthContext";
+import TermsOfServiceField from "../../components/auth/TermsOfServiceField";
 import {
   clearStoredMigrationRequest,
   loadStoredMigrationRequest,
@@ -25,6 +26,7 @@ export interface MigratePanelState {
    * フォールバック欄（Blueskyのapp password認証では`email`が返らない）。 */
   needsEmail: boolean;
   email: string;
+  agreeTos: boolean;
 }
 
 export const MIGRATE_PANEL_INITIAL_STATE: MigratePanelState = {
@@ -36,6 +38,7 @@ export const MIGRATE_PANEL_INITIAL_STATE: MigratePanelState = {
   authFactorToken: "",
   needsEmail: false,
   email: "",
+  agreeTos: false,
 };
 
 interface MigratePanelProps {
@@ -107,6 +110,7 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
         new_password: state.newPassword,
         auth_factor_token: state.needsAuthFactorToken ? state.authFactorToken : undefined,
         email: state.needsEmail ? state.email : undefined,
+        agree_tos: state.agreeTos,
       });
       onStarted({ id: res.request_id, token: res.request_token });
     } catch (err) {
@@ -201,6 +205,7 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
             />
           </label>
         )}
+        <TermsOfServiceField agreed={state.agreeTos} onChange={(agreeTos) => onChange({ agreeTos })} />
         {error && <p className={styles.error}>{error}</p>}
         <button type="submit" className={styles.button} disabled={loading}>
           {loading ? t("auth:migrateRegister.submitting") : t("auth:migrateRegister.submit")}

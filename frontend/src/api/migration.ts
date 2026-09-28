@@ -17,6 +17,8 @@ export interface MigrationStartParams {
   auth_factor_token?: string;
   /** 移行元PDSがメールアドレスを返さなかった場合のみのフォールバック（`SOURCE_EMAIL_REQUIRED`）。 */
   email?: string;
+  /** 利用規約同意チェックボックス。`site_settings.terms_of_service_text`が空でない場合のみ必須。 */
+  agree_tos?: boolean;
 }
 
 export interface MigrationStartResponse {

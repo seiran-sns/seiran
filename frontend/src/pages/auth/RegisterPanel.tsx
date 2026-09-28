@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
 import Turnstile from "../../components/Turnstile";
+import TermsOfServiceField from "../../components/auth/TermsOfServiceField";
 import styles from "../Auth.module.css";
 
 /** 他パネルへ切り替えて戻ってきても再開できるよう、親（`AuthCarouselPage`）に持たせる状態。 */
@@ -14,6 +15,7 @@ export interface RegisterPanelState {
   username: string;
   password: string;
   birthday: string;
+  agreeTos: boolean;
 }
 
 export const REGISTER_PANEL_INITIAL_STATE: RegisterPanelState = {
@@ -23,6 +25,7 @@ export const REGISTER_PANEL_INITIAL_STATE: RegisterPanelState = {
   username: "",
   password: "",
   birthday: "",
+  agreeTos: false,
 };
 
 interface RegisterPanelProps {
@@ -133,7 +136,8 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
         state.username,
         state.password,
         turnstileToken,
-        state.birthday
+        state.birthday,
+        state.agreeTos
       );
       login(res.token, res.user);
       navigate("/");
@@ -192,6 +196,7 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
             className={styles.input}
           />
         </label>
+        <TermsOfServiceField agreed={state.agreeTos} onChange={(agreeTos) => onChange({ agreeTos })} />
         <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
         {error && <p className={styles.error}>{error}</p>}
         <button type="submit" className={styles.button} disabled={loading || (!!turnstileSiteKey && !turnstileToken)}>

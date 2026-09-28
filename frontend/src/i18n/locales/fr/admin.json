@@ -80,6 +80,8 @@
     "siteNameHtmlHint": "Les balises HTML sont autorisées (utilisé pour le titre du site sur l'écran de connexion). Ailleurs, comme les notifications de fédération ou le nom de la PWA, une version en texte brut sans balises est utilisée.",
     "siteDescriptionLabel": "Texte de description du site",
     "siteDescriptionHint": "Affiché sur l'écran de connexion. Les balises HTML sont autorisées et les sauts de ligne sont conservés tels quels. Comme cette saisie est réservée aux administrateurs, elle n'est pas nettoyée.",
+    "termsOfServiceLabel": "Texte des conditions d'utilisation",
+    "termsOfServiceHint": "Affiché comme case à cocher d'acceptation sur les écrans d'inscription (y compris la migration depuis Bluesky). Les balises HTML sont autorisées et les sauts de ligne sont conservés tels quels (white-space: pre-wrap). Laissez vide pour masquer entièrement la case à cocher. Cette saisie est réservée aux administrateurs et n'est donc pas nettoyée.",
     "loginBackgroundLabel": "Arrière-plan de l'écran de connexion",
     "loginBackgroundHint": "Vous pouvez importer une image ou une vidéo. Les vidéos sont lues automatiquement en boucle (sans son) sur l'écran de connexion. Si rien n'est défini, l'arrière-plan est dérivé de la couleur du site.",
     "selectBackgroundButton": "Choisir l'arrière-plan",

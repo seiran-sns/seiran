@@ -80,6 +80,8 @@
     "siteNameHtmlHint": "Se permiten etiquetas HTML (se usa para el título del sitio en la pantalla de inicio de sesión). En otros lugares, como las notificaciones de federación o el nombre de la PWA, se usa una versión de texto plano sin etiquetas.",
     "siteDescriptionLabel": "Texto de descripción del sitio",
     "siteDescriptionHint": "Se muestra en la pantalla de inicio de sesión. Se permiten etiquetas HTML y los saltos de línea se conservan tal cual. Al ser una entrada exclusiva para administradores, no se sanea.",
+    "termsOfServiceLabel": "Texto de los términos del servicio",
+    "termsOfServiceHint": "Se muestra como una casilla de aceptación en las pantallas de registro (incluida la migración desde Bluesky). Se permiten etiquetas HTML y los saltos de línea se conservan tal cual (white-space: pre-wrap). Déjelo vacío para ocultar la casilla por completo. Esta entrada es solo para administradores, por lo que no se sanitiza.",
     "loginBackgroundLabel": "Fondo de la pantalla de inicio de sesión",
     "loginBackgroundHint": "Puedes subir una imagen o un vídeo. Los vídeos se reproducen automáticamente en bucle (sin sonido) en la pantalla de inicio de sesión. Si no se establece, el fondo se deriva del color del sitio.",
     "selectBackgroundButton": "Seleccionar fondo",

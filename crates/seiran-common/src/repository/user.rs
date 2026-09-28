@@ -7,12 +7,16 @@ use sqlx::PgPool;
 /// なった際に actor の無い users 行が残り、そのメールアドレスは以後登録もログインもできなく
 /// なる。ユーザー名の一意制約違反はそのまま`sqlx::Error::Database`として返す
 /// （呼び出し側で`USERNAME_TAKEN`等へ変換する）。
+///
+/// `agreed_tos_text`は登録画面の利用規約同意チェックボックスがONだった場合のみ`Some`
+/// （`terms_of_service_agreements`への証跡記録も同じトランザクションに含める）。
 pub async fn create_local_account(
     pool: &PgPool,
     email: &str,
     password_hash: &str,
     role: &str,
     actor: &crate::repository::actor::NewLocalActor<'_>,
+    agreed_tos_text: Option<&str>,
 ) -> Result<i64, sqlx::Error> {
     let mut tx = pool.begin().await?;
     let user_id: i64 = sqlx::query_scalar(
@@ -26,6 +30,38 @@ pub async fn create_local_account(
     .fetch_one(&mut *tx)
     .await?;
     crate::repository::actor::insert_local_actor_row(&mut tx, user_id, actor).await?;
+    if let Some(text) = agreed_tos_text {
+        crate::repository::terms_of_service::record_agreement_tx(&mut tx, user_id, text).await?;
+    }
+    tx.commit().await?;
+    Ok(user_id)
+}
+
+/// `users`行のみを（同意証跡があれば同じトランザクションで）作成する。既存DID転入フロー
+/// （`materialize_local_account`）専用: そちらは`actors`行の作成/変換が転入元DIDの既存
+/// リモートキャッシュ有無で分岐する別ステップのため、`create_local_account`（users+actors
+/// 同時作成）とは分けている。
+pub async fn insert_local_user(
+    pool: &PgPool,
+    email: &str,
+    password_hash: &str,
+    role: &str,
+    agreed_tos_text: Option<&str>,
+) -> Result<i64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let user_id: i64 = sqlx::query_scalar(
+        "INSERT INTO users (email, password_hash, role, created_at, updated_at)
+         VALUES ($1, $2, $3::user_role, NOW(), NOW())
+         RETURNING id",
+    )
+    .bind(email)
+    .bind(password_hash)
+    .bind(role)
+    .fetch_one(&mut *tx)
+    .await?;
+    if let Some(text) = agreed_tos_text {
+        crate::repository::terms_of_service::record_agreement_tx(&mut tx, user_id, text).await?;
+    }
     tx.commit().await?;
     Ok(user_id)
 }

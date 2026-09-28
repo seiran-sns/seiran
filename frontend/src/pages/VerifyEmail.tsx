@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import Turnstile from "../components/Turnstile";
+import TermsOfServiceField from "../components/auth/TermsOfServiceField";
 import styles from "./Auth.module.css";
 
 type State =
@@ -21,6 +22,7 @@ export default function VerifyEmail() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [birthday, setBirthday] = useState("");
+  const [agreeTos, setAgreeTos] = useState(false);
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
@@ -59,7 +61,14 @@ export default function VerifyEmail() {
     }
     setSubmitting(true);
     try {
-      const res = await api.auth.register(username, password, state.registrationToken, turnstileToken, birthday);
+      const res = await api.auth.register(
+        username,
+        password,
+        state.registrationToken,
+        turnstileToken,
+        birthday,
+        agreeTos
+      );
       login(res.token, res.user);
       navigate("/");
     } catch (err) {
@@ -137,6 +146,7 @@ export default function VerifyEmail() {
           className={styles.input}
         />
       </label>
+      <TermsOfServiceField agreed={agreeTos} onChange={setAgreeTos} />
       <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
       {formError && <p className={styles.error}>{formError}</p>}
       <button type="submit" className={styles.button} disabled={submitting || (!!turnstileSiteKey && !turnstileToken)}>

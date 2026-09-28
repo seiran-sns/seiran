@@ -29,6 +29,9 @@ pub struct SiteSettingsResponse {
     // ログイン画面デザイン（#243）
     /// サイト説明テキスト。HTML可・改行保持、サニタイズしない（管理者専用入力のため）。
     pub site_description: String,
+    /// 利用規約テキスト。HTML可・改行保持、サニタイズしない（管理者専用入力のため）。
+    /// 空文字列なら登録画面は同意チェックボックス自体を表示しない。
+    pub terms_of_service_text: String,
     /// ログイン画面背景メディアのURL（画像/動画どちらも可）。
     pub login_bg_url: String,
     /// "image" | "video"。login_bg_url のメディア種別。
@@ -96,6 +99,10 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
         media_proxy_url: settings.get("media_proxy_url").cloned().unwrap_or_default(),
         site_description: settings
             .get("site_description")
+            .cloned()
+            .unwrap_or_default(),
+        terms_of_service_text: settings
+            .get("terms_of_service_text")
             .cloned()
             .unwrap_or_default(),
         login_bg_url: settings.get("login_bg_url").cloned().unwrap_or_default(),
@@ -220,6 +227,7 @@ pub struct UpdateSiteSettingsRequest {
     pub site_icon_media_file_id: Option<String>,
     pub media_proxy_url: Option<String>,
     pub site_description: Option<String>,
+    pub terms_of_service_text: Option<String>,
     pub login_bg_url: Option<String>,
     pub login_bg_type: Option<String>,
     pub login_bg_media_file_id: Option<String>,
@@ -395,6 +403,9 @@ pub async fn update_site_settings(
         req.site_description
             .as_deref()
             .map(|v| ("site_description", v.to_string())),
+        req.terms_of_service_text
+            .as_deref()
+            .map(|v| ("terms_of_service_text", v.to_string())),
         req.login_bg_url
             .as_deref()
             .map(|v| ("login_bg_url", v.to_string())),

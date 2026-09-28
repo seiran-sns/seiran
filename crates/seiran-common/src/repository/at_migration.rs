@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AtMigrationRequestRow {
     pub id: i64,
     /// `at_migration_status` の値をそのまま文字列で保持。
@@ -32,6 +32,10 @@ pub struct AtMigrationRequestRow {
     /// `ON`なら`email_verifications`のtoken消費で確定した値を後から設定する。
     pub email: Option<String>,
     pub last_error: Option<String>,
+    /// `start`時点で利用規約チェックボックスに同意していた場合のみ`Some`
+    /// （同意した瞬間の site_settings.terms_of_service_text の文面そのもの）。
+    /// `materialize_local_account`がアカウント確定時に`terms_of_service_agreements`へコピーする。
+    pub agreed_tos_text: Option<String>,
 }
 
 /// CARから取り出した1レコード。`at_migration_records`へのステージング用。
@@ -55,6 +59,9 @@ pub struct NewMigrationRequest<'a> {
     pub password_hash: &'a str,
     /// `require_email_verification=OFF`の場合のみ`Some`（`register`のemail解決と同じ形）。
     pub email: Option<&'a str>,
+    /// 利用規約チェックボックスに同意していた場合のみ`Some`（`handlers::auth::resolve_tos_agreement`
+    /// が返す、同意時点のsite_settings.terms_of_service_textの文面そのもの）。
+    pub agreed_tos_text: Option<&'a str>,
 }
 
 #[async_trait]
@@ -185,50 +192,10 @@ impl PgAtMigrationRepository {
     }
 }
 
-#[allow(clippy::type_complexity)]
-type RequestRowTuple = (
-    i64,
-    String,
-    String,
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-    String,
-    String,
-    Option<String>,
-    Option<DateTime<Utc>>,
-    Option<i64>,
-    Option<i64>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-);
-
-fn row_to_request(row: RequestRowTuple) -> AtMigrationRequestRow {
-    AtMigrationRequestRow {
-        id: row.0,
-        status: row.1,
-        source_handle: row.2,
-        source_pds_endpoint: row.3,
-        source_did: row.4,
-        source_access_jwt: row.5,
-        source_refresh_jwt: row.6,
-        new_username: row.7,
-        password_hash: row.8,
-        new_signing_key_pem: row.9,
-        plc_submitted_at: row.10,
-        actor_id: row.11,
-        user_id: row.12,
-        email: row.13,
-        last_error: row.14,
-        new_rotation_key_pem: row.15,
-    }
-}
-
 const SELECT_COLUMNS: &str = "id, status::text, source_handle, source_pds_endpoint, source_did,
      source_access_jwt, source_refresh_jwt, new_username, password_hash, new_signing_key_pem,
-     plc_submitted_at, actor_id, user_id, email, last_error, new_rotation_key_pem";
+     plc_submitted_at, actor_id, user_id, email, last_error, new_rotation_key_pem,
+     agreed_tos_text";
 
 #[async_trait]
 impl AtMigrationRepository for PgAtMigrationRepository {
@@ -248,13 +215,14 @@ impl AtMigrationRepository for PgAtMigrationRepository {
             new_username,
             password_hash,
             email,
+            agreed_tos_text,
         } = *req;
         sqlx::query(
             "INSERT INTO at_migration_requests
                 (id, status, request_token_hash, source_handle, source_pds_endpoint, source_did,
                  source_access_jwt, source_refresh_jwt, new_username, password_hash, email,
-                 created_at, updated_at)
-             VALUES ($1, 'fetching_repo', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)",
+                 agreed_tos_text, created_at, updated_at)
+             VALUES ($1, 'fetching_repo', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)",
         )
         .bind(id)
         .bind(request_token_hash)
@@ -266,6 +234,7 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         .bind(new_username)
         .bind(password_hash)
         .bind(email)
+        .bind(agreed_tos_text)
         .bind(now)
         .execute(&self.pool)
         .await
@@ -273,26 +242,24 @@ impl AtMigrationRepository for PgAtMigrationRepository {
     }
 
     async fn get(&self, id: i64) -> Result<Option<AtMigrationRequestRow>, sqlx::Error> {
-        let row: Option<RequestRowTuple> = sqlx::query_as(&format!(
+        sqlx::query_as::<_, AtMigrationRequestRow>(&format!(
             "SELECT {SELECT_COLUMNS} FROM at_migration_requests WHERE id = $1"
         ))
         .bind(id)
         .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(row_to_request))
+        .await
     }
 
     async fn find_by_token_hash(
         &self,
         request_token_hash: &str,
     ) -> Result<Option<AtMigrationRequestRow>, sqlx::Error> {
-        let row: Option<RequestRowTuple> = sqlx::query_as(&format!(
+        sqlx::query_as::<_, AtMigrationRequestRow>(&format!(
             "SELECT {SELECT_COLUMNS} FROM at_migration_requests WHERE request_token_hash = $1"
         ))
         .bind(request_token_hash)
         .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(row_to_request))
+        .await
     }
 
     async fn set_status(

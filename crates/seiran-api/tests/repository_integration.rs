@@ -471,6 +471,7 @@ async fn concurrent_signups_with_same_username_leave_no_orphan_users() {
                         at_rotation_key_pem: None,
                         birth_date: None,
                     },
+                    None,
                 )
                 .await
                 .is_ok()

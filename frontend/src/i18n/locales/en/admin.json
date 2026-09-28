@@ -88,6 +88,8 @@
     "siteNameHtmlHint": "HTML tags are allowed (used for the site title on the login screen). Other places, such as federation notifications or the PWA name, use a plain-text version with tags stripped.",
     "siteDescriptionLabel": "Site description text",
     "siteDescriptionHint": "Shown on the login screen. HTML tags are allowed and line breaks are preserved as-is. This is an admin-only input, so it is not sanitized.",
+    "termsOfServiceLabel": "Terms of Service text",
+    "termsOfServiceHint": "Shown as an agreement checkbox on the sign-up screens (including migrating from Bluesky). HTML tags are allowed and line breaks are preserved as-is (white-space: pre-wrap). Leave empty to hide the checkbox entirely. This is an admin-only input, so it is not sanitized.",
     "loginBackgroundLabel": "Login screen background",
     "loginBackgroundHint": "You can upload either an image or a video. Videos autoplay and loop (muted) on the login screen. If left unset, the background is derived from the site color.",
     "selectBackgroundButton": "Select background",

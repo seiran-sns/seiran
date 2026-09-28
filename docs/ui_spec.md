@@ -370,6 +370,13 @@ HomePage はフィードとスクロール状態を確実に保つため同期�
 ### フォームエリア（縦カルーセル）
 ログイン・サインアップ・Bluesky から転入の3パネルを縦に並べる。非アクティブなパネルは見出しボタン（クリックで対応するルートへ）だけの高さに縮み、アクティブなパネルはフォーム全体を展開する（`max-height` のアコーディオン）。3パネルは常にマウントしたまま CSS で開閉するので、メール確認送信済みや2FA入力中といった途中状態はパネルを切り替えても残る。共通のフッターに「powered by Seiran」ボタンを1つ置く。
 
+### 利用規約同意（`TermsOfServiceField`）
+アカウントを実際に作成する3つのフォーム（サインアップの直接登録・メール確認完了後の登録フォーム・Bluesky から転入）はいずれも、送信ボタンの直前に共通コンポーネント `TermsOfServiceField` を1つ置く。画面を増やさず、既存フォームへのチェックボックス追加だけで完結させる。
+
+- 管理画面の「利用規約テキスト」（`terms_of_service_text`）が空文字列の間は、`TermsOfServiceField` 自体が何も描画しない（同意対象が無いため）。
+- 空でない場合のみ、同意チェックボックス（`required`、ネイティブバリデーションで未チェックのまま送信できない）と「利用規約を読む」リンクボタンを表示する。ボタンを押すと `Modal`（`components/common/Modal`）がポップアップし、`terms_of_service_text` を `white-space: pre-wrap` で表示する。HTML タグが使え、サニタイズしない（`site_name`/`site_description` と同じ、管理者専用入力のため）。
+- チェックを入れて登録すると、サーバー側が同意した瞬間の文面をそのまま `terms_of_service_agreements` に記録する（`docs/database.md`「利用規約同意」参照）。テキストが空でないのにチェックしないまま送信しようとした場合、サーバー側も `TOS_AGREEMENT_REQUIRED` で拒否する（フロントのネイティブバリデーションをすり抜けても最終防波堤になる）。
+
 ## 8. Unicode絵文字の表示（twemoji）
 
 Unicode 絵文字（本文・表示名・リアクション・ピッカー・装飾アイコン等）は OS/ブラウザのグリフに任せず、jdecked/twemoji（`@twemoji/parser` + `@twemoji/svg`）の SVG をセルフホストして統一する。アセットは postinstall で `scripts/copy-twemoji-assets.mjs` が `frontend/public/twemoji/` にコピーする（git 管理外）。

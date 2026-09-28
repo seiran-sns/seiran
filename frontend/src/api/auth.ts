@@ -43,6 +43,7 @@ export const auth = {
     registrationToken: string,
     turnstileToken?: string,
     birthday?: string,
+    agreeTos?: boolean,
   ) {
     return request<AuthResponse>("POST", "/auth/register", {
       username,
@@ -50,6 +51,7 @@ export const auth = {
       registration_token: registrationToken,
       turnstile_token: turnstileToken,
       birthday: birthday || undefined,
+      agree_tos: agreeTos,
     });
   },
   registerDirect(
@@ -58,6 +60,7 @@ export const auth = {
     password: string,
     turnstileToken?: string,
     birthday?: string,
+    agreeTos?: boolean,
   ) {
     return request<AuthResponse>("POST", "/auth/register", {
       username,
@@ -65,6 +68,7 @@ export const auth = {
       email,
       turnstile_token: turnstileToken,
       birthday: birthday || undefined,
+      agree_tos: agreeTos,
     });
   },
   login(identifier: string, password: string, turnstileToken?: string) {
