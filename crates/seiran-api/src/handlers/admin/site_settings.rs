@@ -22,6 +22,9 @@ pub struct SiteSettingsResponse {
     pub site_icon_url: String,
     /// アップロード経由で設定した場合の対応 `media_files.sha256`（PWAアイコン配信用）。
     pub site_icon_sha256: String,
+    /// アップロード経由で設定した場合の対応 `media_files.id`（文字列）。孤立ファイルGC
+    /// （`maintenance::orphaned_media_files`）が参照有無を判定するために見る。
+    pub site_icon_media_file_id: String,
     pub media_proxy_url: String,
     // ログイン画面デザイン（#243）
     /// サイト説明テキスト。HTML可・改行保持、サニタイズしない（管理者専用入力のため）。
@@ -30,6 +33,9 @@ pub struct SiteSettingsResponse {
     pub login_bg_url: String,
     /// "image" | "video"。login_bg_url のメディア種別。
     pub login_bg_type: String,
+    /// アップロード経由で設定した場合の対応 `media_files.id`（文字列）。用途は
+    /// `site_icon_media_file_id` と同じ。
+    pub login_bg_media_file_id: String,
     // 認証ブルートフォース対策（#223）
     pub auth_bruteforce_window_minutes: String,
     pub auth_bruteforce_max_variants: String,
@@ -83,6 +89,10 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .get("site_icon_sha256")
             .cloned()
             .unwrap_or_default(),
+        site_icon_media_file_id: settings
+            .get("site_icon_media_file_id")
+            .cloned()
+            .unwrap_or_default(),
         media_proxy_url: settings.get("media_proxy_url").cloned().unwrap_or_default(),
         site_description: settings
             .get("site_description")
@@ -90,6 +100,10 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .unwrap_or_default(),
         login_bg_url: settings.get("login_bg_url").cloned().unwrap_or_default(),
         login_bg_type: settings.get("login_bg_type").cloned().unwrap_or_default(),
+        login_bg_media_file_id: settings
+            .get("login_bg_media_file_id")
+            .cloned()
+            .unwrap_or_default(),
         auth_bruteforce_window_minutes: settings
             .get("auth_bruteforce_window_minutes")
             .cloned()
@@ -203,10 +217,12 @@ pub struct UpdateSiteSettingsRequest {
     pub site_color: Option<String>,
     pub site_icon_url: Option<String>,
     pub site_icon_sha256: Option<String>,
+    pub site_icon_media_file_id: Option<String>,
     pub media_proxy_url: Option<String>,
     pub site_description: Option<String>,
     pub login_bg_url: Option<String>,
     pub login_bg_type: Option<String>,
+    pub login_bg_media_file_id: Option<String>,
     pub auth_bruteforce_window_minutes: Option<String>,
     pub auth_bruteforce_max_variants: Option<String>,
     pub auth_ip_block_window_minutes: Option<String>,
@@ -326,8 +342,10 @@ pub async fn update_site_settings(
             "search_rate_limit_max_moderator",
             &req.search_rate_limit_max_moderator,
         ),
+        ("site_icon_media_file_id", &req.site_icon_media_file_id),
+        ("login_bg_media_file_id", &req.login_bg_media_file_id),
     ] {
-        if let Some(v) = value.as_deref() {
+        if let Some(v) = value.as_deref().filter(|v| !v.is_empty()) {
             if !matches!(v.parse::<i64>(), Ok(n) if n > 0) {
                 return Err(ApiError::BadRequest(format!(
                     "INVALID_{}",
@@ -368,6 +386,9 @@ pub async fn update_site_settings(
         req.site_icon_sha256
             .as_deref()
             .map(|v| ("site_icon_sha256", v.to_string())),
+        req.site_icon_media_file_id
+            .as_deref()
+            .map(|v| ("site_icon_media_file_id", v.to_string())),
         req.media_proxy_url
             .as_deref()
             .map(|v| ("media_proxy_url", v.trim_end_matches('/').to_string())),
@@ -380,6 +401,9 @@ pub async fn update_site_settings(
         req.login_bg_type
             .as_deref()
             .map(|v| ("login_bg_type", v.to_string())),
+        req.login_bg_media_file_id
+            .as_deref()
+            .map(|v| ("login_bg_media_file_id", v.to_string())),
         req.auth_bruteforce_window_minutes
             .as_deref()
             .map(|v| ("auth_bruteforce_window_minutes", v.to_string())),

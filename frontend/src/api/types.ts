@@ -111,10 +111,12 @@ export interface SiteSettings {
   site_color: string;
   site_icon_url: string;
   site_icon_sha256: string;
+  site_icon_media_file_id: string;
   media_proxy_url: string;
   site_description: string;
   login_bg_url: string;
   login_bg_type: string;
+  login_bg_media_file_id: string;
   auth_bruteforce_window_minutes: string;
   auth_bruteforce_max_variants: string;
   auth_ip_block_window_minutes: string;

@@ -126,12 +126,22 @@ pub struct OrphanedMediaFile {
 /// 「孤立している」の定義。候補の取得と、削除直前の再確認を兼ねた DELETE で同じ条件を使う。
 /// `post_attachments.media_file_id` はリモート添付で NULL の行が大半なので、`NOT IN` ではなく
 /// `NOT EXISTS` で書く（`NOT IN` だとサブクエリに NULL があるだけで常に偽になる）。
+///
+/// `site_settings` はキーごとに用途の異なる汎用 Key-Value のため外部キーを張れない。
+/// favicon（`site_icon_media_file_id`）・ログイン画面背景（`login_bg_media_file_id`）は
+/// `media_files.id` を文字列化した値をこのテーブルへ保存しており、他の参照
+/// （`post_attachments`/`actors`/`custom_emojis`）と同じ扱いで孤立判定に含める。
 const ORPHANED_MEDIA_FILE_CONDITION: &str = "
     last_uploaded_at < NOW() - INTERVAL '7 days'
     AND NOT EXISTS (SELECT 1 FROM post_attachments pa WHERE pa.media_file_id = media_files.id)
     AND NOT EXISTS (SELECT 1 FROM actors a WHERE a.avatar_media_id = media_files.id)
     AND NOT EXISTS (SELECT 1 FROM actors a WHERE a.banner_media_id = media_files.id)
     AND NOT EXISTS (SELECT 1 FROM custom_emojis ce WHERE ce.media_file_id = media_files.id)
+    AND NOT EXISTS (
+        SELECT 1 FROM site_settings ss
+        WHERE ss.key IN ('site_icon_media_file_id', 'login_bg_media_file_id')
+          AND ss.value = media_files.id::text
+    )
 ";
 
 /// 孤立メディアファイルの候補を最大 `limit` 件。

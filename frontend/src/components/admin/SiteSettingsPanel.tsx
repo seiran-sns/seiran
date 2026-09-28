@@ -24,6 +24,7 @@ export default function SiteSettingsPanel() {
   const [siteColor, setSiteColor] = useState("");
   const [siteIconUrl, setSiteIconUrl] = useState("");
   const [siteIconSha256, setSiteIconSha256] = useState("");
+  const [siteIconMediaFileId, setSiteIconMediaFileId] = useState("");
   const [mediaProxyUrl, setMediaProxyUrl] = useState("");
   const [uploadingIcon, setUploadingIcon] = useState(false);
   const iconRef = useRef<HTMLInputElement>(null);
@@ -32,6 +33,7 @@ export default function SiteSettingsPanel() {
   const [siteDescription, setSiteDescription] = useState("");
   const [loginBgUrl, setLoginBgUrl] = useState("");
   const [loginBgType, setLoginBgType] = useState("");
+  const [loginBgMediaFileId, setLoginBgMediaFileId] = useState("");
   const [uploadingBg, setUploadingBg] = useState(false);
   const bgRef = useRef<HTMLInputElement>(null);
 
@@ -80,10 +82,12 @@ export default function SiteSettingsPanel() {
         setSiteColor(s.site_color);
         setSiteIconUrl(s.site_icon_url);
         setSiteIconSha256(s.site_icon_sha256);
+        setSiteIconMediaFileId(s.site_icon_media_file_id);
         setMediaProxyUrl(s.media_proxy_url);
         setSiteDescription(s.site_description);
         setLoginBgUrl(s.login_bg_url);
         setLoginBgType(s.login_bg_type);
+        setLoginBgMediaFileId(s.login_bg_media_file_id);
         setBruteforceWindowMinutes(s.auth_bruteforce_window_minutes);
         setBruteforceMaxVariants(s.auth_bruteforce_max_variants);
         setIpBlockWindowMinutes(s.auth_ip_block_window_minutes);
@@ -123,6 +127,7 @@ export default function SiteSettingsPanel() {
       const f = await api.media.upload(file, "avatar");
       setSiteIconUrl(f.url);
       setSiteIconSha256(f.sha256);
+      setSiteIconMediaFileId(f.id);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -141,6 +146,7 @@ export default function SiteSettingsPanel() {
       const f = await api.media.upload(file, "login_background", false);
       setLoginBgUrl(f.url);
       setLoginBgType(f.mimeType.startsWith("video/") ? "video" : "image");
+      setLoginBgMediaFileId(f.id);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -164,10 +170,12 @@ export default function SiteSettingsPanel() {
         site_color: siteColor,
         site_icon_url: siteIconUrl,
         site_icon_sha256: siteIconSha256,
+        site_icon_media_file_id: siteIconMediaFileId,
         media_proxy_url: mediaProxyUrl,
         site_description: siteDescription,
         login_bg_url: loginBgUrl,
         login_bg_type: loginBgType,
+        login_bg_media_file_id: loginBgMediaFileId,
         auth_bruteforce_window_minutes: bruteforceWindowMinutes,
         auth_bruteforce_max_variants: bruteforceMaxVariants,
         auth_ip_block_window_minutes: ipBlockWindowMinutes,
@@ -258,6 +266,7 @@ export default function SiteSettingsPanel() {
                   onClick={() => {
                     setLoginBgUrl("");
                     setLoginBgType("");
+                    setLoginBgMediaFileId("");
                   }}
                 >
                   {t("common:delete")}
@@ -284,7 +293,15 @@ export default function SiteSettingsPanel() {
                     : t("admin:siteSettingsPanel.selectIconButton")}
               </button>
               {siteIconUrl && (
-                <button type="button" className={styles.btnGhost} onClick={() => setSiteIconUrl("")}>
+                <button
+                  type="button"
+                  className={styles.btnGhost}
+                  onClick={() => {
+                    setSiteIconUrl("");
+                    setSiteIconSha256("");
+                    setSiteIconMediaFileId("");
+                  }}
+                >
                   {t("common:delete")}
                 </button>
               )}
