@@ -6,6 +6,8 @@ import { profilePath, profileQuery } from "../../lib/format";
 import Avatar from "../note/Avatar";
 import EmojiText from "../note/EmojiText";
 import NoteCard from "../note/NoteCard";
+import ProfileBio from "../note/ProfileBio";
+import { useResolvedLinks } from "../../hooks/useResolvedLinks";
 import panel from "../common/Panel.module.css";
 import styles from "./AuthorPanel.module.css";
 
@@ -20,6 +22,7 @@ export default function AuthorPanel({ note }: AuthorPanelProps) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [resolvedLinks, setResolvedLinks] = useResolvedLinks(undefined);
 
   const q = profileQuery(note.user.username, note.user.domain);
 
@@ -29,12 +32,17 @@ export default function AuthorPanel({ note }: AuthorPanelProps) {
     setError("");
     api.users
       .profile(q)
-      .then((p) => !cancelled && setProfile(p))
+      .then((p) => {
+        if (cancelled) return;
+        setProfile(p);
+        setResolvedLinks(p.link_resolutions ?? {});
+      })
       .catch((e) => !cancelled && setError(getErrorMessage(e)))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
   if (loading) return <p className={panel.message}>{t("common:loading")}</p>;
@@ -60,11 +68,7 @@ export default function AuthorPanel({ note }: AuthorPanelProps) {
         </div>
       </Link>
 
-      {profile.bio && (
-        <p className={styles.bio}>
-          <EmojiText text={profile.bio} emojis={profile.emojis} />
-        </p>
-      )}
+      <ProfileBio profile={profile} resolvedLinks={resolvedLinks} className={styles.bio} />
 
       {profile.actor_id && (
         <div className={styles.counts}>

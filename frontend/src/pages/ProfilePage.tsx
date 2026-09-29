@@ -15,6 +15,9 @@ import AppShell from "../components/layout/AppShell";
 import EmojiText from "../components/note/EmojiText";
 import NoteCard from "../components/note/NoteCard";
 import RichHtml from "../components/note/RichHtml";
+import ProfileBio from "../components/note/ProfileBio";
+import { toProfileHtml } from "../lib/profileHtml";
+import { useResolvedLinks } from "../hooks/useResolvedLinks";
 import ProfileFeedList from "../components/note/ProfileFeedList";
 import FollowListPanel from "../components/right/FollowListPanel";
 import { useAuth } from "../contexts/AuthContext";
@@ -24,9 +27,6 @@ import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { useUserRelationshipMenu } from "../hooks/useUserRelationshipMenu";
 import { profilePath, profileQuery, remoteProfileUrl, remoteServerBadgeInfo } from "../lib/format";
 import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
-import { toProfileHtml } from "../lib/profileHtml";
-import { useStreamingContext } from "../contexts/StreamingContext";
-import { ResolvedLinkInfo } from "../api/types";
 import { setRelationship } from "../stores/userRelationshipStore";
 import { mediaUrl } from "../utils/mediaProxy";
 import panel from "../components/common/Panel.module.css";
@@ -46,10 +46,7 @@ export default function ProfilePage() {
   const q = acct ? acct.replace(/^@/, "") : (searchParams.get("q") ?? "");
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  // bio/profile_fields内リンクの解決結果（#リンク解決）。key=URL文字列。初期値はAPIレスポンス
-  // 同梱分、非同期解決の完了は`linkResolved`のWebSocket通知で追記される。
-  const [resolvedLinks, setResolvedLinks] = useState<Record<string, ResolvedLinkInfo>>({});
-  const { registerLinkResolved } = useStreamingContext();
+  const [resolvedLinks, setResolvedLinks] = useResolvedLinks(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
@@ -168,26 +165,6 @@ export default function ProfilePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
-
-  // bio/profile_fields内リンクの非同期解決完了通知（ログイン中クライアント全員へ配信される
-  // ブロードキャストのため、URLでのフィルタはせず単純にマージする。表示中のbio/profile_fields
-  // に含まれないURLの通知が来ても、該当する`href`が無いため`RichHtml`側で素通りするだけ）。
-  useEffect(() => {
-    return registerLinkResolved((info) => {
-      setResolvedLinks((prev) => ({
-        ...prev,
-        [info.url]: {
-          kind: info.kind,
-          username: info.username,
-          domain: info.domain,
-          actor_type: info.actorType,
-          actor_id: info.actorId,
-          avatar_url: info.avatarUrl,
-          post_id: info.postId,
-        },
-      }));
-    });
-  }, [registerLinkResolved]);
 
   const { user } = useAuth();
 
@@ -441,15 +418,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {profile.bio && (
-            <p className={styles.bio}>
-              <RichHtml
-                html={toProfileHtml(profile.bio, profile.actor_type)}
-                emojis={profile.emojis}
-                resolvedLinks={resolvedLinks}
-              />
-            </p>
-          )}
+          <ProfileBio profile={profile} resolvedLinks={resolvedLinks} className={styles.bio} />
 
           {/* プロフィールのキーバリュー項目（#62） */}
           {profile.profile_fields.length > 0 && (
