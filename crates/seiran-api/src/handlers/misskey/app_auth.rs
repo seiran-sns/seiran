@@ -183,13 +183,10 @@ pub async fn session_authorize(
     State(state): State<AppState>,
     Path(token): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let approved = oauth::approve_misskey_auth_session(
-        &state.db,
-        &sha256_hex(&token),
-        user.user_id,
-    )
-    .await
-    .map_err(internal)?;
+    let approved =
+        oauth::approve_misskey_auth_session(&state.db, &sha256_hex(&token), user.user_id)
+            .await
+            .map_err(internal)?;
     if !approved {
         return Err(ApiError::NotFound("AUTH_SESSION_NOT_FOUND"));
     }
@@ -221,12 +218,15 @@ pub async fn session_userkey(
         .map_err(internal)?
         .ok_or_else(|| ApiError::BadRequest("no such app".to_owned()))?;
 
-    let consumed = oauth::consume_misskey_auth_session(&state.db, &sha256_hex(&params.token), app.id)
-        .await
-        .map_err(internal)?
-        .ok_or_else(|| {
-            ApiError::BadRequest("This session is not approved yet, or already used.".to_owned())
-        })?;
+    let consumed =
+        oauth::consume_misskey_auth_session(&state.db, &sha256_hex(&params.token), app.id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| {
+                ApiError::BadRequest(
+                    "This session is not approved yet, or already used.".to_owned(),
+                )
+            })?;
 
     let actor = state
         .actors
