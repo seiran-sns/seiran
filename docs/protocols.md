@@ -152,7 +152,7 @@ Authorized Fetch（secure mode）のインスタンスは未署名 GET に 401 �
 
 - 送信: `build_reaction_object`（`deliver/activity.rs`）が `tag: [{"type":"Emoji","name":":shortcode:","icon":{...}}]` 付きの `EmojiReact` を組み立てる。`content`/`_misskey_reaction` にはホスト付き正規形を載せるが、`tag[].id`/`tag[].name` は Misskey に合わせてホスト無しの shortcode にする（`parse_reaction_shortcode_and_host` で分離）。
 - 受信: `handle_reaction` は `content` からホストを除いた shortcode で tag を照合する（`build_emoji_map`/`extract_emoji_tag_url`）。
-- 画像URLは `EmojiRepository::find_url_by_shortcode` で解決し、未登録なら `INVALID_REACTION_CONTENT`/`UNKNOWN_EMOJI`。ローカルのピッカーはリモートホスト付き shortcode を選べないため、`validate_reaction_content` はそれを拒否する。
+- 画像URLは `EmojiRepository::find_url_by_shortcode` で解決し、未登録なら `INVALID_REACTION_CONTENT`/`UNKNOWN_EMOJI`。他サーバー由来のリモートホスト付き shortcode（`:name@host:`）は、`validate_reaction_content` がホストを捨てて同名のローカル絵文字として扱う（ローカルに無ければ `UNKNOWN_EMOJI`）。
 - ATP はカスタム絵文字非対応のため、`commit_like` の `emoji` 拡張フィールドに正規形を載せるだけ（画像は送らない）。
 
 ### 投稿本文のカスタム絵文字
@@ -621,7 +621,7 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 **`users/reactions`**: `reactions_by_actor_for_feed`（カスタム API と共通、可視性フィルタ済み）でリアクション一覧を取り、対象ノートを `fetch_referenced_notes` で埋め込む。対象ノートが取れない行は除外する。`note` を持つ `MisskeyUserReaction` を使う（`notes/reactions` 用の `MisskeyNoteReaction` とは別）。
 
-**`notes/reactions`**: `type` 省略時は空配列（集計が単一絵文字指定前提のため）。`notes/reactions/create` の `reaction` はそのまま `validate_reaction_content` に渡す（内部表現が Misskey と同じ `:shortcode@.:` なので変換不要。リモートホスト付きは拒否）。
+**`notes/reactions`**: `type` 省略時は空配列（集計が単一絵文字指定前提のため）。`notes/reactions/create` の `reaction` はそのまま `validate_reaction_content` に渡す（内部表現が Misskey と同じ `:shortcode@.:` なので変換不要。リモートホスト付きはホストを捨てて同名のローカル絵文字として扱う）。
 
 **`stats`**: `notesCount`/`usersCount`（と同値の `original*`）はローカルの実数（削除済み投稿・退会済みユーザー・リモートを除く）。`instances`・`driveUsage*` は0固定。
 

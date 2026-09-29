@@ -153,12 +153,11 @@ pub fn validate_reaction_content(raw: &str) -> Result<ReactionContent, ApiError>
         return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
     }
     if let Some((shortcode, host)) = parse_reaction_shortcode_and_host(&content) {
-        // ローカル入力（生の `:shortcode:`）と、既存チップの追いリアクション等でDBの正規形
-        // `:shortcode@.:` がそのまま渡ってくる経路の両方を受理する。リモートホスト付き
-        // （`:shortcode@remote.example:`）はローカル絵文字ピッカーからは選べないため拒否する。
-        if matches!(host, Some(h) if h != ".") {
-            return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
-        }
+        // ローカル入力（生の `:shortcode:`）、DBの正規形 `:shortcode@.:`、および他サーバー由来の
+        // `:shortcode@remote.example:` を受理する。リモートのチップをクリックしたときは、
+        // ホストを捨てて同名のローカル絵文字として扱う（ローカルに無ければ呼び出し元が
+        // UNKNOWN_EMOJI にする）。ホストを残すとローカルに存在しない絵文字を送ることになる。
+        let _ = host;
         if shortcode.graphemes(true).count() > MAX_CUSTOM_EMOJI_SHORTCODE_LEN {
             return Err(ApiError::BadRequest("INVALID_REACTION_CONTENT".to_owned()));
         }
@@ -384,9 +383,12 @@ mod tests {
     }
 
     #[test]
-    fn validate_reaction_content_rejects_remote_host_suffix() {
-        // ローカル絵文字ピッカーからはリモートホスト付きショートコードを選べないため拒否する。
-        assert!(validate_reaction_content(":smile@remote.example:").is_err());
+    fn validate_reaction_content_maps_remote_host_to_local_shortcode() {
+        // 他サーバーのチップをクリックした場合は同名のローカル絵文字として扱う。
+        assert_eq!(
+            validate_reaction_content(":smile@remote.example:").unwrap(),
+            ReactionContent::Custom("smile".to_string())
+        );
     }
 
     #[test]
