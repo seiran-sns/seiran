@@ -70,7 +70,7 @@ LeftNav 左下の「Powered by Seiran」から開く `ServerInfoDialog` は、�
 | `worker` | Worker | seiran-federation-worker | なし |
 | `firehose` / `atp-repo` | Firehose | seiran-atp-repo | なし |
 
-- **All**（`run_all`）: DB・シークレット・HTTP クライアント・`job_queue`（常に InMemory）を1回だけ作り、`seiran_api::router().merge(seiran_federation_inbox::router())` を1ポートで待ち受ける。firehose と worker は同じプロセスの `tokio::spawn`。
+- **All**（`run_all`）: DB・シークレット・HTTP クライアント・`job_queue`（常に InMemory）を1回だけ作り、`seiran_api::router().merge(seiran_federation_inbox::router())` を1ポートで待ち受ける。firehose と worker は同じプロセスの `tokio::spawn`。合流後のルーターに `tower_http::trace::TraceLayer` を1枚だけ被せ、全リクエストのメソッド・パス・レイテンシ・ステータスを INFO ログへ出す（サードパーティクライアントがどのパスを叩いて 404/401 になっているか事後に追えるようにするため。他にアクセスログが無い）。パスのみ記録し、`/api/streaming?token=...` 等クエリ文字列に含まれうる JWT はログに残さない。
 - **Api / Federation**: 専用ポートで待ち受ける。`REDIS_URL` があれば `RedisJobQueue`、無ければ `InMemoryJobQueue`（split-role でこれだと他プロセスにジョブが届かない）。
 - **Worker**（`run_standalone_worker`）: HTTP を持たずジョブを消費する。
 - **Firehose**: 購読者がいないので空の `StreamHub` を使う。

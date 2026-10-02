@@ -21,7 +21,14 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
     Json(vec![
         "announcements",
         "ap/show",
+        "drive/files",
+        "drive/files/attached-notes",
         "drive/files/create",
+        "drive/files/show",
+        "drive/files/update",
+        "drive/folders",
+        "drive/folders/create",
+        "drive/folders/show",
         "emojis",
         "following/create",
         "following/delete",
@@ -43,6 +50,7 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "notes/timeline",
         "notes/unrenote",
         "notes/user-list-timeline",
+        "notifications/create",
         "stats",
         "users/clips",
         "users/featured-notes",
@@ -1019,6 +1027,196 @@ pub async fn empty_list_stub(
 ) -> Json<Vec<serde_json::Value>> {
     let _ = body;
     Json(Vec::new())
+}
+
+// ─── ドライブ（Misskey互換、Mewk対応） ──────────────────────────────────
+
+/// `POST /api/drive/files` のリクエストボディ。seiranのドライブにフォルダ概念が無いため
+/// `folderId` は無視し、どのフォルダを指定されてもアップロード者自身の全ファイル
+/// （ルート相当）を返す（Mewk作者と合意済みのいい加減な互換実装）。
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFilesBody {
+    pub folder_id: Option<String>,
+    #[serde(flatten)]
+    pub cursor: CursorParams,
+}
+
+/// POST /api/drive/files
+pub async fn drive_files_list(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<DriveFilesBody>,
+) -> Result<Json<Vec<crate::handlers::drive::DriveFileResponse>>, ApiError> {
+    let _ = body.folder_id;
+    let page = body.cursor.page(10);
+    let rows = state
+        .media_files
+        .list_by_uploader(user.actor_id, page.limit, page.until_id, page.since_id)
+        .await
+        .map_err(internal)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in &rows {
+        out.push(crate::handlers::drive::to_drive_file_response(&state, row).await);
+    }
+    Ok(Json(out))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFileIdBody {
+    pub file_id: String,
+}
+
+/// POST /api/drive/files/show。自分がアップロードしたファイルのみ参照できる。
+pub async fn drive_files_show(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<DriveFileIdBody>,
+) -> Result<Json<crate::handlers::drive::DriveFileResponse>, ApiError> {
+    let id = parse_id(&body.file_id, "NO_SUCH_FILE")?;
+    let record = state
+        .media_files
+        .find_by_id(id)
+        .await
+        .map_err(internal)?
+        .filter(|r| r.uploaded_by_actor_id == Some(user.actor_id))
+        .ok_or(ApiError::NotFound("NO_SUCH_FILE"))?;
+    Ok(Json(
+        crate::handlers::drive::to_drive_file_response(&state, &record).await,
+    ))
+}
+
+/// `POST /api/drive/files/update` のリクエストボディ。`folderId`・`name`・`isSensitive`・
+/// `comment`はいずれもseiranに保存先が無い（フォルダ非対応、ファイル名は非永続、
+/// per-file公開範囲やコメントの概念も無い）ため、存在・所有権だけ検証して中身は
+/// 無視する（Aria等の「フォルダ間移動」操作を失敗させずルートに留め置く、
+/// フォルダ合意実装と同じ方針）。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFileUpdateBody {
+    pub file_id: String,
+}
+
+/// POST /api/drive/files/update
+pub async fn drive_files_update(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<DriveFileUpdateBody>,
+) -> Result<Json<crate::handlers::drive::DriveFileResponse>, ApiError> {
+    let id = parse_id(&body.file_id, "NO_SUCH_FILE")?;
+    let record = state
+        .media_files
+        .find_by_id(id)
+        .await
+        .map_err(internal)?
+        .filter(|r| r.uploaded_by_actor_id == Some(user.actor_id))
+        .ok_or(ApiError::NotFound("NO_SUCH_FILE"))?;
+    Ok(Json(
+        crate::handlers::drive::to_drive_file_response(&state, &record).await,
+    ))
+}
+
+/// POST /api/drive/files/attached-notes。自分がアップロードしたファイルのみ対象。
+pub async fn drive_files_attached_notes(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<DriveFileIdBody>,
+) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
+    let id = parse_id(&body.file_id, "NO_SUCH_FILE")?;
+    state
+        .media_files
+        .find_by_id(id)
+        .await
+        .map_err(internal)?
+        .filter(|r| r.uploaded_by_actor_id == Some(user.actor_id))
+        .ok_or(ApiError::NotFound("NO_SUCH_FILE"))?;
+
+    let post_ids = seiran_common::repository::find_post_ids_by_media_file_id(&state.db, id)
+        .await
+        .map_err(internal)?;
+    let rows = seiran_common::repository::find_visible_posts_by_ids(
+        &state.db,
+        &post_ids,
+        Some(user.actor_id),
+    )
+    .await
+    .map_err(internal)?;
+    Ok(Json(build_notes(&state, rows, Some(user.actor_id)).await))
+}
+
+/// Misskey互換`DriveFolder`。seiranはフォルダを永続化しない（下記ハンドラ群参照）ため、
+/// どの値も呼び出し時にその場で組み立てる。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MisskeyDriveFolder {
+    pub id: String,
+    pub created_at: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+}
+
+/// POST /api/drive/folders。seiranのドライブにフォルダ概念が無いため常に空配列
+/// （ルート直下に何も無い状態として振る舞う。Mewk作者と合意済み）。
+pub async fn drive_folders_list(
+    body: Option<Json<serde_json::Value>>,
+) -> Json<Vec<serde_json::Value>> {
+    let _ = body;
+    Json(Vec::new())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFolderShowBody {
+    pub folder_id: String,
+}
+
+/// POST /api/drive/folders/show。フォルダを永続化していないため、指定された`folderId`を
+/// そのまま折り返すダミーの`DriveFolder`で常に成功させる（Mewk作者と合意済みのいい加減な
+/// 互換実装：フォルダ作成は常に成功、中身は常にルート＝全ファイル）。
+pub async fn drive_folders_show(
+    user: AuthedUser,
+    Json(body): Json<DriveFolderShowBody>,
+) -> Json<MisskeyDriveFolder> {
+    let _ = user;
+    Json(MisskeyDriveFolder {
+        id: body.folder_id,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        name: "Drive".to_owned(),
+        parent_id: None,
+    })
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFolderCreateBody {
+    pub name: Option<String>,
+    pub parent_id: Option<String>,
+}
+
+/// POST /api/drive/folders/create。何も永続化せず、その場で生成したIDを含む
+/// `DriveFolder`を返して常に成功させる（Mewk作者と合意済み。フォルダ階層自体を
+/// 持たないため、以降`drive/folders/show`に同じIDを渡しても一貫した中身は返せないが、
+/// 用途（添付整理用のラベル）上クライアント側がそれを気にする場面は無いとの合意）。
+pub async fn drive_folders_create(
+    user: AuthedUser,
+    Json(body): Json<DriveFolderCreateBody>,
+) -> Json<MisskeyDriveFolder> {
+    let _ = user;
+    Json(MisskeyDriveFolder {
+        id: seiran_common::generate_snowflake_id(chrono::Utc::now()).to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        name: body.name.unwrap_or_else(|| "Untitled Folder".to_owned()),
+        parent_id: body.parent_id,
+    })
+}
+
+/// POST /api/notifications/create。クライアント発の自由記述通知（本家Misskeyの
+/// `body`/`header`/`icon`）を受け取るが、`notifications`テーブルは固定種別のシステム
+/// 通知しか保持できないため受理のみして何もしない。
+pub async fn notifications_create(body: Option<Json<serde_json::Value>>) -> StatusCode {
+    let _ = body;
+    StatusCode::NO_CONTENT
 }
 
 #[derive(Deserialize, Default)]

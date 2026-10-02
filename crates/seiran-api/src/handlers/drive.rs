@@ -15,7 +15,7 @@ use seiran_common::{
     is_allowed_video_or_audio_mime, is_faststart_eligible_mime, prepare_image,
     probe_video_or_audio,
     queue::worker::priority,
-    repository::{Actor, CreateMediaFile},
+    repository::{Actor, CreateMediaFile, MediaFile},
     select_provider, sniff_mime_type, ImagePipeline, Job, MediaKind, S3StorageClient,
     SelectorError, StorageProviderRepository,
 };
@@ -705,9 +705,52 @@ async fn mark_bsky_video_failed(state: &AppState, media_file_id: i64) {
         .await;
 }
 
+/// 既存の `MediaFile` レコードから Misskey 互換 `DriveFile` レスポンスを組み立てる
+/// （`POST /api/drive/files`・`drive/files/show` 用。新規アップロード時の
+/// `create_image_file`/`create_video_or_audio_file` はレスポンスをストレージ保存と
+/// 同じ手順内で組み立てるため、こちらは流用しない）。
+pub(crate) async fn to_drive_file_response(state: &AppState, record: &MediaFile) -> DriveFileResponse {
+    let url = build_public_url(
+        state.storage_providers.as_ref(),
+        record.storage_provider_id,
+        &record.storage_key,
+    )
+    .await;
+    let thumbnail_url = match &record.thumbnail_key {
+        Some(key) => Some(build_public_url(state.storage_providers.as_ref(), record.storage_provider_id, key).await),
+        None if record.mime_type.starts_with("image/") => Some(url.clone()),
+        None => None,
+    };
+    DriveFileResponse {
+        id: record.id.to_string(),
+        url,
+        sha256: record.sha256.clone(),
+        blurhash: record.blurhash.clone(),
+        width: record.width.map(|w| w as u32),
+        height: record.height.map(|h| h as u32),
+        size: record.size,
+        mime_type: record.mime_type.clone(),
+        is_reused: false,
+        duration_ms: record.duration_ms.map(|d| d as i64),
+        thumbnail_url,
+        created_at: record.created_at,
+        name: default_file_name(record.id, &record.mime_type),
+        kind: record.mime_type.clone(),
+        // media_files は md5 を保持しない（重複排除は sha256 のみで行う）ため、
+        // 新規アップロード直後（呼び出し元が生バイト列から計算済み）以外は埋められない。
+        md5: String::new(),
+        is_sensitive: false,
+        properties: DriveFileProperties {
+            width: record.width.map(|w| w as u32),
+            height: record.height.map(|h| h as u32),
+        },
+        is_animated_image: record.is_animated_image,
+    }
+}
+
 /// Misskeyワイヤー互換の`name`フィールド用。クライアントが元のファイル名を送ってこなかった
 /// 場合のフォールバック名を、MIME typeから推測した拡張子付きで生成する。
-fn default_file_name(id: i64, mime_type: &str) -> String {
+pub(crate) fn default_file_name(id: i64, mime_type: &str) -> String {
     let ext = match mime_type {
         "image/jpeg" => "jpg",
         "image/png" => "png",

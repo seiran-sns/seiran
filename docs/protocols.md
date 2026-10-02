@@ -91,12 +91,14 @@ pending のまま留まる経路は2つ。どちらも承認待ち通知（`Noti
 AT Protocol には非公開アカウントの概念が無いため、Bluesky 側から直接 DID をフォローされるのは防げない。
 
 ### 公開エンドポイント
-`GET /users/:username`（Actor 文書）、`/users/:username/outbox`（`?page=true` で OrderedCollectionPage）、`/.well-known/webfinger`、`/.well-known/nodeinfo` + `/nodeinfo/2.1`、featured（ピン留め）・lists（公開リスト）。
+`GET /users/:username`（Actor 文書）、`/users/:username/outbox`（`?page=true` で OrderedCollectionPage）、`/.well-known/webfinger`、`/.well-known/nodeinfo` + `/nodeinfo/2.0`・`/nodeinfo/2.1`、featured（ピン留め）・lists（公開リスト）。
 
 - `GET /users/:username` はブラウザ（Accept に `activity+json`/`ld+json` を含まない）を `/@:username` へ 302 する。リモートに残る古いプロフィール記録が `/users/:username` を actor URL として持っているため（`docs/architecture.md` 8.2節）。同じ理由で WebFinger は `resource` に `https://{domain}/users/{username}` 形式も受け付ける。
 - outbox と featured は匿名アクセスなので `followers_only`/`direct` を含めない（総数も同様）。添付の `Document` 化と公開 Note/Create の組み立ては `handlers::ap_collection` で共有する。
 - outbox の各項目は push 配送した種別と一致させる。リポスト行は、元ポストが `ap_object_id` を持てば `Announce`（`id` = 自身の `ap_object_id`、`object` = 元ポスト、`cc` に元投稿者）、`at_uri` のみなら Fedi フォールバックと同じ本文（「🔁 author: bsky.app URL」）の `Create(Note)`。リポスト行の `body` は空なので、そのまま Note にすると push 済みの `Announce` とは別の空 Note がリモートに現れる。
-- `/nodeinfo/2.1` の `metadata.features` に `"emoji_reaction"` を含める。kmyblue は既知 software 以外の絵文字リアクション対応をこれで判定するため。
+- `/.well-known/nodeinfo` は `2.0`・`2.1` 両方のリンクを返す。クライアントによっては discovery の `links` を見ずに決め打ちで `/nodeinfo/2.0` を叩く実装があり（Mewk等）、`2.1` しか公開していないとそれだけで「非対応サーバー」と判定される。本体のJSONは両バージョンとも同じ内容で `version` フィールドのみ異なる。
+- `/nodeinfo/2.0`・`2.1` の `metadata.features` に `"emoji_reaction"` を含める。kmyblue は既知 software 以外の絵文字リアクション対応をこれで判定するため。
+- `services`（`inbound`/`outbound`、RSS/Atom等未実装のため常に空配列）と、本家 Misskey が必ず持つ `metadata.maxNoteTextLength`・`disableRegistration`・`disableLocalTimeline`・`disableGlobalTimeline`・`emailRequiredForSignup`・`enableEmail`・`enableServiceWorker`（Web Push/Service Worker未実装のため常に`false`）も同梱する。これらが丸ごと欠けていると、厳密な型のJSONデコーダを使う Misskey クライアント（Mewk 等）が必須フィールド欠落で例外を投げ、nodeinfo自体の取得に成功していても「Misskey互換サーバーではない」と判定される。`maxNoteTextLength`は配信先により実際の上限が変わる（Bsky配信あり: 300書記素、Fedi限定: 3000書記素）ため、デフォルト設定（Bsky配信あり）の上限である`300`を広告する。
 
 **リモート nodeinfo の取得**: `jobs::remote_instance_info_resolve` が相手の `/.well-known/nodeinfo` → 本体を取得し、`software.name`/`metadata.nodeName`/`metadata.themeColor` を `remote_instance_meta` にキャッシュする（NoteCard のサーバー表示）。`themeColor` を宣言しない software（fedibird/kmyblue/mitra/akkoma/littlefedi/concrnt-ap-bridge）の代替色もここで決める。Bsky はこの経路を使わない。
 
@@ -601,7 +603,11 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 `middleware::misskey_auth_bridge` は、`Authorization` ヘッダーが無ければ JSON ボディ/クエリの `i` から `Authorization: Bearer` を合成する。`handlers::misskey`（`endpoints.rs`/`convert.rs`/`types.rs`）が Misskey 形式のエンドポイントを提供する。データ取得・検証・副作用はカスタム API と共通の関数を使い、Misskey 側はレスポンス整形だけを持つ（`docs/coding_rules.md` 2節）。`POST /api/drive/files/create` は multipart なのでブリッジの対象外で、ハンドラが multipart の `i` を読む（misskey_dart の `postWithBinary` はトークンを multipart フィールドで送る）。
 
-**対応エンドポイント**: `meta`、MiAuth、`i`、`users/show`（`userIds` 指定時は配列、`userId`/`username` 指定時は単一。`UsersShowResponse` の untagged で切り替え）、`users/notes`、`users/following`・`followers`（`MisskeyFollowRelation` が `follower`/`followee` の片方だけを出す）、`users/reactions`、`users/lists/list`・`show`、`notes/show`・`create`・`reactions`・`reactions/create`・`delete`・`unrenote`・`mentions`・`search`・`search-by-tag`・`polls/vote`、`notes/local-timeline`・`timeline`・`hybrid-timeline`（ソーシャル）・`global-timeline`・`user-list-timeline`、`following/create`・`delete`、`i/notifications`、`ap/show`、`stats`、`endpoints`、`emojis`（GET/POST）、`drive/files/create`。カスタム API と同じパスの `GET` とはメソッドで共存する。
+**対応エンドポイント**: `meta`、MiAuth、`i`、`users/show`（`userIds` 指定時は配列、`userId`/`username` 指定時は単一。`UsersShowResponse` の untagged で切り替え）、`users/notes`、`users/following`・`followers`（`MisskeyFollowRelation` が `follower`/`followee` の片方だけを出す）、`users/reactions`、`users/lists/list`・`show`、`notes/show`・`create`・`reactions`・`reactions/create`・`delete`・`unrenote`・`mentions`・`search`・`search-by-tag`・`polls/vote`、`notes/local-timeline`・`timeline`・`hybrid-timeline`（ソーシャル）・`global-timeline`・`user-list-timeline`、`following/create`・`delete`、`i/notifications`、`ap/show`、`stats`、`endpoints`、`emojis`（GET/POST）、`drive/files/create`・`files`・`files/show`・`folders`、`notifications/create`。カスタム API と同じパスの `GET` とはメソッドで共存する。
+
+**ドライブ（`drive/files`・`files/show`・`files/update`・`files/attached-notes`・`folders`・`folders/show`・`folders/create`）**: seiran のドライブはフォルダ階層を持たない（`media_files` に `folder_id` が無い）フラットな構造のため、`drive/files` は `folderId` の指定を無視し、常にアップロード者自身の全ファイルをカーソルページネーションで返す（Mewk作者と合意済みのいい加減な互換実装：「存在しないフォルダ」ではなく「指定されたフォルダの中身は常にルート＝全ファイル」として振る舞う）。`drive/folders` は常に空配列（ルート直下にフォルダは無い）。`drive/folders/show` は何を指定されても`{id: 指定されたfolderId, name: "Drive", parentId: null}` 相当のダミーを返して常に成功、`drive/folders/create` も何も永続化せずその場で生成したIDを含むダミーの`DriveFolder`を返して常に成功する（フォルダは持てないが、作成・参照そのものを失敗させるとクライアントの添付整理フローが止まるため）。`drive/files/update` も同じ方針で、`folderId`（フォルダ間移動）・`name`・`isSensitive`・`comment`はいずれも保存先が無いため無視し、ファイルの存在・所有権だけ検証して現在の`DriveFile`をそのまま返す（Aria等の「ファイルをフォルダ移動」操作を404にせずルートに留め置く）。`drive/files/show`・`files/update`・`files/attached-notes`はいずれもアップロード者本人のファイルのみ対象。`drive/files/attached-notes`は`post_attachments`を実際に引いて添付投稿を返す（ここは本物のデータで実装）。
+
+**`notifications/create`**: 本家 Misskey はクライアント発の自由記述通知（`body`/`header`/`icon`）をユーザー自身に送れるが、seiran の `notifications` テーブルは固定種別のシステム通知しか持たないため、内容を検証せず受理するだけで何も保存せず `204` を返す。
 
 **認証（MiAuth、`handlers::miauth`）**: third-party クライアントが `GET /miauth/:session_id` を開く → SPA の `/connect/:session_id` へ 303（callback URL は `is_valid_callback` で https+パブリックホストかネイティブ URI スキームのみ許可）→ SPA がログイン中ユーザーの Bearer 認証で `POST /api/miauth/:session_id/authorize` を呼び認可成立 → クライアントが `POST /api/miauth/:session_id/check`（パスベース）または `POST /api/miauth/check`（ボディベース、seiran 独自フロント用）で一度きりトークンを取得する。認可待ちセッションはプロセス内メモリ（`AppState.miauth_sessions`）。
 

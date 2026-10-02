@@ -109,6 +109,21 @@ pub async fn find_visible_by_ids(
     .await
 }
 
+/// `media_file_id` を添付している投稿のIDを新しい順に返す（Misskey互換
+/// `POST /api/drive/files/attached-notes` 用）。可視性フィルタは呼び出し元が
+/// `find_visible_by_ids` で別途適用する。
+pub async fn find_post_ids_by_media_file_id(
+    pool: &PgPool,
+    media_file_id: i64,
+) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT DISTINCT post_id FROM post_attachments WHERE media_file_id = $1 ORDER BY post_id DESC",
+    )
+    .bind(media_file_id)
+    .fetch_all(pool)
+    .await
+}
+
 /// リモート投稿の添付（実体を取り込まずURLだけ保持する）。`attach_remote_media_url`の入力。
 #[derive(Debug, Clone, Copy)]
 pub struct RemoteAttachment<'a> {

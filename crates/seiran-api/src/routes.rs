@@ -747,6 +747,40 @@ fn misskey_routes() -> Router<AppState> {
             "/api/users/lists/show",
             post(handlers::misskey::endpoints::users_lists_show),
         )
+        // ドライブ（Mewk対応）。`drive/files/create`は既存の`handlers::drive`配下で
+        // 別途ルーティング済み。
+        .route(
+            "/api/drive/files",
+            post(handlers::misskey::endpoints::drive_files_list),
+        )
+        .route(
+            "/api/drive/files/show",
+            post(handlers::misskey::endpoints::drive_files_show),
+        )
+        .route(
+            "/api/drive/files/update",
+            post(handlers::misskey::endpoints::drive_files_update),
+        )
+        .route(
+            "/api/drive/files/attached-notes",
+            post(handlers::misskey::endpoints::drive_files_attached_notes),
+        )
+        .route(
+            "/api/drive/folders",
+            post(handlers::misskey::endpoints::drive_folders_list),
+        )
+        .route(
+            "/api/drive/folders/show",
+            post(handlers::misskey::endpoints::drive_folders_show),
+        )
+        .route(
+            "/api/drive/folders/create",
+            post(handlers::misskey::endpoints::drive_folders_create),
+        )
+        .route(
+            "/api/notifications/create",
+            post(handlers::misskey::endpoints::notifications_create),
+        )
         // MiAuth（Misskey 互換クライアント用）
         .route("/miauth/:session_id", get(handlers::miauth::miauth_page))
         .route(

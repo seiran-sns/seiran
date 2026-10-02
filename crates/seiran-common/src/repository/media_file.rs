@@ -104,6 +104,17 @@ pub trait MediaFileRepository: Send + Sync {
     /// `upsert` と異なり新規挿入は行わない軽量パス（アップロード事前チェックの
     /// SELECTが既存行を見つけ、S3への保存自体をスキップできる場合に使う）。
     async fn touch_last_uploaded_at(&self, id: i64) -> Result<(), MediaFileError>;
+
+    /// アップロード者（アクターID）の持ち物を新しい順に取得する
+    /// （Misskey 互換 `POST /api/drive/files` 用、`notifications.list` と同じ
+    /// カーソルページネーション規約）。
+    async fn list_by_uploader(
+        &self,
+        actor_id: i64,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+    ) -> Result<Vec<MediaFile>, MediaFileError>;
 }
 
 pub struct PgMediaFileRepository {
@@ -228,6 +239,29 @@ impl MediaFileRepository for PgMediaFileRepository {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    async fn list_by_uploader(
+        &self,
+        actor_id: i64,
+        limit: i64,
+        until_id: Option<i64>,
+        since_id: Option<i64>,
+    ) -> Result<Vec<MediaFile>, MediaFileError> {
+        let rows = sqlx::query_as::<_, MediaFile>(&format!(
+            "SELECT {SELECT_COLS} FROM media_files
+             WHERE uploaded_by_actor_id = $1
+               AND ($2::bigint IS NULL OR id < $2)
+               AND ($3::bigint IS NULL OR id > $3)
+             ORDER BY id DESC LIMIT $4"
+        ))
+        .bind(actor_id)
+        .bind(until_id)
+        .bind(since_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
     }
 }
 

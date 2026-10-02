@@ -17,6 +17,7 @@ seiran-federation-worker = { path = "../seiran-federation-worker" }
 seiran-atp-repo = { path = "../seiran-atp-repo" }
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
+tower-http = { version = "0.5", features = ["trace"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
 reqwest = { version = "0.12", features = ["json"] }
 rustls = "0.23"

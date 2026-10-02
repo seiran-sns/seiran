@@ -3983,6 +3983,7 @@ dependencies = [
  "seiran-federation-worker",
  "sqlx",
  "tokio",
+ "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
 ]

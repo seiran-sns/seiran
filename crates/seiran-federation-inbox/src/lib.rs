@@ -25,7 +25,7 @@ use handlers::{
     featured::featured_handler,
     inbox::inbox_handler,
     lists::{list_detail_handler, lists_collection_handler},
-    nodeinfo::{nodeinfo_discovery_handler, nodeinfo_handler},
+    nodeinfo::{nodeinfo_discovery_handler, nodeinfo_handler, nodeinfo_handler_v20},
     outbox::outbox_handler,
     webfinger::webfinger_handler,
 };
@@ -101,6 +101,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/.well-known/webfinger", get(webfinger_handler))
         .route("/.well-known/nodeinfo", get(nodeinfo_discovery_handler))
+        .route("/nodeinfo/2.0", get(nodeinfo_handler_v20))
         .route("/nodeinfo/2.1", get(nodeinfo_handler))
         .route("/inbox", post(inbox_handler))
         .route("/users/:username", get(actor_handler))

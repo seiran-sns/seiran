@@ -26,12 +26,20 @@ fn strip_html_tags(html: &str) -> String {
         .replace("&nbsp;", " ")
 }
 
+/// Misskeyクライアント（Mewk等）はnodeinfoの対応バージョンでサーバー種別を判定するため、
+/// `2.1`しか公開していないと2.0専用の実装から互換インスタンス扱いされない。
 pub async fn nodeinfo_discovery_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let body = serde_json::json!({
-        "links": [{
-            "rel": "http://nodeinfo.diaspora.software/ns/schema/2.1",
-            "href": format!("https://{}/nodeinfo/2.1", state.local_domain)
-        }]
+        "links": [
+            {
+                "rel": "http://nodeinfo.diaspora.software/ns/schema/2.0",
+                "href": format!("https://{}/nodeinfo/2.0", state.local_domain)
+            },
+            {
+                "rel": "http://nodeinfo.diaspora.software/ns/schema/2.1",
+                "href": format!("https://{}/nodeinfo/2.1", state.local_domain)
+            }
+        ]
     });
     (
         StatusCode::OK,
@@ -41,7 +49,15 @@ pub async fn nodeinfo_discovery_handler(State(state): State<Arc<AppState>>) -> i
         .into_response()
 }
 
+pub async fn nodeinfo_handler_v20(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    nodeinfo_response(state, "2.0").await
+}
+
 pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    nodeinfo_response(state, "2.1").await
+}
+
+async fn nodeinfo_response(state: Arc<AppState>, version: &'static str) -> impl IntoResponse {
     let (user_count, post_count) = seiran_common::repository::ap_public::nodeinfo_counts(&state.db)
         .await
         .unwrap_or((0, 0));
@@ -96,14 +112,35 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
     // kmyblue（Mastodonフォーク）は既知softwareリストに無いインスタンスに対し、
     // ここに "emoji_reaction" が含まれるかどうかでカスタム絵文字リアクション対応を判定する。
     metadata.insert("features".into(), serde_json::json!(["emoji_reaction"]));
+    // 本家Misskeyのnodeinfoが必ず持つ設定系フィールド群。これが丸ごと欠けていると、
+    // 厳密なJSONデコーダを使うMisskeyクライアント（Mewk等）が必須フィールド欠落で
+    // 例外を投げ、「Misskey互換サーバーではない」と判定される。
+    // `maxNoteTextLength`はクライアントの投稿欄文字数カウンタに使われる値で、seiranは
+    // 配信先により実際の上限が変わる（Bsky配信あり: 300書記素、Fedi限定: 3000書記素）ため、
+    // デフォルトで有効なBsky配信込みの上限を広告する（Fedi限定投稿なら実際にはより多く
+    // 書けるが、広告値より少なく見積もる方が「カウンタ超過なのに投稿できる」より安全）。
+    metadata.insert("maxNoteTextLength".into(), serde_json::json!(300));
+    metadata.insert("disableRegistration".into(), serde_json::json!(false));
+    metadata.insert("disableLocalTimeline".into(), serde_json::json!(false));
+    metadata.insert("disableGlobalTimeline".into(), serde_json::json!(false));
+    metadata.insert("emailRequiredForSignup".into(), serde_json::json!(true));
+    metadata.insert("enableEmail".into(), serde_json::json!(true));
+    // Web Push通知・Service Workerは未実装。
+    metadata.insert("enableServiceWorker".into(), serde_json::json!(false));
 
     let body = serde_json::json!({
-        "version": "2.1",
+        "version": version,
         "software": {
             "name": "seiran",
             "version": SERVER_VERSION
         },
         "protocols": ["activitypub"],
+        // NodeInfo スキーマ上は必須項目。RSS/Atom配信・他ソフトウェアからの取り込みは
+        // 未実装のため両方空。
+        "services": {
+            "inbound": [],
+            "outbound": []
+        },
         "usage": {
             "users": {
                 "total": user_count,
@@ -120,7 +157,10 @@ pub async fn nodeinfo_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
         StatusCode::OK,
         [(
             axum::http::header::CONTENT_TYPE,
-            "application/json; profile=\"http://nodeinfo.diaspora.software/ns/schema/2.1#\"",
+            format!(
+                "application/json; profile=\"http://nodeinfo.diaspora.software/ns/schema/{}#\"",
+                version
+            ),
         )],
         Json(body),
     )

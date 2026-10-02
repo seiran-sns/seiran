@@ -112,10 +112,10 @@ pub use password_reset::{PasswordResetRepository, PgPasswordResetRepository};
 pub use pinned_post::{PgPinnedPostsRepository, PinnedPostsRepository, MAX_PINNED_POSTS};
 pub use post::{
     find_by_ids_including_deleted as find_posts_by_ids_including_deleted,
-    find_visible_by_ids as find_visible_posts_by_ids, DmSessionSummary, InsertFullParams,
-    InsertRemoteWithDedupParams, InsertRepostParams, PgPostRepository, PostDeleteInfo,
-    PostDeliveryMeta, PostRecord, PostRepository, PostSummary, ReferenceKind, RemoteAttachment,
-    RepostEntry, RepostUndoInfo, TimelinePost,
+    find_post_ids_by_media_file_id, find_visible_by_ids as find_visible_posts_by_ids,
+    DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, InsertRepostParams,
+    PgPostRepository, PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository, PostSummary,
+    ReferenceKind, RemoteAttachment, RepostEntry, RepostUndoInfo, TimelinePost,
 };
 pub use reaction::{
     NewReaction, PgReactionRepository, ReactionFeedRow, ReactionRepository, ReactionUpsert,

@@ -463,6 +463,24 @@ async fn run_all(shared: SharedResources) -> Result<(), Box<dyn std::error::Erro
     });
 
     // パスが衝突しないため単一ポートに合流できる
-    let app = seiran_api::router(api_state).merge(seiran_federation_inbox::router(inbox_state));
+    let app = seiran_api::router(api_state)
+        .merge(seiran_federation_inbox::router(inbox_state))
+        // サードパーティクライアント（Misskey互換クライアント等）がどのパスを叩いて
+        // 404/401になっているか事後から追えるようにする（アクセスログが他に無いため）。
+        // クエリ文字列は記録しない（`/api/streaming?token=...`等、JWTがそのまま
+        // ログに残るのを避けるため、パスのみを使う）。
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http()
+                .make_span_with(|request: &axum::http::Request<_>| {
+                    tracing::info_span!(
+                        "request",
+                        method = %request.method(),
+                        path = %request.uri().path(),
+                    )
+                })
+                .on_response(
+                    tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
+                ),
+        );
     serve(app, env_port("PORT", 3000)).await
 }
