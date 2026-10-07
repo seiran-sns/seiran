@@ -71,12 +71,18 @@ pub async fn reaction_actors(
                 &a.domain,
                 a.id,
             );
+            let emojis = a
+                .emoji_map
+                .as_ref()
+                .map(crate::handlers::users::json_map_to_string_map)
+                .unwrap_or_default();
             serde_json::json!({
                 "id": a.id.to_string(),
                 "username": a.username,
                 "domain": a.domain,
                 "displayName": a.display_name,
                 "avatarUrl": avatar_url,
+                "emojis": emojis,
             })
         }).collect::<Vec<_>>(),
     }))

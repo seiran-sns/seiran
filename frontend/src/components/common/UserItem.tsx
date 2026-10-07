@@ -1,4 +1,5 @@
 import Avatar from "../note/Avatar";
+import EmojiText from "../note/EmojiText";
 import styles from "./UserItem.module.css";
 
 export interface UserItemProps {
@@ -6,6 +7,8 @@ export interface UserItemProps {
   username: string;
   displayName?: string;
   domain?: string;
+  /** 表示名中の `:shortcode:` → 画像URL（アクターの `emojis`）。 */
+  emojis?: Record<string, string>;
   /** アバターのサイズ（px）。デフォルト 24。 */
   avatarSize?: number;
   /** 追加のCSSクラス名 */
@@ -17,6 +20,7 @@ export default function UserItem({
   avatarUrl,
   username,
   displayName,
+  emojis,
   avatarSize = 24,
   className,
 }: UserItemProps) {
@@ -25,7 +29,7 @@ export default function UserItem({
   return (
     <div className={`${styles.userItem} ${className || ""}`}>
       <Avatar url={avatarUrl} name={name} size={avatarSize} />
-      <span className={styles.name}>{name}</span>
+      <span className={styles.name}><EmojiText text={name} emojis={emojis} /></span>
     </div>
   );
 }

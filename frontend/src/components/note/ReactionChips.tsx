@@ -159,7 +159,7 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
             <ul className={styles.actorList}>
               {actors.map((a) => (
                 <li key={a.id} className={styles.actorRow}>
-                  <UserItem avatarUrl={a.avatarUrl} username={a.username} displayName={a.displayName} avatarSize={22} />
+                  <UserItem avatarUrl={a.avatarUrl} username={a.username} displayName={a.displayName} emojis={a.emojis} avatarSize={22} />
                 </li>
               ))}
             </ul>

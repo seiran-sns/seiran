@@ -146,7 +146,7 @@
 * `EmojiImage` は `media_files.blurhash` を canvas にデコードしたプレースホルダを先に出し、本画像の `onLoad` でプレースホルダを DOM から除く（重ねないので透過部分にプレースホルダ色が透けない）。
 
 #### リアクションチップのホバーポップオーバー（`ReactionChips`）
-* チップ（NoteCard 下部・ポスト詳細）のホバーで、付けた人の一覧（`GET /api/notes/:id/reactions/:content/actors`、新しい順・最大50件）をポップオーバーする。初回ホバーで取得し、120ms 遅延で閉じる（`ReplyIndicator` と同じ）。
+* チップ（NoteCard 下部・ポスト詳細）のホバーで、付けた人の一覧（`GET /api/notes/:id/reactions/:content/actors`、新しい順・最大50件）をポップオーバーする。表示名中の `:shortcode:` はレスポンスの `emojis`（`actors.emoji_map`）で絵文字画像に展開する（`UserItem` の `emojis`）。初回ホバーで取得し、120ms 遅延で閉じる（`ReplyIndicator` と同じ）。
 * 公開投稿なら未認証でも見られる（可視性チェックは `get_note` と同じ）。
 
 ### 2.3 【ポスト詳細（会話ツリー）画面】表示時

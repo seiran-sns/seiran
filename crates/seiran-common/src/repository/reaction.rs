@@ -29,6 +29,8 @@ pub struct ReactorInfo {
     pub actor_type: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
+    /// 表示名中の `:shortcode:` → 画像URL（`actors.emoji_map`）。
+    pub emoji_map: Option<serde_json::Value>,
     /// Misskey互換API（`POST /api/notes/reactions`）の`id`/`createdAt`用（`reactions.id`/`created_at`）。
     pub reaction_id: i64,
     pub reaction_created_at: chrono::DateTime<chrono::Utc>,
@@ -330,6 +332,7 @@ impl ReactionRepository for PgReactionRepository {
         sqlx::query_as::<_, ReactorInfo>(
             "SELECT a.id, a.username, a.domain, a.actor_type::text AS actor_type, a.display_name,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
+                    a.emoji_map,
                     r.id AS reaction_id, r.created_at AS reaction_created_at
              FROM reactions r
              JOIN actors a ON a.id = r.actor_id

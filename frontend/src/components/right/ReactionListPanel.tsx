@@ -81,7 +81,7 @@ export default function ReactionListPanel({ note }: ReactionListPanelProps) {
               <ul className={styles.actorList}>
                 {actors.map((a) => (
                   <li key={a.id} className={styles.actorRow}>
-                    <UserItem avatarUrl={a.avatarUrl} username={a.username} displayName={a.displayName} avatarSize={24} />
+                    <UserItem avatarUrl={a.avatarUrl} username={a.username} displayName={a.displayName} emojis={a.emojis} avatarSize={24} />
                   </li>
                 ))}
               </ul>

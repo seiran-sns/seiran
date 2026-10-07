@@ -396,6 +396,8 @@ export interface ReactionActor {
   domain: string;
   displayName?: string;
   avatarUrl?: string;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 /** `GET /notes/:id/reposts` の1件（#226 リポストタブ）。 */
