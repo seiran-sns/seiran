@@ -153,6 +153,7 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
 
       {open && (
         <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
+          {shortcode && <p className={styles.emojiName}>{r.emoji}</p>}
           {loading && <p className={styles.dim}>{t("common:loading")}</p>}
           {failed && <p className={styles.dim}>{t("home:reactionChips.actorsFetchFailed")}</p>}
           {actors && actors.length > 0 && (
