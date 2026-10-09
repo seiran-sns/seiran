@@ -5,6 +5,8 @@ import { api, getErrorMessage, ApiError } from "../../api/client";
 import type { MigrationStatusResponse } from "../../api/migration";
 import { useAuth } from "../../contexts/AuthContext";
 import TermsOfServiceField from "../../components/auth/TermsOfServiceField";
+import RegistrationUnavailableNotice from "../../components/auth/RegistrationUnavailableNotice";
+import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import {
   clearStoredMigrationRequest,
   loadStoredMigrationRequest,
@@ -95,6 +97,7 @@ interface MigrateFormViewProps {
 
 function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
   const { t } = useTranslation();
+  const { accountLimitReached, registrationClosed } = useSiteMeta();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -126,6 +129,10 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (registrationClosed || accountLimitReached) {
+    return <RegistrationUnavailableNotice />;
   }
 
   return (

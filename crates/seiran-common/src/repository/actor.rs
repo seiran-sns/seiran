@@ -757,6 +757,16 @@ pub async fn lite_rows_for_actors(
     .await
 }
 
+/// ユーザー数上限（`site_settings.max_user_accounts`）の判定に使う、これまでに作られた
+/// ローカルアカウント数。退会済み・凍結済み・DID転出済みも含めて数える（Bluesky公式の
+/// PDSあたりDID数上限がどの状態までを数えるか不明なため、最も保守的に全て数える）。
+/// `users`行を持たないシステムアクターは含めない。
+pub async fn count_local_accounts(pool: &sqlx::PgPool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM actors WHERE actor_type = 'local' AND user_id IS NOT NULL")
+        .fetch_one(pool)
+        .await
+}
+
 /// DID 転出済みにする（既に設定済みなら最初の時刻を保つ）。
 pub async fn mark_did_moved_out(
     pool: &sqlx::PgPool,

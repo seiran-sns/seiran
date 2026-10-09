@@ -223,3 +223,22 @@
 .sentinel {
   height: 1px;
 }
+
+/* 保存ボタンを画面下端に張り付ける（長いフォームで末尾までスクロールせず保存できるように）。
+   狭幅では画面下端にフローティングナビ（AppShell）が固定されるため、その上に出す。 */
+.stickySaveBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin: 0 -16px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 768px) {
+  .stickySaveBar {
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+}

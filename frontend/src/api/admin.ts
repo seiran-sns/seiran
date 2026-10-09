@@ -126,6 +126,8 @@ export const admin = {
       password_reset_max_active: string;
       account_creation_ip_window_minutes: string;
       account_creation_ip_max: string;
+      max_user_accounts: string;
+      registration_closed: string;
       post_rate_limit_window_minutes: string;
       post_rate_limit_max_user: string;
       post_rate_limit_max_moderator: string;

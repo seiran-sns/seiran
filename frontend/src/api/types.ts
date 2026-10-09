@@ -128,6 +128,8 @@ export interface SiteSettings {
   password_reset_max_active: string;
   account_creation_ip_window_minutes: string;
   account_creation_ip_max: string;
+  max_user_accounts: string;
+  registration_closed: string;
   post_rate_limit_window_minutes: string;
   post_rate_limit_max_user: string;
   post_rate_limit_max_moderator: string;
@@ -973,5 +975,9 @@ export interface MetaResponse {
   termsOfServiceHtml?: string;
   loginBackgroundUrl?: string;
   loginBackgroundType?: "image" | "video" | "";
+  /** ユーザー数上限に達していて新規登録・転入できない。 */
+  accountLimitReached?: boolean;
+  /** 管理者が新規登録・転入の受付を停止している。 */
+  registrationClosed?: boolean;
 }
 

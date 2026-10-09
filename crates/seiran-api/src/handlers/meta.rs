@@ -57,12 +57,18 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
         }
     };
 
+    let account_limit_reached = crate::handlers::auth::account_limit_reached(&state)
+        .await
+        .unwrap_or(false);
+    let registration_closed = get("registration_closed") == "true";
+    let registration_disabled = registration_closed || account_limit_reached;
+
     Json(json!({
         "uri": format!("https://{}", state.local_domain),
         "name": site_name,
         "version": SERVER_VERSION,
         "features": {
-            "registration": true,
+            "registration": !registration_disabled,
             "miauth": true
         },
         "requireEmailVerification": require_email_verification,
@@ -85,7 +91,11 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
         // Fedi のみ配信時は上限が緩む（10,000バイト/3,000書記素）が、Misskey クライアントの
         // 投稿フォームは単一の数値しか扱えないため、より厳しい方（既定の配信先である Bsky 側）を返す。
         "maxNoteTextLength": BSKY_MAX_TEXT_GRAPHEMES,
-        // 現状 registration を無効化する設定項目がないため常に false（= 常時登録可能）。
-        "disableRegistration": false
+        "disableRegistration": registration_disabled,
+        // ユーザー数上限（`site_settings.max_user_accounts`）に達していて新規登録・転入できない。
+        // フロントの登録・転入フォームが先に案内を出すために使う。
+        "accountLimitReached": account_limit_reached,
+        // 管理者が受付を停止している（`site_settings.registration_closed`）。
+        "registrationClosed": registration_closed
     }))
 }

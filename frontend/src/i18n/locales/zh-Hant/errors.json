@@ -1,5 +1,7 @@
 {
+  "REGISTRATION_CLOSED": "此伺服器目前暫不接受新註冊與轉入",
   "ACCOUNT_CREATION_RATE_LIMITED": "此網路最近建立的帳號過多，請稍後再試。",
+  "ACCOUNT_LIMIT_REACHED": "此伺服器已達使用者數上限，暫不接受新註冊與轉入",
   "ACTOR_NOT_FOUND": "找不到該使用者身分",
   "ADMIN_REQUIRED": "需要管理員權限",
   "ALREADY_INITIALIZED": "設定已經完成",

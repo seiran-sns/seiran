@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use seiran_common::generate_snowflake_id;
 
 use crate::error::ApiError;
-use crate::handlers::auth::verify_turnstile;
+use crate::handlers::auth::{ensure_registration_open, verify_turnstile};
 use crate::mailer::{send_verification_email, MailError};
 use crate::middleware::ClientIp;
 use crate::AppState;
@@ -41,6 +41,7 @@ pub async fn request_email_verification(
     ip: ClientIp,
     Json(payload): Json<VerifyEmailRequest>,
 ) -> Result<Json<VerifyEmailResponse>, ApiError> {
+    ensure_registration_open(&state).await?;
     verify_turnstile(&state, payload.turnstile_token.as_deref(), &ip).await?;
 
     let email = payload.email.trim().to_lowercase();
@@ -96,6 +97,7 @@ pub async fn verify_email_token(
     Query(params): Query<VerifyTokenQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<VerifyTokenResponse>, ApiError> {
+    ensure_registration_open(&state).await?;
     let pool = &state.db;
 
     let token: uuid::Uuid = params

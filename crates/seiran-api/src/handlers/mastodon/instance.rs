@@ -109,6 +109,8 @@ pub async fn instance_v1(State(state): State<AppState>) -> Result<Json<Value>, A
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let domain = state.local_domain.to_string();
+    let registrations_open = !crate::handlers::auth::registration_closed(&state).await?
+        && !crate::handlers::auth::account_limit_reached(&state).await?;
     Ok(Json(json!({
         "uri": domain,
         "title": site.title,
@@ -124,7 +126,7 @@ pub async fn instance_v1(State(state): State<AppState>) -> Result<Json<Value>, A
         },
         "thumbnail": site.thumbnail,
         "languages": ["ja", "en"],
-        "registrations": true,
+        "registrations": registrations_open,
         "approval_required": false,
         "invites_enabled": false,
         "configuration": {
@@ -142,6 +144,8 @@ pub async fn instance_v1(State(state): State<AppState>) -> Result<Json<Value>, A
 pub async fn instance_v2(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let site = site_info(&state).await?;
     let domain = state.local_domain.to_string();
+    let registrations_open = !crate::handlers::auth::registration_closed(&state).await?
+        && !crate::handlers::auth::account_limit_reached(&state).await?;
     Ok(Json(json!({
         "domain": domain,
         "title": site.title,
@@ -161,7 +165,7 @@ pub async fn instance_v2(State(state): State<AppState>) -> Result<Json<Value>, A
             "polls": polls_configuration(),
             "translation": { "enabled": false },
         },
-        "registrations": { "enabled": true, "approval_required": false, "message": null },
+        "registrations": { "enabled": registrations_open, "approval_required": false, "message": null },
         "api_versions": { "mastodon": MASTODON_API_VERSION },
         "contact": { "email": "", "account": null },
         "rules": [],

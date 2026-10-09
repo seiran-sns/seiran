@@ -36,3 +36,15 @@
   background: color-mix(in srgb, var(--bg) 85%, transparent);
   backdrop-filter: blur(8px);
 }
+
+/* オプトイン: タブが多く幅に収まらない呼び出し元用。均等割りをやめ、横スクロールさせる。 */
+.scrollable {
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: thin;
+}
+
+.scrollable .tab {
+  flex: 0 0 auto;
+  padding: 12px 16px;
+}

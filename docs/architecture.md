@@ -95,6 +95,8 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 **レート制限**:
 - ログインと TOTP 検証は、暗号鍵を pepper にした keyed hash だけを `auth_attempt_log` に保存し、同一識別子に対する資格情報、同一資格情報に対する識別子を既定10分・5種類までに制限する。ウィンドウの起点は「10分前」「直近のパスワードリセット完了」「直近のログイン成功（`users.last_login_success_at`）」の最も新しい時刻で、ログイン成功で数え直しになる。拒否が同一IPで10分に5回起きると24時間 `auth_ip_blocks` で遮断する。
 - 各値・Turnstile 鍵・登録のIP制限（既定60分・5件）は `site_settings` で管理する。Turnstile を設定するとログイン・登録で Siteverify を必須にする。
+- **受付停止**（`site_settings.registration_closed`、既定 false）: 管理者が新規登録・転入を止めるスイッチ。ONの間、下記の各段階が `403 REGISTRATION_CLOSED` で拒否される（ユーザー数上限より優先して判定。`/api/meta` は `registrationClosed`、フロントの案内も同様に優先表示）。
+- **ユーザー数上限**（`site_settings.max_user_accounts`、既定100、0なら無制限）: Bluesky 公式が制限解除前の PDS に課す DID 数上限に合わせるためのもの。数えるのは退会済み・凍結済み・DID 転出済みを含む全ローカルアカウント（`actor::count_local_accounts`。公式がどの状態まで数えるか不明なため最も保守的に数える）。カウントが上限以上なら、新規登録の `register`・メール確認の `verify-email` と `verify-token`・転入の `migration/start` と `submit-plc-token`（不可逆な PLC 提出の前。提出済みの再入は通す）が `403 ACCOUNT_LIMIT_REACHED` で拒否される（受付停止と同じ段階）。`/api/meta` は `accountLimitReached`（Misskey 互換の `disableRegistration` と `features.registration`、Mastodon の `registrations` も連動）を返し、フロントの登録・転入フォームは入力欄の代わりに案内を表示する。初期管理者の `setup` は対象外。判定は登録の冒頭で行うだけなので、並列登録で上限をわずかに超えることはありうる。
 - クライアントIPは `ClientIp`（`cf-connecting-ip` → `x-real-ip` → `x-forwarded-for`、無ければ `None` で IP 系制限は素通り）。
 - ロール別の上限（`rate_limit.rs` の `role_limit`、値は `site_settings`）: `user`/`emoji-editor` はメンション・返信・引用の宛先（DM除く）1時間30人、投稿1時間30通、新規フォロー24時間100人、リスト5本・各50人、検索1時間10回（スクロールのページングは数えない）、アップロード1ファイル10MB。`moderator` は投稿100通・フォロー300人・リスト30本/300人・検索50回・50MB。`admin` は対象外で API 全体の上限100MBだけ。
 

@@ -68,6 +68,8 @@ const STORAGE_SERIAL_SPECS = [
 //   （search）は他specを巻き込んで壊すため、全テスト完了後の排他テールで実行する。
 // - terms-of-service: site_settings（利用規約テキスト）を書き換え、設定中は他specのユーザー登録が
 //   TOS_AGREEMENT_REQUIREDで失敗するため、全テスト完了後の排他テールで実行する。
+// - account-limit: ユーザー数上限（site_settings）を一時的に下げ、設定中は他specのユーザー登録が
+//   ACCOUNT_LIMIT_REACHEDで失敗するため、全テスト完了後の排他テールで実行する。
 // - misskey-stats: notesCount/usersCount等のグローバル集計は他specが並行して
 //   登録するユーザー・投稿の影響を受けるため、全テスト完了後の排他テールで実行する。
 const GLOBALS_SERIAL_SPECS = [
@@ -76,6 +78,7 @@ const GLOBALS_SERIAL_SPECS = [
   "**/search.spec.ts",
   "**/misskey-stats.spec.ts",
   "**/terms-of-service.spec.ts",
+  "**/account-limit.spec.ts",
 ];
 
 export default defineConfig({

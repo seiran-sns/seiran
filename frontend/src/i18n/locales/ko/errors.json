@@ -1,5 +1,7 @@
 {
+  "REGISTRATION_CLOSED": "현재 신규 가입 및 이전을 받지 않습니다",
   "ACCOUNT_CREATION_RATE_LIMITED": "이 네트워크에서 최근 너무 많은 계정이 생성되었습니다. 잠시 후 다시 시도해 주세요.",
+  "ACCOUNT_LIMIT_REACHED": "이 서버는 사용자 수 상한에 도달하여 신규 가입 및 이전을 받지 않습니다",
   "ACTOR_NOT_FOUND": "배우를 찾을 수 없습니다",
   "ADMIN_REQUIRED": "관리자 권한이 필요합니다",
   "ALREADY_INITIALIZED": "설정이 이미 완료되었습니다.",

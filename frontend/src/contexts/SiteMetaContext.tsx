@@ -24,6 +24,10 @@ interface SiteMeta {
   termsOfServiceHtml: string;
   loginBackgroundUrl: string;
   loginBackgroundType: "image" | "video" | "";
+  /** ユーザー数上限に達していて新規登録・転入できない（登録・転入フォームが案内を出す）。 */
+  accountLimitReached: boolean;
+  /** 管理者が新規登録・転入の受付を停止している。 */
+  registrationClosed: boolean;
 }
 
 const EMPTY_SITE_META: SiteMeta = {
@@ -36,6 +40,8 @@ const EMPTY_SITE_META: SiteMeta = {
   termsOfServiceHtml: "",
   loginBackgroundUrl: "",
   loginBackgroundType: "",
+  accountLimitReached: false,
+  registrationClosed: false,
 };
 
 const SiteMetaContext = createContext<SiteMeta>(EMPTY_SITE_META);
@@ -102,6 +108,8 @@ export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
           termsOfServiceHtml: m.termsOfServiceHtml ?? "",
           loginBackgroundUrl: m.loginBackgroundUrl ?? "",
           loginBackgroundType: m.loginBackgroundType ?? "",
+          accountLimitReached: m.accountLimitReached ?? false,
+          registrationClosed: m.registrationClosed ?? false,
         };
         setMeta(next);
         applyFavicon(next.iconUrl);

@@ -1,5 +1,7 @@
 {
+  "REGISTRATION_CLOSED": "This server is not accepting new sign-ups or migrations at the moment",
   "ACCOUNT_CREATION_RATE_LIMITED": "Too many accounts have been created from this network recently. Please try again later.",
+  "ACCOUNT_LIMIT_REACHED": "This server has reached its user limit and is not accepting new sign-ups or migrations",
   "ACTOR_NOT_FOUND": "Actor not found",
   "ADMIN_REQUIRED": "Administrator privileges are required",
   "ALREADY_INITIALIZED": "Setup has already been completed",

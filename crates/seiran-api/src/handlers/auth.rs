@@ -218,6 +218,50 @@ async fn resolve_registration_email(
         .to_lowercase())
 }
 
+/// ユーザー数上限のデフォルト。Bluesky公式が制限解除前のPDSに課すDID数上限に合わせる。
+const DEFAULT_MAX_USER_ACCOUNTS: i64 = 100;
+
+/// 新規登録・転入を受け付けられないほどアカウント数が上限に達しているか。
+/// 上限は`site_settings.max_user_accounts`（0なら無制限）。数えるのは退会済み・凍結済み・
+/// DID転出済みを含む全ローカルアカウント（`actor::count_local_accounts`）。
+pub(crate) async fn account_limit_reached(state: &AppState) -> Result<bool, ApiError> {
+    let max = seiran_common::rate_limit::setting_i64(
+        state.site_settings.as_ref(),
+        "max_user_accounts",
+        DEFAULT_MAX_USER_ACCOUNTS,
+    )
+    .await;
+    if max <= 0 {
+        return Ok(false);
+    }
+    let count = seiran_common::repository::actor::count_local_accounts(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(count >= max)
+}
+
+/// 管理者が新規登録・転入の受付を停止しているか（`site_settings.registration_closed`）。
+pub(crate) async fn registration_closed(state: &AppState) -> Result<bool, ApiError> {
+    Ok(state
+        .site_settings
+        .get("registration_closed")
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .is_some_and(|v| v == "true"))
+}
+
+/// 受付停止中なら`REGISTRATION_CLOSED`、上限到達中なら`ACCOUNT_LIMIT_REACHED`で拒否する。
+/// 登録・メール確認・転入の各段階で呼ぶ。
+pub(crate) async fn ensure_registration_open(state: &AppState) -> Result<(), ApiError> {
+    if registration_closed(state).await? {
+        return Err(ApiError::Forbidden("REGISTRATION_CLOSED"));
+    }
+    if account_limit_reached(state).await? {
+        return Err(ApiError::Forbidden("ACCOUNT_LIMIT_REACHED"));
+    }
+    Ok(())
+}
+
 /// 利用規約同意を検証し、同意した文面（`agreed_tos_text`としてDBへ保存する値）を返す。
 /// `terms_of_service_text`が空の場合はチェックボックス自体が画面に表示されないため、
 /// `agree_tos`の値に関わらず常に`Ok(None)`（同意記録なし）。テキストが空でないのに
@@ -379,6 +423,7 @@ pub async fn register(
     ip: ClientIp,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
+    ensure_registration_open(&state).await?;
     rate_limit::check_ip_not_blocked(&state, &ip).await?;
     // 作成数制限の枠は冒頭で予約し、登録が失敗したら取り消す（成功した登録だけを数える）。
     let reservation = rate_limit::reserve_account_creation(&state, &ip).await?;

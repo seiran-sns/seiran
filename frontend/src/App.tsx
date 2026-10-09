@@ -148,7 +148,7 @@ function AppRoutes() {
         <Route path="/notes/:id" element={<NoteDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route
-          path="/admin"
+          path="/admin/:slug?"
           element={
             <RequireAuth>
               <AdminPage />

@@ -1,5 +1,7 @@
 {
+  "REGISTRATION_CLOSED": "現在、新規登録・転入の受付を停止しています",
   "ACCOUNT_CREATION_RATE_LIMITED": "このネットワークからのアカウント作成が短時間に集中しています。しばらく待ってから再試行してください",
+  "ACCOUNT_LIMIT_REACHED": "現在のユーザー数が上限に達しているため、新規登録・転入を受け付けていません",
   "ACTOR_NOT_FOUND": "アクターが見つかりません",
   "ADMIN_REQUIRED": "管理者権限が必要です",
   "ALREADY_INITIALIZED": "セットアップはすでに完了しています",

@@ -13,7 +13,31 @@ import { BACKEND_URL } from "./ports.ts";
 export default async function globalSetup() {
   const statusRes = await fetch(`${BACKEND_URL}/api/setup/status`);
   const status = (await statusRes.json()) as { initialized: boolean };
-  if (status.initialized) return;
+  if (!status.initialized) await bootstrapAdmin();
+  await disableAccountLimit();
+}
+
+/** 既定のユーザー数上限（100）はE2Eが作る大量のユーザーで超えるため、無制限（0）にしておく。
+ * 上限到達時の挙動は`account-limit.spec.ts`が自前で上限を下げて検証する。 */
+async function disableAccountLimit() {
+  const loginRes = await fetch(`${BACKEND_URL}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identifier: "e2ebootstrap", password: ADMIN_BOOTSTRAP_PASSWORD }),
+  });
+  if (!loginRes.ok) throw new Error(`管理者ログインに失敗しました: ${loginRes.status} ${await loginRes.text()}`);
+  const { token } = (await loginRes.json()) as { token: string };
+  const res = await fetch(`${BACKEND_URL}/api/admin/site-settings`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ max_user_accounts: "0" }),
+  });
+  if (!res.ok) throw new Error(`ユーザー数上限の解除に失敗しました: ${res.status} ${await res.text()}`);
+}
+
+const ADMIN_BOOTSTRAP_PASSWORD = "seiranda-e2e-admin-bootstrap";
+
+async function bootstrapAdmin() {
 
   const res = await fetch(`${BACKEND_URL}/api/setup`, {
     method: "POST",
@@ -26,7 +50,7 @@ export default async function globalSetup() {
       // カウンター（`variants_by_secret`、`crates/seiran-api/src/rate_limit.rs`）は
       // ログイン成功時にもリセットされないため、共通パスワードを使う大量の一般ユーザー
       // ログイン試行に紛れてadmin自身のログインまで拒否されてしまう。
-      password: "seiranda-e2e-admin-bootstrap",
+      password: ADMIN_BOOTSTRAP_PASSWORD,
     }),
   });
   if (!res.ok && res.status !== 409) {

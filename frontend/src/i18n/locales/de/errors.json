@@ -1,5 +1,7 @@
 {
+  "REGISTRATION_CLOSED": "Dieser Server nimmt derzeit keine Registrierungen oder Umzüge an",
   "ACCOUNT_CREATION_RATE_LIMITED": "In letzter Zeit wurden von diesem Netzwerk zu viele Konten erstellt. Bitte versuchen Sie es später erneut.",
+  "ACCOUNT_LIMIT_REACHED": "Dieser Server hat sein Benutzerlimit erreicht und nimmt keine neuen Registrierungen oder Umzüge an",
   "ACTOR_NOT_FOUND": "Schauspieler nicht gefunden",
   "ADMIN_REQUIRED": "Es sind Administratorrechte erforderlich",
   "ALREADY_INITIALIZED": "Die Einrichtung ist bereits abgeschlossen",

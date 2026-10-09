@@ -5,6 +5,8 @@ import { api, getErrorMessage } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
 import Turnstile from "../../components/Turnstile";
 import TermsOfServiceField from "../../components/auth/TermsOfServiceField";
+import RegistrationUnavailableNotice from "../../components/auth/RegistrationUnavailableNotice";
+import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import styles from "../Auth.module.css";
 
 /** 他パネルへ切り替えて戻ってきても再開できるよう、親（`AuthCarouselPage`）に持たせる状態。 */
@@ -46,6 +48,7 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { login } = useAuth();
+  const { accountLimitReached, registrationClosed } = useSiteMeta();
 
   // requireEmailVerification フラグ（null = まだロード中）。再マウントのたびに再取得するが
   // `/api/meta`は軽量・冪等なので問題ない。
@@ -90,6 +93,10 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
         </p>
       </>
     );
+  }
+
+  if (registrationClosed || accountLimitReached) {
+    return <RegistrationUnavailableNotice />;
   }
 
   if (requireEmailVerification === true) {

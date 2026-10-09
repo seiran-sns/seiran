@@ -34,6 +34,7 @@ test("管理者はサイト設定を変更でき、リロード後も反映さ�
     // 既定タブ（ユーザー管理）が描画されるまで待ってから「サイト設定」タブへ切り替える。
     await expect(page.getByText("ユーザー管理")).toBeVisible({ timeout: 10_000 });
     await page.getByRole("button", { name: "サイト設定" }).click();
+    await expect(page).toHaveURL(/\/admin\/site-settings$/);
 
     const newName = `seiran-e2e-${Date.now()}`;
     const mediaProxyUrl = "http://localhost:3100";
@@ -44,9 +45,9 @@ test("管理者はサイト設定を変更でき、リロード後も反映さ�
 
     await expect(page.getByText("保存しました。")).toBeVisible({ timeout: 10_000 });
 
+    // タブごとにURLを持つため、リロードしても同じ「サイト設定」タブが開く。
     await page.reload();
-    await expect(page.getByText("ユーザー管理")).toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: "サイト設定" }).click();
+    await expect(page).toHaveURL(/\/admin\/site-settings$/);
     await expect(page.getByLabel("サイト名称")).toHaveValue(newName, { timeout: 10_000 });
     await expect(page.getByLabel("外部メディアプロキシURL")).toHaveValue(mediaProxyUrl);
   } finally {

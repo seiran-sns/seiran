@@ -69,6 +69,11 @@ pub struct SiteSettingsResponse {
     pub search_rate_limit_max_moderator: String,
     // URLカード埋め込みプレーヤー（oEmbed discovery）の許可ドメイン（改行区切り、後方一致）
     pub oembed_allowed_domains: String,
+    // ユーザー数上限（0 = 無制限）。退会済み・凍結済み・DID転出済みを含むアカウント総数が
+    // これに達すると新規登録・転入を拒否する。
+    pub max_user_accounts: String,
+    /// "true"なら新規登録・転入の受付を停止する。
+    pub registration_closed: String,
 }
 
 fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
@@ -207,6 +212,14 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .get("oembed_allowed_domains")
             .cloned()
             .unwrap_or_default(),
+        max_user_accounts: settings
+            .get("max_user_accounts")
+            .cloned()
+            .unwrap_or_else(|| "100".to_string()),
+        registration_closed: settings
+            .get("registration_closed")
+            .cloned()
+            .unwrap_or_else(|| "false".to_string()),
     }
 }
 
@@ -255,6 +268,8 @@ pub struct UpdateSiteSettingsRequest {
     pub search_rate_limit_max_user: Option<String>,
     pub search_rate_limit_max_moderator: Option<String>,
     pub oembed_allowed_domains: Option<String>,
+    pub max_user_accounts: Option<String>,
+    pub registration_closed: Option<String>,
 }
 
 // ─── ハンドラ ─────────────────────────────────────────────────────────────
@@ -360,6 +375,13 @@ pub async fn update_site_settings(
                     field.to_uppercase()
                 )));
             }
+        }
+    }
+
+    // 0は無制限。他の数値設定と違い0を許す。
+    if let Some(v) = req.max_user_accounts.as_deref().filter(|v| !v.is_empty()) {
+        if !matches!(v.parse::<i64>(), Ok(n) if n >= 0) {
+            return Err(ApiError::BadRequest("INVALID_MAX_USER_ACCOUNTS".to_string()));
         }
     }
 
@@ -487,6 +509,12 @@ pub async fn update_site_settings(
         req.oembed_allowed_domains
             .as_deref()
             .map(|v| ("oembed_allowed_domains", v.to_string())),
+        req.max_user_accounts
+            .as_deref()
+            .map(|v| ("max_user_accounts", v.to_string())),
+        req.registration_closed
+            .as_deref()
+            .map(|v| ("registration_closed", v.to_string())),
     ]
     .into_iter()
     .flatten()

@@ -64,6 +64,7 @@
 - [x] **メールアドレス変更（#59）** — `docs/database.md`
 - [x] **アプリトークン（#60）** — `docs/database.md`
 - [x] **認証・操作レート制限（#223）** — 資格情報種類数制限、IP自動ブロック、Turnstile、ロール別上限。`docs/architecture.md`
+- [x] **新規登録の受付停止スイッチ・ユーザー数上限（PDSあたりDID数制限対策）** — `docs/architecture.md`
 - [x] **退会済みアクターの扱い（#242）** — ログイン・表示・連合エンドポイントから除外。`docs/database.md`
 - [x] **ユーザー凍結（ローカル・リモート共通）** — `docs/database.md`「`actors.suspended_at`」
 - [x] **既存Bluesky DIDの転入・seiranからの転出** — `docs/account_migration.md`

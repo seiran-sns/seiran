@@ -91,6 +91,7 @@ pub async fn start(
     State(state): State<AppState>,
     Json(req): Json<MigrationStartRequest>,
 ) -> Result<Json<MigrationStartResponse>, ApiError> {
+    crate::handlers::auth::ensure_registration_open(&state).await?;
     if req.source_handle.trim().is_empty() || req.source_password.is_empty() {
         return Err(ApiError::BadRequest("INVALID_INPUT".into()));
     }
@@ -291,6 +292,8 @@ pub async fn submit_plc_token(
             if migration_req.status != "awaiting_plc_token" {
                 return Err(ApiError::BadRequest("INVALID_STATE".into()));
             }
+            // 不可逆なPLC提出の前に弾く（提出後に弾くとDIDだけ移ってアカウントが作られない）。
+            crate::handlers::auth::ensure_registration_open(&state).await?;
             submit_plc_operation_to_seiran(&state, &migration_req, &req.token).await?
         }
     };

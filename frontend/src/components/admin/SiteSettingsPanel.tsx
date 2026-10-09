@@ -50,6 +50,8 @@ export default function SiteSettingsPanel() {
   const [passwordResetMaxActive, setPasswordResetMaxActive] = useState("");
   const [accountCreationIpWindowMinutes, setAccountCreationIpWindowMinutes] = useState("");
   const [accountCreationIpMax, setAccountCreationIpMax] = useState("");
+  const [maxUserAccounts, setMaxUserAccounts] = useState("");
+  const [registrationClosed, setRegistrationClosed] = useState(false);
 
   // ロール別レート制限（#223フォローアップ）
   const [postRateLimitWindowMinutes, setPostRateLimitWindowMinutes] = useState("");
@@ -114,6 +116,8 @@ export default function SiteSettingsPanel() {
         setSearchRateLimitMaxUser(s.search_rate_limit_max_user);
         setSearchRateLimitMaxModerator(s.search_rate_limit_max_moderator);
         setOembedAllowedDomains(s.oembed_allowed_domains);
+        setMaxUserAccounts(s.max_user_accounts);
+        setRegistrationClosed(s.registration_closed === "true");
       })
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
@@ -202,6 +206,8 @@ export default function SiteSettingsPanel() {
         search_rate_limit_max_user: searchRateLimitMaxUser,
         search_rate_limit_max_moderator: searchRateLimitMaxModerator,
         oembed_allowed_domains: oembedAllowedDomains,
+        max_user_accounts: maxUserAccounts,
+        registration_closed: registrationClosed ? "true" : "false",
       };
       // パスワード/シークレットは入力があったときだけ送る（未入力なら既存値を維持）。
       if (password) patch.smtp_password = password;
@@ -224,8 +230,6 @@ export default function SiteSettingsPanel() {
   return (
     <div className={styles.body}>
       <h2 className={styles.sectionTitle}>{t("admin:siteSettingsPanel.title")}</h2>
-      {error && <p className={styles.error}>{error}</p>}
-      {saved && <p className={styles.success}>{t("admin:siteSettingsPanel.savedMessage")}</p>}
 
       <form onSubmit={save}>
         <div className={styles.card}>
@@ -404,6 +408,16 @@ export default function SiteSettingsPanel() {
             {t("admin:siteSettingsPanel.accountCreationIpMaxLabel")}
             <input className={styles.input} type="number" min={1} value={accountCreationIpMax} onChange={(e) => setAccountCreationIpMax(e.target.value)} />
           </label>
+          <label className={styles.label} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={registrationClosed} onChange={(e) => setRegistrationClosed(e.target.checked)} />
+            {t("admin:siteSettingsPanel.registrationClosedLabel")}
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.registrationClosedHint")}</p>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.maxUserAccountsLabel")}
+            <input className={styles.input} type="number" min={0} value={maxUserAccounts} onChange={(e) => setMaxUserAccounts(e.target.value)} />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.maxUserAccountsHint")}</p>
         </div>
 
         <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.turnstileSectionTitle")}</div>
@@ -500,9 +514,14 @@ export default function SiteSettingsPanel() {
           <p className={styles.hint}>{t("admin:siteSettingsPanel.oembedEndpointHint")}</p>
         </div>
 
-        <button className={styles.btn} type="submit" disabled={saving}>
-          {saving ? t("common:saving") : t("common:save")}
-        </button>
+        <div className={styles.stickySaveBar}>
+          {/* 保存結果は押した場所の近くに出す（ボタンが下端固定のため、先頭に出すと見えない）。 */}
+          {error && <p className={styles.error}>{error}</p>}
+          {saved && <p className={styles.success}>{t("admin:siteSettingsPanel.savedMessage")}</p>}
+          <button className={styles.btn} type="submit" disabled={saving}>
+            {saving ? t("common:saving") : t("common:save")}
+          </button>
+        </div>
       </form>
     </div>
   );

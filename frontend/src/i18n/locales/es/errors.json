@@ -1,5 +1,7 @@
 {
+  "REGISTRATION_CLOSED": "Este servidor no acepta registros ni migraciones por el momento",
   "ACCOUNT_CREATION_RATE_LIMITED": "Se han creado demasiadas cuentas desde esta red recientemente. Inténtalo de nuevo más tarde.",
+  "ACCOUNT_LIMIT_REACHED": "Este servidor ha alcanzado su límite de usuarios y no acepta nuevos registros ni migraciones",
   "ACTOR_NOT_FOUND": "Actor no encontrado",
   "ADMIN_REQUIRED": "Se requieren privilegios de administrador",
   "ALREADY_INITIALIZED": "La configuración ya se ha completado",
